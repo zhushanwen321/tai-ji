@@ -42,7 +42,7 @@ const VALID_MANIFEST = {
   status: "running",
 };
 
-describe("[U4c/G3] sweepTmpFiles 静默删除（promote 语义失效；H4/U5 更名收口）", () => {
+describe("[U4c/G3] sweepTmpFiles 静默删除（promote 语义失效；H4/U5 更名收尾）", () => {
   let dir: string;
   let store: ManifestStore;
 
@@ -120,7 +120,7 @@ describe("[U4c/G3] sweepTmpFiles 静默删除（promote 语义失效；H4/U5 更
 });
 
 // [A11] listAllSync 目录级读失败分通道：ENOENT = 合法缺省（静默空表）；非 ENOENT
-// （ENOTDIR/EACCES 等）= 真 IO 故障（error 留痕——collectRecords orphan 投影把空表
+// （ENOTDIR/EACCES 等）= 真 IO 故障（error 留痕——collectRecords orphan 派生视图把空表
 // 当 not-found 消费，静默会伪装掉持续故障）。
 describe("[A11] listAllSync 目录读失败分通道", () => {
   let dir: string;

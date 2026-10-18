@@ -200,7 +200,7 @@ describe("updateFromEvent", () => {
       const r = makeRecord();
       const longText = "y".repeat(350);
       updateFromEvent(r, { type: "text_delta", delta: longText });
-      // 完整存储，不切片——这是收口设计的核心
+      // 完整存储，不切片——这是收尾设计的核心
       expect(r.turns[0]?.text).toBe(longText);
       expect(r.turns).toHaveLength(1);
     });
@@ -247,7 +247,7 @@ describe("updateFromEvent", () => {
     });
 
     it("turn_end clears lastError (transient error recovery → success)", () => {
-      // 瞬态 error 到达后，若 turn 正常闭合，lastError 应清空——
+      // 瞬态 error 到达后，若 turn 正常结束，lastError 应清空——
       // 否则 session-runner 会据残留 lastError 把成功误判为 success=false。
       const r = makeRecord();
       updateFromEvent(r, { type: "error", message: "transient" });
@@ -591,7 +591,7 @@ describe("getFullText", () => {
 
 // ============================================================
 // [H1 U6 / D7 ③] getFullTextFrom / nextRoundBaseTurnIndex 用例族随 base 死记账退役删除
-//（生产消费面 onRoundSettled / settleChatRoundFromResponse 已删除，字段 roundBaseTurnIndex
+//（生产消费方 onRoundSettled / settleChatRoundFromResponse 已删除，字段 roundBaseTurnIndex
 // 一并清理——退役不迁移，防丢文本语义由 record.result 恒写承接）。
 
 // ============================================================
@@ -691,7 +691,7 @@ describe("trySettleLegacyClosed", () => {
     expect(r.status).toBe("idle");
   });
 
-  it("legacy closed 收口写入 closedReason（显式值与缺省 gc）", () => {
+  it("legacy closed 收尾写入 closedReason（显式值与缺省 gc）", () => {
     const explicit = makeRecord({ status: "running" });
     expect(trySettleLegacyClosed(explicit, "cancelled")).toBe(true);
     expect(explicit.status).toBe("idle");
@@ -843,13 +843,13 @@ describe("isLegacyClosedSettled（桥接判据单一谓词）", () => {
     expect(isLegacyClosedSettled(roundIdle)).toBe(false);
   });
 
-  it("结构子集入参：SubagentRecord（磁盘投影）与 entry 快照形态同式判定（9 处读点统一消费）", () => {
+  it("结构子集入参：SubagentRecord（磁盘派生视图）与 entry 快照形态同式判定（9 处读点统一消费）", () => {
     const disk = { status: "idle" as const, closedReason: "user-close" as const };
     expect(isLegacyClosedSettled(disk)).toBe(true);
     expect(isLegacyClosedSettled({ status: "running" as const, closedReason: undefined })).toBe(false);
   });
 
-  it("与 projectOutcome 联动：谓词不命中 → outcome 不投影（undefined）", () => {
+  it("与 projectOutcome 联动：谓词不命中 → outcome 不派生（undefined）", () => {
     const roundIdle = makeRecord();
     roundIdle.status = "idle";
     roundIdle.closedReason = undefined;
@@ -886,7 +886,7 @@ describe("deriveOutcome（单一权威终态派生）", () => {
   });
 });
 
-describe("projectOutcome（投影唯一出口）", () => {
+describe("projectOutcome（派生视图唯一出口）", () => {
   it("running → undefined（终态语义不适用活跃态；即使误带 outcome 也拦截）", () => {
     expect(projectOutcome({ status: "running" })).toBeUndefined();
     expect(projectOutcome({ status: "running", outcome: "completed" })).toBeUndefined();
@@ -947,7 +947,7 @@ describe("projections", () => {
       expect(d.sessionFile).toBe("bg-1-abc.jsonl");
     });
 
-    it("[U3] project 投影携带 outcome：一等字段直读 / 存量兜底 / running undefined", () => {
+    it("[U3] project 派生视图携带 outcome：一等字段直读 / 存量兜底 / running undefined", () => {
       const done = makeRecord({ status: "idle", outcome: "completed", closedReason: "gc" });
       expect(project(done).outcome).toBe("completed");
       const legacy = makeRecord({ status: "idle", closedReason: "gc", error: "boom" });
@@ -1136,7 +1136,7 @@ describe("tool_end running index [perf]", () => {
   it("跨 turn 滞后 tool_end：索引跨 turn 命中（与旧全扫语义一致）", () => {
     const record = makeRecord();
     start(record, "read");            // turn 0 内 running
-    updateFromEvent(record, { type: "turn_end" }); // 闭合 turn 0，开 turn 1
+    updateFromEvent(record, { type: "turn_end" }); // 结束 turn 0，开 turn 1
     start(record, "write");           // turn 1
     end(record, "write", "w-done");   // 正常配对 turn 1
     end(record, "read", "r-done");    // 滞后 end 配对 turn 0（跨 turn 兜底）
@@ -1180,7 +1180,7 @@ describe("createRecord 引擎留痕字段（P4）", () => {
     expect("engine" in serialized).toBe(false);
   });
 
-  it("SubagentRecord → v2 终态条目投影保留 engine（record-entry 持久化链）", () => {
+  it("SubagentRecord → v2 终态条目派生视图保留 engine（record-entry 持久化链）", () => {
     const base: SubagentRecord = {
       id: "sa-engine-3",
       agent: "reviewer",
@@ -1202,7 +1202,7 @@ describe("createRecord 引擎留痕字段（P4）", () => {
     };
     const entry = v2SettledEntry({ ...base, engine: "pi" });
     expect(entry.engine).toBe("pi");
-    // 存量 record（无字段）投影后同样缺省——消费方按 pi 投影，零迁移
+    // 存量 record（无字段）派生视图后同样缺省——消费方按 pi 派生视图，零迁移
     expect(v2SettledEntry(base).engine).toBeUndefined();
   });
 });

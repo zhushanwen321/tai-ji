@@ -63,10 +63,10 @@ export interface PruneStateDeps { // oe-exempt:20260929:framework:workflow/recor
 // ── 统一保留通道（W1 D5：fold 终态 + 保留窗口，废除 cap）──────────
 //
 // W1 D5 清理规则落地（替代 [Q2] 的 manifest 资格 + cap + mtime TTL 三限）：
-// ① 资格判据 = fold 投影为终态（journal 内 run-settled 帧驱动 fold 到 terminal，
+// ① 资格判据 = fold 推算为终态（journal 内 run-settled 帧驱动 fold 到 terminal，
 //    含收编产生的 interrupted——收编入口幂等追加终态事件后即获资格）∧ 终态时间
 //    超窗（终态时间 = journal 内终态事件时间戳；防御兜底 = 末条事件时间戳）。
-//    manifest 不再参与资格判定（读序 3 降级为「journal 被裁后的终局投影」与
+//    manifest 不再参与资格判定（读序 3 降级为「journal 被裁后的终局派生视图」与
 //    abandon 终局化载体），结构性不在候选——永不随裁（孤儿判定依赖）；
 // ② 判据②（无终态事件 ∧ 注册超窗 ∧ mtime 超阈值）默认不启用：阈值未实测校准前
 //    只走判据①。其镜像代价（崩溃后永不重开的会话 journal 滞留）经维护轮候选数
@@ -112,7 +112,7 @@ export interface PruneTerminalRunFilesOptions { // oe-exempt:20260929:framework:
 export interface PruneTerminalRunFilesResult { // oe-exempt:20260929:framework:workflow/record 协议契约类型——ports 类型契约先行、单实现常态（dev-0.10.5 已验收代码 merge 带入）
   /** 扫描到的 state 文件数（glob 命中、排除 journal）。 */
   scanned: number;
-  /** fold 投影为终态的 run 数（无论是否超窗——资格计数）。 */
+  /** fold 推算为终态的 run 数（无论是否超窗——资格计数）。 */
   eligible: number;
   /** 本次裁剪的 run 数（state 文件计数；journal 同删不计入）。 */
   pruned: number;
@@ -123,10 +123,10 @@ export interface PruneTerminalRunFilesResult { // oe-exempt:20260929:framework:w
   nonTerminalBeyondWindow: number;
 }
 
-/** 单 run 保留判定（fold 投影 + 时间锚提取；判据①资格与判据②候选的公共输入）。 */
+/** 单 run 保留判定（fold 推算 + 时间锚提取；判据①资格与判据②候选的公共输入）。 */
 interface RunRetentionAssessment { // oe-exempt:20260929:framework:workflow/record 协议契约类型——ports 类型契约先行、单实现常态（dev-0.10.5 已验收代码 merge 带入）
   runId: string;
-  /** fold 投影是否终态（含收编产生的 interrupted——终态事件在 journal 内）。 */
+  /** fold 推算是否终态（含收编产生的 interrupted——终态事件在 journal 内）。 */
   terminal: boolean;
   /** 终态时间（run-settled 帧 ts；防御兜底 = 末条事件 ts）。非终态 = undefined。 */
   terminalAt: number | undefined;
@@ -296,7 +296,7 @@ async function pruneTerminalRunFootprint(
 export interface PruneTerminalRecordEventFilesResult { // oe-exempt:20260929:framework:workflow/record 协议契约类型——ports 类型契约先行、单实现常态（dev-0.10.5 已验收代码 merge 带入）
   /** 扫描到的 *.events 事件文件数。 */
   scanned: number;
-  /** fold 投影为终态（record-settled 在流内且未被回边清除）的 record 数。 */
+  /** fold 推算为终态（record-settled 在流内且未被回边清除）的 record 数。 */
   eligible: number;
   /** 本次裁剪的事件文件数。 */
   pruned: number;
@@ -307,7 +307,7 @@ export interface PruneTerminalRecordEventFilesResult { // oe-exempt:20260929:fra
 /**
  * record 域保留清理（W1 D5：record 事件文件与 run journal 同判据——fold 终态 +
  * 窗口）。运行中/非终态永不清（settled 被 reopened/round-started 清除 = 回边续跑，
- * 保护语义与 fold 投影单源）；manifest（<sa-id>.json）不触碰——其清理归删主会话
+ * 保护语义与 fold 派生视图单源）；manifest（<sa-id>.json）不触碰——其清理归删主会话
  * 级联（随子代理文件族删，runtime session-content-cascade，2026-10-12 裁决）。
  */
 async function pruneTerminalRecordEventFiles(
@@ -497,7 +497,7 @@ export type RunSettlementEvidence =
  *
  * 判定矩阵（[W2 D6] 逐形态锚定保守侧——误注销活跃 run 是事故方向，不可逆）：
  * - journal 与 manifest 均不存在（ENOENT）→ missing（「已归档/不存在视同终态」
- *   ——run 从未落账或已被保留期清理，注册是死亡窗口残留）；
+ *   ——run 从未写入或已被保留期清理，注册是死亡窗口残留）；
  * - journal 尾向存在 run-settled 帧（append-only 单写者：帧在盘 = 终局已记录，
  *   行级独立 JSON 不受早先坏行影响）→ terminal + reason（帧 (outcome, errorCode)
  *   经 runSettledOutcomeToDoneReason 联合派生——[W2 D5] sweep 补注销 reason 统一
@@ -509,14 +509,14 @@ export type RunSettlementEvidence =
  * - journal 存在但无 run-settled 帧（run 真未终局，含坏链首帧形态）→ running
  *   （保守按活跃，不补注销——对齐 adoptInterruptedRun skippedBrokenChain 纪律）；
  * - journal / manifest 读错误（非 ENOENT IO 故障）→ running + warn 留证
- *   （「IO 故障 ≠ 不存在」的保守侧纪律，宁挂账不误注销）。
+ *   （「IO 故障 ≠ 不存在」的保守侧纪律，宁挂着不处理也不误注销）。
  */
 /** journal 尾扫四态（[findRunSettlementEvidence 拆分] 的返回契约）。 */
 type JournalScan =
   | { kind: "frame"; settled: Extract<WorkflowRunEvent, { type: "run-settled" }> }
   | { kind: "noFrame" } // 读成功、无 run-settled 帧（真未终局）
-  | { kind: "fileMissing" } // ENOENT（从未落账/已清理）
-  | { kind: "ioError" }; // 非 ENOENT 读错误（保守挂账）
+  | { kind: "fileMissing" } // ENOENT（从未写入/已清理）
+  | { kind: "ioError" }; // 非 ENOENT 读错误（保守挂起）
 
 /** [findRunSettlementEvidence 拆分] journal 尾扫：自尾向头找最近一条 run-settled 帧
  * （坏行继续向前——append-only 下帧行独立有效；尾部空行静默跳过）。 */
@@ -550,7 +550,7 @@ function scanJournalLastSettledFrame(recordPath: string): JournalScan {
 }
 
 /** [findRunSettlementEvidence 拆分] manifest 终局面（残局防御）。undefined = 无
- * manifest / 无 outcome / ENOENT——交回调用方兜底；非 ENOENT 读错误原样上抛（保守挂账）。 */
+ * manifest / 无 outcome / ENOENT——交回调用方兜底；非 ENOENT 读错误原样上抛（保守挂起）。 */
 function readManifestSettlement(
   manifestPath: string,
 ): { reason: string } | undefined {
@@ -580,8 +580,8 @@ export function findRunSettlementEvidence(stateDir: string, runId: string): RunS
   const recordPath = join(stateDir, `${runId}${RUN_EVENTS_SUFFIX}`);
   const journal = scanJournalLastSettledFrame(recordPath);
   if (journal.kind === "ioError") {
-    // 非 ENOENT 读错误（EACCES/EIO 等）≠ 文件不存在——保守侧按活跃挂账
-    //（宁挂账不误注销），warn 留证防 IO 故障伪装成 missing。
+    // 非 ENOENT 读错误（EACCES/EIO 等）≠ 文件不存在——保守侧按活跃保留
+    //（宁挂着不处理也不误注销），warn 留证防 IO 故障伪装成 missing。
     logger.warn(
       `[run-state-evidence] findRunSettlementEvidence journal read failed, treating as running (stay registered): ${recordPath}`,
     );
@@ -607,7 +607,7 @@ export function findRunSettlementEvidence(stateDir: string, runId: string): RunS
     return { kind: "running" };
   }
   // 两证据面均缺：journal 存在但无帧 = 真未终局（保守活跃）；journal 也缺 =
-  // missing（从未落账/已清理——视同终态补注销）。
+  // missing（从未写入/已清理——视同终态补注销）。
   if (journal.kind === "fileMissing") return { kind: "missing" };
   return { kind: "running" };
 }
@@ -794,7 +794,7 @@ export interface OrphanRunReapResult { // oe-exempt:20260929:framework:workflow/
  * 判定链（每轮全量）：
  * 1. 枚举 stateDir 的 runId 候选（record 流后缀 + 旧 journal 后缀的文件族并集——
  *    含历史遗留形态；manifest 单独在场不成候选：无 record 流与旧 journal 的孤儿
- *    manifest 是终局投影残留，prune 资格链已覆盖）；
+ *    manifest 是终局派生视图残留，prune 资格链已覆盖）；
  * 2. 引用集三代解析（collectAliveRunReferences 注入——壳侧全池 session 文件扫描，
  *    v2 注册条目 ∪ v1 快照条目 ∪ pre-W17 link 指针的并集，解析归壳侧注入面）；
  * 3. 引用命中 → 跳过（保护——任一存活 session 引用即保留）；引用未命中 → 登记

@@ -58,8 +58,8 @@ const RUN_EVENT_TYPE_SET: ReadonlySet<string> = new Set(RUN_EVENT_TYPES);
 
 /**
  * 坏行判定的最小形状校验：JSON 对象 + type 落在词表内 + ts 有限数值（EventEnvelope
- * 信封全词表必填——fold 投影的 startedAt/lastProgressAt 派生与注册表新鲜度判据都
- * 消费它，坏值防污染投影）+ outcome（agent-settled / run-settled 携带）落词表
+ * 信封全词表必填——fold 派生视图的 startedAt/lastProgressAt 推导与注册表新鲜度判据都
+ * 消费它，坏值防污染派生视图）+ outcome（agent-settled / run-settled 携带）落词表
  * （其余事件不携带，缺省自然放行）。任一不过 = 坏行。
  *
  * [W1 seq 契约] 携带 seq 的行按正整数校验（新写行信封必填）；seq 缺失放行——
@@ -267,7 +267,7 @@ let noopJournalWarned = false;
 /** 测试钩子（注入面 door；目录解析面随 [D1 拆边 Class C] 迁本模块）：注入 journal
  *  目录 + 清空按目录 keyed 的 journal 缓存（换目录注入即换实例）。
  *
- *  调用面：编排侧（terminal-actions）保留同名包装转调本函数，包装另清编排侧两族
+ *  调用方：编排侧（terminal-actions）保留同名包装转调本函数，包装另清编排侧两族
  *  进程内状态（活体态缓存 / 终局记录注册表）——那两族归编排层，本模块不反向依赖。 */
 export function setRunEventJournalDirForTest(dir: string | undefined): void {
   runEventJournalDirForTest = dir;
@@ -345,7 +345,7 @@ export function resolveRunEventJournal(journalDir?: string): { dir: string; jour
  * 防线（dir=""）下返回 undefined = 锚点不可寻址，调用方据此跳过条目写（禁触真实
  * 数据目录红线，与 no-op journal 同一防线语义）。
  *
- * 消费面：编排侧 terminal-actions 保留同名 re-export（本函数原定义处），既有调用点
+ * 消费方：编排侧 terminal-actions 保留同名 re-export（本函数原定义处），既有调用点
  * 与导入路径零改动。
  */
 export function runEventJournalPathOf(runId: string): string | undefined {
@@ -359,7 +359,7 @@ export function runEventJournalPathOf(runId: string): string | undefined {
  * `journalDir` = per-call 目录（决策 2 收编链注入，缺省模块锚）；测试防线
  * （NoopJournal 形态 dir=""）返回 undefined——零写域不做真目录读）。
  *
- * 消费面：编排侧 terminal-actions 保留同名 re-export（本函数原定义处）。
+ * 消费方：编排侧 terminal-actions 保留同名 re-export（本函数原定义处）。
  */
 export function runEventJournalDirOf(journalDir?: string): string | undefined {
   const { dir } = resolveRunEventJournal(journalDir);

@@ -15,7 +15,7 @@
 // 全链 killAll）随 SAR 编排退役删除——service 落点的行为守护由
 // workflow-agent-dispatch.test.ts（W2 承接：注册面/池顺序/守护 arm 键 record.id/
 // 双刷新源/fire 追注/stream 自构/D7/D6/adopt 豁免）与 engine/__tests__/routing.test.ts
-// （路由 helper 单点：三层优先级 + 守卫 a/b/c + strict + fallback）承接。
+// （路由 helper 单点：三层优先级 + 检查 a/b/c + strict + fallback）承接。
 
 import { describe, expect, it, vi } from "vitest";
 

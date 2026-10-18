@@ -52,7 +52,7 @@ export function parseAgentFrontmatter(filePath: string, content: string): AgentC
 
 /**
  * 解析 agent .md → { config, meta } 二元组（m5 T2：W4 lint 需要 AgentMeta——
- * AgentConfig 投影时 examples 被丢弃，meta 供 lintAgentMeta 使用）。
+ * AgentConfig 派生视图时 examples 被丢弃，meta 供 lintAgentMeta 使用）。
  */
 export function parseAgentWithMeta(
   filePath: string,
@@ -67,7 +67,7 @@ export function parseAgentWithMeta(
     return { config: { name, systemPrompt: content.trim() }, meta: null };
   }
 
-  // 未闭合 frontmatter：提取 name，其余作为 systemPrompt
+  // 缺结束标记 frontmatter：提取 name，其余作为 systemPrompt
   if (fm.kind === "unclosed") {
     return {
       config: {
@@ -81,8 +81,8 @@ export function parseAgentWithMeta(
   return parseClosedFrontmatterAgent(filePath, name, content, fm.yamlBlock, fm.body);
 }
 
-/** closed frontmatter 的主路径：IF1 严格层 + legacy fallback 字段解析 + config 投影。
- *  字段解析/warn/throw 时序与提取前一致（parseResourceMeta → fallback+warn → engine+校验 → 投影）。 */
+/** closed frontmatter 的主路径：IF1 严格层 + legacy fallback 字段解析 + config 派生视图。
+ *  字段解析/warn/throw 时序与提取前一致（parseResourceMeta → fallback+warn → engine+校验 → 派生视图）。 */
 function parseClosedFrontmatterAgent(
   filePath: string,
   name: string,
@@ -144,7 +144,7 @@ function resolveAgentEngine(
   return engine;
 }
 
-/** closed frontmatter 的 AgentConfig 投影（IF1 严格层优先，逐字段 legacy fallback）。 */
+/** closed frontmatter 的 AgentConfig 派生视图（IF1 严格层优先，逐字段 legacy fallback）。 */
 function projectAgentConfig(
   name: string,
   body: string,
@@ -164,7 +164,7 @@ function projectAgentConfig(
   };
 }
 
-/** tools 投影：IF1 严格层非空清单优先，否则 legacy fallback 非空清单，均缺省 undefined。 */
+/** tools 派生视图：IF1 严格层非空清单优先，否则 legacy fallback 非空清单，均缺省 undefined。 */
 function resolveAgentTools(
   agentMeta: AgentMeta | null,
   toolsFallback: string[] | undefined,
@@ -191,7 +191,7 @@ function extractYamlField(yaml: string, key: string): string | undefined {
 // ============================================================
 
 /**
- * agent .md 的宽容解析结果（执行消费面全字段投影）。
+ * agent .md 的宽容解析结果（执行消费方全字段派生视图）。
  *
  * 双轨语义（D3 定稿）：本结构是**执行可用性**面（可用即跑），严格路由面仍是
  * AgentMeta（注入清单可见性：缺 name/description 不进清单，由 meta !== null 表达）。
@@ -205,7 +205,7 @@ export interface AgentProfile {
   description: string;
   /** frontmatter 后正文（trim）——即 systemPrompt。 */
   body: string;
-  /** 路由提示（严格层投影；IF1 未通过时经 legacy fallback 也不取——该资产不进清单）。 */
+  /** 路由提示（严格层派生视图；IF1 未通过时经 legacy fallback 也不取——该资产不进清单）。 */
   when?: string;
   examples?: RoutingExample[];
   // ── 执行字段全量（与 AgentConfig / AgentMeta 同名同语义）──
@@ -222,7 +222,7 @@ export interface AgentProfile {
   /** agent 声明依赖的 skill 名清单（D3 可选执行字段）。 */
   skills?: string[];
   /**
-   * IF1 严格层 meta：null = 无 frontmatter / 未闭合 / 严格校验未通过。
+   * IF1 严格层 meta：null = 无 frontmatter / 缺结束标记 / 严格校验未通过。
    * 注入清单可见性判定归它（discoverAgents 只放行 meta 非 null 的条目——
    * 与 pi 现装配循环口径等值）。
    */
@@ -242,12 +242,12 @@ export interface AgentProfile {
  * 实现基础（D3 字段形态覆盖矩阵）：
  * - 主路径 = parseResourceMeta（eemeli/yaml 全量解析）：原生支持单行 key:value、
  *   行内数组、block-scalar、多行 `- item` 列表；
- * - meta=null 时（无 frontmatter / 未闭合 / yaml 整体解析失败 / IF1 严格校验未通过）
+ * - meta=null 时（无 frontmatter / 缺结束标记 / yaml 整体解析失败 / IF1 严格校验未通过）
  *   经 extractYamlField legacy fallback（仅单行 key:value 形态）兜底取执行字段，
  *   保证「可用即跑」不因资产格式瑕疵丢失配置（先例：parseAgentWithMeta 的 MF-3
  *   fallback）。fallback 触达时写入 warnings（warn 可见，调用方决定呈现）。
  *
- * 与 parseAgentWithMeta 的关系：本函数是新增导出面（执行消费面），既有
+ * 与 parseAgentWithMeta 的关系：本函数是新增导出面（执行消费方），既有
  * parseAgentWithMeta/loadByPath 语义零改动（含 engine 未注册 throw 的解析期校验）。
  * 本函数宽容语义不抛，故不做 engine 注册校验（执行校验归执行路径）。
  */
@@ -255,7 +255,7 @@ export function parseAgentProfile(text: string, filePath: string): AgentProfile 
   const stem = path.basename(filePath, ".md");
   const warnings: string[] = [];
 
-  // 阶段 1：结构切分（无 frontmatter / 未闭合 / 闭合三态）
+  // 阶段 1：结构切分三态（无 frontmatter / 缺结束标记 / 有结束标记）
   const fm = splitAgentFrontmatter(text);
   // 无 frontmatter → 整个内容作为 body（宽容：README 等普通 .md 也是合法 profile）
   if (fm.kind === "none") {
@@ -268,9 +268,9 @@ export function parseAgentProfile(text: string, filePath: string): AgentProfile 
     };
   }
   if (fm.kind === "unclosed") {
-    // 未闭合 frontmatter：name 经 legacy fallback，其余全文作 body（与 parseAgentWithMeta 同判）
+    // 缺结束标记 frontmatter：name 经 legacy fallback，其余全文作 body（与 parseAgentWithMeta 同判）
     warnings.push(
-      `[agent-registry] ${filePath}: frontmatter 未闭合——name 经 legacy fallback（仅单行 key:value），全文作 body`,
+      `[agent-registry] ${filePath}: frontmatter 缺结束标记——name 经 legacy fallback（仅单行 key:value），全文作 body`,
     );
     return {
       name: extractYamlField(fm.yamlBlock, "name") ?? stem,
@@ -317,7 +317,7 @@ function splitAgentFrontmatter(text: string): AgentFrontmatterSlice {
   };
 }
 
-/** 严格层（IF1 通过）的 profile 投影：AgentMeta 路由/执行字段 + 单行提取的执行配置。 */
+/** 严格层（IF1 通过）的 profile 派生视图：AgentMeta 路由/执行字段 + 单行提取的执行配置。 */
 function profileFromStrictMeta(
   agentMeta: AgentMeta,
   yamlBlock: string,
@@ -347,7 +347,7 @@ function profileFromStrictMeta(
   };
 }
 
-/** legacy fallback 的 profile 投影（仅单行 key:value 提取；warnings 同引用收集）。 */
+/** legacy fallback 的 profile 派生视图（仅单行 key:value 提取；warnings 同引用收集）。 */
 function profileFromLegacyFallback(
   yamlBlock: string,
   body: string,

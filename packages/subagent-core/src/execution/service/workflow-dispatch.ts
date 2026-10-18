@@ -15,7 +15,7 @@
 // 单一职责：workflow 脚本 agent() 派发链（H2 W2 八步迁移的 service 侧承接）——
 // AgentCallOpts 进站映射、引擎路由 + 预检、origin:"workflow" record 注册、journal /
 // no-progress 守护 / signal 合流 / spawned-children 治理、D7 成功即终态化。与手动
-// subagent 共享的编排原语（池槽 / 终态收口）经 deps 回调回流 RunOrchestration。
+// subagent 共享的编排原语（池槽 / 终态收尾）经 deps 回调回流 RunOrchestration。
 //
 // [R1 打样模式——R4 落地]（模式权威定义见 session-baselines.ts 文件头）
 // 1. 依赖注入形态：deps 全晚绑定闭包（构造期零求值）——execNesting / streamSink /
@@ -35,7 +35,7 @@ import { SLUG_MAX_LENGTH } from "../../shared/run-vocabulary.ts";
 // [D8 派发期对称校验] pi 引擎模型目录分类裁决（创建期同源消费 model-catalog；
 // orchestration → shared 叶子方向，无环）。
 import { assertModelInCatalog } from "../../shared/model-catalog.ts";
-// [D3 协议版 P6] armed 回执落账投递（runId 键入口；observedEvent 消费点）。value
+// [D3 协议版 P6] armed 回执登记投递（runId 键入口；observedEvent 消费点）。value
 // import 方向 execution/service → orchestration/pump：pump 的传递闭包（persistence/
 // assembly/orchestration 内部）不 import execution/service，无循环。
 // [U4 → D15/D6 → D1 Class C 第 3 步] scanRunEvents 直连持久化层（journal 目录解析
@@ -49,7 +49,7 @@ import { scanRunEvents } from "../persistence/run-event-journal.ts";
 // orchestration 整体下沉 execution/service（依赖面核查 = 可下沉：值依赖只有
 // core/logger，类型依赖只有 run-events 的 WorkflowRunEvent；无编排状态机语义）——
 // 本 import 即 D1 拆边 Class C 消掉的第四条 execution → orchestration 值边；编排侧
-// 消费面直连本模块（过渡期同名 re-export façade 收尾已删）。
+// 消费方直连本模块（过渡期同名 re-export façade 收尾已删）。
 // 池的 record 读经 io 注入（读面单源），无环。
 import {
   lookupMemberRecordId,
@@ -129,7 +129,7 @@ export type MemberReviveOutcome =
  * - 断言/校验面（assertReady / assertIdleTimeoutMsSafe）：入口就绪门与 idleTimeoutMs
  *   合法域校验（本体在 SessionBaselines / RunOrchestration）。
  * - 会话基线 getter（getExecNesting / getStreamSink / getUiObservability /
- *   getSessionRootId / getPi 通道外的 NotifyHost 投影）：initSession 注入的运行时可变
+ *   getSessionRootId / getPi 通道外的 NotifyHost 派生视图）：initSession 注入的运行时可变
  *   态现读。
  * - R3 聚合显式接口（resolveIdentity / resolveIdentityForEngine / createRecordForMode）
  *   与 #1 留壳共享依赖（getModelService / getNotifyHost）。
@@ -177,7 +177,7 @@ export interface WorkflowDispatchDeps {
   readonly getUiObservability: () => UiRequestObservability;
   /** 根 session id（relay 归属键 SESSION_ID 权威源；SessionBaselines 现读）。 */
   readonly getSessionRootId: () => string | null;
-  /** [RunOrchestration 协作回调] 池槽获取（失败路径含 S1 cancelled 终态收口）。 */
+  /** [RunOrchestration 协作回调] 池槽获取（失败路径含 S1 cancelled 终态收尾）。 */
   readonly acquirePoolOrFinalize: (
     record: ExecutionRecord,
     signal: AbortSignal | undefined,
@@ -185,7 +185,7 @@ export interface WorkflowDispatchDeps {
   ) => Promise<AgentResult | undefined>;
   /** [RunOrchestration 协作回调] AgentOutcome → execution AgentResult 单一映射源。 */
   readonly outcomeToAgentResult: (record: ExecutionRecord, outcome: AgentOutcome) => AgentResult;
-  /** [RunOrchestration 协作回调] one-shot 终态收口（顶部 D7 origin==="workflow"
+  /** [RunOrchestration 协作回调] one-shot 终态收尾（顶部 D7 origin==="workflow"
    *  CAS 抢锁分支 = 成功即终态化 closed/gc）。 */
   readonly settleOneShotOutcome: (record: ExecutionRecord, result: AgentResult, aborted: boolean) => Promise<void>;
   /** [R3 RecordLifecycle 显式接口] run 创建期异常收尾（catch swallow 分支）。 */
@@ -213,7 +213,7 @@ export interface WorkflowDispatchDeps {
   /**
    * [subagent-model-switch §6.2 读取规则 / §7.4] workflow 域覆盖的 miss 重建通道
    * （主 agent 重启后首次派发：内存表 miss → run 事件流折叠产物，latestModelOverride
-   * 单点——U4a journal 覆盖事件的派发侧消费面；resume 不带参数也吃持久化覆盖的
+   * 单点——U4a journal 覆盖事件的派发侧消费方；resume 不带参数也吃持久化覆盖的
    * 管线终点）。命中后由装配方回填内存表（回填与折叠同点完成，后续派发内存命中
    * 不再读 journal）。异步 = 折叠需读 run 事件流文件。
    */
@@ -230,7 +230,7 @@ export class WorkflowDispatch {
   /**
    * [U4 → D6 → D1 Class C] 成员复用绑定的 record 读注入面（本聚合单点装配；scan 经
    * persistence/run-event-journal 的 scanRunEvents 同源解析，不自建 journal 实例）。
-   * append 通道随 [D6] 绑定消解删除——绑定随 agent-started 帧落账（pump
+   * append 通道随 [D6] 绑定消解删除——绑定随 agent-started 帧写入（pump
    * dispatchAgentCall 链），登记收尾只改内存（member-reuse-pool.registerMemberRecord）。
    */
   private readonly memberReusePoolIo: MemberReusePoolIo = {
@@ -253,16 +253,16 @@ export class WorkflowDispatch {
    * §3.5 / G1 等同语义）：workflow 脚本 agent() 经 pump 薄转调进此（W3 接线；本
    * 单元入口就位，测试直接调用），与手动 subagent 同一 service 编排——共享池
    * （DefaultConcurrencyPool）、record 注册进 store（origin:"workflow" +
-   * parentRunId）、journal / no-progress 守护 / spawned-children 治理、终态收口
+   * parentRunId）、journal / no-progress 守护 / spawned-children 治理、终态收尾
    * （D7 成功即终态化）。编排接管自 SAR.run 八步迁移（W4 已掏空 SAR.run 为纯转调
    * ffbe595c5，
-   * ctxModel 孪生守卫按清单放弃——resolveIdentity 已有 model 解析，禁止双轨）。
+   * ctxModel 孪生检查按清单放弃——resolveIdentity 已有 model 解析，禁止双轨）。
    *
    * 顺序红线（D3）：路由/预检/model 校验**先于**池 acquire——失败零池占用；路由
    * 失败/预检命中/嵌套超限同步抛错回脚本且不产生孤儿 record（与 executeViaEngine
    * 「全部同步拒绝发生在 record 创建前」同一不变量）。
    *
-   * 错误规格（§3.4）：池排队被 abort → run 域 cancelled 收口（acquirePoolOrFinalize
+   * 错误规格（§3.4）：池排队被 abort → run 域 cancelled 收尾（acquirePoolOrFinalize
    * 同款 S1 分支）；record 创建失败 → 同步抛错；引擎死亡 → catch 合成 failed result
    * 回脚本（swallow 语义，脚本观察到失败结果非异常）+ record 由失败路径立即终态化
    * （adopt 豁免——workflow record 无脚本可回，纳管等待无意义）。
@@ -425,7 +425,7 @@ export class WorkflowDispatch {
   }
 
   /** [executeWorkflowAgent 阶段拆分] 八步迁移①：引擎路由（D2 单轨——统一经
-   *  routeEngineForHost：三层输入 + probe 守卫 + pi 同步短路）+ Promise 决议。
+   *  routeEngineForHost：三层输入 + probe 检查 + pi 同步短路）+ Promise 决议。
    *
    *  [U2 pi-workflow-run-resource-model] probe 通道窗口实例改道：probe 与
    *  getEngineFn 注入同一来源（resolveWorkflowWindowEnginePort，parentRunId = 本 run
@@ -481,7 +481,7 @@ export class WorkflowDispatch {
    * 已完成 ask）。引擎感知在该点天然成立（isPiRoute 分流）；zcode 引擎 run 走
    * validateModelForEngine 域（builtin:* 套餐族模型空间单独立设计），跳过目录校验
    * 不误拒。identity 解析内部 resolveModel → assertCanonicalModelRef 仍是解析权威
-   * （孪生守卫等全量裁决在彼执行，本层只补分类化前置拒单）。
+   * （孪生检查等全量裁决在彼执行，本层只补分类化前置拒单）。
    * 范围限定（用户裁决 2026-09-21）：仅 pi 引擎（pi 路由不插偏好层——pi 链自有三层
    * 解析，D6 不采用段；下方 declaredModel 只看两层显式声明，与偏好层无关）。 */
   /**
@@ -570,14 +570,14 @@ export class WorkflowDispatch {
    * - 非 pi 引擎（过渡期混合 run）：覆盖值送达引擎的真实通道 = taskSpec.model
    *   （record.model 重盖章直改 + 下方 taskSpec 组装 `model: record.model` →
    *   引擎 task.model）；引擎校验已在 identity 解析点对覆写后的 engineModel 完成
-   *   （覆写先于 resolveWorkflowIdentity）。ctxModel 投影仅补 RunContext 形状
+   *   （覆写先于 resolveWorkflowIdentity）。ctxModel 派生值仅补 RunContext 形状
    *   完备、非 pi 引擎不消费（zcode 出声忽略——zcode-engine warnIgnoredCtxModel，
    *   F16b「ctxModel 是 pi 链路兜底」）；「引擎侧只消费 provider/id 拼词形、name
    *   不参与」的表述仅对 pi 引擎成立（pi-engine buildRunIdentityParams——ctxModel →
    *   spawn model 词形，pi-engine.ts:362-364）。
    *
    * 非本域 record（origin 非 workflow / parentRunId 缺省——runWorkflowEngineTask
-   * 被 SAR 直调占位路径复用时的守卫）短路原样返回。
+   * 被 SAR 直调占位路径复用时的检查）短路原样返回。
    */
   private consultOverrideAtTaskSpec(
     record: ExecutionRecord,
@@ -683,10 +683,10 @@ export class WorkflowDispatch {
    *   ⑤ mergeRunSignals（timeoutMs + 外部 signal 合流）；
    *   ⑥ spawned-children 注册（dispose killAll 收割兜底，键 = record.id——dispose
    *      通道按进程组终止整组的语义保留，宿主停机/引擎退役场景触发）。
-   * 池 = DefaultConcurrencyPool 共享（acquirePoolOrFinalize 同链，D3）；成功收口 =
+   * 池 = DefaultConcurrencyPool 共享（acquirePoolOrFinalize 同链，D3）；成功收尾 =
    * settleOneShotOutcome 顶部 D7 origin 分支（closed/gc 立即终态化）。stream 实参
    * 缺省时自构 createBackgroundStream（设计 D2「streaming 由 service 派发路径既有
-   * 通道承载」——widget 通道收口点，kickOffChatRound 同款策略，见函数体注释）。
+   * 通道承载」——widget 通道收敛点，kickOffChatRound 同款策略，见函数体注释）。
    */
   async runWorkflowEngineTask(
     record: ExecutionRecord,
@@ -708,7 +708,7 @@ export class WorkflowDispatch {
     // [H2 W3 must-fix] stream 实参缺省时自构 background stream——设计 D2「streaming
     // 由 service 派发路径既有通道承载」的实体落点：W3 切换后 pump 不再构造
     // SubagentStream（旁路 record 族退役），workflow agent 的 text_delta widget 通道
-    // 在 service 侧收口，与 kickOffChatRound 的 createBackgroundStream 完全同款
+    // 在 service 侧收敛，与 kickOffChatRound 的 createBackgroundStream 完全同款
     //（含 H1 widget 退役策略：GUI+relay 激活停发私货 / TUI·未激活原样创建 / sink
     // 未注入降级 undefined——照单继承 chat 域现行策略，非行为变化）。显式传 stream
     // 时用传入值（测试注入面保留）。创建先于池 acquire（kickOffChatRound 同序：
@@ -733,8 +733,8 @@ export class WorkflowDispatch {
       );
       const journalOnEvent = journal.onEvent;
       const observedEvent = (event: AgentEvent): void => {
-        // [D5] armed 回执的落账消费点已随占位事件删除（占位形态协议版落地前无
-        // 生产写入方——词表无死成员裁决；宿主等待门 remote-engine 的消费面不受
+        // [D5] armed 回执的登记消费点已随占位事件删除（占位形态协议版落地前无
+        // 生产写入方——词表无死成员裁决；宿主等待门 remote-engine 的消费方不受
         // 影响，journal 取证通道不再接收回执）。
         // [H2 A3 修复] live reducer 喂入恢复：W3 删 inproc pi 引擎时，原
         // engines/pi/session-runner.ts agentEvent 出口的 updateFromEvent(record, event)
@@ -768,13 +768,13 @@ export class WorkflowDispatch {
       journal.backfillHandle(handle);
       record.engineHandle = {
         sessionRef: handle.data.sessionRef,
-        // 持久化形状保留字段（record-store 读侧守卫要求非空）；恒 'shared'——
+        // 持久化形状保留字段（record-store 读侧检查要求非空）；恒 'shared'——
         // [池抽象降级 2026-09-13] 协议面 poolKey 已删，无引擎侧实际值。
         poolKey: SHARED_POOL_KEY,
         eventsPath: journal.path,
       };
       const result = this.deps.outcomeToAgentResult(record, outcome);
-      // D7 收口（origin 分支在 settleOneShotOutcome 函数顶部；aborted 判外部 signal
+      // D7 收尾（origin 分支在 settleOneShotOutcome 函数顶部；aborted 判外部 signal
       // ——timeout 的 abort 走失败 result 语义，不映射 cancelled）。
       await this.deps.settleOneShotOutcome(record, result, signal?.aborted === true);
       return outcomeToWorkflowResult(outcome);
@@ -782,13 +782,13 @@ export class WorkflowDispatch {
       // swallow（不 re-throw）：脚本观察到合成 failed result 而非异常（引擎死亡
       // engine_crashed 同路）；record 由失败路径立即终态化（finalizeFailed CAS →
       // finalizeRecord），不保持 running 态。
-      // [P1b-1] 静默吞失败路径的终态写入已经 transition 体系收口：deps.finalizeFailed
+      // [P1b-1] 静默吞失败路径的终态写入已经 transition 体系收敛：deps.finalizeFailed
       // 内部改调 worker-message-pump 的 settleWorkflowRecord 单点（原直写对删除），
       // agent-settled 事件面由 pump call 完成链投递——失败不再绕过状态机体系无痕。
       const failed = await this.deps.finalizeFailed(record, err);
       return mapToWorkflowAgentResult(failed);
     } finally {
-      // 先摘信号桥接，再归还池槽与 journal 收口（SAR 同序）。内构 stream 的 widget
+      // 先摘信号桥接，再归还池槽与 journal 收尾（SAR 同序）。内构 stream 的 widget
       // 清除（dispose）同经 releaseRoundResources 回收。
       runSignal?.dispose();
       this.deps.releaseRoundResources(record, pooled && acquired, effectiveStream);
@@ -806,8 +806,8 @@ type MutableStampRecord = { -readonly [K in keyof ExecutionRecord]: ExecutionRec
  * [subagent-model-switch §6.6] record.model / thinkingLevel 盖章（复活重新盖章与
  * taskSpec 二次咨询重盖章共用单点——「本轮启动前最后取值点定值，启动后不变」）。
  * 解析产物缺席（用户未指定且无任何候选，引擎走自身缺省解析）时保留原盖章——防误清
- * 历史事实（R4/D6-② 条件留空语义的同款取舍）。落盘面：终态写面 identityBindingPayload
- * 落 model/thinkingLevel 内存现值，盖章后随终态收口自然持久化。
+ * 历史事实（R4/D6-② 条件留空语义的同款取舍）。落盘侧：终态写面 identityBindingPayload
+ * 落 model/thinkingLevel 内存现值，盖章后随终态收尾自然持久化。
  */
 function restampRecordModel(
   record: ExecutionRecord,
@@ -823,7 +823,7 @@ function restampRecordModel(
  * AgentOutcome → workflow AgentResult 直映射（SAR outcomeToRunnerResult 的 service
  * 侧等价物）：保留 usage/sessionFile/worktreePath/failureKind 等引擎层字段——
  * outcomeToAgentResult（execution AgentResult）不含这些字段，经它中转会丢 workflow
- * 消费面（usage 进预算、sessionFile/worktreePath 进 returnMeta、failureKind 进
+ * 消费方（usage 进预算、sessionFile/worktreePath 进 returnMeta、failureKind 进
  * 失败分诊）依赖的字段。
  */
 function outcomeToWorkflowResult(outcome: AgentOutcome): WorkflowAgentResult {
@@ -837,7 +837,7 @@ function outcomeToWorkflowResult(outcome: AgentOutcome): WorkflowAgentResult {
     sessionId: outcome.sessionId,
     sessionFile: outcome.sessionFile,
     worktreePath: outcome.worktreePath,
-    // [D5 诊断引用落账] 失败伴随的 stderr tee 路径透传（引擎终态应答 → call.result
+    // [D5 诊断引用登记] 失败伴随的 stderr tee 路径透传（引擎终态应答 → call.result
     // → dispatchAgentSettled 载荷；上报判据见 AgentOutcome.stderrTeePath 注释）。
     ...(outcome.stderrTeePath !== undefined ? { stderrTeePath: outcome.stderrTeePath } : {}),
     toolCalls: outcome.toolCalls,
@@ -845,15 +845,15 @@ function outcomeToWorkflowResult(outcome: AgentOutcome): WorkflowAgentResult {
 }
 
 /**
- * AgentCallOpts → ExecuteOptions 的最小正向映射（record 创建 + identity 解析消费面；
+ * AgentCallOpts → ExecuteOptions 的最小正向映射（record 创建 + identity 解析消费方；
  * host-task-spec.executeOptionsToEngineTaskSpec 的逆映射）。slug 推导 = 唯一规则
  * （description ?? agent ?? "unknown"，超长按 SLUG_MAX_LENGTH 截断；原 pump
  * dispatchAgentCall trace 命名同源规则随 [H2 W3] 删除）。returnMeta/scene 等
  * worker 层/引擎层独有字段不入 record
- * 消费面（taskSpec 装配走 opts 原样直传，不经本映射）。
+ * 消费方（taskSpec 装配走 opts 原样直传，不经本映射）。
  */
 /**
- * 字段存在性投影（条件 spread 的查表化承载）：value 非 undefined 时经 project 产出
+ * 字段存在性映射（条件 spread 的查表化承载）：value 非 undefined 时经 project 产出
  * 键值片段，否则空对象——语义等价 `...(x !== undefined ? { key: x } : {})`（仅查
  * undefined，falsy 值照常透传），把逐字段条件分支的复杂度堆叠收敛到单点。
  */

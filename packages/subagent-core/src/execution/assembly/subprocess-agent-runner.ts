@@ -73,5 +73,5 @@ export class SubprocessAgentRunner implements AgentRunner {
 
 // [H2 W2 迁移步⑥] mergeRunSignals/MergedRunSignalHandle 公共 helper 权威落点在
 // engine/common/run-signals.ts；此处 re-export 保持既有 import 路径（no-progress
-// killall 测试等消费面零改动）。
+// killall 测试等消费方零改动）。
 export { mergeRunSignals, type MergedRunSignalHandle } from "../engine/common/run-signals.ts";

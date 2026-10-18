@@ -468,7 +468,7 @@ describe("availableThinkingLevels", () => {
 });
 
 // ============================================================
-// [U1 ModelRef 全等裁决] 孪生守卫（D1 规则④，两路径共用）
+// [U1 ModelRef 全等裁决] 孪生检查（D1 规则④，两路径共用）
 // ============================================================
 
 describe("resolveModel — U1 twin guard (D1 rule ④)", () => {
@@ -486,7 +486,7 @@ describe("resolveModel — U1 twin guard (D1 rule ④)", () => {
     ).toThrow(/ambiguous case variants/);
   });
 
-  it("ctxModel 继承路径孪生守卫同等生效（D2 豁免的只是存在性复查）", () => {
+  it("ctxModel 继承路径孪生检查同等生效（D2 豁免的只是存在性复查）", () => {
     const main = makeModel({ id: "GLM-5.3-Flash", provider: "zai-coding-cn" });
     expect(() => resolveModel(undefined, makeTwinRegistry(), undefined, main)).toThrow(
       /ambiguous case variants/,

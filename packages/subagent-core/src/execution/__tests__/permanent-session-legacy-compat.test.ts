@@ -4,9 +4,9 @@
 // 前向兼容铁律）：
 //   - 旧格式磁盘组（旧 `.finalized`/`.cancelled` sidecar + v1 binding + 旧 manifest
 //     值域 closed/completed/failed/cancelled，无 executionStatus/intent）经新代码读侧
-//     投影：恒 idle + stopReason 桥接（finalized→reason / cancelled→interrupted），
+//     派生视图：恒 idle + stopReason 桥接（finalized→reason / cancelled→interrupted），
 //     不炸、不丢 identity；
-//   - manifest 双写映射：markSettled 轮间 idle / markSettledOut 收口落账 → legacy
+//   - manifest 双写映射：markSettled 轮间 idle / markSettledOut 收尾写入 journal 记录 → legacy
 //     running（[u-arch / §3.4 方案 A] 收起概念删除，可续聊 record = 活跃成员）；
 //   - 双写回读：manifest 源按 executionStatus（两态权威词）优先，settle 产物
 //     （legacy running + executionStatus idle）读回 idle；
@@ -117,7 +117,7 @@ describe("[U8/S8] 旧格式磁盘组只读兼容——恒 idle + stopReason 桥�
     fs.rmSync(tmpDir, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 });
   });
 
-  it("旧 manifest（无 executionStatus）三值域 closed/completed/cancelled → manifest 源投影 idle + closedReason 保留", () => {
+  it("旧 manifest（无 executionStatus）三值域 closed/completed/cancelled → manifest 源派生视图 idle + closedReason 保留", () => {
     // 磁盘组缺员（无子 session 文件）→ manifest 源兜底可见（mergedRecords 1.5）
     const writeOld = (id: string, status: string, closedReason?: string): void => {
       fs.writeFileSync(
@@ -188,7 +188,7 @@ describe("[U8] manifest 双写映射 + 双写回读 + engine 域下行", () => {
     store.dispose();
   });
 
-  it("markSettledOut 收口落账 → legacy status=running + executionStatus=idle（[u-arch / §3.4 方案 A] 收起概念删除）", () => {
+  it("markSettledOut 收尾写入 journal 记录 → legacy status=running + executionStatus=idle（[u-arch / §3.4 方案 A] 收起概念删除）", () => {
     const store = new RecordStore(sessionsDir, undefined, undefined, manifestDir);
     const record = makeExecutionRecord("sa-arch");
     store.register(record);
@@ -196,7 +196,7 @@ describe("[U8] manifest 双写映射 + 双写回读 + engine 域下行", () => {
     store.markSettledOut(record);
 
     const manifest = readManifest("sa-arch");
-    // [u-arch / §3.4 方案 A] close 收口落账 record 投 running——可续聊 record =
+    // [u-arch / §3.4 方案 A] close 收尾写入 journal 记录 record 投 running——可续聊 record =
     // 旧 reader 视角的活跃成员（原「收起位 → closed」下行分支随概念删除退役）。
     expect(manifest.status).toBe("running");
     expect(manifest.executionStatus).toBe("idle");
@@ -204,7 +204,7 @@ describe("[U8] manifest 双写映射 + 双写回读 + engine 域下行", () => {
     store.dispose();
   });
 
-  it("[collect 退役] 存量批成员 manifest（桥接终态 cancelled 词汇）读侧容忍：投影 idle + closedReason 保留", () => {
+  it("[collect 退役] 存量批成员 manifest（桥接终态 cancelled 词汇）读侧容忍：派生视图 idle + closedReason 保留", () => {
     // 批写侧（markBatchFinalized → batchManifestRecord → legacyManifestStatusFields
     // 派生单点）已删。构造磁盘遗留形态（批时代产物词汇：legacy status=cancelled +
     // executionStatus=idle + closedReason/intent 缺省）——旧 session 文件必须可读。
@@ -228,7 +228,7 @@ describe("[U8] manifest 双写映射 + 双写回读 + engine 域下行", () => {
     const store = new RecordStore(sessionsDir, new ManifestStore(manifestDir));
     const rec = store.collectRecords(10, "all").find((r) => r.id === "sa-bridge");
     expect(rec).toBeDefined();
-    // 旧 cancelled 词汇读侧投影：idle（两态收敛）+ manifest closedReason 透传保留
+    // 旧 cancelled 词汇读侧派生视图：idle（两态收敛）+ manifest closedReason 透传保留
     expect(rec?.status).toBe("idle");
     expect(rec?.closedReason).toBe("cancelled");
     store.dispose();
@@ -251,7 +251,7 @@ describe("[U8] manifest 双写映射 + 双写回读 + engine 域下行", () => {
     reader.dispose();
   });
 
-  it("双写回读：markSettledOut 收口落账产物 manifest 源读回 idle（intent 停写停读）", () => {
+  it("双写回读：markSettledOut 收尾写入 journal 记录产物 manifest 源读回 idle（intent 停写停读）", () => {
     const writer = new RecordStore(sessionsDir, undefined, undefined, manifestDir);
     const record = makeExecutionRecord("sa-arch-rt");
     writer.register(record);
@@ -286,7 +286,7 @@ describe("[U8] manifest 双写映射 + 双写回读 + engine 域下行", () => {
     expect(manifest.engine).toBe("zcode");
     expect(manifest.engineHandle).toEqual(engineHandle);
 
-    // 读侧回读：manifest 源投影恢复引擎身份与锚（重启可见性兜底）
+    // 读侧回读：manifest 源派生视图恢复引擎身份与锚（重启可见性兜底）
     const reader = new RecordStore(sessionsDir, new ManifestStore(manifestDir));
     const rec = reader.collectRecords(10, "all").find((r) => r.id === "sa-zc");
     expect(rec?.engine).toBe("zcode");

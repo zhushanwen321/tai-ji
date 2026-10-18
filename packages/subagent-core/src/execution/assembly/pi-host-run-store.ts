@@ -34,7 +34,7 @@
 // readdir ENOENT = 从未落盘的正常空态；EACCES / EIO 等真 IO 故障上抛给扫描层
 // ——静默折叠成空集会让持续 IO 故障伪装成「0 个 run 的成功扫描」（与 §2.3
 // 批评的「静默跳过伪装成无 run 可回收」同病）。单 run 判定层——走判定核保守
-// 矩阵（journal/manifest 读失败按 running 保守挂账 + warn 留证），枚举层不额外
+// 矩阵（journal/manifest 读失败按 running 保守挂着不处理 + warn 留证），枚举层不额外
 // 吞错、不额外上抛。
 //
 // v1 旧形态触达（[D16⑥]，D15「触达 v1 形态实体直接跳过 + warn 留痕」）：旧
@@ -75,7 +75,7 @@ const LEGACY_JOURNAL_SUFFIX = ".events.jsonl";
  * 返回形态（ADR-0081 终态重构）：`{ runId, stateDir, status }`
  * ——stateDir = 该 run 的 workflow-state 目录，启动扫描收编按它传 journalDir
  * 参数；status = 共享判定核的终局判读（"running" ∨ 终态词）——事实源推导，
- * 不再携带快照行投影。不含 startedAt（旧 TTL 超龄判定字段，全量收编不判超龄，
+ * 不再携带快照行派生视图。不含 startedAt（旧 TTL 超龄判定字段，全量收编不判超龄，
  * 消费方为零的字段不进接口）。
  *
  * [W2/V1] transition/save 成员删除：终局化经收编原语（journal/manifest 写面，

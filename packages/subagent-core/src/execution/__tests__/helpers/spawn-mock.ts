@@ -66,7 +66,7 @@ import { createRecord } from "../../persistence/execution-record.ts";
 
 // [W3 改写] RunOptions / SessionRunnerContext 类型源（inproc session-runner（已删））
 // 随删件消亡——makeOpts/makeCtx 改用结构化最小类型（消费方为 keep-alive 系历史
-// fixture 形态；引擎侧等价类型在 pi-subagent-cli）。core 侧剩余消费面为
+// fixture 形态；引擎侧等价类型在 pi-subagent-cli）。core 侧剩余消费方为
 // recursive-visibility-baseline 的 spawn 断言工具（waitForSpawn/lastSpawnedChild）。
 
 /** FakeChild 的假 pid（满足 ChildProcess.pid 形状，无真实进程语义）。 */

@@ -5,7 +5,7 @@
 //
 // 历史沿革：本文件原覆盖「v1 全量快照序列化白名单 + v1/v2 双版本分类」；v1 兼容层
 // 下线后（project 未发布、无 v1 数据），写点契约只剩 v2「注册 + 终态两条小条目」，
-// v1 全量快照投影与其读者分支已删除——本文件同步改写为 v2-only，播种一律经
+// v1 全量快照派生视图与其读者分支已删除——本文件同步改写为 v2-only，播种一律经
 // helpers/v2-record-entry.ts（生产写侧未导出等价测试入口）。
 //
 // classify 语义（record-entry.ts SSOT）：
@@ -31,7 +31,7 @@ import type { ExecutionRecord } from "../domain/record-model.ts";
 import { buildCreatedEventPayload, toRegisteredEntryData, toSettledEntryData } from "../persistence/record-entry-write.ts";
 import { v2Entries, v2RegisteredEntry, v2SettledEntry } from "./helpers/v2-record-entry.ts";
 
-/** 最小合法 SubagentRecord（缺省 = tool 来源、未收口）。 */
+/** 最小合法 SubagentRecord（缺省 = tool 来源、未收尾）。 */
 function makeRecord(over: Partial<SubagentRecord> = {}): SubagentRecord {
   return {
     id: "sa-1",
@@ -155,7 +155,7 @@ describe("v2 条目载荷形态", () => {
 // ── 测试播种辅助（helpers/v2-record-entry.ts）────────────────────────────
 
 describe("v2 播种辅助：SubagentRecord → 现行主 session 条目族", () => {
-  it("注册播种：身份域投影 + 可选字段缺省不落键", () => {
+  it("注册播种：身份域派生视图 + 可选字段缺省不落键", () => {
     const entry = v2RegisteredEntry(
       makeRecord({ origin: "workflow", parentRunId: "wf-1", stepIndex: 0, depth: 1 }),
     );
@@ -182,7 +182,7 @@ describe("v2 播种辅助：SubagentRecord → 现行主 session 条目族", () 
     expect("stepIndex" in top).toBe(false);
   });
 
-  it("终态播种：终局域投影（停因/统计/引擎锚/result）", () => {
+  it("终态播种：终局域派生视图（停因/统计/引擎锚/result）", () => {
     const entry = v2SettledEntry(
       makeRecord({
         status: "idle",
@@ -215,7 +215,7 @@ describe("v2 播种辅助：SubagentRecord → 现行主 session 条目族", () 
     expect("thinkingLevel" in revived).toBe(false);
   });
 
-  it("条目族：running 只产注册条目；已收口再补终态条目（注册先行）", () => {
+  it("条目族：running 只产注册条目；已收尾再补终态条目（注册先行）", () => {
     expect(v2Entries(makeRecord()).map((e) => e.kind)).toEqual(["registered"]);
     expect(
       v2Entries(makeRecord({ status: "idle", stopReason: "completed", endedAt: 2000 })).map(
@@ -304,8 +304,8 @@ describe("classifySubagentRecordEntryData（v2-only）", () => {
 });
 
 // ── [subagent-detail-model-info] modelSource 写面（直测生产写侧——测试播种 helper
-//    v2-record-entry 不投影该字段，绕开以锁生产行为）─────────────────────────────
-describe("modelSource 写面：注册/终态条目与 created 帧同域投影", () => {
+//    v2-record-entry 不派生该字段，绕开以锁生产行为）─────────────────────────────
+describe("modelSource 写面：注册/终态条目与 created 帧同域派生视图", () => {
   it("注册条目：modelSource 在场落键 + 缺省不落键", () => {
     const entry = toRegisteredEntryData({
       id: "sa-1",
@@ -331,7 +331,7 @@ describe("modelSource 写面：注册/终态条目与 created 帧同域投影", 
     expect("modelSource" in noSource).toBe(false);
   });
 
-  it("终态条目：SettledEntrySource → 条目投影（缺省不落键）", () => {
+  it("终态条目：SettledEntrySource → 条目派生视图（缺省不落键）", () => {
     const entry = toSettledEntryData(
       {
         id: "sa-1",

@@ -127,13 +127,13 @@ body text`);
     expect(config.systemPrompt).toBe("body text");
   });
 
-  it("未闭合 frontmatter：meta = null，name 经 extractYamlField fallback，其余作为 systemPrompt", () => {
+  it("frontmatter 缺结束标记：meta = null，name 经 extractYamlField fallback，其余作为 systemPrompt", () => {
     const { config, meta } = parseAgentWithMeta("/x/broken.md", `---
 name: broken
 model: x/y`);
     expect(meta).toBeNull();
     expect(config.name).toBe("broken");
-    // 未闭合分支只取 name（原行为），不解析 model
+    // 缺结束标记分支只取 name（原行为），不解析 model
     expect(config.systemPrompt).toBe(`---\nname: broken\nmodel: x/y`);
   });
 });
@@ -213,7 +213,7 @@ You are a worker.`);
 // ============================================================
 
 describe("builtin agents 数据合规", () => {
-  // C5 过渡态收口：10 模板已迁 @zhushanwen/subagent-core/agents/（C1/D-1）——经
+  // C5 过渡态收尾：10 模板已迁 @zhushanwen/subagent-core/agents/（C1/D-1）——经
   // ./workflows/* 子入口锚点解析 core 包根（与 src/host/pi-host.ts corePackageNpmRoot
   // 同一锚，workspace 与发布形态同径），数据面断言随资产指向 core。
   const CORE_PKG_ROOT = path.resolve(

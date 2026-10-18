@@ -110,7 +110,7 @@ describe("SubagentService", () => {
       const service = new SubagentService({ cwd: agentDir, modelService });
       service.initSession({ pi: stalePi, sessionId: "s1" });
       service.dispose();
-      // dispose 后 queries 面被 disposed 守卫拦截（上一用例锚定），迟到写面走 store 直驱
+      // dispose 后 queries 面被 disposed 检查拦截（上一用例锚定），迟到写面走 store 直驱
       const store = Reflect.get(service, "store") as RecordStore;
 
       // 替换窗口内迟到的 record 写面（形态：dispose 未覆盖到的 running record 收尾）
@@ -590,7 +590,7 @@ describe("SubagentService", () => {
     // 让 pending-notifications 清理 registry entry，避免两侧状态不一致。
     // 此组验证该 emit 路径。
 
-    it("T-NFR-8: dispose 时每个 running record 都 emit pending:unregister(reason=completed)（[U5] 编排性关闭=收口落账）", () => {
+    it("T-NFR-8: dispose 时每个 running record 都 emit pending:unregister(reason=completed)（[U5] 编排性关闭=收尾写入 journal 记录）", () => {
       const { service, pi } = makeReadyServiceWithPi();
       injectRunningBackground(service, "bg-dispose-1");
       injectRunningBackground(service, "bg-dispose-2");
@@ -599,7 +599,7 @@ describe("SubagentService", () => {
       service.dispose();
 
       // 每个 running record 都 emit 了 pending:unregister（[U5] reason=completed——
-      // 收口点补发注销，承接原 emitUnregister 语义挂载收口落账原语）
+      // 收尾点补发注销，承接原 emitUnregister 语义挂载收尾写入 journal 记录原语）
       expect(pi.events.emit).toHaveBeenCalledWith(
         "pending:unregister",
         expect.objectContaining({ id: "bg-dispose-1", reason: "completed" }),

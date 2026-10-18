@@ -6,7 +6,7 @@
 // （事件载荷接口按 Class B 先例留原位作类型导入——B1 已裁决「值不能反向依赖编排层」，
 // 类型边编译期擦除）；模块本体是 record 流的 fold + runId 分区内存表，零编排状态机
 // 语义、除 io 注入的 record 读外零 IO / 零时钟依赖，不把状态机语义带进下层。编排侧
-// 消费面（terminal-actions / worker-message-pump / 成员复用池测试）直连本模块——
+// 消费方（terminal-actions / worker-message-pump / 成员复用池测试）直连本模块——
 // 过渡期曾保留同名 re-export façade，收尾已删。
 //
 // [U4 pi-workflow-run-resource-model → D6 绑定消解]（workflow-run-resume-revision）
@@ -18,7 +18,7 @@
 // 字段（agent-started 载荷的 memberRecordId，随帧落 record），复用路由按绑定字段查；
 // 跨崩溃恢复从 record 折叠重建（foldMemberBindings）。机制保留（同名续写、按 runId
 // 分区防串线、收尾清绑定的时序），实体取消（原 member-pool 词表事件随 [D6] 删除，
-// 写入序红线由「绑定字段与 agent-started 帧同帧落账」构造性满足——字段与帧一体，
+// 写入序红线由「绑定字段与 agent-started 帧同帧写入」构造性满足——字段与帧一体，
 // 不存在「事件落了内存没改」或反之的窄窗）。
 //
 // 职责边界（收窄后）：
@@ -46,7 +46,7 @@ const logger = getLogger("member-reuse-pool");
 
 /**
  * record 读注入面（[D6] 收窄：原 appendEvent 通道随 member-pool 词表成员删除——
- * 绑定落账归 agent-started 帧，由 pump dispatchAgentCall 链承载，不经本注入面）。
+ * 绑定写入归 agent-started 帧，由 pump dispatchAgentCall 链承载，不经本注入面）。
  * 生产装配在消费方（workflow-dispatch / terminal-actions 的 scanRunEvents 组装）。
  */
 export interface MemberReusePoolIo { // oe-exempt:20260927:framework:复用绑定 ports IO 契约（record 读面）——生产实现经 terminal-actions 单源，测试 fake 为第二变体
@@ -58,7 +58,7 @@ export interface MemberReusePoolIo { // oe-exempt:20260927:framework:复用绑�
 
 /**
  * 事件流 → 绑定映射（fold 重放）：只消费 agent-started 帧的 memberRecordId 字段
- * （其余事件类型跳过——fold 与 run 状态机投影 foldRunEventFrames 各取所需，互不
+ * （其余事件类型跳过——fold 与 run 状态机派生视图 foldRunEventFrames 各取所需，互不
  * 干扰）。绑定语义 = 首派建绑（同 run 同名首个携带 recordId 的 agent-started 帧
  * 生效，后续同名续写帧的重复携带不换绑——zcode 语义下 run 内名唯一，重复携带是
  * 并行同名派发的防御面，首个为准与原 register 语义一致）。重放幂等：同一事件序列

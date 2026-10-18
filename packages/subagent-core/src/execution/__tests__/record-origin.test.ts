@@ -17,7 +17,7 @@
 //   3. 查询面：collectRecords 缺省过滤 origin==="workflow"（includeWorkflow 缺省
 //      false）、includeWorkflow:true 放行；collectRecordsByParentRunId 按 run id
 //      精确列 record（内存 ∪ 磁盘重建口径，不过滤 origin）。
-//   4. 治理面负向保证（D1⑥）：recoverEntryOnlyOrphans / 重建投影不因 origin 过滤——
+//   4. 治理面负向保证（D1⑥）：recoverEntryOnlyOrphans / 重建派生视图不因 origin 过滤——
 //      workflow 来源的 entry-only 孤儿（注册条目已在主 session、无事件文件、无子文件锚）
 //      照样被终态化收敛；身份域留在注册条目，纠偏只追加终态条目。
 
@@ -145,7 +145,7 @@ describe("record origin/parentRunId 持久化链（H2 W1）", () => {
 
     store.register(makeRecord({ id: "legacy-1" }));
     expect(captured).toHaveLength(1);
-    // v2 契约 origin 必填：undefined 归一 "tool"（消费面负向判定零迁移）；可选域
+    // v2 契约 origin 必填：undefined 归一 "tool"（消费方负向判定零迁移）；可选域
     // parentRunId 经序列化自然缺省（断言序列化后形态——内存对象保留 undefined 键名）。
     const persisted = JSON.parse(JSON.stringify(captured[0])) as Record<string, unknown>;
     expect(persisted.kind).toBe("registered");
@@ -153,7 +153,7 @@ describe("record origin/parentRunId 持久化链（H2 W1）", () => {
     expect(Object.keys(persisted)).not.toContain("parentRunId");
   });
 
-  it("重建投影不过滤（D1⑤）：workflow 来源 record 经内存源投影全量返回（includeWorkflow 通道）", () => {
+  it("重建派生视图不过滤（D1⑤）：workflow 来源 record 经内存源派生视图全量返回（includeWorkflow 通道）", () => {
     const store = new RecordStore(tmpDir);
     store.register(makeRecord({ id: "wf-step-2", origin: "workflow", parentRunId: "wf-run-2" }));
     const all = store.collectRecords(50, "all", "sess-origin", true);
@@ -297,7 +297,7 @@ describe("治理面负向规格（D1⑥：恢复链对 workflow origin 全量可
   });
 
   it("recoverEntryOnlyOrphans：workflow origin 的 entry-only 孤儿照样纠偏（v2 终态条目），身份域留在注册条目", () => {
-    // v2 entry-only 孤儿形态：主 session 只有注册条目（running，未收口），无事件文件、
+    // v2 entry-only 孤儿形态：主 session 只有注册条目（running，未收尾），无事件文件、
     // 无子 session 文件锚——正是 recoverEntryOnlyOrphans 的判定域。
     const orphan = makeRecord({ id: "wf-orphan", origin: "workflow", parentRunId: "run-G" });
     const registered = v2RegisteredEntry(recordToSubagent(orphan));

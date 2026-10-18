@@ -16,7 +16,7 @@
 //   ③ zcode 锚 settle 快照收编（U6-D2 交接）+ 重启锚恢复（B-restart store 面）：
 //      锚键 binding 落盘 → entry 源可见 + 锚派生 → markResurrected zcode 分派
 //      （acquire 键 + foreign 探针 + 折叠水合）→ markReopened/markSettledOut 锚分派；
-//   ④ 归零覆盖回归（GUI 快修批次⑤根因）：冷复活后 register 的 entry 投影携带
+//   ④ 归零覆盖回归（GUI 快修批次⑤根因）：冷复活后 register 的 entry 派生视图携带
 //      水合值，不再以归零 entry last-writer-wins 覆盖磁盘原值。
 //
 // fixture 一律 mkdtempSync(tmpdir) 自建自删，不触碰真实数据目录。
@@ -139,7 +139,7 @@ function zcodeRecord(id: string, dbPath: string, sessionId: string, over: Partia
 // ── ① revive 前轮统计保留（事件流折叠基准 + 跨轮连续）──────────────────
 
 describe("U7① revive 前轮统计保留（事件流折叠基准）", () => {
-  it("事件流轮终收条播种 → 新 store 实例 light 重建水合 turns/tokens/round/endedAt（identity 基底同样投影）", () => {
+  it("事件流轮终收条播种 → 新 store 实例 light 重建水合 turns/tokens/round/endedAt（identity 基底同样派生）", () => {
     const child = path.join(sessionsDir, "child.jsonl");
     writeIdentityChild(child, "bg-1");
     // 宿主 A 的轮终收条（事件流播种：created → round-started(3) → round-idle 快照）。
@@ -160,7 +160,7 @@ describe("U7① revive 前轮统计保留（事件流折叠基准）", () => {
     expect(found?.totalTokens).toBe(4200);
     expect(found?.round).toBe(3);
     expect(found?.endedAt).toBe(999);
-    expect(found?.status).toBe("idle"); // 重建单规则（§3.2.4）不受统计投影影响
+    expect(found?.status).toBe("idle"); // 重建单规则（§3.2.4）不受统计派生视图影响
   });
 
   it("markResurrected 水合基线 → 新轮增量在基线上累加（round N 的 turn 基点 = 事件流累计值）", () => {
@@ -211,7 +211,7 @@ describe("U7① revive 前轮统计保留（事件流折叠基准）", () => {
     expect(rec.totalTokens).toBe(4230);
   });
 
-  it("无事件流（无收条事件）→ light 统计保持缺省 0（不误投影）", () => {
+  it("无事件流（无收条事件）→ light 统计保持缺省 0（不误派生视图）", () => {
     const child = path.join(sessionsDir, "child.jsonl");
     writeIdentityChild(child, "bg-2");
     const store = newStore();
@@ -241,7 +241,7 @@ describe("U7② 跨重启恢复（内存终值 == settle 收条事件 == 重建�
     });
     updateFromEvent(rec, { type: "turn_end" });
     rec.round = 1;
-    // 轮始落账（round-started 帧携带 round=1——[② 读侧换源] 后重建 round 的折叠源）。
+    // 轮始写入 journal 记录（round-started 帧携带 round=1——[② 读侧换源] 后重建 round 的折叠源）。
     storeA.markRoundStarted("bg-1");
     expect(storeA.markSettled(rec, "gc")).toBe(true);
     const memTurns = rec.turnCount;
@@ -303,7 +303,7 @@ describe("U7③ zcode 锚 settle 快照与重启恢复", () => {
     storeA.register(rec);
     storeA.markSettled(rec, "gc");
 
-    // 主 session entry 族（v2 投影：注册 + 终态两条款——settle 条目承载统计/引擎锚；
+    // 主 session entry 族（v2 派生视图：注册 + 终态两条款——settle 条目承载统计/引擎锚；
     // v1 全量快照形态已随兼容层删除）。
     const mainSessionFile = path.join(dir, "main-session.jsonl");
     const settled: SubagentRecord = {
@@ -422,7 +422,7 @@ describe("U7③ zcode 锚 settle 快照与重启恢复", () => {
 
     store.markSettledOut(rec);
     expect(fs.existsSync(`${base}.alive`)).toBe(false);
-    expect(rec.status).toBe("running"); // 收口落账不动占用位
+    expect(rec.status).toBe("running"); // 收尾写入 journal 记录不动占用位
   });
 
   it("双锚皆缺（spawn 窗口期）→ markResurrected 维持响亮硬拒（现行语义保留）", () => {
@@ -441,8 +441,8 @@ describe("U7③ zcode 锚 settle 快照与重启恢复", () => {
 
 // ── ④ 归零覆盖回归（GUI 快修批次⑤根因）──────────────────────────────────────
 
-describe("U7④ 归零覆盖回归：冷复活 entry 投影不再以归零值覆盖磁盘原值", () => {
-  it("settle 落收条 → 冷复活 markResurrected → register 的 entry 投影携带水合值", () => {
+describe("U7④ 归零覆盖回归：冷复活 entry 派生视图不再以归零值覆盖磁盘原值", () => {
+  it("settle 落收条 → 冷复活 markResurrected → register 的 entry 派生视图携带水合值", () => {
     const child = path.join(sessionsDir, "child.jsonl");
     writeIdentityChild(child, "bg-1");
 

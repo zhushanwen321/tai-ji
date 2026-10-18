@@ -13,7 +13,7 @@
 //     历史形态）；自愈段保留为防御纵深。
 //   - M1 负向：user-close/cancelled/gc 末条 entry（v2 终态条目的非 interrupted 停因）
 //     不被孤儿恢复/重物化（主动终态语义不放大）。
-//   - M2：manifest 源快照 closedReason 投影 → endedMessageGuard 三分流正确
+//   - M2：manifest 源快照 closedReason 派生视图 → endedMessageGuard 三分流正确
 //     （user-close/cancelled → 主动关闭专属文案；parent-shutdown → reconnectable 文案）。
 //     曾因 manifest 不携带 closedReason，user-close 误入「closedReason: unknown +
 //     reconnectable/fork-from」分支；cancel（无 sessionFile 形态）则完全不可见报原始 not-found。
@@ -83,7 +83,7 @@ function makeServiceOn(agentDir: string, init?: { mainSessionFile?: string }): S
  * [v1 兼容层删除] v1 全量快照写点（toSubagentRecordEntry）已删：现行主 session 条目
  * 契约 = 注册 + 终态两条小条目（每族两行 JSON——v2Entries 与生产写点同序）。v2 终态
  * 条目不承载 closedReason 兼容位——该「为什么停」语义的值域完整并入 StopReason，
- * 故缺省取 stopReason = closedReason（旧读形态的迁移值），由 v2PairToRecord 投影回
+ * 故缺省取 stopReason = closedReason（旧读形态的迁移值），由 v2PairToRecord 派生视图回
  * stopReason；settle 形态（编排性关闭）显式传 stopReason。
  */
 function closedEntryLines(rec: {
@@ -130,7 +130,7 @@ function closedEntryLines(rec: {
  */
 /**
  * dispose 后的收条读取——收条由事件流承载（③：`.state` 退场）：读最后一条
- * record-settled 帧，投影成与旧 sidecar 同形的 {status, reason, endedAt}。
+ * record-settled 帧，映射成与旧 sidecar 同形的 {status, reason, endedAt}。
  */
 function readDisposedState(
   agentDir: string,
@@ -207,7 +207,7 @@ describe("[M1/M2 Gate B] 编排性终态化 manifest 反查索引 + 重启冷查
     // = D8 判据破坏）。
     const manifestFile = manifestPath(agentDir, "sa-m1");
     expect(fs.existsSync(manifestFile)).toBe(true);
-    // [U5] 编排性关闭 = settle + 收口落账（不终态化）：markSettledOut 派生投影——
+    // [U5] 编排性关闭 = settle + 收尾写入 journal 记录（不终态化）：markSettledOut 派生视图——
     // [u-arch / §3.4 方案 A] 收起概念删除后 legacy status 恒 "running"（可续聊
     // record = 旧 reader 视角的活跃成员）+ executionStatus = idle（两态权威词）双写。
     const manifest = JSON.parse(fs.readFileSync(manifestFile, "utf-8")) as Record<string, unknown>;
@@ -225,8 +225,8 @@ describe("[M1/M2 Gate B] 编排性终态化 manifest 反查索引 + 重启冷查
 
   it("M1: 在途 record 的 engineHandle.sessionRef.sessionFile 提升为终态锚点（entry+manifest 带真实路径）", async () => {
     const promoted = path.join(agentDir, "enc", "20260910T000000_sess-e1.jsonl");
-    // [U2a/B3] dispose 终态化归口 markFinalized 后 .state/binding 随锚点真实落盘——
-    // 父目录须真实存在（旧路径不写 .state，promoted 仅作 manifest 字符串投影）。
+    // [U2a/B3] dispose 终态化收敛 markFinalized 后 .state/binding 随锚点真实落盘——
+    // 父目录须真实存在（旧路径不写 .state，promoted 仅作 manifest 字符串派生视图）。
     fs.mkdirSync(path.dirname(promoted), { recursive: true });
     fs.writeFileSync(promoted, "{}\n", "utf-8");
     const record = makeRecord({
@@ -244,7 +244,7 @@ describe("[M1/M2 Gate B] 编排性终态化 manifest 反查索引 + 重启冷查
 
     service.disposeAllRecords("parent-shutdown");
 
-    // record 本体提升（archive entry 投影随之携带）
+    // record 本体提升（archive entry 派生视图随之携带）
     expect(record.sessionFile).toBe(promoted);
     // [U5] 终态收条（③ 后由事件流承载）：parent-shutdown → interrupted-by-restart
     //（§3.2.2 host shutdown 行）；不再是旧 {status:"finalized", reason} 死亡证明。
@@ -252,7 +252,7 @@ describe("[M1/M2 Gate B] 编排性终态化 manifest 反查索引 + 重启冷查
     expect(marker.status).toBe("idle");
     expect(marker.reason).toBe("interrupted-by-restart");
     expect(typeof marker.endedAt).toBe("number");
-    // .alive release（markSettledOut 内部删——§3.2.4 release 出口①收口即放弃写权）
+    // .alive release（markSettledOut 内部删——§3.2.4 release 出口①收尾即放弃写权）
     expect(fs.existsSync(`${promoted}.alive`)).toBe(false);
     // manifest 落真实锚点（重启 revive/fork-from 可直接定位子文件）
     await vi.waitFor(() => expect(fs.existsSync(manifestPath(agentDir, "sa-promote"))).toBe(true));
@@ -274,7 +274,7 @@ describe("[M1/M2 Gate B] 编排性终态化 manifest 反查索引 + 重启冷查
 
     const snap = restarted.queries.lookupRecordAnyState("sa-m1");
     expect(snap).toBeDefined();
-    // [U8 / §3.2.8 双写回读] 编排性关闭产物重启冷查：manifest 源投影按 executionStatus
+    // [U8 / §3.2.8 双写回读] 编排性关闭产物重启冷查：manifest 源派生视图按 executionStatus
     //（两态权威词）优先读回 idle；[u-arch] 收起概念删除后 intent 不再持久化/回读
     //（manifest 残留键忽略）；closedReason 不携带（settle 语义）。
     expect(snap?.status).toBe("idle");
@@ -309,7 +309,7 @@ describe("[M1/M2 Gate B] 编排性终态化 manifest 反查索引 + 重启冷查
 
     await vi.waitFor(() => expect(fs.existsSync(manifestPath(agentDir, "sa-remat"))).toBe(true));
     const manifest = JSON.parse(fs.readFileSync(manifestPath(agentDir, "sa-remat"), "utf-8")) as Record<string, unknown>;
-    // 收编 manifest 投影 = legacy running + executionStatus idle + 收编停因
+    // 收编 manifest 派生视图 = legacy running + executionStatus idle + 收编停因
     //（v2 条目契约不承载 closedReason——旧终态兼容位随 v1 全量快照删除）
     expect(manifest.status).toBe("running");
     expect(manifest.executionStatus).toBe("idle");
@@ -346,7 +346,7 @@ describe("[M1/M2 Gate B] 编排性终态化 manifest 反查索引 + 重启冷查
   });
 
   it("M1 负向(store 侧): recoverEntryOnlyOrphans 对非 running 末条零 entry 追加", () => {
-    // 与上一用例互补：直接钉 store 层候选守卫（isEntryOrphanCandidate 只认 running 末条），
+    // 与上一用例互补：直接钉 store 层候选检查（isEntryOrphanCandidate 只认 running 末条），
     // 防未来放宽时把主动终态误回收（closed+parent-shutdown 交由 service 重物化段治理）。
     const sessionsDir = path.join(agentDir, "sessions");
     fs.mkdirSync(sessionsDir, { recursive: true });
@@ -373,7 +373,7 @@ describe("[M1/M2 Gate B] 编排性终态化 manifest 反查索引 + 重启冷查
     expect(service.cancel("sa-cx")).toBe(true);
 
     await vi.waitFor(() => expect(fs.existsSync(manifestPath(agentDir, "sa-cx"))).toBe(true));
-    // [U5] cancel = 中断轮 settle（不终态化）：markSettled 派生投影 legacy "running"
+    // [U5] cancel = 中断轮 settle（不终态化）：markSettled 派生视图 legacy "running"
     //（idle 无 closedReason）、closedReason undefined；`.state` 新格式收条
     // {status:"idle", stopReason:"interrupted"}。
     const manifest = JSON.parse(fs.readFileSync(manifestPath(agentDir, "sa-cx"), "utf-8")) as Record<string, unknown>;
@@ -397,7 +397,7 @@ describe("[M1/M2 Gate B] 编排性终态化 manifest 反查索引 + 重启冷查
     expect(err.message).toContain("fork-from");
   });
 
-  it("M2: manifest 源 user-close 快照走「主动关闭」专属文案（读侧投影三分流收口）", async () => {
+  it("M2: manifest 源 user-close 快照走「主动关闭」专属文案（读侧派生视图三分流汇总）", async () => {
     // user-close 终态正常路径走 doFinalizeRecord（store.markFinalized 携 closedReason，
     // 写侧由 finalize-record.test.ts 钉）；此处钉读侧：离线构造 user-close manifest，
     // 重启后 endedMessageGuard 不再误入 reconnectable/fork-from 分支（Gate B 实测错分流形态）。
@@ -428,10 +428,10 @@ describe("[M1/M2 Gate B] 编排性终态化 manifest 反查索引 + 重启冷查
   // ── [U5] disposeAllRecords 自动收起——编排性关闭语义矩阵 ──
   //
   // [U5 / §3.2.5 编排性关闭行] 终态化退役：dispose = settle（.state 新格式收条
-  // {status:"idle", stopReason: interrupted-by-parent/restart}）+ 收口落账
+  // {status:"idle", stopReason: interrupted-by-parent/restart}）+ 收尾写入 journal 记录
   //（markSettledOut：worktreeHandle 清句 + `.alive` release）+ 放弃轮标记。万物可续
   // 下任何 dispose 后 record 均可 message 寻回续聊（U4 锚判据），「可重连集」枚举
-  // gate 消亡——矩阵断言改为 .state 磁盘产物 + 收口资源面 + 放弃标记（gate ②判据）。
+  // gate 消亡——矩阵断言改为 .state 磁盘产物 + 收尾资源面 + 放弃标记（gate ②判据）。
   describe("[U5] disposeAllRecords 编排性关闭——语义矩阵", () => {
     /** 构造带真实 sessionFile + .alive marker 的活跃 record 并注册进 service store。 */
     function registerActiveRecord(opts: {
@@ -463,10 +463,10 @@ describe("[M1/M2 Gate B] 编排性终态化 manifest 反查索引 + 重启冷查
       expect(marker.status).toBe("idle");
       expect(marker.reason).toBe("interrupted-by-restart");
       expect(typeof marker.endedAt).toBe("number");
-      // 编排性关闭 = settle idle + 收口落账（无意愿字段）+ 在飞轮置放弃标记
+      // 编排性关闭 = settle idle + 收尾写入 journal 记录（无意愿字段）+ 在途轮置放弃标记
       expect(record.status).toBe("idle");
       expect(record.lastAbandonedRound).toEqual({ epoch: 0, round: 0 });
-      // release 出口①：.alive 删除（markSettledOut——收口即放弃写权）
+      // release 出口①：.alive 删除（markSettledOut——收尾即放弃写权）
       expect(fs.existsSync(`${sessionFile}.alive`)).toBe(false);
     });
 
@@ -521,7 +521,7 @@ describe("[M1/M2 Gate B] 编排性终态化 manifest 反查索引 + 重启冷查
       expect(marker.reason).toBe("interrupted-by-restart");
 
       // boot 重认领意愿消亡：[U5/D4 MF-1] 磁盘重建单规则恒 idle + 孤儿恢复恒 idle
-      //（无在飞轮即无接管需求）——isBootReadoptable 谓词已随死代码清理删除，
+      //（无在途轮即无接管需求）——isBootReadoptable 谓词已随死代码清理删除，
       // dispose 产物 idle 形态即「等 revive」终态，无重认领路径。
       expect(record.status).toBe("idle");
     });

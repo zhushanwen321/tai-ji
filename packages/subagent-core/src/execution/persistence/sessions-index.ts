@@ -53,7 +53,7 @@ export const INDEX_WRITE_MIN_INTERVAL_MS = 60_000;
  * 正索引条目：「该文件有 identity」的身份字段 + stat 戳。
  *
  * 不含 sessionFile（加载侧由 sessionsDir + basename 重构，绝对路径因 agentDir 迁移
- * 整体失效）；不含 forkDepth（投影源 SubagentRecord 无此字段，buildRecord
+ * 整体失效）；不含 forkDepth（派生源 SubagentRecord 无此字段，buildRecord
  * 构造 light 时不读——存了也无消费方；未来需要时升 INDEX_VERSION）。
  */
 export interface SessionsIndexEntry {
@@ -81,9 +81,9 @@ export interface SessionsIndexEntry {
   model: string | undefined;
   thinkingLevel: string | undefined;
   /**
-   * 来源身份（H2 S3 修复：light→索引→重建往返闭合）。undefined 表示缺失
+   * 来源身份（H2 S3 修复：light→索引→重建往返补全）。undefined 表示缺失
    * （旧索引文件/origin 缺省 = "tool" 语义），可选字段不升 INDEX_VERSION——
-   * 对齐 rootSessionId/parentRecordId 先例（宽容守卫 + 序列化自然缺省）。
+   * 对齐 rootSessionId/parentRecordId 先例（宽容检查 + 序列化自然缺省）。
    */
   origin?: RecordOrigin;
   /** origin="workflow" 时所属 workflow run id（undefined = 缺失/tool 来源）。 */
@@ -179,7 +179,7 @@ function hasOptionalStringFields(v: Record<string, unknown>): boolean {
   );
 }
 
-/** 来源域字段组（origin 守卫宽容：undefined 缺省合法，字面量白名单对齐 readEntryOriginFields）。 */
+/** 来源域字段组（origin 检查宽容：undefined 缺省合法，字面量白名单对齐 readEntryOriginFields）。 */
 function hasOriginFields(v: Record<string, unknown>): boolean {
   return (
     v.origin === undefined || v.origin === "workflow" || v.origin === "tool"
@@ -291,7 +291,7 @@ function parseIndexJson(raw: string, indexPath: string): unknown {
   }
 }
 
-/** DM1 头部字段形态守卫（version 数值 + entries 非空 object 非数组）。 */
+/** DM1 头部字段形态检查（version 数值 + entries 非空 object 非数组）。 */
 function isIndexTopHeader(v: Record<string, unknown>): v is ValidIndexTop {
   return (
     typeof v.version === "number" &&

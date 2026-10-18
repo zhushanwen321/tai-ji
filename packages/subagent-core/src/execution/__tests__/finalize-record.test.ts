@@ -1,13 +1,13 @@
-// doFinalizeRecord — manifest status 透传 + [U2a] 终态四件套归口 store 意图原语测试。
+// doFinalizeRecord — manifest status 透传 + [U2a] 终态四件套收敛 store 意图原语测试。
 //
 // 验证 finalize-record.ts 的 status 映射：done→completed, failed→failed, cancelled→cancelled
 // （cancelled 不再归并 failed）。crashed 不进 finalize 入参（TS 签名锁定 done/failed/cancelled）。
 //
-// [U2a/B1] 终态持久化四件套（.state/binding/archive/manifest/.alive 删）归口
-// store.markFinalized / markCancelled——测试面相应切换为真实 RecordStore 承载
+// [U2a/B1] 终态持久化四件套（.state/binding/archive/manifest/.alive 删）收敛
+// store.markFinalized / markCancelled——测试相应切换为真实 RecordStore 承载
 // （manifestDir 接线第 4 构造参数 → 终态 manifest writeSync 同步落盘，D8 v7）；
 // manifest 写失败路径走缺省降级（manifestStore 异步 + mock 注入 throw）。
-// [B5] doFinalizeRoundToIdle 簿记归口 store.markRoundIdle：record 须先 register 进
+// [B5] doFinalizeRoundToIdle 簿记收敛 store.markRoundIdle：record 须先 register 进
 // store 内存（markRoundIdle 按 id 查内存），轮终 `.alive` 保留（D3a 跨轮延续）。
 //
 // FinalizeDeps 其余 stub 注入（manifestStore 为真实实例,指向 tmpDir）。
@@ -203,7 +203,7 @@ describe("doFinalizeRecord — manifest status 透传 (M3 4 态)", () => {
       doFinalizeRecord(deps, record, makeMinimalResult(), "closed"),
     ).resolves.toBeUndefined();
 
-    // ── 核心 claim 2：写权在 manifest 写失败后仍被释放（收口不因写失败卡住）──
+    // ── 核心 claim 2：写权在 manifest 写失败后仍被释放（收尾不因写失败卡住）──
     expect(fs.existsSync(`${sessionFile}.alive`)).toBe(false);
 
     // ── 核心 claim 3：.alive 被移除（release 出口①——预写的 .alive 不再存在）──
@@ -270,7 +270,7 @@ describe("doFinalizeRecord — manifest status 透传 (M3 4 态)", () => {
       return sessionFile;
     }
 
-  it("sessionFile 缺失 + 反查命中 → 终态收条落账 + .alive 清理 + record/manifest 回填", async () => {
+  it("sessionFile 缺失 + 反查命中 → 终态收条写入 journal 记录 + .alive 清理 + record/manifest 回填", async () => {
       const sessionFile = writeSessionFileWithIdentity("20260901T12000000_ps9.jsonl", "rec-ps9");
       // 预写 .alive 残留（模拟 running 期崩溃恢复窗口的 marker）
       fs.writeFileSync(
@@ -343,7 +343,7 @@ describe("doFinalizeRecord — manifest status 透传 (M3 4 态)", () => {
 
       await doFinalizeRecord(makeDeps(), record, makeMinimalResult(), "closed", "cancelled");
 
-      // record-settled 帧落账且内容为终态收条（字段逐项断言，不用 objectContaining
+      // record-settled 帧写入 journal 记录且内容为终态收条（字段逐项断言，不用 objectContaining
       // 放宽——重建链路靠这些字段还原）
       const marker = lastSettledEvent(tmpDir, "rec-wire-cancelled");
       expect(marker).toBeDefined();
@@ -364,7 +364,7 @@ describe("doFinalizeRecord — manifest status 透传 (M3 4 态)", () => {
 
         await doFinalizeRecord(makeDeps(), record, makeMinimalResult(), "closed", reason);
 
-        // 终态收条落账且 reason = 真实关因（磁盘重建用它还原 closedReason，
+        // 终态收条写入 journal 记录且 reason = 真实关因（磁盘重建用它还原 closedReason，
         // 不再一律硬编码 gc）
         expect(lastSettledEvent(tmpDir, `rec-wire-${reason}`)?.stopReason).toBe(reason);
         // 兼容期旧名不再被写
@@ -519,7 +519,7 @@ describe("doFinalizeRoundToIdle — chatMode 轮次完成进 idle (M2-A)", () =>
     const { deps, store } = makeDeps();
     const record = makeMinimalRecord({ id: "rec-idle", sessionFile, round: 0 });
     // [§4] 轮终契约前置：record 在途（makeMinimalRecord 缺省 running）——
-    // 收口/迟到应答造成的 idle 形态由轮终原语的在途门拒绝（用例见下方「在途门 CAS」）。
+    // 收尾/迟到应答造成的 idle 形态由轮终原语的在途门拒绝（用例见下方「在途门 CAS」）。
     store.register(record);
 
     await doFinalizeRoundToIdle(deps, record, { kind: "success", content: "done" });
@@ -531,7 +531,7 @@ describe("doFinalizeRoundToIdle — chatMode 轮次完成进 idle (M2-A)", () =>
     expect(fs.existsSync(`${sessionFile}.alive`)).toBe(true);
   });
 
-  it("[§4 在途门 CAS] close 侧抢先收口（legacy close CAS 已跑、有意不写 endedAt）+ 迟到轮终 → 拒绝：轮次不推进、迟到正文不写", async () => {
+  it("[§4 在途门 CAS] close 侧抢先收尾（legacy close CAS 已跑、有意不写 endedAt）+ 迟到轮终 → 拒绝：轮次不推进、迟到正文不写", async () => {
     const { deps, store } = makeDeps();
     const record = makeMinimalRecord({ id: "rec-late-settle", round: 0 });
     // close 侧赢：trySettleLegacyClosed 语义（running → idle + closedReason，不写
@@ -544,7 +544,7 @@ describe("doFinalizeRoundToIdle — chatMode 轮次完成进 idle (M2-A)", () =>
     expect(record.status).toBe("idle");
     expect(record.round).toBe(0); // 轮次不推进
     expect(record.result).toBeUndefined(); // 迟到正文不落
-    expect(record.stopReason).toBe("user-close"); // 收口停因不被覆写
+    expect(record.stopReason).toBe("user-close"); // 收尾停因不被覆写
     expect(loggerMock.warn).toHaveBeenCalledWith(
       "[subagents] markRoundIdle: CAS rejected (record not running)",
       expect.objectContaining({ detail: expect.objectContaining({ id: "rec-late-settle", status: "idle" }) }),
@@ -616,7 +616,7 @@ describe("doFinalizeRoundToIdle — chatMode 轮次完成进 idle (M2-A)", () =>
 
   it("轮终注销经 store 簿记⑧发射（setPendingUnregister 注入闭包，status=running）", async () => {
     const { deps, store } = makeDeps();
-    // [B5/U5 收口] 注销由 store.markRoundIdle 簿记⑧统一发射（SubagentService 构造点
+    // [B5/U5 收尾] 注销由 store.markRoundIdle 簿记⑧统一发射（SubagentService 构造点
     // 注入 emitPendingUnregister；调用方薄壳不再双轨重复发）。
     const unregisterSpy = vi.fn();
     store.setPendingUnregister(unregisterSpy);
@@ -635,12 +635,12 @@ describe("doFinalizeRoundToIdle — chatMode 轮次完成进 idle (M2-A)", () =>
     expect(record.agentResult).toBeUndefined();
   });
 
-  it("[B2] 写轮终派生 manifest 投影（session-reader 直读主路径数据源——idle 非终态，legacy running + executionStatus idle 双写）", async () => {
+  it("[B2] 写轮终派生 manifest 派生视图（session-reader 直读主路径数据源——idle 非终态，legacy running + executionStatus idle 双写）", async () => {
     const { deps, store } = makeDeps();
     const record = makeMinimalRecord({ id: "rec-derived-manifest" });
     store.register(record);
     await doFinalizeRoundToIdle(deps, record, { kind: "success", content: "done" });
-    // [B2/簿记⑫] 轮终派生投影落盘（derivedManifestRecord——与 markSettled 字节同源）：
+    // [B2/簿记⑫] 轮终派生视图落盘（derivedManifestRecord——与 markSettled 字节同源）：
     // 轮终 record 留内存 idle，缺本写则 records/ 目录缺席、session-reader manifest
     // 直读主路径永不命中。派生单点：轮终 idle 无 closedReason → legacy "running"
     //（活跃成员）+ executionStatus "idle"（权威词），非终态 closed 形态。

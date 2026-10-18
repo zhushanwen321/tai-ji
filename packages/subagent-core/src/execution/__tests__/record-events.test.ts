@@ -168,7 +168,7 @@ describe("journal 读写原语（seq 单调分配 / scan 宽容解析）", () =>
     expect(events.map((e) => e.type)).toEqual(["record-created", "record-settled"]);
   });
 
-  it("scan 对不存在文件返回空流（record 未落账 / 已清理）", async () => {
+  it("scan 对不存在文件返回空流（record 未写入 journal 记录 / 已清理）", async () => {
     expect(await createRecordEventStream(recordsDir).scan("sa-none")).toEqual([]);
   });
 
@@ -275,7 +275,7 @@ describe("fold 纯函数族（全量 / 增量 / 幂等）", () => {
       INITIAL_RECORD_EVENT_FOLD_STATE,
       (event, why) => skipped.push({ seq: event.seq, why }),
     );
-    // 重放段全部被 seq 守卫拦下，状态与单遍 fold 等价
+    // 重放段全部被 seq 检查拦下，状态与单遍 fold 等价
     expect(state).toEqual(foldRecordEvents(events));
     expect(skipped).toHaveLength(events.length);
     expect(skipped.every((s) => s.why === "seq-regression")).toBe(true);

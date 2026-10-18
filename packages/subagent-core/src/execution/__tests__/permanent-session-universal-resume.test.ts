@@ -267,16 +267,16 @@ describe("[U4 / §3.2.3] 万物可续矩阵：closedReason × message + 唯一�
   });
 
   it("fork-from 对跨树源放行（锚可解析即分叉——fork-from 不做归属校验）", async () => {
-    // 锚可解析：分叉新 id。[U4 守卫 4 删除] 主动告别（user-close）源放行。
+    // 锚可解析：分叉新 id。[U4 检查 4 删除] 主动告别（user-close）源放行。
     const file = writeSessionJsonl(sessionsDir, { id: "sa-u4-fk", rootSessionId: "old-root" });
     seedTerminalRecordForSessionFile(file, recordsDir, { stopReason: "user-close" });
     const r = await forkFromHandler(service, { sourceSubagentId: "sa-u4-fk", prompt: "branch off" });
     expect(r.response.newSubagentId).not.toBe("sa-u4-fk");
     expect(r.response.sourceSessionFile).toBe(file);
     await vi.waitFor(() => expect(fake.runs.length).toBe(1));
-    // 锚不可解析 → 引导 message reopen 的守卫 5 文案，已在
+    // 锚不可解析 → 引导 message reopen 的检查 5 文案，已在
     // subagent-actions-core.test.ts 单元面锁定（集成面无独立构造价值：jsonl 删除后
-    // record 随磁盘源消失，守卫 2 先于守卫 5 命中）。
+    // record 随磁盘源消失，检查 2 先于检查 5 命中）。
   });
 });
 

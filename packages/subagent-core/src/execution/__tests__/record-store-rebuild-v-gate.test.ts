@@ -5,14 +5,14 @@
 // 两面：
 //   1. 版本门零幻影（登记 §3.3）：v1 全量快照兼容层已随兼容层删除，entry 通道
 //      只剩当前版本——非当前版本（v1 快照 / future-v / missing-v）与未知 kind
-//      的行在 collectV2EntryPairs 结构性跳过（不猜测、不产半构造投影）；
+//      的行在 collectV2EntryPairs 结构性跳过（不猜测、不产半构造派生视图）；
 //   2. v2 条目对 → record 派生视图：身份域取注册条目（缺注册条目不成实体 → null），
 //      终局域取终态条目；无终态条目 = running（引擎域回落 journal 的 bound 事件，
 //      终态条目在场时优先）；条目契约不承载的字段（详情域 / patchFile / worktree
 //      / round / batchFinalized）一律缺席。
 //
 // [身份换源第二步] 原第三面（resolveRecordIdentity 三级优先级参考实现）随 binding
-// 兜底路径退场删除；fold 身份腿的守卫锚定在 record-identity-fold.test.ts。
+// 兜底路径退场删除；fold 身份路径的检查锚定在 record-identity-fold.test.ts。
 //
 // fixture 自持：本文件局部构造 v2 条目 JSONL 行与最小 record（record-entry-collect
 // .test.ts 的 makeRecord 同款先例；helpers/ 下资产归各邻近测试的领地）。
@@ -222,7 +222,7 @@ describe("v2PairToRecord：v2 条目对 → record 派生视图", () => {
       result: undefined,
       error: undefined,
     });
-    // 终局域缺席（键不落）而非 undefined 占位——与写侧投影同口径
+    // 终局域缺席（键不落）而非 undefined 占位——与写侧派生视图同口径
     expect(rec?.stopReason).toBeUndefined();
     expect(rec?.outcome).toBeUndefined();
   });
@@ -273,4 +273,4 @@ describe("v2PairToRecord：v2 条目对 → record 派生视图", () => {
 });
 
 // ── [身份换源第二步] 原第三面（resolveRecordIdentity 三级优先级）已随 binding
-// 兜底路径退场删除——fold 身份腿守卫锚定在 record-identity-fold.test.ts。
+// 兜底路径退场删除——fold 身份路径检查锚定在 record-identity-fold.test.ts。

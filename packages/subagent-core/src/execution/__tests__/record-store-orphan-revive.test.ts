@@ -160,7 +160,7 @@ describe("[PS-10] revive() 复位 orphanJudged（appendEntry 失败后重开可�
     expect(corrected?.data.kind).toBe("settled");
     expect(corrected?.data.status).toBe("idle");
     expect(corrected?.data.stopReason).toBe("interrupted-by-restart");
-    // 纠偏不建事件文件（entry-only 入口的磁盘面零副作用）
+    // 纠偏不建事件文件（entry-only 入口的磁盘侧零副作用）
     expect(fs.existsSync(recordEventsPath(recordsDir, "sa-revive-1"))).toBe(false);
   });
 
@@ -254,7 +254,7 @@ describe("[U4a / D3b (a″)] 孤儿恢复活实例跳过：现查探针（pid �
     expect(appended[0]?.data.kind).toBe("settled");
     expect(appended[0]?.data.status).toBe("idle");
     expect(appended[0]?.data.stopReason).toBe("interrupted-by-restart");
-    // journal 唯一事实源：收编帧落账（幂等语义归第三段收编入口用例）
+    // journal 唯一事实源：收编帧写入 journal 记录（幂等语义归第三段收编入口用例）
     expect(
       v2ReadEventLines(recordsDir, "sa-probe-2").filter((e) => e.type === "record-settled"),
     ).toHaveLength(1);
@@ -438,7 +438,7 @@ describe("收编入口（W1 D4：journal 重放 + 收编幂等）", () => {
       fs.readFileSync(path.join(recordsDir, "sa-adopt-1.json"), "utf8") as string,
     ) as { id: string; agentName: string; executionStatus: string; stopReason?: string };
     expect(manifest).toMatchObject({ id: "sa-adopt-1", agentName: "worker", executionStatus: "idle" });
-    // [W4 收敛] 收编停因上投影——sweep 判据第三级（findAdoptedStopReasonSync）的读取源。
+    // [W4 收敛] 收编停因上派生视图——sweep 判据第三级（findAdoptedStopReasonSync）的读取源。
     expect(manifest.stopReason).toBe("interrupted-by-restart");
     // 判据第三级本体：收编 manifest → 停因；非收编形态（文件缺失）→ undefined。
     expect(storeA.findAdoptedStopReasonSync("sa-adopt-1")).toBe("interrupted-by-restart");
@@ -490,7 +490,7 @@ describe("收编入口（W1 D4：journal 重放 + 收编幂等）", () => {
   it("验收⑤v2 新路径：重启后 manifest 经收编物化恢复可见（rematerialize 桥接为 v1 兼容专属零依赖）", async () => {
     seedCrashedRecord("sa-adopt-2");
 
-    // 重启前 manifest 面 = bound 物化的 running 投影（子文件在盘）。
+    // 重启前 manifest 面 = bound 物化的 running 派生视图（子文件在盘）。
     const beforeManifest = JSON.parse(
       fs.readFileSync(path.join(recordsDir, "sa-adopt-2.json"), "utf8") as string,
     ) as { status: string };
@@ -535,7 +535,7 @@ describe("收编入口（W1 D4：journal 重放 + 收编幂等）", () => {
 
   it("空 journal / journal 未接线 / 坏链：skippedMissing / skippedNoIdentity 分类", async () => {
     const store = new RecordStore(sessionsDir, undefined, undefined, recordsDir);
-    // 空 journal（从未落账）。
+    // 空 journal（从未写入 journal 记录）。
     expect(store.adoptInterruptedRecord("sa-never-existed")).toBe("skippedMissing");
 
     // 坏链：事件文件只有 bound 帧（created 帧损坏/缺失的残文件形态）。

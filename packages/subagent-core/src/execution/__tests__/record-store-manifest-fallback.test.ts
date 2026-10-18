@@ -1,14 +1,14 @@
 // src/execution/__tests__/record-store-manifest-fallback.test.ts
 //
 // findByIdManifestFallback（[D3 缺陷五] manifest 兜底单 id 读取）与 markModelOverride
-// 身份守卫臂（非 in-memory 实例拒绝）的单元级断言。
+// 身份检查臂（非 in-memory 实例拒绝）的单元级断言。
 //
 // findByIdManifestFallback 消费场景 = model-switch-wiring 的引擎路由解析（getMutable /
 // findLightById 双 miss 后第三源）：zcode 成员无子 session 文件不在扫描集、settle 后出
 // 内存，bound/派生物化的 manifest 是其磁盘唯一载体。本测试钉住四臂行为：
 //   1. manifestDir 未接线（纯内存测试形态）恒 undefined；
 //   2. 文件缺失 → undefined（保守侧）；
-//   3. 合法 manifest → 返回投影，身份域字段（origin/parentRunId/engine/engineHandle）
+//   3. 合法 manifest → 返回派生视图，身份域字段（origin/parentRunId/engine/engineHandle）
 //      逐字段可信（消费方只依赖身份域——状态域禁用本方法，见方法头）；
 //   4. 损坏 JSON / status 越界 → undefined（与 mergeManifestRecords 坏链保守侧同款）。
 //
@@ -69,8 +69,8 @@ describe("findByIdManifestFallback（D3 缺陷五 manifest 兜底单 id 读取�
     expect(store.findByIdManifestFallback("ghost-id")).toBeUndefined();
   });
 
-  it("合法 manifest → 返回投影，身份域字段（origin/parentRunId/engine/engineHandle）逐字段可信", () => {
-    // 先经真实写面物化 manifest（register + markRoundIdle 派生投影），再以重启形态
+  it("合法 manifest → 返回派生视图，身份域字段（origin/parentRunId/engine/engineHandle）逐字段可信", () => {
+    // 先经真实写面物化 manifest（register + markRoundIdle 派生视图），再以重启形态
     // 的新 store 实例（内存空）走兜底读取——对齐 model-switch-wiring 的重启恢复消费。
     const dbPath = path.join(tmpDir, "session-db", "db.sqlite");
     fs.mkdirSync(path.dirname(dbPath), { recursive: true });
@@ -105,7 +105,7 @@ describe("findByIdManifestFallback（D3 缺陷五 manifest 兜底单 id 读取�
     expect(store.findByIdManifestFallback("broken")).toBeUndefined();
   });
 
-  it("status 越界（数据损坏形态）→ undefined，不降级 failed 投影", () => {
+  it("status 越界（数据损坏形态）→ undefined，不降级 failed 派生视图", () => {
     fs.writeFileSync(
       path.join(manifestDir, "bad-status.json"),
       JSON.stringify({
@@ -122,7 +122,7 @@ describe("findByIdManifestFallback（D3 缺陷五 manifest 兜底单 id 读取�
   });
 });
 
-describe("markModelOverride 身份守卫臂（非 in-memory 实例拒绝）", () => {
+describe("markModelOverride 身份检查臂（非 in-memory 实例拒绝）", () => {
   let tmpDir: string;
   let sessionsDir: string;
   let manifestDir: string;
@@ -167,7 +167,7 @@ describe("markModelOverride 身份守卫臂（非 in-memory 实例拒绝）", ()
     expect(store.markModelOverride(stranger, override)).toBe(false);
 
     expect(stranger.modelOverride).toBeUndefined();
-    // 注册实例与磁盘投影均保持无覆盖记账（写面零触碰）。
+    // 注册实例与磁盘派生视图均保持无覆盖记账（写面零触碰）。
     expect(registered.modelOverride).toBeUndefined();
     expect(fs.existsSync(path.join(manifestDir, "real-ovr.json"))).toBe(false);
   });

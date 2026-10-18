@@ -3,14 +3,14 @@
 // [u-foundation / 永久会话模型] 新领域词汇的最小单测（设计
 // subagent-permanent-session-model.md §3.2.1-§3.2.7；类型与骨架先行，填肉归
 // U2-U7）。锁定面：
-//   ① TranscriptRef 判别联合收窄守卫（isPi/isZcodeTranscriptRef 运行时判别 +
+//   ① TranscriptRef 判别联合收窄检查（isPi/isZcodeTranscriptRef 运行时判别 +
 //      类型穷尽——else 分支不可达构造性验证）；
 //   ② StopReason 枚举完整性（旧 7 值 + 4 新展示值 = 11 无重复；outcome 词
 //      completed/failed 不得混入——词表混淆回归锚）；
 //   ③ RecordBinding 新字段（epoch/transcriptRef/lastAbandonedRound）持久化
-//      往返保真 + 损坏载荷守卫归一 + 存量 binding 零迁移；
+//      往返保真 + 损坏载荷检查归一 + 存量 binding 零迁移；
 //   ④ ExecutionRecord 新字段可选性（构造零破坏：缺省 undefined + 可选赋值）；
-//   ⑤ store 新收口原语骨架 throw not implemented（生产路径禁调的编程错误信号）。
+//   ⑤ store 新收尾原语骨架 throw not implemented（生产路径禁调的编程错误信号）。
 //
 // fixture 一律 mkdtempSync 自建自删（tmpdir），不触碰真实数据目录。
 
@@ -81,7 +81,7 @@ function baseRecord() {
 
 // ── ① TranscriptRef 判别联合 ─────────────────────────────────────────────────
 
-describe("TranscriptRef 判别联合收窄守卫", () => {
+describe("TranscriptRef 判别联合收窄检查", () => {
   const piRef: TranscriptRef = { engine: "pi", sessionFile: "2026-09-13-a.jsonl" };
   const zcodeRef: TranscriptRef = {
     engine: "zcode",
@@ -89,7 +89,7 @@ describe("TranscriptRef 判别联合收窄守卫", () => {
     dbPath: "/data/engines/zcode/session-db/db.sqlite",
   };
 
-  it("两锚经守卫收窄后各只暴露引擎专有字段（类型穷尽 + 运行时判别）", () => {
+  it("两锚经检查收窄后各只暴露引擎专有字段（类型穷尽 + 运行时判别）", () => {
     for (const ref of [piRef, zcodeRef]) {
       if (isPiTranscriptRef(ref)) {
         // 收窄后 sessionFile 可达（TS 层验证）；zcode 专有字段在窄类型上不存在。
@@ -101,13 +101,13 @@ describe("TranscriptRef 判别联合收窄守卫", () => {
         expect(typeof ref.sessionId).toBe("string");
         expect(typeof ref.dbPath).toBe("string");
       } else {
-        // 联合穷尽：两守卫覆盖全部成员，此分支不可达（收窄守卫完备性的构造性验证）。
+        // 联合穷尽：两检查覆盖全部成员，此分支不可达（收窄检查完备性的构造性验证）。
         throw new Error("unreachable: TranscriptRef union not exhausted by guards");
       }
     }
   });
 
-  it("守卫交叉判别互斥（pi 锚不为 zcode，反之亦然）", () => {
+  it("检查交叉判别互斥（pi 锚不为 zcode，反之亦然）", () => {
     expect(isPiTranscriptRef(piRef)).toBe(true);
     expect(isZcodeTranscriptRef(piRef)).toBe(false);
     expect(isPiTranscriptRef(zcodeRef)).toBe(false);
@@ -206,7 +206,7 @@ describe("RecordBinding 新字段（epoch / transcriptRef / lastAbandonedRound�
     expect(readRecordBinding(sessionFile)?.lastAbandonedRound).toBeNull();
   });
 
-  it("损坏载荷守卫归一：非 number epoch / 未知 engine / 缺字段标记 → undefined", () => {
+  it("损坏载荷检查归一：非 number epoch / 未知 engine / 缺字段标记 → undefined", () => {
     const sessionFile = path.join(dir, "sess.jsonl");
     fs.writeFileSync(sessionFile, "{}\n", "utf-8");
     fs.writeFileSync(
@@ -265,12 +265,12 @@ describe("ExecutionRecord 新字段可选性（构造零破坏）", () => {
   });
 });
 
-// ── ⑤ store 新收口原语（U2 已实装，冒烟）────────────────────────────────────
+// ── ⑤ store 新收尾原语（U2 已实装，冒烟）────────────────────────────────────
 // 详细行为矩阵（CAS 语义 / 原语副作用面 / epoch 递增）见
 // permanent-session-state-machine.test.ts；此处仅锁定「骨架已填肉、可调用」。
 
-describe("store 新收口原语（U2 实装冒烟）", () => {
-  it("markSettled：running record 收口为 idle + stopReason（骨架 throw 已移除）", () => {
+describe("store 新收尾原语（U2 实装冒烟）", () => {
+  it("markSettled：running record 收尾为 idle + stopReason（骨架 throw 已移除）", () => {
     const store = new RecordStore(path.join(dir, "sessions"));
     const rec = baseRecord();
     store.register(rec);

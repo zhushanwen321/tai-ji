@@ -1,10 +1,10 @@
 // src/execution/__tests__/lifecycle-manager-idle-timer-identity.test.ts
 //
-// [LC-5/T6①] armIdleTimer 超时回调身份比对（按值守卫，对齐 session-runner
+// [LC-5/T6①] armIdleTimer 超时回调身份比对（按值检查，对齐 session-runner
 // removeChildRegistration 先例）。
 //
 // 覆盖（设计 §4.3 LC-5 + §11-2）：
-//   1. 「旧 timer 已到期、回调迟到执行」与「同 recordId re-arm」精确交错 → 守卫不误删
+//   1. 「旧 timer 已到期、回调迟到执行」与「同 recordId re-arm」精确交错 → 检查不误删
 //      新条目（旧代码此处误删 = 新 timer 脱管、disarm 失效 → turn 中途误杀）。
 //   2. 无交错时旧 timer 到点删除自己的条目 + 后续 re-arm 正常（既有语义不回归）。
 //   3. fake timers 下「re-arm 发生在旧 timer 到期回调处置中」的同轮交错端到端：
@@ -55,7 +55,7 @@ afterEach(() => {
 });
 
 describe("[LC-5] armIdleTimer 超时回调身份比对", () => {
-  it("旧 timer 到点回调迟到执行（re-arm 已覆盖条目）→ 守卫不误删新条目，disarm 仍有效", () => {
+  it("旧 timer 到点回调迟到执行（re-arm 已覆盖条目）→ 检查不误删新条目，disarm 仍有效", () => {
     const onTimeoutA = vi.fn();
     const onTimeoutB = vi.fn();
 
@@ -75,7 +75,7 @@ describe("[LC-5] armIdleTimer 超时回调身份比对", () => {
     expect(onTimeoutB).not.toHaveBeenCalled();
   });
 
-  it("无交错：旧 timer 到点删除自己的条目（守卫不改变既有语义），后续 re-arm 正常", () => {
+  it("无交错：旧 timer 到点删除自己的条目（检查不改变既有语义），后续 re-arm 正常", () => {
     const onTimeoutA = vi.fn();
     const onTimeoutB = vi.fn();
 

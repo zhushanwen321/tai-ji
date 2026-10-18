@@ -6,7 +6,7 @@
 //
 // 与 pi 壳注入器（subagent-list-injector 经工厂 assemble 槽委托本函数，U11 单源）的等值口径：
 // - 清单可见性 = IF1 严格层（profile.meta !== null）——缺 name/description 的资产
-//   不进清单（注入投影「路由可见性」双轨语义，D3 定稿；宽容解析只服务执行消费面）；
+//   不进清单（注入派生视图「路由可见性」双轨语义，D3 定稿；宽容解析只服务执行消费方）；
 // - warn 口径内聚：仅「有 frontmatter 但严格校验未通过」才 warn——README 等无
 //   frontmatter 的 .md 静默跳过（每 turn 扫描不刷屏，pi m5 评审先例）；
 // - 扫描 / 遮蔽语义归 shared/resource-discovery（ADR-031），本文件零扫描逻辑。
@@ -64,7 +64,7 @@ export async function discoverAgents(
       continue;
     }
 
-    // 宽容解析（执行消费面单点）；清单可见性按严格层 meta 判定
+    // 宽容解析（执行消费方单点）；清单可见性按严格层 meta 判定
     const profile = parseAgentProfile(content, resource.path);
     if (profile.meta !== null) {
       agentMap.set(profile.name, {

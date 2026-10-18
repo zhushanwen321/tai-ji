@@ -3,7 +3,7 @@
 // [D4-③] coldLookupForAction 单元测试（依赖注入直测）。
 //
 // 背景：冷查链自 SubagentService 搬移后按 ColdLookupDeps 依赖注入设计，此前仅有经
-// subagent-service 集成路径的 running 重建覆盖——closed 可重连候选的「恢复失败守卫 /
+// subagent-service 集成路径的 running 重建覆盖——closed 可重连候选的「恢复失败检查 /
 // 部分恢复回边」（assertReconnectAllowed / resurrectColdRecord 的 wasClosed 分支）
 // 零直测。[H1 U6] 文件随 cold-resurrect.ts → cold-lookup.ts 改名（chatMode 无条件
 // 置位语义迁 Continuation D4 revive 格 + D5 gate，重建只水合持久化 chatMode）。
@@ -206,8 +206,8 @@ describe("[D4-③] coldLookupForAction 冷查/复活链", () => {
     expect(record.round).toBe(1);
   });
 
-  it("负向对照：重生被守卫拒绝（worktree 绑定丢失）→ 终态 sidecar 不被误删", () => {
-    // 守卫先于任何状态突变与副作用（[v8.5 D] / [review MF-9]）：拒绝路径不得触碰磁盘
+  it("负向对照：重生被检查拒绝（worktree 绑定丢失）→ 终态 sidecar 不被误删", () => {
+    // 检查先于任何状态突变与副作用（[v8.5 D] / [review MF-9]）：拒绝路径不得触碰磁盘
     const sessionFile = writeSessionFixture({
       state: JSON.stringify({ status: "finalized", reason: "parent-shutdown" }),
       finalized: JSON.stringify({ reason: "parent-shutdown" }),
@@ -265,7 +265,7 @@ describe("[D4-③] coldLookupForAction 冷查/复活链", () => {
     expect(vi.mocked(deps.register)).toHaveBeenCalledTimes(1);
   });
 
-  // ── 恢复失败守卫（ResurrectDeniedError + 内存无残留）──
+  // ── 恢复失败检查（ResurrectDeniedError + 内存无残留）──
 
   it("worktree 绑定丢失（跨重启 WorktreeHandle 不可序列化）→ ResurrectDeniedError 拒绝，register 不残留", () => {
     const sessionFile = writeSessionFixture();
@@ -453,16 +453,16 @@ describe("[D4-③] coldLookupForAction 冷查/复活链", () => {
   it("[B4/D3c] acquire-first 失败后磁盘保持旧形态（终态位未删，重生可重试）", () => {
     // acquire 成功但终态位删除失败不可构造（rmSync force 幂等）——验证 acquire-first
     // 顺序的可观察等价面：目录存在 + 终态位在，marker 写成功路径下才执行删除。
-    // 本用例钉失败方向的可重试性：closed 候选 + 守卫通过 + 目录消失 → 响亮中止后
+    // 本用例钉失败方向的可重试性：closed 候选 + 检查通过 + 目录消失 → 响亮中止后
     // .state 残留形态不变（无「半翻」状态）。
     const sessionFile = path.join(dir, "gone", "20260901T000000-000_sa-cold-1.jsonl");
     const deps = makeDeps({ disk: [makeFound({ sessionFile })] });
     expect(() => coldLookupForAction(deps, "sa-cold-1", true)).toThrow();
-    // 磁盘面零触碰（目录本不存在——构造性「保持旧形态」）
+    // 磁盘侧零触碰（目录本不存在——构造性「保持旧形态」）
     expect(fs.existsSync(sessionFile)).toBe(false);
   });
 
-  it("[B4/D3c] running 候选接管（wasClosed=false）→ 仍 acquire marker（接管即声明，B/C 双写窗闭合）", () => {
+  it("[B4/D3c] running 候选接管（wasClosed=false）→ 仍 acquire marker（接管即声明，B/C 双写窗封住）", () => {
     const sessionFile = writeSessionFixture();
     const deps = makeDeps({ disk: [makeFound({ sessionFile, status: "running" })] });
 
@@ -470,12 +470,12 @@ describe("[D4-③] coldLookupForAction 冷查/复活链", () => {
 
     expect(record.status).toBe("running");
     // 「接管即声明」：running 接管形态无终态位可删，但 acquire 照做——A 崩溃（marker
-    // pid 死）→ B 接管刷新 pid=B → C 再触达被拦（S8⑤ 验收锚点的磁盘面前置）。
+    // pid 死）→ B 接管刷新 pid=B → C 再触达被拦（S8⑤ 验收锚点的磁盘侧前置）。
     expect(readAliveMarker(sessionFile)).toMatchObject({ pid: process.pid, id: "sa-cold-1" });
     expect(vi.mocked(deps.register)).toHaveBeenCalledTimes(1);
   });
 
-  it("[A3/S3] 冷查重建透传来源身份：workflow 批成员候选（origin+parentRunId）复活后保留——否则绕过 messageHandler one-shot 守卫；tool 候选缺省 → 仍 undefined", () => {
+  it("[A3/S3] 冷查重建透传来源身份：workflow 批成员候选（origin+parentRunId）复活后保留——否则绕过 messageHandler one-shot 检查；tool 候选缺省 → 仍 undefined", () => {
     const sessionFile = writeSessionFixture();
     const wfDeps = makeDeps({
       disk: [makeFound({ sessionFile, origin: "workflow", parentRunId: "wf-run-1" })],
@@ -483,7 +483,7 @@ describe("[D4-③] coldLookupForAction 冷查/复活链", () => {
 
     const wfRecord = coldLookupForAction(wfDeps, "sa-cold-1", true)!;
 
-    // workflow 批成员收口归档出内存后，message 冷复活必须带着 origin 进守卫
+    // workflow 批成员收尾归档出内存后，message 冷复活必须带着 origin 进检查
     //（subagent-actions-core messageHandler 按 record.origin === "workflow" 拒绝）
     expect(wfRecord.origin).toBe("workflow");
     expect(wfRecord.parentRunId).toBe("wf-run-1");
@@ -625,8 +625,8 @@ describe("[U6] transcriptAnchorOf / isAnchorResolvable 引擎分派", () => {
     const record = coldLookupForAction(deps, "sa-cold-1", true)!;
     // engine 域（identity）：消费方 resolveRoundEnginePort 分派依据，缺省即错投 pi
     expect(record.engine).toBe("zcode");
-    // engineHandle 域（run 后回填的引擎定位符）：record → SubagentRecord 投影 / 锚派生
-    // 单源（transcriptAnchorOf 消费面），重建后须在场
+    // engineHandle 域（run 后回填的引擎定位符）：record → SubagentRecord 派生视图 / 锚派生
+    // 单源（transcriptAnchorOf 消费方），重建后须在场
     expect(record.engineHandle).toBe(engineHandle);
     // pi 候选缺省形态不破坏：engine/engineHandle 均 undefined 透传为 undefined
     const piDeps: ColdLookupDeps = {

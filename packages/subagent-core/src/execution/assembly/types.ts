@@ -69,13 +69,13 @@ import type { ModelOverride, SubagentModelSource } from "../domain/record-model.
 // [S4 簇 3 收编] 事件面契约类型单源化（type-only）：AgentEvent / AgentUsage /
 // AgentUsageTotal / ToolCallResult / ToolCall / InternalToolCall / Turn 的本地定义
 // 已删除，自 @zhushanwen/subagent-engine-sdk re-export（SDK protocol/contract-types.ts
-// 是类型闭包 SSOT，core 反向 re-export 保上层消费面——import 方路径零改动；
+// 是类型闭包 SSOT，core 反向 re-export 保上层消费方——import 方路径零改动；
 // shared/agent-event.ts 转发层链条保持）。结构等价由 protocol-closure.test.ts
-// 断言族守卫。
+// 断言族检查。
 //
 // AgentEvent 语义锚定（SDK 侧注释指向本处的对照权威源，勿删）：
 //   - Pi session.subscribe 上报的事件。Runtime 把它喂给 updateFromEvent。
-//   - 设计：AgentEvent 携带 updateFromEvent 收口进 record 所需的**全部数据**——
+//   - 设计：AgentEvent 携带 updateFromEvent 收尾进 record 所需的**全部数据**——
 //     tool_end 带 result（供 turn.toolCalls 存完整 ToolCall），无需翻译层旁路累积。
 //
 //   ACP 词汇对照（D11 注记级校准，零行为变更；新引擎实现者按本表对齐语义）：
@@ -101,7 +101,7 @@ export type {
  * eventLog 条目（getEventLog 派生产出的元素）。所有字段 readonly。
  *
  * text_output / thinking 类型已移除——它们是 100 字切片的碎片副产物，
- * 现在完整内容收口在 record.turns[] 里，eventLog 只承载离散语义事件
+ * 现在完整内容收尾在 record.turns[] 里，eventLog 只承载离散语义事件
  * （tool 调用 / turn 边界 / error）。
  */
 export interface AgentEventLogEntry {
@@ -146,7 +146,7 @@ export interface DisplayItem {
 
 // [S4 簇 3 收编] WorktreeHandle 本地定义已删除，自 SDK re-export（原为结构等价
 // 副本，单源化后 SDK contract-types 是唯一定义点；「仅 worktree:true 时持有、
-// Object.freeze 守卫不可变」的语义注释见消费方 worktree-manager）。
+// Object.freeze 检查不可变」的语义注释见消费方 worktree-manager）。
 export type { WorktreeHandle } from "@zhushanwen/subagent-engine-sdk";
 
 
@@ -210,7 +210,7 @@ export class DirtyWorktreeError extends Error {
  * - `model` / `thinkingLevel`：本次切换的目标意图（已过 U2 宿主编排的公共校验步骤①
  *   ——canonical ref + 目录 + 凭据 + 档位预检；聚合层只做转发与分派，不重复校验）。
  * - `memberRunIds`：该 run 已受理成员的 runId 全量清单（不做宿主侧存活预判——进程
- *   存活事实的权威在引擎侧，宿主 record 状态只是投影，§7.4）。
+ *   存活事实的权威在引擎侧，宿主 record 状态只是派生视图，§7.4）。
  */
 export interface RunModelSwitchAggregateInput {
   /** 所属 workflow run 的 id（聚合应答 summary 的归属键）。 */
@@ -250,7 +250,7 @@ export interface RunSwitchMemberState {
  * `reason` **开放值域** = SDK setModel 错误码三型 ∪ 词表外透传码（engine_crashed 等
  * engine_* 面原样上报——实装 failureReasonOf 刻意透传，消费方对未知码按原文兜底
  * 显示），`(string & {})` 放行透传码同时保留三型自动补全。
- * **三处类型同步义务**：本类型 reason ∪ wire 投影 SubagentSetModelMemberFailure.reason
+ * **三处类型同步义务**：本类型 reason ∪ wire 派生视图 SubagentSetModelMemberFailure.reason
  * （shared protocol.ts，已知字面词表 = SUBAGENT_SET_MODEL_FAILURE_REASON_CODES）∪ 实装
  * failureReasonOf 返回类型（service/run-model-switch-aggregate.ts），值域口径改动三处
  * 同批；对账锚 = packages/runtime/src/infra/subagent-model-gateway.test.ts
@@ -266,10 +266,10 @@ export interface RunSwitchMemberFailure {
 /**
  * run 级全切聚合应答——三组件固定结构（§7.1 定形）：恒保留三组件，退化仅指
  * 无生效值可报（全员非 switched 时成员条目无档位字段），失败名单无失败成员时为
- * 空名单、不省略组件。前端按成员分项呈现，不坍缩为标量消息。
+ * 空名单、不省略组件。前端按成员分项呈现，不合并退化为标量消息。
  *
  * 形状 SSOT = 本类型；前端 wire 应答（packages/core transport domains + shared
- * protocol.ts 的 SubagentSetModelAggregateReply）为结构等价投影（依赖方向不允许
+ * protocol.ts 的 SubagentSetModelAggregateReply）为结构等价派生视图（依赖方向不允许
  * 物理单源——shared 不依赖 subagent-core），两处漂移由 U1 接线测试对账。
  */
 export interface RunSwitchAggregateResult {
@@ -282,7 +282,7 @@ export interface RunSwitchAggregateResult {
 }
 
 // ============================================================
-// Runtime → TUI 的投影契约
+// Runtime → TUI 的派生视图契约
 // ============================================================
 
 /**
@@ -385,7 +385,7 @@ export interface ExecuteOptions {
   idleTimeoutMs?: number;
   /**
    * 实际执行引擎 id（P4 路由留痕）：pi 引擎由 PiEngine.run 在还原 opts 时写入；
-   * 缺省（历史调用方不设）= pi 投影。createRecordForMode 读入 record identity。
+   * 缺省（历史调用方不设）= pi 派生视图。createRecordForMode 读入 record identity。
    */
   engine?: string;
   // 注：fork 深度不从外部传入（曾暴露 parentForkDepth，改用 ALS 后 execute 内部从调用链派生，
@@ -427,7 +427,7 @@ export interface SubagentListItem {
   /** session jsonl 文件名（窗口期内可能 undefined）。 */
   sessionFile?: string;
   /** 直接父 subagent record ID（顶层 record 为 undefined）。[v4 A-6] 从
-   *  record.parentRecordId 派生，配合 A-5 直接父守卫（message/close 仅作用于直接子）。 */
+   *  record.parentRecordId 派生，配合 A-5 直接父检查（message/close 仅作用于直接子）。 */
   parent?: string;
   /**
    * 终态三态对外语义（U3 C-outcome 一等披露，projectOutcome 唯一出口）：
@@ -542,14 +542,14 @@ export interface SubagentRecord {
   status: ExecutionStatus;
   /**
    * 旧 closed 终态的 L2 关闭原因（桥接期兼容位，与 {@link ExecutionRecord.closedReason}
-   * 同源投影/entry 重建；closed→idle 迁移映射后配合 status="idle" 判读终态遗留）。
-   * SP-1 新增；U2 起新权威展示位 = stopReason（随 entry/重建投影 additive）。
+   * 同源派生视图/entry 重建；closed→idle 迁移映射后配合 status="idle" 判读终态遗留）。
+   * SP-1 新增；U2 起新权威展示位 = stopReason（随 entry/重建派生视图 additive）。
    */
   closedReason?: ClosedReason;
   /**
-   * 展示维度（永久会话模型 §3.2.1，U2 additive 投影）：上一轮为什么停。内存源经
-   * recordToSubagent 投影、entry 重建经 readEntryTerminalFields 映射（存量 entry
-   * closed→idle 时同步从 closedReason 迁移）；undefined = 从未收口 / 旧数据。
+   * 展示维度（永久会话模型 §3.2.1，U2 additive 派生视图）：上一轮为什么停。内存源经
+   * recordToSubagent 派生视图、entry 重建经 readEntryTerminalFields 映射（存量 entry
+   * closed→idle 时同步从 closedReason 迁移）；undefined = 从未收尾 / 旧数据。
    */
   stopReason?: StopReason;
   /** 终态三态对外语义（U3 C-outcome）。磁盘重建源一等直读；无字段的存量兜底走 projectOutcome。 */
@@ -563,8 +563,8 @@ export interface SubagentRecord {
   /** subagent 递归深度。顶层 =0，每层嵌套 +1。 */
   depth: number;
   /**
-   * 来源身份（H2 W1，D1，与 ExecutionRecord.origin 同源投影/entry 重建）。
-   * 缺省（undefined / 存量磁盘重建源）语义 = "tool"；消费面按 `=== "workflow"`
+   * 来源身份（H2 W1，D1，与 ExecutionRecord.origin 同源派生视图/entry 重建）。
+   * 缺省（undefined / 存量磁盘重建源）语义 = "tool"；消费方按 `=== "workflow"`
    * 负向判定，list 查询缺省过滤（includeWorkflow 缺省 false）。
    */
   origin?: RecordOrigin;
@@ -575,7 +575,7 @@ export interface SubagentRecord {
   parentRunId?: string;
   /**
    * [W0 / D1] origin="workflow" 时在 run 内的步骤索引（与 ExecutionRecord.stepIndex
-   * 同源投影 / entry 与 binding 重建）。additive：undefined（存量磁盘重建源 / tool
+   * 同源派生视图 / entry 与 binding 重建）。additive：undefined（存量磁盘重建源 / tool
    * 来源）零迁移，读侧不参与 run 视图关联（无 stepIndex 的 record 不成行）。
    */
   stepIndex?: number;
@@ -587,7 +587,7 @@ export interface SubagentRecord {
   thinkingLevel: string | undefined;
   /**
    * 用户覆盖记账（[subagent-model-switch §6.2]，与 {@link ExecutionRecord.modelOverride}
-   * 同源投影：内存源 recordToSubagent / 事件流折叠 scanFile 补投影）。additive：
+   * 同源派生视图：内存源 recordToSubagent / 事件流折叠 scanFile 补充派生视图）。additive：
    * undefined（存量 / 从未覆盖）零迁移。持久化权威 = record-model-override 事件帧
    * （写点 = store.markModelOverride），本字段是读模型可见面（冷复活水合 + 覆盖
    * 状态查询通道）。
@@ -605,37 +605,37 @@ export interface SubagentRecord {
   patchFile?: string;
   /**
    * [review round2] 创建时启用 worktree 隔离（磁盘重建源从 session entry 恢复；内存源由
-   * recordToSubagent 从 worktreeHandle 投影）。getRecordForAction 跨重启重建时据此拒绝续聊。
+   * recordToSubagent 从 worktreeHandle 派生视图）。getRecordForAction 跨重启重建时据此拒绝续聊。
    */
   worktree?: boolean;
   /**
    * 对话轮次计数（modeless 波1 起全 record 语义）。round 仅在内存维护
    * （doFinalizeRoundToIdle 递增），跨重启不恢复（round 无磁盘持久化）；
-   * 非 idle record 为 undefined。内存源由 recordToSubagent 从 ExecutionRecord.round 投影。
+   * 非 idle record 为 undefined。内存源由 recordToSubagent 从 ExecutionRecord.round 派生视图。
    */
   round?: number;
   /**
-   * [modeless 波1·已删除字段] chatMode 投影随 ExecutionRecord.chatMode 消亡删除
+   * [modeless 波1·已删除字段] chatMode 派生视图随 ExecutionRecord.chatMode 消亡删除
    * （旧 entry/binding 残留键读侧忽略——万物可续后该区分无信息量）。
    */
   /** fork 模式下的 worktree handle。 */
   worktreeHandle?: WorktreeHandle;
   /**
-   * 实际执行引擎 id（P4 路由留痕）。缺省 = pi 投影（存量 record 零迁移）；
+   * 实际执行引擎 id（P4 路由留痕）。缺省 = pi 派生视图（存量 record 零迁移）；
    * GUI 警告条/引擎标记的数据源之一。
    */
   engine?: string;
   /**
-   * 引擎自描述定位符（U1：EngineHandleData 的持久化消费面子集，引擎无关——
+   * 引擎自描述定位符（U1：EngineHandleData 的持久化消费方子集，引擎无关——
    * sessionRef 整体透传不枚举内部键）。read 降级链①②级的数据源（runtime
    * subagent-engine-history）；缺省 = pi（走 JSONL 直读链）。
    */
   engineHandle?: { sessionRef: Record<string, string>; eventsPath?: string; poolKey: string };
-  // [modeless 波3·已删除字段] collectMode 快照投影随字段消亡删除（读侧丢弃，
+  // [modeless 波3·已删除字段] collectMode 快照派生视图随字段消亡删除（读侧丢弃，
   // 存量 entry 残留键零迁移）。
   /**
-   * 离开批终局标记（与 ExecutionRecord.batchFinalized 同源投影/重建——存量 entry
-   * 读侧兼容面，[collect 退役] 起只读不写：旧 session 文件反查投影仍携带）。
+   * 离开批终局标记（与 ExecutionRecord.batchFinalized 同源派生视图/重建——存量 entry
+   * 读侧兼容面，[collect 退役] 起只读不写：旧 session 文件反查派生视图仍携带）。
    * 缺省 = 未离开批 / 退役后新记录。
    */
   batchFinalized?: boolean;
@@ -681,7 +681,7 @@ export interface SubagentsGlobalConfig {
  *
  * 不含 eventLog——snapshot 的消费点（cancel 判 mode/status、hasRunning 判 mode、
  * toNotifyRecord 取 result/error）均不读 eventLog。需要 eventLog 的场景用 project()
- * 投影的 SubagentToolDetails。需要完整内容用 record.turns[]（Core 内部）。
+ * 派生视图的 SubagentToolDetails。需要完整内容用 record.turns[]（Core 内部）。
  */
 export interface RecordSnapshot {
   readonly id: string;

@@ -2,7 +2,7 @@
 //
 // [W4] 注册对账 sweep 单测：差集判据（record 终态 ∪ 已归档/不存在 → 补发；
 // active → 跳过）、类型分流（[F2]：workflow/畸形走 workflow run 判据——终态 ∪
-// store 查不到 → 补注销，running → 跳过；bash 无收口通道保守跳过——显式偏差；
+// store 查不到 → 补注销，running → 跳过；bash 无收尾通道保守跳过——显式偏差；
 // 未注入 workflow 判据时保守跳过）、写法（appendEntry 权威落盘，唯一写路径不经
 // emit——[reload-closeout D4] 尽力 emit 已随恒 no-op 死路径删除；status 经
 // protocol mapReasonToStatus 单点映射，budget_limited→failed 非 identity 用例锁定；
@@ -144,7 +144,7 @@ describe("runReconcileSweep 差集补发", () => {
     ]);
   });
 
-  it("[F2] type=workflow × workflow run running → 保守跳过（宁挂账不误注销活跃 run）", () => {
+  it("[F2] type=workflow × workflow run running → 保守跳过（宁挂着不处理不误注销活跃 run）", () => {
     writeSessionFile([reg("wf-live", "workflow")]);
     const { deps, appended } = makeDeps({
       workflowStates: new Map([["wf-live", "active"]]),
@@ -163,7 +163,7 @@ describe("runReconcileSweep 差集补发", () => {
     expect(appended[0].data).toEqual({ id: "bad-1", reason: "expired", status: "expired" });
   });
 
-  it("[F2] type=bash → 保守跳过（无 record/store 可查，显式偏差——宁挂账不失明）", () => {
+  it("[F2] type=bash → 保守跳过（无 record/store 可查，显式偏差——宁挂着不处理不失明）", () => {
     writeSessionFile([reg("bt-1", "bash")]);
     const { deps, appended } = makeDeps({});
     const result = runReconcileSweep(deps);
@@ -192,7 +192,7 @@ describe("runReconcileSweep 差集补发", () => {
     expect(appended).toHaveLength(0);
   });
 
-  it("[notify-once D7③] session skip 与其余类型共存互不干扰（subagent 照常收口）", () => {
+  it("[notify-once D7③] session skip 与其余类型共存互不干扰（subagent 照常收尾）", () => {
     writeSessionFile([
       reg("sm-123e4567-e89b-12d3-a456-426614174001", "session"),
       reg("bg-1", "subagent"),

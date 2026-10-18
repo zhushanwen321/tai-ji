@@ -12,7 +12,7 @@
 // core 缺省 agentDir 锚定自推，供引擎侧 / zsw 等无 pi SDK 环境消费。agentDir
 // 双源是有意差异，slug + 探测布局恒单源。
 //
-// 消费面边界 [MANDATORY]：本推导锚「调用方进程自身 env/cwd」——只在 pi 进程
+// 消费方边界 [MANDATORY]：本推导锚「调用方进程自身 env/cwd」——只在 pi 进程
 // 内调用才与写侧落盘一致（pi 壳 resolveSessionDir、pi 进程内的注册对账
 // sweep）。runtime 进程侧的读面禁用本推导：pi 出站 env（PI_CODING_AGENT_DIR）
 // 与 pi cwd 均 pi 子进程私有，runtime 侧推导恒错位（可见信号 = 读侧恒空转，

@@ -13,8 +13,8 @@
 //     引擎反向通道 childSpawned/childStateChanged）每一处都被触发通知，监听者现取
 //     getInFlightSnapshot 即含该 record 贡献的绝对计数（无参签名，发送时刻求值）。
 //   ②构建者——推送携带的是双谓词过滤后的真实计数：活句柄 + 无 armed idle timer
-//     才计在途；镜像置死后计数即刻回落（EngineClient 镜像桥接投影）。
-//   ③观察者——EngineClient 镜像 → core 镜像的单向投影可从镜像面观察（core 镜像
+//     才计在途；镜像置死后计数即刻回落（EngineClient 镜像桥接派生视图）。
+//   ③观察者——EngineClient 镜像 → core 镜像的单向派生视图可从镜像面观察（core 镜像
 //     条目随反向通道事件出现/置死），壳层监听者异常不反噬主链（既有出口测试覆盖，
 //     此处不重复）。
 //
@@ -56,7 +56,7 @@ import {
 } from "../engine/inflight-snapshot.ts";
 import { EngineClient } from "../engine/client/engine-client.ts";
 
-/** 最小 fake 子进程（EventEmitter + killed/pid——hasLiveProcessHandle 消费面）。 */
+/** 最小 fake 子进程（EventEmitter + killed/pid——hasLiveProcessHandle 消费方）。 */
 function makeFakeChild(pid = 4242): ChildProcess & EventEmitter {
   const child = new EventEmitter() as ChildProcess & EventEmitter;
   (child as { pid?: number }).pid = pid;
@@ -130,7 +130,7 @@ describe("u7a 生产迁移点 → 在途推送（wiring）", () => {
     // 等协议 run 被 fake 捕获（与 delivery-methods.test.ts 同款等待惯例）。
     await vi.waitFor(() => expect(fake.runs.length).toBe(1));
     const run = fake.runs[0]!;
-    // 引擎侧活句柄（生产经 EngineClient 反向通道桥接投影——此处直接落 core 镜像，
+    // 引擎侧活句柄（生产经 EngineClient 反向通道桥接派生视图——此处直接落 core 镜像，
     // 桥接本体在下方 EngineClient 套件独立验证）
     registerSpawnedChildForRecord(handle.subagentId, makeFakeChild());
     expect(getInFlightSnapshot().inFlight).toBe(1); // 前置：在途句柄在场
@@ -143,7 +143,7 @@ describe("u7a 生产迁移点 → 在途推送（wiring）", () => {
 
   it("续聊投递 disarm（生产路径 = deliverChatMessage → Continuation.dispatchRound）：翻回正在执行，推送 inFlight=1", async () => {
     const record = makeResumableRecord("sa-wiring-disarm");
-    record.sessionFile = path.join(agentDir, "child-session.jsonl"); // 续聊锚点（dispatchRound 守卫必需）
+    record.sessionFile = path.join(agentDir, "child-session.jsonl"); // 续聊锚点（dispatchRound 检查必需）
     // [U4] 锚可解析性要求文件真实在盘（isAnchorResolvable = existsSync）。
     fs.writeFileSync(record.sessionFile, "{}\n", "utf-8");
     store.register(record);
@@ -205,14 +205,14 @@ describe("u7a 数据面桥接：EngineClient 反向通道镜像 → core 镜像 
   it("childSpawned → core 镜像落项 + 推送 inFlight=1；childStateChanged(exited) → 置死 + 推送 inFlight=0", () => {
     client.mirror.recordSpawned(4242, "sa-bridge");
     expect(seen.at(-1)).toEqual({ inFlight: 1 });
-    expect(getInFlightSnapshot().inFlight).toBe(1); // core 镜像已投影（计数数据源）
+    expect(getInFlightSnapshot().inFlight).toBe(1); // core 镜像已派生（计数数据源）
 
     client.mirror.recordStateChanged({ pid: 4242, recordId: "sa-bridge", state: "exited", killed: true });
     expect(seen.at(-1)).toEqual({ inFlight: 0 });
     expect(getInFlightSnapshot().inFlight).toBe(0);
   });
 
-  it("同 recordId 重 spawn 覆盖 + killedAll 整体置死（引擎回收语义投影）", () => {
+  it("同 recordId 重 spawn 覆盖 + killedAll 整体置死（引擎回收语义派生视图）", () => {
     client.mirror.recordSpawned(111, "sa-bridge-a");
     client.mirror.recordSpawned(222, "sa-bridge-b");
     expect(seen.at(-1)).toEqual({ inFlight: 2 });

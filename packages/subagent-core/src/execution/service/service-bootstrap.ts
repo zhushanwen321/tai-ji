@@ -7,7 +7,7 @@
 // 内部零使用的死代码——`new SubagentService(init)` 直构逐字等价；恢复通道 =
 // git 历史原样加回）。
 //
-// 方向纪律（scripts/check-subagent-service-boundary.mjs R6 扩向守卫）：
+// 方向纪律（scripts/check-subagent-service-boundary.mjs R6 扩向检查）：
 //   - 壳→本文件：仅 type-only（接口类型标注——编译后擦除，不成值环）
 //   - 本文件→壳：仅 SubagentService 类值 import（构造依赖，设计 v4 明文
 //     「bootstrap 必须 new SubagentService」；壳对本文件零 re-export，
@@ -24,7 +24,7 @@ import type { RecordSnapshot, SubagentRecord } from "../assembly/types.ts";
 import { GLOBAL_SLOT_KEYS } from "../../shared/global-slots.ts";
 
 /** [D4 查询面聚合] 读模型轴（record 快照读取 + store 订阅）——Service 上的
- *  `service.queries` 消费面。变化轴：改查询投影 / 过滤 / 订阅语义，只动 queries 组；
+ *  `service.queries` 消费方。变化原因：改查询派生视图 / 过滤 / 订阅语义，只动 queries 组；
  *  Service 本体保留编排核（execute/executeAndAwait/cancel）与生命周期面。 */
 export interface SubagentQueries {
   /** 按 id 查内存 running record 的只读快照（G3-002 修复）。不存在返回 undefined。 */
@@ -33,7 +33,7 @@ export interface SubagentQueries {
    *  与 fork-from 源解析共用）。id 在内存与磁盘均不存在返回 undefined。 */
   lookupRecordAnyState(id: string): SubagentRecord | undefined;
   /** 合并内存 + 磁盘 record（/subagents list + tool list 消费，按 rootSessionId 过滤）。
-   *  [H2 W1] includeWorkflow 缺省 false = 过滤 origin==="workflow"（D1 投影过滤①③④）；
+   *  [H2 W1] includeWorkflow 缺省 false = 过滤 origin==="workflow"（D1 派生视图过滤①③④）；
    *  true = 排查通道全量。 */
   collectRecords(limit: number, statusFilter?: StatusFilter, includeWorkflow?: boolean): SubagentRecord[];
   /** [H2 W1] 按 workflow run id 列 record（内存 ∪ 磁盘重建 ∪ manifest 口径，不过滤
@@ -46,7 +46,7 @@ export interface SubagentQueries {
 }
 
 /** [D4 对话 action 面聚合] chat 域 message/close action 轴（M2-B3，原 Service 同节三方法）
- *  ——Service 上的 `service.chatActions` 消费面。变化轴：改对话域归属校验 / close 分流 /
+ *  ——Service 上的 `service.chatActions` 消费方。变化原因：改对话域归属校验 / close 分流 /
    投递编排，只动 chatActions 组。 */
 export interface SubagentChatActions {
   /** 按 id 查 record 并做归属校验（message/close action 的统一入口）。 */

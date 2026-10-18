@@ -40,7 +40,7 @@ import {
   type NotifierHost,
 } from "../notify/notifier.ts";
 
-// ─── fake 投递端口（deliver/flush 消费面 + 同 id 幂等吞） ─────────────────────
+// ─── fake 投递端口（deliver/flush 消费方 + 同 id 幂等吞） ─────────────────────
 
 type RecordedEnvelope = {
   id: string | undefined;
@@ -223,7 +223,7 @@ describe("BgNotifier collectKey 申报 — 该操作世代的第一个通知", (
     expect(fake.envelopes[1]!.opts).not.toHaveProperty("collectKey");
   });
 
-  it("one-shot / close 收口等完成通知（round=undefined）同样申报", () => {
+  it("one-shot / close 收尾等完成通知（round=undefined）同样申报", () => {
     notifier.notify(notifyRecord("bg-collect-oneshot"));
 
     expect(fake.envelopes[0]!.opts).toMatchObject({ collectKey: ["bg-collect-oneshot"] });
@@ -356,7 +356,7 @@ describe("BgNotifier dedup 按轮次（G1 决策 9：对话模式豁免——key
     expect(fake.envelopes[0]!.id).toBe("sa-once");
   });
 
-  it("[U5] 无轮形态（close 收口提示清 round）epoch>0 → key=`id:epoch`：不同 epoch 不互吞，同 key 仍吞", () => {
+  it("[U5] 无轮形态（close 收尾提示清 round）epoch>0 → key=`id:epoch`：不同 epoch 不互吞，同 key 仍吞", () => {
     notifier.notify(notifyRecord("sa-epoch", { result: "close@0" }));
     notifier.notify(notifyRecord("sa-epoch", { result: "close@1", epoch: 1 }));
 
@@ -494,7 +494,7 @@ describe("BgNotifier buildLlmContent 指针行（wave2：chatMode sessionFile �
 
   it("[review 修复] gc-failed + patchFile 并存 → failed 文案优先（失败轮也会写 patchFile，patch 提示不可达）", () => {
     // 回归锚定：doFinalizeRecord Step 0 对 worktreeHandle 无条件 collectPatch，gc 失败 +
-    // worktree 并存时 patchFile 有值。[U3] 判定收口到单一 deriveOutcome（cancelled →
+    // worktree 并存时 patchFile 有值。[U3] 判定收尾到单一 deriveOutcome（cancelled →
     // failed → patch/result），否则 LLM 被告知 completed 掩盖失败。
     notifier.notify({
       id: "sa-ptr-8", status: "closed", closedReason: "gc", agent: "w",

@@ -22,7 +22,7 @@
 // key 字面量：     "@zhushanwen/subagent-core.channelHandshake"
 //                  ↑ 必须与 ask-user/src/channel-registry-register.ts 完全一致
 // handshake 形状： ChannelRegistryHandshake（version=1）
-// version 守卫：    slot.version !== 1 时 console.warn + 丢弃重建（向前兼容未来升级）
+// version 检查：    slot.version !== 1 时 console.warn + 丢弃重建（向前兼容未来升级）
 
 import { getLogger } from "../../core/logger.ts";
 import { GLOBAL_SLOT_KEYS } from "../../shared/global-slots.ts";
@@ -43,7 +43,7 @@ const logger = getLogger("subagents");
 export const CHANNEL_HANDSHAKE_KEY = Symbol.for(GLOBAL_SLOT_KEYS.channelHandshake);
 
 /** 握手版本。未来若形状不兼容升级，递增此常量并在 getOrCreateChannelRegistry
- *  的 version 守卫里加迁移逻辑。 */
+ *  的 version 检查里加迁移逻辑。 */
 const HANDSHAKE_VERSION = 1 as const;
 
 /** pending channel handler 条目。ask-user 先到、registry 未就绪时临时存放。 */
@@ -77,7 +77,7 @@ function readHandshakeSlot(): ChannelRegistryHandshake | undefined {
     );
     return undefined;
   }
-  // 断言目标含必填 version 字段（object/null 已守卫；version 值本身在下一行校验），
+  // 断言目标含必填 version 字段（object/null 已检查；version 值本身在下一行校验），
   // 对齐 format.ts extractAgentName 的必填字段断言先例，避免全可选断言零校验。
   const version = (slot as { version: unknown }).version;
   if (version !== HANDSHAKE_VERSION) {

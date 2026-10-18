@@ -40,7 +40,7 @@ import { makePi, type PiMock } from "./helpers/pi-mock.ts";
 import { CTX_MODEL } from "./helpers/model-registry-mock.ts";
 
 // ============================================================
-// 非 pi 引擎替身（可结算——chat 域轮终收口与 workflow 域 await 都需要 run 应答）
+// 非 pi 引擎替身（可结算——chat 域轮终收尾与 workflow 域 await 都需要 run 应答）
 // ============================================================
 
 /** 一次 run 捕获（task + 手动结算面）。 */

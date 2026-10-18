@@ -80,9 +80,9 @@ describe("T4① notify gate 二元组（[U5 / §3.2.7] 放弃轮标记阻断 + �
     expect(
       notifyGateAllowsDelivery({ round: 3, lastAbandonedRound: { epoch: 0, round: 2 } }),
     ).toBe(true);
-    // 无标记（settle 竞态迟到回注、user-close/gc 等真实收口）照旧回注。
+    // 无标记（settle 竞态迟到回注、user-close/gc 等真实收尾）照旧回注。
     // [u-arch] gate ①（intent=archived 静默）随收起概念删除退役——编排性关闭的
-    // 迟到回注阻断由放弃轮标记（下方 dispose 集成用例）+ 轮身份守卫 + notifyId
+    // 迟到回注阻断由放弃轮标记（下方 dispose 集成用例）+ 轮身份检查 + notifyId
     // 账本承接。
     expect(notifyGateAllowsDelivery({})).toBe(true);
     expect(notifyGateAllowsDelivery({ round: 5 })).toBe(true);

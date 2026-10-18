@@ -18,7 +18,7 @@
 // 4. 事件文件读写原语（createRecordEventStream：append 单调分配 seq + scan 坏行
 //    宽容跳过）；
 // 5. fold 纯函数族（applyRecordEvent 单步 + foldRecordEvents 全量/
-//    增量共用——增量 = 以既有 state 为 initial 重入，seq 单调守卫保证幂等）。
+//    增量共用——增量 = 以既有 state 为 initial 重入，seq 单调检查保证幂等）。
 //
 // 落点裁决（D3）：`<recordsDir>/<sa-id>.events`（与 manifest 同目录同主名，寻址 =
 // 注册条目 id 直接定址，无需扫描）。无 .jsonl 后缀的结构性收益：session-reader
@@ -131,7 +131,7 @@ export type RecordEventType = (typeof RECORD_EVENT_TYPES)[number];
  * seq（1 起严格递增，同一文件内全序）：同一事件的唯一行身份——W2 通知去重键
  * （终态事件身份）的载体 + tail 截断重建后全量重读的 fold 去重依据（seq ≤ 已见
  * 水位的行按重放跳过，见 foldRecordEvents）。ts 对齐 run 侧 EventEnvelope
- * 的投影需求（fold 派生统计/新鲜度判据消费墙钟）。
+ * 的派生视图需求（fold 派生统计/新鲜度判据消费墙钟）。
  */
 export interface RecordEventEnvelope {
   seq: number;
@@ -139,7 +139,7 @@ export interface RecordEventEnvelope {
 }
 
 /**
- * `record-created`——record 创建落账（事件文件首条事件）。
+ * `record-created`——record 创建写入（事件文件首条事件）。
  *
  * 对应现状写点（D3 表行 1）：register（record-store 写点①）+ v2 注册条目（同点
  * 双写：事件文件是事实，主 session 注册条目是锚）。
@@ -190,7 +190,7 @@ export interface RecordBoundEvent extends RecordEventEnvelope { // oe-exempt:202
   type: "record-bound";
   /** 子 session 文件绝对路径。 */
   sessionFile: string;
-  /** 实际执行引擎 id（缺省语义 = pi 由写侧归一后落账）。 */
+  /** 实际执行引擎 id（缺省语义 = pi 由写侧归一后写入）。 */
   engine: string;
   /** 引擎自描述定位符（与 manifest / entry 的 engineHandle 同形——sessionRef 整体透传）。 */
   engineHandle: { sessionRef: Record<string, string>; eventsPath?: string; poolKey: string };
@@ -202,7 +202,7 @@ export interface RecordBoundEvent extends RecordEventEnvelope { // oe-exempt:202
  * `record-round-started`——轮开始。
  *
  * 对应现状写点（D3 表行 3）：resumeRound / reopen 后续轮（首轮经 created→bound
- * 隐含，续轮显式落账——record 轮次粒度事件进事件文件 是 D5 增量裁决：不进则
+ * 隐含，续轮显式写入——record 轮次粒度事件进事件文件 是 D5 增量裁决：不进则
  * .state 仍是事实源，事实源介质数降不到 1）。
  */
 export interface RecordRoundStartedEvent extends RecordEventEnvelope { // oe-exempt:20260929:framework:workflow/record 协议契约类型——ports 类型契约先行、单实现常态（dev-0.10.5 已验收代码 merge 带入）
@@ -216,7 +216,7 @@ export interface RecordRoundStartedEvent extends RecordEventEnvelope { // oe-exe
  * `record-round-idle`——轮终收条（为什么停 + 轮统计快照）。
  *
  * 对应现状写点（D3 表行 4）：markRoundIdle（.state 写点）。.state 降级为本事件
- * 的落盘物化投影（D2 sidecar 裁决表 .state 行）。
+ * 的落盘物化派生视图（D2 sidecar 裁决表 .state 行）。
  */
 export interface RecordRoundIdleEvent extends RecordEventEnvelope { // oe-exempt:20260929:framework:workflow/record 协议契约类型——ports 类型契约先行、单实现常态（dev-0.10.5 已验收代码 merge 带入）
   type: "record-round-idle";
@@ -244,7 +244,7 @@ export interface RecordRoundIdleEvent extends RecordEventEnvelope { // oe-exempt
   resultSummary?: string;
   /**
    * 轮终失败原因原文（可选——成功轮与旧 事件行缺席）。失败轮 outcome.reason
-   * 的轮粒度结构化承载（投影 error 供源；v1 rec.error 显示信号的 事件文件承接，
+   * 的轮粒度结构化承载（派生视图 error 供源；v1 rec.error 显示信号的 事件文件承接，
    * W1 终态同步 F2-2 裁决）。resultSummary 的失败摘要句是兼容形态，本字段是权威。
    */
   error?: string;
@@ -294,7 +294,7 @@ export interface RecordReopenedEvent extends RecordEventEnvelope { // oe-exempt:
 }
 
 /**
- * `record-model-override`——chat 域用户覆盖记账落账（模型切换意图帧）。
+ * `record-model-override`——chat 域用户覆盖记账写入（模型切换意图帧）。
  *
  * [subagent-model-switch §6.2] 用户覆盖的持久化载体 = 执行记录（事件流）新增字段：
  * 载荷即 {@link ModelOverride} 的意图形状——`ref` 恒为用户目标 ref（非引擎回读
@@ -302,7 +302,7 @@ export interface RecordReopenedEvent extends RecordEventEnvelope { // oe-exempt:
  * 不变量约束由形状构造性承载：帧后写覆盖 fold 槽位 → 至多一个生效覆盖（不变量 2）；
  * 切换操作不触碰 record-created 帧（`model` 盖章值不改写——不变量 5）。
  * 折叠消费：fold.modelOverride → revive 水合（hydrateReviveBaseline 缺省回填）+
- * 扫描投影（scanFile light 补投影）——重启后解析第 0 层从记录链恢复覆盖。
+ * 扫描派生视图（scanFile light 补写）——重启后解析第 0 层从记录链恢复覆盖。
  */
 export interface RecordModelOverrideEvent extends RecordEventEnvelope { // oe-exempt:20260929:framework:workflow/record 协议契约类型——ports 类型契约先行、单实现常态（dev-0.10.5 已验收代码 merge 带入）
   type: "record-model-override";
@@ -340,7 +340,7 @@ const RECORD_EVENT_TYPE_SET: ReadonlySet<string> = new Set(RECORD_EVENT_TYPES);
  * 值级事件行判定：JSON 对象 + type 落词表内 + seq 正整数 + ts 有限数值（信封
  * 全词表必填）。载荷字段不在此校验——解码归消费方（与 run 侧
  * isWorkflowRunEventLine 的最宽共同判定面同哲学：词表外 type / 信封坏值 = 坏行，
- * 载荷形状损坏由 fold/消费方各自的守卫承接）。
+ * 载荷形状损坏由 fold/消费方各自的检查承接）。
  */
 export function parseRecordEventLine(value: unknown): RecordEvent | null {
   if (typeof value !== "object" || value === null) return null;
@@ -372,16 +372,16 @@ export function parseRecordEventFileLine(line: string): RecordEvent | undefined 
 // ── fold 纯函数族（全量 / 增量共用单源）────────────────────────
 
 /**
- * fold 投影（事件流 → record 当前态）。
+ * fold 派生视图（事件流 → record 当前态）。
  *
- * 消费方：U2a 收编判据（有注册无终态）、U3 运行投影、U5 清理资格（fold 终态）。
+ * 消费方：U2a 收编判据（有注册无终态）、U3 运行派生视图、U5 清理资格（fold 终态）。
  * settled 不是吸收位——reopened / round-started 清除 settled（可续实体回边），
  * 「当前是否终态」= settled !== undefined。
  */
 export interface RecordEventFoldState { // oe-exempt:20260929:framework:workflow/record 协议契约类型——ports 类型契约先行、单实现常态（dev-0.10.5 已验收代码 merge 带入）
-  /** 身份域（首条 record-created 落账；undefined = 文件缺创建帧——残文件/全坏行形态）。 */
+  /** 身份域（首条 record-created 写入；undefined = 文件缺创建帧——残文件/全坏行形态）。 */
   identity: RecordCreatedEvent | undefined;
-  /** 引擎绑定（record-bound 落账；zcode 运行窗口锚定的数据源）。 */
+  /** 引擎绑定（record-bound 写入；zcode 运行窗口锚定的数据源）。 */
   bound: RecordBoundEvent | undefined;
   /** 当前轮计数（round-started 携带 / reopened 归零；undefined = 无轮事件）。 */
   round: number | undefined;
@@ -389,14 +389,14 @@ export interface RecordEventFoldState { // oe-exempt:20260929:framework:workflow
   epoch: Epoch | undefined;
   /** 最近一次轮终收条（stopReason + 轮统计快照）。 */
   roundIdle: RecordRoundIdleEvent | undefined;
-  /** 当前终态（record-settled 落账、reopened/round-started 清除；undefined = 未终态）。 */
+  /** 当前终态（record-settled 写入、reopened/round-started 清除；undefined = 未终态）。 */
   settled: RecordSettledEvent | undefined;
-  /** 最近一次重开帧（record-reopened 落账；transcriptRef / epoch·round 归零的折叠载体）。 */
+  /** 最近一次重开帧（record-reopened 写入；transcriptRef / epoch·round 归零的折叠载体）。 */
   reopened: RecordReopenedEvent | undefined;
   /**
-   * 当前用户覆盖记账（record-model-override 落账；undefined = 从未被覆盖）。
+   * 当前用户覆盖记账（record-model-override 写入；undefined = 从未被覆盖）。
    * [subagent-model-switch] 后写覆盖语义（新帧整替旧值）——构造性满足「至多一个
-   * 用户覆盖值」（不变量 2）；跨重启经 revive 水合 / 扫描投影恢复（解析第 0 层）。
+   * 用户覆盖值」（不变量 2）；跨重启经 revive 水合 / 扫描派生视图恢复（解析第 0 层）。
    */
   modelOverride: RecordModelOverrideEvent | undefined;
   /** fold 水位：已接受事件的最高 seq（增量续读/截断重读的去重依据）。 */
@@ -422,8 +422,8 @@ export const INITIAL_RECORD_EVENT_FOLD_STATE: RecordEventFoldState = {
 /**
  * 单步应用（纯函数，不可变更新）。
  *
- * seq 守卫不在此层——apply 假定调用方已去重（foldRecordEvents 统一把关；
- * U1/U3 直接复用 fold 入口而非手写 apply 循环，守卫单点）。
+ * seq 检查不在此层——apply 假定调用方已去重（foldRecordEvents 统一把关；
+ * U1/U3 直接复用 fold 入口而非手写 apply 循环，检查单点）。
  */
 export function applyRecordEvent(
   state: RecordEventFoldState,
@@ -475,7 +475,7 @@ export function applyRecordEvent(
  * - seq ≤ 既有水位的事件行按重放跳过（onSkipped 出声）——tail 截断/重建后的
  *   幂等全量重读（D6 原语）靠它构造性去重，重读不产生重复应用；
  * - seq 跳号（gap）宽容放行——单写者 append-only 下 gap 仅在外部编辑时出现，
- *   宽容跳过语义不炸投影（与 run 侧 foldRunEventFrames 的坏帧行为同一精神）。
+ *   宽容跳过语义不炸派生视图（与 run 侧 foldRunEventFrames 的坏帧行为同一精神）。
  */
 export function foldRecordEvents(
   events: readonly RecordEvent[],
@@ -499,19 +499,19 @@ export function foldRecordEvents(
  * record 事件文件读写接口形态。
  *
  * 单写者约束（对齐 run 侧 RunEventJournal 纪律）：append 的唯一合法调用方 =
- * RecordStore 状态迁移点（U2a 接线）——record 域事件经 store 落账，引擎与读侧
+ * RecordStore 状态迁移点（U2a 接线）——record 域事件经 store 写入，引擎与读侧
  * 不直接写。seq 分配权在 事件文件实装内（文件末水位 + 1），构造性单调。
  */
 export interface RecordEventStream { // oe-exempt:20260929:framework:workflow/record 协议契约类型——ports 类型契约先行、单实现常态（dev-0.10.5 已验收代码 merge 带入）
   /**
    * 追加一条事件（JSONL 单行；文件不存在时先落头行）。id 显式传参——文件定位
    * 不依赖事件形态。返回落盘的完整事件（含分配的 seq），调用方据此同步构造
-   * v2 终态条目 / 物化投影（同一事件的单点载荷源）。
+   * v2 终态条目 / 物化派生视图（同一事件的单点载荷源）。
    */
   append(id: string, event: RecordEventInput): Promise<RecordEvent>;
   /**
    * 顺序扫描全部事件（写入序；头行与坏行跳过——坏行计数 warn 留证）。
-   * 文件不存在 = 空事件流（record 未落账 / 已过保留期清理）。
+   * 文件不存在 = 空事件流（record 未写入 / 已过保留期清理）。
    */
   scan(id: string): Promise<readonly RecordEvent[]>;
 }

@@ -26,7 +26,7 @@
 //
 // 触发确定性：进程内首次接线即扫一次 + 每 24h 定时复扫（startEngineJournalGcTimer，
 // 对齐 main 侧 log-retention 形态），best-effort（失败不影响启动）；
-// 调用方以 oncePerProcess 守卫防重复接线。接线方传 agentDir 时 .patch 清扫同批生效
+// 调用方以 oncePerProcess 检查防重复接线。接线方传 agentDir 时 .patch 清扫同批生效
 // （pi extension 接线点持有 agentDir；不传 = 仅引擎 journal，缺省行为不变）。
 
 import * as fs from "node:fs";
@@ -105,7 +105,7 @@ function cleanupOrphanWorktreePatches(agentDir: string, ttlMs: number): void {
 /**
  * 确定性触发接线：立即扫一次 + 每 24h 定时复扫（unref 不 hold 进程退出），
  * 返回 stop 函数（测试清理用）。形态对齐 main 侧 log-retention 的 startLogRetentionTimer；
- * 调用方以 oncePerProcess 守卫防重复接线。agentDir 语义同 cleanupExpiredEngineJournals。
+ * 调用方以 oncePerProcess 检查防重复接线。agentDir 语义同 cleanupExpiredEngineJournals。
  */
 export function startEngineJournalGcTimer(agentDir?: string): () => void {
   cleanupExpiredEngineJournals(agentDir);

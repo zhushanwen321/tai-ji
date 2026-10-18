@@ -4,16 +4,16 @@
 // [H1 U6] cold-resurrect.ts 随 chat 域退役改名落位本文件：其中「跨重启磁盘重建无条件
 // 置 chatMode=true」的升级语义已随 modeless 波1 删除（message 资格 = 引擎轴）
 //（conversation-continuation.ts reviveOrThrow / subagent-actions-core messageHandler
-// 双写点），本文件只保留冷查定位 / 准入守卫 / 磁盘重建注册链——UF-1 跨重启续聊
+// 双写点），本文件只保留冷查定位 / 准入检查 / 磁盘重建注册链——UF-1 跨重启续聊
 // 绑定链（getRecordForAction → coldLookupForAction → 绑定重建 → Continuation）的
-// 宿主侧解析承载。变化轴：改跨重启重建 / 透明重生回边 / 准入守卫语义，只改本文件；
+// 宿主侧解析承载。变化原因：改跨重启重建 / 透明重生回边 / 准入检查语义，只改本文件；
 // Service 的 getRecordForAction 保留归属校验编排（内存未命中分支委托 coldLookupForAction）。
 //
 // [U4 / §3.2.3 准入判据单点] 复活资格从「形态枚举 gate」（closedReason ∈ 可重连集）
 // 切换为物理三件套：锚可解析性（isAnchorResolvable）+ 异进程探针
 //（findForeignLiveInstance）+ 归属匹配（rootSessionId / 直接父，编排层）。任何 idle
 // record 都是候选（万物可续——closedReason/stopReason 只是展示位）；锚不可解析不在此
-// 拒绝——降级处置 = 同 id 带历史重开（markReopened），编排归 Continuation 派发守卫
+// 拒绝——降级处置 = 同 id 带历史重开（markReopened），编排归 Continuation 派发检查
 //（磁盘重建源 = session 文件本身，冷查候选锚天然可解析；锚失效的现实触发面 = 内存
 // idle record 的 transcript 被回收，发生在派发时点）。
 
@@ -61,7 +61,7 @@ export interface ColdLookupDeps {
 }
 
 /**
- * [U6 / §3.2.6] 锚派生的消费面形状（transcriptAnchorOf / isAnchorResolvable 入参）：
+ * [U6 / §3.2.6] 锚派生的消费方形状（transcriptAnchorOf / isAnchorResolvable 入参）：
  * ExecutionRecord 与 SubagentRecord（entry 重建）均结构满足。sessionFile = pi 锚的
  * 迁移期载体（写面未收编前 pi 锚的现行形态）；engineHandle.sessionRef = zcode 锚的
  * 单源（引擎 onHandleReady 回传 {sessionId, dbPath}，经主 session entry 持久化——
@@ -105,9 +105,9 @@ export function transcriptAnchorOf(record: AnchorProbeShape): TranscriptRef | un
  * node:sqlite 零依赖，与 zcode-subagent-cli reader 同选型；subagent-core 不开引擎
  * CLI 包的生产 import（仓内零生产 import 约定），任务书钦点的「内嵌只读查询」形态）。
  * 同步经 process.getBuiltinModule（Node ≥22.3，仓根 engines node>=22.19 满足）。
- * [U3] 非降级消费面：本函数是通用锚探测（isAnchorResolvable）的 zcode 判据单点，
- * fork 守卫等消费点经后者取判据；续聊降级链已不消费它——zcode 库投影预检查退役
- *（app-server 落库滞后于 create 应答，分钟级窗 + 部分行永不落库，滞后窗内查询
+ * [U3] 非降级消费方：本函数是通用锚探测（isAnchorResolvable）的 zcode 判据单点，
+ * fork 检查等消费点经后者取判据；续聊降级链已不消费它——zcode 库派生预检查退役
+ *（app-server 入库滞后于 create 应答，分钟级窗 + 部分行永不入库，滞后窗内查询
  * 恒 false，会把完全有效的锚误降级 reopen，理由详见 conversation-continuation
  * reviveOrThrow 注）。fail-closed（运行时不支持 / db 缺失 / 查询异常 = false）的
  * 保守方向保留：误判可解析仍是有害方向，宁报失效不虚报在库。降级留痕分档——驱动
@@ -151,12 +151,12 @@ function zcodeSessionEntryExists(dbPath: string, sessionId: string): boolean {
 
 /**
  * [U4 / §3.2.3 判据一单点 → U6 引擎分派] transcript 锚可解析性（通用锚探测面——
- * fork 守卫等非降级消费点经此取判据）：
+ * fork 检查等非降级消费点经此取判据）：
  *   - pi：sessionFile 在盘可读（现行判据不变——`{sessionFile}` 字面量入参兼容）；
  *   - zcode：sessionId+dbPath 库中条目存在（TTL 清理/外部删除 = 锚失效）。
  *  「锚失效 ≠ 拒绝续聊」的降级语义（markReopened 同 id 带历史重开，编排归
- *  Continuation 派发守卫）[U3] 收窄为 pi 锚专属：pi transcript 即时落盘、预检查
- *  可靠，锚失效的现实触发面 = 文件被回收；zcode 锚不进预检查分流——库投影滞后
+ *  Continuation 派发检查）[U3] 收窄为 pi 锚专属：pi transcript 即时落盘、预检查
+ *  可靠，锚失效的现实触发面 = 文件被回收；zcode 锚不进预检查分流——库派生视图滞后
  *  于 create 应答属系统性误判（理由详见 conversation-continuation reviveOrThrow
  *  注），带锚正常派发、锚活性由引擎真实 resume 结果承担。zcode 分支保留：探测面
  *  维持引擎中立完整，zcode 锚的判据不因降级收窄而失去单点归属。
@@ -170,10 +170,10 @@ export function isAnchorResolvable(record: AnchorProbeShape): boolean {
 
 /** [U4 / §3.2.3] 冷查候选谓词（findColdLookupCandidate 的候选形态判定，判据单点）。
  *
- *  两态状态机下任何 record 都是候选：running（内存接管形态）与 idle（轮收口 /
+ *  两态状态机下任何 record 都是候选：running（内存接管形态）与 idle（轮收尾 /
  *  磁盘重建单规则产出——旧终态遗留位 closedReason 只是读侧兼容展示位，不参与
  *  资格判定）。形态枚举 gate（closedReason ∈ 可重连集）随「万物可续」消亡。
- *  准入守卫（探针 / worktree / 归属）在候选定位之后统一执行。 */
+ *  准入检查（探针 / worktree / 归属）在候选定位之后统一执行。 */
 function isColdLookupCandidate(r: SubagentRecord): boolean {
   return r.status === "running" || r.status === "idle";
 }
@@ -182,7 +182,7 @@ function isColdLookupCandidate(r: SubagentRecord): boolean {
  *  全目录 collectRecords 兜底（谓词见 isColdLookupCandidate）。
  *
  *  [U4] 异进程活实例探针统一对**所有**候选执行（原「旧 closed 候选走
- *  assertReconnectAllowed / 其余候选在此探活」的双轨守卫随准入单点收敛合并）：
+ *  assertReconnectAllowed / 其余候选在此探活」的双轨检查随准入单点收敛合并）：
  *  冷查候选（跨重启 / 内存重建）此前不经任何探针直接 resurrect + resume spawn——
  *  若其 .alive marker 仍指向活着的异进程实例（父进程重启后旧子进程尚存的窗口），
  *  resume 会 spawn 第二个 pi 子进程写同一 session JSONL（本代码最忌惮的双写者形态，
@@ -211,7 +211,7 @@ function findColdLookupCandidate(deps: ColdLookupDeps, id: string): SubagentReco
   return found;
 }
 
-/** [U4 / §3.2.3] 准入守卫（coldLookupForAction 步骤 2，原 assertReconnectAllowed
+/** [U4 / §3.2.3] 准入检查（coldLookupForAction 步骤 2，原 assertReconnectAllowed
  *  单点化）：先于任何状态突变与注册。拒绝形态只剩两种——worktree 绑定丢失（[U5
  *  接管] 设计 §3.2.5：拒绝动作将改为 worktree 自动重建 + patch 恢复；重建链归 U5
  *  意愿动作单元，本单元保留拒绝语义防 spawn cwd 静默回落主 repo）与异进程活实例
@@ -274,7 +274,7 @@ function resurrectColdRecord(
     // 与 sessionFile 同列水合。
     engine: found.engine,
     // [A3/S3 修复] 来源身份透传（同 engine 惯例走 createRecord 而非水合）：workflow 批
-    // 成员收口归档出内存后，message 冷复活漏传 origin 会让守卫读 undefined 放行，
+    // 成员收尾归档出内存后，message 冷复活漏传 origin 会让检查读 undefined 放行，
     // 成员真的收到消息并回话（违反 one-shot 批成员契约，S3 反向断言）。tool 来源
     // record 两字段本就 undefined，透传无害。
     origin: found.origin,
@@ -293,14 +293,14 @@ function resurrectColdRecord(
   if (anchor !== undefined) record.transcriptRef = anchor;
   // [review round2] 跨重启 worktree 绑定丢失防护：原 record 创建时启用了 worktree 隔离
   //（session entry 的 worktree 标志），但 WorktreeHandle 不可序列化、重建后恒缺失。
-  // 标记 hadWorktree，冷路径续轮守卫据此拒绝续聊（防 spawn cwd 静默回落主 repo 破坏
-  // 隔离——正是 worktree 要防的并发写冲突场景）。close 不受影响（close 收口落账
-  // markSettledOut 不触本守卫；旧 closeChatIdle 语义已改优雅收口，泄漏的 worktree
+  // 标记 hadWorktree，冷路径续轮检查据此拒绝续聊（防 spawn cwd 静默回落主 repo 破坏
+  // 隔离——正是 worktree 要防的并发写冲突场景）。close 不受影响（close 收尾写入 journal 记录
+  // markSettledOut 不触本检查；旧 closeChatIdle 语义已改优雅收尾，泄漏的 worktree
   // 由 reaper 兜底回收）。
-  // [U5 接管] 拒绝动作将改为自动重建 + patch 恢复（§3.2.5），守卫语义届时重写。
+  // [U5 接管] 拒绝动作将改为自动重建 + patch 恢复（§3.2.5），检查语义届时重写。
   record.hadWorktree = found.worktree === true;
-  // [subagent-model-switch §6.2/P7] 用户覆盖记账水合：磁盘候选（fold 投影 / 内存源
-  // 投影）携带的 modelOverride 随冷复活进内存 record——主 agent 重启后解析第 0 层
+  // [subagent-model-switch §6.2/P7] 用户覆盖记账水合：磁盘候选（fold 派生视图 / 内存源
+  // 派生视图）携带的 modelOverride 随冷复活进内存 record——主 agent 重启后解析第 0 层
   // 的恢复源（新 record 产物恒无覆盖，直接赋值即缺省回填语义）。
   type MutableOverrideRecord = { -readonly [K in keyof ExecutionRecord]: ExecutionRecord[K] };
   if (found.modelOverride !== undefined) {
@@ -308,15 +308,15 @@ function resurrectColdRecord(
   }
   // [U2a/B4 → D3c] 透明重生回边整体收编 store.markResurrected：acquire-first 顺序
   // （写 .alive 写权声明 → 删 .state → 删 .finalized legacy）+ resurrectClosed 内存
-  // 翻回 + register，单 try 域原子收敛。准入唯一依据 = §3.2.3 物理三件套（守卫已在
+  // 翻回 + register，单 try 域原子收敛。准入唯一依据 = §3.2.3 物理三件套（检查已在
   // 上方跑完）；reportTransition（entry 上报）留本编排层（纯投递副作用，失败不破坏
   // 状态一致性）。
   // 两种接管形态统一 acquire（D3c）：idle 候选（wasClosed=true）三件套全量；running
   // 候选接管（跨重启磁盘重建，wasClosed=false）跳过删终态位（无 .state 可删）**仍
-  // acquire marker**——「接管即声明」，现状此路径不写 marker 的 B/C 双写窗随归口消灭。
+  // acquire marker**——「接管即声明」，现状此路径不写 marker 的 B/C 双写窗随收敛消灭。
   // 失败语义 = 响亮抛错中止主流程（§3.4）：acquire 失败 = 双写风险敞口，禁止
   // best-effort 吞错续跑（旧「单 try 吞错后继续 resurrectClosed + register」形态随
-  // 归口消灭）；acquire-first 顺序保证失败时终态位未删、磁盘保持旧形态（可重试）。
+  // 收敛消灭）；acquire-first 顺序保证失败时终态位未删、磁盘保持旧形态（可重试）。
   const wasClosed = found.status !== "running";
   deps.markResurrected(record, wasClosed);
   if (wasClosed) {
@@ -328,15 +328,15 @@ function resurrectColdRecord(
 }
 
 /** [D4-③] 冷查编排（原 Service.coldLookupForAction）：getRecordForAction 内存未命中
- *  分支——候选定位 → 准入守卫 → 归属/直接父校验 → 重建注册。
+ *  分支——候选定位 → 准入检查 → 归属/直接父校验 → 重建注册。
  *
  *  [U4] allowReconnect 参数退役保留：两态下 idle 全候选（万物可续），message 专属的
  *  「可重连集把门」语义消亡——close/cancel 等其余 action 的冷查可见面随之统一为
- *  「占用位可见即可操作」（对已收口 record 操作 = 幂等收口落账，符合新语义）。
+ *  「占用位可见即可操作」（对已收尾 record 操作 = 幂等收尾写入 journal 记录，符合新语义）。
  *  参数保留是因调用方 record-access.ts 的签名面（领地外）不做破坏性变更。
  *
  *  @returns 重建的 record；磁盘也无则 undefined
- *  @throws ResurrectDeniedError 候选被 worktree 绑定丢失 / 异进程活实例守卫拦截
+ *  @throws ResurrectDeniedError 候选被 worktree 绑定丢失 / 异进程活实例检查拦截
  *  @throws Error parentRecordId 跨层不匹配（direct parent 错误，与外层校验同文案） */
 export function coldLookupForAction(
   deps: ColdLookupDeps,
@@ -346,7 +346,7 @@ export function coldLookupForAction(
 ): ExecutionRecord | undefined {
   const found = findColdLookupCandidate(deps, id);
   if (!found) return undefined;
-  // [v8.5 D] 准入守卫先于任何状态突变与注册（细节见 assertAdmissionAllowed）
+  // [v8.5 D] 准入检查先于任何状态突变与注册（细节见 assertAdmissionAllowed）
   assertAdmissionAllowed(found, id);
   // [review MF-9] 归属校验先于任何持久化副作用：coldLookup 是 getRecordForAction 的
   // 内存未命中分支，若先 resurrect/register/report 再由调用方抛归属错误，会在磁盘/

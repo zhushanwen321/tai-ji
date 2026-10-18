@@ -2,7 +2,7 @@
 //
 // [subagent-model-switch §7.2 目标 5 壳接线] SubagentService.setModel 装配段的
 // 行为测试：deps 闭包走真实通道（ModelConfigService 透传 / store.markModelOverride
-// 落账原语 / chatRounds.resolveEnginePortForSwitch 引擎路由转发）。编排本体
+// 写入 journal 记录原语 / chatRounds.resolveEnginePortForSwitch 引擎路由转发）。编排本体
 // （model-switch.ts 纯函数）的分型处置表已由 model-switch.test.ts 全量覆盖，本文件
 // 只锚壳装配——两文件互补，不重复证明。
 //
@@ -94,19 +94,19 @@ describe("SubagentService.setModel 壳接线（§7.2 目标 5）", () => {
     return record;
   }
 
-  it("无活进程 → 纯记账路径：store 落账原语写 record.modelOverride + 已记账型应答（不携带档位）", async () => {
+  it("无活进程 → 纯记账路径：store 写入 journal 记录原语写 record.modelOverride + 已记账型应答（不携带档位）", async () => {
     const record = makeRecord("sa-shell-switch-1");
     const reply = await service.setModel({ domain: "chat", record }, TARGET_MODEL);
     expect(reply).toEqual({
       scope: "chat",
       reply: { kind: "recorded", notice: "已记录，下次执行生效。" },
     });
-    // 落账原语真实生效（内存 record 字段；盖章值 model 不变量 5 不触碰）
+    // 写入 journal 记录原语真实生效（内存 record 字段；盖章值 model 不变量 5 不触碰）
     expect(record.modelOverride?.ref).toEqual({ provider: "zai-coding-cn", modelId: "glm-5.3-flash" });
     expect(record.model).toBe("zai-coding-cn/glm-5.3");
   });
 
-  it("活进程 + 引擎解析转发（pi 未注册 → 不可用 stub 的 native 位与方法缺席组合）→ 装配损坏守卫抛出，编排写记账 + 错误应答（不虚构生效值）", async () => {
+  it("活进程 + 引擎解析转发（pi 未注册 → 不可用 stub 的 native 位与方法缺席组合）→ 装配损坏检查抛出，编排写记账 + 错误应答（不虚构生效值）", async () => {
     const record = makeRecord("sa-shell-switch-2");
     // 宿主活进程镜像注册（hasLiveProcessHandle 判真 → 走引擎转发分支）
     registerSpawnedChildForRecord(record.id, { pid: 424242, killed: false } as unknown as ChildProcess);
@@ -116,7 +116,7 @@ describe("SubagentService.setModel 壳接线（§7.2 目标 5）", () => {
       throw new Error(`expected chat error reply, got: ${JSON.stringify(reply)}`);
     }
     expect(reply.reply.message).toMatch(/setModel=native/);
-    // 守卫路径仍写记账（处置表行 3/7 形态——意图已表达，生效值未知如实报错）
+    // 检查路径仍写记账（处置表行 3/7 形态——意图已表达，生效值未知如实报错）
     expect(record.modelOverride?.ref).toEqual({ provider: "zai-coding-cn", modelId: "glm-5.3-flash" });
   });
 });

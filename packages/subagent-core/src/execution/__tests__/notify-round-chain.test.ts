@@ -9,7 +9,7 @@
 //     core conversation-continuation.test.ts 已有同层更强覆盖，随壳文件删除）：
 //       T1  notifyComplete 入参形状（record 入参 = 轮终翻边后簿记，round/result 已写）；
 //       [M3] busy 对照：真在跑 background（镜像活进程 + 无 timer）仍挂合并窗口；
-//       [N1] one-shot 完成通知载荷投影 details.status="running"。
+//       [N1] one-shot 完成通知载荷派生视图 details.status="running"。
 //
 // round2 审查实证的断链（inproc 形态）：agent_settled → onRoundSettled 先 notifyComplete
 //（此时 record.result 从未被写）→ 轮次通知正文恒 "(empty)"。修复 = onRoundSettled
@@ -52,7 +52,7 @@ import type { RecordStore } from "../persistence/record-store.ts";
 import type { ExecutionRecord } from "../domain/record-model.ts";
 import { SubagentService } from "../subagent-service.ts";
 
-// ─── fake 投递端口（port.deliver 消费面：同 id 幂等吞 + merge 判定分流）────────
+// ─── fake 投递端口（port.deliver 消费方：同 id 幂等吞 + merge 判定分流）────────
 //
 // 波 2 改写对位：原「投递内核等价桩」（dedupe / busy gate / 合批窗口）随内核队列
 // 持有退役——port 形态下受理即入 pi 原生队列（忙时不拒），合批窗口在端口侧。
@@ -280,7 +280,7 @@ describe("首轮闭环独有断言面（迁自壳 first-round-closure-service.te
     expect(record!.round).toBe(1);
     expect(record!.result).toBe("first-round-done");
     // 首条通知入参 = 完成通知的 record（轮终翻边 idle，round 已随簿记 +1 透传，
-    // result 从应答 content 写入——BgNotifyRecord 投影 status="running" 由
+    // result 从应答 content 写入——BgNotifyRecord 派生视图 status="running" 由
     // notify-host 的映射用例承保）。[collect 退役] 原「settle 内 notify 与 run 续体
     // collectCoordinator 回注」双调用点收敛为成功轮单通道——用户可见面
     //（pi.sendMessage）恒 1 条（末尾断言）。
@@ -328,14 +328,14 @@ describe("首轮闭环独有断言面（迁自壳 first-round-closure-service.te
     // 判据 hasLiveProcessHandle 读本镜像）。
     coreSpawnedChildrenMirror().register(busy.id, { pid: 4321, killed: false });
     const done = makeRecord("sa-done");
-    done.status = "idle"; // V1 终态形态：markRoundIdle 收口 idle，toNotifyRecord 放行
+    done.status = "idle"; // V1 终态形态：markRoundIdle 收尾 idle，toNotifyRecord 放行
     internals.store.register(done);
     internals.notifyHost.notifyComplete(done);
     expect(pi.sendMessage).toHaveBeenCalledTimes(1); // 未新增——merge:true 不立即注入
     expect(currentFakePort!.records.at(-1)).toMatchObject({ merge: true }); // M3 判据回归锚
   });
 
-  it("[N1 载荷投影] one-shot 成功完成通知：details.status=running（轮终通知形态）、正文含真实结果，恰 1 条", async () => {
+  it("[N1 载荷派生视图] one-shot 成功完成通知：details.status=running（轮终通知形态）、正文含真实结果，恰 1 条", async () => {
     service.initSession({ pi, sessionId: "root-session" }); // 换上带 spy 捕获的 pi
 
     const handle = await service.execute({ task: "one shot task", slug: "oneshot-n1" });

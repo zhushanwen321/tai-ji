@@ -80,7 +80,7 @@ function reportStalePiSkip(context: string): void {
  * ——「stale pi 抛错不得升格为未处理 promise 拒绝」（pi rpc 模式无未处理拒绝处理器，
  * Node 默认 exit 1，见登记 §1.4）。
  *
- * 消费面 = notify-host / record-store / finalize-record / chat-rounds /
+ * 消费方 = notify-host / record-store / finalize-record / chat-rounds /
  * subagent-service 的 `pi?.` 调用点（通知面 + 条目面，全部属「失败不影响主流程判定」
  * 的旁路通道；record 终态/轮终的磁盘权威面走 journal/manifest，不经此通道）。
  *

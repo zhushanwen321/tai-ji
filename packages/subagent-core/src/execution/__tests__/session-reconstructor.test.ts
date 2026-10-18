@@ -734,8 +734,8 @@ describe("轻量 identity 扫描（readIdentityHeader / readIdentityTail / readI
 //
 // Gate B S3 FAIL 根因的 identity entry 侧防线：identity custom entry 携带
 // origin/parentRunId 时，reconstructFromFile（全量重建面）与 readIdentityHeader
-// （light 列表面）必须透传；缺省/非法值守卫归一 undefined（= "tool" 语义），
-// 对齐 readEntryOriginFields 主 entry 重建侧守卫。
+// （light 列表面）必须透传；缺省/非法值检查归一 undefined（= "tool" 语义），
+// 对齐 readEntryOriginFields 主 entry 重建侧检查。
 describe("[H2 S3] identity 面 origin/parentRunId 透传", () => {
   let tmpDir: string;
   let filePath: string;
@@ -782,7 +782,7 @@ describe("[H2 S3] identity 面 origin/parentRunId 透传", () => {
     expect(readIdentityHeader(filePath)!.parentRunId).toBeUndefined();
   });
 
-  it("非法值守卫：origin 非白名单 / parentRunId 非 string → 守卫归一 undefined（不抛）", () => {
+  it("非法值检查：origin 非白名单 / parentRunId 非 string → 检查归一 undefined（不抛）", () => {
     writeOriginJsonl({
       id: "bg-bad", agent: "w", mode: "background", task: "t", startedAt: 1,
       origin: "bogus", parentRunId: 42,

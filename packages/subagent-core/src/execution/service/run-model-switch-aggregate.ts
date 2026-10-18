@@ -6,7 +6,7 @@
 // 实装签名 = RunModelSwitchAggregateCall，本文件）。
 //
 // 职责边界（§7.4）：对已受理成员 runId 全量逐个经引擎 setModel 转发——
-//   - **不做宿主侧存活预判**：进程存活事实的权威在引擎侧，宿主 record 状态只是投影
+//   - **不做宿主侧存活预判**：进程存活事实的权威在引擎侧，宿主 record 状态只是派生视图
 //     （简洁审裁决，review-simplicity#1）；已退出成员由引擎 not-active 应答承接。
 //   - **capability 预检门控先于调用**（§8 场景 7 步骤④）：成员引擎 setModel 位非
 //     native → not-applicable，引擎调用与目标模型校验均不发生（zcode 成员即使目标
@@ -173,7 +173,7 @@ function errorCodeOf(err: unknown): string | undefined {
   return undefined;
 }
 
-/** 词表成员守卫（运行时收窄，无断言）。 */
+/** 词表成员检查（运行时收窄，无断言）。 */
 function isSetModelErrorCode(code: string): code is SetModelErrorCode {
   return (SET_MODEL_ERROR_CODES as readonly string[]).includes(code);
 }

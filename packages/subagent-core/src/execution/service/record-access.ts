@@ -10,7 +10,7 @@
 // 壳分别装配——聚合间零 import（G2 / R1 打样模式 3）。
 //
 // 单一职责：record 的**获得与可见性**——boot 孤儿自愈（manifest 重物化 / entry-born
-// 恢复）、身份解析与 record 创建注册、内存∪磁盘查询投影、message/close action 的
+// 恢复）、身份解析与 record 创建注册、内存∪磁盘查询派生视图、message/close action 的
 // 归属校验网关（冷查/冷复活经 cold-lookup.ts）。终态迁移写面（close/cancel/finalize/
 // dispose 批量回收）在 record-lifecycle.ts——D5「store 与终态迁移入口的唯一宿主」。
 //
@@ -26,7 +26,7 @@
 //    public（strangler 必然，非行为变化）。
 // 3. 只搬不改：方法体除依赖注入通道替换（this.X → this.deps.getX()）外逐字节保留
 //    ——本聚合侧的写点通道（r0-inventory 清单②）：#13 创建期 createRecord + store.register
-//   （C+B 通道）、#3 manifest 重物化投影（D 通道）原样随迁，不经任何中转。
+//   （C+B 通道）、#3 manifest 重物化派生视图（D 通道）原样随迁，不经任何中转。
 
 import { getLogger } from "../../core/logger.ts";
 import { toErrorMessage } from "../../core/error-message.ts";
@@ -48,7 +48,7 @@ import type { AgentConfig, ModelInfo, ResolvedModel } from "../assembly/model-re
 import type { RecordStore, StatusFilter } from "../persistence/record-store.ts";
 // [R6/D-R3-2] 跨进程身份 env 名 ENV_SELF_RECORD_ID 归位常量叶子文件
 // service-constants.ts（原 SSOT 在 session-baselines.ts，R3 时的聚合间单向 import
-// 合法边随之消除）——聚合→支撑文件方向（import 常量），守卫允许。
+// 合法边随之消除）——聚合→支撑文件方向（import 常量），检查允许。
 import { ENV_SELF_RECORD_ID } from "./service-constants.ts";
 import { DEFAULT_AGENT_NAME } from "../domain/record-model.ts";
 import type { ExecutionMode } from "../domain/record-types.ts";
@@ -84,9 +84,9 @@ export interface RecordAccessDeps {
   /** [D4 下沉] assertReady 断言（本体在 SessionBaselines，壳转发）。查询/action
    *  入口的就绪门（findRecord/lookupRecordAnyState/getRecordForAction）。 */
   readonly assertReady: () => void;
-  /** RecordStore（#1 留壳共享依赖；本聚合消费面：恢复扫描/查询投影/注册/冷查）。 */
+  /** RecordStore（#1 留壳共享依赖；本聚合消费方：恢复扫描/查询派生视图/注册/冷查）。 */
   readonly getStore: () => RecordStore;
-  /** ManifestStore（#1 留壳；tmp 恢复 + 重物化投影写）。 */
+  /** ManifestStore（#1 留壳；tmp 恢复 + 重物化派生视图写）。 */
   readonly getManifestStore: () => ManifestStore;
   /** ModelConfigService（resolveIdentity 三层解析 + agentConfig 加载）。 */
   readonly getModelService: () => ModelConfigService;
@@ -171,7 +171,7 @@ export class RecordAccess {
       const deleted = await this.deps.getManifestStore().sweepTmpFiles();
       // recovered 恒 0：promote 已随 U4c 退役——公开签名保留 {deleted, recovered}
       // 形态（subagent-service 壳转发 + subagent-workflow session-lifecycle 消费
-      // swept.deleted，改签名波及 extension 消费面）。
+      // swept.deleted，改签名波及 extension 消费方）。
       return { deleted, recovered: 0 };
     } catch (err) {
       bestEffort(err, "recoverManifestTmpFiles", "error");
@@ -239,7 +239,7 @@ export class RecordAccess {
  *   - model 源 = engineModel（调用参数 opts.model > agentConfig.model frontmatter，
  *     agent 作者声明不忽略——配错在 validateModel 同步报错，不落引擎缺省静默续跑）；
  *   - 无显式 model → 校验仍走引擎缺省裁决（validateModel(undefined)），留痕按裁决
- *     结果条件留空（R4/D6-②：裁决缺席/空串 → record.model = undefined，如实投影
+ *     结果条件留空（R4/D6-②：裁决缺席/空串 → record.model = undefined，如实映射
  *     「用户未指定」，不伪造 fallback 已选）；
  *   - thinkingLevel 直接透传（引擎中立参数，不涉 registry）。
  *
@@ -254,10 +254,10 @@ export class RecordAccess {
   ): ResolvedIdentity {
     // [⑦ 模型引用三元组化] validateModelForEngine 直接返回裁决产物的三元组
     // （SplitModelRef）：trim 归一缺席、canonical 空白回落显式输入、无斜杠 ref 拆分
-    // （provider=""/id=ref/整串进 name）都已在内聚单点完成——本方法只把结构体投影成
+    // （provider=""/id=ref/整串进 name）都已在内聚单点完成——本方法只把结构体映射成
     // ModelInfo，不再各自 normalize + splitEngineModelRef 二次裁词形。双缺席（用户未
     // 指定且引擎裁决缺席）→ model undefined = record.model 条件留空（R4/D6-② 禁空串
-    // 哨兵，如实投影「用户未指定」，引擎走自身缺省解析如 zcode 的 defaultModelSelection）。
+    // 哨兵，如实映射「用户未指定」，引擎走自身缺省解析如 zcode 的 defaultModelSelection）。
     const split = validateModelForEngine(engine, engineModel);
     return {
       agent,
@@ -304,7 +304,7 @@ export class RecordAccess {
       // 契约变更④的无斜杠 ref（provider=""/id=ref）不得落成 "/ref" 或 "ref/" 畸形；
       // 续聊回读侧 splitEngineModelRef 对无斜杠串还原 provider=""/id=ref，往返自洽。
       // [R4/D6-②] 条件盖章：resolved.model 缺席（用户未指定）不落 model 键——
-      // record.model = undefined 如实投影，禁空串哨兵。
+      // record.model = undefined 如实映射，禁空串哨兵。
       ...(identity.resolved.model !== undefined
         ? { model: joinEngineModelRef(identity.resolved.model) }
         : {}),
@@ -324,7 +324,7 @@ export class RecordAccess {
       // conversation 派发参数已随波 5 删除）。idleTimeoutMs 对全 record 生效。
       idleTimeoutMs: opts.idleTimeoutMs,
       // P4 引擎留痕（D9①）：opts.engine 由引擎适配层写入（PiEngine.run
-      // 从 RunContext 回填；缺省 = pi 投影，存量调用方零感知）
+      // 从 RunContext 回填；缺省视为 pi，存量调用方零感知）
       engine: opts.engine,
       // [collect 退役] collect 路由选项不在 record 落值（原 sync 成员由
       // executeViaEngine 派发时点登记进协调器，随批机制删除——collect 值从未入 record）。
@@ -414,7 +414,7 @@ export class RecordAccess {
   }
 
   /** [perf] 单 record 详情懒加载（全量：eventLog/displayItems/result/turns/tokens）。
-   *  内存 running record 直接投影；磁盘 record 全量重建（per-file 缓存，stat 戳校验）。
+   *  内存 running record 直接派生；磁盘 record 全量重建（per-file 缓存，stat 戳校验）。
    *  返回 undefined：id 不存在于内存与磁盘。 */
   getFullRecord(id: string): SubagentRecord | undefined {
     return this.deps.getStore().getFullRecord(id);
@@ -429,11 +429,11 @@ export class RecordAccess {
     findLightById: (id) => this.deps.getStore().findLightById(id),
     collectRecords: (limit, statusFilter, rootFilter) =>
       // [a3rv 归因修复] 冷查兜底全扫必须 includeWorkflow:true——冷查是「按 id 定位
-      // action 候选」的治理语义，不是 list 展示消费面；[H2 W1] origin 展示过滤若在
+      // action 候选」的治理语义，不是 list 展示消费方；[H2 W1] origin 展示过滤若在
       // 此生效，归档出内存的 workflow record 会被滤掉 → 候选 undefined → 上转
       // 「not found or not owned」→ endedMessageGuard 误分流为「different session
       // tree」（同树也误报，a3rv 重验实测）。messageHandler 的 D7 workflow-origin
-      // 域边界守卫依赖冷查能定位到 workflow record；与 lookupRecordAnyState 的 [S2]
+      // 域边界检查依赖冷查能定位到 workflow record；与 lookupRecordAnyState 的 [S2]
       // 「查询能力必须与文案指引一致」同款论证。
       this.deps.getStore().collectRecords(limit, statusFilter, rootFilter, true),
     register: (record) => this.deps.getStore().register(record),
@@ -448,7 +448,7 @@ export class RecordAccess {
   /**
    * 按 id 查 record 并做归属校验（message/close action 的统一入口）。
    *
-   * 设计决策 3（归属守卫）：校验 record.rootSessionId 必须等于当前 session 的根 id
+   * 设计决策 3（归属检查）：校验 record.rootSessionId 必须等于当前 session 的根 id
    *（this.sessionRootId）。不匹配 / 不存在统一抛「not found or not owned」——不区分
    * 两种失败，防信息泄露（无法通过错误消息探测其他 session 的 subagent id）。
    *
@@ -463,7 +463,7 @@ export class RecordAccess {
    *   不参与判定。
    * @returns 可变 ExecutionRecord（message/close handler 直接操作）
    * @throws Error record 不存在 / 非本 session 所有（含恢复指引）
-   * @throws ResurrectDeniedError 命中可重连集但被 worktree/异进程活实例守卫拦截（自带完整行动语言）
+   * @throws ResurrectDeniedError 命中可重连集但被 worktree/异进程活实例检查拦截（自带完整行动语言）
    */
   getRecordForAction(id: string, opts?: { allowReconnect?: boolean }): ExecutionRecord {
     this.deps.assertReady();

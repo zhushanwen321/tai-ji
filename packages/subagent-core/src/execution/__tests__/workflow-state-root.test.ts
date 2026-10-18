@@ -146,7 +146,7 @@ describe("sweep 装配链端到端（runPendingReconcileSweepForService × 真�
     const agentDir = path.join(tmpDir, "agent");
     vi.stubEnv("PI_CODING_AGENT_DIR", agentDir);
     const stateDir = resolvePiWorkflowStateDir(); // 与生产装配同参
-    // [W2/V1 D6] sweep 判据源 = journal/manifest 终态证据——收编/帧落账与判据同源注入。
+    // [W2/V1 D6] sweep 判据源 = journal/manifest 终态证据——收编/帧写入 journal 记录与判据同源注入。
     setRunEventJournalDirForTest(stateDir);
     return { agentDir, stateDir };
   }

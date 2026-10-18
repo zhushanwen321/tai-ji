@@ -359,7 +359,7 @@ describe("sanitizeEngineDefaults（设计 D5）", () => {
 // ============================================================
 
 
-/** seed + 直读断言单源（D6 直读语义的装载腿：写盘后立即可读得同值）。 */
+/** seed + 直读断言单源（D6 直读语义的装载路径：写盘后立即可读得同值）。 */
 function seedEngineDefaults(tmpDir: string, engineDefaults: Record<string, string>): void {
   writeConfig(tmpDir, JSON.stringify({ version: 1, engineDefaults }));
   expect(readEngineDefaults(tmpDir)).toEqual(engineDefaults);

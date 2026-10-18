@@ -3,7 +3,7 @@
 // [U3 pi-workflow-run-resource-model] chat 域窗口实例接线单测（impl-plan u3 验收；
 // fake client，不拉真实进程）：
 //   1. 轮 idle 后 pi 窗口实例 dispose（finalizeRoundToIdle 收尾追加——chat 域轮终
-//      唯一编排收口，成功/失败两分支同经此处）；
+//      唯一编排汇总点，成功/失败两分支同经此处）；
 //   2. revive 后 respawn 新实例 + resume 续写（断言新实例登记 + 续写 run 请求携带
 //      resume 锚点——session 文件冷续写锚；实例层 respawn 与锚层续写并存不互斥）；
 //   3. shared-service 引擎（缺省网关判定）解析透传 registry 单例、轮 idle 不误杀
@@ -278,7 +278,7 @@ describe("chat 轮窗口实例接线（U3）", () => {
     expect(sharedPort.disposed).toBe(0);
   });
 
-  it("引擎身份域损坏守卫：record 带原生引擎锚却无 engine 字段 → 显式抛错（不按 pi 判定/派发）", () => {
+  it("引擎身份域损坏检查：record 带原生引擎锚却无 engine 字段 → 显式抛错（不按 pi 判定/派发）", () => {
     registerEngine("pi", () => new FakeWindowEnginePort("pi-registry"));
     const record = makeRunningRecord("u3-win-corrupt-engine");
     // 原生引擎锚在场（zcode 形态）但没有 engine 字段 = 写侧身份域丢失

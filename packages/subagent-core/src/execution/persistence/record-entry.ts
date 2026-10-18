@@ -7,7 +7,7 @@
 // record 事件文件（record-events.ts）。
 //
 // v1 全量快照形态（W16 [D4]）与其写点/读面已随「项目未上线、无 v1 数据」整体删除
-// （登记 §3.3，2026-09-30）——本文件不再持有 v1 接口、投影函数与版本分支：读侧按
+// （登记 §3.3，2026-09-30）——本文件不再持有 v1 接口、派生视图函数与版本分支：读侧按
 // v 判别只认当前版本，旧形态一律跳过而非猜测。
 //
 // customType 与既有 `subagent-identity`（session 文件首行身份 entry）同族命名
@@ -40,8 +40,8 @@ export type SubagentRecordEntryKind = (typeof SUBAGENT_RECORD_ENTRY_KINDS)[numbe
 /**
  * v2 注册条目 data（设计 D1 条目契约表 subagent-record 行·注册列）。
  *
- * 诞生时写一条：身份 + 家族链锚点。字段集对照三个消费面枚举核对（session-reader
- * 锚链 / runtime 投影构造集 / SubagentTab 展示集）——身份域一次定清。事件文件
+ * 诞生时写一条：身份 + 家族链锚点。字段集对照三个消费方枚举核对（session-reader
+ * 锚链 / runtime 派生视图构造集 / SubagentTab 展示集）——身份域一次定清。事件文件
  * 寻址不经本条目（D3：注册条目 id 直接定址 `<recordsDir>/<sa-id>.events`，无需
  * eventsPath 锚点字段）。
  */
@@ -73,7 +73,7 @@ export interface SubagentRecordRegisteredEntryData {
  *
  * 结束时写一条（收编幂等补写同一形态）：终局 + 摘要 + session-reader 锚链载荷。
  * result 完整文本一次性写（SubagentTab 重启视图依赖，D1 增量裁决）；统计终值与
- * record-settled 事件（record-events.ts）同源——条目是 journal 的投影锚，不是
+ * record-settled 事件（record-events.ts）同源——条目是 journal 的派生视图锚，不是
  * 第二事实源。
  */
 export interface SubagentRecordSettledEntryData {

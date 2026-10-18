@@ -201,7 +201,7 @@ export function resolveModel(
 
   // 3. 主 agent model（直接透传）。无显式 thinking → 兜底最高可用档。
   // [U1 D2 豁免口径] ctxModel 是运行时已验证的 ModelInfo 对象，豁免 registry 存在性
-  // 复查与 auth 校验；但孪生守卫同等适用（registry 含大小写孪生时拒绝放行，modelRefFromVerified）。
+  // 复查与 auth 校验；但孪生检查同等适用（registry 含大小写孪生时拒绝放行，modelRefFromVerified）。
   if (ctxModel) {
     modelRefFromVerified(ctxModel, modelRegistry);
     return {
@@ -228,7 +228,7 @@ export function resolveModel(
  * lookup + auth 校验 + thinkingLevel 裁决。显式指定但不可用 → 抛错（不降级）。
  *
  * [U1 D1] 模型串裁决经 assertCanonicalModelRef 单一入口（strip 后缀 → provider 精确 →
- * 全等匹配 → 孪生守卫；未命中同步抛错并附问句式纠错候选）。放行即与 registry 条目全等。
+ * 全等匹配 → 孪生检查；未命中同步抛错并附问句式纠错候选）。放行即与 registry 条目全等。
  *
  * 错误信息区分三类失败（避免误导排查方向）：
  *   - model 非全等（不存在/大小写不符/孪生歧义）→ assertCanonicalModelRef 的问句式报错

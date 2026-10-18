@@ -1,10 +1,10 @@
 // src/execution/__tests__/subagent-service-multiproc-guard.test.ts
 //
-// [u-svc / T5] 多进程共享文件守卫（subagent-service 侧两项）：
+// [u-svc / T5] 多进程共享文件检查（subagent-service 侧两项）：
 //   - T5①/PS-8：子进程 initSession 跳过 recoverOrphanRecords（env PI_SUBAGENT_SELF_RECORD_ID
 //     判子进程身份）——恢复机制假设「单扫描者」，env 贯穿让每个子进程都成了扫描者，
 //     兄弟记录 marker 缺失/超软超时被无关进程盖终态 sidecar；
-//   - T5③/PS-7b：running 候选冷查补 findForeignLiveInstance 探针守卫——异进程活实例在册
+//   - T5③/PS-7b：running 候选冷查补 findForeignLiveInstance 探针检查——异进程活实例在册
 //     时拒绝 resurrect + resume spawn（防双写者窗口）。
 //
 // mock 形态沿用 subagent-service-message-close.test.ts；alive-store mock（findForeignLiveInstance

@@ -6,7 +6,7 @@
 //   - 失败降级：无 identity 的损坏/异构文件不在扫描集 → 不重建不抛（sessions-index
 //     「损坏静默回退全扫」同款先例）；幸存 manifest 不覆写（幂等补缺）；
 //   - G2 词汇双写：manifest 写面（markFinalized/markCancelled/markSettledOut）
-//     旧 status 三态投影 + executionStatus/closedReason 并存。
+//     旧 status 三态派生视图 + executionStatus/closedReason 并存。
 //     [collect 退役] markBatchFinalized 写面已删，批成员 manifest 改为存量读侧容忍用例。
 
 import * as fs from "node:fs";
@@ -154,7 +154,7 @@ describe("[U4c/G1] rebuildIndexes 双通道 + S5 缓存可丢锚点", () => {
     expect(rebuilt).toBe(2);
 
     // manifest 重建产物：词汇双写（旧三态 + executionStatus）+ identity 富字段。
-    // 终态投影（settled 帧 → closed）由事件驱动的用例覆盖；本用例的被测对象是
+    // 终态派生视图（settled 帧 → closed）由事件驱动的用例覆盖；本用例的被测对象是
     // 「删掉 manifest/索引后 boot 仍能全量重建」这一机制本身。
     const first = JSON.parse(fs.readFileSync(path.join(recordsDir, "sa-closed.json"), "utf-8")) as Record<string, unknown>;
     expect(first.status).toBe("running");
@@ -227,7 +227,7 @@ describe("[U4c/G1] rebuildIndexes 双通道 + S5 缓存可丢锚点", () => {
     store.dispose();
   });
 
-  it("每 id 每进程一次守卫 + revive 复位（防高频查询放大磁盘写）", () => {
+  it("每 id 每进程一次检查 + revive 复位（防高频查询放大磁盘写）", () => {
     const fileA = path.join(sessionsDir, "20260912T000005_guard.jsonl");
     writeSessionJsonl(fileA, { id: "sa-guard", task: "guard task", startedAt: 1000, rootSessionId: "root-session" });
 
@@ -240,7 +240,7 @@ describe("[U4c/G1] rebuildIndexes 双通道 + S5 缓存可丢锚点", () => {
     store.collectRecords(100);
     expect(fs.existsSync(path.join(recordsDir, "sa-guard.json"))).toBe(false);
 
-    // /new /resume 复活（revive）复位守卫——「重开重判」语义
+    // /new /resume 复活（revive）复位检查——「重开重判」语义
     store.revive();
     store.collectRecords(100);
     expect(fs.existsSync(path.join(recordsDir, "sa-guard.json"))).toBe(true);
@@ -248,7 +248,7 @@ describe("[U4c/G1] rebuildIndexes 双通道 + S5 缓存可丢锚点", () => {
   });
 });
 
-describe("[U4c/G2] manifest 词汇双写——四写面旧三态投影 + executionStatus/closedReason 并存", () => {
+describe("[U4c/G2] manifest 词汇双写——四写面旧三态派生视图 + executionStatus/closedReason 并存", () => {
   let rootDir: string;
   let sessionsDir: string;
   let recordsDir: string;
@@ -283,7 +283,7 @@ describe("[U4c/G2] manifest 词汇双写——四写面旧三态投影 + executi
     store.dispose();
   });
 
-  it("markCancelled：终态投影同 markFinalized（双写字段齐）", () => {
+  it("markCancelled：终态派生视图同 markFinalized（双写字段齐）", () => {
     const store = new RecordStore(sessionsDir, undefined, undefined, recordsDir);
     const sessionFile = path.join(sessionsDir, "20260912T000007_cx.jsonl");
     fs.writeFileSync(sessionFile, "{}\n", "utf-8");
@@ -296,10 +296,10 @@ describe("[U4c/G2] manifest 词汇双写——四写面旧三态投影 + executi
     store.dispose();
   });
 
-  it("[collect 退役] 存量批成员 manifest（running 投影双写词汇）读侧容忍：重建投影可读", () => {
+  it("[collect 退役] 存量批成员 manifest（running 派生视图双写词汇）读侧容忍：重建派生视图可读", () => {
     // 批写侧已删，构造磁盘遗留形态（原批写面 batchManifestRecord 产物词汇）：
     // legacy status=running + executionStatus=running + closedReason 缺省 + 无
-    // 子 session 文件（manifest 源兜底投影路径）。
+    // 子 session 文件（manifest 源兜底派生视图路径）。
     fs.writeFileSync(
       path.join(recordsDir, "sa-batch-legacy.json"),
       JSON.stringify({
@@ -319,8 +319,8 @@ describe("[U4c/G2] manifest 词汇双写——四写面旧三态投影 + executi
     const store = new RecordStore(sessionsDir, new ManifestStore(recordsDir));
     const rec = store.collectRecords(10, "all").find((r) => r.id === "sa-batch-legacy");
     expect(rec).toBeDefined();
-    // manifest 源投影按 executionStatus 两态权威词读回；legacy running = §3.2.8
-    // 活跃成员词汇 → running 投影（活跃可见），不炸。
+    // manifest 源派生视图按 executionStatus 两态权威词读回；legacy running = §3.2.8
+    // 活跃成员词汇 → running 派生视图（活跃可见），不炸。
     expect(rec?.status).toBe("running");
     expect(rec?.agent).toBe("worker");
     expect(rec?.task).toBe("batch task");

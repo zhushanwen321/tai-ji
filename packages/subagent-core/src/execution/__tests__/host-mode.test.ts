@@ -3,7 +3,7 @@
 // W1 红灯测试：host-mode.ts 主进程运行模式分类工具。
 //
 // 测试对象：extensions/universal/subagent-workflow/src/execution/host-mode.ts（新建）
-// 契约来源：.fix-plans/00-master-summary.md §一 冲突 4 + §2.5（W4 守卫消费点）
+// 契约来源：.fix-plans/00-master-summary.md §一 冲突 4 + §2.5（W4 检查消费点）
 //
 // 三个导出：
 //   - resolveHostMode(mode): ExtensionMode | undefined → "tui" | "gui" | "headless"

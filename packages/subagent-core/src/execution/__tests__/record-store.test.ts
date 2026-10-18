@@ -229,7 +229,7 @@ describe("RecordStore", () => {
       expect(full?.status).toBe("idle"); // 单规则在全量路径同样套用
     });
 
-    it("statusFilter='running' 只剩内存 running（§3.2.4：磁盘重建恒 idle，running 只在轮次在飞时有意义）", () => {
+    it("statusFilter='running' 只剩内存 running（§3.2.4：磁盘重建恒 idle，running 只在轮次在途时有意义）", () => {
       const sessionFile = path.join(tmpDir, "2026-01-01-uuid-a.jsonl");
       writeSessionJsonl(sessionFile, {
         id: "bg-1", agent: "worker", mode: "background", task: "do it", startedAt: 5000,
@@ -312,7 +312,7 @@ describe("RecordStore", () => {
   describe("compareRecords 排序", () => {
     it("status priority（running < closed）", () => {
       const store = new RecordStore(tmpDir);
-      // 被测对象 = compareRecords 的状态优先级：两条内存记录即可表达（磁盘终态投影
+      // 被测对象 = compareRecords 的状态优先级：两条内存记录即可表达（磁盘终态派生视图
       // 已由事件流承载，与本用例的比较逻辑无关——不再借 sidecar fixture 造形态）。
       const running = makeRecord({ id: "run-1", mode: "background", startedAt: 3000, status: "running" });
       const closed = makeRecord({
@@ -435,9 +435,9 @@ describe("RecordStore", () => {
 
     // ── 输入 2: 旧 finalized → idle + closedReason/stopReason=reason（上行映射）──
     // ── 输入 2b: 旧 finalized 空 reason（死因不可考）→ disconnected 兜底 ──
-    // ── 输入 3: 旧 cancelled → idle + closedReason=cancelled（legacy 投影判据）
+    // ── 输入 3: 旧 cancelled → idle + closedReason=cancelled（legacy 派生视图判据）
     //    + stopReason=interrupted（§3.2.4 上行映射）──
-    // ── 输入 4: 无 sidecar → idle + interrupted-by-restart（崩溃在途 / 尚未收口）──
+    // ── 输入 4: 无 sidecar → idle + interrupted-by-restart（崩溃在途 / 尚未收尾）──
     it("无任何 sidecar → idle + interrupted-by-restart（§3.2.4「文件不存在」行；.alive 不影响判定）", () => {
       const sessionFile = writeBaseSession();
       // .alive 在持（异宿主探活形态）不参与 status 判定——探活读面走 findForeignLiveInstance 现查
@@ -614,7 +614,7 @@ describe("RecordStore", () => {
       expect(found?.round).toBe(2);
     });
 
-    it("[② 读侧换源] 轮终收条之后又轮开始（在途续轮）→ 统计不投影（0/undefined，round 取当前轮）", () => {
+    it("[② 读侧换源] 轮终收条之后又轮开始（在途续轮）→ 统计不派生（0/undefined，round 取当前轮）", () => {
       const sessionFile = path.join(tmpDir, "round-idle-then-start.jsonl");
       writeSessionJsonl(sessionFile, {
         id: "bg-1", agent: "w", mode: "background", task: "t",
@@ -638,7 +638,7 @@ describe("RecordStore", () => {
       const found = store.collectRecords(100, "all", "sess-A").find((r) => r.id === "bg-1");
       expect(found?.status).toBe("idle"); // 重建单规则兜底（无收条 → interrupted-by-restart 展示）
       expect(found?.stopReason).toBe("interrupted-by-restart");
-      // 上一轮的统计不投影（lastEvent 守卫）；round 取当前轮（round-started 携带）。
+      // 上一轮的统计不派生（lastEvent 检查）；round 取当前轮（round-started 携带）。
       expect(found?.endedAt).toBeUndefined();
       expect(found?.turns).toBe(0);
       expect(found?.totalTokens).toBe(0);
@@ -669,7 +669,7 @@ describe("RecordStore", () => {
       } as unknown as ManifestRecord;
     }
 
-    /** Mock ManifestStore 让测试不依赖 fs 路径 + isValidManifest 守卫。
+    /** Mock ManifestStore 让测试不依赖 fs 路径 + isValidManifest 检查。
      *  source/target 类型不兼容是 intentional（ManifestStore 有多个方法，测试仅需 listAllSync），
      *  `as unknown as ManifestStore` 是 vitest mock 标准 pattern。*/
     function makeManifestStoreMock(manifests: ManifestRecord[]): ManifestStore {
@@ -682,7 +682,7 @@ describe("RecordStore", () => {
 
     it("collectRecords 跳过越界 status 时调用 pi.appendEntry('subagent:manifest-invalid-status', ...)", () => {
       const pi = { appendEntry: vi.fn() };
-      // Mock ManifestStore：listAllSync 返回损坏 manifest，绕开真实 fs 路径与 isValidManifest 守卫。
+      // Mock ManifestStore：listAllSync 返回损坏 manifest，绕开真实 fs 路径与 isValidManifest 检查。
       const manifestStore = makeManifestStoreMock([brokenManifest()]);
       const store = new RecordStore(tmpDir, manifestStore, pi);
 
@@ -757,7 +757,7 @@ describe("RecordStore", () => {
   // ============================================================
   // [U3 / §3.2.4 + 登记 §3.3] 孤儿恢复两入口：journal 在场收编（recoverOrphanRecords）
   // 与 entry-only 纠偏（recoverEntryOnlyOrphans）——一律保留 idle，锚在等 revive。
-  // 播种全部走 v2 两条款（注册条目定界 + 非 interrupted 终态条目构成收口证据）。
+  // 播种全部走 v2 两条款（注册条目定界 + 非 interrupted 终态条目构成收尾证据）。
   // ============================================================
   describe("recoverOrphanRecords 孤儿 entry 纠偏", () => {
     /** 播种用 SubagentRecord（孤儿场景缺省 rootSessionId=sess-orphan）。 */
@@ -868,7 +868,7 @@ describe("RecordStore", () => {
       expect(store.getFullRecord("sa-orphan-sp5")?.result).toBe("final answer text");
     });
 
-    it("在飞残留 running（无产出）→ 收编 idle（[U5/D4] resumable 字段退役——可续聊资格由 idle 直读承载）", () => {
+    it("在途残留 running（无产出）→ 收编 idle（[U5/D4] resumable 字段退役——可续聊资格由 idle 直读承载）", () => {
       const sessionFile = path.join(tmpDir, "orphan-resumable.jsonl");
       writeSessionJsonl(sessionFile, {
         id: "sa-orphan-res", agent: "worker", mode: "background", task: "resumable orphan",
@@ -951,7 +951,7 @@ describe("RecordStore", () => {
       expect(fs.existsSync(`${sessionFile}.state`)).toBe(false);
     });
 
-    it("entry 已收口（注册 + 非 interrupted 终态）/ 无 entry 残留 → 不进判定（零 append）", () => {
+    it("entry 已收尾（注册 + 非 interrupted 终态）/ 无 entry 残留 → 不进判定（零 append）", () => {
       const closedFile = path.join(tmpDir, "orphan-closed.jsonl");
       writeSessionJsonl(closedFile, {
         id: "sa-orphan-4", agent: "worker", mode: "background", task: "already settled",
@@ -963,7 +963,7 @@ describe("RecordStore", () => {
         id: "sa-orphan-6", agent: "worker", mode: "background", task: "no main entry",
         startedAt: 4500, rootSessionId: "sess-orphan",
       });
-      // sa-orphan-6 的收口证据 = 注册 + 非 interrupted 终态条目；journal 也在场
+      // sa-orphan-6 的收尾证据 = 注册 + 非 interrupted 终态条目；journal 也在场
       //（终态证据判据回归则收编被放行 → 本用例红）。
       seedRecordJournal("sa-orphan-6", { task: "no main entry", startedAt: 4500 });
       const mainFile = writeMainSession([
@@ -1008,7 +1008,7 @@ describe("RecordStore", () => {
       expect(entry?.data.error).toBeUndefined();
     });
 
-    it("有子文件锚 / 末条已收口 / 他 session 的 entry-born id 不进判定", () => {
+    it("有子文件锚 / 末条已收尾 / 他 session 的 entry-born id 不进判定", () => {
       const anchoredFile = path.join(tmpDir, "orphan-anchored.jsonl");
       writeSessionJsonl(anchoredFile, {
         id: "sa-anchored", agent: "worker", mode: "background", task: "has file",
@@ -1113,7 +1113,7 @@ describe("RecordStore", () => {
       // undefined 值的键名仍在；真实 JSONL 会丢 undefined 值键，此处对齐生产行为。
       const data = asEntryData(JSON.parse(JSON.stringify(appended[0]?.data)));
       // [W1/D1] v2 注册条目字段集 = 身份与锚点（D1 条目契约表）；turns/status/
-      // eventLog/displayItems 等运行态与死字节零携带（turns 投影停写点）。
+      // eventLog/displayItems 等运行态与死字节零携带（turns 派生停写点）。
       expect(Object.keys(data).sort()).toEqual([
         "agent", "depth", "id", "kind", "origin",
         "rootSessionId", "slug", "startedAt", "task", "v",
@@ -1159,7 +1159,7 @@ describe("RecordStore", () => {
       const r = makeRecord({ round: 1 });
       store.reportRecordTransition(r);
 
-      // v1 快照 entry（turns/engineHandle 过程投影）停写——可观测面移交事件文件
+      // v1 快照 entry（turns/engineHandle 过程派生视图）停写——可观测面移交事件文件
       // （record-bound 帧引擎域感知，record-store-v2-journal.test.ts 覆盖）。
       expect(appended).toHaveLength(0);
     });
@@ -1246,7 +1246,7 @@ describe("model 水合往返（record-store-rebuild 读侧归一）", () => {
     { label: "无 model（注册条目 + 无终态条目，新写侧缺席形态）", model: undefined, expected: undefined },
     { label: "model=\"\"（旧写侧空串残留）", model: "", expected: undefined },
     { label: "model 有值（显式留痕）", model: "prov/model-1", expected: "prov/model-1" },
-  ])("entry 投影：$label → $expected", ({ model, expected }) => {
+  ])("entry 派生视图：$label → $expected", ({ model, expected }) => {
     const registered = v2RegisteredEntry(
       makeSubagentRecord({ id: "sa-model-roundtrip", rootSessionId: "sess-m" }),
     );
@@ -1267,7 +1267,7 @@ describe("model 水合往返（record-store-rebuild 读侧归一）", () => {
     expect(rec?.model).toBe(expected);
   });
 
-  it("manifest 投影：model 缺失/空串 → undefined；有值 → 透传", () => {
+  it("manifest 派生视图：model 缺失/空串 → undefined；有值 → 透传", () => {
     const base: ManifestRecord = {
       id: "sa-mani-m",
       rootSessionId: "sess-m",
@@ -1424,7 +1424,7 @@ describe("record 写侧 v2：事件写点映射逐点（W1 D3 表对照）", () 
       epoch: 0,
     });
 
-    // bound manifest 物化（D2 决策 9）：running 投影落 records/<id>.json。
+    // bound manifest 物化（D2 决策 9）：running 派生视图落 records/<id>.json。
     const manifestPath = path.join(recordsDir, "sa-v2-bound.json");
     expect(fs.existsSync(manifestPath)).toBe(true);
     expect(JSON.parse(fs.readFileSync(manifestPath, "utf8") as string)).toMatchObject({
@@ -1513,7 +1513,7 @@ describe("record 写侧 v2：事件写点映射逐点（W1 D3 表对照）", () 
       },
     });
 
-    // 幂等：settled 后重复终局写点（archive 真终局）不再追加——fold settled 守卫。
+    // 幂等：settled 后重复终局写点（archive 真终局）不再追加——fold settled 检查。
     rec.endedAt = Date.now();
     store.archive(rec);
     events = await v2ScanEvents(recordsDir, "sa-v2-settled");
@@ -1600,7 +1600,7 @@ describe("record 写侧 v2：事件写点映射逐点（W1 D3 表对照）", () 
     store.reportRecordTransition(rec);
     store.markRoundStarted("sa-v2-seq");
     store.markRoundIdle("sa-v2-seq", { kind: "failed", reason: "boom" });
-    // 下一轮在飞中断：round-started → markSettled（CAS 仅 running 可收口）。
+    // 下一轮在途中断：round-started → markSettled（CAS 仅 running 可收尾）。
     store.markRoundStarted("sa-v2-seq");
     store.markSettled(rec, "interrupted-by-parent");
 
@@ -1701,7 +1701,7 @@ describe("record-created 帧承载绑定侧独有字段（model / thinkingLevel 
 });
 
 // ============================================================
-// 折叠 → 终态收条投影（.state sidecar 退场的桥，① 读侧换源）
+// 折叠 → 终态收条派生视图（.state sidecar 退场的桥，① 读侧换源）
 // ============================================================
 
 describe("stateMarkerFromFold（折叠状态 → 终态收条）", () => {
@@ -1756,7 +1756,7 @@ describe("stateMarkerFromFold（折叠状态 → 终态收条）", () => {
   });
 });
 
-describe("[② 读侧换源] receiptStatisticsFromFold / baselineStatisticsFromFold（统计域投影）", () => {
+describe("[② 读侧换源] receiptStatisticsFromFold / baselineStatisticsFromFold（统计域派生视图）", () => {
   const created = {
     type: "record-created" as const,
     seq: 1,
@@ -1801,14 +1801,14 @@ describe("[② 读侧换源] receiptStatisticsFromFold / baselineStatisticsFromF
     expect(stats).toEqual({ round: 1, turns: 3, totalTokens: 450, endedAt: 2000 });
   });
 
-  it("收条形：轮终收条之后又有轮开始（在途续轮）→ 统计不投影、round 仍携带", () => {
+  it("收条形：轮终收条之后又有轮开始（在途续轮）→ 统计不派生、round 仍携带", () => {
     const stats = receiptStatisticsFromFold(
       foldRecordEvents([created, roundIdle, { type: "record-round-started", seq: 3, ts: 3000, round: 2, epoch: 0 }]),
     );
     expect(stats).toEqual({ round: 2, turns: undefined, totalTokens: undefined, endedAt: undefined });
   });
 
-  it("收条形：无收条 / 无折叠 → 全 undefined（在途中断不误投影）", () => {
+  it("收条形：无收条 / 无折叠 → 全 undefined（在途中断不误派生视图）", () => {
     expect(receiptStatisticsFromFold(undefined)).toEqual({
       round: undefined,
       turns: undefined,
@@ -1823,7 +1823,7 @@ describe("[② 读侧换源] receiptStatisticsFromFold / baselineStatisticsFromF
     });
   });
 
-  it("基线形（baselineStatistics）：无 last-event 守卫——轮中崩溃取最近轮终快照（revive 水合语义）", () => {
+  it("基线形（baselineStatistics）：无 last-event 检查——轮中崩溃取最近轮终快照（revive 水合语义）", () => {
     // round-idle 之后又 round-started（轮中崩溃形态）：基线仍取上一条 round-idle。
     const inFlightCrash = foldRecordEvents([
       created,
@@ -1891,7 +1891,7 @@ describe("[④ 纯索引水位] manifest 水位（写侧嵌入 + 读侧校验）
     });
   }
 
-  it("markSettled 物化嵌 <id>.events 水位（写点构造性新鲜——先事件后投影写序）", () => {
+  it("markSettled 物化嵌 <id>.events 水位（写点构造性新鲜——先事件后派生视图写序）", () => {
     const store = newWmStore();
     const rec = makeRecord({ id: "sa-wm" });
     store.register(rec);
@@ -1901,19 +1901,19 @@ describe("[④ 纯索引水位] manifest 水位（写侧嵌入 + 读侧校验）
       eventsStamp?: { mtimeMs: number; size: number };
     };
     expect(manifest.eventsStamp).toBeDefined();
-    // 水位 = settled 帧落盘后的事件文件 stat（先事件后投影 → 构造性新鲜）。
+    // 水位 = settled 帧落盘后的事件文件 stat（先事件后派生视图 → 构造性新鲜）。
     const events = fs.statSync(path.join(wmRecords, "sa-wm.events"));
     expect(manifest.eventsStamp?.size).toBe(events.size);
     expect(manifest.eventsStamp?.mtimeMs).toBe(events.mtimeMs);
     store.dispose();
   });
 
-  it("水位不符（半更新窗）→ manifest 源跳过（陈旧快照不投影）；无水位存量 → 照常投影", () => {
+  it("水位不符（半更新窗）→ manifest 源跳过（陈旧快照不派生）；无水位存量 → 照常派生", () => {
     seedSettledRecord("sa-wm-fresh");
     seedSettledRecord("sa-wm-stale");
     seedSettledRecord("sa-wm-legacy");
 
-    // fresh：手写带正确水位的 manifest → 投影。
+    // fresh：手写带正确水位的 manifest → 派生视图。
     const events = fs.statSync(path.join(wmRecords, "sa-wm-fresh.events"));
     fs.writeFileSync(
       manifestPath("sa-wm-fresh"),
@@ -1934,7 +1934,7 @@ describe("[④ 纯索引水位] manifest 水位（写侧嵌入 + 读侧校验）
       }),
       "utf-8",
     );
-    // legacy：无水位（存量形态）→ 照常投影（宽容存量，行为零变化）。
+    // legacy：无水位（存量形态）→ 照常派生（宽容存量，行为零变化）。
     fs.writeFileSync(
       manifestPath("sa-wm-legacy"),
       JSON.stringify({

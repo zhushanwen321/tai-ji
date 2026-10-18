@@ -5,13 +5,13 @@
 // [W3 改写] 投递链路协议化：deliverChatMessage → pi EnginePort（registry cli 形态
 // port 的替身 registerFakePiEngine）。
 // [H1 U2/U6 改写] 每轮 = 新 run + resume 锚点（ctx.resume，键切换后唯一会话形态键），
-// Continuation 单飞承接防双写者守卫（原 resumeColdRound resumesInFlight 守卫退役）；
+// Continuation 单飞承接防双写者检查（原 resumeColdRound resumesInFlight 检查退役）；
 // 轮末分流 = run 应答驱动（onRunSettled，D7）——[H1 U6] 旧 interact 热路径/冷路径
 // 分流与 settleChatRoundFromResponse 结算载体的断言段随载体退役删除。
 // 原 inproc stdin 字节断言（sendPromptCommand/streamingBehavior/EPIPE 写后死检测）
 // 随 inproc pi 引擎目录 删除归 pi-subagent-cli 包内测试。
 //
-// 本文件断言的编排语义（守卫/状态迁移/单飞隔离）与改线前逐点同构。
+// 本文件断言的编排语义（检查/状态迁移/单飞隔离）与改线前逐点同构。
 
 import * as fs from "node:fs";
 import * as os from "node:os";
@@ -75,7 +75,7 @@ describe("会话形态续聊投递（run + resume 锚点）", () => {
     // [U4] 锚可解析性要求文件真实在盘（isAnchorResolvable = existsSync），否则续聊
     // 误触 reopen 降级——fixture 补实体空文件。
     fs.writeFileSync(record.sessionFile, "{}\n", "utf-8");
-    // [U2a/B5] 轮终簿记归口 store.markRoundIdle（按 id 查内存）——record 须 register 进
+    // [U2a/B5] 轮终簿记收敛 store.markRoundIdle（按 id 查内存）——record 须 register 进
     // store（生产链路 getRecordForAction/run 流程的 record 恒在内存，测试补齐同形态）。
     (service as unknown as { store: { register: (r: ExecutionRecord) => void } }).store.register(record);
   });
@@ -117,7 +117,7 @@ describe("会话形态续聊投递（run + resume 锚点）", () => {
   });
 
   it("[P3 ⛔ two-state-convergence U4] chat 轮终翻 idle → message → revive 过站直通：status 翻 running + 恰一条迁移 entry + 无其他簿记变更（round/closedReason 不动）", async () => {
-    // 前置：让 record 先真实轮终一轮（写面翻边 idle 形态——markRoundIdle 收口）。
+    // 前置：让 record 先真实轮终一轮（写面翻边 idle 形态——markRoundIdle 收尾）。
     // 等 stopReason（轮终产物）而非 round——makeIdleRecord 预置 round=1，round 判据
     // 会在 settle 前立即通过。
     await service.chatActions.deliverChatMessage(record, "first round");
@@ -129,7 +129,7 @@ describe("会话形态续聊投递（run + resume 锚点）", () => {
     expect(record.closedReason).toBeUndefined();
     expect(record.stopReason).toBe("completed");
 
-    // revive 过站守卫自检：锚可解析（sessionFile 实体文件 beforeEach 已落盘）。
+    // revive 过站检查自检：锚可解析（sessionFile 实体文件 beforeEach 已落盘）。
     // [modeless 波1] 升级 gate 分支消亡——引擎轴资格与 record 形态无关。
 
     // message 前清迁移上报计数——「恰一条」锚定 message 触发的 entry 序列。快照式
@@ -146,7 +146,7 @@ describe("会话形态续聊投递（run + resume 锚点）", () => {
 
     await service.chatActions.deliverChatMessage(record, "revive after idle round");
 
-    // revive 过站：tryEnterRunning 翻回 running（dispatchRoundGuarded 守卫由此放行）
+    // revive 过站：tryEnterRunning 翻回 running（dispatchRoundGuarded 检查由此放行）
     expect(record.status).toBe("running");
     // 迁移 entry 精确断言（R3——断言「恰一条」而非「无副作用」）：message 链共落两条
     // 设计内 entry——①revive 迁移 entry（reviveClosedRecord 无条件落，携带上轮 result）
@@ -156,9 +156,9 @@ describe("会话形态续聊投递（run + resume 锚点）", () => {
     expect(reviveEntries).toHaveLength(1);
     expect(reviveEntries[0]!.result).toBe("first round text");
     expect(startedEntries).toHaveLength(1);
-    // 无其他簿记变更：round 不推进（revive 格不累加，轮始 markRoundStarted 才归口）、
+    // 无其他簿记变更：round 不推进（revive 格不累加，轮始 markRoundStarted 才收敛）、
     // closedReason 保持清除态。result 在 message 返回时点已被轮始清点
-    //（markRoundStarted 归口——isStreaming 公式要求），revive 过站瞬间 result 保留的
+    //（markRoundStarted 收敛——isStreaming 公式要求），revive 过站瞬间 result 保留的
     // 证据由上方 revive entry 快照承载（e.result = "first round text"）。
     expect(record.round).toBe(roundBefore);
     expect(record.closedReason).toBeUndefined();
@@ -182,7 +182,7 @@ describe("会话形态续聊投递（run + resume 锚点）", () => {
 
   it("[U3 / §3.2.4 桥接] 新侧 idle（closedReason undefined，轮间空闲）→ 直接接管派发，不硬拒", async () => {
     record.status = "idle";
-    // markSettled 轮收口 / 磁盘重建单规则产出的 idle 无旧终态遗留位——message 到达
+    // markSettled 轮收尾 / 磁盘重建单规则产出的 idle 无旧终态遗留位——message 到达
     // 直接翻回 running 派发新轮（万物可续）
     expect(record.closedReason).toBeUndefined();
     await service.chatActions.deliverChatMessage(record, "msg after settle");
@@ -259,14 +259,14 @@ describe("deliverChatMessage（chatMode 统一投递 → Continuation 派发）"
 });
 
 // ============================================================
-// 续聊并发守卫（review round2 MF1：同 turn 批量两条 message 双 kickOff 双 spawn）
+// 续聊并发检查（review round2 MF1：同 turn 批量两条 message 双 kickOff 双 spawn）
 // ============================================================
 // 复现链（reviewer 探针实证）：pi 对同一条 assistant message 的 tool calls 顺序执行，
 // tool1 的投递在续聊返回即 resolve——早于协议 run 完成（pool.acquire await 等
-// 异步点）；tool2 立即执行 → 第二次 kickOff。v4 两态收敛后的 status 守卫对
+// 异步点）；tool2 立即执行 → 第二次 kickOff。v4 两态收敛后的 status 检查对
 // running-resumable record 恒放行 → 两次 kickOff → 两个 pi 子进程以 --session 同一
 // JSONL 双写 + 第一个进程脱离记账成孤儿。
-describe("deliverChatMessage 并发守卫（review round2 MF1）", () => {
+describe("deliverChatMessage 并发检查（review round2 MF1）", () => {
   let agentDir: string;
   let service: SubagentService;
   let record: ExecutionRecord;
@@ -301,7 +301,7 @@ describe("deliverChatMessage 并发守卫（review round2 MF1）", () => {
     await vi.waitFor(() => expect(fake.runs.length).toBe(1));
 
     // 第二条：run 在途 → [H1 U2 / D2 打断语义] abort 在途轮 signal + 入队（不打断单飞、
-    // 不二次派发——修复前双 kickOff 双写 session 的守卫由 Continuation 单飞构造性承接）
+    // 不二次派发——修复前双 kickOff 双写 session 的检查由 Continuation 单飞构造性承接）
     await expect(service.chatActions.deliverChatMessage(record, "second msg")).resolves.toBeUndefined();
     expect(fake.runs.length).toBe(1);
     const continuation = (
@@ -319,7 +319,7 @@ describe("deliverChatMessage 并发守卫（review round2 MF1）", () => {
     expect(fake.runs[1]!.task.prompt).toBe("second msg");
   });
 
-  it("守卫是 record 级：A 在途轮不拦截 B 的 message", async () => {
+  it("检查是 record 级：A 在途轮不拦截 B 的 message", async () => {
     const recordB = makeIdleRecord("sa-chat-b");
     recordB.sessionFile = path.join(agentDir, "fake-session-b.jsonl");
     // [U2a/B5] 同 beforeEach——recordB 须 register 进 store（markRoundIdle 内存查）。
@@ -335,8 +335,8 @@ describe("deliverChatMessage 并发守卫（review round2 MF1）", () => {
 
     fake.runs[0]!.settle({ content: "A done" });
     fake.runs[1]!.settle({ content: "B done" });
-    // 轮终簿记完成（Continuation 无全局在途集合——终态守卫由 per-record 实例承载），
-    // 断言两轮各自 round+1 即单飞收口的可观察结果。
+    // 轮终簿记完成（Continuation 无全局在途集合——终态检查由 per-record 实例承载），
+    // 断言两轮各自 round+1 即单飞收尾的可观察结果。
     await vi.waitFor(() => expect(record.round).toBe(2));
     await vi.waitFor(() => expect(recordB.round).toBe(2));
   });

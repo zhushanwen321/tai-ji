@@ -51,7 +51,7 @@ const logger = getLogger("subagents");
  *  [R1] 常量 SSOT 随消费主体（initSession/initExecContextBaseline/rootCwd 推导）自壳文件
  *  迁入本聚合并 export——壳经 import 消费（壳→聚合正向合法），禁聚合→壳反向 import（D4）。
  *  [R6/D-R3-2] ENV_SELF_RECORD_ID 因 record-access 跨聚合消费归位 service-constants.ts
- *  （消费主体单一且在本聚合时留驻，跨聚合时迁叶子文件——消除 R5 台账合法边①）。 */
+ *  （消费主体单一且在本聚合时留驻，跨聚合时迁叶子文件——消除 R5 登记清单合法边①）。 */
 /** [§2.7] 键名单源 = SDK `identity-env.ts`。 */
 export const ENV_ROOT_SESSION_ID = SUBAGENT_IDENTITY_ENV.rootSessionId;
 export const ENV_DEPTH = SUBAGENT_IDENTITY_ENV.depth;
@@ -89,7 +89,7 @@ export interface SubagentServiceSessionInit {
   mainSessionFile?: string;
   /** UI streaming sink（ctx.ui.setWidget），用于 background text_delta 转发。 */
   streamSink?: StreamSink;
-  /** 主进程运行模式（W4 守卫：headless 不注入 ask_user RPC 提示词）。
+  /** 主进程运行模式（W4 检查：headless 不注入 ask_user RPC 提示词）。
    *  initSession 读取后存入 this.sessionMode，buildSessionRunnerContext 透传给 session-runner。 */
   mode?: ExtensionMode;
   /** UI 请求 handler（session 级覆盖进程级）。
@@ -248,12 +248,12 @@ export class SessionBaselines {
   }
 
   // ── 壳只读透传面（getter）──
-  // [R1 打样模式 2] 壳侧同名私有 getter 逐个透传到这些成员；写点全部收口在本聚合
+  // [R1 打样模式 2] 壳侧同名私有 getter 逐个透传到这些成员；写点全部收敛在本聚合
   // 方法内（D1 单写者）。getter 与存储字段分离 = 壳/测试只读，防写路径旁路聚合。
 
   get pi(): PiLike | null {
-    // [§1.4 (a)] 代际校验消费面：绑定被作废（session 替换窗 / dispose 后）时一律返回
-    // null——late-bound 读面是把句柄传进 pi 调用的唯一通道，此处收口即全部
+    // [§1.4 (a)] 代际校验消费点：绑定被作废（session 替换窗 / dispose 后）时一律返回
+    // null——late-bound 读面是把句柄传进 pi 调用的唯一通道，此处收敛即全部
     // `pi?.` / `getPi()?.` 调用点不再触达失效句柄（PS-30 assertActive 抛错的根源消窗口）。
     if (this._piUsable) return this._pi;
     if (this._pi !== null && this.staleReadLoggedGeneration !== this._piGeneration) {
@@ -307,7 +307,7 @@ export class SessionBaselines {
     this._mainSessionFile = init.mainSessionFile;
     this._streamSink = init.streamSink ?? null;
     this._isIdleFn = init.isIdle;
-    // 读取 mode（W4 守卫透传给 session-runner）+ session 级 handler 覆盖
+    // 读取 mode（W4 检查透传给 session-runner）+ session 级 handler 覆盖
     //（[D4-④] initSession.uiRequestHandler 是唯一注入入口；三态语义见接口注释——
     //null = 显式清空，承载原 setUiRequestHandler(undefined) 语义）。
     this._uiObservability.setMode(init.mode);
@@ -402,7 +402,7 @@ export class SessionBaselines {
   /**
    * [§1.4 (a)] 显式作废 pi 句柄绑定（可用性旗标翻假 + 同步作废 RecordStore 的句柄快照）。
    *
-   * 两个调用面（语义都是「pi 会话替换已发生或即将发生，旧句柄不再可信」）：
+   * 两个调用点（语义都是「pi 会话替换已发生或即将发生，旧句柄不再可信」）：
    *   - dispose（quit/new/resume/fork 的 session_shutdown 链）：壳 dispose 编排末尾调用；
    *   - reload 分支（workflow-events session_shutdown reason=reload）：reload 有意跳过
    *     dispose（在途 run 交给 reload 后 adoption 接管），但旧句柄的可用性判定必须作废
@@ -416,7 +416,7 @@ export class SessionBaselines {
     if (!this._piUsable) return; // 已作废：幂等（不重复留痕）
     this._piUsable = false;
     // RecordStore 持有句柄快照（initSession setPi 注入），不随 getter 走——作废时同步
-    // 置空，其 7 处 `pi?.appendEntry?.` 条目写点与 getter 消费面同规则降级跳过。
+    // 置空，其 7 处 `pi?.appendEntry?.` 条目写点与 getter 消费方同规则降级跳过。
     this.deps.getStore().setPi(null);
     logger.debug(`[subagents] pi binding invalidated: ${reason} — reads return null until next initSession`);
   }

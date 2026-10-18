@@ -131,7 +131,7 @@ describe("startupSweep（机制退役设计 §4.1 假树直调）", () => {
       expect(interrupted.reason).toBe("runtime startup sweep: process-local run without live executor");
     }
     // manifest 半边：不物化（interrupted 非终局——manifest-write 仅 terminal 输出，
-    // [D2] 暂停态可 resume，终局投影不落盘）
+    // [D2] 暂停态可 resume，终局派生视图不落盘）
     expect(await readRunTerminalManifest(stateDir, runId)).toBeNull();
     // 反向断言：全树 diff——零新增文件、修改仅 journal 追加一个文件；session
     // 文件 / state 快照零新增零修改（无终态条目 / 注销条目 / manifest 写入的
@@ -267,7 +267,7 @@ describe("startupSweep（机制退役设计 §4.1 假树直调）", () => {
 
 // ── 检查点 8 三形态（[D16⑥] 枚举换源实测：坏链 / 空 record 流 / v1 旧形态目录）──
 //
-// 枚举判据换源（快照行 status → fold record 读折叠投影）后的行为核实：坏链与
+// 枚举判据换源（快照行 status → fold record 读折叠派生视图）后的行为核实：坏链与
 // 空流候选照进（判定核对「journal 在无 settled 帧」保守判 running）但收编判定
 // 拦下（skippedBrokenChain / skippedMissing——零写入）；v1 旧形态目录不进候选
 //（枚举空集——构造性跳过，其 warn 留痕断言在 pi-host-run-store.test.ts）。
@@ -313,7 +313,7 @@ describe("startupSweep 枚举换源三形态（[D16⑥] 检查点 8）", () => {
     const result = await startupSweep(() => agentRoot, log);
 
     // 判定核：文件在、无 settled 帧 → 保守 running 进收编判定；scan 空流 →
-    // skippedMissing（无事件证据——从未落账或已清理），零写入
+    // skippedMissing（无事件证据——从未写入 journal 记录或已清理），零写入
     expect(result).toMatchObject({ adopted: 0, skipped: 1, errors: [] });
     expect(readFileSync(recordPath, "utf8")).toBe("");
     expect(log.warn).not.toHaveBeenCalled();
