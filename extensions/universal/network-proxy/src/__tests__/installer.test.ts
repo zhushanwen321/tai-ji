@@ -46,11 +46,15 @@ function createDeps(
 	sharedOriginal = new FakeDispatcher("original"),
 ) {
 	const original = sharedOriginal;
+	// get/set 连通同一槽变量（与真实全局槽语义一致：set 改写 get 的返回）——
+	// 槽位归属核查（installer 同指纹分支）依赖该语义判「槽上是谁」。
+	let slot: FakeDispatcher = original;
 	const setCalls: FakeDispatcher[] = [];
 	const errors: string[] = [];
 	const deps: InstallerDeps & { original: FakeDispatcher; setCalls: FakeDispatcher[]; errors: string[] } = {
-		getGlobalDispatcher: () => original,
+		getGlobalDispatcher: () => slot,
 		setGlobalDispatcher: (d) => {
+			slot = d as FakeDispatcher;
 			setCalls.push(d as FakeDispatcher);
 		},
 		buildProxy,
@@ -176,6 +180,71 @@ describe("applyNetworkProxyConfig 状态机", () => {
 		const state: InstalledState | null = applyNetworkProxyConfig(config(), null, deps);
 		expect(deps.setCalls[0]).toBe(state?.current);
 		expect(vi.isMockFunction(deps.onError)).toBe(false);
+	});
+
+	// ── 槽位归属核查（pi 启动序列在 extension 安装后重跑 configureHttpDispatcher 整槽覆盖，
+	// dist main.js:707 实证——指纹未变也必须重装，否则会话整段生命周期不走代理）──
+
+	/** 可变槽 deps：getGlobalDispatcher 返回当前槽变量（覆盖测试用，createDeps 槽固定）。 */
+	function createMutableSlotDeps(initialSlot: FakeDispatcher) {
+		let slot: FakeDispatcher = initialSlot;
+		const setCalls: FakeDispatcher[] = [];
+		const errors: string[] = [];
+		const deps: InstallerDeps & { setCalls: FakeDispatcher[]; errors: string[]; setSlot: (d: FakeDispatcher) => void } = {
+			getGlobalDispatcher: () => slot,
+			setGlobalDispatcher: (d) => {
+				slot = d as FakeDispatcher;
+				setCalls.push(d as FakeDispatcher);
+			},
+			buildProxy: () => new FakeDispatcher("proxy"),
+			onError: (message) => errors.push(message),
+			setCalls,
+			errors,
+			setSlot: (d) => {
+				slot = d;
+			},
+		};
+		return deps;
+	}
+
+	it("同指纹但槽位被外部覆盖（pi 启动重装形态）：撤旧装新，fallback = 覆盖者", () => {
+		const piNative = new FakeDispatcher("pi-native");
+		const deps = createMutableSlotDeps(piNative);
+		const first = applyNetworkProxyConfig(config(), null, deps);
+		expect(first?.current).not.toBeNull();
+		// pi 启动序列整槽覆盖：槽上换成 pi 原生分发器，本扩展状态未感知
+		const overwritten = new FakeDispatcher("pi-native-after-reconfigure");
+		deps.setSlot(overwritten);
+		// 同一配置（指纹未变）下一 turn 推进：必须重装
+		const again = applyNetworkProxyConfig(config(), first, deps);
+		expect(again?.current).not.toBeNull();
+		expect(again?.current).not.toBe(first?.current);
+		expect(again?.fingerprint).toBe(first?.fingerprint);
+		// 新分流器 fallback = 槽上覆盖者（未命中委托 = 覆盖者的行为）
+		expect((again?.current as RuleDispatchDispatcher).fallback).toBe(overwritten);
+		// 槽上回到本扩展分发器
+		expect(deps.getGlobalDispatcher()).toBe(again?.current);
+	});
+
+	it("同指纹且槽位仍归本扩展：零动作（覆盖核查不误伤既有无动作分支）", () => {
+		const deps = createMutableSlotDeps(new FakeDispatcher("pi-native"));
+		const first = applyNetworkProxyConfig(config(), null, deps);
+		const setCallsAfterInstall = deps.setCalls.length;
+		const again = applyNetworkProxyConfig(config(), first, deps);
+		expect(again).toBe(first);
+		expect(deps.setCalls).toHaveLength(setCallsAfterInstall);
+	});
+
+	it("禁用时槽位已被外部覆盖：不回写（槽保持覆盖者）、状态清空", () => {
+		const deps = createMutableSlotDeps(new FakeDispatcher("pi-native"));
+		const installed = applyNetworkProxyConfig(config(), null, deps);
+		const overwritten = new FakeDispatcher("pi-native-after-reconfigure");
+		deps.setSlot(overwritten);
+		const setCallsAfterInstall = deps.setCalls.length;
+		const after = applyNetworkProxyConfig(config({ enabled: false }), installed, deps);
+		expect(after).toBeNull();
+		expect(deps.setCalls).toHaveLength(setCallsAfterInstall);
+		expect(deps.getGlobalDispatcher()).toBe(overwritten);
 	});
 });
 

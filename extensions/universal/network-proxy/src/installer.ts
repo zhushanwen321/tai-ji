@@ -6,9 +6,11 @@
  *
  * | 当前态           | 事件（新配置）      | 动作                                   | 次态 |
  * |-----------------|--------------------|----------------------------------------|------|
- * | 任意            | enabled=false      | 槽上仍是分流器则恢复 original           | null |
+ * | 任意            | enabled=false      | 槽上仍是分流器则恢复 original（仅限槽位归属核查通过） | null |
  * | null            | enabled+新指纹     | 捕获 original → 构造 → 安装             | 装载 |
- * | 装载/锁定       | enabled+同指纹     | 无动作（不重建不重复安装）               | 原态 |
+ * | 装载            | enabled+同指纹+槽位仍归本扩展 | 无动作（不重建不重复安装）        | 装载 |
+ * | 装载            | enabled+同指纹+槽位被外部覆盖 | 撤旧装新（pi 启动重装覆盖形态，original=覆盖者） | 装载 |
+ * | 锁定            | enabled+同指纹     | 无动作（首败即停不重试）                 | 锁定 |
  * | 任意            | enabled+新指纹     | 构造成功 → 撤旧装新                     | 装载 |
  * | 任意            | enabled+构造失败   | error 上报 + 撤旧（全部直连），记指纹锁定 | 锁定 |
  *
@@ -77,18 +79,32 @@ export function applyNetworkProxyConfig(
 	deps: InstallerDeps,
 ): InstalledState | null {
 	if (!config.enabled) {
-		if (state?.current) {
+		// 恢复仅限槽位仍归本扩展时执行：槽位已被外部覆盖（pi 启动重装，见下）时槽上已是
+		// pi 原生分发器，回写 state.originalDispatcher 会把它挤掉（无害但多余），语义上
+		// 禁用 = 摘除自己的安装，不是改写别人的。
+		if (state?.current && deps.getGlobalDispatcher() === state.current) {
 			deps.setGlobalDispatcher(state.originalDispatcher);
 		}
 		return null;
 	}
 
 	const fingerprint = networkProxyFingerprint(config);
-	if (state && state.fingerprint === fingerprint) {
-		return state;
+	if (state && state.fingerprint === fingerprint && state.current === null) {
+		return state; // 锁定态：同指纹不重试构造（首败即停，决策 8）
 	}
-
-	const original = state?.originalDispatcher ?? deps.getGlobalDispatcher();
+	const slotNow = deps.getGlobalDispatcher();
+	if (state && state.fingerprint === fingerprint && slotNow === state.current) {
+		return state; // 同指纹且槽位仍归本扩展：无动作（不重建不重复安装）
+	}
+	// 槽位归属核查（pi 启动时序缺陷的根因修复）：pi 1.0.0 启动序列在 extension 安装之后
+	// 仍会重跑 configureHttpDispatcher() 整槽覆盖（dist main.js:707 实证）——指纹未变但槽上
+	// 已非本扩展分发器时按「撤旧装新」重装。original 统一取槽上现持有者：覆盖场景下
+	// state.originalDispatcher 是上一代 pi 原生分发器，fallback 必须指向当前覆盖者才是
+	// 「未命中委托 = 未安装本扩展时 pi 的确切行为」。
+	const original =
+		state && state.current !== null && slotNow === state.current
+			? state.originalDispatcher
+			: slotNow;
 
 	let proxy: IDispatcher;
 	try {
