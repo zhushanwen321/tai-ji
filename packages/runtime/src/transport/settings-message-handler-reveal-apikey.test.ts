@@ -78,8 +78,8 @@ describe('SettingsMessageHandler · config.revealProviderApiKey', () => {
     expect(m.ctx.sendError).not.toHaveBeenCalled()
   })
 
-  it('非法 payload（providerId 非字符串 / 空串）→ invalid_payload，不调 resolver、无 reply', async () => {
-    for (const payload of [{ providerId: 42 }, { providerId: '' }, {}] as unknown as Array<{ providerId?: unknown }>) {
+  it('非法 / 缺失 payload（providerId 非字符串 / 空串 / payload 缺失）→ invalid_payload，不调 resolver、无 reply', async () => {
+    for (const payload of [{ providerId: 42 }, { providerId: '' }, {}, undefined, null] as unknown as Array<{ providerId?: unknown }>) {
       const m = mockCtx({})
       const handler = new SettingsMessageHandler(m.ctx)
       const handled = await handler.handleSettingsMessage(

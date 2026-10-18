@@ -188,6 +188,36 @@ describe('同 id 刷新（广播替换列表元素）不重置编辑态（MF-1-1
   })
 })
 
+describe('discover 凭据取值复用「真实未保存草稿」判据（MF-1-1）', () => {
+  it('回显值（= 所存值）不作为 payload apiKey 发出（$ENV 引用仍由 runtime resolver 展开）', async () => {
+    const providerRef = ref<ProviderInfo | null>(makeProvider({ apiKeySet: true }))
+    const edit = mount(providerRef)
+    await nextTick()
+    ;(getSettingsTransport().revealProviderApiKey as ReturnType<typeof vi.fn>)
+      .mockResolvedValue({ available: true, apiKey: '$OPENAI_API_KEY', source: 'models.json' })
+    await edit.form.revealApiKey()
+    expect(edit.form.draft.apiKey).toBe('$OPENAI_API_KEY')
+
+    await edit.discover.autoDiscover()
+
+    // 回显值不是待保存草稿：discover 不带 apiKey 键，让 runtime resolver 展开 $ENV
+    const req = vi.mocked(getSettingsTransport().discoverModels).mock.calls[0]![0]
+    expect(req.apiKey).toBeUndefined()
+  })
+
+  it('用户真实输入的草稿仍作为 payload apiKey 发出（回显判据不退化手工输入路径）', async () => {
+    const providerRef = ref<ProviderInfo | null>(makeProvider({ apiKeySet: true }))
+    const edit = mount(providerRef)
+    await nextTick()
+
+    edit.form.draft.apiKey = 'sk-typed'
+    await edit.discover.autoDiscover()
+
+    const req = vi.mocked(getSettingsTransport().discoverModels).mock.calls[0]![0]
+    expect(req.apiKey).toBe('sk-typed')
+  })
+})
+
 describe('discover 错误通道接线（facade 注入回调 → form.actionError，MF-1-7 source=discover）', () => {
   it('discover 失败 → reportActionError 写 form.actionError；再次探活成功 → clearActionError 清除', async () => {
     provideSettingsTransport(makeFakeTransport({

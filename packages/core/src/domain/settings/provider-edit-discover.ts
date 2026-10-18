@@ -6,6 +6,7 @@
  * - test（探活）：M3b 协议分流——只发 providerId + mode（代表模型选择归 runtime，前端零推导），
  *   结果消费 results（每协议一行）/ error（整体性失败）
  * - discover（自动发现）：带 baseUrl/apiKey/providerType 全参，结果合并入模型清单（去重 + D9①）
+ *   apiKey 取「真实未保存草稿」投影（回显值 = 所存值不发，MF-1-1），由装配方注入 pendingApiKey
  *
  * 接口即测试面（interface is the test surface）：行为矩阵见 provider-edit-discover.test.ts。
  */
@@ -15,7 +16,7 @@ import { toErrorMessage } from '../../utils/error-message'
 import { getSettingsTransport } from './transport'
 import type { DiscoverModelsRequest, DiscoverModelsResponse } from './transport'
 import type { Translate } from './provider-edit-types'
-import { resolveApiKeyForSave, type ProviderEditFormDraft } from './provider-edit-form'
+import type { ProviderEditFormDraft } from './provider-edit-form'
 import type { ProviderEditModelsModule } from './provider-edit-models'
 
 /** discover 动作：test（探活，结果显示连接成败）/ discover（合并发现的模型） */
@@ -56,8 +57,14 @@ export interface ProviderEditDiscoverModule {
 export interface ProviderEditDiscoverInputs {
   /** 当前编辑的 provider（null = 新增态；test/discover 的 providerId 来源） */
   providerRef: Ref<ProviderInfo | null>
-  /** 表单草稿（discover 请求的 baseUrl/apiKey/providerType 来源） */
+  /** 表单草稿（discover 请求的 baseUrl/providerType 来源） */
   draft: ProviderEditFormDraft
+  /**
+   * discover 请求的 apiKey 取值器（MF-1-1）：「真实未保存草稿」投影——回显值（= 所存值）
+   * 不算待保存，返回 undefined 让 runtime 走 resolver；清除哨兵经 resolveApiKeyForSave
+   * 转成 ''（清空语义）。装配方注入 form 的同源判据，避免 discover 自建第二套谓词。
+   */
+  pendingApiKey: () => string | undefined
   /**
    * 动作错误写通道（MF-1-7 带来源标签协议）：本 module 的写入固定归属 discover，
    * 标签由装配方（use-provider-edit）落——错误归属按 source 判定，不比对展示文案。
@@ -72,7 +79,7 @@ export interface ProviderEditDiscoverInputs {
 }
 
 export function createProviderEditDiscover(input: ProviderEditDiscoverInputs): ProviderEditDiscoverModule {
-  const { providerRef, draft, reportActionError, clearActionError, models, t } = input
+  const { providerRef, draft, pendingApiKey, reportActionError, clearActionError, models, t } = input
 
   const testing = ref(false)
   const discovering = ref(false)
@@ -95,7 +102,7 @@ export function createProviderEditDiscover(input: ProviderEditDiscoverInputs): P
       baseUrl: draft.baseUrl,
       providerId,
       providerType: draft.api,
-      apiKey: resolveApiKeyForSave(draft.apiKey),
+      apiKey: pendingApiKey(),
     }
   }
 

@@ -18,6 +18,7 @@ import {
 import { makeFakeTransport } from './helpers/fake-transport'
 import type { DiscoverModelsResponse } from '../transport'
 import type { ProviderEditFormDraft } from '../provider-edit-form'
+import { API_KEY_CLEAR_SENTINEL, resolveApiKeyForSave } from '../provider-edit-form'
 import { createProviderEditModels, type ProviderEditModelsModule } from '../provider-edit-models'
 import { createProviderEditDiscover, type ProviderEditDiscoverModule } from '../provider-edit-discover'
 
@@ -73,6 +74,8 @@ interface MountedDiscover {
 function mountDiscover(options: {
   provider?: ProviderInfo | null
   draft?: ProviderEditFormDraft
+  /** 真实未保存草稿取值器（默认按 save 同源判据从 draft 推导；MF-1-1 断言注入点用） */
+  pendingApiKey?: () => string | undefined
 } = {}): MountedDiscover {
   const transport = makeFakeTransport()
   provideSettingsTransport(transport)
@@ -90,6 +93,7 @@ function mountDiscover(options: {
     const discover = createProviderEditDiscover({
       providerRef,
       draft,
+      pendingApiKey: options.pendingApiKey ?? (() => resolveApiKeyForSave(draft.apiKey)),
       reportActionError: (message) => { actionError.value = message },
       clearActionError: () => { actionError.value = '' },
       models,
@@ -207,6 +211,26 @@ describe('runDiscover discover 分支（自动发现 + 合并）', () => {
       providerType: 'anthropic-messages',
       providerId: 'p1',
     })
+  })
+
+  it('MF-1-1：pendingApiKey 为空（draft 是回显值 = 所存值）→ 不带 apiKey（runtime 走 resolver）', async () => {
+    const { transport } = await runDiscoverCase('discover', {
+      mount: {
+        draft: makeDraft({ apiKey: '$OPENAI_API_KEY' }),
+        // 模拟 form.apiKeyPendingDraft：草稿 === 回显值 → 非待保存草稿
+        pendingApiKey: () => undefined,
+      },
+    })
+    const req = vi.mocked(transport.discoverModels).mock.calls[0]![0]
+    expect(req.apiKey).toBeUndefined()
+  })
+
+  it('D18 清除哨兵经 pendingApiKey 保留清除语义（哨兵 → apiKey 空串）', async () => {
+    const { transport } = await runDiscoverCase('discover', {
+      mount: { draft: makeDraft({ apiKey: API_KEY_CLEAR_SENTINEL }) },
+    })
+    const req = vi.mocked(transport.discoverModels).mock.calls[0]![0]
+    expect(req.apiKey).toBe('')
   })
 
   it('成功：合并入清单 + discoverResult 文案（newMerged；total/addedCount 计数接线）', async () => {

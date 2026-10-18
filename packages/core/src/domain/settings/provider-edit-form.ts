@@ -205,6 +205,12 @@ export function createProviderEditForm(input: ProviderEditFormInputs): ProviderE
   /** 回显的已存 apiKey（null = 未回显）。与草稿同值时不构成 dirty、保存不回写（2026-10-18） */
   const revealedApiKey = ref<string | null>(null)
   const revealingApiKey = ref(false)
+  /**
+   * 回显世代号（SS-1/SS-2）：每次发起回显 +1；回显基线被作废（provider 切换 / 凭据被替换 /
+   * 清除广播）时也 +1。迟到响应按世代校验丢弃，`finally` 也不得清掉后发请求的在途标志。
+   * 非响应式（只作请求归属判定，不参与渲染）。
+   */
+  let revealEpoch = 0
   const saving = ref(false)
   // 动作错误内部态（MF-1-7：带来源标签）；对外只投影 message（下方 actionError computed）
   const actionErrorState = ref<ActionErrorState | null>(null)
@@ -275,8 +281,23 @@ export function createProviderEditForm(input: ProviderEditFormInputs): ProviderE
     // 回显态（revealedApiKey）同批清空——回显值属于「当前 provider 的已存值」，不得跨 provider 复用。
     applyPatch(formPatchFromProvider(p))
     draft.apiKey = ''
-    revealedApiKey.value = null
+    // 回显基线 + 在途回显请求同批作废（SS-2）：新 provider 的眼睛按钮不被旧请求 disabled，
+    // 旧请求的迟到响应也拿不到写入资格（世代号已推进）。
+    dropRevealed()
     headerRows.value = headerRowsFromHeaders(draft.headers)
+  }
+
+  /**
+   * 作废回显态（SS-1/SS-3）：推进世代号丢弃在途响应；只有草稿仍是回显值时才清空草稿
+   * （用户已改的草稿保留——回显值 = 所存值，凭据被替换后它不再有效，不能在切回 api_key 形态
+   * 时被当成用户草稿以明文展示）。
+   */
+  function dropRevealed(): void {
+    revealEpoch += 1
+    revealingApiKey.value = false
+    if (revealedApiKey.value !== null && draft.apiKey === revealedApiKey.value) draft.apiKey = ''
+    revealedApiKey.value = null
+    showKey.value = false
   }
 
   function resetTransient(): void {
@@ -383,11 +404,14 @@ export function createProviderEditForm(input: ProviderEditFormInputs): ProviderE
     const p = providerRef.value
     if (!p || draft.apiKey !== '' || revealingApiKey.value) return { ok: true }
     const requestedId = p.id
+    const epoch = ++revealEpoch
     revealingApiKey.value = true
     try {
       const res = await getSettingsTransport().revealProviderApiKey(p.id)
-      // 迟到响应归属校验（MF-1-3）：await 期间可能已切到别的 provider 或用户开始输入——
-      // 此时写入会把 A 的明文显示在 B 上（并成为 B 的非 dirty 基线），或覆盖用户输入。
+      // 迟到响应归属校验（MF-1-3 / SS-1）：await 期间可能已切到别的 provider、用户开始输入，
+      // 或回显基线已作废（apiKeySet=false 广播清空 / 再次回显）——此时写入会把已失效的旧明文
+      // 写回草稿（并成为非 dirty 基线）。
+      if (epoch !== revealEpoch) return { ok: true }
       if (providerRef.value?.id !== requestedId || draft.apiKey !== '') return { ok: true }
       if (res.available && res.apiKey) {
         draft.apiKey = res.apiKey
@@ -397,9 +421,11 @@ export function createProviderEditForm(input: ProviderEditFormInputs): ProviderE
       }
       return { ok: false, error: t('composable.revealApiKeyUnavailable') }
     } catch (e) {
+      if (epoch !== revealEpoch) return { ok: true }
       return { ok: false, error: toErrorMessage(e) }
     } finally {
-      revealingApiKey.value = false
+      // SS-2：只有当前世代能归零在途标志——旧请求收尾不得解除新请求的 disabled 态
+      if (epoch === revealEpoch) revealingApiKey.value = false
     }
   }
 
@@ -438,23 +464,23 @@ export function createProviderEditForm(input: ProviderEditFormInputs): ProviderE
   function applyReconcile(fresh: ProviderInfo): void {
     const decision = reconcileBroadcast(fresh, draft, isDirty.value, snapshot.value)
     if (decision.action === 'ignore') return
+    // 生效凭据不再是 api_key（广播清除凭据 / 换成 OAuth，SS-3）：回显态同批作废——OAuth token
+    // 不走回显通道，继续留着旧 api_key 明文会在用户切回 api_key 形态时以 text 形态展示已被替换的值。
+    const credentialReplaced = !fresh.apiKeySet || fresh.authMethod === 'oauth'
     if (decision.action === 'align-auth-method') {
       draft.authMethod = decision.authMethod
       // 手改快照：单独重拍快照的 authMethod 位（保持其余快照位不动，isDirty 语义不被扰动）
       if (snapshot.value) snapshot.value.authMethod = decision.authMethod
+      if (credentialReplaced) dropRevealed()
       return
     }
     applyPatch(decision.form)
     headerRows.value = headerRowsFromHeaders(draft.headers)
     models.localModels.value = decision.models
-    // 广播携带 apiKeySet=false（凭据已被移除/清空）→ 回显态三件套同批清空（MF-1-2）：
-    // 只清 revealed 会让仍显示的明文被重新判成用户草稿（dirty + 保存时回写）。非 dirty
-    // 分支不存在真实草稿（有草稿即 dirty 走 ignore/对齐分支），故清空不丢用户输入。
-    if (!fresh.apiKeySet) {
-      draft.apiKey = ''
-      revealedApiKey.value = null
-      showKey.value = false
-    }
+    // 广播携带 apiKeySet=false（凭据已被移除/清空）或 authMethod=oauth（凭据已被 OAuth 替换）
+    // → 回显态三件套同批清空（MF-1-2 / SS-3）：只清 revealed 会让仍显示的明文被重新判成用户
+    // 草稿（dirty + 保存时回写）。dropRevealed 仅在草稿仍是回显值时才清空，不丢真实用户输入。
+    if (credentialReplaced) dropRevealed()
     // 刷新后重新捕获快照（新基线，避免下次广播触发不必要的「dirty」）
     captureSnapshot()
   }

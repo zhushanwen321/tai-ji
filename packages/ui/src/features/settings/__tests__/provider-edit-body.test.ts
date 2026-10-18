@@ -73,6 +73,20 @@ const OAUTH_P: ProviderInfo = {
   ],
 }
 
+/**
+ * 旧数据 OAuth provider（MF-1-2 回归）：auth.json 已有 oauth 凭据、models.json 无 apiKey
+ * ⇒ runtime 聚合出 apiKeySet=true / authMethod=undefined（无显式标注可推断）。
+ */
+const LEGACY_OAUTH_P: ProviderInfo = {
+  id: 'kimi-coding-legacy' as ProviderId,
+  name: 'Kimi Coding (legacy)',
+  api: 'openai-completions',
+  apiKeySet: true,
+  status: 'connected',
+  kind: 'catalog',
+  models: [{ id: 'kimi-k2', name: 'Kimi K2', source: 'builtin' }],
+}
+
 /** api_key 型 catalog provider（凭证区维持 API Key 输入；builtin×1 + override×1） */
 const APIKEY_P: ProviderInfo = {
   id: 'zai-coding-cn' as ProviderId,
@@ -685,6 +699,15 @@ describe('已存 API Key 回显（眼睛按钮）', () => {
     await flushPromises()
 
     // apiKey 输入已出现（本地形态切到 api_key），但 props 仍标 oauth → 无可回显的 api_key 凭据
+    expect(wrapper.find('[data-testid="provider-edit-apikey"]').exists()).toBe(true)
+    expect(wrapper.find('[data-testid="provider-reveal-apikey"]').exists()).toBe(false)
+  })
+
+  it('旧数据 OAuth provider（authMethod 缺省 + apiKeySet=true）→ oauthPresent 兜底，不渲染眼睛按钮（MF-1-2）', async () => {
+    wrapper = mountBody(LEGACY_OAUTH_P, { oauthPresent: true })
+    await flushPromises()
+
+    // 无 authMethod 标注 ⇒ 凭证区按 api_key 形态渲染；但 auth.json 只有 oauth 凭据，无 api_key 可回显
     expect(wrapper.find('[data-testid="provider-edit-apikey"]').exists()).toBe(true)
     expect(wrapper.find('[data-testid="provider-reveal-apikey"]').exists()).toBe(false)
   })

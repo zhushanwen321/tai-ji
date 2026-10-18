@@ -437,13 +437,17 @@ const { apiText: catalogApiText, endpointDraft, endpointHint, onEndpointInput, s
 const isOauthForm = computed(() => form.authMethod === 'oauth')
 
 /**
- * 可回显的已存 apiKey（SG-7）：apiKeySet 为真且不是 OAuth 形态。runtime 回显通道对
- * auth.json 的 OAuth 凭据固定 notRevealable（OAuth token 永不出协议面），此时渲染眼睛
- * 只会得到必然失败的 available:false 提示；「改用 API Key」尚未保存时 props 仍是 oauth，
- * 同样没有可回显的 api_key 凭据。用户已输入的草稿仍可点眼睛做显隐（v-if 另一分支）。
+ * 可回显的已存 apiKey（SG-7）：apiKeySet 为真且不是 OAuth 形态，且 auth.json 无 OAuth 凭据。
+ * runtime 回显通道对 auth.json 的 OAuth 凭据固定 notRevealable（OAuth token 永不出协议面），
+ * 此时渲染眼睛只会得到必然失败的 available:false 提示；「改用 API Key」尚未保存时 props 仍是
+ * oauth，同样没有可回显的 api_key 凭据。**旧数据无 authMethod 标注**时（auth.json 已有 oauth
+ * 凭据、models.json 无 apiKey ⇒ authMethod=undefined 而 apiKeySet=true）靠 oauthPresent 兜底
+ * 判为不可回显。用户已输入的草稿仍可点眼睛做显隐（v-if 另一分支）。
  */
 const apiKeyRevealable = computed(() => (
-  props.provider?.apiKeySet === true && props.provider?.authMethod !== 'oauth'
+  props.provider?.apiKeySet === true
+  && props.provider?.authMethod !== 'oauth'
+  && props.oauthPresent !== true
 ))
 
 /** 形态切换目标（非 null = 确认弹窗打开） */

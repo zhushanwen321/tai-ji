@@ -178,7 +178,7 @@ export class ProviderMessageHandler {
    * - 源优先级与常规解析一致（auth.json → models.json），由 resolver 的 sources 数组单点声明；
    * - **原值回显**：`$ENV` 引用不解析成明文（回显即所存值，直接保存不会把引用改成明文）；
    * - auth.json 是 oauth 时限下不可回显且不回落（不显示 models.json 的历史残留值）。
-   * 无凭据则 available:false（UI 不动作）；读取异常交给 server 层统一错误包。
+   * 无凭据则 available:false（UI 以 toast 反馈，不写保存条）；读取异常交给 server 层统一错误包。
    *
    * 明文凭据 carve-out 与其可达性裁决（remote token 持有者可调用，已接受）见 ADR-0141；
    * 行为红线（oauth 不回落 / `$ENV` 原值）见 resolver 单测。
@@ -187,7 +187,9 @@ export class ProviderMessageHandler {
     ws: WsType,
     msg: Extract<ClientMessage, { type: 'config.revealProviderApiKey' }>,
   ): Promise<boolean> {
-    const providerId = msg.payload.providerId
+    // 先于解引用判 payload 存在性（畸形帧 payload: undefined/null 走 invalid_payload，
+    // 而不是抛 TypeError 落 handler_error）——SS-8。
+    const providerId = (msg.payload as { providerId?: unknown } | undefined)?.providerId
     // 入站校验（对齐 handleCheckEnvVars 的 invalid_payload 先例）：providerId 直入
     // resolver 的 auth.json 查表，非法值不静默吞。
     if (typeof providerId !== 'string' || providerId === '') {

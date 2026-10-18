@@ -322,6 +322,81 @@ describe('已存 API Key 回显（2026-10-18，眼睛按钮）', () => {
     expect(form.isDirty.value).toBe(false)
     expect(form.revealingApiKey.value).toBe(false)
   })
+
+  it('SS-1：回显在途期间 apiKeySet=false 广播清空草稿 → 迟到响应不得写回旧明文', async () => {
+    const { form, providers } = mountForm(makeProvider({ apiKeySet: true }))
+    let resolveReveal!: (v: { available: boolean; apiKey?: string; source?: 'auth.json' | 'models.json' }) => void
+    revealSpy().mockImplementation(() => new Promise((resolve) => { resolveReveal = resolve }))
+
+    const pending = form.revealApiKey()
+    // 广播：凭据被移除。草稿被清空后恰好让旧守卫（draft.apiKey !== ''）失效
+    providers.value = [makeProvider({ apiKeySet: false })]
+    await nextTick()
+    expect(form.draft.apiKey).toBe('')
+
+    resolveReveal({ available: true, apiKey: 'sk-stale', source: 'auth.json' })
+    await expect(pending).resolves.toEqual({ ok: true })
+
+    // 已删除的旧明文不得被写回草稿（也不得成为非 dirty 基线）
+    expect(form.draft.apiKey).toBe('')
+    expect(form.showKey.value).toBe(false)
+    expect(form.isDirty.value).toBe(false)
+  })
+
+  it('SS-2：回显在途时切 provider → 新 provider 的眼皮按钮不被旧请求 disabled，且可立即重新回显', async () => {
+    const { form, providerRef } = mountForm(makeProvider({ apiKeySet: true }))
+    let resolveReveal!: (v: { available: boolean; apiKey?: string; source?: 'auth.json' | 'models.json' }) => void
+    revealSpy().mockImplementation(() => new Promise((resolve) => { resolveReveal = resolve }))
+
+    const pending = form.revealApiKey()
+    expect(form.revealingApiKey.value).toBe(true)
+
+    const other = makeProvider({ id: 'p2' as ProviderInfo['id'], name: 'P2', apiKeySet: true })
+    providerRef.value = other
+    form.applyProvider(other)
+    // applyProvider 必须在途标志归零（旧请求收尾也不得清掉新请求的在途态）
+    expect(form.revealingApiKey.value).toBe(false)
+
+    revealSpy().mockResolvedValue({ available: true, apiKey: 'sk-p2', source: 'auth.json' })
+    await form.revealApiKey()
+    expect(form.draft.apiKey).toBe('sk-p2')
+
+    resolveReveal({ available: true, apiKey: 'sk-p1', source: 'auth.json' })
+    await expect(pending).resolves.toEqual({ ok: true })
+    expect(form.draft.apiKey).toBe('sk-p2')
+    expect(form.revealingApiKey.value).toBe(false)
+  })
+
+  it('SS-3：回显后广播 authMethod=oauth（凭据被 OAuth 替换）→ 回显草稿/明文开关作废', async () => {
+    const { form, providers } = mountForm(makeProvider({ apiKeySet: true, authMethod: 'api_key' }))
+    revealSpy().mockResolvedValue({ available: true, apiKey: 'sk-stored', source: 'auth.json' })
+    await form.revealApiKey()
+    expect(form.draft.apiKey).toBe('sk-stored')
+
+    providers.value = [makeProvider({ apiKeySet: true, authMethod: 'oauth' })]
+    await nextTick()
+
+    // 旧 api_key 明文已被 OAuth 替换：不得继续以 text 形态展示
+    expect(form.draft.apiKey).toBe('')
+    expect(form.showKey.value).toBe(false)
+    expect(form.isDirty.value).toBe(false)
+  })
+
+  it('SS-3：dirty 下 authMethod 对齐到 oauth（align 分支）→ 回显态同批作废，用户其他编辑保留', async () => {
+    const { form, providers } = mountForm(makeProvider({ apiKeySet: true, authMethod: 'api_key' }))
+    revealSpy().mockResolvedValue({ available: true, apiKey: 'sk-stored', source: 'auth.json' })
+    await form.revealApiKey()
+    form.draft.name = 'P1-edited'
+    expect(form.isDirty.value).toBe(true)
+
+    providers.value = [makeProvider({ apiKeySet: true, authMethod: 'oauth' })]
+    await nextTick()
+
+    expect(form.draft.authMethod).toBe('oauth')
+    expect(form.draft.apiKey).toBe('')
+    expect(form.showKey.value).toBe(false)
+    expect(form.draft.name).toBe('P1-edited')
+  })
 })
 
 describe('save：校验与 apiKey 合并协议（D15b / D18）', () => {
