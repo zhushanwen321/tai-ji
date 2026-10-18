@@ -486,6 +486,8 @@ describe('A5 shutdown 步骤打点序列 SSOT（SHUTDOWN_STEP_SEQUENCE）', () =
       'dispose-claim-ledger',
       'dispose-terminal-ptys',
       'deinit-relay-server',
+      // u-m3-control：control server 关停（全通道组杀 + 删 socket），与 relay 收尾同区
+      'deinit-control-server',
       'server-stop',
       'dispose-terminal-pties',
       'engine-pool-dispose',

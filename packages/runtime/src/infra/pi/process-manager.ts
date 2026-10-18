@@ -15,6 +15,10 @@ import { buildOutboundChildEnv } from '../spawn-env.js'
 // （relay-registry 受托 spawn 真实 pi 复用同一决策链），原调用点行为零变化。
 import { findPiExecutable } from './find-pi-executable.js'
 import { getRelaySpawnEnv } from '../relay/relay-env.js'
+// M3（relay-spawn-transport §3.3 D4）：control env 注入（socket + root session 初值）
+// ——server 未激活时返回空对象（降级语义与 relay 同款，extension 侧
+// isControlEnvActive 判缺失回落 local transport）。
+import { getControlSpawnEnv } from '../subagent-control/control-server.js'
 import { getCrashJournal } from '../crash-journal.js'
 // 信号取证（signal-forensics）：受管 pi 意外退出（exit_converge）时的发送方归因。
 // 环先于 spawn 起、随受管 pi 清零停——采样成本只发生在「有 pi 在跑」的窗口。
@@ -212,6 +216,10 @@ export class ProcessManager implements IProcessManager {
     // relay server 未激活 / staged 脚本缺失 / 执行器探针失败 → 空对象（spread 无副作用，
     // 行为与现状逐字节一致）；首次调用含探针 spawn（之后 Promise 缓存，无重复开销）。
     const relayEnv = await getRelaySpawnEnv(this.projectRoot)
+    // M3 control env（设计 §3.3 D4 env × spawn 点矩阵 main pi 行）：SOCKET（transport
+    // 选择键）+ ROOT_SESSION_ID 初值（create 路径为 temp id，连接归属权威 = 第一个
+    // engine_open 帧，本键无权威消费方——矩阵完备性注入，见 getControlSpawnEnv 注释）。
+    const controlEnv = getControlSpawnEnv(sessionId)
     // W9 引擎 env（设计 §3.7 路径传递）：staged 引擎根绝对路径显式注入（不 cwd 探测）
     // + 打包态执行器 TAIJI_AGENT_ENGINE_NODE/ELECTRON_RUN_AS_NODE（pi 扩展宿主的
     // process.execPath 是 pi binary，矩阵① 必须用注入执行器）。键序在 DATA_DIR 之后、
@@ -226,6 +234,7 @@ export class ProcessManager implements IProcessManager {
       TAIJI_AGENT_DATA_DIR: getConfigDir(),
       ...pathEnv,
       ...relayEnv,
+      ...controlEnv,
       ...engineRootsEnv,
     }
     const client = new RpcClient({ cwd, sessionId, ...options, env: { ...injectionEnv, ...options?.env }, piCommand: piPath !== 'pi' ? piPath : undefined })

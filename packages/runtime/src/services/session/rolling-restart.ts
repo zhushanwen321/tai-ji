@@ -126,6 +126,9 @@ export const SHUTDOWN_STEP_SEQUENCE = [
   'dispose-claim-ledger',
   'dispose-terminal-ptys',
   'deinit-relay-server',
+  // M3（u-m3-control）：control server 关停打点（全通道组杀 + 删 socket；u-m3-delete
+  // 抬走 relay 半边时本行保留）。
+  'deinit-control-server',
   'server-stop',
   'dispose-terminal-pties',
   'engine-pool-dispose',

@@ -198,6 +198,16 @@ EXEMPT_CALLSITES = [
         "可执行性，非父 env 继承型调用，不存在产品变量外泄面（设计文档 §3.6 R5 点名）",
     ),
     (
+        "infra/subagent-control/control-server.ts",
+        "spawn(launch.command",
+        "引擎 CLI 进程 spawn（M3 控制通道唯一 spawn 面）：env 由本文件 buildEngineLaunchEnv "
+        "组装（内部 buildEngineChildEnv 三层契约——L1 deny 剥 PACKAGED/TOKEN/凭证键、"
+        "L2 manifest prefixes 放行、L0 基础设施键注入），等价性由 "
+        "__tests__/subagent-control/engine-launch-env.test.ts 键集合锚定；构建器调用距 "
+        "spawn 18 行、超出检查器 12 行武装窗口故走豁免通道（relay-spawn-transport "
+        "u-m3-control 登记 2026-10-18）",
+    ),
+    (
         "services/reap-orphan-pi.ts",
         "execFile(",
         "孤儿 pi 进程回收前的 ps 只读探测：数组参数不经 shell、显式 timeout，"
@@ -315,6 +325,13 @@ EXEMPT_CALLSITES = [
         "Windows 进程树终止 kill 处置（崩溃/超时收割补杀），stdio ignore、无数据回流"
         "通路，无 env 出站面（与 engine/client/reaper.ts taskkill 先例同构）"
         "（RT-8#9 检查逐调用点化登记 2026-09-20）",
+    ),
+    (
+        "engine/client/transport/local.ts",
+        'spawn("taskkill"',
+        "Windows 进程树终止 kill 处置（u-m3-local 自 engine-client.ts 进程面迁移的同一"
+        "豁免，签名/语义未变），stdio ignore、无数据回流通路，无 env 出站面"
+        "（relay-spawn-transport u-m3-local 登记 2026-10-18）",
     ),
     (
         "engine/engines/pi/pi-engine.ts",

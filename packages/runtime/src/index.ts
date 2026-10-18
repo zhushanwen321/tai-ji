@@ -168,10 +168,16 @@ import { readExtrasWithFallback } from './services/migration/provider-extras-mig
 import { runProviderExtrasMigration } from './services/migration/run-extras-migration.js'
 import { migrateProviderEnabledToWhitelist } from './services/migration/legacy-provider-migration.js'
 import { TaijiProviderStore } from './services/provider-extras-store.js'
+import { getEngineRootsSpawnEnv } from './services/session/engine-roots.js'
 // E-2（subagent-realtime-channel §4）：relay 基建——socket server + 子进程注册表 +
 // tee 翻译层。纯新增模块，经 messageBus.publish 广播 tee 帧；env 注入在
 // process-manager（getRelaySpawnEnv，与 server 激活状态联动）。
 import { initRelayServer, deinitRelayServer, getActiveRelayRegistry } from './infra/relay/relay-server.js'
+// M3（relay-spawn-transport §3.4.3）：subagent control server——引擎进程 spawn 权收归
+// runtime 的承接面（u-m3-control）。与 relay 并存过渡：u-m3-delete 删 relay 时同批抬走
+// 本接线块的 relay 半边。env 注入在 process-manager（getControlSpawnEnv，与 server
+// 激活状态联动）。
+import { initControlServer, deinitControlServer, getActiveControlServer } from './infra/subagent-control/control-server.js'
 import { toErrorMessage } from './utils/errors.js'
 import { spawnDataDirContractViolation } from './utils/runtime-env.js'
 // W8 宿主接线：runtime 协议客户端的自持引擎实例 dispose 钩子（idle 5min 复用的
@@ -396,6 +402,21 @@ async function initRelayServerOrExit(projectRoot: string, messageBus: MessageBus
     })
   } catch (err) {
     console.error('[runtime] fatal: relay server init failed:', err)
+    process.exit(1)
+  }
+}
+
+/** M3：subagent control server 初始化（initRelayServerOrExit 同区同语义：listen 失败
+ *  fatal——「以为 runtime 在管、实际 local spawn」的静默分裂比启动失败更危险，D9）。
+ *  engineNodeEnv 由组合根注入（getEngineRootsSpawnEnv 产物；infra 不 import services）。 */
+async function initControlServerOrExit(projectRoot: string): Promise<void> {
+  try {
+    await initControlServer({
+      projectRoot,
+      engineNodeEnv: getEngineRootsSpawnEnv(projectRoot),
+    })
+  } catch (err) {
+    console.error('[runtime] fatal: subagent control server init failed:', err)
     process.exit(1)
   }
 }
@@ -1600,6 +1621,10 @@ async function main(): Promise<void> {
       shutdownStep('deinit-relay-server')
       const engineClientsDisposed = disposeRuntimeEngineClients()
       await deinitRelayServer()
+      // M3：control server 关停（全通道组杀 + 删 socket）——过渡期与 relay 并行收尾，
+      // 顺序在 relay 之后无时序耦合（两 server 的通道集不相交）；u-m3-delete 同批调整。
+      shutdownStep('deinit-control-server')
+      await deinitControlServer()
       await engineClientsDisposed
       shutdownStep('server-stop')
       await server.stop()
@@ -1696,6 +1721,8 @@ async function main(): Promise<void> {
   // ── E-2：relay socket server（listen 后、后台初始化前）──────────────────
   // 早建早发现权限问题（设计 §4.1）。
   await initRelayServerOrExit(effectiveRoot, messageBus)
+  // ── M3：subagent control server（同区：listen 后、后台初始化前）──────────
+  await initControlServerOrExit(effectiveRoot)
   // B2 subagent-stream-chunk §4.1：session.getSubagentStreamState 数据源组合根接线。
   // relay registry 句柄归 index.ts（rollingRestart relayInFlight 同款约束：services 层不
   // value import 有状态 IO infra）；闭包按调用时刻解析——未启用/测试形态
@@ -1727,7 +1754,10 @@ async function main(): Promise<void> {
     listSessionIds: () => sessionService.getActiveSessionIds(),
     // relay 在途面（D5 判定源 ②）组合根接线：registry 句柄归 index.ts（reclaim 豁免 #3
     // 同款延迟解析），services 层不 value import 有状态 IO infra。
-    relayInFlight: () => getActiveRelayRegistry()?.size ?? 0,
+    // M3 过渡期双源相加（语义不变：判定源仍是「在途子代理数」）——relay 注册表条目 +
+    // control server 在册通道；extension 切 runtime transport 后 relay 半边自然归零，
+    // u-m3-delete 摘除相加式。
+    relayInFlight: () => (getActiveRelayRegistry()?.size ?? 0) + (getActiveControlServer()?.channelCount ?? 0),
     onExecute: () => { void shutdown('rollingRestart', RUNTIME_PLANNED_EXIT_CODE) },
     broadcast: (type, payload) => server.broadcast({ type, payload } as import('@taiji/shared').ServerMessage),
   })
