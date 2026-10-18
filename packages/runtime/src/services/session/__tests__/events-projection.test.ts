@@ -537,7 +537,7 @@ describe('projectV2Subagent（事件源胜出 / 窗外兜底）', () => {
     )!
     expect(foldWins.modelSource).toBe('frontmatter')
 
-    // fold 缺席（窗外）→ registered 条目兑底
+    // fold 缺席（窗外）→ registered 条目兜底
     const registeredWins = projectV2Subagent(
       { ...registered, modelSource: 'preference' },
       undefined,

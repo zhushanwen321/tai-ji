@@ -158,7 +158,7 @@ export interface IManagedSessionView {
    *
    * 与 handedOffTo 同族收编（照其先例）：字段实携在 session 对象上（create/restore/fork
    * 经 hydrateBindingMeta 动态 patch），且有跨文件读者——toSummary 派生到
-   * SessionSummary.launchPresetId、forkSession 继承源 preset（W-RT-5 内存态兑底）。
+   * SessionSummary.launchPresetId、forkSession 继承源 preset（W-RT-5 内存态兜底）。
    * 类型不声明才是泄漏抽象（此前消费方各自 as-cast 读同一形状）。
    *
    * 持久化走 `.preset.json` sidecar（create 路径 V9-④ 已放行落盘）；内存态兜底

@@ -238,7 +238,7 @@ export interface EnginePort {
    * 的同名翻译分支零冲突）。无跨世界等价表的引擎省略本成员（pi 不实现）。
    *
    * 错误语义：翻译不可达（目标通道缺失 / 模型无等价）同步 throw = 显式失败
-   * （首败即停，错误自带恢复指引），禁静默回落、禁伪造兑底。消费点：
+   * （首败即停，错误自带恢复指引），禁静默回落、禁伪造兜底。消费点：
    * resolveIdentityForRoute 四层解析后、validateModel 与 record stamp 前——record/
    * 上报侧呈现实际发给引擎的 ref（UI 跟随事实）。
    */

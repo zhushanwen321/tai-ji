@@ -414,7 +414,7 @@ describe('TerminalService', () => {
       // ptyMap 已清：write 按多实例路由语义 fail-fast（unknown_terminal_id），不触 pty.write
       expect(() => svc.write('s-kf', 'term:s-kf:1', 'ls\n')).toThrowError(expect.objectContaining({ code: 'unknown_terminal_id' }))
       expect(pty.write).not.toHaveBeenCalled()
-      // untracked 升级 timer 照常（SIGTERM 后未退的升级兑底不因首杀失败而缺席）：
+      // untracked 升级 timer 照常（SIGTERM 后未退的升级兜底不因首杀失败而缺席）：
       // SIGKILL 再抛错落升级 catch（console.error 第二条），不留静默断链
       vi.advanceTimersByTime(5000)
       expect(pty.kill).toHaveBeenLastCalledWith('SIGKILL')

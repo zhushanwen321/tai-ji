@@ -365,7 +365,7 @@ export class BrowserViewManager {
 
   /**
    * shieldsView 遮蔽视图全量上报（browser:shields IPC；模态表面聚合 §6.7 的 view 遮蔽族）。
-   * 全量替换语义（上报是事件提示 + 全量收敛，不做增量簿记/时间窗兑底）。
+   * 全量替换语义（上报是事件提示 + 全量收敛，不做增量簿记/时间窗兜底）。
    * 谓词重算触发路径：成员开合 + 成员开态内 rect 变化（横幅文案随 level 改宽）都经此触发。
    */
   setShieldsViewFaces(faces: ShieldFace[]): void {

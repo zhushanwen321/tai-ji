@@ -363,7 +363,7 @@ export class BashDispatcher {
   /**
    * 取消进行中的 bash 执行（pi abort_bash）。
    *
-   * 与 abort() 对称：失败不 throw（console.error 兑底），finally 兑底广播 message.bashAborted
+   * 与 abort() 对称：失败不 throw（console.error 兜底），finally 兜底广播 message.bashAborted
    * 独立帧——与 abort 广播 message.complete{aborted} 对称，前端据 bashAborted 收尾 isBashRunning 态。
    *
    * 返回 sent = abort_bash 是否真的发出且 pi 确认（P6 断言④回执真实化）：调用方
@@ -380,12 +380,12 @@ export class BashDispatcher {
     // 短路 { sent: false }，由调用方回执真实化。
     if (!activeSession?.isBashRunning) return { sent: false }
     // sent = abort_bash 是否发出且 pi 确认（sendCommand 对 success:false reject，resolve =
-    // pi 已执行 abort）。失败不提前 return：兑底 bashAborted 广播必须照发（T8b 既有契约）。
+    // pi 已执行 abort）。失败不提前 return：兜底 bashAborted 广播必须照发（T8b 既有契约）。
     let sent = true
     try {
       await client.abortBash()
     } catch (e) {
-      // 与 abort() 的错误兑底一致：不 throw，避免请求级 envelope 双重报错。孤儿标记保留：
+      // 与 abort() 的错误兜底一致：不 throw，避免请求级 envelope 双重报错。孤儿标记保留：
       // abort_bash 失败（pi 卡死/管道断）时 bash 状态未知，标记残留只让下次 abortBash 再发
       // 一次幂等的 abort_bash，比误清（谎称无孤儿）更诚实。
       console.error(`[bash-dispatcher] abortBash failed: sessionId=${sessionId}`, toErrorMessage(e))
@@ -404,7 +404,7 @@ export class BashDispatcher {
         activeSession.bashRunToken = `abort_${Date.now()}_${randomTokenSuffix()}`
       }
     }
-    // 兑底终态（独立帧 message.bashAborted，msg-pipeline-debloat D4-3）：无论 pi 是否响应
+    // 兜底终态（独立帧 message.bashAborted，msg-pipeline-debloat D4-3）：无论 pi 是否响应
     // abort_bash 都广播——pi 卡死时不发任何事件，靠这条让前端清 executingBash（UI 中止态，
     // 与 abort 广播 message.complete 同理）。真实 abort 结果由 sendBash await 返回后经
     // bashResult{cancelled:true} 照常发布（与 pi 落盘一致），与本帧职责正交。

@@ -314,7 +314,7 @@ export class SessionMessageHandler {
     // B3：透传 modelOverride / thinkingOverride（Landing Chip 覆盖值，设计文档 §5.2）。
     // 优先级：Landing Chip override > preset.modelOverride/thinkingLevel > 全局默认。
     // 之前只透传了 hidden/presetId，覆盖值在 transport 层被丢弃，导致 Landing Chip 选型不生效。
-    // projectId：D14 语义修正（2026-08-04），创建时归属当前 activeProject（空 = 默认项目兑底）。
+    // projectId：D14 语义修正（2026-08-04），创建时归属当前 activeProject（空 = 默认项目兜底）。
     // 错误路径直通 server 中央 catch（S2 收敛）：create payload 无 sessionId 字段，中央
     // code 透传（含 MODEL_NOT_CONFIGURED L4 差异化引导）产出的信封与原 per-case 特判逐字节一致。
     const session = await this.ctx.sessionService.create(msg.payload.cwd, msg.payload.label, {

@@ -190,7 +190,7 @@ describe('error-visibility M1: failed tool header danger + 终态展开（TC1-3�
     wrapper.unmount()
   })
 
-  it('[tool-detail-rich] 壳未注入（默认 mock deps）→ read 展开维持纯文本兑底（回归保护）', async () => {
+  it('[tool-detail-rich] 壳未注入（默认 mock deps）→ read 展开维持纯文本兜底（回归保护）', async () => {
     const wrapper = mountToolBlock(makeToolCall({ toolName: 'read', output: 'const a = 1' }))
     await wrapper.find('[data-testid="tool-block-header"]').trigger('click')
     expect(wrapper.find('.tool-result').exists()).toBe(true)

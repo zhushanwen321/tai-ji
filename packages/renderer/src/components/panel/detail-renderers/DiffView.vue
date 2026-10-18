@@ -136,7 +136,7 @@ const emit = defineEmits<{
  * 行号点击：emit 行引用信息（FR-5）。仅用 newNo（改动后行号）。
  * 纯删除行（newNo undefined）不可点击注入——该行在新文件已不存在，注入 :L<oldNo>
  * 语义错误（指向被删行）。模板 v-if="line.newNo !== undefined && injectable" 已挡住删除行
- * 与 injectable=false（trace 块复用）的渲染，此处 return 是防御性兑底。
+ * 与 injectable=false（trace 块复用）的渲染，此处 return 是防御性兜底。
  */
 function onLineClick(line: { oldNo?: number; newNo?: number }): void {
   if (!props.path) return

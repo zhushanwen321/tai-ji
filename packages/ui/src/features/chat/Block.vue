@@ -387,7 +387,7 @@
               </div>
               <!-- [tool-detail-rich] read/write/edit 经壳注入组件富渲染（diff / 行号代码块）。
                    水平滚动自管理（BlockScrollBox 仅 overflow-y）；壳未注入（mock 壳）或非三类
-                   工具 → 走下方纯文本兑底。 -->
+                   工具 → 走下方纯文本兜底。 -->
               <BlockScrollBox v-else-if="hasRichDetail">
                 <component :is="chatViewDeps.toolDetailRenderer" :tool="tool!" :session-id="sessionId" />
               </BlockScrollBox>
