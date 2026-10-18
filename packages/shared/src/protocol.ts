@@ -3059,9 +3059,10 @@ export interface ServerMessageMapBase {
   // canvas.updated 广播同源同值）/ 失败回结构化错误（code + recover 恢复指引）。
   // 不回全量状态：全量经广播失效后 canvas.get 拉取收敛（无乐观回显——事实驱动⑨）。
   'canvas.mutate': CanvasMutateReply
-  // canvas.updated 广播：payload 带 sessionId = 画布归属会话（失效提示仍走全局通道，
-  // 帧在 broker 豁免清单 GLOBAL_BROADCAST_SESSION_ID_EXEMPT 登记——sessionId 仅作归属
-  // 信息，消费方按归属过滤，对齐 plugin:headerActionUpdate 先例）；收到后重新拉取。
+  // canvas.updated 广播：payload 带 sessionId = 画布归属会话（runtime 侧为豁免清单
+  // GLOBAL_BROADCAST_SESSION_ID_EXEMPT 登记的全局广播——任意连接可见、不入 ring；
+  // renderer 侧经 ROUTE_TABLE crossSession 声明进跨会话通道，消费方 use-canvas-sync
+  // 模块级单订阅按归属过滤）；收到后重新拉取。
   'canvas.updated': { canvasId: string; sessionId: string; evType: CanvasEventType; eventId: string; summary: string }
 }
 

@@ -16,7 +16,8 @@
  *   不再自动唤起。
  * - refCount：多消费者共享单条物理订阅（一次广播只触发一轮拉取）；全部卸载后退订。
  *
- * 驱动方式：dispatchGlobal（core events 层真实现）喂广播帧；command 以 vi.mock 注入
+ * 驱动方式：dispatchCrossSession（core events 层真实现）喂广播帧（canvas.updated 走
+ * crossSession 通道——ROUTE_TABLE 声明条目，生产链路同通道）；command 以 vi.mock 注入
  * 替身；桥注册 mock（openCanvas vi.fn + snapshot 读真 ref，供打标 watch 建立响应依赖）。
  * 运行：cd packages/renderer && npx vitest run src/composables/use-canvas-sync.test.ts
  */
@@ -24,7 +25,7 @@ import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { nextTick, ref } from 'vue'
 import { effectScope } from 'vue'
 import { flushPromises } from '@vue/test-utils'
-import { dispatchGlobal } from '@taiji/core/transport/api'
+import { dispatchCrossSession } from '@taiji/core/transport/api'
 import type { CanvasState, CanvasEventType, ServerMessage } from '@taiji/shared'
 import {
   registerCanvasOverlayBridge,
@@ -79,7 +80,7 @@ function setupBridge(): void {
 
 /** 构造 canvas.updated 全局广播帧并分发（payload 带归属 sessionId）。 */
 function broadcast(canvasId: string, evType: CanvasEventType, sessionId = SID): void {
-  dispatchGlobal({
+  dispatchCrossSession({
     type: 'canvas.updated',
     payload: { canvasId, sessionId, evType, eventId: 'ev-1', summary: '' },
   } as ServerMessage<'canvas.updated'>)
@@ -105,6 +106,30 @@ describe('useCanvasSync（自动唤起边界 + per-session 分流）', () => {
     await flushPromises()
     expect(commandMock).toHaveBeenCalledTimes(1)
     expect(commandMock).toHaveBeenCalledWith('canvas.list', { sessionId: SID }, expect.any(Number))
+    scope.stop()
+  })
+
+  it('切换会话重拉：sidRef 变化 → 新会话清单 canvas.list（托盘长活外壳不重挂的切换腿）', async () => {
+    const scope = effectScope()
+    const sidRef = ref<string | null | undefined>(SID)
+    scope.run(() => useCanvasSync(sidRef))
+    await flushPromises()
+    commandMock.mockClear()
+    sidRef.value = SID_B
+    await flushPromises()
+    expect(commandMock).toHaveBeenCalledWith('canvas.list', { sessionId: SID_B }, expect.any(Number))
+    scope.stop()
+  })
+
+  it('切换到 null：不发起 canvas.list（无活跃会话跳过）', async () => {
+    const scope = effectScope()
+    const sidRef = ref<string | null | undefined>(SID)
+    scope.run(() => useCanvasSync(sidRef))
+    await flushPromises()
+    commandMock.mockClear()
+    sidRef.value = null
+    await flushPromises()
+    expect(commandMock).not.toHaveBeenCalled()
     scope.stop()
   })
 

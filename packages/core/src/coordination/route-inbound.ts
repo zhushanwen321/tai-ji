@@ -380,6 +380,11 @@ export const ROUTE_TABLE: Record<string, RouteTableEntry> = {
   // PLUGIN_HANDLERS 归一）——漏声明则帧只进 session 通道、bridge
   // （onGlobal/onCrossSession 双订阅）永收不到：徽标恒空。
   'plugin:headerActionUpdate': { crossSession: true },
+  // canvas 失效链（session-store-layout-inversion D4）：runtime 侧 canvas.updated 是豁免
+  // 清单（broker GLOBAL_BROADCAST_SESSION_ID_EXEMPT）登记的全局广播、payload 带归属
+  // sessionId——按 payload 形状进 session 通道，漏声明则模块级单订阅
+  // （use-canvas-sync onCrossSession）永收不到：托盘计数不刷新 / 创建后自动唤起死亡。
+  'canvas.updated': { crossSession: true },
 }
 
 // ── configureRouteInbound（IF4） ───────────────────────────────────

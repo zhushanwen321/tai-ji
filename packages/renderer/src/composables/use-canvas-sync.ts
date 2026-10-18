@@ -7,11 +7,16 @@
  * payload.sessionId 分流：失效重拉走 refreshCanvasFor(目标 sid)（updateFor 写「消息所属
  * 会话」分区，M1 竞态结构性消除），唤起判定只对「广播归属会话 = 本实例会话」的实例生效
  * （D4 裁决：只唤起归属会话前台——A 会话建画布不再抢 B 会话的屏）。
+ * 通道 = crossSession（ADR-0060，ROUTE_TABLE 声明条目）：帧 payload 带 sid，按形状进
+ * session 通道；广播语义（runtime 侧豁免清单 GLOBAL_BROADCAST_SESSION_ID_EXEMPT）+
+ * 全局单例消费面 → 走 crossSession 通道（plugin:headerActionUpdate 同族先例）。
  *
  * 四条链路：
  * 1. 首拉：每个消费面挂载即 `canvas.list` 一次（本实例会话的清单；幂等 RPC，多消费
- *    面各拉一次无害——「renderer 启动时拉一次」的落点 = 首个画布消费面挂载）。
- * 2. canvas.updated 消费（onGlobalType 全局单条）按 evType / 会话分流（广播 = 失效提示，
+ *    面各拉一次无害——「renderer 启动时拉一次」的落点 = 首个画布消费面挂载）+ 切换
+ *    会话重拉（sidRef watch——托盘外壳长活不重挂，对齐 useBackgroundTasks 的 watch(sid)
+ *    拉取腿；广播重拉覆盖不了「重启后静默数据切到该会话」场景）。
+ * 2. canvas.updated 消费（onCrossSession 全局单条）按 evType / 会话分流（广播 = 失效提示，
  *    拉为主 ADR-0097）：
  *    - 全类型：refreshCanvasFor(payload.sessionId, canvasId) 重拉该会话画布与清单；
  *    - CanvasCreated 且 payload.sessionId = 本实例会话：驱动创建后自动唤起（一次性引导），
@@ -32,7 +37,7 @@
  * 必须在组件 setup 内调用（onScopeDispose 挂订阅生命周期）。
  */
 import { watch, onScopeDispose, effectScope, type EffectScope, type Ref } from 'vue'
-import { onGlobalType } from '@taiji/core/transport/api'
+import { onCrossSession } from '@taiji/core/transport/api'
 import type { ServerMessageMap } from '@taiji/shared'
 import {
   isCanvasClosedByUser,
@@ -114,7 +119,9 @@ function ensureSubscribed(): void {
   unsubscribe =
     subScope.run(() => {
       const unsubs = [
-        onGlobalType('canvas.updated', (msg) => handleCanvasUpdated(msg.payload)),
+        onCrossSession((msg) => {
+          if (msg.type === 'canvas.updated') handleCanvasUpdated(msg.payload as ServerMessageMap['canvas.updated'])
+        }),
         // 关闭打标（链路 3）：canvas 内容的浮层被关闭 → 打标记（落 overlay 归属会话分区）；
         // 换内容（now 非 'closed'）不打标。快照读取器内读响应式源（生产 = core reactive
         // 单例；测试 = ref），watch 依赖随读取建立。
@@ -165,6 +172,11 @@ export function useCanvasSync(sidRef: Ref<string | null | undefined>): CanvasSto
   // 每个消费面挂载即拉一次本会话清单（链路 1；幂等，rev 守卫收敛倒拨——未连接时
   // reject 被吞，重连后由下次失效/重挂收敛）
   void store.listCanvases()
+  // 切换会话重拉腿（对齐 useBackgroundTasks 的 watch(sid) 拉取腿）：托盘外壳长活组件
+  // 切会话不重挂，挂载首拉只覆盖挂载时点会话；广播重拉只在 canvas.updated 帧到达时
+  // 发生——重启后静默数据的「切到该会话」场景两腿都不触发（L4 复验 F2 实证）。
+  // listCanvases 调用时点读 sidRef 当前值，null 由其内部兜底跳过。
+  watch(sidRef, () => void store.listCanvases())
   return store
 }
 
