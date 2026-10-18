@@ -40,7 +40,7 @@ import {
   type UiRequest,
   type UiResponse,
 } from "@zhushanwen/subagent-engine-sdk";
-import { killPiProcess } from "@zhushanwen/pi-rpc";
+import { killPiProcess, type SpawnModelRef } from "@zhushanwen/pi-rpc";
 
 import { registerActiveChild } from "./active-children.ts";
 import { SCHEMA_ENV_VAR } from "./constants.ts";
@@ -65,6 +65,7 @@ import {
   createSessionIdentityTracker,
   reportChildSpawned,
   wireChildStdoutPump,
+  type PromptRunCounters,
   type RunEndState,
   type SessionIdentityTracker,
 } from "./spawn-run-pump.ts";
@@ -425,6 +426,81 @@ function hasSchemaEnforcementExtension(spawnArgs: readonly string[]): boolean {
 }
 
 /**
+ * canonical model ref 前置校验：prepare 期第一道门——model 缺失 fail-fast 先于临时
+ * 文件创建（writeAppendPromptFile 会落盘 append-system-prompt 临时文件，校验在后会让
+ * prepare 期失败的 run 泄漏临时文件：finally 清理面在 try 内，校验抛错时 tempFile 尚无
+ * 清理路径）。
+ */
+function requireCanonicalModelRef(model: string | undefined): SpawnModelRef {
+  const modelRef = parseSpawnModelRef(model);
+  if (modelRef === undefined) {
+    throw new Error(
+      `[pi-subagent-cli] run requires a canonical model ref ("provider/id") in ctx.model, got: ${JSON.stringify(model)}. ` +
+        `Recovery: the host must resolve the model before dispatching (run.params.ctx.model); check the engine routing layer.`,
+    );
+  }
+  return modelRef;
+}
+
+/** thinking level 原样透传收窄（缺省/空串 → undefined；合法性权威 = pi，本层不预判）。 */
+function resolveThinkingLevel(params: SpawnRunParams): string | undefined {
+  return typeof params.thinkingLevel === "string" && params.thinkingLevel.length > 0
+    ? params.thinkingLevel
+    : undefined;
+}
+
+/** stderr tee 装配；无 tee 形态（无 stderr / dataDir 不可解析 / pid 缺失）排空流
+ * 防背压（stderr 无消费面写满会卡死子进程）。 */
+function attachStderrTee(child: ChildProcess): { path: string; close(): void } | undefined {
+  const stderrTee = createStderrTee(child);
+  if (stderrTee === undefined && child.stderr !== null) {
+    child.stderr.resume();
+  }
+  return stderrTee;
+}
+
+/** [D3 协议版 P6] 武装回执上报（仅 schema 任务；宿主 reducer 对本事件 no-op，落账归 run 事件 journal）。 */
+function reportSchemaEnforcementArmed(params: SpawnRunParams, callbacks: SpawnRunCallbacks): void {
+  if (params.schema !== undefined) {
+    callbacks.onEvent({
+      type: "armed",
+      schemaEnvVar: SCHEMA_ENV_VAR,
+      extensionPkg: SCHEMA_ENFORCEMENT_EXTENSION_PKG,
+    });
+  }
+}
+
+/**
+ * prompt 命令投递 + [M2 D3] 即时失败路径：register（onRequestId，写前登记并武装零
+ * 输出计时器）→ 写入（EPIPE 抛出 → failNow("epipe")）→ delivered:false（stdin 不可用，
+ * 未登记未写）→ failNow("stdin-unavailable")。两条即时失败不等 30s（S9），killChild 由
+ * onFailure 承接；delivered 后置 promptWritten（pump 的 stdout 计数进入「写入后」半面，
+ * tracker 活性上报同步生效）。
+ */
+function sendPromptWithAck(
+  child: ChildProcess,
+  task: string,
+  ackTracker: PromptAckTracker | undefined,
+  runCounters: PromptRunCounters,
+): void {
+  try {
+    const sent = sendPromptCommand(child, task, {
+      onRequestId: (id) => ackTracker?.register(id),
+      onBytesWritten: (n) => {
+        runCounters.bytesWritten += n;
+      },
+    });
+    if (!sent.delivered) {
+      ackTracker?.failNow("stdin-unavailable", sent.reason ?? "stdin unavailable");
+    } else {
+      runCounters.promptWritten = true;
+    }
+  } catch (err) {
+    ackTracker?.failNow("epipe", toErrorMessage(err));
+  }
+}
+
+/**
  * 单次 spawn run：spawn pi rpc 子进程 → pump stdout → 收集结果。
  *
  * 生命周期（[modeless 波2] 唯一语义）：正常轮终 = agent_settled（真空闲）resolve
@@ -637,7 +713,7 @@ export async function runSpawnOnce(
 ): Promise<SpawnRunResult> {
   const record = createReplayRecord();
   const startTime = Date.now();
-  const modelRef = parseSpawnModelRef(params.model);
+  const modelRef = requireCanonicalModelRef(params.model);
   // [M2 D3] prompt 回执 tracker（spawn 成功后装配；finally 必达 dispose——正常
   // 完成 / 异常 / 取消三路都经过）。
   let ackTracker: PromptAckTracker | undefined;
@@ -646,15 +722,8 @@ export async function runSpawnOnce(
   // workflow 成员复用导致同 recordId 再次 run 时序号接续，不从 0 重开。
   let rawMirror: RawMirrorWriter | undefined;
 
-  // prepare 期校验前置（model 缺失 fail-fast 先于临时文件创建）：writeAppendPromptFile
-  // 会落盘 append-system-prompt 临时文件，校验在后会让 prepare 期失败的 run 泄漏
-  // 临时文件（finally 清理面在 try 内——校验抛错时 tempFile 尚无清理路径）。
-  if (modelRef === undefined) {
-    throw new Error(
-      `[pi-subagent-cli] run requires a canonical model ref ("provider/id") in ctx.model, got: ${JSON.stringify(params.model)}. ` +
-        `Recovery: the host must resolve the model before dispatching (run.params.ctx.model); check the engine routing layer.`,
-    );
-  }
+  // prepare 期校验已前置（见 requireCanonicalModelRef）：model 缺失在临时文件创建前
+  // fail-fast。
 
   // 1. append-system-prompt 文件（环境块 + wrap-up 提示 + 调用方片段）
   const tempFile = await writeAppendPromptFile(params);
@@ -675,10 +744,7 @@ export async function runSpawnOnce(
       // verifiedWith 以 pi-semantics.json 为准，逐 claim 行号见该条目 piAnchor）。
       // pi 升级重验：两处 parseModelPattern 是否仍传 false——若 CLI 链改用缺省
       // 放宽，非法档位将静默剥后缀降级为「没指定」（docs/pi-semantics.json PS-62）。
-      thinkingLevel:
-        typeof params.thinkingLevel === "string" && params.thinkingLevel.length > 0
-          ? params.thinkingLevel
-          : undefined,
+      thinkingLevel: resolveThinkingLevel(params),
       agentTools: params.agentTools,
       appendSystemPromptPath: tempFile?.filePath,
       sessionDir: params.sessionDir,
@@ -770,10 +836,7 @@ export async function runSpawnOnce(
     // 过期清理）；dataDir 不可解析（宿主未注入且无 fallback）时仅排空防背压。
     // [D5 诊断引用落账] tee 路径捕获：失败时随终态应答上报宿主（见 collectOutcome
     // 消费点）。
-    const stderrTee = createStderrTee(child);
-    if (stderrTee === undefined && child.stderr !== null) {
-      child.stderr.resume();
-    }
+    const stderrTee = attachStderrTee(child);
 
     // 3. 镜像上报（childSpawned 先行——未收上报前宿主 = 无句柄）+ 引擎侧记账
     registerActiveChild(params.recordId, child);
@@ -786,13 +849,7 @@ export async function runSpawnOnce(
     // 武装链路活性，防「断言代码自身失效/被绕过」的自证盲区。仅 schema 任务上报
     // （本包是 native 引擎，capability 分流已由断言前置；无 schema 任务无武装面，
     // 上报零语义）。宿主 reducer 对本事件 no-op（C3 第④步），落账归 run 事件 journal。
-    if (params.schema !== undefined) {
-      callbacks.onEvent({
-        type: "armed",
-        schemaEnvVar: SCHEMA_ENV_VAR,
-        extensionPkg: SCHEMA_ENFORCEMENT_EXTENSION_PKG,
-      });
-    }
+    reportSchemaEnforcementArmed(params, callbacks);
 
     // 4. UI 请求队列（host/askUser 两阶段等待体注入）
     const enqueueUi = createUiRequestQueue(child, {
@@ -824,27 +881,8 @@ export async function runSpawnOnce(
       identity.applyGetStateFields(r);
     });
 
-    // 8. prompt 命令（rpc mode 唯一任务驱动通道）+ [M2 D3] 送达回执装配：
-    //    register（onRequestId，写前登记并武装零输出计时器）→ 写入（EPIPE 抛出 →
-    //    failNow("epipe")）→ delivered:false（stdin 不可用，未登记未写）→
-    //    failNow("stdin-unavailable")——两条立即失败路径都不等 30s（S9），killChild
-    //    由 onFailure 承接。delivered 后置 promptWritten：pump 的 stdout 计数进入
-    //    「写入后」半面，tracker 活性上报（零输出计时器取消）同步生效。
-    try {
-      const sent = sendPromptCommand(child, params.task, {
-        onRequestId: (id) => ackTracker?.register(id),
-        onBytesWritten: (n) => {
-          runCounters.bytesWritten += n;
-        },
-      });
-      if (!sent.delivered) {
-        ackTracker?.failNow("stdin-unavailable", sent.reason ?? "stdin unavailable");
-      } else {
-        runCounters.promptWritten = true;
-      }
-    } catch (err) {
-      ackTracker?.failNow("epipe", toErrorMessage(err));
-    }
+    // 8. prompt 命令（rpc mode 唯一任务驱动通道）+ [M2 D3] 送达回执装配（见 sendPromptWithAck）。
+    sendPromptWithAck(child, params.task, ackTracker, runCounters);
 
     // 9. 等待退出
     const exitCode = await exitPromise;

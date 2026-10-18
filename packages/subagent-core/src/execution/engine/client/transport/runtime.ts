@@ -34,6 +34,7 @@ import { acquireRuntimeControlClient } from "./control-client.ts";
 import {
   makeTransportError,
   type ControlChannelIdentity,
+  type RuntimeControlClientOptions,
 } from "./control-shared.ts";
 import type {
   EngineLaunchSpec,
@@ -72,6 +73,30 @@ function parseDepth(value: string | undefined): number | undefined {
   if (value === undefined || value.length === 0) return undefined;
   const parsed = Number(value);
   return Number.isInteger(parsed) && parsed >= 0 ? parsed : undefined;
+}
+
+/** 共享控制客户端选项装配（未注入的时间窗/上限不落键，透传客户端缺省）。 */
+function buildControlClientOptions(
+  opts: RuntimeEngineTransportOptions,
+  socketPath: string,
+  rootSessionId: string,
+): RuntimeControlClientOptions {
+  return {
+    socketPath,
+    // [R2A-N1] 根会话进共享键：同 socket 的不同根各用一条连接（temp 探针连接
+    // 不得占用真根 run 的连接——runtime 首 open 定根后不可换绑）。
+    rootSessionId,
+    hostKind: opts.hostKind,
+    ...(opts.connectTimeoutMs !== undefined ? { connectTimeoutMs: opts.connectTimeoutMs } : {}),
+    ...(opts.helloTimeoutMs !== undefined ? { helloTimeoutMs: opts.helloTimeoutMs } : {}),
+    ...(opts.openTimeoutMs !== undefined ? { openTimeoutMs: opts.openTimeoutMs } : {}),
+    ...(opts.closeGraceMs !== undefined ? { closeGraceMs: opts.closeGraceMs } : {}),
+    ...(opts.maxFrameBytes !== undefined ? { maxFrameBytes: opts.maxFrameBytes } : {}),
+    ...(opts.channelQueueMaxBytes !== undefined
+      ? { channelQueueMaxBytes: opts.channelQueueMaxBytes } : {}),
+    ...(opts.channelQueueMaxFrames !== undefined
+      ? { channelQueueMaxFrames: opts.channelQueueMaxFrames } : {}),
+  };
 }
 
 /**
@@ -128,22 +153,9 @@ export class RuntimeEngineTransport implements EngineTransport {
       ...(depth !== undefined ? { depth } : {}),
     };
 
-    const client = acquireRuntimeControlClient({
-      socketPath,
-      // [R2A-N1] 根会话进共享键：同 socket 的不同根各用一条连接（temp 探针连接
-      // 不得占用真根 run 的连接——runtime 首 open 定根后不可换绑）。
-      rootSessionId,
-      hostKind: this.opts.hostKind,
-      ...(this.opts.connectTimeoutMs !== undefined ? { connectTimeoutMs: this.opts.connectTimeoutMs } : {}),
-      ...(this.opts.helloTimeoutMs !== undefined ? { helloTimeoutMs: this.opts.helloTimeoutMs } : {}),
-      ...(this.opts.openTimeoutMs !== undefined ? { openTimeoutMs: this.opts.openTimeoutMs } : {}),
-      ...(this.opts.closeGraceMs !== undefined ? { closeGraceMs: this.opts.closeGraceMs } : {}),
-      ...(this.opts.maxFrameBytes !== undefined ? { maxFrameBytes: this.opts.maxFrameBytes } : {}),
-      ...(this.opts.channelQueueMaxBytes !== undefined
-        ? { channelQueueMaxBytes: this.opts.channelQueueMaxBytes } : {}),
-      ...(this.opts.channelQueueMaxFrames !== undefined
-        ? { channelQueueMaxFrames: this.opts.channelQueueMaxFrames } : {}),
-    });
+    const client = acquireRuntimeControlClient(
+      buildControlClientOptions(this.opts, socketPath, rootSessionId),
+    );
     this.client = client;
     try {
       const result = await client.openChannel(spec, identity, {

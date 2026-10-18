@@ -125,6 +125,51 @@ export type ControlServerOptions = {
   killGroup?: (pid: number | null | undefined, context: string) => void
 }
 
+/** 构造期解析出的时间窗/上限（ControlServerOptions 缺省注入的集中落点）。 */
+type ResolvedControlLimits = {
+  helloTimeoutMs: number
+  openTimeoutMs: number
+  closeGraceMs: number
+  maxFrameBytes: number
+  maxChannelsPerConnection: number
+  channelQueueMaxBytes: number
+  channelQueueMaxFrames: number
+  connectionQueueMaxBytes: number
+}
+
+/** 构造期解析出的路径锚点（dataDir / pi 定位）。 */
+type ResolvedControlPaths = {
+  dataDir: string
+  projectRoot: string
+  piDir: string | undefined
+  piAgentDir: string
+}
+
+function resolveControlLimits(opts: ControlServerOptions): ResolvedControlLimits {
+  return {
+    helloTimeoutMs: opts.helloTimeoutMs ?? CONTROL_HELLO_TIMEOUT_MS,
+    openTimeoutMs: opts.openTimeoutMs ?? ENGINE_OPEN_TIMEOUT_MS,
+    closeGraceMs: opts.closeGraceMs ?? ENGINE_CLOSE_GRACE_MS,
+    maxFrameBytes: opts.maxFrameBytes ?? CONTROL_MAX_FRAME_BYTES,
+    maxChannelsPerConnection: opts.maxChannelsPerConnection ?? MAX_CHANNELS_PER_CONNECTION,
+    channelQueueMaxBytes: opts.channelQueueMaxBytes ?? CHANNEL_QUEUE_MAX_BYTES,
+    channelQueueMaxFrames: opts.channelQueueMaxFrames ?? CHANNEL_QUEUE_MAX_FRAMES,
+    connectionQueueMaxBytes: opts.connectionQueueMaxBytes ?? CONNECTION_QUEUE_MAX_BYTES,
+  }
+}
+
+function resolveControlPaths(opts: ControlServerOptions): ResolvedControlPaths {
+  const dataDir = opts.dataDir ?? getDataDir()
+  const projectRoot = opts.projectRoot ?? process.cwd()
+  const piCommand = opts.piCommand ?? safeFindPi(projectRoot)
+  return {
+    dataDir,
+    projectRoot,
+    piDir: piCommand !== 'pi' ? dirname(piCommand) : undefined,
+    piAgentDir: opts.piAgentDir ?? getPiAgentDir(),
+  }
+}
+
 /** 在途 engine_open 登记（数据形状，非可实现契约——oe-audit 口径用 type 别名）。 */
 type PendingOpen = {
   key: string
@@ -255,26 +300,27 @@ export class SubagentControlServer {
   private readonly killGroup: (pid: number | null | undefined, context: string) => void
 
   constructor(private readonly opts: ControlServerOptions) {
-    this.dataDir = opts.dataDir ?? getDataDir()
-    this.projectRoot = opts.projectRoot ?? process.cwd()
+    const paths = resolveControlPaths(opts)
+    const limits = resolveControlLimits(opts)
+    this.dataDir = paths.dataDir
+    this.projectRoot = paths.projectRoot
     this.engineNodeEnv = opts.engineNodeEnv ?? {}
     this.runtimeEnv = opts.runtimeEnv ?? { ...process.env }
-    this.helloTimeoutMs = opts.helloTimeoutMs ?? CONTROL_HELLO_TIMEOUT_MS
-    this.openTimeoutMs = opts.openTimeoutMs ?? ENGINE_OPEN_TIMEOUT_MS
-    this.closeGraceMs = opts.closeGraceMs ?? ENGINE_CLOSE_GRACE_MS
-    this.maxFrameBytes = opts.maxFrameBytes ?? CONTROL_MAX_FRAME_BYTES
-    this.maxChannelsPerConnection = opts.maxChannelsPerConnection ?? MAX_CHANNELS_PER_CONNECTION
-    this.channelQueueMaxBytes = opts.channelQueueMaxBytes ?? CHANNEL_QUEUE_MAX_BYTES
-    this.channelQueueMaxFrames = opts.channelQueueMaxFrames ?? CHANNEL_QUEUE_MAX_FRAMES
-    this.connectionQueueMaxBytes = opts.connectionQueueMaxBytes ?? CONNECTION_QUEUE_MAX_BYTES
+    this.helloTimeoutMs = limits.helloTimeoutMs
+    this.openTimeoutMs = limits.openTimeoutMs
+    this.closeGraceMs = limits.closeGraceMs
+    this.maxFrameBytes = limits.maxFrameBytes
+    this.maxChannelsPerConnection = limits.maxChannelsPerConnection
+    this.channelQueueMaxBytes = limits.channelQueueMaxBytes
+    this.channelQueueMaxFrames = limits.channelQueueMaxFrames
+    this.connectionQueueMaxBytes = limits.connectionQueueMaxBytes
     this.resolveLaunch = opts.resolveLaunch ?? resolveEngineNodeLaunch
     this.execPath = opts.execPath
     this.isElectronHost = opts.isElectronHost
     this.killPlatform = opts.killPlatform ?? process.platform
     this.killGroup = opts.killGroup ?? killEngineGroup
-    const piCommand = opts.piCommand ?? safeFindPi(this.projectRoot)
-    this.piDir = piCommand !== 'pi' ? dirname(piCommand) : undefined
-    this.piAgentDir = opts.piAgentDir ?? getPiAgentDir()
+    this.piDir = paths.piDir
+    this.piAgentDir = paths.piAgentDir
     this.mirror = new SubagentMirrorHub(
       opts.publish !== undefined ? { publish: opts.publish } : {},
     )
@@ -662,25 +708,8 @@ export class SubagentControlServer {
 
   private async spawnForOpening(conn: ConnState, opening: PendingOpen): Promise<void> {
     const spec = opening.spec
-    let launch: EngineNodeLaunch
-    try {
-      launch = await this.resolveLaunch({
-        entryPath: spec.entryPath,
-        args: spec.args,
-        hostKind: 'runtime-sidecar',
-        env: this.runtimeEnv,
-        execPath: this.execPath,
-        isElectronHost: this.isElectronHost,
-      })
-    } catch (e) {
-      const code = e instanceof EngineSdkError ? e.code : CONTROL_FRAME_ERROR_CODES.spawnFailed
-      const recovery = e instanceof EngineSdkError && e.recovery.length > 0
-        ? e.recovery
-        : 'Check the engine descriptor entryPath and the runtime executor availability.'
-      this.failOpening(conn, opening, code, toErrorMessage(e), recovery)
-      return
-    }
-    if (conn.destroyed || opening.aborted) return // 迟到解析结果：无进程可杀，占位已清
+    const launch = await this.resolveLaunchOrFail(conn, opening)
+    if (launch === null || conn.destroyed || opening.aborted) return // 迟到解析结果：无进程可杀，占位已清
 
     const env = buildEngineLaunchEnv({
       runtimeEnv: this.runtimeEnv,
@@ -695,24 +724,8 @@ export class SubagentControlServer {
       rawMirror: true,
     })
 
-    let child: ChildProcess
-    try {
-      // POSIX detached:true（引擎 = 进程组长，组杀覆盖引擎 + 其 pi 子进程）；
-      // Windows detached:false + windowsHide:true（树杀走 taskkill /T，D7）。
-      // stdio[3] = raw mirror 通道（TAIJI_ENGINE_RAW_MIRROR=1 宣告；读取侧由
-      // SubagentMirrorHub 接管——见 attachChildWiring 的 fd3 接线）。
-      child = spawn(launch.command, launch.args, {
-        cwd: spec.cwd,
-        env,
-        detached: process.platform !== 'win32',
-        windowsHide: process.platform === 'win32',
-        stdio: ['pipe', 'pipe', 'pipe', 'pipe'],
-      })
-    } catch (e) {
-      this.failOpening(conn, opening, CONTROL_FRAME_ERROR_CODES.spawnFailed, toErrorMessage(e),
-        'Check the engine executor availability; the runtime re-probes after restart.')
-      return
-    }
+    const child = this.spawnChildOrFail(conn, opening, launch, env)
+    if (child === null) return
     if (opening.aborted || conn.destroyed) {
       // spawn 与超时/断连的竞态：刚拿到的进程立即组杀，不回 engine_opened（迟到结果丢弃）
       this.killGroup(child.pid, `late-spawn ${spec.engineId}`)
@@ -722,16 +735,76 @@ export class SubagentControlServer {
     // spawn 完成前不变量复检（planner②）：并发 open 的占位可能在 resolve/spawn
     // 期间继续增长；超限则杀掉刚拿到的进程，不登记、不回 engine_opened。
     if (this.connectionChannelCount(conn) > this.maxChannelsPerConnection) {
-      clearTimeout(opening.timer)
-      conn.pendingOpens.delete(opening.key)
-      this.killGroup(child.pid, `channel-limit ${spec.engineId}`)
-      this.replyOpenFailed(conn, frameIdOf(opening.key), CONTROL_FRAME_ERROR_CODES.channelLimit,
-        `connection channel limit (${String(this.maxChannelsPerConnection)}) reached`,
-        'Close idle engine channels before opening more.')
+      this.rejectOverLimitOpening(conn, opening, child)
       return
     }
 
-    // 登记通道 + pid 文件（D7 形状：runtimePid/instanceId/hostKind 供 sweep owner 判定）
+    this.openChannel(conn, opening, child)
+  }
+
+  /** resolveLaunch 失败面：spawn 语义错误码透传 + 占位失败回包（迟到结果按 failOpening 静默）。 */
+  private async resolveLaunchOrFail(conn: ConnState, opening: PendingOpen): Promise<EngineNodeLaunch | null> {
+    const spec = opening.spec
+    try {
+      return await this.resolveLaunch({
+        entryPath: spec.entryPath,
+        args: spec.args,
+        hostKind: 'runtime-sidecar',
+        env: this.runtimeEnv,
+        execPath: this.execPath,
+        isElectronHost: this.isElectronHost,
+      })
+    } catch (e) {
+      const code = e instanceof EngineSdkError ? e.code : CONTROL_FRAME_ERROR_CODES.spawnFailed
+      const recovery = e instanceof EngineSdkError && e.recovery.length > 0
+        ? e.recovery
+        : 'Check the engine descriptor entryPath and the runtime executor availability.'
+      this.failOpening(conn, opening, code, toErrorMessage(e), recovery)
+      return null
+    }
+  }
+
+  /** spawn 同步失败 → engine_open_failed（异步 spawn error 由 attachChildWiring 的 127 口径承接）。 */
+  private spawnChildOrFail(
+    conn: ConnState,
+    opening: PendingOpen,
+    launch: EngineNodeLaunch,
+    env: Record<string, string>,
+  ): ChildProcess | null {
+    const spec = opening.spec
+    try {
+      // POSIX detached:true（引擎 = 进程组长，组杀覆盖引擎 + 其 pi 子进程）；
+      // Windows detached:false + windowsHide:true（树杀走 taskkill /T，D7）。
+      // stdio[3] = raw mirror 通道（TAIJI_ENGINE_RAW_MIRROR=1 宣告；读取侧由
+      // SubagentMirrorHub 接管——见 attachChildWiring 的 fd3 接线）。
+      return spawn(launch.command, launch.args, {
+        cwd: spec.cwd,
+        env,
+        detached: process.platform !== 'win32',
+        windowsHide: process.platform === 'win32',
+        stdio: ['pipe', 'pipe', 'pipe', 'pipe'],
+      })
+    } catch (e) {
+      this.failOpening(conn, opening, CONTROL_FRAME_ERROR_CODES.spawnFailed, toErrorMessage(e),
+        'Check the engine executor availability; the runtime re-probes after restart.')
+      return null
+    }
+  }
+
+  /** spawn 后并发复检超限：杀刚拿到的进程 + 回 engine_open_failed（与 handleEngineOpen 同文案）。 */
+  private rejectOverLimitOpening(conn: ConnState, opening: PendingOpen, child: ChildProcess): void {
+    clearTimeout(opening.timer)
+    conn.pendingOpens.delete(opening.key)
+    this.killGroup(child.pid, `channel-limit ${opening.spec.engineId}`)
+    this.replyOpenFailed(conn, frameIdOf(opening.key), CONTROL_FRAME_ERROR_CODES.channelLimit,
+      `connection channel limit (${String(this.maxChannelsPerConnection)}) reached`,
+      'Close idle engine channels before opening more.')
+  }
+
+  /** 登记通道 + pid 文件（D7 形状：runtimePid/instanceId/hostKind 供 sweep owner 判定），
+   * 回 engine_opened 并挂子进程事件（spawn 已赢下竞态）。 */
+  private openChannel(conn: ConnState, opening: PendingOpen, child: ChildProcess): void {
+    const spec = opening.spec
     const channelId = `ch-${++this.channelSeq}`
     const pidFile = getEnginePidFilePath(spec.rootSessionId, spec.engineId, channelId, this.dataDir)
     const rec = this.registry.register({
@@ -748,6 +821,29 @@ export class SubagentControlServer {
     rec.state = 'open'
     rec.pid = child.pid ?? null
     rec.child = child
+    const ctx = this.createChannelCtx(conn, rec, channelId)
+    this.ctxs.set(channelId, ctx)
+    this.writePidFileQuietly(pidFile, spec, child)
+
+    clearTimeout(opening.timer)
+    conn.pendingOpens.delete(opening.key)
+    this.writeFrame(conn, {
+      v: SUBAGENT_CONTROL_PROTOCOL_VERSION,
+      kind: SUBAGENT_CONTROL_FRAME_KINDS.engineOpened,
+      id: frameIdOf(opening.key),
+      channelId,
+      pid: child.pid ?? null,
+    })
+    console.log(
+      `[subagent-control] engine opened channelId=${channelId} engineId=${spec.engineId} `
+      + `pid=${String(child.pid)} rootSessionId=${spec.rootSessionId} `
+      + `parentRecordId=${spec.parentRecordId ?? '-'} depth=${String(spec.depth ?? '-')}`,
+    )
+    this.attachChildWiring(ctx)
+  }
+
+  /** 通道运行期结构装配（down 队列的溢出回调闭包引用构造中的 ctx，队列溢出只会异步发生）。 */
+  private createChannelCtx(conn: ConnState, rec: EngineChannelRecord, channelId: string): ChannelCtx {
     const ctx: ChannelCtx = {
       rec,
       conn,
@@ -777,7 +873,11 @@ export class SubagentControlServer {
       exitSeen: false,
       cleanedUp: false,
     }
-    this.ctxs.set(channelId, ctx)
+    return ctx
+  }
+
+  /** pid 文件是重启 sweep 依据，写失败不阻塞（当前 runtime 在管，退出走清理）。 */
+  private writePidFileQuietly(pidFile: string, spec: EngineLaunchSpecWire, child: ChildProcess): void {
     try {
       writeEnginePidFileAtomically(pidFile, {
         pid: child.pid ?? null,
@@ -794,22 +894,6 @@ export class SubagentControlServer {
       // pid 文件是重启 sweep 依据，写失败不阻塞（当前 runtime 在管，退出走清理）
       console.warn(`[subagent-control] pid file write failed ${pidFile}:`, e)
     }
-
-    clearTimeout(opening.timer)
-    conn.pendingOpens.delete(opening.key)
-    this.writeFrame(conn, {
-      v: SUBAGENT_CONTROL_PROTOCOL_VERSION,
-      kind: SUBAGENT_CONTROL_FRAME_KINDS.engineOpened,
-      id: frameIdOf(opening.key),
-      channelId,
-      pid: child.pid ?? null,
-    })
-    console.log(
-      `[subagent-control] engine opened channelId=${channelId} engineId=${spec.engineId} `
-      + `pid=${String(child.pid)} rootSessionId=${spec.rootSessionId} `
-      + `parentRecordId=${spec.parentRecordId ?? '-'} depth=${String(spec.depth ?? '-')}`,
-    )
-    this.attachChildWiring(ctx)
   }
 
   /** open 超时（D8 三窗之一）：中止占位；spawn 已赢下竞态则连引擎一起组杀（open_timeout）。 */

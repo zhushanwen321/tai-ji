@@ -184,6 +184,32 @@ export function createPromptAckTracker(opts: {
     if (result.kind !== "acked") onFailure(result);
   };
 
+  /** 迟到 response 留痕（不重复 kill、不覆盖已有 failure、不产生未处理 rejection）。 */
+  const warnLatePromptResponse = (id: string | undefined, command: string): void => {
+    if (state !== "disposed" && command === "prompt" && id !== undefined && id === pendingId) {
+      logger.warn(
+        `[prompt-ack] ${recordId} late prompt response after settle (ignored): id=${id}`,
+      );
+    }
+  };
+
+  /**
+   * acked 日志：started / queued / handled 都是「pi 已受理」（D3 不采用只认 started）；
+   * ack latency 走 debug（S8/P-6b 的 ack 延迟分布数据源；debug 级不刷 prod info 面）。
+   */
+  const logPromptAcked = (disposition: "started" | "queued" | "handled" | undefined): void => {
+    const latencyMs = registeredAt !== undefined ? Date.now() - registeredAt : undefined;
+    logger.debug(
+      `[prompt-ack] ${recordId} prompt acked${latencyMs !== undefined ? ` in ${latencyMs}ms` : ""}` +
+        `${disposition !== undefined ? ` (disposition=${disposition})` : ""}`,
+    );
+  };
+
+  /** rejected 文案：pi error 文本缺失时回落固定文案，统一走有界截断。 */
+  const rejectionDetail = (error: string | undefined): string => {
+    return boundDetail(error !== undefined && error !== "" ? error : "(no error text from pi)");
+  };
+
   return {
     register(id) {
       if (state !== "pending") {
@@ -212,28 +238,18 @@ export function createPromptAckTracker(opts: {
     dispatch(id, command, success, data, error) {
       if (state !== "pending") {
         // 迟到的 response：留痕忽略（不重复 kill、不覆盖已有 failure、不产生未处理 rejection）
-        if (state !== "disposed" && command === "prompt" && id !== undefined && id === pendingId) {
-          logger.warn(
-            `[prompt-ack] ${recordId} late prompt response after settle (ignored): id=${id}`,
-          );
-        }
+        warnLatePromptResponse(id, command);
         return;
       }
       if (command !== "prompt") return;
       if (id === undefined || id !== pendingId) return;
       if (success) {
         const disposition = extractDisposition(data);
-        const latencyMs = registeredAt !== undefined ? Date.now() - registeredAt : undefined;
-        // started / queued / handled 都是「pi 已受理」（D3 不采用只认 started）；
-        // ack latency 走 debug（S8/P-6b 的 ack 延迟分布数据源；debug 级不刷 prod info 面）
-        logger.debug(
-          `[prompt-ack] ${recordId} prompt acked${latencyMs !== undefined ? ` in ${latencyMs}ms` : ""}` +
-            `${disposition !== undefined ? ` (disposition=${disposition})` : ""}`,
-        );
+        logPromptAcked(disposition);
         settle({ kind: "acked", ...(disposition !== undefined ? { disposition } : {}) });
         return;
       }
-      const detail = boundDetail(error !== undefined && error !== "" ? error : "(no error text from pi)");
+      const detail = rejectionDetail(error);
       logger.warn(`[prompt-ack] ${recordId} prompt rejected by pi: ${detail}`);
       settle({ kind: "rejected", detail });
     },

@@ -82,6 +82,69 @@ function optionalChannelId(value: unknown): string {
   return typeof value === "string" ? value : "";
 }
 
+function toHelloOkFrame(parsed: Record<string, unknown>): ControlInboundHelloOk {
+  return { kind: SUBAGENT_CONTROL_FRAME_KINDS.helloOk, id: parsed.id };
+}
+
+function toHelloRejectFrame(parsed: Record<string, unknown>): ControlInboundHelloReject {
+  return {
+    kind: SUBAGENT_CONTROL_FRAME_KINDS.helloReject,
+    id: parsed.id,
+    reason: optionalString(parsed.reason),
+    message: optionalString(parsed.message),
+    recovery: optionalString(parsed.recovery),
+    code: optionalString(parsed.code),
+  };
+}
+
+function toEngineOpenedFrame(parsed: Record<string, unknown>): ControlInboundEngineOpened {
+  return {
+    kind: SUBAGENT_CONTROL_FRAME_KINDS.engineOpened,
+    id: parsed.id,
+    channelId: optionalChannelId(parsed.channelId),
+    pid: typeof parsed.pid === "number" ? parsed.pid : undefined,
+  };
+}
+
+function toEngineOpenFailedFrame(parsed: Record<string, unknown>): ControlInboundEngineOpenFailed {
+  return {
+    kind: SUBAGENT_CONTROL_FRAME_KINDS.engineOpenFailed,
+    id: parsed.id,
+    code: optionalString(parsed.code) ?? "spawn_failed",
+    message: optionalString(parsed.message) ?? "engine_open failed",
+    recovery: optionalString(parsed.recovery),
+  };
+}
+
+function toEngineFrameFrame(parsed: Record<string, unknown>): ControlInboundEngineFrame {
+  return {
+    kind: SUBAGENT_CONTROL_FRAME_KINDS.engineFrame,
+    channelId: optionalChannelId(parsed.channelId),
+    line: typeof parsed.line === "string" ? parsed.line : "",
+  };
+}
+
+function toEngineClosedFrame(parsed: Record<string, unknown>): ControlInboundEngineClosed {
+  return {
+    kind: SUBAGENT_CONTROL_FRAME_KINDS.engineClosed,
+    channelId: optionalChannelId(parsed.channelId),
+    code: typeof parsed.code === "number" ? parsed.code : null,
+    signal: optionalString(parsed.signal) ?? null,
+    stderrTail: optionalString(parsed.stderrTail),
+    reason: isSubagentControlClosedReason(parsed.reason) ? parsed.reason : undefined,
+  };
+}
+
+function toErrorFrame(parsed: Record<string, unknown>): ControlInboundError {
+  return {
+    kind: SUBAGENT_CONTROL_FRAME_KINDS.error,
+    channelId: optionalString(parsed.channelId),
+    code: optionalString(parsed.code) ?? "engine_transport_unavailable",
+    message: optionalString(parsed.message) ?? "runtime control error",
+    recovery: optionalString(parsed.recovery),
+  };
+}
+
 /** 解析一行 control 帧（R→C 面）。畸形/词表外/方向错 → dropped（调用方计数留痕）。 */
 export function parseControlInboundLine(line: string): ControlInboundParse {
   let parsed: unknown;
@@ -95,66 +158,19 @@ export function parseControlInboundLine(line: string): ControlInboundParse {
   }
   switch (parsed.kind) {
     case SUBAGENT_CONTROL_FRAME_KINDS.helloOk:
-      return { frame: { kind: SUBAGENT_CONTROL_FRAME_KINDS.helloOk, id: parsed.id } };
+      return { frame: toHelloOkFrame(parsed) };
     case SUBAGENT_CONTROL_FRAME_KINDS.helloReject:
-      return {
-        frame: {
-          kind: SUBAGENT_CONTROL_FRAME_KINDS.helloReject,
-          id: parsed.id,
-          reason: optionalString(parsed.reason),
-          message: optionalString(parsed.message),
-          recovery: optionalString(parsed.recovery),
-          code: optionalString(parsed.code),
-        },
-      };
+      return { frame: toHelloRejectFrame(parsed) };
     case SUBAGENT_CONTROL_FRAME_KINDS.engineOpened:
-      return {
-        frame: {
-          kind: SUBAGENT_CONTROL_FRAME_KINDS.engineOpened,
-          id: parsed.id,
-          channelId: optionalChannelId(parsed.channelId),
-          pid: typeof parsed.pid === "number" ? parsed.pid : undefined,
-        },
-      };
+      return { frame: toEngineOpenedFrame(parsed) };
     case SUBAGENT_CONTROL_FRAME_KINDS.engineOpenFailed:
-      return {
-        frame: {
-          kind: SUBAGENT_CONTROL_FRAME_KINDS.engineOpenFailed,
-          id: parsed.id,
-          code: optionalString(parsed.code) ?? "spawn_failed",
-          message: optionalString(parsed.message) ?? "engine_open failed",
-          recovery: optionalString(parsed.recovery),
-        },
-      };
+      return { frame: toEngineOpenFailedFrame(parsed) };
     case SUBAGENT_CONTROL_FRAME_KINDS.engineFrame:
-      return {
-        frame: {
-          kind: SUBAGENT_CONTROL_FRAME_KINDS.engineFrame,
-          channelId: optionalChannelId(parsed.channelId),
-          line: typeof parsed.line === "string" ? parsed.line : "",
-        },
-      };
+      return { frame: toEngineFrameFrame(parsed) };
     case SUBAGENT_CONTROL_FRAME_KINDS.engineClosed:
-      return {
-        frame: {
-          kind: SUBAGENT_CONTROL_FRAME_KINDS.engineClosed,
-          channelId: optionalChannelId(parsed.channelId),
-          code: typeof parsed.code === "number" ? parsed.code : null,
-          signal: optionalString(parsed.signal) ?? null,
-          stderrTail: optionalString(parsed.stderrTail),
-          reason: isSubagentControlClosedReason(parsed.reason) ? parsed.reason : undefined,
-        },
-      };
+      return { frame: toEngineClosedFrame(parsed) };
     case SUBAGENT_CONTROL_FRAME_KINDS.error:
-      return {
-        frame: {
-          kind: SUBAGENT_CONTROL_FRAME_KINDS.error,
-          channelId: optionalString(parsed.channelId),
-          code: optionalString(parsed.code) ?? "engine_transport_unavailable",
-          message: optionalString(parsed.message) ?? "runtime control error",
-          recovery: optionalString(parsed.recovery),
-        },
-      };
+      return { frame: toErrorFrame(parsed) };
     default:
       // hello / engine_open / engine_close 是 C→R 方向，不应出现在接收面。
       return { dropped: "unexpected" };

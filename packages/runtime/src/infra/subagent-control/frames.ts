@@ -163,22 +163,59 @@ export function parseControlInboundFrame(line: string): ControlInboundFrame | nu
   if (parsed.v !== SUBAGENT_CONTROL_PROTOCOL_VERSION) return null
   switch (parsed.kind) {
     case SUBAGENT_CONTROL_FRAME_KINDS.hello:
-      if (!isFrameId(parsed.id)) return null
-      return { v: parsed.v, kind: parsed.kind, id: parsed.id, hostPid: typeof parsed.hostPid === 'number' ? parsed.hostPid : undefined, hostKind: typeof parsed.hostKind === 'string' ? parsed.hostKind : undefined }
-    case SUBAGENT_CONTROL_FRAME_KINDS.engineOpen: {
-      if (!isFrameId(parsed.id)) return null
-      if (!isLaunchSpecShape(parsed.launch)) return null
-      return { v: parsed.v, kind: parsed.kind, id: parsed.id, launch: mergeLaunchAliases(parsed, parsed.launch) }
-    }
+      return toHelloFrame(parsed)
+    case SUBAGENT_CONTROL_FRAME_KINDS.engineOpen:
+      return toEngineOpenFrame(parsed)
     case SUBAGENT_CONTROL_FRAME_KINDS.engineFrame:
-      if (typeof parsed.channelId !== 'string' || parsed.channelId.length === 0) return null
-      if (typeof parsed.line !== 'string') return null
-      return { v: parsed.v, kind: parsed.kind, channelId: parsed.channelId, line: parsed.line }
+      return toEngineFrameFrame(parsed)
     case SUBAGENT_CONTROL_FRAME_KINDS.engineClose:
-      if (typeof parsed.channelId !== 'string' || parsed.channelId.length === 0) return null
-      return { v: parsed.v, kind: parsed.kind, channelId: parsed.channelId }
+      return toEngineCloseFrame(parsed)
     default:
       return null // R→C 方向的 kind 不该出现在 C→R
+  }
+}
+
+function toHelloFrame(parsed: Record<string, unknown>): ControlHelloFrame | null {
+  if (!isFrameId(parsed.id)) return null
+  return {
+    v: SUBAGENT_CONTROL_PROTOCOL_VERSION,
+    kind: SUBAGENT_CONTROL_FRAME_KINDS.hello,
+    id: parsed.id,
+    hostPid: typeof parsed.hostPid === 'number' ? parsed.hostPid : undefined,
+    hostKind: typeof parsed.hostKind === 'string' ? parsed.hostKind : undefined,
+  }
+}
+
+function toEngineOpenFrame(parsed: Record<string, unknown>): ControlEngineOpenFrame | null {
+  if (!isFrameId(parsed.id)) return null
+  if (!isLaunchSpecShape(parsed.launch)) return null
+  return {
+    v: SUBAGENT_CONTROL_PROTOCOL_VERSION,
+    kind: SUBAGENT_CONTROL_FRAME_KINDS.engineOpen,
+    id: parsed.id,
+    launch: mergeLaunchAliases(parsed, parsed.launch),
+  }
+}
+
+function toEngineFrameFrame(parsed: Record<string, unknown>): ControlEngineFrameFrame | null {
+  const channelId = parsed.channelId
+  if (typeof channelId !== 'string' || channelId.length === 0) return null
+  if (typeof parsed.line !== 'string') return null
+  return {
+    v: SUBAGENT_CONTROL_PROTOCOL_VERSION,
+    kind: SUBAGENT_CONTROL_FRAME_KINDS.engineFrame,
+    channelId,
+    line: parsed.line,
+  }
+}
+
+function toEngineCloseFrame(parsed: Record<string, unknown>): ControlEngineCloseFrame | null {
+  const channelId = parsed.channelId
+  if (typeof channelId !== 'string' || channelId.length === 0) return null
+  return {
+    v: SUBAGENT_CONTROL_PROTOCOL_VERSION,
+    kind: SUBAGENT_CONTROL_FRAME_KINDS.engineClose,
+    channelId,
   }
 }
 
