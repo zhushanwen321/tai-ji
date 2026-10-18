@@ -138,13 +138,17 @@ interface CollectToolDetails {
 }
 
 /** collect_results 工具描述（缺省口径 + lifetime 排除 + managed 全键返回形态 + timeout
- *  缺省值引导显式传参，result-collect 设计 §3.1③/§3.4 工具描述更新项）。 */
+ *  缺省值引导显式传参 + 反模式（勿当活性检查用、只关心特定操作勿省略 ids）+
+ *  与 pending_notifications 分工声明，result-collect 设计 §3.1③/§3.4 工具描述更新项）。 */
 const COLLECT_RESULTS_DESCRIPTION = [
 	"Block and batch-collect results of background async operations (workflow / subagent / bash background tasks / managed session claims), instead of receiving one notification per completion.",
 	"Returns collected (entries: {id, type, outcome, content, details}), stillOpen (not collected: {id, note?}) and errors (unknown ids, listed individually without blocking the known subset).",
 	"ids: target operation ids (as returned when dispatching background tasks). Omitted = every active pending operation of the current session, EXCLUDING managed-session lifetime claims (alive-markers that only settle when the session dies — waiting on them would hang until timeout) and registrations inherited from a forked parent session.",
 	"timeout_ms: max wait in milliseconds, default 3600000 (1 hour). Pass a value matched to the expected task duration (e.g. 120000 for short tasks). On timeout the already-arrived results are returned; the rest stay in stillOpen and notify normally (push) when they complete.",
 	"A managed-session batched notification matched by any of its keys returns one entry per key of that batch (same payload shared). Collecting an already-collected id again returns its snapshot (no duplicate injection). Interruption (timeout / user abort) returns normally with the arrived subset.",
+	"Do NOT use this tool as a liveness or status check — it blocks the current turn until results arrive or timeout_ms elapses. Immediate status queries go to pending_notifications (list).",
+	"DO NOT omit ids when you only care about specific operations — the default wait set blocks on every active non-lifetime pending operation of this session at once.",
+	"Division of labor: pending_notifications (list) is the immediate status query; collect_results is the blocking wait — use it only when the next step actually needs those results.",
 ].join("\n");
 
 /**
