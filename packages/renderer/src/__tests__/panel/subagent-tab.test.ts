@@ -103,6 +103,9 @@ const globalStubs = {
   BashOutputBlock: { name: 'BashOutputBlock', template: '<div />' },
   ForkNotice: { name: 'ForkNotice', template: '<div />' },
   Button: { name: 'Button', template: '<button><slot /></button>' },
+  // composer 车道行为有专属单测（subagent-composer-lane.test.ts）——本文件只断言
+  // SubagentTab 的挂载门（chatCapable），壳体 stub 掉避免拖入 composer 全依赖树。
+  Composer: { name: 'Composer', template: '<div data-testid="composer-stub" />' },
 }
 
 const MAIN_SID = 's-tab-main'
@@ -752,6 +755,49 @@ describe('SubagentTab [W0/V8] agentcall 标题 meta（findAgentCall 命中合并
     expect(wrapper.find('[data-testid="drawer-subagent-tab"]').exists()).toBe(true)
     expect(wrapper.text()).toContain('subagent')
     expect(wrapper.text()).not.toContain('reviewer-1')
+    wrapper.unmount()
+  })
+})
+
+describe('subagent composer 挂载门（chatCapable，subagent-composer 2026-10-18）', () => {
+  beforeEach(() => {
+    setActivePinia(createPinia())
+    vi.clearAllMocks()
+    _resetDrawerForTest()
+    bindDrawerSessionId(ref(MAIN_SID))
+    usePanelStore().loadSession(ROOT_PANEL_ID, MAIN_SID)
+    vi.stubGlobal('ResizeObserver', NoopResizeObserver)
+    HTMLElement.prototype.scrollTo = vi.fn()
+    vi.mocked(sessionApi.getSubagentHistory).mockResolvedValue([])
+  })
+
+  it('chatCapable=true：挂 composer 带（.composer-band 同壳）+ 只读提示行消失', async () => {
+    useSubagentStore().applyRecords(MAIN_SID, [makeRecord({ status: 'idle', chatCapable: true })])
+    openSubagent({ virtualId: VIRTUAL_ID, enteredFrom: 'chat' })
+    const wrapper = mountTab()
+    await settle(wrapper)
+    const band = wrapper.find('[data-testid="drawer-subagent-composer-band"]')
+    expect(band.exists()).toBe(true)
+    expect(band.classes()).toContain('composer-band')
+    expect(wrapper.find('[data-testid="composer-stub"]').exists()).toBe(true)
+    wrapper.unmount()
+  })
+
+  it('chatCapable 缺省（未刷新旧帧语义 = 不支持）：不挂带，回退只读提示', async () => {
+    useSubagentStore().applyRecords(MAIN_SID, [makeRecord({ status: 'idle' })])
+    openSubagent({ virtualId: VIRTUAL_ID, enteredFrom: 'chat' })
+    const wrapper = mountTab()
+    await settle(wrapper)
+    expect(wrapper.find('[data-testid="drawer-subagent-composer-band"]').exists()).toBe(false)
+    wrapper.unmount()
+  })
+
+  it('chatCapable=false（引擎声明不支持）：不挂带', async () => {
+    useSubagentStore().applyRecords(MAIN_SID, [makeRecord({ status: 'idle', chatCapable: false })])
+    openSubagent({ virtualId: VIRTUAL_ID, enteredFrom: 'chat' })
+    const wrapper = mountTab()
+    await settle(wrapper)
+    expect(wrapper.find('[data-testid="drawer-subagent-composer-band"]').exists()).toBe(false)
     wrapper.unmount()
   })
 })

@@ -16,7 +16,7 @@ import type { SubagentEnginesFile } from "@zhushanwen/extension-protocol";
 
 import { configureCore, resetCoreForTests } from "../../../core/host-services.ts";
 import type { DiscoveryRoot } from "../../../core/host-services.ts";
-import { clearEngines, engineProcessModelOfDescriptor, getEngine, hasEngine, listEngines, registerEngine } from "../registry.ts";
+import { clearEngines, engineProcessModelOfDescriptor, getEngine, hasEngine, listEngines, registerEngine, registerEngineDescriptor } from "../registry.ts";
 import type { EnginePort } from "../port.ts";
 import { getEnginesFilePath, syncEnginesFile, type SyncEnginesFileOptions } from "../engine-discovery.ts";
 
@@ -27,11 +27,13 @@ import {
   ENGINE_ROOTS_ENV,
   deriveNodeModuleRoots,
   discoverAndRegisterEngines,
+  engineConversationCapable,
   ensureEngineDiscovered,
   parseEngineRootsEnv,
   scanEngines,
 } from "../engine-discovery-scan.ts";
 import { readExplicitEngines } from "../config.ts";
+import { CONSERVATIVE_CAPABILITIES } from "../engine-manifest.ts";
 
 // ── fixture helpers ─────────────────────────────────────────────
 
@@ -674,5 +676,47 @@ describe("readExplicitEngines 读失败与合法缺省分通道", () => {
     expect(
       collectedLogs.some((l) => l.level === "warn" && l.message.includes("read failed")),
     ).toBe(true);
+  });
+});
+
+// ── engineConversationCapable（subagent-composer 2026-10-18）─────────────────────
+// GUI composer 可见性的能力派生位：与宿主 message 资格门同一 conversation 能力轴
+// （manifest 声明消费，不按引擎 id 硬编码）。
+describe("engineConversationCapable", () => {
+  // registry 是模块级单例：用例内注册、afterEach 清场（本文件既有纪律）。
+  afterEach(() => {
+    clearEngines();
+  });
+
+  /** 最小 cli descriptor（能力派生只读 capabilities，portFactory 恒不触达）。capabilities
+   *  以保守缺省展开、仅按用例覆写 conversation——能力位全集演化时本测试零跟随。 */
+  function cliDescriptor(conversation: "native" | "cold" | "unsupported"): Parameters<typeof registerEngineDescriptor>[1] {
+    return {
+      kind: "cli",
+      command: "/bin/true",
+      args: [],
+      capabilities: { ...CONSERVATIVE_CAPABILITIES, conversation },
+      portFactory: () => {
+        throw new Error("not reached: capability derivation never instantiates a port");
+      },
+    };
+  }
+
+  it("conversation=native / cold → true（两形态均可续聊）", () => {
+    registerEngineDescriptor("eng-native", cliDescriptor("native"));
+    registerEngineDescriptor("eng-cold", cliDescriptor("cold"));
+    expect(engineConversationCapable("eng-native")).toBe(true);
+    expect(engineConversationCapable("eng-cold")).toBe(true);
+  });
+
+  it("conversation=unsupported → false", () => {
+    registerEngineDescriptor("eng-unsupported", cliDescriptor("unsupported"));
+    expect(engineConversationCapable("eng-unsupported")).toBe(false);
+  });
+
+  it("未注册引擎 / 空白 id → false（保守缺省不渲染输入面）", () => {
+    expect(engineConversationCapable("never-registered")).toBe(false);
+    expect(engineConversationCapable("")).toBe(false);
+    expect(engineConversationCapable(undefined)).toBe(false);
   });
 });

@@ -210,6 +210,15 @@ export interface SubagentRecord {
    */
   engine?: string
   /**
+   * 引擎续聊能力派生位（subagent-composer 2026-10-18）：该 record 的引擎声明支持
+   * conversation 能力轴（native / cold）时 true——GUI 据此决定 drawer subagent 详情页
+   * 出不出 composer 输入面（决策：按引擎声明出，不按引擎 id 硬编码）。权威源 =
+   * runtime 投影层按引擎 manifest capabilities 派生（core engineConversationCapable，
+   * 与宿主 message 资格门同一能力轴同源）；undiscovered / inproc / 未知引擎派生 false。
+   * undefined（存量快照帧）= 读侧按 false 处理（保守不渲染），首个刷新帧后收敛。
+   */
+  chatCapable?: boolean
+  /**
    * 用户覆盖状态（subagent-model-switch §9 transport 行详情载荷透传）——当前用户
    * 模型覆盖意图（作用域 = 该 subagent 会话的剩余执行），优先级高于 agent 配置与
    * 调用参数。权威源 = 执行记录链最新记录的 modelOverride 记账（runtime 详情载荷

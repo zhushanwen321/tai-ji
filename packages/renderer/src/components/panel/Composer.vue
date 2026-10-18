@@ -92,7 +92,7 @@
           :placeholder="placeholder"
           :disabled="isSending"
           :session-id="sessionId"
-          :suppress-triggers="isBashMode"
+          :suppress-triggers="isBashMode || subagent"
           @input="onInputChange"
           @keydown="onKeydown"
           @slash-trigger="onSlashTrigger"
@@ -129,7 +129,7 @@
              use-composer-bar-density COMPOSER_BTW_BUTTON_DEGRADATION_ORDER）/ 任务托盘
              （左簇唯一聚合入口：aggregated 时单图标按钮承载托盘分段 + 插件 toolbar）/
              展开态插件 toolbar 挂载点 -->
-        <div v-if="sessionId" data-composer-cluster="left" class="flex min-w-0 shrink-0 items-center gap-[4px]">
+        <div v-if="sessionId && !subagent" data-composer-cluster="left" class="flex min-w-0 shrink-0 items-center gap-[4px]">
           <AddMenuPopover @select="onAddSelect" />
           <!-- plugin headerAction 挂载点（demo 裁决落点 = composer 左簇、「+」之后；用户裁决
                2026-10-06）。显隐由 hidden 管线唯一裁决：无任务插件推 hidden=true → 列表构建层
@@ -184,7 +184,7 @@
                aggregated（L1 起，右簇信息先让位）= **单图标**聚合按钮（hover 弹指标聚合页，
                容量/TTFT/速度/缓存四卡全量）；absent = 锚点保护让位（不渲染）。landing（无 session）不渲染。 -->
           <div
-            v-if="sessionId && density.slots.metrics !== 'absent'"
+            v-if="sessionId && !subagent && density.slots.metrics !== 'absent'"
             :class="density.slots.metrics === 'aggregated' ? AGGREGATE_GROUP_CLASS : EXPANDED_GROUP_CLASS"
           >
             <ComposerMetricsAggregate v-if="density.slots.metrics === 'aggregated'" :session-id="sessionId" :model-id="currentModelId" />
@@ -199,7 +199,7 @@
                ml-[8px] 还原 demo L3 下「Gauge ↔ Boxes」12px（demo 由 mt-exp 两个零宽 pop-anchor
                的行 gap 叠出，real 是 v-if 摘除，故补在组容器左距）。
                组间距条件值见 modelThinkingGroupClass 注释（r4 项 3/4，接线件 useComposerSpacingClasses）。 -->
-          <div :class="modelThinkingGroupClass">
+          <div v-if="!subagent" :class="modelThinkingGroupClass">
             <ModelThinkingAggregate
               v-if="density.slots.modelThinking === 'aggregated'"
               :selected="currentModelId"
@@ -351,8 +351,15 @@ const props = withDefaults(
     variant?: 'panel' | 'landing'
     /** btw 入口实例开关（D7，M3-b）：false 不出按钮（drawer 内 BtwPanel 的 Composer 传 false 防递归出 btw 入口；不传默认 true，主 panel 零改动） */
     showBtw?: boolean
+    /**
+     * subagent 车道形态（subagent-composer 2026-10-18）：drawer subagent 详情页挂载时传 true。
+     * 消费面差异（发送/中止/占用分流在 composer-shell 车道层，本 prop 只管模板裁剪）：
+     * 左簇（托盘/插件 toolbar 对 subagent 无数据面）与右簇指标/模型档位（模型入口在
+     * SubagentTab 头部，单入口裁决）隐藏；四符号触发浮层抑制（@/#/$ 文本按字面发送）。
+     */
+    subagent?: boolean
   }>(),
-  { variant: 'panel', showBtw: true },
+  { variant: 'panel', showBtw: true, subagent: false },
 )
 
 const { t } = useI18n()

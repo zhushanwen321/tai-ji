@@ -48,7 +48,13 @@ import { getEngineDataDir } from "./common/data-dir.ts";
 import { readExplicitEngines } from "./config.ts";
 import { EngineClient } from "./client/engine-client.ts";
 import { RemoteEngine } from "./client/remote-engine.ts";
-import { hasEngine, registerEngineDescriptor, type CliEngineDescriptor } from "./registry.ts";
+import {
+  getEngineDescriptor,
+  hasEngine,
+  normalizeEngineId,
+  registerEngineDescriptor,
+  type CliEngineDescriptor,
+} from "./registry.ts";
 import type { EngineCapabilities } from "./types.ts";
 
 const logger = getLogger("subagents");
@@ -195,6 +201,23 @@ export function ensureEngineDiscovered(id: string, opts: DiscoverEnginesOptions)
   if (hasEngine(id)) return true;
   discoverAndRegisterEngines(opts);
   return hasEngine(id);
+}
+
+/**
+ * 引擎续聊（conversation）能力派生——「这个引擎的 record 能否接收 GUI composer 输入」
+ * 的单一判据。GUI 侧 composer 可见性按本派生位出（subagent-composer），不按引擎 id
+ * 硬编码；宿主编排 message 资格门（engineSupportsConversation）消费同一能力轴，
+ * 两侧判据同源（manifest capabilities），不产生声明漂移。
+ *
+ * 判定：descriptor.cli 的 manifest capabilities.conversation 非 'unsupported'（native
+ * / cold 均可续）→ true；inproc descriptor（过渡形态，无 manifest 面）/ 未发现引擎 /
+ * 引擎 id 缺省归一后仍无 descriptor → 保守值（CONSERVATIVE_CAPABILITIES.conversation
+ * = 'unsupported'）→ false——未知引擎不渲染输入面。
+ */
+export function engineConversationCapable(engineId: string | undefined): boolean {
+  const descriptor = getEngineDescriptor(normalizeEngineId(engineId));
+  const caps = descriptor?.kind === "cli" ? descriptor.capabilities : undefined;
+  return (caps ?? CONSERVATIVE_CAPABILITIES).conversation !== "unsupported";
 }
 
 /** L3 显式命令解析：含路径分隔符 → 按路径验证；裸命令名 → PATH 查找。失败 = 不可用。 */

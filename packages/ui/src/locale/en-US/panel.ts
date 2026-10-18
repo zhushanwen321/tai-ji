@@ -63,6 +63,7 @@ export default {
     // Cardification 2026-10-04: shortcut hints removed from placeholder — absolutely-positioned
     // pseudo-element overflows the min-height box when wrapped narrow; triggers stay discoverable via popovers
     inputHint: 'Describe what you want AI to do…',
+    subagentInputHint: 'Message this subagent…',
     addContent: 'Add content (attachment / command)',
     attach: 'Attachment',
     image: 'Image',

@@ -62,6 +62,7 @@ export default {
     // 三卡化 2026-10-04：快捷键提示段移除——placeholder 伪元素脱文档流（光标语义），
     // 长文案窄宽度换行必然溢出叠字（结构性约束）；命令/文件/子代理提示经触发符 popover 自带发现性
     inputHint: '描述你想让 AI 做什么…',
+    subagentInputHint: '给这个 subagent 发消息…',
     addContent: '添加内容（附件 / 命令）',
     attach: '附件',
     image: '图片',

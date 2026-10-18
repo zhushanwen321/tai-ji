@@ -85,7 +85,7 @@ import { WorkflowRunEventsReader } from './workflow-run-events-reader.js'
 import type { WorkflowDagReply, WorkflowRunEventsReply } from '@taiji/shared'
 import { getPiAgentDir } from '../../infra/pi/pi-paths.js'
 import { logger } from '../../infra/logger.js'
-import { discoverAndRegisterEngines } from '@zhushanwen/subagent-core/engine/engine-discovery-scan'
+import { discoverAndRegisterEngines, engineConversationCapable } from '@zhushanwen/subagent-core/engine/engine-discovery-scan'
 import { isStrictlyUnder } from '../../utils/path-utils.js'
 import type { ISessionStore } from '../ports/session.js'
 import { toErrorMessage } from '../../utils/errors.js'
@@ -996,8 +996,11 @@ export class SessionRecords {
   private readonly oversizeWarned = new Set<string>()
 
   /**
-   * [enhanceSubagentDetails 拆分] 单 record 增强（两字段目标值一次展开；键不冲突，
-   * 与原「override 先套、recent 再套」的顺序叠加产物逐字段等价）。任一字段缺席不造键。
+   * [enhanceSubagentDetails 拆分] 单 record 增强（目标值一次展开；键不冲突，
+   * 与原「override 先套、recent 再套」的顺序叠加产物逐字段等价）。override/recent
+   * 任一缺席不造键；chatCapable 恒造键（引擎续聊能力派生位，GUI composer 可见性
+   * 消费——恒在场使 renderer 读侧免 undefined 双义：缺字段 = 未刷新的旧帧，false =
+   * 引擎声明不支持，两者语义不同必须可区分）。
    */
   private enhanceOneSubagentRecord(
     sessionId: string,
@@ -1007,11 +1010,12 @@ export class SessionRecords {
   ): SubagentRecord {
     const override = recordModelOverride(sessionId, query, record, resolved)
     const recent = recordRecentEffectiveModel(record)
-    if (override === undefined && recent === undefined) return record
+    const chatCapable = engineConversationCapable(extractRecordEngine(record))
     return {
       ...record,
       ...(override !== undefined ? { modelOverride: override } : {}),
       ...(recent !== undefined ? { recentEffectiveModel: recent } : {}),
+      chatCapable,
     }
   }
 

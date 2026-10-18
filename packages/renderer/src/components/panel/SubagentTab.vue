@@ -159,10 +159,14 @@
         </span>
       </div>
 
-      <!-- 只读提示（差异化层：subagent 为 background 任务，无 composer）。
-           对齐 demo .sub-ro：头行下方的纯文字行（3xs 档 mid、无边框无图标），
-           不再是底部 border-t 条。 -->
-      <div class="flex shrink-0 items-center px-3.5 pb-2 text-[length:var(--text-3xs)] text-neutral-mid">
+      <!-- 只读提示（差异化层）：composer 不出时（agentcall 快照视图 / 引擎未声明续聊
+           能力）保留只读说明。对齐 demo .sub-ro：头行下方的纯文字行（3xs 档 mid、
+           无边框无图标），不再是底部 border-t 条。composer 出现时本行消失（文案
+           「无 composer」与事实矛盾）。 -->
+      <div
+        v-if="!composerVisible"
+        class="flex shrink-0 items-center px-3.5 pb-2 text-[length:var(--text-3xs)] text-neutral-mid"
+      >
         <span>{{ t('panel.sideDrawer.subagentReadonly') }}</span>
       </div>
 
@@ -221,6 +225,15 @@
         :session-id="activeTab"
         :main-session-id="panelStore.focusedSessionId ?? undefined"
       />
+
+      <!-- composer 带（subagent-composer 2026-10-18）：与主面板同一 band 壳
+           （COMPOSER_BAND_CLASS 单源，几何关系一致）+ 同一 Composer（subagent 车道形态：
+           发送/中止经 session.subagentAction 通道分流，左簇/指标/模型簇裁剪——模型入口
+           留在本组件头部）。回显事实源 = SubagentTee entry 帧（含 user entry），与主
+           agent 定向消息（@ mention）同一链路。 -->
+      <div v-if="composerVisible" :class="COMPOSER_BAND_CLASS" data-fs-scope="chat" data-testid="drawer-subagent-composer-band">
+        <Composer :session-id="activeTab" :show-btw="false" subagent />
+      </div>
     </template>
   </div>
 </template>
@@ -246,6 +259,9 @@ import {
 } from '@/stores/workflow'
 import type { ProviderId, SubagentRecord, WorkflowAgentCall } from '@taiji/shared'
 import MessageStream from './MessageStream.vue'
+import Composer from './Composer.vue'
+import { COMPOSER_BAND_CLASS } from './composer-band'
+import { isSubagentComposerEligible } from '@/composables/panel/subagent-composer-lane'
 import ModelSelectPopover from './ModelSelectPopover.vue'
 import { PopoverTrigger } from '@/components/ui/popover'
 import { DEFAULT_ENGINE_ID } from '@/constants/engine-icons'
@@ -464,6 +480,9 @@ const outcomeSummaryText = computed<string | null>(() => {
   const outcome = record.result ?? record.error
   return outcome !== undefined ? outcome : null
 })
+
+/** composer 可见性（判据单点在 subagent-composer-lane.isSubagentComposerEligible） */
+const composerVisible = computed(() => isSubagentComposerEligible(activeTab.value, currentRecord.value))
 
 /** selectedSubagentId 变化：停旧订阅 + 加载新数据（immediate 覆盖 onMounted 首次加载） */
 watch(

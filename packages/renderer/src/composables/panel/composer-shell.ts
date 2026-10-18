@@ -54,6 +54,7 @@ import {
 } from '@taiji/dom-core/composer/input'
 import { useChatStore } from '@/stores/chat'
 import { useSessionStore } from '@/stores/session'
+import { useSubagentComposerLane, wireSubagentLaneTerminals } from '@/composables/panel/subagent-composer-lane'
 import {
   useBtwSessionStateStore,
   resolveComposerSessionState,
@@ -169,6 +170,98 @@ export function deriveHistoryFromChatStore(chatStore: ReturnType<typeof useChatS
 }
 
 /**
+ * D6 发送路由 + 发送位四态派生工厂（u5b/u6b；useComposerShell 行数治理拆出的纯派生块，
+ * 语义与拆出前逐行等价）。deps = 读取面注入：chat store 占用投影 / sessionIdRef /
+ * subagent 车道两信号（车道占用覆盖，subagent-composer）/ activeView（本地乐观并集源）。
+ */
+function createSendPhaseDerived(deps: {
+  sessionPhaseOf: (sid: string) => SessionPhase
+  sessionIdRef: ComputedRef<string | null>
+  isSubagentLane: ComputedRef<boolean>
+  laneStreaming: ComputedRef<boolean>
+  activeView: ComputedRef<boolean>
+}) {
+  // ── D6 发送路由（u5b）+ 发送位四态（u6b）：sessionPhase（occupancy 投影）单一派生 ─
+  // 数据源 = chat store sessionPhase（session.occupancy 帧驱动 + stateSnapshot 快照恢复）。
+  // 发送位四态（D6 表「发送位」列）与 ActivityStrip 从同一真值取数（不双真源）；与 ⏎ 分发器
+  // 的关系见下方「故意分立」注——同源 ≠ 同输出。
+  //
+  // turn 活跃判定取**并集**：occupancy 权威投影 ∨ 本地乐观视图（isActive = streaming 实体
+  // ∨ 乐观 pendingSend）。本地 send 的乐观置位先于 runtime occupancy 广播（RPC RTT 窗口），
+  // 只看投影会让窗口内 Enter 落 direct 被 canSend 守卫拦死（死键回退）——并集保持现状
+  // isActive→steer 语义；settling/compacting/bash 维度无本地乐观源，由权威帧独占。
+  // sendRoute（三值浓缩）与发送位（需原始 turn/compacting/bash 维度细分——如 settling 单独
+  // vs settling+bash 的 stop/queue 分档）共用同一 effective phase，不双真源。**两者输出故意
+  // 分立**（2026-10 用户裁决）：压缩期 sendRoute=queued（⏎ 排队）而发送位=stop（按钮中止
+  // 压缩）——按钮与 Enter 回答不同问题，派生处分叉不等于漂移（详见 sendButtonState 注释）。
+  const effectivePhase = computed<SessionPhase>(() => {
+    const sid = deps.sessionIdRef.value
+    if (!sid) return IDLE_SESSION_PHASE // landing（无 session）无 occupancy 记录 → 全 idle
+    // subagent 车道：占用只有「轮在飞 = generating」一态（无 bash/compacting/settling
+    // 维度；occupancy 帧对虚拟 id 无投影，事实源 = subagent record 流状态）。
+    if (deps.isSubagentLane.value) {
+      return deps.laneStreaming.value ? { ...IDLE_SESSION_PHASE, turn: 'generating' as const } : IDLE_SESSION_PHASE
+    }
+    const phase = deps.sessionPhaseOf(sid)
+    // 本地乐观 busy 投影化为 dispatching（「已发起未确认」的 occupancy 语义）后过统一派生
+    // ——判定逻辑单点在 resolveSendRoute / 发送位派生，消费方复用同源不漂移。
+    return deps.activeView.value && phase.turn === 'idle' ? { ...phase, turn: 'dispatching' as const } : phase
+  })
+  const sendRoute = computed<SendRoute>(() => resolveSendRoute(effectivePhase.value))
+
+  /**
+   * [u6b] 发送位四态（D6 表「发送位」列）：send（↑ 直发）/ stop（■ 中止）/ queue（↑ 带时钟
+   * 角标排队）。派生自与 sendRoute 同源的 effectivePhase。
+   *
+   * **按钮形态与 Enter 车道是两个问题**（2026-10 用户裁决，修 a46f6fd7b 的过度收敛）：
+   * - 按钮回答「现在能中止什么」——压缩期（任意 turn 组合，含 generating/settling）→ stop，
+   *   点击中止**压缩流程**（复用 abort 链路：pi session.abort → abortCompaction）。压缩期
+   *   从不渲染 queue 按钮——排队提交走 ⏎（内核 queued 车道 + compaction-end flush，车道
+   *   判定见 sendRoute），按钮位是中止入口而非第二提交入口。
+   * - Enter 回答「这条消息走哪条车道」——由 resolveSendRoute 独占（compacting → queued）。
+   * 两者故意分立：a46f6fd7b 曾把 compacting 归 queue 以「对齐内核 holdReasonOf」修按钮/
+   * Enter 漂移，代价是压缩期 composer 失去全部中止能力（阈值自动压缩的 stop 一并消失），
+   * 用户裁决恢复「忙 → 终止钮」直觉（与执行中同构）；漂移根源（按钮语义 vs 车道语义混谈）
+   * 由本分立消除，而非再次二选一。
+   * - turn ∈ {dispatching, generating}（无 compacting）→ stop（turn 活跃，点击 abort）
+   * - settling 分档：单独 → stop（收尾期可中止）；settling + bash → queue（turn 不活跃 +
+   *   其他维度忙；D6 表未单列 settling+bash，按同构归 queue，登记 impl-plan 偏差表）
+   * - bash（turn 不活跃）→ queue
+   * - 全 idle → send（行 1）
+   */
+  const sendButtonState = computed<'send' | 'stop' | 'queue'>(() => {
+    const phase = effectivePhase.value
+    if (phase.compacting) return 'stop'
+    if (phase.turn === 'dispatching' || phase.turn === 'generating') return 'stop'
+    if (phase.turn === 'settling') return phase.bash ? 'queue' : 'stop'
+    return phase.bash ? 'queue' : 'send'
+  })
+
+  /**
+   * stop 态的中止目标（按钮 title 分型）。判定序**有意不与 sendButtonState 同形**——
+   * 对齐 runtime abort 的 compaction-cancel 门（message-dispatcher.abort：source='user'
+   * ∧ isCompacting ∧ ¬isGenerating 才走压缩取消语义；settling → isGenerating=false，
+   * 见 event-interpreter 占用→flags 映射），保证「title 说终止压缩 ⇔ runtime 真走压缩取消」：
+   * - dispatching/generating → 'turn'：isGenerating=true，abort 是回合中止；即便 compacting
+   *   同真（threshold turn 内压缩），title 标「终止压缩」即谎报（2026-10 审查修正）。
+   * - 'compacting'：压缩期且 turn 非生成中（idle 手动 /compact、settling+overflow）——
+   *   点击中止压缩流程（不写 stopped 终态、不广播 message.complete）。
+   * - 'turn'：settling 单独——点击中止当前回合（既有 abort 语义）。
+   * 与 sendButtonState 的关系：stop/queue 全集内非空，唯一错位 settling+bash
+   * （state='queue' 而 target='turn'）——title 仅 stop 态渲染消费，错位无行为影响。
+   */
+  const sendButtonStopTarget = computed<'compacting' | 'turn' | null>(() => {
+    const phase = effectivePhase.value
+    if (phase.turn === 'dispatching' || phase.turn === 'generating') return 'turn'
+    if (phase.compacting) return 'compacting'
+    if (phase.turn === 'settling') return 'turn'
+    return null
+  })
+
+  return { effectivePhase, sendRoute, sendButtonState, sendButtonStopTarget }
+}
+
+/**
  * @param params Composer.vue 组件局部状态（ref/Map 真源）
  * @returns core 模块组装结果 + 派生状态（Composer.vue 解构消费）
  */
@@ -183,6 +276,14 @@ export function useComposerShell(params: ComposerShellParams) {
   const flow = useNewTaskFlow()
   const { info: toastInfo, error: toastError } = useToast()
   const { send, followUp, abort, compact, sendBash } = useChat()
+  // ── subagent 车道（subagent-composer 2026-10-18）：drawer subagent 详情页复用同一
+  //    shell，发送/中止/占用三终端按虚拟 id 形状分流到 subagent-composer-lane（通道 =
+  //    session.subagentAction message/cancel 既有链路；包装体在 lane 文件）。主车道
+  //    deps 逐成员透传原实现，非 vid 输入零变化。──
+  const subagentLane = useSubagentComposerLane(sessionIdRef)
+  const isSubagentLane = subagentLane.isLane
+  const { activeView, send: laneSend, followUp: laneFollowUp, abort: laneAbort, compact: laneCompact, sendBash: laneSendBash } =
+    wireSubagentLaneTerminals(isSubagentLane, subagentLane, { send, followUp, abort, compact, sendBash }, isActive)
   const { handoff: handoffAction, abortHandoff: abortHandoffAction } = useHandoffActions(sessionIdRef)
   const { switchModel, setThinkingLevel } = useModel()
   const sidebar = useSidebar()
@@ -339,98 +440,40 @@ export function useComposerShell(params: ComposerShellParams) {
 
   const hasInput = computed(() => draft.value.trim().length > 0)
 
-  // ── D6 发送路由（u5b）+ 发送位四态（u6b）：sessionPhase（occupancy 投影）单一派生 ─
-  // 数据源 = chat store sessionPhase（session.occupancy 帧驱动 + stateSnapshot 快照恢复）。
-  // 发送位四态（D6 表「发送位」列）与 ActivityStrip 从同一真值取数（不双真源）；与 ⏎ 分发器
-  // 的关系见下方「故意分立」注——同源 ≠ 同输出。
-  //
-  // turn 活跃判定取**并集**：occupancy 权威投影 ∨ 本地乐观视图（isActive = streaming 实体
-  // ∨ 乐观 pendingSend）。本地 send 的乐观置位先于 runtime occupancy 广播（RPC RTT 窗口），
-  // 只看投影会让窗口内 Enter 落 direct 被 canSend 守卫拦死（死键回退）——并集保持现状
-  // isActive→steer 语义；settling/compacting/bash 维度无本地乐观源，由权威帧独占。
-  // sendRoute（三值浓缩）与发送位（需原始 turn/compacting/bash 维度细分——如 settling 单独
-  // vs settling+bash 的 stop/queue 分档）共用同一 effective phase，不双真源。**两者输出故意
-  // 分立**（2026-10 用户裁决）：压缩期 sendRoute=queued（⏎ 排队）而发送位=stop（按钮中止
-  // 压缩）——按钮与 Enter 回答不同问题，派生处分叉不等于漂移（详见 sendButtonState 注释）。
-  const effectivePhase = computed<SessionPhase>(() => {
-    const sid = sessionIdRef.value
-    if (!sid) return IDLE_SESSION_PHASE // landing（无 session）无 occupancy 记录 → 全 idle
-    const phase = chatStore.sessionPhase(sid)
-    // 本地乐观 busy 投影化为 dispatching（「已发起未确认」的 occupancy 语义）后过统一派生
-    // ——判定逻辑单点在 resolveSendRoute / 发送位派生，消费方复用同源不漂移。
-    return isActive.value && phase.turn === 'idle' ? { ...phase, turn: 'dispatching' as const } : phase
-  })
-  const sendRoute = computed<SendRoute>(() => resolveSendRoute(effectivePhase.value))
-
-  /**
-   * [u6b] 发送位四态（D6 表「发送位」列）：send（↑ 直发）/ stop（■ 中止）/ queue（↑ 带时钟
-   * 角标排队）。派生自与 sendRoute 同源的 effectivePhase。
-   *
-   * **按钮形态与 Enter 车道是两个问题**（2026-10 用户裁决，修 a46f6fd7b 的过度收敛）：
-   * - 按钮回答「现在能中止什么」——压缩期（任意 turn 组合，含 generating/settling）→ stop，
-   *   点击中止**压缩流程**（复用 abort 链路：pi session.abort → abortCompaction）。压缩期
-   *   从不渲染 queue 按钮——排队提交走 ⏎（内核 queued 车道 + compaction-end flush，车道
-   *   判定见 sendRoute），按钮位是中止入口而非第二提交入口。
-   * - Enter 回答「这条消息走哪条车道」——由 resolveSendRoute 独占（compacting → queued）。
-   * 两者故意分立：a46f6fd7b 曾把 compacting 归 queue 以「对齐内核 holdReasonOf」修按钮/
-   * Enter 漂移，代价是压缩期 composer 失去全部中止能力（阈值自动压缩的 stop 一并消失），
-   * 用户裁决恢复「忙 → 终止钮」直觉（与执行中同构）；漂移根源（按钮语义 vs 车道语义混谈）
-   * 由本分立消除，而非再次二选一。
-   * - turn ∈ {dispatching, generating}（无 compacting）→ stop（turn 活跃，点击 abort）
-   * - settling 分档：单独 → stop（收尾期可中止）；settling + bash → queue（turn 不活跃 +
-   *   其他维度忙；D6 表未单列 settling+bash，按同构归 queue，登记 impl-plan 偏差表）
-   * - bash（turn 不活跃）→ queue
-   * - 全 idle → send（行 1）
-   */
-  const sendButtonState = computed<'send' | 'stop' | 'queue'>(() => {
-    const phase = effectivePhase.value
-    if (phase.compacting) return 'stop'
-    if (phase.turn === 'dispatching' || phase.turn === 'generating') return 'stop'
-    if (phase.turn === 'settling') return phase.bash ? 'queue' : 'stop'
-    return phase.bash ? 'queue' : 'send'
-  })
-
-  /**
-   * stop 态的中止目标（按钮 title 分型）。判定序**有意不与 sendButtonState 同形**——
-   * 对齐 runtime abort 的 compaction-cancel 门（message-dispatcher.abort：source='user'
-   * ∧ isCompacting ∧ ¬isGenerating 才走压缩取消语义；settling → isGenerating=false，
-   * 见 event-interpreter 占用→flags 映射），保证「title 说终止压缩 ⇔ runtime 真走压缩取消」：
-   * - dispatching/generating → 'turn'：isGenerating=true，abort 是回合中止；即便 compacting
-   *   同真（threshold turn 内压缩），title 标「终止压缩」即谎报（2026-10 审查修正）。
-   * - 'compacting'：压缩期且 turn 非生成中（idle 手动 /compact、settling+overflow）——
-   *   点击中止压缩流程（不写 stopped 终态、不广播 message.complete）。
-   * - 'turn'：settling 单独——点击中止当前回合（既有 abort 语义）。
-   * 与 sendButtonState 的关系：stop/queue 全集内非空，唯一错位 settling+bash
-   * （state='queue' 而 target='turn'）——title 仅 stop 态渲染消费，错位无行为影响。
-   */
-  const sendButtonStopTarget = computed<'compacting' | 'turn' | null>(() => {
-    const phase = effectivePhase.value
-    if (phase.turn === 'dispatching' || phase.turn === 'generating') return 'turn'
-    if (phase.compacting) return 'compacting'
-    if (phase.turn === 'settling') return 'turn'
-    return null
+  // ── D6 发送路由 + 发送位四态（u5b/u6b）：单一派生链抽模块级工厂
+  //    createSendPhaseDerived（纯派生无副作用，语义与拆出前逐行等价；行数治理非语义改动）──
+  const { sendRoute, sendButtonState, sendButtonStopTarget } = createSendPhaseDerived({
+    sessionPhaseOf: (sid) => chatStore.sessionPhase(sid),
+    sessionIdRef,
+    isSubagentLane,
+    laneStreaming: subagentLane.isStreaming,
+    activeView,
   })
 
   // ── bash 命令模式（core dispatch/bash；sendBash 注入）──
+  // subagent 车道禁 bash 分流（`!` 是普通消息文本——subagent 无 bash 通道）：sendBash
+  // 包装为恒 false（bash.ts 失败信号契约 = 不分流继续普通提交链）。
   const composerBash = useComposerBash({
     draft,
     clearInput,
     isSending,
     sessionId: () => sessionIdRef.value,
-    sendBash,
+    sendBash: laneSendBash,
     restoreInput,
   })
-  const isBashMode = composerBash.isBashMode
+  const isBashMode = computed(() => !isSubagentLane.value && composerBash.isBashMode.value)
 
   // ── 提交动作（core dispatch/submit）──
+  // subagent 车道：followUp = 直发（打断入队由 Continuation D2 统一语义承接）；abort =
+  // cancelSubagent（中止对象 = 当前轮，无压缩分型）。
   const { onFollowUp, onAbort } = useComposerSubmit({
     hasInput,
     inputRef,
     sessionIdRef,
     clearInput,
     restoreSegments,
-    followUp,
-    abort,
+    followUp: laneFollowUp,
+    abort: laneAbort,
   })
 
   /**
@@ -463,22 +506,24 @@ export function useComposerShell(params: ComposerShellParams) {
   const boxClass = computed<Array<string | false>>(() => [
     isBashMode.value
       ? 'composer-bash-mode border-[var(--accent)] shadow-[0_0_0_3px_var(--accent-ring)]'
-      : isActive.value
+      : activeView.value
         ? 'border-[var(--accent)] shadow-[0_0_0_2px_var(--accent-ring)]'
         : hasInput.value
           ? 'shadow-[0_0_0_2px_color-mix(in_oklch,var(--surface-hover)_25%,transparent)]'
           : '',
     isSending.value && 'opacity-[0.55]',
   ])
-  /** placeholder 链：bash > steerHint > inputHint。
+  /** placeholder 链：subagent 车道专用文案 > bash > steerHint > inputHint。
    *  [HISTORICAL] staging 换文案档（forkHint/handoffHint）已随 staging banner 退役
    *  （demo placeholder 静态）；core visual.placeholder 派生保留但 renderer 不再消费。 */
   const placeholder = computed(() =>
-    isBashMode.value
-      ? t('panel.composer.bashPlaceholder')
-      : isActive.value
-        ? t('panel.composer.steerHint')
-        : t('panel.composer.inputHint'),
+    isSubagentLane.value
+      ? t('panel.composer.subagentInputHint')
+      : isBashMode.value
+        ? t('panel.composer.bashPlaceholder')
+        : activeView.value
+          ? t('panel.composer.steerHint')
+          : t('panel.composer.inputHint'),
   )
   /** Staging banner 两段文案（fork/handoff 分流，demo 权威形态 = 粗体标题 + 「 · 」+ 描述；
    *  key 为 banner 形态新增，zh/en 双侧见 @taiji/ui locale panel.composer）。 */
@@ -509,8 +554,8 @@ export function useComposerShell(params: ComposerShellParams) {
     isSending,
     flow,
     localThinkingLevel,
-    send,
-    compact,
+    send: laneSend,
+    compact: laneCompact,
     toastError,
     t: t as (key: string, params?: Record<string, unknown>) => string,
   })
@@ -550,7 +595,12 @@ export function useComposerShell(params: ComposerShellParams) {
   // enabledModels = settingsStore.models 经 enabled 兜底过滤（与 ModelSelectPopover 双保险
   // 同款：runtime aggregateModels 已过滤一遍，同源广播未过滤时兜底；序 = scopedModels 白名单
   // 重排的显示序，即模型循环序）。
-  const enabledModels = computed(() => settingsStore.models.value.filter((m) => m.enabled !== false))
+  // subagent 车道：模型/档位入口在头部（SubagentTab ModelSelectPopover，subagent.setModel
+  // 通道）——composer 键盘循环降级为空集（循环对空表天然 no-op，不再向 vid 会话发 model.switch）。
+  const enabledModels = computed(() =>
+    isSubagentLane.value ? [] : settingsStore.models.value.filter((m) => m.enabled !== false),
+  )
+  const shortcutSupportedLevels = computed(() => (isSubagentLane.value ? [] : currentSupportedLevels.value))
   /** staging 活跃只读信号（R2：从既有 staging.activeStaging 派生，零 core 改动） */
   const isStaging = computed(() => staging.activeStaging.value !== null)
   /**
@@ -587,7 +637,7 @@ export function useComposerShell(params: ComposerShellParams) {
     isStaging,
     currentModelId,
     currentThinkingLevel,
-    currentSupportedLevels,
+    currentSupportedLevels: shortcutSupportedLevels,
     enabledModels,
     // 刻意传**原始** core 函数（非 onModelSelectUi 包装）：键盘循环的内联 catch 需要
     // rejection 到达才能清 `modelIntent`/`thinkingIntent`（意图清理是功能必需），
