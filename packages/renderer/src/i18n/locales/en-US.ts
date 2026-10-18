@@ -18,6 +18,7 @@ import btw from './en-US/btw'
 import workflowViz from './en-US/workflow-viz'
 import canvas from './en-US/canvas'
 import find from './en-US/find'
+import subagent from './en-US/subagent'
 
 export default {
   common,
@@ -29,8 +30,16 @@ export default {
   // 顶层键唯一性约束下不能并列两个 panel 键）。panel 本体文案经 ui locale 域文件
   // 下沉迁移自 @taiji/ui/locale，tray 子树留守本壳（无 ui 组件消费）。workflow-viz.ts
   // 同款并入（运行时 key = panel.workflowViz.*）；canvas.ts 同款并入
-  // （运行时 key = panel.canvas.*——problem-solve-canvas U7 组件文案）
-  panel: { ...panel, ...tray, ...workflowViz, ...canvas },
+  // （运行时 key = panel.canvas.*——problem-solve-canvas U7 组件文案）；subagent.ts 同款
+  // 并入（运行时 key = panel.sideDrawer.*——SubagentTab 组件自有文案，无 ui 组件消费故留守本壳）
+  // sideDrawer 显式浅合并（浅展开会整棵覆盖 ui panel 的 sideDrawer 子树，抹掉既有 key）
+  panel: {
+    ...panel,
+    ...tray,
+    ...workflowViz,
+    ...canvas,
+    sideDrawer: { ...panel.sideDrawer, ...subagent.sideDrawer },
+  },
   workspace,
   newTask,
   shell,

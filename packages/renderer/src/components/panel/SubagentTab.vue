@@ -177,6 +177,19 @@
         <span>{{ t('panel.sideDrawer.subagentCoarseHint', { engine: coarseHintEngine }) }}</span>
       </div>
 
+      <!-- live 流降级提示（M3 relay-spawn-transport D6）：镜像 seq 空洞 → runtime 停止
+           live 发布，reply.degraded=true 经 core 流状态机透传；内容以落盘为准，
+           刷新/重开拉全量历史。 -->
+      <div
+        v-if="streamDegraded"
+        class="flex shrink-0 items-center gap-1.5 border-b border-hairline bg-warn-soft px-3.5 py-1.5 text-[length:var(--text-3xs)] text-warn"
+        role="status"
+        data-testid="subagent-stream-degraded"
+      >
+        <TriangleAlert class="size-3 shrink-0 opacity-80" aria-hidden="true" />
+        <span>{{ t('panel.sideDrawer.subagentStreamDegraded') }}</span>
+      </div>
+
       <!-- 错误态：历史加载失败（fail-fast，提供重试入口，不阻塞主对话流） -->
       <div
         v-if="loadError"
@@ -215,10 +228,11 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { AlertCircle, Bot, ChevronDown, ChevronLeft, Clock, X } from '@lucide/vue'
+import { AlertCircle, Bot, ChevronDown, ChevronLeft, Clock, TriangleAlert, X } from '@lucide/vue'
 import { Button } from '@taiji/ui'
 import { useSubagentSelection, openWorkflowInDrawer } from '@taiji/core/domain/drawer'
 import { usePanelStore } from '@/stores/panel'
+import { useChatStore } from '@/stores/chat'
 import {
   useSubagentStore,
   isSubagentVirtualId,
@@ -249,6 +263,7 @@ import {
 
 const { t } = useI18n()
 const panelStore = usePanelStore()
+const chatStore = useChatStore()
 const subagentStore = useSubagentStore()
 const workflowStore = useWorkflowStore()
 
@@ -422,6 +437,15 @@ const coarseHintVisible = computed<boolean>(() => {
   const record = currentRecord.value
   if (!record || recordEngine(record) === DEFAULT_ENGINE_ID) return false
   return subagentStore.isStreamingSubagent(extractMainSessionId(activeTab.value ?? ''), record.subagentId)
+})
+
+/** live 流降级可见性（M3 D6）：core 流状态机透传 degraded=true（镜像 seq 空洞 → runtime
+ * 停止发布）。恢复 = 刷新/重开拉全量历史（内容以落盘为准）；agentcall 快照无 live 流 → false。 */
+const streamDegraded = computed<boolean>(() => {
+  const vid = activeTab.value
+  const record = currentRecord.value
+  if (!vid || !record) return false
+  return chatStore.isSubagentStreamDegraded(vid, record.subagentId)
 })
 
 /** coarse 提示的引擎名（可见时 record.engine 恒非空非 pi） */

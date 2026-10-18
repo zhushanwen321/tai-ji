@@ -1180,6 +1180,7 @@ export function createChatStore(options: ChatStoreOptions = {}) {
       streamingStateMachine.applySubagentStreamState(virtualId, recordId, response),
     requestSubagentStreamState: (virtualId: string, recordId: string) => streamingStateMachine.requestSubagentStreamState(virtualId, recordId),
     sealSubagentStream: (virtualId: string, recordId: string, msgSeq: number) => streamingStateMachine.sealSubagentStream(virtualId, recordId, msgSeq),
+    isSubagentStreamDegraded: (virtualId: string, recordId: string) => streamingStateMachine.isSubagentStreamDegraded(virtualId, recordId),
     clearSubagentChunkState: (virtualId: string, recordId?: string) => streamingStateMachine.clearSubagentChunkState(virtualId, recordId),
     clearSubagentChunkStateForSession: (sessionId: string) => streamingStateMachine.clearSubagentChunkStateForSession(sessionId),
     applySubagentEntries,
@@ -1269,6 +1270,7 @@ export type ChatStoreReaders = Pick<
   | 'isRespawnPending'
   | 'getInflight'
   | 'getHistoryWindow'
+  | 'isSubagentStreamDegraded'
 >
 
 

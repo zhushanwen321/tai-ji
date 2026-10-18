@@ -8,7 +8,7 @@
  */
 import { describe, it, expect, vi } from 'vitest'
 import type { ShallowRef } from 'vue'
-import { ref, shallowRef } from 'vue'
+import { computed, ref, shallowRef } from 'vue'
 import type { Message } from '@taiji/shared'
 import { subagentVirtualId } from '@taiji/shared'
 import type { SessionOccupancyState } from '../store'
@@ -578,6 +578,41 @@ describe('applySubagentStreamState（§4.3 拉取响应按序判定四分支）'
     sm.requestSubagentStreamState(VID, RID)
     sm.requestSubagentStreamState(VID, RID)
     expect(pullCalls).toHaveLength(1)
+  })
+
+  it('TC-R5 degraded 透传（M3 D6）：true 置位 / 缺省不置位 / found:false 降级回执也保留 / 非降级快照覆盖回 false', () => {
+    const { sm, VID, RID, partition } = makeChunkMachine()
+
+    // 未降级形态：协议「非降级不带本字段」→ 不置位
+    sm.applySubagentStreamState(VID, RID, { found: true, msgSeq: 1, lastDeltaSeq: 0, lines: ['a'] })
+    expect(sm.isSubagentStreamDegraded(VID, RID)).toBe(false)
+    expect(partition().degraded).toBe(false)
+
+    // 降级快照：透传到流状态（分区位 + 读口）
+    sm.applySubagentStreamState(VID, RID, { found: true, msgSeq: 2, lastDeltaSeq: 0, lines: ['b'], degraded: true })
+    expect(sm.isSubagentStreamDegraded(VID, RID)).toBe(true)
+    expect(partition().degraded).toBe(true)
+
+    // found:false + degraded（线上形态 msgSeq=0，会走分支 1 早退）：降级位仍须采集
+    sm.applySubagentStreamState(VID, RID, { found: false, msgSeq: 0, lastDeltaSeq: 0, lines: [], degraded: true })
+    expect(sm.isSubagentStreamDegraded(VID, RID)).toBe(true)
+    expect(partition().msgSeq).toBe(2) // 内容水位不被 found:false 回执推进
+
+    // 新 tee 的非降级快照：查询快照即当前事实，覆盖回 false
+    sm.applySubagentStreamState(VID, RID, { found: true, msgSeq: 2, lastDeltaSeq: 0, lines: ['b'] })
+    expect(sm.isSubagentStreamDegraded(VID, RID)).toBe(false)
+  })
+
+  it('TC-R6 degraded 读口响应式：位翻转触发下游 computed 重算，分区清除回落 false', () => {
+    const { sm, VID, RID } = makeChunkMachine()
+    const degraded = computed(() => sm.isSubagentStreamDegraded(VID, RID))
+    expect(degraded.value).toBe(false)
+
+    sm.applySubagentStreamState(VID, RID, { found: true, msgSeq: 1, lastDeltaSeq: 0, lines: ['a'], degraded: true })
+    expect(degraded.value).toBe(true) // 分区表非响应式，依赖版本号 bump
+
+    sm.clearSubagentChunkState(VID)
+    expect(degraded.value).toBe(false)
   })
 })
 
