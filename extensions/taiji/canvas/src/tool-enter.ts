@@ -2,9 +2,9 @@
  * canvas_enter —— 画布发现入口（设计 §3.1(2) 工具面）。
  *
  * 双形态：创建 {statement, criterias, scope} / 打开已有画布 {canvasId}（名称 → id
- * 解析不进契约，经 canvas_list 自决）。创建形态落 marker 'create'（runtime 在该
- * 通道 create 成功时一并登记 sessionId ↔ canvasId 绑定），打开形态落 marker
- * 'enter'（读全量 + 登记绑定）。
+ * 解析不进契约，经 canvas_list 自决）。创建形态落 marker 'create'（sessionId 为
+ * 归属，落盘路径即归属）；打开形态落 marker 'enter'（读全量，归属校验在
+ * readState，非 owner → forbidden）。
  *
  * enter 引导协议：成功的结果文本包含「后续画布操作经 tool_search 检索 canvas_edit /
  * canvas_read / canvas_review / canvas_export」指引——deferred 工具须检索激活后
