@@ -158,12 +158,13 @@ export function getSubagentSessionDir(mainCwd: string): string {
 }
 
 /**
- * btw 线会话根目录（旧布局读取面）：`<piAgentDir>/btw/`。
+ * btw 线会话根目录（旧布局树段锚点）：`<piAgentDir>/btw/`。
  *
  * [session-store-layout-inversion] btw 线已换根至 `<dataDir>/ext-sessions/<mainSid>/btw/`
- * （getSessionBtwDir / getBtwThreadDir）；本函数保留为旧布局残余读取面（对拍机检
- * check-artifact-dir-formula-sync.mjs 以本函数字面量为 pi 宿主树段锚点、shared
- * PI_SESSION_TREE_SEGMENTS 仍列 'btw' 段），指向的旧布局目录按存量保留裁决静置，
+ * （getSessionBtwDir / getBtwThreadDir）；本函数是旧布局树段锚点——对拍机检
+ * check-artifact-dir-formula-sync.mjs RUNTIME_TREE_FNS 以本函数字面量逐位对拍、shared
+ * PI_SESSION_TREE_SEGMENTS[2] 喂 main isInsideSessionTrees 消费；无现役读取方
+ * （D6 裁决旧 btw 线不可对话），指向的旧布局目录按存量保留裁决静置，
  * 新读写一律走新公式。
  */
 export function getBtwSessionsRoot(): string {

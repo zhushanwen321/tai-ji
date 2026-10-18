@@ -72,8 +72,8 @@ const DIGEST_TOP_N = 3
 const DIGEST_COMPACT_CMD_MAX_CHARS = 60
 /** 毫秒 → 秒换算（uptimeSec 落库）。 */
 const MS_PER_SECOND = 1_000
-/** sessionId 文件名安全化最大长度（对齐 logger.ts createPiSessionLog 同规则）。 */
-const SESSION_ID_MAX_LENGTH = 64
+/** sessionId 文件名安全化最大长度（与 logger.ts:88 同源同值：UUID v7 长度上限，非法 sid 清洗名截断）。 */
+const SESSION_ID_MAX_LENGTH = 36
 /** ISO 日期前缀长度（'2026-10-13'）。 */
 const ISO_DATE_LENGTH = 10
 /** init/launchd 的 pid（候选排除项：信号发送方不可能是它）。 */

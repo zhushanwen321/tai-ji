@@ -21,7 +21,7 @@ import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
 
-import { getSessionStoreDir } from "@taiji/shared/paths";
+import { getSessionStoreDir, isPiSessionId } from "@taiji/shared/paths";
 
 import { bestEffort } from "../assembly/best-effort.ts";
 import { getLogger } from "../../core/logger.ts";
@@ -322,8 +322,9 @@ export class WorktreeReconciler {
     const pids = new Set<number>();
     for (const ent of sessionDirs) {
       if (!ent.isDirectory()) continue;
-      // 一级目录名须是合法 sessionId 形态（同域正则守卫——非会话目录跳过）
-      if (!/^[A-Za-z0-9](?:[A-Za-z0-9._-]*[A-Za-z0-9])?$/.test(ent.name)) continue;
+      // 一级目录名须是合法 sessionId 形态（shared isPiSessionId 同源判定——非会话目录跳过；
+      // 不用内联正则，防 shared 收紧/放宽时此处静默漂移）
+      if (!isPiSessionId(ent.name)) continue;
       const sessionsDir = path.join(this.deps.storeRoot, ent.name, "subagents", "sessions");
       let files: string[];
       try {

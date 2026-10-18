@@ -88,7 +88,7 @@ describe('AttachmentStore · writeImage', () => {
     expect(existsSync(join(dataDir, 'attachments', 'att-store-layout-1'))).toBe(false)
   })
 
-  it('panel 态（sessionId 非空）→ 写 attachments/<sessionId>/ 返回 persisted:true，内容 round-trip', async () => {
+  it('panel 态（sessionId 非空）→ 写 <sid>/attachments/ 域目录（session 存储树域 1）返回 persisted:true，内容 round-trip', async () => {
     const bytes = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a])
     const result = await store.writeImage('att-store-panel-1', bytes.toString('base64'), 'image/png', 'shot.png')
     writtenPaths.push(result.path)

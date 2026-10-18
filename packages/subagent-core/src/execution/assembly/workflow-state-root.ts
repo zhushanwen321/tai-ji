@@ -52,12 +52,18 @@ export function setPiWorkflowRootSessionId(sessionId: string): void {
   anchorRootSessionId = sessionId;
 }
 
-/** 解绑进程级锚（session dispose / 测试复位）。 */
+/**
+ * 解绑进程级锚（测试复位用）。
+ *
+ * 生产 dispose 链不清锚（当前无挂点，刻意如此）：session_shutdown 收尾的
+ * terminateRunningRuns 转移帧仍须落当前 session 树——先 clear 会让收尾链的无参
+ * 推导 fail-fast 抛错；锚的生命周期 = 下一次 initSession 覆写。
+ */
 export function clearPiWorkflowRootSessionId(): void {
   anchorRootSessionId = undefined;
 }
 
-/** 进程级锚是否已绑定（测试与 fail-fast 文案分流用）。 */
+/** 进程级锚是否已绑定（测试用——resolvePiWorkflowRunsDir 的 fail-fast 为单一文案，无分流）。 */
 export function hasPiWorkflowRootSessionId(): boolean {
   return anchorRootSessionId !== undefined && anchorRootSessionId !== "";
 }

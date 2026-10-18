@@ -5,10 +5,9 @@
  *   - appPath（app.getAppPath()）：app 资源目录（dev 装配下 = apps/electron 子目录，
  *     非项目根——见 projectRoot 条目）
  *   - dataDir（getDataDir()）：taiji 数据目录（动态推导，dev=~/.taiji-dev，
- *     符合架构约定 #2）+ <dataDir>/attachments：会话级图片附件目录（runtime
- *     session-service 持久化路径，按 sessionId 分区。放行整个 attachments 目录——
- *     全是用户自粘图片非敏感，安全粒度等同 tmpdir；protocol handler 无状态拿不到
- *     session 上下文，无法按 session 推导）
+ *     符合架构约定 #2）。+ <dataDir>/attachments：旧布局遗留放行成员（域 1/3
+ *     落盘已换根 `<root>/<sid>/{attachments,image-cache}/`，被 dataDir 整前缀涵盖，
+ *     去留 deferred——见 computeLocalFilePrefixes 成员声明处注释）
  *   - 会话项目 `.tmp/` 子树（动态派生成员，2026-10-15 ADR-0118 决策②代价修订 3d）：
  *     应用全部会话的项目根（session cwd）下的 `.tmp/` 子树。派生不经 renderer
  *     （决策②否决的 session cwd 动态注册不回归）：main 自有 sessions 目录

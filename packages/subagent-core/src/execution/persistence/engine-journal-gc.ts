@@ -54,13 +54,14 @@ const GC_RESWEEP_INTERVAL_MS = HOURS_PER_DAY * MINUTES_PER_HOUR * SECONDS_PER_MI
 /**
  * 回收引擎 journal + worktree .patch 孤儿（确定性触发，由调用方决定时机）。
  * best-effort——任何异常不外抛。dataDir 解析失败 = 未配置宿主服务，同样吞掉。
- * dataDir 传入时同批清扫 session 存储树各会话树 `<root>/<sid>/subagents/sessions/`
- * 内的 .patch（文件头范围 2；缺省 = 仅引擎 journal）。
+ * .patch 清扫无条件执行：清扫根 = getSessionStoreDir(dataDir)（dataDir 缺省时
+ * 走 getDataDir() 缺省推导，与写侧同源同值——生产接线 startEngineJournalGcTimer
+ * 恒无参，条件化会使设计声明的 mtime 兜底通道在生产失效）。
  */
 export function cleanupExpiredEngineJournals(dataDir?: string): void {
   try {
     cleanupExpiredJournals(getEngineDataDir(), TTL_MS);
-    if (dataDir !== undefined) cleanupOrphanWorktreePatches(getSessionStoreDir(dataDir), TTL_MS);
+    cleanupOrphanWorktreePatches(getSessionStoreDir(dataDir), TTL_MS);
   } catch (_e) {
     // best-effort：异常不外抛
     void _e;

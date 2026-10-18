@@ -168,6 +168,10 @@ export function encodeCwd(cwd: string): string {
  *   sessions = 主会话树 / subagents = 子代理会话树（`<agentDir>/subagents/<encodeCwd>/sessions/`）
  *   / btw = btw 线会话树（`<agentDir>/btw/<encodeCwd>/<mainSid>/`）。
  *
+ * [session-store-layout-inversion] 终态口径：subagents / btw 两段现指旧布局残余读取面
+ * （存量静置；新写入走 getSessionSubagentsDir / getSessionBtwDir 存储树函数族，见
+ * runtime pi-paths.ts 同名函数的退役登记）——对拍保留仅作防树名漂移锚点。
+ *
  * 末位 'ext-sessions' 是 taiji session 存储树根段——基址是 `<dataDir>`（不是
  * piAgentDir），与 getSessionStoreDir / SESSION_STORE_DIR_SEGMENT 同源，对拍机检核对
  * 两者字面量一致。**消费注意**：本数组混两种基址，逐段 join(piAgentDir, segment) 的

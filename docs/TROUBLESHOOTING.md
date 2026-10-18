@@ -19,6 +19,8 @@ Runtime 日志落盘到 `<数据目录>/logs/`（`runtime-YYYY-MM-DD.log`，按�
 
 session 维度衍生数据的现行落点是 session 存储树 `<数据目录>/ext-sessions/<sessionId>/<域>/`，删除会话时整树进废纸篓（mac 可在访达废纸篓恢复整树）。**存储树反转前创建的会话**，其衍生数据仍留在旧布局目录原位、应用不再读写；删除这类旧会话时只回收新树半边，旧布局部分成为磁盘残留——这是显式取舍（不做迁移、不做自动清理），需要回收时按下表手工定位删除。
 
+**例外：会话日志域不做静置**——旧布局会话日志（`pi-*.jsonl(.N.gz)` / `pi-crash-*.log` / `signal-forensics-*.jsonl`）仍由全局日志保留期清理（默认 7 天，`readLogKeepDays`）按 `pi-` / `signal-forensics-` 文件名前缀继续覆盖，超龄自动删除：按本表定位旧日志大概率扑空属正常（已超龄被清），一般无需手工清扫。
+
 sessionId 的取法：侧栏会话列表 / `<数据目录>/agent/sessions/<encodeCwd>/<ts>_<sessionId>.jsonl` 文件名的末段。
 
 **一般域**（目录名或文件名直接含 sessionId，按「旧布局路径 × sessionId」匹配）：
@@ -32,7 +34,7 @@ sessionId 的取法：侧栏会话列表 / `<数据目录>/agent/sessions/<encod
 | 后台任务登记 | `<数据目录>/agent/base-tool-enhance/<sessionId>/` | 目录名即 sessionId |
 | 会话导出 | `<数据目录>/agent/tmp/session-view-<sessionId>.md` | 文件名即 sessionId |
 | btw 线会话 | `<数据目录>/agent/btw/<encodeCwd>/<mainSid>/` | 两层分区，第二层目录名 = 主会话 sessionId |
-| 会话日志 | `<数据目录>/logs/pi-<date>-<sessionId>.jsonl`（含 `.N.gz` 轮转）、`pi-crash-<date>-<sessionId>.log`、`signal-forensics-<date>-<sessionId>.jsonl` | 文件名内嵌 sessionId（`pi-relay-<date>-<recordId>.jsonl` 无 sessionId，不按本表匹配） |
+| 会话日志 | `<数据目录>/logs/pi-<date>-<sessionId>.jsonl`（含 `.N.gz` 轮转）、`pi-crash-<date>-<sessionId>.log`、`signal-forensics-<date>-<sessionId>.jsonl` | 文件名内嵌 sessionId（`pi-relay-<date>-<recordId>.jsonl` 无 sessionId，不按本表匹配）。**本域不静置**：保留期清理（默认 7 天）按前缀继续覆盖，超龄已自动删，一般无需手工清扫 |
 | 画布 | `<数据目录>/canvases/<canvasId>/` | 旧布局无 sessionId 关联（按画布 id 分区）——只能逐目录核对内容，或整目录清理 |
 
 **例外两域**（旧布局按 encodeCwd / cwd-slug 分区、文件按 recordId / runId 命名，sessionId 只存在于记录内容字段 `rootSessionId` 内，不能按目录名匹配，须按记录字段过滤定位）：

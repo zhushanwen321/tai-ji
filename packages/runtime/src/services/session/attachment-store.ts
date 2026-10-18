@@ -31,7 +31,8 @@ export class AttachmentStore {
   /**
    * 写入粘贴截图（base64 → attachments 文件）。
    *
-   * sessionId 非空 → <dataDir>/attachments/<sessionId>/（持久化，persisted=true）；
+   * sessionId 非空 → <root>/<sessionId>/attachments/（session 存储树域 1，ADR-0141，
+   * 经 getAttachmentsDir SSOT 推导；持久化，persisted=true）；
    * 空 → OS tmpdir（landing 降级，session 创建后需 migrateImage，persisted=false）。
    *
    * 安全校验（原样搬自 main privileged-handlers，TC3 零削弱）：

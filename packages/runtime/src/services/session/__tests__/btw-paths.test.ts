@@ -20,7 +20,7 @@ describe('btw 目录布局推导（session-store-layout-inversion 换根后）',
     expect(threadDir).toContain('ext-sessions')
   })
 
-  it('getBtwSessionsRoot = 旧布局残余读取面锚点（<piAgentDir>/btw，对拍机检树段锚定；存量静置）', () => {
+  it('getBtwSessionsRoot = 旧布局树段锚点（<piAgentDir>/btw，对拍机检逐位对拍 + 树段常量消费；无现役读取方，存量静置）', () => {
     expect(getBtwSessionsRoot()).toBe(join(getPiAgentDir(), 'btw'))
   })
 

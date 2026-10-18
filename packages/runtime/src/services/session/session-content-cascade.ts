@@ -68,8 +68,10 @@ import { isEnoent } from '../../utils/errors.js'
 type SubagentRecordEntry = SubagentRecordRegisteredEntryData | SubagentRecordSettledEntryData
 
 /**
- * 子代理会话文件族 sidecar 扩展名名单——本名单是这些 sidecar 的唯一删除面
- * （删主会话级联；外部删除主文件场景接受残留，2026-10-12 裁决）。
+ * 子代理会话文件族 sidecar 扩展名名单——本名单是这些 sidecar 随主会话删除而回收的
+ * 唯一识别清单（外部删除主文件场景接受残留，2026-10-12 裁决）：未引用族随整树
+ * trashSessionTree（废纸篓）整树回收；被引用族经本名单识别后暂存回迁保全
+ * （collectInTreeFamilyFiles）——名单本身不执行删除动作。
  *
  * 现役/退场锚定（防名单与 subagent-core 写点漂移）：
  * - `.record-binding` = 现役绑定 sidecar，写点单一入口 subagent-core

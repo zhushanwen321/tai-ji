@@ -245,7 +245,7 @@ export class RpcClient implements IPiEngine {
    * [session-store-layout-inversion D5 补] rekey 时重定向 tee：create 路径 tee 先按
    * tempId 落树，pi 真实 id 回读后须把日志文件迁到真实 id 树（否则 turn 输出成孤儿、
    * 真实 id 树缺首段）。close 旧 writer → logger 层迁移文件 → reopen（append 语义由
-   * createPiSessionStream 自带）→ 写 retarget 边界行（同 spawn_boundary 的代际标注）。
+   * createPiSessionLog（createPiStreamWriter flags:'a'）自带）→ 写 retarget 边界行（同 spawn_boundary 的代际标注）。
    * tee 未初始化（logger 未初始化/无 sessionId）时 no-op。
    */
   retargetSessionLog(newSessionId: string): void {
@@ -723,8 +723,9 @@ export class RpcClient implements IPiEngine {
    * code=null（信号死亡 / spawn 失败的 process error，如管道断裂后的 SIGKILL）同属异常退出，落盘。
    * 正常退出（code=0）与主动 kill 流程不写。
    * 文件：合法 sid → `<root>/<sid>/logs/pi-crash-<date>.log`（session 存储树 logs/ 域，
-   * 文件名去 sid）；无 sid/非法形态回落全局 `<logsDir>/pi-crash-<date>-nosid.log`
-   * （logger.ts writePiCrashLog，复用 pi-* 命名惯例，保留期清理自动覆盖）。
+   * 文件名去 sid）；sid 缺失 → 全局 `<logsDir>/pi-crash-<date>-nosid.log`；非法形态 →
+   * 全局 `<logsDir>/pi-crash-<date>-<清洗sid>.log`（清洗后为空才落 nosid；
+   * logger.ts writePiCrashLog，复用 pi-* 命名惯例，保留期清理自动覆盖）。
    *
    * best-effort 观测路径：任何失败（logger 未初始化 / 宿主环境未接线该能力，如
    * 单元测试部分 mock logger 模块）都不得影响 exit 主流程（rejectAll / exitCallbacks

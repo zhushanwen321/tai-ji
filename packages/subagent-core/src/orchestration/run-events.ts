@@ -220,10 +220,11 @@ export interface RunCreatedEvent extends EventEnvelope { // oe-exempt:20260929:f
    */
   runId: string;
   /**
-   * 归属会话锚（根 Pi session id，record-created.rootSessionId 同款语义）。同 cwd
-   * 多会话共享同一 sessions 目录与其下 workflow-state 目录，runtime 网关
-   * （subagent-model-gateway）runId 分支若只凭 journal 文件存在性定位宿主，会把
-   * 模型切换路由到非归属 pi 进程——本字段是精确归属判据（比对扫描会话 id，形态
+   * 归属会话锚（根 Pi session id，record-created.rootSessionId 同款语义）。run
+   * journal 目录已按 rootSessionId 分区（`<root>/<sid>/workflow/runs/`，同 cwd
+   * 共享目录分区随 session-store-layout-inversion 退役），runtime 网关
+   * （subagent-model-gateway）在目录级隔离之外仍以本字段做精确归属二次校验——
+   * 防串会话：journal 文件存在性不作归属判据，路由以字段比对为准（形态
    * 对齐 recordId 侧 record-created 帧锚）。可选 = 读取面对旧格式行放行（本字段
    * 落地前的流缺失时读侧回落既有存在性判定，存量 run 行为不劣化），写侧契约由
    * 写入方承担（写入点 = terminal-actions dispatchRunCreated，条件式可选项：

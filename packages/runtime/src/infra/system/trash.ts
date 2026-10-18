@@ -7,7 +7,10 @@ import { toErrorMessage } from '../../utils/errors.js'
 
 // RT-8#2：osascript 路径经 argv 注入（on run argv + item 1 of argv），文件路径
 // 不进 AppleScript 源码字符串——无任何转义面，含 " / $() 的路径原样到达 Finder。
-// Finder delete 作用于 item：目录与文件同为 item，同一脚本对整树目录适用。
+// Finder delete 作用于 item：目录与文件同为 item，同一脚本对整树目录适用
+// （目录形态为推断，实机未核实——本机 Finder 自动化授权受限，osascript 对 POSIX
+// file 定位恒报 -1728，文件形态同型失败，AppleEvent 通道整体不可用；失败语义安全 =
+// 保留原地 + 结构化报错，见 moveToTrashOnMac）。
 const FINDER_DELETE_SCRIPT = 'on run argv\ntell application "Finder" to delete POSIX file (item 1 of argv)\nend run'
 
 /** 提取 execFileSync 失败时捕获的 stderr（Buffer 或 string），并入重抛消息用。 */

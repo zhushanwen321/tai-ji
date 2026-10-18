@@ -6,8 +6,9 @@
 //     pool-manager.test.ts 深度覆盖，本文件锁包装层接线）
 //   - engines 根不存在 / dataDir 解析失败不外抛（best-effort）
 //   - startEngineJournalGcTimer：接线即扫一次 + 24h 复扫 + stop
-//   - worktree .patch 孤儿清扫（传 agentDir 时）：仅 *.patch 按 mtime TTL，级联领地
-//     （.jsonl / sidecar）零触碰；不传 agentDir = 缺省仅 journal（行为不变）
+//   - worktree .patch 孤儿清扫：仅 *.patch 按 mtime TTL，级联领地
+//     （.jsonl / sidecar）零触碰；无参时清扫根走 getSessionStoreDir 缺省推导
+//     （与写侧同源——生产接线恒无参，清扫恒生效）
 //
 // 范围注记（2026-10-12 裁决）：子代理会话文件（session 存储树 subagents 域的 .jsonl /
 // sidecar / manifest / .events 族）不在本 GC 范围——回收归删主会话级联（runtime
@@ -23,6 +24,7 @@ import {
   cleanupExpiredEngineJournals,
   startEngineJournalGcTimer,
 } from "../persistence/engine-journal-gc.ts";
+import { getSessionStoreDir } from "@taiji/shared/paths";
 
 // dataDir 解析钉到 holder.value（默认 tmpAgentDir，beforeEach 赋值）——防止命中真实
 // TAIJI_AGENT_DATA_DIR（或宿主 fallback）误清开发机数据（测试红线）。throw 开关供
@@ -110,7 +112,7 @@ describe("cleanupExpiredEngineJournals", () => {
 });
 
 // ============================================================
-// worktree .patch 孤儿清扫（传 agentDir 时；文件头范围声明 2）
+// worktree .patch 孤儿清扫（无条件执行；文件头范围声明 2）
 // ============================================================
 
 describe("cleanupExpiredEngineJournals: worktree patch sweep", () => {
@@ -136,10 +138,22 @@ describe("cleanupExpiredEngineJournals: worktree patch sweep", () => {
     expect(() => cleanupExpiredEngineJournals(tmpDataDir)).not.toThrow();
   });
 
-  it("不传 dataDir：缺省仅 journal，.patch 不清（缺省行为不变）", () => {
-    const patch = createSubagentFile("sessions/feat-main.patch", 31);
-    cleanupExpiredEngineJournals();
-    expect(fs.existsSync(patch)).toBe(true);
+  it("不传 dataDir：清扫根走 getSessionStoreDir 缺省推导（与写侧同源），超龄 .patch 仍回收", () => {
+    // 缺省推导根 = getDataDir()（vitest 防线固定为 tmp 数据目录，非真实 ~/.taiji）；
+    // 造数自建自删，不依赖 dataDirHolder 注入。
+    const defaultRoot = getSessionStoreDir();
+    const sid = "sid-gc-default-root";
+    const patch = path.join(defaultRoot, sid, "subagents", "sessions", "feat-main.patch");
+    fs.mkdirSync(path.dirname(patch), { recursive: true });
+    fs.writeFileSync(patch, "patch\n", "utf-8");
+    const targetTime = Date.now() / 1000 - 31 * 86400;
+    fs.utimesSync(patch, targetTime, targetTime);
+    try {
+      cleanupExpiredEngineJournals();
+      expect(fs.existsSync(patch)).toBe(false);
+    } finally {
+      fs.rmSync(path.join(defaultRoot, sid), { recursive: true, force: true, maxRetries: 5, retryDelay: 20 });
+    }
   });
 });
 

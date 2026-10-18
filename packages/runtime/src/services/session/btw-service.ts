@@ -654,7 +654,8 @@ export class BtwService {
     // 记录等随树入废纸篓）。三路删除（直删/直删级联/主删级联）都落本段；树不存在
     // （线从未派生数据——常态）= 目标态已达成零动作（trashDirectory 对缺失路径按
     // 契约 ENOENT 上抛，调用方负责判存在）。mac 走 trashDirectory 废纸篓通道（可
-    // 恢复），失败原生结构化错误上抛不吞。
+    // 恢复），失败原生结构化错误上抛不吞。线 jsonl 的 .meta.json sidecar 不随关线
+    // 清理（随主树整删回收；rebuild 只扫 *.jsonl，残留无幽灵复活面）。
     const lineTree = resolveLineTreeDir(rec.piSessionId)
     if (existsSync(lineTree)) {
       await this.deps.trashDirectory(lineTree)

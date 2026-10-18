@@ -872,9 +872,10 @@ export function isPiCrashLogEnabled(): boolean {
  *
  * 文件名（域 11 布局反转）：合法 sessionId → `<root>/<sid>/logs/pi-crash-<date>.log`
  * （树内 logs/ 域，sid 已在路径故文件名去 sid）；sessionId 缺失（无 session 的早期
- * spawn 崩溃）或非法形态回落全局 logs 平铺 `pi-crash-<date>-nosid.log`（'nosid' 占位，
- * D7 豁免②无归属日志留全局；pi- 前缀使 cleanExpiredLogs 的保留期清理自动覆盖，无需改
- * 过滤规则）。
+ * spawn 崩溃）→ 全局 logs 平铺 `pi-crash-<date>-nosid.log`（'nosid' 占位）；非法形态
+ * → 全局 logs 平铺 `pi-crash-<date>-<清洗sid>.log`（清洗保留可辨识 sid 片段，多文件
+ * 可区分，清洗后为空才落 'nosid'；D7 豁免②无归属日志留全局；pi- 前缀使
+ * cleanExpiredLogs 的保留期清理自动覆盖，无需改过滤规则）。
  *
  * 写入复用 createPiStreamWriter（WriteStream 缓冲 + 惰性打开 + closeLogger 退出 flush
  * 覆盖 + 流错误自愈）而非 appendFileSync——logger.ts 写入路径禁同步 append 是
@@ -888,7 +889,7 @@ export function isPiCrashLogEnabled(): boolean {
 export function writePiCrashLog(sessionId: string | undefined, content: string, context?: PiCrashContext): void {
   if (!logsDir || !currentLevel) return
   const date = new Date().toISOString().slice(0, ISO_DATE_LENGTH)
-  // 合法 sid 入树（文件名去 sid）；缺失/非法形态回落全局 nosid 占位（sessionLogFileOrNull 分流）
+  // 合法 sid 入树（文件名去 sid）；缺失 → nosid 占位，非法形态 → 清洗 sid 文件名（空清洗才 nosid）（sessionLogFileOrNull 分流）
   const file = sessionLogFileOrNull(sessionId, `pi-crash-${date}.log`)
     ?? join(logsDir, `pi-crash-${date}-${(sessionId ?? 'nosid').replace(/[^a-zA-Z0-9-]/g, '').slice(0, SESSION_ID_MAX_LENGTH) || 'nosid'}.log`)
   const writer = createPiStreamWriter(file)

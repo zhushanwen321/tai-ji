@@ -589,13 +589,11 @@ export type {
 // 终局证据判定核与保留期维护（workflow-run-store-convergence U3+U4：自
 // orchestration/file-run-store.ts 迁入 execution/persistence/，RunStore 写实现
 // 身份已退役——生产唯一实现 = pi 壳 JsonlRunStore）。
-// [C3 常量上收] STATE_DIR_NAME（定义随 dmg-r3-3 归位 shared/run-vocabulary 词表
-// 最低层——workflow-state-root 经它消费，挂 run-state-evidence 会构成
-// evidence → run-event-journal → workflow-state-root → evidence 三级循环）：
-// pi 壳 workflow-events / jsonl-run-store 的 `<sessionDir>/workflow-state` 与
-// pi 宿主枚举的 agentDir 根回退目录同名分量单源——壳侧字面量改 import 消费，
-// 防布局分量漂移。
-export { STATE_DIR_NAME } from "./shared/run-vocabulary.ts";
+// [退役 2026-10-18] 原 [C3 常量上收] STATE_DIR_NAME（"workflow-state"）随
+// session-store-layout-inversion 布局反转整体退役：run journal 新落点 =
+// `<root>/<sid>/workflow/runs/`（runs 目录分量单源 = shared/paths.ts
+// getSessionWorkflowRunsDir），旧 `<sessionDir>/workflow-state` 布局与其全部
+// 防漂移消费关系消失，全仓零消费点——死导出删除。
 
 // [W1 / D5] 统一保留维护轮入口：run journal prune + record 事件文件 prune 同轮
 // 幂等扫描 + 判据②候选数日志。三触发点（新 run 首写 / 新 record 事件文件首写 /
