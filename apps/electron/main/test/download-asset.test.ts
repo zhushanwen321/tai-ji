@@ -644,10 +644,15 @@ describe('批次 5: resume-state 原子写序列（§3.7.2）', () => {
 
     expect(result.filePath).toMatch(/multipart-atomic\.zip$/)
 
-    // 序列断言：resume-state.json.tmp 的 writeFileSync 先于 renameSync(→resume-state.json)
-    const tmpWrite = fsSpy.writeCalls.find((c) => c.path.endsWith('resume-state.json.tmp'))
+    // 序列断言（原子写助手形态）：resume-state 派生 tmp 名（含 pid+seq、.tmp 结尾）的
+    // writeFileSync 先于 renameSync(→resume-state.json)，rename 源 = 该 tmp
+    const isResumeTmp = (p: string) => {
+      const base = p.split(path.sep).pop() ?? ''
+      return base.startsWith('resume-state.json') && base.endsWith('.tmp')
+    }
+    const tmpWrite = fsSpy.writeCalls.find((c) => isResumeTmp(c.path))
     const rename = fsSpy.renameCalls.find((c) => c.to.endsWith('resume-state.json'))
-    expect(tmpWrite, '应先写 resume-state.json.tmp').toBeDefined()
+    expect(tmpWrite, '应先写 resume-state 派生名的 .tmp 文件').toBeDefined()
     expect(rename, '应 renameSync 到 resume-state.json 终态').toBeDefined()
     const writeIdx = fsSpy.writeCalls.indexOf(tmpWrite!)
     const renameIdx = fsSpy.renameCalls.indexOf(rename!)
@@ -655,7 +660,8 @@ describe('批次 5: resume-state 原子写序列（§3.7.2）', () => {
     expect(rename!.from).toBe(tmpWrite!.path)
     // 下载成功后 clearResumeState 清掉终态文件（且 .tmp 不残留）
     expect(existsSync(path.join(TMP_DATA_DIR, 'update', 'resume-state.json'))).toBe(false)
-    expect(existsSync(path.join(TMP_DATA_DIR, 'update', 'resume-state.json.tmp'))).toBe(false)
+    const leftoverTmp = fsSpy.writeCalls.filter((c) => isResumeTmp(c.path))
+    expect(leftoverTmp.every((c) => !existsSync(c.path))).toBe(true)
   })
 })
 
