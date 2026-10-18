@@ -60,6 +60,8 @@ import {
 } from './frames.js'
 import { ControlChannelRegistry, type EngineChannelRecord } from './channel-registry.js'
 import { buildEngineLaunchEnv } from './engine-launch-env.js'
+import { SubagentMirrorHub, type MirrorPublish } from './mirror.js'
+import type { SubagentTeeStreamState } from './subagent-tee.js'
 import { killEngineGroup } from './process-kill.js'
 import { sweepOrphanEnginePids, sweepStaleControlSockets } from './sweep.js'
 import { findPiExecutable } from '../pi/find-pi-executable.js'
@@ -91,6 +93,11 @@ export type ControlServerOptions = {
   isElectronHost?: boolean
   /** taiji 托管 pi agent 目录（缺省 getPiAgentDir() 同源推导）。 */
   piAgentDir?: string
+  /**
+   * [M3 D6] raw mirror 的 WS 帧发布出口（组合根注入 messageBus.publish；缺省 no-op
+   * ——单测形态：镜像仍可查询状态，不产帧副作用）。
+   */
+  publish?: MirrorPublish
   // ── 时间窗与上限（D8；测试注入小值）──
   helloTimeoutMs?: number
   openTimeoutMs?: number
@@ -166,7 +173,7 @@ const SPAWN_FAILURE_EXIT_CODE = 127
  */
 function endConnQuietly(conn: ConnState): void {
   try {
-    endConnQuietly(conn)
+    conn.socket.end()
   // eslint-disable-next-line taste/no-silent-catch -- 竞态窗口内已 destroyed：无需再关，无信息可记
   } catch {
     // 已 destroyed（竞态）：无需再关
@@ -177,6 +184,8 @@ export class SubagentControlServer {
   private readonly registry = new ControlChannelRegistry()
   private readonly ctxs = new Map<string, ChannelCtx>()
   private readonly conns = new Map<string, ConnState>()
+  /** [M3 D6] raw mirror 读取侧（fd3 → SubagentTee/磁盘镜像/degraded；state 查询数据源）。 */
+  private readonly mirror: SubagentMirrorHub
   private server: net.Server | null = null
   private socketPath = ''
   private isUnixSocket = false
@@ -222,6 +231,9 @@ export class SubagentControlServer {
     const piCommand = opts.piCommand ?? safeFindPi(this.projectRoot)
     this.piDir = piCommand !== 'pi' ? dirname(piCommand) : undefined
     this.piAgentDir = opts.piAgentDir ?? getPiAgentDir()
+    this.mirror = new SubagentMirrorHub(
+      opts.publish !== undefined ? { publish: opts.publish } : {},
+    )
   }
 
   /** 在册通道数（滚动重启在途面组合根消费）。 */
@@ -236,6 +248,15 @@ export class SubagentControlServer {
   /** 测试钩子：通道台账只读（生产无调用方）。 */
   getChannelForTest(channelId: string): EngineChannelRecord | undefined {
     return this.registry.get(channelId)
+  }
+
+  /**
+   * [M3 D6] 流状态查询（session.getSubagentStreamState 的 control 侧数据源）：按
+   * `(rootSessionId, recordId)` 索引读 mirror tee 快照；未登记/跨 session → undefined
+   * （组合根按 relay 回退/缺省 found:false 处理）。
+   */
+  getStreamStateByRecord(sessionId: string, recordId: string): SubagentTeeStreamState | undefined {
+    return this.mirror.getStreamStateByRecord(sessionId, recordId)
   }
 
   // ── 生命周期 ────────────────────────────────────────────────────────────────
@@ -298,6 +319,8 @@ export class SubagentControlServer {
     for (const conn of [...this.conns.values()]) {
       this.destroyConnection(conn, 'runtime_shutdown')
     }
+    // 兜底：异常顺序下可能残留未随连接释放的 record/行泵（disposeChannel/disposeAll 幂等）
+    this.mirror.disposeAll()
     await new Promise<void>((resolve) => {
       if (this.server === null) {
         resolve()
@@ -878,12 +901,24 @@ export class SubagentControlServer {
       console.debug(`[subagent-control] engine stderr stream error channelId=${channelId}:`, err.message)
     })
 
-    // fd3 = raw mirror 通道：本单元不消费（u-m3-mirror 接管），挂 flowing 消费防管道
-    // 积压反压引擎 stdout。
+    // fd3 = raw mirror 通道（TAIJI_ENGINE_RAW_MIRROR=1 宣告；stdio[3] 在 spawn 时开启）。
+    // 字节流 → SubagentMirrorHub（NDJSON 行解析 + seq 空洞→degraded + SubagentTee +
+    // 磁盘镜像 pi-subagent-*.jsonl）；data 监听即进入 flowing（无需 resume），流错误不逃逸。
     const mirrorStream = child.stdio[3]
     if (mirrorStream !== null && mirrorStream !== undefined
-      && typeof (mirrorStream as NodeJS.ReadableStream).resume === 'function') {
-      ;(mirrorStream as NodeJS.ReadableStream).resume()
+      && typeof (mirrorStream as NodeJS.ReadableStream).on === 'function') {
+      const readable = mirrorStream as NodeJS.ReadableStream
+      this.mirror.openChannel(channelId, rec.rootSessionId)
+      readable.on('data', (chunk: Buffer) => {
+        this.mirror.ingestBytes(channelId, chunk)
+      })
+      readable.on('error', (err: Error) => {
+        console.warn(`[subagent-control] engine mirror stream error channelId=${channelId}:`, err.message)
+      })
+    } else {
+      // 无 fd3（spawn 形态退化/测试注入）：镜像通道缺席 = 无 live 派生视图，
+      // reload 腿不受影响（显式 warn 一次）。
+      console.warn(`[subagent-control] fd3 mirror stream unavailable channelId=${channelId}; live subagent stream disabled`)
     }
 
     child.once('error', (err: Error) => {
@@ -1041,6 +1076,8 @@ export class SubagentControlServer {
     }
     this.registry.remove(rec.channelId)
     this.ctxs.delete(rec.channelId)
+    // [M3 D6] 镜像读取侧释放：channel 行泵 + 该通道全部 record 的 tee/磁盘日志
+    this.mirror.disposeChannel(rec.channelId)
     if (ctx.exitSeen) {
       try {
         if (existsSync(rec.pidFile)) unlinkSync(rec.pidFile)
@@ -1090,6 +1127,9 @@ export class SubagentControlServer {
       const ctx = this.ctxs.get(rec.channelId)
       if (ctx === undefined) continue
       this.terminateChannel(ctx, SUBAGENT_CONTROL_CLOSED_REASONS.killedByControl, `connection_closed:${why}`)
+      // 镜像读取侧立即释放（record 仍在台账 = exit 未达，finalizeClosed 延后——本通道
+      // 的 fd3 已随 socket 死亡失去消费方，不得残留；disposeChannel 幂等）。
+      this.mirror.disposeChannel(rec.channelId)
     }
     this.conns.delete(conn.id)
     if (!conn.socket.destroyed) conn.socket.destroy()

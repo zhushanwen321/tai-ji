@@ -550,6 +550,26 @@ export function createPiRelayLog(recordId: string): PiSessionLog {
   return createPiStreamWriter(join(logsDir, `pi-relay-${date}-${safeRecordId}.jsonl`))
 }
 
+/**
+ * 为 raw mirror 托管的 subagent 子进程创建 stdout 原始字节镜像写入器（M3
+ * relay-spawn-transport §3.4.4/§3.4.5：镜像读取侧落盘；架构约定「pi stdout tee 落盘 =
+ * pi 卡死时唯一证据」对子代理进程的现行覆盖）。
+ *
+ * 文件名 `pi-subagent-<date>-<recordId>.jsonl`（设计 §3.4.5 写入点表命名；`pi-` 前缀
+ * 对齐既有命名，cleanExpiredLogs 的保留期清理同样覆盖；date 前缀防跨天冲突）。size
+ * 轮转与 createPiSessionLog 同款（共享 createPiStreamWriter）。recordId 来自引擎 fd3
+ * 镜像帧，按文件名安全字符集清洗。logger 未初始化时返回 no-op 写入器（与
+ * createPiSessionLog 同契约，单元测试无副作用）。
+ */
+export function createPiSubagentLog(recordId: string): PiSessionLog {
+  if (!logsDir || !currentLevel) {
+    return { write: () => {}, end: () => {} }
+  }
+  const date = new Date().toISOString().slice(0, ISO_DATE_LENGTH)
+  const safeRecordId = recordId.replace(/[^a-zA-Z0-9_-]/g, '').slice(0, SESSION_ID_MAX_LENGTH)
+  return createPiStreamWriter(join(logsDir, `pi-subagent-${date}-${safeRecordId}.jsonl`))
+}
+
 // ── 崩溃取证上下文（crash-resilience §3.3 D6-④⑤ / A8）────────────────
 
 /** runtime 进程内存快照的四指标（process.memoryUsage() 的取证子集）。 */

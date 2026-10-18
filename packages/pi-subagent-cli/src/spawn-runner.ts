@@ -54,6 +54,7 @@ import {
   type CollectedOutcome,
 } from "./output-collector.ts";
 import { createPromptAckTracker, resolvePromptAckTimeoutMs, type PromptAckTracker } from "./prompt-ack.ts";
+import { createFd3RawMirrorWriter, type RawMirrorWriter } from "./raw-mirror.ts";
 import { toErrorMessage } from "./error-message.ts";
 import {
   buildEnvBlock,
@@ -643,6 +644,9 @@ export async function runSpawnOnce(
   // [M2 D3] prompt 回执 tracker（spawn 成功后装配；finally 必达 dispose——正常
   // 完成 / 异常 / 取消三路都经过）。
   let ackTracker: PromptAckTracker | undefined;
+  // [M3 D6] fd3 raw mirror 写入器（env 宣告才创建；per-run，finally 必达 dispose
+  // ——fd 属引擎进程不关闭，跨 run 复用）。
+  let rawMirror: RawMirrorWriter | undefined;
 
   // prepare 期校验前置（model 缺失 fail-fast 先于临时文件创建）：writeAppendPromptFile
   // 会落盘 append-system-prompt 临时文件，校验在后会让 prepare 期失败的 run 泄漏
@@ -714,6 +718,9 @@ export async function runSpawnOnce(
       cwd: params.cwd,
       ...(params.signal !== undefined ? { signal: params.signal } : {}),
     });
+    // [M3 D6] fd3 镜像写入器：与主解析链同一数据源（stdout 原始 Buffer tap，接线见
+    // wireChildStdoutPump）；env 未宣告时 undefined（零 fd3 触点，既有路径不变）。
+    rawMirror = createFd3RawMirrorWriter({ recordId: params.recordId, env: process.env });
 
     // [U1 归并] 杀链切 pi-rpc killPiProcess（SIGKILL 直杀 + 立即 resolve，与
     // runtime 主链路同源；原「SIGCONT → SIGTERM → grace → SIGKILL」阶梯随
@@ -807,6 +814,7 @@ export async function runSpawnOnce(
       runEnd,
       promptAck: ackTracker,
       runCounters,
+      ...(rawMirror !== undefined ? { rawMirror } : {}),
     });
 
     // 7. get_state 握手 fire-and-forget（RPC mode 无 header 行，靠握手回填身份）——
@@ -848,6 +856,8 @@ export async function runSpawnOnce(
     // 已落位），未决的零输出计时器/登记表随 run 终止必达清理（迟到 response 由
     // settled/disposed 门自行忽略）。
     ackTracker?.dispose();
+    // [M3 D6] 镜像写入器释放（不关 fd3；残留未成行字节按 NDJSON 语义丢弃）。
+    rawMirror?.dispose();
     if (tempFile !== undefined) await cleanupTempPrompt(tempFile);
   }
 }

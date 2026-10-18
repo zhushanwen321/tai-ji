@@ -21,13 +21,14 @@
  *
  * 运行：cd packages/runtime && npx vitest run src/__tests__/equivalence/relay-live-reload.test.ts
  */
-import { describe, it, expect, afterEach } from 'vitest'
+import { describe, it, expect, afterEach, vi } from 'vitest'
 import { mkdtemp, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import type { ServerMessage, PiToolCallEntryForm } from '@taiji/shared'
 import { subagentVirtualId } from '@taiji/shared'
 import { RelayTee } from '../../infra/relay/relay-tee.js'
+import { SubagentMirrorHub } from '../../infra/subagent-control/mirror.js'
 import { getHistoryFromFilePath } from '../../services/session-history.js'
 import { PiSessionStore } from '../../infra/pi/session-store.js'
 import { replayEntries } from '../../../../core/src/domain/chat/apply-entry.js'
@@ -290,6 +291,72 @@ describe('equivalence: relay live ≡ reload（tee entry 帧 × getSubagentHisto
     })
 
     tee.dispose()
+  })
+
+  it('[M3 u-m3-mirror] 镜像通路（fd3 帧编码 → SubagentMirrorHub 解码）帧序列 ≡ 直通通路，entry replay ≡ JSONL 直读（raw mirror 不破 live ≡ reload）', async () => {
+    const lines = toChildStdoutLines()
+    // tool_execution_end 等翻译路径的 entry.timestamp 源自 Date.now()：冻结系统时间使两腿
+    // 生成值逐字节可比（仅 fake Date，不 fake 定时器——fs 异步腿不受影响）。
+    vi.useFakeTimers({ toFake: ['Date'] })
+    vi.setSystemTime(new Date('2026-01-01T00:00:00.000Z'))
+    try {
+
+    // 直通腿：真实 Tee 直接喂行（镜像开通前的既有通路）
+    const direct: Array<{ sessionId: string; msg: ServerMessage }> = []
+    const directTee = new RelayTee({
+      mainSessionId: MAIN_SID,
+      recordId: RECORD_ID,
+      publish: (sid, msg) => direct.push({ sid, msg }),
+    })
+    directTee.feed(Buffer.from(lines.map((l) => l + '\n').join(''), 'utf-8'))
+
+    // 镜像腿：引擎 writer 同款编码（逐行 {v,recordId,seq,b64}）→ hub 解码（含任意 chunk 切分）
+    const mirrored: Array<{ sessionId: string; msg: ServerMessage }> = []
+    const hub = new SubagentMirrorHub({ publish: (sid, msg) => mirrored.push({ sid, msg }) })
+    hub.openChannel('ch-eq', MAIN_SID)
+    let seq = 0
+    const wire = lines
+      .map((l) => `${JSON.stringify({ v: 1, recordId: RECORD_ID, seq: seq++, b64: Buffer.from(l, 'utf8').toString('base64') })}\n`)
+      .join('')
+    const bytes = Buffer.from(wire, 'utf8')
+    for (let i = 0; i < bytes.length; i += 97) {
+      hub.ingestBytes('ch-eq', bytes.subarray(i, Math.min(i + 97, bytes.length)))
+    }
+
+    // 帧序列全等：镜像开通前后前端可见帧流（entry/chunk/清除）逐字段一致。
+    // 归一化物理差异（非实现差异）：toolCall overlay form 的 messageId/timestamp 是
+    // tee 实例本地生成值（两个实例必然不同），按 applySubagentEntries 同规则剔除。
+    const normalize = (f: { sessionId: string; msg: ServerMessage }): unknown => {
+      const msg = JSON.parse(JSON.stringify(f.msg)) as {
+        payload?: { entries?: Array<Record<string, unknown>> }
+      }
+      for (const entry of msg.payload?.entries ?? []) {
+        if (entry.type === 'toolCall') {
+          delete entry.messageId
+          delete entry.timestamp
+        }
+      }
+      return { sessionId: f.sessionId, msg }
+    }
+    expect(mirrored.length).toBeGreaterThan(0)
+    expect(mirrored.map(normalize)).toEqual(direct.map(normalize))
+
+    // 镜像腿 entry replay ≡ JSONL 直读（与直通腿共用同一 reload 断言目标）
+    const mirrorEntries = mirrored
+      .filter((f) => f.msg.type === 'session.subagentEntriesAppended')
+      .flatMap((f) => (f.msg as { payload: { entries: unknown[] } }).payload.entries)
+      .filter((e): e is PiEntry => (e as { type?: string }).type !== 'toolCall')
+    dir = await mkdtemp(join(tmpdir(), 'mirror-equiv-'))
+    const filePath = join(dir, 'subagent-session.jsonl')
+    await writeFile(filePath, toSessionJsonlLines().join('\n') + '\n', 'utf-8')
+    const { messages: reloadMessages } = await getHistoryFromFilePath(filePath, new PiSessionStore())
+    expect(replayEntries(mirrorEntries).messages).toEqual(reloadMessages)
+
+    hub.disposeChannel('ch-eq')
+    directTee.dispose()
+    } finally {
+      vi.useRealTimers()
+    }
   })
 
   it('流中拉取数据源形状（B2 失步/接入拉取占位）：getStreamState 同步读进行中三元组', () => {

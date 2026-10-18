@@ -7,6 +7,7 @@
 
 import type { ChildProcess } from "node:child_process";
 import os from "node:os";
+import { PassThrough } from "node:stream";
 
 import { isBrokenPipeError } from "@zhushanwen/pi-rpc";
 import { getLogger, pumpNdjsonLines } from "@zhushanwen/subagent-engine-sdk";
@@ -16,6 +17,7 @@ import { dispatchControlResponse } from "./control-responses.ts";
 import { toErrorMessage } from "./error-message.ts";
 import { extractGetStateFields, type GetStateResult } from "./get-state-handshake.ts";
 import type { PromptAckTracker, PromptAckResult } from "./prompt-ack.ts";
+import type { RawMirrorWriter } from "./raw-mirror.ts";
 import {
   deriveSessionFilePath,
   findSessionFileByHeaderId,
@@ -203,6 +205,13 @@ export interface StdoutPumpDeps {
   promptAck?: PromptAckTracker;
   /** [M2 D3] 诊断计数器（缺省 = 不计数，兼容既有装配/测试）。 */
   runCounters?: PromptRunCounters;
+  /**
+   * [M3 D6] fd3 raw mirror 写入器（缺省 = 镜像通道未开通，stdout 走原 setEncoding
+   * 直路）。开通时 child.stdout 保持原始字节形态：tap 先挂（原始 Buffer，行切分在
+   * 写入器内），主解析链经 PassThrough 桥接后再 setEncoding（pumpNdjsonLines 单点）
+   * ——两条链消费同一次读取的同一 chunk 序列（tap 先注册，顺序一致）。
+   */
+  rawMirror?: RawMirrorWriter;
 }
 
 /** stdout 行消费（parseSpawnLine 分类 → 身份/事件/响应/UI 各通道 + [M2 D3] 回执分发/计数）。 */
@@ -371,7 +380,19 @@ export function wireChildStdoutPump(deps: StdoutPumpDeps): Promise<number> {
     deps.runEnd.resolveChatRun = resolveExit;
     const consumeLine = createLineConsumer(deps);
     const onClose = createCloseFinalizer(deps, resolveExit);
-    pumpNdjsonLines(child.stdout, consumeLine);
+    if (deps.rawMirror !== undefined && child.stdout !== null) {
+      // [M3 D6] 镜像通道开通：tap 必须挂 setEncoding 之前——Node 的 setEncoding 是
+      // 流级状态（同一流上先注册的监听器同样收到解码后的 string），保持 child.stdout
+      // 不解码、把解码留给 PassThrough，tap 才能拿到原始 Buffer。
+      child.stdout.on("data", (chunk: Buffer) => {
+        deps.rawMirror?.tap(chunk);
+      });
+      const decoderInput = new PassThrough();
+      child.stdout.pipe(decoderInput);
+      pumpNdjsonLines(decoderInput, consumeLine);
+    } else {
+      pumpNdjsonLines(child.stdout, consumeLine);
+    }
     child.once("close", onClose);
     child.once("error", (err) => {
       logger.error(`[session-runner] child ${deps.recordId} error event`, {
