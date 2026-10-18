@@ -1,7 +1,7 @@
 <template>
   <!-- Settings · 网络代理菜单页（llm-network-proxy U4）：单页纵排三卡（§3.3 决策 6 变体一）。
        保存语义 = 单页单保存（§3.1）：三卡编辑进页面级内存草稿，代理服务器卡「保存」一次
-       全量 setNetworkProxyConfig 整页草稿；开关关闭时规则/统计卡降灰禁交互。 -->
+       全量 setNetworkProxyConfig 整页草稿；开关关闭时规则卡降灰禁交互（统计卡观测与开关正交）。 -->
   <div data-testid="network-page" class="flex flex-col">
     <header class="page-head">
       <div class="head-text">
@@ -14,15 +14,14 @@
          不用 v-model:draft（reactive 对象整体重赋值无生产路径，仅余编译器 let 降级警告） -->
     <NetworkServerCard :draft="draft" :saving="saving" @save="onSave" />
 
-    <!-- 开关关闭降灰区（demo data-disabled 形态）：规则/统计卡 opacity + pointer-events 收敛，
-         关键控件再绑 disabled（键盘路径同闭）；间距 16px 与 GroupCard 兄弟规则等值 -->
-    <div
-      class="mt-[var(--space-4)] flex flex-col gap-[var(--space-4)]"
-      :class="{ 'pointer-events-none opacity-50': !draft.enabled }"
-      data-testid="network-lower-cards"
-    >
-      <NetworkRulesCard :rules="draft.rules" :enabled="draft.enabled" :providers="providers" />
-      <NetworkStatsCard :enabled="draft.enabled" :providers="providers" />
+    <!-- 开关关闭仅降灰规则卡（demo data-disabled 形态：opacity + pointer-events 收敛，
+         关键控件再绑 disabled 键盘路径同闭——禁用态编辑规则无意义）；统计卡读侧观测与
+         enabled 正交（§3.1 卡 3 / 设计目标 3），不随开关降灰。间距 16px 与 GroupCard 兄弟规则等值 -->
+    <div class="mt-[var(--space-4)] flex flex-col gap-[var(--space-4)]" data-testid="network-lower-cards">
+      <div :class="{ 'pointer-events-none opacity-50': !draft.enabled }" data-testid="network-rules-dim">
+        <NetworkRulesCard :rules="draft.rules" :enabled="draft.enabled" :providers="providers" />
+      </div>
+      <NetworkStatsCard :providers="providers" />
     </div>
   </div>
 </template>

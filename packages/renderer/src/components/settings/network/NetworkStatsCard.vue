@@ -12,7 +12,7 @@
     </template>
     <template #actions>
       <div class="flex items-center gap-2">
-        <Select v-model="rangeModel" :disabled="!enabled">
+        <Select v-model="rangeModel">
           <SelectTrigger data-testid="network-stats-range" class="h-[28px] w-[130px] text-[length:var(--text-xs)]">
             <SelectValue />
           </SelectTrigger>
@@ -28,7 +28,6 @@
           class="size-[28px] p-0 text-neutral-mid hover:text-neutral-fg"
           :title="t('settings.network.refresh')"
           :aria-label="t('settings.network.refresh')"
-          :disabled="!enabled"
           data-testid="network-stats-refresh"
           @click="loadStats"
         >
@@ -38,7 +37,6 @@
           variant="ghost"
           size="sm"
           class="h-[28px] gap-1 px-2 text-[length:var(--text-xs)] text-neutral-mid hover:text-neutral-fg"
-          :disabled="!enabled"
           data-testid="network-stats-reset"
           @click="showResetConfirm = true"
         >
@@ -136,8 +134,6 @@ const { t } = useI18n()
 const { info: toastInfo, error: toastError } = useToast()
 
 const props = defineProps<{
-  /** 开关总态：false 时禁交互（降灰由 page 层 wrapper 承担） */
-  enabled: boolean
   /** 主机名↔服务商名反查数据源（page 拉取的 provider 清单） */
   providers: ProviderInfo[]
 }>()

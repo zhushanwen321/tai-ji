@@ -4,8 +4,9 @@
  * 覆盖（impl-plan u-settings 验收 ⑤）：
  *  - 挂载 smoke：三卡渲染 + mock transport 数据回填（草稿字段 / chips / 规则行 / 统计行
  *    服务商名反查——provider baseUrl 主机名命中显名称、查不到显裸主机名）；
- *  - 开关关闭降灰：enabled=false → 降灰区 wrapper 挂 opacity-50 + pointer-events-none，
- *    chip 禁用；enabled=true 无降灰类；
+ *  - 开关关闭降灰：enabled=false → 规则卡降灰 wrapper 挂 opacity-50 + pointer-events-none，
+ *    chip 禁用；统计卡不随开关降灰（读侧观测与 enabled 正交），范围 Select/刷新/重置可用；
+ *    enabled=true 无降灰类；
  *  - chip toggle 增删规则：点击未添加 chip → 规则行追加主机名条目（aria-pressed 翻转）；
  *    再点 → 移除；baseUrl 缺失 provider 的 chip 禁用；「添加自定义规则」push 空条目；
  *  - 保存：调 setNetworkProxyConfig 全量载荷（port Number 化 / noProxy 拆分）+ 成功 toast；
@@ -144,23 +145,31 @@ describe('NetworkPage（llm-network-proxy U4 网络代理页）', () => {
     wrapper.unmount()
   })
 
-  it('开关关闭降灰：enabled=false → 降灰区挂 opacity-50 + pointer-events-none 且 chip 禁用；开启恢复', async () => {
+  it('开关关闭降灰：enabled=false → 规则卡降灰挂 opacity-50 + pointer-events-none 且 chip 禁用；统计卡不随开关禁用；开启恢复', async () => {
     transportApiMock.getNetworkProxyConfig.mockResolvedValue({
       config: { ...fixtureConfig(), enabled: false },
     })
     const wrapper = mountPage()
     await flushPromises()
 
-    const lower = wrapper.find('[data-testid="network-lower-cards"]')
-    expect(lower.classes()).toContain('opacity-50')
-    expect(lower.classes()).toContain('pointer-events-none')
+    const rulesDim = wrapper.find('[data-testid="network-rules-dim"]')
+    expect(rulesDim.classes()).toContain('opacity-50')
+    expect(rulesDim.classes()).toContain('pointer-events-none')
     expect(wrapper.find('[data-testid="network-chip-anthropic"]').attributes('disabled')).toBeDefined()
     expect(wrapper.find('[data-testid="network-add-rule"]').attributes('disabled')).toBeDefined()
+
+    // 统计卡不随开关降灰（读侧观测与 enabled 正交，设计 §3.1 卡 3）：
+    // 无降灰类、范围 Select/刷新/重置可用、数据行照常渲染
+    expect(wrapper.find('[data-testid="network-lower-cards"]').classes()).not.toContain('opacity-50')
+    expect(wrapper.find('[data-testid="network-stats-range"]').attributes('disabled')).toBeUndefined()
+    expect(wrapper.find('[data-testid="network-stats-refresh"]').attributes('disabled')).toBeUndefined()
+    expect(wrapper.find('[data-testid="network-stats-reset"]').attributes('disabled')).toBeUndefined()
+    expect(wrapper.find('[data-testid="network-stats-row-api.anthropic.com"]').exists()).toBe(true)
 
     // 开启开关 → 降灰解除（草稿态即时驱动，无需保存）
     await wrapper.find('[data-testid="network-enabled-switch"]').trigger('click')
     await flushPromises()
-    expect(wrapper.find('[data-testid="network-lower-cards"]').classes()).not.toContain('opacity-50')
+    expect(wrapper.find('[data-testid="network-rules-dim"]').classes()).not.toContain('opacity-50')
     expect(wrapper.find('[data-testid="network-chip-anthropic"]').attributes('disabled')).toBeUndefined()
     wrapper.unmount()
   })

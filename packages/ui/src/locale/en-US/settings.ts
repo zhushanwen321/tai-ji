@@ -1392,7 +1392,6 @@ export default {
     serverCard: 'Proxy Server',
     serverCardDesc: 'Outbound channel for LLM requests: when enabled, requests matching rules go through the proxy, others connect directly',
     enabled: 'Enable network proxy',
-    enabledOffHint: 'Network proxy is off: all requests connect directly. Turn it on to edit rules and view stats',
     protocol: 'Protocol',
     host: 'Server address',
     port: 'Port',

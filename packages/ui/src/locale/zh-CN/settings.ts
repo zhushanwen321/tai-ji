@@ -1391,7 +1391,6 @@ export default {
     serverCard: '代理服务器',
     serverCardDesc: 'LLM 出站请求的代理通道：开启后命中规则的请求经代理转发，其余保持直连',
     enabled: '启用网络代理',
-    enabledOffHint: '网络代理已关闭：全部请求直连。开启后可编辑规则并查看统计',
     protocol: '协议',
     host: '服务器地址',
     port: '端口',
