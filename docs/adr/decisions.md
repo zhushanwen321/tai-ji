@@ -804,3 +804,26 @@ WorkflowTab 步骤列表的数据源绑定从「workflow-record 全量快照（6
 **ADR-0132 红线修订（2026-10-16 用户授权）**：本 ADR 的元数据供给写入修订 ADR-0132 的「taiji 全程零写入 `~/.zcode/` 任何文件」——仅允许写入两条**非秘密**元数据键（`account-provider:<pid>:identity` / `:auth-source`）；凭据仍全程 ZCode 自有、taiji 零 token/apiKey 注入、其余 `~/.zcode/` 文件仍零写入；该写入为用户 2026-10-16 授权的 hack 形态（ADR-0132 的 provider 配置零写入与副本落 taiji 数据目录语义不变）。
 
 **登记**：实装 = `packages/zcode-subagent-cli/src/appserver-launcher.ts`（安装门 + wrapper 落盘）/ `appserver-launcher-patches.ts`（三处改写 + 元数据供给）/ `packages/zcode-subagent-cli/src/preparer.ts` + `package.json`（目标家族 bigmodel-individual）/ 测试 `appserver-launcher.test.ts`（含补丁产物自读回归）+ `preparer.test.ts`；`docs/todo/engine-remote-membership-face.md` 附录的「ZCode 自身 bug」结论按本条修正。
+### ADR-0144 provider API Key 明文回显 = 用户手势触发的单点只读 carve-out + 远程客户端可达性裁决（2026-10-18 交付裁决，fix-provider-save round 1 MF-1-4）
+
+**决策**：`config.revealProviderApiKey`（WS 请求；reply `config.providerApiKeyRevealed`）是 renderer 可达的唯一 provider 明文凭据通道，形态按五条红线收口：
+
+1. **api_key only**：只读 auth.json 中 `type === 'api_key'` 的条目与 models.json `providers[id].apiKey`；auth.json 的 OAuth 条目**结构性不可回显**——resolver 的 readRawApiKey 对 oauth 返回 notRevealable 且**停止向低优先源回落**（OAuth token 永不出协议，与 `config.hasOAuth` 同红线；回落显示 models.json 的历史残留值会误导用户）。
+2. **单点读取**：唯一读点 = `ProviderCredentialResolver.resolveProviderApiKeyRaw`（port 契约 `IProviderCredentialResolver`），源优先级由 resolver 的 sources 数组单点声明（C-proc-14 机器检查 `scripts/check-provider-credential-reads.mjs`）；handler 只做「调用 + reply 解包」，禁自建第二套解析链。
+3. **手势触发 + 无广播**：renderer 唯一调用点 = 设置页编辑体眼睛按钮的显式点击（草稿非空时是纯显隐切换，不发 RPC）；reply 只回请求方，不随 provider 列表或任何广播下发（密钥不常驻前端）。
+4. **非持久化**：回显值只进编辑草稿（内存），renderer 不落盘、不进持久 store；保存不回写（回显值不构成 apiKey 变更）。
+5. **原值语义**：`$ENV` / `!cmd` 配置串按原值回显（不展开、不执行）——回显语义 = 用户所存值，直接保存不会把引用改成明文。
+
+**远程客户端裁决（显式接受可达性）**：WS 鉴权 = {spawn token} ∪ {remote token} 的集合成员校验，`connection-manager` 不记录单条连接由哪个通道认证；开启远程访问（LAN 监听）时，任一持有 remote token 的已配对客户端均可调用本 RPC 取回明文 Key。**裁决 = 接受，不在本轮改鉴权模型**：
+
+- remote token 的既有定级即「LAN 完全控制凭据」（[registry](../architecture/data-source-registry.md) #52）：持有者可驱动同一 agent、经权限审批弹窗执行宿主侧能力（含读 `<piAgentDir>/auth.json`）并读取全部会话内容。明文回显通道**不新增能力类别**，只缩短一条路径；
+- 通道级收窄（spawn-token-only）需 connection-manager 记录每连接认证通道 + 新增通道准入表 + 测试，收益是「已完全控制的凭据再少一条读取捷径」，与引入的鉴权簿记/回归面不成比例；
+- 远程访问默认关（ADR-0120：argv flag 不传即关态、纯回环监听），开态是用户显式动作；LAN `ws://` 明文传输是 ADR-0120 的既有登记取舍（remote token 本身同样明文过该链路），不在本通道单独收口。
+
+**重审触发**：引入「受限远程客户端」（非完全控制级 token / 通道级 capability）时本条必须重审——届时应改为 spawn-token-only 或独立 capability 门控，并同批补 auth-channel 簿记与测试。
+
+**残余风险（不掩饰）**：ADR-0118 §3c 曾以「renderer 被注入后可直读凭据文件」为由把 localFile 读通道收窄到会话产物子树；本通道是同一威胁模型下的**有意有界例外**——renderer XSS 仍可调用本 RPC 取回明文 Key。边界依据：单 provider、只读、无写入/删除能力、OAuth 不可达、无广播、非持久化，暴露面限于「攻击者已能执行 renderer 任意脚本」的既有完全沦陷场景；对应收益 = 用户无需离开设置页即可确认/复制已存 Key（原先须手翻 auth.json）。纵深防线沿用既有 CSP + markdown 分通道净化，不在本通道内新增。**carve-out 不外溢**：本裁决仅适用 provider api_key；其他凭据家族（TTS Key 等）维持「不回传出站」原红线（入站 configure 由用户显式粘贴承载，registry #49）。
+
+**已接受的显示态残留**：外部轮换 api_key 而 `apiKeySet` 保持 true、`authMethod` 不变时，广播只携带布尔（`ProviderInfo` 无凭据指纹），编辑体无法察觉回显基线已过期——继续把旧值当作「所存值」展示；保存永不回写（`resolveApiKeyChange()` 对回显基线返回 undefined），恢复动作 = 关闭重开编辑体（重新回显按需读盘）。结构性消除需给 `ProviderInfo` 增凭据指纹（如 `apiKeyVersion` / `credentialUpdatedAt`）并在指纹变化时作废回显，禁止用时间推测代替。
+
+**登记**：数据源 = [data-source-registry.md](../architecture/data-source-registry.md) #65（provider 凭据与明文回显读通道）；约束 = 复用 C-proc-14（单点读取机器检查）与 C-data-01（单写 owner），**未新增约束族**；行为红线由 `packages/runtime/src/services/auth/__tests__/provider-credential-resolver.test.ts`「回显原值」组（oauth 不回落 / `$ENV` 原值 / custom 源）与 `packages/runtime/src/transport/settings-message-handler-reveal-apikey.test.ts`（reply 形状 + 单 reply）锁定。

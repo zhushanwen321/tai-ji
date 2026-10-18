@@ -18,6 +18,7 @@
  */
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 import { mount, flushPromises } from '@vue/test-utils'
+import { nextTick } from 'vue'
 import { createPinia, setActivePinia } from 'pinia'
 import type { ProviderInfo } from '@taiji/shared'
 
@@ -113,7 +114,7 @@ function mountPage(providers: ProviderInfo[]): ReturnType<typeof mount> {
           emits: ['oauthLogin', 'oauthLogout', 'saved'],
           template: `<div data-testid="provider-edit-body-stub">
             <span data-testid="stub-kind">{{ provider?.kind ?? "new" }}</span>
-            <span data-testid="stub-oauth-present">{{ oauthPresent ? 'present' : 'absent' }}</span>
+            <span data-testid="stub-oauth-present">{{ oauthPresent === undefined ? 'unknown' : oauthPresent ? 'present' : 'absent' }}</span>
             <button data-testid="stub-oauth-login-btn" @click="$emit('oauthLogin')">login</button>
             <button data-testid="stub-oauth-logout-btn" @click="$emit('oauthLogout')">logout</button>
             <button data-testid="stub-saved-quota-on-btn" @click="$emit('saved', { wroteApiKey: false, quotaAutoEnabled: true })">save-quota-on</button>
@@ -478,6 +479,18 @@ describe('B-1: 编辑体凭证区 OAuth 事件接线', () => {
     configMock.onAuthSuccess.mockClear()
   })
 
+  it('展开后 presence 查询未返回前 → 传 unknown（三态，不把未查询当无凭据）', async () => {
+    // hasOAuth 挂起（不 resolve）：验证 ProviderPage 传 oauthPresenceStatus 而非 boolean 回退
+    configMock.hasOAuth.mockReturnValueOnce(new Promise<boolean>(() => {}))
+    wrapper = mountPage([CATALOG_P])
+    await flushPromises()
+
+    await wrapper.find('[role="button"][aria-expanded="false"]').trigger('click')
+    await nextTick()
+
+    expect(wrapper.find('[data-testid="stub-oauth-present"]').text()).toBe('unknown')
+  })
+
   it('展开 oauthSupported provider → 刷新 OAuth presence（hasOAuth 查询）', async () => {
     wrapper = mountPage([CATALOG_P])
     await flushPromises()
@@ -487,6 +500,8 @@ describe('B-1: 编辑体凭证区 OAuth 事件接线', () => {
     await flushPromises()
 
     expect(configMock.hasOAuth).toHaveBeenCalledWith('openai')
+    // 查询返回 false → 显式 absent（三态的下游消费面）
+    expect(wrapper.find('[data-testid="stub-oauth-present"]').text()).toBe('absent')
   })
 
   it('编辑体 @oauth-login → oauth.login 启动 flow；auth.success → setProvider 持久化 authMethod=oauth', async () => {

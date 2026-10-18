@@ -144,6 +144,7 @@ describe('settings-transport-adapter · @/api 门面八元全量转发矩阵（u
     ),
     hasOAuth: fwd('config', 'hasOAuth', [PROBE_PID], (t, providerId) => t.hasOAuth(providerId)),
     checkEnvVars: fwd('config', 'checkEnvVars', [['PROBE_VAR']], (t, names) => t.checkEnvVars(names)),
+    revealProviderApiKey: fwd('config', 'revealProviderApiKey', [PROBE_PID], (t, providerId) => t.revealProviderApiKey(providerId)),
     getSystemPrompt: fwd('config', 'getSystemPrompt', [], (t) => t.getSystemPrompt()),
     getTerminalConfig: fwd('config', 'getTerminalConfig', [], (t) => t.getTerminalConfig()),
     getRetryConfig: fwd('config', 'getRetryConfig', [], (t) => t.getRetryConfig()),

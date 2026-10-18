@@ -330,7 +330,7 @@ describe('opencodeFetcher — A2-1 错误通道', () => {
     'monthlyUsage:$R[3]={status:"active",resetInSec:300,usagePercent:60}',
   ].join('')
 
-  // [8e7d407de] 凭证拦截先于配置检查：normalizeCookieHeader 归一化为空 → 直接 unauthorized
+  // [8e7d407de] 凭证拦截先于配置检查：normalizeCookieHeader 归一化为空 → cookie-invalid-format
   // （fetch 不发出），故 credential 必须用合法形态 'k=v'，否则本 describe 用例不可达。
   // 顺序语义（凭证 vs 配置谁先）如有异议需另裁决——当前实现以凭证检查在前为准。
   it('未配置 workspace → not_configured，不发任何 HTTP 请求（D1-3）', async () => {

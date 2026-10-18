@@ -163,6 +163,11 @@ export interface SettingsTransport {
   hasOAuth(providerId: string): Promise<boolean>
   /** 批量检测环境变量是否已设置（只返回布尔不返回值——env 值可能含凭证） */
   checkEnvVars(names: string[]): Promise<Record<string, boolean>>
+  /**
+   * 回显 provider 已存 API Key（编辑体眼睛按钮按需拉取，2026-10-18）。只对 api_key
+   * 形态生效（OAuth token 永不出协议）；available=false = 无可回显凭据。
+   */
+  revealProviderApiKey(providerId: string): Promise<ServerMessageMap['config.providerApiKeyRevealed']>
 
   // ── system 设置项（system prompt / 终端 / LLM 重试）──
   /** 读取系统提示词配置（corrupted=true：磁盘损坏已回退默认） */

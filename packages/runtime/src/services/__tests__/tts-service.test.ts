@@ -125,6 +125,7 @@ function makeResolver(
     hasProviderCredential: (id) => id in outcomes,
     listCredentialBackedProviderIds: () => new Set<string>(Object.keys(outcomes)),
     resolveProviderCredential: async (id) => outcomes[id],
+    resolveProviderApiKeyRaw: async () => undefined,
     resolveProviderBaseUrl: (id) => baseUrls[id],
   }
 }

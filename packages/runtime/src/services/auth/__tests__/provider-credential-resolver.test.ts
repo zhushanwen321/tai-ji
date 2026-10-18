@@ -129,6 +129,77 @@ describe('ProviderCredentialResolver 双源优先级', () => {
   })
 })
 
+describe('ProviderCredentialResolver 回显原值（resolveProviderApiKeyRaw）', () => {
+  it('auth.json api_key：返回所存原值，$ENV 引用不展开（回显语义 = 用户所存值）', async () => {
+    vi.stubEnv('REVEAL_KEY_ENV', 'sk-resolved-from-env')
+    writeAuthFile({ 'auth-prov': { type: 'api_key', key: '$REVEAL_KEY_ENV' } })
+    const resolver = new ProviderCredentialResolver(makeDeps())
+
+    expect(await resolver.resolveProviderApiKeyRaw('auth-prov')).toEqual({
+      apiKey: '$REVEAL_KEY_ENV',
+      source: 'auth.json',
+    })
+  })
+
+  it('两源同时有 api_key：auth.json 优先（与 resolveProviderCredential 同一优先级）', async () => {
+    writeAuthFile({ both: { type: 'api_key', key: 'sk-auth' } })
+    writeModelsFile({ both: { apiKey: 'sk-models' } })
+    const resolver = new ProviderCredentialResolver(makeDeps())
+
+    expect(await resolver.resolveProviderApiKeyRaw('both')).toEqual({ apiKey: 'sk-auth', source: 'auth.json' })
+  })
+
+  it('auth.json 是 oauth + models.json 有 apiKey：不回落（不显示低优先源的历史残留值）', async () => {
+    writeAuthFile({ mixed: { type: 'oauth', access: 'oauth-access-token', expires: 1_000 } })
+    writeModelsFile({ mixed: { apiKey: 'sk-stale-models' } })
+    const resolver = new ProviderCredentialResolver(makeDeps())
+
+    // resolveProviderCredential 会返回 oauth 的 access（另一消费面），回显面结构性排除
+    expect(await resolver.resolveProviderCredential('mixed')).toEqual({
+      key: 'oauth-access-token',
+      kind: 'oauth',
+      source: 'auth.json',
+    })
+    expect(await resolver.resolveProviderApiKeyRaw('mixed')).toBeUndefined()
+  })
+
+  it('oauth-only / 两源皆无：undefined（available:false 的判定锚）', async () => {
+    writeAuthFile({ 'oauth-only': { type: 'oauth', access: 'tok', expires: 1_000 } })
+    const resolver = new ProviderCredentialResolver(makeDeps())
+
+    expect(await resolver.resolveProviderApiKeyRaw('oauth-only')).toBeUndefined()
+    expect(await resolver.resolveProviderApiKeyRaw('nowhere')).toBeUndefined()
+  })
+
+  it('models.json apiKey：原值透传（custom 定义权威，不展开 $ENV）', async () => {
+    writeModelsFile({ custom: { apiKey: '${CUSTOM_KEY}' } })
+    const resolver = new ProviderCredentialResolver(makeDeps())
+
+    expect(await resolver.resolveProviderApiKeyRaw('custom')).toEqual({
+      apiKey: '${CUSTOM_KEY}',
+      source: 'models.json',
+    })
+  })
+
+  it('`!cmd` 形态：回显返回原串（不执行 shell），常规解析返回 unsupported=command（SG-9）', async () => {
+    writeAuthFile({ cmd: { type: 'api_key', key: '!printf sk-auth' } })
+    writeModelsFile({ 'cmd-models': { apiKey: '!echo sk-models' } })
+    const resolver = new ProviderCredentialResolver(makeDeps())
+
+    // 回显面 = 用户所存配置串，原样展示；常规解析面拒绝执行并报形态不支持
+    expect(await resolver.resolveProviderApiKeyRaw('cmd')).toEqual({
+      apiKey: '!printf sk-auth',
+      source: 'auth.json',
+    })
+    expect(await resolver.resolveProviderCredential('cmd')).toEqual({ unsupported: 'command' })
+    expect(await resolver.resolveProviderApiKeyRaw('cmd-models')).toEqual({
+      apiKey: '!echo sk-models',
+      source: 'models.json',
+    })
+    expect(await resolver.resolveProviderCredential('cmd-models')).toEqual({ unsupported: 'command' })
+  })
+})
+
 describe('ProviderCredentialResolver 批量 sync 形态', () => {
   it('listCredentialBackedProviderIds 返回两源并集且各自只读一次（非 N+1 读盘）', () => {
     writeAuthFile({

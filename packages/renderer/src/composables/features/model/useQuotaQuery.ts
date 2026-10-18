@@ -29,6 +29,8 @@ const QUOTA_FAIL_REASON_KEYS: Record<QuotaFetchFailureReason, string> = {
   parse: 'panel.context.quotaFailParse',
   not_configured: 'panel.context.quotaFailNotConfigured',
   'no-credential': 'panel.context.quotaFailNoCredential',
+  // 2026-10-18：粘贴格式无效（无 name=value 对）与「会话失效」分流，指引换复制路径。
+  'cookie-invalid-format': 'panel.context.quotaFailCookieInvalidFormat',
   // RT-7#7：凭据文件读盘/锁失败（与「确实没有凭证」分流——runtime 日志带具体文件路径）
   'credential-unavailable': 'panel.context.quotaFailCredentialUnavailable',
   // RT-7#4：凭据形态不支持（! command / 未定义环境变量引用），发请求前拦截

@@ -1288,6 +1288,14 @@ const configImpl = {
     }
     return results
   },
+  // 2026-10-18：已存 API Key 回显（编辑体眼睛按钮）。mock 无真实凭据文件——apiKeySet=true
+  // 的 fixture 返回占位明文（保 UI 可演示），未设置返回 available:false（同实机语义）。
+  async revealProviderApiKey(providerId: string): Promise<{ available: boolean; apiKey?: string; source?: 'auth.json' | 'models.json' }> {
+    await sleep(TIMING.ack)
+    const target = fixtureProviders.find((p) => p.id === providerId)
+    if (!target?.apiKeySet) return { available: false }
+    return { available: true, apiKey: `sk-mock-${providerId}`, source: 'models.json' }
+  },
   // wave-oauth-infra：OAuth RPC。mock 模式无 runtime flow（无真实授权），返回 started 失败提示签名同构。
   async oauthLogin(_providerId: string): Promise<{ started: boolean; error?: string }> {
     await sleep(TIMING.ack)

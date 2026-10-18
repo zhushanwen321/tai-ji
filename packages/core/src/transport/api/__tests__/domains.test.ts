@@ -938,6 +938,20 @@ describe('config 域 动作-ack', () => {
     mockCommand.mockResolvedValueOnce({ scopedModels: ['a', 'b'] })
     await expect(config.setScopedModels(['a', 'b'])).resolves.toEqual(['a', 'b'])
   })
+
+  it('revealProviderApiKey 透传 providerId 并解包回显结果', async () => {
+    mockCommand.mockResolvedValueOnce({ available: true, apiKey: 'sk-1', source: 'auth.json' })
+    await expect(config.revealProviderApiKey('p1')).resolves.toEqual({
+      available: true,
+      apiKey: 'sk-1',
+      source: 'auth.json',
+    })
+    expect(mockCommand).toHaveBeenCalledWith(
+      'config.revealProviderApiKey',
+      { providerId: 'p1' },
+      RPC_BACKSTOP_TIMEOUT_MS,
+    )
+  })
 })
 
 describe('config 域 订阅（onGlobalType 通道）', () => {

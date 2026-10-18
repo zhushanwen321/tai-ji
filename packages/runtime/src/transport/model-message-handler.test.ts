@@ -21,6 +21,7 @@ function makeCtx(resolved: Promise<ResolvedProviderCredential | undefined>) {
     hasProviderCredential: () => false,
     listCredentialBackedProviderIds: () => new Set<string>(),
     resolveProviderCredential: () => resolved,
+    resolveProviderApiKeyRaw: async () => undefined,
     resolveProviderBaseUrl: () => undefined,
   }
   const ctx = {

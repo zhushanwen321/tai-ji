@@ -1,13 +1,13 @@
 /**
  * Provider 凭据解析唯一通道（D3 收口）——接口见 services/ports/provider-credential-resolver.ts。
  *
- * 源优先级单点声明（三形态共享，见本文件 ProviderCredentialResolver 构造器里的 sources 数组，
+ * 源优先级单点声明（四种读取形态共享，见本文件 ProviderCredentialResolver 构造器里的 sources 数组，
  * 数组顺序即优先级）：
  *   1. auth.json（经 AuthService / AuthStorage 通道，catalog 凭据所在）
  *   2. models.json providers[id].apiKey（custom 凭据所在）
  *
  * 构造无 IO：全部读取懒发生（hasProviderCredential / listCredentialBackedProviderIds /
- * resolveProviderCredential / resolveProviderBaseUrl 被调用时才读盘）——这是组合根装配时序的前提：
+ * resolveProviderCredential / resolveProviderApiKeyRaw / resolveProviderBaseUrl 被调用时才读盘）——这是组合根装配时序的前提：
  * init 注入先于任何 findValidDefaultModel 调用时，装配期触发读取不会有「文件尚未就绪」的时序风险。
  *
  * $ENV_VAR / command 配置值形态（探针 P-cred，设计 §3.6）：
@@ -31,8 +31,8 @@ import builtinData from '../../generated/builtin-providers.json'
 type CredentialSourceId = 'auth.json' | 'models.json'
 
 /**
- * 单个凭据源的三种读取形态。
- * 三形态集中在同一对象上，使「源优先级」只需在 sources 数组里声明一次顺序。
+ * 单个凭据源的四种读取形态。
+ * 四种读取形态集中在同一对象上，使「源优先级」只需在 sources 数组里声明一次顺序。
  */
 interface CredentialSource {
   readonly id: CredentialSourceId
@@ -46,6 +46,12 @@ interface CredentialSource {
    * typeof 判别失效，'command' 会被当明文 key 透传）；undefined = 未命中。
    */
   readKey(providerId: string): Promise<{ key: string; kind: ProviderCredentialKind } | { unsupported: UnsupportedCredentialForm } | undefined>
+  /**
+   * 回显用 api_key 原值（不展开模板、不返回 oauth 的 access）。
+   * undefined = 该源无条目；{ notRevealable } = 该源有凭据但形态不可回显（oauth），
+   * 消费方据此**停止向低优先源回落**（见 resolver 类注释）。
+   */
+  readRawApiKey(providerId: string): Promise<{ key: string } | { notRevealable: true } | undefined>
 }
 
 /**
@@ -195,6 +201,14 @@ function createAuthJsonSource(deps: ProviderCredentialResolverDeps): CredentialS
       const credential = await deps.authService.getCredential(providerId)
       return credential ? readAuthCredentialKey(credential) : undefined
     },
+    readRawApiKey: async (providerId) => {
+      const credential = await deps.authService.getCredential(providerId)
+      if (!credential) return undefined
+      // oauth 条目 = 高优先源存在但不可回显：返回判别结构阻止向低优先源回落（models.json
+      // 的 apiKey 可能是历史残留，回显它会让用户把非生效值当成自己的 key）。
+      if (credential.type !== 'api_key') return { notRevealable: true as const }
+      return typeof credential.key === 'string' && credential.key !== '' ? { key: credential.key } : undefined
+    },
   }
 }
 
@@ -223,12 +237,16 @@ function createModelsJsonSource(deps: ProviderCredentialResolverDeps): Credentia
       const apiKey = deps.configStore.getProviderConfig(providerId)?.apiKey
       return isUsableApiKey(apiKey) ? toReadKeyOutcome(resolveCredentialValue(apiKey)) : undefined
     },
+    readRawApiKey: async (providerId) => {
+      const apiKey = deps.configStore.getProviderConfig(providerId)?.apiKey
+      return isUsableApiKey(apiKey) ? { key: apiKey } : undefined
+    },
   }
 }
 
 export class ProviderCredentialResolver implements IProviderCredentialResolver {
   /**
-   * 源优先级单点声明：数组顺序即解析优先级，async 明文 / sync 布尔 / 批量三形态共用本数组。
+   * 源优先级单点声明：数组顺序即解析优先级，async 明文 / sync 布尔 / 批量 / 回显原值四种读取形态共用本数组。
    * 禁止在别处再写一遍链（这是读路径收口的全部意义）。
    */
   private readonly sources: readonly CredentialSource[]
@@ -265,6 +283,24 @@ export class ProviderCredentialResolver implements IProviderCredentialResolver {
       // 用户修配置比静默换源诚实。
       if ('unsupported' in outcome) return outcome
       return { key: outcome.key, source: source.id, kind: outcome.kind }
+    }
+    return undefined
+  }
+
+  /**
+   * 回显用 api_key 原值（2026-10-18，设置页眼睛按钮）：只取 api_key 形态、不展开配置值。
+   * 源优先级与 resolveProviderCredential 共用 sources 数组（单点声明，不另写一遍链）；
+   * auth.json 的 oauth 条目被 readRawApiKey 结构性跳过（token 永不出协议）。
+   */
+  async resolveProviderApiKeyRaw(
+    providerId: string,
+  ): Promise<{ apiKey: string; source: 'auth.json' | 'models.json' } | undefined> {
+    for (const source of this.sources) {
+      const outcome = await source.readRawApiKey(providerId)
+      if (outcome === undefined) continue
+      // 高优先源是 oauth 形态：不可回显且**不回落**（回落会显示低优先源的历史残留值）
+      if ('notRevealable' in outcome) return undefined
+      return { apiKey: outcome.key, source: source.id }
     }
     return undefined
   }

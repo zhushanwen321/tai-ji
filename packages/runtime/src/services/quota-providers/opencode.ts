@@ -12,7 +12,8 @@
  */
 
 import type { ProviderQuotaFetcher, QuotaAuthKind, QuotaFetchOutcome, QuotaFetcherConfig } from './types.js'
-import { INFINITE_WIN, normalizeCookieHeader, statusToReason } from './types.js'
+import { INFINITE_WIN, statusToReason } from './types.js'
+import { normalizeCookieHeader } from '@taiji/shared'
 import { logger } from '../../infra/logger.js'
 import { toErrorMessage } from '../../utils/errors.js'
 
@@ -56,7 +57,10 @@ export const opencodeFetcher: ProviderQuotaFetcher = {
 
   async fetchQuota(credential: string, _kind: QuotaAuthKind, config?: QuotaFetcherConfig): Promise<QuotaFetchOutcome> {
     const cookie = normalizeCookieHeader(credential)
-    if (!cookie) return { ok: false, reason: 'unauthorized' }
+    // 2026-10-18：粘贴内容不含任何 name=value 对（典型：从 DevTools Application → Cookies
+    // 表格复制的制表符文本）→ cookie-invalid-format（与「服务端拒绝」分流：本分支不发 HTTP）。
+    // 归一化实现 SSOT 在 shared（renderer 保存前用同一函数做格式校验，两端不漂移）。
+    if (!cookie) return { ok: false, reason: 'cookie-invalid-format' }
 
     // D1-3：未配置 workspace = 可区分失败 not_configured，不发任何 HTTP 请求——
     // 绝不 fallback 别的页面/缓存（G1：未配置得到明确指引，不查他人数据）

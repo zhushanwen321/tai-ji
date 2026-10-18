@@ -1,6 +1,6 @@
 /**
  * Provider 域 config.* message handler（provider CRUD/启停/按体系移除 + 远程目录刷新 +
- * 环境变量检查 + 内置模板与跨 agent 导入迁移 + 源检测，11 条 case）。
+ * 环境变量检查 + 内置模板与跨 agent 导入迁移 + 源检测 + 凭据回显，12 条 case）。
  *
  * Extracted from settings-message-handler.ts to reduce file size（该文件同类先例：
  * config-preferences-message-handler.ts 同款 class + handle() switch 形态；case 体自
@@ -62,6 +62,7 @@ export class ProviderMessageHandler {
       ['config.toggleProviderEnabled', (ws, msg) => this.handleToggleProviderEnabled(ws, msg as Extract<ClientMessage, { type: 'config.toggleProviderEnabled' }>)],
       ['config.removeProviderByKind', (ws, msg) => this.handleRemoveProviderByKind(ws, msg as Extract<ClientMessage, { type: 'config.removeProviderByKind' }>)],
       ['config.checkEnvVars', (ws, msg) => this.handleCheckEnvVars(ws, msg as Extract<ClientMessage, { type: 'config.checkEnvVars' }>)],
+      ['config.revealProviderApiKey', (ws, msg) => this.handleRevealProviderApiKey(ws, msg as Extract<ClientMessage, { type: 'config.revealProviderApiKey' }>)],
       ['config.detectSources', (ws, msg) => this.handleDetectSources(ws, msg as Extract<ClientMessage, { type: 'config.detectSources' }>)],
       ['config.listBuiltinProviders', (ws, msg) => this.handleListBuiltinProviders(ws, msg as Extract<ClientMessage, { type: 'config.listBuiltinProviders' }>)],
       ['config.previewImportProviders', (ws, msg) => this.handlePreviewImportProviders(ws, msg as Extract<ClientMessage, { type: 'config.previewImportProviders' }>)],
@@ -185,6 +186,42 @@ export class ProviderMessageHandler {
     }
     const results = this.ctx.configService.checkEnvVars(names)
     this.ctx.reply(ws, msg.id, 'config.envVarsChecked', { results })
+    return true
+  }
+
+  /**
+   * 回显 provider 已存 API Key（2026-10-18，编辑体眼睛按钮按需拉取）。
+   *
+   * 安全红线：只对 api_key 形态生效——auth.json 里 type !== 'api_key'（OAuth）的凭据
+   * **绝不回显**，OAuth token 永不出协议（与 config.hasOAuth 同红线）。本 RPC 为用户
+   * 显式点击触发的单次读取，不随 provider 列表/广播下发（避免密钥常驻前端）。
+   *
+   * 读取走 resolver 唯一通道的 raw 形态（C-proc-14，禁在 handler 里自建第二套源优先级链）：
+   * - 源优先级与常规解析一致（auth.json → models.json），由 resolver 的 sources 数组单点声明；
+   * - **原值回显**：`$ENV` 引用不解析成明文（回显即所存值，直接保存不会把引用改成明文）；
+   * - auth.json 是 oauth 时限下不可回显且不回落（不显示 models.json 的历史残留值）。
+   * 无凭据则 available:false（UI 以 toast 反馈，不写保存条）；读取异常交给 server 层统一错误包。
+   *
+   * 明文凭据 carve-out 与其可达性裁决（remote token 持有者可调用，已接受）见 ADR-0141；
+   * 行为红线（oauth 不回落 / `$ENV` 原值）见 resolver 单测。
+   */
+  private async handleRevealProviderApiKey(
+    ws: WsType,
+    msg: Extract<ClientMessage, { type: 'config.revealProviderApiKey' }>,
+  ): Promise<boolean> {
+    // 先于解引用判 payload 存在性（畸形帧 payload: undefined/null 走 invalid_payload，
+    // 而不是抛 TypeError 落 handler_error）——SS-8。
+    const providerId = (msg.payload as { providerId?: unknown } | undefined)?.providerId
+    // 入站校验（对齐 handleCheckEnvVars 的 invalid_payload 先例）：providerId 直入
+    // resolver 的 auth.json 查表，非法值不静默吞。
+    if (typeof providerId !== 'string' || providerId === '') {
+      this.ctx.sendError(ws, 'invalid_payload', 'providerId 必须是非空字符串', msg.id)
+      return true
+    }
+    const revealed = await this.ctx.providerCredentialResolver.resolveProviderApiKeyRaw(providerId)
+    this.ctx.reply(ws, msg.id, 'config.providerApiKeyRevealed', revealed
+      ? { available: true, apiKey: revealed.apiKey, source: revealed.source }
+      : { available: false })
     return true
   }
 

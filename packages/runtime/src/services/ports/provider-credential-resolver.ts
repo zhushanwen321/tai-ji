@@ -68,6 +68,22 @@ export interface IProviderCredentialResolver {
   resolveProviderCredential(providerId: string): Promise<ResolvedProviderCredential | undefined>
 
   /**
+   * 回显用 api_key **原值**读取（设置页眼睛按钮，协议 config.revealProviderApiKey）。
+   *
+   * 与 resolveProviderCredential 的差异（有意收窄，不是第二套解析链——源优先级仍由
+   * 实现层的 sources 数组单点声明）：
+   * - **只返回 api_key 形态**：auth.json 的 oauth 凭据一律判定不可回显并**停止向低优先源
+   *   回落**（resolveProviderCredential 会返回 oauth 的 access，消费方不可把它用于回显——
+   *   OAuth token 永不出协议；回落显示低优先源的历史残留值会误导用户）；
+   * - **原值不展开**：`$ENV_VAR` / `!command` 等配置串原样返回（回显语义 = 「用户所存值」，
+   *   展开会显示 env 的实际 secret、command 也无法在不执行 shell 的前提下求值）；
+   * - 全源未命中 → undefined。
+   */
+  resolveProviderApiKeyRaw(
+    providerId: string,
+  ): Promise<{ apiKey: string; source: 'auth.json' | 'models.json' } | undefined>
+
+  /**
    * 解析 provider 实际生效的 baseUrl（同步；两级数据源，对齐 pi 实际生效解析序
    * provider-composer 的 `config.baseUrl ?? model.baseUrl` 覆盖式网关语义——pi 行为锚点：
    * @earendil-works/pi-coding-agent@1.0.0 dist/core/provider-composer.js

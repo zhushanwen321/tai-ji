@@ -282,6 +282,11 @@ export type ClientMessageType =
   | 'config.hasOAuth'
   // OAuth 退出登录（B-1 场景 C）：移除 auth.json 中该 provider 的凭证（有进行中 flow 先中止）。reply config.oauthLogoutReply。
   | 'config.oauthLogout'
+  // 2026-10-18：按需回显 provider 已存 API Key（眼睛按钮）。只对 api_key 凭据生效——
+  // **OAuth token 永不出协议**（本 RPC 是用户显式点击触发的凭据回显，不随列表/广播下发）。
+  // 明文凭据 carve-out（含远程客户端可达性裁决）登记见 ADR-0141。
+  // reply config.providerApiKeyRevealed。
+  | 'config.revealProviderApiKey'
   // wave4：provider 启用切换（写 enabledModels 白名单，reply config.providerUpdated）。替代旧 setProvider({enabled})。
   | 'config.toggleProviderEnabled'
   // wave4：按体系移除 provider（catalog 清凭据/custom 删条目，reply config.providerUpdated）。
@@ -1023,6 +1028,8 @@ export interface ClientMessageMap {
   'config.hasOAuth': { providerId: string }
   /** config.oauthLogout：移除 auth.json 中该 provider 的凭证（退出登录，幂等）。reply config.oauthLogoutReply。 */
   'config.oauthLogout': { providerId: string }
+  /** config.revealProviderApiKey：回显已存 API Key（眼睛按钮；只限 api_key 形态，OAuth token 不走本通道）。明文 carve-out 登记见 ADR-0141。reply config.providerApiKeyRevealed。 */
+  'config.revealProviderApiKey': { providerId: string }
   // ── scoped model ──
   'config.setScopedModels': { models: string[] }
   // ── backgroundTask 域（docs/architecture/background-task-sidebar-view.md §3.3 D3，u-proto）──
@@ -1364,6 +1371,8 @@ export type ServerMessageType =
   | 'config.hasOAuthReply'
   // OAuth 退出登录 reply（B-1 场景 C：ok 布尔 + 错误原因）。
   | 'config.oauthLogoutReply'
+  // 2026-10-18：provider 已存 API Key 回显 reply（available=false = 无可回显凭据；source 标注凭据源）。
+  | 'config.providerApiKeyRevealed'
   // 环境变量检测 reply（I3）。
   | 'config.envVarsChecked'
   // backgroundTask 域（docs/architecture/background-task-sidebar-view.md §3.3 D3，u-proto）：3 个 RPC 回执
@@ -2858,6 +2867,8 @@ export interface ServerMessageMapBase {
   'config.hasOAuthReply': { hasOAuth: boolean }
   /** config.oauthLogout reply（成功/失败布尔 + 错误原因；token 永不出现在协议中）。 */
   'config.oauthLogoutReply': { ok: boolean; error?: string }
+  /** config.revealProviderApiKey reply：已存 API Key 明文（available=false = 无凭据；OAuth token 不走本通道）。登记见 ADR-0141。 */
+  'config.providerApiKeyRevealed': { available: boolean; apiKey?: string; source?: 'auth.json' | 'models.json' }
   /** config.checkEnvVars reply：只含布尔（安全红线：env 值不进前端）。 */
   'config.envVarsChecked': { results: Record<string, boolean> }
   // config.discoveredModels：discoverModels reply（settings-message-handler.ts:178/180）。
@@ -3161,6 +3172,7 @@ export interface ReplyPayloadMap {
   'config.oauthCancel': ServerMessageMap['config.oauthCancelReply']
   'config.hasOAuth': ServerMessageMap['config.hasOAuthReply']
   'config.oauthLogout': ServerMessageMap['config.oauthLogoutReply']
+  'config.revealProviderApiKey': ServerMessageMap['config.providerApiKeyRevealed']
   'config.checkEnvVars': ServerMessageMap['config.envVarsChecked']
   'config.scanSessionSkills': ServerMessageMap['config.sessionSkills']
   'config.getGlobalSkills': ServerMessageMap['config.globalSkills']

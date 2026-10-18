@@ -7,7 +7,7 @@
  * 同款 class + handle() switch 形态，未命中返回 false）。路由表每条委托到所属域子
  * handler 的 handle()——查表命中即域归属成立。域文件清单：
  *   - config-preferences-message-handler.ts      workspace 偏好组（worktree/streaming idle/基分支，链式先行）
- *   - provider-message-handler.ts                provider CRUD/目录刷新/环境检查/导入迁移/源检测
+ *   - provider-message-handler.ts                provider CRUD/目录刷新/环境检查/导入迁移/源检测/凭据回显
  *   - oauth-message-handler.ts                   provider OAuth 凭据
  *   - resources-message-handler.ts               skill/agent/extension 资源发现与目录
  *   - model-message-handler.ts                   模型列表/切换/默认值/scoped/thinking 档位/发现
@@ -153,6 +153,7 @@ export class SettingsMessageHandler {
     'config.toggleProviderEnabled': (msg, ws) => this.providerHandler.handle(msg, ws),
     'config.removeProviderByKind': (msg, ws) => this.providerHandler.handle(msg, ws),
     'config.checkEnvVars': (msg, ws) => this.providerHandler.handle(msg, ws),
+    'config.revealProviderApiKey': (msg, ws) => this.providerHandler.handle(msg, ws),
     'config.detectSources': (msg, ws) => this.providerHandler.handle(msg, ws),
     'config.listBuiltinProviders': (msg, ws) => this.providerHandler.handle(msg, ws),
     'config.previewImportProviders': (msg, ws) => this.providerHandler.handle(msg, ws),

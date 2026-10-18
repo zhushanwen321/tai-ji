@@ -449,6 +449,20 @@ describe('mock config domain', () => {
     un()
   })
 
+  it('revealProviderApiKey：apiKeySet=true 的 fixture 返回占位明文；未设置 → available:false', async () => {
+    // mock 无真实凭据文件：apiKeySet=true 的 fixture 返回占位明文（保 UI 可演示）。
+    // 不用 anthropic：同文件前面的删除用例会摘掉 fixture 首项（测试共享可变 fixture）
+    await expect(config.revealProviderApiKey('openai' as ProviderId)).resolves.toEqual({
+      available: true,
+      apiKey: 'sk-mock-openai',
+      source: 'models.json',
+    })
+    // 未设置凭据的 provider 同实机语义：无可回显内容
+    await expect(config.revealProviderApiKey('ollama-local' as ProviderId)).resolves.toEqual({ available: false })
+    // 未知 provider 同样不报错（眼睛按钮只在 apiKeySet=true 时渲染，未知 id 属防御分支）
+    await expect(config.revealProviderApiKey('no-such-provider' as ProviderId)).resolves.toEqual({ available: false })
+  })
+
   it('skills/agents 订阅 + scan/set/delete + 目录管道 setSkillDirs/setAgentDirs/setExtensionDirs', async () => {
     const skills: unknown[][] = []
     const agents: unknown[][] = []

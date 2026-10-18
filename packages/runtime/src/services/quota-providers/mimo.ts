@@ -19,7 +19,8 @@
 
 import type { ProviderQuotaFetcher, QuotaAuthKind, QuotaFetchOutcome, QuotaWindow } from './types.js'
 import type { QuotaFetchFailureReason } from './types.js'
-import { INFINITE_WIN, fetchQuotaJson, isOptionalField, isRecord, normalizeCookieHeader } from './types.js'
+import { INFINITE_WIN, fetchQuotaJson, isOptionalField, isRecord } from './types.js'
+import { normalizeCookieHeader } from '@taiji/shared'
 import { logger } from '../../infra/logger.js'
 import { toErrorMessage } from '../../utils/errors.js'
 
@@ -187,7 +188,9 @@ export const mimoFetcher: ProviderQuotaFetcher = {
 
   async fetchQuota(credential: string, _kind: QuotaAuthKind): Promise<QuotaFetchOutcome> {
     const cookie = normalizeCookieHeader(credential)
-    if (!cookie) return { ok: false, reason: 'unauthorized' }
+    // 2026-10-18：粘贴内容无任何 name=value 对 → cookie-invalid-format（不发 HTTP，与
+    // 「服务端拒绝」分流；归一化实现 SSOT 在 shared）。
+    if (!cookie) return { ok: false, reason: 'cookie-invalid-format' }
 
     // usage（主数据）与 detail（重置时间）两独立源并行，allSettled 允许 detail 单独降级
     // （失败归 network 失败态，主数据不受影响）。redirect:'manual'：会话过期时平台把
