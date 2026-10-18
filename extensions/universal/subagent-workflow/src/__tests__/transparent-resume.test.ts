@@ -4,7 +4,7 @@
 //（原 transparent-resume.test.ts + ended-message-and-fork-from.test.ts 合并宿主，
 // 共享 writeSessionJsonl/writeTombstone/makePi 夹具）。
 //
-// [2026-09 测试审计] 合并删减对账（行为面权威在 core 包）：
+// [2026-09 测试审计] 合并删减对账（行为范围权威在 core 包）：
 //   - message/fork 放行矩阵（user-close/cancelled/gc/parent-shutdown/异进程活实例/
 //     self-pid/fork 放行/跨树拒绝）→ core permanent-session-universal-resume.test.ts
 //     it.each 7 值矩阵 + subagent-actions-core.test.ts 检查链逐字文案已覆盖，删；

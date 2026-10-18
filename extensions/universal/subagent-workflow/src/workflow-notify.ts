@@ -11,7 +11,7 @@
  *
  * 层归属：workflow 域（与 workflow-events.ts 同层；唯一生产消费方 =
  * workflow-events.ts。原名 interface/helpers.ts，2026-09-24 名实归位——内容自始
- * 是通知生产而非 interface 注册面杂项）。
+ * 是通知生产而非 interface 注册点杂项）。
  */
 
 import { join } from "node:path";
@@ -110,7 +110,7 @@ interface WorkflowNotifyDetails { // oe-exempt:20260929:framework:workflow/recor
   /**
    * [D7] 终局 outcome 三态（completed/failed/cancelled）——脚本层失败
    * （review-failure = outcome:completed + 脚本返回失败结论）与 run 自身怎么死的
-   * （outcome:failed）在通知面可区分（D5 终态双维度语义）。
+   * （outcome:failed）在通知侧可区分（D5 终态双维度语义）。
    */
   outcome: RunOutcome;
   /**
@@ -147,7 +147,7 @@ interface WorkflowNotifyDetails { // oe-exempt:20260929:framework:workflow/recor
  *
  * **内存去重**：notifiedRunIds Set 由调用方（factory/extension instance）持有，
  * 同 runId 的重复收尾回调拦截（跨 session_shutdown 等边界防重复）；标记在 port
- * 受理（accepted/swallowed）后落下。**已知丢失面（如实登记）**：port rejected
+ * 受理（accepted/swallowed）后落下。**已知丢失情形（如实登记）**：port rejected
  * （persist-failed 等）= 受理未发生、投递日志未落，而 notifyDone 的唯一调用点
  * onRunDone 每终态恰好一次、port 差集重放无源可读——该终局通知**永久丢失**，仅
  * error 日志留痕（含 notifyId/content 摘要，供事后手工补偿）。持久层幂等由
@@ -275,7 +275,7 @@ function buildDoneNotifyDetails(
 }
 
 /**
- * notifyDone 投递面：pi 半区投递端口 port.deliver 主投（受理前落投递日志 +
+ * notifyDone 投递侧：pi 半区投递端口 port.deliver 主投（受理前落投递日志 +
  * details-id 送达凭据 + notifyId 幂等 + session_start 差集重放，端口侧内包；
  * workflow-result 外部通道逐条不合批——port 批组隔离原生承载）；port 缺席（装配
  * 异常窗口）→ fire-once 直发降级（stale ctx 静默）。见 notifyDone 主注释。
@@ -305,7 +305,7 @@ function deliverDoneNotify(
       { collectKey: [runId] },
     );
     if (result.kind === "rejected") {
-      // 已知丢失面（如实登记，承原账本 record 抛错同形态）：rejected = 未受理
+      // 已知丢失情形（如实登记，承原账本 record 抛错同形态）：rejected = 未受理
       // （persist-failed 等，幂等键未登记）、notifyDone 每终态恰好一次（无重复收尾
       // 可重试）、port 重放无源可读（账未落）——该终局通知**永久丢失**，error 级
       // 留痕含 notifyId 与 content 摘要，供事后按 run 手工补偿（从 run
@@ -399,7 +399,7 @@ export function notifyDone(
  * 调用点：notifyDone 内部（port 受理/rejected 后 + 降级直发受理后）+ workflow-events
  * onRunDone 回调（notifyDone 之后，幂等二次添加）。notifyDone 抛出（reload 窗口
  * record 抛 / 非 stale 发送失败等）时内外都不标记——进程内的重复收尾回调不被去重
- * 阻断（防御形态；port.deliver rejected 的已知丢失面登记见 notifyDone 注释）。
+ * 阻断（防御形态；port.deliver rejected 的已知丢失情形登记见 notifyDone 注释）。
  *
  * @param notifiedRunIds 去重 Set（调用方持有，scope 到 factory 实例）
  * @param runId run 标识

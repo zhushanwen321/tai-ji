@@ -32,7 +32,7 @@
 
 | 包 | 命中点 | 判定 | 理由 |
 |---|---|---|---|
-| **smart-context** | tool.ts compact 两回调（E1 实锤）；index.ts 三处事件回调内 `pi.sendUserMessage` | **接入** | E1 实锤崩溃点（9/3 pi-crash log 堆栈 `assertActive → sendUserMessage`）；三处事件回调为 D1「所有 fire-and-forget 异步回调接入」判定对象（价值见 §1 崩溃面分层） |
+| **smart-context** | tool.ts compact 两回调（E1 实锤）；index.ts 三处事件回调内 `pi.sendUserMessage` | **接入** | E1 实锤崩溃点（9/3 pi-crash log 堆栈 `assertActive → sendUserMessage`）；三处事件回调为 D1「所有 fire-and-forget 异步回调接入」判定对象（价值见 §1 崩溃侧分层） |
 | **plan** | 原接入点 compact.ts :218-229 两处回调（已随 D-B1-6 形态砍除——文件改名 execution-notice.ts，回调通道不存在，无接入面，全包 `guardStaleCtx` 零调用）；现存 execution-notice.ts 完成投递（`pi.sendMessage`，经 tool.ts :1235 `handlePlanComplete` 同步调用）；command.ts /plan command handler | **退役**（原 compact 两处接入）；**排除**（完成投递、command handler） | 原接入与 E1 同构（无人接的 Promise 链），形态已删；现存投递在 plan 工具 execute 的同步链（用户批准 plan 的当次工具调用内执行），执行时 session 活跃，无跨 session 存活窗口；command handler 是用户主动触发的同步上下文，同理由 |
 | **scheduler** | runtime.ts tick（setInterval 回调内 `onAfterTick → ctx.ui` / dispatch → `pi.sendMessage`） | **迁移**（共享检查替换原地实现） | 既有已验证范式（G1+F2+retireStaleTimer），迁移语义等价对照见 §5 |
 | **structured-output** | loop-gate.ts terminal 的 `ctx.abort()`/`ctx.shutdown()`（无防御）；workflow-hook.ts :249 `pi.sendUserMessage`（try/catch 有痕降级）；loop-gate forceExit setTimeout（只 `process.stderr.write` + `process.exit`） | **接入**（loop-gate terminal）；**排除**（workflow-hook、forceExit timer） | abort/shutdown 在 assertActive 范围且无任何 try/catch（async handler 内 throw = 无人接 rejection）；workflow-hook 的 turn_end 已有 try/catch + writeSteerFailedLog（无崩溃范围；检查「非 stale 上抛」语义在此处会把有痕降级恶化为崩溃，不接入是行为保持）；forceExit timer 不触碰 pi/ctx |
@@ -42,7 +42,7 @@
 | **cache-probe** | before_agent_start / before_provider_request handler 内多处 `pi.appendEntry` | **排除** | 全部调用点已有 try/catch（appendErr 兜底 + stderr 诊断），且在 pi emit() catch 之内——双覆盖 |
 | **subagent-workflow** | src/injectors/engine-awareness.ts :181（before_agent_start handler 内 try 块）；workflow-notify.ts notifyDone port 缺席降级的 `pi.sendMessage`（主路径已切 port.deliver——同步受理结果 + port 内部 try/catch，原 interface/helpers.ts 接入范围随统一投递波 2 迁移）；jsonl-run-store.ts :477 setTimeout | **接入**（notifyDone 缺席降级直发——不在 pi emit() catch 内，port 缺席窗口 stale 即无人接 rejection，同 E1 机制）；**排除**（engine-awareness / jsonl-run-store） | engine-awareness 有 handler 内 try + emit() catch 双覆盖；jsonl-run-store timer 是纯文件持久化 debounce（`.catch(() => {})`，不触碰 pi/ctx）；notifyDone 主路径经 port.deliver 同步返回受理结果无检查范围，仅缺席降级 sendMessage 保留检查接入 |
 | **unified-hooks** | pi.appendEntry（已废弃包） | **排除** | 包已 deprecated（被 base-tool-enhance 整包取代），残留安装场景不在维护面 |
-| **system-prompt** | index.ts :255 `before_agent_start` handler（唯一 hook） | **排除** | handler 同步执行、只做文件读 + 字符串拼接（`buildSystemPrompt` 不触碰任何 pi/ctx 方法）；无 timer / 无 Promise 回调 / 无捕获旧 ctx；失败路径经 `logHookFailure` 双层 try/catch 兜底（logger 自身抛错也内吞），无无人接抛错路径 || **ask-user** | index.ts `execute`（await `ui.custom`/`askUserInteract` 后调 `disableAskUser(pi)`）；channel-handler.ts 捕获 session_start ctx 的 channel handler（subagent 请求到达时异步调用 `ctx.ui.select`/`ctx.ui.custom`） | **排除** | execute 全程在 pi 工具执行链的 await/catch 结构内（agent-loop 对 execute throw 置 isError——index.ts 头注释 SDK 契约自证），无无人接 rejection；channel handler 是包内唯一跨 session 存活的异步闭包，但其抛错由调用方 subagent-core dialog-queue 兜底为 `{cancelled:true}`（dialog-queue.ts「handler 抛错兜底」注释自证）——有痕降级非崩溃面（同 base-tool-enhance sendTaskFinishedMessage 判例）；handler 无 timer / 无自注册延迟调用 |
+| **system-prompt** | index.ts :255 `before_agent_start` handler（唯一 hook） | **排除** | handler 同步执行、只做文件读 + 字符串拼接（`buildSystemPrompt` 不触碰任何 pi/ctx 方法）；无 timer / 无 Promise 回调 / 无捕获旧 ctx；失败路径经 `logHookFailure` 双层 try/catch 兜底（logger 自身抛错也内吞），无无人接抛错路径 || **ask-user** | index.ts `execute`（await `ui.custom`/`askUserInteract` 后调 `disableAskUser(pi)`）；channel-handler.ts 捕获 session_start ctx 的 channel handler（subagent 请求到达时异步调用 `ctx.ui.select`/`ctx.ui.custom`） | **排除** | execute 全程在 pi 工具执行链的 await/catch 结构内（agent-loop 对 execute throw 置 isError——index.ts 头注释 SDK 契约自证），无无人接 rejection；channel handler 是包内唯一跨 session 存活的异步闭包，但其抛错由调用方 subagent-core dialog-queue 兜底为 `{cancelled:true}`（dialog-queue.ts「handler 抛错兜底」注释自证）——有痕降级非崩溃侧（同 base-tool-enhance sendTaskFinishedMessage 判例）；handler 无 timer / 无自注册延迟调用 |
 | **todo** | handlers.ts 5 个 `pi.on`（session_start/session_tree/agent_start/before_agent_start/agent_end，async 体内无 await）；commands.ts /todos handler `await ctx.ui.custom`；tool.ts execute | **排除** | 全部 ctx/pi 调用（`reconstructState` 读 sessionManager、`ctx.ui.setStatus`/`setWidget`、refreshDisplay）都在同步上下文或 pi 自有 await 链——ctx 是事件派发时入参，非注册时捕获的旧引用；无 timer、无跨 session 存活回调（同合并行 permission「setTimeout 是本地 Promise」类排除理由） |
 | **ext-guards** | 检查宿主包（`guardStaleCtx`/`oncePerProcess` 定义处，src/index.ts 唯一 `.then` 是检查自身 rejection 分诊实现） | **排除** | 非 pi extension 的零依赖纯函数库（无 pi SDK peerDep，包注释自证），自身不捕获、不持有任何 pi/ctx——检查宿主 ≠ 自身豁免，按源码事实判定为零调用点 |
 | **notify-ledger-host** | 包已删除（随通知账本退役，原 sendDelivery / sendDisplayMessage 检查接入范围不复存在；投递归 extensions/shared/delivery-port，见 delivery-port 行） | **已退役** | — |
@@ -77,7 +77,7 @@
 
 ## 6. P-guard-holds 探针执行记录（pi CLI RPC 实测，⛔ 交付门）
 
-**执行环境**：2026-09-09，本机 pi CLI 0.84.0（RPC 模式；stale 文案与 workspace 实装 0.84.4 一致，已先行核对全局安装的 runner.js :352 invalidate 默认 message）；模型 `<本机可用模型>`（真实 LLM）；dev extension 直挂 `extensions/universal/smart-context`；`PI_CODING_AGENT_DIR` 指向 mkdtemp 临时目录（凭据文件复制 + 低阈值配置 `reminderThresholds: [100,200,300]`，对齐 A10 阈值校准法——压缩触发面在测试配置内构造，链路全真实）+ `TAIJI_AGENT_DEBUG=1`；session-dir 为临时目录，实测后整体删除。
+**执行环境**：2026-09-09，本机 pi CLI 0.84.0（RPC 模式；stale 文案与 workspace 实装 0.84.4 一致，已先行核对全局安装的 runner.js :352 invalidate 默认 message）；模型 `<本机可用模型>`（真实 LLM）；dev extension 直挂 `extensions/universal/smart-context`；`PI_CODING_AGENT_DIR` 指向 mkdtemp 临时目录（凭据文件复制 + 低阈值配置 `reminderThresholds: [100,200,300]`，对齐 A10 阈值校准法——压缩触发范围在测试配置内构造，链路全真实）+ `TAIJI_AGENT_DEBUG=1`；session-dir 为临时目录，实测后整体删除。
 
 **场景 1（P-guard-holds 主场景，stale）**：stdin JSONL 发 `prompt` → 模型调用 `compact_context`（tool_execution_end isError=false，工具返回「压缩已启动」）→ 3 秒后发 `new_session`（session 替换，runner invalidate）→ 10 秒后发 `get_state`。
 
@@ -117,7 +117,7 @@ VERDICT=PASS
 
 **已知边界（如实记录）**：① 本机全局 pi 为 0.84.0（workspace 实装 0.84.4），文案已核对一致；0.84.4 侧由 PS-30 静态探针（CI 内检查，ext-guards 包测试全绿）覆盖。② 一轮 stale 补充场景中模型未配合调用 compact_context（LLM 行为波动，非检查问题），未计入判定——判定以上述两场景为准。③ pi 原生 compact 有 `Nothing to compact (session too small)`（keepRecentTokens 默认 20000）门槛，实测用大 prompt 构造跨过；`settings.json` 的 `compaction.keepRecentTokens` 覆盖在 0.84.0 CLI 下未生效（键被忽略，原因未深查），如实登记。
 
-## 7. Blockers（清单外疑似风险面，待主 agent 裁决）
+## 7. Blockers（清单外疑似风险，待主 agent 裁决）
 
 1. **subagent-workflow `notifyDone`**（`src/interface/helpers.ts` :150 `pi.sendMessage`，调用链 `src/index.ts` :248 `onRunDone`）：workflow 完成链路异步触发，不在 pi `emit()` catch 内、无自有 try/catch——session 替换窗口 stale 即同 E1 机制崩 pi。同链路家族的 `session-lifecycle.ts` sendDelivery 依赖注入封装同判。超出本单元授权包清单（structured-output / pending-notifications），未改动，建议作为后续单元接入 `guardStaleCtx`。
    **【已完成 2026-09-09】**两处均已接入 `guardStaleCtx`（`subagent-workflow:notifyDone` / `subagent-workflow:sendDelivery`，stale 静默语义判定见 §4），单测锁定 stale 静默 / 非 stale 上抛 / 正常路径透传三面——notifyDone 检查组现役载体 = `src/__tests__/workflow-notify.test.ts`；sendDelivery 检查组随波 2 账本退役删除（被测装配 seam 已删除，port 形态对位锁面迁移至 pi-delivery-port 套件，见 session-lifecycle.test.ts 文末退役注记）。

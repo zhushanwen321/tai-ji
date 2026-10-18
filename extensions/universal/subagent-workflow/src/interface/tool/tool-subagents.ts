@@ -139,7 +139,7 @@ type SubagentsExecuteResult = WorkflowToolResult<SubagentsToolDetails>;
  *
  * 长度：`fan-out-` (8) + 8 = 16 ≤ SLUG_MAX_LENGTH (35)，数十年内形态稳定
  * （36^8 = 2.8e12 ms ≈ 2059 年）——测试锁定该不变量。
- * 空串与空白串按「未提供」处理（避免状态面出现空标签）。
+ * 空串与空白串按「未提供」处理（避免状态侧出现空标签）。
  */
 export function generateBatchSlug(now: number = Date.now()): string {
   return `${FAN_OUT_SCRIPT_NAME}-${now.toString(SLUG_TIME_RADIX)}`;
@@ -185,7 +185,7 @@ export async function runSubagentsBatch(
   // slug 运行时护栏（与 workflow_run actionRun 对称的纵深防御；schema maxLength 是第一道关卡）
   const providedSlug = params.slug?.trim();
   assertSlugWithinLimit(providedSlug, ["tri-review", "scan-docs"]);
-  // 缺省（或空白）时 handler 生成 fan-out-<时间短码>：受益面 = 状态面（drawer run header /
+  // 缺省（或空白）时 handler 生成 fan-out-<时间短码>：受益面 = 状态侧（drawer run header /
   // run 派生视图名）；对话流块面显示的是模型 input.slug（无 input 回写通路——D8 分面声明）。
   const slug = providedSlug ? providedSlug : generateBatchSlug();
 
@@ -209,7 +209,7 @@ export async function runSubagentsBatch(
     );
   }
 
-  // D3 确定性 args 组装：tasks/agents/aggregate 原样进 args（模板参数面，$ARGS）；未提供的
+  // D3 确定性 args 组装：tasks/agents/aggregate 原样进 args（模板参数侧，$ARGS）；未提供的
   // 缺省键不写入（模板侧 aggregate 缺省 false；空值不制造「都传/都缺」歧义形态）。
   const args: Record<string, unknown> = { tasks };
   if (params.agents !== undefined) args.agents = params.agents;

@@ -76,7 +76,7 @@ export interface WorkflowOverview {
   stateFile: string
   /** NEW state.status / OLD 顶层 status / record 流派生视图（[D2] 三态：running | interrupted | done） */
   status: string
-  /** details 格式标记（随 details.runs 透传给程序化消费方，文本渲染不读）。v2 读取面形状与 v1 一致（pi-subagent-workflow 8.x 一次性生命周期） */
+  /** details 格式标记（随 details.runs 透传给程序化消费方，文本渲染不读）。v2 读侧形状与 v1 一致（pi-subagent-workflow 8.x 一次性生命周期） */
   version: 'wf-run-v1' | 'wf-run-v2' | 'legacy'
   /** NEW spec.scriptName / spec.name / OLD name */
   script?: string
@@ -222,7 +222,7 @@ function parseLegacyRunSnapshot(
  *
  * 分支（C-parserunsnapshot-dualformat，TC-wf-snapshot-version-union）：
  * - 非对象 → null（调用方跳过，ES-wf-snapshot-unparseable）
- * - NEW (snapshot.v === 'wf-run-v1' 或 'wf-run-v2'，读取面形状一致)：state.* / meta.* / spec.*
+ * - NEW (snapshot.v === 'wf-run-v1' 或 'wf-run-v2'，读侧形状一致)：state.* / meta.* / spec.*
  * - OLD (无 v，有 callCache 数组或顶层 status)：顶层 status/budget/startedAt + callCache
  * - 既非 NEW 也非 OLD → null（未来版本（如 wf-run-v3）/ 异构内容）
  *
@@ -236,7 +236,7 @@ export function parseRunSnapshot(
 ): WorkflowOverview | null {
   if (!isRecord(snapshot)) return null
 
-  // NEW 格式（v === 'wf-run-v1' || 'wf-run-v2'，v2 读取面形状兼容 v1）
+  // NEW 格式（v === 'wf-run-v1' || 'wf-run-v2'，v2 读侧形状兼容 v1）
   const v = snapshot.v
   if (v === 'wf-run-v1' || v === 'wf-run-v2') {
     return parseNewRunSnapshot(snapshot, v, runId, stateFile)
@@ -331,7 +331,7 @@ interface RecordStreamLine {
   [key: string]: unknown
 }
 
-/** 流解析产物：run 装配面（runId 透传 + stateFile=record 流路径）。 */
+/** 流解析产物：run 装配侧（runId 透传 + stateFile=record 流路径）。 */
 interface RecordStreamFold {
   workflowName?: string
   startedAt?: number

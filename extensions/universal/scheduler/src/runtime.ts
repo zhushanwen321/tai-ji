@@ -33,7 +33,7 @@ const DEFAULT_EXPIRY_MS = DEFAULT_EXPIRY_DAYS * MS_PER_DAY // 7 days
 const DISPATCH_CUSTOM_TYPE_PREFIX = 'pi-scheduler:'
 
 /**
- * 模型控制面（U4 dispatch 模型切换，依赖反转）：runtime 只见 'provider/id' 字符串 ref
+ * 模型控制接口（U4 dispatch 模型切换，依赖反转）：runtime 只见 'provider/id' 字符串 ref
  * （与 ScheduledTask.model 同域，tool.ts draft 组装 modelRef 的产出形态），pi 的 Model
  * 对象解析（modelRegistry.find → setModel）封在生产装配闭包（index.ts session_start）。
  *
@@ -85,7 +85,7 @@ export class SchedulerRuntime {
   private readonly isCtxStale: (() => boolean) | undefined
   // R3-S1：同任务 dispatch 在途标记（Set<taskId>），见 dispatchTask 注释
   private readonly dispatchesInFlight = new Set<string>()
-  // U4 dispatch 模型切换（设计 D3 修订版）：模型控制面（缺省 undefined = 无切换能力，降级）
+  // U4 dispatch 模型切换（设计 D3 修订版）：模型控制接口（缺省 undefined = 无切换能力，降级）
   private readonly modelOps: SchedulerModelOps | undefined
   // 未决模型切换记录（同时至多一条——互斥窗口 + 模型 op 串行队列共同保证「切换→dispatch→
   // 恢复」周期单在途、单 setModel 在途）
@@ -105,7 +105,7 @@ export class SchedulerRuntime {
    * 替换。index.ts 装配点注入（模块级代数比对，R3-M1），使 stale 分诊不依赖 pi 错误文案；
    * 缺省（不注入）恒视为非 stale——纯 runtime 单测与旧装配路径行为不变。
    *
-   * modelOps（U4）：模型控制面，session_start 装配点注入；缺省 = 无模型切换能力
+   * modelOps（U4）：模型控制接口，session_start 装配点注入；缺省 = 无模型切换能力
    * （task.model 非空时降级照常 dispatch）。
    */
   constructor(backend: SchedulerBackend, isCtxStale?: () => boolean, modelOps?: SchedulerModelOps) {

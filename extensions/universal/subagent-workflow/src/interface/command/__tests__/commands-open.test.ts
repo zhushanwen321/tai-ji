@@ -1,7 +1,7 @@
 /**
  * /workflows 命令的打开通道契约（与 commands-resume.test.ts 的 resume 通道互补）。
  *
- * 覆盖面：
+ * 覆盖范围：
  *   - getArgumentCompletions：一级 lifecycle 动词（前缀过滤）/ 二级 runId 补全
  *     （数据源空 → null、getRuns 抛错 → null + warn 留痕）/ 非动词前缀 → null
  *   - handler：print/json 模式降级提示；runId 精确匹配 / 前缀唯一匹配 / 前缀歧义 /
@@ -9,7 +9,7 @@
  *   - openView：ViewActions.abort 接线 + liveRecords 查询域接线（service 在场时）
  *
  * mock 策略：WorkflowsView 模块 stub（createWorkflowsView 为 vi.fn——openView 的
- * 断言面是传参而非真实 TUI）；resume-run 深路径 stub（对齐 commands-resume.test.ts）；
+ * 断言范围是传参而非真实 TUI）；resume-run 深路径 stub（对齐 commands-resume.test.ts）；
  * pi-extension-logger stub（catch 冷路径 warn 不落真实日志盘）。
  */
 import { describe, expect, it, vi, beforeEach, afterEach } from "vitest";

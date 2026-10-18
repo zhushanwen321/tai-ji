@@ -73,7 +73,7 @@ describe("注入段项目级模板源锚点 = PlanPromptInput.projectRoot（ctx.
   });
 });
 
-describe("Phase D 段注入 buildPlanModePrompt（对齐测试的装配面锚）", () => {
+describe("Phase D 段注入 buildPlanModePrompt（对齐测试的装配侧锚）", () => {
   it("Phase D 段的两个注入分支（模板流程 / --template 直传）都携带该段（若装配漏注入，exec-options-alignment 的散文锚测不到）", () => {
     const projectRoot = mkTmpDir("plan-prompt-phased-");
     const base = {
@@ -117,7 +117,7 @@ describe("Phase C.5 自审清单 + D8 重挂请求纪律 + selfReview 必带（D
     expect(prompt).toContain("Acceptance realism");
     // C.5 段落在产物纪律段之后（D9② 注入位固定）
     expect(prompt.indexOf("## Deliverable Discipline")).toBeLessThan(prompt.indexOf("Phase C.5"));
-    // 自审硬门的提示词面：submit-review 必带 selfReview（无豁免）
+    // 自审硬门的提示词侧：submit-review 必带 selfReview（无豁免）
     expect(prompt).toContain("selfReview is REQUIRED every time");
     expect(prompt).toContain("plan(action='submit-review', selfReview=");
     // D8 提示词纪律：收到重挂请求直接 submit-review（不再让用户猜/让 agent 无指令）

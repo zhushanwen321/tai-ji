@@ -181,7 +181,7 @@ describe("场景 24：args 不一致拒绝（D14 fail-fast）", () => {
     const runId = "wf-s24-fullargs";
     const env = mkScenarioEnv("24fa");
     try {
-      // 生产写面 dispatchRunCreated 现行形态：args 全文 + argsSummary 摘要随帧
+      // 生产写侧 dispatchRunCreated 现行形态：args 全文 + argsSummary 摘要随帧
       // 双落（超长 args 的摘要截断不影响全文比对面）
       const longPayload = "y".repeat(400);
       const historical = { payload: longPayload, _runId: runId };
@@ -238,7 +238,7 @@ describe("场景 24：args 不一致拒绝（D14 fail-fast）", () => {
     try {
       // 旧格式流（args 全文载荷落地前落盘）：run-created 帧只带截断摘要（slice 256
       // + 「…」尾标——截断边界常量 = terminal-actions.ts RUN_ARGS_SUMMARY_MAX_CHARS，
-      // 模块私有，此处按生产形态字面构造；检测面 = readHistoricalArgs 的「…」尾标
+      // 模块私有，此处按生产形态字面构造；检测侧 = readHistoricalArgs 的「…」尾标
       // 判定，仅旧格式帧到达）
       const longPayload = "y".repeat(400);
       const serialized = JSON.stringify({ payload: longPayload, _runId: runId });

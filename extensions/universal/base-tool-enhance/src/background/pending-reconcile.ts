@@ -41,7 +41,7 @@
  * 执行链（index.ts session_start 链内）：收殓下沉 runtime 后（u-bte-remove）本链
  * 仅剩对账 + 收殓补投——「对账见 running+pid 活则不动作，下一 session_start 兜底」
  * 的幂等语义覆盖孤儿终态由 runtime 异步写入的时序窗口。补投先于差集收尾（先通知后
- * 清观察面），差集收尾无条件执行（幂等语义不依赖补投成败，两者无隐藏耦合）。
+ * 清观测点），差集收尾无条件执行（幂等语义不依赖补投成败，两者无隐藏耦合）。
  */
 
 import {
@@ -67,14 +67,14 @@ const logger = getLogger("base-tool-enhance");
 
 /**
  * 对账依赖的最小 pi 面（结构兼容 ExtensionAPI 的子集；测试注入不造完整 pi）。
- * 投递面已随波 3 换 port（ReconcileDeliver），本接口只剩 appendEntry 权威写路径。
+ * 投递侧已随波 3 换 port（ReconcileDeliver），本接口只剩 appendEntry 权威写路径。
  */
 export interface ReconcilePi {
 	appendEntry(customType: string, data?: unknown): void;
 }
 
 /**
- * port.deliver 的结构最小面（与 @zhushanwen/pi-delivery-port 的
+ * port.deliver 的结构最小子集（与 @zhushanwen/pi-delivery-port 的
  * DeliveryPortHandle.deliver 结构兼容——调用方传 getDeliveryPort()!.deliver 直接
  * 赋值合法；本模块不 import port 包运行时对象，缺省值单点在 reconcilePendingEntries
  * 参数缺省表达式）。
@@ -100,7 +100,7 @@ export type ReconcileDeliver = (
 	| { kind: "swallowed"; reason: string }
 	| { kind: "rejected"; reason: string };
 
-/** 对账结果（日志 + 测试断言面）。 */
+/** 对账结果（日志 + 测试断言范围）。 */
 export interface ReconcileResult {
 	/** 补写 pending:unregister entry 的任务数。 */
 	reconciled: number;
@@ -126,7 +126,7 @@ export async function reconcilePendingEntries(
 ): Promise<ReconcileResult> {
 	const result: ReconcileResult = { reconciled: 0, skipped: [], redelivered: [] };
 
-	// ① 收殓终态通知补投（先通知后清观察面；幂等由 port 承管，同步无 await）
+	// ① 收殓终态通知补投（先通知后清观测点；幂等由 port 承管，同步无 await）
 	deliverReapNotifications(deliver, dataDir, sessionId, entries, result);
 
 	// ② 既有 pending 差集循环（无条件执行；unregister 收尾的唯一写点）

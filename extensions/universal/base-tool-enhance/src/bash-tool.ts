@@ -212,7 +212,7 @@ export function createBashOverrideToolDefinition() {
 			const delegate = getDelegate(ctx.cwd);
 			// 前台委托：只转发官方 schema 已识别的字段（command/timeout），background
 			// 是本包增量，官方 execute 不认识（其解构也只取这两个键，显式构造让
-			// 「本层转发面」在代码上自解释）。subagent 降级（D14）与 background 缺省
+			// 「本层转发侧」在代码上自解释）。subagent 降级（D14）与 background 缺省
 			// 都落到这条路径。
 			//
 			// 前台 timeout 注入（M4/G3）：LLM 未填 && foregroundTimeoutSeconds 配置了

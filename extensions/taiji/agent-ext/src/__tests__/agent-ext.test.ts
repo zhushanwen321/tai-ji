@@ -8,7 +8,7 @@
  * - index.ts 对 @earendil-works/pi-coding-agent 是 type-only import（运行时擦除），
  *   无需 vi.mock SDK 模块
  *
- * 锚定两命令注册面 + handler 行为：
+ * 锚定两命令注册点 + handler 行为：
  * - __taiji_get_system_prompt__（Trace 视图「现取当前值」通道）→ pi.appendEntry
  *   写 taiji:current-system-prompt custom entry（fullText/charCount/fetchedAt 形状）
  * - __taiji_nav__（消息撤回信令，ADR-0076 D1）→ handler 以显式 await 把
@@ -20,7 +20,7 @@
  *
  * [HISTORICAL] session tree 导航命令（旧品牌时期命名）及其测试随命令删除一并移除
  * （2026-08-31，桥接对端 runtime 消费端已在 monorepo 时代删除）；随消息撤回设计
- * （ADR-0076）以 __taiji_nav__ 形态回归，本文件同步锚定其注册面与写法契约。
+ * （ADR-0076）以 __taiji_nav__ 形态回归，本文件同步锚定其注册点与写法契约。
  * [HISTORICAL] __taiji_reload__ 及其测试随 W5 skill 变更→pi reload 编排退役一并移除
  * （2026-09-25，消费端已 D7 切源 taiji SkillRegistry，pi 侧列表滞后归 ADR-0050 降级）。
  *
@@ -52,7 +52,7 @@ interface WiringHarness {
   entries: RecordedEntry[];
 }
 
-/** Proxy 假体 pi：捕获 registerCommand 注册面与 appendEntry 落点（其余成员 no-op）。 */
+/** Proxy 假体 pi：捕获 registerCommand 注册点与 appendEntry 落点（其余成员 no-op）。 */
 function createWiringHarness(): WiringHarness {
   const commands = new Map<string, RecordedCommand>();
   const entries: RecordedEntry[] = [];

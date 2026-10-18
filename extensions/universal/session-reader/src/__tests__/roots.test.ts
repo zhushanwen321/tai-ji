@@ -428,7 +428,7 @@ describe('resolveSessionRoots options（u8：subagents 模式）', () => {
   })
 
   it('重复调用每次实扫（无缓存）：两次结果独立完整，files 恒非空实扫值', async () => {
-    // 原三个 cache 用例（set 回写 / 命中优先 / stat × cache）随缓存注入面删除
+    // 原三个 cache 用例（set 回写 / 命中优先 / stat × cache）随缓存注入点删除
     // （ext-simplify-04 U3）；本用例固定删除后契约——不存在任何缓存层
     const { tmp, agentDir } = await buildMinimalFixture()
     try {

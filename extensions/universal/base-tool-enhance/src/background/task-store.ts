@@ -77,7 +77,7 @@ export function oldestActiveTask(): BackgroundTask | undefined {
 
 /**
  * 标 killing intent（瞬态 running→killing）。bash_kill 与后台 timeout 定时器共用；
- * 调用方负责同步写 registry 侧（两侧一致是查询面可见性前提；先内存后 registry
+ * 调用方负责同步写 registry 侧（两侧一致是查询结果可见性前提；先内存后 registry
  * 的顺序约束见文件头部不变量登记）。
  */
 export function markKillingIntent(

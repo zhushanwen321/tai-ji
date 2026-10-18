@@ -37,7 +37,7 @@ import {
 } from "@zhushanwen/extension-protocol";
 import { getLogger } from "@zhushanwen/pi-extension-logger";
 
-/** select 通道级超时（控制面单请求，秒级校准——超时默认原则规则 19；与 inflight
+/** select 通道级超时（控制通道单请求，秒级校准——超时默认原则规则 19；与 inflight
  *  reporter 同量级。失败不重试，缺口归消费方补读收敛）。 */
 const SELECT_TIMEOUT_MS = 2_000;
 

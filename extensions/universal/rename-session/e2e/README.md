@@ -84,7 +84,7 @@ env PI_CODING_AGENT_DIR=$TMP/agent TAIJI_AGENT_DEBUG=1 \
 
 （settings.json 需 `retry.enabled=false`，否则 auto-retry 退避重试拉长 error 轮。）
 
-实测 error 轮行为（对 A4 的断言面）：
+实测 error 轮行为（对 A4 的断言范围）：
 
 - `message_end` 与 `turn_end` 的 `message.stopReason === "error"`，`message.errorMessage === "Connection error."`，`content: []`
 - `agent_end` `willRetry:false` → `agent_settled` 照常发出（**settled 不代表成功**，断言必须看 stopReason）

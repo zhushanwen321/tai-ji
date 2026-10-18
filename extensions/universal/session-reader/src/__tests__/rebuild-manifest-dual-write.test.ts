@@ -1,5 +1,5 @@
 // 跨包集成（[U4c / G4-S5③] record 持久化收敛 P4c 验收锚点）：
-// subagent-core 重建/终态写面产出的 manifest → session-reader identity 派生视图不降级。
+// subagent-core 重建/终态写侧产出的 manifest → session-reader identity 派生视图不降级。
 //
 // 断言链（设计 subagent-record-persistence-consolidation D5 前向兼容判定 + S5③）：
 //   1. manifest 被人为删除（S5 缓存可丢场景）→ subagent-core RecordStore.rebuildIndexes
@@ -99,7 +99,7 @@ describe('跨包集成：subagent-core rebuildIndexes 重建 manifest → sessio
   })
 
   it('S5③: manifest 删除 → rebuildIndexes 重建 → identity 派生视图字段集前后一致（双写字段在场）', async () => {
-    // ── 初始 manifest：subagent-core 终态写面（markFinalized）真实产出 ──
+    // ── 初始 manifest：subagent-core 终态写侧（markFinalized）真实产出 ──
     const record = createRecord('sa-dw', {
       agent: 'worker',
       model: 'prov/m1',
@@ -127,7 +127,7 @@ describe('跨包集成：subagent-core rebuildIndexes 重建 manifest → sessio
     expect(before).toBeDefined()
     const viewBefore = identityView(before!)
 
-    // 双写过渡字段在写面就位（本包不消费，但前向兼容锚要求其在场）。
+    // 双写过渡字段在写侧就位（本包不消费，但前向兼容锚要求其在场）。
     // [U2 两态] executionStatus 是内部权威词汇（running|idle 两态，终态概念删除）
     // → 终态化后恒 'idle'；status 旧三态是 session-reader 直读派生视图（永久保留）→ 'closed'。
     const rawBefore = JSON.parse(fs.readFileSync(path.join(recordsDir, 'sa-dw.json'), 'utf-8')) as Record<string, unknown>
@@ -156,8 +156,8 @@ describe('跨包集成：subagent-core rebuildIndexes 重建 manifest → sessio
     expect(rawAfter.closedReason).toBeUndefined()
   })
 
-  it('惰性通道：查询面（collectRecords）补建的 manifest 同样可被本包读取派生视图', async () => {
-    // 不经终态写面（无 manifest 初始形态）：磁盘 record 只有 identity + 无 sidecar
+  it('惰性通道：查询结果（collectRecords）补建的 manifest 同样可被本包读取派生视图', async () => {
+    // 不经终态写侧（无 manifest 初始形态）：磁盘 record 只有 identity + 无 sidecar
     // → 查询触发惰性补建。
     const store = new RecordStore(sessionsDir, undefined, undefined, recordsDir)
     expect(store.collectRecords(10).map((r) => r.id)).toContain('sa-dw')

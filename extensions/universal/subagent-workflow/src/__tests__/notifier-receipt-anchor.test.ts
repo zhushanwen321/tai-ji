@@ -23,7 +23,7 @@ import {
 } from "@zhushanwen/subagent-core/core/notify-ports.ts";
 import { createNotifier, type BgNotifier, type NotifierHost } from "@zhushanwen/subagent-core/execution/notify/notifier.ts";
 
-/** mock host：捕获所有 sendMessage 调用 + 控制 hasRunningBackground（直发兜底观察面）。 */
+/** mock host：捕获所有 sendMessage 调用 + 控制 hasRunningBackground（直发兜底观测点）。 */
 function makeMockHost(): NotifierHost & {
   sendMessageCalls: { message: unknown; options: unknown }[];
   hasRunningBackground: ReturnType<typeof vi.fn>;

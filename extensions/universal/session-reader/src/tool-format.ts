@@ -1,11 +1,11 @@
 /**
  * session_read 各 action 的输出文本渲染（max-lines 拆分轮从 tool-handler.ts 机械
- * 提取，零行为变更）：错误面 message（ES1/ES2 + zcode 七码 + 开库/查询期错误映射）+
+ * 提取，零行为变更）：错误范围 message（ES1/ES2 + zcode 七码 + 开库/查询期错误映射）+
  * content 文本（find/outline/expand/detail/family）+ entry 可读文本 + F2 消歧与
  * find 零匹配的 ToolResult 包装。纯字符串/纯渲染函数，不触 fs（findNoMatch 的
  * roots 由调用方传入）。
  *
- * 导出面：SQLITE_DRIVER_UNSUPPORTED_MARK / ZCODE_DB_MISSING_MARK /
+ * 导出清单：SQLITE_DRIVER_UNSUPPORTED_MARK / ZCODE_DB_MISSING_MARK /
  * zcodeReadErrorMessage（测试契约锚消费方直接 import 本模块）。logger 用同名
  * getLogger('session-reader')——按名缓存单例，与 tool-handler 侧同一实例，
  * warn/error 落同一 appendEntry/文件日志通道。ToolResult 等公共类型留
@@ -84,7 +84,7 @@ export function formatSaIdNotFound(saId: string): string {
 }
 
 // ---------------------------------------------------------------------------
-// zcode 错误面（U9，design §3.4 七码 + 👉 逐行；错误码标识入 message 供机器识别，
+// zcode 错误范围（U9，design §3.4 七码 + 👉 逐行；错误码标识入 message 供机器识别，
 // 形态对齐 §3.1 失败路径示例 `[zcode_db_path_forbidden] …`）
 // ---------------------------------------------------------------------------
 
@@ -131,7 +131,7 @@ function formatZcodeSchemaDrift(observed: string | undefined): string {
 
 /**
  * bun 驱动探测失败（§3.4 表第 8 行理论态）的 message：宿主既无 bun:sqlite 也无
- * node:sqlite——zcode action 整体降级为本错误面（fail-fast + 日志），pi 链路不受影响。
+ * node:sqlite——zcode action 整体降级为本错误范围（fail-fast + 日志），pi 链路不受影响。
  * 错误码字面量为实施期命名（设计该行未定码名，形态对齐七码 `[zcode_*]` 惯例）。
  */
 function formatZcodeHostUnsupported(detail: string): string {
@@ -146,7 +146,7 @@ function formatZcodeHostUnsupported(detail: string): string {
  * sqlite 驱动探测失败的消息特征（zcode-session-source sqlite-driver.ts 探测失败的
  * 错误消息契约；该包不导出专用错误子类，reader 侧按消息特征单列识别——跨包漂移
  * 由 zcode-routing.test.ts 的源文本契约测试检查：sqlite-driver 源文不再含本子串即红）。
- * 导出面仅测试消费（契约锚 + 映射测试引用同值，禁测试内硬编码副本）。
+ * 导出范围仅测试消费（契约锚 + 映射测试引用同值，禁测试内硬编码副本）。
  */
 export const SQLITE_DRIVER_UNSUPPORTED_MARK = '不支持 node:sqlite'
 
@@ -158,13 +158,13 @@ export const SQLITE_DRIVER_UNSUPPORTED_MARK = '不支持 node:sqlite'
  * （assertZcodeDbPathAllowed 第 1 段）已先行拦掉绝大多数缺失，此处命中的是两段
  * existsSync 之间的 TOCTOU 理论窗口（门禁通过后开库前文件被删）。跨包漂移由
  * zcode-routing.test.ts 的源文本契约测试检查（SQLITE_DRIVER_UNSUPPORTED_MARK 同范式）。
- * 导出面仅测试消费（契约锚 + 映射测试引用同值，禁测试内硬编码副本）。
+ * 导出范围仅测试消费（契约锚 + 映射测试引用同值，禁测试内硬编码副本）。
  */
 export const ZCODE_DB_MISSING_MARK = 'db 文件不存在'
 
 /**
- * 开库/查询期错误 → §3.4 错误面映射（SqliteUnreadableError / schema drift / 驱动探测失败 / 库缺失 / 其余）。
- * 导出面仅测试消费（L4 包装形态的映射契约直测，zcode-routing.test.ts）。
+ * 开库/查询期错误 → §3.4 错误范围映射（SqliteUnreadableError / schema drift / 驱动探测失败 / 库缺失 / 其余）。
+ * 导出范围仅测试消费（L4 包装形态的映射契约直测，zcode-routing.test.ts）。
  */
 export function zcodeReadErrorMessage(e: unknown, agentDir: string): string {
   if (e instanceof SqliteUnreadableError) {

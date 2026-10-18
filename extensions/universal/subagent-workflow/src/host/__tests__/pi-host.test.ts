@@ -45,7 +45,7 @@ vi.mock("@zhushanwen/pi-extension-logger", () => extensionLoggerMock);
 vi.mock("@zhushanwen/pi-pending-notifications", () => pendingNotificationsMock);
 vi.mock("@zhushanwen/pi-delivery-port", () => deliveryPortMock);
 
-// 端到端用例（P5 staged 入扫描面）隔离真实用户目录：resource-discovery 用 homedir()
+// 端到端用例（P5 staged 入扫描范围）隔离真实用户目录：resource-discovery 用 homedir()
 // 推导 user-agents 根（~/.agents/workflows），不 mock 会让「内置条目存在/两次一致」
 // 断言依赖本机用户资产状态（resource-discovery.test.ts 同款手法）。
 const mockHomeDir = vi.hoisted(() => {
@@ -60,7 +60,7 @@ vi.mock("node:os", async (importOriginal) => {
 });
 
 import { discoverResources } from "@zhushanwen/subagent-core";
-// clearFileCache 仅测试消费（barrel 收窄面外）——测试深路径经 vitest alias 正则
+// clearFileCache 仅测试消费（barrel 收窄后的范围外）——测试深路径经 vitest alias 正则
 // 重写到 core src 物理路径（B-2/D3 既有先例形态；specifier 不含 src/ 段）
 import { clearFileCache } from "@zhushanwen/subagent-core/shared/resource-discovery.ts";
 
@@ -137,7 +137,7 @@ describe("createPiHostServices.discoveryRoots（与现推导逐项一致）", ()
     expect(existsSync(join(coreRoot!.dir, "subagent-core", "agents"))).toBe(true);
   });
 
-  it("workflows 四根：与 agents 同构，末级目录名切换为 workflows，第 4 根 core 包父目录（P5 staged 副本入扫描面）", () => {
+  it("workflows 四根：与 agents 同构，末级目录名切换为 workflows，第 4 根 core 包父目录（P5 staged 副本入扫描范围）", () => {
     stubAgentDir();
     const roots = createPiHostServices().discoveryRoots?.().workflows;
 
@@ -150,7 +150,7 @@ describe("createPiHostServices.discoveryRoots（与现推导逐项一致）", ()
       { dir: join(AGENT_DIR, "npm", "node_modules"), source: "npm" },
       { dir: join(AGENT_DIR, "extensions"), source: "npm-dev" },
       // P5：workflows kind 的「刻意不注入」禁区拆除——内置 workflow 随 core 包入
-      // 扫描面（P-C6 裁决见 pi-host.ts 注释）
+      // 扫描范围（P-C6 裁决见 pi-host.ts 注释）
       { dir: coreParent, source: "npm" },
     ]);
   });
@@ -567,12 +567,12 @@ describe("createPiNotifyDomainPorts.getDeliveryPort（透传 pi-delivery-port �
 });
 
 // ──────────────────────────────────────────────────────────────
-// P5 staged workflows 入扫描面（端到端）：taiji 态 roots → discoverResources
+// P5 staged workflows 入扫描范围（端到端）：taiji 态 roots → discoverResources
 // 验收条款 b：location 可派发（<location> = 真实存在的脚本路径）+ 同环境两次
 // 扫描 location 形态确定（P-C6 裁决「实际路径直渲染」的稳定性构造性证据）。
 // ──────────────────────────────────────────────────────────────
 
-describe("P5 staged workflows 入扫描面（端到端）", () => {
+describe("P5 staged workflows 入扫描范围（端到端）", () => {
   const AGENT_DIR = "/fake/data-dir/agent";
   const argvSaved = process.argv;
   let ws: string;
@@ -613,7 +613,7 @@ describe("P5 staged workflows 入扫描面（端到端）", () => {
       expect(existsSync(r.path)).toBe(true);
       expect(r.path.endsWith(".js")).toBe(true);
     }
-    // 内置代表脚本（review-fix-loop = workflow 域核心脚本）在扫描面内
+    // 内置代表脚本（review-fix-loop = workflow 域核心脚本）在扫描范围内
     expect(builtin.some((r) => r.path.endsWith("review-fix-loop.js"))).toBe(true);
   });
 

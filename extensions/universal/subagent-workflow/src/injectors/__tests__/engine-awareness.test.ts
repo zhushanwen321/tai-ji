@@ -41,7 +41,7 @@ import {
 } from "../engine-awareness";
 import { MODEL_LIST_GUIDE, setupModelListInjector } from "../model-list-injector.ts";
 
-// ── 测试数据（engine-awareness 编排面）──────────────────
+// ── 测试数据（engine-awareness 编排侧）──────────────────
 
 /** ok 态读取结果工厂（config 形状与 sanitize 输出一致）。 */
 function okRead(defaultEngine: string | undefined): GlobalConfigReadResult {

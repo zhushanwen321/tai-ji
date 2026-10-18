@@ -3,7 +3,7 @@
 // reap 类操作不再执行）：
 //  - reconcilePendingEntries 是 session 级豁免类，每 session_start 派发都执行
 //    （startup/resume/new 多派发 ×N——含 factory 二调 handler 累积的真实形态）
-//  - 触发面消失：reaper.ts 模块文件已删除（文件级断言，见首条用例）+ 维护链不再触发
+//  - 触发点消失：reaper.ts 模块文件已删除（文件级断言，见首条用例）+ 维护链不再触发
 //    全局文件锁（原 reapOrphanedTasks 的 reaper.lock 路径随模块删除一并消失）
 //  - 入口无条件 debug 日志按派发次数出现，detail 仅含 reason（reapSkipped 字段
 //    随 reap 调用移除，S6 观测通道语义更新）
@@ -47,8 +47,8 @@ import type { ExtensionAPI, SessionStartEvent } from "@earendil-works/pi-coding-
 function createMockPi() {
 	return {
 		registerTool: vi.fn(),
-		// __taiji_bg_reconcile__ 第二触发面（runtime 切回补投）注册桩——本文件只验证
-		// session_start 入口，命令注册面断言在 index.test.ts
+		// __taiji_bg_reconcile__ 第二触发点（runtime 切回补投）注册桩——本文件只验证
+		// session_start 入口，命令注册点断言在 index.test.ts
 		registerCommand: vi.fn(),
 		// pi 1.0.0 契约：on 返回退订函数（delivery-port 装配在 session_start 重绑时
 		// dispose 旧实例兑现退订，mock 需符合真契约）
@@ -100,7 +100,7 @@ describe("session_start maintenance chain after reap sink (u-bte-remove)", () =>
 	it("no longer ships a reaper: the module is gone from the extension (trigger surface removed)", () => {
 		// 等价改写（fallow unresolved-import）：原断言动态 import 已删除模块期待
 		// rejects——静态分析无法理解故意性。模块文件不存在 ⟹ import 必 rejects，
-		// 蕴含成立，断言价值不变（触发面消失），文件级判定更直接。路径用 join 逐段
+		// 蕴含成立，断言价值不变（触发点消失），文件级判定更直接。路径用 join 逐段
 		// 拼装：fallow 会把 ../reaper.ts 形态的相对路径字符串按 import specifier 扫描
 		const reaperModulePath = join(dirname(fileURLToPath(import.meta.url)), "..", "reaper.ts");
 		expect(existsSync(reaperModulePath)).toBe(false);

@@ -626,7 +626,7 @@ export interface SessionFileRef {
  *
  * id 取自首行 header（复用 collectCandidates 的首行扫描——与 find 候选、resolveSessionId
  * 同一 id 语义，agent 从 find 输出复制的完整 id 恒能命中；不按文件名反推，避免「文件改名
- * 后与 header id 失配」的误报面）。workflow-state 跳过、坏 header 跳过、被去重根不产候选
+ * 后与 header id 失配」的误报风险）。workflow-state 跳过、坏 header 跳过、被去重根不产候选
  * 均随 collectCandidates 继承。同 id 多根出现（[live] 与 [default] 不去重，V2 语义）时取
  * mtime 新者（与 loadTitleIndex 合并语义一致）。
  *

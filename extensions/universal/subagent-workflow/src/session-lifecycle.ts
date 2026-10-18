@@ -68,8 +68,8 @@ import { clearSkillPathCache } from "@zhushanwen/subagent-core";
 import { recoverCrashedRuns } from "@zhushanwen/subagent-core";
 import type { WorkflowRun } from "@zhushanwen/subagent-core";
 // [engine-awareness D1b] lastEngine 基线归一（随迁块 6 消费）——normalizeEngineId
-// 单一权威源在 core，直连 barrel（engine-awareness 的历史再导出面已删，dev 侧
-// 「导入面折叠直连」语义）
+// 单一权威源在 core，直连 barrel（engine-awareness 的历史再导出范围已删，dev 侧
+// 「导入侧折叠直连」语义）
 import { normalizeEngineId } from "@zhushanwen/subagent-core";
 import { JsonlRunStore } from "./jsonl-run-store.ts";
 import { GLOBAL_SLOT_KEYS } from "@zhushanwen/subagent-core";
@@ -159,7 +159,7 @@ function resolveSessionDir(): string {
   return resolvePiSessionScopedDir({ agentDir: getAgentDir() });
 }
 
-// ── [裁决点 7] 存活 session 引用集采集（壳侧注入面，core 不 import pi SDK）──────
+// ── [裁决点 7] 存活 session 引用集采集（壳侧注入点，core 不 import pi SDK）──────
 //
 // 全池 session 文件流式扫描（sessions 根 + 全 slug 子目录的 *.jsonl），逐文件
 // 提 workflow run 的注册引用并集——三代形态都解析（v2 注册条目 / v1 全量快照
@@ -508,7 +508,7 @@ function appendSubagentIdentityEntry(pi: ExtensionAPI): void {
  * 随迁块 4 的进程级维护三连（各 try-catch「失败记日志不阻断」，设计 §3.4）：
  * 引擎 journal TTL 回收 / ADR-035 manifest tmp 恢复 / ADR-035 worktree reaper 扫描。
  * （[modeless 波5] 原 [E1] sync 批崩溃恢复接线已摘除；[collect 退役] core 侧
- * recoverSyncCollectBatch 方法本体已删——sync 批机制不存在，无恢复面可接线。）
+ * recoverSyncCollectBatch 方法本体已删——sync 批机制不存在，无恢复侧可接线。）
  */
 async function runProcessLevelMaintenance(
   agentDir: string,
@@ -551,8 +551,8 @@ async function runProcessLevelMaintenance(
   // [U4c / G1] 缓存降级重建（boot 全量路径）：boot revive 已完成（createOrReuseServices
   // 内 initSession 的孤儿恢复/可重连 entry 重物化先于本 helper），此处全量重建可丢
   // 缓存——manifest 幂等补缺 + sessions-index 经首扫自愈重写。进程级维护（磁盘域
-  // 全量），oncePerProcess 检查防双跑；/resume /fork 同进程复用实例时跳过（查询面
-  // 惰性通道兜底，且终态写点本身维持 manifest 就位）。
+  // 全量），oncePerProcess 检查防双跑；/resume /fork 同进程复用实例时跳过（惰性查询
+  // 兜底，且终态写点本身维持 manifest 就位）。
   try {
     oncePerProcess("subagent-workflow:rebuild-record-indexes", () =>
       service.rebuildIndexes());
@@ -601,10 +601,10 @@ async function runProcessLevelMaintenance(
         },
       );
       // [裁决点 7]（workflow-run-resume-revision）孤儿 run 对账清理：引用集采集 =
-      // 壳侧注入面（core 不 import pi SDK——全池 session 文件流式扫描，v2 注册
+      // 壳侧注入点（core 不 import pi SDK——全池 session 文件流式扫描，v2 注册
       // 条目 ∪ v1 快照条目 ∪ pre-W17 link 指针三代解析的并集）。同维护轮触发点、
       // 同 oncePerProcess 检查（幂等整轮）；宽限窗缺省 7 天（env 可调）。
-      // 触发面 = 全部 state 目录（对齐 core pi-host-run-store 枚举口径：agentDir
+      // 触发范围 = 全部 state 目录（对齐 core pi-host-run-store 枚举口径：agentDir
       // 根回退 + sessions/<slug>/workflow-state 全目录 + 本 session 锚定目录）——
       // 「引用 session 全删的目录」的残留 run 对本 session 维护轮结构性可达，判定
       // 与删除判据归 core reapOrphanRuns，本处只做目录枚举。引用集预采集一次复用
@@ -626,7 +626,7 @@ async function runProcessLevelMaintenance(
         // 缺侧 = 少扫目录（宁保留方向，宽限窗兜底），对齐读错分通道纪律。
         if (!isEnoent(err)) {
           logger.debug(
-            `[subagent-workflow] sessions 根目录枚举失败，state 目录触发面缺侧：${toErrorMessage(err)}`,
+            `[subagent-workflow] sessions 根目录枚举失败，state 目录触发范围缺失：${toErrorMessage(err)}`,
           );
         }
       }
@@ -722,7 +722,7 @@ async function createSessionRunState(
         "Process killed (kill-9 or crash recovery)",
         {
           onRunRecovered: (payload) => {
-            // [W2/V4 D6] 注销直落权威面：appendEntry 直接落盘，不经 emit。
+            // [W2/V4 D6] 注销直写权威部分：appendEntry 直接落盘，不经 emit。
             // [reload-closeout D4] 定案「emit 链在 reload 转换窗失效、appendEntry
             // 是唯一可靠通道」在崩溃恢复链同样适用（session_start 装配窗可能仍在
             // reload 转换内）；pending 域消费方全部从持久化 entries 现算，直落对其
@@ -805,7 +805,7 @@ async function tryAdoptExistingSession(
  * ① 先无条件 store.rebind(newPi, newCtx)——失败若发生在 rebind 之前，terminate
  *   的终态 flush 走未 rebind 的旧 pi 且 stale guard 未装 → 终态 failed entry 不落
  *   权威 JSONL，run 从 session 历史消失；先 rebind 让终态 flush 走新 pi，G3 可见性
- *   与权威记录同时兑现。rebind 自身再失败则跳过并日志登记终态丢失面。
+ *   与权威记录同时兑现。rebind 自身再失败则跳过并日志登记终态丢失风险。
  * ②+③ 经组合根注入回调：terminateRunningRuns（notifyDone: true，用户可见）+
  *   移除 sessionState 条目（不残留半接管状态）。
  * ④ adoption=failed 归因日志（G4：可从日志直接读出因果）。

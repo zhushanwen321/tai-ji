@@ -13,7 +13,7 @@
 //  - 「进程死亡收殓终态（process-exit / orphaned）」→ 无 outbox 条目，重放无从覆盖，
 //    由对账路径补投（pending-reconcile.test.ts 锁定）；
 //  - rejected（本文件「rejected by delivery port」用例）= 幂等键未登记、无 outbox，
-//    通知丢失——warn 留痕即修复信号（登记丢失面，与旧机制 throw 降级日志同型）。
+//    通知丢失——warn 留痕即修复信号（登记丢失风险，与旧机制 throw 降级日志同型）。
 import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -296,7 +296,7 @@ describe("exit-edge notification via delivery port (⑧⑨, unified-delivery wav
 
 		expect(getTask(task.taskId)?.reason).toBe("killed");
 		// kill 调用方就在当前 turn 等结果（result 类 silent，老能力映射 #10）：
-		// 零入账（无 outbox）零注入，emit unregister 照常（pending 观察面收尾）
+		// 零入账（无 outbox）零注入，emit unregister 照常（pending 观测点收尾）
 		expect(host.appendEntry).not.toHaveBeenCalledWith("delivery-port-outbox", expect.anything());
 		expect(host.sendMessage).not.toHaveBeenCalled();
 	});
@@ -331,7 +331,7 @@ describe("exit-edge notification via delivery port (⑧⑨, unified-delivery wav
 		);
 
 		expect(() => handleTaskExit(finalizedTask())).not.toThrow();
-		// rejected = 幂等键未登记、无 outbox 记录——重放无从覆盖的登记丢失面
+		// rejected = 幂等键未登记、无 outbox 记录——重放无从覆盖的登记丢失风险
 		//（模块 logger warn 留痕即修复信号；port 侧另有 persist-failed warn 同栈落日志）
 		expect(host.sendMessage).not.toHaveBeenCalled();
 		expect(moduleLoggerMock.warn).toHaveBeenCalledWith(
@@ -355,7 +355,7 @@ describe("port-absent fallback (assembly anomaly window, §3.7 absence semantics
 		expect(message.customType).toBe(BACKGROUND_BASH_CUSTOM_TYPE);
 		expect(message.display).toBe(true);
 		expect(message.content).toContain("finished (exit 0, 3m12s)");
-		// 缺席兜底无 port 注入面：details = 业务原样（无 deliveryId）
+		// 缺席兜底无 port 注入点：details = 业务原样（无 deliveryId）
 		expect(message.details).toEqual({
 			taskId: "bt-1700000000-test01",
 			command: "pnpm test",

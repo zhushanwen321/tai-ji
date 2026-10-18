@@ -391,7 +391,7 @@ describe("lazyDeps.workflowAgentDispatch 转发成员（[A1 R3] 缺失 = pump �
     const { handle } = await mountWithSession("sess-dispatch-forward");
     const executeWorkflowAgent = vi.fn(async () => ({ content: "ok" }));
     // service 进程单例槽（service-bootstrap.ts Symbol.for 槽，{ current } 形态）注入
-    // fake——生产 session_start 后真实单例在位，此处只验证闭包转发面。
+    // fake——生产 session_start 后真实单例在位，此处只验证闭包转发侧。
     Reflect.set(globalThis, SERVICE_SLOT_KEY, {
       current: { executeWorkflowAgent, dispose: vi.fn() },
     });
@@ -467,7 +467,7 @@ describe("lazyDeps.onResumeModelOverrideCommitted 转发成员（[dmg-r1-1] 缺�
     const { handle } = await mountWithSession("sess-override-forward");
     const applyRunOverrideProjection = vi.fn();
     // service 进程单例槽（service-bootstrap.ts Symbol.for 槽，{ current } 形态）注入
-    // fake——生产 session_start 后真实单例在位，此处只验证闭包转发面。
+    // fake——生产 session_start 后真实单例在位，此处只验证闭包转发侧。
     Reflect.set(globalThis, SERVICE_SLOT_KEY, {
       current: { applyRunOverrideProjection, dispose: vi.fn() },
     });
@@ -577,7 +577,7 @@ describe("D1 session_shutdown reason=reload：破坏性动作全跳过，adoptio
     expect(reporterDetachSpy).toHaveBeenCalledTimes(1);
   });
 
-  // [§1.4 (a)] reload 分支显式作废句柄：只作废 core 读面的句柄可用性判定（PS-30 窗口
+  // [§1.4 (a)] reload 分支显式作废句柄：只作废 core 读侧的句柄可用性判定（PS-30 窗口
   // 消除），不动在途 run 纳管（上两例的「不 dispose / 条目保留」即纳管面证据）。
   it("[§1.4 (a)] reload：core service 的 invalidatePiBinding 被调（reason 含 reload），dispose 不被调", async () => {
     const { handlers, ctx } = await mountWithSession("sess-reload-invalidate");
@@ -745,7 +745,7 @@ describe("session_start 围栏：装配链异常不逃逸", () => {
 // 管线原是 makeDeps 闭包内嵌策略（顺序固化无独立测试），提级具名导出后在此
 // 直测：不挂 fake pi 全装配、不挂 index.ts、不 mock 兄弟功能模块（notifyDone /
 // trackNotifiedRunId / evictDoneRunsBeyondCap 均真实实现）——只注入 fake env
-//（最小发送面 pi / 真 Set / 真 runs Map）。
+//（最小发送侧 pi / 真 Set / 真 runs Map）。
 //
 // 三步顺序的可观测钉法：
 // - step1（notifyDone 的 sendMessage）经步进哨兵数组记录；
@@ -840,7 +840,7 @@ describe("runSettledEffects：三步固定顺序", () => {
       keep: MAX_RETAINED_DONE_RUNS,
       sessionId: "sess-run-settled",
     });
-    // 通知发送面参数：customType workflow-result + notifyId 幂等键前缀（真实 notifyDone 语义）
+    // 通知发送侧参数：customType workflow-result + notifyId 幂等键前缀（真实 notifyDone 语义）
     expect(h.sendMessage).toHaveBeenCalledTimes(1);
     const [message] = h.sendMessage.mock.calls[0] as [
       { customType: string; details: { runId: string; notifyId: string } },
@@ -877,9 +877,9 @@ describe("runSettledEffects：三步固定顺序", () => {
 
     runSettledEffects(h.env, run);
 
-    // notifyDone 首行去重早退 → 发送面零调用
+    // notifyDone 首行去重早退 → 发送侧零调用
     expect(h.sendMessage).not.toHaveBeenCalled();
-    // step2（幂等）/ step3 照常执行（seq 恒空——发送面零调用）
+    // step2（幂等）/ step3 照常执行（seq 恒空——发送侧零调用）
     expect(h.seq).toEqual([]);
     expect(h.notifiedRunIds.has("wf-dup")).toBe(true);
     expect(h.runs.size).toBe(MAX_RETAINED_DONE_RUNS);
@@ -896,7 +896,7 @@ describe("runSettledEffects：三步固定顺序", () => {
     // 缺席不是抛错路径：不回退两态机字段兜底（I2 失效窗口下兜底 = 恒 completed 假成功）
     expect(() => runSettledEffects(h.env, run)).not.toThrow();
 
-    // 通知跳过：发送面零调用 + error 留痕（含恢复动作指向 journal 错误日志）
+    // 通知跳过：发送侧零调用 + error 留痕（含恢复动作指向 journal 错误日志）
     expect(h.sendMessage).not.toHaveBeenCalled();
     expect(loggerFns.error).toHaveBeenCalledWith(
       "[workflow] done notify skipped: settlement record unavailable (runId=wf-nosettlement) — " +
@@ -904,7 +904,7 @@ describe("runSettledEffects：三步固定顺序", () => {
     );
     // track 不标：未发通知不占去重窗口（允许后续语义修正重试）
     expect(h.notifiedRunIds.has("wf-nosettlement")).toBe(false);
-    // evict 照常：内存有界性独立于通知（seq 恒空——发送面零调用）
+    // evict 照常：内存有界性独立于通知（seq 恒空——发送侧零调用）
     expect(h.seq).toEqual([]);
     expect(h.runs.size).toBe(MAX_RETAINED_DONE_RUNS);
     expect(h.runs.has("seed-0")).toBe(false);
@@ -942,7 +942,7 @@ describe("setupWorkflowDomain pi.on 注册顺序", () => {
 
 // ── ⑥ 组合根薄接线：registerWorkflowsCommand 第三参 lazyDeps.onRunDone ─────────
 //
-// 替代原 index-session-start 的 W3TC8 完整行为重放：行为面权威在 runSettledEffects
+// 替代原 index-session-start 的 W3TC8 完整行为重放：行为范围权威在 runSettledEffects
 // 直测（④）与 core lifecycle evict 用例；此处只锁「组合根把 lazyDeps 转交给
 // workflows command」这一根接线——捕获第三参，调 onRunDone，断言真实管线执行且
 // evict 写的是 session_start 装配的 sessionState 条目 runs Map（同一对象引用）。

@@ -52,7 +52,7 @@ interface MockSetup {
 	getSessionNameMock: ReturnType<typeof vi.fn>;
 	/** usage 记录入口：landing.ts 注入回调体内调 pi.appendEntry，接线断言用（时点与 catch 归属契约见 llm.ts）。 */
 	appendEntryMock: ReturnType<typeof vi.fn>;
-	/** registerTool mock（agent-tool 注册面接线断言用）。 */
+	/** registerTool mock（agent-tool 注册点接线断言用）。 */
 	registerToolMock: ReturnType<typeof vi.fn>;
 	turnEndHandler: (event: unknown, ctx: ExtensionContext) => void | Promise<void>;
 	/** message_end handler（first-prompt 入口）。 */
@@ -218,7 +218,7 @@ describe("renameSessionExtension", () => {
 		vi.mocked(loadRenameConfig).mockReset();
 		vi.mocked(resolveModel).mockReset();
 		vi.mocked(callLLM).mockReset();
-		// 工厂注册面在 load 时读一次 config（工具注册判定）——工厂调用前必须有可用返回值
+		// 工厂注册点在 load 时读一次 config（工具注册判定）——工厂调用前必须有可用返回值
 		vi.mocked(loadRenameConfig).mockReturnValue(ENABLED_CONFIG);
 		setup = createMockPi();
 		renameSessionExtension(setup.pi);
@@ -230,7 +230,7 @@ describe("renameSessionExtension", () => {
 		expect(setup.pi.on).toHaveBeenCalledWith("message_end", expect.any(Function));
 		expect(setup.turnEndHandler).toBeTypeOf("function");
 		expect(setup.messageEndHandler).toBeTypeOf("function");
-		// first-stop（ENABLED_CONFIG）非 agent-tool → 工具不注册（注册面 load 求值时点）
+		// first-stop（ENABLED_CONFIG）非 agent-tool → 工具不注册（注册点 load 求值时点）
 		expect(setup.registerToolMock).not.toHaveBeenCalled();
 	});
 
@@ -337,7 +337,7 @@ describe("renameSessionExtension", () => {
 		expect(warnText(warnSpy)).toContain("firstPrompt skip: mode=first-stop");
 	});
 
-	it("TC-M6: agent-tool 模式 message_end(user) 与 turn_end 均不触发自动命名（事件面 live 分派，V10 A 段「切走即停」）", async () => {
+	it("TC-M6: agent-tool 模式 message_end(user) 与 turn_end 均不触发自动命名（事件路径 live 分派，V10 A 段「切走即停」）", async () => {
 		const warnSpy = debugWarnSpy();
 		vi.mocked(loadRenameConfig).mockReturnValue(AGENT_TOOL_CONFIG);
 		vi.mocked(resolveModel).mockReturnValue(STUB_MODEL);
@@ -792,7 +792,7 @@ interface RegisteredRenameTool {
 describe("rename_session 工具注册与 execute 检查（D3）", () => {
 	let setup: MockSetup;
 
-	/** 显式设置 load 时 mode 后重建工厂（注册面只在 load 求值一次）。 */
+	/** 显式设置 load 时 mode 后重建工厂（注册点只在 load 求值一次）。 */
 	function setupWithMode(config: RenameSessionConfig): void {
 		vi.mocked(loadRenameConfig).mockReset();
 		vi.mocked(loadRenameConfig).mockReturnValue(config);
@@ -816,7 +816,7 @@ describe("rename_session 工具注册与 execute 检查（D3）", () => {
 		expect(tool.parameters).toHaveProperty("properties.title");
 	});
 
-	it("TC-T2: load 时 mode=first-prompt → 工具不注册（三值互斥，工具面 load 求值）", () => {
+	it("TC-T2: load 时 mode=first-prompt → 工具不注册（三值互斥，工具范围 load 求值）", () => {
 		setupWithMode(FIRST_PROMPT_CONFIG);
 		expect(setup.registerToolMock).not.toHaveBeenCalled();
 	});

@@ -7,7 +7,7 @@
 // 单源收敛后 resume 的执行源唯一 = 流内 run-created.scriptSource（resumeRun 不读
 // 外部脚本文件，流内脚本与执行脚本构造性同源）——机制文档的「入口级字节比对
 // 拒绝」在现实现无触发路径；逐调用输入哈希防线（机制文档 D3 → u2
-// detectReplayInputMismatch）的比对数据面（历史入参全文）随 [D1] 载荷裁决未入
+// detectReplayInputMismatch）的比对数据（历史入参全文）随 [D1] 载荷裁决未入
 // record 流（重建 call 为占位 opts，比对构造性跳过）。两条防线与机制文档场景 2
 // 预期的偏差已在 u2 deviations 与本单元 blockers 登记，待编排层裁决。本文件按
 // 现实现行为记录：外部脚本编辑不影响 resume（流内 scriptSource 唯一执行源）。

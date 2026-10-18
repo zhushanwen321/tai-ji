@@ -3,7 +3,7 @@
  * 互补，覆盖 subagent_manage / subagent_message 的 action 路由全分支、subagent_start
  * 的顶层透传与 renderCall 的 model 预解析降级链）。
  *
- * 覆盖面（tool-declaration-slimming D3 拆分后）：
+ * 覆盖范围（tool-declaration-slimming D3 拆分后）：
  *   - subagent_start：service 缺席 → 带恢复动作的错误；顶层 params 原样透传
  *   - subagent_manage：list/cancel/close 三通道 handler 接线 + adapter 包装；
  *     未知 action → immediate throw
@@ -102,7 +102,7 @@ afterEach(() => {
   resetServiceSlot();
 });
 
-describe("注册面：三工具名（D3 拆分终态）", () => {
+describe("注册点：三工具名（D3 拆分终态）", () => {
   it("registerSubagentTool 注册 subagent_start / subagent_manage / subagent_message 三工具", () => {
     const names: string[] = [];
     const pi = mockExtensionApi({

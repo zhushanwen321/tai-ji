@@ -13,7 +13,7 @@ import type { ZcodeAnchorMissingReason } from './discovery/zcode-manifest.js'
 /**
  * v2 条目 data 的认识版本词表（W1 起 = 2）。与写侧 subagent-core
  * SUBAGENT_RECORD_ENTRY_VERSION 同值——本地持有 + entry-anchor.test.ts 跨包断言
- * 检查漂移（生产依赖面不引 subagent-core，同 entry-anchor.ts 的协议字面量模式）。
+ * 检查漂移（生产依赖范围不引 subagent-core，同 entry-anchor.ts 的协议字面量模式）。
  */
 const SUBAGENT_RECORD_ENTRY_V2 = 2
 

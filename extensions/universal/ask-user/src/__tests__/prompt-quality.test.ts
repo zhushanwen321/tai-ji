@@ -92,7 +92,7 @@ describe("ask_user description — 调用信号保留（不要破坏亮点）", 
 
 	it("保留 'mutually exclusive' 提问纪律（Q8：一问题一决策、选项互斥）", () => {
 		// 问题级纪律没有 runtime 校验可拦（validate 只查结构），弱模型把多个决策
-		// 塞进一个 question、或选项互斥性存疑时只有这条声明面约束。
+		// 塞进一个 question、或选项互斥性存疑时只有这条声明侧约束。
 		expect(DESCRIPTION).toContain("mutually exclusive");
 		expect(DESCRIPTION).toContain("one decision");
 	});

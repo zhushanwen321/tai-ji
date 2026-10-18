@@ -59,7 +59,7 @@ function makeTheme(): ThemeLike {
 /** service stub：list-component 只调 collectRecords(limit) 单参数 + getFullRecord（[perf]
  *  选中项详情懒加载，mock 回 undefined → fullRecordOf 回退 light record，与旧行为一致）。
  *  部分对象直接断言为 SubagentService（duck-type）。
- *  [D4 聚合跟随] 读面经 service.queries（成员与平铺键同引用，spy 断言不受影响）。 */
+ *  [D4 聚合跟随] 读侧经 service.queries（成员与平铺键同引用，spy 断言不受影响）。 */
 function makeService(records: SubagentRecord[] = []): SubagentService {
   const collectRecords = vi.fn(() => records);
   const getFullRecord = vi.fn(() => undefined as SubagentRecord | undefined);

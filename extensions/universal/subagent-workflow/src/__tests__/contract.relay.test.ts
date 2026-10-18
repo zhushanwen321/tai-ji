@@ -1,6 +1,6 @@
 // contract.relay.test.ts —— conformance relay 变体（E 方案 §2.3，默认 CI 层，免 LLM）。
 //
-// [W3 改写] 断言口径收敛到「宿主侧仍拥有的契约面」：
+// [W3 改写] 断言口径收敛到「宿主侧仍拥有的契约范围」：
 //   1. 协议常量镜像一致性：relay.mjs（零依赖脚本不能 import workspace 包，只能内嵌
 //      镜像）与 relay-env.ts SSOT 逐字对齐——改名/改值双侧不同步即此处转红（§10-5）。
 //
@@ -11,7 +11,7 @@
 //     pi-invocation.test.ts 的「getPiInvocation relay 分支」describe 逐条覆盖。
 //   - C-归属（buildChildEnv 归属键写入）：宿主侧不再 spawn pi 子进程——归属键
 //     （RELAY_SESSION_ID/RECORD_ID）写入点迁至引擎进程 spawn-runner.buildChildEnv
-//     （deny 终态后按 run ctx 显式重写），原「mock spawn 捕获 childEnv」观测面在
+//     （deny 终态后按 run ctx 显式重写），原「mock spawn 捕获 childEnv」观测范围在
 //     宿主侧不存在。
 //
 // 真机全链（经代理 spawn 真实 pi）是 live 手动门：engine-conformance.live.test.ts 的
@@ -74,9 +74,9 @@ describe("relay 变体 C-镜像：relay.mjs 内嵌常量与 relay-env.ts SSOT �
     }
   });
 
-  it("镜像面不自作主张扩充：NODE/SCRIPT 不在镜像表（代理零消费，见 relay.mjs 头注）", () => {
-    // 若未来有人在 relay.mjs 加镜像而忘记消费，契约面应当显式扩表——此处断言现状
-    // 「镜像常量恰好是代理实际消费的三个 env 名」防镜像面无界生长。
+  it("镜像侧不自作主张扩充：NODE/SCRIPT 不在镜像表（代理零消费，见 relay.mjs 头注）", () => {
+    // 若未来有人在 relay.mjs 加镜像而忘记消费，契约范围应当显式扩表——此处断言现状
+    // 「镜像常量恰好是代理实际消费的三个 env 名」防镜像侧无界生长。
     expect(source).toMatch(/const RELAY_ENV_SOCKET/);
     expect(source).not.toMatch(/const RELAY_ENV_NODE\b/);
     expect(source).not.toMatch(/const RELAY_ENV_SCRIPT\b/);
@@ -86,7 +86,7 @@ describe("relay 变体 C-镜像：relay.mjs 内嵌常量与 relay-env.ts SSOT �
 // ── 2. 帧词表镜像一致性（relay-frames.ts SSOT ↔ relay.mjs 内嵌字面量）──
 //
 // relay.mjs 对帧词表是「值字面量内嵌」（kind/dir 出现在构造与比较点，非命名常量——
-// 零依赖脚本保持无声明面）。断言按源内实际形态锁定每个协议点，值来自 SSOT 导出，
+// 零依赖脚本保持无声明侧）。断言按源内实际形态锁定每个协议点，值来自 SSOT 导出，
 // 词表改值/改形态双侧不同步即此处转红（与上方 env 常量段同款纪律）。
 
 describe("relay 变体 C-帧词表：relay.mjs 内嵌帧字面量与 relay-frames.ts SSOT 一致", () => {
@@ -142,6 +142,6 @@ describe("relay 变体 C-帧词表：relay.mjs 内嵌帧字面量与 relay-frame
   });
 });
 
-// SSOT 面回归锚（原「SSOT 导出面」describe）：RELAY_ENV_NODE / RELAY_ENV_SCRIPT 的
+// SSOT 面回归锚（原「SSOT 导出范围」describe）：RELAY_ENV_NODE / RELAY_ENV_SCRIPT 的
 // 字面量断言与「≠ SOCKET」防呆已迁 core relay-env.test.ts（宿主侧无额外契约可锁——
 // 两常量由 runtime 注入、extension 消费，归属 core SSOT 测试）。

@@ -1,6 +1,6 @@
 // src/__tests__/adoption.test.ts
 //
-// B2 单元验收面（skill-reload-nondestructive 设计 D4/D5）——lifecycle / handler 面：
+// B2 单元验收侧（skill-reload-nondestructive 设计 D4/D5）——lifecycle / handler 面：
 //   ① D4 恢复门控：session_start(reason='reload') 全程不跑 recoverCrashedRuns
 //      （无论条目有无）——条目存在（adoption 接管）与条目缺失（reload 落首次装配
 //      await 链中）两形态的 running run 都不转 failed；非 reload（startup）现状
@@ -230,7 +230,7 @@ describe("D4 恢复门控：session_start(reason=reload) 不跑 kill-9 恢复", 
     // 门控在 adoption 分流内（不进 createSessionRunState / recoverCrashedRuns）
     expect(result).toBe(existing);
     expect(store.rebind).toHaveBeenCalledTimes(1);
-    // [D1] record 单源后 store 无派生视图物化面——resendSnapshots 随 state 快照删除
+    // [D1] record 单源后 store 无派生视图物化侧——resendSnapshots 随 state 快照删除
     // 退役，接管收敛为 rebind（v2 终态条目补写自动走新 pi）
     expect(store.resendSnapshots).not.toHaveBeenCalled();
   });
@@ -276,7 +276,7 @@ describe("D4 恢复门控：session_start(reason=reload) 不跑 kill-9 恢复", 
     });
 
     // [D2]/[D15] kill-9 语义 = 中断收编（run-interrupted 转移帧，非 done,failed）：
-    // 内存观测面 status 维持 running（终局判据归 record fold）
+    // 内存可观测的 status 维持 running（终局判据归 record fold）
     expect(diskRun.state.status).toBe("running");
   });
 });

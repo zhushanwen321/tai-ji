@@ -3,7 +3,7 @@
 // 场景 25（修订设计 §4，D2/D16）：中断 run 宿主派生视图。
 //
 // 两段结构（任务书 §2）：
-// - 无门段（节点级默认跑）：宿主派生视图数据面——中断形态条目（workflow-record-entry
+// - 无门段（节点级默认跑）：宿主派生视图数据——中断形态条目（workflow-record-entry
 //   契约单源）、概览链三态渲染、执行树家族链 calls[].sessionFile 提取（D16 ③
 //   强制连带断言——挂靠本文件：宿主派生视图族同域）。session-reader 实装经 tsx 子进程
 //   probe 加载（vite resolver 不解析跨包物理相对路径——见 scenario-kit 尾注）。
@@ -25,7 +25,7 @@ import { registeredEntry } from "./record-mode/helpers.ts";
 
 const RUN_ID = "wf-s25-projection";
 
-describe("场景 25 无门段：中断 run 宿主派生视图数据面", () => {
+describe("场景 25 无门段：中断 run 宿主派生视图数据", () => {
   it("中断形态条目（workflow-record-entry 契约单源）：status 字面量 'interrupted'", () => {
     const entry = buildWorkflowRecordInterruptedEntryData({
       runId: RUN_ID,
@@ -52,7 +52,7 @@ describe("场景 25 无门段：中断 run 宿主派生视图数据面", () => {
         ],
         inflight: [{ agent: "C" }],
       });
-      // 中断态：概览渲染 interrupted（GUI「已中断（可续跑）」的数据面——文案消费
+      // 中断态：概览渲染 interrupted（GUI「已中断（可续跑）」的数据——文案消费
       // 归 renderer，词面由 state-tone-lock 锁）
       await runSessionReaderProbe("overview-interrupted", env.recordPath(RUN_ID), RUN_ID);
       // 复活流（run-resumed 落流、无终局帧）：run-resumed 是 interrupted → running
@@ -76,11 +76,11 @@ describe("场景 25 无门段：中断 run 宿主派生视图数据面", () => {
         inflight: [{ agent: "C" }],
       });
 
-      // 家族链发现面（D16 ③ 换源后的单点提取函数）：settled 帧 result.sessionFile
+      // 家族链发现范围（D16 ③ 换源后的单点提取函数）：settled 帧 result.sessionFile
       // 按 taskIndex 归位提取，非空 = workflow 子节点可跳转（不退空）
       await runSessionReaderProbe("family-files", env.recordPath(RUN_ID), RUN_ID);
 
-      // v2 注册条目锚点 = record 流路径（新形态实体——发现链数据面）
+      // v2 注册条目锚点 = record 流路径（新形态实体——发现链数据）
       const entry = registeredEntry(RUN_ID, env.recordPath(RUN_ID));
       expect(entry.data).toMatchObject({
         v: 2,

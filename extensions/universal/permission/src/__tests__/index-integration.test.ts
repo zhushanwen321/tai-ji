@@ -23,7 +23,7 @@ import permissionExtension from "../index.js";
 import { FOOTER_HANDSHAKE_KEY, REQUEST_RENDER_KEY } from "../footer-provider.js";
 
 // migrateLegacyConfig 包 spy 计数（透传真实实现，行为零改变）：迁移接线用例的
-// 操作级去重断言（双派发 spy = 1）经此观测，文件面断言（mtime/内容不变）同源有效。
+// 操作级去重断言（双派发 spy = 1）经此观测，文件侧断言（mtime/内容不变）同源有效。
 const { spyMigrateLegacyConfig } = vi.hoisted(() => ({
 	spyMigrateLegacyConfig: vi.fn(),
 }));
@@ -295,7 +295,7 @@ describe("W8 /permission rule 命令集成", () => {
 		const { pi, calls } = createMockPi();
 		permissionExtension(pi);
 		const handler = getPermissionHandler(calls);
-		// notify spy 注入 ctx（commands.test.ts 同款 vi.fn 形态）：headless 降级提示的可观测面
+		// notify spy 注入 ctx（commands.test.ts 同款 vi.fn 形态）：headless 降级提示的可观测范围
 		const notify = vi.fn();
 		const ctx = {
 			mode: "json",
@@ -412,7 +412,7 @@ describe("footer line 注册", () => {
 // 末两条为检查双派发实测（u-audit-fix 探针）：
 //   a) 操作级去重：双派发下 spy migrateLegacyConfig 调用 = 1（warn 在 migrateLegacyConfig
 //      调用点内部，调用 = 1 构造性蕴含 warn ≤ 1，不另设断言）；
-//   b) 文件面：第二次派发后重建的旧文件原样保留、新路径 mtime/内容严格不变；
+//   b) 文件侧：第二次派发后重建的旧文件原样保留、新路径 mtime/内容严格不变；
 //   c) 豁免项防误伤：footer 注册为纯内存初始化（registry.register 同 id 覆盖），不在
 //      包装范围——双派发仍每次执行（pending push ×2）。
 describe("session_start 配置路径迁移接线", () => {
@@ -499,7 +499,7 @@ describe("session_start 配置路径迁移接线", () => {
 	});
 
 	// ── oncePerProcess 检查双派发实测（u-audit-fix 探针）──
-	it("双派发下 migrateLegacyConfig 仅执行一次：spy = 1，文件面首次迁移到位、第二次 mtime/内容不变", async () => {
+	it("双派发下 migrateLegacyConfig 仅执行一次：spy = 1，文件侧首次迁移到位、第二次 mtime/内容不变", async () => {
 		// spy 是文件级单例（跨 resetModules 保留计数），前面用例已触发过迁移 → 先清零
 		spyMigrateLegacyConfig.mockClear();
 		// 预置旧路径文件（新路径不存在 → 走 renameSync 迁移分支）
@@ -524,7 +524,7 @@ describe("session_start 配置路径迁移接线", () => {
 		writeLegacyConfig("yolo");
 		handler({}, makeCtx("json"));
 
-		// 探针 a：操作级去重（spy 透传真实实现，文件面与计数同源）
+		// 探针 a：操作级去重（spy 透传真实实现，文件侧与计数同源）
 		expect(spyMigrateLegacyConfig).toHaveBeenCalledTimes(1);
 		// 探针 b：第二次后重建的旧文件原样保留、新路径 mtime/内容严格不变
 		expect(existsSync(LEGACY_PATH)).toBe(true);

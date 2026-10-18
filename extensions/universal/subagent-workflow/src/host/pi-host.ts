@@ -17,12 +17,12 @@
 //     逐项一致（user-pi / npm / npm-dev 字面即现 ResourceSource 标签）。
 //     project/workspace 根不在壳侧提供——core 消费方按 workspaceRoot 自行推导
 //     （u0-data-discovery 波次接注入消费）。C5⑥ 起 agents kind 追加第 4 根：
-//     core 包一级父目录（source "npm"）——core agents/ 资产进 pi 发现面，见
+//     core 包一级父目录（source "npm"）——core agents/ 资产进 pi 发现范围，见
 //     corePackageNpmRoot 注释。[P5 D4-2] agents/workflows 的 npm/npm-dev 两根
 //     形态感知（taiji 态指 agentDir 父目录 = 实际安装目录，独立态保留 agentDir
-//     直拼），且 core 根对 workflows kind 同样注入（staged 副本入扫描面）——
+//     直拼），且 core 根对 workflows kind 同样注入（staged 副本入扫描范围）——
 //     见 agentDirKindRoots 注释。skills/engines 的同构 npm 槽错位不在 P5 范围
-//     （D4 发现层 = agents/workflows 注入面；skills 另有「刻意不补」既有决策）。
+//     （D4 发现层 = agents/workflows 注入点；skills 另有「刻意不补」既有决策）。
 //   - countActiveFromEntries 适配：pi 侧真函数返回 CountActiveResult 对象，core
 //     端口契约是 number（core 消费方只读 .count，notify-ports.ts 契约注释）——
 //     foundation 单元登记给本单元的适配责任。
@@ -51,7 +51,7 @@ import type { NotifyDomainPorts } from "@zhushanwen/subagent-core";
 import { toErrorMessage } from "@zhushanwen/pi-ext-guards";
 
 /**
- * core 包（@zhushanwen/subagent-core）agents/ 资产进 pi 发现面的注入根（C5⑥，
+ * core 包（@zhushanwen/subagent-core）agents/ 资产进 pi 发现范围的注入根（C5⑥，
  * convergence §5.4 检查点 2）。
  *
  * 解析锚点 = `@zhushanwen/subagent-core/workflows/README.md`：`./workflows/*` 子入口
@@ -89,7 +89,7 @@ export function corePackageNpmRoot(moduleUrl: string = import.meta.url): string 
       // getLogger 惰性调用（冷路径：测试环境对 pi-extension-logger 的 module-level
       // mock 可能返回 undefined，模块级持有会在 import 期踩 undefined）
       getLogger("pi-host").debug(
-        "[pi-host] core 包经 staged scope 根注入（bundle 形态，无 node_modules 解析面）",
+        "[pi-host] core 包经 staged scope 根注入（bundle 形态，无 node_modules 解析范围）",
         { root: stagedRoot },
       );
       return stagedRoot;
@@ -118,11 +118,11 @@ export function corePackageNpmRoot(moduleUrl: string = import.meta.url): string 
 	 * extensions/skills/prompts/themes 四字段（锚 = pi-coding-agent
 	 * dist/core/pi-manifest.js:3 RESOURCE_FIELDS，pi@1.0.0 已核；同源登记见
 	 * docs/extensions/extension-conventions.md「readPiManifest」条），无 agents/workflows
-	 * 概念。已核仓内无任何包声明该字段，故扫描面内所有包都走约定目录分支，不进
+	 * 概念。已核仓内无任何包声明该字段，故扫描范围内所有包都走约定目录分支，不进
 	 * manifest 失败分支）。
  *
  * 与 dev/npm 形态的既有语义一致：npm 槽根扫的就是 scope 下全部包目录（因此本包自带
- * 的 workflows/agents 在 dev/npm 形态同样入发现面），非新增语义。
+ * 的 workflows/agents 在 dev/npm 形态同样入发现范围），非新增语义。
  *
  * 形态判据 = 父目录名以 `@` 开头：dev（模块在 `extensions/universal/...`）与 npm
  * 安装形态都先走 resolve 成功分支，本回退不可达；仅 bundle/staged 形态命中。
@@ -151,7 +151,7 @@ function agentDirKindRoots(kind: "agents" | "workflows"): DiscoveryRoot[] {
   const agentDir = getAgentDir();
   // taiji 态 npm/extensions 布局 = agentDir 的 sibling（<dataDir>/npm、
   // <dataDir>/extensions，agentDir = <dataDir>/agent）；旧 agentDir 直拼形态在
-  // taiji 态恒为不存在目录——taiji 形态下 npm 安装位与 staged 包发现面恒空的
+  // taiji 态恒为不存在目录——taiji 形态下 npm 安装位与 staged 包发现范围恒空的
   // 问题点根因。已知误判面（有意接受，登记 deviations）：独立态用户以 -e 手动加载
   // 本扩展时 argv 同样有 --extension，npm 槽根指到不存在的 <agentDir> 父目录 →
   // 扫描静默空（损失 = 罕见场景的 npm 安装位发现；agentDir/npm 本就非 pi 官方布局）。
@@ -275,7 +275,7 @@ export function createPiHostServices(): HostServices {
 /**
  * 孙进程（subagent 任务子进程）schema 强制所需的最小扩展集（P-C5 起步裁决：
  * 仅 structured-output）。全量 staged 下发会让孙进程加载全部无关扩展——每包都
- * 可能注册工具/注入提示词，孙进程的工具面与 system prompt 行为不可控。
+ * 可能注册工具/注入提示词，孙进程的工具范围与 system prompt 行为不可控。
  *
  * 白名单组成唯一登记处（runtime 侧 getExtensionPaths 全量下发、本常量收窄，
  * 无第二份判据副本——扩白名单只改此处并同步 pi-host.test.ts 用例，以及
@@ -290,7 +290,7 @@ export function createPiHostServices(): HostServices {
  *     选型：两段连续匹配（分组目录名 + 包目录名）而非尾段单匹配 `structured-output`
  *     ——尾段会撞任意同名无关目录（如其他包内的同名子目录）；两段含本仓 extensions
  *     固定分组名 `universal`，且 --extension 值来源可控（runtime extension-service
- *     下发 / pi CLI flags），实际碰撞面可忽略。
+ *     下发 / pi CLI flags），实际碰撞风险可忽略。
  */
 const GRANDCHILD_EXTENSION_PKG_SEGMENTS: readonly (readonly string[])[] = [
   ["@zhushanwen", "pi-structured-output"],
@@ -376,7 +376,7 @@ function resolveStructuredOutputPeer(): string | undefined {
 /**
  * 从 argv 提取 `--extension` / `-e` 的全部值（等号与空格两种形式；自旧
  * mirrorMainProcessFlags 的解析规则精简迁移——该镜像机制已废弃，此处只取
- * extension 值，布尔镜像面不再透传）。
+ * extension 值，布尔镜像侧不再透传）。
  *
  * 有值 flag 表（跳过其他 flag 的值时不误吃）与 MF-7a 判定（`--extension` 后跟
  * `--` 开头 token 不吃值）逐字保留原语义——解析坑防回归见 pi-host.test.ts

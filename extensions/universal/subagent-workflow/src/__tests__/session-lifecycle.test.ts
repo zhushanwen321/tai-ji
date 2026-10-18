@@ -12,7 +12,7 @@
 // mock 面说明：第 2 组用例必须挂载 index.ts（检查消费点是其闭包内符号），走
 // module 级 vi.mock（jsonl-run-store + interface 层）；打桩面收敛是 u-5b 领地。
 // crash-recovery.test.ts 已并入本文件：loadAll 四分支中与组 1 seam 条同契约的
-// 不重复设条，独有断言面（B1 第二 session 恢复 / 已终态直 set / 域隔离）在组 6，
+// 不重复设条，独有断言范围（B1 第二 session 恢复 / 已终态直 set / 域隔离）在组 6，
 // kill-9 真实链路 fixture 在组 7。
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -134,7 +134,7 @@ import { ENV_ROOT_CWD, getSubagentRecordsDir, resolvePiSessionScopedDir, STATE_D
 import type { WorkflowRun as WorkflowRunType } from "@zhushanwen/subagent-core/orchestration/models/workflow-run.ts";
 // 保留窗口 env 通道仅测试消费，深路径直取（对齐 retention 测试先例）
 import { STATE_TTL_MS_ENV } from "@zhushanwen/subagent-core/execution/persistence/run-state-evidence.ts";
-// engine journal gc 抛错条的观察面：深路径直取 mock 实例（文件顶部 vi.mock 同路径——
+// engine journal gc 抛错条的观测点：深路径直取 mock 实例（文件顶部 vi.mock 同路径——
 // 同一 mock 实例，被测 barrel import 归一到同一物理模块）
 import { startEngineJournalGcTimer } from "@zhushanwen/subagent-core/execution/persistence/engine-journal-gc.ts";
 // 通知账本重置导出（beforeEach 显式清空，对齐 index-session-start 先例）
@@ -144,9 +144,9 @@ import { Trace } from "@zhushanwen/subagent-core";
 import type { SessionLifecycleDeps } from "../session-lifecycle.ts";
 import { setupSessionLifecycle } from "../session-lifecycle.ts";
 import subagentsExtension from "../index.ts";
-// 组 6 域隔离条的调用断言面；vi.mock 已在文件顶部拦截同路径（同一 mock 实例）。
+// 组 6 域隔离条的调用断言范围；vi.mock 已在文件顶部拦截同路径（同一 mock 实例）。
 import { registerSubagentTool } from "../interface/tool/subagent-tool.ts";
-// 组 1「new 分支」/ 组 3 观察面：单例访问器 + 双 Service 假类（mock 实例，与被测
+// 组 1「new 分支」/ 组 3 观测点：单例访问器 + 双 Service 假类（mock 实例，与被测
 // 装配消费同一模块图——模块图单实例后静态引用即被测引用）。
 import {
   GLOBAL_SLOT_KEYS,
@@ -164,7 +164,7 @@ process.setMaxListeners(50);
 // ── helpers ──
 
 /** 重置双 Service 单例槽（本文件访问器已被 mock 拦截，槽位正常路径不写入；重置是
- *  防线外兜底——防真实 service-bootstrap 经其他导入面写槽后跨用例泄漏，与
+ *  防线外兜底——防真实 service-bootstrap 经其他导入侧写槽后跨用例泄漏，与
  *  index-session-start 先例同款）。 */
 function resetLifecycleSlots(): void {
   for (const key of [GLOBAL_SLOT_KEYS.service, GLOBAL_SLOT_KEYS.modelService]) {
@@ -202,7 +202,7 @@ function createFakePi(): {
   return { pi, entries, emits };
 }
 
-/** 最小 ExtensionContext fake。mode/ui 可选注入（streamSink 检查观察面：rpc 下 ui.setWidget）。 */
+/** 最小 ExtensionContext fake。mode/ui 可选注入（streamSink 检查观测点：rpc 下 ui.setWidget）。 */
 function createFakeCtx(
   sessionId = "session-seam-1",
   mode: "tui" | "rpc" | "json" | "print" = "tui",
@@ -257,7 +257,7 @@ function makeFakeStore(loadAll: () => Promise<WorkflowRunType[]>): {
   };
 }
 
-/** 挂载 index.ts 并跑一次 session_start（loadAll 行为可配），返回检查/恢复观察面：
+/** 挂载 index.ts 并跑一次 session_start（loadAll 行为可配），返回检查/恢复观测点：
  *  pi / appendEntry entries / lazyDeps。检查组（组 2）与 crash-recovery 吸收组
  *  （组 6）共用本挂载 harness（仅此一份）。 */
 async function mountWithLoadAll(loadAll: () => Promise<WorkflowRunType[]>): Promise<{
@@ -414,7 +414,7 @@ describe("setupSessionLifecycle — bootstrap seam（设计 §3.1）", () => {
 
   it("kill-9 恢复（[D2]/[D15] 中断收编）：running run 落 run-interrupted + pending:unregister 直落（reason interrupted）+ 零 save", async () => {
     const { pi, entries, emits } = createFakePi();
-    // 通知发送面 spy 化：检查「中断 run 不产生 workflow-result 完成通知」（[W2 场景 4]
+    // 通知发送侧 spy 化：检查「中断 run 不产生 workflow-result 完成通知」（[W2 场景 4]
     // 断言——收编路径无通知回调，构造性成立；若未来壳侧装配误把 onRunDone 接进恢复
     // 链，此断言红灯）
     const sendMessage = vi.fn();
@@ -427,11 +427,11 @@ describe("setupSessionLifecycle — bootstrap seam（设计 §3.1）", () => {
 
     const result = await setupSessionLifecycle(pi, createFakeCtx(), deps);
 
-    // [D2] 中断非终局：内存观测面 status 维持 running（活体写点停更——终局判据归
+    // [D2] 中断非终局：内存可观测的 status 维持 running（活体写点停更——终局判据归
     // record fold）；state.error 承载 kill 文本
     expect(isRunSettled(runningRun)).toBe(false);
     expect(runningRun.state.error).toContain("Process killed");
-    // [W2/V4 D6] 注销直落权威面：appendEntry 直接落盘（emit 链在 reload 转换窗
+    // [W2/V4 D6] 注销直写权威部分：appendEntry 直接落盘（emit 链在 reload 转换窗
     // 失效——[reload-closeout D4] 定案在恢复链同样适用）。data 形状与 finalizeRun
     // 直落 / reconcile-sweep 补注销同构（status 经 protocol mapReasonToStatus 单点）。
     const unregister = entries.find((e) => e.customType === PENDING_UNREGISTER_ENTRY_TYPE);
@@ -551,7 +551,7 @@ describe("setupSessionLifecycle — bootstrap seam（设计 §3.1）", () => {
   });
 
   it("mainSessionFile 解析值直传 initSession（按 sessionId 解析 miss → 回退 getSessionFile）", async () => {
-    // 吸收自 session-start-reaper.test.ts（形态适配：旧观察面 = 整类 mock 构造
+    // 吸收自 session-start-reaper.test.ts（形态适配：旧观测点 = 整类 mock 构造
     // 参数，现行生产 = initSession.mainSessionFile 值直传，断言意图不变）。
     // initSession 接线住默认 createOrReuseServices（deps.createServices 注入会绕过
     // 它）——走默认装配 + barrel set 调用观察（组 1「new 分支」用例同款手法）。
@@ -571,7 +571,7 @@ describe("setupSessionLifecycle — bootstrap seam（设计 §3.1）", () => {
   });
 
   it("engine journal gc 抛错不阻断 session_start（catch 记日志，manifest tmp sweep 等后续维护仍执行）", async () => {
-    // 进程级维护首段（engine journal gc 接线）的失败语义面：startEngineJournalGcTimer
+    // 进程级维护首段（engine journal gc 接线）的失败语义侧：startEngineJournalGcTimer
     // 同步抛错 → runProcessLevelMaintenance 首段 catch 吞掉（失败记日志不阻断），
     // 后续维护（manifest tmp sweep / rebuildIndexes / worktree scan）与装配回传照常。
     const gcMock = vi.mocked(startEngineJournalGcTimer);
@@ -688,7 +688,7 @@ describe("deps 检查单一出口（lazyDeps 属性访问触发）", () => {
 // 的 sink 对象。接线住默认装配路径（createOrReuseServices），不走 deps.createServices。
 
 describe("streamSink ctx.mode 检查 — 运行时行为（FR-1/FR-2/AC-1/AC-2）", () => {
-  /** 默认装配跑一次 session_start，返回 initSession spy 与 ctx（rpc 观察面）。 */
+  /** 默认装配跑一次 session_start，返回 initSession spy 与 ctx（rpc 观测点）。 */
   async function runDefaultAssembly(mode: "tui" | "rpc" | "json" | "print"): Promise<{
     mockInitSession: ReturnType<typeof vi.fn>;
     ctx: ExtensionContext & { ui?: { setWidget: ReturnType<typeof vi.fn> } | undefined };
@@ -698,7 +698,7 @@ describe("streamSink ctx.mode 检查 — 运行时行为（FR-1/FR-2/AC-1/AC-2�
     await setupSessionLifecycle(pi, ctx, {
       worktreeManager: { scan: vi.fn(async () => {}) },
     });
-    // initSession 参数观察面：module mock 的 SubagentService 假类实例（访问器槽被
+    // initSession 参数观测点：module mock 的 SubagentService 假类实例（访问器槽被
     // mock 恒 null → new 分支），取静态导入的 barrel set 调用（与被测装配同一 mock
     // 实例）。
     const svc = vi.mocked(setSubagentService).mock.calls[0]?.[0] as
@@ -874,7 +874,7 @@ describe("session_start 兜底触发统一保留维护轮（[W1 / D5 触发点�
 // loadAll 四分支的归属现状：成功+running（transition + appendEntry 直落 + 不经 emit）
 // 与失败 fail-fast（storeHealthy=false）两分支与组 1 seam 条同契约，以组 1 既有条为准
 // 不重复设条；「store unavailable / loadAll failed」错误范围由组 2 检查条锁定。本组保留
-// crash-recovery 独有断言面：B1 第二 session 恢复、已终态直 set、域隔离。观察面迁移
+// crash-recovery 独有断言范围：B1 第二 session 恢复、已终态直 set、域隔离。观测点迁移
 // 两处（断言意图不变）：已终态条的 entries 经挂载 harness 的 appendEntry 捕获（原文件
 // 同形）；域隔离条的注册观察从 pi.registerTool 捕获 "subagent" 改为 interface mock 的
 // registerSubagentTool 调用断言（本文件 interface 层 module mock 下真实注册不达 pi）。
@@ -915,7 +915,7 @@ describe("session_start crash recovery — store.loadAll 路径（吸收自 cras
     const { pi: pi2, entries: entries2 } = createFakePi();
     const second = await setupSessionLifecycle(pi2, createFakeCtx(), mkDeps([runningRun]));
     expect(second.storeHealthy).toBe(true);
-    // [D2] 中断收编：内存观测面维持 running（终局判据归 record fold）
+    // [D2] 中断收编：内存可观测的状态维持 running（终局判据归 record fold）
     expect(isRunSettled(runningRun)).toBe(false);
     expect(runningRun.state.error).toContain("crash");
   });
@@ -931,7 +931,7 @@ describe("session_start crash recovery — store.loadAll 路径（吸收自 cras
     expect(doneRun.meta.completedAt).toBe(originalCompletedAt);
 
     // 终态 run 不触发 pending:unregister（恢复路径只处理 status==="running"；
-    // [W2/V4 D6] 注销面 = appendEntry 直落 entries，零断言走该通道）
+    // [W2/V4 D6] 注销侧 = appendEntry 直落 entries，零断言走该通道）
     const unregister = entries.filter((e) => e.customType === PENDING_UNREGISTER_ENTRY_TYPE);
     expect(unregister).toHaveLength(0);
 
@@ -945,7 +945,7 @@ describe("session_start crash recovery — store.loadAll 路径（吸收自 cras
     });
 
     // 域隔离：subagent tool 注册在 factory 入口（session_start 之外），与 store
-    // 健康无关。观察面迁移：本文件 interface 层 module mock 下断言 mock 调用
+    // 健康无关。观测点迁移：本文件 interface 层 module mock 下断言 mock 调用
     //（原文件无 interface mock、以 pi.registerTool 捕获 "subagent"），断言意图
     // 不变：store 不健康时 factory 入口的 subagent 域注册仍执行。
     expect(vi.mocked(registerSubagentTool)).toHaveBeenCalled();
@@ -1008,7 +1008,7 @@ describe("[W1 / D4] kill-9 收编 fixture：journal 终态 + 条目恰两条 + m
       ];
 
       // fake pi：appendEntry 模拟 session JSONL append（捕获 + 落 entries——pi.appendEntry
-      // 的真实语义）。[W2/V4 D6] 恢复链注销走 appendEntry 直落，appended 是注销观察面。
+      // 的真实语义）。[W2/V4 D6] 恢复链注销走 appendEntry 直落，appended 是注销观测点。
       const appended: Array<{ t: string; d: unknown }> = [];
       const { pi: piBase, emits } = createFakePi();
       const appendEntry = vi.fn((t: string, d: unknown) => {
@@ -1045,7 +1045,7 @@ describe("[W1 / D4] kill-9 收编 fixture：journal 终态 + 条目恰两条 + m
       const first = await setupSessionLifecycle(pi, ctx, mkDeps());
       const run = first.runs.get(runId);
       // [D2] 中断非终局：loadAll 重建产物 status 维持 running（fold 停在 interrupted
-      // 是状态机相——聚合面无终局），无 reason
+      // 是状态机相——聚合结果无终局），无 reason
       expect(isRunSettled(run!)).toBe(false);
       expect(run?.state.reason).toBeUndefined();
       expect(emits.find((e) => e.channel === "pending:unregister")).toBeUndefined();

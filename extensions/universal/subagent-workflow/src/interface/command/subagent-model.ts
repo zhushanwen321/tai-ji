@@ -48,8 +48,8 @@ interface SubagentModelEnvelope { // oe-exempt:20261006:framework:通道结果�
   error: { code: string; message: string; recovery: string };
 }
 
-/** /subagent-model 命令的依赖注入面（注册点装配生产实现，单测注入桩）。 */
-export interface SubagentModelCommandDeps { // oe-exempt:20261006:framework:命令 handler 依赖注入面（注册点装配，单实现常态）
+/** /subagent-model 命令的依赖注入点（注册点装配生产实现，单测注入桩）。 */
+export interface SubagentModelCommandDeps { // oe-exempt:20261006:framework:命令 handler 依赖注入点（注册点装配，单实现常态）
   /** 宿主 setModel 编排单例（session_start 前 null——envelope 分型承接）。 */
   getService: () => ReturnType<typeof getSubagentService>;
   /** agentDir 锚（pi SDK 活源，与 session-lifecycle 装配同源）。 */
@@ -179,7 +179,7 @@ export async function runSubagentModelRpc(
         error: {
           code: "invalid_payload",
           message: parsed.validationMessage,
-          recovery: "修正 subagent.setModel 载荷后重试（runtime 协议面问题，正常使用不可达）",
+          recovery: "修正 subagent.setModel 载荷后重试（runtime 协议范围问题，正常使用不可达）",
         },
       } satisfies SubagentModelEnvelope),
     );

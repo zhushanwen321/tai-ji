@@ -1183,7 +1183,7 @@ describe('resolveSessionId ② sa-id 形态（w2 TC7-TC10 + CQ3）', () => {
     }
   })
 
-  it('TC9: sa-id 0 命中（可能 running）→ zcode_record_not_found（U9：sa-id 语境统一错误面，含 family 指引 + 👉）', async () => {
+  it('TC9: sa-id 0 命中（可能 running）→ zcode_record_not_found（U9：sa-id 语境统一错误范围，含 family 指引 + 👉）', async () => {
     await expect(
       handleSessionRead({ action: 'outline', session: 'sa-nonexist-9999' }, { agentDir: dir }),
     ).rejects.toThrow('zcode_record_not_found')
@@ -1197,7 +1197,7 @@ describe('resolveSessionId ② sa-id 形态（w2 TC7-TC10 + CQ3）', () => {
     }
   })
 
-  it('TC10: sa-id 片段输入（精确相等不命中）→ zcode_record_not_found + 完整 sa- id 重试指引（U9 统一错误面）', async () => {
+  it('TC10: sa-id 片段输入（精确相等不命中）→ zcode_record_not_found + 完整 sa- id 重试指引（U9 统一错误范围）', async () => {
     await makeFixtureSubagent(dir, 'sa-c8c8dfa8', {
       realSessionId: '019e6c96-dddd-eeee-ffff-0000000010a3',
     })
@@ -1361,7 +1361,7 @@ describe('sa-id entry 兜底 v2 终态条锚定（W1 D1 版本门补齐，第三
     await expect(
       handleSessionRead({ action: 'outline', session: 'sa-v2-1' }, { agentDir, liveSessionDir: liveDir }),
     ).rejects.toThrow('zcode_anchor_missing')
-    // 归因进结构化日志不进 LLM 可见面（§3.4）：firstIncompleteAnchorReason 的 v2 分支
+    // 归因进结构化日志不进 LLM 可见部分（§3.4）：firstIncompleteAnchorReason 的 v2 分支
     //（tool-handler 唯一消费点）产出 missing-dbPath
     expect(logCallsWithReason('missing-dbPath')).toBeGreaterThanOrEqual(1)
   })
@@ -1603,7 +1603,7 @@ describe('doWorkflow（w6，fixture）', () => {
   }
 
   /** 构造 v2 record 流文件（run-created + agent-settled[+终局] 帧提 calls）并写注册条目——
-   *  [ADR-0095] v1 读面删除后的单档 fixture 形态（替代 wf-state 快照 + link 指针）。 */
+   *  [ADR-0095] v1 读侧删除后的单档 fixture 形态（替代 wf-state 快照 + link 指针）。 */
   async function wfV2Run(
     dir: string,
     slug: string,
@@ -1798,7 +1798,7 @@ describe('doWorkflow（w6，fixture）', () => {
     expect(text).toContain('family')
   })
 
-  // [ADR-0095] TC-w6-snapshot-skip（快照不可读 → skippedRuns）随 v1 读面删除：
+  // [ADR-0095] TC-w6-snapshot-skip（快照不可读 → skippedRuns）随 v1 读侧删除：
   // 发现链收敛 v2 后 run 一律 record 流直读（读失败 → running 兜底不 skipped），
   // skippedRuns 快照链对 v2 档不可达。
 

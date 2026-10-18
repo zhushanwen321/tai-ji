@@ -196,7 +196,7 @@ interface CrossSearchSkipped {
   sizeBytes?: number
 }
 
-/** 跨会话检索 details（程序化消费/测试断言面）。 */
+/** 跨会话检索 details（程序化消费/测试断言范围）。 */
 export interface CrossSearchDetails {
   pattern: string
   scope: NonNullable<SessionReadParams['scope']>

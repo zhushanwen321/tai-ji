@@ -1,5 +1,5 @@
 // inflight-wiring.test.ts —— 组合根接线：session_start 即发初始上报（u7a，设计 §3.3 D5
-// 「触发时点固定 = extension 加载完成」验收面）。
+// 「触发时点固定 = extension 加载完成」验收侧）。
 //
 // 验证点：
 //   ① 初始上报在 session_start handler 内、setupSessionLifecycle await 链之外发起

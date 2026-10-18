@@ -77,7 +77,7 @@ export interface WatchCoordinatorDeps {
 }
 
 export interface WatchCoordinator {
-	/** 工具结果成功后的 arm：register + 开表（顺序固定——C-5 微窗方向 = 查询面先少计不产幽灵）。
+	/** 工具结果成功后的 arm：register + 开表（顺序固定——C-5 微窗方向 = 查询结果先少计不产幽灵）。
 	 *  kind:"lifetime" = lifetime 死亡债权注册（result-collect 设计 §3.4，emit 申报
 	 *  kind 标记）；缺省 = send 债权。 */
 	armSessionNotify(ctx: ExtensionContext, notifyId: string, name: string, kind?: "lifetime"): void;

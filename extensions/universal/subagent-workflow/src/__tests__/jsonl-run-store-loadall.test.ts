@@ -4,7 +4,7 @@
 // record 流权威重建」单通道。历史形态 entry（v1 全量快照 / 旧 workflow-state-link
 // 指针）不参与发现——旧 session JSONL 里的历史 entry 仍在盘上，loadAll 必须静默
 // 忽略（不抛、不重建、零 warn），未知 entry 容忍面不受影响。
-// v2 重建/收编读面的完整用例在 jsonl-run-store-session-file.test.ts（W17/W1 describe）与
+// v2 重建/收编读侧的完整用例在 jsonl-run-store-session-file.test.ts（W17/W1 describe）与
 // __tests__/record-mode/（[D1] record 单源语义族）。
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -169,7 +169,7 @@ describe("loadAll 发现域（v2-only）：历史形态 entry 不再被发现", 
 
   it("[U6 回归] resolveAgentOpts 失败形态的 agent-settled 帧带 result → loadAll 正常重建（不判损坏）", async () => {
     // 派发前置失败（agent 名/skill 解析失败）是设计内合法产出：run 终局 failed、
-    // call 的 agent-settled 帧由 dispatchAgentSettledFailed 写入 journal 记录。写面补齐 result
+    // call 的 agent-settled 帧由 dispatchAgentSettledFailed 写入 journal 记录。写侧补齐 result
     // 后，重启 loadAll 的严格读原语（settled 帧缺 result = RecordStreamCorruptionError
     // → storeHealthy=false 停初始化）不再把该流判损坏。
     const recordPath = recordPathOf(tmpDir, "run-pre-dispatch-fail");

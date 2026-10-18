@@ -26,7 +26,7 @@ export interface GoalSession {
 	/**
 	 * W5 退避延迟发送的 continuation 定时器（无进展退避时 continuation 不立即发出，
 	 * 按间隔 ×2 递增延迟）。非 null 表示有一个待发的退避 continuation——调度前必须
-	 * 先清（防双发）。清理面（cancelContinuationTimer 统一入口）：clearGoalSession、
+	 * 先清（防双发）。清理侧（cancelContinuationTimer 统一入口）：clearGoalSession、
 	 * session_start（新 session 生命周期旧 timer 作废）、before_agent_start（新用户
 	 * 活动使旧退避作废）、下一轮 agent_end 调度前。
 	 */
@@ -127,7 +127,7 @@ function isGoalStateEntry(entry: SessionEntryLike): boolean {
 // ── clearGoalSession ──────────────────────────────────
 
 /**
- * 取消待发的退避 continuation timer（全部清理点走本函数，防止清理面遗漏）：
+ * 取消待发的退避 continuation timer（全部清理点走本函数，防止清理侧遗漏）：
  * - clearGoalSession：goal 已终态/清除，发出即僵尸 turn
  * - session_start：session 句柄跨 session 复用，新 session 生命周期旧 timer 作废
  * - before_agent_start：新用户活动使旧退避作废，该轮 agent_end 按最新状态重新决策

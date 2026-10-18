@@ -16,7 +16,7 @@
 // 断言与验证点的对应（入口计数 ⟹ 内层副作用 ≤1 的构造性蕴含）：
 //   ① syncEnginesFile 写 = 1（engines.json 写发生在函数内部，入口 =1 ⟹ 写 ≤1）
 //   ⑧ startEngineJournalGcTimer = 1（确定性触发接线在函数内部：首调即扫 + 24h
-//     复扫定时器不属双派发观察面；范围 = 引擎 journal，会话下挂内容回收归级联）
+//     复扫定时器不属双派发观测点；范围 = 引擎 journal，会话下挂内容回收归级联）
 //   ⑨ recoverManifestTmpFiles = 1（promote/unlink 在函数内部）
 //   ⑩ WorktreeManager.scan = 1（git/rm 进程操作在方法内部）
 //   ⑫ rebuildIndexes = 1（[U4c/G1] manifest 补缺/索引重建写发生在函数内部）

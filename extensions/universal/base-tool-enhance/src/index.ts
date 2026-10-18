@@ -9,10 +9,10 @@
  * 入账，缺席兜底 sendMessage steer）+ session_start 对账 + 收殓终态通知补投
  * （对账路径 = 唯一生产者，session_start 差集逐任务 port.deliver，幂等由 port
  * seenIds + 内核三级判重承管——unified-delivery 波 3）。
- * 维护链双触发面：session_start 事件 + `__taiji_bg_reconcile__` 内部命令（taiji runtime
+ * 维护链双触发点：session_start 事件 + `__taiji_bg_reconcile__` 内部命令（taiji runtime
  * 在 getCommands 时按节流补触发，覆盖「切走切回同进程重挂接、session_start 不重发」场景）。
  * 收殓下沉（u-bte-remove）：M5 孤儿收殓已移交 taiji runtime（background-task-
- * reaper 双触发面——session 销毁时 + 启动期兜底扫描，设计 file-lock-unification-
+ * reaper 双触发点——session 销毁时 + 启动期兜底扫描，设计 file-lock-unification-
  * and-reaper-sink.md §3.2 D2），extension 不再做全局扫描/全局锁；session_start
  * 维护链仅剩 M3 对账（session 级豁免类，每 session_start 执行，D3 粒度段）。
  * 白名单与配置体系（M4 已交付）经 bash-tool execute 读时加载接入。
@@ -80,7 +80,7 @@ export default function baseToolEnhanceExtension(pi: ExtensionAPI): void {
 		).recover();
 		return runSessionStartMaintenance(pi, ctx, event.reason);
 	});
-	// 第二触发面（会话重挂接补强）：桌面「切走会话再切回」是同进程重新
+	// 第二触发点（会话重挂接补强）：桌面「切走会话再切回」是同进程重新
 	// 挂接——pi 进程存活、不重发 session_start（真机实证），挂在 session_start 上的
 	// 维护链在「投递失败但进程存活」场景（设计 G2 核心场景）永不触发。taiji runtime 在
 	// getCommands（切回后 renderer 主动拉取命令的必经查询）时经 client.prompt 发起本

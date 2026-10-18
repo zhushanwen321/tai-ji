@@ -12,11 +12,11 @@
 // import 绑定，故测试文件里本 import 必须先于任何会加载 pi-extension-logger 的
 // import（../index.ts / ../notify-delivery.ts / extension-harness helper）。
 // 模块级单例按测试文件隔离（vitest 默认 isolate），getLoggerMock() 与被 mock 模块
-// 的 getLogger() 返回同一引用——断言面与桩面同源。
+// 的 getLogger() 返回同一引用——断言范围与桩面同源。
 
 import { vi } from "vitest";
 
-/** 与被 mock 模块 getLogger() 同源的 spy 集（断言面经 getLoggerMock() 取用） */
+/** 与被 mock 模块 getLogger() 同源的 spy 集（断言范围经 getLoggerMock() 取用） */
 const loggerMock = {
 	error: vi.fn(),
 	warn: vi.fn(),
@@ -25,7 +25,7 @@ const loggerMock = {
 
 export type LoggerMock = typeof loggerMock;
 
-/** 断言面：取本测试文件的 logger spy（与 mock 模块内 getLogger() 返回值同引用） */
+/** 断言范围：取本测试文件的 logger spy（与 mock 模块内 getLogger() 返回值同引用） */
 export function getLoggerMock(): LoggerMock {
 	return loggerMock;
 }

@@ -193,7 +193,7 @@ export function collectNodeLiveProgress(
  *
  * | 签名字段 | 消费点 |
  * |---|---|
- * | displayStatusOf(run) 派生二值（[W2/V1 D1 第 6 行] 混合判源单点——v2 fold/注册表派生视图 ∨ v1 聚合读面）| WorkflowsView.ts renderHeader（statusDotStr+statusLabel 同串源）/ detail-content.ts statusLabel（statusDotStr 调用处）/ renderFooter |
+ * | displayStatusOf(run) 派生二值（[W2/V1 D1 第 6 行] 混合判源单点——v2 fold/注册表派生视图 ∨ v1 聚合读侧）| WorkflowsView.ts renderHeader（statusDotStr+statusLabel 同串源）/ detail-content.ts statusLabel（statusDotStr 调用处）/ renderFooter |
  * | 秒桶 Math.floor(now/1000) | renderHeader formatElapsed（现算 elapsed）+ detail-content.ts（now 参与未完成节点 elapsed）|
  * | completed/total（节点 status 推导）| renderHeader |
  * | budget 量化值（tokens round-k + cost toFixed(4)=BUDGET_COST_DECIMALS，与 renderHeader budgetStr 同精度——第 3-4 位小数变化是可见变化）| renderHeader / saveTraceToFile |
@@ -298,7 +298,7 @@ function createInitialState(): ViewState {
  *   manifest，LIST_LIMIT 口径），view 在 200ms tick 与 render 时重查并按
  *   collectNodeLiveProgress 配对到 running trace node。未注入（无 service 的测试
  *   环境）时 live 派生视图恒空，渲染走终态 result 路径。终态 record archive 出内存后
- *   由下次重查从磁盘重建面取终态快照——无需带 payload 的新事件类型（D2 实现锚点）。
+ *   由下次重查从磁盘重建侧取终态快照——无需带 payload 的新事件类型（D2 实现锚点）。
  */
 export function createWorkflowsView(
   run: WorkflowRun,
@@ -850,7 +850,7 @@ function renderLevel0(
 
 /** L1 左列：sidebar title + phase list（固定高度 viewport + 滚动，只构建可见行）。
  *  与 renderLevel0 左列同构——本 helper 只供 renderLevel1（renderLevel0 不在本单元目标内，不并轨，
- *  避免扩大行为面；后续如消重可让 L0 复用）。 */
+ *  避免扩大行为范围；后续如消重可让 L0 复用）。 */
 function buildLevelSidebar(
   phases: ReturnType<typeof buildPhaseGroups>,
   state: ViewState,

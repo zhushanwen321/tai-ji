@@ -1,7 +1,7 @@
 /**
  * message_end handler 测试（D13① role 过滤 + FR-6.7 ESC 检查）。
  *
- * 断言面：仅 user/assistant 的 message_end 进入 service 消费；system（pi 1.0
+ * 断言范围：仅 user/assistant 的 message_end 进入 service 消费；system（pi 1.0
  * 新形态）/ toolResult / 缺 role 在 handler 层显式拒绝；assistant 正常透传。
  */
 

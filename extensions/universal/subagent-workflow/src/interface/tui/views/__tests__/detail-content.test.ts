@@ -2,7 +2,7 @@
  * detail-content 纯函数直测——与 WorkflowsView.driver.test.ts（经 view 驱动覆盖）
  * 互补：本文件直接单测 view 驱动不易逐一命中的分支面。
  *
- * 覆盖面：
+ * 覆盖范围：
  *   - statusLabel 四分支（入参收窄联合的编译期补齐运行时对照）
  *   - projectRecordProgress 派生视图口径（S1 等价表：toolCallCount = tool_start 计数、
  *     lastError = eventLog 末条 error 的 label、elapsed/turns/token 直读）

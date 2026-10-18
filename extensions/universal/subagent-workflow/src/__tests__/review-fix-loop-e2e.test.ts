@@ -1002,7 +1002,7 @@ describe("review-fix-loop E2E（真实 worker + 场景化 mock runner）", () =>
         const committed = execFileSync("git", ["show", "--name-only", "--pretty=", "HEAD"], { cwd: repo, encoding: "utf-8", timeout: 10_000, env: gitEnv() })
           .split("\n").map((s) => s.trim()).filter(Boolean).sort();
         expect(committed).toEqual(["src/a.ts", "src/b.ts"]);
-        // fixImpactFiles 不做存在性过滤（收集层语义：声称触碰即进 recheck 观察面）
+        // fixImpactFiles 不做存在性过滤（收集层语义：声称触碰即进 recheck 观测点）
         const st = JSON.parse(readFileSync(join(outcome.runDir!, "state.json"), "utf8")) as {
           fixImpactFiles: string[];
         };
@@ -1768,7 +1768,7 @@ describe("startup fail-fast (ADR-0003 D6)", () => {
       expect(parsed.required).toEqual(["report_file", "must_fix", "suggestion", "reconciliation"]);
       expect(JSON.stringify(parsed)).not.toContain("optional for R1"); // stale description 已更新
       // 【源码 grep 断言已删（"...reviewerSchema, required:" 不在脚本内）——同用例上方
-      // 的真实调用 schema 逐字节比对已覆盖该行为面】
+      // 的真实调用 schema 逐字节比对已覆盖该行为范围】
     },
     RUN_TIMEOUT_MS,
   );
@@ -2258,7 +2258,7 @@ describe("review-fix-loop fail-fast（结构化返回失败立即终判）", () 
       const rounds = (st.batches as Array<{ rounds: Array<{ mustFix: number | null; suggestion: number | null }> }>)[0]!.rounds;
       expect(rounds[0]!.mustFix).toBeNull();
       expect(rounds[0]!.suggestion).toBeNull();
-      // degraded 可观测面零残留（返回值 / state.meta 均无 degradedRounds）
+      // degraded 可观测范围零残留（返回值 / state.meta 均无 degradedRounds）
       expect("degradedRounds" in outcome).toBe(false);
       expect("degradedRounds" in (st.meta as Record<string, unknown>)).toBe(false);
     },

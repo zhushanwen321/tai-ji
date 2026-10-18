@@ -120,7 +120,7 @@ const SKIP_DIRS_NONE = new Set<string>()
 
 // ============================================================
 // 扫描 options（u8 追加：doctor「同一数据源两处渲染，不重复实现探测」§6.3——
-// doctor 经 options 驱动 subagent 根不扫。原 u8 的进程内缓存注入面已删除
+// doctor 经 options 驱动 subagent 根不扫。原 u8 的进程内缓存注入点已删除
 // （ext-simplify-04 U3）：每次调用实扫，本模块不再持有任何缓存语义）
 // ============================================================
 
@@ -143,7 +143,7 @@ export interface SessionRootScanOptions {
  * （不存在/无权限）→ 空结果继续，不抛错（沿用 listXxxSessions 契约）。
  *
  * options（u8 追加，全部缺省安全）：`subagents:'stat'` 让 subagent 根只做存在性检查。
- * 无缓存——每次调用实扫（原 u8 cache 注入面已删除，ext-simplify-04 U3；find/F1
+ * 无缓存——每次调用实扫（原 u8 cache 注入点已删除，ext-simplify-04 U3；find/F1
  * 自检行计数与 doctor 表计数同取本次实扫，§7B 要点 8）。
  */
 export async function resolveSessionRoots(

@@ -36,7 +36,7 @@ import { createResourceListInjector } from "./resource-list-injector.ts";
 /**
  * pi 版注入引导文案（C5① guide 参数化——core 渲染函数不内嵌平台文案，宿主注入）。
  *
- * 2026-08 C5 重写依据（pi 现参数面，src/interface/tool/subagent-tool-schema.ts）：
+ * 2026-08 C5 重写依据（pi 现参数侧，src/interface/tool/subagent-tool-schema.ts）：
  * 旧句「pass systemPrompt alongside the agent name to create a dynamic agent」
  * 指向的 systemPrompt 参数已不在 subagent tool schema——现 agent 参数 = .md 绝对
  * 路径（<location>），缺省落 general-purpose（继承主 agent 模型与项目上下文），
@@ -70,7 +70,7 @@ export const SUBAGENT_DISPATCH_SHARED_RULES =
 const injector = createResourceListInjector<AgentEntry>({
 	kind: "agents",
 	logTag: "[subagent-list-injector]",
-	// agents 段无 invalid 产出面（assemble 路径 invalids 恒空），第二参忽略——
+	// agents 段无 invalid 产出侧（assemble 路径 invalids 恒空），第二参忽略——
 	// 签名对齐工厂 config.format（P5 D4-3 invalid 上报仅 workflow 域接线）。
 	format: (agents, _invalids) =>
 		formatAgentList(agents, {

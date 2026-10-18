@@ -29,7 +29,7 @@ export interface ZcodeAnchor {
  * `subagent-record` custom entry 的 customType 值。
  *
  * 磁盘 JSONL 协议字符串（跨侧契约）：写侧单源 = subagent-core record-entry.ts 的
- * SUBAGENT_RECORD_CUSTOM_TYPE。reader 生产依赖面不引 subagent-core（该包是
+ * SUBAGENT_RECORD_CUSTOM_TYPE。reader 生产依赖范围不引 subagent-core（该包是
  * devDependency + vitest alias 形态），故按协议字符串本地持有；两侧漂移由
  * entry-anchor.test.ts 的跨包断言检查。
  */

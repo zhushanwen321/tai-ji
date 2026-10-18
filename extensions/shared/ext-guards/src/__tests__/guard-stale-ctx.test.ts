@@ -108,7 +108,7 @@ describe("guardStaleCtx 同步抛错分诊（F2 形态同步部分）", () => {
 	});
 });
 
-describe("guardStaleCtx async fn（F2 形态异步面，scheduler tick 迁移形态）", () => {
+describe("guardStaleCtx async fn（F2 形态异步侧，scheduler tick 迁移形态）", () => {
 	it("stale rejection：resolve 为 undefined（不 reject，fire-and-forget 安全）", async () => {
 		const onStale = vi.fn();
 

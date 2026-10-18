@@ -792,7 +792,7 @@ describe('buildExecutionTree - 真实形态数据检查（合成）', () => {
     expect(tree.root.sessionId).toBe(MAIN)
     expect(findNode(tree.root, 'subagent', X_REAL)).toBeUndefined()
     // 孤儿 D 仍入树（sessionFile 残留路径，不因文件缺失抛错/丢弃 record——原真实数据检查
-    // 独有覆盖面，合成化后保留）
+    // 独有覆盖范围，合成化后保留）
     const nodeD = findNode(tree.root, 'subagent', D_REAL)
     expect(nodeD).toBeDefined()
     expect(nodeD!.sessionFile).toBe(join(dir, 'subagents', CWD, 'sessions', prefixed(D_REAL)))

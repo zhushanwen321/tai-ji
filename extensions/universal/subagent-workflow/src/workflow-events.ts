@@ -29,7 +29,7 @@
  * wave0-package-structure 等）经 factory 间接覆盖；mock 锚点是模块解析路径
  * （jsonl-run-store / interface/* / subagent-core 深路径），随迁不改写。
  * runSettledEffects 经 fake deps 直测（workflow-events.test.ts，
- * 不挂装配面）。注册顺序经 workflow-events.test.ts 锁定。
+ * 不挂装配侧）。注册顺序经 workflow-events.test.ts 锁定。
  *
  * 架构导航见 docs/extensions/subagents/architecture.md §2.1。
  */
@@ -181,10 +181,10 @@ function createLazy<K extends keyof LauncherDeps>(
 
 // ── run 终局固定顺序副作用（makeDeps onRunDone 管线提级，可直测） ─────────────
 
-/** runSettledEffects 的注入面（生产装配点 = makeDeps；直测注入 fake——模块行为
- *  可脱离装配面独立测试）。 */
+/** runSettledEffects 的注入点（生产装配点 = makeDeps；直测注入 fake——模块行为
+ *  可脱离装配侧独立测试）。 */
 export interface RunSettledEffectsEnv {
-  /** 完成通知的发送面（现读 volatile pi：生产传 resolveCurrentPi，调用时解析——
+  /** 完成通知的发送侧（现读 volatile pi：生产传 resolveCurrentPi，调用时解析——
    *  D3 不快照，reload 后自动路由新 pi）。 */
   resolvePi(): ExtensionAPI;
   /** notifyDone 完成通知去重窗口（domainState.notifiedRunIds，调用方持有）。 */
@@ -193,7 +193,7 @@ export interface RunSettledEffectsEnv {
    *  条目引用，adoption rebind 换新后自动跟进的 D3 语义保持）。 */
   state: Pick<SessionLifecycleResult, "sessionDir" | "runs">;
   /**
-   * [W2/V1 D1 第 7 行] 终局记录查询面（通知载荷源——journal run-settled 帧直取）。
+   * [W2/V1 D1 第 7 行] 终局记录查询入口（通知载荷源——journal run-settled 帧直取）。
    * 生产装配 = JsonlRunStore.settledRecordOf；返回 undefined = 无终局帧（journal
    * dispatch 失败窗口）——通知跳过 + error 留痕（不回退两态机字段兜底：I2 失效
    * 窗口下兜底 = 恒 completed 假成功，比丢通知更糟）。
@@ -285,7 +285,7 @@ export function setupWorkflowDomain(
   // 出口为进程级单监听（在途记账本身是 pi 进程级模块状态），后注册覆盖先注册
   // （jiti 重载幂等）；回调同步 void，不进任何生命周期 await 链（D5 接线约束①）。
   // ctx 由 session_start 注入（factory 阶段无 ui）。wiring.inflightReporter 是测试
-  // 注入面（fake reporter 观察 attach/detach 驱动时点）；生产路径缺省真实创建——
+  // 注入点（fake reporter 观察 attach/detach 驱动时点）；生产路径缺省真实创建——
   // 组合根对实例零知识（纯管道参数已删）。
   const inflightReporter = wiring.inflightReporter ?? createInFlightReporter();
   setInFlightListener(inflightReporter.onInFlightChanged);
@@ -293,7 +293,7 @@ export function setupWorkflowDomain(
   // core 两域落盘提交点 → 出口回调 → reporter 按 (domain,fileKey) 分组合并 → select
   // marker 通道带回执推送 runtime。出口为进程级单监听，后注册覆盖先注册（jiti 重载
   // 幂等）；回调同步 void，不进任何落盘 await 链。ctx 由 session_start 注入
-  // （factory 阶段无 ui）。wiring.journalReporter 是测试注入面（fake reporter 观察
+  // （factory 阶段无 ui）。wiring.journalReporter 是测试注入点（fake reporter 观察
   // attach/detach 驱动时点）；生产路径缺省真实创建——组合根对实例零知识。
   const journalReporter = wiring.journalReporter ?? createJournalReporter();
   setJournalAppendListener(journalReporter.onJournalAppended);
@@ -370,7 +370,7 @@ export function setupWorkflowDomain(
       get eventBus() {
         return resolveCurrentPi().events;
       },
-      // [reload-closeout D4] pending:unregister 直落权威面：finalizeRun 直接
+      // [reload-closeout D4] pending:unregister 直写权威部分：finalizeRun 直接
       // appendEntry 落盘（session JSONL 唯一权威），不经 eventBus emit→内存
       // listener——emit 链在 reload 转换窗/多 extension factory 顺序窗内整链失效，
       // 丢失即注销 entry 永缺位（S1b 事故形态①段）。函数体内现读 current pi
@@ -573,9 +573,9 @@ export function setupWorkflowDomain(
       // [§1.4 (a) reload 分支显式作废句柄] reload 有意跳过全部破坏性清理（下方 D1 分支
       // 说明——在途 run 交给 reload 后 adoption 接管），但 pi 会话替换会使旧 runner
       // 失效（PS-30：assertActive 抛 stale after session replacement），core SubagentService
-      // 的 late-bound pi 读面在旧失效句柄上会一路命中 assertActive 抛错（在途 run 的
+      // 的 late-bound pi 读侧在旧失效句柄上会一路命中 assertActive 抛错（在途 run 的
       // 轮终收尾正落该窗口）。此处只作废「句柄可用性判定」，不动在途 run 纳管：
-      // 作废后读面降级 null（轮终收尾经有界等待挂到新 initSession 注入），新 session_start
+      // 作废后读侧降级 null（轮终收尾经有界等待挂到新 initSession 注入），新 session_start
       // 注入新代际句柄后自然恢复。方法本身不抛（字段写 + 唤醒等待者）。
       getSubagentService()?.invalidatePiBinding("session replacement (reload)");
       // b 动作保留（理由见上方 D1 分支说明）。

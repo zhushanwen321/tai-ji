@@ -1,6 +1,6 @@
 // workflow-list-injector 单测（injectors 域合并宿主：workflow + subagent 两份工厂配置）
 //
-// 覆盖面：
+// 覆盖范围：
 // 1. 纯函数：summarizeDescription（截断）+ parseWorkflowMeta（meta 块解析）+
 //    formatWorkflowList（B2 注入段格式 + 引导语）+ agent 侧 CA2 字节快照
 //    （SUBAGENT_LIST_GUIDE 壳自有文案唯一字节锁）。渲染/解析算法下沉 core 的
@@ -524,7 +524,7 @@ describe("生产模块单例接线冒烟", () => {
 
 // ──────────────────────────────────────────────────────────────
 // KV-cache 顺序契约：注入段按 name 码点序，重建（两次发现）逐字节一致。
-// 经真实 injector 实例的 handler 驱动（顺序契约直接验证注入面——比裸 entries
+// 经真实 injector 实例的 handler 驱动（顺序契约直接验证注入点——比裸 entries
 // 断言更端到端）。workflow 走内置装配循环、agent 走 assemble 委托，两路径同守。
 // ──────────────────────────────────────────────────────────────
 

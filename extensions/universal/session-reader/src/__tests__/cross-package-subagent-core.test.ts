@@ -21,7 +21,7 @@ import {
 } from '@zhushanwen/subagent-core/execution/assembly/path-encoding.ts'
 
 /**
- * W4 跨包集成测试（[collect 退役] 改造保留：原「E1 落标出口产出 manifest」驱动面
+ * W4 跨包集成测试（[collect 退役] 改造保留：原「E1 落标出口产出 manifest」驱动侧
  * 随 sync 批机制删除，现行真实派生视图出口 = store 重建通道 rebuildIndexes——manifest
  * 是可丢缓存，boot 全量路径按磁盘子文件锚幂等补缺）。「subagent-core 真实 tmpdir
  * 产出磁盘状态 → session-reader result action sa- id 反查，不 mock manifest 写入」
@@ -202,7 +202,7 @@ describe('跨包集成：subagent-core 重建 manifest → session-reader result
         data: { id: m.id, agent: '/agents/worker.md', mode: 'background', task: 'cross-package task', startedAt: 1000, rootSessionId: ROOT_SESSION, depth: 0 },
       }),
       JSON.stringify({
-        // 登记 §3.3：主/子文件条目面 = v2 注册条（身份域；运行态事实源在 record 事件文件）。
+        // 登记 §3.3：主/子文件条目范围 = v2 注册条（身份域；运行态事实源在 record 事件文件）。
         type: 'custom', id: `cid-${m.id}-2`, parentId: `cid-${m.id}-1`, timestamp: ts,
         customType: 'subagent-record',
         data: {

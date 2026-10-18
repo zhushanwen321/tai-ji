@@ -16,7 +16,7 @@ import sessionReaderExtension from '../index.js'
 import { setPiHandle } from '@zhushanwen/pi-extension-logger'
 
 // ============================================================
-// U9 路由 + 白名单闸 + 错误面集成测试（design session-reader-shared-core
+// U9 路由 + 白名单闸 + 错误范围集成测试（design session-reader-shared-core
 // §3.1 三层定位链 / §3.4 七码 + 检查顺序三段递进 / §4 场景 1a 变体 M/E +
 // 场景 2 family + 场景 5 八类失败 + 场景 3 pi 零回归 + D4 schema 零变化）。
 //
@@ -53,8 +53,8 @@ beforeEach(() => {
   mkdirSync(agentDir, { recursive: true })
   mkdirSync(liveDir, { recursive: true })
   dbPath = join(root, ...ISOLATED_DB_SEGMENTS)
-  // 结构化日志捕获：logger.warn 走 appendEntry 通道（不进 LLM 可见面——本文件同时
-  // 是「降级留痕不进 LLM 可见面」契约的断言面）。测试后清注入防跨文件泄漏。
+  // 结构化日志捕获：logger.warn 走 appendEntry 通道（不进 LLM 可见部分——本文件同时
+  // 是「降级留痕不进 LLM 可见部分」契约的断言范围）。测试后清注入防跨文件泄漏。
   appendEntries = vi.fn()
   setPiHandle({ appendEntry: appendEntries } as unknown as Parameters<typeof setPiHandle>[0])
 })
@@ -220,7 +220,7 @@ function piRecordLine(entryId: string, saId: string): string {
     id: entryId,
     parentId: null,
     data: {
-      // 登记 §3.3：条目面 = v2 族——pi 形态 = 注册条（身份）+ 终态条（engineHandle 半键）。
+      // 登记 §3.3：条目范围 = v2 族——pi 形态 = 注册条（身份）+ 终态条（engineHandle 半键）。
       v: 2,
       kind: 'settled',
       id: saId,
@@ -433,7 +433,7 @@ describe('场景 5 八类失败（§3.4 表逐行 + 检查顺序三段递进）'
     await expect(handleSessionRead({ action: 'result', session: SA_M }, signals())).rejects.toThrow(
       'zcode_anchor_missing',
     )
-    // 归因进结构化日志不进 LLM 可见面（§3.4）：缺失键名可区分（missing-dbPath）
+    // 归因进结构化日志不进 LLM 可见部分（§3.4）：缺失键名可区分（missing-dbPath）
     expect(logCallsWithReason('missing-dbPath')).toBeGreaterThanOrEqual(1)
   })
 
@@ -524,7 +524,7 @@ describe('场景 5 八类失败（§3.4 表逐行 + 检查顺序三段递进）'
 // 驱动探测失败的错误契约（跨包漂移检查 + L4 包装形态映射）
 // ---------------------------------------------------------------------------
 
-describe('驱动探测失败错误面：跨包契约 + L4 包装形态映射', () => {
+describe('驱动探测失败错误范围：跨包契约 + L4 包装形态映射', () => {
   it('跨包契约：SQLITE_DRIVER_UNSUPPORTED_MARK 子串在 zcode-session-source sqlite-driver 源文内（漂移即红）', () => {
     // 驱动探测错误无专用错误类型（该包不导出子类），reader 按消息特征识别——mark 与
     // sqlite-driver 源内错误字面量的绑定由本测试机器锚定（entry-anchor.test.ts 协议
@@ -689,7 +689,7 @@ describe('pi 穿插不受影响：同 fixture 内 pi 会话读取与 zcode 调�
 /** `session_read` 输入 schema 的 JSON 序列化快照（防无意漂移的逐字节锚）。
  *
  * 快照锚的意图 = 无意漂移拦截（参数增删 / 文案改动即红，迫使有意确认）；
- * 有意的声明面压缩须同批重新生成快照。当前快照 = tool-declaration-slimming
+ * 有意的声明侧压缩须同批重新生成快照。当前快照 = tool-declaration-slimming
  * U-A1 压缩终态（D1 三层分工：action 功能语义唯一承载点 = 枚举 description；
  * 工具 description 只留定位 + 边界；guidelines 只留纪律）。重新生成：
  * tsx 起 extension 捕获 registerTool 的 parameters 后 JSON.stringify。
@@ -748,12 +748,12 @@ describe('session_read schema 快照（D4：不加任何工具参数，逐字节
 
 describe('session_read 锚词保留清单（D2：guidelines 纪律逐词锚定）', () => {
   // SCHEMA_SNAPSHOT 只逐字节锚 parameters schema，不覆盖 guidelines——本块是
-  // guidelines 锚词的机器防线：弱模型回归（P7/PB-weak）后对本工具声明面的
+  // guidelines 锚词的机器防线：弱模型回归（P7/PB-weak）后对本工具声明侧的
   // 再压缩 / 措辞改动，逐词红灯迫使有意确认。清单与 index.ts 注释登记一致：
   //   1. "Progressive reading"   —— 阅读纪律 outline → expand → detail
   //   2. "Never read raw .jsonl" —— 禁直读原始 session 文件
-  //   3. "sa- ids route"         —— zcode 路由对 LLM 的唯一可见面（U9）
-  //   4. "👉 recovery hint"      —— 错误面恢复指针契约
+  //   3. "sa- ids route"         —— zcode 路由对 LLM 的唯一可见部分（U9）
+  //   4. "👉 recovery hint"      —— 错误范围恢复指针契约
   //   5. "doctor"                —— 环境自检入口（另被上方快照 action 枚举间接锚定）
   it('guidelines 5 锚词逐个在位（缺一词即红）', () => {
     const registerTool = vi.fn()

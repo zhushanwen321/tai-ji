@@ -6,7 +6,7 @@
  * + workflow_run / workflow_control + workflow-script）+ 3 command（subagents + workflows + subagent-model）
  * + messageRenderer（subagent-bg-notify）+ session 事件。
  *
- * 包内结构（执行运行时已迁 packages/subagent-core，本包只留注册面与宿主适配）：
+ * 包内结构（执行运行时已迁 packages/subagent-core，本包只留注册点与宿主适配）：
  *   interface/           → 注册胶水（tools / commands / TUI 渲染 / GUI mappers）
  *   host/                → pi 宿主端口实现（HostServices / NotifyDomain 的 pi 侧兑现）
  *   injectors/           → 提示注入器（engine-awareness / model-list / resource-list …）
@@ -230,7 +230,7 @@ export default function subagentsWorkflowExtension(pi: ExtensionAPI): void {
   process.on("beforeExit", reapSpawnedChildrenOnShutdown);
 
   // ════════════════════════════════════════════════════════════
-  //  Tools（7 个）+ Commands（3 个）—— 注册面盘点
+  //  Tools（7 个）+ Commands（3 个）—— 注册点盘点
   //
   //  全包 7 tool：本段注册 4（workflow_run + workflow_control 经 registerWorkflowTool、
   //  subagents 经 registerSubagentsTool、workflow-script 经 registerWorkflowScriptTool）；

@@ -399,7 +399,7 @@ export async function actionRun(
   // normalizeRef 既有——相对路径/裸名一律 null → not_found 拒单，既有文案列全部
   // 可用条目并附 location，失败一次即可按绝对路径自救）。原 registry.get（内置名 +
   // 用户保存名）按名解析整体退役：派发终态形态 = 全路径（用户裁决 2026-09-21），
-  // P5 修复发现面后注册表会命中内置名让裸名「复活」——反向违反终态裁决，故机制
+  // P5 修复发现范围后注册表会命中内置名让裸名「复活」——反向违反终态裁决，故机制
   // 删除而非禁用。行为变更四要素：量级 = 裸名派发调用；旧行为 = registry.get 命中
   // 即启动；新行为 = not_found 拒单（零 token 沉没）；恢复 = 按清单 location 重试。
   const script = await deps.registry.getPath(name);
@@ -410,7 +410,7 @@ export async function actionRun(
     // throw（W4）：pi 只对 execute throw 置 isError:true，返回值里的 isError 被
     // agent-loop 丢弃（agent-loop.js:453-483）——文案原样进 toolResult。
     // [全路径自救指引] 清单逐条附绝对路径 location：run 的 name 形参最贴近的
-    // 读取面就是本清单（<available_workflows> 注入面在 start 时已过时/可能不在
+    // 读侧就是本清单（<available_workflows> 注入点在 start 时已过时/可能不在
     // 上下文）——带 location 后失败一次即可按绝对路径自救。按名解析已退役
     // （D4-1），location 是唯一活路；文案单源 = core launcher.workflowNotFoundMessage。
     throw new Error(await workflowNotFoundMessage(name, deps));

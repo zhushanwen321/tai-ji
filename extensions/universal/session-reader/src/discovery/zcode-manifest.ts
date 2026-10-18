@@ -43,7 +43,7 @@ export interface ZcodeManifestRecord extends ZcodeFamilyNode {
 /**
  * anchor-missing 的缺失键归因（§3.4：缺失键名进结构化日志——engineHandle 整体缺席 /
  * 缺 sessionRef / 缺 sessionId / 缺 dbPath 归因不同：整体缺席多为旧版本产物，缺
- * sessionId 多为引擎未回调 onHandleReady，缺 dbPath 多为写入面截断）。entry 兜底侧
+ * sessionId 多为引擎未回调 onHandleReady，缺 dbPath 多为写侧截断）。entry 兜底侧
  * 的同构分类（tool-handler classifyIncompleteEntryAnchor）复用本类型单源。
  */
 export type ZcodeAnchorMissingReason =
@@ -125,7 +125,7 @@ function richFieldsOf(m: ManifestJson): ManifestRichFields {
   return out
 }
 
-/** stat 存在性（任意路径无安全面——D5-1 只查「文件在不在」，不开库） */
+/** stat 存在性（任意路径无安全侧——D5-1 只查「文件在不在」，不开库） */
 function fileExists(p: string): boolean {
   try {
     statSync(p)

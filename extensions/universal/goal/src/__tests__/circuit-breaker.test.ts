@@ -430,7 +430,7 @@ describe("MF-R2-1 从根源修复：session_shutdown 取消旧退避 timer", () 
 	});
 });
 
-describe("MF-6③ timer 清理面：session_start / before_agent_start 取消旧 timer", () => {
+describe("MF-6③ timer 清理侧：session_start / before_agent_start 取消旧 timer", () => {
 	it("session_start 重建 → 旧退避 timer 被取消，到期不发", async () => {
 		const { h, session } = await enterBackoff();
 

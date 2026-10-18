@@ -20,7 +20,7 @@
 // 2. handler 链模拟：真实导入 setupModelListInjector + 复刻 engine handler
 //    （engine-awareness.ts 的 setupEngineAwarenessInjector）的渲染拼装（检测编排
 //    部分归 engine-awareness.test.ts），模拟 pi 的 before_agent_start 链式叠加
-//    语义，断言段序行为面（含判别力对照用例）。
+//    语义，断言段序行为范围（含判别力对照用例）。
 
 import { readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
@@ -254,7 +254,7 @@ describe("injector 链序源码锚点检查（D7）", () => {
   });
 });
 
-// ── handler 链模拟（段序行为面）──────────────────────────
+// ── handler 链模拟（段序行为范围）──────────────────────────
 
 describe("段序守护：engine 段恒链尾（D7，链模拟）", () => {
   beforeEach(() => {

@@ -477,7 +477,7 @@ function readDocs(data: Partial<PlanState>): PlanDocMeta[] {
 /**
  * 生命周期状态与 resumeHint 读取（D2 读方①）：readLifecycleState / readResumeHint 直引
  * extension-protocol legacy-entries（D-B4-1 映射单源下沉——runtime 读方②同引一份，原本地
- * 拷贝删除；映射契约断言面 = protocol 包内 legacy-entries.test.ts）。
+ * 拷贝删除；映射契约断言范围 = protocol 包内 legacy-entries.test.ts）。
  */
 
 /**

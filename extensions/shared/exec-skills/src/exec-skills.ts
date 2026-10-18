@@ -26,7 +26,7 @@ const logger = getLogger("pi-exec-skills");
  * 检测语义 = 「向用户提议的执行 skill」，以 pi 本体加载集为基线做意图/信任对齐：
  * - 单根枚举复用 pi 公开导出 loadSkillsFromDir——单根内横切规则（ignore / description
  *   必填门 / name 派生 / 递归遍历 / symlink / node_modules / 隐藏文件）随 pi 升级
- *   自动同步，零漂移面（对照表①③⑥⑦ 的 SKILL.md 目录形态侧）；
+ *   自动同步，零漂移风险（对照表①③⑥⑦ 的 SKILL.md 目录形态侧）；
  * - 跨根组装自实现（pi 的四根拼装逻辑未导出，对照表②④⑤）：根序四枚按 pi 本体
  *   `package-manager.js addAutoDiscoveredResources`——`.pi/skills` → 祖先链
  *   `.agents/skills`（近→远，git root 级含）→ `<agentDir>/skills` → `~/.agents/skills`

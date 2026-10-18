@@ -1,5 +1,5 @@
 // session-start-recovery.test.ts — 重启收尾路径（notify-once D7③ / U4）。
-// 断言面：活跃 type 'session' register 重开 watch（入参 = entry id 即 notifyId）/
+// 断言范围：活跃 type 'session' register 重开 watch（入参 = entry id 即 notifyId）/
 // 类型过滤（workflow 与已注销条目不触碰）/ 覆盖序（W1 悬置被 W2 覆盖后该 entry 恰一次
 // unregister、后续 entry 不受阻塞——每 entry 独立 handler 禁串行 await）/
 // 收尾路径 label 降级源 = register 三键 name。
@@ -16,7 +16,7 @@ import {
 	type WatchInvocation,
 } from "./helpers/extension-harness.ts";
 
-// pi-delivery-port 进程级槽（recordManagedNotify 的投递观察面——unified-delivery 波 2）。
+// pi-delivery-port 进程级槽（recordManagedNotify 的投递观测点——unified-delivery 波 2）。
 const PORT_SLOT_KEY = DELIVERY_PORT_SLOT_KEY;
 
 interface Harness extends ExtensionHarness {

@@ -163,7 +163,7 @@ describe("旧工具名精确规则迁移（D3）— 表驱动六用例（五分�
 	it("分支5b：反向混合集（wildcard deny 在前、精确 allow 在后）保序——新名结论 = 旧名结论", () => {
 		// 与分支5互为镜像：旧名调用结论 = deny（尾部精确 allow 被…不——allow 在
 		// wildcard deny 之后，last-match-wins 下 allow 胜。若错误追加，新名 allow
-		// 落在最后 → 仍 allow，本场景区分度弱；承重面是「精确条目仍在 wildcard
+		// 落在最后 → 仍 allow，本场景区分度弱；关键部分是「精确条目仍在 wildcard
 		// 之前」的位置锚 + 与分支5合并覆盖两个方向）。
 		const mixed: Rule[] = [
 			userRule({ id: "user-1", tool: "*", pattern: "*", action: "deny" }),

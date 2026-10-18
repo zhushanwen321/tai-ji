@@ -454,7 +454,7 @@ export function renderOutline(
   const allBranches = options?.allBranches ?? false
   const granularity = options?.granularity ?? 'turn'
 
-  // 字节/条目统计保持全量口径（折叠是展示层行为，不丢数据面）；行与轮次计数走对话集
+  // 字节/条目统计保持全量口径（折叠是展示层行为，不丢数据）；行与轮次计数走对话集
   const parsedBytes = leafParsedBytes(turns)
   const leafEntryCount = turns.reduce((s, t) => s + t.entries.length, 0)
   // totalEntries = leaf + 旁支子树 + 孤儿；totalBytes 无原始文件字节数（签名不含 ParseResult），

@@ -21,7 +21,7 @@
  *    required 的真实 typebox 锁由 structured-output cross-package-contract.test.ts
  *    承担（本包 vitest 把 typebox alias 到 mocks/typebox.ts，丢 options）。
  *
- * 旧名残留负锚（U-B1 验收条款③的机器化）：全部声明面源文件的模型可见文案零
+ * 旧名残留负锚（U-B1 验收条款③的机器化）：全部声明侧源文件的模型可见文案零
  * 旧工具名指引（`subagent` / `workflow` backtick 指引、action:"start" 旧调用形态）。
  *
  * 框架：vitest（禁 node:test）。
@@ -139,13 +139,13 @@ function startProperties(): Record<string, unknown> {
 }
 
 // ══════════════════════════════════════════════════════════════
-// 旧名残留负锚（U-B1 验收条款③）：全部声明面源文件零旧工具名指引
+// 旧名残留负锚（U-B1 验收条款③）：全部声明侧源文件零旧工具名指引
 // ══════════════════════════════════════════════════════════════
 
-describe("旧名残留负锚（U-B1）：声明面源文件零旧工具名指引", () => {
+describe("旧名残留负锚（U-B1）：声明侧源文件零旧工具名指引", () => {
   // 负锚形态界定：backtick 精确包裹旧名（`subagent` / `workflow`）= 模型可见的
   // 工具名指引；代码标识符（registerSubagentTool）、两键控集合保留的旧名、历史注释
-  // 不在声明面（验收条款③除外项）。旧调用形态 action:"start" 同属拆分前结构指引。
+  // 不在声明侧（验收条款③除外项）。旧调用形态 action:"start" 同属拆分前结构指引。
   const DECLARATION_SOURCES: Array<[string, string]> = [
     ["subagent-tool.ts", SUBAGENT_TOOL_SRC],
     ["tool-workflow.ts", TOOL_WORKFLOW_SRC],
@@ -210,7 +210,7 @@ describe("旧名残留负锚（U-B1）：声明面源文件零旧工具名指引
  *      调用形状（subagent_start 侧 A6 的本工具落点）；message 含 session tree 归属
  *      纪律（nested 经其 parent——归属检查 record-access 直接父校验的模型可见范围）
  *  B3  schema subagentId 说明含打断/复活副作用（"interrupts its in-flight round" /
- *      "starts a new round"）——必填字段说明是模型填参必读面，打断语义不依赖
+ *      "starts a new round"）——必填字段说明是模型填参必读内容，打断语义不依赖
  *      deprecated interrupt 字段（interrupt 只声明 no-op 本身）
  */
 describe("subagent_start description — 锚词保留清单（D2/D3 契约）", () => {
@@ -343,7 +343,7 @@ describe("subagent_manage / subagent_message description — call shapes 与 id 
 
   it("message 打断/复活语义锚（B3）：subagentId 必填字段说明承载副作用，interrupt 只声明 no-op", () => {
     const schemaSrc = readFileSync(join(__dirname, "../subagent-tool-schema.ts"), "utf-8");
-    // 只切 messageParam 块（cancel/close 处有同名 subagentId 声明，不在断言面）
+    // 只切 messageParam 块（cancel/close 处有同名 subagentId 声明，不在断言范围）
     const start = schemaSrc.indexOf("messageParam:");
     const end = schemaSrc.indexOf("forkFromParam:");
     if (start < 0 || end < 0 || end <= start) throw new Error("messageParam block not found");
@@ -519,7 +519,7 @@ describe("subagent start schema: collect param retired (批量入口 = subagents
     const manage = schemaData(SubagentManageParams, "SubagentManageParams");
     const message = schemaData(SubagentMessageParams, "SubagentMessageParams");
     expect(Object.keys(start.properties as Record<string, unknown>)).not.toContain("collect");
-    // 数据面全量断言（描述文本里的 collect 措辞随之删除）：三个拆分 schema 序列化后零残留。
+    // 数据全量断言（描述文本里的 collect 措辞随之删除）：三个拆分 schema 序列化后零残留。
     expect(JSON.stringify(start)).not.toContain("collect");
     expect(JSON.stringify(manage)).not.toContain("collect");
     expect(JSON.stringify(message)).not.toContain("collect");

@@ -25,7 +25,7 @@ export interface SkillRef { // oe-exempt:20261001:framework:exec-skills 共享�
 /**
  * 技能名归一：剥掉 pi 命令命名空间前导 `skill:` 前缀，得到自然技能名。
  * pi.getCommands() 枚举 skill 类命令时 name 带 `skill:` 前缀（如 `skill:tech-design`），
- * 这是 pi 的实现细节，不得泄漏到输入面——slash `--skills` 与消费方工具的 skills 参数
+ * 这是 pi 的实现细节，不得泄漏到输入范围——slash `--skills` 与消费方工具的 skills 参数
  * 都用自然技能名。枚举侧与输入侧双向剥前缀后比对，兼容两种形态。
  */
 export function normalizeSkillName(name: string): string {

@@ -148,7 +148,7 @@ export const SubagentMessageParams = Type.Object({
   // 拒绝清单不进 schema 说明——运行时错误本就带恢复动作），此处不重复。
   messageParam: Type.Optional(Type.Object({
     subagentId: Type.String({
-      // message 的打断/复活副作用在此承载：必填字段的说明是模型填参的必读面，
+      // message 的打断/复活副作用在此承载：必填字段的说明是模型填参的必读内容，
       // 不依赖模型去翻 deprecated interrupt 字段（D1 单源化——interrupt 只声明 no-op）。
       description:
         "REQUIRED for action:'message'. The subagentId to message — any subagent in this session tree, running or idle. " +

@@ -209,7 +209,7 @@ describe("entry status maps via protocol mapReasonToStatus (D10 single-source, i
 	// bte 写侧 status 与 pending-notifications unregister listener 同引 protocol 单点
 	// （ext-simplify-17 D10）——原 status: reason 的 identity 假设在非 identity reason
 	// （budget_limited→failed 等）上会静默漂移，映射表演化时两写侧不再可能分叉。
-	// settle 产域四值当前恰为 identity 映射，但断言面按「status === mapReasonToStatus
+	// settle 产域四值当前恰为 identity 映射，但断言范围按「status === mapReasonToStatus
 	// (reason)」表述：映射表日后改任何一行的口径，本组用例随实现同源自洽。
 	it("appended status equals the authoritative mapping for every reason the settle path can produce", () => {
 		// settledPendingReason 全产域：exited 三分支（natural/timeout/killed|process-exit

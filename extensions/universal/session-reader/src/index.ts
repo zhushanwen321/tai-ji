@@ -154,7 +154,7 @@ const guidelines = [
   // 工具内指向本工具的交叉引用，非本清单的锚）。
   'Progressive reading: outline (~1500 tokens) → expand (one turn) → detail; defaults omit toolResult/thinking noise.',
   'find first (uuid fragment / name); TUI #references are full uuids. Never read raw .jsonl—use this tool.',
-  // zcode 路由（U9）对 LLM 的唯一可见面：sa-id 输入自动路由，无需任何参数；首遇
+  // zcode 路由（U9）对 LLM 的唯一可见部分：sa-id 输入自动路由，无需任何参数；首遇
   // zcode_* 错误码前先有背景预告。
   'sa- ids route transparently to pi or zcode engine sessions; sess_ prefixed ids are not accepted—use the completion-notice sa- id.',
   'Errors carry a 👉 recovery hint—follow it to retry.',

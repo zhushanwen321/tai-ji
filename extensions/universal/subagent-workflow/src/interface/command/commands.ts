@@ -149,7 +149,7 @@ export function registerWorkflowsCommand(
  * 各 action 语义：
  * - abort → 调 lifecycle abortRun，成功/失败均 notify（不向上抛）
  * - resume → 调 core resumeRun 断点续跑（与 TUI verb、workflow tool
- *   action:"resume" 三通道同语义——D14 args 校验面在 tool action 入口，命令
+ *   action:"resume" 三通道同语义——D14 args 校验侧在 tool action 入口，命令
  *   通道不带 args，沿用历史 args），成功/失败均 notify（不向上抛）
  * - lifecycle-removed → 已移除的 verb（pause），给定制指引而非 Usage
  *   （F3 定稿——提示语义优先于 missing-id：run 一次性生命周期后不可挂起）

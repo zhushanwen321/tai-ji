@@ -40,7 +40,7 @@ const ORIG = 'prov-a/model-1'
 const TASK_M = 'prov-b/model-2'
 const OTHER_M = 'prov-c/model-3'
 
-/** 模型控制面 mock：setModelCalls 记录调用序（切换/恢复时序断言的核心观测点） */
+/** 模型控制接口 mock：setModelCalls 记录调用序（切换/恢复时序断言的核心观测点） */
 class ModelOpsMock implements SchedulerModelOps {
   currentRef: string | undefined = ORIG
   idle = true

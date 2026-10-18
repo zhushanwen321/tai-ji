@@ -31,7 +31,7 @@ const RESULT_DEFAULT_LIMIT = 8000
 /** result 批量条目分隔符（与 notifier 批通知 "\n\n---\n\n" join 同款）。 */
 const RESULT_BATCH_SEPARATOR = '\n\n---\n\n'
 
-/** result action 对 tool-handler 文件私有 helper 的注入面（入口分发处 per-call 构造）。 */
+/** result action 对 tool-handler 文件私有 helper 的注入点（入口分发处 per-call 构造）。 */
 export interface ResultActionDeps {
   resolveSessionId(
     rawSession: string | undefined,

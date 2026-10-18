@@ -38,7 +38,7 @@ export interface SubagentRef extends SessionRef {
   task?: string
   /** agent 类型名（manifest.agentName，P-fallback 时 identity.data.agent；同语义异名） */
   agentName?: string
-  /** 模型 id（仅 manifest 有；P-fallback 时 undefined）。仅 details 可见，不进文本渲染（D2②：展示面只取 status/agentName/task） */
+  /** 模型 id（仅 manifest 有；P-fallback 时 undefined）。仅 details 可见，不进文本渲染（D2②：展示侧只取 status/agentName/task） */
   model?: string
   /** 终态 completed/failed/running（仅 manifest 有；P-fallback 时 undefined） */
   status?: string

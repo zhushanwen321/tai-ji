@@ -237,7 +237,7 @@ describe('before_agent_start 注入顺序（base → global → capability → a
     expect(prompt).toContain(path.join(GLOBAL_DIR, 'AGENTS.md'))
   })
 
-  it('capability 段文案覆盖四点能力面（HTML 白名单 / 相对图片 / 相对链接双通道 / 远程图片不渲染）', () => {
+  it('capability 段文案覆盖四点能力侧（HTML 白名单 / 相对图片 / 相对链接双通道 / 远程图片不渲染）', () => {
     setupFs({ config: '{"append": {"enabled": false, "prompt": ""}}' })
     const prompt = runHook('BASE-PROMPT')!.systemPrompt as string
     const capText = prompt.slice(prompt.indexOf(CAP_HEADER))

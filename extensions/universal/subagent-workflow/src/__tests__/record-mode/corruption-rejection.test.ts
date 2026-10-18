@@ -14,7 +14,7 @@
 //
 // 宿主 fail-fast 链：loadAll 抛错 → recoverCrashedRuns 上抛 → session-lifecycle
 // storeHealthy=false（workflow 域停初始化）——session-lifecycle.test.ts 的
-// 「store.loadAll 失败 → storeHealthy=false」用例承接该半边，本件只锚 store 读面。
+// 「store.loadAll 失败 → storeHealthy=false」用例承接该半边，本件只锚 store 读侧。
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -125,7 +125,7 @@ describe("场景 18：record 损坏拒绝（[D1] 坏行停摆——解析失败�
     expect(isRunSettled(loaded[0]!)).toBe(false);
   });
 
-  it("损坏隔离面：settlement 查询（通知链）保守 miss + warn，不抛（恢复面的拒绝语义只在 loadAll）", async () => {
+  it("损坏隔离侧：settlement 查询（通知链）保守 miss + warn，不抛（恢复侧的拒绝语义只在 loadAll）", async () => {
     await seedCreatedFrame(env);
     const { appendFileSync } = await import("node:fs");
     appendFileSync(env.recordPath(RUN_ID), "{broken\n", "utf8");

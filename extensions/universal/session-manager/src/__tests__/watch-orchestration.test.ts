@@ -28,7 +28,7 @@ vi.mock("@zhushanwen/pi-extension-logger", () => createLoggerModuleMock());
 const loggerMock = getLoggerMock();
 
 // pi-delivery-port 进程级槽（C-ext-06；recordManagedNotify 的消费入口——unified-
-// delivery 波 2 切换后 watch 应答的投递观察面 = port.deliver）。
+// delivery 波 2 切换后 watch 应答的投递观测点 = port.deliver）。
 const PORT_SLOT_KEY = DELIVERY_PORT_SLOT_KEY;
 
 /** watch 开表调用（deferred）——opts 为开表时传入的 select 第三参原样值 */
@@ -167,7 +167,7 @@ describe("arm（send/create → pending:register + watch 开表）", () => {
 		await runToolCall(h, "send_to_session", { sessionId: "child-1", prompt: "go" });
 		await flushMicrotasks();
 
-		// 请求面：send params 携带 sm- 形态 notifyId
+		// 请求侧：send params 携带 sm- 形态 notifyId
 		const sendPayload = JSON.parse(h.selectMock.mock.calls[0][1][0]) as {
 			action: string;
 			params: Record<string, unknown>;
@@ -189,7 +189,7 @@ describe("arm（send/create → pending:register + watch 开表）", () => {
 		expect(h.watches[0].opts?.timeout).toBeUndefined();
 	});
 
-	it("工具结果原样透传：send result 含 willNotify 字段（LLM 契约面显式化）", async () => {
+	it("工具结果原样透传：send result 含 willNotify 字段（LLM 契约范围显式化）", async () => {
 		const h = createHarness();
 		h.actionResults.send = () => SEND_OK;
 		const result = await runToolForText(h, "send_to_session", {

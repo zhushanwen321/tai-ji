@@ -31,7 +31,7 @@ import {
   type GuiRenderResult,
 } from "@zhushanwen/extension-protocol";
 // C5②/C5⑦：创作闭环统一走 core barrel（generateWorkflowScript/saveWorkflow/
-// deleteWorkflow/lintScript 均为 barrel 导出面；深路径在 npm/vendored 形态不可达）
+// deleteWorkflow/lintScript 均为 barrel 导出范围；深路径在 npm/vendored 形态不可达）
 import {
   deleteWorkflow,
   formatAvailableWorkflowRefs,
@@ -153,7 +153,7 @@ export function registerWorkflowScriptTool(
   pi.registerTool({
     name: "workflow-script",
     label: "Workflow Script",
-    // tool-declaration-slimming U-C1 R1 裁决：低频脚本管理面延迟加载（defer 名单工具）。
+    // tool-declaration-slimming U-C1 R1 裁决：低频脚本管理侧延迟加载（defer 名单工具）。
     exposure: "deferred",
     description:
       "Manage workflow scripts: generate (AI creates tmp script), lint (static check), " +

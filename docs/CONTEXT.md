@@ -69,7 +69,7 @@ session 导入统一入口的多 coding-agent 抽象：一个导入源负责「�
 源 coding-agent 对单条消息「给谁看」的裁决，与 `role` 是**两个正交维度**：`role` 只表达角色（user/assistant），不表达这条消息是真人输入还是运行时注入。zcode 用四字段（`semantics` / `visibility` / `source` / `synthetic`）联合判定出六种派生视图策略（`realUserInput` / `visibleAssistant` / `compactSummary` / `providerContextOnly` / `hiddenSynthetic` / `timelineOnly`），导入转换器按策略映射到 pi entry 类型。**教训**：只按 `role` 分派会让源系统的合成消息（提醒/通知/引用回放）冒充用户消息——zcode 全库 user 消息 67% 是合成。完整判据与闭集枚举：[session-import-sources.md §6.1](architecture/session-import-sources.md)。
 
 ### 消息撤回（Message Revoke）
-撤回 = 把一条已发出的 user 消息（连同其引发的回复与派生）从模型上下文移出，原文回草稿。机制 = pi `navigateTree` **树内回退**（被撤内容移出活跃路径，非删除——session 文件保留完整历史），LabelEntry（label `taiji:revoked`）落文件尾 = 持久化锚（重启/空闲回收后回退不复活）。**派生面口径二分准则**：未来状态随树回退（plan/todo/goal/scheduler/模型绑定——经 session_tree 重建或失效信号重建），已发生事实照实保留（subagent/workflow run 记录、usage 消耗）。撤回 ≠ 抹除：tee 日志、provider 侧已收请求、工具副作用均如实保留，UI 按此表述。机制裁决与重审触发：[decisions.md ADR-0076](adr/decisions.md)。
+撤回 = 把一条已发出的 user 消息（连同其引发的回复与派生）从模型上下文移出，原文回草稿。机制 = pi `navigateTree` **树内回退**（被撤内容移出活跃路径，非删除——session 文件保留完整历史），LabelEntry（label `taiji:revoked`）落文件尾 = 持久化锚（重启/空闲回收后回退不复活）。**派生侧口径二分准则**：未来状态随树回退（plan/todo/goal/scheduler/模型绑定——经 session_tree 重建或失效信号重建），已发生事实照实保留（subagent/workflow run 记录、usage 消耗）。撤回 ≠ 抹除：tee 日志、provider 侧已收请求、工具副作用均如实保留，UI 按此表述。机制裁决与重审触发：[decisions.md ADR-0076](adr/decisions.md)。
 
 ### 会话读取基座（session-core / zcode-session-source）
 session「发现 → 读取 → 归一化 → 序列化」的零依赖共享实现，两层：`packages/session-core/`（canonical 原语——`NormalizedSession` 归一化模型 `{header, entries, degradations}`、JSONL parse/serialize、首行读取、session/zcode sa-id 工具）与 `packages/zcode-session-source/`（zcode 宿主 SQLite 库只读访问层——sqlite 驱动双形态适配、**四级恢复阶梯**（L1 直开 → L2 immutable 逃逸 → L3 快照 → L4 SqliteUnreadableError）、transcript 转换）。两个消费方：session-reader 扩展（通知链 `session_read` 的 zcode 读链）与 runtime zcode 导入源——同一套实现，禁止各自复制副本。`degradations` 承载无法保真的内容（显式登记，禁止伪造）；sa-id → zcode 会话的路由经 manifest/entry 锚双键（`engine: 'zcode'` + sessionRef）判别，db 路径白名单闸放行。
@@ -83,7 +83,7 @@ taiji 的后端服务进程（Node.js）。职责：托管 pi 子进程的生命
 
 ```
 Agent Runtime（一个 Node.js 进程）
-├── transport/   WS 消息面：server.ts 入口 + 按域拆分的 message handler
+├── transport/   WS 消息侧：server.ts 入口 + 按域拆分的 message handler
 │                （session/config/extension/plugin/git/file/terminal/... 各一）
 │                + message-broker（统一广播）。只做连接管理与消息路由，不含业务逻辑。
 ├── services/    业务服务：session/（生命周期、历史、compaction、restore、fork）、
@@ -308,9 +308,9 @@ plan 审阅请求的 select title marker（`\x00TAIJI_PLAN_REVIEW:`，与 `UI_FO
 
 ### Ask User（ask_user）
 
-> **术语演进（2026-09 核对）**：原词条「Human Confirm」的代码符号已消亡，任务级用户确认统一到 ask_user 概念（主对话的 ask-user 工具与子代理的反向 UI 通道是同一交互面）。
+> **术语演进（2026-09 核对）**：原词条「Human Confirm」的代码符号已消亡，任务级用户确认统一到 ask_user 概念（主对话的 ask-user 工具与子代理的反向 UI 通道是同一交互侧）。
 
-agent（主对话或子代理 run）在执行中请求用户输入/确认的交互。子代理场景的链路：引擎进程的 dialog/UI 请求经 engine-protocol v1 的 `host/askUser` 反向通道到达宿主（`packages/subagent-core/src/execution/ui/ui-request-handler-factory.ts`，dialog 类经 `dialog-queue.ts` 跨子进程串行），GUI 模式透传进宿主 UI 通道，以 extension UI 请求呈现给用户（富交互形态 = [统一表单协议](#统一表单协议ui-form2026-09-19)的 FormOverlay：选项/多选/Other/自由文本）。ask-user 包的 channel-handler 以 `ui_form` / `ask_user` 双通道名注册并双读 `formQuestions ?? questions` 入参（孙进程版本不可控的兼容面）。用户回复不是简单的 allow/deny，可以是自由文本、修正指令或附加信息。
+agent（主对话或子代理 run）在执行中请求用户输入/确认的交互。子代理场景的链路：引擎进程的 dialog/UI 请求经 engine-protocol v1 的 `host/askUser` 反向通道到达宿主（`packages/subagent-core/src/execution/ui/ui-request-handler-factory.ts`，dialog 类经 `dialog-queue.ts` 跨子进程串行），GUI 模式透传进宿主 UI 通道，以 extension UI 请求呈现给用户（富交互形态 = [统一表单协议](#统一表单协议ui-form2026-09-19)的 FormOverlay：选项/多选/Other/自由文本）。ask-user 包的 channel-handler 以 `ui_form` / `ask_user` 双通道名注册并双读 `formQuestions ?? questions` 入参（孙进程版本不可控的兼容范围）。用户回复不是简单的 allow/deny，可以是自由文本、修正指令或附加信息。
 
 **Tool Approval vs Ask User**: Tool Approval 是权限控制（binary + always allow），Ask User 是任务级沟通（开放式输入）。
 
@@ -347,7 +347,7 @@ Session 级状态，表示 pi 进程正在工作（从用户发送消息到 agen
 
 **已完结 id 索引**：判重的内存缓存（已完结条目 id 集合），由 DeliveryStore 终局记录在启动 / 重放时构建（loadTerminalIds）；判重顺序 = 在途条目 → 内存索引 → 持久记录。撤销防复活凭据在持久终局记录（v2 的 tombstone 独立机制退役）。
 
-**投递日志（delivery journal）**：通知车道耐久面 = 待投记录 / 已投回执两列 session entry（port 经 appendEntry 写，schema v2 + v1 账本存量兼容读）；持久化承诺先于投递尝试（受理前落盘）。
+**投递日志（delivery journal）**：通知车道耐久侧 = 待投记录 / 已投回执两列 session entry（port 经 appendEntry 写，schema v2 + v1 账本存量兼容读）；持久化承诺先于投递尝试（受理前落盘）。
 
 **持久化存储端口（DeliveryStore）**：内核 v3 端口——`persist / ack / discard / loadUndelivered / loadTerminalIds / hasTerminal`。两实现：runtime 半区 = 磁盘 outbox（fs 注入，内核零 fs 知识）；port 半区 = session entry（persist 为 no-op，落盘由提交层 appendEntry 前置兑现防双写）。
 
@@ -417,7 +417,7 @@ pi session 文件（JSONL）中通过 `parentId` 构建的逻辑树结构。同�
 **命名约定**: "Panel" 统一指 Session 的视口（即代码中的 `Panel` / `PanelLeaf` / `PanelTree`，`packages/renderer/src/stores/panel.ts`），不用于其他含义。
 
 ### 远程访问（Remote Access）
-手机浏览器经局域网直连 runtime 的可选能力，默认关闭（纯回环监听，与既有形态一致）。开启后 runtime 改绑 `0.0.0.0`，同一端口同源托管移动壳构建产物（HTTP 静态范围 + WS）；WS 鉴权集合 = {per-spawn token} ∪ {remote token}。配置面 = 设置 → 远程访问面板（开关 / token 轮换 / LAN 地址+二维码 / Tailscale 指引），配置持久化 `<dataDir>/remote-access.json`（0600，main 原子写，关态留存）。开启信号 = argv `--remote-access`（无 env 通道，脚本直跑 / e2e 池等非 supervisor 路径不传 flag 即天然关态）；`--mobile-dist=<path>` 是移动壳 dist 的唯一来源（main 按运行环境解析：dev 仓库 dist / prod 打包资源）。**代码映射**：runtime `packages/runtime/src/transport/connection-manager.ts`（绑定地址 / token 集合 / 静态托管白名单）、组合根 `packages/runtime/src/index.ts`、main 配置面 `apps/electron/main/remote-access/`、supervisor 拼参 `apps/electron/main/supervisor/process-control.ts`、面板 `packages/renderer/src/components/settings/remote-access/`、契约 `packages/shared/src/remote-access.ts`。
+手机浏览器经局域网直连 runtime 的可选能力，默认关闭（纯回环监听，与既有形态一致）。开启后 runtime 改绑 `0.0.0.0`，同一端口同源托管移动壳构建产物（HTTP 静态范围 + WS）；WS 鉴权集合 = {per-spawn token} ∪ {remote token}。配置侧 = 设置 → 远程访问面板（开关 / token 轮换 / LAN 地址+二维码 / Tailscale 指引），配置持久化 `<dataDir>/remote-access.json`（0600，main 原子写，关态留存）。开启信号 = argv `--remote-access`（无 env 通道，脚本直跑 / e2e 池等非 supervisor 路径不传 flag 即天然关态）；`--mobile-dist=<path>` 是移动壳 dist 的唯一来源（main 按运行环境解析：dev 仓库 dist / prod 打包资源）。**代码映射**：runtime `packages/runtime/src/transport/connection-manager.ts`（绑定地址 / token 集合 / 静态托管白名单）、组合根 `packages/runtime/src/index.ts`、main 配置侧 `apps/electron/main/remote-access/`、supervisor 拼参 `apps/electron/main/supervisor/process-control.ts`、面板 `packages/renderer/src/components/settings/remote-access/`、契约 `packages/shared/src/remote-access.ts`。
 
 ### 移动壳（mobile shell）
 `@taiji/mobile-renderer` 构建出的手机 web 客户端（浏览器运行、触控交互），与桌面 renderer 并列的双壳成员（拓扑见 [renderer-package-topology.md](architecture/renderer-package-topology.md)）。连接装配：WS URL 从 `location.host` 同源派生、凭据经 PlatformPort.storage（localStorage）持久、storage/webSocket 为真实实现。UI 主体 = session 列表 / 消息流 / 新建任务表单 / token 输入视图 + 底部 tab + 根级权限审批弹窗（ui PermissionRequestDialog，PermissionTransport 经 plugin.approvePermissions/revokePermissions 回传）；业务逻辑复用 core 业务域，展示复用 ui 共享组件（markdown 渲染链模块与被 ui 组件消费的 locale 域文件已下沉 ui 包，双壳共享单源）。v1 能力边界：slash 命令 bar / plugin view 全集 / terminal / 文件树 / git 面板不在移动壳（挂载点子集 = message-stream / slash(隐藏保留) / companion）；图片粘贴降级为文本占位（`[图片粘贴：需桌面环境]`）、mermaid 图表占位呈现、hover 类消息操作不可用。壳间禁止互相 import。
@@ -434,7 +434,7 @@ workflow run 的唯一持久化：`<sessionDir>/workflow-state/<runId>.record.js
 ### run/record 状态词表（W2 收敛 + 生命周期重构，[ADR-0080](adr/decisions.md) / [ADR-0082](adr/decisions.md)）
 run 与 record 两域状态词表的单源口径，消费方按维取值、禁止跨维混用：
 
-- **run 域两维正交**：lifecycle 维 = `RunLifecycle` 四态 + `interrupted` 暂停态（`created/running/settling/terminal` + `interrupted`——dispatched 已并入 running（两态行为相同且零消费方，[ADR-0082] D2）；`packages/subagent-core/src/orchestration/run-events.ts` 的 `RUN_TRANSITIONS` 转移表唯一裁决，表外转移 fail-fast）；outcome 维 = `RunOutcome` 四值（`done/failed/cancelled/time_limited`，`ALL_RUN_OUTCOMES` 单源），outcome 仅 terminal 出现。`interrupted` 不是终局——是「执行中断、无活体」的 lifecycle 暂停态（running/settling → interrupted：崩溃收编 / terminate 被动失联（resume 来源 run，[ADR-0082] D11）；interrupted → running：resume），自动终局化写入方已随 abandon 移除消失（[ADR-0082] D9），中断来源细分由 `run-interrupted` 帧 errorCode 承载（`crashed` / `terminated` / `startup-sweep`；历史成员 `interrupted_abandoned` / `idle-evicted` 保留只读解析）；`cancelled` 保留「用户主动取消」语义，显示面「已取消」（主动）与「已中断」（被动）禁混用。旧 `RunStatus` 两态机（running|done + `state.status`/`state.reason` 快照字段）降级 v1 兼容层（W4 sunset），禁止作活体终局判据或载荷源。
+- **run 域两维正交**：lifecycle 维 = `RunLifecycle` 四态 + `interrupted` 暂停态（`created/running/settling/terminal` + `interrupted`——dispatched 已并入 running（两态行为相同且零消费方，[ADR-0082] D2）；`packages/subagent-core/src/orchestration/run-events.ts` 的 `RUN_TRANSITIONS` 转移表唯一裁决，表外转移 fail-fast）；outcome 维 = `RunOutcome` 四值（`done/failed/cancelled/time_limited`，`ALL_RUN_OUTCOMES` 单源），outcome 仅 terminal 出现。`interrupted` 不是终局——是「执行中断、无活体」的 lifecycle 暂停态（running/settling → interrupted：崩溃收编 / terminate 被动失联（resume 来源 run，[ADR-0082] D11）；interrupted → running：resume），自动终局化写入方已随 abandon 移除消失（[ADR-0082] D9），中断来源细分由 `run-interrupted` 帧 errorCode 承载（`crashed` / `terminated` / `startup-sweep`；历史成员 `interrupted_abandoned` / `idle-evicted` 保留只读解析）；`cancelled` 保留「用户主动取消」语义，显示侧「已取消」（主动）与「已中断」（被动）禁混用。旧 `RunStatus` 两态机（running|done + `state.status`/`state.reason` 快照字段）降级 v1 兼容层（W4 sunset），禁止作活体终局判据或载荷源。
 - **record 域三维正交**：lifecycle 维 = `ExecutionStatus`（running|idle）× 停因维 = `StopReason`（上一轮收条语义，由 `record-settled` / `record-round-idle` 事件帧承载，仅展示排障）× 结果维 = outcome 四值（轮终参数 `ExecutionOutcome` 为独立实体字面量 `completed/failed/cancelled`——原 `Exclude<RunOutcome,"interrupted">` 派生别名随 interrupted 移出 RunOutcome 取消，[ADR-0082] 实施期裁决：execution/subagent-record 域写入值不变）。record 域不建显式转移表：意图原语族即状态机（C-data-20 唯一写入口 + `tryEnterRunning` CAS 表外拒绝）。
 - **派生视图相 ≠ 状态**：注册表派生视图 = record fold 四相（missing/active/terminal/interrupted，`run-registry.ts` 的 `RunRegistryPhase`）——interrupted 相是派生视图判读（`run-interrupted` 转移帧已写入 record，或事件流停止且活体未命中的 host-died 判读），对应 lifecycle 暂停态而非终局（[ADR-0082] 后派生视图相与 lifecycle 同构，interrupted 相可流转回 active）。manifest 的派生视图持久化格式（record 终局事件的派生缓存，单一生产者）不计入消费方状态词表口径。
 
@@ -445,7 +445,7 @@ run 与 record 的运行态数据持久化形态（[ADR-0094](adr/decisions.md) 
 - **落盘键的旧词裁决（已完成）**：事件流升格前的旧词（journal）在代码符号与落盘键里的残留已全部改成现行词，不做迁移、不留兼容读——项目未上线，不存在需要兼容的 v1 数据。三处落盘键现状：事件文件头行 = `{"type":"record-events"}`（`RECORD_EVENTS_HEADER_TYPE`，`record-events.ts`）；engineHandle 落盘键 = `engineHandle.eventsPath`（引擎侧事件文件路径——SDK `EngineHandleData`/`ResumeAnchor` wire 契约、core record/manifest/entry 形状、读写两侧与扫描检查同批改名）；workflow-record 注册条目锚点键 = `recordPath`（record 流路径，D16③ 后锚点语义 = `<runId>.record.jsonl`）。
 - **物化派生视图 / 索引**：折叠结果的落盘副本（record 侧 manifest、run 侧 manifest、`.record-binding`、`sessions-index.json`）。三条硬性质（可删 / 带水位 / 无独有字段）与逐项现状见 [物化派生视图与索引](#物化派生视图与索引)。`.alive` 是操作租约，不计事实源。
 - **事件流增量读**：从上次读到的位置（offset）继续读新增事件行的增量读取方式（`packages/subagent-core/src/execution/persistence/event-tail.ts`，run 与 record 两域共用）——runtime 内存派生视图的增量喂入源之一（另一源 = pi entry 游标）。
-- **收编**：把「有注册记录、无终态记录」的实体判定为中断并补齐记录的动作（本域领域词）——run 侧 = 落 `run-interrupted` 转移帧转 interrupted 暂停态（[ADR-0082] D15：壳侧 recoverCrashedRuns 与 runtime startupSweep 两链经终局编排单一入口），record 侧 = 幂等追加终态事件；事件流重放后幂等追加。`recoverCrashedRuns`（崩溃孤儿收编链）与 `rebuildRunFromRecord`（resume 正常路径的聚合重建面——fold 判 resume 资格、重建供 worker 接管的完整聚合）均经调用链甄别为现役机制非补偿残留，保留。
+- **收编**：把「有注册记录、无终态记录」的实体判定为中断并补齐记录的动作（本域领域词）——run 侧 = 落 `run-interrupted` 转移帧转 interrupted 暂停态（[ADR-0082] D15：壳侧 recoverCrashedRuns 与 runtime startupSweep 两链经终局编排单一入口），record 侧 = 幂等追加终态事件；事件流重放后幂等追加。`recoverCrashedRuns`（崩溃孤儿收编链）与 `rebuildRunFromRecord`（resume 正常路径的聚合重建侧——fold 判 resume 资格、重建供 worker 接管的完整聚合）均经调用链甄别为现役机制非补偿残留，保留。
 - **惰性兼容读（run 侧存量）**：run 侧旧格式两件套（`.events.jsonl` + `<runId>.jsonl` 快照）无兼容读——不读、不写、不主动删（[ADR-0082] D1 历史数据处置，随裁决点 7 清理自然消亡）；subagent-record 的 v1 全量快照兼容层已整体删除（无 v1 数据）。
 - **保留窗口**：事件流的显式保留期限（默认 30 天）——窗口内全保留，窗口外的终态实体由统一保留维护轮清理（折叠终态资格判据；cap=50 已废除）。
 
@@ -528,7 +528,7 @@ record 的执行单位：一次「派发 → 回收」= 一轮。`round-started`
 schema 强制链的引擎确认信号：native 引擎在启动期武装断言通过 + 孙进程 spawn 成功后上报一次 `armed` 事件（载荷 = env 变量名 + 必备扩展包名）。宿主是独立信号源（监控不与施控同源），等待窗内未收到即 fail-fast。仅 native 引擎、仅 schema 任务；emulated 引擎恒不上报。契约义务见 [engine-development-guide](extensions/subagents/engine-development-guide.md) §6。
 
 ### 终局必达通知
-workflow run 的结果语义通知纪律：成功/失败/取消一律出终局通知，走确认式送达（持久账本 + 幂等键，at-least-once）。是 C-ext-19 确认式送达在 workflow 域的细化（C-ext-26），终局内容由 run 状态机统一裁决，禁止旁路第二通知面。
+workflow run 的结果语义通知纪律：成功/失败/取消一律出终局通知，走确认式送达（持久账本 + 幂等键，at-least-once）。是 C-ext-19 确认式送达在 workflow 域的细化（C-ext-26），终局内容由 run 状态机统一裁决，禁止旁路第二通知侧。
 
 ### 模型目录（pi 引擎域）
 pi 引擎的可用模型集合及其能力（思考档位等）。能力判定只在 `packages/runtime/src/services/model-capability.ts` 一点进入（ADR-0064 能力注册表），离线快照由 builtin provider 快照承载（`scripts/check-model-references.mjs` 检查漂移）。workflow 派发按全路径形态引用模型：裸名不解析、解析失败为期望行为（C-ext-24）。

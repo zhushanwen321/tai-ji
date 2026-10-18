@@ -24,7 +24,7 @@
 
 import { join } from "node:path";
 
-// 契约常量（LRU 上限）走 index 出口（background-task.ts 契约面）；行为原语走
+// 契约常量（LRU 上限）走 index 出口（background-task.ts 契约范围）；行为原语走
 // background-task 子出口（含 node 内建依赖，不进 index——renderer/core 零触达）
 import { MAX_TERMINAL_REGISTRY_ENTRIES } from "@zhushanwen/extension-protocol";
 import {
@@ -55,7 +55,7 @@ export function getRegistryPath(dataDir: string, sessionId: string): string {
 
 /**
  * 读取 registry 全量条目（Map 映射薄壳）。文件不存在 / 读失败 / 解析失败均返回
- * 空表（工具面不因 registry 问题崩溃）；解析失败由 protocol 原语重命名 .corrupt
+ * 空表（工具范围不因 registry 问题崩溃）；解析失败由 protocol 原语重命名 .corrupt
  * 保留现场 + warn（§3.6）。
  */
 export function readRegistry(registryPath: string): Map<string, RegistryEntry> {

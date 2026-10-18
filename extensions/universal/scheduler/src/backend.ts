@@ -72,7 +72,7 @@ export interface SchedulerBackend {
    */
   getEntries(): SchedulerEntryLike[]
   /**
-   * U6c：session_tree（树回退）重折叠订阅。生产注册面在 extension factory 顶层
+   * U6c：session_tree（树回退）重折叠订阅。生产注册点在 extension factory 顶层
    * （index.ts：pi.on('session_tree') 每代恰一，事件经 activeBackend 委托
    * PiSchedulerBackend.refoldSessionTree），事件到达时按活跃路径重折叠任务集并回调
    * listener——落点是 SchedulerRuntime 的内存任务 Map（runtime 构造时订阅，backend
@@ -156,7 +156,7 @@ export class PiSchedulerBackend implements SchedulerBackend {
 
   /**
    * U6c：session_tree（树回退）事件委托体，由 extension factory 顶层注册的 handler
-   * 经 activeBackend 调用（index.ts；不在本类构造函数注册，注册面理由见该处注释）。
+   * 经 activeBackend 调用（index.ts；不在本类构造函数注册，注册点理由见该处注释）。
    * 纯重建体：只按活跃路径重折叠任务集（loadTasks）并回调 runtime 换 Map——不做
    * 任何 sendMessage / appendEntry / tickTimer 启停（tick 常驻循环照常消费新任务集，
    * 被撤子树任务不在集内即到点不触发，A14）。

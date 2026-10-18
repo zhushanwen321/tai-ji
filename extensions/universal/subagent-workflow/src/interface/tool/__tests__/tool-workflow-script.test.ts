@@ -52,7 +52,7 @@ vi.mock("@zhushanwen/subagent-core", async (importOriginal) => ({
 const mockedWriteFileSync = vi.mocked(writeFileSync);
 const mockedMkdirSync = vi.mocked(mkdirSync);
 
-// ── 注册层捕获 helper（fake pi 捕获单点见 capture-tool.ts，此处只留差异面）──
+// ── 注册层捕获 helper（fake pi 捕获单点见 capture-tool.ts，此处只留差异点）──
 
 interface ScriptExecuteToolView extends CapturedTool { // oe-exempt:20260927:test 测试捕获 view 类型（非 ports 契约），单「实现」即测试本体
   execute: (

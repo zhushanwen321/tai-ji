@@ -30,7 +30,7 @@ export interface RunDisplayState { // oe-exempt:20260930:framework:run 域展示
   doneReason?: DoneReason;
   /** 可中断（abort）——仅 running；interrupted 态已停、done 已终局。 */
   abortable: boolean;
-  /** 会计面（活体快照值；重启重建后的近似值同样走这里，见 §2.1b）。 */
+  /** 记账侧（活体快照值；重启重建后的近似值同样走这里，见 §2.1b）。 */
   accounting: {
     usedTokens: number;
     maxTokens?: number;
@@ -101,9 +101,9 @@ export function formatRunBadge(ds: RunDisplayState, theme: ThemeLike): string {
 /**
  * 展示态 → 渲染签名片段（`computeRenderSignature` 用）。
  *
- * 签名的作用是「字段变了必须失效重绘」——把展示态的**生命周期面全字段**序列化进来，
+ * 签名的作用是「字段变了必须失效重绘」——把展示态的**生命周期侧全字段**序列化进来，
  * 新增字段自动进签名，不再依赖「手工同步签名表」的纪律（原实现只放 status，新增展示
- * 字段靠人记得补签名，DS8 维护约定即为此存在）。会计面（accounting）**刻意不重复进
+ * 字段靠人记得补签名，DS8 维护约定即为此存在）。记账侧（accounting）**刻意不重复进
  * 本片段**：签名里已有的 `budgetPart` 是同一组值的既有同精度形态（token 取整桶 +
  * cost 定点小数），重复只会引入第二套精度口径。
  */

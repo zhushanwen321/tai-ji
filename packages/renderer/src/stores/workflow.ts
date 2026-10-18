@@ -268,7 +268,7 @@ export const useWorkflowStore = defineStore('workflow', () => {
 
   /**
    * [可视化 D11] 活跃 run 信号纪元（每次 workflowUpdate 信号命中活跃 run 分支时自增）。
-   * 消费方 = overlay 内的 agent tab 快照面（AgentTabContent watch 本纪元重调快照拉取，
+   * 消费方 = overlay 内的 agent tab 快照侧（AgentTabContent watch 本纪元重调快照拉取，
    * 设计 §3.1-2/D8「实时性由列表 status + workflowUpdate 信号重新拉取体现」的 agentcall
    * 半边接线）；纪元自增即代表「活跃 run 有新信号」，重新拉取目标由消费方各自的 virtualId 决定。
    */
@@ -535,7 +535,7 @@ export const useWorkflowStore = defineStore('workflow', () => {
     const anchor = activeWorkflowRun.value
     if (anchor !== null && anchor.sessionId === sid) {
       void loadWorkflowRunEvents(sid, anchor.runId, { force: true })
-      // [可视化 D11] 信号纪元自增——通知活跃 run 的 agent tab 快照面重新拉取（§3.1-2：
+      // [可视化 D11] 信号纪元自增——通知活跃 run 的 agent tab 快照侧重新拉取（§3.1-2：
       // 对话流子页 = 拉取时刻快照 + 信号触发重新拉取；事件流 force 重新拉取之外，
       // agentcall 快照通道同链刷新）
       activeRunSignalEpoch.value += 1

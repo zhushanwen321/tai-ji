@@ -17,7 +17,7 @@ import { describe, expect, it, vi, beforeEach } from "vitest";
 import { registerGoalControlTool, type GoalControlDetails } from "../adapters/goal-control-adapter";
 import { createGoalSession } from "../session";
 
-// ── mock：logger + updateWidget（UI 通道降级用例断言面；其余用例下两者为 no-op，
+// ── mock：logger + updateWidget（UI 通道降级用例断言范围；其余用例下两者为 no-op，
 //    与真实路径行为等价——fixture 的 setWidget/notify 本就是 no-op）──
 const loggerWarnSpy = vi.hoisted(() => vi.fn());
 vi.mock("@zhushanwen/pi-extension-logger", () => ({

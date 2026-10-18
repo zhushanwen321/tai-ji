@@ -74,7 +74,7 @@ function makeRun(shape: RunShape = {}): WorkflowRun {
   return makeRunWithId(`wf-sig-${signatureRunSeq++}`, shape);
 }
 
-/** [W2/V1] runId 唯一化 + spec 最小面（displayStatusOf → core runSummary 派生视图
+/** [W2/V1] runId 唯一化 + spec 最小子集（displayStatusOf → core runSummary 派生视图
  *  读 runId/spec.scriptName——签名测试的 mock 需携带该最小字段集）。
  *  [D6(a) 第 1 步] 终局判定源 = 终局记录注册表：done 形态 fixture 必须携带注册表
  *  条目（生产 = 壳重建点 noteRebuiltSettlement 注入 run-settled 帧事实）。 */
@@ -107,7 +107,7 @@ function runWithLive(nodeOverrides: Partial<ExecutionTraceNode>, live: LiveProgr
 }
 
 /** plain theme: 着色方法直接返回原文，无 ANSI 色码——测试断言纯文本。
- *  bg/underline 为宽 ThemeLike 接口的 no-op 实现（workflow 渲染面只用 fg/bold）。 */
+ *  bg/underline 为宽 ThemeLike 接口的 no-op 实现（workflow 渲染范围只用 fg/bold）。 */
 const plainTheme: ThemeLike = {
   bg: (_color: string, text: string) => text,
   fg: (_tag: string, text: string) => text,

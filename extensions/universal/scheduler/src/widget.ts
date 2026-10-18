@@ -22,9 +22,9 @@ const WIDGET_NAME_MAX_WIDTH = 20
  * `readUiLocale()` 解析后传入，再经 `setSchedulerWidget` 双模推送）。
  * 格式：[定时任务] 3 条 · check-build 每 5 分钟（en: [scheduler] 3 scheduled · …）
  *
- * 静态面契约（scheduler widget 推送修正设计 D1-a）：行内容只由任务集稳定字段 + locale
+ * 静态范围契约（scheduler widget 推送修正设计 D1-a）：行内容只由任务集稳定字段 + locale
  * 派生，**无任何 now 参与的元素**——相对时间与「[!] n 条已逾期」标记已整体移除（时间流逝
- * 不是状态变化，静态面恒定是 index.ts 指纹跳推「无变化零推送」的前提）。
+ * 不是状态变化，静态范围恒定是 index.ts 指纹跳推「无变化零推送」的前提）。
  * 「最近任务」= nextRunAt 升序首个**启用**任务、**不用 now 过滤**：若保留
  * `nextRunAt > now` 过滤，任务 dispatch 失败未推进 nextRunAt 时越过时间点后「最近任务」
  * 会切换——显示变化而指纹不变，重新引入冻结缺口（设计 D1-a 反例论证）。
@@ -58,7 +58,7 @@ export function renderSchedulerWidgetTui(tasks: ScheduledTask[], locale: UiLocal
 /**
  * GUI 臂结构化载荷（设计 §6.8 D8）：body = 逐任务 list-tree（行文本走 `renderTaskLineStatic`
  * 静态变体单点），head 元数据由宿主壳层渲染——**标题由扩展自产**（`meta.title = t('tray.title')`），
- * 宿主零改动（三处渲染面：前两面 trim / `TrayAggregatePanel` nullish，非空标题均正确）。
+ * 宿主零改动（三处渲染范围：前两面 trim / `TrayAggregatePanel` nullish，非空标题均正确）。
  *
  * icon 点名 lucide key 'clock'（与设计 §6.8 一致）；badge = 启用任务数；status 两态 =
  * 有启用任务 running / 空 idle（D1-a：「有逾期 → failed」翻牌已移除——逾期是 now 派生

@@ -17,7 +17,7 @@
 
 ### port 后形态
 
-dispatch 改为 `port.deliver({ payload: custom, timing: 'steer', id })`：受理前 appendEntry 写投递日志 → 内核受理 → `pi.sendMessage({ deliverAs: 'steer', triggerTurn: true })`（`extensions/shared/delivery-port/src/delivery-port.ts:240-248`）——注入参数与现状逐字一致；新增投递日志与 ack 两类 plain entry（不进 LLM 上下文）、送达回执（message_end + details.deliveryId 命中）、pi 崩溃重启后 session_start 差集重放、提交侧 compaction 等待。
+dispatch 改为 `port.deliver({ payload: custom, timing: 'steer', id })`：受理前 appendEntry 写投递日志 → 内核受理 → `pi.sendMessage({ deliverAs: 'steer', triggerTurn: true })`（`extensions/shared/delivery-port/src/delivery-port.ts:241-249`）——注入参数与现状逐字一致；新增投递日志与 ack 两类 plain entry（不进 LLM 上下文）、送达回执（message_end + details.deliveryId 命中）、pi 崩溃重启后 session_start 差集重放、提交侧 compaction 等待。
 
 ### 行为变化
 

@@ -335,7 +335,7 @@ export async function callRenameLLM(
 	const finalText = extractFinalText(finalMessage);
 
 	// 提示词解析（rename-prompt-config）：内置风格 → 词表 + slug system；custom 非空 →
-	// 自定义指令 + 通用骨架 system（风格权威 = 用户指令）。事件面 live 读 config 后每次调用重解析。
+	// 自定义指令 + 通用骨架 system（风格权威 = 用户指令）。事件路径 live 读 config 后每次调用重解析。
 	const { systemPrompt, instruction } = resolveTitlePrompt(config);
 
 	// 两段输入信号各截断 4000 码点（成本可控，标题语义足够）

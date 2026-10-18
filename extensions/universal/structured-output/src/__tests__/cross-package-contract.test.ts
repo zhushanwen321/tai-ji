@@ -218,7 +218,7 @@ describe("cross-package contract: SW subagent tool schema（真实 typebox 校�
 		}
 		const startCompiled = REAL_TYPEBOX_COMPILE.Compile(mod.SubagentStartParams);
 		expect(typeof startCompiled.Check).toBe("function");
-		// 拆分收益的行为面：task/slug 缺一即拒（原单工具 schema 下 {"task":"..."} 可过校验）
+		// 拆分收益的行为范围：task/slug 缺一即拒（原单工具 schema 下 {"task":"..."} 可过校验）
 		expect(startCompiled.Check({ task: "t", slug: "s" })).toBe(true);
 		expect(startCompiled.Check({ task: "t" })).toBe(false);
 		expect(startCompiled.Check({ slug: "s" })).toBe(false);

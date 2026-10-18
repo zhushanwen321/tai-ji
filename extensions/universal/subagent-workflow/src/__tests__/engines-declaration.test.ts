@@ -110,7 +110,7 @@ afterEach(() => {
 describe("引擎清单派生视图合流（W4：发现器装载 ∪ 组合根注册 → engines.json）", () => {
   it("组合根注册引擎 + 发现的引擎包合流入派生视图（契约 {v:1, engines} 不变）", async () => {
     // 组合根注册点（registerPiEngine/registerZcodeEngine 的 inproc 形态；工厂体同款
-    // registerEngine 调用——不 import 引擎内部，用 stub 等价注册面）
+    // registerEngine 调用——不 import 引擎内部，用 stub 等价注册点）
     registerEngine("pi", () => stubEngine("pi"));
     registerEngine("zcode", () => stubEngine("zcode"));
     // L1 env 根下的第三方引擎包（A4 最小形态：只装包 + manifest）

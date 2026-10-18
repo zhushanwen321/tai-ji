@@ -79,9 +79,9 @@ function makeCtx(initialEntries: BranchEntry[], initialLeafId: string | null) {
   }
 }
 
-/** 捕获 pi.on 注册的 handler + 副作用记录面（sendMessage / appendEntry vi.fn）。
- * on 字段仅满足 ExtensionAPI 结构完整性：session_tree 注册面已迁至 factory 顶层
- * （index.ts），backend 构造不再调 pi.on（注册面契约见 session-tree-registration.test.ts）。 */
+/** 捕获 pi.on 注册的 handler + 副作用记录侧（sendMessage / appendEntry vi.fn）。
+ * on 字段仅满足 ExtensionAPI 结构完整性：session_tree 注册点已迁至 factory 顶层
+ * （index.ts），backend 构造不再调 pi.on（注册点契约见 session-tree-registration.test.ts）。 */
 function makePi() {
   const handlers = new Map<string, (...args: unknown[]) => unknown>()
   const sendMessage = vi.fn(async () => {})
@@ -201,7 +201,7 @@ describe('session_tree 重折叠（U6c）', () => {
     expect(runtime.getTask('t2')).toBeDefined()
 
     // 撤回：树回退（label 锚落尾 + leafId 指向它）→ session_tree 事件 → 重折叠
-    // （生产注册面在 factory 顶层 index.ts，此处直接驱动委托体）
+    // （生产注册点在 factory 顶层 index.ts，此处直接驱动委托体）
     setTree([...preRevoke, labelEntry('L', 'e1')], 'L')
     backend.refoldSessionTree()
 

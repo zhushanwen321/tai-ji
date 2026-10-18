@@ -71,7 +71,7 @@ vi.mock("@zhushanwen/subagent-core/orchestration/lifecycle.ts", async (importOri
 });
 
 // interface/commands mock：组合根 factory 体内的 registerWorkflowsCommand 调用
-// 打桩（挂载用例的 fake pi 无真实命令注册面）。
+// 打桩（挂载用例的 fake pi 无真实命令注册点）。
 const { mockRegisterWorkflowsCommand } = vi.hoisted(() => ({
   mockRegisterWorkflowsCommand: vi.fn(),
 }));
@@ -146,7 +146,7 @@ function createFakeCtx(
 
 /**
  * seam 直测：注入 fake 双 Service（访问器槽，默认装配 existing 分支复用 fake）+
- * fake wtm/store，跑一次完整 session 装配。返回接线观察面（initSession/initModel/
+ * fake wtm/store，跑一次完整 session 装配。返回接线观测点（initSession/initModel/
  * recoverManifestTmpFiles spies）。
  */
 async function runSessionAssembly(mode: "tui" | "rpc" | "json" | "print", entries?: unknown[]): Promise<{
@@ -181,7 +181,7 @@ async function runSessionAssembly(mode: "tui" | "rpc" | "json" | "print", entrie
   return { mockInitSession, mockInitModel, mockRecoverManifestTmpFiles };
 }
 
-/** 挂载 index.ts 并跑一次 session_start（store loadAll 行为可配），返回检查观察面：
+/** 挂载 index.ts 并跑一次 session_start（store loadAll 行为可配），返回检查观测点：
  *  pi / session_shutdown handler / registerWorkflowsCommand 捕获。 */
 async function mountWithLoadAll(loadAll: () => Promise<unknown[]>): Promise<{
   pi: ExtensionAPI;

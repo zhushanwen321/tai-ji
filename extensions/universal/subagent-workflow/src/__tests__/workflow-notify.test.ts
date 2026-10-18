@@ -15,7 +15,7 @@
 //
 // [unified-delivery 波 2] notifyDone 投递路径切 pi 半区投递端口（C-ext-19 语义由
 // port 内包：受理前落投递日志 + notifyId 幂等 + details-id 送达凭据 + session_start
-// 差集重放）。本文件覆盖验收面：
+// 差集重放）。本文件覆盖验收：
 //   - port 主投接线：port.deliver（id = wf-done:<runId>），送达通道保持
 //     "workflow-result"（runtime W18 workflow-record 失效信号的前提）、content
 //     字节不变（G4）、pi.sendMessage 零调用
@@ -107,7 +107,7 @@ function makeRun(overrides?: {
     state: {
       status: overrides?.status ?? "done",
       // reason 不设默认：生产 reason 恒由 settlement 派生（W2/V1 载荷换源后
-      // state.reason 不被读取），显式传值仅服务 details.reason 断言面
+      // state.reason 不被读取），显式传值仅服务 details.reason 断言范围
       reason: overrides?.reason,
       scriptResult: overrides?.scriptResult,
       calls,
@@ -127,14 +127,14 @@ function makePi(sendMessageImpl?: (...args: unknown[]) => void): {
   return { pi, sendMessage };
 }
 
-/** 从 sendMessage 第 call 次调用的消息里取 details（GUI 协议观察面）。 */
+/** 从 sendMessage 第 call 次调用的消息里取 details（GUI 协议观测点）。 */
 function sentDetails(sendMessage: ReturnType<typeof vi.fn>, call = 0): unknown {
   return (sendMessage.mock.calls[call] as [{ details: unknown }])[0].details;
 }
 
 type FakePortMock = {
   handle: DeliveryPortHandle;
-  /** port.deliver 受理的注入消息（从 envelope 还原——断言面与原 sentMessages 同形）。 */
+  /** port.deliver 受理的注入消息（从 envelope 还原——断言范围与原 sentMessages 同形）。 */
   sentMessages: {
     customType: string;
     content: string;
@@ -272,7 +272,7 @@ describe("notifyDone — port 主投（C-ext-19 语义由 port 内包）", () =>
     const run = makeRun();
     const notified = new Set<string>();
 
-    // 已知丢失面（如实登记，见 notifyDone 注释）：rejected = 受理未发生、投递日志
+    // 已知丢失情形（如实登记，见 notifyDone 注释）：rejected = 受理未发生、投递日志
     // 未落、重放无源——该终局通知丢失，仅 error 日志留痕供手工补偿。deliver 同步
     // 返回无抛错通道（原账本 record 抛错上抛 finalizeRun 围栏的链路随退役消失）。
     mock.rejectNext();
@@ -438,7 +438,7 @@ describe("notifyDone — content 分支矩阵全文锚定", () => {
 
 // [P4 / D7] notifyDone 终局载荷扩展（impl-plan P4 验收条款 a：成功/失败/取消
 // 各恰好一条，载荷含 outcome / 结果摘要或 errorCode / 产物与 journal 指针）。
-// 覆盖面：三态 outcome 映射（completed→completed、failed→failed、aborted→
+// 覆盖范围：三态 outcome 映射（completed→completed、failed→failed、aborted→
 // cancelled，与 core doneReasonToRunOutcome（dispatchFinalRunSettle 消费）同构）；
 // 成功载荷 resultSummary（bounded 截断）+ 指针面；失败载荷 errorCode（最后失败
 // call 的 failureKind）+ 证据指针、零 resultSummary；取消载荷零 errorCode /
@@ -536,7 +536,7 @@ describe("notifyDone 终局载荷（D7）", () => {
 // ── scriptResult 序列化 — boundedPrettySerialize 等价锚定（IF13/#19，TC5/ES5）──
 //
 // bounded 序列化必须与旧实现（全量 JSON.stringify(x, null, 2) + slice(0,8000)+标记）
-// 逐字节等价。断言面（design IF13/ES5 fixture）：
+// 逐字节等价。断言范围（design IF13/ES5 fixture）：
 // - 深嵌套大对象 >8000 → slice(0,8000) + "\n... (truncated)" 逐字节一致
 // - 循环引用 → String(value) 整串回退
 // - 含 BigInt → String(value) 整串回退且不抛出

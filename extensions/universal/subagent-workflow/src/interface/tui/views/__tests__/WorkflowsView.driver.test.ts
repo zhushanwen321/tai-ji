@@ -1,5 +1,5 @@
 /**
- * WorkflowsView 交互面驱动测试（createWorkflowsView 返回的 Component 全行为面）。
+ * WorkflowsView 交互侧驱动测试（createWorkflowsView 返回的 Component 全行为范围）。
  *
  * 与 WorkflowsView.test.ts（纯函数三块：渲染签名 / live 配对 / detail session 行）
  * 互补无断言重叠。本文件经 fake ctx.ui.custom 捕获 Component 后直接驱动：
@@ -186,7 +186,7 @@ afterEach(() => {
   vi.restoreAllMocks();
 });
 
-// ── 渲染面 ───────────────────────────────────────────────────
+// ── 渲染范围 ───────────────────────────────────────────────────
 
 describe("WorkflowsView L0 渲染", () => {
   it("初绘：header（名/slug/描述/state 路径）+ phase 列表 + 右侧 agent 概览 + footer", () => {

@@ -220,7 +220,7 @@ function sendDirectFallback(task: BackgroundTask): void {
 }
 
 /**
- * 通知文案函数的参数面：只依赖终态渲染所需字段。收窄为结构子集（而非完整
+ * 通知文案函数的参数侧：只依赖终态渲染所需字段。收窄为结构子集（而非完整
  * BackgroundTask）使补投路径可直接传 registry 终态条目（RegistryEntry——无
  * registryPath 等运行时字段），文案组装逻辑主路径与补投路径共用一份。完整
  * BackgroundTask 满足该子集，既有调用方不受影响。

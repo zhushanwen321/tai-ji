@@ -785,7 +785,7 @@ async function executeSubmitReview(
     // 外部解散。读-转移-落盘同一同步临界段（getPlanState 现值读取，禁闭包快照跨 await
     // 复用）；状态机检查（transition 合法性，终态上 ok:false 不落盘）保留为结构兜底
     if (pending.dissolvedBy === "self") {
-      // 文案按判别分源（A9 教训：文案是行为触发面）
+      // 文案按判别分源（A9 教训：文案是行为触发点）
       return reviewErrorResult(
         "cancelled",
         "Plan mode has been exited and the full tool set is restored. This is NOT an approval. Do not implement any changes. Briefly tell the user you have stopped, then wait for further user instructions.",

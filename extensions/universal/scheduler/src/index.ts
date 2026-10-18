@@ -44,7 +44,7 @@ import type { ScheduledTask } from './types.js'
 // STALE_CTX_MARKER 文案兜底（F2 catch 分诊）。
 let sessionGeneration = 0
 
-/** 包内既有 logger（ack 编排的日志面与其它模块同源）。 */
+/** 包内既有 logger（ack 编排的日志侧与其它模块同源）。 */
 const logger = getLogger('scheduler')
 
 /**
@@ -58,7 +58,7 @@ const logger = getLogger('scheduler')
 export default function schedulerExtension(pi: ExtensionAPI): void {
   let service: SchedulerService | null = null
   // U6c：当代 backend（session_start 装配点更新）。factory 顶层 session_tree handler
-  // 经它委托当代重折叠（注册面理由见下方 session_tree 注册点注释）。
+  // 经它委托当代重折叠（注册点理由见下方 session_tree 注册点注释）。
   let activeBackend: PiSchedulerBackend | null = null
   // IMPORT-FLUSH-GUARD（MF-1）：importLegacyStore 对未 flush 的新 session 返回延迟删除 .imported
   // 的 cleanup——turn_end / session_shutdown 时执行：确认 flush（sessionFile 已出现）则删，
@@ -106,7 +106,7 @@ export default function schedulerExtension(pi: ExtensionAPI): void {
     // F2 catch 分诊判定 stale——不依赖 pi 错误文案。
     // 投递模型（scheduler-steer-direct-dispatch）：到期任务 steer 直投（backend.sendMessage），
     // 受理即记账，不经投递内核。
-    // U4 模型控制面（设计 D3）：runtime 只见 'provider/id' ref（与 task.model 同域），pi 的
+    // U4 模型控制接口（设计 D3）：runtime 只见 'provider/id' ref（与 task.model 同域），pi 的
     // Model 对象解析封在本闭包。setModelByRef 契约 = 不 throw、失败返回 false（ref 非法 /
     // modelRegistry.find 无命中 / pi setModel false / 意外异常统一折叠）。
     const modelOps: SchedulerModelOps = {
@@ -151,7 +151,7 @@ export default function schedulerExtension(pi: ExtensionAPI): void {
     ackController.handleSessionBoundary()
 
     service = new SchedulerService(runtime, () => backend.now(), (task) => {
-      // 创建汇聚点 → ack 触发器（fire-and-forget：回调不 await，失败仅日志面）。
+      // 创建汇聚点 → ack 触发器（fire-and-forget：回调不 await，失败仅日志侧）。
       // 唯一生产开关 TAIJI_SCHED_ACK_DISABLE 在此单点读取（fail-safe 方向：缺省不禁用）。
       const controller = ackController
       if (!controller) return
@@ -333,7 +333,7 @@ export default function schedulerExtension(pi: ExtensionAPI): void {
     try {
       fingerprint = computeTasksFingerprint(tasks, locale)
     } catch (err) {
-      // fail-open（辅助显示面的降级 ≠ 吞错）：指纹异常说明序列化路径有 bug，跳推判定不可信
+      // fail-open（辅助显示侧的降级 ≠ 吞错）：指纹异常说明序列化路径有 bug，跳推判定不可信
       // → 直接推送保显示正确；缓存失效（null）使下一帧也必推。
       logger.warn('widget fingerprint computation failed, pushing anyway', { error: toErrorMessage(err) })
       lastWidgetFingerprint = null

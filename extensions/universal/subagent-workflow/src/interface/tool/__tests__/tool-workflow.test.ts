@@ -12,7 +12,7 @@
  * - D8 创建期模型拒单（原 tool-workflow-model-rejection.test.ts）。
  * - D4-1 按名解析退役 + run/abort 文案全文锚定（原 tool-workflow-run-builtin-name.test.ts）。
  * - TC3i 宿主 reservedKeys 接线锚（原 detectors.test.ts——TC3a-h 的行为等值断言
- *   在 core orchestration/__tests__/args-meta.test.ts，宿主差异面只留此条）。
+ *   在 core orchestration/__tests__/args-meta.test.ts，宿主差异点只留此条）。
  * - run details.stateFile 暴露（原 workflow-state-file-exposure.test.ts 第 3 条，
  *   grep 断言改行为级等值）。
  *
@@ -20,7 +20,7 @@
  * - fake timers 只在 actionStatus describe 内启用（done 冻结语义需固定墙钟），
  *   不泄漏到 run/abort 路径。
  * - D8 describe 首条必须在任何 setCatalogService 调用之前执行（声明序 = 执行序）：
- *   setModelConfigService 无复位面，单例 set 后「目录缺席」防御分支不可再达。
+ *   setModelConfigService 无复位情形，单例 set 后「目录缺席」防御分支不可再达。
  *
  * mock 策略：lifecycle 深路径 stub（runWorkflow/abortRun 为 vi.fn——不起真
  * Worker，只测启动面与入口校验）。范式：captureTool 注册层黑盒。框架：vitest。
@@ -144,7 +144,7 @@ interface StatusToolView extends CapturedTool { // oe-exempt:20260927:wip:test f
 }
 
 /** 注册层黑盒 capture（actionStatus/actionAbort 未导出，经 execute 唯一入口；
- *  fake pi 捕获单点见 capture-tool.ts，此处只留差异面：runs Map + 泛型 view）。 */
+ *  fake pi 捕获单点见 capture-tool.ts，此处只留差异点：runs Map + 泛型 view）。 */
 function captureRegisteredTool<T extends CapturedTool>(runs: Map<string, WorkflowRun>, toolName: string): T {
   const deps = {
     runs,
@@ -310,7 +310,7 @@ describe("details 形状（execute 级无 GUI attach）", () => {
 // W4b 错误路径 throw 语义（原 tool-workflow-throw-paths.test.ts）
 // ══════════════════════════════════════════════════════════════
 
-/** throw-paths 专用 capture wrapper（差异面：deps 实参 + reentry guard 可注入占用态；
+/** throw-paths 专用 capture wrapper（差异点：deps 实参 + reentry guard 可注入占用态；
  *  D3 拆分后按 toolName 取 workflow_run / workflow_control）。 */
 function captureWorkflowTool(deps: unknown, reentryRef: ReentryGuardRef, toolName: string): CapturedTool {
   return captureTool(
@@ -485,7 +485,7 @@ describe("W4b: workflow tool 错误路径 throw 语义", () => {
 // D8 创建期模型拒单（原 tool-workflow-model-rejection.test.ts）
 // ══════════════════════════════════════════════════════════════
 
-/** D8 专用 deps：getPath 按 path 从给定 scripts 集解析（模型门之前的解析面）。 */
+/** D8 专用 deps：getPath 按 path 从给定 scripts 集解析（模型门之前的解析范围）。 */
 function depsWithScripts(scripts: Array<ReturnType<typeof makeScript>>): Record<string, unknown> {
   return makeDeps({
     get: vi.fn().mockResolvedValue(undefined),
@@ -507,7 +507,7 @@ describe("D8 创建期模型拒单", () => {
 
   it("目录缺席（单例未装配）→ warn 降级跳过，不误拒（runWorkflow 正常到达）", async () => {
     // 本用例必须先于任何 setCatalogService 调用执行（声明序 = 执行序）——
-    // setModelConfigService 无复位面，单例 set 后 null 分支不可再达。
+    // setModelConfigService 无复位情形，单例 set 后 null 分支不可再达。
     const deps = depsWithScripts([SCRIPT]);
     await actionRun(
       { name: "/abs/chain.js", args: {}, model: "prov1/typo" } as never,
@@ -598,7 +598,7 @@ describe("D4-1 按名解析退役（fake registry）", () => {
       undefined,
     ).catch((e: unknown) => e as Error);
 
-    // 退役断言：get 零调用 = 裸名不进入按名通道（P5 修复发现面后也不会复活）
+    // 退役断言：get 零调用 = 裸名不进入按名通道（P5 修复发现范围后也不会复活）
     expect(registry.get).not.toHaveBeenCalled();
     expect(registry.getPath).toHaveBeenCalledWith("chain");
     expect(vi.mocked(runWorkflow)).not.toHaveBeenCalled();
@@ -683,7 +683,7 @@ describe("D4-1 按名解析退役（真 registry：WorkflowScriptRegistryImpl + 
       npmDirs: [],
     });
     // 前置自检：fixture 布局可被扫描（隔离 config 下 hostRoots 为空、仅 project 根命中）
-    // ——名字确实在发现面内，拒单非「不可见」而是「按名通道退役」。
+    // ——名字确实在发现范围内，拒单非「不可见」而是「按名通道退役」。
     const all = await registry.loadAll();
     expect(all.filter((w) => w.available).map((w) => w.name)).toContain("chain");
 
@@ -730,7 +730,7 @@ describe("D4-1 按名解析退役（真 registry：WorkflowScriptRegistryImpl + 
 // 本节逐字锁 LLM 看到的 content[0].text（期望值从 tool-workflow.ts 实现逐字复制）。
 // abort 的终态语义（done/aborted 由 lifecycle transition 落位）归 core lifecycle
 // 测试；此处 mock abortRun 仅落位 state（actionAbort 从 run 对象读转移前后状态
-// 拼接文案的真实行为面不变）。
+// 拼接文案的真实行为范围不变）。
 // ══════════════════════════════════════════════════════════════
 
 describe("run 启动文案全文锚定（LLM 可见文本锁）", () => {
@@ -914,12 +914,12 @@ describe("TC3i: 宿主 TOOL_TOP_LEVEL reservedKeys 接线锚（M-3 回归）", (
 // SW 包内 vitest 把 typebox alias 到 mock（丢 required），schema 对象断言在本包
 // 环境无防线价值——name 必填性走源码负锚（与 tool-subagents.test.ts tasks 负锚
 // 同款形态）：name 未经 Type.Optional 包裹，误改 Optional 即红。
-// actionRun 的 `if (!name) throw` 是运行时兜底，不替代声明面（拍平老路回归时
-// 声明面先劣化，本锚在文本层先亮）。
+// actionRun 的 `if (!name) throw` 是运行时兜底，不替代声明侧（拍平老路回归时
+// 声明侧先劣化，本锚在文本层先亮）。
 // ══════════════════════════════════════════════════════════════
 
 describe("WorkflowRunParams.name 必填性源码锚（D3 必填性真实化 run 侧锁）", () => {
-  it("name 未经 Type.Optional 包裹（schema 声明面必填性防回归）", () => {
+  it("name 未经 Type.Optional 包裹（schema 声明侧必填性防回归）", () => {
     expect(TOOL_WORKFLOW_SRC).toContain("name: Type.String(");
     expect(TOOL_WORKFLOW_SRC).not.toContain("name: Type.Optional(");
   });

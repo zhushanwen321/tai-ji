@@ -20,7 +20,7 @@
  * - **旧格式两件套（旧 journal `.events.jsonl` + state 快照 `<runId>.jsonl`）不读、
  *   不写、不主动删**（用户裁决 2026-09-28：不做存量迁移）：全部读取路径只认
  *   record 后缀；注册条目的 recordPath 锚点后缀天然区分新旧实体——旧后缀锚点
- *   = 历史 run，跳过不重建（从壳侧读取面消失即 D1 历史数据处置的预期行为）。
+ *   = 历史 run，跳过不重建（从壳侧读侧消失即 D1 历史数据处置的预期行为）。
  * - **loadAll = record 流折叠重建**：v2 注册条目定界（本会话有哪些实体）→
  *   record 流全量读 → fold 重建（终局 ⟸ run-settled 帧）；「有注册、无终局帧」
  *   的实体保持 running 交恢复链收编；终局实体幂等补写 v2 终态条目。
@@ -83,7 +83,7 @@ import { WorkflowRun } from "@zhushanwen/subagent-core";
 import { errorLogsFromEvents, latestModelOverride, rebuildBudget, runAccountingFromEvents } from "@zhushanwen/subagent-core";
 import { guardStaleCtx, isEnoentError, toErrorMessage } from "@zhushanwen/pi-ext-guards";
 
-// ── [W1 / D1] v2 条目读面（注册定界 + 终态条目抑制）────────────────
+// ── [W1 / D1] v2 条目读侧（注册定界 + 终态条目抑制）────────────────
 
 /** loadAll 的 entry 扫描产物。 */
 interface EntrySources {
@@ -190,10 +190,10 @@ export class RecordStreamCorruptionError extends Error {
  * 非对象 / 缺 type/ts 信封 / 词表外 type 或 outcome / agent-settled 帧缺 result 全文）
  * 抛 {@link RecordStreamCorruptionError}——不静默跳过（场景 18 坏行停摆语义，
  * 与 core journal scan 活体派生视图的宽容跳过语义刻意分层：活体 fold 不能因单帧
- * 全停，恢复读面不能对损坏装瞎）。
+ * 全停，恢复读侧不能对损坏装瞎）。
  *
- * [§3.2] 判据经 core 单源原语 parseRecordStreamLine（requireSeq=false——本读面
- * 兼容 W1 前无 seq 的存量行）消费；core 恢复读面用同一原语的严格档。两侧真差异只剩
+ * [§3.2] 判据经 core 单源原语 parseRecordStreamLine（requireSeq=false——本读侧
+ * 兼容 W1 前无 seq 的存量行）消费；core 恢复读侧用同一原语的严格档。两侧真差异只剩
  * 错误文案与 ENOENT 分流。
  *
  * 文件不存在（ENOENT）原样上抛交调用方分流（新形态实体早期崩溃 vs 历史实体）。
@@ -218,7 +218,7 @@ function readRecordStream(recordPath: string): WorkflowRunEvent[] {
   return events;
 }
 
-/** 单行问题 → 壳 strict 读面的中文文案（core 恢复读面同问题出英文文案——本函数不共享）。 */
+/** 单行问题 → 壳 strict 读侧的中文文案（core 恢复读侧同问题出英文文案——本函数不共享）。 */
 function describeRecordStreamIssue(issue: RunEventLineIssue): string {
   switch (issue.kind) {
     case "invalid-json":
@@ -304,12 +304,12 @@ interface CallDraft {
  *   [subagent-model-switch §6.6①/§7.4] 注释，不在此重复展开）。
  *
  * record 流不承载的字段（budget 计数/errorLogs/trace 完整面）按恢复语义最小形态
- * 缺省——步骤级详情的恢复读面 = record 流直读（session-reader 家族链），不经本聚合。
+ * 缺省——步骤级详情的恢复读侧 = record 流直读（session-reader 家族链），不经本聚合。
  */
 
 /**
  * argsSummary → args 尽力恢复（旧格式帧回落通道，core resume-run.parseArgsSummary
- * 同款语义）：现行写入面 run-created 帧携带 args 全文（上方优先消费）；本函数只
+ * 同款语义）：现行写侧 run-created 帧携带 args 全文（上方优先消费）；本函数只
  * 服务旧格式帧——未截断摘要可完整恢复，截断/不可解析回落 {}（旧格式流的 $ARGS
  * 语义限制，回落处置对齐 core 侧「尽力恢复」——core 同款分支 warn 留证，非静默）。
  */
@@ -390,7 +390,7 @@ function draftsToExecutionTraceNodes(drafts: Map<number, CallDraft>): ExecutionT
     ...(d.phase !== undefined ? { phase: d.phase } : {}),
     startedAt: d.startedAtIso,
     // settled 终局保真：result 全文随节点（D-10 节点持 result 引用的原语义）+
-    // completedAt（节点时间锚）+ error 诊断面
+    // completedAt（节点时间锚）+ error 诊断信息
     ...(d.result !== undefined ? { result: d.result } : {}),
     ...(d.result?.error !== undefined ? { error: d.result.error } : {}),
     ...(d.settledTs !== undefined ? { completedAt: new Date(d.settledTs).toISOString() } : {}),
@@ -425,7 +425,7 @@ function draftsToAgentCalls(
 
 
 /**
- * spec 重建预算的读取面三档回落（与 core resume-run.assertResumeEligibility 等价，
+ * spec 重建预算的读侧三档回落（与 core resume-run.assertResumeEligibility 等价，
  * 少 options 档——resume 的显式覆盖已由 core 写进 run-resumed 帧，本折叠只表达
  * record 事实）：最近一条 run-resumed 的生效值 > run-created 的创建预算；两者
  * 皆无/<=0 = 不限制。取流尾最近一条 run-resumed 而非「最近一条带字段」——更晚的
@@ -621,7 +621,7 @@ function foldRecordStreamToRun(
   // [§2.1b] 会计重建：v2 终态条目带活体口径 usedTokens/callCount → 真值优先；条目缺席
   // 回落 agent-settled.result.usage 的同一加权口径（下界近似，含 usedCost）。
   // [§2.1 errorLogs 持久化 / ADR-0093] 诊断日志重建：worker-log 帧 → errorLogs（与活体
-  // 写入同语义：按序 + 尾部上限裁剪）。此前无持久面、重启即空。
+  // 写入同语义：按序 + 尾部上限裁剪）。此前无持久化侧、重启即空。
   const parts: FoldCommonParts = {
     budget: rebuildBudget(settled, events),
     errorLogs: errorLogsFromEvents(events),
@@ -655,11 +655,11 @@ interface JsonlRunStoreOptions {
  *
  * 本类的四个 interface 面（方法分组索引）：
  * 1. **port 面**（RunStore 契约）：save（no-op）/ loadAll（record 折叠重建）/
- *    stateFilePath（record 流路径）——组合根装配 LifecycleDeps.store 的注入面；
+ *    stateFilePath（record 流路径）——组合根装配 LifecycleDeps.store 的注入点；
  * 2. **adoption 面**（skill-reload 接管）：rebind——post-reload session_start
- *    就地重绑 appendEntry 源（v2 终态条目补写面的消费源）；
- * 3. **终局记录查询面**：settledRecordOf——通知载荷链的帧直取源；
- * 4. **生命周期面**：dispose + flushPendingSaves——幂等收尾（无派生视图物化面后
+ *    就地重绑 appendEntry 源（v2 终态条目补写侧的消费源）；
+ * 3. **终局记录查询入口**：settledRecordOf——通知载荷链的帧直取源；
+ * 4. **生命周期侧**：dispose + flushPendingSaves——幂等收尾（无派生视图物化侧后
  *    为纯契约保留）。
  */
 export class JsonlRunStore implements RunStore {
@@ -715,7 +715,7 @@ export class JsonlRunStore implements RunStore {
    * （runSettledEffects——载荷源帧直取）。miss = 无终局帧（未终局，或流读失败
    * 降级——调用方按「不可判定」处置：通知跳过 + error 留痕，不回退兜底）。
    * 流损坏（RecordStreamCorruptionError）与 IO 错误同走 miss + warn（通知链
-   * 不是恢复面，保守 miss 可诊断；恢复面的拒绝语义在 loadAll）。
+   * 不是恢复侧，保守 miss 可诊断；恢复侧的拒绝语义在 loadAll）。
    */
   settledRecordOf(runId: string): RunSettlementRecord | undefined {
     let events: readonly WorkflowRunEvent[];
@@ -749,7 +749,7 @@ export class JsonlRunStore implements RunStore {
    *
    * **历史实体分流（D1 历史数据处置）**：注册条目 recordPath 锚点后缀非
    * record 后缀 = 旧形态实体（旧 journal 锚点）→ 跳过不重建（历史 run 从壳侧
-   * 读取面消失 = 预期行为，不读旧两件套）。
+   * 读侧消失 = 预期行为，不读旧两件套）。
    *
    * **拒绝语义**：record 流存在但读失败（损坏/IO 非 ENOENT）→ 抛错穿透（宿主
    * storeHealthy=false fail-fast，workflow 域停初始化）——静默跳过会把数据损坏
@@ -776,7 +776,7 @@ export class JsonlRunStore implements RunStore {
       );
       return [];
     }
-    // rebuild 的损坏错误（RecordStreamCorruptionError / IO）直接上抛——恢复面
+    // rebuild 的损坏错误（RecordStreamCorruptionError / IO）直接上抛——恢复侧
     // 拒绝语义（宿主 storeHealthy=false），不被 getEntries 的降级 catch 吞掉。
     const { registered, settledEntries } = collectEntrySources(entries);
     return this.rebuildRunsFromRecordStreams(registered, settledEntries);
@@ -786,7 +786,7 @@ export class JsonlRunStore implements RunStore {
 
   /**
    * 逐注册条目重建 run：record 流全量读（严格解析）→ fold 重建 → 终局判定
-   * （fold 唯一判法）。条目面的唯一参与 = 终态条目幂等补写抑制
+   * （fold 唯一判法）。条目范围的唯一参与 = 终态条目幂等补写抑制
    * （settledEntries）——条目不再作为终局证据（旧「journal 无帧而条目在 → 按条
    * 目重建」的双面证据分支随 D1 判读单一裁决删除：条目是派生视图锚，不是第二判据）。
    */
@@ -799,7 +799,7 @@ export class JsonlRunStore implements RunStore {
       const recordPath = reg.recordPath;
       if (!recordPath.endsWith(RUN_EVENTS_SUFFIX)) {
         // 旧形态锚点（旧 journal .events.jsonl）= 历史 run：不读旧两件套
-        //（D1 历史数据处置——历史 run 从壳侧读取面消失，resume 一律拒绝）。
+        //（D1 历史数据处置——历史 run 从壳侧读侧消失，resume 一律拒绝）。
         logger.debug(
           `[subagent-workflow] record store: legacy journal anchor skipped, run not rebuilt (runId=${runId}, anchor=${recordPath})`,
         );
@@ -835,8 +835,8 @@ export class JsonlRunStore implements RunStore {
       const settledEvent = lastRunSettledEvent(events);
       if (settledEvent === undefined && settledEntries.has(runId)) {
         // 条目已判终局而 record 流无终局帧（空流/残流）：与流缺失同款存续分流——
-        // 实体呈现面归条目读者，壳侧不重建不交恢复链。warn 留证条目与流的分叉
-        //（流被外部清空/篡改的信号面；恢复面的拒绝语义只在坏行，空流不拒）。
+        // 实体呈现侧归条目读者，壳侧不重建不交恢复链。warn 留证条目与流的分叉
+        //（流被外部清空/篡改的信号侧；恢复侧的拒绝语义只在坏行，空流不拒）。
         logger.warn(
           `[subagent-workflow] record store: settled entry present but record stream has no run-settled frame, run skipped (runId=${runId})`,
         );
@@ -894,17 +894,17 @@ export class JsonlRunStore implements RunStore {
     }
   }
 
-  // ── 生命周期面（无派生视图物化面后的契约保留）────────────────────
+  // ── 生命周期侧（无派生视图物化侧后的契约保留）────────────────────
 
   /**
-   * [D1] 无 pending 批（无派生视图物化面）——立即返回。方法保留 = 生命周期面契约
+   * [D1] 无 pending 批（无派生视图物化侧）——立即返回。方法保留 = 生命周期侧契约
    *（dispose / 排查调用点不改）。
    */
   async flushPendingSaves(): Promise<void> {}
 
   /**
    * 收尾：幂等（缓存自身 Promise——首次未完成时并发交叠进入的后续调用返回同一
-   * Promise）。[D1] 无物化面可冲刷（无批/timer/watcher），置位 disposed 后返回。
+   * Promise）。[D1] 无物化情形可冲刷（无批/timer/watcher），置位 disposed 后返回。
    *
    * 本方法不能是 async 函数（async 总是创建新 Promise 破坏同一引用保证）。
    */

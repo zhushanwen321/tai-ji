@@ -133,7 +133,7 @@ export default function renameSessionExtension(pi: ExtensionAPI): void {
 
 	registerAutoRenameCommand(pi);
 
-	// 工具注册面（求值时点边界）：只在 extension load 时求值一次——pi 无 unregisterTool，
+	// 工具注册点（求值时点边界）：只在 extension load 时求值一次——pi 无 unregisterTool，
 	// 切 mode 后已存活 session 的工具清单不回溯（切到 agent-tool 当前 session 无工具、切走则
 	// 工具残留），残留工具由 execute 内 live mode 检查兜底（RENAME_TOOL_MODE_GUARD_MESSAGE）。
 	if (loadRenameConfig().mode === "agent-tool") {
@@ -160,14 +160,14 @@ export default function renameSessionExtension(pi: ExtensionAPI): void {
 			const config = loadRenameConfig();
 			if (!config.enabled) return;
 
-			// 3. mode 分派（事件面 live 读：GUI 切 mode 对活跃 session 的自动命名即时生效——
+			// 3. mode 分派（事件路径 live 读：GUI 切 mode 对活跃 session 的自动命名即时生效——
 			//    first-stop / agent-tool 模式下本入口静默返回，V10 A 段「切走即停」）
 			if (config.mode !== "first-prompt") {
 				debugLog(`skip: mode=${config.mode}`);
 				return;
 			}
 
-			// 4. 排除 subagent 子进程 session（检查链复用，C-ext-21 覆盖面含本新入口）
+			// 4. 排除 subagent 子进程 session（检查链复用，C-ext-21 覆盖范围含本新入口）
 			if (isSubagentSession(ctx.sessionManager.getSessionDir())) return;
 
 			// 5. 首条 user 判定：extension handler 先于本条 message 的 entries append 执行
@@ -221,7 +221,7 @@ export default function renameSessionExtension(pi: ExtensionAPI): void {
 			const config = loadRenameConfig();
 			if (!config.enabled) return;
 
-			// 2. mode 分派（事件面 live 读）：first-stop 才走 turn_end 自动命名——
+			// 2. mode 分派（事件路径 live 读）：first-stop 才走 turn_end 自动命名——
 			//    first-prompt / agent-tool 模式下本入口静默返回（V10 A 段「切走即停」；
 			//    切回 first-stop 后 live 恢复分派，但已跑过成功 round 的 session 受一次性窗口约束）
 			if (config.mode !== "first-stop") {

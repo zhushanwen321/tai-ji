@@ -1,7 +1,7 @@
 import type { Theme } from "@earendil-works/pi-coding-agent";
 import { describe, expect, it, vi, beforeEach } from "vitest";
 
-// handlers.ts 模块级 getLogger —— 测试里 spy warn（脏条目汇总留痕断言面）
+// handlers.ts 模块级 getLogger —— 测试里 spy warn（脏条目汇总留痕断言范围）
 const loggerWarnSpy = vi.hoisted(() => vi.fn());
 vi.mock("@zhushanwen/pi-extension-logger", () => ({
 	getLogger: () => ({ warn: loggerWarnSpy, debug: vi.fn(), error: vi.fn() }),

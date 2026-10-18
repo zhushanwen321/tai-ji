@@ -254,7 +254,7 @@ describe('renderOutline', () => {
     expect(result.stats.totalTurns).toBe(2)
     // T 序号 = 原 turn.index（expand/detail 的入口地址稳定，折叠不重编号）
     expect(result.turns.map((b) => b.index)).toEqual([1, 3])
-    // 字节/条目统计保持全量口径（折叠是展示层行为，不丢数据面）：2+1+1+1 = 5
+    // 字节/条目统计保持全量口径（折叠是展示层行为，不丢数据）：2+1+1+1 = 5
     expect(result.stats.totalEntries).toBe(5)
   })
 

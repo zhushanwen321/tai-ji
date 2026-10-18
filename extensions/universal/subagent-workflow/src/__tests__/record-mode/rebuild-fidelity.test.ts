@@ -6,7 +6,7 @@
 // 回溯目标 = 设计目标 1「数据不丢」：record 事件流（含全文载荷）fold 重建后，与
 // 产生这些事件的内存派生视图**逐字段等价**——收编（追加 run-interrupted / 旧词表形态
 // run-settled(interrupted)）不销毁任何已完成调用的结果全文与脚本体，resume 的
-// 缓存回放数据面构造性成立。
+// 缓存回放的数据保真由结构保证。
 //
 // 场景原型：三调用 run 第 2 调用完成后崩溃 → 重启收编 → 直接检查盘上 record 事件流
 // 与 fold 重建产物。单测层形态：事件链经 core journal 实装写入（生产落盘形态），
@@ -51,7 +51,7 @@ const RESULT_CALL_2 = {
 
 const SCRIPT_SOURCE = "const a = await agent('stage-1');\nconst b = await agent('stage-2');\nconst c = await agent('stage-3');\nreturn { a, b, c };";
 
-/** run-created 帧的 scriptPath 锚定载荷（fold 重建恢复面的断言锚）。 */
+/** run-created 帧的 scriptPath 锚定载荷（fold 重建恢复侧的断言锚）。 */
 const SCRIPT_PATH = "/abs/packages/subagent-core/workflows/fan-out.js";
 
 const T0 = 1_759_000_000_000;
@@ -108,7 +108,7 @@ describe("场景 6：record 重建保真（[D1]——盘上 record 流 fold 后�
     expect(run!.spec.scriptName).toBe("fidelity-script");
     expect(isRunSettled(run!)).toBe(false); // 无 run-settled 帧 = 交恢复链收编
 
-    // call 级：已完成调用全文保真（resume 缓存回放的数据面）
+    // call 级：已完成调用全文保真（resume 缓存回放的数据）
     const call0 = run!.state.calls.get(0)!;
     expect(call0.status).toBe("done");
     expect(call0.result).toEqual(RESULT_CALL_1);
@@ -149,7 +149,7 @@ describe("场景 6：record 重建保真（[D1]——盘上 record 流 fold 后�
     // 不显示僵尸「运行中」；resume 复活流清该标记（lastInterruptedAt 尾向遇
     // run-resumed 返回 undefined）
     expect(run!.meta.interruptedAt).toBe(new Date(T0 + 100_000).toISOString());
-    // 收编后数据不丢（设计目标 1 的断言面）：全文载荷原样保真
+    // 收编后数据不丢（设计目标 1 的断言范围）：全文载荷原样保真
     expect(run!.spec.scriptSource).toBe(SCRIPT_SOURCE);
     expect(run!.state.calls.get(0)!.result).toEqual(RESULT_CALL_1);
     expect(run!.state.calls.get(1)!.result).toEqual(RESULT_CALL_2);

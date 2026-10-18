@@ -2,11 +2,11 @@
 //
 // JsonlRunStore 壳侧归属面汇总件（[D1] record 单源形态）：record 流折叠重建的
 // round-trip 保真（sessionFile / result 全文经 agent-settled 载荷恢复）、record 流
-// 路径指针（stateFilePath）、workflow-record 条目面（零条目写锚定 + v2 收编读面 +
+// 路径指针（stateFilePath）、workflow-record 条目范围（零条目写锚定 + v2 收编读侧 +
 // rebind 补写 + stale guard）、历史实体分流（旧后缀锚点不重建）。
 //
-// [D1] 退役面（旧形态用例随机制删除，语义锚迁移记录）：
-// - state 快照物化触发源/串行链/批合并（W4-W8）→ 无物化面，写面纪律锚在
+// [D1] 退役侧（旧形态用例随机制删除，语义锚迁移记录）：
+// - state 快照物化触发源/串行链/批合并（W4-W8）→ 无物化情形，写侧纪律锚在
 //   jsonl-run-store-event-edge.test.ts；
 // - save 兜底容错（W3 mkdir ENOENT/EACCES）→ save 恒 no-op 零 IO，锚同上；
 // - 快照版本检查（W9）/ codec golden 字节锚（⛔5）→ 快照机制整体删除（版本常量
@@ -290,7 +290,7 @@ describe("W1[D1]: record 重建 round-trip（call 级详情经 agent-settled res
     expect(call!.status).toBe("done");
   });
 
-  it("loadAll round-trip: result 全文不裁（10000 字符 content 逐字节恢复——resume 缓存回放的数据面）", async () => {
+  it("loadAll round-trip: result 全文不裁（10000 字符 content 逐字节恢复——resume 缓存回放的数据）", async () => {
     const longContent = "q".repeat(10000);
     const runId = "run-rt-long";
     const recordPath = seedSettledRunWithCall(tmpDir, runId, { content: longContent });
@@ -303,7 +303,7 @@ describe("W1[D1]: record 重建 round-trip（call 级详情经 agent-settled res
     expect(restored[0]!.state.trace.toArray()[0]!.result?.content).toBe(longContent);
   });
 
-  it("loadAll round-trip: spec.scriptSource 经 run-created 帧恢复（[D1] resume 重放的脚本体数据面）", async () => {
+  it("loadAll round-trip: spec.scriptSource 经 run-created 帧恢复（[D1] resume 重放的脚本体数据）", async () => {
     const runId = "run-rt-script";
     const recordPath = seedSettledRunWithCall(tmpDir, runId, { content: "done" });
 
@@ -389,9 +389,9 @@ describe("W2[D1]: RunStore.stateFilePath 暴露 record 流路径", () => {
   });
 });
 
-// ── W17/W1: workflow-record 条目面（零条目写锚定 + v2 收编读面）──────
+// ── W17/W1: workflow-record 条目范围（零条目写锚定 + v2 收编读侧）──────
 
-describe("W17/W1[D1]: workflow-record 条目面（零条目写锚定 + v2 收编读面）", () => {
+describe("W17/W1[D1]: workflow-record 条目范围（零条目写锚定 + v2 收编读侧）", () => {
   let tmpDir: string;
 
   beforeEach(() => {
@@ -409,7 +409,7 @@ describe("W17/W1[D1]: workflow-record 条目面（零条目写锚定 + v2 收编
     expect(WORKFLOW_RECORD_CUSTOM_TYPE).toBe("workflow-record");
   });
 
-  it("[停写锚定] save 全程零 workflow-record entry、零 state 文件（[D1] 无物化面）", async () => {
+  it("[停写锚定] save 全程零 workflow-record entry、零 state 文件（[D1] 无物化情形）", async () => {
     const entries: CustomEntry[] = [];
     const store = new JsonlRunStore({ sessionDir: tmpDir, pi: mkPi(entries) });
     const runId = "run-w17-shape";
@@ -440,7 +440,7 @@ describe("W17/W1[D1]: workflow-record 条目面（零条目写锚定 + v2 收编
       pi: mkPi(entriesOld),
       ctx: mkCtx(seedEntries),
     });
-    // rebind 换源：条目补写面路由到新 pi
+    // rebind 换源：条目补写侧路由到新 pi
     store.rebind(mkPi(entriesNew), mkCtx(seedEntries));
 
     const loaded = await store.loadAll();
@@ -494,7 +494,7 @@ describe("W17/W1[D1]: workflow-record 条目面（零条目写锚定 + v2 收编
 
     const entries: CustomEntry[] = [v2RegisteredEntry(runId, recordPath)];
     const store = new JsonlRunStore({ sessionDir: tmpDir, pi: mkPi(entries), ctx: mkCtx(entries) });
-    // interrupted 已出 outcome 词表（[D2] 入 lifecycle）——历史帧在 strict 读面按
+    // interrupted 已出 outcome 词表（[D2] 入 lifecycle）——历史帧在 strict 读侧按
     // 词表外值拒绝（RecordStreamCorruptionError 上抛，storeHealthy=false——与半截
     // 行同语义，不静默跳过把损坏伪装成「无终局」）
     await expect(store.loadAll()).rejects.toThrow(/词表外 outcome/);
@@ -564,7 +564,7 @@ describe("W17/W1[D1]: workflow-record 条目面（零条目写锚定 + v2 收编
     expect(loggerMock.warn.mock.calls.map((c) => String(c[0])).join("\n")).toContain(runId);
   });
 
-  it("[存续分流] record 流缺失 + 终态条目在 → 跳过不重建（呈现面归条目读者，不伪造收编）", async () => {
+  it("[存续分流] record 流缺失 + 终态条目在 → 跳过不重建（呈现侧归条目读者，不伪造收编）", async () => {
     const runId = "run-w1-missing-settled";
     const entries: CustomEntry[] = [
       v2RegisteredEntry(runId, path.join(tmpDir, "workflow-state", `${runId}${RUN_EVENTS_SUFFIX}`)),
@@ -587,7 +587,7 @@ describe("W17/W1[D1]: workflow-record 条目面（零条目写锚定 + v2 收编
 
     const entries: CustomEntry[] = [v2RegisteredEntry(runId, legacyJournalPath)];
     const store = new JsonlRunStore({ sessionDir: tmpDir, ctx: mkCtx(entries) });
-    // 旧后缀锚点 = 历史 run：不重建（从壳侧读取面消失 = D1 预期行为），零读取
+    // 旧后缀锚点 = 历史 run：不重建（从壳侧读侧消失 = D1 预期行为），零读取
     await expect(store.loadAll()).resolves.toEqual([]);
   });
 

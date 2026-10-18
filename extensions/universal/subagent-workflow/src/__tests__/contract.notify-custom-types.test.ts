@@ -7,7 +7,7 @@
 //   1. 值锚定：三个 customType 的值是跨侧公开契约（已落盘 session JSONL 的历史 entry
 //      + shared/runtime/core 消费方逐字节依赖）——改值 = 跨侧破坏性变更，必须先红
 //      本测试（有意识动作），不允许顺手改 SSOT 值静默漂移。
-//   2. 源码形态锁：生产写点不得本地重定义/裸写字面量（回潮 = 新的裸字面量漂移面）。
+//   2. 源码形态锁：生产写点不得本地重定义/裸写字面量（回潮 = 新的裸字面量漂移风险）。
 //      生产侧写点 = 壳三处（workflow-notify 收尾通知 / index messageRenderer 注册 /
 //      subagents 定向留痕）。core 侧写点（notifier 的 SSOT 别名 NOTIFY_CUSTOM_TYPE +
 //      送达分诊零裸字面量）的形态锁在被测包内：packages/subagent-core
@@ -74,7 +74,7 @@ describe("notify customType 词表：生产写点单源形态（防裸字面量�
     const source = readSource(PRODUCER_FILES.index);
     expect(source).toMatch(/import\s*\{[^}]*SUBAGENT_BG_NOTIFY_CUSTOM_TYPE[^}]*\}\s*from\s*["@/]/);
     expect(source).toMatch(/registerMessageRenderer\(\s*SUBAGENT_BG_NOTIFY_CUSTOM_TYPE\s*,/);
-    // 裸字面量注册回潮即红（注释/文档提及不在本断言面——只锁注册调用形态）
+    // 裸字面量注册回潮即红（注释/文档提及不在本断言范围——只锁注册调用形态）
     expect(source).not.toMatch(/registerMessageRenderer\(\s*["']/);
   });
   // 注：subagent-core 形态锁（NOTIFY_CUSTOM_TYPE SSOT 别名 + 分诊零裸字面量）在

@@ -24,7 +24,7 @@ import { pathToFileURL } from "node:url";
 import { discoverResources, isTargetFile } from "@zhushanwen/subagent-core";
 import { afterAll, describe, expect, it, vi } from "vitest";
 
-// pi 宿主协作件 mock：本文件只跑发现链，日志面给可调用桩（回退分支会走 debug）。
+// pi 宿主协作件 mock：本文件只跑发现链，日志侧给可调用桩（回退分支会走 debug）。
 vi.mock("@earendil-works/pi-coding-agent", () => ({
   getAgentDir: () => process.env.PI_CODING_AGENT_DIR ?? "/mock/agent-dir",
 }));
@@ -106,7 +106,7 @@ describe("B′：回退根下的**发现结果**（本批防复发的核心断�
       workspaceRoot: scopeDir,
       hostRoots: [{ dir: scopeDir, source: "npm" }],
     });
-    // 只断言**回退根下**的发现结果（发现面还包括真实用户目录 ~/.agents/workflows
+    // 只断言**回退根下**的发现结果（发现范围还包括真实用户目录 ~/.agents/workflows
     // 等宿主/约定根——本用例的主题是回退根本身，故按路径范围收窄，噪声不介入）
     const names = found
       .filter((r) => r.available && r.path.startsWith(scopeDir))
