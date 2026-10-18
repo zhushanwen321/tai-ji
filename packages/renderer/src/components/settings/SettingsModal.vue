@@ -138,6 +138,7 @@
               <ExtensionPage v-else-if="view === 'extension'" :extensions="extensions" @open-contributions="extensionView = 'contributions'" />
               <PluginContributionsPage v-else-if="view === 'extension-contributions'" @back="extensionView = 'main'" />
               <SystemPage v-else-if="view === 'system'" :system="system" @update="onSystemUpdate" />
+              <NetworkPage v-else-if="view === 'network-proxy'" />
               <SystemPromptPage v-else-if="view === 'system-prompt'" />
               <RenameSessionPage v-else-if="view === 'rename-session'" />
               <TerminalPage v-else-if="view === 'terminal'" :is-active="activeView === 'terminal'" />
@@ -161,7 +162,7 @@
 import { computed, nextTick, onBeforeUnmount, ref, watch } from 'vue'
 import { useEventListener } from '@vueuse/core'
 import { useI18n } from 'vue-i18n'
-import { Settings, Sparkles, Bot, Blocks, SlidersHorizontal, ScrollText, Tag, TerminalSquare, GitBranch, ClipboardList, Server, Volume2, X, Download, Palette, ChartColumn, ArrowLeft, ArrowRight, PanelLeftClose, Wifi, type LucideIcon } from '@lucide/vue'
+import { Settings, Sparkles, Bot, Blocks, SlidersHorizontal, ScrollText, Tag, TerminalSquare, GitBranch, ClipboardList, Server, Volume2, X, Download, Palette, ChartColumn, ArrowLeft, ArrowRight, PanelLeftClose, Wifi, Waypoints, type LucideIcon } from '@lucide/vue'
 import { Button } from '@/components/ui/button'
 import { registerModalSurface, otherSurfaceYieldsEsc } from '@/composables/features/app/modal-surface-registry'
 import { detectPlatform } from '@/composables/effects/usePlatformChrome'
@@ -187,6 +188,7 @@ import UpdatePage from './update/UpdatePage.vue'
 import RemoteAccessPage from './remote-access/RemoteAccessPage.vue'
 import UsagePage from './usage/UsagePage.vue'
 import AppearancePage from './appearance/AppearancePage.vue'
+import NetworkPage from './network/NetworkPage.vue'
 
 // mac 灯组为 OS 绘制，几何随系统版本 → 左上 chrome 组平移按平台分叉（推导见 template 内注释）
 const isMac = detectPlatform() === 'mac'
@@ -221,6 +223,7 @@ const navGroups = [
       { id: 'worktree', labelKey: 'settings.menu.worktree', icon: GitBranch },
       { id: 'update', labelKey: 'settings.menu.update', icon: Download },
       { id: 'remote-access', labelKey: 'settings.menu.remoteAccess', icon: Wifi },
+      { id: 'network-proxy', labelKey: 'settings.menu.networkProxy', icon: Waypoints },
       { id: 'system', labelKey: 'settings.menu.system', icon: SlidersHorizontal },
       { id: 'usage', labelKey: 'settings.menu.usage', icon: ChartColumn },
     ],

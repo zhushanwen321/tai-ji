@@ -21,6 +21,9 @@ import type {
   SystemPromptConfig,
   TerminalConfig,
   LlmRetryConfig,
+  NetworkProxyConfig,
+  NetworkProxyStatsRange,
+  NetworkProxyTestResult,
   SourceDetectResult,
   ProviderSource,
   BuiltinProviderTemplate,
@@ -28,6 +31,7 @@ import type {
   ProviderImportResult,
   SkillCacheInvalidatedPayload,
   ServerMessage,
+  ServerMessageMap,
   ProviderId,
   ConnectionTestResultRow,
   UiLocale,
@@ -388,6 +392,42 @@ export async function setRetryConfig(config: LlmRetryConfig): Promise<{ config: 
 export function onRetryConfig(handler: (payload: { config: LlmRetryConfig; configured: boolean }) => void): () => void {
   return events.onGlobalType('config.retryConfig', (msg) => {
     handler(msg.payload)
+  })
+}
+
+// ── LLM 网络代理（llm-network-proxy §5 U1；协议登记 = shared protocol.ts config.getNetworkProxy 等
+//    五条 + config.networkProxy / config.networkProxyStats 广播。runtime handler 接线归 u-runtime，
+//    本门面只按协议发 command / 订阅全局通道）──
+
+/** 读取网络代理配置（reply 与 config.networkProxy 广播同形）。 */
+export async function getNetworkProxyConfig(): Promise<ServerMessageMap['config.networkProxy']> {
+  return command('config.getNetworkProxy', {}, RPC_BACKSTOP_TIMEOUT_MS)
+}
+
+/** 全量保存网络代理配置（单页单保存；校验失败 runtime 返回 error envelope，command 会 reject）。 */
+export async function setNetworkProxyConfig(config: NetworkProxyConfig): Promise<ServerMessageMap['config.networkProxy']> {
+  return command('config.setNetworkProxy', { config }, RPC_BACKSTOP_TIMEOUT_MS)
+}
+
+/** 测试连接（runtime 两段探测；归因文案 / 阶段 / 耗时形状 = shared NetworkProxyTestResult）。 */
+export function testNetworkProxy(config: NetworkProxyConfig): Promise<NetworkProxyTestResult> {
+  return command('config.testNetworkProxy', { config }, RPC_BACKSTOP_TIMEOUT_MS)
+}
+
+/** 请求统计读聚合（range 时间过滤；「累计」档 = 截断保尾窗口内累计，truncatedNote 携带标注）。 */
+export async function getNetworkProxyStats(range: NetworkProxyStatsRange): Promise<ServerMessageMap['config.networkProxyStats']> {
+  return command('config.getNetworkProxyStats', { range }, RPC_BACKSTOP_TIMEOUT_MS)
+}
+
+/** 重置请求统计（runtime 追加 reset 水位；reply = 清零后统计）。 */
+export async function resetNetworkProxyStats(): Promise<ServerMessageMap['config.networkProxyStats']> {
+  return command('config.resetNetworkProxyStats', {}, RPC_BACKSTOP_TIMEOUT_MS)
+}
+
+/** 订阅网络代理配置广播（保存成功后推回，多窗口同步）。 */
+export function onNetworkProxyConfig(handler: (config: NetworkProxyConfig) => void): () => void {
+  return events.onGlobalType('config.networkProxy', (msg) => {
+    handler(msg.payload.config)
   })
 }
 
