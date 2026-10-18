@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * check-capability-allowlist-sync.mjs —— capability 清单 ↔ 渲染管线白名单对拍守卫。
+ * check-capability-allowlist-sync.mjs —— capability 清单 ↔ 渲染管线白名单对拍检查。
  * （设计：.tmp/tech-design/chat-html-support.md §6.1 D1 / §10 u1-prompt / §11 检查点 8 同型）
  *
  * 背景：system prompt 的 capability 段把「对话流渲染管线的 HTML 能力边界」告知 AI。这段
@@ -8,7 +8,7 @@
  * （CAPABILITY_INLINE_TAG_FAMILIES / CAPABILITY_PRESENTATION_ATTRS / CAPABILITY_FORBIDDEN），
  * 但**真实白名单**是 packages/ui/src/features/chat/markdown-sanitize.ts 的（D10 渲染链下沉迁入 ui 包）
  * ALLOWED_TAGS / ALLOWED_ATTR。两侧是跨包双份手工维护——渲染白名单改了而清单忘跟（或反之）
- * 就是 agent 被教会的能力与实际行为漂移。本守卫在提交期做**源文件字面量集合对拍**（零散文
+ * 就是 agent 被教会的能力与实际行为漂移。本检查在提交期做**源文件字面量集合对拍**（零散文
  * 解析，跨包不可 import 不是豁免理由——u-artifacts 的公式对拍同为读源文件文本形态）：
  *
  *   ① 正面标签清单 === ALLOWED_TAGS 字面量集合（双向对拍：多出 = 教会了会被剥的标签；
@@ -215,10 +215,10 @@ function extractInputsOrFail() {
   const allowedTags = extractArrayConst(sanitizeText, 'ALLOWED_TAGS')
   const allowedAttrs = extractArrayConst(sanitizeText, 'ALLOWED_ATTR')
   if (allowedTags.error) {
-    fail(`渲染侧 ALLOWED_TAGS 提取失败: ${allowedTags.error}——恢复动作：核对 ${SANITIZE_SRC} 后同步本守卫提取正则`)
+    fail(`渲染侧 ALLOWED_TAGS 提取失败: ${allowedTags.error}——恢复动作：核对 ${SANITIZE_SRC} 后同步本检查提取正则`)
   }
   if (allowedAttrs.error) {
-    fail(`渲染侧 ALLOWED_ATTR 提取失败: ${allowedAttrs.error}——恢复动作：核对 ${SANITIZE_SRC} 后同步本守卫提取正则`)
+    fail(`渲染侧 ALLOWED_ATTR 提取失败: ${allowedAttrs.error}——恢复动作：核对 ${SANITIZE_SRC} 后同步本检查提取正则`)
   }
 
   // 清单侧（capability 常量）
@@ -354,8 +354,8 @@ function main() {
   compareAttrs(input)
   checkForbiddenSemantics(input)
   guardExit(
-    '✓ capability 清单对拍守卫通过（正面清单双向一致 + 负面清单与剥除语义一致）',
-    'capability 清单对拍守卫未通过，按上方 ✗ 明细修复后重跑（每条报错自带恢复动作）',
+    '✓ capability 清单对拍检查通过（正面清单双向一致 + 负面清单与剥除语义一致）',
+    'capability 清单对拍检查未通过，按上方 ✗ 明细修复后重跑（每条报错自带恢复动作）',
   )
 }
 

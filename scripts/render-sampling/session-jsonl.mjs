@@ -17,7 +17,7 @@ import { existsSync, readdirSync, readFileSync, statSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { isAbsolute, join, resolve, sep } from 'node:path'
 
-/** 真实数据目录守卫：路径解析后落在 ~/.taiji 树内（~/.taiji-dev 树除外）即抛错。 */
+/** 真实数据目录检查：路径解析后落在 ~/.taiji 树内（~/.taiji-dev 树除外）即抛错。 */
 export function assertNotRealDataDir(path) { // oe-exempt:20261001:wip:render-sampling ④⑤ 在册组件（docs/testing/render-sampling.md 等待信号+断言读取面），验收脚本接线 wip
   const real = join(homedir(), '.taiji')
   const abs = isAbsolute(path) ? resolve(path) : resolve(process.cwd(), path)

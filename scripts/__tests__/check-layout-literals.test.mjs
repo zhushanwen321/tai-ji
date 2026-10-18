@@ -142,7 +142,7 @@ describe('R4 文件范围', () => {
     expect(files.some((f) => f === join(ROOT, 'docs/TROUBLESHOOTING.md'))).toBe(true)
     expect(files.some((f) => f === join(ROOT, 'docs/architecture/data-source-registry.md'))).toBe(true)
   })
-  it('普通 .md 不入域（fixtures README / probe 历史报告属时点性记录，出守卫域）', () => {
+  it('普通 .md 不入域（fixtures README / probe 历史报告属时点性记录，出检查范围）', () => {
     const files = collectFiles()
     const mds = files.filter((f) => f.endsWith('.md'))
     expect(

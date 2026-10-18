@@ -1,8 +1,8 @@
 #!/usr/bin/env node
 /**
- * check-vitest-guard.mjs — vitest 防线挂载守卫：所有含 vitest 测试的包，其
+ * check-vitest-guard.mjs — vitest 防线挂载检查：所有含 vitest 测试的包，其
  * vitest.config.ts 必须经仓库根 test-guard/factory.ts 导出的 taijiTestConfig 包装
- * （文件特征：内容含 `test-guard/factory`），使 TAIJI_AGENT_DATA_DIR 钉死 + fs-guard
+ * （文件特征：内容含 `test-guard/factory`），使 TAIJI_AGENT_DATA_DIR 固定为临时目录 + fs-guard
  * 破坏性 fs 操作拦截两条防线对所有 vitest 运行生效；防「新包/新 config 漏挂防线」回归。
  *
  * 背景事故：2026-09-16 从 packages/shared cwd 误跑 workspace 全仓 vitest，runtime 包
@@ -43,7 +43,7 @@ const ENV_PURITY_MARK = 'ENV_PURITY_PATH'
 /**
  * 已登记的 project 级 fs-guard 豁免（有意不挂 guard 的 project）。
  * key = config 相对目标根的 posix 路径，value = 该 config 内豁免的 project name 列表。
- * 新增豁免必须在此登记并附原因——把「有意不挂」与「漏挂」区分开，后者仍被本守卫拦截。
+ * 新增豁免必须在此登记并附原因——把「有意不挂」与「漏挂」区分开，后者仍被本检查拦截。
  */
 const PROJECT_GUARD_EXEMPT = {
   // legacy 池为存量 40+ 测试文件；挂 guard 会暴露存量用例自身设计缺陷（见该 config 注释），
@@ -56,7 +56,7 @@ const DEFAULT_ROOT = path.resolve(SCRIPT_DIR, '..')
 const targetRoot = path.resolve(process.argv[2] ?? DEFAULT_ROOT)
 
 /** 扫描根（相对目标根）与排除的目录段。resources 含 builtin 插件测试（vitest.config
- *  同经 taijiTestConfig 包装），纳入守卫面防「新插件 config 漏挂防线」静默。 */
+ *  同经 taijiTestConfig 包装），纳入检查范围防「新插件 config 漏挂防线」静默。 */
 const SCAN_ROOTS = ['packages', 'extensions', 'apps', 'resources']
 const EXCLUDED_DIR_NAMES = new Set(['node_modules', 'dist', 'test-results'])
 const TEST_SUFFIXES = ['.test.ts', '.test.mjs']
@@ -111,7 +111,7 @@ function skipLineComment(text, i) {
   return i
 }
 
-/** 块注释消费：跳过到收口符之后（与原内联写法一致，收口判定后的下标自增含在返回值里）。返回新下标。 */
+/** 块注释消费：跳过到结束符之后（与原内联写法一致，结束判定后的下标自增含在返回值里）。返回新下标。 */
 function skipBlockComment(text, i) {
   i += 2
   while (i < text.length && !(text[i] === '*' && text[i + 1] === '/')) i++
@@ -316,7 +316,7 @@ failures.push(...checkConfig(path.join(targetRoot, 'vitest.config.ts'), '<目标
 
 // ── 输出 ───────────────────────────────────────────────────────────────
 if (failures.length > 0) {
-  console.error(`[vitest-guard] 守卫拦截：${failures.length} 项违规（目标根：${toPosix(targetRoot)}）\n`)
+  console.error(`[vitest-guard] 检查拦截：${failures.length} 项违规（目标根：${toPosix(targetRoot)}）\n`)
   for (const failure of failures) console.error(`  ✗ ${failure}`)
   console.error('')
   console.error('[FIX] vitest.config.ts 必须经 test-guard/factory 的 taijiTestConfig 包装，参照 packages/shared/vitest.config.ts。')

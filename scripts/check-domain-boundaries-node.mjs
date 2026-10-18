@@ -37,7 +37,7 @@ const watchAllowlist = new Set(process.argv.slice(2))
  * composer ↔ new-task-search 域级**双向依赖**：model-thinking（composer）消费
  * createLaunchConfigView（new-task-search/launch-config），flow / launch-config
  * （new-task-search）反向消费 last-used-model / model-thinking-memory / thinking-levels
- * （composer）。按守卫建议形态改经 `@taiji/core/domain/<域>` barrel 会引入
+ * （composer）。按检查建议形态改经 `@taiji/core/domain/<域>` barrel 会引入
  * composer/index → model-thinking → new-task-search/index → flow → composer/index
  * 的域级循环 import（现状模块级直连因目标模块不回指而无环）——修复形态本身制造更深的
  * 架构问题。斩环需移动模块归属（专项裁决），完成前本清单登记存量基线：**仅豁免列出的

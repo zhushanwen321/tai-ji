@@ -1,14 +1,14 @@
 #!/usr/bin/env node
 /**
- * check-scroll-follow.mjs — 消息流滚动跟随链路守卫（约束 C-state-11 机器执法）。
+ * check-scroll-follow.mjs — 消息流滚动跟随链路检查（约束 C-state-11 机器执法）。
  *
  * 设计来源：docs/design/chat-pin-bottom-fix.md §4.3 D1/D6 + §4.4 护栏④⑤（已删除，git 可追溯；
  * INVAR 权威定义现居 packages/renderer/src/composables/panel/useVirtuaFollow.ts 文件头注释）
  * （约束登记：docs/constraints.json C-state-11）。
  *
- * [顺序依赖声明] 本守卫在 M1（U1 useVirtuaFollow 末项索引直取 + D6 vlistBottom 同款修正）
+ * [顺序依赖声明] 本检查在 M1（U1 useVirtuaFollow 末项索引直取 + D6 vlistBottom 同款修正）
  * 把禁用模式 `findItemIndex(...scrollSize)` 活调用归零之后落地（实施计划 M2/U4 挂接
- * pre-commit）——先归零后挂接，守卫防复发而非清存量。
+ * pre-commit）——先归零后挂接，检查防复发而非清存量。
  *
  * 检查 1（滚动到底唯一原语，§4.4⑤ 扫描范围收窄）：
  *   范围 = packages/renderer/src/composables/panel/（递归）
@@ -116,7 +116,7 @@ for (const rel of allFiles) {
 }
 
 if (failures.length > 0) {
-  console.error(`[scroll-follow] 守卫拦截：${failures.length} 处违规（约束 C-state-11）\n`)
+  console.error(`[scroll-follow] 检查拦截：${failures.length} 处违规（约束 C-state-11）\n`)
   for (const f of failures) console.error(`  ${f}\n`)
   console.error('[FIX] 滚动到底必须走 useVirtuaFollow 的 follow 原语（末项索引直取 + offset=tailHeight），')
   console.error('      修复指引：packages/renderer/src/composables/panel/useVirtuaFollow.ts 文件头注释 INVAR-M4-2′（原 chat-pin-bottom-fix 设计文档已删除，git 可追溯）。')

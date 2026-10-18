@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * check-extension-dependencies.mjs —— extension-dependencies.json 一致性守卫（S-7）。
+ * check-extension-dependencies.mjs —— extension-dependencies.json 一致性检查（S-7）。
  *
  * 背景：R1 MF-6 事故是 extension-dependencies.json 与磁盘上的扩展包清单漂移
  * （已删除的 pi-statusline 残留条目 + schema 无人消费）。本脚本让该文件与磁盘事实

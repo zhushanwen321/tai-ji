@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * check-posix-resolve-mirror-sync.mjs —— POSIX resolve 折叠实现三份镜像的字面量对拍守卫。
+ * check-posix-resolve-mirror-sync.mjs —— POSIX resolve 折叠实现三份镜像的字面量对拍检查。
  * （chat-html-support v16 内联容器 / markdown-html-sanitize-render D4 镜像纪律的机检补强）
  *
  * 背景：`base + rel` 后逐段折叠 `.` / `..` 的 POSIX resolve 纯函数（Node path.resolve 语义
@@ -10,8 +10,8 @@
  *   ② ui markdown-sanitize.ts 的 resolveResourcePath（相对资源 img src 重写，D4；D10 渲染链下沉后三方同域 ui 包内——镜像形态与对拍纪律不变）
  *   ③ ui markdown-links.ts 的 resolveHrefPath（④路相对链接 href resolve）。
  * 任一份漂移 = 两侧对同一相对路径解析出不同绝对路径（iframe src 与 markdown 链接点击
- * 落点不一致，越界收口行为分叉）。三份仅注释纪律同步无机检同族先例（产物目录公式、
- * capability 清单均已配对拍守卫），本守卫补齐。
+ * 落点不一致，越界收尾行为分叉）。三份仅注释纪律同步无机检同族先例（产物目录公式、
+ * capability 清单均已配对拍检查），本检查补齐。
  *
  * renderer 的 lib/path-utils.resolvePreviewPath 不属于本族——它对相对路径仅前缀拼接
  * 不折叠 `..`（gitOverlay / git diff 查询用途，语义不同），不参与对拍。
@@ -58,7 +58,7 @@ export const UI_LINKS_ANCHOR = 'function resolveHrefPath'
 /** 折叠语义锚点（三份缺一不可——防「一致删空 / 一致退化」的对拍盲区）。 */
 export const FOLD_SEMANTIC_ANCHORS = ["rel.startsWith('/')", "if (seg === '..')", 'parts.pop()']
 
-// 函数体截取原语与产物目录公式守卫同款收敛：scripts/lib/guard-report.mjs（本文件 main /
+// 函数体截取原语与产物目录公式检查同款收敛：scripts/lib/guard-report.mjs（本文件 main /
 // self-test 的本地引用经上方 import 绑定；export 保持既有公共面）。
 export { extractFunctionBlock }
 
@@ -141,7 +141,7 @@ function selfTestDriftDetection(assert) {
 
 function selfTestErrors(assert) {
   assert(extractFunctionBody('const x = 1', UI_ANCHOR).error !== undefined, 'anchor 缺失报 error')
-  assert(extractFunctionBody(`${UI_ANCHOR}(base: string, rel: string): string {\n  return rel\n`, UI_ANCHOR).error !== undefined, '无行首闭合报 error')
+  assert(extractFunctionBody(`${UI_ANCHOR}(base: string, rel: string): string {\n  return rel\n`, UI_ANCHOR).error !== undefined, '无行首收尾报 error')
   assert(stripSignatureHead('nosignature') === '', '无换行块剥签名得空串')
 }
 
@@ -166,7 +166,7 @@ function compareWithBaseline(baselineBody, mirrorBody, mirrorLabel, baselineLabe
     fail(
       `折叠实现漂移: ${mirrorLabel} ≠ 基准 ${baselineLabel}` +
         `——恢复动作：以任一份为准，把三份（${UI_ANCHOR} / ${RENDERER_ANCHOR} / ${UI_LINKS_ANCHOR}）` +
-        `函数体改为逐字同款（本侧源文件 ${mirrorSrc}；本守卫只对拍不裁决权威侧，语义变化须人工确认后三处同批同步）`,
+        `函数体改为逐字同款（本侧源文件 ${mirrorSrc}；本检查只对拍不裁决权威侧，语义变化须人工确认后三处同批同步）`,
     )
   }
 }
@@ -187,7 +187,7 @@ function main() {
     [`ui ${UI_LINKS_ANCHOR}`, uiLinksBody, UI_MARKDOWN_LINKS_SRC],
   ]
   for (const [label, body, src] of extracted) {
-    if (body.error) fail(`${label} 提取失败: ${body.error}——恢复动作：核对 ${src} 函数形态（闭合 '}' 须在行首）`)
+    if (body.error) fail(`${label} 提取失败: ${body.error}——恢复动作：核对 ${src} 函数形态（收尾 '}' 须在行首）`)
   }
   exitIfFailed('POSIX resolve 镜像对拍：函数体提取失败，按上方 ✗ 修复后重跑')
 

@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * chat store facet 双清单对账守卫（chat-ops-sync）。
+ * chat store facet 双清单对账检查（chat-ops-sync）。
  *
  * [HISTORICAL] 起因 2026-09-25（code-overdesign-audit 候选 6 / msg-pipeline-debloat
  * 设计 D5-4）：「组件禁做编排」边界登记两份——store.ts 的 ChatStoreOps Pick 字段清单
@@ -21,8 +21,8 @@
  *      （OPS_FIELDS 未导出，仅能从源文本提取）
  *   3. 双向差集：任一方向非空 → 红灯列差异集（哪侧多/少哪些字段），exit 1
  *
- * 退出码契约：0=双清单一致；1=存在漂移；2=守卫自身输入故障（文件缺失/结构不符合预期
- * 形态——守卫看不到清单了，恢复动作指向源文件，与「检查不通过」可区分）。
+ * 退出码契约：0=双清单一致；1=存在漂移；2=检查自身输入故障（文件缺失/结构不符合预期
+ * 形态——检查看不到清单了，恢复动作指向源文件，与「检查不通过」可区分）。
  *
  * 用法：node scripts/check-chat-ops-sync.mjs（全量对账，毫秒级，无需增量）。
  * import 消费导出纯函数不触发主流程（check-doc-symbol-drift.mjs 同款惯例）。
@@ -45,7 +45,7 @@ const FACET_TYPE_NAME = 'ChatStoreOps'
 const RULE_REL = 'taste-lint/rules/no-chat-ops-in-components.mjs'
 const LINT_FIELD_CONST = 'OPS_FIELDS'
 
-/** 读取对账源文件；缺失/不可读 = 守卫自身输入故障（exit 2，≠ 漂移 exit 1） */
+/** 读取对账源文件；缺失/不可读 = 检查自身输入故障（exit 2，≠ 漂移 exit 1） */
 function readSource(rel) {
   try {
     return readFileSync(path.join(PROJECT_ROOT, rel), 'utf-8')
@@ -60,7 +60,7 @@ function readSource(rel) {
 /**
  * Pick<T, 'a' | 'b' …> 形态校验 + 第二类型参数的字面量收集。
  * 结构不符（非 Pick / 基底类型名不符 / 字面量混入计算键）返回 null——
- * 说明 facet 类型形态变了，守卫失去提取能力，按配置故障处置而非静默放行。
+ * 说明 facet 类型形态变了，检查失去提取能力，按配置故障处置而非静默放行。
  */
 function pickLiteralFields(typeNode, baseTypeName) {
   if (!ts.isTypeReferenceNode(typeNode) || typeNode.typeArguments?.length !== 2) return null
@@ -96,7 +96,7 @@ export function extractFacetOpsFields(sourceText) {
 /**
  * 从 taste-lint 规则源文本提取 const OPS_FIELDS = new Set([…]) 的字符串字面量字段集
  * （OPS_FIELDS 未导出，仅能从源文本机械提取）。数组出现非字符串字面量元素（展开、
- * 计算成员等）按结构不符返回 null——守卫失去提取能力时显形，不静默放行。
+ * 计算成员等）按结构不符返回 null——检查失去提取能力时显形，不静默放行。
  * @returns {Set<string>|null} null = 未找到常量或结构不符（配置故障）
  */
 export function extractLintOpsFields(sourceText) {
@@ -141,7 +141,7 @@ function extractConstSetLiteral(decl) {
 /** 配置故障报告（提取失败时）：退出码 2，恢复动作指向源文件 */
 function reportExtractorFailure(target, rel) {
   console.error(`[chat-ops-sync] 检查器配置故障：无法从 ${rel} 提取 ${target} 字段清单`)
-  console.error('（别名/常量不存在，或结构不再符合守卫假设的提取形态——Pick<ChatStoreInstance, …> / new Set([…字符串字面量])）。')
+  console.error('（别名/常量不存在，或结构不再符合检查假设的提取形态——Pick<ChatStoreInstance, …> / new Set([…字符串字面量])）。')
   console.error(`恢复动作：确认 ${target} 形态后更新 scripts/check-chat-ops-sync.mjs 的提取逻辑。`)
   process.exit(2)
 }

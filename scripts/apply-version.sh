@@ -382,9 +382,9 @@ function consumableChangesets() {
 
 // --- 版本字面量双源同步（subagent-core CORE_PACKAGE_VERSION）---
 // @zhushanwen/subagent-core 的 src/index.ts 导出 CORE_PACKAGE_VERSION 字面量，与
-// package.json version 构成登记双源（check-subagent-core-closure.mjs 检查项 0 守卫
-// 一致性）。apply-version 必须同步更新字面量，否则每次 bump 该包后闭包守卫红灯、
-// 人工手改——守卫是兜底，工具一次做对才是终态。
+// package.json version 构成登记双源（check-subagent-core-closure.mjs 检查项 0 检查
+// 一致性）。apply-version 必须同步更新字面量，否则每次 bump 该包后闭包检查红灯、
+// 人工手改——检查是兜底，工具一次做对才是终态。
 const CORE_PKG = '@zhushanwen/subagent-core';
 const CORE_INDEX_REL = 'packages/subagent-core/src/index.ts';
 const coreLiteralPending = () => allBumped.has(CORE_PKG);

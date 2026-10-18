@@ -78,7 +78,7 @@ WHITELIST_DELIVERAS = {
     "universal/goal/src/adapters/event-handlers/agent-end.ts",
 }
 # ── 规则 2 白名单（路径相对 extensions/universal/subagent-workflow/src/）────
-# 模型引用规范正身 = packages/subagent-core/src/shared/model-ref.ts
+# 模型引用规范权威源文件 = packages/subagent-core/src/shared/model-ref.ts
 # （assertCanonicalModelRef，跨包单源，本域零副本）。域内 "--model" 唯一生产
 # 出现面 = host/pi-host.ts argv 解析词表（行级 g4-allow：解析词表成员，非模型
 # 引用拼装）；无文件级白名单成员。

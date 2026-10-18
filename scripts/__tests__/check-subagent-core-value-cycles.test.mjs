@@ -1,8 +1,8 @@
 // scripts/__tests__/check-subagent-core-value-cycles.test.mjs
 //
-// C-data-26 守卫（scripts/check-subagent-core-value-cycles.mjs）的 fixture 单测：
+// C-data-26 检查（scripts/check-subagent-core-value-cycles.mjs）的 fixture 单测：
 // 值环必红 / 纯类型环放行（类型边编译期擦除）/ 混合说明符按值边 / 动态 import 与
-// require 计入 / 干净图绿——防「守卫恒绿」或「类型边被当成值边误伤」两侧退化。
+// require 计入 / 干净图绿——防「检查恒绿」或「类型边被当成值边误伤」两侧退化。
 // fixture 全在 tmpdir 自建自删（禁触真实仓库）。
 import { spawnSync } from "node:child_process";
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs";

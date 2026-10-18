@@ -1,8 +1,8 @@
 /**
- * check-guide-contract-projection.mjs 守卫自身测试（2026-09-20 R1 评审补：同族 17 守卫
- * 均有测试，本守卫已接线 pre-commit 而无测试——失效即假绿放行指南漂移）。
+ * check-guide-contract-projection.mjs 检查自身测试（2026-09-20 R1 评审补：同族 17 检查
+ * 均有测试，本检查已接线 pre-commit 而无测试——失效即假绿放行指南漂移）。
  *
- * 模式 = check-thinking-levels.test.mjs 同款「tmp mirror + spawnSync」：守卫以
+ * 模式 = check-thinking-levels.test.mjs 同款「tmp mirror + spawnSync」：检查以
  * `dirname(import.meta.url)/..` 求 ROOT，把脚本复制进 <tmp>/scripts/ 后 ROOT 即 <tmp>，
  * 指南与三份源码词表全部落 fixture（mkdtemp 自建自删，同 scripts/__tests__ 既有惯例，
  * 不触真实仓库文件）。锁定行为：
@@ -77,9 +77,9 @@ ${capsJson}
 `)
 }
 
-/** 组装 tmp mirror：<tmp>/scripts/ 放守卫脚本本体（ROOT 解析即 <tmp>），其余为 fixture。
+/** 组装 tmp mirror：<tmp>/scripts/ 放检查脚本本体（ROOT 解析即 <tmp>），其余为 fixture。
  *  漂移注入只动单面（hostCodes / pkgCapValues / guideOverride），指南与 engine.ts 恒按
- *  基准形态生成——否则漂移被 fixture 自身「同步」掉，守卫恒绿。 */
+ *  基准形态生成——否则漂移被 fixture 自身「同步」掉，检查恒绿。 */
 function makeFixture({ hostCodes = ['err_a', 'err_b'], sdkCodes = ['p_x', 'p_y', 'p_z'], capKeys = ['capsA'], pkgCapValues, guideOverride } = {}) {
   const baseValues = { capsA: 'mode-x', maxTurns: false }
   const root = mkdtempSync(join(tmpdir(), 'gcp-guard-'))

@@ -1,10 +1,10 @@
 /**
- * check-provider-credential-reads.mjs 双守卫单测（C-proc-14 / C-proc-15）。
+ * check-provider-credential-reads.mjs 双检查单测（C-proc-14 / C-proc-15）。
  *
  * 正则过宽阻塞正常代码 / 过窄防线静默失效都必须回归捕捉——五组行为机器锁定：
- *   R1 守卫 A 三模式命中（getApiKeyForProvider / readAuthCredentials / getProviderConfig(...).apiKey）
- *   R2 守卫 A 白名单放行（唯一通道本体）+ 白名单收口计数（size===1，膨胀 = 收口失效信号）
- *   R3 守卫 B upsertProvider 直调命中 + 白名单（接口签名声明同形）放行 + 白名单结构完整性
+ *   R1 检查 A 三模式命中（getApiKeyForProvider / readAuthCredentials / getProviderConfig(...).apiKey）
+ *   R2 检查 A 白名单放行（唯一通道本体）+ 白名单收敛计数（size===1，膨胀 = 收敛失效信号）
+ *   R3 检查 B upsertProvider 直调命中 + 白名单（接口签名声明同形）放行 + 白名单结构完整性
  *   R4 词边界与注释剔除（readAuthCredentialKey 近形不误伤 / 行内注释提及不违规）
  *   R5 扫描范围边界（*.test.ts / __tests__/ / *.d.ts 不扫——测试文件允许引用符号做防回归断言）
  *
@@ -49,9 +49,9 @@ function violationsOf(root) {
   return scanDir(root).violations
 }
 
-// ---------- R1 守卫 A 三模式命中 ----------
+// ---------- R1 检查 A 三模式命中 ----------
 
-describe('R1 守卫 A 三模式（白名单外生产代码）', () => {
+describe('R1 检查 A 三模式（白名单外生产代码）', () => {
   it('标识符 getApiKeyForProvider 命中（模式 1）', () => {
     const root = makeFixture({ 'svc/a.ts': "const k = getApiKeyForProvider(id)\n" })
     expect(violationsOf(root)).toEqual([
@@ -81,9 +81,9 @@ describe('R1 守卫 A 三模式（白名单外生产代码）', () => {
   })
 })
 
-// ---------- R2 守卫 A 白名单 ----------
+// ---------- R2 检查 A 白名单 ----------
 
-describe('R2 守卫 A 白名单放行 + 收口计数', () => {
+describe('R2 检查 A 白名单放行 + 收敛计数', () => {
   it('唯一白名单文件（resolver 本体）同形态读取放行', () => {
     expect([...GUARD_A_ALLOWLIST]).toEqual(['services/auth/provider-credential-resolver.ts'])
     const root = makeFixture({
@@ -91,14 +91,14 @@ describe('R2 守卫 A 白名单放行 + 收口计数', () => {
     })
     expect(violationsOf(root)).toEqual([])
   })
-  it('白名单 size===1（清零/膨胀都是收口失效信号，脚本头注释 D3）', () => {
+  it('白名单 size===1（清零/膨胀都是收敛失效信号，脚本头注释 D3）', () => {
     expect(GUARD_A_ALLOWLIST.size).toBe(1)
   })
 })
 
-// ---------- R3 守卫 B ----------
+// ---------- R3 检查 B ----------
 
-describe('R3 守卫 B upsertProvider 直调', () => {
+describe('R3 检查 B upsertProvider 直调', () => {
   it('直调与成员调用都命中', () => {
     const root = makeFixture({
       'svc/d.ts': "upsertProvider(cfg)\nstore.upsertProvider(cfg)\n",
@@ -119,7 +119,7 @@ describe('R3 守卫 B upsertProvider 直调', () => {
       expect(existsSync(join(ROOT, 'packages/runtime/src', rel)), `白名单条目不存在：${rel}`).toBe(true)
     }
   })
-  it('白名单上限 8（脚本恢复动作：>8 = 收口失效信号）', () => {
+  it('白名单上限 8（脚本恢复动作：>8 = 收敛失效信号）', () => {
     expect(GUARD_B_ALLOWLIST.size).toBeLessThanOrEqual(8)
   })
 })
@@ -131,7 +131,7 @@ describe('R4 词边界与注释剔除', () => {
     const root = makeFixture({ 'svc/e.ts': "const k = readAuthCredentialKey(c)\n" })
     expect(violationsOf(root)).toEqual([])
   })
-  it('行内注释提及守卫符号不违规（历史说明先例）', () => {
+  it('行内注释提及检查符号不违规（历史说明先例）', () => {
     const root = makeFixture({
       'svc/f.ts': "// 历史说明：readAuthCredentials 与 getApiKeyForProvider 已删除\nconst x = 1\n",
     })

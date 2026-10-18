@@ -23,7 +23,7 @@
  * 门② 子入口导出面 src↔dist 符号比对：对 exports 的每条子入口（非 `.`、非通配），
  * 从 src 入口（exports import 条件）解析具名导出符号，与 dist 对应 .d.cts
  * （exports require.types）及同基 .d.ts 的导出符号集双向比对，差集非空 = FAIL。
- * `export * from` 无法文本枚举——按依赖闭包守卫同款 fail-closed 处理，直接 FAIL。
+ * `export * from` 无法文本枚举——按依赖闭包检查同款 fail-closed 处理，直接 FAIL。
  *
  * 运行时机：subagent-core build 之后（本脚本只读，不自行 build——dist 缺失即 FAIL，
  * 提示先 `cd packages/subagent-core && pnpm build`）；pre-merge / release 管线可挂。
@@ -65,7 +65,7 @@ function ok(msg) {
 /**
  * 剥离 // 与块注释（保留字符串字面量）——启发式解析前置，避免注释里的语法样式
  * 误报。已知局限：模板串 ${} 内嵌引号会提前结束字符串状态（倾向误报而非漏报，
- * 与依赖闭包守卫的 fail-closed 取向一致）。
+ * 与依赖闭包检查的 fail-closed 取向一致）。
  */
 /** 行注释跳过：consume 到行尾（不含换行符——\n 留给主循环作为普通字符输出）。 */
 function skipLineComment(text, i) {
@@ -73,7 +73,7 @@ function skipLineComment(text, i) {
   return i
 }
 
-/** 块注释跳过：consume 整段（含闭合定界符；EOF 处未闭合时越过末尾，主循环随之结束）。 */
+/** 块注释跳过：consume 整段（含结束定界符；EOF 处未封口时越过末尾，主循环随之结束）。 */
 function skipBlockComment(text, i) {
   i += 2
   while (i < text.length && !(text[i] === '*' && text[i + 1] === '/')) i++
@@ -81,7 +81,7 @@ function skipBlockComment(text, i) {
 }
 
 /**
- * 字符串字面量整段消费：从开引号扫到匹配闭引号（`\x` 转义跳两个字符；未闭合时
+ * 字符串字面量整段消费：从开引号扫到匹配闭引号（`\x` 转义跳两个字符；未封口时
  * 保留到 EOF）。返回原文片段（逐字节原样，含引号与转义）与游标后继。
  */
 function consumeString(text, i) {
@@ -189,7 +189,7 @@ function findModuleLevelMutableState(srcAbs) {
 // export 块单项形态：标识符/default + 可选 as 重命名（重命名后符号才是导出面）
 const EXPORT_PART_RE = /^([A-Za-z_$][\w$]*|default)(?:\s+as\s+([A-Za-z_$][\w$]*|default))?$/
 
-/** 花括号配对扫描：从 open 起找 depth 归零的闭合 }（未闭合返回 -1） */
+/** 花括号配对扫描：从 open 起找 depth 归零的结束 }（未封口返回 -1） */
 function findBlockClose(text, open) {
   let depth = 0
   for (let j = open; j < text.length; j++) {
@@ -218,7 +218,7 @@ function parseExportBlocks(text, problems, where) {
     const open = text.indexOf('{', m.index)
     const close = findBlockClose(text, open)
     if (close < 0) {
-      problems.push(`${where}: export { } 花括号未闭合——文本解析失败`)
+      problems.push(`${where}: export { } 花括号未封口——文本解析失败`)
       continue
     }
     for (const rawPart of text.slice(open + 1, close).split(',')) {
@@ -441,7 +441,7 @@ function locateSubentryFaces(pkg, sub, coreDir) {
     return null
   }
   if (!existsSync(dtsAbs)) {
-    fail(`${sub.key}: dist 声明产物缺失 ${dtsRel}（import 条件消费面断裂——核对 tsup.config.ts dts 输出）`)
+    fail(`${sub.key}: dist 声明产物缺失 ${dtsRel}（import 条件消费方断裂——核对 tsup.config.ts dts 输出）`)
     return null
   }
   return { srcAbs, dctsRel, dctsAbs, dtsRel, dtsAbs }

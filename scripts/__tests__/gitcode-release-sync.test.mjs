@@ -345,7 +345,7 @@ describe('diffNameSets（refs/附件镜像共用的集合互差）', () => {
   })
 })
 
-describe('verifyUploadedAssets（附件推后验证：name 集合 + 逐件远端大小）', () => {
+describe('verifyUploadedAssets（附件推送后验证：name 集合 + 逐件远端大小）', () => {
   const FILES = [
     { name: 'a.dmg', size: 100 },
     { name: 'b.zip', size: 200 },

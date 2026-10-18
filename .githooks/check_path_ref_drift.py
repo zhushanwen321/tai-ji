@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 # 路径引用漂移检查：staged 变更删除/移动了文件时，全仓代码与脚本范围 grep 旧路径的
-# 字符串残留引用——守卫触发正则 / 测试 fixture / 构建与钩子脚本里内嵌的路径不随迁移
+# 字符串残留引用——检查触发正则 / 测试 fixture / 构建与钩子脚本里内嵌的路径不随迁移
 # 更新 = 防线静默失效（钩子不触发、测试 ENOENT，要到 CI 或构建才暴露；v0.10.14 轮
-# 实例：markdown-sanitize.ts 迁 renderer→ui 后 install-hooks.sh 触发正则与守卫测试
+# 实例：markdown-sanitize.ts 迁 renderer→ui 后 install-hooks.sh 触发正则与检查测试
 # fixture 仍指老路径）。
 #
 # 匹配口径：旧路径去扩展名的完整相对串；正则转义形态（`foo\.ts`）与普通形态同判

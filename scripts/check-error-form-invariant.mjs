@@ -1,10 +1,10 @@
 #!/usr/bin/env node
 /**
- * check-error-form-invariant.mjs — error 终态消息形态统一守卫（M2 形态统一，机器护栏）。
+ * check-error-form-invariant.mjs — error 终态消息形态统一检查（M2 形态统一，机器护栏）。
  *
  * 不变量：凡对象字面量声明 `role: 'assistant'` 且 `status: 'error'`（Message 构造），
  * 必须同时含 `error:` 键（错误文本只住 error 字段，content 恒为崩溃前正文）。
- * 违规形态 = 历史上「纯 error 靠 content 承载错误文本 / 收口漏写 error 字段」的复发面
+ * 违规形态 = 历史上「纯 error 靠 content 承载错误文本 / 收尾漏写 error 字段」的复发面
  * ——渲染端以 error 字段有无决定「正文原色 + 独立 danger 行」，缺 error 键的消息要么
  * 错误不可见、要么倒退回「正文整条染红」的旧 bug（2026-09 变红事故根因形态）。
  *
@@ -136,7 +136,7 @@ if (violations.length > 0) {
   for (const v of violations) {
     console.error(`  ${v}`)
   }
-  console.error('[FIX] 把错误文本移入 error 字段（content 留崩溃前正文，无则为空串），或经 finalizeSession/terminalMessagePatch 收口（自带兜底）。')
+  console.error('[FIX] 把错误文本移入 error 字段（content 留崩溃前正文，无则为空串），或经 finalizeSession/terminalMessagePatch 收尾（自带兜底）。')
   process.exit(1)
 }
 console.log(`[error-form-invariant] OK：${scanned} 个文件扫描通过（${SCAN_ROOTS.join(' / ')}）`)

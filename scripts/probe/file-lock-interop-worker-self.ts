@@ -7,7 +7,7 @@
 // 以「runtime 适配层」形态持有锁——packages/runtime/src/utils/file-lock.ts 的
 // withFileLockAsync（内部经 @zhushanwen/pi-file-lock/core 自实现 mkdir 锁）。这正是
 // runtime 与 pi 内嵌 proper-lockfile 在 auth.json / providers.json 上互斥同一把锁的
-// 生产配对形态（auth-storage.ts / provider-extras-store.ts 消费面）。
+// 生产配对形态（auth-storage.ts / provider-extras-store.ts 消费方）。
 //
 // 每轮迭代：acquire（ELOCKED 指数退避等待）→ 临界区内 read-validate-append-write
 // → release。临界区读全文并逐行校验形态——互斥一旦失效，并发 RMW 会产生丢行（后写者
@@ -92,7 +92,7 @@ async function main(): Promise<void> {
     await new Promise((resolve) => setTimeout(resolve, Math.floor(Math.random() * JITTER_MAX_MS)))
   }
   // startedAtMs/endedAtMs（epoch ms）：供编排方断言两 worker 运行区间真实重叠
-  //（并发形态守卫——防探针退化为先后交替执行仍「绿」）
+  //（并发形态检查——防探针退化为先后交替执行仍「绿」）
   console.log(
     JSON.stringify({
       worker: tag,

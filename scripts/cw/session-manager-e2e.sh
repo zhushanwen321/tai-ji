@@ -31,7 +31,7 @@ error() {
   echo -e "${RED}[session-manager-e2e]${NC} $*" >&2
 }
 
-# 红阶段守卫：验证实现产物存在（区分力检查——基线代码树无此文件会 fail）
+# 红阶段检查：验证实现产物存在（区分力检查——基线代码树无此文件会 fail）
 red_phase_guard
 
 # 根据测试类型选择验收 id 与描述，执行统一委托 vitest 探针

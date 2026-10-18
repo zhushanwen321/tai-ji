@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * check-pi-sync.mjs —— pi 构建期派生锚点跟随守卫。
+ * check-pi-sync.mjs —— pi 构建期派生锚点跟随检查。
  *
  * 与 check-pi-semantics.mjs 的分工（设计 §2.1 分工声明）——逐项零重叠自查：
  * - check-pi-semantics 管「实装内部一致 + pi 语义漂移」：pi-coding-agent/pi-ai/pi-agent-core
@@ -13,13 +13,13 @@
  *   ② 实装基准 = node_modules 实装版本（与声明的一致性由 check-pi-semantics 四包门禁先行锁定）
  *      → S3 快照 piAiVersion / S4 快照新鲜度 / S6 KNOWN_PI_API_TYPES / S7 pi-tui 实装
  *
- * 守卫矩阵 8 项（§3.2）：
+ * 检查矩阵 8 项（§3.2）：
  *   S1 build.yml PI_VERSION env == 声明 pi-coding-agent                  [声明/fail]
  *   S2 prepare-pi-resources.sh PI_VERSION 默认值 == 同上                  [声明/fail]
  *   S3 快照 piAiVersion == 实装 pi-ai                                     [实装/fail]
  *   S4 快照 providers/catalogGeneratedAt == 实装 pi-ai 内存重生成
  *      （import gen 脚本纯函数，零副作用不落盘；与 t10 测试构成 D3 明文的
- *       「不同拦截时点双通道」：t10 在测试期、本守卫在提交期+CI invariants） [实装/fail]
+ *       「不同拦截时点双通道」：t10 在测试期、本检查在提交期+CI invariants） [实装/fail]
  *   S5 extensions 各包 package.json 的 pi 依赖 satisfies 对应包声明        [声明/fail]
  *   S6 KNOWN_PI_API_TYPES == pi-ai KnownApi 源码提取值                    [实装/fail]
  *   S7 实装 pi-tui == 声明 pi-tui（check-pi-semantics PI_PKGS 三包缺口的补位）[实装/fail]
@@ -52,7 +52,7 @@ const PI_AI = `${PI_SCOPE}/pi-ai`
 const RESOURCES_PI_PKG = join(ROOT, 'apps', 'electron', 'resources', 'pi', 'package.json')
 
 // 呈报骨架（✓/✗ 行 + 失败旗标 + setDiff/对拍呈报/汇总出口）与 scripts 家族共享：
-// scripts/lib/guard-report.mjs。⚠ warn 行是本守卫的「仅警告不拦截」语义，本地定义。
+// scripts/lib/guard-report.mjs。⚠ warn 行是本检查的「仅警告不拦截」语义，本地定义。
 const warn = (msg) => console.warn(`  ⚠ ${msg}`)
 
 // ── 纯函数（--self-test 覆盖）────────────────────────────────────────
@@ -251,7 +251,7 @@ if (!declaredAgent) {
   )
   process.exit(1)
 }
-console.log(`pi-sync 守卫：声明基准 ${PI_CODING_AGENT}=${declaredAgent}，实装基准取 node_modules`)
+console.log(`pi-sync 检查：声明基准 ${PI_CODING_AGENT}=${declaredAgent}，实装基准取 node_modules`)
 
 // ── S1 build.yml PI_VERSION env（声明基准）────────────────────────────
 {
@@ -330,7 +330,7 @@ let snapshot
   if (snapshot && installedAiVersion) {
     let gen
     try {
-      // 动态 import：gen 脚本仅在直接执行时写文件（其尾部 main 守卫），import 复用纯函数零副作用
+      // 动态 import：gen 脚本仅在直接执行时写文件（其尾部 main 检查），import 复用纯函数零副作用
       gen = await import(pathToFileURL(GEN_SCRIPT).href)
     } catch (e) {
       fail(
@@ -488,6 +488,6 @@ let snapshot
 
 // ── 汇总 ────────────────────────────────────────────────────────────
 guardExit(
-  '✓ pi-sync 守卫通过（构建期派生锚点 8 项：声明基准 3 + 实装基准 4 + dev binary 1）',
-  'pi-sync 守卫未通过，按上方 ✗ 明细修复后重跑（每条报错自带恢复动作）',
+  '✓ pi-sync 检查通过（构建期派生锚点 8 项：声明基准 3 + 实装基准 4 + dev binary 1）',
+  'pi-sync 检查未通过，按上方 ✗ 明细修复后重跑（每条报错自带恢复动作）',
 )

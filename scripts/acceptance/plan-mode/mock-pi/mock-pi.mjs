@@ -214,8 +214,8 @@ function handleAbort(cmd) {
 // - sessionFile：attach 断言 I1 / 崩溃取证（rpc-client getState）——switch_session 绑定后
 //   回报绑定路径，未绑定时省略 key（pi 首次 flush 前 session 路径未定，JSON 序列化丢
 //   undefined key 与实装同构）；
-// - model{provider,id} + thinkingLevel：restore-seeding 播种 + 标量投影（replicated-states
-//   .config 'required' 空值语义——缺失 = 协议异常退避重拉，故给非空 stub）。
+// - model{provider,id} + thinkingLevel：restore-seeding 播种 + 标量派生视图（replicated-states
+//   .config 'required' 空值语义——缺失 = 协议异常退避重新拉取，故给非空 stub）。
 // 无真值来源的字段用 stub 常量（steeringMode/followUpMode = 实装缺省值，见
 // dist/core/settings-manager.js getSteeringMode/getFollowUpMode）。
 function buildState() {

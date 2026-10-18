@@ -2,7 +2,7 @@
  * pi-scheduler e2e 驱动器判定器纯函数族单测（scripts/lib/scheduler-e2e-judgers.cjs）。
  *
  * 判定器自错（协议形状判定漂移 / 分支回归）= e2e 假绿 / 假红不可辨，故对判定面
- * 直接锁定：ScheduleDraft 形状守卫（与 extension-protocol scheduler-create
+ * 直接锁定：ScheduleDraft 形状检查（与 extension-protocol scheduler-create
  * helpers.ts 的 isScheduleDraft 同步契约）、请求帧提取、契约校验、JSONL 解析
  * 容错、entry 分布摘要。场景编排（runS*）与 pi 进程交互保持 e2e 实跑覆盖，
  * 不在本文件范围。

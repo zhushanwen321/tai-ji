@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# red-phase-guard.sh — cw e2e 脚本共用的红阶段守卫（scripts/cw/lib/）
+# red-phase-guard.sh — cw e2e 脚本共用的红阶段检查（scripts/cw/lib/）
 #
 # 用法：source "$(dirname "$0")/../lib/red-phase-guard.sh"（在设置 PROJECT_ROOT 后）
 # 效果：实现产物缺失/不含目标类时以非零退出（cw verify 红阶段区分力检查）

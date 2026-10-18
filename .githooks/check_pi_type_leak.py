@@ -187,7 +187,7 @@ def strip_comments(text: str) -> str:
     # 先剥 HTML 注释（.vue；.ts 无 <!-- --> 字面形态，统一处理无害）
     text = re.sub(r"<!--.*?-->", "", text, flags=re.DOTALL)
 
-    # 块注释：同行/跨行开闭的非贪婪匹配 + 残留未闭合块注释删到文末
+    # 块注释：同行/跨行开闭的非贪婪匹配 + 残留未封口块注释删到文末
     text = re.sub(r"/\*.*?\*/", "", text, flags=re.DOTALL)
     text = re.sub(r"/\*.*$", "", text, flags=re.DOTALL)
 
@@ -246,7 +246,7 @@ def parse_event_names() -> list[str]:
     end = stripped.find("]", m.end())
     if end == -1:
         raise RuntimeError(
-            f"事件名词表取数失败：{EVENT_NAMES_CONST} 数组未找到闭合 ']'"
+            f"事件名词表取数失败：{EVENT_NAMES_CONST} 数组未找到结束 ']'"
             f"（{PI_PROTOCOL_PATH.relative_to(PROJECT_ROOT)}）"
         )
     bracket = stripped[m.end() : end]

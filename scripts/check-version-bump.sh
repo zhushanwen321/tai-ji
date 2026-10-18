@@ -14,7 +14,7 @@ LATEST=$(gh release list --repo "$REPO" --limit 100 \
   | head -1)
 
 if [ -z "$LATEST" ]; then
-  # 仓库尚无任何正式 release（首次发布场景）：无跳版基线可比对，守卫前提不成立，显式放行。
+  # 仓库尚无任何正式 release（首次发布场景）：无跳版基线可比对，检查前提不成立，显式放行。
   # W25 对比同样依赖 v* ref 基线，一并跳过；pi 契约面由 equivalence faux 轨用例覆盖。
   echo "OK: 仓库尚无任何正式 release（首次发布），无跳版基线，放行。"
   echo "注意: W25 pi 依赖对比无 release 基线，跳过（契约面由 equivalence faux 轨覆盖）。"

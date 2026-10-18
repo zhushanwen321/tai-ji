@@ -6,7 +6,7 @@ i18n locale 双侧 key 对齐检查（维度 A）
 必须完全一致（含嵌套 key 的完整路径）：
   - packages/renderer/src/i18n/locales/     （renderer 壳域文件）
   - packages/ui/src/locale/                 （ui 域文件——被 ui 组件消费 key 的域
-    文件按域文件级下沉规则整体迁入 ui locale 模块，双侧必须继续受对齐守卫）
+    文件按域文件级下沉规则整体迁入 ui locale 模块，双侧必须继续受对齐检查）
 
 目的：拦截 zh-CN 加了 key 但忘记同步 en-US（或反之）的 desync。i18n-frontend
 和 i18n-frontend-p2 两轮均发生过 desync（571 vs 567、panel 漏 116 key）。
@@ -33,8 +33,8 @@ GREEN = '\033[0;32m'
 YELLOW = '\033[1;33m'
 NC = '\033[0m'
 
-# 受守卫的 locale 根目录（每组内 zh-CN/ 与 en-US/ 必须镜像）。
-# ui locale 根：域文件级下沉 ui locale 模块后，迁移域双侧不能脱离对齐守卫。
+# 受检查的 locale 根目录（每组内 zh-CN/ 与 en-US/ 必须镜像）。
+# ui locale 根：域文件级下沉 ui locale 模块后，迁移域双侧不能脱离对齐检查。
 LOCALES_ROOTS = [
     Path('packages/renderer/src/i18n/locales'),
     Path('packages/ui/src/locale'),

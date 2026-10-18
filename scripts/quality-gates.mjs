@@ -16,7 +16,7 @@
  *      file_gate 豁免同款）同步覆盖本判定；② 可执行行口径见 hasExecutableLines——
  *      interface/type/常量/纯导出聚合等无可执行分支的文件整文件排除。
  *   4. metrics-gate：子进程调用 metrics-gate.py（在 coverage-gate 之后——它消费同 base 的
- *      .review/coverage.json 真实覆盖率）。warn 档与 high_crap 靶子清单按决策 4 降级为机器
+ *      .review/coverage.json 真实覆盖率）。warn 档与 high_crap 检查目标清单按决策 4 降级为机器
  *      报告呈报（不逐条 LLM 核查），只有 fail 档影响本门判定。
  *
  * base 口径两侧差异有意保留（参数化承载，设计 §5-U1）：
@@ -193,7 +193,7 @@ function stripStep(state, c, d) {
     if (c === '*' && d === '/') return { state: 'code', advance: 2, text: '  ' }
     return { state: 'block', advance: 1, text: c === '\n' ? '\n' : ' ' }
   }
-  // 字符串态（sq/dq/tpl）：转义跳过；闭合引号回 code
+  // 字符串态（sq/dq/tpl）：转义跳过；结束引号回 code
   if (c === '\\') return { state, advance: 2, text: '  ' }
   const closing = state === 'sq' ? "'" : state === 'dq' ? '"' : '`'
   if (c === closing) return { state: 'code', advance: 1, text: c }
@@ -211,7 +211,7 @@ function skipBalanced(lines, start) {
     }
     const ended = started && depth <= 0
     if (ended) return i + 1
-    // 单行即闭合（无括号开启的声明行，如 let x = 1）也到此为止
+    // 单行即结束（无括号开启的声明行，如 let x = 1）也到此为止
     if (!started && /;\s*$/.test(lines[i])) return i + 1
   }
   return lines.length

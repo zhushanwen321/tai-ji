@@ -21,7 +21,7 @@ const VERIFY_SRC = join(REPO, "scripts/verify-staged-extensions.mjs");
 const ASSET_DIR_LIB_SRC = join(REPO, "scripts/lib/staged-asset-dirs.mjs");
 
 /**
- * mirror 复制守卫脚本进 <tmp>/scripts/ 时同步带 scripts/lib/ 共享登记表——
+ * mirror 复制检查脚本进 <tmp>/scripts/ 时同步带 scripts/lib/ 共享登记表——
  * verify-staged import 该登记表（MF-1-17 单一来源），mirror 缺文件 = MODULE_NOT_FOUND。
  */
 function stageVerifyGuardInto(root) {
@@ -60,7 +60,7 @@ describe("builtin-ext-bundle (wave:builtin-ext-bundle)", () => {
 	});
 
 	/**
-	 * TC7 fixture（mirror 形态，同 MF-1-6 makeMirror）：守卫脚本复制进 <tmp>/scripts/
+	 * TC7 fixture（mirror 形态，同 MF-1-6 makeMirror）：检查脚本复制进 <tmp>/scripts/
 	 * （REPO_ROOT 即 <tmp>），SSOT fixture 只含 permission 且 staged 同集——SSOT 同集
 	 * 断言恒过。非 wasm 形态不拷 skills/（真实 package.json 声明 pi.skills=["./skills"]），
 	 * checkManifest 的 pi.skills 引用缺失与 wasm 缺失同时红灯（stderr 共 3 条失败），
@@ -128,7 +128,7 @@ describe("builtin-ext-bundle (wave:builtin-ext-bundle)", () => {
 		// 回归后果：拷贝循环被删 → 新装用户内置 skills 整体消失（staged 非 discovery 扫描源）。
 		// [C1 convergence 86b700f67] 10 个 agent 模板迁至 packages/subagent-core/agents/（随
 		// npm 包 files 分发），本包 pi.agents 声明与 agents/ 目录已删——agents 断言改为「不存在」，
-		// 防止迁移回潮；manifest 资源拷贝分支的回归面由 skills 单独承载（workflows 走 C 包
+		// 防止迁移回潮；manifest 资源拷贝分支的回归测试由 skills 单独承载（workflows 走 C 包
 		// 专线拷贝，不经 manifest 字段，见 bundle-extensions.mjs 常量注释）。
 		const swDir = join(STAGED, "pi-subagent-workflow");
 		expect(existsSync(swDir), "staged pi-subagent-workflow 存在").toBe(true);
@@ -180,7 +180,7 @@ describe("builtin-ext-bundle (wave:builtin-ext-bundle)", () => {
  * TC7 只覆盖 pi-permission 缺 wasm（wasm 校验，非 checkManifest），本组覆盖 checkManifest
  * 的 6 个失败分支——回归时任一分支失效会让残缺 manifest 的产物过 gate 进 pi 加载。
  *
- * 构造模式（mirror 形态，同 MF-1-6）：守卫脚本复制进 <tmp>/scripts/（REPO_ROOT 即
+ * 构造模式（mirror 形态，同 MF-1-6）：检查脚本复制进 <tmp>/scripts/（REPO_ROOT 即
  * <tmp>），SSOT fixture 只含 pi-test-pkg 且 staged 同集——SSOT 集合断言恒过，残缺
  * manifest 成为唯一红灯源；合法 index.js 过文件级检查到达 checkManifest；断言 stderr
  * 含对应失败文案，防其它分支先行 exit 1 的假绿。改造前 tmp 单包直接对仓库真实 19 包
@@ -303,7 +303,7 @@ describe("verify-staged checkManifest failure branches (M6a-09, MF-3)", () => {
  * 防御性返回空清单、listTemplates 仅 warn）。共享登记表是唯一 postbuild 拦截面。
  *
  * 构造模式（tmp mirror × spawnSync，同 check-guide-contract-projection 惯例）：
- * 守卫脚本复制进 <tmp>/scripts/（REPO_ROOT 即 <tmp>，SSOT mandatory-extensions.json
+ * 检查脚本复制进 <tmp>/scripts/（REPO_ROOT 即 <tmp>，SSOT mandatory-extensions.json
  * 落 fixture），staged 给全量最小合法包集（每包 index.js + pi.extensions 指向它）
  * ——SSOT 集合断言与 manifest 校验恒通过，templates 缺失成为唯一红灯源；并对
  * stderr 断言定位原因，防「其它校验先行 exit 1」的假绿。
@@ -386,12 +386,12 @@ describe("verify-staged per-package asset dirs (MF-1-6)", () => {
 });
 
 /**
- * staged 特殊资产目录单一登记表结构守卫（MF-1-17）。
+ * staged 特殊资产目录单一登记表结构检查（MF-1-17）。
  *
  * bundle 侧 templates/ 专项拷贝与 verify 侧 staged 校验共读 scripts/lib/staged-asset-dirs.mjs
  * 的唯一登记表（键 = 包 short 名，值 = staged 包根下资产目录名）——原「双登记 + 仅注释
  * 互指」结构已删除（bundle 侧加条目漏改 verify 侧时 MF-1-6 校验静默失效、缺失形态复辟，
- * 运行期无任何红灯）。本用例做结构性回归守卫：两脚本必须 import 共享登记表、不得另持
+ * 运行期无任何红灯）。本用例做结构性回归检查：两脚本必须 import 共享登记表、不得另持
  * 字面量表；登记表本体非空（空表 = bundle 不拷 + verify 不查的双侧失明）。
  */
 describe("staged asset dirs single-source registry (MF-1-17)", () => {

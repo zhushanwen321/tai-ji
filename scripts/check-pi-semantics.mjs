@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * check-pi-semantics.mjs —— pi 语义依赖登记表（docs/pi-semantics.json）漂移守卫（D6 守卫层，U7a）。
+ * check-pi-semantics.mjs —— pi 语义依赖登记表（docs/pi-semantics.json）漂移检查（D6 检查层，U7a）。
  *
  * 背景：taiji 对 pi 私有语义的依赖此前只有人读登记（troubleshooting 观察项），
  * pi 升级后假设批量过期无人知（2026-08-20 登记思考钳制、8-27 照样出事的实证）。
@@ -120,7 +120,7 @@ for (const entry of entries) {
 
   const guard = entry.guard
   if (typeof guard !== 'object' || guard === null) {
-    fail(`条目 ${entry.id} 缺 guard 对象——恢复动作：按附录 A「守卫」列补 {type:"probe",test} 或 {type:"observe",note}`)
+    fail(`条目 ${entry.id} 缺 guard 对象——恢复动作：按附录 A「检查」列补 {type:"probe",test} 或 {type:"observe",note}`)
   } else if (guard.type === 'probe') {
     if (!isNonEmptyStr(guard.test) || !guard.test.endsWith('.test.ts')) {
       fail(`条目 ${entry.id} 的 guard.type=probe 必须带 .test.ts 测试路径（当前 ${JSON.stringify(guard.test)}）——恢复动作：补齐探针测试路径`)
@@ -130,7 +130,7 @@ for (const entry of entries) {
       fail(`条目 ${entry.id} 的 guard.type=observe 必须带 note（处置说明）——恢复动作：补齐观察项处置建议`)
     }
   } else {
-    fail(`条目 ${entry.id} 的 guard.type 必须是 probe / observe（当前 ${JSON.stringify(guard.type)}）——恢复动作：按附录 A 守卫列修正分型`)
+    fail(`条目 ${entry.id} 的 guard.type 必须是 probe / observe（当前 ${JSON.stringify(guard.type)}）——恢复动作：按附录 A 检查列修正分型`)
   }
 
   if (!isNonEmptyStr(entry.verifiedWith) || !/^\d+\.\d+\.\d+/.test(entry.verifiedWith)) {
@@ -251,8 +251,8 @@ try {
 // ── 汇总 ────────────────────────────────────────────────────────────
 if (failed === 0) {
   const observeCount = entries.length - probeCount
-  console.log(`✓ pi-semantics.json 守卫通过（${entries.length} 条 = probe ${probeCount} + observe ${observeCount}；schema/探针存在性/版本门禁${ROOT !== DEFAULT_ROOT ? `，fixture root=${ROOT}` : ''}）`)
+  console.log(`✓ pi-semantics.json 检查通过（${entries.length} 条 = probe ${probeCount} + observe ${observeCount}；schema/探针存在性/版本门禁${ROOT !== DEFAULT_ROOT ? `，fixture root=${ROOT}` : ''}）`)
   process.exit(0)
 }
-console.error('pi-semantics 守卫未通过，按上方 ✗ 明细修复后重跑（每条报错自带恢复动作）')
+console.error('pi-semantics 检查未通过，按上方 ✗ 明细修复后重跑（每条报错自带恢复动作）')
 process.exit(1)

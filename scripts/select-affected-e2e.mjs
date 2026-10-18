@@ -20,7 +20,10 @@
  *                                                         #（git diff --cached），防「新增 e2e
  *                                                         # 资产但漏改 e2e-map.json」——与 --check
  *                                                         # 同判定（unregisteredWatchedFiles），
- *                                                         # 不渲染受影响清单
+ *                                                         # 不渲染受影响清单。登记义务面 = 新增/
+ *                                                         # 改名进看护目录的文件（--diff-filter=AR），
+ *                                                         # 修改存量文件不产生登记义务（见
+ *                                                         # changedAddedFiles 注释）
  *
  * 退出码：0 成功 / 1 --check、--staged 检出未登记文件 / 2 环境错误（map 缺失、git ref 无效）
  */
@@ -140,6 +143,27 @@ function stagedFiles() {
   }
 }
 
+/** 门禁判定专用输入源（--staged 形态）：仅新增/改名进看护目录的暂存文件。
+ *
+ * 登记义务只由「新资产进入看护目录」产生——这正是 --staged/--check 的存在目的
+ * （防新增 e2e 资产漏登记）。修改存量文件不产生登记义务：看护根常是共用工具
+ * 目录（scripts/ 等，watchedRoots 注释所警示的「孤资产共享目录」），对其中存量
+ * 非资产文件的行内修改（注释/文案/测试名）与 e2e 资产登记无关；原实现把修改
+ * 也纳入判定，导致任何 scripts/ 存量脚本的编辑都被逼去 e2e-map 登记。
+ * 规则选择（selectRules）仍用全量 stagedFiles——不受本收窄影响。 */
+function stagedAddedFiles() {
+  return execSync("git diff --cached --name-only --diff-filter=AR", { cwd: REPO_ROOT, encoding: "utf8" })
+    .split("\n")
+    .filter(Boolean);
+}
+
+/** 门禁判定专用输入源（--check 形态）：仅新增/改名进看护目录的变更文件（同 stagedAddedFiles 理由）。 */
+function changedAddedFiles(base) {
+  return execSync(`git diff --name-only --diff-filter=AR ${base}...HEAD`, { cwd: REPO_ROOT, encoding: "utf8" })
+    .split("\n")
+    .filter(Boolean);
+}
+
 function renderRules(rules, map) {
   const lines = [];
   lines.push(`| ID | 层 | 触发 | 串行 | 摘要 |`);
@@ -179,7 +203,7 @@ function main() {
 
   // --staged：pre-commit 门禁形态——只做防漏登记判定，不渲染受影响清单（与 --check 同判定逻辑）
   if (args.includes("--staged")) {
-    const unregistered = unregisteredWatchedFiles(map, stagedFiles());
+    const unregistered = unregisteredWatchedFiles(map, stagedAddedFiles());
     if (unregistered.length > 0) {
       console.error("[select-affected-e2e] --staged FAIL：以下暂存文件落在 e2e-map 看护目录内但无任何 rule 覆盖（防漏登记）：");
       for (const f of unregistered) console.error(`  - ${f}`);
@@ -207,7 +231,7 @@ function main() {
   console.log(renderRules(rules, map));
 
   if (check) {
-    const unregistered = unregisteredWatchedFiles(map, files);
+    const unregistered = unregisteredWatchedFiles(map, changedAddedFiles(base));
     if (unregistered.length > 0) {
       console.error("[select-affected-e2e] --check FAIL：以下变更文件落在 e2e-map 看护目录内但无任何 rule 覆盖（防漏登记）：");
       for (const f of unregistered) console.error(`  - ${f}`);

@@ -7,7 +7,7 @@
  *                   [data-testid="plan-review-degraded"]，谓词 visible，窗 3000ms）
  *   zero-render     稳定窗「间隙内零渲染」——persist→pending 间隙（mock pi 1.5s 构造）内 degraded
  *                   零渲染（窗 = 间隙时长，默认 1500ms）
- *   fallback-not-lit 「10s 兜底不亮」——兜底窗内可点 degraded 零渲染（冷拉对账后才可渲染；谓词
+ *   fallback-not-lit 「10s 兜底不亮」——兜底窗内可点 degraded 零渲染（主动拉取对账后才可渲染；谓词
  *                   clickable，窗 10000ms）
  *   eventually      正向等待——目标在窗内出现（如审批条回到 ready），谓词 exists
  *

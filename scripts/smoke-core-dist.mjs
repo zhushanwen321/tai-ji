@@ -32,7 +32,7 @@
  * node 版本说明：engines 声明 node>=20。本脚本实际执行环境跟随调用方
  * （本机 dev / release-npm.yml CI 均为 node 24）。TODO(node20 runner)：真正的
  * node 20 require 复验需 node 20 runner——[W11/H3] 起 core dist 全入口
- * require 链不含 node:sqlite（bare import("sqlite") 守卫已随 reader 迁引擎包
+ * require 链不含 node:sqlite（bare import("sqlite") 检查已随 reader 迁引擎包
  * 构建），node 20 可加载面与 node 24 一致。语义等价声明：本脚本在 node 24 上
  * 验证的是「构建产物可加载 + exports 映射正确 + golden 回放绿」的回归语义。
  *

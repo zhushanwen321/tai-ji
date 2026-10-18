@@ -152,7 +152,7 @@ NON_SESSIONS_DERIVATIONS_RE = re.compile(
 
 ASSIGN_RE_TMPL = r"^[ \t]*(?:const|let|var)\s+{name}\s*="
 CHAIN_LOOKBACK_LINES = 10   # 同函数单跳赋值链的最大回溯行数
-STATEMENT_MAX_SPAN = 5      # 多行语句（括号未闭合）向下拼接的最大行数
+STATEMENT_MAX_SPAN = 5      # 多行语句（括号未结束）向下拼接的最大行数
 
 # ---------------------------------------------------------------------------
 # allowlist：文件级登记例外（registry_doc §4 条目 ↔ 本表一一对应；§5 维护规约第 3 条
@@ -275,7 +275,7 @@ def is_test_file(rel: Path) -> bool:
 
 
 def statement_text(lines: list[str], lineno: int) -> str:
-    """写调用所在语句文本：本行 + 括号未闭合时向下拼接（封顶 STATEMENT_MAX_SPAN 行）。"""
+    """写调用所在语句文本：本行 + 括号未结束时向下拼接（封顶 STATEMENT_MAX_SPAN 行）。"""
     text = lines[lineno - 1]
     depth = text.count("(") - text.count(")")
     idx = lineno

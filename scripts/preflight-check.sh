@@ -12,7 +12,7 @@
 #    gitignored 不豁免；逻辑单一源 = scripts/check-pi-resources-links.mjs）
 # 8. 磁盘空间
 # 9. extension-dependencies.json 一致性
-# 10. Provider 凭据读取单通道守卫（C-proc-14/15，runtime 源码约束）
+# 10. Provider 凭据读取单通道检查（C-proc-14/15，runtime 源码约束）
 #
 # 注：builtin pi-extensions（@zhushanwen/pi-*）打包内置（2026-08 重构），
 # 由 prepare-builtin-extensions.sh 部署 + electron-builder extraResources 拷贝。
@@ -24,7 +24,7 @@
 set -euo pipefail
 
 # 检查失败原则：任何非 0 退出都输出（不管从哪个 exit 点）
-trap '[ $? -ne 0 ] && echo "[原则] 无论是否本次改动引入的问题，都必须正面修复解决，不允许跳过。" >&2' EXIT
+trap '[ $? -ne 0 ] && echo "[原则] 无论是否本次改动引入的问题，都必须当场直接修复解决，不允许跳过。" >&2' EXIT
 
 RED='\033[0;31m'
 GREEN='\033[0;32m'
@@ -268,9 +268,9 @@ else
 fi
 
 # ── 9. extension 发布一致性 ────────────────────────────────────────
-# S-7 守卫：extension-dependencies.json 与磁盘包清单双向对应（防 R1 MF-6 类残留/漂移
+# S-7 检查：extension-dependencies.json 与磁盘包清单双向对应（防 R1 MF-6 类残留/漂移
 # 再次静默进入）。脚本：scripts/check-extension-dependencies.mjs（零依赖）。
-# files 白名单守卫：npm 发布闭包校验（import 闭包 ⊆ files，防 pi-subagent-workflow@8.8.1
+# files 白名单检查：npm 发布闭包校验（import 闭包 ⊆ files，防 pi-subagent-workflow@8.8.1
 # 类缺文件包）。脚本：scripts/check-extension-files.mjs（零依赖）。
 echo ""
 echo -e "${BLUE}[9/10] extension consistency (dependencies + publish files)...${NC}"
@@ -285,7 +285,7 @@ else
     FAILED=1
 fi
 
-# ── 10. Provider 凭据读取单通道守卫（C-proc-14/15）────────────────────
+# ── 10. Provider 凭据读取单通道检查（C-proc-14/15）────────────────────
 # catalog-provider-field-authority §3.3 D3/D6：runtime 源码的凭据直查禁令
 # （getApiKeyForProvider / readAuthCredentials / getProviderConfig(...).apiKey，
 # 白名单 = resolver 唯一通道本体）+ upsertProvider 直调清单。零依赖毫秒级，

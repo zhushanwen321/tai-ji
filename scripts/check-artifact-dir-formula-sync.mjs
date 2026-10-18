@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * check-artifact-dir-formula-sync.mjs —— 会话产物目录公式对拍守卫（公式双实现 +
+ * check-artifact-dir-formula-sync.mjs —— 会话产物目录公式对拍检查（公式双实现 +
  * sessionId 校验正则三方）。
  * （设计：.tmp/tech-design/chat-html-support.md §6.7 D7 / §11 检查点 8 / §10 u-artifacts）
  *
@@ -12,7 +12,7 @@
  *      `SESSION_ARTIFACTS_DIR_SEGMENT` + `resolveSessionArtifactsDir`（每 turn 注入产物
  *      目录绝对路径）。
  * 两侧任一漂移（段名改了 / 校验正则松紧不一）= agent 收到的路径与实际目录不符（写偏或
- * 预览 404）。跨包不可 import 不是豁免机检的理由——本守卫与 u1 的
+ * 预览 404）。跨包不可 import 不是豁免机检的理由——本检查与 u1 的
  * check-capability-allowlist-sync.mjs 同为**源文件字面量对拍**形态（强度对称）：
  * 读双侧源文本，提取段名字面量与 sessionId 校验正则字面量，断言逐字一致。
  *
@@ -72,7 +72,7 @@ export const RUNTIME_TREE_FNS = ['getSessionsDir', 'getSubagentSessionDir', 'get
 const SHARED_ANCHOR = `export function ${SHARED_FN}`
 const MIRROR_ANCHOR = `export function ${MIRROR_FN}`
 
-// 函数体截取原语与 POSIX resolve 镜像守卫同款收敛：scripts/lib/guard-report.mjs。
+// 函数体截取原语与 POSIX resolve 镜像检查同款收敛：scripts/lib/guard-report.mjs。
 // re-export 保持单测（scripts/__tests__/check-artifact-dir-formula-sync.test.mjs）的既有 import 面。
 export { extractFunctionBlock }
 
@@ -100,7 +100,7 @@ export function extractConstLiteral(text, constName) {
 /**
  * 从源文本提取 `const <name> = /正则字面量/` 的正则字面量本体（第三源 runtime
  * `PI_SESSION_ID_PATTERN` 的声明形态；行尾分号可选）。按行匹配（multiline `$`），
- * 正则字面量内含未转义 `/` 时提取失败一律 fail（守卫原则：形态变化宁可误报不可漏报）。
+ * 正则字面量内含未转义 `/` 时提取失败一律 fail（检查原则：形态变化宁可误报不可漏报）。
  */
 export function extractConstRegex(text, constName) {
   const m = text.match(new RegExp(`const\\s+${constName}\\s*=\\s*(/[^/\\n]+/)\\s*;?\\s*$`, 'm'))
@@ -308,7 +308,7 @@ function checkMirrorConstUsage(mirrorBlock) {
     fail(
       `镜像 ${MIRROR_FN} 未经 ${MIRROR_SEGMENT_CONST} 拼段名` +
         `——恢复动作：改为 join(resolveDataDir(), ${MIRROR_SEGMENT_CONST}, sessionId)` +
-        '（重写死字面量会被本守卫漏掉漂移）',
+        '（重写死字面量会被本检查漏掉漂移）',
     )
   }
 }
@@ -325,7 +325,7 @@ function compareTreeSegments(sharedText, runtimeText) {
   } else if (treeSegments.value.length !== RUNTIME_TREE_FNS.length) {
     fail(
       `${SHARED_TREE_CONST} 元素数 ${treeSegments.value.length} ≠ runtime 布局权威函数数 ${RUNTIME_TREE_FNS.length}` +
-        `——恢复动作：树布局增删时同批更新 shared 常量与本守卫 RUNTIME_TREE_FNS 清单`,
+        `——恢复动作：树布局增删时同批更新 shared 常量与本检查 RUNTIME_TREE_FNS 清单`,
     )
   } else {
     for (const [i, fn] of RUNTIME_TREE_FNS.entries()) {

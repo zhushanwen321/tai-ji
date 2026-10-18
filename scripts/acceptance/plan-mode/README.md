@@ -117,7 +117,7 @@ node scripts/acceptance/plan-mode/cdp/assert-window.mjs --kind suppress
 # S3「persist→pending 间隙内零渲染」（稳定窗；间隙 = mock pi 1.5s 构造，先跑 assert 再触发重挂）
 node scripts/acceptance/plan-mode/cdp/assert-window.mjs --kind zero-render --window-ms 1500
 
-# 「10s 兜底不亮」（可点 degraded 冷拉对账后才可渲染）
+# 「10s 兜底不亮」（可点 degraded 主动拉取对账后才可渲染）
 node scripts/acceptance/plan-mode/cdp/assert-window.mjs --kind fallback-not-lit
 
 # 正向等待（如审批条回到 ready 三键）

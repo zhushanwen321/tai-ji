@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * check-extension-files.mjs —— extension npm 发布 files 白名单守卫。
+ * check-extension-files.mjs —— extension npm 发布 files 白名单检查。
  *
  * 背景：pi-subagent-workflow@8.8.1 事故——重构新增 src/session-lifecycle.ts 被
  * src/index.ts 引用，但该包 files 白名单是逐文件枚举（全仓唯一），新文件未同步

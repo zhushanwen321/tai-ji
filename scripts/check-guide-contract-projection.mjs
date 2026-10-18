@@ -1,12 +1,12 @@
 #!/usr/bin/env node
 /**
- * 引擎开发指南契约投影守卫（guide-contract-projection）。
+ * 引擎开发指南契约映射检查（guide-contract-projection）。
  *
  * [HISTORICAL] 起因 2026-09-18：docs/extensions/subagents/engine-development-guide.md
  * 的能力位/错误码两张契约表与源码词表之间无机器对账——指南头部的「更新触发（同 commit
  * 义务）」只约束人，源码枚举新增成员后指南漏同步无任何机器信号（与 doc-symbol-drift
  * 同族问题：drift 只查反引号内 UPPER_SNAKE/get* 符号，错误码小写蛇形与能力位表不在其
- * 候选集）。本脚本把「指南契约表 ↔ 源码词表」变成可机检的投影一致性。
+ * 候选集）。本脚本把「指南契约表 ↔ 源码词表」变成可机检的映射一致性。
  *
  * 检查逻辑（正则提取，零依赖）：
  *   1. 宿主词表：errors.ts 的 ENGINE_ERROR_CODES as-const 数组 ↔ 指南 §4「封闭枚举 N 条」
@@ -20,16 +20,16 @@
  *   4. manifest 能力值三面对账：zcode-subagent-cli 包 package.json 的
  *      taiji.subagentEngine.capabilities ↔ zcode-engine.ts capabilities() 方法体 ↔
  *      指南 §1 manifest 完整示例 JSON——三方键集一致 + 逐键值相等（maxTurns 须 boolean，
- *      其余键须字符串字面量）。两镜像为权威，指南为投影面；两镜像互相不一致属源码误改。
+ *      其余键须字符串字面量）。两镜像为权威，指南为派生视图；两镜像互相不一致属源码误改。
  *
  * 书写契约（指南侧）：§4 宿主词表行保持「封闭枚举 N 条——`code` / `code` / …」全量列举
  * 形态；§3 保持「能力位全集 N 位」标题 + 表首列 `capabilityKey` 形态；§1 manifest 完整
- * 示例保持 ```json 围栏内含 "subagentEngine" 段形态。破坏形态 = 本守卫红。
+ * 示例保持 ```json 围栏内含 "subagentEngine" 段形态。破坏形态 = 本检查红。
  *
  * 触发面：pre-commit 按 staged 路径接线（指南 / errors.ts / error-codes.ts /
  * engine-manifest.ts / contract-types.ts / zcode-subagent-cli 的 package.json 与
  * zcode-engine.ts），见 .githooks/install-hooks.sh 对应块。
- * 不设独立 SKIP_* 开关（R1 后惯例，总闸 SKIP_ALL_CHECKS 兜底）。
+ * 不设独立 SKIP_* 开关（R1 后惯例，总开关 SKIP_ALL_CHECKS 兜底）。
  */
 import { readFileSync } from 'node:fs'
 import path from 'node:path'
@@ -54,7 +54,7 @@ function extractConstArray(src, name, file, seen = new Set()) {
   if (members !== null) return members
   const str = src.match(new RegExp(`export const ${name} = "([^"]+)"`))
   if (str) return [str[1]]
-  fail(`源码解析失败：${file} 中找不到 export const ${name}（数组或字符串常量；源码形态变更须同步本守卫）`)
+  fail(`源码解析失败：${file} 中找不到 export const ${name}（数组或字符串常量；源码形态变更须同步本检查）`)
   return []
 }
 
@@ -79,10 +79,10 @@ function expandArrayToken(src, t, file, seen) {
   return ref ? extractConstArray(src, ref[1], file, seen) : []
 }
 
-/** 从 CAPABILITY_ENUMS 块提取键集（值域校验交编译层，此处只对账键集投影）。 */
+/** 从 CAPABILITY_ENUMS 块提取键集（值域校验交编译层，此处只对账键集派生视图）。 */
 function extractCapabilityKeys(src) {
   const m = src.match(/const CAPABILITY_ENUMS[^=]*= \{([\s\S]*?)\n\}/)
-  if (!m) fail('源码解析失败：engine-manifest.ts 中找不到 const CAPABILITY_ENUMS 块（源码形态变更须同步本守卫）')
+  if (!m) fail('源码解析失败：engine-manifest.ts 中找不到 const CAPABILITY_ENUMS 块（源码形态变更须同步本检查）')
   return [...m[1].matchAll(/^\s{2}(\w+): \[/gm)].map((x) => x[1])
 }
 
@@ -94,12 +94,12 @@ function extractPkgManifestCapValues(rel) {
   try {
     pkg = JSON.parse(read(rel))
   } catch {
-    fail(`源码解析失败：${rel} 不是合法 JSON（形态变更须同步本守卫）`)
+    fail(`源码解析失败：${rel} 不是合法 JSON（形态变更须同步本检查）`)
     return {}
   }
   const caps = pkg?.taiji?.subagentEngine?.capabilities
   if (!caps || typeof caps !== 'object' || Array.isArray(caps)) {
-    fail(`源码解析失败：${rel} 缺 taiji.subagentEngine.capabilities 段（manifest 义务见指南 §1；形态变更须同步本守卫）`)
+    fail(`源码解析失败：${rel} 缺 taiji.subagentEngine.capabilities 段（manifest 义务见指南 §1；形态变更须同步本检查）`)
     return {}
   }
   return caps
@@ -110,7 +110,7 @@ function extractEngineMethodCapValues(rel) {
   const src = read(rel)
   const m = src.match(/capabilities\(\): EngineCapabilities \{([\s\S]*?)\n  \}/)
   if (!m) {
-    fail(`源码解析失败：${rel} 中找不到 capabilities(): EngineCapabilities 方法体（源码形态变更须同步本守卫）`)
+    fail(`源码解析失败：${rel} 中找不到 capabilities(): EngineCapabilities 方法体（源码形态变更须同步本检查）`)
     return {}
   }
   const body = m[1]
@@ -130,7 +130,7 @@ function extractGuideManifestCapValues(guideText) {
     .map((f) => f[1])
     .find((b) => b.includes('"subagentEngine"'))
   if (!block) {
-    fail(`${GUIDE} 找不到 manifest 完整示例（书写契约：§1 \`\`\`json 围栏内含 "taiji"."subagentEngine" 段，破坏形态 = 投影守卫红）`)
+    fail(`${GUIDE} 找不到 manifest 完整示例（书写契约：§1 \`\`\`json 围栏内含 "taiji"."subagentEngine" 段，破坏形态 = 本检查红）`)
     return {}
   }
   const caps = block.match(/"capabilities"\s*:\s*\{([\s\S]*?)\}/)
@@ -159,13 +159,13 @@ const hostCodes = extractConstArray(read(ERRORS_FILE), 'ENGINE_ERROR_CODES', ERR
 const sdkCodes = extractConstArray(read(SDK_CODES_FILE), 'ENGINE_PROTOCOL_ERROR_CODES', SDK_CODES_FILE)
 const capabilityKeys = [...extractCapabilityKeys(read(MANIFEST_FILE)), 'maxTurns'] // knownKeys 同源并集（engine-manifest.ts knownKeys = CAPABILITY_ENUMS 键 + maxTurns）
 
-// ── 指南侧投影 ──────────────────────────────────────────────────────────────
+// ── 指南侧派生视图 ──────────────────────────────────────────────────────────────
 const guide = read(GUIDE)
 
 // 1. 宿主词表：计数 + 集合双向对账
 const hostLine = guide.split('\n').find((l) => l.includes('封闭枚举') && l.includes('条——'))
 if (!hostLine) {
-  fail(`${GUIDE} §4 找不到宿主词表行（书写契约：「封闭枚举 N 条——\`code\` / …」全量列举形态，破坏形态 = 投影守卫红）`)
+  fail(`${GUIDE} §4 找不到宿主词表行（书写契约：「封闭枚举 N 条——\`code\` / …」全量列举形态，破坏形态 = 本检查红）`)
 } else {
   const countClaim = Number((hostLine.match(/封闭枚举 (\d+) 条/) || [])[1])
   const guideCodes = [...hostLine.matchAll(/`([a-z_]+)`/g)].map((x) => x[1])
@@ -216,7 +216,7 @@ if (manifestCapSides.every((s) => Object.keys(s.values).length > 0)) {
     }
     const present = manifestCapSides.filter((s) => key in s.values)
     if (new Set(present.map((s) => JSON.stringify(s.values[key]))).size > 1) {
-      fail(`manifest 能力值三面不一致：\`${key}\`——${present.map((s) => `${s.label}（${s.file}）= ${fmtCapValue(s.values[key])}`).join('；')}——同 commit 更新失同步面（指南 §1 向两镜像对齐；两镜像互相不一致属源码误改，回退源码）`)
+      fail(`manifest 能力值三面不一致：\`${key}\`——${present.map((s) => `${s.label}（${s.file}）= ${fmtCapValue(s.values[key])}`).join('；')}——同 commit 更新失同步的部分（指南 §1 向两镜像对齐；两镜像互相不一致属源码误改，回退源码）`)
     }
   }
   for (const s of manifestCapSides) {
@@ -230,9 +230,9 @@ if (manifestCapSides.every((s) => Object.keys(s.values).length > 0)) {
 
 // ── 汇总 ────────────────────────────────────────────────────────────────────
 if (failures.length) {
-  console.log(`[guide-contract-projection] 发现 ${failures.length} 处指南契约投影失同步：`)
+  console.log(`[guide-contract-projection] 发现 ${failures.length} 处指南契约映射失同步：`)
   for (const f of failures) console.log(`  ✗ ${f}`)
   console.log('恢复动作：按 AGENTS.md 主题索引「更新触发」同 commit 更新指南对应节；若属源码误改则回退源码。')
   process.exit(1)
 }
-console.log(`[guide-contract-projection] OK：宿主词表 ${hostCodes.length} 条 / SDK 协议码 ${sdkCodes.length} 条 / 能力位 ${capabilityKeys.length} 位 / manifest 能力值三面逐键一致，指南投影逐项一致`)
+console.log(`[guide-contract-projection] OK：宿主词表 ${hostCodes.length} 条 / SDK 协议码 ${sdkCodes.length} 条 / 能力位 ${capabilityKeys.length} 位 / manifest 能力值三面逐键一致，指南映射逐项一致`)

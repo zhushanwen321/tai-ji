@@ -1,9 +1,9 @@
 /**
- * check_infra_services_import.py 守卫自身测试（2026-09-20 R1 评审补 MF-1-15：守卫已接线
+ * check_infra_services_import.py 检查自身测试（2026-09-20 R1 评审补 MF-1-15：检查已接线
  * pre-commit（install-hooks.sh CONSTRAINT_CHECKER 循环）而无测试——失效即假绿放行
  * infra→services 反向依赖，三层单向 transport→services←infra 的补向拦截形同虚设）。
  *
- * 模式 = check-guide-contract-projection.test.mjs 同款「tmp mirror + spawnSync」：守卫以
+ * 模式 = check-guide-contract-projection.test.mjs 同款「tmp mirror + spawnSync」：检查以
  * `Path(__file__).resolve().parent.parent` 求 PROJECT_ROOT，把脚本复制进 <tmp>/.githooks/
  * 后 ROOT 即 <tmp>，infra fixture 全部落 <tmp>/packages/runtime/src/infra/（mkdtemp 自建
  * 自删，同 scripts/__tests__ 既有惯例，不触真实仓库文件）。锁定行为：
@@ -21,7 +21,7 @@ import { fileURLToPath } from 'node:url'
 
 const SCRIPT_SRC = join(dirname(fileURLToPath(import.meta.url)), '..', '..', '.githooks', 'check_infra_services_import.py')
 
-/** 组装 tmp mirror：<tmp>/.githooks/ 放守卫副本（PROJECT_ROOT 解析即 <tmp>），
+/** 组装 tmp mirror：<tmp>/.githooks/ 放检查副本（PROJECT_ROOT 解析即 <tmp>），
  *  files 为 { infra 相对路径: 内容 }，落 <tmp>/packages/runtime/src/infra/ 下。 */
 function makeFixture(files) {
   const root = mkdtempSync(join(tmpdir(), 'isi-guard-'))

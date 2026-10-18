@@ -1,5 +1,5 @@
 /**
- * check-doc-symbol-drift.mjs 守卫逻辑单测（G5：源码注释内 docs 引用存在性检查面）。
+ * check-doc-symbol-drift.mjs 检查逻辑单测（G5：源码注释内 docs 引用存在性检查）。
  *
  * 误放行会让「注释引用已删除文档」继续悬空存活（panel-view-derivation 事故形态）；
  * 误报会拦死正常提交——两条都机器锁定：
@@ -237,7 +237,7 @@ describe('R6 extractDataOwnerAnnotations', () => {
   })
 })
 
-// ---------- R7 ADR 编号登记面与引用存在性 ----------
+// ---------- R7 ADR 编号登记清单与引用存在性 ----------
 
 describe('R7 extractAdrRegistry', () => {
   it('合条标题收全部编号，标题正文提及的其他编号不收（承 ADR-XXXX 是引用不是定义）', () => {

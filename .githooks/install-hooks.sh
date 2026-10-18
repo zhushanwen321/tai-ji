@@ -791,7 +791,7 @@ else
 fi
 
 # ============================================================================
-# CSS token SSOT 一致性检查（DESIGN.md frontmatter 投影 ↔ style.css 值真值）
+# CSS token SSOT 一致性检查（DESIGN.md frontmatter 派生视图 ↔ style.css 值真值）
 # ============================================================================
 
 CSS_SSOT_CHECKER=".githooks/check_css_token_ssot.py"
@@ -811,7 +811,7 @@ if [ "$SKIP_ALL_CHECKS" != "1" ] && [ "$SKIP_CSS_TOKEN_SSOT_CHECK" != "1" ]; the
 
             if [ $EXIT_CODE -ne 0 ]; then
                 echo ""
-                echo -e "${RED}[ERROR] CSS token SSOT 检查失败：DESIGN.md 投影值与 style.css 不一致${NC}"
+                echo -e "${RED}[ERROR] CSS token SSOT 检查失败：DESIGN.md 派生视图值与 style.css 不一致${NC}"
                 echo -e "${RED}[原则] 无论是否本次改动引入的问题，都必须当场直接修复解决，不允许跳过。${NC}"
                 exit 1
             fi
@@ -1514,7 +1514,7 @@ fi
 
 # ============================================================================
 # 路径引用漂移检查（staged 删除/移动的旧路径 → 全仓残留引用拦截）
-#   场景：文件迁移/删除后，守卫触发正则、测试 fixture、钩子脚本里内嵌的旧路径
+#   场景：文件迁移/删除后，检查触发正则、测试 fixture、钩子脚本里内嵌的旧路径
 #   不随更新 = 防线静默失效（v0.10.14 轮 markdown-sanitize.ts 迁移实例）。
 #   豁免登记处 = .githooks/check_path_ref_drift.py 的 PATH_REF_EXEMPT。
 # ============================================================================
@@ -1544,7 +1544,7 @@ I18N_CJK_CHECKER=".githooks/check_i18n_cjk.py"
 
 if [ "$SKIP_ALL_CHECKS" != "1" ] && [ "$SKIP_I18N_CJK_CHECK" != "1" ]; then
     # 仅当 staged 含 .vue 文件时检查（双根与 check_i18n_cjk.py 的 SCAN_ROOTS 对齐；
-    # mobile-renderer 根缺席曾致其下 .vue 不触发守卫）
+    # mobile-renderer 根缺席曾致其下 .vue 不触发检查）
     STAGED_VUE=$(echo "$STAGED_FILES" | grep -E "^packages/(renderer/src|mobile-renderer/src)/.*\.vue$" || true)
     if [ -n "$STAGED_VUE" ]; then
         echo -e "${BLUE}[INFO] 运行 i18n CJK 残留检测...${NC}"
@@ -1870,7 +1870,7 @@ SUBAGENT_CORE_CYCLE_STAGED=$(git diff --cached --name-only -- packages/subagent-
 if echo "$SUBAGENT_CORE_CYCLE_STAGED" | grep -qE "^packages/subagent-core/|^scripts/check-subagent-core-value-cycles\.mjs$"; then
     print_section "[subagent-core 包内值依赖环检查]"
     if [ ! -f "scripts/check-subagent-core-value-cycles.mjs" ]; then
-        echo -e "${RED}[ERROR] 找不到 scripts/check-subagent-core-value-cycles.mjs（C-data-26 守卫缺失）${NC}"
+        echo -e "${RED}[ERROR] 找不到 scripts/check-subagent-core-value-cycles.mjs（C-data-26 检查缺失）${NC}"
         exit 1
     fi
     if ! node scripts/check-subagent-core-value-cycles.mjs; then
@@ -1890,18 +1890,18 @@ fi
 # ============================================================================
 # 领域类型路径单源检查（D2 配套，register §2.0/§2.4）
 #   subagent-core 源码或检查脚本自身变更时触发：scripts/check-domain-type-path.mjs
-#   —— execution/domain/ 是领域类型唯一权威路径；assembly 禁 re-export、消费面禁绕道。
+#   —— execution/domain/ 是领域类型唯一权威路径；assembly 禁 re-export、消费方禁绕道。
 # ============================================================================
 
 DOMAIN_TYPE_PATH_STAGED=$(git diff --cached --name-only -- packages/subagent-core/src scripts/check-domain-type-path.mjs)
 if echo "$DOMAIN_TYPE_PATH_STAGED" | grep -qE "^packages/subagent-core/src/|^scripts/check-domain-type-path\.mjs$"; then
     print_section "[领域类型路径单源检查]"
     if [ ! -f "scripts/check-domain-type-path.mjs" ]; then
-        echo -e "${RED}[ERROR] 找不到 scripts/check-domain-type-path.mjs（D2 守卫缺失）${NC}"
+        echo -e "${RED}[ERROR] 找不到 scripts/check-domain-type-path.mjs（D2 检查缺失）${NC}"
         exit 1
     fi
     if ! node scripts/check-domain-type-path.mjs; then
-        echo -e "${RED}[ERROR] 领域类型路径出现双源（D2）——领域名只在 execution/domain/ 声明，assembly 不得 re-export，消费面不得绕道${NC}"
+        echo -e "${RED}[ERROR] 领域类型路径出现双源（D2）——领域名只在 execution/domain/ 声明，assembly 不得 re-export，消费方不得绕道${NC}"
         echo -e "${RED}[原则] 无论是否本次改动引入的问题，都必须当场直接修复解决，不允许跳过。${NC}"
         exit 1
     fi
@@ -1912,7 +1912,7 @@ GLOBAL_SLOT_STAGED=$(git diff --cached --name-only -- packages/subagent-core/src
 if echo "$GLOBAL_SLOT_STAGED" | grep -qE "^packages/subagent-(core|engine-sdk)/src/|^extensions/universal/subagent-workflow/src/|^scripts/check-global-slot-keys\.mjs$"; then
     print_section "[进程级全局槽键归属检查]"
     if [ ! -f "scripts/check-global-slot-keys.mjs" ]; then
-        echo -e "${RED}[ERROR] 找不到 scripts/check-global-slot-keys.mjs（C-state-20 守卫缺失）${NC}"
+        echo -e "${RED}[ERROR] 找不到 scripts/check-global-slot-keys.mjs（C-state-20 检查缺失）${NC}"
         exit 1
     fi
     if ! node scripts/check-global-slot-keys.mjs; then
@@ -1965,7 +1965,7 @@ fi
 #   结构无关的 glob 全域匹配，新增分组/包零维护（同上方 EXTENSION_PKG_FILES
 #   两段式改造的教训：禁止与目录结构耦合的清单式写法）。
 #   scripts/check-record-write-surface.mjs —— grep 门兜底（R1 七名写函数直调 +
-#   R2 subagent-record entry 直写 + R3 workflow-record 三宿主白名单 + R4 v1 投影器
+#   R2 subagent-record entry 直写 + R3 workflow-record 三宿主白名单 + R4 v1 派生器
 #   + R5 v1 快照载荷 + R6 死字节 + R7 .events 直写，七族规则与脚本头注释/OK 输出
 #   同口径）。一级拦截 = eslint
 #   no-restricted-imports（eslint.config.mjs subagent-core 块，模块边界级）；
@@ -2039,10 +2039,10 @@ else
 fi
 
 # ============================================================================
-# 引擎开发指南契约投影检查（docs/extensions/subagents/engine-development-guide.md §12 待建检查行落地）
-#   staged 命中指南或其投影源（errors.ts / error-codes.ts / engine-manifest.ts /
+# 引擎开发指南契约映射检查（docs/extensions/subagents/engine-development-guide.md §12 待建检查行落地）
+#   staged 命中指南或其映射源（errors.ts / error-codes.ts / engine-manifest.ts /
 #   contract-types.ts）或检查脚本自身时触发：scripts/check-guide-contract-projection.mjs
-#   ——指南 §3 能力位表 / §4 两层词表 ↔ 源码词表投影一致性（引擎子进程域，2026-09-18
+#   ——指南 §3 能力位表 / §4 两层词表 ↔ 源码词表映射一致性（引擎子进程域，2026-09-18
 #   引擎开发指南立项时同步落地）。
 #   契约源码 staged 而指南未同批 staged → 软提示（AGENT SMELL：语义漂移机器不可判，
 #   靠 AGENTS.md 主题索引「更新触发」义务 + 提示兜底；误报率数据出来前不收紧为硬门）。
@@ -2051,23 +2051,23 @@ fi
 
 GUIDE_PROJECTION_STAGED=$(git diff --cached --name-only -- docs/extensions/subagents/engine-development-guide.md packages/subagent-core/src/execution/engine/common/errors.ts packages/subagent-engine-sdk/src/protocol/error-codes.ts packages/subagent-core/src/execution/engine/engine-manifest.ts packages/subagent-engine-sdk/src/protocol/contract-types.ts packages/zcode-subagent-cli/package.json packages/zcode-subagent-cli/src/zcode-engine.ts scripts/check-guide-contract-projection.mjs)
 if echo "$GUIDE_PROJECTION_STAGED" | grep -qE "^docs/extensions/subagents/engine-development-guide\.md$|^packages/subagent-core/src/execution/engine/common/errors\.ts$|^packages/subagent-engine-sdk/src/protocol/error-codes\.ts$|^packages/subagent-core/src/execution/engine/engine-manifest\.ts$|^packages/subagent-engine-sdk/src/protocol/contract-types\.ts$|^packages/zcode-subagent-cli/package\.json$|^packages/zcode-subagent-cli/src/zcode-engine\.ts$|^scripts/check-guide-contract-projection\.mjs$"; then
-    print_section "[引擎指南契约投影检查]"
+    print_section "[引擎指南契约映射检查]"
     if [ ! -f "scripts/check-guide-contract-projection.mjs" ]; then
         echo -e "${RED}[ERROR] 找不到 scripts/check-guide-contract-projection.mjs（检查脚本被删除）${NC}"
         exit 1
     fi
     if ! node scripts/check-guide-contract-projection.mjs; then
-        echo -e "${RED}[ERROR] 指南契约表与源码词表投影失同步——按上方 ✗ 明细同 commit 更新指南（更新触发义务见根 AGENTS.md 主题索引）后重试${NC}"
+        echo -e "${RED}[ERROR] 指南契约表与源码词表映射失同步——按上方 ✗ 明细同 commit 更新指南（更新触发义务见根 AGENTS.md 主题索引）后重试${NC}"
         echo -e "${RED}[原则] 无论是否本次改动引入的问题，都必须当场直接修复解决，不允许跳过。${NC}"
         exit 1
     fi
-    echo -e "${GREEN}[OK] 引擎指南契约投影一致${NC}"
+    echo -e "${GREEN}[OK] 引擎指南契约映射一致${NC}"
     if echo "$GUIDE_PROJECTION_STAGED" | grep -qE "^packages/subagent-core/src/execution/engine/common/errors\.ts$|^packages/subagent-engine-sdk/src/protocol/error-codes\.ts$|^packages/subagent-core/src/execution/engine/engine-manifest\.ts$|^packages/subagent-engine-sdk/src/protocol/contract-types\.ts$|^packages/zcode-subagent-cli/package\.json$|^packages/zcode-subagent-cli/src/zcode-engine\.ts$" \
         && ! echo "$GUIDE_PROJECTION_STAGED" | grep -q "^docs/extensions/subagents/engine-development-guide\.md$"; then
         echo -e "${BLUE}[INFO] 引擎契约面源码已变更且指南未同批 staged——核对 docs/extensions/subagents/engine-development-guide.md 是否需同步（更新触发义务见根 AGENTS.md 主题索引行；纯实现改动可忽略本提示）${NC}"
     fi
 else
-    echo -e "${GREEN}[OK] 无引擎契约面/指南变更，跳过引擎指南契约投影检查${NC}"
+    echo -e "${GREEN}[OK] 无引擎契约面/指南变更，跳过引擎指南契约映射检查${NC}"
 fi
 
 # ============================================================================

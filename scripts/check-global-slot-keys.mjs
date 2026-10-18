@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * check-global-slot-keys.mjs —— 进程级全局槽键归属守卫（§2.6，约束 C-state-20）。
+ * check-global-slot-keys.mjs —— 进程级全局槽键归属检查（§2.6，约束 C-state-20）。
  *
  * 背景：进程级单例经 `globalThis[Symbol.for(键)]` 共享（workspace 源码 / npm dist /
  * pi jiti 三实例化通道下模块级变量会分裂）。键字面量散落多前缀时，撞名无编译期报错，

@@ -57,13 +57,13 @@ describe('stripComments', () => {
   it('转义引号不结束字符串状态', () => {
     expect(stripComments(`const s = "a\\"//b"; // c`)).toBe(`const s = "a\\"//b"; `)
   })
-  it('未闭合块注释越过后安全结束（fail-closed 倾向，不抛）', () => {
+  it('未封口块注释越过后安全结束（fail-closed 倾向，不抛）', () => {
     expect(stripComments('a /* never closed')).toBe('a ')
   })
   it('空输入返回空串', () => {
     expect(stripComments('')).toBe('')
   })
-  it('未闭合字符串保留到 EOF（其中 // 不当注释剥离）', () => {
+  it('未封口字符串保留到 EOF（其中 // 不当注释剥离）', () => {
     expect(stripComments('const s = "a // x')).toBe('const s = "a // x')
   })
   it('字符串末尾孤立转义不抛且原样保留', () => {
@@ -91,12 +91,12 @@ describe('parseExportBlocks', () => {
     expect([...names].sort()).toEqual(['Bar', 'def', 'foo', 'qux'])
     expect(problems).toEqual([])
   })
-  it('未闭合花括号 fail-closed 记 problems', () => {
+  it('未封口花括号 fail-closed 记 problems', () => {
     const problems = []
     const names = parseExportBlocks('export { a, b', problems, 't')
     expect([...names]).toEqual([])
     expect(problems.length).toBe(1)
-    expect(problems[0]).toContain('花括号未闭合')
+    expect(problems[0]).toContain('花括号未封口')
   })
   it('无法解析的导出项记 problems（不静默漏符号）', () => {
     const problems = []
@@ -353,7 +353,7 @@ describe('gateTwo', () => {
       rmSync(dir, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 })
     }
   })
-  it('.d.ts 产物缺失 → fail（import 条件消费面断裂）', () => {
+  it('.d.ts 产物缺失 → fail（import 条件消费方断裂）', () => {
     const dir = makeFixture({ 'src/sub.ts': SRC, 'dist/sub.d.cts': DCTS_FULL })
     try {
       const { errors } = withCapturedConsole(() => gateTwo(PKG, [SUB], dir))

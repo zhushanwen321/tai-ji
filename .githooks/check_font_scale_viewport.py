@@ -11,7 +11,7 @@
 管辖区（字号 token 的唯一三处权威文件）：
   - packages/renderer/src/style.css（值真值）
   - packages/mobile-renderer/src/styles/tokens.css（mobile 镜像副本）
-  - docs/DESIGN.md（投影）
+  - docs/DESIGN.md（派生视图）
 
 用户字号档位（--font-scale-u）与分区档位（--font-scale-sidebar/chat/drawer）是
 合法机制，不在禁令范围。
@@ -32,7 +32,7 @@ GREEN = '\033[0;32m'
 YELLOW = '\033[1;33m'
 NC = '\033[0m'
 
-# (路径, 是否做 @media 块级检查)；md 文件只查字面量（投影漂移面）
+# (路径, 是否做 @media 块级检查)；md 文件只查字面量（派生视图漂移面）
 GUARDED_FILES = [
     ('packages/renderer/src/style.css', True),
     ('packages/mobile-renderer/src/styles/tokens.css', True),

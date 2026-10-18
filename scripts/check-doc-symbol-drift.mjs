@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * 文档-代码符号漂移守卫（doc-symbol-drift）。
+ * 文档-代码符号漂移检查（doc-symbol-drift）。
  *
  * [HISTORICAL] 起因 2026-08-31：update 模块 13 个路径常量函数化（4f973590e）后，
  * 设计文档与 impl-plan 中 3 处旧常量引用（UPDATE_DIR / MANUAL_ASSET_DIR×2）悬空
@@ -34,11 +34,11 @@
  *      收全部编号。源码注释内 ADR 引用不在本面（文档面检查，与第二检查同构）。
  *
  * 退出码契约：0=全部通过；1=存在违规；2=检查器配置故障（DOC_MODULE_MAP 登记路径
- * 缺失/不可访问——守卫自身输入坏了，恢复动作指向映射表，与「检查不通过」可区分）。
- * 不可读文件/目录不静默：计入 skipped 台账，报告尾部一行显形（违规判定可能少报）。
+ * 缺失/不可访问——检查自身输入坏了，恢复动作指向映射表，与「检查不通过」可区分）。
+ * 不可读文件/目录不静默：计入 skipped 登记清单，报告尾部一行显形（违规判定可能少报）。
  *
  * 书写约定：反引号 = 现行代码符号。历史性提及已删除/改名的符号（如描述事故成因）
- * 不带反引号——带反引号即按现状引用检查，这正是本守卫的判定口径。
+ * 不带反引号——带反引号即按现状引用检查，这正是本检查的判定口径。
  *
  * 映射表 DOC_MODULE_MAP 是显式登记（文档 → 权威源码模块）。新增设计文档时在
  * 此登记映射，未登记的文档不检查（宁缺勿滥，误报面收敛到声明过的对照对）。
@@ -72,7 +72,7 @@ const DOC_MODULE_MAP = {
   'docs/architecture/zcode-session-db-isolation.md': ['packages/subagent-core/src/execution/engine', 'packages/zcode-subagent-cli/src', 'packages/shared/src/paths.ts', 'packages/runtime/src/infra/pi/pi-paths.ts', 'scripts/zcode-session-db-cleanup.mjs'],
   // replay port 设计（subagent 完成回收在新架构上的重放移植）：M1/M2 落点在
   // pi-subagent-cli，M3 落点在 subagent-core execution（watchdog 复用 settled-watchdog
-  // 原语）；MAX_ATTEMPTS 引执行面、CANCEL_SETTLE_GRACE_MS 引协议面、DOC_MODULE_MAP 引守卫
+  // 原语）；MAX_ATTEMPTS 引执行面、CANCEL_SETTLE_GRACE_MS 引协议面、DOC_MODULE_MAP 引检查
   // 本体——按文档实际引用符号的所在模块逐条登记（宁准勿滥）。
   //
   // 引擎开发指南（docs/extensions/subagents/engine-development-guide.md）：登记蓝本 =
@@ -81,7 +81,7 @@ const DOC_MODULE_MAP = {
   // （getSubagentSessionDir）、两引擎包（zcode constants/engine/session-channel/reader/parser、
   // pi constants/spawn-args）、shared constants（ENV_WHITELIST_PREFIXES）。非导出的模块内
   // const（PROBE_TIMEOUT_MS/DISPOSE_GRACE_MS/CAPABILITY_ENUMS/ENGINE_ICON_REGISTRY 等）不进
-  // 守卫符号表，指南以粗体非反引号形态引用（书写约定见指南头部断言分级）。
+  // 检查符号表，指南以粗体非反引号形态引用（书写约定见指南头部断言分级）。
   'docs/extensions/subagents/engine-development-guide.md': ['packages/subagent-engine-sdk/src', 'packages/subagent-core/src/execution/engine', 'packages/subagent-core/src/execution/assembly/path-encoding.ts', 'packages/zcode-subagent-cli/src', 'packages/pi-subagent-cli/src', 'packages/shared/src/constants.ts', 'packages/shared/src/paths.ts'],
 }
 
@@ -236,7 +236,7 @@ function buildSymbolTable(modulePaths) {
     } catch {
       console.error(`[doc-symbol-drift] 检查器配置故障：DOC_MODULE_MAP 登记路径不存在或不可访问: ${p}`)
       console.error('恢复动作：更新 scripts/check-doc-symbol-drift.mjs 的 DOC_MODULE_MAP 映射表')
-      console.error('（改为现行路径；文档或模块已删除时移除该条目）。此为守卫自身配置错误，非文档违规。')
+      console.error('（改为现行路径；文档或模块已删除时移除该条目）。此为检查自身配置错误，非文档违规。')
       process.exit(2)
     }
     if (st.isDirectory()) files.push(...collectTsFiles(abs))
@@ -269,7 +269,7 @@ function extractDocCandidates(mdText) {
     if (!candidates.has(sym)) candidates.set(sym, [])
     candidates.get(sym).push(line)
   }
-  // 逐行扫反引号 span（跨行 span 不支持——设计文档惯例单行内闭合）
+  // 逐行扫反引号 span（跨行 span 不支持——设计文档惯例单行内结束）
   lines.forEach((line, i) => {
     for (const m of line.matchAll(/`([^`\n]+)`/g)) {
       for (const sm of m[1].matchAll(SCREAMING_SNAKE_RE)) add(sm[0], i + 1)
@@ -283,7 +283,7 @@ function extractDocCandidates(mdText) {
 
 /**
  * 收集路径检查域的文档（明列文件 + 目录递归 .md）。
- * @param {{files: number, dirs: number}} skipped 不可读跳过台账（调用方传入，报告尾部显形）
+ * @param {{files: number, dirs: number}} skipped 不可读跳过登记清单（调用方传入，报告尾部显形）
  */
 function collectPathRefDocs(skipped) {
   const docs = []
@@ -395,8 +395,8 @@ const COMMENT_DOC_REF_EXEMPT = new Map([
   ['packages/renderer/src/__tests__/composables/markdown-filepath.test.ts::docs/My', 'markdown 链接解析测试叙述中的空格切断反例（docs/My Document.md），非仓库路径引用'],
   ['apps/electron/main/diagnostics/export-diagnostic-bundle.ts::summary.md', '运行时生成物文件名（诊断 zip 内置 summary.md，代码自身生成），非 docs 引用'],
   ['*::aggregated.md', 'zsw review-fix-loop 工作流脚本（.zcode/workflow-drafts，gitignored 产物目录）自述其产物文件名，非本仓 docs 引用'],
-  ['*::delivery-ownership-kernel.md', '投递所有权内核设计文档为 dev-flow 工作流产物（.tmp/dev-flow/，按规不入库）；决策沉淀 ADR-0074，设计章节锚点（§/D 编号）指工作盘文档'],
-  ['*::tool-declaration-slimming.md', '工具声明精简设计文档为 tech-design 工作流产物（.tmp/tech-design/，按规不入库）；决策沉淀 ADR-0134/0135/0136，设计章节锚点（§/D 编号）指工作盘文档（同 delivery-ownership-kernel 先例）'],
+  ['*::delivery-ownership-kernel.md', '投递所有权内核设计文档为 dev-flow 工作流产物（.tmp/dev-flow/，按规不入库）；决策记录在 ADR-0074，设计章节锚点（§/D 编号）指工作盘文档'],
+  ['*::tool-declaration-slimming.md', '工具声明精简设计文档为 tech-design 工作流产物（.tmp/tech-design/，按规不入库）；决策记录在 ADR-0134/0135/0136，设计章节锚点（§/D 编号）指工作盘文档（同 delivery-ownership-kernel 先例）'],
 ])
 
 /**
@@ -473,7 +473,7 @@ export function extractDocRefsInComment(commentText) {
  * Form B 裸 .md 文件名的合法名字集：git ls-files '*.md'（读 index——提交预览语义：
  * staged 删除的文档名字即失效，文档删除提交当场暴露引用悬空；staged 新增即时合法）。
  * git 不可用时回退 docs/ 递归 + 仓库根一级（降级覆盖，.agents 等非 docs 树收不进）。
- * @param {{files: number, dirs: number}} [skipped] 不可读跳过台账（可选，测试注入用）
+ * @param {{files: number, dirs: number}} [skipped] 不可读跳过登记清单（可选，测试注入用）
  */
 export function buildDocsMdNameIndex(skipped) {
   const names = new Set()
@@ -556,7 +556,7 @@ function skipReason({ ref, lineText, precedingText, rel, exempt }) {
  * @param {Array<{rel: string, abs: string}>} files
  * @param {Set<string>} docsMdNames Form B 合法名字集
  * @param {Map<string, string>} exempt 豁免表（缺省 = COMMENT_DOC_REF_EXEMPT；测试注入用）
- * @param {{files: number, dirs: number}} [skipped] 不可读跳过台账（可选，测试注入用）
+ * @param {{files: number, dirs: number}} [skipped] 不可读跳过登记清单（可选，测试注入用）
  */
 export function checkCommentDocRefs(files, docsMdNames, exempt = COMMENT_DOC_REF_EXEMPT, skipped) {
   const violations = []
@@ -729,7 +729,7 @@ function reportAdrRegistry(adr) {
   return printed
 }
 
-/** skipped 台账收尾显形（0 时静默）：计数为 0 即无输出，不打扰正常通过流 */
+/** skipped 登记清单收尾显形（0 时静默）：计数为 0 即无输出，不打扰正常通过流 */
 function reportSkipped(skipped) {
   const n = skipped.files + skipped.dirs
   if (n === 0) return
@@ -865,7 +865,7 @@ const ADR_DEPRECATED_LINE_RE = /^- \*\*(ADR-\d{4}(?:\s*\/\s*ADR-\d{4})*)\*\*/
 const ADR_NUM_RE = /ADR-(\d{4})/g
 
 /**
- * 纯函数：从 decisions.md 文本提取 ADR 登记面。
+ * 纯函数：从 decisions.md 文本提取 ADR 登记清单。
  * @returns {{ defined: Map<string, number[]>, deprecated: Set<string> }}
  *   defined：编号 → 标题行行号列表（>1 条 = 重复占用）；deprecated：已否谱系编号集
  */
@@ -951,7 +951,7 @@ function collectAdrRefDocs(skipped) {
   return docs
 }
 
-/** 检查面 6：登记面唯一占用 + 引用域悬空扫描（decisions.md 缺失 = 登记处被删，
+/** 检查面 6：登记清单唯一占用 + 引用域悬空扫描（decisions.md 缺失 = 登记处被删，
  *  引用面无从判定，显形提示而非静默通过）。 */
 function checkAdrRegistry(skipped) {
   const docAbs = path.join(PROJECT_ROOT, ADR_REGISTRY_REL)

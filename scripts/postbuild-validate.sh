@@ -13,7 +13,7 @@
 set -euo pipefail
 
 # 检查失败原则：任何非 0 退出都输出（不管从哪个 exit 点）
-trap '[ $? -ne 0 ] && echo "[原则] 无论是否本次改动引入的问题，都必须正面修复解决，不允许跳过。" >&2' EXIT
+trap '[ $? -ne 0 ] && echo "[原则] 无论是否本次改动引入的问题，都必须当场直接修复解决，不允许跳过。" >&2' EXIT
 
 RED='\033[0;31m'
 GREEN='\033[0;32m'
@@ -345,7 +345,7 @@ if [ -d "$OUTPUT_DIR/mac-arm64" ]; then
             FAILED=1
         fi
 
-        # node-pty prebuilds 平台裁剪守卫 — u2（设计 batch3 §3.2.2）靠 electron-builder.yml
+        # node-pty prebuilds 平台裁剪检查 — u2（设计 batch3 §3.2.2）靠 electron-builder.yml
         # mac 平台段 files 排除 win32-*/darwin-x64 prebuilds。yml 回退或 electron-builder
         # 升级改变 files 匹配语义时，全平台 prebuilds 会静默回到产物（死重 + 体积回涨），
         # CI 无感。产物级断言：prebuilds 目录仅含 darwin-arm64，且 pty.node/spawn-helper 在位

@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * check-structure-wiring.mjs —— 非 workspace 结构接线对账守卫（S1，PR #20 组 D 守卫化）。
+ * check-structure-wiring.mjs —— 非 workspace 结构接线对账检查（S1，PR #20 组 D 检查化）。
  *
  * 背景：PR #20 的组 D 全部 5 条问题同一形态——新顶层结构（新包/新目录）落线时，
  * 机器管线接线（CI typecheck / coverage 测量面 / 发布线 / 测试装配）漏接，等 PR 期
@@ -88,7 +88,7 @@ function packageRoots() {
   return [...roots]
 }
 
-/** git ls-files 在极简环境（无 git）下不可用时的说明——本守卫只在仓库内运行 */
+/** git ls-files 在极简环境（无 git）下不可用时的说明——本检查只在仓库内运行 */
 if (!existsSync(join(ROOT, '.git')) && !existsSync(join(ROOT, '.bare'))) {
   console.error('check-structure-wiring: 不在仓库内运行（无 .git/.bare）')
   process.exit(1)

@@ -99,7 +99,7 @@ async function main() {
     await sleep(Math.floor(Math.random() * JITTER_MAX_MS))
   }
   // startedAtMs/endedAtMs（epoch ms）：供编排方断言两 worker 运行区间真实重叠
-  //（并发形态守卫——防探针退化为先后交替执行仍「绿」）
+  //（并发形态检查——防探针退化为先后交替执行仍「绿」）
   console.log(
     JSON.stringify({
       worker: tag,
