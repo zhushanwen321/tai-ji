@@ -55,7 +55,12 @@ import {
 	mapReasonToStatus as mapReasonToStatusImpl,
 	scanPendingFields,
 } from "@zhushanwen/extension-protocol";
-import { getDeliveryPort, type CollectedEntry } from "@zhushanwen/pi-delivery-port";
+import {
+	getDeliveryPort,
+	type CollectedEntry,
+	type CollectSnapshot,
+	type DeliveryPortHandle,
+} from "@zhushanwen/pi-delivery-port";
 import { getLogger } from "@zhushanwen/pi-extension-logger";
 import { Type } from "typebox";
 
@@ -388,32 +393,7 @@ export default function pendingNotificationsExtension(pi: ExtensionAPI): void {
 		const stillOpen: StillOpenEntry[] = [];
 		const waitingIds: string[] = [];
 		const unknownIds: string[] = [];
-		for (const snap of snapshot) {
-			switch (snap.state) {
-				case "ready":
-				case "unregistered-no-entry":
-					// 快照收取：ready = 日志条目已有终局的读侧快照（不写新终局）；
-					// unregistered-no-entry = 第四态无载荷有限信息形态（outcome 取注销
-					// status、note 说明来源，端口侧组装）。两态的 entry 契约在册。
-					collected.push({ id: snap.id, ...(snap.entry ?? {}) });
-					break;
-				case "in-push-pipeline":
-					// 已过分流点、在 push 管线排队待注入：不收取（收取后再注入 = 双重呈现）
-					// 不等待（等其终局 = 等待源与阻塞源互等自锁）——附 note 进 stillOpen。
-					stillOpen.push({
-						id: snap.id,
-						note: "already queued in the push pipeline — will be delivered as a normal notification after this tool returns",
-					});
-					break;
-				case "waiting":
-					waitingIds.push(snap.id);
-					break;
-				case "unknown":
-					// 未知 id（端口五态判据单点判定）：逐条列出、不阻断已知子集。
-					unknownIds.push(snap.id);
-					break;
-			}
-		}
+		partitionCollectSnapshot(snapshot, { collected, stillOpen, waitingIds, unknownIds });
 		const errors: CollectErrorEntry[] = unknownIds.map((id) => ({
 			id,
 			reason: "unknown id — not an active pending operation and never registered in this session",
@@ -421,34 +401,7 @@ export default function pendingNotificationsExtension(pi: ExtensionAPI): void {
 
 		// 到达等待：事件驱动（onCollectArrival）不轮询；到达/超时/abort 三者先到。
 		// 完成判据 = 全部等待键出现在已收取集合（到达即 consume 取走载荷+终局）。
-		if (waitingIds.length > 0) {
-			await new Promise<void>((resolve) => {
-				let settled = false;
-				let timer: ReturnType<typeof setTimeout> | undefined = undefined;
-				let unsubscribeArrival: () => void = () => {};
-				const onAbort = () => finish();
-				const finish = () => {
-					if (settled) return;
-					settled = true;
-					if (timer !== undefined) clearTimeout(timer);
-					signal?.removeEventListener("abort", onAbort);
-					unsubscribeArrival();
-					resolve();
-				};
-				const pullArrived = () => {
-					collected.push(...port.consume());
-					const collectedIds = new Set(collected.map((c) => c.id));
-					if (waitingIds.every((id) => collectedIds.has(id))) finish();
-				};
-				if (signal?.aborted) {
-					finish();
-					return;
-				}
-				timer = setTimeout(finish, timeoutMs);
-				signal?.addEventListener("abort", onAbort, { once: true });
-				unsubscribeArrival = port.onCollectArrival(pullArrived);
-			});
-		}
+		await awaitCollectArrivals(port, waitingIds, collected, timeoutMs, signal);
 
 		// 终局序列（设计 §3.1③）：consume 取走剩余已到达挂起条目（超时/abort 路径的
 		// 部分收取），collectRelease 解散等待集并把未收挂起条目直通内核 flush（跳过
@@ -456,23 +409,8 @@ export default function pendingNotificationsExtension(pi: ExtensionAPI): void {
 		collected.push(...port.consume());
 		port.collectRelease();
 
-		// type/outcome 缺失回填（设计 §3.1③ 字段来源表：type 与 pending:register 的
-		// type 对齐、outcome 与 pending:unregister 的 status 对齐；MF-1-6：端口 consume
-		// 只返回 {id, content, details}，终态字段统一由本处单遍扫描回填）：「等待中
-		// 同步到达」的挂起条目在端口 consume 时点，生产方的注销 entry 尚未落盘
-		// （managed flushBatch 的 deliver 与 unregisterPending 同步段相邻、deliver 先
-		// 行；端口 consume 由到达回调在 deliver 栈内同步触发），outcome 恒取空。await
-		// 恢复后生产方同步栈已完成（注销 entry 已落盘），按本 session entries 现算回填；
-		// 注销不在册的条目保持 undefined（诚实缺省，不虚构终态）。快照收取条目
-		// （ready / unregistered-no-entry）的 type/outcome 已由端口 collectArm 填充，
-		// 回填只补缺不覆盖。
-		if (collected.some((c) => c.outcome === undefined || c.type === undefined)) {
-			const fields = scanPendingFields(ctx.sessionManager.getEntries());
-			for (const c of collected) {
-				if (c.type === undefined) c.type = fields.registerTypes.get(c.id);
-				if (c.outcome === undefined) c.outcome = fields.unregisterStatuses.get(c.id);
-			}
-		}
+		// type/outcome 缺失回填（字段来源见 backfillCollectFields 注释）。
+		backfillCollectFields(ctx, collected);
 
 		// 未收取的等待键进 stillOpen（无 note = 单纯未完成，完成时恢复 push）。
 		const collectedIds = new Set(collected.map((c) => c.id));
@@ -488,6 +426,103 @@ export default function pendingNotificationsExtension(pi: ExtensionAPI): void {
 			errors: errors.length,
 		});
 		return { content: [{ type: "text" as const, text: formatCollectDetails(details) }], details };
+	}
+
+	/** 快照五态分流（§3.1③）：ready ∪ unregistered-no-entry 进 collected；in-push-pipeline
+	 * 进 stillOpen 附 note；waiting 留守；unknown 逐条回流（错误组装在调用方）。 */
+	function partitionCollectSnapshot(
+		snapshot: CollectSnapshot,
+		buckets: {
+			collected: CollectedEntry[];
+			stillOpen: StillOpenEntry[];
+			waitingIds: string[];
+			unknownIds: string[];
+		},
+	): void {
+		for (const snap of snapshot) {
+			switch (snap.state) {
+				case "ready":
+				case "unregistered-no-entry":
+					// 快照收取：ready = 日志条目已有终局的读侧快照（不写新终局）；
+					// unregistered-no-entry = 第四态无载荷有限信息形态（outcome 取注销
+					// status、note 说明来源，端口侧组装）。两态的 entry 契约在册。
+					buckets.collected.push({ id: snap.id, ...(snap.entry ?? {}) });
+					break;
+				case "in-push-pipeline":
+					// 已过分流点、在 push 管线排队待注入：不收取（收取后再注入 = 双重呈现）
+					// 不等待（等其终局 = 等待源与阻塞源互等自锁）——附 note 进 stillOpen。
+					buckets.stillOpen.push({
+						id: snap.id,
+						note: "already queued in the push pipeline — will be delivered as a normal notification after this tool returns",
+					});
+					break;
+				case "waiting":
+					buckets.waitingIds.push(snap.id);
+					break;
+				case "unknown":
+					// 未知 id（端口五态判据单点判定）：逐条列出、不阻断已知子集。
+					buckets.unknownIds.push(snap.id);
+					break;
+			}
+		}
+	}
+
+	/** 到达等待段：等待键为空立即返回；否则 consume+到达判据（全部等待键已收取）/
+	 * 超时 / abort 三者先到解除（abort 捕获后正常 return，不抛错——抛错会把已写
+	 * collected 终局的载荷随返回丢失，§3.1 [abort]）。 */
+	async function awaitCollectArrivals(
+		port: DeliveryPortHandle,
+		waitingIds: readonly string[],
+		collected: CollectedEntry[],
+		timeoutMs: number,
+		signal: AbortSignal | undefined,
+	): Promise<void> {
+		if (waitingIds.length === 0) return;
+		await new Promise<void>((resolve) => {
+			let settled = false;
+			let timer: ReturnType<typeof setTimeout> | undefined = undefined;
+			let unsubscribeArrival: () => void = () => {};
+			const onAbort = () => finish();
+			const finish = () => {
+				if (settled) return;
+				settled = true;
+				if (timer !== undefined) clearTimeout(timer);
+				signal?.removeEventListener("abort", onAbort);
+				unsubscribeArrival();
+				resolve();
+			};
+			const pullArrived = () => {
+				collected.push(...port.consume());
+				const collectedIds = new Set(collected.map((c) => c.id));
+				if (waitingIds.every((id) => collectedIds.has(id))) finish();
+			};
+			if (signal?.aborted) {
+				finish();
+				return;
+			}
+			timer = setTimeout(finish, timeoutMs);
+			signal?.addEventListener("abort", onAbort, { once: true });
+			unsubscribeArrival = port.onCollectArrival(pullArrived);
+		});
+	}
+
+	/** type/outcome 缺失回填（设计 §3.1③ 字段来源表：type 与 pending:register 的
+	 * type 对齐、outcome 与 pending:unregister 的 status 对齐；MF-1-6：端口 consume
+	 * 只返回 {id, content, details}，终态字段统一由本处单遍扫描回填）：「等待中
+	 * 同步到达」的挂起条目在端口 consume 时点，生产方的注销 entry 尚未落盘
+	 * （managed flushBatch 的 deliver 与 unregisterPending 同步段相邻、deliver 先
+	 * 行；端口 consume 由到达回调在 deliver 栈内同步触发），outcome 恒取空。await
+	 * 恢复后生产方同步栈已完成（注销 entry 已落盘），按本 session entries 现算回填；
+	 * 注销不在册的条目保持 undefined（诚实缺省，不虚构终态）。快照收取条目
+	 * （ready / unregistered-no-entry）的 type/outcome 已由端口 collectArm 填充，
+	 * 回填只补缺不覆盖。 */
+	function backfillCollectFields(ctx: ExtensionContext, collected: CollectedEntry[]): void {
+		if (!collected.some((c) => c.outcome === undefined || c.type === undefined)) return;
+		const fields = scanPendingFields(ctx.sessionManager.getEntries());
+		for (const c of collected) {
+			if (c.type === undefined) c.type = fields.registerTypes.get(c.id);
+			if (c.outcome === undefined) c.outcome = fields.unregisterStatuses.get(c.id);
+		}
 	}
 }
 

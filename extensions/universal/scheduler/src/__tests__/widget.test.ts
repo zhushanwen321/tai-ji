@@ -260,12 +260,16 @@ describe('computeTasksFingerprint（字段集契约）', () => {
   it('non-display runtime state does NOT alter the fingerprint', () => {
     // runCount/history/lastStatus/pending 不在指纹字段集（非显示决定因素——执行摘要只进
     // 命令查询结果）。它们变化不触发推送，否则静态期零推送承诺被破坏。
-    const base = makeTask()
+    // nextRunAt 显式固定（nextRunAt 在指纹字段集内）：makeTask 缺省 Date.now() 两次调用
+    // 跨毫秒边界时差 1ms → 指纹不同 → 断言测到时钟而非字段集（coverage-gate 实测实例）。
+    const now = Date.now()
+    const base = makeTask({ nextRunAt: now })
     const busy = makeTask({
       runCount: 7,
       history: [{ at: base.createdAt, status: 'failed' }],
       lastStatus: 'failed',
       pending: true,
+      nextRunAt: now,
     })
     expect(computeTasksFingerprint([base], 'en-US')).toBe(computeTasksFingerprint([busy], 'en-US'))
   })

@@ -1,4 +1,5 @@
 // scheduler-manager 插件单测配置（MF-1-7 首批装配）。
+// coverage-file-gate-exempt: vitest 测试装配文件，由测试运行器加载、恒不被覆盖率测量（结构性不可达面）
 // resources/plugins 不在 pnpm workspace——import 一律走相对路径直指源码/仓库根设施
 // （裸包名在该目录链上无 node_modules 可解析，同 index.ts 头注的根因说明）。
 // root 钉在本目录（taste-lint/vitest.config.ts 同款先例）：include 以 config 所在

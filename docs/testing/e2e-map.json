@@ -1153,12 +1153,13 @@
     },
     {
       "id": "E2E-PIPE-01",
-      "summary": "review-pipeline 工程门脚本轨：quality-gates（typecheck 三处 + coverage/metrics 聚合 + 盲区判定）/ changeset-check（check_changeset 唯一实装）/ cross-branch-overlap（兄弟线 diff 交集）单测锁 + pr-pre-merge 一体化脚本",
+      "summary": "review-pipeline 工程门脚本轨：quality-gates（typecheck 三处 + coverage/metrics 聚合 + 盲区判定）/ changeset-check（check_changeset 唯一实装）/ cross-branch-overlap（兄弟线 diff 交集）单测锁 + pr-pre-merge 一体化脚本 + skill-data-dir（gate 产物目录解析单一出口）",
       "scope": [
         "scripts/quality-gates.mjs",
         "scripts/changeset-check.mjs",
         "scripts/cross-branch-overlap.mjs",
-        "scripts/pr-pre-merge.sh"
+        "scripts/pr-pre-merge.sh",
+        "scripts/skill-data-dir.mjs"
       ],
       "layer": "L1",
       "assets": [
@@ -1177,6 +1178,10 @@
         {
           "kind": "script",
           "ref": "scripts/pr-pre-merge.sh"
+        },
+        {
+          "kind": "script",
+          "ref": "scripts/skill-data-dir.mjs"
         },
         {
           "kind": "spec",

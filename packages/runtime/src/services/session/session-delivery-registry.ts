@@ -52,6 +52,7 @@ import type {
   DeliveryPayload,
   DeliveryReceiptAnchor,
   DeliveryStore,
+  DeliveryStoreRecord,
 } from '@zhushanwen/session-delivery'
 import type { Segment } from '@taiji/shared'
 import { markerLiteral, MSG_ID_TAG_RE, SKILL_MARKER_TAG } from '@taiji/shared'
@@ -1278,49 +1279,72 @@ export function createSessionDeliveryRegistry(
     rt.outboxReplayed = true
     warn(`outbox replay: ${records.length} undelivered record(s) on disk, sid=`, sessionId)
     for (const record of records) {
-      const id = record.id
-      const text = payloadText(record.payload)
-      const full = rt.handle.entriesFull()
-      if (full.active.some((e) => e.id === id)) continue
-      if (
-        record.unmarked === true &&
-        full.active.some(
-          (e) => e.payload.kind === 'text' && e.payload.content === text && rt.unmarkedEntryIds.has(e.id),
-        )
-      ) {
-        warn('outbox replay: adopted twin exists for unmarked record — skipped, sid=', sessionId, 'id=', id)
-        continue
-      }
-      if (full.tombstones.some((t) => t.id === id)) continue
-      const delivered =
-        record.unmarked === true
-          ? await transcriptHasExactText(sessionId, rt, text)
-          : await transcriptHasMarker(sessionId, rt, id)
-      if (delivered) rt.suppressed.add(id) // 出站检查读 suppressed，必须先于 submitToKernel 置位
-      await submitToKernel(sessionId, rt, {
-        id,
-        text,
-        lane: record.lane,
-        ...(record.intent !== undefined ? { intent: record.intent } : {}),
-        ...(record.unmarked === true ? { unmarked: true } : {}),
-        ...(record.receiptAnchor !== undefined ? { receiptAnchor: record.receiptAnchor } : {}),
-        ...(record.payload.kind === 'text' && record.payload.images !== undefined
-          ? { images: record.payload.images }
-          : {}),
-        ...(record.meta !== undefined ? { meta: record.meta } : {}),
-      })
-      if (delivered) {
-        // 已进 transcript：只落终态记账（磁盘 ack 终局行随 confirmDelivered 写入），不重投
-        rt.handle.confirmDelivered(id)
-        rt.submitted.delete(bareMarkerId(id))
-        warn('outbox replay: record already delivered — accounting only, sid=', sessionId, 'id=', id)
-        continue
-      }
-      // segments 回填（磁盘 meta.segments → 撤销编排全文 segments 返回跨重启成立）。回填
-      // 必须在条目入册后：buildRuntime 的 onChange 剪枝以 active 集为界，先回填会被剪掉。
-      const segments = recordSegmentsOf(record)
-      if (segments !== undefined) rt.segmentsByEntry.set(id, segments)
-      warn('outbox replay: record requeued, sid=', sessionId, 'id=', id)
+      await replayOneUndeliveredRecord(sessionId, rt, record)
+    }
+  }
+
+  /** 单条磁盘记录的重放判定（replayUndelivered 循环体，注释见其头注 ①/①'/②/③）。 */
+  async function replayOneUndeliveredRecord(
+    sessionId: string,
+    rt: SessionRuntime,
+    record: DeliveryStoreRecord,
+  ): Promise<void> {
+    const id = record.id
+    const text = payloadText(record.payload)
+    const full = rt.handle.entriesFull()
+    if (full.active.some((e) => e.id === id)) return
+    if (
+      record.unmarked === true &&
+      full.active.some(
+        (e) => e.payload.kind === 'text' && e.payload.content === text && rt.unmarkedEntryIds.has(e.id),
+      )
+    ) {
+      warn('outbox replay: adopted twin exists for unmarked record — skipped, sid=', sessionId, 'id=', id)
+      return
+    }
+    if (full.tombstones.some((t) => t.id === id)) return
+    const delivered =
+      record.unmarked === true
+        ? await transcriptHasExactText(sessionId, rt, text)
+        : await transcriptHasMarker(sessionId, rt, id)
+    if (delivered) rt.suppressed.add(id) // 出站检查读 suppressed，必须先于 submitToKernel 置位
+    await submitToKernel(sessionId, rt, replaySubmitArgsOf(record, id, text))
+    if (delivered) {
+      // 已进 transcript：只落终态记账（磁盘 ack 终局行随 confirmDelivered 写入），不重投
+      rt.handle.confirmDelivered(id)
+      rt.submitted.delete(bareMarkerId(id))
+      warn('outbox replay: record already delivered — accounting only, sid=', sessionId, 'id=', id)
+      return
+    }
+    // segments 回填（磁盘 meta.segments → 撤销编排全文 segments 返回跨重启成立）。回填
+    // 必须在条目入册后：buildRuntime 的 onChange 剪枝以 active 集为界，先回填会被剪掉。
+    const segments = recordSegmentsOf(record)
+    if (segments !== undefined) rt.segmentsByEntry.set(id, segments)
+    warn('outbox replay: record requeued, sid=', sessionId, 'id=', id)
+  }
+
+  /** 重放提交载荷（磁盘记录 → submitToKernel args：幂等键不丢——id/lane/intent/凭据申报/images/meta）。 */
+  function replaySubmitArgsOf(record: DeliveryStoreRecord, id: string, text: string): {
+    id: string
+    text: string
+    lane: DeliveryLane
+    intent?: DeliveryIntent
+    unmarked?: boolean
+    receiptAnchor?: DeliveryReceiptAnchor
+    images?: Array<{ data: string; mimeType: string }>
+    meta?: DeliveryMeta
+  } {
+    return {
+      id,
+      text,
+      lane: record.lane,
+      ...(record.intent !== undefined ? { intent: record.intent } : {}),
+      ...(record.unmarked === true ? { unmarked: true } : {}),
+      ...(record.receiptAnchor !== undefined ? { receiptAnchor: record.receiptAnchor } : {}),
+      ...(record.payload.kind === 'text' && record.payload.images !== undefined
+        ? { images: record.payload.images }
+        : {}),
+      ...(record.meta !== undefined ? { meta: record.meta } : {}),
     }
   }
 

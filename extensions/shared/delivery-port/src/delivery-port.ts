@@ -391,17 +391,7 @@ export function createDeliveryPort(host: DeliveryPortHost): DeliveryPortHandle {
       recordedAt: Date.now(),
       ...(collectKeys !== undefined && collectKeys.length > 0 ? { collectKey: [...collectKeys] } : {}),
     };
-    try {
-      host.appendEntry(OUTBOX_CUSTOM_TYPE, {
-        v: 2,
-        id,
-        timing,
-        payload: record.payload,
-        recordedAt: record.recordedAt,
-        ...(record.collectKey !== undefined ? { collectKey: record.collectKey } : {}),
-      });
-    } catch (err) {
-      warn(`delivery-port persist failed before accept; entry rejected (id=${id})`, err);
+    if (!persistOutboxRecord(record)) {
       return { kind: "rejected", reason: "persist-failed" };
     }
     state.outbox.set(id, record);
@@ -409,14 +399,45 @@ export function createDeliveryPort(host: DeliveryPortHost): DeliveryPortHandle {
     // 显式失败策略随条目登记（submitToKernel 单次消费；缺省 retain 不占位）。
     // 登记在落盘成功后——persist-failed rejected 的条目不残留策略项。
     if (opts?.onFailure) failurePolicies.set(id, opts.onFailure);
+    routeAcceptedDelivery(id, record, collectKeys, channel, opts);
+    return { kind: "accepted", id };
+  }
+
+  /** 受理前落盘（耐久承诺先于投递尝试）：appendEntry 抛错 = 承诺未落 → false（拒收）。 */
+  function persistOutboxRecord(record: JournalRecord): boolean {
+    try {
+      host.appendEntry(OUTBOX_CUSTOM_TYPE, {
+        v: 2,
+        id: record.id,
+        timing: record.timing,
+        payload: record.payload,
+        recordedAt: record.recordedAt,
+        ...(record.collectKey !== undefined ? { collectKey: record.collectKey } : {}),
+      });
+    } catch (err) {
+      warn(`delivery-port persist failed before accept; entry rejected (id=${record.id})`, err);
+      return false;
+    }
+    return true;
+  }
+
+  /** 受理后路由（collect 挂起分流 → 攒批判定）：挂起条目已落盘（persistOutboxRecord
+   * 成功在前）——崩溃后差集重放按未投递重投。 */
+  function routeAcceptedDelivery(
+    id: string,
+    record: JournalRecord,
+    collectKeys: readonly string[] | undefined,
+    channel: string,
+    opts: DeliveryDeliverOptions | undefined,
+  ): void {
     // collect 挂起分流（result-collect 设计 §3.1②，先于合批判定）：键集 ∩ 在途
     // 等待集 ≠ ∅ → 挂起缓冲（不进内核，push 管线零感知）+ 唤醒等待器；否则 push
-    // 现状零变化。挂起条目已落盘（上方 appendEntry）——崩溃后差集重放按未投递重投。
+    // 现状零变化。
     if (collectKeys !== undefined && collectKeys.length > 0 && keysIntersect(collectKeys, collectWaitingKeys)) {
       collectBuffer.set(id, record);
       seenIds.add(id);
       fireCollectArrival();
-      return { kind: "accepted", id };
+      return;
     }
     // 攒批判定（§3.4 缺省值表）：默认通道 + 有活跃后台任务 → 60s 窗口攒批；其余
     // → 立即放行（泵按通道分组）：外部通道结构性逐条——merge:true 亦不得覆盖
@@ -434,7 +455,6 @@ export function createDeliveryPort(host: DeliveryPortHost): DeliveryPortHandle {
       seenIds.add(id);
       pumpDirect();
     }
-    return { kind: "accepted", id };
   }
 
   // ─── 合批窗口（60s 滑动；攒批路径专用）─────────────────────
