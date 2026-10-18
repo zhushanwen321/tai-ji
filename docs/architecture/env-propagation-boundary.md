@@ -196,7 +196,7 @@ rg -n 'spawn\(|execFile\(|fork\(|pty\.spawn' packages/runtime/src apps/electron/
 |------|------|------|-----------|
 | 反向（shell→main→runtime） | 入站必传基座 | PATH/HOME/USER/LANG/TERM/NODE_/NVM_/XDG_ 等 + main extras 五件（PACKAGED/DATA_DIR/PORT_OFFSET/RUNTIME_TOKEN/RUN_AS_NODE）+ undefined=删除语义 | `safe-env.ts`（现状保留，G4 不回归） |
 | 正向（runtime→pi） | 必传白名单 | 白名单过滤后的父 env 基座 + `TAIJI_AGENT_DATA_DIR`、`PI_CODING_AGENT_DIR`、PATH 补齐、control 两键（server 激活时显式注入）；forward 参考 = B 组四项（附 pi 子树内消费锚点） | 本文 U1/U2 新建 |
-| 正向（runtime→pi 及一切自有子进程） | 边界剥除清单 | 首版 `['TAIJI_AGENT_PACKAGED','TAIJI_RUNTIME_TOKEN']`；扩展须补消费/危害证据入档 | U1 `spawn-env-contract.ts` |
+| 正向（runtime→pi 及一切自有子进程） | 边界剥除清单 | 当前 3 项 `['TAIJI_AGENT_PACKAGED','TAIJI_RUNTIME_TOKEN','TAIJI_ENGINE_RAW_MIRROR']`，成员清单由 `spawn-env-contract.test.ts` 锁定；扩展须补消费/危害证据入档。raw mirror 只剥 task pi 侧——引擎进程自身是合法读取方，引擎出站 deny（`ENGINE_ENV_DENY_LIST`）不含该键 | U1 `spawn-env-contract.ts` |
 | 红线 | 上游不可控面 | B4 及其后代零改动——全部治理压缩在 B3 封堵 | [MANDATORY] pi 零改动 |
 
 实施载体即 §5 的 U1（清单）+ U2（构建器）。
@@ -229,22 +229,22 @@ rg -n 'spawn\(|execFile\(|fork\(|pty\.spawn' packages/runtime/src apps/electron/
 ### 3.5 关键决策与权衡
 
 - **D1 出站模型：deny-by-default，否决严格 allowlist-only。**
-  出站面真正危险的变量极少（实证 2 个），而合法系统变量集合巨大且随 OS 变化；逐个 allow 会让每次工具故障排查都先怀疑「是不是又少传了哪个」，运维摩擦不成比例。deny 清单从 2 个实证害项起步，只增不减、增删须过评审（消费证据/危害证据入档）。
+  出站面真正危险的变量极少（当前 3 个），而合法系统变量集合巨大且随 OS 变化；逐个 allow 会让每次工具故障排查都先怀疑「是不是又少传了哪个」，运维摩擦不成比例。deny 清单当前 3 项，只增不减、增删须过评审（消费证据/危害证据入档）。
 
 - **D2 与 `ENV_WHITELIST_PREFIXES` SSOT 的关系（G5）：共存正交，不动本体。**
   入站白名单回答「外部环境哪些东西准许进来」（策略层：防宿主污染、防凭证串台；constants.ts:76-80 云凭证 ambient 变量的细粒度豁免展示了它的立法精密性）。出站契约回答「我自己身上的东西哪些允许跟随 spawn 出去」。两问不同维度。曾考虑把 `'TAIJI_'` 改精细枚举一次性解决：否决。因为入站环节不知道哪个下游消费 `TAIJI_GLOBAL_AGENTS_DIR`（那是 pi 子树里 system-prompt extension 的事）——把业务变量生死塞进白名单会让 SSOT 职责膨胀成变量注册表，每次加变量都得动共享常量（guard 摩擦、churn），且依然回答不了「哪些该进 pi」——只有出站契约能答。互引关系登记进 constraints.json（U6）；`check_env_whitelist_sync.py:43` 的 `LOCAL_DEF_RE = const\s+ENV_WHITELIST_PREFIXES` 为精确名匹配，新常量命名 `SPAWN_ENV_OUTBOUND_DENY_LIST` 规避该字面量即可零冲突共存。
 
-- **D3 出站 deny 清单首版只收 2 个实证项，其余进观察名单。**
-  进入：`TAIJI_AGENT_PACKAGED`（pi 子树零消费 + 行为危害探针实锤）、`TAIJI_RUNTIME_TOKEN`（零消费 + 凭证暴露活体取证）。不进的：`PORT_OFFSET`/`MOCK`/`LOG_*` 等——有的双端可读（如 `TAIJI_EXTENSION_PATHS` 两侧消费）、有的「似乎该剥但消费点未穷尽」。一次性大面积剥离违反最小变更原则，且每个变量都需独立消费证据——契约清单化之后这类增量恰好变容易。
+- **D3 出站 deny 清单当前 3 项，其余进观察名单。**
+  进入：`TAIJI_AGENT_PACKAGED`（pi 子树零消费 + 行为危害探针实锤）、`TAIJI_RUNTIME_TOKEN`（零消费 + 凭证暴露活体取证）、`TAIJI_ENGINE_RAW_MIRROR`（raw mirror 通道宣告；引擎进程自身合法读取，task pi 零消费，shared 出站 deny 只覆盖 shared builder 消费方，task pi 由引擎 buildChildEnv 显式剥除承重）。不进的：`PORT_OFFSET`/`MOCK`/`LOG_*` 等——有的双端可读（如 `TAIJI_EXTENSION_PATHS` 两侧消费）、有的「似乎该剥但消费点未穷尽」。一次性大面积剥离违反最小变更原则，且每个变量都需独立消费证据——契约清单化之后这类增量恰好变容易。
 
 - **D4 control 显式注入与继承的等价性。**
   担心「剥掉继承来的 control 两键会弄坏托管链」不成立：两键本就有显式注入通路（runtime `process-manager` 注入主 pi；`buildEngineLaunchEnv` 注入引擎；嵌套 task pi 经引擎出站 env 继承同值），control server 未激活时返回空对象，继承值从未承担独立职责；且两键刻意不进任何 deny 清单。AC7 用真实 subagent 链验证此等价性。
 
 - **D5 用户终端（B7）：跟随最小剥离。**
-  terminal 身份是「用户的 shell」，比 pi 更外部——连 `PI_CODING_AGENT_DIR` 都不该有。首版仅加 deny 两项 + 保持 PR #105 三项删除不变；扩独立 TERMINAL_DENY 属过度设计信号，等实证需求。
+  terminal 身份是「用户的 shell」，比 pi 更外部——连 `PI_CODING_AGENT_DIR` 都不该有。当前 deny 清单 3 项全量叠加 + 保持 PR #105 三项删除不变；扩独立 TERMINAL_DENY 属过度设计信号，等实证需求。
 
 - **D6 plugin 宿主（B6）只做增量叠加。**
-  `{...process.env}` 全量拷贝对 trusted/sandbox 插件的兼容性属有意设计，无实证受害前不改拓扑，仅叠加 deny 两项删除。诚实标注：plugin 域消费点未逐一审计（无 blocker，超 MVP 范围）。
+  `{...process.env}` 全量拷贝对 trusted/sandbox 插件的兼容性属有意设计，无实证受害前不改拓扑，仅叠加 deny 清单删除。诚实标注：plugin 域消费点未逐一审计（无 blocker，超 MVP 范围）。
 
 - **待验证集（实施期核实，如实标注）：**
   ① `TAIJI_SUBAGENT_IDLE_TIMEOUT_MS` 进入主 pi 的真实通道（extension 设置进嵌套 frame.env，还是依赖 B3 白名单继承；15 处命中多为测试）；② `TAIJI_LOG_LEVEL` 族是否同时被 `extensions/shared/extension-logger` 读取（若是则须并入 forward，否则 extension 日志静默变级）。两项动作各为一次 rg，嵌入 U0/U2。
@@ -284,8 +284,8 @@ rg -n 'spawn\(|execFile\(|fork\(|pty\.spawn' packages/runtime/src apps/electron/
 子代理引擎协议化（`subagent-engine-protocolization.impl-plan.md`（已删除，git 可追溯）§2.12，约束登记 C-proc-12）引入引擎 CLI 子进程形态后，出站契约新增引擎面分支——与 §3.5 D2/D3 的 runtime/main 面共用治理原则（deny-by-default + 消费证据），但**SSOT 落在 `@zhushanwen/subagent-engine-sdk`**（F9：SDK 消费方（zsw 宿主/引擎 CLI）不可依赖 `@taiji/shared`，SDK 是跨宿主 SSOT）：
 
 - **`buildEngineChildEnv(baseEnv, opts)` 三层**（高者覆盖低者，次序写死 = 先过滤后 L0 显式注入）：
-  - **L0 基础设施键**（core 过滤之后显式注入，不受放行/剥除约束）：`TAIJI_AGENT_DATA_DIR` / `TAIJI_AGENT_ENGINE_NODE` / `ELECTRON_RUN_AS_NODE`（执行器为 Electron 二进制时）/ `TAIJI_AGENT_SUBAGENT=1`（nesting guard）/ control 两键 `TAIJI_SUBAGENT_CONTROL_{SOCKET,ROOT_SESSION_ID}`（必经 L0——L1 拒绝 `TAIJI_SUBAGENT_` 前缀、L2 是 manifest 面，两层都到不了）/ 引擎侧身份 env（`PI_SUBAGENT_ROOT_SESSION_ID` 等）；
-  - **L1 deny + 显式剥除**（恒高于 manifest 放行）：`ENGINE_ENV_DENY_LIST` = deny 两键（`TAIJI_AGENT_PACKAGED` / `TAIJI_RUNTIME_TOKEN`，与 `SPAWN_ENV_OUTBOUND_DENY_LIST` 同成员）+ 凭证键 `TAIJI_AGENT_API_KEY` + 预设回落事实两键 `TAIJI_PRESET_FALLBACK_{FROM,TO}`（引擎一跳继承会造成子 agent 假披露）；
+  - **L0 基础设施键**（core 过滤之后显式注入，不受放行/剥除约束）：`TAIJI_AGENT_DATA_DIR` / `TAIJI_AGENT_ENGINE_NODE` / `ELECTRON_RUN_AS_NODE`（执行器为 Electron 二进制时）/ `TAIJI_AGENT_SUBAGENT=1`（nesting guard）/ control 两键 `TAIJI_SUBAGENT_CONTROL_{SOCKET,ROOT_SESSION_ID}`（必经 L0——runtime 进程 env 无此键；manifest 不得声明 `TAIJI_` 族保留前缀（`RESERVED_ENV_PREFIXES`），故由 runtime 在 L0 显式注入，嵌套 task pi 经引擎出站 env 继承）/ 引擎侧身份 env（`PI_SUBAGENT_ROOT_SESSION_ID` 等）；
+  - **L1 deny + 显式剥除**（恒高于 manifest 放行）：`ENGINE_ENV_DENY_LIST` = deny 两键（`TAIJI_AGENT_PACKAGED` / `TAIJI_RUNTIME_TOKEN`；**刻意不含** `TAIJI_ENGINE_RAW_MIRROR`——引擎自身需读取，raw mirror 只在 task pi 边界由引擎 `buildChildEnv` 显式 delete）+ 凭证键 `TAIJI_AGENT_API_KEY` + 预设回落事实两键 `TAIJI_PRESET_FALLBACK_{FROM,TO}`（引擎一跳继承会造成子 agent 假披露）；
   - **L2 manifest 放行**：manifest `envPrefixes` 声明前缀的引擎私有 env；保留前缀拒绝表 `TAIJI_` / `TAIJI_AGENT_` / `TAIJI_SUBAGENT_`；形态校验 `^[A-Za-z0-9_]+$`（大小写不敏感）；非法条目丢弃 + warn（包继续可用）。
 - **常量单源**：`ENGINE_ENV_PREFIXES` / `ENGINE_ENV_DENY_LIST` SSOT 在 `packages/shared/src/constants.ts`，SDK `src/env.ts` 内联镜像（构建期生成物），逐项相等由 `check_env_whitelist_sync.py` 断言，两处改动同批提交；检查断言 L0 键集合 ∩ L1 deny/剥除集合 = ∅（SDK vitest）。
 - **通用出站构建器 SDK 版**：SDK 同时导出 `buildOutboundChildEnv`（deny 剥离终态，供非引擎 spawn 面）。与 shared 版的刻意差异：**缺省不做白名单过滤**（prefixes 省略 = 全量继承父 env + deny 剥除）——SDK 不可 import `ENV_WHITELIST_PREFIXES`，引擎 base 已先经 core 过滤，ambient 面（worktree git 需要 GIT_*/proxy/ssh）必须保留继承面。`packages/subagent-core/src/execution/worktree/worktree-{manager,git-ops}.ts` 的两处 git `execFile` 已采纳（R3 MF-C：deny 键不进 git 子进程，git hooks 后代不再可能消费 deny 键）。
@@ -347,10 +347,10 @@ rg -n 'spawn\(|execFile\(|fork\(|pty\.spawn' packages/runtime/src apps/electron/
 | Unit | 内容与文件级落点 | 为什么这么拆 | 完成条件（可检查） | 验收对应 |
 |------|------------------|--------------|---------------------|----------|
 | U0 待验证核实 | 对 D3 待验证集 ①② 各跑一次定位 rg（idle-timeout 主 pi 通道 / extension-logger 是否读 LOG_LEVEL 族）；结论以 JSDoc 注入 U1 清单文件 | 设计期如实标注的缺口先行消歧，防 U1 内容返工 | 三个问题的证据锚点写入 deny/forward 清单注释（或维持原判的说明） | 支撑 AC7 |
-| U1 出站契约 SSOT | 新建 `packages/shared/src/spawn-env-contract.ts`：导出 `SPAWN_ENV_OUTBOUND_DENY_LIST`（首版两项，逐项 JSDoc 写危害证据锚点）+ forward 参考清单（B 组五项，标注消费锚点）+ 文件头「入站白名单管准入／出站契约管出站」关系说明；配套 `packages/shared/src/__tests__/spawn-env-contract.test.ts`（断言：常量名规避 guard 字面量、成员最小性=首版恰为 2） | deny 清单需被 U2 构建器与 U3-U4 五个消费端共享，放 shared 与入站 SSOT 同居一仓才是单一权威 | 两文件存在；`cd packages/shared && npx vitest run spawn-env-contract` 绿 | AC5 |
+| U1 出站契约 SSOT | 新建 `packages/shared/src/spawn-env-contract.ts`：导出 `SPAWN_ENV_OUTBOUND_DENY_LIST`（当前 3 项，逐项 JSDoc 写危害证据锚点）+ forward 参考清单（B 组五项，标注消费锚点）+ 文件头「入站白名单管准入／出站契约管出站」关系说明；配套 `packages/shared/src/__tests__/spawn-env-contract.test.ts`（断言：常量名规避 guard 字面量、成员清单=当前 3 项由测试锁定） | deny 清单需被 U2 构建器与 U3-U4 五个消费端共享，放 shared 与入站 SSOT 同居一仓才是单一权威 | 两文件存在；`cd packages/shared && npx vitest run spawn-env-contract` 绿 | AC5 |
 | U2 出站构建器 | 新建 `packages/runtime/src/infra/spawn-env.ts`：`buildOutboundChildEnv({ parentEnv, extras?, prefixes? }): Record<string,string>`——语义＝prefixes 过滤（缺省 SSOT）→ merge extras（保留 undefined=删除语义）→ apply DENY_LIST；纯函数 env 全 DI；配套测试覆盖：deny 键剔除 / PATH·HOME 基座完整 / extras undefined 删除 / 不 mutate 入参（R1）/ 大输入幂等 | 出站语义唯一实现点；DI 是 R3 的结构性保证 | 模块与测试存在且绿；R1/R2 两个红线用例在测试清单中显式可查 | AC2/AC4 基础 |
 | U3 主链路接线（B2+B3） | `safe-env.ts` 改为 U2 薄封装（保留 ELECTRON_ 扩展入参，删本地循环体）；`rpc-client.ts:15-29` 私有 buildSafeEnv 删除改 import U2；`process-manager.ts:104-124` 组装迁至 U2 调用（PATH 补齐 / controlEnv / DATA_DIR 传参不变） | 重复实现消灭在此；等价范围最大的一步单拆便于精准回归 | runtime 相关既有 vitest 用例全绿 + 新增「RpcClient env 无 deny 键」用例；`cd packages/runtime && npx vitest run infra` 绿 | AC2/AC3 |
-| U4 周边边界接线（B5-B8） | `shell-runner.ts:63`、`git-executor.ts:40` 显式传入构建器输出（不再隐式继承）；`terminal-service.ts:430` buildEnv 替换为构建器输出 + 原 TERM/ELECTRON_ 删除逻辑保留；`control-server.ts` 引擎 spawn env 经 `buildEngineLaunchEnv` 三层契约；`plugin-host-process.ts:392` 叠加 deny 两键删除（拷贝拓扑不动，D6） | 五处接线互不依赖、每处是独立小 diff，出问题可单独 revert | 每处各配一个小单测（污染 env 输入 → 子进程 env 断言）；四个文件相关测试全绿 | AC6/AC7 |
+| U4 周边边界接线（B5-B8） | `shell-runner.ts:63`、`git-executor.ts:40` 显式传入构建器输出（不再隐式继承）；`terminal-service.ts:430` buildEnv 替换为构建器输出 + 原 TERM/ELECTRON_ 删除逻辑保留；`control-server.ts` 引擎 spawn env 经 `buildEngineLaunchEnv` 三层契约；`plugin-host-process.ts:392` 叠加 deny 清单删除（拷贝拓扑不动，D6） | 五处接线互不依赖、每处是独立小 diff，出问题可单独 revert | 每处各配一个小单测（污染 env 输入 → 子进程 env 断言）；四个文件相关测试全绿 | AC6/AC7 |
 | U5 回归检查测试 | 在 `packages/runtime/src/infra/__tests__/spawn-env.test.ts` 内固化「契约快照」用例：给定模拟污染父 env（PACKAGED/TOKEN=1 + 正常系统变量）→ 断言输出无 deny 键、必备基座齐全 | 把本案永久钉进测试基线，防止未来重构悄悄放行 | 该测试文件入 CI 常跑集合并绿 | AC2 自动化层 |
 | U6 constraints 登记 | `docs/constraints.json` 新增条目：「runtime 子进程 env 出站契约」scope=[rpc-client.ts, shell-runner.ts, git-executor.ts, terminal-service.ts, subagent-control/control-server.ts, plugin-host-process.ts]，执行方式指向 U7 检查脚本；附「与 ENV_WHITELIST_PREFIXES 关系」说明段；随后 `node scripts/validate-constraints.mjs` 结构校验（原指令 `node scripts/render-constraints.mjs` 再生成 constraints.md 的脚本已于 2026-09-13 删除，md 视图不再生成） | 本项目约束治理的唯一登记处（AGENTS.md 文档索引行），先登记再写码制度 | json 校验过、两条目互引成立 | AC5 |
 | U7 pre-commit 静态检查 | 新建 `.githooks/check_spawn_env_boundary.py`：扫 `packages/runtime/src` 与 `apps/electron/main` 中 spawn/execFile/fork/pty.spawn/Worker( 调用点，要求相邻 ≤10 行出现 `buildOutboundChildEnv` 或命中脚本内置豁免名单（豁免逐条注释理由：reap-orphan-pi ps 只读、SDK node-executor 探针手工 env、__tests__ 等）；报错信息给修复指引（import 路径 + U1 清单链接）；注册进 `.githooks/install-hooks.sh` heredoc 并重跑安装（R4） | G3 的机器强制力；静态检查成本低误报可控（豁免白名单兜底） | 带 U 临时文件跑 exit≠0 且输出含行号指引；清理后 exit 0；重装 hook 后对新文件生效 | AC8 |

@@ -1485,7 +1485,7 @@
     },
     {
       "id": "C-proc-09",
-      "summary": "runtime 子进程 env 出站契约：进程创建点的子 env 必须经 buildOutboundChildEnv 构建（deny 清单剥 TAIJI_AGENT_PACKAGED / TAIJI_RUNTIME_TOKEN）；与 ENV_WHITELIST_PREFIXES 入站准入正交共存——入站白名单管「外部环境哪些准许进来」，出站契约管「自身变量哪些允许跟随 spawn 出去」（设计文档 §3.5 D2）；B2 main→runtime 产品内部边界走 composeChildEnvBase 基座、不出 deny 兜底，deny 由下游对外边界承担",
+      "summary": "runtime 子进程 env 出站契约：进程创建点的子 env 必须经 buildOutboundChildEnv 构建（deny 清单当前 3 项：TAIJI_AGENT_PACKAGED / TAIJI_RUNTIME_TOKEN / TAIJI_ENGINE_RAW_MIRROR，成员由测试锁定；raw mirror 只剥 task pi 侧，引擎进程自身合法读取）；与 ENV_WHITELIST_PREFIXES 入站准入正交共存——入站白名单管「外部环境哪些准许进来」，出站契约管「自身变量哪些允许跟随 spawn 出去」（设计文档 §3.5 D2）；B2 main→runtime 产品内部边界走 composeChildEnvBase 基座、不出 deny 兜底，deny 由下游对外边界承担",
       "scope": [
         "packages/shared/src/spawn-env-contract.ts",
         "packages/runtime/src/infra/spawn-env.ts",

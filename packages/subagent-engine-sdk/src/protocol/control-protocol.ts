@@ -5,9 +5,11 @@
 // （引擎 NDJSON 协议）正交——control 协议是引擎帧的信封运输层：engine_frame.line
 // 载荷是不透明字符串，本层不理解引擎协议语义。
 //
-// 消费方（本单元只立契约，实现在后续单元）：u-m3-control（runtime control server，
-// 帧构造/解析/比较）与 u-m3-rt-transport（RuntimeControlClient/RuntimeEngineTransport，
-// hello/engine_open/frame 双向）。两侧禁手写字面量，一律 import 本单源。
+// 消费方（已实装）：runtime `infra/subagent-control/control-server.ts`（帧构造/解析/比较）
+// 与 core `execution/engine/client/transport/{control-client,runtime}.ts`
+// （RuntimeControlClient/RuntimeEngineTransport，hello/engine_open/frame 双向）。两侧禁手写
+// 字面量，一律 import 本单源；词表由 `control-protocol.test.ts` / runtime
+// `control-frames.test.ts` 锁定。
 //
 // 帧形状契约（单行 JSON，`v` = SUBAGENT_CONTROL_PROTOCOL_VERSION；字段逐 kind 见设计
 // §3.4.3 帧表，payload 接口随消费单元落地——kind/version/reason 值域以本模块为单源）：

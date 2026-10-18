@@ -20,7 +20,7 @@
 
 ### 1.2 系统是什么（受众认知铺垫）
 
-subagent 派发链（三层进程）：宿主 pi 主进程（extension 加载 `subagent-core`）→ 引擎 CLI 子进程（`pi-subagent-cli`，共享池长驻）→ 任务子进程（`pi --mode rpc`，每个 run 一个）。一个 subagent 在宿主侧对应一条 **ExecutionRecord**（状态机 = `running | closed` + 关闭原因；`chatMode` 标记对话容器），GUI 列表/详情/通知从 record 投影。**resume 锚点** = record 的 sessionFile：pi 以 `--session <file>` 启动时**续写原文件**（`spawn-args.ts:71-73`），模型召回全部历史。设计时点的**轮次监督器**是 run 域 record 的崩溃治理主体（三态判定：该等/该唤醒/该放弃），chatMode record 豁免（见 D8：对话容器的治理者是用户，监督器的判死语义不适用于容器）。[2026-09-28 后记] 该监督器经裁决整机清理（生产不可达断线死机器），崩溃治理现归孤儿恢复与 Continuation 失败分支。
+subagent 派发链按 transport 分两种形态（引擎与任务子进程不变）：**managed**（托管态，control env 非空）——宿主 pi 主进程（extension 加载 `subagent-core`，只持有 control 客户端）→ runtime 进程（control socket；引擎由 runtime spawn，故主 pi 与引擎是兄弟进程）→ 引擎 CLI 子进程（`pi-subagent-cli`，共享池长驻）→ 任务子进程（`pi --mode rpc`，每个 run 一个）；**standalone**（无 control env）——宿主 pi 主进程 → 引擎 CLI 子进程（由 extension 直接 spawn）→ 任务子进程。一个 subagent 在宿主侧对应一条 **ExecutionRecord**（状态机 = `running | closed` + 关闭原因；`chatMode` 标记对话容器），GUI 列表/详情/通知从 record 投影。**resume 锚点** = record 的 sessionFile：pi 以 `--session <file>` 启动时**续写原文件**（`spawn-args.ts:71-73`），模型召回全部历史；锚点语义不受 spawn 权变化影响——managed/standalone 的续聊轮都是「新 run + resume」，引擎由谁 spawn 不改变锚点归属。设计时点的**轮次监督器**是 run 域 record 的崩溃治理主体（三态判定：该等/该唤醒/该放弃），chatMode record 豁免（见 D8：对话容器的治理者是用户，监督器的判死语义不适用于容器）。[2026-09-28 后记] 该监督器经裁决整机清理（生产不可达断线死机器），崩溃治理现归孤儿恢复与 Continuation 失败分支。
 
 ### 1.3 设计目标
 

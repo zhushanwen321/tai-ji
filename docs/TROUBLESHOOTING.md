@@ -120,7 +120,7 @@ lsof -i :1420 -P | grep node
 
 ### 6. subagent 没走 runtime control 通道：查 control env 与传输选择
 
-托管态下 runtime 持有引擎进程 spawn 权：runtime 向主 pi 进程注入 `TAIJI_SUBAGENT_CONTROL_SOCKET`（control socket 路径）与 `TAIJI_SUBAGENT_CONTROL_ROOT_SESSION_ID`，extension 侧 `EngineClient` 以 `isControlEnvActive`（socket 非空）为唯一谓词选择 `RuntimeEngineTransport`；env 缺失/空串（standalone、旧 runtime、control server 未监听）回落 local transport（`TAIJI_AGENT_DEBUG=1` 时可见 debug 日志 `transport selected: local (no control env)`）。
+托管态下 runtime 持有引擎进程 spawn 权：runtime 向主 pi 进程注入 `TAIJI_SUBAGENT_CONTROL_SOCKET`（control socket 路径）与 `TAIJI_SUBAGENT_CONTROL_ROOT_SESSION_ID`，extension 侧 `EngineClient` 以 `isControlEnvActive`（socket 非空）为唯一谓词选择 `RuntimeEngineTransport`；env 缺失/空串（standalone、旧 runtime）回落 local transport（`TAIJI_AGENT_DEBUG=1` 时可见 debug 日志 `transport selected: local (no control env)`）。env 存在但 socket 不可达 / `hello` 失败 → `engine_transport_unavailable`（显式失败，不回落 local）；control server init 失败是 runtime fatal（见 #8），不会以「control server 未监听」形态到达这里。
 
 ```bash
 # 1. control server 是否监听（runtime 首启日志）
@@ -397,6 +397,49 @@ node scripts/check-pi-resources-links.mjs --fix   # 外部 symlink → 真实复
 **判定**：`apps/electron/main/test/updater-script-integration.test.ts` 的 waitFor 预算 = 30s（按 `TAIJI_WAIT_DEBUG=1` 实测耗时分布 2-6s 校准的 5x 上界，吸收系统瞬态尖峰；成本仅真死锁时失败报告晚到，成功路径立即返回）。超时错误消息携带实测等待时长，按它直接归因：贴近 30s = 系统级瞬态尖峰（hdiutil 排队/换页类外部负载），复跑即绿；数量级偏离（分钟级）= 真退化，查 hdiutil/磁盘/被测脚本变更，禁止直接放大预算。
 
 **观测**：`TAIJI_WAIT_DEBUG=1` 打印该文件每次 waitFor 的成功耗时。
+
+### 31. subagent 一开始就失败：`engine_prompt_not_delivered` / `engine_prompt_rejected`
+
+**语义**：prompt response 是唯一成功回执。prompt 写入后**完全没有任何 stdout 行**满 30s（`TAIJI_SUBAGENT_PROMPT_ACK_TIMEOUT_MS` 可覆盖）→ `engine_prompt_not_delivered`；stdin 不可用 / 写入 EPIPE → 同码（立即失败，不等 30s）；pi 回 `success:false` → `engine_prompt_rejected`（立即失败）。出现任意 stdout 行（get_state 应答、事件、compaction 等）只取消零输出计时器并记 `prompt ack delayed` warn，**不是结算、不杀子进程**，run 继续等 prompt response。引擎层对两者都不自动重试（prompt 可能已产生副作用）；是否重跑由上层 recovery 文案决定。
+
+**诊断五元组**（随失败写进日志并拼入 `outcome.error`，有界）：`pid` / `bytesWritten`（stdin 已写字节）/ `stdoutBytes` / `stdoutBytesAfterPrompt`（prompt 写入后的 stdout 字节）/ `getStateAnswered`（get_state 是否已应答），另附 `lastEventType` / `stdoutSeen`。判定优先看 `stdoutBytesAfterPrompt`：为 0 = 通道彻底无响应（查引擎/pi 启动与 stdin 接线）；非 0 但无 prompt response = pi 已活跃但未受理 prompt（查 pi 侧 busy/queue/extension takeover 原因）。
+
+**日志**：引擎日志（经 runtime 日志的 `[rpc:stderr]` 行或 `host/log` 反向通道）grep `[prompt-ack]`：
+
+```bash
+grep "\[prompt-ack\]" <数据目录>/logs/runtime-*.log
+# prompt acked in Xms (disposition=...)      正常（debug 级）
+# prompt ack delayed: ...                    有 stdout 活动，零输出计时器取消（run 继续）
+# prompt not delivered (timeout): ...        零输出 30s（engine_prompt_not_delivered）
+# prompt rejected by pi: ...                 success:false（engine_prompt_rejected）
+# prompt delivery lost (failNow): ...        stdin 不可用 / EPIPE（同归 not_delivered）
+```
+
+**恢复动作**：按错误文案内联的 `Recovery` 重跑任务；复现时保留 `outcome.error` 的诊断摘要 + 上述日志 + `engine_open`/`engine_opened` 时间点（runtime 日志 `[subagent-control] engine opened`）。`engine_prompt_rejected` 的 pi error 文本（busy / queue / extension takeover）由 pi 侧给出，不归结为 taiji 传输故障。
+
+### 32. 引擎 / 任务 pi 残留（组杀与启动 sweep）
+
+**机制**：托管态下控制面裁决统一走组杀（POSIX 负 pid 进程组 + 子孙递归兜底；Windows `taskkill /PID <pid> /T /F`），信号发出即返回，真实 exit 由 child exit 事件收尾——**pid 文件只在 exit 确认后删除**；杀链失败时 pid 文件保留给下次启动 sweep。连接关闭 → 该连接全部通道 fan-out 组杀；runtime 退出 → 引擎 stdin EOF → SDK `armEngineSelfDestruct` 自灭；runtime 异常死亡 → 下次启动 `sweepOrphanEnginePids` 对 owner 已死的引擎组立即收割（pid 复用防护：现持有者启动时间晚于登记则只删记录不杀）。
+
+**取证**：
+
+```bash
+grep "kill decision" <数据目录>/logs/runtime-*.log
+# [subagent-control] kill decision action=terminate_channel channelId=... engineId=...
+#   pid=... rootSessionId=... parentRecordId=... reason=...
+grep "reaping orphan engine group\|removed stale control socket\|held by a live runtime" <数据目录>/logs/runtime-*.log
+```
+
+POSIX 按进程表定位（引擎 CLI 命令行含 `pi-subagent-cli`，任务 pi 为 `pi --mode rpc`）：
+
+```bash
+pgrep -fl "pi-subagent-cli"          # 引擎
+pgrep -fl "pi --mode rpc"            # 任务 pi（按 recordId / session 目录核对归属）
+```
+
+Windows 等效：`tasklist /FI "PID eq <pid>"` 核对单进程；按命令行定位用 PowerShell `Get-CimInstance Win32_Process | Where-Object { $_.CommandLine -like '*pi-subagent-cli*' } | Select-Object ProcessId,ParentProcessId,CommandLine`。
+
+**处置**：① 先确认 owner runtime 是否仍存活（pid 文件 `<数据目录>/run/subagent-engines/*.pid` 含 `runtimePid`/`spawnedAt`）——owner 活着交给它管，owner 死则重启 taiji 触发启动 sweep；② 手工清理只在核对 `spawnedAt` 与进程启动时间一致后按进程组终止（POSIX `kill -TERM -<pgid>`，Windows `taskkill /PID <pid> /T /F`），避免 pid 复用误杀；③ 反复残留且 sweep 日志无收割行 = 按缺陷报（杀链失败会留 debug 兜底行 `group kill fallback` / `orphan kill fallback`）。
 
 ## 环境变量速查
 

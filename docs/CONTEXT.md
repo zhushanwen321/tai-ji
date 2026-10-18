@@ -182,7 +182,7 @@ subagent 运行状态的内存单源（`packages/subagent-core/src/execution/per
 
 ### 引擎控制通道（control channel）
 
-托管态（runtime 存活）下 extension 与 runtime 之间的 typed socket 通道，承载 control 帧（`hello` / `hello_reject` / `engine_open` / `engine_opened` / `engine_open_failed` / `engine_frame` / `engine_close` / `engine_closed` / `error`；词表与版本 SSOT = SDK `protocol/control-protocol.ts`，`SUBAGENT_CONTROL_PROTOCOL_VERSION=1`）。选择谓词单源 = `isControlEnvActive`（`TAIJI_SUBAGENT_CONTROL_SOCKET` 非空 → runtime transport；空串/缺失 → local transport）。连接死亡 = `engine_transport_lost` fan-out，不自动重连；通道终局（`engine_closed`）与连接死亡两分，`unknown_channel` 原 code 透传。**代码映射**：runtime `infra/subagent-control/control-server.ts`、core `execution/engine/client/transport/control-client.ts`、SDK `protocol/control-protocol.ts` + `control-env.ts`。
+托管态（runtime 存活）下 extension 与 runtime 之间的 typed socket 通道，承载 control 帧（`hello` / `hello_ok` / `hello_reject` / `engine_open` / `engine_opened` / `engine_open_failed` / `engine_frame` / `engine_close` / `engine_closed` / `error`；词表与版本 SSOT = SDK `protocol/control-protocol.ts`，`SUBAGENT_CONTROL_PROTOCOL_VERSION=1`）。选择谓词单源 = `isControlEnvActive`（`TAIJI_SUBAGENT_CONTROL_SOCKET` 非空 → runtime transport；空串/缺失 → local transport）。连接死亡 = `engine_transport_lost` fan-out，不自动重连；通道终局（`engine_closed`）与连接死亡两分，`unknown_channel` 原 code 透传。**代码映射**：runtime `infra/subagent-control/control-server.ts`、core `execution/engine/client/transport/control-client.ts`、SDK `protocol/control-protocol.ts` + `control-env.ts`。
 
 ### control server
 
@@ -206,7 +206,7 @@ control 连接上的一次引擎进程生命周期单元（`channelId`）：`eng
 
 ### raw mirror（原始 stdout 镜像）
 
-引擎侧 fd3 原始 stdout 字节镜像：runtime 注入 `TAIJI_ENGINE_RAW_MIRROR=1` 后，引擎在 `child.stdout` 上于 `setEncoding` 前 tap 原始 Buffer、按字节层行切分，写 `{v, recordId, seq, b64}` NDJSON 到 fd3；runtime `SubagentMirrorHub` 解码并按 `(rootSessionId, recordId)` 索引 `SubagentTee`，同批落盘 `pi-subagent-<date>-<recordId>.jsonl`。tee 是权威数据（pi session / journal）的派生视图，不是第二权威；`TAIJI_ENGINE_RAW_MIRROR` 在引擎构建 task pi env 时显式剥除（shared 出站 deny 是第二道防线）。**代码映射**：`packages/pi-subagent-cli/src/raw-mirror.ts` + runtime `infra/subagent-control/mirror.ts`。
+引擎侧 fd3 原始 stdout 字节镜像：runtime 注入 `TAIJI_ENGINE_RAW_MIRROR=1` 后，引擎在 `child.stdout` 上于 `setEncoding` 前 tap 原始 Buffer、按字节层行切分，写 `{v, recordId, seq, b64}` NDJSON 到 fd3；runtime `SubagentMirrorHub` 解码并按 `(rootSessionId, recordId)` 索引 `SubagentTee`，同批落盘 `pi-subagent-<date>-<recordId>.jsonl`。tee 是权威数据（pi session / journal）的派生视图，不是第二权威；`TAIJI_ENGINE_RAW_MIRROR` 在引擎构建 task pi env 时由 `buildChildEnv` 显式 delete 承重（`task-pi-env-shape` 测试锁定）；shared 出站 deny 只覆盖 shared builder 消费方。**代码映射**：`packages/pi-subagent-cli/src/raw-mirror.ts` + runtime `infra/subagent-control/mirror.ts`。
 
 ### degraded（live 流降级）
 

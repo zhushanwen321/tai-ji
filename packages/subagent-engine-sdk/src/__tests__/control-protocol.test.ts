@@ -2,7 +2,7 @@
 //
 // [M3 u-foundation] control 通道协议契约词表测试：版本 / 帧 kind 词表 / engine_closed
 // reason 值域 + guard 收窄。契约单源 = protocol/control-protocol.ts；消费方
-// （u-m3-control / u-m3-rt-transport）落地时以本词表为准，禁手写字面量。
+// （runtime subagent-control / core transport）已实装，本测试锁定词表，两侧禁手写字面量。
 
 import { describe, expect, it } from "vitest";
 
