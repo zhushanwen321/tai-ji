@@ -1,5 +1,11 @@
 # @zhushanwen/pi-scheduler
 
+## 0.11.0
+
+### Minor Changes
+
+- 796f01b29: schedule / schedule_control 结果 details 新增 summary 收起态一行摘要，并新增 TUI 折叠态渲染。
+
 ## 0.10.4
 
 ### Patch Changes
