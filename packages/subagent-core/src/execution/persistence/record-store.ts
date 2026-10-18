@@ -1849,8 +1849,8 @@ export class RecordStore {
     if (Date.now() - this.lastIndexWriteAt < INDEX_WRITE_MIN_INTERVAL_MS) return; // 60s 节流窗内
     const entries = this.projectIndexEntries();
     this.indexDirty = false; // 发起时消费（写失败在 .catch 恢复）
-    const encDir = path.dirname(this.sessionsDir());
-    saveIndex(encDir, { entries })
+    const subagentsTreeDir = path.dirname(this.sessionsDir());
+    saveIndex(subagentsTreeDir, { entries })
       .then(() => {
         this.lastIndexWriteAt = Date.now(); // 仅成功分支推进节流窗
       })
@@ -1860,7 +1860,7 @@ export class RecordStore {
         // 无线索。失败会跨轮重试（dirty 恢复），warn 每次过窗写失败都会出现——
         // 正是「反复写失败需要可见」的信号面。
         logger.warn("[subagents] sessions-index write failed", {
-          detail: { dir: encDir, error: err instanceof Error ? err.message : String(err) },
+          detail: { dir: subagentsTreeDir, error: err instanceof Error ? err.message : String(err) },
         });
       });
   }
