@@ -297,30 +297,11 @@ export class QuotaService {
     const { providerId } = payload
 
     // ── 第一段：全部校验与计算（零物理副作用）──
-    // workspace 归一化校验（D1-1/P1-1）：非法输入 fail-fast（不落半成品配置），错误面
-    // 返回给调用方（renderer 已本地预校验，此处是直接 RPC 调用者的防御线）
-    let normalizedWorkspace: string | null | undefined
-    if (payload.workspace !== undefined) {
-      const wsResult = this.normalizeWorkspaceInput(providerId, payload.workspace)
-      if ('error' in wsResult) return { ok: false, error: wsResult.error }
-      normalizedWorkspace = wsResult.value
-    }
-    // cookie 入站归一化（SG-10）：renderer 已用同一 shared 函数预检，但 wire 不信任——
-    // 直接 RPC 调用者可能粘贴带空白伪影 / 带 `Cookie:` 头名的串。非空输入归一化后为空 =
-    // 格式非法（不落半成品）；合法 → 落盘归一化值（与 renderer 判据同一 SSOT）。
-    let normalizedCookie: string | undefined
-    if (payload.cookie !== undefined) {
-      normalizedCookie = payload.cookie === '' ? '' : normalizeCookieHeader(payload.cookie)
-      if (payload.cookie !== '' && normalizedCookie === '') {
-        logger.warn('[quota] invalid cookie input', { providerId, length: payload.cookie.length })
-        return { ok: false, error: 'cookie 格式无效：未包含任何 name=value 对（请从 DevTools → Network 请求头复制整串）' }
-      }
-    }
-    // cookieSet/apiKeySet 由 payload 纯计算（不触碰文件）：true = 本次写入，false = 本次
-    // 清除，undefined = 本次不动（继承既存）。实际物理写入在第三段——persist 失败时
-    // providers.json 与 secrets 都不被触碰（顺序重排的目标）
-    const cookieSet = normalizedCookie !== undefined ? normalizedCookie !== '' : undefined
-    const apiKeySet = payload.apiKey !== undefined ? payload.apiKey !== '' : undefined
+    // workspace / cookie 归一化与 cookieSet/apiKeySet 三态计算统一在 resolveConfigureInputs
+    // （metrics：configure 圈复杂度门 ≤15；行为与内联版本逐字等价）
+    const resolved = this.resolveConfigureInputs(payload)
+    if (!resolved.ok) return { ok: false, error: resolved.error }
+    const { normalizedWorkspace, normalizedCookie, cookieSet, apiKeySet } = resolved.inputs
     // 改动 4：fetcher 变更检测锚点——必须在 persist 之前读（persist 落盘后再读已是新值）
     const prevFetcher = this.readQuotaFallback(providerId)?.fetcher
 
@@ -439,6 +420,62 @@ export class QuotaService {
       logger.warn('[quota] failed to write apiKey', { providerId, error: msg })
       return { error: msg }
     }
+  }
+
+  /**
+   * configure 第一阶段：全部校验与纯计算（零物理副作用）。
+   * - workspace 归一化校验（D1-1/P1-1）：非法输入 fail-fast（不落半成品配置），错误面
+   *   返回给调用方（renderer 已本地预校验，此处是直接 RPC 调用者的防御线）；
+   * - cookie 入站归一化（SG-10）：wire 不信任，renderer 预检仅为第一道防线；
+   * - cookieSet/apiKeySet 三态：true = 本次写入，false = 本次清除，undefined = 本次不动。
+   * 独立成方法压 configure 圈复杂度（metrics 门 ≤15），行为与内联版本逐字等价。
+   */
+  private resolveConfigureInputs(payload: QuotaConfigurePayload): {
+    ok: true
+    inputs: {
+      normalizedWorkspace: string | null | undefined
+      normalizedCookie: string | undefined
+      cookieSet: boolean | undefined
+      apiKeySet: boolean | undefined
+    }
+  } | { ok: false; error: string } {
+    let normalizedWorkspace: string | null | undefined
+    if (payload.workspace !== undefined) {
+      const wsResult = this.normalizeWorkspaceInput(payload.providerId, payload.workspace)
+      if ('error' in wsResult) return { ok: false, error: wsResult.error }
+      normalizedWorkspace = wsResult.value
+    }
+    const cookieResult = this.normalizeCookieInput(payload.cookie)
+    if ('error' in cookieResult) {
+      logger.warn('[quota] invalid cookie input', { providerId: payload.providerId, length: payload.cookie?.length ?? 0 })
+      return { ok: false, error: cookieResult.error }
+    }
+    return {
+      ok: true,
+      inputs: {
+        normalizedWorkspace,
+        normalizedCookie: cookieResult.value,
+        cookieSet: cookieResult.value !== undefined ? cookieResult.value !== '' : undefined,
+        apiKeySet: payload.apiKey !== undefined ? payload.apiKey !== '' : undefined,
+      },
+    }
+  }
+
+  /**
+   * configure 阶段 helper 之五：cookie 入站归一化（SG-10，wire 不信任）。
+   * 返回：{ value: undefined } = 本次不动；{ value: '' } = 清除；{ value: string } = 归一化写入值；
+   * { error } = 非空输入归一化后为空（无可解析的 name=value 对）→ 调用方 fail-fast。
+   */
+  private normalizeCookieInput(
+    cookie: string | undefined,
+  ): { value: string | undefined } | { error: string } {
+    if (cookie === undefined) return { value: undefined }
+    if (cookie === '') return { value: '' }
+    const normalized = normalizeCookieHeader(cookie)
+    if (normalized === '') {
+      return { error: 'cookie 格式无效：未包含任何 name=value 对（请从 DevTools → Network 请求头复制整串）' }
+    }
+    return { value: normalized }
   }
 
   /**
