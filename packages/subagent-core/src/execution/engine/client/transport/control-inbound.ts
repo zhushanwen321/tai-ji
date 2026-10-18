@@ -13,9 +13,12 @@ import {
 
 import { isRecord } from "./control-shared.ts";
 
-export type ControlInboundHelloOk = { kind: "hello_ok"; id: unknown };
+export type ControlInboundHelloOk = {
+  kind: typeof SUBAGENT_CONTROL_FRAME_KINDS.helloOk;
+  id: unknown;
+};
 export type ControlInboundHelloReject = {
-  kind: "hello_reject";
+  kind: typeof SUBAGENT_CONTROL_FRAME_KINDS.helloReject;
   id: unknown;
   reason: string | undefined;
   message: string | undefined;
@@ -23,21 +26,25 @@ export type ControlInboundHelloReject = {
   code: string | undefined;
 };
 export type ControlInboundEngineOpened = {
-  kind: "engine_opened";
+  kind: typeof SUBAGENT_CONTROL_FRAME_KINDS.engineOpened;
   id: unknown;
   channelId: string;
   pid: number | undefined;
 };
 export type ControlInboundEngineOpenFailed = {
-  kind: "engine_open_failed";
+  kind: typeof SUBAGENT_CONTROL_FRAME_KINDS.engineOpenFailed;
   id: unknown;
   code: string;
   message: string;
   recovery: string | undefined;
 };
-export type ControlInboundEngineFrame = { kind: "engine_frame"; channelId: string; line: string };
+export type ControlInboundEngineFrame = {
+  kind: typeof SUBAGENT_CONTROL_FRAME_KINDS.engineFrame;
+  channelId: string;
+  line: string;
+};
 export type ControlInboundEngineClosed = {
-  kind: "engine_closed";
+  kind: typeof SUBAGENT_CONTROL_FRAME_KINDS.engineClosed;
   channelId: string;
   code: number | null;
   signal: string | null;
@@ -45,7 +52,7 @@ export type ControlInboundEngineClosed = {
   reason: string | undefined;
 };
 export type ControlInboundError = {
-  kind: "error";
+  kind: typeof SUBAGENT_CONTROL_FRAME_KINDS.error;
   channelId: string | undefined;
   code: string;
   message: string;
@@ -88,11 +95,11 @@ export function parseControlInboundLine(line: string): ControlInboundParse {
   }
   switch (parsed.kind) {
     case SUBAGENT_CONTROL_FRAME_KINDS.helloOk:
-      return { frame: { kind: "hello_ok", id: parsed.id } };
+      return { frame: { kind: SUBAGENT_CONTROL_FRAME_KINDS.helloOk, id: parsed.id } };
     case SUBAGENT_CONTROL_FRAME_KINDS.helloReject:
       return {
         frame: {
-          kind: "hello_reject",
+          kind: SUBAGENT_CONTROL_FRAME_KINDS.helloReject,
           id: parsed.id,
           reason: optionalString(parsed.reason),
           message: optionalString(parsed.message),
@@ -103,7 +110,7 @@ export function parseControlInboundLine(line: string): ControlInboundParse {
     case SUBAGENT_CONTROL_FRAME_KINDS.engineOpened:
       return {
         frame: {
-          kind: "engine_opened",
+          kind: SUBAGENT_CONTROL_FRAME_KINDS.engineOpened,
           id: parsed.id,
           channelId: optionalChannelId(parsed.channelId),
           pid: typeof parsed.pid === "number" ? parsed.pid : undefined,
@@ -112,7 +119,7 @@ export function parseControlInboundLine(line: string): ControlInboundParse {
     case SUBAGENT_CONTROL_FRAME_KINDS.engineOpenFailed:
       return {
         frame: {
-          kind: "engine_open_failed",
+          kind: SUBAGENT_CONTROL_FRAME_KINDS.engineOpenFailed,
           id: parsed.id,
           code: optionalString(parsed.code) ?? "spawn_failed",
           message: optionalString(parsed.message) ?? "engine_open failed",
@@ -122,7 +129,7 @@ export function parseControlInboundLine(line: string): ControlInboundParse {
     case SUBAGENT_CONTROL_FRAME_KINDS.engineFrame:
       return {
         frame: {
-          kind: "engine_frame",
+          kind: SUBAGENT_CONTROL_FRAME_KINDS.engineFrame,
           channelId: optionalChannelId(parsed.channelId),
           line: typeof parsed.line === "string" ? parsed.line : "",
         },
@@ -130,7 +137,7 @@ export function parseControlInboundLine(line: string): ControlInboundParse {
     case SUBAGENT_CONTROL_FRAME_KINDS.engineClosed:
       return {
         frame: {
-          kind: "engine_closed",
+          kind: SUBAGENT_CONTROL_FRAME_KINDS.engineClosed,
           channelId: optionalChannelId(parsed.channelId),
           code: typeof parsed.code === "number" ? parsed.code : null,
           signal: optionalString(parsed.signal) ?? null,
@@ -141,7 +148,7 @@ export function parseControlInboundLine(line: string): ControlInboundParse {
     case SUBAGENT_CONTROL_FRAME_KINDS.error:
       return {
         frame: {
-          kind: "error",
+          kind: SUBAGENT_CONTROL_FRAME_KINDS.error,
           channelId: optionalString(parsed.channelId),
           code: optionalString(parsed.code) ?? "engine_transport_unavailable",
           message: optionalString(parsed.message) ?? "runtime control error",

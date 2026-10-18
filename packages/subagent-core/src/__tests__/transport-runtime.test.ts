@@ -118,6 +118,19 @@ class FakeControlServer {
     for (const socket of this.conns) this.sendControl(socket, frame);
   }
 
+  /**
+   * 逐段写原始字节到活连接（跨 chunk UTF-8 边界测试）：段间留 gap，保证客户端侧
+   * 按两次 data 事件收到（段内可落在多字节字符中间）。
+   */
+  async sendRawChunks(chunks: Buffer[], gapMs = 30): Promise<void> {
+    for (const socket of this.conns) {
+      for (const chunk of chunks) {
+        await new Promise<void>((resolve) => socket.write(chunk, () => resolve()));
+        if (gapMs > 0) await new Promise<void>((resolve) => setTimeout(resolve, gapMs));
+      }
+    }
+  }
+
   sendEngineFrame(channelId: string, line: string): void {
     this.sendToAll({ v: SUBAGENT_CONTROL_PROTOCOL_VERSION, kind: K.engineFrame, channelId, line });
   }
@@ -389,6 +402,41 @@ describe("RuntimeEngineTransport：control 通道全链（验收①）", () => {
 
     await transportA.close();
     await transportB.close();
+  });
+
+  it("[m-core-1] 跨 chunk 的 UTF-8 多字节字符不被撕裂（StringDecoder 按字符边界切分）", async () => {
+    const server = await startServer();
+    server.onEngineOpen = (socket, frame) => {
+      server.sendControl(socket, {
+        v: SUBAGENT_CONTROL_PROTOCOL_VERSION,
+        kind: K.engineOpened,
+        id: frame.id,
+        channelId: "ch-utf8",
+        pid: process.pid,
+      });
+    };
+    const transport = makeTransport(server);
+    const frames: string[] = [];
+    transport.onFrame((line) => frames.push(line));
+    await transport.open(makeSpec());
+
+    const inboundLine = JSON.stringify({ id: 9, result: { text: "中文内容" } });
+    const envelope = `${JSON.stringify({
+      v: SUBAGENT_CONTROL_PROTOCOL_VERSION,
+      kind: K.engineFrame,
+      channelId: "ch-utf8",
+      line: inboundLine,
+    })}\n`;
+    const bytes = Buffer.from(envelope, "utf8");
+    const charStart = bytes.indexOf(Buffer.from("中", "utf8"));
+    expect(charStart).toBeGreaterThan(0);
+    // 3 字节汉字拆到两个 chunk：切点落在字符内部（bytes[charStart..charStart+3)）。
+    await server.sendRawChunks([bytes.subarray(0, charStart + 1), bytes.subarray(charStart + 1)], 30);
+
+    await waitFor(() => frames.length === 1, "inbound engine frame after split chunks");
+    expect(frames[0]).toBe(inboundLine);
+    expect(frames[0]).not.toContain("\uFFFD");
+    await transport.close();
   });
 
   it("engine_closed → onExit（code/signal/reason/stderrTail）；stderrTail 经 onStderr 出口", async () => {
@@ -1003,6 +1051,31 @@ describe("EngineClient：runtime transport 谓词接线（验收③④）", () =
     // 通道级错误在 engine_closed 后回到 exited（下次 run 可重建——退避重试语义与引擎崩溃同型）；
     // 连接死亡无 engine_closed 跟随 → 保持 unavailable（不在同一连接重试）
     expect(client.currentState).toBe("exited");
+  });
+
+  it("[m-core-3] unknown_channel（通道终局、连接仍活）→ 不 markUnavailable；下一次 run 在活连接上重新 open", async () => {
+    const server = await startServer();
+    wireEchoEngineProtocol(server);
+    const dataDir = mkdtempSync(join(tmpdir(), "u-m3-rt-unknown-"));
+    dataDirs.push(dataDir);
+    const client = makeHostedClient(server, dataDir);
+
+    await client.ensureConnected();
+    expect(client.currentState).toBe("ready");
+
+    // runtime 对 unknown_channel 只发 error 帧、不跟 engine_closed（D10：通道终局，
+    // 不是连接丢失）。旧实现无条件 markUnavailable → 无 engine_closed 回落，永久不可用。
+    server.sendError("ch-1", "unknown_channel", "unknown channel ch-1");
+    await waitFor(() => client.currentState === "exited", "state falls back to exited");
+    expect(client.currentState).not.toBe("unavailable");
+
+    // 下一次 run 可重建：同一 control 连接上重新 engine_open（连接未死，不重连）。
+    await client.ensureConnected();
+    expect(client.currentState).toBe("ready");
+    expect(server.frames.filter((f) => f.kind === K.engineOpen)).toHaveLength(2);
+    expect(server.connectionCount).toBe(1);
+    await expect(client.request("probe", {})).resolves.toBeTruthy();
+    await client.dispose();
   });
 
   it("连接在 engine_open 期间死亡 → ensureConnected 以 engine_transport_lost 上抛（不包装）+ 标记不可用", async () => {

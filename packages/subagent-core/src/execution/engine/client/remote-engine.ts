@@ -555,18 +555,31 @@ export class RemoteEngine implements EnginePort {
 
 /**
  * 运行中失败（合成 outcome）vs prepare 期失败（reject）的分界：EngineSdkError 的
- * engine_crashed / engine_request_timeout / engine_handshake_timeout 三类由「run 帧
- * 已受理后进程死亡/链路故障」产生；其余（engine_protocol_mismatch、engine_model_*、
- * 未知错误）按 prepare 期失败上抛（调用方分诊）。进程组杀引发的 stdin 写失败同属
- * engine_crashed（engine-client.request 统一包装）。
+ * run 期瞬态码由「run 帧已发出后的进程死亡/链路故障/通道终局」产生；其余
+ *（engine_protocol_mismatch、engine_model_*、未知错误）按 prepare 期失败上抛
+ *（调用方分诊）。进程组杀引发的 stdin 写失败同属 engine_crashed（engine-client.request
+ * 统一包装）。
+ *
+ * [m-core-2] 集合补齐 runtime transport 在 run 期可能出现的四条码：
+ *   - engine_transport_lost（control 连接中途丢失）；
+ *   - engine_frame_too_large / engine_backpressure_overflow（帧/队列超限，通道终局）；
+ *   - unknown_channel（通道已不存在，连接仍活）。
+ * 与 prepare 期同码的区分不在码表而在位置：`ensureConnected`/握手在 run() 的 try
+ * 之外，prepare 期抛这些码仍走 reject，不会落入本判定。
  */
+const RUN_PHASE_TRANSIENT_CODES: ReadonlySet<string> = new Set([
+  "engine_crashed",
+  "engine_request_timeout",
+  "engine_handshake_timeout",
+  "engine_transport_lost",
+  "engine_frame_too_large",
+  "engine_backpressure_overflow",
+  "unknown_channel",
+]);
+
 function isTransientRunFailure(err: unknown): boolean {
   if (!(err instanceof EngineSdkError)) return false;
-  return (
-    err.code === "engine_crashed" ||
-    err.code === "engine_request_timeout" ||
-    err.code === "engine_handshake_timeout"
-  );
+  return RUN_PHASE_TRANSIENT_CODES.has(err.code);
 }
 
 /** run 帧 wire 载荷（EngineClient.request("run") 入参形态）。 */

@@ -15,6 +15,7 @@
 // engine_open_timeout；帧超限/队列溢出 → engine_frame_too_large / engine_backpressure_overflow（先具体码后 engine_closed）。
 
 import * as net from "node:net";
+import { StringDecoder } from "node:string_decoder";
 
 import {
   EngineSdkError,
@@ -103,6 +104,11 @@ export class RuntimeControlClient {
   private nextId = 1;
   private buffer = "";
   private bufferBytes = 0;
+  /**
+   * [m-core-1] 跨 chunk UTF-8 边界：Buffer 不保证落在字符边界，逐 chunk toString 会把
+   * 残缺字节替换为 U+FFFD（外层 JSON 仍可解析 → 静默污染）。StringDecoder 缓冲残字节。
+   */
+  private readonly decoder = new StringDecoder("utf8");
   private readonly channels = new Map<string, ControlChannelRecord>();
   private readonly pendingOpens = new Map<string, ControlPendingOpen>();
   private readonly writeQueue: ControlWriteQueue;
@@ -327,7 +333,7 @@ export class RuntimeControlClient {
   // 接收面
 
   private ingest(chunk: Buffer): void {
-    this.buffer += chunk.toString("utf8");
+    this.buffer += this.decoder.write(chunk);
     this.bufferBytes += chunk.length;
     if (this.bufferBytes > this.maxFrameBytes && !this.buffer.includes("\n")) {
       // partial-line 上限（D8 对称防线）：runtime 侧本应保证不超限，防御性终局。
@@ -359,28 +365,26 @@ export class RuntimeControlClient {
     }
     const frame = parsed.frame;
     switch (frame.kind) {
-      case "hello_ok":
+      case SUBAGENT_CONTROL_FRAME_KINDS.helloOk:
         this.handleHelloOk(frame);
         return;
-      case "hello_reject":
+      case SUBAGENT_CONTROL_FRAME_KINDS.helloReject:
         this.handleHelloReject(frame);
         return;
-      case "engine_opened":
+      case SUBAGENT_CONTROL_FRAME_KINDS.engineOpened:
         this.handleEngineOpened(frame);
         return;
-      case "engine_open_failed":
+      case SUBAGENT_CONTROL_FRAME_KINDS.engineOpenFailed:
         this.handleEngineOpenFailed(frame);
         return;
-      case "engine_frame":
+      case SUBAGENT_CONTROL_FRAME_KINDS.engineFrame:
         this.handleEngineFrame(frame);
         return;
-      case "engine_closed":
+      case SUBAGENT_CONTROL_FRAME_KINDS.engineClosed:
         this.handleEngineClosed(frame);
         return;
-      case "error":
+      case SUBAGENT_CONTROL_FRAME_KINDS.error:
         this.handleErrorFrame(frame);
-        return;
-      default:
         return;
     }
   }

@@ -10,7 +10,8 @@
 // spawn 引擎 CLI / stdio 接线 / pidfile / 进程组收割归 LocalEngineTransport
 // （transport/local.ts），control socket 通道归 RuntimeEngineTransport
 // （transport/runtime.ts），本类经 EngineTransport 契约消费；协议面（握手/请求关联/
-// 反向路由/崩溃重建）留守。transport 选择谓词（单源 = SDK isControlEnvActive）：
+// 反向路由/崩溃重建）留守。transport 选择谓词（单源 = transport-selection.ts，底层
+// SDK isControlEnvActive）：
 // TAIJI_SUBAGENT_CONTROL_SOCKET 非空 → runtime transport（连接失败/hello 被拒 → 对应
 // transport 错误码，不静默 local）；空串/缺失 → local。pidfile/reaper 仅 local 模式注册
 // （impl-plan 验收③）：进程面收割段按 localTransport 实例有无编排。
@@ -31,7 +32,6 @@ import {
   EngineSdkError,
   HANDSHAKE_TIMEOUT_MS,
   getLogger,
-  isControlEnvActive,
   isProtocolVersionCompatible,
   isResponseFrame,
   isNotificationFrame,
@@ -55,6 +55,11 @@ import {
 } from "./client-options.ts";
 import { LocalEngineTransport } from "./transport/local.ts";
 import { RuntimeEngineTransport } from "./transport/runtime.ts";
+import {
+  SUBAGENT_TRANSPORT_ENV,
+  isForcedLocalTransport,
+  usesRuntimeTransport,
+} from "./transport-selection.ts";
 import type {
   EngineTransport,
   EngineTransportExitInfo,
@@ -69,10 +74,10 @@ import { notifyInFlightChanged } from "../inflight-snapshot.ts";
 const logger = getLogger("subagents");
 
 /**
- * [D9 逃生舱] transport 强制覆盖键：值 `local` → 跳过 control env 判定强制 local。
- * 设计 D9「一个发布周期后删除」；值不合法/未设时按既有谓词判定。
+ * [D9 逃生舱] transport 强制覆盖键（定义在 transport-selection.ts，与 stream-sink
+ * 的 widget 抑制判据单源；此处 re-export 保持既有导入面）。
  */
-export const SUBAGENT_TRANSPORT_ENV = "TAIJI_SUBAGENT_TRANSPORT";
+export { SUBAGENT_TRANSPORT_ENV };
 
 /**
  * 单条镜像事件 → core 镜像投影 + 在途推送（u7a 数据面桥接）：置死**或已退出** →
@@ -255,7 +260,8 @@ export class EngineClient {
   }
 
   /**
-   * transport 选择（D5 谓词，单源 = SDK isControlEnvActive）：control env 非空 →
+   * transport 选择（D5 谓词，单源 = transport-selection.ts：isForcedLocalTransport /
+   * usesRuntimeTransport，底层 isControlEnvActive）：control env 非空 →
    * RuntimeEngineTransport（control socket 通道；connect/hello 失败 →
    * engine_transport_unavailable，不静默回退 local）；空串/缺失 → LocalEngineTransport
    * （standalone）。每代引擎连接一份 transport 实例（open/close 生命周期 = 单通道）。
@@ -264,13 +270,13 @@ export class EngineClient {
   protected resolveTransport(): EngineTransport {
     const baseEnv = this.opts.baseEnv ?? process.env;
     // [D9 逃生舱] 优先于 control env 激活判定：值 local → 强制 local（排障回退）。
-    if ((baseEnv[SUBAGENT_TRANSPORT_ENV] ?? "").trim() === "local") {
+    if (isForcedLocalTransport(baseEnv)) {
       logger.warn(
         `[engine-client:${this.engineId}] ${SUBAGENT_TRANSPORT_ENV}=local → forcing local transport (D9 escape hatch)`,
       );
       return this.createLocalTransport();
     }
-    if (isControlEnvActive(baseEnv)) {
+    if (usesRuntimeTransport(baseEnv)) {
       logger.debug(`[engine-client:${this.engineId}] transport selected: runtime control channel`);
       return new RuntimeEngineTransport({
         engineId: this.opts.engineId,
@@ -279,7 +285,9 @@ export class EngineClient {
         onStderr: (chunk) => this.appendStderrTail(chunk),
       });
     }
-    logger.debug(`[engine-client:${this.engineId}] transport selected: local (no control env)`);
+    // 设计 D5：「空串/缺失 → local（warn）」。生产日志默认不落 debug，回落原因必须
+    // 在 warn 级可见（排障面：standalone vs 托管态 control env 未注入）。
+    logger.warn(`[engine-client:${this.engineId}] transport selected: local (no control env)`);
     return this.createLocalTransport();
   }
 
@@ -779,7 +787,15 @@ export class EngineClient {
     this.runRoutes.clear();
     this.lastPartialHandle = undefined;
     this.mirror.killAll();
-    if (this.state !== "unavailable") this.markUnavailable(err);
+    if (err.code === "unknown_channel") {
+      // [m-core-3] unknown_channel 是通道终局、control 连接仍活（runtime 该路径只发
+      // error 帧、不跟 engine_closed）：无条件 markUnavailable 会让状态永久停在
+      // unavailable（下一次 ensureConnected 直接抛旧错误）。回落 exited，让下一次
+      // run 在活连接上重新 engine_open（与 engine_closed 的收敛语义一致）。
+      if (this.state !== "unavailable" && this.state !== "disposed") this.state = "exited";
+    } else if (this.state !== "unavailable") {
+      this.markUnavailable(err);
+    }
     // 通道/连接已裁决终局：让 transport 收敛（连接死亡时通道已清 → 立即 resolve；
     // 通道级 error 时加入 engine_close 宽限/engine_closed 回收链）——fire-and-forget。
     void this.transport?.close(`transport error: ${err.code}`);

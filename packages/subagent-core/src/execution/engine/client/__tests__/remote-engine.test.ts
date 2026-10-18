@@ -25,7 +25,7 @@ import {
 import { SubagentStream } from "../../../assembly/stream-sink.ts";
 import { getSubagentSessionDir } from "../../../assembly/path-encoding.ts";
 import { probePidAliveness } from "../pid-file.ts";
-import { getLogger, type UiRequest } from "@zhushanwen/subagent-engine-sdk";
+import { EngineSdkError, getLogger, type UiRequest } from "@zhushanwen/subagent-engine-sdk";
 import { getLogger as coreGetLogger } from "../../../../core/logger.ts";
 import {
   _resetHostUiRequestEndpointForTest,
@@ -499,6 +499,73 @@ describe("失败分界（运行中合成 vs prepare 期 reject）", () => {
     });
     await cleanup();
   }, 20_000);
+});
+
+/**
+ * [m-core-2] 最小 EngineClient 替身：run 期错误注入（只实现 RemoteEngine.run 触达的
+ * 成员；真实引擎/控制通道不在本用例范围）。
+ */
+function makeStubClient(injected: {
+  connectError?: EngineSdkError;
+  requestError?: EngineSdkError;
+}): EngineClient {
+  const stub = {
+    ensureConnected: async (): Promise<void> => {
+      if (injected.connectError !== undefined) throw injected.connectError;
+    },
+    getInitializeDiagnostics: () => undefined,
+    registerRunRoute: () => () => {},
+    request: async (): Promise<unknown> => {
+      if (injected.requestError !== undefined) throw injected.requestError;
+      throw new Error("stub: no request result configured");
+    },
+    getPartialHandle: () => undefined,
+    cancelRun: async (): Promise<void> => {},
+    dispose: async (): Promise<void> => {},
+  };
+  return stub as unknown as EngineClient;
+}
+
+function makeStubEngine(client: EngineClient): RemoteEngine {
+  return new RemoteEngine({
+    engineId: "stub-engine",
+    client,
+    dataDir,
+    hostKind: "test",
+    manifest: { capabilities: { ...FAKE_MATCHED_CAPS } },
+  });
+}
+
+describe("[m-core-2] run 期 transport 失败码：合成 error outcome（不 reject）", () => {
+  const RUN_PHASE_CODES = [
+    "engine_transport_lost",
+    "engine_frame_too_large",
+    "engine_backpressure_overflow",
+    "unknown_channel",
+  ] as const;
+
+  for (const code of RUN_PHASE_CODES) {
+    it(`${code} → 正常返回 error outcome + 正常 handle`, async () => {
+      const engine = makeStubEngine(makeStubClient({
+        requestError: new EngineSdkError(code, `injected ${code}`, "inspect the transport"),
+      }));
+      const { ctx } = makeCtx();
+      const result = await engine.run({ prompt: "p" }, ctx);
+      expect(result.outcome.error).toContain(code);
+      expect(result.outcome.exitCode).toBeNull();
+      expect(result.handle.data.v).toBe(1);
+    });
+  }
+
+  it("同码在 prepare 期（ensureConnected 抛）→ 仍 reject，不产生 handle", async () => {
+    const engine = makeStubEngine(makeStubClient({
+      connectError: new EngineSdkError("engine_transport_lost", "connection lost before run", "reconnect"),
+    }));
+    const { ctx } = makeCtx();
+    await expect(engine.run({ prompt: "p" }, ctx)).rejects.toMatchObject({
+      code: "engine_transport_lost",
+    });
+  });
 });
 
 describe("gate 位多声明 run 期判定（W3 契约⑤接线：manifest vs initialize 应答）", () => {
