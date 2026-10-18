@@ -38,6 +38,8 @@ export default [
       'apps/electron/resources/extensions/**',
       // [W11] 引擎包 staging 产物（bundle-extensions esbuild 输出，gitignored 构建产物）
       'apps/electron/resources/engines/**',
+      // scheduler-manager 插件 staging 产物（同 bundle-extensions 输出，.gitignore resources/plugins/*/index.js）
+      'resources/plugins/**',
       // .taiji-harness 是设计文档/骨架代码（spec/plan/code-skeleton），非项目源码，不参与 lint
       '.taiji-harness/**',
       // zcode 动态工作流引擎产物（workflow-runs = run 脚本快照，workflow-drafts = 发起
