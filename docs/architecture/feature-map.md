@@ -45,14 +45,14 @@
 
 ### 功能概述
 
-根治「30 天进程足迹只增不减」（实测 33 进程 3080MB，~10 个空闲 pi 各 80-141MB 常驻）：空闲 2h 且 30min 内未被查看的用户可见 session 由 reaper「最小摘除」（杀 pi 进程、保留 bus 分区订阅 seq 连续 + HistoryRebuildCache），下次使用惰性 restore（增量恢复，Gate B 实测 544ms）。维护通道（promptReload skill 变更风暴）出站+回程双路径豁免不重置空闲时钟；relay 子进程豁免（kill-on-disconnect 自理）；默认生效无需 opt-in（env `TAIJI_RUNTIME_PI_RECLAIM_*` 可调）。设计与实施计划已删除（git 历史可追溯）——idle-pi-reclamation.md / idle-pi-reclamation.impl-plan.md（u1a/u1b/u2/u3a/u3b/u4 + 偏差 R1-R14）。
+根治「30 天进程足迹只增不减」（实测 33 进程 3080MB，~10 个空闲 pi 各 80-141MB 常驻）：空闲 2h 且 30min 内未被查看的用户可见 session 由 reaper「最小摘除」（杀 pi 进程、保留 bus 分区订阅 seq 连续 + HistoryRebuildCache），下次使用惰性 restore（增量恢复，Gate B 实测 544ms）。维护通道（promptReload skill 变更风暴）出站+回程双路径豁免不重置空闲时钟；默认生效无需 opt-in（env `TAIJI_RUNTIME_PI_RECLAIM_*` 可调）。设计与实施计划已删除（git 历史可追溯）——idle-pi-reclamation.md / idle-pi-reclamation.impl-plan.md（u1a/u1b/u2/u3a/u3b/u4 + 偏差 R1-R14）。
 
 ### 关键落点
 
 | 层 | 载体 |
 |------|------|
 | 空闲信号 | `packages/runtime/src/infra/pi/rpc-client.ts`（idle signal 三写点：出站 maintenance 豁免 + 入站 pending maintenance response 排除 + sendPrompt touch） |
-| 查看窗口 | `lastViewedAt` per-sid map + `session.switch` 记录 + `RelayRegistry.hasByMainSessionId` 豁免（u1b acc603d4d） |
+| 查看窗口 | `lastViewedAt` per-sid map + `session.switch` 记录（u1b acc603d4d）；reaper 模块已整体退役（ADR-0122 防御机制清查），查看时间戳作为事实源保留 |
 | reaper | `packages/runtime/src/services/session/idle-pi-reaper.ts`（5min tick，豁免查询走 u3a 只读 accessor） |
 | 摘除编排 | `session-lifecycle.ts` `reclaimManagedSession`（七步：占座 reclaimInflight → 代际校验 → 最小摘除，绝不复用 removeSessionEntry） |
 | 阈值 SSOT | `packages/shared/src/constants.ts`（tick/idle/viewed，与 reaper fallback 双源一致性有检查测试） |
@@ -76,7 +76,7 @@
 | 诊断导出（E7） | `apps/electron/main/diagnostics/export-diagnostic-bundle.ts` + IPC（零新依赖 zip，缺文件降级）+ 设置页 SystemDiagnosticsSection + Panel.vue 死态块入口 + 知情文案三方共用 |
 | E5a checkpoint 恢复 | `packages/runtime/src/services/session/runtime-checkpoint.ts`（五契约：删除属主双轨 / staleness / tmp+rename / 失败现场保留 3 份 / 风暴防护）+ `startup-reattach.ts`（真补集过滤 + 收割 promise 等待 + 高水位即时查询延迟 + 并发 2）+ `infra/mem-pressure.ts` + main 侧冷启动可信度（resolveColdStartTrust / isolateStaleCheckpoint）；约束 C-proc-17 |
 | E5b 看门狗 | `packages/runtime/src/infra/watchdog.ts`（60s 采样环 + 70%/85% 两级阈值 + relief 持续性条件 + armed 门）；renderer `useMemoryPressure`（refCount 单订阅 + core `setLruMaxSessions` 可变窗压窗）；约束 C-proc-19（`TAIJI_RUNTIME_WATCHDOG_ARMED` 默认 off = Gate W 纯观测） |
-| E5c 滚动重启 | `packages/runtime/src/services/session/rolling-restart.ts`（在途谓词推迟【extension 聚合上报镜像 ∪ EnginePort 快照 ∪ relay-registry】+ 30min defer 上限 + 双维硬升级 92%/memPressure + SHUTDOWN_STEP_SEQUENCE 15 步打点 + 退出码 86）+ supervisor recordPlanned 零退避零计数 + RollingRestartBanner 四态横幅 + 只读 status RPC；约束 C-proc-18 |
+| E5c 滚动重启 | `packages/runtime/src/services/session/rolling-restart.ts`（在途谓词推迟【extension 聚合上报镜像 ∪ control 在途引擎通道（`engineChannelsInFlight` = control server channelCount，组合根 `index.ts:1733` 接线）】+ 30min defer 上限 + 双维硬升级 92%/memPressure + SHUTDOWN_STEP_SEQUENCE 15 步打点 + 退出码 86）+ supervisor recordPlanned 零退避零计数 + RollingRestartBanner 四态横幅 + 只读 status RPC；约束 C-proc-18 |
 | 在途上报通道 | `packages/extension-protocol/src/extensions/subagent-inflight/`（marker + 绝对计数 schema + ack）+ subagent-workflow 聚合上报 + runtime `inflight-mirror.ts`（五 spawn 形态预置 0 + 生命周期对账 + absent-report errs 判别） |
 | 批次补课 | tee size 轮转：`infra/logger.ts`（gzip `.1.gz` 单代 + `TAIJI_LOG_MAX_BYTES` 单旋钮，C-build-09，2026-09-13 改号）；入站 parse 检查：core `ws-client.ts` 80MB + 单 session 终止阀（C-comm-15）；O3-C superseded-by 注记 + `scripts/check-stale-ctx-audit-coverage.mjs` 审计覆盖检查；reap 判据 v2 marker 化（C-proc-20） |
 | Gate 状态 | Gate A 通过（六包 typecheck 0 + 七组测试全绿 + 全量 lint 0，1 真回归已修）；Gate B **终判通过**（8 PASS / 1 BLOCKED / 3 SCALED，`a266e42f1`）——A4 滚动重启退出链挂死已从根源修复（stop 时关存续 WS 连接，`3220a351c`）并真机复验（61 次 planned_rolling_restart 退出码 86、零 liveness 误杀）/ A6 BLOCKED（无生产注入钩子，单元级覆盖；u7a push 链生产悬挂已修 `90cdbefe6`，复验挂 swap 水位回落窗口）/ A5·A8 SCALED·替代口径；u8 Gate W 挂数据（V6 soak 约 2026-09-18） |

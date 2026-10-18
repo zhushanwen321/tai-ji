@@ -92,7 +92,7 @@ Agent Runtime（一个 Node.js 进程）
 │                在 interfaces.ts，pi 引擎接口唯一权威在 services/ports/pi-engine.ts。
 └── infra/       基础设施与外部系统适配：pi/（rpc-client、process-manager、
                  event-adapter、message-converter、session-store 等 pi 协议适配族）、
-                 relay/、git、fs、spawn-env、watchdog 等。
+                 subagent-control/、git、fs、spawn-env、watchdog 等。
 ```
 
 设计原则：变化隔离——pi 升级改 infra/pi，业务能力改 services，WS 契约改 transport，不同速率的变化不交叉。
@@ -172,13 +172,13 @@ subagent 运行状态的内存单源（`packages/subagent-core/src/execution/per
 
 - **subagent.stream_chunk 消息型**：唯一的内容推送通道。runtime 对子代理的每个文本增量发一条 `{ sessionId, recordId, msgSeq, deltaSeq, delta }`，`delta` 是真增量片段（非累积全文）。transient 主题（不分配 seq、不入 ring、不写快照，断连即丢、无回放），推送允许丢失，正确性由拉取收敛兜底。
 - **msgSeq / deltaSeq 双序号**：`msgSeq` = per-record assistant 消息序号，表达消息边界（产生端从 1 开始——首条 assistant 消息 = 1，message_start 递进；消费端状态机初始 0）；`deltaSeq` = per-message 从 0 递增。消费端按双序号拼合：边界推进（msgSeq 前向变化）开新消息并重置 deltaSeq 期望值；msgSeq 回退（陈旧 chunk）丢弃不推进；序号连续即追加；跳号即失步。
-- **session.getSubagentStreamState RPC**：拉取某 record 当前流状态的只读快照（RelayTee 既有内存状态的投影，不新增保留状态）。入参 `{ sessionId, recordId }`；出参 `{ found, msgSeq, lastDeltaSeq, lines }`。`found: false` = 该 record 无进行中流（未开始或已定稿，合法回执非错误）；`found: true` 时 `lines` = 当前消息累积全文（消费端复用现有全量替换入口），`lastDeltaSeq` = 这份全文包含到第几条 delta。失败走统一 error envelope，无独立错误码词表。
+- **session.getSubagentStreamState RPC**：拉取某 record 当前流状态的只读快照（`SubagentTee` 既有内存状态的投影，不新增保留状态）。入参 `{ sessionId, recordId }`；出参 `{ found, msgSeq, lastDeltaSeq, lines, degraded? }`。`found: false` = 该 record 无进行中流（未开始或已定稿，合法回执非错误）；`found: true` 时 `lines` = 当前消息累积全文（消费端复用现有全量替换入口），`lastDeltaSeq` = 这份全文包含到第几条 delta；`degraded: true`（additive，缺省不出现）= raw mirror 出现 seq 空洞/丢弃，live 视图已停止更新、reload 不受影响。失败走统一 error envelope，无独立错误码词表。
 - **水位（watermark，记录已处理到哪的位置标记）**：`lastDeltaSeq` 在消费端的用法——拉取响应携带的 `lastDeltaSeq` 标记这份全文覆盖到哪条 delta，`<= 水位` 的在途/缓冲 chunk 丢弃，`> 水位` 的按序回放；跨通道（RPC 应答 × 广播）拼接正确性靠水位 + 缓冲回放保证。
 - **sealedMsgSeq**：消费端状态机的定稿水位——已定稿到的最高消息序号，单调推进、从不重置（清除消息按其携带的 msgSeq 置位）。用于丢弃「定稿后同消息序号的晚到拉取响应」，防止已定稿消息被复活。
 
 收敛分工：chunk 推送是性能提示；接入（订阅建立/晚订阅/刷新）与失步（跳号）触发拉取；定稿由清除消息 + entry 权威链（`session.subagentEntriesAppended`）收敛——拉为主、推补充（[ADR-0097](adr/decisions.md)）。
 
-**代码映射**: 协议类型 `packages/shared/src/protocol.ts`（ServerMessageMapBase 的 `subagent.stream_chunk` / `session.getSubagentStreamState` 条目）；产生端 `packages/runtime/src/infra/relay/relay-tee.ts`；消费端状态机 `packages/core/src/domain/chat/streaming-state-machine.ts`。
+**代码映射**: 协议类型 `packages/shared/src/protocol.ts`（ServerMessageMapBase 的 `subagent.stream_chunk` / `session.getSubagentStreamState` 条目）；产生端 `packages/runtime/src/infra/subagent-control/subagent-tee.ts`（数据源 = 引擎 fd3 raw mirror）；消费端状态机 `packages/core/src/domain/chat/streaming-state-machine.ts`。
 
 ### 模型覆盖（modelOverride）
 

@@ -183,6 +183,14 @@ EXEMPT_CALLSITES = [
         "——类型契约形态豁免（RT-8#9 检查逐调用点化登记 2026-09-20）",
     ),
     (
+        "engine-sdk/src/spawn.ts",
+        "spawn(command, [...args], options)",
+        "SDK 自灭链 Windows 分支 taskkill 自身进程树的 spawn 缺省实现（D7/B-U-4）："
+        "数组参数不经 shell、stdio ignore、windowsHide、fire-and-forget，无 env 出站面"
+        "（与 engine/client/reaper.ts / transport/local.ts taskkill 先例同构；"
+        "spawnFn 为平台分支单测 seam，缺省实现仅在 win32 分支调用 taskkill）",
+    ),
+    (
         "node-executor.ts",
         'spawn(execPath, ["--eval", "process.exit(0)"]',
         "引擎执行器可用性探针（W9，SDK 单源）："
@@ -304,13 +312,6 @@ EXEMPT_CALLSITES = [
         "taskkill",
         "Windows 进程树终止（引擎崩溃收割 kill 处置，无数据回流通路；与 "
         "supervisor/windows-process.ts taskkill.exe 先例同构）",
-    ),
-    (
-        "engine/client/engine-client.ts",
-        'spawn("taskkill"',
-        "Windows 进程树终止 kill 处置（崩溃/超时收割补杀），stdio ignore、无数据回流"
-        "通路，无 env 出站面（与 engine/client/reaper.ts taskkill 先例同构）"
-        "（RT-8#9 检查逐调用点化登记 2026-09-20）",
     ),
     (
         "engine/client/transport/local.ts",

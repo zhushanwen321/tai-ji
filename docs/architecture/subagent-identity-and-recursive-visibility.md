@@ -24,7 +24,7 @@
 | `PI_SUBAGENT_DEPTH` | 执行嵌套深度（子进程 = 父进程 + 1） | 视为 0 |
 | `PI_SUBAGENT_FORK_DEPTH` | fork 链深度（root 侧一次设定，链上不变） | 视为 0 |
 | `PI_SUBAGENT_PARENT_RECORD_ID` | 父 record id（嵌套时 = 父进程自身的 selfRecordId） | 无父（顶层派发） |
-| `PI_SUBAGENT_AGENT` / `PI_SUBAGENT_TASK` | agent 名 / 任务文本（身份条目展示用） | 壳读者按空串兜底 |
+| `PI_SUBAGENT_AGENT` / `PI_SUBAGENT_TASK` | agent 名 / 任务文本（身份条目展示用；`TASK` 在写入点截断——前 2000 字符 + `…[truncated N chars]`，常量 = SDK `PI_SUBAGENT_TASK_MAX_CHARS`） | 壳读者按空串兜底 |
 | `PI_SUBAGENT_MODE` | 执行形态（信封权威值；core 现役词表只有 `background`，env 侧保持字符串以容纳其它引擎） | 信封缺席时继承父进程判定，顶层缺省 `background` |
 | `PI_SUBAGENT_SLUG` / `PI_SUBAGENT_STARTED_AT` | 短标签 / 起始时刻（epoch ms）——来源 = `ctx.identity` 信封（宿主权威值） | 信封缺席时 slug 可选、startedAt 回落 `Date.now()` |
 | `PI_SUBAGENT_WORKTREE` | worktree 隔离标志（`"true"` = 是） | 视为否 |
@@ -39,9 +39,21 @@ core 派发 run（run.params.task + ctx.identity 信封；宿主侧构造单点 
         → core 读者 + 壳身份条目
 ```
 
-写入方 = 各引擎在 spawn 任务子进程时按 **per-run 值**写回（pi 引擎实现 = `packages/pi-subagent-cli/src/spawn-runner.ts` 的 `applyIdentityEnvToChildEnv`，纯函数，可单测）。写在 deny 剥除**之后**：当前 deny 名单不含这些键，但按 relay 归属键先例统一在终态写回，防将来 deny 名单扩展时静默失效。
+写入方 = 各引擎在 spawn 任务子进程时按 **per-run 值**写回（pi 引擎实现 = `packages/pi-subagent-cli/src/spawn-runner.ts` 的 `applyIdentityEnvToChildEnv`，纯函数，可单测）。写在 deny 剥除**之后**：当前 deny 名单不含这些键，但按身份键终端写回先例统一在终态写入，防将来 deny 名单扩展时静默失效。
 
 **为什么不是宿主级注入**：SDK 的 `EngineChildEnvOptions.identityEnv` 是**引擎宿主级**通道，而引擎宿主是长驻进程（每窗口一个），身份却是 per-run 的（子进程自己的 recordId / depth 每次 run 都不同）。宿主级钉值只能得到粗粒度值，无法承载本机制；身份必须随 run 参数走协议，由引擎在 spawn 时写回。
+
+### `PI_SUBAGENT_TASK` 截断与投影消费方（D2）
+
+`PI_SUBAGENT_TASK` 在写入点截断（`PI_SUBAGENT_TASK_MAX_CHARS = 2000`：前 2000 字符 + `…[truncated N chars]`；实现 = `spawn-runner.ts` 的 `applyContentIdentityKeys` / `truncateTaskForEnv`），目的是让控制帧与 execve env 不随任务正文线性膨胀。截断改变的是子 pi 写入 session 文件的 `subagent-identity` 条目 `data.task`，消费方按三层判定：
+
+| 消费层 | 截断后行为 | 判定 |
+|---|---|---|
+| manifest 主路径（父侧全文投影，收口点写入） | 收口后 manifest 命中：全文不变 | 无降级（时机限定：收口后；在途 run 与崩溃未收口 record 无 manifest） |
+| record 重建链（manifest 缺席：`session-reconstructor` / `record-store-rebuild`） | `record.task` = 前 2000 字符 + 截断标记（GUI 列表/详情展示与该路径检索用截断文本） | 可接受：展示/检索投影非正确性通路 |
+| session-reader P-fallback（manifest miss：`discovery/subagents.ts` / `find.ts` / `family.ts`） | 富化与回退全文检索只覆盖前 2000 字符 | 可接受：P-fallback 本身是降级路径，身份/路由字段不受影响 |
+
+LLM 可见渲染面（execution-tree 既有 50 字符上限）不变；全文恢复源 = pi session 首条 user 消息与父侧 manifest。该降级与重审基线（manifest 命中率 / P-fallback 触发次数 / 2000 字内外 query miss）登记于 relay-spawn-transport 设计 §3.7 已接受代价（P-5）。
 
 ## 4. 读者与失效后果
 

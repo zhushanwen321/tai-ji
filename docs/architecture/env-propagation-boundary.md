@@ -376,6 +376,6 @@ rg -n 'spawn\(|execFile\(|fork\(|pty\.spawn' packages/runtime/src apps/electron/
 - 入站白名单 SSOT（含 `'TAIJI_'`）：`packages/shared/src/constants.ts:72-81`
 - 反向清除语义：`apps/electron/main/supervisor/safe-env.ts:26-43`
 - 泄道（第二份 buildSafeEnv + spawn 整体替换）：`packages/runtime/src/infra/pi/rpc-client.ts:15-29,:162-164,:168,:255-258`
-- runtime isPackaged 消费六处：`find-pi-executable.ts:26` · `pi-maintenance.ts:108` · `spawn-markers.ts:48` · `logger.ts:119` · `process-manager.ts:132` · `extension-service.ts:131`
+- runtime isPackaged 消费六处：`extension-service.ts:143` · `logger.ts:174` · `process-manager.ts:240` · `find-pi-executable.ts:27` · `pi-maintenance.ts:26` · `engine-roots.ts:43`（同文件 :48/:65 另两处同源判定）
 - 嵌套剥离范式：`buildEngineChildEnv` / `buildOutboundChildEnv`（SDK env 契约）；终端净化先例：`terminal-service.ts:430-457`
 - guard 兼容依据：`.githooks/check_env_whitelist_sync.py:43`（`LOCAL_DEF_RE` 精确名匹配，已核）；hook 安装源：`.githooks/install-hooks.sh:43-48,:1036`

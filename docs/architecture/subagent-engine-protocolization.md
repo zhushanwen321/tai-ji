@@ -423,7 +423,7 @@ runtime 进程（GUI 详情页①级读）──spawn（按需 + idle 复用）�
 3. **manifest 放行层**——引擎专属命名空间前缀；**保留前缀拒绝表**（产品命名空间不得被第三方声明）；非法条目丢弃该前缀并 warn（包继续可用）。
 **不变量**：基础设施层键集合与 deny 集合恒不相交（检查断言）；用户无法为引擎注入其 manifest 未声明、引擎未实现消费的 env（已接受能力放弃，重审触发登记原在 impl-plan，已删除，git 可追溯）。
 
-**control 透传语义（与 H12 一致）**：control 的**两键必须透传**（嵌套 subagent 的供数面，缺一即回落 local spawn）——runtime spawn 引擎时经 L0 注入，嵌套 task pi 经引擎出站 env 继承同值；归属键（`rootSessionId`/`parentRecordId`）由引擎按运行上下文在 `engine_open` 帧携带，不靠 env 继承。实现级键名与注入位置由代码承载（入口 = SDK `control-env.ts` 与 runtime `infra/subagent-control/engine-launch-env.ts`）。
+**control 透传语义（与 H12 一致）**：control 的**两键必须透传**（嵌套 subagent 的供数面，缺一即回落 local spawn）——runtime spawn 引擎时经 L0 注入，嵌套 task pi 经引擎出站 env 继承同值；归属键（`rootSessionId`/`parentRecordId`）由宿主 extension 侧 transport 按 RunContext 在 `engine_open` 帧携带（`engine_open` 是 C→R 帧，引擎进程不发送），不靠 env 继承。实现级键名与注入位置由代码承载（入口 = SDK `control-env.ts` 与 runtime `infra/subagent-control/engine-launch-env.ts`）。
 
 **基座常量来源（单源 + 构建期派生）**：SDK 的前缀/deny 常量由 `packages/shared/src/constants.ts` SSOT **构建期生成**
 （生成物名 `ENGINE_ENV_PREFIXES` / `ENGINE_ENV_DENY_LIST`，与 `modelCatalog` 同款构建期生成口径）；**检查断言**：L0 基础设施键集合 ∩ L1 deny/剥除集合 = ∅（防未来 deny 清单误伤 L0 键）。

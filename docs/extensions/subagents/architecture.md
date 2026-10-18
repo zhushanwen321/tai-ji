@@ -2,7 +2,7 @@
 
 > **本文件定位**：subagent 体系的**结构导航页**——回答「这套能力现在由哪些包组成、各包边界在哪、关键机制落在哪个模块」，并指向各主题的权威文档。机制细节不在本文件展开（避免与设计文档双源漂移）。
 >
-> **最后校准**：2026-09-29（workflow-run-resume-revision 落地后复核——run record 单源收敛 + 生命周期四态/中断暂停态 + phase 状态机 + 事件词对齐 pi + 终局编排单一入口 + resume 断点续跑，见 §4 状态机两行 / 介质归位行与 [ADR-0082](../../adr/decisions.md)）；2026-09-27（W2 状态机收敛登记后复核——run 五态机唯一权威 + outcome 四值 + record 意图原语即状态机 + manifest 三态投影口径 + abandon 注销差集已接受代价，见 §4 状态机两行与 [ADR-0080](../../adr/decisions.md)）；2026-09-26（W1 介质归位落地后复核——run/record 运行态移出主 session JSONL：journal 唯一事实源 + 注册/终态两条 v2 条目 + state/manifest 物化投影 + 收编统一恢复 + 保留窗口清理，见 §4 介质归位行与 [ADR-0094](../../adr/decisions.md)）；2026-09-16（collect / sync 批机制整体退役后复核——`service/` 收敛为六聚合、persistence 去 `sync-rebuild`、assembly 去 `collect-coordinator`；新增 `subagents` 批量 tool 与 fan-out 模板现状条目，见 §2 与 §4 批量编排行）；2026-09-13（永久会话模型落地后复核——状态机两态化 / `.state` 收条化 / in-flight 推送链重挂 / worktree-reconcile 拆分；同日 execution/ 顶层 51 文件按变化原因落入子目录——persistence / notify / worktree / ui / lifecycle / assembly，目录镜像本表分组，顶层仅留 subagent-service.ts 装配壳与 relay-env.ts（exports 子入口物理位置）；2026-09-11 校准的包拓扑仍有效，见 §7 历史沿革）。
+> **最后校准**：2026-09-29（workflow-run-resume-revision 落地后复核——run record 单源收敛 + 生命周期四态/中断暂停态 + phase 状态机 + 事件词对齐 pi + 终局编排单一入口 + resume 断点续跑，见 §4 状态机两行 / 介质归位行与 [ADR-0082](../../adr/decisions.md)）；2026-09-27（W2 状态机收敛登记后复核——run 五态机唯一权威 + outcome 四值 + record 意图原语即状态机 + manifest 三态投影口径 + abandon 注销差集已接受代价，见 §4 状态机两行与 [ADR-0080](../../adr/decisions.md)）；2026-09-26（W1 介质归位落地后复核——run/record 运行态移出主 session JSONL：journal 唯一事实源 + 注册/终态两条 v2 条目 + state/manifest 物化投影 + 收编统一恢复 + 保留窗口清理，见 §4 介质归位行与 [ADR-0094](../../adr/decisions.md)）；2026-09-16（collect / sync 批机制整体退役后复核——`service/` 收敛为六聚合、persistence 去 `sync-rebuild`、assembly 去 `collect-coordinator`；新增 `subagents` 批量 tool 与 fan-out 模板现状条目，见 §2 与 §4 批量编排行）；2026-09-13（永久会话模型落地后复核——状态机两态化 / `.state` 收条化 / in-flight 推送链重挂 / worktree-reconcile 拆分；同日 execution/ 顶层 51 文件按变化原因落入子目录——persistence / notify / worktree / ui / lifecycle / assembly，目录镜像本表分组，顶层仅留 subagent-service.ts 装配壳（exports 语义子入口物理位置 = execution/engine/paths.ts 与 execution/engine/engine-discovery-scan.ts）；2026-09-11 校准的包拓扑仍有效，见 §7 历史沿革）。
 > **历史**：本文件此前描述的是 M0 拆分前的**单包三层实现**（TUI / Runtime / Core 全在 extension 内，`session-runner.ts` / `session-factory.ts` / `executor` 等文件）。那些结构已随 core 抽包、引擎协议化、双轨收敛退役，对应实现迁至 `packages/subagent-core` 与两个引擎包（见 §7 历史沿革）。
 
 ---
@@ -37,12 +37,12 @@ subagent 能力现由 5 类包协作，跨进程边界只有一处（宿主 ↔ 
 ┌──────────────────────────────▼────────────────────────────────────────┐
 │ contract                                                               │
 │  packages/subagent-engine-sdk  @zhushanwen/subagent-engine-sdk          │
-│   - protocol/（方法/载荷/反向通道）+ port-contract + env/spawn/relay/    │
+│   - protocol/（方法/载荷/反向通道）+ port-contract + env/spawn/control-env │
 │     journal/kill-chain/nesting-guard/ui-* + node-executor + paths       │
 └────────────────────────────────────────────────────────────────────────┘
         ▲
-        │ 宿主侧 relay 通道（tee 帧归属）
-   packages/runtime/src/infra/relay/（relay-env / relay-paths / relay-registry / relay-server / relay-tee）
+        │ 宿主侧 control 通道（channel / tee 帧归属；只在托管态存在）
+   packages/runtime/src/infra/subagent-control/（control-server / mirror / subagent-tee / engine-launch-env / frames / paths）
 ```
 
 ## 2. 各包职责与关键模块
@@ -67,7 +67,7 @@ subagent 能力现由 5 类包协作，跨进程边界只有一处（宿主 ↔ 
 
 | 子域 | 内容 |
 |---|---|
-| `src/execution/`（顶层） | 装配壳 `subagent-service.ts`（唯一直接留顶层的执行域文件——装配点入口）+ `relay-env.ts`（`./relay-env` exports 子入口物理位置）+ `service/`（六聚合：`session-baselines` / `record-lifecycle` / `record-access` / `workflow-dispatch` / `run-orchestration` / `chat-rounds`（Continuation 协作面聚合，自 run-orchestration 拆出）+ `service-bootstrap` / `service-constants`） |
+| `src/execution/`（顶层） | 装配壳 `subagent-service.ts`（唯一直接留顶层的执行域文件——装配点入口）+ `service/`（六聚合：`session-baselines` / `record-lifecycle` / `record-access` / `workflow-dispatch` / `run-orchestration` / `chat-rounds`（Continuation 协作面聚合，自 run-orchestration 拆出）+ `service-bootstrap` / `service-constants`） |
 | `src/execution/persistence/` | record 持久化轴：`record-store.ts`（内存 + 磁盘重建容器，意图原语唯一写入口 C-data-20；H4 三轴拆分后 = 容器 + 原语立面 + D7 写面收敛本体，三轴实现拆至 `record-store-terminal.ts`（终态原语轴）/ `record-store-rounds.ts`（轮次簿记轴 + RecordEventsWriteFace 事件写面接线层——record 事件文件追加与 v2 两条款写面的共享基础设施）/ `record-store-rebuild.ts`（重建与投影轴，v2 条目对读入 + 磁盘重建单规则）——轴文件经 ctx 注入写面，检查白名单覆盖 store 家族）、`execution-record.ts`（唯一状态对象与 CAS）、`finalize-record.ts`、`record-entry.ts`（subagent-record 族条目契约单源：v2 注册/终态两条目，v2-only 判别）、`record-events.ts`（record 事件文件 `<sa-id>.events`——六类事件词表 + seq 分配 + fold/tail 原语，唯一事实源）、`event-tail.ts`（事件流 tail 增量读取原语：watch/offset 续读/坏行宽容——run 与 record 两域共用）、`state-marker.ts` / `alive-store.ts`（轮终收条与写权声明 sidecar）、`manifest-store.ts` / `sessions-index.ts` / `session-reconstructor.ts`（持久化——manifest/state 均为 journal fold 的物化投影，`*.events` 清理走统一保留维护轮）、`engine-journal-gc.ts`（引擎 journal 30 天 TTL 回收定时器——子代理会话文件族的回收归 runtime 删主会话级联 session-content-cascade，ADR-0133）、`run-state-evidence.ts`（run 终局证据判定核 `findRunSettlementEvidence`——journal run-settled 帧 ∨ manifest 终局面三态判定，枚举与对账 sweep 共用；统一保留维护轮 `runRetentionMaintenanceRound` / `pruneTerminalRunFiles`——fold 终态资格判据 + 30 天保留窗口；`STATE_DIR_NAME` 布局常量单源） |
 | `src/execution/notify/` | 通知轴：`notifier.ts` / `notify-host.ts` / `notify-ledger.ts`（确认式送达） |
 | `src/execution/worktree/` | worktree 隔离轴：`worktree-manager.ts` / `worktree-git-ops.ts` / `worktree-reconcile.ts` / `worktree-registry.ts`（worktree 隔离与归档重建对账） |
@@ -86,7 +86,7 @@ subagent 能力现由 5 类包协作，跨进程边界只有一处（宿主 ↔ 
 
 两个独立引擎进程，各自实现同一份 engine-protocol v1 契约：
 
-- **pi 引擎**：spawn `pi` 子进程（RPC 模式），stdout pump 解析事件、握手取 session 身份、relay 身份键注入；`base-tool-enhance` 等扩展负责子进程侧行为。
+- **pi 引擎**：spawn `pi` 子进程（RPC 模式），stdout pump 解析事件、握手取 session 身份、子代理身份 env 写回（`applyIdentityEnvToChildEnv`）；`base-tool-enhance` 等扩展负责子进程侧行为。
 - **zcode 引擎**：只走 app-server RPC（禁 CLI spawn 链，约束 C-ext-20），共享宿主 HOME，会话库隔离到独立 sqlite（不进 GUI 侧边栏）。
 
 两包均只依赖 SDK（不依赖 core），保证引擎侧无宿主耦合。
@@ -103,7 +103,7 @@ subagent 能力现由 5 类包协作，跨进程边界只有一处（宿主 ↔ 
 
 反向通道（引擎 → 宿主）覆盖进度与交互：`host/streamDelta`（增量文本）、`host/askUser`（UI 请求）、`host/childSpawned`（子进程注册）、`host/childStateChanged`（任务子进程生命周期上报，C-pi-16）等。chat 域独立协议面（原第 9 通道 `host/roundLifecycle` 与 `interact` 方法）已随 H1（[subagent-chat-run-unification.md](../../architecture/subagent-chat-run-unification.md)）退役：续聊轮 = 新 run + resume 锚点（`RunParams.resume`），轮活性经 run 事件通道既有事件（含 `activity` 变体）与 run 终态应答承载（约束 C-proc-13，authority 已改挂该设计）。manifest conversation 位语义随永久会话模型增 `cold` 值（zcode 冷恢复：resume 读 + 新 session 注入，无热 steering）；capability gate 判据仍 `=== 'unsupported'` 拒绝（`true`/`cold` 均放行，[subagent-permanent-session-model.md](../../architecture/subagent-permanent-session-model.md) §3.2.6）。
 
-`run` 的上下文（`RunContextParams`）承载每次运行的定位信息：`taskId` / `recordId` / `sessionRootId`（relay 身份键权威源，见 F6 修复）等——引擎据它重写子进程的 relay 身份 env，不靠 env 继承。[池抽象降级 2026-09-13] 原 `ctx.poolKey` 字段与 `host/poolResolved` 反向通道（第 8 通道）已删——两引擎 poolKey 恒 `'shared'`，journal 固定落 `engines/<id>/shared/`；[permission 通道退役 2026-09-13] `host/permission` 骨架已删（两引擎 `permissionMode=native` 零 emit、core 零注入），反向通道现为 6 条。
+`run` 的上下文（`RunContextParams`）承载每次运行的定位信息：`taskId` / `recordId` / `sessionRootId`（子代理身份 env 的根会话权威源）等——引擎据它写回子进程身份 env（`applyIdentityEnvToChildEnv`），不靠 env 继承。[池抽象降级 2026-09-13] 原 `ctx.poolKey` 字段与 `host/poolResolved` 反向通道（第 8 通道）已删——两引擎 poolKey 恒 `'shared'`，journal 固定落 `engines/<id>/shared/`；[permission 通道退役 2026-09-13] `host/permission` 骨架已删（两引擎 `permissionMode=native` 零 emit、core 零注入），反向通道现为 6 条。
 
 ## 4. 关键机制（落点索引）
 
@@ -130,7 +130,7 @@ subagent 能力现由 5 类包协作，跨进程边界只有一处（宿主 ↔ 
 ## 5. 测试与验证
 
 - 单元/集成测试按包分布：`packages/subagent-core/src/**/__tests__/`、两个引擎包的 `src/__tests__/`、shell 的 `src/**/__tests__/`。
-- 协议一致性由 conformance 套件锁定（引擎 manifest、relay 常量镜像、run 帧映射）。
+- 协议一致性由 conformance 套件锁定（引擎 manifest、control 帧映射、run 帧映射）。
 - 分层与测试策略见仓库根 [TEST-STRATEGY.md](../../../docs/TEST-STRATEGY.md) 与 [docs/testing/](../../testing/)。
 
 ## 6. 约束与权威文档

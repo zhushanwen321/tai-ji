@@ -10,7 +10,7 @@ const coreExports = JSON.parse(
 const coreSubentries = Object.keys(coreExports).filter((k) => k !== '.');
 const coreSubentryAllowlist = coreSubentries.map((k) => `@zhushanwen/subagent-core${k.slice(1)}`);
 const coreSubentryRegex = coreSubentries
-  .map((k) => k.slice(2)) // './relay-env' -> 'relay-env'，'./workflows/*' -> 'workflows/*'
+  .map((k) => k.slice(2)) // './engine/paths' -> 'engine/paths'，'./workflows/*' -> 'workflows/*'
   .map((frag) =>
     frag.endsWith('*')
       ? frag.slice(0, -1).replace(/[.*+?^${}()|[\]\\]/g, '\\$&') // 通配子入口 = 前缀放行
@@ -272,8 +272,9 @@ export default [
       'max-lines': 'off',
     },
   },
-  // [HISTORICAL] logger.ts 是 runtime 日志设施的唯一聚合点：主日志/pi tee/relay tee 三形态
-  // writer（createPiStreamWriter 共享轮转，2026-09-11 u9 tee size 轮转）+ 内存水位打点与
+  // [HISTORICAL] logger.ts 是 runtime 日志设施的唯一聚合点：主日志 / pi session tee（createPiSessionLog）
+  // / pi-subagent 镜像 tee（createPiSubagentLog，pi-subagent-*）/ pi-crash 与 plugin-crash 写者
+  // （共享 createPiStreamWriter 轮转，2026-09-11 u9 tee size 轮转）+ 内存水位打点与
   // 自然日聚合（2026-09-11 u1e watermark-daily）共用 pendingLines/流引用/轮转序同一套状态机。
   // 拆分需重新设计写者注册与 flush 生命周期，属独立重构任务；与 protocol.ts override 同型。
   {

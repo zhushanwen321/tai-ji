@@ -135,7 +135,7 @@ grep "transport selected" ~/.taiji/agent/logs/subagents-*.log
 
 ### 7. bash 工具里启动 Electron 二进制被静默降级纯 node 模式（ELECTRON_RUN_AS_NODE=1）
 
-打包模式下 runtime sidecar 由 main 以 `ELECTRON_RUN_AS_NODE=1` 启动（Electron 二进制当纯 node 跑 sidecar 的必需条件），该变量经白名单透传进入 pi 子树；runtime spawn 引擎遇到 Electron 执行器时同样注入（SDK node-executor 的宿主矩阵①/②）——subagent 的 bash 工具里启动任何 Electron 二进制（如 `npx electron .`）会被静默切到纯 node 模式：无窗口、无报错。定位：bash 工具里 `env | grep ELECTRON`。终端服务不受影响（TerminalService 独立构造 env 已剥离）。**playwright e2e 形态（fail-fast 非静默）[2026-09-22]**：经 subagent bash 跑 `npx playwright test --project=electron*` 时，launch-app fixture 的 `{...process.env}` 把该变量透传给 Playwright 拉起的 Electron → 纯 node 化不认 `--remote-debugging-port=0` → 全部用例 `electron.launch: Process failed to launch!` + `bad option` + exit 9（对照：直接跑 `--version` 打出 `v24.15.0` 而非 `Electron x.y.z` 即此病）。对策 = e2e 运行命令前缀 `env -u ELECTRON_RUN_AS_NODE`（CI 无此变量时 no-op）；pnpm dev 正规链（dev-instance `buildDevEnv` LEAK_ENV_KEYS）已内置剥离不受影响。机制细节见 `packages/subagent-engine-sdk/src/node-executor.ts` 的宿主矩阵注释与 `apps/electron/main/supervisor/process-control.ts` 的 sidecar env 注释。
+打包模式下 runtime sidecar 由 main 以 `ELECTRON_RUN_AS_NODE=1` 启动（Electron 二进制当纯 node 跑 sidecar 的必需条件），打包态 runtime 再经 `getEngineRootsSpawnEnv` 以 extras 显式注入 pi 子进程（`engine-roots.ts:65-67` → `process-manager.ts` 的 `buildOutboundChildEnv` extras；`ENV_WHITELIST_PREFIXES` 不含 `ELECTRON_` 前缀，不是白名单继承），runtime spawn 引擎遇到 Electron 执行器时同样注入（SDK node-executor 的宿主矩阵①/②）——subagent 的 bash 工具里启动任何 Electron 二进制（如 `npx electron .`）会被静默切到纯 node 模式：无窗口、无报错。定位：bash 工具里 `env | grep ELECTRON`。终端服务不受影响（TerminalService 独立构造 env 已剥离）。**playwright e2e 形态（fail-fast 非静默）[2026-09-22]**：经 subagent bash 跑 `npx playwright test --project=electron*` 时，launch-app fixture 的 `{...process.env}` 把该变量透传给 Playwright 拉起的 Electron → 纯 node 化不认 `--remote-debugging-port=0` → 全部用例 `electron.launch: Process failed to launch!` + `bad option` + exit 9（对照：直接跑 `--version` 打出 `v24.15.0` 而非 `Electron x.y.z` 即此病）。对策 = e2e 运行命令前缀 `env -u ELECTRON_RUN_AS_NODE`（CI 无此变量时 no-op）；pnpm dev 正规链（dev-instance `buildDevEnv` LEAK_ENV_KEYS）已内置剥离不受影响。机制细节见 `packages/subagent-engine-sdk/src/node-executor.ts` 的宿主矩阵注释与 `apps/electron/main/supervisor/process-control.ts` 的 sidecar env 注释。
 
 **同根因的第二个症状面（2026-09-19 实测）：playwright electron 轨在 agent bash 里全灭**——`npx playwright test --project=electron` 报 `electron.launch: Process failed to launch!` + `Electron: bad option: --remote-debugging-port=0`（`--version` 回显 `v24.x` 而非 `v42.3.3` = 已被降级为裸 node，node 的 CLI 不认该开关）；与代码无关，**跑 e2e 前先 `env -u ELECTRON_RUN_AS_NODE`**（例：`env -u ELECTRON_RUN_AS_NODE npx playwright test --project=electron-smoke`）。别误判为 Electron 二进制损坏或构建失败。解除该变量后 mock 轨与 real 轨均可跑通（2026-09-20 实测：electron 轨 64/64 全绿，real 轨为凭证无关的 faux LLM 装配，无需真实 provider）。
 
@@ -143,10 +143,10 @@ grep "transport selected" ~/.taiji/agent/logs/subagents-*.log
 
 ### 8. runtime 启动即退出："fatal: subagent control server init failed"
 
-subagent control server 在 runtime listen 后同步初始化，失败即 fatal + exit 1（fail-fast：覆盖/复用 socket 会劫持他人注册表，宁可不起）。常见原因：`<dataDir>/run` 不可写、残留 socket 文件被活实例持有：
+subagent control server 在 runtime listen 后同步初始化，失败即 fatal + exit 1（fail-fast：托管态下 control 通道是引擎 spawn 的唯一权威，init 失败拒绝启动，避免「以为 runtime 在管、实际 local spawn」的静默分裂）。常见原因：`<dataDir>/run` 不可写；socket 路径超长（macOS unix domain socket 104 字节上限，`assertSocketPathLength` 在 listen 前 fail-fast）；本 pid 对应的 socket 路径残留（pid 复用：跨代 sweep 的 skipPath 就是本实例即将 listen 的路径，不探不删）。跨实例不会因「残留 socket 被活实例持有」而失败：`getControlSocketPath` 按 pid 命名天然隔离，sweep 对活实例的 socket 只 warn 保留、不动它。
 
 ```bash
-ls -la ~/.taiji/run/          # dev 用 ~/.taiji-dev
+ls -la ~/.taiji/run/          # dev 用 ~/.taiji-dev；per-runtime 文件名为 subagent-<pid>.sock
 lsof | grep subagent-.*\.sock
 ```
 

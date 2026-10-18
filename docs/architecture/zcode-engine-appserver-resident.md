@@ -52,7 +52,7 @@
 
 ## §1 背景目标
 
-**一句话结论**：core（`@zhushanwen/subagent-core`）的 zcode engine 从「spawn 单轮」升级为「app-server 常驻」，EnginePort 接口除新增一个可选 `dispose()`（引擎停机路径）与 RunContext 一个可选回调 `onHandleReady`（运行中句柄回填通道，§3.4 不变量 3）外零改动——两处字段级扩展均已在本文登记，满足 port.ts 头注纪律；宿主（taiji pi 壳 / zsw 壳）零改动获得引擎升级收益（收益边界：GUI live 逐字推送依赖 relay 通道另行建设，grace 兜底仅在宿主存活时生效——见 G2 与 D6①）；漂移防御内化到 core 的 probe + capabilities + conformance 体系。
+**一句话结论**：core（`@zhushanwen/subagent-core`）的 zcode engine 从「spawn 单轮」升级为「app-server 常驻」，EnginePort 接口除新增一个可选 `dispose()`（引擎停机路径）与 RunContext 一个可选回调 `onHandleReady`（运行中句柄回填通道，§3.4 不变量 3）外零改动——两处字段级扩展均已在本文登记，满足 port.ts 头注纪律；宿主（taiji pi 壳 / zsw 壳）零改动获得引擎升级收益（收益边界：GUI live 逐字推送由 pi 引擎的 fd3 raw mirror + runtime `SubagentTee` 承载（M3 relay-spawn-transport，ADR-0144；zcode 引擎无 child stdout，不在该镜像面），grace 兜底仅在宿主存活时生效——见 G2 与 D6①）；漂移防御内化到 core 的 probe + capabilities + conformance 体系。
 
 **SCQA**：
 
@@ -68,14 +68,14 @@
 | # | 目标 | 使用者视角 |
 |---|------|-----------|
 | G1 | 长驻进程 + 零冷启动 | zsw 用户跑 map-reduce 多任务，第 2 个起 subagent 启动耗时从 ~1.5s 降为 ~0 |
-| G2 | 实时事件流（coarse→stream） | 引擎以 stream 粒度实时流出事件：zsw workflow 终端 live 输出实时刷新；taiji 侧 journal 增量落盘且**运行中**的 record entry 即携带 ①②级读取钥匙（sessionRef/poolKey/journalPath，W4 回填机制——①级命中依赖 sessionRef），subagent 详情页中途打开可见当时进度快照、重开与 live 一致。GUI live 逐字推送（`subagent.stream_delta` WS 帧）现由引擎 fd3 raw mirror + runtime `SubagentTee` 承载（M3 relay-spawn-transport，ADR-0144；subagent-realtime-channel.md 已删除，git 可追溯），**不属本设计**——chat 域 engine 任务的 onEvent 现只接 journal 落盘，无 GUI 广播通道（subagent-service.ts runEngineTask） |
+| G2 | 实时事件流（coarse→stream） | 引擎以 stream 粒度实时流出事件：zsw workflow 终端 live 输出实时刷新；taiji 侧 journal 增量落盘且**运行中**的 record entry 即携带 ①②级读取钥匙（sessionRef/poolKey/journalPath，W4 回填机制——①级命中依赖 sessionRef），subagent 详情页中途打开可见当时进度快照、重开与 live 一致。GUI live 逐字推送（`subagent.stream_delta` WS 帧）现由 pi 引擎 fd3 raw mirror + runtime `SubagentTee` 承载（M3 relay-spawn-transport，ADR-0144；仅覆盖有 child stdout 的 pi 引擎，zcode 引擎走 app-server RPC 无此镜像面；subagent-realtime-channel.md 已删除，git 可追溯），**不属本设计**——chat 域 engine 任务的 onEvent 现只接 journal 落盘，无 GUI 广播通道（subagent-service.ts runEngineTask） |
 | G3 | per-session model | 同一常驻进程上，任务 A 与任务 B 各用不同模型，互不干扰 |
 | G4 | 宿主零改动 | pi 壳与 zsw 壳不改一行代码、不发 breaking 版本即获得上述收益 |
 | G5 | 漂移防御内化 | zcode 平台升级导致协议漂移时，core probe/golden/conformance 承接，宿主无感或按 capabilities 声明自适应 |
 
 **in scope**：zcode engine 常驻化（连接层 + 会话层 + launcher 双模式）；EnginePort `dispose()` 停机路径；abort 链从杀进程改 `session/stop`；capabilities 升级（仅 eventGranularity）；probe / golden 语料 / conformance 套件适配；spawn 降级路径保留（见 D2）。
 
-**out of scope**：steer（运行中插话）——旧 app-server 实测 send-while-running 恒 `-32010` 硬错误，RPC 面无此能力，属引擎 turn-steer 面的后续升级项；conversation 热会话续聊 / 热会话 idle 复用 / `-32004` 四步恢复序——`EnginePort.interact` 生产代码零调用方，zsw 侧已登记 upstream gap，配套恢复序留 conversation 阶段；pi 引擎与其他引擎；GUI relay 实时通道建设（subagent-realtime-channel.md 已论证模式可复制——已删除，git 可追溯，launcher 层加环境分支即可复用，不提前建设）；zsw 宿主与 pi 壳的任何改动。
+**out of scope**：steer（运行中插话）——旧 app-server 实测 send-while-running 恒 `-32010` 硬错误，RPC 面无此能力，属引擎 turn-steer 面的后续升级项；conversation 热会话续聊 / 热会话 idle 复用 / `-32004` 四步恢复序——`EnginePort.interact` 生产代码零调用方，zsw 侧已登记 upstream gap，配套恢复序留 conversation 阶段；pi 引擎与其他引擎；GUI 实时通道建设（pi 引擎逐字 live 已由 fd3 raw mirror + runtime `SubagentTee` 承载，ADR-0144，不属本设计；zcode 引擎无 child stdout 镜像面，其逐字实时推送不在现行承载面）；zsw 宿主与 pi 壳的任何改动。
 
 ## §2 现状与问题分析
 
@@ -107,7 +107,7 @@ spawn 单轮是 D-010（`.taiji-harness/subagent-engine-abstraction/decisions.md
 
 **已具备（不需要动）**：
 
-- `RunContext.onEvent` 回调式事件流全程贯通：engine → journal 增量落盘（`event-journal.ts` append/flush 天然支持流式）→ workflow liveRecord → journal-replay 复用 live reducer。pi 引擎已是 stream 粒度，下游消费链路中 journal ②级读取（reload 路径）与 zsw workflow liveRecord 对 stream 事件无兼容问题；**taiji GUI live 推送不在此列**——chat 域 engine 任务的 onEvent 只接 journal.append，无 stream 通道与 WS 广播（实时逐字依赖 relay 通道，另行设计）。
+- `RunContext.onEvent` 回调式事件流全程贯通：engine → journal 增量落盘（`event-journal.ts` append/flush 天然支持流式）→ workflow liveRecord → journal-replay 复用 live reducer。pi 引擎已是 stream 粒度，下游消费链路中 journal ②级读取（reload 路径）与 zsw workflow liveRecord 对 stream 事件无兼容问题；**taiji GUI live 推送不在此列**——chat 域 engine 任务的 onEvent 只接 journal.append，无 stream 通道与 WS 广播（pi 引擎的实时逐字由 fd3 raw mirror + runtime `SubagentTee` 承载，ADR-0144；zcode 引擎无 child stdout 镜像面，不在本设计范围）。
 - AbortSignal 传递链完整（workflow 域 `mergeTimeoutSignal` / chat 域 record controller → `ctx.signal` → 引擎 abort listener）。
 - `eventGranularity` 能力位**生产代码零消费方**（全仓 grep 证实；唯一 capabilities() 生产消费是 `assertEngineParamSupport`，只看 conversation/steer/sandbox）——coarse→stream 翻转对上层零影响。
 - 隔离池/并发池/降级层（schema-emulation、kill-chain；persona-router 已删除 2026-09-13——零生产接线）与进程形态解耦。
@@ -147,7 +147,7 @@ task ─┘                    │ ① session/create {workspace, mode, model, .
 
 **成功路径（zsw 用户）**：`zsw run` 一个 map-reduce workflow（1 个主任务 + 3 个并行 subagent）。第一个任务触发常驻进程惰性启动（首任务仍含一次进程冷启动），三个 subagent 任务在同一条连接上各自 create 会话、并发 send、`turn.terminal` 判定终态、read 取全文、close 会话。`zsw status` 可见三条 record 的耗时中不再有每任务 ~1.5s 的进程启动段；record 留痕 `engineHandle.sessionRef.sessionId` 为 app-server 会话 id。
 
-**成功路径（taiji GUI 用户）**：chat 域发起 zcode 引擎 subagent，任务运行中途打开详情页——record entry 在 journal writer 创建后即已回填 ②级读取钥匙（W4 回填机制，create 应答后并入 sessionId），详情页可见打开时刻的进度快照（journal 已增量落盘的 text_delta）；任务进行中刷新/重开 session，详情页渲染与 live 所见一致（读取链 ①级 sqlite / ②级 journal 无论哪级命中，内容一致）。GUI 内的逐字实时推送属 relay 通道建设（out of scope，见 G2 边界）。
+**成功路径（taiji GUI 用户）**：chat 域发起 zcode 引擎 subagent，任务运行中途打开详情页——record entry 在 journal writer 创建后即已回填 ②级读取钥匙（W4 回填机制，create 应答后并入 sessionId），详情页可见打开时刻的进度快照（journal 已增量落盘的 text_delta）；任务进行中刷新/重开 session，详情页渲染与 live 所见一致（读取链 ①级 sqlite / ②级 journal 无论哪级命中，内容一致）。GUI 内的逐字实时推送由 pi 引擎 fd3 raw mirror + runtime `SubagentTee` 承载（zcode 引擎无 child stdout 镜像面，不在本设计范围，见 G2 边界）。
 
 **失败路径 1（协议漂移）**：zcode 升级后协议漂移（如 `session/create` 返回 `-32602`）——**现行行为：不再降级保底，直接报可操作错误**（2026-09 breaking 删除 spawn 降级链；原「自动降级 spawn 重跑 + record 标注」方案 git 可追溯）。
 
