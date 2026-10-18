@@ -53,12 +53,12 @@
 
 | 层 | 载体 |
 |------|------|
-| 查看时间戳 | `packages/runtime/src/services/session/session-service.ts`（`lastViewedAtBySession` per-session map + `markSessionViewed` / 查询 / 删除）；写入触发 = `session.switch` 成功分支（`packages/runtime/src/transport/session-message-handler.ts`） |
+| 查看时间戳 | `packages/runtime/src/services/session/session-service.ts`（`lastViewedAtBySession` per-session map + `markSessionViewed` / 查询 / 删除）；写入触发 = `session.switch` 处理器入口（`getSummary` 之前；summary 命中与 `ensureActive` 自动恢复两条分支均记录，不依赖恢复成败；`packages/runtime/src/transport/session-message-handler.ts`） |
 | 清理挂点 | `packages/runtime/src/services/session/session-entry-removal.ts`（真删除汇聚点清理 `lastViewedAt` 条目） |
 | checkpoint 持久化 | `packages/runtime/src/services/session/runtime-checkpoint.ts`（`lastViewedAt` 条目字段，随 checkpoint 快照写入/读取） |
 | 过滤消费 | `packages/runtime/src/services/startup-reattach.ts` `shouldReattachEntry`（`lastViewedAt` 30min 窗口；活跃窗口常量 = 同文件 `REATTACH_ACTIVE_IDLE_MS` / `REATTACH_ACTIVE_VIEWED_MS`） |
 | 已退役面 | reaper 模块 / `reclaimManagedSession` / `TAIJI_RUNTIME_PI_RECLAIM_*` 阈值与环境旋钮 / real-pi 回收集成测试均不存在（ADR-0122 清查登记见 `docs/todo/defense-mechanism-cleanup.md`） |
-| 历史字段 | `packages/shared/src/crash-journal-schema.ts` 的 `reclaimed` 事件与 `lastIdleMs` / `lastViewedAt` 字段保留，仅供旧 journal 解析，无新写入方 |
+| 历史字段 | `packages/shared/src/crash-journal-schema.ts` 的 `reclaimed` 事件与 `idleMs` / `lastViewedAt` 字段保留，仅供旧 journal 解析，无新写入方 |
 
 ---
 

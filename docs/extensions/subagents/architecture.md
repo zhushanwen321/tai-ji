@@ -130,7 +130,7 @@ subagent 能力现由 5 类包协作，跨进程边界只有一处（宿主 ↔ 
 ## 5. 测试与验证
 
 - 单元/集成测试按包分布：`packages/subagent-core/src/**/__tests__/`、两个引擎包的 `src/__tests__/`、shell 的 `src/**/__tests__/`。
-- 协议一致性由 conformance 套件锁定（引擎 manifest、run 帧映射）；control 帧词表/映射由 `packages/subagent-engine-sdk/src/__tests__/control-protocol.test.ts` + `packages/runtime/src/__tests__/infra/subagent-control/control-frames.test.ts` 锁定（客户端连接语义见 `packages/subagent-core/src/__tests__/transport-runtime.test.ts`）。
+- 协议一致性由 conformance 套件锁定（引擎 manifest、run 帧映射）；control 协议 kind/version/engine_closed reason 词表由 `packages/subagent-engine-sdk/src/__tests__/control-protocol.test.ts` 锁定，runtime 帧解析行为（形状守卫/别名合并/超长帧归因）由 `packages/runtime/src/__tests__/infra/subagent-control/control-frames.test.ts` 锁定，runtime 裁决 code → transport 错误码映射（D10）由 `packages/subagent-core/src/__tests__/transport-runtime.test.ts` 的同名映射用例锁定（客户端连接语义同文件；runtime `CONTROL_FRAME_ERROR_CODES` 词表本身暂无独立测试锚点）。
 - 分层与测试策略见仓库根 [TEST-STRATEGY.md](../../../docs/TEST-STRATEGY.md) 与 [docs/testing/](../../testing/)。
 
 ## 6. 约束与权威文档
