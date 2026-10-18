@@ -116,10 +116,13 @@
             data-testid="provider-edit-apikey"
           />
           <Button
+            v-if="form.apiKey !== '' || provider?.apiKeySet"
             variant="ghost"
             class="size-8 shrink-0 rounded-sm p-0 text-neutral-dim hover:bg-surface-hover hover:text-neutral-fg"
             :aria-label="showKey ? t('settings.providerEdit.hideKey') : t('settings.providerEdit.showKey')"
-            @click="showKey = !showKey"
+            data-testid="provider-reveal-apikey"
+            :disabled="revealingApiKey"
+            @click="onToggleKey"
           >
             <EyeOff v-if="showKey" class="size-4" />
             <Eye v-else class="size-4" />
@@ -289,7 +292,9 @@
       </DialogContent>
     </Dialog>
 
-    <!-- sticky save-bar：dirty 时出现（spec §4.3）。负 margin 撑满 expand-body padding。 -->
+    <!-- sticky save-bar：dirty 时出现（spec §4.3）。负 margin 撑满 expand-body padding。
+         吸底生效的前提 = GroupCard overflow: clip（见 GroupCard.vue：hidden 会建立滚动容器，
+         使 sticky 参照卡片自身而失效，保存条会落在展开体末尾、常在视口外）。 -->
     <div
       v-if="isDirty"
       data-testid="provider-save-bar"
@@ -389,6 +394,9 @@ const {
   draft: form,
   headerRows,
   showKey,
+  revealingApiKey,
+  revealApiKey,
+  apiKeyPendingDraft,
   saving,
   actionError,
   setActionError,
@@ -414,7 +422,7 @@ const quota = quotaFactory?.({
   provider: toRef(props, 'provider'),
   preset: matchedPreset,
   providerOauthPresent: computed(() => props.oauthPresent === true),
-  providerApiKeyDraft: toRef(form, 'apiKey'),
+  providerApiKeyDraft: apiKeyPendingDraft,
 })
 if (quota) provide(QUOTA_CONFIGURE_MODULE_KEY, quota)
 
@@ -481,6 +489,18 @@ provide(MODEL_LIST_DEPS_KEY, {
 
 // dirty 上抛父组件（展开切换守卫）。immediate 让父组件初始即知当前 dirty 态
 watch(isDirty, (v) => emit('dirtyChange', v), { immediate: true })
+
+/**
+ * 眼睛按钮（2026-10-18）：草稿非空 = 纯显隐切换；草稿为空（= 已存 key 未回显）→ 按需拉取回显
+ * （只写入草稿 + 明文显示，不置 dirty、保存不回写——见 provider-edit-form.revealApiKey）。
+ */
+function onToggleKey(): void {
+  if (form.apiKey !== '') {
+    showKey.value = !showKey.value
+    return
+  }
+  void revealApiKey()
+}
 
 /** 添加模型：捕获 addModel 校验错填到 actionError（save-bar 显示；来源标签 models，MF-1-7） */
 function onAddModel(): void {

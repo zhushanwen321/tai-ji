@@ -85,7 +85,7 @@ export const QUOTA_PRESETS: QuotaPreset[] = [
       namePattern: '\\bmimo\\b',
     },
     helpUrl: 'https://platform.xiaomimimo.com/',
-    helpText: '登录 platform.xiaomimimo.com 后，从浏览器 DevTools → Application → Cookies 复制完整 cookie 字符串',
+    helpText: '登录 platform.xiaomimimo.com 后，在 DevTools → Network 选中任一请求 → 请求头里的 Cookie 整串复制（形如 name=value; name2=value2）',
   },
   {
     fetcher: 'opencode-go',
@@ -97,7 +97,7 @@ export const QUOTA_PRESETS: QuotaPreset[] = [
     // 资源维度：额度挂在具体 workspace 下（同一 cookie 可有多个 workspace），必须用户配置
     requiresWorkspace: true,
     helpUrl: 'https://opencode.ai/',
-    helpText: '登录 opencode.ai 后，从浏览器 DevTools → Application → Cookies 复制完整 cookie 字符串',
+    helpText: '登录 opencode.ai 后，在 DevTools → Network 选中任一请求 → 请求头里的 Cookie 整串复制（形如 name=value; name2=value2）',
   },
 ]
 

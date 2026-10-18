@@ -27,6 +27,7 @@ export default {
   // errors only (useChat filters errorEvent === 'command'); {name} = command name without prefix
   extensionCommandFailed: 'Command failed: {name} — {msg}',
   providerNameRequired: 'Provider name is required',
+  revealApiKeyUnavailable: 'Failed to read the saved API Key: no stored credential to reveal for this provider',
   oauthSwitchNeedsKey: 'Switching to API Key requires a new API Key (it replaces the OAuth credential on save)',
   duplicateHeaderKey: 'Duplicate header key detected, the last value will be used',
   modelNameRequired: 'Model name is required',

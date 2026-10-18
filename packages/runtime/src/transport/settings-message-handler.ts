@@ -146,6 +146,7 @@ export class SettingsMessageHandler {
     'config.toggleProviderEnabled': (msg, ws) => this.providerHandler.handle(msg, ws),
     'config.removeProviderByKind': (msg, ws) => this.providerHandler.handle(msg, ws),
     'config.checkEnvVars': (msg, ws) => this.providerHandler.handle(msg, ws),
+    'config.revealProviderApiKey': (msg, ws) => this.providerHandler.handle(msg, ws),
     'config.detectSources': (msg, ws) => this.providerHandler.handle(msg, ws),
     'config.listBuiltinProviders': (msg, ws) => this.providerHandler.handle(msg, ws),
     'config.previewImportProviders': (msg, ws) => this.providerHandler.handle(msg, ws),

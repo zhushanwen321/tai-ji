@@ -74,8 +74,9 @@ export function headerRowsFromHeaders(headers: Record<string, string>): Array<{ 
  * - headers：headers 行编辑重复 key
  * - discover：test / discover 探活失败（use-provider-edit 装配时经写通道注入落标签）
  * - models：模型清单 CRUD 校验错（ProviderEditBody onAddModel 捕获填入）
+ * - reveal：回显已存 API Key 失败（2026-10-18 眼睛按钮）
  */
-export type ActionErrorSource = 'save' | 'headers' | 'discover' | 'models'
+export type ActionErrorSource = 'save' | 'headers' | 'discover' | 'models' | 'reveal'
 
 /** 动作错误内部态（带来源标签；null = 无错误） */
 export interface ActionErrorState {
@@ -114,6 +115,19 @@ export interface ProviderEditFormModule {
   readonly headerRows: Ref<Array<{ key: string; value: string }>>
   /** apiKey 明文显示开关 */
   readonly showKey: Ref<boolean>
+  /** 正在拉取已存 API Key（眼睛按钮禁用态；2026-10-18 回显） */
+  readonly revealingApiKey: Ref<boolean>
+  /**
+   * 回显已存 API Key（眼睛按钮，按需 RPC——只对 api_key 凭据生效，OAuth token 不走本通道）：
+   * 拉取成功填入草稿并置 showKey；草稿已非空（用户已输入）时为空操作。
+   * 回显值不构成 dirty、保存时不回写（回显 = 所存值，回写会改变凭据来源语义）。
+   */
+  revealApiKey(): Promise<void>
+  /**
+   * 配额区 carry-in 槽位用「真实未保存草稿」：回显值（= 所存值）不算待保存，返回 ''。
+   * 供 useQuotaConfigure 的 providerCredentialPendingSave 判定（防回显触发「已填未保存」误报）。
+   */
+  readonly apiKeyPendingDraft: ComputedRef<string>
   /** 保存中（save-bar 按钮禁用） */
   readonly saving: Ref<boolean>
   /**
@@ -183,6 +197,9 @@ export function createProviderEditForm(input: ProviderEditFormInputs): ProviderE
   })
   const headerRows = ref<Array<{ key: string; value: string }>>([])
   const showKey = ref(false)
+  /** 回显的已存 apiKey（null = 未回显）。与草稿同值时不构成 dirty、保存不回写（2026-10-18） */
+  const revealedApiKey = ref<string | null>(null)
+  const revealingApiKey = ref(false)
   const saving = ref(false)
   // 动作错误内部态（MF-1-7：带来源标签）；对外只投影 message（下方 actionError computed）
   const actionErrorState = ref<ActionErrorState | null>(null)
@@ -225,8 +242,9 @@ export function createProviderEditForm(input: ProviderEditFormInputs): ProviderE
     if (draft.name !== s.name) return true
     if (draft.api !== s.api) return true
     if (draft.baseUrl !== s.baseUrl) return true
-    // apiKey：用户输入了值 或 点了清除（哨兵）都算变更
-    const apiKeyChangedNow = draft.apiKey !== ''
+    // apiKey：用户输入了值 或 点了清除（哨兵）都算变更；**等于回显值 = 未改动**
+    //（2026-10-18 回显：回显只是把已存值展示出来，不得因此进入 dirty）
+    const apiKeyChangedNow = draft.apiKey !== '' && draft.apiKey !== revealedApiKey.value
     if (apiKeyChangedNow !== s.apiKeyChanged) return true
     // models 整体对比（增删 + 内部字段改都触发 dirty）
     if (JSON.stringify(models.localModels.value) !== s.modelsJson) return true
@@ -241,8 +259,10 @@ export function createProviderEditForm(input: ProviderEditFormInputs): ProviderE
   function applyProvider(p: ProviderInfo | null): void {
     // edit 模式：用现有 provider 数据填充表单；新增模式：重置为初始空状态。
     // apiKey 恒重置为 ''（=「不变」）：明文/env 引用/哨兵都是草稿态，随 provider 切换清空。
+    // 回显态（revealedApiKey）同批清空——回显值属于「当前 provider 的已存值」，不得跨 provider 复用。
     applyPatch(formPatchFromProvider(p))
     draft.apiKey = ''
+    revealedApiKey.value = null
     headerRows.value = headerRowsFromHeaders(draft.headers)
   }
 
@@ -260,7 +280,7 @@ export function createProviderEditForm(input: ProviderEditFormInputs): ProviderE
   function validateBeforeSave(): string | null {
     if (!draft.name.trim()) return t('composable.providerNameRequired')
     if (snapshot.value?.authMethod === 'oauth' && draft.authMethod === 'api_key'
-      && resolveApiKeyForSave(draft.apiKey) === undefined) {
+      && resolveApiKeyChange() === undefined) {
       return t('composable.oauthSwitchNeedsKey')
     }
     return null
@@ -283,8 +303,10 @@ export function createProviderEditForm(input: ProviderEditFormInputs): ProviderE
       // 网关——「undefined = 不变」是既有 merge 协议，清空输入框必须走显式空串带键，否则网关
       // 回退通道不可达）；custom 空串不带键（runtime 对 custom 空串同样是「不变」）。
       ...(isCatalog || baseUrl ? { baseUrl } : {}),
-      // D18：apiKey 空=不变（undefined）；哨兵=清空（''）；非空=原值
-      apiKey: resolveApiKeyForSave(draft.apiKey),
+      // D18：apiKey 空=不变（undefined）；哨兵=清空（''）；非空=原值。
+      // 2026-10-18 回显：草稿 === 回显值（未改动）时不发键——回显只是展示，直接回写会
+      // 改变凭据来源语义（如 catalog 的 auth.json → 被误当作新 key 重写）。
+      apiKey: resolveApiKeyChange(),
       // B-1：凭证形态回传（undefined = 不变；runtime 写 providers.json authMethod 标注）
       authMethod: draft.authMethod,
       // W3 D7：headers（空对象时不传，避免覆盖 runtime 既有值）+ authHeader 回写。
@@ -316,7 +338,7 @@ export function createProviderEditForm(input: ProviderEditFormInputs): ProviderE
     try {
       const res = await getSettingsTransport().setProvider(providerId, buildSetProviderPayload(isCatalog, baseUrl))
       // 哨兵→''、空→undefined 均为 falsy：只有本次真正写入非空 key（明文或 $ENV 引用）才 true
-      return { ok: true, wroteApiKey: Boolean(resolveApiKeyForSave(draft.apiKey)), quotaAutoEnabled: res?.quotaAutoEnabled }
+      return { ok: true, wroteApiKey: Boolean(resolveApiKeyChange()), quotaAutoEnabled: res?.quotaAutoEnabled }
     } catch (e) {
       setActionError('save', toErrorMessage(e))
       return { ok: false, wroteApiKey: false }
@@ -328,6 +350,47 @@ export function createProviderEditForm(input: ProviderEditFormInputs): ProviderE
   function clearApiKey(): void {
     draft.apiKey = API_KEY_CLEAR_SENTINEL
   }
+
+  /**
+   * 本次保存实际要写的 apiKey（D18 + 2026-10-18 回显）：
+   * - 草稿 === 回显值（未改动）→ undefined（不发键：回显只是展示，不得被当作新值回写）
+   * - 空 → undefined（不变）；哨兵 → ''（清空）；非空 → 原值
+   */
+  function resolveApiKeyChange(): string | undefined {
+    if (draft.apiKey === revealedApiKey.value) return undefined
+    return resolveApiKeyForSave(draft.apiKey)
+  }
+
+  /**
+   * 回显已存 API Key（2026-10-18，眼睛按钮按需拉取；草稿已非空时为空操作——用户输入优先）。
+   * 只对 api_key 凭据生效：runtime 端 OAuth token 永不出协议（见协议 config.revealProviderApiKey）。
+   * 回显值写入草稿 + 置 showKey（明文可见），但不进入 dirty、save 不回写（见 resolveApiKeyChange）。
+   */
+  async function revealApiKey(): Promise<void> {
+    const p = providerRef.value
+    if (!p || draft.apiKey !== '' || revealingApiKey.value) return
+    revealingApiKey.value = true
+    try {
+      const res = await getSettingsTransport().revealProviderApiKey(p.id)
+      if (res.available && res.apiKey) {
+        draft.apiKey = res.apiKey
+        revealedApiKey.value = res.apiKey
+        showKey.value = true
+        if (actionErrorState.value?.source === 'reveal') clearActionError()
+      } else {
+        setActionError('reveal', t('composable.revealApiKeyUnavailable'))
+      }
+    } catch (e) {
+      setActionError('reveal', toErrorMessage(e))
+    } finally {
+      revealingApiKey.value = false
+    }
+  }
+
+  /** 真实未保存草稿（回显值排除）——配额区 pendingSave 判定槽位（见接口 JSDoc） */
+  const apiKeyPendingDraft = computed<string>(() => (
+    draft.apiKey === revealedApiKey.value ? '' : draft.apiKey
+  ))
 
   function syncHeadersFromRows(): void {
     const { headers, hasDuplicate } = buildHeadersFromRows(headerRows.value)
@@ -390,6 +453,9 @@ export function createProviderEditForm(input: ProviderEditFormInputs): ProviderE
     draft,
     headerRows,
     showKey,
+    revealingApiKey,
+    revealApiKey,
+    apiKeyPendingDraft,
     saving,
     actionError,
     setActionError,

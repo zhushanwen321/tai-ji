@@ -168,12 +168,15 @@ const toastStub: SettingsToast = {
 const setProviderSpy = vi.fn(async (_id: string, _data: SetProviderData) => ({}))
 /** 显式标注返回类型：M4 场景 ⑨ 需按用例注入 results / error（类型推断会把返回值收窄成 models: never[]） */
 const discoverModelsSpy = vi.fn(async (): Promise<DiscoverModelsResponse> => ({ success: true, models: [] }))
+/** 2026-10-18 回显：眼睛按钮拉取已存 API Key（默认无可回显凭据，用例按需 mockResolvedValue） */
+const revealApiKeySpy = vi.fn(async (_providerId: string): Promise<{ available: boolean; apiKey?: string; source?: 'auth.json' | 'models.json' }> => ({ available: false }))
 
 /** [C3] 共享 seam 桩工厂（@taiji/core/testing，全方法面中性默认）+ 本文件两个 spy。 */
 function makeTransport(): SettingsTransport {
   return makeSettingsTransportStub({
     setProvider: setProviderSpy,
     discoverModels: discoverModelsSpy,
+    revealProviderApiKey: revealApiKeySpy,
   })
 }
 
@@ -190,6 +193,8 @@ beforeEach(() => {
   provideSettingsTransport(makeTransport())
   setProviderSpy.mockClear()
   discoverModelsSpy.mockClear()
+  revealApiKeySpy.mockClear()
+  revealApiKeySpy.mockResolvedValue({ available: false })
   quotaFactoryStub.mockClear()
   toastInfoSpy.mockClear()
 })
@@ -526,6 +531,9 @@ describe('编排链路：dirty 上抛与测试连接', () => {
     expect(emitted).toBeTruthy()
     expect(emitted![0]).toEqual([false])
 
+    // A 方案（spec §4.3）：未改动无保存条；改动后出现
+    expect(wrapper.find('[data-testid="provider-save-bar"]').exists()).toBe(false)
+
     await wrapper.find('[data-testid="provider-edit-name"]').setValue('Renamed Provider')
     await flushPromises()
 
@@ -551,6 +559,74 @@ describe('编排链路：dirty 上抛与测试连接', () => {
     expect(discoverModelsSpy).toHaveBeenCalledTimes(1)
     // 成功态用户可见（t(key, {count}) mock 会 append 命名参数值）
     expect(wrapper.text()).toContain('settings.providerEdit.testOk')
+  })
+})
+
+// ══ 已存 API Key 回显（2026-10-18，眼睛按钮）═════════════════════════
+
+describe('已存 API Key 回显（眼睛按钮）', () => {
+  it('草稿为空 + 已存 key → 点击眼睛拉取回显：填入输入框、type=text、不出现未保存徽章', async () => {
+    revealApiKeySpy.mockResolvedValue({ available: true, apiKey: 'sk-stored-secret', source: 'auth.json' })
+    wrapper = mountBody(APIKEY_P)
+    await flushPromises()
+
+    const input = wrapper.find('[data-testid="provider-edit-apikey"]')
+    expect((input.element as HTMLInputElement).value).toBe('')
+    expect((input.element as HTMLInputElement).type).toBe('password')
+
+    await wrapper.find('[data-testid="provider-reveal-apikey"]').trigger('click')
+    await flushPromises()
+
+    expect(revealApiKeySpy).toHaveBeenCalledWith('zai-coding-cn')
+    expect((input.element as HTMLInputElement).value).toBe('sk-stored-secret')
+    expect((input.element as HTMLInputElement).type).toBe('text')
+    // 回显不是改动：不出现保存条（A 方案：dirty 才出现），更不可「一打开就未保存」
+    expect(wrapper.find('[data-testid="provider-save-bar"]').exists()).toBe(false)
+  })
+
+  it('无已存 key（apiKeySet=false）且草稿为空 → 不渲染眼睛按钮（消除「点了没反应」）', async () => {
+    wrapper = mountBody(CUSTOM_P)
+    await flushPromises()
+    expect(wrapper.find('[data-testid="provider-reveal-apikey"]').exists()).toBe(false)
+  })
+
+  it('回显后再编辑 → 进入 dirty（未保存徽章 + 保存可用）', async () => {
+    revealApiKeySpy.mockResolvedValue({ available: true, apiKey: 'sk-stored-secret', source: 'auth.json' })
+    wrapper = mountBody(APIKEY_P)
+    await flushPromises()
+    await wrapper.find('[data-testid="provider-reveal-apikey"]').trigger('click')
+    await flushPromises()
+
+    await wrapper.find('[data-testid="provider-edit-apikey"]').setValue('sk-edited')
+    await flushPromises()
+
+    expect(wrapper.find('[data-testid="provider-save-bar"]').text()).toContain('settings.provider.unsavedBadge')
+    expect(wrapper.find('[data-testid="provider-save-btn"]').attributes('disabled')).toBeUndefined()
+  })
+
+  it('回显失败（available:false）→ 输入框不变、不明文显示（错误写入 actionError，归 core module 用例断言）', async () => {
+    revealApiKeySpy.mockResolvedValue({ available: false })
+    wrapper = mountBody(APIKEY_P)
+    await flushPromises()
+
+    await wrapper.find('[data-testid="provider-reveal-apikey"]').trigger('click')
+    await flushPromises()
+
+    const input = wrapper.find('[data-testid="provider-edit-apikey"]')
+    expect((input.element as HTMLInputElement).value).toBe('')
+    expect((input.element as HTMLInputElement).type).toBe('password')
+  })
+
+  it('草稿已输入 → 眼睛只切换显隐，不发 RPC', async () => {
+    wrapper = mountBody(APIKEY_P)
+    await flushPromises()
+
+    await wrapper.find('[data-testid="provider-edit-apikey"]').setValue('sk-typed')
+    await wrapper.find('[data-testid="provider-reveal-apikey"]').trigger('click')
+    await flushPromises()
+
+    expect(revealApiKeySpy).not.toHaveBeenCalled()
+    expect((wrapper.find('[data-testid="provider-edit-apikey"]').element as HTMLInputElement).type).toBe('text')
   })
 })
 
@@ -791,6 +867,7 @@ describe('M4 catalog 展示：类型只读派生 + 端点（自定义网关）',
     wrapper = mountBody(CATALOG_GATEWAY_P)
     await flushPromises()
     expect((wrapper.find(ENDPOINT).element as HTMLInputElement).value).toBe(CATALOG_GATEWAY_URL)
+    // A 方案：未改动无保存条（无虚假 dirty = 保存条不出现）
     expect(wrapper.find('[data-testid="provider-save-bar"]').exists()).toBe(false)
 
     await wrapper.setProps({ provider: CATALOG_MIXED_P })

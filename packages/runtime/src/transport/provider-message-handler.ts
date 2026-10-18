@@ -62,6 +62,7 @@ export class ProviderMessageHandler {
       ['config.toggleProviderEnabled', (ws, msg) => this.handleToggleProviderEnabled(ws, msg as Extract<ClientMessage, { type: 'config.toggleProviderEnabled' }>)],
       ['config.removeProviderByKind', (ws, msg) => this.handleRemoveProviderByKind(ws, msg as Extract<ClientMessage, { type: 'config.removeProviderByKind' }>)],
       ['config.checkEnvVars', (ws, msg) => this.handleCheckEnvVars(ws, msg as Extract<ClientMessage, { type: 'config.checkEnvVars' }>)],
+      ['config.revealProviderApiKey', (ws, msg) => this.handleRevealProviderApiKey(ws, msg as Extract<ClientMessage, { type: 'config.revealProviderApiKey' }>)],
       ['config.detectSources', (ws, msg) => this.handleDetectSources(ws, msg as Extract<ClientMessage, { type: 'config.detectSources' }>)],
       ['config.listBuiltinProviders', (ws, msg) => this.handleListBuiltinProviders(ws, msg as Extract<ClientMessage, { type: 'config.listBuiltinProviders' }>)],
       ['config.previewImportProviders', (ws, msg) => this.handlePreviewImportProviders(ws, msg as Extract<ClientMessage, { type: 'config.previewImportProviders' }>)],
@@ -163,6 +164,40 @@ export class ProviderMessageHandler {
     }
     const results = this.ctx.configService.checkEnvVars(names)
     this.ctx.reply(ws, msg.id, 'config.envVarsChecked', { results })
+    return true
+  }
+
+  /**
+   * 回显 provider 已存 API Key（2026-10-18，编辑体眼睛按钮按需拉取）。
+   *
+   * 安全红线：只对 api_key 形态生效——auth.json 里 type !== 'api_key'（OAuth）的凭据
+   * **绝不回显**，OAuth token 仍永不出协议（与 config.hasOAuth 同红线）。本 RPC 为用户
+   * 显式点击触发的单次读取，不随 provider 列表/广播下发（避免密钥常驻前端）。
+   *
+   * 读取顺序对齐凭据解析链（auth.json → models.json）：
+   * - auth.json api_key 凭据（catalog 手动填 key 的落点，applyProviderCredentials 写入）
+   * - models.json providers[id].apiKey **原值**（custom 定义权威；`$ENV` 引用原样回显，
+   *   不解析成明文——回显即所存值，直接保存不会把引用改成明文）
+   * 无凭据 / 读取异常 → 交给 server 层统一错误包；无凭据则 available:false（UI 不动作）。
+   */
+  private async handleRevealProviderApiKey(
+    ws: WsType,
+    msg: Extract<ClientMessage, { type: 'config.revealProviderApiKey' }>,
+  ): Promise<boolean> {
+    const { providerId } = msg.payload
+    const authCred = await this.ctx.authService.getCredential(providerId)
+    if (authCred?.type === 'api_key' && authCred.key) {
+      this.ctx.reply(ws, msg.id, 'config.providerApiKeyRevealed', {
+        available: true,
+        apiKey: authCred.key,
+        source: 'auth.json',
+      })
+      return true
+    }
+    const apiKey = this.ctx.configService.getProvider(providerId)?.apiKey
+    this.ctx.reply(ws, msg.id, 'config.providerApiKeyRevealed', apiKey
+      ? { available: true, apiKey, source: 'models.json' }
+      : { available: false })
     return true
   }
 

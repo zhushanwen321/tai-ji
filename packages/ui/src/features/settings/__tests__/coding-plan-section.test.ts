@@ -620,6 +620,16 @@ describe('⑥ §5.2 失败路径文案（module 归一分档 + cookie 变体）'
     expect(msg).toContain('settings.providerEdit.quotaFetchFailUnauthorizedCookie')
   })
 
+  it('cookie-invalid-format → quotaFetchFailCookieInvalidFormat（与「凭证失效」分流，不混 unauthorized 文案）', async () => {
+    arrangeFailure('cookie-invalid-format', { cookieAuth: true, form: 'cookie' })
+    wrapper = mountSection()
+    await flushPromises()
+
+    const msg = wrapper.find('[data-testid="quota-error-msg"]').text()
+    expect(msg).toContain('settings.providerEdit.quotaFetchFailCookieInvalidFormat')
+    expect(msg).not.toContain('settings.providerEdit.quotaFetchFailUnauthorizedCookie')
+  })
+
   it('no-credential + api-key 类 → quotaFetchFailNoCredential（指向两个可填位置）', async () => {
     arrangeFailure('no-credential', { cookieAuth: false })
     wrapper = mountSection()

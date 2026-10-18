@@ -521,6 +521,9 @@ export default {
     quotaFetchFailUnauthorized: 'Quota query failed: the credential may have expired. Start a conversation with this provider to trigger a credential refresh, then click "Save and test" to retry',
     // §5.2 path 3 cookie variant: "start a conversation to refresh" is not an action a cookie user can take
     quotaFetchFailUnauthorizedCookie: 'Quota query failed: the credential may have expired. Copy this platform’s Cookie from the browser again, paste it, and retry',
+    // 2026-10-18: Cookie paste format invalid (no name=value pairs after normalization, typically copied from
+    // the Application → Cookies table) — distinct from an expired session; point at the correct copy path.
+    quotaFetchFailCookieInvalidFormat: 'Quota query failed: invalid Cookie format — no name=value pairs found. In DevTools → Network, select any request and copy the full Cookie from its request headers (like name=value; name2=value2), then retry',
     quotaFetchFailNetwork: 'Quota query failed: network error or service unavailable. Check your network connection and retry',
     quotaFetchFailNoSubscription: 'Quota query failed: no active subscription detected. Confirm your account has the corresponding coding plan subscription',
     // S5: for cookie-based providers the no-subscription business code cannot distinguish "no subscription" from "expired cookie" (proven infeasible at fetcher layer), so hint both
@@ -544,7 +547,10 @@ export default {
     // D1 field-level badges: independent of the input draft (with D7 unmasked inputs, an empty box does not mean unconfigured)
     quotaRequiredBadge: 'Required',
     quotaConfiguredBadge: 'Configured',
-    quotaCookiePlaceholder: 'Paste cookie string here',
+    quotaCookiePlaceholder: 'Paste cookie string here (e.g. name=value; name2=value2)',
+    // 2026-10-18: pre-save format validation message (useQuotaConfigure.saveAndTest) — no RPC is sent;
+    // points at the correct copy path (DevTools → Network → request-header Cookie, not the Application → Cookies table).
+    quotaCookieFormatInvalid: 'Invalid Cookie format: no name=value pairs found. In DevTools → Network, select any request and copy the full Cookie from its request headers (like name=value; name2=value2), then retry',
     quotaUpdateCookie: 'Update Cookie',
     // window labels + time formatting (CodingPlanSection inline quota preview)
     quotaWindow5h: '5h',

@@ -12,7 +12,7 @@ vi.mock('../../../infra/logger.js', () => ({
 }))
 
 import type { ProviderQuotaFetcher, QuotaAuthKind } from '../types.js'
-import { normalizeCookieHeader } from '../types.js'
+import { normalizeCookieHeader } from '@taiji/shared'
 import { kimiFetcher } from '../kimi.js'
 import { mimoFetcher } from '../mimo.js'
 import { minimaxFetcher } from '../minimax.js'
@@ -38,7 +38,8 @@ function setupFetch(
 
 async function fetchOk(fetcher: ProviderQuotaFetcher, body: unknown) {
   setupFetch(() => jsonResponse(body))
-  // 凭证用带 = 的真实形态：mimo fetcher 会对粘贴 cookie 归一化，无 = 的裸串被判空 → unauthorized
+  // 凭证用带 = 的真实形态：mimo fetcher 会对粘贴 cookie 归一化，无 = 的裸串被判空 →
+  // cookie-invalid-format（2026-10-18 与 unauthorized 分流）
   return fetcher.fetchQuota('sid=1', 'api-key' as QuotaAuthKind)
 }
 
@@ -228,8 +229,12 @@ describe('mimoFetcher', () => {
     vi.unstubAllGlobals()
   })
 
-  it('无凭证 → unauthorized', async () => {
-    expect(await mimoFetcher.fetchQuota('', 'cookie')).toEqual({ ok: false, reason: 'unauthorized' })
+  it('无凭证 / 无 k=v 对 → cookie-invalid-format（与 unauthorized 分流：不发 HTTP）', async () => {
+    expect(await mimoFetcher.fetchQuota('', 'cookie')).toEqual({ ok: false, reason: 'cookie-invalid-format' })
+    // 典型错误粘贴：DevTools Application → Cookies 表格（制表符分隔，无任何 = ）
+    const fetchMock = setupFetch(() => jsonResponse({}))
+    expect(await mimoFetcher.fetchQuota('sid\t1\nother\t2', 'cookie')).toEqual({ ok: false, reason: 'cookie-invalid-format' })
+    expect(fetchMock).not.toHaveBeenCalled()
   })
 
   it('401 → unauthorized，500 → network', async () => {

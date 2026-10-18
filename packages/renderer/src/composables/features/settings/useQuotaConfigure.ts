@@ -19,7 +19,7 @@ import type {
   QuotaAuthKind,
   QuotaFetchFailureReason,
 } from '@taiji/shared'
-import { QUOTA_PRESETS, normalizeQuotaWorkspaceUrl, resolveQuotaCredentialSource, supportsExclusiveCredential } from '@taiji/shared'
+import { QUOTA_PRESETS, normalizeCookieHeader, normalizeQuotaWorkspaceUrl, resolveQuotaCredentialSource, supportsExclusiveCredential } from '@taiji/shared'
 import type {
   QuotaConfigureInputs,
   QuotaConfigureModule,
@@ -148,6 +148,9 @@ const FAILURE_KINDS: Record<QuotaFetchFailureReason, QuotaFailureKind> = {
   parse: 'parse',
   not_configured: 'not-configured',
   'no-credential': 'no-credential',
+  // 2026-10-18：cookie 归一化为空（粘贴内容无 name=value 对）与「服务端拒绝」分流——
+  // 前者恢复动作是「换复制路径重贴」而非「重新登录」，不得复用 unauthorized 文案。
+  'cookie-invalid-format': 'cookie-invalid-format',
   'credential-unavailable': 'generic',
   'credential-unsupported': 'generic',
 }
@@ -477,6 +480,15 @@ export function useQuotaConfigure(inputs: QuotaConfigureInputs): QuotaConfigureM
     const apiKeyDraft = draft.value.apiKey.trim()
 
     configureError.value = ''
+
+    // cookie 粘贴格式前置校验（2026-10-18，用户手动复制路径）：归一化后为空（不含任何
+    // name=value 对，典型 = 从 DevTools Application → Cookies 表格复制的制表符文本）
+    // 当场拦下并给精确指引——不发 RPC，不落入 runtime 侧「凭证可能已失效」的误报。
+    // 归一化实现 SSOT 在 shared（与 runtime fetcher 同一函数，两端判据不得各写一份）。
+    if (isCookieAuth.value && cookieDraft && normalizeCookieHeader(cookieDraft) === '') {
+      configureError.value = t('settings.providerEdit.quotaCookieFormatInvalid')
+      return
+    }
 
     // Workspace：明文回显字段，传归一化后的草稿（D13：永不传 ''）；空 / 非法输入本地拦截
     let workspacePayload: string | undefined

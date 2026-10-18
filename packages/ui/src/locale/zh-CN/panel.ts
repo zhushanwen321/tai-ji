@@ -303,6 +303,9 @@ export default {
     quotaFailParse: '额度响应解析失败',
     quotaFailNotConfigured: '未配置 Workspace，请在设置中填写后重试',
     quotaFailNoCredential: '未找到可用凭证，请到设置页检查额度查询配置',
+    // 2026-10-18：Cookie 粘贴格式无效（无 name=value 对）——与「会话失效」分流：
+    // 恢复动作是换复制路径重贴，不是重新登录。
+    quotaFailCookieInvalidFormat: 'Cookie 格式无效（未解析出 name=value）',
     // RT-7#7：凭据文件读取失败（读盘/锁异常，非「没有凭证」）——指引用户查文件而非重填
     quotaFailCredentialUnavailable: '凭据文件读取失败，请检查磁盘与文件权限后重试',
     // RT-7#4：凭据形态不支持（! command 前缀 / 环境变量未定义）

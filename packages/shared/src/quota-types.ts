@@ -47,6 +47,9 @@ export type QuotaAuthKind = 'api-key' | 'oauth' | 'cookie'
  * 恢复指引指向检查文件/锁（message 带具体路径）。
  * credential-unsupported（RT-7#4）：凭据条目存在但形态不支持解析（`!` command 前缀 /
  * 环境变量引用未定义）——resolver 返回 unsupported 判别结构，查询在发请求前拦截。
+ * cookie-invalid-format（2026-10-18）：cookie 类 fetcher 的凭证归一化后为空（粘贴内容不含
+ * 任何 `name=value` 对）——与 unauthorized（服务端拒绝）分流：前者根本没发出 HTTP 请求，
+ * 恢复动作是「换正确的复制路径重贴」，不是「重新登录」。
  */
 export type QuotaFetchFailureReason =
   | 'unauthorized'
@@ -57,6 +60,29 @@ export type QuotaFetchFailureReason =
   | 'no-credential'
   | 'credential-unavailable'
   | 'credential-unsupported'
+  | 'cookie-invalid-format'
+
+/**
+ * 归一化用户粘贴 cookie 的分隔空白伪影（`k = v ;  k2 = v2` → `k=v; k2=v2`）。
+ * 只做空白修剪：键值对内值的引号原样保留（`k="v"` 是浏览器线上传输形态，动了反而破坏鉴权）。
+ * 归一化后为空（无任何 k=v 对）返回空串。
+ *
+ * 唯一实现（SSOT，2026-10-18 自 runtime 迁入 shared）：runtime fetcher 据此判
+ * `cookie-invalid-format`，renderer 保存前用同一函数做格式校验——两端不得各写一份。
+ */
+export function normalizeCookieHeader(raw: string): string {
+  return raw
+    .split(';')
+    .map((pair) => {
+      const eq = pair.indexOf('=')
+      if (eq < 0) return ''
+      const name = pair.slice(0, eq).trim()
+      const value = pair.slice(eq + 1).trim()
+      return name ? `${name}=${value}` : ''
+    })
+    .filter((pair) => pair !== '')
+    .join('; ')
+}
 
 /**
  * 单次额度查询结果：成功带数据，失败带可区分 reason（不 throw）。

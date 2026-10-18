@@ -311,6 +311,9 @@ export default {
     quotaFailParse: 'failed to parse quota response',
     quotaFailNotConfigured: 'no Workspace configured — set it in Settings and retry',
     quotaFailNoCredential: 'no usable credential found — check the quota query configuration in Settings',
+    // 2026-10-18: cookie paste format invalid (no name=value pairs) — distinct from an expired session;
+    // the fix is re-copying from the right place, not signing in again.
+    quotaFailCookieInvalidFormat: 'invalid Cookie format (no name=value pairs found)',
     // RT-7#7: credential file read failed (IO/lock error, not "no credential") — check files, don't re-enter keys
     quotaFailCredentialUnavailable: 'failed to read credential file — check disk and file permissions, then retry',
     // RT-7#4: unsupported credential form (! command prefix / undefined env reference)

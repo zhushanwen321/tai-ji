@@ -51,6 +51,7 @@ export function createSettingsTransport(): SettingsTransport {
     },
     hasOAuth: (providerId) => config.hasOAuth(providerId),
     checkEnvVars: (names) => config.checkEnvVars(names),
+    revealProviderApiKey: (providerId) => config.revealProviderApiKey(providerId),
     getSystemPrompt: () => config.getSystemPrompt(),
     getTerminalConfig: () => config.getTerminalConfig(),
     getRetryConfig: () => config.getRetryConfig(),

@@ -28,6 +28,7 @@ import type {
   ProviderImportResult,
   SkillCacheInvalidatedPayload,
   ServerMessage,
+  ServerMessageMap,
   ProviderId,
   ConnectionTestResultRow,
   UiLocale,
@@ -432,6 +433,14 @@ export async function hasOAuth(providerId: string): Promise<boolean> {
 export async function checkEnvVars(names: string[]): Promise<Record<string, boolean>> {
   const reply = await command('config.checkEnvVars', { names }, RPC_BACKSTOP_TIMEOUT_MS)
   return reply.results
+}
+
+/**
+ * 回显 provider 已存 API Key（2026-10-18，编辑体眼睛按钮按需拉取）。
+ * 只对 api_key 形态生效（OAuth token 永不出协议）；available=false = 无可回显凭据。
+ */
+export async function revealProviderApiKey(providerId: string): Promise<ServerMessageMap['config.providerApiKeyRevealed']> {
+  return command('config.revealProviderApiKey', { providerId }, RPC_BACKSTOP_TIMEOUT_MS)
 }
 
 /** 订阅 device flow 中间态（user_code / verification_uri / 倒计时）。返回取消函数。 */
