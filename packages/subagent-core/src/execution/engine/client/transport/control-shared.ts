@@ -5,8 +5,11 @@
 // 与通道生命周期）与 runtime.ts（EngineTransport 实现）共用；不 import 二者（无环）。
 //
 // 错误映射规则（D10）：SDK transport 族与已知 engine_ 前缀码原样透传；runtime 侧裁决
-// 字面（session/channel_limit/duplicate/invalid_launch/spawn_failed/unknown_channel）
-// 收敛为 transport 族错误码——宿主只认 SDK 词表。
+// 字面按语义分流到与 local transport 同型的失败面：资源耗尽（channel_limit / 写队列
+// 溢出）→ engine_backpressure_overflow；归属键不可用（session）→
+// engine_transport_unavailable；启动裁决失败（invalid_launch / spawn_failed）→
+// engine_crashed（与 local 启动解析错误同型，EngineClient.connectOnce 统一包装）；
+// unknown_channel（非关闭竞态）→ engine_transport_lost（通道终局）。宿主只认 SDK 词表。
 
 import { ENGINE_TRANSPORT_ERROR_RECOVERY, EngineSdkError } from "@zhushanwen/subagent-engine-sdk";
 
@@ -69,13 +72,29 @@ export function makeTransportError(code: string, detail: string): EngineSdkError
   return new EngineSdkError(code, detail, recovery);
 }
 
-/** runtime 裁决字面 → SDK 传输码收敛表（SDK 词表未收录 control 帧 code；唯一收敛点）。 */
+/** runtime 裁决字面 → SDK 错误码收敛表（按 D10 语义分流；唯一收敛点）。 */
 const CONTROL_CODE_TO_TRANSPORT_CODE: Record<string, string> = {
   engine_open_timeout: "engine_open_timeout",
   engine_frame_too_large: "engine_frame_too_large",
   engine_backpressure_overflow: "engine_backpressure_overflow",
+  // 连接级 channel 上限与写队列溢出同属资源耗尽面（D8：显式失败、不丢帧）。
+  channel_limit: "engine_backpressure_overflow",
+  // 归属键不可用（root session 与连接绑定不一致）：连接/hello 级失败面。
+  session: "engine_transport_unavailable",
+  // 启动裁决失败：与 local transport 的启动错误同型（connectOnce 包装 engine_crashed）。
+  invalid_launch: "engine_crashed",
+  spawn_failed: "engine_crashed",
+  // 请求 id 复用是宿主侧协议违规：按不可用终局（不重试），recovery 用 runtime 帧文案。
+  duplicate: "engine_transport_unavailable",
+  // 通道已不存在（非关闭竞态）= 通道终局；SDK 词表无独立通道终局码，按 lost 收敛
+  //（设计 D5/D8 明示 unknown_channel → engine_transport_lost）。
   unknown_channel: "engine_transport_lost",
 };
+
+/** engine_crashed 收敛面缺省 recovery（runtime 帧未携带时使用；定位指向 runtime 日志）。 */
+const CRASHED_CONTROL_RECOVERY =
+  "The runtime failed to launch the engine (see the control code in the detail). "
+  + "Inspect the runtime log, then re-run the task.";
 
 /** engine_open_failed / error 帧的 code → EngineSdkError（见文件头映射规则）。 */
 export function mapControlError(code: string, message: string, recovery?: string): EngineSdkError {
@@ -84,8 +103,10 @@ export function mapControlError(code: string, message: string, recovery?: string
   const detail = mapped === code ? message : `${message} (control code: ${code})`;
   const recoveryText = recovery !== undefined && recovery.length > 0
     ? recovery
-    : (ENGINE_TRANSPORT_ERROR_RECOVERY as Record<string, string>)[mapped]
-      ?? ENGINE_TRANSPORT_ERROR_RECOVERY.engine_transport_unavailable;
+    : mapped === "engine_crashed"
+      ? CRASHED_CONTROL_RECOVERY
+      : (ENGINE_TRANSPORT_ERROR_RECOVERY as Record<string, string>)[mapped]
+        ?? ENGINE_TRANSPORT_ERROR_RECOVERY.engine_transport_unavailable;
   return new EngineSdkError(mapped, detail, recoveryText);
 }
 

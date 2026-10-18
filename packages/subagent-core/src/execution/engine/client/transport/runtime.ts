@@ -10,9 +10,10 @@
 // 不外泄给 EngineClient（types.ts 契约边界）。
 //
 // 归属键来源（D4 env × spawn 点矩阵 / D5）：socket = CONTROL_ENV_SOCKET；rootSessionId
-// 优先 spec.rootSessionId（宿主 run ctx 透传时），否则 control env 的
-// CONTROL_ENV_ROOT_SESSION_ID（runtime 注入全链同值），再否则身份 env 的
-// PI_SUBAGENT_ROOT_SESSION_ID；parentRecordId/depth 仅嵌套携带（来自本进程身份 env：
+// 优先 spec.rootSessionId（run 路径 = RunContext.sessionRootId 权威源；探针等无 ctx
+// 调用为空串），否则 control env 的 CONTROL_ENV_ROOT_SESSION_ID（runtime 注入的
+// spawn 期初值，create 路径可能是 temp id），再否则身份 env 的
+// PI_SUBAGENT_ROOT_SESSION_ID（嵌套真根）；parentRecordId/depth 仅嵌套携带（来自本进程身份 env：
 // PI_SUBAGENT_SELF_RECORD_ID / PI_SUBAGENT_DEPTH——引擎通道的父挂点）。socket 激活但
 // root session 缺失 → 显式 engine_transport_unavailable（不发畸形帧等超时）。
 //
@@ -78,6 +79,8 @@ export class RuntimeEngineTransport implements EngineTransport {
   private readonly opts: RuntimeEngineTransportOptions;
   private client: ReturnType<typeof acquireRuntimeControlClient> | undefined;
   private channelId: string | undefined;
+  /** open 时解析出的归属根（spec 优先；未注入时 control env / 身份 env 回落）。 */
+  private openedRootSessionId: string | undefined;
   private released = false;
   private exitNotified = false;
   private closePromise: Promise<void> | undefined;
@@ -87,6 +90,11 @@ export class RuntimeEngineTransport implements EngineTransport {
 
   constructor(opts: RuntimeEngineTransportOptions) {
     this.opts = opts;
+  }
+
+  /** 已打开通道实际绑定的根会话 id（B-U-1 换代重连判定；未 open = undefined）。 */
+  get rootSessionId(): string | undefined {
+    return this.openedRootSessionId;
   }
 
   /**
@@ -139,6 +147,7 @@ export class RuntimeEngineTransport implements EngineTransport {
         onStderr: (chunk) => this.opts.onStderr?.(chunk),
       });
       this.channelId = result.channelId;
+      this.openedRootSessionId = rootSessionId;
       return result.pid !== undefined ? { pid: result.pid } : {};
     } catch (err) {
       this.releaseClient();

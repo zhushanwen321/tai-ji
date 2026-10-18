@@ -51,9 +51,10 @@ export interface EngineLaunchSpec { // oe-exempt:20261018:framework:extension↔
   /** 引擎 manifest 声明的 envPrefixes 放行前缀（runtime 构建 env 用）。 */
   envPrefixes: string[];
   /**
-   * 主会话根 id（嵌套同值）；连接上第一个 engine_open 确定归属，后续不一致 →
-   * engine_open_failed。runtime 实现必填；local 实现忽略（standalone 无 runtime
-   * 归属概念，宿主传空串占位）。
+   * 主会话根 id（嵌套同值）——run 路径 = RunContext.sessionRootId（权威源）；未注入
+   * （探针 / standalone）传空串占位，由 runtime transport 以 control env 回落。
+   * 连接上第一个 engine_open 确定归属，后续不一致 → engine_open_failed；local 实现
+   * 忽略（standalone 无 runtime 归属概念）。
    */
   rootSessionId: string;
   /** 嵌套：父 task pi 的 record id（来自 PI_SUBAGENT_SELF_RECORD_ID）。 */
@@ -90,6 +91,12 @@ export interface EngineTransportExitInfo { // oe-exempt:20261018:framework:exten
  * 生命周期：open → writeFrame/onFrame 帧交换 → close（或 onExit 终局）。
  */
 export interface EngineTransport { // oe-exempt:20261018:framework:extension↔engine 传输契约端口（local/runtime 双实现）
+  /**
+   * 打开通道实际使用的根会话 id（runtime = open 时解析结果；local 恒 undefined——
+   * standalone 无 runtime 归属面）。EngineClient 用于判定 run ctx 的权威根是否需要
+   * 换代重连（B-U-1：engine_open 归属键在通道生命周期内不可变）。
+   */
+  readonly rootSessionId?: string;
   /**
    * 打开引擎通道。local = spawn 引擎 CLI 进程（stdio 接线，不等待 initialize）；
    * runtime = hello（进程级共享连接时复用）+ engine_open，收到 engine_opened 才 resolve

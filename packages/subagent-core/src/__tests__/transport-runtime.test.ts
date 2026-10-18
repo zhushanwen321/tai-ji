@@ -12,7 +12,7 @@
 //   ④ 谓词：control env 激活 → runtime transport 被选中（ready 经 control 通道、
 //      零 spawn 零 pidfile）；空串/缺失 → local（既有 transport-local.test.ts 覆盖）。
 
-import { existsSync, mkdtempSync, rmSync } from "node:fs";
+import { existsSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import * as net from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -30,6 +30,7 @@ import { RuntimeControlClient } from "../execution/engine/client/transport/contr
 import type {
   ControlChannelHandlers,
 } from "../execution/engine/client/transport/control-shared.ts";
+import { mapControlError } from "../execution/engine/client/transport/control-shared.ts";
 import {
   RuntimeEngineTransport,
   type RuntimeEngineTransportOptions,
@@ -482,7 +483,7 @@ describe("传输错误码面（验收②）", () => {
     client.dispose();
   });
 
-  it("engine_open_failed：runtime 拒开（spawn_failed）→ engine_transport_unavailable（显式不静默）", async () => {
+  it("engine_open_failed：runtime 拒开（spawn_failed）→ engine_crashed（与 local 启动失败同型）", async () => {
     const server = await startServer();
     server.onEngineOpen = (socket, frame) => {
       server.sendControl(socket, {
@@ -496,9 +497,36 @@ describe("传输错误码面（验收②）", () => {
     };
     const transport = makeTransport(server);
     await expect(transport.open(makeSpec())).rejects.toMatchObject({
-      code: "engine_transport_unavailable",
+      code: "engine_crashed",
       message: expect.stringContaining("spawn_failed"),
+      recovery: "install the engine",
     });
+  });
+
+  it("D10 错误分型映射：runtime 裁决码按语义分流（逐码锁定）", () => {
+    const cases: Array<[string, string]> = [
+      ["session", "engine_transport_unavailable"],
+      ["channel_limit", "engine_backpressure_overflow"],
+      ["invalid_launch", "engine_crashed"],
+      ["spawn_failed", "engine_crashed"],
+      ["duplicate", "engine_transport_unavailable"],
+      ["unknown_channel", "engine_transport_lost"],
+      ["engine_open_timeout", "engine_open_timeout"],
+      ["engine_frame_too_large", "engine_frame_too_large"],
+      ["engine_backpressure_overflow", "engine_backpressure_overflow"],
+      // SDK transport 族 / 引擎透传码原样保留（不重复收敛）。
+      ["engine_transport_lost", "engine_transport_lost"],
+      ["engine_not_found", "engine_not_found"],
+    ];
+    for (const [controlCode, expected] of cases) {
+      const err = mapControlError(controlCode, `detail-${controlCode}`);
+      expect(err.code, controlCode).toBe(expected);
+      if (expected !== controlCode) {
+        expect(err.message, controlCode).toContain(`(control code: ${controlCode})`);
+      }
+    }
+    // recovery 语义：crash 面有专用兜底（不借用 transport_unavailable 的可达性文案）
+    expect(mapControlError("spawn_failed", "boom").recovery).toContain("runtime failed to launch");
   });
 
   it("engine_frame_too_large：出站信封超限 → writeFrame false + onTransportError 具体码（不截断）", async () => {
@@ -620,6 +648,20 @@ describe("传输错误码面（验收②）", () => {
       baseEnv: { TAIJI_SUBAGENT_CONTROL_SOCKET: server.socketPath },
     });
     await expect(noRoot.open(makeSpec())).rejects.toMatchObject({ code: "engine_transport_unavailable" });
+
+    // [B-U-1 嵌套优先级] spec（run ctx 真根）> control env（spawn 期 temp id）>
+    // 身份 env（PI_SUBAGENT_ROOT_SESSION_ID = 嵌套真根）；spec 有值时不得被 env 遮蔽。
+    const nestedExplicit = makeTransport(server, {
+      baseEnv: {
+        TAIJI_SUBAGENT_CONTROL_SOCKET: server.socketPath,
+        TAIJI_SUBAGENT_CONTROL_ROOT_SESSION_ID: "sess-spawn-temp",
+        PI_SUBAGENT_ROOT_SESSION_ID: "sess-nested-root",
+      },
+    });
+    await nestedExplicit.open(makeSpec({ rootSessionId: "sess-run-ctx" }));
+    const nestedLaunch = server.frames.filter((f) => f.kind === K.engineOpen).at(-1)?.launch as Record<string, unknown>;
+    expect(nestedLaunch.rootSessionId).toBe("sess-run-ctx");
+    await nestedExplicit.close();
   });
 });
 
@@ -644,7 +686,11 @@ function wireFakeEngineProtocol(server: FakeControlServer): void {
   };
 }
 
-function makeHostedClient(server: FakeControlServer, dataDir: string): EngineClient {
+function makeHostedClient(
+  server: FakeControlServer,
+  dataDir: string,
+  baseEnv: Record<string, string | undefined> = {},
+): EngineClient {
   return new EngineClient({
     engineId: "fake",
     command: process.execPath,
@@ -655,11 +701,106 @@ function makeHostedClient(server: FakeControlServer, dataDir: string): EngineCli
     baseEnv: {
       TAIJI_SUBAGENT_CONTROL_SOCKET: server.socketPath,
       TAIJI_SUBAGENT_CONTROL_ROOT_SESSION_ID: "sess-rt-1",
+      ...baseEnv,
     },
   });
 }
 
 describe("EngineClient：runtime transport 谓词接线（验收③④）", () => {
+  it("[B-U-1] run ctx 权威根 → engine_open.rootSessionId（不被 control env 的 spawn 期 temp id 遮蔽）", async () => {
+    const server = await startServer();
+    wireFakeEngineProtocol(server);
+    const dataDir = mkdtempSync(join(tmpdir(), "u-m3-rt-data-"));
+    dataDirs.push(dataDir);
+    // control env 模拟 create 路径：ProcessManager 在 spawn 时注入 temp id（pi 自生成
+    // sessionId 后 rekey 只改 runtime Map，不更新已 spawn 的 pi env）。
+    const client = makeHostedClient(server, dataDir, {
+      TAIJI_SUBAGENT_CONTROL_ROOT_SESSION_ID: "spawn-temp-id",
+    });
+
+    await client.ensureConnected("real-session-id-from-ctx");
+    expect(client.currentState).toBe("ready");
+    const open = server.frames.find((f) => f.kind === K.engineOpen);
+    expect((open?.launch as Record<string, unknown>).rootSessionId).toBe("real-session-id-from-ctx");
+    await client.dispose();
+  });
+
+  it("[B-U-1] 探针先以 env 初值建连 → run ctx 真实根触发换代重连（engine_open 携带权威根）", async () => {
+    const server = await startServer();
+    wireFakeEngineProtocol(server);
+    const dataDir = mkdtempSync(join(tmpdir(), "u-m3-rt-data-"));
+    dataDirs.push(dataDir);
+    const client = makeHostedClient(server, dataDir, {
+      TAIJI_SUBAGENT_CONTROL_ROOT_SESSION_ID: "spawn-temp-id",
+    });
+
+    // 探针路径（无 run ctx）：control env 初值成为连接绑定值。
+    await client.ensureConnected();
+    const opens = server.frames.filter((f) => f.kind === K.engineOpen);
+    expect((opens[0]?.launch as Record<string, unknown>).rootSessionId).toBe("spawn-temp-id");
+
+    // run 路径携带 per-run 权威根：旧通道不可换绑（runtime 侧 session 不一致即拒），
+    // 换代重连 + 新 engine_open 用真根。
+    await client.ensureConnected("real-session-id-from-ctx");
+    expect(client.currentState).toBe("ready");
+    const reopened = server.frames.filter((f) => f.kind === K.engineOpen);
+    expect(reopened).toHaveLength(2);
+    expect((reopened[1]?.launch as Record<string, unknown>).rootSessionId).toBe("real-session-id-from-ctx");
+    // 旧通道已发 engine_close（runtime 杀组回收）
+    expect(server.frames.some((f) => f.kind === K.engineClose)).toBe(true);
+    await client.dispose();
+  });
+
+  it("[B-U-3] 同失败形态分型等价：启动失败 → local 与 runtime 同落 engine_crashed", async () => {
+    // local：entry 子进程加载即退出（本地启动失败的真实形态）
+    const localDir = mkdtempSync(join(tmpdir(), "u-m3-rt-local-dead-"));
+    dataDirs.push(localDir);
+    const deadEngine = join(localDir, "dead-engine.mjs");
+    writeFileSync(deadEngine, "process.exit(1);\n", "utf8");
+    const local = new EngineClient({
+      engineId: "fake",
+      command: process.execPath,
+      args: [deadEngine],
+      hostKind: "test",
+      dataDir: localDir,
+      envPrefixes: [],
+      baseEnv: {},
+    });
+    let localCode: string | undefined;
+    let localRecovery: string | undefined;
+    try {
+      await local.ensureConnected();
+    } catch (err) {
+      localCode = (err as EngineSdkError).code;
+      localRecovery = (err as EngineSdkError).recovery;
+    }
+    expect(localCode).toBe("engine_crashed");
+
+    // runtime：runtime 侧启动裁决失败（invalid_launch）→ 同一宿主分型。
+    const server = await startServer();
+    server.onEngineOpen = (socket, frame) => {
+      server.sendControl(socket, {
+        v: 1,
+        kind: K.engineOpenFailed,
+        id: frame.id,
+        code: "invalid_launch",
+        message: "entryPath is not an absolute existing path",
+        recovery: "resolve the engine entry from the descriptor",
+      });
+    };
+    const runtimeDir = mkdtempSync(join(tmpdir(), "u-m3-rt-runtime-invalid-"));
+    dataDirs.push(runtimeDir);
+    const hosted = makeHostedClient(server, runtimeDir);
+    await expect(hosted.ensureConnected("real-session-id")).rejects.toSatisfy(
+      (err: Error & { code?: string; recovery?: string; message?: string }) => {
+        expect(err.code).toBe("engine_crashed");
+        expect(err.message).toContain("invalid_launch");
+        // 同型包装：connectOnce 对非 preserve 码统一补宿主恢复指引（与 local 逐字一致）。
+        expect(err.recovery).toBe(localRecovery);
+        return true;
+      },
+    );
+  });
   it("control env 激活 → runtime transport 被选中：ready 经 control 通道（零 spawn 零 pidfile）+ dispose 走 dispose 帧与 engine_close", async () => {
     const server = await startServer();
     wireFakeEngineProtocol(server);

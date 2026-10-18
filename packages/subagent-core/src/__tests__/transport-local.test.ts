@@ -18,7 +18,7 @@ import {
   EngineSdkError,
 } from "@zhushanwen/subagent-engine-sdk";
 
-import { EngineClient } from "../execution/engine/client/engine-client.ts";
+import { EngineClient, SUBAGENT_TRANSPORT_ENV } from "../execution/engine/client/engine-client.ts";
 import { pidfilePath, probePidAliveness } from "../execution/engine/client/pid-file.ts";
 import { LocalEngineTransport } from "../execution/engine/client/transport/local.ts";
 import type {
@@ -274,6 +274,32 @@ describe("EngineClient transport 谓词与错误码 preserve（验收②③）",
     expect(client.enginePid).toBeDefined();
     expect(existsSync(pidfilePath(dataDir, "fake", "test", process.pid))).toBe(true);
     await client.dispose();
+  });
+
+  it("[D9] TAIJI_SUBAGENT_TRANSPORT=local 优先于 control env 激活判定（强制 local；ready + pidfile）", async () => {
+    const client = makeClient({
+      baseEnv: {
+        // control env 本应选中 runtime（socket 路径甚至不存在）——逃生舱必须抢先。
+        TAIJI_SUBAGENT_CONTROL_SOCKET: join(tmpdir(), `u-m3-rt-missing-${process.pid}.sock`),
+        [SUBAGENT_TRANSPORT_ENV]: "local",
+      },
+    });
+    await client.ensureConnected();
+    expect(client.currentState).toBe("ready");
+    expect(client.enginePid).toBeDefined();
+    expect(existsSync(pidfilePath(dataDir, "fake", "test", process.pid))).toBe(true);
+    await client.dispose();
+  });
+
+  it("[D9] 非 local 值不改变既有谓词（control env 仍选 runtime → 显式不可用）", async () => {
+    const client = makeClient({
+      baseEnv: {
+        TAIJI_SUBAGENT_CONTROL_SOCKET: join(tmpdir(), `u-m3-rt-missing-${process.pid}.sock`),
+        [SUBAGENT_TRANSPORT_ENV]: "runtime",
+      },
+    });
+    await expect(client.ensureConnected()).rejects.toMatchObject({ code: "engine_transport_unavailable" });
+    expect(client.currentState).toBe("unavailable");
   });
 
   it("transport 错误码经 connectOnce preserve：open 拒 engine_transport_lost → 原样上抛（不包装 failed-to-start）+ 标记不可用", async () => {

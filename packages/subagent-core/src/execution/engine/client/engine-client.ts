@@ -18,6 +18,9 @@
 // 引擎自灭 core 侧配套：spawn 不覆写引擎 stdin（stdio[0] = 'pipe' 独占管道，core
 // 是唯一写端）——引擎侧 stdio EOF 主判据（SDK armEngineSelfDestruct）的前提（职责
 // 在 transport 的 spawn 段，约束随实现走）。
+//
+// [D9 逃生舱] TAIJI_SUBAGENT_TRANSPORT=local → 强制 local transport（优先于 control
+// env 激活判定）；运行期严重故障的快速回退通道，一个发布周期后删除（设计 D9）。
 // 超时域划分（R9-2 / R9-2b）的实现与注释在 reverse-router.ts（反向面）与本文件
 // 正向请求段；run 不设墙钟（任务级默认无超时，AGENTS.md 规则 19 / ADR-0047）。
 
@@ -66,6 +69,12 @@ import { notifyInFlightChanged } from "../inflight-snapshot.ts";
 const logger = getLogger("subagents");
 
 /**
+ * [D9 逃生舱] transport 强制覆盖键：值 `local` → 跳过 control env 判定强制 local。
+ * 设计 D9「一个发布周期后删除」；值不合法/未设时按既有谓词判定。
+ */
+export const SUBAGENT_TRANSPORT_ENV = "TAIJI_SUBAGENT_TRANSPORT";
+
+/**
  * 单条镜像事件 → core 镜像投影 + 在途推送（u7a 数据面桥接）：置死**或已退出** →
  * markKilled，running → register（同 recordId 重 spawn 覆盖，与引擎侧 Map 同语义）。
  * 判据必须是 `state === "exited" || entry.killed` 而非只看 killed：pi 子进程自行
@@ -101,8 +110,8 @@ const FRAME_ECHO_MAX_CHARS = 200;
 /**
  * connectOnce 错误码 preserve 白名单：这些 code 原样上抛 + 标记不可用，不包装成
  * engine_crashed（「错误即语义」的宿主侧处置面 vs 进程意外死亡的分界）。协议版本
- * 越界为既有成员；transport 五码为 M3 control 通道成员（runtime transport 接线后
- * 生效——local 分支的失败码面不变：engine_not_found 等启动解析错误维持既有
+ * 越界为既有成员；transport 五码为 M3 control 通道成员（runtime transport 生效——
+ * local 分支的失败码面不变：engine_not_found 等启动解析错误维持既有
  * engine_crashed 包装，见 impl-plan u-m3-local「connectOnce preserve 白名单」）。
  */
 const PRESERVED_CONNECT_ERROR_CODES: ReadonlySet<string> = new Set([
@@ -167,6 +176,12 @@ export class EngineClient {
   private state: EngineClientState = "idle";
   /** 引擎通道（每代引擎连接一份实例；open/close 生命周期 = 单通道，u-m3-local）。 */
   private transport: EngineTransport | undefined;
+  /**
+   * 本次连接绑定的根 session id（run 路径 = RunContext.sessionRootId 权威值；
+   * 未注入 = undefined，由 runtime transport 以 control env 回落）。启动期连接前
+   * 由 ensureConnected(rootSessionId) 写入，engine_open 据此携带归属键。
+   */
+  private requestedRootSessionId: string | undefined;
   private nextRequestId = 1;
   private readonly pending = new Map<number, PendingRequest>();
   private readonly runRoutes = new Map<string, RunRoute>();
@@ -230,7 +245,15 @@ export class EngineClient {
    * protected = 测试 seam（错误码 preserve 白名单单测注入假 transport）。
    */
   protected resolveTransport(): EngineTransport {
-    if (isControlEnvActive(this.opts.baseEnv ?? process.env)) {
+    const baseEnv = this.opts.baseEnv ?? process.env;
+    // [D9 逃生舱] 优先于 control env 激活判定：值 local → 强制 local（排障回退）。
+    if ((baseEnv[SUBAGENT_TRANSPORT_ENV] ?? "").trim() === "local") {
+      logger.warn(
+        `[engine-client:${this.engineId}] ${SUBAGENT_TRANSPORT_ENV}=local → forcing local transport (D9 escape hatch)`,
+      );
+      return this.createLocalTransport();
+    }
+    if (isControlEnvActive(baseEnv)) {
       logger.debug(`[engine-client:${this.engineId}] transport selected: runtime control channel`);
       return new RuntimeEngineTransport({
         engineId: this.opts.engineId,
@@ -240,6 +263,11 @@ export class EngineClient {
       });
     }
     logger.debug(`[engine-client:${this.engineId}] transport selected: local (no control env)`);
+    return this.createLocalTransport();
+  }
+
+  /** local transport 装配（正常谓词与 D9 逃生舱共用，避免两处漂移）。 */
+  private createLocalTransport(): LocalEngineTransport {
     return new LocalEngineTransport({
       engineId: this.opts.engineId,
       dataDir: this.opts.dataDir,
@@ -258,6 +286,39 @@ export class EngineClient {
           .filter((e) => e.state === "running" && !e.killed)
           .map((e) => e.pid),
     });
+  }
+
+  /**
+   * [B-U-1] 连接级根会话换绑：runtime 通道的 engine_open 归属键在 open 时固定，
+   * 后续同连接再 open 会被 runtime 以 `engine_open_failed session` 拒绝。因此当
+   * run ctx 提供权威根且与在通道实际绑定值不同（探针先以 control env 的 spawn 期
+   * 初值建连的场景）时，换代重连：关旧通道（runtime 杀组回收）→ 协议面清理 →
+   * 由调用方继续走 connectOnce 用新根 open。
+   *
+   * 有在途请求/run 路由时不动连接（跑着的 run 不得被根换绑打断），warn 留痕；
+   * 单 pi 进程生命周期内根会话不应变化，命中该分支即宿主误用信号。
+   * 返回 true = 已换绑（调用方需重连）；false = 无需换绑或保持现状。
+   */
+  private async rebindRootSessionIfNeeded(): Promise<boolean> {
+    const requested = this.requestedRootSessionId;
+    const transport = this.transport;
+    if (requested === undefined || !(transport instanceof RuntimeEngineTransport)) return false;
+    if (transport.rootSessionId === requested) return false;
+    if (this.pending.size > 0 || this.runRoutes.size > 0) {
+      logger.warn(
+        `[engine-client:${this.engineId}] root session "${requested}" differs from the open channel `
+          + `("${transport.rootSessionId ?? "unknown"}") but requests/runs are in flight — keeping the current channel`,
+      );
+      return false;
+    }
+    logger.debug(
+      `[engine-client:${this.engineId}] rebinding engine channel root session `
+        + `"${transport.rootSessionId ?? "unknown"}" -> "${requested}"`,
+    );
+    await transport.close("root session rebind");
+    this.teardownProcess("root session rebind");
+    this.state = "idle";
+    return true;
   }
 
   /** 引擎 CLI 进程 pid（未连接 / 已终局清理 = undefined）。 */
@@ -285,8 +346,16 @@ export class EngineClient {
    * 初建失败一次即标记不可用（unavailable 恒 throw，错误附恢复指引），修复由用户
    * 排查后重启宿主承接。[HISTORICAL] 原退避 1s/2s/4s × 3 次自动重建已删。
    * 版本协商越界 → engine_protocol_mismatch + 直接标记不可用。
+   *
+   * [B-U-1 根会话权威] rootSessionId 可选：run 路径传 RunContext.sessionRootId
+   * （engine_open 归属键权威源）。连接已按 env 回落的旧根打开（如探针先于 run）
+   * 且当前无在途 run 时，换代重连让新的权威根生效；有在途 run 时保持旧连接并 warn
+   * （根会话在单 pi 进程生命周期内不变，跨根切换只可能来自宿主误用）。
    */
-  async ensureConnected(): Promise<void> {
+  async ensureConnected(rootSessionId?: string): Promise<void> {
+    if (rootSessionId !== undefined && rootSessionId.length > 0) {
+      this.requestedRootSessionId = rootSessionId;
+    }
     if (this.disposed) {
       throw new EngineSdkError(
         "engine_crashed",
@@ -297,8 +366,15 @@ export class EngineClient {
     if (this.state === "unavailable") {
       throw this.unavailableReason ?? new Error(`engine "${this.engineId}" is unavailable`);
     }
-    if (this.state === "ready") return;
-    if (this.connectInFlight) return this.connectInFlight;
+    if (this.state === "ready") {
+      if (!(await this.rebindRootSessionIfNeeded())) return;
+    } else if (this.connectInFlight !== undefined) {
+      // 并发连接请求：等同一代连接落地后再判定权威根是否一致（探针 → run 的
+      // 时序下首个请求可能没有 run ctx）。失败由发起者上抛，本调用同享终态。
+      await this.connectInFlight;
+      // 经 getter 现读（TS 对 await 前后的 this.state 保持窄化，直比会误报无重叠）。
+      if (this.currentState !== "ready" || !(await this.rebindRootSessionIfNeeded())) return;
+    }
 
     this.connectInFlight = this.connectOnce();
     try {
@@ -380,9 +456,10 @@ export class EngineClient {
       args: [...this.opts.args],
       cwd: this.opts.cwd ?? process.cwd(),
       envPrefixes: [...(this.opts.envPrefixes ?? [])],
-      // runtime 归属键，local 实现忽略（types.ts rootSessionId 注）；runtime
-      // transport 接线后由 control env 注入真值（u-m3-rt-transport）。
-      rootSessionId: "",
+      // runtime 归属键：run 路径传 RunContext.sessionRootId（权威源）；未注入
+      // （探针 / standalone）传空串占位，由 runtime transport 以 control env 回落。
+      // local 实现忽略（types.ts rootSessionId 注）。
+      rootSessionId: this.requestedRootSessionId ?? "",
     });
 
     // initialize 握手（HANDSHAKE_TIMEOUT_MS；版本越界 → mismatch + 不可用）。

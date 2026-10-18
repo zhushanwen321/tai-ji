@@ -54,10 +54,8 @@
 
 | 子入口 | 内容 |
 |--------|------|
-| `@zhushanwen/subagent-core/engines/zcode/reader` | zcode 引擎 session 历史读取（`readZcodeSessionView` / `ZcodeReaderError`） |
-| `@zhushanwen/subagent-core/engines/zcode/constants` | zcode 引擎常量（`ZCODE_ENGINE_ID` / 路径后缀 / 缺省模型等） |
 | `@zhushanwen/subagent-core/engine/paths` | 引擎数据目录路径推导（engines 根 / 池目录 / journal 路径） |
-| `@zhushanwen/subagent-core/relay-env` | relay 通道 env 名与协议常量 SSOT（extension / runtime / 代理三方共用） |
+| `@zhushanwen/subagent-core/engine/engine-discovery-scan` | 引擎发现扫描（runtime 冷启动回退链深路径消费：`session-records.ts`） |
 
 ### 资产子入口
 

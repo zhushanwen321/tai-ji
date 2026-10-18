@@ -14,6 +14,7 @@ import {
   armEngineSelfDestruct,
   DEFAULT_ENGINE_HOST_REQUEST_TIMEOUT_MS,
   ENGINE_HOST_REQUEST_TIMEOUT_ENV,
+  killOwnProcessGroup,
   spawnEngineChild,
 } from "../spawn.ts";
 
@@ -123,6 +124,59 @@ describe("spawnEngineChild", () => {
     const exitSignal = await Promise.race([exited, failure]);
     expect(exitSignal).toBe("SIGTERM");
   }, 15_000);
+});
+
+describe("killOwnProcessGroup（D7 平台矩阵；分支注入，不实跑 Windows）", () => {
+  it("win32 → taskkill /PID <self> /T /F（stdio ignore + fire-and-forget，不触达 process.kill）", () => {
+    const calls: Array<{ command: string; args: readonly string[]; options: unknown }> = [];
+    const errorHandlers: Array<(err: Error) => void> = [];
+    const unref = vi.fn();
+    const kill = vi.fn();
+    killOwnProcessGroup({
+      platform: "win32",
+      killFn: kill,
+      spawnFn: (command, args, options) => {
+        calls.push({ command, args, options });
+        return {
+          on: (event: "error", listener: (err: Error) => void) => {
+            if (event === "error") errorHandlers.push(listener);
+            return undefined;
+          },
+          unref,
+        };
+      },
+    });
+
+    expect(calls).toEqual([
+      {
+        command: "taskkill",
+        args: ["/PID", String(process.pid), "/T", "/F"],
+        options: { stdio: "ignore", windowsHide: true },
+      },
+    ]);
+    expect(unref).toHaveBeenCalledTimes(1);
+    expect(kill).not.toHaveBeenCalled();
+    // fire-and-forget：taskkill 缺失（error 事件）不得反噬自灭链
+    expect(errorHandlers).toHaveLength(1);
+    expect(() => errorHandlers[0]!(new Error("taskkill not found"))).not.toThrow();
+  });
+
+  it("posix → 负 pid 组杀（SIGKILL）", () => {
+    const kill = vi.fn();
+    killOwnProcessGroup({ platform: "darwin", killFn: kill });
+    expect(kill).toHaveBeenCalledTimes(1);
+    expect(kill).toHaveBeenCalledWith(-process.pid, "SIGKILL");
+  });
+
+  it("posix 组杀失败 → 回落单进程杀（既有语义不变）", () => {
+    const kill = vi.fn((pid: number) => {
+      if (pid < 0) throw new Error("ESRCH");
+      return true;
+    });
+    killOwnProcessGroup({ platform: "linux", killFn: kill });
+    expect(kill).toHaveBeenNthCalledWith(1, -process.pid, "SIGKILL");
+    expect(kill).toHaveBeenNthCalledWith(2, process.pid, "SIGKILL");
+  });
 });
 
 describe("armEngineSelfDestruct", () => {

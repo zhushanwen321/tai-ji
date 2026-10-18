@@ -389,7 +389,10 @@ export class RemoteEngine implements EnginePort {
    * ChildProcess 实例，ctx.onChildSpawned 不调用——W6 起生命周期谓词读镜像）。
    */
   async run(task: AgentCallOpts, ctx: RunContext): Promise<EngineRunResult> {
-    await this.opts.client.ensureConnected();
+    // [B-U-1] 根会话权威 = per-run ctx（RunContext.sessionRootId）→ engine_open
+    // 归属键；不能依赖 control env 的 spawn 期 temp id（create 路径 rekey 不更新
+    // 已 spawn 的 pi env，会致 live 流/流状态拉取双失效，且遮蔽嵌套身份根）。
+    await this.opts.client.ensureConnected(ctx.sessionRootId);
 
     // [W3 契约⑤ run 期接线] gate 位方向判定②：同步面 assertTaskShapeSupported 读
     // manifest 拦「少声明」；「多声明」（manifest 声明可用、引擎实态不符）gate 同步面

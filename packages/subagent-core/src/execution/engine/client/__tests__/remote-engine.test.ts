@@ -293,6 +293,15 @@ describe("RemoteEngine run 帧映射", () => {
     await bare.cleanup();
   });
 
+  it("[B-U-1] ctx.sessionRootId → client.ensureConnected(根 id)（engine_open 归属键权威源贯通）", async () => {
+    const fixture = makeEngine();
+    const spy = vi.spyOn(fixture.client, "ensureConnected");
+    const { ctx } = makeCtx({ sessionRootId: "root-sess-connect" });
+    await fixture.engine.run({ prompt: "p" }, ctx);
+    expect(spy).toHaveBeenCalledWith("root-sess-connect");
+    await fixture.cleanup();
+  });
+
   it("[Option C] wire ctx.sessionDir = getSubagentSessionDir(env 同源推导)；ctx 显式注入优先", async () => {
     // stub env 固定推导输入（测试进程可能已带这两键——stub 后期望值确定）
     vi.stubEnv("PI_CODING_AGENT_DIR", join(dataDir, "agent-dir"));
