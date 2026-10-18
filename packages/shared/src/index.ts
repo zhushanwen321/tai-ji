@@ -108,6 +108,25 @@ export type {
 // LLM 重试配置域（类型 + D8 合法域常量 + 校验纯函数，renderer 表单与 runtime 写入侧共用）
 export type { LlmRetryConfig, LlmRetryProviderConfig } from './llm-retry'
 export { LLM_RETRY_DOMAIN, validateLlmRetryConfig } from './llm-retry'
+// LLM 网络代理域（llm-network-proxy 设计 §5 U1：类型 + 校验 + 匹配语义纯函数，SSOT；
+// extension 侧 bundle 隔离复制同语义实现时以本出口为准）
+export type {
+  NetworkProxyConfig,
+  NetworkProxyProtocol,
+  NetworkProxyServer,
+  NetworkProxyStats,
+  NetworkProxyStatsRange,
+  NetworkProxyTestResult,
+  NetworkProxyTestStage,
+  NetworkProxyValidationResult,
+} from './network-proxy'
+export {
+  DEFAULT_NETWORK_PROXY_CONFIG,
+  NETWORK_PROXY_PROTOCOLS,
+  matchesHostPattern,
+  normalizeHostname,
+  validateNetworkProxyConfig,
+} from './network-proxy'
 // codemode 域 WS 协议契约（codemode 设计 D1/A1：开关命令对请求响应 + settings.json 损坏错误态形状，renderer 与 runtime 共用）
 export type {
   CodemodeSettingsCorruption,
