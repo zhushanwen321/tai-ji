@@ -15,12 +15,16 @@
  * 锁定态（current=null）：同指纹不重试构造（fail-fast 首败即停，AGENTS.md 事实驱动原则⑧）；
  * 用户修正配置 → 指纹变化 → 自然重试。依赖注入（get/setGlobalDispatcher、buildProxy、
  * onError）使状态机在单测中以 fake 依赖驱动，不 mock undici 全局槽。
+ *
+ * 状态机前置伴随入口 = detachResidualDispatcher：jiti 全量 reload 后 installed=null 但槽上
+ * 仍挂着旧环境残留分流器，状态机自身无法区分「真无状态」与「reload 残留」，由它在推进前
+ * 摘除（转移表各分支才从干净基线成立）。
  */
 
 import type { Dispatcher as IDispatcher } from "undici";
 
 import { networkProxyFingerprint, type NetworkProxyConfig } from "./config.js";
-import { RuleDispatchDispatcher } from "./dispatcher.js";
+import { isRuleDispatchDispatcher, RuleDispatchDispatcher } from "./dispatcher.js";
 import { recordDispatch } from "./stats.js";
 
 /** 当前安装状态；null = 未安装（槽上是 pi 原生分发器）。 */
@@ -42,6 +46,25 @@ export interface InstallerDeps { // oe-exempt:20261019:framework:安装状态机
 	buildProxy: (config: NetworkProxyConfig) => IDispatcher;
 	/** extension error 呈现（logger.error；文案含恢复动作）。 */
 	onError: (message: string) => void;
+}
+
+/**
+ * reload 残留摘除（设计 §3.1 行为序列 2 在 reload 窗口的兑现）：jiti 全量 reload 后本扩展
+ * 换了新模块环境，installed=null 但全局槽仍挂着旧环境安装的 RuleDispatchDispatcher——
+ * 不摘除则 enabled=false 状态机判「无状态」零动作（旧分流器继续生效，禁用失效），或
+ * enabled=true 时旧分流器被捕获为 original 嵌套（同一请求经新旧两层各计一次，统计双计）。
+ * 摘除 = 恢复残留分流器安装时捕获的原分发器（fallback 引用），状态机从干净基线推进。
+ * installed 非 null（同环境 factory 重跑）早退：槽上就是 state.current，摘掉会与
+ * 「指纹未变无动作」分支冲突（分流器被摘而状态机不重装）。
+ */
+export function detachResidualDispatcher(
+	installed: InstalledState | null,
+	deps: Pick<InstallerDeps, "getGlobalDispatcher" | "setGlobalDispatcher">,
+): void {
+	if (installed !== null) return;
+	const current = deps.getGlobalDispatcher();
+	if (!isRuleDispatchDispatcher(current)) return;
+	deps.setGlobalDispatcher(current.fallback);
 }
 
 /**

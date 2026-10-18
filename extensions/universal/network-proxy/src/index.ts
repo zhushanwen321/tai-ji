@@ -22,7 +22,11 @@ import { getConfigPath } from "@zhushanwen/pi-llm-shared";
 
 import { loadNetworkProxyConfig } from "./config.js";
 import { buildProxyDispatcher } from "./dispatcher.js";
-import { applyNetworkProxyConfig, type InstalledState } from "./installer.js";
+import {
+	applyNetworkProxyConfig,
+	detachResidualDispatcher,
+	type InstalledState,
+} from "./installer.js";
 import { ensureExitFlush, flushStats } from "./stats.js";
 
 const logger = getLogger("network-proxy");
@@ -35,7 +39,7 @@ function recoveryHint(): string {
 	return `配置文件: ${getConfigPath("network-proxy")}，修正该文件后自下一轮对话起生效，或删除该文件恢复默认禁用态。`;
 }
 
-/** 读配置并推进安装状态机（加载时与每 turn 开始共用同一入口）。 */
+/** 读配置并推进安装状态机（加载时与每 turn 开始共用同一入口）；推进前先摘除 reload 残留。 */
 function refreshFromConfig(): void {
 	const config = loadNetworkProxyConfig((warning) => {
 		// 非法配置 / 坏 JSON：loadConfig 已回落 defaults（enabled=false → 不安装，全部直连），
@@ -43,6 +47,7 @@ function refreshFromConfig(): void {
 		logger.error(`${warning} ${recoveryHint()}`);
 	});
 	try {
+		detachResidualDispatcher(installed, { getGlobalDispatcher, setGlobalDispatcher });
 		installed = applyNetworkProxyConfig(config, installed, {
 			getGlobalDispatcher,
 			setGlobalDispatcher,

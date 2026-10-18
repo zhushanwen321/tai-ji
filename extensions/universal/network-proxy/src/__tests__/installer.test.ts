@@ -8,7 +8,12 @@ import { Dispatcher } from "undici";
 
 import type { NetworkProxyConfig } from "../config.ts";
 import { RuleDispatchDispatcher } from "../dispatcher.ts";
-import { applyNetworkProxyConfig, type InstalledState, type InstallerDeps } from "../installer.ts";
+import {
+	applyNetworkProxyConfig,
+	detachResidualDispatcher,
+	type InstalledState,
+	type InstallerDeps,
+} from "../installer.ts";
 
 class FakeDispatcher extends Dispatcher {
 	readonly label: string;
@@ -171,5 +176,69 @@ describe("applyNetworkProxyConfig 状态机", () => {
 		const state: InstalledState | null = applyNetworkProxyConfig(config(), null, deps);
 		expect(deps.setCalls[0]).toBe(state?.current);
 		expect(vi.isMockFunction(deps.onError)).toBe(false);
+	});
+});
+
+describe("detachResidualDispatcher（reload 残留摘除）", () => {
+	/** 模拟旧模块环境残留在全局槽上的分流器（跨环境识别走 Symbol.for 标记，不走 instanceof）。 */
+	function residualDispatcher(original: FakeDispatcher): RuleDispatchDispatcher {
+		return new RuleDispatchDispatcher({
+			fallback: original,
+			proxy: new FakeDispatcher("proxy"),
+			noProxy: [],
+			rules: [],
+			onCount: () => {},
+		});
+	}
+
+	it("installed=null 且槽上是残留分流器：恢复其 fallback（旧环境安装时捕获的原分发器）", () => {
+		const sharedOriginal = new FakeDispatcher("original");
+		const deps = createDeps(() => new FakeDispatcher("proxy"), sharedOriginal);
+		const residual = residualDispatcher(sharedOriginal);
+		detachResidualDispatcher(null, { ...deps, getGlobalDispatcher: () => residual });
+		expect(deps.setCalls).toEqual([sharedOriginal]);
+	});
+
+	it("installed=null 且槽上是 pi 原生分发器（非本扩展）：零动作", () => {
+		const deps = createDeps();
+		detachResidualDispatcher(null, deps);
+		expect(deps.setCalls).toHaveLength(0);
+	});
+
+	it("installed 非 null（同环境 factory 重跑）：早退零动作——槽上 current 不被误摘", () => {
+		const deps = createDeps();
+		const state = applyNetworkProxyConfig(config(), null, deps);
+		expect(state).not.toBeNull();
+		detachResidualDispatcher(state, deps);
+		expect(deps.setCalls).toHaveLength(1); // 仅首装那一次，摘除未触发
+	});
+
+	it("reload 后推进状态机：enabled=false 恢复直连（摘除 + 零动作，无旧分流器残留）", () => {
+		const sharedOriginal = new FakeDispatcher("original");
+		const deps = createDeps(() => new FakeDispatcher("proxy"), sharedOriginal);
+		const residual = residualDispatcher(sharedOriginal);
+		// reload 形态：新环境 installed=null、槽上是旧环境残留
+		detachResidualDispatcher(null, { ...deps, getGlobalDispatcher: () => residual });
+		const after = applyNetworkProxyConfig(config({ enabled: false }), null, {
+			...deps,
+			getGlobalDispatcher: () => sharedOriginal,
+		});
+		expect(after).toBeNull();
+		expect(deps.setCalls).toEqual([sharedOriginal]); // 摘除那一次；禁用分支零动作
+	});
+
+	it("reload 后推进状态机：enabled=true 捕获的 original 是原分发器（无嵌套双计）", () => {
+		const sharedOriginal = new FakeDispatcher("original");
+		const deps = createDeps(() => new FakeDispatcher("proxy"), sharedOriginal);
+		const residual = residualDispatcher(sharedOriginal);
+		detachResidualDispatcher(null, { ...deps, getGlobalDispatcher: () => residual });
+		const state = applyNetworkProxyConfig(config(), null, {
+			...deps,
+			getGlobalDispatcher: () => sharedOriginal,
+		});
+		expect(state?.originalDispatcher).toBe(sharedOriginal);
+		expect(state?.current).toBeInstanceOf(RuleDispatchDispatcher);
+		// 新分流器的 fallback 是原分发器而非旧残留——同一请求只经一层计数
+		expect((state?.current as RuleDispatchDispatcher).fallback).toBe(sharedOriginal);
 	});
 });

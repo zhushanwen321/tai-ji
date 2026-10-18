@@ -52,6 +52,20 @@ const PROXY_TLS_TUNING: buildConnector.BuildOptions = {
 export type DispatchCounter = (host: string, proxied: boolean) => void;
 
 /**
+ * 跨模块环境身份标记：jiti 全量 reload 产生的新模块环境与旧环境的类对象互异（instanceof
+ * 失效），而 Symbol.for 全局注册表跨模块环境共享——以它识别全局槽上本扩展旧环境残留的
+ * 分流器实例（残留不摘除则禁用失效 / 重装嵌套双计，见 installer.ts detachResidualDispatcher）。
+ */
+const RULE_DISPATCH_MARK = Symbol.for("@zhushanwen/pi-network-proxy:rule-dispatch");
+
+/** 类型守卫：目标分发器是否本扩展的 RuleDispatchDispatcher（跨模块环境可辨，见 RULE_DISPATCH_MARK）。 */
+export function isRuleDispatchDispatcher(
+	dispatcher: IDispatcher,
+): dispatcher is RuleDispatchDispatcher {
+	return RULE_DISPATCH_MARK in dispatcher;
+}
+
+/**
  * 防崩溃 error listener（对齐 pi withUndiciErrorListener 形态）：undici 内部 Client 在
  * 中途终止 fetch body 时可能 emit "error"——EventEmitter 的 unhandled "error" 特例会炸掉
  * pi 进程，listener 只吞事件不掩盖请求本身的错误（body 流照常经 reader.read() reject）。
@@ -119,6 +133,7 @@ export interface RuleDispatchDeps { // oe-exempt:20261019:framework:分流器依
  * 全局分发器，设计 §3.1 行为序列 3）。
  */
 export class RuleDispatchDispatcher extends Dispatcher {
+	readonly [RULE_DISPATCH_MARK] = true;
 	readonly fallback: IDispatcher;
 	readonly proxy: IDispatcher;
 	readonly noProxy: string[];
