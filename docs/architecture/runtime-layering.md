@@ -44,7 +44,7 @@ packages/runtime/src/
 ├── services/         # session/ config/ model/ git/ terminal/ quota/ ... + plugin-service/（黑盒）
 │   └── ports/        # ★ 依赖倒置载体：pi-engine / config / model / installer / git-* / workspace 等
 └── infra/            # pi/（rpc-client、process-manager、event-adapter、message-converter、session-store）
-                      # relay/ git/ fs/ installers/ system/ logger crash-journal mem-pressure watchdog
+                      # subagent-control/ git/ fs/ installers/ system/ logger crash-journal mem-pressure watchdog
                       # remote-access（remote token 热读） mobile-static（移动壳静态面）...
 ```
 

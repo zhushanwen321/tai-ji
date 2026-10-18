@@ -180,6 +180,42 @@ subagent 运行状态的内存单源（`packages/subagent-core/src/execution/per
 
 **代码映射**: 协议类型 `packages/shared/src/protocol.ts`（ServerMessageMapBase 的 `subagent.stream_chunk` / `session.getSubagentStreamState` 条目）；产生端 `packages/runtime/src/infra/subagent-control/subagent-tee.ts`（数据源 = 引擎 fd3 raw mirror）；消费端状态机 `packages/core/src/domain/chat/streaming-state-machine.ts`。
 
+### 引擎控制通道（control channel）
+
+托管态（runtime 存活）下 extension 与 runtime 之间的 typed socket 通道，承载 control 帧（`hello` / `hello_reject` / `engine_open` / `engine_opened` / `engine_open_failed` / `engine_frame` / `engine_close` / `engine_closed` / `error`；词表与版本 SSOT = SDK `protocol/control-protocol.ts`，`SUBAGENT_CONTROL_PROTOCOL_VERSION=1`）。选择谓词单源 = `isControlEnvActive`（`TAIJI_SUBAGENT_CONTROL_SOCKET` 非空 → runtime transport；空串/缺失 → local transport）。连接死亡 = `engine_transport_lost` fan-out，不自动重连；通道终局（`engine_closed`）与连接死亡两分，`unknown_channel` 原 code 透传。**代码映射**：runtime `infra/subagent-control/control-server.ts`、core `execution/engine/client/transport/control-client.ts`、SDK `protocol/control-protocol.ts` + `control-env.ts`。
+
+### control server
+
+runtime 侧的 control 通道服务端（`SubagentControlServer`，`packages/runtime/src/infra/subagent-control/control-server.ts`）：socket 权限（`run/` 0700 + socket 0600）与跨代扫描、`hello` 握手、`engine_open`（校验归属根/在册引擎/绝对路径，spawn 引擎并回 `engine_opened`）、`engine_frame` 双向路由、`engine_close` 有界等待后组杀、`engine_closed` 通知、channel 注册表、pid 文件/启动 sweep、raw mirror 读取。runtime listen 后同步初始化，失败即 fatal（托管态下 control 通道是引擎 spawn 的唯一权威，不静默回落 local）。
+
+### EngineTransport
+
+extension ↔ engine 接缝的传输契约（`EngineTransport`，`packages/subagent-core/src/execution/engine/client/transport/types.ts`）：`open` / `writeFrame` / `onFrame` / `onExit` / `close`，另有只读 `rootSessionId` 与可选 `onTransportError`。它只负责帧搬运与通道生死；engine-protocol 语义（initialize 握手 / 请求-应答关联 / 反向路由 / 崩溃重建）留在 `EngineClient`，送达回执留在引擎 run 生命周期。两实现 = `LocalEngineTransport` / `RuntimeEngineTransport`，选择谓词单源 = SDK `isControlEnvActive`；`TAIJI_SUBAGENT_TRANSPORT=local` 是显式逃生舱（强制 local，不改变 control env 注入面）。
+
+### LocalEngineTransport
+
+standalone（无 control env）下的 `EngineTransport` 实现（`packages/subagent-core/src/execution/engine/client/transport/local.ts`）：extension 进程直接 spawn 引擎 CLI，stdio 接线、pidfile 与孤儿 reaper 仅该模式注册；进程面错误由 `onExit` + `writeFrame` 回执表达，无 `onTransportError`。
+
+### RuntimeEngineTransport
+
+托管态（control env 非空）下的 `EngineTransport` 实现（`packages/subagent-core/src/execution/engine/client/transport/runtime.ts`）：经 `RuntimeControlClient` 连 control socket，`open` = `hello` + `engine_open`（收到 `engine_opened` 才 resolve），`writeFrame` 包进 `engine_frame` 信封，`engine_closed` 映射 `onExit`（含 `stderrTail`/`reason`），连接死亡经 `onTransportError` 报 `engine_transport_lost`。共享客户端按 `(socketPath, rootSessionId)` 复用（引用计数归零 dispose）——一条连接只服务一个根，首个 `engine_open` 定根，异根拒绝；无 run 上下文的探针用 spawn 期 temp 根独立成连接。
+
+### 引擎通道（engine channel）
+
+control 连接上的一次引擎进程生命周期单元（`channelId`）：`engine_open` 创建、`engine_close` / `engine_closed` 终结；一个 channel 可服务多次 run（引擎进程级），一个连接可承载多个 channel（通道数上限 256）。channel 树按 `rootSessionId` / `parentRecordId` / `depth` 维护嵌套关系；当前 `engine_open` 未携带 `recordId`，递归收割为机制预留，实际收割 = 同组进程杀 + 连接 close fan-out。
+
+### raw mirror（原始 stdout 镜像）
+
+引擎侧 fd3 原始 stdout 字节镜像：runtime 注入 `TAIJI_ENGINE_RAW_MIRROR=1` 后，引擎在 `child.stdout` 上于 `setEncoding` 前 tap 原始 Buffer、按字节层行切分，写 `{v, recordId, seq, b64}` NDJSON 到 fd3；runtime `SubagentMirrorHub` 解码并按 `(rootSessionId, recordId)` 索引 `SubagentTee`，同批落盘 `pi-subagent-<date>-<recordId>.jsonl`。tee 是权威数据（pi session / journal）的派生视图，不是第二权威；`TAIJI_ENGINE_RAW_MIRROR` 在引擎构建 task pi env 时显式剥除（shared 出站 deny 是第二道防线）。**代码映射**：`packages/pi-subagent-cli/src/raw-mirror.ts` + runtime `infra/subagent-control/mirror.ts`。
+
+### degraded（live 流降级）
+
+raw mirror 的显式降级标注（additive）：写侧 seq 按 `recordId` 进程级单调、首帧必须为 0；任一 record 首帧非 0 或后续非 `last+1`（空洞/丢弃/坏帧）→ 该 record `degraded:true`，停止发布 live 视图，`session.getSubagentStreamState` 响应带 `degraded`，磁盘镜像与 reload 不受影响。可见性 = 拉取触发（订阅建立 / chunk 失步）：drawer 已开且 seq 空洞后无新 chunk 时提示条不即时出现，重开/刷新后 visible；即时推送面未实现。**代码映射**：`packages/runtime/src/infra/subagent-control/{mirror,subagent-tee}.ts`、core `streaming-state-machine.ts`、renderer `SubagentTab.vue`。
+
+### prompt 送达回执（prompt delivery receipt）
+
+引擎 run 生命周期内的送达判定（M2）：pi 对 `prompt` 命令的 response 是唯一成功回执；stdout 活性只用于取消「prompt 写入后 30s 完全零输出」计时器（不是第二回执、不是 pending 状态）。完全零输出 → `engine_prompt_not_delivered`；`success:false` → `engine_prompt_rejected`；stdin 不可用 / EPIPE → 立即失败；迟到 response 不重复 settle；**不加重试**（prompt 可能已产生副作用）。**代码映射**：`packages/pi-subagent-cli/src/prompt-ack.ts` + `spawn-runner.ts`。
+
 ### 模型覆盖（modelOverride）
 
 用户对执行中/已中断的 subagent 或 workflow run 实时下达的模型意图，作用域 = 该会话/run 的剩余执行（含中断后 resume 与进程重启后重开），优先级最高（用户覆盖赢，压过 agent frontmatter 与脚本显式参数）。载体 = record 事件文件 `record-model-override` 帧（chat 域）/ run journal `model-override` 帧（workflow 域），fold 取最新、替换不叠加（至多一个生效覆盖值）。配套术语：**生效模型** = pi 子进程当前实际使用的模型（审计权威 = pi session `model_change` 条目，热切后可与本轮盖章值不同）；**覆盖记账** = 覆盖意图的持久化半场（管未派发步骤/resume/重开），与**热切**半场（管在跑成员立即生效）构成同一意图的两半——只热切不记账会被下一轮 spawn 的旧 `--model` argv 压回。resume 生效模型三档回落：resume 显式参数 > 持久化覆盖记录 > run 创建时模型。**模型意图 / 历史事实（持久化二分）**：切换只写「意图」类载体（override 帧），永不修改「历史事实」类持久化（record.model 盖章、run-created.model、pi session model_change 条目）。机制 SSOT：[ADR-0129](adr/decisions.md)；用户通道 = 面板模型选择器 / `/subagent-model` 命令（runtime 经 prompt 斜杠命令出站点触达 pi extension，守卫 `.githooks/check_prompt_outposts.py` 白名单）。

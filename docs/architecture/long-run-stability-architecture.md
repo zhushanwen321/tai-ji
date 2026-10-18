@@ -23,7 +23,7 @@
 |---|------|---------|----------------|
 | D1 | **统一崩溃登记（crash journal）** | `<dataDir>/logs/crashes/` 双 JSONL（main.jsonl / runtime.jsonl，10MB 轮转），全层崩溃/自愈事件单一出口；防漏三设计：detailDigest 内嵌、main unclean-exit marker、renderer 错误上报节流 | 复用日志 grep（人工三处拼时间线 = G4 不成立） |
 | D2 | **pi 崩溃 bounded proactive respawn**——对原 pi-exit-notification-and-respawn.md §6.2「lazy respawn」裁决（已删，git 可追溯）的显式修订，修订记录落原详述（git 可追溯） | 复用 `restoreSession` 自动 respawn：连续失败计数（成功 60s 清零）+ 熔断死态；崩溃分类差异化（OOM 类延迟）；intentional-kill 抑制集合（先登记后终止 / 消费即删 / TTL / 取消 pending respawn）；仅用户可见 session；在途 turn 重发提示 | 保持 lazy（每次崩溃都是手动恢复，G2 不成立——新证据使原裁决三论据全部失效） |
-| D3 | **runtime 内存看门狗 + 优雅滚动重启** | 水位采样 → 告警降级（清缓存）→ 临界优雅滚动重启（专用退出码 + supervisor 跳过退避）；持续 checkpoint 交接统一计划内/崩溃恢复路径（clean shutdown 删除、staleness guard、完整性降级、风暴防护）；relay 活跃推迟（30min 上限 + heap 92% 或系统压力双维硬升级）；**默认不武装**（C-proc-19，Gate W 数据门） | 只重启不降级；固定 RSS 阈值；永不重启只靠 GC |
+| D3 | **runtime 内存看门狗 + 优雅滚动重启** | 水位采样 → 告警降级（清缓存）→ 临界优雅滚动重启（专用退出码 + supervisor 跳过退避）；持续 checkpoint 交接统一计划内/崩溃恢复路径（clean shutdown 删除、staleness guard、完整性降级、风暴防护）；在途引擎通道 / extension 聚合上报活跃推迟（30min 上限 + heap 92% 或系统压力双维硬升级）；**默认不武装**（C-proc-19，Gate W 数据门） | 只重启不降级；固定 RSS 阈值；永不重启只靠 GC |
 | D4 | **renderer 自愈闭环** | 全局错误捕获（节流去重）+ 面板级错误边界 + render-process-gone 自动 reload（per-window 循环保护）+ 草稿 localStorage 持久化 + 内存压力联动收紧 LRU | 白屏后用户手动 Cmd+R（G2/G4 同时不成立） |
 | D5 | **extension 错误遏制** | ext-guards 新增异步回调兜底 + stale-ctx 安全调用两类检查原语，21 包全量接入，stale 识别串入 pi 版本门禁探针族 | pi 上游修隔离（铁律禁止）；只修个案；runtime 侧兜底（隔进程鞭长莫及） |
 | D6 | **长跑资源治理** | 历史加载分页预算协议（pi RPC 无倒序分页是外部约束——只消全量驻留/下发/parse，不消全量传输）；entryStates 截断 + 图片落盘引用化；tee 大小轮转（显式推翻「tee 不轮转」旧裁决，198MB 实证）；全量读统一过预检流式化 | 不动数据路径只靠看门狗（兜底变高频主路径 = 正常路径 broken） |
