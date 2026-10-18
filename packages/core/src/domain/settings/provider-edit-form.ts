@@ -121,8 +121,10 @@ export interface ProviderEditFormModule {
    * 回显已存 API Key（眼睛按钮，按需 RPC——只对 api_key 凭据生效，OAuth token 不走本通道）：
    * 拉取成功填入草稿并置 showKey；草稿已非空（用户已输入）时为空操作。
    * 回显值不构成 dirty、保存时不回写（回显 = 所存值，回写会改变凭据来源语义）。
+   * 失败（无可回显凭据 / RPC 错误）返回 ok:false + 可直接展示的文案——保存条仅在 dirty
+   * 时渲染，回显失败必须由调用方给可见反馈（C-proc-21，禁静默无动作）。
    */
-  revealApiKey(): Promise<void>
+  revealApiKey(): Promise<{ ok: true } | { ok: false; error: string }>
   /**
    * 配额区 carry-in 槽位用「真实未保存草稿」：回显值（= 所存值）不算待保存，返回 ''。
    * 供 useQuotaConfigure 的 providerCredentialPendingSave 判定（防回显触发「已填未保存」误报）。
@@ -366,9 +368,9 @@ export function createProviderEditForm(input: ProviderEditFormInputs): ProviderE
    * 只对 api_key 凭据生效：runtime 端 OAuth token 永不出协议（见协议 config.revealProviderApiKey）。
    * 回显值写入草稿 + 置 showKey（明文可见），但不进入 dirty、save 不回写（见 resolveApiKeyChange）。
    */
-  async function revealApiKey(): Promise<void> {
+  async function revealApiKey(): Promise<{ ok: true } | { ok: false; error: string }> {
     const p = providerRef.value
-    if (!p || draft.apiKey !== '' || revealingApiKey.value) return
+    if (!p || draft.apiKey !== '' || revealingApiKey.value) return { ok: true }
     revealingApiKey.value = true
     try {
       const res = await getSettingsTransport().revealProviderApiKey(p.id)
@@ -377,11 +379,15 @@ export function createProviderEditForm(input: ProviderEditFormInputs): ProviderE
         revealedApiKey.value = res.apiKey
         showKey.value = true
         if (actionErrorState.value?.source === 'reveal') clearActionError()
-      } else {
-        setActionError('reveal', t('composable.revealApiKeyUnavailable'))
+        return { ok: true }
       }
+      const error = t('composable.revealApiKeyUnavailable')
+      setActionError('reveal', error)
+      return { ok: false, error }
     } catch (e) {
-      setActionError('reveal', toErrorMessage(e))
+      const error = toErrorMessage(e)
+      setActionError('reveal', error)
+      return { ok: false, error }
     } finally {
       revealingApiKey.value = false
     }

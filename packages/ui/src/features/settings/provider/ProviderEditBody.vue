@@ -367,7 +367,7 @@ const emit = defineEmits<{
 }>()
 
 const { t } = useI18n()
-const { info: toastInfo } = useToast()
+const { info: toastInfo, error: toastError } = useToast()
 
 // wave4 C4 边界修订（B-2）：catalog provider 的 builtin 条目只读，override 条目开放增删
 // （追加自定义模型是 pi 原生支持的合法操作，见模板区注释）。kind 缺失当作 custom（向后兼容）。
@@ -493,13 +493,15 @@ watch(isDirty, (v) => emit('dirtyChange', v), { immediate: true })
 /**
  * 眼睛按钮（2026-10-18）：草稿非空 = 纯显隐切换；草稿为空（= 已存 key 未回显）→ 按需拉取回显
  * （只写入草稿 + 明文显示，不置 dirty、保存不回写——见 provider-edit-form.revealApiKey）。
+ * 回显失败走 toast：保存条仅在 dirty 时渲染，不能把失败文案押在它身上（C-proc-21 可见反馈）。
  */
-function onToggleKey(): void {
+async function onToggleKey(): Promise<void> {
   if (form.apiKey !== '') {
     showKey.value = !showKey.value
     return
   }
-  void revealApiKey()
+  const result = await revealApiKey()
+  if (!result.ok) toastError(result.error)
 }
 
 /** 添加模型：捕获 addModel 校验错填到 actionError（save-bar 显示；来源标签 models，MF-1-7） */

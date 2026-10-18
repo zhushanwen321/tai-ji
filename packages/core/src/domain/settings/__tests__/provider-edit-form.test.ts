@@ -235,11 +235,34 @@ describe('已存 API Key 回显（2026-10-18，眼睛按钮）', () => {
     const { form } = mountForm(makeProvider({ apiKeySet: true }))
     revealSpy().mockResolvedValue({ available: false })
 
-    await form.revealApiKey()
-
+    await expect(form.revealApiKey()).resolves.toEqual({
+      ok: false,
+      error: 'composable.revealApiKeyUnavailable',
+    })
     expect(form.actionError.value).toBe('composable.revealApiKeyUnavailable')
     expect(form.draft.apiKey).toBe('')
     expect(form.showKey.value).toBe(false)
+  })
+
+  it('RPC 失败 → 返回 ok:false + 错误文案（调用方负责可见反馈，禁静默无动作），revealing 复位', async () => {
+    const { form } = mountForm(makeProvider({ apiKeySet: true }))
+    revealSpy().mockRejectedValue(new Error('runtime down'))
+
+    await expect(form.revealApiKey()).resolves.toEqual({ ok: false, error: 'runtime down' })
+    expect(form.actionError.value).toBe('runtime down')
+    expect(form.revealingApiKey.value).toBe(false)
+  })
+
+  it('回显成功返回 ok:true；apiKeyPendingDraft 排除回显值（配额区不误报已填未保存）', async () => {
+    const { form } = mountForm(makeProvider())
+    revealSpy().mockResolvedValue({ available: true, apiKey: 'sk-stored', source: 'auth.json' })
+
+    await expect(form.revealApiKey()).resolves.toEqual({ ok: true })
+    // 回显值 = 所存值，不是待保存草稿
+    expect(form.apiKeyPendingDraft.value).toBe('')
+
+    form.draft.apiKey = 'sk-edited'
+    expect(form.apiKeyPendingDraft.value).toBe('sk-edited')
   })
 
   it('切换 provider → 回显态与草稿同批清空（回显值不得跨 provider 复用）', async () => {

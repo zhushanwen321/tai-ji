@@ -86,6 +86,7 @@ function makeHandler() {
       hasProviderCredential: vi.fn().mockReturnValue(false),
       listCredentialBackedProviderIds: vi.fn().mockReturnValue(new Set<string>()),
       resolveProviderCredential: vi.fn().mockResolvedValue(undefined),
+      resolveProviderApiKeyRaw: async () => undefined,
       resolveProviderBaseUrl: vi.fn().mockReturnValue(undefined),
     },
     skillRegistry: { getGlobalSkills: () => [], getProjectSkills: vi.fn().mockResolvedValue([]) } as unknown as SettingsHandlerContext['skillRegistry'],

@@ -443,6 +443,7 @@ describe('M2b: listProviders 凭据判定走 resolver 批量 sync 版（链 5）
       hasProviderCredential: vi.fn(() => false),
       listCredentialBackedProviderIds: vi.fn(() => new Set(ids)),
       resolveProviderCredential: vi.fn(async () => undefined),
+      resolveProviderApiKeyRaw: async () => undefined,
       resolveProviderBaseUrl: vi.fn(() => undefined),
     }
     return resolver
@@ -529,6 +530,7 @@ describe('M4: catalog 展示字段（网关优先 + 派生兜底）', () => {
     hasProviderCredential: () => false,
     listCredentialBackedProviderIds: () => new Set<string>(),
     resolveProviderCredential: async () => undefined,
+    resolveProviderApiKeyRaw: async () => undefined,
     resolveProviderBaseUrl: () => undefined,
   }
 
@@ -629,6 +631,7 @@ describe('D12: 删除链 quota 清理（排序约束 + warn-only）', () => {
     hasProviderCredential: () => false,
     listCredentialBackedProviderIds: () => new Set<string>(),
     resolveProviderCredential: async () => undefined,
+    resolveProviderApiKeyRaw: async () => undefined,
     resolveProviderBaseUrl: () => undefined,
   }
 

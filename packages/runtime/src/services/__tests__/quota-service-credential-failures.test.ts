@@ -39,6 +39,7 @@ const stubResolver: IProviderCredentialResolver = {
   hasProviderCredential: () => false,
   listCredentialBackedProviderIds: () => new Set<string>(),
   resolveProviderCredential: () => nextResolved,
+  resolveProviderApiKeyRaw: async () => undefined,
   resolveProviderBaseUrl: () => undefined,
 }
 

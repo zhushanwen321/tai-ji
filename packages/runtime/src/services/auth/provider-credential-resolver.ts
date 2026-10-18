@@ -46,6 +46,12 @@ interface CredentialSource {
    * typeof 判别失效，'command' 会被当明文 key 透传）；undefined = 未命中。
    */
   readKey(providerId: string): Promise<{ key: string } | { unsupported: UnsupportedCredentialForm } | undefined>
+  /**
+   * 回显用 api_key 原值（不展开模板、不返回 oauth 的 access）。
+   * undefined = 该源无条目；{ notRevealable } = 该源有凭据但形态不可回显（oauth），
+   * 消费方据此**停止向低优先源回落**（见 resolver 类注释）。
+   */
+  readRawApiKey(providerId: string): Promise<{ key: string } | { notRevealable: true } | undefined>
 }
 
 /**
@@ -189,6 +195,14 @@ function createAuthJsonSource(deps: ProviderCredentialResolverDeps): CredentialS
       const credential = await deps.authService.getCredential(providerId)
       return credential ? readAuthCredentialKey(credential) : undefined
     },
+    readRawApiKey: async (providerId) => {
+      const credential = await deps.authService.getCredential(providerId)
+      if (!credential) return undefined
+      // oauth 条目 = 高优先源存在但不可回显：返回判别结构阻止向低优先源回落（models.json
+      // 的 apiKey 可能是历史残留，回显它会让用户把非生效值当成自己的 key）。
+      if (credential.type !== 'api_key') return { notRevealable: true as const }
+      return typeof credential.key === 'string' && credential.key !== '' ? { key: credential.key } : undefined
+    },
   }
 }
 
@@ -215,6 +229,10 @@ function createModelsJsonSource(deps: ProviderCredentialResolverDeps): Credentia
     readKey: async (providerId) => {
       const apiKey = deps.configStore.getProviderConfig(providerId)?.apiKey
       return isUsableApiKey(apiKey) ? toReadKeyOutcome(resolveCredentialValue(apiKey)) : undefined
+    },
+    readRawApiKey: async (providerId) => {
+      const apiKey = deps.configStore.getProviderConfig(providerId)?.apiKey
+      return isUsableApiKey(apiKey) ? { key: apiKey } : undefined
     },
   }
 }
@@ -258,6 +276,24 @@ export class ProviderCredentialResolver implements IProviderCredentialResolver {
       // 用户修配置比静默换源诚实。
       if ('unsupported' in outcome) return outcome
       return { key: outcome.key, source: source.id }
+    }
+    return undefined
+  }
+
+  /**
+   * 回显用 api_key 原值（2026-10-18，设置页眼睛按钮）：只取 api_key 形态、不展开配置值。
+   * 源优先级与 resolveProviderCredential 共用 sources 数组（单点声明，不另写一遍链）；
+   * auth.json 的 oauth 条目被 readRawApiKey 结构性跳过（token 永不出协议）。
+   */
+  async resolveProviderApiKeyRaw(
+    providerId: string,
+  ): Promise<{ apiKey: string; source: 'auth.json' | 'models.json' } | undefined> {
+    for (const source of this.sources) {
+      const outcome = await source.readRawApiKey(providerId)
+      if (outcome === undefined) continue
+      // 高优先源是 oauth 形态：不可回显且**不回落**（回落会显示低优先源的历史残留值）
+      if ('notRevealable' in outcome) return undefined
+      return { apiKey: outcome.key, source: source.id }
     }
     return undefined
   }

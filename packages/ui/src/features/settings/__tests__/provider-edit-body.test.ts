@@ -157,8 +157,9 @@ const CATALOG_GATEWAY_P: ProviderInfo = {
 const quotaFactoryStub = vi.fn(() => makeQuotaModuleStub({ state: 'ready' }))
 
 const toastInfoSpy = vi.fn()
+const toastErrorSpy = vi.fn()
 const toastStub: SettingsToast = {
-  error: vi.fn(),
+  error: toastErrorSpy,
   info: toastInfoSpy,
   warning: vi.fn(),
 }
@@ -197,6 +198,7 @@ beforeEach(() => {
   revealApiKeySpy.mockResolvedValue({ available: false })
   quotaFactoryStub.mockClear()
   toastInfoSpy.mockClear()
+  toastErrorSpy.mockClear()
 })
 
 afterEach(() => {
@@ -604,7 +606,7 @@ describe('已存 API Key 回显（眼睛按钮）', () => {
     expect(wrapper.find('[data-testid="provider-save-btn"]').attributes('disabled')).toBeUndefined()
   })
 
-  it('回显失败（available:false）→ 输入框不变、不明文显示（错误写入 actionError，归 core module 用例断言）', async () => {
+  it('回显失败（available:false）→ 输入框不变、不明文显示 + toast 可见反馈（C-proc-21）', async () => {
     revealApiKeySpy.mockResolvedValue({ available: false })
     wrapper = mountBody(APIKEY_P)
     await flushPromises()
@@ -615,6 +617,8 @@ describe('已存 API Key 回显（眼睛按钮）', () => {
     const input = wrapper.find('[data-testid="provider-edit-apikey"]')
     expect((input.element as HTMLInputElement).value).toBe('')
     expect((input.element as HTMLInputElement).type).toBe('password')
+    // 保存条 dirty 才渲染 → 失败文案必须走 toast，否则用户看到的是「点了没反应」
+    expect(toastErrorSpy).toHaveBeenCalledWith('composable.revealApiKeyUnavailable')
   })
 
   it('草稿已输入 → 眼睛只切换显隐，不发 RPC', async () => {

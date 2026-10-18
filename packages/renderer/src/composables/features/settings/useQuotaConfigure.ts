@@ -455,6 +455,28 @@ export function useQuotaConfigure(inputs: QuotaConfigureInputs): QuotaConfigureM
   }
 
   /**
+   * 保存前本地校验（不发 RPC）：cookie 粘贴格式 / workspace 归一化。
+   * 返回 { errorKey } = 拦住（调用方转 i18n 文案）；{ workspace } = 通过并带回 payload
+   * （undefined = 该 fetcher 不需要 workspace）。从 saveAndTest 抽出：校验分支与参数构造
+   * 分开后各自职责单一，saveAndTest 的圈复杂度回到门限内（metrics-gate ≤15）。
+   */
+  function resolvePreSaveInputs(
+    cookieDraft: string,
+  ): { errorKey: string } | { workspace: string | undefined } {
+    // cookie 粘贴格式前置校验（2026-10-18，用户手动复制路径）：归一化后为空（不含任何
+    // name=value 对，典型 = 从 DevTools Application → Cookies 表格复制的制表符文本）
+    // 当场拦下并给精确指引——不发 RPC，不落入 runtime 侧「凭证可能已失效」的误报。
+    // 归一化实现 SSOT 在 shared（与 runtime fetcher 同一函数，两端判据不得各写一份）。
+    if (isCookieAuth.value && cookieDraft && normalizeCookieHeader(cookieDraft) === '') {
+      return { errorKey: 'settings.providerEdit.quotaCookieFormatInvalid' }
+    }
+    // Workspace：明文回显字段，传归一化后的草稿（D13：永不传 ''）；空 / 非法输入本地拦截
+    if (!needsWorkspace.value) return { workspace: undefined }
+    const normalized = normalizeWorkspaceDraft(draft.value.workspace)
+    return normalized.ok ? { workspace: normalized.payload } : { errorKey: normalized.errorKey }
+  }
+
+  /**
    * 保存并测试（D2）：先把草稿落盘（quota.configure），成功后再触发查询（quota.refresh）。
    * 参数构造严格按 §7.2 细节 4 的构造表；credentialSource 恒由 payload 显式值落盘，**写侧禁用**
    * resolveQuotaCredentialSource 推断——该函数是**显式值优先**（`quota?.credentialSource ?? …`），
@@ -481,25 +503,12 @@ export function useQuotaConfigure(inputs: QuotaConfigureInputs): QuotaConfigureM
 
     configureError.value = ''
 
-    // cookie 粘贴格式前置校验（2026-10-18，用户手动复制路径）：归一化后为空（不含任何
-    // name=value 对，典型 = 从 DevTools Application → Cookies 表格复制的制表符文本）
-    // 当场拦下并给精确指引——不发 RPC，不落入 runtime 侧「凭证可能已失效」的误报。
-    // 归一化实现 SSOT 在 shared（与 runtime fetcher 同一函数，两端判据不得各写一份）。
-    if (isCookieAuth.value && cookieDraft && normalizeCookieHeader(cookieDraft) === '') {
-      configureError.value = t('settings.providerEdit.quotaCookieFormatInvalid')
+    const preSave = resolvePreSaveInputs(cookieDraft)
+    if ('errorKey' in preSave) {
+      configureError.value = t(preSave.errorKey)
       return
     }
-
-    // Workspace：明文回显字段，传归一化后的草稿（D13：永不传 ''）；空 / 非法输入本地拦截
-    let workspacePayload: string | undefined
-    if (needsWorkspace.value) {
-      const normalized = normalizeWorkspaceDraft(draft.value.workspace)
-      if (!normalized.ok) {
-        configureError.value = t(normalized.errorKey)
-        return
-      }
-      workspacePayload = normalized.payload
-    }
+    const workspacePayload = preSave.workspace
 
     const payload: QuotaConfigurePayload = {
       providerId: p.id,
