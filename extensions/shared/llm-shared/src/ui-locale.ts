@@ -14,7 +14,7 @@
 import { readFileSync, statSync } from "node:fs";
 import { join } from "node:path";
 
-/** UI 语言两值（与 ui-preferences.json 读写两端守卫测试对齐的字面量词表）。 */
+/** UI 语言两值（与 ui-preferences.json 读写两端检查测试对齐的字面量词表）。 */
 export type UiLocale = "zh-CN" | "en-US";
 
 export const DEFAULT_UI_LOCALE: UiLocale = "en-US";

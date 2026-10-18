@@ -39,7 +39,7 @@ vi.mock('@zhushanwen/pi-extension-logger', () => ({
 vi.mock('../importer.js', () => ({ importLegacyStore: vi.fn(() => vi.fn()) }))
 
 // u-p2b 接线断言：index.ts 的 refreshWidget 必须走结构化/双模入口 `setSchedulerWidget`
-// （取代旧 `renderSchedulerWidget` TUI 单形态）——mock 捕获调用面（任务数组直传）。
+// （取代旧 `renderSchedulerWidget` TUI 单形态）——mock 捕获调用（任务数组直传）。
 const { setSchedulerWidgetMock } = vi.hoisted(() => ({ setSchedulerWidgetMock: vi.fn() }))
 vi.mock('../widget.js', async (importOriginal) => {
   const actual = await importOriginal<typeof import('../widget.js')>()
@@ -294,7 +294,7 @@ describe('F1: session_start 停旧 runtime（crash-fix U4）', () => {
     expect(setSchedulerWidgetMock).toHaveBeenCalledTimes(2) // runtime2 初始渲染（实例态重置，首帧必推）
     expect(runtimeInstances).toHaveLength(2)
 
-    // 行为断言（验收口径）：stopScheduler 恰被调一次且命中 runtime1；
+    // 行为断言（验收标准）：stopScheduler 恰被调一次且命中 runtime1；
     // F1 缺失时旧 timer 不被停（数组为空或不含 runtime1）
     expect(stopSchedulerCalls).toEqual([runtimeInstances[0]])
   })

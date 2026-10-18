@@ -68,7 +68,7 @@ interface FooterHandshakeSlot {
 	pending: PendingEntry[];
 }
 
-// ── Slot 读取（version + 结构守卫）──
+// ── Slot 读取（version + 结构检查）──
 
 /**
  * 从 globalThis 读 slot；version !== 1 或结构不合规视为无 slot（返回 undefined）。
@@ -80,7 +80,7 @@ function readSlot(): FooterHandshakeSlot | undefined {
 	const slot = Reflect.get(globalThis, FOOTER_HANDSHAKE_KEY);
 	if (slot === undefined) return undefined;
 	if (typeof slot !== "object" || slot === null) return undefined;
-	// 双字段 in 守卫：version + pending 都在才视为 slot 雏形（避免 as 到全可选类型的无校验断言）
+	// 双字段 in 检查：version + pending 都在才视为 slot 雏形（避免 as 到全可选类型的无校验断言）
 	if (!("version" in slot) || !("pending" in slot)) return undefined;
 	const loose = slot as { version: unknown; pending: unknown };
 	if (loose.version !== HANDSHAKE_VERSION) {

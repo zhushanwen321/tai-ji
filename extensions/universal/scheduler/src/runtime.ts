@@ -53,7 +53,7 @@ export interface SchedulerModelOps {
 
 /**
  * 未决模型切换记录（纯内存态）。模型语义异常不进持久化词表
- * （replay 守卫对 advance.status 硬校验 'success'，旁路字段会炸重放推进）。
+ * （replay 检查对 advance.status 硬校验 'success'，旁路字段会炸重放推进）。
  *
  * 生命周期（ADR-0122 事实查询翻转后）：dispatch 受理 → 记录创建（in-flight 等价语义：
  * 等 run 落定）；恢复兑现锚点 = isIdle() 同步事实查询（agent_settled 事件提前触发 +
@@ -68,7 +68,7 @@ interface PendingModelSwitch {
 }
 
 // HISTORY_LIMIT 单点在 types.ts（ext-simplify-08 L5）——与 replay.ts 的 advance 折叠共用
-// STALE_CTX_MARKER（文案兜底分诊词）已迁移到 ext-guards 共享守卫（guardStaleCtx 内部
+// STALE_CTX_MARKER（文案兜底分诊词）已迁移到 ext-guards 共享检查（guardStaleCtx 内部
 // 引用，本文件不再直接持有）。语义：G1 模块级代际检测（isCtxStale）为主判；文案子串
 // 覆盖代际盲区——显式 reload / cwd 变化触发 clearExtensionCache 后 jiti 重新 import 产生
 // 全新模块环境，旧闭包引用的模块级代数冻结不再递增，isCtxStale 恒 false，只剩错误文案
@@ -90,9 +90,9 @@ export class SchedulerRuntime {
   // 未决模型切换记录（同时至多一条——互斥窗口 + 模型 op 串行队列共同保证「切换→dispatch→
   // 恢复」周期单在途、单 setModel 在途）
   private pendingModelSwitch: PendingModelSwitch | null = null
-  // 模型 op 串行队列尾（MF-2 收口）：调度器发起的全部 setModel（dispatch 切换 / 期望模型
+  // 模型 op 串行队列尾（MF-2 收敛）：调度器发起的全部 setModel（dispatch 切换 / 期望模型
   // 恢复 / 错误路径恢复）单点经 serializeModelOp 入队——「setModel 起步 → 记录创建 /
-  // 恢复收口」全程持队，任何后继 setModel 发起点先排队前置等待，两个 setModel 并发
+  // 恢复收尾」全程持队，任何后继 setModel 发起点先排队前置等待，两个 setModel 并发
   // 结构性不可能（完成顺序不定 → turn 静默跑错模型的交错被消除）。链条引用恒吞错
   // 自愈（见 serializeModelOp），前序 op 失败不阻断后继。
   private modelOpChain: Promise<void> = Promise.resolve()
@@ -240,13 +240,13 @@ export class SchedulerRuntime {
   startScheduler(): void {
     if (this.tickTimer) return
     this.tickTimer = setInterval(() => {
-      // 三件套语义等价迁移到共享守卫 guardStaleCtx（crash-resilience D1 / u1-ext-guard；
-      // 守卫语义 = 本处原地实现的泛化，迁移对照逐条可证）：
-      // 1. G1 前置检查（S9）：守卫的 isCtxStale 命中 → onStale（= retireStaleTimer）且
+      // 三件套语义等价迁移到共享检查 guardStaleCtx（crash-resilience D1 / u1-ext-guard；
+      // 检查语义 = 本处原地实现的泛化，迁移对照逐条可证）：
+      // 1. G1 前置检查（S9）：检查的 isCtxStale 命中 → onStale（= retireStaleTimer）且
       //    tickScheduler 不执行——与迁移前「前置分支 return」等价：本 runtime 所属 session
       //    已被替换 → timer 属泄漏资源自停退场，不触碰捕获的 stale ctx，不依赖 pi 错误文案。
       //    主防线仍是 F1（session_start 停旧 timer），此处覆盖 F1 未能触达的泄漏路径。
-      // 2. F2 catch 分诊（防御兜底）：守卫对 tickScheduler 的 rejection 挂同一分诊谓词
+      // 2. F2 catch 分诊（防御兜底）：检查对 tickScheduler 的 rejection 挂同一分诊谓词
       //    `isCtxStale() || 文案含 STALE_CTX_MARKER`（字面不变）——stale → retireStaleTimer；
       //    非 stale → 原样 reject，由下方 .catch 仅告警不终止调度（'tick error' 文案不变，
       //    U2/G1-c 锚定）。fire-and-forget 的 tick 链路必须自带 catch——tick 内任何异常
@@ -254,7 +254,7 @@ export class SchedulerRuntime {
       //    即 unhandledRejection，直接崩掉 pi 主进程（E1 同机制）。
       // 3. retireStaleTimer 自停：未改（'tick stopped' warn 口径与幂等 stopScheduler 原样，
       //    U1/G1-b/G1-d 锚定）。
-      // `?.catch`：前置检查命中时守卫返回 undefined（fn 未执行、无 Promise、无 rejection
+      // `?.catch`：前置检查命中时检查返回 undefined（fn 未执行、无 Promise、无 rejection
       // 可接——retire 已由 onStale 完成）；非 stale 时返回 Promise，非 stale rejection
       // 流到 .catch 仅告警。
       void guardStaleCtx(() => this.tickScheduler(), {
@@ -298,7 +298,7 @@ export class SchedulerRuntime {
     // 循环才开 setModel；更广的「任意两个 setModel 不并发」由模型 op 串行队列（modelOpChain）
     // 结构保证——含 agent_settled 恢复 fire-and-forget 挂点，dispatch 模型分支排在其后。
     // 无未决记录（或非 idle）的绝大多数 tick 同步返回、不引入 microtask 断点——dispatch
-    // 的同步段契约（in-flight 守卫在 tickScheduler() 未 await 时同步可见）保持不变。
+    // 的同步段契约（in-flight 检查在 tickScheduler() 未 await 时同步可见）保持不变。
     const settling = this.settlePendingIfIdle('tick-reconcile')
     if (settling) await settling
 
@@ -343,7 +343,7 @@ export class SchedulerRuntime {
    * dispatch 单个任务。返回 true 表示消息已发出（pi.sendMessage 受理），false 表示
    * no-op（task disabled / 已有同任务在途 / rate-limited）。
    *
-   * R3-S1 in-flight 守卫：tick 为 fire-and-forget，若 tick1 的 `await backend.sendMessage`
+   * R3-S1 in-flight 检查：tick 为 fire-and-forget，若 tick1 的 `await backend.sendMessage`
    * 挂起超过 TICK_INTERVAL_MS（如 pi 卡死），tick2 的 step2 会再标 pending、step3 对同一
    * task 并发第二个 dispatch → 同一 prompt 双注入。参照 subagent-workflow resumesInFlight
    * 模式：入口同步置位、finally 清除（覆盖 gate / rate-limit / sendMessage 抛错 / 成功推进
@@ -365,8 +365,8 @@ export class SchedulerRuntime {
   }
 
   /**
-   * dispatch 本体（dispatchTask 守卫置位后执行；runTaskNow 与 tick step3 共用入口，
-   * 手动 run-now 与挂起中的 tick dispatch 并发时同样被守卫拦截）。
+   * dispatch 本体（dispatchTask 检查置位后执行；runTaskNow 与 tick step3 共用入口，
+   * 手动 run-now 与挂起中的 tick dispatch 并发时同样被检查拦截）。
    * steer 直投（scheduler-steer-direct-dispatch 设计）：{deliverAs:'steer', triggerTurn:true}
    * 在 pi 侧的两分支——busy 时 steer 插入当前 turn（立即被模型看到）、idle 时开新 turn。
    * 受理即记账：pi extension API sendMessage 是 fire-and-forget（返回 void，错误走
@@ -403,15 +403,15 @@ export class SchedulerRuntime {
         // skip 本轮 + pending 留待下 tick 重试（复用现状 skip 语义，不建真队列；不需切模型
         // 的任务不受互斥影响——检查只在本分支）。「dispatch 写新记录前先结算旧记录」
         // 的落地：本分支结构性永不写新记录（杜绝新旧叠写），skip 前做一次 isIdle() 事实
-        // 查询结算（idle 即恢复收口），保证新任务不被旧记录无限阻塞。
+        // 查询结算（idle 即恢复收尾），保证新任务不被旧记录无限阻塞。
         // 结算的恢复必须 await（顺序约束，与 tickScheduler 的结算 await 同构）：恢复
         // setModel(原) 完成后才放行 skip——恢复与紧随的需切模型任务 setModel(目标) 不得
         // 并发（串行由模型 op 队列结构保证，本 await 是调用方顺序语义：skip 放行前恢复
-        // 已收口）；本分支随后即 skip，await 无额外延迟代价。
+        // 已收尾）；本分支随后即 skip，await 无额外延迟代价。
         await this.settlePendingIfIdle('mutex-settle')
         skipped = true
       } else {
-        // 模型 op 串行段（MF-2 收口，互斥窗口全程覆盖「setModel 起步 → 记录创建」）：
+        // 模型 op 串行段（MF-2 收敛，互斥窗口全程覆盖「setModel 起步 → 记录创建」）：
         // 前序模型 op（agent_settled 恢复 / 前序 dispatch 切换 / 错误路径恢复）可能仍在途——
         // 排队等待期间未决记录与当前模型均可能变化，禁止按排队前快照盲切（旧快照的
         // expectedModelRef 会把恢复锚点记错），串行段内重新校验后再切换。后来的需切模型
@@ -546,20 +546,20 @@ export class SchedulerRuntime {
    * 未决模型切换记录的事实查询结算：记录存在 + 会话 idle（isIdle() 同步查询，
    * 判定层级最高的事实来源）→ 兑现恢复；非 idle → 不动作（不能把在途 run 的模型
    * 换掉），记录保留等下一查询点。无记录时同步返回 undefined（调用方跳过 await，
-   * 保住 tick 无记录路径的同步契约——dispatch 的 in-flight 守卫在 tickScheduler()
+   * 保住 tick 无记录路径的同步契约——dispatch 的 in-flight 检查在 tickScheduler()
    * 未 await 时同步可见）。
    *
    * 调用点两处：① tickScheduler 开头（严格先于 dispatch 循环——顺序约束：否则
    * 「B dispatch 先切 Y → 对账持 A 旧记录把 Y 静默切回」；agent_settled 事件丢失时
    * 本查询点是正确性兜底，事件只作提前触发加速器）；② dispatchTaskInner 互斥分支
-   * （skip 前尽量把旧记录收口，恢复 setModel 与后续新任务的 setModel(目标) 不得并发
+   * （skip 前尽量把旧记录收尾，恢复 setModel 与后续新任务的 setModel(目标) 不得并发
    * ——串行由模型 op 队列结构保证，本 await 是调用方顺序语义）。
    */
   private settlePendingIfIdle(reason: string): Promise<void> | undefined {
     const ps = this.pendingModelSwitch
     if (!ps) return undefined
     if (this.isCtxStale?.()) {
-      // stale 代际失效（session 替换）：未决记录随代际丢弃，不触碰旧 ctx（同现有守卫路径）
+      // stale 代际失效（session 替换）：未决记录随代际丢弃，不触碰旧 ctx（同现有检查路径）
       this.pendingModelSwitch = null
       return undefined
     }
@@ -586,7 +586,7 @@ export class SchedulerRuntime {
   }
 
   /**
-   * 执行恢复（切回会话期望模型）并关闭未决记录（在途标记生命周期收口）：
+   * 执行恢复（切回会话期望模型）并关闭未决记录（在途标记生命周期收尾）：
    * 当前模型已等于期望（用户已手动切回）→ 清记录不动作；setModel(原) false →
    * restore-failed 终态（日志含恢复动作：会话停留在任务模型，需手动切回）+ 清记录。
    * 记录先关后恢复——防 await setModel 期间 agent_settled 与 tick 对账并发重入。

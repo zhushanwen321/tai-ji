@@ -44,7 +44,7 @@ export function toTaskSnapshot(task: ScheduledTask): TaskSnapshot {
 export interface SchedulerStore {
   /**
    * 形状忠实保留（ext-simplify-08 L8）：旧 store 文件（npm 0.1.1 store.ts）顶层携带
-   * version:1，importer 只读 tasks、version 零读点——字段是磁盘格式的文档而非消费面，
+   * version:1，importer 只读 tasks、version 零读点——字段是磁盘格式的文档而非消费方，
    * 删除会让类型与迁移源文件的真实形状静默漂移。
    */
   version: 1
@@ -121,7 +121,7 @@ export interface AckState {
   window: { providerId: string } | null
   /** ack 轮是否已启动（session 边界写盘判定的判据之一：文件不存在且未启动才补发告警） */
   ackTurnStarted: boolean
-  /** 本次 ack 触发的任务 id（session 边界通知拼去重键用）；null = 未发起过 ack。注意：状态为模块级单例，session_start 时它可能是上一会话的残留——故所有读点都必须先过 taskId !== null 且由边界清理收口 */
+  /** 本次 ack 触发的任务 id（session 边界通知拼去重键用）；null = 未发起过 ack。注意：状态为模块级单例，session_start 时它可能是上一会话的残留——故所有读点都必须先过 taskId !== null 且由边界清理收尾 */
   taskId: string | null
   /** 本次 ack 触发的任务名（如实通知文案插值；taskId 为兜底） */
   taskName: string
@@ -144,7 +144,7 @@ export interface AckState {
 }
 
 /**
- * 会话当前模型的最小投影（`SchedulerBackend.getCurrentModel()` 返回值）。
+ * 会话当前模型的最小派生视图（`SchedulerBackend.getCurrentModel()` 返回值）。
  *
  * 只取 ack 合成轮所需三字段：`api`（registerProvider 覆写 config.api）、`provider`
  * （覆写目标 provider id）、`id`（合成 assistant 行的 model 字段）。`api` 用

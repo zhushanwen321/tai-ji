@@ -123,7 +123,7 @@ export const SubagentManageParams = Type.Object({
     }),
   })),
   // action:"close" → closeParam.subagentId REQUIRED. 归档（archived）：列表隐藏、可寻回、
-  // 非终态化（[U5 §3.2.5]）。idle 立即归档；running 默认等当前轮收口后归档（closeHandler 分流）。
+  // 非终态化（[U5 §3.2.5]）。idle 立即归档；running 默认等当前轮收尾后归档（closeHandler 分流）。
   closeParam: Type.Optional(Type.Object({
     subagentId: Type.String({
       description: "REQUIRED for action:'close'. The subagentId to close (running or idle). Archives the record: hidden from list, recoverable, not terminal.",
@@ -169,7 +169,7 @@ export const SubagentMessageParams = Type.Object({
   // 从旧 subagent 的会话历史 spawn 新 id：新进程 --fork 指向旧 session 文件（copy-on-write，
   // 源文件只读不续写）；旧记录/状态机不动。pi 引擎限定（非 pi 在 execute 层拒绝）。
   // 拒绝条件与恢复指引（still-running / 异进程活跃 / worktree-bound / 锚不可解析 → message
-  // reopen）由 core forkFromHandler 守卫链文案承载（D1，同 messageParam），此处不重复。
+  // reopen）由 core forkFromHandler 检查链文案承载（D1，同 messageParam），此处不重复。
   forkFromParam: Type.Optional(Type.Object({
     sourceSubagentId: Type.String({
       description: "REQUIRED for action:'fork-from'. The OLD subagentId whose history the new subagent inherits (pi engines only). Works for any idle record (disconnected, finished, or closed).",

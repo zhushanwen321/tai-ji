@@ -79,7 +79,7 @@ export interface OutlineOptions {
 }
 
 // ---------------------------------------------------------------------------
-// content 类型守卫与提取（message.content 是 unknown，design §3.4）
+// content 类型检查与提取（message.content 是 unknown，design §3.4）
 // ---------------------------------------------------------------------------
 
 interface ContentBlock {

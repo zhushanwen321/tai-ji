@@ -250,7 +250,7 @@ describe("parseSubagentRpcCommand message/start（定向消息通道）", () => 
 
 describe("转义协议互逆（message/start 文本往返不变）", () => {
   // runtime 侧 encodeDirectiveText（session-service.ts）的本地镜像：extension 不依赖
-  // runtime 包（依赖边界 F7），互逆性靠两侧测试对同一 wire 协议双向钉死。
+  // runtime 包（依赖边界 F7），互逆性靠两侧测试对同一 wire 协议双向固定。
   // 编码规则：原生反斜杠 → \\（先）、真实换行 → 字面 \n（后），命令保持单行。
   const encodeMirror = (s: string) => s.replace(/\\/g, "\\\\").replace(/\n/g, "\\n");
 
@@ -518,7 +518,7 @@ describe("registerSubagentsCommand — RPC message/start dispatch + 留痕", () 
     const deliverChatMessage = vi.fn();
     const getRecordForAction = vi.fn(() => record);
     const engineSupportsConversation = vi.fn(() => true);
-    // [D4 聚合跟随] message/close 生产消费面 = service.chatActions
+    // [D4 聚合跟随] message/close 生产消费方 = service.chatActions
     injectFakeService({
       chatActions: {
         getRecordForAction,
@@ -557,7 +557,7 @@ describe("registerSubagentsCommand — RPC message/start dispatch + 留痕", () 
   it("message 正常（streaming）→ 留痕走 deliverAs:nextTurn，不 steer 主 agent 当前 turn", async () => {
     const record = makeRecord();
     const deliverChatMessage = vi.fn();
-    // [D4 聚合跟随] message/close 生产消费面 = service.chatActions
+    // [D4 聚合跟随] message/close 生产消费方 = service.chatActions
     injectFakeService({
       chatActions: {
         getRecordForAction: vi.fn(() => record),
@@ -591,7 +591,7 @@ describe("registerSubagentsCommand — RPC message/start dispatch + 留痕", () 
   });
 
   it("message 目标不存在（getRecordForAction throw）→ warning 文案，不留痕", async () => {
-    // [D4 聚合跟随] message/close 生产消费面 = service.chatActions
+    // [D4 聚合跟随] message/close 生产消费方 = service.chatActions
     injectFakeService({
       chatActions: {
         getRecordForAction: vi.fn(() => {
@@ -706,7 +706,7 @@ describe("registerSubagentsCommand — RPC message/start dispatch + 留痕", () 
   it("start service.execute 抛错（slug 超长等）→ warning 文案，不留痕", async () => {
     injectFakeService({
       execute: vi.fn().mockRejectedValue(new Error("slug must be ≤35 chars")),
-      // [U1/U2] startHandler 解析链（E4 守卫前置）在 execute 之前调；缺省 async 不触发额外分支
+      // [U1/U2] startHandler 解析链（E4 检查前置）在 execute 之前调；缺省 async 不触发额外分支
       getCollectSyncDefault: () => "async",
     });
 

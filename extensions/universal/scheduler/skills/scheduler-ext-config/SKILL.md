@@ -35,7 +35,7 @@ description: "使用或排查 @zhushanwen/pi-scheduler（定时任务调度）�
 - **`schedule_control`**（管理）：`action` = `list`/`toggle`/`delete`/`run`，`id`（toggle/delete/run 必填），`enabled`（toggle 必填）。
 - 两个工具的返回都是结构化 `{content: [{type:'text', text}], details}`；业务失败以异常抛出（pi 只对 execute throw 置 `isError:true`，错误 message 作为 toolResult content 返回），不通过返回值表达失败。
 
-> 创建/管理操作不受 agent 运行状态约束；**到期 dispatch** 也不等待 agent idle（steer 直投，busy 时插入当前 turn），仅受速率限制/同任务 in-flight 守卫约束（见「运行限制与 dispatch 行为」）。
+> 创建/管理操作不受 agent 运行状态约束；**到期 dispatch** 也不等待 agent idle（steer 直投，busy 时插入当前 turn），仅受速率限制/同任务 in-flight 检查约束（见「运行限制与 dispatch 行为」）。
 
 ### 3. 创建方式（触发反转）
 
@@ -127,7 +127,7 @@ dispatch 行为（`dispatchTask`，scheduler-steer-direct-dispatch 直投模型�
 
 - **steer 直投**：到期任务 `backend.sendMessage(..., {deliverAs: 'steer', triggerTurn: true})` 直接投递——agent busy 时消息插入当前 turn（立即被模型看到）、idle 时开新 turn。不排队、不等 idle、不丢弃。
 - **受理即记账**：`sendMessage` 是 fire-and-forget（返回 void），await 立即通过，`nextRunAt` 调用即推进——无「入队未终态」窗口。
-- **同任务 in-flight 守卫**：该任务 dispatch 在途（如 `/schedule run` 与 tick dispatch 并发）时本 tick 跳过，防双投。
+- **同任务 in-flight 检查**：该任务 dispatch 在途（如 `/schedule run` 与 tick dispatch 并发）时本 tick 跳过，防双投。
 - **模型切换**（`task.model` 设定且 ≠ 会话当前模型）：sendMessage 前 `setModel` 切到目标任务模型、记未决切换记录，事件恢复（turn_end + isIdle 复核）后切回原模型；切换失败降级——照常 dispatch（模型字段不阻塞核心调度）。
 - dispatch 成功后：recurring 推进 `nextRunAt` 并 append `advance`；once 删除任务并 append `delete`；失败（`sendMessage` 同步抛错，如 session 关闭）记 `lastStatus='failed'` 不 rethrow，下个 tick 重试（transient 失败重试语义，不 append advance）。
 - 注入的消息：`{content: task.prompt, customType: 'pi-scheduler:dispatched', display: true}`，投递选项 `{deliverAs: 'steer', triggerTurn: true}`。

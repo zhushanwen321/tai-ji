@@ -7,19 +7,19 @@
 // `computeRenderSignature` 的签名首段），每处自己决定「什么状态显示成什么」；改一处
 // 漏一处即出现口径漂移（本批修掉的三处可见错误正是这种漂移的产物）。
 //
-// 边界（刻意不做的）：**不并子代理域与通知域**。run 生命周期（三态投影）与子代理执行
+// 边界（刻意不做的）：**不并子代理域与通知域**。run 生命周期（三态派生视图）与子代理执行
 // 状态（running/idle）、通知正文（outcome + closedReason 兜底）没有共同的输入词汇，
 // 强行共用一张表会把两套语义塞进一个枚举——`gui-mappers.ts` 与 `bg-notify-render.ts`
 // 各自留在自己的域里（§2.2 裁决）。
 //
 // 单一判定源纪律：本模块**不判定状态**——`status` 直接取 core `runSummary(run).status`
-//（pi 侧唯一投影，`tool-workflow.displayStatusOf` 同源），只把「生命周期 / 终局原因 /
+//（pi 侧唯一派生视图，`tool-workflow.displayStatusOf` 同源），只把「生命周期 / 终局原因 /
 // 可中断性 / 会计」整理成展示形态。判定 1 个、展示 1 个。
 import { runSummary, type DoneReason, type WorkflowRun } from "@zhushanwen/subagent-core";
 
 import type { ThemeLike } from "./format.ts";
 
-/** run 展示三态（与 core `runSummary` 投影、shared `WorkflowRunStatus` 同词）。 */
+/** run 展示三态（与 core `runSummary` 派生视图、shared `WorkflowRunStatus` 同词）。 */
 export type RunDisplayStatus = "running" | "interrupted" | "done";
 
 /** run 展示态（唯一中间表示）。 */
@@ -42,7 +42,7 @@ export interface RunDisplayState { // oe-exempt:20260930:framework:run 域展示
  * run → 展示态（纯函数，不读 store、不发事件）。
  *
  * 注意 `runSummary` 的终局判定优先读进程内终局注册表（活体终局），重启后由 record
- * 流 fold 出的聚合兜底——因此本函数对活体与重水合两种形态同样正确。
+ * 流 fold 出的聚合兜底——因此本函数对活体与重新加载进内存两种形态同样正确。
  */
 export function runDisplayStateOf(run: WorkflowRun): RunDisplayState {
   const summary = runSummary(run);

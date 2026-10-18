@@ -53,7 +53,7 @@ async function seg3aAnd3c(log) {
 		faux: {
 			responses: [
 				{ text: "1+1 等于 2。" }, // 首轮主 turn
-				{ text: "simple-arithmetic-question" }, // 首轮 rename（被 name exists 守卫 skip 前仍真实调用）
+				{ text: "simple-arithmetic-question" }, // 首轮 rename（被 name exists 检查 skip 前仍真实调用）
 				{ text: "2+2 等于 4。" }, // 3c 次轮主 turn
 			],
 		},
@@ -118,11 +118,11 @@ async function seg3bOnce(log) {
 		await settledP;
 		// rename 终态时序（日志契约更新后）：`renamed to` 在 handler .then() 的 setSessionName
 		// 之后打出——竞态命中防覆盖时提前 return 打 `skip: name exists`，renamed to 不出现。
-		// 故成功防覆盖 = skip: name exists；renamed to 出现 = 标题已抢先落库（miss），交重跑
+		// 故成功防覆盖 = skip: name exists；renamed to 出现 = 标题已抢先写入（miss），交重跑
 		const outcome = await pi.rpc.waitForSessionLog(/skip: name exists|renamed to "/, { timeoutMs: 45_000 });
 		assert(
 			outcome.message.includes("skip: name exists"),
-			`3b 竞态 miss：rename 先于手动命名落库（${outcome.message}）`,
+			`3b 竞态 miss：rename 先于手动命名写入（${outcome.message}）`,
 		);
 		await sleep(10_500); // ≥10s 观察窗口
 		assert(lastSessionInfoEntry(await pi.readSessionLines())?.name === RACE_NAME, "3b 等待 10s 后竞态命名被覆盖");

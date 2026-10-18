@@ -135,7 +135,7 @@ function assistantMsg(
 
 /**
  * 建真实 fixture 隔离库（WAL + session/message/part/schema_migration 四表，行形态 =
- * zcode-session-source helpers 同款宿主 schema 0.16.5 消费面子集）。
+ * zcode-session-source helpers 同款宿主 schema 0.16.5 消费方子集）。
  * 测试进程跑 node（node:sqlite 可用）；生产读链的驱动选择在 source 包内。
  */
 function createZcodeDb(path: string, schemaVersion = '0.16.5', sessions: SessionRows[] = []): void {
@@ -210,8 +210,8 @@ function recordLine(entryId: string, saId: string, sessionRef: Record<string, st
 
 /**
  * pi 形态的 subagent-record custom entry 行（回归 A1 instrument）：engine 键缺省 +
- * sessionRef 无 dbPath——subagent-core record-entry.ts 的 pi 投影形态（engineHandle
- * 可选、sessionRef 整体透传不枚举内部键；最小可信子集，跨包漂移由 entry-anchor.test 守卫）。
+ * sessionRef 无 dbPath——subagent-core record-entry.ts 的 pi 派生视图形态（engineHandle
+ * 可选、sessionRef 整体透传不枚举内部键；最小可信子集，跨包漂移由 entry-anchor.test 检查）。
  */
 function piRecordLine(entryId: string, saId: string): string {
   return JSON.stringify({
@@ -521,14 +521,14 @@ describe('场景 5 八类失败（§3.4 表逐行 + 检查顺序三段递进）'
 })
 
 // ---------------------------------------------------------------------------
-// 驱动探测失败的错误面契约（跨包漂移守卫 + L4 包装形态映射）
+// 驱动探测失败的错误契约（跨包漂移检查 + L4 包装形态映射）
 // ---------------------------------------------------------------------------
 
 describe('驱动探测失败错误面：跨包契约 + L4 包装形态映射', () => {
   it('跨包契约：SQLITE_DRIVER_UNSUPPORTED_MARK 子串在 zcode-session-source sqlite-driver 源文内（漂移即红）', () => {
     // 驱动探测错误无专用错误类型（该包不导出子类），reader 按消息特征识别——mark 与
     // sqlite-driver 源内错误字面量的绑定由本测试机器锚定（entry-anchor.test.ts 协议
-    // 字面量跨包漂移守卫同范式）：源文措辞变更不再含 mark → host_unsupported 面死亡，红。
+    // 字面量跨包漂移检查同范式）：源文措辞变更不再含 mark → host_unsupported 契约死亡，红。
     const source = readFileSync(
       new URL('../../../../../packages/zcode-session-source/src/sqlite-driver.ts', import.meta.url),
       'utf8',

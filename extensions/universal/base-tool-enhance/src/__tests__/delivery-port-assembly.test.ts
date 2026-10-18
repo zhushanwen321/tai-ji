@@ -129,7 +129,7 @@ describe("session_start 装配统一投递端口（unified-delivery §3.7）", (
 		const second = getDeliveryPort()!;
 		expect(second).not.toBe(first);
 		expect(first.deliver({ id: "w-2", payload: { kind: "custom", customType: "workflow-result", content: "y", display: true } }).kind).toBe("rejected");
-		// 差集重放：w-1 未送达未销账 → 重投（经新实例 sendMessage）
+		// 差集重放：w-1 未送达未处理完毕 → 重投（经新实例 sendMessage）
 		expect(pi.sendMessage).toHaveBeenCalledWith(
 			expect.objectContaining({ customType: "workflow-result", details: expect.objectContaining({ deliveryId: "w-1" }) }),
 			expect.anything(),

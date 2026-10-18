@@ -7,7 +7,7 @@
 //   ② deliver（投递）→ 内核 on-accept 受理即出站 → pi.sendMessage 直达唯一队列
 //     （两档出队由 pi 原生 steer/followUp 队列承载，本端口零注入时机代码——提交
 //     侧缓冲只决定「何时把账交给内核」，不持注入队列、零自建出队机制）；
-//   ③ ack（销账）→ message_end 事件命中 details.deliveryId → 内核
+//   ③ ack（处理完毕）→ message_end 事件命中 details.deliveryId → 内核
 //     confirmDeliveredByProof → 内核终局 store.ack → appendEntry(ack)；
 //   ④ replay（重启恢复）→ session_start 差集重放（outbox − delivered − ack）。
 //
@@ -18,7 +18,7 @@
 // 全部提交先落盘再进提交缓冲（攒批成员 mergeBuffer / 直通成员 directBuffer），由
 // 放行泵按通道分组交给内核：
 //   - 默认通道组（subagent-bg-notify）：60s 滑动窗口攒批（攒批条件 = 有活跃后台
-//     任务），到期/flush 时经 merge-commit hold 逐条提交内核（注入闸门 hold →
+//     任务），到期/flush 时经 merge-commit hold 逐条提交内核（注入门禁 hold →
 //     内核 retain → 条目 queued 聚合）→ kernel.flush() → 内核 buildBatchPayload
 //     合成一条 {batch:true, items} 消息一次 sendMessage 入队；
 //   - 外部通道组（workflow-result / managed-session-notify 等）：逐条提交、逐条
@@ -56,7 +56,7 @@
 // 尝试」内核契约由该同步时序等价兑现：appendEntry 抛错 = 承诺未落 → deliver 返回
 // rejected("persist-failed")，不进投递流程）。内核侧 store.persist 因此有意 no-op：
 // 成员记录若由内核 persist 再落盘会与成员记录双写（重放差集把同一条当两条重建，
-// 合批投出后成员记录无法单独销账 → 必然双投）。port 的内核句柄是本闭包私有面，
+// 合批投出后成员记录无法单独处理完毕 → 必然双投）。port 的内核句柄是本闭包私有面，
 // store 的 no-op 形态不外泄。store 其余职责（ack / discard / loadUndelivered /
 // loadTerminalIds / hasTerminal）照常承载。
 
@@ -234,7 +234,7 @@ export function createDeliveryPort(host: DeliveryPortHost): DeliveryPortHandle {
   };
 
   /**
-   * 内核出站端口（intent → pi 参数翻译在适配器内；内核零 pi 词汇纪律由此收口）。
+   * 内核出站端口（intent → pi 参数翻译在适配器内；内核零 pi 词汇纪律由此收敛）。
    * 方法体引用的闭包变量（mergeCommitting / compacting / buckets）在内核出站时点
    * 已初始化。
    */
@@ -303,7 +303,7 @@ export function createDeliveryPort(host: DeliveryPortHost): DeliveryPortHandle {
   /**
    * compaction 开始边沿：挂起标记置位（此后整缓冲挂起 + 内核 send 拒受理，直至
    * 终态边沿复位）。manual /compact / threshold / overflow recovery 全 trigger 在
-   * 此收口（pi 两路发射点：manual compact 与 auto compaction）。
+   * 此收尾（pi 两路发射点：manual compact 与 auto compaction）。
    */
   function onBeforeCompact(): void {
     if (disposed) return;
@@ -500,7 +500,7 @@ export function createDeliveryPort(host: DeliveryPortHost): DeliveryPortHandle {
   }
 
   /**
-   * 单通道组聚合放行：merge-commit hold 逐条提交内核（注入闸门 hold 聚合为
+   * 单通道组聚合放行：merge-commit hold 逐条提交内核（注入门禁 hold 聚合为
    * queued 集）→ kernel.flush() 一次出站。组内成员同通道 → doSend 合批产物恒
    * 单通道；单成员组出站即单条消息（buildBatchPayload 单条透传）。
    */
@@ -888,7 +888,7 @@ function withDeliveryId(payload: CustomPayload, id: string): CustomPayload {
   return { ...payload, details: { ...details, deliveryId: id } };
 }
 
-/** journal 记录 → 内核持久记录投影（store.loadUndelivered 的读取单元）。 */
+/** journal 记录 → 内核持久记录派生视图（store.loadUndelivered 的读取单元）。 */
 function toStoreRecord(rec: JournalRecord): DeliveryStoreRecord {
   return {
     id: rec.id,

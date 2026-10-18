@@ -1,7 +1,7 @@
 /**
  * Workflow Extension — tool-workflow-script
  *
- * workflow-script tool，5 actions（FR-5：脚本领域收口为单 tool）。
+ * workflow-script tool，5 actions（FR-5：脚本领域收敛为单 tool）。
  *
  * Actions:
  * - generate: AI 生成临时脚本 → 写 .pi/workflows/.tmp/
@@ -10,7 +10,7 @@
  * - delete: 删除脚本（前查 isRunning 防删运行中脚本）
  * - list: 列出可用脚本（调 registry.loadAll）
  *
- * C5②（convergence D-6）：generate 五道闸校验管线 + tmp 写盘下沉 core
+ * C5②（convergence D-6）：generate 五项校验管线 + tmp 写盘下沉 core
  * generateWorkflowScript（报错文案逐字平移，CA2 前提）；save/delete 改调 core
  * barrel（第三可选目录参数缺省即 pi 布局 .pi/workflows——pi 现两参调用形态零变化）。
  * 结构化 {ok}|{error} → pi 的 execute-throw 契约转换在本层（pi 1.0.0：execute 抛出经
@@ -241,7 +241,7 @@ export function actionGenerate(params: ScriptParams): WorkflowScriptExecuteResul
   const name = params.name ?? "";
   const script = params.script ?? "";
 
-  // C5②：五道闸（ESM 拒/meta 必需/agent() 必需/语法/@pi-meta round-trip）+ tmp 写盘
+  // C5②：五项校验（ESM 拒/meta 必需/agent() 必需/语法/@pi-meta round-trip）+ tmp 写盘
   // 全部在 core generateWorkflowScript（缺省 tmpDir 即 pi 布局 .pi/workflows/.tmp，
   // 相对 cwd resolve——与旧本地实现一致）。结构化 {ok}|{error} → execute-throw 契约
   // 转换在此（报错文案逐字平移自 pi 旧版，含 round-trip 行列信息）。

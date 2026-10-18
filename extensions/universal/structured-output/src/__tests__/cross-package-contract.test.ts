@@ -5,7 +5,7 @@
 //
 // 两包是独立 npm 包不能直接 import（发布产物里跨包相对 import 悬空）——env 名 /
 // schema 大小上限等契约常量各自保留副本，本文件在测试期动态 import SW 侧源码叶子
-// 模块，锁「字节相等」防止任一端静默改名/改值（漂移守卫）。
+// 模块，锁「字节相等」防止任一端静默改名/改值（漂移检查）。
 //
 // 降级策略：SW 侧叶子模块未就位 / 模块结构不符（import 失败、导出缺失）时，
 // 用例 skip，不阻塞本包测试；SW 侧抽出/导出后自动生效。
@@ -71,7 +71,7 @@ async function tryImportSwSchemaEnv(): Promise<Record<string, unknown> | undefin
 }
 
 describe("cross-package contract: schema env（structured-output ↔ pi-subagent-cli）", () => {
-	it("SW SCHEMA_ENV_VAR 与 SO ENV_SCHEMA 字节相等（env 名漂移守卫）", async (ctx) => {
+	it("SW SCHEMA_ENV_VAR 与 SO ENV_SCHEMA 字节相等（env 名漂移检查）", async (ctx) => {
 		const mod = await tryImportSwSchemaEnv();
 		if (!mod) {
 			// SW 侧叶子模块未就位（schema-env.ts 被移动/改名）时的降级 skip；

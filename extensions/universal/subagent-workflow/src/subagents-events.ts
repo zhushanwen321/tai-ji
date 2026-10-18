@@ -43,7 +43,7 @@ export function setupSubagentsCascadeEvents(pi: ExtensionAPI): void {
   pi.on("session_before_switch", (event, _ctx) => {
     // /new（reason:"new"）创建全新 session → 级联关闭旧 record。
     // reason:"resume"（/resume /import 回到已有 session）不级联：record 按 rootSessionId
-    // 归属隔离，跨 session 读写由 store 过滤守卫，无需销毁。
+    // 归属隔离，跨 session 读写由 store 过滤检查，无需销毁。
     if (event.reason !== "new") return;
     const service = getSubagentService();
     if (service) {

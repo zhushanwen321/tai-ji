@@ -9,7 +9,7 @@
 //
 // 保留维护的现行形态：
 // - 判定/执行单源在 core runRetentionMaintenanceRound（维护轮入口）；
-// - 触发点收敛为 session_start 兜底（session-lifecycle.ts，oncePerProcess 守卫）
+// - 触发点收敛为 session_start 兜底（session-lifecycle.ts，oncePerProcess 检查）
 //   ——其行为断言在 session-lifecycle.test.ts；
 // - 旧格式两件套（旧 journal `.events.jsonl` + state 快照 `<runId>.jsonl`）不读、
 //   不写、**不主动删**——维护轮对窗外终态旧双源足迹的成对裁剪是既有清理通道的
@@ -139,12 +139,12 @@ describe("store 侧保留维护面退役（[D1] record 单源）", () => {
     // 窗外终态旧双源原样留置（删除通道收敛到维护轮入口 / 裁决点 7 对账清理）
     expect(fs.existsSync(stateFile(stateDir, runIdAt(0)))).toBe(true);
     expect(fs.existsSync(legacyJournalFile(stateDir, runIdAt(0)))).toBe(true);
-    // save 不再产生 state 快照（旧 `<runId>.jsonl` 投影退役锚）
+    // save 不再产生 state 快照（旧 `<runId>.jsonl` 派生视图退役锚）
     expect(fs.existsSync(stateFile(stateDir, runIdAt(1)))).toBe(false);
     await store.dispose();
   });
 
-  it("D9 store 侧接线拆除的机器锚：core barrel 不再导出 abandonElapsedInterruptedRuns（壳侧唯一消费面已拆）", async () => {
+  it("D9 store 侧接线拆除的机器锚：core barrel 不再导出 abandonElapsedInterruptedRuns（壳侧唯一消费方已拆）", async () => {
     const core = (await import("@zhushanwen/subagent-core")) as unknown as Record<string, unknown>;
     expect(core["abandonElapsedInterruptedRuns"]).toBeUndefined();
   });
@@ -168,7 +168,7 @@ describe("store 侧保留维护面退役（[D1] record 单源）", () => {
   });
 });
 
-describe("维护轮入口（core 单源）对 run 域目录的行为——session_start 兜底触发点消费面", () => {
+describe("维护轮入口（core 单源）对 run 域目录的行为——session_start 兜底触发点消费方", () => {
   let tmpDir: string;
   let stateDir: string;
 

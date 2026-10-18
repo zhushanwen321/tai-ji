@@ -1,22 +1,22 @@
-// subagent tool 路径类参数守卫测试（三通道对称审查修复 + MF-13）。
+// subagent tool 路径类参数检查测试（三通道对称审查修复 + MF-13）。
 //
 // 修复背景：subagent tool 的 skillPath 参数此前零校验直传 session-runner 拼
 // `--skill <path>`；cwd 仅 description 声明 "Must be an absolute path" 无运行时
 // 闸。schema pattern（^/）经 pi agent-loop 运行时强校验已是强制（PS-20：
-// agent-loop.js:403-404 → validation.js:247-273），工具层守卫定位 = defense-in-depth
+// agent-loop.js:403-404 → validation.js:247-273），工具层检查定位 = defense-in-depth
 // + schema 表达力缺口——`..` 穿越语义超出 pattern 能力（^/ 放行 "/a/../b"），
-// 守卫在 executeSubagentStart immediate throw（与 action 枚举守卫同风格）。
+// 检查在 executeSubagentStart immediate throw（与 action 枚举检查同风格）。
 //
 // 本文件锁住：
 //   1. skillPath / cwd 含 `..` 穿越段 → 同步 reject，service.execute 零触达
 //   2. skillPath / cwd 相对路径 → 同步 reject
-//   3. 合法绝对路径放行 → 参数原样透传 service.execute（守卫零误伤对照）
+//   3. 合法绝对路径放行 → 参数原样透传 service.execute（检查零误伤对照）
 //
 // harness（[u-5b / A-V3] 改写）：registerSubagentTool 后按名捕获 subagent_start 的
-// execute 回调直接调用（D3 拆分：registerSubagentTool 注册三工具，start 守卫在
+// execute 回调直接调用（D3 拆分：registerSubagentTool 注册三工具，start 检查在
 // subagent_start 的 execute）。
 // SubagentService 经单例访问器槽注入 fake（setSubagentService，globalThis 槽——
-// executeSubagentStart 内 getSubagentService() 读同一槽，「守卫拒绝时 service.execute
+// executeSubagentStart 内 getSubagentService() 读同一槽，「检查拒绝时 service.execute
 // 零触达」的承重断言不依赖整类 mock）；pi-ai/typebox 桩改共享桩
 // （src/__tests__/mocks/runtime-stubs.ts，async 工厂 + 动态 import，消费约定见
 // 桩 module 头注）。
@@ -43,7 +43,7 @@ import { GLOBAL_SLOT_KEYS } from "@zhushanwen/subagent-core";
 
 // ── 访问器槽注入 helpers ─────────────────────────────────────
 
-/** fake service：execute 断言面（守卫拒绝 → 零触达）。 */
+/** fake service：execute 断言范围（检查拒绝 → 零触达）。 */
 const { mockServiceExecute } = vi.hoisted(() => ({
   mockServiceExecute: vi.fn(),
 }));
@@ -76,7 +76,7 @@ function captureStartExecute(): ExecuteCb {
   return captured;
 }
 
-/** 合法 start 入参基线（守卫测试只变动 skillPath/cwd 字段；start 工具无 action 字段）。 */
+/** 合法 start 入参基线（检查测试只变动 skillPath/cwd 字段；start 工具无 action 字段）。 */
 function baseParams(over: Record<string, unknown> = {}): Record<string, unknown> {
   return { task: "guard task", slug: "path-guard", ...over };
 }
@@ -91,7 +91,7 @@ function stubHandle() {
   };
 }
 
-describe("subagent_start 路径守卫（skillPath/cwd：绝对路径 + 禁 .. 穿越）", () => {
+describe("subagent_start 路径检查（skillPath/cwd：绝对路径 + 禁 .. 穿越）", () => {
   let execute: ExecuteCb;
 
   beforeEach(() => {
@@ -150,7 +150,7 @@ describe("subagent_start 路径守卫（skillPath/cwd：绝对路径 + 禁 .. �
     expect(mockServiceExecute).not.toHaveBeenCalled();
   });
 
-  // ── 放行对照（守卫零误伤）──
+  // ── 放行对照（检查零误伤）──
 
   it("合法绝对路径 skillPath/cwd 放行，参数原样透传 service.execute", async () => {
     await execute(
@@ -170,7 +170,7 @@ describe("subagent_start 路径守卫（skillPath/cwd：绝对路径 + 禁 .. �
     );
   });
 
-  it("不传 skillPath/cwd → 守卫不介入（undefined 合法缺省）", async () => {
+  it("不传 skillPath/cwd → 检查不介入（undefined 合法缺省）", async () => {
     await execute("call-none", baseParams(), undefined, undefined, undefined);
 
     expect(mockServiceExecute).toHaveBeenCalledTimes(1);

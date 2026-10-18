@@ -269,7 +269,7 @@ describe("adapter message/close action", () => {
 // ============================================================
 
 describe("start model 全等回显", () => {
-	/** 最小 stub service：startHandler 解析链（E4 守卫前置）触达的读面 + execute。 */
+	/** 最小 stub service：startHandler 解析链（E4 检查前置）触达的读取范围 + execute。 */
 	function makeStartService(execute: (opts: { task: string; slug?: string }) => Promise<ExecutionHandle>): SubagentService {
 		const findRecord = vi.fn(() => undefined);
 		const collectRecords = vi.fn(() => []);

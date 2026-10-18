@@ -74,9 +74,9 @@ structured-output/
     ├── tool-definition.ts  # 双变体工具定义（workflow 单参数 / 日常双参数）
     ├── execute.ts          # 校验编排（workflow 透传 / 日常防御链）+ 根形态判定
     ├── ajv-validator.ts    # Ajv 编译缓存（WeakMap）
-    ├── schema-guards.ts    # 形态守卫纯函数（互换检测 / 关键字识别 / JSON 解析回显）
+    ├── schema-guards.ts    # 形态检查纯函数（互换检测 / 关键字识别 / JSON 解析回显）
     ├── workflow-hook.ts    # turn_end 强制调用 hook + RetryState 状态机
-    ├── loop-gate.ts        # 同签名失败 ×3 有界闸门（abort + shutdown + 硬退兜底）
+    ├── loop-gate.ts        # 同签名失败 ×3 有界门禁（abort + shutdown + 硬退兜底）
     └── text-primitives.ts  # 截断/错误块有界化共享原语
 ```
 

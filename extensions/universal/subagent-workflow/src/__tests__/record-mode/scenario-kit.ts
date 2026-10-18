@@ -164,7 +164,7 @@ export interface SeedRunSpec { // oe-exempt:20260929:test:seed run shape (test f
   /**
    * run-created 帧的 scriptPath 锚定载荷（生产写面 dispatchRunCreated 随帧落——
    * 内置模板场景必填：worker 沙箱 require _shared 族靠它定位；缺省 = 旧格式帧，
-   * 模板脚本 resume 由收紧后的守卫拒绝——A4 场景的构造面）。
+   * 模板脚本 resume 由收紧后的检查拒绝——A4 场景的构造范围）。
    */
   scriptPath?: string;
   ts?: number;
@@ -306,7 +306,7 @@ export async function scanScenarioEvents(env: RecordFixtureEnv, runId: string): 
   return createRunEventJournal(env.stateDir).scan(runId);
 }
 
-/** 轮询至终局（runSummary 投影——活体终局源 = 终局记录注册表）。 */
+/** 轮询至终局（runSummary 派生视图——活体终局源 = 终局记录注册表）。 */
 export async function waitForScenarioSettled(
   runs: Map<string, WorkflowRun>,
   runId: string,

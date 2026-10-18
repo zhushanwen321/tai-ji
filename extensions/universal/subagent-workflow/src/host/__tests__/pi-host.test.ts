@@ -97,9 +97,9 @@ describe("createPiHostServices.discoveryRoots（与现推导逐项一致）", ()
   }
 
   beforeEach(() => {
-    // 独立 pi 形态基线（argv 无 --extension）：P5 扫描根修正后 npm/npm-dev 根的
+    // 独立 pi 形态基线（argv 无 --extension）：P5 扫描从根源修复后 npm/npm-dev 根的
     // 指向随形态分流——本 describe 全部锚定独立态推导，runner argv 形态不构成
-    // 契约，显式钉死防漂移（taiji 态断言见下方专属 describe）。
+    // 契约，显式固定防漂移（taiji 态断言见下方专属 describe）。
     process.argv = ["node", "/pi", "--mode", "rpc"];
   });
 
@@ -186,7 +186,7 @@ describe("createPiHostServices.discoveryRoots（与现推导逐项一致）", ()
   });
 });
 
-describe("createPiHostServices.discoveryRoots（P5 D4-2 扫描根修正：taiji 态形态感知）", () => {
+describe("createPiHostServices.discoveryRoots（P5 D4-2 扫描从根源修复：taiji 态形态感知）", () => {
   const AGENT_DIR = "/fake/data-dir/agent";
   const argvSaved = process.argv;
 
@@ -631,7 +631,7 @@ describe("P5 staged workflows 入扫描面（端到端）", () => {
     const second = await scan();
 
     // readdir 枚举序无契约（discoverResources 返回按扫描插入序）——确定性断言
-    // 以 path 排序投影比较（条目集合与形态稳定，序不在契约内）
+    // 以 path 排序派生视图比较（条目集合与形态稳定，序不在契约内）
     const sorted = (rs: Awaited<ReturnType<typeof discoverResources>>) =>
       rs.map((r) => ({ path: r.path, source: r.source, available: r.available })).sort((a, b) => (a.path < b.path ? -1 : 1));
     expect(sorted(second)).toEqual(sorted(first));

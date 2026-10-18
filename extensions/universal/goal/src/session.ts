@@ -6,7 +6,7 @@
  * U6c：重建输入接活跃路径裁剪——被撤子树的 goal-state 不进重建态）。
  *
  * FR-6.4: 删除 hasPendingInjection（僵尸字段）
- * FR-6.7: 删除 pendingPause（ESC 改用 aborted 守卫）
+ * FR-6.7: 删除 pendingPause（ESC 改用 aborted 检查）
  * FR-8.1 G-006: session append-only——entry GC 不生效（生产），history 显示侧截断
  * FR-3: 崩溃后保持原状态（active 重启计时；paused/blocked 保持；终态保持）
  */
@@ -71,7 +71,7 @@ export interface ActivePathSessionView {
 // ── reconstructGoalState（session_start / session_tree 时调）──────────
 
 /**
- * 从 session entries 恢复 goal state（U6c：重建输入 = 活跃路径投影，非全文件）。
+ * 从 session entries 恢复 goal state（U6c：重建输入 = 活跃路径派生视图，非全文件）。
  *
  * Pi SDK 的 session 是 append-only，getEntries() 返回 filter-copy——splice
  * 无法修改真实 entries。Entry GC（goal-state 留 1、goal-history 留 20）在生产
@@ -145,7 +145,7 @@ export function clearGoalSession(session: GoalSession, uiPort: UiPort): void {
 	cancelContinuationTimer(session);
 	session.state = null;
 	session.isProcessing = false;
-	// FR-6.6: hasUI 守卫
+	// FR-6.6: hasUI 检查
 	if (uiPort.hasUI) {
 		uiPort.setWidget("goal", undefined);
 		uiPort.setStatus("goal", undefined);

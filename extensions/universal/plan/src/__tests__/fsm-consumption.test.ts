@@ -72,7 +72,7 @@ function planningState(): PlanState {
 
 /**
  * 组合 harness：tool + command 共享单 ctx 对象两注册表
- * （跨入口解散判别需要真实共享——exitPlanMode 与等待归口经同一 controllers 表传递
+ * （跨入口解散判别需要真实共享——exitPlanMode 与等待收尾经同一 controllers 表传递
  * dissolvedBy 直传来源，D-B1-2；sessions/controllers 别名 = planCtx 两表，D-B4-3）。
  */
 function setup(initialState?: PlanState) {
@@ -147,8 +147,8 @@ afterEach(() => {
 
 // ── dissolvedBy 直传断言组（D-B1-2，单测锚定，零 token）──
 
-describe("dissolvedBy① 入口解散同步临界段（markDissolved 先于 abort、无让出点——归口点必读到 'self'）", () => {
-  it("挂起审批中 /plan abort：归口①判命令解散 no-op（不落 review_aborted），reset 终态是唯一新落盘", async () => {
+describe("dissolvedBy① 入口解散同步临界段（markDissolved 先于 abort、无让出点——收尾点必读到 'self'）", () => {
+  it("挂起审批中 /plan abort：收尾①判命令解散 no-op（不落 review_aborted），reset 终态是唯一新落盘", async () => {
     const h = setup(planningState());
     h.ctx.mode = "rpc";
     selectHonoringSignal(h.ctx);
@@ -159,17 +159,17 @@ describe("dissolvedBy① 入口解散同步临界段（markDissolved 先于 abor
     const hang = h.controllers.get("test-session");
     expect(hang?.dissolvedBy).toBeUndefined();
     // exitPlanMode 体内无 await：整段（markDissolved('self') → controller.abort() →
-    // resetPlanState）同步执行完毕，abort 触发的 promise 解析是微任务——归口点必在其后
+    // resetPlanState）同步执行完毕，abort 触发的 promise 解析是微任务——收尾点必在其后
     // 运行、dissolvedBy 已置位（同步临界段不变量）
     void h.handleCommand("abort");
     // 打标来源随挂起闭包直达等待处（原独立中途断言用例内联）
     expect(hang?.dissolvedBy).toBe("self");
     const res = await pending;
 
-    // 归口①：dissolvedBy === 'self'（入口直传）→ 命令解散 no-op
+    // 收尾①：dissolvedBy === 'self'（入口直传）→ 命令解散 no-op
     expect(res.details).toEqual({ action: "review-error", reason: "cancelled" });
     expect((res as { content: Array<{ text: string }> }).content[0].text).toContain("has been exited");
-    // 归口 no-op：无 review_aborted 落盘（不出现把 exited 打回 planning 的 entry）
+    // 收尾 no-op：无 review_aborted 落盘（不出现把 exited 打回 planning 的 entry）
     const all = entries(h.pi);
     expect(all.map((e) => e.state)).toEqual(["reviewing", "exited"]);
   });
@@ -218,7 +218,7 @@ describe("S15② 新鲜度门拒收后重试仍触发（gate 判定先于一切�
 });
 
 describe("dissolvedBy② 跨轮无挂起退出 → 新一轮外部解散正常转移（闭包身份天然隔离，无残留回归）", () => {
-  it("上一轮 abort（无挂起 select）不污染本轮归口：新一轮外部解散仍走 review_aborted", async () => {
+  it("上一轮 abort（无挂起 select）不污染本轮收尾：新一轮外部解散仍走 review_aborted", async () => {
     const h = setup(planningState());
     // 第一轮：无挂起 select 的退出（规划期退出——旧世代标记机制会在此形态下残留的病根）
     await h.exec({ action: "abort" });
@@ -373,7 +373,7 @@ describe("六 action 状态写走 transition()（D1 边表接线）", () => {
 
 // ── CompleteChoiceOutcome 显式 via 五构造点补齐（①later/⑤channel 已在 tool.test 锚定）──
 
-describe("CompleteChoiceOutcome via 构造点（D3 连带段：显式枚举，归口直读）", () => {
+describe("CompleteChoiceOutcome via 构造点（D3 连带段：显式枚举，收尾直读）", () => {
   // 构造点③（rpc cancel：select 解散 + signal aborted）已并入 tool.test.ts「turn abort
   // during the pending execution-method select」（controller-abort→select-解散接线保留者）；
   // 「signal aborted → reason cancelled」的库层判别由 extension-protocol ui-form 测试归属。

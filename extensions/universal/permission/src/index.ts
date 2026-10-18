@@ -43,7 +43,7 @@ import { paletteFromTheme, type PermissionPalette } from "./statusline-palette.j
 // Added in v1.0.0. Remove after v2.0.0 (one major past).
 // session_start 首次触发时把旧路径 permission-config.json 迁到 config/permission-ext-config.json。
 // 幂等、best-effort（migrateLegacyConfig 见 @zhushanwen/pi-llm-shared）。
-// 写 agentDir 全局配置文件属跨 session 副作用——oncePerProcess 守卫防 factory 二调/handler
+// 写 agentDir 全局配置文件属跨 session 副作用——oncePerProcess 检查防 factory 二调/handler
 // 累积双跑（u-audit-fix 收编原内联 once flag；key 带包名前缀避撞，见 pi-ext-guards JSDoc）。
 // agentDir 由 getAgentDir() 推导（尊重 PI_CODING_AGENT_DIR）。
 
@@ -90,7 +90,7 @@ const _UI_OPTIONS_PARAM_INDEX = 2;
  *
  * select/input 的 opts 类型经 `Parameters<typeof ...>[typeof _UI_OPTIONS_PARAM_INDEX]`
  * 索引提取（字面量索引会触发 no-magic-numbers，typeof 常量索引语义等价）。
- * input 可选守卫展开：SDK 提供，mock/headless 可能缺失——rule-editor custom 模板
+ * input 可选检查展开：SDK 提供，mock/headless 可能缺失——rule-editor custom 模板
  * 文本输入与 Reject-with-Reason（approval.ts collectRejectReason）都依赖此透传。
  */
 function makeUiAdapter(ui: ExtensionUIContext) {

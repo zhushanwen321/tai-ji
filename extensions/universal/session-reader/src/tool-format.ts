@@ -145,7 +145,7 @@ function formatZcodeHostUnsupported(detail: string): string {
 /**
  * sqlite 驱动探测失败的消息特征（zcode-session-source sqlite-driver.ts 探测失败的
  * 错误消息契约；该包不导出专用错误子类，reader 侧按消息特征单列识别——跨包漂移
- * 由 zcode-routing.test.ts 的源文本契约测试守卫：sqlite-driver 源文不再含本子串即红）。
+ * 由 zcode-routing.test.ts 的源文本契约测试检查：sqlite-driver 源文不再含本子串即红）。
  * 导出面仅测试消费（契约锚 + 映射测试引用同值，禁测试内硬编码副本）。
  */
 export const SQLITE_DRIVER_UNSUPPORTED_MARK = '不支持 node:sqlite'
@@ -154,10 +154,10 @@ export const SQLITE_DRIVER_UNSUPPORTED_MARK = '不支持 node:sqlite'
  * 库文件缺失的消息特征（zcode-session-source sqlite-access.ts `openZcodeSessionDb`
  * 开头 existsSync 失败抛普通 Error「db 文件不存在：<dbPath>」的消息契约锚点）。该包
  * 不导出专用错误子类，reader 侧按消息特征单列识别——落 §3.4 第 4 行
- * `zcode_db_unreadable`（不误标 schema_drift）。生产路径上白名单闸
+ * `zcode_db_unreadable`（不误标 schema_drift）。生产路径上白名单门禁
  * （assertZcodeDbPathAllowed 第 1 段）已先行拦掉绝大多数缺失，此处命中的是两段
- * existsSync 之间的 TOCTOU 理论窗口（闸通过后开库前文件被删）。跨包漂移由
- * zcode-routing.test.ts 的源文本契约测试守卫（SQLITE_DRIVER_UNSUPPORTED_MARK 同范式）。
+ * existsSync 之间的 TOCTOU 理论窗口（门禁通过后开库前文件被删）。跨包漂移由
+ * zcode-routing.test.ts 的源文本契约测试检查（SQLITE_DRIVER_UNSUPPORTED_MARK 同范式）。
  * 导出面仅测试消费（契约锚 + 映射测试引用同值，禁测试内硬编码副本）。
  */
 export const ZCODE_DB_MISSING_MARK = 'db 文件不存在'

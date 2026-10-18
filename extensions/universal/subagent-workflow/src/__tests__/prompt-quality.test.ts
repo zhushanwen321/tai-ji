@@ -24,7 +24,7 @@ function readSrc(relPath: string): string {
   return readFileSync(join(PKG_ROOT, relPath), "utf-8");
 }
 
-// C5 过渡态收口：agent 模板已迁 @zhushanwen/subagent-core/agents/（C1/D-1）——经
+// C5 过渡态收尾：agent 模板已迁 @zhushanwen/subagent-core/agents/（C1/D-1）——经
 // ./workflows/* 子入口锚点解析 core 包根（与 src/host/pi-host.ts corePackageNpmRoot 同一锚；
 // 子入口映射包根真实目录，随源码走不依赖 dist 构建——relay-env 锚在 require 条件下落
 // dist/，CI 不构建 workspace 包时 resolve 直接 MODULE_NOT_FOUND）。
@@ -167,7 +167,7 @@ describe("explorer read-only 黑名单/白名单", () => {
   });
 });
 
-// ── reviewer 吸收需求验收（原 oracle 职责） ─────────────────
+// ── reviewer 吸收需求验收（原最终裁决角色职责） ─────────────────
 
 describe("reviewer 吸收需求验收", () => {
   const reviewer = readAgent("reviewer");

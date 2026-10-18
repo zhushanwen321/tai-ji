@@ -55,7 +55,7 @@ interface RelayFrame {
   cwd?: unknown;
 }
 
-/** JSON.parse + 运行时守卫（禁裸 as）：非对象或无 string kind 视为不可解析。 */
+/** JSON.parse + 运行时检查（禁裸 as）：非对象或无 string kind 视为不可解析。 */
 function parseFrame(line: string): RelayFrame | null {
   let parsed: unknown;
   try {

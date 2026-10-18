@@ -35,7 +35,7 @@ export type WorkflowRpcAction =
  */
 const REMOVED_LIFECYCLE_VERBS: ReadonlySet<"pause"> = new Set(["pause"]);
 
-/** verb 是否为已移除的 lifecycle action（类型守卫，收窄到 "pause"）。 */
+/** verb 是否为已移除的 lifecycle action（类型保护，收窄到 "pause"）。 */
 function isRemovedLifecycleVerb(verb: string): verb is "pause" {
   return REMOVED_LIFECYCLE_VERBS.has(verb as "pause");
 }

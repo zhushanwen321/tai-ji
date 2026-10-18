@@ -173,8 +173,8 @@ describe("MT-last-match-wins: 后匹配的规则胜出", () => {
 // ──────────────────────── matchRules 退化路径 ────────────────────────
 
 describe("MT-matchRules: 退化路径（command 字符串）", () => {
-	// E11：toolName 参数与 '!== bash' 守卫已删（生产调用点恒在 bash 分支内，
-	// 非 bash 由 pipeline.matchNonBashTool 承接），对应守卫用例随之移除。
+	// E11：toolName 参数与 '!== bash' 检查已删（生产调用点恒在 bash 分支内，
+	// 非 bash 由 pipeline.matchNonBashTool 承接），对应检查用例随之移除。
 
 	it("command === undefined → ask", () => {
 		const r = matchRules(undefined, getDefaultRules());

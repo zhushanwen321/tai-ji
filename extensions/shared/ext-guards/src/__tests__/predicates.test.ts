@@ -1,7 +1,7 @@
 // src/__tests__/predicates.test.ts
 //
 // isRecord / isEnoentError / isErrnoWithCode / isSubagentProcess 单测
-//（ext-simplify-17 D3/D2/D4 新导出 + isErrnoWithCode errno 守卫上收）：
+//（ext-simplify-17 D3/D2/D4 新导出 + isErrnoWithCode errno 检查上收）：
 //   - isRecord 排数组严版：数组必须 false（钉值，防回退到允数组宽版）
 //   - isEnoentError scheduler 严版：仅 Error 子类 + code === "ENOENT" 才 true，
 //     非 Error 对象带 code 是宽版才接受的形态，严版必须 false

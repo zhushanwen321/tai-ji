@@ -24,14 +24,14 @@ import {
   type SchedulerProviderOverride,
 } from '../types.js'
 
-// ── 1. 扩面可被纯对象夹具实现（类型闭合）──
+// ── 1. 扩面可被纯对象夹具实现（类型完备）──
 
 /**
  * 纯对象夹具：只实现接口成员（sendMessage/appendEntry/getSessionFile/now +
  * registerProvider/unregisterProvider/getEntries）。
  * `satisfies SchedulerBackend` 的**编译期**效力以「测试被 typecheck」为前提——
  * `extensions/tsconfig.json` 的 exclude 覆盖全部测试目录，常态 `extensions:typecheck`
- * 不覆盖本文件（若将来把测试纳入 typecheck，这行才是编译期契约闭合证据）；当前至少保证
+ * 不覆盖本文件（若将来把测试纳入 typecheck，这行才是编译期契约完备证据）；当前至少保证
  * 运行期结构契约。
  */
 function createFixtureBackend(): SchedulerBackend {
@@ -66,7 +66,7 @@ function createFixtureBackend(): SchedulerBackend {
 }
 
 describe('SchedulerBackend ack 扩面（纯对象夹具）', () => {
-  it('夹具实现既有 + 新增全部方法且类型闭合', () => {
+  it('夹具实现既有 + 新增全部方法且类型完备', () => {
     const backend = createFixtureBackend()
 
     expect(backend.getEntries()).toHaveLength(1)

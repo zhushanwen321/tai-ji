@@ -137,7 +137,7 @@ export function collectSearchHits(
   return hits
 }
 
-/** search 收口阶段：结果文本组装（header 标注降级/scope/截断 + 逐行命中列表）。 */
+/** search 收尾阶段：结果文本组装（header 标注降级/scope/截断 + 逐行命中列表）。 */
 export function formatSearchText(
   pattern: string,
   degraded: boolean,
@@ -355,7 +355,7 @@ interface CrossSearchOptions {
   byteBudget?: number
 }
 
-/** 缺省值收口后的检索参数（各缺省值与旧内联 `opts?.** ?? 常量` 逐一对应）。 */
+/** 缺省值收尾后的检索参数（各缺省值与旧内联 `opts?.** ?? 常量` 逐一对应）。 */
 interface CrossSearchResolvedOptions {
   scope: NonNullable<SessionReadParams['scope']>
   limit: number

@@ -9,15 +9,15 @@
 // - state 快照物化触发源/串行链/批合并（W4-W8）→ 无物化面，写面纪律锚在
 //   jsonl-run-store-event-edge.test.ts；
 // - save 兜底容错（W3 mkdir ENOENT/EACCES）→ save 恒 no-op 零 IO，锚同上；
-// - 快照版本守卫（W9）/ codec golden 字节锚（⛔5）→ 快照机制整体删除（版本常量
-//   与 codec 随 run-snapshot.ts 删除，git 12a60d0a4），无版本守卫后继面；
-// - adoption 投影重发保序（D4 resendSnapshots）→ 无投影可重发，接管动作收敛为
+// - 快照版本检查（W9）/ codec golden 字节锚（⛔5）→ 快照机制整体删除（版本常量
+//   与 codec 随 run-snapshot.ts 删除，git 12a60d0a4），无版本检查后继范围；
+// - adoption 派生视图重发保序（D4 resendSnapshots）→ 无派生视图可重发，接管动作收敛为
 //   rebind（session-lifecycle.ts）；
 // - 坏行宽容收编 → [D1] 反转为读失败拒绝（场景 18），见本件与 record-mode 族。
 //
 // 起源防的 bug（沿用）：sessionFile 加入 AgentCall + ExecutionTraceNode 后，持久化
-// 时必须写入、重建时必须恢复——否则跨 session 重水合后 agent 的 session jsonl
-// 路径丢失，overlay 无法定位。[D1] 形态下持久化面 = record 流 agent-settled 帧
+// 时必须写入、重建时必须恢复——否则跨 session 把落盘的运行状态快照重新加载进内存后 agent 的 session jsonl
+// 路径丢失，overlay 无法定位。[D1] 形态下持久化路径 = record 流 agent-settled 帧
 // result 载荷（sessionFile 随 result 全文落流）。
 
 import * as fs from "node:fs";
@@ -51,7 +51,7 @@ import {
 import { JsonlRunStore } from "../jsonl-run-store.ts";
 import { mkCtx, mkPi } from "@zhushanwen/subagent-core/testing/orchestration/__tests__/test-mocks.ts";
 
-/** 向 stateDir 的 record 流追加一帧（raw JSONL——模拟 core 写者落账）。 */
+  /** 向 stateDir 的 record 流追加一帧（raw JSONL——模拟 core 写者写入 journal 记录）。 */
 function appendRecordLine(tmpDir: string, runId: string, line: Record<string, unknown>): string {
   const recordPath = path.join(tmpDir, "workflow-state", `${runId}${RUN_EVENTS_SUFFIX}`);
   fs.mkdirSync(path.dirname(recordPath), { recursive: true });
@@ -336,9 +336,10 @@ describe("W1[D1]: record 重建 round-trip（call 级详情经 agent-settled res
     expect(restored[0]!.state.calls.get(0)!.traceNode.agent).toBe("worker");
   });
 
-  it("[U10] 中断流 fold：run-interrupted 无复活无终局 → meta.interruptedAt 置位（投影 interrupted 非僵尸 running）；复活流清除标记", async () => {
-    // 已收编 run（流含 run-interrupted）的重水合投影：聚合 status 保持两态
-    // （running），中断态经 meta.interruptedAt 表达——runSummary 据此投影
+  it("[U10] 中断流 fold：run-interrupted 无复活无终局 → meta.interruptedAt 置位（派生视图 interrupted 非僵尸 running）；复活流清除标记", async () => {
+    // 已收编 run（流含 run-interrupted）重新加载进内存后的派生视图：聚合 status 保持两态
+    // （running），中断态经 meta.interruptedAt 表达——runSummary 据此派生视图
+    // 'interrupted'，CLI/TUI 不显示僵尸「运行中」；resume 复活（run-resumed
     // 'interrupted'，CLI/TUI 不显示僵尸「运行中」；resume 复活（run-resumed
     // 尾帧）后标记清除回 running。
     const runId = "run-rt-interrupted";
@@ -354,7 +355,7 @@ describe("W1[D1]: record 重建 round-trip（call 级详情经 agent-settled res
     expect(restored[0]!.meta.interruptedAt).toBe(new Date(1200).toISOString());
     expect(runSummary(restored[0]!).status).toBe("interrupted");
 
-    // 复活流（同流追加 run-resumed）：标记清除，投影回 running
+    // 复活流（同流追加 run-resumed）：标记清除，派生视图回 running
     const runId2 = "run-rt-resumed";
     const recordPath2 = appendRecordLine(tmpDir, runId2, { type: "run-created", seq: 1, ts: 1000, runId: runId2, workflowName: "test-script", argsSummary: "{}", scriptSource: "agent('x')" });
     appendRecordLine(tmpDir, runId2, { type: "run-interrupted", seq: 2, ts: 1100, errorCode: "crashed", reason: "Process killed" });
@@ -421,7 +422,7 @@ describe("W17/W1[D1]: workflow-record 条目面（零条目写锚定 + v2 收编
     await store.save(run);
 
     expect(entries.filter((e) => e.customType === WORKFLOW_RECORD_CUSTOM_TYPE)).toHaveLength(0);
-    // 无 state 快照文件（[D1] 投影退役锚）
+    // 无 state 快照文件（[D1] 派生视图退役锚）
     expect(fs.existsSync(path.join(tmpDir, "workflow-state", `${runId}.jsonl`))).toBe(false);
   });
 
@@ -483,7 +484,7 @@ describe("W17/W1[D1]: workflow-record 条目面（零条目写锚定 + v2 收编
     expect(data["outcome"]).toBe("done");
     expect(data["reason"]).toBe("completed");
     expect(data["settledAt"]).toBe(3000);
-    expect(data["callCount"]).toBe(1); // record agent-settled 帧数投影
+    expect(data["callCount"]).toBe(1); // record agent-settled 帧数派生视图
   });
 
   it("[D2] 历史形态 interrupted outcome 帧被 scan 词表外坏行跳过（[D1] 历史数据处置——旧词表行不进解析路径，run 重建退 running 交收编）", async () => {
@@ -570,7 +571,7 @@ describe("W17/W1[D1]: workflow-record 条目面（零条目写锚定 + v2 收编
       v2SettledEntry(runId),
     ];
     const store = new JsonlRunStore({ sessionDir: tmpDir, ctx: mkCtx(entries) });
-    // 条目在 = 实体呈现面归条目读者（runtime 投影）；壳侧不产生 running 聚合
+    // 条目在 = 实体呈现范围归条目读者（runtime 派生视图）；壳侧不产生 running 聚合
     //（对不在场的流交恢复链 = 伪造收编事实）
     await expect(store.loadAll()).resolves.toEqual([]);
     expect(loggerMock.warn.mock.calls.map((c) => String(c[0])).join("\n")).toContain("settled entry present");
@@ -593,7 +594,7 @@ describe("W17/W1[D1]: workflow-record 条目面（零条目写锚定 + v2 收编
   it("[终局帧损坏] record 坏行 + 终态条目在 → 仍拒绝（条目救不回损坏的流——判读无第二判据）", async () => {
     const runId = "run-w1-settled-entry-final";
     const recordPath = appendRecordLine(tmpDir, runId, { type: "run-created", runId, workflowName: "test-script", argsSummary: "{}", ts: 1000, seq: 1 });
-    // 终局帧损坏：[D1] 拒绝语义不因条目在场放宽（条目是投影锚不是第二判据）
+    // 终局帧损坏：[D1] 拒绝语义不因条目在场放宽（条目是派生视图锚不是第二判据）
     fs.appendFileSync(recordPath, '{"type":"run-settled","outcome":"compl\n', "utf8");
 
     const entries: CustomEntry[] = [v2RegisteredEntry(runId, recordPath), v2SettledEntry(runId)];
@@ -603,7 +604,7 @@ describe("W17/W1[D1]: workflow-record 条目面（零条目写锚定 + v2 收编
     expect(entries.filter((e) => e.customType === WORKFLOW_RECORD_CUSTOM_TYPE)).toHaveLength(2);
   });
 
-  it("entry 形态守卫：v2 但 kind 不在词表（半写/漂移）→ 静默跳过不崩（对齐 future-v 的不猜测解析）", async () => {
+  it("entry 形态检查：v2 但 kind 不在词表（半写/漂移）→ 静默跳过不崩（对齐 future-v 的不猜测解析）", async () => {
     const entries: CustomEntry[] = [
       {
         type: "custom",
@@ -622,7 +623,7 @@ describe("W17/W1[D1]: workflow-record 条目面（零条目写锚定 + v2 收编
 // ── D5 store stale guard（rebind 面——被测对象是 JsonlRunStore rebind 后的条目补写）──
 
 describe("D5 store stale guard：rebind 后窗口内 stale appendEntry 统一 debug 丢弃", () => {
-  it("stale 抛错不进错误路径：loadAll 终态条目补写被守卫丢弃（不 reject）、读回终态", async () => {
+  it("stale 抛错不进错误路径：loadAll 终态条目补写被检查丢弃（不 reject）、读回终态", async () => {
     const staleMessage = "Extension runner is stale after session replacement";
     const entriesStale: CustomEntry[] = [];
     const piStale = mkPi(entriesStale, {
@@ -646,7 +647,7 @@ describe("D5 store stale guard：rebind 后窗口内 stale appendEntry 统一 de
       store.rebind(piStale, mkCtx(seedEntries));
 
       // 补写撞 stale → guardStaleCtx 分诊丢弃（debug 留痕），loadAll 不 reject、
-      // 读回终态（条目是投影锚：stale 窗口内缺失由下次 loadAll 幂等补写自愈）
+      // 读回终态（条目是派生视图锚：stale 窗口内缺失由下次 loadAll 幂等补写自愈）
       const loaded = await store.loadAll();
       expect(loaded).toHaveLength(1);
       // [D6(a) 第 3 步] 终局判定源 = 终局记录注册表（聚合不持 status）

@@ -265,7 +265,7 @@ export function registerTodoTool(
 			"[验证任务] 为测试 / 类型检查等验证步骤单独建 todo，完成前确保验证通过",
 			"[完成纪律] 完成一个 todo 立即标记 completed，不要攒到最后批量标记；未真正完成（被阻塞或测试失败）不得标记 completed，保持 in_progress",
 			"[批量优先] 完成多项任务时使用 updates[] 批量更新，减少工具调用次数",
-			"[自动闭合] 旧任务全部 completed 后再 add 会自动清理旧列表，直接添加新任务即可，无需手动 delete",
+			"[自动收尾] 旧任务全部 completed 后再 add 会自动清理旧列表，直接添加新任务即可，无需手动 delete",
 			"[规模控制] todo 总数建议不超过 10 个；超过时合并细粒度步骤或 delete 掉不再需要的项",
 			"[Not for] 单步操作、简单对话",
 		],
@@ -279,7 +279,7 @@ export function registerTodoTool(
 
 		renderCall(args: Record<string, unknown>, theme: Theme, _context?: unknown) {
 			// TUI 渲染先于 schema 校验（args 是未经 schema 收窄的原始形态）：非对象整体
-			// 走安全占位，字段逐个 typeof/Array.isArray 守卫替代裸断言——非法形态不抛错
+			// 走安全占位，字段逐个 typeof/Array.isArray 检查替代裸断言——非法形态不抛错
 			if (typeof args !== "object" || args === null) {
 				return new Text(
 					theme.fg("toolTitle", theme.bold("todo ")) + theme.fg("muted", "(invalid args)"),

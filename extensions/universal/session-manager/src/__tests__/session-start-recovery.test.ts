@@ -1,8 +1,8 @@
-// session-start-recovery.test.ts — 重启收口腿（notify-once D7③ / U4）。
+// session-start-recovery.test.ts — 重启收尾路径（notify-once D7③ / U4）。
 // 断言面：活跃 type 'session' register 重开 watch（入参 = entry id 即 notifyId）/
 // 类型过滤（workflow 与已注销条目不触碰）/ 覆盖序（W1 悬置被 W2 覆盖后该 entry 恰一次
 // unregister、后续 entry 不受阻塞——每 entry 独立 handler 禁串行 await）/
-// 收口腿 label 降级源 = register 三键 name。
+// 收尾路径 label 降级源 = register 三键 name。
 // pi/ctx 装配、respondWatch、flushMicrotasks 走共享 harness（helpers/extension-harness.ts）；
 // watch-only select（非 watch action 即抛）为本文件域行为，留在本地。
 
@@ -33,7 +33,7 @@ function staleEntries(): unknown[] {
 	return [
 		{ customType: "pending:register", data: { id: E1, type: "session", name: "Alpha", registeredAt: 1, sessionId: "parent-1" } },
 		{ customType: "pending:register", data: { id: E2, type: "session", name: "Beta", registeredAt: 2, sessionId: "parent-1" } },
-		// workflow 类型归 core 对账 sweep，收口腿不得触碰
+		// workflow 类型归 core 对账 sweep，收尾路径不得触碰
 		{ customType: "pending:register", data: { id: WF, type: "workflow", name: "run-1" } },
 		// 已注销（差集净空）→ 不重开
 		{ customType: "pending:register", data: { id: E3, type: "session", name: "Gamma", registeredAt: 3, sessionId: "parent-1" } },
@@ -66,7 +66,7 @@ function unregistersOf(h: Harness): Array<[string, unknown]> {
 		.map((e) => [String(e.data.id), e.data.reason]);
 }
 
-/** 单条 session register 的收口腿驱动（fail-closed / label 降级两用例共用前置）：
+/** 单条 session register 的收尾路径驱动（fail-closed / label 降级两用例共用前置）：
  * 开表（session_start）→ 排干微任务 → 应答首个 watch → 再排干 */
 async function startSingleEntrySession(respondValue: unknown): Promise<Harness> {
 	const h = createHarness([
@@ -88,7 +88,7 @@ afterEach(() => {
 	Reflect.deleteProperty(globalThis, PORT_SLOT_KEY);
 });
 
-describe("session_start 重启收口腿（D7③）", () => {
+describe("session_start 重启收尾路径（D7③）", () => {
 	it("重开 watch 覆盖序：W1 悬置被 W2 覆盖后该 entry 恰一次 unregister，且后续 entry 不受阻塞", async () => {
 		const h = createHarness(staleEntries());
 		expect(h.handlers.session_start).toBeTypeOf("function");
@@ -99,7 +99,7 @@ describe("session_start 重启收口腿（D7③）", () => {
 		await flushMicrotasks();
 		expect(h.watches.map((w) => w.notifyId)).toEqual([E1, E2]);
 
-		// E2 先应答 orphaned（杀父腿，触发器②批量转移先行）→ 即时静默 unregister
+		// E2 先应答 orphaned（杀父路径，触发器②批量转移先行）→ 即时静默 unregister
 		h.respondWatch(1, JSON.stringify({ reason: "orphaned", sessionId: "child-b" }));
 		await flushMicrotasks();
 		expect(unregistersOf(h)).toEqual([[E2, "orphaned"]]);
@@ -127,12 +127,12 @@ describe("session_start 重启收口腿（D7③）", () => {
 		expect(watchedIds).not.toContain(E3);
 	});
 
-	it("runtime 已重启查无 claim → fail-closed 'cancelled' 腿：静默注销（活跃集回归基线）", async () => {
+	it("runtime 已重启查无 claim → fail-closed 'cancelled' 路径：静默注销（活跃集回归基线）", async () => {
 		const h = await startSingleEntrySession(JSON.stringify({ reason: "cancelled" }));
 		expect(unregistersOf(h)).toEqual([[E1, "cancelled"]]);
 	});
 
-	it("收口腿 label 降级源 = register 三键 name（D9 label 两路径的恢复路径）", async () => {
+	it("收尾路径 label 降级源 = register 三键 name（D9 label 两路径的恢复路径）", async () => {
 		const delivered: Array<{ id?: string; content: string }> = [];
 		Reflect.set(globalThis, PORT_SLOT_KEY, {
 			current: {

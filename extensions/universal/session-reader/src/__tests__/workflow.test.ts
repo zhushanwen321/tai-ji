@@ -549,7 +549,7 @@ describe('resolveWorkflows（v2 注册条目单档发现链）', () => {
     expect(workflows).toEqual([])
   })
 
-  it('跨包契约守卫：发现链判别的本地字面量 === subagent-core 写侧单源（[D1] record 后缀）', () => {
+  it('跨包契约检查：发现链判别的本地字面量 === subagent-core 写侧单源（[D1] record 后缀）', () => {
     // 源码本地持有磁盘协议字符串与版本/尾段（生产依赖面不引 subagent-core），锚定两侧同值
     expect(WORKFLOW_RECORD_CUSTOM_TYPE).toBe('workflow-record')
     expect(WORKFLOW_RECORD_ENTRY_VERSION).toBe(2)

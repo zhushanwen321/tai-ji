@@ -459,7 +459,7 @@ describe('renderDetail', () => {
   })
 })
 
-// 测试内联的类型守卫镜像（验证 renderDetail 剥离效果，不依赖 render 内部导出）
+// 测试内联的类型检查镜像（验证 renderDetail 剥离效果，不依赖 render 内部导出）
 function extractTextForTest(content: unknown): string {
   if (typeof content === 'string') return content
   if (Array.isArray(content)) {

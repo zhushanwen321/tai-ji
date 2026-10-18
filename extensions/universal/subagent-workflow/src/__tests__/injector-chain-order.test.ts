@@ -1,10 +1,10 @@
-// injector-chain-order.test.ts —— system-prompt 注入链注册顺序守卫（D7）单点。
+// injector-chain-order.test.ts —— system-prompt 注入链注册顺序检查（D7）单点。
 //
 // index.ts 的注入链序只由 setup*Injector 调用的先后表达（subagent 清单 → workflow
 // 清单 → provider models → engine-awareness），无任何运行时检查。D7 硬约束
 // （injectors/engine-awareness.ts「生产装配」节注释）：engine-awareness 恒链尾
 // 注册——其段落内容变化只断 system prompt 尾部 cache 前缀。新增注入器若插到
-// engine-awareness 之后 = 静默断 KV-cache 前缀（无运行时红灯），本守卫把该
+// engine-awareness 之后 = 静默断 KV-cache 前缀（无运行时红灯），本检查把该
 // 违例变成测试红灯。
 //
 // 双层覆盖（本文件是链序源码锚点与链模拟的唯一所在地）：
@@ -81,7 +81,7 @@ function findInjectorCalls(src: string): InjectorCall[] {
   return calls;
 }
 
-/** 守卫失败信息（可操作闭环）：约束依据 + 违例 injector 名与双方行号 + 恢复动作。 */
+/** 检查失败信息（可操作闭环）：约束依据 + 违例 injector 名与双方行号 + 恢复动作。 */
 function buildChainTailViolationMessage(
   engine: InjectorCall,
   violators: InjectorCall[],
@@ -95,7 +95,7 @@ function buildChainTailViolationMessage(
   );
 }
 
-// ── 链模拟 fixture（engine-awareness.ts 复刻保真由下方源码锚点守卫）────────
+// ── 链模拟 fixture（engine-awareness.ts 复刻保真由下方源码锚点检查）────────
 
 /** pi registry 风格条目（provider models 段数据源；同时充当 ctx.modelRegistry 快照）。 */
 const PROVIDER_ENTRIES: ModelEntry[] = [
@@ -169,17 +169,17 @@ async function runHandlerChain(handlers: ChainHandler[], initialPrompt: string):
   return prompt;
 }
 
-// ── 源码锚点守卫 ────────────────────────────────────────
+// ── 源码锚点检查 ────────────────────────────────────────
 
-describe("injector 链序源码锚点守卫（D7）", () => {
+describe("injector 链序源码锚点检查（D7）", () => {
   const src = readSrc(INDEX_TS);
   const calls = findInjectorCalls(src);
 
-  it("守卫前提：index.ts 恰好注册一次 engine-awareness injector", () => {
+  it("检查前提：index.ts 恰好注册一次 engine-awareness injector", () => {
     expect(
       calls.filter((c) => c.name === CHAIN_TAIL_INJECTOR),
-      `守卫前提失效：${INDEX_TS} 中 ${CHAIN_TAIL_INJECTOR} 调用数应为 1。` +
-        `若注册点已迁走，请把本守卫与 D7 约束一并迁到新装配点。`,
+      `检查前提失效：${INDEX_TS} 中 ${CHAIN_TAIL_INJECTOR} 调用数应为 1。` +
+        `若注册点已迁走，请把本检查与 D7 约束一并迁到新装配点。`,
     ).toHaveLength(1);
   });
 
@@ -205,7 +205,7 @@ describe("injector 链序源码锚点守卫（D7）", () => {
     expect(violators, buildChainTailViolationMessage(engine, violators)).toEqual([]);
   });
 
-  it("守卫不退化为空集：index.ts 还有其他 setup*Injector 调用被覆盖", () => {
+  it("检查不退化为空集：index.ts 还有其他 setup*Injector 调用被覆盖", () => {
     expect(calls.filter((c) => c.name !== CHAIN_TAIL_INJECTOR).length).toBeGreaterThanOrEqual(1);
   });
 

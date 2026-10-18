@@ -496,7 +496,7 @@ describe("WorkflowsView tick 条件失效（200ms）", () => {
     expect(d.tui.requestRender).toHaveBeenCalledTimes(1);
     vi.advanceTimersByTime(200);
     expect(d.tui.requestRender).toHaveBeenCalledTimes(1);
-    // 原位替换 record（token 数变化 → 配对投影变 → 签名变）。追加同分候选不改投影
+    // 原位替换 record（token 数变化 → 配对派生视图变 → 签名变）。追加同分候选不改派生视图
     // （startedAt 最近邻贪心仍取首个，签名不变——非本用例目标）。
     subs[0] = makeSub({ totalTokens: 2400 });
     vi.advanceTimersByTime(200);

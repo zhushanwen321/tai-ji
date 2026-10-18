@@ -30,7 +30,7 @@ export const MODE_LABELS: Record<PermissionMode, string> = {
 	strict: "Strict",
 };
 
-/** PermissionMode 类型守卫 */
+/** PermissionMode 类型检查 */
 export function isValidPermissionMode(value: unknown): value is PermissionMode {
 	return typeof value === "string" && PERMISSION_MODES.includes(value as PermissionMode);
 }

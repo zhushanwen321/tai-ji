@@ -194,7 +194,7 @@ export interface SessionFileMeta {
 /**
  * main sessions 扫描时整体跳过的子目录名。
  * `workflow-state` 目录存放 workflow 运行状态文件（wf-*.jsonl，首行 `{"v":"wf-run-v1"|"wf-run-v2"...}`，
- * 版本随 subagent-workflow 快照格式演进，读取侧 v1/v2 兼容），非 session 文件——属 family 腿
+ * 版本随 subagent-workflow 快照格式演进，读取侧 v1/v2 兼容），非 session 文件——属 family 路径
  * 独立处理（design §3.3 D-7），扫描 main sessions 时排除，
  * 否则会把 wf 文件误收为 session（且 find.ts 读其首行 header 时会因 type≠session 被丢弃，
  * 在此排除可避免这批无效首行扫描）。

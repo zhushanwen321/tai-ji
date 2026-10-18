@@ -11,7 +11,7 @@
  *         无 LLM request 日志、无自动 session_info、正向证据 skip: stopReason=error、pi 存活。
  * 阶段 2：kill 进程、spawnPi 以 --session <文件> 续跑（新 tmp agentDir 同款 faux 预置），
  *         发「现在把刚才目录里的 ts 文件数一下」→ round 成功。断言：LLM request 出现 +
- *         session_info 落库 slug 标题。
+ *         session_info 写入 slug 标题。
  *
  * 阶段 1 tmp（含 session 文件）保留到阶段 2 结束后才清理（--session 指向其中的文件）。
  */
@@ -124,7 +124,7 @@ export async function runA4() {
 				const lastInfo = await h2.waitSessionInfoEntry(10_000);
 				assert(lastInfo && typeof lastInfo.name === "string" && lastInfo.name.length > 0, "阶段2 session_info 无标题");
 				assertLogTitleMatches(rename2.message, lastInfo.name);
-				// 落库标题须为 slug 形态（与 A2 同款两层断言：kebab 遵从是模型问题只记录，
+				// 写入标题须为 slug 形态（与 A2 同款两层断言：kebab 遵从是模型问题只记录，
 				// 其余（代词开头/时态结尾/超长/句尾标点）是 cleanTitle 契约回归，硬失败）
 				const guards = assertTitleGuards(lastInfo.name);
 				const kebabViol = guards.violations.find((v) => v.rule === "english-kebab-case");
@@ -136,7 +136,7 @@ export async function runA4() {
 					hardViol.length === 0,
 					`阶段2 标题 "${lastInfo.name}" slug guard 失败:\n${hardViol.map((v) => `  [${v.layer}/${v.rule}] ${v.message}`).join("\n")}`,
 				);
-				log(`阶段2 OK: LLM request 出现 + session_info 落库标题「${lastInfo.name}」`);
+				log(`阶段2 OK: LLM request 出现 + session_info 写入标题「${lastInfo.name}」`);
 			} finally {
 				h2.cleanup();
 			}

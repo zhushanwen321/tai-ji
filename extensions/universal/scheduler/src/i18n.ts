@@ -19,7 +19,7 @@ export { readUiLocale }
  * - `t(key, params)`：单条词典模板
  * - `renderResult(messageKey, params, locale)`：toast / 命令反馈（12+ 条命令反馈）
  * - `renderTaskLine(taskParams, locale)`：**命令变体**任务行（状态●/○ + id + name + 摘要 +
- *   相对时间 + 执行状态摘要），调用面 = list 行 / toast 内部组合，`renderResult` 内部复用、
+ *   相对时间 + 执行状态摘要），调用点 = list 行 / toast 内部组合，`renderResult` 内部复用、
  *   不重实现
  * - `renderTaskLineStatic(taskParams, locale)`：**widget 静态变体**（状态●/○ + id + name +
  *   静态调度描述，无任何 now 派生段），仅供 widget GUI body——两变体拆分是 scheduler
@@ -75,7 +75,7 @@ export type TaskParams = TaskScheduleParams & {
   /**
    * 执行状态摘要（可选；仅命令层 `task.list` 行尾消费，见 renderLastExecSummary）。
    * widget 静态变体**不消费**本字段：摘要不在 widget 指纹字段集内，进显示面会造出
-   * 「显示已变、指纹未变」的冻结缺口（scheduler widget 推送修正设计 D1-a/被否③）；
+   * 「显示已变、指纹未变」的冻结缺口（scheduler widget 推送修正设计 D1-a/不采用③）；
    * 失败可见性补偿只进命令查询面（按需呈现，零推送成本）。
    */
   lastExec?: { lastStatus: TaskStatus; recentFailures: number }
@@ -136,7 +136,7 @@ export type ServiceMessage<K extends ServiceMessageKey = ServiceMessageKey> = {
 }[K]
 
 /**
- * messageKey 词表（机器化守卫用：`service.test.ts` 断言「词典 key 集合 ⊇ 本表 + tray.title」）。
+ * messageKey 词表（机器化检查用：`service.test.ts` 断言「词典 key 集合 ⊇ 本表 + tray.title」）。
  * RESULT_RENDERERS 的映射类型已提供编译期穷尽校验；本数组供测试与词典对账。
  */
 export const SERVICE_MESSAGE_KEYS: readonly ServiceMessageKey[] = [
@@ -212,7 +212,7 @@ const ZH_CN: Dictionary = {
 
   // ack 确认轮（合成确认行 + 落盘失败如实文案）
   // 措辞边界：只承诺「写入会话文件」（本机制的唯一保证），不得写「已持久化 / 已保存到磁盘」
-  // 之类存储级承诺——ack.notPersisted 是失败面，confirm 是成功面，两者都不越界。
+  // 之类存储级承诺——ack.notPersisted 是失败情形，confirm 是成功情形，两者都不越界。
   'ack.confirm': '已保存任务：{name}（{schedule}）。',
   'ack.notPersisted': '已创建任务 {name}，但未写入会话文件。在本会话说一句话即可保存。',
 
@@ -302,10 +302,10 @@ function interpolate(template: string, params?: Record<string, string | number>)
   })
 }
 
-// ── 形状投影 ──
+// ── 形状映射 ──
 
 /**
- * 执行状态摘要投影（ScheduledTask.history/lastStatus → TaskParams.lastExec 单点）：
+ * 执行状态摘要派生视图（ScheduledTask.history/lastStatus → TaskParams.lastExec 单点）：
  * recentFailures = history 定长窗口（HISTORY_LIMIT=20）内失败计数；无任何执行记录
  * （history 空且 lastStatus 缺）→ undefined = 行尾不显示摘要段。
  * 失败记账为进程内存态（失败 dispatch 无 jsonl op），跨 resume/重启后计数归零、
@@ -317,7 +317,7 @@ function toLastExec(task: ScheduledTask): TaskParams['lastExec'] {
   return { lastStatus: task.lastStatus ?? 'success', recentFailures }
 }
 
-/** ScheduledTask → locale-neutral TaskParams（service 与 widget 共用同一投影，防双口径）。 */
+/** ScheduledTask → locale-neutral TaskParams（service 与 widget 共用同一派生视图，防双口径）。 */
 export function toTaskParams(task: ScheduledTask, now: number): TaskParams {
   const base = {
     id: task.id,
@@ -327,7 +327,7 @@ export function toTaskParams(task: ScheduledTask, now: number): TaskParams {
     now,
     expiresAt: task.expiresAt,
     enabled: task.enabled,
-    // 摘要随投影携带；仅命令变体消费（widget 静态变体忽略——不在指纹字段集内）
+    // 摘要随派生视图携带；仅命令变体消费（widget 静态变体忽略——不在指纹字段集内）
     lastExec: toLastExec(task),
   }
   return task.schedule.mode === 'interval'

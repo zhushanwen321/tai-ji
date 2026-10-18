@@ -172,12 +172,12 @@ export function makeDeps(runner: AgentRunner): LauncherDeps {
 // ── runWorkflowToSettled：跑一个 workflow 至终局并取结果（测试专用入口） ──────
 
 /**
- * 一个 workflow 跑到终局后的结果投影（runAndWait 删除后 e2e 测试的观察面形态；
+ * 一个 workflow 跑到终局后的结果派生视图（runAndWait 删除后 e2e 测试的观察范围形态；
  * 字段与原 runAndWait 返回的 WorkflowRunResult 测试消费子集同构——reason/error/
  * scriptResult/runId，既有断言零改动）。
  */
 export interface WorkflowRunOutcome { // oe-exempt:20260929:framework:测试 fixture 契约类型（mock 桩/断言视图）——dev-0.10.5 已验收代码 merge 带入
-  /** 终态原因（completed/failed/…，经 runSummary 投影——活体终局源 = 终局记录注册表）。 */
+  /** 终态原因（completed/failed/…，经 runSummary 派生视图——活体终局源 = 终局记录注册表）。 */
   reason: string;
   /** 失败/中止原因（state.error）。 */
   error?: string;
@@ -192,11 +192,11 @@ export interface WorkflowRunOutcome { // oe-exempt:20260929:framework:测试 fix
 const SETTLE_POLL_INTERVAL_MS = 5;
 
 /**
- * 同步运行一个 workflow 至终局并返回结果投影（e2e 测试的「跑完并拿结果」入口）。
+ * 同步运行一个 workflow 至终局并返回结果派生视图（e2e 测试的「跑完并拿结果」入口）。
  *
  * 替代已删除的 core runAndWait（嵌套 workflow() 编排 API 退役，C-2：编程阻塞
  * 入口零生产消费方随之删除）。走生产通道 runWorkflow（与 workflow tool 的
- * actionRun 同一 choke point），等待终局用 runSummary 投影（活体终局经终局记录
+ * actionRun 同一 choke point），等待终局用 runSummary 派生视图（活体终局经终局记录
  * 注册表判定，与 core isRunSettled 同判源）。
  *
  * 失败形态与原 runAndWait 的差异（测试语境下的简化，无既有用例依赖被删分支）：

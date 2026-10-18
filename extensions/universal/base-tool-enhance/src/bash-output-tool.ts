@@ -92,7 +92,7 @@ function findTask(
 function taskDetailText(task: BackgroundTask | RegistryEntry): string {
 	// protocol 原语返回 {text, truncated}；50KB/2000 行口径（本包产品决策）在此传参。
 	// 返回 JSON 的 `output` 字段名是 LLM 可见契约（工具 schema/描述零变化），仅在
-	// 此处从原语的 text 投影，ext-simplify-13 D2 有意内部变化
+	// 此处从原语的 text 映射，ext-simplify-13 D2 有意内部变化
 	const tail = readOutputTail(task.outputFile, { maxBytes: TAIL_MAX_BYTES, maxLines: TAIL_MAX_LINES });
 	const detail = {
 		task_id: task.taskId,

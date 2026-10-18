@@ -174,7 +174,7 @@ describe("register-doc（D10）", () => {
   });
 });
 
-describe("submit-review E6 双守卫 + D9① 自审硬门", () => {
+describe("submit-review E6 双检查 + D9① 自审硬门", () => {
   it("guard 1: inactive plan mode → error result, no select is hung", async () => {
     const { exec, ctx } = setup();
     const res = await exec({ action: "submit-review", selfReview: SELF_REVIEW });
@@ -326,7 +326,7 @@ describe("turn abort 级联（execute signal → 挂起 select 解散，MF-1-8�
     );
   }
 
-  it("submit-review 挂起窗口内 turn abort → select 解散 → 归口①外部解散（review_aborted → planning 落盘，非批准）", async () => {
+  it("submit-review 挂起窗口内 turn abort → select 解散 → 收尾①外部解散（review_aborted → planning 落盘，非批准）", async () => {
     vi.stubEnv("TAIJI_AGENT_EXT_LOG", "1");
     const { exec, ctx, pi } = setupActive();
     selectHonoringSignal(ctx);
@@ -336,7 +336,7 @@ describe("turn abort 级联（execute signal → 挂起 select 解散，MF-1-8�
     turn.abort();
     const res = await pending;
 
-    // 归口① 非入口解散（turn abort 级联不打标，dissolvedBy 缺省）→ 外部解散：reviewing --review_aborted--> planning
+    // 收尾① 非入口解散（turn abort 级联不打标，dissolvedBy 缺省）→ 外部解散：reviewing --review_aborted--> planning
     expect(res.details).toEqual({ action: "review-error", reason: "review-interrupted" });
     // A9 语义：中断 ≠ 批准，result 文本显式禁止实施
     expect(res.content[0].text).toContain("NOT an approval");
@@ -462,7 +462,7 @@ describe("decision 消费（taiji 形态）", () => {
 
     const res = await exec({ action: "submit-review", selfReview: SELF_REVIEW });
 
-    // D3 消费面②③：dismiss 分支显式结果 + tool result 语义（搁置 ≠ 批准 ≠ 取消）
+    // D3 消费方②③：dismiss 分支显式结果 + tool result 语义（搁置 ≠ 批准 ≠ 取消）
     expect(res.details).toEqual({ action: "review-dismissed", docsCount: 1 });
     expect(res.content[0].text).toContain("set this review aside");
     expect(res.content[0].text).toContain("Do not implement any changes");
@@ -589,7 +589,7 @@ describe("decision 消费（taiji 形态）", () => {
   it("echo 回显（旧 taiji 宿主不识别 PLAN_REVIEW_MARKER）→ 升级指引错误，不引导重挂（MF-1-9，判定先于 parse）", async () => {
     const { exec, ctx, pi } = setupTaiji();
     // 宿主把 marker select 降级普通单选项：用户点选回显 payload 自身（合法 JSON，
-    // parse 会成功但形状守卫必败——echo 判定必须先于 parse，否则重挂 → 再回显循环）
+    // parse 会成功但形状检查必败——echo 判定必须先于 parse，否则重挂 → 再回显循环）
     (ctx.ui.select as ReturnType<typeof vi.fn>).mockImplementation(
       async (_title: string, options: string[]) => options[0],
     );
@@ -603,7 +603,7 @@ describe("decision 消费（taiji 形态）", () => {
     expect(pi.sendMessage).not.toHaveBeenCalled();
   });
 
-  it("dismissed select (undefined, 无 reset 介入) → 归口①外部解散：中断≠批准，停止审批循环等指示", async () => {
+  it("dismissed select (undefined, 无 reset 介入) → 收尾①外部解散：中断≠批准，停止审批循环等指示", async () => {
     const { exec, ctx, pi } = setupTaiji();
     (ctx.ui.select as ReturnType<typeof vi.fn>).mockResolvedValueOnce(undefined);
 
@@ -652,5 +652,5 @@ describe("submit-review 转移落盘（D4 clearRoundFields 重挂起点调用点
   });
 });
 
-// PLAN_ACTIONS 六值钉死的保留者在 tool.test.ts「action list contains exactly the six actions」
+// PLAN_ACTIONS 六值固定的保留者在 tool.test.ts「action list contains exactly the six actions」
 // （同断言更强：另钉已删 action 不在列）——此处不再重复守护。

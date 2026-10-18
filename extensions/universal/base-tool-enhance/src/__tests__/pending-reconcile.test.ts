@@ -7,7 +7,7 @@
 //    （natural/timeout）退役出补投——主路径入账后丢失由 port 的 outbox 差集重放覆盖
 //    （对位说明：投递 throw → 内核 retain + 边沿重放；落盘后崩溃 → outbox 差集重放；
 //    两形态由 delivery-port 包测试锁定，本文件锁定「对账不再覆盖它们」）
-//  - 旧补投标记 / in-flight 单飞守卫随波 3 退役：防双投由 port 幂等接管（deliver
+//  - 旧补投标记 / in-flight 单飞检查随波 3 退役：防双投由 port 幂等接管（deliver
 //    幂等预检 + 内核三级判重 + outbox/ack 终态列）——本文件锁定「marker 在场不再
 //    阻断重投」（痕迹缺失即重投，旧 marker「标记在而消息丢」残余失败域随之修复）
 import { spawnSync } from "node:child_process";
@@ -111,8 +111,8 @@ afterEach(() => {
 });
 
 describe("bt- diff via protocol collectActivePendingIds (single-source diff core)", () => {
-	// 差集本体单点在 protocol pending-entries（ext-simplify-13 D3，与 pending 守卫
-	// 判据同源）；此处锁定 bte 对账消费面的语义（idPrefix = BACKGROUND_TASK_ID_PREFIX）
+	// 差集本体单点在 protocol pending-entries（ext-simplify-13 D3，与 pending 检查
+	// 判据同源）；此处锁定 bte 对账消费方的语义（idPrefix = BACKGROUND_TASK_ID_PREFIX）
 	it("collects bt- registers without a matching unregister", () => {
 		const ids = collectActivePendingIds(
 			[
@@ -423,8 +423,8 @@ describe("reap-notify: candidates (reaped terminal × trace absent) via port.del
 
 		const result = await reconcilePendingEntries(createMockPi(), DATA_DIR, SESSION_ID, [], deliver);
 
-		// 逐任务信封（旧合并单条形态退役）：port 幂等键/送达凭据/差集销账全链锚定
-		// 「单 id 单消息」——合并形态需造合成 id 且部分销账必然双投
+	// 逐任务信封（旧合并单条形态退役）：port 幂等键/送达凭据/差集逐条处理完毕全链锚定
+	// 「单 id 单消息」——合并形态需造合成 id 且部分处理完毕必然双投
 		expect(deliver).toHaveBeenCalledTimes(2);
 		const envelopes = deliver.mock.calls.map(
 			(c) => c[0] as DeliverEnvelope,

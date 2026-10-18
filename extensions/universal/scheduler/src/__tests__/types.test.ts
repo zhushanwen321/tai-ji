@@ -4,7 +4,7 @@ import { snapshotToTask, toTaskSnapshot } from '../types.js'
 import type { ScheduledTask, TaskSnapshot } from '../types.js'
 
 /**
- * B2 转换器收敛（ext-simplify-17）等价守卫：toTaskSnapshot canonical 取解构式，
+ * B2 转换器收敛（ext-simplify-17）等价检查：toTaskSnapshot canonical 取解构式，
  * 替换 importer 旧显式 14 字段式——期望值按旧显式式的输出形状逐字段锚定
  * （toEqual 严格比较键集合，解构式多带/漏带键即红），防字段演进中静默漂移。
  * 既有间接断言（importer/runtime 测试的 objectContaining）不覆盖键集合精确性与

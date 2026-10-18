@@ -138,14 +138,14 @@ describe('SchedulerRuntime', () => {
     })
   })
 
-  // ── R3-S1：dispatchTask in-flight 守卫 ──
+  // ── R3-S1：dispatchTask in-flight 检查 ──
   // tick 为 fire-and-forget：tick1 的 await sendMessage 挂起超过 TICK_INTERVAL_MS（如 pi
   // 卡死）时，tick2 的 step2 再标 pending → step3 对同一 task 并发第二个 dispatch → 同一
-  // prompt 双注入。守卫：同任务在途（Set<taskId>）
+  // prompt 双注入。检查：同任务在途（Set<taskId>）
   // 时 skip 本轮并 warn；不同任务不受影响。
   // 末两条为调用方 API 层验收：不经 tick，直接并发/串行调 dispatchTask，
-  // 验证守卫在调用方入口同样拦截（warn + 第二次 false）与完成后放行。
-  describe('dispatchTask in-flight 守卫（R3-S1）', () => {
+  // 验证检查在调用方入口同样拦截（warn + 第二次 false）与完成后放行。
+  describe('dispatchTask in-flight 检查（R3-S1）', () => {
     beforeEach(() => {
       vi.useFakeTimers()
       vi.setSystemTime(new Date('2026-01-01T00:00:00Z'))
@@ -170,7 +170,7 @@ describe('SchedulerRuntime', () => {
       expect(task.pending).toBe(true) // dispatch 未完成，pending 未清
 
       // tick2（模拟 30s 后 pi 仍卡死）：同任务再标 pending → step3 dispatchTask 命中
-      // in-flight 守卫 → skip + warn（修复前：同一 prompt 双注入）
+      // in-flight 检查 → skip + warn（修复前：同一 prompt 双注入）
       await runtime.tickScheduler()
       expect(backend.sendMessage).toHaveBeenCalledTimes(1)
       const warnText = loggerMock.warn.mock.calls.map(c => String(c[0])).join('\n')
@@ -198,8 +198,8 @@ describe('SchedulerRuntime', () => {
       const tick1 = runtime.tickScheduler()
       expect(backend.sendMessage).toHaveBeenCalledTimes(1)
 
-      // tick2：task1 命中守卫跳过，task2 无在途 → 正常 dispatch（守卫按 taskId 粒度隔离）。
-      // 注：tick2 挂起在 task1 的 await dispatchTask（守卫命中即 resolved promise）与 task2
+      // tick2：task1 命中检查跳过，task2 无在途 → 正常 dispatch（检查按 taskId 粒度隔离）。
+      // 注：tick2 挂起在 task1 的 await dispatchTask（检查命中即 resolved promise）与 task2
       // 的 await sendMessage 上，先放行再 await，完成态统一断言
       const tick2 = runtime.tickScheduler()
       resolveSend!()
@@ -210,7 +210,7 @@ describe('SchedulerRuntime', () => {
     })
 
     // ── 调用方 API 层 ──
-    it('调用方守卫：同一 taskId 并发 dispatchTask → 第二次被拦截（send 只调 1 次 + warn）', async () => {
+    it('调用方检查：同一 taskId 并发 dispatchTask → 第二次被拦截（send 只调 1 次 + warn）', async () => {
       loggerMock.warn.mockClear()
       // 可控延迟的 sendMessage：让第一次 dispatch 挂起
       let resolveSend: (() => void) | undefined
@@ -239,7 +239,7 @@ describe('SchedulerRuntime', () => {
       await first
     })
 
-    it('调用方守卫：第一次完成后 → 第二次 dispatchTask 正常执行（send 调 2 次）', async () => {
+    it('调用方检查：第一次完成后 → 第二次 dispatchTask 正常执行（send 调 2 次）', async () => {
       const task = await runtime.addTask('serial-inflight', { mode: 'interval', intervalMs: 60_000 })
 
       // 第一次 dispatch（串行等待完成）

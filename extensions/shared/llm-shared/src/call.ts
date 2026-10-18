@@ -58,8 +58,8 @@ export interface CallLLMOptions {
 /**
  * callLLM 出参。
  * - ok:true → content 为提取并 trim 的文本；usage 为 completeSimple 响应的 resp.usage 透传
- *   （可选，存在才带——usage 整体缺失时不带字段，「跳过落账」语义由调用方处理，如
- *   rename-session 的 appendEntry 存在性守卫；permission classifier 等既有调用方不消费，零影响）。
+ *   （可选，存在才带——usage 整体缺失时不带字段，「跳过记录」语义由调用方处理，如
+ *   rename-session 的 appendEntry 存在性检查；permission classifier 等既有调用方不消费，零影响）。
  *   stopReason 透传（可选，存在才带）：ok:false 分支只可能是 error/aborted；ok:true 分支的
  *   值域是其余终态（stop/length/toolUse 等），调用方用它区分「输出被预算截断（length）」与
  *   「模型正常返回空文本（stop）」两类静默失败（rename-session 的 title empty warn）。

@@ -7,7 +7,7 @@
  * 2. **流不在场 = 未终局**（undefined，ENOENT 静默 miss——正常形态）；
  * 3. **流损坏 = 保守 miss + warn**（通知链不是恢复面；恢复面的拒绝语义在
  *    loadAll，见 record-mode 场景 18 用例）;
- * 4. **零快照写面**：save（终局前后）不产生任何 state 投影文件——磁盘上唯一
+ * 4. **零快照写面**：save（终局前后）不产生任何 state 派生视图文件——磁盘上唯一
  *    持久件 = record 流。
  */
 import * as fs from "node:fs";
@@ -111,7 +111,7 @@ describe("壳 store 判终局唯一判法（[D1] record fold）", () => {
     await store.dispose();
   });
 
-  it("零快照写面：终局前后 save 均不产生 state 投影文件（磁盘唯一持久件 = record 流）", async () => {
+  it("零快照写面：终局前后 save 均不产生 state 派生视图文件（磁盘唯一持久件 = record 流）", async () => {
     const store = new JsonlRunStore({ sessionDir: tmpDir });
     const run = makeRun("wf-route-nosnap");
 

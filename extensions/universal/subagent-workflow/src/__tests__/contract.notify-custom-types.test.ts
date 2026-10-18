@@ -8,7 +8,7 @@
 //      + shared/runtime/core 消费方逐字节依赖）——改值 = 跨侧破坏性变更，必须先红
 //      本测试（有意识动作），不允许顺手改 SSOT 值静默漂移。
 //   2. 源码形态锁：生产写点不得本地重定义/裸写字面量（回潮 = 新的裸字面量漂移面）。
-//      生产侧写点 = 壳三处（workflow-notify 收口通知 / index messageRenderer 注册 /
+//      生产侧写点 = 壳三处（workflow-notify 收尾通知 / index messageRenderer 注册 /
 //      subagents 定向留痕）。core 侧写点（notifier 的 SSOT 别名 NOTIFY_CUSTOM_TYPE +
 //      送达分诊零裸字面量）的形态锁在被测包内：packages/subagent-core
 //      src/execution/__tests__/notifier.test.ts（unified-delivery 波 2：别名随账本

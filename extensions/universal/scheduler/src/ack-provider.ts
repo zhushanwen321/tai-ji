@@ -228,7 +228,7 @@ export async function computeAckAvailability(deps: AckAvailabilityDeps): Promise
   }
 }
 
-// ── 小守卫（禁 any / 免断言）──
+// ── 小检查（禁 any / 免断言）──
 
 /** 是否为带 `code` 的 Node errno 异常（ENOENT 判别用）。 */
 function isErrnoException(err: unknown): err is NodeJS.ErrnoException {
@@ -240,7 +240,7 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value)
 }
 
-/** 错误类型最小投影（name + 可选 code）——只取可安全入日志的字段。 */
+/** 错误类型最小派生视图（name + 可选 code）——只取可安全入日志的字段。 */
 function describeError(err: unknown): { name: string; code?: string } {
   if (err instanceof Error) {
     const code = isErrnoException(err) ? err.code : undefined

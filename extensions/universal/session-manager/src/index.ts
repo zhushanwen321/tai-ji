@@ -97,7 +97,7 @@ function newNotifyId(): string {
 	return `sm-${crypto.randomUUID()}`;
 }
 
-/** 运行时守卫（读侧不信任外部格式）：结果是否 JSON object——形状断言前的类型 guard。 */
+/** 运行时检查（读侧不信任外部格式）：结果是否 JSON object——形状断言前的类型 guard。 */
 function asResultRecord(v: unknown): Record<string, unknown> | undefined {
 	return typeof v === "object" && v !== null && !Array.isArray(v)
 			? (v as Record<string, unknown>)
@@ -198,13 +198,13 @@ export default function sessionManagerExtension(pi: ExtensionAPI): void {
 	setPiHandle(pi);
 
 	// watch 桥编排（notify-once U4）：工具结果 arm / watch 应答两层攒批 record /
-	// session_start 重启收口腿共用同一闭包状态（label 缓存 + 死亡新闻槽 + 攒批队列）。
+	// session_start 重启收尾路径共用同一闭包状态（label 缓存 + 死亡新闻槽 + 攒批队列）。
 	const coordinator = createWatchCoordinator({
 		pi,
 		callWatch: (ctx, notifyId) => callSessionManager(ctx, "watch", { notifyId }),
 	});
 
-	// 重启收口腿（D7③）：父 pi 死亡后永无 unregister 的活跃 type 'session' register
+	// 重启收尾路径（D7③）：父 pi 死亡后永无 unregister 的活跃 type 'session' register
 	// 逐条重开 watch（入参 = entry id 即 notifyId），应答经 watch 处理链静默注销，
 	// 活跃集回归基线；每 entry 独立 handler（禁串行 await）在 coordinator 内保证。
 	pi.on("session_start", (_event: SessionStartEvent, ctx: ExtensionContext) => {

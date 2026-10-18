@@ -101,13 +101,13 @@ afterEach(() => {
 
 // ── 契约纯函数（error envelope / boundary 帧 / truncateSelfReview）的 canonical 测试
 // 在 packages/extension-protocol/src/extensions/plan/review-contract.test.ts（更强版本：
-// 键剥除结构断言 / 4KB 字节界精确锚 / 刁钻样本超集）——本文件只保留经 tool 消费面的
+// 键剥除结构断言 / 4KB 字节界精确锚 / 刁钻样本超集）——本文件只保留经 tool 消费方的
 // 接线契约，不重复测共享逻辑。──
 
-// ── 经 tool 消费面的契约落地（consumers.md ①③：payload 构造单点 + 双分源降级）──
+// ── 经 tool 消费方的契约落地（consumers.md ①③：payload 构造单点 + 双分源降级）──
 
-describe("契约经 executeSubmitReview 消费面落地", () => {
-  it("超限 selfReview：payload 构造单点截断（写侧 4KB），且产出 payload 过入站守卫（boundary 帧合法）", async () => {
+describe("契约经 executeSubmitReview 消费方落地", () => {
+  it("超限 selfReview：payload 构造单点截断（写侧 4KB），且产出 payload 过入站检查（boundary 帧合法）", async () => {
     const { ctx, exec } = setup();
     const oversized = "自审".repeat(PLAN_SELF_REVIEW_MAX_BYTES); // 远超 4KB
     (ctx.ui.select as ReturnType<typeof vi.fn>).mockResolvedValue(JSON.stringify({ decision: "dismiss" }));
@@ -116,7 +116,7 @@ describe("契约经 executeSubmitReview 消费面落地", () => {
 
     const payload = markerPayload(ctx) as { selfReview: string };
     expect(Buffer.byteLength(payload.selfReview, "utf8")).toBeLessThanOrEqual(PLAN_SELF_REVIEW_MAX_BYTES);
-    // 截断后仍是合法 boundary 帧（消费侧守卫必过）
+    // 截断后仍是合法 boundary 帧（消费侧检查必过）
     expect(isPlanReviewRequest(payload)).toBe(true);
   });
 

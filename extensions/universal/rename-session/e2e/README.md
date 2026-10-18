@@ -13,7 +13,7 @@ E2E wave（P0 探针 + T1 harness + A1-A7 场景）的探针结论与运行指�
 
 ### 1. auth 迁移（GAP-1 硬前提）——可行，无降级需求
 
-**结论**：`xiaomi-token-plan-cn` 是 **pi-ai 内置 provider**（`pi-ai/dist/providers/xiaomi-token-plan-cn.js`，`envApiKeyAuth(["XIAOMI_TOKEN_PLAN_CN_API_KEY"])`）。迁移只需把 `~/.pi/agent/auth.json`（含 `xiaomi-token-plan-cn` key）复制到 tmp 的 `PI_CODING_AGENT_DIR/auth.json`。实测：tmp 隔离环境起 pi 发真实 prompt，主模型与 rename LLM（同 provider）均真实调通，标题「基础算术计算」落库。
+**结论**：`xiaomi-token-plan-cn` 是 **pi-ai 内置 provider**（`pi-ai/dist/providers/xiaomi-token-plan-cn.js`，`envApiKeyAuth(["XIAOMI_TOKEN_PLAN_CN_API_KEY"])`）。迁移只需把 `~/.pi/agent/auth.json`（含 `xiaomi-token-plan-cn` key）复制到 tmp 的 `PI_CODING_AGENT_DIR/auth.json`。实测：tmp 隔离环境起 pi 发真实 prompt，主模型与 rename LLM（同 provider）均真实调通，标题「基础算术计算」写入。
 
 无需迁移 customProvider 定义（provider 是内置的，models-store.json 是 pi 自管的 catalog 缓存，会自建）。无 settings.json `packages` 时不触发 npm 安装。
 
@@ -135,7 +135,7 @@ data:    { error: "unknown error" }   ← 结构化 data 字段，message 不含
 
 - **进程编排**：`spawnPi(opts)`（tmp 初始化 + auth 迁移 + 交错时间轴 + RPC client）、`startHangServer()`（A5 stub socket）、`runScenario(name, fn)`（场景 runner 通用执行器：单场景失败不阻断，四分类汇总）、`runStandalone(moduleUrl, run)`（独立执行入口判定 + exit code 映射，run-aN.mjs 尾部共用）
 - **RPC client**（spawnPi 返回值的 `rpc`）：`request(cmd)`（id 关联）、`waitFor(type, opts)`、`waitForSessionLog(pattern, opts)`（轮询 session JSONL 的 rename-session:log entry，pattern 匹配 message）、`prompt(msg)`、`setSessionName(name)`、`getState()`
-- **断言纯函数**（场景脚本与单测共用）：`sleep`（场景通用 sleep）/ `assert`（场景通用 assert，失败抛 assertion 分类 HarnessError）/ `rebuildPreview` / `parseLogMessages` / `lastSessionInfoEntry`（取最后一条 session_info entry，name SSOT）/ `parseJsonlEntries`（逐行 JSON.parse，坏行跳过）/ `extractRenameLogEntries` / `extractLastStopAssistant` / `firstAssistantStartT` / `lastStopAssistantEndT` / `countToolCalls` / `countLlmRequestLogs` / `countSessionInfoEntries` / `assertTitleGuards` / `assertLogTitleMatches`（断言 renamed to 日志标题与 session_info 落库一致）/ `classifyFailure`
+- **断言纯函数**（场景脚本与单测共用）：`sleep`（场景通用 sleep）/ `assert`（场景通用 assert，失败抛 assertion 分类 HarnessError）/ `rebuildPreview` / `parseLogMessages` / `lastSessionInfoEntry`（取最后一条 session_info entry，name SSOT）/ `parseJsonlEntries`（逐行 JSON.parse，坏行跳过）/ `extractRenameLogEntries` / `extractLastStopAssistant` / `firstAssistantStartT` / `lastStopAssistantEndT` / `countToolCalls` / `countLlmRequestLogs` / `countSessionInfoEntries` / `assertTitleGuards` / `assertLogTitleMatches`（断言 renamed to 日志标题与 session_info 写入一致）/ `classifyFailure`
 - **共用常量/类**：`E2E_MODEL`（测试模型，值见开头）、`LLM_REQUEST_MARKER`（rename LLM request 日志行前缀）、`RENAME_LOG_CUSTOM_TYPE`（rename 日志 entry 的 customType）、`HarnessError`（携带失败分类的错误类，classifyFailure 归类依据）
 - **清理**：handle 的 `kill()`（按 PID）与 `cleanup()`（kill + 删 tmp；`E2E_KEEP_TMP=1` 保留现场）
 

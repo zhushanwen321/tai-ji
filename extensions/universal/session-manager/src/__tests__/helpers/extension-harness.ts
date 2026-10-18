@@ -26,7 +26,7 @@ export interface EmittedEvent { // oe-exempt:20260930:test:事件断言形状契
 export interface ExtensionHarness {
 	registered: RegisteredTool[];
 	emitted: EmittedEvent[];
-	/** pi.on 注册的 handler（session_start / session_compact 收口腿触发面） */
+	/** pi.on 注册的 handler（session_start / session_compact 收尾路径触发面） */
 	handlers: Record<string, (event: unknown, ctx: unknown) => unknown>;
 	/** rpc 模式 ctx 桩（sessionManager.getEntries 读 mountExtension 的 entries 入参） */
 	ctx: Record<string, unknown>;
@@ -94,7 +94,7 @@ export async function flushMicrotasks(): Promise<void> {
 	for (let i = 0; i < 12; i++) await Promise.resolve();
 }
 
-/** 工具文本结果形态（六工具 execute 成功路径的 content 投影） */
+/** 工具文本结果形态（六工具 execute 成功路径的 content 派生视图） */
 export interface ToolTextResult { // oe-exempt:20260930:test:runToolForText 返回契约——断言面消费
 	content: Array<{ type: string; text: string }>;
 }

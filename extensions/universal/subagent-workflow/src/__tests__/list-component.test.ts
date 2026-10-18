@@ -389,7 +389,7 @@ describe("SubagentsListComponent", () => {
       const joined = comp.render(80).join("\n");
       expect(joined).toContain("stopped: interrupted");
 
-      // running（在飞，无停因）与无 stopReason 的 idle（存量数据）不出现停因段
+      // running（在途，无停因）与无 stopReason 的 idle（存量数据）不出现停因段
       const runningRec = makeRecord({ id: "sa-run", status: "running" });
       const runComp = makeComponent({ records: [runningRec], rows: 24, detailMode: true });
       expect(runComp.comp.render(80).join("\n")).not.toContain("stopped:");

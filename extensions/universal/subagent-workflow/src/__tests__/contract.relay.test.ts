@@ -4,7 +4,7 @@
 //   1. 协议常量镜像一致性：relay.mjs（零依赖脚本不能 import workspace 包，只能内嵌
 //      镜像）与 relay-env.ts SSOT 逐字对齐——改名/改值双侧不同步即此处转红（§10-5）。
 //
-// 随 W3 chat 域收口废弃的两段（行为迁出宿主进程，原断言面无宿主侧对应物，非跳过）：
+// 随 W3 chat 域收尾废弃的两段（行为迁出宿主进程，原断言范围无宿主侧对应物，非跳过）：
 //   - C-通道（getPiInvocation 三分支）：spawn 目标解析随 inproc session-runner 删除
 //     整体迁入引擎进程（packages/pi-subagent-cli/src/pi-invocation.ts），三分支契约
 //     （三 env 齐备 → 代理 / 任一缺失 → 直连 / relay:false 强制直连）由引擎包自有

@@ -42,10 +42,10 @@ import {
 /** 探测宽度：足够大避免截断折行影响行数统计（对齐 subagents DETAIL_LEN_PROBE_WIDTH）。 */
 const DETAIL_LEN_PROBE_WIDTH = 9999;
 
-// ── [H2 W3] store record 的 live 进度投影（设计 D2：进度源从 node.live 切 store）──
+// ── [H2 W3] store record 的 live 进度派生视图（设计 D2：进度源从 node.live 切 store）──
 
 /**
- * running record 的实时进度投影（totalTokens / 工具计数 / elapsedSeconds / turns /
+ * running record 的实时进度派生视图（totalTokens / 工具计数 / elapsedSeconds / turns /
  * eventLog / currentActivity / lastError）。
  */
 export interface LiveProgressView {
@@ -59,7 +59,7 @@ export interface LiveProgressView {
 }
 
 /**
- * SubagentRecord（store 查询投影）→ LiveProgressView。字段口径（S1 等价表）：
+ * SubagentRecord（store 查询派生视图）→ LiveProgressView。字段口径（S1 等价表）：
  *   - totalTokens / turns：recordToSubagent 直读 record.totalTokens / turnCount，同源；
  *   - toolCallCount：eventLog 里 tool_start 计数——getEventLog 对每个 toolCall 恰产
  *     一条 tool_start，与 getAllToolCalls(record).length 恒等；

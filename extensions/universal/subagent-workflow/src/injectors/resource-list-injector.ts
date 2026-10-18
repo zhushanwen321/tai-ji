@@ -119,7 +119,7 @@ function singularKind(kind: "agents" | "workflows"): string {
 /**
  * 空态注入（D4-2）渲染的发现根清单：宿主注入根（discoveryRoots 槽，现取——
  * 实例隔离语义同 discover）+ core 约定根推导（conventionRootDirs 单源，含
- * includeTmp 的 .tmp 根）——本函数只做纯投影，不持有任何 join 字面。
+ * includeTmp 的 .tmp 根）——本函数只做纯派生视图，不持有任何 join 字面。
  * TAIJI_EXTENSION_PATHS 刻意不列——taiji 内部 dev-link 通道，非 agent 自救面。
  * 清单是给 agent 的提示信息：顺序无优先级契约，保序去重由渲染函数保证
  * （同 turn 重建字节稳定，KV-cache 契约）。

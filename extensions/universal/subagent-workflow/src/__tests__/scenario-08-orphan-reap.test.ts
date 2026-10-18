@@ -167,7 +167,7 @@ function makeCtx(sessionId: string): ExtensionContext {
   } as unknown as ExtensionContext;
 }
 
-/** 触发一轮维护轮（reset 进程级守卫 + session_start 装配）。 */
+/** 触发一轮维护轮（reset 进程级检查 + session_start 装配）。 */
 async function runMaintenanceRound(sessionId: string): Promise<void> {
   _resetOncePerProcessForTest();
   await setupSessionLifecycle(makePi(), makeCtx(sessionId), {});

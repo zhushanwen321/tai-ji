@@ -11,7 +11,7 @@
  * 收尾写法（权威路径）：直接 pi.appendEntry("pending:unregister", {id, reason,
  * status})——**appendEntry 即唯一权威路径**：appendEntry 同步入账（pi dist 实证）
  * 且不依赖 listener 存活，差集消费方 goal 从持久化 entries 算差集
- * （agent-end.ts getEntries()），对守卫直接生效，无不一致窗口。（尽力补 emit 的
+ * （agent-end.ts getEntries()），对检查直接生效，无不一致窗口。（尽力补 emit 的
  * 第二写路径已随 ext-simplify-13 删除：pending unregister listener 的落盘前置
  * isPendingActive 对 entries 现算，而对账 appendEntry 同步入账先于 emit 执行，emit
  * 到达时该 id 必已注销 = 恒 no-op 死路径。）
@@ -24,7 +24,7 @@
  * 已随波 3 退役出补投：主路径入账后丢失由 port 的 outbox 差集重放覆盖（受理前落盘
  * + details-id 凭据未命中即差集）。
  *
- * 幂等体系（随载体换 port 收敛）：旧「补投标记 entry + in-flight 单飞守卫」退役——
+ * 幂等体系（随载体换 port 收敛）：旧「补投标记 entry + in-flight 单飞检查」退役——
  * 防双投由 port 幂等接管（deliver 幂等预检 + 内核三级判重 + outbox/ack 终态列）：
  * 同激活双派发的第二路 deliver 同 id 被 port 吞（swallowed）；已送达任务由送达痕迹
  * 判据阻断（通知消息的 details.taskId / content bt- token 在 entries）。旧 marker
@@ -33,7 +33,7 @@
  * session_start 幂等重投），不做无幂等保护的直发兜底（双派发窗口双投）。
  *
  * 差集判据单点（ext-simplify-13）：collectActivePendingIds（protocol
- * pending-entries 模块，与 pending-notifications 守卫判据同源）+ bt- 前缀过滤；
+ * pending-entries 模块，与 pending-notifications 检查判据同源）+ bt- 前缀过滤；
  * 送达痕迹提取单点 = notify-reconcile-judgement.ts collectDeliveredTaskIds。
  * task_id 前缀亦消费 protocol 契约常量 BACKGROUND_TASK_ID_PREFIX（§2.3，区别于
  * subagent-workflow 的 bg-/run-）。
@@ -139,7 +139,7 @@ export async function reconcilePendingEntries(
 		if (entry === undefined) {
 			// registry 无条目：终态无从判定（LRU 淘汰的终态条目其 unregister entry 应已
 			// 落盘，差集里还出现 = spawn 后 registry 写失败等罕见路径）——保守不动作，
-			// pending-notifications 已无任何 TTL 清理，差集残留由 next-session 对账重查收口。
+			// pending-notifications 已无任何 TTL 清理，差集残留由 next-session 对账重查收尾。
 			// warn 是设计决策 6 的 LRU 淘汰重审触发观测落点（含 taskId；此前该形态零日志）
 			logger.warn(
 				"pending reconcile: registry has no entry for a pending bt- id (LRU-evicted or spawn-write failure); unregister stays pending",

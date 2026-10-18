@@ -183,7 +183,7 @@ describe("normalizeErrorSignature", () => {
 	});
 });
 
-// ── 签名哈希化的闸门级验收（审查项#7）──────────────────────────
+// ── 签名哈希化的门禁级验收（审查项#7）──────────────────────────
 
 describe("WorkflowGate signature hashing (progressive-fix acceptance)", () => {
 	it("渐进修复（字段集合缩小）→ 每步新签名计数重起，不触发 terminal；停止修复后第 3 次同签名才 terminal", () => {
@@ -250,7 +250,7 @@ describe("required 渐进修复签名区分（F1 回归：bullet 路径位仅含
 		expect(s1).not.toBe(s3);
 	});
 
-	it("闸门级：三步演化序列每步计数重起，不触发 terminal（误杀回归）", () => {
+	it("门禁级：三步演化序列每步计数重起，不触发 terminal（误杀回归）", () => {
 		const gate = new WorkflowGate();
 		expect(gate.onToolExecEnd(true, requiredError(REQUIRED_FIELDS)))
 			.toEqual({ terminal: false, newlyTerminal: false });
@@ -283,7 +283,7 @@ describe("required 渐进修复签名区分（F1 回归：bullet 路径位仅含
 		expect(normalizeErrorSignature(nested)).not.toBe(normalizeErrorSignature(nestedShrunk));
 	});
 
-	it("同缺失集合重复 3 次（模型没修任何字段）→ 仍触发 terminal（闸门有界语义不变）", () => {
+	it("同缺失集合重复 3 次（模型没修任何字段）→ 仍触发 terminal（门禁有界语义不变）", () => {
 		const gate = new WorkflowGate();
 		const err = requiredError(REQUIRED_FIELDS);
 		gate.onToolExecEnd(true, err);
@@ -335,7 +335,7 @@ describe("additionalProperties 渐进删除签名区分（AP 回归：D4 默认�
 		expect(s1).not.toBe(s3);
 	});
 
-	it("同一多余字段反复失败（keys 集合不变）→ 同签名第 3 次仍触闸（闸门保护不丢失）", () => {
+	it("同一多余字段反复失败（keys 集合不变）→ 同签名第 3 次仍触闸（门禁保护不丢失）", () => {
 		const gate = new WorkflowGate();
 		// keys 恒为 {summary}，仅值变化——不算进展，既有「值变化 ≠ 进展」语义在 AP 场景保留
 		gate.onToolExecEnd(true, apError({ summary: "wrong" }));
@@ -402,7 +402,7 @@ describe("嵌套 AP keys 下钻（R4-F2：路径位 a / a.b / list.0）", () => 
 		expect(new Set(sigs).size).toBe(3);
 	});
 
-	it("同一嵌套多余字段反复失败 → 同签名第 3 次仍触闸（闸门有界语义在嵌套层保留）", () => {
+	it("同一嵌套多余字段反复失败 → 同签名第 3 次仍触闸（门禁有界语义在嵌套层保留）", () => {
 		const gate = new WorkflowGate();
 		const err = apErrorAt("a", { a: { keep: "wrong" } });
 		gate.onToolExecEnd(true, err);
@@ -560,7 +560,7 @@ describe("echo keys 分桶（并集恒定陷阱回归）", () => {
 		expect(s1).not.toBe(s2); // req 桶变化 → 新签名
 		expect(s2).not.toBe(s3); // keys 桶变化 → 新签名
 		expect(s1).not.toBe(s3);
-		// 闸门级：三步计数重起不触闸
+		// 门禁级：三步计数重起不触闸
 		const gate = new WorkflowGate();
 		for (const r of [r1, r2, r3]) {
 			expect(gate.onToolExecEnd(true, r)).toEqual({ terminal: false, newlyTerminal: false });
@@ -568,7 +568,7 @@ describe("echo keys 分桶（并集恒定陷阱回归）", () => {
 		}
 	});
 
-	it("④ 同错反复（混合形态）：两类桶 token 恒同 → 第 3 次仍触闸（闸门有界语义保留）", () => {
+	it("④ 同错反复（混合形态）：两类桶 token 恒同 → 第 3 次仍触闸（门禁有界语义保留）", () => {
 		const gate = new WorkflowGate();
 		const err = mixedRequiredApError(["f1"], { f2: 2, extra: 1 });
 		gate.onToolExecEnd(true, err);
@@ -666,13 +666,13 @@ describe("setupWorkflowHook assembly (via mock pi)", () => {
 // 幂等武装三用例——已随 ADR-0122 清查删除：墙钟兜底不建，pi 挂死不 settle 的
 // 处置 = 父进程既有失败路径 + 用户重启应用。）
 
-// ── D2 双闸门合一等价断言（单状态机交互时序锁）─────────────────
+// ── D2 双门禁合一等价断言（单状态机交互时序锁）─────────────────
 //
-// 等价口径：WorkflowGate 单状态机对「steer 记账 + 硬杀计数」双闸门的外部可观测行为，
-// 与两闸门分立状态机时逐条一致。以下断言锁定四个关键交互点——每条行为同时被
+// 等价口径：WorkflowGate 单状态机对「steer 记账 + 硬杀计数」双门禁的外部可观测行为，
+// 与两门禁分立状态机时逐条一致。以下断言锁定四个关键交互点——每条行为同时被
 // characterization-hook ③/⑦/④ 以黑盒形态锁定，此处为状态机级直接锚。
 
-describe("D2 双闸门合一等价（单状态机交互时序锁）", () => {
+describe("D2 双门禁合一等价（单状态机交互时序锁）", () => {
 	it("跨 turn 同签名计数连续：3 turn 各失败 1 次（每 turn steer 后 onTurnEnd）→ 第 3 轮失败即 terminal（onTurnEnd 不清硬杀计数）", () => {
 		const gate = new WorkflowGate();
 		for (let turn = 0; turn < 2; turn++) {
@@ -697,7 +697,7 @@ describe("D2 双闸门合一等价（单状态机交互时序锁）", () => {
 		gate.onToolExecEnd(true, "error C");
 		gate.onTurnEnd();
 		expect(gate.terminal).toBe(false); // 签名各异 → 硬杀计数每轮重起，不触闸
-		expect(gate.hookRetryCount).toBe(3); // steer 预算独立累计（装配层守卫第 5 条停 steer）
+		expect(gate.hookRetryCount).toBe(3); // steer 预算独立累计（装配层检查第 5 条停 steer）
 	});
 
 	it("成功清零对两侧同步：同一成功事件同时置 soSucceededEver 终态并清硬杀计数", () => {
@@ -727,19 +727,19 @@ describe("index assembly: gate wired into workflow mode", () => {
 		const pi = createMockPi();
 		await loadExtension(pi, SCHEMA);
 
-		// 3 次同签名失败（同一错误文本 = 同签名）：闸门 terminal + shutdown
+		// 3 次同签名失败（同一错误文本 = 同签名）：门禁 terminal + shutdown
 		const err = "Schema validation failed: /count must be number";
 		for (let i = 0; i < 3; i++) {
 			await pi.emit("tool_execution_end", failedToolEndWith(err));
 		}
 		expect(pi.ctx.shutdown).toHaveBeenCalledTimes(1);
 
-		// terminal 后 turn_end：hook 守卫链第 0 条（state.terminal）拦截 → 不 steer
+		// terminal 后 turn_end：hook 检查链第 0 条（state.terminal）拦截 → 不 steer
 		await pi.emit("turn_end", turnEndPayload());
 		expect(pi.sendMessage).not.toHaveBeenCalled();
 	});
 
-	it("失败次数未达阈值时 turn_end steer 行为不受闸门影响（软硬闸门分层）", async () => {
+	it("失败次数未达阈值时 turn_end steer 行为不受门禁影响（软硬门禁分层）", async () => {
 		const pi = createMockPi();
 		await loadExtension(pi, SCHEMA);
 
@@ -752,17 +752,17 @@ describe("index assembly: gate wired into workflow mode", () => {
 	});
 });
 
-// ── terminal teardown 的 stale ctx 守卫分支（crash-resilience D1）──────────
+// ── terminal teardown 的 stale ctx 检查分支（crash-resilience D1）──────────
 //
 // 接入点形态（workflow-hook.ts setupWorkflowHook 的 tool_execution_end listener →
 // loop-gate.ts runTerminalTeardown）：优雅退出（abort+shutdown）被 guardStaleCtx
 // 包裹，本接入点未注入 isCtxStale 代际检查——stale 分诊完全依赖错误文案兜底（pi
-// assertActive 抛错文案含 STALE_CTX_MARKER，PS-30 门禁守卫）。三态锁定：
+// assertActive 抛错文案含 STALE_CTX_MARKER，PS-30 门禁检查）。三态锁定：
 //   ① stale（文案分诊）→ 跳过优雅退出（shutdown 不被调）+ stderr 降级日志
 //   ② 非 stale → 优雅退出照常（abort 先行 + shutdown）（正常路径回归）
-//   ③ 非 stale 真实错误 → 原样上抛（守卫不吞 bug）
+//   ③ 非 stale 真实错误 → 原样上抛（检查不吞 bug）
 // （原三态各自的 force-exit timer 武装断言随 ADR-0122 墙钟兜底删除一并移除。）
-describe("terminal teardown stale ctx 守卫（crash-resilience D1）", () => {
+describe("terminal teardown stale ctx 检查（crash-resilience D1）", () => {
 	/** 三次同签名失败驱动 gate 到 newlyTerminal（每次 emit 后 handler 同步完成）。 */
 	const GATE_ERROR = paramLayerErrorText("  - magic: must be equal to constant", "{}");
 
@@ -785,9 +785,9 @@ describe("terminal teardown stale ctx 守卫（crash-resilience D1）", () => {
 		setupWorkflowHook(pi, SCHEMA);
 
 		await driveToTerminal(pi);
-		// terminal 标记与日志在守卫之前完成（闸门状态机不受 stale 窗口影响）
+		// terminal 标记与日志在检查之前完成（门禁状态机不受 stale 窗口影响）
 		expect(pi.appendEntry).toHaveBeenCalledTimes(1);
-		// stale 分诊：abort 已触（错误被守卫接住不外抛），shutdown 未被调（优雅退出跳过）
+		// stale 分诊：abort 已触（错误被检查接住不外抛），shutdown 未被调（优雅退出跳过）
 		expect(pi.ctx.abort).toHaveBeenCalledTimes(1);
 		expect(pi.ctx.shutdown).not.toHaveBeenCalled();
 		// 观测点：onStale 降级日志（排查者可见跳过原因）
@@ -814,7 +814,7 @@ describe("terminal teardown stale ctx 守卫（crash-resilience D1）", () => {
 		);
 	});
 
-	it("③ 非 stale 真实错误原样上抛（守卫不吞 bug）：handler rejected", async () => {
+	it("③ 非 stale 真实错误原样上抛（检查不吞 bug）：handler rejected", async () => {
 		vi.useFakeTimers();
 		const stderrSpy = vi.spyOn(process.stderr, "write").mockImplementation(() => true);
 		const pi = createMockPi();
@@ -826,7 +826,7 @@ describe("terminal teardown stale ctx 守卫（crash-resilience D1）", () => {
 		const ev = failedToolEndWith(GATE_ERROR);
 		await pi.emit("tool_execution_end", ev);
 		await pi.emit("tool_execution_end", ev);
-		// 非 stale 错误经守卫原样上抛 → async handler 变 rejected Promise（调用方可观测）
+		// 非 stale 错误经检查原样上抛 → async handler 变 rejected Promise（调用方可观测）
 		await expect(pi.emit("tool_execution_end", ev)).rejects.toThrow("real bug");
 		expect(pi.ctx.shutdown).not.toHaveBeenCalled();
 		expect(stderrSpy).not.toHaveBeenCalledWith(

@@ -30,13 +30,13 @@ import {
   waitForScenarioSettled,
 } from "./record-mode/scenario-kit.ts";
 
-/** 历史 args 的生产形态：rfl 仪表向 spec.args 注入 _runId 后 stringify 落账。 */
+/** 历史 args 的生产形态：rfl 仪表向 spec.args 注入 _runId 后 stringify 写入 journal 记录。 */
 const HISTORICAL_ARGS_SUMMARY = JSON.stringify({ a: 1, _runId: "wf-s24-run" });
 
 /**
  * 终局 manifest（<stateDir>/<runId>.json 派生缓存）是 run-settled 落盘后的异步
- * 投影（terminal-actions 终局 coda）——cleanup 前等它落盘，防 teardown 删目录与
- * 投影 rename 的竞态告警（场景族无噪音形态）。
+ * 派生视图（terminal-actions 终局 coda）——cleanup 前等它落盘，防 teardown 删目录与
+ * 派生视图 rename 的竞态告警（场景族无噪音形态）。
  */
 async function waitForTerminalManifest(env: ReturnType<typeof mkScenarioEnv>, runId: string, timeoutMs = 5_000): Promise<void> {
   const deadline = Date.now() + timeoutMs;

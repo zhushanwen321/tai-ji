@@ -1,6 +1,6 @@
 // src/interface/__tests__/display-state.test.ts
 //
-// [§2.2 B 档] run 域展示态单点：三态投影 + 色调 / 徽标 / 签名片段三张映射的等价性。
+// [§2.2 B 档] run 域展示态单点：三态派生视图 + 色调 / 徽标 / 签名片段三张映射的等价性。
 //
 // 回归价值：本批把原散在 WorkflowsView 三处的判定收敛到一处——本测试同时钉住
 // 「与既有 TUI 输出逐字一致」与「run 域色档与 format.ts 的 statusColorToken 同档」
@@ -70,7 +70,7 @@ function makeRun(shape: {
   } as unknown as WorkflowRun;
 }
 
-describe("runDisplayStateOf（三态投影与可中断性）", () => {
+describe("runDisplayStateOf（三态派生视图与可中断性）", () => {
   it("running → status running + abortable", () => {
     const ds = runDisplayStateOf(makeRun());
     expect(ds.status).toBe("running");

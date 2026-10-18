@@ -392,7 +392,7 @@ function readSection(raw: unknown): { enabled: boolean; prompt: string } {
 /**
  * pi 是否以 --no-context-files / -nc 启动。用户显式退出 AGENTS.md
  * 自动发现时，全局文件不得从这条通路溜回来。pi CLI 把 -nc 视为 --no-context-files
- * 的等价短形式（cli/args.ts），两种形式都必须命中守卫——与镜像侧
+ * 的等价短形式（cli/args.ts），两种形式都必须命中检查——与镜像侧
  * （argv-mirror.ts 同样解析两种形式）保持一致。
  */
 function contextFilesDisabled(): boolean {

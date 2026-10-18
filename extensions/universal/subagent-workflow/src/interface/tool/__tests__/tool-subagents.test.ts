@@ -289,7 +289,7 @@ describe("handler 组装：runWorkflow('fan-out') 确定性映射（D3）", () =
     expect(spec.slug).toBe("foo-tri-review");
     expect(spec.model).toBe("zai-coding-cn/glm-5.3-flash");
     expect(spec.thinkingLevel).toBe("max");
-    // details：无 __gui__，携带 runId/stateFile（程序化消费面）
+    // details：无 __gui__，携带 runId/stateFile（程序化消费方）
     expect(Object.keys(result.details)).not.toContain("__gui__");
     expect(result.details).toMatchObject({
       runId: "wf-1700000000000-abcd",

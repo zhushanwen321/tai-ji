@@ -281,7 +281,7 @@ describe("registerPlanTool", () => {
   describe("complete", () => {
     beforeEach(() => {
       // goal outcome 用例经 handlePlanComplete mock 构造结果（execute 档 tryGoalInit
-      // 在 execution-notice.ts 内部自理 goal-unavailable 降级，不在本文件消费面）
+      // 在 execution-notice.ts 内部自理 goal-unavailable 降级，不在本文件消费方）
       (handlePlanComplete as ReturnType<typeof vi.fn>).mockReset();
       (detectExecSkills as ReturnType<typeof vi.fn>).mockReset();
       (detectExecSkills as ReturnType<typeof vi.fn>).mockReturnValue([]);
@@ -325,7 +325,7 @@ describe("registerPlanTool", () => {
       expect(pi.setActiveTools).not.toHaveBeenCalled();
     });
 
-    it("turn abort during the pending execution-method select dissolves the dialog → 归口②外部解散（review_aborted→approved，MF-1-8）", async () => {
+    it("turn abort during the pending execution-method select dissolves the dialog → 收尾②外部解散（review_aborted→approved，MF-1-8）", async () => {
       const { exec, ctx, pi } = setup();
       (detectExecSkills as ReturnType<typeof vi.fn>).mockReturnValue([
         { name: "dev-flow", description: "d", skillEntryPath: "/tmp/skills/dev-flow/SKILL.md" },
@@ -569,7 +569,7 @@ describe("registerPlanTool", () => {
       expect(handlePlanComplete).toHaveBeenCalledWith(expect.anything(), expect.anything(), expect.anything(), "skill:dev-flow", skillEntryPath);
     });
 
-    it("timeout via undefined resolve (signal not aborted) folds to 归口②外部解散（构造点④，review_aborted→approved）", async () => {
+    it("timeout via undefined resolve (signal not aborted) folds to 收尾②外部解散（构造点④，review_aborted→approved）", async () => {
       // rpc 模式 GUI 用户取消 resolve undefined，与超时不可区分（signal 未 abort 折叠
       // timeout，库层 callMarkerRpc 判别），构造点③④同折 via 'dissolved' reason='cancelled'。
       // 未经入口解散（不打标）→ 外部解散：批准事实保留，文案不得声称已退出
@@ -588,9 +588,9 @@ describe("registerPlanTool", () => {
       expect(pi.setActiveTools).not.toHaveBeenCalled();
     });
 
-    it("命令解散（handleAbort 全序列：markDissolved('self') + controller.abort() + reset 介入）→ 归口② no-op（dissolvedBy 判别，不落盘）", async () => {
+    it("命令解散（handleAbort 全序列：markDissolved('self') + controller.abort() + reset 介入）→ 收尾② no-op（dissolvedBy 判别，不落盘）", async () => {
       // 真实通道注入 = command.ts exitPlanMode 的因果链：markDissolved('self') 与
-      // controller.abort() 后 resetPlanState 同步落盘（同步临界段，无让出点）——归口点
+      // controller.abort() 后 resetPlanState 同步落盘（同步临界段，无让出点）——收尾点
       // 在微任务里运行时来源已置位
       const { exec, ctx, controllers, pi } = setupGui();
       (detectExecSkills as ReturnType<typeof vi.fn>).mockReturnValue([
@@ -609,13 +609,13 @@ describe("registerPlanTool", () => {
       expect(res.details.source).toBe("self");
       expect(res.content[0].text).toContain("has been exited");
       expect(res.content[0].text).toContain("full tool set is restored");
-      // 归口 no-op：不追加任何落盘（reset 已由命令侧落终态）——最后一条仍是入函数时的 dispatching
+      // 收尾 no-op：不追加任何落盘（reset 已由命令侧落终态）——最后一条仍是入函数时的 dispatching
       const entries = (pi.appendEntry as ReturnType<typeof vi.fn>).mock.calls.map((c) => c[1] as { state?: string });
       expect(entries.at(-1)?.state).toBe("dispatching");
       expect(pi.setActiveTools).not.toHaveBeenCalled();
     });
 
-    it("channel-error (echo payload) folds to 归口②外部解散（构造点⑤）with channel note, no throw", async () => {
+    it("channel-error (echo payload) folds to 收尾②外部解散（构造点⑤）with channel note, no throw", async () => {
       const { exec, ctx, pi } = setupGui();
       (detectExecSkills as ReturnType<typeof vi.fn>).mockReturnValue([
         { name: "dev-flow", description: "d", skillEntryPath: "/tmp/skills/dev-flow/SKILL.md" },
@@ -632,7 +632,7 @@ describe("registerPlanTool", () => {
       expect(pi.setActiveTools).not.toHaveBeenCalled();
     });
 
-    it("non-json response folds to 归口②外部解散（构造点⑤）with channel note, no throw", async () => {
+    it("non-json response folds to 收尾②外部解散（构造点⑤）with channel note, no throw", async () => {
       const { exec, ctx } = setupGui();
       (detectExecSkills as ReturnType<typeof vi.fn>).mockReturnValue([
         { name: "dev-flow", description: "d", skillEntryPath: "/tmp/skills/dev-flow/SKILL.md" },
@@ -681,7 +681,7 @@ describe("registerPlanTool", () => {
       expect(entry.skills).toEqual([]);
     });
 
-    it("终态上 abort → 幂等退出：warn 纠偏 + 不覆写 completed、不落盘 + ④无快照不动工具集（D-B1-1 守卫极性）", async () => {
+    it("终态上 abort → 幂等退出：warn 纠偏 + 不覆写 completed、不落盘 + ④无快照不动工具集（D-B1-1 检查极性）", async () => {
       const { exec, pi, sessions, planCtx } = setup();
       sessions.set("test-session", {
         ...DEFAULT_PLAN_STATE,
@@ -718,7 +718,7 @@ describe("registerPlanTool", () => {
       const { exec, pi, sessions, planCtx } = setup();
       sessions.set("test-session", {
         ...DEFAULT_PLAN_STATE,
-        isActive: true, // 坏格：伪 active 投影
+        isActive: true, // 坏格：伪 active 派生视图
         planFilePath: "/tmp/plans/auth/plan.md",
         state: "completed",
         docs: [{ fileName: "design.md", absPath: "/tmp/plans/auth/design.md", sourceSkill: "", version: 1 }],
@@ -727,7 +727,7 @@ describe("registerPlanTool", () => {
       planCtx.toolSnapshots.set("test-session", [...DEFAULT_ACTIVE_TOOLS]);
       const res = await exec({ action: "abort" });
       expect(res.details).toEqual({ action: "review-error", reason: "inactive" });
-      // 清洗例外：唯一保留的落盘——isActive 投影复位 + state 取当前终态值（completed 不被 exited 覆写）
+      // 清洗例外：唯一保留的落盘——isActive 派生视图复位 + state 取当前终态值（completed 不被 exited 覆写）
       expect(pi.appendEntry).toHaveBeenCalledWith(
         "plan-state",
         expect.objectContaining({ isActive: false, state: "completed" }),

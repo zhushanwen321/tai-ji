@@ -5,7 +5,7 @@
 // wrapper（() => isCtxStale()）——registerCompactContextTool 在 factory 体同步执行，简写
 // 属性 { isCtxStale } 会把该行时刻的初始 () => false 快照进 deps 对象，session_start
 // handler 内的重新赋值不回写已构造对象 → compact onComplete/onError（E1 实锤崩溃点）
-// 守卫的前置代际检查恒不生效，stale 分诊 100% 退化为 PS-30 文案兜底。
+// 检查的前置代际检查恒不生效，stale 分诊 100% 退化为 PS-30 文案兜底。
 //
 // 可区分快照 vs live 的唯一拓扑是 factory 重跑（生产主路径：pi 每次 session 替换
 // newSession/fork/switchSession 都重跑 factory 函数体，loader.ts extensionCache 只缓存

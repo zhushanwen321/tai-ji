@@ -128,12 +128,12 @@ export type CollectSnapshot = CollectSnapshotEntry[];
  * settleRejected = 注入调用被拒（sendMessage throw）次数；recoveryReplays =
  * session_start 恢复重放条数。增量同时经 host.logger 落日志（限流面归 logger）。
  */
-export interface DeliveryPortMetrics { // oe-exempt:20261017:framework:分桶诊断契约（extensionLogger 消费面）
+export interface DeliveryPortMetrics { // oe-exempt:20261017:framework:分桶诊断契约（extensionLogger 消费方）
   settleRejected: number;
   recoveryReplays: number;
 }
 
-// ─── host 端口（装配点接线面）───────────────────────────────
+// ─── host 端口（装配点接线点）───────────────────────────────
 
 /** host logger 最小面（@zhushanwen/pi-extension-logger 的 ExtensionLogger 结构性满足）。 */
 export interface DeliveryPortLogger { // oe-exempt:20261017:framework:日志注入契约（宿主提供实现）

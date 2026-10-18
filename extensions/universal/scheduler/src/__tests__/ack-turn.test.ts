@@ -322,11 +322,11 @@ it('session 边界：未启动 ack 轮且文件不存在 ⇒ 补发通知；ack 
   expect(b.notifyCalls).toHaveLength(0)
 })
 
-it('E3 后同会话再次创建可重试（无定时器清 pending，守卫只认 window）', async () => {
+it('E3 后同会话再次创建可重试（无定时器清 pending，检查只认 window）', async () => {
   const h = makeHarness({ builtinIds: new Set(['anthropic']) })
   await startAck(h.controller)
   expect(h.captured.sent).toHaveLength(1)
-  // 触发器未启动轮次 ⇒ window 从未置位 ⇒ 守卫不挡，下一次创建重新注入。
+  // 触发器未启动轮次 ⇒ window 从未置位 ⇒ 检查不挡，下一次创建重新注入。
   await h.controller.maybeStartAck({
     task: { ...TASK, id: 't2' },
     model: MODEL,
@@ -399,9 +399,9 @@ it('E3 后同会话再次创建可重试（无定时器清 pending，守卫只�
   })
 })
 
-// ── 回归用例（一致性审查 F2/F3 + 去定时器后的守卫语义）──
+// ── 回归用例（一致性审查 F2/F3 + 去定时器后的检查语义）──
 
-describe('ack-turn 守卫与归因回归', () => {
+describe('ack-turn 检查与归因回归', () => {
   beforeEach(() => {
     vi.useFakeTimers()
     resetAckState()

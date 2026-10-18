@@ -165,7 +165,7 @@ describe("index.ts wiring SDK 契约", () => {
     // 接住的 promise 必须等待 navigateTree 完成——「revokeMessage reply 前树变更+落盘
     // 完成」的保证链。判别两违禁形态：①同步花括号体 fire-and-forget 返回 undefined；
     // ②async 无 await 体返回的 promise 先于 sentinel settle。
-    // 注：SDK 0.84.4 RegisteredCommand.handler 钉死 Promise<void>，「直接 return
+    // 注：SDK 0.84.4 RegisteredCommand.handler 固定为 Promise<void>，「直接 return
     // navigateTree promise」形态编译不过（TS2322），故 D1 许可形态为显式 await，判别
     // 断言用 settle 时序而非 promise 引用全等。
     let resolveNav!: (value: { cancelled: boolean }) => void;

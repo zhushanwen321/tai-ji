@@ -1,16 +1,16 @@
 // src/__tests__/workflow-notify.test.ts
 //
 // notifyDone 域合一文件（组 4 收尾段：四文件合一 + stale-guard notifyDone 半边 +
-// M10 守卫条迁入）。构成：
+// M10 检查条迁入）。构成：
 //   - 投递生命周期（port.deliver 受理 / 回执 / 降级直发）/ content 分支矩阵全文锚定（主体）
 //   - 终局载荷 D7（三态 outcome + resultSummary/errorCode + 产物与 journal 指针）
 //     ← workflow-notify-notify-payload.test.ts
 //   - bounded 序列化等价锚定 + 截断边界 ← workflow-notify-bounded-serialize.test.ts
 //   - GUI 协议 + trackNotifiedRunId 有界 FIFO ← workflow-notify-gui.test.ts
-//   - stale ctx 守卫（notifyDone 降级直发分支）← notify-stale-guard.test.ts
+//   - stale ctx 检查（notifyDone 降级直发分支）← notify-stale-guard.test.ts
 //     （sendDelivery 半边的被测入口是 session-lifecycle 的 bindLedgerHostAndRecover，
 //     归属 session-lifecycle 域——已迁 session-lifecycle.test.ts）
-//   - M10 源码锚定（boundedPrettySerialize 调用点守卫，bounded 性能契约唯一防线）
+//   - M10 源码锚定（boundedPrettySerialize 调用点检查，bounded 性能契约唯一防线）
 //     ← robustness-medium-batch2-interface.test.ts
 //
 // [unified-delivery 波 2] notifyDone 投递路径切 pi 半区投递端口（C-ext-19 语义由
@@ -20,18 +20,18 @@
 //     "workflow-result"（runtime W18 workflow-record 失效信号的前提）、content
 //     字节不变（G4）、pi.sendMessage 零调用
 //   - 幂等键拒绝：同一 runId 重复 notifyDone（绕过内存 Set 层）不双投递
-//   - port rejected：error 留痕（已知丢失面）+ 去重不标记（重复收口可重试）
-//   - [回执销账 / 重放随账本退役] 送达判定与重启恢复由 port 内包——行为锁在
+//   - port rejected：error 留痕（已知丢失范围）+ 去重不标记（重复收尾可重试）
+//   - [回执逐条处理完毕（关闭） / 重放随账本退役] 送达判定与重启恢复由 port 内包——行为锁在
 //     pi-delivery-port 套件（「四步对位」/「session_start 差集重放」段），本文件
 //     不重复设条
 //   - 降级路径：port 缺席（装配异常窗口）→ fire-once 直发 + warn（triggerTurn
 //     单通道，无 deliverAs）
 //
 // 形态参照：helpers-gui.test.ts 的 RunMock duck typing + notifier.test.ts 的
-// fake port（deliver 消费面）。
+// fake port（deliver 消费方）。
 //
 // mock 面单一定义：RunMock / makePi / FakePortMock 各一处（makePi 可注入
-// sendMessage 实现——stale 守卫用例经此注入抛错形态）。「port 缺席」前置由
+// sendMessage 实现——stale 检查用例经此注入抛错形态）。「port 缺席」前置由
 // 文件级 afterEach 构造性保证（每用例后重置端口注入），不依赖 describe 声明
 // 顺序——port 路径用例注入后，降级直发 / GUI / stale / bounded 用例恒从缺席
 // 状态起步。
@@ -69,7 +69,7 @@ import {
 
 const WORKFLOW_RESULT_CUSTOM_TYPE = "workflow-result";
 
-/** pi 实装 stale 文案的完整形态（E1 崩溃堆栈原文，探针 PS-30 守卫其稳定性）。 */
+  /** pi 实装 stale 文案的完整形态（E1 崩溃堆栈原文，探针 PS-30 检查其稳定性）。 */
 const PI_STALE_ERROR = `This extension ctx is stale ${STALE_CTX_MARKER} or reload. Do not use a captured pi or command ctx after ctx.newSession().`;
 
 // ── mock 面（全文件单一定义；helpers-gui.test.ts 同款 duck typing） ──
@@ -94,7 +94,7 @@ function makeRun(overrides?: {
   reason?: string;
   scriptResult?: unknown;
   trace?: Array<{ stepIndex: number; agent: string; status: string }>;
-  /** failed 终局 errorCode 提取的消费面（calls.set(1, { result })，payload 域用）。 */
+  /** failed 终局 errorCode 提取的消费方（calls.set(1, { result })，payload 域用）。 */
   failedCall?: { error: string; failureKind: string };
 }): RunMock {
   const calls = new Map<unknown, unknown>();
@@ -146,7 +146,7 @@ type FakePortMock = {
   rejectNext: () => void;
 };
 
-/** fake 投递端口（deliver 消费面：同 id 幂等吞 + 受理即记录；port 本体行为由
+  /** fake 投递端口（deliver 消费方：同 id 幂等吞 + 受理即记录；port 本体行为由
  *  pi-delivery-port 套件锁定）。 */
 function makeFakePort(): FakePortMock {
   const seen = new Set<string>();
@@ -260,7 +260,7 @@ describe("notifyDone — port 主投（C-ext-19 语义由 port 内包）", () =>
     const run = makeRun();
 
     notifyDone(pi, "wf-dup", runAsParam(run), new Set(), undefined, settlementFor(run.state.reason));
-    // 第二次调用持全新 Set（模拟内存窗口挤出 / 重启后的重复收口回调）——
+    // 第二次调用持全新 Set（模拟内存窗口挤出 / 重启后的重复收尾回调）——
     // 持久层幂等键承接去重（port 判重吞）
     notifyDone(pi, "wf-dup", runAsParam(run), new Set(), undefined, settlementFor(run.state.reason));
 
@@ -285,17 +285,17 @@ describe("notifyDone — port 主投（C-ext-19 语义由 port 内包）", () =>
         contentPreview: expect.stringContaining("Workflow 'build' done"),
       }),
     );
-    // 去重未标记：进程内的重复收口回调不被去重阻断（防御形态）
+    // 去重未标记：进程内的重复收尾回调不被去重阻断（防御形态）
     expect(notified.has("wf-stale")).toBe(false);
     expect(mock.sentMessages).toHaveLength(0);
 
-    // 重复收口回调（若到达）：rejected 消退 → 受理成功 + 去重标记
+    // 重复收尾回调（若到达）：rejected 消退 → 受理成功 + 去重标记
     notifyDone(pi, "wf-stale", runAsParam(run), notified, undefined, settlementFor(run.state.reason));
     expect(mock.sentMessages).toHaveLength(1);
     expect(notified.has("wf-stale")).toBe(true);
   });
 
-  // [③ 回执销账 / ④ 断连重启重放随账本退役] 两用例的行为锁由 port 内包语义承接：
+    // [③ 回执逐条处理完毕（关闭） / ④ 断连重启重放随账本退役] 两用例的行为锁由 port 内包语义承接：
   // 送达判定（details-id 凭据命中 → 确认 → 终局判重）与 session_start 差集重放
   // 由 pi-delivery-port 套件「四步对位」/「session_start 差集重放」段锁定，本文件
   // 不重复设条。
@@ -637,7 +637,7 @@ describe("notifyDone scriptResult — bounded 序列化等价锚定（IF13）", 
   });
 
   it("≤8000 全形态与原生逐字节一致（原语/数组/嵌套/NaN/Infinity/Unicode）", () => {
-    // 注：null / undefined 顶层被 notifyDone 上游守卫（!== undefined && !== null）
+    // 注：null / undefined 顶层被 notifyDone 上游检查（!== undefined && !== null）
     // 跳过整段，不进序列化路径，不在此用例面内。
     const cases: unknown[] = [
       "plain string",
@@ -683,7 +683,7 @@ describe("notifyDone scriptResult — 截断边界（恰好 8000 / 8001 / 转义
     // 控制字符 U+0001 被 JSON.stringify 转义为 6 字符序列 \u0001（现代 Node 对
     // U+2028 不转义——ES2019 JSON superset，实测 JSON.stringify("\\u2028") 输出原字符，
     // 故用必转义的控制字符）。pad 逐字符平移使全文第 8000 字符扫过转义序列内部，
-    // 命中起始反斜杠——截断点切在转义序列中间（不补任何转义闭合，末尾裸反斜杠）。
+    // 命中起始反斜杠——截断点切在转义序列中间（不补任何转义封口，末尾裸反斜杠）。
     const esc = "\u0001";
     let x: unknown = null;
     let full = "";
@@ -700,12 +700,12 @@ describe("notifyDone scriptResult — 截断边界（恰好 8000 / 8001 / 转义
     expect(full.charCodeAt(7999)).toBe(92); // 第 8000 字符 = 反斜杠（转义序列开头被切）
     const section = runAndGetSection(x);
     expect(section).toBe(full.slice(0, 8000) + "\n... (truncated)");
-    // 截断段（前 8000 字符）末尾是裸反斜杠——切在转义序列中间，未补转义/结构闭合
+    // 截断段（前 8000 字符）末尾是裸反斜杠——切在转义序列中间，未补转义/结构封口
     expect(section.slice(0, 8000).endsWith("\\")).toBe(true);
   });
 });
 
-// ── details 形状（S#13 收口：`__gui__` 死构造已删除，通知 details 不含 GUI 描述符）──
+// ── details 形状（S#13 收尾：`__gui__` 死构造已删除，通知 details 不含 GUI 描述符）──
 
 // notifyDone 在 run 到达 done 终态时发送完成通知。GUI 描述符构造已删除（isWorkflow
 // 块分支恒折叠单行不消费 `__gui__`，构造即死代码——D8 同款裁决）；本节锁 details
@@ -800,7 +800,7 @@ describe("trackNotifiedRunId（notifiedRunIds 有界 FIFO）", () => {
     // 第二次对 "old" 的 notifyDone：has 为 false → 重新发送
     notifyDone(pi, "old", runAsParam(run), set, undefined, settlementFor(run.state.reason));
 
-    // 旧行为『永不重复』在挤出窗口后不成立——边界显式钉死：
+    // 旧行为『永不重复』在挤出窗口后不成立——边界显式固定：
     // old 首次 + n1/n2/n3 + old 二次 = 5 次
     expect(pi.sendMessage).toHaveBeenCalledTimes(5);
   });
@@ -832,19 +832,19 @@ describe("trackNotifiedRunId（notifiedRunIds 有界 FIFO）", () => {
   });
 });
 
-// ── stale ctx 守卫（guardStaleCtx 接入，出自 notify-stale-guard.test.ts）──────
+// ── stale ctx 检查（guardStaleCtx 接入，出自 notify-stale-guard.test.ts）──────
 //
-// stale ctx 守卫接入（crash-resilience D1 / ext-guards 审计 §7 blockers#1 收口）：
+// stale ctx 检查接入（crash-resilience D1 / ext-guards 审计 §7 blockers#1 收尾）：
 // notifyDone（workflow-notify.ts）[u9 账本化] 主路径走 ledger（courier 装配层
 // sendDelivery 已内置 stale 防御）；本组用例覆盖的是 ledger 未 bind 的降级直发
 // 分支——pi.sendMessage 经 guardStaleCtx 包裹后 stale 错误（含 PS-30 分诊词）静默
-// 降级不外抛；非 stale 错误原样上抛（同一错误实例，守卫不吞真实 bug）；正常路径
-// 参数透传零变化（A2 负面验证的单测面）。sendDelivery 半边（同链路家族同判，
+// 降级不外抛；非 stale 错误原样上抛（同一错误实例，检查不吞真实 bug）；正常路径
+// 参数透传零变化（A2 负面验证的单测）。sendDelivery 半边（同链路家族同判，
 // 被测入口是 session-lifecycle 的 bindLedgerHostAndRecover seam）已迁
 // session-lifecycle.test.ts。形态对齐 ext-guards guard-stale-ctx.test.ts；分诊无
-// isCtxStale 注入（与生产接入一致，文案兜底由 PS-30 门禁守卫）。
+// isCtxStale 注入（与生产接入一致，文案兜底由 PS-30 门禁检查）。
 
-describe("notifyDone stale ctx 守卫（guardStaleCtx 接入）", () => {
+describe("notifyDone stale ctx 检查（guardStaleCtx 接入）", () => {
   it("stale 错误静默降级：不外抛（session 替换窗口不再崩 pi）", () => {
     const { pi, sendMessage } = makePi(() => {
       throw new Error(PI_STALE_ERROR);
@@ -854,7 +854,7 @@ describe("notifyDone stale ctx 守卫（guardStaleCtx 接入）", () => {
     expect(sendMessage).toHaveBeenCalledTimes(1);
   });
 
-  it("非 stale 错误原样上抛：同一错误实例，守卫不吞真实 bug", () => {
+  it("非 stale 错误原样上抛：同一错误实例，检查不吞真实 bug", () => {
     const boom = new Error("real bug: serialization exploded");
     const { pi } = makePi(() => {
       throw boom;
@@ -885,7 +885,7 @@ describe("notifyDone stale ctx 守卫（guardStaleCtx 接入）", () => {
 // IF13（#19）：notifyDone 的 scriptResult 序列化从「整体 try { JSON.stringify(x, null, 2) }
 // catch { String(x) }」重构为 boundedPrettySerialize（只生成 ≤8000 前缀）。循环引用
 // 保护语义不变，锚定点：(1) notifyDone 调用 boundedPrettySerialize(scriptResult)；
-// (2) 实现内祖先 Set 守卫（命中 throw）+ 顶层 try-catch 整体回退 String(value)
+// (2) 实现内祖先 Set 检查（命中 throw）+ 顶层 try-catch 整体回退 String(value)
 // ——(2) 已随实现下沉锚定于 core __tests__/bounded-serialize.test.ts。
 // 行为级等价（回退输出与旧实现逐字节一致）由本文件 bounded 序列化 describe 锚定。
 // 本条是 bounded 性能契约在壳侧的唯一防线（robustness-medium-batch2 豁免保留项，

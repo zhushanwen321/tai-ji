@@ -242,7 +242,7 @@ export default function sessionReaderExtension(pi: ExtensionAPI): void {
   //
   // addAutocompleteProvider 挂在 ctx.ui（非 ExtensionAPI），setup 入口无 ctx，
   // 只能在 event handler 里拿——session_start 是最早且每 session 触发的 event。
-  // once-guard + ctx.mode 守卫 + typeof 运行时守卫三重防护。
+	// once-guard + ctx.mode 检查 + typeof 运行时检查三重防护。
   //
   // 2026-08-10 重构：数据源从全盘 findSessions(agentDir) 换为 SessionManager.listAll(ctx.sessionManager.getSessionDir())。
   // getSessionDir() 返回当前 session 的目录（encoded cwd），listAll 只扫该目录 →

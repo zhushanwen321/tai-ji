@@ -7,7 +7,7 @@ import { normalizeSkillName, resolveSkills } from "../resolve-skills.js";
 /**
  * fake skill 命令条目（SlashCommandInfo 形态：source === 'skill' + sourceInfo.path）。
  * name 带 pi 命名空间前缀（`skill:<name>`）——真实 pi.getCommands() 枚举 skill 类
- * 命令即此形态，归一化比对的靶子。
+ * 命令即此形态，归一化比对的检查目标。
  */
 const SKILL_COMMANDS = [
   { name: "skill:tech-design", source: "skill", sourceInfo: { path: "/skills/tech-design/SKILL.md" } },

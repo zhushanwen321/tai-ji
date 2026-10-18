@@ -1,5 +1,5 @@
 /**
- * 轮次活性熔断行为测试（chat-domain-v1x 设计 §3.2 D4 / W5，验收 §4 A10 的单测面）
+ * 轮次活性熔断行为测试（chat-domain-v1x 设计 §3.2 D4 / W5，验收 §4 A10 的单测）
  *
  * 四断言（对齐 impl-plan W5 验收条款②）：
  * a. 主判据 50 次封顶必停发——含「每轮调一次工具」序列同样被封顶（正交性：
@@ -43,7 +43,7 @@ interface FakeHarness {
 	entries: unknown[];
 	piCalls: RecordedCall[];
 	ctxCalls: RecordedCall[];
-	/** 可控 isIdle（MF-6① 守卫断言用：延迟窗内有活动 turn 时置 false） */
+	/** 可控 isIdle（MF-6① 检查断言用：延迟窗内有活动 turn 时置 false） */
 	isIdle: { value: boolean };
 	/**
 	 * 可控 appendEntry 抛错（MF-R2-1 测试前提修正）：pi.appendEntry 与 ctx 同生命周期
@@ -336,11 +336,11 @@ async function enterBackoff(): Promise<{ h: FakeHarness; session: GoalSession }>
 	return { h, session };
 }
 
-describe("MF-6① idle 守卫：ctx.signal 实时求值失效场景由 isIdle 拦截", () => {
+describe("MF-6① idle 检查：ctx.signal 实时求值失效场景由 isIdle 拦截", () => {
 	it("延迟窗内有活动 turn（isIdle=false、signal=undefined）→ 到期不误发", async () => {
 		const { h, session } = await enterBackoff();
 
-		// agent idle 后 SDK get signal 实时求值为 undefined（旧 signal?.aborted 守卫恒放行）；
+		// agent idle 后 SDK get signal 实时求值为 undefined（旧 signal?.aborted 检查恒放行）；
 		// 用户在延迟窗内发新消息 → 活动 turn 占用 → isIdle=false
 		h.ctx.signal = undefined;
 		h.isIdle.value = false;
@@ -350,7 +350,7 @@ describe("MF-6① idle 守卫：ctx.signal 实时求值失效场景由 isIdle �
 		expect(session.state!.continuationsSent).toBe(4);
 	});
 
-	it("延迟窗内 idle（isIdle=true、signal=undefined）→ 正常发出（守卫不误伤退避路径）", async () => {
+	it("延迟窗内 idle（isIdle=true、signal=undefined）→ 正常发出（检查不误伤退避路径）", async () => {
 		const { h, session } = await enterBackoff();
 
 		h.ctx.signal = undefined;
@@ -403,7 +403,7 @@ describe("MF-6② stale 保护：timer 回调内异常不冒泡（catch 块自�
 	});
 });
 
-describe("MF-R2-1 根修：session_shutdown 取消旧退避 timer", () => {
+describe("MF-R2-1 从根源修复：session_shutdown 取消旧退避 timer", () => {
 	it("session_shutdown（invalidate 前触发）后旧 timer 到期不发；全量 stale 下不崩、不冒泡", async () => {
 		const { h, session } = await enterBackoff();
 
@@ -459,13 +459,13 @@ describe("MF-6③ timer 清理面：session_start / before_agent_start 取消旧
 // 端口改造前 backoff timer 到期伪装用户消息投递；改造后
 // deliverContinuation 经端口发 custom message 且 options 含 triggerTurn: true——
 // 非 streaming idle 场景真实开轮（改造前 append 不开轮 = 死消息）。
-// isIdle=false 拦截见 MF-6①；封顶记账守卫见「主判据」describe；此处锁定到期
+// isIdle=false 拦截见 MF-6①；封顶记账检查见「主判据」describe；此处锁定到期
 // 发出路径的 options 契约与记账恰好 +1。
 describe("A8：退避 timer 到期 → triggerTurn: true 开轮发出", () => {
-	it("isIdle 守卫通过后发出：custom message 四要素齐备，记账恰好 +1", async () => {
+	it("isIdle 检查通过后发出：custom message 四要素齐备，记账恰好 +1", async () => {
 		const { h, session } = await enterBackoff();
 
-		vi.advanceTimersByTime(20_000); // 2×base 到期，isIdle 默认 true → 守卫放行
+		vi.advanceTimersByTime(20_000); // 2×base 到期，isIdle 默认 true → 检查放行
 
 		const sends = followUpSends(h);
 		expect(sends).toHaveLength(5); // 4 立即 + 1 到期发出

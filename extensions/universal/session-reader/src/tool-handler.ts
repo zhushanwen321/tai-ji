@@ -501,8 +501,8 @@ async function resolveByFragment(
 /**
  * zcode 锚 → ParseResult（既有 turns/render 管线的统一内容入口）。
  *
- * 检查顺序三段递进（§3.4，实现与测试双锚定）：第 1 段存在性 → 第 2 段路径闸
- * （whitelist.ts）→ 第 3 段开库与查询（四级恢复阶梯 + schema 已知集闸门在
+ * 检查顺序三段递进（§3.4，实现与测试双锚定）：第 1 段存在性 → 第 2 段路径门禁
+ * （whitelist.ts）→ 第 3 段开库与查询（四级恢复阶梯 + schema 已知集门禁在
  * openZcodeSessionDb 单点）。读库发生在 ext 进程内（§3.5 关键论断），不经 taiji。
  */
 async function loadZcodeParsed(anchor: ZcodeAnchor, agentDir: string): Promise<ParseResult> {
@@ -996,7 +996,7 @@ async function doExport(
 //（max-lines 拆分轮机械提取）；本段保留 F7 what 校验与 doExtract 编排（定位依赖
 // tool-handler 私有的 resolveSessionId/safeParse/segmentTurns）。纯提取，不调 LLM。
 
-/** what 类型守卫（直接比较，避开不安全断言；schema 已校验，此处防御 + 可单测绕过）。 */
+/** what 类型检查（直接比较，避开不安全断言；schema 已校验，此处防御 + 可单测绕过）。 */
 function isExtractWhat(v: unknown): v is ExtractWhat {
   return (
     v === 'user-messages' ||
@@ -1109,7 +1109,7 @@ interface SkippedRun {
  * session 会抛「session not found in family index」）——resolveSessionId 已把 session 解析到
  * 真实文件（kind==='ok' 保证文件存在，三形态：绝对路径/sa-id 均 existsSync 校验，片段匹配
  * 来自实际 fs 扫描），直接用 resolved.fileName 构造单条目 sessionIdToPath 调 resolveWorkflows
- *（与 buildFamilyFromFs 步骤 6 的 workflow 腿同源）。pathToRef 传空 Map（单条目链路无其他
+ *（与 buildFamilyFromFs 步骤 6 的 workflow 路径同源）。pathToRef 传空 Map（单条目链路无其他
  * 文件可反查），call 引用 100% 走 sessionRefFromPath 文件名最小回退（sessionId+fileName，
  * 足够 LLM 跳 outline/detail 深读）。
  *
@@ -1131,7 +1131,7 @@ async function renderSingleWorkflowRun(
 ): Promise<void> {
   // [D16③] 概览链换源：v2 档的 stateFile = record 流路径（recordPath 锚点语义
   // 重定义）——直读流经 parseRunRecordStream 概览（[D2] 三态 status；空流/读失败
-  // 投影 running，活跃 run 概览不退化为 skipped——红线）。record 后缀以外的
+	// 映射 running，活跃 run 概览不退化为 skipped——红线）。record 后缀以外的
   // stateFile（v1 快照档空串 / 旧指针档 link path）走原快照链。
   if (wf.stateFile.endsWith('.record.jsonl')) {
     await renderRunFromRecordStream(wf, ctx)

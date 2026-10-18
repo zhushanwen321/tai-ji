@@ -151,7 +151,7 @@ export function createBashOverrideToolDefinition() {
 		...initial,
 		// D2（禁止改名）：桌面侧六处按工具 key 'bash' 硬编码（truncate-tool-output、
 		// useToolMeta、block-icon、pi-preset BUILTIN_TOOLS 与 deniedTools、permission
-		// extractCommand）——改名后这些消费面全部失配，审批退化为逐次弹窗、渲染错位
+		// extractCommand）——改名后这些消费方全部失配，审批退化为逐次弹窗、渲染错位
 		name: initial.name, // "bash"：同名覆盖内置工具（agent-session _refreshToolRegistry 后注册者胜）
 		description: ENHANCED_BASH_DESCRIPTION,
 		parameters: enhancedBashSchema,
@@ -163,7 +163,7 @@ export function createBashOverrideToolDefinition() {
 			// 随 render 面传入，execute 签名必须对齐，否则 registerTool 赋值检查不过）
 			onUpdate: AgentToolUpdateCallback<BashToolDetails | undefined> | undefined,
 			// pi 1.0.0：ToolDefinition.execute 第 5 参 ctx 收窄为 ExtensionToolContext
-			// （ExtensionContext + tools/executeTool，嵌套工具调用面）
+			// （ExtensionContext + tools/executeTool，嵌套工具调用点）
 			ctx: ExtensionToolContext,
 		) {
 			// 配置每次 execute 读时加载（热重载契约：禁止上层缓存，同进程改配置文件

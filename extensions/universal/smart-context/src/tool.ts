@@ -114,7 +114,7 @@ export function registerCompactContextTool(
 		 * G1 代际检测（crash-resilience D1）：compact 是 fire-and-forget——onComplete/onError
 		 * 回调在压缩 LLM 调用期间异步触发，用户此间切换/重载 session 后回调持有的 pi 已
 		 * stale（E1 实锤崩溃点）。index.ts 注入模块级代数比对闭包，前置检查 + 错误分诊
-		 * 双保险；缺省时守卫退化为纯文案兜底分诊（PS-30 门禁守文案）。
+		 * 双保险；缺省时检查退化为纯文案兜底分诊（PS-30 门禁守文案）。
 		 */
 		isCtxStale?: () => boolean;
 	},
@@ -181,8 +181,8 @@ export function registerCompactContextTool(
 				// session/新建/重载高频触发）下 sendMessage 命中 stale ctx 同步抛错即
 				// 杀死 pi 进程（pi 1.0.0 实装：dist/core/extensions/loader.js 的 assertActive
 				// wrapper 对 stale 即 throw "no longer active"，在 runtime 调用前同步 throw）。
-				// 守卫 stale 静默降级（结果不投递，用户可重试 /compact），非
-				// stale 错误原样上抛（守卫不吞真实 bug）。
+				// 检查 stale 静默降级（结果不投递，用户可重试 /compact），非
+				// stale 错误原样上抛（检查不吞真实 bug）。
 				onComplete: (r: unknown) => {
 					guardStaleCtx(() => {
 						const result = toCompactionResultLike(r);
@@ -207,7 +207,7 @@ export function registerCompactContextTool(
 					});
 				},
 				onError: (err: Error) => {
-					// 压缩本身的失败信息先落日志（守卫体外——stale 降级时该观测保留）
+					// 压缩本身的失败信息先落日志（检查体外——stale 降级时该观测保留）
 					debugLog(`compact_context error: ${err.message}`);
 					guardStaleCtx(() => {
 						sendSmartContextNotice(

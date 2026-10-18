@@ -48,7 +48,7 @@ export const WORKFLOW_LIST_GUIDE =
 
 /**
  * 解析 workflow .js 文件的 meta（name + description），经 IF1 parseResourceMeta。
- * 投影到 WorkflowEntry {name, description(summarized)} 注入用。
+ * 映射到 WorkflowEntry {name, description(summarized)} 注入用。
  */
 export function parseWorkflowMeta(content: string): WorkflowEntry | null {
 	const meta = parseResourceMeta(content, "workflow");

@@ -87,9 +87,9 @@ describe("createGoalState", () => {
 	});
 });
 
-// ── E1 守卫：状态变更唯一执行点（.status 裸赋值扫描）──
+// ── E1 检查：状态变更唯一执行点（.status 裸赋值扫描）──
 
-describe("E1 守卫：src 内禁止 .status 裸赋值（必须走 transitionStatus 查表）", () => {
+describe("E1 检查：src 内禁止 .status 裸赋值（必须走 transitionStatus 查表）", () => {
 	it("扫描 src/**/*.ts（排除 __tests__）：0 命中", () => {
 		// 正则逐字来自设计定稿，不得自行修改：
 		// (?![=>]) 排除 ==/===/=>（比较与箭头函数形态）；(?!\s*transitionStatus\b) 放行白名单查表赋值。

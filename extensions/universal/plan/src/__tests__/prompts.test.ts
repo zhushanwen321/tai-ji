@@ -83,12 +83,12 @@ describe("Phase D 段注入 buildPlanModePrompt（对齐测试的装配面锚）
       skills: [],
     };
 
-    // 分支一：无 --skills 的模板流程（prompts.ts else-if 注入腿）
+    // 分支一：无 --skills 的模板流程（prompts.ts else-if 注入路径）
     const templateFlow = buildPlanModePrompt(base);
     expect(templateFlow).toContain("Phase D: Completion");
     expect(templateFlow).toContain("picks an execution method in the completion dialog");
 
-    // 分支二：--template 直传变体（prompts.ts if 注入腿；技能流程分支无 Phase D 属设计现状，不锚定）
+    // 分支二：--template 直传变体（prompts.ts if 注入路径；技能流程分支无 Phase D 属设计现状，不锚定）
     const directFlow = buildPlanModePrompt({
       ...base,
       template: { absPath: "/tmp/plans-templates/feature.md", content: "# Feature\n## Implementation Steps\n1. Do it" },
@@ -115,7 +115,7 @@ describe("Phase C.5 自审清单 + D8 重挂请求纪律 + selfReview 必带（D
     expect(prompt).toContain("[UNVERIFIED]");
     expect(prompt).toContain("Chapter completeness");
     expect(prompt).toContain("Acceptance realism");
-    // C.5 段落在产物纪律段之后（D9② 注入位钉死）
+    // C.5 段落在产物纪律段之后（D9② 注入位固定）
     expect(prompt.indexOf("## Deliverable Discipline")).toBeLessThan(prompt.indexOf("Phase C.5"));
     // 自审硬门的提示词面：submit-review 必带 selfReview（无豁免）
     expect(prompt).toContain("selfReview is REQUIRED every time");

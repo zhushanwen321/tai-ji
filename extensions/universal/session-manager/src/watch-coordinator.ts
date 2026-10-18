@@ -12,7 +12,7 @@
 //   3. trailing debounce 50ms 两层攒批（D3 裁决4）：分拣键 (sessionId, reason) 定处理类别，
 //      批身份 settleSeq/deathSeq 定 record 边界——跨 session 不合批由分组键自然排除；
 //      cancelled/orphaned 不入窗（逐笔即时）；
-//   4. session_start 重启收口腿（D7③）：活跃 type 'session' register 重开 watch
+//   4. session_start 重启收尾路径（D7③）：活跃 type 'session' register 重开 watch
 //      （入参 = entry id 即 notifyId，P4 三键零改动），每 entry 独立 handler 禁串行 await。
 //
 // 合批的 record 幂等键 = 批内首个响应的 notifyId（A6 口径：每 notifyId 至多一条、
@@ -85,7 +85,7 @@ export interface WatchCoordinator {
 	noteLabel(sessionId: string, label: string): void;
 	/** 读 label 缓存（缺席回退 sessionId——label 降级路径，见交付偏差登记） */
 	labelFor(sessionId: string): string;
-	/** session_start 重启收口腿（D7③）：活跃 type 'session' register 逐条重开 watch */
+	/** session_start 重启收尾路径（D7③）：活跃 type 'session' register 逐条重开 watch */
 	recoverStaleRegisters(ctx: ExtensionContext): void;
 }
 
@@ -96,7 +96,7 @@ export function createWatchCoordinator(deps: WatchCoordinatorDeps): WatchCoordin
 	 *  权威源仍是 pi sessionName（登记表主表 #1），本缓存无回写；写方 = noteLabel 单点
 	 *  回填（create 入参 / list 结果），生命周期随 coordinator 实例（pi 进程级）。 */
 	const labels = new Map<string, string>();
-	/** 死亡新闻槽 (sessionId, deathSeq) 去重集合（ADR-0087 关键被否④的槽键消解机制）：
+	/** 死亡新闻槽 (sessionId, deathSeq) 去重集合（ADR-0087 关键不采用④的槽键消解机制）：
 	 *  技术簿记 W24-EX-C（data-source-registry.md §4⑧），非 GUI 数据——键单调不重放、
 	 *  槽位消费一次即终局，无消费点清理（集合容量 = 进程生命周期内死亡事件数），生命周期
 	 *  随 coordinator 实例（pi 进程级）。 */
@@ -153,7 +153,7 @@ export function createWatchCoordinator(deps: WatchCoordinatorDeps): WatchCoordin
 	}
 
 	/** 开表：fire-and-forget（D2/P1：不传 timeout 长挂不死；被覆盖的悬 promise 已知无害）。
-	 *  每次调用独立 handler——收口腿禁串行 await 链的实现基础（D7③ 编排纪律）。 */
+	 *  每次调用独立 handler——收尾路径禁串行 await 链的实现基础（D7③ 编排纪律）。 */
 	function openWatch(ctx: ExtensionContext, notifyId: string, label: string): void {
 		void deps.callWatch(ctx, notifyId).then(
 			(result) => {
@@ -178,7 +178,7 @@ export function createWatchCoordinator(deps: WatchCoordinatorDeps): WatchCoordin
 	function handleRespond(notifyId: string, label: string, result: MarkerRpcResult): void {
 		if (!result.ok) {
 			// cancelled/timeout = 应答未达（session 销毁等 select 侧折叠）——不动 pending，
-			// 残留由下次 session_start 收口腿清（D7③ / 附录 C-9 的清理通道）。
+			// 残留由下次 session_start 收尾路径清（D7③ / 附录 C-9 的清理通道）。
 			// non-json/channel-error = 应答已到但不可解析 → 折叠 cancelled 清 stale register。
 			if (result.reason === "non-json" || result.reason === "channel-error") {
 				logger.warn("[session-manager] watch respond unusable — folding cancelled", {
@@ -191,8 +191,8 @@ export function createWatchCoordinator(deps: WatchCoordinatorDeps): WatchCoordin
 		}
 		// 读侧不信任外部格式（AGENTS 关键规则 5），null 与畸形/词表外拆开处置：
 		//   ① null（旧 runtime 象限，respond null → JSON "null"）是 D6 兼容矩阵的显式
-		//      静默豁免——折叠 cancelled 收口、不 warn（非漂移信号，不伪造死亡通知）；
-		//   ② 畸形对象 / 词表外 reason / error envelope {error,...}（runtime params 守卫
+	//      静默豁免——折叠 cancelled 收尾、不 warn（非漂移信号，不伪造死亡通知）；
+	//   ② 畸形对象 / 词表外 reason / error envelope {error,...}（runtime params 检查
 		//      拒绝态）= 协议漂移信号 → 必须 warn 留痕（同上方 non-json/channel-error
 		//      分支形态：notifyId + 漂移形态摘要），再折叠 cancelled 清 stale register。
 		let parsed: unknown;
@@ -221,7 +221,7 @@ export function createWatchCoordinator(deps: WatchCoordinatorDeps): WatchCoordin
 		}
 		const reason = parsed.reason;
 		if (reason === "cancelled" || reason === "orphaned") {
-			// 例外1：静默（主 abort 销账 / 归属失效 / fail-closed / orphan 吸收态）——
+			// 例外1：静默（主 abort 处理完毕 / 归属失效 / fail-closed / orphan 吸收态）——
 			// 逐笔即时 unregister，不入攒批窗、不 record、不动死亡槽。
 			unregisterPending(notifyId, reason);
 			return;

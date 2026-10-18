@@ -1,5 +1,5 @@
 /**
- * 事件 7: session_shutdown（MF-R2-1 根修：invalidate 前取消旧退避 timer）。
+ * 事件 7: session_shutdown（MF-R2-1 从根源修复：invalidate 前取消旧退避 timer）。
  *
  * SDK 触发序（@earendil-works/pi-coding-agent 0.84.4 实装核对）——所有使旧
  * runner 失效的路径都先 emit session_shutdown 再 invalidate，此刻 pi/ctx 仍可用：

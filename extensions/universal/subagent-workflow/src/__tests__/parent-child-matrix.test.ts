@@ -140,20 +140,20 @@ describe("SP-4 级联关闭（真实 SubagentService）", () => {
     fs.rmSync(agentDir, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 });
   });
 
-  it("[U5] onParentFork：running record 编排性收口（settle idle + interrupted-by-parent + 放弃轮标记，不终态化留内存可续聊）", () => {
+  it("[U5] onParentFork：running record 编排性收尾（settle idle + interrupted-by-parent + 放弃轮标记，不终态化留内存可续聊）", () => {
     const record = makeRunningRecord("sa-fork-1");
     store.register(record);
 
     const count = service.onParentFork();
 
     expect(count).toBe(1);
-    // [U5 / §3.2.5 编排性关闭行] settle 回 idle（不终态化）+ markSettledOut 收口落账
-    //（2026-09-16 裁决：意愿字段已全链路删除，收口不写任何 intent 位）
+    // [U5 / §3.2.5 编排性关闭行] settle 回 idle（不终态化）+ markSettledOut 收尾并写入 journal 记录
+    //（2026-09-16 裁决：意愿字段已全链路删除，收尾不写任何 intent 位）
     expect(record.status).toBe("idle");
     expect(record.stopReason).toBe("interrupted-by-parent");
     expect(record.closedReason).toBeUndefined();
     expect(record.lastAbandonedRound).toEqual({ epoch: 0, round: 0 });
-    // 在飞 controller 立即打断
+    // 在途 controller 立即打断
     expect(record.controller?.signal.aborted).toBe(true);
     // record 留内存（settle ≠ 内存回收——旧 session 树内 message 可续聊；
     // listRunningMutable 只收 running——settle 后离开 running 集，getMutable 仍可达）
@@ -161,7 +161,7 @@ describe("SP-4 级联关闭（真实 SubagentService）", () => {
     expect(store.listRunningMutable()).toHaveLength(0);
   });
 
-  it("[U5] onParentNew：running record 编排性收口（interrupted-by-parent）", () => {
+  it("[U5] onParentNew：running record 编排性收尾（interrupted-by-parent）", () => {
     const record = makeRunningRecord("sa-new-1");
     store.register(record);
 
@@ -173,7 +173,7 @@ describe("SP-4 级联关闭（真实 SubagentService）", () => {
     expect(store.getMutable("sa-new-1")).toBeDefined();
   });
 
-  it("多个 running record 全部级联收口，返回 count 与 record 数一致", () => {
+  it("多个 running record 全部级联收尾，返回 count 与 record 数一致", () => {
     const records = [
       makeRunningRecord("sa-multi-1"),
       makeRunningRecord("sa-multi-2"),
@@ -192,7 +192,7 @@ describe("SP-4 级联关闭（真实 SubagentService）", () => {
     expect(store.listRunningMutable()).toHaveLength(0);
   });
 
-  it("级联收口对每个被关 record 发 pending:unregister（[U5] reason=completed——收口点补发注销）", () => {
+  it("级联收尾对每个被关 record 发 pending:unregister（[U5] reason=completed——收尾点补发注销）", () => {
     const record = makeRunningRecord("sa-pending-1");
     store.register(record);
 
@@ -204,13 +204,13 @@ describe("SP-4 级联关闭（真实 SubagentService）", () => {
     });
   });
 
-  it("幂等：无活跃 record 返回 0；级联后再次调用返回 0（record 已收口离场）", () => {
+  it("幂等：无活跃 record 返回 0；级联后再次调用返回 0（record 已收尾离场）", () => {
     expect(service.onParentNew()).toBe(0);
 
     const record = makeRunningRecord("sa-idem-1");
     store.register(record);
     expect(service.onParentFork()).toBe(1);
-    expect(service.onParentFork()).toBe(0); // 已收口离场，不重复关
+    expect(service.onParentFork()).toBe(0); // 已收尾离场，不重复关
   });
 });
 
@@ -275,11 +275,11 @@ describe("SP-4 index.ts 事件接线", () => {
   it("[M2] 不注册 session_before_tree——/tree 同 session 分支导航不得级联杀 subagent", () => {
     // SDK 中 session_before_tree 只由 navigateTree（/tree）触发，与 /new 无关。
     // 旧实现误挂此事件当 /new 级联入口 → 普通 /tree 导航误杀全部活跃 subagent。
-    // 本断言是 M2 回归守卫：该事件不得再注册级联 handler。
+    // 本断言是 M2 回归检查：该事件不得再注册级联 handler。
     expect(registered.has("session_before_tree")).toBe(false);
   });
 
-  it("[M2] session_before_switch(reason:'new') 触发 /new 级联：record 编排性收口（[U5] interrupted-by-parent）", () => {
+  it("[M2] session_before_switch(reason:'new') 触发 /new 级联：record 编排性收尾（[U5] interrupted-by-parent）", () => {
     const record = makeRunningRecord("sa-wire-new-1");
     store.register(record);
     const onParentNewSpy = vi.spyOn(service, "onParentNew");
@@ -314,7 +314,7 @@ describe("SP-4 index.ts 事件接线", () => {
     expect(store.getMutable("sa-wire-resume-1")).toBe(record);
   });
 
-  it("session_before_fork 触发 /fork 级联：record 编排性收口（[U5] interrupted-by-parent）", () => {
+  it("session_before_fork 触发 /fork 级联：record 编排性收尾（[U5] interrupted-by-parent）", () => {
     const record = makeRunningRecord("sa-wire-fork-1");
     store.register(record);
     const onParentForkSpy = vi.spyOn(service, "onParentFork");

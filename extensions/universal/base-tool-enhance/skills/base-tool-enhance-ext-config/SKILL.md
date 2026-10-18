@@ -61,7 +61,7 @@ description: "使用或排查 @zhushanwen/pi-base-tool-enhance 的 bash 后台/�
 
 用户正则**自动加命令位置锚定前缀**（`CMD_ANCHOR`：行首，或 `;` / `&&` / `||` / `|` / 换行之后的命令起始位，后随可选空白）——与内置条目统一匹配语义：
 
-- **无需也不应自带 `^`**：写 `pnpm\s+typecheck` 即可。自带 `^` 反而收窄匹配（`^` 只钉死整条命令第一段，`cmd1 && pnpm typecheck` 中的第二段就匹配不到了）。
+- **无需也不应自带 `^`**：写 `pnpm\s+typecheck` 即可。自带 `^` 反而收窄匹配（`^` 只固定整条命令第一段，`cmd1 && pnpm typecheck` 中的第二段就匹配不到了）。
 - **不做裸子串匹配（防误伤）**：参数文本里的命令词不会命中——`git commit -m "fix: npm test"` 不触发后台（unified-hooks 时代的 `\s` 前缀会误伤，本包已收紧为命令位置锚定）。
 - **wrapper 局限（漏报方向）**：`sudo npm test` / `timeout 300 npm test` / `xargs npm test` 这类 wrapper 形态不命中（wrapper 名占命令位置）。漏报无害——force 命中本就是非破坏性的，模型可显式传 `background: true` 兜底。
 

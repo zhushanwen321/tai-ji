@@ -2,8 +2,8 @@
  * goal_control adapter 测试 — handler 用 fake ports
  *
  * 覆盖 #3 验收：
- * - complete: active 守卫 + evidence 必填 + finalizeAndPersist（status→complete + history）
- * - report_blocked: active 守卫 + reason 必填 + tickState + transitionStatus(active→blocked) + persistState
+ * - complete: active 检查 + evidence 必填 + finalizeAndPersist（status→complete + history）
+ * - report_blocked: active 检查 + reason 必填 + tickState + transitionStatus(active→blocked) + persistState
  *
  * 全解耦后不再测 todo 前置检查（checkCompletePrerequisites / buildProgressInput / findIncompleteTodos 已删）。
  * complete 不做 todo 完成硬检查——AI 自行判断（prompt 软建议）。
@@ -74,7 +74,7 @@ const activeState = (overrides: Partial<GoalRuntimeState> = {}): GoalRuntimeStat
 
 // ── handleComplete ───────────────────────────────────
 
-describe("handleComplete — active 守卫 + evidence + finalizeAndPersist", () => {
+describe("handleComplete — active 检查 + evidence + finalizeAndPersist", () => {
 	it("active + evidence → status complete + 写 history", () => {
 		const session = createGoalSession();
 		session.state = activeState();
@@ -117,7 +117,7 @@ describe("handleComplete — active 守卫 + evidence + finalizeAndPersist", () 
 
 // ── handleCreate ─────────────────────────────────────
 
-describe("handleCreate — objective/successCriteria 必填（handler 运行时校验）+ slug 真 optional + 非终态守卫 + createGoal", () => {
+describe("handleCreate — objective/successCriteria 必填（handler 运行时校验）+ slug 真 optional + 非终态检查 + createGoal", () => {
 	it("无旧 goal + slug + objective → status active + slug 写入 + 持久化 + notify", () => {
 		const session = createGoalSession();
 		const ports = makeFakePorts();
@@ -175,7 +175,7 @@ describe("handleCreate — objective/successCriteria 必填（handler 运行时�
 	});
 
 	const NON_TERMINAL_STATUSES: GoalRuntimeState["status"][] = ["active", "paused", "blocked"];
-	it.each(NON_TERMINAL_STATUSES)("已有 %s goal → throw（D25 非终态守卫）", (status) => {
+	it.each(NON_TERMINAL_STATUSES)("已有 %s goal → throw（D25 非终态检查）", (status) => {
 		const session = createGoalSession();
 		session.state = activeState({ status });
 		expect(() =>
@@ -232,7 +232,7 @@ describe("handleCreate — objective/successCriteria 必填（handler 运行时�
 
 // ── handleReportBlocked ──────────────────────────────
 
-describe("handleReportBlocked — active 守卫 + tick + transition + persist", () => {
+describe("handleReportBlocked — active 检查 + tick + transition + persist", () => {
 	it("active + reason → status blocked + reason 记录 + tick 累加", () => {
 		const session = createGoalSession();
 		const past = Date.now() - 4000;

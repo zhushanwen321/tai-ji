@@ -9,9 +9,9 @@ import type { ZcodeFamilyNode } from '../core/family.js'
  * zcode manifest 直读与枚举（design session-reader-shared-core §3.1 第①步 / D5 / D5-1）。
  *
  * 背景（F21）：pi 路径的 `isRecordManifest` 三必填含 `sessionFile`，而 zcode manifest
- * 落盘时该键被 JSON.stringify 丢弃（subagent-core record-store-rebuild.ts:665/725 投影
+ * 落盘时该键被 JSON.stringify 丢弃（subagent-core record-store-rebuild.ts:665/725 派生视图
  * 照写 `sessionFile: undefined`）→ `listRecordManifests` 对 zcode manifest 恒返回 []。
- * 本单元另开一条**不经过该守卫**的独立路径：
+ * 本单元另开一条**不经过该检查**的独立路径：
  * - **定点直读**（`readZcodeManifest`）：manifest 文件名由 sa-id 完全确定（写侧
  *   `path.join(recordsDir, \`${record.id}.json\`)`，manifest-store.ts:141/153），按确定性
  *   文件名 `<sa-id>.json` 在 `<agentDir>/subagents/<cwd>/records/` 下**窄 walk（命中即止，
@@ -24,7 +24,7 @@ import type { ZcodeFamilyNode } from '../core/family.js'
  * `listRecordManifests`（subagents.ts）一行不改——pi manifest 仍走原扫描路径，本单元
  * 的谓词**不走** isRecordManifest。判别规则与 runtime `transcriptAnchorOf` 同构
  * （F8：`engine === 'zcode'` 第一判据 + sessionRef 双键齐）。用 `engine` 判别而非
- * 「engineHandle 存在性」的理由见 D5 被否项 ②（pi record 提升后 engineHandle 仍持久化，
+ * 「engineHandle 存在性」的理由见 D5 不采用项 ②（pi record 提升后 engineHandle 仍持久化，
  * 存在性判别会误路由）。
  */
 
@@ -67,7 +67,7 @@ export type ZcodeManifestLookup =
   | { kind: 'not-zcode' }
   | { kind: 'anchor-missing'; reason: ZcodeAnchorMissingReason }
 
-/** manifest 顶层 JSON 的读取视图（守卫输入） */
+/** manifest 顶层 JSON 的读取视图（检查输入） */
 type ManifestJson = Record<string, unknown>
 
 function asObject(v: unknown): ManifestJson | undefined {

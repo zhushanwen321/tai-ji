@@ -82,7 +82,7 @@ export function buildSchedulerWidgetGui(tasks: ScheduledTask[], locale: UiLocale
 /**
  * GUI body 逐任务行（复用 renderTaskLineStatic 静态变体单点；导出供测试直接断言行文本）。
  * `now` 形参仅为满足 toTaskParams 的形状必填字段（命令变体的相对时间基准），静态变体
- * **不消费**它——保留形参以维持与命令投影同一形状来源，防双口径。
+ * **不消费**它——保留形参以维持与命令派生视图同一形状来源，防双口径。
  */
 export function buildSchedulerWidgetItems(
   tasks: ScheduledTask[],
@@ -108,7 +108,7 @@ function widgetStatus(enabledCount: number): WidgetMeta['status'] {
  * 否则冻结缺口静默回归。
  *
  * kind 显式入指纹：行文本含 `formatSchedule(spec, kind, locale)`，kind 是显示决定因素
- * （当前无 update op 不可变，by-construction 论证仍须显式闭合）；locale 显式入指纹：
+ * （当前无 update op 不可变，by-construction 论证仍须显式补全）；locale 显式入指纹：
  * 切语言一次推送自愈。
  */
 export function computeTasksFingerprint(tasks: ScheduledTask[], locale: UiLocale): string {

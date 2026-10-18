@@ -68,7 +68,7 @@ export interface OutboxEntryDataV2 { // oe-exempt:20261017:framework:投递日�
   timing: DeliveryTiming;
   /** custom 载荷（调用方原样）。 */
   payload: CustomPayload;
-  /** 落账时间（epoch ms）。 */
+  /** 写入 journal 记录时间（epoch ms）。 */
   recordedAt: number;
   /**
    * 收取关联键集（result-collect 设计 §3.4）：生产方申报的债权键集合，快照按键集
@@ -97,10 +97,10 @@ export interface AckEntryDataV1 { // oe-exempt:20261017:framework:回执 entry s
   notifyId: string;
 }
 
-// ─── journal 记录（内存投影）─────────────────────────────────
+// ─── journal 记录（内存派生视图）─────────────────────────────────
 
 /**
- * 投递日志一条记录的内存投影（outbox entry 的运行时形态，重放重投的重建源）。
+ * 投递日志一条记录的内存派生视图（outbox entry 的运行时形态，重放重投的重建源）。
  * 与 OutboxEntryDataV2 字段一一对应（v1 经 mapV1OutboxData 映射进同一形态）。
  * collectKey 仅 v2 新条目在册（收取关联键集；缺失 = 无键，不参与 collect 匹配）。
  */
@@ -140,7 +140,7 @@ export function isPlainObject(v: unknown): v is Record<string, unknown> {
  *   语义等价 steer 档）；
  * - payload = { kind:"custom", customType: deliveryCustomType ?? 默认通道,
  *   content, display:true, details: record }（单条消息形态回构）；
- * - recordedAt = 扫描时点（v1 无落账时点字段，重放只用于展示与排序，取扫描时点）。
+ * - recordedAt = 扫描时点（v1 无写入时点字段，重放只用于展示与排序，取扫描时点）。
  *
  * 字段形态不符（content 非 string / record 非对象）返回 undefined（该 entry 视为
  * 噪音跳过，不抛——重放扫描对存量脏数据宽容，对齐账本扫描的逐条 guard 形态）。
@@ -171,8 +171,8 @@ export function mapV1OutboxData(data: unknown, scannedAt: number): JournalRecord
 }
 
 /**
- * collectKey 可选字段 guard（result-collect 设计 §3.4）：仅「非空数组且全部元素
- * 为非空 string」视为合法键集；缺失/畸形（含部分畸形）按无键——整体守卫不半收
+ * collectKey 可选字段检查（result-collect 设计 §3.4）：仅「非空数组且全部元素
+ * 为非空 string」视为合法键集；缺失/畸形（含部分畸形）按无键——整体检查不半收
  * （半收会虚构键集完整性）。返回 undefined = 条目无键。
  */
 function readCollectKeys(raw: unknown): string[] | undefined {

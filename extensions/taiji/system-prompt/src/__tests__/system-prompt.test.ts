@@ -8,7 +8,7 @@
  *   损坏形态（"enabled": "false" 字符串 / capability 非对象）→ 注入（与 readSection 解析方向相反）
  * - before_agent_start 注入顺序：base → global instructions → capability → append（indexOf 链锁定，
  *   swap 注入顺序两行的 mutant 会被顺序用例 kill）
- * - -nc / --no-context-files 守卫：global 注入跳过、append 不受影响
+ * - -nc / --no-context-files 检查：global 注入跳过、append 不受影响
  * - global 候选选择：候选序优先、空白内容跳过继续找、目录缺失降级
  * - fail-safe：handler 全程 throw → return undefined + logger.error 可观测；logger 自身抛错的
  *   终极兜底 process.stderr.write；systemPrompt 非法类型的旧 quirk 锚定
@@ -136,7 +136,7 @@ const savedEnv: Record<string, string | undefined> = {}
 const savedArgv = process.argv
 
 beforeEach(() => {
-  vi.clearAllMocks() // 清跨用例的 fs mock 调用记录（「守卫不触发」类断言依赖零计数）
+  vi.clearAllMocks() // 清跨用例的 fs mock 调用记录（「检查不触发」类断言依赖零计数）
   for (const k of ENV_KEYS) savedEnv[k] = process.env[k]
   process.env.TAIJI_AGENT_DATA_DIR = DATA_DIR
   process.env.TAIJI_GLOBAL_AGENTS_DIR = GLOBAL_DIR
@@ -314,9 +314,9 @@ describe('capability 段三态锚点（设计 D6：仅显式布尔 false 关闭�
   })
 })
 
-describe('-nc / --no-context-files 守卫（contextFilesDisabled）', () => {
-  // capability 与守卫正交（内置段不受 --no-context-files 影响，该旗标只管上下文文件
-  // 发现），用例显式关 capability 隔离守卫语义。
+describe('-nc / --no-context-files 检查（contextFilesDisabled）', () => {
+  // capability 与检查正交（内置段不受 --no-context-files 影响，该旗标只管上下文文件
+  // 发现），用例显式关 capability 隔离检查语义。
   it('argv 含 --no-context-files → global 不注入，append 仍生效（用户显式退出不得溜回来）', () => {
     setupFs({
       config: `{"append": {"enabled": true, "prompt": "APPEND-TEXT"}, ${CAP_OFF}}`,
@@ -325,11 +325,11 @@ describe('-nc / --no-context-files 守卫（contextFilesDisabled）', () => {
     })
     process.argv = ['node', 'pi', '--no-context-files']
     expect(runHook('BASE-PROMPT')).toEqual({ systemPrompt: 'BASE-PROMPT\n\nAPPEND-TEXT' })
-    // 守卫在读 global 文件之前：readdirSync 不应被调用（global 目录完全不被触碰）
+    // 检查在读 global 文件之前：readdirSync 不应被调用（global 目录完全不被触碰）
     expect(readdirSync).not.toHaveBeenCalled()
   })
 
-  it('argv 含 -nc 短形式 → 同样跳过 global 注入（pi CLI 等价短形式，守卫两种形式都命中）', () => {
+  it('argv 含 -nc 短形式 → 同样跳过 global 注入（pi CLI 等价短形式，检查两种形式都命中）', () => {
     setupFs({
       config: `{"append": {"enabled": true, "prompt": "APPEND-TEXT"}, ${CAP_OFF}}`,
       globalEntries: ['AGENTS.md'],
@@ -404,7 +404,7 @@ describe('fail-safe（外层 catch return undefined，永不阻断 agent loop）
   })
 
   it('systemPrompt 非法类型（undefined）且无 append → 旧 quirk 锚定：返回仅含 capability 段的结果而非 undefined', () => {
-    // R3 复核锚定的返回值守卫 quirk（index.ts newPrompt === event.systemPrompt 比较）：
+    // R3 复核锚定的返回值检查 quirk（index.ts newPrompt === event.systemPrompt 比较）：
     // base 收敛 ''，capability 默认开 → newPrompt 非空且 !== undefined → 必然返回对象。
     // 与重构前行为一致（非回归）：quirk 在「有注入时必然返回对象」，schema v2 后 capability
     // 默认开使该形态成为常态。

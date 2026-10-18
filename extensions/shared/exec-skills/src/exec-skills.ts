@@ -45,7 +45,7 @@ const logger = getLogger("pi-exec-skills");
  * plan-exec skill，出现时补第五根）。
  *
  * 降级规格（检测失败最坏后果 = skill 选项空集，绝不允许炸消费方的核心交互闭环；
- * pi 对坏 skill 也只产 diagnostics 不中断加载）：每根 existsSync 守卫 + 整根
+ * pi 对坏 skill 也只产 diagnostics 不中断加载）：每根 existsSync 检查 + 整根
  * try/catch（EACCES 等任何 fs 错 → 跳过该根 + warn）；单 skill frontmatter 读/解析
  * 失败 → 跳过该项 + warn；settings 读取/解析失败 → 视为无 overrides。
  */

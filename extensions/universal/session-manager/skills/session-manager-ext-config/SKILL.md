@@ -34,7 +34,7 @@ description: "使用或排查 @zhushanwen/pi-session-manager（agent-managed ses
    分拣键 (sessionId, reason)，批身份 settleSeq/deathSeq——同一批合并为一条通知。
 4. **入账投递**：攒批结果经 `recordManagedNotify` → delivery-port 的 `port.deliver`
    提交（见下节），注入直达 pi 唯一队列（steer 档 + `triggerTurn: true`，pi 忙时入队
-   不拒、轮边界注入），送达回执按 notifyId 的 details-id 凭据匹配销账（ack entry）。
+   不拒、轮边界注入），送达回执按 notifyId 的 details-id 凭据匹配逐条处理完毕（ack entry）。
 
 通知文案形态：`Managed session "<label>" (<sessionId>) finished with status "<status>"
 (exit code: N). (fulfills N request(s))`；stderr 非空时附 Stderr tail（400 字截尾）；
@@ -49,17 +49,17 @@ runtime 查得到时附 `Full transcript: <sessionFilePath>` 指针行。
 
 ## 投递日志（delivery-port）
 
-通知落账与恢复不依赖独立磁盘文件，复用 pi session 文件本身（pi session append-only
+通知记录与恢复不依赖独立磁盘文件，复用 pi session 文件本身（pi session append-only
 契约：entry 只追加不删改，compaction 不清 entry）：
 
 - **outbox entry = session 文件自定义 entry**：通知经 `@zhushanwen/pi-delivery-port`
   的 `port.deliver` 提交（id = notifyId 幂等键，managed-session-notify 外部通道逐条），
   受理前先 `pi.appendEntry` 写 outbox entry（delivery-port-outbox，plain custom entry
   不进 LLM 上下文）——先落盘后投递，进程崩溃后债权不丢。
-- **送达回执销账**：注入后 pi 侧出现携带该 id 的 custom_message，port 订阅
+- **送达回执处理完毕**：注入后 pi 侧出现携带该 id 的 custom_message，port 订阅
   message_end 按 details-id 凭据命中 → 写 ack entry（delivery-port-ack）终局。
 - **session_start 差集重放**：每次 session_start 扫投递日志 −（对话记录已送达 ∪ ack）
-  差集——未销账债权重新投递，已销账静默；按 notifyId 幂等去重，重放不重复发声。
+  差集——未处理的债权重新投递，已处理完毕的静默；按 notifyId 幂等去重，重放不重复发声。
 - 投递端口装配在 `@zhushanwen/pi-base-tool-enhance` 的 session_start（infrastructure
   档必载），本扩展零装配义务——port 恒可用；缺席仅覆盖装配异常窗口（warn + 弃投该条，
   下次 session_start 重试装配）。
@@ -69,7 +69,7 @@ runtime 查得到时附 `Full transcript: <sessionFilePath>` 指针行。
 | 症状 | 排查路径 |
 |------|---------|
 | 未收到完成通知 | ① 确认 taiji 桌面环境（standalone pi CLI 无 handler，工具本身就会超时）；② 查扩展日志 `<agentDir>/logs/session-manager-YYYY-MM-DD.log`（agentDir = pi `getAgentDir()`，默认 `~/.pi/agent`，taiji 隔离环境 `~/.taiji/agent`）搜 `[session-manager]`——`delivery port not bound`（base-tool-enhance session_start 未跑/装配失败，通知丢弃，下次 session_start 重试装配）、`delivery port rejected notification`（受理被拒：幂等键未登记，watch 重试合法）、`watch select rejected`（watch 通道被拒）、`watch respond unusable/malformed`（runtime 应答不可解析，协议漂移信号）；③ 日志干净则确认子 session 是否真完成（get_session_status） |
-| pending 列表残留 type 'session' 条目 | register 由 send/create 带 prompt 的 arm 写入，正常由 watch 应答逐条 unregister。残留 = watch 应答未达（pi 进程被杀 / runtime 重启 / 通道折叠 cancelled）；这些活跃 register 由下次 session_start 收口腿逐条重开 watch（入参 = entry id 即 notifyId），应答到达即静默注销，无需手工处理 |
+| pending 列表残留 type 'session' 条目 | register 由 send/create 带 prompt 的 arm 写入，正常由 watch 应答逐条 unregister。残留 = watch 应答未达（pi 进程被杀 / runtime 重启 / 通道折叠 cancelled）；这些活跃 register 由下次 session_start 收尾路径逐条重开 watch（入参 = entry id 即 notifyId），应答到达即静默注销，无需手工处理 |
 | 同一完成重复通知 | 不应发生——投递日志按 notifyId 判重、死亡槽 (sessionId, deathSeq) 同键只发首条。若复现即协议漂移，查扩展日志 `delivery port rejected notification` / `notify delivery failed` 留痕归因 |
 
 ## 工具速查

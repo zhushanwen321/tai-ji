@@ -24,7 +24,7 @@
 //
 // [组 5a 瘦身 2026-09-27] beforeEach 不再 resetModules + 动态 import index.ts
 //（每用例全图重求值，9 条 seam 用例免付）——模块图静态加载一次，oncePerProcess
-// 守卫 Map 经 ext-guards 测试重置导出在 beforeEach 清空（与 resetModules 重建等价）；
+// 检查 Map 经 ext-guards 测试重置导出在 beforeEach 清空（与 resetModules 重建等价）；
 // W3TC7/W3TC8 淘汰接线两条删除（core lifecycle-recover-crashed 已锁淘汰语义；
 // W3TC8 由组 5b 在 workflow-events 合并文件补薄接线断言）。
 //
@@ -82,8 +82,8 @@ vi.mock("../interface/command/commands.ts", () => ({
 // ── import 被测模块 ──
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 
-// session_start 的六项跨 session 副作用操作经 oncePerProcess 守卫（u-audit-fix），
-// 守卫 Map 是模块级状态：beforeEach 经 _resetOncePerProcessForTest 清空（本文件
+// session_start 的六项跨 session 副作用操作经 oncePerProcess 检查（u-audit-fix），
+// 检查 Map 是模块级状态：beforeEach 经 _resetOncePerProcessForTest 清空（本文件
 // 静态加载模块图，无 resetModules 重建）。
 import { setupSessionLifecycle } from "../session-lifecycle.ts";
 import subagentsExtension from "../index.ts";
@@ -181,7 +181,7 @@ async function runSessionAssembly(mode: "tui" | "rpc" | "json" | "print", entrie
   return { mockInitSession, mockInitModel, mockRecoverManifestTmpFiles };
 }
 
-/** 挂载 index.ts 并跑一次 session_start（store loadAll 行为可配），返回守卫观察面：
+/** 挂载 index.ts 并跑一次 session_start（store loadAll 行为可配），返回检查观察面：
  *  pi / session_shutdown handler / registerWorkflowsCommand 捕获。 */
 async function mountWithLoadAll(loadAll: () => Promise<unknown[]>): Promise<{
   pi: ExtensionAPI;

@@ -203,7 +203,7 @@ describe('pi-scheduler SDK contract', () => {
     const cleanup = vi.mocked(importLegacyStore).mock.results[0]!.value
     expect(typeof cleanup).toBe('function')
 
-    // turn_end（首个 turn 完成，flush 已发生）→ cleanup 被调用——跨 session 双导入窗口闭合点
+    // turn_end（首个 turn 完成，flush 已发生）→ cleanup 被调用——跨 session 双导入窗口封住点
     await events.get('turn_end')!()
     expect(cleanup).toHaveBeenCalledTimes(1)
 

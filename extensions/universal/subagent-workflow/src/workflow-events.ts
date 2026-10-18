@@ -3,11 +3,11 @@
  *
  * 随迁内容 = 原组合根 index.ts 的 workflow 域闭包状态与事件 handler（原样搬移，
  * D2 纪律：本文件不改行为；lazyDeps 10 个同构 getter 收敛为 createLazy 单一原语
- * ——守卫/throw/转发语义与错误消息逐字保留）。原闭包变量收编为显式
+ * ——检查/throw/转发语义与错误消息逐字保留）。原闭包变量收编为显式
  * WorkflowDomainState（[skill-reload D2] 提权为 globalThis Symbol 槽 get-or-create
  * ——pi reload 时 jiti(moduleCache:false) 重求值模块图、模块级状态归零，槽跨
  * reload 存活，factory 重跑拿到同一 domain state，post-reload adoption 据此接管
- * 在飞 run）：
+ * 在途 run）：
  *   1. per-factory 域状态（lsRef / notifiedRunIds / workerHost / registry / sessionState）
  *   2. log（pi.appendEntry 包装）+ runSettledEffects（onRunDone 三步终局副作用
  *      管线，具名导出可直测）+ makeLifecycleDeps + makeDeps（LauncherDeps 纯装配）
@@ -15,14 +15,14 @@
  *      + 3 个跨域事件注册（model 缓存刷新 / subagents 父级级关闭×2——
  *      setup* 函数住各自域模块，本 seam 在原注册位置调用；pi.on 全链注册顺序逐位不变，
  *      workflow-events.test.ts 锁定）
- *   4. deps 守卫（单一出口，失败 throw）+ lazyDeps（tool lazy 注入源）
+ *   4. deps 检查（单一出口，失败 throw）+ lazyDeps（tool lazy 注入源）
  *
- * 组合根消费面：setupWorkflowDomain(pi) 返回
+ * 组合根消费方：setupWorkflowDomain(pi) 返回
  * WorkflowDomainHandle（state / lazyDeps / isScriptRunning），
  * tool + command 注册仍留 index.ts。
  *
  * [skill-reload D3] makeDeps 的三个 volatile 成员（eventBus / log / onRunDone 的
- * pi）不做闭包快照：pi 从槽上 currentPi 现读（factory 重跑时覆盖登记）——在飞
+ * pi）不做闭包快照：pi 从槽上 currentPi 现读（factory 重跑时覆盖登记）——在途
  * pump 持有的旧 deps 对象经属性访问自动路由到新绑定，无需遍历重绑。
  *
  * 测试入口：既有 index 挂载类测试（index-session-start / process-shutdown-hook /
@@ -71,8 +71,8 @@ import { createInFlightReporter, type InFlightReporter } from "./host/inflight-r
 // setJournalAppendListener（与 inflight reporter 同 seam 同款），session_start /
 // session_shutdown 驱动 attach/detach；测试可注入 fake。
 import { createJournalReporter, type JournalReporter } from "./host/journal-reporter.ts";
-// [W2/V1 D1 第 8 行] 判活类消费面（isScriptRunning）经 core 投影单点
-//（runSummary.status 三态投影——终局判定源 = 终局记录注册表）。
+// [W2/V1 D1 第 8 行] 判活类消费方（isScriptRunning）经 core 派生视图单点
+//（runSummary.status 三态派生视图——终局判定源 = 终局记录注册表）。
 import { type RunSettlementRecord } from "./jsonl-run-store.ts";
 import { notifyDone, trackNotifiedRunId } from "./workflow-notify.ts";
 // ═══ 跨域事件注册（handler 体住各自域模块，本 seam 原位调用保注册顺序） ═══
@@ -106,7 +106,7 @@ export interface WorkflowDomainState {
   sessionState: Map<string, SessionLifecycleResult>;
   /** [skill-reload D3] current pi 的 volatile 登记点：setupWorkflowDomain 每次
    *  factory 重跑开头覆盖（reload 后新 factory 持新 pi）。makeDeps 的 eventBus /
-   *  log / onRunDone 三 volatile 成员经属性访问从本成员现读——在飞 pump 持有的
+   *  log / onRunDone 三 volatile 成员经属性访问从本成员现读——在途 pump 持有的
    *  旧 deps 对象因此自动解析到新 pi，无需遍历重绑。undefined = setup 未跑过
    *  （makeDeps 只能经 setup 之后的事件链创建，命中即时序异常，fail-fast）。 */
   currentPi: ExtensionAPI | undefined;
@@ -127,9 +127,9 @@ function createWorkflowDomainState(): WorkflowDomainState {
 // DIALOG_QUEUE_KEY 同一防线形态（globalThis[Symbol.for]，跨 jiti 多实例与
 // pi reload 模块重求值存活）。get-or-create 整对象一槽——禁止逐字段筛选提权
 // （sessionState/workerHost/registry/notifiedRunIds/lsRef 是一张对象图，漏提
-// 一项即新旧实例并存、闭包引用分裂，设计被否项）。reload 后 factory 重跑经
+// 一项即新旧实例并存、闭包引用分裂，设计不采用项）。reload 后 factory 重跑经
 // 此槽拿回同一 domain state，session_shutdown(reload) 跳过清理（D1）保住的
-// 在飞 run / store 由 post-reload session_start(reason=reload) 的 adoption
+// 在途 run / store 由 post-reload session_start(reason=reload) 的 adoption
 // 接管（D4，session-lifecycle.ts）。
 const WORKFLOW_DOMAIN_SLOT_KEY = Symbol.for(GLOBAL_SLOT_KEYS.workflowDomainState);
 
@@ -145,7 +145,7 @@ function getOrCreateWorkflowDomainState(): WorkflowDomainState {
 // [skill-reload D3] makeDeps volatile 成员的 pi 现读源。只读槽不创建——本函数被调
 // 时 domainState 必已存在（makeDeps 只能经 setupWorkflowDomain 之后的事件链创建）。
 // 窗口语义：reload 的 ②invalidate 到新 factory 重跑覆盖登记之间，这里读到的仍是
-// 旧 pi（设计 D5 声明的窗口内 stale 形态，降级守卫在消费侧——notifyDone 的
+// 旧 pi（设计 D5 声明的窗口内 stale 形态，降级检查在消费侧——notifyDone 的
 // guardStaleCtx / store appendEntry 的 stale guard，本单元不处理）。缺失 = 时序
 // 异常（槽被外力删除或 deps 逃逸到 setup 之前使用），fail-fast 带恢复指向。
 function resolveCurrentPi(): ExtensionAPI {
@@ -160,16 +160,16 @@ function resolveCurrentPi(): ExtensionAPI {
   return pi;
 }
 
-// ── workflow deps 守卫（单一出口） ─────────────────────────────────────────────
+// ── workflow deps 检查（单一出口） ─────────────────────────────────────────────
 //
-// 守卫单一出口（lazyDeps 消费）：state 缺失 / storeHealthy=false 时 throw（pi tool
+// 检查单一出口（lazyDeps 消费）：state 缺失 / storeHealthy=false 时 throw（pi tool
 // 框架将其转译为 tool 错误结果）。错误消息逐字保留（crash-recovery 测试锁
 // "store unavailable" / "loadAll failed" 子串）。
 
 // ── lazyDeps 样板收敛 ──────────────────────────────────────────────────────────
 
 /**
- * lazyDeps 单成员转发原语：属性访问触发 deps 守卫求值，失败 throw，成功转发
+ * lazyDeps 单成员转发原语：属性访问触发 deps 检查求值，失败 throw，成功转发
  * deps[key]。收敛原 index.ts 10 个同构 4 行 getter；每属性独立求值语义不变。
  */
 function createLazy<K extends keyof LauncherDeps>(
@@ -254,7 +254,7 @@ export function runSettledEffects(env: RunSettledEffectsEnv, run: WorkflowRun): 
   }
 }
 
-// ── 组合根消费面 ───────────────────────────────────────────────────────────────
+// ── 组合根消费方 ───────────────────────────────────────────────────────────────
 
 export interface WorkflowDomainHandle {
   /** workflow 域状态（组合根只读消费：engine-awareness lastEngine 存取器 /
@@ -345,7 +345,7 @@ export function setupWorkflowDomain(
       runs: state.runs,
       registry,
       // [skill-reload D3] 三个 volatile 成员（eventBus / log / onRunDone 的 pi）
-      // 现读不快照：pi 从槽 currentPi 解析（factory 重跑覆盖登记）。在飞 pump 持有的
+      // 现读不快照：pi 从槽 currentPi 解析（factory 重跑覆盖登记）。在途 pump 持有的
       // 旧 deps 对象经属性访问自动路由到新 pi。eventBus
       // 是值成员必须 getter；log/onRunDone 是函数成员，现读在函数体内达成（函数引用
       // 稳定，调用方缓存引用也无 stale 面）。
@@ -353,7 +353,7 @@ export function setupWorkflowDomain(
       // onRunDone = run 终局固定顺序副作用管线（提级为 runSettledEffects 具名
       // 导出，顺序与失败语义的权威注释在该函数；此处纯装配注入依赖）。
       // [W2/V1 D1 第 7 行] settledRecordOf 注入 = store 帧查询（notifyDone 在
-      // finalizeRun coda 内于 dispatch 落账之后触发，帧必已落 journal）。
+      // finalizeRun coda 内于 dispatch 写入 journal 记录之后触发，帧必已落 journal）。
       onRunDone: (run: WorkflowRun) =>
         runSettledEffects(
           {
@@ -374,7 +374,7 @@ export function setupWorkflowDomain(
       // appendEntry 落盘（session JSONL 唯一权威），不经 eventBus emit→内存
       // listener——emit 链在 reload 转换窗/多 extension factory 顺序窗内整链失效，
       // 丢失即注销 entry 永缺位（S1b 事故形态①段）。函数体内现读 current pi
-      // （与 log/onRunDone 同款 volatile 形态）——在飞 pump 持有的旧 deps 对象
+      // （与 log/onRunDone 同款 volatile 形态）——在途 pump 持有的旧 deps 对象
       // 经属性访问自动路由到新 pi。
       appendEntry: (customType: string, data: unknown) => {
         resolveCurrentPi().appendEntry(customType, data);
@@ -399,7 +399,7 @@ export function setupWorkflowDomain(
         }
         return service.executeWorkflowAgent(opts, parentRunId, signal, undefined, undefined, stepIndex);
       },
-      // [F1-18 修复] resume 显式 model 落账后的宿主投影同步（生产接线——单例现读
+      // [F1-18 修复] resume 显式 model 写入 journal 记录后的宿主派生视图同步（生产接线——单例现读
       // 同 workflowAgentDispatch 形态）。实现 = SubagentService.applyRunOverrideProjection
       // （覆盖内存表写值 + 重建负缓存作废）；throw 走 resume 侧回滚围栏（run 回
       // interrupted 可重试），service 缺席文案同款 [C2] 闭环。
@@ -429,8 +429,8 @@ export function setupWorkflowDomain(
   function isScriptRunning(name: string): boolean {
     for (const state of sessionState.values()) {
       for (const run of state.runs.values()) {
-        // [W2/V1 D1 第 8 行] 判活换源 runSummary 投影二值（混合判源收拢在 core
-        // 投影单点——原两态机 status 读随活体写点删除停更）。
+        // [W2/V1 D1 第 8 行] 判活换源 runSummary 派生视图二值（混合判源收拢在 core
+        // 派生视图单点——原两态机 status 读随活体写点删除停更）。
         if (run.spec.scriptName === name && runSummary(run).status === "running") return true;
       }
     }
@@ -555,7 +555,7 @@ export function setupWorkflowDomain(
   //  清除 / f dialogQueue.rejectAll），只执行 b（inflightReporter.detachSession，
   //  detach 不是破坏——旧 reporter 是 per-factory 实例，不 detach 会在重试循环里持
   //  stale ctx 反复 attempt；新 factory 建新 reporter 并覆盖进程级单监听）。存活的
-  //  在飞 run / store 经 D2 槽由 post-reload session_start(reason=reload) 的
+  //  在途 run / store 经 D2 槽由 post-reload session_start(reason=reload) 的
   //  adoption 接管（D4，session-lifecycle.ts）。quit/new/resume/fork = 会话真离开，
   //  六动作现状全保持；session_tree 与 /new 父级联（subagents-events.ts）的
   //  terminate 路径不受影响（各自独立 handler，真语义）。
@@ -637,7 +637,7 @@ export function setupWorkflowDomain(
         await terminateRunningRuns(makeDeps(state), "Session shutdown: run terminated");
       } catch (err) {
         // 外层兜底（正常路径 helper 内部已自过滤单 run 失败）——error 级：中断转移
-        // 落账失败意味着重启后收编链的输入缺失（该 run 仍呈 running 活体投影），必须可见。
+        // 写入 journal 记录失败意味着重启后收编链的输入缺失（该 run 仍呈 running 活体派生视图），必须可见。
         bestEffort(err, "terminateRunningRuns (session_shutdown handler)", "error");
       }
       // dispose 自身恒 resolve，catch 兜底防御——handler 内抛错会中断后续 session
@@ -665,7 +665,7 @@ export function setupWorkflowDomain(
     dialogQueue.rejectAll();
   });
 
-  /** deps 守卫单一出口：state 缺失 / store 不健康时 throw（错误消息逐字保留——
+  /** deps 检查单一出口：state 缺失 / store 不健康时 throw（错误消息逐字保留——
    *  crash-recovery / session-lifecycle 等测试锁定子串），成功返回 LauncherDeps。 */
   const resolveDepsFor = (sessionId: string): LauncherDeps => {
     const state = sessionState.get(sessionId);
@@ -698,8 +698,8 @@ export function setupWorkflowDomain(
   //  lazyDeps（2 个 tool + workflows command 的 lazy deps 注入源；
   //  workflow-script tool 走 state.registry 直供不经 lazyDeps）
   //
-  //  属性访问触发 deps 守卫 + makeDeps 求值（每属性独立，createLazy 原语转发；
-  //  守卫失败 throw——pi tool 框架转译为 tool 错误结果，session-lifecycle.test.ts
+  //  属性访问触发 deps 检查 + makeDeps 求值（每属性独立，createLazy 原语转发；
+  //  检查失败 throw——pi tool 框架转译为 tool 错误结果，session-lifecycle.test.ts
   //  锁定消息子串）。
   // ════════════════════════════════════════════════════════════
   const resolveDeps = (): LauncherDeps => resolveDepsFor(lsRef.lastSessionId);
@@ -714,7 +714,7 @@ export function setupWorkflowDomain(
     // [A1 修复循环 R3] workflowAgentDispatch 必须随 lazyDeps 转发：workflow tool 的
     // run action 以 lazyDeps 为 deps 启动 run，漏本成员则 pump dispatchAgentCall 读到
     // undefined 回退 deps.runner（SAR.run 占位 runId）→ record.parentRunId =
-    // "sar-unattached" → armed 回执落账键错 → fold 出 created 态 → IllegalTransitionError
+    // "sar-unattached" → armed 回执写入 journal 记录键错 → fold 出 created 态 → IllegalTransitionError
     // 让位，run journal 恒缺 armed 帧（真机 wf-1790034646281-w7tp4f 实证链，R2 裁决）。
     get workflowAgentDispatch() { return createLazy(resolveDeps, "workflowAgentDispatch"); },
     // [dmg-r2-5] 宿主会话锚必须随 lazyDeps 转发（workflowAgentDispatch 同款先例）：
@@ -722,12 +722,12 @@ export function setupWorkflowDomain(
     // 成员则 run-created 帧不落 rootSessionId（可选成员静默放行）——同 cwd 多会话下
     // runtime 网关 runId 路由恒回落目录存在性弱锚，精确归属形同虚设。
     get getSessionRootId() { return createLazy(resolveDeps, "getSessionRootId"); },
-    // [dmg-r1-1] resume 显式 model 落账回调必须随 lazyDeps 转发（getSessionRootId
+    // [dmg-r1-1] resume 显式 model 写入 journal 记录回调必须随 lazyDeps 转发（getSessionRootId
     // 同款先例，同族第三例）：三个生产入口（registerWorkflowTool / registerSubagentsTool /
     // registerWorkflowsCommand）都以 lazyDeps 为 deps 启动 run，resume with model 的
-    // 落账点（resume-run appendResumeModelOverride）落完 journal B 帧后经本回调同步
-    // 宿主投影——漏本成员则可选链静默短路（可选成员静默放行）：覆盖内存表 /
-    // 负缓存 stale 不失效，重派被旧投影遮蔽（旧 model 命中或覆盖丢失按 run-created.model
+    // 写入点（resume-run appendResumeModelOverride）落完 journal B 帧后经本回调同步
+    // 宿主派生视图——漏本成员则可选链静默短路（可选成员静默放行）：覆盖内存表 /
+    // 负缓存 stale 不失效，重派被旧派生视图遮蔽（旧 model 命中或覆盖丢失按 run-created.model
     // 解析），pi 仍 notify「resuming with model B」成功文案。转发清单对账测试防第四处
     // 漏转发（workflow-events.test.ts lazyDeps 转发清单对账 describe）。
     get onResumeModelOverrideCommitted() { return createLazy(resolveDeps, "onResumeModelOverrideCommitted"); },

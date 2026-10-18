@@ -17,7 +17,7 @@ import { buildExecutionTree, formatExecutionTreeText, type ExecutionTreeNode } f
  * - TC-m3b-cycle-detection：workflow 指针环（A→B→A），visited Set 防环
  * - TC-m3b-single-node：单节点树（无后代，ES5）
  * - TC-m3b-source-priority：parentRecordId 三级数据源优先级（manifest>identity>flat，DM4）
- * - TC-m3b-real-data-guard：真实形态数据守卫（合成 fixture）：mkdtemp 临时目录仿真真实
+ * - TC-m3b-real-data-guard：真实形态数据检查（合成 fixture）：mkdtemp 临时目录仿真真实
  *   agentDir 布局（时间戳前缀文件名 / 新旧机制混合 / 孤儿 manifest / 坏 manifest / 外来
  *   家族），guard 语义断言——解析不抛错 / 树非空 / 结构自洽，不锁 sourceMode 具体值
  */
@@ -51,7 +51,7 @@ async function writeMainSession(dir: string, slug: string, id: string): Promise<
 /**
  * 写 subagent session 文件：首行 header（真实 id）+ 占位 message + 尾行 identity。
  * identity 尾行含 rootSessionId/slug/agent，可选 parentRecordId（数据源 ② 测试用）。
- * fileName 可选：默认 `<realId>.jsonl`；真实形态守卫用例传时间戳前缀名（<ts>_<id>.jsonl）。
+ * fileName 可选：默认 `<realId>.jsonl`；真实形态检查用例传时间戳前缀名（<ts>_<id>.jsonl）。
  */
 async function writeSubagentSession(
   dir: string,
@@ -588,7 +588,7 @@ describe('buildExecutionTree - fixture', () => {
     expect(tree.maxDepth).toBe(1)
     expect(tree.truncated).toBe(false)
 
-    // 差分守卫：不传 mainSessionFile（旧行为）→ main root 无 sessionFile → workflow run 不可达
+    // 差分检查：不传 mainSessionFile（旧行为）→ main root 无 sessionFile → workflow run 不可达
     const tree2 = await buildExecutionTree(MAIN, dir)
     expect(tree2.root.sessionFile).toBeUndefined()
     expect(tree2.totalNodes).toBe(1)
@@ -681,11 +681,11 @@ describe('buildExecutionTree - fixture', () => {
 })
 
 // ============================================================
-// 真实形态数据守卫（合成 fixture）：mkdtemp 临时目录仿真真实 agentDir 布局，
+// 真实形态数据检查（合成 fixture）：mkdtemp 临时目录仿真真实 agentDir 布局，
 // guard 语义断言（解析不抛错 / 树非空 / 结构自洽 / sourceMode 值域），不触碰真实数据目录。
 // ============================================================
 
-describe('buildExecutionTree - 真实形态数据守卫（合成）', () => {
+describe('buildExecutionTree - 真实形态数据检查（合成）', () => {
   let dir: string
 
   beforeEach(async () => {
@@ -786,12 +786,12 @@ describe('buildExecutionTree - 真实形态数据守卫（合成）', () => {
     // 全无 → flat-fallback），不锁具体值
     expect(['precise', 'flat-fallback']).toContain(tree.sourceMode)
     // 家族树非空：main + 顶层 A/C/D + A 的嵌套后代 B = 5；外来 X 不泄漏（合成数据确定性
-    // 可数，精确计数即非泄漏守卫）
+    // 可数，精确计数即非泄漏检查）
     expect(tree.totalNodes).toBe(5)
     expect(tree.root.type).toBe('main')
     expect(tree.root.sessionId).toBe(MAIN)
     expect(findNode(tree.root, 'subagent', X_REAL)).toBeUndefined()
-    // 孤儿 D 仍入树（sessionFile 残留路径，不因文件缺失抛错/丢弃 record——原真实数据守卫
+    // 孤儿 D 仍入树（sessionFile 残留路径，不因文件缺失抛错/丢弃 record——原真实数据检查
     // 独有覆盖面，合成化后保留）
     const nodeD = findNode(tree.root, 'subagent', D_REAL)
     expect(nodeD).toBeDefined()

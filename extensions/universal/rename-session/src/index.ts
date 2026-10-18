@@ -42,14 +42,14 @@ interface MessageEndLikeEvent {
 }
 
 /**
- * mode 切走后残留 rename_session 工具被调用的 execute 守卫文案（isError 经 throw 产生）。
- * 与失败路径表「守卫拒绝」行 / V10 通过标准三处对齐：含恢复动作指引。
+ * mode 切走后残留 rename_session 工具被调用的 execute 检查文案（isError 经 throw 产生）。
+ * 与失败路径表「检查拒绝」行 / V10 通过标准三处对齐：含恢复动作指引。
  */
 const RENAME_TOOL_MODE_GUARD_MESSAGE =
 	"模式已切换，rename_session 仅在 agent-tool 模式可用；本会话可切回 agent-tool 立即恢复（live 读 mode），或手动改名（GUI rename / pi 原生 /name）。";
 
 /**
- * subagent session 的 rename_session 工具 execute 守卫文案（守卫闭环，C-ext-21 三入口
+ * subagent session 的 rename_session 工具 execute 检查文案（检查闭环，C-ext-21 三入口
  * 复用；isError 经 throw 产生）。不暴露内部路径细节——subagents 目录形态是跨包实现耦合，
  * 面向 agent 的报错只说结论与指引。
  */
@@ -60,17 +60,17 @@ const RENAME_TOOL_SUBAGENT_GUARD_MESSAGE =
  * 注册 rename_session 工具（agent-tool 模式）。
  *
  * 关键语义：
- * - subagent session 守卫：isSubagentSession 命中即 throw isError——subagent
+ * - subagent session 检查：isSubagentSession 命中即 throw isError——subagent
  *   子进程同样加载本 extension（全局 mode=agent-tool 时 subagent 也注册本工具），
  *   子会话是临时产物不参与 rename 体系，与 message_end / turn_end 两入口同语义。
- * - execute 内 live 读 config 守卫：mode !== "agent-tool"（mode 切走后本工具残留在
+ * - execute 内 live 读 config 检查：mode !== "agent-tool"（mode 切走后本工具残留在
  *   已存活 session 的工具清单——pi 无 unregisterTool）→ throw isError（pi 1.0.0 实装：
  *   execute 抛出经 pi-agent-core agent-loop.js executePreparedToolCall 外层 catch 统一转
  *   isError:true 的 error tool result〔:581-588 createErrorToolResult(message)〕；统一
  *   throw 为纪律选择（单一错误路径），非「返回值 isError 失效」——1.0.0 起返回值上的
  *   isError 标记同样被尊重〔:579〕）。
- * - cleanTitle 空值同样 throw isError（空白/纯标点标题不可落库）。
- * - 非空直接 pi.setSessionName，不走 getSessionName() 防覆盖守卫——agent 显式调用
+ * - cleanTitle 空值同样 throw isError（空白/纯标点标题不可写入）。
+ * - 非空直接 pi.setSessionName，不走 getSessionName() 防覆盖检查——agent 显式调用
  *   是「代表用户的意图」，语义等同 GUI 手动 rename，允许覆盖任何既有名（含自动名/语义名）。
  */
 function registerRenameSessionTool(pi: ExtensionAPI): void {
@@ -95,7 +95,7 @@ function registerRenameSessionTool(pi: ExtensionAPI): void {
 			_onUpdate: undefined,
 			ctx: ExtensionContext,
 		): Promise<AgentToolResult<Record<string, never>>> {
-			// subagent session 守卫先于 mode 守卫：subagent 拒绝与 mode 无关（即便 mode 仍为
+			// subagent session 检查先于 mode 检查：subagent 拒绝与 mode 无关（即便 mode 仍为
 			// agent-tool 也不该命名临时子会话），且文案归因到 subagent 而非误导性的「模式已切换」
 			if (isSubagentSession(ctx.sessionManager.getSessionDir())) {
 				throw new Error(RENAME_TOOL_SUBAGENT_GUARD_MESSAGE);
@@ -119,7 +119,7 @@ function registerRenameSessionTool(pi: ExtensionAPI): void {
 
 /**
  * pi-rename-session extension 工厂函数。
- * 三种触发模式（默认 first-stop）共用同一落库管道（callRenameLLM → 防覆盖重查 →
+ * 三种触发模式（默认 first-stop）共用同一写入管道（callRenameLLM → 防覆盖重查 →
  * setSessionName）：
  * - first-stop（默认）：首个成功 round 末触发（turn_end 入口，现状行为）
  * - first-prompt：首条 user 消息发出即触发（message_end 入口，不等回复，标题只基于 prompt）
@@ -135,7 +135,7 @@ export default function renameSessionExtension(pi: ExtensionAPI): void {
 
 	// 工具注册面（求值时点边界）：只在 extension load 时求值一次——pi 无 unregisterTool，
 	// 切 mode 后已存活 session 的工具清单不回溯（切到 agent-tool 当前 session 无工具、切走则
-	// 工具残留），残留工具由 execute 内 live mode 守卫兜底（RENAME_TOOL_MODE_GUARD_MESSAGE）。
+	// 工具残留），残留工具由 execute 内 live mode 检查兜底（RENAME_TOOL_MODE_GUARD_MESSAGE）。
 	if (loadRenameConfig().mode === "agent-tool") {
 		registerRenameSessionTool(pi);
 	}
@@ -167,7 +167,7 @@ export default function renameSessionExtension(pi: ExtensionAPI): void {
 				return;
 			}
 
-			// 4. 排除 subagent 子进程 session（守卫链复用，C-ext-21 覆盖面含本新入口）
+			// 4. 排除 subagent 子进程 session（检查链复用，C-ext-21 覆盖面含本新入口）
 			if (isSubagentSession(ctx.sessionManager.getSessionDir())) return;
 
 			// 5. 首条 user 判定：extension handler 先于本条 message 的 entries append 执行
@@ -202,7 +202,7 @@ export default function renameSessionExtension(pi: ExtensionAPI): void {
 			// rename 是 best-effort，任何 LLM 失败（网络/提取/auth/model 不可用）都静默跳过保留原 label，
 			// 不进 session history。
 		} catch (e) {
-			// best-effort 降级：message_end handler 同步部分（守卫判定）抛错时记录但不阻断
+			// best-effort 降级：message_end handler 同步部分（检查判定）抛错时记录但不阻断
 			// 事件链——rename 是非关键副作用，任何失败不得干扰主对话。
 			logger.error("failed", { error: String(e) });
 		}
@@ -248,11 +248,11 @@ export default function renameSessionExtension(pi: ExtensionAPI): void {
 				return;
 			}
 
-			// 6. LLM 生成标题并落库。pi 运行时的事件链是 await 的（runner.emit → await handler），
+			// 6. LLM 生成标题并写入。pi 运行时的事件链是 await 的（runner.emit → await handler），
 			// 若 await callRenameLLM 会阻塞 agent 进入下一次迭代。这里用 detached promise 脱离 await 链，
 			// 真正实现 fire-and-forget：handler 立即 resolve，LLM 调用与 setSessionName 在后台异步完成。
-			// 落库管道（起 LLM → 防覆盖重查 → setSessionName → renamed to 日志）见 landing.ts：
-			// 与 first-prompt 入口共用同一段，usage 落账回调 / skip / renamed to 契约由该处单点保证
+			// 写入管道（起 LLM → 防覆盖重查 → setSessionName → renamed to 日志）见 landing.ts：
+			// 与 first-prompt 入口共用同一段，usage 记录回调 / skip / renamed to 契约由该处单点保证
 			void landTitle(pi, ctx, config, event.message, { debugLog });
 			// rename 是 best-effort，任何 LLM 失败（网络/提取/auth/model 不可用）都静默跳过保留原 label，
 			// 不进 session history。

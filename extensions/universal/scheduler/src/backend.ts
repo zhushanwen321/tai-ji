@@ -107,7 +107,7 @@ export interface SchedulerBackendCtx {
    */
   isIdle?(): boolean
   /**
-   * 会话当前模型（真实 ExtensionContext.model: Model<any> | undefined，结构兼容此处最小投影）。
+   * 会话当前模型（真实 ExtensionContext.model: Model<any> | undefined，结构兼容此处最小派生视图）。
    * 可选 = 无模型会话（ExtensionContext.model 本身可为 undefined）。
    */
   model?: SchedulerCurrentModel
@@ -215,14 +215,14 @@ export class PiSchedulerBackend implements SchedulerBackend {
    *
    * ctx.isIdle 缺失（最小 duck ctx）时保守返回 false（视作「有轮在跑」）：ack 机制的
    * fail-safe 方向是「不确定则不介入」——运行中的轮次会自然产出 assistant 消息、打开会话
-   * 落盘闸门（设计 §3.3 D4 / G4），而未知状态下注入合成轮反而可能吞掉用户消息。
+   * 落盘门禁（设计 §3.3 D4 / G4），而未知状态下注入合成轮反而可能吞掉用户消息。
    */
   isIdle(): boolean {
     return this.ctx.isIdle ? this.ctx.isIdle() : false
   }
 
   /**
-   * 会话当前模型的最小投影（**类方法，非接口成员**，理由同 isIdle）；ctx.model 缺失/
+   * 会话当前模型的最小派生视图（**类方法，非接口成员**，理由同 isIdle）；ctx.model 缺失/
    * undefined（无模型会话）时返回 undefined。
    */
   getCurrentModel(): SchedulerCurrentModel | undefined {

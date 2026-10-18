@@ -52,7 +52,7 @@ describe("buildManagedNotifyContent（D9 文案形状）", () => {
 		expect(absent).not.toContain("fulfills");
 	});
 
-	it("exit code 注入 status 段内（death 文案，exit 腿诊断通路复刻）", () => {
+	it("exit code 注入 status 段内（death 文案，exit 路径诊断通路复刻）", () => {
 		const content = buildManagedNotifyContent({
 			label: "L",
 			sessionId: "s1",

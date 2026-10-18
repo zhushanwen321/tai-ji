@@ -20,8 +20,8 @@
  *   时下一 turn 自然反映。
  *
  * C5①（convergence D-3）：formatModelList + ModelEntry 口径下沉 core 并改调
- * barrel——pi 投影全字段必给（provider/reasoning:boolean/input[]/contextWindow），
- * core 的 (provider,id) 码点序 + provider/id 拼接在 pi 投影下与本地旧实现逐字节
+ * barrel——pi 派生视图全字段必给（provider/reasoning:boolean/input[]/contextWindow），
+ * core 的 (provider,id) 码点序 + provider/id 拼接在 pi 派生视图下与本地旧实现逐字节
  * 一致（CA2 快照验收前提）；guide 文案是 pi 宿主注入（core 不内嵌平台文案）。
  *
  * 立场：本注入段只服务「派发时选模型」，明确告知模型不要在会话中切换主模型
@@ -53,7 +53,7 @@ const logger = getLogger("injector");
 export const MODEL_LIST_GUIDE =
 	"The following models are available (auth-configured). Use these ids when delegating via the subagent/workflow `model` param (\"provider/modelId\" format) to match the task (e.g. vision models for screenshots, strong reasoners for architecture). Do NOT switch the main conversation model mid-session — per-call model override on delegates only (switching the main model is cache-hostile); use the /model command only when the user explicitly asks to change it.";
 
-/** Model<Api> → ModelEntry 投影（只留注入段消费的字段；模块内唯一消费方 setupModelListInjector） */
+/** Model<Api> → ModelEntry 映射（只留注入段消费的字段；模块内唯一消费方 setupModelListInjector） */
 function toModelEntry(model: Model<Api>): ModelEntry {
 	return {
 		provider: model.provider,

@@ -16,7 +16,7 @@
  * + WorkflowsView（读 WorkflowRun 聚合根）。
  *
  * 参考：
- * - domain-models.md §FR-6（command 收口仅 /workflows，打开交互式面板）
+ * - domain-models.md §FR-6（command 收尾仅 /workflows，打开交互式面板）
  * - spec.md UC-3（用户输入 /workflows，打开三级导航 TUI 面板）
  */
 
@@ -41,7 +41,7 @@ import { displayStatusOf } from "../tool/tool-workflow.ts";
 
 /** status 显示顺序：running 优先（活跃态在前），interrupted 次之（[D2] 暂停态
  *  ——无活体但可续跑，排活体后、终局前），再 startedAt 倒序。
- *  [W2/V1 D1 第 6 行] 权重表消费键 = displayStatusOf 投影三态（排序键不读
+ *  [W2/V1 D1 第 6 行] 权重表消费键 = displayStatusOf 派生视图三态（排序键不读
  *  outcome 细分——outcome 由 runSummary.reason 并列承载）。 */
 const STATUS_ORDER: Record<string, number> = {
   running: 0,

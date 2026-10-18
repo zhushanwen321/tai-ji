@@ -4,7 +4,7 @@
  *
  * 三个被测域与断言形态：
  * - actionGenerate（m0 wave TC1-TC10 + [P-generate-roundtrip]；C5② 改接 core 管线）：
- *   五道闸校验 + tmp 写盘在 core generateWorkflowScript（barrel import）——验证宿主
+ *   五项校验 + tmp 写盘在 core generateWorkflowScript（barrel import）——验证宿主
  *   契约层（结构化结果 → execute-throw 转换、成功文案）+ 经真实 core 管线的校验行为
  *   回归。mock node:fs（mkdirSync/writeFileSync）避免真实落盘 .pi/workflows/.tmp/
  *   （builtin 模块 mock 对 core 管线内的写盘同样生效）；save/delete 走 barrel mock
@@ -42,7 +42,7 @@ vi.mock("node:fs", async (importOriginal) => ({
 }));
 
 // C5②：被测模块经 barrel 消费 save/delete/generateWorkflowScript——mock 挂 barrel，
-// importActual 展开保持 generateWorkflowScript 真实（校验管线是被测回归面）
+// importActual 展开保持 generateWorkflowScript 真实（校验管线是被测回归测试）
 vi.mock("@zhushanwen/subagent-core", async (importOriginal) => ({
   ...(await importOriginal<typeof import("@zhushanwen/subagent-core")>()),
   saveWorkflow: vi.fn(),
@@ -323,7 +323,7 @@ describe("execute 入口 abort 前置（P1-2：与 workflow / subagents 两 tool
    */
 
   const ctx = { mode: "tui" as const, hasUI: true };
-  /** 各 action 的最小合法入参（generate 给齐 name+script：守卫失效时会走完真实 core 管线并写盘，零触达断言随之红）。 */
+  /** 各 action 的最小合法入参（generate 给齐 name+script：检查失效时会走完真实 core 管线并写盘，零触达断言随之红）。 */
   const ACTION_PARAMS: Record<string, Record<string, unknown>> = {
     generate: { action: "generate", name: "test-wf", script: "// s" },
     lint: { action: "lint", name: "test-wf" },
@@ -434,7 +434,7 @@ describe("actionLint 输出形态（LLM 可见文本锁）", () => {
 // ── GUI attach（RPC 模式分发；attach 实现单点在 tool-shared withGuiAttach）──
 
 describe("actionLint GUI attach（execute 级 RPC/非 RPC 分发）", () => {
-  /** details 的 __gui__ 投影形态（协议 GuiRenderResult 的断言子集）。 */
+  /** details 的 __gui__ 派生视图形态（协议 GuiRenderResult 的断言子集）。 */
   type GuiProjection = { __gui__?: { component?: { type?: string; props?: { items?: Array<{ label?: string; value?: string }> } } } };
 
   it("RPC ctx → details 附带 __gui__（lint findings → stats-line warn）", async () => {
@@ -529,7 +529,7 @@ describe("actionList 输出形态（LLM 可见文本锁）", () => {
   });
 });
 
-// ── GUI attach（RPC 模式分发；list 的 GUI 投影 = scripts 计数 stats-line）──
+// ── GUI attach（RPC 模式分发；list 的 GUI 派生视图 = scripts 计数 stats-line）──
 
 describe("actionList GUI attach（execute 级 RPC/非 RPC 分发）", () => {
   type GuiProjection = { __gui__?: { component?: { type?: string; props?: { items?: Array<{ label?: string; value?: string; severity?: string }> } } } };

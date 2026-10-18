@@ -263,7 +263,7 @@ describe('replayFoldEntries', () => {
     expect(a.nextRunAt).toBe(100) // 保持 upsert 快照值
   })
 
-  // ── MF-2：守卫按变体校验必填字段——损坏 entry 只跳过该条，不清空全部任务 ──
+  // ── MF-2：检查按变体校验必填字段——损坏 entry 只跳过该条，不清空全部任务 ──
   it('MF-2: op 合法但缺必填字段的损坏 entry 被跳过，其余任务保留', () => {
     const session = '/s.json'
     loggerMock.warn.mockClear()

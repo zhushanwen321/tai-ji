@@ -975,7 +975,7 @@ describe('renderExtractItems F9 截断（S3 首项超大 + S4 文案）', () => 
 
 // ============================================================
 // w2 新增：resolveSessionId 三形态（① 绝对路径 / ② sa-id / ③ findSessions 透传 source）
-// + ES1/ES2 错误契约 + source 透传 + 真实数据守卫（design TC2-TC18）
+// + ES1/ES2 错误契约 + source 透传 + 真实数据检查（design TC2-TC18）
 // ============================================================
 
 /**
@@ -1264,7 +1264,7 @@ describe('resolveSessionId ② sa-id 形态（w2 TC7-TC10 + CQ3）', () => {
   })
 })
 
-describe('sa-id entry 兜底 v2 终态条锚定（W1 D1 版本门补齐，第三层兜底消费面）', () => {
+describe('sa-id entry 兜底 v2 终态条锚定（W1 D1 版本门补齐，第三层兜底消费方）', () => {
   // fixture 骨架对齐 zcode-routing.test.ts：root/agent = agentDir、root/live-sessions =
   // liveSessionDir（entry 兜底候选根）、root/engines/zcode/session-db/db.sqlite = 隔离库
   // 白名单形态路径（不落文件——正向用例锚命中后进 zcode 读链，在白名单存在性检查处
@@ -1939,7 +1939,7 @@ describe('doFamily recursive（m3b U8 接入）', () => {
 
 // ===========================================================================
 // ext-simplify-04 U4/E2（D2②）：formatFamilyText subagents 行富字段展示
-// status 终态短标签 + agent 名 + task 截 60 摘要；孤儿只标 [已清理]；P4 输出量级守卫。
+// status 终态短标签 + agent 名 + task 截 60 摘要；孤儿只标 [已清理]；P4 输出量级检查。
 // ===========================================================================
 
 describe('formatFamilyText subagents 行富字段（ext-simplify-04 U4 / E2）', () => {
@@ -2219,7 +2219,7 @@ describe('doctor action（u8：环境判定 + 根表 + 告警 + 残留 glob）',
   it('无缓存形态（ext-simplify-04 U3）：重复调用输出一致（每次实扫），新落盘文件立即可见', async () => {
     // 原三个用例（缓存命中不重扫 / TTL 到期失效 / find 不读 doctor 缓存 PS-14）随
     // doctor 缓存机删除而合并为本用例——无缓存层后「find/doctor 读到旧计数」的形态
-    // 在结构上不存在，守卫点收敛为：输出无「缓存命中」行 + 每次调用实扫（新增文件
+    // 在结构上不存在，检查点收敛为：输出无「缓存命中」行 + 每次调用实扫（新增文件
     // 下一次调用即见，反而更实时）
     const agentDir = join(tmp, 'agent')
     await writeJsonl(join(agentDir, 'sessions', SLUG, 'a.jsonl'))

@@ -1,11 +1,11 @@
 /**
  * 生产装配层（W5 集成层）。
  *
- * P3 收口：classifier 的 model 解析改走 llm-shared resolveModel（三源合并含 OAuth/env/auth.json），
+ * P3 收敛：classifier 的 model 解析改走 llm-shared resolveModel（三源合并含 OAuth/env/auth.json），
  * 废弃自读 models.json。'auto' 由 permission 本地处理：直接取 ctx.modelRegistry.getAvailable()[0]
  * （不经过 llm-shared 的非精确 selector），与下方 createProductionClassifier JSDoc 一致。
  *
- * C1a 收口：classifier 的 LLM 调用改走 llm-shared callLLM（凭证 getApiKeyAndHeaders +
+ * C1a 收敛：classifier 的 LLM 调用改走 llm-shared callLLM（凭证 getApiKeyAndHeaders +
  * completeSimple + stopReason 归一化都在 callLLM 内部完成），删除 getApiProvider +
  * streamSimple（@ts-ignore 随之消除）。
  *
@@ -54,7 +54,7 @@ export function toSelector(modelSpec: string): ModelSelector {
  *  - model 仍 null → 返回 null（fail-closed）。
  *
  * callLLM 注入（C1a）：闭包捕获 ctx，把 llm-shared callLLM 绑定为 classifier 的 LLM 调用。
- * 凭证获取（getApiKeyAndHeaders）在 callLLM 内部完成（C1a 收口后不再在 resolveModel 层预检）。
+ * 凭证获取（getApiKeyAndHeaders）在 callLLM 内部完成（C1a 收敛后不再在 resolveModel 层预检）。
  */
 export function createProductionClassifier(ctx: ExtensionContext): {
 	classifyRisk: ReturnType<typeof createClassifier>["classifyRisk"];

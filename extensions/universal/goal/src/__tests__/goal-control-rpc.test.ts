@@ -150,9 +150,9 @@ describe("goal_control execute — RPC 模式 tool result 无 __gui__", () => {
 	});
 
 	it("RPC + session.state = null → 前置 handler throw（分支不可达）", async () => {
-		// execute 路径上，create 总会 set session.state；complete/report_blocked 前置守卫
+		// execute 路径上，create 总会 set session.state；complete/report_blocked 前置检查
 		// 要求 session.state 非 null 否则 throw——所以 session.state=null 时不会走到返回路径。
-		// 验证：全新 session（state=null）下，complete 前置守卫先 throw。
+		// 验证：全新 session（state=null）下，complete 前置检查先 throw。
 		const { pi, ctx } = makeFixture("rpc");
 		let captured: CapturedTool | undefined;
 		const capturePi = {
@@ -163,7 +163,7 @@ describe("goal_control execute — RPC 模式 tool result 无 __gui__", () => {
 		} as unknown as ExtensionAPI;
 		registerGoalControlTool(capturePi, createGoalSession());
 		const tool2 = captured!;
-		// complete 在 state=null 时 throw（handleComplete 前置守卫）
+		// complete 在 state=null 时 throw（handleComplete 前置检查）
 		await expect(
 			tool2.execute(
 				"id",

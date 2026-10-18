@@ -16,7 +16,7 @@ export const SYSTEM_PROMPT_CUSTOM_TYPE = "taiji:system-prompt";
  * `PRESET_FALLBACK_ENV_KEYS`）。
  *
  * extension 独立发布体系不依赖 `@taiji/shared`，只能按字面量镜像——单侧改名即断链
- * （消息见 write 产出的 `presetFallback` 字段消失）。一致性由机器守卫断言：
+ * （消息见 write 产出的 `presetFallback` 字段消失）。一致性由机器检查断言：
  * `.githooks/check_env_whitelist_sync.py` 规则 3 A8（漂移即红）。写入方 =
  * `packages/runtime/src/services/session/launch-params.ts` 的 `buildPresetFallbackEnv`。
  */

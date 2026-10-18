@@ -60,14 +60,14 @@ function runEventsJournalPath(artifactsDir: string, runId: string): string {
 
 /**
  * notifyDone 幂等键前缀（[u9] 承袭，对齐 C-ext-19）。键形态
- * `wf-done:<runId>`——一个 run 的收口通知只投递一次（port.deliver 受理 →
- * details-id 回执销账 → 断连/重启经投递日志 session_start 差集重放，幂等键去重
+ * `wf-done:<runId>`——一个 run 的收尾通知只投递一次（port.deliver 受理 →
+ * details-id 回执逐条处理完毕（关闭） → 断连/重启经投递日志 session_start 差集重放，幂等键去重
  * 不双投递）。前缀惯例承接 collect 时代 `sync-batch:` 的「通道语义前缀 + 天然
  * 唯一标识」形态；导出供测试构造回执 entry 与投递日志断言复用同键。
  */
 export const WORKFLOW_DONE_NOTIFY_ID_PREFIX = "wf-done:";
 
-// workflow 收口通知的送达 customType 经 extension-protocol 单源
+// workflow 收尾通知的送达 customType 经 extension-protocol 单源
 // （WORKFLOW_RESULT_CUSTOM_TYPE，与 shared/runtime/core 消费侧同源）：runtime
 // event-interpreter 按该类型识别 run 完成并驱动 W18 workflow-record 失效信号
 // （session.workflows 增量广播），taiji 完成通知 display 覆写 SSOT
@@ -103,7 +103,7 @@ interface WorkflowNotifyDetails { // oe-exempt:20260929:framework:workflow/recor
   traceLength: number;
   /**
    * [u9] 幂等键（`wf-done:<runId>`）——回执匹配键（port 投递日志扫
-   * 送达 custom_message entry 的 details.notifyId 判定销账）。携带在 details 不进
+   * 送达 custom_message entry 的 details.notifyId 判定为已关闭）。携带在 details 不进
    * 文案（G4 字节锁定不受影响）。
    */
   notifyId: string;
@@ -131,7 +131,7 @@ interface WorkflowNotifyDetails { // oe-exempt:20260929:framework:workflow/recor
   artifactsDir?: string;
   /**
    * [D7] 事件 journal 指针（`<artifactsDir>/wf-<runId>.record.jsonl`）——终局
-   * 证据的入口载荷（D5-3 诊断引用落账的消费面）。
+   * 证据的入口载荷（D5-3 诊断引用写入 journal 记录的消费方）。
    */
   eventsJournalPath?: string;
 }
@@ -146,7 +146,7 @@ interface WorkflowNotifyDetails { // oe-exempt:20260929:framework:workflow/recor
  * 窗口，生产不可达常态）降级为 fire-once 直发（at-most-once；triggerTurn 单通道）。
  *
  * **内存去重**：notifiedRunIds Set 由调用方（factory/extension instance）持有，
- * 同 runId 的重复收口回调拦截（跨 session_shutdown 等边界防重复）；标记在 port
+ * 同 runId 的重复收尾回调拦截（跨 session_shutdown 等边界防重复）；标记在 port
  * 受理（accepted/swallowed）后落下。**已知丢失面（如实登记）**：port rejected
  * （persist-failed 等）= 受理未发生、投递日志未落，而 notifyDone 的唯一调用点
  * onRunDone 每终态恰好一次、port 差集重放无源可读——该终局通知**永久丢失**，仅
@@ -306,7 +306,7 @@ function deliverDoneNotify(
     );
     if (result.kind === "rejected") {
       // 已知丢失面（如实登记，承原账本 record 抛错同形态）：rejected = 未受理
-      // （persist-failed 等，幂等键未登记）、notifyDone 每终态恰好一次（无重复收口
+      // （persist-failed 等，幂等键未登记）、notifyDone 每终态恰好一次（无重复收尾
       // 可重试）、port 重放无源可读（账未落）——该终局通知**永久丢失**，error 级
       // 留痕含 notifyId 与 content 摘要，供事后按 run 手工补偿（从 run
       // journal/manifest 读取终态）。deliver 同步返回结果无抛错通道（原 record 抛错
@@ -320,7 +320,7 @@ function deliverDoneNotify(
           reason: result.reason,
         },
       );
-      // 去重不标记：进程内的重复收口回调不被去重阻断（防御形态，不改变丢失事实）。
+      // 去重不标记：进程内的重复收尾回调不被去重阻断（防御形态，不改变丢失事实）。
       return;
     }
     trackNotifiedRunId(notifiedRunIds, runId);
@@ -330,10 +330,10 @@ function deliverDoneNotify(
   // 降级：port 缺席（base-tool-enhance session_start 装配异常 / 版本混装窗口——
   // 生产不可达常态，warn 即修复信号）→ fire-once 直发（at-most-once）。
   // triggerTurn 单通道；stale ctx 防御（crash-resilience D1 / ext-guards 审计
-  // §7 blockers#1 收口）：session 替换窗口触碰 stale pi 命中 assertActive（PS-30）
+  // §7 blockers#1 收尾）：session 替换窗口触碰 stale pi 命中 assertActive（PS-30）
   // 即无人接 rejection 崩 pi（E1 同机制）。stale 静默降级（完成通知不投递，用户可从
   // session 历史 / 工具结果看到 workflow 结果，判定见 stale-ctx-audit.md §4），非
-  // stale 错误原样上抛（守卫不吞真实 bug）。去重标记在实际发送**之后**落下：非
+  // stale 错误原样上抛（检查不吞真实 bug）。去重标记在实际发送**之后**落下：非
   // stale 瞬态发送失败（同步抛错上抛）后进程内仍可重试（去重不阻断）；stale 分支由
   // onStale 补标记保持现语义——stale = 通知对旧 session 已无意义，不重试。
   logger.warn(
@@ -394,11 +394,11 @@ export function notifyDone(
  *   被挤出窗口的旧 id 再经 notifyDone：内存层放行后由投递日志 notifyId 幂等兜底
  *   （[u9] port 按 id 判重——生产环境 port 已装配时不会重发；port 缺席降级环境
  *   才会重新直发，runId 全局唯一，旧 id 重现概率为零，该边界由 W3TC12 单测
- *   在降级形态下钉死）。
+ *   在降级形态下固定）。
  *
  * 调用点：notifyDone 内部（port 受理/rejected 后 + 降级直发受理后）+ workflow-events
  * onRunDone 回调（notifyDone 之后，幂等二次添加）。notifyDone 抛出（reload 窗口
- * record 抛 / 非 stale 发送失败等）时内外都不标记——进程内的重复收口回调不被去重
+ * record 抛 / 非 stale 发送失败等）时内外都不标记——进程内的重复收尾回调不被去重
  * 阻断（防御形态；port.deliver rejected 的已知丢失面登记见 notifyDone 注释）。
  *
  * @param notifiedRunIds 去重 Set（调用方持有，scope 到 factory 实例）

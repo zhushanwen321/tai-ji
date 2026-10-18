@@ -7,7 +7,7 @@
  *
  * 关键设计：
  *   - 依赖注入 ClassifierDeps（callLLM 注入，便于测试 mock，不直接 import）
- *   - C1a 收口：LLM 调用走 llm-shared callLLM（内部完成凭证 getApiKeyAndHeaders +
+ *   - C1a 收敛：LLM 调用走 llm-shared callLLM（内部完成凭证 getApiKeyAndHeaders +
  *     completeSimple + stopReason 归一化：error/aborted → {ok:false,
  *     stopReason 透传}），不再走 production.ts 的 streamSimple
  *   - G3 修正（由 callLLM 承接）：completeSimple 的 EventStream.result() 只 resolve 不 reject，
@@ -51,9 +51,9 @@ const CLASSIFY_FALLBACK_RESULT: ClassifierResult = {
  * Classifier 的外部依赖（DI 便于测试 mock）。
  *
  * - resolveModel（async）：把 ClassifierConfig.model 解析为 Model<Api>（或 null）。
- *   P3 收口后 model 解析走 llm-shared resolveModel（ctx.modelRegistry 三源合并）。
+ *   P3 收敛后 model 解析走 llm-shared resolveModel（ctx.modelRegistry 三源合并）。
  * - callLLM：llm-shared 的 LLM 调用封装（内部完成凭证 getApiKeyAndHeaders +
- *   completeSimple + stopReason 归一化）。C1a 收口替代原 streamSimple 注入。
+ *   completeSimple + stopReason 归一化）。C1a 收敛替代原 streamSimple 注入。
  * - onLog：可选日志回调（调试/审计）
  */
 export interface ClassifierDeps {

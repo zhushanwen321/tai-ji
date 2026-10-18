@@ -53,8 +53,8 @@ export interface UiPort {
 	/**
 	 * 设置 widget（双模单调用）。content = { gui, text } 双模 payload / undefined 清除；
 	 * 模式分派（RPC→gui 经 marker 通道 / TUI→text 原生文本行）由 protocol setWidgetDual
-	 * 单点内化（守卫单点化说明见 extension-protocol core/helpers.ts，adapter 委托 helper）。
-	 * hasUI 守卫留在调用方（FR-6.6）。
+	 * 单点内化（检查单点化说明见 extension-protocol core/helpers.ts，adapter 委托 helper）。
+	 * hasUI 检查留在调用方（FR-6.6）。
 	 */
 	setWidget(name: string, content: DualWidgetContent | undefined): void;
 	/** 设置 status bar */

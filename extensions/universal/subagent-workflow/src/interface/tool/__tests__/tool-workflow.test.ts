@@ -4,7 +4,7 @@
  * 来源与分工：
  * - actionStatus 输出形态 + GUI attach（原 tool-workflow-status.test.ts）——
  *   status 列表行格式是 LLM 判断 run 状态与 runId 引用的唯一信息源，锁
- *   result.content 实际文本与 details.runs 投影。
+ *   result.content 实际文本与 details.runs 派生视图。
  * - W4b 错误路径 throw 语义（原 tool-workflow-throw-paths.test.ts）——pi 只对
  *   execute throw 置 isError:true（返回值里的 isError 被 agent-loop 丢弃），故
  *   错误路径必须 throw。其中 4 条 entry-guard 用例（slug 上限 / time 上限 /
@@ -17,7 +17,7 @@
  *   grep 断言改行为级等值）。
  *
  * 结构约束：
- * - fake timers 只在 actionStatus describe 内启用（done 冻结语义需钉死墙钟），
+ * - fake timers 只在 actionStatus describe 内启用（done 冻结语义需固定墙钟），
  *   不泄漏到 run/abort 路径。
  * - D8 describe 首条必须在任何 setCatalogService 调用之前执行（声明序 = 执行序）：
  *   setModelConfigService 无复位面，单例 set 后「目录缺席」防御分支不可再达。
@@ -78,7 +78,7 @@ afterEach(() => {
   vi.restoreAllMocks();
 });
 
-// ── 生产源码文本（KNOWN_ARG_KEYS 退役守卫用——读源码非 import，同提示词测试模式）──
+// ── 生产源码文本（KNOWN_ARG_KEYS 退役检查用——读源码非 import，同提示词测试模式）──
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const TOOL_WORKFLOW_SRC = readFileSync(join(__dirname, "../tool-workflow.ts"), "utf-8");
@@ -159,7 +159,7 @@ function captureRegisteredTool<T extends CapturedTool>(runs: Map<string, Workflo
   );
 }
 
-/** 真实 WorkflowRun 聚合根（reconstruct 工厂——status/abort 路径只读投影面）。 */
+/** 真实 WorkflowRun 聚合根（reconstruct 工厂——status/abort 路径只读派生视图字段集）。 */
 function makeRun(opts: {
   runId: string;
   scriptName: string;
@@ -188,7 +188,7 @@ function makeRun(opts: {
     },
     { startedAt: opts.startedAt, completedAt: opts.completedAt },
   );
-  // [D6(a) 第 1 步] 终局判定源 = 终局记录注册表：done 形态 fixture 建模「重水合
+  // [D6(a) 第 1 步] 终局判定源 = 终局记录注册表：done 形态 fixture 建模「重新加载进内存的
   // done run」时必须携带注册表条目（生产 = 壳重建点 noteRebuiltSettlement 注入
   // run-settled 帧事实；settledAt = 快照 completedAt = 帧时序）。
   if (opts.status === "done") {
@@ -201,7 +201,7 @@ function makeRun(opts: {
 }
 
 describe("actionStatus 输出形态（LLM 可见文本锁）", () => {
-  // ── 墙钟 fixture（fake timers 钉死 Date.now，elapsed 全确定性；
+  // ── 墙钟 fixture（fake timers 固定 Date.now，elapsed 全确定性；
   //    收窄进本 describe——不泄漏到 run/abort 路径）──
   const FAKE_NOW = new Date("2026-01-01T00:00:30.000Z").getTime();
 
@@ -261,7 +261,7 @@ describe("actionStatus 输出形态（LLM 可见文本锁）", () => {
           "[done] ok-wf (wf-17197) (2s)",
       },
     ]);
-    // details.runs = core runSummary 投影 + 宿主 stateFile 扩展（GUI 消费面）
+    // details.runs = core runSummary 派生视图 + 宿主 stateFile 扩展（GUI 消费方）
     expect(r.details).toMatchObject({
       action: "status",
       runs: [
@@ -809,7 +809,7 @@ describe("abort 转移文案全文锚定（LLM 可见文本锁）", () => {
   };
 
   /** mock abortRun 落位终态（模拟 lifecycle transition 语义：status=done + 可选 reason）。
-   *  `settle: false` = abort 未产生终局记录（换源后 run 保持 running 投影）。 */
+   *  `settle: false` = abort 未产生终局记录（换源后 run 保持 running 派生视图）。 */
   function stubAbortTransition(opts: { reason?: string; settle?: boolean }): void {
     vi.mocked(abortRun).mockReset();
     vi.mocked(abortRun).mockImplementation(async (runId, deps) => {
@@ -818,7 +818,7 @@ describe("abort 转移文案全文锚定（LLM 可见文本锁）", () => {
         run.state.status = "done";
         run.state.reason = opts.reason;
         // [D6(a) 第 1 步] 终局判定源 = 终局记录注册表：stub 直改状态须同步注入终局
-        // 事实（生产 abortRun 经 dispatch 链 note）——否则 runSummary 投影回退 running。
+        // 事实（生产 abortRun 经 dispatch 链 note）——否则 runSummary 派生视图回退 running。
         noteRebuiltSettlement(runId, { outcome: "cancelled", settledAt: Date.now() });
       }
     });
@@ -839,10 +839,10 @@ describe("abort 转移文案全文锚定（LLM 可见文本锁）", () => {
     expect(r.details).toMatchObject({ action: "abort", runId: run.runId, status: "done", reason: "aborted" });
   });
 
-  it("无终局记录 → 转移段无后缀（reasonSuffix 条件拼接；[D6(a) 第 1 步] 换源后「未终局」不再投影 done/reason）", async () => {
+  it("无终局记录 → 转移段无后缀（reasonSuffix 条件拼接；[D6(a) 第 1 步] 换源后「未终局」不再派生视图 done/reason）", async () => {
     // 换源前本用例靠「聚合 done 而注册表 miss」造出 done+无 reason 形态——该形态随
     // R6 判据换源消失（done ⟺ 注册表有条目 ⟺ reason 由 (outcome,errorCode) 恒派生）。
-    // 现锁同一条拼接分支的可达形态：无终局记录 = 未终局，status 与 reason 都不投影。
+    // 现锁同一条拼接分支的可达形态：无终局记录 = 未终局，status 与 reason 都不进派生视图。
     stubAbortTransition({ settle: false });
     const run = makeRun({
       runId: "wf-1719600000000-z9y8x7",

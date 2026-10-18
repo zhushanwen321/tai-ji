@@ -9,12 +9,12 @@
  * `Agent is already processing` 拒绝。
  *
  * 语义定性（设计 D4「C-ext-19 合规定性」四类两分）：
- * - 阈值提醒 / model_select 两条 = **提醒语义**（与 scheduler 2026-09-15 销账先例同类：
+ * - 阈值提醒 / model_select 两条 = **提醒语义**（与 scheduler 2026-09-15 逐条处理完毕先例同类：
  *   提醒不承载必须必达的结果）；
  * - 压缩结果 onComplete / onError = **结果语义**，本改造是**存量域内改判而非新建
  *   at-most-once 通道**：原 steer 通道即 at-most-once 且自起 run，nextTurn 化后必达性
  *   （常驻至被消费）与运行面（不自起 run）同时持平或改善；账本化正向要求的完整迁移维持
- *   pi-boundary-reliability 附录 B 挂账不变（设计 §1.3 Out）。
+ *   pi-boundary-reliability 附录 B 挂着不处理不变（设计 §1.3 Out）。
  *
  * 已接受代价（设计 D4 四要素）：阈值提醒不再于 agent 空闲时立即生效，改为随用户下一条消息
  * 注入——pi 内建 overflow/threshold 自动压缩兜底在场，无人在场时上下文可能持续增长。

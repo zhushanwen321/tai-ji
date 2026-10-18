@@ -103,8 +103,8 @@ describe("todo tool prompt — snippet & guidelines（使用纪律唯一承载�
 		expect(TOOL_SRC).toContain("[验证任务] 为测试 / 类型检查等验证步骤单独建 todo，完成前确保验证通过");
 	});
 
-	it("promptGuidelines 含 [自动闭合] / [批量优先] 核心条目", () => {
-		expect(TOOL_SRC).toContain("[自动闭合] 旧任务全部 completed 后再 add 会自动清理旧列表");
+	it("promptGuidelines 含 [自动收尾] / [批量优先] 核心条目", () => {
+		expect(TOOL_SRC).toContain("[自动收尾] 旧任务全部 completed 后再 add 会自动清理旧列表");
 		expect(TOOL_SRC).toContain("[批量优先] 完成多项任务时使用 updates[] 批量更新");
 	});
 

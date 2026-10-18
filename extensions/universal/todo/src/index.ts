@@ -42,7 +42,7 @@ import { registerTodoTool } from "./tool";
  * 不读 custom）。
  *
  * 推送/清屏 × GUI/TUI 模式分派由 protocol setWidgetDual 单点内化
- * （守卫单点化说明见 extension-protocol helpers.ts，本文件不再自持 isGui 判定）。
+ * （检查单点化说明见 extension-protocol helpers.ts，本文件不再自持 isGui 判定）。
  */
 export function makeRefreshDisplay(state: TodoSessionState): RefreshDisplayFn {
 	return function refreshDisplay(ctx: ExtensionContext): void {

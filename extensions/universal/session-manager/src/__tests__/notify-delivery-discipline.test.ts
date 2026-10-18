@@ -2,7 +2,7 @@
 // （unified-delivery 波 2：投递路径切 pi 半区投递端口后的消费纪律锁）。
 //
 // 覆盖（原 notify-ledger-discipline.test.ts 场景的 port 形态对位——账本装配纪律
-// ①②③④与 stale 守卫随账本退役：bind/recover 收敛由 pi-delivery-port 套件的
+// ①②③④与 stale 检查随账本退役：bind/recover 收敛由 pi-delivery-port 套件的
 // 「重复 bind 替换并 dispose 旧实例」锁定，stale 注入 throw → 内核 retain 由其
 // 「注入 throw → retain 留账」锁定，compaction 接线随 append-only 契约裁决删除）：
 //   ⑤ 消费点经 getDeliveryPort() 动态查槽（禁缓存实例引用——后 bind 方 dispose
@@ -74,7 +74,7 @@ afterEach(() => {
 	Reflect.deleteProperty(globalThis, PORT_SLOT_KEY);
 });
 
-describe("recordManagedNotify 投递接入纪律（unified-delivery 波 2：port 消费面）", () => {
+describe("recordManagedNotify 投递接入纪律（unified-delivery 波 2：port 消费方）", () => {
 	it("槽空（port 未装配）→ 降级 false + warn 留痕（通知类接入点降级，非静默吞）", () => {
 		Reflect.deleteProperty(globalThis, PORT_SLOT_KEY);
 		expect(recordManagedNotify("sm-x", "content", makeDetails("sm-x"), ["sm-x"])).toBe(false);

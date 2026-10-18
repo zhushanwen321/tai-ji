@@ -223,7 +223,7 @@ export default function schedulerExtension(pi: ExtensionAPI): void {
   pi.on('agent_settled', () => service?.runtime.handleRunSettled())
 
   pi.on('session_shutdown', async () => {
-    // 命令路径挂起表单的收口（设计 §6.2 生命周期案 ①②③）：session_shutdown
+    // 命令路径挂起表单的收尾（设计 §6.2 生命周期案 ①②③）：session_shutdown
     //（reason ∈ quit/reload/new/resume/fork）→ abort 挂起的表单交互（不创建、不 toast）。
     // taiji 内「切到另一会话」不触发本事件，表单保留且仍有效（有意行为）。
     abortPendingScheduleForms()

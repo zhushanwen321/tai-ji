@@ -12,7 +12,7 @@
  * ApprovalComponent 是简化版 TUI 组件（参考 ask-user AskUserComponent）：
  *  - 显示工具名 + 命令 + 触发原因 + 可选 AI 预分类。
  *  - Enter/approve、Esc/deny。
- *  - signal abort → comp.cancel()（复用 _resolved 守卫，避免二次 done）。
+ *  - signal abort → comp.cancel()（复用 _resolved 检查，避免二次 done）。
  *
  * W6 T9 G3 Reject-with-Reason：用户拒绝时，若 ctx.ui.input 存在则弹出文本输入框
  * 采集真实拒绝理由（回传给 agent，辅助理解为何被拒）；ctx.ui.input 不存在则 fallback
@@ -105,7 +105,7 @@ async function requestTui(
 
 	return approvalCtx.ui.custom<UserDecision>((tui, _theme, _kb, done) => {
 		const comp = new ApprovalComponent(req, tui as TuiLike, done);
-		// signal abort → comp.cancel()（复用 _resolved 守卫，避免二次 done）
+		// signal abort → comp.cancel()（复用 _resolved 检查，避免二次 done）
 		if (signal) {
 			signal.addEventListener("abort", () => comp.cancel(), { once: true });
 		}
@@ -275,7 +275,7 @@ interface TuiLike {
  * 键位：Enter → approve；Esc → deny/cancel（y/n 快捷键已移除，测试钉住 no-op）。
  *
  * G4：implements Component，补 invalidate()（调 tui.requestRender()）。
- * signal abort → cancel()（复用 _resolved 守卫）。
+ * signal abort → cancel()（复用 _resolved 检查）。
  *
  * TODO W6：若需更丰富的 TUI（方向键选择 once/session/always scope、高亮风险等级、
  * Reject-with-Reason 的内联文本输入），参考 ask-user AskUserComponent 的 SelectList
@@ -345,7 +345,7 @@ export class ApprovalComponent implements Component {
 		this.done({ approved: false, reason: "denied via tui" });
 	}
 
-	/** 取消（signal abort 调用）。复用 _resolved 守卫，避免二次 done。 */
+	/** 取消（signal abort 调用）。复用 _resolved 检查，避免二次 done。 */
 	cancel(): void {
 		if (this._resolved) return;
 		this._resolved = true;

@@ -42,8 +42,8 @@ export function buildPorts(pi: ExtensionAPI, ctx: ExtensionContext): ServicePort
 	const uiPort: UiPort = {
 		setWidget(name, content): void {
 			// 双模 payload 委托 protocol setWidgetDual：推送/清屏 × GUI/TUI 的模式分派
-			// 由 helper 单点内化（守卫单点化说明见 extension-protocol helpers.ts），
-			// 本 adapter 不再自持 isGui 判定/守卫注释。
+			// 由 helper 单点内化（检查单点化说明见 extension-protocol helpers.ts），
+			// 本 adapter 不再自持 isGui 判定/检查注释。
 			//
 			// 断言根因：pi ExtensionUIContext.custom 是泛型方法（返回 Promise<T>），
 			// 与 GuiContext.ui.custom 的具体返回类型静态不兼容，但 mode/hasUI/ui 其余

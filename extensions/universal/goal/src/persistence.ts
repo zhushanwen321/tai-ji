@@ -31,7 +31,7 @@ export function serializeState(state: GoalRuntimeState): GoalRuntimeState {
  * npm pi-goal 0.7.x（base 968b9d76）经 finalizeAndPersist 真实写入过 `time_limited`（时间预算
  * 维度，新状态机已删除该状态）。若不归一化，升级用户持有该状态的 goal 会功能死锁：
  * /goal clear 的 transitionStatus 查表 throw、goal_control create 误报 already active、
- * resume/update 被 isActiveStatus 守卫拒绝——唯一出口是手动删 session 文件。
+ * resume/update 被 isActiveStatus 检查拒绝——唯一出口是手动删 session 文件。
  * 归一化为语义最接近的 `budget_limited`（预算耗尽终态），clear 走 isTerminalStatus 快速路径。
  * 其余值原样透传（不做值域校验，保持现状）。
  */

@@ -1,12 +1,12 @@
 /**
  * production.test.ts — createProductionClassifier + createPipelineDeps 装配测试。
  *
- * C1a 收口后 createProductionClassifier(ctx) 的 resolveModel 注入走 llm-shared resolveModel
+ * C1a 收敛后 createProductionClassifier(ctx) 的 resolveModel 注入走 llm-shared resolveModel
  * （不再预检凭证），callLLM 注入闭包捕获 ctx（凭证在 callLLM 内部 getApiKeyAndHeaders）。
  * 测试用 mock ctx.modelRegistry + vi.mock llm-shared（resolveModel + callLLM）精确控制，覆盖：
  *  - TC1: toSelector 任意字符串 → ref 精确选择器（'auto' 不走 selector，由 resolveModel 注入层本地处理）
  *  - TC3: 'auto' 且 getAvailable 空 → resolveModel 返回 null → fail-closed ask（不触达 callLLM）
- *  - TC4（静态断言）: production.ts 收口完成——无 getApiProvider/streamSimple/@ts-ignore，走 callLLM
+ *  - TC4（静态断言）: production.ts 收敛完成——无 getApiProvider/streamSimple/@ts-ignore，走 callLLM
  *  - TC4（装配）: resolveModel 命中 → callLLM 收到 model → ok:true 正常分类（链路通）
  *  - TC5: callLLM 返回 ok:false（LLM 调用失败）→ classifier fail-closed fallback
  *  - TC7: 'auto' 直接取 getAvailable() 首个（permission 本地解析，不经过 llm-shared 非精确 selector）
@@ -129,7 +129,7 @@ describe("createProductionClassifier", () => {
 	});
 });
 
-// ──────────────────────── resolveModel 装配（C3 + C1a 收口） ────────────────────────
+// ──────────────────────── resolveModel 装配（C3 + C1a 收敛） ────────────────────────
 
 describe("resolveModel 装配（resolveModel + callLLM）", () => {
 	const CTX = { toolName: "bash", command: "ls", cwd: "/tmp" };
@@ -147,19 +147,19 @@ describe("resolveModel 装配（resolveModel + callLLM）", () => {
 		expect(callLLMShared).not.toHaveBeenCalled();
 	});
 
-	it("TC4（静态断言）: production.ts 收口完成——无 getApiProvider/streamSimple/@ts-ignore，classifier 走 callLLM", () => {
+	it("TC4（静态断言）: production.ts 收敛完成——无 getApiProvider/streamSimple/@ts-ignore，classifier 走 callLLM", () => {
 		const source = readFileSync(new URL("../production.ts", import.meta.url), "utf-8");
 		// 匹配代码形式（import 调用 / 字段定义），注释里的历史描述不算残留
 		expect(source).not.toMatch(/getApiProvider\s*\(/);
 		expect(source).not.toMatch(/streamSimple\s*[:=]/);
 		expect(source).not.toMatch(/\/\/\s*@ts-ignore/);
 		expect(source).not.toMatch(/import\s*\{[^}]*getApiProvider/);
-		// classifier LLM 调用收口到 llm-shared callLLM（注入闭包捕获 ctx）
+		// classifier LLM 调用收敛到 llm-shared callLLM（注入闭包捕获 ctx）
 		expect(source).toMatch(/callLLM\s*:/);
 		expect(source).toContain('from "@zhushanwen/pi-llm-shared"');
 	});
 
-	it("TC4（装配）: ref resolveModel 命中 → callLLM 收到 model → ok:true 正常分类（收口链路通）", async () => {
+	it("TC4（装配）: ref resolveModel 命中 → callLLM 收到 model → ok:true 正常分类（收敛链路通）", async () => {
 		vi.mocked(resolveModelShared).mockReturnValue(MOCK_MODEL_A);
 		vi.mocked(callLLMShared).mockResolvedValue({
 			ok: true,
@@ -168,7 +168,7 @@ describe("resolveModel 装配（resolveModel + callLLM）", () => {
 		const classifier = createProductionClassifier(makeMockCtx());
 		const result = await classifier.classifyRisk(CTX, CFG_REF);
 		expect(result.outcome).toBe("allow");
-		// 关键：resolveModel 返回 model 后，callLLM 被调用且收到该 model（收口链路 resolve→callLLM 通）
+		// 关键：resolveModel 返回 model 后，callLLM 被调用且收到该 model（收敛链路 resolve→callLLM 通）
 		expect(callLLMShared).toHaveBeenCalledOnce();
 		// callLLM(ctx, opts) 两个参数：mock.calls[0] = [ctx, opts]
 		const opts = vi.mocked(callLLMShared).mock.calls[0]![1];

@@ -8,7 +8,7 @@
 //     d69583684；runtime 查得到即携、查不到不携，不携时整行省略语义不变）。
 //
 // label 两路径（U4）：正常路径 = 工具入参 label（create 入参 / send 经 labelCache 回填）；
-// 重启收口腿 = pending:register 三键的 name。两条路径都汇入本函数的 params.label，
+// 重启收尾路径 = pending:register 三键的 name。两条路径都汇入本函数的 params.label，
 // deathSeq 后 kind 不再决定文案（D3 例外2 内容确定性）。
 
 /** managed session 完成通知的送达 customType（D9）。与 packages/shared
@@ -26,12 +26,12 @@ export interface ManagedNotifyContentParams {
 	sessionId: string;
 	/** 通知状态（settle: completed/failed/stopped；death: exited/deleted） */
 	status: string;
-	/** 本批销账的债权笔数（D3 合批 fulfills N；0/undefined → 不出行；纯死亡通知无债权） */
+	/** 本批处理完毕的债权笔数（D3 合批 fulfills N；0/undefined → 不出行；纯死亡通知无债权） */
 	fulfills?: number;
 	/** transcript 指针行数据源（watch respond payload.sessionFilePath——u-protocol d69583684；
 	 *  runtime 查不到不携 → 缺席时整行省略） */
 	sessionFilePath?: string;
-	/** death 应答携带（D6 meta，exit 腿诊断通路复刻） */
+	/** death 应答携带（D6 meta，exit 路径诊断通路复刻） */
 	exitCode?: number | null;
 	stderrTail?: string;
 }
@@ -71,7 +71,7 @@ export interface ManagedNotifyDetails {
 	notifyId: string;
 	sessionId: string;
 	reason: string;
-	/** 批内销账笔数（runtime fulfillsN 直供，缺省回退批长——见 watch-coordinator） */
+	/** 批内处理完毕笔数（runtime fulfillsN 直供，缺省回退批长——见 watch-coordinator） */
 	fulfills: number;
 	label: string;
 }

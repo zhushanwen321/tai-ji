@@ -103,7 +103,7 @@ export const FORCE_LONGRUN_PATTERN_ENTRIES: readonly BuiltinForcePatternEntry[] 
 
 	// ── dev server：npx 直接调用 ──
 	// vite dev server（vite 缺省即 serve；排除 vite build——build 有自然退出点。
-	// 双 lookahead：先钉死 vite 后必须是空白/结尾（防回溯绕过），再排除 build 子命令）
+	// 双 lookahead：先固定 vite 后必须是空白/结尾（防回溯绕过），再排除 build 子命令）
 	{ pattern: new RegExp(CMD_ANCHOR + String.raw`npx\s+vite(?=\s|$)(?!\s*build\b)`), label: "vite" },
 	// next dev / nuxt dev / ng serve：框架 dev server 子命令
 	{ pattern: new RegExp(CMD_ANCHOR + String.raw`npx\s+next\s+dev\b`), label: "next dev" },

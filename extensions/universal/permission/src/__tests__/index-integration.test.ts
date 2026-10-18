@@ -406,10 +406,10 @@ describe("footer line 注册", () => {
 });
 
 // ──────────────────────── session_start 配置路径迁移接线（index.ts migrateLegacyConfig 调用）────────────────────────
-// 迁移经 oncePerProcess 守卫（u-audit-fix 收编原内联 once flag），守卫的模块级 Map
+// 迁移经 oncePerProcess 检查（u-audit-fix 收编原内联 once flag），检查的模块级 Map
 // 跨用例残留：用 vi.resetModules() + 动态 import 取新鲜模块实例，否则前面用例已触发过
 // session_start，迁移分支永不执行（静默不测）。
-// 末两条为守卫双派发实测（u-audit-fix 探针）：
+// 末两条为检查双派发实测（u-audit-fix 探针）：
 //   a) 操作级去重：双派发下 spy migrateLegacyConfig 调用 = 1（warn 在 migrateLegacyConfig
 //      调用点内部，调用 = 1 构造性蕴含 warn ≤ 1，不另设断言）；
 //   b) 文件面：第二次派发后重建的旧文件原样保留、新路径 mtime/内容严格不变；
@@ -453,7 +453,7 @@ describe("session_start 配置路径迁移接线", () => {
 		expect(existsSync(LEGACY_PATH)).toBe(false);
 	});
 
-	it("once 守卫：同进程第二次 session_start 不重复迁移（重建旧文件不动）", async () => {
+	it("once 检查：同进程第二次 session_start 不重复迁移（重建旧文件不动）", async () => {
 		rmSync(CONFIG_PATH, { force: true });
 		writeLegacyConfig("auto");
 
@@ -464,7 +464,7 @@ describe("session_start 配置路径迁移接线", () => {
 		handler({}, makeCtx("json"));
 		expect(existsSync(LEGACY_PATH)).toBe(false); // 首次已迁移
 
-		// 重建旧文件（模拟外部残留），再次触发 session_start → oncePerProcess 守卫跳过迁移
+		// 重建旧文件（模拟外部残留），再次触发 session_start → oncePerProcess 检查跳过迁移
 		writeLegacyConfig("yolo");
 		handler({}, makeCtx("json"));
 		expect(existsSync(LEGACY_PATH)).toBe(true); // 未被再次消费
@@ -498,7 +498,7 @@ describe("session_start 配置路径迁移接线", () => {
 		expect(existsSync(CONFIG_PATH)).toBe(false); // 迁移不凭空造新配置
 	});
 
-	// ── oncePerProcess 守卫双派发实测（u-audit-fix 探针）──
+	// ── oncePerProcess 检查双派发实测（u-audit-fix 探针）──
 	it("双派发下 migrateLegacyConfig 仅执行一次：spy = 1，文件面首次迁移到位、第二次 mtime/内容不变", async () => {
 		// spy 是文件级单例（跨 resetModules 保留计数），前面用例已触发过迁移 → 先清零
 		spyMigrateLegacyConfig.mockClear();
@@ -520,7 +520,7 @@ describe("session_start 配置路径迁移接线", () => {
 		const contentAfterFirst = readFileSync(CONFIG_PATH, "utf-8");
 
 		// 第二次派发（factory 二调/handler 累积形态：同一 handler 引用再调）：
-		// 重建旧路径文件模拟外部残留——守卫已消费 key，不得再次触碰任何文件。
+		// 重建旧路径文件模拟外部残留——检查已消费 key，不得再次触碰任何文件。
 		writeLegacyConfig("yolo");
 		handler({}, makeCtx("json"));
 

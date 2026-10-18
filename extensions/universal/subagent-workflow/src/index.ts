@@ -123,7 +123,7 @@ export default function subagentsWorkflowExtension(pi: ExtensionAPI): void {
   // [W11/DoD#5] 'pi' 的 inproc 注册（registerPiEngine）已删除——缺省引擎 'pi' 的
   // registry 条目由下方 syncEnginesFile 内的三级发现装载（cli descriptor，幂等），
   // P4 配置路由（agent frontmatter engine 字段 + 三层优先级）在其上消费；chat 域
-  // pi 引擎不经 registry（SubagentService 自持 DI，W11 主 agent 裁决的临时豁免面）。
+  // pi 引擎不经 registry（SubagentService 自持 DI，W11 主 agent 裁决的临时豁免范围）。
   // [P3 引擎接线] 登记 'zcode'（幂等同上）。D8 薄壳：vendored 定位 cli descriptor。
   registerZcodeEngine();
 
@@ -131,13 +131,13 @@ export default function subagentsWorkflowExtension(pi: ExtensionAPI): void {
   // 用户体验拍板 2026-08-25：taiji 打开后激活任意 session 的第一时间（含 TUI 等价
   // 场景）GUI 引擎选择器就该有数据；session_start 处保留幂等重写兜底 jiti 双路径/
   // 模块重载场景的刷新）。
-  // [skill-reload D9] oncePerProcess 不提权（用户裁决）：守卫 Map 是 ext-guards
+  // [skill-reload D9] oncePerProcess 不提权（用户裁决）：检查 Map 是 ext-guards
   // 模块级状态，jiti reload 后归零 → 进程级维护跨 reload 幂等重跑属预期，不为此
   // 提权 globalThis。factory 期引擎重注册的危险面已由 D2b 消除——
   // registerEngineDescriptor 稳定标识等价则保留单例不 dispose（幂等重注册，杀令 B
   // 拆除），本调用点的 discovery 面与上方 registerZcodeEngine 都经此入口；标识变化
   // （引擎包真升级）仍走现状 dispose。恢复误杀面由 session_start(reason==='reload')
-  // 门控消除（D4，session-lifecycle.ts recoverCrashedRuns 守卫调用点的
+  // 门控消除（D4，session-lifecycle.ts recoverCrashedRuns 检查调用点的
   // [skill-reload D4] 注释有对应登记）。
   syncEnginesFile(getAgentDir());
 
@@ -166,7 +166,7 @@ export default function subagentsWorkflowExtension(pi: ExtensionAPI): void {
   //  workflow 域：per-factory 状态 + 7 个 session/model 事件 + deps 装配
   //
   //  状态创建（lsRef / notifiedRunIds / workerHost / registry / sessionState）、log、
-  //  makeLifecycleDeps / makeDeps、7 个 pi.on handler、getWorkflowDeps 守卫 +
+  //  makeLifecycleDeps / makeDeps、7 个 pi.on handler、getWorkflowDeps 检查 +
   //  lazyDeps 已收编 workflow-events.ts（事件族 seam，与 session-lifecycle.ts 同构；
   //  7 个 handler 的注册相对顺序原样保留）。此处仅接线——在途上报（createInFlightReporter
   //  + setInFlightListener 登记与 attach/detach 驱动）同为该 seam 家内装配。
@@ -207,7 +207,7 @@ export default function subagentsWorkflowExtension(pi: ExtensionAPI): void {
   //
   //  防线 iii（activate 互斥）：未接线——acquireActivateLock 机制已随简化清扫删除
   //  （历史接线点随协议化重构消失，仅余自持单测）。当前的双写者防护由
-  //  subagent-service 的 resumesInFlight 集合守卫承担。
+  //  subagent-service 的 resumesInFlight 集合检查承担。
   //  防线 ii（启动孤儿扫描）：未接线，骨架已随 L2 死代码清扫删除（当前 piped stdio
   //  下 stdin-EOF 自灭链覆盖崩溃路径）。
   // ════════════════════════════════════════════════════════════
@@ -240,7 +240,7 @@ export default function subagentsWorkflowExtension(pi: ExtensionAPI): void {
   //
   //  lazyDeps / isScriptRunning / registry 由 workflow-events.ts 装配结果提供。
   //  guard：workflow tool 与 subagents（批量派发入口）共用同一 guard——两者是同一条
-  //  runWorkflow 管道的入口，单守卫防双 guard 语义漂移（D3 复用裁决）。
+  //  runWorkflow 管道的入口，单检查防双 guard 语义漂移（D3 复用裁决）。
   // ════════════════════════════════════════════════════════════
   const guard = { isProcessing: false };
 
@@ -267,7 +267,7 @@ export default function subagentsWorkflowExtension(pi: ExtensionAPI): void {
 // （getOrCreateDialogQueue；消费方 = 该文件 createOrReuseServices + workflow-events.ts
 // session_shutdown），Symbol key 单定义点随迁，避免双份定义漂移。
 
-// 跨扩展 channel handler 注册入口已收口到 core 深路径
+// 跨扩展 channel handler 注册入口已收敛到 core 深路径
 // `@zhushanwen/subagent-core/execution/assembly/channel-registry-access.ts`
 // （getOrCreateChannelRegistry / UiChannelRegistry / ChannelHandler）。
 // 历史上的包根 re-export 已删：ask-user 等跨扩展消费者经 globalThis 握手

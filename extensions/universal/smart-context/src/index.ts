@@ -150,7 +150,7 @@ export default function smartContextExtension(pi: ExtensionAPI): void {
 	// isCtxStale 必须传 live 绑定 wrapper 而非简写属性：本行在 factory 体同步执行，简写
 	// { isCtxStale } 会把此刻的初始 () => false 快照进 deps 对象，上方 session_start
 	// handler 的重新赋值不回写已构造对象 → compact onComplete/onError（E1 实锤崩溃点）
-	// 守卫的前置代际检查恒不生效。wrapper 每次调用读闭包当前绑定。
+	// 检查的前置代际检查恒不生效。wrapper 每次调用读闭包当前绑定。
 	registerCompactContextTool(pi, { isCtxStale: () => isCtxStale() });
 
 	// ── 阈值提醒（D3/D4）：agent_settled 越档检查 + marker 持久化 + nextTurn 一次性投递 ──
@@ -184,7 +184,7 @@ export default function smartContextExtension(pi: ExtensionAPI): void {
 		// 会在 agent 空闲后自起一个提醒 run，与用户消息同抢 prompt 跑道（故事 C 的三重放大器之一）。
 		// 防循环：crossed 全部已标记 fired，marker 与提醒触发的 settled 不会重复发。
 		// 事件回调内直接调用捕获的 pi——session 替换窗口可能 stale（crash-resilience D1
-		// 普查接入点），守卫 stale 静默降级（不杀 pi 进程），非 stale 错误原样上抛。
+		// 普查接入点），检查 stale 静默降级（不杀 pi 进程），非 stale 错误原样上抛。
 		guardStaleCtx(() => {
 			sendSmartContextNotice(pi, message, "threshold-reminder");
 		}, {
@@ -211,7 +211,7 @@ export default function smartContextExtension(pi: ExtensionAPI): void {
 			debugLog(`switch notice: ${nowExcluded ? "unavailable" : "available"} (${modelId})`);
 			// 状态通知（非紧急）：triggerTurn:false 不唤醒轮次——LLM 在下一轮自然看到并自行
 			// 调整（compact 工具 execute 有运行时门控校验兜底），不为通知烧一整轮全量上下文。
-			// session 替换窗口可能 stale（D1 普查接入点）——守卫 stale 静默降级
+			// session 替换窗口可能 stale（D1 普查接入点）——检查 stale 静默降级
 			guardStaleCtx(() => {
 				sendSmartContextNotice(pi, notice, "model-switch");
 			}, {
@@ -232,7 +232,7 @@ export default function smartContextExtension(pi: ExtensionAPI): void {
 		if (downshift && isGatingActive(config, modelId)) {
 			debugLog("downshift notice fired");
 			// "建议"非紧急（同 S1 裁决）：triggerTurn:false 不唤醒轮次，用户继续对话时
-			// LLM 自行决策是否先压缩。session 替换窗口可能 stale（D1 普查接入点）——守卫 stale 静默降级
+			// LLM 自行决策是否先压缩。session 替换窗口可能 stale（D1 普查接入点）——检查 stale 静默降级
 			guardStaleCtx(() => {
 				sendSmartContextNotice(pi, downshift, "model-downshift");
 			}, {

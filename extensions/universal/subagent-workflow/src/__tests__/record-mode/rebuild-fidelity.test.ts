@@ -4,7 +4,7 @@
 // §4 场景 6 的单测层承接——验收计划表 A2「L1 增量单测：盘上 record 事件流直接断言」）。
 //
 // 回溯目标 = 设计目标 1「数据不丢」：record 事件流（含全文载荷）fold 重建后，与
-// 产生这些事件的内存投影**逐字段等价**——收编（追加 run-interrupted / 旧词表形态
+// 产生这些事件的内存派生视图**逐字段等价**——收编（追加 run-interrupted / 旧词表形态
 // run-settled(interrupted)）不销毁任何已完成调用的结果全文与脚本体，resume 的
 // 缓存回放数据面构造性成立。
 //
@@ -68,7 +68,7 @@ async function seedCrashedRun(env: RecordFixtureEnv): Promise<void> {
   ]);
 }
 
-describe("场景 6：record 重建保真（[D1]——盘上 record 流 fold 后与内存投影逐字段等价）", () => {
+describe("场景 6：record 重建保真（[D1]——盘上 record 流 fold 后与内存派生视图逐字段等价）", () => {
   let env: RecordFixtureEnv;
 
   beforeEach(() => {
@@ -81,7 +81,7 @@ describe("场景 6：record 重建保真（[D1]——盘上 record 流 fold 后�
 
   it("盘上 record 流形态：run-created 含 scriptSource 全文；settled 帧含 result 全文；在途调用无 settled 帧（崩溃形态）", async () => {
     await seedCrashedRun(env);
-    // 直接检查盘上事件流（场景 6 通过标准的盘面半边——不经 store，验证写入器产物）
+    // 直接检查盘上事件流（场景 6 通过标准的磁盘侧半边——不经 store，验证写入器产物）
     const raw = (await import("node:fs")).readFileSync(env.recordPath(RUN_ID), "utf8");
     const lines = raw.split("\n").filter((l) => l.trim()).map((l) => JSON.parse(l) as Record<string, unknown>);
     const created = lines.find((l) => l["type"] === "run-created");
@@ -144,8 +144,8 @@ describe("场景 6：record 重建保真（[D1]——盘上 record 流 fold 后�
     // [D2] 中断非终局：重建产物维持 running（终局判据归 fold；无 done/reason 收敛）
     expect(isRunSettled(run!)).toBe(false);
     expect(run!.state.reason).toBeUndefined();
-    // 中断标记投影（U10）：流含 run-interrupted、无 run-settled → meta.interruptedAt
-    // 置位（= 帧 ts ISO）——runSummary/displayStatusOf 投影 'interrupted'，CLI/TUI
+    // 中断标记派生视图（U10）：流含 run-interrupted、无 run-settled → meta.interruptedAt
+    // 置位（= 帧 ts ISO）——runSummary/displayStatusOf 派生视图 'interrupted'，CLI/TUI
     // 不显示僵尸「运行中」；resume 复活流清该标记（lastInterruptedAt 尾向遇
     // run-resumed 返回 undefined）
     expect(run!.meta.interruptedAt).toBe(new Date(T0 + 100_000).toISOString());

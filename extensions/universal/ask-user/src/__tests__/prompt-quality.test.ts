@@ -38,7 +38,7 @@ const __dirname = dirname(fileURLToPath(import.meta.url));
 const INDEX_SRC = readFileSync(join(__dirname, "../index.ts"), "utf-8");
 const VALIDATE_SRC = readFileSync(join(__dirname, "../validate.ts"), "utf-8");
 
-/** 提取 description: `...` 模板字符串的原始内容（模板内无反引号，匹配到闭合 `,）。 */
+/** 提取 description: `...` 模板字符串的原始内容（模板内无反引号，匹配到结束 `,）。 */
 function extractDescription(src: string): string {
 	const m = src.match(/description:\s*`([\s\S]*?)`,/);
 	if (!m) throw new Error("description template literal not found in index.ts");

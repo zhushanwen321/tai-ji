@@ -44,7 +44,7 @@ type SubagentDisplayStatus = ExecutionStatus;
 /** 子代理状态 → 协议三态 / 图标（穷尽 switch，无 default 静默兜底）。 */
 function displayIndexOf(status: SubagentDisplayStatus): { tree: TreeStatus; icon: TreeItemIcon } {
   switch (status) {
-    // running = 有任务在飞；idle = 无进行中工作（可续聊）——「为什么停」不进树形状态
+    // running = 有任务正在后台运行；idle = 无进行中工作（可续聊）——「为什么停」不进树形状态
     //（协议无该维度），空闲落 done/check。
     case "running": return { tree: "running", icon: "circle" };
     case "idle": return { tree: "done", icon: "check" };

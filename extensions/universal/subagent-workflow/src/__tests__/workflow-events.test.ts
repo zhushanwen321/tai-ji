@@ -149,7 +149,7 @@ function makeRun(shape: FakeRunShape): WorkflowRun {
 }
 
 /** mode 是 GuiContext 面的唯一判定维度（isGuiCapable = mode==='rpc'）——
- *  tui 门控在飞上报等 rpc-only 行为（组合根接线测试用 tui 防重试 timer 悬挂）。 */
+ *  tui 门控在途上报等 rpc-only 行为（组合根接线测试用 tui 防重试 timer 悬挂）。 */
 function makeCtx(sessionId: string, mode: "rpc" | "tui" = "rpc"): ExtensionContext {
   return {
     cwd: "/home/user/project",
@@ -228,7 +228,7 @@ function mount(): { handle: WorkflowDomainHandle; handlers: HandlerMap } {
   return { handle, handlers };
 }
 
-/** 挂载 + session_start 装配受控条目（deps 守卫要求条目 + storeHealthy）。 */
+/** 挂载 + session_start 装配受控条目（deps 检查要求条目 + storeHealthy）。 */
 async function mountWithSession(
   sessionId: string,
   opts: { mode?: "rpc" | "tui"; runs?: WorkflowRun[] } = {},
@@ -245,7 +245,7 @@ async function mountWithSession(
   mockSetupSessionLifecycle.mockResolvedValue(result);
   const handle = setupWorkflowDomain(pi, { inflightReporter: makeReporter() });
   await handlers.get("session_start")!({ type: "session_start" }, ctx);
-  // deps = lazyDeps 本体（getter 形态）：属性访问触发守卫 + makeDeps 现读——
+  // deps = lazyDeps 本体（getter 形态）：属性访问触发检查 + makeDeps 现读——
   // D3 volatile 现读语义（pi 切换后旧 deps 解析新 pi）依赖 getter 不被展开求值。
   const deps: LauncherDeps = handle.lazyDeps;
   return { pi, handle, handlers, deps, ctx, runs };
@@ -353,10 +353,10 @@ describe("D3 currentPi 登记点：factory 重跑覆盖槽上 volatile 绑定", 
 
 // ── ① lazyDeps 语义不回归 ─────────────────────────────────────────────────────
 
-describe("lazyDeps 语义不回归：属性访问经 deps 守卫 → makeDeps 现读链路", () => {
+describe("lazyDeps 语义不回归：属性访问经 deps 检查 → makeDeps 现读链路", () => {
   it("pi 切换后经 lazyDeps 的 eventBus/log/onRunDone 属性访问同样解析新 pi", async () => {
     const { pi: pi1, handle } = await mountWithSession("sess-lazy");
-    expect(handle.lazyDeps.eventBus).toBe(pi1.events); // 守卫 + 转发语义不变（切换前）
+    expect(handle.lazyDeps.eventBus).toBe(pi1.events); // 检查 + 转发语义不变（切换前）
 
     const { pi: pi2 } = makePi();
     setupWorkflowDomain(pi2, { inflightReporter: makeReporter() });
@@ -373,15 +373,15 @@ describe("lazyDeps 语义不回归：属性访问经 deps 守卫 → makeDeps �
 // 生产缺口实证（真机 wf-1790034646281-w7tp4f，R2 裁决）：lazyDeps 漏本成员时
 // workflow tool 的 run action 以 lazyDeps 启动 run → pump dispatchAgentCall 读到
 // undefined 静默回退 deps.runner（SAR.run 占位 runId）→ record.parentRunId =
-// "sar-unattached" → armed 回执落账键错 → fold 出 created → IllegalTransitionError
-// 让位，run journal 恒缺 armed 帧。守卫同源与转发契约锁定（真实回归豁免面）。
+// "sar-unattached" → armed 回执写入 journal 记录键错 → fold 出 created → IllegalTransitionError
+// 让位，run journal 恒缺 armed 帧。检查同源与转发契约锁定（真实回归豁免范围）。
 
 describe("lazyDeps.workflowAgentDispatch 转发成员（[A1 R3] 缺失 = pump 回退 SAR 占位 runId）", () => {
   afterEach(() => {
     Reflect.deleteProperty(globalThis, SERVICE_SLOT_KEY);
   });
 
-  it("守卫同源：session 未初始化时属性访问 throw 'Session not initialized'（与 store 等成员同消息）", async () => {
+  it("检查同源：session 未初始化时属性访问 throw 'Session not initialized'（与 store 等成员同消息）", async () => {
     const { pi } = makePi();
     const handle = setupWorkflowDomain(pi, { inflightReporter: makeReporter() }); // 无 session_start
     expect(() => handle.lazyDeps.workflowAgentDispatch).toThrowError("Session not initialized");
@@ -411,7 +411,7 @@ describe("lazyDeps.workflowAgentDispatch 转发成员（[A1 R3] 缺失 = pump �
 
 // ── ①b [dmg-r2-5] lazyDeps.getSessionRootId 转发成员 ──────────────────────────
 //
-// 守卫同源与转发契约锁定（workflowAgentDispatch 同款先例）：lazyDeps 漏本成员时
+// 检查同源与转发契约锁定（workflowAgentDispatch 同款先例）：lazyDeps 漏本成员时
 // workflow/subagents tool 的 run action 以 lazyDeps 启动 run → run-created 帧
 // 不落 rootSessionId（可选成员静默放行）——同 cwd 多会话下 runtime 网关 runId
 // 路由恒回落目录存在性弱锚，精确归属形同虚设。
@@ -421,7 +421,7 @@ describe("lazyDeps.getSessionRootId 转发成员（[dmg-r2-5] 缺失 = run-creat
     Reflect.deleteProperty(globalThis, SERVICE_SLOT_KEY);
   });
 
-  it("守卫同源：session 未初始化时属性访问 throw 'Session not initialized'（与 store 等成员同消息）", async () => {
+  it("检查同源：session 未初始化时属性访问 throw 'Session not initialized'（与 store 等成员同消息）", async () => {
     const { pi } = makePi();
     const handle = setupWorkflowDomain(pi, { inflightReporter: makeReporter() }); // 无 session_start
     expect(() => handle.lazyDeps.getSessionRootId).toThrowError("Session not initialized");
@@ -446,18 +446,18 @@ describe("lazyDeps.getSessionRootId 转发成员（[dmg-r2-5] 缺失 = run-creat
 // ── ①c [dmg-r1-1] lazyDeps.onResumeModelOverrideCommitted 转发成员 ─────────────
 //
 // 同族第三例（workflowAgentDispatch [A1 R3] / getSessionRootId [dmg-r2-5] 先例）：
-// lazyDeps 漏本成员时，resume with model 的落账点（resume-run appendResumeModelOverride）
+// lazyDeps 漏本成员时，resume with model 的写入点（resume-run appendResumeModelOverride）
 // 落完 journal B 帧后调 deps.onResumeModelOverrideCommitted 可选链静默短路——宿主
-// 两个派生投影（覆盖内存表 + workflow 域负缓存）stale 不失效，重派被旧投影遮蔽
+// 两个派生视图（覆盖内存表 + workflow 域负缓存）stale 不失效，重派被旧派生视图遮蔽
 // （旧 model 命中或覆盖丢失按 run-created.model 解析），pi 仍 notify「resuming with
-// model B」成功文案（假成功）。守卫同源与转发契约锁定（同款先例）。
+// model B」成功文案（假成功）。检查同源与转发契约锁定（同款先例）。
 
-describe("lazyDeps.onResumeModelOverrideCommitted 转发成员（[dmg-r1-1] 缺失 = resume model 宿主投影同步恒不触发）", () => {
+describe("lazyDeps.onResumeModelOverrideCommitted 转发成员（[dmg-r1-1] 缺失 = resume model 宿主派生视图同步恒不触发）", () => {
   afterEach(() => {
     Reflect.deleteProperty(globalThis, SERVICE_SLOT_KEY);
   });
 
-  it("守卫同源：session 未初始化时属性访问 throw 'Session not initialized'（与 store 等成员同消息）", async () => {
+  it("检查同源：session 未初始化时属性访问 throw 'Session not initialized'（与 store 等成员同消息）", async () => {
     const { pi } = makePi();
     const handle = setupWorkflowDomain(pi, { inflightReporter: makeReporter() }); // 无 session_start
     expect(() => handle.lazyDeps.onResumeModelOverrideCommitted).toThrowError("Session not initialized");
@@ -558,7 +558,7 @@ describe("D1 session_shutdown reason=reload：破坏性动作全跳过，adoptio
     // e：sessionState 条目保留（adoption 接管前提——同 run 对象仍在 Map 内）
     expect(handle.state.sessionState.size).toBe(1);
     expect(handle.state.sessionState.get("sess-reload")?.runs.get("run-sess-reload")).toBe(run);
-    // f：pending dialog 不被全量拒绝（在飞 ask-user 属于在飞工作）
+    // f：pending dialog 不被全量拒绝（在途 ask-user 属于在途工作）
     expect(queueRejectAllSpy).not.toHaveBeenCalled();
     // b：reporter detach 仍执行（detach 不是破坏，防旧 reporter 持 stale ctx 重试）
     expect(reporterDetachSpy).toHaveBeenCalledTimes(1);
@@ -568,7 +568,7 @@ describe("D1 session_shutdown reason=reload：破坏性动作全跳过，adoptio
     );
   });
 
-  it("reload：空 sessionState（无在飞工作）时 preserved 计数为 0，日志仍发出", async () => {
+  it("reload：空 sessionState（无在途工作）时 preserved 计数为 0，日志仍发出", async () => {
     const { handlers } = mount();
     await handlers.get("session_shutdown")!({ type: "session_shutdown", reason: "reload" }, makeCtx("sess-empty"));
     expect(loggerFns.debug).toHaveBeenCalledWith(
@@ -742,7 +742,7 @@ describe("session_start 围栏：装配链异常不逃逸", () => {
 
 // ── ④ runSettledEffects：三步固定顺序直测 ─────────────────────────────────────
 //
-// 管线原是 makeDeps 闭包内嵌策略（顺序固化无独立测试面），提级具名导出后在此
+// 管线原是 makeDeps 闭包内嵌策略（顺序固化无独立测试），提级具名导出后在此
 // 直测：不挂 fake pi 全装配、不挂 index.ts、不 mock 兄弟功能模块（notifyDone /
 // trackNotifiedRunId / evictDoneRunsBeyondCap 均真实实现）——只注入 fake env
 //（最小发送面 pi / 真 Set / 真 runs Map）。
@@ -873,7 +873,7 @@ describe("runSettledEffects：三步固定顺序", () => {
     const h = makeEnv();
     const run = makeRun({ runId: "wf-dup", status: "done", completedAt: new Date(10_000).toISOString() });
     seedRunsWithCapOverflow(h, run);
-    h.notifiedRunIds.add("wf-dup"); // 预置：模拟重复收口
+    h.notifiedRunIds.add("wf-dup"); // 预置：模拟重复收尾
 
     runSettledEffects(h.env, run);
 
@@ -918,7 +918,7 @@ describe("runSettledEffects：三步固定顺序", () => {
 // 原样保留」。跨域 handler 迁出（model_select / 父级联 before 事件归各自域模块的
 // setup* 注册）后，本用例是顺序逐位不变的机器证据：fake pi 捕获 on() 调用序列
 //（Map 保持插入序），与锁定的事件序列逐位比对。[波 2] session_compact 注册
-//（notify ledger compaction 补写守卫）随账本退役删除——pi session append-only
+//（notify ledger compaction 补写检查）随账本退役删除——pi session append-only
 // 契约排除 entry 被清事件（unified-delivery §3.7②），序列 7 → 6。
 
 /** 锁定的注册顺序（波 2 后的 6 事件序列，逐位不变契约）。 */
@@ -946,7 +946,7 @@ describe("setupWorkflowDomain pi.on 注册顺序", () => {
 // 直测（④）与 core lifecycle evict 用例；此处只锁「组合根把 lazyDeps 转交给
 // workflows command」这一根接线——捕获第三参，调 onRunDone，断言真实管线执行且
 // evict 写的是 session_start 装配的 sessionState 条目 runs Map（同一对象引用）。
-// ctx 用 tui（环境门控：非 rpc 不启动在飞上报，零重试 timer 悬挂）。
+// ctx 用 tui（环境门控：非 rpc 不启动在途上报，零重试 timer 悬挂）。
 
 describe("组合根接线：registerWorkflowsCommand 第三参 lazyDeps.onRunDone", () => {
   it("捕获的 onRunDone 转发到真实 runSettledEffects 管线：workflow-result 通知发出 + evict 操作真实 sessionState runs Map", async () => {

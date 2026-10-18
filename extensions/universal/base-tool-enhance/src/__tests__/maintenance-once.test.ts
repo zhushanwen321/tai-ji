@@ -8,7 +8,7 @@
 //  - 入口无条件 debug 日志按派发次数出现，detail 仅含 reason（reapSkipped 字段
 //    随 reap 调用移除，S6 观测通道语义更新）
 // 断言方式：reconcile / logger 间谍注入观察调用次数与参数；file-lock 为 mock
-// 缺键守卫 + withFileLockSync throw 哨兵（不计数）。
+// 缺键检查 + withFileLockSync throw 哨兵（不计数）。
 import { existsSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -30,7 +30,7 @@ vi.mock("@earendil-works/pi-coding-agent", () => ({
 vi.mock("@zhushanwen/pi-extension-logger", () => ({
 	getLogger: () => loggerMock,
 }));
-// 守卫形态 = mock 工厂缺键：包入口已删除的 async 锁导出不在工厂注册——维护链若
+// 检查形态 = mock 工厂缺键：包入口已删除的 async 锁导出不在工厂注册——维护链若
 // 误回流，对已删导出的任何访问（调用与 typeof 均计）即抛错（vitest mock 缺键语义；
 // 模块导入本身不抛）。withFileLockSync 哨兵保留：registry 写路径误入维护链即抛
 vi.mock("@zhushanwen/pi-file-lock", () => ({
@@ -122,7 +122,7 @@ describe("session_start maintenance chain after reap sink (u-bte-remove)", () =>
 		expect(reconcileMock).toHaveBeenCalledTimes(3);
 		expect(reconcileMock).toHaveBeenNthCalledWith(1, expect.anything(), dataDirRef.dir, "sid-once", []);
 		expect(reconcileMock).toHaveBeenLastCalledWith(expect.anything(), dataDirRef.dir, "sid-once", []);
-		// 无全局扫描回流：误触发已删锁导出的任何访问会被 mock 缺键直接抛错（守卫见工厂注释），无告警
+		// 无全局扫描回流：误触发已删锁导出的任何访问会被 mock 缺键直接抛错（检查见工厂注释），无告警
 		expect(loggerMock.warn).not.toHaveBeenCalled();
 	});
 

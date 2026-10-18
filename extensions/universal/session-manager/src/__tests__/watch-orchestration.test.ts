@@ -286,9 +286,9 @@ describe("arm（send/create → pending:register + watch 开表）", () => {
 	});
 });
 
-// ── 默认 record + trailing debounce 两层攒批（settle 腿） ──────────────────────
+// ── 默认 record + trailing debounce 两层攒批（settle 路径） ──────────────────────
 
-describe("watch 应答 → 两层攒批 record（settle 腿）", () => {
+describe("watch 应答 → 两层攒批 record（settle 路径）", () => {
 	async function armTwoSends(h: Harness): Promise<{ id1: string; id2: string }> {
 		h.actionResults.send = () => SEND_OK;
 		await runToolCall(h, "send_to_session", { sessionId: "child-1", prompt: "a" });
@@ -382,7 +382,7 @@ describe("watch 应答 → 两层攒批 record（settle 腿）", () => {
 		expect(byId.get(id2)).toContain('status "stopped"');
 	});
 
-	it("跨 session 不合批（分拣键 sessionId 腿）：同 settleSeq 不同 session → 两条 record", async () => {
+	it("跨 session 不合批（分拣键 sessionId 路径）：同 settleSeq 不同 session → 两条 record", async () => {
 		const delivered = deliverSpy();
 		const h = createHarness();
 		h.actionResults.send = () => SEND_OK;
@@ -528,7 +528,7 @@ describe("两例外（cancelled·orphaned 静默 / 死亡新闻槽）", () => {
 			{ customType: "pending:register", data: { id: claimId, type: "session", name: "D" } },
 			{ customType: "pending:register", data: { id: lifetime, type: "session", name: "D" } },
 		]);
-		// 经收口腿开两条 watch（开表序 = entries 序，claim 先到）
+		// 经收尾路径开两条 watch（开表序 = entries 序，claim 先到）
 		h.handlers.session_start({ type: "session_start" }, h.ctx);
 		await flushMicrotasks();
 		expect(h.watches).toHaveLength(2);
@@ -561,7 +561,7 @@ describe("两例外（cancelled·orphaned 静默 / 死亡新闻槽）", () => {
 	});
 });
 
-// ── 兼容与防御（D6 象限 / 形状守卫）─────────────────────────────────────────────
+// ── 兼容与防御（D6 象限 / 形状检查）─────────────────────────────────────────────
 
 describe("兼容与防御", () => {
 	it("旧 runtime 象限：respond 'null' → 折叠 cancelled 静默 unregister，零 record", async () => {
@@ -572,7 +572,7 @@ describe("兼容与防御", () => {
 		expect(loggerMock.warn).not.toHaveBeenCalled();
 	});
 
-	it("畸形/词表外 payload → 折叠 cancelled 收口（不落 default 误标、不产通知）+ 漂移 warn 留痕", async () => {
+	it("畸形/词表外 payload → 折叠 cancelled 收尾（不落 default 误标、不产通知）+ 漂移 warn 留痕", async () => {
 		const { delivered, h } = await armSendAndRespondWatch(JSON.stringify({ reason: "some-future-reason" }));
 		expect(delivered).toHaveLength(0);
 		expect(emittedIds(h, "pending:unregister")).toHaveLength(1);
@@ -586,7 +586,7 @@ describe("兼容与防御", () => {
 		});
 	});
 
-	it("select 侧 cancelled（应答未达，resolve undefined）→ 不动 pending（残留交下次 session_start 收口腿）", async () => {
+	it("select 侧 cancelled（应答未达，resolve undefined）→ 不动 pending（残留交下次 session_start 收尾路径）", async () => {
 		const { delivered, h } = await armSendAndRespondWatch(undefined);
 		expect(emittedIds(h, "pending:unregister")).toHaveLength(0);
 		expect(delivered).toHaveLength(0);

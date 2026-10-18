@@ -6,12 +6,12 @@
 // 本文件属壳侧（shell），不进 core 切面——对 pi SDK 与 pi 宿主协作件
 // （@earendil-works/pi-coding-agent / @zhushanwen/pi-extension-logger /
 // @zhushanwen/pi-pending-notifications / @zhushanwen/pi-delivery-port）的运行时
-// import 收敛在此层，core 闭包（D9 守卫对象）不得出现这些包。
+// import 收敛在此层，core 闭包（D9 检查对象）不得出现这些包。
 //
 // 端口语义：
 //   - dataRoot / discoveryRoots 每次调用现取 getAgentDir()，禁止模块级缓存：
 //     getAgentDir 尊重 PI_CODING_AGENT_DIR 实例隔离（taiji 按 session dir
-//     隔离 pi 实例），缓存会把后续切换实例的进程钉死在首个 agentDir。
+//     隔离 pi 实例），缓存会把后续切换实例的进程固定在首个 agentDir。
 //   - discoveryRoots 的根清单/顺序/source 标签与 shared/resource-discovery.ts
 //     buildScanTargets、orchestration/skill-discovery.ts resolveSkillPath 的现推导
 //     逐项一致（user-pi / npm / npm-dev 字面即现 ResourceSource 标签）。
@@ -24,7 +24,7 @@
 //     见 agentDirKindRoots 注释。skills/engines 的同构 npm 槽错位不在 P5 范围
 //     （D4 发现层 = agents/workflows 注入面；skills 另有「刻意不补」既有决策）。
 //   - countActiveFromEntries 适配：pi 侧真函数返回 CountActiveResult 对象，core
-//     端口契约是 number（core 消费面只读 .count，notify-ports.ts 契约注释）——
+//     端口契约是 number（core 消费方只读 .count，notify-ports.ts 契约注释）——
 //     foundation 单元登记给本单元的适配责任。
 //   - getDeliveryPort 透传：@zhushanwen/pi-delivery-port 的进程级槽访问器本体直传
 //     （core 闭包红线禁 import 该包，经 NotifyDomainPorts.getDeliveryPort 端口注入
@@ -143,7 +143,7 @@ export function stagedScopeRootFromModuleUrl(moduleUrl: string): string | undefi
  *  顺序与 source 标签逐项对齐 resource-discovery.ts buildScanTargets 的
  *  user-pi → npm → npm-dev 段（根列表按优先级低→高排列，D2 语义边界）。
  *
- *  [P5 D4-2 扫描根修正] npm/npm-dev 两根形态感知：taiji 宿主注入态改指 taiji
+ *  [P5 D4-2 扫描从根源修复] npm/npm-dev 两根形态感知：taiji 宿主注入态改指 taiji
  *  实际安装目录（agentDir 的父目录——taiji 布局迁移后 npm/extensions 是 agentDir
  *  的 sibling，对齐 runtime pi-paths.ts getNpmDir/getExtensionsDir 的推导），独立
  *  pi 形态保留 getAgentDir() 派生的 pi 语义根（现状即正确）。 */
@@ -152,7 +152,7 @@ function agentDirKindRoots(kind: "agents" | "workflows"): DiscoveryRoot[] {
   // taiji 态 npm/extensions 布局 = agentDir 的 sibling（<dataDir>/npm、
   // <dataDir>/extensions，agentDir = <dataDir>/agent）；旧 agentDir 直拼形态在
   // taiji 态恒为不存在目录——taiji 形态下 npm 安装位与 staged 包发现面恒空的
-  // 病灶根因。已知误判面（有意接受，登记 deviations）：独立态用户以 -e 手动加载
+  // 问题点根因。已知误判面（有意接受，登记 deviations）：独立态用户以 -e 手动加载
   // 本扩展时 argv 同样有 --extension，npm 槽根指到不存在的 <agentDir> 父目录 →
   // 扫描静默空（损失 = 罕见场景的 npm 安装位发现；agentDir/npm 本就非 pi 官方布局）。
   const installBase = isTaijiHostInjected() ? dirname(agentDir) : agentDir;
@@ -168,7 +168,7 @@ function agentDirKindRoots(kind: "agents" | "workflows"): DiscoveryRoot[] {
   //    同标签多根依注入序扫描 + last-writer-wins，core（随本包依赖分发的新模板）
   //    遮蔽同安装位内旧版残留副本；序位仍在 user 级之上、project 级之下（红线 1）。
   //    [P5] workflows kind 的「刻意不注入」禁区拆除：原顾虑 = <available_workflows>
-  //    的 <location> 是 CA2 快照不豁免面（红线 8 豁免仅限 agent 角色路径前缀）。
+    //    的 <location> 是 CA2 快照不属豁免范围（红线 8 豁免仅限 agent 角色路径前缀）。
   //    P-C6 实施期核查裁决：CA2 锚定测试为 fixture 输入驱动（不消费运行时路径），
   //    turn 间字节稳定由工厂渲染缓存 + 码点序构造性保证——staged 绝对路径渲染
   //    <location> 不破坏快照稳定性，内置 workflow 因此可列出、路径可派发。
@@ -397,7 +397,7 @@ const ARGV_VALUED_FLAGS = new Set<string>([
 const ARGV_FLAG_START = 2;
 
 /**
- * taiji 宿主注入态判据（P5 D4-2 扫描根修正；形态判据复用 H2 先例）：主 pi 进程
+ * taiji 宿主注入态判据（P5 D4-2 扫描从根源修复；形态判据复用 H2 先例）：主 pi 进程
  * argv 含 --extension/-e 值即 taiji spawn（runtime 恒带 staged 全量集下发的
  * --extension；独立 pi 经 settings 清单加载扩展，argv 无该 flag）。
  * 与 resolveGrandchildExtensionPaths 的白名单收窄是两个决策——此处只做形态判定

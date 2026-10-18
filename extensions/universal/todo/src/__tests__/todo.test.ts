@@ -347,7 +347,7 @@ describe("todo update batch", () => {
 	});
 });
 
-// ── handleSingleUpdate 守卫（tool 单条路径）────
+// ── handleSingleUpdate 检查（tool 单条路径）────
 
 describe("handleSingleUpdate guards (tool single path)", () => {
 	it("TC6: text='  ' (纯空格) → throw (trim 后空串拒绝，不只判 ===)", () => {

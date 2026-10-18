@@ -271,7 +271,7 @@ describe("createAskUserChannelHandler — 形态特有用例", () => {
 		});
 	});
 
-	it("新 payload 逐项守卫：不合法项过滤，合法项照常服务", async () => {
+	it("新 payload 逐项检查：不合法项过滤，合法项照常服务", async () => {
 		const protoAnswers = { "Which DB?": "Postgres" };
 		const handler = createAskUserChannelHandler(
 			makeCtx({ mode: "rpc", selectResult: JSON.stringify(protoAnswers) }) as never,
@@ -337,7 +337,7 @@ describe("createAskUserChannelHandler — input 校验", () => {
 // ── 输出等价锚（plan-mode-audit-remediation 批次 3 活路径去重）──
 // TUI 三格式往返收敛为单次转换：handler 编码直接迭代 internal Question[]（formToInternalQuestions
 // 单次转换产物），不再构造 legacy AskUserQuestion[] 中转视图（formToAskUserQuestions 已删）。
-// 本组断言钉死：新路径产出 ≡ 旧「proto 中转视图 + encodeAnswer」链路的产出——proto 视图以
+// 本组断言固定：新路径产出 ≡ 旧「proto 中转视图 + encodeAnswer」链路的产出——proto 视图以
 // 字面量充当被删转换的参考实现（key = header ?? question、multiSelect === true 语义不变）。
 describe("TUI encode 输出等价锚（internal 单次转换 ≡ 旧 proto 中转视图链路）", () => {
 	it("handler 编码结果 ≡ 旧链路参考实现（single/multi/Other 三形态对拍）", async () => {

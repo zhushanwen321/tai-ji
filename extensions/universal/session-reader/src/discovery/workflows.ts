@@ -82,7 +82,7 @@ function sessionRefFromPath(path: string, pathToRef: Map<string, SessionRef>): S
 }
 
 // ============================================================
-// workflow-record 条目契约（v2 注册条目判别——本地字面量 + 测试守卫漂移）
+// workflow-record 条目契约（v2 注册条目判别——本地字面量 + 测试检查漂移）
 // ============================================================
 
 /**
@@ -91,7 +91,7 @@ function sessionRefFromPath(path: string, pathToRef: Map<string, SessionRef>): S
  * 磁盘 JSONL 协议字符串（跨侧契约）：写侧单源 = subagent-core
  * workflow-record-entry.ts 的 WORKFLOW_RECORD_CUSTOM_TYPE。reader 生产依赖面不引
  * subagent-core（同 entry-anchor.ts 的协议字面量模式），两侧漂移由 workflow.test.ts
- * 的跨包断言守卫。
+ * 的跨包断言检查。
  */
 const WORKFLOW_RECORD_CUSTOM_TYPE = 'workflow-record'
 
@@ -102,7 +102,7 @@ const WORKFLOW_RECORD_ENTRY_V2 = 2
  * run record 流文件名尾段（`<runId>.record.jsonl`）。写侧 subagent-core
  * RUN_EVENTS_SUFFIX 同值（[D1] record 单源后缀）——v2 注册条目的
  * recordPath 锚点后缀判定用（新锚点直读 record 流；旧 `.events.jsonl` 锚点 =
- * 历史实体分流），本地持有 + 测试守卫漂移。
+ * 历史实体分流），本地持有 + 测试检查漂移。
  */
 export const RUN_RECORD_STREAM_SUFFIX = '.record.jsonl'
 
@@ -155,7 +155,7 @@ interface AgentSettledSessionFileView {
   result: { sessionFile: string }
 }
 
-/** [extractRecordStreamSessionFiles 守卫] 单帧是否为携带非空 result.sessionFile
+/** [extractRecordStreamSessionFiles 检查] 单帧是否为携带非空 result.sessionFile
  *  的 agent-settled 帧：逐字段 typeof 校验（type → taskIndex → result →
  *  sessionFile），不过关 = 宽容跳过（与 readRunSnapshot 同容忍度）。 */
 function isAgentSettledSessionFileFrame(v: unknown): v is AgentSettledSessionFileView {

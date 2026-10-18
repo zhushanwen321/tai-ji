@@ -181,9 +181,9 @@ describe("deserializeState — 旧数据迁移（time_limited → budget_limited
 		expect((state as unknown as { timeWarning90Sent?: unknown }).timeWarning90Sent).toBeUndefined();
 	});
 
-	it("归一化后是合法终态：/goal clear 守卫（!isTerminalStatus）跳过 transitionStatus，不 throw", () => {
+	it("归一化后是合法终态：/goal clear 检查（!isTerminalStatus）跳过 transitionStatus，不 throw", () => {
 		const state = deserializeState(LEGACY_DATA);
-		// handleClear（command-adapter.ts）的守卫：!isTerminalStatus 为 false → 直接 clearSession，
+		// handleClear（command-adapter.ts）的检查：!isTerminalStatus 为 false → 直接 clearSession，
 		// 不再走 finalizeAndPersist("cancelled") 的 transitionStatus 查表（旧值会 throw）。
 		expect(isTerminalStatus(state.status)).toBe(true);
 	});

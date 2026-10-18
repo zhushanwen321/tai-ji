@@ -17,7 +17,7 @@
  * ① subagent-core——notify-host.ts（register + record 终态化 unregister——finalizeRun
  *   直落后的残留发射面，观测通道 = sweep reconciled WARN）/ orchestration/lifecycle.ts
  *   （register 主链）；
- * ② base-tool-enhance——bash 投影（notify.ts register/unregister 主链 +
+ * ② base-tool-enhance——bash 派生视图（notify.ts register/unregister 主链 +
  *   process-exit-guard.ts 退出边沿尽力补 emit（pending-reconcile 对账走 appendEntry
  *   权威路径，不经 emit））；
  * ③ subagent-workflow——仅崩溃恢复时 emit pending:unregister（session-lifecycle.ts
@@ -40,7 +40,7 @@
  *   白名单透传落盘——collect_results 缺省等待集排除依据，result-collect 设计 §3.4）
  * - pending:unregister → { id, reason, status }
  *
- * 状态权威源：session entries 是唯一状态——工具投影与写侧去重/活跃判断全部对
+ * 状态权威源：session entries 是唯一状态——工具派生视图与写侧去重/活跃判断全部对
  * getEntries() 现算（appendEntry 同步入账，pi dist 实证，锚定 pi-semantics
  * PS-29 extensionAPI appendEntry 直委托 appendCustomEntry + PS-17 _appendEntry
  * 同步 push 无 debounce），无内存第二份状态；历史的内存 registry、
@@ -70,7 +70,7 @@ import {
 	type PendingType,
 } from "./state.ts";
 
-// 跨扩展消费 API：goal（continuation 守卫）/ subagent-workflow（agent_end 后代判定）
+// 跨扩展消费 API：goal（continuation 检查）/ subagent-workflow（agent_end 后代判定）
 // 直接 import 本包导出的 countActiveFromEntries，避免各自复制差集逻辑。导出面只保留
 // 唯一消费函数 + 其签名所需类型（entries 是唯一状态源，包内不再导出状态机 API）。
 export {
@@ -124,7 +124,7 @@ interface CollectErrorEntry {
 	reason: string;
 }
 
-/** collect_results 工具的 details 形状（与返回契约同构，结构化消费面）。 */
+/** collect_results 工具的 details 形状（与返回契约同构，结构化消费方）。 */
 interface CollectToolDetails {
 	collected: CollectedEntry[];
 	stillOpen: StillOpenEntry[];
@@ -169,7 +169,7 @@ export default function pendingNotificationsExtension(pi: ExtensionAPI): void {
 	unsubscribers = [];
 
 	// ── 闭包内状态 ─────
-	// entries 是唯一状态源（无内存状态副本）：currentSessionId 是查询投影的跨 session
+	// entries 是唯一状态源（无内存状态副本）：currentSessionId 是查询派生视图的跨 session
 	// 过滤基准；sessionManager 是 listener 写侧前置判断的 entries 读取通道（EventBus
 	// 回调无 ctx 参数，经 session_start 缓存持有）。
 	let currentSessionId: string = "";

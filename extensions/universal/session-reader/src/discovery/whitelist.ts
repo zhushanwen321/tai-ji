@@ -16,7 +16,7 @@ import { zcodeImportDbAllowlist } from '@zhushanwen/zcode-session-source'
  *
  * **检查顺序铁律（§3.4 三段递进，实现与测试双锚定）**：存在性先于路径——
  * `existsSync` 为 false 报 `zcode_db_unreadable`（库文件不存在）而非
- * `zcode_db_path_forbidden`，避免把「只是还没落库」误报成安全事件（forbidden 是
+ * `zcode_db_path_forbidden`，避免把「只是还没写入仓库」误报成安全事件（forbidden 是
  * 安全面错误，语义更重、更惊扰 agent）。存在才 realpath 后与派生允许集合精确比对。
  * 开库（第 3 段）由调用方在本闸通过后进行。
  *
@@ -75,7 +75,7 @@ export function formatZcodeDbPathForbidden(dbPath: string): string {
  *         消息即 §3.4 的 👉 指引文案——tool-handler 直接 throw 给 pi 错误面）
  */
 export function assertZcodeDbPathAllowed(dbPath: string, agentDir: string): void {
-  // 第 1 段 存在性（先于路径——「还没落库」不是安全事件）
+	// 第 1 段 存在性（先于路径——「还没写入仓库」不是安全事件）
   if (!existsSync(dbPath)) {
     throw new Error(formatZcodeDbUnreadable(dirname(agentDir), `（库文件不存在：${dbPath}）`))
   }

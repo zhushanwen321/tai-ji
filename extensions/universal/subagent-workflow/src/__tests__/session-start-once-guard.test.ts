@@ -6,9 +6,9 @@
 // 粒度边界豁免（明令不包装）的 ③identity appendEntry /
 // ⑥service.initSession 保持每 session_start 执行（×2，防误伤反向断言）。
 //
-// [B1] recoverCrashedRuns 已移出守卫清单（原⑪）：W17 后 loadAll 只读本 session
+// [B1] recoverCrashedRuns 已移出检查清单（原⑪）：W17 后 loadAll 只读本 session
 // entries、save 只写自身 runId 的 state 文件——恢复是 session 级幂等操作，挂进程级
-// 守卫会让同进程后续 session（/new 后 /resume 崩溃 session）的残留不被收编
+// 检查会让同进程后续 session（/new 后 /resume 崩溃 session）的残留不被收编
 // （session-lifecycle.test.ts 的 B1 用例锁定该场景）。双派发下恢复 ×2 是幂等空转
 // （第二次 loadAll 全终态、emit 0 条）——本文件 mock 不模拟幂等（每次调用恒 emit），
 // 故断言 ×2 / emit 2 条，真实幂等语义由 B1 用例锁定。
@@ -21,7 +21,7 @@
 //   ⑩ WorktreeManager.scan = 1（git/rm 进程操作在方法内部）
 //   ⑫ rebuildIndexes = 1（[U4c/G1] manifest 补缺/索引重建写发生在函数内部）
 //
-// 守卫 Map 是模块级状态：本文件静态 import 被测工厂（免付每用例全图重建），守卫
+// 检查 Map 是模块级状态：本文件静态 import 被测工厂（免付每用例全图重建），检查
 // Map 经 ext-guards 测试重置导出在 beforeEach 清空（与 resetModules 重建等价）。
 
 import { beforeEach, describe, expect, it, vi } from "vitest";
@@ -65,7 +65,7 @@ const {
   mockInitModel,
 } = vi.hoisted(() => {
   return {
-    // ① engines.json 同步（factory 体内还有一次无守卫调用，用例内 clearAllMocks 分离计数）
+    // ① engines.json 同步（factory 体内还有一次无检查调用，用例内 clearAllMocks 分离计数）
     mockSyncEnginesFile: vi.fn(),
     // ⑩ worktree reaper 扫描
     mockScan: vi.fn(),
@@ -181,7 +181,7 @@ vi.mock("../interface/command/commands.ts", () => ({
   registerWorkflowsCommand: vi.fn(),
 }));
 
-// ── import 被测工厂（静态 import——守卫 Map 经 _resetOncePerProcessForTest 重置，
+// ── import 被测工厂（静态 import——检查 Map 经 _resetOncePerProcessForTest 重置，
 //    免付每用例 resetModules 全图重建） ──
 
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
@@ -277,8 +277,8 @@ function createMockCtx(): Record<string, unknown> {
 
 // ── tests ──
 
-describe("session_start 双派发幂等守卫（oncePerProcess，u-audit-fix）", () => {
-  it("双派发下五项跨 session 副作用操作各执行 1 次（recoverCrashedRuns 已移出守卫，B1）", async () => {
+describe("session_start 双派发幂等检查（oncePerProcess，u-audit-fix）", () => {
+  it("双派发下五项跨 session 副作用操作各执行 1 次（recoverCrashedRuns 已移出检查，B1）", async () => {
     // ⑪ 模拟恢复一个 run：onRunRecovered 回调 → [W2/V4 D6] pi.appendEntry 直落
     //（真实链路观察点——注销不经 emit）
     mockRecoverCrashedRuns.mockImplementation(async (
@@ -292,7 +292,7 @@ describe("session_start 双派发幂等守卫（oncePerProcess，u-audit-fix）"
 
     const { pi, appendEntryCalls, getSessionStartHandler } = createMockPi();
     subagentsExtension(pi);
-    // factory 体内有一次无守卫的 syncEnginesFile（U7b，模块加载期兜底，u-audit 范围外）
+    // factory 体内有一次无检查的 syncEnginesFile（U7b，模块加载期兜底，u-audit 范围外）
     // ——清计数后只观察 handler 双派发窗口。
     vi.clearAllMocks();
 
@@ -309,7 +309,7 @@ describe("session_start 双派发幂等守卫（oncePerProcess，u-audit-fix）"
     expect(mockRecoverManifestTmpFiles).toHaveBeenCalledTimes(1);
     expect(mockRebuildIndexes).toHaveBeenCalledTimes(1);
     expect(mockScan).toHaveBeenCalledTimes(1);
-    // [B1] recoverCrashedRuns 不再挂进程级守卫：每 session_start 各跑一次（×2）——
+    // [B1] recoverCrashedRuns 不再挂进程级检查：每 session_start 各跑一次（×2）——
     // 双派发是幂等空转（第二次 loadAll 全终态）。mock 恒回调故 unregister = 2；
     // 真实幂等语义（第二次直落 0 条）由 session-lifecycle.test.ts 的 B1 用例锁定。
     expect(mockRecoverCrashedRuns).toHaveBeenCalledTimes(2);

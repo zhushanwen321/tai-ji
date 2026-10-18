@@ -119,7 +119,7 @@ export function spawnBackgroundTask(opts: SpawnBackgroundOptions): SpawnBackgrou
 	if (countActiveTasks() >= maxConcurrent) {
 		const oldest = oldestActiveTask();
 		if (oldest === undefined) {
-			// 防御缺口闭合：上限已满但找不出最老活跃任务 = maxConcurrent <= 0 且 0 活跃
+			// 防御缺口补上：上限已满但找不出最老活跃任务 = maxConcurrent <= 0 且 0 活跃
 			// ——同样拒绝，否则上限静默失效。config normalize 保证 >= 1，此处兜底
 			// 绕过配置直传非法值的调用方（错误指向配置键，可操作）
 			return {

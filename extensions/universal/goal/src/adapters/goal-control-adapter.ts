@@ -4,9 +4,9 @@
  * #3：替代已删除的 goal_manager tool。
  *
  * 职责分层：
- * - execute 层（adapter 职责）：signal 守卫
+ * - execute 层（adapter 职责）：signal 检查
  * - handler 层（goal 业务，契约对齐 code-architecture §3 handleCreate/handleComplete/handleReportBlocked）：
- *   active 守卫 + evidence/reason 空串校验 + 状态转换
+ *   active 检查 + evidence/reason 空串校验 + 状态转换
  *
  * 全解耦：goal 不再读 todo/plan 状态。complete 不做 todo 完成前置硬检查——
  * todo 是否全完成由 AI 自行判断，goal 仅通过 prompt 软建议（见 prompts.ts）。
@@ -146,7 +146,7 @@ export interface GoalControlDetails {
 
 /**
  * create 业务逻辑：objective + successCriteria 必填（schema 层已强制，此处仅校验空串）
- * + 非终态旧 goal 守卫 + service.createGoal。
+ * + 非终态旧 goal 检查 + service.createGoal。
  *
  * slug：AI 生成的短标识，仅 widget 标题 + history 用，不注入 prompt。真 optional。
  * objective：完整描述，注入每轮 context prompt（保证方向感）。
@@ -154,9 +154,9 @@ export interface GoalControlDetails {
  * 全解耦：不读 todo/plan。toolcall 时 AI 已在 turn 中，**不**发消息注入
  * （AI 返回后自行续跑，对齐 Codex create_goal）。
  *
- * 守卫用 D25 严格语义：非终态 active/paused/blocked 全挡，提示用 /goal resume 或
+ * 检查用 D25 严格语义：非终态 active/paused/blocked 全挡，提示用 /goal resume 或
  * /goal clear——防 AI 静默覆盖含未完成工作的 goal。
- * 终态旧 goal 走 createGoal 快速路径覆盖（createGoal 内部 active 守卫，终态可覆盖）。
+ * 终态旧 goal 走 createGoal 快速路径覆盖（createGoal 内部 active 检查，终态可覆盖）。
  *
  * 参数校验拆分至 requireCreateObjective / requireCreateSuccessCriteria /
  * resolveCreateBudget（圈复杂度拆分），校验顺序与错误消息不变。
@@ -217,7 +217,7 @@ export function handleCreate(
 	const slugInput = params.slug?.trim();
 	const successCriteria = requireCreateSuccessCriteria(params);
 
-	// D25 严格守卫：非终态旧 goal（active/paused/blocked）→ 拒绝创建（防静默覆盖未完成工作）
+	// D25 严格检查：非终态旧 goal（active/paused/blocked）→ 拒绝创建（防静默覆盖未完成工作）
 	if (session.state && !isTerminalStatus(session.state.status)) {
 		throw new Error(
 			`Goal already active (status: ${session.state.status}). Use /goal resume to continue or /goal clear to reset before creating a new one.`,
@@ -230,7 +230,7 @@ export function handleCreate(
 	// FR-3.1: 唯一创建入口。终态旧 goal 走覆盖快速路径。
 	const created = createGoal(session, objective, budget, ports, slugInput, successCriteria);
 	if (!created) {
-		// createGoal 内部 active 守卫兜底（理论上上面守卫已挡；防御性）
+		// createGoal 内部 active 检查兜底（理论上上面检查已挡；防御性）
 		throw new Error("Goal already active. Cannot create a new one.");
 	}
 
@@ -248,7 +248,7 @@ export function handleCreate(
 }
 
 /**
- * complete 业务逻辑：active 守卫 + evidence 空串校验 + finalizeAndPersist。
+ * complete 业务逻辑：active 检查 + evidence 空串校验 + finalizeAndPersist。
  *
  * 全解耦后不再做 todo 完成前置检查——todo 是否全完成由 AI 自行判断（prompt 软建议）。
  */
@@ -283,7 +283,7 @@ export function handleComplete(
 }
 
 /**
- * report_blocked 业务逻辑：active 守卫 + reason 空串校验 + tickState + transitionStatus + persistState。
+ * report_blocked 业务逻辑：active 检查 + reason 空串校验 + tickState + transitionStatus + persistState。
  *
  * 必须在 transitionStatus **之前** tickState，使 tick 看到 active 状态并累加当前运行段；
  * 否则转 blocked 后 persistState 内部的 tick 因 status≠active 不累加，丢失最后一段运行时间。
@@ -322,7 +322,7 @@ export function handleReportBlocked(
 	return { action: "report_blocked", goalId: state.goalId, status: state.status };
 }
 
-/** renderResult 的 result 是否含 details 字段（类型守卫，替代全可选结构断言 as {details?}）。
+/** renderResult 的 result 是否含 details 字段（类型检查，替代全可选结构断言 as {details?}）。
  * 收紧：除检查 "details" in r 外，还验证其值为 object 或 undefined（防 details 是 string/number
  * 时下游读 d.status 得到 undefined 却被类型系统当作 GoalControlDetails）。 */
 function hasGoalDetails(r: unknown): r is { details?: GoalControlDetails } {
@@ -403,7 +403,7 @@ export function registerGoalControlTool(pi: ExtensionAPI, session: GoalSession):
 
 		renderCall(args: Record<string, unknown>, theme: Theme): Text {
 			// TUI 渲染先于 schema 校验（args 是未经 schema 收窄的原始形态）：非对象整体
-			// 走安全占位（不抛错）；action/slug 逐个 typeof 守卫替代裸断言——非法 action
+			// 走安全占位（不抛错）；action/slug 逐个 typeof 检查替代裸断言——非法 action
 			// 落 report_blocked 回落分支（与原行为一致）
 			if (typeof args !== "object" || args === null) {
 				return new Text(

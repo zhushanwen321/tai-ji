@@ -30,8 +30,8 @@ description: "配置 @zhushanwen/pi-rename-session（会话自动重命名）时
 - **自动模式一次性语义**：每个 session 最多自动重命名一次；已过触发窗口的存量 session 不会回溯重命名——开启后只对之后新建的 session 生效
 - 工具中间轮（`stopReason === "toolUse"`）不评估；error/aborted/length 轮延迟到下一个成功轮再命名（first-stop）
 - 首个成功 round 时 LLM 调用失败 → 静默跳过保留原标题，不重试（first-stop 有 error 轮延迟语义；first-prompt 触发窗口唯一，错过即无自动机会）
-- **mode 求值时点**：事件面（自动命名分派）每次事件 live 读——切换对活跃 session 的自动命名即时生效；`rename_session` 工具注册面只在 pi 进程启动加载 extension 时求值一次——切换后已存活 session 的工具清单不回溯，残留工具被调用时 execute 内 live 守卫拒绝（错误文案含恢复指引）
-- `rename_session` 工具改名**不走防覆盖守卫**——agent 显式调用等同手动 rename，允许覆盖任何既有名（含自动名/语义名）
+- **mode 求值时点**：事件面（自动命名分派）每次事件 live 读——切换对活跃 session 的自动命名即时生效；`rename_session` 工具注册面只在 pi 进程启动加载 extension 时求值一次——切换后已存活 session 的工具清单不回溯，残留工具被调用时 execute 内 live 检查拒绝（错误文案含恢复指引）
+- `rename_session` 工具改名**不走防覆盖检查**——agent 显式调用等同手动 rename，允许覆盖任何既有名（含自动名/语义名）
 - steering/follow-up 队列消息不满足「session 首条 user」判定，不会误触发（first-prompt）
 
 > 改完配置「没看到 session 被重命名」的常见原因：当前 session 已过触发窗口（首条 user 已发出 / 首个成功 round 已完成）。新建一个 session 测试。

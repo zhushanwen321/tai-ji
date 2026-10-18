@@ -459,7 +459,7 @@ describe("失败保留策略（onFailure 覆写）", () => {
 		h.sendThrows.value = true; // 注入通道全程 throw
 		const port = createDeliveryPort(h.host);
 		expect(port.deliver(defaultEnvelope({ id: "fg-1" }), { onFailure: "forget" }).kind).toBe("accepted");
-		// 提交链两段：首投被 commitAsBatch 注入闸门 hold（设计内等待，不计首败、无终局落盘）
+		// 提交链两段：首投被 commitAsBatch 注入门禁 hold（设计内等待，不计首败、无终局落盘）
 		// → 窗口结束 kernel.flush() 重提 → 真注入 throw（首败语义生效）：forget → discard。
 		// settleRejected=1 锚定 discard 由真注入失败触发（hold 路径不计数）。
 		expect(h.sent).toHaveLength(0);
@@ -482,7 +482,7 @@ describe("失败保留策略（onFailure 覆写）", () => {
 	it("提交窗 hold 拒不计首败：forget 条目不被 discard、留册，窗口结束重提送达成功", () => {
 		const h = makeHost({ bg: false });
 		const port = createDeliveryPort(h.host);
-		// 默认通道 bg=false → 直通 → commitAsBatch 提交窗：首投被注入闸门 hold（设计内等待）
+		// 默认通道 bg=false → 直通 → commitAsBatch 提交窗：首投被注入门禁 hold（设计内等待）
 		expect(port.deliver(defaultEnvelope({ id: "hd-1" }), { onFailure: "forget" }).kind).toBe("accepted");
 		// 窗口结束 kernel.flush() 重提 → 送达成功（旧实现此处 hold 被误计首败 → discard 永久丢弃）
 		expect(h.sent).toHaveLength(1);
@@ -802,7 +802,7 @@ describe("collectArm 四态快照", () => {
 
 	it("unregistered-no-entry：曾注册已注销且无日志条目 → 按 unregister status 定 outcome（三形态：死亡跨批 / 例外1 / 防御分支的 status 值变体）", () => {
 		// 写侧 mapReasonToStatus 落盘值：exited/orphaned → cancelled（死亡跨批・例外1）、
-		// stopped → aborted（例外1 掐断）、reopened → completed（防御分支收口）
+		// stopped → aborted（例外1 掐断）、reopened → completed（防御分支收尾）
 		const cases: Array<{ id: string; status: string }> = [
 			{ id: "k-death", status: "cancelled" },
 			{ id: "k-orph", status: "cancelled" },

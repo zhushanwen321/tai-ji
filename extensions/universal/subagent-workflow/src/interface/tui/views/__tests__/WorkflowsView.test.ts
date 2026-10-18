@@ -12,10 +12,10 @@
  * [H2 W3] live 数据源切换：签名第 2 参从 node.live 直读改为 store record 派生视图
  * （Map<stepIndex, LiveProgressView>，经 collectNodeLiveProgress 配对注入）——
  * 字段口径不变（totalTokens/toolCallCount/elapsedSeconds/turns/eventLog.length/
- * currentActivity/lastError），本文件用 makeLiveView 直接构造投影驱动「已入字段
+ * currentActivity/lastError），本文件用 makeLiveView 直接构造派生视图驱动「已入字段
  * 变 → 签名变」。
  *
- * 确定性说明：签名非完全纯——live 投影的 elapsedSeconds 由 projectRecordProgress
+ * 确定性说明：签名非完全纯——live 派生视图的 elapsedSeconds 由 projectRecordProgress
  * 内 computeElapsedSeconds 现算（record.endedAt ?? Date.now()）。fake timers 控制
  * Date.now() 与 now 参数同源推进，保证确定性。
  */
@@ -74,7 +74,7 @@ function makeRun(shape: RunShape = {}): WorkflowRun {
   return makeRunWithId(`wf-sig-${signatureRunSeq++}`, shape);
 }
 
-/** [W2/V1] runId 唯一化 + spec 最小面（displayStatusOf → core runSummary 投影
+/** [W2/V1] runId 唯一化 + spec 最小面（displayStatusOf → core runSummary 派生视图
  *  读 runId/spec.scriptName——签名测试的 mock 需携带该最小字段集）。
  *  [D6(a) 第 1 步] 终局判定源 = 终局记录注册表：done 形态 fixture 必须携带注册表
  *  条目（生产 = 壳重建点 noteRebuiltSettlement 注入 run-settled 帧事实）。 */
@@ -97,7 +97,7 @@ function makeRunWithId(runId: string, shape: RunShape): WorkflowRun {
   } as unknown as WorkflowRun;
 }
 
-/** 单节点 run + 该节点的 live 投影（最常见断言形态的便捷封装）。 */
+/** 单节点 run + 该节点的 live 派生视图（最常见断言形态的便捷封装）。 */
 function runWithLive(nodeOverrides: Partial<ExecutionTraceNode>, live: LiveProgressView) {
   const node = makeNode(nodeOverrides);
   return {
@@ -145,7 +145,7 @@ afterEach(() => {
 });
 
 describe("computeRenderSignature — 基础确定性", () => {
-  it("同输入同签名（含 live 投影，elapsedSeconds 固定值确定）", () => {
+  it("同输入同签名（含 live 派生视图，elapsedSeconds 固定值确定）", () => {
     const { run, live } = runWithLive({}, makeLiveView());
     expect(computeRenderSignature(run, live, T0)).toBe(computeRenderSignature(run, live, T0));
   });
@@ -220,7 +220,7 @@ describe("computeRenderSignature — 节点级字段（store record 派生视图
     expect(computeRenderSignature(a.run, a.live, T0)).not.toBe(computeRenderSignature(b.run, b.live, T0));
   });
 
-  it("live.toolCallCount 变化（store 投影：eventLog tool_start 计数）→ 签名变", () => {
+    it("live.toolCallCount 变化（store 派生视图：eventLog tool_start 计数）→ 签名变", () => {
     const a = runWithLive({}, makeLiveView({ toolCallCount: 1 }));
     const b = runWithLive({}, makeLiveView({ toolCallCount: 2 }));
     expect(computeRenderSignature(a.run, a.live, T0)).not.toBe(computeRenderSignature(b.run, b.live, T0));
@@ -271,8 +271,8 @@ describe("computeRenderSignature — 节点级字段（store record 派生视图
 });
 
 describe("computeRenderSignature — 多节点与无 live 终态", () => {
-  it("多节点：live 投影按 stepIndex 配对生效（live 值出现 / 消失 / 挂到另一节点 → 签名变）", () => {
-    // 对比式断言：同一 run 换 live 投影驱动签名变化——词法格式串是内部表示非契约，
+    it("多节点：live 派生视图按 stepIndex 配对生效（live 值出现 / 消失 / 挂到另一节点 → 签名变）", () => {
+    // 对比式断言：同一 run 换 live 派生视图驱动签名变化——词法格式串是内部表示非契约，
     // 不作为主证明（结构快照见下一条）。
     const run = makeRun({
       nodes: [
@@ -323,11 +323,11 @@ describe("computeRenderSignature — 多节点与无 live 终态", () => {
 //
 // 配对规则：task 标签匹配 + startedAt 最近邻 + 贪心唯一；终态 node 不配；
 // 无匹配 record（重试间隙）返回空。
-// SubagentRecord 投影面（eventLog/turns/totalTokens 等）的投影恒等由 core 侧
-// record-store 测试锁定，此处消费投影面。
+    // SubagentRecord 派生视图字段集（eventLog/turns/totalTokens 等）的派生视图恒等由 core 侧
+    // record-store 测试锁定，此处消费派生视图字段集。
 
 describe("collectNodeLiveProgress 配对", () => {
-  it("task 全等匹配：running node ↔ running record，投影挂到 stepIndex", () => {
+    it("task 全等匹配：running node ↔ running record，派生视图挂到 stepIndex", () => {
     const run = makeRunShape([{ stepIndex: 0, task: "调研 A", status: "running", startedAt: new Date(T0).toISOString() }]);
     const live = collectNodeLiveProgress(run, [makeSub({ totalTokens: 42 })]);
     expect(live.get(0)?.totalTokens).toBe(42);

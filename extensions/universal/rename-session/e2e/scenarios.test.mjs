@@ -69,7 +69,7 @@ describe.skipIf(process.env.TAIJI_PI_LIVE !== "1")("E2E 场景 A1-A7（真实 pi
 		toGate(await runA1());
 	}, 300_000);
 
-	it("A2 slug 标题风格：中文 / 英文 / 跟进型 ×3 prompt 标题守卫", async () => {
+	it("A2 slug 标题风格：中文 / 英文 / 跟进型 ×3 prompt 标题检查", async () => {
 		toGate(await runA2());
 	}, 2_100_000);
 
@@ -81,7 +81,7 @@ describe.skipIf(process.env.TAIJI_PI_LIVE !== "1")("E2E 场景 A1-A7（真实 pi
 		toGate(await runA4());
 	}, 630_000);
 
-	it("A5 超时兜底：hang provider 30s 超时不落库 + pi 存活", async () => {
+	it("A5 超时兜底：hang provider 30s 超时不写入 + pi 存活", async () => {
 		toGate(await runA5());
 	}, 240_000);
 
@@ -89,7 +89,7 @@ describe.skipIf(process.env.TAIJI_PI_LIVE !== "1")("E2E 场景 A1-A7（真实 pi
 		toGate(await runA6());
 	}, 600_000);
 
-	it("A7 agent-tool 模式：工具改名即时落库覆盖既有名 + first-stop 对照零 toolCall", async () => {
+	it("A7 agent-tool 模式：工具改名即时写入覆盖既有名 + first-stop 对照零 toolCall", async () => {
 		toGate(await runA7());
 	}, 480_000);
 });

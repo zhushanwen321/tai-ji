@@ -2,13 +2,13 @@
  * session-lifecycle — 会话生命周期装配 seam（bootstrap seam）。
  *
  * 随迁内容 = 原组合根 index.ts session_start handler（:336-613）的六职责，原样搬移
- * （D2 纪律：本文件不改行为；行为变更点——守卫合一 / lazyDeps getter 化（10 成员
- * 守卫触发对象，偏差 #10）——留在 index.ts，各自独立成条）：
+ * （D2 纪律：本文件不改行为；行为变更点——检查合一 / lazyDeps getter 化（10 成员
+ * 检查触发对象，偏差 #10）——留在 index.ts，各自独立成条）：
  *   1. identity env→appendEntry 重建（类型 13 字段含 1 个 @deprecated，写入 12）
  *   2. notify ledger host 装配 + 重启恢复（unified-delivery 波 2 退役：投递归
  *      pi-delivery-port 恒装配于 base-tool-enhance，本包零装配义务）
  *   3. 双 Service 装配 + initSession（createOrReuseServices 封装，单例语义 D8）
- *   4. GC / manifest tmp 清扫（[U4c/D6] promote 退役）/ 索引重建（[U4c/G1] boot 全量腿）/ worktree 恢复 / 保留维护轮兜底（[W1/D5] session_start 触发）
+ *   4. GC / manifest tmp 清扫（[U4c/D6] promote 退役）/ 索引重建（[U4c/G1] boot 全量路径）/ worktree 恢复 / 保留维护轮兜底（[W1/D5] session_start 触发）
  *   5. per-session run store + kill-9 恢复循环 + evictDoneRunsBeyondCap
  *   6. SAR + engine 基线（经 SessionLifecycleResult 返回，sessionState 写入留在组合根）
  *
@@ -62,8 +62,8 @@ import {
 import { SubprocessAgentRunner } from "@zhushanwen/subagent-core";
 import { WorktreeManager } from "@zhushanwen/subagent-core";
 import { clearSkillPathCache } from "@zhushanwen/subagent-core";
-// kill-9 崩溃恢复四步（loadAll → failed → save → evict）收口 core（D8：宿主各写
-// 一遍正是 failure-mode-B）；dev 侧 u-audit-fix 的 6 个 oncePerProcess 守卫随迁块
+// kill-9 崩溃恢复四步（loadAll → failed → save → evict）收敛进 core（D8：宿主各写
+// 一遍正是 failure-mode-B）；dev 侧 u-audit-fix 的 6 个 oncePerProcess 检查随迁块
 // 从 index.ts 原样迁入（f23fbcc3c）。
 import { recoverCrashedRuns } from "@zhushanwen/subagent-core";
 import type { WorkflowRun } from "@zhushanwen/subagent-core";
@@ -173,7 +173,7 @@ function resolveSessionDir(): string {
 // （坏文件不阻断整轮——引用集缺侧 = 宁保留方向：少采集到的 run 引用会使其
 // 进观察期而非直接删除，宽限窗兜底）。成本量级 = 全池文件流式扫描，秒级～
 // 十秒级（设计「实现落点」登记的实测预期——每 session_start 一次，oncePerProcess
-// 守卫下进程内单跑）。
+// 检查下进程内单跑）。
 
 /** Node fs 错误 code 判定（ENOENT = 路径不存在；core shared/fs-error 的 errorCodeOf
  *  未进 barrel——本地等价 helper，判据与 pi-host-run-store 的读错分通道同款）。 */
@@ -188,7 +188,7 @@ interface WorkflowCustomEntryView {
   data: Record<string, unknown>;
 }
 
-/** [extractRunReferencesFromLine 守卫] 是否为 data 载荷成形的 workflow custom
+/** [extractRunReferencesFromLine 检查] 是否为 data 载荷成形的 workflow custom
  *  entry（type=custom 且 data 为对象；customType 免判型——分流在调用方）。 */
 function isWorkflowCustomEntry(v: unknown): v is WorkflowCustomEntryView {
   if (typeof v !== "object" || v === null) return false;
@@ -425,7 +425,7 @@ function createOrReuseServices(pi: ExtensionAPI, ctx: ExtensionContext): Service
     mainSessionFile: cachedMainSessionFile,
     // 注入 ctx.ui.setWidget 作为 streaming sink（只绑方法，不持有整个 ctx）。
     // background subagent 执行期间，text_delta 经 SubagentStream 合并后由此通道转发。
-    // [W1 修复] ctx.mode === 'rpc' 守卫：TUI/json/print 下 streamSink = undefined（无 widget 噪音），
+    // [W1 修复] ctx.mode === 'rpc' 检查：TUI/json/print 下 streamSink = undefined（无 widget 噪音），
     // rpc mode（GUI/taiji）下保持原行为（ctx.ui.setWidget → sidecar → chatStore）。
     // streamSink API 不变（SubagentStream.onDelta 仍可调，只是 TUI 下 stream 不会被创建）。
     streamSink: ctx.mode === "rpc"
@@ -519,7 +519,7 @@ async function runProcessLevelMaintenance(
   try {
     // 引擎 journal TTL 回收（30 天 mtime）+ worktree .patch 孤儿清扫（同 TTL，仅
     // *.patch 两层枚举——按 branch 命名无会话锚，级联引用并集无锚可达，唯一 mtime
-    // 兜底通道）属进程级维护——oncePerProcess 守卫防双跑（u-audit-fix）。接线即扫
+    // 兜底通道）属进程级维护——oncePerProcess 检查防双跑（u-audit-fix）。接线即扫
     // 一次 + 24h 定时复扫（unref 不 hold 进程退出，对齐 main 侧 log-retention 形态）。
     // 子代理会话文件（*.jsonl / sidecar / manifest / *.events）不在本维护面——回收归
     // 删主会话级联（runtime session-content-cascade，2026-10-12 裁决）。
@@ -534,7 +534,7 @@ async function runProcessLevelMaintenance(
   // ADR-035 启动清扫：manifest tmp 残留（崩溃打断的 writeManifest 留下）。
   // [U4c / D6] tmp 恢复退役为静默删除——manifest 已是可丢可重建缓存（权威 =
   // `.state`，重建走下方 rebuildIndexes 钩子），promote 半写 tmp 的恢复语义失效。
-  // 扫描属进程级维护——oncePerProcess 守卫防双跑（u-audit-fix）；第二派发重放首次
+  // 扫描属进程级维护——oncePerProcess 检查防双跑（u-audit-fix）；第二派发重放首次
   // Promise（结果缓存语义），deleted 计数日志可能重打，无文件副作用。
   try {
     const swept = await oncePerProcess("subagent-workflow:sweep-manifest-tmp-files", () =>
@@ -548,10 +548,10 @@ async function runProcessLevelMaintenance(
     });
   }
 
-  // [U4c / G1] 缓存降级重建（boot 全量腿）：boot revive 已完成（createOrReuseServices
+  // [U4c / G1] 缓存降级重建（boot 全量路径）：boot revive 已完成（createOrReuseServices
   // 内 initSession 的孤儿恢复/可重连 entry 重物化先于本 helper），此处全量重建可丢
   // 缓存——manifest 幂等补缺 + sessions-index 经首扫自愈重写。进程级维护（磁盘域
-  // 全量），oncePerProcess 守卫防双跑；/resume /fork 同进程复用实例时跳过（查询面
+  // 全量），oncePerProcess 检查防双跑；/resume /fork 同进程复用实例时跳过（查询面
   // 惰性通道兜底，且终态写点本身维持 manifest 就位）。
   try {
     oncePerProcess("subagent-workflow:rebuild-record-indexes", () =>
@@ -564,7 +564,7 @@ async function runProcessLevelMaintenance(
 
   try {
     // ADR-035：worktree reaper 扫描（git/rm 进程操作 + 注册表/目录扫描）属进程级
-    // 维护——oncePerProcess 守卫防双跑（u-audit-fix）。默认每次扫描新建
+    // 维护——oncePerProcess 检查防双跑（u-audit-fix）。默认每次扫描新建
     // WorktreeManager（现状语义）；deps.worktreeManager 供测试注入 fake（scanCalls 计数）。
     await oncePerProcess("subagent-workflow:worktree-scan", async () => {
       const wtm = deps.worktreeManager ?? new WorktreeManager(agentDir);
@@ -582,7 +582,7 @@ async function runProcessLevelMaintenance(
   // getSubagentRecordsDir(agentDir, rootCwd)，rootCwd 推导与 SubagentService 构造点
   // （SessionBaselines）同式：env 贯穿 ?? ctx.cwd 兜底，env 名单源 ENV_ROOT_CWD——
   // enc 段不漂移（sessions 与 records 两目录同源不变量）。进程级维护幂等，
-  // oncePerProcess 守卫防双跑；/resume /fork 同进程复用时跳过（record-only 会话
+  // oncePerProcess 检查防双跑；/resume /fork 同进程复用时跳过（record-only 会话
   // 的持续累积由 record 首写触发点 RecordStore.register 覆盖）。
   try {
     await oncePerProcess("subagent-workflow:retention-maintenance-round", async () => {
@@ -603,7 +603,7 @@ async function runProcessLevelMaintenance(
       // [裁决点 7]（workflow-run-resume-revision）孤儿 run 对账清理：引用集采集 =
       // 壳侧注入面（core 不 import pi SDK——全池 session 文件流式扫描，v2 注册
       // 条目 ∪ v1 快照条目 ∪ pre-W17 link 指针三代解析的并集）。同维护轮触发点、
-      // 同 oncePerProcess 守卫（幂等整轮）；宽限窗缺省 7 天（env 可调）。
+      // 同 oncePerProcess 检查（幂等整轮）；宽限窗缺省 7 天（env 可调）。
       // 触发面 = 全部 state 目录（对齐 core pi-host-run-store 枚举口径：agentDir
       // 根回退 + sessions/<slug>/workflow-state 全目录 + 本 session 锚定目录）——
       // 「引用 session 全删的目录」的残留 run 对本 session 维护轮结构性可达，判定
@@ -668,7 +668,7 @@ interface SessionRunState {
  * 随迁块 5：per-session run store + runs + kill-9 崩溃恢复循环 + storeHealthy 跟踪。
  *
  * MF-1: store 健康度跟踪。loadAll 失败 → storeHealthy=false，workflow 域启动时 fail-fast。
- * 崩溃恢复四步（loadAll → failed → save → evict）收口到 core recoverCrashedRuns（D8：
+ * 崩溃恢复四步（loadAll → failed → save → evict）收敛到 core recoverCrashedRuns（D8：
  * 宿主各写一遍正是 failure-mode-B）；pending:unregister 经 hooks 外置回调在本面
  * appendEntry 直落（[W2/V4 D6] 与 reload-closeout D4 定案对齐——不经 emit；位置在
  * transition 后、save 前，对齐原内联实现）；save 走 store 冷路径（done 绕过去抖）——
@@ -712,10 +712,10 @@ async function createSessionRunState(
       // [B1 修复] 恢复不挂 oncePerProcess：loadAll 只认本 session 的 v2 注册
       // 条目（record 流折叠重建，W17 定界的现行形态）、收编即向本 run 的 record
       // 流追加 run-interrupted 转移事件（不覆盖任何文件，天然幂等）——恢复是
-      // session 级幂等操作，挂进程级守卫会让同进程的后续 session_start（如 /new
+      // session 级幂等操作，挂进程级检查会让同进程的后续 session_start（如 /new
       // 后 /resume 一个上次崩溃退出的 session）重放首次 Promise、跳过 loadAll，
       // 该 session 的 running 残留既不收编也不进 run 列表。reload 的防误杀由上方
-      // opts.skipRecovery（分流处按 reason 判定）承担，无需进程级守卫。
+      // opts.skipRecovery（分流处按 reason 判定）承担，无需进程级检查。
       const { loaded, recovered } = await recoverCrashedRuns(
         store,
         runs,
@@ -728,7 +728,7 @@ async function createSessionRunState(
             // reload 转换内）；pending 域消费方全部从持久化 entries 现算，直落对其
             // 即时生效。status 经 protocol mapReasonToStatus 单点（与 finalizeRun
             // 直落 / reconcile-sweep 补注销同一函数）；抛错由 core 侧 hook 围栏
-            // warn 留痕后恢复循环继续，差集残留交 reconcile-sweep 下次收口。
+            // warn 留痕后恢复循环继续，差集残留交 reconcile-sweep 下次收尾。
             pi.appendEntry(PENDING_UNREGISTER_ENTRY_TYPE, {
               id: payload.id,
               reason: payload.reason,
@@ -736,7 +736,7 @@ async function createSessionRunState(
             });
           },
           // [W1 / D4] 收编终态条目补写（恢复链收编的条目半边）：core 在 journal
-          // run-settled 落账后回调本面，v2 终态条目经当前 pi appendEntry 落主
+          // run-settled 写入 journal 记录后回调本面，v2 终态条目经当前 pi appendEntry 落主
           // session（注册 + 终态两条 v2 小条目的收编补齐；本 store loadAll 对
           // 「journal 已终局而条目缺失」形态的幂等补写与此同构）。围栏在 core 消费
           // 侧（同步抛错 warn 后恢复循环继续，lifecycle.ts hooks 契约）。
@@ -782,7 +782,7 @@ async function tryAdoptExistingSession(
   }
   try {
     // D3 rebind：store 实例跨 reload 存活（this 引用不变），原地改写 .pi/.ctx；
-    // 换入的 appendEntry 源带 stale guard（D5）。[D1] record 单源后 store 无投影
+    // 换入的 appendEntry 源带 stale guard（D5）。[D1] record 单源后 store 无派生视图
     // 物化面（原 D4 快照重发随 state 快照删除而退役）——接管动作收敛为 rebind，
     // 后续 v2 终态条目补写自动走新 pi。
     existing.store.rebind(pi, ctx);
@@ -866,7 +866,7 @@ export async function setupSessionLifecycle(
 
   // [U7] 引擎列表同步 engines.json（幂等零写 + fail-safe；组合根注册已在
   // extension 工厂体完成，此处 registry 已含全部引擎）。写 agentDir 全局文件属
-  // 跨 session 副作用——oncePerProcess 守卫防 factory 二调/handler 累积双跑（u-audit-fix）。
+  // 跨 session 副作用——oncePerProcess 检查防 factory 二调/handler 累积双跑（u-audit-fix）。
   oncePerProcess("subagent-workflow:sync-engines-file", () => syncEnginesFile(agentDir));
 
   // skill 路径两级缓存 session 级失效：pi 同进程可能有多个 session（TUI /new、/fork），
@@ -885,7 +885,7 @@ export async function setupSessionLifecycle(
     : createOrReuseServices(pi, ctx);
 
   // ── GC / manifest tmp / worktree 恢复（随迁块 4）──
-  // [skill-reload D4] 两分支都保留：进程级维护幂等重跑无害（oncePerProcess 守卫 Map
+  // [skill-reload D4] 两分支都保留：进程级维护幂等重跑无害（oncePerProcess 检查 Map
   // 是模块级状态，reload 后归零属预期——D9）。
   await runProcessLevelMaintenance(agentDir, ctx, service, deps);
 
