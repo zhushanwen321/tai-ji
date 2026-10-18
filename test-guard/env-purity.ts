@@ -5,7 +5,7 @@
 // identity-env 的 SUBAGENT_IDENTITY_ENV，跨进程 spawn 时写入）被测试进程原样继承，
 // 与「测试进程是根进程」的默认语义基线冲突，两处假红同根：
 //   1. subagent-core：SubagentService.initSession 读 PI_SUBAGENT_SELF_RECORD_ID 建
-//      嵌套基线 → coldLookup 跨层归属守卫误拒根层 record（成员复用 revive 假红）；
+//      嵌套基线 → coldLookup 跨层归属检查误拒根层 record（成员复用 revive 假红）；
 //   2. subagent-workflow：session_start 兜底维护轮读 PI_SUBAGENT_ROOT_CWD 推
 //      recordsDir 编码段 → 锚进宿主真实 cwd 段（测试 seed 在 fake ctx cwd 段）→
 //      裁剪轮扫空目录（retention 断言假红）。

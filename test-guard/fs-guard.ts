@@ -39,7 +39,7 @@
  * （FS_SYNC_FNS / FS_ASYNC_FNS），两工厂共用防分叉漏挂；[2026-09-17] 缺口复盘：旧版
  * node:fs 工厂只挂 FS_SYNC_FNS，callback 版十函数与 fs.promises 访问器整面透传
  * （探针实证 PASSTHROUGH 到真实 fs 层），G1 防线自检（fs-guard.test.ts 名单完备性 +
- * 四访问面探针）守卫回归。
+ * 四访问面探针）防回归。
  *
  * 边界（有意为之）：
  * - 只拦写/删/移动，不拦读——vitest 模块加载与源码 import 本身就是海量读 IO，拦读会
@@ -60,10 +60,10 @@ import { vi } from 'vitest'
 
 import { repinDataDirEnv } from './fs-guard-impl.js'
 
-// env 钉扎漂移恢复：本 setupFile 先于每个测试文件执行。worker 进程复用形态（isolate=false）
+// env 固定值漂移恢复：本 setupFile 先于每个测试文件执行。worker 进程复用形态（isolate=false）
 // 下前序文件的 process.env 变更（afterEach delete TAIJI_AGENT_DATA_DIR 等）会跨文件泄漏，
 // 使后续文件的 getSessionsDir() 缺省解析到真实 ~/.taiji（2026-09-22 import-service 污染
-// 事故的 env 腿）。首次执行记录 globalSetup 钉扎值，后续执行发现漂移即恢复——模块注册表
+// 事故的 env 路径）。首次执行记录 globalSetup 固定值，后续执行发现漂移即恢复——模块注册表
 // 每文件重建，故记录值挂 globalThis 存续（详见 fs-guard-impl.ts repinDataDirEnv）。
 repinDataDirEnv()
 

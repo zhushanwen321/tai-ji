@@ -79,7 +79,7 @@ const stderr = process.stderr;
 let sock = null;
 /** 握手已被 runtime accept，进入双向泵模式。 */
 let handshakeAccepted = false;
-/** 退出流程已启动（幂等守卫——error 后必发 close，防双退出路径竞态）。 */
+/** 退出流程已启动（幂等检查——error 后必发 close，防双退出路径竞态）。 */
 let exiting = false;
 /** socket 按行解析的残留缓冲（JSONL 帧）。 */
 let lineBuf = "";

@@ -1,7 +1,7 @@
 /**
  * 品味规则（data-source-governance R3）：模块级缓存必须带 @data-owner 注解且条目真实
  *
- * 模块级可变缓存（new Map/Set/WeakMap、ref/shallowRef/reactive）是「数据多源」病灶的
+ * 模块级可变缓存（new Map/Set/WeakMap、ref/shallowRef/reactive）是「数据多源」问题点的
  * 高发形态（影子状态/第二写方都从这里长出来，见 data-source-governance.md §2.2）。
  * 新增必须先登记 owner 再写代码（登记表 §5 维护规约第 5 条），本规则强制该顺序可机检：
  * 声明处缺 `@data-owner <登记表条目编号>` 注释，或引用的编号不在登记表内 → 报错。

@@ -236,7 +236,7 @@ test('R2/W24: 转发违规 + 行内豁免注释 → 通过', () => {
   expect(messages).toHaveLength(0);
 });
 
-// ── W24 R2 逃逸收口用例（verifier 打回 major：双重逃逸静默绕过路径）─────────
+// ── W24 R2 逃逸收尾用例（verifier 打回 major：双重逃逸静默绕过路径）─────────
 
 test('R2/W24: 表达式体箭头工厂 const grab = () => useSessionStore() → grab().applySnapshot 报错', () => {
   const messages = lint(
@@ -279,7 +279,7 @@ test('R2/W24: 对象方法包装 box.grab().applySnapshot（MemberExpression rec
   expect(messages[0].message).toMatch(/grab/);
 });
 
-test('R2/W24: 非 store 的表达式体箭头 / 对象方法返回值调 applySnapshot → 通过（收口不扩大误报面）', () => {
+test('R2/W24: 非 store 的表达式体箭头 / 对象方法返回值调 applySnapshot → 通过（收尾不扩大误报面）', () => {
   const messages = lint(
     'import { useSessionStore } from "@/stores/session"\n' +
       'const keepFactoryVisible = useSessionStore\n' +

@@ -55,7 +55,7 @@ jobs:
       # bin 时会静默从 registry 拉最新版运行（行为漂移而非报错，PR #185 review R2 INFO）。
       # 经专用 script 承接：根 vitest.config.ts exclude 了 taste-lint/**，根 cwd 直接
       # `vitest run taste-lint` 收集不到任何文件（曾实发 No test files found）——专用
-      # config + 目标非空守卫见 scripts/check-ci-vitest-targets.mjs（G2，invariants）。
+      # config + 目标非空检查见 scripts/check-ci-vitest-targets.mjs（G2，invariants）。
       - name: Test - taste-lint rules
         run: pnpm run test:taste-lint
 
@@ -270,8 +270,8 @@ jobs:
         run: pnpm install --frozen-lockfile
 
       # pi-subagent-cli 的 bin 真机协议 e2e（protocol-e2e / protocol-chat-e2e）spawn
-      # dist/main.js（dist-first 加载），dist-fresh 守卫对缺失产物 fail-fast——fresh
-      # checkout 无 dist，测试前必须先构建（8c64c7c4a 守卫注释「CI 恒新构建」的前提在此补齐）。
+      # dist/main.js（dist-first 加载），dist-fresh 检查对缺失产物 fail-fast——fresh
+      # checkout 无 dist，测试前必须先构建（8c64c7c4a 检查注释「CI 恒新构建」的前提在此补齐）。
       - name: Build pi-subagent-cli
         run: pnpm --filter @zhushanwen/pi-subagent-cli build
 
@@ -280,7 +280,7 @@ jobs:
 
       # builtin taiji 插件（resources/plugins/<name>/）单测：经根 test:resources-plugins
       # script 走 --config 指入（config root 钉在插件目录，cwd 无关），目标非空由
-      # check-ci-vitest-targets 守卫覆盖；当前成员 scheduler-manager，新插件装配测试后
+      # check-ci-vitest-targets 检查覆盖；当前成员 scheduler-manager，新插件装配测试后
       # 在 script 追加同形 --config 段。
       - name: Test - builtin plugins (resources)
         run: pnpm test:resources-plugins
@@ -290,7 +290,7 @@ jobs:
       #（gitignored，fresh checkout 不存在）——先 prepare 再跑。pnpm exec 同 taste-lint step
       # 理由（显式本地 bin，防 npx registry 静默拉版）。
       # .agents 实体已脱离 git 跟踪（workspace 根单一实体 + worktree symlink，ADR 见
-      # docs/adr/decisions.md）——CI 从 skills snapshot ref 物化出 .agents 树供守卫读取；
+      # docs/adr/decisions.md）——CI 从 skills snapshot ref 物化出 .agents 树供检查读取；
       # snapshot 缺失时 fail-fast 给修复指引（设计 cross-worktree-skill-sync.md D4/U4）。
       - name: Materialize .agents from skills snapshot
         run: |
@@ -309,32 +309,32 @@ jobs:
       # R1-R3 新增 scripts 层护栏测试（check-unsafe-stream-writes / check-core-dist-gate /
       # gitcode-release-sync，纯函数 + mock fetch，不依赖 staged 产物）接入 CI——护栏测试
       # 自身也需要回归保护。
-      # npm-publish-surface-guard u3 同批追加 check-publish-surface（发布面守卫本体单测，
+      # npm-publish-surface-guard u3 同批追加 check-publish-surface（发布面检查本体单测，
       # vitest + tmpdir fixture 同上惯例）。
       # session-root-discovery R2-MF1 同批追加 check-layout-literals / check-provider-credential-reads
-      # （守卫正则/白名单回归，同上 fixture 惯例不依赖 staged 产物）。
+      # （检查正则/白名单回归，同上 fixture 惯例不依赖 staged 产物）。
       # 逐文件列举刻意维持（禁改目录级 vitest run scripts/__tests__/——builtin-ext-bundle.test.mjs
       # 依赖上方 prepare 步骤的 staged 产物，目录级会把所有未登记测试一并拉进本 step）。
       # constraints-registry 复审同批追加 validate-constraints（约束登记校验函数本体单测，
       # 只读仓库既有文件不依赖 staged 产物，同上 fixture 惯例）。
-      # thinking-levels 守卫测试同批追加 check-thinking-levels（纯函数 + tmp mirror CLI 集成，
-      # mirror 内复制守卫副本运行、pi-ai 走 node_modules symlink，不依赖 staged 产物）。
-      # G5 注释 docs 引用守卫同批追加 check-doc-symbol-drift（纯函数 + tmpdir fixture +
+      # thinking-levels 检查测试同批追加 check-thinking-levels（纯函数 + tmp mirror CLI 集成，
+      # mirror 内复制检查副本运行、pi-ai 走 node_modules symlink，不依赖 staged 产物）。
+      # G5 注释 docs 引用检查同批追加 check-doc-symbol-drift（纯函数 + tmpdir fixture +
       # 真实仓库 tracked .md 名字集只读断言，不依赖 staged 产物，同上 fixture 惯例）。
-      # guide-contract-projection 守卫测试同批追加（R1 评审：守卫已接线 pre-commit 而自身
+      # guide-contract-projection 检查测试同批追加（R1 评审：检查已接线 pre-commit 而自身
       # 无测试，tmp mirror × spawnSync 同 check-thinking-levels 惯例，不依赖 staged 产物）。
-      # infra-services-import 守卫测试同批追加（R1 评审 MF-1-15：.githooks py 守卫已接线
+      # infra-services-import 检查测试同批追加（R1 评审 MF-1-15：.githooks py 检查已接线
       # pre-commit 而无测试，tmp mirror × spawnSync python3 同族惯例，不依赖 staged 产物）。
       # scheduler e2e 判定器单测同批追加（MF-1-13：判定器自错 = e2e 假绿/假红不可辨，
       # 纯函数族抽至 scripts/lib/scheduler-e2e-judgers.cjs 直测，不依赖 staged 产物）。
       # render-sampling 管道判定层单测同批追加（MF-1-22：复用管道判定逻辑出错 = 静默
       # 产物污染，抽取自 scripts/render-sampling/decisions.mjs，jsdom 直测浏览器侧
       # 同一函数体，不依赖 staged 产物）。
-      # 领域类型路径单源守卫测试同批追加（D2：守卫本体已接线 pre-commit 与上方 CI step
-      # 而自测漏登记则 CI 零执行面，tmpdir 自建树 × --root 注入直测守卫本体，
+      # 领域类型路径单源检查测试同批追加（D2：检查本体已接线 pre-commit 与上方 CI step
+      # 而自测漏登记则 CI 零执行面，tmpdir 自建树 × --root 注入直测检查本体，
       # 不依赖 staged 产物）。
-      # chat-html-support u1/u-artifacts 两条对拍守卫测试同批追加（R1 一致性审查：守卫本体 +
-      # pre-commit 触发段已交付而守卫自身无回归测试、--self-test 无自动化挂载点——比较逻辑
+      # chat-html-support u1/u-artifacts 两条对拍检查测试同批追加（R1 一致性审查：检查本体 +
+      # pre-commit 触发段已交付而检查自身无回归测试、--self-test 无自动化挂载点——比较逻辑
       # 退化时无红灯；tmp mirror × spawnSync 同 check-thinking-levels 惯例，不依赖 staged 产物）。
       - name: Test - scripts guards
         run: pnpm exec vitest run scripts/__tests__/check-unsafe-stream-writes.test.mjs scripts/__tests__/check-core-dist-gate.test.mjs scripts/__tests__/gitcode-release-sync.test.mjs scripts/__tests__/check-publish-surface.test.mjs scripts/__tests__/check-layout-literals.test.mjs scripts/__tests__/check-provider-credential-reads.test.mjs scripts/__tests__/vue-rules-split-justified.test.mjs scripts/__tests__/check-subagent-service-boundary.test.mjs scripts/__tests__/check-subagent-core-value-cycles.test.mjs scripts/__tests__/check-global-slot-keys.test.mjs scripts/__tests__/check-record-write-surface.test.mjs scripts/__tests__/validate-constraints.test.mjs scripts/__tests__/check-thinking-levels.test.mjs scripts/__tests__/check-ci-vitest-targets.test.mjs scripts/__tests__/check-doc-symbol-drift.test.mjs scripts/__tests__/check-guide-contract-projection.test.mjs scripts/__tests__/check-infra-services-import.test.mjs scripts/__tests__/verify-scheduler-e2e.test.mjs scripts/__tests__/render-sampling-decisions.test.mjs scripts/__tests__/check-domain-type-path.test.mjs scripts/__tests__/check-capability-allowlist-sync.test.mjs scripts/__tests__/check-artifact-dir-formula-sync.test.mjs scripts/__tests__/check-posix-resolve-mirror-sync.test.mjs
@@ -398,7 +398,7 @@ jobs:
   # macos-latest 与 e2e-visual 一致（macOS 是 Electron 主开发平台，无需 xvfb）。圈定 SSOT =
   # playwright.config.ts electron-smoke project 的 grep 标签；用例名单与四层定位框架见
   # docs/TEST-STRATEGY.md「e2e 资产归宿纪律」。real 轨 spec（*-real）不进本 job（需真实 runtime
-  # /可能烧 token，归 L2 dev-flow 按改动面触发）。
+  # /可能烧 token，归 L2 dev-flow 按改动范围触发）。
   e2e-behavior:
     name: E2E Behavior P0 smoke (mock)
     runs-on: macos-latest
@@ -437,7 +437,7 @@ jobs:
   # - 后两步等效实现 scripts/validate-runtime-bundle.sh 的静态段（[2/6] noExternal、
   #   [3/6] 源码禁令）——该脚本无 preflight 模式，第 [1/6] 步起需构建产物无法在 CI
   #   单独跑静态段，故等效实现并注明同步维护：改脚本对应段时须同步本 job。
-  # - U7b 新增：G1 pi 语义登记守卫 + G4 subagent 通道禁则（--all 全仓模式）。
+  # - U7b 新增：G1 pi 语义登记检查 + G4 subagent 通道禁则（--all 全仓模式）。
   # 只加红灯：不进 build needs，不阻塞发布链。
   invariants:
     name: Invariants
@@ -460,12 +460,12 @@ jobs:
           ELECTRON_SKIP_BINARY_DOWNLOAD: '1'
         run: pnpm install --frozen-lockfile
 
-      # C-proc-11 发布面一致性守卫（docs/design/npm-publish-surface-guard.md §3.3 D2）：
+      # C-proc-11 发布面一致性检查（docs/design/npm-publish-surface-guard.md §3.3 D2）：
       # dist 发布包 files 白名单 ↔ 构建产出双向对齐（幽灵条目 / 产物目录反向覆盖 /
       # 自包含探针 / workspace 依赖发布闭包）。dist 产物被 .gitignore、干净 checkout
       # 上必红，刻意不挂 pre-commit（与 extensions 方向的刻意不对称，设计 D2）——
       # pre-commit 之外的 CI 面同源拦截（D7 通则，同 D9-① 挂载理由）：先构建 9 包
-      # 10 档再同源直调守卫，漂移在 PR 软拦截而非发布现场硬拦截（两级拦截等级声明
+      # 10 档再同源直调检查，漂移在 PR 软拦截而非发布现场硬拦截（两级拦截等级声明
       # 见设计 D2）。
       - name: Build dist packages (publish surface guard)
         run: |
@@ -489,10 +489,10 @@ jobs:
       - name: ENV whitelist SSOT check
         run: python3 .githooks/check_env_whitelist_sync.py
 
-      # 非 workspace 结构接线对账（S1，PR #20 组 D 守卫化；与 pre-commit 结构接线段同源——
+      # 非 workspace 结构接线对账（S1，PR #20 组 D 改为检查；与 pre-commit 结构接线段同源——
       # D7 通则：pre-commit 之外的 CI 面同源拦截，防本地 hook 被绕过）
       # .agents 实体已脱离 git 跟踪（workspace 根单一实体 + worktree symlink，ADR 见
-      # docs/adr/decisions.md）——CI 从 skills snapshot ref 物化出 .agents 树供守卫读取；
+      # docs/adr/decisions.md）——CI 从 skills snapshot ref 物化出 .agents 树供检查读取；
       # snapshot 缺失时 fail-fast 给修复指引（设计 cross-worktree-skill-sync.md D4/U4）。
       - name: Materialize .agents from skills snapshot
         run: |
@@ -505,7 +505,7 @@ jobs:
       - name: Structure wiring check (non-workspace packages)
         run: node scripts/check-structure-wiring.mjs
 
-      # runtime-layering §3 表行 ↔ 守卫 DOCUMENTED_MODULES 双向对账（S2②，与 pre-commit
+      # runtime-layering §3 表行 ↔ 检查侧 DOCUMENTED_MODULES 双向对账（S2②，与 pre-commit
       # 架构约束登记段同源）
       - name: Layering registry sync check
         run: python3 .githooks/check_layering_registry_sync.py
@@ -564,7 +564,7 @@ jobs:
           console.log("noExternal parity OK (" + noExternal.size + " entries)");
           '
 
-      # 包边界守卫（PR #185 review R1 F-3 / R2 S-6）：runtime→core 跨包相对 import 对依赖图
+      # 包边界检查（PR #185 review R1 F-3 / R2 S-6）：runtime→core 跨包相对 import 对依赖图
       # 工具不可见（package.json / pnpm-lock 均无此边），仅靠注释契约。两条断言：
       #  1. runtime 生产代码（排除 __tests__ 等价性测试直连源码模式）中 from '<相对>/core/src'
       #     只许出现在 infra/pi/message-converter.ts（apply-entry 入口，W21/W22 包边界重评收敛）；
@@ -601,15 +601,15 @@ jobs:
           console.log("apply-entry closure OK (shared + intra-directory only)");
           '
 
-      # G1 pi 语义登记守卫（pi-boundary-reliability §3.3 D7，与 pre-commit 同源直调）：
+      # G1 pi 语义登记检查（pi-boundary-reliability §3.3 D7，与 pre-commit 同源直调）：
       # registry schema / 探针存在性 / pi 三包 + runtime pin 四包版本门禁。
       # 注：docs/** 在 paths-ignore 内——pi-semantics.json 单独变更不触发 CI，
       # 此步覆盖代码/依赖侧变更（已知边界，D7 护栏设计通则登记）。
       - name: pi semantics registry guard (G1)
         run: node scripts/check-pi-semantics.mjs
 
-      # 引擎包边界守卫（W9，subagent-engine-protocolization，与 pre-commit 同源直调）：
-      # ① W1 SDK 边界（SDK 不得 import core，.githooks 守卫随 W9 挂载链同步进 CI）；
+      # 引擎包边界检查（W9，subagent-engine-protocolization，与 pre-commit 同源直调）：
+      # ① W1 SDK 边界（SDK 不得 import core，.githooks 检查随 W9 挂载链同步进 CI）；
       # ② W9 引擎包边界（packages/subagent-engine-* + pi/zcode-subagent-cli 不得
       # 依赖/导入 core 内部路径 + DoD#2 exports/barrel 断言）。
       - name: Engine package boundary guards (W9)
@@ -618,14 +618,14 @@ jobs:
           node scripts/check-engine-package-boundary.mjs
           node packages/subagent-core/scripts/check-engine-spawn-guard.mjs
 
-      # pi 构建期派生锚点守卫（pi-evolution-consistency §3.2 方向 1A / D2，与 pre-commit 同源直调）：
+      # pi 构建期派生锚点检查（pi-evolution-consistency §3.2 方向 1A / D2，与 pre-commit 同源直调）：
       # 声明基准（build.yml env / prepare 脚本默认值 / extensions peerDeps 对根 package.json）
       # + 实装基准（快照 piAiVersion / 快照新鲜度 / KNOWN_PI_API_TYPES / pi-tui 对 node_modules）。
-      # 与上行 G1 逐项零重叠（§2.1 分工声明）：语义漂移归 check-pi-semantics，派生锚点跟随归本守卫。
+      # 与上行 G1 逐项零重叠（§2.1 分工声明）：语义漂移归 check-pi-semantics，派生锚点跟随归本检查。
       - name: pi sync derived anchors guard
         run: node scripts/check-pi-sync.mjs
 
-      # pi 引擎域资产模型引用漂移守卫（workflow-architecture-redesign D8，与 pre-commit
+      # pi 引擎域资产模型引用漂移检查（workflow-architecture-redesign D8，与 pre-commit
       # 同源直调）：extensions/ agent 资产 frontmatter model 声明 vs 内置 provider 目录
       # 快照 diff。CI 无 staged 上下文——脚本本身即全量扫描模式，PR 面等价拦截（D7 通则）。
       - name: Model reference drift guard (D8)
@@ -633,7 +633,7 @@ jobs:
 
       # G3 思考档位差分探针（pi-boundary-reliability D7-G3「CI invariants 同步」）：
       # 能力注册表计算路径 vs pi-ai 同源函数直调逐模型比对——防 registry 自身漂移
-      #（U6 删 resolveAvailableLevels 后探针改守卫 registry，见脚本头注）。
+      #（U6 删 resolveAvailableLevels 后探针改为检查 registry，见脚本头注）。
       - name: Thinking diff probe (G3)
         run: node scripts/diff-probe-thinking.mjs
 
@@ -642,27 +642,27 @@ jobs:
       - name: Subagent channel bans (G4, full-repo)
         run: python3 .githooks/check_subagent_channels.py --all
 
-      # D9-① subagent-core 依赖闭包守卫（与 pre-commit 同源直调）：D9-① 闭包守卫：
+      # D9-① subagent-core 依赖闭包检查（与 pre-commit 同源直调）：D9-① 闭包检查：
       # pre-commit 之外的 CI 面——闭包红线（零 pi SDK / 零宿主专属依赖 + worker
       # 入口零宿主服务）在 PR invariants 上同源拦截，防本地 hook 被绕过（D7 通则，
       # 同上行 G4 的挂载理由）。
       - name: Subagent-core closure guard (D9-①)
         run: node scripts/check-subagent-core-closure.mjs
 
-      # C-data-26 subagent-core 包内值依赖环守卫（与 pre-commit 同源直调）：整包值
+      # C-data-26 subagent-core 包内值依赖环检查（与 pre-commit 同源直调）：整包值
       # import 图零环，类型擦除边豁免——CI 面是全量等价拦截点（D7 通则）。
       - name: Subagent-core value-cycle guard (C-data-26)
         run: node scripts/check-subagent-core-value-cycles.mjs
 
-      # C-state-20 进程级全局槽键归属守卫（与 pre-commit 同源直调）：Symbol.for 字面量
+      # C-state-20 进程级全局槽键归属检查（与 pre-commit 同源直调）：Symbol.for 字面量
       # 只允许出现在两处声明文件，前缀/唯一性同时校验。
       - name: Global slot-key ownership guard (C-state-20)
         run: node scripts/check-global-slot-keys.mjs
 
-      - name: 领域类型路径单源（D2 守卫）
+      - name: 领域类型路径单源（D2 检查）
         run: node scripts/check-domain-type-path.mjs
 
-      # H3 subagent-service 聚合边界守卫（与 pre-commit 同源直调；守卫全量扫描
+      # H3 subagent-service 聚合边界检查（与 pre-commit 同源直调；检查全量扫描
       # SERVICE_DIR 不依赖 staged 上下文）：聚合间值 import 禁 / 聚合→壳 import 禁 /
       # 跨聚合私有访问禁 / 支撑文件方向门 + 环检测——本地 hook 仅单一 worktree 生效
       #（core.hooksPath 局部安装），CI 面是跨 worktree 的等价拦截点（D7 通则，
@@ -670,7 +670,7 @@ jobs:
       - name: Subagent-service boundary guard (H3)
         run: node scripts/check-subagent-service-boundary.mjs
 
-      # H4 record 持久化写面守卫（与 pre-commit 同源直调；守卫全量扫描
+      # H4 record 持久化写面检查（与 pre-commit 同源直调；检查全量扫描
       # packages/*/src + extensions/**/src 不依赖 staged 上下文）：store 外 record
       # 写面直写（R1 六名写函数 + R2 subagent-record entry）零命中——本地 hook 按
       # staged 路径触发，触发面外的包在 CI 面等价拦截（D7 通则，同上行 H3 /
@@ -684,7 +684,7 @@ jobs:
       - name: Unsafe stream writes guard
         run: node scripts/check-unsafe-stream-writes.mjs
 
-      # A2 用户内容出站点守卫（adversarial-review-fixes D-A2-3，与 pre-commit 同源脚本）：
+      # A2 用户内容出站点检查（adversarial-review-fixes D-A2-3，与 pre-commit 同源脚本）：
       # runtime 的 .prompt( / .steer( / .followUp( 调用点必须登记白名单（文件 + 行内
       # 指纹 + 内容性质 + 注入状态），未登记新调用点即拦截——防新增用户内容出站通路
       # 忘挂 SkillInjector（MF-B @ 定向 / MF-C landing 首发同类缺口复发）。
@@ -696,10 +696,10 @@ jobs:
       - name: Alias-tsconfig sync guard
         run: node scripts/check-alias-tsconfig-sync.mjs
 
-      # vitest 防线挂载守卫（2026-09-16 误跑 workspace 全仓 vitest、runtime 包防线配置
+      # vitest 防线挂载检查（2026-09-16 误跑 workspace 全仓 vitest、runtime 包防线配置
       # 未加载致测试删除用户真实 ~/.taiji 数据目录的事故防线）：所有含 vitest 测试的包，
       # 其 vitest.config.ts 必须经仓库根 test-guard/factory 的 taijiTestConfig 包装
-      # （TAIJI_AGENT_DATA_DIR 钉死 + fs-guard 切面）。静态特征校验，不执行测试；
+      # （TAIJI_AGENT_DATA_DIR 固定 + fs-guard 切面）。静态特征校验，不执行测试；
       # 新包/新 config 漏挂防线在此红灯。
       - name: Vitest test-guard mount guard
         run: node scripts/check-vitest-guard.mjs
@@ -726,20 +726,20 @@ jobs:
       - name: P-bundle gate (staged driver spec runtime-resolved form)
         run: node scripts/check-pbundle.mjs --rebuild
 
-      # G2 CI vitest 目标非空守卫：解析本文件全部 `vitest run` 调用（含经 package.json
+      # G2 CI vitest 目标非空检查：解析本文件全部 `vitest run` 调用（含经 package.json
       # script 一层间接），逐目标 vitest list --filesOnly 干跑断言收集非空——防「目标被
       # config exclude / 路径漂移 → CI 步骤空跑」回归（taste-lint 步骤曾实发 No test
       # files found，每轮 CI 烧到该步才红）。
       - name: CI vitest targets non-empty guard (G2)
         run: node scripts/check-ci-vitest-targets.mjs
 
-      # G3 hook 脚本反模式守卫：install-hooks.sh 内 `VAR=$(cmd)` 赋值后紧跟 `EXIT=$?`
+      # G3 hook 脚本反模式检查：install-hooks.sh 内 `VAR=$(cmd)` 赋值后紧跟 `EXIT=$?`
       # 的组合在 set -e 下是死代码 + 吞诊断输出（赋值失败即整脚退出，$? 行永不可达），
       # 一律 if ! VAR=$(cmd) 形态（诊断可见、失败分支可达）。
       - name: Hook script antipattern guard (G3)
         run: python3 .githooks/check_hook_exitcode_antipattern.py
 
-      # review-fix-loop 双实现锁步守卫：pi 内置版（packages/subagent-core/workflows/）与
+      # review-fix-loop 双实现锁步检查：pi 内置版（packages/subagent-core/workflows/）与
       # zcode 原生版（~/.zcode/workflows/*.dwf.ts，版本控制外）必须保持调度/常量一致。
       # CI 环境无 zcode 副本，双实现对账自动跳过；但 pi 侧去重不变量（order 恒为输入
       # 的排列）与结构标记在跳过判定之前照跑且失败不被吞——这是本仓库侧唯一防线：

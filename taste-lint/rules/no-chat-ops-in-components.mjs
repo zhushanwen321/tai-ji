@@ -27,14 +27,14 @@
  * OPS_FIELDS 清单 SSOT = ChatStoreOps（packages/core/src/domain/chat/store.ts，
  * ChatStoreOps 与 ChatStoreReaders 的差集）；store.ts 内有编译期完备性/互斥断言
  * （_FacetCoversAllKeys / _FacetsDisjoint），字段增删时两处同步改，漂移由
- * scripts/check-chat-ops-sync.mjs 机器守卫拦截（双清单任一侧增删未同步即红灯）。
+ * scripts/check-chat-ops-sync.mjs 机器检查拦截（双清单任一侧增删未同步即红灯）。
  *
  * 误报豁免：无行内豁免通道（facet 边界是类型级事实不是裁量判断——字段该在哪个
  * 面由 store.ts 的编译期断言锚定，豁免诉求应改为修 facet 划分或下沉 composable）。
  */
 
 /** chat store ops 面字段清单（= ChatStoreOps 键集，与 ChatStoreReaders 互斥不重叠；
- *  排序同 store.ts facet，漂移由 scripts/check-chat-ops-sync.mjs 守卫拦截） */
+ *  排序同 store.ts facet，漂移由 scripts/check-chat-ops-sync.mjs 检查拦截） */
 const OPS_FIELDS = new Set([
   // 写操作
   'setChangeSetStatus', 'markChangeSetsSuperseded', 'markHistoryFailed',

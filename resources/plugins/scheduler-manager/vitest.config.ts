@@ -5,7 +5,7 @@
 // 目录为基准解析，无论从仓库根（根 package.json test:resources-plugins --config 指入）
 // 还是从本插件目录直接跑（coverage-gate run_coverage cwd），收集面一致、不依赖 cwd。
 // 防线纪律：全仓所有 vitest.config.ts 必须经仓库根 test-guard/factory 的 taijiTestConfig
-// 包装（TAIJI_AGENT_DATA_DIR 钉死 tmp + fs-guard 切面），漏挂由
+// 包装（TAIJI_AGENT_DATA_DIR 固定为 tmp + fs-guard 切面），漏挂由
 // scripts/check-vitest-guard.mjs 拦截（SCAN_ROOTS 已含 resources）。
 import { fileURLToPath } from 'node:url'
 import { taijiTestConfig } from '../../../test-guard/factory.ts'

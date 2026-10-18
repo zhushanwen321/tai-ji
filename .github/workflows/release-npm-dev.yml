@@ -71,7 +71,7 @@ jobs:
         if: steps.check_pre.outputs.should_publish == 'true'
         run: pnpm --filter @zhushanwen/subagent-core run build && pnpm --filter @zhushanwen/subagent-core run build:bundle
 
-      # W5/W7 引擎三包构建入口（MF-4 修复，约束 C-proc-11 三者闭合）。SDK 先于
+      # W5/W7 引擎三包构建入口（MF-4 修复，约束 C-proc-11 三者补齐）。SDK 先于
       # 两个引擎 CLI 构建（CLI dist 的 external 依赖在 npm 形态解析到 SDK dist）。
       # 与 Publish 同条件挂载——skip 分支不发布即不构建，维持「skip 整体绿」语义。
       # pi-rpc（C-proc-11 同批）：pi-subagent-cli dependencies 的 registry 解析目标，
@@ -115,7 +115,7 @@ jobs:
         if: steps.check_pre.outputs.should_publish == 'true'
         run: node scripts/smoke-core-dist.mjs
 
-      # 发布面一致性守卫（约束 C-proc-11，docs/design/npm-publish-surface-guard.md）：
+      # 发布面一致性检查（约束 C-proc-11，docs/design/npm-publish-surface-guard.md）：
       # 与正式线 release-npm.yml 同源直调（幽灵条目 + 反向覆盖 + 自包含探针）。
       # 与 Smoke / Publish 同条件挂载——skip 分支不发布，发布面校验无对象，
       # 空跑构建反而破坏「skip 整体绿」语义（npm-prerelease.sh 阶段 4 轮询

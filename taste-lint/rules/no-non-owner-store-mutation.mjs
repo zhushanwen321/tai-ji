@@ -10,9 +10,9 @@
  *    store 写通道 → 该形参在函数体内调受管 mutation → 报错（三层链：caller → f →
  *    mutation，W4 直呼版对形参形态不可见，本条是其超集证明）；
  * 3. 方法引用传递：`g(store.applySnapshot)` 把受管方法引用作为值传递（脱离接收者后
- *    可在任意回调内被调，等价转发）——W4 docstring 点名的检出边界，本版收口；
+ *    可在任意回调内被调，等价转发）——W4 docstring 点名的检出边界，本版收尾；
  * 4. 工厂包装：本文件函数 return store 表达式 → getStore().applySnapshot(...)。
- *    W24 R2 收口后覆盖四形态：函数 return 语句、表达式体箭头（const grab = () =>
+ *    W24 R2 收尾后覆盖四形态：函数 return 语句、表达式体箭头（const grab = () =>
  *    useSessionStore()——无 ReturnStatement 节点，收集进 pending 列表、Program:exit
  *    统一解析以消解「body 引用的绑定声明晚于箭头」词法序陷阱）、对象方法（const box =
  *    { grab() { return useSessionStore() } }——函数名取 Property key）及其调用点
@@ -241,7 +241,7 @@ export default {
         '包装不改变非许可文件写 store 的事实；豁免同上：登记表补例外 + 行内豁免注释。',
       detachedMethodRef:
         '受管 mutation 方法引用 {{mutation}} 被作为值传递/脱离 store 接收者持有（登记条目：{{entries}}）——' +
-        '脱离接收者后可在任意回调内被调，等价于转发写入口。合法路径：改为显式调用或在 owner 文件内收口；' +
+        '脱离接收者后可在任意回调内被调，等价于转发写入口。合法路径：改为显式调用或在 owner 文件内收敛；' +
         '确属合法：在 docs/architecture/data-source-registry.md 补条目/例外 + 行内豁免注释 taste:allow-non-owner-mutation。',
       stalePermittedEntry:
         '规则许可表引用的登记条目 {{entry}}（许可文件 {{suffix}}）不在 docs/architecture/data-source-registry.md ' +
@@ -382,7 +382,7 @@ export default {
             callee.object.type === 'Identifier' ||
             (callee.object.type === 'CallExpression' &&
               (callee.object.callee.type === 'Identifier' ||
-                // box.grab().applySnapshot()：receiver 工厂是对象方法调用（双重包装逃逸收口）
+                // box.grab().applySnapshot()：receiver 工厂是对象方法调用（双重包装逃逸收尾）
                 callee.object.callee.type === 'MemberExpression'))
           ) {
             candidates.push({

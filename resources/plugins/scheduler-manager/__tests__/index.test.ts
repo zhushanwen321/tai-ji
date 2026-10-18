@@ -5,15 +5,15 @@
  * 与注册的 command handlers，覆盖：
  * ① handleWrite 回执分支矩阵（accepted/command-missing/其余（hook-blocked/error）
  *    + 无效 id + TASK_NOT_FOUND 自愈）
- * ② doRefresh 的 E11 游标失效全量重拉与 E4 恢复两态（terminal vs recovering）
+ * ② doRefresh 的 E11 游标失效全量重新拉取与 E4 恢复两态（terminal vs recovering）
  * ③ 重试预算耗尽态稳定（不重试不清零，外部信号重置预算）
  * ④ 生命周期拆镜（onDidDestroySession → teardownMirror 后失效信号冻结）
  * ⑤ 恢复窗口写路径两支用户文案（写成功提示 restore 副作用 / 写抛错提示手动打开）
  * ⑥ onDidActivateSession 焦点切换（focusSessionId → 写命令链指向新会话 +
- *    ensureMirror 为新 sid 补挂 + 恢复超时失败态的激活重拉自愈）
+ *    ensureMirror 为新 sid 补挂 + 恢复超时失败态的激活时重新拉取自愈）
  * ⑦ 展示层三态分支（已过期「即将触发」两态文案 / 上次成败标记 + 失败原因行 /
- *    成功标记且无原因行——经首拉推树断言）
- * ⑧ 撤回信号镜像重建（'taiji:revoked' → 丢弃累计 + 全量重拉，折叠不含被撤任务；
+ *    成功标记且无原因行——经首次拉取推树断言）
+ * ⑧ 撤回信号镜像重建（'taiji:revoked' → 丢弃累计 + 全量重新拉取，折叠不含被撤任务；
  *    任务域订阅仍走增量不误重建）
  * ⑨ hidden 入口可见性（空清单 true / 有任务 false；读失败态保持上次值）
  *
@@ -302,10 +302,10 @@ afterEach(() => {
   vi.useRealTimers()
 })
 
-// ── 激活链 + 首拉（其余用例的前置语义，独立断言）────────────────────────────
+// ── 激活链 + 首次拉取（其余用例的前置语义，独立断言）────────────────────────────
 
-describe('activate: 冷启动兜底 + 首拉折叠 + 徽标', () => {
-  it('list() 兜底焦点会话，防抖后全量首拉，徽标 = 启用任务数', async () => {
+describe('activate: 冷启动兜底 + 首次拉取折叠 + 徽标', () => {
+  it('list() 兜底焦点会话，防抖后全量首次拉取，徽标 = 启用任务数', async () => {
     const h = await setup({
       readScript: [
         {
@@ -492,7 +492,7 @@ describe('handleWrite: 回执分支矩阵', () => {
 
     expect(h.sendCalls).toHaveLength(0)
     expect(ansiLines(h.lastTree())).toContain('任务已不存在，列表已刷新')
-    // 自愈：防抖重拉已武装，推进后 readEntries 第二次（带游标增量）
+    // 自愈：防抖重新拉取已武装，推进后 readEntries 第二次（带游标增量）
     await vi.advanceTimersByTimeAsync(READ_DEBOUNCE_MS)
     expect(h.readCalls).toHaveLength(2)
     expect(h.readCalls[1]?.opts.sinceEntryId).toBe('e1')
@@ -501,8 +501,8 @@ describe('handleWrite: 回执分支矩阵', () => {
 
 // ── ② E11 游标失效 + E4 恢复两态（guidance MF-1-7 第 2 块）───────────────────
 
-describe('doRefresh: E11 游标失效全量重拉', () => {
-  it('增量抛 Entry not found → 清累计清游标 → 无 sinceEntryId 全量重拉', async () => {
+describe('doRefresh: E11 游标失效全量重新拉取', () => {
+  it('增量抛 Entry not found → 清累计清游标 → 无 sinceEntryId 全量重新拉取', async () => {
     const h = await setup({
       readScript: [
         { sessionFile: SESSION_FILE, entries: [upsertEntry('aaaabbbb', true, 'e1')], leafEntryId: 'e1' },
@@ -527,7 +527,7 @@ describe('doRefresh: E11 游标失效全量重拉', () => {
     expect(console.warn).toHaveBeenCalledWith(
       expect.stringContaining('cursor invalidated, full re-pull'),
     )
-    // 折叠结果 = 全量重拉后的 2 任务
+    // 折叠结果 = 全量重新拉取后的 2 任务
     expect(lastHeaderAction(h.api).badge).toBe('2')
   })
 })
@@ -603,7 +603,7 @@ describe('scheduleRetry: 预算耗尽态稳定', () => {
     await vi.advanceTimersByTimeAsync(READ_RETRY_MS * READ_RETRY_MAX)
     expect(h.readCalls).toHaveLength(1 + READ_RETRY_MAX)
 
-    // 外部信号（会话侧新证据）→ scheduleRefresh 重置预算 + 防抖重拉
+    // 外部信号（会话侧新证据）→ scheduleRefresh 重置预算 + 防抖重新拉取
     h.invalidate('s-1')
     await vi.advanceTimersByTimeAsync(READ_DEBOUNCE_MS)
     expect(h.readCalls).toHaveLength(1 + READ_RETRY_MAX + 1)
@@ -661,7 +661,7 @@ describe('onDidDestroySession: 生命周期拆镜', () => {
 describe('handleWrite: 恢复窗口两支文案', () => {
   const TASK = 'aaaabbbb'
 
-  /** 前置 = 首拉成功（快照留任务）→ 失效重拉抛 SESSION_NOT_ACTIVE → 恢复窗口中 */
+  /** 前置 = 首次拉取成功（快照留任务）→ 失效重新拉取抛 SESSION_NOT_ACTIVE → 恢复窗口中 */
   async function recoveringSetup(opts: {
     sendMessageReceipt?: SendReceipt
     sendMessageError?: Error
@@ -712,9 +712,9 @@ describe('onDidActivateSession: 焦点切换 + ensureMirror 补挂', () => {
     const SESSION_FILE_2 = '/sessions/s-2.jsonl'
     const h = await setup({
       readScript: [
-        // s-1 冷启动兜底首拉（1 个启用任务，供 toggle 快照命中发命令）
+        // s-1 冷启动兜底首次拉取（1 个启用任务，供 toggle 快照命中发命令）
         { sessionFile: SESSION_FILE, entries: [upsertEntry('aaaa1111', true, 'e1')], leafEntryId: 'e1' },
-        // s-2 激活补挂首拉（1 个启用任务）
+        // s-2 激活补挂首次拉取（1 个启用任务）
         {
           sessionFile: SESSION_FILE_2,
           entries: [upsertEntry('aaaa1111', true, 'e1', SESSION_FILE_2)],
@@ -734,7 +734,7 @@ describe('onDidActivateSession: 焦点切换 + ensureMirror 补挂', () => {
     h.activateSession(makeSession({ id: 's-2', label: 'other-session' }))
     await vi.advanceTimersByTimeAsync(READ_DEBOUNCE_MS)
 
-    // 补挂证明：readEntries 出现 s-2 的全量首拉（新镜像游标从零起，无 sinceEntryId）
+    // 补挂证明：readEntries 出现 s-2 的全量首次拉取（新镜像游标从零起，无 sinceEntryId）
     expect(h.readCalls).toEqual([
       { sessionId: 's-1', opts: { customType: TASK_ENTRY_TYPE } },
       { sessionId: 's-2', opts: { customType: TASK_ENTRY_TYPE } },
@@ -748,10 +748,10 @@ describe('onDidActivateSession: 焦点切换 + ensureMirror 补挂', () => {
     expect(h.sendCalls.at(-1)?.sessionId).toBe('s-2')
   })
 
-  it('恢复超时后 didActivate：失败态镜像重置预算重拉成功，任务列表回归', async () => {
+  it('恢复超时后 didActivate：失败态镜像重置预算重新拉取成功，任务列表回归', async () => {
     const h = await setup({
       readScript: [
-        // 兜底建镜首拉 + 恢复窗口 5 次重试全败（共 6 次），第 7 次（激活触发）成功
+        // 兜底建镜首次拉取 + 恢复窗口 5 次重试全败（共 6 次），第 7 次（激活触发）成功
         ...Array.from({ length: 1 + READ_RETRY_MAX }, () => new Error('SESSION_NOT_ACTIVE: no live pi')),
         { sessionFile: SESSION_FILE, entries: [upsertEntry('aaaabbbb', true, 'e1')], leafEntryId: 'e1' },
       ],
@@ -768,24 +768,24 @@ describe('onDidActivateSession: 焦点切换 + ensureMirror 补挂', () => {
     h.activateSession(makeSession())
     await vi.advanceTimersByTimeAsync(READ_DEBOUNCE_MS)
 
-    // 失败态镜像重置预算重拉成功：失败文案清除，任务列表/徽标回归
+    // 失败态镜像重置预算重新拉取成功：失败文案清除，任务列表/徽标回归
     expect(h.readCalls).toHaveLength(1 + READ_RETRY_MAX + 1)
     expect(ansiLines(h.lastTree())).toEqual([])
     expect(lastHeaderAction(h.api).badge).toBe('1')
   })
 })
 
-// ── ⑧ 撤回信号镜像重建（U7：'taiji:revoked' → 丢弃累计 + 全量重拉）────────────
+// ── ⑧ 撤回信号镜像重建（U7：'taiji:revoked' → 丢弃累计 + 全量重新拉取）────────────
 
 describe('onEntriesInvalidated(taiji:revoked): 树回退镜像重建', () => {
   const REVOKED = 'taiji:revoked'
 
-  it('创建任务 op 累计后撤回信号到达 → 丢弃累计 + 无游标全量重拉 → 折叠不含被撤任务', async () => {
+  it('创建任务 op 累计后撤回信号到达 → 丢弃累计 + 无游标全量重新拉取 → 折叠不含被撤任务', async () => {
     const h = await setup({
       readScript: [
-        // 首拉全量：任务 op 在累计镜像内（缺陷形态：被撤任务残留启用态徽标 1）
+        // 首次拉取全量：任务 op 在累计镜像内（缺陷形态：被撤任务残留启用态徽标 1）
         { sessionFile: SESSION_FILE, entries: [upsertEntry('aaaabbbb', true, 'e1')], leafEntryId: 'e1' },
-        // 撤回后全量重拉：runtime 活跃路径过滤使被撤 op 不在回包（空集 + 新游标）
+        // 撤回后全量重新拉取：runtime 活跃路径过滤使被撤 op 不在回包（空集 + 新游标）
         { sessionFile: SESSION_FILE, entries: [], leafEntryId: 'L-e2' },
       ],
     })
@@ -797,7 +797,7 @@ describe('onEntriesInvalidated(taiji:revoked): 树回退镜像重建', () => {
     h.invalidate('s-1', REVOKED)
     await vi.advanceTimersByTimeAsync(READ_DEBOUNCE_MS)
 
-    // 全量重拉（无 sinceEntryId——累计与游标均已丢弃，不带走被撤 op 的增量基线）
+    // 全量重新拉取（无 sinceEntryId——累计与游标均已丢弃，不带走被撤 op 的增量基线）
     expect(h.readCalls).toHaveLength(2)
     expect(h.readCalls[1]?.opts).toEqual({ customType: TASK_ENTRY_TYPE })
     // 折叠结果 = 干净集合：徽标清空、面板回空态提示、零任务操作条
@@ -826,7 +826,7 @@ describe('onEntriesInvalidated(taiji:revoked): 树回退镜像重建', () => {
   })
 })
 
-// ── ⑦ 展示层三态分支（MF-4-3：buildTaskRows 经首拉推树断言）───────────
+// ── ⑦ 展示层三态分支（MF-4-3：buildTaskRows 经首次拉取推树断言）───────────
 
 describe('buildTaskRows: 展示层三态', () => {
   it('已过期 → 即将触发；失败 → 成败标记 + 独立原因行；成功 → 标记且无原因行', async () => {
@@ -861,7 +861,7 @@ describe('buildTaskRows: 展示层三态', () => {
 
     // 启用按 nextRunAt 升序：过期任务最前；b/c nextRunAt 相等 → 稳定排序保持插入序。
     // 相对时间值均留单位边界裕度（防抖推进 200ms 不翻转：2m/1d/in 1d）。
-    // toEqual 全量闭合断言同时证明③「成功无原因行」（boom 仅出现一次且只属失败任务）。
+    // toEqual 全量补全断言同时证明③「成功无原因行」（boom 仅出现一次且只属失败任务）。
     expect(treeLabels(h.lastTree())).toEqual([
       'task-aaaa1111',
       'every 1m · 即将触发',

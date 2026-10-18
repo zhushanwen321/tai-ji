@@ -9,7 +9,7 @@
  * - 观察者形态：拦截错误信息必须可操作（含白名单与恢复指引）
  *
  * 写句柄入口（fd/流写路径防线）：openSync 写 flags / callback open / createWriteStream /
- * promises.open 的写 flags 校验 path——写 fd 只能经此产生，闭合 writeSync/ftruncate 等
+ * promises.open 的写 flags 校验 path——写 fd 只能经此产生，封住 writeSync/ftruncate 等
  * fd 消费点（详见 test/fs-guard.ts「边界」注释）。
  */
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
@@ -259,7 +259,7 @@ function makeEntry(name: OpenEntryName) {
   }
 }
 
-describe('isWriteOpenArg string flags（经 wrapOpenFns 行为投影）', () => {
+describe('isWriteOpenArg string flags（经 wrapOpenFns 行为派生视图）', () => {
   it("'w' → 拦；'r+' → 拦（含 + 即写）", () => {
     const { expectBlocked } = makeEntry('openSync')
     expectBlocked(PROBE, 'w')
@@ -312,7 +312,7 @@ describe('isWriteOpenArg object 形态与缺省 flags', () => {
 })
 
 /**
- * G1 防线自检（fs-guard 自己的守卫）：
+ * G1 防线自检（fs-guard 自己的检查）：
  * - 名单完备性：wrap 名单 × 真实模块键集的确定性差集断言，名单单源化后防「Node 升级
  *   移除 API 后名单残留死名」「名单漏挂/工厂装配回归」「sync/async 名单单侧分叉」
  *   （2026-09-17 拦截面缺口即后两者叠加形态：FS_ASYNC_FNS 挂了 promises 工厂、
@@ -405,7 +405,7 @@ describe('G1 防线自检——四访问面端到端探针（对白名单外不�
   })
 })
 
-describe('repinDataDirEnv（worker 复用形态 env 钉扎漂移恢复，2026-09-22 import-service 污染事故 env 腿）', () => {
+describe('repinDataDirEnv（worker 复用形态 env 固定值漂移恢复，2026-09-22 import-service 污染事故 env 路径）', () => {
   const PIN_VALUE = join(tmpdir(), 'taiji-repin-pin-fixture')
   let savedValue: string | undefined
 
@@ -424,7 +424,7 @@ describe('repinDataDirEnv（worker 复用形态 env 钉扎漂移恢复，2026-09
     else process.env.TAIJI_AGENT_DATA_DIR = savedValue
   })
 
-  it('首执行记录当前值且不改 env（globalSetup 钉扎值的登记点，恒 no-op）', () => {
+  it('首执行记录当前值且不改 env（globalSetup 固定值的登记点，恒 no-op）', () => {
     expect(repinDataDirEnv(process.env)).toBe(false)
     expect(process.env.TAIJI_AGENT_DATA_DIR).toBe(PIN_VALUE)
   })
@@ -448,7 +448,7 @@ describe('repinDataDirEnv（worker 复用形态 env 钉扎漂移恢复，2026-09
     warnSpy.mockRestore()
   })
 
-  it('env 等于记录值 → no-op（钉扎未漂移零开销路径）', () => {
+  it('env 等于记录值 → no-op（固定值未漂移零开销路径）', () => {
     repinDataDirEnv(process.env)
     expect(repinDataDirEnv(process.env)).toBe(false)
     expect(process.env.TAIJI_AGENT_DATA_DIR).toBe(PIN_VALUE)

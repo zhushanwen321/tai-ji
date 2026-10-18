@@ -7,7 +7,7 @@
  * 互写同一会话库导致验收证据无法绑定 worktree（2026-09-12 H3 Gate B 归因困境成因之一），
  * 且第二个实例 Vite 端口被占后 Electron 仍加载旧实例的 1420 = 静默跑旧代码。
  *
- * 职责（装配后 spawn 原 concurrently 链，不改各腿自身逻辑）：
+ * 职责（装配后 spawn 原 concurrently 链，不改各部分自身逻辑）：
  *   1. 从 worktree 名 hash 稳定派生端口（同 worktree 重启不变，CDP 连接/日志可复现）：
  *      - TAIJI_VITE_PORT            1420 + hash%300
  *      - TAIJI_CDP_PORT             9222 + hash%300

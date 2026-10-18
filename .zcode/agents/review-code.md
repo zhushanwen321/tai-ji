@@ -16,7 +16,7 @@ description: "CW 代码审查。审查 git diff 的变更：状态机正确性�
 ## 审查维度
 
 1. **状态机合法性**：action 转换是否符合 WAVE_TRANSITIONS/SLICE_TRANSITIONS。特别关注本分支改造（per-wave testCommand）引入的重定向逻辑：`WAVE_STATUS_TO_ACTION[unit.status]` 用于 guidance 推荐下一步，不得与合法性表（WAVE_TRANSITIONS）混淆；executing 状态 plan 是 illegal_transition，replan 是唯一合法写入通道。
-2. **gate 完备性**：gate 逻辑弱化（加容差、跳过检查、丢失记录、空白串假通过）= critical。`testCommandNonEmpty` gate 的 trim 判空是否正确；testRunner 的守卫短路是否有 TypeError 路径。
+2. **gate 完备性**：gate 逻辑弱化（加容差、跳过检查、丢失记录、空白串假通过）= critical。`testCommandNonEmpty` gate 的 trim 判空是否正确；testRunner 的检查短路是否有 TypeError 路径。
 3. **schema 契约**：外部输入 schema（PlanInputSchema/ReplanInputSchema）与内部类型（WavePlan/PlanInput/ReplanInput）是否同步。字段缺一 = critical。
 4. **逻辑正确性**：分支条件、边界值、空值/undefined 处理、错误路径。testCommand-only replan 判定（abandonedIds/abandonParentItems/addedSpecItems 三空）是否精确；非 testCommand-only 是否保持原行为。
 5. **兼容性**：config.testRunner.command 废弃的 read-compat 与 warning 是否正确（不能 double-warn、不能破坏读取）；测试基建改动是否波及无关测试。
