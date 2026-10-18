@@ -6,6 +6,7 @@
  * 覆盖：
  * - update 方法族（W4TC11 / RM2.3）：web/mock 环境优雅降级形状 + electronAPI 转发透传
  *   （[批次 3] performUpdate 一键封装已删（m17）；updateDownload 改传意图 version 字符串）
+ * - openExternal（升级备用下载页等共用外链通道）：降级静默 resolve + 透传
  * - pickFile（TC1，slice5 attach-dragdrop-menu）：无 preload 降级 {canceled:true, path:null}
  *   + 转发透传（TC1a-variant「electronAPI 存在但无 pickFile」与 TC1a 同一 `!api?.pickFile`
  *   分支，已省略）
@@ -19,7 +20,7 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 import type { LatestReleaseInfo } from '@taiji/shared'
 
-/** 测试用 LatestReleaseInfo（openUpdateFallbackUrl/getPreloaded 透传） */
+/** 测试用 LatestReleaseInfo（getPreloaded 等透传） */
 const release: LatestReleaseInfo = {
   version: '0.9.0',
   tagName: 'v0.9.0',
@@ -64,9 +65,9 @@ describe('lib/ipc update 方法 · web/mock 降级（electronAPI=undefined）', 
     expect(() => off()).not.toThrow()
   })
 
-  it('openUpdateFallbackUrl → resolve（不抛错）', async () => {
+  it('openExternal → resolve（不抛错）', async () => {
     const ipc = await import('@/lib/ipc')
-    await expect(ipc.openUpdateFallbackUrl('https://example.com')).resolves.toBeUndefined()
+    await expect(ipc.openExternal('https://example.com')).resolves.toBeUndefined()
   })
 
   it('updateDownload → { downloaded: false }（传意图：version 字符串）', async () => {
@@ -143,12 +144,12 @@ describe('lib/ipc update 方法 · 转发到 electronAPI', () => {
     expect(realOff).toHaveBeenCalled()
   })
 
-  it('openUpdateFallbackUrl 转发 url', async () => {
+  it('openExternal 转发 url', async () => {
     const spy = vi.fn((url: string) => Promise.resolve())
-    ;(window as { electronAPI?: unknown }).electronAPI = { openUpdateFallbackUrl: spy }
+    ;(window as { electronAPI?: unknown }).electronAPI = { openExternal: spy }
     const ipc = await import('@/lib/ipc')
 
-    await ipc.openUpdateFallbackUrl('https://example.com/x')
+    await ipc.openExternal('https://example.com/x')
     expect(spy).toHaveBeenCalledWith('https://example.com/x')
   })
 

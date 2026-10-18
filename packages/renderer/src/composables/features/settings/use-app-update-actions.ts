@@ -21,7 +21,7 @@ const t = i18n.global.t
 /** 升级动作轴依赖：所属 state 容器 + ipc 缝 */
 export interface ActionsAxisDeps {
   state: UpdateStateContainer
-  ipc: Pick<AppUpdateIpc, 'updateDownload' | 'updateInstall' | 'openUpdateFallbackUrl'>
+  ipc: Pick<AppUpdateIpc, 'updateDownload' | 'updateInstall' | 'openExternal'>
 }
 
 /** 两阶段升级动作轴 */
@@ -118,7 +118,7 @@ export function createActionsAxis(deps: ActionsAxisDeps): ActionsAxis {
     const release = state.state.latestRelease
     if (!release) return
     try {
-      await ipc.openUpdateFallbackUrl(release.htmlUrl)
+      await ipc.openExternal(release.htmlUrl)
     } catch (e) {
       // RD-4#9：更新失败时唯一的「手动下载」出口自身不能裸崩。调用点 void openFallbackUrl()
       // 不 await，IPC reject 会变 unhandledRejection 静默失灵。此处兜住：toast 报错并把

@@ -169,8 +169,8 @@ describe('UpdateCheckCard 版本检查卡片', () => {
     expect(fallbackBtn.exists()).toBe(true)
     expect(fallbackBtn.text()).toContain('前往下载')
     await fallbackBtn.trigger('click')
-    expect(getCardUpdateHarness().ipc.openUpdateFallbackUrl).toHaveBeenCalledTimes(1)
-    expect(getCardUpdateHarness().ipc.openUpdateFallbackUrl).toHaveBeenCalledWith('https://example.com/release')
+    expect(getCardUpdateHarness().ipc.openExternal).toHaveBeenCalledTimes(1)
+    expect(getCardUpdateHarness().ipc.openExternal).toHaveBeenCalledWith('https://example.com/release')
   })
 
   // ── 附加：downloading / replacing / restarting 渲染断言（补全状态机覆盖） ──

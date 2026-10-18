@@ -1,9 +1,11 @@
 /**
  * useAppUpdate 的 ipc 依赖缝（seam）。
  *
- * 本接口是 useAppUpdate 控制器对 settings 域升级 IPC 的全部依赖范围（10 个方法与
- * @/api/domains/settings 现有导出一一对齐）。控制器与各轴工厂只认本接口：
- * 生产装配传 createRealAppUpdateIpc()（逐函数转发 @/api/domains/settings），
+ * 本接口是 useAppUpdate 控制器对升级 IPC 的全部依赖范围（10 个方法：9 个升级专用导出与
+ * @/api/domains/settings 一一对齐 + openExternal 取自 @/lib/ipc 通用外链通道——升级备用
+ * 下载页与 BrowserPane 外链共用同一 OPEN_EXTERNAL 通道，不再设升级专属别名）。
+ * 控制器与各轴工厂只认本接口：
+ * 生产装配传 createRealAppUpdateIpc()（逐函数转发 @/api/domains/settings 与 @/lib/ipc），
  * 测试注入内存 adapter——依赖方向反转后测试无需 vi.mock @/api 层。
  */
 import type {
@@ -15,11 +17,11 @@ import type {
   UpdateSettings,
   UpdateStage,
 } from '@taiji/shared'
+import { openExternal as openExternalApi } from '@/lib/ipc'
 import {
   checkForUpdate as checkForUpdateApi,
   updateDownload as updateDownloadApi,
   updateInstall as updateInstallApi,
-  openUpdateFallbackUrl as openUpdateFallbackUrlApi,
   getPreloaded as getPreloadedApi,
   getPendingUpdate as getPendingUpdateApi,
   getLaunchResult as getLaunchResultApi,
@@ -44,8 +46,8 @@ export interface AppUpdateIpc {
   getLaunchResult(): Promise<LaunchResult | null>
   /** 读取升级设置（autoUpdate / preDownload 等） */
   getUpdateSettings(): Promise<UpdateSettings>
-  /** 不支持当前平台时，打开备用下载页（release 页面） */
-  openUpdateFallbackUrl(url: string): Promise<void>
+  /** 不支持当前平台时，打开备用下载页（release 页面）。走通用外链通道（main 侧 http(s) 校验） */
+  openExternal(url: string): Promise<void>
   /** 监听升级进度事件（stage + percent 0-100），返回取消订阅函数 */
   onUpdateProgress(cb: (p: { stage: UpdateStage; percent: number }) => void): () => void
   /** 监听升级错误事件（stage + message + errorCode + suggestion），返回取消订阅函数 */
@@ -62,7 +64,7 @@ export function createRealAppUpdateIpc(): AppUpdateIpc {
     getPendingUpdate: () => getPendingUpdateApi(),
     getLaunchResult: () => getLaunchResultApi(),
     getUpdateSettings: () => getUpdateSettingsApi(),
-    openUpdateFallbackUrl: (url) => openUpdateFallbackUrlApi(url),
+    openExternal: (url) => openExternalApi(url),
     onUpdateProgress: (cb) => onUpdateProgressApi(cb),
     onUpdateError: (cb) => onUpdateErrorApi(cb),
   }

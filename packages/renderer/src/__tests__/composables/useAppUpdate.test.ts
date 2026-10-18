@@ -344,18 +344,18 @@ describe('useAppUpdate', () => {
     stop()
   })
 
-  it('openFallbackUrl 调 ipc.openUpdateFallbackUrl(latestRelease.htmlUrl)', async () => {
-    ipc.openUpdateFallbackUrl.mockResolvedValue(undefined)
+  it('openFallbackUrl 调 ipc.openExternal(latestRelease.htmlUrl)', async () => {
+    ipc.openExternal.mockResolvedValue(undefined)
     const { result, stop } = await enterAvailable()
     await result.openFallbackUrl()
 
-    expect(ipc.openUpdateFallbackUrl).toHaveBeenCalledWith(makeUpdateRelease('0.9.0').htmlUrl)
+    expect(ipc.openExternal).toHaveBeenCalledWith(makeUpdateRelease('0.9.0').htmlUrl)
     stop()
   })
 
   // ── RD-4#9：逃生通道自身裸崩修复 ──
   it('RD-4#9: openFallbackUrl IPC 失败 → toastError 带可复制 URL（不变 unhandledRejection）', async () => {
-    ipc.openUpdateFallbackUrl.mockRejectedValue(new Error('shell.openPath failed'))
+    ipc.openExternal.mockRejectedValue(new Error('shell.openPath failed'))
     toastFns.error.mockClear()
     const { result, stop } = await enterAvailable()
     await result.openFallbackUrl()

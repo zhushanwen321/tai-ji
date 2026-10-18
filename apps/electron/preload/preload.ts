@@ -199,8 +199,6 @@ export interface ElectronAPI { // oe-exempt:20261003:framework:类型契约先�
   onUpdateProgress(callback: (payload: { stage: UpdateStage; percent: number }) => void): () => void
   /** 监听升级错误事件（stage + message + errorCode + suggestion），返回取消订阅函数 */
   onUpdateError(callback: (payload: UpdateErrorPayload) => void): () => void
-  /** 不支持当前平台时，打开备用下载页（release 页面） */
-  openUpdateFallbackUrl(url: string): Promise<void>
   /**
    * 打开手动升级产物目录（update-network-resilience D9 设置页手动通道）。
    * main 侧先幂等建目录（用户无需手动创建）再 shell.openPath 打开；打开失败时 reject
@@ -415,7 +413,6 @@ contextBridge.exposeInMainWorld('electronAPI', {
     ipcRenderer.on(UPDATE_ERROR, handler)
     return () => ipcRenderer.removeListener(UPDATE_ERROR, handler)
   },
-  openUpdateFallbackUrl: (url: string) => ipcRenderer.invoke(OPEN_EXTERNAL, url),
   openUpdateManualDir: () => ipcRenderer.invoke(UPDATE_OPEN_MANUAL_DIR),
   // ── 代理配置 ────────────────────────────────────────────────────
   getDataDir: () => ipcRenderer.invoke(GET_DATA_DIR),

@@ -355,11 +355,6 @@ export function getLaunchResult(): Promise<LaunchResult | null> {
   return api?.getLaunchResult() ?? Promise.resolve(null)
 }
 
-/** 不支持当前平台时，打开备用下载页（release 页面）。无 IPC 时 no-op */
-export function openUpdateFallbackUrl(url: string): Promise<void> {
-  return api?.openUpdateFallbackUrl(url) ?? Promise.resolve()
-}
-
 /**
  * 打开手动升级产物目录（D9 设置页手动通道「打开目录」按钮）。
  * main 侧幂等建目录后在系统文件管理器打开；打开失败 reject（Error.message 含
