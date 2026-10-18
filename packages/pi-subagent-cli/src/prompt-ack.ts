@@ -50,11 +50,11 @@ export type PromptAckDiagnostics = {
   pid?: number;
   /** stdin 已写字节（stdin-writer onBytesWritten 计数）。 */
   bytesWritten: number;
-  /** 子进程 stdout 总字节（pump 逐行计数，含 prompt 前的握手应答）。 */
+  /** 子进程 stdout 总字节（chunk 层计数，含 prompt 前的握手应答与未成行字节）。 */
   stdoutBytes: number;
-  /** prompt 写入后的 stdout 字节（零输出判定的直接证据）。 */
+  /** prompt 写入后的 stdout 字节（chunk 层计数，含未成行字节——零输出判定的直接证据）。 */
   stdoutBytesAfterPrompt: number;
-  /** prompt 写入后是否见过任意 stdout 行（onChannelActivity 置位）。 */
+  /** prompt 写入后是否见过任意 stdout 字节（onChannelActivity 置位）。 */
   stdoutSeen: boolean;
   /** get_state response 是否已应答（success 与否都算——证明 stdout 活着）。 */
   getStateAnswered: boolean;
@@ -85,14 +85,15 @@ export type PromptAckTracker = {
   /** 立即失败（stdin 不可用 / EPIPE）：清 timer + settle(lost) + onFailure。已 settle 后 no-op。 */
   failNow(reason: "stdin-unavailable" | "epipe", detail: string): void;
   /**
-   * prompt 写入后收到任意 stdout 行时由 pump 调用：取消零输出计时器并置
+   * prompt 写入后收到任意 stdout 字节时由 pump 在 chunk 层调用（未成行的 partial
+   * chunk 同样算活性——D3「任意字节」，防大行慢写被误杀）：取消零输出计时器并置
    * stdoutSeen，**不 settle、不判失败**（S8b：get_state 有应答但 prompt response
    * 延迟 → 不杀不判失败，run 继续；之后 prompt response 到达仍按 acked 结算）。
    * 未武装（register 前）调用为 no-op——prompt 前的 stdout（如握手应答先达）不算
    * 「写入后活性」。
    */
   onChannelActivity(): void;
-  /** prompt 写入后是否见过任意 stdout 行（diagnostics 装配源）。 */
+  /** prompt 写入后是否见过任意 stdout 字节（diagnostics 装配源）。 */
   readonly stdoutSeen: boolean;
   /** 幂等清理：清 timer、清登记表、标记 disposed（runSpawnOnce finally 必达）。 */
   dispose(): void;

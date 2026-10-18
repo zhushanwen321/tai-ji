@@ -5,6 +5,8 @@
 //   - 行切分在字节层（跨 chunk 的 UTF-8 多字节字符不被劈坏；b64 解码 ≡ 原始行字节）；
 //   - env 未宣告 → 工厂不创建（零 fd3 触点）；
 //   - 写失败/队列超限 → 丢弃计数 + warn 一次，不抛出不阻塞；
+//   - 丢弃后 dispose → 一条有界 warn（recordId/written/dropped/lastSeq，stats 唯一
+//     生产观测面；尾丢条件式措辞）；
 //   - 进程级共享 sink：per-run 回调随 dispose 摘除（连续 15 个 run 监听器数不增长）；
 //   - 写入点与主 stdout 解析同一数据源（wireChildStdoutPump 的原始 Buffer tap：
 //     mirror 行序列 ≡ 行解析链事件序列，同一读取顺序）。
@@ -210,6 +212,46 @@ describe("raw mirror 丢弃面（best-effort：不阻塞 stdout、不影响 run�
     writer.tap(Buffer.from("second\n", "utf8"));
     expect(writer.stats).toEqual({ written: 1, dropped: 1 });
     expect(warnings.filter((w) => w.includes("fd3 write error"))).toHaveLength(1);
+  });
+
+  it("丢弃后 dispose → 一条有界 warn（recordId/written/dropped/lastSeq），幂等不重复", () => {
+    const warnings: string[] = [];
+    const recordId = "rec-dispose-drop";
+    const sink: RawMirrorSink = { write: () => false }; // 永不 drain：第三帧被队列上限丢弃
+    const oneFrameBytes = Buffer.byteLength(
+      `${JSON.stringify({ v: 1, recordId, seq: 0, b64: Buffer.from("1111111111").toString("base64") })}\n`,
+      "utf8",
+    );
+    const writer = createRawMirrorWriter({
+      recordId,
+      sink,
+      maxQueueBytes: oneFrameBytes * 2 + 1,
+      warn: (m) => warnings.push(m),
+    });
+    writer.tap(Buffer.from("1111111111\n2222222222\n3333333333\n", "utf8"));
+    expect(writer.stats).toEqual({ written: 2, dropped: 1 });
+    expect(warnings).toHaveLength(1); // 队列超限 warn（既有）
+
+    writer.dispose();
+    expect(warnings).toHaveLength(2); // [m-pi-3] dispose 丢弃摘要（stats 唯一生产观测面）
+    const summary = warnings[1]!;
+    expect(summary).toContain("recordId=rec-dispose-drop");
+    expect(summary).toContain("written=2");
+    expect(summary).toContain("dropped=1");
+    expect(summary).toContain("lastSeq=2"); // 丢弃帧也消耗 seq（0/1 写成功，2 被丢）
+    expect(summary).toContain("only marks degraded when a later frame"); // 尾丢盲区的条件式措辞
+
+    writer.dispose(); // 幂等：不重复告警
+    expect(warnings).toHaveLength(2);
+  });
+
+  it("无丢弃 → dispose 不产生丢弃摘要 warn", () => {
+    const warnings: string[] = [];
+    const { sink } = collectingSink();
+    const writer = createRawMirrorWriter({ recordId: "rec-dispose-clean", sink, warn: (m) => warnings.push(m) });
+    writer.tap(Buffer.from("ok\n", "utf8"));
+    writer.dispose();
+    expect(warnings).toEqual([]);
   });
 
   it("drain 恢复：背压后队列可复用（maxQueueBytes 内不被误弃）", () => {

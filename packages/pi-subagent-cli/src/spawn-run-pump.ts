@@ -174,9 +174,9 @@ export function createSessionIdentityTracker(
 export interface PromptRunCounters {
   /** stdin 已写字节（stdin-writer onBytesWritten 累计）。 */
   bytesWritten: number;
-  /** 子进程 stdout 总字节（pump 逐行累计，含 prompt 前的握手应答）。 */
+  /** 子进程 stdout 总字节（chunk 层累计，含 prompt 前的握手应答与未成行字节）。 */
   stdoutBytes: number;
-  /** prompt 写入后的 stdout 字节（promptWritten 置位后累计）。 */
+  /** prompt 写入后的 stdout 字节（promptWritten 置位后按 chunk 累计，含未成行字节）。 */
   stdoutBytesAfterPrompt: number;
   /** prompt 已写入（spawn-runner 在 sendPromptCommand delivered 后置位）。 */
   promptWritten: boolean;
@@ -201,7 +201,7 @@ export interface StdoutPumpDeps {
   enqueueUi: (id: string, request: ExtensionUiRequest) => void;
   stderrTee: { close(): void } | undefined;
   runEnd: RunEndState;
-  /** [M2 D3] prompt 回执 tracker（response 分支分发 + 逐行活性上报；缺省 = 旧形态直通，兼容既有装配/测试）。 */
+  /** [M2 D3] prompt 回执 tracker（response 分支分发 + chunk 层活性上报；缺省 = 旧形态直通，兼容既有装配/测试）。 */
   promptAck?: PromptAckTracker;
   /** [M2 D3] 诊断计数器（缺省 = 不计数，兼容既有装配/测试）。 */
   runCounters?: PromptRunCounters;
@@ -214,32 +214,24 @@ export interface StdoutPumpDeps {
   rawMirror?: RawMirrorWriter;
 }
 
-/** stdout 行消费（parseSpawnLine 分类 → 身份/事件/响应/UI 各通道 + [M2 D3] 回执分发/计数）。 */
+/**
+ * stdout 行消费（parseSpawnLine 分类 → 身份/事件/响应/UI 各通道 + [M2 D3] 回执分发）。
+ * 字节计数与零输出活性上报**不在这里**：它们是 chunk 级事实（{@link wireChildStdoutPump}
+ * 的 noteStdoutChunk），行消费器只做解析——否则未成行的 partial chunk（极端大行
+ * 慢写）不产生行、既不计字节也不取消计时器，健康 pi 会被误判 not_delivered。
+ */
 function createLineConsumer(deps: StdoutPumpDeps): (line: string) => void {
   const { recordId, identity, handleSdkEvent, enqueueUi, promptAck, runCounters } = deps;
   return (line: string): void => {
-    // [M2 D3 零输出判定] 任意 stdout 行（含 invalid 行）都是通道活性证据：字节计数
-    // 在分类前完成——parse 失败的字节同样证明 pi 活着。计数在 promptWritten 置位后
-    // 才进 stdoutBytesAfterPrompt（「写入后」语义）。
-    if (runCounters !== undefined) {
-      const lineBytes = Buffer.byteLength(line, "utf8");
-      runCounters.stdoutBytes += lineBytes;
-      if (runCounters.promptWritten) runCounters.stdoutBytesAfterPrompt += lineBytes;
-    }
     const parsed = parseSpawnLine(line);
-    if (parsed === null) {
-      promptAck?.onChannelActivity();
-      return;
-    }
+    if (parsed === null) return;
     switch (parsed.kind) {
       case "header":
         identity.noteHeader(parsed.header);
-        promptAck?.onChannelActivity();
         return;
       case "event":
         if (runCounters !== undefined) runCounters.lastEventType = parsed.event.type;
         handleSdkEvent(parsed.event);
-        promptAck?.onChannelActivity();
         return;
       case "response":
         // [M2 D3] get_state response（无论 success）证明 stdout 活着 → 五元组置位；
@@ -252,20 +244,14 @@ function createLineConsumer(deps: StdoutPumpDeps): (line: string) => void {
         // ——run 生命周期外的控制面操作等不到 per-run 监听表；两表按 id 各自一次性
         // 消费，未登记 id 各自自弃）。
         dispatchControlResponse(parsed.id, parsed.success, parsed.data, parsed.error);
-        // 活性通知在状态更新之后（本行的自身状态计入诊断快照，如 get_state 应答）；
-        // 首条活性即 prompt response 自身的形态下 tracker 已 settle，通知 no-op
-        // （不多发 prompt ack delayed warn）。
-        promptAck?.onChannelActivity();
         return;
       case "extension_ui_request":
         enqueueUi(parsed.id, parsed.request);
-        promptAck?.onChannelActivity();
         return;
       case "invalid":
-        // [C-U1] invalid 行同样是通道活性证据（与上方字节计数口径一致：任意
-        // stdout 字节都证明 pi 活着）——必须取消 post-prompt 零输出计时器，否则
-        // 「只吐非 JSON / 缺 type 行」的健康 pi 会在 30s 窗口被误杀。
-        promptAck?.onChannelActivity();
+        // [C-U1] invalid 行不产生事件，但同样的字节已经在 chunk 层上报过活性
+        // （noteStdoutChunk）——「只吐非 JSON / 缺 type 行」的健康 pi 不会在
+        // 30s 窗口被误杀。此处只留解析失败诊断。
         logger.debug(
           `[session-runner] invalid stdout line from ${recordId} (ignored): ${parsed.raw.slice(0, INVALID_LINE_LOG_CHARS)}`,
           { error: parsed.error },
@@ -381,6 +367,21 @@ export function wireChildStdoutPump(deps: StdoutPumpDeps): Promise<number> {
     deps.runEnd.resolveChatRun = resolveExit;
     const consumeLine = createLineConsumer(deps);
     const onClose = createCloseFinalizer(deps, resolveExit);
+    // [M2 D3 零输出判定] 活性/字节计数在 chunk 层（任意字节，含无换行的 partial
+    // chunk）——行消费器只做解析，避免「极端大行慢写」不产出完整行时计时器不被
+    // 取消而误走 engine_prompt_not_delivered + SIGKILL（设计 D3「任意字节」）。
+    // 注册序在解析链监听器之后：同一 chunk 内的完整行先完成解析（get_state /
+    // lastEventType 已落位），随后 chunk 上报只补「解析链仍在缓冲的未成行字节」的
+    // 活性证据；timer 已清时 onChannelActivity 为 no-op，不会重复 warn。
+    const noteStdoutChunk = (chunk: Buffer | string): void => {
+      if (chunk.length === 0) return;
+      if (deps.runCounters !== undefined) {
+        const bytes = typeof chunk === "string" ? Buffer.byteLength(chunk, "utf8") : chunk.length;
+        deps.runCounters.stdoutBytes += bytes;
+        if (deps.runCounters.promptWritten) deps.runCounters.stdoutBytesAfterPrompt += bytes;
+      }
+      deps.promptAck?.onChannelActivity();
+    };
     if (deps.rawMirror !== undefined && child.stdout !== null) {
       // [M3 D6] 镜像通道开通：tap 必须挂 setEncoding 之前——Node 的 setEncoding 是
       // 流级状态（同一流上先注册的监听器同样收到解码后的 string），保持 child.stdout
@@ -391,8 +392,12 @@ export function wireChildStdoutPump(deps: StdoutPumpDeps): Promise<number> {
       const decoderInput = new PassThrough();
       child.stdout.pipe(decoderInput);
       pumpNdjsonLines(decoderInput, consumeLine);
+      // 解析链监听器（pump）先注册 → 同 chunk 先解析；chunk 活性紧随其后。
+      decoderInput.on("data", noteStdoutChunk);
     } else {
       pumpNdjsonLines(child.stdout, consumeLine);
+      // 同上：pump 监听器先注册（其 setEncoding 对后续监听器同样生效）。
+      child.stdout?.on("data", noteStdoutChunk);
     }
     child.once("close", onClose);
     child.once("error", (err) => {

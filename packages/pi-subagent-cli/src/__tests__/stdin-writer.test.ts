@@ -280,19 +280,9 @@ describe("sendPromptCommand", () => {
     expect(raw.endsWith("\n")).toBe(true);
   });
 
-  it("child.stdin 已 destroyed → 静默跳过（guard 生效，不抛错）", () => {
-    const stdin = new PassThrough();
-    stdin.destroy();
-    const child = { stdin } as unknown as ChildProcess;
-
-    expect(() => sendPromptCommand(child, "task")).not.toThrow();
-    // destroyed 后 write 无效，但函数安全返回
-  });
-
-  it("child.stdin 为 null/undefined → 静默跳过（guard 生效）", () => {
-    const child = { stdin: null } as unknown as ChildProcess;
-    expect(() => sendPromptCommand(child, "task")).not.toThrow();
-  });
+  // [m-pi-5] 旧「静默跳过」两条用例（名称与新契约相反且只断言 not.toThrow）已删除；
+  // 现行契约 = delivered:false + 不登记（不武装计时），覆盖见下方「stdin 缺失 /
+  // stdin 已销毁」两例。
 
   // [V2 决策 3] streamingBehavior 可选参数：续聊热路径用 prompt+streamingBehavior 统一投递
   it("options.streamingBehavior='followUp' → 写入 streamingBehavior:followUp 字段", () => {

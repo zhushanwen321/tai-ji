@@ -117,9 +117,12 @@ export type RawMirrorSink = {
 export type RawMirrorWriter = {
   /** 喂入 stdout 原始字节 chunk（与主解析链同一数据源；内部行切分）。 */
   tap(chunk: Buffer): void;
-  /** run 结束释放（幂等；不 close fd——fd3 属引擎进程，跨 run 复用）。 */
+  /**
+   * run 结束释放（幂等；不 close fd——fd3 属引擎进程，跨 run 复用）。
+   * 有丢弃帧时记一条有界 warn（written/dropped/lastSeq）——这是 stats 唯一的生产观测面。
+   */
   dispose(): void;
-  /** 统计快照。 */
+  /** 统计快照（dispose 后只读）。 */
   readonly stats: RawMirrorStats;
 };
 
@@ -165,6 +168,8 @@ export function createRawMirrorWriter(opts: RawMirrorWriterOptions): RawMirrorWr
   let disposed = false;
   let warnedFailure = false;
   let warnedQueue = false;
+  /** 最后一个被 emit 的帧 seq（含丢弃帧）——dispose 丢弃摘要的可观测字段。 */
+  let lastSeq: number | undefined;
   const stats: RawMirrorStats = { written: 0, dropped: 0 };
 
   const fail = (reason: string, detail?: unknown): void => {
@@ -173,7 +178,8 @@ export function createRawMirrorWriter(opts: RawMirrorWriterOptions): RawMirrorWr
     warnedFailure = true;
     warn(
       `[raw-mirror] mirror disabled (${reason}) recordId=${opts.recordId}; ` +
-        `the live subagent stream will be marked degraded, reload is unaffected` +
+        `frames from this point are dropped (if a later frame arrives, the live subagent stream ` +
+        `will be marked degraded there; a tail drop is silent), reload is unaffected` +
         (detail !== undefined ? `: ${describeError(detail)}` : ""),
     );
   };
@@ -234,6 +240,7 @@ export function createRawMirrorWriter(opts: RawMirrorWriterOptions): RawMirrorWr
       seq: seqCounter.value++,
       b64: line.toString("base64"),
     };
+    lastSeq = frame.seq;
     const wire = `${JSON.stringify(frame)}\n`;
     if (disposed || failed) {
       stats.dropped += 1;
@@ -246,7 +253,8 @@ export function createRawMirrorWriter(opts: RawMirrorWriterOptions): RawMirrorWr
         warnedQueue = true;
         warn(
           `[raw-mirror] write queue exceeded ${maxQueueBytes} bytes, dropping frames recordId=${opts.recordId}; ` +
-            `the runtime will mark this record's live stream degraded`,
+            `if a later frame arrives, the runtime will mark this record's live stream degraded ` +
+            `(a tail drop with no later frame stays silent until dispose)`,
         );
       }
       return;
@@ -281,6 +289,17 @@ export function createRawMirrorWriter(opts: RawMirrorWriterOptions): RawMirrorWr
       queuedBytes = 0;
       opts.sink.offDrain?.(onDrain);
       opts.sink.offError?.(onError);
+      // [m-pi-3] 丢弃计数此前只活在 writer.stats（finally 直接 dispose 即丢），
+      // 生产路径零观测面：§3.7 的「丢弃率 > 1%」重审触发无从判读，且尾丢（丢弃后
+      // 再无完整帧）不会让 reader 看到 seq 空洞 → live 流静默停止。dispose 时记一条
+      // 有界 warn（每 run 至多一条，幂等门已在上方）：recordId/written/dropped/lastSeq。
+      if (stats.dropped > 0) {
+        warn(
+          `[raw-mirror] run ended with dropped frames recordId=${opts.recordId} ` +
+            `written=${stats.written} dropped=${stats.dropped} lastSeq=${lastSeq ?? "-"}; ` +
+            `live stream is incomplete (reader only marks degraded when a later frame exposes the seq gap)`,
+        );
+      }
     },
     get stats(): RawMirrorStats {
       return { ...stats };

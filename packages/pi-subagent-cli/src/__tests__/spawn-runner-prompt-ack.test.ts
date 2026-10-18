@@ -10,6 +10,9 @@
 //     engine_prompt_rejected（不误报 not_delivered），错误含 pi error 文本；
 //   - S8b get_state 有应答但 prompt response 延迟 → 不杀不判失败：零输出计时器被
 //     stdout 活性取消（prompt ack delayed warn），response 到达后 run 正常完成；
+//   - S9 stdin 不可用 / prompt 写入 EPIPE → 立即失败（不等零输出窗口）：
+//     delivered:false → failNow(stdin-unavailable) / catch EPIPE → failNow(epipe)，
+//     错误码前缀 engine_prompt_not_delivered + SIGKILL 收割 + error 事件 1 条；
 //   - [M1 D2] PI_SUBAGENT_TASK 写入点截断：identity env 值 = 前 2000 字符 + 截断
 //     标记（子 pi 实际收到的 env 经 text_delta 回显断言），多字节/代理对不劈半；
 //     边界纯函数面（truncateTaskForEnv）+ applyIdentityEnvToChildEnv 装配单测同文件。
@@ -44,7 +47,7 @@ import {
 } from "@zhushanwen/subagent-engine-sdk";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import { killAllActiveChildren, runSpawnOnce, applyIdentityEnvToChildEnv, truncateTaskForEnv, type SpawnRunCallbacks, type SpawnRunParams, type SpawnRunResult } from "../spawn-runner.ts";
+import { killAllActiveChildren, getActiveChild, runSpawnOnce, applyIdentityEnvToChildEnv, truncateTaskForEnv, type SpawnRunCallbacks, type SpawnRunParams, type SpawnRunResult } from "../spawn-runner.ts";
 import { PROMPT_ACK_TIMEOUT_ENV } from "../prompt-ack.ts";
 
 /**
@@ -52,6 +55,13 @@ import { PROMPT_ACK_TIMEOUT_ENV } from "../prompt-ack.ts";
  * 时钟冻结到 pi 就绪后（见文件头 [确定性]）——窗口值不变，变的是起算点。
  */
 const ACK_WINDOW_MS = 300;
+
+/**
+ * [m-pi-2 / S9] 立即失败用例的注入窗（拉大只为区分「立即失败」与「等窗口超时」：
+ * 失败路径在 prompt 写入同 tick 结算，实测远小于窗；若接线退化为等窗口，elapsed
+ * 会 ≥ 窗值或错误文案变成 timeout）。
+ */
+const S9_WINDOW_MS = 5_000;
 
 /** fake pi 脚本：stdin JSONL 命令 → stdout JSONL（M2 故障注入形态）。 */
 const FAKE_PI_SCRIPT = `
@@ -129,13 +139,14 @@ function restoreHarness(h: Harness): void {
   fs.rmSync(h.rootDir, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 });
 }
 
-function callbacksOf(h: Harness): SpawnRunCallbacks {
+function callbacksOf(h: Harness, overrides: Partial<SpawnRunCallbacks> = {}): SpawnRunCallbacks {
   return {
     onEvent: (e) => h.events.push(e),
     onDelta: (d) => h.deltas.push(d),
     onChildStateChanged: (p) => h.stateChanges.push(p),
     // pi 就绪 = get_state 应答回填 sessionFile（ready 只在正向用例被 await）。
     onHandleReady: () => h.notifyReady(),
+    ...overrides,
   };
 }
 
@@ -150,9 +161,9 @@ const baseParams = (h: Harness, overrides: Partial<SpawnRunParams> = {}): SpawnR
 });
 
 /** 注入短 ack 窗（用后恢复；返回 restore 函数）。 */
-function injectAckWindow(): () => void {
+function injectAckWindow(windowMs: number = ACK_WINDOW_MS): () => void {
   const saved = process.env[PROMPT_ACK_TIMEOUT_ENV];
-  process.env[PROMPT_ACK_TIMEOUT_ENV] = String(ACK_WINDOW_MS);
+  process.env[PROMPT_ACK_TIMEOUT_ENV] = String(windowMs);
   return () => {
     if (saved === undefined) delete process.env[PROMPT_ACK_TIMEOUT_ENV];
     else process.env[PROMPT_ACK_TIMEOUT_ENV] = saved;
@@ -278,6 +289,105 @@ describe("S8b get_state 有应答但 prompt response 延迟 → 不杀不判失�
     } finally {
       vi.useRealTimers();
       resetLoggerSinkForTests();
+      restoreWindow();
+      restoreHarness(h);
+    }
+  });
+});
+
+// ============================================================
+// [m-pi-2 / S9] stdin 不可用 / EPIPE → 立即失败（run 级装配接线）
+// ============================================================
+// 组件半面（stdin-writer 的 delivered:false/throw、prompt-ack 的 failNow）已有覆盖，
+// 但 `if (!sent.delivered) failNow` 与 catch-EPIPE 两条装配分支此前无 run 级用例
+// 执行——删掉/改错分支不会红。驱动方式：onChildSpawned（prompt 写入前同步触发）
+// 拿到活跃子进程 stdin 注入故障；fake pi 用 silent 形态（读 stdin 但零输出、
+// setInterval 保活），确保失败由 failNow + SIGKILL 收割而非自然退出。
+
+describe("S9 stdin 不可用 → delivered:false → 立即 engine_prompt_not_delivered（不等窗口）", () => {
+  it("spawn 后销毁 stdin → failNow(stdin-unavailable)：错误前缀 + SIGKILL + error 事件 1 条", async () => {
+    const h = makeHarness("silent");
+    const restoreWindow = injectAckWindow(S9_WINDOW_MS);
+    try {
+      const startedAt = Date.now();
+      const result: SpawnRunResult = await runSpawnOnce(
+        baseParams(h),
+        callbacksOf(h, {
+          onChildSpawned: (_pid, recordId) => {
+            // prompt 写入前拿到活跃子进程（registerActiveChild 先于本回调）
+            const stdin = getActiveChild(recordId)?.stdin;
+            if (stdin === null || stdin === undefined) {
+              throw new Error("S9 harness: active child stdin missing");
+            }
+            stdin.destroy();
+          },
+        }),
+      );
+      const elapsed = Date.now() - startedAt;
+
+      // 立即失败：远小于注入窗（若退化为等窗口，错误文案会变成 timeout）
+      expect(elapsed).toBeLessThan(S9_WINDOW_MS);
+      expect(result.success).toBe(false);
+      expect(result.error).toMatch(/^engine_prompt_not_delivered:/);
+      expect(result.error).toContain("stdin-unavailable");
+      expect(result.error).not.toContain("zero stdout after prompt write"); // 非 timeout 形态
+      expect(result.failureKind).toBe("unknown");
+
+      await waitFor(() => h.stateChanges.some((s) => s.state === "exited"));
+      const exited = h.stateChanges.find((s) => s.state === "exited");
+      expect(exited).toMatchObject({ killed: true, signal: "SIGKILL" });
+      const errorEvents = h.events.filter((e) => e.type === "error");
+      expect(errorEvents).toHaveLength(1);
+      expect((errorEvents[0] as { message: string }).message).toMatch(/^engine_prompt_not_delivered:/);
+    } finally {
+      restoreWindow();
+      restoreHarness(h);
+    }
+  });
+});
+
+describe("S9 prompt 写入 EPIPE → catch → failNow(epipe)（不等窗口、不误报 timeout）", () => {
+  it("stdin.write 抛 EPIPE（仅 prompt 帧）→ engine_prompt_not_delivered 含 epipe + SIGKILL", async () => {
+    const h = makeHarness("silent");
+    const restoreWindow = injectAckWindow(S9_WINDOW_MS);
+    try {
+      const startedAt = Date.now();
+      const result: SpawnRunResult = await runSpawnOnce(
+        baseParams(h),
+        callbacksOf(h, {
+          onChildSpawned: (_pid, recordId) => {
+            const stdin = getActiveChild(recordId)?.stdin;
+            if (stdin === null || stdin === undefined) {
+              throw new Error("S9 harness: active child stdin missing");
+            }
+            const originalWrite = stdin.write.bind(stdin);
+            stdin.write = ((chunk: string) => {
+              // get_state 握手照常写入；只让 prompt 帧抛 EPIPE（模拟管道已断）
+              if (chunk.includes('"type":"prompt"')) {
+                throw Object.assign(new Error("write EPIPE"), { code: "EPIPE" });
+              }
+              return originalWrite(chunk);
+            }) as typeof stdin.write;
+          },
+        }),
+      );
+      const elapsed = Date.now() - startedAt;
+
+      expect(elapsed).toBeLessThan(S9_WINDOW_MS);
+      expect(result.success).toBe(false);
+      expect(result.error).toMatch(/^engine_prompt_not_delivered:/);
+      expect(result.error).toContain("epipe");
+      expect(result.error).toContain("EPIPE on stdin write"); // writeStdinLine 的 throw 文案
+      expect(result.error).not.toContain("zero stdout after prompt write"); // 非 timeout 形态
+      expect(result.failureKind).toBe("unknown");
+
+      await waitFor(() => h.stateChanges.some((s) => s.state === "exited"));
+      const exited = h.stateChanges.find((s) => s.state === "exited");
+      expect(exited).toMatchObject({ killed: true, signal: "SIGKILL" });
+      const errorEvents = h.events.filter((e) => e.type === "error");
+      expect(errorEvents).toHaveLength(1);
+      expect((errorEvents[0] as { message: string }).message).toMatch(/^engine_prompt_not_delivered:/);
+    } finally {
       restoreWindow();
       restoreHarness(h);
     }
