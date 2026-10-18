@@ -2,7 +2,7 @@
 
 > **一句话结论**：把 skill chip 从「行首唯一的命令 chip」改造为「任意位置、多个共存的标记 chip」，pi 侧不改一行代码——runtime 在发送前把 chip 标记展开为与 pi 逐字对齐的 `<skill>` 全文注入；预估超窗（>80% contextWindow）时整条消息降级为「短标记 + 模型自主 read」模式，防止单条巨大消息把会话拖入持续失败态。
 >
-> **R4 修订（2026-09-12）**：注入形态从「原位展开」改为「**正文原样保留占位标记 + 消息末尾集中追加 `<taiji-skill-data>` 包裹块**」（D11）——正文句子不再被全文劈开，resume/复制/编辑重发的数据面干净，降级形态与正常形态统一为同一包裹块。附带两项显示层修复：用户气泡混排 badge 前后换行（D12）、composer skill chip 前后自动空开（D13）。
+> **R4 修订（2026-09-12）**：注入形态从「原位展开」改为「**正文原样保留占位标记 + 消息末尾集中追加 `<taiji-skill-data>` 包裹块**」（D11）——正文句子不再被全文劈开，resume/复制/编辑重发的数据范围干净，降级形态与正常形态统一为同一包裹块。附带两项显示层修复：用户气泡混排 badge 前后换行（D12）、composer skill chip 前后自动空开（D13）。
 
 **当前层 → 下一层**：本文档是**技术方案设计**（下一层产物 = 可实现的接口/数据模型/代码任务），准则 5/6/7（物理数据流、错误恢复、运行时探针）全适用。
 
@@ -248,7 +248,7 @@ runtime 解析 pi stdout JSONL 曾用 node `readline`（**已随本 feature D10 
 
 **D9：发送路径统一收敛 + hook 顺序（选定；投递所有权内核化后挂载点随出站交接点迁移）**
 - **采用（现行终态）**：注入器挂载点 = 投递注册表的出站交接点（`session-delivery-registry.ts` deliverOne 的 `injector.inject`，skill 注入器所有权随出站交接点走）——全部用户消息路径（message.send / delivery.submit / 内核 requeue/rebuild/adopt 重投）经同一交接点，注入恰好一次。runtime 组合根构造注入器时与 dispatcher/records 共源（`sessionService.skillMappingSource` 单权威）。
-- **挂载顺序（明确）**：BeforeSend hook 在受理入口（`MessageDispatcher.runAcceptance`，提交前唯一拦截面，审核用户原文），注入器在出站交接（hook 改写后的文本交给内核，出站时注入）；hook 改写若破坏标记完整性，走 D8 透传+提示（标记残缺不展开、不静默丢内容）。
+- **挂载顺序（明确）**：BeforeSend hook 在受理入口（`MessageDispatcher.runAcceptance`，提交前唯一拦截范围，审核用户原文），注入器在出站交接（hook 改写后的文本交给内核，出站时注入）；hook 改写若破坏标记完整性，走 D8 透传+提示（标记残缺不展开、不静默丢内容）。
 - **幂等（结构化保证）**：每条消息仅过一次注入器，由「hook 只在受理阶段一次、注入只在出站交接一次」的分工保证；**不做文本级幂等检测**（grep「已展开否」会被用户正文手打 `<taiji-skill` 字样欺骗而误跳过真实 chip）。
 - **历史形态（已被替代）**：早期方案在 `message-dispatcher.ts` 的三个发送入口（sendPrompt / steerMessage / followUpMessage）各自挂载；steer/followUp 转发路径随协议条目 message.steer / message.follow_up 退役（MF-1-8），busy 场景的补充消息经 delivery.submit 统一排队，G2 由内核持有+释放后投递承接。
 - **效果**：§3.1 场景 4。
@@ -263,12 +263,12 @@ runtime 解析 pi stdout JSONL 曾用 node `readline`（**已随本 feature D10 
   - **正常形态（预算内）**：块内为去重后的 `<skill name location>全文</skill>` 列表（展开格式仍遵 D5 与 pi 逐字对齐）；
   - **降级形态（超预算/fail-safe，原 D7 降级块统一并入）**：块内为 `<taiji-skill/>` 标记清单 + 指引行（原 `<taiji-skills>` 块内容整体搬入，旧 tag 退役）。
   - 失效标记（无映射/读取失败/hook 破坏）不进块：正文原样保留 + notice（D8 行为不变）；映射源整体失败（registry 扫描异常 / 晚绑定未绑定，mapping_unavailable；原 get_commands RPC 失败同 reason）同理：正文留标记、不追加块。
-- **裁决理由**：① 正文可读性——原位展开把 SKILL.md 全文（最坏 50KB）嵌进句子中间，模型与人都难读；占位保留后句子完整，展开集中尾部；② 显示/数据面干净——反解析从「把 block 从正文中间挖出来」变为「剥尾部一整块 + 正文标记还原 badge」，复制消息（normalizeContent）恒为占位形态，编辑重发草稿不可见全文；③ 降级统一——原降级形态（标记 + 块）与正常形态同构，两 tag 合一后反解析规则从「形态分叉」收敛为「先剥块、再认标记」；④ 多轮上下文中后续 turn 引用「某条消息的 skill」时正文位置稳定。
+- **裁决理由**：① 正文可读性——原位展开把 SKILL.md 全文（最坏 50KB）嵌进句子中间，模型与人都难读；占位保留后句子完整，展开集中尾部；② 显示/数据范围干净——反解析从「把 block 从正文中间挖出来」变为「剥尾部一整块 + 正文标记还原 badge」，复制消息（normalizeContent）恒为占位形态，编辑重发草稿不可见全文；③ 降级统一——原降级形态（标记 + 块）与正常形态同构，两 tag 合一后反解析规则从「形态分叉」收敛为「先剥块、再认标记」；④ 多轮上下文中后续 turn 引用「某条消息的 skill」时正文位置稳定。
 - **同 name 去重**：块内每个 name 只展开一次（按标记出现序首个归并，notice 不发）。UI 层 D2 已禁选同 skill，此处兜底手打/编辑重发路径；重复全文纯浪费上下文。**数据源澄清**：块内 `<skill>` 的 location **与降级清单条目的 location 均恒取 SkillRegistry 权威扫描的 `sourcePath`**（D4 修订后权威源；「与 pi 逐字对齐」约束的是展开格式而非数据源；标记自带 location 若过时——skill 移动后——不得作为权威 read 路径进入块/清单，否则模型按过时路径 read）；去重归并判定仅按 `name`（不读标记自带 location）；标记自带 location 仅作反解析自描述，非权威数据源。
 - **落盘末尾性依赖声明**：useChat 在注入前已于文本尾追加 `<!--taiji:msg:u-…-->` 标记，注入块实际拼接在该注释之后；「真末尾」由 pi 侧 msg-id-mapper input hook 剥除注释实现——该 extension 自身降级（hook 错误标记存活）时落盘为「注释 + 块」，反解析剥块按任意位置匹配不受影响。
 - **LLM 关联指引：正常形态不加文本内指引行（选定）**。理由：对齐信号完备——正文标记带 `name`、块内每个 `<skill>` 也带同名 `name`，citation/脚注模式主流 coding 模型可建立映射；块 tag 名语义化。**观察点**：若实测弱模型漏读末尾块（回答未体现 skill 内容），补救路径 = system-prompt extension 经 hook 注入提示词（一处生效全 session，不污染消息文本）；不回退到文本内指引行。降级形态保留指引行（该形态下 read 是唯一获取通道，指引是必要指令非冗余）。
-- **不采用**：① 维持原位展开——裁决理由 ①②③ 全部反向；② 展开块紧跟各标记后方内联——可读性问题与原位展开等价，只是换个包裹；③ 新降级 tag 与新块并存——同构形态双 tag 徒增反解析与文档分叉；④ **复用既有 `<taiji-skills>` 作统一包裹 tag**——基础设施虽现成（`buildSkillsFallbackBlock`/`parseSkillsFallbackBlocks` 已实装），但 tag 名是 LLM 可读协议面：`taiji-skills`（清单语义）承载全文块语义 stretch，`taiji-skill-data` 对模型的「数据附挂区」语义传达更准；且存量降级块消息与 R4 新形态消息靠 tag 名即可自识别（诊断/测试断言友好），复用则须解析块内子项形态才能区分新旧——概念净增 1 个 tag 换取协议面语义精度与新旧自识别，判定值得。
-- **效果**：正文可读；resume/复制/编辑重发数据面干净；降级/正常统一包裹。验收场景 1②/2①/4 形态断言随本决策更新。
+- **不采用**：① 维持原位展开——裁决理由 ①②③ 全部反向；② 展开块紧跟各标记后方内联——可读性问题与原位展开等价，只是换个包裹；③ 新降级 tag 与新块并存——同构形态双 tag 徒增反解析与文档分叉；④ **复用既有 `<taiji-skills>` 作统一包裹 tag**——基础设施虽现成（`buildSkillsFallbackBlock`/`parseSkillsFallbackBlocks` 已实装），但 tag 名是 LLM 可读协议范围：`taiji-skills`（清单语义）承载全文块语义 stretch，`taiji-skill-data` 对模型的「数据附挂区」语义传达更准；且存量降级块消息与 R4 新形态消息靠 tag 名即可自识别（诊断/测试断言友好），复用则须解析块内子项形态才能区分新旧——概念净增 1 个 tag 换取协议范围语义精度与新旧自识别，判定值得。
+- **效果**：正文可读；resume/复制/编辑重发数据范围干净；降级/正常统一包裹。验收场景 1②/2①/4 形态断言随本决策更新。
 
 **D12：用户气泡混排内联渲染（R4 新增，选定——修复 badge 前后换行）**
 - **现状缺陷**：`UserBubble.vue` 渲染循环中 badge（skill/file/session/subagent）与非 text 段（slash 文本还原、image 缩略图）均为 inline 形态，但 text 段经 `MarkdownRenderer` 渲染为**块级**（根元素 `<div class="md-render">` + markdown-it 包裹的块级 `<p>`）——badge 前后任意一侧存在 text 段时该侧必然换行（块级边界），`[text, skill, text]` 段序下 badge 单独占一行。live 与 reload 两侧同构（共用 UserBubble），发送后立即可见。
@@ -298,7 +298,7 @@ runtime 解析 pi stdout JSONL 曾用 node `readline`（**已随本 feature D10 
 
 ### 3.5 影响面与已接受代价（四要素登记）
 
-① **store 去重第三判据失配面扩大（P0-12 登记；R4 修正机制描述）**。`packages/core/src/domain/chat/store.ts` 的 `mergeBaselineWithLive` 第三判据（user 文本多重集）实际比较的是**两侧派生视图**（`userMessageText`：基线 Array content 走 segmentsToText）——sidecar 命中消息的基线 content 已被 backfillSegments 换回原始 Segment[]，与 live 侧同源**命中**（不双计）；真实失配域 = sidecar 丢失的兜底路径（反解析产物与提交文本存在剥块残留分隔空白等字节差）。store.ts 注释中「pi 文本 ≡ 提交文本」为过时前提（实施期同批更正）。改造后含 skill chip 消息的兜底反解析产物 ≠ 提交文本，判据在该域失配落回「身份+数量对齐」——**现状已存在同类失配**（行首 skill chip 消息，注释明示「skill 展开消息自然失配 → 落回现状」），本设计将触发面从边缘形态扩到主用例。**量级**：仅在 F2 竞态窗口（切入 session 时 getHistory 快照与 live 帧流时序差 + 基线尾部为 assistant）且 sidecar 丢失时短暂双计（badge 版 + 纯文本版各一条）；**恢复路径**：下一轮 reconcile 自动收敛（现状机制，非新增）；**重审条件**：若实跑出现可见双计未收敛，评估归一比对（兜底产物归拢回标记形态再比对）；**判定**：可接受（现状同类边界先例 `store.ts:128-130`）。**R4 注记**：末尾块协议下 pi 落盘文本 = 标记正文 + 末尾展开块，仍 ≠ 提交文本（标记正文），失配面与结论不变。
+① **store 去重第三判据失配面扩大（P0-12 登记；R4 修正机制描述）**。`packages/core/src/domain/chat/store.ts` 的 `mergeBaselineWithLive` 第三判据（user 文本多重集）实际比较的是**两侧派生视图**（`userMessageText`：基线 Array content 走 segmentsToText）——sidecar 命中消息的基线 content 已被 backfillSegments 换回原始 Segment[]，与 live 侧同源**命中**（不双计）；真实失配域 = sidecar 丢失的兜底路径（反解析产物与提交文本存在剥块残留分隔空白等字节差）。store.ts 注释中「pi 文本 ≡ 提交文本」为过时前提（实施期同批更正）。改造后含 skill chip 消息的兜底反解析产物 ≠ 提交文本，判据在该域失配落回「身份+数量对齐」——**现状已存在同类失配**（行首 skill chip 消息，注释明示「skill 展开消息自然失配 → 落回现状」），本设计将触发范围从边缘形态扩到主用例。**量级**：仅在 F2 竞态窗口（切入 session 时 getHistory 快照与 live 帧流时序差 + 基线尾部为 assistant）且 sidecar 丢失时短暂双计（badge 版 + 纯文本版各一条）；**恢复路径**：下一轮 reconcile 自动收敛（现状机制，非新增）；**重审条件**：若实跑出现可见双计未收敛，评估归一比对（兜底产物归拢回标记形态再比对）；**判定**：可接受（现状同类边界先例 `store.ts:128-130`）。**R4 注记**：末尾块协议下 pi 落盘文本 = 标记正文 + 末尾展开块，仍 ≠ 提交文本（标记正文），失配面与结论不变。
 
 ② **宿主 JSONL 写入量级与跨消息累积（P0-19 登记）**。**量级**：本机实测 SKILL.md 体量 0.9KB~50KB，单条消息注入 N 个 skill = 追加 N×全文；同一 skill 跨消息重复注入**单调累积**（每条挂该 skill 的消息都注入一份全文进历史，每轮请求上下文含全部历史副本），token 成本线性增长（prompt cache 命中时增量主要是 cache read）。**清理通道**：pi compaction 会把旧 skill block 摘掉（普通 skill < 20000 token 不受切点保护，可被摘要——与单条巨大消息的盲区不同）；单条超窗由 D6 预检拦截。**控制旋钮**：单消息内 chip 去重（D2）；跨消息**显式不做去重**——重复插入是用户的显式强调意图，自动跳过会静默违背意图。**重审条件**：用户反馈成本异常时评估跨消息引用提升（如上下文已有同 skill 全文时第二条起降级为标记）。**判定**：可接受。连带：`queue_update` 帧的 queuedMessages 全文数组随注入量膨胀——帧只在内核内部回执链消费、不再直驱 UI（队列区读 `session.delivery` 帧的 preview 文本），内存帧不落盘，量级与消息体积同阶，可接受。**R4 补登显示派生视图**：steer/followUp 入队前已完成注入，队列区行（QueueBubble）以 `session.delivery` 帧的 preview（提交原文侧派生视图）单行 truncate 展示——skill 标记与包裹块不经队列区行呈现（注入文本在 pi 槽位与 transcript 中仍完整存在，展示层剥离 SSOT = `apply-entry-convert.ts`；重审条件 = 用户反馈排队气泡可读性，届时 QueueBubble 复用反解析派生视图剥块/还原短标记）。
 
@@ -312,7 +312,7 @@ runtime 解析 pi stdout JSONL 曾用 node `readline`（**已随本 feature D10 
 
 ⑦ **subagent/landing 出站注入的预算近似与 encode 膨胀（2026-09-07 登记，指针——裁决与论证 SSOT 在 [adversarial-review-fixes.md](adversarial-review-fixes.md) D-A2-4）**。①注入预算 80% 阈值按主 session contextWindow 计算，subagent / 新 session 实际窗口可能更小——阈值偏松，pi 侧既有上下文裁剪兜底（v1 已知近似，维持）；②注入产物（≤50KB 全文）经 `encodeDirectiveText`（反斜杠翻倍 + 换行转义）后命令长度膨胀，代码密集 SKILL.md 最坏接近翻倍（~100KB 命令串）——pi CLI 单命令长度上限的探针确认（adversarial-review-fixes §5 检查点④）截至 u2 落地尚未回填结论；超限兜底 = 降级块先行（降级块 <1KB 无膨胀问题），出现单命令超长报错即按该检查点处置。
 
-⑧ **历史读取链路字节预算耦合（R4 新增登记）**。注入块使含 chip 消息的落盘体积膨胀（单 skill 最大 50KB），三级读取面随之变化：getHistory 双预算窗口按 turn 字节选窗（HISTORY_BUDGET 640KB / 20 turns）→ skill 重度会话更早触发 truncated、「加载更早」翻页增多；get_entries 全量重建 reply 体积增大；离线尾读分块扩窗同源预算。**量级**：per-turn 字节与注入量同阶；**恢复路径**：翻页/优雅降级（truncated 置位，非正确性问题）；**重审条件**：用户反馈历史加载频繁截断——2026-09-19 已触发（归因不是 skill 注入：重 agent 会话实测 7 轮 3.5MB、单轮均 500KB，640KB 预算窗口只剩 1 轮），处置为触顶自动续载（renderer `useLoadMoreHistory.onScrollOffset`，预算常量未动），本项的注入膨胀耦合维持可接受；**判定**：可接受。
+⑧ **历史读取链路字节预算耦合（R4 新增登记）**。注入块使含 chip 消息的落盘体积膨胀（单 skill 最大 50KB），三级读侧随之变化：getHistory 双预算窗口按 turn 字节选窗（HISTORY_BUDGET 640KB / 20 turns）→ skill 重度会话更早触发 truncated、「加载更早」翻页增多；get_entries 全量重建 reply 体积增大；离线尾读分块扩窗同源预算。**量级**：per-turn 字节与注入量同阶；**恢复路径**：翻页/优雅降级（truncated 置位，非正确性问题）；**重审条件**：用户反馈历史加载频繁截断——2026-09-19 已触发（归因不是 skill 注入：重 agent 会话实测 7 轮 3.5MB、单轮均 500KB，640KB 预算窗口只剩 1 轮），处置为触顶自动续载（renderer `useLoadMoreHistory.onScrollOffset`，预算常量未动），本项的注入膨胀耦合维持可接受；**判定**：可接受。
 
 ---
 

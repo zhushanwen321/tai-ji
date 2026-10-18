@@ -17,7 +17,7 @@
 import { ref } from 'vue'
 import { expect, vi } from 'vitest'
 
-/** sidebar 动作 mock 集（超集：assign-project 用基础面，import-entry 走 restore/fork/handoff 扩展面）。 */
+/** sidebar 动作 mock 集（超集：assign-project 用基础面，import-entry 走 restore/fork/handoff 扩展范围）。 */
 export const sidebarActionMocks = {
   selectSession: vi.fn(),
   deleteSession: vi.fn(),
@@ -61,7 +61,7 @@ export function sidebarStoreModule() {
   }
 }
 
-/** '@/stores/session' mock 工厂。includeSetListLoadError：import-entry 走列表加载错误面。 */
+/** '@/stores/session' mock 工厂。includeSetListLoadError：import-entry 走列表加载错误范围。 */
 export function sessionStoreModule(options: { includeSetListLoadError?: boolean } = {}) {
   return {
     useSessionStore: () => ({

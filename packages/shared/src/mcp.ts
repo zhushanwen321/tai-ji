@@ -33,7 +33,7 @@ export type McpExposureLevel = 'codemode' | 'deferred' | 'direct' | 'hidden'
 
 /**
  * mcp.json 条目值对象（`mcpServers` 键名下的对象本体，不含名称键——名称是聚合唯一键，
- * 协议面独立承载）。两族传输字段全部可选：文件里已存在的坏条目（command 与 url 均缺，
+ * 协议范围独立承载）。两族传输字段全部可选：文件里已存在的坏条目（command 与 url 均缺，
  * pi 报错跳过类）照原样保留派生视图并以 `configError` 标注（设计 D4，不阻塞其余条目管理）；
  * 写侧（add/update payload）的合法性由 runtime 保存校验 fail-fast 把关，类型不强约束
  *（command/url 同填的互斥拦截是运行时校验，D4 有意收紧项）。

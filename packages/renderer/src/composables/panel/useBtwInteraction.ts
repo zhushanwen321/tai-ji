@@ -32,7 +32,7 @@ export interface BtwBarRequest {
   dialog?: UiDialogRequest
 }
 
-/** 降档表单选项（形状对齐 extension-protocol 的 PlanReviewComment——契约已直引，本地收窄仅为降档最小渲染面） */
+/** 降档表单选项（形状对齐 extension-protocol 的 PlanReviewComment——契约已直引，本地收窄仅为降档最小渲染范围） */
 export interface BtwBarOption {
   label: string
   description?: string
@@ -180,7 +180,7 @@ function scheduleResultJson(d: BtwScheduleDraft): string {
 /**
  * 接线 drawer 内联确认条（BtwPanel setup 同步调用）。
  *
- * 数据面三通道合并：store 族（form + planReview，useExtensionUI vid 分区）∪ dialog 族
+ * 数据范围三通道合并：store 族（form + planReview，useExtensionUI vid 分区）∪ dialog 族
  * （模块级簿记 FIFO）——按 receivedAt 取最早呈现（并发有序），respond 后自然晋升下一条。
  */
 export function useBtwInteraction(vidRef: Ref<string | null>) {

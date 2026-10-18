@@ -36,7 +36,7 @@ export function installRendererErrorReporting(app: App): void {
   try {
     app.config.errorHandler = (err, _instance, info) => {
       report('vue-error-handler', err, info)
-      // RD-2#1 上屏显形：只落盘用户不可见——渲染面异常时补一次 toast（限流防风暴）
+      // RD-2#1 上屏显形：只落盘用户不可见——渲染范围异常时补一次 toast（限流防风暴）
       toastVueError()
       // 不 rethrow：Vue 3 存在 errorHandler 时错误不再向默认链路传播，组件树保留
       // （设计确认语义：抑制默认错误处理，不卸载整树）
@@ -83,7 +83,7 @@ const VUE_ERROR_TOAST_INTERVAL_MS = 30_000
 let lastVueErrorToastAt = 0
 
 /**
- * errorHandler 附加的上屏 toast（RD-2#1 ③）：全局 handler 原本只落盘，用户对渲染面
+ * errorHandler 附加的上屏 toast（RD-2#1 ③）：全局 handler 原本只落盘，用户对渲染范围
  * 异常零感知。补一条含 sessionId 的 error toast——与落盘互补（落盘管取证、toast 管显形）。
  * 组件级边界捕获的错误不经过这里（return false 已阻断），本 toast 只显形边界外的漏网错误。
  * 全链路 try/catch：i18n 未就绪 / pinia 未激活 / toast 通道故障均静默放弃上屏（落盘已在先）。

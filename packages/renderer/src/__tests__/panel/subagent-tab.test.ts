@@ -80,7 +80,7 @@ class NoopResizeObserver {
 }
 
 /**
- * Turn stub：透出对话流内容（黑盒断言面——MessageStream 渲染树末端的消息文本）。
+ * Turn stub：透出对话流内容（黑盒断言范围——MessageStream 渲染树末端的消息文本）。
  * template 表达式受限于 stub 形态，用 computed 归一 user/assistant 文本。
  */
 const globalStubs = {

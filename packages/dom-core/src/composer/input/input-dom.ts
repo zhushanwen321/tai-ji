@@ -23,7 +23,7 @@ import type { VerticalMoveResult, HandleImagePasteResult } from './types'
 /** ZWSP spacer 文本（image-chip / slash-chip 后跟的零宽空格，移除占位 badge 时一并清） */
 export const CHIP_SPACER_ZWSP = '\u200B'
 
-// ── 来自 useContenteditableInput：segments / 文本提取（提取至 ./segment-parse，保留原导出面）──
+// ── 来自 useContenteditableInput：segments / 文本提取（提取至 ./segment-parse，保留原导出清单）──
 export { getSegmentsFromEl, getTextFromEl } from './segment-parse'
 
 // ── 来自 useContenteditableInput：触发检测 ──

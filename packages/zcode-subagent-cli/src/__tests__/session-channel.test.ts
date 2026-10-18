@@ -551,7 +551,7 @@ describe("onActivity（tool 执行期活性）", () => {
 
   it("final-frame（payload.response）→ onActivity 不调（终态帧非活性语义）", async () => {
     const onActivity = vi.fn();
-    // dropTurnTerminal：终态仅由收尾帧宽松判定——final-frame 路径直达断言面
+    // dropTurnTerminal：终态仅由收尾帧宽松判定——final-frame 路径直达断言范围
     const { ch, workspacePath } = makeChannel({ dropTurnTerminal: true });
     const r = await ch.runTurn({ workspacePath, mode: "yolo" }, "做点什么", {
       onActivity,
@@ -746,7 +746,7 @@ describe("usage", () => {
     const { ch, workspacePath } = makeChannel({ dropFinalFrame: true });
     const r = await ch.runTurn({ workspacePath, mode: "yolo" }, "做点什么");
     expect(r.usage).toEqual(GOLDEN_READ_TOKENS);
-    // 提取函数单点：golden readResponse 的 tokens 结构（宽容解析面）
+    // 提取函数单点：golden readResponse 的 tokens 结构（宽容解析范围）
     expect(
       extractReadUsage(JSON.parse(ZCODE_APPSERVER_GOLDEN.readResponse))
     ).toEqual(GOLDEN_READ_TOKENS);
@@ -910,7 +910,7 @@ describe("连接崩溃收割（R4 onClose 面）", () => {
     const onlyRunning = [ZCODE_APPSERVER_GOLDEN.pushStream[0]];
     const { ch, conn, stateFile, workspacePath } = makeChannel({ replaceSendPushes: onlyRunning });
     const turn = ch.runTurn({ workspacePath, mode: "yolo" }, "做点什么");
-    // 等 send 已达（fake 流水可观测）后在同一连接上触发自杀（崩溃收割的触发面）
+    // 等 send 已达（fake 流水可观测）后在同一连接上触发自杀（崩溃收割的触发范围）
     await vi.waitFor(() => {
       expect(sentFrames(stateFile, "session/send")).toHaveLength(1);
     }, { timeout: 5_000 });

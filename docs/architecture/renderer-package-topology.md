@@ -124,7 +124,7 @@ extension-host/
 
 渲染件（ui/src/extension-host/）：`ViewHost.vue`、`StatusBar.vue`（main-panel 局部底栏）、`PluginSettingsPage.vue`、`PermissionRequestDialog.vue`。
 
-提问表单渲染面（renderer/src/components/extension/form/，桌面壳）：`FormOverlay.vue`（壳：表头 / 多问 tab 条 / Submit 门 / 取消）+ `ChoiceQuestion.vue` / `TextQuestion.vue` / `ScheduleForm.vue` 三类型渲染器——统一提问表单协议（ui-form，ask-user / scheduler / plan 三方提问收尾）的 GUI 唯一渲染面，Panel 内联覆盖 composer 挂载。
+提问表单渲染范围（renderer/src/components/extension/form/，桌面壳）：`FormOverlay.vue`（壳：表头 / 多问 tab 条 / Submit 门 / 取消）+ `ChoiceQuestion.vue` / `TextQuestion.vue` / `ScheduleForm.vue` 三类型渲染器——统一提问表单协议（ui-form，ask-user / scheduler / plan 三方提问收尾）的 GUI 唯一渲染范围，Panel 内联覆盖 composer 挂载。
 
 ### 4.2 三套 UI 接口统一（pi ctx.ui × plugin api.ui × GuiComponent）
 

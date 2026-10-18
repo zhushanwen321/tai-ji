@@ -110,7 +110,7 @@ rl.on("line", (line) => {
   }
   if (mode === "echo-schema-env") {
     // [D1] 派生注入验收：回显子进程实际收到的 PI_WORKFLOW_SCHEMA env 值（未注入
-    // 时回显哨兵），经 text_delta 送达断言面
+    // 时回显哨兵），经 text_delta 送达断言范围
     send({ type: "message_update", assistantMessageEvent: { type: "text_delta", delta: process.env.PI_WORKFLOW_SCHEMA ?? "<env-absent>" } });
     send({ type: "message_end", message: { stopReason: "stop" } });
     send({ type: "agent_end", willRetry: false, reason: "end_turn" });
@@ -241,7 +241,7 @@ describe("runSpawnOnce 集成（fake pi 子进程）", () => {
       expect(result.parsedOutput).toBeUndefined();
       expect(result.failureKind).toBeUndefined();
       // tool_end 配对 tool_start（toolCallId 回填 args）；对象为 InternalToolCall
-      // 运行时形态（含 _status/startedTs 内部态，导出面 strip 归消费方），业务字段
+      // 运行时形态（含 _status/startedTs 内部态，导出清单 strip 归消费方），业务字段
       // 用 toMatchObject 断言
       expect(result.toolCalls).toMatchObject([
         {

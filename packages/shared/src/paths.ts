@@ -36,6 +36,40 @@ import { homedir } from 'node:os'
 import { join, resolve, sep } from 'node:path'
 
 /**
+ * taiji 数据目录根名 SSOT（dev / prod 两形态）。
+ *
+ * 消费方：getDataDir 缺省（dev）、prod 值准入检查（prod）、main 侧两 resolver
+ * （resolveDevDataDir / resolvePackagedDataDir 的 fallback 树根）与 main.ts 兜底字面量
+ * ——全部经本常量推导，禁止各处手抄 '.taiji' / '.taiji-dev'（手抄漂移 = dev/prod
+ * 实例互串数据）。
+ */
+export const DATA_DIR_ROOT_NAMES = {
+  dev: '.taiji-dev',
+  prod: '.taiji',
+} as const
+
+/**
+ * 树内包含判定单点（`resolved === root || resolved.startsWith(root + sep)` 的词法判定，
+ * sep 边界防前缀混淆——`~/.taijiish` 不是 `~/.taiji` 树内）。
+ *
+ * 入参 `resolved` 必须是 path.resolve 归一后的路径（resolve 消解 `..` 与重复分隔符，
+ * 纯词法、不触 fs——env 泄漏威胁模型是路径值本身，symlink 越界不在面内）。
+ *
+ * casefold 不对称（有意，漏判代价不对称）：
+ * - prod 值准入检查（assertNotLeakedProdDataDir）传 `{ casefold: true }`——大小写不敏感
+ *   卷（macOS/Windows 默认）上 `~/.TAIJI` 类手滑变体词法在树外、磁盘实际命中 prod 目录，
+ *   漏判即非 prod 进程写真实 prod 数据，从严误拦可接受（见该函数头注释）。
+ * - main 两 resolver（resolveDev/PackagedDataDir）不 fold（缺省）——此处漏判方向的说明见
+ *   packaged-data-dir.ts 的「大小写盲区」注释；opts 参数显式承载该不对称，不折中合并。
+ */
+export function isPathWithinTree(resolved: string, root: string, opts?: { casefold?: boolean }): boolean {
+  const folded = opts?.casefold === true
+  const a = folded ? resolved.toLowerCase() : resolved
+  const b = folded ? root.toLowerCase() : root
+  return a === b || a.startsWith(b + sep)
+}
+
+/**
  * prod 值准入检查（C-proc-26 第二支柱）：`TAIJI_AGENT_DATA_DIR` 指向 `~/.taiji` 树内的
  * 合法前提 = 进程声明自己是 prod 形态（`TAIJI_AGENT_PACKAGED === '1'`）。非 prod 进程
  * （dev/测试/裸跑/脚本）持有 prod 值 = env 泄漏或配置错误 → fail-fast。
@@ -50,7 +84,7 @@ import { join, resolve, sep } from 'node:path'
  * （C-proc-26 入口断言保证）；打包 main 进程在 packaged 分支自置位。pi 子树内的 taiji
  * 代码不 import 本模块（extension 包不依赖 @taiji/shared，import 即包边界越界）。
  *
- * 判定纯词法（path.resolve 消解 ../ 后树内包含判定 + sep 边界），不触磁盘。
+ * 判定纯词法（path.resolve 消解 ../ 后经 isPathWithinTree 判定 + sep 边界），不触磁盘。
  * 树内包含判定双侧 casefold：大小写不敏感卷（macOS/Windows 默认）上 `~/.TAIJI`
  * 类手滑变体词法在树外、磁盘实际命中 prod 目录（stat dev+ino 同一物理文件），
  * 漏判即非 prod 进程写真实 prod 数据。Linux 大小写敏感卷上该路径本就是树外另一目录，
@@ -60,12 +94,9 @@ function assertNotLeakedProdDataDir(env: NodeJS.ProcessEnv): void {
   const external = env.TAIJI_AGENT_DATA_DIR
   if (!external) return
   const resolved = resolve(external)
-  const prodRoot = join(homedir(), '.taiji')
+  const prodRoot = join(homedir(), DATA_DIR_ROOT_NAMES.prod)
   // 判定用小写副本（错误消息保留原大小写）：见函数头 casefold 注释
-  const foldedResolved = resolved.toLowerCase()
-  const foldedProdRoot = prodRoot.toLowerCase()
-  const inProdTree =
-    foldedResolved === foldedProdRoot || foldedResolved.startsWith(foldedProdRoot + sep)
+  const inProdTree = isPathWithinTree(resolved, prodRoot, { casefold: true })
   if (inProdTree && env.TAIJI_AGENT_PACKAGED !== '1') {
     throw new Error(
       `[getDataDir] blocked: TAIJI_AGENT_DATA_DIR=${resolved} resolves into the prod data dir` +
@@ -106,7 +137,7 @@ export function getDataDir(env: NodeJS.ProcessEnv = process.env): string {
   assertNotLeakedProdDataDir(env)
   // 空串视同未设（|| 非 ??）：与 resolveDev/PackagedDataDir 的「非空才算外部值」
   // 对齐——空串只可能来自宿主手滑 export，归缺省 dev 树是安全方向。
-  return env.TAIJI_AGENT_DATA_DIR || join(homedir(), '.taiji-dev')
+  return env.TAIJI_AGENT_DATA_DIR || join(homedir(), DATA_DIR_ROOT_NAMES.dev)
 }
 
 /**

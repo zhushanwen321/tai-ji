@@ -1,7 +1,7 @@
 /**
  * 语音合成朗读（TTS）契约类型 —— shared 协议层 SSOT。
  *
- * 设计文档：.tmp/tech-design/ai-voice-tts.md §7.1（WS 协议面）/ §7.3（driver 接口与能力表）。
+ * 设计文档：.tmp/tech-design/ai-voice-tts.md §7.1（WS 协议范围）/ §7.3（driver 接口与能力表）。
  * 全部形状以该设计 §7.3 TS 块为唯一权威；消费方：
  * - runtime driver（infra/tts/，u2）：实现 TtsDriver，消费 TtsCapabilities / InternalSpeechRequest
  * - runtime service / transport（u3）：打包 InternalSpeechRequest、reply 协议载荷
@@ -136,8 +136,8 @@ export interface TtsConfig {
 
 /**
  * 内部统一合成请求（OpenAI `POST /v1/audio/speech` 形 + 受控扩展，设计 D1/§7.3）。
- * driver 职责 = 字段换家 + 钳制/丢弃；`response_format` 恒 pcm 系值（D9——进类型面使
- * D5 缓存键全集与类型面逐项对齐）：StepFun `pcm` / MiniMax `audio_setting.format=pcm` / MiMo `pcm16`。
+ * driver 职责 = 字段换家 + 钳制/丢弃；`response_format` 恒 pcm 系值（D9——进类型范围使
+ * D5 缓存键全集与类型范围逐项对齐）：StepFun `pcm` / MiniMax `audio_setting.format=pcm` / MiMo `pcm16`。
  * `passthrough` 是 speak 时由 TtsConfig.vendor 子树恒等搬运组装出的请求字段（派生值，不落盘），
  * driver 将其 deep-merge 进厂商请求体（护栏见设计 D2）。
  */

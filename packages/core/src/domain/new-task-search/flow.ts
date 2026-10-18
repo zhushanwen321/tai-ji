@@ -347,7 +347,7 @@ export function useNewTaskFlow(deps: NewTaskFlowDepsWithLaunch) {
    * presetId（preset 透传）：landing 态用户在 PresetSelectChip 选定的预设（pendingPreset，
    * 经 setPendingPreset 写入）与全局默认预设（defaultPresetId）都作为 resolveLaunchConfig
    * 的输入——透传的是 resolve 终值（D3：默认预设首次真正生效；出厂 builtin:full →
-   * undefined 不透传，行为与写入面全等现状）。pendingPreset 仍是用户显式选择的单一真源
+   * undefined 不透传，行为与写侧全等现状）。pendingPreset 仍是用户显式选择的单一真源
    * （PresetSelectChip emit select → Landing.vue onPresetSelect → flow.setPendingPreset）。
    */
   /**
@@ -393,7 +393,7 @@ export function useNewTaskFlow(deps: NewTaskFlowDepsWithLaunch) {
       // runtime INV-7 降级，不消费 resolve.cwd
       cwd: pendingCwd.value,
       // D3：透传 resolve 终值 presetId（出厂 builtin:full → undefined 不透传，
-      // 行为与写入面全等现状）
+      // 行为与写侧全等现状）
       presetId: resolved.presetId ?? null,
       // D5 契约快照化：恒传解析终值（'' 全链空防御形态不上线——回落 runtime 全局默认）
       pendingModel: resolved.model || null,

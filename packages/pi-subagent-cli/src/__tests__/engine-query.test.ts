@@ -1,4 +1,4 @@
-// engine-query.test.ts —— pi 引擎查询面（engine-query.ts，pi-workflow-run-resource-model
+// engine-query.test.ts —— pi 引擎查询范围（engine-query.ts，pi-workflow-run-resource-model
 // §3.3 决策 11 方案 B）单测。fixture json 注入 mkdtemp tmp 目录（自建自删，零真实数据
 // 目录触碰），server 接线用例经 EngineProtocolServer piAgentDir 注入同款 fixture。
 // 另含零新依赖红线断言（包 dependencies 键集锁死——任务书验收 2）。
@@ -73,7 +73,7 @@ async function pollUntil<T>(pred: () => T | null | undefined, timeoutMs = 2_000)
   }
 }
 
-/** 查询面请求往返：注入帧收集 sink 的 server + 一问一答。 */
+/** 查询范围请求往返：注入帧收集 sink 的 server + 一问一答。 */
 async function queryServer(method: string, params?: unknown): Promise<ResponseFrame> {
   const frames: ResponseFrame[] = [];
   const server = new EngineProtocolServer({
@@ -204,7 +204,7 @@ describe("validatePiModel", () => {
 
 // ── server.ts 分发位接线（pi-workflow-run-resource-model §3.3 决策 11） ──
 
-describe("EngineProtocolServer 查询面接线（分发位路由 engine-query）", () => {
+describe("EngineProtocolServer 查询范围接线（分发位路由 engine-query）", () => {
   it("listModels 请求 → fixture 数据目录内容；initialize 应答 models 同源（派生视图仅 id）", async () => {
     writeFixture("models.json", MODELS_JSON);
     writeFixture("auth.json", AUTH_JSON);
@@ -252,7 +252,7 @@ describe("EngineProtocolServer 查询面接线（分发位路由 engine-query）
 // ── 零新依赖红线（任务书验收 2） ──
 
 describe("pi-subagent-cli 零新依赖", () => {
-  it("package.json dependencies 键集 = 既有两依赖（查询面零新依赖红线）", () => {
+  it("package.json dependencies 键集 = 既有两依赖（查询范围零新依赖红线）", () => {
     const pkgPath = path.join(path.dirname(fileURLToPath(import.meta.url)), "..", "..", "package.json");
     const pkg = JSON.parse(fs.readFileSync(pkgPath, "utf8")) as { dependencies?: Record<string, string> };
     expect(Object.keys(pkg.dependencies ?? {}).sort()).toEqual([

@@ -14,7 +14,7 @@
  * assertValidSessionId 允许集的真子集，收紧方向安全；锚点
  * dist/core/session-manager.js assertValidSessionId 正则字面量（语义登记 PS-52，verifiedWith 以该登记为准））。
  *
- * 相对 runtime 旧版的改造（设计 §1.5 source 包契约第 4 条「错误面归消费侧」）：不再
+ * 相对 runtime 旧版的改造（设计 §1.5 source 包契约第 4 条「错误范围归消费侧」）：不再
  * 抛 runtime services 层的 ImportServiceError（本包不私建 import_* / zcode_* 错误码），
  * 归一化失败抛普通 Error——消费方（session-reader 路由 / runtime 导入薄包装）按各自
  * 错误词表映射（reader → zcode_param_invalid；runtime → import_invalid_session）。

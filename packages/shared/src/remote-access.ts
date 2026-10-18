@@ -95,7 +95,7 @@ export interface RemoteAccessInfo extends RemoteAccessConfig {
    * 面板默认选中数组首项，跨网使用为主时默认即展示 Tailscale 地址。
    */
   urls: RemoteAccessUrl[]
-  /** 移动壳 dist 产物就绪（bridge 读时点测；false = E5 静态面禁用，面板显形警告） */
+  /** 移动壳 dist 产物就绪（bridge 读时点测；false = E5 静态范围禁用，面板显形警告） */
   mobileDistReady: boolean
 }
 

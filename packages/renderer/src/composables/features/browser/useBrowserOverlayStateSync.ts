@@ -31,7 +31,7 @@ export function useBrowserOverlayStateSync(): void {
         ? { open: true, content: cur.kind, sessionId: cur.payload.sessionId }
         : { open: false, content: null, sessionId: null },
     ).catch((e: unknown) => {
-      // 上报是事件提示（主进程谓词收敛仍有 rect/错误/shields 触发面）；非法 payload reject
+      // 上报是事件提示（主进程谓词收敛仍有 rect/错误/shields 触发范围）；非法 payload reject
       // 属上报方 bug，warn 级消化防 unhandledrejection 上报 error-reporter
       console.warn('[browser-overlay-state-sync] report failed:', e)
     })

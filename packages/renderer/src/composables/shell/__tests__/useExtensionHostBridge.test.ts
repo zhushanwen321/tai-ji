@@ -378,7 +378,7 @@ describe('u4b E13 四态判定 resolveHeaderActionAvailability（纯函数直测
     return registry
   }
 
-  /** 会话命令分区读取面 stub（E13 只消费 getCommands，结构契约见 CommandPartitionReader） */
+  /** 会话命令分区读侧 stub（E13 只消费 getCommands，结构契约见 CommandPartitionReader） */
   const readerOf = (names: string[]): CommandPartitionReader => ({
     getCommands: () => names.map((name) => ({ name })),
   })
@@ -405,7 +405,7 @@ describe('u4b E13 四态判定 resolveHeaderActionAvailability（纯函数直测
 })
 
 describe('hasVisibleHeaderActions（headerAction 可见性判定，与 HeaderActionsHost 渲染过滤同构对账）', () => {
-  /** 最小 source stub（只带可见性判定消费的三个读面；E13/E3 面不参与可见性） */
+  /** 最小 source stub（只带可见性判定消费的三个读侧；E13/E3 面不参与可见性） */
   function sourceOf(
     declarations: Array<{ id: string; ha: Record<string, unknown> | null }>,
     hiddenByDefault = false,

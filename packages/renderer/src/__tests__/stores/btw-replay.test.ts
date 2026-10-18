@@ -1,11 +1,11 @@
 /**
  * btw-replay —— btw 重载链接线测试（btw-question D5「重载链」/ M2-c 验收 ③④）。
  *
- * 覆盖面：
+ * 覆盖范围：
  * - ③ 接线：重开线（drawer 复合条件翻出 selectedBtwVid）→ getHistory(vid) → chatStore
  *   分区注入；触发门控（非 btw tab 不回放）；已 hydrate 幂等；驱逐后重开回填一致；
  *   失败降级（markHistoryFailed + 重开重试）。
- * - ④ live ≡ reload 等价口径（btw 分区纳入 applyEntry 等价性覆盖面）：同 vid 上
+ * - ④ live ≡ reload 等价口径（btw 分区纳入 applyEntry 等价性覆盖范围）：同 vid 上
  *   live 帧链（message.message_end 载 entry → applyEntryFrame 累积）≡ 文件回放
  *   （replayEntries 派生视图经接线注入分区）——两路径喂同一 applyEntry reducer。
  * - V8 回放侧核实：半截 entry（悬空 toolCall，无 toolResult）重开回放的呈现形态。
@@ -115,7 +115,7 @@ describe('重开线回放接线（D5 重载链：文件 → chatStore 分区）'
 
   it('触发门控：非 btw tab 不回放；切到 btw tab 触发一次；关 drawer 再开幂等不重新拉取', async () => {
     getHistoryMock.mockResolvedValue(reply([msgOf('r1', '回填')]))
-    store.hydrate(MAIN, [msgOf('m1', '主对话')]) // 主分区已回放态（不参与触发面）
+    store.hydrate(MAIN, [msgOf('m1', '主对话')]) // 主分区已回放态（不参与触发范围）
 
     // 门控①：drawer 开在其他 tab、selectedBtwVid 在场（切走残留）→ 不回放
     drawerControl.open('git')
@@ -135,7 +135,7 @@ describe('重开线回放接线（D5 重载链：文件 → chatStore 分区）'
     drawerControl.open('btw')
     await settle()
     expect(getHistoryMock).toHaveBeenCalledTimes(1)
-    // 主分区回放态未被打扰（触发面只写 btw 分区）
+    // 主分区回放态未被打扰（触发范围只写 btw 分区）
     expect(store.getMessages(MAIN)).toEqual([msgOf('m1', '主对话')])
   })
 
@@ -145,7 +145,7 @@ describe('重开线回放接线（D5 重载链：文件 → chatStore 分区）'
     await openThread('btw:pi-r')
     expect(store.getMessages('btw:pi-r')).toEqual(history)
 
-    // LRU 驱逐（btw 键普通候选，core chat-lru-btw 断言面）：分区 + hydrated 标记同清
+    // LRU 驱逐（btw 键普通候选，core chat-lru-btw 断言范围）：分区 + hydrated 标记同清
     store.evictSessionWithVirtual('btw:pi-r')
     expect(store.getMessages('btw:pi-r')).toEqual([])
     expect(store.isHydrated('btw:pi-r')).toBe(false)
@@ -178,7 +178,7 @@ describe('重开线回放接线（D5 重载链：文件 → chatStore 分区）'
   })
 })
 
-describe('live ≡ reload 等价口径（btw 分区纳入 applyEntry 等价性覆盖面）', () => {
+describe('live ≡ reload 等价口径（btw 分区纳入 applyEntry 等价性覆盖范围）', () => {
   it('同 vid：live message_end 帧链累积 ≡ 文件回放派生视图注入（两路径同一 applyEntry reducer）', async () => {
     const vid = 'btw:pi-eq'
     const entries: PiEntry[] = [
@@ -238,7 +238,7 @@ describe('live ≡ reload 等价口径（btw 分区纳入 applyEntry 等价性�
 })
 
 describe('三消费方复合谓词不变量（真实事件序对账，display-containers §7.1 迁出不变量）', () => {
-  // 回放触发面（本文件消费方②）必须与 getViewedVids（①chat LRU 豁免）、
+  // 回放触发范围（本文件消费方②）必须与 getViewedVids（①chat LRU 豁免）、
   // isViewingBtwVid（③useBtwTabData 视口命中）同值同变（读取单一源 selection/predicates.ts）。
   // 真实事件序 = 真实响应式写入逐步推进（开/切 tab/切 session），每步对账三读数一致。
   it('开 btw → 选线 → 切 tab → 切 session：回放触发与①③读数每步一致', async () => {

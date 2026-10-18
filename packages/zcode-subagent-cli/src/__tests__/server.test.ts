@@ -2,7 +2,7 @@
 // 单测；protocol-e2e 走 bin 子进程不计入本包 v8 覆盖率，server.ts 曾整文件 0 覆盖）。
 //
 // engine = EnginePort 内存 fake（无子进程 / 无真实数据目录——本文件零 fs 触碰），
-// stdout 写入面注入内存 sink。覆盖：
+// stdout 写侧注入内存 sink。覆盖：
 //   ① 帧分类路由：请求帧分发 / 反向应答落位 / 入站反向请求 bad_frame / 坏帧静默；
 //   ② 10 正向方法表驱动路由（逐方法 → EnginePort 成员）+ 未知方法
 //      engine_protocol_unknown_method（错误原文含方法名与 request id）；
@@ -283,7 +283,7 @@ describe("methodHandlers 表驱动路由（逐方法 → EnginePort 成员）", 
     expect(r2.error?.code).toBe("engine_capability_unsupported");
   });
 
-  it("read：handle 以 {data} 包装传给引擎（协议面裸 handle）", async () => {
+  it("read：handle 以 {data} 包装传给引擎（协议范围裸 handle）", async () => {
     const engine = makeEngine();
     const { server, sink } = makeServer(engine);
     // [H1 U5] interact dispatch 已随协议方法退役删除（zcode 桩同步移除）

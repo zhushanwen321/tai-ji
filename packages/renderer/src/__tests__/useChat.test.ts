@@ -261,7 +261,7 @@ describe('useChat pendingSend 合并态（空窗期）', () => {
 
   // [ADR-0122] 原「正常流转清除 pendingSend 超时 timer」用例随 timer 退役删除：
   // message_start 到达清 pendingSend 的语义由「message_start 到达 → 清 pendingSend +
-  // 设 isGenerating」用例覆盖，无 timer 残留断言面。
+  // 设 isGenerating」用例覆盖，无 timer 残留断言范围。
 
   it('[u3c/D1] followUp 提交失败零乐观残留（受理回执前不上屏）+ toast 提示', async () => {
     const chat = useChatStore()

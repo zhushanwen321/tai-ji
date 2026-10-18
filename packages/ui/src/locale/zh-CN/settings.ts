@@ -246,7 +246,7 @@ export default {
       credentialMissing: '需手填',
       credentialOauth: 'OAuth·Phase2',
       credentialCommand: '!命令',
-      credentialCommandHint: 'apiKey 以 ! 开头，pi 运行时执行 shell 命令取值（命令注入面）',
+      credentialCommandHint: 'apiKey 以 ! 开头，pi 运行时执行 shell 命令取值（命令注入风险）',
       warnings: '警告',
       // B2/W7：源配置解析期致命错误横幅（preview?.parseError 触发，不阻断已解析 providers 导入）
       parseError: '源配置解析出错（部分 provider 可能仍可导入）：{message}',

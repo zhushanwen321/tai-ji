@@ -6,9 +6,9 @@
  * 状态本体按 per-session 分区（useSessionScopedState，ADR-0049），与控制态分区同键
  * （drawerSessionKey，control.ts 绑定），但物理独立——控制态只留开合 + activeTab。
  *
- * 写入面 = setSubagentView（coordination.openSubagent 编排调用）/ clearSubagentView
+ * 写侧 = setSubagentView（coordination.openSubagent 编排调用）/ clearSubagentView
  * （coordination.clearSubagentSelection 编排调用）；
- * 读取面 = useSubagentSelection（SubagentTab 消费）+ readSubagentSelectionFor
+ * 读侧 = useSubagentSelection（SubagentTab 消费）+ readSubagentSelectionFor
  * （复合谓词 selection/predicates.ts 按 sid 跨域读，getViewedVids 豁免链用）。
  */
 import { computed, reactive } from 'vue'

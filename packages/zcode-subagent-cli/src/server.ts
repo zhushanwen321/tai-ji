@@ -7,13 +7,13 @@
 //
 // 9 正向方法逐个映射到 EnginePort（本地 port-types 镜像）成员；run 期间事件经
 // `event` 通知（runId + 单调 seq）外发，onHandleReady/stream 经 host/* 反向请求上抛
-//（[池抽象降级] host/poolResolved 通道已随 poolKey 协议面退役删除）。run.params.task 是 SDK AgentCallOpts 引擎面子集——model/
+//（[池抽象降级] host/poolResolved 通道已随 poolKey 协议范围退役删除）。run.params.task 是 SDK AgentCallOpts 引擎面子集——model/
 // cwd/model 从 run.params.ctx 还原进本地 AgentCallOpts/RunContext
 // （与 core RemoteEngine.toSdkTaskSubset 的映射互为镜像）。
 //
 // 反向请求客户端：帧④ {id:"rev-N", method:"host/*", params} 必须应答；每个请求
 // 登记进 ReverseRequestClock（armEngineSelfDestruct 的辅助判据面——ack 后等待不计
-// in-flight 超时）。数据面应答 {ok:true} / 人机交互两阶段 {ack:true} 的分类按 SDK
+// in-flight 超时）。数据范围应答 {ok:true} / 人机交互两阶段 {ack:true} 的分类按 SDK
 // REVERSE_CHANNEL_TIMEOUT_CLASS。
 //
 // 本单元验收口径（任务书）：协议服务器以「能被 W2 EngineClient 驱动完成
@@ -60,7 +60,7 @@ const logger = getLogger("subagents");
 
 /** 入站帧来源（ readline 已拆行的请求帧 + 反向请求应答帧混流）。 */
 export interface EngineProtocolServerOptions {
-  /** stdout 写入面（每帧一行 JSON）。 */
+  /** stdout 写侧（每帧一行 JSON）。 */
   write: FrameWriter;
   /** 引擎实例（缺省 createDefaultZcodeEngine——测试注入 fake/DI 实例）。 */
   engine?: EnginePort;
@@ -223,8 +223,8 @@ export class EngineProtocolServer {
   /**
    * 发反向请求并等应答（帧④必须应答）。计时面登记：发出 → clock.started；收到
    * ack 形态应答 → clock.acked（两阶段第一段，等待不计超时）；终结 → clock.settled。
-   * 应答超时兜底 reject——数据面通道（host/log 等）core 10s 应答，reject 由调用方
-   * 吞掉留痕（数据面丢失不拖死主链路）。
+   * 应答超时兜底 reject——数据范围通道（host/log 等）core 10s 应答，reject 由调用方
+   * 吞掉留痕（数据范围丢失不拖死主链路）。
    */
   /**
    * fire-and-forget 反向请求（`void this.reverseRequestInternal(...)` 形态）的

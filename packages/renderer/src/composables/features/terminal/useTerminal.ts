@@ -503,7 +503,7 @@ let lastConnectionToken: string | null | undefined = undefined
  * visibility 重连复用 currentToken 与 url，token 不变）。若不播种，旧值仍为 undefined
  * 会被 `handleConnectionEstablished` 的「旧值不可得」分支保守判为世代变更 → 误跑
  * resetTerminalDomain（清空分区 / 订阅 / 滞留命令并弹「输入可能丢失」），与 §3.3
- * 「重置触发面显式收窄为世代变更」相悖，T11/T12 反向验收落空。
+ * 「重置触发范围显式收窄为世代变更」相悖，T11/T12 反向验收落空。
  *
  * 故模块求值时按当前连接态播种旧值（ws-client 只读取值面）：已有已知 token
  * （已连接 / 连接中 / 等待重连）即取为旧值，使「旧值不可得」只对应真正无任何已知 token
@@ -711,7 +711,7 @@ export function useTerminal(sessionIdRef: Ref<string | null>) {
    * `unknown_terminal_id` 平行检查（设计 §3.3）：任意已建档条目收到首个
    * `unknown_terminal_id`（write / kill / attach / resize 均可触发）→ 执行关闭沿三路径清理。
    * 判据 = runtime「该 terminalId 不在注册表」的否定回执（与关闭沿检查同源）。
-   * 用户可见语义按触发面分档：
+   * 用户可见语义按触发范围分档：
    * - `write` 命中 → 经「输入可能丢失」通道告知（对齐死亡沿 pendingWrites 丢弃范式）
    *   + 迁焦点（焦点按关闭沿规则落相邻实例；**先告知后迁移**——prompt 在同步路径先发，
    *   焦点迁移由视图对 active 变化的异步 watcher 落地）；

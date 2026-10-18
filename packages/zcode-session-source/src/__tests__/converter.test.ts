@@ -670,7 +670,7 @@ describe('切段与 T3c 边界', () => {
     const assistant = lines[1] as ParsedEntry & { message: { stopReason: string; usage?: Record<string, unknown>; content: Array<{ type: string }>; timestamp: number } }
     expect(lines).toHaveLength(2) // session_info + assistant
     expect(assistant.message.stopReason).toBe('stop')
-    // 2026-09-21 毒消息事故后新契约：assistant 恒带 usage（pi 读面裸读，缺键即崩续聊）
+    // 2026-09-21 毒消息事故后新契约：assistant 恒带 usage（pi 读侧裸读，缺键即崩续聊）
     expect(assistant.message.usage).toMatchObject({ totalTokens: 0 })
     expect(assistant.message.timestamp).toBe(2500)
   })
@@ -740,7 +740,7 @@ describe('切段与 T3c 边界', () => {
     const session = convertZcodeTranscript(msgs, { ...SESSION_INPUT, title: 'T' })
     const lines = toLines(session)
     const a = lines[1] as ParsedEntry & { message: Record<string, unknown> }
-    // 2026-09-21 毒消息事故后新契约：不可解不等于可缺键——零值兜底（pi 读面裸读）
+    // 2026-09-21 毒消息事故后新契约：不可解不等于可缺键——零值兜底（pi 读侧裸读）
     expect(a.message.usage).toMatchObject({ totalTokens: 0 })
     // 本 fixture 唯一损失即该登记：结构化形态（code + count + sample 定位源消息）
     expect(session.degradations).toHaveLength(1)
@@ -866,7 +866,7 @@ describe('zcode 脏数据防御分支（tool part 结构异常 / text·reasoning
 
 // ── T3c 事故回归（2026-09-21 毒消息）：取消/失败轮的 stopReason 语义与 usage 不变量 ─────
 // 事故链：zcode 取消轮（data.error.turnResult=cancelled、无 step-finish part）→ 旧实现
-// 尾段 'stop' 保底且不带 usage → pi 读面对「非 aborted/error 的 assistant」裸读 usage
+// 尾段 'stop' 保底且不带 usage → pi 读侧对「非 aborted/error 的 assistant」裸读 usage
 // （stats 聚合 agent-session.js:2678 / turn 前上下文扫描 :2721）→ 导入后续聊即崩。
 // pi dist 真实加载的不变量断言在同目录 pi-reader-invariant.test.ts（PS-41 探针）。
 describe('T3c cancelled/error turn regression (poison-message incident)', () => {
@@ -1030,7 +1030,7 @@ describe('normalizeZcodeSessionId（T1 header.id 归一化域）', () => {
   it('后置条件失败 fail-fast（归一化后为空 / 非法字符），错误含原始 id 与事实归因', () => {
     expect(() => normalizeZcodeSessionId('sess_')).toThrow(/归一化后为空/)
     expect(() => normalizeZcodeSessionId('sess_空格 id')).toThrow(/非法字符/)
-    // 错误面归消费侧（普通 Error，非私建错误码类）——消费方按各自词表映射
+    // 错误范围归消费侧（普通 Error，非私建错误码类）——消费方按各自词表映射
     try {
       normalizeZcodeSessionId('sess_空格 id')
       expect.unreachable()
@@ -1120,7 +1120,7 @@ describe('端到端：fixture 库 → readZcodeSession → NormalizedSession', (
     expect(messages[1]?.toolCalls?.map((t) => t.toolName)).toEqual(['edit', 'bash', 'ZcodeCustomTool', 'grep'])
   })
 
-  it('session 行在读取阶段复查不存在 → Error（错误面归消费侧映射），消息含 sessionId', async () => {
+  it('session 行在读取阶段复查不存在 → Error（错误范围归消费侧映射），消息含 sessionId', async () => {
     const dbPath = await buildKitchenSinkDb('missing', 'sess_0198e2e0-0000-0000-0000-00000000000c', 'Seed')
     await expect(readZcodeSession(dbPath, 'sess_no_such')).rejects.toThrow(/sess_no_such/)
     // 迁移适配：旧断言 toThrow(ImportServiceError)——import_* 错误码属 runtime 消费侧

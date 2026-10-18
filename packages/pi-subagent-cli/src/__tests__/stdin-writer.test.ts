@@ -30,7 +30,7 @@ const { loggerMock } = vi.hoisted(() => ({
   },
 }));
 // W7 迁移：stdin-writer 的日志面改 SDK logger facade——mock SDK barrel 的
-// getLogger（其余成员 importOriginal 透传），保持 warn 断言面不变。
+// getLogger（其余成员 importOriginal 透传），保持 warn 断言范围不变。
 vi.mock("@zhushanwen/subagent-engine-sdk", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@zhushanwen/subagent-engine-sdk")>();
   return {

@@ -3,8 +3,8 @@
  *
  * 迁出来源 = DrawerControlState.selectedBtwVid（btw tab 当前查看的旁路线 vid）。
  * per-session 分区（useSessionScopedState，ADR-0049），键 = drawerSessionKey。
- * 写入面 = setBtwView（BtwPanel 选中线时写入）；读取面 = useBtwSelection（BtwPanel）+
- * 复合谓词 selection/predicates.ts（getViewedVids 的 D5 豁免 / btw-replay 触发面 /
+ * 写侧 = setBtwView（BtwPanel 选中线时写入）；读侧 = useBtwSelection（BtwPanel）+
+ * 复合谓词 selection/predicates.ts（getViewedVids 的 D5 豁免 / btw-replay 触发范围 /
  * useBtwTabData 视口命中三消费方共用——禁止各处自行拼装三分量）。
  */
 import { computed, reactive } from 'vue'

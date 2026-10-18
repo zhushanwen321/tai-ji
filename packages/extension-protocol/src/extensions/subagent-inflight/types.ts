@@ -1,5 +1,5 @@
 /**
- * subagent 在途上报的类型定义（u7a 协议面）。
+ * subagent 在途上报的类型定义（u7a 协议范围）。
  *
  * 契约两端：
  *   - 写侧（生产）：@zhushanwen/pi-subagent-workflow 壳层（src/host/inflight-reporter.ts）

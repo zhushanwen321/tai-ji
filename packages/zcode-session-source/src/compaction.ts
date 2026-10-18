@@ -3,7 +3,7 @@
  * compaction part 的关联预扫描 + firstKeptEntryId 三级锚解析。
  * 来源注记：自 runtime services/session/zcode-import dev 演进版移植（判定逻辑零改动，
  * git 可追溯），本包为现行唯一承载（原拆分背景——max-lines 自 converter.ts 拆出、测试
- * 锚定 converter 公共面——见 git 历史）。
+ * 锚定 converter 公共范围——见 git 历史）。
  *
  * 依赖方向：本模块只消费 assistant-mapping 的运行时检查；对 converter 仅 `import type`
  * 取 ZcodeMessageInput 输入形态（类型引用编译期擦除，无运行时边——不构成循环依赖）。
@@ -42,7 +42,7 @@ function partHasTimelineStatus(part: Record<string, unknown>): boolean {
  * ② 未命中 → 紧邻前驱（保留全部历史，与摘要冗余但无损——「宁多保留不丢历史」保守方向）；
  * ③ compaction entry 是首条 entry（无前驱）→ 其自身 id。
  * 集成路径上 session_info 恒先于消息发射，② 级恒可用，③ 级仅规格完备性防御；独立导出
- * 是为让 ③ 路径可单测（convertZcodeTranscript 公共面构造不出「无前驱 entry」的输入）。
+ * 是为让 ③ 路径可单测（convertZcodeTranscript 公共范围构造不出「无前驱 entry」的输入）。
  */
 export function resolveFirstKeptEntryId(
   tier1: string | undefined,

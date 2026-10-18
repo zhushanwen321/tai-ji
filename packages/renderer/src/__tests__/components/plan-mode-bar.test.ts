@@ -556,7 +556,7 @@ describe('挂载位：Panel 内 composer 下方（.composer-band 之后）', () 
   })
 })
 
-/** locale 值递归展平（文案合规静态断言的输入面） */
+/** locale 值递归展平（文案合规静态断言的输入范围） */
 function flattenStrings(obj: unknown, out: string[] = []): string[] {
   if (typeof obj === 'string') {
     out.push(obj)

@@ -212,7 +212,7 @@ export function buildEngineChildEnv(
   applyManifestAllowlist(env, opts);
 
   // L1 兜底复检：deny/剥除恒高于 manifest 放行——宽前缀（如声明 TAIJI_ 形态的
-  // 宽松清单）也不允许经 L2 把 deny 键带回来。L0 未注入，此轮只清 L2 写入面。
+  // 宽松清单）也不允许经 L2 把 deny 键带回来。L0 未注入，此轮只清 L2 写侧。
   deleteEnvKeysCaseInsensitive(env, ENGINE_ENV_DENY_LIST);
 
   // L0：基础设施键显式注入（最后写入 = 最高优先级）

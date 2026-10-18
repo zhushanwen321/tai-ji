@@ -51,7 +51,7 @@ import { __resetBtwPendingBookkeepingForTest } from '@/composables/panel/useBtwT
 import { __clearSessionCleanupRegistryForTest } from '@/composables/useSessionScopedState'
 import { dispatchGlobal } from '@taiji/core/transport/api'
 
-// ── tray 数据面替身：全无条目（三态「全无」→ 托盘不渲染，左簇位次断言无干扰）──
+// ── tray 数据范围替身：全无条目（三态「全无」→ 托盘不渲染，左簇位次断言无干扰）──
 vi.mock('@/components/panel/tray/useTrayCounts', async (importOriginal) => {
   const actual = await importOriginal<typeof import('@/components/panel/tray/useTrayCounts')>()
   const stubState = {
@@ -203,7 +203,7 @@ describe('入口渲染与 show-btw 实例开关（D7 ③入口）', () => {
     expect(bar().findAll('button')[0]?.attributes('title')).toBe('添加内容（附件 / 命令）')
   })
 
-  it('无 session：不出 btw 入口（badge 数据面需主会话；真 landing 态不受影响）', async () => {
+  it('无 session：不出 btw 入口（badge 数据范围需主会话；真 landing 态不受影响）', async () => {
     const w = mountComposer({ sessionId: null })
     await settle()
 

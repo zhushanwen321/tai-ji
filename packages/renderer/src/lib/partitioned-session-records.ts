@@ -56,7 +56,7 @@ export function createPartitionedRecords<T>(): PartitionedRecords<T> {
   return { recordsBySession, recordsOf, get, apply, clear }
 }
 
-/** 每 session 加载态三件套的分区读写面（createPartitionedLoadState 返回形状）。 */
+/** 每 session 加载态三件套的分区读侧与写侧（createPartitionedLoadState 返回形状）。 */
 export interface PartitionedLoadState {
   /** per-session 加载态读取（消费方 computed 内调用建立响应依赖；无条目 = 不在途） */
   isLoadingOf(sessionId: string): boolean

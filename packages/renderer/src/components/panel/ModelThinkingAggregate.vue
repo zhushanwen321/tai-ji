@@ -14,7 +14,7 @@
     switching（U4「切换中」单飞锁透传，与 ModelSelectPopover/ThinkingLevelPopover 同 prop 语义）；
   - emits：selectModel（与 ModelSelectPopover 的 select 完全同形）/ selectThinking
     （发 runtime 的实际值，复用 resolveThinkingValue，与 ThinkingLevelPopover 同语义）；
-  - 数据面与 ModelSelectPopover 同源（model-picker-data：settingsStore.models + enabled 过滤，
+  - 数据范围与 ModelSelectPopover 同源（model-picker-data：settingsStore.models + enabled 过滤，
     反查失败静默忽略的兜底共用）；档位可用集与 ThinkingLevelPopover 同源（./thinking-levels，
     禁止复制常量）。
 
@@ -120,7 +120,7 @@ const props = defineProps<{
 const { t } = useI18n()
 const open = ref(false)
 
-// ── 模型面（与 ModelSelectPopover 同源数据面；聚合页不限定 provider）──
+// ── 模型面（与 ModelSelectPopover 同源数据范围；聚合页不限定 provider）──
 const { pickerGroups, hasAnyModel, defaultModel, resolveProviderId } = useModelPickerData()
 
 /** 当前选中裸 id（hover 去重与高亮同用此值，复合串先拆段） */
@@ -132,7 +132,7 @@ const selectedProviderId = computed(() => {
   return i > 0 ? props.selected.slice(0, i) : undefined
 })
 
-// ── U4 单飞锁 + 本地 pending 去重（hover 触发面并发收敛）──
+// ── U4 单飞锁 + 本地 pending 去重（hover 触发范围并发收敛）──
 // 去重基准 = 「runtime 已确认值 ∪ 本地已 emit 未回流目标」：hover 已启动切换后，
 // 同目标 click 不再发第二条 RPC；pending 在目标回流（selected/level 更新到位）或
 // 切换终态（switching 回落 false，覆盖失败/超时——允许用户重试同目标）时清除。

@@ -6,7 +6,7 @@
  * 与 core 侧等价锚定：`@zhushanwen/subagent-core` 的 shared/agent-ref.ts 导出
  * 同名 displayAgentName / displayWorkflowName，两侧行为逐字节等价（双分隔符
  * basename + 扩展名剥离，大小写敏感 endsWith）。core 不依赖 shared（shared 不发
- * npm，core 运行时 import 需改 bundle/发布面，代价不成比例），故双实现并存；
+ * npm，core 运行时 import 需改 bundle/发布范围，代价不成比例），故双实现并存；
  * 等价性由两侧测试同款向量（`C:\\a\\worker.md` → `worker` 等）共同锁定，任一侧
  * 改语义须同步另一侧。
  *

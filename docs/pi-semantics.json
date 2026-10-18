@@ -319,7 +319,7 @@
     ],
     "guard": {
       "type": "observe",
-      "note": "sw 子进程单写者不变量（extensions/universal/subagent-workflow session-runner.ts 的 buildSpawnArgs / runSpawn 注释）的 pi 侧机制依据；resume/续聊冷路径须先确认旧进程已死（resumesInFlight 检查）。pi 升级时重验：compaction 是否仍 append-only、_rewriteFile 触发面是否仍限于加载期"
+      "note": "sw 子进程单写者不变量（extensions/universal/subagent-workflow session-runner.ts 的 buildSpawnArgs / runSpawn 注释）的 pi 侧机制依据；resume/续聊冷路径须先确认旧进程已死（resumesInFlight 检查）。pi 升级时重验：compaction 是否仍 append-only、_rewriteFile 触发范围是否仍限于加载期"
     },
     "verifiedWith": "1.0.0"
   },
@@ -678,7 +678,7 @@
         "pkg": "pi-coding-agent",
         "distPath": "dist/core/session-manager.d.ts",
         "symbol": "type ReadonlySessionManager / getSessionDir 签名",
-        "note": ":140 Pick<SessionManager, \"getCwd\" | \"getSessionDir\" | ...>——getSessionDir 在 extension 可见的只读面上；:205 getSessionDir(): string【行号锚基于 pi@0.84.4；1.0.0 复核按符号名定位】"
+        "note": ":140 Pick<SessionManager, \"getCwd\" | \"getSessionDir\" | ...>——getSessionDir 在 extension 可见的只读侧上；:205 getSessionDir(): string【行号锚基于 pi@0.84.4；1.0.0 复核按符号名定位】"
       }
     ],
     "guard": {
@@ -758,7 +758,7 @@
   },
   {
     "id": "PS-36",
-    "claim": "ENV_SESSION_DIR 变量名 = PI_CODING_AGENT_SESSION_DIR：实装为模板拼接 \"${APP_NAME.toUpperCase()}_CODING_AGENT_SESSION_DIR\"，默认发行形态 APP_NAME=\"pi\" 展开即得该名（piConfig.name 品牌化定制时变量名随 APP_NAME 漂移）——session-reader 的 [env] 根信号与 taiji 注入面（U4 退路）依赖此精确变量名",
+    "claim": "ENV_SESSION_DIR 变量名 = PI_CODING_AGENT_SESSION_DIR：实装为模板拼接 \"${APP_NAME.toUpperCase()}_CODING_AGENT_SESSION_DIR\"，默认发行形态 APP_NAME=\"pi\" 展开即得该名（piConfig.name 品牌化定制时变量名随 APP_NAME 漂移）——session-reader 的 [env] 根信号与 taiji 注入范围（U4 退路）依赖此精确变量名",
     "piAnchor": [
       {
         "pkg": "pi-coding-agent",
@@ -809,7 +809,7 @@
     ],
     "guard": {
       "type": "observe",
-      "note": "消费方：taiji 经 get_available_models（PS-10 读面）拿到的可用模型清单由该巡检快照承载——oauth 凭据临近过期的 provider 刷新失败时该轮快照不更新，清单滞后属 pi 侧行为非 taiji 缓存失真（cache-governance 审计 A-1 登记的 pi 语义断言依赖）。pi 升级时重验：resolveProviderAuth 调用点是否补 catch、Promise.all 是否改 allSettled 化部分成功、availabilityError 记录后是否有自动重试收敛"
+      "note": "消费方：taiji 经 get_available_models（PS-10 读侧）拿到的可用模型清单由该巡检快照承载——oauth 凭据临近过期的 provider 刷新失败时该轮快照不更新，清单滞后属 pi 侧行为非 taiji 缓存失真（cache-governance 审计 A-1 登记的 pi 语义断言依赖）。pi 升级时重验：resolveProviderAuth 调用点是否补 catch、Promise.all 是否改 allSettled 化部分成功、availabilityError 记录后是否有自动重试收敛"
     },
     "verifiedWith": "1.0.0"
   },
@@ -826,13 +826,13 @@
     ],
     "guard": {
       "type": "observe",
-      "note": "消费方：taiji 读 pi 模型状态（get_state 的 model 字段等，PS-10 读面同族）遇未初始化窗口拿到的是 unknown 占位而非空值——按对象真值判定会误判「已有模型」。pi 升级时重验：占位字段集与 ?? 兜底位置是否漂移（如改回 undefined 或新增独立 hasModel 标志）"
+      "note": "消费方：taiji 读 pi 模型状态（get_state 的 model 字段等，PS-10 读侧同族）遇未初始化窗口拿到的是 unknown 占位而非空值——按对象真值判定会误判「已有模型」。pi 升级时重验：占位字段集与 ?? 兜底位置是否漂移（如改回 undefined 或新增独立 hasModel 标志）"
     },
     "verifiedWith": "1.0.0"
   },
   {
     "id": "PS-40",
-    "claim": "session JSONL append-only 是 taiji 两条消费链的共同前提：①runtime HistoryRebuildCache 增量拉取以「上次 get_entries 响应的 leafId」为 since 游标翻页，前提 = 旧 entry 永不删除/改写（compaction 也是 entry 追加）→ since 游标持续有效、增量 delta 有界；②cache-governance 批 3 sidecar 退役后的 model 反向读（沿文件物理尾逆序扫 model_change/assistant）同以 append-only 为前提——新 append 只会更靠近尾部，尾扫单调收敛且新数据自然可见。pi 若引入加载期以外的就地改写/删除（_rewriteFile 触发面扩大、entry 修剪等），两条链同时失真（游标失效 / 反向读漏读错位）",
+    "claim": "session JSONL append-only 是 taiji 两条消费链的共同前提：①runtime HistoryRebuildCache 增量拉取以「上次 get_entries 响应的 leafId」为 since 游标翻页，前提 = 旧 entry 永不删除/改写（compaction 也是 entry 追加）→ since 游标持续有效、增量 delta 有界；②cache-governance 批 3 sidecar 退役后的 model 反向读（沿文件物理尾逆序扫 model_change/assistant）同以 append-only 为前提——新 append 只会更靠近尾部，尾扫单调收敛且新数据自然可见。pi 若引入加载期以外的就地改写/删除（_rewriteFile 触发范围扩大、entry 修剪等），两条链同时失真（游标失效 / 反向读漏读错位）",
     "piAnchor": [
       {
         "pkg": "pi-coding-agent",
@@ -843,7 +843,7 @@
     ],
     "guard": {
       "type": "observe",
-      "note": "消费方：packages/runtime/src/services/session/history-rebuild-cache.ts 的 since=leafId 游标翻页（头注 :25 自述「compact 是 append-only → since 不会因 compact 失效」）+ cache-governance 批 3 extractLatestModelFromJsonl 尾扫（U7/U8 落地后生效）。pi 升级时重验与 PS-18 同点：_rewriteFile 触发面是否仍限加载期、是否新增删除/改写路径——PS-18 登记 pi 侧机制，本条登记 taiji 消费侧前提，pi bump 双条同验【行号锚基于 pi@0.84.4；1.0.0 复核按符号名定位】"
+      "note": "消费方：packages/runtime/src/services/session/history-rebuild-cache.ts 的 since=leafId 游标翻页（头注 :25 自述「compact 是 append-only → since 不会因 compact 失效」）+ cache-governance 批 3 extractLatestModelFromJsonl 尾扫（U7/U8 落地后生效）。pi 升级时重验与 PS-18 同点：_rewriteFile 触发范围是否仍限加载期、是否新增删除/改写路径——PS-18 登记 pi 侧机制，本条登记 taiji 消费侧前提，pi bump 双条同验【行号锚基于 pi@0.84.4；1.0.0 复核按符号名定位】"
     },
     "verifiedWith": "1.0.0"
   },
@@ -924,7 +924,7 @@
   },
   {
     "id": "PS-44",
-    "claim": "pi 读面对 assistant 消息的 usage 无检查：getSessionStats 对每条 assistant 裸调 addUsageToTotals(usage)（读 .input），turn 前上下文扫描对 stopReason 非 aborted/error 的 assistant 裸调 calculateContextTokens(usage)（读 .totalTokens）——「终态 stopReason + 无 usage 键」的 assistant entry 会让会话恢复后续聊即崩、stats 恒败。pi 原生写侧连错误轮都写全零 usage（全零 = 无测量数据的合法编码，检查按无效跳过），zcode 导入产物必须遵守同一不变量（converter zeroUsage 兜底 + unsealedStopReason 把取消/失败轮映射 aborted/error）",
+    "claim": "pi 读侧对 assistant 消息的 usage 无检查：getSessionStats 对每条 assistant 裸调 addUsageToTotals(usage)（读 .input），turn 前上下文扫描对 stopReason 非 aborted/error 的 assistant 裸调 calculateContextTokens(usage)（读 .totalTokens）——「终态 stopReason + 无 usage 键」的 assistant entry 会让会话恢复后续聊即崩、stats 恒败。pi 原生写侧连错误轮都写全零 usage（全零 = 无测量数据的合法编码，检查按无效跳过），zcode 导入产物必须遵守同一不变量（converter zeroUsage 兜底 + unsealedStopReason 把取消/失败轮映射 aborted/error）",
     "piAnchor": [
       {
         "pkg": "pi-coding-agent",
@@ -1448,7 +1448,7 @@
   },
   {
     "id": "PS-65",
-    "claim": "pi RPC 面的投递原语族恒五条且全部队列级：prompt（streamingBehavior 直透 session.prompt）/ steer / follow_up / abort / clear_queue（→ session.clearQueue() 队列级全清）——命令面无任何条目级寻址或按 id 撤回形态。session-delivery-registry 对账器（Reconciler）的存在理由（原挂不入库设计文档 F9 节）：runtime 侧条目级收回/重投只能以「clear_queue 全收 + 标记识别 + 三分处置」在 pi 之上实现（pi 词汇封闭层 rpc-client.clearQueue 的协议面依据）；pi 若新增条目级收回命令，对账器三步机制可被窄接口替代，复审信号",
+    "claim": "pi RPC 面的投递原语族恒五条且全部队列级：prompt（streamingBehavior 直透 session.prompt）/ steer / follow_up / abort / clear_queue（→ session.clearQueue() 队列级全清）——命令范围无任何条目级寻址或按 id 撤回形态。session-delivery-registry 对账器（Reconciler）的存在理由（原挂不入库设计文档 F9 节）：runtime 侧条目级收回/重投只能以「clear_queue 全收 + 标记识别 + 三分处置」在 pi 之上实现（pi 词汇封闭层 rpc-client.clearQueue 的协议范围依据）；pi 若新增条目级收回命令，对账器三步机制可被窄接口替代，复审信号",
     "piAnchor": [
       {
         "pkg": "pi-coding-agent",
@@ -1494,7 +1494,7 @@
   },
   {
     "id": "PS-70",
-    "claim": "settings.json defaultTools 解析语义（taiji tools 字段域的 pi 侧承重语义）：mergeDefaultTools 做 global/project 两层合并——overrides 未设返回 base；任一层非数组或 overrides 含非增量条目时 overrides 整体替换（源码自述 Settings files are not validated; a malformed value replaces instead of throwing）；overrides 全为 +name/-name 增量条目时拼接 [...base, ...overrides]。resolveDefaultTools 激活集解析：纯名条目（无修饰符）整体替换 DEFAULT_TOOL_NAMES（read/bash/edit/write）；仅增量条目则从默认集起步；空数组 = 空激活集；+name 追加（name 非空且不在集内）、-name 移除，按条目顺序应用。getDefaultTools 读面：数组先 filter 剥非字符串元素再解析（坏值逐元素行为 2026-10-03 二轮探针定案——非字符串元素静默剥除后按剩余字符串解析：纯名+坏值混合 = 剥除后整体替换默认集（write 等默认工具随之丢失）；全坏数组 = 空激活集；全坏+增量条目混合 = filter 后只剩增量条目、默认集起步（非空集）；falsy 坏值 0/false 同 typeof 判定剥除；mergeDefaultTools 增量拼接判定只检查 overrides（every isToolModifier）——base 混坏值仍拼接、坏值留至解析期剥除，overrides 混入任一非增量条目（含非字符串）则整体替换 base）；非数组按空数组解析 = 空激活集；字段缺失（undefined）原样返回 undefined，会话层回落 DEFAULT_TOOL_NAMES。taiji 读侧同构实现 resolveDefaultToolSet 对字段缺失/非数组坏值统一空激活集——codemode 不在 DEFAULT_TOOL_NAMES，空集与回落默认集对 includes('codemode') 判定等价；逐元素混合坏值与 taiji 同构一致（2026-10-03 探针对照）；pi bump 时本条随探针重验",
+    "claim": "settings.json defaultTools 解析语义（taiji tools 字段域的 pi 侧承重语义）：mergeDefaultTools 做 global/project 两层合并——overrides 未设返回 base；任一层非数组或 overrides 含非增量条目时 overrides 整体替换（源码自述 Settings files are not validated; a malformed value replaces instead of throwing）；overrides 全为 +name/-name 增量条目时拼接 [...base, ...overrides]。resolveDefaultTools 激活集解析：纯名条目（无修饰符）整体替换 DEFAULT_TOOL_NAMES（read/bash/edit/write）；仅增量条目则从默认集起步；空数组 = 空激活集；+name 追加（name 非空且不在集内）、-name 移除，按条目顺序应用。getDefaultTools 读侧：数组先 filter 剥非字符串元素再解析（坏值逐元素行为 2026-10-03 二轮探针定案——非字符串元素静默剥除后按剩余字符串解析：纯名+坏值混合 = 剥除后整体替换默认集（write 等默认工具随之丢失）；全坏数组 = 空激活集；全坏+增量条目混合 = filter 后只剩增量条目、默认集起步（非空集）；falsy 坏值 0/false 同 typeof 判定剥除；mergeDefaultTools 增量拼接判定只检查 overrides（every isToolModifier）——base 混坏值仍拼接、坏值留至解析期剥除，overrides 混入任一非增量条目（含非字符串）则整体替换 base）；非数组按空数组解析 = 空激活集；字段缺失（undefined）原样返回 undefined，会话层回落 DEFAULT_TOOL_NAMES。taiji 读侧同构实现 resolveDefaultToolSet 对字段缺失/非数组坏值统一空激活集——codemode 不在 DEFAULT_TOOL_NAMES，空集与回落默认集对 includes('codemode') 判定等价；逐元素混合坏值与 taiji 同构一致（2026-10-03 探针对照）；pi bump 时本条随探针重验",
     "piAnchor": [
       {
         "pkg": "pi-coding-agent",

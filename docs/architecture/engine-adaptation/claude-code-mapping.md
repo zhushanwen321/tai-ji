@@ -69,7 +69,7 @@ stream_event 内层 `event.type` 全集（Anthropic 流协议，src/services/api
 | assistant（message.content[].type=text/thinking/tool_use 整块到达） | text_delta / thinking_delta / tool_start + tool_end | 合成：适配层按 content block 拆解，text block → text_delta（整块单发）、thinking block → thinking_delta、tool_use block → tool_start（args=input 对象）；result 帧后对未收尾 tool 补 tool_end | src/entrypoints/sdk/coreSchemas.ts:1347-1356；content block 组装 src/services/api/claude.ts:2192-2210 |
 | stream_event > content_block_delta > text_delta | text_delta | 直接（`--include-partial-messages` 开启时） | src/services/api/claude.ts:2113-2126 |
 | stream_event > content_block_delta > thinking_delta | thinking_delta | 直接 | src/services/api/claude.ts:2148-2161 |
-| stream_event > content_block_delta > signature_delta / citations_delta / connector_text_delta | （无） | 丢弃（签名/引用/连接文本非 taiji 事件面） | src/services/api/claude.ts:2084-2086, 2127-2147 |
+| stream_event > content_block_delta > signature_delta / citations_delta / connector_text_delta | （无） | 丢弃（签名/引用/连接文本非 taiji 事件范围） | src/services/api/claude.ts:2084-2086, 2127-2147 |
 | stream_event > content_block_start(tool_use) | tool_start | 直接（toolName=name, args 待 input_json_delta 累积） | src/services/api/claude.ts:1997-2001 |
 | stream_event > content_block_delta > input_json_delta | （tool_start args 累积） | 合成：partial_json 串接，content_block_stop 时 JSON.parse 得 args | src/services/api/claude.ts:2087-2112 |
 | stream_event > content_block_stop | （tool args 定稿触发点） | 合成 | src/services/api/claude.ts:2171-2211 |
@@ -86,13 +86,13 @@ stream_event 内层 `event.type` 全集（Anthropic 流协议，src/services/api
 | system subtype=task_progress | activity | 合成：后台任务进度节流帧（含 total_tokens/tool_uses/duration_ms，丢弃） | src/entrypoints/sdk/coreSchemas.ts:1750-1767 |
 | system subtype=task_started / task_notification | tool_start / tool_end（Task 型工具）或 activity | 合成：后台任务生命周期可映射为对应 tool 事件 | src/entrypoints/sdk/coreSchemas.ts:1694-1733 |
 | system subtype=post_turn_summary | turn_end{summary} | 合成：summary 字段入 turn_end.summary（可选增强） | src/entrypoints/sdk/coreSchemas.ts:1544-1570 |
-| system subtype=hook_started / hook_progress / hook_response / files_persisted / elicitation_complete | （无） | 丢弃（hook 生命周期/文件持久化回执非事件面） | src/entrypoints/sdk/coreSchemas.ts:1604-1692, 1779-1792 |
+| system subtype=hook_started / hook_progress / hook_response / files_persisted / elicitation_complete | （无） | 丢弃（hook 生命周期/文件持久化回执非事件范围） | src/entrypoints/sdk/coreSchemas.ts:1604-1692, 1779-1792 |
 | system subtype=local_command_output | text_delta | 合成（content 作正文增量；headless 下少见） | src/entrypoints/sdk/coreSchemas.ts:1590-1602 |
 | tool_progress（type=tool_progress） | activity | 直接语义：工具执行中周期心跳（30s 节流，src/utils/queryHelpers.ts:96-100） | src/entrypoints/sdk/coreSchemas.ts:1648-1659 |
 | tool_use_summary | activity | 合成（累计工具摘要字符串丢弃） | src/entrypoints/sdk/coreSchemas.ts:1769-1777 |
 | auth_status | activity 或 error | 合成：认证中断时 error{message=output}，其余丢弃 | src/entrypoints/sdk/coreSchemas.ts:1661-1670 |
 | rate_limit_event / prompt_suggestion / streamlined_text / streamlined_tool_use_summary | （无） | 丢弃（订阅限流状态/提示建议/精简输出模式专属） | src/entrypoints/sdk/coreSchemas.ts:1358-1397, 1795-1806 |
-| control_response / control_cancel_request / keep_alive | （无） | 消费：反向通道应答与保活帧，非事件面 | src/entrypoints/sdk/controlSchemas.ts:605-627 |
+| control_response / control_cancel_request / keep_alive | （无） | 消费：反向通道应答与保活帧，非事件范围 | src/entrypoints/sdk/controlSchemas.ts:605-627 |
 
 taiji `activity`（纯活性信号）在 claude 侧无单一原生对应，由 tool_progress / api_retry / session_state_changed / task_progress 四源合成（上表）；长工具执行期 tool_progress 是最稳的判活源。
 
@@ -101,7 +101,7 @@ taiji `activity`（纯活性信号）在 claude 侧无单一原生对应，由 t
 - **text / thinking block**：assistant 消息的 `message.content[]` 内 `{type:"text", text}` 与 `{type:"thinking", thinking, signature}`（signature 丢弃）。流式路径：`--include-partial-messages` 下 text_delta/thinking_delta 逐段转发；非流式路径：content_block_stop 时整块 yield 为独立 assistant 消息（每 block 一条，src/services/api/claude.ts:2192-2210 注释「claude.ts yields one assistant message per content block」），适配层整块合成对应 delta。
 - **tool_use block**：`{type:"tool_use", id, name, input}`。流式下 input 由 input_json_delta 的 partial_json 串接（起始为空串，src/services/api/claude.ts:1997-2001），content_block_stop 时为完整对象 → tool_start{toolName:name, args:input}。
 - **tool_result**：到达于 user 消息 `message.content[]` 内 `{type:"tool_result", tool_use_id, content, is_error?}`（src/utils/messages.ts:838-850 的 `ToolUseResultMessage` 判定：content[0].type==='tool_result'）。映射 tool_end{toolName（按 tool_use_id 反查在途 tool_use）, result:{content: Array 视 content 形态装填, details}, isError: is_error}：
-  - `ToolCallResult.content: unknown[]` ← tool_result.content。该字段是 Anthropic block 数组（text/image 块）或字符串；适配层归一为数组（字符串包一元素）。结构化旁路：同条 user 消息顶层 `toolUseResult` 字段携带工具完整结构化 Output（注释「Matches tool's `Output` type」，src/utils/messages.ts:481），取其文本/数据面并入 content，整体对象入 `details`。
+  - `ToolCallResult.content: unknown[]` ← tool_result.content。该字段是 Anthropic block 数组（text/image 块）或字符串；适配层归一为数组（字符串包一元素）。结构化旁路：同条 user 消息顶层 `toolUseResult` 字段携带工具完整结构化 Output（注释「Matches tool's `Output` type」，src/utils/messages.ts:481），取其文本/数据范围并入 content，整体对象入 `details`。
 - **redacted_thinking / server_tool_use / web_search_tool_result**：default 分支透传块（src/services/api/claude.ts:2039-2049）；redacted_thinking 无 delta，不产事件；server_tool_use（内建服务端工具）同 tool_use 处理（advisor 特判在 src/services/api/claude.ts:2008）。
 - **isError 的另一个来源**：SDKAssistantMessageError 枚举（authentication_failed/billing_error/rate_limit/invalid_request/server_error/unknown/max_output_tokens，src/entrypoints/sdk/coreSchemas.ts:1256-1266）出现在 assistant 帧顶层 `error` 字段 → 映射 error 事件。
 
@@ -150,7 +150,7 @@ claude 侧反向协议 = stdout `control_request`（CLI → SDK host，src/entry
 |---|---|---|
 | host/log{level,component,message,data?} | 无原生通道；debug 日志走 stderr（`-d/--debug`、`--debug-to-stderr`，src/main.tsx:971-976） | 合成：适配层消费 stderr 诊断行转 host/log，或适配层自身日志 |
 | host/askUser{runId,request:UiRequest} | control_request `can_use_tool`（权限询问，src/cli/structuredIO.ts:586-606）+ `elicitation`（MCP 表单询问，src/cli/structuredIO.ts:694-721）+ `hook_callback`（hook 输入，src/cli/structuredIO.ts:661-689） | 直接映射（详见下表）；应答 control_response 回 `PermissionToolOutput` 形态（allow{behavior:"allow",updatedInput} / deny{behavior:"deny",message,interrupt?}，src/utils/permissions/PermissionPromptToolResultSchema.ts:47-86） |
-| host/streamDelta{runId,delta} | 无对应（claude 流式增量在 stdout 事件面，无宿主回推 UI 通道） | 适配层可将 text_delta 同时泵该通道（渲染加速面，纯合成） |
+| host/streamDelta{runId,delta} | 无对应（claude 流式增量在 stdout 事件范围，无宿主回推 UI 通道） | 适配层可将 text_delta 同时泵该通道（渲染加速面，纯合成） |
 | host/handleReady{runId,sessionRef} | system/init 帧（首帧含 session_id，src/utils/messages/systemInit.ts:53-104） | 合成：收到 init 帧即回填 handle 并发 handleReady |
 | host/childSpawned{pid,recordId} | initialize 应答的 `pid` 字段（CLI 进程自身 PID，src/entrypoints/sdk/controlSchemas.ts:86-89） | 合成：适配层 spawn 后即知 pid，主动上报一次（claude 无内嵌孙进程上报） |
 | host/childStateChanged{pid,recordId,state,killed,exitCode?,signal?} | 无对应（进程退出由适配层 wait 链感知） | 合成：进程 exit 事件驱动 |
@@ -187,7 +187,7 @@ deny 应答的 `interrupt:true`（src/utils/permissions/PermissionPromptToolResu
 
 ## 9. gap 清单
 
-**源有靶无**（claude 有、taiji 协议面无承载，适配层丢弃或仅诊断消费）：
+**源有靶无**（claude 有、taiji 协议范围无承载，适配层丢弃或仅诊断消费）：
 - 事件流：rate_limit_event、auth_status、prompt_suggestion、post_turn_summary（作 turn_end.summary 增强除外）、task_started/task_progress/task_notification（非 Task 映射时）、hook_started/hook_progress/hook_response、files_persisted、elicitation_complete、local_command_output、streamlined_text/streamlined_tool_use_summary（精简输出模式专属）、tool_use_summary、keep_alive、update_environment_variables
 - result 帧字段：modelUsage（分模型明细）、permission_denials、fast_mode_state、stop_reason、duration_api_ms
 - 控制请求：rewind_files、cancel_async_message、seed_read_state、mcp_message/mcp_set_servers/mcp_reconnect/mcp_toggle/mcp_status、stop_task、apply_flag_settings/get_settings、set_model/set_max_thinking_tokens（运行时切换，taiji 无对应方法）、elicitation、hook_callback（taiji 无 hook 面）

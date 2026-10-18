@@ -1,6 +1,6 @@
 # scheduler-manager 插件验收归档（R3）
 
-> plugin 交互点位（headerAction / action-bar + 条目镜像数据面）与首消费者 `resources/plugins/scheduler-manager` 的真机验收记录。设计源 = `.tmp/tech-design/plugin-header-action-modal-points.md`（工作产物，不入库；本文档为其验收章节 §4 的归档承载，三态归宿 R3）。验收日期：2026-09-20；基线 `de2e475c0..` 全部场景 pass。本文档归档的验收以当时独立的 modal 弹层通道执行；该通道已退役，面板呈现通道 = WorkflowVizOverlay 定时任务 tab（`views.update` 推树链与 viewId 字符串不变），通道级场景（弹层 z 序 / 切会话关闭 / 浮层互斥）随通道退役移除，浮层开合/焦点/互斥由 OverlayShell 现行机制承接。
+> plugin 交互点位（headerAction / action-bar + 条目镜像数据范围）与首消费者 `resources/plugins/scheduler-manager` 的真机验收记录。设计源 = `.tmp/tech-design/plugin-header-action-modal-points.md`（工作产物，不入库；本文档为其验收章节 §4 的归档承载，三态归宿 R3）。验收日期：2026-09-20；基线 `de2e475c0..` 全部场景 pass。本文档归档的验收以当时独立的 modal 弹层通道执行；该通道已退役，面板呈现通道 = WorkflowVizOverlay 定时任务 tab（`views.update` 推树链与 viewId 字符串不变），通道级场景（弹层 z 序 / 切会话关闭 / 浮层互斥）随通道退役移除，浮层开合/焦点/互斥由 OverlayShell 现行机制承接。
 
 ## 1. 场景结果总表
 

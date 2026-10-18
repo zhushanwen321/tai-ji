@@ -1,5 +1,5 @@
 /**
- * useTrayCounts —— composer 任务托盘（Widget Tray）built-in 三件的数据面
+ * useTrayCounts —— composer 任务托盘（Widget Tray）built-in 三件的数据范围
  * （设计 docs/design/composer-task-tray.md（已删除，git 可追溯）§3.3 D2/D13 + §3.4 终态数据流）。
  *
  * 职责三件：
@@ -12,7 +12,7 @@
  * - **D13 首次拉取触发迁移**：**外壳挂载即** `watch(sessionId)` → `loadSubagents` / `loadWorkflows`
  *   ——范式 = useBackgroundTasks 的 watch(sid) 拉取路径（原侧栏任务列表的首次拉取路径已随该视图退役，
  *   迁入此处成为唯一实现；「外壳挂载」而非「面板打开」是 U1 的语义前提：面板每次 hover 打开
- *   都重新挂载，数据面必须活在外壳上，打开时数据已在）。
+ *   都重新挂载，数据范围必须活在外壳上，打开时数据已在）。
  *   历史 record（已结束桶 / dim 常驻判据）依赖首次拉取：广播路径只覆盖在跑任务，缺此路径切 session
  *   后托盘空/滞后。WS 重连路径仍归 useSidebar.onConnected（D13 明文不迁），本处不重复挂。
  * - **面板错误态 retry 支撑**：按类重新拉取（bash → useBackgroundTasks.refresh；
@@ -151,7 +151,7 @@ export interface UseTrayCountsReturn {
 }
 
 /**
- * 数据面单例注入键：外壳（ComposerTray）在 setup 创建**唯一**实例并 provide，built-in 面板
+ * 数据范围单例注入键：外壳（ComposerTray）在 setup 创建**唯一**实例并 provide，built-in 面板
  * inject 消费。面板随 Popover 每次打开重新挂载（reka Presence 卸载/重建），若各自调
  * useTrayCounts 则每次打开重发首次拉取 RPC（loadSubagents + loadWorkflows，bash 另加 list）；
  * 单例把实例生命周期固定在外壳（= Composer 生命周期）上，面板卸载不销毁、不重新拉取。
@@ -159,7 +159,7 @@ export interface UseTrayCountsReturn {
 export const TRAY_COUNTS_KEY: InjectionKey<UseTrayCountsReturn> = Symbol('tray-counts')
 
 /**
- * 消费外壳提供的托盘数据面（TrayNativePanel 专用）。token 缺失即抛错：面板只能在
+ * 消费外壳提供的托盘数据范围（TrayNativePanel 专用）。token 缺失即抛错：面板只能在
  * ComposerTray 内渲染；**刻意不设「自建实例」回退**——回退即面板自持第二数据实例，正是
  * 「每次 hover 打开重发首次拉取 RPC」的根因（错误信息给出恢复动作）。
  */
@@ -167,7 +167,7 @@ export function useTrayCountsContext(): UseTrayCountsReturn {
   const tray = inject(TRAY_COUNTS_KEY)
   if (!tray) {
     throw new Error(
-      '[tray] 数据面注入缺失：TrayNativePanel 必须在 ComposerTray 内渲染' +
+      '[tray] 数据范围注入缺失：TrayNativePanel 必须在 ComposerTray 内渲染' +
         '（外壳需 provide(TRAY_COUNTS_KEY, useTrayCounts(sessionId))）。',
     )
   }
@@ -175,7 +175,7 @@ export function useTrayCountsContext(): UseTrayCountsReturn {
 }
 
 /**
- * 托盘 built-in 三件数据面。必须在组件 setup 同步调用（内部 watch 依赖实例 scope；
+ * 托盘 built-in 三件数据范围。必须在组件 setup 同步调用（内部 watch 依赖实例 scope；
  * useBackgroundTasks 同样要求 setup 上下文）。**整个应用只有一个调用点**——外壳
  * ComposerTray；面板走 useTrayCountsContext 消费同一实例（见 TRAY_COUNTS_KEY）。
  *
@@ -187,7 +187,7 @@ export function useTrayCounts(sessionIdRef: Ref<string | null | undefined>): Use
 
   const subagentStore = useSubagentStore()
   const workflowStore = useWorkflowStore()
-  // bash 数据面：useBackgroundTasks 自带 watch(sid) 拉取路径 + 广播增量路径 + 重连路径，
+  // bash 数据范围：useBackgroundTasks 自带 watch(sid) 拉取路径 + 广播增量路径 + 重连路径，
   // 托盘不另挂订阅（AGENTS 规则 2：物理订阅在 store/状态根层收敛）。
   const backgroundTasks = useBackgroundTasks(normalizedSid)
 

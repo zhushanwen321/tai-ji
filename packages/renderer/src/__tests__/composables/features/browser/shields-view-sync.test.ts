@@ -1,6 +1,6 @@
 /**
  * useShieldsViewSync 单测族 —— shieldsView 遮蔽面全量上报（display-containers §5.1 规则 6② /
- * §6.7 view 遮蔽族 / §7.4 谓词重算触发面）。
+ * §6.7 view 遮蔽族 / §7.4 谓词重算触发范围）。
  *
  * 对账锚：
  * - **faces payload 形状**（§7.4 / main display-gate ShieldFace 契约）：全屏阻塞面
@@ -9,9 +9,9 @@
  * - **开关触发上报——真实事件序**（禁 mock 时序）：成员开合态经响应式 ref 翻转 +
  *   nextTick flush（flush 'post' = 重渲染后 DOM 定形再实测 rect）驱动上报；无 debounce、
  *   无定时兜底——ref 翻转后第一个 flush 点即出报。
- * - **变化才上报**（内容比较收敛）：payload 无变化的重算（overlay 内容切换等触发面）
+ * - **变化才上报**（内容比较收敛）：payload 无变化的重算（overlay 内容切换等触发范围）
  *   不产生等值 IPC。
- * - **resize 触发面**（§6.7）：window resize 事件直推重测（无防抖）。
+ * - **resize 触发范围**（§6.7）：window resize 事件直推重测（无防抖）。
  * - **卸载对称**：composable 宿主卸载上报空 faces 复位；重挂后首报必达。
  *
  * 三视角：构建者白盒（mock IPC 捕获调用序列）+ 使用者黑盒（挂载宿主组件 + 开表面 →
@@ -150,7 +150,7 @@ describe('开关触发上报（真实事件序：ref 翻转 → flush 即报，�
     expect(sentCalls().at(-1)).toEqual({ faces: [] })
   })
 
-  it('overlay 内容切换触发面：faces 无变化时重算不上报（变化才上报，内容比较收敛）', async () => {
+  it('overlay 内容切换触发范围：faces 无变化时重算不上报（变化才上报，内容比较收敛）', async () => {
     mountSyncHost()
     const surface = mountSurface('search-modal', 'sm')
     surface.open.value = true
@@ -166,7 +166,7 @@ describe('开关触发上报（真实事件序：ref 翻转 → flush 即报，�
   })
 })
 
-describe('resize 触发面（§6.7：事件直推重测，无防抖）', () => {
+describe('resize 触发范围（§6.7：事件直推重测，无防抖）', () => {
   it('开态内几何变化 + window resize 事件 → 立即重报新 rect（不依赖响应式依赖）', async () => {
     mountSyncHost()
     const currentRect = { x: 10, y: 10, width: 200, height: 30 }

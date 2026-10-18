@@ -28,7 +28,7 @@ import {
 
 // ============================================================
 // mock 连接 + 驱动器（与 session-channel-turn-timers.test.ts 同形态，
-// 增补 onClose handler 的手动触发面——close 吞没注入的机制等价物）
+// 增补 onClose handler 的手动触发范围——close 吞没注入的机制等价物）
 // ============================================================
 
 interface MockChannel {

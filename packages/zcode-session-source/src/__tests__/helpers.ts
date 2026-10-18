@@ -186,7 +186,7 @@ export function dirSnapshot(dir: string): string[] {
 
 /**
  * 场景 1a 共用 fixture 行集契约（≥2 轮对话 + toolCall/toolResult 对 + 可检索
- * 关键词 + compaction part）——本包测试只断言行集查询面（converter 断言归 U4），
+ * 关键词 + compaction part）——本包测试只断言行集查询范围（converter 断言归 U4），
  * 行集保持与设计契约同形供后续单元复用。
  */
 export function defaultTranscriptSeeds(): {

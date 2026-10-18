@@ -294,7 +294,7 @@ export function resetChatModuleStateForTest(): void {
 /**
  * [pi1-disposition-chat-flow U2② / D1⑤] 孤儿对账——handled 终局通知丢失后的静默清除兜底。
  *
- * 触发面：session.delivery 快照帧到达（含断线重连 stateSnapshot 回放，同一 handler 路径）。
+ * 触发范围：session.delivery 快照帧到达（含断线重连 stateSnapshot 回放，同一 handler 路径）。
  * 判据（三条同时成立才清除，操作域 = handledDeliveryTargets 登记在册的命令条目）：
  * ①「曾经在场」正向证据（seenInProjection——曾出现在此前任一帧派生视图；受理窗口内快照不含
  *   新条目属正常态，无此条件的「不在派生视图即清除」会在连发场景误清未受理气泡，设计 V8 反向）；
@@ -863,7 +863,7 @@ export function ensureStreamSubscription(
 
 /**
  * [HISTORICAL → 投递所有权内核 u3b 退役] submitQueuedEntry（defer 队列 flush 的逐条提交
- * 入口，u4b/D5.1）已删除：defer 队列状态机整体退役（设计 §3.1 删除面），用户消息统一经
+ * 入口，u4b/D5.1）已删除：defer 队列状态机整体退役（设计 §3.1 删除范围），用户消息统一经
  * delivery.submit 提交（下方 submitNewMessage 编排），lane 判定与逐条投递由 runtime 内核
  * 承担（D1）。出站裸标记附加（簇 A2）随消息出站统一由内核出站侧负责，renderer 不再拼标记。
  * renderer 唯一消费方 useCompactQueue.doFlush 随 u3c 退役。git 可追溯。
@@ -1313,7 +1313,7 @@ export function createUseChat(deps: UseChatDeps) {
    *     侧呈现未发生，保守 toast 兜底（AGENTS.md 规则 #3 错误必须可见）。
    * 不 throw（consumer fire-and-forget）。compacting 态由 session.compacted 复位（interpreter 发，必达）。
    * [R2-A5 失败信号] 返回值（Promise<boolean>）：true = RPC 受理成功；false = RPC reject
-   * （分类码级 / transport 级均算——错误面已按上述路由消化）——调用方（dispatch send
+   * （分类码级 / transport 级均算——错误范围已按上述路由消化）——调用方（dispatch send
    * 的 /compact 分支）据 `=== false` restoreSegments 恢复草稿。
    *
    * 显式接收 sessionId：per-panel 隔离，不读全局 activeId。
@@ -1504,7 +1504,7 @@ export function createUseChat(deps: UseChatDeps) {
     sendBash,
     abortBash,
     // [u5a 退役] 前身 clearQueueState 转发（forceQuit 清 pi queue_update 快照）已删：
-    // queueStates 分区及其读写面随本单元退役，pi 槽位回收由 delivery.drain 承担（u3c）。
+    // queueStates 分区及其读侧与写侧随本单元退役，pi 槽位回收由 delivery.drain 承担（u3c）。
     // 队列区数据源 = session.delivery 派生视图（disposeSession → clearDeliveryProjection 清理）。
   }
 }

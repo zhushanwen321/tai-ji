@@ -37,24 +37,24 @@ import { invalidateStreamSubscription } from './useChat'
 import { subscribeSession } from '../../coordination/subscription-state'
 
 /** session store 生命周期动作面（markDead 置灰 / revive 复位；createSessionStore 产物子集）。 */
-export interface LifecycleSessionActions { // oe-exempt:20261003:framework:D5 设计裁决的 core factory 契约面——factory 即唯一实现点是设计形态，非待扩展口
+export interface LifecycleSessionActions { // oe-exempt:20261003:framework:D5 设计裁决的 core factory 契约范围——factory 即唯一实现点是设计形态，非待扩展口
   markDead(sessionId: string): void
   revive(sessionId: string): void
 }
 
-export interface LifecycleEffectsDeps { // oe-exempt:20261003:framework:D5 设计裁决的 core factory 契约面——factory 即唯一实现点是设计形态，非待扩展口
+export interface LifecycleEffectsDeps { // oe-exempt:20261003:framework:D5 设计裁决的 core factory 契约范围——factory 即唯一实现点是设计形态，非待扩展口
   /** chat store 动作面：markSessionError（session 级错误统一入口，含流式终结）+ appendRespawnNotice（恢复提示条写入点）。 */
   chat: Pick<ChatStoreInstance, 'markSessionError' | 'appendRespawnNotice'>
   session: LifecycleSessionActions
 }
 
 /** 恢复提示条两形态文案（壳注入——core 不持有 i18n）。 */
-export interface LifecycleNoticeTexts { // oe-exempt:20261003:framework:D5 设计裁决的 core factory 契约面——factory 即唯一实现点是设计形态，非待扩展口
+export interface LifecycleNoticeTexts { // oe-exempt:20261003:framework:D5 设计裁决的 core factory 契约范围——factory 即唯一实现点是设计形态，非待扩展口
   restored: string
   restoreFailed: string
 }
 
-export interface LifecycleEffects { // oe-exempt:20261003:framework:D5 设计裁决的 core factory 契约面——factory 即唯一实现点是设计形态，非待扩展口
+export interface LifecycleEffects { // oe-exempt:20261003:framework:D5 设计裁决的 core factory 契约范围——factory 即唯一实现点是设计形态，非待扩展口
   /**
    * session.exited 的 core 序列：markSessionError（含流式终结 / error 消息追加）+ markDead
    * （列表置灰）+ 订阅簿记失效。壳扩展（弹窗分区清理 / toast / 强杀分流 / 过渡态）由调用方

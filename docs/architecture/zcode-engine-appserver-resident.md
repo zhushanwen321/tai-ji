@@ -8,7 +8,7 @@
 > 凭据/模型解析实际读取 `~/.zcode/v2/provider_config.json`（CLI homedir 解析走 passwd
 > 不吃 HOME env），而非本节所述 `~/.zcode/cli/config.json`——上句的 v2 provider 注入
 > 机制对现行 CLI 疑似 no-op（引擎全链靠 provider_config.json 原生凭据工作，V1/V6 真机
-> 通过不受影响）。注入面语义在引擎下次升级协议重锚时一并重验（R-upgrade impl-plan
+> 通过不受影响）。注入范围语义在引擎下次升级协议重锚时一并重验（R-upgrade impl-plan
 > 验收记录观察项①）。
 > ② **删除 HOME 池化，共享宿主 HOME**——spawn env 不再覆写 HOME（db/plugins/MCP 继承
 > 宿主 HOME，会话与 GUI 共写同一 SQLite，WAL 并发安全）；**凭据经 fs 拦截 launcher 注入**
@@ -16,12 +16,12 @@
 > 读凭据而 GUI 登录态落在 `~/.zcode/v2/config.json`，wrapper patch fs 把对前者的读取重定向为
 > 「真实文件 + v2 provider 注入」内存合并，同 id 时 v2 整条优先——v2 是权威凭据源）。
 > D7（常驻 HOME）章节随之**作废**。已接受代价：GUI 会话列表可见 headless 会话（**已由 2026-09
-> 会话库隔离撤销**——写入面改落独立库后不再可见，见下方修订块）；登录态
+> 会话库隔离撤销**——写侧改落独立库后不再可见，见下方修订块）；登录态
 > 轮换后常驻连接需引擎进程重启才用新凭据（凭据内容 hash 刷新机制删除）；zcode 升级
 > schema migration 竞争无契约担保。新漂移面：zcode 升级若改变配置读取路径/方式，失败信号
 > 为 missing baseURL / Model config is missing 明确报错（不静默坏）。收益：HOME 依赖副作用
 > （pnpm store 随 HOME 翻转等）根治；锁/pidfile/孤儿回收/派生目录整章复杂度删除。journal
-> 固定落 `engines/zcode/shared/`（[池抽象降级 2026-09-13] poolKey 协议面已整体退役——原
+> 固定落 `engines/zcode/shared/`（[池抽象降级 2026-09-13] poolKey 协议范围已整体退役——原
 > PI_POOL_KEY/ZCODE_SHARED_POOL_KEY 常量与 onPoolResolved 通道删除，journal 落盘路径构造
 > 即终值）；handle.sessionRef.dbPath 为
 > 绝对路径（隔离库 `<engineDataDir>/engines/zcode/session-db/db.sqlite`，`zcodeSessionDbPath()`
@@ -42,7 +42,7 @@
 > subagent 会话不再进 ZCode GUI 侧边栏。上方修订块中三处口径随之撤销/改写：「会话与 GUI 共写
 > 同一 SQLite」「已接受代价：GUI 会话列表可见 headless 会话」「handle.dbPath 锚定宿主库
 > `ZCODE_HOST_DB_SUFFIX`」。**HOME 保持共享**（凭据 / 插件 / MCP / pnpm store 语义零变化）、
-> 凭据 fs 拦截注入、journal 固定分组 `'shared'`（[池抽象降级] poolKey 协议面已删）、常驻连接 / abort 链 / 会话自包含 / capabilities /
+> 凭据 fs 拦截注入、journal 固定分组 `'shared'`（[池抽象降级] poolKey 协议范围已删）、常驻连接 / abort 链 / 会话自包含 / capabilities /
 > 停机路径全部不变。两条读取链按 `zcodeDbPathAllowlist(dataDir)` 白名单集合成员判定放行
 > （隔离库 + 宿主库存量兼容锚点）。
 
@@ -246,7 +246,7 @@ task ─┘                    │ ① session/create {workspace, mode, model, .
 
 ### 3.4 实施不变量（从决策推导，conformance 承接）
 
-1. **事件不变量沿用 C3 全量**：stream 模式下 text_delta 拼接 == read 全文；终态唯一（turn.terminal 权威）；message_end.usage 完整；tool_start/tool_end 配对（app-server 推送帧能提供 toolCallCount，但首期事件面若无逐工具帧，tool 事件不合成——granularity 声明与实际流出一致即可）。
+1. **事件不变量沿用 C3 全量**：stream 模式下 text_delta 拼接 == read 全文；终态唯一（turn.terminal 权威）；message_end.usage 完整；tool_start/tool_end 配对（app-server 推送帧能提供 toolCallCount，但首期事件范围若无逐工具帧，tool 事件不合成——granularity 声明与实际流出一致即可）。
 2. **run resolve 先于 journal close**：事件 emit 完成先于 run resolve（现有不变量 5 在流式形态下自然成立——turn.terminal 后 read 兜底完成才 resolve）。
 3. **onPoolResolved 先于首事件 + 运行中 entry 携带读取钥匙**：常驻通道 poolKey 为静态常量（'home-appserver' 或派生目录名，W4 已定案），onPoolResolved 可在连接建立前极早调用；**传递通道（r3 固定）：RunContext 新增可选回调 `onHandleReady(partial: Pick<EngineHandleData, 'sessionRef' | 'poolKey'>)`**——与 onPoolResolved 分立两个时点（poolKey 在 prepare 期经 onPoolResolved，sessionRef 在 create 应答后经 onHandleReady；字段级扩展已在本设计登记，满足 port.ts 头注纪律）。编排层收到回调后立即回填 `record.engineHandle = { sessionRef, poolKey, journalPath }` 并经 `reportRecordTransition` 落 entry（record-store.ts:434 既有上报通道）——运行中的 GUI 经 entry 重建 record 即拿到 ①②级读取钥匙，不再等 `engine.run` resolve 后的回填（subagent-service.ts:1746 现状）。
 4. **dispose 幂等**：重复调用无副作用；dispose 后首个 run 自动重建（与「进程死后重建」同一代码路径）。

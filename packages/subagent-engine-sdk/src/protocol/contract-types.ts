@@ -77,7 +77,7 @@ export type AssertMutuallyAssignable<A, B> = [A] extends [B]
   : never;
 
 // ============================================================
-// 事件面（AgentEvent 及其字段型）
+// 事件范围（AgentEvent 及其字段型）
 // ============================================================
 
 /** token 用量（message_end 单条消息增量）。← core execution/assembly/types.ts AgentUsage。 */
@@ -136,7 +136,7 @@ export interface Turn {
 
 /**
  * 引擎事件（10 种，协议 event.params.event 逐字序列化——「事件与 handle 序列化逐字
- * 兼容」不变量 3 的类型面）。语义锚点 = pi（ACP 词汇对照见 core execution/assembly/types.ts 注释）。
+ * 兼容」不变量 3 的类型范围）。语义锚点 = pi（ACP 词汇对照见 core execution/assembly/types.ts 注释）。
  *
  * activity = 纯活性信号：双侧 reducer no-op、不开 turn、不写状态、不落 journal
  * （core event-journal-wiring 对其豁免 append），只承诺「引擎活跃时周期性出现」——供宿主
@@ -184,7 +184,7 @@ export type AgentEvent =
  *      → 错误直接落在词表漏改的成员行；
  *   ③ 兜底——成员绕过 EventName 约束裸加字面量 → _EventVocabSyncLock 爆红。
  * 新增事件变体的同步点分两层，漏改任一处 typecheck 均红且精确指路（验收 A1 演练
- * 实证）：协议面两笔（词表 + union）即协议面全同步——schema enum 与遍历型测试断言
+ * 实证）：协议范围两笔（词表 + union）即协议范围全同步——schema enum 与遍历型测试断言
  * 自动跟随；同仓消费方另有两处编译期同步点——journal-replay reducer case（穷尽
  * switch never 检查）与 contract-closure 构造冒烟（Record<AgentEventTypeName,…>
  * 漏键爆红）。不 bump 版本、不改任何引擎（演进政策 additive 面，判据全文见头注）。
@@ -289,7 +289,7 @@ export interface SessionView {
  * 用户覆盖记账共用的模型指向形状（设计 subagent-model-switch §6.2/§7.3）。
  *
  * 刻意用结构化对象而非现役 wire 的字符串 canonical ref（`ctx.model` = "provider/id"）：
- * 切换操作的原生输入面就是「provider 选了哪个模型」两个独立选择（前端模型选择器 /
+ * 切换操作的原生输入范围就是「provider 选了哪个模型」两个独立选择（前端模型选择器 /
  * runtime `model.switch` 均平铺 provider/modelId），字符串拼接形态会在协议两侧各做一次
  * 拆/拼（拆分规则 = provider 含 '/' 时无法无歧义反转），结构化形状让拆装只发生在宿主
  * 编排层单点（U2 组帧时拼 canonical ref、读回执时拆 ref）。
@@ -322,7 +322,7 @@ export type EngineProcessModel = "per-window" | "shared-service";
  * 引擎能力声明（11 必填位 + 1 可选位 setModel）。三级：native / emulated / unsupported。
  * 声明的是本仓 subagent 链路实际接通的能力，不是引擎 RPC 层的理论能力。
  * 同步权威 = manifest（注册期直读）；握手应答仅诊断（§3.3「同步成员清单」）。
- * 进程形态声明是独立字段（上方 EngineProcessModel——manifest 契约面，不在本
+ * 进程形态声明是独立字段（上方 EngineProcessModel——manifest 契约范围，不在本
  * 接口内），两套字段服务不同裁决（任务能力 vs 宿主实例管理）。
  */
 export interface EngineCapabilities {
@@ -334,7 +334,7 @@ export interface EngineCapabilities {
    * [H1 D5 语义收窄 + modeless] 「怎么续」形态轴兼 message 资格轴：
    * 位非 'unsupported' = 引擎可续聊（core capability-gate 的 message 资格门消费），
    * 值区分续聊形态——native（原地续写）/ cold（冷恢复重建 + 新 run + resume 锚点）。
-   * 原名字沿用——conversation 位保留、语义从「interact 长驻控制面」收窄为
+   * 原名字沿用——conversation 位保留、语义从「interact 长驻控制范围」收窄为
    * 「resume 续聊能力」。[modeless 波2] 会话形态键只剩 run.params.resume（协议
    * task.conversation 已删），本轴不再是 per-run 模式开关——描述各引擎的真实
    * 续聊差异（gate 判据仍是 `=== "unsupported"` 拒绝，"cold" 与 "native" 等价
@@ -475,7 +475,7 @@ export interface AgentOutcome {
 
 /**
  * 引擎模型目录条目（manifest `modelCatalog.models` 条目形态，设计 §3.4 示例）。
- * 协议面 = initialize 应答 models? 与 listModels 应答 models 的元素型；
+ * 协议范围 = initialize 应答 models? 与 listModels 应答 models 的元素型；
  * manifest 解析与生成（gen:model-catalog）归 W4/W5 实装。
  */
 export interface ModelCatalogEntry { // oe-exempt:20260929:framework:workflow/record 协议契约类型——ports 类型契约先行、单实现常态（dev-0.10.5 已验收代码 merge 带入）

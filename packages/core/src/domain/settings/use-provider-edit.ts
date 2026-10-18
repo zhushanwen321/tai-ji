@@ -8,11 +8,11 @@
  * - provider-edit-reconcile.ts 广播 × 用户编辑并发对齐纯核（D8 + S8 规则，接口级可测）
  * - provider-edit-types.ts    跨 module 共享类型
  *
- * 本 facade 只做两件事：① 三 module 装配（互相依赖的注入面在此接线）② provider 变化时的
+ * 本 facade 只做两件事：① 三 module 装配（互相依赖的注入点在此接线）② provider 变化时的
  * 重置序（载入 → 瞬态重置 → 快照捕获，原 watch(props.provider) 的执行序逐字保持）。
  * 返回面收敛为 3 组子 interface（form / discover / models），调用方按组消费。
  *
- * 历史导出面（CONTEXT_OPTIONS / THINKING_STRATEGIES / API_KEY_CLEAR_SENTINEL / LocalModel /
+ * 历史导出清单（CONTEXT_OPTIONS / THINKING_STRATEGIES / API_KEY_CLEAR_SENTINEL / LocalModel /
  * ThinkingStrategy / DiscoverAction 等）已归位各 module，经 settings 域 barrel（index.ts）
  * 统一导出，消费方 import 源不变（'@taiji/core' / '@taiji/core/domain/settings'）。
  *

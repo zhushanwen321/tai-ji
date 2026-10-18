@@ -70,7 +70,7 @@ const emit = defineEmits<{ (e: 'remove', id: string): void }>()
 const { t } = useI18n()
 
 /** 加载失败项 id 集（onerror 置位 → 该 chip 回退 ImageIcon 占位；不可变更新驱动重渲）。
- *  失败标记不随 items 清理：id 是 uuid 恒不复用，失败态对已删除 id 残留无观测面。 */
+ *  失败标记不随 items 清理：id 是 uuid 恒不复用，失败态对已删除 id 残留无观测范围。 */
 const failedIds = ref<Set<string>>(new Set())
 
 function markFailed(id: string): void {

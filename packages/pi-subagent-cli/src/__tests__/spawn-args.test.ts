@@ -52,7 +52,7 @@ describe("buildSpawnArgs", () => {
     expect(args).not.toContain("builtin:mcp");
   });
 
-  it("回归锚：subagent 模板不含 builtin:tool-search（tool-declaration-slimming D4 仅主 agent 模板装载——subagent 工具面为显式白名单语义、无 tool_search 检索需求；本断言防未来误传导）", () => {
+  it("回归锚：subagent 模板不含 builtin:tool-search（tool-declaration-slimming D4 仅主 agent 模板装载——subagent 工具范围为显式白名单语义、无 tool_search 检索需求；本断言防未来误传导）", () => {
     const args = buildSpawnArgs(baseParams);
     expect(args).not.toContain("builtin:tool-search");
   });

@@ -503,7 +503,7 @@ describe('世代变更失效重置（auth token 判据）', () => {
   })
 })
 
-describe('unknown_terminal_id 平行检查（提示与焦点按触发面分档）', () => {
+describe('unknown_terminal_id 平行检查（提示与焦点按触发范围分档）', () => {
   async function seedAlive(): Promise<{ wrapper: ReturnType<typeof mount>; terminal: UseTerminalReturn }> {
     terminalApiMock.spawn.mockResolvedValue({ terminalId: T1 })
     const h = host('s1')
@@ -573,7 +573,7 @@ describe('unknown_terminal_id 平行检查（提示与焦点按触发面分档�
 
   it('UG-6: 注册表条目已删但分区/订阅在场时，unknown_terminal_id 仍回收（三路径判据不早退）', async () => {
     const { wrapper, terminal } = await seedAlive()
-    // 模拟「关闭沿已删注册表条目、但分区与订阅仍在场」的竞态残留形态（设计 §3.3 检查覆盖面）
+    // 模拟「关闭沿已删注册表条目、但分区与订阅仍在场」的竞态残留形态（设计 §3.3 检查覆盖范围）
     unregisterInstance(T1)
     setActiveTerminalId('s1', T1) // active 仍指向该编号（模拟竞态残留，使 attach 路径可达）
     expect(hasInstance(T1)).toBe(false)

@@ -168,7 +168,7 @@ ResumeAnchor.sessionRef 构成建议：`{sessionId: <uuid>, hermesHome: <get_her
 **源有靶无**（hermes 有、taiji 协议无槽，丢弃或宿主自行消费）：
 - ACP plan 更新（todo 工具 → AgentPlanUpdate，events.py:39-84）；available_commands（9 个 slash 命令，server.py:448-500）；session_info_update 自动标题（server.py:712-741）；usage_update 上下文水位（server.py:660-710）
 - 多模态输入（image/resource blocks → OpenAI content parts，server.py:378-442）；MCP server 动态注册（NewSession.mcp_servers，server.py:750-817）
-- 工具面：delegate_task 子 agent、execute_code、browser_* 11 工具、send_message/kanban/cron 等平台工具、memory/session_search 跨会话记忆（toolsets.py:347-364 hermes-acp 29 工具）
+- 工具范围：delegate_task 子 agent、execute_code、browser_* 11 工具、send_message/kanban/cron 等平台工具、memory/session_search 跨会话记忆（toolsets.py:347-364 hermes-acp 29 工具）
 - SOUL.md 身份 / AGENTS.md/.cursorrules 项目上下文自动装载（system_prompt.py:61-90）；skills 三工具；checkpoint 体系；六种执行环境；interim_assistant 中途评论；clarify 工具（hermes-acp 不装）
 
 **靶有源无**（taiji 需要、hermes 无原生）：

@@ -179,6 +179,6 @@ describe('防复活凭据：撤销写持久终局 + 重启（新 handle 同 stor
   })
 })
 
-// 类型面引用保持（DeliveryPort 形态契约）：假 port 供上述用例构造
+// 类型范围引用保持（DeliveryPort 形态契约）：假 port 供上述用例构造
 const _portTypeAnchor: DeliveryPort | undefined = undefined
 void _portTypeAnchor

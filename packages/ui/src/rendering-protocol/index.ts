@@ -1,5 +1,5 @@
 /**
- * ui 包 rendering-protocol 层导出面（IF2）。
+ * ui 包 rendering-protocol 层导出清单（IF2）。
  *
  * 导出 GuiComponentRenderer（7 原语渲染路由器）+ 透传 core 的 resolve 纯函数与注册表机制
  * （resolveComponent / ResolvedRender / GUI_CUSTOM_REGISTRY_KEY / EMPTY_CUSTOM_REGISTRY /

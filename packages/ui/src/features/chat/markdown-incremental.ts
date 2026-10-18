@@ -523,7 +523,7 @@ export function createIncrementalRenderCache(): IncrementalMarkdownCache {
 /**
  * fence/mermaid 占位转完整渲染的静默阈值（ms）。finalize 判定 = message complete ∨
  * token 静默 ≥ 本阈值（判定式收敛在 ui useMarkdownStreaming，审计候选 18：原壳层
- * shouldFinalizeStreamingFence 谓词注入删除后，本常量是 finalize 唯一注入面）。
+ * shouldFinalizeStreamingFence 谓词注入删除后，本常量是 finalize 唯一注入点）。
  * 08 §5.4 待验证项：无真实用户数据，200 是实施期 A/B 起点（候选 200/300），
  * dev 实测 tuning 后可调——不是结论值。
  */
@@ -706,7 +706,7 @@ async function buildTailSegments(
  * **硬约束（并发，W22 review）**：同一 cache 必须串行调用——上一帧 Promise 落定后才能发起
  * 下一帧，按发起顺序应用结果、丢弃乱序帧。本函数在 await 点交错原地更新 cache（边界前进
  * 并入 / fallback 重置互相踩踏，坏状态不可被 append-only 校验自愈），**不自带串行化**
- * （cache 内嵌串行链需扩展 ui 侧镜像协议面，长期方案另议），并发消费方须自带串行化——
+ * （cache 内嵌串行链需扩展 ui 侧镜像协议范围，长期方案另议），并发消费方须自带串行化——
  * 如 MarkdownRenderer 的 latest-wins 帧门（W23 已实现）。
  *
  * - 前缀缓存命中（边界不变且前缀未变）：prefixSegments 与 cache.prefixSegments 同引用，

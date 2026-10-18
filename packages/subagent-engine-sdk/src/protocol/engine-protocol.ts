@@ -20,7 +20,7 @@
 // ① additive 面：新增可选字段/事件变体/方法/反向通道不 bump 版本，旧端对新成员忽略
 //    或 no-op 安全落空；新增须过门槛——消费方 + 降级路径 + 能力位绑定三件齐才进协议，
 //    无消费方不进协议（占位先行即违宪，C 型教训）。
-// ② 删除面：同形键改名（A 型）默认「新增新键 + 旧键 deprecated 双读 + major 清除」；
+// ② 删除范围：同形键改名（A 型）默认「新增新键 + 旧键 deprecated 双读 + major 清除」；
 //    机制替换/语义收窄（B 型）同批切换合法，条件 = 对端同仓 + ADR 登记；对端独立节奏
 //    出现时删除一律走 major（minor 协商触发条件三条见 ADR-0071，条件不到不加协商位）。
 // ③ major bump：core 支持区间平移 [1,2)→[2,3)，遗留清单届时清理。
@@ -95,7 +95,7 @@ export function isProtocolVersionCompatible(version: number): boolean {
 // 量级常量（impl-plan §2.1 逐项写死，双侧同源）
 // ============================================================
 
-/** 正向数据面反向请求（帧④数据面类）未应答容忍时长：10s 未答 = 引擎故障 → 杀进程 + 在途 run 失败。 */
+/** 正向数据范围反向请求（帧④数据范围类）未应答容忍时长：10s 未答 = 引擎故障 → 杀进程 + 在途 run 失败。 */
 export const REVERSE_REQUEST_TIMEOUT_MS = 10_000;
 
 /** initialize 握手超时（ms）：超时 → engine_handshake_timeout，该引擎不可用。 */
@@ -107,7 +107,7 @@ export const CANCEL_SETTLE_GRACE_MS = 3_000;
 /**
  * setModel 引擎侧单阶段控制窗（ms）：pi 实现等子进程 `set_model` 应答、等
  * `get_state` 回读各占一窗（设计 subagent-model-switch §7.3——命令与回读全程带
- * 存活检查，超时上限复用现役取消收敛窗量级：控制面单请求 = 秒级）。窗满且进程
+ * 存活检查，超时上限复用现役取消收敛窗量级：控制范围单请求 = 秒级）。窗满且进程
  * 仍存活 → `engine_state_readback_failed`；窗满时进程已退出 → 无活进程形态
  * （`SET_MODEL_NOT_ACTIVE_CODE`）——两种处置不可混淆。
  */
@@ -115,8 +115,8 @@ export const SET_MODEL_STAGE_TIMEOUT_MS = 3_000;
 
 /**
  * setModel 正向方法的宿主侧单请求上界（ms）：≥ 引擎侧两阶段最坏时延
- * （2 × SET_MODEL_STAGE_TIMEOUT_MS）+ 协议余量；量级锚 = 数据面单请求
- * REVERSE_REQUEST_TIMEOUT_MS 的 10s 先例（控制面单请求必须秒级有界——宿主不悬挂）。
+ * （2 × SET_MODEL_STAGE_TIMEOUT_MS）+ 协议余量；量级锚 = 数据范围单请求
+ * REVERSE_REQUEST_TIMEOUT_MS 的 10s 先例（控制范围单请求必须秒级有界——宿主不悬挂）。
  */
 export const SET_MODEL_REQUEST_TIMEOUT_MS = 10_000;
 
@@ -128,7 +128,7 @@ export const STDERR_TAIL_CHARS = 400;
 
 /**
  * 反向请求超时二分（帧④注释，R9-2）：
- * - 数据面类（host/log / host/streamDelta / host/handleReady /
+ * - 数据范围类（host/log / host/streamDelta / host/handleReady /
  *   host/childSpawned / host/childStateChanged）：10s 未答 = 引擎故障；
  * - 人机交互类（host/askUser）：不设统一超时——core 先回 {ack:true}，
  *   结果异步到达；按 ADR-0047「静默 ≠ 卡死」用无进展检测/用户取消，不据此判引擎故障。

@@ -9,13 +9,13 @@
  * 默认值为中性语义：请求/动作返回空值 ack、订阅返回 no-op 取消函数；用例按需 overrides
  * 注入自己的 vi.fn() 断言。
  *
- * 导出面：@taiji/core/testing（包内 __tests__ 亦可相对路径消费；renderer/ui 测试经包名）。
+ * 导出清单：@taiji/core/testing（包内 __tests__ 亦可相对路径消费；renderer/ui 测试经包名）。
  */
 import { vi } from 'vitest'
 import type { SettingsTransport } from '../domain/settings/transport'
 
 /**
- * 覆盖面签名：键集与实参表逐签名对齐（漏键/错键/实参错型即报错），返回值保持宽松——
+ * 覆盖范围签名：键集与实参表逐签名对齐（漏键/错键/实参错型即报错），返回值保持宽松——
  * 测试 vi.fn() 桩的返回形状常是宽化 mock（如 () => Promise<void> 顶替真实 reply 形状），
  * 返回强校验会把桩类型噪音当契约错误。实参表校验堵住「实参错型的假绿桩」（桩签名与
  * seam 方法对不上时编译期即红，而非测试静默通过）；契约漂移检测由下方

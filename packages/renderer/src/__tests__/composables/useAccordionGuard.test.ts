@@ -4,7 +4,7 @@
  * 背景：u06（清理点#3）把 PendingAction 三变体判别联合收敛成单 pendingTarget 赋值，
  * commit message 声称「6 行为场景等价」但全仓无测试文件——本文件把该等价性钉成可回归断言。
  *
- * 观测面（消费者视角，镜像 ProviderPage.vue 的真实绑定）：
+ * 观测范围（消费者视角，镜像 ProviderPage.vue 的真实绑定）：
  * - aria-expanded / body-<id> ← expandedId
  * - dirty-<id> 徽章 ← expandedId === id && currentBodyDirty
  * - guard-dialog ← v-model:open（guardDialogOpen）；confirm 走 @confirm="confirmDiscard"，

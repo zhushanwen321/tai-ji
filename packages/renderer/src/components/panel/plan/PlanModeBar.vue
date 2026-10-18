@@ -223,7 +223,7 @@ const { t } = useI18n()
 const sessionIdRef = computed(() => props.sessionId)
 
 // focusedSid 注入 + WS 订阅 + 首次拉取（承接清单②；视图透出 view/stage/loadError）
-// drafts = 焦点分区评论草稿（§3.5 退出确认草稿警示 + 确认退出即清的读取面）
+// drafts = 焦点分区评论草稿（§3.5 退出确认草稿警示 + 确认退出即清的读侧）
 const { view, stage, loadError, drafts, clearDrafts } = usePlanState(sessionIdRef)
 
 // 常驻订阅（承接清单①）：isActive=false 期间 planReview 请求仍入 store 的兜底实例。

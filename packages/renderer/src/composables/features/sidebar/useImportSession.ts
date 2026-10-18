@@ -203,12 +203,12 @@ export function useImportSession(options: UseImportSessionOptions = {}) {
     return items.value.filter((item) => item.dirLabel === selectedDir.value)
   })
 
-  /** 路径模式判定：query 以 '/' 或 '~' 开头（D5 S7 renderer 侧切换；runtime 无分支）。纯 query 派生，数据面登记归 #22 */
+  /** 路径模式判定：query 以 '/' 或 '~' 开头（D5 S7 renderer 侧切换；runtime 无分支）。纯 query 派生，数据范围登记归 #22 */
   const isPathMode = computed<boolean>(() => /^[~/]/.test(query.value.trim()))
 
   /**
    * 路径模式命中条目：候选中 sourcePath includes query 的首条（items 已按
-   * lastModified 降序；isPathMode/pathHit 均纯派生视图，数据面登记归 #22）。
+   * lastModified 降序；isPathMode/pathHit 均纯派生视图，数据范围登记归 #22）。
    * runtime 的 includes 匹配天然覆盖路径输入，此处只在
    * renderer 侧收敛到「路径行」单一命中语义（demo 方案 A path-bar）。
    */

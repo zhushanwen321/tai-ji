@@ -361,9 +361,9 @@ export function createChatStore(options: ChatStoreOptions = {}) {
   // [u5a 退役] `queueStates` 分区 + `getQueueState` / `clearQueueState` 已删除：唯一写方
   // （message.queue_update handler）随投递所有权内核 u3b 退役（内核排队取代 pi 快照），队列区
   // 展示数据源改为 session.delivery 状态帧单一来源（u3c：useQueueRows 读内核派生视图）——本分区
-  // 恒空、读面恒 undefined、clearQueueState 恒 no-op（u3b/u3c 已把「分区与 API 收尾」记为待处理 u5）。
+  // 恒空、读侧恒 undefined、clearQueueState 恒 no-op（u3b/u3c 已把「分区与 API 收尾」记为待处理 u5）。
   // [B1 退役] `pendingBuffer` 分区 + `pushPending` / `drainN` / `reconcilePending` /
-  // `abortPending` 已删除：计数路径被设计 §3.1 删除面明列退役（投递所有权内核 u3b 后零生产
+  // `abortPending` 已删除：计数路径被设计 §3.1 删除范围明列退役（投递所有权内核 u3b 后零生产
   // 消费方，队列区数据源 = session.delivery 状态帧；提交侧统一 submit 直发，无暂存形态）。
   // 历史见 git（steer-followup-user-bubble-display D2 / W14 D6）。
   /**
@@ -557,7 +557,7 @@ export function createChatStore(options: ChatStoreOptions = {}) {
     return retryStates.value.get(sessionId)
   }
 
-  // [u5a 退役] 前身 getQueueState / clearQueueState（queueStates 分区的读写面）已删除——
+  // [u5a 退役] 前身 getQueueState / clearQueueState（queueStates 分区的读侧与写侧）已删除——
   // 分区已无生产写方（见上方 queueStates 退役注记），两方法分别为恒 undefined 读与恒 no-op 写。
   // forceQuit 编排（renderer useSidebarSessionActions）不再调用 clearQueueState：steer 队列快照
   // 展示态本身已不存在，pi 槽位的真实回收由 delivery.drain 承担（u3c）。
@@ -1243,7 +1243,7 @@ export function createChatStore(options: ChatStoreOptions = {}) {
 export type ChatStoreInstance = ReturnType<typeof createChatStore>
 
 /**
- * [D6②/u6.1] chat store facet：readers 面——消费组件可碰的渲染读取面。
+ * [D6②/u6.1] chat store facet：readers 面——消费组件可碰的渲染读侧。
  *
  * 边界裁量（「组件渲染需要」vs「编排动作」，renderer-deepening §3.3 D6）：
  * - 状态 refs 全部入 readers：数据载体本身，组件读 ref 不破坏任何不变量

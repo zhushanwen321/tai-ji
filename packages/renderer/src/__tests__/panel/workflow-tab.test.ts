@@ -50,7 +50,7 @@ function record(overrides: Partial<WorkflowRunRecord> = {}): WorkflowRunRecord {
 
 async function mountTab(records: WorkflowRunRecord[], selectName?: string): Promise<VueWrapper> {
   const workflowStore = useWorkflowStore()
-  // 种数据：applyRecords 已从 store 导出面摘除，直写分区 ref（不可变替换触发响应性）
+  // 种数据：applyRecords 已从 store 导出清单摘除，直写分区 ref（不可变替换触发响应性）
   workflowStore.recordsBySession = new Map(workflowStore.recordsBySession).set(SID, records)
   // workflow-visualization U6/D1 入口改向后 openWorkflow = 开 overlay（core 测试环境无
   // opener 绑定 no-op）；本组件测试意图 = 注入 drawer 选中态，改调显式 drawer 语义函数

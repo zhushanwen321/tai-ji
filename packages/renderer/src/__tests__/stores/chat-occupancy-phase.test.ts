@@ -170,7 +170,7 @@ describe('occupancy 快照恢复（G4：重连 resubscribeAll / 切回 session�
 describe('occupancy 帧不再触发投递（[u3c] renderer 侧投递时机职责已退役）', () => {
   /**
    * [u3c 退役] 前身「occupancy idle × defer 队列非空 → flush 触发」用例随 defer 队列整体退役
-   * （设计 §3.1 删除面）：投递时机由 runtime 内核驱动（occupancy 边沿是内核 lane 再判定触发源），
+   * （设计 §3.1 删除范围）：投递时机由 runtime 内核驱动（occupancy 边沿是内核 lane 再判定触发源），
    * renderer 不再持队列、不再触发 flush。本用例改为锁定「occupancy 帧只写派生视图、不产生任何提交
    * RPC」——旧触发路径不存在，正交确认其不复活。
    */

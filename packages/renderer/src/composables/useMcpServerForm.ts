@@ -43,7 +43,7 @@ export function useMcpServerForm() {
     command.value = value.command ?? ''
     argsText.value = (value.args ?? []).join('\n')
     // env/headers 键集自由（pi 语义：用户可配任意环境变量/请求头名），此处为对象 → 行文本回显，
-    // 无注入面，不做键白名单过滤
+    // 无注入通道，不做键白名单过滤
     envText.value = kvRecordToText(value.env)
     cwd.value = value.cwd ?? ''
     url.value = value.url ?? ''

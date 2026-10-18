@@ -1,17 +1,17 @@
 // src/engine-query.ts
 //
-// pi 引擎查询面（pi-workflow-run-resource-model §3.3 决策 11，方案 B）：listModels /
+// pi 引擎查询范围（pi-workflow-run-resource-model §3.3 决策 11，方案 B）：listModels /
 // validateModel 的引擎侧实装——读 pi 数据目录（agentDir）下的四个 json（models.json /
 // models-store.json / settings.json / auth.json），纯文件读取、零新依赖、不 spawn pi
 // 进程、不 import pi 包本体。
 //
-// 定性 = 可选诊断面：pi 被显式排除在引擎级模型校验外（core validateModelForEngine
+// 定性 = 可选诊断范围：pi 被显式排除在引擎级模型校验外（core validateModelForEngine
 // 对 pi 原样放行，走派发期对称路径），宿主对 cli 形态引擎的同步成员读 manifest 快照、
-// 不经本协议通道——本查询面服务诊断用途（协议 listModels/validateModel 应答的真实
-// 数据面），失败按辅助功能降级纪律处置（读面 warn 降级不抛断链；裁决面返回结构化
+// 不经本协议通道——本查询范围服务诊断用途（协议 listModels/validateModel 应答的真实
+// 数据范围），失败按辅助功能降级纪律处置（读侧 warn 降级不抛断链；裁决面返回结构化
 // 错误 EngineSdkError）。
 //
-// 数据面边界（设计内知情取舍，决策 11）：清单 = pi 数据目录配置面可见的模型
+// 数据范围边界（设计内知情取舍，决策 11）：清单 = pi 数据目录配置面可见的模型
 // （models.json 静态声明 ∪ models-store.json 远程 catalog 缓存），不含 pi 内置
 // provider 的编译期模型定义（那需要 import pi 包本体，被方案 B 明文排除）。
 //
@@ -34,7 +34,7 @@ const logger = getLogger("pi-engine-query");
 const PI_AGENT_DIR_ENV = "PI_CODING_AGENT_DIR";
 
 /** 清单条目形态（协议 ListModelsResult.models 元素的结构等价面）。 */
-export interface PiModelEntry { // oe-exempt:20260927:framework:pi 数据目录查询面的清单条目契约——ports 接口先立、单实现常态（决策 11 查询面交付形态）
+export interface PiModelEntry { // oe-exempt:20260927:framework:pi 数据目录查询范围的清单条目契约——ports 接口先立、单实现常态（决策 11 查询范围交付形态）
   /** 模型全 ref（`<providerId>/<modelId>`——pi 模型 ref 通行形态）。 */
   id: string;
   /** 显示名（数据文件声明时携带）。 */
@@ -84,7 +84,7 @@ function stringKeysOf(value: unknown): Set<string> {
 
 /**
  * 凭据 provider 集合：auth.json 键集（登录写入）∪ models.json 内联 apiKey 声明的
- * provider。env key 凭据通道不查（出了「纯文件读取」的声明边界，诊断面不猜 env 状态）。
+ * provider。env key 凭据通道不查（出了「纯文件读取」的声明边界，诊断范围不猜 env 状态）。
  */
 function credentialedProviderIds(auth: Record<string, unknown> | undefined | null, configured: Set<string>): Set<string> {
   return new Set([...stringKeysOf(auth), ...configured]);
@@ -120,7 +120,7 @@ function parseProviderModels(source: string, providerId: string, provider: unkno
 }
 
 /**
- * pi 数据目录的模型清单（诊断面）。
+ * pi 数据目录的模型清单（诊断范围）。
  *
  * 数据源与合并：models.json providers 为静态基线，models-store.json（远程 catalog
  * 缓存，键 = providerId）为动态面——同 id 动态条目覆盖基线（对齐 pi mergeModels
@@ -179,14 +179,14 @@ export function listPiModels(agentDir: string): PiModelEntry[] | null {
 }
 
 /**
- * pi 模型 ref 校验（诊断面裁决）。
+ * pi 模型 ref 校验（诊断范围裁决）。
  *
  * - modelRef 缺席/空 = 查引擎缺省模型：settings.json 的 defaultProvider +
  *   defaultModel 拼全 ref（pi /model 选择持久化的宿主级缺省）；均未配置 =
  *   engine_model_unknown（pi 无编译期缺省模型语义——运行期「继承主 agent」，无
  *   静态 canonical 形态可答）。
  * - 有值 ref = 清单 id 全等匹配（命中 → canonicalRef = 全 ref）；清单无枚举面或
- *   未命中 → engine_model_unknown（诊断面如实裁决，不做模糊匹配——对齐 RemoteEngine
+ *   未命中 → engine_model_unknown（诊断范围如实裁决，不做模糊匹配——对齐 RemoteEngine
  *   matchCatalogEntry 的零宽容口径）。
  */
 export function validatePiModel(modelRef: string | undefined, agentDir: string): { canonicalRef: string } {

@@ -4,7 +4,7 @@
 //
 // 为什么需要：CLI 形态的 zcode app-server 只从 `$HOME/.zcode/cli/config.json` 的
 // provider 字段读凭据（bundle 实测：路径硬编码，userConfigPath/modelConfig 参数仅对
-// GUI 同代码库内嵌调用方开放，env/argv/协议面无配置注入通道）；而 GUI 把凭据放
+// GUI 同代码库内嵌调用方开放，env/argv/协议范围无配置注入通道）；而 GUI 把凭据放
 // `~/.zcode/v2/config.json` 且从不写 cli/config.json——外部 spawn 的 app-server 在
 // 真实 HOME 下是「无源之水」（实测报 "Model provider ... is missing baseURL"）。
 //
@@ -114,7 +114,7 @@ function injectedConfigText() {
     if (hasKey(entry)) injectable[id] = entry;
   }
   // provider_config.json 补注入（读取失败静默降级——校验源缺席时引擎侧校验同样不可
-  // 用，注入面维持 v2-only 现状；providerRules 缺失不构成凭据错误）。
+  // 用，注入点维持 v2-only 现状；providerRules 缺失不构成凭据错误）。
   try {
     const pc = JSON.parse(readOrig(PROVIDER_CONFIG_PATH, 'utf8'));
     const pcCfg = pc && typeof pc.config === 'object' && pc.config ? pc.config : {};
@@ -166,7 +166,7 @@ function injectedConfigText() {
         models: models,
       };
     }
-  } catch { /* provider_config 缺失/损坏 → 补注入面静默降级（v2 注入不受影响） */ }
+  } catch { /* provider_config 缺失/损坏 → 补注入点静默降级（v2 注入不受影响） */ }
   if (Object.keys(injectable).length === 0) return null;
   const merged = { ...real };
   merged.provider = { ...realProviders, ...injectable };
@@ -287,7 +287,7 @@ function catalogPatchText(path) {
 }
 
 // [2026-10-13 account 直通②] CLI bundle 源码内存补丁：外部 spawn 的账号条目构建
-// 硬编码 entitled:!1（YXe），数据面注入（目录 entitled 字段）被其无视——按用户裁决
+// 硬编码 entitled:!1（YXe），数据范围注入（目录 entitled 字段）被其无视——按用户裁决
 // 改 zcode 源码绕过：拦截 CLI bundle 源码读取，内存替换该字面量为 !0（ZCode.app
 // 磁盘文件零触碰；锚串含 ]]:[] 尾缀唯一命中 YXe 构造，另一处同名条件逻辑不受影响）。
 // 锚不命中（上游混淆形态变化）→ 原文透出：仅 account 家族继续被拒，个人 provider
@@ -477,7 +477,7 @@ if (text !== null || catalogPatch !== null) {
 
   // existsSync 拦截：真实 bundle 的用户 config 读取（loadFileConfig）以 existsSync
   // 为短路门——文件不存在时返回空 config 且 readFileSync 不被调用，GUI-only
-  // 登录宿主（cli/config.json 从未被 CLI 侧写过）上注入只挂在读取面 = 不可见。
+  // 登录宿主（cli/config.json 从未被 CLI 侧写过）上注入只挂在读侧 = 不可见。
   // D3 换轨：真实 provider_config.json 的存在性 = 真实或副本任一存在即 true
   //（真实缺失 + 副本存在时 Registry 的 existsSync 门不得拦掉 merge 视图读取）
   fs.__origExistsSync = fs.existsSync;

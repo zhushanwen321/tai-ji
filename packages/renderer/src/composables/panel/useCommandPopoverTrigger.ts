@@ -194,7 +194,7 @@ export function useCommandPopoverTrigger(
    * onChanged 传空实现：draft ref 同步由紧随其后的 insertSlashChip/insertSkillChip 尾部
    * onChanged（= onInput → emitInput(getText())）承担——两者在同一 watch 回调内无条件顺序
    * 执行，删除后的最终态文本经 insert 的 emitInput 一次性同步给 Composer.vue 的 draft ref；
-   * 独立 emitInput 通道（contenteditable composable 闭包）未暴露在 ShellInputInstance 契约面。
+   * 独立 emitInput 通道（contenteditable composable 闭包）未暴露在 ShellInputInstance 契约范围。
    */
   function clearActiveTokenBeforeInject(): void {
     if (frozenSearchModalSessionId.value !== sessionId.value) return

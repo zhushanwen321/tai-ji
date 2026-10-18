@@ -69,7 +69,7 @@ interface RegistryEntry { // oe-exempt:20261003:framework:类型契约先行—�
 
 /** 成员表版本号（membership 变更信号源）：注册新条目 / 覆盖既有条目读点（挂载点交接，
  *  读点集合变更需让消费方改绑依赖）/ 注销摘除条目时递增。view 遮蔽
- *  联动（useShieldsViewSync）的反应式触发面依赖它——成员表的增删本身不是 Vue 响应式
+ *  联动（useShieldsViewSync）的反应式触发范围依赖它——成员表的增删本身不是 Vue 响应式
  *  变更（Map 非响应式），查询方必须在读点消费本版本号才能追踪「挂载⇔开」型成员
  *  （isOpen 不读任何响应式 ref，卸载即注销）的开合翻转。
  *  taste:allow-no-data-owner W24-EX-A（同 entries——注册基建的成员表变更计数器，
@@ -159,10 +159,10 @@ export function anyModalSurfaceYieldsCmdW(): boolean {
  * view 遮蔽报告：开着且 shieldsView≠'none' 的成员及档位（几何求交/滞回归 main 侧 view 链，
  * 本模块只报「哪些开着的表面声称遮蔽 view、按哪一档、开态几何是多少」）。
  *
- * 响应式语义（useShieldsViewSync 触发面契约）：本函数内部读 membershipVersion（成员表
+ * 响应式语义（useShieldsViewSync 触发范围契约）：本函数内部读 membershipVersion（成员表
  * 增删可追踪）+ 逐条目 isOpen getter（各成员绑定的响应式状态本体可追踪）——在 Vue
  * 响应式作用域（watchEffect/computed）内调用时自动建立依赖；rect getter 的 DOM 实测
- * 不响应（几何在每次重算时直读 DOM，由调用方的重算触发面保证新鲜度）。
+ * 不响应（几何在每次重算时直读 DOM，由调用方的重算触发范围保证新鲜度）。
  */
 export function openShieldingSurfaces(): Array<{
   id: ModalSurfaceId

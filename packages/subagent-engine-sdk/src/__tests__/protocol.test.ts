@@ -1,6 +1,6 @@
 // src/__tests__/protocol.test.ts
 //
-// 协议面 v1 契约断言（W1 验收：impl-plan §2.1 规格逐项 + A6 协议层部分）。
+// 协议范围 v1 契约断言（W1 验收：impl-plan §2.1 规格逐项 + A6 协议层部分）。
 // A6 完整真机验收（能力协商/relay/旋钮）归 W2+ 真机场景；本文件锁定协议层可自动
 // 判定的子集：版本协商区间、错误码表、方法/通道全集、超时二分、量级常量、帧判别。
 
@@ -97,13 +97,13 @@ describe("版本协商（A6① 协议层判据）", () => {
 });
 
 describe("量级常量（impl-plan §2.1 逐项写死）", () => {
-  it("数据面反向请求 10s / 握手 10s / cancel 收敛 3s", () => {
+  it("数据范围反向请求 10s / 握手 10s / cancel 收敛 3s", () => {
     expect(REVERSE_REQUEST_TIMEOUT_MS).toBe(10_000);
     expect(HANDSHAKE_TIMEOUT_MS).toBe(10_000);
     expect(CANCEL_SETTLE_GRACE_MS).toBe(3_000);
   });
 
-  it("setModel 控制面超时（[subagent-model-switch §7.3] 引擎单阶段窗 3s 锚 cancel 收敛窗量级；宿主单请求上界 10s ≥ 2×3s + 余量）", () => {
+  it("setModel 控制范围超时（[subagent-model-switch §7.3] 引擎单阶段窗 3s 锚 cancel 收敛窗量级；宿主单请求上界 10s ≥ 2×3s + 余量）", () => {
     expect(SET_MODEL_STAGE_TIMEOUT_MS).toBe(3_000);
     expect(SET_MODEL_REQUEST_TIMEOUT_MS).toBe(10_000);
     expect(SET_MODEL_REQUEST_TIMEOUT_MS).toBeGreaterThanOrEqual(SET_MODEL_STAGE_TIMEOUT_MS * 2);
@@ -134,7 +134,7 @@ describe("10 正向方法全集", () => {
   it("方法名联合与常量数组同源（编译期互证 + 运行时抽查）", () => {
     const sample: ProtocolMethod = "run";
     expect(PROTOCOL_METHODS).toContain(sample);
-    // 类型面锁死：params/result 映射表键集 = 方法全集（缺方法 = 编译失败）
+    // 类型范围锁死：params/result 映射表键集 = 方法全集（缺方法 = 编译失败）
     type _ParamsKeys = AssertMutuallyAssignable<keyof ProtocolParamsMap, ProtocolMethod>;
     type _ResultKeys = AssertMutuallyAssignable<keyof ProtocolResultMap, ProtocolMethod>;
     // U5 词表锁：ProtocolMethod ⟷ PROTOCOL_METHODS 双向互等——`satisfies readonly
@@ -148,7 +148,7 @@ describe("10 正向方法全集", () => {
   });
 });
 
-describe("6 反向通道全集与超时二分（R9-2；[池抽象降级] 原 host/poolResolved 已随 poolKey 协议面退役删除；[permission 退役] host/permission 已删——两引擎 permissionMode=native 零 emit）", () => {
+describe("6 反向通道全集与超时二分（R9-2；[池抽象降级] 原 host/poolResolved 已随 poolKey 协议范围退役删除；[permission 退役] host/permission 已删——两引擎 permissionMode=native 零 emit）", () => {
   it("恰好 6 个通道", () => {
     expect(REVERSE_CHANNELS).toHaveLength(6);
     expect([...REVERSE_CHANNELS]).toEqual([
@@ -170,7 +170,7 @@ describe("6 反向通道全集与超时二分（R9-2；[池抽象降级] 原 hos
     expect(lock).toEqual([true]);
   });
 
-  it("二分：数据面 5 通道 10s 超时；人机交互 1 通道不设统一超时", () => {
+  it("二分：数据范围 5 通道 10s 超时；人机交互 1 通道不设统一超时", () => {
     const dataPlane = REVERSE_CHANNELS.filter(
       (ch) => REVERSE_CHANNEL_TIMEOUT_CLASS[ch] === "data-plane",
     );

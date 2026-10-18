@@ -11,7 +11,7 @@
  * 内部实现），收集侧 hasFormOverlay 不判 dead——重复判定会把「dead 不应答」（W6）的
  * 职责撕成两份，派生规则演化时漏改一处即回归。
  *
- * turn 运行态（streaming/compacting）不在此收集：D2 裁决它们不再驱动输入面存在性
+ * turn 运行态（streaming/compacting）不在此收集：D2 裁决它们不再驱动输入范围存在性
  * （composer 的禁用/进度模态由 Composer 内部消费 isCompacting，与存在性正交）。
  */
 import { computed } from 'vue'
@@ -51,7 +51,7 @@ export function usePanelView(sessionId: Ref<string | null>): {
   const sessionStore = useSessionStore()
   const flow = useNewTaskFlow()
   const { partition: tracePartition } = useSessionTrace()
-  // filter 走 useExtensionUI 默认值 formFilter（统一表单 overlay 渲染面）；普通 dialog
+  // filter 走 useExtensionUI 默认值 formFilter（统一表单 overlay 渲染范围）；普通 dialog
   // 请求由硬过滤 + CompanionBand 侧排除，不经 store。
   const { currentFormRequest, respond, cancel } = useExtensionUI(sessionId)
 

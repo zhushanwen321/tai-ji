@@ -49,7 +49,7 @@ export interface SpawnEngineChildOptions {
  */
 export const ENGINE_ABORT_KILL_GRACE_MS = 30_000;
 
-/** 这些键出现即拒绝：spawn 形态是本原语的契约面，不允许调用方绕过硬编码值。 */
+/** 这些键出现即拒绝：spawn 形态是本原语的契约范围，不允许调用方绕过硬编码值。 */
 const FORBIDDEN_OPTION_KEYS = ["detached", "stdio", "stdin", "windowsHide"] as const;
 
 /**
@@ -171,7 +171,7 @@ function killOwnProcessGroup(): void {
  * 武装引擎侧自灭检查。返回 ReverseRequestClock 给反向通道分发层登记请求生命周期。
  *
  * 判据：
- * - 主判据 stdio EOF：stdin 'end'（数据面读尽）或 'close'（fd 关闭）→ 立即自灭
+ * - 主判据 stdio EOF：stdin 'end'（数据范围读尽）或 'close'（fd 关闭）→ 立即自灭
  *   （宿主死后无人再写协议帧，引擎继续跑只烧 token）；
  * - 辅助判据 in-flight 反向请求计时：未 ack 的反向请求超过 hostRequestTimeoutMs
  *   仍无 ack → 宿主大概率已死（EOF 未达或正在关闭）→ 自灭。**排除面**：已 ack 的

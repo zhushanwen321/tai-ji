@@ -18,7 +18,7 @@ zcode subagent 会话库（SQLite）的唯一只读读取基座。三个消费�
     256MB 拒拷；读后 finally 清理。**$TMPDIR 治理面**：快照属「读快照」非对话数据
     存放——源库只读零触碰、副本即弃，taiji 侧登记为 data-source-registry §4 ⑰
     〔ADR-0063 I2 的登记例外〕，详见 recovery.ts 头注）
-  - L4 错误面（`SqliteUnreadableError`，`attempted` 记录已尝试级别，供上层映射
+  - L4 错误范围（`SqliteUnreadableError`，`attempted` 记录已尝试级别，供上层映射
     消费侧错误码——本包不私建错误码词表）
   - 拷贝集唯一定义：db only + 自建 0 字节 `-wal`；`-wal`/`-shm` 在场绝不自动拷贝
     （防静默回滚），`-shm` 永不进拷贝集。

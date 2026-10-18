@@ -14,7 +14,7 @@
 //   reconnecting/restarting/failed。[漂移] 原稿 4 态 connecting/open/closing/closed 是
 //   remote-use 期术语；closing 中间态不存在——主动 disconnect 先摘回调再 close，直接置
 //   disconnected。断言点：connecting → connected（onopen，token 模式经 auth.result ok 的
-//   markConnected）可达；主动 disconnect → disconnected 可达且残余回调不干扰行为（行为面
+//   markConnected）可达；主动 disconnect → disconnected 可达且残余回调不干扰行为（行为范围
 //   锁定，不锁摘回调的实现手段——摘回调与 gen 拦截等价）；非法迁移拒绝
 //   （已连接/连接中重复 connect 幂等 no-op，不重置状态不建新 WS）；onclose → disconnected →
 //   scheduleReconnect（closed 是重连起点，原稿语义保留）。
@@ -153,7 +153,7 @@ describe('ws-client 不变量 ① 连接状态机', () => {
 
     disconnect()
     expect(getState().value).toBe('disconnected')
-    // 行为面锁定（不锁「摘回调」实现手段——「保留回调 + gen 拦截」等价实现行为相同）：
+    // 行为范围锁定（不锁「摘回调」实现手段——「保留回调 + gen 拦截」等价实现行为相同）：
     // 残余 open/close 触发不改变状态；主动断开不复活重连链（不调度退避、无新 WS）。
     const f = latestFake()
     f.triggerOpen()

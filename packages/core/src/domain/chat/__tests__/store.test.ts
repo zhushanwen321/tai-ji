@@ -569,7 +569,7 @@ describe('createChatStore factory', () => {
   })
 
   // [B1 退役] 前身 `pendingBuffer 数据层` describe（TC1/TC2/TC2b/TC3/TC3b 五例：pushPending
-  // 暂存 / drainN 计数 FIFO / abortPending 文本匹配）已随计数路径整体删除（设计 §3.1 删除面）——
+  // 暂存 / drainN 计数 FIFO / abortPending 文本匹配）已随计数路径整体删除（设计 §3.1 删除范围）——
   // 分区与四个方法不再是 store 面 API，无方法可测。
 
   // ── [steer-bubble u0/D2] inflight 投递确认计数契约层：state + 增/减/清零 action 面。
@@ -860,7 +860,7 @@ describe('createChatStore factory', () => {
       // s2：无消息实体、仅 retry/compacting 瞬态（瞬态 Map 来源的候选——只遍历 messages 会漏）
       sut.store.applyMessageEvent(s2, msg(s2, 'message.auto_retry_start', { attempt: 1 }))
       // [u3b/D7] 原 queue_update 写 queueStates 的候选来源已退役（handler 删除，无生产写方）——
-      // 瞬态候选维度由 retryStates + compactingSessions 承担，断言面不缩水。
+      // 瞬态候选维度由 retryStates + compactingSessions 承担，断言范围不缩水。
       sut.store.setOccupancy(s2, { turn: 'idle', compacting: true, bash: false })
       expect(sut.store.isGenerating(s1)).toBe(true)
       expect(sut.store.getRetryState(s2)).toBeDefined()

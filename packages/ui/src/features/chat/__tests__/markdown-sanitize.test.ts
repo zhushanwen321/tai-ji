@@ -240,7 +240,7 @@ describe('URI 行为（默认 ALLOWED_URI_REGEXP，D1 R8/R9）', () => {
     expect(html).toContain('%6Aavascript:alert(1)')
   })
 
-  it('tel: 存活（默认正则协议面，非剥除）', async () => {
+  it('tel: 存活（默认正则协议范围，非剥除）', async () => {
     const html = await freshRender('<a href="tel:+8613800000000">tel</a>\n')
     expect(html).toContain('href="tel:')
   })

@@ -1,5 +1,5 @@
 /**
- * DialogRequestQueue 单测（IF2 契约全行为面 + D2 超时撤窗 + M1 未送达保留 + U6 resetFor
+ * DialogRequestQueue 单测（IF2 契约全行为范围 + D2 超时撤窗 + M1 未送达保留 + U6 resetFor
  * 三用例）。
  *
  * 运行：cd packages/ui && npx vitest run src/extension-host/

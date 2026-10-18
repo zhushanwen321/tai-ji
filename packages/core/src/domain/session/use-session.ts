@@ -152,7 +152,7 @@ export interface SessionCleanupHooks {
   /**
    * workflow-viz overlay 关闭（workflow-visualization U6/D11⑤ 可选 hook）：删除的
    * session 是 overlay 当前发起 session 时关 overlay（overlay 全局单例、绑定发起 pane
-   * 的 session）。事件流缓存与活跃锚的数据面清理由 clearWorkflow（store.clearSession）
+   * 的 session）。事件流缓存与活跃锚的数据范围清理由 clearWorkflow（store.clearSession）
    * 承担，本 hook 只做 UI 关闭编排。
    */
   closeWorkflowOverlay?(sid: string): void
@@ -490,7 +490,7 @@ export function createUseSession(deps: UseSessionDeps) {
     hooks.clearTerminalQueue?.(id)
     hooks.clearSlashCommands?.(id)
     hooks.clearForkNotices?.(id)
-    // workflow-viz overlay UI 关闭（U6/D11⑤，可选 hook——壳未接线即跳过；数据面在 clearWorkflow）
+    // workflow-viz overlay UI 关闭（U6/D11⑤，可选 hook——壳未接线即跳过；数据范围在 clearWorkflow）
     hooks.closeWorkflowOverlay?.(id)
     // ADR-0049 W5：触发所有 useSessionScopedState 实例清理该 sid 的 Map 分区，
     // 防已销毁 session 的 per-session 状态条目在 Map 中积累导致内存泄漏（AC-8）。
@@ -501,7 +501,7 @@ export function createUseSession(deps: UseSessionDeps) {
   /**
    * [D7 空态承接] 删除路径的空态出口统一编排（deleteSession/deleteFolder 专用）：
    * push chat 空态 + 显式 startFlow——终态下 landing 渲染需 flow 活跃，flow=idle 时
-   * 面板落入无输入面死态 empty（旧壳 enterEmptyChatState 同构上收）。
+   * 面板落入无输入范围死态 empty（旧壳 enterEmptyChatState 同构上收）。
    * flow 未接线（headless 形态）时只 push。不用于 newSession 延迟 create 分支——
    * 无参 startFlow 的 pendingCwd=null 会清掉 newSession 刚回灌的 fallback cwd。
    */

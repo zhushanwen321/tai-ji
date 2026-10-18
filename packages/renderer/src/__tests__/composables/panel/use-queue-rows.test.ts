@@ -15,7 +15,7 @@
  * - onRetryEntry：delivery.resync 单条重报（§3.4 重试耗尽行），失败出声
  *
  * [HISTORICAL] 前身（compact-defer-composer-queue u1）：useDeferQueueRows 读本地 useCompactQueue
- * 分区（peek/mode 过滤/remove），队列状态机已随投递所有权内核整体退役（设计 §3.1 删除面）。
+ * 分区（peek/mode 过滤/remove），队列状态机已随投递所有权内核整体退役（设计 §3.1 删除范围）。
  *
  * 覆盖：过滤口径（direct/delivered 排除 + 序保持）· 折叠口径（failed 置顶恒可见 + +N 不含
  * failed）· null session 早退 · hint 四档 · 撤销四态（成功回草稿 / 不可撤 / RPC 失败 /

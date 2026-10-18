@@ -147,7 +147,7 @@ export const ENGINE_PROTOCOL_SCHEMAS = {
 } as const;
 
 /**
- * 协议面凭据禁区键名（不变量 5 的测试断言依据）：帧 schema 与深载荷 TS 类型面
+ * 协议范围凭据禁区键名（不变量 5 的测试断言依据）：帧 schema 与深载荷 TS 类型范围
  * 不得出现。词表覆盖常见拼写（子串匹配，非精确枚举）。
  */
 export const FORBIDDEN_CREDENTIAL_KEY_FRAGMENTS = [

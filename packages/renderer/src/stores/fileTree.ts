@@ -102,7 +102,7 @@ export interface DetailTabsPartition { // oe-exempt:20261003:framework:类型契
   activePath: string | null
 }
 
-/** 空 tab 列表常量（只读面缺分区时返回，避免每次新建数组） */
+/** 空 tab 列表常量（只读侧缺分区时返回，避免每次新建数组） */
 const EMPTY_DETAIL_TABS: DetailTabState[] = []
 
 /** 新 tab 实例（openDetailTab 创建用）：viewMode 初值按 forceDiff，加载时再按 gitOverlay 终判 */
@@ -440,12 +440,12 @@ export const useFileTreeStore = defineStore('fileTree', () => {
 
   // ── detail 多文件 tab（W3 §6.3 注入语义：未开新增并激活 / 已开仅激活 / 不设上限）──
 
-  /** 取 session 的 detail 分区（无则 undefined——只读面不隐式建分区） */
+  /** 取 session 的 detail 分区（无则 undefined——只读侧不隐式建分区） */
   function getDetailPartition(sessionId: string): DetailTabsPartition | undefined {
     return detailTabs.value.get(sessionId)
   }
 
-  /** 取/建 session 的 detail 分区（写入面用；reactive 容器，mutate 触发下游） */
+  /** 取/建 session 的 detail 分区（写侧用；reactive 容器，mutate 触发下游） */
   function detailPartition(sessionId: string): DetailTabsPartition {
     let partition = detailTabs.value.get(sessionId)
     if (!partition) {

@@ -153,7 +153,7 @@ function makeMountPointSource(partition: Map<string, ViewCacheEntry>): ViewHostS
 }
 
 /**
- * headerAction 数据源替身（B3 聚合面用例：scheduler overlay 直开声明形态——
+ * headerAction 数据源替身（B3 聚合范围用例：scheduler overlay 直开声明形态——
  * hasVisibleHeaderActions 判定消费 getDeclarations/getRuntimeState 两面）。
  */
 function makeHeaderActionSource(hidden = false): object {
@@ -395,7 +395,7 @@ describe('S4 模型名零截断 + `»` 退役（构造性回归防线）', () =>
   })
 })
 
-describe('B3 聚合面：headerAction（定时任务钮）随左簇聚合走（demo composer-bar spec §2.1/§4.2）', () => {
+describe('B3 聚合范围：headerAction（定时任务钮）随左簇聚合走（demo composer-bar spec §2.1/§4.2）', () => {
   it('L0 expanded：headerAction 钮在左簇渲染（clock 直开入口在场）', async () => {
     mountComposer(makeMountPointSource(reactive(new Map())), makeHeaderActionSource())
     await dispatchTick()

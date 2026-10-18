@@ -297,7 +297,7 @@ describe("resolvePersonalProviderConfigPath（默认解析链：显式 sources >
     expect(resolveZcodeModelRef("copy-model-x")).toBe(`${COPY_PROVIDER}/copy-model-x`);
   });
 
-  it("merge 视图激活时凭据缺失报错的已读源 = merge(真实 + 副本) 双路径（诊断面锚点）", () => {
+  it("merge 视图激活时凭据缺失报错的已读源 = merge(真实 + 副本) 双路径（诊断范围锚点）", () => {
     process.env[DATA_DIR_ENV_KEY] = dataDir;
     writeJson(realPath, { schemaVersion: 1, config: { providerOrder: [], providerConfigRules: { providerRules: [] } } });
     const copyPath = piSyncedProviderConfigPath(dataDir);

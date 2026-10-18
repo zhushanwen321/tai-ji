@@ -30,7 +30,7 @@ vi.mock('@/composables/features/file-tree/useDetailPane', async () => {
   })
   return {
     useDetailPane: () => ({
-      // main W3 per-tab 契约面：tabs/activePath + 实例编排函数（本文件只断言 state 驱动的
+      // main W3 per-tab 契约范围：tabs/activePath + 实例编排函数（本文件只断言 state 驱动的
       // 内容区与退役足迹，tab 条给空数组即不渲染）
       tabs: ref([]),
       activePath: ref('report.html'),

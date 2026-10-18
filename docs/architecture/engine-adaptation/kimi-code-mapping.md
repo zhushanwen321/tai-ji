@@ -51,7 +51,7 @@ CLI `-p` 降级路径：`kimi -p "<prompt>" --output-format stream-json`（apps/
 
 源侧三层，逐层穷尽。适配层订阅第②层（ACP 面）只能看到 acp-server 转发的部分；第①层引擎原生事件是语义全集，标注 acp-server 是否透传。
 
-**第①层：引擎事件全集**（`AgentEvent` union 49 成员，packages/protocol/src/events.ts:1006-1059；klient 事件面同源，packages/node-sdk/src/events.ts:1-108）：
+**第①层：引擎事件全集**（`AgentEvent` union 49 成员，packages/protocol/src/events.ts:1006-1059；klient 事件范围同源，packages/node-sdk/src/events.ts:1-108）：
 
 | 源事件（type 字面量） | taiji 事件 | 映射方式 | ACP 面可见 | 证据 |
 |---|---|---|---|---|
@@ -88,7 +88,7 @@ Volatile（不落 journal）事件类别：assistant.delta / thinking.delta / to
 | agent_thought_chunk | thinking.delta | thinking_delta | 直接 | events-map.ts:352-363 |
 | tool_call | tool.call.started（或首个 tool.call.delta lazy-create） | tool_start | 直接（name→toolName，rawInput→args） | events-map.ts:194-226,265-286 |
 | tool_call_update | tool.call.delta 累积 / started upgrade / tool.progress 标题 / tool.result 终态 | tool_end（status completed/failed 时） | 直接（rawOutput→result） | events-map.ts:233-253,295-325,332-347,373-389 |
-| plan | TodoList display block | （无） | 丢弃（taiji 无 plan 事件面） | events-map.ts:396-415,436-443 |
+| plan | TodoList display block | （无） | 丢弃（taiji 无 plan 事件范围） | events-map.ts:396-415,436-443 |
 | plan_update / plan_removed | 无生产点 | （无） | 丢弃 | ACP schema 有、kimi 不产 |
 | available_commands_update | 生命周期后置推送 + skills.changed | （无） | 丢弃 | events-map.ts:448-459；session.ts:469-479 |
 | current_mode_update | set_mode 后 | （无） | 丢弃 | events-map.ts:468-479 |
@@ -181,13 +181,13 @@ session/cancel 与 ping 对应物：`session/cancel` 通知（server.ts:430-445�
 
 ## 9. gap 清单
 
-**源有靶无**（kimi 有、taiji 协议面无消费位，适配层丢弃）：
+**源有靶无**（kimi 有、taiji 协议范围无消费位，适配层丢弃）：
 
-- `plan` / `available_commands_update` / `current_mode_update` / `config_option_update` / `session_info_update` 五类展示型 update（§3 第②层）——taiji 无对应事件面；如需 GUI 呈现 todo/命令面板属宿主功能扩展。
+- `plan` / `available_commands_update` / `current_mode_update` / `config_option_update` / `session_info_update` 五类展示型 update（§3 第②层）——taiji 无对应事件范围；如需 GUI 呈现 todo/命令面板属宿主功能扩展。
 - `elicitation/create` form 模式的多问题 + multiSelect 原生形态（question.ts:128-162）——UiRequest 无 multiSelect 字段，只能按单选降级。
 - kimi 内嵌 subagent 事件族（subagent.spawned 等 5 类，events.ts:853-901）与 goal/cron/task 域事件——taiji 自身即 subagent 宿主，不消费引擎内嵌嵌套。
 - ToolKind / ToolCallLocation / diff content 等 tool 卡片增强形态（§4）。
-- session/fork（UNSTABLE）与 session/list 的 cwd 过滤列表（server.ts:266-287,316-323）——协议面 fork 仅锚点语义。
+- session/fork（UNSTABLE）与 session/list 的 cwd 过滤列表（server.ts:266-287,316-323）——协议范围 fork 仅锚点语义。
 
 **靶有源无**（taiji 协议要求、kimi ACP 面不可达，标降级策略）：
 

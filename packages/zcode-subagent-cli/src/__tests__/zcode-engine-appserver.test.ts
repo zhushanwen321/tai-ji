@@ -54,7 +54,7 @@ interface EngineHandle_ {
   workspace: string;
 }
 
-/** run 返回形态别名（abort 用例的中止终态断言面）。 */
+/** run 返回形态别名（abort 用例的中止终态断言范围）。 */
 type EngineRunResult_ = EngineRunResult;
 
 const engines: ZcodeEngine[] = [];
@@ -838,7 +838,7 @@ describe("dispose", () => {
     // 面同步注入——白盒构造同形态快照：runtime 的 conn 无活进程、activeSessions 非空。
     // 检查缺失时 dispose 循环 post("session/close") 会 ensureStarted 惰性 spawn 一代新
     // 进程再被同次 dispose 杀掉（onSpawned 同步触发）；检查生效时永不 spawn。
-    // 观测面用 conn.onSpawned（spawnGeneration 内同步调用）而非 fake 侧 boot 计数：
+    // 观测范围用 conn.onSpawned（spawnGeneration 内同步调用）而非 fake 侧 boot 计数：
     // post 后紧接 SIGTERM，新进程来不及写 boot 即死，写盘时序不可靠。
     const { engine } = makeEngine();
     let spawned = false;

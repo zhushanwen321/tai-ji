@@ -202,7 +202,7 @@ interface PlanPartition {
    */
   reviewAckMarked: boolean
   /**
-   * planReview 挂起镜像（D4 组合判定输入面；唯一写入口 = useExtensionUI 挂起漏斗 + 冷读路径拉取对账
+   * planReview 挂起镜像（D4 组合判定输入范围；唯一写入口 = useExtensionUI 挂起漏斗 + 冷读路径拉取对账
    * ——registry 的同步派生视图，渲染公式仍以 registry presence 为唯一交互权威，本镜像只驱动
    * 组合判定）。
    */
@@ -677,7 +677,7 @@ export const usePlanStore = defineStore('plan', () => {
   const planReviewAckMarked: ComputedRef<boolean> = computed(() => scoped.current.value.reviewAckMarked)
 
   /**
-   * 焦点分区 planReview 挂起镜像（D4 稳定窗输入面的只读透出；**非渲染权威**——审批条
+   * 焦点分区 planReview 挂起镜像（D4 稳定窗输入范围的只读透出；**非渲染权威**——审批条
    * presence 判定以 registry（useExtensionUI currentPlanReviewRequests）为唯一交互权威，
    * 本视图供漏斗一致性断言/诊断读取）。
    */

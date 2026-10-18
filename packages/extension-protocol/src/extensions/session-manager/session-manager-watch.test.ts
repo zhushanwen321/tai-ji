@@ -82,7 +82,7 @@ describe('isSessionManagerWatchParams（封闭单键 + 形态自检）', () => {
     expect(isSessionManagerWatchParams({ notifyId: `sm-${'a'.repeat(500)}` })).toBe(false)
   })
 
-  it('单键寻址：夹带 parentSid/sessionId 等额外字段拒绝（parentSid 归 runtime 连接身份，协议面不定义）', () => {
+  it('单键寻址：夹带 parentSid/sessionId 等额外字段拒绝（parentSid 归 runtime 连接身份，协议范围不定义）', () => {
     expect(isSessionManagerWatchParams({ notifyId: VALID_NOTIFY_ID, parentSid: 'sid-parent' })).toBe(false)
     expect(isSessionManagerWatchParams({ notifyId: VALID_NOTIFY_ID, sessionId: 'child' })).toBe(false)
   })
@@ -94,7 +94,7 @@ describe('isSessionManagerWatchParams（封闭单键 + 形态自检）', () => {
   })
 })
 
-describe('send/create optional-notifyId 检查（缺省放行 + 类型面，形态归 arm 判据）', () => {
+describe('send/create optional-notifyId 检查（缺省放行 + 类型范围，形态归 arm 判据）', () => {
   it('send：notifyId 缺省 → 检查通过（缺省不 arm，不构成 params 错误）', () => {
     expect(isSessionManagerSendParams({ sessionId: 's', prompt: 'p' })).toBe(true)
   })
@@ -159,7 +159,7 @@ describe('watch respond payload（sessionId 回带 + meta 可选字段）', () =
     expect(isSessionManagerWatchRespondPayload({ reason: 'orphaned', sessionId: 's' })).toBe(true)
   })
 
-  it('类型面：sessionFilePath 携/不携两形态均合法（additive optional，D9 Full transcript 指针行数据源）', () => {
+  it('类型范围：sessionFilePath 携/不携两形态均合法（additive optional，D9 Full transcript 指针行数据源）', () => {
     const withPath: SessionManagerWatchRespondPayload = {
       reason: 'exited',
       sessionId: 'child-a1b2',

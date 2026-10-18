@@ -3,7 +3,7 @@
  * D7 单一数据源）。
  *
  * 前身：effects-defer-confirmation.test.ts（defer 分区 FIFO 文本匹配 + provider 注入）——
- * defer 队列状态机已整体退役（设计 §3.1 删除面），确认通道升级为「内核裸标记 id 匹配派生视图
+ * defer 队列状态机已整体退役（设计 §3.1 删除范围），确认通道升级为「内核裸标记 id 匹配派生视图
  * 条目」（C-data-08 修订方向：id 是身份不是内容），git 可追溯。
  *
  * 覆盖：

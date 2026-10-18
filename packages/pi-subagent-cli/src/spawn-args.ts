@@ -2,7 +2,7 @@
 //
 // pi spawn 参数组装纯函数（W7 迁 pi 包，自 core engines/pi/session-runner.ts 的
 // buildSpawnArgs / applySchemaEnvToChildEnv / buildEnvBlock 提取——行为逐字等价，
-// 类型面改包内形态）。
+// 类型范围改包内形态）。
 //
 // [U1 归并] buildSpawnArgs / parseSpawnModelRef
 // 的实现本体已上移 @zhushanwen/pi-rpc spawn-args 模块（主/从两侧模板单源，设计

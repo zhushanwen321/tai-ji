@@ -74,7 +74,7 @@ function makeRecord(overrides: Partial<WorkflowRunRecord> = {}): WorkflowRunReco
 }
 
 /**
- * 测试种数据：applyRecords 已从 store 导出面摘除（生产零直写场景），测试经分区 ref
+ * 测试种数据：applyRecords 已从 store 导出清单摘除（生产零直写场景），测试经分区 ref
  * 直写——不可变替换整 Map（与 partition.apply 等价）触发 shallowRef 响应性。
  */
 function seedRecords(

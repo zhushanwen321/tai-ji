@@ -4,7 +4,7 @@
  * 共享小型运行时检查。纯函数、零 converter 依赖（防循环）。
  * 来源注记：自 runtime services/session/zcode-import dev 演进版移植（判定逻辑零改动，
  * git 可追溯），本包为现行唯一承载。原拆分背景（2026-09-21 毒消息事故后自 converter.ts
- * 拆出，行为零变化，测试锚在 converter 公共面）见 git 历史。
+ * 拆出，行为零变化，测试锚在 converter 公共范围）见 git 历史。
  */
 
 const STOP_REASON_MAP: Readonly<Record<string, string>> = Object.freeze({
@@ -25,7 +25,7 @@ function mapStopReason(zcodeFinish: unknown): string {
 /**
  * 未收尾段（无 step-finish 完成）的 stopReason：消息级 data.error 优先（T3c 事故补强，
  * 2026-09-21 毒消息事故——取消轮无 step-finish，finish 兜底把它伪装成 'stop'，而 pi
- * 读面对「非 aborted/error 的 assistant」裸读 usage（语义登记 PS-44，verifiedWith 以
+ * 读侧对「非 aborted/error 的 assistant」裸读 usage（语义登记 PS-44，verifiedWith 以
  * pi-semantics.json 为准，逐 claim 行号见该条目 piAnchor）——伪 stop + 无 usage 导入
  * 后续聊即崩）。turnResult cancelled →
  * 'aborted'（pi 语义 = 用户中止），其余 error 家族 → 'error'；两态 pi 检查均跳过。
@@ -41,7 +41,7 @@ function unsealedStopReason(data: Record<string, unknown>): string {
 }
 
 /**
- * 产物不变量门（A3）：assistant entry 恒带 usage 对象——pi 读面三处裸读（见
+ * 产物不变量门（A3）：assistant entry 恒带 usage 对象——pi 读侧三处裸读（见
  * unsealedStopReason 注释）以「stopReason 非 aborted/error ⇒ usage 在场」为隐式前提
  * （pi 原生写侧连错误轮都写全零 usage；全零 = pi 的「无测量数据」合法编码，检查按
  * 无效跳过、零贡献进统计）。step-finish 缺席（取消轮）或 tokens 不可解时零值兜底；

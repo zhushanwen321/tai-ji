@@ -79,7 +79,7 @@ import { applyEntryFrameWithOverlay } from './entry-overlay'
 import { isDevMode } from '../../../platform/dev-mode'
 // [投递所有权内核 u3b] message_end(user) 送达回执（内核标记 id 匹配，C-data-08 修订方向）
 // 归位 effects/user-delivery.ts；① 前身（defer 分区 FIFO 文本匹配）与 queue_update 计数路径
-// （countDrained/drainN）已随内核整体退役（设计 §3.1 删除面），git 可追溯。
+// （countDrained/drainN）已随内核整体退役（设计 §3.1 删除范围），git 可追溯。
 import { confirmKernelDeliveryOnMessageEnd } from './user-delivery'
 // [TODO @i18n-migration] core/i18n 落地后恢复 i18n.global.t 调用（§0.3 列为后续迁移）。
 // compactionSummary（W6）/ branchSummary（D13 renderer-deepening）均已 entry 化：两者的

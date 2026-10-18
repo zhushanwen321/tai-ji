@@ -11,7 +11,7 @@
 - 例外保留：产品功能定时、C2 显式配置超时、file-lock 锁语义、事件驱动对账（B 类：delivery-port 回执对账本体（details-id 命中 + session_start 差集重放）、reconcile 事件触发路径、worktree 观察期族）、构建脚本类、PingProbe 无进展检测（ADR-0047 口径）、relay 孤儿收割（无 ChildProcess 引用可挂事件，时间机制为唯一判据）、外部网络端点墙钟（npm/oauth，网络客户端标准防线）。
 - 轮询保留登记（现状依据：pi 侧 / 写侧无完成事件信号，轮询是当前唯一可达通道；退役条件：上游提供完成事件即改事件驱动并删轮询）：
   - trace-sync 现取轮询（`trace-sync.ts` FETCH_CURRENT_PROMPT_POLL_MS=250ms / 8s 上限）：`/__taiji_get_system_prompt__` 命令 handler 写 custom entry 后 runtime 轮询 get_entries 拉取；命令 handler 毫秒级完成、无完成事件信号（拉取通道本体承 ADR-0075）。退役条件 = pi 提供「entry 已写」事件边沿或命令 RPC 直返结果。
-  - background-task 变更检测轮询（`background-task-service.ts` 2s mtime 轮询）：后台任务状态变更检测的三触发面之一（mtime 轮询 + 事件钩子 + service 自写自检，共享同一 last-seen mtime 判定）；registry 文件写侧无变更事件信号。退役条件 = 写侧变更事件覆盖全部写路径。
+  - background-task 变更检测轮询（`background-task-service.ts` 2s mtime 轮询）：后台任务状态变更检测的三触发范围之一（mtime 轮询 + 事件钩子 + service 自写自检，共享同一 last-seen mtime 判定）；registry 文件写侧无变更事件信号。退役条件 = 写侧变更事件覆盖全部写路径。
   - btw-fork 结果轮询（`btw-fork-exec.ts` 50ms 扫新增 .jsonl / 10s 上界）：fork bootstrap 进程无「执行完成」事件信号，fork 产物文件可见性轮询是唯一判据（文件可见先于内容可读）。退役条件 = pi 提供 fork 完成事件信号。
 
 ## 已实施终态（4 分区删除约 150 处机制）
@@ -26,7 +26,7 @@
   - ABORT_STALL 收敛窗（`runtime/services/session/event-interpreter.ts` + `event-interpreter-settled-delay.ts`）：ABORT_STALL_CONVERGENCE_WINDOW_MS=3s 静默窗 + ABORT_STALL_MAX_PENDING_GENERATIONS=10 代强制清环 + UserStoppedGate 收敛环（converging Map / timer / beginRestoreConvergence / noteAgentSettled / disposeForEntryRemoval）——全删，改事件顺序契约：userStopped 标记存活期 = 旁路 turn 拦截存续期，标记清除只由显式意图事件驱动（显式投递 / 会话删除 / shutdown）；「settled 永不到达」（pi 收尾挂死）归 PingProbe → onSilentAbort → forceQuit 显式上报链。
   - structured-output 兜底硬退（`extensions/universal/structured-output/src/loop-gate.ts`）：TEARDOWN_FORCE_EXIT_MS=15s 兜底硬退 timer（armForceExitTeardown / process.exit 兜底）——删；同签名 3 次门禁（MAX_CONSECUTIVE_FAILURES）为确定性失败计数非时间机制，判定保留。pi 挂死不 settle 的处置 = 父进程既有失败路径 + 用户重启应用。
 - Wave 2-C1 批次（独立包组，2026-10-05 落地）：
-  - zcode turn 双 timer（`zcode-subagent-cli`）：ZCODE_TURN_IDLE_TIMEOUT_MS=30min + ZCODE_TURN_MAX_TIMEOUT_MS=60min 任务级墙钟族（常量 / env 旋钮 / timer 装配 / TurnTimeoutError 分流 / 超时入口 abort 链 / engine_timeout 文案 / transient:timeout 重试形态 / 预算继承面）——全删（规则 19 红线：任务级正常路径禁止自带墙钟超时）；瞬时重试本体（conn-closed 形态）与 schema 重试保留但不再携带上界。控制面单请求秒级超时（request 15s / read 5s / close 1.5s / stop 3s）与回收层有界兜底（abort grace 3s / kill grace 5s / harvest grace 1s）判定保留。
+  - zcode turn 双 timer（`zcode-subagent-cli`）：ZCODE_TURN_IDLE_TIMEOUT_MS=30min + ZCODE_TURN_MAX_TIMEOUT_MS=60min 任务级墙钟族（常量 / env 旋钮 / timer 装配 / TurnTimeoutError 分流 / 超时入口 abort 链 / engine_timeout 文案 / transient:timeout 重试形态 / 预算继承面）——全删（规则 19 红线：任务级正常路径禁止自带墙钟超时）；瞬时重试本体（conn-closed 形态）与 schema 重试保留但不再携带上界。控制范围单请求秒级超时（request 15s / read 5s / close 1.5s / stop 3s）与回收层有界兜底（abort grace 3s / kill grace 5s / harvest grace 1s）判定保留。
   - update 下载停滞检测（`apps/electron/main/update/download-asset.ts`）：IDLE_TIMEOUT_MS=30s 无字节进展 abort watchdog——删（追加裁决推翻初scan「唯一保留超时」标注）；断点续传 temp 机制保留；curl 引擎 --speed-time 不在裁决点名范围，保留。
   - renderer 崩溃恢复提示条死链（`useCrashRecoveryNotice` + `CrashRecoveredBar`）：数据源 reloadWindowAfterCrash 随 recovery-policy 删除后无生产者、结构性永不可见——四文件整删 + 3 个死 i18n 键清理。
   - scheduler 模型切换对账（`extensions/universal/scheduler/src/runtime.ts`）：MODEL_SWITCH_RECONCILE_TICKS 2-tick 窗口计数 + phase/ticksOpen 字段 + forceSettleExpiredInFlight——合并为 settlePendingIfIdle 单点（记录存在 + isIdle() 事实查询即恢复）。

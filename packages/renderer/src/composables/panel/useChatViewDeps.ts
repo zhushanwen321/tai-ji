@@ -260,7 +260,7 @@ export function useChatViewDeps(
     /** 朗读（ai-voice-tts §5.1）：点击动作分流收敛在装配侧——idle = 朗读（清洗由
      *  useTtsPlayer 内部承担，文本源 = 消息正文 normalizeContent）；loading/playing =
      *  取消/停止（stop 与「点击停止」同源复用，§5.1 状态机非 idle 态点击语义）。
-     *  ui 包不 import renderer（反向依赖禁令），状态机数据面经 speakStateOf 派生视图。
+     *  ui 包不 import renderer（反向依赖禁令），状态机数据范围经 speakStateOf 派生视图。
      *  朗读总开关（§5.2 通用配置）只在 idle 分支拦截：关闭时 toast「语音服务未配置」
      *  不发 RPC；非 idle 态点击 = 停止，不受开关约束（关掉开关也应能停掉在播的声音）。 */
     onSpeak: (sid: string, msg: Message): void => {

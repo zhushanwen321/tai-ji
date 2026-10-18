@@ -81,9 +81,9 @@ import { resetTrustSlot, sanitizeAndRestore, stashTrusted } from './markdown-san
 /**
  * 代码块高亮覆盖的语言清单（按 wave review 要点：ts/vue/json/bash/md + 常见派生）。
  * fine-grained 后不再作为 createHighlighter 入参（grammar 改静态 import，见 getHighlighter），
- * 语义 = 高亮覆盖面 SSOT：highlightShikiSync 的 fallback 判定走 getLoadedLanguages()
+ * 语义 = 高亮覆盖范围 SSOT：highlightShikiSync 的 fallback 判定走 getLoadedLanguages()
  * （其返回值天然含 bash/shell 等 alias 键——shellscript grammar aliases 自动注册），
- * 本清单导出供单测驱动「13 语言逐个高亮」断言，防清单与注册面漂移。
+ * 本清单导出供单测驱动「13 语言逐个高亮」断言，防清单与注册清单漂移。
  */
 export const SHIKI_LANGS = ['typescript', 'javascript', 'vue', 'json', 'bash', 'shell', 'markdown', 'css', 'html', 'yaml', 'python', 'go', 'rust']
 

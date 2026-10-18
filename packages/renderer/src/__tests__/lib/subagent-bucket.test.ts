@@ -86,7 +86,7 @@ describe('isRunningProjection 占用谓词（白盒：G2「正在跑」严格口
   })
 })
 
-describe('导出形态（观察者：SSOT 模块公共面齐全）', () => {
+describe('导出形态（观察者：SSOT 模块公共范围齐全）', () => {
   it('谓词函数已导出且为函数（分桶面已随托盘两态化退役，[两视图裁决 2026-09-16]）', () => {
     expect(typeof isRunningProjection).toBe('function')
   })

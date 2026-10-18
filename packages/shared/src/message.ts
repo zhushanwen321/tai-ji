@@ -26,7 +26,7 @@ export type MessageRole = 'user' | 'assistant' | 'system'
  * session-manager extension 经 B-ledger 送达的 custom message，与 extension 端
  * MANAGED_SESSION_NOTIFY_CUSTOM_TYPE、core extractNotifyRecords 分支三处同值。
  */
-// 显式 Set<string>：保持既有类型面（成员常量是 as const 字面量类型，缺省推断会
+// 显式 Set<string>：保持既有类型范围（成员常量是 as const 字面量类型，缺省推断会
 // 收窄成联合字面量 Set，令消费方 .has(entry.customType: string) 编译期红）
 // 'managed-session-notify' 暂未入 extension-protocol 词表（常量在 session-manager
 // 扩展内部），单源化跟进项
@@ -41,7 +41,7 @@ export const COMPLETE_NOTIFY_CUSTOM_TYPES: Set<string> = new Set([
 // display 覆写 / renderer 定向气泡）。
 //
 // 用户经 @ subagent chip 发送的定向消息：subagent-workflow extension（/subagents message
-// 命令面）在 deliverMessage 成功后经 pi.sendMessage 落 custom_message entry——
+// 命令入口）在 deliverMessage 成功后经 pi.sendMessage 落 custom_message entry——
 // customType 即本常量，content=定向文本原文，details={subagentId, slug, direction:'user'}，
 // display:false（false 是 pi TUI 渲染语义；taiji 消费侧另行决定显隐，见
 // parseSubagentDirective 消费点）。留痕进主 agent 上下文但不 triggerTurn（留痕 ≠ 处理）。
@@ -160,7 +160,7 @@ const MSG_ID_IDENTITY_SEGMENT = `(${MSG_ID_UUID_SEGMENT}|${MSG_ID_ADOPTED_SEGMEN
 
 /**
  * 投递身份标记正则（`<!--taiji:msg:<uuid>-->` 全文匹配 SSOT，双形态）：
- * `u-<uuid>`（renderer 气泡 id 写入面，msg-id-mapper TAG_MATCH 同构）与裸 `<uuid>`
+ * `u-<uuid>`（renderer 气泡 id 写侧，msg-id-mapper TAG_MATCH 同构）与裸 `<uuid>`
  * （内核出站标记形态，刻意不被 msg-id-mapper 剥离——出站身份必须存活进 transcript
  * 供送达回执匹配）。两形态指向同一 clientUuid，回归期（renderer 拼 u- 形态 + 内核
  * 追加裸形态）首个命中即正确值。
@@ -214,7 +214,7 @@ export function markerLiteral(bareId: string): string {
  *
  * busy/compacting/bash 三退役值已删：「排队取代拒绝」后投递内核对暂不可收时态只排队
  * 不回拒，运行面只产上述三值。收窄裁决（P7 定案，非 breaking）：plugin-sdk
- * private:true 不发布 npm（词表非外部发布契约面）+ 运行面只看 blocked/rejected 布尔
+ * private:true 不发布 npm（词表非外部发布契约范围）+ 运行面只看 blocked/rejected 布尔
  * （reason 是诊断/文案面，插件不得依赖精确值做行为分支）。词表收窄的传播义务：
  * 仓内消费方（含插件与测试 mock）不得比较或注入退役值——出现即属收窄未同步清扫，
  * 须一并删除。
@@ -422,7 +422,7 @@ export function parseBgNotifyDetails(details: unknown): BgNotifyDetails | null {
 }
 
 // ── parseSingleRecord 内部 helper（按处理阶段拆分：必需字段解析 / 可选字段拷贝）──────
-// 模块私有，不进导出面。判定语义（含空串拒绝、属性写入顺序）与拆分前逐字节一致。
+// 模块私有，不进导出清单。判定语义（含空串拒绝、属性写入顺序）与拆分前逐字节一致。
 
 /** 字符串字段窄化：非 string → null（防御性解析，不信任运行时形状） */
 function asRecordString(v: unknown): string | null {
@@ -696,7 +696,7 @@ export interface Message {
   /**
    * 该消息产出的结束时刻（epoch ms）；`timestamp` 是开始时刻。
    *
-   * 只对 assistant message 有意义（唯一写入面）：
+   * 只对 assistant message 有意义（唯一写侧）：
    * - live：终态收尾（message.complete / abort / error / 断连）当下写入
    * - reload：JSONL / get_entries 的 entry 时间戳（pi appendMessage 落在 message_end，
    *   即该消息产出结束；entry 时间戳不参与 reducer——由运行时历史链路回填，见

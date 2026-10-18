@@ -27,7 +27,7 @@
  *
  * filter 仅用于读取分流 + 入队第二道闸（富交互硬过滤之后）：store 存全量 pending，
  * 多个 composable 实例（Panel 入 overlay 读取、审批条入 planReview 读取——D5）各按
- * filter 读同一份 store 分区。默认 formFilter（统一表单 form 键，Panel inline 渲染面）；
+ * filter 读同一份 store 分区。默认 formFilter（统一表单 form 键，Panel inline 渲染范围）；
  * dialog 请求（非标记类）已由 CompanionBand 消费 bus 直连（wave1 起），不再经 store。
  *
  * legacy 归一已上移 runtime（ui-presentation-protocol D7 收尾，MF-1-5）：旧 askUser /
@@ -75,7 +75,7 @@ export const formFilter: UIRequestFilter = (req) => req.form === true
  * `selfReview`（D9③）：agent 自审结论，与 canonical `PlanReviewRequest.selfReview` 同名同义，
  * 帧搬运走 pickPlanFields 白名单（热帧）/ 快照全量解包（冷补）双入店路径。
  * 本文件的 `isPlanReviewRequest` 是**帧标记检查**（入 store 的请求面），与 canonical
- * `@zhushanwen/extension-protocol` 的同名**载荷形状检查**（select options JSON 解析面）
+ * `@zhushanwen/extension-protocol` 的同名**载荷形状检查**（select options JSON 解析范围）
  * 输入域不同、互不替代。
  */
 export interface PlanReviewUIRequest extends ExtensionUIRequest {
@@ -147,7 +147,7 @@ type RequestsInvalidatedEvent = Extract<InternalEvent, { kind: 'requests-invalid
 let invalidatedUnsub: (() => void) | null = null
 
 /**
- * planReview 挂起镜像同步（D4 稳定窗输入面，store 禁 import store 的漏斗单写）：
+ * planReview 挂起镜像同步（D4 稳定窗输入范围，store 禁 import store 的漏斗单写）：
  * 本模块是 planReview 请求入店/出店的唯一漏斗（热帧 / 冷补 / respond / 失效 / 快照修剪），
  * 每个写入点 mutation 后按 registry 现值同步一次（幂等）——setPlanReviewPending 内含
  * 「新 pending 到达解除已应答标记」语义。
@@ -180,7 +180,7 @@ function ensureInvalidatedSubscription(): void {
   invalidatedUnsub = bus.on('requests-invalidated', (e: RequestsInvalidatedEvent) => {
     if (!e.sessionId) return
     const store = useExtensionUIStore()
-    // D4 抑制窗触发面（respond 外的另一路 planReview 摘除源——覆盖 turn abort / /plan abort
+    // D4 抑制窗触发范围（respond 外的另一路 planReview 摘除源——覆盖 turn abort / /plan abort
     // 全部解散源）：先按移除前快照判定本次失效是否摘除 planReview 挂起
     const beforeRemoval = store.getRequestsBySession(e.sessionId)
     const removedPlanReview = e.requestIds.some((rid) => {
@@ -206,12 +206,12 @@ function ensureInvalidatedSubscription(): void {
   })
 }
 
-/** dialog level 白名单检查（ExtensionUIRequest.level 契约面，三值）。 */
+/** dialog level 白名单检查（ExtensionUIRequest.level 契约范围，三值）。 */
 function isDialogLevel(value: unknown): value is 'info' | 'warn' | 'error' {
   return value === 'info' || value === 'warn' || value === 'error'
 }
 
-/** string[] 检查（options 契约面）：数组且逐项 string。 */
+/** string[] 检查（options 契约范围）：数组且逐项 string。 */
 function isStringArray(value: unknown): value is string[] {
   return Array.isArray(value) && value.every(item => typeof item === 'string')
 }
@@ -335,7 +335,7 @@ export function useExtensionUI(
     // FormOverlay / PlanReviewBar；普通 dialog 由 CompanionBand 消费 bus，
     // shell-adapters 侧对称排除，零重叠契约），filter 是第二道闸（实例只放各自
     // 标记——store 共享，谁放行谁入队，requestId dedup 兜底双实例幂等）。
-    // C2：事件 sid 缺失（无 sid 的 ui-request）跳过入队（warn）——渲染面依赖 session 分区。
+    // C2：事件 sid 缺失（无 sid 的 ui-request）跳过入队（warn）——渲染范围依赖 session 分区。
     unsubFns.push(
       subscribeBus((e) => {
         const eventSid = e.sessionId
@@ -394,7 +394,7 @@ export function useExtensionUI(
           store.addRequest(sid, { ...req, receivedAt: req.receivedAt ?? Date.now() })
         }
         // D4 审批窗口漏斗（冷补/修剪后收尾）：按 registry 现值同步镜像（快照剔除 planReview
-        // 置镜像 false 但不置已应答标记——标记触发面只有 respond 成功 / 失效帧两路，D4①）
+        // 置镜像 false 但不置已应答标记——标记触发范围只有 respond 成功 / 失效帧两路，D4①）
         syncPlanReviewWindow(sid)
       })
       .catch((err) => {

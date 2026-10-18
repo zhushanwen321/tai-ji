@@ -1,7 +1,7 @@
 /**
  * 磁盘 outbox（DiskDeliveryStore）单测——DeliveryStore 端口契约的磁盘实现行为锁。
  *
- * 覆盖面（unified-delivery 波 4 任务书验收）：
+ * 覆盖范围（unified-delivery 波 4 任务书验收）：
  * - persist 受理前写入记录 → loadUndelivered 返回；
  * - ack 终局行：delivered / cancelled 同形（判重只看 id）→ loadUndelivered 移除 +
  *   loadTerminalIds/hasTerminal 命中；
@@ -11,7 +11,7 @@
  * - attachSegments meta 补记：loadUndelivered 的 record.meta.segments 取回，后写覆盖先写；
  * - persist 抛错上抛（内核拒收语义：耐久承诺未写入）。
  *
- * fs 全程内存替身（DiskStoreFs 注入面）——本文件不触真实磁盘。
+ * fs 全程内存替身（DiskStoreFs 注入点）——本文件不触真实磁盘。
  */
 import { describe, it, expect } from 'vitest'
 import { createDiskDeliveryStore, type DiskStoreFs } from '../src/disk-store.js'

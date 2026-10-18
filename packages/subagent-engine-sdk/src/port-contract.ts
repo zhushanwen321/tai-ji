@@ -1,11 +1,11 @@
 // src/port-contract.ts
 //
-// 引擎进程内契约面七符号 + parseCtxModel 单源（S4 簇 1 收编：pi/zcode 两包
+// 引擎进程内契约范围七符号 + parseCtxModel 单源（S4 簇 1 收编：pi/zcode 两包
 // port-types.ts 的逐字等价本地镜像收编——两包原地改 re-export shim，18 个 import
 // 点零改写；server.ts 的 parseCtxModel 模块级纯函数同批收编，实现以 pi 版为基线
 // 逐字迁移）。
 //
-// 为什么现在能收（W5/W7 双轨合并后的收编，不翻「SDK 类型闭包只收跨进程协议面」
+// 为什么现在能收（W5/W7 双轨合并后的收编，不翻「SDK 类型闭包只收跨进程协议范围」
 // 的原始裁决）：两包过渡期镜像经 W10 conformance 套件验证字段逐字等价、双轨已
 // 稳定，收编即消除克隆而非改变边界语义。RunContext 含 AbortSignal/回调/EngineStream
 // 等非序列化成员，跨进程面经各包 server.ts 帧映射——故收主 barrel，不进 protocol/
@@ -16,7 +16,7 @@
 // 关系，不可同名共存；两包 shim 转名 re-export 保本包消费方 AgentCallOpts 不变）。
 //
 // onChildSpawned 统一采窄载荷形态（host/childSpawned 载荷形态；ChildProcess 句柄
-// 不跨协议面）——zcode 侧生产零调用（D6），形态统一无行为影响。
+// 不跨协议范围）——zcode 侧生产零调用（D6），形态统一无行为影响。
 //
 // 第三份镜像登记：core execution/engine/port.ts 的 RunContext 是宿主侧独立契约
 // （onChildSpawned 全 ChildProcess 句柄，业务含义 = 宿主进程内），不收编、不 import
@@ -66,7 +66,7 @@ export interface EngineStream {
  * journal 固定分组 key（值锚定，**只承载、不透传**）：journal 落盘路径
  * `<dataDir>/engines/<engineId>/<本值>/journal-<taskId>.jsonl` 的第二段，两引擎恒
  * 本值（pi / zcode 均无池化实现——pi = PI_CODING_AGENT_DIR 全局一份，zcode = 共享
- * 宿主 HOME）。[池抽象降级 2026-09-13] poolKey 协议面（RunContext/run.params.ctx/
+ * 宿主 HOME）。[池抽象降级 2026-09-13] poolKey 协议范围（RunContext/run.params.ctx/
  * host/poolResolved 通道/EngineHandleData）已整体退役，本常量不再跨进程透传，仅
  * 三类消费：① journal 落盘路径构造（core event-journal-wiring）；② 存量 record 兼容
  * （zcode read 旧相对 dbPath 的锚定分支 + 持久化 engineHandle.poolKey 字段——
@@ -112,7 +112,7 @@ export interface RunContext {
     mode?: string;
   };
   onHandleReady?: (partial: Pick<EngineHandleData, "sessionRef">) => void;
-  /** 一次性子进程 pid 上报（host/childSpawned 载荷形态；ChildProcess 句柄不跨协议面）。 */
+  /** 一次性子进程 pid 上报（host/childSpawned 载荷形态；ChildProcess 句柄不跨协议范围）。 */
   onChildSpawned?: (child: { pid: number | undefined; killed: boolean }) => void;
   /**
    * 子进程退出态上报（host/childStateChanged 载荷形态；SR-4 接线：宿主镜像据此取消

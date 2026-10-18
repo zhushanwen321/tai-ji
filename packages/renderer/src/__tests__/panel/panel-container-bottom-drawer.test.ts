@@ -46,7 +46,7 @@ import {
   type PlatformPort,
 } from '@taiji/core/platform/port'
 
-// ── 懒加载面板 mock（轻量占位，带 sessionId 透传断言面）──
+// ── 懒加载面板 mock（轻量占位，带 sessionId 透传断言范围）──
 vi.mock('@/components/panel/TerminalView.vue', () => ({
   default: {
     name: 'TerminalView',
@@ -98,7 +98,7 @@ vi.mock('@/components/panel/SubagentTab.vue', () => ({
 vi.mock('@/components/panel/WorkflowTab.vue', () => ({
   default: { name: 'WorkflowTab', template: '<div />' },
 }))
-// StatusBar mock 带 testid（布局顺序断言面：底抽屉在 status-bar 之前）
+// StatusBar mock 带 testid（布局顺序断言范围：底抽屉在 status-bar 之前）
 vi.mock('@taiji/ui/extension-host', () => ({
   StatusBar: { name: 'StatusBar', template: '<div data-testid="status-bar" />' },
 }))

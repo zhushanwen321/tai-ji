@@ -12,8 +12,8 @@
  *   L3 小库快照兜底（罕见）：immutable 也失败 → db 拷 mkdtemp（固定前缀
  *      taiji-zcode-snap-）+ 自建 0 字节 -wal → 开库后验证 sqlite_master 表集合含
  *      session/message/part（防「开库成功但缺表」半残态）→ 通过才读。
- *      规模门：db 文件 > 256MB 不拷 → 直接错误面。
- *   L4 错误面：SqliteUnreadableError（attempted 记录已尝试的等级、跳过原因并入
+ *      规模门：db 文件 > 256MB 不拷 → 直接错误范围。
+ *   L4 错误范围：SqliteUnreadableError（attempted 记录已尝试的等级、跳过原因并入
  *      message，供上层映射 zcode_db_unreadable——错误码词表属消费侧，本包不私建）。
  *
  *   拷贝集唯一定义：db only + 自建 0 字节 -wal；-wal/-shm 在场绝不自动拷贝
@@ -45,7 +45,7 @@ import { loadSqliteDriver, toSqliteFileUri, type SqliteDb } from './sqlite-drive
 /** 阶梯级别标识（attempted 记录与调用方结构化日志消费）。 */
 export type RecoveryLevel = 'L1-direct' | 'L2-immutable' | 'L3-snapshot'
 
-/** L3 快照目录固定前缀（崩溃残留人工识别 + 验收判据断言面）。 */
+/** L3 快照目录固定前缀（崩溃残留人工识别 + 验收判据断言范围）。 */
 export const SNAPSHOT_TMP_PREFIX = 'taiji-zcode-snap-'
 
 /** KiB 字节数——SNAPSHOT_MAX_DB_BYTES 的乘数基元。 */
@@ -54,7 +54,7 @@ const KIB = 1024
 /** L3 规模门上限：256MB（KiB 计）。 */
 const SNAPSHOT_MAX_DB_KIB = 256
 
-/** L3 规模门：db 文件超过此大小不拷（直接错误面 + 指引）。 */
+/** L3 规模门：db 文件超过此大小不拷（直接错误范围 + 指引）。 */
 export const SNAPSHOT_MAX_DB_BYTES = SNAPSHOT_MAX_DB_KIB * KIB * KIB
 
 /** L3 开库后的表集合验证（防「开库成功但缺表」半残态）。 */
@@ -160,7 +160,7 @@ export async function openWithRecovery(dbPath: string): Promise<OpenedWithRecove
   const walPresent = existsSync(walPathOf(dbPath))
   if (walPresent) {
     // -wal 在场：immutable 静默丢行（F25）、快照拷贝会引入「旧 wal + 新 db」的
-    // 静默回滚——两级全部门控跳过，响亮落错误面（「-wal 在场绝不自动拷贝」断言面）。
+    // 静默回滚——两级全部门控跳过，响亮落错误范围（「-wal 在场绝不自动拷贝」断言范围）。
     skipNotes.push('-wal present: L2 immutable and L3 snapshot gated off (silent data loss / rollback guard)')
   } else {
     // ---- L2 immutable 逃逸（常态恢复，零拷贝）----
@@ -202,7 +202,7 @@ export async function openWithRecovery(dbPath: string): Promise<OpenedWithRecove
     }
   }
 
-  // ---- L4 错误面 ----
+  // ---- L4 错误范围 ----
   const parts: string[] = [`zcode session db unreadable (recovery ladder exhausted): ${dbPath}`]
   if (skipNotes.length > 0) parts.push(skipNotes.join('; '))
   const detail = lastError instanceof Error ? lastError.message : String(lastError)

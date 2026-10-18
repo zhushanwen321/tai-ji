@@ -51,7 +51,7 @@ function makeWorkflow(overrides: Partial<WorkflowRunRecord>): WorkflowRunRecord 
 }
 
 /**
- * 测试种数据：applyRecords 已从 workflow store 导出面摘除（生产零直写场景），测试经
+ * 测试种数据：applyRecords 已从 workflow store 导出清单摘除（生产零直写场景），测试经
  * 分区 ref 直写——不可变替换整 Map（与 partition.apply 等价）触发 shallowRef 响应性。
  */
 function seedRecords(
@@ -179,7 +179,7 @@ describe('useBackgroundWork', () => {
 // undefined → hasBackgroundWork 判定断言同步转红（红锚联动）。
 describe('useBackgroundWork × runtime extractor 真实派生视图产物（R3-1④）', () => {
   /** 自描述 subagent-record entry 构造（pi JSONL 持久化形态 = runtime extractor 输入）。 */
-  /** 登记 §3.3：条目面 = v2 族（注册条定身份、终态条定终局）。 */
+  /** 登记 §3.3：条目范围 = v2 族（注册条定身份、终态条定终局）。 */
   function recordEntry(
     id: string,
     extra: { origin?: string; result?: string; status?: 'running' | 'idle' } = {},

@@ -107,7 +107,7 @@ function notifyDialogResponseNotDelivered(_sessionId?: string): void {
   showErrorBar(t('mobile.errorBar.responseNotDelivered'))
 }
 
-/** bootstrap effects 注入面（U6 接线：`effects: { ...errorBarEffects, ... }`），签名对齐 core InboundEffects */
+/** bootstrap effects 注入点（U6 接线：`effects: { ...errorBarEffects, ... }`），签名对齐 core InboundEffects */
 export const errorBarEffects = {
   onSessionError: handleSessionError,
   onGlobalError: handleGlobalError,
@@ -163,7 +163,7 @@ export function useMobilePermissionRequest(): PermissionRequestState {
 const formRequestsBySid = reactive(new Map<string, ExtensionUIRequest[]>())
 
 /**
- * form 帧的公共读取面：bus ui-request 的 request（core DialogRequest，marker 键由索引签名
+ * form 帧的公共读侧：bus ui-request 的 request（core DialogRequest，marker 键由索引签名
  * 承载）与 getPendingRequests 快照条目（runtime {...r,...r.payload} 解包的 ExtensionUIRequest）
  * 的结构交集——适配器两源共用，零断言转换。
  */

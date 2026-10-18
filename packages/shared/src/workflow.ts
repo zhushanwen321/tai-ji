@@ -111,7 +111,7 @@ export interface WorkflowAgentCall {
   modelOverride?: SubagentModelOverrideStatus
   /**
    * 最近生效值（subagent-model-switch §6.4 分叉态重载承接字段，run 详情侧逐成员携带、
-   * 聚合面不取单一值——同族替换可只发生在部分成员）。仅 pi 引擎成员派生（源 = 该成员
+   * 聚合范围不取单一值——同族替换可只发生在部分成员）。仅 pi 引擎成员派生（源 = 该成员
    * pi session 文件 model_change 尾条目）；与 SubagentRecord.recentEffectiveModel 同构，
    * 语义见该字段注释。
    */
@@ -231,7 +231,7 @@ export interface WorkflowRunRecord {
   /** state 路径：v2 = 注册条目 recordPath（详情面板「run 关联持久化文件」展示位）；v1 快照恒 ''（对空串隐藏） */
   stateFilePath: string
   /**
-   * [P3/D6] run 级 health（run 停滞观测面）。仅 lastProgressAt 单字段；
+   * [P3/D6] run 级 health（run 停滞观测范围）。仅 lastProgressAt 单字段；
    * stalledSince 由消费侧 lastProgressAt + 阈值推导。v2 事件 fold 派生视图不产出
    * 本字段（历史快照形态遗留），消费侧按 unknown 处理（不判定停滞）。
    */
@@ -345,9 +345,9 @@ export type WorkflowRunEventType = (typeof WORKFLOW_RUN_EVENT_TYPES_ALL)[number]
  *
  * ts = epoch ms（core 事件信封原样；注意与 WorkflowAgentCall 的 ISO 字符串不同源
  * ——事件流各帧 ts 是 Gantt 反推公式的输入，单位恒 epoch ms）。seq = 行级单调
- * 序号（可选 = W1 前旧格式行无 seq，core 读取面对缺失放行；消费方不得以 seq 存在
+ * 序号（可选 = W1 前旧格式行无 seq，core 读侧对缺失放行；消费方不得以 seq 存在
  * 性判数据新旧）。truncatedFields = 本行被截断的大字段名清单（缺省 = 无截断）；
- * 截断值仅供展示——任何恢复/重放/对账读面不得以截断载荷为数据源（设计 §3.1-4
+ * 截断值仅供展示——任何恢复/重放/对账读侧不得以截断载荷为数据源（设计 §3.1-4
  * D12 防误用边界：resume 的 $ARGS 恢复与 args 一致性校验在引擎侧读 record 原文
  * 全文字段，不经本通道）。
  */
@@ -498,7 +498,7 @@ export interface WorkflowRunModelOverrideEntry extends WorkflowRunEventEntryBase
   thinkingLevel?: string
 }
 
-/** `worker-log` 条目（worker 诊断日志帧——不参与生命周期状态机的诊断面）。 */
+/** `worker-log` 条目（worker 诊断日志帧——不参与生命周期状态机的诊断范围）。 */
 export interface WorkflowRunWorkerLogEntry extends WorkflowRunEventEntryBase {
   type: 'worker-log'
   /**

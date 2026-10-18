@@ -11,7 +11,7 @@
  * mock 策略：
  * - api/domains/session mock（getWorkflowRunEvents / getWorkflows）+ @/api 门面回指
  *   （同 workflow.test.ts 先例——store 与断言用同一 vi.fn()）
- * - vue-i18n 文件内 override（t(key, named) → `key(k=v)`，key 引用 + 参数双断言面）
+ * - vue-i18n 文件内 override（t(key, named) → `key(k=v)`，key 引用 + 参数双断言范围）
  * - MessageStream / useSubagentTabData mock（agent tab 对话流编排接线验证，渲染树 stub）
  *
  * 运行：cd packages/renderer && npx vitest run src/components/panel/workflow-viz/__tests__/workflow-live-panel.test.ts

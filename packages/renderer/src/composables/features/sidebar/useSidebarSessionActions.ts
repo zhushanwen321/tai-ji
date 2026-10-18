@@ -163,7 +163,7 @@ export function useSidebarSessionActions(options: UseSidebarSessionActionsOption
  * 失败（写不回草稿且不可再生）。
    * [HISTORICAL] 前身：本地 defer 队列 drain + clearDeferFlushRetryTimer（1s 重投 timer + 熔断
    * 计数）——内核接管重投（backoff + settled 边沿 + watchdog），renderer 不再持队列/定时器
-   * （设计 §3.1 删除面），编排收窄为「drain RPC → 文本回草稿」。
+   * （设计 §3.1 删除范围），编排收窄为「drain RPC → 文本回草稿」。
    */
   async function onForceQuitSession(id: string): Promise<void> {
     markForcedExit(id)

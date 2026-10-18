@@ -1,12 +1,12 @@
 /**
- * zcode 导入产物的 pi 读面不变量锚（PS-44 探针，2026-09-21 毒消息事故回归）。
+ * zcode 导入产物的 pi 读侧不变量锚（PS-44 探针，2026-09-21 毒消息事故回归）。
  * 来源注记：自 runtime zcode-import dev 演进版移植（用例语义零改动，git 可追溯）；
  * 产物构造适配本包 canonical 契约（convertZcodeTranscript + serializeSession + header 行
  * 包内拼装），pi dist 定位改为包内轻量实现——不跨包 import runtime（跨包会成环，
  * 手段自证先例见 converter.test 头注）。
  *
  * 事故链：zcode 取消轮导入后产物里出现「assistant、stopReason='stop'、无 usage」——
- * pi 0.84.4 读面对这种形态裸读崩溃：
+ * pi 0.84.4 读侧对这种形态裸读崩溃：
  *   - dist/core/agent-session.js:2678 getSessionStats → addUsageToTotals(
  *     assistantMsg.usage) 读 .input（toolResult 分支 :2668 有存在性检查，assistant 分支无）
  *   - dist/core/agent-session.js:2721 turn 前上下文扫描 → calculateContextTokens(

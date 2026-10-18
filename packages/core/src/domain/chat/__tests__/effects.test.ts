@@ -853,7 +853,7 @@ describe('dispatchMessageEvent message_end(user) 投递确认收敛（u3b：①�
     dispatchMessageEvent(ctx, SID, msg('message.message_end', { entry: userEndEntry('T') }))
 
     // 前身：includes 命中 → drainN(1) + appendUser + 剔快照——整体退役（计数路径 D7 + [B1]
-    // 计数路径删除；[u5a] 快照分区删除后不在 ctx 上），断言面收敛为 appendUser 零调用。
+    // 计数路径删除；[u5a] 快照分区删除后不在 ctx 上），断言范围收敛为 appendUser 零调用。
     expect(ctx.appendUser).not.toHaveBeenCalled()
   })
 })
@@ -922,7 +922,7 @@ describe('dispatchMessageEvent message.complete abort 清理（u3b：确认基�
 describe('dispatchMessageEvent 坏帧静默丢弃（A5 设计裁决锁定：异常帧不断流）', () => {
   // [设计裁决登记（registry.ts 三处检查，2026-09-17 错误处理审查 A5）] 正常流经
   // event-adapter 构造的帧不会产生 undefined/形态不符 entry；检查静默 return 是
-  // 有意取舍（单帧异常不中断主对话流、不加 warn）。本组用例锁定该行为面：坏帧
+  // 有意取舍（单帧异常不中断主对话流、不加 warn）。本组用例锁定该行为范围：坏帧
   // 喂入 → 不抛错、零副作用（reducer 喂入 / overlay / 确认路径均不触发）。
   beforeEach(() => setActivePinia(createPinia()))
 

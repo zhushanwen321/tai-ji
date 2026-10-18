@@ -1,11 +1,11 @@
 /**
- * panel-view —— panel 主区/输入面渲染视图模型 + derivePanelView 派生纯函数。
+ * panel-view —— panel 主区/输入范围渲染视图模型 + derivePanelView 派生纯函数。
  *
  * 背景（原始根因）：现行 Panel.vue 在组件 computed 里手工组合六个异构状态源
  * （session 绑定 / 消息有无 / flow 单例态 / dead / form overlay / trace），组合空间无检查
  * 穷举——每个 bug 来自一个未被考虑的格子（flow 卡 landing → turn 结束后 composer 消失）。
  * 本模块把该组合收敛为单一纯函数：决策可穷举（G3，7 输入 = 2^7 = 128 组合全表单测检查）、
- * 「flow 残留 × 输入面消失」在派生规则上不可表达（G2 结构免疫）。
+ * 「flow 残留 × 输入范围消失」在派生规则上不可表达（G2 结构免疫）。
  *
  * 设计要点：
  * - 输入全原始值、零 import（零跨域依赖），天然可穷举、可移植到任何消费方。
@@ -15,8 +15,8 @@
  *      trace 视图替换对话流位置，二者都依附具体会话）。
  *   ② conversation / trace：sessionId 非空即成立——conversation 有消息走 MessageStream、
  *      无消息走空对话态，消息有无只影响分支内部子视图（渲染层 switch 的事），不改变 kind；
- *      输入面按 hasFormOverlay 互斥二选一（表单 overlay 阻塞应答替换 composer），trace
- *      同样保留输入面 = session-trace 契约「composer 保留在底部，不打断对话能力」
+ *      输入范围按 hasFormOverlay 互斥二选一（表单 overlay 阻塞应答替换 composer），trace
+ *      同样保留输入范围 = session-trace 契约「composer 保留在底部，不打断对话能力」
  *      （D5/V4，一致性审查 R-U1 补入）。
  *      该分支吸收现行「已绑空 session 走空对话态 + band composer 供直输」与
  *      「turn 活跃 + 无消息 → 空白」边界组合（§5 检查点）。
@@ -27,10 +27,10 @@
  *      conversation（见②），empty-with-session 为类型层防御、现行派生不可达。
  *
  * - hasMessages 在输入契约中但不参与 kind 判定：它是 panel 事实全集的一员（G3 穷举的
- *   对象即该全集，设计 D1 输入面明确列入），语义上供消费方区分 conversation 的子视图。
+ *   对象即该全集，设计 D1 输入范围明确列入），语义上供消费方区分 conversation 的子视图。
  * - landing 的 !sessionId 条件与既有不变量「startFlow 进入 landing 时清空 activeId
  *   （isFlowActive ⟹ sessionId=null）」（flow.ts）构成双保险：即便不变量未来被破坏，
- *   派生也只会落到 empty/conversation（composer 保持可见），不会错误藏掉输入面。
+ *   派生也只会落到 empty/conversation（composer 保持可见），不会错误藏掉输入范围。
  */
 
 /** derivePanelView 输入（全原始值，无对象/函数/跨域类型） */
@@ -54,7 +54,7 @@ export interface PanelViewInput {
    * 有 pending 统一表单 overlay 请求待答（与 composer 互斥）。
    * 布尔语义（ui-presentation-protocol D5）：form 帧富交互表单（ask-user / scheduler /
    * plan 三源收敛，legacy 键经 renderer 归一层附加 form 后统一命中）替换 composer 的
-   * 输入面；Panel 拿到请求后按挂载源分流 FormOverlay 的 questions / draft props，
+   * 输入范围；Panel 拿到请求后按挂载源分流 FormOverlay 的 questions / draft props，
    * 组合表不扩维（union input 第三值兜底路线默认不做）。
    */
   hasFormOverlay: boolean
@@ -69,7 +69,7 @@ export interface PanelViewInput {
  */
 export type PanelView =
   | { kind: 'dead'; sessionId: string }
-  /** trace 保留输入面：session-trace 契约「composer 保留在底部，不打断对话能力」（D5） */
+  /** trace 保留输入范围：session-trace 契约「composer 保留在底部，不打断对话能力」（D5） */
   | { kind: 'trace'; sessionId: string; input: 'form' | 'composer' }
   // input='form' = 统一表单 overlay 替换 composer（ui-presentation-protocol D5 正名，
   // 具体挂载源由渲染层按请求帧键分流 FormOverlay）。
@@ -102,7 +102,7 @@ export function derivePanelView(input: PanelViewInput): PanelView {
     return { kind: 'dead', sessionId }
   }
   if (isTraceView) {
-    // trace 只替换对话流位置，输入面与 conversation 同规则保留（D5，见模块头注释②）
+    // trace 只替换对话流位置，输入范围与 conversation 同规则保留（D5，见模块头注释②）
     return { kind: 'trace', sessionId, input: hasFormOverlay ? 'form' : 'composer' }
   }
   return {

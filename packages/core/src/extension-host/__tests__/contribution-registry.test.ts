@@ -112,7 +112,7 @@ describe('ContributionRegistry.registerBuiltin（DM5）', () => {
     // scheduler-manager 声明形状：headerActions 1（activation 直开声明，
     // 无 commandId）+ commands 3（overlay 树内 action-bar 写操作 toggle/run/delete——缺
     // 声明则写操作在 CommandRegistry 无注册通路成死链，id 与插件 api.commands.register 逐字一致）。
-    // 声明类型面无 modals 键（无法再产出该类声明）。
+    // 声明类型范围无 modals 键（无法再产出该类声明）。
     expect(builtinContributions[2].contributes.headerActions).toHaveLength(1)
     expect(builtinContributions[2].contributes.commands).toHaveLength(3)
     expect(builtinContributions[2].contributes.commands?.map((c) => c.command)).toEqual([

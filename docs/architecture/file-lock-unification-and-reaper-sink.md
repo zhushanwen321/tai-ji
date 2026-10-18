@@ -12,9 +12,9 @@
 
 **SCQA**：
 - S（情境）：taiji 通过 pi binary spawn 子进程承载会话，20 个 `@zhushanwen/pi-*` extension 经 pi 的 jiti loader 加载；extension 与 runtime 两侧各自封装 proper-lockfile 做跨进程文件锁。
-- C（冲突）：2026-09-01 实证：冷启动后首次点击 session，pi 进程必崩（exit 1），用户看到「切换会话失败」；重试成功。根因是 jiti 2.7.0 对嵌套 CJS 依赖 exports 的 Proxy 值缓存违反 ES invariant——同模块图内第二次 proper-lockfile 异步锁必抛 TypeError 且进程级崩溃；触发面是 base-tool-enhance 的 reaper 在 pi factory 二次调用（extension 按 cwd 缓存命中时重复调用、handler 累积注册）下于同一 session_start 事件双跑。
+- C（冲突）：2026-09-01 实证：冷启动后首次点击 session，pi 进程必崩（exit 1），用户看到「切换会话失败」；重试成功。根因是 jiti 2.7.0 对嵌套 CJS 依赖 exports 的 Proxy 值缓存违反 ES invariant——同模块图内第二次 proper-lockfile 异步锁必抛 TypeError 且进程级崩溃；触发范围是 base-tool-enhance 的 reaper 在 pi factory 二次调用（extension 按 cwd 缓存命中时重复调用、handler 累积注册）下于同一 session_start 事件双跑。
 - Q（问题）：如何让这类「extension 运行环境 × 基础设施依赖」的组合缺陷不再发生，而不是只修这一次的症状？
-- A（答案）：三批次——①锁原语自实现统一（天然免疫 jiti，替代「继续用 proper-lockfile + 绕过」）；②reaper 收殓下沉 runtime（触发面从结构上消失，职责归位）；③pi 环境检查骨架 + 观测补齐（防线显式化，下次可观测）。
+- A（答案）：三批次——①锁原语自实现统一（天然免疫 jiti，替代「继续用 proper-lockfile + 绕过」）；②reaper 收殓下沉 runtime（触发范围从结构上消失，职责归位）；③pi 环境检查骨架 + 观测补齐（防线显式化，下次可观测）。
 
 **系统认知**（受众：会用 taiji 但不了解 extension 体系的开发者）：
 
@@ -71,7 +71,7 @@ pi exit(1) ──→ restore 失败 ──→ 前端 toast「切换会话失败�
 ```
 现状：每个 pi session_start ──全局锁──> 扫描全部 session registry ──> 处置孤儿 ──(可能崩掉 pi)
 
-目标态（双触发面）：
+目标态（双触发范围）：
   A. 生命周期收殓（精确时点）：runtime 在 onSessionDestroyed 汇聚点（覆盖主动删/进程退出/
      forceQuit/restore 清场）──> 读该 session registry ──> active × ownerPiPid 已死
      ──> kill 任务 pid（start-time 防复用）──> 写终态 orphaned（统一锁）。fire-and-forget，
@@ -110,18 +110,18 @@ pi exit(1) ──→ restore 失败 ──→ 前端 toast「切换会话失败�
 | C 各自自实现、维持两份（仅替换库） | 仍是参数对齐双轨——本次事故的制度性根源未除 | 中 | 同今天 |
 
 A 的关键约束（不是自由设计）：
-- **磁盘协议必须与 pi 内嵌 proper-lockfile 逐字段兼容**（auth.json 锁互斥）——即照抄其协议：`<目标>.lock` mkdir 目录 / rmdir 释放 / stat mtime>stale 判死夺取（夺取 = 先 rmdir 再 mkdir，接受竞态窗口，与 proper-lockfile 语义一致）/ utimes touch 仅在临界区超 stale/2 时才需要（现有契约临界区毫秒级，不做周期 touch，文档声明该边界）/ **graceful exit 兜底 rmdir**（对齐 proper-lockfile 的 signal-exit 清理，一行 `process.on('exit')` 配对，避免优雅退出后依赖 30s stale 兜底。边界声明（一致性审查 D1/D2 补）：①'exit' hook 覆盖正常退出/process.exit，信号默认终止（SIGINT/SIGTERM 无 handler）场景 proper-lockfile 的 signal-exit 额外覆盖而 'exit' 不触发，锁残留回退 30s stale 夺取（同 SIGKILL 路径）；②本方持锁被对端 stale 夺取后，本方 release/exit-hook 的 rmdir 会删除夺取者新建的锁目录（proper-lockfile 同场景由 updateLock 发现而拒绝 unlock，自实现无保活故无此防线）——触发前提为临界区违约超 stale 30s（契约要求毫秒级），风险接受；③proper-lockfile 的 mtime-precision probe 随保活一并移除——probe 不属磁盘协议四操作，其唯一消费方保活定时器已被本设计显式移除，顺带消除了事故根因触发面）。**三方互斥等价性**：同锁文件的参与方为 runtime 自实现、extension 自实现（jiti）、pi 内嵌 proper-lockfile——前两者同源 lock-core（同包双子入口），协议按构造一致，**唯一跨实现互斥对 = 自实现 × proper-lockfile**，S3 两方探针即穷尽；批 1 原子切换两侧（同时发版）排除混协议窗口。
+- **磁盘协议必须与 pi 内嵌 proper-lockfile 逐字段兼容**（auth.json 锁互斥）——即照抄其协议：`<目标>.lock` mkdir 目录 / rmdir 释放 / stat mtime>stale 判死夺取（夺取 = 先 rmdir 再 mkdir，接受竞态窗口，与 proper-lockfile 语义一致）/ utimes touch 仅在临界区超 stale/2 时才需要（现有契约临界区毫秒级，不做周期 touch，文档声明该边界）/ **graceful exit 兜底 rmdir**（对齐 proper-lockfile 的 signal-exit 清理，一行 `process.on('exit')` 配对，避免优雅退出后依赖 30s stale 兜底。边界声明（一致性审查 D1/D2 补）：①'exit' hook 覆盖正常退出/process.exit，信号默认终止（SIGINT/SIGTERM 无 handler）场景 proper-lockfile 的 signal-exit 额外覆盖而 'exit' 不触发，锁残留回退 30s stale 夺取（同 SIGKILL 路径）；②本方持锁被对端 stale 夺取后，本方 release/exit-hook 的 rmdir 会删除夺取者新建的锁目录（proper-lockfile 同场景由 updateLock 发现而拒绝 unlock，自实现无保活故无此防线）——触发前提为临界区违约超 stale 30s（契约要求毫秒级），风险接受；③proper-lockfile 的 mtime-precision probe 随保活一并移除——probe 不属磁盘协议四操作，其唯一消费方保活定时器已被本设计显式移除，顺带消除了事故根因触发范围）。**三方互斥等价性**：同锁文件的参与方为 runtime 自实现、extension 自实现（jiti）、pi 内嵌 proper-lockfile——前两者同源 lock-core（同包双子入口），协议按构造一致，**唯一跨实现互斥对 = 自实现 × proper-lockfile**，S3 两方探针即穷尽；批 1 原子切换两侧（同时发版）排除混协议窗口。
 - **路径规范化统一 `realpath: false`**：与 pi auth-storage 及 extension 包现状一致；runtime async 锁现状是默认 realpath:true（历史偏差），切换属纠正——行为变化仅影响 symlink 目标路径的锁路径解析，锁目标路径（auth.json 在 `getPiAgentDir()`、settings/ext-config 在 `getDataDir()` 派生目录）均动态推导、无 symlink 场景，影响面声明为零；symlink 目标不在锁契约内。探针基线锁定 proper-lockfile 4.1.2（与 pi 依赖一致，pi package.json 核实）。
 - **锁原语源文件零依赖**：`lock-core.ts` 不 import extension-logger（其依赖链携带 pi SDK peerDep，会经 runtime re-export 穿越 pi 边界）；诊断日志改为可选注入（`opts.log?: (msg) => void`，extension 入口注入 logger，runtime 不注入）。
 - **包导出双子入口**：`@zhushanwen/pi-file-lock`（extension 用，现 API 含 logger 依赖）与 `@zhushanwen/pi-file-lock/core`（零依赖锁原语，runtime 用，package.json `exports` 声明子路径）。
 不采用 B 的教训回放：若用它，§2.1 链路中 probe 缓存问题消失，但 P1 双轨仍在，下一个 jiti×第三方组合缺陷仍要 13 轮实验定位。
 
-**D2 收殓下沉 runtime（双触发面）**
+**D2 收殓下沉 runtime（双触发范围）**
 
 | 方案 | 长期架构合理性 | 短期成本 | 风险 |
 |---|---|---|---|
-| A（推荐）双触发面：① 生命周期收殓挂 runtime `onSessionDestroyed` 汇聚点（汇聚点本体 session-service.ts removeSessionEntry，覆盖主动删/进程退出/forceQuit/restore 清场，见 §5 U2-2 DE2 澄清），fire-and-forget 不阻塞销毁收敛链；② 启动期全量兜底扫描挂 startup-background-init 后台序列（与 reapOrphanPiProcesses 同序列，**硬序在其完成后执行**，时序论证见 §2.3）——旧 reaper 全局扫描的三类兜底对象（跨运行遗留孤儿、启动期被收殓 pi 的 detached 任务、从未激活即删的 session）由此等价承接。extension 删 session_start reaper（reconcile 对账保留，见 D3） | 收殓发生在「该 session 的 pi 确认死亡」的精确时点；跨运行遗留有启动期等价兜底；extension 不再做运行期全局扫描/全局锁；registry 契约入 `@zhushanwen/extension-protocol`（跨层契约 SSOT 有 session-manager 先例） | 中（~180 行：判定逻辑移植自 reaper.ts 三分支 + 契约定义 + 双挂点接线） | 扫描成本（启动期一次 readdir + 逐 registry 读取，毫秒级×session 数，fire-and-forget）；新旧共存见 §3.3 过渡窗口 |
-| B extension 侧保留 reaper 仅加幂等检查 | 职责仍错层，全局锁/全局扫描仍在；触发面靠 D1 兜底而非消失 | 低 | 治标 |
+| A（推荐）双触发范围：① 生命周期收殓挂 runtime `onSessionDestroyed` 汇聚点（汇聚点本体 session-service.ts removeSessionEntry，覆盖主动删/进程退出/forceQuit/restore 清场，见 §5 U2-2 DE2 澄清），fire-and-forget 不阻塞销毁收敛链；② 启动期全量兜底扫描挂 startup-background-init 后台序列（与 reapOrphanPiProcesses 同序列，**硬序在其完成后执行**，时序论证见 §2.3）——旧 reaper 全局扫描的三类兜底对象（跨运行遗留孤儿、启动期被收殓 pi 的 detached 任务、从未激活即删的 session）由此等价承接。extension 删 session_start reaper（reconcile 对账保留，见 D3） | 收殓发生在「该 session 的 pi 确认死亡」的精确时点；跨运行遗留有启动期等价兜底；extension 不再做运行期全局扫描/全局锁；registry 契约入 `@zhushanwen/extension-protocol`（跨层契约 SSOT 有 session-manager 先例） | 中（~180 行：判定逻辑移植自 reaper.ts 三分支 + 契约定义 + 双挂点接线） | 扫描成本（启动期一次 readdir + 逐 registry 读取，毫秒级×session 数，fire-and-forget）；新旧共存见 §3.3 过渡窗口 |
+| B extension 侧保留 reaper 仅加幂等检查 | 职责仍错层，全局锁/全局扫描仍在；触发范围靠 D1 兜底而非消失 | 低 | 治标 |
 | B' 仅生命周期收殓、无启动期兜底（Round 0 原案） | 跨运行遗留孤儿永久无人收殓——G2「有孤儿时收殓仍然发生」因果链断裂（旧 reaper 立项场景「SIGKILL 后 detached 任务被 init 收养」静默丢失） | 低 | 功能回归 |
 | C 收殓挂 Electron main | pi 生命周期所有者是 runtime，跨层绕路 | 高 | 引入新链路故障面 |
 
@@ -177,18 +177,18 @@ A 的关键约束（不是自由设计）：
 
 | 单元 | 内容 | 文件 | justification / 验收挂钩 |
 |---|---|---|---|
-| U1-1 锁自实现 | `@zhushanwen/pi-file-lock` 内部替换：新增**零依赖** `lock-core.ts`（mkdir-lock 核心 acquire/release/stale 夺取/graceful-exit rmdir 兜底 + 可选注入 `opts.log`）；async 退避重试（语义对齐现 proper-lockfile retries 参数：10 次 factor2 100ms~10s randomize）+ ELOCKED 错误码；**对外 API 签名与默认常量导出不变**；package.json `exports` 增 `./core` 子入口 | `extensions/shared/file-lock/src/lock-core.ts`（新）、`file-lock.ts`（重写内部，logger 改注入）、`package.json`（exports + 移除 proper-lockfile 依赖） | 移除 jiti 触发面（P1）；S1/S3 |
+| U1-1 锁自实现 | `@zhushanwen/pi-file-lock` 内部替换：新增**零依赖** `lock-core.ts`（mkdir-lock 核心 acquire/release/stale 夺取/graceful-exit rmdir 兜底 + 可选注入 `opts.log`）；async 退避重试（语义对齐现 proper-lockfile retries 参数：10 次 factor2 100ms~10s randomize）+ ELOCKED 错误码；**对外 API 签名与默认常量导出不变**；package.json `exports` 增 `./core` 子入口 | `extensions/shared/file-lock/src/lock-core.ts`（新）、`file-lock.ts`（重写内部，logger 改注入）、`package.json`（exports + 移除 proper-lockfile 依赖） | 移除 jiti 触发范围（P1）；S1/S3 |
 | U1-2 runtime 侧收敛 | runtime `utils/file-lock.ts` 删除本地实现，改从 `@zhushanwen/pi-file-lock/core` import（零依赖子入口，**不引入** extension-logger/pi SDK 链）；保留本地签名适配层避免调用方改动；tsup noExternal：`proper-lockfile` → `@zhushanwen/pi-file-lock`；runtime package.json 增 workspace 依赖（先例：@zhushanwen/subagent-core） | `packages/runtime/src/utils/file-lock.ts`、`packages/runtime/tsup.config.ts`、`packages/runtime/package.json` | 单一源码（P1）；S3 |
 | U1-3 测试迁移与升级 | 现有 file-lock 测试套平移；parity 测试升级为「与 pi 内嵌 proper-lockfile 互斥」集成探针（S3 脚本入测试目录）；新增 jiti 环境冒烟（受控复现命令脚本化，CI 外本地门禁） | `extensions/shared/file-lock/src/__tests__/`、`packages/runtime/test/file-lock-parity.test.ts` | S1/S3 可重复执行 |
 | U1-4 幂等止血 | base-tool-enhance `runSessionStartMaintenance` 内**仅对 reapOrphanedTasks** 加模块级 once flag（reconcile 保持每 session_start 执行，见 D3 粒度段）；**入口加一条无条件 debug 日志**（reason + reap 是否将被跳过，S6 的观测通道） | `extensions/universal/base-tool-enhance/src/index.ts` | resume 双发下 reaper 单跑；S6 内联版 |
 
-### 批次 2：收殓下沉 runtime（触发面消失 + 职责归位）
+### 批次 2：收殓下沉 runtime（触发范围消失 + 职责归位）
 
 | 单元 | 内容 | 文件 | justification / 验收挂钩 |
 |---|---|---|---|
 | U2-1 契约定义 | registry.json schema/目录布局/终态枚举/ownerPiPid 语义入 `@zhushanwen/extension-protocol`（新 section + zod/TS 类型） | `packages/extension-protocol/src/background-task.ts`（新）、index.ts 导出 | 跨层契约 SSOT（P2）；D2 决策 |
-| U2-2 runtime 收殓器（双触发面） | 判定逻辑移植（reaper.ts 三分支 + isPidAlive/getProcessStartTimeSec/pid 复用防御，Node 环境实现）；**触发面 A**：onSessionDestroyed 汇聚点挂接，fire-and-forget（void + catch warn，含 spawnSync ps 5s 超时不阻塞销毁链）；**触发面 B**：startup-background-init 新增启动期全量扫描（扫 `<agentDir>/base-tool-enhance/*/registry.json`，**硬序：链式 await reapOrphanPiProcesses 完成后执行**，时序论证见 §2.3），顺带 rmdir stale reaper.lock 残留；写 registry 用统一锁 sync 版 | `packages/runtime/src/services/session/background-task-reaper.ts`（新）、`session-service.ts` 挂接（onSessionDestroyed 汇聚点本体 removeSessionEntry——transport/server.ts 为注册方而非汇聚点，DE2 澄清）、`startup-background-init.ts` 挂接（与孤儿 pi 收殓定时器的链式编排）、装配 | 职责归位 + 兜底等价承接（P2）；S4a/S4b |
-| U2-3 extension 侧移除 | base-tool-enhance 删 reapOrphanedTasks 及其调用；**reconcilePendingEntries 保留每 session_start 执行**（session 级豁免类，见 D3）；删 reaper.ts；依赖改引 extension-protocol 类型 | `extensions/universal/base-tool-enhance/src/index.ts`、删 `reaper.ts`、package.json 增 `@zhushanwen/extension-protocol` 依赖 | 触发面消失（P2）；S4a/S4b/S6 |
+| U2-2 runtime 收殓器（双触发范围） | 判定逻辑移植（reaper.ts 三分支 + isPidAlive/getProcessStartTimeSec/pid 复用防御，Node 环境实现）；**触发范围 A**：onSessionDestroyed 汇聚点挂接，fire-and-forget（void + catch warn，含 spawnSync ps 5s 超时不阻塞销毁链）；**触发范围 B**：startup-background-init 新增启动期全量扫描（扫 `<agentDir>/base-tool-enhance/*/registry.json`，**硬序：链式 await reapOrphanPiProcesses 完成后执行**，时序论证见 §2.3），顺带 rmdir stale reaper.lock 残留；写 registry 用统一锁 sync 版 | `packages/runtime/src/services/session/background-task-reaper.ts`（新）、`session-service.ts` 挂接（onSessionDestroyed 汇聚点本体 removeSessionEntry——transport/server.ts 为注册方而非汇聚点，DE2 澄清）、`startup-background-init.ts` 挂接（与孤儿 pi 收殓定时器的链式编排）、装配 | 职责归位 + 兜底等价承接（P2）；S4a/S4b |
+| U2-3 extension 侧移除 | base-tool-enhance 删 reapOrphanedTasks 及其调用；**reconcilePendingEntries 保留每 session_start 执行**（session 级豁免类，见 D3）；删 reaper.ts；依赖改引 extension-protocol 类型 | `extensions/universal/base-tool-enhance/src/index.ts`、删 `reaper.ts`、package.json 增 `@zhushanwen/extension-protocol` 依赖 | 触发范围消失（P2）；S4a/S4b/S6 |
 | U2-4 文档同步 | base-tool-enhance 设计文档 §3.5 收殓章节标注下沉（历史沿革 + 新链路指引）；release note 段落：npm 旧装残留卸载指引（参照 unified-hooks 先例） | `docs/design/base-tool-enhance.md`（已随 2026-09 docs 清理删除，git 可追溯）、发布说明草稿 | 文档符号漂移守护（C-proc-10）；S5 |
 
 ### 批次 3：pi 环境检查 + 观测补齐

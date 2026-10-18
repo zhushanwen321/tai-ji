@@ -4,7 +4,7 @@
 >
 > 状态：**已实施交付**（两轮对抗式审查收敛 + 计划期契约细化 + 实现后一致性审查回写，轨迹 git 可追溯）。
 >
-> **演进谱系（2026-09-13 收编注记——下列四份后续设计文档已删除，决策与否决记录 git 可追溯）**：本文（抽包）之后 core 体系经四轮连续演进，全部落地——① `subagent-core-convergence.md`（2026-08-30，能力收敛 W1-W5：内置 agent 模板/注入渲染/创作管线收敛进 core + 发现链三缺口）；② `subagent-core-sink-design.md（已删，git 可追溯）`（2026-08-31，下沉收尾：barrel 扩面 + 组装层函数 + codec 单源 + git 内核参数化 + 动作层下沉，终态两宿主零复刻）；③ `subagent-dual-track-convergence.md`（2026-09-02，双轨收敛：10 对双轨/双实现按依赖分 3 组收敛，「每个概念一个实现点」）；④ `subagent-post-convergence-architecture.md`（2026-09-03，三组深化：组合根 seam、core 契约面 semver 化、三个小收敛；chat 轮次机器抽出被源码证据撤销留档）。现行 core 结构权威 = [../extensions/subagents/architecture.md](../extensions/subagents/architecture.md) 与包内 README。
+> **演进谱系（2026-09-13 收编注记——下列四份后续设计文档已删除，决策与否决记录 git 可追溯）**：本文（抽包）之后 core 体系经四轮连续演进，全部落地——① `subagent-core-convergence.md`（2026-08-30，能力收敛 W1-W5：内置 agent 模板/注入渲染/创作管线收敛进 core + 发现链三缺口）；② `subagent-core-sink-design.md（已删，git 可追溯）`（2026-08-31，下沉收尾：barrel 扩面 + 组装层函数 + codec 单源 + git 内核参数化 + 动作层下沉，终态两宿主零复刻）；③ `subagent-dual-track-convergence.md`（2026-09-02，双轨收敛：10 对双轨/双实现按依赖分 3 组收敛，「每个概念一个实现点」）；④ `subagent-post-convergence-architecture.md`（2026-09-03，三组深化：组合根 seam、core 契约范围 semver 化、三个小收敛；chat 轮次机器抽出被源码证据撤销留档）。现行 core 结构权威 = [../extensions/subagents/architecture.md](../extensions/subagents/architecture.md) 与包内 README。
 
 ## 1. 背景目标
 
@@ -27,7 +27,7 @@
 **术语**（后文反复使用，均绑定上面的系统）：
 
 - **核心（core）**：与宿主无关的共享实现——引擎抽象、spawn 执行链、workflow 编排运行时。
-- **壳（shell）**：宿主特有的接入层——工具面/命令/视图（pi）、CLI/daemon/通知适配（zcode）。
+- **壳（shell）**：宿主特有的接入层——工具范围/命令/视图（pi）、CLI/daemon/通知适配（zcode）。
 - **依赖闭包**：core 的 import 传递闭包中所有非 node 内置依赖。core 可独立发布的判据是闭包内不出现 pi SDK 与 pi 宿主协作件。
 - **双形态包**：同时以 TS 源（供本仓 workspace 内消费）和编译 dist（供 npm 外部消费）发布的包。本仓 `@zhushanwen/extension-protocol`（0.7.0）、`@zhushanwen/session-delivery`（0.3.0）已是此形态。
 - **vendor / 分叉点**：zcode 仓为复用 pi 侧逻辑而逐字复制源码的同步方式；「分叉点」是 vendor 文件头注中登记的、两份实现刻意不再一致的位置。
@@ -38,7 +38,7 @@
 2. **pi 宿主行为零回归**：taiji 用户的 subagent / workflow / GUI 可见性行为与抽包前逐字段一致。
 3. **zcode 宿主升级到统一实现的全量能力**：获得引擎抽象（路由语义、probe、fallback 检查）、conformance/golden 质量资产、schema native/emulated 降级链——这些是 zsw 现在没有的。
 4. **两宿主特有能力不丢失**：zcode 的 daemon + task-notification 唤醒、pi 的 GUI record 三级读取，迁移后照常工作。
-5. **公共 API 成为显式契约**：core 的导出面按 semver 管理，宿主升级路径可预期。
+5. **公共 API 成为显式契约**：core 的导出范围按 semver 管理，宿主升级路径可预期。
 
 ### in / out of scope
 
@@ -122,7 +122,7 @@
 
 **终态一：pi / taiji 用户零感知。** `subagent`/`workflow` 工具入参、返回、GUI 展示与抽包前完全一致——同一份 agent 清单、同一个 record 结构、同一个引擎选择行为。
 
-**终态二：zcode 用户命令面不变、内核统一。** `zsw start/run/workflow` 等命令照常；review-fix-loop 与 pi 侧是**同一份实现**（改 core 一处，下次 `zsw` 升级即生效）。zsw 获得 pi 侧的质量资产：agent .md `engine:` 字段路由、probe 拦截（引擎不可用即结构化失败，不换目标）、schema 降级链。边界声明：「命令面不变」指内置命令与参数面；资源发现的清单/优先级语义与自定义 `script:<name>` 脚本契约属 2b/2c 接管的显式处置面（D6-⑦⑧），不是静默沿用。
+**终态二：zcode 用户命令范围不变、内核统一。** `zsw start/run/workflow` 等命令照常；review-fix-loop 与 pi 侧是**同一份实现**（改 core 一处，下次 `zsw` 升级即生效）。zsw 获得 pi 侧的质量资产：agent .md `engine:` 字段路由、probe 拦截（引擎不可用即结构化失败，不换目标）、schema 降级链。边界声明：「命令范围不变」指内置命令与参数面；资源发现的清单/优先级语义与自定义 `script:<name>` 脚本契约属 2b/2c 接管的显式处置面（D6-⑦⑧），不是静默沿用。
 
 **终态三：开发者单权威源。** 例：`wrapUntrusted`（上游 LLM 产出的防注入包裹）行为修正落在 core 的一个函数——本仓 extension 因 workspace 引用立即生效（跑 extensions 三连验证）；zcode 仓 `pnpm bump @zhushanwen/subagent-core` 后同样生效。vendor 文件删除，5 个分叉点登记表关闭。HostServices 保持 4 方法环境服务语义，膨胀受 D2 演进纪律条款机器可查地约束。
 
@@ -149,8 +149,8 @@
 
 **D1：core 切面 = execution（引擎无关件）+ orchestration + shared + `workflows/` 脚本资产；准入规则用依赖闭包判据（选定）**
 
-- **采用**：core 范围为 `src/execution/`（剔除 §2.5 表中留壳件）+ `src/orchestration/`（剔除 pi 会话版 RunStore 实现）+ `src/shared/`，**外加包根 `workflows/` 脚本资产整体迁入**（内置四件 chain/parallel/map-reduce/scatter-gather、`review-fix-loop.js` 主脚本、`review-fix-loop-utils.cjs` 纯函数层、`_shared/`）——workflow 脚本是「跑在 worker 契约上的数据/脚本资产」，是 §2.2 失败模式 A 的 vendor 对象本体，不进 core 则 2a/2b 的替换无从落地、终态二「同一份实现」对 workflow 主逻辑断裂。发布形态：作为 core 的子路径资产发布（`@zhushanwen/subagent-core/workflows/*`，保持 .cjs 脚本形态不编译）。脚本内依赖定位保持**现状机制**（✅实测；P1 后该脚本位于 `packages/subagent-core/workflows/review-fix-loop.js`，fail-fast 加固后 scriptPath 检查在 :96-98、utils require 在 :148）：worker 脚本以 `workerData.scriptPath` 锚定自身目录、拼接绝对路径加载同目录依赖（`require(dirname(workerData.scriptPath) + "/review-fix-loop-utils.cjs")`）——该机制不经过 node_modules 解析面，因此 pi 侧内置 staged 布局（`apps/electron/resources/extensions/` 下无 node_modules）整目录复制后成立，zcode 侧 npm 安装后亦成立（scriptPath 指向包内脚本的真实路径）。**附带加固（P0 落地）**：现状在 scriptPath 缺席时静默回退 `process.cwd()`（用户项目目录）拼接加载同名文件——core 化时改为 fail-fast（scriptPath 缺失即报 `core_module_load_failed` 并指出 worker 宿主的注入点），消除「从用户目录误加载/被植入同名文件」的代码加载面；scriptPath 注入由此成为 worker 契约的显式前提条件（2b zcode 侧接入时核对）。准入判据一条：**core 内模块（含 workflows 脚本）的依赖闭包不得出现 pi SDK 与 pi 宿主协作件**——违者要么 port 化，要么划归宿主壳。逐文件清单是下一层产物（Phase 1 实施），本层只定判据。
-- **不采用**：①workflows/ 留在 pi extension 包、仅 src 层进 core——vendor 对象（utils.cjs）不在 core，2a「删 vendor 改 npm 依赖」无处落地，目标 1 对 review-fix-loop 主逻辑不成立；②脚本内改 require 包名（`@zhushanwen/subagent-core/...`）——pi builtin staged 布局无 node_modules 解析面，属本项目打包事故最高发形态（关键规则 12），现状的 scriptPath 目录锚定是 staged 下的既验证模式；③逐文件硬清单在本文档定死——Phase 0 port 化会移动文件归属，硬清单立刻过时，判据 + 机器检查（D9）比静态清单稳；④workflows 脚本 TS 化、构建产出同目录 .cjs——178KB（utils 84KB + 主脚本 94KB）无类型 JS 确是 core 内防护最弱的资产（无 typecheck/lint 覆盖，vitest 只守护纯函数层），但 worker 契约（$ARGS/workerData/stdout 协议）本身无类型，TS 化收益集中在内部函数签名，且引入构建步骤会把脚本资产「src=dist 同字节直发」的零分歧形态（D4）变成新的 src/dist 分歧面；记为 P3 独立评估项（reopen 条件：worker 契约类型化先行），不绑架本设计。
+- **采用**：core 范围为 `src/execution/`（剔除 §2.5 表中留壳件）+ `src/orchestration/`（剔除 pi 会话版 RunStore 实现）+ `src/shared/`，**外加包根 `workflows/` 脚本资产整体迁入**（内置四件 chain/parallel/map-reduce/scatter-gather、`review-fix-loop.js` 主脚本、`review-fix-loop-utils.cjs` 纯函数层、`_shared/`）——workflow 脚本是「跑在 worker 契约上的数据/脚本资产」，是 §2.2 失败模式 A 的 vendor 对象本体，不进 core 则 2a/2b 的替换无从落地、终态二「同一份实现」对 workflow 主逻辑断裂。发布形态：作为 core 的子路径资产发布（`@zhushanwen/subagent-core/workflows/*`，保持 .cjs 脚本形态不编译）。脚本内依赖定位保持**现状机制**（✅实测；P1 后该脚本位于 `packages/subagent-core/workflows/review-fix-loop.js`，fail-fast 加固后 scriptPath 检查在 :96-98、utils require 在 :148）：worker 脚本以 `workerData.scriptPath` 锚定自身目录、拼接绝对路径加载同目录依赖（`require(dirname(workerData.scriptPath) + "/review-fix-loop-utils.cjs")`）——该机制不经过 node_modules 解析范围，因此 pi 侧内置 staged 布局（`apps/electron/resources/extensions/` 下无 node_modules）整目录复制后成立，zcode 侧 npm 安装后亦成立（scriptPath 指向包内脚本的真实路径）。**附带加固（P0 落地）**：现状在 scriptPath 缺席时静默回退 `process.cwd()`（用户项目目录）拼接加载同名文件——core 化时改为 fail-fast（scriptPath 缺失即报 `core_module_load_failed` 并指出 worker 宿主的注入点），消除「从用户目录误加载/被植入同名文件」的代码加载面；scriptPath 注入由此成为 worker 契约的显式前提条件（2b zcode 侧接入时核对）。准入判据一条：**core 内模块（含 workflows 脚本）的依赖闭包不得出现 pi SDK 与 pi 宿主协作件**——违者要么 port 化，要么划归宿主壳。逐文件清单是下一层产物（Phase 1 实施），本层只定判据。
+- **不采用**：①workflows/ 留在 pi extension 包、仅 src 层进 core——vendor 对象（utils.cjs）不在 core，2a「删 vendor 改 npm 依赖」无处落地，目标 1 对 review-fix-loop 主逻辑不成立；②脚本内改 require 包名（`@zhushanwen/subagent-core/...`）——pi builtin staged 布局无 node_modules 解析范围，属本项目打包事故最高发形态（关键规则 12），现状的 scriptPath 目录锚定是 staged 下的既验证模式；③逐文件硬清单在本文档定死——Phase 0 port 化会移动文件归属，硬清单立刻过时，判据 + 机器检查（D9）比静态清单稳；④workflows 脚本 TS 化、构建产出同目录 .cjs——178KB（utils 84KB + 主脚本 94KB）无类型 JS 确是 core 内防护最弱的资产（无 typecheck/lint 覆盖，vitest 只守护纯函数层），但 worker 契约（$ARGS/workerData/stdout 协议）本身无类型，TS 化收益集中在内部函数签名，且引入构建步骤会把脚本资产「src=dist 同字节直发」的零分歧形态（D4）变成新的 src/dist 分歧面；记为 P3 独立评估项（reopen 条件：worker 契约类型化先行），不绑架本设计。
 - **证据**：`extensions/universal/subagent-workflow/workflows/` 实测清单（P1 后整体迁至 `packages/subagent-core/workflows/`；utils.cjs 84KB / review-fix-loop.js 94KB / 内置四件 / _shared）；zcode 仓 vendor 头注（§2.2 失败模式 A）；pi 内置扩展 staged 机制（关键规则 17）。
 - **效果**：目标 1/3 对 workflow 层完整成立；切面清晰使 Phase 2 的 zcode 侧替换有明确对照物；终态二「同一份 review-fix-loop」有物理载体。
 
@@ -201,7 +201,7 @@ interface NotifyDomainPorts {
   /** pending 计数：pi 会话 entries 中活跃 register/unregister 差集判定。 */
   countActiveFromEntries?(entries: unknown[]): number;
   /** 投递内核工厂：签名即 core 自持结构化类型（DeliveryPort / DeliveryConfig /
-   *  DeliveryHandle——从 @zhushanwen/session-delivery 的类型面手工转写，闭包红线：
+   *  DeliveryHandle——从 @zhushanwen/session-delivery 的类型范围手工转写，闭包红线：
    *  core 不得 import 该包）；结构超集/子集兼容由宿主注入点 typecheck 守护。 */
   createDelivery?(port: DeliveryPort, options?: DeliveryConfig): DeliveryHandle;
 }
@@ -230,7 +230,7 @@ interface NotifyDomainPorts {
 
 **D5：版本与公共 API 契约（选定）**
 
-- **采用**：core 的公共 API 面 = 包 index 导出（EnginePort 及中立类型 / routeEngine / HostServices 与 configureCore / orchestration 入口 runWorkflow 等）+ 深路径子入口（`@zhushanwen/subagent-core/engines/<id>/reader` 供双端复用链；`@zhushanwen/subagent-core/workflows/*` 脚本资产子入口，见 D1）。**子入口谱系注记（2026-09）**：`./engines/zcode/reader`、`./engines/zcode/constants` 已随引擎协议化 H3 删除（引擎符号退出 core 公共面，zcode 外移至 `packages/zcode-subagent-cli`）；`./engine/engine-discovery-scan` 由 W4 冷启动回退链新增——现行子入口清单以 `packages/subagent-core/package.json` exports 为准。semver 纪律：breaking 走 major；zsw 壳用 `^` 区间 + 启动期版本 guard。发布通道复用现管线：正式走 changeset/main 稳定发布，zcode 侧联调用 dev-npm 预发布通道（`scripts/npm-prerelease.sh`）。
+- **采用**：core 的公共 API 面 = 包 index 导出（EnginePort 及中立类型 / routeEngine / HostServices 与 configureCore / orchestration 入口 runWorkflow 等）+ 深路径子入口（`@zhushanwen/subagent-core/engines/<id>/reader` 供双端复用链；`@zhushanwen/subagent-core/workflows/*` 脚本资产子入口，见 D1）。**子入口谱系注记（2026-09）**：`./engines/zcode/reader`、`./engines/zcode/constants` 已随引擎协议化 H3 删除（引擎符号退出 core 公共部分，zcode 外移至 `packages/zcode-subagent-cli`）；`./engine/engine-discovery-scan` 由 W4 冷启动回退链新增——现行子入口清单以 `packages/subagent-core/package.json` exports 为准。semver 纪律：breaking 走 major；zsw 壳用 `^` 区间 + 启动期版本 guard。发布通道复用现管线：正式走 changeset/main 稳定发布，zcode 侧联调用 dev-npm 预发布通道（`scripts/npm-prerelease.sh`）。
 - **版本跟随治理（防漂移换形态复活，终态四的承载机制）**：单权威源消灭代码分叉后，漂移会以「zsw 长期不 bump core」的版本差形态静默复活——设两道防线：①zsw 仓配置自动化依赖跟随（renovate/dependabot 或 cron 工作流：core 发新 minor/major 即自动开 bump PR，CI 跑 zsw 测试族 + golden 回放）；②滞后告警与跟进时限——core 版本落后最新 minor 超过约定窗口（2 周）时 bump PR 升级为显式待办；跟随失败（测试红）时钉住旧版并在 zsw 仓开 issue 跟踪，禁止静默无限滞后。
 - **不采用**：core 跟随 extension 的 8.x 主版本号——两个包语义不同步，版本号耦合制造假对应关系。
 - **证据**：本仓两条 npm 发布管线（main 稳定 + dev-npm 预发布）为既有机制。
@@ -238,7 +238,7 @@ interface NotifyDomainPorts {
 
 > **[2026-09 post-convergence 补注]** 深路径豁免终止（出处：subagent-post-convergence-architecture.md（已删，git 可追溯） §3.2 B-2 / D5-补注）——壳侧生产代码深路径归零，豁免条款不再适用：曾保留的 `./*` → src 开发态通配已删除，生产消费收敛到主入口 barrel（符号逐名可审，数量随批次演进、以 `src/index.ts` 实测为准——2026-09-13 实测 298：去注释后逐名去重）与上列受控子入口（现行 3 条语义子入口 + `./workflows/*`；成文时 4 条，`./engines/zcode/*` 两条已随引擎协议化 H3 删除、`./engine/engine-discovery-scan` 由 W4 新增，谱系见 D5 注记）；删通配后壳再写深路径 = tsc 编译错误（不再是风格问题）。D5「无宿主触点证据不放宽」判据由 post-convergence 收敛首次执行——补注而非推翻。
 
-> **[barrel 收窄已执行（2026-09-13 用户裁决）]** 同日死代码/未接线全面复查（四包 tsc 全绿 + barrel ~298 符号逐名 grep 消费方）曾登记如下 backlog：仓内零消费 36 / 仅测试消费 25。**用户裁决 2026-09-13 不等跨仓验证直接收窄**，当日按脚本化分类执行完毕（判定口径：词边界全仓检索，范围 = packages/*/src + extensions/**/src + apps + scripts + .githooks，排除 barrel 自身 / 定义文件 / dist / node_modules / md，注释行不计命中，`__tests__` / `*.test.ts` / `*.bench.ts` / vitest 配置归测试类；前次手工登记 36/25 与脚本实测 38/31 的差异属判定口径不同，以本次脚本实测与 commit 为准）：**A 组全死 1 个**（`createSubagentService`——连定义一并删除，`new SubagentService(init)` 直构逐字等价）、**B 组仅定义文件内部使用 37 个**（只摘 barrel 行，定义与模块内使用保留——atomic-write 类型族 / worktree-git-ops 函数与类型族 / workflow-ref 规范族 / `RecoverCrashedRunsHooks` 等）、**C 组仅测试消费 31 个**（摘 barrel 行，定义保留；经 barrel import 的仅 4 文件改深路径：`script-generate.test.ts`（3 类型 + `DEFAULT_WORKFLOW_SAVED_DIR` barrel 探针）、`record-progress.test.ts`（`projectLiveProgress`）、cold-scan / concurrent-scan 两 bench（`INDEX_FILENAME`）；其余测试本就相对深路径零改动。无「等价改写删定义」裁决——C 组不存在公共 API 等价替换面）。barrel 298 → 229 符号。**恢复通道**：zsw 仓 bump 后编译报错的符号按 git 历史（本次 commit）原样加回 barrel。弱活保留项（探针/检查脚本真实 import 消费，不算死代码）：`maxTurnsToWatchdogMs`、`loadWorkflowScriptByPath`、`normalizeWorkflowRef`、`cleanupStaleTmpFiles`、`listStaleTmpFiles`、`parseAtomicTmpPath`（scripts/probe-third-host-integration.mjs 探针）、`CORE_PACKAGE_VERSION` / `DEFAULT_DATA_ROOT` / `routeEngine`（版本一致性检查 check-subagent-core-closure + dist 冒烟 smoke-core-dist）。前次登记的 `promptTooLargeError` / `disposeEngines` 实况均不在 barrel 导出面（仅 barrel 注释提及），无需处置；`ColdLookupDeps.register` 不在 barrel 符号面。
+> **[barrel 收窄已执行（2026-09-13 用户裁决）]** 同日死代码/未接线全面复查（四包 tsc 全绿 + barrel ~298 符号逐名 grep 消费方）曾登记如下 backlog：仓内零消费 36 / 仅测试消费 25。**用户裁决 2026-09-13 不等跨仓验证直接收窄**，当日按脚本化分类执行完毕（判定口径：词边界全仓检索，范围 = packages/*/src + extensions/**/src + apps + scripts + .githooks，排除 barrel 自身 / 定义文件 / dist / node_modules / md，注释行不计命中，`__tests__` / `*.test.ts` / `*.bench.ts` / vitest 配置归测试类；前次手工登记 36/25 与脚本实测 38/31 的差异属判定口径不同，以本次脚本实测与 commit 为准）：**A 组全死 1 个**（`createSubagentService`——连定义一并删除，`new SubagentService(init)` 直构逐字等价）、**B 组仅定义文件内部使用 37 个**（只摘 barrel 行，定义与模块内使用保留——atomic-write 类型族 / worktree-git-ops 函数与类型族 / workflow-ref 规范族 / `RecoverCrashedRunsHooks` 等）、**C 组仅测试消费 31 个**（摘 barrel 行，定义保留；经 barrel import 的仅 4 文件改深路径：`script-generate.test.ts`（3 类型 + `DEFAULT_WORKFLOW_SAVED_DIR` barrel 探针）、`record-progress.test.ts`（`projectLiveProgress`）、cold-scan / concurrent-scan 两 bench（`INDEX_FILENAME`）；其余测试本就相对深路径零改动。无「等价改写删定义」裁决——C 组不存在公共 API 等价替换面）。barrel 298 → 229 符号。**恢复通道**：zsw 仓 bump 后编译报错的符号按 git 历史（本次 commit）原样加回 barrel。弱活保留项（探针/检查脚本真实 import 消费，不算死代码）：`maxTurnsToWatchdogMs`、`loadWorkflowScriptByPath`、`normalizeWorkflowRef`、`cleanupStaleTmpFiles`、`listStaleTmpFiles`、`parseAtomicTmpPath`（scripts/probe-third-host-integration.mjs 探针）、`CORE_PACKAGE_VERSION` / `DEFAULT_DATA_ROOT` / `routeEngine`（版本一致性检查 check-subagent-core-closure + dist 冒烟 smoke-core-dist）。前次登记的 `promptTooLargeError` / `disposeEngines` 实况均不在 barrel 导出范围（仅 barrel 注释提及），无需处置；`ColdLookupDeps.register` 不在 barrel 符号面。
 
 **D6：zcode 侧渐进替换次序 = utils → workflow 运行时 → spawn 驱动（选定）**
 
@@ -249,7 +249,7 @@ interface NotifyDomainPorts {
 
 **D7：zcode 侧存量数据切换点（选定方向，细节 ⛔ 实施期门）**
 
-- **采用**：`~/.zcode/zsw/` 旧 record 只读保留（读取兼容期），新 run 落 core 布局（dataRoot 下 engines/ 与 workflow-state/）；以 2c 合入为 break 点，在 zsw README 标注。⛔ 实施期门：2c 前调研存量 record 的读取路径与数据量，确认只读兼容的覆盖面；降级路径：若存量读取面过大，提供一次性迁移脚本（旧 record → core 布局映射）。
+- **采用**：`~/.zcode/zsw/` 旧 record 只读保留（读取兼容期），新 run 落 core 布局（dataRoot 下 engines/ 与 workflow-state/）；以 2c 合入为 break 点，在 zsw README 标注。⛔ 实施期门：2c 前调研存量 record 的读取路径与数据量，确认只读兼容的覆盖范围；降级路径：若存量读侧过大，提供一次性迁移脚本（旧 record → core 布局映射）。
 - **不采用**：静默双写——两份数据目录并行是新的漂移源。
 - **证据**：zsw record-store 的存储路径（§2.4 图）。
 - **效果**：目标 4（zsw 用户不丢历史）；失败模式 A 类问题不再新增。
@@ -336,7 +336,7 @@ interface NotifyDomainPorts {
 
 1. `ui-request-handler-factory.ts`（execution/ 内唯一 pi ExtensionContext 类型触点）的切面归属：泛化为中立 UI 上下文类型进 core，还是随 GUI 交互件划归 pi 壳——Phase 1 实施时按其被依赖方向定（若仅 interface 层消费则划壳）。
 2. D4 的 CJS require 链：node 20 真机 smoke（r2 核实：当前 entry 闭包无 protocol 运行时引用，探针不压 bundle 边界），失败走「全量 bundle 闭包」降级。
-3. D7 的 zsw 存量 record 兼容覆盖面（2c 前调研）。
+3. D7 的 zsw 存量 record 兼容覆盖范围（2c 前调研）。
 4. core dist 的 d.ts 生成与 exports conditions 映射（先例 extension-protocol 的构建配置可直接参照，但 CJS 是首例）。
 5. worker thread 链路对 HostServices 的零依赖断言（D2 推理依据实测：`orchestration/launcher.ts` 的 agent-call 经 postMessage 回主线程执行，AgentRunner 在主线程）——用现有 worker-exit/workflow-e2e 测试族加一条断言探针。**（已落地 + r2 收紧注记）**断言经 D9-① 闭包检查产品化承载（pre-commit 路径触发），且实现收紧为 worker 入口子图到达任何 core `src/` 源码即拦（staged 资产自包含判据——builtin staged 布局无 src/），非仅 host-services/notify-ports 两文件，同时封死模块改名后断言 fail-open 的缝隙。降级路径：若断言翻车（worker 内确需宿主服务），退守 D2 不采用方案②——HostServices 经 worker 构造参数以「可序列化的宿主调用描述」传递（worker 内只发消息，宿主侧执行），core 接口不变。
 6. resource-discovery 的 symlink 跟随策略三方核对（2c 前，不预设结论）：pi 侧 7 源实现对 symlink 的实际行为（实测）、zsw `agent-md-resolver.js` 刻意跟随 symlink（头注自证：zcode 引擎发现跳过 symlink 是其自实现原因）、zcode 引擎发现入口的软链策略——core 统一行为在「跟随 symlink」（pi 侧可能行为变化，需发版说明标注）与「不跟随」（zcode 侧 symlink 安装的 agent 消失，终态二破防）之间按实测影响面定夺，倾向跟随（zsw 头注证明该安装惯例真实存在）。

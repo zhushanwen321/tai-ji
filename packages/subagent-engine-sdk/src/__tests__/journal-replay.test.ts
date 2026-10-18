@@ -4,7 +4,7 @@
 // usage 累加、索引外/孤儿 tool_end、同名多实例 LIFO 配对、message_end error、
 // compaction no-op、派生 strip、sessionIdFromHandle 运行时 guard）。
 // 全部走导出 API；直接往 record.turns[] 构造 running toolCall 是 ReplayRecordView
-// 的公开契约面（源码注释明示「重建 record 的历史 running toolCall（索引未覆盖）」
+// 的公开契约范围（源码注释明示「重建 record 的历史 running toolCall（索引未覆盖）」
 // 为支持场景，journal 重建产物无 tool_start 索引）。
 
 import { describe, expect, it } from "vitest";

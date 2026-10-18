@@ -212,7 +212,7 @@ export function hasVisibleHeaderActions(source: HeaderActionsSource, sessionId: 
 }
 
 /**
- * E13 判定的最小读取面（会话命令分区；结构契约而非 pinia store 全型——纯函数直测
+ * E13 判定的最小读侧（会话命令分区；结构契约而非 pinia store 全型——纯函数直测
  * 只需 getCommands，test-coverage SG-2 补防线时提出）。
  */
 export interface CommandPartitionReader {

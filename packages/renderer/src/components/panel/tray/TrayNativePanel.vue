@@ -236,11 +236,11 @@
  * ── 契约（供 u-tray-shell 消费）──
  * props.kind: 'bash' | 'subagent' | 'workflow' —— 面板类型（built-in 三件之一）
  * props.sessionId: string —— 焦点 session id（行点击归宿 / 行内操作 RPC 的会话键；外壳由
- *   Composer 绑定的 sessionId 透传，与外壳 provide 的数据面同一 session——外壳透传自身
+ *   Composer 绑定的 sessionId 透传，与外壳 provide 的数据范围同一 session——外壳透传自身
  *   props，两侧天然一致）
  * props.pinned?: boolean（默认 false）—— pin 态。行内操作按钮**仅 pin 态渲染**
  *   （D8：hover 态刻意不渲染行内按钮防误触；pin 由外壳管理，面板只消费该位）
- * inject TRAY_COUNTS_KEY（必需）：数据面单例，由外壳创建并 provide（见 useTrayCountsContext）。
+ * inject TRAY_COUNTS_KEY（必需）：数据范围单例，由外壳创建并 provide（见 useTrayCountsContext）。
  *   **面板不自建数据实例**——面板随 Popover 开合反复挂载，自建即每次打开重发首次拉取 RPC；token
  *   缺失时 useTrayCountsContext 直接抛错（不静默降级）。
  * emits: 无 —— 面板自持动作：行内操作直连既有 store / RPC（结果经 store 广播回流，外壳计数
@@ -266,7 +266,7 @@
  * 迁移语义 D14「复制不抽走」：cancel 防误报（原侧栏列表动作 composable）、两段式确认、行渲染
  * 形态均以复制件迁入；旧侧栏组件已随退役单元删除，本文件为唯一实现。
  *
- * 脚本分区：props 契约 / 数据面接线（inject 外壳单例，禁自建）/ 分桶视图状态（ADR-0049
+ * 脚本分区：props 契约 / 数据范围接线（inject 外壳单例，禁自建）/ 分桶视图状态（ADR-0049
  * per-session 分区）/ 行渲染格式化 / 行内操作（RPC + 两段式确认）/ 行点击归宿矩阵。
  */
 import { computed, onBeforeUnmount, reactive, ref, watch } from 'vue'
@@ -311,7 +311,7 @@ const { error: toastError, info: toastInfo } = useToast()
 const subagentStore = useSubagentStore()
 
 /**
- * 数据面（单例注入）：实例由外壳 ComposerTray 创建并 provide（TRAY_COUNTS_KEY），本面板
+ * 数据范围（单例注入）：实例由外壳 ComposerTray 创建并 provide（TRAY_COUNTS_KEY），本面板
  * **不自建实例**——面板随 Popover 开合反复挂载/卸载，自建即每次打开重发首次拉取 RPC（loadSubagents
  * + loadWorkflows）。计数/行集/错误态/retry 全部消费外壳实例，本面板零拉取。
  */

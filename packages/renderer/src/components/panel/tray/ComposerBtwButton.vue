@@ -5,7 +5,7 @@
 
   契约：
   - props.sessionId: string —— 焦点主会话 id（Composer 只在 showBtw && sessionId 时挂载本组件，
-    badge 数据面 = 该主会话名下线，D7 焦点绑定②③④）
+    badge 数据范围 = 该主会话名下线，D7 焦点绑定②③④）
   - 点击 = openDrawerTab('btw')（D7 唯一入口；drawer 开合与 tab 状态归 core drawer 域）
   - badge 两态（§1.4 裁决，挂点 = composer 按钮聚合）：双零 → 不渲染（常态归零）；
     unread >0 → Σ 计数角标（右上角，accent 实底；清除 = 线内容进视口）；pending >0 →

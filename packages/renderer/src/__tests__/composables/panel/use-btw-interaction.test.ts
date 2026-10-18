@@ -6,7 +6,7 @@
  * 六个纯函数（toScheduleDraft / toBarQuestionKind / toBarQuestionBase / toBarOptions /
  * toBarQuestion / questionsOf）经模块 __testing 后门直测——非法项剔除策略与 runtime 侧
  * isFormQuestion 逐项过滤同策略（对齐声明见源文件 :111 注释），此前双侧均无 renderer
- * 侧回归防线。行为面（formQuestions 请求 → BtwPanel 降档 DOM）归
+ * 侧回归防线。行为范围（formQuestions 请求 → BtwPanel 降档 DOM）归
  * src/__tests__/panel/btw-panel.test.ts 的内联确认条用例。
  *
  * 运行：cd packages/renderer && npx vitest run src/__tests__/composables/panel/use-btw-interaction.test.ts

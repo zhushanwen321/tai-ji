@@ -4,14 +4,14 @@
  * 三视角（TEST-STRATEGY §3）：
  * - 使用者（黑盒 DOM）：Host 把 threads 计数 / Σ unread 映射成文本节点，每条用例断言可见文本
  *   （拉取落地 / 迟到响应不串台 / 进视口清除 / 剪枝后归零）
- * - 观察者（形态）：挂载即主动拉取（不依赖广播）；线列表与 badge 数据面按主会话分区落位
+ * - 观察者（形态）：挂载即主动拉取（不依赖广播）；线列表与 badge 数据范围按主会话分区落位
  * - 构建者（白盒）：updateFor(capturedSid) 迟到响应写旧分区（规则 8 隔离）+ 虚拟 key 登记
  *   三函数（get/clear/reconcile——M4-a 消费方先写后读）+ 出册线观察停止
  *
  * mock 策略（TEST-STRATEGY §5）：vi.mock('@/api') 局部替换 btw 域（spread actual 保门面
  * 其余域，btw-panel 同款）+ chat.getHistory 桩（见 mock 处注释——回放链不产生墙钟竞争）；
  * 真实 chat store（setMessages 真实分区增长驱动未读 watch）+
- * 真实 core drawer 域（视口判定与抽屉活动触发面）。i18n 走全局 setup（本文件无文案断言）。
+ * 真实 core drawer 域（视口判定与抽屉活动触发范围）。i18n 走全局 setup（本文件无文案断言）。
  *
  * 运行：cd packages/renderer && npx vitest run src/__tests__/composables/panel/use-btw-tab-data.test.ts
  */
@@ -61,7 +61,7 @@ const btwMock = vi.hoisted(() => ({
 // stores/btw-replay 的真实回放链，mock transport 的 TIMING.ack 是 40ms setTimeout
 //（settle 只冲刷微任务，等不到它），迟到的空历史 hydrate 会清掉用例刚 seed 的线分区、
 // 未读 watch 的 prev 基线随之归零——重负载下定时器落点漂移，未读计数随机翻错。
-// 本文件断言面是 badge 计数不是回放，桩成同步空历史后回放链不再产生墙钟竞争。
+// 本文件断言范围是 badge 计数不是回放，桩成同步空历史后回放链不再产生墙钟竞争。
 const chatGetHistoryMock = vi.hoisted(() =>
   vi.fn(async () => ({ messages: [], truncated: false, loadedTurns: 0, totalTurnsEstimate: 0 })),
 )
@@ -73,7 +73,7 @@ vi.mock('@/api', async (importActual) => {
 const SID_A = 's-btw-data-a'
 const SID_B = 's-btw-data-b'
 
-/** 最小 Host：把 composable 暴露面映射成可见文本节点（使用者视角断言面） */
+/** 最小 Host：把 composable 暴露面映射成可见文本节点（使用者视角断言范围） */
 const Host = defineComponent({
   props: { sid: { type: String, default: null } },
   setup(props) {
@@ -389,7 +389,7 @@ describe('虚拟 key 清理登记（M3-b 登记结构；deleteSession 消费方�
     await settle(w)
     await waitForUnread(w, '1')
 
-    // 关线后重新拉取（抽屉活动触发面）：权威列表只剩 t1
+    // 关线后重新拉取（抽屉活动触发范围）：权威列表只剩 t1
     btwMock.list.mockResolvedValue([{ vid: 'btw:t1' }])
     openDrawerTab('btw')
     await settle(w)
@@ -418,7 +418,7 @@ describe('线终结分区处置（M4-a 消费方：reconcile 出册同拍 dispos
     chat.setMessages('btw:line-other', [msg('keep')]) // 他主名下线
     chat.setMessages(SID_A, [msg('main')]) // 主分区
 
-    // 关线（btw.remove 同拍）→ 抽屉活动触发面重新拉取 → 权威列表空 → 出册同拍处置（单入口幂等）
+    // 关线（btw.remove 同拍）→ 抽屉活动触发范围重新拉取 → 权威列表空 → 出册同拍处置（单入口幂等）
     btwMock.list.mockResolvedValue([])
     openDrawerTab('btw')
     await settle(w)

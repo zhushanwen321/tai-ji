@@ -8,7 +8,7 @@
  *   规划中档）/ ③ reviewing / ③✓ approved（D5 阶段不倒退，F5）
  * - state 读侧解析（resolvePlanLifecycleState：归一 View 的 state 直读 + 值域检查，缺失/
  *   垃圾落 idle——批次 3 条目 1 删除混装兜底后的声明例外锚；resolveResumeHint：直读）
- * - D4 分支公式单源（derivePlanReviewBarMode）：presence 语义 / 抑制标记 / degraded 组合输入面
+ * - D4 分支公式单源（derivePlanReviewBarMode）：presence 语义 / 抑制标记 / degraded 组合输入范围
  * - 审批窗口机件：已应答标记两路事件驱动解除（预期后态帧值判定 / 新 pending）、迟到旧帧
  *   不解标记、degraded 组合即时评估（[ADR-0122] 时间窗已删）、双源主动拉取对账（显式拉取：
  *   失败 → 标记悬挂 + loadError（R7）；成功 → 真值解除 + sink 再入店）

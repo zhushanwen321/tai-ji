@@ -10,7 +10,7 @@
  *   clear 精确释放 / clearAll 整表替换。
  *
  * 两 store（subagent / workflow）的 facet 领域语义与工厂接线由各自 store 测试锁定；
- * 本文件锁工厂自身的分区范式（与 createPartitionedRecords 同风格的行为面）。
+ * 本文件锁工厂自身的分区范式（与 createPartitionedRecords 同风格的行为范围）。
  *
  * 运行：cd packages/renderer && npx vitest run src/__tests__/lib/partitioned-session-records.test.ts
  */

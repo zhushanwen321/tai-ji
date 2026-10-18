@@ -23,7 +23,7 @@ import { configureLoggerSink, getLogger } from "./logger.ts";
 export interface CliProtocolServerSink {
   /** 入站协议帧处理（readline 已拆行 + JSON.parse 后的帧）。 */
   handleFrame(frame: unknown): void;
-  /** 数据面反向请求（host/log 等；应答分类由各包 server 实现承载）。 */
+  /** 数据范围反向请求（host/log 等；应答分类由各包 server 实现承载）。 */
   reverseRequest(method: string, params: unknown): Promise<unknown>;
 }
 
@@ -49,7 +49,7 @@ export function runEngineCliEntry(opts: RunEngineCliEntryOptions): void {
   // stdout 是协议独占通道：应用日志一律走 host/log 反向请求 + stderr 兜底，禁写 stdout。
   configureLoggerSink({
     log(level, component, message, data) {
-      // stderr 兜底先落（反向通道未就绪/失败时日志不丢）；host/log 为数据面反向请求
+      // stderr 兜底先落（反向通道未就绪/失败时日志不丢）；host/log 为数据范围反向请求
       // （10s 应答分类），失败吞掉——日志面不能拖垮主链路。
       // debug 不写 stderr：对齐 logger.ts CONSOLE_SINK 的「debug no-op」语义——
       // 引擎 stderr 落宿主 [rpc:stderr] 全量 ERROR 级链路，debug 刷屏会淹没真异常

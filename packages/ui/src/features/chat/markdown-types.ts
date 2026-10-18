@@ -3,7 +3,7 @@
  *
  * 渲染纯逻辑（markdown.ts / markdown-incremental.ts，依赖 markdown-it/shiki/katex，
  * 经 `@taiji/ui` 渲染 subpath 导出）产出/消费本文件类型，经 ChatViewDeps.renderMarkdown
- * 注入 ui 的 MarkdownRenderer。桌面壳与移动壳共用同一协议面。
+ * 注入 ui 的 MarkdownRenderer。桌面壳与移动壳共用同一协议范围。
  *
  * - text 段：渲染后的 HTML 字符串（含代码块/链接等，走 v-html）
  * - mermaid 段：原始 mermaid 源码（走 MermaidRenderer 组件渲染）

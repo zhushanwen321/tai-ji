@@ -331,8 +331,8 @@ export interface SchemaArmingInput {
  * 「武装」概念不适用，直接豁免。分流判据复用协议 EngineCapabilities 词表，不新造机制。
  *
  * 断言③（孙进程启动无扩展加载错误）经 P-C1 实施期核实（pi 实装版 0.84.4 dist）：
- * RPC 命令全集（rpc-types.d.ts 逐一枚举，32 条）无工具清单/扩展加载错误查询面
- * （get_commands = slash 命令、get_state = RpcSessionState，均不暴露工具/扩展面）；
+ * RPC 命令全集（rpc-types.d.ts 逐一枚举，32 条）无工具清单/扩展加载错误查询范围
+ * （get_commands = slash 命令、get_state = RpcSessionState，均不暴露工具/扩展范围）；
  * 且扩展加载失败时 pi 在非交互模式（含 rpc）启动诊断 gate 直接 `process.exit(1)`
  * （main.js：runtime diagnostics 含 "Failed to load extension" → exit 1），到不了
  * RPC 服务面。③不可作为主动查询断言，按设计预留路径退化为 ①+②；扩展加载破坏的
@@ -718,7 +718,7 @@ export async function runSpawnOnce(
 
 // [subagent-model-switch §7.3] setModel 子进程通路（定位活跃子进程 → 命令写入 →
 // 读应答 → get_state 回读）落 control-responses.ts——spawn-runner 职责 = spawn 执行
-// 与 run 生命周期，模型热切控制面与其正交（该编排移入即越本文件 max-lines 上限）；
+// 与 run 生命周期，模型热切控制范围与其正交（该编排移入即越本文件 max-lines 上限）；
 // 接线原语复用不变：stdin-writer sendSetModelCommand / active-children 记账表 /
 // pump 应答分发（spawn-run-pump.ts response 分支）。
 

@@ -49,7 +49,7 @@
           @mode-update="onModeUpdate"
         />
 
-        <!-- 模式提示词两节（替换 / 追加）。数据面 preset.prompt，保存走 preset.update；
+        <!-- 模式提示词两节（替换 / 追加）。数据范围 preset.prompt，保存走 preset.update；
              上限是两段合计，故两节共用下方一行合计计数（禁止分节各自计数）。
              形态 = demo PresetSection：预设盒内 border-t hairline 分节，flab 标题 + 右侧开关同行。 -->
         <div

@@ -336,7 +336,7 @@ describe('useComposerSend.onSend', () => {
   // ── [R2-A5] 失败信号契约：send/compact 返回 false = RPC 失败（useChat 已 toast），恢复草稿 ──
 
   it('⑪b [R2-A5] send 契约失败（false）→ restoreSegments 恢复草稿 + 不补 toast + isSending 复位', async () => {
-    // useChat.send 内部已 toast（错误面行为不变），调用方补 toast 会双提示——对齐 steer 先例。
+    // useChat.send 内部已 toast（错误范围行为不变），调用方补 toast 会双提示——对齐 steer 先例。
     const { deps, spies } = setup({ variant: 'panel', draft: 'hello' })
     spies.send.mockResolvedValueOnce(false)
     await useComposerSend(deps).onSend()

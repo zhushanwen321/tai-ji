@@ -94,7 +94,7 @@ describe('驱动公共子集（open/prepare/all/get/close）', () => {
       const driver = await loadSqliteDriver()
       const db = driver.open(fixture.dbPath, { readOnly: true })
       try {
-        // 生产语句类型面无 run（readonly 连接不写）；此处断言驱动真的拒绝写，
+        // 生产语句类型范围无 run（readonly 连接不写）；此处断言驱动真的拒绝写，
         // 用局部形状断言补出 run（bun 可能 prepare 即抛，node 是 run 时抛——
         // 都包进同一断言）
         const insert = db.prepare(
@@ -109,7 +109,7 @@ describe('驱动公共子集（open/prepare/all/get/close）', () => {
     }
   })
 
-  it('immutable URI 开库（L2 行为面）：works 平台全行可读零附属 / URI 不可用平台直开数据等价承接', async () => {
+  it('immutable URI 开库（L2 行为范围）：works 平台全行可读零附属 / URI 不可用平台直开数据等价承接', async () => {
     const fx = makeFixtureDir('zss-driver-imm-')
     try {
       const fixture = await buildFixtureDb(fx.root, defaultTranscriptSeeds(), { quiesce: true })

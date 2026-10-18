@@ -94,7 +94,7 @@ function subscribeKey(sessionId: string, fromSeq?: number): string {
 /**
  * subscribe RPC 签名类型（D3 连带①）：直引 core transport/api/domains/session 的
  * subscribe（不再从 TransportPorts 派生——后者已降级为 route-inbound 的内部测试 seam）。
- * 模块内私有（零外部消费，不放大 @taiji/core 公共面）。
+ * 模块内私有（零外部消费，不放大 @taiji/core 公共范围）。
  */
 type SubscribeRpc = typeof sessionDomain.subscribe
 
@@ -105,7 +105,7 @@ type SubscribeRpc = typeof sessionDomain.subscribe
  * 注入，实现 = routeInbound 的共享路由核心（seq gap 去重 + ROUTE_TABLE effects +
  * crossSession 分发），sid 固定为 subscribe 目标 session。回放与 live 共享同一语义，
  * 不再裸调 events.dispatchSession（那会绕过去重与全部 effect 兜底）。
- * 模块内私有（零外部消费；注入面 = setSubscriptionPorts 函数）。
+ * 模块内私有（零外部消费；注入点 = setSubscriptionPorts 函数）。
  */
 type SubscriptionPorts = {
   subscribe: SubscribeRpc

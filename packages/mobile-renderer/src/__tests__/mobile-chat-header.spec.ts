@@ -1,6 +1,6 @@
 // MobileChatHeader 组件测试（u13/A5：聊天头部模型/思考档只读标签——V11 聊天头面）。
 //
-// 行为面：会话在 sessionList 中时头部可见（modelId + thinkingLevel，与列表行同源同形）；
+// 行为范围：会话在 sessionList 中时头部可见（modelId + thinkingLevel，与列表行同源同形）；
 // thinkingLevel 缺失只显示 modelId；无匹配 summary 头部整体不渲染（无会话数据不占位）。
 //
 // app-runtime 模块级 mock：组件只消费 sessionList 一个导出，mock 工厂内建可写 ref，

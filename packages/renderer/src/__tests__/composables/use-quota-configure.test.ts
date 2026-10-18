@@ -40,7 +40,7 @@ import { provideSettingsTransport } from '@taiji/core'
 import { makeSettingsTransportStub } from '../helpers/settings-transport-stub'
 
 // [C3] quota RPC 经 SettingsTransport seam 桩注入（getCachedQuota/configureQuota/refreshQuota
-// 逐名映射到本 mock 集，替换原 domains/quota 模块 mock；断言面不变，仍打 quotaApi.*）。
+// 逐名映射到本 mock 集，替换原 domains/quota 模块 mock；断言范围不变，仍打 quotaApi.*）。
 // fetchQuota 不在 seam 方法面（useQuotaConfigure 结构上不可达），保留仅供「零查询调用」负向断言。
 const quotaApi = vi.hoisted(() => ({
   getCached: vi.fn<(providerId: string) => Promise<QuotaSnapshot>>(),

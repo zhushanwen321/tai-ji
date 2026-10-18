@@ -10,7 +10,7 @@ import { defineConfig } from 'tsup'
 // type-stripping 时代的锚点），对齐 pi-subagent-cli tsup target。
 //
 // 无 noExternal：本包零生产依赖（dependencies 缺席，纯 Node 内建），全部产物自包含
-// 于「无外部裸名 require」意义下；宿主 node_modules 解析面无对象。
+// 于「无外部裸名 require」意义下；宿主 node_modules 解析范围无对象。
 export default defineConfig({
   entry: {
     index: 'src/index.ts',

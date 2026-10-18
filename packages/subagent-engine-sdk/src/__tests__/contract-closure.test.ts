@@ -71,7 +71,7 @@ type _NoTaskCtxDualWrite = AssertMutuallyAssignable<
   never
 >;
 
-// C2-① 存量能力位逐一必填的类型面：任一**存量键**被误标可选即
+// C2-① 存量能力位逐一必填的类型范围：任一**存量键**被误标可选即
 // REQUIRED_CAPABILITY_KEYS 派生形态不再可赋值给 Required 形态 → 红。
 // [subagent-model-switch] 锁域从「整个 EngineCapabilities」收窄到 REQUIRED_CAPABILITY_KEYS
 // 11 键——首个可选新轴 setModel 进接口后，全接口 Required 形态必然含可选键（C2-②
@@ -117,7 +117,7 @@ describe("类型闭包样板", () => {
     expect(probe).toBe(true);
   });
 
-  it("run.params.task 与 AgentCallOpts 同一类型面（协议 task 载荷 = 引擎面子集）", () => {
+  it("run.params.task 与 AgentCallOpts 同一类型范围（协议 task 载荷 = 引擎面子集）", () => {
     const same: _SelfAgentCallOpts = true;
     expect(same).toBe(true);
   });
@@ -140,7 +140,7 @@ describe("类型闭包样板", () => {
 // 断言助手注释）。本组测试的实际职责 = 构造面冒烟：必填缺失 / 多余字段在字面量
 // 构造处编译爆红 + 关键必填值的运行时确认。
 describe("契约类型运行时形状冒烟（必填缺失/多余字段在构造处爆红；可选项漂移防线 = core 侧双向断言）", () => {
-  it("EngineCapabilities 11 个能力位必填（gate 四类判据的类型面）", () => {
+  it("EngineCapabilities 11 个能力位必填（gate 四类判据的类型范围）", () => {
     const caps: EngineCapabilities = {
       schemaEnforcement: "emulated",
       steer: "unsupported",

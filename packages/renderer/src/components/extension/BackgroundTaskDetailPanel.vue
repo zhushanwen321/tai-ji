@@ -5,7 +5,7 @@
   + §3.3 D5（drawer 接线第 8 tab）/ D7（输出 = 按需 tail RPC + running 2s 跟随）/ D6（kill 回执
   分支④⑤ toast）。u-drawer 单元。
 
-  数据面（不自持 listener，AGENTS 规则 2）：
+  数据范围（不自持 listener，AGENTS 规则 2）：
   - 控制态：selectedBackgroundTaskId 经 core useBashTaskSelection()（selection/bash-task.ts，
     display-containers §6.6① 迁出后落点）读 per-session 分区
     （undefined=未选中 → PanelContainer 不注入本组件，DrawerPanel 空态 fallback 承载）；

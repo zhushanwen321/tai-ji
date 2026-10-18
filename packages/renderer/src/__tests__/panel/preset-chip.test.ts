@@ -8,7 +8,7 @@
  * 3. 三档退化（模式名 → 短名 → 仅图标）**各档信任标记不丢**：文本/短名档 = chip 内后缀
  *    「含替换提示词」；纯图标档 = 右上角警示色角标（`preset-chip-replace-badge`）+ tooltip。
  * 4. 只读 popover 含锁定说明（「模式在创建时确定…不能更换」）+「新建会话以使用其他模式」出口
- *    + 工具面/扩展面/提示词段数。
+ *    + 工具范围/扩展范围/提示词段数。
  *
  * 策略：pinia 真 store（setPresets/setDefaultPresetId/setLoadError）+ HoverCard 家族 stub 常开
  * （reka HoverCard 未 hover 不渲染 content；stub 常开使浮层内容可 DOM 断言，
@@ -226,8 +226,8 @@ describe('PresetChip 只读 popover（设计 D5 第 4 点）', () => {
     expect(popover.text()).toMatch(/⌘N|Ctrl\+N/)
     // 模式面摘要
     expect(popover.text()).toContain('主 Agent 只做拆解与派发')
-    expect(popover.text()).toContain('工具面')
-    expect(popover.text()).toContain('扩展面')
+    expect(popover.text()).toContain('工具范围')
+    expect(popover.text()).toContain('扩展范围')
     expect(popover.text()).toContain('提示词段数')
     // 提示词两段都启用 → 段数 2
     expect(popover.text()).toContain('2 段')

@@ -61,7 +61,7 @@ function makeKeyEvent(key: string, mods: KeyMods = {}) {
   return { e, preventDefault }
 }
 
-/** fake deps：仅覆盖 keydown 分发路径实际消费的契约面（多余方法对测试无意义） */
+/** fake deps：仅覆盖 keydown 分发路径实际消费的契约范围（多余方法对测试无意义） */
 function makeDeps(overrides: {
   /** moveCaretVertical 返回值（默认 at-edge → 触发翻历史路径） */
   caret?: 'moved' | 'at-edge'

@@ -146,7 +146,7 @@
  * D3 主动终止形态）。写入生效语义 = 新会话生效（D1，页头说明）。I3 登录引导：needs-auth
  * 条目的登录命令 PI_CODING_AGENT_DIR 值取自 mcp.list reply 的 agentDir，复制经 toast 反馈。
  *
- * probe 结果回填通道：协议面 test 只回异步句柄（McpTestHandle），终态经 runtime 的
+ * probe 结果回填通道：协议范围 test 只回异步句柄（McpTestHandle），终态经 runtime 的
  * `mcp:testResult` 广播帧回填——连接测试三组状态（徽标 / 上次结果 / testId 登记）、广播
  * 订阅与 applyProbeResult 接缝（defineExpose 透传；「测试超时」同样经此回填，D3 语义 =
  * 整体无本次结果，保留上次成功测试结果展示）整体在 useMcpTestState（composables/ 同级

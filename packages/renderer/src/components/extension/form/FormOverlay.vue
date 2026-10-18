@@ -13,7 +13,7 @@ function nextFormOverlaySurfaceKey(): string {
  * FormOverlay —— 统一提问表单壳（AskUserOverlay 泛化，设计 D5）。
  *
  * 三 extension（ask-user / scheduler / plan）的提问经 UI_FORM_MARKER 收敛为一个表单协议，
- * 本组件为 GUI 唯一渲染面：壳负责表头（脉冲点 + 单问标题 | 多问 tab 条）/ Submit 门 /
+ * 本组件为 GUI 唯一渲染范围：壳负责表头（脉冲点 + 单问标题 | 多问 tab 条）/ Submit 门 /
  * 取消；按问题 type 分派渲染器——choice（单选 auto-advance / 多选 / Other 卡片化）、
  * text（纯自由文本）、schedule（ScheduleForm 整表单）。
  *

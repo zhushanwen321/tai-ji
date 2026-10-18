@@ -56,7 +56,7 @@
  * - apply-entry-convert.ts：message body 转换群（convertMessageBody / computeToolCallFill 等）
  * - 本文件：reducer 本体（派生段 deriveXxx / commit 段 handler / dispatch 骨架 /
  *   ChatStateCollector 三实现 / applyEntry / replayEntries / createChatViewStateBuffer）
- *   + 对外导出面。
+ *   + 对外导出清单。
  */
 import type {
   Message,

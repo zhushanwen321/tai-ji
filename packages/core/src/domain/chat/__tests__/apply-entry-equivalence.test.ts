@@ -773,7 +773,7 @@ describe('live ≡ reload 构造性等价（W6 全类型）', () => {
 // entry（uuidv7 id）直接 replayEntries——归一后逐字段 deep-equal。
 //
 // [u3b 机制迁移] 前身三路径（路径 1 queue_update 计数差集 → drainN / 路径 2 includes 兜底 / defer
-// 分区 FIFO）随 defer 队列与 pendingBuffer 计数路径整体退役（设计 §3.1 删除面；D7 队列区数据源
+// 分区 FIFO）随 defer 队列与 pendingBuffer 计数路径整体退役（设计 §3.1 删除范围；D7 队列区数据源
 // 改 session.delivery 状态帧单一源）。新机制的两条显示通路与原三例职责一一对应：
 // - morph 回填（E5a/E5c）：统一 submit 的乐观气泡（appendUser，原 segments 引用）→
 //   session.delivery 帧非 direct 车道 morph（truncateFrom 移出对话流 + captureMorphSegments
@@ -802,7 +802,7 @@ describe('steer/followUp 投递气泡 live ≡ reload（steer-bubble u4 / D3 + A
   })
 
   // ts 用文件级共享 helper；本组假 id 保留异形本地副本（尾组编码 = n×10，与共享版不同形，
-  // 独立命名防混淆——不强行并入共享参数化，保 id 形态覆盖面）
+  // 独立命名防混淆——不强行并入共享参数化，保 id 形态覆盖范围）
   /** uuidv7 形态假 id（重放侧专用，模拟 pi 持久化 id 空间） */
   const steerPiId = (n: number) => `0198aabb-ccdd-7e${n.toString().padStart(2, '0')}-8f00-0000000000${n}0`
 
@@ -1273,7 +1273,7 @@ describe('预算窗口内 live ≡ reload（u6 re-scope）', () => {
 // record-entry.ts 现行唯一形态）：identity 域（agent/slug/task/startedAt/…）在 registered，
 // 终局域（status='idle'/stopReason/result/endedAt/…）在 settled；同 id 后到覆盖按条目族
 // 各自取末条（collectV2SubagentPair 语义）。v1 条目载体字段（closed/closedReason/resumable
-// 等）无 v2 carrier，其归一断言随读面删除（见各用例注释）。
+// 等）无 v2 carrier，其归一断言随读侧删除（见各用例注释）。
 
 /** v2 registered 条目构造（extension record-entry.ts v2 schema 的测试镜像）：身份 + 家族链锚点 */
 function subagentRegisteredEntry(data: Record<string, unknown>): Record<string, unknown> {

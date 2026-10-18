@@ -76,7 +76,7 @@ describe('workspaceStore.load 降级（T3.4）', () => {
       await store.load()
       // AC-4.5 口径不变：records 置 [] 不抛、不阻断启动（不加错误条/重试）
       expect(store.records).toEqual([])
-      // RD-3#4：留痕 + 标记，让「读失败」与「真无历史」在观测面可分
+      // RD-3#4：留痕 + 标记，让「读失败」与「真无历史」在观测范围可分
       expect(store.loadError).toBe('RPC timeout')
       expect(warnSpy).toHaveBeenCalledWith(
         expect.stringContaining('[workspace] load failed'),

@@ -29,7 +29,7 @@
  * [2026-09-16 裁决] 「已收起」第三状态（意愿维度字段）已全链路删除——列表可见性
  * 不再由独立字段表达。
  *
- * [U6] legacy 兼容值（done/failed/cancelled/crashed/closed）已从类型面删除：扩展写面
+ * [U6] legacy 兼容值（done/failed/cancelled/crashed/closed）已从类型范围删除：扩展写侧
  * U2 起不再产出，历史 session 数据的旧值在解析边界（runtime normalizeSubagentStatus
  * 归一 + record 派生视图）映射为两态 + stopReason/closedReason 展示位，renderer 永不见
  * legacy 值（D5「边界归一」）。编译期破坏性收窄（tsc 全量拦截消费方）。
@@ -178,7 +178,7 @@ export interface SubagentRecord {
    * SSOT，extension 新增展示值时读侧不因类型收窄丢字段。
    */
   stopReason?: string
-  /** [modeless 波4·已删除字段] chatMode（对话模式标志）随 core 写面停写一同消亡：万物可续后
+  /** [modeless 波4·已删除字段] chatMode（对话模式标志）随 core 写侧停写一同消亡：万物可续后
    * 「模式」不再是 record 状态——执行态细分（完成 vs 等续聊）无信息量，idle 统一按
    * 「有 result=完成」展示。旧 entry 携带的该键在 runtime 派生视图层被忽略（读侧容忍）。 */
   /**

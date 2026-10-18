@@ -13,7 +13,7 @@
  *   （landing 要求无 session）。
  *   dead=1,respawning=0 → dead（吞掉 trace/form/flow，W6「dead 不应答」）；
  *   dead=1,respawning=1 → respawning 抑制 dead（crash-resilience T4：自动恢复窗口
- *   对话保持可用形态），后续按 dead=0 规则：trace=1 → trace（保留输入面，session-trace
+ *   对话保持可用形态），后续按 dead=0 规则：trace=1 → trace（保留输入范围，session-trace
  *   契约「composer 保留，不打断对话能力」，D5）；trace=0 → conversation；input 按
  *   hasFormOverlay 互斥；
  *   dead=0 → respawning 无死可抑制（no-op），同上 trace/conversation 规则。
@@ -45,7 +45,7 @@ const EXPECTED: Record<string, PanelView> = {
   's1|11110': { kind: 'trace', sessionId: 's1', input: 'form' },
   's1|11111': { kind: 'trace', sessionId: 's1', input: 'form' },
   // ── sessionId='s1'，dead=0 respawning=0：trace 次优先（吞掉 flow；input 按 hasFormOverlay
-  //    互斥，trace 保留输入面 = session-trace 契约「composer 保留，不打断对话能力」，2^2 = 4 格）──
+  //    互斥，trace 保留输入范围 = session-trace 契约「composer 保留，不打断对话能力」，2^2 = 4 格）──
   's1|00100': { kind: 'trace', sessionId: 's1', input: 'composer' },
   's1|00101': { kind: 'trace', sessionId: 's1', input: 'composer' },
   's1|00110': { kind: 'trace', sessionId: 's1', input: 'form' },
@@ -144,7 +144,7 @@ describe('derivePanelView 全组合表（2^7 = 128）', () => {
   })
 })
 
-describe('回归用例（V5 指定三项 + trace 输入面专项 + T4 respawning 抑制）', () => {
+describe('回归用例（V5 指定三项 + trace 输入范围专项 + T4 respawning 抑制）', () => {
   it('① 有消息 + isFlowActive → conversation（landing 不可表达，§2.2 根因症状核心回归）', () => {
     // 为什么：现行判据 isLandingView = !sessionId || flow.state==='landing'——flow 单例卡
     // landing 时，有消息会话的 landing 判据仍成立，turn 结束瞬间（isSessionActive 翻 false）
@@ -206,11 +206,11 @@ describe('回归用例（V5 指定三项 + trace 输入面专项 + T4 respawning
     expect(formView).toEqual({ kind: 'conversation', sessionId: 's1', input: 'form' })
   })
 
-  it('④ trace + hasFormOverlay → trace + input=form（trace 保留输入面，D5/V4 专项）', () => {
+  it('④ trace + hasFormOverlay → trace + input=form（trace 保留输入范围，D5/V4 专项）', () => {
     // 为什么：session-trace 契约「composer 保留在底部，不打断对话能力」——Trace 视图
-    // 替换的是对话流位置而非输入面，表单请求在 trace 态仍由 overlay 承接应答
+    // 替换的是对话流位置而非输入范围，表单请求在 trace 态仍由 overlay 承接应答
     // （D5：form overlay 渲染 ⟺ (conversation || trace) && input==='form'）。
-    // 若此处把 form 吞成 composer，即输入面恢复缺口回归（一致性审查 R-U1）。
+    // 若此处把 form 吞成 composer，即输入范围恢复缺口回归（一致性审查 R-U1）。
     const view = derivePanelView({
       sessionId: 's1',
       hasMessages: true,

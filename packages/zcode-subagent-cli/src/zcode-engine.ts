@@ -20,7 +20,7 @@
 //     zcodeDbPathAllowlist 封闭白名单放行（宿主路径仅存量兼容）。原「GUI 会话列表
 //     可见 headless 会话」已接受代价随之撤销。
 //   - journal 分组 key 固定 'shared'（SDK SHARED_POOL_KEY——[池抽象降级 2026-09-13]
-//     poolKey 协议面已删，值仅承载 journal 落盘路径与存量 record 兼容）：journal 落
+//     poolKey 协议范围已删，值仅承载 journal 落盘路径与存量 record 兼容）：journal 落
 //     engineDataDir/engines/zcode/shared/journal-<taskId>.jsonl。
 //
 // run 错误语义（设计 §3.3.5）：
@@ -215,7 +215,7 @@ export class ZcodeEngine implements EnginePort {
       permissionMode: "native",
       // [D3-④] 无 turn_end 语义，轮数上限不可兑现（预检 gate 据此同步拒绝）
       maxTurns: false,
-      // [subagent-model-switch] zcode 引擎不在模型切换设计范围（协议面引擎中立预留，
+      // [subagent-model-switch] zcode 引擎不在模型切换设计范围（协议范围引擎中立预留，
       // 后续另立项接入）——setModel 通路未接通，unsupported 如实声明
       setModel: "unsupported",
     };
@@ -304,7 +304,7 @@ export class ZcodeEngine implements EnginePort {
    * 常驻路径主编排：模型解析（v2 单源校验）→ 惰性连接 + runTurn（事件时序前移：
    * text_delta 流式、终态后 message_end/turn_end）→ schema 仿真重试 → outcome/handle。
    * onHandleReady 在 create 应答后（§3.4 不变量 3；原 onPoolResolved prepare 期
-   * 声明已随 [池抽象降级 2026-09-13] poolKey 协议面退役删除）。
+   * 声明已随 [池抽象降级 2026-09-13] poolKey 协议范围退役删除）。
    */
   private async runViaAppServer(task: AgentCallOpts, ctx: RunContext): Promise<EngineRunResult> {
     const startedAt = Date.now();
@@ -374,7 +374,7 @@ export class ZcodeEngine implements EnginePort {
    * 重算，一次封顶）。组合序：瞬时重试在前、schema 重试在后——瞬时重试轮 parsed 且
    * 校验失败时仍进 schema 重试（末次 attempt 语义，schema 重试编排保持现状不动）。
    *
-   * 重试轮是独立会话的独立 LLM 调用：token 计入 outcome.usage 总量；事件面
+   * 重试轮是独立会话的独立 LLM 调用：token 计入 outcome.usage 总量；事件范围
    * text_delta 按实际流出（含失败轮——journal 记录真实流水），message_end/turn_end
    * 只在最终轮终态后合成（不变量 2/5）。
    */
@@ -924,9 +924,9 @@ export class ZcodeEngine implements EnginePort {
    * 权威，无双实现）。校验失败原样抛 ZcodePrepareError，由编排层
    * （engine/model-validation.ts）包装成「引擎与模型不配套」文案。
    *
-   * [R4/D6-②] 缺席语义：本实现是进程内形态 + 协议诊断面（宿主 cli 形态消费的是
+   * [R4/D6-②] 缺席语义：本实现是进程内形态 + 协议诊断范围（宿主 cli 形态消费的是
    * RemoteEngine 的 manifest 本地判定，不经本方法——SDK protocol methods.ts 明示
-   * validateModel 为诊断面）。缺席 modelRef 时返回空串 canonical（= create 帧省略
+   * validateModel 为诊断范围）。缺席 modelRef 时返回空串 canonical（= create 帧省略
    * model 键、CLI 自身缺省解析——2026-09-29 account 体系迁移后 plan 家族兜底 id
    * 已不可用；record 留痕侧按 R4/D6-② 空串归一为「用户未指定」条件留空）。帧应答
    * 形态维持 {canonicalRef: string}（SDK port-contract 契约必填——「帧字段缺席」
@@ -944,7 +944,7 @@ export class ZcodeEngine implements EnginePort {
    * （zcodeSessionDbPath(engineDataDir)，tier1 白名单集合见方法体——宿主路径仅
    * 「共享 HOME 时代」存量兼容）；旧 records（池时代）的相对路径仍按池目录锚定
    * 解析（read 兼容旧数据，池目录不存在时自然落②级 journal 降级）。[池抽象降级
-   * 2026-09-13] 锚定 key 用常量 SHARED_POOL_KEY 承载——协议面 poolKey 已删，池
+   * 2026-09-13] 锚定 key 用常量 SHARED_POOL_KEY 承载——协议范围 poolKey 已删，池
    * 时代真实池 key 不再随 handle 传输；若旧 record 的池目录恰为 shared 布局则①级
    * 仍可达，其余池 key 的旧 record 直接走②级 journal 降级（30 天 TTL 同尺度衰减，
    * 行为安全）。
@@ -1253,12 +1253,12 @@ function resolveAppserverTimingMs(envName: string, fallbackMs: number, label: st
   return fallbackMs;
 }
 
-/** [测试注入缝] stop 控制面超时实际值（env 覆盖 > 默认 3s；解析见 resolveAppserverTimingMs）。 */
+/** [测试注入缝] stop 控制范围超时实际值（env 覆盖 > 默认 3s；解析见 resolveAppserverTimingMs）。 */
 function stopTimeoutMs(): number {
   return resolveAppserverTimingMs(
     ZCODE_APPSERVER_STOP_TIMEOUT_ENV,
     ZCODE_APPSERVER_STOP_TIMEOUT_MS,
-    "stop 控制面超时",
+    "stop 控制范围超时",
   );
 }
 
@@ -1466,7 +1466,7 @@ function parsedAppServerAttempt(task: AgentCallOpts, r: SessionTurnResult): Atte
  * terminal 帧 errorCode/errorMessage（⛔P-Z2 实证——真实 failed 终态的错误详情只在
  * terminal 帧，read/delta 携带不了）> read 兜底/delta 聚合尾部（F-3 原文案，降级为
  * 兜底）> 「无返回内容」（P-Z2 降级形态：final-frame 先到且 read 无错误信息——不
- * 伪造错误详情，覆盖面收窄但不假成功）。
+ * 伪造错误详情，覆盖范围收窄但不假成功）。
  */
 function failedTerminalAppServerAttempt(r: SessionTurnResult): AttemptResult {
   const status = authoritativeTerminalStatus(r);

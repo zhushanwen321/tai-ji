@@ -103,12 +103,12 @@ vi.mock('../../panel/WorkflowLivePanel.vue', () => ({
 
 // ── mock：BrowserOverlay stub（kind 门控用例经 openBrowser 换入 browser 内容）────
 // 真实 BrowserOverlay 会拉起 BrowserPane/view 链路；本文件只关心 Host 侧 kind 门控，
-// 壳内容无断言观测面，stub 掉保用例密闭。
+// 壳内容无断言观测范围，stub 掉保用例密闭。
 vi.mock('@/components/panel/BrowserOverlay.vue', () => ({
   default: { name: 'BrowserOverlayStub', template: '<div />' },
 }))
 
-// ── mock：Guard 挂载计数包装（U4 kind 门控对账观测面）─────────────────────────
+// ── mock：Guard 挂载计数包装（U4 kind 门控对账观测范围）─────────────────────────
 // 保留真实 Guard 回落语义（onErrorCaptured → emit fallback 原样转发），仅在 setup 计数：
 // guardEpoch 重挂 = Guard 重建（:key 换代），计数即重挂次数。
 const { guardMounts } = vi.hoisted(() => ({ guardMounts: { count: 0 } }))

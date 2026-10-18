@@ -23,7 +23,7 @@
  */
 import type { DeliveryStore, DeliveryStoreRecord } from './types.js'
 
-/** fs 窄接口（注入面；生产 = node:fs 适配，测试 = 内存替身）。 */
+/** fs 窄接口（注入点；生产 = node:fs 适配，测试 = 内存替身）。 */
 export interface DiskStoreFs { // oe-exempt:20261017:framework:磁盘 outbox 的 fs 注入端口（runtime 侧注入实现，内核零 fs 知识）
   existsSync(path: string): boolean
   mkdirSync(path: string, opts: { recursive: true }): unknown

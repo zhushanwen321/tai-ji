@@ -1,6 +1,6 @@
 /**
  * legacy-entries.test.ts — plan-state entry legacy 映射行为测试（D-B4-1 下沉后映射契约
- * 唯一断言面）。
+ * 唯一断言范围）。
  *
  * 承接原 shared fixture 等价表（LEGACY_ENTRY_VIEW_EQUIVALENCE_PAIRS，5 对等价契约，随下沉
  * 删除）的契约义务：读方①（扩展 reconstructPlanState）/ 读方②（runtime extractor）共用的

@@ -1,7 +1,7 @@
 /**
  * Panel 渲染分支派生测试（panel-view switch 重写，单元 T3）。
  *
- * Panel 主区与输入面判据收敛为 usePanelView → derivePanelView 单点派生（D1/D2/D5），本文件锁
+ * Panel 主区与输入范围判据收敛为 usePanelView → derivePanelView 单点派生（D1/D2/D5），本文件锁
  * renderer 装配层的派生消费行为（core 纯函数的 64 组合表在
  * packages/core/src/domain/session/__tests__/panel-view.test.ts，V5）。
  *
@@ -10,11 +10,11 @@
  *   Landing 不渲染（旧判据下此状态 turn 结束后 composer 消失——用户报告的原始 bug）
  * - PV2 landing：无 session + flow 活跃 → Landing；band 不重复挂 composer
  * - PV3 empty：绑定空会话（有 sid 无消息，flow idle）→ 空对话态 + Composer（直输）；
- *   无 session + flow idle → 选会话空态，无输入面
+ *   无 session + flow idle → 选会话空态，无输入范围
  * - PV4 dead：占位视图（重开入口），无 Composer；表单请求在场仍无 overlay
  *   （W6「dead 不应答」由派生优先级 dead > form 承接，收集侧不重复判）
  * - PV5 form overlay：请求到达 → FormOverlay 替换 Composer；应答出队 → Composer 恢复
- * - PV6 trace 输入面保留（D5/V4，一致性审查 R-U1）：trace 视图 → TraceView 替换对话流
+ * - PV6 trace 输入范围保留（D5/V4，一致性审查 R-U1）：trace 视图 → TraceView 替换对话流
  *   位置 + Composer 保留；trace + 表单请求 → overlay 承接应答
  * - PV7 respawn 过渡态（T4）：dead + respawnPending → 过渡条 + Composer
  *   保持（dead 占位被抑制）；收尾后回落 dead 占位
@@ -60,7 +60,7 @@ vi.mock('@/composables/useExtensionUI', async () => {
       cancel: vi.fn(),
     }),
     formFilter: (req: { form?: boolean }) => req.form === true,
-    // PanelModeBar（Panel composer 上方常驻挂载）setup 消费 planReviewFilter——窄 mock 需补齐该导出面
+    // PanelModeBar（Panel composer 上方常驻挂载）setup 消费 planReviewFilter——窄 mock 需补齐该导出清单
     planReviewFilter: (req: { planReview?: boolean }) => req.planReview === true,
   }
 })
@@ -149,7 +149,7 @@ describe('PV1: flow 残留免疫（G2 结构实证——用户报告 bug 的原�
 
     const wrapper = mountPanel('s1')
 
-    // 用户可见：对话流与输入面同时在，输入面不因 flow 残留消失
+    // 用户可见：对话流与输入范围同时在，输入范围不因 flow 残留消失
     expect(wrapper.find('[data-testid="msg-stream"]').exists()).toBe(true)
     expect(wrapper.find('[data-testid="composer-box"]').exists()).toBe(true)
     // Landing 判据读不到非空 sessionId——「有会话 × landing」在派生上不可表达
@@ -192,7 +192,7 @@ describe('PV3: empty 兜底（flow 未活跃）', () => {
     expect(wrapper.find('[data-testid="landing"]').exists()).toBe(false)
   })
 
-  it('无 session + flow idle（选会话空态）→ 兜底空态文案，无输入面', () => {
+  it('无 session + flow idle（选会话空态）→ 兜底空态文案，无输入范围', () => {
     const wrapper = mountPanel(null)
 
     expect(wrapper.text()).toContain('选择左侧会话开始')
@@ -301,7 +301,7 @@ describe('PV5: form overlay 互斥替换（D5：overlay ⟺ (conversation || tra
     expect(wrapper.find('[data-testid="composer-box"]').exists()).toBe(false)
   })
 
-  it('应答出队后 → Composer 恢复（阻塞解除回到常驻输入面）', async () => {
+  it('应答出队后 → Composer 恢复（阻塞解除回到常驻输入范围）', async () => {
     hydrateS1Messages()
     extUIMock.__mockFormReq.value = formReq
     const wrapper = mountPanel('s1')
@@ -316,7 +316,7 @@ describe('PV5: form overlay 互斥替换（D5：overlay ⟺ (conversation || tra
   })
 })
 
-describe('PV6: trace 态输入面保留（D5/V4：session-trace 契约「composer 保留，不打断对话能力」）', () => {
+describe('PV6: trace 态输入范围保留（D5/V4：session-trace 契约「composer 保留，不打断对话能力」）', () => {
   it('trace 视图 → TraceView 替换对话流位置，Composer 保留', () => {
     hydrateS1Messages()
     focusSession('s1')
@@ -324,7 +324,7 @@ describe('PV6: trace 态输入面保留（D5/V4：session-trace 契约「compose
 
     const wrapper = mountPanel('s1')
 
-    // 用户可见：Trace 视图替换对话流，输入面不被打断（composer 保留在底部）
+    // 用户可见：Trace 视图替换对话流，输入范围不被打断（composer 保留在底部）
     expect(wrapper.find('[data-testid="trace-view"]').exists()).toBe(true)
     expect(wrapper.find('[data-testid="msg-stream"]').exists()).toBe(false)
     expect(wrapper.find('[data-testid="composer-box"]').exists()).toBe(true)

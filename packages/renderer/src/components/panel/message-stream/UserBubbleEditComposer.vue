@@ -1,5 +1,5 @@
 <!--
-  split-justified: 用户气泡编辑态 = 简化版 composer（user-bubble-edit-composer）。输入面五件
+  split-justified: 用户气泡编辑态 = 简化版 composer（user-bubble-edit-composer）。输入范围五件
   （ComposerInput 富文本 + CommandPopover 四符号浮层 + 五路触发态机 + skill 候选源 + 键盘路由）
   与底部 Composer 同源复用，只裁掉 chrome（+ 按钮 / 底栏左簇 / 右簇 / staging / 草稿分区 /
   历史召回 / 拖拽落位）——「气泡框变成输入框」的富编辑器实现。经 ChatViewDeps.editComposerRenderer
@@ -157,7 +157,7 @@ const projectSkillsCwd = computed<string | null>(
 const { projectSkills } = useProjectSkills(projectSkillsCwd)
 const { globalSkills } = useGlobalSkills()
 
-// ── 草稿 + 已选 skill 集合（禁选数据面）──
+// ── 草稿 + 已选 skill 集合（禁选数据范围）──
 // getSegments 读 DOM 非响应式 → 随 input 显式刷新（与 Composer onInputChange 同模式）。
 const draft = ref('')
 const selectedSkillNames = ref<string[]>([])

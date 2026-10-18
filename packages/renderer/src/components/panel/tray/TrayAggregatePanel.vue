@@ -10,7 +10,7 @@
   ScrollArea 一个有界高度（其根是 flex-1 + min-h-0，无界高度下内部滚动不成立）。
 
   ── 契约 ──
-  props.sessionId: string —— 焦点 session id（透传段内面板；数据面经 inject 消费外壳单例，
+  props.sessionId: string —— 焦点 session id（透传段内面板；数据范围经 inject 消费外壳单例，
     本组件不自建 useTrayCounts 实例）
   props.sections: 段头 + 段体所需的 built-in 切片（kind / icon / running / total；由外壳
     ComposerTray 从同一份 `useTrayCounts` 计数派生传入——计数只有一份口径）

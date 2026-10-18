@@ -42,7 +42,7 @@ Workflows currently available:
    的 `require.resolve`（锚定扩展 bundle 自身，`src/host/pi-host.ts:68-85`）。解析失败仅 warn 降级
    （"绝不因资产接线失败阻断发现主链"）。
 3. 打包态该 resolve **必败**，原因是**两条独立的必要条件同时不成立**：
-   - **条件甲（解析面无 node_modules）**：`scripts/bundle-extensions.mjs` 用 esbuild 打自包含
+   - **条件甲（解析范围无 node_modules）**：`scripts/bundle-extensions.mjs` 用 esbuild 打自包含
      `index.js`，`@zhushanwen/subagent-core` 被 inline，staged 布局无 node_modules，无从解析；
      且随包拷贝的 `workflows/` 不在任何发现根上（agentDir 三根 `~/.taiji/agent/workflows`、
      `~/.taiji/extensions`、`~/.taiji/npm` 实测均不存在；`TAIJI_EXTENSION_PATHS` 为空；
@@ -214,7 +214,7 @@ Workflows currently available:
 
 - 不给 staged package.json 补 `pi.workflows` manifest（会让 standalone pi 用户经 manifest 模式命中
   "声明路径不存在 → 整包失败占位"）；
-- 不改 `WORKFLOW_TOOL_NAMES`/工具注册面；不改 workflow tool 的裸名拒收设计（`tool-workflow.ts:337`，刻意行为）；
+- 不改 `WORKFLOW_TOOL_NAMES`/工具注册范围；不改 workflow tool 的裸名拒收设计（`tool-workflow.ts:337`，刻意行为）；
 - 不改 pi 壳的 warn-降级策略（属 §5 治理项，另立项）。
 
 ---
@@ -420,7 +420,7 @@ npm 槽扫描命中 agents 10 / workflows 6、invalids 0；换锚 `fan-out.js` �
 | A-AUD-10 | 同类面全景清单（每处资产解析的打包态裁决）+ 非 index.js 资产逐个裁决 | 采纳 | §5 末条 |
 
 **根因表述修正（A-AUD-10/Q5）**：三锁**不是等价三把**——条件乙（锚点被剪枝）是**必要条件不可省**
-（只修甲后产物仍坏，已实证）；条件甲是解析面；"孤儿资产"不是独立锁，是条件甲在发现面的具体表现。
+（只修甲后产物仍坏，已实证）；条件甲是解析范围；"孤儿资产"不是独立锁，是条件甲在发现面的具体表现。
 最小充分条件 = "锚点在打包产物内可解析"。§1.6 已按此重写并显式登记同类残留（d8-compat /
 hostPackageNodeModulesRoot），说明本类问题是**系统性机理**而非单点写错。
 
@@ -493,7 +493,7 @@ function corePackageDir(): string | undefined {
 
 ### 8.4 风险
 
-校验只在"上溯结果不是 core 包根"时触发，dev/npm 布局天然通过；改动集中在 core 引擎层，不涉协议面。
+校验只在"上溯结果不是 core 包根"时触发，dev/npm 布局天然通过；改动集中在 core 引擎层，不涉协议范围。
 
 ---
 

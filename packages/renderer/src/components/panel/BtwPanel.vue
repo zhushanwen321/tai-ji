@@ -107,7 +107,7 @@
             :data-vid="thread.vid"
             @click="selectThread(thread.vid)"
           >
-            <!-- badge 待处理态 per-line 挂点（D8 终态机驱动；聚合面 = composer btw 按钮 Σ） -->
+            <!-- badge 待处理态 per-line 挂点（D8 终态机驱动；聚合范围 = composer btw 按钮 Σ） -->
             <span
               v-if="isBtwPending(thread.vid)"
               class="size-1.5 shrink-0 rounded-full bg-warn"

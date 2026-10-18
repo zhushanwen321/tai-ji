@@ -1,7 +1,7 @@
 /**
  * btw-overlay-routing —— M3-c 探针 P-overlay 单测（D8 降级路径：drawer 内联确认条）。
  *
- * 覆盖面（设计 §3 探针 P-overlay + 验收 S9/S9b + 实施计划 M3-c 验收①-⑤）：
+ * 覆盖范围（设计 §3 探针 P-overlay + 验收 S9/S9b + 实施计划 M3-c 验收①-⑤）：
  * - vid 路由：五类请求（ask-user 富表单 / scheduler 表单 / plan 审批 / 权限审批 select /
  *   confirm 简单 dialog）按 vid 现 drawer 内联确认条；主视图 CompanionBand（主 sid 分区）
  *   零浮出（P-overlay 正向）；三模态面既有测试族回归绿 = 反向分支（见运行证据）。
@@ -188,7 +188,7 @@ describe('① vid 路由：五类请求 drawer 内联确认条 + 主视图零浮
     expect(bar.text()).toContain('问题甲？')
     expect(w.find('[data-testid="btw-form-submit"]').exists()).toBe(true)
 
-    // 主 sid 的请求不进本面板确认条（vid 分区隔离；主 sid 渲染面归 Panel/FormOverlay 族）
+    // 主 sid 的请求不进本面板确认条（vid 分区隔离；主 sid 渲染范围归 Panel/FormOverlay 族）
     emitUIRequest(MAIN, formFrame('r-main', '主会话问题？'))
     await settle(w)
     expect(bar.text()).toContain('问题甲？')
@@ -476,7 +476,7 @@ describe('⑤ 状态区退役（2026-10-15 用户裁决）：extension GUI 状�
           : undefined,
       getViewIds: (sid: string) => (sid === VID ? ['w1'] : []),
     }
-    // 选中一条线：状态区退役的断言面在 composer 带（btw-interaction）内，非空态非澄清命中
+    // 选中一条线：状态区退役的断言范围在 composer 带（btw-interaction）内，非空态非澄清命中
     apiMock.list.mockResolvedValue([{ vid: VID }])
     const w = mount(BtwPanel, {
       props: { sessionId: MAIN },

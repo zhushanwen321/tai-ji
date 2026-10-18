@@ -29,7 +29,7 @@ import { effectScope, ref } from 'vue'
 import { createPinia, setActivePinia } from 'pinia'
 import { InternalEventBus } from '@taiji/core'
 
-// ── mock chatStore（clearPendingSend 因果断言面；vi.hoisted 解决工厂提升引用）──
+// ── mock chatStore（clearPendingSend 因果断言范围；vi.hoisted 解决工厂提升引用）──
 const chatStoreMocks = vi.hoisted(() => ({
   clearPendingSend: vi.fn(),
 }))
@@ -171,8 +171,8 @@ describe('⑤ expectTurn 三态矩阵（form-submit-busy-convergence 场景 7，
   // - result≠null + true/undefined → 不清（2 格，桥接 message_start 照旧；
   //   undefined = 存量扩展缺省态，truthy 简化（!expectTurn）会把这两格误清——D2 不采用其余方案的理由）
   // - result≠null + false → 清（1 格，命令 handler 内 select 提交即收尾，消除 30s 假忙）
-  // result 非 null 格取表单 answers JSON string（提交型主流形态，对齐 ② 用例输入面）；
-  // 该输入面同时是 toExtensionUIRequest expectTurn 透传（D1 段 4）的因果断言——透传断
+  // result 非 null 格取表单 answers JSON string（提交型主流形态，对齐 ② 用例输入范围）；
+  // 该输入范围同时是 toExtensionUIRequest expectTurn 透传（D1 段 4）的因果断言——透传断
   // 链时 false 格必然翻红。经 bus 帧入队（真实透传链），非直写 store。
   const answers = JSON.stringify({ title: '任务' })
   const matrix: Array<{
@@ -228,7 +228,7 @@ describe('③ delivered=false（WS 断连）不清——锚点只挂送达成功
 
     expect(sendExtensionUIResponse).toHaveBeenCalledWith('sessionA', 'r-drop', 'select', null)
     // 断连期请求保留（FormOverlay 不消失，现状行为）+ pendingSend 不收尾
-    //（表单仍占输入面，假忙窗口不暴露——设计 §3.1 失败路径语义）
+    //（表单仍占输入范围，假忙窗口不暴露——设计 §3.1 失败路径语义）
     expect(useExtensionUIStore().getRequestsBySession('sessionA')).toHaveLength(1)
     expect(chatStoreMocks.clearPendingSend).not.toHaveBeenCalled()
     dispose()

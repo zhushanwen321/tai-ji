@@ -89,7 +89,7 @@ function findStopItem(): HTMLElement | null {
   return document.body.querySelector('[data-testid="session-stop-item"]')
 }
 
-/** 生产源码 = src 下非 __tests__ 的 .ts/.vue（组件退役扫描面） */
+/** 生产源码 = src 下非 __tests__ 的 .ts/.vue（组件退役扫描范围） */
 function productionSources(): string[] {
   return walkFiles('src', { extensions: ['.ts', '.vue'], skipDirs: ['__tests__'] })
 }

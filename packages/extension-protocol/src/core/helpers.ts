@@ -125,7 +125,7 @@ export function setWidgetDual(
 /**
  * d 语法白名单字符集：SVG path 命令字母（MLCQAZHVST 大小写——含 S/s/T/t 平滑曲线
  * 命令，@lucide/vue 全量图标约 1% 的 d 串用到）+ 数字 + 空格/逗号/小数点/负号。
- * 刻意不含 e/E 等其余任何字符——白名单外即拒，故无注入面（渲染侧也只用 DOM 属性
+ * 刻意不含 e/E 等其余任何字符——白名单外即拒，故无注入通道（渲染侧也只用 DOM 属性
  * 赋值，无 innerHTML）。
  */
 const ICON_PATH_D_ALLOWED_RE = /^[MLCQAZHVSTmlcqazhvst0-9 ,.\-]+$/

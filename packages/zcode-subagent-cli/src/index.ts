@@ -18,5 +18,5 @@ export {
 export { zcodeSessionDbPath, zcodeDbPathAllowlist, hostZcodeDbPath } from "./db-path.ts";
 export { readZcodeSessionView } from "./reader.ts";
 // golden 帧序列内嵌副本（采集 SSOT = src/__golden__/zcode-golden-appserver.json，
-// 双副本 diff 防漂移）——core conformance golden-replay 消费此导出面（W10）。
+// 双副本 diff 防漂移）——core conformance golden-replay 消费此导出清单（W10）。
 export { ZCODE_APPSERVER_GOLDEN } from "./golden-sample.ts";

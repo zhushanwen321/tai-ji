@@ -11,7 +11,7 @@
     flow/chat/session 状态做渲染判据——全部判据收敛在 derivePanelView 纯函数
     （core 64 组合全表检查），本模板只消费 kind/input。分支顺序即派生优先级：
     dead > trace > conversation（有消息 MessageStream / 无消息空对话态）> landing > empty。
-    turn 运行态（streaming/compacting）不参与任何存在性判定（D2：输入面恒定，
+    turn 运行态（streaming/compacting）不参与任何存在性判定（D2：输入范围恒定，
     compacting 的禁用模态由 Composer 内部承担）。
   -->
   <section
@@ -194,8 +194,8 @@ const restoreErrorCode = ref<string | null>(null)
 
 /**
  * 渲染视图单源（usePanelView：事实收集 + derivePanelView 单点派生）。
- * D2：isSessionActive/isCompacting 兜底已删——turn 状态不再驱动输入面存在性；
- * 「landing 残留 × 输入面消失」在派生规则上不可表达（G2 结构免疫）。
+ * D2：isSessionActive/isCompacting 兜底已删——turn 状态不再驱动输入范围存在性；
+ * 「landing 残留 × 输入范围消失」在派生规则上不可表达（G2 结构免疫）。
  * currentOverlayRequest 本地别名：currentFormRequest = 队列第一个统一表单 overlay 请求
  * （form 键——新 form 帧与 legacy askUser / scheduleCreate 帧归一后统一命中）。
  */
@@ -218,7 +218,7 @@ const conversationSessionId = computed<string | null>(() => {
 const traceSessionId = computed<string | null>(() =>
   panelView.value.kind === 'trace' ? panelView.value.sessionId : null,
 )
-/** band 内 Composer 渲染（D5）：conversation/trace 恒挂（trace 保留输入面 = session-trace
+/** band 内 Composer 渲染（D5）：conversation/trace 恒挂（trace 保留输入范围 = session-trace
  *  契约「composer 保留在底部，不打断对话能力」）；empty 绑定会话时挂（直输，防御支现行不可达） */
 const showPanelComposer = computed(() => {
   const v = panelView.value
@@ -261,7 +261,7 @@ const scheduleDraft = computed<ScheduleDraft | null>(() => {
 })
 
 /**
- * overlay 输入面带有效性（conversation/trace 且派生为 overlay 替换 composer）。
+ * overlay 输入范围带有效性（conversation/trace 且派生为 overlay 替换 composer）。
  * 抽出公共判据供 overlay / Composer 分支复用（v-if/v-else-if 互斥对的第一段）。
  */
 const overlayBandActive = computed(() =>

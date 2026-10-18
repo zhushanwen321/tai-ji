@@ -74,8 +74,8 @@ gateway 侧请求参数权威：`SessionsSendParamsSchema`（`packages/gateway-p
 | bus `lifecycle` phase=start | 无对应 | 丢弃（可作 run 开始标记） | handlers.lifecycle.ts:32-40 |
 | bus `lifecycle` phase=end | turn_end + message_end | 合成（run 终态：taiji 每 turn=「一次 assistant 响应+工具批」，源 turn_end 事件类型层存在但 bus 不单发，需从 assistant message_end 序列合成 turn 边界） | handlers.lifecycle.ts:151-196 |
 | bus `lifecycle` phase=error | message_end{error} + error{message} | 合成（data.error→两处） | handlers.lifecycle.ts:151-168 |
-| bus `error` | error{message} | 直接（声明通道；观测面） | agent-events.ts:5-17 |
-| bus `item` / `plan` / `command_output` / `patch` | 无对应 | 丢弃（UI 呈现面；plan 可选映射 setStatus 类 UiRequest，非事件面） | agent-events.ts:254-317 |
+| bus `error` | error{message} | 直接（声明通道；观测范围） | agent-events.ts:5-17 |
+| bus `item` / `plan` / `command_output` / `patch` | 无对应 | 丢弃（UI 呈现面；plan 可选映射 setStatus 类 UiRequest，非事件范围） | agent-events.ts:254-317 |
 | bus `approval` phase=requested/resolved | activity | 丢弃为事件；走反向通道（§7） | agent-events.ts:280-291 |
 | bus `compaction` phase=start/end | compaction{} | 直接（end 到达时发 1 次；start 丢弃） | handlers.compaction.ts:52-62,144-152 |
 | LLM `text_delta`/`thinking_delta`/`text_end`/`thinking_end` | 同上 text_delta / thinking_delta | 经 bus 后同上（bus 已消费，适配器只看 bus） | llm-core types.ts:335-340 |
@@ -161,7 +161,7 @@ exec.approvals.*（get/set 配置面，`src/gateway/server-methods/exec-approval
 
 ## 9. gap 清单
 
-**源有靶无**（引擎多出、taiji 协议面不承载——适配器丢弃或自持）：
+**源有靶无**（引擎多出、taiji 协议范围不承载——适配器丢弃或自持）：
 - bus `item/plan/command_output/patch` 四个 UI 呈现通道；`exec.approval.requested` 之外的结构化审批元数据（approvalId/allowlist 项）。
 - 多渠道路由面（channel/account/thread/replyTo，`AgentCommandOpts` :57-98）与消息渠道本位的会话拓扑（group/DM sessionKey 族）。
 - cron/heartbeat/skills/web 等平台方法族；ACP 双面。

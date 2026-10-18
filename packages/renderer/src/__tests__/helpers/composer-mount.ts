@@ -127,7 +127,7 @@ function composerChatApiGroup() {
 /**
  * '@/api' mock 工厂（chat 组增量形态）：compact-queue / dispatch-route 等走真实
  * flush 链路的文件用——queue.flush 内部经 api.chat.send 提交，与 useChat mock 的
- * send 是同一 vi.fn（断言面不分裂）。
+ * send 是同一 vi.fn（断言范围不分裂）。
  */
 export function composerApiModuleWithChat() {
   return {

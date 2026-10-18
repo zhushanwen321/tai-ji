@@ -134,19 +134,19 @@
           <!-- plugin headerAction 挂载点（demo 裁决落点 = composer 左簇、「+」之后；用户裁决
                2026-10-06）。显隐由 hidden 管线唯一裁决：无任务插件推 hidden=true → 列表构建层
                剔除，零 DOM 不渲染；无声明同样零 DOM。密度归属（demo composer-bar spec §2.1/§4.2
-               B3：L2 聚合面 = 定时任务 + 托盘 → layers 单钮）：expanded 在左簇渲染；aggregated
+               B3：L2 聚合范围 = 定时任务 + 托盘 → layers 单钮）：expanded 在左簇渲染；aggregated
                起摘除、同一挂载点数据源改在托盘聚合面板首段渲染（与插件 toolbar 同构）；
                anchorProtected 随托盘折叠（L4）。 -->
           <HeaderActionsHost v-if="sessionId && density.slots.leftCluster === 'expanded'" :session-id="sessionId" />
           <!-- btw 入口（btw-question D7，M3-b）：`+` 之后、托盘之前。show-btw 实例开关
                （false 不出按钮——drawer 内 BtwPanel 的 Composer 传 false 防递归出 btw 入口）；
-               无 session 不出（与托盘同判据，badge 数据面需主会话）。点击 = openDrawerTab('btw')，
+               无 session 不出（与托盘同判据，badge 数据范围需主会话）。点击 = openDrawerTab('btw')，
                badge = useBtwTabData 聚合 Σ unread（清除 = 线内容进视口）。 -->
           <ComposerBtwButton v-if="showBtw && sessionId" :session-id="sessionId" :class="btwSpacingClass" />
           <!-- 任务托盘（设计 docs/design/composer-task-tray.md——已删除，git 可追溯——D1：`+` 之后、composer.toolbar 之前）。
                挂载/可见拆两层：v-if="sessionId"（landing 态卸载，与指标聚合按钮同判据，无 session 无任务面）；
                锚点保护态 v-show 样式折叠
-               **不卸载**——`update:has-items` 的 emitter 与 useTrayCounts 数据面唯一实例都活在
+               **不卸载**——`update:has-items` 的 emitter 与 useTrayCounts 数据范围唯一实例都活在
                本组件内，保护态阈值附近的宽度抖动（拖拽窗口/分屏）每次 protect/unprotect 往返
                若走 v-if 都会重订阅 + 重首次拉取。
                aggregated = 序 2 生效：托盘 + 插件 toolbar 收为**单图标**聚合按钮（角标仅运行数数字，
@@ -155,7 +155,7 @@
                false → 切回有条目会话时托盘永不重挂（e2e workflow-sidebar-sync T2 死锁回归）。
                无条目/零贡献的「不留死入口」由托盘内部三态（逐件不渲染）与聚合按钮自身可见条件
                （有条目或有贡献才出）承接。
-               @update:has-items = 托盘三态上抛（托盘数据面唯一实例在外壳，Composer 不建第二份）。 -->
+               @update:has-items = 托盘三态上抛（托盘数据范围唯一实例在外壳，Composer 不建第二份）。 -->
           <ComposerTray
             v-if="sessionId"
             v-show="!density.anchorProtected"
@@ -438,7 +438,7 @@ const popoverQuery = computed(() => {
 })
 
 /**
- * 已插入 skill 名集合（多 skill 注入 D2 已选禁选数据面）：从 composer 当前 segments 取，
+ * 已插入 skill 名集合（多 skill 注入 D2 已选禁选数据范围）：从 composer 当前 segments 取，
  * 透传 CommandPopover.selectedSkillNames。显式刷新（非 computed）——getSegments 读 DOM
  * 非响应式，随 onInputChange 同步刷新（chip 插入/删除走 onChanged → emit input，
  * 与 refreshAttachedItems 同一模式）。
@@ -552,7 +552,7 @@ function onInputChange(text: string): void {
   // 长草稿每次击键省一次 O(节点数) 遍历）
   const segments = inputRef.value?.getSegments() ?? []
   refreshAttachedItems(segments)
-  // 已选禁选数据面（多 skill 注入 D2）：skill segment 有 name，其余类型跳过
+  // 已选禁选数据范围（多 skill 注入 D2）：skill segment 有 name，其余类型跳过
   // （TS 5.5 推断 type predicate：filter 后 s 收窄为 skill segment）
   selectedSkillNames.value = segments.filter((s) => s.type === 'skill').map((s) => s.name)
   // 用户修改了内容，重置浏览历史状态（下次按上重新从最后一条开始）

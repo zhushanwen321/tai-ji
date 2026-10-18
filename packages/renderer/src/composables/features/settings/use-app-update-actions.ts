@@ -87,7 +87,7 @@ export function createActionsAxis(deps: ActionsAxisDeps): ActionsAxis {
         // D2 交错缓解：手动认领与后台预下载并发写 preloaded（最后写者胜）时，实装版本
         // 可能新于 UI 确认版本（认领 0.9.11 → 预下载 0.9.12 覆写）。以 install 响应的
         // version（实装权威）对齐 latestRelease 版本显示；其他字段保持（app 即将重启，
-        // 旧 release 的 notes/url 残留生命周期以秒计，整体替换无收益反而放大覆盖面）。
+        // 旧 release 的 notes/url 残留生命周期以秒计，整体替换无收益反而放大覆盖范围）。
         if (
           result.version &&
           state.state.latestRelease &&

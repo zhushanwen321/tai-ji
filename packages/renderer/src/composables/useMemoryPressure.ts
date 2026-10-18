@@ -14,7 +14,7 @@
  * 重设无副作用）。
  * - **压窗值裁决**：D4 未钉数值（Gate W 校准清单可调），取默认窗一半（8→4）——「收紧」
  *   的最小有效档，避免过激驱逐把「切回重进」变常态路径。
- * - **恢复语义裁决（D4 未指明，登记）**：压窗一次**不自动恢复默认**。协议面 'normal'
+ * - **恢复语义裁决（D4 未指明，登记）**：压窗一次**不自动恢复默认**。协议范围 'normal'
  *   不广播（renderer 无「压力消退」信号可消费），自动恢复无从触发；已驱逐的 session
  *   不回补（恢复默认只影响后续判定），应用重启后 LRU 模块态归零天然复位。
  *
@@ -50,7 +50,7 @@ export type MemoryReliefAction = (level: MemoryPressureLevel, payload: WatchdogM
 
 // taste:allow-no-data-owner W24-EX-B（模块级单例 UI 瞬态，已登记 §4 ⑧ 2026-09-12）：内存压力级别（窗口级全局观测态）
 const level = ref<MemoryPressureLevel>('normal')
-// taste:allow-no-data-owner W24-EX-C（非 GUI 数据技术结构，已登记 §4 ⑧ 2026-09-12）：最近一拍通知快照（观测面，payload 原样透传）
+// taste:allow-no-data-owner W24-EX-C（非 GUI 数据技术结构，已登记 §4 ⑧ 2026-09-12）：最近一拍通知快照（观测范围，payload 原样透传）
 const lastPayload = shallowRef<WatchdogMemoryPressurePayload | null>(null)
 
 /** 订阅引用计数（useAppUpdate 同款：多消费者共享单条物理订阅）。 */

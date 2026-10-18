@@ -27,7 +27,7 @@ export interface DrawerOpenOptions {
   commandName?: string
 }
 
-/** 朗读按钮三态（ai-voice-tts 设计 §5.1 状态机数据面；数据源 = renderer useTtsPlayer
+/** 朗读按钮三态（ai-voice-tts 设计 §5.1 状态机数据范围；数据源 = renderer useTtsPlayer
  *  全局单例任务态，D11——同一时刻每窗口只有一条消息在朗读，状态窗口级唯一） */
 export type SpeakState = 'idle' | 'loading' | 'playing'
 
@@ -83,7 +83,7 @@ export interface ChatViewDeps {
    *  optional，同 probeArtifact：未 provide（测试 mock 壳）→「源码」按钮隐藏（容器只有
    *  预览态）；renderer useChatViewDeps 运行时总 provide 真实实现。 */
   readArtifact?: (absPath: string) => Promise<{ content: string }>
-  /** 查询某消息的朗读态（ai-voice-tts 设计 §5.1 按钮状态机数据面，TurnSummary 朗读按钮消费；
+  /** 查询某消息的朗读态（ai-voice-tts 设计 §5.1 按钮状态机数据范围，TurnSummary 朗读按钮消费；
    *  三态与 renderer useTtsPlayer 的 SpeakStatus 结构同形——ui 不 import renderer，形状各自声明）。
    *  optional，同 onSpeak：两字段成对 provide/缺席，未 provide 时朗读按钮不渲染 */
   speakStateOf?: (messageId: string) => SpeakState

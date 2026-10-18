@@ -15,11 +15,11 @@
  *   useTrayCounts.test.ts），本文件只验外壳三态判定与交互；`useReal` 模式透传真实现——
  *   U1 用例需要真实拉取路径可被 spy 计数（「面板开关不重发首次拉取 RPC」）。
  * - **真实** TrayNativePanel / TrayWidgetPanel：面板分流与 pinned 透传必须经真实组件落地
- *   （stub 会把「必须显式透传 pinned」测成空断言）；面板数据面经 TRAY_COUNTS_KEY 消费外壳实例
- *   （U1），故 `useTrayCounts` 替身的调用次数 = 数据面实例数（> 1 即面板自建第二实例）。
+ *   （stub 会把「必须显式透传 pinned」测成空断言）；面板数据范围经 TRAY_COUNTS_KEY 消费外壳实例
+ *   （U1），故 `useTrayCounts` 替身的调用次数 = 数据范围实例数（> 1 即面板自建第二实例）。
  * - `VIEW_HOST_SOURCE_KEY` provide 响应式 mock（同构壳层桥：shallowReactive 外层分区 Map +
  *   reactive 内层分区 Map）——推送/更新/清屏直接改分区即驱动重算；
- * - `useBackgroundTasks` mock：仅 U1 的真实数据面用例会消费（避免真实 list RPC / 物理订阅）；
+ * - `useBackgroundTasks` mock：仅 U1 的真实数据范围用例会消费（避免真实 list RPC / 物理订阅）；
  * - 真实 pinia（面板内 store 依赖）+ vue-i18n 走全局 setup（断言 zh-CN 文案）。
  *
  * timer 说明：vi.useFakeTimers({ now: FIXED_NOW })——160/240ms 边界要精确推进；reka 的
@@ -48,7 +48,7 @@ import type { BackgroundTaskEntry } from '@/lib/background-task-bucket'
 import type { SessionSummary, SubagentRecord, WorkflowRunRecord } from '@taiji/shared'
 import zhTray from '@/i18n/locales/zh-CN/tray'
 
-// ── mock：数据面（三件计数/行集；口径与首次拉取触发在 useTrayCounts.test.ts）──
+// ── mock：数据范围（三件计数/行集；口径与首次拉取触发在 useTrayCounts.test.ts）──
 interface TrayState {
   bashRunning: BackgroundTaskEntry[]
   bashEnded: BackgroundTaskEntry[]
@@ -82,7 +82,7 @@ function createTrayState(): TrayState {
 const trayState = reactive<TrayState>(createTrayState())
 
 /**
- * 数据面替身/透传开关（U1）：`calls` = useTrayCounts 调用次数 = 数据面实例创建次数——外壳
+ * 数据范围替身/透传开关（U1）：`calls` = useTrayCounts 调用次数 = 数据范围实例创建次数——外壳
  * 只创建唯一实例并 provide，面板 inject 消费，故任意开合次数下都应恒为 1；`useReal` 打开时
  * 透传真实现（U1 用例用真实拉取路径 + spy 断言不重发首次拉取）。
  */
@@ -99,7 +99,7 @@ vi.mock('@/components/panel/tray/useTrayCounts', async (importOriginal) => {
   }
 })
 
-/** fixture 数据面（计数/行集由 trayState 注入；`UseTrayCountsReturn` 类型标注 = 契约漂移门） */
+/** fixture 数据范围（计数/行集由 trayState 注入；`UseTrayCountsReturn` 类型标注 = 契约漂移门） */
 function createTrayFixture(): UseTrayCountsReturn {
   return {
     ...makeTrayCountsStub(trayState),
@@ -136,7 +136,7 @@ vi.mock('@/composables/features/sidebar/useSidebar', () => ({
   useSidebar: () => ({ selectSession: selectSessionMock }),
 }))
 
-// ── headerAction 数据源开关（B3 聚合面：聚合面板首段 = 被聚合 clock 直开入口的承接段）。
+// ── headerAction 数据源开关（B3 聚合范围：聚合面板首段 = 被聚合 clock 直开入口的承接段）。
 //    经 mountTray 的 provide 注入（HEADER_ACTIONS_SOURCE_KEY 消费方 = 外壳 + HeaderActionsHost）；
 //    hasVisibleHeaderActions 纯函数用真实现（对账对象），source stub 经开关切换。 ──
 const headerActionsSwitch = vi.hoisted(() => ({ source: null as object | null }))
@@ -873,11 +873,11 @@ describe('ComposerTray 会话切换（D12/A6：不残留旧 session 交互态）
   })
 })
 
-// ── ⑦ 数据面单例与首帧（U1/U2；真实 useTrayCounts + spy 拉取路径）──
+// ── ⑦ 数据范围单例与首帧（U1/U2；真实 useTrayCounts + spy 拉取路径）──
 
-describe('ComposerTray 数据面单例（U1：面板不自建实例、开合不重发首次拉取 RPC）', () => {
-  it('面板打开/关闭/换件/重开：数据面实例恒一个、loadSubagents / loadWorkflows 各仅一次', async () => {
-    // 真实数据面（外壳仍是唯一调用点）+ spy 拉取路径：断言的是 load RPC 次数，不是替身内部行为
+describe('ComposerTray 数据范围单例（U1：面板不自建实例、开合不重发首次拉取 RPC）', () => {
+  it('面板打开/关闭/换件/重开：数据范围实例恒一个、loadSubagents / loadWorkflows 各仅一次', async () => {
+    // 真实数据范围（外壳仍是唯一调用点）+ spy 拉取路径：断言的是 load RPC 次数，不是替身内部行为
     trayCountsSwitch.useReal = true
     const subagentStore = useSubagentStore()
     const workflowStore = useWorkflowStore()
@@ -1144,10 +1144,10 @@ describe('ComposerTray 第 4 件「子会话」（u7）', () => {
   })
 })
 
-// ── 聚合面板 headerAction 段（demo composer-bar spec §2.1 B3：L2 聚合面 = 定时任务 + 托盘 →
+// ── 聚合面板 headerAction 段（demo composer-bar spec §2.1 B3：L2 聚合范围 = 定时任务 + 托盘 →
 //    layers 单钮，被聚合 clock 的直开动作由面板首段承接）──
 
-describe('ComposerTray 聚合面板 headerAction 段（B3 聚合面含定时任务入口）', () => {
+describe('ComposerTray 聚合面板 headerAction 段（B3 聚合范围含定时任务入口）', () => {
   it('有可见声明 → 面板首段渲染 headerAction 按钮（clock 直开入口随聚合走）', async () => {
     headerActionsSwitch.source = makeHeaderActionSource()
     trayState.bashRunning = [makeTask({ taskId: 'bt-1' })]

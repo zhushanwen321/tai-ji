@@ -30,11 +30,11 @@ function choiceRequest(overrides: Record<string, unknown> = {}): ExtensionUIRequ
         header: 'db',
         question: '用哪个数据库？',
         options: [{ label: 'pg' }, { label: 'mysql' }],
-        // overrides 值域 unknown，spread 前按 fixture 注入面收窄（缺省 undefined 合法展开）
+        // overrides 值域 unknown，spread 前按 fixture 注入点收窄（缺省 undefined 合法展开）
         ...(overrides.question as Record<string, unknown> | undefined),
       },
     ],
-    // overrides 值域 unknown，spread 前按 fixture 注入面收窄（缺省 undefined 合法展开）
+    // overrides 值域 unknown，spread 前按 fixture 注入点收窄（缺省 undefined 合法展开）
     ...(overrides.request as Record<string, unknown> | undefined),
   } as unknown as ExtensionUIRequest
 }

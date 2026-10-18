@@ -319,7 +319,7 @@ export function resolvePersonalProviderConfigPath(sources?: ZcodeSourcePaths, en
   return resolvePersonalProviderSource(sources, engineDataDir).path;
 }
 
-/** 校验链读取结果：SourceConfig + 诊断面已读源描述（merge 视图 = 双路径）。 */
+/** 校验链读取结果：SourceConfig + 诊断范围已读源描述（merge 视图 = 双路径）。 */
 interface PersonalProviderView {
   conf: SourceConfig;
   sourceDesc: string;
@@ -647,7 +647,7 @@ function translateToAccountModelRef(wanted: string, sources?: ZcodeSourcePaths):
  * 解析链：显式 requested（trim 非空）> 空串（= 缺席，CLI 缺省解析）。
  *
  * [R4/G3] 消费方（条件携带后）：① run 显式路径（task.model trim 非空才调用——缺席
- * 时 runViaAppServer 不进本函数、create 不携带 model 键）；② validateModel 诊断面
+ * 时 runViaAppServer 不进本函数、create 不携带 model 键）；② validateModel 诊断范围
  * （缺席 = 空串 → record.model 留空映射「用户未指定」）。
  *
  * 校验对「带 apiKey 的个人 provider 注册表」做（没配凭据的 provider 写进注册表也

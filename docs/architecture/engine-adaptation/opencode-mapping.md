@@ -201,7 +201,7 @@ opencode 两层 message/part（user message → N 个 assistant message，各含
 
 ## 9. gap 清单
 
-**源有靶无**（opencode 有、taiji 协议面无承载，适配器丢弃）：
+**源有靶无**（opencode 有、taiji 协议范围无承载，适配器丢弃）：
 - session 树操作：children、fork 树（parentID）、revert/unrevert、消息/part 删除与改写 API（groups/session.ts:144-155,369-394,409-444）。
 - 多模态与富 part：file part 输入、subtask part（内部子任务派发）、patch/snapshot parts、session.diff、todo.updated（§3.2/§4.1）。
 - 入口变体：`POST /session/{id}/command`（斜杠命令模板）、`/shell`（直跑 shell）、`/init`、`/summarize`（手动压缩）、`prompt_async` 之外的 share/init 面（groups/session.ts:343-315）。

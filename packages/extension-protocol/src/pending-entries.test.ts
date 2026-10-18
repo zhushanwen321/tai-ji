@@ -152,7 +152,7 @@ describe('mapReasonToStatus（reason→status 落盘契约权威单点，D10）'
   })
 
   it('禁扩词表：MappedPendingStatus 值域封闭在既有 6 终态（Record 全键锁定，加词即编译错）', () => {
-    // D3 明令四个新 reason 不扩 MappedPendingStatus/PendingStatus——本断言的类型面
+    // D3 明令四个新 reason 不扩 MappedPendingStatus/PendingStatus——本断言的类型范围
     // 是 Record<MappedPendingStatus, true> 全键字面量：值域长出第 7 个成员即 TS 编译失败
     const fullVocabulary: Record<MappedPendingStatus, true> = {
       completed: true,

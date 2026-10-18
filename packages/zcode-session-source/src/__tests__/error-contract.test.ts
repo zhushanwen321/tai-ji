@@ -36,7 +36,7 @@ import {
   snapshotDirNameSet,
 } from './helpers.ts'
 
-// ── 假驱动注入面（仅 recovery 错误收尾契约组使用；slot 为空 = 回退真实驱动）──────────
+// ── 假驱动注入点（仅 recovery 错误收尾契约组使用；slot 为空 = 回退真实驱动）──────────
 
 const fakeDriverSlot = vi.hoisted(() => ({ driver: null as SqliteDriver | null }))
 
@@ -219,7 +219,7 @@ describe('candidatesByteSize 行检查（bytes 非 number → warn 留痕 + 跳�
       const writer = await openWritableSqlite(join(fx.root, 'db.sqlite'))
       writer.exec('CREATE TABLE session (id TEXT PRIMARY KEY)')
       writer.exec('CREATE TABLE message (id TEXT PRIMARY KEY, session_id TEXT, sequence INTEGER, data)')
-      // part.data 可空（宿主真 schema 允许 NULL；SUM(全 NULL) 返 NULL 是该检查的真实触发面）
+      // part.data 可空（宿主真 schema 允许 NULL；SUM(全 NULL) 返 NULL 是该检查的真实触发范围）
       writer.exec('CREATE TABLE part (id TEXT PRIMARY KEY, message_id TEXT, session_id TEXT, sequence INTEGER, data)')
       writer.exec(
         'CREATE TABLE schema_migration (id TEXT PRIMARY KEY, checksum TEXT NOT NULL, app_version TEXT, time_applied INTEGER NOT NULL)',
@@ -272,7 +272,7 @@ describe('recovery 错误收尾契约（假驱动：close 失败 / probe 失败 
       expect(caught).toBeInstanceOf(SqliteUnreadableError)
       const err = caught as SqliteUnreadableError
       expect(err.attempted).toEqual(['L1-direct', 'L2-immutable', 'L3-snapshot'])
-      // 归因以探测错误为准：close 错误吞掉不参与（失败路径错误面不污染）
+      // 归因以探测错误为准：close 错误吞掉不参与（失败路径错误范围不污染）
       expect(err.message).toContain('fake probe NOTADB')
       expect(err.message).not.toContain('fake close broken')
       // L3 失败路径收尾：快照目录读后即清（零新增残留断言，并发噪声免疫形态
@@ -345,7 +345,7 @@ describe('recovery 错误收尾契约（假驱动：close 失败 / probe 失败 
       // wrapDb.close 吞错（[HISTORICAL] 只读连接 close 失败不影响读取结果）：
       // dispose 走 recovery 的 closeQuietly，close 面须单独驱动
       expect(() => handle.db.close()).not.toThrow()
-      // 前缀常量仍在断言面（快照目录识别 SSOT 未漂移）
+      // 前缀常量仍在断言范围（快照目录识别 SSOT 未漂移）
       expect(SNAPSHOT_TMP_PREFIX).toBe('taiji-zcode-snap-')
     } finally {
       fx.cleanup()

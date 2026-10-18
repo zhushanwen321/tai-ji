@@ -17,7 +17,7 @@
  * （不持久化，design T2 约束）。
  *
  * badge 小圆点（background-task-sidebar-view D4④）已随「后台命令」native 视图退役
- * （composer-task-tray D10：后台命令观察面归 Composer 托盘）——本组件不再有 badge 渲染面。
+ * （composer-task-tray D10：后台命令观察面归 Composer 托盘）——本组件不再有 badge 渲染范围。
  */
 import { X } from '@lucide/vue'
 import { Button } from '../primitives/button'

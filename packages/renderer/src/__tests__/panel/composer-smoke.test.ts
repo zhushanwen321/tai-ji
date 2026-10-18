@@ -100,7 +100,7 @@ vi.mock('@/composables/useExtensionUI', () => ({
     cancel: uiMock.cancel,
   }),
   formFilter: (req: { form?: boolean } | undefined) => req?.form === true,
-  // PanelModeBar（Panel composer 上方常驻挂载）setup 消费 planReviewFilter——窄 mock 需补齐该导出面
+  // PanelModeBar（Panel composer 上方常驻挂载）setup 消费 planReviewFilter——窄 mock 需补齐该导出清单
   planReviewFilter: (req: { planReview?: boolean } | undefined) => req?.planReview === true,
 }))
 

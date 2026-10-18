@@ -431,7 +431,7 @@ describe('useVirtuaFollow', () => {
 
   // [决策 12] 旧「U1 静默跟随变体 followIfStuck({markUnread:false})」describe 随标记分档
   // 参数退役删除：标记/静默两档合一后「贴底态正常滚」由 W1TC5、「脱离态不滚屏」由 W1TC6 +
-  // D7① 拖拽用例覆盖，无独立行为面残留。
+  // D7① 拖拽用例覆盖，无独立行为范围残留。
 
   describe('U1 onSessionRebuild（session 重建入口）', () => {
     it('置 NaN：重建后首个 scroll 事件只建快照不判定', async () => {

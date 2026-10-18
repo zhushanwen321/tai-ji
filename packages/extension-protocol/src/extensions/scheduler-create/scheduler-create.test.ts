@@ -2,7 +2,7 @@
 // 时间折叠往返（dateToOnceCron / onceCronToDate）/ isScheduleDraft 检查 /
 // isScheduleFormResult 回包检查（scheduleCreateInteract 已随统一表单协议退役，
 // 四态折叠由 ui-form 包的 uiFormInteract 测试承担——见 ../ui-form/ui-form.test.ts）。
-// 经 barrel（../../index）导入：单测同时锚定导出面。
+// 经 barrel（../../index）导入：单测同时锚定导出清单。
 
 import { describe, it, expect } from 'vitest'
 import {

@@ -1,10 +1,10 @@
 // src/__tests__/cli-entry.test.ts
 //
-// runEngineCliEntry 安装的 logger sink 行为面（stderr 兜底 + host/log 反向请求）：
+// runEngineCliEntry 安装的 logger sink 行为范围（stderr 兜底 + host/log 反向请求）：
 // debug 级不写 stderr（对齐 logger.ts CONSOLE_SINK 的「debug no-op」语义——引擎
 // stderr 落宿主 [rpc:stderr] 全量 console.error 链路，debug 刷屏会淹没真异常，
 // 常态路径的分级降噪依赖此跳过），warn/error 照旧落 stderr；host/log 反向请求
-// 全级别透传（level 随行，宿主侧自行分级——stderr 跳过不削减宿主可观测面）。
+// 全级别透传（level 随行，宿主侧自行分级——stderr 跳过不削减宿主可观测范围）。
 // 子进程真进程形态（非 in-process spy）：sink 写的是子进程 process.stderr，必须
 // 经真实 stdio 管道取证；probe 脚本 tmpdir 自写自删（fs-guard 白名单）。
 

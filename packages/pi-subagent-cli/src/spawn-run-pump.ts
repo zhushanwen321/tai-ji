@@ -188,7 +188,7 @@ function createLineConsumer(deps: StdoutPumpDeps): (line: string) => void {
       case "response":
         identity.dispatchStateResponse(parsed.id, parsed.success, parsed.data);
         // [subagent-model-switch §7.3] 进程级控制应答等待表并行分发（setModel 通路
-        // ——run 生命周期外的控制面操作等不到 per-run 监听表；两表按 id 各自一次性
+        // ——run 生命周期外的控制范围操作等不到 per-run 监听表；两表按 id 各自一次性
         // 消费，未登记 id 各自自弃）。
         dispatchControlResponse(parsed.id, parsed.success, parsed.data, parsed.error);
         return;

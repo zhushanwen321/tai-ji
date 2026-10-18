@@ -85,7 +85,7 @@ export function isThinkingLevel(v: unknown): v is ModelThinkingLevel;
 ```
 
 消费方迁移：rename-session `pure.ts:48-77`（`THINKING_LEVELS` + `isThinkingLevel` 删除改 import）、permission `config.ts:57-68`（同）。**双登记裁决**：llm-shared 持 extensions 侧唯一副本，与 subagent-core `THINKING_ORDER`（`model-ref.ts:40`）注释互指，不建跨包 import（universal 角色禁 import subagent-core，反向破坏分层）；spawn-args 手写字面量面是被迫的（package.json 明文「never subagent-core」+ W9 检查），本项只补值不收敛结构。
-**机器检查补强**（r1 主审 S2 采纳）：钉值单测只锚副本自身字面量，副本间漂移不触发任何红灯——P1-a 即该代价已兑现的实证；pi 版本门禁探针族守 runtime 注册表面、不校验 extensions 侧词表（已核实 `check-pi-semantics.mjs` / `diff-probe-thinking.mjs` 锚定范围）。随批次 2 交付构建期词表比对：小脚本从 pi-ai dist `types.d.ts` 提取 `ModelThinkingLevel` 联合成员，与 llm-shared `THINKING_LEVELS` Set 比对，不一致即非零退出，接入现有 pre-commit 按路径触发链（符合「SSOT + 机器检查」架构偏好）。**实施落定（20260914）**：`scripts/check-thinking-levels.mjs` 已交付并接入 pre-commit（触发面 = llm-shared resolve.ts / pi-rpc types.ts / pnpm-lock.yaml / 脚本自身）；提取逻辑对 pi-ai 实装的 `= "off" | ThinkingLevel` 别名引用形态做递归展开；**比对面 = llm-shared + pi-rpc 两副本**（pi-rpc 为被迫独立的第二副本，顺带比对成本 trivial 已加——超出本段原登记表，此处补记）；pi-ai 版本 bump 引起联合成员变化时红灯指向 resolve.ts 同步。
+**机器检查补强**（r1 主审 S2 采纳）：钉值单测只锚副本自身字面量，副本间漂移不触发任何红灯——P1-a 即该代价已兑现的实证；pi 版本门禁探针族守 runtime 注册表面、不校验 extensions 侧词表（已核实 `check-pi-semantics.mjs` / `diff-probe-thinking.mjs` 锚定范围）。随批次 2 交付构建期词表比对：小脚本从 pi-ai dist `types.d.ts` 提取 `ModelThinkingLevel` 联合成员，与 llm-shared `THINKING_LEVELS` Set 比对，不一致即非零退出，接入现有 pre-commit 按路径触发链（符合「SSOT + 机器检查」架构偏好）。**实施落定（20260914）**：`scripts/check-thinking-levels.mjs` 已交付并接入 pre-commit（触发范围 = llm-shared resolve.ts / pi-rpc types.ts / pnpm-lock.yaml / 脚本自身）；提取逻辑对 pi-ai 实装的 `= "off" | ThinkingLevel` 别名引用形态做递归展开；**比对面 = llm-shared + pi-rpc 两副本**（pi-rpc 为被迫独立的第二副本，顺带比对成本 trivial 已加——超出本段原登记表，此处补记）；pi-ai 版本 bump 引起联合成员变化时红灯指向 resolve.ts 同步。
 **配套 [A 基线]**：`packages/pi-subagent-cli/src/spawn-args.ts` 六值白名单补齐 `xhigh`（P1-a 实锤滞后）。行为变化（有意）：`:xhigh` 后缀从「静默拒掉降级 undefined」变为「接受传递」——与上游类型对齐，恢复上游能力。**（合流基线落点漂移：U1 归并后白名单本体在 `packages/pi-rpc/src/types.ts`，spawn-args 仅 re-export——实施于 pi-rpc，见词表检查 T2 比对面）**
 
 **D6 `normalizeModelSelector(raw: unknown): ModelSelector | null` 新导出**（建议新增）。落 `resolve.ts`（`ModelSelector` 类型 SSOT 所在地）。rename-session `pure.ts:171-178` 删本地改 import；smart-context `pure.ts:62-68` 改为 `normalizeModelSelector(r.compactModel) ?? { type: "ref", ref: "" }` 保留其回退语义，行为零变更。
@@ -147,7 +147,7 @@ callMarkerRpc(ctx: GuiContext, marker: string, payload: string, opts?: { signal?
 | 双列行合并内核（todo/ask-user/subagent-workflow） | 缓行 | 三处 fit 语义刻意真差异（截断加省略号/左补齐硬截/ANSI 感知截断），只能抽合并循环 fit 注入；每包约 10 行，边际收益。若未来立项，以 subagent-workflow tui-kit 通用件为包种子 |
 | `migrateTodo`（todo model.ts） | 不抽 | 与 Todo 三态域强耦合（verifying/failed/cancelled 映射）；与 llm-shared `migrateLegacyConfig`（文件路径搬移）仅名字近似，假同构 |
 | 双形陷阱检测（todo tool.ts text/texts、id/ids） | 不抽 | 07 号设计 out-of-scope 明列保留；各包字段与文案不同，抽出只剩一行判空 |
-| `isSubagentSession` 路径嗅探（rename-session llm.ts） | 不抽 | 15 号裁决：contested → 登记 C-ext-21，env 标记方案已否决；shared 化扩大契约面正是裁决拒绝的方向。与 D4 是不同机制（session 文件路径嗅探 vs 进程 env 判据），不合并 |
+| `isSubagentSession` 路径嗅探（rename-session llm.ts） | 不抽 | 15 号裁决：contested → 登记 C-ext-21，env 标记方案已否决；shared 化扩大契约范围正是裁决拒绝的方向。与 D4 是不同机制（session 文件路径嗅探 vs 进程 env 判据），不合并 |
 | `firstPromptInFlight` 闭包标志 / scheduler `dispatchesInFlight` / plugin-bridge `ensureSynced` 在途防抖 | 不抽 | 与 ext-guards `oncePerProcess`（结果永久缓存重放）是三种真差异语义；「在途 Promise 合流」变体全仓仅 plugin-bridge 一处 |
 | error+hint 文本拼接（plugin-bridge:169 ≈ session-manager:117） | 不单独立项 | 真重复但 1 行模板、形状微差，低于抽取阈值；随 D8 错误形状单源化自然消解 |
 | `isPlainObject` 三份 extensions 副本 | 不抽 | 3 行体量、全仓 10 份中 7 份在 packages/（extensions 侧收敛不可达）；D1 实施 bte 时可顺带评估其 1 份 |
@@ -166,12 +166,12 @@ callMarkerRpc(ctx: GuiContext, marker: string, payload: string, opts?: { signal?
 ### 5.2 真机验收（pi CLI 优先，按 AGENTS.md 本地实测规范）
 
 - V6 D4 探针（实施前置 + 修后回归）：subagent 真机任务 dump env，断言 `TAIJI_AGENT_SUBAGENT=1` 存在、`PI_SUBAGENT_*` 两键不存在；修后 subagent 内 `background:true` 恢复 D14 降级（旧行为对照：当前判据失效背景下该降级未生效）。**反向断言**（r1 主审 S4）：非 subagent 主进程（env 无 `TAIJI_AGENT_SUBAGENT`）中 `background:true` 任务正常后台化，重锚定后的 guard 不误命中降级。探针报告同时登记 §3.1 D4 ③④ 两处既有失效读者的发现。
-- V7 D8 双通道 + inflight 冒烟：session-manager 真机调一 action（raw 回包路径）+ plugin-bridge 真机 sync+tool 调用（JSON 回包路径）+ 构造非 JSON 回包断言 isError + 留痕日志（session-manager 行为微变的直接验证点）+ inflight 真机冒烟（任一 subagent 任务后 runtime 侧在途镜像计数正确或 event-adapter 收到 ack 确认帧——聚焦评审 S4 补项）。**构造手段**（r1 主审 S5）：临时 dev patch runtime session-manager-handler 的 respond 链注入畸形字符串，验收后还原不留痕。**宿主不变口径**（r1 主审 S3）：runtime 侧本设计零代码改动 + V4 导出面 typecheck 检查，二者合构成为宿主消费方行为不变论证（已核实 session-manager 回包消费方 = agent toolResult，renderer 无专属展示路径）。
+- V7 D8 双通道 + inflight 冒烟：session-manager 真机调一 action（raw 回包路径）+ plugin-bridge 真机 sync+tool 调用（JSON 回包路径）+ 构造非 JSON 回包断言 isError + 留痕日志（session-manager 行为微变的直接验证点）+ inflight 真机冒烟（任一 subagent 任务后 runtime 侧在途镜像计数正确或 event-adapter 收到 ack 确认帧——聚焦评审 S4 补项）。**构造手段**（r1 主审 S5）：临时 dev patch runtime session-manager-handler 的 respond 链注入畸形字符串，验收后还原不留痕。**宿主不变口径**（r1 主审 S3）：runtime 侧本设计零代码改动 + V4 导出范围 typecheck 检查，二者合构成为宿主消费方行为不变论证（已核实 session-manager 回包消费方 = agent toolResult，renderer 无专属展示路径）。
 - V8 D5/D6：rename-session 真机改名（thinking level 传递 + 模型恢复路径）。
 
 ### 5.3 三视角
 
-构建者白盒（各 D 项单测）+ 使用者黑盒（V7/V8 真机调用含 DOM/文案断言）+ 观察者形态（迁移后包的导出面收敛断言——删除的本地符号不再出现在 index barrel）。
+构建者白盒（各 D 项单测）+ 使用者黑盒（V7/V8 真机调用含 DOM/文案断言）+ 观察者形态（迁移后包的导出范围收敛断言——删除的本地符号不再出现在 index barrel）。
 
 ## 6. 实施拆分与分支归属
 

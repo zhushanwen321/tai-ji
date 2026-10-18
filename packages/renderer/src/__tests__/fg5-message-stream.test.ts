@@ -332,7 +332,7 @@ describe('FG5 chat store 块类型扩展', () => {
   /**
    * [u3c/u5a 退役] queue_update 全族用例（8 条：queueStates 置位/清空、drain 驱动 appendUser、
    * 重复文本/跨类型计数 diff、message_start 时序、retry/queue session 隔离）随投递所有权内核
-   * 整体退役——设计 §3.1 删除面 + §3.4+ 接管归属表：
+   * 整体退役——设计 §3.1 删除范围 + §3.4+ 接管归属表：
    * - queue_update 帧降级为内核内部回执（u3b 删除 message.queue_update handler），不再直驱
    *   renderer UI，也不再写 store 快照分区（[u5a] 该分区已删除）/ 驱动 pendingBuffer 计数路径（pushPending/
    *   countDrained/drainN）；

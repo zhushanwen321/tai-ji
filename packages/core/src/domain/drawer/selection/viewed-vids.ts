@@ -35,7 +35,7 @@ export function bindViewedVidPanels(source: ViewedPanelsSource): void {
  *
  * 组合链（查询源固定为 panel 枚举，R2 S1）：逐 panel → focusedSessionId → 该 sid 的
  * 复合谓词（isOpen ∧ activeTab ∈ {'subagent','btw'} ∧ 选中 id——唯一拼装点 =
- * selection/predicates.ts，与 btw-replay 触发面 / useBtwTabData 视口命中同源）。
+ * selection/predicates.ts，与 btw-replay 触发范围 / useBtwTabData 视口命中同源）。
  *
  * [禁止] drawer 分区全枚举：曾开过 drawer 的 session 焦点切走后分区保留，全枚举会把
  * 全部历史 agentcall 分区永久豁免，B9 对重度用户静默失效。分区读取经 updateFor

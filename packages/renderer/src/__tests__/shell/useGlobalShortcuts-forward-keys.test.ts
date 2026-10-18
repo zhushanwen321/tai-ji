@@ -11,8 +11,8 @@
  *    主进程严格拒绝——方向安全（严格侧只会少转发不会误转发），断言 renderer ⊇ 主进程。
  * 2. 入清单约束（deriveForwardAccelerators 镜像 parseForwardAccelerator）：仅 mod 前缀组合；
  *    裸键/shift-only/alt/Esc override 不入清单（页面聚焦态不生效，§7.4 已知边界）。
- * 3. 上报触发面：setup 即全量重报（browserSetForwardKeys，覆盖初始化/renderer 重载/崩溃恢复）；
- *    overrides 变化 → browserUpdateForwardKeys 注册/注销增量（settings 重录触发面）。
+ * 3. 上报触发范围：setup 即全量重报（browserSetForwardKeys，覆盖初始化/renderer 重载/崩溃恢复）；
+ *    overrides 变化 → browserUpdateForwardKeys 注册/注销增量（settings 重录触发范围）。
  * 4. 转发派发：onBrowserForwardKey 回执 accelerator → 同一 keymap 派发动作（guardComposerFocus
  *    不适用——转发事件蕴含焦点在 WebContentsView，composer 非输入态）。
  *
@@ -44,7 +44,7 @@ vi.mock('@/lib/ipc', async (importOriginal) => {
   }
 })
 
-/** commandStore 壳 mock：shortcutOverrides 可控 ref（重录触发面驱动点；真 ref 使 watch 可触发） */
+/** commandStore 壳 mock：shortcutOverrides 可控 ref（重录触发范围驱动点；真 ref 使 watch 可触发） */
 const commandStoreMock = vi.hoisted(() => ({
   overrides: null as { value: Record<string, string> } | null,
 }))

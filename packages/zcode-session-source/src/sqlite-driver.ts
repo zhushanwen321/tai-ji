@@ -91,7 +91,7 @@ let cachedDriver: SqliteDriver | undefined
 /**
  * 加载当前运行时可用的 sqlite 驱动（进程内缓存——驱动探测是一次性事实）。
  * 宿主既无 bun:sqlite 也无 node:sqlite 时抛 Error（理论态）：调用方按降级契约
- * 处理（zcode 读取面整体降级为错误指引，pi 链路不受影响）。
+ * 处理（zcode 读侧整体降级为错误指引，pi 链路不受影响）。
  */
 export async function loadSqliteDriver(): Promise<SqliteDriver> {
   if (cachedDriver) return cachedDriver

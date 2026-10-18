@@ -212,7 +212,7 @@ const props = defineProps<{
   variant?: ComposerVariant
   /** 过滤 query（输入区 / 或 # 后的内容，空串/缺省=不过滤；file 按 name+path 过滤，slash 按命令名过滤） */
   query?: string
-  /** 已插入的 skill 名集合（多 skill 注入 D2 已选禁选数据面）：Composer 从当前 segments 取。
+  /** 已插入的 skill 名集合（多 skill 注入 D2 已选禁选数据范围）：Composer 从当前 segments 取。
    *  命中项显示「已选」并禁选（同一 skill 不重复注入全文，防上下文浪费）。默认空。 */
   selectedSkillNames?: string[]
   /** 全局 skill（useGlobalSkills → skillRegistry globalCache，W4 FR-5）。skill 段两态共用 +

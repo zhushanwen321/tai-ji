@@ -4,7 +4,7 @@
  * **单一数据源**：队列条目 = `session.delivery` 状态帧派生视图（core `getDeliveryProjectionRef()`，
  * state topic last-value 全量快照）。随报文更新的旧通路已随内核迁移退役：
  * - `queue_update`（steering/followUp 快照）不再直驱 UI（内核内部回执用，D7）；
- * - `useCompactQueue`（本地 defer 队列）整体退役（设计 §3.1 删除面：入队/flush/S1/timer/
+ * - `useCompactQueue`（本地 defer 队列）整体退役（设计 §3.1 删除范围：入队/flush/S1/timer/
  *   熔断/confirmDelivery/drain 全部由内核 backoff+settled+watchdog、delivery.cancel/drain、
  *   送达回执接管）。
  *
@@ -69,7 +69,7 @@ export function foldQueueRows(rows: readonly QueueRow[]): { visible: QueueRow[];
   }
 }
 
-/** 撤销/重试回草稿的注入面（Composer 壳提供——草稿/chip 操作属壳层 DOM 能力，本层不直连 inputRef）。 */
+/** 撤销/重试回草稿的注入点（Composer 壳提供——草稿/chip 操作属壳层 DOM 能力，本层不直连 inputRef）。 */
 export interface QueueRowsDeps {
   /**
    * 撤销（×）成功后把消息送回输入框草稿。空输入 → 按 segments 整段恢复（text + chips）；

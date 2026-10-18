@@ -16,7 +16,7 @@
 | tokens.css 全文件 | 无 `--md-code-*` 组 | `--md-code-bg/fg` 六主题各一对（决策 5） |
 | main.ts:41-44 neutral 兜底值 | 同旧 | —（style.css 加载成功时不生效，但兜底失真） |
 
-镜像校验单测 `mobile-token-mirror-parity.test.ts` 断言面仅 accent 族四组，neutral/bg/fw 不在断言面，故双绿不拦分叉。
+镜像校验单测 `mobile-token-mirror-parity.test.ts` 断言范围仅 accent 族四组，neutral/bg/fw 不在断言范围，故双绿不拦分叉。
 
 增量（2026-10-10 demo 复刻波）：桌面侧六主题 accent 换青玉系 + 新增 `--link-c`/`--code-c`/`--md-code-*` 改 code-c 派生，parity 断言强制下 accent 族已机械同步到 mobile 镜像（:root + light 块）；其余分叉项如上表维持待裁决。
 

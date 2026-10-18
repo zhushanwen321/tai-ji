@@ -451,7 +451,7 @@ export class SessionChannel {
   /**
    * [P0-1 U5/D7] dispose 标志：dispose 收割后 closeSession 短路——收割形态下连接
    * 可能仍 alive（close 事件迟到，finalize 未跑、child 非 null），此时发 close
-   * request 会写死进程（请求挂到控制面超时）或触发惰性重建（凭空 spawn 无人使用的
+   * request 会写死进程（请求挂到控制范围超时）或触发惰性重建（凭空 spawn 无人使用的
    * 进程，违背 dispose 防泄漏语义）；进程随即被引擎杀链回收，会话驻留随之消亡。
    */
   private disposed = false;

@@ -1,6 +1,6 @@
 // ui-form.test.ts — 统一提问表单协议：类型双路径（payload 构造 / answers 解析）/
 // TUI 抛错契约 / uiFormInteract 四态折叠 / echo 检测 / isFormQuestion 与 isFormAnswers 检查。
-// 经 barrel（../../../index）导入：单测同时锚定新增导出面。
+// 经 barrel（../../../index）导入：单测同时锚定新增导出清单。
 
 import { describe, it, expect, vi } from 'vitest'
 import {

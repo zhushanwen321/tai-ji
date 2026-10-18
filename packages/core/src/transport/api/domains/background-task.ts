@@ -7,7 +7,7 @@
  * 消费侧 composable（经 events 通道、模块级单 listener，AGENTS 规则 2），不在此处封装。
  *
  * 任务条目形状直接用 @zhushanwen/extension-protocol 的 BackgroundTaskRegistryEntry（D9 数据契约
- * 零新造，与 bash_output 工具面的 snake_case 契约互不相干）。shared protocol.ts 侧是结构镜像
+ * 零新造，与 bash_output 工具范围的 snake_case 契约互不相干）。shared protocol.ts 侧是结构镜像
  *（shared 不依赖 extension-protocol），镜像 ⇔ 契约的逐字段全等由本文件 BackgroundTaskMirrorEqualsContract
  * 编译期检查——任一侧形状漂移即 tsc 红。
  *

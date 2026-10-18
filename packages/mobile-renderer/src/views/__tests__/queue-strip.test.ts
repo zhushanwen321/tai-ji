@@ -34,7 +34,7 @@ vi.mock('@taiji/core/transport/api/domains/chat', async (importOriginal) => {
   return { ...actual, cancelDelivery: cancelDeliveryMock }
 })
 
-/** ComposerInput stub 的 expose spy（消费 API 断言面；仅「端到端回填」组消费） */
+/** ComposerInput stub 的 expose spy（消费 API 断言范围；仅「端到端回填」组消费） */
 const inputCalls = { insertTextAtCursor: vi.fn() }
 
 vi.mock('@taiji/ui/features/composer', async (importOriginal) => {

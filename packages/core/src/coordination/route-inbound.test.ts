@@ -567,7 +567,7 @@ describe('configureRouteInbound — 声明式条目 schema（D2 阶段 A）', ()
   })
 
   it('D2-b payloadGuard 坏形状 → 跳过 sessionEffect，dispatchSession/crossSession 分发照常（检查只门控 effect）', () => {
-    // 探针条目经导出面注册（用后清理）：同时声明 crossSession + payloadGuard，
+    // 探针条目经导出清单注册（用后清理）：同时声明 crossSession + payloadGuard，
     // 验证检查失败时分发不受门控（D2「payloadGuard 不门控分发」显式条款）
     const probeType = 'test.d2.payloadGuardProbe'
     const sessionEffect = vi.fn()

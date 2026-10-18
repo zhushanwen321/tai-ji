@@ -96,7 +96,7 @@ describe('MobileComposer 中断键（remote-use-mobile D7（移动壳 v1 功能�
 // kind:'text' 移除占位 + insertText 降级。断言落最近可观察面：占位 badge 生命周期 +
 // insertText 降级文案（happy-dom 无 document.execCommand，stub spy 兼作观察面）。
 // 环境说明：happy-dom 已支持 DataTransfer/ClipboardEvent/DataTransferItem.getAsFile（探针实测），
-// 粘贴链所需事件面齐备，无需 per-file 切 jsdom。
+// 粘贴链所需事件范围齐备，无需 per-file 切 jsdom。
 describe('图片粘贴降级链（真实 paste 事件驱动）', () => {
   const execSpy = vi.fn<(command: string, showUI?: boolean, value?: string) => boolean>(() => true)
 

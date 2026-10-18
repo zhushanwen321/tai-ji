@@ -157,7 +157,7 @@ function onWindowKeydown(e: KeyboardEvent): void {
 
 if (typeof window !== 'undefined') {
   window.addEventListener('keydown', onWindowKeydown, true)
-  // composingRef 维护：组合发生在消息区外的输入面，window capture 感知组合起止
+  // composingRef 维护：组合发生在消息区外的输入范围，window capture 感知组合起止
   const onCompositionStart = (): void => { composingRef.value = true }
   const onCompositionEnd = (): void => { composingRef.value = false }
   window.addEventListener('compositionstart', onCompositionStart, true)

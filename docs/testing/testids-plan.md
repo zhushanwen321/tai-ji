@@ -1,7 +1,7 @@
 # plan 面 data-testid 清单（PlanModeBar / PlanReviewBar / PlanDocsPanel / PlanCommentPopover）
 
 > 口径：testid 以组件 template 内 `data-testid` 属性为准（手册总则 [00-overview.md](./00-overview.md)）。
-> 覆盖面 = `packages/renderer/src/components/panel/plan/` 四组件；消费测试 =
+> 覆盖范围 = `packages/renderer/src/components/panel/plan/` 四组件；消费测试 =
 > `packages/renderer/src/__tests__/{components,stores,composables}/plan-*` 族（资产登记见
 > [e2e-map.json](./e2e-map.json) E2E-MOCK-02）。本账随 plan 模式状态机显式化 U4b 建立
 > （2026-09-24）：该批次首次对 plan 面 testid 做新增/更名/退役，按同 commit 纪律建账并留变更登记。

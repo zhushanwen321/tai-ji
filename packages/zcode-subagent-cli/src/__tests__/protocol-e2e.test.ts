@@ -100,7 +100,7 @@ interface Inbound {
   params?: { runId?: string; seq?: number; event?: { type: string; delta?: string } };
 }
 
-/** 驱动一个引擎 CLI 进程：写帧 / 读帧 / 自动应答数据面 host/* 反向请求。 */
+/** 驱动一个引擎 CLI 进程：写帧 / 读帧 / 自动应答数据范围 host/* 反向请求。 */
 class EngineProc {
   private readonly child: ChildProcess;
   private readonly frames: Inbound[] = [];
@@ -157,7 +157,7 @@ class EngineProc {
     let frame: Inbound;
     if (typeof parsed.method === "string" && parsed.method.startsWith("host/")) {
       frame = { kind: "reverse", id: parsed.id as string, method: parsed.method, params: parsed.params as Inbound["params"] };
-      // 数据面自动应答（host/log 等 {ok:true}；两阶段面 {ack:true}）
+      // 数据范围自动应答（host/log 等 {ok:true}；两阶段面 {ack:true}）
       this.write({ id: parsed.id, result: { ok: true } });
     } else if (typeof parsed.method === "string") {
       frame = { kind: "notification", method: parsed.method, params: parsed.params as Inbound["params"] };
@@ -383,7 +383,7 @@ describe("bin e2e：interact(resume) 全链（resume 读 → create 新 session 
         },
       });
 
-      // handleReady 的新 sessionRef（create 应答后回传——锚换新的协议面证据）
+      // handleReady 的新 sessionRef（create 应答后回传——锚换新的协议范围证据）
       const handle = await engine.waitFor((f) => f.kind === "reverse" && f.method === "host/handleReady");
       const handleSid = (handle.params as { sessionRef?: Record<string, string> })?.sessionRef?.["sessionId"];
       expect(typeof handleSid).toBe("string");

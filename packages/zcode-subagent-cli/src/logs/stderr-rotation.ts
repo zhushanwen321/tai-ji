@@ -1,7 +1,7 @@
 // src/logs/stderr-rotation.ts
 //
 // zcode app-server stderr tee 的实例维度文件名 + 轮转 + 过期清理（W11，impl-plan
-// §2.11 / 设计 §3.9 写入面表「宿主侧引擎 stderr」行）——SDK 单源实现的薄包装
+// §2.11 / 设计 §3.9 写侧表「宿主侧引擎 stderr」行）——SDK 单源实现的薄包装
 // （只绑定 zcode 前缀常量；实现与契约见
 // @zhushanwen/subagent-engine-sdk logs/stderr-rotation.ts）。
 //

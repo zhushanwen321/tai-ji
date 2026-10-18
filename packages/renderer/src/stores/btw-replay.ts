@@ -8,7 +8,7 @@
  * live ≡ reload 由共用同一 applyEntry reducer 构造性成立（等价性断言见本目录测试
  * btw-replay.test.ts + core apply-entry-equivalence 家族）。
  *
- * 触发面 = 复合谓词单一源「drawer 开 + btw tab + 选中线」（selection/predicates.ts 的
+ * 触发范围 = 复合谓词单一源「drawer 开 + btw tab + 选中线」（selection/predicates.ts 的
  * useViewedBtwVid，display-containers §7.1 迁出不变量——与 getViewedVids 的 D5 豁免、
  * useBtwTabData 视口命中同源；selectedBtwVid 唯一源 = BtwPanel setBtwView，M3-a；不设第二副本）：
  * - 重开线（重启后自动选中 / 点 chip / 关 drawer 再开 / 切回焦点会话分区）→ 源值翻转即回放；

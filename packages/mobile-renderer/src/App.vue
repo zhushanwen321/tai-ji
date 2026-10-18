@@ -70,7 +70,7 @@ provide(DIALOG_QUEUE_HANDLE_KEY, registerDialogQueueHandle)
 // 在 inject 缺失时仍在场但点击 no-op（假行为）；provide 后 minimize/restore 经
 // transition→getState 闭环真实生效（expanded→minimized→restored，对齐桌面
 // useExtensionHostBridge 同类 provide）。bus 为独立实例：移动壳共享 bus 私居
-// companion-bridge（无导出面），本实例不 subscribe——状态迁移不依赖订阅（transition/getState
+// companion-bridge（无导出清单），本实例不 subscribe——状态迁移不依赖订阅（transition/getState
 // 直读分区 Map），订阅无事件源的 bus 属无效监听；桌面订阅才有的 ui-request 自动建 expanded
 // 分区（z-index 派生）与 session-destroyed cleanup 在移动壳消费方之外（移动壳未定义
 // --z-dialog，bandStyle 的 expanded 分支本就无有效派生视图）。

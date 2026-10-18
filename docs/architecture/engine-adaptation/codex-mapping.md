@@ -9,7 +9,7 @@
 
 推荐 zcode 式常驻接入：spawn `codex app-server --listen stdio://`（app-server/src/main.rs:29-36，stdio 为默认 transport），JSON-RPC over stdio，一个常驻引擎进程承载多个 thread（codex 的会话单位）。thread 生命周期：`thread/start` 创建 → `turn/start` 提交任务 → 通知流（`item/*`、`turn/completed`）→ `thread/resume`/`thread/fork` 续接；会话落盘 rollout JSONL，进程重启后仍可 `thread/resume`。审批等反向交互走 JSON-RPC ServerRequest（服务端 → 客户端请求，须应答）。
 
-exec 降级路径（一次性任务形态）：`codex exec --json --output-schema <file> "<prompt>"`（exec/src/cli.rs:47-65，`--json` 输出 JSONL 事件流，`--output-schema` 指定终响应 JSON Schema），`--output-last-message <file>` 取最终正文（cli.rs:67-74），`codex exec resume <session-id> --json` / `codex exec fork <session-id>` 续接（cli.rs:148-158）。降级路径事件面窄（无 delta 流），仅作 app-server 不可用时的回退。
+exec 降级路径（一次性任务形态）：`codex exec --json --output-schema <file> "<prompt>"`（exec/src/cli.rs:47-65，`--json` 输出 JSONL 事件流，`--output-schema` 指定终响应 JSON Schema），`--output-last-message <file>` 取最终正文（cli.rs:67-74），`codex exec resume <session-id> --json` / `codex exec fork <session-id>` 续接（cli.rs:148-158）。降级路径事件范围窄（无 delta 流），仅作 app-server 不可用时的回退。
 
 ## 2. run 参数映射表
 
@@ -64,7 +64,7 @@ run.params.task（AgentCallOpts）/ ctx / resume → app-server `thread/start`�
 | turn/started | — | 合成开界 | 适配器开新 turn（不开 taiji 事件） |
 | turn/completed | turn_end | 直接 | Turn{id,items,status,error,…}（v2/thread_data.rs:353-373）；turn 级 usage 不在此载荷，经 tokenUsage/updated |
 | turn/diff/updated | — | 丢弃 | turn 级聚合 diff，taiji 无槽 |
-| turn/plan/updated | — | 丢弃 | plan 工具面，taiji 无槽 |
+| turn/plan/updated | — | 丢弃 | plan 工具范围，taiji 无槽 |
 | item/started | tool_start（tool 类 item）/ — | 直接 | CommandExecution/McpToolCall/DynamicToolCall/WebSearch 等 → tool_start{toolName,args}；AgentMessage/Reasoning/UserMessage/ContextCompaction 等非 tool 类不产 tool_start |
 | item/completed | tool_end（tool 类）/ message_end（AgentMessage）/ compaction（ContextCompaction）/ — | 直接 | 同上分派；AgentMessage 完成即正文定稿（不含 usage） |
 | item/autoApprovalReview/started / completed、autoApprovalReview/strictReviewRequired | — | 丢弃 | guardian 自动审批内部面 |
@@ -113,7 +113,7 @@ thread.started（:40-43，携 thread_id）/ turn.started（:47）/ turn.complete
 | DynamicToolCall{namespace,tool,arguments,status,contentItems,success}（v2/item.rs:335-346） | ToolCall{toolName, args:arguments, result:{content:contentItems 文本化}, isError:!success} | 宿主侧动态工具反呼见 §7 |
 | FileChange{changes:[{path,kind,diff}],status}（v2/item.rs:307-311, :1065-1089） | 合成 ToolCall{toolName:"apply_patch",args:{changes},result:{content:[diffs join]},isError:status∈{Failed,Declined}} | codex 无 per-file tool 调用流，整个 patch 为一个 item |
 | WebSearch{id,query,action,results} | ToolCall{toolName:"web_search",args:{query},result:{content:[results]}} | WebSearchItem 定义于 codex-extension-items（v2/item.rs:378, :918-923） |
-| CollabAgentToolCall / SubAgentActivity | 丢弃（或合成 activity） | codex 内建多 agent 协作面，taiji 无对应槽 |
+| CollabAgentToolCall / SubAgentActivity | 丢弃（或合成 activity） | codex 内建多 agent 协作范围，taiji 无对应槽 |
 | TodoList / Plan / ImageView / Sleep / ImageGeneration / ReviewMode items | 丢弃（或 GUI 自行消费） | taiji 9 事件无槽 |
 | exec 版 CommandExecutionItem{command,aggregatedOutput,exitCode,status}（exec/src/exec_events.rs:161-166） | 同上 shell 装载 | exec_events McpToolCallItemResult{content:Vec\<JsonValue\>,meta,structuredContent}（:263-276）同 v2 对位 |
 

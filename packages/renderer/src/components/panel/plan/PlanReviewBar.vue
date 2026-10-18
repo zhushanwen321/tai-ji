@@ -126,7 +126,7 @@
       {{ t('plan.reviewBar.revising') }}
     </div>
     <!-- 分支③ 降级态（D8 可行动化：一句成因说明 + [重新提交审批] 按钮）：state=reviewing 而
-         进程已换（E3 重启/挂起已消亡）——按钮经消息发送通道注入固定文案 user 消息（D8 写入面
+         进程已换（E3 重启/挂起已消亡）——按钮经消息发送通道注入固定文案 user 消息（D8 写侧
          已穷举登记），agent 在提示词纪律下重调 submit-review；文案分源（resumeHint）。
          退出入口收敛到左区常驻退出按钮；耗时显示不做（设计裁决） -->
     <div
@@ -273,7 +273,7 @@ function submit(decision: 'approve' | 'revise' | 'dismiss'): void {
 /**
  * 重新提交审批（D8 降级态可行动化）：经 renderer 既有消息发送通道（message.send，与用户
  * 在 composer 直发同链）注入一条固定文案的 user 可见消息（「请重新提交计划审批」——D8
- * 写入面穷举已登记：rename-session / smart-context / session-reader / fork / 回放审计等
+ * 写侧穷举已登记：rename-session / smart-context / session-reader / fork / 回放审计等
  * 消费方同真实用户消息语义），agent 在 plan 模式提示词纪律下重调 submit-review。
  * 失败双分支（设计 D8 明文「发送失败/agent 未响应」）就近错误行 + 左区退出常驻兜底：
  * ① 发送失败 = message.send 抛错（WS/超时）；② agent 未响应 = 发送成功但预期重挂未发生

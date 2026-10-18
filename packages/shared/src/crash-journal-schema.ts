@@ -149,7 +149,7 @@ export interface CrashJournalEvent {
   /** 进程存活秒数。 */
   uptimeSec?: number | null
   /**
-   * 滚动重启 deferred/forced 事件的当时镜像在途计数（D5 ⑤ stale-high 观测面）：
+   * 滚动重启 deferred/forced 事件的当时镜像在途计数（D5 ⑤ stale-high 观测范围）：
    * 数字 = 在场且已上报的镜像合计；null = 计数未知（errs/absent-report 形态，
    * u7b 配方——0 是「在场且无在途」的已证事实，null 才是未知）。其余事件缺省。
    */

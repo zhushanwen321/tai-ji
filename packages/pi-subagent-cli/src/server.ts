@@ -8,8 +8,8 @@
 //
 // 10 正向方法逐个映射到 EnginePort（本地 port-types 镜像）成员；run 期间事件经
 // `event` 通知（runId + 单调 seq）外发，onHandleReady/onChildSpawned/stream 经
-// host/* 反向请求上抛（[池抽象降级] host/poolResolved 通道已随 poolKey 协议面退役删除）。
-// 查询面两方法（listModels/validateModel）不映射 EnginePort——PiEngine 未实装该
+// host/* 反向请求上抛（[池抽象降级] host/poolResolved 通道已随 poolKey 协议范围退役删除）。
+// 查询范围两方法（listModels/validateModel）不映射 EnginePort——PiEngine 未实装该
 // 可选面，分发位直接路由 engine-query（读 pi 数据目录 json，pi-workflow-run-resource-model
 // §3.3 决策 11 方案 B）。
 //
@@ -74,7 +74,7 @@ const logger = getLogger("pi-engine-cli");
 
 /** 入站帧来源（readline 已拆行的请求帧 + 反向请求应答帧混流）。 */
 export interface EngineProtocolServerOptions {
-  /** stdout 写入面（每帧一行 JSON）。 */
+  /** stdout 写侧（每帧一行 JSON）。 */
   write: FrameWriter;
   /** 引擎实例（缺省 createDefaultPiEngine——测试注入 fake/DI 实例）。 */
   engine?: EnginePort & {
@@ -85,7 +85,7 @@ export interface EngineProtocolServerOptions {
   /** 应答等待缺省超时（反向请求两阶段等待上限兜底；默认 REVERSE_TIMEOUT_DEFAULT_MS）。 */
   reverseTimeoutMs?: number;
   /**
-   * pi agent 目录（引擎查询面 listModels/validateModel 的数据目录；缺省 =
+   * pi agent 目录（引擎查询范围 listModels/validateModel 的数据目录；缺省 =
    * resolvePiAgentDir()——env PI_CODING_AGENT_DIR 优先、缺省系统 pi 目录）。
    * 测试注入 tmp fixture 目录隔离真实数据。
    */
@@ -109,7 +109,7 @@ export class EngineProtocolServer {
   private readonly engine: NonNullable<EngineProtocolServerOptions["engine"]>;
   private readonly reverseClock: ReverseRequestClock | undefined;
   private readonly reverseTimeoutMs: number;
-  /** 引擎查询面数据目录（listModels/validateModel 应答源；见 opts.piAgentDir）。 */
+  /** 引擎查询范围数据目录（listModels/validateModel 应答源；见 opts.piAgentDir）。 */
   private readonly queryAgentDir: string;
   private readonly frameLoop: FrameLoopContext;
   private readonly activeRuns = new Map<string, ActiveRun>();
@@ -148,7 +148,7 @@ export class EngineProtocolServer {
       run: (params) => this.run(params as RunParams),
       cancel: (params) => this.cancel(params as { runId: string; reason: string }),
       read: (params) => this.read(params as ReadParams),
-      // 查询面两方法路由 engine-query（pi-workflow-run-resource-model §3.3 决策 11
+      // 查询范围两方法路由 engine-query（pi-workflow-run-resource-model §3.3 决策 11
       // 方案 B：读 pi 数据目录 json，不经 engine 实例——PiEngine 本就未实装该可选面）
       listModels: () => ({ models: listPiModels(this.queryAgentDir) }),
       validateModel: (params) => this.validateModel(params as { modelRef?: string }),
@@ -303,8 +303,8 @@ export class EngineProtocolServer {
     return this.engine.read({ data: params.handle });
   }
 
-  /** 查询面裁决（engine-query.validatePiModel：缺席查 settings.json 缺省模型，
-   * 未命中回 engine_model_unknown 结构化错误——诊断面如实裁决不抛断链）。 */
+  /** 查询范围裁决（engine-query.validatePiModel：缺席查 settings.json 缺省模型，
+   * 未命中回 engine_model_unknown 结构化错误——诊断范围如实裁决不抛断链）。 */
   private validateModel(params: { modelRef?: string }): { canonicalRef: string } {
     return validatePiModel(params.modelRef, this.queryAgentDir);
   }
@@ -375,7 +375,7 @@ export class EngineProtocolServer {
    *
    * ack 两阶段（R9-2）：人机交互通道（host/askUser）宿主先回
    * `{ack:true}`——只 ack 计时面（移出 in-flight 自灭计时），**不终结等待**；最终
-   * 结果帧才 settle。数据面通道宿主直接回终态（{ok:true} 等），ack 即 settle。 */
+   * 结果帧才 settle。数据范围通道宿主直接回终态（{ok:true} 等），ack 即 settle。 */
   private settleReverse(id: number | string, frame: { result?: unknown; error?: unknown }): void {
     const pending = this.reversePending.get(String(id));
     if (pending === undefined) {

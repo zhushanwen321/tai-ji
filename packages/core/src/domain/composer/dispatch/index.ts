@@ -4,7 +4,7 @@
  * 定位：p3-strangler-domains::composer W3 产物。staging/submit/bash/send/fork-mode/handoff-mode
  * 六个 composable 迁入 core，经 deps 注入跨域能力（chatStore/useChat/useSidebar 等），零 renderer import。
  * fork-mode/handoff-mode 的共享行为骨架在 ./staging-mode（D8 泛化）——dispatch 内部模块，
- * 不经 barrel 导出（公共面不宣告内部骨架）。
+ * 不经 barrel 导出（公共范围不宣告内部骨架）。
  *
  * barrel 用 export * 自动 re-export 各模块已 export 的符号：六个 composable + 已 export 的
  * deps 接口（ComposerSendDeps/ForkDeps/HandoffDeps）。ComposerSubmitDeps 未 export，

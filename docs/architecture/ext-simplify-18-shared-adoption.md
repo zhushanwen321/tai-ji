@@ -1,6 +1,6 @@
 # ext-simplify-18：shared 采用批兑现（17 号长期议题 + 包内收敛）
 
-> 状态：v2 双审查通过（20260914，双 PASS 0 must-fix）。审查轨迹：双审 r1——主审 PASS（0 MF + 7 S + 4 INFO，方案/清单/等价论证经独立复扫全部成立）、影响面 NEEDS-FIX（2 MF + 2 S，均 D6 检查面：触发面不含 model-ref.ts 且 CI 不跑检查；extractConstListMembers 正则要求类型标注而 THINKING_ORDER 无标注实装失配）。v2 全修：D6 补触发面扩面 + 提取正则适配决策（MF-1/2，适配正则经三真实源文件实测验证，`\s*=` 吸收无标注形态空格）、§2.2 消费点清单补全至实测全量（S1）、cache-probe:73 论据改锚 pi-ai 实装构造点（S3）、system-prompt-trace 改直接删导出（S6，taiji 组非独立发布，re-export 论据不成立；影响面复审复核成立——mandatory-extensions.json 实证 + 包外零 import）、V1 grep 词边界 / V2b model-picker 钉值 / V4 测试路径 / V6 人工清单 / V8 真机化（S2/S4/S5/S7 + INFO 全收）、负面清单补 relay.mjs、§6 债务逐条关闭登记义务（影响面 S-2）。r2 影响面定向复审：MF-1/MF-2/S-1/S-2 全部解决，PASS。
+> 状态：v2 双审查通过（20260914，双 PASS 0 must-fix）。审查轨迹：双审 r1——主审 PASS（0 MF + 7 S + 4 INFO，方案/清单/等价论证经独立复扫全部成立）、影响面 NEEDS-FIX（2 MF + 2 S，均 D6 检查面：触发范围不含 model-ref.ts 且 CI 不跑检查；extractConstListMembers 正则要求类型标注而 THINKING_ORDER 无标注实装失配）。v2 全修：D6 补触发范围扩面 + 提取正则适配决策（MF-1/2，适配正则经三真实源文件实测验证，`\s*=` 吸收无标注形态空格）、§2.2 消费点清单补全至实测全量（S1）、cache-probe:73 论据改锚 pi-ai 实装构造点（S3）、system-prompt-trace 改直接删导出（S6，taiji 组非独立发布，re-export 论据不成立；影响面复审复核成立——mandatory-extensions.json 实证 + 包外零 import）、V1 grep 词边界 / V2b model-picker 钉值 / V4 测试路径 / V6 人工清单 / V8 真机化（S2/S4/S5/S7 + INFO 全收）、负面清单补 relay.mjs、§6 债务逐条关闭登记义务（影响面 S-2）。r2 影响面定向复审：MF-1/MF-2/S-1/S-2 全部解决，PASS。
 > 来源：①17 号实施终态登记的长期采用议题（isRecord 其余副本、toErrorMessage 全域采用批的 extensions 部分、THINKING_ORDER 纳入词表检查议题，见 17 号实施终态的债务逐条关闭登记——ext-simplify-index 索引原档案族已清理）；②20260914 全仓两层重复检测（jscpd 197 克隆聚合 + 三域 subagent 语义扫描，全部候选经主 agent grep/实读二次核实）。本批全部为 17 号已裁决框架内的**纯采用与包内收敛**：ext-guards 零改动、extension-protocol 零改动，唯一共享层新增导出在 llm-shared。
 > 用户裁决（20260914）：参考 17 号框架延续，直接走 tech-design 审查 → dev-flow。
 
@@ -89,7 +89,7 @@ llm-shared resolve.ts:70 `parseRef(ref)`（私有）：`indexOf("/")` 首斜杠�
 - 严版 3 处（permission/bte/structured-output）：函数体逐字等价，零语义争议直接替换。structured-output 侧迁移策略：包内三消费文件（tool-definition.ts / execute.ts / loop-gate.ts）import 源从 `./schema-guards.js` 改为 ext-guards `isRecord`（消除包内对 deprecated 别名的依赖），`schema-guards.ts` 本地定义删除、**降级为 re-export ext-guards `isRecord` 保留 `isPlainObject` 导出名**（structured-output 独立发布给外部 pi 用户，package.json 无 exports 字段、files 含 src/ → 深路径对外可达，公开名删除是 breaking；re-export 上注明 deprecated 别名）。
 - 允数组版 5 处（system-prompt-trace / cache-probe / session-reader / smart-context ×2）：迁移到严版，逐消费点等价论证（D3 方法论，全量消费点见 §2.2 表）：
   - **system-prompt-trace**：baseline.ts:30 `if (!isRecord(parsed)) return null`——数组输入旧路径被紧随的类型分发（:31 `type !== "custom"` 判定，数组无合法 type 字段）拦回 `null`；types.ts:56 `isSystemPromptTraceEntryData` 内字段检查（version/hash/reason 逐 `typeof` 判定）对数组恒 false——两消费点数组输入两版同归 `null`/`false`。**exported `isRecord` 直接删导出**（r1 裁决修订：taiji 组 = taiji 集成包随应用打包、离开 taiji 无功能，「独立 pi 用户 breaking」论据不成立；包外零 import 已实测；保留 = 制造无人消费的兼容面），包内 2 消费点改 import ext-guards。
-  - **cache-probe** fingerprint.ts 5 消费点中 4 处（:69,78,87,117）为「检查失败/字段读出 undefined → default/null」形态，数组输入两版同归；**:73 `if (isRecord(systemInstruction)) return systemInstruction` 是唯一返回值本体消费点**——等价论证（r1 主审 S3 依 pi-ai 0.84.4 实装重锚）：`BeforeProviderRequestEvent.payload` 类型面是 `unknown`，契约锚定在构造点——pi-ai provider 实装 `systemInstruction: sanitizeSurrogates(context.systemPrompt)` 且 `Context.systemPrompt?: string`（google-generative-ai.js:294 / google-vertex.js:368），即**实装流量中 systemInstruction 恒 string 或缺席，两版 isRecord 对 string 同 false → :73 恒落穿 messages 扫描**，宽严两版真实行为逐流量等价；数组仅在手工伪造 entry 的病态输入下可达，旧行为把数组 hash 进指纹（垃圾当合法）、严版落穿扫描同产垃圾指纹，本批不保真病态输入。
+  - **cache-probe** fingerprint.ts 5 消费点中 4 处（:69,78,87,117）为「检查失败/字段读出 undefined → default/null」形态，数组输入两版同归；**:73 `if (isRecord(systemInstruction)) return systemInstruction` 是唯一返回值本体消费点**——等价论证（r1 主审 S3 依 pi-ai 0.84.4 实装重锚）：`BeforeProviderRequestEvent.payload` 类型范围是 `unknown`，契约锚定在构造点——pi-ai provider 实装 `systemInstruction: sanitizeSurrogates(context.systemPrompt)` 且 `Context.systemPrompt?: string`（google-generative-ai.js:294 / google-vertex.js:368），即**实装流量中 systemInstruction 恒 string 或缺席，两版 isRecord 对 string 同 false → :73 恒落穿 messages 扫描**，宽严两版真实行为逐流量等价；数组仅在手工伪造 entry 的病态输入下可达，旧行为把数组 hash 进指纹（垃圾当合法）、严版落穿扫描同产垃圾指纹，本批不保真病态输入。
   - **session-reader** core/workflow.ts 12 消费点全部为 `if (!isRecord) return default` 或 `isRecord(x) ? x : default` 形态，数组输入旧路径经字段读 undefined → 嵌套 isRecord(undefined)=false → default，与严版立即 default 同归（r1 主审独立复扫确认隐藏前提成立：normalizeCallStatus 对缺字段返 'pending'（workflow.ts:111-114）、mapBudget 纯字段读（:99-107）、:238 pickSessionRefs 数组路径经 :247 双条件判非 OLD 同归 null）。
   - **smart-context** tool.ts 3 处（`isRecord(x) ? x : {}` / null 链）与 pure.ts 4 处（`continue` / `&&` 前置检查）同上形态，同归。
   smart-context pure.ts/tool.ts 与 system-prompt-trace 的消费语义与 17 号 D4② 已收敛的 smart-context 单键版无耦合，独立迁移。
@@ -125,7 +125,7 @@ subagents.ts / find.ts 删本地副本改 import（find.ts 的 `parseHeader` 调
 **D6 THINKING_ORDER 纳入词表检查比对面**（T3）。四件连带（r1 影响面 2 MF 修复）：
 
 1. **提取适配**：`extractConstListMembers` 正则改类型标注可选——现 `const\s+NAME\s*:[^=]*=` 要求标注，THINKING_ORDER 实装 `export const THINKING_ORDER = [...] as const` 无标注失配；改为 `const\s+NAME(?:\s*:[^=]*)?\s*=\s*(?:new\s+Set\(\s*)?\[`（标注可选；**`\s*=` 吸收无标注形态 `=` 前空格**——起草 v2 期以三真实源文件实测验证：llm-shared Set / pi-rpc 带标注数组 / subagent-core 无标注数组三形态均正确提取七值）。**不选**「给 THINKING_ORDER 加标注」路线：`ThinkingLevel = (typeof THINKING_ORDER)[number]` 依赖 `as const` 字面量联合推导，加 `readonly string[]` 类标注会破坏推导（影响面 MF-2 已注明该坑）。self-test 补第三形态用例（无标注数组）。
-2. **触发面扩面**：`.githooks/install-hooks.sh:1317` 触发正则补 `^packages/subagent-core/src/shared/model-ref\.ts$`；hook 头注释（:1310 触发面清单）与 constraints.json C-build-10 summary 触发面描述同批同步。CI 不跑该检查为现状（pre-commit 唯一执行点），扩面后盲场景收敛为「绕过 hook 提交」，登记不改。
+2. **触发范围扩面**：`.githooks/install-hooks.sh:1317` 触发正则补 `^packages/subagent-core/src/shared/model-ref\.ts$`；hook 头注释（:1310 触发范围清单）与 constraints.json C-build-10 summary 触发范围描述同批同步。CI 不跑该检查为现状（pre-commit 唯一执行点），扩面后盲场景收敛为「绕过 hook 提交」，登记不改。
 3. **比对面**：提取 THINKING_ORDER 数组单行成员，**排序后**与 pi-ai 联合成员集合比对（THINKING_ORDER 是低→高有序数组，比对语义是成员集合一致性，顺序语义由 subagent-core 自身测试锚定，检查不判序）。
 4. **注释同步**：model-ref.ts 头注释「本数组不在比对面，靠本注释提示」改为指向 T3；检查脚本头注释比对面清单补 T3。
 
@@ -138,7 +138,7 @@ subagents.ts / find.ts 删本地副本改 import（find.ts 的 `parseHeader` 调
 | subagent-workflow relay/relay.mjs:86（err.stack 形态） | 不迁 | 零依赖镜像常量脚本，头注释明言「不能 Import workspace 包」，结构性不可迁移（r1 主审 INFO 补登；路径经区 A 审查勘误——实际在 relay/ 无 src/host/ 段） |
 | bte spawn-background.ts:283 / session-reader isRecordManifest | 不动 | 17 号已裁定（撞名 / 形状检查），复述防重提 |
 | packages/ 层 toErrorMessage/isRecord 副本 | 不动 | 17 号 D3 分层裁决（protocol 同理）；全仓 packages 侧收敛独立立项 |
-| extension-protocol 发布层拆分（9 包私有依赖） | 不做 | 架构级工程（可发布面包新增），独立 tech-design |
+| extension-protocol 发布层拆分（9 包私有依赖） | 不做 | 架构级工程（可发布范围包新增），独立 tech-design |
 | getSessionsDir/encodeCwdSlug 路径推导 | 不做 | llm-shared 是 LLM 域包，塞 pi 布局知识破坏域纯度；归宿（新 pi-paths 模块）需独立裁决 |
 | extension-logger rawStderr 通道 | 不做 | 前置验证缺失（子进程 fileLog 落盘行为未实测），盲接有静默丢日志风险 |
 | structured-output isPlainObject 导出名直接删除 | 降级 re-export | 独立 pi 用户可单独安装，公开导出断裂是 breaking；deprecated 别名保留一个发布周期 |
@@ -153,7 +153,7 @@ subagents.ts / find.ts 删本地副本改 import（find.ts 的 `parseHeader` 调
 - V2b permission model-picker 钉值：合法 ref（provider 与 model 双预选命中）行为不变断言 + "provider/" 病态输入新行为（provider 预选回 Auto）钉值（D4 微变的直接验证点）。
 - V3 三连绿：`pnpm extensions:typecheck && pnpm extensions:lint && pnpm extensions:test`。
 - V4 session-reader 单源化回归：discovery 既有测试全绿 + `readSessionHeaderIdSync` 行为不变（src/__tests__/tool-handler.test.ts:1057-1058 既有用例锚定首行非 header 返 undefined）。
-- V5 检查 T3：直接执行 `node scripts/check-thinking-levels.mjs` 绿；手工构造 THINKING_ORDER 漂移（临时删一个成员）直接跑脚本触发非零退出，还原后绿；再验证 hook 触发面——staged 改动含 `packages/subagent-core/src/shared/model-ref.ts` 时 pre-commit 实际拉起检查（验收时执行并还原不留痕）。
+- V5 检查 T3：直接执行 `node scripts/check-thinking-levels.mjs` 绿；手工构造 THINKING_ORDER 漂移（临时删一个成员）直接跑脚本触发非零退出，还原后绿；再验证 hook 触发范围——staged 改动含 `packages/subagent-core/src/shared/model-ref.ts` 时 pre-commit 实际拉起检查（验收时执行并还原不留痕）。
 - V6 依赖登记：`node scripts/check-extension-dependencies.mjs` 通过；4 包（session-reader/cache-probe/ask-user/system-prompt-trace）extension-dependencies.json 条目与 package.json dependencies **双人工核对**（检查不校验两者一致性，已知盲区见 §2.1 注）。
 
 ### 5.2 真机验收（按 AGENTS.md 本地 pi CLI 实测规范，抽验不改行为的通路）
@@ -164,7 +164,7 @@ subagents.ts / find.ts 删本地副本改 import（find.ts 的 `parseHeader` 调
 
 ### 5.3 三视角
 
-构建者白盒（V2/V2b/V4 单测）+ 使用者黑盒（V7-V9 真机工具调用）+ 观察者形态（V1 零残留 grep + 导出面收敛断言——structured-output 的 `isPlainObject` 在原导出文件 schema-guards.ts 内以 deprecated re-export 保留、本地私有定义删除；system-prompt-trace 的 `isRecord` 导出删除；两包 src/index.ts barrel 从未 re-export 该两名，无 barrel 锚点）。
+构建者白盒（V2/V2b/V4 单测）+ 使用者黑盒（V7-V9 真机工具调用）+ 观察者形态（V1 零残留 grep + 导出范围收敛断言——structured-output 的 `isPlainObject` 在原导出文件 schema-guards.ts 内以 deprecated re-export 保留、本地私有定义删除；system-prompt-trace 的 `isRecord` 导出删除；两包 src/index.ts barrel 从未 re-export 该两名，无 barrel 锚点）。
 
 ## 6. 实施拆分（dev-0.9.21 单线，两分支已合流）
 
@@ -172,7 +172,7 @@ subagents.ts / find.ts 删本地副本改 import（find.ts 的 `parseHeader` 调
 |------|------|------|
 | 批次 1 | D1（25 处 toErrorMessage + 3 包依赖/登记）+ D3（isEnoentError 1 处） | 机械，零行为变化 |
 | 批次 2 | D2（isRecord 8 副本 + system-prompt-trace 依赖/登记 + 2 处 exported 降级 re-export） | 机械 + 论证已含本文档 |
-| 批次 3 | D4（parseModelRef 导出 + permission 采用，**行为微变独立 commit**）+ D6（检查 T3 四件连带：提取正则适配 + self-test / hook 触发面扩面 + 头注释 / C-build-10 登记 / model-ref.ts 注释） | 小新增 |
+| 批次 3 | D4（parseModelRef 导出 + permission 采用，**行为微变独立 commit**）+ D6（检查 T3 四件连带：提取正则适配 + self-test / hook 触发范围扩面 + 头注释 / C-build-10 登记 / model-ref.ts 注释） | 小新增 |
 | 批次 4 | D5（session-reader 三副本单源） | 包内收敛 |
 
 **收尾义务**：全部批次完成后登记 re-export 别名（structured-output `isPlainObject`）删除时点与各独立立项尾巴（packages 层收敛 / extension-protocol 发布层拆分 / 路径推导归宿 / rawStderr），对齐 17 号惯例——原登记通道 ext-simplify-index 18 号行原档案族已清理，逐条关闭信息以本文档实施终态为承载（r1 影响面 S-2）。
@@ -183,4 +183,4 @@ subagents.ts / find.ts 删本地副本改 import（find.ts 的 `parseHeader` 调
 
 - 全部迁移为等价替换（D4 一处病态输入微变独立 commit），回退 = git revert 对应 commit；无数据迁移、无持久化形态变化。
 - 允数组→严版 5 处的等价论证已按 17 号 D3 方法论逐消费点给出（§3.1 D2）；实施时若发现论证外消费点（grep 漏网），该包迁移暂停回本设计补论证，不现场发挥。
-- structured-output 导出面：schema-guards.ts 内 deprecated re-export 保持深路径公开名零 breaking，删除时点登记进 index 18 号行债务逐条关闭段（§6 收尾义务）；system-prompt-trace 直接删导出（taiji 组无外部发布面论据，§3.1 D2）。
+- structured-output 导出范围：schema-guards.ts 内 deprecated re-export 保持深路径公开名零 breaking，删除时点登记进 index 18 号行债务逐条关闭段（§6 收尾义务）；system-prompt-trace 直接删导出（taiji 组无外部发布范围论据，§3.1 D2）。

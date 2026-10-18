@@ -5,7 +5,7 @@
  * - W 组 Composer wiring（挂 Composer + stub CommandPopover）：空格/全角空格/NBSP 后 `/`
  *   触发 skill-only 浮层（场景 6④）；`/usr` 输到第二个 `/` 浮层关闭（场景 6①）；
  *   行首 `/` 仍命令浮层（场景 6② 回归）；`#`/`$`/`@` 无变化（场景 6③ 回归）；
- *   select payload → insertSkillChip（光标标记 chip、多个共存）+ 已选集合回传（D2 已选禁选数据面）
+ *   select payload → insertSkillChip（光标标记 chip、多个共存）+ 已选集合回传（D2 已选禁选数据范围）
  * - P 组 CommandPopover（真实组件）：panel 态 taiji 源（globalSkills ∪ projectSkills props，
  *   ADR-0050 修订切源）合并去重序 + `__` 过滤 + pi 真源 skill 推送不影响；已选项「已选」
  *   禁选（onSelect 检查）；location 取 SkillInfo.sourcePath；panel slash 段 skill 换源保留
@@ -79,7 +79,7 @@ beforeEach(() => {
 let currentPick: Record<string, unknown> | null = null
 
 /** CommandPopover stub：props 反映到 data-* 供 DOM 断言；cp-pick 按钮模拟选中项 emit select。
- *  globalSkills/projectSkills 反映到 data-*（P7/P8 cwd 接线断言面）。 */
+ *  globalSkills/projectSkills 反映到 data-*（P7/P8 cwd 接线断言范围）。 */
 const CommandPopoverStub = defineComponent({
   name: 'CommandPopover',
   props: {
@@ -229,7 +229,7 @@ describe('Composer skill 触发 wiring（场景 6①②③④）', () => {
   })
 })
 
-describe('Composer skill chip 插入与已选回传（D2 已选禁选数据面）', () => {
+describe('Composer skill chip 插入与已选回传（D2 已选禁选数据范围）', () => {
   afterEach(() => {
     document.body.innerHTML = ''
   })

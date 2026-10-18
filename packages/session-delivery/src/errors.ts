@@ -12,7 +12,7 @@
  * 产生点（delivery.ts）：cancel 终结条目（queued/failed 本地终结 + in-flight 收回确认）
  * 与 drain 全量回收时的 waiter reject。语义：文本已回草稿（V9/V11），条目已被内核
  * 终结——不是投递失败，消费方（registry dispose 错误分级）据 instanceof 判别后
- * 只记日志、不进用户可见错误面。
+ * 只记日志、不进用户可见错误范围。
  *
  * 结构化字段（原文案契约的语义信息转字段，文案漂移不再击穿判别）：
  * - kind：回收方式。'cancelled' = cancel(id) 单条回收；'drained' = drain() 全量回收。

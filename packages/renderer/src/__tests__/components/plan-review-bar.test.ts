@@ -452,7 +452,7 @@ describe('degraded 可行动化（D8：成因分源文案 + [重新提交审批]
 
     await btn.trigger('click')
     await flushAsync()
-    // D8 写入面：复用消息发送通道（message.send）注入固定文案 user 可见消息
+    // D8 写侧：复用消息发送通道（message.send）注入固定文案 user 可见消息
     expect(chatSendMock).toHaveBeenCalledTimes(1)
     expect(chatSendMock).toHaveBeenCalledWith(SID, '请重新提交计划审批')
     // 退出入口收敛：右区无退出按钮（唯一入口 = 左区常驻退出）

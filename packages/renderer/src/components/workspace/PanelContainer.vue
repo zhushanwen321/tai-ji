@@ -240,7 +240,7 @@
       <!-- 收合过渡期内容保挂载（U6 修复，§6.2 S1「开合动画平顺」）：壳 height 过渡逐帧收拢
            期间终端不同帧卸载（旧形态动画期空抽屉），卸载时机 = leave 过渡结束（Vue Transition
            事件顺序语义，无定时兜底）。Transition 直接子项用无 key 包装层：retry 的 :key 重挂
-           留在内层，chunk 重试换件不经 leave/enter 过渡（chunk 失败占位链断言面不变）。 -->
+           留在内层，chunk 重试换件不经 leave/enter 过渡（chunk 失败占位链断言范围不变）。 -->
       <Transition name="bottom-drawer-content">
         <div v-if="bottomOpen" class="h-full overflow-hidden rounded-[var(--radius-card)] border border-border bg-surface shadow-[var(--shadow-1)]" :class="DRAWER_FOCUS_SCOPE">
           <TerminalView

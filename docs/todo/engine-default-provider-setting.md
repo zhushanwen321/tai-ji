@@ -82,7 +82,7 @@ taiji runtime 启动时把 pi provider 配置映射成一份 zcode `provider_con
 |-------------------|------------------|------|
 | `openai-completions` | `openai-chat-completions` | 同一协议族（OpenAI Chat Completions），两侧命名不同 |
 | `anthropic-messages` | `anthropic-messages` | 同名直传 |
-| 其余（`openai-responses` / `mistral-conversations` / `azure-openai-responses` / `openai-codex-responses` / `bedrock-converse-stream` / `google-generative-ai` / `google-vertex` / `pi-messages`） | 无对应 | zcode 个人 provider 协议面本机实测仅两值（见现状②），不做无把握合成——错配的协议错误在请求期才暴露，不如映射期拒绝并留日志 |
+| 其余（`openai-responses` / `mistral-conversations` / `azure-openai-responses` / `openai-codex-responses` / `bedrock-converse-stream` / `google-generative-ai` / `google-vertex` / `pi-messages`） | 无对应 | zcode 个人 provider 协议范围本机实测仅两值（见现状②），不做无把握合成——错配的协议错误在请求期才暴露，不如映射期拒绝并留日志 |
 
 api 取值链：provider 级 `api` → 首模型 `api` → catalog 声明。
 

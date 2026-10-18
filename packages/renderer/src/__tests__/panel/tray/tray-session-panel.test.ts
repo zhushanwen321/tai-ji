@@ -10,7 +10,7 @@
  *   软停止 RPC（携该子会话 id）；两段确认首击不发 RPC
  *
  * mock 策略：
- * - 数据面经 `TRAY_COUNTS_KEY` **provide 替身**（面板 inject 消费外壳单例，不自建实例）；
+ * - 数据范围经 `TRAY_COUNTS_KEY` **provide 替身**（面板 inject 消费外壳单例，不自建实例）；
  *   口径测试在 useTrayCounts.test.ts，本文件只验渲染与交互
  * - `@/composables/features/sidebar/useSidebar` mock：避免拉真实 12 步链，只验「点击 → selectSession」
  * - `@/api` mock：chat.abort 可控
@@ -43,7 +43,7 @@ vi.mock('@/api', () => ({ chat: { abort: abortMock } }))
 const SID = 's-session-panel'
 const FIXED_NOW = new Date(2026, 8, 16, 10, 30, 0).getTime()
 
-/** 数据面替身（inject 消费点）：reactive 容器供 sessionChildren 变更驱动重算 */
+/** 数据范围替身（inject 消费点）：reactive 容器供 sessionChildren 变更驱动重算 */
 const trayState = reactive({
   bashRunning: [],
   bashEnded: [],

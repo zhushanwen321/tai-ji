@@ -284,7 +284,7 @@ export async function createMobileTask(input: MobileNewTaskInput): Promise<Sessi
 
 // ── 导出（组件层消费方）──────────────────────────────────────────────
 // 仅暴露组件/测试实际消费的符号；useSessionInstance 与两个 api 端口是文件内组装细节，
-// 去 export 防「导出面 = API 面」的假象（外部断链由本文件 import 图自证）。
+// 去 export 防「导出清单 = 公开 API」的假象（外部断链由本文件 import 图自证）。
 
 export { chatStore, sessionStore, useChatInstance }
 
@@ -308,7 +308,7 @@ export const composerInjectionStore = createComposerInjectionStore()
 
 /**
  * 测试后门命名空间（生产代码禁止消费，对齐 companion-bridge __testing 先例）：
- * 装配检查的断言入口——sessionEntry 端口束注入面（三成员非 no-op + 缺省成员无键，
+ * 装配检查的断言入口——sessionEntry 端口束注入点（三成员非 no-op + 缺省成员无键，
  * D2/U5 装配断言；U21 装配检查 helper 双壳测试将复用同一出口）。
  */
 export const __testing = {

@@ -10,7 +10,7 @@
  * 与一切未知码落 `general`（toast 文本附后端 message，用户仍能读到原始信息）。
  */
 
-/** 运行时错误对象的最小读取面（不引入 `any`：code 可为字符串语义码或数值 JSON-RPC 码）。 */
+/** 运行时错误对象的最小读侧（不引入 `any`：code 可为字符串语义码或数值 JSON-RPC 码）。 */
 interface ErrorWithCode {
   code?: unknown
   message?: unknown

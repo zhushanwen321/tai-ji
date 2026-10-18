@@ -68,7 +68,7 @@ vi.mock('@/composables/features/chat/useSessionDerivations', () => ({
 }))
 
 // ── 静态重面板 vi.mock（import 期替换：vitest 不再加载原模块，砍掉 PanelContainer 整图
-// transform；占位组件与原 global.stubs 等价——同名 testid，接线断言面不变）。工厂零外部
+// transform；占位组件与原 global.stubs 等价——同名 testid，接线断言范围不变）。工厂零外部
 // 引用（普通 options 对象组件），规避 vi.mock hoisting 对顶层绑定的限制。──
 vi.mock('@/components/panel/GitPanel.vue', () => ({
   default: { name: 'GitPanel', template: '<div data-testid="git-panel" />' },
@@ -276,7 +276,7 @@ describe('PanelContainer 单 panel + Drawer 壳路径（AC9/AC12 冒烟载体）
 })
 
 // 首屏冒烟（TC1）：DrawerPanel 探针 stub 仅本用例覆盖——断言壳派发的 sessionId 落进
-// DrawerPanel props 面；其余用例走真实 DrawerPanel（drawer-panel/tab DOM 断言面）。
+// DrawerPanel props 面；其余用例走真实 DrawerPanel（drawer-panel/tab DOM 断言范围）。
 const DrawerPanelProbe = defineComponent({
   name: 'DrawerPanel',
   props: {
@@ -392,7 +392,7 @@ describe('PanelContainer bashTask tab 接线（D5③）', () => {
   it('bashTask + 已选中任务 → 注入 BackgroundTaskDetailPanel（stub 面板渲染）', async () => {
     const panel = usePanelStore()
     panel.loadSession(ROOT_PANEL_ID, 's-bash-selected')
-    // 模拟列表 item 点击写入（D5④ 写入面：bashTask 内容域选中态 selection/bash-task.ts）
+    // 模拟列表 item 点击写入（D5④ 写侧：bashTask 内容域选中态 selection/bash-task.ts）
     setBackgroundTaskView('bt-20260906-a1b2c3')
     openDrawerTab('bashTask')
 

@@ -217,10 +217,10 @@ H1 后续聊要点：每轮续聊 = 独立 run（`RunParams.resume` 续写原 se
 
 > 权威 SSOT：[architecture/subagent-record-persistence-consolidation.md](architecture/subagent-record-persistence-consolidation.md)（§3.3 检查分级 / §3.1 意图级 API 表）；约束登记 C-data-20。
 
-record 持久化写面（事件文件 `<recordsDir>/<id>.events` / `.record-binding` 绑定 sidecar / `.alive` 写权声明 / manifest / sessions-index / `subagent-record` entry）的唯一写入口 = `RecordStore` 意图原语（`packages/subagent-core/src/execution/persistence/record-store.ts`）；事件流是 record 域唯一事实源（收条由 `record-settled` / `record-round-idle` 帧承载），manifest 是带水位（eventsStamp）纯索引派生视图。两级检查：eslint `no-restricted-imports`（store 外禁 import 写函数，模块边界一级拦截）+ pre-commit `scripts/check-record-write-surface.mjs`（写函数 / 字面量直写形态 grep 门兜底，含 `.events` 事件文件直写判定）。
+record 持久化写侧（事件文件 `<recordsDir>/<id>.events` / `.record-binding` 绑定 sidecar / `.alive` 写权声明 / manifest / sessions-index / `subagent-record` entry）的唯一写入口 = `RecordStore` 意图原语（`packages/subagent-core/src/execution/persistence/record-store.ts`）；事件流是 record 域唯一事实源（收条由 `record-settled` / `record-round-idle` 帧承载），manifest 是带水位（eventsStamp）纯索引派生视图。两级检查：eslint `no-restricted-imports`（store 外禁 import 写函数，模块边界一级拦截）+ pre-commit `scripts/check-record-write-surface.mjs`（写函数 / 字面量直写形态 grep 门兜底，含 `.events` 事件文件直写判定）。
 
 - 处置：改调 RecordStore 意图原语（`markSettled` / `markRoundIdle` / `markReopened` / `markSettledOut` / `acquireWriteLease` / `reportRecordTransition`；legacy 终态桥接族 `markFinalized` / `markCancelled` 保留至读侧兼容收尾）；读函数不受限。复跑：`node scripts/check-record-write-surface.mjs`（应输出 store 外零命中）。
-- 误拦判定：新写面确属 store 外自有域时，在检查脚本 `EXTENSION_DOMAIN_ALLOWLIST` 登记文件并注明设计依据（登记处即登记），禁止行内豁免绕过。
+- 误拦判定：新写侧确属 store 外自有域时，在检查脚本 `EXTENSION_DOMAIN_ALLOWLIST` 登记文件并注明设计依据（登记处即登记），禁止行内豁免绕过。
 
 ### 14. catalog provider 自定义网关失效 / 端点与官网不符（启动清洗剥除手编网关，2026-09-10 D2 已接受代价）
 
@@ -347,8 +347,8 @@ VITE_E2E=true VITE_MOCK=true pnpm run build:e2e
 
 - **症状 A（轻）**：runtime 日志反复 `replicated-state usage snapshot fetch failed (attempt=N/4): Cannot read properties of undefined (reading 'input')` WARN——token 用量统计（辅助功能）降级，续聊正常。
 - **症状 B（重）**：续聊发出后 25ms 内 turn 即死，pi tee 日志 `turn_end` 带 `stopReason:"error"` + `errorMessage:"Cannot read properties of undefined (reading 'totalTokens')"`，且与症状 A 并存。
-- **根因**：产物中存在「assistant 消息、stopReason 为终态（stop/toolUse/length）、无 usage 键」的 entry。pi 0.84.4 读面对此无检查（pi-semantics PS-41：`agent-session.js:2678` stats 读 `.input`、`:2721` turn 前上下文扫描读 `.totalTokens` 仅跳过 aborted/error）。pi 原生写侧连错误轮都写全零 usage，原生会话不触发；只有导入产物能违反该隐式不变量。
-- **成因与根治**：旧版 zcode 导入转换器把「取消轮」（zcode `data.error.turnResult=cancelled`、无 step-finish part）映射成 `stopReason:'stop'` 且不写 usage——设计期「message 级 stopReason 零消费」断言只查了 taiji 渲染链、漏了 pi 读面。已根治（converter `unsealedStopReason`：cancelled→aborted / error 家族→error；`zeroUsage` 不变量门：assistant 恒带 usage 对象，缺失零值兜底——全零是 pi「无测量数据」的合法编码）。
+- **根因**：产物中存在「assistant 消息、stopReason 为终态（stop/toolUse/length）、无 usage 键」的 entry。pi 0.84.4 读侧对此无检查（pi-semantics PS-41：`agent-session.js:2678` stats 读 `.input`、`:2721` turn 前上下文扫描读 `.totalTokens` 仅跳过 aborted/error）。pi 原生写侧连错误轮都写全零 usage，原生会话不触发；只有导入产物能违反该隐式不变量。
+- **成因与根治**：旧版 zcode 导入转换器把「取消轮」（zcode `data.error.turnResult=cancelled`、无 step-finish part）映射成 `stopReason:'stop'` 且不写 usage——设计期「message 级 stopReason 零消费」断言只查了 taiji 渲染链、漏了 pi 读侧。已根治（converter `unsealedStopReason`：cancelled→aborted / error 家族→error；`zeroUsage` 不变量门：assistant 恒带 usage 对象，缺失零值兜底——全零是 pi「无测量数据」的合法编码）。
 - **修复配方（存量毒产物，手术式）**：备份 jsonl → 定位毒 entry（assistant + 终态 stopReason + 无 usage）→ 补 `stopReason:'aborted'`（zcode 源有取消证据时）与全零 usage 对象 → 验证：`parseSessionEntries` + PS-41 双谓词零违例 → 重启应用或切走再切回该会话（运行中 pi 进程持旧内存态，改文件不生效于已加载会话）。
 - **排查特征**：「续聊即死 + reading 'totalTokens' + stats WARN」三者并存 = 症状 B；仅 stats WARN（续聊正常）= 症状 A（毒 entry 的 stopReason 恰为 aborted/error 时 2721 跳过、仅 2678 崩）。两者同根（usage 缺键），根治后新导入产物均不再出现；存量产物按修复配方手术。
 
@@ -423,7 +423,7 @@ node scripts/check-pi-resources-links.mjs --fix   # 外部 symlink → 真实复
 
 - **「开第二个终端返回的还是第一个」**：先看是**反向混跑**还是缺陷——dev 工作流里 renderer 走 Vite HMR、runtime 是 tsx **非 watch**，所以「新界面 × 旧 runtime」可真实共存；旧 runtime 会按会话幂等复用单 PTY（静默复用、无报错）。处置：重启 `pnpm dev`（runtime 侧改动不重启不生效）；打包形态无混跑窗口（界面与后台成对原子更新）。
 - **「活着的死实例」**（切换条有条目、输入必得 `unknown_terminal_id`）：`spawn` 完成到界面建档之间的窗口内实例就已死亡（`terminal.exit` 帧无归属可投递）→ 残留条目。**自动回收双通道**：首次对该条目的 `write` / `kill` / `attach` 收到否定回执（`unknown_terminal_id`）即执行三路径清理；或下一次 `terminal.list` 对账（清单外条目）回收。若**反复出现且不自动消失**，取证 `<数据目录>/logs/runtime-*.log` 的 `[terminal]` 行与 `terminal.list` 返回，按缺陷报（回收通道应幂等）。
-- **runtime 重启后旧终端输出消失 / 编号从「终端 1」重算**：**既定语义**（世代变更：注册表纯内存，重启即清空、序号重算；界面经世代重置清输出分区与写队列）。判据 = auth token 变化（**端口值不可靠**——重启常落回原端口）。反向异常：**同世代 WS 闪断却丢了历史** = 世代判据误判，查 `getCurrentToken()` 读取面与连接态保存的旧值。
+- **runtime 重启后旧终端输出消失 / 编号从「终端 1」重算**：**既定语义**（世代变更：注册表纯内存，重启即清空、序号重算；界面经世代重置清输出分区与写队列）。判据 = auth token 变化（**端口值不可靠**——重启常落回原端口）。反向异常：**同世代 WS 闪断却丢了历史** = 世代判据误判，查 `getCurrentToken()` 读侧与连接态保存的旧值。
 - **应用退出后仍有终端子进程**：正常退出路径由 shutdown 序的 `dispose-terminal-pties`（`destroyAllPties`）全量清理；**异常死亡**（SIGKILL / 崩溃）下 `nohup`/disown 类子进程可能残留（已登记的前提 P5，属 OS 层行为）——按系统进程表定位后手动清理。
 
 ### 36. e2e smoke 全灭 `electron.launch: Process failed to launch`（宿主会话 ELECTRON_RUN_AS_NODE 泄漏，2026-10-01）

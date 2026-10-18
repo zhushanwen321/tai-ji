@@ -1,7 +1,7 @@
 // 移动壳 session.exited 分通道重置编排（remote-use U6 / D5 exited 分区清理段 + 「exited
 // 清理与拦截解绑」段）。
 //
-// 锁定三个行为面：
+// 锁定三个行为范围：
 //   分通道清理 —— exited 编排出口（companion-bridge）：dialog 通道 queue.resetFor（band
 //                消失）+ form 通道 Map 具名清理（form 卡消失、composer 恢复）——M8 防御：
 //                死会话残留请求不重弹、作答不发给新进程后石沉大海（V18 正面）

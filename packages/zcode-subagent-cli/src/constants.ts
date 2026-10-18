@@ -54,7 +54,7 @@ export const ZCODE_KILL_GRACE_MS = 5_000;
 export const ZCODE_ERROR_TAIL_CHARS = 2000;
 
 /**
- * [R2] app-server 控制面请求默认超时（ms）。依据：旧 zsw 实现 REQUEST_TIMEOUT_MS=15s
+ * [R2] app-server 控制范围请求默认超时（ms）。依据：旧 zsw 实现 REQUEST_TIMEOUT_MS=15s
  * （60+ fake-server 用例 + 真机 e2e 验证值）。
  */
 export const ZCODE_APPSERVER_REQUEST_TIMEOUT_MS = 15_000;
@@ -77,7 +77,7 @@ export const ZCODE_APPSERVER_STDERR_TAIL_BUFFER_CHARS = 2048;
 export const ZCODE_APPSERVER_TURN_READ_TIMEOUT_MS = 5_000;
 
 /**
- * [R3] 任务收尾 session/close 的控制面超时（ms，best-effort——失败只 warn 不抛）。
+ * [R3] 任务收尾 session/close 的控制范围超时（ms，best-effort——失败只 warn 不抛）。
  * 旧 zsw 实现 RELEASE_CLOSE_TIMEOUT_MS=1500（wave2 D2，同值同语义）。
  */
 export const ZCODE_APPSERVER_TURN_CLOSE_TIMEOUT_MS = 1_500;
@@ -92,7 +92,7 @@ export type ZcodeTurnTimeoutEnvParse =
   | { state: "invalid" };
 
 /**
- * [R4 D3] abort 链第一级：session/stop 的控制面超时（ms）。stop 失败/超时即落
+ * [R4 D3] abort 链第一级：session/stop 的控制范围超时（ms）。stop 失败/超时即落
  * killChain（协议此时已不可信）。
  */
 export const ZCODE_APPSERVER_STOP_TIMEOUT_MS = 3_000;
@@ -179,7 +179,7 @@ export const ZCODE_RESUME_CHARS_PER_TOKEN = 4;
 /**
  * [U6 TTL 通道] sweep defer 时点（ms）：运行时建立后让位首 run 的 create 请求先
  * 出站（sweep 同步执行，大库删除 + checkpoint 可能达秒级——不推后则抢占首 run
- * 的控制面时序）。unref（不阻塞进程退出）。
+ * 的控制范围时序）。unref（不阻塞进程退出）。
  */
 export const ZCODE_SESSION_SWEEP_DEFER_MS = 50;
 

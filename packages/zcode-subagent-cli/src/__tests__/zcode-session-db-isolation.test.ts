@@ -50,7 +50,7 @@ describe("路径单一来源（db-path 契约根，不变量 2）", () => {
     expect(zcodeSessionDbPath("/data-root")).toBe(
       path.join("/data-root", "engines", "zcode", "session-db", "db.sqlite"),
     );
-    // D1/F11：engines/zcode/shared/ 是 journal 池目录（deletePoolNativeState 覆盖面），
+    // D1/F11：engines/zcode/shared/ 是 journal 池目录（deletePoolNativeState 覆盖范围），
     // 隔离库不得落在其下——否则池归零/TTL 清理会删掉会话库
     expect(zcodeSessionDbPath("/data-root").includes(path.join("engines", "zcode", "shared"))).toBe(false);
   });

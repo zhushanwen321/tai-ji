@@ -17,8 +17,8 @@
  *
  * 策略（对齐 composer-bash-mode.test.ts 结构范本）：
  * - 真 pinia + 真 chatStore（occupancy 派生视图驱动发送位与 sessionPhase）
- * - 真 QueueBubble / 真 useQueueRows（DOM 断言面）+ mock useChat（spy 化 send/...）
- * - mock '@/api/domains/delivery'（cancel/resync RPC 断言面）+ useToast（断言 toastError）
+ * - 真 QueueBubble / 真 useQueueRows（DOM 断言范围）+ mock useChat（spy 化 send/...）
+ * - mock '@/api/domains/delivery'（cancel/resync RPC 断言范围）+ useToast（断言 toastError）
  * - mock ComposerInput（emit input 设 draft + emit keydown Enter 触发 onSend；expose
  *   setText/getSegments 供撤销回草稿断言）
  * - 帧到达模拟：直接写 core 派生视图 ref（帧消费链路由 core useChat handler 承担，u3b 已覆盖）
@@ -65,7 +65,7 @@ vi.mock('@/api/domains/delivery', () => ({ delivery: deliveryMock }))
 vi.mock('@/composables/features/new-task/useNewTaskFlow', () => composerFlowModule())
 vi.mock('@/api', () => ({
   ...composerApiModule(),
-  // flush 链路经 api.chat.send 提交（与 useChat mock 同一 vi.fn，断言面不分裂）
+  // flush 链路经 api.chat.send 提交（与 useChat mock 同一 vi.fn，断言范围不分裂）
   chat: { send: chatApiMock.send, streamSubscribe: vi.fn(() => () => {}) },
 }))
 vi.mock('@/stores/session', () => composerSessionStoreModule())

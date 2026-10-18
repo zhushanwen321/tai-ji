@@ -5,7 +5,7 @@
  * 三个跨域消费方**只准读本文件**，禁止各处自行拼装三分量（任何拼装漂移 = 查看中的
  * btw 线 / agentcall 分区被静默驱逐（数据丢失类回归）或回放误停）：
  *   ① getViewedVids（chat LRU 驱逐豁免，selection/viewed-vids.ts）——per-sid 读；
- *   ② btw-replay 触发面（renderer stores/btw-replay.ts）——useViewedBtwVid 响应式读；
+ *   ② btw-replay 触发范围（renderer stores/btw-replay.ts）——useViewedBtwVid 响应式读；
  *   ③ useBtwTabData 视口命中（renderer composables/panel/useBtwTabData.ts）——
  *      isViewingBtwVid / useBtwViewKey。
  *
@@ -53,7 +53,7 @@ export function viewedSubagentVidFor(sid: string): string | null {
 }
 
 /**
- * 响应式读（当前分区）：视口内选中线 vid（btw-replay 触发面直接 watch 本 computed——
+ * 响应式读（当前分区）：视口内选中线 vid（btw-replay 触发范围直接 watch 本 computed——
  * 关 drawer / 切走 tab / 清选中折叠为 null，重开/切回/选中翻出 vid，恰好覆盖「重开线」全部形态）。
  */
 export function useViewedBtwVid(): ComputedRef<string | null> {

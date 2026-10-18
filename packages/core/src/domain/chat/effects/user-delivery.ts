@@ -11,7 +11,7 @@
  *
  * [HISTORICAL] 前身：defer 队列 provider（compactQueueProvider + confirmDeferQueueEntry
  * + removeQueuedTextFromSnapshot）——defer 队列状态机已随投递所有权内核整体退役
- * （设计 §3.1 删除面），确认通道由「队列 FIFO 文本匹配」升级为「内核条目 id 标记匹配」，
+ * （设计 §3.1 删除范围），确认通道由「队列 FIFO 文本匹配」升级为「内核条目 id 标记匹配」，
  * git 可追溯。
  *
  * 派生视图落位说明：session.delivery 派生视图由本模块级 ref 承载（u3c 落地形态：useQueueRows

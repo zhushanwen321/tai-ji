@@ -169,7 +169,7 @@ export const MAX_WS_PAYLOAD_BYTES: number = 16 * 1024 * 1024
  *
  * [历史] 2026-09：移除 ~/.claude/skills / ~/.claude/agents 预设候选。原因：preset 成员
  * 恒在 UI 重挂（buildDirConfigs 未启用也会补回），导致用户「删除 claude 行」后重新出现、
- * 无法真正移除；且 claude 目录非本产品默认扫描面。用户仍可手动「添加路径」加入。
+ * 无法真正移除；且 claude 目录非本产品默认扫描范围。用户仍可手动「添加路径」加入。
  */
 export const PRESET_SKILL_DIRS = [
   '~/.pi/agent/skills',
@@ -404,7 +404,7 @@ export const OUTBOUND_FRAME_TRUNCATE_BYTES: number = 32 * 1024 * 1024
  * 消费方）② 离线尾读 fallback ③ findLastEntryField fallback ④ readSessionJsonlText
  * （Trace 视图）⑤ restore 附着 normalize ⑥ workflow record 事件流拉取
  * （workflow-run-events-reader，2026-10-02 增——record 含无上界 worker-log 行且信号
- * force 重新拉取放大读面）。超限按调用方语义分档降级（逆序分块读 / oversize 标记 /
+ * force 重新拉取放大读侧）。超限按调用方语义分档降级（逆序分块读 / oversize 标记 /
  * 跳过 normalize + warn），消除「读巨文件 → OOM」恶性循环。
  *
  * 校准依据：本机实测 session 历史文件最大 6MB（探针 P-hist-sizes，`du` 实测）、单
@@ -497,6 +497,6 @@ export const TTS_CACHE_MAX_BYTES: number = 512 * 1024 * 1024
  * import main 侧符号，SSOT 落 shared 消除双 86 字面量。
  *
  * apps/electron/main/supervisor/runtime-supervisor.ts 的 `PLANNED_EXIT_CODE` 是
- * 本值的转发常量（导出面不变，u1f 既有测试与消费方 import 点不受影响）。
+ * 本值的转发常量（导出清单不变，u1f 既有测试与消费方 import 点不受影响）。
  */
 export const RUNTIME_PLANNED_EXIT_CODE = 86

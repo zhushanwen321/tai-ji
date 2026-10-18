@@ -304,7 +304,7 @@ onMounted(() => {
    用 --neutral-dim（三级文字/占位，design-tokens SSOT）。
    设计意图：占位是三级最暗层，与输入正文 --fg 拉开梯度，弱化提示语。
    —— absolute 脱文档流：不占行内位，光标始终在内容区最左（开头）而非 placeholder 末尾。
-   —— 空态恒显（含聚焦，demo textarea 原生 placeholder 同形态）：R3 无缝输入面，
+   —— 空态恒显（含聚焦，demo textarea 原生 placeholder 同形态）：R3 无缝输入范围，
       聚焦后光标与 placeholder 共存，光标即焦点反馈，无聚焦边界。 */
 .composer-input.is-empty::before {
   content: attr(data-placeholder);

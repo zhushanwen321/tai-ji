@@ -286,7 +286,7 @@ export const useSubagentStore = defineStore('subagent', () => {
    *
    * [two-state-convergence D2] 宽松口径（仅 `status==='running'`），与占用判据
    * isRunningProjection 的分工是刻意设计、非重复：SubagentTab 依赖它决定是否订阅
-   * 实时增量流——resumable 续轮瞬间仍有真实流活动，收紧会断数据通路。写面翻边
+   * 实时增量流——resumable 续轮瞬间仍有真实流活动，收紧会断数据通路。写侧翻边
    * （Phase 2 markRoundIdle 落 idle）后本口径与占用判据天然合流，保留订阅语义。
    */
   function isRunning(mainSessionId: string, subagentId: string): boolean {

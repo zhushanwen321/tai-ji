@@ -1,5 +1,5 @@
 /**
- * useTrayCounts 数据面测试（u-tray-native，设计 docs/design/composer-task-tray.md §3.3 D2/D13，已删除 git 可追溯）。
+ * useTrayCounts 数据范围测试（u-tray-native，设计 docs/design/composer-task-tray.md §3.3 D2/D13，已删除 git 可追溯）。
  *
  * 三视角（TEST-STRATEGY §3）：
  * - 构建者（白盒）：三件计数口径与谓词边界——running+stopReason（死亡纳管态）不落进行中、
@@ -110,7 +110,7 @@ function mountHarness(sessionId = SID) {
   return mount(Harness, { props: { sessionId } })
 }
 
-/** 当前数据面（防守：宿主 setup 必已赋值） */
+/** 当前数据范围（防守：宿主 setup 必已赋值） */
 function data(): UseTrayCountsReturn {
   if (!tray) throw new Error('useTrayCounts 未挂载')
   return tray
@@ -280,7 +280,7 @@ describe('useTrayCounts session kind（第 4 件子会话，u7 / 设计 mode-sys
     expect(data().counts.value.session).toEqual({ running: 0, ended: 3, total: 3 })
   })
 
-  it('行集按 lastActiveAt 倒序（最近在前；面板行序 = 数据面行序）', () => {
+  it('行集按 lastActiveAt 倒序（最近在前；面板行序 = 数据范围行序）', () => {
     useSessionStore().applySnapshot({
       groups: [
         {

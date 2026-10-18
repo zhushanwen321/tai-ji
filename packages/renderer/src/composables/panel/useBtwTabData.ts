@@ -253,7 +253,7 @@ export interface UseBtwTabDataReturn {
   totalUnread: ComputedRef<number>
   /** badge 待处理聚合 = 名下处于「待处理」（挂起请求 ∪ 回收提醒）的线数（D8 终态机驱动） */
   totalPending: ComputedRef<number>
-  /** 主动拉取入口（挂载/切会话/抽屉活动三触发面共用；captured 分区回写） */
+  /** 主动拉取入口（挂载/切会话/抽屉活动三触发范围共用；captured 分区回写） */
   refresh: (captured: string) => Promise<void>
 }
 
@@ -285,7 +285,7 @@ export function useBtwTabData(sidRef: Ref<string | null>): UseBtwTabDataReturn {
   )
   const state = computed(() => scoped.current.value)
 
-  /** badge 聚合：只 Σ 权威线列表内的未读（出册线的残留字段由拉取剪枝，聚合面天然干净） */
+  /** badge 聚合：只 Σ 权威线列表内的未读（出册线的残留字段由拉取剪枝，聚合范围天然干净） */
   const totalUnread = computed(() => {
     const s = state.value
     let total = 0
@@ -454,7 +454,7 @@ export function useBtwTabData(sidRef: Ref<string | null>): UseBtwTabDataReturn {
     }
   }
 
-  // ── 触发面 ────────────────────────────────────────────────────────────────────
+  // ── 触发范围 ────────────────────────────────────────────────────────────────────
 
   // ① 挂载 / 切会话必拉（broadcast 时序竞争规则：切换后主动拉取，不依赖广播）
   watch(

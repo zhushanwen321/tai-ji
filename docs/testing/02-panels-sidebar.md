@@ -1192,4 +1192,4 @@ ForkGroup（当前会话的「本会话的分支」折叠区）已整体退役�
 | 事件流 | 事件流子页（RunEventStream）含截断标注与错误二分形态 | record 原文（2KB 截断 + truncatedFields） |
 | Gantt | `wfvz-gantt`（`data-frozen` 标记停止冻结） | attempt 分段横条/phase 色带/游标 |
 
-**坑位**：① mock 轨 getWorkflowDag 恒 record_not_found 降级（T3/OV4 共用断言面，勿改成功）；② block 反查名字形态归一（路径/basename/带扩展名互通，workflow-viz-overlay.ts findRun）——主 agent 传路径是常态；③ e2e 像素轨不覆盖 overlay（交互层不进 shell/composer 基线视口，视觉验证走 L4 截图）。
+**坑位**：① mock 轨 getWorkflowDag 恒 record_not_found 降级（T3/OV4 共用断言范围，勿改成功）；② block 反查名字形态归一（路径/basename/带扩展名互通，workflow-viz-overlay.ts findRun）——主 agent 传路径是常态；③ e2e 像素轨不覆盖 overlay（交互层不进 shell/composer 基线视口，视觉验证走 L4 截图）。

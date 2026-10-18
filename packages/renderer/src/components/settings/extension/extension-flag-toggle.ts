@@ -17,7 +17,7 @@ interface ExtensionFlagToggleOps<T> { // oe-exempt:20260930:framework:两组件�
  * extension 布尔开关的乐观切换编排（ExtensionActions「启用」/ ExtensionDetail「自动升级」共用）。
  *
  * 编排走乐观更新协议（runOptimisticUpdate：apply 乐观写 store → commit 持久化 → 失败
- * rollback 后 rethrow）；本地只把 rethrow 的错误映射到既有错误面（error ref），不手写
+ * rollback 后 rethrow）；本地只把 rethrow 的错误映射到既有错误范围（error ref），不手写
  * try/catch 回滚。toggling 集合防双击（API 期间 disable Switch）。广播回来时权威值
  * 覆盖 store（幂等：若值一致无副作用）。
  */

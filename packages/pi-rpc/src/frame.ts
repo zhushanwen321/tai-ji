@@ -88,9 +88,9 @@ export interface PendingRegistry<TMsg = PiMessage> {
   resolveResponse(id: string, msg: TMsg): boolean
   /** 注销 pending（请求未送达的写失败路径）。 */
   cancel(id: string): void
-  /** 只读可观测面：id 是否仍 pending（诊断 / 白盒测试断言用）。 */
+  /** 只读可观测范围：id 是否仍 pending（诊断 / 白盒测试断言用）。 */
   hasPending(id: string): boolean
-  /** 只读可观测面：当前 pending 数（诊断 / 白盒测试断言用）。 */
+  /** 只读可观测范围：当前 pending 数（诊断 / 白盒测试断言用）。 */
   get pendingSize(): number
   /** 全部 reject（进程退出 / stream error 收敛）。 */
   rejectAll(error: Error): void
@@ -152,7 +152,7 @@ export interface EarlyFrameBuffer<TMsg> {
   takeAndClose(): TMsg[]
   /** 缓冲是否已关闭（一次性；关闭后 listeners 再空集也不重新武装）。 */
   get closed(): boolean
-  /** 只读可观测面：当前缓冲帧快照（诊断 / 白盒测试断言用；不消费缓冲）。 */
+  /** 只读可观测范围：当前缓冲帧快照（诊断 / 白盒测试断言用；不消费缓冲）。 */
   get frames(): readonly TMsg[]
 }
 

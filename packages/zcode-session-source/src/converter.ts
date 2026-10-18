@@ -40,7 +40,7 @@
  * - 时间不可解不伪造（RT-5#8）：session.timeCreated / message.time.created 不可解时
  *   timestamp 键缺省（header.timestamp / entry.timestamp / message.timestamp 均可选），
  *   降级登记一次，不以 0 产出 1970 假时间戳污染排序与按日统计。
- * - 错误面归消费侧（§1.5 契约第 4 条）：session 行不存在、归一化失败、查询/JSON
+ * - 错误范围归消费侧（§1.5 契约第 4 条）：session 行不存在、归一化失败、查询/JSON
  *   解析失败均抛普通 Error 原样上抛——reader 侧映射 zcode_* 词表、runtime 导入侧
  *   映射 import_* 词表，本包不私建错误码与恢复话术（dev 版的 convertZcodeSession
  *   db 组合 + ImportServiceError 不移植）。
@@ -72,7 +72,7 @@ import {
 } from './assistant-mapping.ts'
 import type { ProjectionPolicy } from './semantics.ts'
 
-// 公共面：resolveFirstKeptEntryId 实现在 compaction.ts，经再导出维持从本模块导入的
+// 公共范围：resolveFirstKeptEntryId 实现在 compaction.ts，经再导出维持从本模块导入的
 // 既有路径（compaction-firstkept.test 等锚点；dev 版同款先例）。
 export { resolveFirstKeptEntryId }
 
@@ -258,7 +258,7 @@ function newSegment(): AssistantSegment {
 
 // T3c stopReason / usage 映射与共享检查（isRecord / asFinite / asNonEmptyString）在
 // assistant-mapping.ts（字段映射域：mapStopReason / unsealedStopReason（取消轮 error 优先）/
-// zeroUsage（pi 读面不变量门）/ usageFromStepFinish——RT-5#1 缺省语义见其头注）。
+// zeroUsage（pi 读侧不变量门）/ usageFromStepFinish——RT-5#1 缺省语义见其头注）。
 
 /**
  * T4：tool part 的 state.output → pi toolResult 的 content/details 三形态。

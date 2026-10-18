@@ -270,7 +270,7 @@ function dispatchGlobalRouted(
  * event-adapter 实发 'extension.dialog'，与 protocol.ts + MessageBusBridge
  * EXTENSION_HANDLERS 同源）。
  *
- * 导出面说明：导出供 route-inbound.test.ts 注册探针条目（payloadGuard「不门控分发」
+ * 导出清单说明：导出供 route-inbound.test.ts 注册探针条目（payloadGuard「不门控分发」
  * 契约的接口级验证——生产 payloadGuard 条目均无 crossSession 声明，需注入探针才可
  * 组合验证）与声明形状锁定；生产消费方只读，不 mutate（与 subscription-state 的
  * resetSubscriptionStates 同类测试支撑导出）。globalEffect 自阶段 B 起有生产条目

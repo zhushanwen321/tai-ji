@@ -699,7 +699,7 @@ describe('moveCaretVerticalOf（jsdom 可达分支，W6 特征锚定）', () => 
   /**
    * jsdom 无布局引擎：Range rect API 缺失/全零，caretRangeFromPoint 未实现，
    * Selection.modify 未实现。注入假几何（stub Range rect 方法）驱动各分支；
-   * caretRangeFromPoint 通路（多行中间行移动）不在 jsdom 覆盖面，由 renderer 行为测试兜底。
+   * caretRangeFromPoint 通路（多行中间行移动）不在 jsdom 覆盖范围，由 renderer 行为测试兜底。
    */
   interface FakeRect {
     top: number

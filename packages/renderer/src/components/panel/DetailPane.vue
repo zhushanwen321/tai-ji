@@ -1,4 +1,4 @@
-<!-- split-justified: 文件预览抽屉单一语义域（类型分发 + 多态渲染 + 选区引用注入——渲染面与选区反推围绕同一预览上下文） -->
+<!-- split-justified: 文件预览抽屉单一语义域（类型分发 + 多态渲染 + 选区引用注入——渲染范围与选区反推围绕同一预览上下文） -->
 <template>
   <!-- split-justified: detail 文件预览域（多文件 tab 实例层 + header 动作 + 四态内容渲染 + 选区反推行号——同一预览面板语义域；display-containers W3 tab 条接入后 script 超 300，按登记制放行） -->
   <!--

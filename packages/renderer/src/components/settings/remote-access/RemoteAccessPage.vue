@@ -56,7 +56,7 @@
         </Button>
       </template>
       <div class="p-[12px_16px]">
-        <!-- 移动壳 dist 缺失显形（E5）：enabled 但产物缺失时 runtime 静态面已禁用，手机端 404 -->
+        <!-- 移动壳 dist 缺失显形（E5）：enabled 但产物缺失时 runtime 静态范围已禁用，手机端 404 -->
         <div
           v-if="!info.mobileDistReady"
           role="alert"

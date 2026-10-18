@@ -3,8 +3,8 @@
  *
  * 迁出来源 = DrawerControlState.selectedWorkflowName（workflow tab 当前展示的 workflow 名）。
  * per-session 分区（useSessionScopedState，ADR-0049），键 = drawerSessionKey。
- * 写入面 = setWorkflowView（coordination.openWorkflowInDrawer 编排调用）；
- * 读取面 = useWorkflowSelection（WorkflowTab 消费）。
+ * 写侧 = setWorkflowView（coordination.openWorkflowInDrawer 编排调用）；
+ * 读侧 = useWorkflowSelection（WorkflowTab 消费）。
  */
 import { computed, reactive } from 'vue'
 import type { ComputedRef } from 'vue'

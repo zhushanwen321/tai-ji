@@ -1,12 +1,12 @@
 // src/index.ts
 //
 // @zhushanwen/subagent-engine-sdk 主 barrel。
-// u-foundation 契约根（impl-plan §2 W1 行）：协议面（帧型/方法/错误码/版本协商/
+// u-foundation 契约根（impl-plan §2 W1 行）：协议范围（帧型/方法/错误码/版本协商/
 // JSON Schema/契约类型）+ 引擎侧原语（7 模块）+ UI 请求契约类型。
 // 不变量（设计 §3.10.1）：本包禁止 import @zhushanwen/subagent-core——检查
 // .githooks/check-engine-sdk-boundary.mjs（SDK 源码 + dist 双侧扫描）。
 
-// ── 协议面（契约类型 SSOT + 帧型 + 方法 + 反向通道 + 错误码 + 版本协商 + schema）──
+// ── 协议范围（契约类型 SSOT + 帧型 + 方法 + 反向通道 + 错误码 + 版本协商 + schema）──
 export * from "./protocol/index.ts";
 
 // ── 引擎侧原语（7 模块，impl-plan §2.1 原语迁移处置表）──
@@ -62,7 +62,7 @@ export * from "./best-effort.ts";
 // replayJournal/parseLine 逐字等价双副本收编；JournalWriter 写侧留 core）。
 export * from "./journal-io.ts";
 
-// 引擎进程内契约面七符号 + parseCtxModel（S4 簇 1：pi/zcode port-types.ts 本地镜像
+// 引擎进程内契约范围七符号 + parseCtxModel（S4 簇 1：pi/zcode port-types.ts 本地镜像
 // 收编，两包改 re-export shim。收主 barrel 不进 protocol/——RunContext 含
 // AbortSignal/回调非序列化成员；全量任务声明名 EngineAgentCallOpts 避让 protocol
 // 的 AgentCallOpts 引擎面子集）。

@@ -3,8 +3,8 @@
  *
  * 迁出来源 = DrawerControlState.selectedBackgroundTaskId（bashTask tab 当前展示的后台任务 id）。
  * per-session 分区（useSessionScopedState，ADR-0049），键 = drawerSessionKey。
- * 写入面 = setBackgroundTaskView（TrayNativePanel 行点击 / 测试）；
- * 读取面 = useBashTaskSelection（BackgroundTaskDetailPanel + PanelContainer 注入判定）。
+ * 写侧 = setBackgroundTaskView（TrayNativePanel 行点击 / 测试）；
+ * 读侧 = useBashTaskSelection（BackgroundTaskDetailPanel + PanelContainer 注入判定）。
  */
 import { computed, reactive } from 'vue'
 import type { ComputedRef } from 'vue'

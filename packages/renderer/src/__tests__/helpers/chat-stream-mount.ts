@@ -1,7 +1,7 @@
 /**
  * 聊天流壳测试共享 mock 工厂与装配工具单源（Wave C r2-05 chatDepsMock 收敛）。
  *
- * 导出面：
+ * 导出清单：
  * - 壳 mock 三工厂：chatViewDepsModule / useChatMockModule / useSidebarMockModule
  *   （vi.mock 注册形态：测试文件自行 vi.mock 转发，或 import
  *   message-stream-shell-mount.ts 由其顶层注册）

@@ -11,7 +11,7 @@
  * 导出但无任何调用点的代码已删（b05 候选 4），hydrate 相关用例改走 store.hydrate 验收路径。
  *
  * [u3b 退役] defer flush/S1 拒绝检测/1s 重投 timer/5 次熔断/handleSendRejected/pendingDirectSends
- * /steer pendingBuffer 计数路径相关 describe 已删除（设计 §3.1 删除面），由「统一 submit +
+ * /steer pendingBuffer 计数路径相关 describe 已删除（设计 §3.1 删除范围），由「统一 submit +
  * delivery 帧 morph + 回执入流」describe 承接，git 可追溯。
  *
  * 模式（对齐 w4 store.test.ts）：effectScope + createChatStore（真实 store）+ mockDeps

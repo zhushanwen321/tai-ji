@@ -2,7 +2,7 @@
  * custom-registry.test.ts —— GUI_CUSTOM_REGISTRY_KEY / EMPTY_CUSTOM_REGISTRY / isCustomRegistered
  * 全覆盖（TC-1/TC-2，AC3「注册表 builtin-only 机制生效」）。
  *
- * IF2 契约面：
+ * IF2 契约范围：
  * ① key 类型 symbol + 描述 'Symbol(gui-custom-registry)'（与 renderer gui-registry.ts 同 Symbol 值）
  * ② key 唯一性（与其它任意 Symbol 不相等）
  * ③ EMPTY_CUSTOM_REGISTRY frozen + 零自有属性（运行时不可 mutate）

@@ -7,12 +7,12 @@
  *   agent/slug/task、scriptName/进度）、tab 切换、空态按钮、两段式首击确认态
  * - 观察者（形态）：pin 门控（hover 态无行内按钮）、错误态 retry、断连提示条、加载态
  * - 构建者（白盒）：行点击归宿矩阵（drawer 三 tab）与 RPC 参数（计数口径在
- *   useTrayCounts.test.ts 覆盖）；数据面单例（U1：真实 useTrayCounts + spy 断言面板开合
+ *   useTrayCounts.test.ts 覆盖）；数据范围单例（U1：真实 useTrayCounts + spy 断言面板开合
  *   不重发首次拉取 RPC）
  *
  * mock 策略：
- * - 数据面经 `TRAY_COUNTS_KEY` **provide 替身**（非模块 mock）：面板已改 inject 消费外壳单例
- *   （U1），替身是 `UseTrayCountsReturn` 类型标注的固定数据面——契约漂移即编译报错；口径测试
+ * - 数据范围经 `TRAY_COUNTS_KEY` **provide 替身**（非模块 mock）：面板已改 inject 消费外壳单例
+ *   （U1），替身是 `UseTrayCountsReturn` 类型标注的固定数据范围——契约漂移即编译报错；口径测试
  *   在同目录 useTrayCounts.test.ts，本文件只验渲染与交互
  * - U1 用例用**真实** useTrayCounts（外壳替身持有）+ spy 拉取路径（`loadSubagents` /
  *   `loadWorkflows`）：断言面板开合不重复触发首次拉取（旧实现每次 hover 打开都重发，是 U1 根因）
@@ -50,7 +50,7 @@ import type { SubagentRecord, WorkflowRunRecord } from '@taiji/shared'
 import * as backgroundTaskApi from '@taiji/core/transport/api/domains/background-task'
 import * as sessionApi from '@taiji/core/transport/api/domains/session'
 
-// ── 数据面替身（inject 消费点：panel 已不自建实例；U1 用例另用真实 useTrayCounts）──
+// ── 数据范围替身（inject 消费点：panel 已不自建实例；U1 用例另用真实 useTrayCounts）──
 interface TrayState {
   bashRunning: BackgroundTaskEntry[]
   bashEnded: BackgroundTaskEntry[]
@@ -95,7 +95,7 @@ const trayState = reactive<TrayState>(createTrayState())
 const retryMock = vi.hoisted(() => vi.fn<(kind: TrayKind) => Promise<void>>().mockResolvedValue(undefined))
 
 /**
- * 固定数据面替身（`UseTrayCountsReturn` 类型标注 = 契约漂移门：成员增删改名即编译报错）。
+ * 固定数据范围替身（`UseTrayCountsReturn` 类型标注 = 契约漂移门：成员增删改名即编译报错）。
  * 经 TRAY_COUNTS_KEY provide 给被测面板——面板不再 import useTrayCounts（U1），替身即其唯一数据源。
  * 模块级构造：所有计算属性都从 trayState 惰性派生，用例之间无需重建。
  */
@@ -118,7 +118,7 @@ const trayFixture: UseTrayCountsReturn = {
   retry: retryMock,
 }
 
-// ── mock：bash 分区状态根（bash 数据面；U1 用例的真实 useTrayCounts 会调用它）──
+// ── mock：bash 分区状态根（bash 数据范围；U1 用例的真实 useTrayCounts 会调用它）──
 vi.mock('@/composables/features/sidebar/useBackgroundTasks', () => ({
   useBackgroundTasks: () => ({
     current: computed(() => ({
@@ -323,7 +323,7 @@ describe('TrayNativePanel 分桶 tab 与行渲染（使用者黑盒）', () => {
 
   it('bash：切「已结束」→ 终态行显示 exit 码（null 显 —）', async () => {
     trayState.bashRunning = [makeTask({ taskId: 'bt-1' })]
-    // 行序由数据面给定（排序是 background-task-bucket SSOT 的职责，口径在其单测覆盖；
+    // 行序由数据范围给定（排序是 background-task-bucket SSOT 的职责，口径在其单测覆盖；
     // 本文件只验渲染：killed（exitCode null）在前，正常终态在后）
     trayState.bashEnded = [
       makeTask({ taskId: 'bt-e2', state: 'exited', exitCode: null, reason: 'killed', endedAt: T(1_000), durationMs: 59_000 }),
@@ -495,7 +495,7 @@ describe('TrayNativePanel 空态可行动（D9）', () => {
   })
 
   it('subagent：已结束记录落已结束桶渲染（[两视图裁决 2026-09-16]，无寻回入口）', async () => {
-    // 已结束记录由数据面归入已结束行集（口径断言在 useTrayCounts.test.ts）；面板层断言
+    // 已结束记录由数据范围归入已结束行集（口径断言在 useTrayCounts.test.ts）；面板层断言
     // 空「进行中」tab 下经「查看已结束」跳转后该记录走「已结束」tab 可见，且无
     // 「查看已收起」寻回按钮（「已收起」机制已全链路删除，第三桶不存在）
     trayState.subagentEnded = [makeSubagent({ subagentId: 'sub-a1', status: 'idle' })]
@@ -837,7 +837,7 @@ describe('TrayNativePanel 加载态判据（U2：在途且该类无数据才占�
   })
 })
 
-describe('TrayNativePanel 数据面单例（U1：开合不重发首次拉取 RPC）', () => {
+describe('TrayNativePanel 数据范围单例（U1：开合不重发首次拉取 RPC）', () => {
   it('面板关闭再打开（卸载重挂）不触发重复首次拉取：loadSubagents / loadWorkflows 各仅外壳挂载一次', async () => {
     const subagentStore = useSubagentStore()
     const workflowStore = useWorkflowStore()
@@ -853,7 +853,7 @@ describe('TrayNativePanel 数据面单例（U1：开合不重发首次拉取 RPC
     wrapper = mount(ShellHarness, { props: { sessionId: SID, open: false } })
     await flushPromises()
 
-    // 外壳挂载（= 数据面唯一实例创建点）即首次拉取，各一次
+    // 外壳挂载（= 数据范围唯一实例创建点）即首次拉取，各一次
     expect(loadSubSpy).toHaveBeenCalledTimes(1)
     expect(loadSubSpy).toHaveBeenCalledWith(SID)
     expect(loadWfSpy).toHaveBeenCalledTimes(1)
@@ -936,7 +936,7 @@ describe('TrayNativePanel tick 空转治理（interval 仅随可见 running bash
     await flushPromises()
     expect(vi.getTimerCount()).toBe(0)
 
-    // running 行出现（数据面推送）：interval 建立，耗时开始实时走
+    // running 行出现（数据范围推送）：interval 建立，耗时开始实时走
     trayState.bashRunning = [makeTask({ taskId: 'bt-1' })]
     await flushPromises()
     expect(vi.getTimerCount()).toBe(1)

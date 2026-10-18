@@ -150,7 +150,7 @@ describe('Landing 渲染条件（Panel v-if 分支）', () => {
     // D1：landing 判据需 !sessionId——「有会话 × flow 活跃」在派生上不可表达，
     // 无论 flow 单例因何残留活跃，有会话 panel 恒走 conversation（composer 常驻）
     expect(wrapper.findComponent(Landing).exists()).toBe(false)
-    // conversation 无消息 → 空对话态 + band composer（输入面不因 flow 残留消失）
+    // conversation 无消息 → 空对话态 + band composer（输入范围不因 flow 残留消失）
     expect(wrapper.text()).toContain('输入消息开始对话')
     expect(wrapper.find('[data-testid="band-composer"]').exists()).toBe(true)
   })

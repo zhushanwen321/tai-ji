@@ -1,6 +1,6 @@
 // src/port-types.ts
 //
-// EnginePort / RunContext / EngineRunResult 的引擎包契约面——re-export shim
+// EnginePort / RunContext / EngineRunResult 的引擎包契约范围——re-export shim
 // （S4 簇 1 收编：W7 迁移承接的本地镜像七符号 + server.ts 的 parseCtxModel 单源
 // 收编 SDK port-contract；本包 import 点零改写）。
 //

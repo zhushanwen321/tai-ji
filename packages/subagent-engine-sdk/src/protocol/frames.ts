@@ -80,7 +80,7 @@ export interface ReverseRequestFrame {
 
 /** 反向请求的应答（core → 引擎，沿 ResponseFrame 通道回传；id = 反向请求 id 原样）。 */
 export type ReverseResponseResult =
-  /** 数据面类：处理确认。 */
+  /** 数据范围类：处理确认。 */
   | { ok: true }
   /** 人机交互类（askUser）两阶段第一阶段：已受理，结果异步到达（R9-2）。 */
   | { ack: true }

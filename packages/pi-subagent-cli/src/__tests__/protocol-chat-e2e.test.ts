@@ -137,7 +137,7 @@ async function initialize(host: FakeHost, dataDir: string): Promise<void> {
   expect(init.error).toBeUndefined();
 }
 
-/** 收割链自动应答：等 childStateChanged exited（数据面）并回 ack，防引擎侧反向等待挂起。 */
+/** 收割链自动应答：等 childStateChanged exited（数据范围）并回 ack，防引擎侧反向等待挂起。 */
 async function awaitReaped(host: FakeHost, recordId: string): Promise<void> {
   const exited = await host.waitForReverse("host/childStateChanged");
   expect(exited.params).toMatchObject({ recordId, state: "exited" });

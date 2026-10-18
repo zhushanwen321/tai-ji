@@ -187,7 +187,7 @@ describe('W2 两态断言（-wal 在场）', () => {
     }
   })
 
-  it('② 直开失败 ∧ -wal 在场（db 无读权限）：落错误面而绝不触发拷贝/immutable', async () => {
+  it('② 直开失败 ∧ -wal 在场（db 无读权限）：落错误范围而绝不触发拷贝/immutable', async () => {
     const fx = makeFixtureDir('zss-w2-gate-')
     try {
       const fixture = await buildFixtureDb(fx.root, defaultTranscriptSeeds())
@@ -259,7 +259,7 @@ describe('阶梯编排（openWithRecovery）', () => {
     }
   })
 
-  it('L1→L2→L3 全链失败（损坏文件）：L4 错误面 attempted 全记录、无快照残留', async () => {
+  it('L1→L2→L3 全链失败（损坏文件）：L4 错误范围 attempted 全记录、无快照残留', async () => {
     const fx = makeFixtureDir('zss-ladder-corrupt-')
     try {
       const dbPath = join(fx.root, 'db.sqlite')
@@ -285,7 +285,7 @@ describe('阶梯编排（openWithRecovery）', () => {
     }
   })
 
-  it('db 不存在：L4 错误面（存在性由消费方先行检查，此处以 unreadable 兜底）', async () => {
+  it('db 不存在：L4 错误范围（存在性由消费方先行检查，此处以 unreadable 兜底）', async () => {
     const fx = makeFixtureDir('zss-ladder-missing-')
     try {
       let caught: unknown
@@ -348,7 +348,7 @@ describe('L3 快照兜底（单级）', () => {
     }
   })
 
-  it('规模门：db > 256MB 拒拷（错误面 + 零目录创建）', async () => {
+  it('规模门：db > 256MB 拒拷（错误范围 + 零目录创建）', async () => {
     const fx = makeFixtureDir('zss-l3-gate-')
     try {
       const dbPath = join(fx.root, 'big.sqlite')

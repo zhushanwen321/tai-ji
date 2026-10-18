@@ -28,7 +28,7 @@
  * - `pluginToolbarContributionCount`：ViewHost 的 `composer.toolbar` 挂载点当前缓存条目（挂载点把
  *   N 个贡献合成**一个** view，故只有布尔面 → 有内容记 1、无记 0；状态机只判定 `> 0`）。
  *   判定单份在 `./use-plugin-toolbar`（挂载点标识 + getView/guiTree 判定），本处只映射为计数。
- * - `hasTrayItems`：**不由本文件推导**（托盘三态的唯一真源是 `useTrayCounts` 数据面，唯一实例在
+ * - `hasTrayItems`：**不由本文件推导**（托盘三态的唯一真源是 `useTrayCounts` 数据范围，唯一实例在
  *   ComposerTray）——外壳经 `update:has-items` 事件上抛，本文件只承载该 ref。缺省 `true`
  *   （状态机的保守缺省），首帧后即被真实值覆盖。
  *
@@ -180,7 +180,7 @@ export function useComposerBarDensity(sessionId: Ref<string | null>): UseCompose
    */
   const pluginToolbarHasContribution = usePluginToolbarContribution(() => sessionId.value ?? '')
   /**
-   * 插件 headerAction 可见入口面（左簇内容三源之一；demo composer-bar spec §2.1 B3——L2 聚合面
+   * 插件 headerAction 可见入口面（左簇内容三源之一；demo composer-bar spec §2.1 B3——L2 聚合范围
    * 含定时任务钮，其存在性必须参与「左簇有无内容」判定，否则托盘空 + toolbar 零贡献时聚合
    * 入口不渲染、被聚合 clock 直开动作丢失）。判定纯函数与渲染过滤同构（bridge 单份）。
    */
@@ -327,7 +327,7 @@ export function useComposerBarDensity(sessionId: Ref<string | null>): UseCompose
     passCount = 0
   })
 
-  // 托盘条目面 / 插件贡献 / headerAction 声明面变化会改左簇占宽（散图标 ↔ 聚合 ↔ 缺席），重新判一次
+  // 托盘条目范围 / 插件贡献 / headerAction 声明面变化会改左簇占宽（散图标 ↔ 聚合 ↔ 缺席），重新判一次
   watch(hasTrayItems, () => scheduleFitPass())
   watch(pluginToolbarContributionCount, () => scheduleFitPass())
   watch(hasHeaderActionEntries, () => scheduleFitPass())

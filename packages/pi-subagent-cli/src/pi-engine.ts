@@ -9,10 +9,10 @@
 //     → 本包 spawn-runner（迁移物）；
 //   - chat 轮次 → run 派发形态（每轮一进程：首轮无锚点新建，续聊 resume 锚点
 //     --session 续写原文件；agent_settled resolve + 收割——D7）。U5 起 registry 本体
-//     与 interact 控制面已删除（续聊不经 interact——deliverChatMessage 面 = U2 建
+//     与 interact 控制范围已删除（续聊不经 interact——deliverChatMessage 面 = U2 建
 //     ConversationContinuation 后的 run 域派发）；
 //   - 宿主编排面（executeAndAwait / record 状态回写 / idle 定时器）→ core
-//     （W3 改线消费本引擎的事件面）；
+//     （W3 改线消费本引擎的事件范围）；
 //   - read：①级 pi 原生读取依赖 core session-reconstructor（§2.7「保持 core」），
 //     引擎包 read 走 ②级 journal 重放（SDK journal-replay）→ ③级 outcome-only
 //     降级链（deviations 登记：①级留在 core 侧过渡期链路，W10 conformance 定夺）。
@@ -189,7 +189,7 @@ export class PiEngine implements EnginePort {
     // handle）。dataDir 本身不参与 sessionDir 推导——session 目录唯一源 = 宿主注入
     // ctx.sessionDir（Option C）。
     resolveEngineDataRootOrThrow(this.deps.dataDir);
-    // [池抽象降级 2026-09-13] 原 onPoolResolved 恒值声明已随 poolKey 协议面退役删除
+    // [池抽象降级 2026-09-13] 原 onPoolResolved 恒值声明已随 poolKey 协议范围退役删除
     //（journal 固定落 engines/pi/shared/，宿主侧路径构造即终值）。
 
     const cwd = task.cwd ?? process.cwd();
@@ -274,7 +274,7 @@ export class PiEngine implements EnginePort {
     killAllActiveChildren();
   }
 
-  // ── 反向通道注入面（server 构造后接线 host/askUser） ──
+  // ── 反向通道注入点（server 构造后接线 host/askUser） ──
 
   private askUserHandler: ((req: UiRequest) => Promise<UiResponse>) | undefined;
 
@@ -468,7 +468,7 @@ function toOutcome(result: SpawnRunResult): AgentOutcome {
   };
 }
 
-/** usage 域映射（collector 聚合面 → AgentOutcomeUsage 的必填字段装配）。 */
+/** usage 域映射（collector 聚合范围 → AgentOutcomeUsage 的必填字段装配）。 */
 function toOutcomeUsage(result: SpawnRunResult): import("@zhushanwen/subagent-engine-sdk").AgentOutcomeUsage {
   const u = result.usage!;
   return {

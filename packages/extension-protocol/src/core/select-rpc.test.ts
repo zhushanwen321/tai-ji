@@ -2,7 +2,7 @@
 // + 错误回包形状单源化（ChannelErrorResult / 两 alias）。
 //
 // 设计权威源：docs/architecture/ext-simplify-17-shared-extraction.md §3.3 D8（v7 冻结形态）。
-// 经 barrel（../index）导入：单测同时锚定新增导出面。
+// 经 barrel（../index）导入：单测同时锚定新增导出清单。
 
 import { describe, it, expect, expectTypeOf, vi } from 'vitest'
 import {

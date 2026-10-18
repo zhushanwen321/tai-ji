@@ -70,7 +70,7 @@ export interface SessionManagerAbortParams {
 /**
  * watch action 参数（notify-once D2/D6）：通知债权的纯应答通道，**单键寻址**——
  * runtime 按 `(调用方 parentSid, notifyId)` 反查 claim，parentSid 取自调用方连接身份、
- * **协议面不定义不携带**（可推导字段免传，多余字段被检查拒绝）。不传 timeout、
+ * **协议范围不定义不携带**（可推导字段免传，多余字段被检查拒绝）。不传 timeout、
  * fire-and-forget 长挂 select；每 claim 单 watch 槽（新覆盖旧，runtime 只 respond 最新）。
  */
 export interface SessionManagerWatchParams {
@@ -104,7 +104,7 @@ function isOptionalNumberOrNull(v: unknown): boolean {
 }
 
 /**
- * notifyId 形态入站自检（notify-once D2/D6，廉价防御级校验）——协议面单一权威：
+ * notifyId 形态入站自检（notify-once D2/D6，廉价防御级校验）——协议范围单一权威：
  * extension 侧 `crypto.randomUUID()` 前缀 `sm-` 生成、runtime 生成的 `lifetimeNotifyId`
  * 同形态**同本函数**（防 kind=lifetime 的 watch 被自检拒掉）。形状 = `sm-` + RFC4122
  * 十六进制 UUID（8-4-4-4-12，大小写不敏感），总长构造性固定 39 字符——超长/截断/
@@ -119,7 +119,7 @@ export function isSessionManagerNotifyId(v: unknown): v is string {
   return typeof v === 'string' && NOTIFY_ID_PATTERN.test(v)
 }
 
-/** optional notifyId 的类型面校验（缺省放行；present 须为 string——非 string 属形状
+/** optional notifyId 的类型范围校验（缺省放行；present 须为 string——非 string 属形状
  *  违规拒绝走 error envelope，字符串形态不符留给 arm 判据降级为 willNotify:false） */
 function isOptionalNotifyId(v: unknown): boolean {
   return v === undefined || typeof v === 'string'
@@ -129,7 +129,7 @@ function isSessionIdParams(v: unknown): boolean {
   return isRecord(v) && typeof v.sessionId === 'string'
 }
 
-/** create：字段可选 string + optional notifyId（类型面，sm- 形态判定归 arm 判据） */
+/** create：字段可选 string + optional notifyId（类型范围，sm- 形态判定归 arm 判据） */
 export function isSessionManagerCreateParams(v: unknown): v is SessionManagerCreateParams {
   return (
     isRecord(v) &&
@@ -140,7 +140,7 @@ export function isSessionManagerCreateParams(v: unknown): v is SessionManagerCre
   )
 }
 
-/** send：sessionId + prompt 必填，notifyId optional（类型面校验同 create） */
+/** send：sessionId + prompt 必填，notifyId optional（类型范围校验同 create） */
 export function isSessionManagerSendParams(v: unknown): v is SessionManagerSendParams {
   return (
     isRecord(v) &&
@@ -176,7 +176,7 @@ export function isSessionManagerListParams(v: unknown): v is SessionManagerListP
 /**
  * watch：**封闭单键** `{notifyId}` 检查（notify-once D2 形态入站自检）——
  * 空载荷 / 缺字段 / 夹带任何额外字段（如 parentSid：归属由 runtime 取连接身份，
- * 协议面不定义）/ notifyId 非 string / 形态不符（缺 `sm-` 前缀、非 UUID 体、超长）
+ * 协议范围不定义）/ notifyId 非 string / 形态不符（缺 `sm-` 前缀、非 UUID 体、超长）
  * → false → handler dispatch 抛错走 respond({error}) 错误闭环（error envelope）。
  * 形态函数与 lifetimeNotifyId 同一实现（防自检拒掉 runtime 生成的 lifetime watch）。
  */
@@ -192,7 +192,7 @@ export interface SessionManagerCreateResult {
   status: 'created'
   modelId?: string
   /**
-   * 完成通知债权是否已 arm（notify-once D6，LLM 契约面显式化）：create 无 prompt /
+   * 完成通知债权是否已 arm（notify-once D6，LLM 契约范围显式化）：create 无 prompt /
    * notifyId 缺省或畸形 → false（零完成通知）；true 时首次完成恰回一条通知。
    * 注意与 lifetimeNotifyId 正交——后者恒存在（死亡通知与债权无关）。
    */

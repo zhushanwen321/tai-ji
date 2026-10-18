@@ -208,7 +208,7 @@ function setupFork(sessionIdValue?: string | null) {
 
 function setupHandoff(sessionIdValue?: string | null) {
   const signal = ref<HandoffSourceShape | null>(null)
-  // exitForkMode 是 extras spy（不在 StagingModeDeps 公共面），经闭包引用 deps 也记入序列日志
+  // exitForkMode 是 extras spy（不在 StagingModeDeps 公共范围），经闭包引用 deps 也记入序列日志
   let depsRef: DepsSpies | undefined
   const handoffExtras = {
     signal,

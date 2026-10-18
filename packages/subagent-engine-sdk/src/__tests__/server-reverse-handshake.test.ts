@@ -88,7 +88,7 @@ describe("sendReverseRequest（发送侧语义）", () => {
     expect(pending.get("rev-1")?.method).toBe("host/askUser");
   });
 
-  it("无 clock 时不报错（测试注入面可缺席）", () => {
+  it("无 clock 时不报错（测试注入点可缺席）", () => {
     const { ctx, written } = makeSendCtx({ clock: undefined });
     expect(() => void sendReverseRequest(ctx, "host/y", {})).not.toThrow();
     expect(written).toHaveLength(1);

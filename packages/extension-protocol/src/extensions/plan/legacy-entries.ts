@@ -8,13 +8,13 @@
  *
  * 消费方 = 扩展 reconstructPlanState（读方①）+ runtime plan-state-extractor（读方②）直引；
  * renderer 侧兜底映射已随批次 3 条目 1 删除（不引）。原 shared fixture 等价表与双套平行断言
- * 随下沉删除——映射契约唯一断言面 = 本目录 legacy-entries.test.ts。
+ * 随下沉删除——映射契约唯一断言范围 = 本目录 legacy-entries.test.ts。
  *
  * 范围注记：本模块只承载 lifecycle/resumeHint 两个跨包映射；templateProvidedPath 等其余旧
  * 字段映射仍留扩展读侧（extension 域私有，无第二消费方，无跨包单源诉求）。
  *
  * 纯数据 + 纯函数，零依赖（仅同包 state-machine 值域），与 state-machine.ts（纯契约模块）
- * 刻意分文件——legacy 读取规则有自己的退役时钟，不混入长期契约面。
+ * 刻意分文件——legacy 读取规则有自己的退役时钟，不混入长期契约范围。
  */
 import { PLAN_LIFECYCLE_STATES } from './state-machine'
 import type { PlanLifecycleState } from './state-machine'

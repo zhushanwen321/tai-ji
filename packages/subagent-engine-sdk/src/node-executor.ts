@@ -208,7 +208,7 @@ async function resolveStandaloneLaunch(
  * （EngineClient / runtime）持有各自的平台参数（detached / 进程组收割语义）。
  *
  * 判定序（与规格逐行对应）：
- *   Windows + entry .cmd → cmd.exe /c 显式形态（禁 shell:true 的注入面）；
+ *   Windows + entry .cmd → cmd.exe /c 显式形态（禁 shell:true 的注入通道）；
  *   pi-extension → 注入执行器（env TAIJI_AGENT_ENGINE_NODE），缺失/探针失败 =
  *     engine_not_found + 指引；
  *   runtime-sidecar → process.execPath（Electron 时 electronRunAsNode，探针先行）；

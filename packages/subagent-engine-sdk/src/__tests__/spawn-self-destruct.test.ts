@@ -30,7 +30,7 @@ describe("spawnEngineChild", () => {
     spawned = null;
   });
 
-  it("形态键（detached/stdio/stdin/windowsHide）出现即抛错——不暴露硬编码契约面", () => {
+  it("形态键（detached/stdio/stdin/windowsHide）出现即抛错——不暴露硬编码契约范围", () => {
     const env = buildEngineChildEnv({}, { dataDir: "/d" });
     expect(() => spawnEngineChild({ command: "x", args: [], env, detached: true } as never))
       .toThrow(/detached/);
@@ -46,7 +46,7 @@ describe("spawnEngineChild", () => {
     // 毫秒级（node -e 载荷是完整 Node 启动，满载下墙钟成本高且无谓）。probe 从
     // 子进程侧断言 stdin 是流式 IPC 端点（-S socket 或 -p FIFO——libuv 'pipe'
     // stdio 在 macOS 走 socketpair、Linux 走 pipe2，两者都是 'pipe' 形态本体；
-    // 排除 TTY/文件），/bin/cat 回环验证数据面通路 + EOF 自然退出（与自灭主判据
+    // 排除 TTY/文件），/bin/cat 回环验证数据范围通路 + EOF 自然退出（与自灭主判据
     // 同源的 EOF 语义）。buildEngineChildEnv 是净化面（无 PATH），一律绝对路径。
     // Windows 无原生端点探测，回落 node -e 原样回显（契约由父侧 fd 断言 + 回环
     // 覆盖）。

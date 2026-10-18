@@ -77,7 +77,7 @@ const settingsStore = getSettingsStore()
 const { info: toastInfo } = useToast()
 const { t } = useI18n()
 
-// 启用开关的乐观切换（toggling 防双击 / error 就近错误面；编排与 ExtensionDetail 的
+// 启用开关的乐观切换（toggling 防双击 / error 就近错误范围；编排与 ExtensionDetail 的
 // autoUpgrade 开关共用 extension-flag-toggle）
 const { toggling, error, toggleFlag } = useOptimisticExtensionFlagToggle()
 /** 升级中（按扩展名 key） */

@@ -1,5 +1,5 @@
 /**
- * ui 包 extension-host 层导出面（W4 · T4 + W3 · T2/T3 + W2 · T6）。
+ * ui 包 extension-host 层导出清单（W4 · T4 + W3 · T2/T3 + W2 · T6）。
  *
  * 导出 PluginSettingsPage（插件管理页，IF7）+ 其数据源接口 + StatusBar/ViewHost
  * （W3：AC5 状态栏 + AC9 view 渲染侧，C3/C4 契约）及其注入接口 +

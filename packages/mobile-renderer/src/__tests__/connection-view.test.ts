@@ -2,7 +2,7 @@
 // 直改视图 ref 驱动渲染不经转移逻辑，此处闭环三信号优先级不变量）。
 //
 // core getState 经 vi.mock 替换为本地可写 ref（ws-client 真实 state 无测试写入口，且本
-// 测试聚焦转移规则而非 ws 状态机）；断言面：
+// 测试聚焦转移规则而非 ws 状态机）；断言范围：
 //   - token-input 粘滞：进入后不被 connecting/reconnecting/failed 中间态覆盖，connected 才切出
 //   - failed 终态（非 token-input 前提下）
 //   - connected 置 hasConnectedOnce 后断连不复位（BM5 布局粘滞锚点）

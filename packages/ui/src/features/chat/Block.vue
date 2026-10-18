@@ -453,7 +453,7 @@ import { useChatViewDeps } from './chat-view-deps'
 
 const { t } = useI18n()
 const { copied, copy } = useCopy()
-// N1 文件 chip 的 drawer 双通道经壳依赖注入（与 UserBubble 同一契约面；inject 强契约，
+// N1 文件 chip 的 drawer 双通道经壳依赖注入（与 UserBubble 同一契约范围；inject 强契约，
 // 须在 provide ChatViewDepsKey 的容器内渲染）
 const chatViewDeps = useChatViewDeps()
 

@@ -195,7 +195,7 @@ describe("failed 终态分流（真实协议枚举：parsed 前消费 status →
       readResult: { messages: [] }, // read 无错误信息（降级形态判据）
     });
     const r = await f.engine.run(makeTask({ cwd: f.workspace }), makeCtx());
-    // 覆盖面收窄但不假成功：final-frame 的宽松 success 不采信
+    // 覆盖范围收窄但不假成功：final-frame 的宽松 success 不采信
     expect(r.outcome.error).toMatch(/^engine_run_failed: app-server 终态 status=failed/);
     expect(r.outcome.exitCode).toBeNull();
     expect(r.outcome.content).toBe("");

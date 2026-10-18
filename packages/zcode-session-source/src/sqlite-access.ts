@@ -92,7 +92,7 @@ export interface ZcodeTranscriptMessageRow {
   parts: Array<Record<string, unknown>>
 }
 
-/** 只读查询面：候选行 / 单会话行 / 字节聚合 / schema 版本诊断。 */
+/** 只读查询范围：候选行 / 单会话行 / 字节聚合 / schema 版本诊断。 */
 export interface ZcodeReadonlyDb {
   /**
    * 候选会话行（排除 subagent_child；time_updated 降序）。
@@ -293,7 +293,7 @@ export function assertKnownSchema(db: SqliteDb): void {
   }
 }
 
-/** openZcodeSessionDb 产物：查询面 + 实际命中的阶梯级别 + 统一收尾。 */
+/** openZcodeSessionDb 产物：查询范围 + 实际命中的阶梯级别 + 统一收尾。 */
 export interface ZcodeSessionDbHandle {
   db: ZcodeReadonlyDb
   /** 实际命中的四级恢复阶梯级别（恢复成功非静默事件：调用方记结构化日志）。 */

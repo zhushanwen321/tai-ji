@@ -3,7 +3,7 @@
 // [U6 / §3.2.6 风险登记②] zcode 隔离会话库的 TTL 清理通道（引擎侧 sweep 选型）。
 // 设计：docs/architecture/subagent-permanent-session-model.md §3.2.6「zcode 会话库资源
 // 生命周期」——万物可续聊后隔离库（<engineDataDir>/engines/zcode/session-db/db.sqlite）
-// 成为单调累积写入面，条目 TTL 必须与 pi transcript 同窗 30 天；通道未落地不得
+// 成为单调累积写侧，条目 TTL 必须与 pi transcript 同窗 30 天；通道未落地不得
 // 发布「zcode 万物可续聊」。
 //
 // 选型裁决（设计待验证检查点 4）：**引擎侧 sweep** 而非宿主侧清库——
@@ -70,7 +70,7 @@ interface SweepSqliteDb {
   close: () => void;
 }
 
-/** sweep 结果（观测面：日志与单测断言）。 */
+/** sweep 结果（观测范围：日志与单测断言）。 */
 export interface ZcodeSessionSweepResult {
   /** 本轮删除的 session 条数。 */
   swept: number;

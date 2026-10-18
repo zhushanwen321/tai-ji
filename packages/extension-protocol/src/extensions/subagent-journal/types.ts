@@ -1,5 +1,5 @@
 /**
- * journal 事件推送的类型定义（event-push-channel 协议面）。
+ * journal 事件推送的类型定义（event-push-channel 协议范围）。
  *
  * 契约两端：
  *   - 写侧（生产）：@zhushanwen/pi-subagent-workflow 壳层（src/host/journal-reporter.ts）

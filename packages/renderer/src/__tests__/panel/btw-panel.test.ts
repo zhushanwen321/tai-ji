@@ -8,7 +8,7 @@
  *   切焦点会话线列表不串台 / 加载失败可见可重试 / 创建失败可见可恢复
  * - 观察者（形态）：首屏冒烟（drawer-btw-tab + 无头行 chip 条顶置 + 关键 testid 存在）；Composer 装配
  *   variant=panel + show-btw=false（防递归出 btw 入口，prop 声明归 M3-b，本处只写调用处）
- * - M3-c 行为面：formQuestions 请求 → 内联确认条降档 DOM（问题/选项按钮/Other/text 输入/
+ * - M3-c 行为范围：formQuestions 请求 → 内联确认条降档 DOM（问题/选项按钮/Other/text 输入/
  *   Submit 门；纯函数直测归 __tests__/composables/panel/use-btw-interaction.test.ts）
  *
  * mock 策略（TEST-STRATEGY §5）：vi.mock('@/api') 局部替换 btw 域（门面其余域走 actual）；
@@ -144,7 +144,7 @@ describe('BtwPanel 首屏冒烟与线列表（观察者 + 使用者）', () => {
 
     // composer 带（含内联确认条）跟 chat 档：与主面板 composer（main-area chat scope 内）同语义。
     // 流根的 chat scope 归 MessageStream 组件本体（wire 测试 TC-w4-9c 已断真实组件）——
-    // 本套件 MessageStream 为透传 attrs 的 stub div，组件内部属性不在断言面。
+    // 本套件 MessageStream 为透传 attrs 的 stub div，组件内部属性不在断言范围。
     const band = wrapper.find('[data-testid="btw-interaction"]')
     expect(band.exists()).toBe(true)
     expect(band.attributes('data-fs-scope')).toBe('chat')
@@ -295,7 +295,7 @@ describe('BtwPanel 焦点绑定（D7②④）与失败路径', () => {
   })
 })
 
-describe('BtwPanel 内联确认条表单降档（M3-c 行为面，useBtwInteraction 消费链）', () => {
+describe('BtwPanel 内联确认条表单降档（M3-c 行为范围，useBtwInteraction 消费链）', () => {
   it('formQuestions 请求 → 确认条渲染问题文本 + choice 选项按钮 + Other/text 单行输入', async () => {
     apiMock.list.mockResolvedValue([{ vid: 'btw:pi-1' }])
     const wrapper = mountPanel(MAIN_A)

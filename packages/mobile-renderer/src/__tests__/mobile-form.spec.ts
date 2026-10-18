@@ -264,7 +264,7 @@ describe('移动壳 form 请求链（remote-use-mobile D7 form 行恢复）', ()
     expect(mockSendResponse).toHaveBeenCalledTimes(1)
   })
 
-  it('无 sid 的 ui-request 跳过（C2，渲染面依赖 session 分区）', async () => {
+  it('无 sid 的 ui-request 跳过（C2，渲染范围依赖 session 分区）', async () => {
     wrapper = await mountChatView('sid-form')
     __testing.mobileExtensionBus.emit({
       kind: 'ui-request',
@@ -414,7 +414,7 @@ describe('form 通道 respond 防御面（无 App 装配的通道级断言）', 
     })
     expect(respond('req-1', 'late')).toBe(false)
     expect(mockSendResponse).not.toHaveBeenCalled()
-    // 无 sid 上下文：respond 直接 false（渲染面依赖 session 分区的同构防御）
+    // 无 sid 上下文：respond 直接 false（渲染范围依赖 session 分区的同构防御）
     sid.value = null
     expect(respond('req-1', 'late')).toBe(false)
   })

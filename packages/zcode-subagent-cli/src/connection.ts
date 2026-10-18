@@ -184,13 +184,13 @@ export interface AppServerConnectionOptions {
   stderrLogPathResolver?: (pid: number | undefined) => string;
   /** node 二进制（缺省 'node' 走 PATH）。 */
   nodeBin?: string;
-  /** 控制面请求默认超时（缺省 ZCODE_APPSERVER_REQUEST_TIMEOUT_MS）。 */
+  /** 控制范围请求默认超时（缺省 ZCODE_APPSERVER_REQUEST_TIMEOUT_MS）。 */
   requestTimeoutMs?: number;
   /** 反向请求 handler 表（缺省 D9 常量表；测试注入故障 handler 用）。 */
   reverseHandlers?: Readonly<Record<string, (params: unknown) => unknown>>;
   /**
    * [R4] 每代进程 spawn 成功后的同步回调。pidfile 机制删除后引擎侧不再传——现为
-   * 测试专有的代级观测面（采集 spawn 时序 / 子进程句柄）。与 RunContext.onChildSpawned
+   * 测试专有的代级观测范围（采集 spawn 时序 / 子进程句柄）。与 RunContext.onChildSpawned
    * 无关：常驻进程不进宿主 spawnedChildren（D6——其生命周期归引擎 dispose）。
    * 不抛保证：回调异常吞掉记 warn，不影响帧泵。
    */
@@ -279,7 +279,7 @@ export class AppServerConnection {
     return this.child?.pid;
   }
 
-  /** 当前代是否有活进程（关闭原语与重建测试的观测面）。 */
+  /** 当前代是否有活进程（关闭原语与重建测试的观测范围）。 */
   get alive(): boolean {
     return this.child !== null;
   }

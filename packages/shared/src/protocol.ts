@@ -53,7 +53,7 @@ import type { QuotaConfigurePayload } from './quota-types'
 // 直接引用 PlanLifecycleState（canonical = packages/extension-protocol/src/extensions/plan/state-machine，barrel 已 re-export），
 // type-only 零运行时面（shared 不因此获得对该包的运行时依赖；类型解析由 devDependency 承载，
 // plan-protocol.test.ts 的跨包 AssertExact 锁镜像漂移）。
-// SubagentEngineModelInfo 同款直引：单源 = extension-protocol subagent-engine 契约面，
+// SubagentEngineModelInfo 同款直引：单源 = extension-protocol subagent-engine 契约范围，
 // 消除 shared 侧双声明漂移（engine-provider-unification D5）。
 import type { PlanLifecycleState, SubagentEngineModelInfo } from '@zhushanwen/extension-protocol'
 
@@ -715,7 +715,7 @@ export interface ClientMessageMap {
   // ── delivery 域（投递所有权内核 D1/D5，u-contracts 契约先行；行为实现归 u1/u2/u3a）──
   // delivery.submit：renderer 统一提交入口（D1——renderer 不做 lane 路由，乐观气泡后一律
   // submit，lane 判定单一实现归 runtime 内核）。clientUuid 必填（D2 裸标记身份源 + 判重锚）；
-  // images 可选（形态对齐 message.send，D9④ TextPayload.images 协议面）。reply 携带初始
+  // images 可选（形态对齐 message.send，D9④ TextPayload.images 协议范围）。reply 携带初始
   // lane 与条目态（D5）；同步失败走 error envelope（内核 FIFO 无界，正常路径无拒绝态）。
   // segments 可选（ADR-0043 快照）：富消息提交时随 payload 上网，runtime 按 clientUuid
   // 持有快照——cancel/drain reply 回草稿时原样返回（提交侧不传 = 纯文本恢复，不携带）。
@@ -1005,7 +1005,7 @@ export interface ClientMessageMap {
   'config.setScopedModels': { models: string[] }
   // ── backgroundTask 域（docs/architecture/background-task-sidebar-view.md §3.3 D3，u-proto）──
   // list：拉取该 session 后台任务全量（runtime 直读 registry 的派生视图；目录/文件不存在 → 空数组）。
-  // 首次调用同时把 session 加入 runtime watched 集合（D8③）——订阅语义由 list 隐含，协议面无
+  // 首次调用同时把 session 加入 runtime watched 集合（D8③）——订阅语义由 list 隐含，协议范围无
   // subscribe/unsubscribe 消息（D3 不采用项）；watched 退订挂 session 销毁汇聚点（runtime 侧职责）。
   'backgroundTask.list': { sessionId: string }
   // output：读任务输出尾部（字节窗口，从文件末尾读；maxBytes 省略时 runtime 用默认 32KB 上界，
@@ -1346,7 +1346,7 @@ export type ServerMessageType =
   // 经 IMessageBus.publish(sessionId, msg) session 级定向推。
   | 'backgroundTask.tasks' | 'backgroundTask.outputResult' | 'backgroundTask.killResult'
   | 'backgroundTask:updated'
-  // rollingRestart 域（crash-forensics-and-watchdog §3.3 D5，u7b 协议面）：status = 只读查询
+  // rollingRestart 域（crash-forensics-and-watchdog §3.3 D5，u7b 协议范围）：status = 只读查询
   // reply（与 request 同名）；deferred / forced = 全局推送事件（Server→Client 冒号
   // camelCase，对齐 backgroundTask:updated 规则；与条目清单 event 值同源）；countdown =
   // 执行前 T-30s 二次预告（D5 ③，u7c 补缺——推迟期内新开终端的知情窗口）。
@@ -1502,7 +1502,7 @@ export type SkillNoticeReason =
   | 'marker_malformed'
   | 'mapping_unavailable'
 
-// ── 滚动重启协议面（crash-forensics-and-watchdog §3.3 D5，u7b 契约）────────────
+// ── 滚动重启协议范围（crash-forensics-and-watchdog §3.3 D5，u7b 契约）────────────
 //
 // 三块：① rollingRestart.status 只读查询 RPC（状态机实现在 u7c，本处只钉类型契约；
 // renderer 重连/刷新后主动拉取恢复横幅——「broadcast 时序竞争」教训：需立即消费的持续
@@ -1594,7 +1594,7 @@ export type ReattachDeferReason = 'high-memory'
  * **广播形态裁决（单次进入 + 单次退出，非延迟中每拍重发）**：每拍重发对「窗口内重连」
  * 自愈更快，但缓解退出帧两种形态都是单发——重连错过退出帧的陈旧态残留窗口等价，重发
  * 只增冗余帧；且 reattach 延迟只存在于启动后短窗口（收割等待 + 高水位轮询），无只读
- * 拉取面（协议面仅本事件）。残余窗口 = 「进入帧后断连、退出帧也错过后重连」的低概率
+ * 拉取面（协议范围仅本事件）。残余窗口 = 「进入帧后断连、退出帧也错过后重连」的低概率
  * 组合，接受并登记。
  *
  * **预计恢复语义**：高压复查周期 pollMs 随帧携带——恢复无总上限（D3：高压持续则逐拍
@@ -1609,7 +1609,7 @@ export interface ReattachDeferredPayload {
   pollMs: number
 }
 
-// ── 看门狗协议面（crash-forensics-and-watchdog §3.3 D4，u6）────────────────
+// ── 看门狗协议范围（crash-forensics-and-watchdog §3.3 D4，u6）────────────────
 //
 // watchdog:memoryPressure = 内存压力全局推送（Server→Client 冒号 camelCase，对齐
 // rollingRestart:deferred 命名规则；无 sessionId——窗口级全局态，非 session 级消息，
@@ -1812,7 +1812,7 @@ export interface SubagentDefaultEngineMutationReply {
   engineId: string
 }
 
-/** 引擎可选模型清单条目——单源 = @zhushanwen/extension-protocol subagent-engine 契约面
+/** 引擎可选模型清单条目——单源 = @zhushanwen/extension-protocol subagent-engine 契约范围
  *  （顶部 type-only 直引 + 此处 re-export，shared 协议出口对下游形态不变，双声明漂移以
  *  单源收敛结构性消除）。值形状镜像 = zcode-subagent-cli preparer listZcodeModels 返回形态。
  *  engine-provider-unification D5：settings per-engine 模型清单与写入校验共用该形态。 */
@@ -1929,7 +1929,7 @@ export type WorkflowRunEventsErrorCode = 'record_not_found'
  * WorkflowRunEventEntry：五字段 2KB 截断 + truncatedFields 逐行标注）。oversize
  * （[RT-4#8] 同款降级标志，与 session.workflows 形态一致）：record 文件超
  * READ_PRECHECK_MAX_BYTES（32MB，D5 预检族）时 runtime 不全文读取（worker-log 行数
- * 无上界 + workflowUpdate 信号 force 重新拉取放大读面），events 恒空数组 + oversize=true
+ * 无上界 + workflowUpdate 信号 force 重新拉取放大读侧），events 恒空数组 + oversize=true
  * ——「不可用」与「无数据」显式分形，renderer 面板按标志显示降级提示。
  * 错误形态：{ sessionId, runId, code, message }——code 闭集见 WorkflowRunEventsErrorCode。
  * 两臂恒带 sessionId——C-comm-05 会话隔离（runtime→前端消息必须带 sessionId，
@@ -2035,7 +2035,7 @@ export interface PlanDocMeta {
  * 完成映射（awaiting→reviewing / revising→revising / 无→planning|idle 按 isActive）——映射
  * 只存在于 entry 读取侧，本契约不携带旧字段（plan-mode-audit-remediation 批次 3 条目 1：
  * renderer 混装格兜底映射随 deprecated 双字段删除；映射实现单源 = extension-protocol
- * legacy-entries，D-B4-1 下沉，契约断言面 = 其包内 legacy-entries.test.ts）。
+ * legacy-entries，D-B4-1 下沉，契约断言范围 = 其包内 legacy-entries.test.ts）。
  *
  * resumeHint（D2）：降级态等待原因——仅 E3 重挂时落 'resubmit'，清除点三处
  * （resetPlanState / 进入重置组 / submit-review 转移落盘）；不变量：只描述当前降级
@@ -2432,7 +2432,7 @@ export interface ServerMessageMapBase {
   // session.workflowRunEvents：session.getWorkflowRunEvents 的 reply（workflow-visualization
   // 设计 §3.1-4 D4 事件流拉模式）。成功/结构化错误两形态见 WorkflowRunEventsReply——
   // 大字段截断与 truncatedFields 标注的行形态 = WorkflowRunEventEntry（shared/workflow.ts）；
-  // 截断载荷仅供展示（D12 防误用边界：恢复/重放/对账读面不经本通道）。
+  // 截断载荷仅供展示（D12 防误用边界：恢复/重放/对账读侧不经本通道）。
   'session.workflowRunEvents': WorkflowRunEventsReply
   // session.workflowDag：session.getWorkflowDag 的 reply（workflow-visualization 设计
   // §3.1-5 DAG 透出通道）。成功/结构化错误两形态见 WorkflowDagReply——错误码四枚举
@@ -2944,7 +2944,7 @@ export interface ServerMessageMapBase {
   // corrupted 语义与 backgroundTask.tasks 同源（损坏空表标记，S7）；缺省/false = 正常拍。
   'backgroundTask:updated': { sessionId: string; tasks: BackgroundTaskRegistryEntry[]; corrupted?: boolean }
 
-  // ── rollingRestart 域（crash-forensics-and-watchdog §3.3 D5，u7b 协议面）──
+  // ── rollingRestart 域（crash-forensics-and-watchdog §3.3 D5，u7b 协议范围）──
   // status：只读查询 reply（u7c 状态机生产；renderer 重连/刷新后主动拉取恢复横幅——持续态
   // 不可依赖广播时序，T-30s 广播只作加速显示）。
   'rollingRestart.status': RollingRestartStatusPayload
@@ -2985,7 +2985,7 @@ export interface ServerMessageMapBase {
   'tts.configure:result': { config?: SanitizedTtsConfig; ok: boolean; error?: string }
   /**
    * tts.speak:result：只回 filePath（D9 决死 mimeType 恒 'audio/wav'、fromCache/chars/chunks
-   * 无 renderer 消费方——三字段不进协议面，收敛依据见 §7.1）。
+   * 无 renderer 消费方——三字段不进协议范围，收敛依据见 §7.1）。
    */
   'tts.speak:result': { filePath: string }
   /** tts.getCapabilities:result：三家表单派生视图（数据权威在 runtime driver，renderer 不 import 数据表）。 */

@@ -7,7 +7,7 @@
  * submitFirstMessage 透传（后续 U2b 改线）消费同一 resolve 输出——「显示 ≡ 生效」由
  * 构造保证（by construction），不再靠对账。
  *
- * 导出面：
+ * 导出清单：
  * - resolveLaunchConfig：D2 字段优先级序 + D4 有效性校验（失效链内跳过回落下一档，
  *   KV 保留原值——本模块无 KV 写点）+ 每字段 provenance 标签
  *   （explicit / preset / lastUsed / memory / default）。
@@ -73,7 +73,7 @@ export interface LaunchConfig {
   thinkingLevel: string
   thinkingProvenance: LaunchProvenance
   /**
-   * 生效 preset id：出厂 builtin:full → undefined（D3 不透传，行为与写入面全等现状）；
+   * 生效 preset id：出厂 builtin:full → undefined（D3 不透传，行为与写侧全等现状）；
    * 被字段级覆写过的 builtin:full / 自定义 preset → 正常透传 id
    */
   presetId: string | undefined
@@ -224,7 +224,7 @@ export function launchFieldEquals(a: unknown, b: unknown): boolean {
  * D3 出厂等价判定：preset 是否与出厂 builtin:full 定义在全部 launch 生效字段上逐字段等价。
  *
  * - id 非 builtin:full → 恒 false（谈不上出厂 full 等价）
- * - 出厂等价 → resolve 输出 presetId=undefined 不透传（写入面与现状全等）
+ * - 出厂等价 → resolve 输出 presetId=undefined 不透传（写侧与现状全等）
  * - 被用户字段级覆写过（savePreset 只保护 id/builtin/order/name 四字段）→ false，正常透传
  * - 比对基准缺失（DEFAULT_PRESETS 无 FULL，理论不可达的 shared 常量损坏）→ 保守 false
  *   （透传侧：preset 内容仍随 resolve 生效，不吞行为差异）

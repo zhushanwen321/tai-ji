@@ -10,7 +10,7 @@
  * 的活数据源（连续 computed 读取、不清空）；detailFilePath 由 useDetailPane 消费后
  * 置 null（避免残留导致下次打开 detail tab 被旧值劫持）。
  *
- * 读取面 = 可写 computed（名字沿用旧全局 ref：selectedCommandName / detailFilePath），
+ * 读侧 = 可写 computed（名字沿用旧全局 ref：selectedCommandName / detailFilePath），
  * 既有消费方（useSideDrawer 兼容层 / CommandDocPanel / useDetailPane）`.value` 读写零改动。
  */
 import { computed, reactive } from 'vue'

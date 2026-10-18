@@ -1,6 +1,6 @@
 # subagent 引擎协议化与外移（engine 插件化：pi-subagent-cli / zcode-subagent-cli）技术设计
 
-> **[HISTORICAL] 部分退役注记（2026-09-11，U7 符号清扫批）**：本文「引擎协议 + 编排壳」主体（发现注册 / NDJSON stdio / manifest 能力位 / conformance 套件）仍现行；但文中 chat 域协议面已随 [subagent-chat-run-unification.md](subagent-chat-run-unification.md)（H1）退役——EnginePort 的 `interact` 成员（§3.3.5 契约签名 F1 行）、协议正向方法 `interact`（方法映射表，现存方法 9 个）、第 9 反向通道 `host/roundLifecycle`（现存通道 8 条）、契约类型 SSOT 清单中的 `InteractAction`/`InteractResult` 均已删除；续聊 = 新 run + resume 锚点（`RunParams.resume`）。W11 收尾注记与 A2 的 chat 域验收描述为 v1.x 时代史实记录，不逐处改写。读现行协议面以 `packages/subagent-engine-sdk/src/protocol/{methods,reverse-channels}.ts` 与 [subagent-chat-run-unification.md](subagent-chat-run-unification.md) 为准。
+> **[HISTORICAL] 部分退役注记（2026-09-11，U7 符号清扫批）**：本文「引擎协议 + 编排壳」主体（发现注册 / NDJSON stdio / manifest 能力位 / conformance 套件）仍现行；但文中 chat 域协议范围已随 [subagent-chat-run-unification.md](subagent-chat-run-unification.md)（H1）退役——EnginePort 的 `interact` 成员（§3.3.5 契约签名 F1 行）、协议正向方法 `interact`（方法映射表，现存方法 9 个）、第 9 反向通道 `host/roundLifecycle`（现存通道 8 条）、契约类型 SSOT 清单中的 `InteractAction`/`InteractResult` 均已删除；续聊 = 新 run + resume 锚点（`RunParams.resume`）。W11 收尾注记与 A2 的 chat 域验收描述为 v1.x 时代史实记录，不逐处改写。读现行协议范围以 `packages/subagent-engine-sdk/src/protocol/{methods,reverse-channels}.ts` 与 [subagent-chat-run-unification.md](subagent-chat-run-unification.md) 为准。
 
 > **一句话结论**：把 subagent-core 从「内建多引擎实现」改成「**引擎协议 + 编排壳**」——
 > core 只保留路由 / 公共降级层 / journal / record / 协议客户端 / conformance 套件；
@@ -19,7 +19,7 @@
 >   ③**runtime 升为第三个宿主**并给出①级读的进程模型与降级语义；④协议补 `read.dataDir`、
 >   反向通知 `host/handleReady|childSpawned`、反向请求超时值（[池抽象降级 2026-09-13] `host/poolResolved` 已删，反向通道 8→7）；⑤删内置引擎清单 +
 >   定义「缺省引擎包缺失」的路由规格；⑥v1 **关闭事件合并**（原 16ms/4KB 与 A1 逐字段等价不可兼得）；
->   ⑦宿主零改动改为**兼容公共面**；⑧补伴生写入面、env 契约归属、打包发现路径传递、relay 透传、
+>   ⑦宿主零改动改为**兼容公共部分**；⑧补伴生写侧、env 契约归属、打包发现路径传递、relay 透传、
 >   pi 等价验收与宿主表面不变量场景；⑨硬耦合清单补齐 pi 的静态 import 面与测试消费方。
 > - v3（2026-09-08，R2 修复）：①**同步范围补全**——`validateModel`/`listModels` 也是同步成员（manifest `modelCatalog` +
 >   握手后缓存，未知 ref 按 `dynamic` 分流；显式放宽「record 创建前拒绝」不变量）；②**能力位时序固定**——免探路径
@@ -48,7 +48,7 @@
 >   ⑦数据根矩阵补 **standalone pi**（core 侧解析注入）；⑧stderr 清理判据 = 同前缀 + pid 未存活 + mtime（参数读 `TAIJI_LOG_*`）；
 >   ⑨**删冷启动静态 JSON 兜底**（与派生规则冲突）；⑩fixture 路径三处统一、双向可赋值断言、错误码补 `engine_capability_unsupported`、A11 时效断言改「dispose 发起后 1s」。
 > - v6（2026-09-08，**减法收敛**——R5 四个 reviewer 因会话压缩被中止、无报告；按 `flow/write.md` §101「轮次问题同级 → 回到方案对比重做」先做减法）：
->   ①**同步范围单源化**：删「握手后缓存 + 失效时机 + 保鲜/陈旧检查」整套机器 → 同步成员只读 manifest（`capabilities` / `modelCatalog`），握手降为诊断面（不一致 warn，不参与判据）；
+>   ①**同步范围单源化**：删「握手后缓存 + 失效时机 + 保鲜/陈旧检查」整套机器 → 同步成员只读 manifest（`capabilities` / `modelCatalog`），握手降为诊断范围（不一致 warn，不参与判据）；
 >   ②**env 四层压回三层**：删 L3 `engines.<id>.env` extras（优先级歧义源）+ L3 config 去 `env` 键；
 >   ③**镜像收割单一机制**：删「按镜像 pid 补杀」（pid 复用面 + 需 pid→句柄映射）→ 只留 `detached:true` 进程组收割。
 > - v7（2026-09-08，R5 修复——zcode 引擎重跑 R5，两批 reviewer 共 10 must-fix + 8 suggestion，取并集全修）：
@@ -59,7 +59,7 @@
 >   ⑤**进程组收割两前提登记**（Windows `taskkill /T /F`；引擎一代子进程禁 `detached:true` + conformance）+ §3.9 补「detached 孤儿」与「modelCatalog 静态化」两条已接受代价；
 >   ⑥**stderr 清理判据改 OS 探测** `process.kill(pid,0)`（「活进程表」全仓零命中，不可实现）；⑦W2 删残留「按 pid 补杀」+ §3.7 删「(extras)」；⑧A6 补「listModels 不一致 → 仅 warn + 任务仍跑通」验收；⑨「缓存」术语统一为「manifest 快照」；⑩dev-link 表述改正（只管 `extensions/`，引擎包走 L3 config）。
 > - v8（2026-09-08，R6 修复——5 must-fix + 4 suggestion）：
->   ①**非 gate 能力位行去 `steer`/`sandbox`**（实装 gate 读四者，二者属被 gate 面）+ **不一致一律 warn、不阻断 run**（删除「该 run 依赖则失败」——与「握手降为诊断面」自相矛盾）；
+>   ①**非 gate 能力位行去 `steer`/`sandbox`**（实装 gate 读四者，二者属被 gate 面）+ **不一致一律 warn、不阻断 run**（删除「该 run 依赖则失败」——与「握手降为诊断范围」自相矛盾）；
 >   ②**Windows spawn 侧写死**（`detached:false` + `windowsHide:true`，避免 console 窗口闪现；收割走 `taskkill /T /F`）；
 >   ③**conformance 禁 detached 落到承接单元**（W10 新增断言 + A3 验收项）；④**A11 补 Windows 等效断言**（`tasklist`/`taskkill`）；
 >   ⑤**省略 `modelCatalog` 时 `validateModel` 成员形态写死**（不实现 → 跳过校验）；⑥A6 补 fork 判据 OR 语义（任一可用即放行）；
@@ -125,14 +125,14 @@ core 负责：选引擎 → 建 journal → 派发任务 → 收集事件流 →
 
 **in scope**：引擎协议 v1；引擎 SDK 包；core 壳侧边界；发现与注册（manifest + 配置 + 搜索路径 + 时机）；
 引擎进程生命周期；三个宿主的接线与改动清单；打包与分发三形态；迁移策略与回退；conformance 套件；
-错误规格与恢复指引；宿主伴生写入面登记。
+错误规格与恢复指引；宿主伴生写侧登记。
 
 **out of scope**：
 ① 具体引擎的驱动细节重写——归各自提取设计；细节外置**不豁免** DoD；
 ② 引擎协议的**网络/远程**形态（v1 只做本机 stdio）；
 ③ 引擎市场 / 自动下载安装（v1 只做「本地已安装包的发现」）；
 ④ EnginePort 成员签名变更（本设计不改签名，只改「谁实现它、跑在哪」）；
-⑤ `~/.zcode/cli/{artifacts,exec,log,…}` 伴生写入面治理（由 `zcode-session-db-isolation.md` §2.4.1 登记）。
+⑤ `~/.zcode/cli/{artifacts,exec,log,…}` 伴生写侧治理（由 `zcode-session-db-isolation.md` §2.4.1 登记）。
 
 ---
 
@@ -156,7 +156,7 @@ core 负责：选引擎 → 建 journal → 派发任务 → 收集事件流 →
       │    └─ engines/
       │         ├─ pi/       PiEngine + session-runner + reader + …（12 个 .ts）
       │         └─ zcode/    ZcodeEngine + connection + session-channel + reader + …（10 个 .ts）
-      └─ index.ts  barrel（registerPiEngine / registerZcodeEngine / markAllSpawnedChildrenDead 等公共面）
+      └─ index.ts  barrel（registerPiEngine / registerZcodeEngine / markAllSpawnedChildrenDead 等公共部分）
 ```
 
 引擎与 core **同进程、同依赖树、同版本**；引擎通过 `EnginePort` 被调用，
@@ -210,7 +210,7 @@ core 负责：选引擎 → 建 journal → 派发任务 → 收集事件流 →
 ### 3.1 目标架构
 
 ```
-宿主进程（pi 扩展 / zsw CLI）——业务代码零改动（靠 §3.6 D8 兼容公共面保证）
+宿主进程（pi 扩展 / zsw CLI）——业务代码零改动（靠 §3.6 D8 兼容公共部分保证）
  └─ @zhushanwen/subagent-core（壳）
       ├─ 编排层（不变）：SAR / workflow / record-store / journal / session-view 派生视图
       ├─ 路由层（签名不变）：三层优先级 + probe（不可用即显式失败，不换引擎）（routing.ts）
@@ -247,7 +247,7 @@ runtime 进程（GUI 详情页①级读）──spawn（按需 + idle 复用）�
 
 | 方案 | 做法 | 长期架构合理性 | 短期成本 | 风险 | 结论 |
 |------|------|---------------|---------|------|------|
-| **A 进程边界 + CLI 协议（推荐）** | 引擎 = CLI 包，core spawn 之，NDJSON 协议 | **好**：语言无关、依赖隔离、版本独立、崩溃隔离、可单独分发 | 中：协议 + 客户端 + 发现 + 三宿主接线 + 迁移 | 中：协议面设计不当会锁死演进；流式 IPC 开销（事件合并默认关闭，见 §3.3） | ✅ 推荐 |
+| **A 进程边界 + CLI 协议（推荐）** | 引擎 = CLI 包，core spawn 之，NDJSON 协议 | **好**：语言无关、依赖隔离、版本独立、崩溃隔离、可单独分发 | 中：协议 + 客户端 + 发现 + 三宿主接线 + 迁移 | 中：协议范围设计不当会锁死演进；流式 IPC 开销（事件合并默认关闭，见 §3.3） | ✅ 推荐 |
 | B 进程内插件（动态 import） | 引擎 = 导出 `register()` 的包 | 差：同进程同依赖树、无版本隔离、崩溃连坐 | 低 | 高：依赖冲突不可控 | 不采用（仅作过渡期兼容手段） |
 | C 混合（A 为目标 + 过渡期双模） | 双模注册表：内建 factory 或 external descriptor，逐个迁移 | 好：迁移可控、可回退 | 中低（A 的一部分） | 低 | ✅ **A 的落地形态**；双模是过渡态（DoD 后删内建） |
 
@@ -268,7 +268,7 @@ runtime 进程（GUI 详情页①级读）──spawn（按需 + idle 复用）�
 { "id": 1, "result": { ... } }   |   { "id": 1, "error": { "code": "...", "message": "...", "recovery": "...", "data": {...} } }
 // ③ 通知（引擎 → core，无 id）
 { "method": "event", "params": { "runId": "...", "seq": 1, "event": { "type": "text_delta", "delta": "..." } } }
-// ④ 反向请求（引擎 → core，**必须应答**）：数据面类（`host/log`/`streamDelta`/
+// ④ 反向请求（引擎 → core，**必须应答**）：数据范围类（`host/log`/`streamDelta`/
 //    `handleReady`/`host/childSpawned`/`host/childStateChanged`）10s 未答 = 引擎故障 → 杀进程 + 在途 run 失败；
 //    人机交互类（`host/askUser`）**不设统一超时**——core 先回 `{ack:true}`，
 //    结果异步到达；按 ADR-0047「静默 ≠ 卡死」用无进展检测/用户取消，不据此判引擎故障
@@ -285,8 +285,8 @@ runtime 进程（GUI 详情页①级读）──spawn（按需 + idle 复用）�
 | `cancel` | core→引擎 | AbortSignal | `{runId, reason}`；引擎须在 3s 内收敛终态；超时 core 走杀链 |
 | `interact` | core→引擎 | `interact` | `{handle, action}` → `InteractResult` |
 | `read` | core→引擎 | `read` | `{handle, dataDir}` → `SessionView`（**`dataDir` 必填**：存量池时代相对 `dbPath` 需要它） |
-| `listModels` | core→引擎 | `listModels?` | `{}` → `{models: [...] \| null}`（**诊断面**；宿主侧同步成员读 manifest，不经本方法） |
-| `validateModel` | core→引擎 | `validateModel?` | `{modelRef?}` → `{canonicalRef}`（**诊断面**；宿主侧同步成员读 manifest） |
+| `listModels` | core→引擎 | `listModels?` | `{}` → `{models: [...] \| null}`（**诊断范围**；宿主侧同步成员读 manifest，不经本方法） |
+| `validateModel` | core→引擎 | `validateModel?` | `{modelRef?}` → `{canonicalRef}`（**诊断范围**；宿主侧同步成员读 manifest） |
 | `dispose` | core→引擎 | `dispose?` | `{}` → `{ok:true}`；幂等 |
 | `ping` | core→引擎 | 健康检查 | 诊断/重建判据（ADR-0047：静默 ≠ 卡死，不据此杀任务） |
 | `host/log` | 引擎→core | 日志 | 引擎日志落宿主日志 |
@@ -315,10 +315,10 @@ runtime 进程（GUI 详情页①级读）──spawn（按需 + idle 复用）�
 > **单一同步源原则（v6 减法收敛）**：同步成员**只读 manifest**，**不读任何握手产物、不设缓存**。
 > 否决记录：「握手后填充缓存 + 失效时机 + 保鲜/陈旧检查 + 三态映射」——四轮审查中该机制每轮都新生一处矛盾
 > （缓存生产者与失效时机互相打架 / `initialize.models` 三态未写死 / 免探路径握手永不发生而缓存恒空），
-> 而它解决的问题（同步可用）**用 manifest 直读即可解决**。握手降为**诊断面**：应答与 manifest 不一致 → warn 留痕，
+> 而它解决的问题（同步可用）**用 manifest 直读即可解决**。握手降为**诊断范围**：应答与 manifest 不一致 → warn 留痕，
 > **「不参与判据」的确切边界（防绝对句过宽）**：握手应答**不参与同步成员（`capabilities` / `listModels` / `validateModel`）的判据**；
 > 能力位**方向判定**仍以 manifest 为权威，握手仅在两处生效：① **被 gate 位多声明** → run 失败（**唯一阻断面**）；
-> ② **非 gate 位不一致** → **仅 warn 留痕，绝不阻断 run**（即使该 run 名义上「依赖」该位——文档不为它设阻断路径，否则与「握手降为诊断面」自相矛盾；若依赖未满足导致运行期失败，按引擎自报错误走）。
+> ② **非 gate 位不一致** → **仅 warn 留痕，绝不阻断 run**（即使该 run 名义上「依赖」该位——文档不为它设阻断路径，否则与「握手降为诊断范围」自相矛盾；若依赖未满足导致运行期失败，按引擎自报错误走）。
 
 | 同步成员 | 消费者（实测锚） | 同步源 | 失败/降级语义 |
 |---------|----------------|--------|--------------|
@@ -339,8 +339,8 @@ runtime 进程（GUI 详情页①级读）──spawn（按需 + idle 复用）�
 
 | 能力位类型 | 权威 | 不一致处置 |
 |-----------|------|-----------|
-| **被 gate 的四类任务形态**（`conversation` / `fork` / `maxTurns` / `worktree`） | **manifest 是权威契约**（gate 同步读，无法等握手）。**注意判据涉及的能力位 ≠ 形态名**：实装 `capability-gate.ts:58/67/76/84` 读的是 `conversation`（conversation 形态）/ `steer`+`conversation`（fork 形态）/ `maxTurns` / `sandbox`（worktree 形态）——**这四个能力位同属 manifest 权威面**，其余能力位（personaInjection / eventGranularity / sessionRead / resume / interrupt / permissionMode / schemaEnforcement）归握手诊断面 | 少声明 → **首个调用同步拒**（`engine_capability_unsupported`）；**恢复指引 = 「修 manifest（或升级引擎包）」**——不写「先派一次任务触发握手」（gate 读 manifest，握手不参与同步判据，那个指引是空转）；多声明 → 首个 run 的 `initialize` 发现 → **该 run 失败 `engine_capability_mismatch` + record 标 failed**，并**清理 run 前已建的前置副作用**（worktree：`subagent-service.ts:2053-2077` 在 `kickOffEngineRun` 前创建，`finalizeFailed` `:2725-2736` 不清理 → 本设计新增「run 期失败路径清理 worktree/池」，登记为第 5 条契约变更） |
-| **非 gate 能力位**（schemaEnforcement / personaInjection / eventGranularity / sessionRead / resume / interrupt / permissionMode——**不含 `steer` / `sandbox`**，二者属被 gate 面） | **manifest 为权威，握手仅诊断** | **不一致（无论强弱）→ 一律 warn 留痕，不阻断 run**（若该 run 依赖该位而未满足，引擎自行报错；core 不据此失败——与「握手降为诊断面」一致） |
+| **被 gate 的四类任务形态**（`conversation` / `fork` / `maxTurns` / `worktree`） | **manifest 是权威契约**（gate 同步读，无法等握手）。**注意判据涉及的能力位 ≠ 形态名**：实装 `capability-gate.ts:58/67/76/84` 读的是 `conversation`（conversation 形态）/ `steer`+`conversation`（fork 形态）/ `maxTurns` / `sandbox`（worktree 形态）——**这四个能力位同属 manifest 权威面**，其余能力位（personaInjection / eventGranularity / sessionRead / resume / interrupt / permissionMode / schemaEnforcement）归握手诊断范围 | 少声明 → **首个调用同步拒**（`engine_capability_unsupported`）；**恢复指引 = 「修 manifest（或升级引擎包）」**——不写「先派一次任务触发握手」（gate 读 manifest，握手不参与同步判据，那个指引是空转）；多声明 → 首个 run 的 `initialize` 发现 → **该 run 失败 `engine_capability_mismatch` + record 标 failed**，并**清理 run 前已建的前置副作用**（worktree：`subagent-service.ts:2053-2077` 在 `kickOffEngineRun` 前创建，`finalizeFailed` `:2725-2736` 不清理 → 本设计新增「run 期失败路径清理 worktree/池」，登记为第 5 条契约变更） |
+| **非 gate 能力位**（schemaEnforcement / personaInjection / eventGranularity / sessionRead / resume / interrupt / permissionMode——**不含 `steer` / `sandbox`**，二者属被 gate 面） | **manifest 为权威，握手仅诊断** | **不一致（无论强弱）→ 一律 warn 留痕，不阻断 run**（若该 run 依赖该位而未满足，引擎自行报错；core 不据此失败——与「握手降为诊断范围」一致） |
 
 > 「强于 manifest → 放行」**只对非 gate 能力位成立**（被 gate 位少声明时首个调用已被同步拒，握手永不发生——这是 gate 先行的结构性结果，不是遗漏）。
 > 同批回写 `capability-gate.ts:12-16` 与 `subagent-service.ts:2005-2009` 的注释（「全部同步拒绝发生在 record 创建前」→ 补「manifest 多声明的情形由 run 期握手失败兼底，并清理前置副作用」）。
@@ -353,7 +353,7 @@ runtime 进程（GUI 详情页①级读）──spawn（按需 + idle 复用）�
 合并（16ms/4KB）与逐字段等价不可兼得。
 **stdout/stderr 分工**：stdout 独占 NDJSON（行解析器 + 背压：core 读得慢时靠 OS 管道背压，不做无界缓存）；
 **stderr 必须常驻排空**（内存环形缓冲尾 400 字符，崩溃现场由 `engine_crashed` 帧携带）——**宿主侧不落盘**
-（落盘会引入宿主侧新写入面，而宿主日志清理只认 `runtime-`/`pi-` 前缀；见 §3.9）；只 pipe 不消费会因管道缓冲满**阻塞引擎进程**（长跑必发生）。
+（落盘会引入宿主侧新写侧，而宿主日志清理只认 `runtime-`/`pi-` 前缀；见 §3.9）；只 pipe 不消费会因管道缓冲满**阻塞引擎进程**（长跑必发生）。
 
 **取消语义**：`cancel` 首选；core AbortSignal → `cancel` → 等 3s → 未收敛则杀引擎进程；
 进程死亡 = 该引擎**全部在途 run** 失败（错误含 stderr 尾 400 字符）。
@@ -377,7 +377,7 @@ runtime 进程（GUI 详情页①级读）──spawn（按需 + idle 复用）�
 
 *演进政策三条*：① **additive 面**——新增可选字段 / 事件变体 / 方法 / 通道不 bump 版本，
 纪律 = 旧端对新成员忽略或 no-op 安全落空（reducer default 分支、未知字段丢弃）；
-② **删除面 = 同批切换**——读写端同 commit 族、全程无「写新读旧」窗口 + ADR 登记，
+② **删除范围 = 同批切换**——读写端同 commit 族、全程无「写新读旧」窗口 + ADR 登记，
 单仓同步部署协议（两引擎同仓同发布）下删除的唯一合法形态；③ **major bump 触发**——
 删除无法同批协调时（第三方引擎独立发布节奏出现），core 支持区间平移 `[1,2)→[2,3)`。
 
@@ -575,7 +575,7 @@ pi 依赖宿主服务面更重——**两者拆分成本都不小**；zcode 仍�
 | H8 | pi 引擎静态 import core 内部：`session-runner`/`lifecycle-manager`/`stdin-writer`/`session-reconstructor` | `pi-engine.ts:48-62`、`engines/pi/reader.ts:32` | 逐条定归属（D2 表）：`spawnedChildren` 镜像/杀链 → core `EngineClient`；idle 定时器 → core 回收层；`sendPromptCommand`/EPIPE → pi 包；`session-reconstructor` → 保持 core，pi 包经协议拿会话视图 | W6/W7 |
 | H9 | 测试范围深路径消费（14 个扩展测试 + core 测试） | F12 | 随目录迁移；DoD 验证含 `pnpm extensions:test` + core test 全绿 | W10 |
 | H10 | env 契约归属 | F9 | SDK `buildEngineChildEnv`（含**引擎专属命名空间放行清单**）；检查 `SCAN_ROOTS` 扩展；pi 侧 `buildChildEnv` 迁移并补齐剥离 | W12 |
-| H11 | 引擎落盘路径（wrapper / stderr 日志 / 常驻进程） | `appserver-launcher.ts:144-156`、`zcode-engine.ts:656`、`connection.ts:577-578` | 随引擎包迁移；**stderr 日志轮转由引擎包自实现**（宿主 logger 只清 `runtime-`/`pi-` 前缀，看不见它）；写入面登记见 §3.9 | W11 |
+| H11 | 引擎落盘路径（wrapper / stderr 日志 / 常驻进程） | `appserver-launcher.ts:144-156`、`zcode-engine.ts:656`、`connection.ts:577-578` | 随引擎包迁移；**stderr 日志轮转由引擎包自实现**（宿主 logger 只清 `runtime-`/`pi-` 前缀，看不见它）；写侧登记见 §3.9 | W11 |
 | H12 | relay 通道穿透新进程边界 | `relay-env.ts`、`relay.mjs` | 引擎 CLI 必须原样转发 relay env 与 stdio（嵌套 subagent）；A6 增嵌套用例 | W2/W8 |
 
 #### 3.5.3 路由与执行时序契约（跨进程后必须显式登记的契约变更）
@@ -585,7 +585,7 @@ pi 依赖宿主服务面更重——**两者拆分成本都不小**；zcode 仍�
 - **下游时序契约作废**：`routing.ts:258` 与 `subprocess-agent-runner.ts:142` 两处声明「run 内首个 await 前已触达 `executeAndAwait`」；
   `subagent-service.ts:1178-1200` 只有「routed 非 Promise，零微任务——缺省路径时序不变」——三者**跨进程后均需改写**
   （spawn + 握手 + 帧往返必经 await）→ 同批改写为「首个 await 前完成**路由决策**；执行经进程边界，时序契约由本设计放宽」。
-- **不变量 2 加例外**：EnginePort 成员签名不变，但**上述时序注释及依赖它的假设**属本设计允许变更的契约面。
+- **不变量 2 加例外**：EnginePort 成员签名不变，但**上述时序注释及依赖它的假设**属本设计允许变更的契约范围。
 - **pi 实例构造点（代理形态）**：`subagent-service.ts:377` 的 `new PiEngine({getService})` 是字段初始化器（**构造期 eager**）
   → 代理必须**构造同步、不读 descriptor**（缺包/坏包**不在构造期 throw**，descriptor 首次使用时才解析），
   否则与 D4「派发期 `engine_not_found`、坏包不拖累其他引擎」冲突。
@@ -627,7 +627,7 @@ pi 依赖宿主服务面更重——**两者拆分成本都不小**；zcode 仍�
 
 **A11 断言**：「runtime ①级读打开的库路径 == pi 宿主引擎写入的库路径」+「**独立 pi 安装下引擎落盘根 == core `getEngineDataDir()`**」。
 
-#### D8 兼容公共面（宿主零改动的机械保证）
+#### D8 兼容公共部分（宿主零改动的机械保证）
 
 | 符号 | 兼容形态 | 移除条件 |
 |------|---------|---------|
@@ -650,7 +650,7 @@ pi 依赖宿主服务面更重——**两者拆分成本都不小**；zcode 仍�
 ② zsw 显式注入 `TAIJI_AGENT_ENGINE_ROOTS`（一行 env）。
 **A7 判据因此修订**：**业务逻辑零改动**；允许的机械改动 = vendor 刷新（zsw 仓 `vendor-subagent-core.js` + 新增引擎包目录）
 + 发现根注入（若走通道①则零行）。**代价**：core 保留三个符号的兼容层（预计 < 80 行）；DoD 不要求删除它们
-（它们不是引擎实现，是公共面契约）。
+（它们不是引擎实现，是公共部分契约）。
 
 #### D9 反转记录（与既有权威文档的冲突，显式登记）
 
@@ -675,7 +675,7 @@ pi 依赖宿主服务面更重——**两者拆分成本都不小**；zcode 仍�
 |----|------|
 | `bin` 名 → 绝对入口 | manifest `bin` 映射（包目录相对路径）+ 包目录绝对化；**不依赖 PATH**（staging 目录不在 PATH） |
 | 运行时选择（**宿主 × 平台二维**） | **设计决策**：打包态 pi 宿主的 `process.execPath` 是 Bun standalone binary（再拉就是又起一个 pi）→ **必须用注入的执行器**，单一名字（不复用 relay 的 node 键）、经基础设施层注入（不依赖继承，否则被剥除）；执行器为 Electron 二进制时同时注入 `ELECTRON_RUN_AS_NODE`；首次使用前跑 node 探针，失败 → `engine_not_found` + 指引。三宿主 × 三平台的完整解析矩阵、探针实现与 env 注入点由代码承载（原 impl-plan §2.9 已删除，git 可追溯；入口 = 本节对应实现文件） |
-| Windows | 入口为 `.mjs` 时不需 shim；若引擎声明 `.cmd` → 禁止 `shell:true`（注入面），改用显式 `cmd.exe /c` + 参数数组 |
+| Windows | 入口为 `.mjs` 时不需 shim；若引擎声明 `.cmd` → 禁止 `shell:true`（注入范围），改用显式 `cmd.exe /c` + 参数数组 |
 | 安全 | 不 cwd 探测；引擎根只读 manifest，不执行用户 repo 内同名目录 |
 
 **SSOT 与检查**：引擎包清单**不新增静态 SSOT 文件**（回退源 = runtime 发现结果，见 §3.4）；
@@ -753,16 +753,16 @@ DoD#5 要求迁移完成后删除 `inproc` 分支。**DoD 之后的恢复路径*
 | 8 | 测试范围全绿：core test + `pnpm extensions:test` + conformance（协议黑盒） | CI |
 | 9 | 文档与约束回写：`check-doc-symbol-drift.mjs` 全绿 + 新增「引擎协议边界」约束登记（`docs/constraints.json` + `scripts/validate-constraints.mjs`） | pre-commit |
 
-### 3.9 写入面与已接受代价（登记）
+### 3.9 写侧与已接受代价（登记）
 
-| 写入面 | 归属 | 累积性 | 清理通道 | 判定 |
+| 写侧 | 归属 | 累积性 | 清理通道 | 判定 |
 |--------|------|--------|---------|------|
 | `<engineDataDir>/engines/zcode/appserver-launcher.cjs` | 引擎包 | 幂等覆盖 | 随引擎数据目录 | 可接受 |
 | `<engineDataDir>/logs/zcode-appserver-stderr-<pid>.log` | 引擎包 | append 累积 | **文件名带实例维度**（同路径双实例并发写入会 rename 竞争）；清理通道 = 引擎包自实现，判据 = 同前缀 + **pid 已死（OS 存在性探测，不是进程内表）** + mtime 过期（三者同时成立才删）；参数读宿主 `TAIJI_LOG_*`（缺省 50MB / 7 天）；宿主 logger 看不见它 → **W11 落地 + A13**；实现级判据由代码承载（原 impl-plan §2.11 已删除，git 可追溯；入口 = 引擎包 stderr 轮转实现） | 可接受（通道自建） |
 | **`<engineDataDir>/engines/zcode/session-db/db.sqlite`** | 引擎包 | 单调（引擎无删除 RPC） | 删除即重建（停机窗口）；TTL 策略见前置文档 `zcode-session-db-isolation.md` §3.2 D4 | 可接受（前置文档已登记） |
 | 引擎常驻进程（**每宿主每 id 一个**，典型 2 个） | 引擎包 | 常驻 | `dispose` / 杀链 / **runtime 退出钩子**（§3.6） | 可接受 |
 | `~/.zcode/cli/{artifacts,exec,log,…}` | 引擎包 | 单调 | 见前置文档 §2.4.1 | 另案（已登记） |
-| **宿主侧引擎 stderr** | —— | —— | **不落盘**（仅内存环缓冲，崩溃现场由 `engine_crashed` 帧携带；与不变量 4「引擎不落盘宿主数据」同向） | 无新写入面 |
+| **宿主侧引擎 stderr** | —— | —— | **不落盘**（仅内存环缓冲，崩溃现场由 `engine_crashed` 帧携带；与不变量 4「引擎不落盘宿主数据」同向） | 无新写侧 |
 | **`modelCatalog` 构建期静态化**（同步成员单源化） | 引擎包 | 静态 | 无（构建产物） | **已接受代价**：zcode 侧清单从「运行期凭据感知」（`preparer.ts:210-227`）退化为**静态声明**——用户新配凭据后，同步 `validateModel` 不立即识别（`dynamic:true` 下仍放行、运行期以引擎为权威）；**用户可见面**：新配模型可能**能派发但不出现在 system prompt 的模型段**（陈旧展示，非功能阻断）；第三方引擎**不跑 `gen:model-catalog`** 时 prompt 段落 = `buildCoreAlignedHint`（无枚举面语义，与事实相容）；**恢复路径** = 重新运行引擎包构建期生成（`pnpm --filter <pkg> gen:model-catalog`）后重启宿主；第三方包需作者发版；**重审触发** = 出现「新配凭据后同步校验误拒 / 模型段陈旧」报告 | 已接受代价 |
 | **宿主崩溃后的引擎残留**（`kill -9`/断电） | 引擎包 | 单调 | 引擎侧自灭（**主判据 stdio EOF** + in-flight 反向请求超时）+ 宿主启动期 pidfile 清扫（**实例维度文件名 + 三条件判定**） | 可接受（已缓解；残余 = 阈值窗口内的残留，见 A8） |
 | **引擎 detached 子进程不收割** | 引擎包 | 单调 | 无（进程组收割覆盖不到） | **已接受代价（四要素）**：量级 = **引擎自身 detached spawn 的后代**（实证：pi rpc-mode `session-runner.ts:582/629` 即属此类——不是「仅当第三方引擎乱用」的假设场景）；恢复路径 = 人工 `kill` + 引擎升级；重审触发 = 出现孤儿进程报告；**首选规避** = conformance 禁止引擎一代子进程 `detached:true`（需 detach 的常驻进程必须自管 dispose 自杀），见 §3.6 D2 |
@@ -802,7 +802,7 @@ RSS 实施期实测回写 §3.6 表；恢复 = 取消 runtime 路径（降②级
 1. **协议是唯一界面**：引擎包不得 import `@zhushanwen/subagent-core`（只可 import SDK）；**SDK 也不得 import core**
    （否则 `core → SDK → core` 成环）——检查 `check-engine-package-boundary.mjs` + `check-engine-sdk-boundary.mjs`。
 2. **EnginePort 成员签名不变**：上层代码与测试不改（除注册表内部与新增协议客户端）；
-   **例外**：§3.5.3 的时序契约注释及依赖它的假设属本设计允许变更的契约面。
+   **例外**：§3.5.3 的时序契约注释及依赖它的假设属本设计允许变更的契约范围。
 3. **事件与 handle 序列化逐字兼容**：`AgentEvent` / `EngineHandleData` / `SessionView` 与现有类型同构（golden 对比）。
 4. **数据所有权**：journal / record / engines.json 只由 core 写；引擎不落盘宿主数据。
 5. **凭据不过协议**：协议里不出现 apiKey / token 字段（schema 层禁止 + 测试断言）。
@@ -874,17 +874,17 @@ RSS 实施期实测回写 §3.6 表；恢复 = 取消 runtime 路径（降②级
 | W5 zcode 外移 | 新建 `@zhushanwen/zcode-subagent-cli` 包，搬 `engines/zcode/` + 前置文档改动 | W1–W4 | A1/A5/A9；实现级规格由代码承载（原 impl-plan §2.5，已删除） | 实现级细节由代码承载（入口 = `packages/zcode-subagent-cli`） |
 | W6 pi 宿主面下沉 | `PiEngineService` 9 成员拆 HostBridge + `spawnedChildren` 状态镜像（前置，强制） | W1–W3 | A2/A3/A8 前置；实现级规格由代码承载（原 impl-plan §2.6，已删除） | 实现级细节由代码承载（入口 = 本行职责对应实现文件） |
 | W7 pi 外移 | 新建 `@zhushanwen/pi-subagent-cli`（依赖 W6 产物） | W6 | A2/A3/A9；实现级规格由代码承载（原 impl-plan §2.7，已删除） | 实现级细节由代码承载（入口 = `packages/pi-subagent-cli`） |
-| W8 宿主接线 | runtime 成为协议客户端 + 扩展依赖声明 + D8 兼容公共面 + relay 透传 | W2/W4 | A7/A11；实现级规格由代码承载（原 impl-plan §2.8，已删除） | 实现级细节由代码承载（入口 = 本行职责对应实现文件） |
+| W8 宿主接线 | runtime 成为协议客户端 + 扩展依赖声明 + D8 兼容公共部分 + relay 透传 | W2/W4 | A7/A11；实现级规格由代码承载（原 impl-plan §2.8，已删除） | 实现级细节由代码承载（入口 = 本行职责对应实现文件） |
 | W9 打包与分发 | 引擎包 staging + 启动解析二维矩阵 + 数据根注入矩阵 + 新检查 | W1/W5/W7 | A5/A11；实现级规格由代码承载（原 impl-plan §2.9，已删除） | 实现级细节由代码承载（入口 = `scripts/bundle-extensions.mjs` 与边界检查脚本） |
 | W10 conformance 改造 | 协议黑盒套件 + 基线三层 + 录制/复跑 + H9 测试范围迁移 | W1/W2/W5/W7 | A1/A2/A4/A9；实现级规格由代码承载（原 impl-plan §2.10，已删除） | 实现级细节由代码承载（入口 = 本行职责对应实现文件） |
 | W11 壳侧去引擎化（DoD 收尾） | 清 H1–H4/H8/H11 + 删内建与 inproc + stderr 轮转引擎侧自实现 | W5/W7/W8/W9/W10/W12 | A5/A9/A11/A13；实现级规格由代码承载（原 impl-plan §2.11，已删除） | 实现级细节由代码承载（入口 = 本行职责对应实现文件） |
 | W12 环境与文档 | `buildEngineChildEnv` 三层 env + 检查扩展 + env 文档/约束回写 | W1 | A6/A9；实现级规格由代码承载（原 impl-plan §2.12，已删除） | 实现级细节由代码承载（入口 = `packages/subagent-engine-sdk` env 构建与检查脚本） |
 
 **下一层文档**：`zcode-subagent-cli` 提取设计与 `pi-subagent-cli` 提取设计各自单独成文
-（驱动细节、凭据/池策略、事件适配、迁移验收），本设计只固定它们与 core 的协议面。
+（驱动细节、凭据/池策略、事件适配、迁移验收），本设计只固定它们与 core 的协议范围。
 
 **排序与版本**：W1–W4（协议与壳）→ W5（zcode 外移，首个真机验证）→ W6–W7（pi，强制路径）→
-W8/W9/W10/W12 并行收敛 → **W11（DoD 收尾）**。core 发 **major**（引擎注册面与公共面语义变化）；
+W8/W9/W10/W12 并行收敛 → **W11（DoD 收尾）**。core 发 **major**（引擎注册范围与公共部分语义变化）；
 引擎包首版 0.x；SDK 与协议版本独立于包版本。
 **风险与回退**：任一阶段卡住，`TAIJI_SUBAGENT_ENGINE_MODE=inproc` 立即回到现状——但该开关是**过渡期专用**，
 DoD#5 要求它最终删除；回退只用于「迁移中途救火」，不构成长期形态。

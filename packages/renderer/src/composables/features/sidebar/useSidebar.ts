@@ -99,7 +99,7 @@ export function resetAppBootstrap(): void {
 
 /**
  * 测试后门命名空间（生产代码禁止消费，对齐 useExtensionHostBridge / app-runtime __testing
- * 先例）：装配检查断言入口——sessionEntry 端口束原始注入面（composable 内构造，useSidebar()
+ * 先例）：装配检查断言入口——sessionEntry 端口束原始注入点（composable 内构造，useSidebar()
  * 调用时填充）。remote-use D9/U21 装配检查 helper 双壳测试的桌面壳断言源：未来重构 useSidebar
  * 静默删 sessionEntry 注入时，core helper 断言在测试期报红（生产零消费由 assembly-check
  * grep 断言守护，出口不扩大 API 面常驻语义）。
@@ -213,7 +213,7 @@ export function useSidebar() {
     clearTerminalQueue: (sid) => useTerminalWriteQueueStore().removeSession(sid),
     clearSlashCommands: (sid) => useCommandStore().clearCommands(sid),
     // [可视化 U6/D11⑤] workflow-viz overlay UI 关闭：删除的 session 是 overlay 当前发起
-    // session 时关 overlay（数据面——事件流缓存 + 活跃锚——由 clearWorkflow/store.clearSession 收尾）。
+    // session 时关 overlay（数据范围——事件流缓存 + 活跃锚——由 clearWorkflow/store.clearSession 收尾）。
     closeWorkflowOverlay: (sid) => closeWorkflowVizOverlayForSession(sid),
     clearForkNotices: (sid) => useForkNoticeFeed().clearSession(sid),
   }

@@ -33,14 +33,14 @@ import {
   composerChildStubs,
 } from '../helpers/composer-mount'
 
-// ── mock 段：工厂委托共享 helper（单源；ComposerInput stub 下方自留——expose 断言面专属）──
+// ── mock 段：工厂委托共享 helper（单源；ComposerInput stub 下方自留——expose 断言范围专属）──
 vi.mock('@/composables/features/chat/useChat', () => composerChatModule())
 vi.mock('@/composables/features/new-task/useNewTaskFlow', () => composerFlowModule())
 vi.mock('@/api', () => composerApiModule())
 vi.mock('@/stores/chat', () => composerChatStoreModule())
 vi.mock('@/stores/session', () => composerSessionStoreModule())
 
-// ── ComposerInput stub：expose 面带 insertTextAtCursor / setText 等 spy（消费 API 断言面）──
+// ── ComposerInput stub：expose 面带 insertTextAtCursor / setText 等 spy（消费 API 断言范围）──
 interface InputCalls {
   insertTextAtCursor: ReturnType<typeof vi.fn>
   setText: ReturnType<typeof vi.fn>

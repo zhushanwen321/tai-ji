@@ -306,7 +306,7 @@ event handler（如 `tool_execution_end`）中向 LLM 注入提示词/通知消�
 
 **因此 SO 单独 bump 必须同步重发 SW**：npm 7+ 默认自动安装 peerDependencies 并严格解析——SO 发了新版本而 SW 未重发时，用户环境装新 SO + 旧 SW 会因旧 SW 的 peer 声明仍锁旧精确版本而报 ERESOLVE（装不上/需 --legacy-peer-deps 强装）。两包语义上本就同进退：`PI_WORKFLOW_SCHEMA` env 隐式契约 + 256KiB 上限由跨包契约测试锁字节相等（原裁决记录 structured-output-redesign.md §7 补记 C——已删除，git 可追溯），一端演进而另一端不跟即静默断桥。
 
-**一般化规则**：凡 peerDependencies 引用兄弟 extension 包（而非 `@earendil-works/pi-*` 上游）且发布态为精确版本的，被依赖包任何 bump 都必须同 PR/同批重发依赖包；只 bump 一端时 changeset 必须显式说明另一端为何可以不跟（如确无契约面变更）。
+**一般化规则**：凡 peerDependencies 引用兄弟 extension 包（而非 `@earendil-works/pi-*` 上游）且发布态为精确版本的，被依赖包任何 bump 都必须同 PR/同批重发依赖包；只 bump 一端时 changeset 必须显式说明另一端为何可以不跟（如确无契约范围变更）。
 
 > 决策追溯：初始裁决记录 pi-ext-019（已压缩，见 [adr/archive-digest.md](./adr/archive-digest.md)；structured-output-redesign §7 补记 C 同为 git 历史可追溯）。
 

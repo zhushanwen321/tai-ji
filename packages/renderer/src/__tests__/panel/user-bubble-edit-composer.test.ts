@@ -9,7 +9,7 @@
  *
  * 覆盖：
  * - R1 挂载回填：segments → 真 chip（.slash-chip / .mention-chip）+ 草稿同步（发送门禁）
- *   + selectedSkillNames 禁选数据面透传 CommandPopover
+ *   + selectedSkillNames 禁选数据范围透传 CommandPopover
  * - R2 Enter 提交：emit submit(segments)（chip 即段，无序列化标记文本）
  * - R3 ⇧⏎ 换行不提交 / Esc 取消
  * - R4 空稿 + disabled 双门禁：发送钮禁用且点击不 emit
@@ -100,7 +100,7 @@ describe('UserBubbleEditComposer 挂载回填（R1）', () => {
     expect(wrapper.find('[role="textbox"]').text()).toContain('总结')
   })
 
-  it('file/skill 段 → mention/skill chip 还原 + selectedSkillNames 禁选数据面透传', async () => {
+  it('file/skill 段 → mention/skill chip 还原 + selectedSkillNames 禁选数据范围透传', async () => {
     const wrapper = mountEditor([
       { type: 'skill', name: 'cw-cli', location: '/sk.md' },
       { type: 'file', path: '/a.ts', lineRange: [10, 20] },

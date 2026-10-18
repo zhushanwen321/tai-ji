@@ -214,7 +214,7 @@ export const useWorkflowStore = defineStore('workflow', () => {
 
   /**
    * 写入指定 session 的 workflow 列表（不可变写，确保 Map 响应性触发）。
-   * store 私有（仅 loadWorkflows 内部消费），不在导出面——分区写权威入口是 loadWorkflows
+   * store 私有（仅 loadWorkflows 内部消费），不在导出清单——分区写权威入口是 loadWorkflows
    * 拉取，无生产直写场景；计数等派生一律从 recordsOf 分区读侧派生。
    */
   function applyRecords(sessionId: string, list: WorkflowRunRecord[]): void {
@@ -228,7 +228,7 @@ export const useWorkflowStore = defineStore('workflow', () => {
     // [W0/D4] 拉取收敛簿记随分区一并释放（dirty 不复活已删分区）
     releaseLoadBookkeeping(sessionId)
     // [可视化 U5/D11⑤] 该 session 名下 run 的事件流缓存随分区一并释放；活跃 run 归属该
-    // session 时清除活跃锚（overlay 关闭编排归 useSidebar.deleteSession 链，数据面在此收尾）
+    // session 时清除活跃锚（overlay 关闭编排归 useSidebar.deleteSession 链，数据范围在此收尾）
     clearRunEventsBySession(sessionId)
   }
 
@@ -240,7 +240,7 @@ export const useWorkflowStore = defineStore('workflow', () => {
   // ② 缓存按 runId 分区——overlay 关闭不清（重开秒显）、session 删除随 clearSession 清、
   //    LRU 上界 5（防长会话内存累积）；
   // ③ 切换 run——关全部 run 级 tab 归 overlay 容器（面板按 runId 重挂载，tab 随挂载态
-  //    消亡）；store 侧活跃锚换指 + 在途丢弃即数据面完备；
+  //    消亡）；store 侧活跃锚换指 + 在途丢弃即数据范围完备；
   // ④ agentcall 分区——复用现状 LRU 联动与 registerAgentCall（面板 agent tab 经
   //    useSubagentTabData 走既有编排，本 store 零新增）；
   // ⑤ session 删除——clearSession 扩展清缓存与活跃锚（上方 clearSession 内）。

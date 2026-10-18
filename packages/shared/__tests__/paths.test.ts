@@ -22,9 +22,52 @@
  * 运行：cd packages/shared && npx vitest run __tests__/paths.test.ts
  */
 import { describe, it, expect } from 'vitest'
-import { join } from 'node:path'
+import { join, resolve } from 'node:path'
 import { homedir } from 'node:os'
-import { getAttachmentsDir, getDataDir, getPiAgentDir, getTtsCacheDir } from '../src/paths'
+import { getAttachmentsDir, getDataDir, getPiAgentDir, getTtsCacheDir, isPathWithinTree, DATA_DIR_ROOT_NAMES } from '../src/paths'
+
+describe('isPathWithinTree（树内包含判定单点，MF-1-7）', () => {
+  const ROOT = join('/home', 'alice', '.taiji-dev')
+
+  it('树根本身 → true（含树根的边界语义）', () => {
+    expect(isPathWithinTree(ROOT, ROOT)).toBe(true)
+  })
+
+  it('树内子路径（直接子目录 / 深层）→ true', () => {
+    expect(isPathWithinTree(join(ROOT, 'instances'), ROOT)).toBe(true)
+    expect(isPathWithinTree(join(ROOT, 'a', 'b', 'c'), ROOT)).toBe(true)
+  })
+
+  it('前缀混淆兄弟目录（~/.taiji-devish）→ false（sep 边界）', () => {
+    expect(isPathWithinTree(`${ROOT}ish`, ROOT)).toBe(false)
+  })
+
+  it('树外完全无关路径 → false', () => {
+    expect(isPathWithinTree(join('/home', 'alice', '.taiji'), ROOT)).toBe(false)
+    expect(isPathWithinTree('/tmp/anything', ROOT)).toBe(false)
+  })
+
+  it('.. 逃逸负例：resolve 消解后出树 → false（入参契约 = 已 resolve 的路径）', () => {
+    // 真实消费点形态：外部值先 path.resolve 再判——resolve 消解 .. 后已不在树内
+    const escaped = resolve(join(ROOT, 'instances', '..', '..', '.taiji'))
+    expect(isPathWithinTree(escaped, ROOT)).toBe(false)
+    // 反向：词法入树形态 resolve 消解后仍在树内 → true
+    const inside = resolve(join(ROOT, 'instances', '..', 'agent'))
+    expect(isPathWithinTree(inside, ROOT)).toBe(true)
+  })
+
+  it('casefold 两态：大小写变体缺省不 fold 判树外，fold 判树内', () => {
+    const variant = join('/home', 'alice', '.TAIJI-DEV')
+    expect(isPathWithinTree(variant, ROOT)).toBe(false)
+    expect(isPathWithinTree(variant, ROOT, { casefold: true })).toBe(true)
+    expect(isPathWithinTree(join(variant, 'agent'), ROOT, { casefold: true })).toBe(true)
+  })
+
+  it('DATA_DIR_ROOT_NAMES 与真实根名字面量一致（dev/prod 两形态）', () => {
+    expect(DATA_DIR_ROOT_NAMES.dev).toBe('.taiji-dev')
+    expect(DATA_DIR_ROOT_NAMES.prod).toBe('.taiji')
+  })
+})
 
 describe('getAttachmentsDir（W3 IF4 纯函数）', () => {
   it('W3TC1: 传 dataDir → path.join(dataDir, "attachments", sessionId)', () => {

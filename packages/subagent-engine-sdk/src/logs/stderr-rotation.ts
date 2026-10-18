@@ -27,7 +27,7 @@ const DAY_MS = HOURS_PER_DAY * MINUTES_PER_HOUR * SECONDS_PER_MINUTE * MS_PER_SE
 /** 缺省保留天数（与宿主 logger 同源缺省：7 天）。 */
 export const DEFAULT_STDERR_KEEP_DAYS = 7;
 
-/** 轮转参数（env 覆盖面 = 宿主 logger 同款 TAIJI_LOG_* 两键）。 */
+/** 轮转参数（env 覆盖范围 = 宿主 logger 同款 TAIJI_LOG_* 两键）。 */
 export interface StderrRotationParams {
   maxBytes: number;
   keepDays: number;

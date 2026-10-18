@@ -28,7 +28,7 @@
 | U8a 派生视图契约与 manifest 双写 | `0b1cd73f5` | 8 个 shared/runtime 文件被并行 docs 批次 `340ae8c1f` 捎带（同 U2 期先例，不 revert） |
 | U8b GUI 派生视图 | `c47871d05` | idle 归进行中桶 + 默认可见性翻转 + 已收起过滤器（该过滤器已随 2026-09-16 裁决随 intent 位删除退役）+ GUI 快修批次 #1#3#4 |
 | U9 文档同步 | 本 commit | 母设计 D5/D8 注记 / constraints 三条 / explainer / AGENTS.md 术语 |
-| 阶段 3 审查修复 | `3143447b5`..`2890700d0` | 检查补齐 / relay 收敛 / markRoundIdle 轮终写面（A-lite）/ closeAfterRound 清除 / 注释与值比较 |
+| 阶段 3 审查修复 | `3143447b5`..`2890700d0` | 检查补齐 / relay 收敛 / markRoundIdle 轮终写侧（A-lite）/ closeAfterRound 清除 / 注释与值比较 |
 | 阶段 5 验收修复 | `d01f0f225` `5dcb99453` `8ea19681e` | cancel 收敛窗 30s+迟到轮检查（A1 22/22）/ engine 水合（A3 16/16）/ worktree 重建脱离注册表+keepBranch（A5 18/18，U5-D8 失效） |
 
 **上游跟踪项（U6 遗留）**：zcode -32031 `ZCODE_RUNTIME_MODEL_UNAVAILABLE`——resume 后原会话 send 被 restoreWarning 挂起卡死（provider 注入生产形态不解除；协议层 session/setModel 应答成功但不清除），本设计选型绕开（resume 读通道取历史 + `session/create` 新会话注入，§3.2.6 要点 3 / §3.5 P-1）；若 zcode 未来版本打通 restoreWarning 的协议层清除路径，可升级为原地 resume 续聊（机制不变，省 token）。探针存证：`.tmp/probe/zcode-resume-probe*.mjs`（gitignore，不进 git）。
@@ -262,7 +262,7 @@ RECONNECTABLE_FINAL_REASONS = ["disconnected","parent-shutdown"]   (types.ts:99)
   running--settle(成功/失败)-->    idle      （stopReason=completed/failed；进程按 idle timer 回收）
       [实施形态 A-lite，阶段 3 裁决]：内存面轮终保持 running-resumable + stopReason 展示位
       （completed/failed），状态机翻边不发生——派生视图桥接（isDoneProjection）与续聊判定等价，
-      统计承诺经轮终写面兑现（binding 快照 + record-round-idle 收条帧随每轮终写入 journal 记录，markRoundIdle 簿记⑩⑪）。
+      统计承诺经轮终写侧兑现（binding 快照 + record-round-idle 收条帧随每轮终写入 journal 记录，markRoundIdle 簿记⑩⑪）。
       事件表行保留为领域语义（「轮终=会话回到可续聊」），中断族（abort/engine death/host
       shutdown）仍真实翻 idle。登记 impl-plan §5 S3-R1。
   running--abort(用户 cancel)-->   idle      （stopReason=interrupted；不写任何「终态」）
@@ -281,7 +281,7 @@ RECONNECTABLE_FINAL_REASONS = ["disconnected","parent-shutdown"]   (types.ts:99)
 **不变量**（沿用 H4 已确立的，全部保留）：
 - pi / zcode 是 transcript 的唯一写者，taiji 侧只传指针（两侧现状一致，runtime session-store.ts:9-10 与 spawn-args.ts:53-55）；
 - 跨进程单写权由 `.alive` 探针保证（findForeignLiveInstance，pid 单判据 + self 排除）；
-- record 持久化写面唯一入口 RecordStore（C-data-20）。
+- record 持久化写侧唯一入口 RecordStore（C-data-20）。
 
 #### 3.2.3 复活资格判据（核心简化）
 
@@ -340,7 +340,7 @@ RECONNECTABLE_FINAL_REASONS = ["disconnected","parent-shutdown"]   (types.ts:99)
 > cancel 与 close 的产品边界（写死在语义层，不靠技术 gate 兜底）：cancel 回答「这一轮先停下」——秒级、可立即续聊、资源不动；close 回答「这件事告一段落」——worktree 释放、record 归「已结束」桶、message 仍可续聊（2026-09-16 裁决后 close 不再隐藏列表）。两者的会话记忆（transcript）保留期完全相同。
 
 **worktree 续聊重建**：close 收敛后 worktree 已回收，续聊时 → 自动重建（worktree-manager 现有能力：worktree add + checkout 记录的分支）+ apply patch（恢复未提交改动）→ 原地续聊（transcript 还在）。三种失败形态的处置：①patch 丢失或分支不存在 → 降级为带历史重开（同 3.2.3）；②**patch apply 冲突**（close 后分支已有新提交）→ worktree 重建为干净基线 + 原地续聊（transcript 仍有效，续聊资格判据不受工作区影响）+ 用户可见提示「close 时有 N 处未提交改动无法自动恢复，patch 备份在 <path>」——不降级 reopen；③重建自身失败（磁盘满等 IO 错）→ 响亮报错重试，不静默回落。**防御不变**：hadWorktree && !worktreeHandle 的「防回落主 repo」检查保留（conversation-continuation.ts:264-272），只是拒绝动作改为自动重建。
-> **[实施演进注记，阶段 5 验收 U5-D8 修正（commit `8ea19681e`）]**：上文「checkout 记录的分支」依赖注册表 branch 反查的原始机制已删除——重建依据现 = repoPath 入参（`deps.getCwd()`，与 create() 的 mainCwd 构造性同源：record 存储按 encodeCwd 物理分区）+ `pi-sub-<recordId>` 命名约定派生分支与 checkout 路径 + `rev-parse --verify` 实测存在性。收敛 cleanup 增 `keepBranch: true` 保留分支（否则收敛删分支 = 重建依据消亡，阶段 5 实测第四缺口）。上文形态①「分支不存在」的触发面随之收窄：仅剩外部删除（注册表回收删除路径已消亡）。保留分支的资源生命周期裁决见 §1.3 G3 注记。
+> **[实施演进注记，阶段 5 验收 U5-D8 修正（commit `8ea19681e`）]**：上文「checkout 记录的分支」依赖注册表 branch 反查的原始机制已删除——重建依据现 = repoPath 入参（`deps.getCwd()`，与 create() 的 mainCwd 构造性同源：record 存储按 encodeCwd 物理分区）+ `pi-sub-<recordId>` 命名约定派生分支与 checkout 路径 + `rev-parse --verify` 实测存在性。收敛 cleanup 增 `keepBranch: true` 保留分支（否则收敛删分支 = 重建依据消亡，阶段 5 实测第四缺口）。上文形态①「分支不存在」的触发范围随之收窄：仅剩外部删除（注册表回收删除路径已消亡）。保留分支的资源生命周期裁决见 §1.3 G3 注记。
 > **[实施演进注记，worktree 陈旧元数据修复批]**：① **形态①判据全部前置**——patch 备份丢失 / 分支不存在两个判据都在一切重建副作用（残留 checkout 清理 / `worktree add` / 注册表补条目 / node_modules 软链）之前返回 `degrade-reopen`，命中时零副作用（不建 checkout、不写注册表、不建软链、不留 git worktree 登记）。原实现先重建完再判 patch，产物被丢弃并留存到宿主进程死亡，且消费方对 degrade-reopen 不接收 handle → 每续轮重复整套 git 重建。② **create / reconstruct 共用恢复原语 `addWorktreeWithStaleRecovery`**（`worktree-manager.ts`）：`worktree add` 失败 → `worktree prune` →（仅 `-b` 新建形态 `deleteStaleBranch=true`）删同名残留分支 → 重试一次；重试仍失败即形态③响亮上抛。create 由此获得与 reconstruct 对称的陈旧 git 元数据（`.git/worktrees/<branch>` 登记 + 残留分支仍在）恢复能力，同 recordId 不再永久卡死；reconstruct 的既有分支检出形态保持 `deleteStaleBranch=false`——该形态下分支存在从不是 add 失败原因，删除只会让重试报 `invalid reference`（实测 git 2.52）并销毁重建依据。
 
 #### 3.2.6 zcode transcript 锚（ref 锚）
@@ -355,7 +355,7 @@ RECONNECTABLE_FINAL_REASONS = ["disconnected","parent-shutdown"]   (types.ts:99)
 4. **zcode conversation 能力位**：`capabilities.conversation` 从 `unsupported` 升为 `cold`（新值：冷恢复会话——resume 读 + 新 session 注入，无热 steering）——capability-gate 的 message 升级 gate（run-orchestration canUpgradeToConversation :1394-1401）自动放行 zcode record 的 chat 升级。`steer` 维持 unsupported（interrupt=true 的 message 对 zcode 先做「等轮结束再投」降级，映射 followUp 语义，capabilities 声明如实）。
 5. **entry-born 形态消亡**：zcode record 有了 transcriptRef，`finalizeEntryOnlyOrphan` 直断分支删除（见 3.2.3 删除清单）——Gate B F2（缓存重建缺员）与 F3（纳管态误结案）随 anchor 统一自动消解。
 
-**zcode 会话库资源生命周期（风险登记，四要素）**：万物可续聊后，zcode 隔离库（`<engineDataDir>/engines/zcode/session-db/db.sqlite`，含每会话全量 turns）成为单调累积写入面——每 subagent 每轮追加、reopen 再开新 sessionId 继续追加。要素登记：①**量级** = 会话数 × 轮均体积（sqlite 全量 turns，量级与 pi 侧 jsonl transcript 同源同阶；实施期以真实库采样校准，设计期上界假设 <1MB/会话）；②**清理通道** = zcode 库条目 TTL 30 天（引擎侧 sweep 已落地，C-data-22；pi 侧 transcript 自 ADR-0133 起无独立 TTL——回收归删主会话级联，两域不再有「同窗」绑定）；③**恢复路径** = 条目被清 = 锚失效 → 自动走 reopen 降级（§3.2.3），无需人工恢复（**[U3 修订 2026-09-19，commit `f98d9e459`]** zcode 侧降级形态改写：库派生视图预检查退役——app-server 对 session 元数据行入库滞后于 create 应答（分钟级窗 + 部分行永不入库，真机实证），预检查把有效锚系统性误判失效致每轮续聊误 reopen；现行 zcode 锚活性由引擎真实 resume 结果承担——resume 读失败 = 锚失效声明段裸跑（模型知情「延续但无历史」，不世代推进），reopen 触发面收缩为 pi 锚失效专属）；④**重审条件** = 库体积 >100MB 或活跃条目 >1000（数字实施期校准）触发 TTL 窗口复审。**执行锚**（防纯文本承诺静默失效）：本约束随 U6 落地时登记进 constraints.json（C-data 系新条目，pre-commit / CI 检查按路径触发），S3 验收补通道存在性断言（zcode 库条目超窗被清 + 清后 message 走 reopen 降级）；**约束登记与 TTL 通道属同一发布单元，不拆分发布**（防「锚先合、通道后合」的裸奔窗口）。
+**zcode 会话库资源生命周期（风险登记，四要素）**：万物可续聊后，zcode 隔离库（`<engineDataDir>/engines/zcode/session-db/db.sqlite`，含每会话全量 turns）成为单调累积写侧——每 subagent 每轮追加、reopen 再开新 sessionId 继续追加。要素登记：①**量级** = 会话数 × 轮均体积（sqlite 全量 turns，量级与 pi 侧 jsonl transcript 同源同阶；实施期以真实库采样校准，设计期上界假设 <1MB/会话）；②**清理通道** = zcode 库条目 TTL 30 天（引擎侧 sweep 已落地，C-data-22；pi 侧 transcript 自 ADR-0133 起无独立 TTL——回收归删主会话级联，两域不再有「同窗」绑定）；③**恢复路径** = 条目被清 = 锚失效 → 自动走 reopen 降级（§3.2.3），无需人工恢复（**[U3 修订 2026-09-19，commit `f98d9e459`]** zcode 侧降级形态改写：库派生视图预检查退役——app-server 对 session 元数据行入库滞后于 create 应答（分钟级窗 + 部分行永不入库，真机实证），预检查把有效锚系统性误判失效致每轮续聊误 reopen；现行 zcode 锚活性由引擎真实 resume 结果承担——resume 读失败 = 锚失效声明段裸跑（模型知情「延续但无历史」，不世代推进），reopen 触发范围收缩为 pi 锚失效专属）；④**重审条件** = 库体积 >100MB 或活跃条目 >1000（数字实施期校准）触发 TTL 窗口复审。**执行锚**（防纯文本承诺静默失效）：本约束随 U6 落地时登记进 constraints.json（C-data 系新条目，pre-commit / CI 检查按路径触发），S3 验收补通道存在性断言（zcode 库条目超窗被清 + 清后 message 走 reopen 降级）；**约束登记与 TTL 通道属同一发布单元，不拆分发布**（防「锚先合、通道后合」的裸奔窗口）。
 
 #### 3.2.7 结算副作用与统计口径
 
@@ -390,7 +390,7 @@ RECONNECTABLE_FINAL_REASONS = ["disconnected","parent-shutdown"]   (types.ts:99)
 | `RECONNECTABLE_FINAL_REASONS` / `isReconnectableFinalReason` | 唯一存活消费点 = record-access.ts `rematerializeReconnectableEntryManifests`（boot 自愈可见性 gate，注释已标注桥接残留） | 重物化 gate 改物理判据（entry 自描述完整 + 归属本 session 树，与 §3.2.3 复活资格判据同源）落地并全绿 | 删集合与判定函数；注释口径随改 |
 | `StopReason` 超集值空间 | 与 ClosedReason 的历史并集（types.ts），13 值中部分无展示面消费 | 逐值 grep GUI/TUI/文案消费方：零消费值清单确认后一个批次收窄（收窄属 types 面破坏性改动，须与 closedReason 字段删除同批走） | 值空间收窄至实际消费集 |
 | manifest 旧三态 + executionStatus 双写 | manifest-store.ts:26-40「永久双写」——仓外已发布 session-reader 包的兼容契约 + 无版本磁盘 schema | session-reader 发布 next-major（README/CHANGELOG 声明新两态词汇）**且**全量存量用户数据经一次重建后无旧 status 读需求——两条件同时满足才评审下线；只满足前者不得动磁盘 schema | 双写降级为「派生视图函数保留、字段退役」评审（届时按 session-reader 实际安装面数据裁决，不预设结论） |
-| **内存面轮终保持 running-resumable（A-lite 桥接，S3-R1）**（2026-09-14 补登记，登记依据 = [subagent-two-state-convergence.md](design/subagent-two-state-convergence.md)——本模型 §3.2.2「[实施形态 A-lite，阶段 3 裁决]」预告的 impl-plan §5 载体已悬空，按元规则补入本表） | record-store-rounds.ts markRoundIdleImpl 簿记①「status 保持 running」+ ⑤ resumable=true——「轮已收敛」被编码为 `running + result + resumable + chatMode` 四字段组合，写面/协议面/读面各自重组；已发生事故 = sidebar badge 对 chat 轮终误判占用（session 01a09f83 实测 8 幽灵，止血批读侧谓词已对齐严格口径） | 两态收敛设计 Phase 2（U4 写面翻边）落地后，markRoundIdle 生产路径零「status 保持 running」注释（grep 生产写点 + 同源注释归零；resumable 随 U5 退役） | markRoundIdleImpl 改写 idle + resumable 停写；renderer 判据（isRunningProjection / isDoneProjection）随翻边合并为 status 直读（U6 SSOT 谓词终态化） |
+| **内存面轮终保持 running-resumable（A-lite 桥接，S3-R1）**（2026-09-14 补登记，登记依据 = [subagent-two-state-convergence.md](design/subagent-two-state-convergence.md)——本模型 §3.2.2「[实施形态 A-lite，阶段 3 裁决]」预告的 impl-plan §5 载体已悬空，按元规则补入本表） | record-store-rounds.ts markRoundIdleImpl 簿记①「status 保持 running」+ ⑤ resumable=true——「轮已收敛」被编码为 `running + result + resumable + chatMode` 四字段组合，写侧/协议范围/读侧各自重组；已发生事故 = sidebar badge 对 chat 轮终误判占用（session 01a09f83 实测 8 幽灵，止血批读侧谓词已对齐严格口径） | 两态收敛设计 Phase 2（U4 写侧翻边）落地后，markRoundIdle 生产路径零「status 保持 running」注释（grep 生产写点 + 同源注释归零；resumable 随 U5 退役） | markRoundIdleImpl 改写 idle + resumable 停写；renderer 判据（isRunningProjection / isDoneProjection）随翻边合并为 status 直读（U6 SSOT 谓词终态化） |
 
 > 登记维护规则：本表为桥接词汇唯一登记（SSOT）；每轮 design-code-sync 审查须核对本表条目的判据是否已触发，触发未执行 = must-fix。
 
@@ -410,7 +410,7 @@ RECONNECTABLE_FINAL_REASONS = ["disconnected","parent-shutdown"]   (types.ts:99)
 │  pi-subagent-cli / zcode-subagent-cli：引擎实现（zcode 增 interact/resume）        │
 ├────────────────────────── NEW: pi 进程协议公共包 ────────────────────────────────┤
 │  @zhushanwen/pi-rpc：spawn args 构造 / NDJSON 帧协议 / prompt·steer·followUp·     │
-│  abort·getState·switchSession 命令面 / 超时分级 / 杀链 / LF 行分帧                │
+│  abort·getState·switchSession 命令范围 / 超时分级 / 杀链 / LF 行分帧                │
 │  消费者：runtime（主 agent rpc-client 重构为薄壳）+ pi-subagent-cli（stdin-writer  │
 │  归并）——zcode 不经过此层（app-server 是另一协议，仅在语义层对齐）                 │
 ├────────────────────────── pi 本体（上游，不可改）────────────────────────────────┤
@@ -420,7 +420,7 @@ RECONNECTABLE_FINAL_REASONS = ["disconnected","parent-shutdown"]   (types.ts:99)
 
 包位置 `packages/pi-rpc`（workspace 内，pi-subagent-cli 与 runtime 共同依赖；**不进 subagent-engine-sdk**——SDK 是引擎中立协议层，pi 进程细节放进去会让 zcode 引擎背上 pi 依赖）。
 
-公共面（按 §2.4 重复表逐项收敛）：
+公共部分（按 §2.4 重复表逐项收敛）：
 
 | 模块 | 收敛内容 | 来源 |
 |---|---|---|
@@ -437,7 +437,7 @@ RECONNECTABLE_FINAL_REASONS = ["disconnected","parent-shutdown"]   (types.ts:99)
 #### 3.3.3 subagent 操作逻辑的统一收敛点
 
 现状已收敛（H4 遗产，本设计沿用不重造）：
-- **写面**：RecordStore 意图原语唯一入口（C-data-20）；
+- **写侧**：RecordStore 意图原语唯一入口（C-data-20）；
 - **轮编排**：Continuation（message → revive/dispatch/drain 单链）+ run-orchestration（每轮新 run + resume 锚）。
 
 本设计新增收敛：

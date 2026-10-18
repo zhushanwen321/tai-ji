@@ -4,7 +4,7 @@
  * useSessionRespawnRetry —— crash 恢复唯一人工通路的单测（crash-resilience D7）。
  *
  * D7 熔断后 runtime 不再自动重连，用户侧唯一出口 = 提示条「重试」按钮，本 composable
- * 即该按钮的全部行为面，两条分支都必须锁住：
+ * 即该按钮的全部行为范围，两条分支都必须锁住：
  * - 成功链：session.restore RPC（显式重新 spawn）→ 本地 revive 复位 dead 态，无错误 toast；
  * - 失败链：RPC reject → 异常在内部吞掉（不外抛）、不 revive（dead 态保持，侧栏置灰准确）
  *   + toast 指引（respawnRetryFailed）。

@@ -90,7 +90,7 @@ function dispatchUnhandledRejection(reason: unknown): void {
   }
 }
 
-/** 取最近一次上报 payload（测试断言面）。 */
+/** 取最近一次上报 payload（测试断言范围）。 */
 function lastReport(): RendererLogPayload {
   expect(reportMock).toHaveBeenCalled()
   const calls = reportMock.mock.calls as unknown as Array<[RendererLogPayload]>

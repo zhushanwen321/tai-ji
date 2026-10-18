@@ -4,7 +4,7 @@
  * drawer workflow tab）+ 跟随 session 切换 + workflow-viz overlay 边界态演员。
  *
  * 从 mock/index.ts 拆出（文件行数超 500 限制）。
- * [HISTORICAL] 2026-09-16 侧栏 Flows/Agents tab 退役后，列表渲染断言面迁至任务托盘
+ * [HISTORICAL] 2026-09-16 侧栏 Flows/Agents tab 退役后，列表渲染断言范围迁至任务托盘
  * （workflow 详情视图 2 = drawer WorkflowTab）。
  *
  * [D8] workflow-overlay-refine §3.3 演员清单（SSOT = .tmp/dev-flow/ui-redesign-combined.runlog/
@@ -435,7 +435,7 @@ const wfEmptyDagDag: WorkflowDag = {
   loops: [],
 }
 
-/** wf-mock-wide-phase 蓝图（单 phase Build 7 节点并行组、无顺序边——W-2 纵向边界数据面）。 */
+/** wf-mock-wide-phase 蓝图（单 phase Build 7 节点并行组、无顺序边——W-2 纵向边界数据范围）。 */
 const wfWidePhaseDag: WorkflowDag = {
   nodes: [
     agentNode(3, 0, 'builder-W1', 'Build'),

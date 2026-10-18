@@ -2,7 +2,7 @@
  * index.ts —— RenderingProtocol 层 IF3 入口 facade（AC1 承载件）。
  *
  * 职责：把 extension-protocol 消费侧面 + 本模块 w1（custom-registry）/ w2（resolve）面
- * 聚合为单一入口，作为 @taiji/core/rendering-protocol 子路径的公共面。
+ * 聚合为单一入口，作为 @taiji/core/rendering-protocol 子路径的公共范围。
  * 纯 re-export 零逻辑——降级/注册逻辑在 w1/w2 已落地，本文件只做接口收敛。
  *
  * re-export 选型（clarify Q1 锁定）：
@@ -11,7 +11,7 @@
  *   isGuiCapable/isGuiComponent/GUI_WIDGET_MARKER）。core 是消费/渲染侧（resolve = 读路径），
  *   re-export extension 写侧面会混淆 core 与 extension-protocol 的职责边界（§7.2）。
  * - 显式枚举每个符号（不用 `export *`），防 extension-protocol 未来新增符号悄悄漏到 core
- *   公共面（显式接口原则）。
+ *   公共范围（显式接口原则）。
  *
  * 类型与 runtime 分离（TC2「零运行时 vue / 零运行时 extension-protocol helper」延续）：
  * - `export type {}` 编译期擦除，产物零 extension-protocol helper 引用

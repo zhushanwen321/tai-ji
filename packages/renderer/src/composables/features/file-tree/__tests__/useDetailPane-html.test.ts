@@ -73,7 +73,7 @@ beforeEach(() => {
 })
 
 describe('useDetailPane · .html 恢复源码分发（渲染态退役）', () => {
-  it('有 git 改动的 .html → 默认 diff（实施前行为；渲染面归消息流内联容器）', async () => {
+  it('有 git 改动的 .html → 默认 diff（实施前行为；渲染范围归消息流内联容器）', async () => {
     const sid = 's1'
     const path = 'docs/report.html'
     setupSession(sid, path, 'modified')

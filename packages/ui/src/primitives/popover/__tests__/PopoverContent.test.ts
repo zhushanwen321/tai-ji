@@ -1,7 +1,7 @@
 /**
  * PopoverContent 模态表面注册测试（§6.7 弹出层族）。
  *
- * 覆盖面：provide 注册桥后挂载即注册（surface id 'popover-content'）；开合态读点绑
+ * 覆盖范围：provide 注册桥后挂载即注册（surface id 'popover-content'）；开合态读点绑
  * reka PopoverRoot context 的 open 状态本体（关 → false / 开 → true）；rect 读点两条路径——
  * 内容未挂载（关态）返回 null（上报不带 rect）、开态实测内容根元素返回四元组矩形。
  *

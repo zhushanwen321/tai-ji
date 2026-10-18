@@ -61,7 +61,7 @@ export const LRU_MAX_SESSIONS = 8
  * null = 未压窗，按默认 LRU_MAX_SESSIONS；number = 压窗值（ relief 期间生效）。
  *
  * 并发/边界（单线程 JS 无真并发，本注记登记交错语义）：
- * - setter 幂等，重复设置同值无副作用；null 恢复默认（读面 getLruMaxSessions 单点消费，
+ * - setter 幂等，重复设置同值无副作用；null 恢复默认（读侧 getLruMaxSessions 单点消费，
  *   evictIfNeeded 每次调用现读——压窗后已被驱逐的 session 不回补，恢复默认只影响后续判定）；
  * - 下限钳制 ≥1：压到 0 = 全量驱逐会让「切回重进」从兜底变常态路径（违反「兜底不进正常路径」）；
  * - 非整数向下取整（防御性；调用方传整数时不产生差异）。

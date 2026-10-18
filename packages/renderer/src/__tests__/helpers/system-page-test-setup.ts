@@ -47,7 +47,7 @@ export { seedStore, smartContextFixture } from './system-page-mount'
 /** 下拉/异步断言等待原语转发（同上）。 */
 export { flushPromises } from '@vue/test-utils'
 
-/** SystemPage 集成测试文件 setup 工厂（返回断言面与 mount 编排，见文件头）。 */
+/** SystemPage 集成测试文件 setup 工厂（返回断言范围与 mount 编排，见文件头）。 */
 export function setupSystemPageTest(sectionLoader: () => Promise<{ default: Component }>) {
   let wrapper: Awaited<ReturnType<typeof mountSystemPage>> | null = null
 
