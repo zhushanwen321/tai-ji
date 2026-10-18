@@ -79,7 +79,7 @@ run.params.task（AgentCallOpts）/ ctx / resume → ACP `new_session`（server.
 | user_message_chunk（UserMessageChunk） | —（重放用户历史/队列回显，宿主已知） | 丢弃 | server.py:936-940, :1558-1561 |
 | tool_call（ToolCallStart） | tool_start | 直接 | server.py:1041；acp_adapter/tools.py:1017-1242 |
 | tool_call_update（ToolCallProgress，status completed/failed） | tool_end | 直接 | events.py:244-251；tools.py:1249-1274 |
-| plan（AgentPlanUpdate，todo 工具结果投影） | —（taiji 9 事件无 plan 槽） | 丢弃（或宿主 GUI 自行消费） | events.py:39-84, :252-255 |
+| plan（AgentPlanUpdate，todo 工具结果派生视图） | —（taiji 9 事件无 plan 槽） | 丢弃（或宿主 GUI 自行消费） | events.py:39-84, :252-255 |
 | available_commands_update（9 个 slash 命令） | — | 丢弃 | server.py:448-500, :1584-1627 |
 | session_info_update（自动标题） | — | 丢弃 | server.py:712-741 |
 | usage_update（上下文水位 size/used，非 token 用量） | —（或作 activity） | 丢弃（合成 activity 可选） | server.py:660-710 |

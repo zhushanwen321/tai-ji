@@ -522,7 +522,7 @@
   },
   {
     "id": "PS-26",
-    "claim": "消息文本 transform 面唯一性：pi 对 user 消息文本的改写只发生在 prompt() 通路的 extension input hook（hasHandlers(\"input\")/emitInput 全文仅此一处，hook 返回 transform 才替换 currentText）；steer()/followUp()/_queueSteer/_queueFollowUp 全程无 input hook，消息对象从 _queueSteer 原文本构造 → agent.steer 入队（steeringQueue.enqueue）→ drain（getSteeringMessages 原样返回）→ 直接 emit message_start/message_end 并 push 进 LLM 上下文，零改写；user 消息落盘与事件同源（_handleAgentEvent 对 message_end 的 event.message 原样 sessionManager.appendMessage，runAgentLoop 对初始 prompt 同款 emit）。推论（core defer 投递确认协议承重，data-governance round2 MF-1）：不匹配 msg-id-mapper TAG_STRIP（仅 u- 前缀形态，uuid hex 字符集不含 u，与裸 uuid 结构互斥）的裸标记 <!--taiji:msg:<uuid>-->（DEFER_FLUSH_MARKER_RE，SSOT apply-entry-convert.ts）在 send 通路（input hook 不命中即 transform 不发生）与 steer 通路（无 hook）均全程存活——pi 落盘文本与 message_end(user) 回流文本都携带标记，core user-delivery ①a 按标记 id 确认出队的可达性锚点；裸标记随消息文本进入 LLM 上下文（prompt 尾部一行 HTML 注释，已知权衡登记 registry #6 修订注记）。pi 1.0.0 附带变化：hook 拦截段抽为独立方法 _runInputHandlers（守卫反转早退，handled → undefined 终止 prompt）；初始 prompt 与 steering 注入循环经 declareToolChanges 包裹——工具装载有增量时插入/改写 system 消息（toolsAdded/toolsRemoved），无增量时消息原样直通，user prompt 文本零改写，transform 面唯一性不变",
+    "claim": "消息文本 transform 面唯一性：pi 对 user 消息文本的改写只发生在 prompt() 通路的 extension input hook（hasHandlers(\"input\")/emitInput 全文仅此一处，hook 返回 transform 才替换 currentText）；steer()/followUp()/_queueSteer/_queueFollowUp 全程无 input hook，消息对象从 _queueSteer 原文本构造 → agent.steer 入队（steeringQueue.enqueue）→ drain（getSteeringMessages 原样返回）→ 直接 emit message_start/message_end 并 push 进 LLM 上下文，零改写；user 消息落盘与事件同源（_handleAgentEvent 对 message_end 的 event.message 原样 sessionManager.appendMessage，runAgentLoop 对初始 prompt 同款 emit）。推论（core defer 投递确认协议承重，data-governance round2 MF-1）：不匹配 msg-id-mapper TAG_STRIP（仅 u- 前缀形态，uuid hex 字符集不含 u，与裸 uuid 结构互斥）的裸标记 <!--taiji:msg:<uuid>-->（DEFER_FLUSH_MARKER_RE，SSOT apply-entry-convert.ts）在 send 通路（input hook 不命中即 transform 不发生）与 steer 通路（无 hook）均全程存活——pi 落盘文本与 message_end(user) 回流文本都携带标记，core user-delivery ①a 按标记 id 确认出队的可达性锚点；裸标记随消息文本进入 LLM 上下文（prompt 尾部一行 HTML 注释，已知权衡登记 registry #6 修订注记）。pi 1.0.0 附带变化：hook 拦截段抽为独立方法 _runInputHandlers（检查反转早退，handled → undefined 终止 prompt）；初始 prompt 与 steering 注入循环经 declareToolChanges 包裹——工具装载有增量时插入/改写 system 消息（toolsAdded/toolsRemoved），无增量时消息原样直通，user prompt 文本零改写，transform 面唯一性不变",
     "piAnchor": [
       {
         "pkg": "pi-coding-agent",
@@ -1177,7 +1177,7 @@
   },
   {
     "id": "PS-57",
-    "claim": "pi RPC 模式 stdout JSONL 消息按写入顺序到达（FIFO）：全部协议消息（response / 事件 / extension_ui_request）汇经 rpc-mode 的 output 单点 writeRawStdout(serializeJsonLine(obj))，事件流经 session.subscribe 回调逐条 output；writeRawStdout 以 promise tail 链串行化（rawStdoutWriteTail = rawStdoutWriteTail.then(() => writeRawStdoutChunk(text))），底层 write 的异步回调与背压重试（ENOBUFS/EAGAIN/EWOULDBLOCK → 10ms 延迟重试）都在 tail 链上排队——写序 = 调用序，不并行不乱序。承重（ADR-0087 通知兑现链）：delivery 内核 onSettled 受理回执（port.send 同栈同步触发）先于其后的 agent_settled 事件被 runtime 处理——armed→injected 锚定与 settled 兑现的先后关系以 stdout FIFO 为前提。pi 升级时重验：output 是否仍单点汇入 writeRawStdout、tail 链是否仍串行化（改并行/分通道输出即失锚）",
+    "claim": "pi RPC 模式 stdout JSONL 消息按写入顺序到达（FIFO）：全部协议消息（response / 事件 / extension_ui_request）汇经 rpc-mode 的 output 单点 writeRawStdout(serializeJsonLine(obj))，事件流经 session.subscribe 回调逐条 output；writeRawStdout 以 promise tail 链串行化（rawStdoutWriteTail = rawStdoutWriteTail.then(() => writeRawStdoutChunk(text))），底层 write 的异步回调与背压重试（ENOBUFS/EAGAIN/EWOULDBLOCK → 10ms 延迟重试）都在 tail 链上排队——写序 = 调用序，不并行不乱序。承重（ADR-0087 通知兑现链）：delivery 内核 onSettled 受理回执（port.send 同栈同步触发）先于其后的 agent_settled 事件被 runtime 处理——armed→injected 锚定与 settled 兑现的先后关系以 stdout FIFO 为前提。pi 升级时重验：output 是否仍单点汇入 writeRawStdout、tail 链是否仍串行化（改并行/分通道输出即定位失败）",
     "piAnchor": [
       {
         "pkg": "pi-coding-agent",
@@ -1229,7 +1229,7 @@
   },
   {
     "id": "PS-59",
-    "claim": "RPC select 请求无 timeout 时永不超时（长挂语义）：createDialogPromise 仅在 opts?.timeout 真值时设 setTimeout，timeout 缺省 promise 恒 pending 直到 extension_ui_response 到达（pendingExtensionRequests.get(response.id) → delete → resolve）或 abort signal；select 定义 timeout: opts?.timeout 直传无默认值。与 PS-45 互补（PS-45 登记应答路径只 resolve 不回灌，本条登记请求路径超时语义）。承重（ADR-0087 watch 桥）：extension 以 {action:'watch'} 长挂 select 不传 timeout fire-and-forget，runtime 晚 respond（settle/death/abort/TTL 腿）依赖 promise 不被 pi 侧超时打断；pi 若引入默认超时，晚达 respond 将落在已 resolve 的缺省值上、通知静默丢失。pi 升级时重验：createDialogPromise 超时分支条件性与 select 直传形态",
+    "claim": "RPC select 请求无 timeout 时永不超时（长挂语义）：createDialogPromise 仅在 opts?.timeout 真值时设 setTimeout，timeout 缺省 promise 恒 pending 直到 extension_ui_response 到达（pendingExtensionRequests.get(response.id) → delete → resolve）或 abort signal；select 定义 timeout: opts?.timeout 直传无默认值。与 PS-45 互补（PS-45 登记应答路径只 resolve 不回灌，本条登记请求路径超时语义）。承重（ADR-0087 watch 桥）：extension 以 {action:'watch'} 长挂 select 不传 timeout fire-and-forget，runtime 晚 respond（settle/death/abort/TTL 路径）依赖 promise 不被 pi 侧超时打断；pi 若引入默认超时，晚达 respond 将落在已 resolve 的缺省值上、通知静默丢失。pi 升级时重验：createDialogPromise 超时分支条件性与 select 直传形态",
     "piAnchor": [
       {
         "pkg": "pi-coding-agent",
@@ -1327,7 +1327,7 @@
   },
   {
     "id": "PS-60",
-    "claim": "pi session 树重放规则：SessionManager 加载路径（_setSessionFile → loadEntriesFromFile → _buildIndex）重建内存 leafId = 文件序最后一条非 header entry 的 id（_buildIndex 循环内逐条赋 this.leafId = entry.id，type==='session' header 被跳过）——重启/空闲回收后活跃叶子 = 文件尾，活跃上下文路径由 buildSessionPath 从该叶子沿 parentId 回溯到根构成。配套不变量：①运行时追加恒落文件尾且推进 leafId（_appendEntry 置 leafId=entry.id，全部 append* 的 parentId=旧 leafId）；②navigateTree 树内回退 = branch() 仅移内存指针不重写文件（被撤子树保留在文件里），随后 appendLabelChange 以 parentId=回退后 leaf 追加 LabelEntry 到文件尾——故撤回（summarize:false + label:'taiji:revoked'）后文件尾 = 新路径上的 label entry，重启重放所得叶子的 parentId 链不含被撤子树（回退不复活）；③label entry 不投影为 LLM 消息（sessionEntryToContextMessages 对 type==='label' 落入末尾 return []）。承重（ADR-0076 撤回持久化安全 + message-revoke U6a/U6d 文件腿裁剪 leaf=文件尾取数）：taiji 文件源活跃路径裁剪（trimFileEntriesToActivePath / computeActivePathEntries 取文件尾 entry id 回溯）与 pi 重放语义同构全靠本条；pi 若改为按持久化 leaf 指针/其他准则重放，文件尾≠叶子，撤回复活或裁剪错叶。pi 升级时重验：_buildIndex 的文件序赋值循环与 header 跳过、_setSessionFile 加载路径调 _buildIndex、navigateTree 的 branch+appendLabelChange 两步形态。pi 1.0.0 附带变化：装载 + 建索引抽成共享 _loadEntries（构造器 preloaded 分支与 _setSessionFile 共用），_buildIndex 移入其尾部，重放准则不变",
+    "claim": "pi session 树重放规则：SessionManager 加载路径（_setSessionFile → loadEntriesFromFile → _buildIndex）重建内存 leafId = 文件序最后一条非 header entry 的 id（_buildIndex 循环内逐条赋 this.leafId = entry.id，type==='session' header 被跳过）——重启/空闲回收后活跃叶子 = 文件尾，活跃上下文路径由 buildSessionPath 从该叶子沿 parentId 回溯到根构成。配套不变量：①运行时追加恒落文件尾且推进 leafId（_appendEntry 置 leafId=entry.id，全部 append* 的 parentId=旧 leafId）；②navigateTree 树内回退 = branch() 仅移内存指针不重写文件（被撤子树保留在文件里），随后 appendLabelChange 以 parentId=回退后 leaf 追加 LabelEntry 到文件尾——故撤回（summarize:false + label:'taiji:revoked'）后文件尾 = 新路径上的 label entry，重启重放所得叶子的 parentId 链不含被撤子树（回退不复活）；③label entry 不映射为 LLM 消息（sessionEntryToContextMessages 对 type==='label' 落入末尾 return []）。承重（ADR-0076 撤回持久化安全 + message-revoke U6a/U6d 文件路径裁剪 leaf=文件尾取数）：taiji 文件源活跃路径裁剪（trimFileEntriesToActivePath / computeActivePathEntries 取文件尾 entry id 回溯）与 pi 重放语义同构全靠本条；pi 若改为按持久化 leaf 指针/其他准则重放，文件尾≠叶子，撤回复活或裁剪错叶。pi 升级时重验：_buildIndex 的文件序赋值循环与 header 跳过、_setSessionFile 加载路径调 _buildIndex、navigateTree 的 branch+appendLabelChange 两步形态。pi 1.0.0 附带变化：装载 + 建索引抽成共享 _loadEntries（构造器 preloaded 分支与 _setSessionFile 共用），_buildIndex 移入其尾部，重放准则不变",
     "piAnchor": [
       {
         "pkg": "pi-coding-agent",
@@ -1345,7 +1345,7 @@
         "pkg": "pi-coding-agent",
         "distPath": "dist/core/agent-session.js",
         "symbol": "navigateTree(targetId, options) 的 branch + appendLabelChange 两步",
-        "note": ":2464 方法体——:2581 非 user 目标 newLeafId = targetId；:2597/:2601 无摘要时 resetLeaf()/branch(newLeafId)；:2605 label && !summaryText → appendLabelChange(targetId, label)（revoke 形态 summarize:false 恒走此腿，label entry 落文件尾）【行号锚基于 pi@0.84.4；1.0.0 复核按符号名定位】"
+        "note": ":2464 方法体——:2581 非 user 目标 newLeafId = targetId；:2597/:2601 无摘要时 resetLeaf()/branch(newLeafId)；:2605 label && !summaryText → appendLabelChange(targetId, label)（revoke 形态 summarize:false 恒走此路径，label entry 落文件尾）【行号锚基于 pi@0.84.4；1.0.0 复核按符号名定位】"
       }
     ],
     "guard": {
@@ -1545,7 +1545,7 @@
   },
   {
     "id": "PS-73",
-    "claim": "`pi mcp list --json` 输出契约（taiji McpProbe 的解析基准）：list 分支对全部条目并行真实连接（Promise.all 内逐条 createConnection+getClient）后 JSON.stringify 一次性输出 stdout（连接逐条进行、无增量输出——中途杀进程无部分结果可解析）；退出码 0 = 全部正常 / 1 = 有失败（errors 非空或任一启用条目 state ≠ \"connected\"）；禁用条目固定写 state:\"disabled\"；servers[] 条目字段集 = name/scope/source/enabled/exposure/transport/state/tools/toolExposure?/resources?/resourceTemplates?/error?；ServerState 六值闭集 connecting|connected|disconnected|needs-auth|failed|closed。taiji probe（pi-mcp-probe.ts）按该契约做形状守卫：name 非字符串条目丢弃、字段缺失按 CLI 默认值兜底、非法 JSON/形状不符降级 invalid-output",
+    "claim": "`pi mcp list --json` 输出契约（taiji McpProbe 的解析基准）：list 分支对全部条目并行真实连接（Promise.all 内逐条 createConnection+getClient）后 JSON.stringify 一次性输出 stdout（连接逐条进行、无增量输出——中途杀进程无部分结果可解析）；退出码 0 = 全部正常 / 1 = 有失败（errors 非空或任一启用条目 state ≠ \"connected\"）；禁用条目固定写 state:\"disabled\"；servers[] 条目字段集 = name/scope/source/enabled/exposure/transport/state/tools/toolExposure?/resources?/resourceTemplates?/error?；ServerState 六值闭集 connecting|connected|disconnected|needs-auth|failed|closed。taiji probe（pi-mcp-probe.ts）按该契约做形状检查：name 非字符串条目丢弃、字段缺失按 CLI 默认值兜底、非法 JSON/形状不符降级 invalid-output",
     "piAnchor": [
       {
         "pkg": "pi-coding-agent",
@@ -1608,7 +1608,7 @@
     ],
     "guard": {
       "type": "observe",
-      "note": "消费方：pi-subagent-cli setModel 转发错误三型封闭映射 classifySetModelFailure（control-responses.ts:146-151，头注回指本条）——`Model not found`（快照型，PS-41）与 `No API key`（凭据型）两前缀之外的残余消息按 readback-failed 收口。pi 升级时重验：agent-session.js setModel 的 throw 词形是否仍为 `No API key for <provider>/<id>`（grep dist）；词形变化须同步改 classifySetModelFailure 的分型前缀"
+      "note": "消费方：pi-subagent-cli setModel 转发错误三型封闭映射 classifySetModelFailure（control-responses.ts:146-151，头注回指本条）——`Model not found`（快照型，PS-41）与 `No API key`（凭据型）两前缀之外的残余消息按 readback-failed 归类。pi 升级时重验：agent-session.js setModel 的 throw 词形是否仍为 `No API key for <provider>/<id>`（grep dist）；词形变化须同步改 classifySetModelFailure 的分型前缀"
     },
     "verifiedWith": "1.0.0"
   },

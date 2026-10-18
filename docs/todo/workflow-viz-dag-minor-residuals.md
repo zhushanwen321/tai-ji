@@ -11,4 +11,4 @@
 
 ## 关联工具缺陷（登记备查）
 
-review-fix-loop workflow 的 state 对账缺陷：聚合器把「延续未修」条目写成无 title/severity 的空壳（state.json S-1/S-2/S-3/S-5），后续 clean 轮 reconcile 无法匹配销账 → 连续 3 轮 clean 后误判 stuck 终态。实质审查已收敛（R4 报告明确 must-fix 无、4 条为 minor 延续项）。修复方向 = 聚合器延续条目继承上轮 title/severity 字段。
+review-fix-loop workflow 的 state 对账缺陷：聚合器把「延续未修」条目写成无 title/severity 的空壳（state.json S-1/S-2/S-3/S-5），后续 clean 轮 reconcile 无法匹配关闭 → 连续 3 轮 clean 后误判 stuck 终态。实质审查已收敛（R4 报告明确 must-fix 无、4 条为 minor 延续项）。修复方向 = 聚合器延续条目继承上轮 title/severity 字段。

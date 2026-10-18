@@ -792,7 +792,7 @@ Composer.onSend(segments)（send 显式接收 sessionId——双 panel 各自绑
 | `message.file_changes` | `{ sessionId, messageId, fileChanges[], changeSetStatus, isFullSet }` | accumulating 增量合并 / ready 全集替换 |
 | `message.auto_retry_start` | `{ sessionId, attempt, maxAttempts?, ... }` | 写 retryStates[sid] |
 | `message.auto_retry_end` | `{ sessionId, success, attempt, ... }` | 清 retryStates[sid] |
-| `message.queue_update` | `{ sessionId, steering?, followUp? }` | 内核内部回执（受理/滞留判定用），不直驱 UI——队列区渲染读 `session.delivery` 状态帧（内核条目投影） |
+| `message.queue_update` | `{ sessionId, steering?, followUp? }` | 内核内部回执（受理/滞留判定用），不直驱 UI——队列区渲染读 `session.delivery` 状态帧（内核条目派生视图） |
 
 **ToolCall.status 枚举**：`'running' | 'completed' | 'error' | 'end_not_received'`
 **ChangeSetStatus 5 态**：`'accumulating' | 'ready' | 'partially-reviewed' | 'resolved' | 'superseded'`
@@ -877,7 +877,7 @@ message.complete {messageId, stopReason:'complete', usage:{inputTokens:1280, out
 | [`__tests__/panel/block-working.test.ts`](../../packages/renderer/src/__tests__/panel/block-working.test.ts) | Block working 态折叠（thinking/tool/end_not_received） |
 | [`__tests__/panel/turn-working.test.ts`](../../packages/renderer/src/__tests__/panel/turn-working.test.ts) | Turn working 态（完成复位/elapsed 计时/非 working 静态） |
 | [`__tests__/stores/toolcall-anchor.test.ts`](../../packages/renderer/src/__tests__/stores/toolcall-anchor.test.ts) | toolCallId 锚定（findToolCallOwner 乱序无害化） |
-| [`__tests__/effects/use-streaming-pin.test.ts`](../../packages/renderer/src/__tests__/effects/use-streaming-pin.test.ts) + [`__tests__/components/MessageStream-kind.test.ts`](../../packages/renderer/src/__tests__/components/MessageStream-kind.test.ts) | message-stream-editing-pin-identity keepMounted 崩溃回归：streaming pin 恒定 identity（turnStableId 身份钉扎，virtua keepMounted 下序列变更不崩）/ MessageStream kind 查表分发（三态互斥，防死分支复辟） |
+| [`__tests__/effects/use-streaming-pin.test.ts`](../../packages/renderer/src/__tests__/effects/use-streaming-pin.test.ts) + [`__tests__/components/MessageStream-kind.test.ts`](../../packages/renderer/src/__tests__/components/MessageStream-kind.test.ts) | message-stream-editing-pin-identity keepMounted 崩溃回归：streaming pin 恒定 identity（turnStableId 身份固定，virtua keepMounted 下序列变更不崩）/ MessageStream kind 查表分发（三态互斥，防死分支复辟） |
 | [`packages/core/src/domain/chat/__tests__/use-chat-disposition.test.ts`](../../packages/core/src/domain/chat/__tests__/use-chat-disposition.test.ts)（core 包） | 发送终局行为分型（§4.4，pi1-disposition-chat-flow D1/D2/D14③）：handled 三件套静默回滚 / 孤儿对账终态双分支 + 在途窗口反向 / extension.error 命令 toast 限频 / pendingSend 命令条目豁免 |
 
 **运行**：

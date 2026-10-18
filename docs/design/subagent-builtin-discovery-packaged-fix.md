@@ -8,7 +8,7 @@
 
 ---
 
-# 第一部分：主修复（S0–S2 + 收口 S6）
+# 第一部分：主修复（S0–S2 + 收尾 S6）
 
 ## 1. 背景与实证（全部为运行时/产物级证据，非源码推断）
 
@@ -118,7 +118,7 @@ Workflows currently available:
 **改动清单：**
 
 1. `scripts/bundle-extensions.mjs`（build 侧）：
-   - **骨架落点（钉死，含一条硬约束）** [rev-mechanism F2 实测]：
+   - **骨架落点（固定，含一条硬约束）** [rev-mechanism F2 实测]：
      `apps/electron/resources/extensions/@zhushanwen/pi-subagent-workflow/node_modules/@zhushanwen/subagent-core/`
      （`<pkg>/node_modules/...` 形态；等价的另一合法落点是 `<staged>/@zhushanwen/node_modules/...`）。
      **禁止放在 `resources/extensions/node_modules/`**——`app-builder-lib/out/util/filter.js:43` 硬编码
@@ -141,7 +141,7 @@ Workflows currently available:
      - **本修复批次保留**：零测试/探针/文档连锁改动（TC8 `builtin-ext-bundle.test.mjs:152-171` 与
        `bundle-extensions.mjs` V1-④ 双形态探针路径全不变），且**规避 resume 断链**（见下）；
        代价是产物多 ~250KB 重复资产；
-     - **后续批次删除**（单一事实源收口）：删除时必须同批改 TC8（改指骨架路径 + 一条负向断言
+     - **后续批次删除**（单一事实源收敛）：删除时必须同批改 TC8（改指骨架路径 + 一条负向断言
        "顶层 `workflows/` 必须不存在"防布局回潮）、更新 V1-④ 探针路径与注释、按 C-proc-10 回写
        `docs/architecture/subagent-core-package-extraction.md` 的 D1/V1-④ 段；否则 CI 必红。
      **删除的真实障碍（新登记，rev-mechanism F4）**：升级前中断的 run 在 record 里持久化的是旧
@@ -162,7 +162,7 @@ Workflows currently available:
    - 断言必须放 `verifyPackage(pkgDirName, pkgDir)` **per-package 条件位**，不得无条件放 `main()`
      [F2]——否则 4 个 mirror fixture（自造最小 SSOT，staged 内根本没有 pi-subagent-workflow）转红；
    - 骨架登记进 `scripts/lib/staged-asset-dirs.mjs` 共享登记表（MF-1-17 单源纪律：bundle 拷贝与
-     verify 校验共读同一登记，禁止两侧各持字面量表），并把新键名纳入该表的结构守卫 grep 反证；
+     verify 校验共读同一登记，禁止两侧各持字面量表），并把新键名纳入该表的结构检查 grep 反证；
    - 断言内容：骨架三件存在、workflows 文件集合与源目录**逐文件一致**（不写死数量）、agents 10 个 .md、
      **以 staged `index.js` 为锚 `createRequire().resolve(锚点)` 成功且 `resolved.startsWith(STAGED)`**
      [F11 防 symlink realpath 逃逸假绿]。
@@ -228,7 +228,7 @@ Workflows currently available:
 | CA2 注入快照 | 无影响——快照族为 fixture 输入驱动（location 用字面量），不消费运行时路径（审查员已核） |
 | 单测/门禁同步（**修正** [F6/F7]） | 五处字面引用（`pi-host.test.ts:116/144`、`prompt-quality.test.ts:32`、`tool-prompt-contract.test.ts:235`、`agent-registry.test.ts:220`）**换锚后都不会红**（均取 `dirname(锚)`，且跑在 dev 形态）——按 C-proc-10 顺手对齐即可，勿按"必须改"处理；**唯一会红的是 `builtin-ext-bundle.test.mjs` TC8，且仅在选择删除顶层拷贝时**（本设计分批：本批保留 → TC8 不动） |
 | **resume 断链（新登记）** [rev-mechanism F4] | 升级前中断的 run 持久化的是旧 scriptPath（顶层拷贝路径）；**删除顶层拷贝后**跨升级 resume 在 worker 启动期抛 `core_module_load_failed`（响亮失败，非静默）。对策：本批保留顶层拷贝（断链不发生）；后续删除批次须在 release notes 说明该一次性影响 |
-| 双宿主（**修正** [A-AUD-1/8]） | 原表述"zcode 不走此发现链，无回归面"不准确：`d8-compat.corePackageDir()` 正是走同类 `import.meta.url` 上溯并在打包态失败（今日 13 条 warn），只是被 `TAIJI_AGENT_ENGINE_ROOTS` 兜住。zcode 引擎进程**结构上不需要** core 发现面（只依赖 `subagent-engine-sdk`，SDK 明令禁止 import core；agent/systemPrompt/tools 由宿主在 pi 进程解析后经 wire task 下发），故本修复对 zcode 无回归，但 d8-compat 应另行立项 |
+| 双宿主（**修正** [A-AUD-1/8]） | 原表述"zcode 不走此发现链，无回归影响"不准确：`d8-compat.corePackageDir()` 正是走同类 `import.meta.url` 上溯并在打包态失败（今日 13 条 warn），只是被 `TAIJI_AGENT_ENGINE_ROOTS` 兜住。zcode 引擎进程**结构上不需要** core 发现面（只依赖 `subagent-engine-sdk`，SDK 明令禁止 import core；agent/systemPrompt/tools 由宿主在 pi 进程解析后经 wire task 下发），故本修复对 zcode 无回归，但 d8-compat 应另行立项 |
 | 缓存 | `getWorkflow` 60s TTL 按 workspaceRoot 分桶，产物路径变化在重启后自然生效，无跨形态污染 |
 | 骨架 symlink 化风险 | verify 断言 `startsWith(STAGED)` 拦截（F11） |
 
@@ -339,10 +339,10 @@ dev（`pnpm dev`）与 npm 安装形态各跑一次 §4.2 a–d 抽样。
 
 ## 6. 对抗式审查结论（三路并发）
 
-### 6.1 rev-regression（回归面 / 影响半径 / 替代设计）— 已回收，关键条目主会话已独立核实
+### 6.1 rev-regression（回归影响 / 影响半径 / 替代设计）— 已回收，关键条目主会话已独立核实
 
 **裁决**：机制方向可接受（方案 A 结构性优于 B/C/D；审查员明确回答"没有比 A 更单源的替代"），
-但按原文档形态施工不安全；**回归面本体无回退风险**（三平台 extraResources、dev/npm/独立三形态、
+但按原文档形态施工不安全；**回归影响本体无回退风险**（三平台 extraResources、dev/npm/独立三形态、
 扩展加载扫描、引擎发现、CA2 快照族全部代码级核查通过）。
 
 **must-fix（均已并入正文）**：
@@ -350,9 +350,9 @@ dev（`pnpm dev`）与 npm 安装形态各跑一次 §4.2 a–d 抽样。
 | # | 问题 | 主会话复核结果 | 落入本文位置 |
 |---|---|---|---|
 | F1 | 删顶层 `workflows/` 会使 CI 固定环节 TC8 变红（原文档漏登记）；TC8 = `builtin-ext-bundle.test.mjs:152-171`，`.github/workflows/ci.yml:300` 固定跑 | ✅ 已核实 | §2.1-1（改为"保留顶层拷贝"以规避；若删则三项同步改动必须同批） |
-| F2 | 新 verify 断言须 per-package 条件化 + 进 `staged-asset-dirs.mjs` 共享登记表（否则 mirror fixture 转红 + 违反 MF-1-17 单源纪律、结构守卫 grep 不到会静默漏检） | ✅ 已核实（fixture 为自造最小 SSOT） | §2.1-3、§5 首条 |
+| F2 | 新 verify 断言须 per-package 条件化 + 进 `staged-asset-dirs.mjs` 共享登记表（否则 mirror fixture 转红 + 违反 MF-1-17 单源纪律、结构检查 grep 不到会静默漏检） | ✅ 已核实（fixture 为自造最小 SSOT） | §2.1-3、§5 首条 |
 | F3 | 骨架 `package.json` exports 条件形态未指定 → 写成 `import`-only 会抛 `ERR_PACKAGE_PATH_NOT_EXPORTED`，修复静默失效 | ✅ 采纳（沙箱复现过 CJS 解析语义） | §2.1-1（改为整份拷贝真实文件，结构性消除） |
-| F4 | 骨架落点歧义必须钉死 | ✅ 采纳 | §2.1-1、§3 |
+| F4 | 骨架落点歧义必须定死 | ✅ 采纳 | §2.1-1、§3 |
 | F5 | "workflows×7"实为 **6** | ✅ 主会话实测 6 | §1.5、§2.1-3、§4.2 |
 
 **should-fix/nit（已择要并入）**：F6 单测清单修正（§3）、F7 e2e 影响面（§4.3）、F8 三处事实错误
@@ -403,7 +403,7 @@ npm 槽扫描命中 agents 10 / workflows 6、invalids 0；换锚 `fan-out.js` �
 
 ### 6.3 rev-audit（根因完备性 / 静默降级面 / 验证计划）— 已回收，关键条目主会话已独立核实
 
-**裁决**："没有别的问题了"**不成立**（部分成立）：本 bug 的技术机制定位正确，但原 §5 作为收口
+**裁决**："没有别的问题了"**不成立**（部分成立）：本 bug 的技术机制定位正确，但原 §5 作为收尾
 不完备且含两处机制性事实错误。
 
 | # | 结论 | 主会话复核 | 落入本文位置 |
@@ -420,7 +420,7 @@ npm 槽扫描命中 agents 10 / workflows 6、invalids 0；换锚 `fan-out.js` �
 | A-AUD-10 | 同类面全景清单（每处资产解析的打包态裁决）+ 非 index.js 资产逐个裁决 | 采纳 | §5 末条 |
 
 **根因表述修正（A-AUD-10/Q5）**：三锁**不是等价三把**——条件乙（锚点被剪枝）是**必要条件不可省**
-（只修甲后产物仍坏，已实证）；条件甲是解析面；"孤儿资产"不是独立锁，是条件甲在发现面的投影。
+（只修甲后产物仍坏，已实证）；条件甲是解析面；"孤儿资产"不是独立锁，是条件甲在发现面的具体表现。
 最小充分条件 = "锚点在打包产物内可解析"。§1.6 已按此重写并显式登记同类残留（d8-compat /
 hostPackageNodeModulesRoot），说明本类问题是**系统性机理**而非单点写错。
 
@@ -430,13 +430,13 @@ hostPackageNodeModulesRoot），说明本类问题是**系统性机理**而非�
 
 | 阶段 | 内容 | 依赖 |
 |---|---|---|
-| S0 前置 | 闭合 [UNVERIFIED-R1]（`build:dir` 核对嵌套 node_modules 入包且未被 `filter.js:43` 误伤） | — |
-| S1 主修复 | §2.1：bundle 骨架拷贝（钉死 `<pkg>/node_modules` + 派生 package.json）+ 锚点换 `.js` + verify per-package 断言 + 共享登记表条目；**本批保留顶层 `workflows/` 拷贝**（避开 TC8 与 resume 断链） | S0 |
+| S0 前置 | 关闭 [UNVERIFIED-R1]（`build:dir` 核对嵌套 node_modules 入包且未被 `filter.js:43` 误伤） | — |
+| S1 主修复 | §2.1：bundle 骨架拷贝（固定为 `<pkg>/node_modules` + 派生 package.json）+ 锚点换 `.js` + verify per-package 断言 + 共享登记表条目；**本批保留顶层 `workflows/` 拷贝**（避开 TC8 与 resume 断链） | S0 |
 | S2 门禁 | §4.1 五条命令级断言（post-package resolve / 滤镜静态对账 / 资产清单对账 / 产物资产存活 diff / pi 进程内 resolve）+ e2e 登记 | S1 |
 | S3 滤镜收紧 | §10：yml 模式收紧 + `check_asset_survival()` 护栏（**建议与 S1 同批**，与主修复共用存活 diff） | S0 |
 | S4 降级可见性 | §9：tier1 契约+渲染+运行期自检（与 S1 同批，直接防复发）→ tier2 用户可见 → tier3 约束登记+检查脚本 | S1（骨架在位才好做故障注入验收） |
 | S5 d8-compat | §8：`corePackageDir()` 形态校验 + warn 语义/时机纠偏 + 终局对账回执（复用 §9 回执通道） | S4 回执通道 |
-| S6 收口 | 删顶层 `workflows/` 拷贝（同批改 TC8/V1-④/架构文档，release notes 说明跨升级 resume 一次性影响） | S1–S5 全绿 + 一个发布周期 |
+| S6 收尾 | 删顶层 `workflows/` 拷贝（同批改 TC8/V1-④/架构文档，release notes 说明跨升级 resume 一次性影响） | S1–S5 全绿 + 一个发布周期 |
 
 **e2e 纪律**：S3–S5 各自落地时按项目规则跑 `node scripts/select-affected-e2e.mjs --base <ref>` 重新圈定
 （本文 §4.3 的表仅覆盖 S1 的 pi-host/bundle-extensions 两项）；L3 轨登记进 dev-flow 验收计划表，不进 PR 门禁。
@@ -445,7 +445,7 @@ hostPackageNodeModulesRoot），说明本类问题是**系统性机理**而非�
 
 # 第二部分：同族三项修复（同批交付）
 
-## 8. d8-compat 同根修复（S5）
+## 8. d8-compat 同根因修复（S5）
 
 ### 8.1 问题（同根、不同果）
 
@@ -539,7 +539,7 @@ corePackageNpmRoot / d8-compat 终局缺失是能力级；hostPackageNodeModules
 新增行类型——挂载点已存在：`packages/core/src/domain/session-trace/trace-rows.ts`（`SYSTEM_PROMPT_CUSTOM_TYPE` 同处）
 + renderer 行渲染 + 按项目规范加 testid 断言。若本批不做 renderer，tier1 已消除"agent 侧不可见"这一半。
 
-**tier3 —— 机器可见（结构收口）**：`docs/constraints.json` 登记"**能力级降级必须产生回执，禁止 warn-only**"
+**tier3 —— 机器可见（结构层收尾）**：`docs/constraints.json` 登记"**能力级降级必须产生回执，禁止 warn-only**"
 （与 C-pi-12/13 同族），并入库一张"能力级降级点清单"（单源）；检查脚本
 `scripts/check-capability-degradations.mjs` 扫清单是否都接了回执通道，pre-commit/CI 挂载
 （范式参照 `scripts/check-vitest-guard.mjs`）。新增降级点漏接清单同样红。
@@ -686,10 +686,10 @@ PI_CODING_AGENT_DIR=/tmp/pi-accept-agent <app>/Contents/Resources/pi/pi-darwin-a
 工具路径亦已实测：新产物内调用 `subagents` 批量工具 → **成功派发**（`fan-out-musk0nkr`，1 subagent，无报错）；
 修复前同一调用即报 `Built-in workflow 'fan-out' is not available`。
 
-### 12.5 待闭合
+### 12.5 待完成
 
 - **真机产物级验证**（[UNVERIFIED-R1]）：`build:dir` 后确认 ① `Contents/Resources/extensions/@zhushanwen/pi-subagent-workflow/{workflows,agents}` 均在且与源同量（`check_builtin_ext_assets` 在 postbuild 里即此断言）；② 打包 app 内 `<available_workflows>` 列出 6 个内置模板、`subagents` 批量工具调用成功。
 - **未做（按裁定）**：§8 d8-compat、§9 降级可见性；§10 仅落地了滤镜模式一行（见 §12.3），其余部分
-  （注释/核对清单）延后；S6 删顶层拷贝收口延后。
+  （注释/核对清单）延后；S6 删顶层拷贝收尾延后。
 - **一个待裁决的交付问题**：本次改动落在 `feat-drawer-visualization-refactor` worktree（与抽屉可视化特性
   无关）；按 DEV-WORKFLOW 建议独立 `fix-*` 分支/ worktree 交付，待用户裁定后再提交。

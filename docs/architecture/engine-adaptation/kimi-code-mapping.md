@@ -104,7 +104,7 @@ ACP `tool_call` / `tool_call_update` 共享同一字段集 `{toolCallId, title, 
 
 - toolName ← `name` 字段（create 时由事件携带；acp-server 未显式回填 name 时由 title 兜底，title = description ?? name，events-map.ts:198）。
 - args ← `rawInput`（tool.call.started 事件的 args 原样，events-map.ts:221）。
-- result.content[] ← `content` 数组投影：`{type:'content'}` 内嵌 text 块逐个入列；`{type:'diff'}`（path/oldText/newText，convert.ts:279-302）与 `{type:'terminal'}`（session.ts:833-843）为非文本形态，适配层序列化为描述性文本或丢入 details。
+- result.content[] ← `content` 数组映射：`{type:'content'}` 内嵌 text 块逐个入列；`{type:'diff'}`（path/oldText/newText，convert.ts:279-302）与 `{type:'terminal'}`（session.ts:833-843）为非文本形态，适配层序列化为描述性文本或丢入 details。
 - result.details ← `rawOutput`（tool.result 的 output 原值，events-map.ts:385）。
 - isError ← `status:'failed'`（isError = status==='failed'；ToolCallStatus 全集 = pending/in_progress/completed/failed）。
 - kind（ToolKind 10 值 read/edit/delete/move/search/execute/think/fetch/switch_mode/other）与 locations（绝对路径文件位置，events-map.ts:174-188）为 ACP 展示增强，taiji 靶面无对应，丢弃。
@@ -144,7 +144,7 @@ ToolCallResult.content 装载口径：ToolResultEvent.output 为 unknown（event
 
 官方 fold 语义（read 重建权威）：resume-replay.ts:20-46 给出 record→replay 映射——`context.append_message`→message（含由 loop event 拼装的 assistant/tool 消息：step.begin 开 assistant 消息、content.part/tool.call 原地变更、tool.result 完成、中断的 tool 交换合成 interrupted 结果）；`full_compaction.begin`→compaction 记录、`context.apply_compaction` 回填 result；`goal.*`→goal_updated；`plan_mode.*`→plan_updated；`config.update`→config_updated；`permission.set_mode`→permission_updated；`tools.update_store`→工具库 last-wins；`turn.*`/`usage.record` 等只重建状态。
 
-**session/load replayHistory 语义**（ACP 面重建第②通路）：`agent.getContext().history`（ContextMessage[]，role ∈ user/assistant/tool）投影为有序 `session/update` 批（packages/acp-server/src/replay.ts:36-76）——user 文本→user_message_chunk；assistant text/think part→agent_message_chunk/agent_thought_chunk（重放 turnId 合成自增）；assistant.toolCalls→tool_call CREATE（arguments JSON 解析，replay.ts:112-124）；tool 角色消息按 toolCallId 关联→tool_call_update 终态（isError→failed，replay.ts:126-155）；system 等无对应角色跳过。**适配层 read 通路建议**：对已有 sessionId 发 `session/load`，收集重放流聚合出 ReplayedTurn[]（text/thinking/toolCalls/closed=true），source 标 `native`；usage 不随重放供给（delta 类是 volatile，不入 journal 也不入 history），SessionView.usage 缺省或由 journal 的 usage.record 聚合补齐（source 仍标 native/journal 按数据源）。
+**session/load replayHistory 语义**（ACP 面重建第②通路）：`agent.getContext().history`（ContextMessage[]，role ∈ user/assistant/tool）映射为有序 `session/update` 批（packages/acp-server/src/replay.ts:36-76）——user 文本→user_message_chunk；assistant text/think part→agent_message_chunk/agent_thought_chunk（重放 turnId 合成自增）；assistant.toolCalls→tool_call CREATE（arguments JSON 解析，replay.ts:112-124）；tool 角色消息按 toolCallId 关联→tool_call_update 终态（isError→failed，replay.ts:126-155）；system 等无对应角色跳过。**适配层 read 通路建议**：对已有 sessionId 发 `session/load`，收集重放流聚合出 ReplayedTurn[]（text/thinking/toolCalls/closed=true），source 标 `native`；usage 不随重放供给（delta 类是 volatile，不入 journal 也不入 history），SessionView.usage 缺省或由 journal 的 usage.record 聚合补齐（source 仍标 native/journal 按数据源）。
 
 **ResumeAnchor.sessionRef 构成建议**：`{ sessionId, home }`——sessionId 是引擎 mint 的全局会话 id（session/new 应答，server.ts:252）；home 记录该 session 所属数据根的 KIMI_CODE_HOME 值（数据根隔离部署下同一 sessionId 在不同 home 下不互通，bootstrap.ts:162-165）。resume 执行序列：确保引擎进程以正确 `KIMI_CODE_HOME` 启动 → `session/resume`（冷续，不回放）或 `session/load`（需重建 UI 时）。journalPath 可选填宿主可定位的 `<数据根>/sessions/<workspaceId>/` 下 wire journal 路径，作 read 降级链第②级。
 
@@ -205,6 +205,6 @@ session/cancel 与 ping 对应物：`session/cancel` 通知（server.ts:430-445�
 - **turn 粒度**：kimi 一个 turn = 一次 session/prompt 的完整循环，内含多个 turn.step（每 step 一次 LLM 调用）；taiji 的 Turn（reducer turns[] 元素）≈ kimi 的 step 而非 turn。纯 ACP 面看不到 turn.step 边界（acp-server 不转发 turn.step.*）→ 一次 run 在 GUI 上退化为单 turn 形态；task.maxTurns 的「轮」若按 taiji 语义折算应映射引擎 step 预算，而该预算 ACP 面不可配。
 - **usage 语义**：ACP usage_update 是上下文水位数（context tokenCount）非消耗增量；直接当 message_end.usage 用会系统性偏差（§5）。
 - **session ↔ workspace 绑定**：session 定位 = KIMI_CODE_HOME × workspace(cwd 派生) × sessionId；跨 cwd 或跨数据根复用同一 sessionId 不可行，resume 锚点必须携带 home（§6）。
-- **permissionMode 语义轴**：kimi 四档 mode 是 plan×permission 正交轴的合并投影（plan 同时改 planMode+permission，modes.ts:61-87）；taiji permissionMode 只管 permission 轴——映射 plan 档时需明确是否接受副作用（进入只读 plan 模式）。
+- **permissionMode 语义轴**：kimi 四档 mode 是 plan×permission 正交轴的合并派生视图（plan 同时改 planMode+permission，modes.ts:61-87）；taiji permissionMode 只管 permission 轴——映射 plan 档时需明确是否接受副作用（进入只读 plan 模式）。
 - **thinkingLevel 词表**：kimi = off/on/effort（模型声明 supportEfforts 决定值域，session.ts:1075-1100）；taiji = high/medium/low 类词表，适配层需按模型目录折算，且 always_thinking 模型无 off。
 - **compaction 事件形态**：kimi 把 compaction 进度合成为正文文本 chunk（session.ts:882-905）而非结构化事件；taiji compaction{} 事件与 text_delta 流的边界要靠适配层状态机区分，否则压缩提示文本会混入 turn 正文。

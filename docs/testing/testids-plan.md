@@ -5,7 +5,7 @@
 > `packages/renderer/src/__tests__/{components,stores,composables}/plan-*` 族（资产登记见
 > [e2e-map.json](./e2e-map.json) E2E-MOCK-02）。本账随 plan 模式状态机显式化 U4b 建立
 > （2026-09-24）：该批次首次对 plan 面 testid 做新增/更名/退役，按同 commit 纪律建账并留变更登记。
-> 改 testid 必同步本表 + 清扫指向已删 testid 的悬空引用（负向守卫断言除外，见文末登记）。
+> 改 testid 必同步本表 + 清扫指向已删 testid 的悬空引用（负向防御断言除外，见文末登记）。
 
 ## 1. PlanModeBar.vue（计划模式状态带，Panel composer 下方常驻行）
 
@@ -23,12 +23,12 @@
 | `plan-mode-bar-exit-cancel` | 确认层「取消」 |
 | `plan-mode-bar-exit-confirm`（按钮） | 确认层「确认退出」（与容器同名 testid，点击发 session.abortPlan） |
 | `plan-mode-bar-error` | 退出命令失败错误行（E9 就近呈现） |
-| `plan-mode-bar-load-error` | 首拉/冷拉失败错误行（分区 loadError） |
+| `plan-mode-bar-load-error` | 首次拉取/主动拉取失败错误行（分区 loadError） |
 
 ## 2. PlanReviewBar.vue（审批条，PlanModeBar 行内右区；D4 分支公式单源）
 
 分支公式：ready ⇔ 挂起 planReview 注册表（presence 语义，恒优先）/ revising ⇔ state=revising /
-degraded ⇔ state=reviewing ∧ 无挂起 ∧ 稳定窗放行（2s 持续或冷拉真值豁免）；已应答抑制窗压
+degraded ⇔ state=reviewing ∧ 无挂起 ∧ 稳定窗放行（2s 持续或主动拉取真值豁免）；已应答抑制窗压
 degraded/revising；dispatching/approved 与其余不渲染。
 
 | testid | 触发/可见条件 |
@@ -53,7 +53,7 @@ degraded/revising；dispatching/approved 与其余不渲染。
 | `plan-docs-pending-active` | isActive 且 docs 空、agent 推进中 |
 | `plan-docs-pending-idle` | isActive 且 docs 空、agent 未推进 |
 | `plan-docs-empty` | 无 plan/产物的空态（含「输入 /plan 开始规划」指引） |
-| `plan-docs-load-error` | 计划状态首拉失败（分区 loadError）空态 |
+| `plan-docs-load-error` | 计划状态首次拉取失败（分区 loadError）空态 |
 | `plan-docs-panel` | 面板主容器（有 docs 时） |
 | `plan-docs-tabs` / `plan-docs-tab` | L2 文档 tab 行 / 单 tab |
 | `plan-docs-tab-version` / `plan-docs-tab-revising` | tab 版本角标 / 修订中角标 |
@@ -82,6 +82,6 @@ degraded/revising；dispatching/approved 与其余不渲染。
   `plan-review-degraded-hint`（D8 改「成因 + 按钮」，恢复指引小字删除）。
 - **更早已退役（本账建账前已不存在，防清扫误判）**：`plan-review-degraded-exit`（退出入口收敛左区）、
   `plan-review-explain`（解释键随 2026-09-21 两键裁决删除）、`plan-banner`（挂载已拆除）。
-- **负向守卫断言登记（引用退役键但断言不存在，不是悬空引用，清扫时勿删）**：
+- **负向防御断言登记（引用退役键但断言不存在，不是悬空引用，清扫时勿删）**：
   `plan-mode-bar.test.ts`（`plan-review-degraded-exit` / `plan-review-ignore` / `plan-review-explain` 的 exists()=false）、
   `plan-review-bar.test.ts`（`plan-review-ignore` / `plan-review-degraded-exit` 的 exists()=false）——锚定退役键不复活。

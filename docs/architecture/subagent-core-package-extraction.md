@@ -249,7 +249,7 @@ interface NotifyDomainPorts {
 
 **D7：zcode 侧存量数据切换点（选定方向，细节 ⛔ 实施期门）**
 
-- **采用**：`~/.zcode/zsw/` 旧 record 只读保留（读取兼容期），新 run 落 core 布局（dataRoot 下 engines/ 与 workflow-state/）；以 2c 合入为 break 点，在 zsw README 标注。⛔ 实施期门：2c 前调研存量 record 的读取路径与数据量，确认只读兼容的覆盖面；降级路径：若存量读取面过大，提供一次性迁移脚本（旧 record → core 布局投影）。
+- **采用**：`~/.zcode/zsw/` 旧 record 只读保留（读取兼容期），新 run 落 core 布局（dataRoot 下 engines/ 与 workflow-state/）；以 2c 合入为 break 点，在 zsw README 标注。⛔ 实施期门：2c 前调研存量 record 的读取路径与数据量，确认只读兼容的覆盖面；降级路径：若存量读取面过大，提供一次性迁移脚本（旧 record → core 布局映射）。
 - **不采用**：静默双写——两份数据目录并行是新的漂移源。
 - **证据**：zsw record-store 的存储路径（§2.4 图）。
 - **效果**：目标 4（zsw 用户不丢历史）；失败模式 A 类问题不再新增。

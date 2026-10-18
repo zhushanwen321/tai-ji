@@ -43,7 +43,7 @@ run.params.task（AgentCallOpts）/ ctx / resume → app-server `thread/start`�
 
 | taiji 面 | 源对应 | 证据（file:line） | 备注 |
 |---|---|---|---|
-| listModels → ModelCatalogEntry{id,aliases?,canonicalRef?} | `model/list` → `ModelListResponse{data:Vec\<Model\>}`；`Model{id, model, displayName, …}` | common.rs:1020-1024；v2/model.rs:53-63, :92-121, :147-152 | 投影：ModelCatalogEntry.id←Model.id；canonicalRef←Model.model（真实模型 ref）；aliases 无对应（缺省）。无枚举面时返回 null 的协议语义不受影响（方法恒可调） |
+| listModels → ModelCatalogEntry{id,aliases?,canonicalRef?} | `model/list` → `ModelListResponse{data:Vec\<Model\>}`；`Model{id, model, displayName, …}` | common.rs:1020-1024；v2/model.rs:53-63, :92-121, :147-152 | 映射：ModelCatalogEntry.id←Model.id；canonicalRef←Model.model（真实模型 ref）；aliases 无对应（缺省）。无枚举面时返回 null 的协议语义不受影响（方法恒可调） |
 | validateModel → canonicalRef | 无独立校验方法 | — | 合成：以 model/list 全集匹配；不命中时 thread/start 实际验证（ModelRerouted 通知为替换信号，v2/model.rs:157-163） |
 
 ## 3. 事件映射表
@@ -89,7 +89,7 @@ run.params.task（AgentCallOpts）/ ctx / resume → app-server `thread/start`�
 | fs/changed | — | 丢弃 | fs watch 面 |
 | model/rerouted | error（warn 级） | 合成 | 模型被替换，宿主须感知（v2/model.rs:157-163） |
 | model/verification、model/safetyBuffering/updated、turn/moderationMetadata | — | 丢弃 | 平台安全面 |
-| warning / guardianWarning / deprecationNotice / configWarning | error（或 host/log） | 合成 | 非致命告知；taiji 9 事件无 warn 槽，投影 error 或降 host/log |
+| warning / guardianWarning / deprecationNotice / configWarning | error（或 host/log） | 合成 | 非致命告知；taiji 9 事件无 warn 槽，映射为 error 或降 host/log |
 | fuzzyFileSearch/sessionUpdated / sessionCompleted | — | 丢弃 | 搜索面 |
 | thread/realtime/*（9 个） | — | 丢弃 | 语音实时面 |
 | windows/worldWritableWarning、windowsSandbox/setupCompleted | — | 丢弃 | Windows 沙箱面 |
@@ -123,7 +123,7 @@ thread.started（:40-43，携 thread_id）/ turn.started（:47）/ turn.complete
 
 | taiji 字段 | 源字段 | 证据（file:line） | 备注 |
 |---|---|---|---|
-| AgentUsage.input | TokenUsageBreakdown.inputTokens | v2/thread.rs:1795-1809 | last（单轮增量）投影 message_end.usage；total 投影累计 |
+| AgentUsage.input | TokenUsageBreakdown.inputTokens | v2/thread.rs:1795-1809 | last（单轮增量）映射 message_end.usage；total 映射累计 |
 | AgentUsage.output | TokenUsageBreakdown.outputTokens | 同上 | 含 reasoning 输出 |
 | AgentUsage.cacheRead | TokenUsageBreakdown.cachedInputTokens | 同上 | 直接 |
 | AgentUsage.cacheWrite | TokenUsageBreakdown.cacheWriteInputTokens | 同上 | serde default（:1802-1804），旧上游可能缺省 |
@@ -148,7 +148,7 @@ thread.started（:40-43，携 thread_id）/ turn.started（:47）/ turn.complete
 - `Turn{id, items: Vec\<ThreadItem\>, itemsView, status, error, startedAt, completedAt, durationMs}`（thread_data.rs:353-373）。
 - 大历史分页：`thread/turns/list`（v2/thread.rs:1678-1707，cursor/limit/sortDirection/itemsView）与 `thread/items/list`（:1712-1748，返回 `ThreadItemEntry{turnId,item}`）。
 
-ReplayedTurn 映射（Turn.items 投影）：
+ReplayedTurn 映射（Turn.items 派生视图）：
 
 | ReplayedTurn 槽 | 源 | 备注 |
 |---|---|---|
@@ -199,7 +199,7 @@ UiRequest 9 method 对齐度：select（← requestUserInput）✅、confirm（�
 ### 9.1 源有靶无（codex 有、taiji 协议无槽——适配器丢弃，不阻塞接入）
 
 - thread 管理面：archive/delete/unarchive/name/goal/queue/section/project/settings/rollback/revert/inject_items/search（common.rs:523-802）。
-- collab agents（codex 内建多 agent 子线程：CollabAgentToolCall item、thread/realtime 语音面）——taiji subagent 编排归宿主，引擎内多 agent 不投影。
+- collab agents（codex 内建多 agent 子线程：CollabAgentToolCall item、thread/realtime 语音面）——taiji subagent 编排归宿主，引擎内多 agent 不映射。
 - command/exec、process/* 独立进程面与 fs/* 远程文件面（common.rs:899-945, :1247-1299）。
 - dynamic tools 注册（thread/start.dynamicTools，v2/thread.rs:135-141）与 DynamicToolCall 宿主反呼（item/tool/call）——taiji 反向面无「宿主执行引擎工具」通道，此能力不可用（除非扩展协议）。
 - hooks / plugins / marketplace / skills 管理面（common.rs:803-878）。
@@ -220,7 +220,7 @@ UiRequest 9 method 对齐度：select（← requestUserInput）✅、confirm（�
 
 1. **thread ≠ taiji session**：codex thread 是会话单位（Thread.session_id 是「session tree 共享 id」，thread_data.rs:205-206），一个引擎进程多 thread；taiji session≈record+sessionFile 一对一。映射取 threadId 为 sessionId，thread.session_id 不投。
 2. **turn/item 层级 vs taiji turn/message 两层**：codex 一个 turn 内 items 交错（AgentMessage、Reasoning、CommandExecution…），taiji ReplayedTurn 只有 text/thinking/toolCalls 三槽——**item 顺序与交错信息丢失**（多段正文/思考被合并拼接）；中途 error item 无槽（并入 turn error 或丢弃）。
-3. **usage 增量语义**：taiji message_end.usage 是「单条消息增量」；codex tokenUsage/updated 给 {total,last}，last 是「单轮」而非「单消息」——一 turn 多次模型调用时增量粒度粗于 pi；message_end 投影点建议绑 turn/completed 而非 item/completed(AgentMessage)。
+3. **usage 增量语义**：taiji message_end.usage 是「单条消息增量」；codex tokenUsage/updated 给 {total,last}，last 是「单轮」而非「单消息」——一 turn 多次模型调用时增量粒度粗于 pi；message_end 映射点建议绑 turn/completed 而非 item/completed(AgentMessage)。
 4. **compaction 双形态**：thread/compacted 通知已标 deprecated（common.rs:1894-1895），现行 = ContextCompaction item（v2/item.rs:401-403）随 item/started|completed 出现；rollout 侧另有 compacted line（replacementHistory 重建历史）。适配器以 item 形态为准。
 5. **正文完成去重**：AgentMessage delta 累积与 item/completed 全文并存，须按 itemId 去重（§4）；Plan delta 注释明示「completed 权威、delta 拼接可能不等」（v2/item.rs:1357-1361），若投 text_delta 需同规则。
 6. **fork 语义**：codex thread/fork 产新 threadId（v2/thread.rs:503-514），taiji fork 概念是「继承父 session 上下文的新 run」——resume 锚点须切换为新 fork 的 threadId，宿主 record 的 handle 需更新。

@@ -396,11 +396,11 @@ pushUpdateNow();   // flush 后再立即推一次，双保险
 
 ### 3. 状态快照 vs 可变引用
 
-**坑（`ba1c80327` P2）**：`executionStateToDetails(state)` 投影出 details 传给 `onUpdate`，如果直接传 state 的 eventLog 引用，SDK 的 `tool_execution_update` 是异步消费（`process.nextTick`），消费时 state 可能已被下一个 event 继续 mutate；更糟的是 archive 时 `_completedAgents` 记录会和 `state.eventLog` 共享同一数组，后续 mutate 泄漏进归档。
+**坑（`ba1c80327` P2）**：`executionStateToDetails(state)` 推算出 details 传给 `onUpdate`，如果直接传 state 的 eventLog 引用，SDK 的 `tool_execution_update` 是异步消费（`process.nextTick`），消费时 state 可能已被下一个 event 继续 mutate；更糟的是 archive 时 `_completedAgents` 记录会和 `state.eventLog` 共享同一数组，后续 mutate 泄漏进归档。
 
 **正确做法**：两层防御：
 
-1. **投影层浅拷贝**：`details: { ...details }`，`executionStateToDetails` 内部 `eventLog: [...state.eventLog]`。
+1. **转换层浅拷贝**：`details: { ...details }`，`executionStateToDetails` 内部 `eventLog: [...state.eventLog]`。
 2. **归档层浅拷贝**：`scheduleSyncArchive` 传 `source.eventLog.slice()`。
 
 **何时需要深拷贝**：eventLog 元素是不可变 record（只 push 新 entry，不 mutate 已有 entry），`.slice()` 一层浅拷贝足够。如果将来 entry 内部会被 mutate，才需要 `structuredClone`。**不要无脑深拷贝**——streaming 期间每个 onUpdate 都深拷贝整个 eventLog（ring buffer 可能几百条）是 CPU 浪费。

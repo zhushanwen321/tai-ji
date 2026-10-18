@@ -25,7 +25,7 @@
 
 1. **影子推断**：taiji 域内代码对 pi 私有语义做本地重新实现/推断（两条规则互不知晓，语义可能相反）。
 2. **无受理确认**：跨边界承诺（校验通过、RPC 返回、send 成功）与「实际生效」之间没有可验证路径。
-3. **写入时坍缩**：状态/语义在写入点坍缩或缺失（占位符、字段 undefined），下游多处各自推导补全。
+3. **写入时信息丢失**：状态/语义在写入点被合并或缺失（占位符、字段 undefined），下游多处各自推导补全。
 4. **漂移无检查**：行为随时间变化（pi 升级、models-store 刷新）而域内假设无人重验，用户成为报警器。
 
 **适用边界（防 scope 扩大化）**：判据前置条件是「涉及 pi 私有语义或 taiji↔pi 跨边界承诺」；纯 taiji 域内 bug、与 pi 语义无关的 UI 缺陷不属本问题类。判定新事故是否同类时，须能指认具体的 pi 语义假设点——四条判据不是万能筐。
@@ -53,7 +53,7 @@
 
 - **F1 模型标识没有单一权威形态**（判据 1+4）：扩展层精确匹配校验 vs pi CLI pattern 模糊引擎（canonical 双命中判歧义 → contains 模糊 → `localeCompare` 取最大），两套规则互不知晓；「通过校验」不代表「子进程按此名执行」。models-store.json 周期刷新引入小写条目家族后，昨日可用的串今日掉进 `glm-5.3-highspeed` → 429 空转。
 - **F2 通知 at-most-once 且无回执**（判据 2）：steer 落点是内存队列（pi-agent-core 全文仅 2 个 drain 点），nextTurn 队列唯一消费点是用户主动 `prompt()`；投递内核重试的是「send 函数调用」而非「消息进入主会话」这一事实。基线 session 十余次完成仅 1 次送达。
-- **F3 终态语义写入时坍缩**（判据 3）：done/failed/crashed 统一坍缩为 `closed + closedReason:"gc"`，下游三处同构 switch 各自重新推导成败。
+- **F3 终态语义写入时信息丢失**（判据 3）：done/failed/crashed 统一合并为 `closed + closedReason:"gc"`，下游三处同构 switch 各自重新推导成败。
 
 ### 2.2 事故 B：思考等级自动变关（2026-08-27）
 
@@ -100,7 +100,7 @@
 |---|---|---|
 | 1 影子推断 | 扩展 model-resolver 精确 find vs pi pattern 引擎（选择规则互不知晓） | `resolveAvailableLevels`（undefined=支持）vs pi 两级门控（undefined=off），语义恰好相反 |
 | 2 无受理确认 | 校验通过 ≠ 按此名执行；send 成功 ≠ 消息存在 | RPC 返回 ≠ 生效（effective off 被 void 丢弃）；表单保存 ≠ 字段存在（reasoning 静默缺失） |
-| 3 写入时坍缩 | `closedReason:"gc"` 占位，三处同构推导 | reasoning 字段不写即 undefined，两侧按相反语义补全 |
+| 3 写入时信息丢失 | `closedReason:"gc"` 占位，三处同构推导 | reasoning 字段不写即 undefined，两侧按相反语义补全 |
 | 4 漂移无检查 | models-store 19:20 刷新 → 昨日成功今日 429 | thinking 钳制 2026-08-20 已登记观察项 #4，无接线，8-27 照样出事 |
 
 ### 2.4 根因：缺「pi 语义吸收层」，登记≠防御
@@ -160,7 +160,7 @@ models-store 远端目录刷新引入大小写孪生条目
 
 | 方案 | 长期架构 | 短期成本 | 风险 |
 |---|---|---|---|
-| **CR-hybrid 同源函数离线计算 + pi RPC 在线对账（选）**：runtime 引入 `@earendil-works/pi-ai` 依赖，用 pi 自己的 `getSupportedThinkingLevels(model)` 对配置模型算档位（离线可用、与 pi 逐字节同语义——diff-probe-thinking.mjs 已实证可 import 可用）；session 附着后经 `get_available_models` RPC 取 pi 合并清单对账（覆盖 models-store 刷新引入的漂移）；结果以 view-ready 字段随模型信息推 renderer（符合 C-data-03「投影只发生一次」），`resolveAvailableLevels` 退役 | pi 语义只有一个实现副本（pi-ai 自身），taiji 侧零影子逻辑；pi 升级时语义自动跟随（限单包同步 bump 场景；多包版本一致性由 D6 门禁机器保证——防 runtime 内嵌 pi-ai 与 pi 子进程静默分裂），配 D6 版本门禁双保险 | runtime 加依赖 + tsup noExternal + 打包验证（既有纪律流程）；modelService 加一个服务面；renderer 三处接线 | ⛔ pi-ai 在 runtime CJS bundle 下的可用性须实测（diff-probe 仅在 node ESM 下验证过）——实施期门，降级路径 = 退化为纯在线 RPC 对账 + 设置页仅在任一 session 存活时可编辑档位（可用性妥协，语义保真不变） |
+| **CR-hybrid 同源函数离线计算 + pi RPC 在线对账（选）**：runtime 引入 `@earendil-works/pi-ai` 依赖，用 pi 自己的 `getSupportedThinkingLevels(model)` 对配置模型算档位（离线可用、与 pi 逐字节同语义——diff-probe-thinking.mjs 已实证可 import 可用）；session 附着后经 `get_available_models` RPC 取 pi 合并清单对账（覆盖 models-store 刷新引入的漂移）；结果以 view-ready 字段随模型信息推 renderer（符合 C-data-03「派生只发生一次」），`resolveAvailableLevels` 退役 | pi 语义只有一个实现副本（pi-ai 自身），taiji 侧零影子逻辑；pi 升级时语义自动跟随（限单包同步 bump 场景；多包版本一致性由 D6 门禁机器保证——防 runtime 内嵌 pi-ai 与 pi 子进程静默分裂），配 D6 版本门禁双保险 | runtime 加依赖 + tsup noExternal + 打包验证（既有纪律流程）；modelService 加一个服务面；renderer 三处接线 | ⛔ pi-ai 在 runtime CJS bundle 下的可用性须实测（diff-probe 仅在 node ESM 下验证过）——实施期门，降级路径 = 退化为纯在线 RPC 对账 + 设置页仅在任一 session 存活时可编辑档位（可用性妥协，语义保真不变） |
 | CR-align 前端语义对齐修补（把 resolveAvailableLevels 的 undefined 分支改得跟 pi 一致） | 影子实现原样保留：pi 哪天改门控顺序/加第三级，前端同步漂移；恰恰复刻判据 1+4 | 几行 diff | 长期架构最差——今天修的就是这个模式本身 |
 | CR-rpc-only 纯在线（只靠 get_available_models，不引入 pi-ai） | 无新依赖 | 设置页/无存活 session 时无 pi 进程可查（短命进程方案有 C-pi-10 withEphemeralPi 先例但每次起进程成本高）；models-store 未刷新时与配置编辑场景错位 | 可用性缺口真实存在；对账仍是单源，配置态与运行态谁权威要再发明规则 |
 
@@ -232,7 +232,7 @@ models-store 远端目录刷新引入大小写孪生条目
 | G1 | `check-pi-semantics.mjs`（D6 检查层） | machine | pre-commit 总开关（install-hooks.sh heredoc，i18n 段后插入，**不设独立 SKIP_\*** 遵循 R1 后惯例）+ CI `invariants` job 等价一步 | 新增 scripts/ 脚本 + docs/pi-semantics.json；constraints.json 登记 C-proc-08 |
 | G2 | pi 语义探针测试族 `pi-semantics-*.test.ts` | machine | `packages/runtime` vitest 主池（不进 REAL_PI_TESTS）；CI `test-runtime` 自动覆盖（凭证无关） | 仿 pi-paths-config-dir-contract.test.ts；初始覆盖附录 A 全部 probe 条目 |
 | G3 | `diff-probe-thinking.mjs` 接线 | machine | pre-commit：staged 含 `thinking-levels.ts` / `provider-edit-models.ts` / `builtin-providers.json` / `model-capability.ts` 时触发；CI invariants 同步 | U6 删除 resolveAvailableLevels 后，探针比对对象改为「registry 计算路径 vs pi-ai 同源函数」（防 registry 自身漂移），脚本改目标不退役 |
-| G4 | custom 注入点唯一性检查（C-ext-19） | machine | pre-commit（staged 为 `extensions/universal/subagent-workflow/**` 时触发，检查器内部按方案 B 扫 extensions/ 全部 .ts——port 为唯一合法 custom 注入点）：禁 `deliverAs:"steer"/"followUp"/"nextTurn"` 字面量出现在 delivery-port 白名单（11 条逐文件定性）之外；deliverAs 变量传参形态不在检查射程（goal/plan 等经参数传递的注入由端口迁移波次收敛）；禁 `"--model"` 字面量出现在模型引用白名单外（扫描面 subagent-workflow 域，白名单空集——正身锚 `packages/subagent-core/src/shared/model-ref.ts`，域内唯一生产出现面 = argv 解析词表行级豁免）；测试文件（`__tests__/` / `*.test.ts`）排除 | 实现为 `.githooks/check_subagent_channels.py`（exit 0/2 范式）；scheduler 已改判提醒语义（D5 改判段），结果语义义务仅当其未来承载结果语义通知时重新评估 |
+| G4 | custom 注入点唯一性检查（C-ext-19） | machine | pre-commit（staged 为 `extensions/universal/subagent-workflow/**` 时触发，检查器内部按方案 B 扫 extensions/ 全部 .ts——port 为唯一合法 custom 注入点）：禁 `deliverAs:"steer"/"followUp"/"nextTurn"` 字面量出现在 delivery-port 白名单（11 条逐文件定性）之外；deliverAs 变量传参形态不在检查射程（goal/plan 等经参数传递的注入由端口迁移波次收敛）；禁 `"--model"` 字面量出现在模型引用白名单外（扫描面 subagent-workflow 域，白名单空集——权威源锚 `packages/subagent-core/src/shared/model-ref.ts`，域内唯一生产出现面 = argv 解析词表行级豁免）；测试文件（`__tests__/` / `*.test.ts`）排除 | 实现为 `.githooks/check_subagent_channels.py`（exit 0/2 范式）；scheduler 已改判提醒语义（D5 改判段），结果语义义务仅当其未来承载结果语义通知时重新评估 |
 | G5 | real-pi 对账用例 `thinking-level-effective-e2e.test.ts` | machine | REAL_PI_TESTS 池（须登记进 `packages/runtime/vitest.config.ts:22-34`，检查测试强制）；开发机跑（凭证门控 REAL_PI_READY） | 真实 pi：reasoning:false 模型 set high → 断言回执=get_state=off；正常模型 → 回执=请求值。这是「config ≡ pi effective」的端到端保险丝 |
 | G6 | 改状态 RPC reply=void 拦截 | review | constraints.json 登记 C-pi-13，dimensions: business-logic（review-business-logic agent 消费）；protocol.ts 改状态区段加注释指约束 | 机器化（静态判定「改状态」语义）不可靠，诚实停在 review 级 |
 | G7 | constraints.json 四条新登记 | governance | C-pi-12（能力注册表单点，authority=本文 §3.3 D2 + 未来 ADR-0064）、C-pi-13（生效回执，authority=本文 D3）、C-ext-19（确认式送达，authority=本文 D5 + extension-conventions 新增节）、C-proc-08（漂移检查，authority=本文 D6） | enforcement 的 machine hook 必须真实存在才可通过 render-constraints 校验——**登记与对应护栏同 commit 或护栏先行** |
@@ -440,5 +440,5 @@ docs/extensions/logging-conventions.md / AGENTS.md       [U8]
 投递所有权内核（`packages/session-delivery` 状态机 + DeliveryStore 双介质耐久——runtime 半区磁盘 outbox（`<getDataDir>/delivery-outbox/`，受理前 persist / 终局 ack）+ port 半区 session entry 投递日志；runtime 适配与对账 `packages/runtime/src/services/session/session-delivery-registry.ts`，决策见 [ADR-0074](../adr/decisions.md)）是四支柱在**交互式投递域**（composer 用户消息 / agent 间 send / completion-backflow 回流）的实例化，本设计的域边界由此补齐：
 
 - **与 D5「确认式送达」的关系（域面两分，非替代）**：D5 的禁令对准**结果语义通知**（subagent 完成、未来 webhook——持久账本 + 幂等键 + at-least-once）；本内核覆盖**交互式消息**，解决的问题是 pi 契约假定的「消息进 transcript 之前所有权归前端」这一层在 taiji 长期缺失（§2.1 事故 A 的同类结构性空缺，只是发生在用户消息域）。内核按 pi 既有原语（steer/followUp 交接槽位、`queue_update` 受理回执、`message_end(user)` 送达事实、`clear_queue` 回收原语）实现**两阶段回执**：受理（prompt 受理 / 文本入槽位）≠ 送达（`message_end(user)` 命中裸标记 = 已进 transcript）；只拿受理的条目停留 in-flight 并由对账器（四触发点 ×  reclaim/rebuild/adopt 三分处置兜底；watchdog 定时触发点已随 ADR-0122 防御机制清查退役，全事件驱动）兜底。C-ext-19 的禁令在本域的落实形态 = **交互式发送不再由多处各自判定车道**：lane（direct/steer/queued）判定单一源收归 runtime 内核，renderer/extension 侧的车道判定与本地时序防御（defer 队列状态机、S1 拒绝检测、重投 timer）整体退役——登记 C-data-25，条目数据源登记 C-data-08。
-- **结果语义的域内改判注记（C-ext-19 挂账关系重申）**：smart-context 四类通知（含压缩结果 onComplete/onError——**结果语义**）由 `sendUserMessage(deliverAs:'steer' | 'followUp')` 改判为 `pi.sendMessage(deliverAs:'nextTurn', triggerTurn:false)`（`sendMessage` 为 ExtensionAPI 实装名，见 `node_modules/@earendil-works/pi-coding-agent` 的 `ExtensionAPI` 类型）：必达性由 at-most-once 提升为**常驻至被消费**（PS-06：`_pendingNextTurnMessages` 唯一消费点 = 用户驱动 `prompt()`），且不再自起 run。这是**存量通路的域内改判**（字面不违「禁止新建 at-most-once 通道」），**不是** C-ext-19 正向要求的满足——迁移处置按统一投递设计（`.tmp/tech-design/unified-delivery.md` §3.7）u6 豁免类评估登记（波 5 可选，默认不迁，登记于 `docs/todo/`）：pi 进程死亡致 nextTurn 通知丢失的面与改判前相同，是否经 delivery-port 迁移由 u6 评估裁决。
+- **结果语义的域内改判注记（C-ext-19 未决登记关系重申）**：smart-context 四类通知（含压缩结果 onComplete/onError——**结果语义**）由 `sendUserMessage(deliverAs:'steer' | 'followUp')` 改判为 `pi.sendMessage(deliverAs:'nextTurn', triggerTurn:false)`（`sendMessage` 为 ExtensionAPI 实装名，见 `node_modules/@earendil-works/pi-coding-agent` 的 `ExtensionAPI` 类型）：必达性由 at-most-once 提升为**常驻至被消费**（PS-06：`_pendingNextTurnMessages` 唯一消费点 = 用户驱动 `prompt()`），且不再自起 run。这是**存量通路的域内改判**（字面不违「禁止新建 at-most-once 通道」），**不是** C-ext-19 正向要求的满足——迁移处置按统一投递设计（`.tmp/tech-design/unified-delivery.md` §3.7）u6 豁免类评估登记（波 5 可选，默认不迁，登记于 `docs/todo/`）：pi 进程死亡致 nextTurn 通知丢失的面与改判前相同，是否经 delivery-port 迁移由 u6 评估裁决。
 - **另三柱不涉本内核**：无模型能力面（能力注册表）、无改状态 RPC 回执（生效回执）。pi 语义依赖全部登记进 `pi-semantics.json` PS 条目（guard=probe 形态 vitest——静态直读实装 dist 断言，受 C-proc-08 版本门禁与探针重验约束，pi 升级时自动重跑）：`clear_queue` 返回值与队列收回原语 = PS-64/65（`pi-semantics-reclaim-primitives.test.ts`）、`get_entries` 标记可读 = PS-26（user 消息落盘与事件同源、文本原样携带裸标记，get_entries 读到的即该落盘源）、`nextTurn` 注入形态 = PS-06（`pi-semantics-agent-session.test.ts`）、`compaction_start/end` 的 reason 字段与 manual 掐断序 = PS-61/62（`pi-semantics-compaction-resume.test.ts`）。行为序类判据（agent_end 先于 compaction_start 的实测到达序、reason 实测值、stopReason='aborted'）另由 `packages/runtime/src/__tests__/probes/` 实机探针手动补验（真 pi + faux LLM 零 token，不在版本门禁自动重跑范围）。

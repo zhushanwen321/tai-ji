@@ -20,7 +20,7 @@
 
 ### 1.2 系统是什么（受众认知铺垫）
 
-subagent 派发链（三层进程）：宿主 pi 主进程（extension 加载 `subagent-core`）→ 引擎 CLI 子进程（`pi-subagent-cli`，共享池长驻）→ 任务子进程（`pi --mode rpc`，每个 run 一个）。一个 subagent 在宿主侧对应一条 **ExecutionRecord**（状态机 = `running | closed` + 关闭原因；`chatMode` 标记对话容器），GUI 列表/详情/通知从 record 投影。**resume 锚点** = record 的 sessionFile：pi 以 `--session <file>` 启动时**续写原文件**（`spawn-args.ts:71-73`），模型召回全部历史。设计时点的**轮次监督器**是 run 域 record 的崩溃治理主体（三态判定：该等/该唤醒/该放弃），chatMode record 豁免（见 D8：对话容器的治理者是用户，监督器的判死语义不适用于容器）。[2026-09-28 后记] 该监督器经裁决整机清理（生产不可达断线死机器），崩溃治理现归孤儿恢复与 Continuation 失败分支。
+subagent 派发链（三层进程）：宿主 pi 主进程（extension 加载 `subagent-core`）→ 引擎 CLI 子进程（`pi-subagent-cli`，共享池长驻）→ 任务子进程（`pi --mode rpc`，每个 run 一个）。一个 subagent 在宿主侧对应一条 **ExecutionRecord**（状态机 = `running | closed` + 关闭原因；`chatMode` 标记对话容器），GUI 列表/详情/通知从 record 派生。**resume 锚点** = record 的 sessionFile：pi 以 `--session <file>` 启动时**续写原文件**（`spawn-args.ts:71-73`），模型召回全部历史。设计时点的**轮次监督器**是 run 域 record 的崩溃治理主体（三态判定：该等/该唤醒/该放弃），chatMode record 豁免（见 D8：对话容器的治理者是用户，监督器的判死语义不适用于容器）。[2026-09-28 后记] 该监督器经裁决整机清理（生产不可达断线死机器），崩溃治理现归孤儿恢复与 Continuation 失败分支。
 
 ### 1.3 设计目标
 
@@ -272,7 +272,7 @@ GUI message → subagent tool(message) → Continuation
 
 **文件改动地图**：SDK `protocol/{methods,contract-types,schema,reverse-channels,port-contract,engine-protocol}.ts`；core `execution/subagent-service.ts` + `execution/assembly/subagent-actions-core.ts` + 新增 `execution/assembly/conversation-continuation.ts` + 删 `execution/cold-resurrect.ts` + `execution/persistence/finalize-record.ts` + `execution/notify/notifier.ts`（轮末分流/round 写点）+ `execution/persistence/execution-record.ts`（base 两函数与 `roundBaseTurnIndex` 字段清理，U6）+ `execution/assembly/types.ts`（字段声明清理）+ `execution/engine/{port.ts,client/{remote-engine,reverse-router,engine-client}.ts,host/host-bridge.ts,common/capability-gate.ts}`（capability-gate 注释更新 + SP-5 升级 gate 错误构造单源 engineConversationUpgradeUnsupportedError——conversation 位保留）+ `execution/lifecycle/settled-watchdog.ts`（刷新源）；pi `pi-engine.ts`/`server.ts`/`spawn-runner.ts` + 删 `chat-session.ts`；zcode `server.ts`/`zcode-engine.ts`；extensions `subagent-workflow/src/__tests__/{first-round-closure-service,one-shot-upgrade}.test.ts`（改写）+ interface 面。
 
-**待验证检查点**：① U3 resume 穿透精确点位与首轮 spawn-run 化细节；② U4 冷启耗时分布（D2 量化）；③ gui-mappers 多轮 run 投影兼容（S1/S3 覆盖）；④ capability-gate/conversation 位消费方在 U5-U6 的逐位回归（fork 派发真机一次）；⑤ S2 trap-flush 召回实证；⑥ settle 段交棒接线次序（形态已定 D7：onRunSettled 内调 noteRoundSettledFromProtocol，先于轮终簿记——核验实施期接线与单测断言一致）；⑦（S4 条件触发）收割路径中断现场召回实测不通过时，pi 对裸 SIGTERM 的 flush 行为重查 + 已接受代价登记（**模板三要素前置，v6**：丢失面量级——最坏丢尾部未完成 entry 或整轮 streaming 输出，以实测 flush 粒度定案；恢复路径——无自动恢复、用户重问；重审触发——交错行证据或召回显著低于 S2 同构基线）。
+**待验证检查点**：① U3 resume 穿透精确点位与首轮 spawn-run 化细节；② U4 冷启耗时分布（D2 量化）；③ gui-mappers 多轮 run 派生视图兼容（S1/S3 覆盖）；④ capability-gate/conversation 位消费方在 U5-U6 的逐位回归（fork 派发真机一次）；⑤ S2 trap-flush 召回实证；⑥ settle 段交棒接线次序（形态已定 D7：onRunSettled 内调 noteRoundSettledFromProtocol，先于轮终簿记——核验实施期接线与单测断言一致）；⑦（S4 条件触发）收割路径中断现场召回实测不通过时，pi 对裸 SIGTERM 的 flush 行为重查 + 已接受代价登记（**模板三要素前置，v6**：丢失面量级——最坏丢尾部未完成 entry 或整轮 streaming 输出，以实测 flush 粒度定案；恢复路径——无自动恢复、用户重问；重审触发——交错行证据或召回显著低于 S2 同构基线）。
 
 ---
 

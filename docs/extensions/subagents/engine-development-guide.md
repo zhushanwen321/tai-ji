@@ -194,7 +194,7 @@ data-plane 10s 未答 = 引擎故障 → 杀进程 + 在途 run 失败（`REVERS
 
 **resume 锚形态**：`ResumeAnchor = { sessionRef: Record<string,string>, eventsPath? }`（`contract-types.ts:154-159`）；zcode 锚 = `sessionRef {sessionId, dbPath}`，pi 锚 = `{recordId?, sessionFile?}`（`EngineHandleData` 注释 :132）。引擎按锚分派 create/resume（`zcode-engine.ts:297-338` 形态）。锚只在协议层经 `run.params.resume` 携带，形状 = `{ recordId, resume?: ResumeAnchor }`（锚本体在 `params.resume.resume.sessionRef`；`RunContextParams` 无 resume 键）。zcode 判别函数（:1098-1110）读该键做形状收窄 + dbPath 白名单校验；其源码形参名叫 ctx 是引擎内部命名，勿与协议层 `RunContextParams` 混同。
 
-## 6. 事件族与投影义务
+## 6. 事件族与映射义务
 
 **事件类型全集 10 种**（`contract-types.ts:120-127` `AgentEvent`；词表 SSOT 与新增四步义务见 `AGENT_EVENT_TYPE_NAMES` 注释——协议演进宪法 C3；core 语义锚定注释 `subagent-core/src/execution/assembly/types.ts:305-318`）：
 
@@ -210,13 +210,13 @@ data-plane 10s 未答 = 引擎故障 → 杀进程 + 在途 run 失败（`REVERS
 | `error` | message | 事件流内错误（不替代 run 终态应答的 error outcome） |
 | `armed` | schemaEnvVar + extensionPkg | **schema 强制武装确认回执**（[D3 协议版 P6]，`contract-types.ts:126`）：native 引擎在启动期武装断言通过 + 孙进程 spawn 成功后上报**一次**（仅 native 引擎、仅 schema 任务；emulated 引擎无孙进程 env/扩展依赖，「武装」概念不适用，恒不上报）。宿主是独立信号源（引擎自查断言之外的第二道防线——监控信号不与施控同源）：native schema 任务的 run 在宿主等待窗内未收到本事件即 fail-fast；载荷 = 已核验的武装事实（env 变量名 + 必备扩展包名），宿主落 run 事件 journal（`RunArmedEvent.frame`） |
 
-**上游实名对照义务**（教训：taiji SDK 命名 ≠ 引擎上游实名）：SDK `tool_start`/`tool_end`（`contract-types.ts:110-111`）在 zcode bundle 实名是 `tool.updated`（kind=scheduled 的 input 可 omitted/inputRef 变体，kind=result 含 result+duration）——引擎适配层负责实名映射与 args 完整性不假设；zcode 现状不向 `ctx.onEvent` 投影 tool 事件，活性经 `session/event` 非终态非增量帧 → `activity`（`zcode-engine.ts:480-485`，真机探针实证约 1s 一帧）。
+**上游实名对照义务**（教训：taiji SDK 命名 ≠ 引擎上游实名）：SDK `tool_start`/`tool_end`（`contract-types.ts:110-111`）在 zcode bundle 实名是 `tool.updated`（kind=scheduled 的 input 可 omitted/inputRef 变体，kind=result 含 result+duration）——引擎适配层负责实名映射与 args 完整性不假设；zcode 现状不将 tool 事件映射进 `ctx.onEvent`，活性经 `session/event` 非终态非增量帧 → `activity`（`zcode-engine.ts:480-485`，真机探针实证约 1s 一帧）。
 
 **journal 落盘义务**（`subagent-core/src/execution/engine/common/event-journal-wiring.ts:61-88`，已实现；接线点 = workflow 域两处——`workflow-dispatch.ts:333` + `run-orchestration.ts:650`，chat 域不接 event journal）：先落盘再转发（:67-79）；`activity` 豁免 append——双侧 reducer 对其 no-op，豁免不破坏 live≡reload 重放等价性；seq 由 append 铸造、过滤在 append 前，故无 seq 空洞（:73-74）；close 在 run 终态（成功/失败均达）flush + fsync 一次、不抛（②级尽力而为数据源，:14-16）。
 
-**投影决策义务**：引擎层新观察到的事件是否向 `ctx.onEvent` 投影须显式声明消费方面——journal/SessionView/workflow trace 三消费方随投影新增面。裁决先例（设计 4，已裁决未实施）：submit_result 工具调用选择不投影——仅在引擎层内部提取，三消费方零新增面。该先例确立的判据：投影有消费方面成本；确需投影时必须同步补 apply-entry-equivalence 的 zcode tool_end 用例。
+**映射决策义务**：引擎层新观察到的事件是否映射进 `ctx.onEvent` 须显式声明消费方——journal/SessionView/workflow trace 三消费方随映射新增。裁决先例（设计 4，已裁决未实施）：submit_result 工具调用选择不映射——仅在引擎层内部提取，三消费方零新增。该先例确立的判据：映射有消费方成本；确需映射时必须同步补 apply-entry-equivalence 的 zcode tool_end 用例。
 
-**schema 分流义务**（`task.schema` × `capabilities.schemaEnforcement`）：native 引擎直传 schema 通道，宿主对其 `parsedOutput` **不做二次校验**（D4 硬分流——`AgentOutcome.parsedOutput` 注释，`contract-types.ts:284`）；emulated 引擎自行仿真（prompt 约定 + 容错提取 + ajv，SDK `schema-emulation.ts`），终报失败走 `schema_emulation_failed`。native 引擎的武装确认义务：启动期自查断言（env 变量在位 + 必备扩展在载）通过且孙进程 spawn 成功后，必须上报一次 `armed` 事件（载荷只放已核验事实——env 变量名 + 扩展包名，不放派生投影）；不上报或迟报的后果由宿主等待窗 fail-fast 承接（pi 实装锚：`pi-subagent-cli/src/spawn-runner.ts` `assertSchemaEnforcementArmed` + stderr tee 附加，宿主 10s 等待门 `TAIJI_SUBAGENT_ARMED_RECEIPT_TIMEOUT_MS`）。coarse 粒度引擎（`eventGranularity: "coarse"`）须在 run resolve 前补发离散语义事件（`synthesizeCoarseEvents` 调用点 `zcode-engine.ts:900`）——text_delta 等增量可省，tool/turn 边界与 message_end 不可省（reducer turns 收敛依赖）。
+**schema 分流义务**（`task.schema` × `capabilities.schemaEnforcement`）：native 引擎直传 schema 通道，宿主对其 `parsedOutput` **不做二次校验**（D4 硬分流——`AgentOutcome.parsedOutput` 注释，`contract-types.ts:284`）；emulated 引擎自行仿真（prompt 约定 + 容错提取 + ajv，SDK `schema-emulation.ts`），终报失败走 `schema_emulation_failed`。native 引擎的武装确认义务：启动期自查断言（env 变量在位 + 必备扩展在载）通过且孙进程 spawn 成功后，必须上报一次 `armed` 事件（载荷只放已核验事实——env 变量名 + 扩展包名，不放派生视图）；不上报或迟报的后果由宿主等待窗 fail-fast 承接（pi 实装锚：`pi-subagent-cli/src/spawn-runner.ts` `assertSchemaEnforcementArmed` + stderr tee 附加，宿主 10s 等待门 `TAIJI_SUBAGENT_ARMED_RECEIPT_TIMEOUT_MS`）。coarse 粒度引擎（`eventGranularity: "coarse"`）须在 run resolve 前补发离散语义事件（`synthesizeCoarseEvents` 调用点 `zcode-engine.ts:900`）——text_delta 等增量可省，tool/turn 边界与 message_end 不可省（reducer turns 收敛依赖）。
 
 ## 7. 生命周期与接管点义务
 
@@ -228,7 +228,7 @@ data-plane 10s 未答 = 引擎故障 → 杀进程 + 在途 run 失败（`REVERS
 3.〔zcode〕回引擎层：`parsedAppServerAttempt`（`zcode-engine.ts:1446-1459`，`interrupted` 不在 `isFailedTerminalStatus`、不误判失败——:1440-1445 注释）→〔契约〕schema 校验 → outcome + handle → run 应答。
 4.〔契约〕宿主：run 应答到达即终态（`methods.ts:153`）→ handle 回填（`backfillRoundHandle` 整替语义 + 同值幂等；journal 终态路径 `backfillHandle` 补 eventsPath，`event-journal-wiring.ts:84-86`）。
 
-**resume 轮（现状 cold 形态）**：宿主带 `run.params.resume` 锚 → 引擎读锚（`zcode-engine.ts:322-328`）→ `buildResumeHistoryPrefix`：`channel.resumeSession(anchor.sessionId)`（读通道）取结构化历史 → 24k token 预算裁剪（保尾丢旧，至少保 1 条）→ 拼注入前缀 → **执行仍 create 新 session**（原地 resume 续写会命中上游 -32031 卡死——设计期 bundle 探针结论）→ 新 sessionRef 经 `onHandleReady` 回传 → 宿主同值幂等整替锚。**读通道失败分支（[U3] 2026-09-19）**：读失败即判定锚真失效——resume 走 app-server resident 内存态，resume 结果就是锚活性权威信号（宿主侧 zcode 锚库投影预检查已退役收窄 pi 锚专属——库投影滞后于 create 应答致预检查系统性误判，`conversation-continuation.ts` reviveOrThrow 注），引擎经 `buildResumeUnavailableNoticeSegment`（`zcode-engine.ts:1163`）注入 `[会话延续提示]` 锚失效声明段继续执行——run 不失败、零世代推进（锚失效不走 reopen 降级，round/epoch 不动），模型知情后基于最新消息独立续推。native resume 主路径（同 session 续写、锚稳定、24k 语义收敛）= 设计 3（native resume，已裁决未实施），实施期定型项。
+**resume 轮（现状 cold 形态）**：宿主带 `run.params.resume` 锚 → 引擎读锚（`zcode-engine.ts:322-328`）→ `buildResumeHistoryPrefix`：`channel.resumeSession(anchor.sessionId)`（读通道）取结构化历史 → 24k token 预算裁剪（保尾丢旧，至少保 1 条）→ 拼注入前缀 → **执行仍 create 新 session**（原地 resume 续写会命中上游 -32031 卡死——设计期 bundle 探针结论）→ 新 sessionRef 经 `onHandleReady` 回传 → 宿主同值幂等整替锚。**读通道失败分支（[U3] 2026-09-19）**：读失败即判定锚真失效——resume 走 app-server resident 内存态，resume 结果就是锚活性权威信号（宿主侧 zcode 锚库派生视图预检查已退役收窄 pi 锚专属——库派生视图滞后于 create 应答致预检查系统性误判，`conversation-continuation.ts` reviveOrThrow 注），引擎经 `buildResumeUnavailableNoticeSegment`（`zcode-engine.ts:1163`）注入 `[会话延续提示]` 锚失效声明段继续执行——run 不失败、零世代推进（锚失效不走 reopen 降级，round/epoch 不动），模型知情后基于最新消息独立续推。native resume 主路径（同 session 续写、锚稳定、24k 语义收敛）= 设计 3（native resume，已裁决未实施），实施期定型项。
 
 **门禁续轮形态**（设计 4 已裁决未实施，实施期定型项）：自纠重试循环落在 `runTurn` **内部**（turn 终态 → 缺 parsedOutput 且未耗尽 → 同 session 再 send → 新 turn，≤3 次）→ 终态 → read 兜底 → finally close——**循环必须在 close 之前**（finally 无条件 `closeSession` 是硬约束，`session-channel.ts:791-795`）；每轮 steer 决策前检查 `ctx.signal.aborted`——`interrupted` 终态直接出口，不进门禁、不因新轮拖延 settle 触发 killChain 连坐。
 
@@ -242,7 +242,7 @@ data-plane 10s 未答 = 引擎故障 → 杀进程 + 在途 run 失败（`REVERS
 
 **嵌套派发拒绝义务**：引擎内不得再派发 subagent（无界递归检查）——SDK `nesting-guard.ts` 引擎侧原语（双层：跨进程 `TAIJI_AGENT_SUBAGENT=1` env 统一标记，宿主 spawn 必达；引擎 adapter 检测到即拒 `nested_spawn_rejected` + 剥离各引擎原生嵌套标记防继承泄漏；进程内 ALS 深度计数单点同一文件）——恢复指引 = 当前任务内直接做，不委派。深层原因：嵌套子 record 挂在父进程内存，父轮末回收经 `disposeAllRecords` 连带收起、父 relay 断开触发 kill-on-disconnect（[architecture.md](architecture.md) §4 嵌套生命周期行）——嵌套子**结构性不能活过父的当前轮**，引擎放行嵌套只会制造必失败任务。
 
-## 8. 读取与 SessionView 投影义务
+## 8. 读取与 SessionView 派生视图义务
 
 **SessionView 契约**（`contract-types.ts:174-182`）：`engineId` / `sessionId?` / `turns: ReplayedTurn[]` / `usage?: AgentUsageTotal` / `source: "native" | "journal" | "outcome-only"`。`source` 是 GUI 降级标记数据源；三级降级链：①引擎原生 `read` → ②宿主 event journal 重放（`handle.eventsPath` 自描述定位；重放实现 = SDK `journal-replay.ts`，与宿主 execution-record 共用「双侧 reducer no-op 对 activity」语义，事件流重放 ≡ live 落盘）→ ③outcome-only（只剩终态 content，`sessionRead: "outcome-only"` 引擎的事实标准形态）。
 
@@ -253,9 +253,9 @@ data-plane 10s 未答 = 引擎故障 → 杀进程 + 在途 run 失败（`REVERS
 
 **zcode ①级读取链实装锚**：`readZcodeSessionView`（`reader.ts:342`，三级 JOIN 按会话全量读；db 缺失/表漂移 → 结构化错误交降级链）；`usageFromStepFinish` 只填 input/output/cacheRead/cacheWrite 四项（:107-119）；`ReplayedTurn.closed` 恒 true（重放物无进行时语义，`contract-types.ts:161-168`）。
 
-**读取安全义务（dbPath 白名单）**：dbPath 白名单判定**内聚引擎包**（zcode 先例：`zcode-engine.ts` read 方法内单点判定——`zcodeDbPathAllowlist(dataDir)` 封闭集合成员判定，集合 = 隔离库路径 + 宿主库存量兼容锚点，非集合内路径拒绝①级降 journal）；宿主两条读取链（`session-view-service` ①级投影 + `EnginePort.read` 协议 read）经协议 read 复用同一判定，不自行校验。新引擎若在 sessionRef 携带文件路径类定位键，必须在**引擎 read 内**同型加封闭白名单判定，防路径注入面。
+**读取安全义务（dbPath 白名单）**：dbPath 白名单判定**内聚引擎包**（zcode 先例：`zcode-engine.ts` read 方法内单点判定——`zcodeDbPathAllowlist(dataDir)` 封闭集合成员判定，集合 = 隔离库路径 + 宿主库存量兼容锚点，非集合内路径拒绝①级降 journal）；宿主两条读取链（`session-view-service` ①级派生视图 + `EnginePort.read` 协议 read）经协议 read 复用同一判定，不自行校验。新引擎若在 sessionRef 携带文件路径类定位键，必须在**引擎 read 内**同型加封闭白名单判定，防路径注入面。
 
-**已知投影形态（必须写进验收防误报**，设计 3（native resume，已裁决未实施）两点）：① 中间轮 user 消息不进 `turns`（reader 只取 assistant 视角，`turnsToMessages` 只前置 record.task 一条 user）——多轮续聊详情页呈「task + 全部 assistant turns、无中间提问」，问答对应关系不可见，属已知形态非 bug；② usage 聚合挂最后一个 turn（`session-view-service.ts:305-310`）——全量累计值展示在末条 assistant 上，与单轮语义有别。引擎新增投影形态同样入此清单。
+**已知派生视图形态（必须写进验收防误报**，设计 3（native resume，已裁决未实施）两点）：① 中间轮 user 消息不进 `turns`（reader 只取 assistant 视角，`turnsToMessages` 只前置 record.task 一条 user）——多轮续聊详情页呈「task + 全部 assistant turns、无中间提问」，问答对应关系不可见，属已知形态非 bug；② usage 聚合挂最后一个 turn（`session-view-service.ts:305-310`）——全量累计值展示在末条 assistant 上，与单轮语义有别。引擎新增派生视图形态同样入此清单。
 
 ## 9. env 与数据目录契约
 
@@ -299,7 +299,7 @@ data-plane 10s 未答 = 引擎故障 → 杀进程 + 在途 run 失败（`REVERS
 
 **go/no-go 探针先行的强制形态**：外部系统对接（上游 RPC 通道、新协议面）先写独立探针脚本验证行为面再编码，用完归档移除；探针是方案成立性门，先于生产代码，失败触发设计回退点而非原地硬修（先例：两设计（均已裁决未实施）的 go/no-go 探针同款形态；键面可设计期逐键核实的，探针火力收敛到行为面）。
 
-**真机场景通过标准写法**：可证伪断言（禁「绝对不会出错」式表述）+ **已知投影形态写进标准防误报**（§8 两点形态入验收场景的预期形态栏，避免当 bug 报）+ 库侧硬证据优先（如「隔离库内该 record 恰 1 条会话条目」直接证锚稳定）。验收计划结构先例（两设计同型）：单测表（U 编号 × 用例 × 回溯目标）+ 真机表（V 编号 × 步骤 × 通过标准，实施期探针场景显式标注其 go/no-go 门身份）+ 变体覆盖（正常链 / 参数变体 / 降级路径各一）。
+**真机场景通过标准写法**：可证伪断言（禁「绝对不会出错」式表述）+ **已知派生视图形态写进标准防误报**（§8 两点形态入验收场景的预期形态栏，避免当 bug 报）+ 库侧硬证据优先（如「隔离库内该 record 恰 1 条会话条目」直接证锚稳定）。验收计划结构先例（两设计同型）：单测表（U 编号 × 用例 × 回溯目标）+ 真机表（V 编号 × 步骤 × 通过标准，实施期探针场景显式标注其 go/no-go 门身份）+ 变体覆盖（正常链 / 参数变体 / 降级路径各一）。
 
 **Electron 形态复验义务**：本地 CLI 探针的 execPath 是真 node；生产环境引擎与 app-server 跑在 Electron `process.execPath + ELECTRON_RUN_AS_NODE=1` 形态——执行器矩阵与探针义务的权威源 = `packages/subagent-engine-sdk/src/node-executor.ts`（矩阵头注 :10-18：①打包宿主注入 `TAIJI_AGENT_ENGINE_NODE` + Electron 二进制同点注入 `ELECTRON_RUN_AS_NODE=1`、②runtime sidecar `process.execPath + ELECTRON_RUN_AS_NODE=1`、③standalone 走 PATH node；`probeNodeExecutor` :43-70 首用探针，失败 → `engine_not_found` + 指引）。引擎构造子进程 command 时必须传 `process.execPath` 字面值并附该 env，否则 Electron 下会拉起 GUI 实例；**探针须在 Electron 环境复验一次 spawn 面**（本地 node 探针通过 ≠ 生产形态通过）。
 
@@ -312,13 +312,13 @@ data-plane 10s 未答 = 引擎故障 → 杀进程 + 在途 run 失败（`REVERS
 | §3 capabilities | `protocol/contract-types.ts`（`EngineCapabilities`）+ 两引擎声明点（`zcode-engine.ts` `capabilities()` + 各包 manifest） + `capability-gate.ts` + `chat-rounds.ts` | 新增能力位同批：`EngineCapabilities` 类型 + manifest **CAPABILITY_ENUMS** 词表 + `CONSERVATIVE_CAPABILITIES` 保守值 + gate 判据 + 两引擎两镜像声明（枚举编译校验拦截漏改）；gate 双向判定 | C-ext-20 |
 | §4 错误码 | `subagent-core/.../engine/common/errors.ts` + SDK `protocol/error-codes.ts` | **封闭枚举 + `DEFAULT_RECOVERY_HINTS` Record 全集编译强制** | — |
 | §5 run 载荷 | `protocol/methods.ts`（`RunParams`/`RunContextParams`）+ `contract-types.ts`（`AgentCallOpts`/`ResumeAnchor`） | 帧级 schema（`protocol-schema.test.ts`/`resume-schema.test.ts`） | C-proc-09（relay 身份键）、[zcode-session-db-isolation.md](../../architecture/zcode-session-db-isolation.md) |
-| §6 事件 | `contract-types.ts`（`AgentEvent`）+ `assembly/types.ts`（语义锚定）+ `event-journal-wiring.ts` | apply-entry-equivalence 等价测试族（投影变更须补用例） | C-proc-13 |
+| §6 事件 | `contract-types.ts`（`AgentEvent`）+ `assembly/types.ts`（语义锚定）+ `event-journal-wiring.ts` | apply-entry-equivalence 等价测试族（映射变更须补用例） | C-proc-13 |
 | §7 生命周期 | `zcode-subagent-cli/src/session-channel.ts` + `zcode-engine.ts` + `constants.ts`（引擎侧）；`assembly/conversation-continuation.ts`（宿主侧） | conformance 套件 | C-proc-09/13、[crash-forensics-and-watchdog.md](../../architecture/crash-forensics-and-watchdog.md) 附录 E |
-| §8 读取投影 | `zcode-subagent-cli/src/reader.ts` + `parser.ts` + `db-path.ts`（`zcodeDbPathAllowlist` 白名单集合）+ `contract-types.ts`（`SessionView`）+ `session-view-service.ts` | — | C-data-20/22 |
+| §8 读取派生视图 | `zcode-subagent-cli/src/reader.ts` + `parser.ts` + `db-path.ts`（`zcodeDbPathAllowlist` 白名单集合）+ `contract-types.ts`（`SessionView`）+ `session-view-service.ts` | — | C-data-20/22 |
 | §9 env/目录 | `packages/shared/src/constants.ts`（`ENV_WHITELIST_PREFIXES`）+ `spawn-env-contract.ts` + `engine/common/data-dir.ts` + `engine/paths.ts` + SDK `spawn.ts`/`env.ts`（引擎侧 spawn/env 契约） | `check_spawn_env_boundary.py`、路径白名单检查、`check_env_whitelist_sync.py` | [env-propagation-boundary.md](../../architecture/env-propagation-boundary.md)、C-proc-09、C-proc-12、C-ext-20、C-data-22 |
 | §10 可靠性模式 | 本指南自定义（模式源 = 设计 3/4 对抗审查裁决，裁决正文暂在仓外，见头部）；已实现参照 `event-journal-wiring.ts`（`activity` 豁免的「同通道同失败」判别） | — | — |
 | §11 验收 | `subagent-engine-sdk/src/node-executor.ts`（执行器矩阵）+ [TEST-STRATEGY.md](../../TEST-STRATEGY.md) | `check-vitest-guard.mjs`（测试防线挂载） | [TEST-STRATEGY.md](../../TEST-STRATEGY.md)、docs/testing/ |
-| 投影检查（已建，2026-09-18） | `scripts/check-guide-contract-projection.mjs`——本指南 §3 能力位表 / §4 两层词表 ↔ 源码词表投影 diff（pre-commit 按指南与契约源码路径触发，install-hooks.sh 对应块；先例：CSS token SSOT check） | 投影失同步即拦截（计数 + 集合双向对账） | 根 AGENTS.md 主题索引「更新触发」行 |
+| 派生视图检查（已建，2026-09-18） | `scripts/check-guide-contract-projection.mjs`——本指南 §3 能力位表 / §4 两层词表 ↔ 源码词表派生视图 diff（pre-commit 按指南与契约源码路径触发，install-hooks.sh 对应块；先例：CSS token SSOT check） | 派生视图失同步即拦截（计数 + 集合双向对账） | 根 AGENTS.md 主题索引「更新触发」行 |
 
 本表已登记进 doc-symbol-drift 检查（`scripts/check-doc-symbol-drift.mjs` 的 **DOC_MODULE_MAP**，7 条模块路径——SDK 全 src / core 引擎子域 / `path-encoding.ts` / 两引擎包全 src / shared 两常量文件）；登记蓝本 = 本表（按实际引用符号逐模块登记，宁缺勿滥）。非导出的模块内常量不进检查符号表，以粗体非反引号形态引用（**DOC_MODULE_MAP** 本身即先例）。
 
@@ -330,7 +330,7 @@ data-plane 10s 未答 = 引擎故障 → 杀进程 + 在途 run 失败（`REVERS
 4. 按 §3 声明 capabilities（引擎类 + package.json 两镜像同批；头注同批写依据）。
 5. 按 §4 登记错误码（引擎合成码进宿主枚举 + 恢复模板，漏登记编译失败）。
 6. 按 §5-§9 落 params/事件/生命周期/读取/env 义务（接管点复刻、journal 义务、写入面登记逐条过）。
-7. 按 §11 产出验收计划（go/no-go 探针先行、Electron 形态复验、已知投影形态入标准）。
+7. 按 §11 产出验收计划（go/no-go 探针先行、Electron 形态复验、已知派生视图形态入标准）。
 8. 上游引擎（pi/zcode 之外）对接另加：上游语义断言单点登记（先例 C-pi-02——pi 语义断言以 node_modules 实装版为权威源；机器登记 + 探针 + 版本门禁承载见 C-proc-08）。
 
 ## 14. 既有引擎改造评估 checklist

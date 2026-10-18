@@ -217,9 +217,9 @@ H1 后续聊要点：每轮续聊 = 独立 run（`RunParams.resume` 续写原 se
 
 > 权威 SSOT：[architecture/subagent-record-persistence-consolidation.md](architecture/subagent-record-persistence-consolidation.md)（§3.3 检查分级 / §3.1 意图级 API 表）；约束登记 C-data-20。
 
-record 持久化写面（事件文件 `<recordsDir>/<id>.events` / `.record-binding` 绑定 sidecar / `.alive` 写权声明 / manifest / sessions-index / `subagent-record` entry）的唯一写入口 = `RecordStore` 意图原语（`packages/subagent-core/src/execution/persistence/record-store.ts`）；事件流是 record 域唯一事实源（收条由 `record-settled` / `record-round-idle` 帧承载），manifest 是带水位（eventsStamp）纯索引投影。两级检查：eslint `no-restricted-imports`（store 外禁 import 写函数，模块边界一级拦截）+ pre-commit `scripts/check-record-write-surface.mjs`（写函数 / 字面量直写形态 grep 门兜底，含 `.events` 事件文件直写判定）。
+record 持久化写面（事件文件 `<recordsDir>/<id>.events` / `.record-binding` 绑定 sidecar / `.alive` 写权声明 / manifest / sessions-index / `subagent-record` entry）的唯一写入口 = `RecordStore` 意图原语（`packages/subagent-core/src/execution/persistence/record-store.ts`）；事件流是 record 域唯一事实源（收条由 `record-settled` / `record-round-idle` 帧承载），manifest 是带水位（eventsStamp）纯索引派生视图。两级检查：eslint `no-restricted-imports`（store 外禁 import 写函数，模块边界一级拦截）+ pre-commit `scripts/check-record-write-surface.mjs`（写函数 / 字面量直写形态 grep 门兜底，含 `.events` 事件文件直写判定）。
 
-- 处置：改调 RecordStore 意图原语（`markSettled` / `markRoundIdle` / `markReopened` / `markSettledOut` / `acquireWriteLease` / `reportRecordTransition`；legacy 终态桥接族 `markFinalized` / `markCancelled` 保留至读侧兼容收口）；读函数不受限。复跑：`node scripts/check-record-write-surface.mjs`（应输出 store 外零命中）。
+- 处置：改调 RecordStore 意图原语（`markSettled` / `markRoundIdle` / `markReopened` / `markSettledOut` / `acquireWriteLease` / `reportRecordTransition`；legacy 终态桥接族 `markFinalized` / `markCancelled` 保留至读侧兼容收尾）；读函数不受限。复跑：`node scripts/check-record-write-surface.mjs`（应输出 store 外零命中）。
 - 误拦判定：新写面确属 store 外自有域时，在检查脚本 `EXTENSION_DOMAIN_ALLOWLIST` 登记文件并注明设计依据（登记处即登记），禁止行内豁免绕过。
 
 ### 14. catalog provider 自定义网关失效 / 端点与官网不符（启动清洗剥除手编网关，2026-09-10 D2 已接受代价）
@@ -354,9 +354,9 @@ VITE_E2E=true VITE_MOCK=true pnpm run build:e2e
 
 ### 26. workflow run 状态异常排查：run 事件 journal 取证（2026-09-21 run 显式状态机落地）
 
-- **取证源**：workflow run 生命周期由显式状态机裁决（`subagent-core/src/orchestration/run-events.ts`，`RUN_TRANSITIONS` 转移表 + `transition` 纯函数，表外转移 fail-fast）；record 流 journal 是 run 态权威投影源——`<agentDir>/workflow-state/<runId>.record.jsonl`（[D1] record 单源，后缀经 core `RUN_EVENT_JOURNAL_SUFFIX`；workspace 有活跃 session 时为 `<agentDir>/sessions/<slug>/workflow-state/`，推导 = `resolvePiWorkflowStateDir`），JSONL 逐行（`run-created / phase-started / agent-started / agent-retrying / agent-settled / phase-settled / run-interrupted / run-resumed / run-settled`；`agent-started` 载荷携带 `phase?` = 剧本 phase 归属，抽屉分组视图供源；成员词表权威源 = `subagent-core/src/orchestration/run-events.ts` 的 `RUN_EVENT_TYPES`）。旧格式 `.events.jsonl` 两件套不读不写（历史 run 不进 GUI 列表、resume 拒绝，随孤儿对账清理自然消亡）——不是取证源。
+- **取证源**：workflow run 生命周期由显式状态机裁决（`subagent-core/src/orchestration/run-events.ts`，`RUN_TRANSITIONS` 转移表 + `transition` 纯函数，表外转移 fail-fast）；record 流 journal 是 run 态权威派生视图源——`<agentDir>/workflow-state/<runId>.record.jsonl`（[D1] record 单源，后缀经 core `RUN_EVENT_JOURNAL_SUFFIX`；workspace 有活跃 session 时为 `<agentDir>/sessions/<slug>/workflow-state/`，推导 = `resolvePiWorkflowStateDir`），JSONL 逐行（`run-created / phase-started / agent-started / agent-retrying / agent-settled / phase-settled / run-interrupted / run-resumed / run-settled`；`agent-started` 载荷携带 `phase?` = 剧本 phase 归属，抽屉分组视图供源；成员词表权威源 = `subagent-core/src/orchestration/run-events.ts` 的 `RUN_EVENT_TYPES`）。旧格式 `.events.jsonl` 两件套不读不写（历史 run 不进 GUI 列表、resume 拒绝，随孤儿对账清理自然消亡）——不是取证源。
 - **判定姿势**：run 卡死/终态异常先读 journal 事件序列对照合法转移表——① 缺 `run-settled` 事件 = run 未终局（查 pump 日志）；② schema 任务武装回执异常：journal 里没有也不该有 `armed` 事件（占位事件已随 D5 删除——回执经运行时事件路由喂入宿主等待门，不落 journal）；现行断言点 = run 终态 failed 且 error 文案含 `[schema-arming]`（宿主 armed 回执等待窗窗满合成失败 outcome，fail-fast 先行——查引擎侧武装断言与 `@zhushanwen/pi-structured-output` 扩展装载；native 引擎 + schema 任务才有武装面，emulated 引擎 / 无 schema 任务豁免不适用本条）；③ debug 日志 `run event dispatch yielded (runId=...)` = 表外转移让位，常见根因是派发链 runId 键错、事件落进占位键（旁证：binding sidecar `.record-binding` 的 `parentRunId` 为 `sar-unattached` 占位而非真实 runId = 未走 workflowAgentDispatch 通道）。
-- **注册表投影**：run 列表态 = journal fold（四相 missing/active/terminal/interrupted），不看文件 mtime；journal 缺失即 missing 相，手工挪动/删除 journal 文件直接改变投影结果。
+- **注册表派生视图**：run 列表态 = journal fold（四相 missing/active/terminal/interrupted），不看文件 mtime；journal 缺失即 missing 相，手工挪动/删除 journal 文件直接改变派生视图结果。
 
 ### 27. 项目 skill 实体（.agents）排障：symlink 形态判定 / 实体还原 / 检出旧 ref 脱钩（2026-09-25 ADR-0086）
 
@@ -422,7 +422,7 @@ node scripts/check-pi-resources-links.mjs --fix   # 外部 symlink → 真实复
 终端实例标识为 `term:<会话id>:<序号>`，注册表与序号分配的**唯一事实源在 runtime**（重键 `ptyMap` + 会话级计数器），界面经 `terminal.list` 对账恢复。按症状分路：
 
 - **「开第二个终端返回的还是第一个」**：先看是**反向混跑**还是缺陷——dev 工作流里 renderer 走 Vite HMR、runtime 是 tsx **非 watch**，所以「新界面 × 旧 runtime」可真实共存；旧 runtime 会按会话幂等复用单 PTY（静默复用、无报错）。处置：重启 `pnpm dev`（runtime 侧改动不重启不生效）；打包形态无混跑窗口（界面与后台成对原子更新）。
-- **「活着的死实例」**（切换条有条目、输入必得 `unknown_terminal_id`）：`spawn` 完成到界面建档之间的窗口内实例就已死亡（`terminal.exit` 帧无归属可投递）→ 残留条目。**自动回收双通道**：首次对该条目的 `write` / `kill` / `attach` 收到否定回执（`unknown_terminal_id`）即执行三腿清理；或下一次 `terminal.list` 对账（清单外条目）回收。若**反复出现且不自动消失**，取证 `<数据目录>/logs/runtime-*.log` 的 `[terminal]` 行与 `terminal.list` 返回，按缺陷报（回收通道应幂等）。
+- **「活着的死实例」**（切换条有条目、输入必得 `unknown_terminal_id`）：`spawn` 完成到界面建档之间的窗口内实例就已死亡（`terminal.exit` 帧无归属可投递）→ 残留条目。**自动回收双通道**：首次对该条目的 `write` / `kill` / `attach` 收到否定回执（`unknown_terminal_id`）即执行三路径清理；或下一次 `terminal.list` 对账（清单外条目）回收。若**反复出现且不自动消失**，取证 `<数据目录>/logs/runtime-*.log` 的 `[terminal]` 行与 `terminal.list` 返回，按缺陷报（回收通道应幂等）。
 - **runtime 重启后旧终端输出消失 / 编号从「终端 1」重算**：**既定语义**（世代变更：注册表纯内存，重启即清空、序号重算；界面经世代重置清输出分区与写队列）。判据 = auth token 变化（**端口值不可靠**——重启常落回原端口）。反向异常：**同世代 WS 闪断却丢了历史** = 世代判据误判，查 `getCurrentToken()` 读取面与连接态保存的旧值。
 - **应用退出后仍有终端子进程**：正常退出路径由 shutdown 序的 `dispose-terminal-pties`（`destroyAllPties`）全量清理；**异常死亡**（SIGKILL / 崩溃）下 `nohup`/disown 类子进程可能残留（已登记的前提 P5，属 OS 层行为）——按系统进程表定位后手动清理。
 

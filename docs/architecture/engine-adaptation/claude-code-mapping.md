@@ -66,7 +66,7 @@ stream_event 内层 `event.type` 全集（Anthropic 流协议，src/services/api
 
 | 源类型 | taiji 事件 | 映射方式 | 证据 |
 |---|---|---|---|
-| assistant（message.content[].type=text/thinking/tool_use 整块到达） | text_delta / thinking_delta / tool_start + tool_end | 合成：适配层按 content block 拆解，text block → text_delta（整块单发）、thinking block → thinking_delta、tool_use block → tool_start（args=input 对象）；result 帧后对未闭合 tool 补 tool_end | src/entrypoints/sdk/coreSchemas.ts:1347-1356；content block 组装 src/services/api/claude.ts:2192-2210 |
+| assistant（message.content[].type=text/thinking/tool_use 整块到达） | text_delta / thinking_delta / tool_start + tool_end | 合成：适配层按 content block 拆解，text block → text_delta（整块单发）、thinking block → thinking_delta、tool_use block → tool_start（args=input 对象）；result 帧后对未收尾 tool 补 tool_end | src/entrypoints/sdk/coreSchemas.ts:1347-1356；content block 组装 src/services/api/claude.ts:2192-2210 |
 | stream_event > content_block_delta > text_delta | text_delta | 直接（`--include-partial-messages` 开启时） | src/services/api/claude.ts:2113-2126 |
 | stream_event > content_block_delta > thinking_delta | thinking_delta | 直接 | src/services/api/claude.ts:2148-2161 |
 | stream_event > content_block_delta > signature_delta / citations_delta / connector_text_delta | （无） | 丢弃（签名/引用/连接文本非 taiji 事件面） | src/services/api/claude.ts:2084-2086, 2127-2147 |
@@ -84,7 +84,7 @@ stream_event 内层 `event.type` 全集（Anthropic 流协议，src/services/api
 | system subtype=api_retry | activity | 合成：重试等待期活性信号（携带 attempt/max_retries 细节丢弃） | src/QueryEngine.ts:943-955 |
 | system subtype=session_state_changed | activity | 合成：idle/running/requires_action 状态翻转作活性信号 | src/entrypoints/sdk/coreSchemas.ts:1735-1747 |
 | system subtype=task_progress | activity | 合成：后台任务进度节流帧（含 total_tokens/tool_uses/duration_ms，丢弃） | src/entrypoints/sdk/coreSchemas.ts:1750-1767 |
-| system subtype=task_started / task_notification | tool_start / tool_end（Task 型工具）或 activity | 合成：后台任务生命周期可投影为对应 tool 事件 | src/entrypoints/sdk/coreSchemas.ts:1694-1733 |
+| system subtype=task_started / task_notification | tool_start / tool_end（Task 型工具）或 activity | 合成：后台任务生命周期可映射为对应 tool 事件 | src/entrypoints/sdk/coreSchemas.ts:1694-1733 |
 | system subtype=post_turn_summary | turn_end{summary} | 合成：summary 字段入 turn_end.summary（可选增强） | src/entrypoints/sdk/coreSchemas.ts:1544-1570 |
 | system subtype=hook_started / hook_progress / hook_response / files_persisted / elicitation_complete | （无） | 丢弃（hook 生命周期/文件持久化回执非事件面） | src/entrypoints/sdk/coreSchemas.ts:1604-1692, 1779-1792 |
 | system subtype=local_command_output | text_delta | 合成（content 作正文增量；headless 下少见） | src/entrypoints/sdk/coreSchemas.ts:1590-1602 |
@@ -133,7 +133,7 @@ Entry type 全集（grep 穷尽自 `Entry` union，src/types/logs.ts:297-317，1
 |---|---|---|
 | TranscriptMessage(user)，content 无 tool_result | 新 turn 的起点标记（用户输入不进 turn 正文） | src/types/logs.ts:221-231 |
 | TranscriptMessage(assistant) | 按内容块拆入当前 turn：text→text、thinking→thinking、tool_use→toolCalls[{toolName,args}]（args=input 对象） | 同上；内容块形态同 §4 |
-| TranscriptMessage(user) 含 tool_result | 回填最近未闭合 toolCall 的 result/isError（按 tool_use_id 配对） | src/utils/messages.ts:838-850 |
+| TranscriptMessage(user) 含 tool_result | 回填最近未收尾 toolCall 的 result/isError（按 tool_use_id 配对） | src/utils/messages.ts:838-850 |
 | TranscriptMessage(system, compact_boundary) | 压缩边界：之前 turns 归档、之后开新段（read 重建时保留边界标记或分段） | src/QueryEngine.ts:597-605 |
 | TranscriptMessage(attachment) | 丢弃（附件元数据） | src/utils/sessionStorage.ts:139-146 |
 | 其余 14 种元数据 Entry | 丢弃（标题/标签/快照/工作树状态等，非对话内容） | src/types/logs.ts:55-295 |
@@ -160,7 +160,7 @@ claude 侧反向协议 = stdout `control_request`（CLI → SDK host，src/entry
 | UiRequest method | 可映射 | 说明 |
 |---|---|---|
 | confirm | 能 | can_use_tool 是「允许/拒绝」二元询问 → {confirmed:true/false} ↔ behavior allow/deny；title/display_name/description/decision_reason → title/message |
-| select | 部分 | can_use_tool 无选项列表；permission_suggestions（权限规则建议，数组）语义不同，可投影为附加选项但语义错配，建议降级 confirm |
+| select | 部分 | can_use_tool 无选项列表；permission_suggestions（权限规则建议，数组）语义不同，可映射为附加选项但语义错配，建议降级 confirm |
 | input | 无 | can_use_tool 无自由文本输入形态；elicitation 的 form 模式（requested_schema）最接近，可映射为多条 input 或降级 |
 | editor | 无 | 无对应 |
 | notify | 部分 | hook_callback / elicitation url 模式的单向提示可合成 notify；无原生 fire-and-forget UI 请求 |
@@ -188,7 +188,7 @@ deny 应答的 `interrupt:true`（src/utils/permissions/PermissionPromptToolResu
 ## 9. gap 清单
 
 **源有靶无**（claude 有、taiji 协议面无承载，适配层丢弃或仅诊断消费）：
-- 事件流：rate_limit_event、auth_status、prompt_suggestion、post_turn_summary（作 turn_end.summary 增强除外）、task_started/task_progress/task_notification（非 Task 投影时）、hook_started/hook_progress/hook_response、files_persisted、elicitation_complete、local_command_output、streamlined_text/streamlined_tool_use_summary（精简输出模式专属）、tool_use_summary、keep_alive、update_environment_variables
+- 事件流：rate_limit_event、auth_status、prompt_suggestion、post_turn_summary（作 turn_end.summary 增强除外）、task_started/task_progress/task_notification（非 Task 映射时）、hook_started/hook_progress/hook_response、files_persisted、elicitation_complete、local_command_output、streamlined_text/streamlined_tool_use_summary（精简输出模式专属）、tool_use_summary、keep_alive、update_environment_variables
 - result 帧字段：modelUsage（分模型明细）、permission_denials、fast_mode_state、stop_reason、duration_api_ms
 - 控制请求：rewind_files、cancel_async_message、seed_read_state、mcp_message/mcp_set_servers/mcp_reconnect/mcp_toggle/mcp_status、stop_task、apply_flag_settings/get_settings、set_model/set_max_thinking_tokens（运行时切换，taiji 无对应方法）、elicitation、hook_callback（taiji 无 hook 面）
 - flag 面：`--max-budget-usd`、`--task-budget`、`--fallback-model`、`--betas`、`--settings`、`--add-dir`、`--mcp-config`、`--plugin-dir`、`--workload`、`--no-session-persistence`、`--tools`（工具白名单，denyTools 之外的另一半）

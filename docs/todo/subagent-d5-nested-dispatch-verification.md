@@ -8,7 +8,7 @@
 
 - `/subagents` 树的嵌套层级展示；
 - `subagent-identity` 条目（含身份四元组与 D4 已上协议的 identity 信封字段 slug / startedAt / mode）；
-- core 三读者（壳侧 fold、runtime 投影、session-reader 锚链）对嵌套 run 的读取一致性。
+- core 三读者（壳侧 fold、runtime 派生视图、session-reader 锚链）对嵌套 run 的读取一致性。
 
 ## 执行步骤
 

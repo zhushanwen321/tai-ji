@@ -159,7 +159,7 @@ pi 的消息 content 是数组；taiji 侧 `Message.content` 为 `string | Segme
 
 ### 7.1 Border-radius 约束
 
-三档圆角：默认 8px / 小元素（chip、badge、指示点容器）3px / 大容器（面板、modal、float-panel）12px，圆形指示器与无圆角不受限。禁止硬编码 px，使用对应 Tailwind class（`rounded-sm` / `rounded` / `rounded-lg`）。数值权威 = [`style.css`](../packages/renderer/src/style.css)（值真值，运行时唯一源）；[DESIGN.md](DESIGN.md) §4 为登记对照，其 frontmatter 投影与 style.css 的值相等由 `.githooks/check_css_token_ssot.py` 机器检查。
+三档圆角：默认 8px / 小元素（chip、badge、指示点容器）3px / 大容器（面板、modal、float-panel）12px，圆形指示器与无圆角不受限。禁止硬编码 px，使用对应 Tailwind class（`rounded-sm` / `rounded` / `rounded-lg`）。数值权威 = [`style.css`](../packages/renderer/src/style.css)（值真值，运行时唯一源）；[DESIGN.md](DESIGN.md) §4 为登记对照，其 frontmatter 派生视图与 style.css 的值相等由 `.githooks/check_css_token_ssot.py` 机器检查。
 
 ### 7.2 Markdown 文本元素样式规范
 

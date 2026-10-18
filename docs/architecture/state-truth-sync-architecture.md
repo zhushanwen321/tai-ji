@@ -110,7 +110,7 @@ landing 页 chip 区（`packages/renderer/src/components/new-task/Landing.vue` �
 |---|---|---|
 | 2026-08-20 | thinking 档位钳制登记进 troubleshooting 观察项 #4 | 登记（人读） |
 | 2026-08-27 | 事故 B：设最高档过一会自动变关——乐观写请求值，pi 钳制后无人回读 | C-pi-13「改状态 RPC 一律回生效值」机制修 |
-| 2026-08-27 | 事故 A 附属：终态统一坍缩 `closedReason:"gc"`，三处下游各自重新推导成败 | 单点修 |
+| 2026-08-27 | 事故 A 附属：终态统一合并为 `closedReason:"gc"`，三处下游各自重新推导成败 | 单点修 |
 | —— | structured-output：校验 LLM 自报 schema 致修复静默丢失（自报值 ≠ 权威值同族） | 方案 A：唯一权威 schema 校验 |
 | —— | u3 记忆表被非用户动作污染（auto 值经首发透传写进 per-model 记忆） | u3 D2 跟随 watch 门禁 |
 | 2026-09-04 | composer-model-chaos：session 模型串台 + restore 窗口假值，6 机制根因、4 轮对抗 review | D1-D5（sidecar 持久化 / 显示分流 / 移除 config.defaults 广播 / lastUsedModel KV） |

@@ -4,7 +4,7 @@
 >
 > 当前态权威文档：
 > - 视觉设计权威：[docs/DESIGN.md](DESIGN.md)（v6 范式 + token 登记对照；2026-09-13 page-design 目录退役后收敛并入）
-> - 值真值：[`packages/renderer/src/style.css`](../packages/renderer/src/style.css)（运行时唯一源；DESIGN.md frontmatter 投影挂值相等检查）
+> - 值真值：[`packages/renderer/src/style.css`](../packages/renderer/src/style.css)（运行时唯一源；DESIGN.md frontmatter 派生视图挂值相等检查）
 > - 视觉规格稿：`v6-spec-*.html` 已删除（2026-09-13 退役，git 可追溯）；`.tmp/v6/` demo 为 gitignored 临时产物已清理（不入库不保留），现行验证载体 = dev 实例真机 + @taiji/ui 组件实装
 >
 > 已删除过程文档（2026-09-13 收尾，残值并入 v6-master-spec.md，git 可追溯）：v6-design.md（五原则原始定稿）、v6-summary.md（索引/摘要）、design-system.md（v3 原语层，活跃裁决并入 master-spec §3.2/§5.1/§5.13/§6.1）

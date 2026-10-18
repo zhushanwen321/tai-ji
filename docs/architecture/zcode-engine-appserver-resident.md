@@ -1,7 +1,7 @@
 # zcode engine app-server 常驻化改造设计（core 侧）
 
 > **2026-09 breaking 修订（用户拍板，`refactor-zcode-engine-shared-home` 分支落地）**：
-> ① **删除 CLI spawn 降级链**——`TAIJI_ZCODE_MODE` 钉扎、probe 冒烟门控（appserver-probe.ts）、
+> ① **删除 CLI spawn 降级链**——`TAIJI_ZCODE_MODE` 模式固定变量、probe 冒烟门控（appserver-probe.ts）、
 > protocol-drift 首败降级全部移除；launcher.ts / appserver-home.ts / appserver-probe.ts 整文件删除。
 > 协议漂移不再降级保底，直接报可操作错误。本文 D2（降级链）章节随之**作废**。
 > **[注入机制观察项，2026-09-19 R-upgrade 阶段 5 trace 实证]** 3.12.x CLI 的 provider

@@ -46,7 +46,7 @@
 >   ④`initialize.models` **三态映射**；⑤`canonicalRef` 改在 core 侧处理无斜杠 ref（第 4 条契约变更）；
 >   ⑥启动解析执行器单一 env `TAIJI_AGENT_ENGINE_NODE` 经 L0 注入（不依赖继承）+ `ELECTRON_RUN_AS_NODE` 归 L0；
 >   ⑦数据根矩阵补 **standalone pi**（core 侧解析注入）；⑧stderr 清理判据 = 同前缀 + pid 未存活 + mtime（参数读 `TAIJI_LOG_*`）；
->   ⑨**删冷启动静态 JSON 兜底**（与投影规则冲突）；⑩fixture 路径三处统一、双向可赋值断言、错误码补 `engine_capability_unsupported`、A11 时效断言改「dispose 发起后 1s」。
+>   ⑨**删冷启动静态 JSON 兜底**（与派生规则冲突）；⑩fixture 路径三处统一、双向可赋值断言、错误码补 `engine_capability_unsupported`、A11 时效断言改「dispose 发起后 1s」。
 > - v6（2026-09-08，**减法收敛**——R5 四个 reviewer 因会话压缩被中止、无报告；按 `flow/write.md` §101「轮次问题同级 → 回到方案对比重做」先做减法）：
 >   ①**同步范围单源化**：删「握手后缓存 + 失效时机 + 保鲜/陈旧检查」整套机器 → 同步成员只读 manifest（`capabilities` / `modelCatalog`），握手降为诊断面（不一致 warn，不参与判据）；
 >   ②**env 四层压回三层**：删 L3 `engines.<id>.env` extras（优先级歧义源）+ L3 config 去 `env` 键；
@@ -212,7 +212,7 @@ core 负责：选引擎 → 建 journal → 派发任务 → 收集事件流 →
 ```
 宿主进程（pi 扩展 / zsw CLI）——业务代码零改动（靠 §3.6 D8 兼容公共面保证）
  └─ @zhushanwen/subagent-core（壳）
-      ├─ 编排层（不变）：SAR / workflow / record-store / journal / session-view 投影
+      ├─ 编排层（不变）：SAR / workflow / record-store / journal / session-view 派生视图
       ├─ 路由层（签名不变）：三层优先级 + probe（不可用即显式失败，不换引擎）（routing.ts）
       ├─ 注册表（改造）：id → EngineDescriptor（只持有「怎么启动」+ 声明的能力位）
       │     └─ 发现器：manifest 扫描 + 配置覆盖 + 宿主发现根
@@ -361,7 +361,7 @@ runtime 进程（GUI 详情页①级读）──spawn（按需 + idle 复用）�
 **版本协商**：`ENGINE_PROTOCOL_VERSION = 1`（core 支持 `>=1 <2`）；越界 → `engine_protocol_mismatch`
 （含双方版本 + 升级指引），该引擎标记不可用，不影响其他引擎与宿主。
 
-**协议演进宪法**（条文权威 = 本节 + [ADR-0071](../adr/decisions.md)；代码侧投影 = SDK protocol 四文件头注与 `contract-closure.test.ts` 机器锁）：
+**协议演进宪法**（条文权威 = 本节 + [ADR-0071](../adr/decisions.md)；代码侧映射 = SDK protocol 四文件头注与 `contract-closure.test.ts` 机器锁）：
 
 *字段归属三分判据（新增 wire 字段按决策树依序裁决；存量不搬家不重判，判据只约束新增）*：
 ① 引擎不消费它任务能否正确完成？能 → 宿主自持不上协议（「正确」含满足字段声明携带的约束面——
@@ -491,16 +491,16 @@ core 与引擎**统一从 SDK 读**——**不引入 core → `@taiji/shared` �
 （见 §3.3 能力位段的时序）；**同步成员（capabilities / listModels / validateModel）全部直读 manifest，无缓存、无失效时机**
 （v6 减法，见 §3.3 同步成员清单）。
 
-**engines.json 投影形态（P0-19 四问）**
+**engines.json 派生视图形态（P0-19 四问）**
 
 | 问 | 答案 |
 |---|------|
 | 消费方 | runtime RPC（`session-records.ts` 读取 + 冷启动静态声明回退）、renderer 选择器（`SubagentEngineSection.vue`）、写入门 `setSubagentDefaultEngine`（清单外拒绝） |
-| 投影规则 | 清单 = **已发现且可执行**的引擎 id 数组；契约 `SubagentEnginesFile{v:1, engines: string[]}` **不改** |
+| 派生规则 | 清单 = **已发现且可执行**的引擎 id 数组；契约 `SubagentEnginesFile{v:1, engines: string[]}` **不改** |
 | 速率/单调性 | 每次 session_start 幂等写（内容不变零写） |
 | 清理通道 | 引擎卸载 → 下次扫描自动消失；`defaultEngine` 指向已卸载引擎 → 派发期 `engine_not_found`（列出已发现引擎 + 配置路径 + 安装指引） |
 | 「灰显 + 原因」 | **v1 不做**（需改契约 + renderer，违反 G1/G3）；不可用引擎不进清单，派发时给 `engine_not_found` + 原因 + 恢复指引 |
-| **冷启动回退源（H5 连带面，单源）** | 现状二级回退 = `engines.json` 缺失 → 读**扩展包** `taiji.subagentEngines` → 最终 `['pi']`（`session-records.ts:337-392`）。H5 后该字段消失 → **回退源 = runtime 自身发现结果**（W8 三级发现，与派发同源）。**不保留静态 JSON 兜底**：零命中时静态清单列出的 id 恰好**不可派发**（无引擎被发现 = 无 bin 可执行），会让选择器出现「能选不能跑」的项，且与本节投影规则「不可用引擎不进清单」直接冲突；零命中就返回**空清单 + 「未发现任何引擎包」状态**（GUI 按既有语义给 `engine_not_found` + 安装指引）。**量级**：冷启动窗口 = 首次 RPC 前（百毫秒级）；**重审触发条件** = 出现「选择器列出不可派发引擎」或「已装引擎不可见」报告；**判定** = 可接受。同步改两个守护测试（`engines-declaration.test.ts` / `session-service-engine-config.test.ts`）；**A12⑦ 断言 = 「已安装引擎全部可见（含第三方）」** |
+| **冷启动回退源（H5 连带面，单源）** | 现状二级回退 = `engines.json` 缺失 → 读**扩展包** `taiji.subagentEngines` → 最终 `['pi']`（`session-records.ts:337-392`）。H5 后该字段消失 → **回退源 = runtime 自身发现结果**（W8 三级发现，与派发同源）。**不保留静态 JSON 兜底**：零命中时静态清单列出的 id 恰好**不可派发**（无引擎被发现 = 无 bin 可执行），会让选择器出现「能选不能跑」的项，且与本节派生规则「不可用引擎不进清单」直接冲突；零命中就返回**空清单 + 「未发现任何引擎包」状态**（GUI 按既有语义给 `engine_not_found` + 安装指引）。**量级**：冷启动窗口 = 首次 RPC 前（百毫秒级）；**重审触发条件** = 出现「选择器列出不可派发引擎」或「已装引擎不可见」报告；**判定** = 可接受。同步改两个守护测试（`engines-declaration.test.ts` / `session-service-engine-config.test.ts`）；**A12⑦ 断言 = 「已安装引擎全部可见（含第三方）」** |
 
 **冲突与失败**：manifest 缺字段/不可解析 → warn 跳过该包（不阻断其他引擎）；同 id 覆盖 → info 留痕；
 `bin` 不存在/不可执行 → 标记不可用（不进清单）+ 派发错误给原因。
@@ -511,7 +511,7 @@ core 与引擎**统一从 SDK 读**——**不引入 core → `@taiji/shared` �
 |----|------|------|
 | 路由三层优先级 + probe（不可用即显式失败，不换引擎） | **core 保留** | `routing.ts` 纯决策，改为面向 descriptor/代理 |
 | capability-gate | **core 保留** | 引擎无关（persona-router 已删除 2026-09-13——零生产接线，随本轮设计代码同步清扫） |
-| journal 落盘 / record-store / session-view 投影 | **core 保留** | 数据所有权在宿主 |
+| journal 落盘 / record-store / session-view 派生视图 | **core 保留** | 数据所有权在宿主 |
 | 引擎进程生命周期（spawn/握手/重建/dispose/杀链） | **core 保留**（新增 `EngineClient`） | 与 `AppServerConnection` 同型但**引擎无关** |
 | conformance 套件 | **core 保留**（改为**协议黑盒套件**） | 引擎作者可用它自测 |
 | **引擎消费型公共层**（schema-emulation / kill-chain / nesting-guard / data-dir / journal-replay 的引擎侧用途） | **移入 SDK 包**（D7） | 它们不是「引擎无关」；但其中 `data-dir` / `journal-replay` / `kill-chain` **当前 import core 内部**，须先拆 seam（D7 逐条表） |
@@ -532,7 +532,7 @@ core 与引擎**统一从 SDK 读**——**不引入 core → `@taiji/shared` �
 | 协议类型与帧编解码（**契约类型 SSOT**：`AgentEvent`/`EngineHandleData`/`SessionView`/`EngineCapabilities`/`ProbeReport`/`InteractAction`/`AgentCallOpts`/`AgentOutcome`） | 两侧不许各写一份；**core 反向 re-export** 保上层消费方不变（不变量 2） |
 | 引擎侧原语：schema-emulation、nesting-guard、日志 facade | 无 core 内部依赖（直接搬） |
 | `data-dir` 解析（`resolveEngineDataDir(env)`） | 今天 `data-dir.ts:23` import `core/host-services.ts`（引擎进程无 `configureCore`）→ **拆 seam**：SDK 版参数化/env 优先，core 侧保留 `getHostServices()` 绑定 |
-| `journal-replay` 的**纯投影部分**（entry → record 的 reducer） | 今天 import `execution-record.ts:11-15`——所谓「纯 reducer」正是 core 的 `execution-record` → 下沉 SDK，**journal I/O 与②级降级链留 core** |
+| `journal-replay` 的**纯派生视图部分**（entry → record 的 reducer） | 今天 import `execution-record.ts:11-15`——所谓「纯 reducer」正是 core 的 `execution-record` → 下沉 SDK，**journal I/O 与②级降级链留 core** |
 | `kill-chain` 的**引擎侧部分** | 今天 import `orchestration/models/types.ts:13-16` + `registry.ts`（`DEFAULT_ENGINE_ID`）+ `core/logger.ts` → 契约类型随 SDK 下沉、`DEFAULT_ENGINE_ID` 改**参数注入**、logger 走 SDK facade |
 | `buildEngineChildEnv()`（env 契约） | F9：`buildOutboundChildEnv` 在 `@taiji/shared`（zsw 不可依赖）——SDK 是跨宿主 SSOT |
 | 身份 env 常量（`PI_SUBAGENT_*`） | 跨扩展契约锚点（`base-tool-enhance` 消费） |
@@ -569,7 +569,7 @@ pi 依赖宿主服务面更重——**两者拆分成本都不小**；zcode 仍�
 | H2 | core barrel 重导出引擎符号 | `src/index.ts:96-118/322-323` | 引擎符号迁走；**`markAllSpawnedChildrenDead`/`registerZcodeEngine`/`createZcodeEngine` 保留为兼容薄壳**（D8） | W11 |
 | H3 | package.json 暴露引擎子入口 `./engines/zcode/reader`、`./engines/zcode/constants` | `package.json` exports、`tsup.config.ts:25-26` | 随引擎外移删除；runtime 侧真实机制是 `noExternal`（`runtime/tsup.config.ts:54`）+ **bare `import("sqlite")` 检查**（`:85-95`）——**检查随 reader 迁往引擎包构建**；**新增**：SDK 必须加入 `noExternal`（否则打包态 `Cannot find module`） | W9/W11 |
 | H4 | 引擎进程生命周期导出在 pi 模块：`markAllSpawnedChildrenDead` | `engines/pi/session-runner.ts`、`src/index.ts:97` | 收割逻辑归 core `EngineClient` | W2/W11 |
-| H5 | 引擎清单声明在扩展包 package.json | `extensions/universal/subagent-workflow/package.json:34` | 声明迁到各引擎包 manifest；扩展包只声明**依赖**；**回退源 = runtime 自身发现结果**（无静态 JSON 兜底，§3.4 投影形态表） | W4/W8 |
+| H5 | 引擎清单声明在扩展包 package.json | `extensions/universal/subagent-workflow/package.json:34` | 声明迁到各引擎包 manifest；扩展包只声明**依赖**；**回退源 = runtime 自身发现结果**（无静态 JSON 兜底，§3.4 派生视图形态表） | W4/W8 |
 | H6 | 引擎代码进 extension bundle | `scripts/bundle-extensions.mjs:23-56/281` | external 边界加引擎包；引擎包单独 staging | W9 |
 | H7 | 跨宿主 vendor 粒度 | zsw `lib/vendor/subagent-core` | 增加 `lib/vendor/<engine>-subagent-cli`；**vendor 工具链在 zsw 仓，owner = zsw** | W9（zsw 侧） |
 | H8 | pi 引擎静态 import core 内部：`session-runner`/`lifecycle-manager`/`stdin-writer`/`session-reconstructor` | `pi-engine.ts:48-62`、`engines/pi/reader.ts:32` | 逐条定归属（D2 表）：`spawnedChildren` 镜像/杀链 → core `EngineClient`；idle 定时器 → core 回收层；`sendPromptCommand`/EPIPE → pi 包；`session-reconstructor` → 保持 core，pi 包经协议拿会话视图 | W6/W7 |
@@ -596,7 +596,7 @@ pi 依赖宿主服务面更重——**两者拆分成本都不小**；zcode 仍�
 | 宿主 | 现状 | 改造后 | 改动 |
 |------|------|--------|------|
 | **pi 扩展进程**（taiji） | 组合根 `registerPiEngine/registerZcodeEngine`；扩展 `src/index.ts:37/103` 调 `markAllSpawnedChildrenDead` | 发现器自动注册；兼容薄壳保留符号 | **零业务改动**（D8） |
-| **runtime 进程**（taiji） | 直消费 `readSubagentHistoryMessages` 做①级读；**从不 `configureCore`** | 成为**协议客户端**：发现源 = `TAIJI_AGENT_ENGINE_ROOTS` + node 解析 + `config.json` 三级（`engines.json` **仅用于 GUI 投影，不可作发现源**——它只有 id，无 bin/command）→ 按需 spawn 引擎 CLI 调 `read`（idle 复用）→ 失败降②级 journal | 需接线（宿主改动，A7 登记） |
+| **runtime 进程**（taiji） | 直消费 `readSubagentHistoryMessages` 做①级读；**从不 `configureCore`** | 成为**协议客户端**：发现源 = `TAIJI_AGENT_ENGINE_ROOTS` + node 解析 + `config.json` 三级（`engines.json` **仅用于 GUI 派生视图，不可作发现源**——它只有 id，无 bin/command）→ 按需 spawn 引擎 CLI 调 `read`（idle 复用）→ 失败降②级 journal | 需接线（宿主改动，A7 登记） |
 | **zsw CLI** | vendored core + 自持引擎表 + `runner-core.js:75/161/428` 调公共符号 | 兼容薄壳保留符号；vendor 增加引擎包目录 | **业务逻辑零改动**；允许的机械改动 = vendor 刷新 + 发现根注入（D8/A7） |
 
 **runtime 的①级读代价与降级**：冷 spawn 约 150–400ms（本机 zcode CLI 启动量级），idle 复用后 < 50ms；
@@ -870,7 +870,7 @@ RSS 实施期实测回写 §3.6 表；恢复 = 取消 runtime 路径（降②级
 | W1 协议定义 + SDK 骨架 | engine-protocol v1 帧型/方法/错误码/版本常量/JSON Schema + 边界检查 | —（DAG 根，与 u-foundation 等价的共享契约根） | A4/A6；实现级规格由代码承载（原 impl-plan §2.1，已删除） | 实现级细节由代码承载（入口 = 本行职责对应实现文件） |
 | W2 协议客户端 | `EngineClient` + `RemoteEngine implements EnginePort` + 同步成员形态映射 | W1 | A1/A6/A8/A13；实现级规格由代码承载（原 impl-plan §2.2，已删除） | 实现级细节由代码承载（入口 = 本行职责对应实现文件） |
 | W3 注册表与路由 | `EngineDescriptor` 双模 + manifest 快照 + D4 缺省引擎 + 时序契约改写 + 契约变更④⑤ | W1 | A2/A3/A4/A6/A12；实现级规格由代码承载（原 impl-plan §2.3，已删除） | 实现级细节由代码承载（入口 = 本行职责对应实现文件） |
-| W4 发现器 | manifest 解析 + 三级搜索路径 + engines.json 投影 + 冷启动回退源单源化 | W1 | A4/A11/A12；实现级规格由代码承载（原 impl-plan §2.4，已删除） | 实现级细节由代码承载（入口 = 本行职责对应实现文件） |
+| W4 发现器 | manifest 解析 + 三级搜索路径 + engines.json 派生视图 + 冷启动回退源单源化 | W1 | A4/A11/A12；实现级规格由代码承载（原 impl-plan §2.4，已删除） | 实现级细节由代码承载（入口 = 本行职责对应实现文件） |
 | W5 zcode 外移 | 新建 `@zhushanwen/zcode-subagent-cli` 包，搬 `engines/zcode/` + 前置文档改动 | W1–W4 | A1/A5/A9；实现级规格由代码承载（原 impl-plan §2.5，已删除） | 实现级细节由代码承载（入口 = `packages/zcode-subagent-cli`） |
 | W6 pi 宿主面下沉 | `PiEngineService` 9 成员拆 HostBridge + `spawnedChildren` 状态镜像（前置，强制） | W1–W3 | A2/A3/A8 前置；实现级规格由代码承载（原 impl-plan §2.6，已删除） | 实现级细节由代码承载（入口 = 本行职责对应实现文件） |
 | W7 pi 外移 | 新建 `@zhushanwen/pi-subagent-cli`（依赖 W6 产物） | W6 | A2/A3/A9；实现级规格由代码承载（原 impl-plan §2.7，已删除） | 实现级细节由代码承载（入口 = `packages/pi-subagent-cli`） |

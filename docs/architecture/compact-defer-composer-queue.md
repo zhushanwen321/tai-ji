@@ -3,7 +3,7 @@
 > 状态：v3，经两轮对抗式审查（round1 三审 2/4/0 MF → round2 聚焦复审 0/2MF 主审收敛；收敛轨迹 6→2 MF，报告见 `.tmp/tech-design/design-review-20260913-compactdefer{,-impact,-simplicity}.md`）。
 > 视觉规格基线 = `docs/page-design/compact-defer-queue-spec.html`（用户裁决的方案 2 demo 已入库；`.tmp/compact-queue-demos/` 的 demo-1/3 为落选过程残留，不入库）。
 >
-> **现行边界（投递所有权内核，[ADR-0074](../adr/decisions.md)，2026-09-16）**：本文的队列**数据源与记账**层已被内核取代——renderer 本地 defer 队列（`useCompactQueue` 分区、flush / S1 拒绝检测 / 1s 重投 timer / 5 次熔断、`PendingBubble`）整体退役；队列状态载体 = runtime 投递内核的 `session.delivery` 状态帧（core `getDeliveryProjectionRef`），composer 队列区（`QueueBubble`）单源读帧，条目态 = 内核五态（queued / in-flight / delivered / failed / cancelled）+ lane，撤销走 `delivery.cancel`、重试走 `delivery.resync`、forceQuit 回收走 `delivery.drain`。**本文仍有效**：队列区位置与形态基线（composer-box 顶部队列区、行截断、`VISIBLE_MAX` 截断 + 「+N」、hover × 撤销）、「压缩中」通栏活动带（`ActivityStrip` compacting 行 + 副文案计数）；occupancy 驱动展示的口径不变。**失效条款**：§2.1 的双数据源归一规则（defer 行仅渲染未提交条目、已提交 send 条目确认前不可见）随本地队列退役——内核条目从提交起全程可见（queued / in-flight 行）；活动带与队列区计数口径 = `session.delivery` 投影中「lane ≠ direct 且 state ≠ delivered」的条目数（过滤唯一定义点 `deliveryQueueEntries`，与队列区行渲染同源）；行内富内容 +N 徽标退役（帧只携带 preview 文本，草稿恢复由 cancel/drain reply 的全文快照承担，ADR-0043）。
+> **现行边界（投递所有权内核，[ADR-0074](../adr/decisions.md)，2026-09-16）**：本文的队列**数据源与记账**层已被内核取代——renderer 本地 defer 队列（`useCompactQueue` 分区、flush / S1 拒绝检测 / 1s 重投 timer / 5 次熔断、`PendingBubble`）整体退役；队列状态载体 = runtime 投递内核的 `session.delivery` 状态帧（core `getDeliveryProjectionRef`），composer 队列区（`QueueBubble`）单源读帧，条目态 = 内核五态（queued / in-flight / delivered / failed / cancelled）+ lane，撤销走 `delivery.cancel`、重试走 `delivery.resync`、forceQuit 回收走 `delivery.drain`。**本文仍有效**：队列区位置与形态基线（composer-box 顶部队列区、行截断、`VISIBLE_MAX` 截断 + 「+N」、hover × 撤销）、「压缩中」通栏活动带（`ActivityStrip` compacting 行 + 副文案计数）；occupancy 驱动展示的口径不变。**失效条款**：§2.1 的双数据源归一规则（defer 行仅渲染未提交条目、已提交 send 条目确认前不可见）随本地队列退役——内核条目从提交起全程可见（queued / in-flight 行）；活动带与队列区计数口径 = `session.delivery` 派生视图中「lane ≠ direct 且 state ≠ delivered」的条目数（过滤唯一定义点 `deliveryQueueEntries`，与队列区行渲染同源）；行内富内容 +N 徽标退役（帧只携带 preview 文本，草稿恢复由 cancel/drain reply 的全文快照承担，ADR-0043）。
 
 ## 1 背景与目标
 
@@ -31,7 +31,7 @@
 
 > **defer 行仅渲染未提交条目（`mode === undefined`）**。已提交条目的本地行隐藏，承接面分通道：**steer** 条目由镜像行（queue_update，Zap）承接展示；**send** 条目无承接行——send 不进 queue_update，flush-send 亦不做乐观 appendUser（与直发不同，useChat.ts:625），inflight 仅是确认匹配的记账计数（无视觉形态）——确认帧（message_end(user) echo）前该消息暂不可见，echo 到达即经 confirmDelivery → appendUser 转正常气泡入流（既有转态链路不变）。
 >
-> **提交尝试瞬态声明**：`setEntryMode` 先于 RPC await（useCompactQueue.ts:365/:368）——提交尝试窗口内 defer 行即隐藏；busy/传输错误回滚 mode 后行弹回（ms 级自愈）。回滚是既有 flush 记账「留队静默自愈」的显示投影，非双显/丢失，回滚后 × 撤销能力恢复。与 pi 既有队列条目的交叉时序沿用既有消费顺序约定（QueueBubble 现注释 + G-023），非本设计 delta。
+> **提交尝试瞬态声明**：`setEntryMode` 先于 RPC await（useCompactQueue.ts:365/:368）——提交尝试窗口内 defer 行即隐藏；busy/传输错误回滚 mode 后行弹回（ms 级自愈）。回滚是既有 flush 记账「留队静默自愈」的显示层呈现，非双显/丢失，回滚后 × 撤销能力恢复。与 pi 既有队列条目的交叉时序沿用既有消费顺序约定（QueueBubble 现注释 + G-023），非本设计 delta。
 
 - 反例重演（压缩中入队 2 条 D1/D2 → 压缩结束 flush）：D1 队首走 send → D1 defer 行隐藏、确认前无任何行（零行窗口，量级 = pi echo 延迟）；D2 走 steer → 队列区出现 D2 镜像 Zap 行、D2 defer 行隐藏 → **每条消息至多一行，无双行**。D1/D2 确认帧先后到达 → 镜像行消失/气泡入流、正常气泡逐一入流。VISIBLE_MAX 不再对同一消息计双份；defer chip 只出现在未提交行，「稍后发送」chip 与「已提交」tooltip 的矛盾不复存在。
 - 否决记录：~~镜像行按 DEFER_FLUSH_MARKER 与本地队列求差集隐藏、defer 行承接已提交态~~ —— 击穿反例：文本匹配脆弱（同文本多条目），且已提交行保留仍占 VISIBLE_MAX 位；~~显式接受双显示~~ —— 击穿反例：直接违背 §1.2「消息没丢」目标（同列表相邻双行）。
