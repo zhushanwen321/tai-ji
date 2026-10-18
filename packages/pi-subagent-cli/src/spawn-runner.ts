@@ -33,6 +33,7 @@ import {
   buildOutboundChildEnv,
   createReplayRecord,
   getLogger,
+  PI_SUBAGENT_TASK_MAX_CHARS,
   SUBAGENT_IDENTITY_ENV,
   resolveEngineDataDir,
   spawnEngineChild,
@@ -46,7 +47,13 @@ import { killPiProcess } from "@zhushanwen/pi-rpc";
 import { registerActiveChild } from "./active-children.ts";
 import { SCHEMA_ENV_VAR } from "./constants.ts";
 import { getPiInvocation } from "./pi-invocation.ts";
-import { collectOutcome, type CollectedOutcome } from "./output-collector.ts";
+import {
+  buildExitErrorText,
+  collectOutcome,
+  describePromptAckFailure,
+  type CollectedOutcome,
+} from "./output-collector.ts";
+import { createPromptAckTracker, resolvePromptAckTimeoutMs, type PromptAckTracker } from "./prompt-ack.ts";
 import { toErrorMessage } from "./error-message.ts";
 import {
   buildEnvBlock,
@@ -55,6 +62,7 @@ import {
 } from "./spawn-args.ts";
 import { createSdkEventTranslator, type SdkTranslatorOpts } from "./spawn-event-translator.ts";
 import {
+  createPromptRunCounters,
   createSessionIdentityTracker,
   reportChildSpawned,
   wireChildStdoutPump,
@@ -216,6 +224,27 @@ function applyLinkageIdentityKeys(
   }
 }
 
+/**
+ * [M1 D2] PI_SUBAGENT_TASK 写入点截断（SDK identity-env 常量单源）：任务正文只取前
+ * PI_SUBAGENT_TASK_MAX_CHARS 字符 + 截断标记，使控制面（握手帧）与 execve env 不随
+ * 任务正文线性膨胀。全文以 pi session 文件首条 user 消息与父侧 manifest 为准（设计
+ * D2 消费方矩阵：截断只影响 manifest 缺席时的重建链/P-fallback 投影，env 读取点
+ * appendSubagentIdentityEntry 零改动）。
+ *
+ * 多字节不劈半：JS 字符串按 UTF-16 码元 slice，BMP 内（含 CJK）天然整字符；补一步
+ * 代理对回退——边界恰好劈在 astral 字符（如 emoji，高低代理各占一个码元）时回退
+ * 一个码元，保证 env 值无孤立代理（execve 的 UTF-8 编码不产生替换字符）。标记计数
+ * 与 `task.length` 同口径（UTF-16 码元）。
+ */
+export function truncateTaskForEnv(task: string): string {
+  if (task.length <= PI_SUBAGENT_TASK_MAX_CHARS) return task;
+  let keep = PI_SUBAGENT_TASK_MAX_CHARS;
+  // 边界恰在代理对中间（高代理 + 低代理）时回退一个码元：regex 以码元区间表达
+  // 边界两码元，与逐 charCode 区间比较等价（含孤立代理的畸形输入）。
+  if (/^[\uD800-\uDBFF][\uDC00-\uDFFF]$/.test(task.slice(keep - 1, keep + 1))) keep -= 1;
+  return `${task.slice(0, keep)}…[truncated ${task.length - keep} chars]`;
+}
+
 /** 身份内容键写入（applyIdentityEnvToChildEnv 拆出）：agent/task 直写 + [D4]
  * 身份信封三键（slug/startedAt/mode）——信封优先（宿主派发权威值），缺席按既有
  * 继承/缺省语义回落。 */
@@ -228,7 +257,7 @@ function applyContentIdentityKeys(
 ): void {
   const key = SUBAGENT_IDENTITY_ENV;
   childEnv[key.agent] = params.agentName;
-  childEnv[key.task] = params.task;
+  childEnv[key.task] = truncateTaskForEnv(params.task);
   // [D4] record 身份信封优先（宿主派发的权威值）；缺席时按既有继承/缺省语义回落。
   const identity = params.identity;
   const slug = identity?.slug ?? parentEnv[key.slug];
@@ -264,7 +293,14 @@ function buildChildEnv(params: SpawnRunParams): Record<string, string> {
     extras,
     params.schema !== undefined ? JSON.stringify(params.schema) : undefined,
   );
-  const childEnv = buildOutboundChildEnv({ parentEnv: process.env, extras });
+  // [D1 补强] PI_WORKFLOW_SCHEMA 是派生注入键，唯一合法来源 = task.schema 派生
+  // （上一行 extras）：引擎自身 env 的 ambient 值不透传——schema-less run 的孙进程
+  // 绝不携带幽灵 schema env（structured-output 扩展会按幽灵 schema 校验无 schema
+  // 任务）。实测泄漏源：workflow 驱动的宿主会话内跑测时，父 env 携带本 run 自己的
+  // schema（run-spawn-once 集成测试「无 schema run 不注入」用例红）。
+  const parentEnv: NodeJS.ProcessEnv = { ...process.env };
+  delete parentEnv[SCHEMA_ENV_VAR];
+  const childEnv = buildOutboundChildEnv({ parentEnv, extras });
   // relay 归属键重写（W8/H12）：SESSION_ID/RECORD_ID 在 ENGINE_ENV_DENY_LIST，
   // buildOutboundChildEnv 的 deny 在 extras 之后执行——经 extras 注入会被剥掉
   // （旧实现的 RECORD_ID 重写因此从未送达 relay.mjs，归属键缺失 → 退出码 13）。
@@ -395,7 +431,8 @@ function hasSchemaEnforcementExtension(spawnArgs: readonly string[]): boolean {
  * 生命周期（[modeless 波2] 唯一语义）：正常轮终 = agent_settled（真空闲）resolve
  * （exit 0 口径）并收割子进程；异常/abort = 子进程 close（exit/error，128+ 折算
  * 判据）。abort（signal）经 spawnEngineChild 的 signal 通道发 SIGTERM，升级链由
- * killPiProcess 兜底。
+ * killPiProcess 兜底；[M2 ⑦] prepare 期已 abort（spawn 前 signal 置位）= 不 spawn
+ * 短路取消终态（见 collectCancelledBeforeSpawn）。
  */
 /**
  * stderr tee（W11）：实例维度路径 + 懒打开 + 尺寸轮转（超 TAIJI_LOG_MAX_BYTES rename
@@ -513,7 +550,8 @@ function buildTranslatorOpts(
 
 /**
  * run 尾段：退出码 → 终态 outcome 收集（含 spawn 'error' 形态文案、成功轮数快照
- * 恢复、失败时 stderr tee 取证指针）。返回 SpawnRunResult 终态载荷。
+ * 恢复、失败时 stderr tee 取证指针、[M2 D3] prompt 送达失败分支）。返回
+ * SpawnRunResult 终态载荷。
  */
 function collectRunResult(
   record: ReturnType<typeof createReplayRecord>,
@@ -523,6 +561,7 @@ function collectRunResult(
   stderrTee: { path: string; close(): void } | undefined,
   params: SpawnRunParams,
   startTime: number,
+  callbacks: SpawnRunCallbacks,
 ): SpawnRunResult {
   // spawn 'error' 形态（子进程从未运行，典型 ENOENT）：错误事件消息（含 errno
   // code 与命令路径）直接进终态文案——比裸退出码可诊断，且不命中 stale 分诊
@@ -532,14 +571,26 @@ function collectRunResult(
   // 以 resolve 时刻快照恢复真实轮数（成功 run 的 outcome.turns/usage.turns 不为
   // 0）；失败路径 agent_settled 未到达，快照缺省，record 值即真实值。
   if (runEnd.settledTurnCount !== undefined) record.turnCount = runEnd.settledTurnCount;
+  // [M2 D3] 送达失败分支优先：tracker 已结算（timeout/lost → engine_prompt_not_delivered；
+  // rejected → engine_prompt_rejected），退出码只是杀链后果（SIGKILL → 137），
+  // 终态呈现映射后的错误码文案而非裸「子进程退出 137」（设计 S7/S7b 反向断言）。
+  // 退出码文案的 relay 映射见 buildExitErrorText（relay 激活时子进程是 relay.mjs）。
+  const ackFailure = runEnd.promptAckFailure;
+  const success = exitCode === 0 && ackFailure === undefined;
+  const error = success
+    ? undefined
+    : ackFailure !== undefined
+      ? describePromptAckFailure(ackFailure)
+      : buildExitErrorText(exitCode, isRelayActive(process.env), runEnd.childErrorMessage);
+  if (ackFailure !== undefined) {
+    // 送达失败路径同时发 error 事件（设计 §3.4.2：让 journal 有记录；既有退出码
+    // 失败不加发，行为面不变）。
+    callbacks.onEvent({ type: "error", message: error ?? "prompt delivery failed" });
+  }
   const outcome = collectOutcome(record, {
     startTime,
-    success: exitCode === 0,
-    error: exitCode === 0
-      ? undefined
-      : runEnd.childErrorMessage !== undefined
-        ? `pi child error: ${runEnd.childErrorMessage} (exit code ${exitCode})`
-        : `pi child exited with code ${exitCode}`,
+    success,
+    error,
     sessionId: identity.sessionId ?? "",
     sessionFile: identity.sessionFile,
     // [F-1 信号解耦] schemaExpected 判定源 = task.schema 声明形态（schema 本体
@@ -558,6 +609,30 @@ function collectRunResult(
   };
 }
 
+/**
+ * [M2 ⑦ / 设计 §3.4.1 prepare 期 abort] 取消先于 spawn 的终态装配：检查点位于
+ * `spawnEngineChild`（AbortSignal 监听的唯一注册点）之前——已 abort 则不 spawn 子
+ * 进程（无孤儿、无 childSpawned/pid 镜像），直接以取消语义收口。
+ *
+ * 取消 = cancelled 终态而非失败（设计 §3.4.1「取消不带恢复指引」）：载荷复用既有
+ * 失败构造（collectOutcome，与中途 abort 的 143 路径同形），错误文案取宿主 cancel
+ * 通道的既有措辞——server.ts `cancel` → `Error("cancelled by host: <reason>")`，经
+ * `signal.reason` 承载（不新造错误码）；reason 缺失/非 Error/空串时回落同口径固定
+ * 文案。不 emit error 事件（取消无失败面，事件/镜像面零产出）。宿主侧 record 的
+ * cancelled 终态判定基于自身 signal 事实（terminal-actions 的 aborted 参数），本
+ * 结果只承载引擎侧终态载荷。
+ */
+function collectCancelledBeforeSpawn(
+  record: ReturnType<typeof createReplayRecord>,
+  signal: AbortSignal,
+  startTime: number,
+): SpawnRunResult {
+  const reason = signal.reason;
+  const error = reason instanceof Error && reason.message !== "" ? reason.message : "cancelled by host";
+  const outcome = collectOutcome(record, { startTime, success: false, error, sessionId: "", sessionFile: undefined });
+  return { ...outcome, sessionId: undefined };
+}
+
 export async function runSpawnOnce(
   params: SpawnRunParams,
   callbacks: SpawnRunCallbacks,
@@ -565,6 +640,9 @@ export async function runSpawnOnce(
   const record = createReplayRecord();
   const startTime = Date.now();
   const modelRef = parseSpawnModelRef(params.model);
+  // [M2 D3] prompt 回执 tracker（spawn 成功后装配；finally 必达 dispose——正常
+  // 完成 / 异常 / 取消三路都经过）。
+  let ackTracker: PromptAckTracker | undefined;
 
   // prepare 期校验前置（model 缺失 fail-fast 先于临时文件创建）：writeAppendPromptFile
   // 会落盘 append-system-prompt 临时文件，校验在后会让 prepare 期失败的 run 泄漏
@@ -609,6 +687,15 @@ export async function runSpawnOnce(
     });
     const invocation = getPiInvocation(args);
     const childEnv = buildChildEnv(params);
+    // [M2 ⑦ / 设计 §3.4.1 prepare 期 abort 检查] 取消先于 spawn：在 spawnEngineChild
+    // （AbortSignal 监听唯一注册点）之前短路——已 abort 的 run 不 spawn（防「启动即
+    // 被杀」与「监听注册太晚漏杀」两窗口），直接返回取消终态。检查与 spawn 之间是
+    // 同步块（无 await，且监听在 spawnEngineChild 内同步注册），不存在「检查后、监听
+    // 前」的可交错漏杀窗口；武装断言与本次 spawn 绑定，取消优先于武装失败（已取消的
+    // run 不产生失败面）。
+    if (params.signal?.aborted === true) {
+      return collectCancelledBeforeSpawn(record, params.signal, startTime);
+    }
     // [D3 止血版 武装断言] run 开始后、孙进程 spawn 前校验武装状态，缺席即抛错
     // （秒级 fail-fast，host 侧收到含恢复指引的 engine_run_failed）。capability
     // 字面量与 PiEngine.capabilities().schemaEnforcement（pi-engine.ts，manifest
@@ -643,6 +730,30 @@ export async function runSpawnOnce(
     const runEnd: RunEndState = { endedCleanly: false };
     // 身份写入口先行装配：stdout pump 的 get_state 应答回填与握手共用同一 tracker。
     const identity = createSessionIdentityTracker(params.sessionDir, callbacks);
+    // [M2 D3] prompt 送达回执 tracker + 诊断计数器：prompt response 是唯一成功
+    // 回执；onFailure = 记录 runEnd.promptAckFailure + 杀链（SIGKILL 直杀，run 以
+    // 失败 outcome 收尾，终态文案带诊断五元组）；零输出窗口经
+    // TAIJI_SUBAGENT_PROMPT_ACK_TIMEOUT_MS 覆盖（默认 30s；0 = 逃生舱关闭看门狗）。
+    const runCounters = createPromptRunCounters();
+    ackTracker = createPromptAckTracker({
+      recordId: params.recordId,
+      timeoutMs: resolvePromptAckTimeoutMs(process.env),
+      diagnostics: () => ({
+        pid: child.pid,
+        bytesWritten: runCounters.bytesWritten,
+        stdoutBytes: runCounters.stdoutBytes,
+        stdoutBytesAfterPrompt: runCounters.stdoutBytesAfterPrompt,
+        stdoutSeen: ackTracker?.stdoutSeen === true,
+        getStateAnswered: runCounters.getStateAnswered,
+        ...(runCounters.lastEventType !== undefined
+          ? { lastEventType: runCounters.lastEventType }
+          : {}),
+      }),
+      onFailure: (result) => {
+        runEnd.promptAckFailure = result;
+        killChild();
+      },
+    });
     const handleSdkEvent = createSdkEventTranslator(
       record,
       buildTranslatorOpts(params, callbacks, killChild, runEnd),
@@ -694,6 +805,8 @@ export async function runSpawnOnce(
       enqueueUi,
       stderrTee,
       runEnd,
+      promptAck: ackTracker,
+      runCounters,
     });
 
     // 7. get_state 握手 fire-and-forget（RPC mode 无 header 行，靠握手回填身份）——
@@ -705,13 +818,36 @@ export async function runSpawnOnce(
       identity.applyGetStateFields(r);
     });
 
-    // 8. prompt 命令（rpc mode 唯一任务驱动通道）
-    sendPromptCommand(child, params.task);
+    // 8. prompt 命令（rpc mode 唯一任务驱动通道）+ [M2 D3] 送达回执装配：
+    //    register（onRequestId，写前登记并武装零输出计时器）→ 写入（EPIPE 抛出 →
+    //    failNow("epipe")）→ delivered:false（stdin 不可用，未登记未写）→
+    //    failNow("stdin-unavailable")——两条立即失败路径都不等 30s（S9），killChild
+    //    由 onFailure 承接。delivered 后置 promptWritten：pump 的 stdout 计数进入
+    //    「写入后」半面，tracker 活性上报（零输出计时器取消）同步生效。
+    try {
+      const sent = sendPromptCommand(child, params.task, {
+        onRequestId: (id) => ackTracker?.register(id),
+        onBytesWritten: (n) => {
+          runCounters.bytesWritten += n;
+        },
+      });
+      if (!sent.delivered) {
+        ackTracker?.failNow("stdin-unavailable", sent.reason ?? "stdin unavailable");
+      } else {
+        runCounters.promptWritten = true;
+      }
+    } catch (err) {
+      ackTracker?.failNow("epipe", toErrorMessage(err));
+    }
 
     // 9. 等待退出
     const exitCode = await exitPromise;
-    return collectRunResult(record, runEnd, exitCode, identity, stderrTee, params, startTime);
+    return collectRunResult(record, runEnd, exitCode, identity, stderrTee, params, startTime, callbacks);
   } finally {
+    // [M2 D3] tracker 幂等清理：已 settle 的结果不受影响（runEnd.promptAckFailure
+    // 已落位），未决的零输出计时器/登记表随 run 终止必达清理（迟到 response 由
+    // settled/disposed 门自行忽略）。
+    ackTracker?.dispose();
     if (tempFile !== undefined) await cleanupTempPrompt(tempFile);
   }
 }

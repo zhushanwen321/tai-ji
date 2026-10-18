@@ -10,6 +10,8 @@
 //   - 失败退出（exit 3）→ success=false + failureKind 分诊；
 //   - message_end stopReason=aborted → record.lastError → success=false（stale 分诊）；
 //   - abort signal → SIGTERM → 128+signal 折算退出码；
+//   - [M2 ⑦] prepare 期已 abort（signal 预置位）→ 不 spawn（marker/镜像/登记三重
+//     证明）+ 取消终态（宿主 cancel 措辞透传，与中途 abort 143 同形载荷）；
 //   - spawn 失败（relay node 不存在路径，真实 ENOENT）→ 失败终态 + 可诊断 error（F4）；
 //   - [D1] schema 派生注入：params.schema → 孙进程 env PI_WORKFLOW_SCHEMA
 //     逐字节等值（JSON.stringify 本体）+ 无 schema 声明不注入；
@@ -544,18 +546,20 @@ describe("runSpawnOnce 集成（fake pi 子进程）", () => {
     }
   }, 15_000);
 
-  it("[F-1 回归] schemaExpected 信号源 = task.schema 声明形态（非 env 同源）：env 污染 + 无声明 → 守卫不武装", async () => {
-    // H3 判定源回归（H1 归位后的消费面守卫）：PI_WORKFLOW_SCHEMA 不在引擎 env
-    // deny list——引擎进程 env 被污染时该键会随继承实际到达孙进程（回显非哨兵可证），
-    // 但 schemaExpected 只认 params.schema 声明形态：env 在、声明缺 → 守卫不武装，
-    // 静默成功不被拦截。若判定源回归 env 同源，本用例翻红。
+  it("[F-1 回归 × D1 归位] env 污染 + 无声明：污染不透传（幽灵 schema env 不达孙进程），守卫只认声明形态不武装", async () => {
+    // H3 判定源回归（H1 归位后的消费面守卫）+ [D1 补强] 传输归位回归：
+    // PI_WORKFLOW_SCHEMA 是派生注入键，唯一合法来源 = task.schema 派生——引擎 env
+    // 被污染时该键**不透传**到孙进程（回显哨兵可证；幽灵 schema env 会让
+    // structured-output 对无 schema 任务按污染 schema 校验）；同时 schemaExpected
+    // 只认 params.schema 声明形态：env 污染、声明缺 → 守卫不武装，静默成功不被
+    // 拦截。若判定源回归 env 同源或派生补强退化回透传，本用例翻红。
     const h = await makeHarness("echo-schema-env");
     const polluted = JSON.stringify({ type: "object" });
     process.env.PI_WORKFLOW_SCHEMA = polluted;
     try {
       const result = await runSpawnOnce(baseParams(h), callbacksOf(h));
-      // env 事实存在：污染值已实际到达孙进程（回显非哨兵）
-      expect(result.content).toBe(polluted);
+      // [D1 归位] 污染值不透传：孙进程 env 无 PI_WORKFLOW_SCHEMA（回显哨兵）
+      expect(result.content).toBe("<env-absent>");
       // 守卫信号源是声明形态：无声明 → schemaExpected 不置位 → 静默成功保持
       expect(result.success).toBe(true);
     } finally {
@@ -697,6 +701,45 @@ describe("runSpawnOnce 集成（fake pi 子进程）", () => {
       ).rejects.toThrow(/canonical model ref/);
       expect(h.childSpawned).toHaveLength(0);
     } finally {
+      restoreHarness(h);
+    }
+  });
+
+  it("[M2 ⑦] prepare 期已 abort（signal 预置位）→ 不 spawn，取消终态（无子进程/无 pid 镜像/无事件）", async () => {
+    const h = await makeHarness("success");
+    // 「不产生子进程」的物理证据：换成本用例专用 fake pi——真被启动即落 marker
+    // （子进程 env 经 buildOutboundChildEnv 透传 FAKE_PI_MARKER，cwd = h.rootDir）。
+    const marker = join(h.rootDir, "spawned.marker");
+    fs.writeFileSync(
+      h.scriptPath,
+      'import fs from "node:fs";\n' +
+        'fs.writeFileSync(process.env.FAKE_PI_MARKER, "spawned");\n' +
+        "setInterval(() => {}, 1000);\n",
+    );
+    process.env.FAKE_PI_MARKER = marker;
+    try {
+      const controller = new AbortController();
+      controller.abort(new Error("cancelled by host: pre-abort before spawn"));
+      const result: SpawnRunResult = await runSpawnOnce(
+        baseParams(h, { signal: controller.signal }),
+        callbacksOf(h),
+      );
+
+      // 取消终态：成功位 false + 宿主 cancel 通道既有措辞（signal.reason 透传）；
+      // 载荷构造与中途 abort（143）同形——failureKind 落 unknown，不误诊 stale
+      expect(result.success).toBe(false);
+      expect(result.error).toBe("cancelled by host: pre-abort before spawn");
+      expect(result.failureKind).toBe("unknown");
+      expect(result.content).toBe("");
+      expect(result.sessionId).toBeUndefined();
+      // 不 spawn：marker 未落盘 + 无 childSpawned/状态镜像 + 无活跃子进程登记 + 零事件
+      expect(fs.existsSync(marker)).toBe(false);
+      expect(h.childSpawned).toHaveLength(0);
+      expect(getActiveChild("rec-int-1")).toBeUndefined();
+      expect(h.stateChanges).toHaveLength(0);
+      expect(h.events).toHaveLength(0);
+    } finally {
+      delete process.env.FAKE_PI_MARKER;
       restoreHarness(h);
     }
   });

@@ -13,7 +13,13 @@ import type {
   ToolCall,
   Turn,
 } from "@zhushanwen/subagent-engine-sdk";
+import {
+  ENGINE_SPAWN_DELIVERY_ERROR_RECOVERY,
+  RELAY_EXIT_CODES,
+} from "@zhushanwen/subagent-engine-sdk";
 import type { ReplayRecordView } from "@zhushanwen/subagent-engine-sdk";
+
+import type { PromptAckResult } from "./prompt-ack.ts";
 
 // ============================================================
 // 失败分诊词表（D5-③，产出侧单点；与 core 版逐字等价）
@@ -50,16 +56,139 @@ export function isDeterministicSchemaFailureMsg(msg: string | undefined): boolea
 }
 
 /**
- * [D5-③] 错误文案 → 结构化失败分诊标签（产出侧唯一识别点，stale 在前）。
- * 未命中任何词表 → unknown——消费侧默认退避重试（语义守恒）。
+ * [M2 D3/D10] 引擎侧 spawn/送达错误码前缀（产出侧识别点；码表/recovery 文案 SSOT =
+ * SDK protocol/error-codes.ts ENGINE_SPAWN_DELIVERY_ERROR_CODES——本表只收
+ * outcome.error 文本里的「码前缀」形态，供确定性分诊）。
+ */
+export const ENGINE_SPAWN_DELIVERY_ERROR_PREFIXES = [
+  "engine_prompt_not_delivered:",
+  "engine_prompt_rejected:",
+  "engine_spawn_handshake_timeout:",
+] as const;
+
+/** 判断错误信息是否为引擎 spawn/送达窗口错误（码前缀确定性判定）。 */
+export function isEngineSpawnDeliveryErrorMsg(msg: string | undefined): boolean {
+  if (!msg) return false;
+  return ENGINE_SPAWN_DELIVERY_ERROR_PREFIXES.some((p) => msg.startsWith(p));
+}
+
+/**
+ * [M2 D3/D10] 错误文案 → 结构化失败分诊标签（产出侧唯一识别点，
+ * 送达错误码在前 > stale > schema_deterministic）。
+ *
+ * 送达错误码分支置前且返回 "unknown" 的理由：
+ *   - **确定性优先**：码前缀由引擎结构化事实产出（tracker 结算 / relay 退出码），
+ *     不是自由文本启发；若落到 stale 词表（rejected 的 pi error 文本可能含
+ *     "aborted" 等词）会被误诊为 stale_context（重试只会再失败）——而送达失败的
+ *     recovery 恰恰是「re-run the task」（engine_prompt_rejected 的 pi error 也
+ *     可能只是 busy/queue 态）。"unknown" = 消费侧默认退避重试（语义守恒，
+ *     core orchestration models/types.ts「failureKind=unknown → 保守重试」），
+ *     与三码的 recovery 指引（重跑/重启后重跑）一致。
+ *   - 显式分支（而非落空默认）把本词表登记为单点：未来 AgentFailureKind 扩位时
+ *     从这里改返回值，分诊语义一处收口。
  */
 export function classifyFailureKind(
   msg: string | undefined,
 ): AgentFailureKind | undefined {
   if (msg === undefined) return undefined;
+  if (isEngineSpawnDeliveryErrorMsg(msg)) return "unknown";
   if (isStaleContextErrorMsg(msg)) return "stale_context";
   if (isDeterministicSchemaFailureMsg(msg)) return "schema_deterministic";
   return "unknown";
+}
+
+// ============================================================
+// [M2 D3/D10] prompt 送达失败与 relay 退出码的终态文案（产出侧单点）
+// ============================================================
+
+/**
+ * PromptAckResult → outcome.error 文案（collectRunResult 失败分支消费）。
+ * 形态 = `<code>: <detail> Recovery: <recovery>`（与 engineTimeoutDetail 同款：
+ * 恢复指引随文案内联；码前缀供 classifyFailureKind / 宿主分诊）。
+ *   - timeout/lost → engine_prompt_not_delivered（零输出 / stdin 不可用 / EPIPE——
+ *     任务从未被真实 pi 受理）；detail 已由 tracker 拼入诊断五元组摘要（有界）；
+ *   - rejected → engine_prompt_rejected（已送达但被 pi 拒绝；带 pi error 文本）；
+ *   - acked 不经此函数（正常 outcome）。
+ */
+export function describePromptAckFailure(failure: PromptAckResult): string {
+  if (failure.kind === "acked") {
+    throw new Error("describePromptAckFailure called with acked result (acks are not failures)");
+  }
+  if (failure.kind === "rejected") {
+    return (
+      `engine_prompt_rejected: pi rejected the prompt command: ${failure.detail}. ` +
+      `Recovery: ${ENGINE_SPAWN_DELIVERY_ERROR_RECOVERY.engine_prompt_rejected}`
+    );
+  }
+  // timeout / lost 同归 engine_prompt_not_delivered（D10：任务未送达；lost 的
+  // detail 已含 stdin-unavailable/epipe 区分与诊断摘要）
+  return (
+    `engine_prompt_not_delivered: ${failure.detail}. ` +
+    `Recovery: ${ENGINE_SPAWN_DELIVERY_ERROR_RECOVERY.engine_prompt_not_delivered}`
+  );
+}
+
+/**
+ * relay 代理退出码 → 引擎侧错误文案（[M1/S5] relay 退出码不再呈现为裸
+ * 「子进程退出 N」；映射表 = 设计 §3.4.1 失败路径表 + D10：15 专项映射
+ * engine_spawn_handshake_timeout，10/11/12/13 按失败路径表给具名文案 + 恢复
+ * 指引，不占用 engine_ 码——它们不是「送达窗口」语义）。词表单源 = SDK
+ * RELAY_EXIT_CODES；非映射码返回 undefined（走既有退出码文案）。
+ */
+export function describeRelayExitCode(exitCode: number): string | undefined {
+  const c = RELAY_EXIT_CODES;
+  if (exitCode === c.ACCEPT_TIMEOUT) {
+    return (
+      `engine_spawn_handshake_timeout: relay proxy timed out waiting for the runtime accept ` +
+      `(relay exit code ${c.ACCEPT_TIMEOUT}). ` +
+      `Recovery: ${ENGINE_SPAWN_DELIVERY_ERROR_RECOVERY.engine_spawn_handshake_timeout}`
+    );
+  }
+  if (exitCode === c.VERSION_MISMATCH) {
+    return (
+      `engine relay handshake rejected: protocol version mismatch (relay exit code ${c.VERSION_MISMATCH}; ` +
+      `the staged relay asset and the runtime are from different builds). ` +
+      `Recovery: upgrade or reinstall taiji (staged assets ship with the runtime), then re-run the task.`
+    );
+  }
+  if (exitCode === c.SOCKET_UNREACHABLE) {
+    return (
+      `engine relay socket unreachable (relay exit code ${c.SOCKET_UNREACHABLE}). ` +
+      `Recovery: restart taiji (the runtime is not running or has been restarted), then re-run the task.`
+    );
+  }
+  if (exitCode === c.SOCKET_CLOSED) {
+    return (
+      `engine relay socket closed mid-flight (relay exit code ${c.SOCKET_CLOSED}). ` +
+      `Recovery: restart taiji and re-run the task.`
+    );
+  }
+  if (exitCode === c.MISSING_IDENTITY) {
+    return (
+      `engine relay identity env missing (relay exit code ${c.MISSING_IDENTITY}). ` +
+      `Recovery: check the subagent extension's relay attribution env injection, then re-run the task.`
+    );
+  }
+  return undefined;
+}
+
+/**
+ * 退出码 → 失败 error 文案（collectRunResult 消费的单一装配点）：relay 激活时
+ * 子进程是 relay.mjs，其专属退出码映射优先；否则既有「child error / 退出码」
+ * 文案不变（真实 pi 自身也可能退出 10-15，不经 relay 映射——语义归属不同）。
+ */
+export function buildExitErrorText(
+  exitCode: number,
+  relayActive: boolean,
+  childErrorMessage: string | undefined,
+): string {
+  if (relayActive) {
+    const relayText = describeRelayExitCode(exitCode);
+    if (relayText !== undefined) return relayText;
+  }
+  return childErrorMessage !== undefined
+    ? `pi child error: ${childErrorMessage} (exit code ${exitCode})`
+    : `pi child exited with code ${exitCode}`;
 }
 
 // ============================================================

@@ -15,6 +15,7 @@ import { unregisterActiveChild } from "./active-children.ts";
 import { dispatchControlResponse } from "./control-responses.ts";
 import { toErrorMessage } from "./error-message.ts";
 import { extractGetStateFields, type GetStateResult } from "./get-state-handshake.ts";
+import type { PromptAckTracker, PromptAckResult } from "./prompt-ack.ts";
 import {
   deriveSessionFilePath,
   findSessionFileByHeaderId,
@@ -65,6 +66,12 @@ export interface RunEndState {
    * 成功 run 的真实轮数；undefined = agent_settled 未到达（失败路径），record 值即真实值。
    */
   settledTurnCount?: number;
+  /**
+   * [M2 D3] prompt 送达失败的结算结果（tracker onFailure 落位；collectRunResult
+   * 据此把退出码文案覆盖为 engine_prompt_not_delivered / engine_prompt_rejected
+   * 错误码前缀终态——不是裸「子进程退出 137」）。undefined = 送达链路无失败。
+   */
+  promptAckFailure?: PromptAckResult;
 }
 
 /** session 身份回填状态机（三路写同源；get_state 监听表随行持有）。 */
@@ -75,8 +82,8 @@ export interface SessionIdentityTracker { // oe-exempt:20260930:framework:CLI �
   noteHeader(header: SpawnSessionHeader): void;
   /** get_state response 监听登记（握手 + 迟到 response 自弃）。 */
   addStateListener(id: string, resolver: (data: unknown) => void): void;
-  /** response 帧分发（一次性消费；未知 id 自弃；失败帧以 undefined resolve）。 */
-  dispatchStateResponse(id: string | undefined, success: boolean, data: unknown): void;
+  /** response 帧分发（一次性消费；未知 id 自弃；失败帧以 undefined resolve）。@returns 是否消费了已登记的 get_state 应答。 */
+  dispatchStateResponse(id: string | undefined, success: boolean, data: unknown): boolean;
   /** get_state 字段落位（同步路径 + 握手兜底共用；新值才覆盖 + 重发 handleReady）。 */
   applyGetStateFields(fields: GetStateResult): void;
   /** 兜底反查（LC-4）：header/握手全 miss 时按 sessionId 后缀匹配 sessionDir。 */
@@ -138,10 +145,11 @@ export function createSessionIdentityTracker(
       });
     },
     dispatchStateResponse(id, success, data) {
-      if (id === undefined || !stateListeners.has(id)) return;
+      if (id === undefined || !stateListeners.has(id)) return false;
       const resolver = stateListeners.get(id);
       stateListeners.delete(id);
       resolver?.(success ? data : undefined);
+      return true;
     },
     applyGetStateFields,
     fallbackSessionFileByHeaderId() {
@@ -160,6 +168,27 @@ export function createSessionIdentityTracker(
   };
 }
 
+/** run 内 stdout/stdin 诊断计数（[M2 D3] 五元组的计数半面；spawn-runner 闭包读）。 */
+export interface PromptRunCounters {
+  /** stdin 已写字节（stdin-writer onBytesWritten 累计）。 */
+  bytesWritten: number;
+  /** 子进程 stdout 总字节（pump 逐行累计，含 prompt 前的握手应答）。 */
+  stdoutBytes: number;
+  /** prompt 写入后的 stdout 字节（promptWritten 置位后累计）。 */
+  stdoutBytesAfterPrompt: number;
+  /** prompt 已写入（spawn-runner 在 sendPromptCommand delivered 后置位）。 */
+  promptWritten: boolean;
+  /** get_state response 已应答（success 与否都算——证明 stdout 活着）。 */
+  getStateAnswered: boolean;
+  /** 最近一次 SdkEvent 的 type（pump event 分支更新）。 */
+  lastEventType?: string;
+}
+
+/** 新建归零计数器（spawn-runner 每 run 装配）。 */
+export function createPromptRunCounters(): PromptRunCounters {
+  return { bytesWritten: 0, stdoutBytes: 0, stdoutBytesAfterPrompt: 0, promptWritten: false, getStateAnswered: false };
+}
+
 /** stdout pump 接线依赖（runSpawnOnce 装配后的每 run 依赖集）。 */
 export interface StdoutPumpDeps {
   child: ChildProcess;
@@ -170,27 +199,58 @@ export interface StdoutPumpDeps {
   enqueueUi: (id: string, request: ExtensionUiRequest) => void;
   stderrTee: { close(): void } | undefined;
   runEnd: RunEndState;
+  /** [M2 D3] prompt 回执 tracker（response 分支分发 + 逐行活性上报；缺省 = 旧形态直通，兼容既有装配/测试）。 */
+  promptAck?: PromptAckTracker;
+  /** [M2 D3] 诊断计数器（缺省 = 不计数，兼容既有装配/测试）。 */
+  runCounters?: PromptRunCounters;
 }
 
-/** stdout 行消费（parseSpawnLine 分类 → 身份/事件/响应/UI 各通道）。 */
+/** stdout 行消费（parseSpawnLine 分类 → 身份/事件/响应/UI 各通道 + [M2 D3] 回执分发/计数）。 */
 function createLineConsumer(deps: StdoutPumpDeps): (line: string) => void {
-  const { recordId, identity, handleSdkEvent, enqueueUi } = deps;
+  const { recordId, identity, handleSdkEvent, enqueueUi, promptAck, runCounters } = deps;
   return (line: string): void => {
+    // [M2 D3 零输出判定] 任意 stdout 行（含 invalid 行）都是通道活性证据：字节计数
+    // 在分类前完成——parse 失败的字节同样证明 pi 活着。计数在 promptWritten 置位后
+    // 才进 stdoutBytesAfterPrompt（「写入后」语义）。
+    if (runCounters !== undefined) {
+      const lineBytes = Buffer.byteLength(line, "utf8");
+      runCounters.stdoutBytes += lineBytes;
+      if (runCounters.promptWritten) runCounters.stdoutBytesAfterPrompt += lineBytes;
+    }
     const parsed = parseSpawnLine(line);
-    if (parsed === null) return;
+    if (parsed === null) {
+      promptAck?.onChannelActivity();
+      return;
+    }
     switch (parsed.kind) {
       case "header":
         identity.noteHeader(parsed.header);
+        promptAck?.onChannelActivity();
         return;
       case "event":
+        if (runCounters !== undefined) runCounters.lastEventType = parsed.event.type;
         handleSdkEvent(parsed.event);
+        promptAck?.onChannelActivity();
         return;
       case "response":
-        identity.dispatchStateResponse(parsed.id, parsed.success, parsed.data);
+        // [M2 D3] get_state response（无论 success）证明 stdout 活着 → 五元组置位；
+        // 同时分发 prompt 回执 tracker（只有 command==="prompt" 且 id 匹配才结算）。
+        if (identity.dispatchStateResponse(parsed.id, parsed.success, parsed.data) && runCounters !== undefined) {
+          runCounters.getStateAnswered = true;
+        }
+        promptAck?.dispatch(parsed.id, parsed.command, parsed.success, parsed.data, parsed.error);
         // [subagent-model-switch §7.3] 进程级控制应答等待表并行分发（setModel 通路
         // ——run 生命周期外的控制面操作等不到 per-run 监听表；两表按 id 各自一次性
         // 消费，未登记 id 各自自弃）。
         dispatchControlResponse(parsed.id, parsed.success, parsed.data, parsed.error);
+        // 活性通知在状态更新之后（本行的自身状态计入诊断快照，如 get_state 应答）；
+        // 首条活性即 prompt response 自身的形态下 tracker 已 settle，通知 no-op
+        // （不多发 prompt ack delayed warn）。
+        promptAck?.onChannelActivity();
+        return;
+      case "extension_ui_request":
+        enqueueUi(parsed.id, parsed.request);
+        promptAck?.onChannelActivity();
         return;
       case "extension_ui_request":
         enqueueUi(parsed.id, parsed.request);
