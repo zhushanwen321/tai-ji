@@ -90,6 +90,7 @@ harness 必备能力（业务价值视角，2026-09-12 用户裁决）：
 | MCP 服务器管理 | 设置页 MCP 分区：服务器清单（用户级，坏条目「配置有误」标注不阻塞）、表单/代码双模式添加与编辑（stdio 本地命令 / http 远程地址，表单外键原样保留）、启停/删除确认、连接测试（spawn `pi mcp list --json` 真实连接，逐服务器状态与失败原因）；配置由新启动的会话读取（运行中会话保持不变，页头说明该语义）。**挂掉后果 = 无法在界面管理 MCP 服务器**（分区/清单/连接测试失效仅损失管理面，手编 `<数据目录>/agent/mcp.json` 与终端 `pi mcp` 命令仍可用，不动 P0 对话主链；pi-mcp-management 设计原文口径 P2——「挂掉后果：界面无法管理 MCP，高级用户仍可手编配置文件，harness 其余功能不受影响」）。错误处理按 §1 P2 降级隔离契约：读写层 fail-fast（保存校验不过不落盘、文件损坏拒入报错不静默重置——不覆盖外部手编内容，修复指引含文件路径）；连接测试为辅助功能，失败/超时降级为状态显示（保留上次结果），不阻塞清单读写；域内错误经 reply 信封结构化返回（错误码 + 修复动作文案），不向上传播打断 P0/P1 主流程 |
 | fast-handoff 会话交接 | 源 session 一键交接：runtime 让源 session 跑 handoff turn 生成交接文档（agent-driven）→ 新建承接 session 注入文档首条 → 广播跳转（`HandoffService`；Staging Mode 模型/思考档位继承，ADR-0056）。**挂掉后果 = 一键交接失效**（手动新建 session + 自行迁移上下文仍可用，不动 P0 对话主链）。错误处理按 §1 P2 降级隔离契约：失败经 message.error 通道广播到源 session 对话流（空文档 / pi 出错重试用尽 / timeout / abort / pi 中途退出各分支显式 reject——重试中间帧 willRetry 跳过 + 终态 error 帧拒绝，pi1-disposition-chat-flow U3② 修复的「首个 agent_end 即收尾」重试误杀），不向上传播打断 P0/P1 主流程 |
 | 工具延迟加载（exposure deferred + tool_search） | 低频工具不逐请求常驻的加载形态：低频工具（session_read、plan、goal_control、schedule 族、compact_context、rename_session、session-manager 六件套等，defer 名单见 ADR-0136）注册声明 `exposure: "deferred"`（不声明给模型），pi 内置检索工具 tool_search（BM25）经启动迁移默认启用（settings `defaultTools` 幂等追加 `+tool_search`，复用 codemode 迁移通道，ADR-0136）；模型需要时经 tool_search 检索激活，下一轮起直接调用；跨进程 fork/resume 后激活态退场、重搜一次即恢复（pi 语义边界）。**挂掉后果 = 低频工具不可被发现 → 模型用 bash 兜底，功能可用性不灭**（高频工具 bash/todo/ask_user/subagent 族/workflow 族恒 direct 在场，对话主链路完整可用；tool_search 搜索无果返回空结果，模型自然回落 bash，行为与无该工具时一致）。错误处理按 §1 P2 降级隔离契约：启动迁移失败不阻塞启动（warn 留痕 + 下次启动幂等补跑，同 codemode 通道形态），不向上传播打断 P0/P1 主流程。**P0 关联**：写入域本身是 P0（§2 设置页行——settings.json 写坏影响全部会话），本功能对它的义务 = 只动 `defaultTools` 的 tool_search 相关系目，与 codemode 条目同域不同条目 |
+| LLM 网络代理（按 provider 规则分流） | settings「网络代理」菜单页三卡（代理服务器 + 测试连接两段归因 / 规则与 noProxy + provider 快速添加 / 请求统计）、pi extension 全局分发器分流（命中规则经代理、未命中委托 pi 原生通道）、ext-config 热生效（turn 粒度指纹比对）。**挂掉后果 = 无法按规则走代理，请求直连**（直连在无墙环境本就可用；关闭开关或禁用扩展即恢复直连基线，对话主链路完整可用；llm-network-proxy 设计原文口径 P2——「默认禁用零行为变化，启用故障降级为全直连」）。错误处理按 §1 P2 降级隔离契约：坏配置不炸 pi（校验失败回落默认禁用 + error 日志含恢复动作文案，验收场景 10）、分流器构造失败不安装全直连（首败即停，配置修正自然重试）、分流器安装/卸载任何一步失败不触碰 LLM 请求链路本身；统计写失败日志不阻断（计数是观测面非请求链）；runtime RPC 错误经 reply 信封结构化返回。**P0 关联**：分流接管的是进程级全局分发器槽——接管语义经「未命中委托原分发器」保持 pi 原生 env 路由/连接调优不变（验收场景 13），该通道行为回退由 pi 上游漂移探针（场景 7 资产）+ TROUBLESHOOTING 排障条目承载 |
 
 ## 5. P3 — 特定人群/低影响
 
@@ -131,6 +132,7 @@ harness 必备能力（业务价值视角，2026-09-12 用户裁决）：
 | structured-output | universal | P2 | workflow 模式依赖 |
 | todo | universal | P2 | 面板能力 |
 | canvas（@zhushanwen/pi-canvas） | taiji | P2 | 问题解决画布（tech-design-wf 之前的方向规划层）；挂掉 = 对话与 subagent/workflow 派发主链完整可用，用户回到无画布状态（同 btw 口径） |
+| network-proxy（@zhushanwen/pi-network-proxy） | universal | P2 | LLM 网络代理分流域（feature 组可禁）；挂掉 = 请求全部直连（无墙环境本就可用），settings 页与统计失效不动主链（§4 LLM 网络代理行） |
 | cache-probe | universal | P3 | 特定人群 |
 | goal | universal | P3 | 特定人群 |
 | rename-session | universal | P3 | 低频有手动路径 |
