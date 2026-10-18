@@ -110,8 +110,9 @@ export default function baseToolEnhanceExtension(pi: ExtensionAPI): void {
  * 频率语义（D3 检查粒度）：对账是 session 级操作（读当前 session 的 pi entries +
  * 当前 session 的 registry，appendEntry 幂等），属豁免类不挂进程级 once flag，
  * 每 session_start 都执行。桌面端每次激活是 startup+resume 双派发（factory 二调
- * 下 handler 还会累积），对账多次执行幂等无害（补投的重复穿透由 pending-reconcile
- * 的 in-flight 单飞检查 + 同步补投标记收敛）；反之若挂进程级 flag，startup 消费
+ * 下 handler 还会累积），对账多次执行幂等无害（补投的重复穿透由 port 幂等接管：
+ * 同激活双派发的第二路 deliver 同 id 被 port 吞、已送达任务由送达痕迹判据阻断，
+ * 详见 pending-reconcile.ts 头注幂等体系节）；反之若挂进程级 flag，startup 消费
  * flag 后目标 session 的对账将永远被跳过（M3 对账在主链路被禁用，此处是唯一执行点）。
  *
  * 入口无条件 debug 日志（S6 观测通道）：每次 handler 派发都打，含 reason——

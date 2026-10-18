@@ -107,8 +107,9 @@ export function createDiskDeliveryStore(deps: DiskDeliveryStoreDeps): DiskDelive
       records.delete(line.id)
       return
     }
-    // meta 行：segments 并入记录 meta（无记录在册的 meta 行为孤儿——保留待 record 行
-    // 后到的归并场景按行序自然并入；此处 records.set 前置存在才并入）
+    // meta 行：segments 并入记录 meta。无 record 在册的 meta 行直接丢弃不保留（此处
+    // 无 else、无暂存结构）；归并恒命中由调用序保证——record 行在条目受理前已 persist
+    // 落盘（耐久承诺先于投递尝试），meta 行只来自提交侧受理后的 attachSegments，恒后到
     const record = records.get(line.id)
     if (record) {
       record.meta = { ...record.meta, segments: line.segments }
