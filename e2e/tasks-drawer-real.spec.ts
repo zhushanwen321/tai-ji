@@ -57,8 +57,14 @@ const R2_FAUX_SCRIPT = [
   { text: '已把三个步骤加进任务清单。' },
 ]
 
-/** R3 faux 脚本：goal_control create → stop 文本 */
+/** R3 faux 脚本：tool_search 激活 deferred 的 goal_control → create → stop 文本 */
 const R3_FAUX_SCRIPT = [
+  {
+    toolCalls: [{
+      name: 'tool_search',
+      args: { query: 'goal control create objective successCriteria' },
+    }],
+  },
   {
     toolCalls: [{
       name: 'goal_control',

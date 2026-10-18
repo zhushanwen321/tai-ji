@@ -75,7 +75,8 @@ const PROBE_PROMPT = `请调用 workflow tool 运行 ${PROBE_SCRIPT} 脚本。`
 function buildFauxScript(probePath: string): Record<string, FauxStep[]> {
   return {
     'faux/faux-1': [
-      { toolCalls: [{ name: 'workflow', args: { action: 'run', name: probePath } }] },
+      // D3 工具拆分（tool-declaration-slimming）：legacy 名 workflow 退役 → workflow_run
+      { toolCalls: [{ name: 'workflow_run', args: { name: probePath } }] },
       { text: 'workflow 已完成。' },
     ],
     'faux/faux-1-reasoning': [
