@@ -2,15 +2,22 @@
  * 假引擎 CLI fixture（u-m3-control 集成/单测专用，设计 relay-spawn-transport §3.4.3
  * runtime 侧验收形态）。
  *
- * territory 自足：不追 pi-subagent-cli 工作副本（真实引擎联测登记 A4，DC-1 推迟到
- * W2 全部单元完成后）。本 fixture 只承载 control server 需要的引擎侧行为：
+ * 定位：本 fixture 覆盖 control server 的**传输/生命周期**面（帧不透明转发、组杀、
+ * 背压、超时），不追 pi-subagent-cli 的引擎协议语义。真实的「control server ×
+ * pi-subagent-cli 引擎 × 假 pi 子进程」跨包集成见
+ * __tests__/infra/subagent-control/real-engine-integration.test.ts（A4/DC-1 承接）。
+ *
+ * 承载的引擎侧行为：
  * - NDJSON stdin/stdout（engine_frame 信封的 `line` 载荷是不透明字符串，server 不理解
  *   引擎协议语义——fixture 按请求回 response 即可贯通双向转发）；
  * - `--spawn-child`：spawn 一个长驻子进程（模拟引擎拉起的假 pi，组杀收割对象）；
- * - `--exit-on <token> [--exit-code <n>]`：stdin 行含 token 即退出（正常/非正常退出）；
+ * - `--exit-on <token> [--exit-code <n>] [--exit-delay-ms <n>]`：stdin 行含 token 即退出
+ *   （正常/非正常退出；delay 用于「engine_close 先受理、引擎在 grace 窗内退出」的
+ *   确定性时序用例）；
  * - `--die-parent-only`：父进程自杀（exit 0）留子进程残活——unexpected-exit → 组杀
  *   兜底链（POSIX 负 pid 组杀覆盖已死组长）的收割对象；
- * - `--hang`：忽略 stdin 永不退出（engine_close 有界等待超时 → killed_by_control）；
+ * - `--hang`：忽略 stdin 内容永不退出（engine_close 有界等待超时 → killed_by_control）；
+ * - `--no-read-stdin`：不消费 stdin（管道写满 → 背压 → down 队列累积，聚合上限用例）；
  * - `--stderr <text>`：启动即写一行 stderr（engine_closed.stderrTail 采集验证）；
  * - `--emit <json>`：启动即向 stdout 写一行（unsolicited 引擎帧下发验证）。
  *
@@ -50,28 +57,40 @@ if (has('--spawn-child')) {
 }
 
 let buf = ''
-process.stdin.setEncoding('utf8')
-process.stdin.on('data', (c) => {
-  buf += c
-  let nl = buf.indexOf('\n')
-  while (nl !== -1) {
-    const line = buf.slice(0, nl)
-    buf = buf.slice(nl + 1)
-    nl = buf.indexOf('\n')
-    if (line.trim().length === 0) continue
-    handleLine(line)
-  }
-})
-process.stdin.on('end', () => {
-  // 保持与真实引擎同语义：stdin EOF 不自动退出（EOF 自灭是 SDK armEngineSelfDestruct
-  // 的职责，宿主测试用显式 exit/kill 驱动终局）
-})
+// --no-read-stdin：不消费 stdin（管道写满后 server 侧 down 队列开始累积——连接级
+// 聚合上限用例的确定性入口；进程仍常驻，由 engine_close/组杀收尾）。
+if (!has('--no-read-stdin')) {
+  process.stdin.setEncoding('utf8')
+  process.stdin.on('data', (c) => {
+    buf += c
+    let nl = buf.indexOf('\n')
+    while (nl !== -1) {
+      const line = buf.slice(0, nl)
+      buf = buf.slice(nl + 1)
+      nl = buf.indexOf('\n')
+      if (line.trim().length === 0) continue
+      handleLine(line)
+    }
+  })
+  process.stdin.on('end', () => {
+    // 保持与真实引擎同语义：stdin EOF 不自动退出（EOF 自灭是 SDK armEngineSelfDestruct
+    // 的职责，宿主测试用显式 exit/kill 驱动终局）
+  })
+} else {
+  // 不消费 stdin 时进程需自持活跃（否则 Node 无活动句柄即正常退出）
+  setInterval(() => {}, 1000)
+}
 
 function handleLine(line) {
   // --exit-on 判定先于回包（退出语义优先）
   const exitToken = argOf('--exit-on')
   if (exitToken !== undefined && line.includes(exitToken)) {
     const code = Number(argOf('--exit-code') ?? '0')
+    const delayMs = Number(argOf('--exit-delay-ms') ?? '0')
+    if (delayMs > 0) {
+      setTimeout(() => process.exit(code), delayMs)
+      return
+    }
     process.exit(code)
   }
   if (has('--hang')) return

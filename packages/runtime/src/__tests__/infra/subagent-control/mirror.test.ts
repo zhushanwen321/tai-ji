@@ -94,9 +94,10 @@ describe('mirror 帧解析与 seq 判定（纯函数）', () => {
     expect(parseRawMirrorLine(JSON.stringify({ recordId: 'r', seq: 0 }))).toBeNull()
   })
 
-  it('isMirrorSeqContinuous：首帧 true（无从比较）；其后必须 +1（跳号/回退/重复均 false）', () => {
+  it('isMirrorSeqContinuous：首帧必须 seq=0（写侧从 0 起）；其后必须 +1（跳号/回退/重复均 false）', () => {
     expect(isMirrorSeqContinuous(undefined, 0)).toBe(true)
-    expect(isMirrorSeqContinuous(undefined, 7)).toBe(true)
+    expect(isMirrorSeqContinuous(undefined, 1)).toBe(false)
+    expect(isMirrorSeqContinuous(undefined, 7)).toBe(false)
     expect(isMirrorSeqContinuous(0, 1)).toBe(true)
     expect(isMirrorSeqContinuous(0, 2)).toBe(false)
     expect(isMirrorSeqContinuous(5, 5)).toBe(false)
@@ -185,6 +186,25 @@ describe('SubagentMirrorHub：seq 空洞 → degraded（显式标注，不静默
       lastDeltaSeq: 0,
       lines: ['正常'],
     })
+  })
+
+  it('首帧 seq>0（写侧首帧被丢弃）→ 立即 degraded，live 不发布但磁盘镜像照写', () => {
+    const { hub, published, warnings, logs } = makeHub()
+    hub.openChannel('ch-1', MAIN_SID)
+    const line = piLine({ type: 'message_start', message: { role: 'assistant', content: [] } })
+    hub.ingestBytes('ch-1', Buffer.from(encodeFrame(REC, 1, line), 'utf8'))
+
+    expect(published).toHaveLength(0)
+    expect(hub.getStreamStateByRecord(MAIN_SID, REC)).toEqual({
+      found: false,
+      msgSeq: 0,
+      lastDeltaSeq: 0,
+      lines: [],
+      degraded: true,
+    })
+    expect(warnings.some((w) => w.includes('first frame seq mismatch') && w.includes(REC))).toBe(true)
+    // 证据面不受降级影响：首达帧仍落盘
+    expect(logs.get(REC)?.chunks.map((b) => b.toString('utf8'))).toEqual([`${line}\n`])
   })
 
   it('畸形帧丢弃 + 计数告警（不抛出、不升连）；其后的 seq 断档按自然归因触发 degraded', () => {

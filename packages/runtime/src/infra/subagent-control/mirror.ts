@@ -7,10 +7,11 @@
  * control close → dispose 该通道全部 record），并同步落盘磁盘镜像
  * `pi-subagent-<date>-<recordId>.jsonl`。
  *
- * seq 连续性检查（D6）：写侧「丢弃也递增」——读取侧看到 `seq` 非 `last+1` 即判定该
- * record 的 live 派生视图出现空洞，`markDegraded()` 停止发布 live entries/chunks 并让
- * 状态查询带 `degraded: true`（显式标注，不静默）。磁盘镜像与 reload 腿不受影响：tee
- * 只是可由权威数据（pi session 文件 + journal）重建的派生视图。
+ * seq 连续性检查（D6）：写侧「丢弃也递增」且每个 record 从 0 起——读取侧要求首帧
+ * `seq === 0`、其后严格 `last+1`；任一不满足即判定该 record 的 live 派生视图出现空洞，
+ * `markDegraded()` 停止发布 live entries/chunks 并让状态查询带 `degraded: true`（显式
+ * 标注，不静默）。磁盘镜像与 reload 腿不受影响：tee 只是可由权威数据（pi session 文件
+ * + journal）重建的派生视图。
  *
  * 帧解析容错：畸形行（非 JSON/字段缺失）丢弃 + 计数，不抛出不升连——单个坏帧不影响
  * 其他 record/channel；attributable 的空洞语义仍由 seq 检查承担（坏帧同样消耗写侧 seq，
@@ -61,9 +62,13 @@ type RecordMirror = {
   degraded: boolean
 }
 
-/** seq 连续性判定（纯函数，单测直构）：undefined = 首帧（无从比较，视为连续）。 */
+/**
+ * seq 连续性判定（纯函数，单测直构）：写侧每个 record 从 0 起、丢弃也递增，因此首帧
+ * 必为 seq 0（首帧被写侧丢弃时，读取侧首个到达帧 seq>0 = 空洞，必须显式降级）；
+ * 其后必须严格 last+1。
+ */
 export function isMirrorSeqContinuous(previous: number | undefined, next: number): boolean {
-  return previous === undefined || next === previous + 1
+  return previous === undefined ? next === 0 : next === previous + 1
 }
 
 /** 帧行解析（容错：任何形状问题 → null，调用方计数丢弃）。 */
@@ -241,7 +246,9 @@ export class SubagentMirrorHub {
     if (!continuous) {
       this.markDegraded(
         rec,
-        `seq discontinuity (got ${frame.seq} after ${previous ?? 'none'})`,
+        previous === undefined
+          ? `first frame seq mismatch (got ${frame.seq}, writer starts at 0)`
+          : `seq discontinuity (got ${frame.seq} after ${previous})`,
         frame.seq,
       )
       return

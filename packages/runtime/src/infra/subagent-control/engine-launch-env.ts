@@ -17,10 +17,10 @@
  * - PATH：findPiExecutable 所在目录前缀（引擎 spawn pi 子进程按名字解析 pi 时可达）；
  * - TAIJI_SUBAGENT_CONTROL_SOCKET / _ROOT_SESSION_ID：control 两键（SDK L0 基础设施
  *   键登记位；不进任何 deny——嵌套 extension 是合法读者，task pi 经引擎出站 env 继承）；
- * - TAIJI_ENGINE_RAW_MIRROR='1'：只给引擎（fd3 镜像通道宣告，u-m3-mirror 消费）；只在
- *   shared 出站 deny（剥 task pi 直 spawn 形态）登记、不在 SDK ENGINE_ENV_DENY_LIST——
- *   本函数在 buildEngineChildEnv 之后显式注入即不受影响，引擎再出站时的剥除归引擎侧
- *   出站构建器与 shared deny 的消费方（本单元不做该剥除——task pi 的 env 由引擎构建）。
+ * - TAIJI_ENGINE_RAW_MIRROR='1'：只给引擎（fd3 镜像通道宣告，读取侧 = runtime
+ *   SubagentMirrorHub）；runtime 注入发生在 buildEngineChildEnv 之后，故刻意不进
+ *   SDK ENGINE_ENV_DENY_LIST（否则引擎自己也收不到）；引擎再 spawn task pi 时的
+ *   剥除归引擎侧出站构建器（pi-subagent-cli spawn-runner，本函数不承担）。
  */
 import { delimiter as pathDelimiter } from 'node:path'
 import {
@@ -53,7 +53,7 @@ export type EngineLaunchEnvOptions = {
   controlSocket?: string
   /** 主会话根 id（engine_open 的 rootSessionId；嵌套 task pi 共享同一根）。 */
   rootSessionId?: string
-  /** fd3 raw mirror 宣告（u-m3-mirror 消费；runtime 宿主恒 true）。 */
+  /** fd3 raw mirror 宣告（runtime 宿主恒 true；读取侧 = SubagentMirrorHub）。 */
   rawMirror?: boolean
 }
 

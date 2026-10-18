@@ -8,8 +8,8 @@
  * engine_close 的接收方。
  *
  * engine_open 的 launch 字段：契约 SSOT = core transport/types.ts 的 EngineLaunchSpec
- * （u-foundation 产物；core 包 exports 未暴露该 deep path，runtime 以结构镜像承载，
- * u-m3-rt-transport 落地后可回切 type import）。设计 §3.4.3 帧表把 engineId/
+ * （core 包 exports 未暴露该 deep path，runtime 以结构镜像承载——不 value import 该
+ * deep path；runtime 对 core 的运行时消费限于 barrel 与语义子入口）。设计 §3.4.3 帧表把 engineId/
  * rootSessionId/parentRecordId/depth 列在顶层、§3.4.3 launch spec 接口将其收在 launch
  * 内——解析取「launch 权威 + 顶层同名字段存在即覆盖」的并集读法，两种写法均可解析。
  */
@@ -186,8 +186,10 @@ export function parseControlInboundFrame(line: string): ControlInboundFrame | nu
 //
 // SDK ENGINE_TRANSPORT_ERROR_CODES 族是 extension 侧 transport 错误面；引擎通道裁决
 // 帧的 code 是 runtime 侧行内词表（设计 §3.4.3 只点名 session/channel_limit，spawn
-// 失败透传 SDK EngineSdkError.code 如 engine_not_found）。u-m3-rt-transport 只透传
-// message/recovery，不按 code 分支——词表扩充无跨端兼容负担。
+// 失败透传 SDK EngineSdkError.code 如 engine_not_found）。消费方（core control-shared）
+// 会按 code 收敛为 transport 错误码（非 engine_ 前缀的 open 裁决码统一落
+// engine_transport_unavailable，unknown_channel 在非 close 竞态落
+// engine_transport_lost），词表扩充时须同步核对消费侧映射。
 
 export const CONTROL_FRAME_ERROR_CODES = {
   sessionMismatch: 'session',

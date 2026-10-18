@@ -142,7 +142,7 @@ describe('local vs runtime launch env 等价（D4 env 形状测试，验收 ⑤�
     }
   })
 
-  it('键集合差集有界：runtime 侧相对 local 的新增键 = raw mirror（runtime 宿主宣告键，SDK deny 未登记——过渡期事实锚定，u-m3-mirror/delete 终态复核）', () => {
+  it('键集合差集有界：runtime 侧相对 local 的新增键 = raw mirror（runtime 宿主向引擎进程宣告 fd3 通道；task pi 侧的剥除归引擎出站构建器，不在本函数职责内）', () => {
     const localKeys = new Set(Object.keys(localTaskEnv))
     const runtimeOnly = Object.keys(runtimeTaskEnv).filter((k) => !localKeys.has(k))
     expect(new Set(runtimeOnly)).toEqual(new Set(['TAIJI_ENGINE_RAW_MIRROR']))

@@ -141,6 +141,11 @@ type ConnState = {
   /** up 方向待写队列（socket 背压；{channelId, 行} FIFO 保 per-channel 顺序）。 */
   upQueue: Array<{ channelId: string; line: string; bytes: number }>
   upQueueBytes: number
+  /**
+   * down 方向待写队列的**连接级聚合**字节数（各通道 pendingDownBytes 之和；D8
+   * 「每连接每方向 256MB」的 down 侧防线）。
+   */
+  downQueueBytes: number
   awaitingDrain: boolean
 }
 
@@ -156,6 +161,11 @@ type ChannelCtx = {
   closeTimer: NodeJS.Timeout | null
   /** 控制面已裁决杀组（engine_close 超时 / 背压溢出 / 断连 fan-out / open 超时 / 递归树杀）。 */
   killRequested: boolean
+  /**
+   * engine_close（intentional）已受理：引擎在 grace 窗内自行退出属正常关闭路径，
+   * exit 处理按正常口径记日志（D7 intentional/unexpected 两分），不走「意外退出」warn。
+   */
+  intentionalClose: boolean
   /** 杀组路径预设的终局归因（exit 事件到达时采用；缺省按 code/signal 推导）。 */
   closedReason: SubagentControlClosedReason | null
   closedNotified: boolean
@@ -362,6 +372,7 @@ export class SubagentControlServer {
       seenOpenIds: new Set(),
       upQueue: [],
       upQueueBytes: 0,
+      downQueueBytes: 0,
       awaitingDrain: false,
     }
     this.conns.set(conn.id, conn)
@@ -624,7 +635,8 @@ export class SubagentControlServer {
     try {
       // POSIX detached:true（引擎 = 进程组长，组杀覆盖引擎 + 其 pi 子进程）；
       // Windows detached:false + windowsHide:true（树杀走 taskkill /T，D7）。
-      // stdio[3] = raw mirror 通道（TAIJI_ENGINE_RAW_MIRROR=1 宣告；u-m3-mirror 接管读取）。
+      // stdio[3] = raw mirror 通道（TAIJI_ENGINE_RAW_MIRROR=1 宣告；读取侧由
+      // SubagentMirrorHub 接管——见 attachChildWiring 的 fd3 接线）。
       child = spawn(launch.command, launch.args, {
         cwd: spec.cwd,
         env,
@@ -670,6 +682,7 @@ export class SubagentControlServer {
       stderrTail: '',
       closeTimer: null,
       killRequested: false,
+      intentionalClose: false,
       closedReason: null,
       closedNotified: false,
       exitSeen: false,
@@ -779,12 +792,17 @@ export class SubagentControlServer {
       return
     }
     const bytes = byteLengthOf(line) + 1
-    // 队列上限前置检查（溢出 → error + 杀组 + engine_closed，D8 不丢帧不静默）
-    if (ctx.pendingDownBytes + bytes > this.channelQueueMaxBytes
-      || ctx.pendingDown.length + 1 > this.channelQueueMaxFrames) {
-      this.writeErrorAndKill(ctx, CONTROL_FRAME_ERROR_CODES.backpressureOverflow,
-        `engine stdin queue overflow (${String(ctx.pendingDownBytes + bytes)} bytes / ${String(ctx.pendingDown.length + 1)} frames queued)`,
-        'engine_backpressure_overflow')
+    // 队列上限前置检查（溢出 → error + 杀组 + engine_closed，D8 不丢帧不静默）：
+    // per-channel 上限 + 每连接 down 方向聚合上限（各通道 pendingDownBytes 之和）
+    // 两级同判——聚合越界只关本通道（其它通道不受影响），不升连整条连接。
+    const channelOverflow = ctx.pendingDownBytes + bytes > this.channelQueueMaxBytes
+      || ctx.pendingDown.length + 1 > this.channelQueueMaxFrames
+    const connectionOverflow = ctx.conn.downQueueBytes + bytes > this.connectionQueueMaxBytes
+    if (channelOverflow || connectionOverflow) {
+      const detail = connectionOverflow
+        ? `engine stdin queue overflow (connection aggregate ${String(ctx.conn.downQueueBytes + bytes)} bytes)`
+        : `engine stdin queue overflow (${String(ctx.pendingDownBytes + bytes)} bytes / ${String(ctx.pendingDown.length + 1)} frames queued)`
+      this.writeErrorAndKill(ctx, CONTROL_FRAME_ERROR_CODES.backpressureOverflow, detail, 'engine_backpressure_overflow')
       return
     }
     let ok = false
@@ -798,6 +816,7 @@ export class SubagentControlServer {
     if (!ok) {
       ctx.pendingDown.push({ line, bytes })
       ctx.pendingDownBytes += bytes
+      ctx.conn.downQueueBytes += bytes
       stdin.once('drain', () => {
         this.flushPendingDown(ctx)
       })
@@ -817,6 +836,7 @@ export class SubagentControlServer {
       }
       ctx.pendingDown.shift()
       ctx.pendingDownBytes -= next.bytes
+      ctx.conn.downQueueBytes = Math.max(0, ctx.conn.downQueueBytes - next.bytes)
       if (!ok) {
         stdin.once('drain', () => {
           this.flushPendingDown(ctx)
@@ -842,6 +862,7 @@ export class SubagentControlServer {
     }
     if (ctx.rec.state !== 'open') return // 幂等：重复/已关闭通道的 engine_close 忽略
     ctx.rec.state = 'closing'
+    ctx.intentionalClose = true // D7：intentional close 路径（exit 日志不走「意外退出」口径）
     ctx.closeTimer = setTimeout(() => {
       ctx.closeTimer = null
       console.warn(`[subagent-control] engine_close grace (${String(this.closeGraceMs)}ms) elapsed, killing group channelId=${frame.channelId}`)
@@ -938,7 +959,8 @@ export class SubagentControlServer {
       }
       // 引擎意外退出（非控制面裁决）→ 无条件组杀（D7：负 pid 对已死组长仍有效，
       // 覆盖其 pi 子进程孤儿）；控制面裁决路径的组杀已在 terminateChannel 执行。
-      const unexpected = !ctx.killRequested
+      // engine_close（intentional）窗内自行退出是正常关闭路径（D7 两分），不计意外。
+      const unexpected = !ctx.killRequested && !ctx.intentionalClose
       const reason: SubagentControlClosedReason = ctx.closedReason
         ?? (signal !== null ? SUBAGENT_CONTROL_CLOSED_REASONS.engineSignal : SUBAGENT_CONTROL_CLOSED_REASONS.engineExit)
       this.finalizeClosed(ctx, code, signal, reason)
@@ -1070,6 +1092,10 @@ export class SubagentControlServer {
       clearTimeout(ctx.closeTimer)
       ctx.closeTimer = null
     }
+    // down 队列随通道终结释放：连接级聚合计数同步扣减（迟到 drain 不再回调本通道）。
+    ctx.conn.downQueueBytes = Math.max(0, ctx.conn.downQueueBytes - ctx.pendingDownBytes)
+    ctx.pendingDown = []
+    ctx.pendingDownBytes = 0
     // 递归树杀（D4：父通道关闭/被杀 → 递归杀子通道引擎组；登记面 = recordId→parentRecordId）
     for (const childId of this.registry.findDescendantIds(rec.channelId)) {
       const childCtx = this.ctxs.get(childId)
@@ -1181,9 +1207,11 @@ export function getActiveControlServer(): SubagentControlServer | undefined {
  * 计算注入主 pi 进程的 control env（D4 env × spawn 点矩阵的 main pi 行）。
  *
  * 降级语义：server 未激活 → 空对象（spread 无副作用，extension 侧
- * isControlEnvActive 判缺失回落 local transport）。ROOT_SESSION_ID 是初值语义
- * （create 路径的 sessionId 参数可能为 temp id，pi 就绪后 rekey）——连接归属的权威
- * = 第一个 engine_open 帧（D5），本键无权威消费方，按设计矩阵完备性注入。
+ * isControlEnvActive 判缺失回落 local transport）。ROOT_SESSION_ID 是宿主侧初值/兜底：
+ * 连接归属的权威 = engine_open 帧携带的 rootSessionId（spec 显式值优先，D5），本键
+ * 只在 engine_open 未显式携带时被 transport 回落消费。create 路径的 sessionId 参数
+ * 可能是 spawn 时刻的 temp id（pi 就绪后 rekey 不更新已 spawn 的进程 env），因此
+ * 真实根会话须由调用方经 spec 显式传递。
  */
 export function getControlSpawnEnv(sessionId?: string): Record<string, string> {
   const socketPath = getActiveControlSocketPath()

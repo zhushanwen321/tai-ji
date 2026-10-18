@@ -6,7 +6,7 @@
  * 形态：dataDir 注入 mkdtemp、上限与时间窗注入小值、
  * POSIX 组杀断言 skipIf(win32)。
  */
-import { describe, it, expect, afterEach } from 'vitest'
+import { describe, it, expect, afterEach, vi } from 'vitest'
 import { readFile } from 'node:fs/promises'
 import { existsSync } from 'node:fs'
 import { join } from 'node:path'
@@ -43,6 +43,7 @@ async function setupServer(overrides = {}): Promise<{ server: SubagentControlSer
 }
 
 afterEach(async () => {
+  vi.restoreAllMocks()
   for (const server of servers.splice(0)) {
     await server.destroy()
   }
@@ -312,6 +313,77 @@ describe('subagent-control server（真 socket 环回 + fixture 引擎）', () =
     await agent.waitForFrame((f) => f.kind === SUBAGENT_CONTROL_FRAME_KINDS.engineClosed, 'engine_closed')
     await waitFor(() => !isPidAlive(pid), 'engine killed after up oversize')
     void channelId
+  })
+
+  it('down 方向连接级聚合上限：多通道累加越界 → 仅触发通道失败（error + engine_closed），其它通道保持 open', { timeout: 30_000 }, async () => {
+    // per-channel 上界放宽到 8MB；连接级 down 聚合上界压到 100KB——两个 70KB
+    // 待写帧累加即越界（fixture --no-read-stdin 不消费 stdin，写必然入队列）。
+    const { server } = await setupServer({
+      channelQueueMaxBytes: 8 * 1024 * 1024,
+      connectionQueueMaxBytes: 100 * 1024,
+      closeGraceMs: 500,
+    })
+    const agent = new TestAgent(server.listeningSocketPath)
+    await agent.opened
+    agent.hello()
+    const a = expectOpened(await agent.open(launchSpec({ engineId: 'fake-engine-a', args: ['--no-read-stdin'] }), 'agg-a'))
+    const b = expectOpened(await agent.open(launchSpec({ engineId: 'fake-engine-b', args: ['--no-read-stdin'] }), 'agg-b'))
+
+    const frame = 'x'.repeat(70 * 1024)
+    agent.sendFrame(a.channelId, frame) // 通道 A 入队（per-channel 未越界）
+    agent.sendFrame(b.channelId, frame) // A+B 聚合 140KB > 100KB → 仅 B 被判溢出
+
+    const error = await agent.waitForFrame(
+      (f) => f.kind === SUBAGENT_CONTROL_FRAME_KINDS.error && f.code === 'engine_backpressure_overflow',
+      'down aggregate overflow error',
+    )
+    expect(error.channelId).toBe(b.channelId)
+    expect(String(error.message)).toContain('connection aggregate')
+    const closed = await agent.waitForFrame(
+      (f) => f.kind === SUBAGENT_CONTROL_FRAME_KINDS.engineClosed && f.channelId === b.channelId,
+      'engine_closed for aggregate-overflow channel',
+    )
+    expect(closed.reason).toBe(SUBAGENT_CONTROL_CLOSED_REASONS.killedByControl)
+    await waitFor(() => !isPidAlive(b.pid), 'aggregate-overflow channel engine reaped')
+
+    // 其它通道不受影响：台账仍 open、进程存活、无 error/engine_closed 帧，且仍可受理下行帧
+    expect(server.getChannelForTest(a.channelId)?.state).toBe('open')
+    expect(isPidAlive(a.pid)).toBe(true)
+    expect(agent.errorFrames().some((f) => f.channelId === a.channelId)).toBe(false)
+    expect(agent.closedFrames().some((f) => f.channelId === a.channelId)).toBe(false)
+    agent.sendFrame(a.channelId, 'still-accepted')
+    await new Promise((r) => setTimeout(r, 150))
+    expect(agent.errorFrames().some((f) => f.channelId === a.channelId)).toBe(false)
+    agent.destroy()
+  })
+
+  it('engine_close 窗内正常退出 → 不打「exited unexpectedly」warn（intentional 路径日志口径）', { timeout: 20_000 }, async () => {
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    const logSpy = vi.spyOn(console, 'log').mockImplementation(() => {})
+    const { server } = await setupServer({ closeGraceMs: 2_000 })
+    const agent = new TestAgent(server.listeningSocketPath)
+    await agent.opened
+    agent.hello()
+    const { channelId, pid } = expectOpened(
+      await agent.open(launchSpec({ args: ['--exit-on', 'dispose-now', '--exit-delay-ms', '150'] }), 1),
+    )
+    // dispose 帧送达（引擎 150ms 后退出）→ engine_close 先受理（intentionalClose）
+    agent.sendFrame(channelId, 'dispose-now')
+    agent.send({ v: 1, kind: SUBAGENT_CONTROL_FRAME_KINDS.engineClose, channelId })
+
+    const closed = await agent.waitForFrame(
+      (f) => f.kind === SUBAGENT_CONTROL_FRAME_KINDS.engineClosed && f.channelId === channelId,
+      'engine_closed after intentional close',
+    )
+    expect(closed.reason).toBe(SUBAGENT_CONTROL_CLOSED_REASONS.engineExit)
+    await waitFor(() => !isPidAlive(pid), 'engine exited in close grace window')
+
+    const warned = warnSpy.mock.calls.map((args) => args.map(String).join(' ')).join('\n')
+    expect(warned).not.toContain('exited unexpectedly')
+    const logged = logSpy.mock.calls.map((args) => args.map(String).join(' ')).join('\n')
+    expect(logged).toContain(`engine closed channelId=${channelId}`)
+    expect(logged).toContain('reason=engine_exit')
+    agent.destroy()
   })
 
   it('destroy（deinit）：全通道组杀 + socket 文件删除', { timeout: 20_000 }, async () => {
