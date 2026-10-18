@@ -85,8 +85,15 @@ function derSanEntry(host) {
   return derTlv(0x82, Buffer.from(host, "ascii")); // dNSName
 }
 
-/** 生成自签证书（同一张既是服务端证书也是信任锚）。 */
-export function generateSelfSignedCert({ commonName = COMMON_NAME, sans = DEFAULT_SANS } = {}) {
+/**
+ * 生成自签证书（同一张既是服务端证书也是信任锚）。
+ * 默认 CN 按次派生（pid + 随机后缀）：NODE_EXTRA_CA_CERTS 同主体证书互相覆盖（bundle 内仅
+ * 最后一张生效），多 mock 实例并存形态（如双代理对照）各自 CA 必须主体互异才同时受信。
+ */
+export function generateSelfSignedCert({
+  commonName = `${COMMON_NAME}-${process.pid.toString(36)}-${crypto.randomBytes(3).toString("hex")}`,
+  sans = DEFAULT_SANS,
+} = {}) {
   const { publicKey, privateKey } = crypto.generateKeyPairSync("rsa", { modulusLength: 2048 });
   const serial = crypto.randomBytes(8);
   serial[0] &= 0x7f; // 保证正整数（最高位清零，免前导 0x00 分支）
@@ -284,11 +291,14 @@ function handleWsUpgrade(req, socket, head, hits) {
  */
 export function startMockLlmEndpoint({ keyPem, certPem, host = "127.0.0.1", port = 0 } = {}) {
   const hits = [];
-  const server = https.createServer({ key: keyPem, cert: certPem }, (req, res) => {    const chunks = [];
+  const server = https.createServer({ key: keyPem, cert: certPem }, (req, res) => {
+    const chunks = [];
     req.on("data", (c) => chunks.push(c));
     req.on("end", () => {
       hits.push({ path: req.url, ts: new Date().toISOString() });
-      if (req.method === "POST" && req.url === "/v1/messages") {
+      // pathname 匹配（剥查询串）：anthropic SDK 恒定 POST /v1/messages?beta=true
+      // （@anthropic-ai/sdk resources/beta/messages/messages.js），精确匹配必 404。
+      if (req.method === "POST" && (req.url ?? "").split("?")[0] === "/v1/messages") {
         let body = {};
         try {
           body = JSON.parse(Buffer.concat(chunks).toString("utf8") || "{}");
