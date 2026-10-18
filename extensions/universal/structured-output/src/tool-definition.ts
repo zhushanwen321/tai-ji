@@ -24,6 +24,7 @@ import { Type } from "typebox";
 
 import { executeStructuredOutput, isObjectRootSchema } from "./execute.js";
 import { renderStructuredOutputResult } from "./render-result.js";
+import type { StructuredOutputRenderContext } from "./render-result.js";
 import {
 	assertJsonSchemaRoot,
 	echo,
@@ -167,9 +168,15 @@ export function createWorkflowToolDefinition(envSchema: string) {
 		},
 
 		// 摘要不进 details：details 是模型的结构化产出本体（workflow 引擎 extractParsedOutput
-		// 原样消费），折叠态摘要 = render-result 的固定文案。
-		renderResult(result: unknown, options: { expanded: boolean }, theme: Theme) {
-			return renderStructuredOutputResult(result, options, theme);
+		// 原样消费），成功轮折叠态摘要 = render-result 的固定文案；失败轮（context.isError）
+		// 回退 content 首行，避免把校验失败显示成「schema validated」。
+		renderResult(
+			result: unknown,
+			options: { expanded: boolean },
+			theme: Theme,
+			context?: StructuredOutputRenderContext,
+		) {
+			return renderStructuredOutputResult(result, options, theme, context);
 		},
 	};
 }
@@ -249,9 +256,15 @@ export function createDailyToolDefinition() {
 			);
 		},
 
-		// 摘要不进 details：同 workflow 变体（details = 数据本体，parsedOutput 契约）
-		renderResult(result: unknown, options: { expanded: boolean }, theme: Theme) {
-			return renderStructuredOutputResult(result, options, theme);
+		// 摘要不进 details：同 workflow 变体（details = 数据本体，parsedOutput 契约）；
+		// 失败轮折叠态回退 content 首行（context.isError）。
+		renderResult(
+			result: unknown,
+			options: { expanded: boolean },
+			theme: Theme,
+			context?: StructuredOutputRenderContext,
+		) {
+			return renderStructuredOutputResult(result, options, theme, context);
 		},
 	};
 }

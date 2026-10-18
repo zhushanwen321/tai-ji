@@ -214,7 +214,7 @@ raw mirror 的显式降级标注（additive）：写侧 seq 按 `recordId` 进�
 
 ### prompt 送达回执（prompt delivery receipt）
 
-引擎 run 生命周期内的送达判定（M2）：pi 对 `prompt` 命令的 response 是唯一成功回执；stdout 活性只用于取消「prompt 写入后 30s 完全零输出」计时器（不是第二回执、不是 pending 状态）。完全零输出 → `engine_prompt_not_delivered`；`success:false` → `engine_prompt_rejected`；stdin 不可用 / EPIPE → 立即失败；迟到 response 不重复 settle；**不加重试**（prompt 可能已产生副作用）。**代码映射**：`packages/pi-subagent-cli/src/prompt-ack.ts` + `spawn-runner.ts`。
+引擎 run 生命周期内的送达判定（M2）：pi 对 `prompt` 命令的 response 是唯一成功回执；stdout 活性只用于取消「prompt 写入后 30s 完全零输出」计时器（不是第二回执、不是 pending 状态）。完全零输出 → `engine_prompt_not_delivered`；`success:false` → `engine_prompt_rejected`；stdin 不可用 / EPIPE → 立即失败；迟到 response 不重复 settle；**不加重试**（prompt 可能已产生副作用）。**代码映射**：`packages/pi-subagent-cli/src/prompt-ack.ts` + `spawn-runner.ts`。pi 语义锚点 = PS-81（[pi-semantics.json](pi-semantics.json)；探针 `pi-semantics-prompt-response.test.ts`，pi 升级时由版本门禁复验）。
 
 ### 模型覆盖（modelOverride）
 

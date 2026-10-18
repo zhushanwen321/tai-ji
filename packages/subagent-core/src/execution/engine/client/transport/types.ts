@@ -15,7 +15,8 @@
 //   缺席（进程面错误由 onExit + writeFrame 回执表达，无第二个事实源）。
 // - 送达回执不放进 transport：「prompt 已被 pi 受理」的事实源是 pi 的 prompt response /
 //   stdout 活性，只有引擎能解析——回执留在引擎 run 生命周期（M2），transport 不理解
-//   pi 协议。
+//   pi 协议。该事实源与 disposition 值域登记为 pi 语义 PS-81（docs/pi-semantics.json；
+//   stdout 活性只取消零输出计时器、不构成回执）。
 // - initialize 握手保持在上层：EngineClient 的请求 id 关联、反向通道路由、超时、
 //   initialize、崩溃重建策略不变；engineConfig 经上层 initialize 发送，transport 不携带。
 // - 选择逻辑（单源谓词 = transport-selection.ts（内部消费 SDK isControlEnvActive + D9 逃生舱））：TAIJI_SUBAGENT_CONTROL_SOCKET 非空 →

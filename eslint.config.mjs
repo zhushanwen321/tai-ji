@@ -156,11 +156,21 @@ export default [
   },
   // [M3 relay-spawn-transport u-m3-control] subagent control server：control 帧路由 /
   // 通道台账 / 引擎 spawn 与按组收割 / fd3 raw mirror 接线的单点聚合文件（职责内聚，
-  // 再拆属独立重构任务）。970 行 > 500 软上限，提额保留软上限告警（先例同型）。
+  // 再拆属独立重构任务）。1051 行 > 500 软上限，提额保留软上限告警（先例同型）。
   {
     files: ['packages/runtime/src/infra/subagent-control/control-server.ts'],
     rules: {
-      'max-lines': ['warn', { max: 1000, skipBlankLines: true, skipComments: true }],
+      'max-lines': ['warn', { max: 1060, skipBlankLines: true, skipComments: true }],
+    },
+  },
+  // [M3 relay-spawn-transport u-m2-prompt-ack] pi 引擎 spawn runner：spawn/握手/帧泵/
+  // prompt 送达回执（prompt-ack）接线 / fd3 raw mirror 装配的单点聚合文件（职责内聚，
+  // 再拆属独立重构任务）。prompt-ack 接线与 mirror 装配入列后折算 520 行 > 500 软上限，
+  // 按「微超即提额，保留软上限告警」先例（pi-provider-store）提额，长期应拆分。
+  {
+    files: ['packages/pi-subagent-cli/src/spawn-runner.ts'],
+    rules: {
+      'max-lines': ['warn', { max: 540, skipBlankLines: true, skipComments: true }],
     },
   },
   // [HISTORICAL·2026-09 idle-pi-reclamation] 空闲 pi 进程回收功能接入（reaper 装配 +

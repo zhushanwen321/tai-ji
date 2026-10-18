@@ -11,6 +11,8 @@
 //   ③ 连接死亡 → 在册通道 engine_transport_lost fan-out + 在途 open 全拒（不重试）；
 //   ④ 谓词：control env 激活 → runtime transport 被选中（ready 经 control 通道、
 //      零 spawn 零 pidfile）；空串/缺失 → local（既有 transport-local.test.ts 覆盖）。
+//   ⑤ [ADR-0122] 握手期失败（protocol mismatch）→ teardown 清理链迟到的 engine_closed
+//      不复活 unavailable（下一次 ensureConnected 仍抛原错误、不重新 engine_open）。
 
 import { existsSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import * as net from "node:net";
@@ -1100,6 +1102,43 @@ describe("EngineClient：runtime transport 谓词接线（验收③④）", () =
     const client = makeHostedClient(server, dataDir);
 
     await expect(client.ensureConnected()).rejects.toMatchObject({ code: "engine_protocol_mismatch" });
+    expect(client.currentState).toBe("unavailable");
+  });
+
+  it("[ADR-0122] 握手期失败（initialize 版本不兼容）→ 清理回执 engine_closed 不复活 unavailable；再次 ensureConnected 仍抛原错误且不重新 engine_open", async () => {
+    const server = await startServer();
+    // 通道已 open、initialize 应答版本越界（握手失败的快速形态；超时形态
+    // engine_handshake_timeout 走同一条 connectOnce catch → teardown + markUnavailable 路径）。
+    server.onEngineFrame = (socket, frame) => {
+      let parsed: { id?: number; method?: string };
+      try {
+        parsed = JSON.parse(String(frame.line)) as { id?: number; method?: string };
+      } catch {
+        return;
+      }
+      if (parsed.method !== "initialize") return;
+      server.sendControl(socket, {
+        v: SUBAGENT_CONTROL_PROTOCOL_VERSION,
+        kind: K.engineFrame,
+        channelId: frame.channelId,
+        line: JSON.stringify({ id: parsed.id, result: { protocolVersion: 999 } }),
+      });
+    };
+    const dataDir = mkdtempSync(join(tmpdir(), "u-m3-rt-handshake-"));
+    dataDirs.push(dataDir);
+    const client = makeHostedClient(server, dataDir);
+
+    await expect(client.ensureConnected()).rejects.toMatchObject({ code: "engine_protocol_mismatch" });
+    // 清理链（teardownProcess → engine_close → runtime 回 engine_closed → 通道终局）
+    // 走完的确定性信号 = 共享 control 连接引用归零被关停（release 在 onExit 之后）。
+    await waitFor(() => server.connectionCount === 0, "engine_closed processed (control connection released)");
+    // 终局失败不得被清理回执复活（旧实现 onTransportExit 无条件 state = "exited"，
+    // 会让下一次 ensureConnected 把终局错误当可重试、重新 spawn 引擎）。
+    expect(client.currentState).toBe("unavailable");
+
+    const opensBefore = server.frames.filter((f) => f.kind === K.engineOpen).length;
+    await expect(client.ensureConnected()).rejects.toMatchObject({ code: "engine_protocol_mismatch" });
+    expect(server.frames.filter((f) => f.kind === K.engineOpen)).toHaveLength(opensBefore);
     expect(client.currentState).toBe("unavailable");
   });
 });

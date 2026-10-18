@@ -2,7 +2,19 @@
 //
 // [relay-spawn-transport §3.4.2 M2 / D3] prompt 送达回执 tracker（单级，per-run）。
 //
-// 语义锚点（设计 D3，用户裁决）：
+// 语义锚点（pi@1.0.0 实装 + 设计 D3 用户裁决；机器登记 = docs/pi-semantics.json PS-81）：
+//   pi 侧锚点（行号基于 pi@1.0.0；复核按符号名定位，探针 =
+//   packages/runtime/src/infra/pi/__tests__/pi-semantics-prompt-response.test.ts）：
+//   - `pi-coding-agent dist/modes/rpc/rpc-mode.js` `case "prompt"`（:298-313）：
+//     `success(id, "prompt", { disposition })` 唯一发送点 = `session.prompt(...)` 的
+//     `preflightResult` 回调内（先置 `preflightSucceeded = true`）；`.catch`（:308-312）
+//     仅在 `!preflightSucceeded` 时 `output(error(id, "prompt", e.message))`——
+//     受理后的异常不改写回执形状；
+//   - `pi-coding-agent dist/core/agent-session.js` `prompt(text, options)`（:1487-1594）：
+//     `preflightResult` 调用点全集 / disposition 值域 = `handled`（扩展命令接管 :1494 /
+//     input handler 短路 :1504）/ `queued`（流式中排队 :1525）/ `started`（起轮前 :1594，
+//     先于 `_runAgentPrompt`）——三态都是「pi 已受理」，pi 升级时此值域由 PS-81 探针复验。
+//   taiji 侧（设计 D3，用户裁决）：
 //   - **prompt response 是唯一成功回执**——`success === true`（`data.disposition` 可为
 //     started / queued / handled，三者都表示 pi 已受理；`started` 不是唯一合法值）；
 //   - **stdout 活性只用于零输出判定**——`onChannelActivity()` 只取消零输出计时器，

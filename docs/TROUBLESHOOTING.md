@@ -400,7 +400,7 @@ node scripts/check-pi-resources-links.mjs --fix   # 外部 symlink → 真实复
 
 ### 31. subagent 一开始就失败：`engine_prompt_not_delivered` / `engine_prompt_rejected`
 
-**语义**：prompt response 是唯一成功回执。prompt 写入后**完全没有任何 stdout 字节（任意 chunk）**满 30s（`TAIJI_SUBAGENT_PROMPT_ACK_TIMEOUT_MS` 可覆盖）→ `engine_prompt_not_delivered`；stdin 不可用 / 写入 EPIPE → 同码（立即失败，不等 30s）；pi 回 `success:false` → `engine_prompt_rejected`（立即失败）。出现任意 stdout 字节（chunk；含未成行的 partial 数据）只取消零输出计时器并记 `prompt ack delayed` warn，**不是结算、不杀子进程**，run 继续等 prompt response。引擎层对两者都不自动重试（prompt 可能已产生副作用）；是否重跑由上层 recovery 文案决定。
+**语义**：prompt response 是唯一成功回执。prompt 写入后**完全没有任何 stdout 字节（任意 chunk）**满 30s（`TAIJI_SUBAGENT_PROMPT_ACK_TIMEOUT_MS` 可覆盖）→ `engine_prompt_not_delivered`；stdin 不可用 / 写入 EPIPE → 同码（立即失败，不等 30s）；pi 回 `success:false` → `engine_prompt_rejected`（立即失败）。出现任意 stdout 字节（chunk；含未成行的 partial 数据）只取消零输出计时器并记 `prompt ack delayed` warn，**不是结算、不杀子进程**，run 继续等 prompt response。引擎层对两者都不自动重试（prompt 可能已产生副作用）；是否重跑由上层 recovery 文案决定。pi 语义锚点 = PS-81（[pi-semantics.json](pi-semantics.json)；探针 `pi-semantics-prompt-response.test.ts`——pi 升级时该断言由版本门禁复验）。
 
 **诊断五元组**（随失败写进日志并拼入 `outcome.error`，有界）：`pid` / `bytesWritten`（stdin 已写字节）/ `stdoutBytes` / `stdoutBytesAfterPrompt`（prompt 写入后的 stdout 字节）/ `getStateAnswered`（get_state 是否已应答），另附 `lastEventType` / `stdoutSeen`。判定优先看 `stdoutBytesAfterPrompt`：为 0 = 通道彻底无响应（查引擎/pi 启动与 stdin 接线）；非 0 但无 prompt response = pi 已活跃但未受理 prompt（查 pi 侧 busy/queue/extension takeover 原因）。
 

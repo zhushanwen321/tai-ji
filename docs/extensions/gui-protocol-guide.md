@@ -8,7 +8,7 @@
 
 ## 1. 问题：为什么需要改造
 
-taiji 以 `--mode rpc` 运行 pi，pi 的 5 个渲染入口（`renderResult` / `setWidget` / `setStatus` / `registerMessageRenderer` / `ctx.ui.custom`）在 RPC 模式下失效或降级——pi 的 `Component` 返回 ANSI 文本行，不可序列化进 JSON-RPC。
+taiji 以 `--mode rpc` 运行 pi，pi 的 5 个渲染入口（`renderResult` / `setWidget` / `setStatus` / `registerMessageRenderer` / `ctx.ui.custom`）在 RPC 模式下失效或降级——pi 的 `Component` 返回 ANSI 文本行，不可序列化进 JSON-RPC。其中 `setStatus` 在 taiji 内已随底栏整体退役为**静默 noop**（[ADR-0141](../adr/decisions.md)，见 §3.3），独立运行 pi CLI 不受影响。
 
 **解决思路**：extension 在 `execute()` 内部按 `ctx.mode` 分支——TUI 走原生 `Component`，RPC 走结构化 `GuiComponent`（可序列化的 `{ type, props }`）。代码只写一版，运行时自动路由。问题陈述与入口失效明细见协议权威文档 §1。
 
@@ -106,7 +106,7 @@ export const myTool: ToolDefinition = {
 |---|---|---|
 | renderResult（tool 结果） | `details.__gui__` | 否 |
 | setWidget（持久面板） | `setWidgetDual(ctx, key, { gui, text })` | 否 |
-| setStatus（状态栏） | pi 原生，无需改造 | 否 |
+| setStatus（状态栏） | taiji 内静默 noop（底栏已退役，ADR-0141）；独立 pi CLI 不受影响，extension 无需改造 | 否 |
 | ctx.ui.custom（交互式） | `uiFormInteract(ctx, form)`（统一提问表单协议，见 §3.4） | 是 |
 | registerMessageRenderer（消息卡片） | `message.details.__gui__` | 否 |
 
@@ -164,15 +164,11 @@ setWidgetDual(ctx as GuiContext, 'my-widget', undefined)   // 模式无关；托
 - 不需要手动拼接 NUL 标记或 JSON.stringify——helper 已封装
 - 前端通过 `extension:widgetGui` WS 消息接收（`ViewHostStore` per-session 缓存）→ composer 任务托盘的 icon 条目/面板；推 `undefined` = invalidate = 条目消失
 
-### 3.3 setStatus：状态栏
+### 3.3 setStatus：状态栏（taiji 内已退役）
 
-**无需改造**。pi 的 `ctx.ui.setStatus(key, text)` 在 RPC 模式下已有效。runtime 同时保留 `text`（stripAnsi 纯文本）和 `textRaw`（原始 ANSI），extension 不改代码即可获益：
+**taiji 内为静默 noop，无需也无从改造**：底栏 StatusBar 及其数据链已整体退役（[ADR-0141](../adr/decisions.md)）——runtime 对 `extension_ui_request{method:'setStatus'}` 的翻译直接返回 noop（`packages/runtime/src/infra/pi/event-adapter.ts` 的 `translateStatusRequest()`，与 `setTitle` 同类已知落点），不广播、不落未知 method warn。
 
-```typescript
-// 现有代码无需改动
-ctx.ui.setStatus('my-ext:status', '\x1b[32m● Running\x1b[0m')
-// 前端收到 { text: '● Running', textRaw: '\x1b[32m● Running\x1b[0m' }
-```
+pi 扩展的 `ctx.ui.setStatus(key, text)` 调用保留：**独立运行 pi CLI 时状态栏仍有意义**，taiji 内该调用只是无害空操作。需要用户可见的进度/状态展示请改用 composer 任务托盘 widget（`setWidgetDual`，见 §3.2）。
 
 ### 3.4 ctx.ui.custom：富交互组件（统一提问表单协议 ui-form）
 

@@ -204,6 +204,17 @@ export class EngineClient {
   private stderrTail = "";
   private unavailableReason: EngineSdkError | undefined;
   /**
+   * 通道级 transport error 标记（onTransportError 置位、connectOnce 复位）。
+   * 通道级错误（error 帧 / 帧超限 / 队列溢出）的不可用是「通道死、control 连接仍活」
+   * 的中间态——随后的 engine_closed 只是通道终局回执，onTransportExit 据此回落 exited
+   * （下一次 run 可在同一连接上重新 engine_open；D5/D8，与 unknown_channel 同语义）。
+   * connect/握手失败的不可用（connectOnce catch）不置位：那是 [ADR-0122] 终局失败
+   * （unavailable 恒 throw），teardownProcess 关闭链迟到的 engine_closed 不得把状态
+   * 复活为 exited——否则下一次 run 会把终局错误（协议不匹配/握手超时）当作可重试、
+   * 重新 spawn 引擎。
+   */
+  private channelErrorUnavailable = false;
+  /**
    * 「连接/根换绑」单飞槽（R2A-N2）：ensureConnected 的统一入口。成立前探针→run
    * 并发调用会让两个调用方同时通过 ready 检查、双起 connectOnce（一个 run 握到
    * 另一个的通道，engine_open 被误拆）。所有连接/换绑必须经本槽串行化；finally
@@ -465,6 +476,7 @@ export class EngineClient {
   private async connectOnce(): Promise<void> {
     this.state = "connecting";
     this.intentionalKill = false;
+    this.channelErrorUnavailable = false;
     try {
       // transport 选择（D5 谓词，见 resolveTransport；谓词失败 = engine_transport_unavailable
       // 显式失败，经下方同一条 catch 标记不可用——不静默 local）+ 帧面订阅（open 后即可到达）。
@@ -766,7 +778,15 @@ export class EngineClient {
       logger.warn(`[engine-client:${this.engineId}] engine process exited unexpectedly (${detail})`);
     }
     this.teardownProcess(detail);
-    this.state = "exited";
+    // [ADR-0122] 状态回落复用 teardownProcess 的守卫（state !== unavailable /
+    // disposed），不再无条件重置：connect/握手失败标记的不可用是终局，teardownProcess
+    // 关闭链迟到的 engine_closed 不得把它复活为 exited。唯一例外 = 通道级 transport
+    // error 触发的不可用（channelErrorUnavailable）——通道死、control 连接仍活，本回执
+    // 即通道终局回执，回落 exited 让下一次 run 在同一连接上重建（D5/D8）。
+    if (this.state === "unavailable" && this.channelErrorUnavailable) {
+      this.state = "exited";
+    }
+    this.channelErrorUnavailable = false;
   }
 
   /**
@@ -794,6 +814,10 @@ export class EngineClient {
       // run 在活连接上重新 engine_open（与 engine_closed 的收敛语义一致）。
       if (this.state !== "unavailable" && this.state !== "disposed") this.state = "exited";
     } else if (this.state !== "unavailable") {
+      // 通道级错误：不可用只是中间态（fail-fast 收口在途请求），随后的 engine_closed
+      // 由 onTransportExit 回落 exited（channelErrorUnavailable 消费点）——通道死、
+      // control 连接仍活，下一次 run 可在同一连接上重建。
+      this.channelErrorUnavailable = true;
       this.markUnavailable(err);
     }
     // 通道/连接已裁决终局：让 transport 收敛（连接死亡时通道已清 → 立即 resolve；
