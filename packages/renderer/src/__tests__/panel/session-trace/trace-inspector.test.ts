@@ -173,8 +173,9 @@ async function mountContainer() {
 async function readyPartition() {
   ensureTraceLoaded(SID)
   // mock 数据一个微任务即 ready，interval 缺省 50ms 白付一个轮询 tick——缩到 1ms 只改轮询
-  // 粒度，等待语义不变（下同：本文件三处 vi.waitFor 统一处理）
-  await vi.waitFor(() => expect(useSessionTrace().partition.value.status).toBe('ready'), { interval: 1 })
+  // 粒度，等待语义不变（下同：本文件三处 vi.waitFor 统一处理，timeout 显式 5s——
+// 全量并发高负载下缺省 1s 上限曾产偶发假失败，interval 轮询粒度不变）
+  await vi.waitFor(() => expect(useSessionTrace().partition.value.status).toBe('ready'), { interval: 1, timeout: 5_000 })
 }
 
 beforeEach(() => {
@@ -445,7 +446,7 @@ describe('SESSION 行溯源跳转失败的用户反馈（onJumpParent catch+toas
       const errorToast = useToast().toasts.value.find((toast) => toast.type === 'error')
       expect(errorToast).toBeDefined()
       expect(errorToast?.message).toContain('trace 加载超时')
-    }, { interval: 1 })
+    }, { interval: 1, timeout: 5_000 })
     view.unmount()
   })
 
@@ -457,7 +458,7 @@ describe('SESSION 行溯源跳转失败的用户反馈（onJumpParent catch+toas
       const errorToast = useToast().toasts.value.find((toast) => toast.type === 'error')
       expect(errorToast).toBeDefined()
       expect(errorToast?.message).toContain('未找到源 session')
-    }, { interval: 1 })
+    }, { interval: 1, timeout: 5_000 })
     view.unmount()
   })
 })
