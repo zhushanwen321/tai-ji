@@ -70,7 +70,13 @@ export function useProviderEdit(providerRef: Ref<ProviderInfo | null>, deps: Pro
   // 表单载入 → 瞬态态重置 → 模型清单载入 → 记录初始快照。快照最后捕获，确保覆盖全部编辑态）。
   watch(
     () => providerRef.value,
-    (p) => {
+    (p, prev) => {
+      // MF-1-1：同 id 的新对象 = 广播/刷新替换了列表元素（ProviderPage v-for 直接把数组元素作
+      // :provider，settingsStore.setProviders 整体替换数组），不是「切换 provider」。
+      // 这里若继续全量重置，会把用户已输入或已回显的 apiKey 抹掉（回显态含 revealedApiKey/showKey）。
+      // 同 id 刷新由 form module 的 watch(providers) + applyReconcile 承接（非 dirty 整体重拍
+      // 表单与模型清单并重捕获快照，dirty 保留用户改动）——不在这里重复重置。
+      if (p && prev && p.id === prev.id) return
       form.applyProvider(p)
       models.applyProvider(p)
       form.resetTransient()

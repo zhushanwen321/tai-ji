@@ -40,6 +40,7 @@ import {
   provideSettingsTransport,
   provideSettingsStore,
   createSettingsStore,
+  getSettingsStore,
   __resetPlatformForTesting,
   type SettingsTransport,
   type DiscoverModelsResponse,
@@ -631,6 +632,61 @@ describe('已存 API Key 回显（眼睛按钮）', () => {
 
     expect(revealApiKeySpy).not.toHaveBeenCalled()
     expect((wrapper.find('[data-testid="provider-edit-apikey"]').element as HTMLInputElement).type).toBe('text')
+  })
+
+  it('回显失败不写进 actionError：之后一次无关编辑的保存条不带出滞后的回显失败文案（SG-1）', async () => {
+    revealApiKeySpy.mockResolvedValue({ available: false })
+    wrapper = mountBody(APIKEY_P)
+    await flushPromises()
+
+    await wrapper.find('[data-testid="provider-reveal-apikey"]').trigger('click')
+    await flushPromises()
+    expect(toastErrorSpy).toHaveBeenCalledWith('composable.revealApiKeyUnavailable')
+
+    // 回显失败时表单不 dirty（无保存条）；随后一次无关编辑 → 保存条出现
+    await wrapper.find('[data-testid="provider-edit-name"]').setValue('Z.AI renamed')
+    await flushPromises()
+    const bar = wrapper.find('[data-testid="provider-save-bar"]')
+    expect(bar.exists()).toBe(true)
+    expect(bar.text()).not.toContain('composable.revealApiKeyUnavailable')
+  })
+
+  it('同 id 广播刷新（store 列表元素替换 / 配额保存并测试）→ 回显值保留 + 其余字段重拍 + 不出现未保存徽章（MF-1-1/MF-1-2）', async () => {
+    revealApiKeySpy.mockResolvedValue({ available: true, apiKey: 'sk-stored-secret', source: 'auth.json' })
+    wrapper = mountBody(APIKEY_P)
+    await flushPromises()
+    await wrapper.find('[data-testid="provider-reveal-apikey"]').trigger('click')
+    await flushPromises()
+    expect((wrapper.find('[data-testid="provider-edit-apikey"]').element as HTMLInputElement).value).toBe('sk-stored-secret')
+
+    // 广播整体替换 store.providers（同 id 新对象）→ ProviderPage v-for 把新元素作为 provider prop
+    const refreshed: ProviderInfo = { ...APIKEY_P, name: 'Z.AI Coding CN Refreshed' }
+    getSettingsStore().providers.value = [refreshed]
+    await wrapper.setProps({ provider: refreshed })
+    await flushPromises()
+
+    const input = wrapper.find('[data-testid="provider-edit-apikey"]')
+    // 回显态不因同 id 刷新被抹掉（不重置为 ''/password）
+    expect((input.element as HTMLInputElement).value).toBe('sk-stored-secret')
+    expect((input.element as HTMLInputElement).type).toBe('text')
+    // 同 id 刷新仍经 reconcile 重拍其余字段
+    expect((wrapper.find('[data-testid="provider-edit-name"]').element as HTMLInputElement).value).toBe('Z.AI Coding CN Refreshed')
+    // 回显不构成 dirty：重拍后保存条不出现
+    expect(wrapper.find('[data-testid="provider-save-bar"]').exists()).toBe(false)
+  })
+
+  it('OAuth 型 provider「改用 API Key」未保存（prop 仍是 oauth）→ 不渲染眼睛按钮（回显必然失败，SG-7）', async () => {
+    wrapper = mountBody(OAUTH_P, { oauthPresent: true })
+    await flushPromises()
+
+    await wrapper.find('[data-testid="auth-switch-to-apikey"]').trigger('click')
+    await flushPromises()
+    clickBody('[data-testid="auth-switch-confirm-btn"]')
+    await flushPromises()
+
+    // apiKey 输入已出现（本地形态切到 api_key），但 props 仍标 oauth → 无可回显的 api_key 凭据
+    expect(wrapper.find('[data-testid="provider-edit-apikey"]').exists()).toBe(true)
+    expect(wrapper.find('[data-testid="provider-reveal-apikey"]').exists()).toBe(false)
   })
 })
 

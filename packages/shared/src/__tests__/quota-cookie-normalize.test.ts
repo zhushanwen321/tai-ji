@@ -26,6 +26,13 @@ describe('normalizeCookieHeader · 归一化与格式判定（双端同一 SSOT�
     expect(normalizeCookieHeader('token="a b"; x= y ')).toBe('token="a b"; x=y')
   })
 
+  it('剥掉可选的 Cookie: 请求头名（帮助文案的整串复制形态）', () => {
+    expect(normalizeCookieHeader('Cookie: a=1; b=2')).toBe('a=1; b=2')
+    expect(normalizeCookieHeader('  cookie :  a = 1 ; b = 2 ')).toBe('a=1; b=2')
+    // 值里出现 cookie: 字样不误杀（只剥开头的头名）
+    expect(normalizeCookieHeader('a=cookie:1; b=2')).toBe('a=cookie:1; b=2')
+  })
+
   it('缺失 "=" 的片段（DevTools 表格 TSV 粘贴残留）被丢弃 → 空串', () => {
     expect(normalizeCookieHeader('Name\tValue\tauth\txyz')).toBe('')
     expect(normalizeCookieHeader('   ')).toBe('')

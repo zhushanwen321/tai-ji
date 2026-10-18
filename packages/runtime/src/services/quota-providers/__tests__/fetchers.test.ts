@@ -12,7 +12,6 @@ vi.mock('../../../infra/logger.js', () => ({
 }))
 
 import type { ProviderQuotaFetcher, QuotaAuthKind } from '../types.js'
-import { normalizeCookieHeader } from '@taiji/shared'
 import { kimiFetcher } from '../kimi.js'
 import { mimoFetcher } from '../mimo.js'
 import { minimaxFetcher } from '../minimax.js'
@@ -399,18 +398,6 @@ describe('mimoFetcher', () => {
       ok: false,
       reason: 'no-subscription',
     })
-  })
-})
-
-describe('normalizeCookieHeader', () => {
-  it.each([
-    ['a=1; b=2', 'a=1; b=2'],
-    ['a = 1 ; b = 2', 'a=1; b=2'],
-    ['k="v w"; b=2', 'k="v w"; b=2'],
-    ['; a=1; ; b=2;', 'a=1; b=2'],
-    ['   ', ''],
-  ])('%j → %j', (input, expected) => {
-    expect(normalizeCookieHeader(input)).toBe(expected)
   })
 })
 

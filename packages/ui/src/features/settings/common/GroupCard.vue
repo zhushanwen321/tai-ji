@@ -61,9 +61,10 @@ function toggle(): void {
   background: var(--bg-card);
   border-radius: var(--radius-card);
   /* overflow: clip 而非 hidden：hidden 会建立滚动容器，使卡内 position:sticky 的参照物
-     变成卡片自身（不可滚动）——吸底/吸顶失效（provider save-bar 落进展开体末尾、
-     ScopedModelSection 表头吸顶失效）。clip 只裁剪不建滚动容器，sticky 正确参照
-     外层设置区滚动容器。2026-10-18 用户裁决（保存入口不可见事故）。 */
+     变成卡片自身（不可滚动）——吸底失效（provider save-bar 落进展开体末尾、常在视口外）。
+     clip 只裁剪不建滚动容器，sticky 正确参照外层设置区滚动容器。
+     2026-10-18 用户裁决（保存入口不可见事故）。注意：ScopedModelSection 表头吸顶与本属性
+     无关（它在自己的 max-h + overflow-y-auto 容器内滚动，最近滚动端是内层）。 */
   overflow: clip;
 }
 .group-card + :deep(.group-card),

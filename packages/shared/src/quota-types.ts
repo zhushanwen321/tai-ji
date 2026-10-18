@@ -63,7 +63,9 @@ export type QuotaFetchFailureReason =
   | 'cookie-invalid-format'
 
 /**
- * 归一化用户粘贴 cookie 的分隔空白伪影（`k = v ;  k2 = v2` → `k=v; k2=v2`）。
+ * 归一化用户粘贴 cookie 的分隔空白伪影（`k = v ;  k2 = v2` → `k=v; k2=v2`），并剥掉可选的
+ * `Cookie:` 请求头名（帮助文案让用户从 DevTools 请求头整串复制，可能连头名一起粘贴——
+ * 不剥会把 `cookie: a=1` 当 cookie 名发送，服务端 401 后误报「凭证可能已失效」）。
  * 只做空白修剪：键值对内值的引号原样保留（`k="v"` 是浏览器线上传输形态，动了反而破坏鉴权）。
  * 归一化后为空（无任何 k=v 对）返回空串。
  *
@@ -72,6 +74,7 @@ export type QuotaFetchFailureReason =
  */
 export function normalizeCookieHeader(raw: string): string {
   return raw
+    .replace(/^\s*cookie\s*:/i, '')
     .split(';')
     .map((pair) => {
       const eq = pair.indexOf('=')

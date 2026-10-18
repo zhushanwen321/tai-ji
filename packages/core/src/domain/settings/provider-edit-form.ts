@@ -74,9 +74,11 @@ export function headerRowsFromHeaders(headers: Record<string, string>): Array<{ 
  * - headers：headers 行编辑重复 key
  * - discover：test / discover 探活失败（use-provider-edit 装配时经写通道注入落标签）
  * - models：模型清单 CRUD 校验错（ProviderEditBody onAddModel 捕获填入）
- * - reveal：回显已存 API Key 失败（2026-10-18 眼睛按钮）
+ *
+ * 不含回显失败（SG-1）：保存条仅在 dirty 时渲染，把回显失败写进 actionError 会让用户
+ * 之后一次无关编辑就看到滞后的「读取已保存的 API Key 失败」——回显失败由调用方 toast 承载。
  */
-export type ActionErrorSource = 'save' | 'headers' | 'discover' | 'models' | 'reveal'
+export type ActionErrorSource = 'save' | 'headers' | 'discover' | 'models'
 
 /** 动作错误内部态（带来源标签；null = 无错误） */
 export interface ActionErrorState {
@@ -122,7 +124,8 @@ export interface ProviderEditFormModule {
    * 拉取成功填入草稿并置 showKey；草稿已非空（用户已输入）时为空操作。
    * 回显值不构成 dirty、保存时不回写（回显 = 所存值，回写会改变凭据来源语义）。
    * 失败（无可回显凭据 / RPC 错误）返回 ok:false + 可直接展示的文案——保存条仅在 dirty
-   * 时渲染，回显失败必须由调用方给可见反馈（C-proc-21，禁静默无动作）。
+   * 时渲染，回显失败必须由调用方给可见反馈（C-proc-21，禁静默无动作）；**不写入 actionError**
+   * （SG-1：避免之后的无关编辑把滞后的回显失败文案带进保存条）。
    */
   revealApiKey(): Promise<{ ok: true } | { ok: false; error: string }>
   /**
@@ -225,12 +228,21 @@ export function createProviderEditForm(input: ProviderEditFormInputs): ProviderE
     draft.authMethod = patch.authMethod
   }
 
+  /**
+   * 是否存在「真实未保存的 apiKey 草稿」（MF-1-2）：非空且不等于回显值——回显值 = 所存值，
+   * 不构成变更。dirty 判定 / 快照捕获 / save 回写三处共用同一判据（曾因两套谓词不一致：
+   * 广播重拍后回显态被快照记成「用户已改」，保存条虚假出现）。
+   */
+  function hasPendingApiKeyDraft(): boolean {
+    return draft.apiKey !== '' && draft.apiKey !== revealedApiKey.value
+  }
+
   function captureSnapshot(): void {
     snapshot.value = {
       name: draft.name,
       api: draft.api,
       baseUrl: draft.baseUrl,
-      apiKeyChanged: draft.apiKey !== '',
+      apiKeyChanged: hasPendingApiKeyDraft(),
       modelsJson: JSON.stringify(models.localModels.value),
       authHeader: draft.authHeader,
       headersJson: JSON.stringify(draft.headers),
@@ -245,9 +257,8 @@ export function createProviderEditForm(input: ProviderEditFormInputs): ProviderE
     if (draft.api !== s.api) return true
     if (draft.baseUrl !== s.baseUrl) return true
     // apiKey：用户输入了值 或 点了清除（哨兵）都算变更；**等于回显值 = 未改动**
-    //（2026-10-18 回显：回显只是把已存值展示出来，不得因此进入 dirty）
-    const apiKeyChangedNow = draft.apiKey !== '' && draft.apiKey !== revealedApiKey.value
-    if (apiKeyChangedNow !== s.apiKeyChanged) return true
+    //（2026-10-18 回显：回显只是把已存值展示出来，不得因此进入 dirty）。判据与快照同源。
+    if (hasPendingApiKeyDraft() !== s.apiKeyChanged) return true
     // models 整体对比（增删 + 内部字段改都触发 dirty）
     if (JSON.stringify(models.localModels.value) !== s.modelsJson) return true
     // W3 D7：authHeader / headers 变更即 dirty
@@ -359,7 +370,7 @@ export function createProviderEditForm(input: ProviderEditFormInputs): ProviderE
    * - 空 → undefined（不变）；哨兵 → ''（清空）；非空 → 原值
    */
   function resolveApiKeyChange(): string | undefined {
-    if (draft.apiKey === revealedApiKey.value) return undefined
+    if (!hasPendingApiKeyDraft()) return undefined
     return resolveApiKeyForSave(draft.apiKey)
   }
 
@@ -371,23 +382,22 @@ export function createProviderEditForm(input: ProviderEditFormInputs): ProviderE
   async function revealApiKey(): Promise<{ ok: true } | { ok: false; error: string }> {
     const p = providerRef.value
     if (!p || draft.apiKey !== '' || revealingApiKey.value) return { ok: true }
+    const requestedId = p.id
     revealingApiKey.value = true
     try {
       const res = await getSettingsTransport().revealProviderApiKey(p.id)
+      // 迟到响应归属校验（MF-1-3）：await 期间可能已切到别的 provider 或用户开始输入——
+      // 此时写入会把 A 的明文显示在 B 上（并成为 B 的非 dirty 基线），或覆盖用户输入。
+      if (providerRef.value?.id !== requestedId || draft.apiKey !== '') return { ok: true }
       if (res.available && res.apiKey) {
         draft.apiKey = res.apiKey
         revealedApiKey.value = res.apiKey
         showKey.value = true
-        if (actionErrorState.value?.source === 'reveal') clearActionError()
         return { ok: true }
       }
-      const error = t('composable.revealApiKeyUnavailable')
-      setActionError('reveal', error)
-      return { ok: false, error }
+      return { ok: false, error: t('composable.revealApiKeyUnavailable') }
     } catch (e) {
-      const error = toErrorMessage(e)
-      setActionError('reveal', error)
-      return { ok: false, error }
+      return { ok: false, error: toErrorMessage(e) }
     } finally {
       revealingApiKey.value = false
     }
@@ -437,6 +447,14 @@ export function createProviderEditForm(input: ProviderEditFormInputs): ProviderE
     applyPatch(decision.form)
     headerRows.value = headerRowsFromHeaders(draft.headers)
     models.localModels.value = decision.models
+    // 广播携带 apiKeySet=false（凭据已被移除/清空）→ 回显态三件套同批清空（MF-1-2）：
+    // 只清 revealed 会让仍显示的明文被重新判成用户草稿（dirty + 保存时回写）。非 dirty
+    // 分支不存在真实草稿（有草稿即 dirty 走 ignore/对齐分支），故清空不丢用户输入。
+    if (!fresh.apiKeySet) {
+      draft.apiKey = ''
+      revealedApiKey.value = null
+      showKey.value = false
+    }
     // 刷新后重新捕获快照（新基线，避免下次广播触发不必要的「dirty」）
     captureSnapshot()
   }
