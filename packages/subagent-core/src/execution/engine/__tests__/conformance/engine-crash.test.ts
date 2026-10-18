@@ -17,7 +17,7 @@
 //     W2 包内测试已承载；本用例钉宿主侧（协议客户端）对信号死亡的投影语义；
 //   - 宿主侧 crash 域既有覆盖（W2 client 套件）：fake 引擎自行 exit（code 137 /
 //     crash 模式）走 `exit code N` 分支；本用例覆盖 **signal 分支**
-//     （`onEngineExit(null, "SIGTERM")` → detail = `signal SIGTERM`）——外部真实
+//     （[u-m3-local] exit 投影 `EngineTransportExitInfo {code:null, signal:"SIGTERM"}` → detail = `signal SIGTERM`）——外部真实
 //     信号（事故形态：宿主 infra 连带击杀）是 W2 套件未触达的形态；
 //   - engine_crashed 错误规格：stderr 内存环形缓冲尾 400 字符（STDERR_TAIL_CHARS，
 //     SDK 权威）随 message 携带——用「头标记被截断 + 尾标记保留」的窗口行为断言

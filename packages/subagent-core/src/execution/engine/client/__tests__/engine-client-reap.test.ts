@@ -47,6 +47,7 @@ vi.mock("node:child_process", async (importOriginal) => {
 });
 
 import { EngineClient } from "../engine-client.ts";
+import { LocalEngineTransport } from "../transport/local.ts";
 import type { MirrorEntry } from "../mirror.ts";
 
 function makeClient(): EngineClient {
@@ -61,9 +62,31 @@ function makeClient(): EngineClient {
   });
 }
 
-/** 塞一个已死的假引擎 child（exitCode 非 null = alreadyDead 判据命中）。 */
-function plantDeadChild(client: EngineClient, pid: number): void {
-  (client as unknown as { child: unknown }).child = {
+/**
+ * [u-m3-local 适配] 进程面所有权已迁入 LocalEngineTransport：收割链单测不经
+ * ensureConnected（不 spawn），手动构造 local transport 挂到 client 的 transport 槽，
+ * 让 teardownProcess 编排走到真实 delegate。listLiveOrphanPids 与生产装配同源
+ * （client 镜像快照过滤活项），Windows 通道快照收割断言依赖此接线。
+ */
+function attachTransport(client: EngineClient): LocalEngineTransport {
+  const transport = new LocalEngineTransport({
+    engineId: "fake",
+    dataDir: "/tmp/engine-client-reap-test",
+    hostKind: "test",
+    engineCmdlineMatcher: () => false,
+    listLiveOrphanPids: () =>
+      client.mirror
+        .snapshot()
+        .filter((e) => e.state === "running" && !e.killed)
+        .map((e) => e.pid),
+  });
+  (client as unknown as { transport: unknown }).transport = transport;
+  return transport;
+}
+
+/** 塞一个已死的假引擎 child（exitCode 非 null = alreadyDead 判据命中；transport 持有进程面）。 */
+function plantDeadChild(transport: LocalEngineTransport, pid: number): void {
+  (transport as unknown as { child: unknown }).child = {
     pid,
     exitCode: 1,
     signalCode: null,
@@ -72,9 +95,9 @@ function plantDeadChild(client: EngineClient, pid: number): void {
   };
 }
 
-/** 塞一个活着的假引擎 child（alreadyDead 不命中——既有组杀兜底路径）。 */
-function plantLiveChild(client: EngineClient, pid: number): void {
-  (client as unknown as { child: unknown }).child = {
+/** 塞一个活着的假引擎 child（alreadyDead 不命中——既有组杀兜底路径；transport 持有进程面）。 */
+function plantLiveChild(transport: LocalEngineTransport, pid: number): void {
+  (transport as unknown as { child: unknown }).child = {
     pid,
     exitCode: null,
     signalCode: null,
@@ -107,13 +130,14 @@ describe("红线①收割链：非主动死亡路径（POSIX 组杀）", () => {
 
   it("引擎意外死（alreadyDead + !intentionalKill）→ teardownProcess 内 mirror.killAll 之前组杀引擎 pid", () => {
     const client = makeClient();
-    plantDeadChild(client, 4321);
+    const transport = attachTransport(client);
+    plantDeadChild(transport, 4321);
     client.mirror.recordSpawned(9100, "sa-a"); // 死前 spawn 的任务子进程（活孤儿）
 
     (client as unknown as { teardownProcess: (d: string) => void }).teardownProcess("signal SIGKILL");
 
     // POSIX：复用 killProcessTree 负 pid 组杀（目标 = 引擎 pid，组内含任务子进程——
-    // 不依赖镜像）
+    // 不依赖镜像）；收割 delegate 到 transport（u-m3-local 进程面所有权迁移）
     expect(killProcessTreeSpy).toHaveBeenCalledTimes(1);
     expect(killProcessTreeSpy).toHaveBeenCalledWith(
       4321,
@@ -127,7 +151,8 @@ describe("红线①收割链：非主动死亡路径（POSIX 组杀）", () => {
 
   it("无外层逐 pid 兜底：组杀仅一次（5s grace 窗不被同步校验压缩）", () => {
     const client = makeClient();
-    plantDeadChild(client, 4321);
+    const transport = attachTransport(client);
+    plantDeadChild(transport, 4321);
     for (let i = 0; i < 5; i++) client.mirror.recordSpawned(9000 + i, `sa-${i}`); // 多个活孤儿
 
     (client as unknown as { teardownProcess: (d: string) => void }).teardownProcess("signal SIGKILL");
@@ -139,9 +164,10 @@ describe("红线①收割链：非主动死亡路径（POSIX 组杀）", () => {
 
   it("intentionalKill 路径跳过收割（主动 dispose 链已有两层杀——不叠加、优雅窗零压缩）", () => {
     const client = makeClient();
-    plantDeadChild(client, 4321);
+    const transport = attachTransport(client);
+    plantDeadChild(transport, 4321);
     client.mirror.recordSpawned(9100, "sa-a");
-    (client as unknown as { intentionalKill: boolean }).intentionalKill = true;
+    (transport as unknown as { intentionalKill: boolean }).intentionalKill = true;
 
     (client as unknown as { teardownProcess: (d: string) => void }).teardownProcess("after intentional kill");
 
@@ -152,7 +178,8 @@ describe("红线①收割链：非主动死亡路径（POSIX 组杀）", () => {
 
   it("引擎进程仍活（握手失败重建路径）→ 不触发收割分支（既有组杀兜底承接，行为不变）", () => {
     const client = makeClient();
-    plantLiveChild(client, 4321);
+    const transport = attachTransport(client);
+    plantLiveChild(transport, 4321);
 
     (client as unknown as { teardownProcess: (d: string) => void }).teardownProcess("handshake failed");
 
@@ -175,14 +202,15 @@ describe("红线①收割链：Windows 通道（镜像快照过滤活孤儿 + �
 
   it("置死前快照过滤活孤儿：仅 state=running && !killed 进 taskkill 清单（历史死 pid 与 killed 项排除）", () => {
     const client = makeClient();
-    plantDeadChild(client, 4321);
+    const transport = attachTransport(client);
+    plantDeadChild(transport, 4321);
     client.mirror.recordSpawned(9100, "sa-live-orphan"); // 活孤儿 → 进清单
     client.mirror.recordSpawned(9101, "sa-exited");
     client.mirror.recordStateChanged({ pid: 9101, recordId: "sa-exited", state: "exited", killed: false });
     client.mirror.recordSpawned(9102, "sa-killed");
     client.mirror.recordStateChanged({ pid: 9102, recordId: "sa-killed", state: "exited", killed: true });
 
-    (client as unknown as { reapOrphansViaMirrorSnapshot: (d: string) => void }).reapOrphansViaMirrorSnapshot(
+    (transport as unknown as { reapOrphansViaMirrorSnapshot: (d: string) => void }).reapOrphansViaMirrorSnapshot(
       "signal SIGKILL",
     );
 
@@ -193,12 +221,13 @@ describe("红线①收割链：Windows 通道（镜像快照过滤活孤儿 + �
 
   it("taskkill 异步 spawn 不阻塞 teardown（pending reject 在同步段完成——Continuation 失败通知链源头不被推迟）", () => {
     const client = makeClient();
-    plantDeadChild(client, 4321);
+    const transport = attachTransport(client);
+    plantDeadChild(transport, 4321);
     client.mirror.recordSpawned(9100, "sa-live-orphan");
     const pending = plantPendingRequest(client, 7);
 
     // Windows 通道直调 + teardown 全流程（快照 → 异步 spawn → killAll → pending reject）
-    (client as unknown as { reapOrphansViaMirrorSnapshot: (d: string) => void }).reapOrphansViaMirrorSnapshot(
+    (transport as unknown as { reapOrphansViaMirrorSnapshot: (d: string) => void }).reapOrphansViaMirrorSnapshot(
       "signal SIGKILL",
     );
     (client as unknown as { teardownProcess: (d: string) => void }).teardownProcess("signal SIGKILL");

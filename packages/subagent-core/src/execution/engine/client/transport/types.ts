@@ -16,7 +16,10 @@
 //   initialize、崩溃重建策略不变；engineConfig 经上层 initialize 发送，transport 不携带。
 // - 选择逻辑（单源 = SDK isControlEnvActive）：TAIJI_SUBAGENT_CONTROL_SOCKET 非空 →
 //   runtime transport（连接失败 → engine_transport_unavailable，不静默 local）；空串/
-//   缺失 → local transport（warn）。
+//   缺失 → local transport。谓词落点 = EngineClient（local 分支 u-m3-local 已落地；
+//   runtime 分支 u-m3-rt-transport 接线前对激活态显式 engine_transport_unavailable）。
+// - pidfile/reaper 仅 local 模式注册（impl-plan u-m3-local 验收③）：进程面收割段
+//   按 localTransport 实例有无编排，runtime 模式无 pidfile、无进程组收割。
 // - 错误码面：transport 错误用 SDK ENGINE_TRANSPORT_ERROR_CODES 族
 //   （engine_transport_unavailable / _lost / engine_open_timeout / engine_frame_too_large /
 //   engine_backpressure_overflow），EngineClient.connectOnce 原样 preserve（不包装成
@@ -30,7 +33,7 @@
  * 后照常发送，runtime 只做帧转发。runtime 侧以 rootSessionId 归属连接、以
  * parentRecordId/depth 建立 channel 树（嵌套递归收割）。
  */
-export interface EngineLaunchSpec { // oe-exempt:20261018:wip:local/runtime 二实现随 u-m3-local/u-m3-rt-transport 落地（本计划 W2/W3）
+export interface EngineLaunchSpec { // oe-exempt:20261018:wip:runtime 实现随 u-m3-rt-transport 落地（local 已落地 u-m3-local）
   /** 引擎 id（runtime 校验在册 + 诊断日志）。 */
   engineId: string;
   /** 引擎 CLI 入口（extension 从 engine descriptor 解析；绝对路径）。 */
@@ -41,7 +44,11 @@ export interface EngineLaunchSpec { // oe-exempt:20261018:wip:local/runtime 二�
   cwd: string;
   /** 引擎 manifest 声明的 envPrefixes 放行前缀（runtime 构建 env 用）。 */
   envPrefixes: string[];
-  /** 主会话根 id（嵌套同值）；连接上第一个 engine_open 确定归属，后续不一致 → engine_open_failed。 */
+  /**
+   * 主会话根 id（嵌套同值）；连接上第一个 engine_open 确定归属，后续不一致 →
+   * engine_open_failed。runtime 实现必填；local 实现忽略（standalone 无 runtime
+   * 归属概念，宿主传空串占位）。
+   */
   rootSessionId: string;
   /** 嵌套：父 task pi 的 record id（来自 PI_SUBAGENT_SELF_RECORD_ID）。 */
   parentRecordId?: string;
@@ -50,7 +57,7 @@ export interface EngineLaunchSpec { // oe-exempt:20261018:wip:local/runtime 二�
 }
 
 /** open() 的结果（pid 尽力而为：local=spawn 即知；runtime=engine_opened 帧；不可得时不谎报）。 */
-export interface EngineTransportOpenResult { // oe-exempt:20261018:wip:同上——二实现随 u-m3-local/u-m3-rt-transport 落地
+export interface EngineTransportOpenResult { // oe-exempt:20261018:wip:runtime 实现随 u-m3-rt-transport 落地（local 已落地 u-m3-local）
   pid?: number;
 }
 
@@ -61,7 +68,7 @@ export interface EngineTransportOpenResult { // oe-exempt:20261018:wip:同上—
  * 重新 open）由 onExit 表达；控制连接自身死亡由 close 的错误 fan-out（engine_transport_lost）
  * 表达，不进本信息面。
  */
-export interface EngineTransportExitInfo { // oe-exempt:20261018:wip:同上——二实现随 u-m3-local/u-m3-rt-transport 落地
+export interface EngineTransportExitInfo { // oe-exempt:20261018:wip:runtime 实现随 u-m3-rt-transport 落地（local 已落地 u-m3-local）
   /** 进程退出码（被信号终止时为 null）。 */
   code: number | null;
   /** 终止信号名（正常退出时为 null）。 */
@@ -76,15 +83,19 @@ export interface EngineTransportExitInfo { // oe-exempt:20261018:wip:同上—�
  * 引擎进程传输通道契约（extension ↔ engine 接缝的 local/runtime 共同签名）。
  * 生命周期：open → writeFrame/onFrame 帧交换 → close（或 onExit 终局）。
  */
-export interface EngineTransport { // oe-exempt:20261018:wip:同上——二实现随 u-m3-local/u-m3-rt-transport 落地
+export interface EngineTransport { // oe-exempt:20261018:wip:runtime 实现随 u-m3-rt-transport 落地（local 已落地 u-m3-local）
   /**
    * 打开引擎通道。local = spawn 引擎 CLI 进程（stdio 接线，不等待 initialize）；
    * runtime = hello（进程级共享连接时复用）+ engine_open，收到 engine_opened 才 resolve
    * ——resolve 前 writeFrame 不得调用。
    */
   open(spec: EngineLaunchSpec): Promise<EngineTransportOpenResult>;
-  /** 写一行 engine-protocol 帧到引擎 stdin（runtime 实现包进 engine_frame 信封）。 */
-  writeFrame(line: string): void;
+  /**
+   * 写一行 engine-protocol 帧到引擎 stdin（runtime 实现包进 engine_frame 信封；
+   * local 实现补换行直写）。返回 false = 帧未被受理（stdin 不可用/EPIPE / 控制连接
+   * 不可写）——宿主据以把关联 in-flight 请求按通道死亡收口，故必须是回执形态而非 void。
+   */
+  writeFrame(line: string): boolean;
   /** 订阅引擎 stdout 行（runtime 实现解包 engine_frame.line 后回调；一行一调）。 */
   onFrame(handler: (line: string) => void): void;
   /** 订阅通道终局（引擎退出/被杀；幂等注册，多次终局只回调一次由实现保证）。 */
@@ -92,8 +103,9 @@ export interface EngineTransport { // oe-exempt:20261018:wip:同上——二实�
   /**
    * 优雅关闭本通道：local = 既有 teardown/kill 链语义；runtime = 发 engine_close，
    * 等待 engine_closed 或有界宽限（超时只放弃该 channel，不关闭共享连接）。
+   * reason 可选（宿主收割场景的排障 reason 透传，实现记日志用）。
    * 控制连接死亡（runtime 死/断连）不是 close 的职责——实现以 engine_transport_lost
    * fan-out 拒绝全部 in-flight 并标记不可用，不在同一连接重试。
    */
-  close(): Promise<void>;
+  close(reason?: string): Promise<void>;
 }
