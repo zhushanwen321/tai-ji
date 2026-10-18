@@ -127,7 +127,7 @@ describe("spawnEngineChild", () => {
 });
 
 describe("killOwnProcessGroup（D7 平台矩阵；分支注入，不实跑 Windows）", () => {
-  it("win32 → taskkill /PID <self> /T /F（stdio ignore + fire-and-forget，不触达 process.kill）", () => {
+  it("win32 → taskkill /PID <self> /T /F（stdio ignore + fire-and-forget）", () => {
     const calls: Array<{ command: string; args: readonly string[]; options: unknown }> = [];
     const errorHandlers: Array<(err: Error) => void> = [];
     const unref = vi.fn();
@@ -156,9 +156,38 @@ describe("killOwnProcessGroup（D7 平台矩阵；分支注入，不实跑 Windo
     ]);
     expect(unref).toHaveBeenCalledTimes(1);
     expect(kill).not.toHaveBeenCalled();
-    // fire-and-forget：taskkill 缺失（error 事件）不得反噬自灭链
+    // [R2A-N4] taskkill 起不来（error 事件）→ 回落杀自己（至少停引擎），不反噬自灭链。
     expect(errorHandlers).toHaveLength(1);
     expect(() => errorHandlers[0]!(new Error("taskkill not found"))).not.toThrow();
+    expect(kill).toHaveBeenCalledTimes(1);
+    expect(kill).toHaveBeenCalledWith(process.pid, "SIGKILL");
+  });
+
+  it("[R2A-N4] win32 taskkill spawn 同步抛错（EMFILE 等）→ 回落 SIGKILL 杀自己（warn 留痕）", () => {
+    const kill = vi.fn();
+    expect(() => killOwnProcessGroup({
+      platform: "win32",
+      killFn: kill,
+      spawnFn: () => {
+        throw new Error("EMFILE: too many open files");
+      },
+    })).not.toThrow();
+    expect(kill).toHaveBeenCalledTimes(1);
+    expect(kill).toHaveBeenCalledWith(process.pid, "SIGKILL");
+  });
+
+  it("[R2A-N4] win32 回落杀自己也失败 → 不向外抛（自灭链不因兜底再抛而中断）", () => {
+    const kill = vi.fn(() => {
+      throw new Error("EPERM");
+    });
+    expect(() => killOwnProcessGroup({
+      platform: "win32",
+      killFn: kill,
+      spawnFn: () => {
+        throw new Error("spawn failed");
+      },
+    })).not.toThrow();
+    expect(kill).toHaveBeenCalledWith(process.pid, "SIGKILL");
   });
 
   it("posix → 负 pid 组杀（SIGKILL）", () => {

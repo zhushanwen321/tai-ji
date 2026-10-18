@@ -123,6 +123,17 @@ function isPreservedConnectErrorCode(code: string): boolean {
   return PRESERVED_CONNECT_ERROR_CODES.has(code);
 }
 
+/**
+ * [R2A-N3③] runtime 启动裁决失败（invalid_launch / spawn_failed，mapControlError 已
+ * 收敛为 engine_crashed）的保留判定：`data.controlCode` 是 mapControlError 写入的
+ * 机器标记。保留整个 EngineSdkError 而不是重包，使 runtime 帧的专用 recovery
+ *（如「Resolve the engine entry from the engine descriptor」）在真实 open 路径可见；
+ * 宿主侧兜底包装产生的 engine_crashed 没有该标记，仍按原有通用文案处理。
+ */
+function isPreservedControlCrash(err: EngineSdkError): boolean {
+  return err.code === "engine_crashed" && typeof err.data?.controlCode === "string";
+}
+
 /** 客户端连接状态。 */
 export type EngineClientState =
   | "idle"
@@ -187,7 +198,13 @@ export class EngineClient {
   private readonly runRoutes = new Map<string, RunRoute>();
   private stderrTail = "";
   private unavailableReason: EngineSdkError | undefined;
-  private connectInFlight: Promise<void> | undefined;
+  /**
+   * 「连接/根换绑」单飞槽（R2A-N2）：ensureConnected 的统一入口。成立前探针→run
+   * 并发调用会让两个调用方同时通过 ready 检查、双起 connectOnce（一个 run 握到
+   * 另一个的通道，engine_open 被误拆）。所有连接/换绑必须经本槽串行化；finally
+   * 以 promise 身份比对清位（旧代 finally 不得清掉后来者新设的代）。
+   */
+  private connectOrRebindInFlight: Promise<void> | undefined;
   private pidfileSwept = false;
   /**
    * 主动杀标记（日志分级消费点）：killAll/dispose 置位、connectOnce 复位——exit
@@ -295,6 +312,11 @@ export class EngineClient {
    * 初值建连的场景）时，换代重连：关旧通道（runtime 杀组回收）→ 协议面清理 →
    * 由调用方继续走 connectOnce 用新根 open。
    *
+   * [R2A-N2] 调用方持单飞槽（connectOrRebindInFlight），因此本方法内部无并发第二
+   * 调用方；但 `await close` 期间仍可能发生直接 request / run 路由注册（不保证都经
+   * ensureConnected），且 transport 也可能被外部终局链替换——await 后必须复检，
+   * 否则会拆掉新 transport 或打断刚起的 run（TOCTOU）。
+   *
    * 有在途请求/run 路由时不动连接（跑着的 run 不得被根换绑打断），warn 留痕；
    * 单 pi 进程生命周期内根会话不应变化，命中该分支即宿主误用信号。
    * 返回 true = 已换绑（调用方需重连）；false = 无需换绑或保持现状。
@@ -316,6 +338,24 @@ export class EngineClient {
         + `"${transport.rootSessionId ?? "unknown"}" -> "${requested}"`,
     );
     await transport.close("root session rebind");
+    // [R2A-N2] await 后复检（单飞锁外的旁路）：
+    // ① 有人重建了通道（transport 换代）——绝不能用旧观察拆掉新 transport；
+    // ② 有在途请求/run 路由出现——换绑已不再安全，保持现状（旧通道仍可用）。
+    if (this.transport !== transport) {
+      logger.warn(
+        `[engine-client:${this.engineId}] engine channel changed while rebinding the root session — `
+          + "not tearing down the replacement transport",
+      );
+      return false;
+    }
+    if (this.pending.size > 0 || this.runRoutes.size > 0) {
+      logger.warn(
+        `[engine-client:${this.engineId}] requests/runs appeared while rebinding the root session — `
+          + "keeping the current channel",
+      );
+      return false;
+    }
+    if (this.disposed || this.state === "unavailable") return false;
     this.teardownProcess("root session rebind");
     this.state = "idle";
     return true;
@@ -351,11 +391,40 @@ export class EngineClient {
    * （engine_open 归属键权威源）。连接已按 env 回落的旧根打开（如探针先于 run）
    * 且当前无在途 run 时，换代重连让新的权威根生效；有在途 run 时保持旧连接并 warn
    * （根会话在单 pi 进程生命周期内不变，跨根切换只可能来自宿主误用）。
+   *
+   * [R2A-N2 单飞] 连接与根换绑是同一个串行状态迁移：所有调用方在这里统一排队到
+   * 一个 connectOrRebind promise（不区分「首连/换代」）。这样探针后并行两个 run
+   * 不会双双通过 ready 检查后各起一代 connectOnce（旧实现会双连接并误拆新
+   * transport）。排队返回后按最新权威根再判一次：根是在等待期间才到的（探针先到）
+   * 就在本调用里补一次换代，而不是把旧根交给 run。
    */
   async ensureConnected(rootSessionId?: string): Promise<void> {
     if (rootSessionId !== undefined && rootSessionId.length > 0) {
       this.requestedRootSessionId = rootSessionId;
     }
+    for (;;) {
+      this.assertConnectable();
+      const inFlight = this.connectOrRebindInFlight;
+      if (inFlight === undefined) break;
+      // 等当前代落地（成功/失败都由发起者与本调用共享终态）；落地后再看本调用
+      // 记录的权威根是否已被满足，未满足则进入下一轮（再取/再起一代）。
+      await inFlight;
+    }
+    this.assertConnectable();
+    if (this.state === "ready" && !this.needsRootRebind()) return;
+
+    const op = this.connectOrRebind();
+    this.connectOrRebindInFlight = op;
+    try {
+      await op;
+    } finally {
+      // 代数守卫：只清自己的槽（旧代 finally 不得清掉后来者新设的 promise）。
+      if (this.connectOrRebindInFlight === op) this.connectOrRebindInFlight = undefined;
+    }
+  }
+
+  /** 终结态检查（单点，保证排队前后一致地 fail-fast）。 */
+  private assertConnectable(): void {
     if (this.disposed) {
       throw new EngineSdkError(
         "engine_crashed",
@@ -366,22 +435,23 @@ export class EngineClient {
     if (this.state === "unavailable") {
       throw this.unavailableReason ?? new Error(`engine "${this.engineId}" is unavailable`);
     }
-    if (this.state === "ready") {
-      if (!(await this.rebindRootSessionIfNeeded())) return;
-    } else if (this.connectInFlight !== undefined) {
-      // 并发连接请求：等同一代连接落地后再判定权威根是否一致（探针 → run 的
-      // 时序下首个请求可能没有 run ctx）。失败由发起者上抛，本调用同享终态。
-      await this.connectInFlight;
-      // 经 getter 现读（TS 对 await 前后的 this.state 保持窄化，直比会误报无重叠）。
-      if (this.currentState !== "ready" || !(await this.rebindRootSessionIfNeeded())) return;
-    }
+  }
 
-    this.connectInFlight = this.connectOnce();
-    try {
-      await this.connectInFlight;
-    } finally {
-      this.connectInFlight = undefined;
+  /** 权威根是否需要换代（只读判定；副作用在 rebindRootSessionIfNeeded）。 */
+  private needsRootRebind(): boolean {
+    const requested = this.requestedRootSessionId;
+    const transport = this.transport;
+    if (requested === undefined || !(transport instanceof RuntimeEngineTransport)) return false;
+    return transport.rootSessionId !== requested;
+  }
+
+  /** 单飞段：要么换代重连（ready + 根不一致），要么首连。 */
+  private async connectOrRebind(): Promise<void> {
+    if (this.state === "ready") {
+      const rebound = await this.rebindRootSessionIfNeeded();
+      if (!rebound) return;
     }
+    await this.connectOnce();
   }
 
   private async connectOnce(): Promise<void> {
@@ -426,7 +496,7 @@ export class EngineClient {
       // （含 engine_not_found 等启动解析错误）维持既有 engine_crashed 包装。
       const failure = err instanceof Error ? err : new Error(String(err));
       const unavailable =
-        err instanceof EngineSdkError && isPreservedConnectErrorCode(err.code)
+        err instanceof EngineSdkError && (isPreservedConnectErrorCode(err.code) || isPreservedControlCrash(err))
           ? err
           : new EngineSdkError(
             "engine_crashed",

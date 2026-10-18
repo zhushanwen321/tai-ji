@@ -390,7 +390,7 @@ describe("RemoteEngine run 帧映射", () => {
 describe("abort 分级（cancel 帧 + 收敛兜底窗）", () => {
   it("signal abort → cancel；引擎主动收敛（终态应答在兜底窗内）→ 引擎侧 abort 终态正常返回（窗满兜底不触发）", async () => {
     const controller = new AbortController();
-    const { engine, cleanup } = makeEngine(undefined, {
+    const { engine, client, cleanup } = makeEngine(undefined, {
       // run 受理后 delay 挂起（不与 --run-hang 组合——run-hang 丢弃 run 帧致
       // activeRun 恒 null，cancel-settle 永不生效，用例会退化为兜底窗路径）；
       // cancel 到达 → cancel-settle 同步回 abort 终态（引擎侧收敛，兜底窗不触发）。
@@ -402,7 +402,12 @@ describe("abort 分级（cancel 帧 + 收敛兜底窗）", () => {
     });
     const { ctx } = makeCtx({ signal: controller.signal });
     const runPromise = engine.run({ prompt: "p" }, ctx);
-    setTimeout(() => controller.abort(), 100);
+    // 先等连接就绪再 abort：本用例验证「run 受理后 cancel 收敛」，不是「连接期
+    // abort」。高负载下本地引擎 spawn + 握手可超 100ms，墙钟定时会把 cancel 抢在
+    // run 帧之前（fake engine 对无 activeRun 的 cancel 是 no-op → run 照常 60s
+    // 延迟 → 用例 15s 超时；HEAD 源码在同等负载下同样复现，属既存测试竞态）。
+    await waitForReady(client);
+    controller.abort();
     const result = await runPromise;
     expect(result.outcome.error).toContain("engine_run_failed: aborted (fake)");
     expect(result.outcome.exitCode).toBeNull(); // 被信号杀死判据

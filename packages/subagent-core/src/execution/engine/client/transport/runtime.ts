@@ -3,11 +3,14 @@
 // [M3] RuntimeEngineTransport：EngineTransport 契约的 runtime 实现（设计
 // relay-spawn-transport §3.3 D4/D5、§3.4.3；u-m3-rt-transport）。托管态下引擎
 // 进程由 runtime spawn（control server），extension 不再持有 ChildProcess：
-// open(spec) = 「取进程级共享 RuntimeControlClient（一个主 pi 一条连接）→
-// engine_open（rootSessionId/parentRecordId/depth 归属）→ engine_opened（pid）」；
-// writeFrame = 包 engine_frame 信封；onFrame = 解包 engine_frame.line；onExit =
-// engine_closed 映射（code/signal/reason/stderrTail）。channelId 是本实现内部键，
-// 不外泄给 EngineClient（types.ts 契约边界）。
+// open(spec) = 「取进程级共享 RuntimeControlClient（按 (socket, rootSessionId)
+// 复用——见 control-client 共享键注释）→ engine_open（rootSessionId/parentRecordId/
+// depth 归属）→ engine_opened（pid）」；writeFrame = 包 engine_frame 信封；onFrame
+// = 解包 engine_frame.line；onExit = engine_closed 映射（code/signal/reason/
+// stderrTail）。channelId 是本实现内部键，不外泄给 EngineClient（types.ts 契约边界）。
+//
+// [R2A-N1] 共享粒度 = 根会话：runtime 的「一个连接一个根」是协议不变量，不同根的
+// 通道不得共用连接（探针经 env 回落的 temp 根 vs run ctx 的真根）。
 //
 // 归属键来源（D4 env × spawn 点矩阵 / D5）：socket = CONTROL_ENV_SOCKET；rootSessionId
 // 优先 spec.rootSessionId（run 路径 = RunContext.sessionRootId 权威源；探针等无 ctx
@@ -127,6 +130,9 @@ export class RuntimeEngineTransport implements EngineTransport {
 
     const client = acquireRuntimeControlClient({
       socketPath,
+      // [R2A-N1] 根会话进共享键：同 socket 的不同根各用一条连接（temp 探针连接
+      // 不得占用真根 run 的连接——runtime 首 open 定根后不可换绑）。
+      rootSessionId,
       hostKind: this.opts.hostKind,
       ...(this.opts.connectTimeoutMs !== undefined ? { connectTimeoutMs: this.opts.connectTimeoutMs } : {}),
       ...(this.opts.helloTimeoutMs !== undefined ? { helloTimeoutMs: this.opts.helloTimeoutMs } : {}),

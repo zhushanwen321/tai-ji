@@ -31,6 +31,7 @@ import {
   CONTROL_HELLO_TIMEOUT_MS,
   CONTROL_MAX_FRAME_BYTES,
   ENGINE_OPEN_TIMEOUT_MS,
+  controlClientKey,
   makeTransportError,
   mapControlError,
   type ControlChannelHandlers,
@@ -56,17 +57,23 @@ import type { EngineLaunchSpec, EngineTransportExitInfo } from "./types.ts";
 
 const logger = getLogger("subagents");
 
-/** 进程级共享表（socket 路径 → 客户端实例；D5 一个主 pi 一条连接）。 */
+/**
+ * 进程级共享表（(socket 路径, root session id) → 客户端；每个根一条连接）。
+ *
+ * [R2A-N1] 复用键必须含根：runtime 以连接上首个 engine_open 固定 conn.rootSessionId
+ * 且无重置点，不同根的后续 open 一律 `session` 拒绝。只按 socketPath 复用会把真根
+ * 引擎与探针（spawn 期 temp 根）塞进同一条连接 → 先到者定根、后到者永久 mismatch；
+ * 根纳入键 = 「一连接一根」协议不变量的构造性投影，无需跨引擎锁或重连。
+ */
 const sharedClients = new Map<string, RuntimeControlClient>();
+
 /** 取得共享客户端（引用计数 +1）；不可用实例（lost/disposed）弃用后新建。 */
 export function acquireRuntimeControlClient(opts: RuntimeControlClientOptions): RuntimeControlClient {
-  const existing = sharedClients.get(opts.socketPath);
-  if (existing !== undefined && existing.isUsable) {
-    existing.acquire();
-    return existing;
-  }
+  const key = controlClientKey(opts.socketPath, opts.rootSessionId);
+  const reusable = sharedClients.get(key);
+  if (reusable?.isUsable === true) { reusable.acquire(); return reusable; }
   const created = new RuntimeControlClient(opts);
-  sharedClients.set(opts.socketPath, created);
+  sharedClients.set(key, created);
   created.acquire();
   return created;
 }
@@ -74,6 +81,8 @@ export function acquireRuntimeControlClient(opts: RuntimeControlClientOptions): 
 /** control socket 客户端（一条连接多通道）：connect → openChannel → closeChannel → 连接死亡 fan-out；不自动重连。 */
 export class RuntimeControlClient {
   readonly socketPath: string;
+  /** 本连接绑定的根（共享键成分；与 open 的 identity.rootSessionId 一致）。 */
+  readonly rootSessionId: string | undefined;
   private readonly hostKind: string;
   private readonly connectTimeoutMs: number;
   private readonly helloTimeoutMs: number;
@@ -99,6 +108,7 @@ export class RuntimeControlClient {
 
   constructor(opts: RuntimeControlClientOptions) {
     this.socketPath = opts.socketPath;
+    this.rootSessionId = opts.rootSessionId;
     this.hostKind = opts.hostKind;
     this.connectTimeoutMs = opts.connectTimeoutMs ?? CONTROL_CONNECT_TIMEOUT_MS;
     this.helloTimeoutMs = opts.helloTimeoutMs ?? CONTROL_HELLO_TIMEOUT_MS;
@@ -297,7 +307,9 @@ export class RuntimeControlClient {
       socket.removeAllListeners();
       socket.destroy();
     }
-    if (sharedClients.get(this.socketPath) === this) sharedClients.delete(this.socketPath);
+    if (sharedClients.get(controlClientKey(this.socketPath, this.rootSessionId)) === this) {
+      sharedClients.delete(controlClientKey(this.socketPath, this.rootSessionId));
+    }
   }
 
   private clearConnectTimers(): void {

@@ -61,6 +61,8 @@ type FakeFrame = Record<string, unknown>;
  */
 class FakeControlServer {
   readonly frames: FakeFrame[] = [];
+  /** engine_open 被连接级根绑定拒绝的记录（R2A-N1 回归面）。 */
+  readonly openFailures: Array<{ code: unknown; launch: unknown }> = [];
   readonly dir: string;
   readonly socketPath: string;
   holdHello = false;
@@ -72,6 +74,8 @@ class FakeControlServer {
   private readonly server: net.Server;
   private readonly conns = new Set<net.Socket>();
   private readonly buffers = new Map<net.Socket, string>();
+  /** 连接级根绑定（模拟 runtime 的首 open 定根语义；无重置点）。 */
+  private readonly connRoots = new Map<net.Socket, unknown>();
   private channelSeq = 0;
 
   private constructor(dir: string, socketPath: string) {
@@ -95,6 +99,11 @@ class FakeControlServer {
 
   get connectionCount(): number {
     return this.conns.size;
+  }
+
+  /** 当前活连接的绑定根（R2A-N1：一条连接只应有一个根）。 */
+  get activeConnectionRoots(): unknown[] {
+    return [...this.connRoots.values()];
   }
 
   sendControl(socket: net.Socket, frame: FakeFrame): void {
@@ -164,6 +173,7 @@ class FakeControlServer {
     socket.on("close", () => {
       this.conns.delete(socket);
       this.buffers.delete(socket);
+      this.connRoots.delete(socket);
     });
   }
 
@@ -215,6 +225,24 @@ class FakeControlServer {
     }
     if (frame.kind === K.engineOpen) {
       if (this.holdOpen) return;
+      // 连接级根绑定（runtime control-server 同语义）：首个 open 定根，之后不同根
+      // 一律 engine_open_failed{session}（连接根无重置点）——N1 的回归面。
+      const launch = frame.launch as Record<string, unknown> | undefined;
+      const root = launch?.rootSessionId;
+      if (!this.connRoots.has(socket)) {
+        this.connRoots.set(socket, root);
+      } else if (this.connRoots.get(socket) !== root) {
+        this.openFailures.push({ code: "session", launch });
+        this.sendControl(socket, {
+          v: SUBAGENT_CONTROL_PROTOCOL_VERSION,
+          kind: K.engineOpenFailed,
+          id: frame.id,
+          code: "session",
+          message: `root session mismatch: connection bound to ${String(this.connRoots.get(socket))}, open carried ${String(root)}`,
+          recovery: "One control connection serves one root session; open a new connection for another session.",
+        });
+        return;
+      }
       if (this.onEngineOpen !== undefined) {
         this.onEngineOpen(socket, frame);
         return;
@@ -510,7 +538,9 @@ describe("传输错误码面（验收②）", () => {
       ["invalid_launch", "engine_crashed"],
       ["spawn_failed", "engine_crashed"],
       ["duplicate", "engine_transport_unavailable"],
-      ["unknown_channel", "engine_transport_lost"],
+      // [R2A-N3①] 通道终局（非关闭竞态）不是连接丢失：原 code 透传，不落
+      // engine_transport_lost（D10 的 lost 专指 control 连接中途丢失）。
+      ["unknown_channel", "unknown_channel"],
       ["engine_open_timeout", "engine_open_timeout"],
       ["engine_frame_too_large", "engine_frame_too_large"],
       ["engine_backpressure_overflow", "engine_backpressure_overflow"],
@@ -522,11 +552,26 @@ describe("传输错误码面（验收②）", () => {
       const err = mapControlError(controlCode, `detail-${controlCode}`);
       expect(err.code, controlCode).toBe(expected);
       if (expected !== controlCode) {
-        expect(err.message, controlCode).toContain(`(control code: ${controlCode})`);
+        expect(err.message, controlCode).toContain(`(control code: ${controlCode}`);
       }
+      // [R2A-N3③] runtime 帧裁决的错误都带 controlCode 机器标记（connectOnce 据此
+      // 保留启动裁决的专用 recovery）。
+      expect(err.data?.controlCode, controlCode).toBe(controlCode);
     }
     // recovery 语义：crash 面有专用兜底（不借用 transport_unavailable 的可达性文案）
     expect(mapControlError("spawn_failed", "boom").recovery).toContain("runtime failed to launch");
+    // [R2A-N3①] unknown_channel：透传 code + 通道终局 recovery（连接仍活），不是 lost。
+    const unknown = mapControlError("unknown_channel", "unknown channel ch-9");
+    expect(unknown.code).not.toBe("engine_transport_lost");
+    expect(unknown.message).toContain("unknown channel ch-9");
+    expect(unknown.recovery).toContain("control connection itself is still alive");
+    // runtime 帧携带的 recovery 优先（排障指引不丢）。
+    expect(mapControlError("unknown_channel", "gone", "Open the engine channel again with engine_open.").recovery)
+      .toBe("Open the engine channel again with engine_open.");
+    // [R2A-N3②] channel_limit 与字节背压区分：同 code 但 detail 显式标明「通道数上限」。
+    const channelLimit = mapControlError("channel_limit", "connection channel limit (256) reached");
+    expect(channelLimit.code).toBe("engine_backpressure_overflow");
+    expect(channelLimit.message).toContain("channel-count limit, not write-queue byte backpressure");
   });
 
   it("engine_frame_too_large：出站信封超限 → writeFrame false + onTransportError 具体码（不截断）", async () => {
@@ -690,9 +735,10 @@ function makeHostedClient(
   server: FakeControlServer,
   dataDir: string,
   baseEnv: Record<string, string | undefined> = {},
+  engineId = "fake",
 ): EngineClient {
   return new EngineClient({
-    engineId: "fake",
+    engineId,
     command: process.execPath,
     args: ["--never-spawned"],
     hostKind: "test",
@@ -704,6 +750,32 @@ function makeHostedClient(
       ...baseEnv,
     },
   });
+}
+
+/**
+ * 假引擎协议应答（initialize + 任意正向方法）：R2A-N1/N2 用例需要 run/probe 级请求
+ * 兑现（双客户端、并发 ensureConnected 后的实际派发）。
+ */
+function wireEchoEngineProtocol(server: FakeControlServer, seenMethods: string[] = []): void {
+  server.onEngineFrame = (socket, frame) => {
+    let parsed: { id?: number; method?: string };
+    try {
+      parsed = JSON.parse(String(frame.line)) as { id?: number; method?: string };
+    } catch {
+      return;
+    }
+    if (parsed.method === undefined) return;
+    seenMethods.push(parsed.method);
+    const result = parsed.method === "initialize"
+      ? { protocolVersion: SUBAGENT_CONTROL_PROTOCOL_VERSION }
+      : { ok: parsed.method };
+    server.sendControl(socket, {
+      v: SUBAGENT_CONTROL_PROTOCOL_VERSION,
+      kind: K.engineFrame,
+      channelId: frame.channelId,
+      line: JSON.stringify({ id: parsed.id, result }),
+    });
+  };
 }
 
 describe("EngineClient：runtime transport 谓词接线（验收③④）", () => {
@@ -751,7 +823,88 @@ describe("EngineClient：runtime transport 谓词接线（验收③④）", () =
     await client.dispose();
   });
 
-  it("[B-U-3] 同失败形态分型等价：启动失败 → local 与 runtime 同落 engine_crashed", async () => {
+  it("[R2A-N1] 单 control server + 双 EngineClient：pi run（真根）先 / zcode probe（env temp 根）后 → 无 session mismatch、无永久 unavailable", async () => {
+    const server = await startServer();
+    wireEchoEngineProtocol(server);
+    const dataDir = mkdtempSync(join(tmpdir(), "u-m3-rt-n1-"));
+    dataDirs.push(dataDir);
+    // 两个引擎共享同一进程级 control env：create 路径的 spawn 期 temp 根。
+    const env = { TAIJI_SUBAGENT_CONTROL_ROOT_SESSION_ID: "spawn-temp-id" };
+    const pi = makeHostedClient(server, dataDir, env, "pi");
+    const zcode = makeHostedClient(server, dataDir, env, "zcode");
+
+    // 顺序 A：pi run 先用真根建连。
+    await pi.ensureConnected("real-root");
+    // zcode probe 无 run ctx → env 回落 temp 根。旧实现落到 pi 的共享连接上 →
+    // engine_open_failed{session} → probe 永久 unavailable。
+    await zcode.ensureConnected();
+
+    expect(pi.currentState).toBe("ready");
+    expect(zcode.currentState).toBe("ready");
+    expect(server.openFailures).toEqual([]);
+    // 协议不变量：不同根各占一条连接，每条连接只绑一个根。
+    expect(server.connectionCount).toBe(2);
+    expect([...new Set(server.activeConnectionRoots)].sort()).toEqual(["real-root", "spawn-temp-id"]);
+    // 两引擎的通道都真实可用（不是「标记 ready 但请求走不通」）。
+    await expect(pi.request("run", { runId: "pi-run" })).resolves.toBeTruthy();
+    await expect(zcode.request("probe", {})).resolves.toBeTruthy();
+
+    // 顺序 B（反序，同一 server 新会话）：zcode probe 先（temp 根）→ pi run 后（真根
+    // 不能在 temp 连接上 open 被拒）。
+    const piB = makeHostedClient(server, dataDir, env, "pi-b");
+    const zcodeB = makeHostedClient(server, dataDir, env, "zcode-b");
+    await zcodeB.ensureConnected();
+    await piB.ensureConnected("real-root-b");
+    expect(piB.currentState).toBe("ready");
+    expect(zcodeB.currentState).toBe("ready");
+    expect(server.openFailures).toEqual([]);
+    await expect(piB.request("run", { runId: "pi-run-b" })).resolves.toBeTruthy();
+    await expect(zcodeB.request("probe", {})).resolves.toBeTruthy();
+
+    await pi.dispose();
+    await zcode.dispose();
+    await piB.dispose();
+    await zcodeB.dispose();
+  });
+
+  it("[R2A-N2] 探针后两个并发 ensureConnected（真根）→ 只生成一代连接，两 run 都成功", async () => {
+    const server = await startServer();
+    wireEchoEngineProtocol(server);
+    const dataDir = mkdtempSync(join(tmpdir(), "u-m3-rt-n2-"));
+    dataDirs.push(dataDir);
+    const client = makeHostedClient(server, dataDir, {
+      TAIJI_SUBAGENT_CONTROL_ROOT_SESSION_ID: "spawn-temp-id",
+    });
+
+    // 探针先建连（temp 根，通道 1）。
+    await client.ensureConnected();
+    // 并行两个 run：旧实现两次 rebind 各自起一代 connectOnce → 第三个 engine_open
+    // 与误拆新 transport（transport_lost/unavailable）。单飞后只应有一次换绑 + 一次 open。
+    await Promise.all([
+      client.ensureConnected("real-root"),
+      client.ensureConnected("real-root"),
+    ]);
+
+    const opens = server.frames.filter((f) => f.kind === K.engineOpen);
+    expect(opens.map((f) => (f.launch as Record<string, unknown>).rootSessionId))
+      .toEqual(["spawn-temp-id", "real-root"]);
+    expect(server.openFailures).toEqual([]);
+    expect(client.currentState).toBe("ready");
+    // temp 连接在换绑后 refcount 归零被关停，只剩真根连接。
+    await waitFor(() => server.connectionCount === 1, "temp connection disposed after rebind");
+    expect(server.activeConnectionRoots).toEqual(["real-root"]);
+
+    // 两个 run 共用同一代连接且都得到应答（不是「一个成功一个 transport_lost」）。
+    const results = await Promise.all([
+      client.request("run", { runId: "run-a" }),
+      client.request("run", { runId: "run-b" }),
+    ]);
+    expect(results).toEqual([{ ok: "run" }, { ok: "run" }]);
+    expect(client.currentState).toBe("ready");
+    await client.dispose();
+  });
+
+  it("[B-U-3] 同失败形态分型等价（code 同为 engine_crashed）+ [R2A-N3③] runtime 帧 recovery 保留", async () => {
     // local：entry 子进程加载即退出（本地启动失败的真实形态）
     const localDir = mkdtempSync(join(tmpdir(), "u-m3-rt-local-dead-"));
     dataDirs.push(localDir);
@@ -767,39 +920,44 @@ describe("EngineClient：runtime transport 谓词接线（验收③④）", () =
       baseEnv: {},
     });
     let localCode: string | undefined;
-    let localRecovery: string | undefined;
     try {
       await local.ensureConnected();
     } catch (err) {
       localCode = (err as EngineSdkError).code;
-      localRecovery = (err as EngineSdkError).recovery;
     }
     expect(localCode).toBe("engine_crashed");
 
-    // runtime：runtime 侧启动裁决失败（invalid_launch）→ 同一宿主分型。
-    const server = await startServer();
-    server.onEngineOpen = (socket, frame) => {
-      server.sendControl(socket, {
-        v: 1,
-        kind: K.engineOpenFailed,
-        id: frame.id,
-        code: "invalid_launch",
-        message: "entryPath is not an absolute existing path",
-        recovery: "resolve the engine entry from the descriptor",
-      });
-    };
-    const runtimeDir = mkdtempSync(join(tmpdir(), "u-m3-rt-runtime-invalid-"));
-    dataDirs.push(runtimeDir);
-    const hosted = makeHostedClient(server, runtimeDir);
-    await expect(hosted.ensureConnected("real-session-id")).rejects.toSatisfy(
-      (err: Error & { code?: string; recovery?: string; message?: string }) => {
-        expect(err.code).toBe("engine_crashed");
-        expect(err.message).toContain("invalid_launch");
-        // 同型包装：connectOnce 对非 preserve 码统一补宿主恢复指引（与 local 逐字一致）。
-        expect(err.recovery).toBe(localRecovery);
-        return true;
-      },
-    );
+    // runtime：runtime 侧启动裁决失败（invalid_launch / spawn_failed）→ 同一 code 分型；
+    // R2A-N3③：runtime 帧的专用 recovery 经 connectOnce 原样保留（不被宿主通用文案
+    // 盖掉——恢复指引指向真实修复动作）。
+    for (const controlCode of ["invalid_launch", "spawn_failed"] as const) {
+      const server = await startServer();
+      server.onEngineOpen = (socket, frame) => {
+        server.sendControl(socket, {
+          v: 1,
+          kind: K.engineOpenFailed,
+          id: frame.id,
+          code: controlCode,
+          message: controlCode === "invalid_launch"
+            ? "entryPath is not an absolute existing path"
+            : "engine executor not found",
+          recovery: "resolve the engine entry from the descriptor",
+        });
+      };
+      const runtimeDir = mkdtempSync(join(tmpdir(), "u-m3-rt-runtime-invalid-"));
+      dataDirs.push(runtimeDir);
+      const hosted = makeHostedClient(server, runtimeDir);
+      await expect(hosted.ensureConnected("real-session-id")).rejects.toSatisfy(
+        (err: Error & { code?: string; recovery?: string; message?: string }) => {
+          expect(err.code).toBe("engine_crashed");
+          expect(err.message).toContain(controlCode);
+          // [R2A-N3③] 真实 open 路径的 recovery 断言：runtime 帧文案保留。
+          expect(err.recovery).toBe("resolve the engine entry from the descriptor");
+          return true;
+        },
+      );
+      expect(hosted.currentState).toBe("unavailable");
+    }
   });
   it("control env 激活 → runtime transport 被选中：ready 经 control 通道（零 spawn 零 pidfile）+ dispose 走 dispose 帧与 engine_close", async () => {
     const server = await startServer();

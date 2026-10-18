@@ -176,12 +176,27 @@ export type KillOwnProcessGroupDeps = {
  *
  * 平台矩阵（设计 D7）：POSIX = 负 pid 组杀；Windows 无进程组信号语义，用
  * `taskkill /PID <self> /T /F` 树杀（stdio ignore + fire-and-forget，不阻塞自灭链）。
- * Windows 分支只挂 error 留痕、不回落单进程杀（单杀留孤儿，违背 D7 目标）。
+ * Windows 分支在 taskkill 根本起不来（spawn 同步抛错，或 child 'error'：PATH 缺
+ * System32 / EMFILE 等）时回落 `SIGKILL` 杀自己（R2A-N4）：只杀自己是「可接受
+ * 降级」（后代 pi 交给 runtime sweep / 组登记），但引擎自身必须停住——否则引擎事件
+ * 循环仍有活句柄时宿主死后引擎与 pi 都不死，比原行为更差。两条失败路径都 warn 留痕。
  * 依赖可注入 = 平台分支单测 seam（不实跑 Windows）。
  */
 export function killOwnProcessGroup(deps: KillOwnProcessGroupDeps = {}): void {
   const pid = process.pid;
+  const kill = deps.killFn ?? ((targetPid: number, signal: NodeJS.Signals) => process.kill(targetPid, signal));
   if ((deps.platform ?? process.platform) === "win32") {
+    // [R2A-N4] taskkill 不可用时的自灭兜底（至少停引擎）：后代由 runtime sweep 收尾。
+    const fallbackSelfKill = (reason: string): void => {
+      logger.warn(`taskkill self-tree failed (${reason}); falling back to self SIGKILL`);
+      try {
+        kill(pid, "SIGKILL");
+      } catch (err) {
+        logger.warn(
+          `self SIGKILL fallback failed (${String(err)}); descendant pi may linger until runtime sweep`,
+        );
+      }
+    };
     const spawnFn = deps.spawnFn
       ?? ((command, args, options) => spawn(command, [...args], options));
     try {
@@ -190,15 +205,14 @@ export function killOwnProcessGroup(deps: KillOwnProcessGroupDeps = {}): void {
         windowsHide: true,
       });
       child.on("error", (err) => {
-        logger.warn(`taskkill self-tree failed (${String(err)}); descendant pi may linger until runtime sweep`);
+        fallbackSelfKill(String(err));
       });
       child.unref?.();
     } catch (err) {
-      logger.warn(`taskkill self-tree could not be spawned (${String(err)}); descendant pi may linger until runtime sweep`);
+      fallbackSelfKill(`spawn threw: ${String(err)}`);
     }
     return;
   }
-  const kill = deps.killFn ?? ((targetPid: number, signal: NodeJS.Signals) => process.kill(targetPid, signal));
   try {
     kill(-pid, "SIGKILL");
   } catch (err) {
