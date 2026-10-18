@@ -17,19 +17,20 @@
  * - 恢复尺寸 clamp：上限当前屏 workArea（拔外接屏场景）、下限 minWidth/minHeight
  *   （800×600，clamp 实现保证上限优先——工作区比下限还小时不超屏）
  *
- * 写入走仓内 atomicWrite 先例（packages/runtime/src/utils/fs-utils.ts 的 tmp+rename
- * 语义同构实装于此）：main 进程不依赖 runtime 包（依赖方向 main → @taiji/shared，
- * 设计 §7「无新包」核对），原子写是 20 行叶子工具不跨包引依赖。
+ * 写入走 main/utils/atomic-write-json（main 侧 JSON 落盘原子写单一助手，与
+ * remote-access / update 三文件的写方共用同一实现）——main 进程不依赖 runtime 包
+ * （依赖方向 main → @taiji/shared，设计 §7「无新包」核对）。
  *
  * 不 import electron：窗口以 StateTrackedWindow 最小结构接口注入（BrowserWindow
  * 结构子集），单测零 electron mock、零真实窗口。
  * 日志经 deps.logger 注入（生产装配 mainLogger 落盘 <getDataDir()>/logs/，§5.2
  * 失败路径 warn 落 logs；单测注 spy 断言）。
  */
-import { mkdirSync, readFileSync, renameSync, unlinkSync, writeFileSync } from 'node:fs'
+import { readFileSync } from 'node:fs'
 import path from 'node:path'
 import { getDataDir } from '@taiji/shared/paths'
 import { mainLogger } from '../logs/main-logger.js'
+import { atomicWriteJsonFile } from '../utils/atomic-write-json.js'
 
 /** window-state.json 持久化字段（恰三件，禁止扩 x/y——D-1-14 裁决） */
 export interface WindowState {
@@ -261,35 +262,13 @@ export class WindowStatePersistence {
   /** 原子写 + 失败 warn 不抛（§5.2：写失败不影响窗口行为、不阻断关闭流程） */
   private writeStateFile(state: WindowState): void {
     try {
-      mkdirSync(path.dirname(this.statePath), { recursive: true })
-      atomicWriteFile(this.statePath, JSON.stringify(state))
+      atomicWriteJsonFile(this.statePath, state)
     } catch (err) {
       this.logger.warn('[window-state] failed to persist window state (non-blocking)', {
         statePath: this.statePath,
         error: err instanceof Error ? err.message : String(err),
       })
     }
-  }
-}
-
-// ── tmp+rename 原子写（语义对齐 packages/runtime/src/utils/fs-utils.ts atomicWrite）──
-
-/** 进程内 tmp 序号：与 pid 组合保证同进程多次写、跨进程并发写的 tmp 名互不碰撞 */
-let tmpSeq = 0
-
-function atomicWriteFile(filePath: string, data: string): void {
-  const tmpPath = `${filePath}.tmp_${process.pid}-${tmpSeq++}`
-  try {
-    writeFileSync(tmpPath, data, 'utf-8')
-    renameSync(tmpPath, filePath)
-  } catch (e) {
-    try {
-      unlinkSync(tmpPath)
-    // eslint-disable-next-line taste/no-silent-catch -- 清理失败不掩盖原错误（对齐 runtime fs-utils atomicWrite 同型；残留 tmp 无害）
-    } catch {
-      // 清理失败不掩盖原错误；残留 tmp 无害
-    }
-    throw e
   }
 }
 

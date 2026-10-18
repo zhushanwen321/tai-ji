@@ -17,15 +17,16 @@
  * 不做 TTL / 不读 downloadedAt，保留期方案同日裁决否决）。
  *
  * 依赖方向：preloaded-update → constants + pick-platform-asset + hash + @taiji/shared + node:fs/path
- *   （hash 为无网络依赖的纯函数叶子模块，见 hash.ts / review S#13）
+ *   + main/utils/atomic-write-json（原子写）（hash 为无网络依赖的纯函数叶子模块，见 hash.ts / review S#13）
  */
-import { existsSync, mkdirSync, readFileSync, readdirSync, unlinkSync, writeFileSync, statSync } from 'node:fs'
+import { existsSync, readFileSync, readdirSync, unlinkSync, statSync } from 'node:fs'
 import path from 'node:path'
 import { compare } from 'compare-versions'
 import type { LatestReleaseInfo } from '@taiji/shared'
 import { getPreloadedUpdateFile, getUpdateDir } from './constants.js'
 import { pickPlatformAsset, pickPlatformAssetName } from './pick-platform-asset.js'
 import { hashFileSha256 } from './hash.js'
+import { atomicWriteJsonFile } from '../utils/atomic-write-json.js'
 
 /**
  * 预载安装包版本封顶保留个数（2026-10-12 用户裁决，缺口 3）：
@@ -109,7 +110,6 @@ export function writePreloadedUpdate(release: LatestReleaseInfo, filePath: strin
     return
   }
   try {
-    mkdirSync(path.dirname(getPreloadedUpdateFile()), { recursive: true })
     const data: PreloadedUpdateData = {
       version: release.version,
       assetName: asset.name,
@@ -119,8 +119,9 @@ export function writePreloadedUpdate(release: LatestReleaseInfo, filePath: strin
       sha256: asset.sha256,
       release,
     }
-    // eslint-disable-next-line no-magic-numbers -- 2 = JSON 缩进空格数（人类可读）
-    writeFileSync(getPreloadedUpdateFile(), JSON.stringify(data, null, 2))
+    // 原子写（main/utils/atomic-write-json 缺省档）：裸写的崩溃窗口半写会在
+    // install 恢复路径留下半截 JSON（读取侧判损坏清除，快路径失效）
+    atomicWriteJsonFile(getPreloadedUpdateFile(), data)
   } catch (err) {
     // best-effort：写元信息失败不影响已下载的文件，快路径降级为完整下载
     console.warn('[preloaded-update] write failed:', err)

@@ -16,12 +16,13 @@
  * 读取时机：useAppUpdate 启动时调 update:getPending handler → readPendingUpdate。
  *
  * 依赖方向：pending-update → constants + @taiji/shared + compare-versions + node:fs
+ *   + main/utils/atomic-write-json（原子写）
  */
-import { existsSync, mkdirSync, readFileSync, unlinkSync, writeFileSync } from 'node:fs'
-import path from 'node:path'
+import { existsSync, readFileSync, unlinkSync } from 'node:fs'
 import { compare } from 'compare-versions'
 import type { LatestReleaseInfo } from '@taiji/shared'
 import { getPendingUpdateFile } from './constants.js'
+import { atomicWriteJsonFile } from '../utils/atomic-write-json.js'
 
 /**
  * pending-update.json 落盘结构。
@@ -73,10 +74,10 @@ function isPendingUpdateData(x: unknown): x is PendingUpdateData {
  */
 export function writePendingUpdate(release: LatestReleaseInfo): void {
   try {
-    mkdirSync(path.dirname(getPendingUpdateFile()), { recursive: true })
     const data: PendingUpdateData = { release, at: new Date().toISOString() }
-    // eslint-disable-next-line no-magic-numbers -- 2 = JSON 缩进空格数（人类可读）
-    writeFileSync(getPendingUpdateFile(), JSON.stringify(data, null, 2))
+    // 原子写（main/utils/atomic-write-json 缺省档）：裸写的崩溃窗口半写会在下次
+    // 启动恢复路径留下半截 JSON（读取侧判损坏清除，提醒丢失）
+    atomicWriteJsonFile(getPendingUpdateFile(), data)
   } catch (err) {
     // best-effort：写标志失败不应阻断检测响应，下次检测会再次尝试写入
     console.warn('[pending-update] write failed:', err)

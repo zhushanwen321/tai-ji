@@ -4,9 +4,8 @@
  * remote-access D2：main 是该文件的唯一写入方（生成/轮换 token、开关状态落盘），
  * runtime 是热读方（每次 WS auth 握手读 remote token 入鉴权集合）——因此本模块的
  * 写入形态（原子写 + 0600 + 字段契约）直接构成 runtime 读侧行为的前置：
- * - 原子写（同目录 `.tmp` 临时文件 + rename 前对 tmp fsync + renameSync）：
- *   rename 的目标 inode 要么是完整旧内容要么是完整新内容，runtime 热读永不撕裂；
- *   fsync 保证 rename 落定时刻数据已在盘上（防掉电留下内容为空的「完整」文件）；
+ * - 原子写：经 main/utils/atomic-write-json（fsync 档：rename 前对 tmp 强制刷盘，
+ *   掉电不留内容为空的「完整」文件；rename 原子替换，runtime 热读永不撕裂）；
  * - 0600：token 等同远程控制凭据，禁 group/other 读取（与 runtime-token 同级）；
  * - 字段契约：@taiji/shared 的 RemoteAccessConfig + REMOTE_ACCESS_FILENAME，
  *   shape 判据（对象 + enabled boolean + token string）复用 shared 的
@@ -26,10 +25,11 @@
  * dataDir 参数注入（测试用），缺省 getDataDir() 动态推导——禁硬编码数据目录。
  */
 import { randomBytes } from 'node:crypto'
-import { chmodSync, closeSync, fsyncSync, mkdirSync, openSync, readFileSync, renameSync, writeFileSync } from 'node:fs'
+import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { isRemoteAccessConfigShape, REMOTE_ACCESS_FILENAME, REMOTE_TOKEN_HEX64, type RemoteAccessConfig } from '@taiji/shared'
 import { getDataDir } from '@taiji/shared/paths'
+import { atomicWriteJsonFile } from '../utils/atomic-write-json.js'
 
 /** remote token 熵：32 字节 = 256 bit（hex 编码后 64 字符），对齐 runtime-token 量级。 */
 const REMOTE_TOKEN_BYTES = 32
@@ -39,9 +39,6 @@ const REMOTE_TOKEN_BYTES = 32
  * 完全控制 taiji 的凭据），禁 group/other 读取（D2：与 dataDir 内其他凭据同级）。
  */
 const REMOTE_ACCESS_FILE_MODE = 0o600
-
-/** 配置文件 JSON 缩进（人类可读落盘，与 dataDir 内其他 JSON 配置文件一致）。 */
-const CONFIG_JSON_INDENT = 2
 
 /** 生成 remote token：32 字节随机值的 hex 编码（64 位小写 hex）。 */
 export function generateRemoteAccessToken(): string {
@@ -167,36 +164,20 @@ function ensureRemoteAccessIntegrity(raw: string, dataDir?: string): RemoteAcces
 }
 
 /**
- * 原子写配置（同目录 `.tmp` 临时文件 + fsync + renameSync）+ 0600。
+ * 原子写配置：走 main/utils/atomic-write-json 单一助手，加强档 mode 0600 + fsync。
  *
- * 原子性：rename 是同目录内的 inode 原子替换，runtime 热读侧要么读到完整旧内容
- * 要么读到完整新内容，无半截 JSON 窗口（D2 配套规格①）。
- * 掉电半写防护：writeFileSync 返回 ≠ 数据已落盘（page cache 异步刷写），掉电时
- * rename 可能先于数据刷写落定，留下内容为空的「完整」新文件。rename 前对 `.tmp`
- * 的 fd 做 fsyncSync 强制刷盘，保证 rename 落定时刻数据已在盘上；fsync 失败
- * （掉电前兆）即中止写入（fail-fast 裸抛，不 rename 可能半写的文件）。
- * 权限：writeFileSync 的 mode 只在创建文件时生效且受 umask 影响；`.tmp` 每次都是
- * 新建文件（mode 生效），rename 后再 chmodSync 兜底（对齐 process-control
- * issueRuntimeToken 的 writeFileSync + chmodSync 双保险形态）。fsync 段以只读 fd
- * 打开（fsync 不要求写权限），不改变 0600 语义。
+ * - 原子性 + 掉电半写防护（fsync 档）：rename 的目标 inode 要么是完整旧内容要么是
+ *   完整新内容，runtime 热读永不撕裂；fsync 保证 rename 落定时刻数据已在盘上
+ *   （防掉电留下内容为空的「完整」文件），fsync 失败即中止写入不 rename；
+ * - 0600：token 等同远程控制凭据，禁 group/other 读取（与 runtime-token 同级）。
+ * 助手内纪律的机制细节见 atomic-write-json.ts 模块注释。
  *
  * @param config 待写配置（调用方保证字段合法；本模块产出的配置均经结构检查）
  * @param dataDir 可选数据根目录（测试注入）；缺省读 getDataDir()
  */
 export function writeRemoteAccessConfig(config: RemoteAccessConfig, dataDir?: string): void {
-  const dir = dataDir ?? getDataDir()
-  mkdirSync(dir, { recursive: true })
-  const filePath = join(dir, REMOTE_ACCESS_FILENAME)
-  const tmpPath = `${filePath}.tmp`
-  writeFileSync(tmpPath, `${JSON.stringify(config, null, CONFIG_JSON_INDENT)}\n`, { mode: REMOTE_ACCESS_FILE_MODE })
-  const fd = openSync(tmpPath, 'r')
-  try {
-    fsyncSync(fd)
-  } finally {
-    closeSync(fd)
-  }
-  renameSync(tmpPath, filePath)
-  chmodSync(filePath, REMOTE_ACCESS_FILE_MODE)
+  const filePath = join(dataDir ?? getDataDir(), REMOTE_ACCESS_FILENAME)
+  atomicWriteJsonFile(filePath, config, { mode: REMOTE_ACCESS_FILE_MODE, fsync: true })
 }
 
 /**
