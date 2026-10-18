@@ -1,5 +1,5 @@
 /**
- * 模态表面聚合运行时注册（§6.7 模态共存守卫的数据源）——各表面挂载点注册开/关，
+ * 模态表面聚合运行时注册（§6.7 模态共存检查的数据源）——各表面挂载点注册开/关，
  * 单一事实源；编排器（Esc 层级序 / ⌘W 让位）与 view 遮蔽联动（§5.1 规则 6②）都读本模块。
  *
  * 语义要点（§6.7）：
@@ -20,7 +20,7 @@
  * - **后行档消费方的开合态必须绑状态本体**（如 SessionList 绑删除确认态），禁绑广播计数器。
  *
  * 注意：本模块不做几何求交——shieldsView='intersecting' 成员与 view 显示矩形的双阈值空间
- * 滞回判定（§6.7 抖动面缓冲裁决）归 main 侧 view 收口链（browser gateway display-gate），
+ * 滞回判定（§6.7 抖动范围缓冲裁决）归 main 侧 view 收尾链（browser gateway display-gate），
  * 本模块只报「哪些开着的表面声称遮蔽 view、按哪一档、开态几何是多少」（rect 读点）。
  */
 import { shallowRef } from 'vue'
@@ -46,7 +46,7 @@ export function surfaceRectOf(value: unknown): ModalSurfaceRect | null {
 }
 
 /** 单个表面实例的注册描述 */
-export interface ModalSurfaceRegistration { // oe-exempt:20261003:framework:类型契约先行——容器/编排/注册表契约层，D1 下游单元即为消费面
+export interface ModalSurfaceRegistration { // oe-exempt:20261003:framework:类型契约先行——容器/编排/注册表契约层，D1 下游单元即为消费方
   /** 登记表内的表面 id（manifest.ts；未登记 id 直接抛错） */
   surface: ModalSurfaceId
   /** 实例级去重键（同 key 重复注册走 refCount 计数 + 读点覆盖为最新注册者；
@@ -60,7 +60,7 @@ export interface ModalSurfaceRegistration { // oe-exempt:20261003:framework:类�
   rect?: () => ModalSurfaceRect | null
 }
 
-interface RegistryEntry { // oe-exempt:20261003:framework:类型契约先行——容器/编排/注册表契约层，D1 下游单元即为消费面 // oe-exempt:20261003:framework:聚合注册表数据契约，消费面为编排器与各表面单元
+interface RegistryEntry { // oe-exempt:20261003:framework:类型契约先行——容器/编排/注册表契约层，D1 下游单元即为消费方 // oe-exempt:20261003:framework:聚合注册表数据契约，消费方为编排器与各表面单元
   surface: ModalSurfaceId
   isOpen: () => boolean
   rect?: () => ModalSurfaceRect | null
@@ -134,7 +134,7 @@ function openEntries(): RegistryEntry[] {
   return open
 }
 
-/** 让位旗标族（Esc）：任一开着的成员 yieldsEsc ⇒ 栈序编排器 Esc 不动作（§6.7 模态共存守卫②） */
+/** 让位旗标族（Esc）：任一开着的成员 yieldsEsc ⇒ 栈序编排器 Esc 不动作（§6.7 模态共存检查②） */
 export function anyModalSurfaceYieldsEsc(): boolean {
   return openEntries().some((entry) => modalSurfaceFlags(entry.surface).yieldsEsc)
 }

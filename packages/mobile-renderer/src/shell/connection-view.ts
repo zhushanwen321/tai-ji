@@ -1,16 +1,16 @@
-// connection-view —— 移动壳连接视图状态机（W6：连接 UI 态从 bootstrap 抽取收口的独立模块）。
+// connection-view —— 移动壳连接视图状态机（W6：连接 UI 态从 bootstrap 抽取收尾点的独立模块）。
 //
 // 拥有面（bootstrap 只装配不拥有）：
 //   - shellConnectionState：连接视图四态（connecting/connected/token-input/failed）
 //   - hasConnectedOnce：布局粘滞锚点（connected 置位后进程生命周期内不复位）——与四态
-//     正交的变化轴（四态随时迁移，锚点只进不退），故不并入五态 enum：瞬时断连
+//     正交的变化原因（四态随时迁移，锚点只进不退），故不并入五态 enum：瞬时断连
 //     （connected → connecting）保持 connected 布局挂载（composer 草稿不丢，BM5）
 //   - tokenSubmit：token 提交反馈态（submitting / error）
 //   - submitRemoteToken：token 重试入口（TokenInputView 提交路径）
 //
-// 三输入信号的转移优先级（显式收口于此，一处可读）：
+// 三输入信号的转移优先级（显式收尾于此，一处可读）：
 //   ① core getState（watch）：connected 覆盖一切（退出 token-input / failed，置
-//      hasConnectedOnce，收口 submitting）；token-input 粘滞——除 connected 外的
+//      hasConnectedOnce，收尾 submitting）；token-input 粘滞——除 connected 外的
 //      中间态（connecting/reconnecting/failed）均不覆盖 token-input（重试连接期间
 //      保持输入视图，auth 结果落地时才切换）；其余映射 failed → failed（终态）、
 //      其他 → connecting
@@ -58,7 +58,7 @@ export const hasConnectedOnce = ref(false)
 /**
  * token 提交结果态（TokenInputView 消费）：提交编排进行中 / 验身失败的可见反馈。
  * 验身结果异步于提交编排（initConnection resolve = 编排已提交，auth 结果后续到），
- * submitting 的收口点 = auth 结果落地（watch connected / notifyAuthRejected）。
+ * submitting 的收尾点 = auth 结果落地（watch connected / notifyAuthRejected）。
  *
  * taste:allow-no-data-owner W24-EX-B（模块级单例 UI 瞬态）：token 提交反馈态（§4 ⑧ 2026-10-04 批登记）
  */
@@ -69,7 +69,7 @@ export const tokenSubmit = ref<{ submitting: boolean; error: 'invalid' | 'failed
 
 /**
  * 信号入口④（D8 重启感知）：服务端计划内关停窗口（ws-client onclose 读 close 1001 →
- * onGoingAway，P6 探针证实可读）置位；复位点 = 重连成功（watch connected 分支统一收口——
+ * onGoingAway，P6 探针证实可读）置位；复位点 = 重连成功（watch connected 分支统一收尾——
  * 服务回来了）。置位期间重连退避照常（ws-client 侧不改重连机制），本态只影响断线条文案
  * 分流（connectionBannerI18nKey），不改变 shellConnectionState 转移（不升级 failed 全屏）。
  */
@@ -77,10 +77,10 @@ export const tokenSubmit = ref<{ submitting: boolean; error: 'invalid' | 'failed
 export const runtimeRestarting = ref(false)
 
 /**
- * 断线条文案 key 投影（App.vue banner 消费 `t(connectionBannerI18nKey)`）：重启窗口显示
+ * 断线条文案 key 派生视图（App.vue banner 消费 `t(connectionBannerI18nKey)`）：重启窗口显示
  * restarting 文案，其余断线维持现状 reconnecting 文案（D8 文案区分，不改重连机制）。
  * key 的权威源 = src/locales/ 双侧文件（mobile.restarting / mobile.reconnecting），
- * 双侧对齐由 __tests__/mobile-locale.test.ts 守卫。
+ * 双侧对齐由 __tests__/mobile-locale.test.ts 检查。
  */
 export const connectionBannerI18nKey = computed(() =>
   runtimeRestarting.value ? 'mobile.restarting' : 'mobile.reconnecting',
@@ -104,7 +104,7 @@ export function setupConnectionView(controller: ConnectionCredentialController):
   })
 
   // auth 结果 → UI 态（D4 处置接线）：connected = 验身成功（落 storage / 抹地址栏的时机，
-  // 同时收口 token 提交 submitting + 复位重启提示态——服务回来了）；token-input 由
+  // 同时收尾 token 提交 submitting + 复位重启提示态——服务回来了）；token-input 由
   // notifyAuthRejected / notifyTokenInputRequired 侧写入，不被中间连接态覆盖（重试连接
   // 期间保持输入视图，auth 结果落地时切换）；failed = 重连预算用尽（终态，UI 落可行动
   // 指引），token-input 优先级高于 failed。
@@ -159,10 +159,10 @@ export async function submitRemoteToken(token: string): Promise<void> {
     profileController.adoptManualToken(token)
     resetAuthRejectionSuppression()
     // auth 拒绝路径的 socket 已 close；此处 disconnect 兜底清理「连接中 / 握手超时窗口内提交」
-    // 的残态（connect 幂等守卫会被 OPEN/CONNECTING 拦截，先断开保证重试必达）
+    // 的残态（connect 幂等检查会被 OPEN/CONNECTING 拦截，先断开保证重试必达）
     disconnect()
     await initConnection()
-    // 编排提交成功；submitting 不在此清——auth 结果（connected / 拒绝）异步落地时收口，
+    // 编排提交成功；submitting 不在此清——auth 结果（connected / 拒绝）异步落地时收尾，
     // 避免「提交中」与「验身中」两个阶段闪烁
   } catch (e) {
     console.error('[connection-view] submitRemoteToken failed:', e)

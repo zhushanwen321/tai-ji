@@ -160,7 +160,7 @@ describe("[W2/V4 D6] sweep 判据源改接后的 v2 run 补注销（真实判定
     expect(readUnregisterEntries()).toHaveLength(1);
   });
 
-  it("保守侧矩阵（误注销为零）：非终态（无 settled 帧）/ 坏链（首帧损坏）/ IO 故障（EISDIR）→ 全部按活跃挂账，零补注销", async () => {
+  it("保守侧矩阵（误注销为零）：非终态（无 settled 帧）/ 坏链（首帧损坏）/ IO 故障（EISDIR）→ 全部按活跃挂着不处理，零补注销", async () => {
     // 形态 a：journal 存在但无 run-settled 帧（run 真未终局）
     writeRegisterEntry("wf-v4-live");
     const journal = createRunEventJournal(stateDirOf());
@@ -196,7 +196,7 @@ describe("[W2/V4 D6] sweep 判据源改接后的 v2 run 补注销（真实判定
     const { deps, unregisterAppends } = assembleSweep();
     const result = runReconcileSweep(deps);
 
-    // 三形态全部保守按活跃挂账：不进 reconciled、落 skippedActive
+    // 三形态全部保守按活跃挂着不处理：不进 reconciled、落 skippedActive
     expect(result.reconciled).toEqual([]);
     expect(result.skippedActive).toEqual(
       expect.arrayContaining(["wf-v4-live", "wf-v4-broken", "wf-v4-iofail"]),
@@ -446,7 +446,7 @@ describe("[U1 判定核抽取] findRunSettlementEvidence 直测（矩阵逐分�
     expect(findRunSettlementEvidence(stateDirOf(), "wf-core-gone")).toEqual({ kind: "missing" });
   });
 
-  it("journal 非 ENOENT 读错（EISDIR）→ running + warn 留证（宁挂账不误注销）", () => {
+  it("journal 非 ENOENT 读错（EISDIR）→ running + warn 留证（宁挂着不处理不误注销）", () => {
     fs.mkdirSync(path.join(stateDirOf(), `wf-core-iofail${RUN_EVENTS_SUFFIX}`), {
       recursive: true,
     });

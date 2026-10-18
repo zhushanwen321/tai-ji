@@ -1,4 +1,4 @@
-// routing.test.ts —— 配置路由三层 + 探针编排的单测面（fake probe/getEngine 注入，
+// routing.test.ts —— 配置路由三层 + 探针编排的单测（fake probe/getEngine 注入，
 // 不依赖真机引擎与真实探针）。核心口径：三层任一指定了引擎就按它执行，不可用即
 // 结构化错误失败——不换引擎。
 

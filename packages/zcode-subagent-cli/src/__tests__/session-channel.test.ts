@@ -625,7 +625,7 @@ describe("权威终态迟到分级日志", () => {
     const r = await ch.runTurn({ workspacePath, mode: "yolo" }, "做点什么");
     expect(r.terminal).toEqual({ status: "success", source: "final-frame" }); // 落定语义不变
     expect(r.lastTerminalStatus).toBe("success"); // 入账路径不动
-    expect(lateTerminalLogs()).toEqual([]); // 常态迟到零日志（降噪根修点）
+    expect(lateTerminalLogs()).toEqual([]); // 常态迟到零日志（降噪从根源修复点）
   }, 10_000);
 
   it("迟到 failed：warn 保留（假成功识破防御面），文案含原样 status；lastTerminalError 照常入账", async () => {
@@ -995,7 +995,7 @@ describe("golden 双副本与四类样本", () => {
     ).toEqual(GOLDEN_READ_TOKENS);
   });
 
-  it("golden 帧序列全链回放（fake 逐字回放四类样本）：不变量 1 + usage + sessionId 一次收口", async () => {
+  it("golden 帧序列全链回放（fake 逐字回放四类样本）：不变量 1 + usage + sessionId 一次收尾", async () => {
     const { ch, workspacePath } = makeChannel(); // scenario 即 golden 四类样本
     const r = await ch.runTurn({ workspacePath, mode: "yolo" }, "做点什么");
     expect(r.sessionId).toBe(GOLDEN_SESSION_ID);

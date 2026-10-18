@@ -100,7 +100,7 @@ export interface PendingRegistry<TMsg = PiMessage> {
  * RPC pending 表：请求-响应配对。
  *
  * 无墙钟超时（ADR-0122 防御机制清查退役）：pi 对某 RPC 永不响应时 pending 悬挂，
- * 失败信号由 pi 进程 exit 事件链经 rejectAll 统一收口，不做时间窗猜测。
+ * 失败信号由 pi 进程 exit 事件链经 rejectAll 统一收尾，不做时间窗猜测。
  */
 export function createPendingRegistry<TMsg = PiMessage>(): PendingRegistry<TMsg> {
   const pending = new Map<string, PendingRegistration<TMsg>>()

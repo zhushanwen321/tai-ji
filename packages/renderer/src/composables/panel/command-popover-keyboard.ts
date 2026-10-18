@@ -15,7 +15,7 @@
  * 消费语义（缺陷 B）：浮层 `open` 时 ↑↓ ⏎ Tab 被消费（↑↓ 以候选非空为前提；Enter/Tab 空候选
  * 也消费）——preventDefault 终止浏览器默认行为，并 stopPropagation 截断事件向 target 的传播。
  * window capture 是**主入口**（同一事件另经 contenteditable 冒泡到 Composer 的 keydown 路由，
- * 那是兜底路——见下方 defaultPrevented 幂等守卫）；不截断则事件继续到达 contenteditable 的
+ * 那是兜底路——见下方 defaultPrevented 幂等检查）；不截断则事件继续到达 contenteditable 的
  * 冒泡监听、被 composer 的方向键导航二次消费。
  * ↑↓ 的截断尤其必要：composer 裸箭头导航在单视觉行返回 at-edge 后会触发历史召回
  * （dom-core input/history 的 setText），把当前草稿替换成上一条历史消息——浮层开着时按 ↑/↓
@@ -39,7 +39,7 @@ import { useCompositionFlag } from './composition-flag'
 import { normalizedSlashName } from '@/components/panel/command-popover-symbols'
 import type { ShellInputInstance } from './composer-shell'
 
-/** exactMatch 直发对候选项的最小结构要求（command-enter-exact-send D1 前置③读 name、禁选守卫读 selected） */
+/** exactMatch 直发对候选项的最小结构要求（command-enter-exact-send D1 前置③读 name、禁选检查读 selected） */
 type KeyboardItem = { name: string; selected?: boolean }
 
 /** D1 前置② activeElement 门：document.activeElement 在 composer 输入区内（识别源 =
@@ -59,7 +59,7 @@ export interface CommandPopoverKeyboardOpts<T extends KeyboardItem> {
   open: () => boolean
   /** 当前候选列表（长度变化即触发 activeIndex 收敛） */
   items: () => readonly T[]
-  /** 选中候选项（鼠标点击与键盘 Enter/Tab 共用同一入口，含已选禁选守卫） */
+  /** 选中候选项（鼠标点击与键盘 Enter/Tab 共用同一入口，含已选禁选检查） */
   onSelect: (item: T) => void
   /** 关闭浮层（Escape 分支） */
   close: () => void
@@ -123,17 +123,17 @@ export function useCommandPopoverKeyboard<T extends KeyboardItem>(
   /** ComposerInput keydown 路由：浮层 open 且候选非空时消费 ↑↓ ⏎ Tab（preventDefault +
    *  stopPropagation 全截断）；`len === 0` 空态行 ↑↓ 与 Esc 放行、Enter/Tab 仍消费。
    *  返回 true 表示已消费。
-   *  幂等守卫 defaultPrevented：同一事件可能经 window capture 与 contenteditable 冒泡两条入口
-   *  命中，split mode 双实例亦共享 window capture 节点（先到先得），不守卫 ↑↓ 会跳两项
+   *  幂等检查 defaultPrevented：同一事件可能经 window capture 与 contenteditable 冒泡两条入口
+   *  命中，split mode 双实例亦共享 window capture 节点（先到先得），不检查 ↑↓ 会跳两项
    *  （① 已消费则 ② 不再处理）。 */
   function handleKeydown(e: KeyboardEvent): boolean {
     if (!opts.open()) return false
-    if (e.defaultPrevented) return false // 幂等守卫：① 已消费则 ② 不再重复处理
+    if (e.defaultPrevented) return false // 幂等检查：① 已消费则 ② 不再重复处理
     const list = opts.items()
     const len = list.length
     const isEnterOrTab = e.key === 'Enter' || e.key === 'Tab'
     // 无候选（空态提示行）时方向键无项可移（(0 ± 1 + 0) % 0 = NaN）⇒ 放行；Enter/Tab 仍须消费
-    // （该守卫同时保证下方 ↑↓ helper 不会在 len === 0 时做 % 0 取模）
+    // （该检查同时保证下方 ↑↓ helper 不会在 len === 0 时做 % 0 取模）
     if (len === 0 && !isEnterOrTab) return false
     // 方向键族（↑↓）：helper 返回 null 表示非方向键，交回下方 Enter/Tab、Esc 路由
     const arrowHandled = handleArrowKey(e, len)
@@ -151,7 +151,7 @@ export function useCommandPopoverKeyboard<T extends KeyboardItem>(
    *  ↑↓ 环形移动高亮并消费事件，返回 true；非方向键返回 null（交回主路由继续判定）。
    *  方向键必须同时截断传播（与 Enter/Tab 同款）：截断点即 window capture 主入口，
    *  只 preventDefault 而不 stopPropagation 时事件继续到达 contenteditable 冒泡监听 →
-   *  composer-keydown 的 handleBareArrowNav 二次消费（defaultPrevented 幂等守卫只挡
+   *  composer-keydown 的 handleBareArrowNav 二次消费（defaultPrevented 幂等检查只挡
    *  activeIndex 二次变更，不挡 composer 的方向键导航）→ dom-core 单视觉行 at-edge →
    *  history setText 用上一条历史消息替换当前草稿。勿删。 */
   function handleArrowKey(e: KeyboardEvent, len: number): boolean | null {
@@ -199,8 +199,8 @@ export function useCommandPopoverKeyboard<T extends KeyboardItem>(
         opts.type() === 'slash' &&
         activeElementInInput(opts.shellInputRef?.()) &&
         normalizedSlashName(item.name).toLowerCase() === ('/' + opts.query()).toLowerCase()
-      // 分流：exactMatch 直发仅 Enter（命中后先查 item.selected 禁选守卫——已选 skill 降级
-      // 不直发，守卫语义单源在 CommandPopover.onSelect）；Tab 恒 onSelect 插 chip（补参通道
+      // 分流：exactMatch 直发仅 Enter（命中后先查 item.selected 禁选检查——已选 skill 降级
+      // 不直发，检查语义单源在 CommandPopover.onSelect）；Tab 恒 onSelect 插 chip（补参通道
       // 不因完整名关闭）
       if (exactMatch && !item.selected && e.key === 'Enter') opts.onSelectAndSend(item, e)
       else opts.onSelect(item)

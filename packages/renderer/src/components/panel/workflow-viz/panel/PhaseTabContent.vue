@@ -38,8 +38,8 @@
       @open-agent="(call) => emit('openAgent', call)"
     />
 
-    <!-- 事件流过滤区（仅本 phase 归属事件；失败/加载态收敛为简短提示——重试入口与重拉
-         链在 workflow tab 事件流子页，同一份缓存重拉后本区响应式更新，不复制错误二分） -->
+    <!-- 事件流过滤区（仅本 phase 归属事件；失败/加载态收敛为简短提示——重试入口与重新拉取
+         链在 workflow tab 事件流子页，同一份缓存重新拉取后本区响应式更新，不复制错误二分） -->
     <div class="flex min-h-0 flex-1 flex-col overflow-y-auto border-t border-hairline" data-testid="wf-viz-phase-events">
       <p class="shrink-0 px-3 py-1 text-[length:var(--text-3xs)] text-neutral-faint">{{ t('panel.workflowViz.phaseEventsTitle') }}</p>
       <div v-if="entry?.status !== 'ready'" class="px-3 pb-2 text-[length:var(--text-3xs)] text-neutral-dim" data-testid="wf-viz-phase-events-unavailable">
@@ -100,7 +100,7 @@ const phaseCalls = computed(() => props.run.agentCalls.filter((c) => c.phase ===
 function isPhaseOwnedEvent(e: WorkflowRunEventEntry): boolean {
   if (e.type === 'phase-started' || e.type === 'phase-settled') return e.phase === props.phase
   // 协议载荷只有 agent-started 携带 phase 字段（retrying/settled 均无）——按 taskIndex
-  // 归属到本 phase 的 call 反查（call.phase 是 trace 投影的归属快照）
+  // 归属到本 phase 的 call 反查（call.phase 是 trace 派生视图的归属快照）
   if (e.type === 'agent-started') return e.phase === props.phase
   if (e.type === 'agent-retrying' || e.type === 'agent-settled') {
     return phaseCalls.value.some((c) => c.id === e.taskIndex)

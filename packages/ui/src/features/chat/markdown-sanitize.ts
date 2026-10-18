@@ -182,7 +182,7 @@ export function isRelativeResourcePath(value: string): boolean {
 
 /**
  * POSIX resolve（Node path.resolve 语义的纯函数实现，D4）：base 恒为绝对目录（resourceBaseDir
- * 契约），rel 相对。../ 穿越按 POSIX 语义出 base，越界收口按消费通道分列：
+ * 契约），rel 相对。../ 穿越按 POSIX 语义出 base，越界收尾按消费通道分列：
  * - img src（本函数在 renderer 的唯一消费方 = 上方 hook）：出 base 路径经 toLocalFileUrl
  *   走 local-file:// 协议，由 Electron main 进程（apps/electron/main/main.ts 的
  *   protocol.handle('local-file')）按 computeLocalFilePrefixes/isPathInAllowedPrefixes
@@ -214,7 +214,7 @@ export function toLocalFileUrl(absPath: string): string {
 
 /**
  * 净化 + 回填 + 完整性断言（renderMarkdown 出口调用，D2：净化点在最终输出整串——
- * mXSS 防御要求用户段整串 DOM 往返，唯一入口覆盖全部消费面）。
+ * mXSS 防御要求用户段整串 DOM 往返，唯一入口覆盖全部消费方）。
  *
  * 完整性断言（D3）：store 全部消费 + 输出无哨兵残留，违反抛错由调用方 catch 降级。
  * 覆盖「哨兵被 sanitize 连带销毁」形态：公式哨兵落进 FORBID_CONTENTS 连删元素

@@ -76,7 +76,7 @@ export interface EngineProtocolServerOptions {
 /**
  * 引擎协议服务器。生命周期 = 进程生命周期（单引擎实例，无重建面——崩溃重建归
  * core EngineClient：杀进程再 spawn）。dispose 方法释放引擎常驻资源但进程不退出
- * （后续请求仍可服务——引擎进程退出归宿主 / 自灭守卫）。
+ * （后续请求仍可服务——引擎进程退出归宿主 / 自灭检查）。
  */
 export class EngineProtocolServer {
   private readonly write: FrameWriter;

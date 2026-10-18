@@ -723,7 +723,7 @@ function fakeExtrasStore(current: ProviderExtras | undefined = undefined) {
   return { modify }
 }
 
-/** quota 组用例共用腿：preview（须成功）→ 对单 id apply（extras store 可选，须成功）→ 返回 result。 */
+/** quota 组用例共用路径：preview（须成功）→ 对单 id apply（extras store 可选，须成功）→ 返回 result。 */
 async function previewAndApply(selectedId: string, store?: ReturnType<typeof fakeExtrasStore>) {
   const prev = previewImport('pi')
   if (!('importId' in prev)) throw new Error('preview should succeed')
@@ -905,13 +905,13 @@ describe('provider-importer · coding-plan 额度显示自动开启（导入即�
     const applyOut = await applyImport(prev.importId, ['kimi-main'], undefined, store)
 
     expect(store.modify).toHaveBeenCalledTimes(1)
-    // 守卫（quota-auto-enable.ts）：quota.enabled 已有值（含手动关闭 false）→ 原样返回，
+    // 检查（quota-auto-enable.ts）：quota.enabled 已有值（含手动关闭 false）→ 原样返回，
     // 不覆盖不复活（对齐 provider-config-helper「用户已有 enabled 决定 → 不覆盖不复活」用例）
     const current: ProviderExtras = { authMethod: 'api_key', quota: { enabled: false, credentialSource: 'provider' } }
     const written = store.modify.mock.calls[0][1](current)
     expect(written).toBe(current)
     expect(written.quota).toEqual({ enabled: false, credentialSource: 'provider' })
-    // 守卫拦截 = 未发生真实写入 → 结果条目不置 quotaAutoEnabled（前端不 toast 不实报告）
+    // 检查拦截 = 未发生真实写入 → 结果条目不置 quotaAutoEnabled（前端不 toast 不实报告）
     if (!('result' in applyOut)) throw new Error('apply should succeed')
     expect(applyOut.result.imported[0].quotaAutoEnabled).toBeUndefined()
   })
@@ -927,7 +927,7 @@ describe('provider-importer · coding-plan 额度显示自动开启（导入即�
     await applyImport(prev.importId, ['kimi-main'], undefined, store)
 
     expect(store.modify).toHaveBeenCalledTimes(1)
-    // 锁 merge 保留字段域：无 enabled 键（守卫放行）→ spread 保留 quota 其余字段
+    // 锁 merge 保留字段域：无 enabled 键（检查放行）→ spread 保留 quota 其余字段
     // （credentialSource）与 extras 字段域（authMethod），只写 enabled+fetcher。
     // enabled 在类型上必填，运行时缺键形态（磁盘 JSON）按本文件既有 unknown 断言构造
     const current = { authMethod: 'api_key', quota: { credentialSource: 'provider' } } as unknown as ProviderExtras

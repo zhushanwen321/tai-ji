@@ -1,9 +1,9 @@
 /**
  * TerminalView spawn 失败反馈测试（RD-5#2 / 多实例 u2）。
  *
- * 背景：PTY 起不来时原实现丢弃裸 reject → 用户只看到空白终端。多实例后新建失败分两腿：
- * - 挂载自动新建腿（存量会话首开无实例）→ inline 错误条（terminal-spawn-error）+ 重试；
- * - 「+」手动新建腿（设计 §3.3「新建失败」）→ 既有全局错误通道（toast），不出现新条目。
+ * 背景：PTY 起不来时原实现丢弃裸 reject → 用户只看到空白终端。多实例后新建失败分两路径：
+ * - 挂载自动新建路径（存量会话首开无实例）→ inline 错误条（terminal-spawn-error）+ 重试；
+ * - 「+」手动新建路径（设计 §3.3「新建失败」）→ 既有全局错误通道（toast），不出现新条目。
  *
  * mock 策略：与 terminal-view.test.ts 同（xterm/addon/session store 全替身，
  * useTerminal 替身的 spawnTerminal 可注入 reject）。
@@ -69,7 +69,7 @@ const useTerminalMock = {
   instances: instancesRef,
   activeTerminalId: activeRef,
   spawnTerminal: spawnTerminalMock,
-  // spawnTerminalAuto 同一替身：自动新建腿经互斥入口仍委托同一 spawn 面（dmg-r1-3）
+  // spawnTerminalAuto 同一替身：自动新建路径经互斥入口仍委托同一 spawn 面（dmg-r1-3）
   spawnTerminalAuto: spawnTerminalMock,
   selectInstance: vi.fn(),
   closeInstance: vi.fn(),
@@ -121,7 +121,7 @@ afterEach(() => {
   document.body.innerHTML = ''
 })
 
-describe('TerminalView spawn 失败 inline 错误条（RD-5#2 挂载自动新建腿）', () => {
+describe('TerminalView spawn 失败 inline 错误条（RD-5#2 挂载自动新建路径）', () => {
   it('spawn resolve → 不显示错误条', async () => {
     wrapper = mount(TerminalView, { props: { sessionId: 'test-session' }, attachTo: document.body })
     await flushPromises()
@@ -185,13 +185,13 @@ describe('TerminalView spawn 失败 inline 错误条（RD-5#2 挂载自动新建
     expect(document.body.querySelector('[data-testid="terminal-spawn-error"]')).toBeNull()
   })
 
-  it('挂载腿失败后点「+」新建成功 → 撤下 inline 错误条（错误态不跨腿泄漏）', async () => {
+  it('挂载路径失败后点「+」新建成功 → 撤下 inline 错误条（错误态不跨路径泄漏）', async () => {
     spawnTerminalMock.mockRejectedValueOnce(new Error('mount boom'))
     wrapper = mount(TerminalView, { props: { sessionId: 'test-session' }, attachTo: document.body })
     await flushPromises()
     expect(document.body.querySelector('[data-testid="terminal-spawn-error"]')).toBeTruthy()
 
-    // 「+」成功（spawnTerminalMock 默认 resolve）——错误态不得跨腿泄漏到已成功新建的场景
+    // 「+」成功（spawnTerminalMock 默认 resolve）——错误态不得跨路径泄漏到已成功新建的场景
     const create = document.body.querySelector('[data-testid="terminal-instance-create"]') as HTMLButtonElement
     create.dispatchEvent(new MouseEvent('click', { bubbles: true }))
     await flushPromises()

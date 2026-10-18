@@ -2,7 +2,7 @@
 
 /**
  * useQuotaConfigure（QuotaConfigure module 实现）接口级单测（契约 v2，coding-plan-quota-config-ux
- * §7.1/§7.2；C1 收拢后测试面 = core QuotaConfigureModule 接口）。
+ * §7.1/§7.2；C1 收拢后测试 = core QuotaConfigureModule 接口）。
  *
  * interface is the test surface：全部用例只经 draft / view / test 三个透镜 + 3 个写动作打点，
  * 不窥内部 ref —— 契约收窄 / 内部重组不失效这些断言，正是「行为保持 refactor」的验收面。
@@ -17,7 +17,7 @@
  *    apiKey 仅 exclusive 且草稿非空才传且永不 ''；workspace 必填永不 ''；credentialSource / enabled 恒传
  * ④ setEnabled（D4）：只发 { providerId, enabled }，零查询调用
  * ⑤ 去掩码（D7）：syncFromProvider 后 cookie / apiKey 草稿为空
- * ⑥ 类型草稿写入（D5 细节 2）：同值短路 / 真变清凭证草稿 / 非字符串守卫
+ * ⑥ 类型草稿写入（D5 细节 2）：同值短路 / 真变清凭证草稿 / 非字符串检查
  * ⑦ loadCached：data=null + reason 时保留失败态（D6 影响面表修正）
  * ⑧ configureError 走 i18n（D9）：quotaConfigureFail / quotaSaveAndTestFail
  * ⑨ §7.1 时序约定 1：payload 必须在 await 之前捕获（configure 期间广播重置草稿也不影响已提交值）
@@ -201,7 +201,7 @@ describe('readiness 齐备性矩阵（D1 / D13）', () => {
     expect(module.view.value.type.selected).toBe('legacy-unknown')
     expect(module.view.value.readiness).toEqual({ ready: false, missing: ['type'] })
 
-    // 重选一个有效预设类型 → 判定恢复常态（守卫不是「命中一次就永久卡死」）
+    // 重选一个有效预设类型 → 判定恢复常态（检查不是「命中一次就永久卡死」）
     module.selectType('kimi-coding')
     expect(module.view.value.readiness.missing).not.toContain('type')
   })
@@ -681,7 +681,7 @@ describe('类型草稿写入（D5 细节 2）', () => {
     expect(quotaApi.configure).not.toHaveBeenCalled()
   })
 
-  it('非字符串 payload 被守卫拦下（reka Select 宽联合类型；不许 String() 强转出 "undefined"）', async () => {
+  it('非字符串 payload 被检查拦下（reka Select 宽联合类型；不许 String() 强转出 "undefined"）', async () => {
     const { module } = await mountBaseline('mimo')
 
     module.draft.value.cookie = 'unsubmitted'

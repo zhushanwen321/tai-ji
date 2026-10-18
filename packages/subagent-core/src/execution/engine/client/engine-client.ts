@@ -68,14 +68,14 @@ import { notifyInFlightChanged } from "../inflight-snapshot.ts";
 const logger = getLogger("subagents");
 
 /**
- * 单条镜像事件 → core 镜像投影 + 在途推送（u7a 数据面桥接）：置死**或已退出** →
+ * 单条镜像事件 → core 镜像映射 + 在途推送（u7a 数据面桥接）：置死**或已退出** →
  * markKilled，running → register（同 recordId 重 spawn 覆盖，与引擎侧 Map 同语义）。
  * 判据必须是 `state === "exited" || entry.killed` 而非只看 killed：pi 子进程自行
  * 退出/崩溃时引擎侧上报 `state:"exited", killed:false`（child.killed 只在我方 kill
  * 过才为 true），且引擎侧镜像对已退出子进程只改 state 不删项——只看 killed 会把
  * 已死子进程重新 register 为活句柄（countInFlight 虚高 → 幻影在途拖住滚动重启
  * 判据；hasLiveProcessHandle 恒真 → isResumable 失真）。exited 即死，killed 只是
- * 其子集。投影后必推送——镜像事件本身就是在途迁移点（子进程注册/移除），首轮无
+ * 其子集。映射后必推送——镜像事件本身就是在途迁移点（子进程注册/移除），首轮无
  * 任何 arm/disarm 推送，不在此推则首轮在途窗口对 D5 不可见；notify 同步
  * fire-and-forget，异常不外溢。killedAll 空表单发（无 pid）与迟到事件（条目已清）
  * 为 no-op。
@@ -118,7 +118,7 @@ export type EngineClientState =
 
 /**
  * run 作用域反向通知路由（RemoteEngine.run 注册，终态后注销）。
- * 回调允许返回 Promise（数据面 10s 应答守卫的计时对象；同步回调不受守卫影响）。
+ * 回调允许返回 Promise（数据面 10s 应答检查的计时对象；同步回调不受检查影响）。
  * [H1 U6] 轮次相位消费口（旧第 9 反向通道）已随 chat 域相位机退役删除。
  */
 export interface RunRoute {
@@ -203,7 +203,7 @@ export class EngineClient {
       isDisposed: () => this.disposed,
     };
     this.mirror.onChange((event) => {
-      // [u7a 生产补挂] 反向通道镜像事件同步投影进 core 侧镜像 + 推送在途计数
+      // [u7a 生产补挂] 反向通道镜像事件同步映射进 core 侧镜像 + 推送在途计数
       //（数据面桥接，见 bridgeMirrorEventToCoreMirror 与文件头 u7a 注释）。
       bridgeMirrorEventToCoreMirror(event, this.mirror);
     });
@@ -350,7 +350,7 @@ export class EngineClient {
     });
     const child = this.child;
     child.on("error", (err) => {
-      // spawn 本身失败（ENOENT 等）：让 initialize 超时/写失败路径统一收口。
+      // spawn 本身失败（ENOENT 等）：让 initialize 超时/写失败路径统一收尾。
       logger.warn(`[engine-client:${this.engineId}] spawn error: ${err.message}`);
       this.appendStderrTail(`spawn error: ${err.message}\n`);
     });
@@ -569,7 +569,7 @@ export class EngineClient {
   }
 
   /**
-   * [subagent-model-switch §7.3] setModel 类型化调用面（cancelRun 同族）：控制面单
+   * [subagent-model-switch §7.3] setModel 类型化调用点（cancelRun 同族）：控制面单
    * 请求，上界 SET_MODEL_REQUEST_TIMEOUT_MS（10s——≥ 引擎侧两阶段窗 2×3s + 协议
    * 余量；控制面单请求必须秒级有界，宿主不悬挂）。错误经 error 帧 reject 为
    * EngineSdkError（code 原样保留——三型失败分型 + engine_run_not_active 无活进程
@@ -585,7 +585,7 @@ export class EngineClient {
   // ── 收割 / 停机 ──────────────────────────────────────────────────────────
 
   /**
-   * 宿主收割入口（D8 markAllSpawnedChildrenDead 落点）：组杀引擎 CLI（POSIX 负 pid 组杀 /
+   * 宿主收割入口（D8 markAllSpawnedChildrenDead 落点）：按进程组终止引擎 CLI（POSIX 负 pid 按进程组终止 /
    * Windows taskkill /T /F）+ 镜像整体置死 + pidfile 清理。在途请求以 engine_crashed
    * 失败。「零残留」断言范围 = 一代子进程 + 组内后代（引擎自身 detached 后代不覆盖，
    * impl-plan §7.2 R9-1 / 设计 §3.9 已接受代价）。
@@ -601,7 +601,7 @@ export class EngineClient {
   }
 
   /**
-   * 协议 dispose：dispose 帧（3s 上界）→ 组杀兜底 → 清理。幂等。
+   * 协议 dispose：dispose 帧（3s 上界）→ 按进程组终止兜底 → 清理。幂等。
    * dispose 后首个 run 的重建由新的连接状态机承担（EnginePort.dispose 契约）。
    */
   async dispose(): Promise<void> {
@@ -637,9 +637,9 @@ export class EngineClient {
   }
 
   /**
-   * 进程死亡 / 失败后的统一清理（收割/组杀分支各成子函数，此处只做顺序编排）：
+   * 进程死亡 / 失败后的统一清理（收割/按进程组终止分支各成子函数，此处只做顺序编排）：
    * 孤儿收割（镜像置死前）→ 镜像置死（失效语义 2+3）→ pidfile 删 → 在途请求
-   * engine_crashed（附 stderr 尾）→ run 路由清空 → 活引擎组杀兜底。
+   * engine_crashed（附 stderr 尾）→ run 路由清空 → 活引擎按进程组终止兜底。
    */
   private teardownProcess(detail: string): void {
     this.reapOrphansAfterUnexpectedDeath(detail);
@@ -669,9 +669,9 @@ export class EngineClient {
    *   - 位置 = mirror.killAll() 置死清空之前——Windows 通道依赖镜像快照过滤活孤儿
    *     （置死后全量项 killed=true 不可过滤）；
    *   - 条件 = !intentionalKill && alreadyDead——主动 dispose 链已有两层杀（引擎
-   *     killAllActiveChildren SIGTERM+30s + 宿主 killAll 组杀 5s 升级），跳过即不叠加、
+   *     killAllActiveChildren SIGTERM+30s + 宿主 killAll 按进程组终止 5s 升级），跳过即不叠加、
    *     优雅窗零压缩、pi trap-flush 零截断；进程仍活的路径（握手失败重建）由
-   *     killLeakedAliveChild 组杀兜底承接。
+   *     killLeakedAliveChild 按进程组终止兜底承接。
    */
   private reapOrphansAfterUnexpectedDeath(detail: string): void {
     if (!this.intentionalKill && this.child !== undefined) {
@@ -683,10 +683,10 @@ export class EngineClient {
           // found → 空操作（不可复用）——镜像通道收割（置死前快照，见下）。
           this.reapOrphansViaMirrorSnapshot(detail);
         } else {
-          // POSIX：复用 killProcessTree 负 pid 组杀（SIGTERM → 5s grace → SIGKILL
+          // POSIX：复用 killProcessTree 负 pid 按进程组终止（SIGTERM → 5s grace → SIGKILL
           // 升级链内建，fire-and-forget 不阻塞同步 teardown）。组长死后进程组存活到
-          // 最后一员退出，组杀可达任务子进程（引擎 detached:true spawn = 组长，任务
-          // 子进程 detached:false 同组，组杀目标 -child.pid 不依赖镜像）。
+          // 最后一员退出，按进程组终止可达任务子进程（引擎 detached:true spawn = 组长，任务
+          // 子进程 detached:false 同组，按进程组终止目标 -child.pid 不依赖镜像）。
           // 无外层逐 pid 兜底（SIGTERM 同步返回后 5s 窗内孤儿必然仍活，同步校验恒
           // 命中、立即兜底 = 优雅窗归零截断 trap-flush——升级链已覆盖残余职责）。
           killProcessTree(
@@ -700,7 +700,7 @@ export class EngineClient {
   }
 
   /**
-   * 握手失败路径（版本越界/握手超时/启动僵死）引擎进程仍活着：必须组杀，否则
+   * 握手失败路径（版本越界/握手超时/启动僵死）引擎进程仍活着：必须按进程组终止，否则
    * crash 重建循环每次 spawn 泄漏一个常驻孤儿（测试机实测积累 370+）。主动杀
    * （intentionalKill=true）与进程已死（exitCode/signalCode 非空）跳过重复发信号。
    */
@@ -757,7 +757,7 @@ export class EngineClient {
       stdin.write(`${JSON.stringify(frame)}\n`);
       return true;
     } catch (err) {
-      // 写失败 = 进程已死（EPIPE）——调用方按 false 走 engine_crashed 收口，debug 留痕。
+      // 写失败 = 进程已死（EPIPE）——调用方按 false 走 engine_crashed 收尾，debug 留痕。
       logger.debug(
         `[engine-client:${this.engineId}] stdin write failed: ${err instanceof Error ? err.message : String(err)}`,
       );

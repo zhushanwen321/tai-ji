@@ -100,7 +100,7 @@ describe('UsagePage 图例过滤交互', () => {
     document.body.innerHTML = ''
   })
 
-  it('点击 legend chip 关闭 provider → chip 置灰保留原位、可单独恢复；「至少保留一个」守卫生效', async () => {
+  it('点击 legend chip 关闭 provider → chip 置灰保留原位、可单独恢复；「至少保留一个」检查生效', async () => {
     const wrapper = await mountPage(threeProviderRows())
 
     // 初始三个图例 chip 齐全且均未置灰（perProvFull 全量恒显）
@@ -124,7 +124,7 @@ describe('UsagePage 图例过滤交互', () => {
     await wrapper.find('[data-testid="usage-legend-p1"]').trigger('click')
     expect(wrapper.find('[data-testid="usage-legend-p1"]').classes()).not.toContain('opacity-[0.38]')
 
-    // 连关 p1、p2 后仅剩 p3 启用 → 守卫拦截 p3 的关闭（不置灰，基数 = perProvFull 全量三 provider）
+    // 连关 p1、p2 后仅剩 p3 启用 → 检查拦截 p3 的关闭（不置灰，基数 = perProvFull 全量三 provider）
     await wrapper.find('[data-testid="usage-legend-p1"]').trigger('click')
     await wrapper.find('[data-testid="usage-legend-p2"]').trigger('click')
     expect(wrapper.find('[data-testid="usage-legend-p1"]').classes()).toContain('opacity-[0.38]')
@@ -201,7 +201,7 @@ describe('UsagePage isolate 单看交互', () => {
   })
 
   it('关闭 isolate 模型所属 provider → isolate 联动清除（chip 消失）；关其他 provider 不误清', async () => {
-    // 三 provider fixture：关 p2 后 p1 非最后一个启用 provider，不被「至少保留一个」守卫拦截
+    // 三 provider fixture：关 p2 后 p1 非最后一个启用 provider，不被「至少保留一个」检查拦截
     const wrapper = await mountPage(threeProviderRows())
 
     await wrapper.find('[data-testid="usage-model-p1/m1"]').trigger('click')

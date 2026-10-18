@@ -2,7 +2,7 @@
  * WorkspaceDetector 三态检测测试（W2）+ detectBareWorkspaceCached 门面测试（批 4 U10）。
  *
  * detectBareWorkspaceCached 已门面化到 repo 观测器（services/git/repo-observer.ts 共享单例）：
- * 单例的解析走真实 GitRepoResolver（fs 用临时 fixture，execSync 经 vi.mock 钉死），缓存策略
+ * 单例的解析走真实 GitRepoResolver（fs 用临时 fixture，execSync 经 vi.mock 固定），缓存策略
  * 断言经 GitRepoResolver.prototype.resolve spy 计数。
  *
  * 测试框架：vitest（从 vitest 导入 describe/it/expect/vi/beforeEach）。

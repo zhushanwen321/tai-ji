@@ -9,11 +9,11 @@
 // 与 pi-sw 原实现的差异（本模块定约）：
 // - guide 文案必填注入：core 不内嵌任何平台文案，宿主（pi-sw / zsw）各自传入；
 // - ModelEntry 并集口径：除 id/name 外全字段 optional（红线 5）——undefined
-//   消费点显式守卫（input 缺席不抛、contextWindow 缺席不渲染该元素、
+//   消费点显式检查（input 缺席不抛、contextWindow 缺席不渲染该元素、
 //   provider 缺席/空串时 id 裸渲染），不是自然降级；
 // - 分段条目预算：subagents/workflows 可传 maxEntries，超限按排序键码点序
 //   截尾 + 追加宿主注入的兜底指引行（红线 7：内置条目无截断豁免，不做
-//   「内置优先保留」两段式）；models 段无预算参数，完整渲染永不截（设计钉死）；
+//   「内置优先保留」两段式）；models 段无预算参数，完整渲染永不截（设计固定）；
 // - format 内部先排后截：pi 调用链数据已排时重排幂等，不破坏「pi 现调用
 //   形态下输出逐字节等价」（CA2 快照验收前提）。
 // - 空态显式化（D4-2）：subagents/workflows 两段新增空发现态渲染
@@ -21,7 +21,7 @@
 //   函数空列表仍返回空串（判据契约），空态接管在工厂层（resource-list-injector）；
 //   空态段可携带宿主注入的纪律行（guide 可选参数——清单为零但工具可用时
 //   跨工具调度纪律不随清单消失）。
-// 设计锚点：红线 5（ModelEntry 守卫）与红线 7（分段条目预算），见上方差异定约。
+// 设计锚点：红线 5（ModelEntry 检查）与红线 7（分段条目预算），见上方差异定约。
 
 import { escapeXml, renderXmlSection } from "./xml-injection.ts";
 
@@ -55,9 +55,9 @@ export interface InvalidResource {
 }
 
 /**
- * 注入段的最小模型投影——pi 数据投影（D-3 + 本仓 provider 补充）：
+ * 注入段的最小模型派生视图——pi 数据派生视图（D-3 + 本仓 provider 补充）：
  * id/name 为条目最小必填（缺则无渲染意义），其余字段 optional（红线 5）。
- * provider/reasoning:boolean/input[]/contextWindow 全给（pi 投影形态）；
+ * provider/reasoning:boolean/input[]/contextWindow 全给（pi 派生视图形态）；
  * 渲染面消费 provider/reasoning/input/contextWindow。
  */
 export interface ModelEntry {
@@ -75,14 +75,14 @@ export interface ListFormatOptions {
 	guide: string;
 	/**
 	 * 条目预算上限：超限按排序键码点序截尾（保留靠前条目）。缺省不限制
-	 * （pi 现行为全量）。models 段无此参数（永不截，设计钉死）。
+	 * （pi 现行为全量）。models 段无此参数（永不截，设计固定）。
 	 */
 	maxEntries?: number;
 	/** 截断发生时在段末追加的兜底指引行（宿主注入，如查看全量的命令）；未提供则不追加 */
 	truncationNotice?: string;
 }
 
-/** models 段渲染选项：仅 guide——无条目预算（完整渲染永不截，D-3 钉死） */
+/** models 段渲染选项：仅 guide——无条目预算（完整渲染永不截，D-3 固定） */
 export interface ModelListFormatOptions {
 	guide: string;
 }
@@ -203,8 +203,8 @@ export function formatAgentList(
  *  agents 段装配链无 invalid 产出面，不引入死参数）。 */
 export interface WorkflowListFormatOptions extends ListFormatOptions {
 	/**
-	 * 损坏 workflow 具名上报：非空时在条目行后、闭合标签前渲染 invalid 元素行
-	 * （escapeXml，形态 `invalid: [{path, reason}]` 的注入段投影）。缺省/空数组
+	 * 损坏 workflow 具名上报：非空时在条目行后、结束标签前渲染 invalid 元素行
+	 * （escapeXml，形态 `invalid: [{path, reason}]` 的注入段派生视图）。缺省/空数组
 	 * 零渲染（CA2 字节锚定不受影响——不传即与既有输出逐字节一致）。条目为空时
 	 * 本参数不消费（返回空串，invalid 随空态段渲染——见 formatEmptyResourceList）。
 	 */
@@ -292,8 +292,8 @@ export function formatEmptyResourceList(
 
 /**
  * models 段排序：provider 归一为非空串参与比较（缺席/空串 → ""）——
- * pi 投影（provider 全给且非空）下与 pi 现实现 (provider, id) 两段码点序一致；
- * zsw 投影（provider 缺席）整体退化为 id 码点序；混合形态下无 provider 条目
+ * pi 派生视图（provider 全给且非空）下与 pi 现实现 (provider, id) 两段码点序一致；
+ * zsw 派生视图（provider 缺席）整体退化为 id 码点序；混合形态下无 provider 条目
  * 排最前（空串码点最小），口径确定可复现。
  */
 function compareModelEntries(a: ModelEntry, b: ModelEntry): number {
@@ -306,7 +306,7 @@ function compareModelEntries(a: ModelEntry, b: ModelEntry): number {
 
 /**
  * 能力标记：reasoning true → "reasoning"；input 含 image → "vision"。空则省略 caps 段。
- * 红线 5 守卫：input 缺席经 optional chaining 不抛（pi 版此处对 undefined 抛
+ * 红线 5 检查：input 缺席经 optional chaining 不抛（pi 版此处对 undefined 抛
  * TypeError，本仓 L73 已核实）。
  */
 function formatCaps(entry: ModelEntry): string {
@@ -321,8 +321,8 @@ function formatCaps(entry: ModelEntry): string {
  *
  * 输入按归一 (provider, id) 码点序排序（见 compareModelEntries）——同一数据集
  * 输出字节稳定（KV-cache 契约）。空列表返回空串（不注入）。
- * models 段无条目预算（完整渲染永不截，D-3 钉死）。
- * 红线 5 守卫：contextWindow 缺席不渲染该元素（不输出 "undefined" 垃圾）；
+ * models 段无条目预算（完整渲染永不截，D-3 固定）。
+ * 红线 5 检查：contextWindow 缺席不渲染该元素（不输出 "undefined" 垃圾）；
  * provider 缺席/空串时 id 裸渲染。
  */
 export function formatModelList(

@@ -2,7 +2,7 @@
 //
 // 背景（W3 断链修复）：fork-from 的 ExecuteOptions.forkFromSessionFile 在 chat 域协议化
 // 改写后曾断链（本 mapper 不映射 → 协议 run 帧无承载位 → fork-from 轮次以无 --fork 的
-// 全新 session 跑，继承历史丢失）。本文件钉死宿主侧映射面：forkFromSessionFile →
+// 全新 session 跑，继承历史丢失）。本文件固定宿主侧映射面：forkFromSessionFile →
 // forkSource 改名透传（三层同名的唯一改名点）+ 缺省不落键（协议负向兼容）。
 // 端到端消费链由两侧专项覆盖：
 //   - chat 域执行链观测（subagent-workflow ended-message-and-fork-from.test 的 fake.runs）；

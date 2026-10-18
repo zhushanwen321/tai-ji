@@ -12,7 +12,7 @@ import { useSessionScopedState } from '../../../foundation/use-session-scoped-st
 import { drawerSessionKey } from '../control'
 
 /** bashTask 选中态（per-session 分区） */
-export interface BashTaskSelectionState { // oe-exempt:20261003:framework:类型契约先行——selection 分区契约，renderer 消费面即本批 D1 单元
+export interface BashTaskSelectionState { // oe-exempt:20261003:framework:类型契约先行——selection 分区契约，renderer 消费方即本批 D1 单元
   /** bashTask tab 当前展示的后台任务 id（registry taskId，background-task-sidebar-view D5①）；undefined=未选中（bashTask tab 显空态） */
   selectedBackgroundTaskId?: string
 }

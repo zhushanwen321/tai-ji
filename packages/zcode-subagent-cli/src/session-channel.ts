@@ -10,7 +10,7 @@
 // TS 重写收窄到 D4 单任务自包含面——-32004 四步恢复序 / resume / 热会话复用整体
 // out of scope，见设计 D4 连带声明）。
 //
-// 分层边界（与 R4 的接线面）：
+// 分层边界（与 R4 的接线点）：
 //   - 本层只做「单任务会话通道」：create/subscribe/send/终态/read/close + runTurn
 //     组合入口。AgentEvent 合成（text_delta→事件流、message_end.usage 映射走
 //     parser.mapZcodeUsage 同源）与 abort 链（session/stop→杀链）归 R4 编排层；
@@ -312,7 +312,7 @@ export function extractResumeTotalTokens(resumeResult: unknown): number | undefi
 }
 
 // ============================================================
-// 类型（R4 引擎 run 的消费面）
+// 类型（R4 引擎 run 的消费方）
 // ============================================================
 
 /** session/create 的 per-session 模型（A.2 ①：strict 对象——字符串会被 -32602 拒收）。
@@ -418,7 +418,7 @@ interface TerminalInfo {
 
 /**
  * 一个在途 turn 的全部状态（推送泵的归因目标）。settle/fail 由 openTurn 装配
- * （互斥守卫 + done promise 落定），泵内只调用不感知装配细节。
+ * （互斥检查 + done promise 落定），泵内只调用不感知装配细节。
  */
 interface ActiveTurn {
   readonly sessionId: string;
@@ -475,10 +475,10 @@ export class SessionChannel {
   /**
    * [P0-1 U5/D7] dispose 前收割 + 退订：「退订 = 不会再有事件」在结构上蕴含「在途
    * turn 不应再等」——close 缺失/被吞没形态（onClose 收割主路径未触发）下，在途
-   * turn 于退订前经既有 failAllTurns 收敛为明确失败（设计 §3.4 退化路径闭合；
+   * turn 于退订前经既有 failAllTurns 收敛为明确失败（设计 §3.4 退化路径完成；
    * race 窗口在引擎 shutdownRuntimeAndDisposeChannel，量级与 awaitConnFinalized
    * 同源 ZCODE_APPSERVER_HARVEST_GRACE_MS）。幂等：与 onClose 收割先到者赢
-   * （turn.fail 的 settled 守卫——已落定 turn 不改写），activeTurns 已空则 no-op。
+   * （turn.fail 的 settled 检查——已落定 turn 不改写），activeTurns 已空则 no-op。
    * 不影响连接自身生命周期（R4）。
    */
   dispose(): void {
@@ -562,7 +562,7 @@ export class SessionChannel {
    * 原样上抛（调用方决定降级形态——引擎侧 warn 后注入锚失效声明段继续执行，
    * run 不失败，[U3]）。
    * 经 conn.request 惰性启动连接（resume 是 run 的**首个**请求——调用时点连接
-   * 可能尚未启动，与 readBestEffort 的「已死跳过」判据不同场景，不做 alive 守卫）。
+   * 可能尚未启动，与 readBestEffort 的「已死跳过」判据不同场景，不做 alive 检查）。
    */
   async resumeSession(sessionId: string): Promise<unknown> {
     return this.conn.request("session/resume", { sessionId }, { timeoutMs: ZCODE_APPSERVER_TURN_READ_TIMEOUT_MS });
@@ -575,7 +575,7 @@ export class SessionChannel {
    * 对死连接发请求会触发惰性重建（凭空 spawn 一代无人使用的进程）。
    */
   async closeSession(sessionId: string): Promise<void> {
-    // [P0-1 U5/D7] dispose 收割后短路（先于 alive 守卫——收割形态下 alive 可仍为
+    // [P0-1 U5/D7] dispose 收割后短路（先于 alive 检查——收割形态下 alive 可仍为
     // true，见 disposed 字段注释）
     if (this.disposed) return;
     if (!this.conn.alive) return;
@@ -749,7 +749,7 @@ export class SessionChannel {
 
   /**
    * 收尾帧判定与吸收（A.2 ⑤ 两种形态：payload.response / stopReason+content 变体）。
-   * 命中任一形态则落 finalText/finalUsage 并以 final-frame 宽松终态收口，返回 true。
+   * 命中任一形态则落 finalText/finalUsage 并以 final-frame 宽松终态收尾，返回 true。
    */
   private applyFinalFrame(
     turn: ActiveTurn,
@@ -904,7 +904,7 @@ export class SessionChannel {
     }
   }
 
-  /** 终态后 read（A.2 ⑥）。失败/超时不抛——降级链由 runTurn 收口（read 只兜底不致命）。
+  /** 终态后 read（A.2 ⑥）。失败/超时不抛——降级链由 runTurn 收尾（read 只兜底不致命）。
    *  连接已死时跳过（与 closeSession 同判——对死连接发请求会凭空重建进程）。 */
   private async readBestEffort(sessionId: string): Promise<unknown> {
     if (!this.conn.alive) return undefined;

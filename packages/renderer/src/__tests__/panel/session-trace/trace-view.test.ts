@@ -4,7 +4,7 @@
  * A42 SegmentedTab「对话 | Trace」per-pane 视图状态：
  * - PanelHeader 渲染 toggle（两段，chat 默认激活）
  * - 切换只改 store 分区 view 字段：不重发 RPC（数据不重建）
- * - TraceView 卸载（切回对话）再挂载：过滤/选中状态保留 + 仍不重拉
+ * - TraceView 卸载（切回对话）再挂载：过滤/选中状态保留 + 仍不重新拉取
  *
  * A43 行组件渲染：
  * - 12 kind + MALFORMED 行摘要齐全（§3.4 渲染模型表）
@@ -38,7 +38,7 @@ vi.mock('@/api', () => ({
     fetchCurrentSystemPrompt: apiMock.fetchCurrentSystemPrompt,
   },
   // PanelHeader 挂载链引入 useChat（chat 域门面），模块加载期要求 chat 导出存在；
-  // 本测试不发消息，成员全 stub 即可（成员清单 = useChat 的 ChatApiPort 消费面）
+  // 本测试不发消息，成员全 stub 即可（成员清单 = useChat 的 ChatApiPort 消费方）
   chat: {
     send: vi.fn(),
     submitDelivery: vi.fn(),
@@ -137,7 +137,7 @@ describe('A42 SegmentedTab 对话|Trace per-pane 视图状态', () => {
     expect(traceBtn.attributes('aria-pressed')).toBe('false')
   })
 
-  it('切换到 Trace：仅改 view 字段（数据不重拉），切回对话再切回状态保留', async () => {
+  it('切换到 Trace：仅改 view 字段（数据不重新拉取），切回对话再切回状态保留', async () => {
     // 预加载（模拟此前打开过 Trace）
     ensureTraceLoaded(SID)
     await vi.waitFor(() => expect(useSessionTrace().partition.value.status).toBe('ready'))
@@ -159,7 +159,7 @@ describe('A42 SegmentedTab 对话|Trace per-pane 视图状态', () => {
     setTraceFilter(SID, { activeGroups: ['messages'] })
     selectTraceEntry(SID, 'u2')
 
-    // 切回对话（卸载 TraceView）→ 再切回（重新挂载）：过滤/选中保留 + 仍不重拉
+    // 切回对话（卸载 TraceView）→ 再切回（重新挂载）：过滤/选中保留 + 仍不重新拉取
     view.unmount()
     await wrapper.find('[data-testid="trace-view-toggle-chat"]').trigger('click')
     expect(useSessionTrace().partition.value.view).toBe('chat')
@@ -564,7 +564,7 @@ describe('oversize 降级视图（D5④，u4c 协议扩展）', () => {
 
 describe('error 态 envelope message 透出（回流修复）', () => {
   it("status='error' → 渲染分区 errorMessage（envelope 恢复指引：分页入口 + session 文件路径），不只显示 code", async () => {
-    // Gate B A11② 场景：活跃大 session 的 get_entries reply 被 D3 传输守卫拦为错误
+    // Gate B A11② 场景：活跃大 session 的 get_entries reply 被 D3 传输检查拦为错误
     // envelope（code=payload_too_large），message 携带恢复指引——此前 UI 只渲染 code，
     // 指引文案被藏掉。message-broker reply envelope 生成处透传的 err.message 即原文。
     const envelopeMessage =
@@ -608,8 +608,8 @@ describe('error 态 envelope message 透出（回流修复）', () => {
   })
 })
 
-describe('B11 台账截断降级 banner（truncated 正交字段→现有降级渲染分支，不新增 status 值）', () => {
-  it('超限快照：保尾部 5000 + truncated 置位 → banner 可见且台账仍正常渲染', async () => {
+describe('B11 登记清单截断降级 banner（truncated 正交字段→现有降级渲染分支，不新增 status 值）', () => {
+  it('超限快照：保尾部 5000 + truncated 置位 → banner 可见且登记清单仍正常渲染', async () => {
     // 5001 条线性链（软上限 5000 → 丢弃头部 e0，保 e1..e5000）
     const entries: unknown[] = []
     let parent: string | null = null
@@ -631,9 +631,9 @@ describe('B11 台账截断降级 banner（truncated 正交字段→现有降级�
     const p = useSessionTrace().partition.value
     expect(p.truncated).toBe(true)
     expect(p.entries).toHaveLength(5000)
-    expect(p.status).toBe('ready') // 台账仍 ready——截断不是错误态，不新增 status 值
+    expect(p.status).toBe('ready') // 登记清单仍 ready——截断不是错误态，不新增 status 值
 
-    // 用户可见 DOM 断言：降级 banner（与 file 降级 banner 同构）+ 台账主体仍在
+    // 用户可见 DOM 断言：降级 banner（与 file 降级 banner 同构）+ 登记清单主体仍在
     const banner = view.find('[data-testid="trace-truncated-banner"]')
     expect(banner.exists()).toBe(true)
     expect(banner.text()).toContain('5000')

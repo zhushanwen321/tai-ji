@@ -129,7 +129,7 @@ describe('组头操作（hover 动作钮，demo .pgh-acts）', () => {
     setupProjects(DEFAULT_PROJECT_ID)
     const wrapper = mountList()
 
-    // 默认项目无 ProjectGroup：nameless 身份的重命名/删除守卫不再经由组件渲染面表达
+    // 默认项目无 ProjectGroup：nameless 身份的重命名/删除检查不再经由组件渲染面表达
     expect(wrapper.find(`[data-testid="project-group"][data-project-id="${DEFAULT_PROJECT_ID}"]`).exists()).toBe(false)
     // 会话在置顶平铺区可见（无组框）
     expect(wrapper.find('[data-testid="default-project-flat-zone"]').exists()).toBe(true)

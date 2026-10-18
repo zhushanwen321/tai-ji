@@ -413,7 +413,7 @@ describe('M1b: setProvider 接线（防线②③ 经 applyProviderWritePolicy �
     expect(upsertProvider.mock.calls[0]?.[1]).toEqual({ name: 'OpenCode Go' })
   })
 
-  it('d 新建 + skipUpsert 成立 → ensureProviderInWhitelist 仍被调用（白名单守卫不随 skip 跳过）', async () => {
+  it('d 新建 + skipUpsert 成立 → ensureProviderInWhitelist 仍被调用（白名单检查不随 skip 跳过）', async () => {
     const { svc, upsertProvider, ensureProviderInWhitelist } = makeSetProviderService(undefined)
 
     await svc.setProvider('p-new-empty', { name: 'Only Name' })
@@ -424,7 +424,7 @@ describe('M1b: setProvider 接线（防线②③ 经 applyProviderWritePolicy �
 })
 
 /**
- * M2b：链 5 凭据判定迁移到 resolver 批量 sync 版（设计 D3 收口）。
+ * M2b：链 5 凭据判定迁移到 resolver 批量 sync 版（设计 D3 收敛）。
  *
  * 不变量：apiKeySet / status 判定经 `listCredentialBackedProviderIds` 单次批量取（auth.json ∪
  * models.json），不得退回 per-provider `hasProviderCredential` / `hasCredentialSync` 循环
@@ -738,7 +738,7 @@ describe('D12: 删除链 quota 清理（排序约束 + warn-only）', () => {
   })
 })
 
-describe('U6① 模型 id 规则（id 类毒化收口：可强转则强转、不可用才丢）', () => {
+describe('U6① 模型 id 规则（id 类毒化收敛：可强转则强转、不可用才丢）', () => {
   it('id 缺失（undefined / null）/ 空串 / 纯空白 / 对象 → 整条丢弃 + droppedModels 可见', () => {
     const result = applyProviderWritePolicy(
       { name: 'p1' },
@@ -825,7 +825,7 @@ describe('coding-plan 额度显示自动开启（新增即默认同意，quota-a
     return { svc, extras }
   }
 
-  /** 「不自动开启」标准腿：固定 zai-coding-cn 明文 setProvider → quotaAutoEnabled 与 quota extras 双 undefined 断言。 */
+  /** 「不自动开启」标准路径：固定 zai-coding-cn 明文 setProvider → quotaAutoEnabled 与 quota extras 双 undefined 断言。 */
   async function setPlainZaiAndExpectNoAutoEnable(svc: ConfigService, extras: TaijiProviderStore): Promise<void> {
     const res = await svc.setProvider('zai-coding-cn', { name: 'Z.AI Coding CN', apiKey: 'sk-plain' })
 

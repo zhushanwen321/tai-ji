@@ -8,11 +8,11 @@
  * 事故链：zcode 取消轮导入后产物里出现「assistant、stopReason='stop'、无 usage」——
  * pi 0.84.4 读面对这种形态裸读崩溃：
  *   - dist/core/agent-session.js:2678 getSessionStats → addUsageToTotals(
- *     assistantMsg.usage) 读 .input（toolResult 分支 :2668 有存在性守卫，assistant 分支无）
+ *     assistantMsg.usage) 读 .input（toolResult 分支 :2668 有存在性检查，assistant 分支无）
  *   - dist/core/agent-session.js:2721 turn 前上下文扫描 → calculateContextTokens(
  *     assistant.usage) 读 .totalTokens（仅跳过 stopReason aborted/error）
  * AgentSession 无法无 LLM 构造，两处按行级实装复演为谓词（parseSessionEntries /
- * buildContextEntries 则是真实 dist 调用——pi 解析器本身不校验 usage，守卫责任在
+ * buildContextEntries 则是真实 dist 调用——pi 解析器本身不校验 usage，检查责任在
  * 产物写侧，即 converter 的不变量门）。
  *
  * 实装加载：包内 locatePiCodingAgentDist 动态 import dist JS（cwd 上溯定位，与 runtime
@@ -132,7 +132,7 @@ function convertedCancelledTurn(): string {
 }
 
 describe('pi reader invariant (PS-44): assistant entries must carry usage for unguarded pi reads', () => {
-  it('事故形态（伪 stop + 无 usage）被两谓词捕获——pi 解析器本身放行，守卫责任在写侧', () => {
+  it('事故形态（伪 stop + 无 usage）被两谓词捕获——pi 解析器本身放行，检查责任在写侧', () => {
     const entries = parseSessionEntries(POISON_JSONL) as ParsedEntry[]
     // pi 解析器不校验 usage（事故正是这样溜进来的）——真实 parse 必须成功
     expect(entries).toHaveLength(2)

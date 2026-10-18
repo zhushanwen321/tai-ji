@@ -4,7 +4,7 @@
 // EngineClient 构造后更新 host-ui-endpoint 槽 → 反向请求必须路由到新 handler。
 // 生产背景：cli 引擎单例跨 reload 存活（registry D2b 幂等重注册不 dispose），
 // post-reload adoption 只更新槽、不重建 EngineClient——若 reverse-router 在构造期
-// 固化应答端（旧 uiRequestHandler 传参形态），在飞 run 的 ask_user 会路由到旧 ctx
+// 固化应答端（旧 uiRequestHandler 传参形态），在途 run 的 ask_user 会路由到旧 ctx
 // 的 handler（assertActive 抛错 → {cancelled:true} 静默取消）。本套件用真实
 // fake-engine 子进程链路锁死「消费时现读」语义。
 
@@ -161,7 +161,7 @@ describe("D3：reverse-router host/askUser 槽现读（构造期固化已消除�
   });
 
   it("窗口内旧 handler 抛 assertActive（reload 间隙形态）→ 降级 {cancelled:true}，不崩不误报 unsupported", async () => {
-    // 设计 §5 单测面清单项（D3 检查点补全）：reload 窗口内（invalidate → adoption 完成）
+    // 设计 §5 单测清单项（D3 检查点补全）：reload 窗口内（invalidate → adoption 完成）
     // 槽上仍是旧 ctx 的 handler，其应答链触碰旧 pi 命中 assertActive——结构性 catch
     // 须把该形态降级为 {cancelled:true}（dialog-queue 应答链同款语义）：引擎侧收到
     // cancelled 后子进程可继续推进（非死锁、非崩溃），warn 留痕供归因。

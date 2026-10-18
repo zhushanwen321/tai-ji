@@ -89,7 +89,7 @@ function smartContextDefaults(): SmartContextConfigSnapshot {
 
 /**
  * 读取 smart-context 配置快照。文件不存在/坏 JSON/字段非法 → 默认值
- * （与 extension normalizeSmartContextConfig 的回退语义一致）。不抛错（防御性设计，与 getRenameModel 一致）。
+ * （与 extension normalizeSmartContextConfig 的回退语义一致）。不抛错（容错处理，与 getRenameModel 一致）。
  */
 export function getSmartContextConfig(): SmartContextConfigSnapshot {
   try {

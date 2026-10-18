@@ -88,7 +88,7 @@ describe("版本协商（A6① 协议层判据）", () => {
       supportedMin: 1,
       supportedMaxExclusive: 2,
     });
-    // toStructured 投影即协议 error 帧载荷形态
+    // toStructured 派生即协议 error 帧载荷形态
     expect(err.toStructured()).toMatchObject({
       code: "engine_protocol_mismatch",
       recovery: err.recovery,
@@ -249,7 +249,7 @@ describe("错误码表（impl-plan §2.1 逐项 + subagent-model-switch §7.3 se
   });
 });
 
-describe("帧判别守卫（四帧型互斥判别，W2 行解析器消费）", () => {
+describe("帧判别检查（四帧型互斥判别，W2 行解析器消费）", () => {
   const req: RequestFrame = { id: 1, method: "run", params: {} };
   const okRes: SuccessResponseFrame = { id: 1, result: { handle: {}, outcome: {} } };
   const errRes: ErrorResponseFrame = {

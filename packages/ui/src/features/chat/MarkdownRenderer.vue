@@ -24,7 +24,7 @@
     <template v-for="(seg, i) in segments" :key="segKey(seg, i)">
       <!-- eslint-disable-next-line vue/no-v-html -- text 段已经 markdown-sanitize 分通道净化（可信段摘出-回填 + 用户内容白名单），仅此受控点放开。 -->
       <div v-if="seg.type === 'text'" v-html="seg.content" />
-      <!-- streaming-fence 占位（D-5/W23，R-20）：未闭合 fence 流式期不跑 shiki/mermaid——语言标签 +
+      <!-- streaming-fence 占位（D-5/W23，R-20）：未结束 fence 流式期不跑 shiki/mermaid——语言标签 +
            loader 行；token 静默 ≥阈值或消息 complete 后 finalize 转完整渲染（.md-codeblock/MermaidRenderer） -->
       <div
         v-else-if="seg.type === 'streaming-fence'"
@@ -100,7 +100,7 @@ const props = defineProps<{
   sessionId?: string | null
   /** 渲染变体：默认 undefined（正文级排版）；'thinking' 用于 thinking 块/次要过程信息。 */
   variant?: 'thinking'
-  /** 所属 assistant 是否正在流式（Block text 分支透传）。true 期间未闭合 fence 走 streaming-fence
+  /** 所属 assistant 是否正在流式（Block text 分支透传）。true 期间未结束 fence 走 streaming-fence
    *  占位（静默 ≥阈值或翻 false 时 finalize 转完整渲染）；false/undefined（complete/静态内容）直接完整渲染。 */
   streaming?: boolean
   /** 相对资源解析基准目录（绝对路径；设计 markdown-html-sanitize-render D4，双通道取值
@@ -120,9 +120,9 @@ const { segments } = useMarkdownStreaming(props, deps)
  * v-for 段 key（W23 review Fix-2）：streaming-fence 占位段固定哨兵 'sf'——占位段的 segId
  * 在协议层每帧重分配（tail 段每帧重建），若 key 随帧变则占位 DOM 重建、loader 旋转动画
  * 每帧从头重启、视觉冻结在起始相位（宿主 tailwind loader-spin，周期随宿主配置）。
- * 文档级至多一个未闭合 fence，哨兵不撞号。
+ * 文档级至多一个未结束 fence，哨兵不撞号。
  * 其余段沿用 segId（前缀段跨帧不变 → DOM 复用）/ index（全量降级路径）。html-preview 段
- * （fence 闭合后才成段，属前缀/稳定区）走 segId——容器预检态随实例保活，不被重建重置。
+ * （fence 结束后才成段，属前缀/稳定区）走 segId——容器预检态随实例保活，不被重建重置。
  */
 function segKey(seg: MarkdownSegment, i: number): string {
   if (seg.type === 'streaming-fence') return 'sf'
@@ -179,7 +179,7 @@ function handleCodeblockCopy(e: MouseEvent, btn: HTMLElement): void {
     code = ''
   }
   // 非安全上下文（LAN http，如移动壳远程访问）clipboard 为 undefined——同步访问即抛
-  // TypeError（.catch 接不住），守卫早退且不置 is-copied（反馈态须与复制结果一致）。
+  // TypeError（.catch 接不住），检查早退且不置 is-copied（反馈态须与复制结果一致）。
   if (code && !navigator.clipboard) return
   if (code) {
     navigator.clipboard.writeText(code).catch(() => { /* 剪贴板失败静默 */ })
@@ -520,11 +520,11 @@ function onClick(e: MouseEvent): void {
   font-size: 0.92em;
 }
 /* th/td 规则拆两条（th/td 对齐转写的配套条件，设计 D3 R5/R6）：border/padding 无条件
-   ——整条加守卫会让带 align 的单元格连边框内边距一起丢；仅 text-align 移入 :not([align])
-   守卫——无 align 属性兜底 left（维持现状视觉基线），有 align 属性（markdown-it 的
-   style 经 markdown.ts 转写而来）时守卫不命中、HTML 呈现属性生效（align 优先级低于
+   ——整条加检查会让带 align 的单元格连边框内边距一起丢；仅 text-align 移入 :not([align])
+   检查——无 align 属性兜底 left（维持现状视觉基线），有 align 属性（markdown-it 的
+   style 经 markdown.ts 转写而来）时检查不命中、HTML 呈现属性生效（align 优先级低于
    任何作者规则，转写不同批改宿主 CSS 则列对齐回归依旧）。
-   min-width 列宽地板同样留无条件侧：地板与列对齐无关，进守卫会让带 align 的列丢地板。 */
+   min-width 列宽地板同样留无条件侧：地板与列对齐无关，进检查会让带 align 的列丢地板。 */
 .md-render :deep(th),
 .md-render :deep(td) {
   border-right: 1px solid var(--border);
@@ -543,7 +543,7 @@ function onClick(e: MouseEvent): void {
      否决备案：word-break:keep-all（让 CJK min-content = 整段）在窄容器下会把无标点
      长中文变成不可断 → 表格被迫横滚，比现状更糟；table-layout:fixed + colgroup 百分比
      需 renderer 侧改造且 fixed 下不可断 code token 会溢出单元格，留作后续升级。
-     布局回归守卫（jsdom 无 layout 引擎，单测不可行）：e2e/markdown-table-layout.spec.ts
+     布局回归检查（jsdom 无 layout 引擎，单测不可行）：e2e/markdown-table-layout.spec.ts
      @p0-smoke（L1 行为轨）。 */
   min-width: 4em;
 }

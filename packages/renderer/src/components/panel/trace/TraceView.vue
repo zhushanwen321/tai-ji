@@ -1,6 +1,6 @@
 <template>
   <!--
-    容器组件 · trace-view（session-trace §3.1 终态：占满 main 区的全量 entry 台账）。
+    容器组件 · trace-view（session-trace §3.1 终态：占满 main 区的全量 entry 登记清单）。
     结构：TraceToolbar（状态行 + chips + 搜索 + context toggle）+ 行列表 + context 分界行。
     加载/空态/失败路径（§3.1）：loading 转圈 / empty（未落盘）文案 / oversize（超预检阈值
     D5④）降级文案 / error 重试 / 过滤空态。
@@ -19,7 +19,7 @@
       <Loader2 class="size-5 animate-spin text-neutral-dim" stroke-width="1.6" />
       <p class="text-[length:var(--text-xs)] text-neutral-dim">{{ t('panel.trace.loading') }}</p>
     </div>
-    <!-- 失败路径：加载失败（§3.1 失败路径，文案 t() 占位收口 trace-i18n） -->
+    <!-- 失败路径：加载失败（§3.1 失败路径，文案 t() 占位收敛 trace-i18n） -->
     <div
       v-else-if="partition.status === 'error'"
       class="flex flex-1 flex-col items-center justify-center gap-2 p-6 text-center"
@@ -29,7 +29,7 @@
       <p class="text-[length:var(--text-xs)] text-neutral-fg">{{ t('panel.trace.loadFailed') }}</p>
       <p class="max-w-[420px] text-[length:var(--text-2xs)] leading-relaxed text-neutral-dim">{{ t('panel.trace.loadFailedHint') }}</p>
       <p class="font-mono text-[length:var(--text-3xs)] text-neutral-faint">{{ partition.errorCode }}</p>
-      <!-- envelope message 透出（分区已存此前未渲染）：payload_too_large 等传输守卫错误
+      <!-- envelope message 透出（分区已存此前未渲染）：payload_too_large 等传输检查错误
            的恢复指引在此字段（「加载更早」分页入口 + session 文件路径，），
            只显示 code 会把恢复路径藏掉 -->
       <p
@@ -71,14 +71,14 @@
         {{ t('panel.trace.retry') }}
       </Button>
     </div>
-    <!-- 台账主体 -->
+    <!-- 登记清单主体 -->
     <template v-else>
       <!-- 对话流居中列（spec R5.1 同轨居中）：与 chat 视图共用 .content-col 布局原语
            （margin-inline auto + w-full + max-width var(--content-max-w)，demo .chat-scroll>*
            唯一权威）；原 ml-2 的 8px 呼吸改列内 pl-2 承接，滚动容器自身尺寸语义不变。 -->
       <div class="content-col flex min-h-0 min-w-0 flex-1 flex-col pl-2">
         <!-- RPC 降级 banner（§3.1 失败路径：pi RPC 失败/非活跃 session 走文件直读，无实时增量）。
-           source='file' 涵盖两种情形，语义统一：凡文件路径均无实时更新（增量腿只随 RPC 建立）。 -->
+           source='file' 涵盖两种情形，语义统一：凡文件路径均无实时更新（增量路径只随 RPC 建立）。 -->
         <div
           v-if="partition.source === 'file'"
           class="flex flex-shrink-0 items-center gap-1.5 border-b border-hairline px-3.5 py-1 text-[length:var(--text-2xs)] text-neutral-dim"
@@ -88,8 +88,8 @@
           <span>{{ t('panel.trace.degradedFileSource') }}</span>
         </div>
         <!--
-           B11 台账截断降级 banner（正交字段 truncated，参照 source:'oversize' 先例——
-           不新增 status 值，台账仍正常渲染）：entries 达 5000 软上限停止追加后提示台账
+           B11 登记清单截断降级 banner（正交字段 truncated，参照 source:'oversize' 先例——
+           不新增 status 值，登记清单仍正常渲染）：entries 达 5000 软上限停止追加后提示登记清单
            不完整。与 file 降级 banner 同构（icon + 文案），正交可同时出现。 -->
         <div
           v-if="partition.truncated"
@@ -249,7 +249,7 @@ const filteredRows = computed<TraceRow[]>(() => {
   return byState.filter((row) => searchableText(row).includes(q))
 })
 
-/** 渲染项：展开子 block 的台账行 + context 分界行（最后一个 COMPACTED 之后；contextOnly 态隐藏——demo 行为）。 */
+/** 渲染项：展开子 block 的登记清单行 + context 分界行（最后一个 COMPACTED 之后；contextOnly 态隐藏——demo 行为）。 */
 const items = computed<TraceDisplayItem[]>(() => {
   const list = buildTraceDisplayItems(filteredRows.value, partition.value.expandedKeys)
   if (partition.value.contextOnly) return list

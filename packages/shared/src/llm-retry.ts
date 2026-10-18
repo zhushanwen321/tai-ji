@@ -52,7 +52,7 @@ function isValidMaxRetryDelayMs(value: number): boolean {
 
 /** provider 域校验（agent 层字段已在前置校验通过，本函数只管 provider 域）。 */
 function validateProviderConfig(provider: LlmRetryProviderConfig): LlmRetryValidationResult {
-  // 对象性守卫：null 解构抛 TypeError（写路径校验在 try 外，会以 handler_error 逃逸而非
+  // 对象性检查：null 解构抛 TypeError（写路径校验在 try 外，会以 handler_error 逃逸而非
   // set_retry_config_failed 信封）；string/array 解构静默得 undefined，被当「全未设」丢字段。
   if (provider === null || typeof provider !== 'object' || Array.isArray(provider)) {
     return { ok: false, error: `provider 类型必须是对象或未设: ${String(provider)}` }

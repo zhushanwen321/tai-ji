@@ -6,7 +6,7 @@
  *    隐藏 API key 输入；未登录态渲染登录入口
  * ② api_key 型：渲染 API key 输入，不渲染 OAuth 状态区
  * ③ 形态切换确认弹窗：oauth→api_key 与 api_key→oauth 双向（确认执行切换、取消不动凭证）；
- *    oauth→api_key 空 key 保存被守卫阻断
+ *    oauth→api_key 空 key 保存被检查阻断
  * ④ 混合模型列表（catalog）：builtin 条目只读 + Built-in 徽章；override 条目可编辑/可删 +
  *    Custom 徽章；手动添加入口开放
  * ⑤ save payload：models 只含 override 条目（builtin id 不回传）+ authMethod 字段
@@ -331,7 +331,7 @@ describe('形态切换：双向确认弹窗', () => {
     expect(setProviderSpy).not.toHaveBeenCalled()
   })
 
-  it('确认 oauth→api_key：apiKey 输入 + save-bar 出现；空 key 保存被守卫阻断；填 key 保存 → payload authMethod=api_key + apiKey 覆写', async () => {
+  it('确认 oauth→api_key：apiKey 输入 + save-bar 出现；空 key 保存被检查阻断；填 key 保存 → payload authMethod=api_key + apiKey 覆写', async () => {
     wrapper = mountBody(OAUTH_P, { oauthPresent: true })
     await flushPromises()
 
@@ -344,7 +344,7 @@ describe('形态切换：双向确认弹窗', () => {
     expect(wrapper.find('[data-testid="provider-edit-apikey"]').exists()).toBe(true)
     expect(wrapper.find('[data-testid="provider-save-bar"]').exists()).toBe(true)
 
-    // 空 key 保存 → 守卫拦截（确认弹窗承诺退出 OAuth，空 key 会残留 OAuth 凭证）
+    // 空 key 保存 → 检查拦截（确认弹窗承诺退出 OAuth，空 key 会残留 OAuth 凭证）
     await wrapper.find('[data-testid="provider-save-btn"]').trigger('click')
     await flushPromises()
     expect(setProviderSpy).not.toHaveBeenCalled()
@@ -440,7 +440,7 @@ describe('混合模型列表：builtin 只读 + override 可编辑', () => {
     expect(wrapper.text()).toContain('gpt-4o')
   })
 
-  it('空名添加模型 → 守卫错误显示在 save-bar（addModel 抛错非静默）', async () => {
+  it('空名添加模型 → 检查错误显示在 save-bar（addModel 抛错非静默）', async () => {
     wrapper = mountBody(APIKEY_P)
     await flushPromises()
 
@@ -954,13 +954,13 @@ describe('R4 补口：类型 Select / compat providerApi', () => {
   })
 })
 
-// ══ 场景 ⑪：行级模型 Select 守卫透传（onCtxSelect / onStrategySelect）════════
+// ══ 场景 ⑪：行级模型 Select 检查透传（onCtxSelect / onStrategySelect）════════
 
 /**
  * ModelListSection 行级 Select 的 update:modelValue payload 是 reka 宽联合，组件以运行时
- * 守卫收窄后才进 core module（ModelListSection onCtxSelect / onStrategySelect，typeof 收窄
- * + 成员校验）。本组断言**组件级**透传：真实用户交互（开下拉 → 点选项）后守卫把合法值
- * 放行进 module → 行视图显示更新 → save payload 落盘。守卫早退分支（非 number / 非法策略
+ * 检查收窄后才进 core module（ModelListSection onCtxSelect / onStrategySelect，typeof 收窄
+ * + 成员校验）。本组断言**组件级**透传：真实用户交互（开下拉 → 点选项）后检查把合法值
+ * 放行进 module → 行视图显示更新 → save payload 落盘。检查早退分支（非 number / 非法策略
  * key）属 reka 内部不变量——Select 只会 emit 已注册 option 的 value，正常交互不可达，
  * 不强行锁（core 层 updateCtx/pickStrategy 行为已由 provider-edit-models.test.ts 直接单测）。
  *
@@ -971,7 +971,7 @@ describe('R4 补口：类型 Select / compat providerApi', () => {
  *   写入 localModels 后经 buildModelsPayload 回传的结果，透传链路端到端可证。
  * - 观察者形态：全部 DOM / payload 断言，无组件内部 spy。
  */
-describe('行级模型 Select：ctx / 策略守卫透传', () => {
+describe('行级模型 Select：ctx / 策略检查透传', () => {
   it('行内 ctx Select 选 128K → trigger 显示更新；策略 Select 选 On/Off → payload 双字段落盘', async () => {
     wrapper = mountBody(APIKEY_P)
     await flushPromises()
@@ -994,7 +994,7 @@ describe('行级模型 Select：ctx / 策略守卫透传', () => {
     await pickSelectOption(strategyTrigger.element as HTMLElement, 'composable.thinkingStrategy.onOff')
     expect(strategyTrigger.text()).toBe('composable.thinkingStrategy.onOff')
 
-    // 改名称制造 dirty → 保存 → payload 携带守卫放行后的双字段（透传进 module 的落盘证据）
+    // 改名称制造 dirty → 保存 → payload 携带检查放行后的双字段（透传进 module 的落盘证据）
     await wrapper.find('[data-testid="provider-edit-name"]').setValue('Renamed')
     await wrapper.find('[data-testid="provider-save-btn"]').trigger('click')
     await flushPromises()

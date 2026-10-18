@@ -9,7 +9,7 @@
     本组件只做展示 + 事件绑定。
     OAuth 状态机不在此组件（ui 零 renderer import 铁律）：凭证区登录/切换按钮经
     @oauth-login 上抛父组件（ProviderPage 共享单实例 useProviderOAuth，无双 listener）。
-    dirty 状态经 @dirty-change 上抛父组件做展开切换守卫；保存/取消经 @saved/@cancel 通知父收起。
+    dirty 状态经 @dirty-change 上抛父组件做展开切换检查；保存/取消经 @saved/@cancel 通知父收起。
   -->
   <div class="flex flex-col">
     <!-- 凭据 + 额度 + 验证（左侧区，垂直堆叠） -->
@@ -353,7 +353,7 @@ const emit = defineEmits<{
    * quotaAutoEnabled=新建分支自动开启 coding-plan 额度显示写成功，父组件 toast） */
   saved: [payload?: { wroteApiKey: boolean; quotaAutoEnabled?: boolean }]
   cancel: []
-  /** dirty 状态变化（true=有未保存改动）。父组件用于展开切换守卫 */
+  /** dirty 状态变化（true=有未保存改动）。父组件用于展开切换检查 */
   dirtyChange: [value: boolean]
   /** OAuth 登录/重新登录（B-1：父组件驱动共享 useProviderOAuth 状态机 + OAuthDialog，单实例无双 listener） */
   oauthLogin: []
@@ -458,7 +458,7 @@ function confirmAuthSwitch(): void {
   }
 }
 
-// reka Switch 的 update:modelValue payload 是宽联合，先运行时守卫收窄再进表单写入
+// reka Switch 的 update:modelValue payload 是宽联合，先运行时检查收窄再进表单写入
 // （对齐 ModelListSection onCtxSelect/onStrategySelect 的 unknown+guard 范式），不用模板
 // as 断言把非法 payload 直接放行。
 function onAuthHeaderChange(value: unknown): void {
@@ -479,7 +479,7 @@ provide(MODEL_LIST_DEPS_KEY, {
   providerApi: computed(() => isCatalog.value ? props.provider?.api : form.api),
 })
 
-// dirty 上抛父组件（展开切换守卫）。immediate 让父组件初始即知当前 dirty 态
+// dirty 上抛父组件（展开切换检查）。immediate 让父组件初始即知当前 dirty 态
 watch(isDirty, (v) => emit('dirtyChange', v), { immediate: true })
 
 /** 添加模型：捕获 addModel 校验错填到 actionError（save-bar 显示；来源标签 models，MF-1-7） */

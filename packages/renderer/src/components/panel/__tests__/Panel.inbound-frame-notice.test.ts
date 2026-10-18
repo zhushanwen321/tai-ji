@@ -4,15 +4,15 @@
  * 缺口背景：InboundFrameDroppedNotice 此前全仓零挂载、installInboundFrameGuard 全仓零调用
  * ——单元测试显式构造状态/组件掩盖了「组合根未装配 + 会话视图未挂载」的集成缺口。本文件
  * 走真实链路的可见性闭环：installInboundFrameGuard（App 装配层等价动作）→ core 丢帧回调
- * → 终止阀投影 → 真实 Panel 会话视图 → 提示条可见；切走切回 → 重试订阅恰好一次 + 提示消失。
+ * → 终止阀派生视图 → 真实 Panel 会话视图 → 提示条可见；切走切回 → 重试订阅恰好一次 + 提示消失。
  *
- * Mock 策略（Panel 挂载测试最小闭合集，同 Panel.dead-diagnostics-export.test.ts）：
+ * Mock 策略（Panel 挂载测试最小完备集，同 Panel.dead-diagnostics-export.test.ts）：
  * - mock core：捕获 onInboundFrameDropped 回调（用真实 useInboundFrameGuard 消费它）+
  *   retryInboundDroppedSession/subscribeSession 调用断言；
  * - mock '@/lib/ipc'（reportRendererLog）——上报面非本用例关注点（unit 文件已覆盖）；
  * - mock 重型子组件（MessageStream/Composer/Landing/FormOverlay）；Panel 与
  *   useInboundFrameGuard/InboundFrameDroppedNotice 均真实渲染；
- * - 真实 Pinia（守卫的 focus watch 数据源 = panel store focusedSessionId）。
+ * - 真实 Pinia（检查的 focus watch 数据源 = panel store focusedSessionId）。
  *
  * 运行：cd packages/renderer && npx vitest run src/components/panel/__tests__/Panel.inbound-frame-notice.test.ts
  */
@@ -60,7 +60,7 @@ const chatMock = vi.hoisted(() => ({
   isActive: vi.fn(() => false),
   isCompacting: vi.fn(() => false),
   isRespawnPending: vi.fn(() => false),
-  // occupancy 投影读口（缺省全 idle，对齐 store.getOccupancy 无记录缺省）
+  // occupancy 派生视图读口（缺省全 idle，对齐 store.getOccupancy 无记录缺省）
   getOccupancy: vi.fn(() => ({ turn: 'idle', compacting: false, bash: false })),
   failedHistory: new Map<string, boolean>(),
 }))
@@ -127,7 +127,7 @@ afterEach(() => {
 })
 
 describe('Panel 承接入站丢帧终止阀提示（D8 挂载点闭环）', () => {
-  it('安装守卫 + 丢帧触发终止阀 → Panel 会话视图内提示条可见（composer-band 同区），非 tripped session 不渲染', async () => {
+  it('安装检查 + 丢帧触发终止阀 → Panel 会话视图内提示条可见（composer-band 同区），非 tripped session 不渲染', async () => {
     installInboundFrameGuard() // App 装配层等价动作
     fireDrop({ sessionId: 's1' })
     expect(isInboundSessionTripped('s1')).toBe(true)

@@ -40,7 +40,7 @@ import {
 } from '../spawn-args.ts'
 
 // ─────────────────────────────────────────────────────────────────────────────
-// 主 agent 模板（runtime 消费面）
+// 主 agent 模板（runtime 消费方）
 // ─────────────────────────────────────────────────────────────────────────────
 
 describe('buildPiMainAgentArgs（主 agent 模板）', () => {
@@ -169,7 +169,7 @@ describe('buildPiMainAgentArgs（主 agent 模板）', () => {
 })
 
 // ─────────────────────────────────────────────────────────────────────────────
-// subagent 模板（pi-subagent-cli 消费面）
+// subagent 模板（pi-subagent-cli 消费方）
 // ─────────────────────────────────────────────────────────────────────────────
 
 /** subagent 侧基础参数（对齐 pi-subagent-cli spawn-args.test.ts 的 baseParams 形状）。 */

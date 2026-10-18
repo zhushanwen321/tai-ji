@@ -26,7 +26,7 @@
  * 它（chat 组转发），本地 const 彼时 TDZ，故必须单例驻本文件）；composerChatSpyModule
  * （useChat 工厂转发单例 + resetChatModuleState 超集键）；composerApiModuleWithChat
  * （@/api 加 chat 组 = spy 转发 + streamSubscribe）；composerApiModuleWithChatAndBtw
- * （再加 getHistory 回放腿 + composerBtwApiSpy 组）。
+ * （再加 getHistory 回放路径 + composerBtwApiSpy 组）。
  *
  * W4：useNewTaskFlow 的 currentCwd 必须是真实 Vue ref（Composer 的
  * useProjectSkills(flow.currentCwd) 对它 watch，裸 { value } 对象触发 Vue warn）——
@@ -54,7 +54,7 @@ import { createPinia, setActivePinia } from 'pinia'
 import { textToSegments } from '@taiji/shared'
 import { triggerEnterForkMode } from '@/composables/panel/useForkModeChannel'
 
-/** '@/composables/features/chat/useChat' mock 工厂（Composer 消费面 7 键全量）。
+/** '@/composables/features/chat/useChat' mock 工厂（Composer 消费方 7 键全量）。
  *  api 对象在工厂内创建一次（vi.mock factory 每模块图只执行一次）：测试经
  *  `import { useChat }` 拿到与组件同一实例的 spy 做断言（每调用新建 = 断言空转假绿）。 */
 export function composerChatModule() {
@@ -73,7 +73,7 @@ export function composerChatModule() {
 /**
  * useChat 的 spy 对象工厂（断言需直接引用 send/steer/followUp 的文件用）：
  * 七个动作方法带 resolve 基线（Composer 内部若 await 链路不悬空）；sendBash/abortBash
- * 是 bash 路文件（send-button-states / smoke 等）的消费面，对其余文件为无害多余键。
+ * 是 bash 路文件（send-button-states / smoke 等）的消费方，对其余文件为无害多余键。
  * 持有方式：
  *   const chatApiMock = makeComposerChatApiMock()
  *   vi.mock('@/composables/features/chat/useChat', () => ({ useChat: () => chatApiMock }))
@@ -104,7 +104,7 @@ export const composerChatApiSpy = makeComposerChatApiMock()
 
 /**
  * '@/composables/features/chat/useChat' mock 工厂（spy 单例转发形态，注册走
- * composer-shell-mount.ts）：resetChatModuleState 是 queue 链路文件的消费面，
+ * composer-shell-mount.ts）：resetChatModuleState 是 queue 链路文件的消费方，
  * 对 bash / btw 文件为无害多余键（超集）。
  */
 export function composerChatSpyModule() {
@@ -159,7 +159,7 @@ export async function composerApiModuleActualWithBtw(
 
 /**
  * '@/api' mock 工厂（chat + btw 组增量形态，btw-button 专用）：chat 组加 getHistory
- * 回放腿（空快照即可，drawer 选中线不走失败告警路径），btw 组为 badge 数据源。
+ * 回放路径（空快照即可，drawer 选中线不走失败告警路径），btw 组为 badge 数据源。
  */
 export function composerApiModuleWithChatAndBtw() {
   return {
@@ -173,7 +173,7 @@ export function composerApiModuleWithChatAndBtw() {
 }
 
 /**
- * '@/composables/features/new-task/useNewTaskFlow' mock 工厂（四文件消费面并集超集，
+ * '@/composables/features/new-task/useNewTaskFlow' mock 工厂（四文件消费方并集超集，
  * 多余键为无害 vi.fn / ref）。W4：currentCwd 统一真 ref 形态（见文件头注释）。
  */
 export function composerFlowModule() {
@@ -262,7 +262,7 @@ export function composerChatStoreModule() {
       isActive: () => false,
       getRetryState: () => undefined,
       isCompacting: () => false,
-      // [u6b] 发送位四态渲染即读 occupancy 投影（sendButtonState ← effectivePhase），mock 需提供
+      // [u6b] 发送位四态渲染即读 occupancy 派生视图（sendButtonState ← effectivePhase），mock 需提供
       sessionPhase: () => ({ turn: 'idle', compacting: false, bash: false }),
       getMessages: () => [],
       getOccupancy: () => ({ turn: 'idle', compacting: false, bash: false }),
@@ -280,7 +280,7 @@ export function composerSessionStoreModule() {
 const SIMPLE = defineComponent({ name: 'SimpleStub', template: '<div />' })
 
 /** Composer 兄弟子组件空 stub（四文件逐字相同；CommandPopover 需透传 slot）。
- *  ComposerCapacityBar 细条与 ContextCapacityPopover 平铺触发器都带 useContextUsage 恢复腿
+ *  ComposerCapacityBar 细条与 ContextCapacityPopover 平铺触发器都带 useContextUsage 恢复路径
  *  （getContext RPC），stub 防止 RPC 依赖泄进 Composer mount 族用例（组件行为归各自组件级测试）。 */
 export const composerChildStubs = {
   CommandPopover: defineComponent({ name: 'CommandPopover', template: '<div><slot /></div>' }),

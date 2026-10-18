@@ -268,7 +268,7 @@ const degradeReason = computed<string | null>(() => {
   return null
 })
 
-/** 降级原因 → i18n key（字面全路径：locale 反向守卫要求每个叶子 key 在源码里有字面引用，
+/** 降级原因 → i18n key（字面全路径：locale 反向检查要求每个叶子 key 在源码里有字面引用，
  *  动态拼接 `panel.htmlPreview.degrade.${reason}` 会被判为死键） */
 const DEGRADE_LABEL_KEYS: Readonly<Record<string, string>> = {
   invalid_path: 'panel.htmlPreview.invalidPath',
@@ -326,9 +326,9 @@ const iframeSrc = computed<string | undefined>(() => {
 let probeSeq = 0
 
 /**
- * 预检：路径解析结果变化时重跑。序号守卫防旧请求覆盖（路径改写/组件复用场景）。
+ * 预检：路径解析结果变化时重跑。序号检查防旧请求覆盖（路径改写/组件复用场景）。
  * 未 provide / 通道异常 → skipped（跳过预检，不显示大小）——设计 D3「未 provide 跳过预检」，
- * 通道异常同款处置：不把预览钉死在降级（预检只是挂载前准入提示，真实服务判定在协议 handler）。
+ * 通道异常同款处置：不把预览固定在降级（预检只是挂载前准入提示，真实服务判定在协议 handler）。
  */
 async function runProbe(path: string | null): Promise<void> {
   const seq = ++probeSeq
@@ -384,7 +384,7 @@ type SourceState = { kind: 'idle' | 'loading' | 'content' | 'error'; content: st
 const sourceState = ref<SourceState>({ kind: 'idle', content: '' })
 
 /** 源码态读取失败原因 → i18n key（DEGRADE_LABEL_KEYS 同款字面全路径映射，防 locale 反向
- *  守卫死键误判；复用既有词条不新增 key——not_found / is_dir 用 panel.detail.htmlReason*，
+ *  检查死键误判；复用既有词条不新增 key——not_found / is_dir 用 panel.detail.htmlReason*，
  *  out_of_whitelist 沿用预览白名单提示词条；read_failed 等无专用词条 → fallback 固定文案） */
 const SOURCE_ERROR_LABEL_KEYS: Readonly<Record<string, string>> = {
   not_found: 'panel.detail.htmlReasonNotFound',
@@ -436,7 +436,7 @@ function showPreview(): void {
 /**
  * 源码态渲染输入：源码包进 fence 走 shiki 高亮（MarkdownRenderer 的 fence 通道，
  * deps.renderMarkdownIncremental 注入形态原样复用）。开栅长度 = 源码内行首最长反引号
- * 连跑数 +1（markdown-it 闭合栅栏须 ≥ 开栅长度）——源码含 ``` 代码块示例时不会提前闭合，
+ * 连跑数 +1（markdown-it 结束栅栏须 ≥ 开栅长度）——源码含 ``` 代码块示例时不会提前结束，
  * 构造性排除源码内容被当 markdown 解析（含 html-preview fence → 嵌套容器递归）。
  */
 /** markdown-it 栅栏最小开栅长度（小于 3 不构成 fence） */

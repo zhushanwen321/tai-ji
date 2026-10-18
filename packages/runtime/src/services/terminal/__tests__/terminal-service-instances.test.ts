@@ -2,7 +2,7 @@
  * TerminalService 多实例单元测试（terminal-multi-instance u1）。
  *
  * 覆盖验收条款：同会话两次新建编号 1/2 且关闭后不复用（T8 语义）、交叉校验独立码、
- * listInstances 会话范围钉死 + 含冒号 sid 负例（T13 语义、设计 §0.5 P7）、
+ * listInstances 会话范围固定 + 含冒号 sid 负例（T13 语义、设计 §0.5 P7）、
  * destroySessionPties / destroyAllPties 会话维度全实例杀（T4 语义）、
  * spawn 指定形态（存活幂等 / 不存在 unknown_terminal_id）。
  *
@@ -152,7 +152,7 @@ describe('TerminalService 交叉校验（独立码）', () => {
   })
 })
 
-describe('TerminalService.listInstances（范围钉死被查询会话）', () => {
+describe('TerminalService.listInstances（范围固定为被查询会话）', () => {
   it('MI-5: 只返回被查询会话实例（含存活态）；他会话实例不参与', async () => {
     const svc = createService()
     const a1 = await svc.spawn('sess-a', undefined, 80, 24)
@@ -181,7 +181,7 @@ describe('TerminalService.listInstances（范围钉死被查询会话）', () =>
     expect(svc.listInstances('a:1').map((i) => i.terminalId)).not.toContain(plain)
 
     // 负例断言：查询 sid 'a'（外层）不得命中 sid 'a:1' 的内层实例键 term:a:1:1
-    //（序号段 `1:1` 非纯数字——仅做 startsWith(prefix) 会误纳，此处为口径守卫的核心断言）
+    //（序号段 `1:1` 非纯数字——仅做 startsWith(prefix) 会误纳，此处为口径检查的核心断言）
     expect(svc.listInstances('a').map((i) => i.terminalId)).not.toContain(colon)
     // 正向：sid 'a' 的清单恰好只有自己的实例（正反合并为精确断言）
     expect(svc.listInstances('a')).toEqual([{ terminalId: plain, alive: true }])

@@ -1161,7 +1161,7 @@ function filterAndBackfillGroups(rawGroups, activeIds) {
 }
 
 /** ③ 组间文件相交 → 传递闭包合并（reconcileGroups 子步骤）：并行 fixer 不编辑同一
- * 文件；groupFiles 为组→files 投影函数。 */
+ * 文件；groupFiles 为组→files 映射函数。 */
 function mergeOverlappingGroups(groups, groupFiles) {
   let mergedFlag = true;
   while (mergedFlag) {

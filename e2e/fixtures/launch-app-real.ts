@@ -285,7 +285,7 @@ export async function waitForRuntime(dataDir: string, timeoutMs = RUNTIME_START_
   throw new Error(`runtime.port not found in ${dataDir} within ${timeoutMs}ms — runtime failed to start`)
 }
 
-// ── real 轨共享 helper（各 spec 原自带同款副本，L2.5 翻轨收口到 fixture 层） ──
+// ── real 轨共享 helper（各 spec 原自带同款副本，L2.5 翻轨收尾到 fixture 层） ──
 
 /**
  * 打开 WS 并完成 auth 握手（S1-W1 契约：连接后首条消息必须是 {type:'auth'}，token =

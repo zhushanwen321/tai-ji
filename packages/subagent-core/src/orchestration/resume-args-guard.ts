@@ -5,19 +5,19 @@
 // 为什么在 core：这段判定是 run 领域规则（「resume 重放同一意图」），原先完整实现在
 // 壳（`extensions/universal/subagent-workflow/src/interface/tool-workflow.ts` 的
 // readHistoricalArgs / diffResumeArgs / 三套拒绝文案），并自带一份 record 流 JSONL
-// 解析——与 core 的严格读面构成第三份平行读实现。落点选 core 的资格段：那里**已经
+// 解析——与 core 的严格读取路径构成第三份平行读实现。落点选 core 的资格段：那里**已经
 // 读到 run-created 事件**（`assertResumeEligibility`），判定所需数据在手上，不需要
 // 新的端口原语，也不需要壳再读文件（壳只把 args 与 journalDir 传下来）。
 //
 // 分层：本文件是纯判定（无 IO、无状态）。历史 args 的唯一数据源是 run-created 事件
 // 载荷（args 全文优先；旧格式帧回落 argsSummary 截断摘要 → 保守拒绝）。判定结果经
-// 调用方注入的 reject 工厂抛出，错误类型归调用方（core 恢复读面用
+// 调用方注入的 reject 工厂抛出，错误类型归调用方（core 恢复读取路径用
 // ResumeRejectionError，保持错误族单一）。
 import type { WorkflowRunEvent } from "./run-events.ts";
 
 /**
  * D14 比对排除键：rfl 仪表向 spec.args 原地注入的稳定 `_runId`（lifecycle
- * runWorkflow 注入面）——run 派发的机器字段，不属用户意图，比对前双侧剔除。
+ * runWorkflow 注入路径）——run 派发的机器字段，不属用户意图，比对前双侧剔除。
  */
 const RESUME_ARGS_EXCLUDED_KEY = "_runId";
 
@@ -44,7 +44,7 @@ function malformedArgsMessage(runId: string): string {
 /**
  * run-created 事件 → D14 数据源形态。
  *
- * - args 全文优先（现行写入面 `dispatchRunCreated` 随帧落全文，任意体积的 args 都可
+ * - args 全文优先（现行写入路径 `dispatchRunCreated` 随帧落全文，任意体积的 args 都可
  *   逐字段深度比对）；
  * - 无 run-created 事件 / 帧内既无 args 也无 argsSummary → absent：**不在 D14 层拒绝**
  *   ——资格判据归 resumeRun 自己的权威文案（分层：D14 只管 args 一致性）；
@@ -136,7 +136,7 @@ export function assertResumeArgsMatch(
 ): void {
   const historical = historicalArgsOf(runId, created);
   if (historical.kind === "truncated") {
-    // 仅旧格式帧（args 全文载荷落地前落盘、截断摘要形态）到达此分支——现行写入面
+    // 仅旧格式帧（args 全文载荷落地前落盘、截断摘要形态）到达此分支——现行写入路径
     // 随帧落 args 全文，任意体积可逐字段比对
     throw reject(
       `Resume rejected: original args of run ${runId} exceed the record's args summary limit ` +

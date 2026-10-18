@@ -14,7 +14,7 @@ import type { Config } from 'tailwindcss'
  *  - renderer：colors['border-hairline'] / borderColor.hairline / taiji-spin animation
  *  - mobile-renderer：keyframes（SSOT 尚未迁 style.css）/ pulse-warn 等专属 animation
  *
- * 等价性守卫：两包 resolveConfig 结果须与提取前逐字段一致（提取时经
+ * 等价性检查：两包 resolveConfig 结果须与提取前逐字段一致（提取时经
  * tailwindcss/resolveConfig 对比验证；后续改动跑同款对比或 diff 两包生成 CSS）。
  */
 export default {
@@ -99,7 +99,7 @@ export default {
       },
       borderRadius: {
         xs: 'var(--radius-xs)', // 微件档 4px（seg 项/滚动条 thumb/badge 内件；demo --r-xs 同档，收敛组件 rounded-[4px] 任意值）
-        sm: '6px', // v6 升档（对应 --radius-sm）
+        sm: '6px', // v6 升到下一档（对应 --radius-sm）
         DEFAULT: '8px', // 按钮/卡片默认档（对应 --radius）
         md: '8px',
         lg: '12px', // 面板/弹层（对应 --radius-lg）

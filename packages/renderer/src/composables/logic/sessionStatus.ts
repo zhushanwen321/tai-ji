@@ -120,7 +120,7 @@ export const SPINNER_TEXT_CLASS: Record<'streaming' | 'waiting' | 'working', str
 export type SpinnerStatus = 'streaming' | 'waiting' | 'working'
 
 /**
- * 类型守卫：status 是否为 spinner 适用状态（streaming / waiting）。
+ * 类型检查：status 是否为 spinner 适用状态（streaming / waiting）。
  * 收窄后可安全索引 SPINNER_TEXT_CLASS。
  */
 export function isSpinnerStatus(status: DerivedStatus): status is SpinnerStatus {

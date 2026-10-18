@@ -115,7 +115,7 @@ function createReactiveSessionScopedMap<T>(init: () => T): SessionScopedMap<T> {
  *
  * watcher 生命周期随 init dispose-and-rebuild（对齐 usePermissionRequest 习语）：返回 stop
  * 句柄由 __testing.lastInitHandles.dispose 统一回收，重复 init 先 stop 旧 watcher 再挂新。
- * [HISTORICAL] 旧实现的模块级布尔守卫使 watcher 永久闭包绑定第一次 init 的 registry 实例
+ * [HISTORICAL] 旧实现的模块级布尔检查使 watcher 永久闭包绑定第一次 init 的 registry 实例
  * ——重复 init 后 setExtensionRegistries 已把 core 单例换新实例，注册进新实例、上报旧实例快照。
  */
 function ensureMountPointsSync(mountPoints: MountPointRegistry): () => void {
@@ -279,7 +279,7 @@ export function initExtensionHostBridge(app: App): void {
   // mutate 纯 Map 不被 Vue computed 追踪 → ViewHost/StatusBar 永不重渲染。壳层两层 reactive 化：
   // ①外层 partitions 容器 reactive（createReactiveSessionScopedMap——分区后建也触发重算，
   //   修复「computed 首次求值短路 → 永久 stale」）；②分区值由 init 工厂返回 reactive 容器
-  // （get/set 走 reactive proxy）。ViewHost.vue computed 的 getView/getItems 调用面即被追踪
+  // （get/set 走 reactive proxy）。ViewHost.vue computed 的 getView/getItems 调用点即被追踪
   // （core 代码零改动）。
   const viewHostStore = new ViewHostStore({
     bus,
@@ -338,7 +338,7 @@ export function initExtensionHostBridge(app: App): void {
   // ui 组件数据源（ViewHost/StatusBar 经 inject 取，壳 provide 真实实现；形状对齐 IF10/IF5）
   app.provide(VIEW_HOST_SOURCE_KEY, {
     getView: (sessionId, viewId) => viewHostStore.getView(sessionId, viewId),
-    // widget 视图消费面（Composer 托盘 widget 区）：枚举该 session 全部缓存 viewId（纯透传 core store）
+    // widget 视图消费方（Composer 托盘 widget 区）：枚举该 session 全部缓存 viewId（纯透传 core store）
     getViewIds: (sessionId: string) => viewHostStore.getViewIds(sessionId),
   })
   // L2 二级 tab 数据源（PluginViewContainer 经 inject 取；纯静态声明——sidebar.tab 视图贡献清单，
@@ -363,9 +363,9 @@ export function initExtensionHostBridge(app: App): void {
     },
   })
   // L2 原生视图路由表与 L2 tab badge 源已随「后台命令」native 视图退役
-  // （composer-task-tray D10：托盘承接后台命令观察面；PluginViewContainer 的
+  // （composer-task-tray D10：托盘承接后台命令观察范围；PluginViewContainer 的
   // 同名分支同批删除）。plugin sidebar view 机制本身保留——
-  // 上方 VIEWS_SOURCE_KEY + ViewHost 原路径即其消费面。
+  // 上方 VIEWS_SOURCE_KEY + ViewHost 原路径即其消费方。
   app.provide(STATUS_BAR_SOURCE_KEY, {
     // 两 scope 重载（ui 契约）：直接委托 StatusBarController（签名对齐 IF8）。
     // MF-2（R2）：global scope 经 controller 的 sessionScoped 保留分区（GLOBAL_SCOPE_KEY）存储，

@@ -50,7 +50,7 @@ describe("U2: 内置脚本 agent() 返回值属性访问含 null guard", () => {
   // 这里用启发式：验证含 agent() 结果属性访问的脚本都含 ?. 模式（null guard 已存在）。
   //
   // 注意：parallel.js 的 aggregate 段为纯代码 concat（无 LLM 聚合 agent()），
-  // 其 parallel() 多结果由 W4 的 r.status === "failed" / typeof / Array.isArray 守卫，
+  // 其 parallel() 多结果由 W4 的 r.status === "failed" / typeof / Array.isArray 检查，
   // 不再用 ?.，故不纳入此 ?. 启发式检查。
   // map-reduce 的 reduce、scatter-gather 的 gather 恢复为 LLM agent() 调用，
   // 故 map-reduce.js 重新纳入此检查。
@@ -127,8 +127,8 @@ describe("U2: 内置脚本 agent() 返回值属性访问含 null guard", () => {
   });
 });
 
-// W4: parallel() 降级返回值 {status:'failed'} 兼容 + 结果字段守卫 + spread 消除
-describe("W4: parallel() failed-status 兼容 + 结果字段守卫 + spread 消除", () => {
+// W4: parallel() 降级返回值 {status:'failed'} 兼容 + 结果字段检查 + spread 消除
+describe("W4: parallel() failed-status 兼容 + 结果字段检查 + spread 消除", () => {
   // W1 后 worker parallel() 可能返回 {status:'failed', error:'...'}，脚本 for 循环
   // 必须识别此对象并标记失败（不能误判为成功）。验证四个含 parallel() 的脚本。
   const PARALLEL_SCRIPTS = ["parallel.js", "scatter-gather.js", "map-reduce.js", "fan-out.js"] as const;
@@ -143,18 +143,18 @@ describe("W4: parallel() failed-status 兼容 + 结果字段守卫 + spread 消�
     const src = readScript("parallel.js");
     // W4 后显式取 score/findings，不再 ...r
     expect(src).not.toContain("...r");
-    // 显式字段守卫存在
+    // 显式字段检查存在
     expect(src).toContain("typeof r.score === \"number\"");
     expect(src).toContain("Array.isArray(r.findings)");
   });
 
-  it("scatter-gather.js r.result 字段守卫存在", () => {
+  it("scatter-gather.js r.result 字段检查存在", () => {
     const src = readScript("scatter-gather.js");
     expect(src).toContain("typeof r.result === \"string\"");
     expect(src).toContain("\"(无结果)\"");
   });
 
-  it("map-reduce.js r.mapped 字段守卫存在", () => {
+  it("map-reduce.js r.mapped 字段检查存在", () => {
     const src = readScript("map-reduce.js");
     expect(src).toContain("typeof r.mapped === \"string\"");
     expect(src).toContain("\"(无结果)\"");

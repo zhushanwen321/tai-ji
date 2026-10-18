@@ -5,7 +5,7 @@
  * - 离线计算：reasoning 缺失/false → ['off']（pi 两级门控第一关）；正常模型与
  *   pi-ai getSupportedThinkingLevels 同源值一致（builtin-providers.json fixture
  *   全量直调比对——对 passthrough 实现是恒真基线，computeSupportedLevels 一旦被
- *   塞入 taiji 侧改写逻辑即红，同源契约守卫）；档位过滤语义锚点。
+ *   塞入 taiji 侧改写逻辑即红，同源契约检查）；档位过滤语义锚点。
  * - 对账：config_only / reasoning_mismatch / case_twin 三类 drift 纯比对 +
  *   编排路径（runtime 日志 + 事件上报出口 + 降级路径）。
  * - 下发标注：attachSupportedLevels 输出含 supportedLevels、不改入参。

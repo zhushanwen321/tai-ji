@@ -3,7 +3,7 @@
  *
  * 聚合 subagent + workflow 的 running 判定（workflow 一次性生命周期 D-2：paused 态已删），
  * 供 deriveStatus（working 态）与
- * handleCompletion（完成提示守卫）共用。单一真相源：未来新增 background 任务类型
+ * handleCompletion（完成提示检查）共用。单一真相源：未来新增 background 任务类型
  * （非 subagent/workflow）只需在 hasBackgroundWork 实现里注册判定。
  *
  * 为什么独立 composable 而非内联：
@@ -26,7 +26,7 @@ export function useBackgroundWork() {
    * 仍是未完成状态。
    *
    * H2 W1（record-unification D1③）：workflow 脚本派发的 subagent（origin==='workflow'）
-   * 不算本 session 的后台工作——其生命周期由 workflow run 承载（终态化收口见 D7），
+   * 不算本 session 的后台工作——其生命周期由 workflow run 承载（终态化收尾见 D7），
    * 混入会让主 session 在 workflow 运行期间被误判 working。origin 缺省（undefined =
    * tool 语义，存量 record）恒参与判定。判据单源 = store.hasRunning（S1：origin 排除
    * 经 opts 传入，不再内联复刻判据）。

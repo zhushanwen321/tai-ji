@@ -3,12 +3,12 @@
  *
  * 被测对象：domain/composer/dispatch/send.ts —— Composer onSend 统一分发入口
  * （Enter / Alt+Enter / 发送按钮共用）。
- * 职责：staging > canSend 守卫 > staging.send > landing > bash > /compact > send
+ * 职责：staging > canSend 检查 > staging.send > landing > bash > /compact > send
  * （统一 submit）+ 失败 restoreSegments 回滚。
  *
  * [u3b/D1 改造] getSendRoute / steer / enqueueCompact 三 deps 退役（lane 判定收归 runtime
  * 内核，renderer 不再判定车道）：steer 路由与 defer 入队两分支删除，终端统一 deps.send
- * （useChat.send：乐观气泡 + delivery.submit）。canSend 守卫语义收窄为「可提交」
+ * （useChat.send：乐观气泡 + delivery.submit）。canSend 检查语义收窄为「可提交」
  * （hasInput ∧ ¬isSending——占用不再拦截，内核排队取代拦截/拒绝）；busy 期命令拒绝退役。
  *
  * 发送位预测表六行的纯函数断言见 ./send-route.test.ts；本文件锁定分发器行为。
@@ -77,9 +77,9 @@ function setup(initial?: Partial<DepsControl>): { deps: ComposerSendDeps; spies:
   }
   const spies: Spies = {
     stagingSend: vi.fn(async () => ctrl.stagingSendReturn) as unknown as Spies['stagingSend'],
-    // 真实 clearInput 语义（[compaction-input-unlock] 守卫用例前置）：draft/drafts 清空 +
+    // 真实 clearInput 语义（[compaction-input-unlock] 检查用例前置）：draft/drafts 清空 +
     // DOM 清空（getSegments 归空）——hasInput/draft computed 经 ctrl 翻转为 false/''，
-    // 守卫读取的「失败时刻输入区是否为空」与生产一致
+    // 检查读取的「失败时刻输入区是否为空」与生产一致
     clearInput: vi.fn(() => {
       ctrl.hasInput = false
       ctrl.draft = ''
@@ -136,7 +136,7 @@ function setup(initial?: Partial<DepsControl>): { deps: ComposerSendDeps; spies:
 }
 
 describe('useComposerSend.onSend', () => {
-  it('① 守卫拦截：canSend=false + 非 staging 活跃 → return，不调任何发送', async () => {
+  it('① 检查拦截：canSend=false + 非 staging 活跃 → return，不调任何发送', async () => {
     const { deps, spies } = setup({ canSend: false, hasActiveStaging: false })
     await useComposerSend(deps).onSend()
     expect(spies.stagingSend).not.toHaveBeenCalled()
@@ -146,7 +146,7 @@ describe('useComposerSend.onSend', () => {
 
   it('①b [GUI 快修④] blocked 不再静默：有输入被拦 → toast「占用中」反馈（区分空输入）', async () => {
     // [u3b] canSend=false 语义 = 双发锁期（isSending）——占用期发送已合法（内核排队），
-    // 守卫只剩双发锁一类「有输入被拦」形态。
+    // 检查只剩双发锁一类「有输入被拦」形态。
     const { deps, spies } = setup({ canSend: false, hasActiveStaging: false, hasInput: true })
     await useComposerSend(deps).onSend()
     expect(spies.toastError).toHaveBeenCalledTimes(1)
@@ -235,7 +235,7 @@ describe('useComposerSend.onSend', () => {
     expect(spies.clearInput).toHaveBeenCalledTimes(1)
   })
 
-  it('④ bash 分流不动：`!` 前缀占用期仍走 trySendBash（bash/slash 守卫不动，§3.1 终态图首行）', async () => {
+  it('④ bash 分流不动：`!` 前缀占用期仍走 trySendBash（bash/slash 检查不动，§3.1 终态图首行）', async () => {
     const { deps, spies } = setup({ draft: '!ls', bashTryReturn: true })
     await useComposerSend(deps).onSend()
     expect(spies.trySendBash).toHaveBeenCalledWith('!ls')
@@ -299,7 +299,7 @@ describe('useComposerSend.onSend', () => {
     expect(spies.send).not.toHaveBeenCalled()
   })
 
-  it('⑨ `/compact` 命令 → compact(sessionId, undefined)（slash 守卫不动）', async () => {
+  it('⑨ `/compact` 命令 → compact(sessionId, undefined)（slash 检查不动）', async () => {
     // [D4-c] 判定源已迁 segmentsToPrompt：mock segments 提供对应 slash 段保持语义真实。
     const { deps, spies } = setup({ variant: 'panel', draft: '/compact' })
     spies.getSegments.mockReturnValue([{ type: 'slash', name: 'compact' }])
@@ -362,7 +362,7 @@ describe('useComposerSend.onSend', () => {
     spies.compact.mockResolvedValueOnce(false)
     await useComposerSend(deps).onSend()
     expect(spies.compact).toHaveBeenCalledWith('s1', 'focus on auth')
-    // clearInput 后输入区为空（fixture 真实语义）→ 守卫放行恢复
+    // clearInput 后输入区为空（fixture 真实语义）→ 检查放行恢复
     expect(spies.restoreSegments).toHaveBeenCalledTimes(1)
     expect(spies.toastError).not.toHaveBeenCalled()
     expect(deps.isSending.value).toBe(false)
@@ -400,7 +400,7 @@ describe('useComposerSend.onSend', () => {
   })
 
   it('⑨g [compaction-input-unlock] compact 失败但压缩期用户已插入 chip（无文本）→ 不恢复（防覆盖 chip）', async () => {
-    // hasInput 只看纯文本 draft；chip（slash/skill/image 等）不进 draft——守卫第二支
+    // hasInput 只看纯文本 draft；chip（slash/skill/image 等）不进 draft——检查第二支
     // getSegments().length 兑现「有 chip 也不覆盖」
     const { deps, spies } = setup({ variant: 'panel', draft: '/compact' })
     spies.getSegments.mockReturnValue([{ type: 'slash', name: 'compact' }])
@@ -413,7 +413,7 @@ describe('useComposerSend.onSend', () => {
     expect(spies.restoreSegments).not.toHaveBeenCalled()
   })
 
-  it('⑬ [b08-F2] session 缺失（null）→ panel 分支守卫早退：不 bash/compact/send、不清输入', async () => {
+  it('⑬ [b08-F2] session 缺失（null）→ panel 分支检查早退：不 bash/compact/send、不清输入', async () => {
     const { deps, spies } = setup({ variant: 'panel', sessionId: null, draft: '!ls' })
     await useComposerSend(deps).onSend()
     expect(spies.trySendBash).not.toHaveBeenCalled()

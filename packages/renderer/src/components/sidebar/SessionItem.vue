@@ -205,11 +205,11 @@ const rootEl = ref<HTMLElement | null>(null)
 // ── 键盘可达（demo Sidebar.vue onSiKey 同链路：Tab 聚焦行 → Enter/Space 选择 →
 //    ContextMenu/Shift+F10 开右键菜单）──
 
-/** 行级键处理：e.target 守卫行自身聚焦（子钮聚焦时 Enter 冒泡到此不得二次触发
+/** 行级键处理：e.target 检查行自身聚焦（子钮聚焦时 Enter 冒泡到此不得二次触发
  *  select，钮激活交还原生 click）。Enter/Space = 选择（Space preventDefault 防滚动）。
  *  不用 Vue 按键修饰符：withKeys 按 hyphenate(event.key) 匹配（@vue/runtime-dom
  *  keyNames 表），'ContextMenu' 键 hyphenate 后为 'context-menu' 无对应修饰符，
- *  shift 守卫也无法表达——手写判断。 */
+ *  shift 检查也无法表达——手写判断。 */
 function onItemKeydown(e: KeyboardEvent): void {
   const el = rootEl.value
   if (!el || e.target !== el) return

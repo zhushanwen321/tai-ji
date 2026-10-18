@@ -88,7 +88,7 @@ export interface PartitionedLoadState {
  * 创建每 session 加载态三件套（loading / loadError / oversize 三张分区 Map + 读取函数，
  * 待裁决项 1 收敛 2026-10-04——原 subagent / workflow 两 store 逐字抄写的 71 行收进本工厂）。
  *
- * 三 facet 的领域语义（何时置位、错误文案来源、降级提示消费面）留在 store 侧；本工厂只持
+ * 三 facet 的领域语义（何时置位、错误文案来源、降级提示消费方）留在 store 侧；本工厂只持
  * 分区范式：ref<Map> 分区（ADR-0049 派，split 双面板并行拉取互不遮蔽）+ 缺省读取
  * （无条目 = false / null）+ delete 式清理（防已删 session 重生条目）。
  */
@@ -145,10 +145,10 @@ export function createPartitionedLoadState(): PartitionedLoadState {
   return { isLoadingOf, loadErrorOf, oversizeOf, beginLoad, endLoad, setLoadError, setOversize, clearOversize, clear, clearAll }
 }
 
-/** 空结果守卫（连续空命中 strike 计数，单源 lib——原 subagent/workflow 两 store 手抄退役）。 */
+/** 空结果检查（连续空命中 strike 计数，单源 lib——原 subagent/workflow 两 store 手抄退役）。 */
 interface EmptyResultStrikeGuard {
   /**
-   * 空结果守卫判定：true = 疑似瞬时读失败，调用方保留旧分区直接 return（不覆盖）；
+   * 空结果检查判定：true = 疑似瞬时读失败，调用方保留旧分区直接 return（不覆盖）；
    * false = 放行覆盖（连续空命中达到 LIMIT 判真实删空，或结果非空 / 分区本就为空）。
    *
    * 为什么 strike 连续计数（sidebar-sync-plan P1 + R1 business-logic S3，原三 store 注释单源）：
@@ -156,7 +156,7 @@ interface EmptyResultStrikeGuard {
    * 成功且空 + 分区非空时先保留旧分区。但「真实删空」（trash 清掉全部记录，删除
    * 动作无对应推送）同样表现为空结果，单次判定无法区分二者：用连续空命中计数（strike）
    * 区分——连续 LIMIT 次空结果判定真实删空放行覆盖（瞬时读失败不会连续命中，RPC 失败走
-   * catch 且重置计数），非空结果即清零。推送路径是权威数据，不经此守卫。
+   * catch 且重置计数），非空结果即清零。推送路径是权威数据，不经此检查。
    */
   shouldKeepExisting(sessionId: string, fetchedCount: number, partitionCount: number): boolean
   /** 清零该 sid 计数（成功覆盖 / RPC 失败 catch / clearSession 路径——「连续 RPC 成功且空」语义纯净，读失败与数据空不同通道，不让 RPC 故障累计出误清分区） */
@@ -164,7 +164,7 @@ interface EmptyResultStrikeGuard {
 }
 
 /**
- * 创建 loadXxx 空结果守卫（连续空命中 strike 计数，语义见 shouldKeepExisting JSDoc）。
+ * 创建 loadXxx 空结果检查（连续空命中 strike 计数，语义见 shouldKeepExisting JSDoc）。
  *
  * @param limit 连续空命中判真实删空的阈值
  * @param logTag console.warn 前缀（store 名，如 'subagent-store'）

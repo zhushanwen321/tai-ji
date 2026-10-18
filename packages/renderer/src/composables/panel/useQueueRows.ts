@@ -1,14 +1,14 @@
 /**
  * useQueueRows —— composer 队列区（QueueBubble）数据源与撤销/重试编排（投递所有权内核 u3c / D7）。
  *
- * **单一数据源**：队列条目 = `session.delivery` 状态帧投影（core `getDeliveryProjectionRef()`，
+ * **单一数据源**：队列条目 = `session.delivery` 状态帧派生视图（core `getDeliveryProjectionRef()`，
  * state topic last-value 全量快照）。随报文更新的旧通路已随内核迁移退役：
  * - `queue_update`（steering/followUp 快照）不再直驱 UI（内核内部回执用，D7）；
  * - `useCompactQueue`（本地 defer 队列）整体退役（设计 §3.1 删除面：入队/flush/S1/timer/
  *   熔断/confirmDelivery/drain 全部由内核 backoff+settled+watchdog、delivery.cancel/drain、
  *   送达回执接管）。
  *
- * 投影过滤（`deliveryQueueEntries`）：lane ≠ 'direct' 且 state ≠ 'delivered'——
+ * 派生视图过滤（`deliveryQueueEntries`）：lane ≠ 'direct' 且 state ≠ 'delivered'——
  * - direct 车道：乐观气泡原位保留待确认（送达回执抵消 inflight 占位，D7），不进队列区；
  * - delivered：已入 transcript（reducer 权威），队列区隐去；
  * - queued / in-flight / failed：队列区一行（三态可见，G3「排队中/投递中」）。
@@ -28,8 +28,8 @@
  * 重试（§3.4 重试耗尽行）：failed 条目红色标识 + 重试钮 → `delivery.resync` 单条重报
  * （去重锚在 runtime，命中终态判重记录的条目自动隐去）。
  *
- * [ADR-0049] 本 composable 不持 per-session 状态：投影分区由 core 投影 ref 持有（内核状态
- * 帧是 runtime 投影数据），行派生为 per-call computed，session 切换/销毁无残留面。
+ * [ADR-0049] 本 composable 不持 per-session 状态：派生视图分区由 core 派生视图 ref 持有（内核状态
+ * 帧是 runtime 派生视图数据），行派生为 per-call computed，session 切换/销毁无残留范围。
  */
 import { computed, type ComputedRef } from 'vue'
 import { useI18n } from 'vue-i18n'
@@ -117,7 +117,7 @@ export function useQueueRows(
   async function onCancelEntry(clientUuid: string): Promise<void> {
     const sid = sessionId.value
     if (!sid) return
-    // 失败域拆分：cancelDelivery RPC / restoreDraft 回草稿是两个独立失败面——混在一个 try
+    // 失败域拆分：cancelDelivery RPC / restoreDraft 回草稿是两个独立失败情形——混在一个 try
     // 会把「回草稿失败」误标成「撤销失败」（撤销已成功、行随 state 帧消失，文案与事实相反）。
     let reply: Awaited<ReturnType<typeof delivery.cancelDelivery>>
     try {
@@ -152,7 +152,7 @@ export function useQueueRows(
     if (!sid) return
     try {
       // 单条重报：去重 anchor 在 runtime（终态判重记录），已投递的条目在 reply.deduped 命中
-      // 并经随后到达的 session.delivery 快照帧从队列区隐去——renderer 不本地改投影（单源）。
+      // 并经随后到达的 session.delivery 快照帧从队列区隐去——renderer 不本地改派生视图（单源）。
       await delivery.resyncDelivery(sid, [clientUuid])
     } catch (e) {
       const msg = e instanceof Error ? e.message : String(e)

@@ -4,7 +4,7 @@ import { describe, expect, it } from 'vitest'
 // - jsdom 环境生效验证（vitest.config.ts 的 environment: 'jsdom'）
 // - barrel re-export 链路可编译可解析（src/index.ts → ./composer/input 空占位）
 // - workspace 链接验证（deps @taiji/core / @taiji/shared 可解析）
-// scaffold 阶段无业务逻辑代码，三用例守卫包结构与测试环境本身。
+// scaffold 阶段无业务逻辑代码，三用例检查包结构与测试环境本身。
 describe('dom-core jsdom environment', () => {
   it('document is available (jsdom environment active)', () => {
     const el = document.createElement('div')

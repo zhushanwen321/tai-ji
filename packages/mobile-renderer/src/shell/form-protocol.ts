@@ -12,7 +12,7 @@
 //   字节等价；时间折叠单点 = 协议包 dateToOnceCron/onceCronToDate（协议注释禁止双端各写一份）
 //
 // 单源化路径（登记）：编码契约的桌面侧实现仍内联在 renderer FormOverlay——收敛为 ui 包共享
-// 纯模块 + 桌面改指属后续任务（需动桌面消费面，超本任务边界）；收敛前双端以本模块契约测试 +
+// 纯模块 + 桌面改指属后续任务（需动桌面消费方，超本任务边界）；收敛前双端以本模块契约测试 +
 // 桌面 FormOverlay 既有测试双锁定。
 import {
   dateToOnceCron,
@@ -26,7 +26,7 @@ import {
 } from '@zhushanwen/extension-protocol'
 import type { ExtensionUIRequest } from '@taiji/core/transport/api/domains/extension'
 
-// ── 帧标记守卫（窄化 ExtensionUIRequest 索签名承载的 marker 键）──────────────
+// ── 帧标记检查（窄化 ExtensionUIRequest 索签名承载的 marker 键）──────────────
 
 /** planReview 审批帧（runtime event-adapter PLAN_REVIEW_MARKER 分支产出，selfReview 有界可选） */
 export type PlanReviewFrame = ExtensionUIRequest & {
@@ -57,7 +57,7 @@ export function formQuestionsOf(req: ExtensionUIRequest): FormQuestion[] {
   return raw.filter(isFormQuestion)
 }
 
-/** legacy scheduleCreate 帧的预填草稿收窄（形状守卫失败 → null，不可确认仅可取消） */
+/** legacy scheduleCreate 帧的预填草稿收窄（形状检查失败 → null，不可确认仅可取消） */
 export function scheduleDraftOf(req: ExtensionUIRequest): ScheduleDraft | null {
   if (req.scheduleCreate !== true) return null
   return isScheduleDraft(req.scheduleDraft) ? req.scheduleDraft : null

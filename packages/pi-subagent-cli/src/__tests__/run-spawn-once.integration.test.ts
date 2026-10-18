@@ -17,7 +17,7 @@
 //     产出 → success=false + schema_deterministic 归因）；
 //   - [D3 止血版] 武装断言：native + schema 任务 + structured-output 缺席 →
 //     spawn 前 fail-fast（零 spawn）+ 双形态恢复指引；schemaExpected 信号源 =
-//     声明形态非 env 同源（env 污染 + 无声明 → 守卫不武装）；
+//     声明形态非 env 同源（env 污染 + 无声明 → 检查不武装）；
 //   - 轮终语义（[modeless 波2] 唯一形态，原 chatMode 分支统一）：agent_end 轮收敛
 //     不 kill、agent_settled resolve（exit 0）+ 杀链收割（每轮一进程，续聊 = 新
 //     run + resume）；
@@ -232,7 +232,7 @@ describe("runSpawnOnce 集成（fake pi 子进程）", () => {
       expect(result.error).toBeUndefined();
       expect(result.content).toBe("hello world");
       // 成功 run 轮数 = resolve 时刻快照（本流 1 条 turn_end → 真实轮数 1）——
-      // agent_settled 消费面的按轮清零（SP-9）不得腐化收集面
+      // agent_settled 消费方的按轮清零（SP-9）不得腐化收集面
       expect(result.turns).toBe(1);
       expect(result.sessionId).toBe("fake-sess-1");
       expect(result.sessionFile).toBe(
@@ -298,7 +298,7 @@ describe("runSpawnOnce 集成（fake pi 子进程）", () => {
     }
   }, 15_000);
 
-  it("[D5 诊断引用落账] 失败（exit 3）→ 终态应答携带 stderrTeePath 且 tee 文件存在（S2 引擎段）", async () => {
+  it("[D5 诊断引用写入 journal 记录] 失败（exit 3）→ 终态应答携带 stderrTeePath 且 tee 文件存在（S2 引擎段）", async () => {
     const h = await makeHarness("exit-3");
     try {
       const result = await runSpawnOnce(baseParams(h), callbacksOf(h));
@@ -324,7 +324,7 @@ describe("runSpawnOnce 集成（fake pi 子进程）", () => {
     }
   }, 15_000);
 
-  it("[D5 诊断引用落账] 成功 → 终态应答不带 stderrTeePath（tee 存在也不报）", async () => {
+  it("[D5 诊断引用写入 journal 记录] 成功 → 终态应答不带 stderrTeePath（tee 存在也不报）", async () => {
     const h = await makeHarness("success");
     try {
       const result = await runSpawnOnce(baseParams(h), callbacksOf(h));
@@ -377,7 +377,7 @@ describe("runSpawnOnce 集成（fake pi 子进程）", () => {
         callbacksOf(h),
       );
       // 本用例不断言 success：schema 声明 + fake pi 无 structured-output 调用 →
-      // F-1 守卫按设计翻成 false（专测见下方 schemaExpected 用例）；此处只验
+      // F-1 检查按设计翻成 false（专测见下方 schemaExpected 用例）；此处只验
       // 回显值（content = 孙进程读到的 env 原值）逐字节等于 JSON.stringify(schema)
       expect(result.content).toBe(JSON.stringify(schema));
       expect(result.content).not.toContain("<env-absent>");
@@ -441,7 +441,7 @@ describe("runSpawnOnce 集成（fake pi 子进程）", () => {
 
   it("[D2] extensionPaths dev 源码布局 → 真实 spawn 链 argv 透传 + 武装断言②放行（L4 A1 回归锁）", async () => {
     // dev 下 taiji 宿主注入的 extensionPaths 是源码目录（无 @zhushanwen scope 段）。
-    // 断言②（schema 任务 + dev 布局路径）走完 spawn 链 = 放行证明；到达 F-1 守卫
+    // 断言②（schema 任务 + dev 布局路径）走完 spawn 链 = 放行证明；到达 F-1 检查
     // 翻 false（fake pi 无 structured-output 调用，同上方武装态用例的预期形态）。
     const devExtPath = "/repo/extensions/universal/structured-output";
     const h = await makeHarness("success");
@@ -453,7 +453,7 @@ describe("runSpawnOnce 集成（fake pi 子进程）", () => {
         }),
         callbacksOf(h),
       );
-      // 武装断言未拦截（零 spawn 前抛错）→ run 走到 F-1 确定性守卫
+      // 武装断言未拦截（零 spawn 前抛错）→ run 走到 F-1 确定性检查
       expect(result.success).toBe(false);
       expect(result.failureKind).toBe("schema_deterministic");
       expect(h.childSpawned).toHaveLength(1);
@@ -463,7 +463,7 @@ describe("runSpawnOnce 集成（fake pi 子进程）", () => {
   }, 15_000);
 
   it("[F-1] schemaExpected 判定源 = task.schema 声明形态：声明存在且无 structured-output 产出 → 静默成功被拦截", async () => {
-    // 判定信号 = params.schema 声明（与 env 注入值解耦）：声明存在 → 守卫武装，
+    // 判定信号 = params.schema 声明（与 env 注入值解耦）：声明存在 → 检查武装，
     // run 正常结束（exit 0）但无 parsedOutput → 不得静默 success。反面（schema
     // 缺省 → success 保持 true）由上方 rpc 模式成功流用例覆盖（该 run 无 schema）。
     // [D3] 武装态 run：schema 任务须带 structured-output 扩展路径（武装断言放行）。
@@ -487,7 +487,7 @@ describe("runSpawnOnce 集成（fake pi 子进程）", () => {
       let err: unknown;
       try {
         // 无 extensionPaths = 断言②命中场景（taiji 形态注入源置空 / 独立形态未装
-        // peerDep 的同构失败面——引擎侧两者都是「--extension 无 structured-output」）
+        // peerDep 的同构失败情形——引擎侧两者都是「--extension 无 structured-output」）
         await runSpawnOnce(
           baseParams(h, { schema: { type: "object", properties: { answer: { type: "number" } } } }),
           callbacksOf(h),
@@ -544,10 +544,10 @@ describe("runSpawnOnce 集成（fake pi 子进程）", () => {
     }
   }, 15_000);
 
-  it("[F-1 回归] schemaExpected 信号源 = task.schema 声明形态（非 env 同源）：env 污染 + 无声明 → 守卫不武装", async () => {
-    // H3 判定源回归（H1 归位后的消费面守卫）：PI_WORKFLOW_SCHEMA 不在引擎 env
+  it("[F-1 回归] schemaExpected 信号源 = task.schema 声明形态（非 env 同源）：env 污染 + 无声明 → 检查不武装", async () => {
+    // H3 判定源回归（H1 归位后的消费方检查）：PI_WORKFLOW_SCHEMA 不在引擎 env
     // deny list——引擎进程 env 被污染时该键会随继承实际到达孙进程（回显非哨兵可证），
-    // 但 schemaExpected 只认 params.schema 声明形态：env 在、声明缺 → 守卫不武装，
+    // 但 schemaExpected 只认 params.schema 声明形态：env 在、声明缺 → 检查不武装，
     // 静默成功不被拦截。若判定源回归 env 同源，本用例翻红。
     const h = await makeHarness("echo-schema-env");
     const polluted = JSON.stringify({ type: "object" });
@@ -556,7 +556,7 @@ describe("runSpawnOnce 集成（fake pi 子进程）", () => {
       const result = await runSpawnOnce(baseParams(h), callbacksOf(h));
       // env 事实存在：污染值已实际到达孙进程（回显非哨兵）
       expect(result.content).toBe(polluted);
-      // 守卫信号源是声明形态：无声明 → schemaExpected 不置位 → 静默成功保持
+      // 检查信号源是声明形态：无声明 → schemaExpected 不置位 → 静默成功保持
       expect(result.success).toBe(true);
     } finally {
       delete process.env.PI_WORKFLOW_SCHEMA;
@@ -654,7 +654,7 @@ describe("runSpawnOnce 集成（fake pi 子进程）", () => {
       expect(result.failureKind).toBe("unknown"); // 不命中 stale 词表（可重试口径）
       expect(result.content).toBe("");
       expect(result.turns).toBe(0);
-      // 子进程从未运行：无 pid 可上报（reportChildSpawned 的 pid 缺失守卫）
+      // 子进程从未运行：无 pid 可上报（reportChildSpawned 的 pid 缺失检查）
       expect(h.childSpawned).toHaveLength(0);
     } finally {
       delete process.env.TAIJI_SUBAGENT_RELAY_SOCKET;

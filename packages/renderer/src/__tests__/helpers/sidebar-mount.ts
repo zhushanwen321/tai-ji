@@ -169,7 +169,7 @@ export function coreTransportApiModule() {
   }
 }
 
-/** toast 三键 spy 单例（sidebar 会话动作文件的 error/success/info 消费面，可断言）。 */
+/** toast 三键 spy 单例（sidebar 会话动作文件的 error/success/info 消费方，可断言）。 */
 export const sidebarToastTripleMocks = { error: vi.fn(), success: vi.fn(), info: vi.fn() }
 
 /** '@/composables/useToast' mock 工厂（三键单例形态）。 */

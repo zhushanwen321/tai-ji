@@ -158,7 +158,7 @@ describe('PresetChip E7 三态（设计 §7.5：与 ModeDeclarationRow 同判据
     expect(wrapper.find('[data-testid="preset-chip-fallback-popover"]').exists()).toBe(true)
     // a11y 名（纯图标档唯一可见通道之一）不得漏披露——chip 文本之外的可靠落点
     expect(chip.attributes('aria-label')).toContain('本次以全工具模式启动')
-    // 纯图标档：无 chip 文本，icon 档 title 是唯一可见通道（最脆一腿）——披露须随 iconTitle 落位
+    // 纯图标档：无 chip 文本，icon 档 title 是唯一可见通道（最脆一路径）——披露须随 iconTitle 落位
     const iconWrapper = mountChip({ presetId: 'custom:gone', fallbackTo: 'builtin:full', density: 'icon' })
     const iconChip = iconWrapper.find('[data-testid="preset-chip"]')
     expect(iconChip.attributes('title')).toContain('本次以全工具模式启动')

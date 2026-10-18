@@ -141,7 +141,7 @@
  * 「表现层依赖 core transport 域」；不经 SettingsTransport seam——MCP 非 settings 域语义）。
  * 打开时经 mcp.list 拉取一次（§3.1 拉取一次模型：pi 无状态推送通道，运行期间外部改动不
  * 实时刷新，重开分区或保存后可见）。协议动作编排：启停（setEnabled 专用操作——runtime
- * 仅翻转 enabled 键，不带清单投影回写，§3.1 最小语义）/ 删除（确认后 remove）/ 连接测试
+ * 仅翻转 enabled 键，不带清单派生视图回写，§3.1 最小语义）/ 删除（确认后 remove）/ 连接测试
  *（test 发起，徽标转「测试中」；测试进行中按钮切「取消」→ testCancel 杀 probe 子进程，
  * D3 主动终止形态）。写入生效语义 = 新会话生效（D1，页头说明）。I3 登录引导：needs-auth
  * 条目的登录命令 PI_CODING_AGENT_DIR 值取自 mcp.list reply 的 agentDir，复制经 toast 反馈。
@@ -263,7 +263,7 @@ async function onToggle(entry: McpServerEntry, enabled: boolean): Promise<void> 
   busyName.value = entry.name
   try {
     // 启停专用操作（§3.1「写入 enabled 字段」最小语义）：runtime 锁内仅翻转 enabled 键，
-    // 不带清单投影回写——外部并发改动（终端 pi mcp 命令/手编）不被旧投影覆盖（D2 丢失
+    // 不带清单派生视图回写——外部并发改动（终端 pi mcp 命令/手编）不被旧派生视图覆盖（D2 丢失
     // 窗口保持锁内亚秒级）；reply entry = 写后落盘终态，服务端校准清单
     const res = await setMcpServerEnabled({ name: entry.name, enabled })
     if (res.ok) {

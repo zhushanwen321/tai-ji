@@ -10,7 +10,7 @@
  *
  * journey：
  * - J1 切走再切回：A 真值 → B 无值占位 → 切回 A（RPC 往返期显示分区缓存，无闪横线）
- *   → getContext(A) resolve 后台 turn 新值 → 显示更新（无条件恢复腿，A7）；
+ *   → getContext(A) resolve 后台 turn 新值 → 显示更新（无条件恢复路径，A7）；
  * - J2 0 帧哨兵：A 视图下全 0 帧 → 显示不变 + console.warn（D4 journey 级验证）。
  *
  * mock 边界：session.getContext mock 为受控 deferred（transport 层不在本层职责，对齐
@@ -60,7 +60,7 @@ interface PendingRpc {
 let pendingRpcs: PendingRpc[] = []
 const mountedWrappers: VueWrapper[] = []
 
-/** mount 容量卡组件（挂载即触发恢复腿 getContext(sid)，在途受控）。 */
+/** mount 容量卡组件（挂载即触发恢复路径 getContext(sid)，在途受控）。 */
 function mountCard(sid: string): VueWrapper {
   const wrapper = mount(ContextCapacityCard, { props: { sessionId: sid } })
   mountedWrappers.push(wrapper)
@@ -115,11 +115,11 @@ afterEach(() => {
   while (mountedWrappers.length) mountedWrappers.pop()?.unmount()
 })
 
-describe('J1: 切走再切回——分区缓存无闪横线，恢复腿收敛新值（G1/G2/G3）', () => {
+describe('J1: 切走再切回——分区缓存无闪横线，恢复路径收敛新值（G1/G2/G3）', () => {
   it('A 真值 → B 无值 → 切回 A 显示缓存 → getContext resolve 后更新（父文档 A1+A7）', async () => {
     const wrapper = mountCard('A')
     await settle()
-    // 首拉在途，分区 unknown → 「—」（无假数字）
+    // 首次拉取在途，分区 unknown → 「—」（无假数字）
     expect(capacityText(wrapper)).toContain('—')
 
     // A 的 stateSnapshot 回放 ok 帧 → 按钮显示 A 的用量（21000 → 21K，formatTokens 实际输出）
@@ -128,7 +128,7 @@ describe('J1: 切走再切回——分区缓存无闪横线，恢复腿收敛新
     expect(capacityText(wrapper)).toContain('21K')
     expect(capacityText(wrapper)).toContain('3.5%')
 
-    // A 首拉 resolve（与帧同值）：显示不变
+    // A 首次拉取 resolve（与帧同值）：显示不变
     resolveForSid('A', { sessionId: 'A', inputTokens: 21000, contextLimit: 600000, usagePercent: 3.5 })
     await settle()
     expect(capacityText(wrapper)).toContain('21K')
@@ -147,13 +147,13 @@ describe('J1: 切走再切回——分区缓存无闪横线，恢复腿收敛新
     expect(capacityText(wrapper)).toContain('21K')
     expect(capacityText(wrapper)).toContain('3.5%')
 
-    // getContext(A) resolve 后台 turn 产生的新值（30000 → 30K，A7 无条件恢复腿）
+    // getContext(A) resolve 后台 turn 产生的新值（30000 → 30K，A7 无条件恢复路径）
     resolveForSid('A', { sessionId: 'A', inputTokens: 30000, contextLimit: 600000, usagePercent: 5 })
     await settle()
     expect(capacityText(wrapper)).toContain('30K')
     expect(capacityText(wrapper)).toContain('5%')
 
-    // 恢复腿无条件触发：A 首拉 + A 切回重拉各一次（B 同理），非「有缓存不拉」
+    // 恢复路径无条件触发：A 首次拉取 + A 切回重新拉取各一次（B 同理），非「有缓存不拉」
     const callsForA = getContextMock.mock.calls.filter((c) => c[0] === 'A')
     expect(callsForA).toHaveLength(2)
   })

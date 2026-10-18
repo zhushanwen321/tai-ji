@@ -149,7 +149,7 @@ describe('回归用例（V5 指定三项 + trace 输入面专项 + T4 respawning
     // 为什么：现行判据 isLandingView = !sessionId || flow.state==='landing'——flow 单例卡
     // landing 时，有消息会话的 landing 判据仍成立，turn 结束瞬间（isSessionActive 翻 false）
     // composer 消失（用户报告症状）。终态规则下 landing 仅在 !sessionId 成立，此处刻意喂
-    // isFlowActive=true 模拟残留，断言派生结果无视它（G2 结构免疫的机器守卫）。
+    // isFlowActive=true 模拟残留，断言派生结果无视它（G2 结构免疫的机器检查）。
     const view = derivePanelView({
       sessionId: 's1',
       hasMessages: true,

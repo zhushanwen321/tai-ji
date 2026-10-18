@@ -4,7 +4,7 @@ import { describe, expect, it } from 'vitest'
 import { enUS, zhCN } from '../index'
 
 /**
- * locale 消息编译守卫测试。
+ * locale 消息编译检查测试。
  *
  * 背景（2026-10-15 事故）：vue-i18n 懒编译——t(key) 首次渲染时才编译文案。文案里的
  * 裸 `{` 会被当占位符起始，后续 token 非法即抛 INVALID_TOKEN_IN_PLACEHOLDER（code 2）；
@@ -52,8 +52,8 @@ function collectCompileIssues(locale: string, node: unknown, path: string) {
   return issues
 }
 
-describe('locale 消息编译守卫', () => {
-  it('守卫自检：已知坏样本（裸 { 与裸 @）必须被检出（防 walker 失效假绿）', () => {
+describe('locale 消息编译检查', () => {
+  it('检查自检：已知坏样本（裸 { 与裸 @）必须被检出（防 walker 失效假绿）', () => {
     const issues = collectCompileIssues('self-check', { brace: '{ "x": 1 }', at: 'run pnpm --filter @taiji/x build' }, '')
     expect(issues.map((issue) => issue.path).sort()).toEqual(['at', 'brace'])
   })

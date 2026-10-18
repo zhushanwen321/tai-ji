@@ -137,7 +137,7 @@ export const fixtureWorkflows: WorkflowRunRecord[] = [
     usedTokens: 4000,
     totalCallCount: 1,
     agentCalls: [
-      // 在途 call 无 settled 行——run 终局后投影保持 running（stopped-time-limited 语义）
+      // 在途 call 无 settled 行——run 终局后派生视图保持 running（stopped-time-limited 语义）
       { id: 0, agent: 'migrator-W1', status: 'running', phase: 'Migrate', sessionId: 'sess-agent-mock-7', startedAt: '2026-07-11T14:00:02Z' },
     ],
     stateFilePath: '/data/wf-mock-stopped-time-limited.jsonl',

@@ -98,7 +98,7 @@ function generateRunId(): string {
 // ── OR-7：signal abort listener 终态移除 ─────────────────────
 
 /**
- * run → signal abort listener 收口句柄注册表。
+ * run → signal abort listener 收尾句柄注册表。
  *
  * [OR-7] 旧实现 `{ once: true }` 只在 abort 触发时自清——run 经 return / error /
  * abortRun / terminate 等任何终态路径收敛后，listener 仍挂在（可能长生命周期的）
@@ -151,7 +151,7 @@ function broadcastAbortToWorker(run: WorkflowRun, reason: string): void {
  * 故 handlers 对新 worker 仍有效（lifecycle 与 worker-message-pump 共用 handlers）。
  *
  * **onExit G-025**：handleWorkerExit 内部检查 handle.isCurrent（stale exit 丢弃）。
- * 本函数不在 onExit 里重复检查——worker-message-pump.handleWorkerExit 是单一守卫点。
+ * 本函数不在 onExit 里重复检查——worker-message-pump.handleWorkerExit 是单一检查点。
  *
  * **workerErrorCount**：[HISTORICAL] 原重试计数载体（C.5）——[ADR-0122] 重试矩阵
  * 删除后无生产写入方，字段保留为旧 record 兼容读。
@@ -167,7 +167,7 @@ export function makeHandlers(run: WorkflowRun, deps: LifecycleDeps): WorkerHandl
   // listener」。worker-message-pump 全部终态路径（handleReturn / handleWorkerError /
   // handleScriptError / handleWorkerExit / 预算终止 / time_limited / [OR-2] rebuild
   // 失败收敛——均经 finalizeRun）都经 handlers 调用链消费本视图——消息面终态在此
-  // 统一收口；abortRun / terminateRunningRuns 两个 lifecycle 自有终态路径另行显式 dispose。
+  // 统一收尾；abortRun / terminateRunningRuns 两个 lifecycle 自有终态路径另行显式 dispose。
   //
   // 视图必须经 Object.create 原型链承载、禁止 object spread：Interface 层注入的
   // eventBus 是现读 getter（D3——每次属性访问重取当前 pi.events，reload 重跑 factory
@@ -371,7 +371,7 @@ function emitPendingRegister(runId: string, deps: LifecycleDeps, spec: RunSpec):
  *
  * 流程：创建 WorkflowRun（running，I1 构造期跳过）+ run-created 入队（[Q2/D5]
  * journal 首帧——dispatchRunCreated 的唯一生产调用点；入队先于 worker 启动，
- * 落账 await 在 store.save 之后）+ makeHandlers + 构建 RunRuntime
+ * 写入 journal 记录的 await 在 store.save 之后）+ makeHandlers + 构建 RunRuntime
  * （worker+gate+controller）+ assignRuntime（注入 runtime，恢复 I1）+ 注册到
  * deps.runs + store.save。
  *
@@ -420,7 +420,7 @@ export async function runWorkflow(
   // 修复形态裁决：run-created 入队先行（候选②），候选①「created 态缓冲重放」被
   // 否——重放 = 靠引导静默补齐时序倒置，与 pump dispatchRunTrigger 的既有裁决
   // （表外转移 fail-fast 不补投）冲突。await 留在 store.save 之后原位，保持
-  // 「runWorkflow 返回 ⟹ 投影可查」语义不变。
+    // 「runWorkflow 返回 ⟹ 派生视图可查」语义不变。
   // 取舍登记：workerHost.start 抛错路径上 created 帧可能已落 journal（孤儿首帧，
   // runId 不复用、无 fold 消费方，可接受）；失败 = journal IO 错误，取证面降级
   // 不阻断创建主链（对齐 SW-DATA-3：error 留痕后继续——此时该 run 的后续事件因
@@ -452,9 +452,9 @@ export async function runWorkflow(
 
   try {
     await createdDispatch;
-    // [W1 / D1] v2 注册条目（journal 首帧落账成功后写——锚点语义：条目指向的
+    // [W1 / D1] v2 注册条目（首帧写入 journal 记录成功后写——锚点语义：条目指向的
     // journal 此刻已在盘，无悬挂锚）。appendWorkflowRecordRegisteredEntry 内含
-    // best-effort 围栏与 recordPath 可寻址守卫（vitest 防线跳过）。
+    // best-effort 围栏与 recordPath 可寻址检查（vitest 防线跳过）。
     appendWorkflowRecordRegisteredEntry(run, deps);
   } catch (err) {
     const msg = toErrorMessage(err);
@@ -501,7 +501,7 @@ export async function abortRun(
   deps.log?.("debug", "workflow:lifecycle", "abortRun", { runId, reason, doneReason });
 
   // 已终局 no-op（[W2/V1] → [D6(a) 第 1 步] 判据换源 isRunSettled = 进程内终局记录
-  // 注册表；活体终局经 dispatch 链 note、重水合终局经重建点 noteRebuiltSettlement
+  // 注册表；活体终局经 dispatch 链 note、重新加载的终局经重建点 noteRebuiltSettlement
   // 注入，聚合状态字段不再参与判定）。
   if (isRunSettled(run)) {
     deps.log?.("debug", "workflow:lifecycle", "abortRun no-op: already settled", { runId });
@@ -516,12 +516,12 @@ export async function abortRun(
   // terminate 之后广播发不进去）——worker 侧 pending 优雅解阻
   broadcastAbortToWorker(run, reason ?? `Workflow aborted (${doneReason})`);
   // [OR-7] run 终态：移除 signal abort listener（幂等；abort 由 signal 触发时
-  // listener 已在 onAbort 内自移除，此处为其余 abort 入口的收口；即使 finalizeRun
+  // listener 已在 onAbort 内自移除，此处为其余 abort 入口的收尾；即使 finalizeRun
   // 因并发终态化让位，WeakMap 条目也应清除，不依赖 transition 成败）
   disposeSignalAbortListener(run);
   // A4 + C-4: transition 内部 releaseRuntime（cleanup before mutate）；到达 done 终态
   // → 注销 pending-notification + 通知 Interface 层（D5-② 终态 coda 收敛为
-  // worker-message-pump 的 finalizeRun 单写点——OR-8 in-flight 收口 + save best-effort
+  // worker-message-pump 的 finalizeRun 单写点——OR-8 in-flight 收尾 + save best-effort
   // （SW-DATA-3）不再向上抛，内存态已终态，调用方无需因落盘失败收到 abort 异常；
   // OR-4/B-4 unregister 与 onRunDone 各自独立围栏）
   await finalizeRun(run, deps, doneReason, { context: `abortRun (${doneReason})` });
@@ -538,14 +538,14 @@ export async function abortRun(
  * 进程内注册表随分叉消失整体删除）。
  *
  * per-run 序列：`state.error = reason` → 优雅解阻（broadcastAbortToWorker）+
- * signal listener 收口 → 中断转移（[D15] interruptRun 入口——零终局副作用：
+ * signal listener 收尾 → 中断转移（[D15] interruptRun 入口——零终局副作用：
  * 不写 manifest 派生缓存、不发终局通知、不落 pending:unregister）→ 在途 call
- * 观测面收口（closeOutInFlightCalls——record 侧无 settled 帧的 call 天然在
+ * 观测侧收尾（closeOutInFlightCalls——record 侧无 settled 帧的 call 天然在
  * 「未完成」侧，resume 按三档恢复处置）→ 执行资源释放（releaseRuntime + 引擎
  * 窗口实例 dispose，时序红线对齐 finalizeRun：在途收敛之后释放实例）。
  *
  * 用户可见性：中断态经 v2 中断条目（appendInterruptedEntry）进 workflow 列表
- * （「已中断（可续跑）」，场景 25 投影断言），无聊天流完成通知——session 切换/
+ * （「已中断（可续跑）」，场景 25 派生视图断言），无聊天流完成通知——session 切换/
  * 关闭语境下主 agent 已离开本 session，注入完成通知只会把消息发给已离开的
  * session（对齐 session_start 恢复先例）。
  *
@@ -558,14 +558,14 @@ export async function abortRun(
 export async function terminateRunningRuns(deps: LifecycleDeps, reason: string): Promise<void> {
   for (const run of deps.runs.values()) {
     // [W2/V1 → D6(a) 第 1 步] 已终局 run 跳过（判据换源 isRunSettled——终局记录
-    // 注册表；重水合 done run 的注册表条目由重建点 noteRebuiltSettlement 注入）。
+    // 注册表；重新加载 done run 的注册表条目由重建点 noteRebuiltSettlement 注入）。
     if (isRunSettled(run)) continue;
     try {
       deps.log?.("debug", "workflow:lifecycle", "terminateRunningRuns: run → interrupted", { runId: run.runId, reason });
       run.state.error = reason;
       // [OR-3] 同 abortRun：先广播 abort 再转移（worker 侧 pending 优雅解阻）
       broadcastAbortToWorker(run, reason);
-      // [OR-7] 移除 signal abort listener（本路径不走 onRunDone——显式收口）
+      // [OR-7] 移除 signal abort listener（本路径不走 onRunDone——显式收尾）
       disposeSignalAbortListener(run);
       // 中断转移（[D15] interruptRun 入口）。幂等让位：重复 terminate 对已
       // interrupted 的 run 表外转移 fail-fast → 返回 false，无重复帧。
@@ -578,7 +578,7 @@ export async function terminateRunningRuns(deps: LifecycleDeps, reason: string):
             ? (entry) => deps.appendEntry?.(WORKFLOW_RECORD_CUSTOM_TYPE, entry)
             : undefined,
       });
-      // 在途 call 观测面收口（内存翻取消终态——观测纪律不变）
+      // 在途 call 观测侧收尾（内存翻取消终态——观测纪律不变）
       closeOutInFlightCalls(run);
       // 执行资源释放：worker/controller 停止（中断后无活体），引擎窗口实例
       // dispose（时序红线：在途收敛之后释放实例）。
@@ -603,7 +603,7 @@ export async function terminateRunningRuns(deps: LifecycleDeps, reason: string):
  *
  * 规则（契约 W3C1；[W2/V1 D1] 判据与排序键换源后的形态）：
  * 1. **终局白名单**：仅 `isRunSettled` 可淘汰——判据 = 进程内终局记录注册表，
- *    活体终局经 dispatch 链 note、重水合终局经重建点 noteRebuiltSettlement 注入
+ *    活体终局经 dispatch 链 note、重新加载的终局经重建点 noteRebuiltSettlement 注入
  *    （[D6(a) 第 1 步] 换源后不再读聚合状态字段）。活跃执行 run 永不淘汰，即使排序
  *    键缺失也绝不参与排序淘汰。
  * 2. **排序**：[W2/V1 D1] 排序键换终局帧时间戳——settledRecordOf().settledAt
@@ -634,7 +634,7 @@ export function evictDoneRunsBeyondCap(
   const settled = Array.from(runs.values()).filter((r) => isRunSettled(r));
   const excess = settled.length - keepDone;
   if (excess <= 0) return 0;
-  // [W2/V1 D1] 排序键 = 终局帧时间戳（注册表；重水合 run 的条目 = 重建 fold 注入的
+  // [W2/V1 D1] 排序键 = 终局帧时间戳（注册表；重新加载 run 的条目 = 重建 fold 注入的
   // run-settled 帧时序）→ 注册表 miss 回落 meta.completedAt → 0 兜底；
   // 数值升序 = 时间升序，缺失 fallback 最小 = 最旧先淘汰
   const keyOf = (r: WorkflowRun): number =>
@@ -671,8 +671,8 @@ export interface RecoverCrashedRunsHooks {
   onRunRecovered?: (payload: { id: string; reason: string }) => void;
   /**
    * [D2] 中断条目补写通道（主 session appendEntry 面；缺省 = 不写条目）。
-   * run-interrupted 转移事件落账后调用——收编产物的条目半边（status 'interrupted'
-   * 暂停态收敛词，[D2] 宿主投影裁决②）。错误围栏与 onRunRecovered 同款。
+   * run-interrupted 转移事件写入 journal 记录后调用——收编产物的条目半边（status 'interrupted'
+   * 暂停态收敛词，[D2] 宿主派生视图裁决②）。错误围栏与 onRunRecovered 同款。
    */
   appendSettledEntry?: (customType: string, data: unknown) => void;
 }
@@ -681,11 +681,11 @@ export interface RecoverCrashedRunsHooks {
  * recoverCrashedRuns 的计数结果（宿主启动日志/健康面用）。
  *
  * `recovered` 只计 running 遗留被中断收编的条数；`loaded` 是 loadAll
- * 重水合的全量数（含 done 历史）——两者分开口径，避免宿主把「重水合 N 条」
+ * 重新加载的全量数（含 done 历史）——两者分开口径，避免宿主把「重新加载 N 条」
  * 误报为「恢复 N 条」。
  */
 export interface RecoverCrashedRunsResult {
-  /** loadAll 重水合的 run 总数（含 done 历史）。 */
+  /** loadAll 重新加载的 run 总数（含 done 历史）。 */
   loaded: number;
   /** running 遗留被中断收编的条数（0 = 无崩溃遗留）。 */
   recovered: number;
@@ -699,7 +699,7 @@ export interface RecoverCrashedRunsResult {
  * （pending:unregister 为唯一宿主差异点——经 {@link RecoverCrashedRunsHooks} 外置）。
  *
  * 步骤语义：
- * 1. **loadAll**：从 store 全量重水合（[D1] record 流 fold 重建）。失败向上抛
+ * 1. **loadAll**：从 store 全量重新加载运行状态快照（[D1] record 流 fold 重建）。失败向上抛
  *    ——fail-fast 策略（pi 的 storeHealthy=false 停初始化）是宿主职责，调用方
  *    catch 后自行决定；
  * 2. **中断收编**（[D15] 发起面第三路，经 terminal-actions.interruptRun 入口）：
@@ -711,7 +711,7 @@ export interface RecoverCrashedRunsResult {
  *    启动收编触达 v1 形态实体由 loadAll 的只认 record 流构造性跳过——v1 历史
  *    run 不复活，其两件遗留文件按 [D1] 历史数据处置不读不写，跟随裁决点 7 清理
  *    消亡）。单 run 收编失败仅记日志不中断其余 run——恢复天然幂等，下次启动重试；
- * 3. **evict**：全量重水合后立即 `evictDoneRunsBeyondCap(runs,
+ * 3. **evict**：全量重新加载后立即 `evictDoneRunsBeyondCap(runs,
  *    MAX_RETAINED_DONE_RUNS)`（K=20）——done run 内存有界性；只 delete 内存
  *    Map 条目，磁盘文件不动。
  *
@@ -764,8 +764,8 @@ export async function recoverCrashedRuns(
         });
         if (adopted) {
           recovered += 1;
-          // 内存投影同步（[D2] 中断标记）：record 侧转移事件已落，聚合侧
-          // meta.interruptedAt 同步置位——runSummary 投影 'interrupted'（CLI/TUI
+          // 内存派生视图同步（[D2] 中断标记）：record 侧转移事件已落，聚合侧
+          // meta.interruptedAt 同步置位——runSummary 派生视图 'interrupted'（CLI/TUI
           // 不显示僵尸「运行中」；fold 重建路径同款写点见壳 foldRecordStreamToRun）。
           run.meta.interruptedAt = new Date().toISOString();
         }
@@ -775,8 +775,8 @@ export async function recoverCrashedRuns(
           `[workflow] recoverCrashedRuns interrupt dispatch failed for run ${run.runId} (recovery continues): ${msg}`,
         );
       }
-      // [OR-8] 重水合 running 聚合可携带 in-flight call（崩溃瞬间的 running 节点）——
-      // 内存观测面收口为取消终态（观测纪律不变；[D2] 中断非终局，record 侧无
+      // [OR-8] 重新加载的 running 聚合可携带 in-flight call（崩溃瞬间的 running 节点）——
+      // 内存观测侧收尾为取消终态（观测纪律不变；[D2] 中断非终局，record 侧无
       // settled 帧的可续语义由 fold 承接——在途 call 天然在「未完成」侧）。
       closeOutInFlightCalls(run);
       // 宿主事件外置点：pi 发 pending:unregister（对齐既有 emit 位置——中断转移

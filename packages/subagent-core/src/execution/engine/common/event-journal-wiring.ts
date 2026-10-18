@@ -12,7 +12,7 @@
 // （pool-manager cleanupExpiredJournals）。
 //
 // 机制语义：writer 创建即路径定稿；run 终态后 close（flush + fsync 一次，§3.3.6
-// 写入纪律；写失败已由 writer 内部 warn + failed 收口，close 不抛，journal 是②级
+// 写入纪律；写失败已由 writer 内部 warn + failed 收尾，close 不抛，journal 是②级
 // 尽力而为数据源）。
 
 import { SHARED_POOL_KEY } from "@zhushanwen/subagent-engine-sdk";
@@ -35,7 +35,7 @@ export interface JournalWiringOptions {
   forwardEvents?: (event: AgentEvent) => void;
 }
 
-/** wireEventJournal 的产物（喂给 RunContext 的回调簇 + 终态收口/回填面）。 */
+/** wireEventJournal 的产物（喂给 RunContext 的回调簇 + 终态收尾/回填面）。 */
 export interface JournalWiring {
   /** journaling onEvent：先落盘再转发——RunContext.onEvent 的值。 */
   onEvent: (event: AgentEvent) => void;
@@ -45,7 +45,7 @@ export interface JournalWiring {
    * （workflow 域 backfillHandle）都取本值。
    */
   readonly path: string;
-  /** run 终态收口（flush + fsync；幂等，不抛——见文件头）。 */
+  /** run 终态收尾（flush + fsync；幂等，不抛——见文件头）。 */
   close(): Promise<void>;
   /**
    * handle 回填：EngineHandleData.eventsPath = writer 终态路径（read ②级经

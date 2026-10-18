@@ -63,7 +63,7 @@ const { sessionApiMock, submitDeliveryMock, useChatAbortMock } = vi.hoisted(() =
 }))
 vi.mock('@/api', () => ({ project: { load: vi.fn().mockResolvedValue({ projects: [], activeProjectId: '' }), save: vi.fn().mockResolvedValue(undefined) },
   session: sessionApiMock,
-  // chat 域 = helper spy 单例展开（send/steer/... 与 useChat mock 同源锚点）+ fork 统一提交腿
+  // chat 域 = helper spy 单例展开（send/steer/... 与 useChat mock 同源锚点）+ fork 统一提交路径
   chat: { ...composerChatApiSpy, submitDelivery: submitDeliveryMock },
   model: { switchModel: vi.fn() },
   composer: { getMentionCandidates: vi.fn().mockResolvedValue([]), getFileCandidates: vi.fn().mockResolvedValue([]) },

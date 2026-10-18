@@ -21,7 +21,7 @@ export type SubagentJournalDomain = 'run' | 'record'
  * 单条 journal 事件（run 域 = run journal 行 / record 域 = record 事件行——域内
  * 词表校验归读侧与文件行同一解析器，本层只校验跨域共同信封）。
  */
-export interface SubagentJournalEvent { // oe-exempt:20261003:framework:跨进程 marker 通道 wire 协议契约（形状守卫消费，协议类型先立）
+export interface SubagentJournalEvent { // oe-exempt:20261003:framework:跨进程 marker 通道 wire 协议契约（形状检查消费，协议类型先立）
   /** 事件类型（域词表成员资格由读侧按域校验）。 */
   type: string
   /** 事件时点（ms epoch；信封必填）。 */
@@ -65,13 +65,13 @@ export interface SubagentJournalReport { // oe-exempt:20261003:framework:跨进�
  */
 export const JOURNAL_REPORT_ACK = '{"ack":true}' as const
 
-/** 运行时形状守卫（信任边界：帧内容来自 select 通道 payload，LLM/外部可控 JSON）。 */
+/** 运行时形状检查（信任边界：帧内容来自 select 通道 payload，LLM/外部可控 JSON）。 */
 
 function isRecord(v: unknown): v is Record<string, unknown> {
   return typeof v === 'object' && v !== null && !Array.isArray(v)
 }
 
-/** 单事件信封守卫：type 非空串、ts 有限数值、seq 缺省或正安全整数。 */
+/** 单事件信封检查：type 非空串、ts 有限数值、seq 缺省或正安全整数。 */
 function isSubagentJournalEvent(v: unknown): v is SubagentJournalEvent {
   if (!isRecord(v)) return false
   if (typeof v.type !== 'string' || v.type === '') return false
@@ -83,8 +83,8 @@ function isSubagentJournalEvent(v: unknown): v is SubagentJournalEvent {
 }
 
 /**
- * SubagentJournalReport 形状守卫：domain 落两域词表、fileKey 非空串、events 逐条
- * 过信封守卫、sessionId 缺席或 string。event-adapter 路由分支消费；非法帧返回
+ * SubagentJournalReport 形状检查：domain 落两域词表、fileKey 非空串、events 逐条
+ * 过信封检查、sessionId 缺席或 string。event-adapter 路由分支消费；非法帧返回
  * false（调用方丢弃，不 fold 不 ack）。
  */
 export function isSubagentJournalReport(v: unknown): v is SubagentJournalReport {
@@ -100,7 +100,7 @@ export function isSubagentJournalReport(v: unknown): v is SubagentJournalReport 
   return true
 }
 
-/** 确认回包形状守卫（pi 侧 reporter 消费——非本字符串即未确认）。 */
+/** 确认回包形状检查（pi 侧 reporter 消费——非本字符串即未确认）。 */
 export function isJournalReportAck(v: unknown): v is typeof JOURNAL_REPORT_ACK {
   return v === JOURNAL_REPORT_ACK
 }

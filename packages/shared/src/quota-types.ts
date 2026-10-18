@@ -70,7 +70,7 @@ export type QuotaFetchOutcome =
 /**
  * per-provider 只读查询配置（D1-2，timeout-audit-hygiene-batch）：QuotaService 从
  * providers.json 读出后经 fetchQuota 第三参数注入。可选签名——账号维度 fetcher
- * （kimi/mimo/minimax/zhipu）忽略该参数，零改动面。
+ * （kimi/mimo/minimax/zhipu）忽略该参数，零改动范围。
  */
 export interface QuotaFetcherConfig {
   /**

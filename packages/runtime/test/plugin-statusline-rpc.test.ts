@@ -6,7 +6,7 @@
  * 本地 mock 上的假测试（断言手抄实现，已被清理）。本文件走生产装配全链：
  * 真实 PluginService（registerRpcMethods → registerAllRpcMethods → registerUiRpcHandlers）
  * + 真实 JSON-RPC 往返桥（PluginRpcClient ↔ PluginRpcServer.dispatch，与 PluginHost 转发同构）
- * + Worker 侧 createUiApi（插件实际调用面），断言真实 registry 状态与 broker 广播 payload。
+ * + Worker 侧 createUiApi（插件实际调用点），断言真实 registry 状态与 broker 广播 payload。
  *
  * 锁的行为契约（plugin-rpc-setup.ts updateStatusBarItem + status-bar-registry.ts）：
  * - itemKey = `${pluginId}:${id}` 复合键；text 非空写入（options 缺省 priority=100/scope='global'）

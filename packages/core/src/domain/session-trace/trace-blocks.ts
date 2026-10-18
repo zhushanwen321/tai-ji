@@ -5,7 +5,7 @@
  * block 数组，toolResult 为 text/image block 数组（真实 corpus 采样确认无其他组合）。
  * 防御性 narrowing（pi session 文件不做校验），未知 block 类型归 unknown 兜底不丢失。
  * 列表子行与 inspector 详情共用本 SSOT——此前组件层手写解析用了错误字段名
- * （toolName/toolCallId vs pi 实际的 name/id），统一收口后消除该类偏差。
+ * （toolName/toolCallId vs pi 实际的 name/id），统一收敛后消除该类偏差。
  */
 
 /** content block 归一化视图（kind 判别联合；字段名对齐 UI 语义，不透传 pi 原字段名）。 */

@@ -2,7 +2,7 @@
  * useQueueRows 单测（投递所有权内核 u3c / D7 队列区单源化）。
  *
  * 被测：composables/panel/useQueueRows.ts —— composer 队列区的**唯一数据源与操作面**：
- * - rows：session.delivery 帧投影（core getDeliveryProjectionRef）过滤「非 direct 且未 delivered」
+ * - rows：session.delivery 帧派生视图（core getDeliveryProjectionRef）过滤「非 direct 且未 delivered」
  *   的条目（帧序 = 内核 FIFO 发送序），preview 直用帧值（runtime 装配已剥标记截断，
  *   帧契约测试 session-message-handler-delivery 断言无标记——显示层不二次加工）
  * - foldQueueRows：队列区折叠口径唯一定义点——failed 行置顶且恒可见（重试入口不折叠），
@@ -54,7 +54,7 @@ function entry(
   return { clientUuid, preview, state, lane }
 }
 
-/** 写 core 投影（帧消费链路由 core useChat handler 承担，本层只读投影） */
+/** 写 core 派生视图（帧消费链路由 core useChat handler 承担，本层只读派生视图） */
 function setProjection(sid: string, entries: DeliveryFrameEntry[]): void {
   const ref = getDeliveryProjectionRef()
   const next = new Map(ref.value)
@@ -76,7 +76,7 @@ beforeEach(() => {
   deliveryMock.resyncDelivery.mockResolvedValue({ sessionId: 's1', deduped: [] })
 })
 
-describe('useQueueRows · 单源投影过滤（D7）', () => {
+describe('useQueueRows · 单源派生视图过滤（D7）', () => {
   it('只收「非 direct 且未 delivered」条目，帧序保持（内核 FIFO 发送序）', () => {
     setProjection('s1', [
       entry('d1', 'in-flight', 'direct'), // direct 车道：乐观气泡原位保留 → 不进队列区

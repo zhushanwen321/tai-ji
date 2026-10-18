@@ -88,7 +88,7 @@ export type ReverseResponseResult =
   | { unsupported: true };
 
 // ============================================================
-// 判别守卫（W2 行解析器消费；结构判定，不抛错）
+// 判别检查（W2 行解析器消费；结构判定，不抛错）
 // ============================================================
 
 function isRecord(v: unknown): v is Record<string, unknown> {

@@ -5,7 +5,7 @@
  *   - 显式 `{ accepted: false }` → 内核按发送失败处理（错误重试 / onSettled rejected）
  *   - `{ accepted: true }` / void / 其他形态 → 受理成功（旧 port 实现零改动兼容）
  *
- * 本套件锁死内核对 receipt 三形态的分流行为——SendReceipt 是 B-ledger 销账链的
+ * 本套件锁死内核对 receipt 三形态的分流行为——SendReceipt 是 B-ledger 逐条关闭链的
  * 底层口径（扩展侧 courier 的受理事实），内核不得把 accepted:false 当成功吞掉。
  *
  * [D9⑤ 口径升级] 受理成功只把条目转 in-flight（两阶段回执第一阶段），onSettled
@@ -45,7 +45,7 @@ describe('port.send receipt（U2 回执口径）', () => {
     const handle = createDelivery(port, { onSettled })
 
     handle.send(textMsg('m1'))
-    // 首败即停：无重试窗口，rejected 通知同步收口
+    // 首败即停：无重试窗口，rejected 通知同步收尾
     expect(onSettled).toHaveBeenCalledTimes(1)
     expect(onSettled.mock.calls[0]?.[1]).toBe('rejected')
     expect(handle.entriesFull().active).toHaveLength(0)

@@ -9,7 +9,7 @@
 // 一切周期任务——生产常态（宿主挂机）下停摆，是死机制。替代 = runtime 启动序列
 // 的一次性全量收编扫描：单实例锁确立后、先于任何 pi spawn 的时点，全量枚举 pi
 // 宿主形态 run（createPiHostRunEnumeration——[D16⑥] 枚举判据换源：候选 = record
-// 事件流文件族，status = 共享判定核 fold record 读折叠投影，不读快照行），对
+// 事件流文件族，status = 共享判定核 fold record 读取折叠派生视图，不读快照行），对
 // 判读 running 的 run 逐个收编（adoptInterruptedRun → [D15] interruptRun 中断
 // 编排入口，run-interrupted 转移帧一件直落）。
 //

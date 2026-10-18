@@ -651,7 +651,7 @@ describe('U6d invalidateDerivedState 撤回失效契约', () => {
     expect(framesOf(publish, 'session.subagents')).toHaveLength(1)
   })
 
-  it('失效落在增量轮在途：cursor 回写被否决，作废本轮重跑全量（forceFullRebuild 竞态安全）', async () => {
+  it('失效落在增量轮在途：cursor 回写不采用，作废本轮重跑全量（forceFullRebuild 竞态安全）', async () => {
     const { records, publish, client } = makeRecords()
     const fire = registerSession(records)
     fire('s1')

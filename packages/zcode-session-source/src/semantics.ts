@@ -9,7 +9,7 @@
  * 本机 ZCode 3.14.x / 宿主库 schema_migration.app_version = 0.16.5 实证，见 asar 全量
  * 对拍报告——.tmp 工作流产物不入库，实测口径以测试期望值为准）。
  *
- * 刻意不导出 PART_TYPES（设计 §6-D5 被否条目）：仓内无判定职责消费 part 类型闭集
+ * 刻意不导出 PART_TYPES（设计 §6-D5 不采用条目）：仓内无判定职责消费 part 类型闭集
  * （未知 part type 的前向兼容由 converter 既有「跳过 + 降级登记」覆盖），part 类型登记
  * 职责由 docs/architecture/session-import-sources.md §6 文档速查层承担——避免制造
  * 「闭集常量必有消费方」的假象。
@@ -78,13 +78,13 @@ export const LEGACY_METADATA_SOURCES = Object.freeze([
   'todo_reminder',
 ] as const)
 
-// ── 投影策略（6 值）：zcode 原生 5 策略 + taiji 侧 compactSummary 特判落点 ───────────
+// ── 派生视图策略（6 值）：zcode 原生 5 策略 + taiji 侧 compactSummary 特判落点 ───────────
 // zcode 原生（asar getConversationMessageProjectionPolicy 返回域）：realUserInput /
 // visibleAssistant / providerContextOnly / hiddenSynthetic / timelineOnly。
 // compactSummary 是 taiji 特判落点（设计 §6-D2/§6-D5）：同一条 compact_summary 消息在
 // zcode 原函数返回 providerContextOnly，taiji 侧改落 compaction entry（摘要合并规格 D2），
 // 故作为第六策略单列。降级态 'unclassified' 不在闭集内（设计 D4：未知枚举的显形降级，
-// 不是投影策略——不参与策略 → entry 落点映射）。
+// 不是派生视图策略——不参与策略 → entry 落点映射）。
 export const PROJECTION_POLICIES = Object.freeze([
   'realUserInput',
   'visibleAssistant',

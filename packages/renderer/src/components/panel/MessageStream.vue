@@ -66,7 +66,7 @@
     </div>
 
     <!-- [D3] 静态无样式 wrapper：RO 兜底网的观察目标（Virtualizer spacer
-         高度 + 尾部块 tailEl 高度都投影到本元素盒尺寸，见 useMessageStreamFollowTriggers）。
+         高度 + 尾部块 tailEl 高度都映射到本元素盒尺寸，见 useMessageStreamFollowTriggers）。
          本元素【永不】获得 position/transform/尺寸样式——不得成为 containing block，否则空态
          欢迎语（absolute inset-0）与 load-more 浮层（absolute top-0，均留在本 wrapper 外）
          锚定漂移（§4.4 结构护栏③）。 -->
@@ -82,7 +82,7 @@
            - :key=session 强制重建 Virtualizer，跨 session 测量缓存隔离（design §4.5）
            slot 内 item.kind 分支与 streamItems 对应（kind 全集四态：core 三态 turn/systemNotice/
            bashExecution + u5 渲染层拼接的 skillNotice，:data 已从 renderItems 升为 streamItems
-           的前置求值投影 streamViewItems——1:1 同下标空间，RD-2#1）。 -->
+           的前置求值派生视图 streamViewItems——1:1 同下标空间，RD-2#1）。 -->
       <Virtualizer
         ref="vlistRef"
         :data="streamViewItems"
@@ -145,7 +145,7 @@
         <!-- ActivityStrip 活动条（session-occupancy u6a / D7 展示统一）：对话流尾部单一的
              「进行中」指示位，收编原 compacting 浮层 / executing bash 行 / TurnMeta dispatching
              思考占位三处分散指示（优先级 compacting > bash > thinking，数据源 sessionPhase
-             occupancy 投影）。文档流 block（Virtualizer 之后），fork notice 等后续内容自然堆叠。
+             occupancy 派生视图）。文档流 block（Virtualizer 之后），fork notice 等后续内容自然堆叠。
              dev 断言（COMPACTING/EXECUTING_BASH 高度常量漂移检测）随行迁入组件内部。 -->
         <ActivityStrip :session-id="sessionId" :executing-bash="executingBash" :subagent-thinking="subagentThinking" />
 
@@ -262,7 +262,7 @@ import LoadMoreErrorBar from './LoadMoreErrorBar.vue'
 // 活动条（u6a / D7 展示统一）：compacting/bash/thinking 行的单一渲染位（原三处分散指示收编）。
 import ActivityStrip from './message-stream/ActivityStrip.vue'
 import SkillNoticeInline from './SkillNoticeInline.vue'
-// [RD-2#1] 单条渲染项错误边界 + slot 表达式前置求值视图模型（1:1 投影 streamItems）
+// [RD-2#1] 单条渲染项错误边界 + slot 表达式前置求值视图模型（1:1 派生视图 streamItems）
 import StreamItemBoundary from './message-stream/StreamItemBoundary.vue'
 import { buildStreamViewItems } from './message-stream/stream-view-items'
 import { useSkillNoticeStreamItems } from '@/composables/panel/useSkillNoticeStream'
@@ -338,8 +338,8 @@ const renderItems = computed(() =>
 /** skill 注入提示 + streamItems 拼接（u5）：订阅/per-session 分区/toast 副作用与 interleave
  *  组装都在 useSkillNoticeStream.ts（useSkillNoticeStreamItems）。
  *  [索引一致性硬约束] streamItems 是 lastUserTurnIdx / useStreamingPin / rail 的基准；:data
- *  消费其 1:1 投影 streamViewItems（下方，同长度同顺序）——混用 renderItems 与 streamItems
- *  两基准会错钉/错跳，投影不换基准。 */
+ *  消费其 1:1 派生视图 streamViewItems（下方，同长度同顺序）——混用 renderItems 与 streamItems
+ *  两基准会错固定/错跳，派生视图不换基准。 */
 const { streamItems } = useSkillNoticeStreamItems(sessionId, renderItems)
 
 /** 渲染项里最后一个 turn（streaming 滚动判定 + hasWorkingTurn 派生用）。 */
@@ -405,30 +405,30 @@ const lastUserTurnIdx = computed(() => {
 })
 
 // [RD-2#1] slot 表达式前置求值（canEdit/isLastTurn/key/preview 在此算好，模板零派生表达式；
-// 单项抛错降级 broken 占位行）：1:1 投影 streamItems，:data 与 pin/rail 两基准下标空间不变。
+// 单项抛错降级 broken 占位行）：1:1 派生视图 streamItems，:data 与 pin/rail 两基准下标空间不变。
 const streamViewItems = computed(() =>
   buildStreamViewItems(streamItems.value, lastUserTurnIdx.value, lastRenderTurn.value),
 )
 
 /**
- * editing 钉扎（SR5，B9）：编辑中的 turn 滚出视口会卸载丢失 UserBubble 的 draftText。
- * [cw wave w3] 切到 virta：钉扎改由 <Virtualizer :keepMounted> 消费 pinnedIndexes（design §4.3），
+ * editing 固定挂载（SR5，B9）：编辑中的 turn 滚出视口会卸载丢失 UserBubble 的 draftText。
+ * [cw wave w3] 切到 virta：固定挂载改由 <Virtualizer :keepMounted> 消费 pinnedIndexes（design §4.3），
  * 不再调旧手写虚拟滚动的 pinEditing。
  * [pin-identity D2] 编辑态改持身份（turnStableId）非位置：数组下标快照在切 session / 消息增删后
- * 过期（E-now-1 越界崩溃 / E-now-2 错钉），身份不过期——索引由 useStreamingPin.pinnedIndexes
+ * 过期（E-now-1 越界崩溃 / E-now-2 错固定），身份不过期——索引由 useStreamingPin.pinnedIndexes
  * 每次从当前 items 反查（D1），本层只持有并传递身份。
  */
 const editingTurnKey = ref<string | null>(null)
 /**
  * [pin-identity D2/D8] handler 显式按 editing 分支：false 恒置 null，禁止无分支
  * `= payload.turnKey`——否则切 session 时序「D8 清 null → 卸载 emit 迟到置回 turnKey →
- * 回合复现时复活钉扎」，把 E4 从窄窗口扩大为每次切 session 必现，恰好击穿 D8。
+ * 回合复现时复活固定挂载」，把 E4 从窄窗口扩大为每次切 session 必现，恰好击穿 D8。
  */
 function onEditStateChange(payload: { editing: boolean; turnKey: string }): void {
   editingTurnKey.value = payload.editing ? payload.turnKey : null
 }
 
-/** streaming + editing 钉扎（design §4.3）：输出 pinnedIndexes 喂给 <Virtualizer :keepMounted>。
+/** streaming + editing 固定挂载（design §4.3）：输出 pinnedIndexes 喂给 <Virtualizer :keepMounted>。
  *  virta 对 keepMounted 的项恒挂 RO，从根上消除 streaming turn 滚出视口致 RO 断开、高度不更新的隐患。
  *  [cw wave w3] 不传 pinStreaming（W3T1 已改可选，watch 内 guard no-op）。 */
 const { pinnedIndexes } = useStreamingPin({

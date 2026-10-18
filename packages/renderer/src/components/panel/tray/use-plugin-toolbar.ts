@@ -2,7 +2,7 @@
  * usePluginToolbarContribution —— 插件 toolbar 挂载点（composer.toolbar）的贡献面判定。
  *
  * W3a 从 ComposerTray 抽出（该组件 `<script setup>` 已贴 300 行硬门禁）：聚合入口可见条件
- * 「托盘有条目 或 插件有贡献」与聚合面板承接段共用这一判定，唯一消费面在 ComposerTray。
+ * 「托盘有条目 或 插件有贡献」与聚合面板承接段共用这一判定，唯一消费方在 ComposerTray。
  *
  * 数据源经 inject VIEW_HOST_SOURCE_KEY（未 provide 时恒 false，不崩不 warn——缺 source 只影响
  * 聚合入口/承接段判定）；有贡献 = `getView(sessionId, viewId)?.guiTree.length > 0`——挂载点把

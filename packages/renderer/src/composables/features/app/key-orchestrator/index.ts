@@ -1,7 +1,7 @@
 /**
  * 键盘栈序编排器 barrel（display-containers §6.7 Esc 唯一属主 / §7.5 快捷键接线）。
  *
- * 消费面装配义务（u-w1-keys）：
+ * 消费方装配义务（u-w1-keys）：
  * - AppShell 根 setup **首位**调用 useKeyOrchestrator()（§6.7 R4 顺序前提）；
  * - useCloseShortcut（IPC 桥）把 'shortcut' type='close'/'toggle-bottom-drawer' 派发到
  *   handleCmdWShortcut / handleToggleBottomDrawerShortcut；

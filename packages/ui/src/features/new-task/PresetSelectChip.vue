@@ -49,7 +49,7 @@ import { computed, onBeforeUnmount, onMounted, ref, watch, nextTick } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { ChevronDown, Lock, SlidersHorizontal } from '@lucide/vue'
 // ui 原语走包内相对导入（不经 @taiji/ui 顶层 barrel）：new-task 组件经顶层 barrel
-// 再导出，顶层 barrel 自引用会闭合循环依赖环（R2 S-1）
+// 再导出，顶层 barrel 自引用会封住循环依赖环（R2 S-1）
 import { Button } from '../../primitives/button'
 import { Checkbox } from '../../primitives/checkbox'
 import { HoverCard, HoverCardContent, HoverCardTrigger } from '../../primitives/hover-card'
@@ -104,7 +104,7 @@ const { presets, defaultPresetId, presetOpenRequest, loadPresets, setDefaultPres
  * 显式选择档（resolve 输入，非回显真源）：用户真实点击 popover 项时记录（onSelectPreset），
  * 同步 emit select → 父组件写 flow.pendingPreset（单向链，写点唯一）。外部重置（startFlow
  * 重入把 pendingPreset 归 null）经下方 watch 同步回本 ref——Landing 在 flow 活跃期间保持
- * 挂载（isActive 守卫），组件实例不重建，生命周期与 pendingPreset 不同构，须显式跟随。
+ * 挂载（isActive 检查），组件实例不重建，生命周期与 pendingPreset 不同构，须显式跟随。
  */
 const explicitPresetId = ref<string | null>(null)
 
@@ -115,7 +115,7 @@ const explicitPresetId = ref<string | null>(null)
  * submit 按默认预设创建（显示与生效发散）。watch 单向跟随：重置 → explicit 档清空，
  * resolve 回落默认链；用户显式点击仍经 onSelectPreset 写入 + emit（链路不变）。
  *
- * immediate:true（挂载时序变体闭合）：chip 实例可能在 flow.pendingPreset 已非 null 时
+ * immediate:true（挂载时序变体完成）：chip 实例可能在 flow.pendingPreset 已非 null 时
  * 新挂载（如 landing 已有显式选择后新增分屏 pane）——新实例 explicitPresetId 初值 null，
  * 无 immediate 则 chip 显示默认链而 submit 消费显式档（显示 ≠ 生效的挂载变体）。
  * 挂载即跟随当前真值，与重入同步共用同一条单向链。
@@ -303,7 +303,7 @@ function onSelectPreset(preset: PiLaunchPreset): void {
  * 勾选：调 setDefaultPreset(displayPresetId) 把当前显示/将生效的预设写为全局默认。
  * 取消：no-op（全局默认至少有一个值，不支持取消到空——用户可选其他预设设默认替代）。
  * 失败：setDefaultPreset 契约 = RPC 失败时 store 已乐观回滚后 rethrow（usePiPresets），
- * 本处 catch 转 toast 可见反馈（checkbox 回弹 + 失败原因，两条腿都不缺）。
+ * 本处 catch 转 toast 可见反馈（checkbox 回弹 + 失败原因，两条路径都不缺）。
  */
 async function onToggleDefault(checked: boolean | string): Promise<void> {
   if (checked && displayPresetId.value) {

@@ -3,7 +3,7 @@
  *
  * 职责：把 extension-protocol 消费侧面 + 本模块 w1（custom-registry）/ w2（resolve）面
  * 聚合为单一入口，作为 @taiji/core/rendering-protocol 子路径的公共面。
- * 纯 re-export 零逻辑——降级/注册逻辑在 w1/w2 已落地，本文件只做接口收口。
+ * 纯 re-export 零逻辑——降级/注册逻辑在 w1/w2 已落地，本文件只做接口收敛。
  *
  * re-export 选型（clarify Q1 锁定）：
  * - 只 re-export goal 显式列出的 7 个 extension-protocol 符号（4 类型 + PROTOCOL_VERSION

@@ -228,7 +228,7 @@ describe('MF-2 响应式桥（分区后建时序 + global scope）', () => {
     // sidebar L2 tab 数据源纯静态（D5：M2 动态发现废弃）——widget 推送不进 getViews
     expect(viewsSource.getViews('s1').map((v) => v.viewId)).toEqual([])
     expect(viewsSource.getViews('s1').map((v) => v.viewId)).not.toContain('goal')
-    // 对照断言：ViewHost 枚举（Composer 托盘 widget 区消费面）不受影响，仍含该 widgetKey
+    // 对照断言：ViewHost 枚举（Composer 托盘 widget 区消费方）不受影响，仍含该 widgetKey
     expect(viewHostSource.getViewIds('s1')).toEqual(['goal'])
   })
 
@@ -343,7 +343,7 @@ describe('MF-1 挂载点上报时序（mountPoints.sync 连接就绪后发送）
     expect(transportSendSpy).toHaveBeenCalledTimes(1)
 
     // 重复 init：dispose-and-rebuild 使新 watcher 绑定新 registry 实例（setExtensionRegistries
-    // 已换新）。register:false 使新实例快照为空表——若退回模块级布尔守卫（watcher 永久闭包
+    // 已换新）。register:false 使新实例快照为空表——若退回模块级布尔检查（watcher 永久闭包
     // 绑定第一次 init 的实例），此处上报的是实例 1 残留快照（5 个挂载点），空表断言即红。
     initBridge({ register: false })
     // 已 connected → 新 watcher immediate 同步补发（无需推进 timer）

@@ -1,12 +1,12 @@
 /**
- * RuntimeSupervisor start() 并发串行化回归测试（AM2：TOCTOU 双 spawn 根修）。
+ * RuntimeSupervisor start() 并发串行化回归测试（AM2：TOCTOU 双 spawn 从根源修复）。
  *
- * 背景：start() 原实现幂等守卫后 `await this.stop()` 再 spawn——toggle 入口
- * （restartForConfigChange）与启动链/崩溃重启并发时双方都通过守卫 →
+ * 背景：start() 原实现幂等检查后 `await this.stop()` 再 spawn——toggle 入口
+ * （restartForConfigChange）与启动链/崩溃重启并发时双方都通过检查 →
  * 双 spawn 抢端口。修复 = promise 链串行队列（join 会让 toggle 拿到旧配置的
  * 启动结果，故串行而非共享）。
  *
- * 第二组 describe 覆盖 restartForConfigChange 本体（toggle 重启编排收口进
+ * 第二组 describe 覆盖 restartForConfigChange 本体（toggle 重启编排收敛进
  * supervisor）：广播时序（restarting 先于 stop）、队列并发不双 spawn、
  * 失败补 runtime-failed 终态广播后 reject 上抛，不进崩溃退避链。
  *
@@ -32,7 +32,7 @@ vi.mock('../supervisor/port-discoverer.js', () => ({
   getPortOffset: vi.fn(() => 0),
 }))
 
-// spawnRuntimeProcess：返回恒活 fake child（exitCode 恒 null，幂等守卫判活）
+// spawnRuntimeProcess：返回恒活 fake child（exitCode 恒 null，幂等检查判活）
 vi.mock('../supervisor/process-control.js', () => ({
   spawnRuntimeProcess: vi.fn(() => ({
     child: { exitCode: null, pid: 12345, on: vi.fn(), kill: vi.fn() },
@@ -114,7 +114,7 @@ describe('RuntimeSupervisor start() 并发串行化（AM2）', () => {
     const manual = sup.start()
     onExit!(137)
     await manual
-    // 手动 start 串行执行：守卫见 child 已清 → 独立 spawn（exit 排程的重启在队列后续）
+    // 手动 start 串行执行：检查见 child 已清 → 独立 spawn（exit 排程的重启在队列后续）
     expect(spawnMock).toHaveBeenCalledTimes(2)
     // 后续重启尝试经同一串行入口运行：child 已活 → 幂等短路，不叠加 spawn
     await vi.advanceTimersByTimeAsync(1_000)
@@ -122,7 +122,7 @@ describe('RuntimeSupervisor start() 并发串行化（AM2）', () => {
   })
 })
 
-describe('RuntimeSupervisor restartForConfigChange（toggle 重启编排收口）', () => {
+describe('RuntimeSupervisor restartForConfigChange（toggle 重启编排收敛）', () => {
   beforeEach(() => {
     vi.clearAllMocks()
   })
@@ -176,7 +176,7 @@ describe('RuntimeSupervisor restartForConfigChange（toggle 重启编排收口�
     }])
     const sup = new RuntimeSupervisor()
     await expect(sup.restartForConfigChange()).rejects.toThrow('health timeout')
-    // 协议闭合：restarting 必有终态广播——失败落 runtime-failed（renderer 经既有
+    // 协议完成：restarting 必有终态广播——失败落 runtime-failed（renderer 经既有
     // failed 态拿重试按钮），runtime-port 是成功专属；无第二次 restarting = 未进崩溃退避链
     expect(channels).toEqual(['runtime-restarting', 'runtime-failed'])
     // 前序失败不毒化队列：后续 start 独立执行成功

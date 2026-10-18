@@ -18,8 +18,8 @@ import { writeFileSync, mkdirSync, readFileSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
 
-// re-export 供 scripts/check-pi-sync.mjs S4 快照新鲜度比对调用：守卫必须与 main() 落盘
-// 走同一函数，否则守卫侧 `gen.getBuiltinModelDataGeneratedAt?.() ?? snapshot.catalogGeneratedAt`
+// re-export 供 scripts/check-pi-sync.mjs S4 快照新鲜度比对调用：检查必须与 main() 落盘
+// 走同一函数，否则检查侧 `gen.getBuiltinModelDataGeneratedAt?.() ?? snapshot.catalogGeneratedAt`
 // 退化为快照自比（恒真死分支），S4 声称的比对失效。
 export { getBuiltinModelDataGeneratedAt }
 
@@ -44,7 +44,7 @@ export function readPiAiVersion() {
 }
 
 // 镜像 pi-ai 0.82.1 dist/env-api-keys.js 的 getApiKeyEnvVars 映射。
-// 升级 pi-ai 后 verifyEnvVars() 做双向守卫校验（镜像表 ⊆ pi-ai 且 pi-ai ⊆ 镜像表），
+// 升级 pi-ai 后 verifyEnvVars() 做双向检查校验（镜像表 ⊆ pi-ai 且 pi-ai ⊆ 镜像表），
 // 任一方向不一致则报错 exit 1。
 // 特殊标注：google-vertex 有显式 API key 路径（GOOGLE_CLOUD_API_KEY，envMap 有条目），
 // 但主要凭据是 ADC 云凭证，故 authMode 仍为 ambient；amazon-bedrock 纯 ambient（AWS profile/IAM，
@@ -104,7 +104,7 @@ const AMBIENT_PROVIDERS = new Set(['google-vertex', 'amazon-bedrock'])
 //
 // pi-ai 的 provider 元数据（catalog）只含 auth.oauth.name，clientId/flow/endpoints/scopes/callbackPort
 // 硬编码在各 oauth 实现文件的源码里，本脚本用正则从源码提取（pi-ai 升级后靠
-// scripts/gen-builtin-providers.test.ts 回归守卫）。已核实的 6 个 oauth provider 常量名（0.82.1）：
+// scripts/gen-builtin-providers.test.ts 回归检查）。已核实的 6 个 oauth provider 常量名（0.82.1）：
 // - anthropic:      CLIENT_ID(base64 混淆)/AUTHORIZE_URL/TOKEN_URL/CALLBACK_PORT/SCOPES
 // - github-copilot: CLIENT_ID(base64 混淆)；端点在 getUrls() 函数内模板（domain 默认 github.com）
 // - kimi-coding:    CLIENT_ID(明文)/DEFAULT_OAUTH_HOST；端点在函数内模板（oauthHost 默认 DEFAULT_OAUTH_HOST）
@@ -396,7 +396,7 @@ export function generateBuiltinProviders() {
 }
 
 /**
- * 双向守卫校验 PROVIDER_ENV_VARS 镜像表与 pi-ai findEnvKeys 一致。
+ * 双向检查校验 PROVIDER_ENV_VARS 镜像表与 pi-ai findEnvKeys 一致。
  *
  * 方向 1（pi-ai → 镜像表）：对 catalog 每个 provider 调 findEnvKeys，得到 pi-ai 实际识别的
  * 全部 env var 名（probeEnv 用 Proxy——任意属性读都返回真值，等价于「所有变量均已设置」，

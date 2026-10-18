@@ -1,10 +1,10 @@
 /**
- * useAppUpdate 的联网检测主流程轴工厂（checkForUpdate 状态机 + 守卫族）。
+ * useAppUpdate 的联网检测主流程轴工厂（checkForUpdate 状态机 + 检查族）。
  *
  * - 请求令牌（renderToken）：用户快速连续点击检测时丢弃陈旧解析
- * - 防覆盖守卫：pendingRestored（恢复链已提醒）时不进 checking / 不回退 idle
+ * - 防覆盖检查：pendingRestored（恢复链已提醒）时不进 checking / 不回退 idle
  * - 限额退避（rateLimited）：「限额未知」≠「确认无新版」，恢复原态 + 一次性提示
- * - 状态守卫 ES4/ES5：downloaded 态不被联网检测误覆盖（同版本保持 / 新版本退回 available）
+ * - 状态检查 ES4/ES5：downloaded 态不被联网检测误覆盖（同版本保持 / 新版本退回 available）
  *
  * 令牌与限额提示标记是检测轴的私有可变态，收进 createCheckAxis 闭包——
  * 每个控制器实例独立一份，测试建新控制器即隔离。
@@ -38,15 +38,15 @@ export type CheckSource = 'manual' | 'auto'
  * ipc check 超时兜底（毫秒）。Electron invoke 无内置超时——main 侧网络路径虽已配 10s 级
  * 超时，但一旦 invoke 因任意形态永不返回，checkForUpdate 挂起会连锁杀死两条通路：
  * 自动调度链（runAutoCheck 在 await 之后才排下一周期，见 use-app-update-autocheck）与
- * state（固化 checking，canCheck 守卫此后跳过一切自动检查）。此处保证 checkForUpdate
- * 恒在 60s 内落定（超时按失败收口），单次挂死不再永久失效。60s 覆盖 main 侧最坏
+ * state（固化 checking，canCheck 检查此后跳过一切自动检查）。此处保证 checkForUpdate
+ * 恒在 60s 内落定（超时按失败收尾），单次挂死不再永久失效。60s 覆盖 main 侧最坏
  * 路径（探测 3s + 双源×双通道 fetch 10s + manifest 10s）且不误伤慢检查。
  */
 const IPC_CHECK_TIMEOUT_MS = 60_000
 
 /**
  * 给 ipc check promise 加墙钟超时：超时 reject（由 checkForUpdate 的 catch 按
- * source 收口），保证 checkForUpdate 恒在有限时间内落定。原 promise 迟到的
+ * source 收尾），保证 checkForUpdate 恒在有限时间内落定。原 promise 迟到的
  * resolve/reject 无人消费、自然丢弃——迟到结果视为不可信，等下一次检查取新值。
  * timer 随 settle 清理防泄漏。
  */
@@ -103,15 +103,15 @@ export function createCheckAxis(deps: CheckAxisDeps): CheckAxis {
   let renderToken = 0
 
   /**
-   * 进入 checking 态前的状态守卫：记录本次检测前的稳定态（prevState）并按需置 checking。
+   * 进入 checking 态前的状态检查：记录本次检测前的稳定态（prevState）并按需置 checking。
    *
-   * 防覆盖守卫：若已从 pending 恢复 available 态，联网检测不进入 checking 态
+   * 防覆盖检查：若已从 pending 恢复 available 态，联网检测不进入 checking 态
    * （否则 available→checking→idle 会短暂隐藏提醒，且失败/无更新会丢失已恢复的提醒）。
    * 仅当未恢复 pending（首次检测 / 正常流程）时才进入 checking 态。
    * prevState：限额退避（rateLimited）时恢复原态——「限额未知」≠「确认无新版」，
    * 不应把已有 available 提醒回退成 idle（RM2.3，2026-08 一致性审查补齐）。
-   * 降级守卫：理论并发（上一 check 未返回又触发本次）时 state 可能仍是瞬态 checking，
-   * 恢复瞬态态会被周期检查守卫卡死（canCheck 不含 checking），降级为 idle。
+   * 降级检查：理论并发（上一 check 未返回又触发本次）时 state 可能仍是瞬态 checking，
+   * 恢复瞬态态会被周期检查卡死（canCheck 不含 checking），降级为 idle。
    */
   function beginCheckTransition(): UpdateState {
     const prevState = state.state.state === 'checking' ? 'idle' : state.state.state
@@ -140,7 +140,7 @@ export function createCheckAxis(deps: CheckAxisDeps): CheckAxis {
    * myToken 用于渲染完成后的防陈旧检查（令牌语义见 checkForUpdate）。
    */
   function applyCheckResult(info: LatestReleaseInfo, myToken: number): void {
-    // 状态守卫 ES4：downloaded/replacing/restarting 不被覆盖（除非检测到更新版本=ES5）
+    // 状态检查 ES4：downloaded/replacing/restarting 不被覆盖（除非检测到更新版本=ES5）
     const currentVersion = state.state.latestRelease?.version
     const isUpgrading = info.version !== currentVersion // 检测到不同（更新）版本
     if (
@@ -169,9 +169,9 @@ export function createCheckAxis(deps: CheckAxisDeps): CheckAxis {
   }
 
   /**
-   * 无新版回退 idle。防覆盖守卫：若已从 pending 恢复（pendingRestored=true），保持 available——
+   * 无新版回退 idle。防覆盖检查：若已从 pending 恢复（pendingRestored=true），保持 available——
    * pending 标志证明曾检测到更新，联网检测此刻未发现可能是缓存/网络问题，不应丢失提醒。
-   * 检测失败路径（handleCheckFailure）复用同一守卫，语义一致。
+   * 检测失败路径（handleCheckFailure）复用同一检查，语义一致。
    */
   function resetToIdleAfterMiss(): void {
     if (!state.flags.pendingRestored) {
@@ -183,7 +183,7 @@ export function createCheckAxis(deps: CheckAxisDeps): CheckAxis {
    * 检测失败处理（RD-4#5）：区分触发源决定失败是否显形。
    * - manual（用户点击「检查更新」/「重试」）：置 state='error' + errorMessage 指向恢复动作
    *   （「网络不可达，请检查连接或前往下载页」）——失败与「已是最新版」（idle）必须可区分。
-   * - auto（周期/补查/STALE 重查）：保持既有静默 + 防覆盖守卫回退，不打扰用户。
+   * - auto（周期/补查/STALE 重查）：保持既有静默 + 防覆盖检查回退，不打扰用户。
    * 两者都先做防陈旧丢弃（丢弃陈旧的失败结果）并 console.warn 便于诊断。
    */
   function handleCheckFailure(e: unknown, myToken: number, source: CheckSource): void {
@@ -197,7 +197,7 @@ export function createCheckAxis(deps: CheckAxisDeps): CheckAxis {
       state.state.errorMessage = t('settings.system.checkUpdateFailed')
       state.state.errorSuggestion = ''
     } else {
-      // 自动检查保持静默：防覆盖守卫 pendingRestored 时不回退 idle（见 resetToIdleAfterMiss 理由）
+      // 自动检查保持静默：防覆盖检查 pendingRestored 时不回退 idle（见 resetToIdleAfterMiss 理由）
       resetToIdleAfterMiss()
     }
   }

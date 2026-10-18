@@ -6,9 +6,9 @@
     切走再切回本 session（useInboundFrameGuard 的 watch 自动重试一次订阅），提示条内
     文案明示该动作；不放重试按钮——「对端自行恢复」无观测信号，恢复动作统一收敛到
     用户切换行为（设计 D8 恢复触发器裁决）。
-    状态源：useInboundFrameGuardState 的 trippedSessionIds（core ws-client 终止阀投影）。
+    状态源：useInboundFrameGuardState 的 trippedSessionIds（core ws-client 终止阀派生视图）。
     挂载点：会话视图内（props.sessionId 由宿主传入）；App 装配层 installInboundFrameGuard()
-    已启动状态投影。
+    已启动状态派生视图。
   -->
   <div
     v-if="tripped"
@@ -46,7 +46,7 @@ const tripped = computed(() => trippedSessionIds.value.has(props.sessionId))
 
 // 文案内建双语字面量（按 i18n locale 判定），未进 i18n 注册表——聚合行文件
 // （locales/zh-CN.ts / en-US.ts）是并行单元热点（u3b/u7d 批次共改），本单元领地不含
-// i18n 文件。i18n 注册迁移随批次收口（阶段 6 文档同步义务）统一补齐。
+// i18n 文件。i18n 注册迁移随批次收尾（阶段 6 文档同步义务）统一补齐。
 const TEXT = {
   zh: {
     title: '本会话数据流已暂停',

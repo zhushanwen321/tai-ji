@@ -48,7 +48,7 @@ describe('A13 sessionsInRuntimeGroupOrder：组序恒等（runtime 权威序唯�
     expect(sessionsInRuntimeGroupOrder(groups).map((s) => s.id)).toEqual(['b2', 'b1', 'a1'])
   })
 
-  it('createSessionStore().list 经同一谓词派生（store 投影与谓词唯一定义点同源）', () => {
+  it('createSessionStore().list 经同一谓词派生（store 派生视图与谓词唯一定义点同源）', () => {
     const groups: SessionGroup[] = [
       { cwd: '/b', sessions: [session('b1', 1000), session('b2', 9000)] },
       { cwd: '/a', sessions: [session('a1', 5000), session('a2', 4000)] },

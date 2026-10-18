@@ -14,7 +14,7 @@
 // 现状语义：run.params.resume 为唯一会话形态键；会话形态请求由 conversation 能力门
 // 派发前预检（manifest 无 gate 位 → engine_capability_unsupported + 升级引擎包指引，
 // 判据 6 先例）；事件变体增量同演进政策 ①——新变体进 union，旧宿主 runtime
-// reducer default no-op 安全落空 / journal 豁免面不感知，协议版本维持 1 不 bump。
+// reducer default no-op 安全落空 / journal 豁免范围不感知，协议版本维持 1 不 bump。
 //
 // ==================== 演进政策三条（协议宪法） ====================
 // ① additive 面：新增可选字段/事件变体/方法/反向通道不 bump 版本，旧端对新成员忽略
@@ -65,10 +65,10 @@
 // 存量不搬家（搬家本身是删改）——判据回判发现的错位只登记，major bump 时按清单清理：
 //   - idleTimeoutMs：判据 1 明确错位（六引擎映射全部不支持，实为宿主 idle GC 参数）；
 //   - scene / description：弱错位待核（宿主消费为主，逐引擎核实 pi 侧是否消费再定）；
-//   - schemaEnv：待消亡——H1b 收口未完成（packages/subagent-core/src/execution/engine/
-//     client/remote-engine.ts:382 仍 `ctx.schemaEnv ?? task.schemaEnv` 双源，在飞不重复
+//   - schemaEnv：待消亡——H1b 收敛未完成（packages/subagent-core/src/execution/engine/
+//     client/remote-engine.ts:382 仍 `ctx.schemaEnv ?? task.schemaEnv` 双源，在途不重复
 //     处理）；wire 层禁令断言现状纯 never、无豁免（键集交集为空——AgentCallOpts 已
-//     单侧排除 schemaEnv），收口后仅回看断言注释（wire-field-locks.test.ts）；
+//     单侧排除 schemaEnv），收敛后仅回看断言注释（wire-field-locks.test.ts）；
 //   - steer：能力位无独立 wire 执行通道（判据 7 首个登记条目，只登记不设计）。
 // 重审触发条件（任一命中 → 提前清理裁决，不等 major bump）：遗留清单 >5 项，或任一
 // 错位引发实际派发事故。

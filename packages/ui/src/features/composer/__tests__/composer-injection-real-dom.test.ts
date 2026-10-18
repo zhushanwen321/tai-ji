@@ -63,7 +63,7 @@ function setupRealChipChain(variant: 'panel' | 'landing', sessionId: string | nu
     t: (key: string) => key,
   } as ChipCallbacks)
   // 模拟 ComposerInput 的 defineExpose 对象（useComposerInjection 通过 inputRef.value 访问）。
-  // W4：core 统一 ComposerInputInstance 契约（input/types.ts）——mock 只实现注入消费面，
+  // W4：core 统一 ComposerInputInstance 契约（input/types.ts）——mock 只实现注入消费方，
   // 用断言补齐剩余方法（clear/setText 等壳层消费方法在真实组件上有，mock 不需要）。
   const fakeInputRef = ref({
     focus: vi.fn(),

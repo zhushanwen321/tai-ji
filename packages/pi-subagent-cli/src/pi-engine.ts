@@ -202,7 +202,7 @@ export class PiEngine implements EnginePort {
   }
 
   /**
-   * read 三级降级（协议化形态）：②级 journal 重放（SDK journal-replay 纯投影）
+   * read 三级降级（协议化形态）：②级 journal 重放（SDK journal-replay 纯派生视图）
    * → ③级 outcome-only。①级 pi 原生读取（session-reconstructor）按 §2.7 保持
    * core，不随迁（deviations 登记）。
    */
@@ -457,7 +457,7 @@ function toOutcome(result: SpawnRunResult): AgentOutcome {
     ...(result.error !== undefined ? { error: result.error } : {}),
     ...(result.sessionId !== undefined ? { sessionId: result.sessionId } : {}),
     ...(result.sessionFile !== undefined ? { sessionFile: result.sessionFile } : {}),
-    // [D5 诊断引用落账] 失败伴随的 stderr tee 路径透传上协议（spawn-runner 装配，
+    // [D5 诊断引用写入 journal 记录] 失败伴随的 stderr tee 路径透传上协议（spawn-runner 装配，
     // 判据见 AgentOutcome.stderrTeePath 注释）。
     ...(result.stderrTeePath !== undefined ? { stderrTeePath: result.stderrTeePath } : {}),
     toolCalls: result.toolCalls.map((tc) => ({

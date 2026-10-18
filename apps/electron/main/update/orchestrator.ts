@@ -264,7 +264,7 @@ function oppositeSource(source: UpdateSource): UpdateSource {
  * 不消费缓存 / 退避 / 源顺序状态，独立实例无状态副作用。
  *
  * 惰性构造的理由：避免模块加载期副作用；且 u-checker（fetchReleaseByTag 实现）落地前
- * release.source 恒为 undefined（检查链尚未多源化），降级链在 source 守卫处即被拦截，
+ * release.source 恒为 undefined（检查链尚未多源化），降级链在 source 检查处即被拦截，
  * 默认实例不会被真正调用——中间态安全。
  */
 let defaultFailoverChecker: IReleaseChecker | undefined
@@ -308,7 +308,7 @@ function isAllowedDownloadUrl(url: string): boolean {
   }
 }
 
-/** 跨源降级入参（downloadUpdate 内聚装配，收口成对象避免参数列膨胀）。 */
+/** 跨源降级入参（downloadUpdate 内聚装配，收敛成对象避免参数列膨胀）。 */
 interface ICrossSourceResumeInput {
   /** 本源胜出 asset（完整性基准 sha256/size 与 temp 键控 name 的来源） */
   asset: ReleaseAsset
@@ -335,7 +335,7 @@ interface ICrossSourceResumeInput {
  * 降级续传仅替换 downloadUrl，完整性基准（sha256/size）保持原胜出源 asset——tag 重发
  * 发散窗口下对侧内容将因 sha256 不符 fail-fast（与 D8 语义一致）。temp 按 asset.name
  * 键控 + resume-state 按 temp 路径匹配（download-asset 既有机制），跨源续传天然命中
- * 同一断点；totalBytes 不符由既有守卫自动转全量（§11.4 三组合）。
+ * 同一断点；totalBytes 不符由既有检查自动转全量（§11.4 三组合）。
  *
  * 降级发生点（对侧确认可用、实际转向续传前）登记 logSourceFailover(segment='download')；
  * by-tag null（404 发布时间窗）与 200 但目标 asset 缺失（部分同步失败窗口）同语义：
@@ -446,7 +446,7 @@ export async function resolveByVersion(
     )
   }
 
-  // ③ 版本格式非法 → 直接拒绝。typeof 守卫先行：IPC payload 不受 TS 类型约束，
+  // ③ 版本格式非法 → 直接拒绝。typeof 检查先行：IPC payload 不受 TS 类型约束，
   //    数字等非 string 值会被正则隐式串化绕过（123 → '123' 合法），必须显式拒绝
   if (typeof version !== 'string' || !REQUESTED_VERSION_RE.test(version)) {
     lastResolveRejectedAt = Date.now()

@@ -4,7 +4,7 @@
 
   ── 数据面（D7：native 直连，零新协议）──
   inject TRAY_COUNTS_KEY（外壳单例）：本面板**不自建 useTrayCounts 实例**（面板随 Popover
-  开合反复挂载，自建即每次打开重发首拉）；子会话行集来自 `tray.lists.session.children`
+  开合反复挂载，自建即每次打开重发首次拉取）；子会话行集来自 `tray.lists.session.children`
   （native 直连 session store，过滤 parentAgentSessionId === 外壳 sessionId，无新 RPC/订阅）。
 
   ── 形态（与三件任务面板的差异面）──

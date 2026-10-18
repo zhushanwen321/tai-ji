@@ -239,7 +239,7 @@ describe('上报与派发（useGlobalShortcuts 装配点）', () => {
       const dispatch = ipcMock.forwardKeyHandlers[0]!
       const composer = document.querySelector('[data-testid="composer-box"]') as HTMLElement
       composer.querySelector('[contenteditable="true"]')!.focus()
-      // 宿主 window keydown 路径会因 composer 聚焦禁用 fork 条目；转发路径不适用该守卫
+      // 宿主 window keydown 路径会因 composer 聚焦禁用 fork 条目；转发路径不适用该检查
       dispatch({ accelerator: 'mod+g' })
       expect(forkFromLastAssistant).toHaveBeenCalledTimes(1)
       stop()

@@ -206,7 +206,7 @@ describe("RemoteEngine 同步成员形态映射（必写死）", () => {
 });
 
 describe("RemoteEngine run 帧映射", () => {
-  it("task 子集收窄（model/cwd 改挂 ctx）+ ctxModel 投影 provider/id", async () => {
+  it("task 子集收窄（model/cwd 改挂 ctx）+ ctxModel 映射 provider/id", async () => {
     const { engine, cleanup } = makeEngine();
     const { ctx, events } = makeCtx({
       ctxModel: { id: "glm-5.1", name: "GLM", provider: "zai", reasoning: true },
@@ -403,7 +403,7 @@ describe("abort 分级（cancel 帧 + 收敛兜底窗）", () => {
 
   it("[S1 P1] cancel 收敛兜底窗常量 = 30s（pi 停轮收敛实测 15s 的 2× 量级——量级校准回归锚）", () => {
     // 历史误校准：SDK CANCEL_SETTLE_GRACE_MS(3s) 是控制面单请求量级，被误用为
-    // 任务级停轮收敛窗 → 常驻引擎在 pi 正常收敛途中被组杀（S1 主路径 8/8 失败）。
+    // 任务级停轮收敛窗 → 常驻引擎在 pi 正常收敛途中被按进程组终止（S1 主路径 8/8 失败）。
     // 本断言锚定兜底窗按被保护对象粒度（任务级）校准，防止再被「优化」回秒级。
     expect(CANCEL_SETTLE_GRACE_WINDOW_MS).toBe(30_000);
   });
@@ -730,7 +730,7 @@ describe("armed 回执等待门（[D3 协议版 P6]）", () => {
       // ① cancel 受理失败出声（原空 catch 吞信号）
       expect(errorSpy).toHaveBeenCalledWith(expect.stringContaining("armed receipt timeout cancel failed"));
       // ② 兜底 timer 武装并在 grace（300ms）到点触发：per-window 引擎 → 本实例
-      //    dispose（dispose 请求 → 组杀兜底），引擎进程消亡（薄壳整体回收）。
+      //    dispose（dispose 请求 → 按进程组终止兜底），引擎进程消亡（薄壳整体回收）。
       await waitForTrue(() => probePidAliveness(enginePid) === false);
       await waitForTrue(() => client.currentState === "disposed");
     } finally {
@@ -754,7 +754,7 @@ describe("armed 回执等待门（[D3 协议版 P6]）", () => {
     const { ctx } = makeCtx();
     try {
       const runPromise = engine.run({ prompt: "p", schema: { type: "object" } }, ctx);
-      // 孙进程上报镜像（childSpawned 反向通道落账 = 回收目标的确定性同步点）
+      // 孙进程上报镜像（childSpawned 反向通道写入 journal 记录 = 回收目标的确定性同步点）
       await waitForTrue(() => client.mirror.snapshot().some((e) => e.recordId === "run-1" && e.state === "running"));
       const child = client.mirror.snapshot().find((e) => e.recordId === "run-1");
       expect(child).toBeDefined();

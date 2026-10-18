@@ -101,7 +101,7 @@ describe('readRemoteAccessConfig', () => {
     try {
       const config = readRemoteAccessConfig(TMP_DATA_DIR)
       // 降级为关态 fail-closed；token 空串 = 缺失形态（磁盘态不可信，不产磁盘上
-      // 不存在的假 token 误导面板——上游 fullUrl 有 token 真值守卫，空值不渲染假链接）
+      // 不存在的假 token 误导面板——上游 fullUrl 有 token 真值检查，空值不渲染假链接）
       expect(config.enabled).toBe(false)
       expect(config.token).toBe('')
       expect(config.createdAt).toBeTruthy()
@@ -337,7 +337,7 @@ describe('ensureRemoteAccessIntegrity（E10 损坏重建，经 read 触发）', 
   })
 })
 
-describe('isValidRemoteAccessConfig（结构守卫）', () => {
+describe('isValidRemoteAccessConfig（结构检查）', () => {
   it('合法形态放行', () => {
     expect(
       isValidRemoteAccessConfig({ enabled: true, token: '6'.repeat(64), createdAt: '2026-01-01T00:00:00.000Z' }),

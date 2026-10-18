@@ -44,7 +44,7 @@
     <FileText class="size-5 text-neutral-faint" aria-hidden="true" />
     <p class="text-[length:var(--text-xs)] text-neutral-dim">{{ t('plan.drawer.noPlan') }}</p>
     <p class="text-[length:var(--text-2xs)] text-neutral-dim">{{ t('plan.drawer.planHint') }}</p>
-    <!-- 首拉失败（分区 loadError，u1-store 错误通路）：view 为空时状态带不渲染（isActive 门），
+    <!-- 首次拉取失败（分区 loadError，u1-store 错误通路）：view 为空时状态带不渲染（isActive 门），
          错误若只落状态带呈全面即静默降级（C-U1）——本面板空态就近呈现「错误 + 恢复指引」，
          与 PlanModeBar 状态带错误行同款形态 -->
     <p
@@ -211,7 +211,7 @@
  * 修订刷新（G3）：刷新键 = 选中文档 absPath + version + 生命周期状态组合——agent 修订重
  * 登记（version bump）或状态离开 revising（resolvePlanLifecycleState 解析归一 View 的
  * state）时键变化 → 重新 file.read；tab 切换
- * （absPath 变化）同键承载，单一 watch 收口三种触发。loadingPath 标记防并发竞态
+ * （absPath 变化）同键承载，单一 watch 收尾三种触发。loadingPath 标记防并发竞态
  * （CommandDocPanel 同款：异步期间切走丢弃旧结果）。
  *
  * D4 降级（§3.2 矩阵 #3）：旧 entry 无 docs 字段（或模板流程 docs 空）且 **!isActive** →
@@ -360,8 +360,8 @@ async function loadSelected(): Promise<void> {
 }
 
 /**
- * 刷新键单 watch 收口三种触发：tab 切换（absPath）/ 修订重登记（version bump）/ 修订
- * 收尾（生命周期状态变化含离开 revising，D2③ 解析值）。immediate 承担挂载首拉；null 键 = 无选中，
+ * 刷新键单 watch 收尾三种触发：tab 切换（absPath）/ 修订重登记（version bump）/ 修订
+ * 收尾（生命周期状态变化含离开 revising，D2③ 解析值）。immediate 承担挂载首次拉取；null 键 = 无选中，
  * 清空正文。
  */
 watch(

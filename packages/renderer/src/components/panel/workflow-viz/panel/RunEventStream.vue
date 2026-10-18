@@ -5,7 +5,7 @@
   无重试 vs 暂时错误重试按钮；oversize 降级 = record 文件超 32MB 读取上限、events 恒空
   + oversize 标志的第三态，RT-4#8「不可用 ≠ 无数据」同款分形）。数据源 = workflowStore
   事件流缓存（与 Gantt 子页共享同一份拉取，§3.1-2）；刷新链 = workflowUpdate 信号
-  （store 内聚合 force 重拉），本组件零订阅。
+  （store 内聚合 force 重新拉取），本组件零订阅。
   -->
   <div class="flex min-w-0 flex-1 flex-col overflow-hidden" data-testid="wf-viz-event-stream">
     <!-- 加载态 -->
@@ -36,7 +36,7 @@
       </Button>
     </div>
     <!-- oversize 降级（RT-4#8 同款分形：record 文件超 32MB 读取上限——「不可用」非
-         「无数据」，无重试（重拉结果恒同）） -->
+         「无数据」，无重试（重新拉取结果恒同）） -->
     <div v-else-if="entry?.oversize" class="flex flex-1 flex-col items-center justify-center gap-2 p-6 text-center" data-testid="wf-viz-events-oversize">
       <AlertCircle class="size-6 text-neutral-dim opacity-60" />
       <p class="text-[length:var(--text-xs)] text-neutral-fg">{{ t('panel.workflowViz.eventsOversize') }}</p>

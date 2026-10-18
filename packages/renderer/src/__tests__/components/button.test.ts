@@ -1,7 +1,7 @@
 // @vitest-environment node
 
 /**
- * buttonVariants base class 回归守卫（Plan 02 — Button 按下物理反馈）。
+ * buttonVariants base class 回归检查（Plan 02 — Button 按下物理反馈）。
  *
  * 守护契约 C1：buttonVariants 的 base class 必须含按下物理反馈 token：
  *   - active:scale-[0.97]（press 微缩，AUDIT §3 推荐区 0.95-0.98 中值）

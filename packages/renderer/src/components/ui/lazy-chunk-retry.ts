@@ -70,7 +70,7 @@ export type BustedImport = (url: string) => Promise<unknown>
 const runtimeBustedImport: BustedImport = (url) =>
   import(/* @vite-ignore */ url)
 
-export interface LazyChunkRetry<T = unknown> { // oe-exempt:20261003:framework:类型契约先行——重试状态机契约即测试消费面（状态机单测按此接口驱动），单实现为常态
+export interface LazyChunkRetry<T = unknown> { // oe-exempt:20261003:framework:类型契约先行——重试状态机契约即测试消费方（状态机单测按此接口驱动），单实现为常态
   /** wrapper 重挂 key：每次自动重试自增（重试的唯一驱动，见头注「重试驱动形态」） */
   retryKey: Readonly<Ref<number>>
   /** 传给 defineAsyncComponent 的 loader（首载走静态 import，重试走 busted import） */

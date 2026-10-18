@@ -170,7 +170,7 @@ function isKnownSound(name: string, platform: SoundPlatform): boolean {
 /**
  * macOS 播放：spawn afplay（fire-and-forget，unref 不阻塞主进程退出）。
  * afplay 是用户态命令，无沙箱限制，自己管理播放时长。
- * 文件不存在时记录警告并返回空对象（统一 existsSync 守卫，避免 spawn 不存在的路径
+ * 文件不存在时记录警告并返回空对象（统一 existsSync 检查，避免 spawn 不存在的路径
  * 导致 child.on('error') 静默吞错——见 S4）。
  */
 function playMac(name: string): SoundPlayResult {
@@ -187,7 +187,7 @@ function playMac(name: string): SoundPlayResult {
 
 /**
  * Linux 播放：探测 paplay/pw-play/aplay，spawn 后 unref。
- * 无可用播放器或声音文件不存在时返回空对象（统一 existsSync 守卫——见 S4，
+ * 无可用播放器或声音文件不存在时返回空对象（统一 existsSync 检查——见 S4，
  * 避免 spawn 不存在的路径让 child.on('error') 静默吞错）。
  */
 function playLinux(name: string): SoundPlayResult {

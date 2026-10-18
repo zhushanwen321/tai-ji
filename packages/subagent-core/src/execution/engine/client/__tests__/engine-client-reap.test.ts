@@ -5,9 +5,9 @@
 //
 // 覆盖分支：
 //   - 非主动死亡（!intentionalKill && alreadyDead）POSIX → 复用 killProcessTree 负 pid
-//     组杀（fire-and-forget），且仅组杀一次（无外层逐 pid 兜底——grace 窗不被压缩）；
+//     按进程组终止（fire-and-forget），且仅按进程组终止一次（无外层逐 pid 兜底——grace 窗不被压缩）；
 //   - intentionalKill 路径跳过（主动 dispose 链已有两层杀——不叠加、优雅窗零压缩）；
-//   - 引擎进程仍活（握手失败重建路径）不触发收割（下方既有组杀兜底承接，行为不变）；
+//   - 引擎进程仍活（握手失败重建路径）不触发收割（下方既有按进程组终止兜底承接，行为不变）；
 //   - Windows 通道：置死前 mirror.snapshot 过滤活孤儿（state==="running" && !killed——
 //     死 pid 与 killed 项不进清单）后逐 pid **异步 spawn** taskkill（无 spawnSync——
 //     同步逐个会冻结 onEngineExit 回调、推迟 pending reject）；
@@ -24,7 +24,7 @@ const { loggerMock } = vi.hoisted(() => ({
 }));
 vi.mock("../../../../core/logger.ts", () => ({ getLogger: () => loggerMock }));
 
-// killProcessTree spy（POSIX 组杀断言）；waitForChildExit 保留真实现（killAll 消费）。
+// killProcessTree spy（POSIX 按进程组终止断言）；waitForChildExit 保留真实现（killAll 消费）。
 const { killProcessTreeSpy } = vi.hoisted(() => ({ killProcessTreeSpy: vi.fn() }));
 vi.mock("../reaper.ts", async (importOriginal) => {
   const actual = await importOriginal<typeof import("../reaper.ts")>();
@@ -72,7 +72,7 @@ function plantDeadChild(client: EngineClient, pid: number): void {
   };
 }
 
-/** 塞一个活着的假引擎 child（alreadyDead 不命中——既有组杀兜底路径）。 */
+/** 塞一个活着的假引擎 child（alreadyDead 不命中——既有按进程组终止兜底路径）。 */
 function plantLiveChild(client: EngineClient, pid: number): void {
   (client as unknown as { child: unknown }).child = {
     pid,
@@ -94,7 +94,7 @@ function mirrorEntry(pid: number, state: "running" | "exited", killed: boolean):
   return { pid, recordId: `sa-${pid}`, state, killed, updatedAt: Date.now() };
 }
 
-describe("红线①收割链：非主动死亡路径（POSIX 组杀）", () => {
+describe("红线①收割链：非主动死亡路径（POSIX 按进程组终止）", () => {
   beforeEach(() => {
     killProcessTreeSpy.mockClear();
     spawnSpy.mockClear();
@@ -105,14 +105,14 @@ describe("红线①收割链：非主动死亡路径（POSIX 组杀）", () => {
     vi.restoreAllMocks();
   });
 
-  it("引擎意外死（alreadyDead + !intentionalKill）→ teardownProcess 内 mirror.killAll 之前组杀引擎 pid", () => {
+  it("引擎意外死（alreadyDead + !intentionalKill）→ teardownProcess 内 mirror.killAll 之前按进程组终止引擎 pid", () => {
     const client = makeClient();
     plantDeadChild(client, 4321);
     client.mirror.recordSpawned(9100, "sa-a"); // 死前 spawn 的任务子进程（活孤儿）
 
     (client as unknown as { teardownProcess: (d: string) => void }).teardownProcess("signal SIGKILL");
 
-    // POSIX：复用 killProcessTree 负 pid 组杀（目标 = 引擎 pid，组内含任务子进程——
+    // POSIX：复用 killProcessTree 负 pid 按进程组终止（目标 = 引擎 pid，组内含任务子进程——
     // 不依赖镜像）
     expect(killProcessTreeSpy).toHaveBeenCalledTimes(1);
     expect(killProcessTreeSpy).toHaveBeenCalledWith(
@@ -120,12 +120,12 @@ describe("红线①收割链：非主动死亡路径（POSIX 组杀）", () => {
       expect.stringContaining("reap orphaned children"),
       { engineId: "fake" },
     );
-    // 收割插入点在镜像置死之前：killAll 后快照已清（此处仅验证组杀发生在 teardown 内
+    // 收割插入点在镜像置死之前：killAll 后快照已清（此处仅验证按进程组终止发生在 teardown 内
     // 且镜像最终被置死清空）
     expect(client.mirror.size).toBe(0);
   });
 
-  it("无外层逐 pid 兜底：组杀仅一次（5s grace 窗不被同步校验压缩）", () => {
+  it("无外层逐 pid 兜底：按进程组终止仅一次（5s grace 窗不被同步校验压缩）", () => {
     const client = makeClient();
     plantDeadChild(client, 4321);
     for (let i = 0; i < 5; i++) client.mirror.recordSpawned(9000 + i, `sa-${i}`); // 多个活孤儿
@@ -150,13 +150,13 @@ describe("红线①收割链：非主动死亡路径（POSIX 组杀）", () => {
     expect(client.mirror.size).toBe(0); // 置死清空照常
   });
 
-  it("引擎进程仍活（握手失败重建路径）→ 不触发收割分支（既有组杀兜底承接，行为不变）", () => {
+  it("引擎进程仍活（握手失败重建路径）→ 不触发收割分支（既有按进程组终止兜底承接，行为不变）", () => {
     const client = makeClient();
     plantLiveChild(client, 4321);
 
     (client as unknown as { teardownProcess: (d: string) => void }).teardownProcess("handshake failed");
 
-    // alreadyDead 不命中 → 收割链跳过；活进程组杀由 teardown 既有兜底承接（reason 原样）
+    // alreadyDead 不命中 → 收割链跳过；活进程按进程组终止由 teardown 既有兜底承接（reason 原样）
     expect(killProcessTreeSpy).toHaveBeenCalledTimes(1);
     expect(killProcessTreeSpy).toHaveBeenCalledWith(4321, "handshake failed", { engineId: "fake" });
   });

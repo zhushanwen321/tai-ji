@@ -3,7 +3,7 @@
  * 文本行，波 4；关闭 ADR-0074「outbox 不落盘」代价）。
  *
  * 形态：JSONL 追加文件，每行一个 JSON 对象（`t` 字段判别行型），单调累积——
- * - `{"t":"record","r":<DeliveryStoreRecord>}`：受理前落账（耐久承诺先于投递尝试）；
+ * - `{"t":"record","r":<DeliveryStoreRecord>}`：受理前写入记录（耐久承诺先于投递尝试）；
  * - `{"t":"ack","id":...}`：终局（delivered / cancelled 同形，判重只看 id）——终局行
  *   保留是判重依据（已撤销消息的防复活凭据同样在此），**单调累积、不实现清理通道**；
  * - `{"t":"discard","id":...}`：forget 失败条目的记录移除（无终局无判重语义，区别于
@@ -85,7 +85,7 @@ export function createDiskDeliveryStore(deps: DiskDeliveryStoreDeps): DiskDelive
   const { fs, dir, file } = deps
   const log = deps.log ?? ((message: string, err?: unknown): void => { console.warn(message, err ?? '') })
 
-  // 全量行序重放的内存投影（懒加载一次；此后运行期直接维护，不重读文件）
+  // 全量行序重放的内存派生数据（懒加载一次；此后运行期直接维护，不重读文件）
   let loaded = false
   const records = new Map<string, DeliveryStoreRecord>()
   const terminalIds = new Set<string>()
@@ -124,7 +124,7 @@ export function createDiskDeliveryStore(deps: DiskDeliveryStoreDeps): DiskDelive
       raw = fs.readFileSync(file, 'utf8')
     } catch (err) {
       // 读取失败按空文件处理：判重失效（terminalIds 空 → 宁可多投）+ 本轮重放源
-      // 不可用（内存投影全空，loadUndelivered 返回空不重放）；warn 留痕，重启重读自愈。
+      // 不可用（内存派生数据全空，loadUndelivered 返回空不重放）；warn 留痕，重启重读自愈。
       log(`[disk-delivery-store] read failed (treated as empty), file=${file}`, err)
       return
     }

@@ -11,7 +11,7 @@
 // 往返测试 + core/zcode 各自 journal 直测覆盖。
 //
 // 分层：只承接读侧（replay）。JournalWriter（写入器）留 core——宿主侧职责；本模块
-// 与 journal-replay.ts（纯投影，无 fs）分离，保持投影层零文件系统依赖。
+// 与 journal-replay.ts（纯派生视图，无 fs）分离，保持派生视图层零文件系统依赖。
 
 import { readFileSync } from "node:fs";
 

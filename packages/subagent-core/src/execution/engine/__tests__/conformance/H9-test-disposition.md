@@ -1,8 +1,8 @@
-# W10 H9 测试面处置表（core 深路径测试三选一）
+# W10 H9 测试处置表（core 深路径测试三选一）
 
 > 实施计划 §2.10「core 测试逐文件三选一处置清单」的执行记录（W10，2026-09-09）。
 > 处置依据 = 文件 import 实测 + W5/W7 已迁件核对。处置后 core test 全绿
-> （2999 passed | 7 skipped；删除 48 文件 / 改写 5 文件 / 保留待 W11 同批改写 4 文件——保留的 4 文件已随 W3 收口（1 删 3 改写），见 §② 节尾回写注记）。
+> （2999 passed | 7 skipped；删除 48 文件 / 改写 5 文件 / 保留待 W11 同批改写 4 文件——保留的 4 文件已随 W3 收尾（1 删 3 改写），见 §② 节尾回写注记）。
 
 ## ① 已随引擎包迁移 —— 删除 core 重复副本（11 文件）
 
@@ -39,13 +39,13 @@ W5/W7 已把自包含件迁入引擎包（pi-subagent-cli / zcode-subagent-cli `
 | `execution/engine/__tests__/common/capability-gate.test.ts` | PiEngine/ZcodeEngine 内建构造 → 读两引擎包 package.json manifest `taiji.subagentEngine.capabilities`（同步成员唯一源；11 用例绿） |
 | `execution/engine/__tests__/conformance/contract.{probe,abort,read-degradation,agent-events}.test.ts` + `golden-replay.{pi,zcode}.test.ts` + `engine-conformance.live.test.ts` | conformance 契约套件整体协议黑盒化：RemoteEngine × fake 引擎 CLI / golden 语料改引擎包 `__golden__/` + 公共导出面 / live 门改「协议客户端 × 引擎包 CLI」形态（A2 真机形态本身） |
 
-## ② 改写被阻塞 —— 保留 + W10 处置注记，W11 同批改写（4 文件）[v1.x W3 已收口，见节尾回写注记]
+## ② 改写被阻塞 —— 保留 + W10 处置注记，W11 同批改写（4 文件）[v1.x W3 已收尾，见节尾回写注记]
 
 `src/__tests__/append-system-prompt-assembly.test.ts`、`execution/__tests__/explicit-agent-ref-guard.test.ts`、`execution/__tests__/delivery-methods.test.ts`、`execution/__tests__/gc-timer.test.ts`。
 
-阻塞原因（同根）：这些文件 `vi.mock("…engines/pi/session-runner.ts")` 拦截的**是 core 生产代码的 inproc 深路径 import**（subagent-service / lifecycle 谓词等消费点在生产侧）——mock 目标改指引擎包或镜像需生产 import 先改线，而 W6 已把改线收敛到 W11 收口（`subagent-service.ts` W7 注 + `lifecycle-predicates.test.ts` 仍深 import spawnedChildren 同证）。W11 删内建当轮必须同批改写这 4 个文件（每文件头部已留 `[W10 处置注记]`）。
+阻塞原因（同根）：这些文件 `vi.mock("…engines/pi/session-runner.ts")` 拦截的**是 core 生产代码的 inproc 深路径 import**（subagent-service / lifecycle 谓词等消费点在生产侧）——mock 目标改指引擎包或镜像需生产 import 先改线，而 W6 已把改线收敛到 W11 收尾（`subagent-service.ts` W7 注 + `lifecycle-predicates.test.ts` 仍深 import spawnedChildren 同证）。W11 删内建当轮必须同批改写这 4 个文件（每文件头部已留 `[W10 处置注记]`）。
 
-> **[v1.x W3 已收口 —— 回写注记（2026-09-09）]** 上方 4 文件已随 commit `0df9ef8b3`（W3 删 inproc pi 引擎 + chat 协议化改线）处理完毕：`append-system-prompt-assembly.test.ts` 删除，其余 3 文件改写为协议等价断言（`explicit-agent-ref-guard.test.ts` / `delivery-methods.test.ts` / `gc-timer.test.ts`，现头注 `[W3 改写]` 可核）。原 `[W10 处置注记]` 已被 `[W3 改写]` 头注取代，W11 对这 4 文件无剩余改写面。本节标题、阻塞原因与文首统计行保留作 W10 时点历史（[HISTORICAL] 纪律），现行状态以本注记为准。
+> **[v1.x W3 已收尾 —— 回写注记（2026-09-09）]** 上方 4 文件已随 commit `0df9ef8b3`（W3 删 inproc pi 引擎 + chat 协议化改线）处理完毕：`append-system-prompt-assembly.test.ts` 删除，其余 3 文件改写为协议等价断言（`explicit-agent-ref-guard.test.ts` / `delivery-methods.test.ts` / `gc-timer.test.ts`，现头注 `[W3 改写]` 可核）。原 `[W10 处置注记]` 已被 `[W3 改写]` 头注取代，W11 对这 4 文件无剩余改写面。本节标题、阻塞原因与文首统计行保留作 W10 时点历史（[HISTORICAL] 纪律），现行状态以本注记为准。
 
 ## ③ 声明废弃 —— 删除（34 文件 + 1 helper）
 
@@ -73,13 +73,13 @@ W5/W7 已把自包含件迁入引擎包（pi-subagent-cli / zcode-subagent-cli `
 | execution-runtime-face / engine-model-validation / session-view-service-zcode-dbpath | zcode 引擎内部（zcode 包 zcode-engine-* / reader / zcode-session-db-isolation 测试） |
 | `helpers/session-runner-mocks.ts` | 消费者全部随上表删除（spawn-mock.ts 保留——3 个存活壳侧行为测试仍消费） |
 
-## 未入清单的既有深路径引用（W11 处置面，W10 显式登记）[v1.x W3 已收口，见节尾回写注记]
+## 未入清单的既有深路径引用（W11 处置面，W10 显式登记）[v1.x W3 已收尾，见节尾回写注记]
 
 以下文件经 `vi.mock` 字符串路径引用 `engines/pi|zcode`（非值 import，grep 字符串命中），
 不在 §2.10 三选一清单内、本次未动，W11 删内建时同批核处：
 `recursive-visibility-baseline` / `nested-visibility-env-propagation` / `execute-nesting` / `execute-and-await-worktree` / `collect-coordinator-service` / `collect-mixed-dispatch` / `get-record-for-action-restart` / `stream-sink-retirement` / `subagent-agent-runner.test` / `subagent-service-{multiproc-guard,notify-gate,parent-guard,recovery-bounds}` / `sync-collect-recovery` / `helpers/{spawn-mock,subagent-service-mocks}` / `lifecycle-predicates.test`（归 W6/W11）。
 
-> **[v1.x W3 已收口 —— 回写注记（2026-09-09）]** 上节登记的 17 项（14 测试 + 2 helper + `lifecycle-predicates.test`）已全部随 commit `0df9ef8b3`（W3 删 inproc pi 引擎 + chat 协议化改线）处理完毕：节内所列文件在该 commit 全部为改写（M），无一保留原深路径 mock；其中 `subagent-agent-runner.test` 系 `subprocess-agent-runner.test.ts` 的简写登记，同在该 commit 改写。`vi.mock(…engines/pi|zcode)` 深路径命中现全 core 树清零（grep 实测：残留仅注释/用例描述文本，无模块路径引用）；`[W3]`/`[W3 改写]` 标记 17 项中 14 项可核（标记散布文件头部注记与用例旁注，非全在文件头），余 3 项（`execute-and-await-worktree` / `subagent-service-multiproc-guard` / `subagent-service-parent-guard`）无标记但同 commit 已删深路径 mock（diff 可核）。W11（commit `6d5f6747d`）对该面无剩余核处义务。原节登记保留作 W10 时点历史（[HISTORICAL] 纪律），现行状态以本注记为准。
+> **[v1.x W3 已收尾 —— 回写注记（2026-09-09）]** 上节登记的 17 项（14 测试 + 2 helper + `lifecycle-predicates.test`）已全部随 commit `0df9ef8b3`（W3 删 inproc pi 引擎 + chat 协议化改线）处理完毕：节内所列文件在该 commit 全部为改写（M），无一保留原深路径 mock；其中 `subagent-agent-runner.test` 系 `subprocess-agent-runner.test.ts` 的简写登记，同在该 commit 改写。`vi.mock(…engines/pi|zcode)` 深路径命中现全 core 树清零（grep 实测：残留仅注释/用例描述文本，无模块路径引用）；`[W3]`/`[W3 改写]` 标记 17 项中 14 项可核（标记散布文件头部注记与用例旁注，非全在文件头），余 3 项（`execute-and-await-worktree` / `subagent-service-multiproc-guard` / `subagent-service-parent-guard`）无标记但同 commit 已删深路径 mock（diff 可核）。W11（commit `6d5f6747d`）对该面无剩余核处义务。原节登记保留作 W10 时点历史（[HISTORICAL] 纪律），现行状态以本注记为准。
 
 
 ## 主会话修正（2026-09-09，W10 修复轮）
@@ -105,7 +105,7 @@ W5/W7 已把自包含件迁入引擎包（pi-subagent-cli / zcode-subagent-cli `
 
 - 引擎中途 SIGTERM → run 终态 failed（**D5 前置闸：本用例先于 W3 删 `engines/pi/session-runner.ts` 旧 143 误分类器存在并保持绿**，P2 探针的 conformance 承载）→ `conformance/engine-crash.test.ts`；
 - chat 轮次协议 v1.x（host/roundLifecycle 三相位 × runId|recordId 关联键回执链 + recordId 键 delta 分路 + conversation gate 负向 A6）→ `conformance/chat-round-protocol.test.ts`；
-- 翻档事实（三类型全 process 档、跨时长无 TTL 清理）+ fork 读侧过滤①③两口径 + **bash 跨 session 可见性显式断言**（R4 一刀钉成显式选择）+ 偏差 #4 探针（goal 守卫口径实测）→ `conformance/registry-fork-filter.test.ts`。
+- 翻档事实（三类型全 process 档、跨时长无 TTL 清理）+ fork 读侧过滤①③两口径 + **bash 跨 session 可见性显式断言**（R4 一刀钉成显式选择）+ 偏差 #4 探针（goal 检查口径实测）→ `conformance/registry-fork-filter.test.ts`。
 
 **goal 熔断（W5）处置**：**由 extension 侧单测承载，不重复造**——`extensions/universal/goal` 393 例已覆盖双维度熔断（circuit-breaker 6 + liveness 17：50 次封顶必停发、第 5 轮起间隔 ×2、恢复清零退避不重置总数、defer 通知去重）；设计验收 A10（实机熔断场景）仍归 Gate B 真机剧本，不在 conformance 重复。
 

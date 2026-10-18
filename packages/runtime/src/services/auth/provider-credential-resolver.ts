@@ -1,5 +1,5 @@
 /**
- * Provider 凭据解析唯一通道（D3 收口）——接口见 services/ports/provider-credential-resolver.ts。
+ * Provider 凭据解析唯一通道（D3 收敛）——接口见 services/ports/provider-credential-resolver.ts。
  *
  * 源优先级单点声明（三形态共享，见本文件 ProviderCredentialResolver 构造器里的 sources 数组，
  * 数组顺序即优先级）：
@@ -49,12 +49,12 @@ interface CredentialSource {
 }
 
 /**
- * 实现依赖：auth.json 读通道（async 经 AuthService 收口通道 + sync 经 AuthStorage 同步原语）
+ * 实现依赖：auth.json 读通道（async 经 AuthService 收敛通道 + sync 经 AuthStorage 同步原语）
  * 与 models.json 读通道（IConfigStore port，不直接碰文件）。
  * 注意：这里取的都不是「裸读文件」实例，而是既有通道——本模块存在的意义正是消灭裸读。
  */
 export interface ProviderCredentialResolverDeps {
-  /** auth.json 异步读（AuthService 收口通道，OAuth 刷新写回后能立即读到新值） */
+  /** auth.json 异步读（AuthService 收敛通道，OAuth 刷新写回后能立即读到新值） */
   authService: Pick<AuthService, 'getCredential'>
   /** auth.json 同步原语（hasCredentialSync / listCredentialIds，auth-storage.ts:166/:178） */
   authStorage: Pick<AuthStorage, 'hasCredentialSync' | 'listCredentialIds'>
@@ -222,7 +222,7 @@ function createModelsJsonSource(deps: ProviderCredentialResolverDeps): Credentia
 export class ProviderCredentialResolver implements IProviderCredentialResolver {
   /**
    * 源优先级单点声明：数组顺序即解析优先级，async 明文 / sync 布尔 / 批量三形态共用本数组。
-   * 禁止在别处再写一遍链（这是读路径收口的全部意义）。
+   * 禁止在别处再写一遍链（这是读路径收敛的全部意义）。
    */
   private readonly sources: readonly CredentialSource[]
 

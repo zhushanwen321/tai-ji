@@ -148,9 +148,9 @@ function resolveVerifiedEngineBin(
 }
 
 /**
- * displayName / description（可选；displayName 缺省 = id 由消费面兜底
+ * displayName / description（可选；displayName 缺省 = id 由消费方兜底
  * （listEnginesByDisplayName 的 `?? id`），快照只存显式值防「缺省填充」被误读；
- * description 当前无消费面，仅做形态校验）。
+ * description 当前无消费方，仅做形态校验）。
  */
 function parseOptionalDisplayFields(m: Record<string, unknown>, id: string): string | undefined {
   let displayName: string | undefined;

@@ -3,7 +3,7 @@
 // read 第②级（journal 重放）的引擎包承接：journal 文件读取（replayJournal，SDK
 // 单源）+ replayJournalToSessionView 编排。reducer 本体（eventsToSessionView /
 // updateFromEvent / toReplayedTurn / aggregateUsage）用 SDK journal-replay——
-// 与 core live reducer 同源（W1 已把纯投影部分下沉 SDK，见 SDK 该文件头注）。
+// 与 core live reducer 同源（W1 已把纯派生视图部分下沉 SDK，见 SDK 该文件头注）。
 //
 // replayJournal/parseLine 原自持副本已收编 SDK journal-io（S4 簇 6：引擎包不能
 // import core，core 与本包的逐字等价副本单源落 SDK——原头注「引擎包进程内无

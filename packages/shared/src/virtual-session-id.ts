@@ -41,7 +41,7 @@ const SUBAGENT_REST_SEGMENT_COUNT = 2
  *   sessionId 是 btw vid，误传即产出 `subagent:btw:<y>:<s>` 四段键（结构校验必拒、
  *   静默解析 mainSid="btw" 的歧义路径封死）。btw 线名下派生应传线 piSessionId：
  *   `extractBtwPiSessionId(btwVid)`——映射即 extract（D9③ 键中段位约定）。
- * - 中段禁冒号（`btw:` 前缀必含冒号，该守卫同时兜住其余误传形态，保证产物恰好
+ * - 中段禁冒号（`btw:` 前缀必含冒号，该检查同时兜住其余误传形态，保证产物恰好
  *   2 冒号 3 段、恒过 isSubagentVirtualId 结构校验）；第三段 subagentId 同规则
  *   （非空 + 禁冒号，INVAR-1.1 三段非空）。
  */
@@ -125,7 +125,7 @@ export const BTW_PREFIX = 'btw:'
  * 构造 btw 虚拟 session ID：`btw:<piSessionId>`（两段式，工厂第三家族）。
  *
  * 第二段直接内嵌 btw 线的 pi 会话 id——映射即 extract（extractBtwPiSessionId
- * 去前缀即真 sid），无独立映射层（D2：关联不靠 id 前缀解析，三段式被否）。
+ * 去前缀即真 sid），无独立映射层（D2：关联不靠 id 前缀解析，三段式不采用）。
  * 值域断言：piSessionId 非空且禁冒号（与 pi assertValidSessionId 同款——真 sid
  * 永不含 `:`，虚拟 id 永含 `:`，命名空间构造性分离；嵌套 btw vid 必含冒号被拒）。
  */

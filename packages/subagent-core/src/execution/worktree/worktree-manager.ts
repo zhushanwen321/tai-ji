@@ -94,7 +94,7 @@ export type WorktreeRebuildOutcome =
   /** 重建成功（patch 已恢复或无 patch 可恢复）——handle 回填 record.worktreeHandle。 */
   | { kind: "rebuilt"; handle: WorktreeHandle }
   /**
-   * 形态②：patch apply 冲突（收口后分支已有新提交）——worktree 已重建为干净
+   * 形态②：patch apply 冲突（收尾后分支已有新提交）——worktree 已重建为干净
    * 基线 + 原地续聊（transcript 仍有效，续聊资格判据不受工作区影响，不降级
    * reopen）；patchFile 留存供用户手动恢复（提示文案由调用方注入）。
    */
@@ -330,14 +330,14 @@ export class WorktreeManager {
   }
 
   /**
-   * [U5 / §3.2.5 worktree 续聊重建] 收口续聊时 worktree 已按保留期回收 → 自动重建：
+   * [U5 / §3.2.5 worktree 续聊重建] 收尾续聊时 worktree 已按保留期回收 → 自动重建：
    * worktree add（checkout 记录的分支，分支名可由 recordId 推导 `pi-sub-<id>`）+
-   * apply patch（恢复收口时落盘的未提交改动）→ 原地续聊（transcript 还在）。
+   * apply patch（恢复收尾时落盘的未提交改动）→ 原地续聊（transcript 还在）。
    *
    * 三失败形态处置（设计写死）：
    *   ① patch 丢失（备份文件不在）或分支不存在 → 返回 degrade-reopen，调用方降级
    *      带历史重开（同 §3.2.3）；
-   *   ② patch apply 冲突（收口后分支有新提交）→ worktree 重建为干净基线 + 原地
+   *   ② patch apply 冲突（收尾后分支有新提交）→ worktree 重建为干净基线 + 原地
    *      续聊（transcript 仍有效，续聊资格判据不受工作区影响）+ 返回 conflict 供
    *      调用方发用户可见提示（含 patch 备份路径）——不降级 reopen；
    *   ③ 重建自身 IO 错（git 命令失败、磁盘满等）→ GitRunError/DirtyWorktreeError
@@ -346,7 +346,7 @@ export class WorktreeManager {
    * repo 定位 [S5 修复：不依赖注册表]：repoPath 由调用方传入（run-orchestration
    * 传进程 cwd——与 create() 的 mainCwd 同源：record/session/binding 全按
    * encodeCwd(cwd) 物理分区存储，能扫到该 record 的进程其 cwd 必与创建时一致）。
-   * 旧实现按注册表 branch 反查——收口 cleanup 已删注册表条目 → 反查恒落空 →
+   * 旧实现按注册表 branch 反查——收尾 cleanup 已删注册表条目 → 反查恒落空 →
    * 恒 degrade-reopen（U5-D8 偏差根因，随本修复失效）。branchName / checkout
    * 路径按 create() 同款命名约定派生（`pi-sub-<recordId>` + tmpdir/pi-subagents/
    * <enc(repoPath)>/<branch>）；分支存在性经 `rev-parse --verify` 实测（形态①：
@@ -358,7 +358,7 @@ export class WorktreeManager {
    *
    * @param repoPath 主仓库根目录（create 时的 mainCwd 同源值）
    * @param recordId record id（分支名推导键，必须匹配 `^[\w-]+$`）
-   * @param patchFile 收口时落盘的 patch 备份路径（record.patchFile；undefined = 无
+   * @param patchFile 收尾时落盘的 patch 备份路径（record.patchFile；undefined = 无
    *        备份——干净基线重建）
    */
   async reconstruct(repoPath: string, recordId: string, patchFile?: string): Promise<WorktreeRebuildOutcome> {
@@ -376,7 +376,7 @@ export class WorktreeManager {
     } catch {
       return { kind: "degrade-reopen", reason: `branch ${branch} no longer exists in ${repo}` };
     }
-    // checkout 路径按 create() 同款约定派生（不读注册表——收口 cleanup 后注册表
+    // checkout 路径按 create() 同款约定派生（不读注册表——收尾 cleanup 后注册表
     // 条目已删，重建依据 = 命名约定 + 入参 repoPath）。
     const worktreePath = path.join(os.tmpdir(), "pi-subagents", encodeCwd(repo), branch);
     // [1.2] patch 备份存在性判定前置：该判定只依赖入参路径，必须排在一切副作用
@@ -452,16 +452,16 @@ export class WorktreeManager {
    * 各步独立 try/catch——任一步失败不阻断其余（如 remove 失败仍尝试 branch -D + 注册表移除），
    * 避免单步失败导致后续资源泄漏。
    *
-   * [S5 修复] opts.keepBranch：close 收口回收传 true——回收 checkout（释放并发写隔离语义）
+   * [S5 修复] opts.keepBranch：close 收尾回收传 true——回收 checkout（释放并发写隔离语义）
    * 但保留分支（reconstruct 的重建依据：branchName 按 `pi-sub-<recordId>` 命名约定
    * 派生 + rev-parse --verify 验证存在性；删了分支 = 重建依据消亡 → 续聊恒降级
-   * reopen）。默认 false = 删分支（终态化 / reaper / create 竞态守卫等无续聊重建
+   * reopen）。默认 false = 删分支（终态化 / reaper / create 竞态检查等无续聊重建
    * 需求的调用方，行为零变化）。保留的分支无注册表条目，对账器方向二只扫 tmpdir
    * 物理 checkout 目录、不触碰无 checkout 的存活分支（worktree-reconcile.ts
    * discoverPhysicalWorktrees），不会误回收。
    *
    * @param handle 要清理的 worktree handle（含 mainCwd，不靠路径反推）
-   * @param opts.keepBranch true = 保留分支（close 收口回收——重建依据）
+   * @param opts.keepBranch true = 保留分支（close 收尾回收——重建依据）
    */
   async cleanup(handle: WorktreeHandle, opts: { keepBranch?: boolean } = {}): Promise<void> {
     try {

@@ -75,7 +75,7 @@ describe('getImageCacheDir', () => {
     )
   })
 
-  it('路径穿越形态 sessionId：throw（路径遍历防护守卫）', () => {
+  it('路径穿越形态 sessionId：throw（路径遍历防护检查）', () => {
     for (const bad of ['../evil', 'a/b', 'a\\b', '..' , 'a b']) {
       expect(() => getImageCacheDir(bad, '/tmp/taiji-shared-test-data')).toThrow(
         /invalid sessionId \(path traversal blocked\)/,

@@ -35,7 +35,7 @@ import type { AbandonedRoundMark, ClosedReason, Epoch, ExecutionOutcome } from "
  * 送达消息的 customType——notify 词表单源（extension-protocol 的
  * SUBAGENT_BG_NOTIFY_CUSTOM_TYPE）的兼容别名：notifier / bg-notify-render /
  * 壳 index.ts（messageRenderer 注册）/ shared 集合消费同一常量，历史名保留供
- * 本包既有消费面（值锚定锁 = 壳 __tests__/contract.notify-custom-types.test.ts）。
+ * 本包既有消费方（值锚定锁 = 壳 __tests__/contract.notify-custom-types.test.ts）。
  * （原定义在 notify-ledger.ts，随账本退役迁入本文件。）
  */
 export const NOTIFY_CUSTOM_TYPE = SUBAGENT_BG_NOTIFY_CUSTOM_TYPE;
@@ -52,7 +52,7 @@ export const NOTIFY_CUSTOM_TYPE = SUBAGENT_BG_NOTIFY_CUSTOM_TYPE;
 export interface NotifyGateRecordState {
   /** record 当前世代（两步判定的比较基准——非标记槽 epoch，§3.2.7 显式两步）。 */
   readonly epoch?: Epoch;
-  /** 放弃轮标记（gate 判据，单槽）：abort（cancel / 编排性关闭打断）时置在飞轮。 */
+  /** 放弃轮标记（gate 判据，单槽）：abort（cancel / 编排性关闭打断）时置在途轮。 */
   readonly lastAbandonedRound?: AbandonedRoundMark | null;
   /** 当前轮次（gate 第二步的回注轮缺省源——settle 推进后的值，正常轮通知凭此
    *  越过旧标记；被中断轮不推进，迟到回注轮 ≤ 标记轮被丢弃）。 */
@@ -76,7 +76,7 @@ export interface NotifyGateInbound {
  * [U5 / §3.2.7 通知 gate] 轮次完成回注的投递门。
  *
  * 两个阻断维度承接旧 closedReason 集合门的事故防御（v4 A-6 僵尸回执 / cancelled
- * 防双发），判据源 = 「放弃标记」单维（收口/静默场景由放弃轮标记 + 轮身份守卫 +
+ * 防双发），判据源 = 「放弃标记」单维（收尾/静默场景由放弃轮标记 + 轮身份检查 +
  * notifyId 账本三层承接——原 intent=archived 静默 gate 随 intent 概念删除退役）：
  *
  *   ① 回注 epoch ≠ record 当前 epoch → 丢弃（跨世代回注）；
@@ -86,10 +86,10 @@ export interface NotifyGateInbound {
  *        第一步：回注 epoch ≠ record 当前 epoch → 丢弃；
  *        第二步：同 epoch 时标记非空、标记槽世代 = 当前世代且回注轮 ≤ 标记轮 → 丢弃。
  *
- * 收口轮豁免（构造性）：close 挂起等待的最后一轮（closeAfterRound 消费）通知正常
- * 送达——close 不置放弃轮标记（标记只由 cancel/编排性关闭的 abort 置位），且收口
- * 落账编排挂在轮次通知送达之后（§3.2.5 顺序约束 [写死]），settle 时点 record 仍
- * running 非放弃轮，①②均不命中。收口后的残余迟到回注由轮身份守卫（Continuation
+ * 收尾轮豁免（构造性）：close 挂起等待的最后一轮（closeAfterRound 消费）通知正常
+ * 送达——close 不置放弃轮标记（标记只由 cancel/编排性关闭的 abort 置位），且收尾
+ * 写入 journal 记录的编排挂在轮次通知送达之后（§3.2.5 顺序约束 [写死]），settle 时点 record 仍
+ * running 非放弃轮，①②均不命中。收尾后的残余迟到回注由轮身份检查（Continuation
  * abortAndClearQueue 废弃轮身份）+ 投递日志 notifyId 判重承接。
  *
  * 正常轮通知不该被旧标记吞的论证（为何比较 record.round 而非标记槽）：正常轮 N settle
@@ -97,7 +97,7 @@ export interface NotifyGateInbound {
  * notifyId 去重兜底；只有「被显式放弃的轮」才进标记（stopReason 单值会被新轮覆盖，
  * 无法承载 per-round 终局）。
  *
- * 消费面：Continuation 成功/失败分支双闸 + drain 丢弃通知 + 泛化派发主干尾部
+ * 消费方：Continuation 成功/失败分支双闸 + drain 丢弃通知 + 泛化派发主干尾部
  *（one-shot 回注）+ watchdog 失败通知（run-orchestration）。
  */
 export function notifyGateAllowsDelivery(
@@ -131,13 +131,13 @@ export interface BgNotifyRecord {
   /**
    * 完成状态。v4 B-1 两态收敛：closed（终态，含 cancelled，closedReason 表达 L2 原因）
    * 或 running（对话模式轮次完成，旧 idle 折入 running，携带本轮结果送回主 agent）。
-   * toNotifyRecord 守卫放行后经此联合穷尽。
+   * toNotifyRecord 检查放行后经此联合穷尽。
    */
   status: "running" | "closed";
   /** L2 关闭原因子枚举（仅 status="closed" 时有意义）。内部诊断 + outcome 兜底派生输入。 */
   closedReason?: ClosedReason;
   /**
-   * 终态三态对外语义（U3 C-outcome）。notify() 投影边界物化：closed 入参缺省时按
+   * 终态三态对外语义（U3 C-outcome）。notify() 派生视图边界物化：closed 入参缺省时按
    * deriveOutcome(closedReason, error) 兜底填充（所有可达流程下与 completeLegacyClosed
    * 冻结的 record.outcome 等价——toNotifyRecord 构造点在 completeLegacyClosed 之后；该
    * 构造点属 U3 领地外，不透传本字段）。buildLlmContent 与 bg-notify-render 只读本字段。
@@ -164,7 +164,7 @@ export interface BgNotifyRecord {
    *  "Full transcript: <path>" 指针行，父 LLM 可按需读全文；万物可续下每个
    *  record 都要能被 message/fork 定位。缺失时 buildLlmContent 省略整行。 */
   sessionFile?: string;
-  /** [U2] 通知身份键（投影边界物化 = dedupe key：`id` / `id:round`；[U5 / §3.2.3]
+  /** [U2] 通知身份键（派生视图边界物化 = dedupe key：`id` / `id:round`；[U5 / §3.2.3]
    *  epoch>0 时扩为 `id:epoch:round` / `id:epoch`（无轮形态——reopen 后第二次
    *  close 不与首轮 close 撞键，epoch=0 恒旧格式，磁盘账本零迁移）。投递日志条目 /
    *  回执匹配 / 幂等判重共用——details 携带（不进文案，G4 字节锁定不受影响），
@@ -185,7 +185,7 @@ export interface BgNotifyRecord {
    */
   dedupKey?: string;
   /** [C-2] close 终态通知的轮次统计（文案 "completed after N rounds." 用）。
-   *  仅收口落账提示语义（notifyClosed）构造时携带——此时 dedup 身份 round 已被
+   *  仅收尾写入 journal 记录的提示语义（notifyClosed）构造时携带——此时 dedup 身份 round 已被
    *  置 undefined（与轮次通知的 id:round key 区分，终态不被吞），轮数改由本字段进
    *  文案。one-shot 完成通知不设置，文案保持 "completed. Result:" 逐字节（G4）。 */
   totalRounds?: number;
@@ -246,7 +246,7 @@ function buildLlmContent(record: BgNotifyRecord): string {
     : "";
   switch (record.status) {
     case "closed": {
-      // U3 C-outcome：终态文案只读 outcome（notify() 投影边界已物化；?? 兜底为防御
+      // U3 C-outcome：终态文案只读 outcome（notify() 派生视图边界已物化；?? 兜底为防御
       // 完整性——单一权威函数，非同构重写）。判定先于 patchFile——失败轮也会写
       // patchFile（doFinalizeRecord Step 0 对 worktreeHandle 无条件 collectPatch），
       // failed 分支不展示 patch 提示，否则 worktree 失败并存时 LLM 被告知 completed
@@ -261,8 +261,8 @@ function buildLlmContent(record: BgNotifyRecord): string {
         return `Subagent "${agent}" (${id}) failed: ${record.error}\n\n${FAILURE_RECOVERY_TAIL}${transcriptPointer}`;
       }
       // 成功完成或通用结束：展示结果。
-      // [C-2] close 收口提示附轮次统计（设计 D2 路径①"completed after N rounds"）。
-      // totalRounds 仅 notifyClosed（收口提示）携带；轮次通知不设置（轮次身份由
+      // [C-2] close 收尾提示附轮次统计（设计 D2 路径①"completed after N rounds"）。
+      // totalRounds 仅 notifyClosed（收尾提示）携带；轮次通知不设置（轮次身份由
       // round 承载），文案保持 "completed. Result:" 逐字节（G4 硬约束锚定）。
       const roundsSuffix =
         record.totalRounds != null && record.totalRounds > 0
@@ -285,7 +285,7 @@ function buildLlmContent(record: BgNotifyRecord): string {
 /**
  * Background 完成通知器接口（迁移后由内核实现）。
  *
- * 保持与旧 BgNotifier 类相同的公共 API，避免消费方（subagent-service）改动面过大。
+ * 保持与旧 BgNotifier 类相同的公共 API，避免消费方（subagent-service）改动范围过大。
  */
 export interface BgNotifier {
   /** 入队一条完成通知（去重 + 合批窗口合并）。dispose 后短路。 */
@@ -444,7 +444,7 @@ export function createNotifier(host: NotifierHost): BgNotifier {
     notify(record: BgNotifyRecord): void {
       if (disposed) return;
 
-      // U3 C-outcome：投影边界物化 outcome——closed payload 缺省时按单一权威
+      // U3 C-outcome：派生视图边界物化 outcome——closed payload 缺省时按单一权威
       // deriveOutcome 兜底填充，content 与 details（GUI pane 消费）均携带一等 outcome；
       // 所有可达流程下与 record.outcome 等价（toNotifyRecord 在 completeLegacyClosed 之后
       // 构造）。running（轮次通知）语义上无 outcome，不物化。消源自 record 的浅拷贝
@@ -470,7 +470,7 @@ export function createNotifier(host: NotifierHost): BgNotifier {
       //    rounds.ts），世代内 round 从 0/undefined 单调递增、reopen 归零重计，故
       //    round === 1 在一个世代内恰出现一次 = 首个轮终（后续轮次 2,3,… 不申报，
       //    collect 等到首轮即返回，后续轮次正常 push）。
-      //  - round == null：one-shot 完成通知 / close 收口提示等无轮次身份的完成通知
+      //  - round == null：one-shot 完成通知 / close 收尾提示等无轮次身份的完成通知
       //    （notifyClosed 显式清 round），设计明示同样申报。
       //  - dedupKey 非 null：派生通知（drain 丢弃通知等，notifyId 已非世代主身份），
       //    非终态信号不申报。

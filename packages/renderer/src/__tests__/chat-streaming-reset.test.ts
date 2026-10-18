@@ -115,14 +115,14 @@ describe('chat store message.error 流式状态复位（规则 #3）', () => {
   })
 })
 
-describe('chat store message.complete 多 assistant 气泡收口', () => {
+describe('chat store message.complete 多 assistant 气泡收尾', () => {
   beforeEach(() => setActivePinia(createPinia()))
 
   // [HISTORICAL] handoff 2026-07-04 L3：一个 turn 可能产生多个 streaming assistant 气泡
   // （如工具调用气泡 + 文字总结气泡，或历史/fork 路径残留）。旧实现用 findLastAssistantIndex
-  // 只收口最后一条，前面的 toolCall 气泡永远 streaming——内部状态机不一致，影响后续定位逻辑。
-  // 修复后 message.complete 收口所有 status==='streaming' 的 assistant，usage 只回填最后一条。
-  it('message.complete 收口所有 streaming assistant 气泡（不只最后一条）', () => {
+  // 只收尾最后一条，前面的 toolCall 气泡永远 streaming——内部状态机不一致，影响后续定位逻辑。
+  // 修复后 message.complete 收尾所有 status==='streaming' 的 assistant，usage 只回填最后一条。
+  it('message.complete 收尾所有 streaming assistant 气泡（不只最后一条）', () => {
     const store = useChatStore()
     const sid = 'multi'
     // 模拟一个 turn 产生两条 streaming assistant（如 toolCall 气泡 + 文字气泡）
@@ -145,7 +145,7 @@ describe('chat store message.complete 多 assistant 气泡收口', () => {
     })
 
     const after = store.getMessages(sid)
-    // 关键：两条 assistant 都收口（旧行为只收最后一条，前一条卡 streaming）
+    // 关键：两条 assistant 都收尾（旧行为只收最后一条，前一条卡 streaming）
     expect(after[0].status).toBe('complete')
     expect(after[1].status).toBe('complete')
   })
@@ -176,7 +176,7 @@ describe('chat store message.complete 多 assistant 气泡收口', () => {
     expect(after[1].usage).toMatchObject({ inputTokens: 100, outputTokens: 50 })
   })
 
-  it('message.complete stopReason error 时所有 streaming assistant 收口为 error', () => {
+  it('message.complete stopReason error 时所有 streaming assistant 收尾为 error', () => {
     const store = useChatStore()
     const sid = 'err-multi'
     store.applyMessageEvent(sid, {
@@ -242,7 +242,7 @@ describe('chat store markSessionError —— session 级错误统一入口', () 
     expect(msgs[0].content).not.toContain('进程崩溃')
   })
 
-  it('finalizeSession 收口所有活跃态：streaming entity + pendingSend', () => {
+  it('finalizeSession 收尾所有活跃态：streaming entity + pendingSend', () => {
     const store = useChatStore()
     const sid = 'me-3'
 

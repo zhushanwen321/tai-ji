@@ -5,7 +5,7 @@
  * 构造适配实现转发 @/api/domains；P1 transport 迁移完成后仅换实现为 core/transport
  * 直连，域内代码不动。
  *
- * [C3] settings 域 transport 访问按通道分工收口：本 seam 只承载 runtime WS 通道——settings 页
+ * [C3] settings 域 transport 访问按通道分工收敛：本 seam 只承载 runtime WS 通道——settings 页
  * （components/settings）与 settings composables（composables/features/settings）的 WS 读写 /
  * 订阅一律经本接口访问，禁止深 import `@taiji/core/transport/**` 直连。Electron main 进程通道
  * （@/api/domains/settings 的 proxy / update / dialog / 数据目录路径 / 系统声音面）不经本 seam，
@@ -20,9 +20,9 @@
  * 注入机制（C-W1-2）：仿 platform/port.ts 模块级单例模式——provideSettingsTransport
  * 注入、getSettingsTransport 注入前调用 fail-fast 抛错（防隐式 undefined）。
  *
- * 接口分组反映真实消费面（读 / 写 / 订阅 on*），签名与 api/domains 各域导出函数一一对齐
+ * 接口分组反映真实消费项（读 / 写 / 订阅 on*），签名与 api/domains 各域导出函数一一对齐
  * （mock 兼容硬约束：门面三元要求两侧同构）。唯二有意改名处：
- * - setProvider 保持早期 `id: string` 签名（core 消费面已按此调用，不churn）；
+ * - setProvider 保持早期 `id: string` 签名（core 消费方已按此调用，不churn）；
  * - 通用动词域（extension / preset / quota）加域前缀（toggleExtension 等），避免 80+ 方法的
  *   平铺接口出现 install/list/create 之类无归属裸名。
  */
@@ -133,7 +133,7 @@ export interface SettingsTransport {
   // ══════════════════════ 读（请求-响应）══════════════════════
 
   // ── provider / 模型 / 目录 ──
-  /** providers 快照 + scoped models 白名单（reply 未携带 scopedModels 时为 undefined，消费方守卫不覆盖） */
+  /** providers 快照 + scoped models 白名单（reply 未携带 scopedModels 时为 undefined，消费方检查不覆盖） */
   listProviders(): Promise<{ providers: ProviderInfo[]; scopedModels?: string[] }>
   /** 聚合模型列表主动拉取（对齐 listProviders，连接后兜底防订阅时序竞态） */
   listModels(): Promise<ModelInfo[]>
@@ -338,7 +338,7 @@ export interface SettingsTransport {
   onDefaults(h: (m: string) => void): () => void
   /** 带 source 的 defaults 订阅（区分 runtime 自动修复默认模型与用户主动设置） */
   onDefaultsWithSource(h: (payload: { defaultModel: string; source?: string }) => void): () => void
-  /** skill 缓存失效信号（scope='global' 全局重拉 / 'project' 按 cwd 路由） */
+  /** skill 缓存失效信号（scope='global' 全局重新拉取 / 'project' 按 cwd 路由） */
   onSkillCacheInvalidated(h: (payload: SkillCacheInvalidatedPayload) => void): () => void
 
   // ── system 设置项 ──

@@ -1,7 +1,7 @@
 // @vitest-environment node
 
 /**
- * ToolCall ID 锚定 + 流结束收口测试。
+ * ToolCall ID 锚定 + 流结束收尾测试。
  *
  * 根因：event-adapter 并行处理 pi 事件（void this.handleEvent 不 await），
  * tool_execution_end 的 async handler（含 hook + git 对账）可能晚于下一个
@@ -9,7 +9,7 @@
  * end 命中错误的空 assistant message，更新静默失败，toolCall 永久卡 running。
  *
  * 修复：tool_call_end/update 用 findToolCallOwner（按 toolCallId 全局查找）锚定；
- * message.complete 把残留 running 收口为 end_not_received（正常 stop）/ error（error stop）。
+ * message.complete 把残留 running 收尾为 end_not_received（正常 stop）/ error（error stop）。
  *
  * 运行：pnpm --filter @taiji/frontend run test -- src/__tests__/stores/toolcall-anchor.test.ts
  */
@@ -104,10 +104,10 @@ describe('tool_call_end/update — ID 锚定（乱序免疫）', () => {
   })
 })
 
-describe('message.complete — 残留 running toolCall 收口', () => {
+describe('message.complete — 残留 running toolCall 收尾', () => {
   beforeEach(() => setActivePinia(createPinia()))
 
-  it('U6: 正常 stopReason，残留 running 收口为 end_not_received', () => {
+  it('U6: 正常 stopReason，残留 running 收尾为 end_not_received', () => {
     const store = useChatStore()
     const sid = 's6'
     store.applyMessageEvent(sid, { type: 'message.message_start', payload: { sessionId: sid, messageId: 'a0' } })
@@ -120,7 +120,7 @@ describe('message.complete — 残留 running toolCall 收口', () => {
     expect(msgs[0].toolCalls![0].status).toBe('end_not_received')
   })
 
-  it('U7: error stopReason，残留 running 收口为 error', () => {
+  it('U7: error stopReason，残留 running 收尾为 error', () => {
     const store = useChatStore()
     const sid = 's7'
     store.applyMessageEvent(sid, { type: 'message.message_start', payload: { sessionId: sid, messageId: 'a0' } })
@@ -132,7 +132,7 @@ describe('message.complete — 残留 running toolCall 收口', () => {
     expect(msgs[0].toolCalls![0].status).toBe('error')
   })
 
-  it('U11: 正常到达的 tool_call_end 不被收口覆盖（仍是 completed）', () => {
+  it('U11: 正常到达的 tool_call_end 不被收尾覆盖（仍是 completed）', () => {
     const store = useChatStore()
     const sid = 's11'
     store.applyMessageEvent(sid, { type: 'message.message_start', payload: { sessionId: sid, messageId: 'a0' } })
@@ -141,7 +141,7 @@ describe('message.complete — 残留 running toolCall 收口', () => {
     store.applyMessageEvent(sid, { type: 'message.complete', payload: { sessionId: sid, stopReason: 'end_turn' } })
 
     const msgs = store.getMessages(sid)
-    expect(msgs[0].toolCalls![0].status).toBe('completed') // 未被收口覆盖
+    expect(msgs[0].toolCalls![0].status).toBe('completed') // 未被收尾覆盖
     expect(msgs[0].toolCalls![0].output).toBe('ok')
   })
 })
@@ -152,7 +152,7 @@ describe('end_not_received — 下游消费点', () => {
   it('U15: deriveStatus 遇 end_not_received 不返回 waiting（已结束，非进行中）', () => {
     const store = useChatStore()
     const sid = 's15'
-    // 最后一条 toolCall 是 end_not_received（已收口，非 running）
+    // 最后一条 toolCall 是 end_not_received（已收尾，非 running）
     store.hydrate(sid, [{
       id: 'a1', role: 'assistant', content: 'done', status: 'complete',
       toolCalls: [{ id: 'tc-1', toolName: 'read', input: {}, status: 'end_not_received', startTime: 0 }],

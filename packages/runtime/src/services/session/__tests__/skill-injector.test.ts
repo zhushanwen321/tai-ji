@@ -368,8 +368,8 @@ describe('SkillInjector.inject', () => {
   })
 
   it('无 frontmatter 结束 --- 行：镜像 pi 行为原文保留（不剥），块内展开正文为全文 trim', async () => {
-    writeFileSync(skillAPath, '---\nname: skill-a\n没有闭合行')
-    const raw = '---\nname: skill-a\n没有闭合行'
+    writeFileSync(skillAPath, '---\nname: skill-a\n没有结束标记行')
+    const raw = '---\nname: skill-a\n没有结束标记行'
     const marker = buildSkillMarker('skill-a', skillAPath)
     const injector = new SkillInjector(globalOnlySource([registrySkill('skill-a', skillAPath)]))
     const { client } = makeClient({ stats: { contextUsage: { tokens: 1, contextWindow: 100000, percent: 1 } } })

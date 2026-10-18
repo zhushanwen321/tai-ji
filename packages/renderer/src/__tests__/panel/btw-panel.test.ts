@@ -2,7 +2,7 @@
  * BtwPanel 组件测试（btw-question D7，M3-a）。
  *
  * 三视角（TEST-STRATEGY §3）：
- * - 构建者（白盒）：btw.list 按 mainSid 拉取 + loadSeq 乱序守卫回写 captured 分区；
+ * - 构建者（白盒）：btw.list 按 mainSid 拉取 + loadSeq 乱序检查回写 captured 分区；
  *   选中唯一源 = core drawer 分区 selectedBtwVid（setBtwView 写入，D5 豁免同源）
  * - 使用者（黑盒 DOM）：空态三要素 / 线 chip 渲染与点击切线 / 新建提问 → fork pill 三态 /
  *   切焦点会话线列表不串台 / 加载失败可见可重试 / 创建失败可见可恢复
@@ -37,7 +37,7 @@ import type { ServerMessageMap } from '@taiji/shared'
 // btw 具名类型走 indexed-access（shared 包出口未挂具名，SSOT = shared protocol.ts）
 type BtwForkState = ServerMessageMap['btw.create']['forkState']
 
-// ── @/api 门面局部 mock：只替换 btw 域（三元消费面 = 本面板唯一数据入口）──
+// ── @/api 门面局部 mock：只替换 btw 域（三元消费方 = 本面板唯一数据入口）──
 vi.mock('@/api', (importActual) => composerApiModuleActualWithBtw(importActual))
 // 断言锚点：btw 域 spy 单例（helper 持有，播种/断言经别名）
 const apiMock = composerBtwApiMock
@@ -133,7 +133,7 @@ describe('BtwPanel 首屏冒烟与线列表（观察者 + 使用者）', () => {
 
     // 构建者：选中写入 core drawer 分区（与 getViewedVids D5 豁免同源，无第二副本）
     expect(useBtwSelection().selectedBtwVid.value).toBe('btw:pi-2')
-    // 列表加载完成后 loading 收口（空态不误显）
+    // 列表加载完成后 loading 收尾（空态不误显）
     expect(wrapper.find('[data-testid="btw-empty"]').exists()).toBe(false)
   })
 
@@ -235,7 +235,7 @@ describe('BtwPanel 新建线与 fork pill 三态（D3 口径）', () => {
 })
 
 describe('BtwPanel 焦点绑定（D7②④）与失败路径', () => {
-  it('切焦点会话 → 线列表按新 mainSid 重拉不串台；切回恢复（DOM 面）', async () => {
+  it('切焦点会话 → 线列表按新 mainSid 重新拉取不串台；切回恢复（DOM 面）', async () => {
     apiMock.list.mockImplementation(async (sid: string) =>
       sid === MAIN_A ? [{ vid: 'btw:a-1' }] : [{ vid: 'btw:b-1' }],
     )
@@ -253,7 +253,7 @@ describe('BtwPanel 焦点绑定（D7②④）与失败路径', () => {
     expect(wrapper.find('[data-testid="btw-thread-chip"][data-vid="btw:a-1"]').exists()).toBe(false)
     expect(wrapper.find('[data-testid="btw-stream"]').attributes('session-id')).toBe('btw:b-1')
 
-    // 切回 A：重拉 + 恢复 A 的线（分区隔离，无 B 泄漏）
+    // 切回 A：重新拉取 + 恢复 A 的线（分区隔离，无 B 泄漏）
     boundSid.value = MAIN_A
     await wrapper.setProps({ sessionId: MAIN_A })
     await settle(wrapper)

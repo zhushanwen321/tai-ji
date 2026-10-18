@@ -4,7 +4,7 @@
  * [C1 架构收拢] 原 QuotaConfigureState 是 27 成员扁平接口，被逐名镜像 4 跳
  * （core 契约 → ui NOOP_FACTORY 逐名镜像 → ProviderEditBody 28 名解构 → CodingPlanSection
  * 23 props / 7 emits）：interface 与 implementation 同宽，加一个字段要改 5 处。
- * 现契约收窄为消费方（CodingPlanSection）的真实消费面 —— 3 个状态透镜 + 3 个写动作；
+ * 现契约收窄为消费方（CodingPlanSection）的真实消费项 —— 3 个状态透镜 + 3 个写动作；
  * 规则（类型切换清凭证草稿、齐备性判定、失败原因归一、provider 凭据警示分档）全部
  * 内化为 implementation，UI 只做布局与 i18n 映射。
  *
@@ -196,10 +196,10 @@ export type QuotaConfigureFactoryInputs = Omit<QuotaConfigureInputs, 't'>
 export type QuotaConfigureFactory = (inputs: QuotaConfigureFactoryInputs) => QuotaConfigureModule
 
 /**
- * QuotaConfigure module 对外契约 —— CodingPlanSection 的全部消费面。
+ * QuotaConfigure module 对外契约 —— CodingPlanSection 的全部消费项。
  *
- * 测试面即本接口（interface is the test surface）：模块行为（readiness 矩阵 /
- * payload 构造 / 失败归一 / 各类守卫）只经本接口打点，不窥内部 ref。
+ * 测试入口即本接口（interface is the test surface）：模块行为（readiness 矩阵 /
+ * payload 构造 / 失败归一 / 各类检查）只经本接口打点，不窥内部 ref。
  */
 export interface QuotaConfigureModule {
   /** 输入草稿（v-model 直绑） */
@@ -209,7 +209,7 @@ export interface QuotaConfigureModule {
   /** 测试结果面 */
   readonly test: Ref<QuotaTestView>
   /**
-   * 写入类型草稿（D5 守卫落在值上）：非字符串守卫（reka Select 的宽联合 payload）、
+   * 写入类型草稿（D5 检查落在值上）：非字符串检查（reka Select 的宽联合 payload）、
    * 同值短路（同值选中不得清掉用户未提交的输入）、类型**真变**清凭证草稿
    * （cookie / 专属 Key；Workspace 草稿不清）
    */

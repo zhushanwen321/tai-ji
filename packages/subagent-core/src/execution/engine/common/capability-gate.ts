@@ -24,7 +24,7 @@
 //   - **少声明**（任务要求的能力 manifest 未声明）→ 本文件同步拒
 //     engine_capability_unsupported；恢复指引 = 「修 manifest / 升级引擎包」——不写
 //     「先派一次任务触发握手」（gate 读 manifest，握手不参与同步判据，那个指引是空转）；
-//   - **多声明**（manifest 声明支持而引擎实际不支持）→ gate 读不到（同步面只有
+//   - **多声明**（manifest 声明支持而引擎实际不支持）→ gate 读不到（同步部分只有
 //     manifest），由首个 run 的协议握手 `initialize` 发现 → engine_capability_mismatch
 //     该 run 失败 + record 标 failed + **清理 run 前已建的前置副作用**（worktree：
 //     executeViaEngine 在 kickOffChatRound 派发前创建，经 finalizeFailed → finalizeRecord

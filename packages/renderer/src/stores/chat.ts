@@ -1,7 +1,7 @@
 /**
  * chat store —— defineStore 薄包装（P3 chat 域绞杀 w4）。
  *
- * [归位] store 主体逻辑（messages 分区 / isGenerating 派生 / finalizeSession 收口 /
+ * [归位] store 主体逻辑（messages 分区 / isGenerating 派生 / finalizeSession 收尾 /
  * pendingSend 生命周期 / LRU 驱逐 / changeset / handoff / retry-queue 子域）已迁
  * @taiji/core/domain/chat/store.ts 的 createChatStore factory（IF1 契约）。
  * 本文件做三件事：
@@ -46,7 +46,7 @@ export const useChatStore = defineStore('chat', () => {
     subagentStreamPull: (virtualId, recordId) =>
       sessionApi.getSubagentStreamState(extractMainSessionId(virtualId), recordId),
   })
-  // [M2-c btw 重载链] 重开线回放接线：drawer 选中线翻出时文件 → 分区（applyEntry 投影）
+  // [M2-c btw 重载链] 重开线回放接线：drawer 选中线翻出时文件 → 分区（applyEntry 派生视图）
   setupBtwReplayWatch(store)
   return store
 })

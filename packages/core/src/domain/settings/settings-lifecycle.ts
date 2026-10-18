@@ -2,7 +2,7 @@
  * settings-lifecycle —— settings 域订阅生命周期编排（core 域迁移版）。
  *
  * [迁移] strangler 迁移自 packages/renderer/src/composables/features/useSettings.ts（182 行）。
- * 保持模块级单例形态（unsubs 数组 + initialized 布尔守卫）：AppShell 应用级调用一次
+ * 保持模块级单例形态（unsubs 数组 + initialized 布尔检查）：AppShell 应用级调用一次
  * init() 即挂载全部常驻订阅，其余消费方只读 store，不重复挂载。
  *
  * 职责（G2 语义保留）：
@@ -29,14 +29,14 @@ import { getSettingsStore } from './settings-store'
 import { getSettingsTransport } from './transport'
 
 /**
- * 创建 settings 生命周期实例：订阅句柄（unsubs）+ 幂等守卫（initialized）收进闭包。
+ * 创建 settings 生命周期实例：订阅句柄（unsubs）+ 幂等检查（initialized）收进闭包。
  *
  * 生产走模块级单例 defaultLifecycle（useSettings 委托）；测试用
  * createSettingsLifecycle() 新建实例即隔离（无 reset 后门）。
  */
 export function createSettingsLifecycle() {
   /**
-   * 订阅句柄 + 幂等守卫（实例内，跨 init() 调用共享）。
+   * 订阅句柄 + 幂等检查（实例内，跨 init() 调用共享）。
    */
   const unsubs: Array<() => void> = []
   let initialized = false
@@ -106,7 +106,7 @@ export function createSettingsLifecycle() {
       throw e
     }
 
-    // 成功：提交订阅到实例表 + 置幂等守卫（**仅此处置位**——失败路径不置位，重试不被吞）。
+    // 成功：提交订阅到实例表 + 置幂等检查（**仅此处置位**——失败路径不置位，重试不被吞）。
     unsubs.push(...localUnsubs)
     initialized = true
 

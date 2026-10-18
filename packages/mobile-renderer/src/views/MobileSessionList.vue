@@ -1,7 +1,7 @@
 <script setup lang="ts">
 // MobileSessionList —— 移动壳会话列表（core createSessionStore/createUseSession 驱动，remote-use-mobile D7（移动壳 v1 功能集裁定）的列表行）。
 //
-// 数据源：app-runtime 的 sessionList（runtime 组序投影，A13：客户端不重排——排序谓词
+// 数据源：app-runtime 的 sessionList（runtime 组序派生视图，A13：客户端不重排——排序谓词
 // sessionsInRuntimeGroupOrder 已下沉 core（U20），store.list 经它派生，与桌面同源）+
 // listLoadError（core loadSessions 错误落 store，点击重试走同一入口）。
 // 状态点 = 派生态（A14/U20）：逐条目经 core deriveSessionStatus 按参数化输入计算——
@@ -138,7 +138,7 @@ async function onMenuRestore(): Promise<void> {
     await restoreSession(target.id)
   } catch (e) {
     // 降级策略：壳级一次性编排失败 console 留痕，不占用错误条单槽（coreChannelDeps.toast
-    // 已接错误条承载 core 失败面——A7；对齐 app-runtime.restoreSession 同口径）
+    // 已接错误条承载 core 失败情形——A7；对齐 app-runtime.restoreSession 同口径）
     console.error('[session-list] restore failed:', e)
   }
 }
@@ -181,7 +181,7 @@ async function onRenameSubmit(): Promise<void> {
     renameOpen.value = false
   } catch (e) {
     // 降级策略：壳级一次性编排失败 console 留痕，不占用错误条单槽（coreChannelDeps.toast
-    // 已接错误条承载 core 失败面——A7）；表单保持打开——标签未变（乐观更新只在 RPC 成功后），用户可直接重试
+    // 已接错误条承载 core 失败情形——A7）；表单保持打开——标签未变（乐观更新只在 RPC 成功后），用户可直接重试
     console.error('[session-list] rename failed:', e)
   }
 }

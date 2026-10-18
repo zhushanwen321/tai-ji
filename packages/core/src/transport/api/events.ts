@@ -63,7 +63,7 @@ export function off(sessionId: string, handler: MessageHandler): void {
   if (set.size === 0) {
     sessionHandlers.delete(sessionId)
     // [memory-probe] L3 诊断日志探针，已按 memory-leak-remediation §4 降级 debug 级（A9 验收
-    // 完成）：A3 场景删 session 后本行出现且 mapSize 回落；机器断言走 _probeSessionHandlerEntryCount 单测面。
+    // 完成）：A3 场景删 session 后本行出现且 mapSize 回落；机器断言走 _probeSessionHandlerEntryCount 单元测试。
     console.debug(`[memory-probe] off removed empty sessionHandlers entry sid=${sessionId}, mapSize=${sessionHandlers.size}`)
   }
 }
@@ -139,8 +139,8 @@ export function dispatchCrossSession(msg: ServerMessage): void {
   if (crossSessionHandlers.size > 0) safeForEach(crossSessionHandlers, msg)
 }
 
-// ── 实施期内存探针（memory-leak-remediation 验收门；A 系列验收已收口，非业务 API）──
-// L1 单测面：A3/B2 经 before/after delta 断言 sessionHandlers 无残留条目（events.test.ts B2 组）。
+// ── 实施期内存探针（memory-leak-remediation 验收门；A 系列验收已收尾，非业务 API）──
+// L1 单元测试：A3/B2 经 before/after delta 断言 sessionHandlers 无残留条目（events.test.ts B2 组）。
 // A4（断连重连后 'app.info' handler 数恒 1）的机器断言在组件侧闭环：Sidebar 退订对称单测
 // （Sidebar.test.ts B3 组 TC4/TC5）；原 _probeGlobalTypeHandlerCount 唯一消费方是 Sidebar
 // 探针日志行，验收后随日志行一并删除。

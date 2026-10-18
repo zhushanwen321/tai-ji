@@ -210,8 +210,8 @@ describe('renderer-log-handler', () => {
   })
 })
 
-// ── 结构化标记：inbound-frame-dropped → 崩溃台账（crash-forensics §3.3 D8 / u10a）──
-describe('renderer-log-handler inbound-frame-dropped 台账承接', () => {
+// ── 结构化标记：inbound-frame-dropped → 崩溃登记清单（crash-forensics §3.3 D8 / u10a）──
+describe('renderer-log-handler inbound-frame-dropped 登记清单承接', () => {
   let tmpDir: string
   let savedDataDir: string | undefined
 
@@ -220,7 +220,7 @@ describe('renderer-log-handler inbound-frame-dropped 台账承接', () => {
     return await import('../renderer-log-handler.js')
   }
 
-  /** 读取 crashes/main.jsonl 台账行（main writer 经 initCrashJournal 注入本目录）。 */
+  /** 读取 crashes/main.jsonl 登记清单行（main writer 经 initCrashJournal 注入本目录）。 */
   function readJournalLines(): Array<Record<string, unknown>> {
     const file = join(tmpDir, 'logs', 'crashes', 'main.jsonl')
     expect(existsSync(file), `crash journal should exist at ${file}`).toBe(true)
@@ -236,7 +236,7 @@ describe('renderer-log-handler inbound-frame-dropped 台账承接', () => {
     tmpDir = mkdtempSync(join(tmpdir(), 'renderer-log-handler-guard-test-'))
     savedDataDir = process.env.TAIJI_AGENT_DATA_DIR
     process.env.TAIJI_AGENT_DATA_DIR = tmpDir
-    // 台账单例 init（与 loadHandler 同一模块注册表——vi.resetModules 后重新 import）
+    // 登记清单单例 init（与 loadHandler 同一模块注册表——vi.resetModules 后重新 import）
     const { initCrashJournal } = await import('../crash-journal.js')
     initCrashJournal({ dir: join(tmpDir, 'logs', 'crashes') })
   })
@@ -257,7 +257,7 @@ describe('renderer-log-handler inbound-frame-dropped 台账承接', () => {
     })
   }
 
-  it('结构化标记上报 → main.jsonl 台账行（layer=renderer, event=inbound-frame-dropped）+ renderer-error 行照写', async () => {
+  it('结构化标记上报 → main.jsonl 登记清单行（layer=renderer, event=inbound-frame-dropped）+ renderer-error 行照写', async () => {
     const { handleRendererLogReport } = await loadHandler()
     handleRendererLogReport(makeEvent(), makeGuardPayload())
 
@@ -272,12 +272,12 @@ describe('renderer-log-handler inbound-frame-dropped 台账承接', () => {
     expect(String(journal[0].detailDigest)).toContain('42000001')
     expect(typeof journal[0].ts).toBe('string')
 
-    // renderer-error 主路径不受台账分支影响（照写）
+    // renderer-error 主路径不受登记清单分支影响（照写）
     expect(readErrorLines(tmpDir)).toHaveLength(1)
     expect(readErrorLines(tmpDir)[0].source).toBe('inbound-frame-dropped')
   })
 
-  it('4 次丢帧上报 → 4 条台账行（A6 ×4 计数语义）', async () => {
+  it('4 次丢帧上报 → 4 条登记清单行（A6 ×4 计数语义）', async () => {
     const { handleRendererLogReport } = await loadHandler()
     for (let i = 1; i <= 4; i++) {
       handleRendererLogReport(makeEvent(), makeGuardPayload({ message: `dropped-${i}` }))
@@ -293,16 +293,16 @@ describe('renderer-log-handler inbound-frame-dropped 台账承接', () => {
     ])
   })
 
-  it('限流语义保持：丢帧上报与普通错误共享同一窗口配额（100/min），超限台账同样停写', async () => {
+  it('限流语义保持：丢帧上报与普通错误共享同一窗口配额（100/min），超限登记清单同样停写', async () => {
     const { handleRendererLogReport } = await loadHandler()
     for (let i = 0; i < 100; i++) handleRendererLogReport(makeEvent(), makeGuardPayload({ message: `g-${i}` }))
     handleRendererLogReport(makeEvent(), makePayload({ message: 'plain-error-over-quota' })) // 第 101 条：配额已被丢帧上报占满
 
-    expect(readJournalLines()).toHaveLength(100) // 台账与 renderer-error 同受一限流门
+    expect(readJournalLines()).toHaveLength(100) // 登记清单与 renderer-error 同受一限流门
     expect(readErrorLines(tmpDir)).toHaveLength(100)
     expect(readErrorLines(tmpDir).some((l) => l.message === 'plain-error-over-quota')).toBe(false)
 
-    // 窗口翻转后恢复写入（限流语义本身不因台账分支改变）
+    // 窗口翻转后恢复写入（限流语义本身不因登记清单分支改变）
     vi.useFakeTimers({ toFake: ['Date'], now: Date.now() + 61_000 })
     handleRendererLogReport(makeEvent(), makeGuardPayload({ message: 'g-next-window' }))
     expect(readJournalLines()).toHaveLength(101)

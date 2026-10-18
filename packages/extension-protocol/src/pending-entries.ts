@@ -5,7 +5,7 @@
  * 契约两端（此前各持一份同构差集实现，对齐手段是注释）：
  *  - extension 侧：@zhushanwen/pi-base-tool-enhance 对账（原 collectUnsettledTaskIds：
  *    session_start 时对「entries 显示活跃但任务已终态」的 bt- 任务补写注销）
- *  - extension 侧：@zhushanwen/pi-pending-notifications 守卫判据（原
+ *  - extension 侧：@zhushanwen/pi-pending-notifications 检查判据（原
  *    scanPendingEntries + filterActiveRegisters；其 types/currentSessionId/normalize
  *    过滤是 pending 产品语义，留在 pending 侧，不在本模块）
  *
@@ -37,7 +37,7 @@ export interface PendingEntriesScan {
 
 /**
  * 单趟扫描 entries 按 customType 分流（容错对齐 pending 侧 S-10：null/非对象
- * 元素先守卫再访问字段）。register 侧不校验 id（合法性判定归差集层）；unregister
+ * 元素先检查再访问字段）。register 侧不校验 id（合法性判定归差集层）；unregister
  * 仅收 string id。data 用最小结构类型 Record<string, unknown>，消费方自行窄化。
  */
 export function scanPendingEntries(entries: unknown[]): PendingEntriesScan {

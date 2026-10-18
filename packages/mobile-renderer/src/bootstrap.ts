@@ -133,7 +133,7 @@ export async function bootstrap(): Promise<void> {
     // reject 流入用户可见 UI（列表 loadError role=alert）。透传 key 会把裸 key 直出给用户。
     // i18n.global.t 的复杂重载收窄为 (key, params?) => string（对齐 app-runtime 同款收窄）。
     t: i18n.global.t as (key: string, params?: Record<string, unknown>) => string,
-    // 断连/重启用尽的对话流收口（对齐桌面 useMessageEffects.handleRuntimeUnavailable，减去
+    // 断连/重启用尽的对话流收尾（对齐桌面 useMessageEffects.handleRuntimeUnavailable，减去
     // extensionUI clearAllPending——移动壳无 extension UI）：断连宽限（10s）到期或重连放弃
     // （failed）时，把在途 streaming 消息落终态、错误作为 assistant 消息插入对话流（项目
     // 规则#3：错误必须重置状态）。不接线 = 断连后 composer 永久卡「生成中」。

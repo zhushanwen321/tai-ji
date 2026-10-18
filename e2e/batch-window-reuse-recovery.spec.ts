@@ -2,7 +2,7 @@
  * BATCH-WRR 窗口复用与自愈（pi-workflow-run-resource-model D3 验收 A6/A8，场景 V6/V8）。
  *
  * 两个独立场景（各自 session、各自 run、空载串行）：
- *  - A6/V6 窗口内薄壳崩溃自愈：自定义模板顺序两条 agent()（不同名），第一条在飞期
+ *  - A6/V6 窗口内薄壳崩溃自愈：自定义模板顺序两条 agent()（不同名），第一条在途期
  *    剧本 kill 薄壳进程 → record 流 agent-settled{outcome:failed}（崩溃合成路径；
  *    errorCode 口径见用例内注记）；第二条 agent() respawn 新薄壳（pid 更替证据）完成
  *    其任务，run 不被放大失败（run-settled outcome done）。设计 D7 保留语义的真机复核。
@@ -18,7 +18,7 @@
  * workflow tool run action 的绝对路径 name 派发——subagents tool 恒转译 fan-out，
  * 承载不了顺序/同名形态）。
  *
- * 断言 ground truth = run journal（run-events 帧型，W1 权威介质）+ ps 进程表
+ * 断言原始证据文档 = run journal（run-events 帧型，W1 权威介质）+ ps 进程表
  * （scripts/count-engine-shell-processes.mjs 特征并集，基线差分）+ sessions 目录
  * 磁盘事实。执行侧约定与 batch-window-lifecycle.spec.ts 同款（双凭证门 skip、
  * 空载串行、失败 writeDiag 归因禁盲重试）。
@@ -295,7 +295,7 @@ test('WRR-A6 (batch real): kill 注入薄壳后第二条 agent() respawn 完成�
 
     const agentDir = path.join(dataDir, 'agent')
 
-    // r1 在飞证据：薄壳新 pid + sleep 30 进程
+    // r1 在途证据：薄壳新 pid + sleep 30 进程
     const shellUp = await waitUntil(() => {
       const now = shellProcessSnapshot()
       return [...now.pids].filter((p) => !shellBase.pids.has(p)).length >= 1
@@ -310,7 +310,7 @@ test('WRR-A6 (batch real): kill 注入薄壳后第二条 agent() respawn 完成�
       })
     }
     expect(shellUp, '派发后引擎宿主薄壳应出现（per-window 窗口实例）').toBe(true)
-    expect(sleepUp, '派发后 r1 成员 sleep 30 进程应在跑（在飞证据）').toBe(true)
+    expect(sleepUp, '派发后 r1 成员 sleep 30 进程应在跑（在途证据）').toBe(true)
 
     // kill 注入：静置后杀薄壳新 pid（SIGKILL——薄壳崩溃语义）
     await new Promise((r) => setTimeout(r, KILL_SETTLE_MS))
@@ -341,7 +341,7 @@ test('WRR-A6 (batch real): kill 注入薄壳后第二条 agent() respawn 完成�
     expect(respawned, `kill 后第二条 agent() 应 respawn 新薄壳（pid≠${killedPid}；diag 见进程明细）`).toBe(true)
     const respawnPid = [...afterRespawn.pids].find((p) => !shellBase.pids.has(p) && p !== killedPid)
 
-    // r2 在飞证据：sleep 20 进程出现（respawn 后薄壳承载的服务）
+    // r2 在途证据：sleep 20 进程出现（respawn 后薄壳承载的服务）
     const sleep2Up = await waitUntil(() => countMemberSleeperProcesses(20).count > 0, JOURNAL_TIMEOUT_MS)
     if (!sleep2Up) {
       writeDiag('batch-wrr-a6-r2-not-seen.json', {
@@ -351,11 +351,11 @@ test('WRR-A6 (batch real): kill 注入薄壳后第二条 agent() respawn 完成�
     }
     expect(sleep2Up, 'r2 成员 sleep 20 进程应出现（respawn 薄壳承载第二条 ask）').toBe(true)
 
-    // run 收口：done（r1 crashed 是设计内合成形态，不放大 run 失败）
+    // run 收尾：done（r1 crashed 是设计内合成形态，不放大 run 失败）
     const run = await waitForRunSettled(agentDir, SETTLE_TIMEOUT_MS, 'a6')
     const settledFrames = run.frames.filter((f) => f['type'] === 'run-settled')
     expect(settledFrames.length, 'run-settled 应恰 1 帧').toBe(1)
-    expect(settledFrames[0]?.['outcome'], 'run 应 done 收口（崩溃不放大失败）').toBe('done')
+    expect(settledFrames[0]?.['outcome'], 'run 应 done 收尾（崩溃不放大失败）').toBe('done')
 
     // record 流 agent 面：r1 failed + r2 done。
     // errorCode 断言口径：agent 级 errorCode 实装 = result.failureKind（枚举
@@ -383,7 +383,7 @@ test('WRR-A6 (batch real): kill 注入薄壳后第二条 agent() respawn 完成�
         shellNow: shellProcessSnapshot().lines,
       })
     }
-    expect(shellBack, `run 收口后薄壳应回落基线（${ORPHAN_GRACE_MS}ms 窗）`).toBe(true)
+    expect(shellBack, `run 收尾后薄壳应回落基线（${ORPHAN_GRACE_MS}ms 窗）`).toBe(true)
 
     if (consoleCap.errors.length > 0) {
       writeDiag('batch-wrr-a6-console-errors.json', { errors: consoleCap.errors.slice(-50) })
@@ -450,7 +450,7 @@ async function assertA8RecordMediaFace(
     'registered 条目 origin 应为 workflow',
   ).toBe('workflow')
   expect(registered[0]?.['parentRunId'], 'registered 条目应锚定本 run').toBe(run.runId)
-  expect(settledEntries.length, `subagent-record v2 settled 条目应恰 1（同一成员收口一次）`).toBe(1)
+  expect(settledEntries.length, `subagent-record v2 settled 条目应恰 1（同一成员收尾一次）`).toBe(1)
   return { registered }
 }
 
@@ -494,11 +494,11 @@ test('WRR-A8 (batch real): 同名 agent() 两次调用复用同一成员（membe
       secondTask: SECOND_TASK_REUSE,
     }, 'a8-dispatch', sub, consoleCap.errors, dataDir)
 
-    // run 收口
+    // run 收尾
     const run = await waitForRunSettled(agentDir, SETTLE_TIMEOUT_MS, 'a8')
     const settledFrames = run.frames.filter((f) => f['type'] === 'run-settled')
     expect(settledFrames.length, 'run-settled 应恰 1 帧').toBe(1)
-    expect(settledFrames[0]?.['outcome'], 'run 应 done 收口').toBe('done')
+    expect(settledFrames[0]?.['outcome'], 'run 应 done 收尾').toBe('done')
 
     // record 流复用面（D6 绑定消解后语义）：member-pool 事件已删，「同名复用」
     // 承载于 agent-started 载荷字段 memberRecordId——首派（新建成员）缺省，续写
@@ -557,7 +557,7 @@ test('WRR-A8 (batch real): 同名 agent() 两次调用复用同一成员（membe
 
     // 收尾：薄壳回落基线（run 收尾窗口 dispose；复用不改变收尾语义）
     const shellBack = await waitUntil(() => shellProcessSnapshot().pids.size <= shellBase.pids.size, ORPHAN_GRACE_MS, 1_000)
-    expect(shellBack, `run 收口后薄壳应回落基线（${ORPHAN_GRACE_MS}ms 窗）`).toBe(true)
+    expect(shellBack, `run 收尾后薄壳应回落基线（${ORPHAN_GRACE_MS}ms 窗）`).toBe(true)
 
     await page.screenshot({ path: testInfo.outputPath('a8-done.png'), fullPage: true })
     if (consoleCap.errors.length > 0) {

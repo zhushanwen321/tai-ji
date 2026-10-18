@@ -1,7 +1,7 @@
 /**
  * plan-protocol.test.ts — plan 模式重设计协议登记契约校验
  *
- * 验证 plan 模式投影面（D1-⑥ 冷启动首拉 + D5 退出命令）三面登记完整：
+ * 验证 plan 模式派生视图范围（D1-⑥ 冷启动首次拉取 + D5 退出命令）三方面登记完整：
  *  - 新帧 session.planState 在 ServerMessageType 联合 + ServerMessageMapBase 有精确登记
  *    （防 payload 漂移——漏登记会落 Record<string, unknown> 占位，消费侧被迫 as）
  *  - 新 RPC session.getPlanState / session.abortPlan 在 ClientMessageType 联合 +

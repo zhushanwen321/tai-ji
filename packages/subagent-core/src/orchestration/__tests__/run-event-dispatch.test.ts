@@ -1,16 +1,16 @@
 // src/orchestration/__tests__/run-event-dispatch.test.ts
 //
-// [P1b-1] run 事件状态机接线单测（D5-④ 唯一入口的编排侧消费面）。
+// [P1b-1] run 事件状态机接线单测（D5-④ 唯一入口的编排侧消费方）。
 //
 // 锁四面（设计 workflow-architecture-redesign D5 事件枚举表 + 转移表）：
-// 1. 事件序列落账：ask 重试轨迹完整（run-created → agent-started → agent-retrying →
+// 1. 事件序列写入 journal 记录：ask 重试轨迹完整（run-created → agent-started → agent-retrying →
 //    agent-settled(failed, errorCode) → agent-settled(completed, attempt 递增) →
 //    run-settled(completed)）——对照设计 D5 事件枚举表的字段验收（attempt/errorCode）。
 // 2. 终态三形态（journal 侧写读闭环）：成功=completed、失败=failed+errorCode、
 //    取消=cancelled（经 cancel-requested 控制事件合成 run-settled 路径——控制事件
 //    本身不落 journal，journal 词表恰无 cancel-requested 帧）。
 // 3. terminal 后单写者停止 append：终局后再投递任何事件 = IllegalTransitionError
-//    让位，journal 帧数不变（表 terminal × 任意事件 fail-fast 的接线侧守卫）。
+//    让位，journal 帧数不变（表 terminal × 任意事件 fail-fast 的接线侧检查）。
 // 4. fold 重放：清空活体态缓存后，新投递从 journal fold 恢复状态——终帧停 running
 //    时后续 run-settled 可续推（run-events.ts fold 契约的接线侧验证）。
 //
@@ -88,9 +88,9 @@ function makeRun(runId: string, opts: { budgetTimeMs?: number } = {}): WorkflowR
   return run;
 }
 
-// ── 1. 事件序列落账（ask 重试轨迹完整） ──────────────────────
+// ── 1. 事件序列写入 journal 记录（ask 重试轨迹完整） ──────────────────────
 
-describe("事件序列落账（D5 事件枚举表对照）", () => {
+describe("事件序列写入 journal 记录（D5 事件枚举表对照）", () => {
   it("ask 重试轨迹完整：dispatched → retrying → settled(failed, errorCode, attempt) → settled(completed, attempt+1) → run-settled(completed)", async () => {
     const run = makeRun("wf-seq-1");
     const ts = Date.now();
@@ -308,9 +308,9 @@ describe("终态写读三形态（验收 b：journal 侧）", () => {
   });
 
   it("派发前置失败形态（resolveAgentOpts 失败）= failed + errorCode unknown + result 全文随帧", async () => {
-    // [U6 回归] agent-settled 帧缺 result 是 record 恢复读面（loadAll 严格解析 /
+    // [U6 回归] agent-settled 帧缺 result 是 record 恢复读取路径（loadAll 严格解析 /
     // D12 完整性校验）的拒绝形态——本帧是合法写入方（agent 名/skill 解析失败路径），
-    // result 必须随帧落账，否则一次普通用户错误（agent 名拼错）在重启后使整个
+    // result 必须随帧写入 journal 记录，否则一次普通用户错误（agent 名拼错）在重启后使整个
     // workflow 域停初始化。errorResult 与 worker-message-pump resolveAgentOpts
     // 失败分支构造的 run 内形态同源（{content:"", error}）。
     const run = makeRun("wf-pre-dispatch-fail");
@@ -339,7 +339,7 @@ describe("终态写读三形态（验收 b：journal 侧）", () => {
 
 // ── 3. terminal 后单写者停止 append ──────────────────────────
 
-describe("terminal 后追加让位（终局纪律守卫）", () => {
+describe("terminal 后追加让位（终局纪律检查）", () => {
   it("终局后投递任何事件 → IllegalTransitionError，journal 帧数不变", async () => {
     const run = makeRun("wf-term-guard");
     await dispatchRunCreated(run);
@@ -391,7 +391,7 @@ describe("fold 重放（活体态 miss → journal fold 恢复）", () => {
       ts: Date.now(),
     });
 
-    // 清空活体态缓存（模拟进程重启后的投影恢复路径）——journal 仍在
+    // 清空活体态缓存（模拟进程重启后的派生视图恢复路径）——journal 仍在
     setRunEventJournalDirForTest(journalDir);
     const run2 = makeRun(runId);
     await dispatchRunTrigger(run2, {
@@ -410,7 +410,7 @@ describe("fold 重放（活体态 miss → journal fold 恢复）", () => {
     ]);
   });
 
-  it("已 terminal 的 journal：重置后投递 fail-fast（fold 终帧落 terminal 的守卫）", async () => {
+  it("已 terminal 的 journal：重置后投递 fail-fast（fold 终帧落 terminal 的检查）", async () => {
     const runId = "wf-fold-2";
     const run = makeRun(runId);
     await dispatchRunCreated(run);
@@ -439,11 +439,11 @@ describe("fold 重放（活体态 miss → journal fold 恢复）", () => {
 
 // ── 5. run 启动竞态回归（L4 A4 附带发现：8 跑 1 丢 6 帧的回归锁） ──────────
 
-describe("run 启动竞态回归（created 落账前到达的 ask 帧零丢失）", () => {
+describe("run 启动竞态回归（created 写入 journal 记录前到达的 ask 帧零丢失）", () => {
   it("run-created 入队（不 await）后同步并发投递首 ask 链 ×20 轮 → 帧序 created 先行、零丢帧", async () => {
     // 生产时序（lifecycle.runWorkflow 修复后形态）：created 入队先于 worker 启动，
-    // worker 首个 agent() 的 ask 事件在 created 落账完成前同步入队——per-run 队列
-    // 执行序 = 入队序，ask 帧必须全部落账。修复前形态（ask 先入队）在 created 态
+  // worker 首个 agent() 的 ask 事件在 created 写入 journal 记录完成前同步入队——per-run 队列
+  // 执行序 = 入队序，ask 帧必须全部写入 journal 记录。修复前形态（ask 先入队）在 created 态
     // 表外转移被 yielded 吞，journal 永久缺帧。cancel-requested 作队列尾哨兵
     // （await 它 = 该 run 队列排空 + terminal 自清理）。
     for (let i = 0; i < 20; i++) {

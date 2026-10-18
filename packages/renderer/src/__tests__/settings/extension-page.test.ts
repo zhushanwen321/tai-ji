@@ -227,7 +227,7 @@ describe('ExtensionDetail 自动升级开关（乐观更新协议）', () => {
   })
 })
 
-// ── 安装流四路径（ExtensionInstallFlow · transport seam 调用面）──────────────────
+// ── 安装流四路径（ExtensionInstallFlow · transport seam 调用范围）──────────────────
 /** 切到安装流的 Git URL tab（git 发现两用例共用交互序列） */
 async function selectGitTab(): Promise<void> {
   const gitTab = wrapper!.findAll('button').find((b) => b.text() === 'Git URL')

@@ -64,7 +64,7 @@ export const REVERSE_CHANNEL_TIMEOUT_CLASS: Record<ReverseChannel, ReverseReques
 // 通道载荷（params）
 // ============================================================
 
-/** host/log：引擎日志落宿主日志（对齐 core HostServices.log 调用面）。 */
+/** host/log：引擎日志落宿主日志（对齐 core HostServices.log 调用范围）。 */
 export interface HostLogParams {
   level: "debug" | "warn" | "error";
   component: string;

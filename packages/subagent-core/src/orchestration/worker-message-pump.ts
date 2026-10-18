@@ -113,7 +113,7 @@ type WorkerMsg = AgentCallMsg | ReturnMsg | ErrorMsg | LogMsg | PhaseMsg;
  * 孤儿 call 判定：dispatch 时捕获的 call 实例是否已不是 calls Map 中该 callId
  * 的当前条目。
  *
- * 为何需要实例级比对（而非只查 run 状态）：既有的终态 stale 守卫拦不住旧代际的
+ * 为何需要实例级比对（而非只查 run 状态）：既有的终态 stale 检查拦不住旧代际的
  * 迟到 completion。只有新一代 dispatch（set 新实例）会改变「callId → 实例」映射，
  * 故实例不等 ⟺ 本 completion 属于被替换的旧代际（S7-second 竞态：旧失败结果经
  * postAgentResult 投给新 worker 的同 callId pending，劫持重跑调用为假失败/空串
@@ -121,7 +121,7 @@ type WorkerMsg = AgentCallMsg | ReturnMsg | ErrorMsg | LogMsg | PhaseMsg;
  * （ADR-0122），谓词保留为接管形态的防御面。
  *
  * 运行期 calls Map 写点为 dispatchAgentCall 的 set（jsonl-run-store 的 set 在离线
- * 重水合路径，无在飞 promise），正常（非孤儿）路径下实例恒等，无误判。
+ * 重新加载路径，无在途 promise），正常（非孤儿）路径下实例恒等，无误判。
  */
 function isOrphanedCall(run: WorkflowRun, callId: number, call: AgentCall): boolean {
   return run.state.calls.get(callId) !== call;
@@ -135,7 +135,7 @@ function isOrphanedCall(run: WorkflowRun, callId: number, call: AgentCall): bool
 // ── [U2] canonical JSON 工具（场景 13：schema 哈希稳定）─────────
 
 // 实装与设计说明已抽至 ./canonical-json.ts（第二消费方 terminal-actions 的
-// agent-started 入参落账出现后，工具留在本文件会形成 pump ↔ terminal-actions
+// agent-started 入参写入 journal 记录出现后，工具留在本文件会形成 pump ↔ terminal-actions
 // 反向 import 成环）。此处 re-export 维持既有 import 路径（测试与下游消费方
 // 不变），语义与落位理由见该模块头注。
 export { canonicalJsonStringify, canonicalJsonHash } from "./canonical-json.ts";
@@ -165,7 +165,7 @@ function dropStaleWorkerMessage(run: WorkflowRun, raw: unknown): void {
 }
 
 /** [handleWorkerMessage 拆分] [F1] 标记本 runtime 代际已收到终态消息：WorkerHandle.isCurrent
- * 守卫保证消息必来自当前代际 worker。handleWorkerExit 的 exit(0) 无终态判定据此区分——
+ * 检查保证消息必来自当前代际 worker。handleWorkerExit 的 exit(0) 无终态判定据此区分——
  * 「已交付但 run 仍 running」（script-error 重试退避窗口）不得误判 failed。 */
 function markTerminalMessageDelivered(run: WorkflowRun): void {
   if (run.runtime) run.runtime.receivedTerminalMessage = true;
@@ -241,13 +241,13 @@ export async function handleWorkerMessage(
  * 消费 worker 的独立 log 消息（[OR-6/T7④] 主线程半边）。
  *
  * 计入 run.state.errorLogs（与 workerLogs 通路的 L9 追加/上限语义一致）+ deps.log
- * debug 留痕。终态守卫（isRunSettled）已由 handleWorkerMessage 前置——此处只管写入。
+ * debug 留痕。终态检查（isRunSettled）已由 handleWorkerMessage 前置——此处只管写入。
  */
 /**
- * errorLogs 追加 + 诊断落账（[§2.1 errorLogs 持久化] ADR-0093）。
+ * errorLogs 追加 + 诊断写入 journal 记录（[§2.1 errorLogs 持久化] ADR-0093）。
  *
- * 活体写入与落账的唯一单点：追加语义 + 尾部上限裁剪（`MAX_ERROR_LOGS`）与
- * `errorLogsFromEvents` 重建面同构；落账经 terminal-actions 的
+ * 活体写入与写入 journal 记录的唯一单点：追加语义 + 尾部上限裁剪（`MAX_ERROR_LOGS`）与
+ * `errorLogsFromEvents` 重建面同构；写入经 terminal-actions 的
  * `appendRunDiagnosticEvent`（journal 单写者纪律）。
  */
 function appendErrorLogs(run: WorkflowRun, entries: readonly WorkerLogEntry[]): void {
@@ -281,7 +281,7 @@ function handleWorkerLog(run: WorkflowRun, msg: LogMsg, deps: LifecycleDeps): vo
  * **C-2 修复**：call 完成后检查 `budget.isExceeded` → abortRun(budget_limited)，
  * 终止整个 run。
  *
- * **stale 完成守卫（两层）**：completion 到达时——
+ * **stale 完成检查（两层）**：completion 到达时——
  * 1. isRunSettled recheck：run 终止（abort/terminate）后到达的 call 完成不写
  *    run.state.calls / 不 postAgentResult（终态快照不被迟到结果污染）；
  * 2. 孤儿 call 实例比对（isOrphanedCall）：rebuildRuntime 后旧代际 dispatch 的
@@ -327,7 +327,7 @@ function isMalformedAgentCallMsg(msg: AgentCallMsg): boolean {
  * 差异，canonical 键序消除 IPC/重建往返的形态漂移——场景 13 零误报）。
  *
  * 跳过比对（返回 false）的三形态——比对即假 mismatch：
- * 1. 占位 opts（resume/重水合重建的 call 无可比数据面时：旧格式 record 流的
+ * 1. 占位 opts（resume/重新加载重建的 call 无可比数据面时：旧格式 record 流的
  *    agent-started 帧不携带入参全文（input 载荷为 [U13] 补齐，写侧随本设计
  *    落地）——新帧有 input 的重建走 opts 恢复，比对正常执行）；
  * 2. 失败历史（cached.result.error 在场——失败也是真实历史结果，重跑不保证更对
@@ -442,7 +442,7 @@ function dispatchAgentCall(
   run.state.trace.append(node);
 
   // [D3] phase 收束账本记账（phase-settled 判定的派发半边；无 phase 归属的 call
-  // 不入账——phase-settled 只对显式 phase 落账，空值守卫在 notePhaseDispatched 内）。
+  // 不入账——phase-settled 只对显式 phase 写入 journal 记录，空值检查在 notePhaseDispatched 内）。
   notePhaseDispatched(run.runId, msg.phase);
 
   // 构建 AgentCall（opts 形状对齐 AgentCallOpts；schema: unknown → Record）
@@ -476,8 +476,8 @@ function dispatchAgentCall(
       result: errorResult,
       completedAt: new Date().toISOString(),
     });
-    // [P1b-1] agent-settled(failed) 落账（派发前置失败形态：attempt 恒 1）。result
-    // 随帧携带（errorResult 同源——record 恢复读面拒绝缺 result 的 settled 帧）。
+    // [P1b-1] agent-settled(failed) 写入 journal 记录（派发前置失败形态：attempt 恒 1）。result
+    // 随帧携带（errorResult 同源——record 恢复读取路径拒绝缺 result 的 settled 帧）。
     dispatchAgentSettledFailed(run, msg.callId, errorResult);
     postAgentResult(run, msg.callId, errorResult, false);
     deps.store.save(run).catch((e: unknown) => {
@@ -488,10 +488,10 @@ function dispatchAgentCall(
 
   const call = new AgentCall(msg.callId, resolved.opts, node);
   run.state.calls.set(msg.callId, call);
-  // [P1b-1] agent-started 落账（编排层事件源，D5 载荷表；taskIndex = callId 单源）。
+  // [P1b-1] agent-started 写入 journal 记录（编排层事件源，D5 载荷表；taskIndex = callId 单源）。
   // phase 透传（[D3] call 归属快照）；memberRecordId 透传（[D6] 绑定字段化——
   // 续写帧携带既有成员 record id，首派缺省；绑定登记的真相面在 workflow-dispatch，
-  // 此处从复用池活体缓存取值随帧落账，跨崩溃重建由 fold 消费本字段）；opts 落
+  // 此处从复用池活体缓存取值随帧写入 journal 记录，跨崩溃重建由 fold 消费本字段）；opts 落
   // 入参全文（设计 §3.1 载荷表 agent-started 行「入参」——canonical 序列化，
   // resume 重建回放集 call 的 opts 恢复源，detectReplayInputMismatch 比对由此可比）。
   const boundRecordId = lookupBoundRecordIdSync(run.runId, agentName);
@@ -511,11 +511,11 @@ function dispatchAgentCall(
   // deps.runner——生产装配恒注入 dispatch（extension index.ts makeDeps），回退分支
   // 生产不可达。
   const dispatch = deps.workflowAgentDispatch;
-  // [W0 / D1] stepIndex = msg.callId（taskIndex 单源，与 agent-started 落账同源）。
+  // [W0 / D1] stepIndex = msg.callId（taskIndex 单源，与 agent-started 写入 journal 记录同源）。
   const innerRunner: AgentRunner = dispatch
     ? { run: (rOpts, rSignal) => dispatch(rOpts, run.runId, rSignal, msg.callId) }
     : deps.runner;
-  // [ADR-0122] 无重试——runner 直用 innerRunner（原 agent-retrying 落账包装随
+  // [ADR-0122] 无重试——runner 直用 innerRunner（原 agent-retrying 写入 journal 记录包装随
   // 重试矩阵删除；agent-retrying 事件类型保留为 journal 词表兼容，仅历史记录含此帧）。
   const runner: AgentRunner = innerRunner;
   // 原 gate.withSlot(fn, signal) 语义内联：pre-aborted 时 reject AbortError。
@@ -534,16 +534,16 @@ function dispatchAgentCall(
       // run 终止（终态）后到达的 stale completion 不写 state。
       // [W2/V1] 终局判据换源 isRunSettled。
       if (isRunSettled(run)) return;
-      // 孤儿 call 守卫（S7-second 竞态）：重跑 dispatch 已用新实例替换同 callId
+      // 孤儿 call 检查（S7-second 竞态）：重跑 dispatch 已用新实例替换同 callId
       // 条目时，本 completion 属于旧代际——跳过投递 / budget 同步 / 持久化，仅留日志。
       if (isOrphanedCall(run, msg.callId, call)) {
         deps.log?.("debug", "workflow:worker-message-pump", "orphan agent call completion dropped", { runId: run.runId, callId: msg.callId });
         return;
       }
       if (call.result) postAgentResult(run, msg.callId, call.result, false);
-      // [P1b-1] agent-settled 落账（引擎终态应答，D5 载荷表；置于 budget 终局检查
+      // [P1b-1] agent-settled 写入 journal 记录（引擎终态应答，D5 载荷表；置于 budget 终局检查
       // 之前——record 序 = agent-settled 先、budget 的 run-settled 后）。signal abort
-      // = agent 粒度 cancelled。落账后进行 [D3] phase 收束判定（账本 settled 计数
+      // = agent 粒度 cancelled。写入 journal 记录后进行 [D3] phase 收束判定（账本 settled 计数
       // 追平 dispatched 即落 phase-settled——先于 run-settled 帧，phase 收束语义
       // 先于 run 终局）。
       dispatchAgentSettled(run, call, signal.aborted);
@@ -558,7 +558,7 @@ function dispatchAgentCall(
 
       // C-2：budget 超限 → 终止整个 run（避免继续 spawn 烧预算）
       // 内联 terminate（不调 lifecycle.abortRun 避免 engine 内循环依赖）：
-      // finalizeRun 内含终局让位守卫。
+      // finalizeRun 内含终局让位检查。
       if (run.state.budget.isExceeded()) {
         run.state.error = run.state.error ?? "Budget exceeded";
         deps.log?.("debug", "workflow:worker-message-pump", "budget exceeded, finalizing run", { runId: run.runId });
@@ -572,7 +572,7 @@ function dispatchAgentCall(
       logger.error(`[workflow] agent call ${msg.callId} failed: ${message}`);
       // 兜底回发：executeAgentCall 抛非 Abort 异常时构造 failed AgentResult
       // postAgentResult 回 worker，让 pending Promise resolve（结果为 error），脚本
-      // 可继续或失败退出。孤儿 call 守卫（与 .then 对称）：rebuild 后本 call 已被
+      // 可继续或失败退出。孤儿 call 检查（与 .then 对称）：rebuild 后本 call 已被
       // discard 移除/替换——全部跳过。
       if (isOrphanedCall(run, msg.callId, call)) {
         deps.log?.("debug", "workflow:worker-message-pump", "orphan agent call failure dropped", { runId: run.runId, callId: msg.callId });
@@ -591,7 +591,7 @@ function dispatchAgentCall(
         result: errorResult,
         completedAt: new Date().toISOString(),
       });
-      // [P1b-1] agent-settled(failed) 落账（executeAgentCall 兜底异常路径——非 Abort
+      // [P1b-1] agent-settled(failed) 写入 journal 记录（executeAgentCall 兜底异常路径——非 Abort
       // 异常，aborted=false；终局尝试序号 = call.attempts）。
       dispatchAgentSettled(run, call, false);
       settlePhaseIfComplete(run, msg.phase);
@@ -617,12 +617,12 @@ function lookupBoundRecordIdSync(runId: string, name: string): string | undefine
 }
 
 /**
- * [D3] phase 收束判定与落账：该 phase 账本 settled 计数追平 dispatched 时落
- * phase-settled 帧并清账（账本与记账原语在 terminal-actions——settlePhaseLedger
- * 含空串守卫与无条目 false，语义同前：仅显式 phase 参与、无 phase 归属的 call
+ * [D3] phase 收束判定与写入 journal 记录：该 phase 账本 settled 计数追平 dispatched 时落
+ * phase-settled 帧并标记登记项完成（账本与记账原语在 terminal-actions——settlePhaseLedger
+ * 含空串检查与无条目 false，语义同前：仅显式 phase 参与、无 phase 归属的 call
  * 落定不影响任何账本）。竞态说明：账本是过程内派发/落定序的镜像（同 runId 内
  * dispatchAgentCall 与其完成链天然按事件循环序推进），终局/中断路径不经此判定
- * （phase-settled 只在 running/settling 自环行合法——落账于 run-settled 之前的
+ * （phase-settled 只在 running/settling 自环行合法——写入 journal 记录于 run-settled 之前的
  * 调用序构造性满足表内转移；让位形态（IllegalTransitionError）由 reportDispatchFailure
  * 的 debug 分支吸收）。
  */
@@ -751,7 +751,7 @@ export async function handleWorkerError(
     return;
   }
 
-  // [R4-F1] 同代际幂等守卫：worker 崩溃时 error + exit(1) 双事件各派发一次
+  // [R4-F1] 同代际幂等检查：worker 崩溃时 error + exit(1) 双事件各派发一次
   // handleWorkerError（onError 先到，exit 非 0 经 handleWorkerExit 委托二次到达）。
   // 复用 receivedTerminalMessage 代际标志：进入处理前置 true 标记「本代际已有
   // error/terminal 处理」，第二个事件命中标志直接跳过。
@@ -836,7 +836,7 @@ export async function handleScriptError(
   deps: LifecycleDeps,
   _handlers: WorkerHandlers,
 ): Promise<void> {
-  // 与 handleWorkerMessage/handleWorkerError 对称——终态守卫前置。
+  // 与 handleWorkerMessage/handleWorkerError 对称——终态检查前置。
   if (isRunSettled(run)) return;
 
   // P2-2: 捕获 worker 诊断日志
@@ -850,6 +850,6 @@ export async function handleScriptError(
   await finalizeRun(run, deps, "failed", { context: "handleScriptError (done,failed)" });
 }
 
-// ── [D6] 复用池活体缓存的同步读取面 ─────────────────────────
+// ── [D6] 复用池活体缓存的同步读取路径 ─────────────────────────
 
 import { peekMemberRecordId } from "../execution/service/member-reuse-pool.ts";

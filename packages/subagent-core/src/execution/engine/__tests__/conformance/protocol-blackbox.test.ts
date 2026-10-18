@@ -201,7 +201,7 @@ describe("协议黑盒：9 正向方法 × fake 引擎回放", () => {
     }
   });
 
-  it("dispose：幂等收口（应答 ok + 进程退出）", async () => {
+  it("dispose：幂等收尾（应答 ok + 进程退出）", async () => {
     const h = makeHarness();
     await h.client.ensureConnected();
     const r = (await h.client.request("dispose", {}, { timeoutMs: 5_000 })) as { ok: boolean };
@@ -363,7 +363,7 @@ describe("协议黑盒：fixture 回放结构等价（基线三层①）", () =>
   it("POSIX 组探测：childSpawned 上报 pid 非组长（在引擎收割组内；A3 前提；Windows 显式跳过）", async () => {
     if (process.platform === "win32") {
       // Windows 无外部组判据（无 kill(-pid,0) 等价物）——仅 SDK 层 spawnEngineChild
-      // 的 detached/stdio 规约保证，真机面挂 A3 手动门（taskkill /T /F 形态）。
+      // 的 detached/stdio 规约保证，真机验证挂 A3 手动门（taskkill /T /F 形态）。
       return;
     }
     const h = makeHarness();

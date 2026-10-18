@@ -2,7 +2,7 @@
  * createKVSlot 单元测试。
  *
  * 被测对象：foundation/create-kv-slot.ts —— KV 单键槽位工厂（state-truth-sync
- * §3.3 D9 KV 单键族收编：三态惰性预载 / 加载窗口守卫 / deferred 补写 / 写穿串行链 /
+ * §3.3 D9 KV 单键族收编：三态惰性预载 / 加载窗口检查 / deferred 补写 / 写穿串行链 /
  * 容错 warn / validate 钩子）。
  *
  * 策略：KV 用内存 stub 实现 KVStorage 接口，经 providePlatform 注入（工厂经
@@ -24,7 +24,7 @@ import {
 } from '../platform/port'
 import { createKVSlot, type KVSlot, type KVSlotOptions } from './create-kv-slot'
 
-/** KV 内存 stub：可控时序（读闸门 loadGate / 写闸门 setGate）+ 读/写失败注入 + 落盘观测。 */
+/** KV 内存 stub：可控时序（读门禁 loadGate / 写门禁 setGate）+ 读/写失败注入 + 落盘观测。 */
 class StubKV implements KVStorage {
   private map = new Map<string, string>()
   /** 非 undefined 时 get 直接返回该原始串（注入损坏 JSON / 非对象 JSON 场景） */
@@ -33,10 +33,10 @@ class StubKV implements KVStorage {
   failSetError: Error | null = null
   getCalls = 0
   setWrites: Array<[string, string]> = []
-  /** 读闸门：非 null 时 get 挂起直到 releaseLoadGate（控制预载完成时点） */
+  /** 读门禁：非 null 时 get 挂起直到 releaseLoadGate（控制预载完成时点） */
   private loadGate: Promise<void> | null = null
   private openLoad: (() => void) | null = null
-  /** 写闸门：armed 后的下一次 set 挂起直到 releaseSetGate（写串行链用例观测交错） */
+  /** 写门禁：armed 后的下一次 set 挂起直到 releaseSetGate（写串行链用例观测交错） */
   private setGate: Promise<void> | null = null
   private openSet: (() => void) | null = null
 
@@ -47,7 +47,7 @@ class StubKV implements KVStorage {
     }
   }
 
-  /** 关读闸门：之后的 get 挂起直到 releaseLoadGate */
+  /** 关读门禁：之后的 get 挂起直到 releaseLoadGate */
   closeLoadGate(): void {
     this.loadGate = new Promise((resolve) => {
       this.openLoad = resolve
@@ -59,7 +59,7 @@ class StubKV implements KVStorage {
     this.openLoad = null
   }
 
-  /** armed 写闸门：下一次 set 先记录调用再挂起（可断言「已开始未完成」） */
+  /** armed 写门禁：下一次 set 先记录调用再挂起（可断言「已开始未完成」） */
   armSetGate(): void {
     this.setGate = new Promise((resolve) => {
       this.openSet = resolve
@@ -154,7 +154,7 @@ function assembleSingleValueSlot(
 
 /**
  * 整表 Map 形态组装（model-thinking-memory 镜像）：容器 = plain Map（KV 单键存整个表），
- * merge 内建「内存已有值优先」加载窗口守卫。
+ * merge 内建「内存已有值优先」加载窗口检查。
  */
 function assembleMapSlot(
   key: string,
@@ -183,7 +183,7 @@ function assembleMapSlot(
   }
 }
 
-describe('createKVSlot · 加载窗口守卫（Map 值形态）', () => {
+describe('createKVSlot · 加载窗口检查（Map 值形态）', () => {
   beforeEach(() => {
     vi.spyOn(console, 'warn').mockImplementation(() => {})
   })
@@ -204,7 +204,7 @@ describe('createKVSlot · 加载窗口守卫（Map 值形态）', () => {
 
     stub.releaseLoadGate()
     await flushAsync()
-    // 窗口守卫：KV 旧快照的 m1:'old' 不覆写内存新值；快照其余条目正常并入
+    // 窗口检查：KV 旧快照的 m1:'old' 不覆写内存新值；快照其余条目正常并入
     expect(slot.map.get('m1')).toBe('new')
     expect(slot.map.get('m2')).toBe('keep')
     // deferred 补写收敛：落盘为合并后的完整表（而非只有 m1 的局部快照）
@@ -219,7 +219,7 @@ describe('createKVSlot · 加载窗口守卫（Map 值形态）', () => {
 
     slot.loadOnce()
     slot.writeEntry('m2', 'v2')
-    await flushAsync() // KV get 仍挂起（闸门未开）
+    await flushAsync() // KV get 仍挂起（门禁未开）
     expect(stub.setWrites).toHaveLength(0)
 
     stub.releaseLoadGate()

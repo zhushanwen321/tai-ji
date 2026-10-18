@@ -9,7 +9,7 @@
  * 注入方式（六个组件测试文件同构）：
  *   vi.mock('@/composables/features/settings/useAppUpdate', () => useAppUpdateCardModule())
  * 工厂经 vi.importActual 保留真实模块导出，只重写 useAppUpdate 单例入口返回 harness
- * 控制器的消费面。注意本 helper 禁止顶层 import 被 mock 的路径：vi.mock 工厂在测试文件的
+ * 控制器的消费方。注意本 helper 禁止顶层 import 被 mock 的路径：vi.mock 工厂在测试文件的
  * helper import 绑定初始化前就会因该 import 被触发（TDZ），故 controller 的创建收进 async
  * 工厂内（vi.importActual 取真实 createAppUpdateController，此时尚在模块 setup 阶段，早于
  * 任何 beforeEach，resetCardUpdateHarness 前必然就绪）。

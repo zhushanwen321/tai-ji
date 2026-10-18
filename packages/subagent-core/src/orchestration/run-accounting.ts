@@ -28,7 +28,7 @@ import type { WorkflowRunEvent } from "./run-events.ts";
 /**
  * 帧推导会计（下界近似，见文件头「精度边界」）。纯函数，不改任何状态。
  *
- * 返回形状就地声明（不立具名接口）：唯一消费面是本文件与三处重建调用点，无第二实现，
+ * 返回形状就地声明（不立具名接口）：唯一消费方是本文件与三处重建调用点，无第二实现，
  * 具名接口只会多一层需要维护的间接。
  */
 export function runAccountingFromEvents(

@@ -84,14 +84,14 @@ export async function fetchRecommended(): Promise<Array<RecommendedExtension & {
 }
 
 /**
- * 主动重拉扩展列表（重连补发，设计文档 A4 §3.4）。
+ * 主动重新拉取扩展列表（重连补发，设计文档 A4 §3.4）。
  *
  * runtime extension.list → scanExtensions() → 回 config.extensions（带 id）。
  * reply 因 msg.id 命中 pending 被 resolve（routeInbound），同时 dispatchGlobal
  * 触发 onExtensions 订阅回调刷新 store。
  *
  * 场景：WS 重连后 sendInitialState 的 extensions 异步段可能早于订阅建立/断连完成
- * 而丢失（broker.ts async fire-and-forget），此处主动补拉确保扩展列表新鲜。
+ * 而丢失（broker.ts async fire-and-forget），此处主动补充拉取确保扩展列表新鲜。
  */
 export async function scan(): Promise<void> {
   await command('extension.list', {}, RPC_BACKSTOP_TIMEOUT_MS)
@@ -130,16 +130,16 @@ export interface ExtensionUIRequest {
   prefill?: string
   // ask-user 富交互扩展（仅 dialogKind='select' + askUser=true 时存在）
   askUser?: boolean
-  askUserQuestions?: unknown[]  // AskUserQuestion[]，前端用类型守卫收窄
+  askUserQuestions?: unknown[]  // AskUserQuestion[]，前端用类型检查收窄
   allowCancel?: boolean
   // schedule 创建确认富交互扩展（仅 dialogKind='select' + scheduleCreate=true 时存在，
   // runtime event-adapter 第 4 marker 分支翻译 SCHEDULE_CREATE_MARKER select）
   scheduleCreate?: boolean
-  scheduleDraft?: unknown  // ScheduleDraft（@zhushanwen/extension-protocol），前端守卫收窄
+  scheduleDraft?: unknown  // ScheduleDraft（@zhushanwen/extension-protocol），前端检查收窄
   // 统一提问表单扩展（仅 dialogKind='select' + form=true 时存在；ui-presentation-protocol D1：
   // runtime event-adapter 翻译 UI_FORM_MARKER select，前端 FormOverlay 渲染类型化问题集）
   form?: true
-  formQuestions?: unknown[]  // FormQuestion[]（@zhushanwen/extension-protocol），前端守卫收窄
+  formQuestions?: unknown[]  // FormQuestion[]（@zhushanwen/extension-protocol），前端检查收窄
   // 源元数据：本次表单提交后是否有 turn 预期（respond 分型判据，form-submit-busy-convergence D1 段 4/5）。
   // 来源契约 = @zhushanwen/extension-protocol uiFormInteract options 的同名字段（A-1 加员）；
   // core 不依赖 extension-protocol，本地同形声明（同上方 scheduleDraft/formQuestions 注释惯例），
@@ -212,7 +212,7 @@ export function sendExtensionUIResponse(sessionId: string, requestId: string, me
  */
 export async function getPendingRequests(sessionId: string): Promise<ExtensionUIRequest[]> {
   const reply = await command('extension.getPendingRequests', { sessionId }, RPC_BACKSTOP_TIMEOUT_MS)
-  // reply.requests 是 unknown[]（runtime PendingUIRequest 未下沉 shared），用类型守卫收窄为 ExtensionUIRequest
+  // reply.requests 是 unknown[]（runtime PendingUIRequest 未下沉 shared），用类型检查收窄为 ExtensionUIRequest
   return reply.requests.filter((r): r is ExtensionUIRequest =>
     r != null && typeof r === 'object' &&
     typeof (r as Record<string, unknown>).requestId === 'string' &&

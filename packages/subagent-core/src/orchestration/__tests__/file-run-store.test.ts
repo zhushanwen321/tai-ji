@@ -21,10 +21,10 @@ import {
   createRecordEventStream,
   type RecordEventInput,
 } from "../../execution/persistence/record-events.ts";
-// [W1 / D5 触发点②] RecordStore.register 首写触发维护轮的行为断言面
+// [W1 / D5 触发点②] RecordStore.register 首写触发维护轮的行为断言范围
 import { RecordStore } from "../../execution/persistence/record-store.ts";
 import { createRecord } from "../../execution/persistence/execution-record.ts";
-// barrel 消费面回归锚：维护轮入口经 barrel 导出（三触发点接线面，U7 消费同路径）
+// barrel 消费方回归锚：维护轮入口经 barrel 导出（三个触发点接线，U7 消费同路径）
 import { runRetentionMaintenanceRound } from "../../index.ts";
 import {
   PruneStateDeps,
@@ -54,7 +54,7 @@ function daysAgoMs(days: number): number {
   return Date.now() - days * 86_400_000;
 }
 
-/** run journal 帧构造（W1 前格式：无 seq——读取面对缺失放行，D7 兼容读）。 */
+/** run journal 帧构造（W1 前格式：无 seq——读取侧对缺失放行，D7 兼容读）。 */
 function runCreatedFrame(runId: string, ts: number): Record<string, unknown> {
   return { type: "run-created", ts, runId, workflowName: "w", argsSummary: "args" };
 }
@@ -332,7 +332,7 @@ void CAP_RETIREMENT_TYPE_ANCHOR;
 //
 // record-only 会话（只跑 subagents()、无任何 workflow run）的 record 域清理入口：
 // RecordStore.register 的 record 事件文件首写触发统一维护轮（fire-and-forget——
-// 同步写点无 await 通道），窗外终态 .events 被清、manifest 不触碰、新落账的
+// 同步写点无 await 通道），窗外终态 .events 被清、manifest 不触碰、新写入 journal 记录的
 // record 事件文件（窗内、非终态）保留。
 
 describe("record 首写触发维护轮（W1 / D5 触发点②：RecordStore.register 接线）", () => {

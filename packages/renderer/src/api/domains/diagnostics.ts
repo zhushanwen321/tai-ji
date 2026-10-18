@@ -1,6 +1,6 @@
 // 诊断包导出域（crash-forensics-and-watchdog §3.3 D6 / u3b）。
 // Electron IPC 平台门面（对齐 ./settings.ts 域形态：经 @/lib/ipc 二级适配——renderer 对
-// electronAPI 的唯一适配点是 lib/ipc（spec §4 R1，B1 IPC 门面守卫禁直调 window.electronAPI）；
+// electronAPI 的唯一适配点是 lib/ipc（spec §4 R1，B1 IPC 门面检查禁直调 window.electronAPI）；
 // 不进 api/index.ts 聚合——该门面只聚合 core transport 域）。
 import { exportDiagnosticBundle as exportDiagnosticBundleIpc } from '@/lib/ipc'
 import type { DiagnosticExportBundlePayload, DiagnosticExportBundleResult } from '@taiji/shared'

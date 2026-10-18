@@ -1,7 +1,7 @@
 /**
  * Composer 命令浮层触发态机（架构审查 F7，从 Composer.vue 拆出）。
  *
- * 职责（单一变化轴「slash/file/session/subagent/skill 浮层触发 + CommandPopover 联动」）：
+ * 职责（单一变化原因「slash/file/session/subagent/skill 浮层触发 + CommandPopover 联动」）：
  * - 五路触发态标记（slash/file/session/subagent/skill TriggerActive）：区分「输入区符号触发」
  *   与「+菜单触发」两条打开浮层路径——仅输入区路径设 true，使后续 trigger:null 能正确关闭浮层。
  * - onSlashTrigger / onFileTrigger / onSessionTrigger / onSubagentTrigger / onSkillTrigger：
@@ -12,11 +12,11 @@
  * - onAddSelect：+ 菜单打开 slash 浮层（不设触发态，防普通键误关）。
  * - onCmdSelect：选中后插 chip（slash/file/session/subagent），清过滤文本 + 复位触发态。
  * - onSelectAndSend：命令名精确匹配直发（onCmdSelect 复用 + 同步直调 dispatchEnter 链，
- *   command-enter-exact-send D2 钉死直调、禁合成事件）。
+ *   command-enter-exact-send D2 固定为直调、禁合成事件）。
  * - pendingSlash watch：消费 SearchModal 经 commandStore 注入的 slash 请求（D2b：注入前
- *   清活跃域 token 残留——session 冻结守卫 + 文本定位删除助手，再插 chip）。
+ *   清活跃域 token 残留——session 冻结检查 + 文本定位删除助手，再插 chip）。
  * - SM 互斥 watch（search-modal-popover-mutual-exclusion D1）：SearchModal open 时单向
- *   关闭命令浮层（flush:'sync'，close 不恢复；open 时冻结 sessionId 供 D2b 守卫）。
+ *   关闭命令浮层（flush:'sync'，close 不恢复；open 时冻结 sessionId 供 D2b 检查）。
  * - commandPopoverRef + cmdOpen：键盘路由（⏎/Esc）与 v-model:open 绑定。
  *
  * 不含：发送/steer/abort 编排、模型/思考等级、草稿维护（均留在 Composer.vue / 其他 composable）。
@@ -136,10 +136,10 @@ export function useCommandPopoverTrigger(
   /** SearchModal 单例（core 域，⌘K 全局搜索弹窗）——D1 互斥 watch 消费其 isOpen */
   const searchModal = useSearchModal()
   /**
-   * SM open 时刻冻结的 sessionId（D2b session 冻结守卫锚点）：消费 pendingSlash 清理时
+   * SM open 时刻冻结的 sessionId（D2b session 冻结检查锚点）：消费 pendingSlash 清理时
    * 冻结值 ≠ 当前 session 则跳过清理（⌘N 在 SM open 期间可切 session，切换时 draft watch
-   * setText 整框替换且不派发 trigger——冻结的 active/query 与新文本静默脱钩，不守卫则可能
-   * 误删他 session 草稿的同形 token）。注入本身不受此守卫影响（由 req.sessionId 过滤）。
+   * setText 整框替换且不派发 trigger——冻结的 active/query 与新文本静默脱钩，不检查则可能
+   * 误删他 session 草稿的同形 token）。注入本身不受此检查影响（由 req.sessionId 过滤）。
    */
   const frozenSearchModalSessionId = ref<string | null>(null)
 
@@ -155,7 +155,7 @@ export function useCommandPopoverTrigger(
    * 无重置为 true 的输入源。flush:'sync'：⌘K keydown → isOpen=true → watch 同步执行
    * cmdOpen=false，同一事件循环内完成——用户下一次物理按键时 capture 监听开门条件已失效
    * （前提 3；仓内既定习语，command-popover-keyboard activeIndex 收敛 watch 同款）。
-   * 不动 triggerActive/query 标记（保留即冻结守卫与 D2b 活跃域判定的锚，D2b 责任面）。
+   * 不动 triggerActive/query 标记（保留即冻结检查与 D2b 活跃域判定的锚，D2b 责任范围）。
    */
   watch(
     () => searchModal.isOpen.value,
@@ -188,7 +188,7 @@ export function useCommandPopoverTrigger(
    *
    * 不清理则用户输入 `/compact`（浮层 open、域活跃）→ ⌘K → SM confirm `/commit` → chip 注入
    * 但残留明文仍在 → 序列化归首产出 `/commit /compact` → pi 把残留当 args 执行（垃圾参数）。
-   * 链路：session 冻结守卫（SM open 时冻结 ≠ 当前 session 跳过——防误删他 session 草稿）→
+   * 链路：session 冻结检查（SM open 时冻结 ≠ 当前 session 跳过——防误删他 session 草稿）→
    * 活跃域判定（无活跃域跳过）→ removeActiveTokenText（带域约束正则全文定位；非唯一/0 命中
    * 自行 no-op；删除范围 = 符号 + query，边界空白保留；光标落删除点，后续 chip 落 token 原位）。
    * onChanged 传空实现：draft ref 同步由紧随其后的 insertSlashChip/insertSkillChip 尾部
@@ -330,7 +330,7 @@ export function useCommandPopoverTrigger(
    *    与原 insertMentionChip('#') 等价——dom-core 内 # 委托 insertFileChip，直接走本名）
    *  - session（# 触发）：clearSessionQueryText → insertSessionChip（显示 label 非 uuid）
    *  - subagent（@ 触发）：clearSubagentQueryText → insertSubagentChip；「新建」项
-   *    （subagentId/slug 空串）插占位 slug chip（@新任务），发送分流在 U2b 收口。
+   *    （subagentId/slug 空串）插占位 slug chip（@新任务），发送分流在 U2b 收尾。
    *  icon 按 source 透传给 chip（extension→terminal / skill→star / 默认 wrench），与选择框图标一致。 */
   function onCmdSelect(payload: CommandSelectPayload): void {
     cmdOpen.value = false
@@ -363,7 +363,7 @@ export function useCommandPopoverTrigger(
       const slug = payload.slug || ''
       const subagentId = payload.subagentId || ''
       if (subagentId) {
-        // 既有 record 引用（D3 顺带发现 2 收口裁决：消费契约 = 按 subagentId 引用——
+        // 既有 record 引用（D3 顺带发现 2 收尾裁决：消费契约 = 按 subagentId 引用——
         // 与发送链分流判据同键）。显示名与候选行同口径 slug || subagentId；「新任务」
         // 占位文案仅属新建项，不再顶替缺 slug record 的 chip 显示（directive 派发
         // record agent/slug 可缺省，顶占位会让用户看到「@新任务」却实际定向旧任务）。

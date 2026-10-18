@@ -16,7 +16,7 @@
  * 多实例键迁移（terminal-multi-instance 设计 §2.2 第 4 表 / §3.3）：状态键从会话 id 迁移到
  * **实例编号** `term:<会话id>:<序号>`——pendingWrites / ptyAlive 镜像 / dropToastTimers 全部
  * 按 terminalId 分键；会话删除走 `removeSession(sid)`（core 精确前缀扇出），世代变更走
- * `clearAll()`。**入队守卫**（关闭沿竞态）：`isRegistered` 由本层注入实例注册表成员资格
+ * `clearAll()`。**入队检查**（关闭沿竞态）：`isRegistered` 由本层注入实例注册表成员资格
  * 判据（与 ptyAlive 镜像解耦——已建档未 alive 仍入 pendingWrites）。
  *
  * 数据流（多实例）：
@@ -52,7 +52,7 @@ export const useTerminalWriteQueueStore = defineStore('terminal-write-queue', ()
   const dropToastTimers = new Map<string, ReturnType<typeof setTimeout>>()
 
   // core 工厂实例（pinia store setup 内创建，随 pinia 实例生命周期）：write 副作用 +
-  // drop/失败显形 + 关闭沿入队守卫判据的注入点均在本兼容层（core 零 api/UI 层依赖）。
+  // drop/失败显形 + 关闭沿入队检查判据的注入点均在本兼容层（core 零 api/UI 层依赖）。
   const queue = createTerminalWriteQueue(
     (terminalId, cmd) => {
       const sessionId = sessionIdOfTerminalId(terminalId)
@@ -82,7 +82,7 @@ export const useTerminalWriteQueueStore = defineStore('terminal-write-queue', ()
         }, DROP_TOAST_AGGREGATE_MS)
         dropToastTimers.set(terminalId, timer)
       },
-      // 关闭沿入队守卫（设计 §3.3）：注册成员资格否定 → 拒绝入队、不建档（防幽灵实例态）。
+      // 关闭沿入队检查（设计 §3.3）：注册成员资格否定 → 拒绝入队、不建档（防幽灵实例态）。
       isRegistered: (terminalId) => hasInstance(terminalId),
     },
   )
@@ -131,8 +131,8 @@ export const useTerminalWriteQueueStore = defineStore('terminal-write-queue', ()
   /**
    * 入队写命令（预留接入点：Block「在终端运行」调；**当前仓内无生产调用方**）。PTY 已活立即 write / 未活入 pendingWrites
    * markAlive 时 flush。
-   * **关闭沿入队守卫**（设计 §5 u2）：实例不在注册表（已关闭）→ 拒绝入队并经「输入可能
-   * 丢失」提示告知（core 侧同名守卫保留为无 UI 依赖的兜底，防幽灵实例态建档）。判据 =
+   * **关闭沿入队检查**（设计 §5 u2）：实例不在注册表（已关闭）→ 拒绝入队并经「输入可能
+   * 丢失」提示告知（core 侧同名检查保留为无 UI 依赖的兜底，防幽灵实例态建档）。判据 =
    * 注册成员资格，与 ptyAlive 镜像解耦（已建档未 alive 仍入 pendingWrites）。
    */
   function enqueueWrite(terminalId: string, cmd: string): void {

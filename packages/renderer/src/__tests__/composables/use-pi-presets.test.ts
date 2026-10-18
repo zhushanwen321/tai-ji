@@ -6,7 +6,7 @@
  * - loadPresets 降级：getDefault 失败不阻断 list 写 store（allSettled，TC-4 边界）
  * - setDefault(id)：乐观更新 store + 调 RPC（TC-5）
  * - **u5 加载点：`createPresetAutoLoad()` 容器 install**（下方独立 describe）——首次 connected 后拉取 /
- *   安装时已 connected 立即可用 / 失败后下一次 connected 补拉（可自愈）/ 重连不重复请求（幂等）
+ *   安装时已 connected 立即可用 / 失败后下一次 connected 补充拉取（可自愈）/ 重连不重复请求（幂等）
  *   （`mode-declaration-row.test.ts` 头注声明“加载点本身由本文件覆盖”，即指该 describe）
  *
  * mock 策略：SettingsTransport seam 桩（[C3] 测试打 seam）捕获 preset 域调用，真 pinia + 真 preset store。
@@ -259,7 +259,7 @@ describe('usePiPresets.update（W-RN-3 reply 回写）', () => {
 
 // ─────────────────────────────────────────────────────────────────────────
 // u5 mode-declaration-row · 加载点（设计 §6.5 P0-12）：首次 connected 必拉一次，
-// 重连不重复；加载失败不置位 → 下一次 connected 补拉（E7 ③ 恢复通道）。
+// 重连不重复；加载失败不置位 → 下一次 connected 补充拉取（E7 ③ 恢复通道）。
 // ─────────────────────────────────────────────────────────────────────────
 describe('usePiPresets.installPresetAutoLoad（u5 加载点）', () => {
   // 每用例新自动加载容器（createPresetAutoLoad 实例即隔离，不碰生产默认单例）
@@ -307,7 +307,7 @@ describe('usePiPresets.installPresetAutoLoad（u5 加载点）', () => {
     expect(usePresetStore().defaultPresetId).toBe('builtin:full')
   })
 
-  it('加载失败 → 不置位，下一次 connected 补拉（E7 ③ 恢复通道）', async () => {
+  it('加载失败 → 不置位，下一次 connected 补充拉取（E7 ③ 恢复通道）', async () => {
     presetApiMock.list.mockRejectedValueOnce(new Error('rpc failed'))
     presetApiMock.getDefault.mockRejectedValueOnce(new Error('rpc failed'))
 
@@ -317,7 +317,7 @@ describe('usePiPresets.installPresetAutoLoad（u5 加载点）', () => {
     expect(presetApiMock.list).toHaveBeenCalledTimes(1)
     expect(usePresetStore().loadError).not.toBeNull()
 
-    // 下一次 connected：因未置位而补拉，成功后清错误态
+    // 下一次 connected：因未置位而补充拉取，成功后清错误态
     presetApiMock.list.mockResolvedValueOnce(FIXTURE_PRESETS)
     presetApiMock.getDefault.mockResolvedValueOnce('builtin:full')
     wsMock.ref!.value = 'disconnected'

@@ -3,7 +3,7 @@
  *
  * applyEntry 单条走 copy-on-write collector，replayEntries 走 mutable collector 原地累积；
  * 两条 fold 路径共享同一派生段（deriveXxxMessage）与 dispatch 骨架（apply-entry.ts 文件头
- * collector 叙事）——本文件以三个维度机器守卫「内部累积、产物同构」约定：
+ * collector 叙事）——本文件以三个维度机器检查「内部累积、产物同构」约定：
  * 1. 产物同构：混合全类型序列两条路径全量 state deep-equal（messages / orphanToolResults /
  *    deliveredToolResultIds / lastAssistantWithToolCalls 非抽样）；
  * 2. 输入纯度：entries 与 initial（含非空 initial 接续场景）均不被 mutable fold mutate；
@@ -55,7 +55,7 @@ describe('replayEntries(mutable fold) ≡ reduce(applyEntry) 元断言', () => {
     const viaFold = replayEntries(entries)
     const viaReduce = entries.reduce(applyEntry, createInitialChatViewState())
     expect(viaFold).toEqual(viaReduce)
-    // 用户可见内容非空守卫（防两侧同归于空 / no-op 假等价）：user / assistant / 回填 /
+    // 用户可见内容非空检查（防两侧同归于空 / no-op 假等价）：user / assistant / 回填 /
     // 孤儿 / bash / 双形态压缩 / 分支 / 自定义通知各就各位
     expect(viaFold.messages.filter((m) => m.role === 'user')).toHaveLength(1)
     expect(viaFold.messages.filter((m) => m.role === 'assistant')).toHaveLength(1)
@@ -65,7 +65,7 @@ describe('replayEntries(mutable fold) ≡ reduce(applyEntry) 元断言', () => {
     expect(viaFold.messages.filter((m) => m.compactionSummary !== undefined)).toHaveLength(2)
     expect(viaFold.messages.filter((m) => m.branchSummary !== undefined)).toHaveLength(1)
     expect(viaFold.messages.filter((m) => m.customType === 'goal-context')).toHaveLength(1)
-    // custom（client-msg-id）纯数据 entry：两路径同为 no-op（零对话流投影，D6-4 死簿记已删）
+    // custom（client-msg-id）纯数据 entry：两路径同为 no-op（零对话流派生视图，D6-4 死簿记已删）
     expect(viaFold.messages.every((m) => m.customType !== 'taiji.client-msg-id')).toBe(true)
     // 幂等簿记：同 id 双投递收敛单投递（deliveredToolResultIds 两路径同构）
     expect(viaFold.deliveredToolResultIds).toEqual(new Set(['tc-1', 'tc-none']))

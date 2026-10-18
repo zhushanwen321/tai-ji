@@ -139,7 +139,7 @@ describe("performGetStateHandshake（FR-4 单次握手）", () => {
     expect(reg.resolvers.size).toBe(0); // 抛错未发出请求 → 无监听注册
   });
 
-  it("resolve 后迟到的 response 被忽略（resolved 守卫，不二次 resolve）", async () => {
+  it("resolve 后迟到的 response 被忽略（resolved 检查，不二次 resolve）", async () => {
     vi.useFakeTimers();
     try {
       const { child } = makeFakeStdin();

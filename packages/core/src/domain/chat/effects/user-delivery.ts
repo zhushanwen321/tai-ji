@@ -2,11 +2,11 @@
  * message_end(user) 投递确认子域（投递所有权内核 D2/D7——delivery-ownership-kernel u3b）。
  *
  * 承载两块职责：
- * 1. **session.delivery 帧投影**（D7 单一数据源）：内核状态帧（state topic 全量快照）
- *    的 per-session 投影，队列区/气泡 morph（u3c QueueBubble 单源化）读这里；
+ * 1. **session.delivery 帧派生视图**（D7 单一数据源）：内核状态帧（state topic 全量快照）
+ *    的 per-session 派生视图，队列区/气泡 morph（u3c QueueBubble 单源化）读这里；
  *    steer/queued 条目 morph 时捕获的 segments 暂存于此，送达回执时按原段入流。
  * 2. **送达回执消费**（①a 泛化，C-data-08 修订方向）：message_end(user) 帧文本尾的
- *    内核裸标记 id 命中投影条目 → 投影转 delivered + morph 段按序入流 + inflight 占位
+ *    内核裸标记 id 命中派生视图条目 → 派生视图转 delivered + morph 段按序入流 + inflight 占位
  *    回收，帧消费终止。
  *
  * [HISTORICAL] 前身：defer 队列 provider（compactQueueProvider + confirmDeferQueueEntry
@@ -14,9 +14,9 @@
  * （设计 §3.1 删除面），确认通道由「队列 FIFO 文本匹配」升级为「内核条目 id 标记匹配」，
  * git 可追溯。
  *
- * 投影落位说明：session.delivery 投影由本模块级 ref 承载（u3c 落地形态：useQueueRows
- * 等 composable 不持 per-session 状态，投影分区由本 ref 持有——内核状态帧是 runtime
- * 投影数据，非本地 UI 输入）；per-session 键控 + disposeSession/resetChatModuleStateForTest
+ * 派生视图落位说明：session.delivery 派生视图由本模块级 ref 承载（u3c 落地形态：useQueueRows
+ * 等 composable 不持 per-session 状态，派生视图分区由本 ref 持有——内核状态帧是 runtime
+ * 派生视图数据，非本地 UI 输入）；per-session 键控 + disposeSession/resetChatModuleStateForTest
  * 双清理点 + 测试 reset 钩子按 ADR-0049 分区纪律对齐。登记条目 = 登记表主表 #6
  * （deliveryEntriesBySession 声明处 @data-owner #6）。
  */
@@ -39,14 +39,14 @@ import { isDevMode } from '../../../platform/dev-mode'
  * [R2-b04-2] 回执匹配用全局形态（由 shared SSOT 派生，不复制模式文本）：matchAll 取文本内
  * **全部**标记逐一消费（[dmg-r1-5] 整批口径，对齐 runtime confirmByMessageEnd 的全量提取
  * ——splitComposed 放弃拆分时一帧携带多条目标记，只取尾标记会让其余条目 morph 段等不到
- * 消费、TTL 过期丢弃，live 对话流缺已提交消息）。防误配由「命中未 delivered 投影条目才
- * 消费」判定承接：用户正文自带（粘贴）标记不命中投影即跳过，误配无消费面。
+ * 消费、TTL 过期丢弃，live 对话流缺已提交消息）。防误配由「命中未 delivered 派生视图条目才
+ * 消费」判定承接：用户正文自带（粘贴）标记不命中派生视图即跳过，误配无消费方。
  */
 const MSG_ID_TAG_RE_GLOBAL = new RegExp(MSG_ID_TAG_RE.source, `${MSG_ID_TAG_RE.flags}g`)
 
-// ── session.delivery 帧投影（D7 队列区单一数据源）──────────────────────────────
+// ── session.delivery 帧派生视图（D7 队列区单一数据源）──────────────────────────────
 
-/** per-session 内核条目快照投影（state topic last-value 语义：每帧整体替换）。 */
+/** per-session 内核条目快照派生视图（state topic last-value 语义：每帧整体替换）。 */
 // @data-owner #6 —— 主表 #6 renderer 消费副本：队列区渲染（useQueueRows / QueueBubble）
 // 与撤回/气泡三态路由（findDeliveryEntry）直接消费的数据源，自 §4 ⑧ W24-EX-C 豁免转正向注解
 const deliveryEntriesBySession = ref<Map<string, DeliveryFrameEntry[]>>(new Map())
@@ -60,7 +60,7 @@ interface MorphSegmentsSnapshot {
   capturedAt: number
 }
 // taste:allow-no-data-owner W24-EX-C（进程内流程状态——morph 暂存的段待送达回执一次性
-// 消费，无 GUI 直接消费方；登记于登记表 §4 ⑧ W24-EX-C 条目，队列条目本体归主表 #6 投影/内核）
+// 消费，无 GUI 直接消费方；登记于登记表 §4 ⑧ W24-EX-C 条目，队列条目本体归主表 #6 派生视图/内核）
 const morphSegmentsBySession = new Map<string, Map<string, MorphSegmentsSnapshot>>()
 
 /**
@@ -80,7 +80,7 @@ function purgeExpiredMorphSegments(now: number): void {
   }
 }
 
-/** 消费 session.delivery 帧：投影整体替换（空条目集删键，不积累空形态——对齐 retryStates 惯例）。 */
+/** 消费 session.delivery 帧：派生视图整体替换（空条目集删键，不积累空形态——对齐 retryStates 惯例）。 */
 export function replaceDeliveryProjection(sid: string, entries: DeliveryFrameEntry[]): void {
   const next = new Map(deliveryEntriesBySession.value)
   if (entries.length === 0) next.delete(sid)
@@ -89,7 +89,7 @@ export function replaceDeliveryProjection(sid: string, entries: DeliveryFrameEnt
 }
 
 /**
- * 撤回「在途条目」判定谓词的单一数据点（[MF-1-4]）：按 clientUuid 查投影条目（无条目 =
+ * 撤回「在途条目」判定谓词的单一数据点（[MF-1-4]）：按 clientUuid 查派生视图条目（无条目 =
  * undefined）。调用方（UserBubble 三态路由 / useChat.revokeMessage 双态路由）共用本谓词，
  * 禁再各自内联 `find(e => e.clientUuid === id)`——判定式漂移会让 UI 展示与执行分派分叉。
  * 返回条目对象非布尔：执行侧（revokeMessage）可细分 state（`state !== 'delivered'` = 在途）。
@@ -98,12 +98,12 @@ export function findDeliveryEntry(sid: string, clientUuid: string): DeliveryFram
   return deliveryEntriesBySession.value.get(sid)?.find((e) => e.clientUuid === clientUuid)
 }
 
-/** 投影 ref（u3c QueueBubble 单源化 reactive 消费口；模块级单例，测试 reset 见下方钩子）。 */
+/** 派生视图 ref（u3c QueueBubble 单源化 reactive 消费口；模块级单例，测试 reset 见下方钩子）。 */
 export function getDeliveryProjectionRef(): typeof deliveryEntriesBySession {
   return deliveryEntriesBySession
 }
 
-/** 清指定 session 投影与 morph 段（disposeSession 编排 + delivery.drain 全量回收共用）。 */
+/** 清指定 session 派生视图与 morph 段（disposeSession 编排 + delivery.drain 全量回收共用）。 */
 export function clearDeliveryProjection(sid: string): void {
   if (deliveryEntriesBySession.value.has(sid)) {
     const next = new Map(deliveryEntriesBySession.value)
@@ -113,7 +113,7 @@ export function clearDeliveryProjection(sid: string): void {
   morphSegmentsBySession.delete(sid)
 }
 
-/** 重置全部投影状态（仅供测试隔离；生产禁调——生产清理走 clearDeliveryProjection）。 */
+/** 重置全部派生视图状态（仅供测试隔离；生产禁调——生产清理走 clearDeliveryProjection）。 */
 export function resetDeliveryProjectionForTest(): void {
   deliveryEntriesBySession.value = new Map()
   morphSegmentsBySession.clear()
@@ -134,7 +134,7 @@ export function captureMorphSegments(sid: string, clientUuid: string, segments: 
 }
 
 /**
- * 送达回执消费（一次性）：条目投影转 delivered（队列区随即隐去）+ 返回捕获的 morph 段
+ * 送达回执消费（一次性）：条目派生视图转 delivered（队列区随即隐去）+ 返回捕获的 morph 段
  * （未 morph 过的条目返回 undefined——发送端本地气泡原位保持不重复入流；无气泡条目
  * 的显示经 ② 降级入流承接，D4）。
  * 幂等：已 delivered 条目返回 undefined（重复回执不二次入流）。
@@ -192,43 +192,43 @@ function extractUserContentText(entry: PiMessageEntry): string {
 }
 
 /**
- * [u3b / D2① 泛化] message_end(user) 送达回执——内核裸标记 id 命中投影条目即送达事实
+ * [u3b / D2① 泛化] message_end(user) 送达回执——内核裸标记 id 命中派生视图条目即送达事实
  * （C-data-08 修订方向：标记 id 精确匹配取代计数 FIFO/文本匹配，id 是身份不是内容）。
  *
  * 提取口径：文本内**全部**标记逐一消费（[dmg-r1-5] 对齐 runtime confirmByMessageEnd
  * session-delivery-registry.ts 的 extractMarkerIds 全量提取）——splitComposed 放弃拆分
  * 的整批投递一帧携带多条目标记，只取尾标记会让其余条目 morph 段等不到消费、TTL 过期
- * 丢弃（live 对话流缺已提交消息直到重开/切回由基线投影恢复）。防误配语义由「命中未
- * delivered 投影条目才消费」判定承接（见 MSG_ID_TAG_RE_GLOBAL 注释）。
+ * 丢弃（live 对话流缺已提交消息直到重开/切回由基线派生视图恢复）。防误配语义由「命中未
+ * delivered 派生视图条目才消费」判定承接（见 MSG_ID_TAG_RE_GLOBAL 注释）。
  *
- * 命中处理（三分支，单一 owner = 内核投影）：
+ * 命中处理（三分支，单一 owner = 内核派生视图）：
  * - ① morph 段存在（本地乐观气泡被 morph 移除过）→ 按原 segments 入流（非降级恢复）。
  * - ② 无任何段恢复的帧里，foreign 条目（无 morph 段且 ref 中无同 id 气泡）的首个命中 →
  *   整帧剥标记纯文本降级入流**一次**：外来注入（session_manager send / plugin-service /
  *   收养）与 runtime 重启 reattach 形态没有本地乐观气泡，其显示责任由本分支承接（前身
- *   = 已退役的腿 2 includes 兜底，见下方 [HISTORICAL] 注记）——文本按 reload 投影同
+ *   = 已退役的路径 2 includes 兜底，见下方 [HISTORICAL] 注记）——文本按 reload 派生视图同
  *   规则剥标记 + trimEnd（同一正则同一变换，live ≡ reload 构造性成立）。多标记帧整帧
- *   文本涵盖全部条目内容，逐条目入流同一整帧文本会重复，故按帧只入流一次、保号挂首个
+ *   文本涵盖全部条目内容，逐条目入流同一整帧文本会重复，故按帧只入流一次、保留原 id 挂首个
  *   降级条目；已有段恢复的帧不再整帧文本入流（与已恢复段重复显示），其中无段条目
- *   （外来/reattach 混批形态，三重低频）的显示由基线投影兜底。[D4] 车道不参与豁免
+ *   （外来/reattach 混批形态，三重低频）的显示由基线派生视图兜底。[D4] 车道不参与豁免
  *   （原 `lane !== 'direct'` 整体豁免退役——它只对发送端成立，观看端 direct 外来消息
  *   因此无人显示，S4）：「双插」防御由 foreign 判定里的 hasLocalBubble 精确承接——
  *   发送端有本地同 id 气泡 → foreign=false 不入流；观看端无气泡（含 direct 车道）→
  *   入流补显。
  * - ③ 其余（发送端本地气泡原位——foreign=false）→ 不动 ref（防双插）。
- * 共同收尾：投影转 delivered（幂等：已 delivered 命中即拒）+ inflight 占位回收（统一
- * submit 每条挂 1，命中 N 条 = 批量确认扣 N，钳制幂等机制兜底外来条目的挂账缺席）+
+ * 共同收尾：派生视图转 delivered（幂等：已 delivered 命中即拒）+ inflight 占位回收（统一
+ * submit 每条挂 1，命中 N 条 = 批量确认扣 N，钳制幂等机制兜底外来条目的记账缺席）+
  * 返回 true（帧消费终止，调用方不再走 ② 计数兜底）。
- * 未命中返回 false（无标记 / 标记不命中投影——外来直发、帧缺失形态，落 ② 现状链）。
+ * 未命中返回 false（无标记 / 标记不命中派生视图——外来直发、帧缺失形态，落 ② 现状链）。
  *
- * [消息撤回 U8] 两分支入流均传 hit.clientUuid 保号：重建气泡沿用提交时 clientUuid
- * （= morph 前乐观气泡 id = 内核条目 id，三者同源）。保号是 live 窗口撤回入口的结构
+ * [消息撤回 U8] 两分支入流均传 hit.clientUuid 保留原 id：重建气泡沿用提交时 clientUuid
+ * （= morph 前乐观气泡 id = 内核条目 id，三者同源）。保留原 id 是 live 窗口撤回入口的结构
  * 前提——换新 `u-<uuid>` 会使该消息在撤回定位双通道（custom entry 映射 / 裸标记末尾
  * 锚）构造性 miss（no-mapping 空洞，且 live 窗口 reconcile 仅切入/重试触发、无自愈）。
  *
- * [HISTORICAL ② 前身] 退役的腿 2 ③「includes 兜底」以 queue_update 快照文本匹配为据、
+ * [HISTORICAL ② 前身] 退役的路径 2 ③「includes 兜底」以 queue_update 快照文本匹配为据、
  * 插入含标记的原文纯文本；本分支以「内核条目身份 + 剥标记文本」同职责重建（数据源从
- * 已退役的 queue_update 快照换成 session.delivery 投影，D7 单一数据源）。
+ * 已退役的 queue_update 快照换成 session.delivery 派生视图，D7 单一数据源）。
  *
  * 与 reducer 的关系：调用方（registry message_end handler）已无条件 ctx.applyEntryFrame
  * 喂 reducer（transcript 权威），本函数只是 overlay 显示侧的回执消费，异常路径不阻断
@@ -261,7 +261,7 @@ export function confirmKernelDeliveryOnMessageEnd(
     consumedIds.add(hit.clientUuid)
     const segments = consumeDeliveryReceipt(sid, hit.clientUuid)
     // [R2-b04-3] 外来投递观测判定（须在 ② 入流前取——appendUser 会改变 hasLocalBubble 结果）：
-    // 无 morph 段且 ref 无同 id 气泡 = 本地未挂账的投递（外来注入 / reattach 形态）。
+    // 无 morph 段且 ref 无同 id 气泡 = 本地未记账的投递（外来注入 / reattach 形态）。
     hits.push({
       hit,
       segments,
@@ -270,13 +270,13 @@ export function confirmKernelDeliveryOnMessageEnd(
   }
   if (hits.length === 0) return false
   // 处置（收集后统一执行）：① 段恢复逐条目入流；② 整帧文本降级与段恢复同帧互斥（防
-  // 同帧重复入流），全无段帧只入流一次、保号挂首个降级条目。
+  // 同帧重复入流），全无段帧只入流一次、保留原 id 挂首个降级条目。
   let anySegments = false
   for (const { hit, segments } of hits) {
     if (!segments) continue
     // ① morph 段入流（气泡已移除的条目按原 segments 恢复为正常 user 气泡——overlay-only，
     // 不喂 reducer：transcript 权威已由调用方 applyEntryFrame 承担，appendUser 不写 sidecar）；
-    // 保号传 hit.clientUuid（= 被移除乐观气泡的 id——morph key 同源），见函数头 [U8] 注释
+    // 保留原 id 传 hit.clientUuid（= 被移除乐观气泡的 id——morph key 同源），见函数头 [U8] 注释
     ctx.appendUser(sid, segments, hit.clientUuid)
     anySegments = true
   }
@@ -290,7 +290,7 @@ export function confirmKernelDeliveryOnMessageEnd(
     const degradeTarget = hits.find(({ foreign }) => foreign)
     if (degradeTarget) {
       // ② 无本地气泡的投递（外来注入 / reattach 恢复）：纯文本降级可见，不静默丢显示；
-      // 保号传 hit.clientUuid（内核条目 id——外来形态可能为裸 uuid，保号语义优先于形态）
+      // 保留原 id 传 hit.clientUuid（内核条目 id——外来形态可能为裸 uuid，保留原 id 语义优先于形态）
       ctx.appendUser(
         sid,
         textToSegments(text.replace(DEFER_FLUSH_MARKER_RE_GLOBAL, '').trimEnd()),
@@ -302,7 +302,7 @@ export function confirmKernelDeliveryOnMessageEnd(
     if (foreign) logForeignReceiptDecrement(sid, hit)
   }
   // inflight 占位回收：统一 submit 的每条乐观气泡挂 1，命中 N 条 = 批量确认扣 N
-  // （钳制幂等机制兜底外来投递的挂账缺席；② 不再重复扣）
+  // （钳制幂等机制兜底外来投递的记账缺席；② 不再重复扣）
   ctx.decrementInflight(sid, hits.length)
   return true
 }

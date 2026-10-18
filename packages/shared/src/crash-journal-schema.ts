@@ -1,5 +1,5 @@
 /**
- * 崩溃台账事件 Schema SSOT（docs/architecture/crash-forensics-and-watchdog.md §3.3 D1）。
+ * 崩溃条目清单事件 Schema SSOT（docs/architecture/crash-forensics-and-watchdog.md §3.3 D1）。
  *
  * 双文件 append-only JSONL（`<dataDir>/logs/crashes/main.jsonl` + `runtime.jsonl`）
  * 的事件形态在此唯一定义：main writer（写 main 自身 + renderer 事件）与 runtime
@@ -7,9 +7,9 @@
  * （实施计划 crash-forensics-and-watchdog.impl-plan.md u1b/u1c）。
  *
  * 枚举口径（设计 D1 schema JSON 块对齐 + 实装扩展）：
- * - event：21 值闭合枚举。设计文档行 20 值逐字对齐，外加 1 个实装扩展值
+ * - event：21 值封闭枚举。设计文档行 20 值逐字对齐，外加 1 个实装扩展值
  *   frame-unserializable（message-bus publish 序列化失败丢帧——与 registry-miss 同为
- *   核心链整帧丢弃，丢弃必须落台账）。孤儿值删除先例：unclean-exit（v8，是 reason 值不是 event
+ *   核心链整帧丢弃，丢弃必须写入条目清单）。孤儿值删除先例：unclean-exit（v8，是 reason 值不是 event
  *   值——main 自身 crash 经 clean-exit marker 下次启动补记为 layer=main, event=crash,
  *   reason=unclean-exit，见 D1 写入点矩阵「main 自身 crash」行）；oom（2026-09-12
  *   裁决，偏差 #32②——零生产者：renderer OOM 实际形态 = reload 事件 + Electron
@@ -17,8 +17,7 @@
  *   保守记 crash / 只广播，见设计 D1 矩阵 oom 行裁决注记）。
  * - reason：开放式枚举（schema reason 行末「…」）——已知值登记在
  *   CRASH_JOURNAL_KNOWN_REASONS，未知值可携带（类型保持 string 不收窄联合，
- *   台账消费方按「值即文档」自解释），新增已知值时同步登记元组。
- *
+ *   条目清单消费方按「值即文档」自解释），新增已知值时同步登记元组。
  * 字段全可空（设计 D1「不知道 ≠ 没打点」原则）：崩溃瞬间常拿不全上下文，任何字段
  * 缺省或显式 null 都是合法事件——打点永不因字段不全而放弃。
  *
@@ -29,7 +28,7 @@
 export type CrashJournalLayer = 'pi' | 'runtime' | 'renderer' | 'main' | 'plugin-worker'
 
 /**
- * 事件名（闭合枚举：设计 D1 schema event 行 20 值 + 实装扩展 frame-unserializable
+ * 事件名（封闭枚举：设计 D1 schema event 行 20 值 + 实装扩展 frame-unserializable
  * / signal-forensics，共 22 值；设计行内顺序保持逐字一致，扩展值随 frame-truncated
  * 同族紧随其位）。
  */
@@ -66,11 +65,11 @@ export type CrashJournalEventName =
 export type CrashJournalReason = string
 
 /**
- * reason 已知值集合（开放枚举的登记面，非校验闸）。
+ * reason 已知值集合（开放枚举的登记清单，非校验闸）。
  *
  * 前段 6 值 = 设计 D1 schema reason 行逐字转录；其余 = 实装 append 调用点静态可枚举
  * 的已知值全集（impl-plan 偏差 #18 残留风险回写，按写入域分组，来源文件见行注释）。
- * 两类动态形态刻意不登记（非闭合字面量，落 open 集语义覆盖）：Electron
+ * 两类动态形态刻意不登记（非封闭字面量，落 open 集语义覆盖）：Electron
  * render-process-gone reason 透传（window-factory reload 行，值域由 Electron 决定）
  * 与 trigger-review 的 `condition-<id>` 参数化模板（trigger-patrol.ts）。
  */
@@ -102,7 +101,7 @@ export const CRASH_JOURNAL_KNOWN_REASONS = [
   'stale-checkpoint-after-clean-exit',
   // checkpoint-corrupt（runtime-checkpoint.ts）
   'parse-failed',
-  // registry-miss（message-bus 出站守卫 dropReason 闭合二值）
+  // registry-miss（message-bus 出站检查 dropReason 封闭二值）
   'registry_miss',
   'still_oversize_after_truncate',
   // frame-unserializable（message-bus publish 序列化失败丢帧）
@@ -127,10 +126,10 @@ export interface CrashJournalMemPressure {
 }
 
 /**
- * 台账事件（schema JSON 块字段集，14 个顶层字段全部可缺省可 null）+ 登记的扩展字段。
+ * 条目清单事件（schema JSON 块字段集，14 个顶层字段全部可缺省可 null）+ 登记的扩展字段。
  * JSONL 每行一个本对象；字段语义见设计 D1 schema JSON 块与写入点矩阵。
  *
- * **扩展字段开放语义（偏差 #32③ 登记面）**：14 个 schema 字段之外，具体事件可携带
+ * **扩展字段开放语义（偏差 #32③ 登记清单）**：14 个 schema 字段之外，具体事件可携带
  * 下方「按事件登记的扩展字段」（全可空，与主字段同原则）——新增扩展字段必须先在
  * 本接口登记（字段 + 产生事件 + 产生文件注释），禁止写入侧绕过本接口私自扩字段；
  * 设计文档 D1 schema JSON 块只权威化 14 主字段，扩展字段以本接口为登记 SSOT。
@@ -165,7 +164,7 @@ export interface CrashJournalEvent {
   /** 详情文件相对路径（如 logs/pi-crash-….log）。 */
   detailPath?: string | null
 
-  // ── 扩展字段登记面（开放语义：新增须在此登记，见接口头注）─────────────
+  // ── 扩展字段登记清单（开放语义：新增须在此登记，见接口头注）─────────────
 
   /** [reaped/reap-failed] 被收殓（成功/失败）的孤儿 pi 进程 pid（reap-orphan-pi.ts 杀链命中行）。 */
   pid?: number | null
@@ -191,7 +190,7 @@ export interface CrashJournalEvent {
   machinePiDigest?: string | null
 }
 
-/** 台账文件角色：main writer 写 main.jsonl，runtime writer 写 runtime.jsonl（D1 双文件）。 */
+/** 条目清单文件角色：main writer 写 main.jsonl，runtime writer 写 runtime.jsonl（D1 双文件）。 */
 export type CrashJournalFileRole = 'main' | 'runtime'
 
 /** writer 构造选项。 */
@@ -201,9 +200,9 @@ export interface CrashJournalWriterOptions {
 }
 
 /**
- * 崩溃台账 writer 接口（u1b runtime / u1c main 两实现共用此签名）。
+ * 崩溃条目清单 writer 接口（u1b runtime / u1c main 两实现共用此签名）。
  *
- * append 为 fire-and-forget：追加一条事件（单行 JSONL）不向调用方抛错——台账是
+ * append 为 fire-and-forget：追加一条事件（单行 JSONL）不向调用方抛错——条目清单是
  * 崩溃路径上的旁路，写失败（磁盘满等）不得放大为调用链故障（D1 防漏设计前提）。
  */
 export interface CrashJournalWriter {

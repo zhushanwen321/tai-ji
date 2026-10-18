@@ -1,5 +1,5 @@
 // server.test.ts —— EngineProtocolServer 直测（照 zcode-subagent-cli/src/__tests__/
-// server.test.ts 形态，两包同构代码测试面对齐——review round1 MF-2）。
+// server.test.ts 形态，两包同构代码测试对齐——review round1 MF-2）。
 //
 // engine = EnginePort 内存 fake（无子进程 / 无真实数据目录——本文件零 fs 触碰），
 // stdout 写入面注入内存 sink。覆盖：
@@ -241,7 +241,7 @@ describe("dispatchTable 表驱动路由（逐方法 → EnginePort 成员）", (
     });
   });
 
-  it("initialize：models 应答源 = 引擎查询面（engine-query 读数据目录，不经 engine mock；models 投影仅 id）", async () => {
+  it("initialize：models 应答源 = 引擎查询面（engine-query 读数据目录，不经 engine mock；models 派生视图仅 id）", async () => {
     // engine.listModels mock 不再被分发位消费（pi-workflow-run-resource-model §3.3
     // 决策 11：查询面路由 engine-query）——数据面断言归 engine-query.test.ts（fixture
     // 注入形态），本用例锁定「mock 声明不泄漏进 initialize 应答」的改道路由事实。

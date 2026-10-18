@@ -54,7 +54,7 @@ function overrideEvent(seq: number, ts: number, thinkingLevel?: string): ModelOv
   };
 }
 
-/** 剥离 seq 的载荷投影（追加往返等价断言用）。 */
+/** 剥离 seq 的载荷派生视图（追加往返等价断言用）。 */
 function stripSeq(event: WorkflowRunEvent): Omit<WorkflowRunEvent, "seq"> {
   const { seq: _s, ...rest } = event;
   return rest;
@@ -84,7 +84,7 @@ describe("词表同步：model-override 在 core 词表值域内（journal 严�
 
   it("坏行纪律不放宽：词表外 type 与坏 seq 信封照旧拒收（新成员不豁免既有校验）", () => {
     expect(parseRecordStreamLine(JSON.stringify({ type: "not-in-vocabulary", ts: T0 }), { requireSeq: false }).ok).toBe(false);
-    // seq 契约在 core 严格档（requireSeq: true——恢复读面）下校验；坏值（0 非正整数）拒收
+    // seq 契约在 core 严格档（requireSeq: true——恢复读取路径）下校验；坏值（0 非正整数）拒收
     expect(
       parseRecordStreamLine(JSON.stringify({ ...overrideEvent(1, T0), seq: 0 }), { requireSeq: true }).ok,
     ).toBe(false);

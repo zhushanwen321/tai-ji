@@ -98,8 +98,8 @@ describe("capability-gate（D3-④ 拦截矩阵）", () => {
     // 波5 收尾] 显式 conversation 参数分支已删，本位仅在 fork OR 借位/mismatch/
     // message 门消费。
     // fork 通道族（OR 对偶）：conversation cold 可用 → fork/fork-from 不在 gate 拦
-    //（zcode 的 fork-from「继承历史」语义空洞由 actions-core 守卫 5 的锚判据承接
-    //——zcode record 无 pi sessionFile 锚，守卫按锚缺失给 message/reopen 指引）。
+    //（zcode 的 fork-from「继承历史」语义空洞由 actions-core 检查 5 的锚判据承接
+    //——zcode record 无 pi sessionFile 锚，检查按锚缺失给 message/reopen 指引）。
     expect(() => gate(ZCODE_CAPS, { fork: true })).not.toThrow();
     expect(() => gate(ZCODE_CAPS, { forkFromSessionFile: "/tmp/sess.jsonl" })).not.toThrow();
     // 能力位未变的拦截面（maxTurns）不随 conversation/sandbox 升级回退

@@ -307,7 +307,7 @@ describe("runPendingReconcileSweepForService 的 subagent 判据（lookupRecordS
       throw new Error("store exploded");
     };
     expect(() => runPendingReconcileSweepForService(h.binding, false)).not.toThrow();
-    // 空转守卫：getStore 未被触达 = 判据链路没跑，异常根本没进 sweep 外层 catch
+    // 空转检查：getStore 未被触达 = 判据链路没跑，异常根本没进 sweep 外层 catch
     expect(storeRequested).toBeGreaterThanOrEqual(1);
   });
 });

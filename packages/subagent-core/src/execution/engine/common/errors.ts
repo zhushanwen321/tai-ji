@@ -60,7 +60,7 @@ export class EngineError extends Error {
     this.recovery = recovery;
   }
 
-  /** 结构化投影（code/message 与 GUI 警告条共用形态）。 */
+  /** 结构化派生视图（code/message 与 GUI 警告条共用形态）。 */
   toStructured(): { code: EngineErrorCode; message: string; recovery: string } {
     return { code: this.code, message: this.message, recovery: this.recovery };
   }
@@ -172,5 +172,5 @@ export function engineRunFailedDetail(reason: string, exitCode: number | null, s
 }
 
 // schema_emulation_failed 的终报文案（schemaEmulationFailedDetail）已随 schema-emulation
-// 死镜像收口删除：活体单源 SDK error-codes.ts（emulated 引擎的宿主编排层经 SDK 消费），
+// 死镜像收尾删除：活体单源 SDK error-codes.ts（emulated 引擎的宿主编排层经 SDK 消费），
 // core 侧此前仅剩自身测试引用（test-only）。

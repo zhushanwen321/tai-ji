@@ -245,7 +245,7 @@ describe('createSessionFlow', () => {
 
   it('TC-9 E7 两空 cwd：reqCwd 空串且 runtime 落 homedir → onCwdFallback("", actualCwd) 触发（不再静默）', async () => {
     // landing 两空：pendingCwd null 且 ctx.defaultCwd 空 → cwd='' → runtime create('')
-    // 内部落 homedir（resolveCreateCwd existsSync('')=false）。空串守卫曾跳过回调——
+    // 内部落 homedir（resolveCreateCwd existsSync('')=false）。空串检查曾跳过回调——
     // 放宽后两空场景也有 toast 提示（D10-E7「已在主目录创建」由壳侧文案承担）
     ctx = makeCtx({
       defaultCwd: '',

@@ -1,5 +1,5 @@
 /**
- * Main 进程崩溃台账 writer（crash-forensics-and-watchdog §3.3 D1，实施计划 u1c）。
+ * Main 进程崩溃登记清单 writer（crash-forensics-and-watchdog §3.3 D1，实施计划 u1c）。
  *
  * 双文件形态（D1）：main 写 `<dataDir>/logs/crashes/main.jsonl`（main 自身 + renderer
  * 事件），runtime 写同目录 `runtime.jsonl`——与 runtime writer 是**双胞胎独立实现**
@@ -11,12 +11,12 @@
  * 清理**只依赖自带轮转**：`crashes/` 是子目录，cleanExpiredLogs（runtime）与 log-retention
  * （main）均只认顶层平铺前缀、结构性跳过子目录（设计 D1 显式裁决，不修改清理器语义）。
  *
- * 同步 append 的取舍（与 main-logger 缓冲写的分叉点）：台账事件量 KB 级/日 + watermark
+ * 同步 append 的取舍（与 main-logger 缓冲写的分叉点）：登记清单事件量 KB 级/日 + watermark
  * daily 1 条/日（D2 代价声明），写入频率极低；同步 appendFileSync 使「崩溃瞬间落盘」
  * （探针 P-A1 在场性）不依赖 flush 时机，且轮转无在途写窗口（无 pendingLines 队列），
  * 轮转边界行不丢由实现结构保证而非时序防护。
  *
- * 失败容错（D1 防漏设计前提）：台账是崩溃路径上的旁路，写失败（磁盘满/权限）best-effort
+ * 失败容错（D1 防漏设计前提）：登记清单是崩溃路径上的旁路，写失败（磁盘满/权限）best-effort
  * 不抛进调用方（接口契约见 shared CrashJournalWriter 注释）；首个失败经 main-logger 记
  * 一次受限 warn，后续静默——失败风暴时写失败路径不得反灌主日志（对齐 main-logger
  * attachStreamErrorHandler 的 first-only 形态）。
@@ -39,10 +39,10 @@ import { mainLogger } from './main-logger.js'
 const BYTES_PER_KB = 1024
 const BYTES_PER_MB = BYTES_PER_KB * BYTES_PER_KB
 const DEFAULT_MAX_FILE_MB = 10
-/** 单文件 size 轮转帽默认值（D1 定值；无 env 旋钮——设计 §5 env 清单未含台账项）。 */
+/** 单文件 size 轮转帽默认值（D1 定值；无 env 旋钮——设计 §5 env 清单未含登记清单项）。 */
 const DEFAULT_MAX_FILE_BYTES = DEFAULT_MAX_FILE_MB * BYTES_PER_MB
 
-/** 台账文件名按角色（D1 双文件）；writer 构造时按 role 取名。 */
+/** 登记清单文件名按角色（D1 双文件）；writer 构造时按 role 取名。 */
 const FILE_BY_ROLE: Record<CrashJournalFileRole, string> = {
   main: 'main.jsonl',
   runtime: 'runtime.jsonl',
@@ -59,14 +59,14 @@ export function getCrashJournalDir(): string {
 
 /** writer 构造选项：shared 契约（role）+ main 侧注入项（测试注入小阈值/临时目录）。 */
 export interface CrashJournalFileWriterOptions extends CrashJournalWriterOptions {
-  /** 台账目录；缺省 getCrashJournalDir()（生产路径），测试注入 mkdtemp 自建目录。 */
+  /** 登记清单目录；缺省 getCrashJournalDir()（生产路径），测试注入 mkdtemp 自建目录。 */
   dir?: string
   /** 单文件 size 帽（字节）；缺省 10MB（D1）。 */
   maxFileBytes?: number
 }
 
 /**
- * 崩溃台账文件 writer：单行 JSONL 同步原子追加 + size 级联轮转。
+ * 崩溃登记清单文件 writer：单行 JSONL 同步原子追加 + size 级联轮转。
  *
  * append 语义（shared CrashJournalWriter 接口）：fire-and-forget，任何 fs 失败都不向
  * 调用方抛错。event.ts 缺省/null 时补写落盘时刻（ISO 8601 UTC）——ts 是 D2 评估器窗口
@@ -97,7 +97,7 @@ export class CrashJournalFileWriter implements CrashJournalWriter {
     try {
       line = JSON.stringify(normalized) + '\n'
     } catch {
-      // 循环引用等不可序列化 event：本行放弃，不抛（接线侧 bug 不经台账放大）
+      // 循环引用等不可序列化 event：本行放弃，不抛（接线侧 bug 不经登记清单放大）
       this.reportWriteFailureOnce('serialize')
       return
     }
@@ -130,7 +130,7 @@ export class CrashJournalFileWriter implements CrashJournalWriter {
     try {
       this.bytesWritten = statSync(this.mainFile).size
     } catch {
-      this.bytesWritten = 0 // ENOENT = 全新台账（常态），其他错误同归零（下条写入重建）
+      this.bytesWritten = 0 // ENOENT = 全新登记清单（常态），其他错误同归零（下条写入重建）
     }
     this.opened = true
     return true
@@ -172,7 +172,7 @@ export class CrashJournalFileWriter implements CrashJournalWriter {
     this.failureReported = true
     try {
       mainLogger.warn(`[crash-journal] append failed at ${phase} (${this.mainFile}); further failures suppressed`)
-    // eslint-disable-next-line taste/no-silent-catch -- main-logger 自身故障（未 init 为 no-op 不会抛；其余为盘故障）不得反噬台账调用方
+    // eslint-disable-next-line taste/no-silent-catch -- main-logger 自身故障（未 init 为 no-op 不会抛；其余为盘故障）不得反噬登记清单调用方
     } catch {
       // no-op
     }
@@ -187,7 +187,7 @@ let instance: CrashJournalFileWriter | undefined
 export type CrashJournalInitOptions = Omit<CrashJournalFileWriterOptions, 'role'>
 
 /**
- * 初始化 main 崩溃台账单例（main.ts 模块加载早期调用一次，幂等）。
+ * 初始化 main 崩溃登记清单单例（main.ts 模块加载早期调用一次，幂等）。
  * 纯惰性 IO：目录在首条 append 时才创建，init 本身零副作用。
  */
 export function initCrashJournal(options: CrashJournalInitOptions = {}): void {
@@ -196,7 +196,7 @@ export function initCrashJournal(options: CrashJournalInitOptions = {}): void {
 }
 
 /**
- * main 崩溃台账单例出口（接线单元消费面：crashJournal.append(event)）。
+ * main 崩溃登记清单单例出口（接线单元消费方：crashJournal.append(event)）。
  * 未 init 时 no-op（对齐 main-logger：不抛错、不建文件）。
  */
 export const crashJournal = {

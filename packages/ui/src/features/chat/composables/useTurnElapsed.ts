@@ -1,5 +1,5 @@
 /**
- * useTurnElapsed —— 整个 agent-turn 的耗时 live 计时（从 Turn.vue 拆出，单一变化轴「elapsed 计时」）。
+ * useTurnElapsed —— 整个 agent-turn 的耗时 live 计时（从 Turn.vue 拆出，单一变化原因「elapsed 计时」）。
  *
  * 口径（2026-09 用户裁决：状态行是**整个 agent-turn** 的聚合事实，不是单条 assistant 消息的）：
  * - elapsed = 整 turn 墙钟。起点 = turn 起点（user 消息时间戳 / 首条 assistant 时间戳），
@@ -13,7 +13,7 @@
  * 计时驱动（转 live 停 freeze 的唯一判据）：
  * - `getIsTurnRunning` = 本 turn 是否仍在进行（工作 turn：会话活跃 + 末位 turn）。
  *   true → 秒级 tick，elapsed 跟随 Date.now()（含长工具执行、等待用户输入）；false → 定格读
- *   endedAt（不再回跳：收口当下就写入 endedAt，定格值 = 最后一帧 live 值）。
+ *   endedAt（不再回跳：收尾当下就写入 endedAt，定格值 = 最后一帧 live 值）。
  *   [口径修正 2026-09] 旧判据是「末位 assistant 仍在 streaming」——ask-user 等待期间 pi 已
  *   agent_end（assistant 转 complete）但会话仍在进行，旧判据下计时冻住、作答后才跳变（定格
  *   值含等待而显示不含）。整 turn 墙钟口径要求含等待，故改为 turn 进行中。
@@ -172,7 +172,7 @@ export function useTurnElapsed(
   )
 
   // 完成收起：isSessionActive true→false 触发（对话真正结束才收起 trace）。
-  // ask-user 时序：sessionActive 保持 true 直到 respond 后收口 → 不提前收起。
+  // ask-user 时序：sessionActive 保持 true 直到 respond 后收尾 → 不提前收起。
   // 若未提供 getIsSessionActive（旧调用方），退化为跟随 getIsTurnRunning 收起。
   const activeGetter = getIsSessionActive ?? getIsTurnRunning
   if (onComplete) {

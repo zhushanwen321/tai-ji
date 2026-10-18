@@ -7,12 +7,12 @@
  * 职责（markdown 流式消费编排，展示层不感知）：
  * - 渲染模式：deps.renderMarkdownIncremental（前缀段引用恒等缓存 + tail 段每帧重建 +
  *   streaming-fence 占位，D-5/W23）。
- * - rAF trailing 节流（H2）：每帧多次 content 变化合并为单次渲染；序号守卫防旧覆盖；
+ * - rAF trailing 节流（H2）：每帧多次 content 变化合并为单次渲染；序号检查防旧覆盖；
  *   失败降级转义纯文本（console.error 出声，不静默）+ 增量缓存作废重建。
  * - latest-wins 串行（W23）：增量缓存是单个可变对象（W22 原地更新），并发调用会交叉改写
  *   （旧渲染 resume 后按陈旧 boundary 追加 → 前缀段重复，append-only 校验对「重复但文本一致」
  *   无法自愈）→ in-flight 期间新请求合并为待执行项（queuedRender 覆盖），完成后只跑最新一条。
- * - streaming-fence 占位 finalize（D-5/W23，R-20）：未闭合 fence 流式期不跑 shiki/mermaid，
+ * - streaming-fence 占位 finalize（D-5/W23，R-20）：未结束 fence 流式期不跑 shiki/mermaid，
  *   静默 ≥阈值（deps.streamingFenceSilenceMs）或消息 complete（props.streaming 翻 false）后
  *   finalizeOpenFence:true 转完整渲染；tail 含占位且未完成时每帧重排静默定时器。
  * - silence-finalize 粘滞（W23 review Fix-1）：已 finalize 的 open fence 在新 token 到达后
@@ -20,7 +20,7 @@
  *   silenceMs≈0 → finalize=false → 占位回归（已渲染代码从屏幕消失）→ 再静默又完整」每次
  *   「停顿后继续」横跳的修复。协议（IncrementalMarkdownResult）不暴露 openFence offset，
  *   用内容前缀等价判据：流式 content 只会 append，finalize 快照的前缀未变则保持 finalize，
- *   改写/清空即解除。代价：粘滞期间同消息后续新开 fence 不再走占位（闭合 fence 渲染与
+ *   改写/清空即解除。代价：粘滞期间同消息后续新开 fence 不再走占位（结束 fence 渲染与
  *   finalize 无关、输出相同，仅损失占位优化，无正确性影响）。
  * - 生命周期：实例生命周期与所属消息的组件子树一致——同一条消息流式期间跨 content 变化
  *   保活（增量缓存持续累积），卸载即弃。无跨 session 残留的依据不是本 composable 自身机制，
@@ -56,11 +56,11 @@ function escapeHtmlForFallback(s: string): string {
  * 「停顿后继续」横跳的修复。协议（IncrementalMarkdownResult）不暴露 openFence offset，
  * 用内容前缀等价判据：流式 content 只会 append，finalize 快照的前缀未变则保持 finalize，
  * 改写/清空即解除（stickyAfter 置 null）。代价：粘滞期间同消息后续新开 fence 不再走占位
- * （闭合 fence 渲染与 finalize 无关、输出相同，仅损失占位优化，无正确性影响）。
+ * （结束 fence 渲染与 finalize 无关、输出相同，仅损失占位优化，无正确性影响）。
  *
- * html-preview 分流（chat-html-support §6.3 D3 流式形态）：fenceLang = 上一帧结果的未闭合
+ * html-preview 分流（chat-html-support §6.3 D3 流式形态）：fenceLang = 上一帧结果的未结束
  * fence 语言名（useMarkdownStreaming 持有）。首词为 html-preview 时静默/强制提前 finalize
- * 不生效——路径载荷是原子语义，半截路径只会产出假降级占位；只由 fence 收尾标记到达 /
+ * 不生效——路径载荷是原子语义，半截路径只会产出假降级占位；只由 fence 结束标记到达 /
  * 消息 complete 触发（complete 已在上方判定成立，fence 收尾后 openFence 消失、finalize
  * 不再参与尾段形态）。mermaid / 代码 fence 的静默提前 finalize 行为不变。
  */
@@ -91,7 +91,7 @@ function resolveStreamingFinalize(
   return { finalize, stickyAfter }
 }
 
-/** 从尾段回读未闭合 fence 语言名（占位段的 lang 即 scan.openFence 首词）；无占位 → null */
+/** 从尾段回读未结束 fence 语言名（占位段的 lang 即 scan.openFence 首词）；无占位 → null */
 function readOpenFenceLang(tailSegments: MarkdownSegment[]): string | null {
   const fenceSeg = tailSegments.find((s) => s.type === 'streaming-fence')
   return fenceSeg?.lang ?? null
@@ -109,14 +109,14 @@ export function useMarkdownStreaming(
   let incrementalCache: IncrementalMarkdownCache | null = null
   /** 上次 content 变化时刻（streaming-fence 静默判定基准 = 距上一 token 到达的时长） */
   let lastContentAt = 0
-  /** streaming-fence 占位的静默 finalize 定时器（fence 闭合前 token 停止时转完整渲染） */
+  /** streaming-fence 占位的静默 finalize 定时器（fence 结束前 token 停止时转完整渲染） */
   let fenceFinalizeTimer: ReturnType<typeof setTimeout> | null = null
   /** silence-finalize 粘滞快照（W23 review Fix-1）：finalize 帧的 content 快照，非 null 表示
-   *  该消息流中某个未闭合 fence 已被 finalize 过。后续帧 content 仍是快照的 append-only 延长
+   *  该消息流中某个未结束 fence 已被 finalize 过。后续帧 content 仍是快照的 append-only 延长
    *  （同一消息流）时保持 finalize=true（见文件头「粘滞」段）。 */
   let finalizedStickyPrefix: string | null = null
-  /** 最近一帧结果里未闭合 fence 的语言名（finalize 分流依据，§6.3 D3）：首词为 html-preview
-   *  时静默提前 finalize 不生效。null = 无未闭合 fence（或尚未渲染）。 */
+  /** 最近一帧结果里未结束 fence 的语言名（finalize 分流依据，§6.3 D3）：首词为 html-preview
+   *  时静默提前 finalize 不生效。null = 无未结束 fence（或尚未渲染）。 */
   let openFenceLang: string | null = null
   /** 卸载标志（W23 review Fix-3）：短路 in-flight 渲染结果应用与 finally 分支的 queued 消费 */
   let disposed = false
@@ -153,7 +153,7 @@ export function useMarkdownStreaming(
 
   /**
    * 渲染执行体（编排）：空文本重置 → 序号取号 → 增量渲染（D-5）→ 失败降级。
-   * 序号守卫 + 失败降级转义纯文本语义在 runIncrementalRender / handleRenderFailure。
+   * 序号检查 + 失败降级转义纯文本语义在 runIncrementalRender / handleRenderFailure。
    */
   async function runRender(text: string, opts?: { forceFinalize?: boolean }): Promise<void> {
     if (disposed) return
@@ -179,7 +179,7 @@ export function useMarkdownStreaming(
   }
 
   /** 增量路径（D-5/W23）：finalize 判定（含粘滞 + html-preview 分流）→ 壳增量渲染 →
-   *  序号守卫应用 + 重排 finalize 定时器 */
+   *  序号检查应用 + 重排 finalize 定时器 */
   async function runIncrementalRender(
     renderIncremental: ChatViewDeps['renderMarkdownIncremental'],
     text: string,
@@ -206,7 +206,7 @@ export function useMarkdownStreaming(
     // 首现竞态兜底（§6.3 D3「半截路径不产假降级占位」）：上面的 openFenceLang 是上一帧结果的
     // 回读——本轮才新开的 html-preview fence，在静默条件命中（判定层 fenceLang 尚为 null/旧值）
     // 时会被误 finalize，tail 落成 html-preview 段即半截路径降级占位闪现。检出「未 complete 却落了
-    // html-preview 段」→ 撤回 finalize 以占位形态重渲染；fence 实际已闭合时无 open fence、
+    // html-preview 段」→ 撤回 finalize 以占位形态重渲染；fence 实际已结束时无 open fence、
     // finalize 不参与尾段形态，两次输出等价（仅多一次渲染，且只在竞态帧发生）。
     if (finalize && !complete && r.tailSegments.some((s) => s.type === 'html-preview')) {
       finalize = false
@@ -226,7 +226,7 @@ export function useMarkdownStreaming(
     }
   }
 
-  /** 渲染失败降级：出声 + 卸载/序号守卫内转义纯文本回填 + 作废缓存/粘滞 + 撤销 finalize 定时器 */
+  /** 渲染失败降级：出声 + 卸载/序号检查内转义纯文本回填 + 作废缓存/粘滞 + 撤销 finalize 定时器 */
   function handleRenderFailure(e: unknown, text: string, seq: number): void {
     // [HISTORICAL] 降级必须出声（2026-08 CSP 拦截 shiki WASM 事故：此 catch 曾静默吞错，
     // 全部 markdown 渲染无声退化纯文本，线上多版本无任何日志可查）。降级行为保留
@@ -267,7 +267,7 @@ export function useMarkdownStreaming(
     }, remaining)
   }
 
-  /** rAF 回调：执行 pending 渲染（延迟求值守卫，一帧内多次 content 变化只渲染末次值） */
+  /** rAF 回调：执行 pending 渲染（延迟求值检查，一帧内多次 content 变化只渲染末次值） */
   function flushRender(): void {
     rafId = null
     void doRender(pendingContent)
@@ -292,7 +292,7 @@ export function useMarkdownStreaming(
     { immediate: true },
   )
 
-  // streaming true→false（消息 complete）：未闭合 fence 占位立即转完整渲染，不等静默阈值
+  // streaming true→false（消息 complete）：未结束 fence 占位立即转完整渲染，不等静默阈值
   watch(
     () => props.streaming,
     (s, prev) => {

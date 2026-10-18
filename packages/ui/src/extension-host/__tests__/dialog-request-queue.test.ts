@@ -372,9 +372,9 @@ describe('DialogRequestQueue', () => {
       initCounter.count = 0
       const q = getQueue()
       expect(q.resetFor('never-existed')).toBeUndefined()
-      // 守卫生效：清理动作未制造常驻空分区（照搬 updateFor 会经 getOrCreatePartition 惰性 init）
+      // 检查生效：清理动作未制造常驻空分区（照搬 updateFor 会经 getOrCreatePartition 惰性 init）
       expect(initCounter.count).toBe(0)
-      // 守卫是「不存在才跳过」而非恒 no-op：对已存在的 A resetFor 正常清空
+      // 检查是「不存在才跳过」而非恒 no-op：对已存在的 A resetFor 正常清空
       q.resetFor('A')
       expect(q.pendingCount.value).toBe(0)
       expect(initCounter.count).toBe(0) // 已有分区的清空不触发 init

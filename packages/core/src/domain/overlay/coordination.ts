@@ -5,7 +5,7 @@
  * closeOverlay 关浮层并复位 current（§7.4 发起会话删除级联同语义）。
  *
  * 载荷校验（边界防御，契约用例覆盖）：载荷关键字段为空串/非有限值 = no-op
- * （不改开合态——无效内容不进浮层，调用方（renderer controller）已有同口径守卫）。
+ * （不改开合态——无效内容不进浮层，调用方（renderer controller）已有同口径检查）。
  *
  * W2 扩展位（u-w2-browser-mount）：openBrowser(url, sessionId) 协调函数落本文件（URL 注入链）。
  * 入口语义分立（§6.4）：openWorkflow（drawer/coordination，改向开浮层）与

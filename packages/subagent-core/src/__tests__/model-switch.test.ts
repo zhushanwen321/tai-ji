@@ -10,7 +10,7 @@
 //
 // 编排 deps 全桩注入（engineSetModel / runAggregate 等 U3/U5 接线通道按契约形状
 // 打桩）；模型校验链用真实 ModelConfigService + mock registry（校验语义真实）；
-// chat 域落账用真实 RecordStore（内存 + 事件文件 tmpdir 形态——落账原语行为真实）。
+// chat 域写入 journal 记录用真实 RecordStore（内存 + 事件文件 tmpdir 形态——写入行为真实）。
 
 import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -295,7 +295,7 @@ describe("model-switch — 分型处置表（§7.2 七行）", () => {
     expect(events.filter((e) => e.type === "record-model-override")).toHaveLength(1);
   });
 
-  it("落账返回值门（dmg-r1-10）：record 非内存实例（落账 false）→ 内存记账表同步跳过（无双介质劈叉），应答形态不变", async () => {
+  it("写入返回值门（dmg-r1-10）：record 非内存实例（写入 false）→ 内存记账表同步跳过（无双介质劈叉），应答形态不变", async () => {
     const h = makeHarness({
       registry: makeRegistry([makeModel({ id: "glm-5.3-flash" })]),
       capabilitiesSetModel: "native",
@@ -305,7 +305,7 @@ describe("model-switch — 分型处置表（§7.2 七行）", () => {
     // 同 id 重建对象（gateway manifest 兜底链可能产出的形态——store.getMutable 同 id 但非同实例）
     const ghost: typeof h.record = { ...h.record };
     const reply = await setModel(h.deps, { domain: "chat", record: ghost }, TARGET_MODEL);
-    // 应答形态不变（错误应答照常——生效状态未知如实报，不因落账跳过虚构校验失败）
+    // 应答形态不变（错误应答照常——生效状态未知如实报，不因写入跳过虚构校验失败）
     expect(reply).toMatchObject({ scope: "chat", reply: { kind: "error", errorCode: "engine_state_readback_failed" } });
     // 双介质劈叉消除：内存记账表未写（持久化两面 store 原语内跳过——重建对象 record 字段本就不落内存表）
     expect(h.service.getModelOverride(ghost.id)).toBeUndefined();

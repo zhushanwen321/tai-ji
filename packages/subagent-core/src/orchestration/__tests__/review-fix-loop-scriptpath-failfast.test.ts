@@ -3,11 +3,11 @@
 // 验证目标：worker 依赖加载从「cwd 静默回退」收紧为 fail-fast——scriptPath 缺席时
 // 必须报 core_module_load_failed 且不加载用户目录下的同名依赖文件
 // （review-fix-loop.js → review-fix-loop-utils.cjs；chain/parallel/map-reduce/
-// scatter-gather → _shared/agent-refs.cjs），消除从 cwd 误加载/被植入同名文件的代码加载面。
+// scatter-gather → _shared/agent-refs.cjs），消除从 cwd 误加载/被植入同名文件的代码加载路径。
 //
 // 驱动方式：node:child_process spawn node -e 探针 + AsyncFunction 包装。五个脚本均含
 // 顶层 await（agent/parallel 入口）与顶层 return，是 worker 模板宿主形态——纯文件加载
-// （.js ESM / .cjs CJS）在解析期即 SyntaxError，守卫无从执行（review-fix-loop-script.test.ts
+// （.js ESM / .cjs CJS）在解析期即 SyntaxError，检查无从执行（review-fix-loop-script.test.ts
 // 头注释同样记录了该形态约束）。探针以 AsyncFunction 构造器复刻 worker 模板的「async
 // 函数包装 + require 注入」宿主形态后求值真实源码副本，仍是真实子进程 + 真实退出码。
 // 负向探针在 cwd 预置植入版依赖（require 即抛标记错误），断言标记未出现——直接验证
@@ -27,7 +27,7 @@ const WORKFLOWS_DIR = join(__dirname, "..", "..", "..", "workflows");
 /** 五个内置脚本（stem → 源文件名），副本统一以 .cjs 落 sandbox。 */
 const SCRIPT_STEMS = ["review-fix-loop", "chain", "parallel", "map-reduce", "scatter-gather"] as const;
 
-/** 各脚本到达依赖加载守卫所需的最小合法 $ARGS（编排四件的必需参数校验先于守卫——
+/** 各脚本到达依赖加载检查所需的最小合法 $ARGS（编排四件的必需参数校验先于检查——
  *  真实触发场景即「args 合法 + scriptPath 缺失」，与 worker 宿主总是成对注入的契约一致）。 */
 const MIN_VALID_ARGS: Record<(typeof SCRIPT_STEMS)[number], string> = {
   "review-fix-loop": '{ targetType: "file", target: "probe" }',
@@ -42,7 +42,7 @@ const PLANTED_MARKER = "PLANTED-CWD-UTILS-LOADED";
 
 const run = promisify(execFile);
 
-/** execFile reject 侧的最小形状（Node ExecException 子集，避免 any / 无守卫断言）。 */
+/** execFile reject 侧的最小形状（Node ExecException 子集，避免 any / 无检查断言）。 */
 interface ExecFailure extends Error {
   code?: number | string;
   stderr?: string;
@@ -103,8 +103,8 @@ async function runNodeExpectSuccess(args: string[], cwd: string): Promise<{ stdo
 }
 
 /** -e 探针体：AsyncFunction 包装复刻 worker 模板宿主形态，注入 workerData/$ARGS/log
- *  后求值指定脚本副本。log 为模板全局（map-reduce 在守卫前有 log 调用，缺失会提前
- *  ReferenceError 而到不了守卫），实现为 writeSync(1) 记录到 stdout——编排脚本自身的
+ *  后求值指定脚本副本。log 为模板全局（map-reduce 在检查前有 log 调用，缺失会提前
+ *  ReferenceError 而到不了检查），实现为 writeSync(1) 记录到 stdout——编排脚本自身的
  *  try/catch 会吞掉后续缺失模板全局的 ReferenceError 并正常返回（exit 0），「依赖加载
  *  之后的启动日志已打出」因此构成依赖加载成功的确定性证据。 */
 function probeCode(stem: string, workerDataJson: string, argsJson: string): string {
@@ -199,7 +199,7 @@ describe("内置 workflow 脚本 scriptPath 锚定 fail-fast（u0-failfast）", 
       sandboxDir,
     );
 
-    // 依赖加载成功的证据：chain.js 的守卫与 require 位于 try 之外（require 失败 →
+    // 依赖加载成功的证据：chain.js 的检查与 require 位于 try 之外（require 失败 →
     // 非零退出 + core_module_load_failed），其后的启动日志「chain 开始」能出现在
     // stdout 即证明 _shared/agent-refs.cjs 已锚定加载且执行推进到编排段
     expect(stdout).toContain("chain 开始");

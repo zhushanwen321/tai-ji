@@ -2,7 +2,7 @@
  * local-file 网关：白名单前缀解析（单一来源）+ servable 预检 / 源码读取 IPC（chat-html-support
  * §6.9 D9）。
  *
- * 三个消费面共用本模块，准入分两面：
+ * 三个消费方共用本模块，准入分两面：
  * ① main.ts 的 `protocol.handle('local-file')` 协议 handler——渲染面（图片/iframe 服务），
  *   准入 = 全量白名单 getAllowedLocalFilePrefixes
  * ② `localFile:servable` 预检 IPC（内联预览容器 HtmlPreviewInline 挂载前准入检查，经 deps

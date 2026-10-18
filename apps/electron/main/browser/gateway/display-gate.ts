@@ -1,10 +1,10 @@
 /**
- * view 层级共存守卫——显示收口谓词 + 双阈值空间滞回（display-containers §7.4 / §5.1 规则 6）。
+ * view 层级共存检查——显示收敛谓词 + 双阈值空间滞回（display-containers §7.4 / §5.1 规则 6）。
  *
  * 背景：WebContentsView 恒渲染在宿主全部 DOM 之上（z-index 不可穿越），错误占位 / 模态 /
  * 横幅等 DOM 表面会被原生 view 盖住不可见。本模块是「view 何时可见」的**单一权威**：
- * show 当且仅当谓词为真（§7.4 show 统一谓词，R3 收口），禁止各触发点独立 show——
- * 否则 shieldsView 相交隐藏期间重开浮层会「show 竞态盖住模态」，守卫要防的形态在恢复通道复现。
+ * show 当且仅当谓词为真（§7.4 show 统一谓词，R3 收敛），禁止各触发点独立 show——
+ * 否则 shieldsView 相交隐藏期间重开浮层会「show 竞态盖住模态」，检查要防的形态在恢复通道复现。
  *
  * 谓词（computeShouldShow）= 浮层开 ∧ 内容 browser ∧ 该 session 是浮层发起会话
  *   ∧ 无错误态 ∧ 无相交 shieldsView 面。
@@ -24,7 +24,7 @@
  */
 
 /** 显示矩形（DIP = CSS px，与 setBounds 同坐标系；不乘 devicePixelRatio） */
-export interface DisplayRect { // oe-exempt:20261003:framework:类型契约先行——容器/编排/注册表契约层，D1 下游单元即为消费面
+export interface DisplayRect { // oe-exempt:20261003:framework:类型契约先行——容器/编排/注册表契约层，D1 下游单元即为消费方
   x: number
   y: number
   width: number
@@ -43,8 +43,8 @@ import type { ShieldFace, ShieldRect, OverlayContentKind } from '@taiji/shared'
 // 保持既有导入路径（browser-view-manager / 测试）不变；下 :parse 校验的运行时三值
 // 检查保留——进程边界防线上类型不替代运行时校验。
 
-/** 浮层开合态（renderer 经 IPC 上报；view 显示收口的事实源之一） */
-export interface OverlayDisplayState { // oe-exempt:20261003:framework:类型契约先行——容器/编排/注册表契约层，D1 下游单元即为消费面
+/** 浮层开合态（renderer 经 IPC 上报；view 显示收敛的事实源之一） */
+export interface OverlayDisplayState { // oe-exempt:20261003:framework:类型契约先行——容器/编排/注册表契约层，D1 下游单元即为消费方
   open: boolean
   content: OverlayContentKind | null
   sessionId: string | null
@@ -96,7 +96,7 @@ export function isOverlayBrowserActive(overlay: OverlayDisplayState): boolean {
 }
 
 /**
- * show 统一谓词（§7.4 R3 收口）：view 显示的唯一触发。
+ * show 统一谓词（§7.4 R3 收敛）：view 显示的唯一触发。
  * 三触发恢复动作（重试成功 / shieldsView 全关 / 重开浮层）一律经此求值，禁止各触发独立 show。
  */
 export function computeShouldShow(args: {

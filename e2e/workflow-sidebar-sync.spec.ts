@@ -7,7 +7,7 @@
  * （docs/testing/e2e-map.json E2E-MOCK-01 条目），语义从「侧栏列表同步」变为「托盘同步」。
  *
  * 分层定位（workflow-visualization 设计 §4 e2e 影响面评估 + 计划 u6 验收条款）：
- * 行渲染细节（分桶/格式化/两段式操作/空态）已沉淀 ComposerTray / TrayNativePanel 组件测试
+ * 行渲染细节（分桶/格式化/两段式操作/空态）已转化为 ComposerTray / TrayNativePanel 组件测试
  * （packages/renderer/src/__tests__/panel/tray/），本 spec 只保留 e2e 层不可替代的**跨进程链路**：
  *   mock 数据源 → store 分区 → useTrayCounts 计数/行集 → 托盘 DOM，
  * 以及「点托盘行 → workflow overlay」的归宿不变量（workflow-visualization U6/D1 入口改向

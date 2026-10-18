@@ -3,7 +3,7 @@
 // 覆盖（impl-plan §2.2 / 验收 A6①⑦ / A8①④ / §7.2 R9-2/R9-2b/R9-3）：
 //   帧往返 / initialize 握手与 pidfile 写入 / 反向通知路由（含镜像落项）/
 //   host/askUser ack 两阶段 / 超时域二分（数据面 10s 判死 vs 交互面不计时，fake timers）/
-//   崩溃重建 3 次退避 + 不可用 / 版本协商 mismatch / killAll 组杀（POSIX 真进程）/ dispose。
+//   崩溃重建 3 次退避 + 不可用 / 版本协商 mismatch / killAll 按进程组终止（POSIX 真进程）/ dispose。
 // stdin fd 不外泄（R9-4②）由 SDK spawn 单测兜底，core 侧不重测。
 
 import { spawn } from "node:child_process";
@@ -273,7 +273,7 @@ describe("stdout 半行上限（MAX_LINE_BYTES：残片丢头留尾，防无界�
   }, 20_000);
 });
 
-describe("镜像桥接 → core 镜像投影（u7a 数据面桥接）", () => {
+describe("镜像桥接 → core 镜像映射（u7a 数据面桥接）", () => {
   // bridge 写的是 core 进程级单例镜像（globalThis[Symbol.for] 槽），测试间必须隔离。
   beforeEach(() => {
     _resetCoreSpawnedChildrenMirrorForTest();
@@ -285,7 +285,7 @@ describe("镜像桥接 → core 镜像投影（u7a 数据面桥接）", () => {
     expect(hasLiveProcessHandleCore("rec-bridge")).toBe(true);
 
     // pi 子进程自行退出/崩溃的载荷形态：killed=false（child.killed 只在我方 kill 过
-    // 才为 true）、state=exited——投影必须置死 core 镜像项，否则 countInFlight 虚高
+    // 才为 true）、state=exited——映射必须置死 core 镜像项，否则 countInFlight 虚高
     // （幻影在途拖住滚动重启判据）+ isResumable 恒 false（resumable 说谎）。
     client.mirror.recordStateChanged({
       pid: 4242,
@@ -410,7 +410,7 @@ describe("超时域二分（fake timers，R9-2 / R9-2b）", () => {
       client.request("run", { runId: "run-1", task: { prompt: "p" }, ctx: { cwd: dataDir } }),
     ).rejects.toMatchObject({ code: "engine_crashed" });
     // 分步推进：streamDelta 反向请求是真实 IO（引擎收到 run → 回帧），guardTimer
-    // 注册于帧到达之后——一次性 advance(10s) 会与该 IO 竞态（推进时守卫尚未注册）。
+    // 注册于帧到达之后——一次性 advance(10s) 会与该 IO 竞态（推进时检查尚未注册）。
     // 循环小步推进直到杀链生效（teardown → state 离开 ready）。
     for (let i = 0; i < 200 && client.currentState === "ready"; i += 1) {
       await vi.advanceTimersByTimeAsync(500);
@@ -524,7 +524,7 @@ describe("引擎崩溃与重建（A8①③）", () => {
 });
 
 describe("收割（POSIX 进程组；范围 = 一代子进程 + 组内后代，R9-1）", () => {
-  it("killAll：负 pid 组杀连带组内后代（引擎 + grandchild 全灭）+ 镜像置死 + pidfile 清理", async () => {
+  it("killAll：负 pid 按进程组终止连带组内后代（引擎 + grandchild 全灭）+ 镜像置死 + pidfile 清理", async () => {
     const { client } = makeClient({
       args: [
         FAKE_ENGINE,

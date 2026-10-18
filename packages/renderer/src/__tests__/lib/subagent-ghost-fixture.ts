@@ -5,7 +5,7 @@
  * 原始主 session JSONL（renderer 契约源）在提取时已被清理（`~/.taiji/agent/sessions/
  * --…-feat-optimize-memory-leak--/` 目录为空），无法逐条重放 entry 序列。fixture 按
  * two-state-convergence §2.1 主审实测的「最后快照」形态分布构造（39 record id =
- * 8 chat 轮终幽灵 + 29 one-shot 轮终 + 2 中断收口；观察时点 2 条真在跑的 id 已被
+ * 8 chat 轮终幽灵 + 29 one-shot 轮终 + 2 中断收尾；观察时点 2 条真在跑的 id 已被
  * 其后到轮终 entry 覆盖，不占独立行——同 id 后到覆盖语义），并以存活旁证交叉锚定：
  * `agent/subagents/<cwd>/records/` 恰有 39 个 rootSessionId=01a09f83 的 record 快照
  * （id 数吻合）、`.state` 收条 38 条 idle + interrupted 族。chat 轮终幽灵与 one-shot
@@ -29,7 +29,7 @@
 export interface GhostFixtureSpec {
   /** 脱敏别名（语义前缀 + 序号，与真实 subagentId 解耦） */
   aliasId: string
-  /** entry 最后快照的 status（[U4] 翻边后：轮终写 idle，中断收口 idle） */
+  /** entry 最后快照的 status（[U4] 翻边后：轮终写 idle，中断收尾 idle） */
   status: 'running' | 'idle'
   /** result 有/无（在场 = 轮终信号；正文已脱敏） */
   hasResult: boolean
@@ -49,7 +49,7 @@ const CHAT_ROUND_GHOSTS: GhostFixtureSpec[] = [
   { aliasId: 'ghost-chat-8', status: 'idle', hasResult: true, stopReason: 'failed' },
 ]
 
-/** 29 条 one-shot 轮终（done 展示形态，新旧判据都排除；含观察时点 2 条真在跑收口后的终态） */
+/** 29 条 one-shot 轮终（done 展示形态，新旧判据都排除；含观察时点 2 条真在跑收尾后的终态） */
 const ONESHOT_ROUND_DONE: GhostFixtureSpec[] = Array.from({ length: 29 }, (_, i) => ({
   aliasId: `oneshot-done-${i + 1}`,
   status: 'idle' as const,
@@ -57,7 +57,7 @@ const ONESHOT_ROUND_DONE: GhostFixtureSpec[] = Array.from({ length: 29 }, (_, i)
   stopReason: 'completed',
 }))
 
-/** 2 条中断收口（markSettled 真翻 idle，新旧判据都排除） */
+/** 2 条中断收尾（markSettled 真翻 idle，新旧判据都排除） */
 const INTERRUPTED_SETTLED: GhostFixtureSpec[] = [
   { aliasId: 'idle-interrupted-1', status: 'idle', hasResult: false, stopReason: 'interrupted' },
   { aliasId: 'idle-interrupted-2', status: 'idle', hasResult: false, stopReason: 'interrupted' },

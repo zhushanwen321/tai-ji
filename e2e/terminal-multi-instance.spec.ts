@@ -14,7 +14,7 @@
  * - T8 序号不复用：关「终端 2」→「+」→ 新条目序号为 3、输出区空白
  * - T9 最后实例自然退出：唯一实例敲 `exit` → 空态 + 「+」可用 → 新建得序号 2（不回落 1）
  * - T10 runtime 重启边界：杀 runtime → supervisor 重生（token 变化 = 世代变更）→ App.vue
- *   非 connected 态整壳替换 AppShell（TerminalView 卸载）→ 重连后重挂载，挂载腿对账得空清单
+ *   非 connected 态整壳替换 AppShell（TerminalView 卸载）→ 重连后重挂载，挂载路径对账得空清单
  *   自动新建本世代默认实例 → 恰 1 条实例且编号 = `term:<sid>:1`（世代重置证据）→ 回显命令
  *   输出正常、无上一世代串入
  * - T13 跨会话不误清：会话 A 双实例 → 切 B（触发 B 的 terminal.list 对账）→ 切回 A →
@@ -25,7 +25,7 @@
  *   前提 P3 已由 u0-probe 探针核实成立）
  * - T6 幂等防御 / T7 最后实例保护 / T11 同世代闪断 / T12 非世代广播沿：L1 单测
  *   （u1 runtime 协议测试 + u3-bar 组件测试 + u2「世代与对账」测试）
- * - T1/T2 的「三腿资源释放 / 滞留命令提示」与 T10 的 write-queue 重置细节：由 u2 单测承载
+ * - T1/T2 的「三路径资源释放 / 滞留命令提示」与 T10 的 write-queue 重置细节：由 u2 单测承载
  *   （`use-terminal.test.ts` RT-4 / CL-1 / GEN-1、GEN-3；impl-plan §5 u2 验收条款）；
  *   「焦点落相邻」在 T2 做真机 activeElement 断言（impl-plan §4.4
  *   A2 明列的 L3 可脚本化判据），不由单测承载
@@ -422,7 +422,7 @@ test('T1: 双终端并行——「+」新建第二实例、两实例各自输出
     // 切回终端 1：历史输出完整在屏（设计 §1 目标 2）；且不含终端 2 输出
     await selectInstance(h.page, 0, { expectText: T1_A.out })
     await expectTerminalTextExcludes(h.page, T1_B.out)
-    // 隐藏期累积锚的收口断言：终端 1 不可见期间到达的 T1_C 输出已在切回时回放上屏（新标记，
+    // 隐藏期累积锚的收尾断言：终端 1 不可见期间到达的 T1_C 输出已在切回时回放上屏（新标记，
     // 非切换前就在屏的旧标记 T1_A）——不可见实例的输出在此前全程无断言（切回只断旧标记时，
     // 隐藏期丢输出仍全绿）
     await expectTerminalOutput(h.page, T1_C.out)
@@ -494,7 +494,7 @@ test('T2: 关闭隔离——关第二实例后其进程消失、条目回 1、�
     await runInTerminal(h.page, T2_MARK.cmd)
     await expectTerminalOutput(h.page, T2_MARK.out)
 
-    // 关闭沿滞留命令提示 / 三腿资源释放细节由 u2 单测承载（impl-plan §4.4 A2）；本轨锚用户可见面
+    // 关闭沿滞留命令提示 / 三路径资源释放细节由 u2 单测承载（impl-plan §4.4 A2）；本轨锚用户可见面
     // + 真机进程级（上）与 activeElement（上）两处 L3 判据
   } finally {
     await teardownHarness(h)
@@ -649,7 +649,7 @@ test('T10: runtime 重启边界——杀 runtime 后世代重置为终端 1、�
     // 重挂载后抽屉保持打开（面板 store 跨整壳替换存活）；本调用幂等，兼作兜底
     await openTerminalDrawer(h.page)
 
-    // 重置的可观测终态：空态在本链路不可稳定观测——重连 remount 触发 TerminalView 挂载腿
+    // 重置的可观测终态：空态在本链路不可稳定观测——重连 remount 触发 TerminalView 挂载路径
     // `reconcileInstances → 空清单 → spawnWithFeedback` 自动新建本世代默认实例（u2 既定行为），
     // 空态窗口 ~50-150ms 短于 100ms 起的轮询间隔 → 不断言空态，断言终态：恰 1 条实例且编号
     // = `term:<sid>:1`（新世代序号从 1 重新起算 = 世代重置证据；上一世代为 2 条、编号 :1/:2）。
@@ -657,7 +657,7 @@ test('T10: runtime 重启边界——杀 runtime 后世代重置为终端 1、�
     const id = await terminalIdAt(h.page, 0)
     expect(id, '新世代重建实例应为 term:<sid>:1（序号从 1 重新起算）').toBe(`term:${sessionId}:1`)
 
-    // 全链正向锚：重建实例敲键回显正常显示（重置 → 挂载腿 ack 建档 → 订阅建立 → 输出可达）
+    // 全链正向锚：重建实例敲键回显正常显示（重置 → 挂载路径 ack 建档 → 订阅建立 → 输出可达）
     await runInTerminal(h.page, T10_MARK.cmd)
     await expectTerminalOutput(h.page, T10_MARK.out)
     // 无上一世代输出串入
@@ -690,7 +690,7 @@ test('T13: 跨会话不误清——A 双实例切 B 触发对账后切回 A，�
     await expectTerminalOutput(h.page, T13_A2.out)
 
     // 会话 B（无终端）：B 的底抽屉分区默认关（per-session 开合记忆，切走即收起）→
-    // 切换后重开抽屉 → TerminalView 挂载激活轮跑 B 的 terminal.list 对账（会话激活腿）
+    // 切换后重开抽屉 → TerminalView 挂载激活轮跑 B 的 terminal.list 对账（会话激活路径）
     const sidB = await createSession(h.port, 'create-t13-b', bLabel)
     await selectSessionInSidebar(h.page, bLabel)
     await openTerminalDrawer(h.page)

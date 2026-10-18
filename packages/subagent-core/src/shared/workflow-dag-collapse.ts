@@ -5,7 +5,7 @@
  * 同 (phase, templateName, kind) 的调用点在 D2 蓝图-实例匹配与视图两侧天然不可区分
  * ——同 phase 等值 + 同模板正则 + 字面段总长相等恒并列歧义，保留多个只会互致歧义：
  * 任一实例命中并列候选即判歧义进「未匹配实例」分组，该 agent 家族在 DAG 图上整体
- * 失去挂接（实测形态：① helper 投影把「派发 + 原位重试」投成两个全通配 `*` 节点；
+ * 失去挂接（实测形态：① helper 派生视图把「派发 + 原位重试」投成两个全通配 `*` 节点；
  * ② 同字面模板双直呼节点——aggregate 派发与其重试分支）。合并语义：组内最前行号者
  * 为代表节点（出现序平局），边端点重写到代表后按 (from,to) 优先级去重（dataflow >
  * conditional > sequence，与解析器候选去重同口径；loop-back 边不参与去重——与
@@ -20,7 +20,7 @@ import type { WorkflowDag, WorkflowDagEdge, WorkflowDagNode } from "./workflow-d
 /** 分组/去重键分隔符（节点 id 与模板名不含 \u0000，无碰撞面）。 */
 const KEY_SEP = "\u0000";
 
-/** 前向边同 (from,to) 收口优先级（dataflow 最信息密集，与解析器 dedupeEdges 同词表同值——loop-back 键仅为词表完整性，不参与收口）。 */
+/** 前向边同 (from,to) 收敛优先级（dataflow 最信息密集，与解析器 dedupeEdges 同词表同值——loop-back 键仅为词表完整性，不参与收敛）。 */
 const EDGE_PRIORITY: Record<WorkflowDagEdge["kind"], number> = {
   sequence: 0,
   conditional: 1,
@@ -50,7 +50,7 @@ export function collapseDuplicateCallSites(dag: WorkflowDag): WorkflowDag {
   if (representativeByNodeId.size === 0) return dag;
 
   const remapId = (id: string): string => representativeByNodeId.get(id) ?? id;
-  // 前向边：端点重映射 + 同 (from,to) 优先级收口，合并产生的自环丢弃（重映射后两端
+  // 前向边：端点重映射 + 同 (from,to) 优先级收敛，合并产生的自环丢弃（重映射后两端
   // 点同节点，边无信息量且会渲染成横穿节点卡片的直线）；loop-back：只重映射不去重
   // （每条 loop-back 被某 loop.backEdgeId 配对引用——去重会孤儿化引用，结构校验红线）。
   // loop-back 自环分两态：未被合并波及的单节点循环体回边是解析器原生自环（合法结构，

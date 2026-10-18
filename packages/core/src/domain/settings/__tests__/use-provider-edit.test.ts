@@ -131,10 +131,10 @@ describe('discover 错误通道接线（facade 注入回调 → form.actionError
     const edit = mount(ref<ProviderInfo | null>(makeProvider()))
 
     await edit.discover.autoDiscover()
-    // 错误经 facade 的 reportActionError 回调落 form module（带 source 标签，投影 message）
+    // 错误经 facade 的 reportActionError 回调落 form module（带 source 标签，呈现 message）
     expect(edit.form.actionError.value).toBe('conn refused')
 
-    // 成功探活：runDiscover 开头 clearActionError → 错误投影清除
+    // 成功探活：runDiscover 开头 clearActionError → 错误派生视图清除
     provideSettingsTransport(makeFakeTransport())
     await edit.discover.testConnection()
     expect(edit.form.actionError.value).toBe('')

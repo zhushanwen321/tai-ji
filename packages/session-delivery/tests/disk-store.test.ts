@@ -2,14 +2,14 @@
  * 磁盘 outbox（DiskDeliveryStore）单测——DeliveryStore 端口契约的磁盘实现行为锁。
  *
  * 覆盖面（unified-delivery 波 4 任务书验收）：
- * - persist 受理前落账 → loadUndelivered 返回；
+ * - persist 受理前写入记录 → loadUndelivered 返回；
  * - ack 终局行：delivered / cancelled 同形（判重只看 id）→ loadUndelivered 移除 +
  *   loadTerminalIds/hasTerminal 命中；
  * - discard（forget 失败条目）→ loadUndelivered 跳过且 hasTerminal 为假（区别于 ack）；
  * - 文件损坏容错：坏 JSON 行 / 半行 / 未知行型跳过不炸加载；
  * - 行序归并：discard 后同 id record 复活；ack 后同 id record 判重保持（宁可误吞不误重投）；
  * - attachSegments meta 补记：loadUndelivered 的 record.meta.segments 取回，后写覆盖先写；
- * - persist 抛错上抛（内核拒收语义：耐久承诺未落）。
+ * - persist 抛错上抛（内核拒收语义：耐久承诺未写入）。
  *
  * fs 全程内存替身（DiskStoreFs 注入面）——本文件不触真实磁盘。
  */
@@ -56,7 +56,7 @@ function newStore(fs = memFs()) {
 }
 
 describe('DiskDeliveryStore — DeliveryStore 端口契约', () => {
-  it('persist 受理前落账 → loadUndelivered 返回原记录', () => {
+  it('persist 受理前写入记录 → loadUndelivered 返回原记录', () => {
     const { store } = newStore()
     const record = recordOf('a')
     store.persist(record)

@@ -201,7 +201,7 @@ describe("workflow 窗口实例收尾接线（U2）", () => {
     const run = makeRealRun(runId);
     const deps = makeTracingDeps();
 
-    // 在途 call（dispatch 后未完成）：closeOutInFlightCalls 的收口对象
+    // 在途 call（dispatch 后未完成）：closeOutInFlightCalls 的收尾对象
     const node: ExecutionTraceNode = {
       stepIndex: 1,
       agent: "reviewer",
@@ -217,8 +217,8 @@ describe("workflow 窗口实例收尾接线（U2）", () => {
     const port = new FakeWindowEnginePort("fake-win");
     usePerWindowGateway({ "fake-win": port });
     resolveWorkflowWindowEnginePort(runId, "fake-win");
-    // dispose 执行时点断言：在途 call 已被 closeOut 收口（done + trace failed）。
-    // closeOut 是 finalizeRun 的模块内部调用，其「先于 dispose」只能靠被收口对象的
+    // dispose 执行时点断言：在途 call 已被 closeOut 收尾（done + trace failed）。
+    // closeOut 是 finalizeRun 的模块内部调用，其「先于 dispose」只能靠被收尾对象的
     // 状态在 dispose 时点已翻转来证明——dispose 早于 closeOut 时本断言为 false。
     let closeOutObservedAtDispose = false;
     port.onDispose = () => {
@@ -341,7 +341,7 @@ describe("workflow 窗口实例收尾接线（U2）", () => {
 
     await finalizeRun(run, deps, "completed", { context: "test" });
 
-    // 透传引擎的停机面不经窗口收尾触发（dispose 通道归 registry/停机链，现状保形）
+    // 透传引擎的停机路径不经窗口收尾触发（dispose 通道归 registry/停机链，现状保形）
     expect(sharedPort.disposed).toBe(0);
   });
 });

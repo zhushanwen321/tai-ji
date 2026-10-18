@@ -219,7 +219,7 @@ describe("armEngineSelfDestruct", () => {
     expect(kill2).toHaveBeenCalledTimes(1);
   });
 
-  it("dispose：正常 shutdown 卸载守卫（EOF 与计时均不再触发）", () => {
+  it("dispose：正常 shutdown 卸载检查（EOF 与计时均不再触发）", () => {
     const stdin = fakeStdin();
     const kill = vi.fn();
     const clock = armEngineSelfDestruct({ stdin, killSelf: kill, timeoutEnv: {} });

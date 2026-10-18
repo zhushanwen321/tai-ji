@@ -30,7 +30,7 @@
 //                                                的 stderr 尾 400 窗口实证）；
 //     streamDelta op 支持 action.recordId      → recordId 键 delta（chat 续聊轮关联键）；
 // - 数据面应答回声：recordId-delta 帧的②应答到达时回发 host/log("ack <label>")——
-//   core 侧断言「宿主确认收到」回执链闭合的观测锚；
+//   core 侧断言「宿主确认收到」回执链完成的观测锚；
 // - FAKE_RUN_RECORD_DELTA=1 / FAKE_RUN_STDERR_HANG=1：run script 注入上述动作段
 //   （recordId 键 delta / stderr+hang）。[H1 U5] FAKE_RUN_LIFECYCLE（轮次相位 ×
 //   双键注入段）已随通道退役删除。
@@ -177,7 +177,7 @@ createInterface({ input: process.stdin }).on("line", (line) => {
 
   // 帧②（core 对反向请求的应答）：askUser 最终结果到达——回放层记录后继续。
   // [W6] 数据面（recordId-delta）应答到达 → 回发 host/log 回声（core 侧「宿主
-  // 确认收到」回执链闭合的观测锚；NDJSON 单连接有序，回声先于 run 应答帧到达）。
+  // 确认收到」回执链完成的观测锚；NDJSON 单连接有序，回声先于 run 应答帧到达）。
   if (typeof frame.id === "string") {
     const echoLabel = ackEchoLabels.get(frame.id);
     if (echoLabel !== undefined) {

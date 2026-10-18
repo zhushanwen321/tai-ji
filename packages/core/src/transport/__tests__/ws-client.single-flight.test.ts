@@ -1,13 +1,13 @@
 // ws-client 单飞防并存测试（移动端「同页多 WS 连接并存（半死）」复验问题的防回归）。
 //
-// 根因（修复前）：connect() 幂等守卫只拦 OPEN/CONNECTING——CLOSING（close 握手未完成，
+// 根因（修复前）：connect() 幂等检查只拦 OPEN/CONNECTING——CLOSING（close 握手未完成，
 // 移动弱网下可悬挂数秒~分钟）的旧 socket 会被模块变量直接覆盖并开新连接；且 connect() /
 // scheduleReconnect 均不清挂起的退避定时器，三个重连入场口（退避定时器 / visibility 切
 // 前台 / token 重试）在 CLOSING 窗口与定时器窗口交错即叠出多个并存 socket（半死 = CLOSING
 // 悬挂）。
 //
 // 修复后不变量（本文件锁定）：
-// 1. 单飞守卫：存在非 CLOSED socket 时 connect() 一律 no-op（新连接建立前旧连接必须 closed）。
+// 1. 单飞检查：存在非 CLOSED socket 时 connect() 一律 no-op（新连接建立前旧连接必须 closed）。
 //    OPEN/CONNECTING 分区的幂等断言收敛在 invariants 文件（参数化用例）；本文件锁 CLOSING
 //    分区与混合交错序列。
 // 2. 单一定时器：connect() 放行时清挂起的退避定时器；scheduleReconnect 覆盖前清旧 handle。

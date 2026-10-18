@@ -1,7 +1,7 @@
 /**
  * usePermissionRequest —— 桌面壳 permissionRequest 装配薄接线。
  *
- * 状态机本体（bus 订阅 + 畸形事件守卫 + permissions 拷贝 + expired 撤窗 +
+ * 状态机本体（bus 订阅 + 畸形事件检查 + permissions 拷贝 + expired 撤窗 +
  * transport 回传 + BM3/D3 失败/超时语义）在 @taiji/ui/extension-host
  * createPermissionRequestController（双壳共享 factory，单测在同包 __tests__/）。
  * 本模块只做桌面壳装配裁决：

@@ -214,7 +214,7 @@ describe("respond — JSON.stringify 失败降级为 cancelled (#16)", () => {
 });
 
 // ============================================================
-// respond：signal.aborted 守卫
+// respond：signal.aborted 检查
 // ============================================================
 
 describe("respond — signal 已 aborted 跳过写入", () => {

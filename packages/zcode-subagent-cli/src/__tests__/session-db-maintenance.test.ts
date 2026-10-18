@@ -36,7 +36,7 @@ async function openDb(file: string): Promise<Db> {
 }
 
 /**
- * 建出 sweep 消费面的最小 schema（session + 两张 session_id 子表 + input_history
+ * 建出 sweep 消费方的最小 schema（session + 两张 session_id 子表 + input_history
  * + 三族 FK 孤儿防线表）。三族表不声明 FK 约束——复现生产实测形态（engine 声明
  * CASCADE/SET NULL 但 foreign_keys=0 不生效，孤儿行只有 sweep 显式 SQL 能清），
  * 断言针对显式清理 SQL 的效果而非连接级级联。

@@ -7,13 +7,13 @@
 //
 // 核心改动：
 //   1. isExtensionUiRequest 重写：判 type==="extension_ui_request" + id:string + method:string
-//      （删 jsonrpc==="2.0" 守卫 + params 守卫 — Pi 原生格式是平铺字段）
+//      （删 jsonrpc==="2.0" 检查 + params 检查 — Pi 原生格式是平铺字段）
 //   2. extension_ui_request 分支：从 {id, params:Record} 改为 {id, request: ExtensionUiRequest}
 //      request 按 method 平铺（title/options/message/... 与 Pi rpc-types.ts 1:1）
 //   3. isRpcResponse 重写：判 type==="response" + command:string + success:boolean（SR-1 根因 1b）
 //   4. 判定顺序：isExtensionUiRequest 必须在 event 分支之前（否则被 typeof obj.type===string 吞）
 //
-// 红灯原因：spawn-event-adapter.ts 当前用旧 JSON-RPC 2.0 守卫，对 Pi 原生格式样本
+// 红灯原因：spawn-event-adapter.ts 当前用旧 JSON-RPC 2.0 检查，对 Pi 原生格式样本
 //   无法识别为 extension_ui_request（会落到 event 分支）。改造后这些断言才绿。
 
 import { describe, expect, it } from "vitest";
@@ -128,9 +128,9 @@ describe("parseSpawnLine — 10 种 method 真实样本分类（Pi 原生格式�
   });
 });
 
-describe("parseSpawnLine — 旧 JSON-RPC 2.0 格式不再被识别（守卫已删）", () => {
+describe("parseSpawnLine — 旧 JSON-RPC 2.0 格式不再被识别（检查已删）", () => {
   it("jsonrpc+method:extension_ui_request+params 旧格式 → 不归类为 extension_ui_request", () => {
-    // 旧格式（错误假设）：会被识别为 event 或 invalid，因为新守卫不认 jsonrpc
+    // 旧格式（错误假设）：会被识别为 event 或 invalid，因为新检查不认 jsonrpc
     const oldFormat = JSON.stringify({
       jsonrpc: "2.0", id: "x", method: "extension_ui_request", params: { foo: "bar" },
     });

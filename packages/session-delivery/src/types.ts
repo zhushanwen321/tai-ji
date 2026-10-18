@@ -155,7 +155,7 @@ export type DeliveryReceiptAnchor = 'marker' | 'acceptance' | 'details-id'
  *   loadUndelivered 重入队（通知车道无人值守语义，与账本现状同构）。
  *
  * 缺省按载荷类型：custom = 'retain' / text = 'forget'（§3.4 提交选项缺省值表：
- * 交互在席 vs 无人值守），提交方可显式覆写。sendChecked 挂账条目恒 'forget'（同步
+ * 交互在席 vs 无人值守），提交方可显式覆写。sendChecked 挂起条目恒 'forget'（同步
  * 失败回执契约与 retain 重投矛盾——调用方已收到失败，重投会产生「失败但送达」的
  * 矛盾观测；显式申报 retain 时按 forget 处置并一次性 warn）。
  */
@@ -171,7 +171,7 @@ export type DeliveryProofCheck = (id: string) => boolean
 
 /**
  * DeliveryStore 的持久记录（persist 的写入单元 / loadUndelivered 的读取单元）：
- * 重建投递所需的最小信息快照。字段是内核条目的持久投影——重启重入队时装配方经
+ * 重建投递所需的最小信息快照。字段是内核条目的持久化派生数据——重启重入队时装配方经
  * loadUndelivered 取回后按原 id / lane / receiptAnchor 重新提交（幂等判重锚不丢）。
  */
 export interface DeliveryStoreRecord {
@@ -183,7 +183,7 @@ export interface DeliveryStoreRecord {
   payload: DeliveryPayload
   /** 期望注入时机（persist 时按 msg.intent ?? config.intent 解析定型）。 */
   intent: DeliveryIntent
-  /** 落账时间（epoch ms）。 */
+  /** 记录写入时间（epoch ms）。 */
   recordedAt: number
   /** 送达凭据申报（重入队时保真重报）。 */
   receiptAnchor?: DeliveryReceiptAnchor
@@ -218,7 +218,7 @@ export interface DeliveryStoreRecord {
  * 不进端口签名。
  */
 export interface DeliveryStore {
-  /** 受理前落账（耐久承诺先于投递尝试）。抛错 = 承诺未落，内核拒收。 */
+  /** 受理前写入记录（耐久承诺先于投递尝试）。抛错 = 承诺未写入，内核拒收。 */
   persist(record: DeliveryStoreRecord): void
   /** 终局（delivered / cancelled）后写持久终局（从待投差集移除、进终局记录）。 */
   ack(id: string): void
@@ -313,7 +313,7 @@ export interface DeliveryHandle {
 
 /**
  * 投递车道（D1）。lane 在条目创建时由 runtime 内核适配层判定（读权威 occupancy
- * 投影 + 内核自身队列态，单一判定源）后记录，此后不变。三档为投递车道语义名
+ * 派生视图 + 内核自身队列态，单一判定源）后记录，此后不变。三档为投递车道语义名
  * （设计 §1.1 术语表），非底层通道 API 词汇。
  */
 export type DeliveryLane = 'direct' | 'steer' | 'queued'
@@ -327,7 +327,7 @@ export type DeliveryLane = 'direct' | 'steer' | 'queued'
  * - in-flight → failed：断连事件驱动的未确认终局（failInFlight，ADR-0122——pi 连接
  *   断开时结果未知，显式失败交用户处置）
  * - failed → queued：用户重试（resync 单条重报）；failed → cancelled：用户移除
- * 帧投影四态差异：cancelled 不进 session.delivery 帧（D5③），协议侧帧 state 无此值。
+ * 帧派生视图四态差异：cancelled 不进 session.delivery 帧（D5③），协议侧帧 state 无此值。
  */
 export type DeliveryEntryState = 'queued' | 'in-flight' | 'delivered' | 'failed' | 'cancelled'
 
@@ -354,7 +354,7 @@ export interface DeliveryEntry {
 
 /**
  * 终局记录（v3）：delivered 与 cancelled 的轻量元数据——条目离开系统的事实的内存
- * 投影。v2 的 DeliveryTombstone 独立判重机制与类型随 v3 退役（它像独立机制只因没有
+ * 派生数据。v2 的 DeliveryTombstone 独立判重机制与类型随 v3 退役（它像独立机制只因没有
  * 持久存储）：判重统一为「在途条目 → 内存已完结 id 索引（store.loadTerminalIds 播种
  * + 终局即时登记）→ 持久记录（store.hasTerminal）」三级（设计 §3.5.5），终态唯一
  * 事实源 = 投递日志（DeliveryStore 终局记录）；本类型只承载条目视图面——
@@ -379,7 +379,7 @@ export interface DeliveryTerminalRecord {
 /**
  * 全量视图（D9②）：对账器与判重消费。活跃条目（完整字段）+ 全部终局记录。
  * 消费方：Reconciler 判别在途集（runtime registry 侧）、resync 判重、reattach 收养判定。
- * 访问入口 = handle.entriesFull()（MF-1-13 拆名：与投影视图分开命名，误用编译期可查）。
+ * 访问入口 = handle.entriesFull()（MF-1-13 拆名：与派生视图分开命名，误用编译期可查）。
  *
  * tombstones 字段口径（v3）：本 handle 生命周期内终局条目的完整记录（含 restart 前
  * 条目的判重不依赖它——重启前的已完结 id 由 store.loadTerminalIds 播种进判重索引，
@@ -391,10 +391,10 @@ export interface DeliveryEntriesFull {
 }
 
 /**
- * 投影视图（D9②/D5③）：session.delivery 帧装配用。活跃条目（queued/in-flight/failed）
+ * 派生视图（D9②/D5③）：session.delivery 帧装配用。活跃条目（queued/in-flight/failed）
  * 全量 + delivered 最近 50 条完整条目；稳态体积有界 ≤ 50 + 活跃条目数。
  * 装配（帧 DTO 转换）归 runtime transport 侧（u3a），内核只产出本视图。
- * 访问入口 = handle.projection()；投影窗口恒为默认常量 50，无参数位（与全量视图
+ * 访问入口 = handle.projection()；派生视图窗口恒为默认常量 50，无参数位（与全量视图
  * entriesFull() 拆名为两个具名方法——双视图误用编译期即红，不靠注释纪律维持）。
  */
 export interface DeliveryEntriesProjection {

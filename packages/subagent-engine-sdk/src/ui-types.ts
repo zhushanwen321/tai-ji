@@ -9,7 +9,7 @@
 // "@zhushanwen/subagent-engine-sdk"`，§2.7 MF-X2 既定决策，引用切换归 W2/W7）；
 // 双向可赋值断言挂 core typecheck 断言族。
 //
-// 协议消费面：反向通道 host/askUser 的载荷携带 UiRequest（reverse-channels.ts），
+// 协议消费方：反向通道 host/askUser 的载荷携带 UiRequest（reverse-channels.ts），
 // 两阶段结果 = UiResponse（ack 先行、结果异步到达，R9-2）。
 
 /** Pi extension_ui_request 的方法枚举（dialog + fire-and-forget 两类）。
@@ -82,8 +82,8 @@ export type UiResponse =
   | { ack: true };
 
 /** UiResponse 载荷结构判定（四成员判别；形态对齐 reverse-channels 的
- *  isHostStreamDeltaParams 先例）。消费方：引擎侧应答落位前守卫，防宿主畸形帧
- *  静默流入 UI 队列（S7：askUser 应答跨界无守卫）。 */
+ *  isHostStreamDeltaParams 先例）。消费方：引擎侧应答落位前检查，防宿主畸形帧
+ *  静默流入 UI 队列（S7：askUser 应答跨界无检查）。 */
 export function isUiResponse(value: unknown): value is UiResponse {
   if (typeof value !== "object" || value === null) return false;
   const v = value as Record<string, unknown>;

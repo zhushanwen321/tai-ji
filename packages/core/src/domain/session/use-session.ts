@@ -20,7 +20,7 @@
  * evictIfNeeded / clearUnread / fileTree 预加载 / flow.cancelFlow，原 C-W3-4「壳补齐时序」
  * 立场）已升级为 sessionEntry 端口束（SessionEntryPort，api-port.ts）注入 selectSession
  * 完整 12 步切入链——链本体在本文件单点编排（唯一载体），原三份实现（core/壳新/壳旧）的
- * 时序漂移由此收口。时序采壳版 panel-first（D4 行为纠正：panel/navigation 先于 hydrate）。
+ * 时序漂移由此收敛。时序采壳版 panel-first（D4 行为纠正：panel/navigation 先于 hydrate）。
  *
  * 命名说明：IF4 字面签名写 useSession；core 内 factory 统一 create* 前缀
  * （createSessionStore/createChatStore/createUseChat 先例），故命名 createUseSession。
@@ -29,7 +29,7 @@ import { computed, onScopeDispose } from 'vue'
 import type { BatchDeleteResult, Message, SessionGroup, SessionSummary } from '@taiji/shared'
 import { triggerSessionCleanups } from '../../foundation/use-session-scoped-state'
 // [u4d] getHistory 响应 → 截断窗口状态归一（SSOT 在 domain/chat/truncated-window）；
-// [D6-⑨ 缺陷#2] toolResult 图片落盘编排（hydrate 通路统一收口，见 reconcileFromReply）。
+// [D6-⑨ 缺陷#2] toolResult 图片落盘编排（hydrate 通路统一收敛，见 reconcileFromReply）。
 // session→chat 单向依赖（chat 域不 import session 域，无环；truncated-window 同先例）；
 // AC10：跨域经 '@taiji/core/domain/chat' 公开 index API 消费（self-reference）。
 import { historyWindowFromReply } from '@taiji/core/domain/chat'
@@ -61,7 +61,7 @@ export interface NavigationRoute {
 export interface ChatHydratePort {
   /**
    * 拉取 session 历史（session.history RPC；u4b 双预算窗口可能截断）。
-   * [u6] 窗口契约字段必填（legacy historyTruncated 退役，偏差表 D7 双轨收口），
+   * [u6] 窗口契约字段必填（legacy historyTruncated 退役，偏差表 D7 双轨收敛），
    * 经 historyWindowFromReply 归一后随 reconcileHistory 写入 chat store 截断窗口状态。
    */
   getHistory(sessionId: string): Promise<{
@@ -70,7 +70,7 @@ export interface ChatHydratePort {
     loadedTurns: number
     totalTurnsEstimate: number
   }>
-  /** 该 session 是否已 hydrate（幂等守卫：已回填不重复拉取） */
+  /** 该 session 是否已 hydrate（幂等检查：已回填不重复拉取） */
   isHydrated(sessionId: string): boolean
   /** 注入历史消息（chat store hydrate） */
   hydrate(sessionId: string, messages: Message[]): void
@@ -287,7 +287,7 @@ export function createUseSession(deps: UseSessionDeps) {
   }
 
   /**
-   * getHistory 响应 → store 回填 + toolResult 图片落盘编排统一收口（D6-⑨）。
+   * getHistory 响应 → store 回填 + toolResult 图片落盘编排统一收敛（D6-⑨）。
    *
    * use-session 侧所有「history 消息写入 store」的通路（runEntryChain 首次切入 / 已
    * hydrate 刷新 / retryHistory）必须经此 helper，禁止直接调 chat.reconcileHistory——
@@ -397,7 +397,7 @@ export function createUseSession(deps: UseSessionDeps) {
     chat.clearHistoryError(sessionId)
     try {
       const reply = await chat.getHistory(sessionId)
-      // [u4d] 窗口状态随 reconcile 写入 + 图片落盘编排（同 runEntryChain 收口）
+      // [u4d] 窗口状态随 reconcile 写入 + 图片落盘编排（同 runEntryChain 收敛）
       reconcileFromReply(sessionId, reply)
     } catch {
       chat.markHistoryFailed(sessionId)
@@ -410,7 +410,7 @@ export function createUseSession(deps: UseSessionDeps) {
    * 末尾恒 bindCurrentSession(null)），故本方法恒进 chat view 让 Panel 渲染 landing 空态，
    * 恒返回 null。返回类型保持 string | null 对齐端口契约形状（调用方均不消费返回值）。
    *
-   * per-instance in-flight 守卫（renderer 同构：6+ 组件实例各自独立守卫，模块级会互相阻塞）。
+   * per-instance in-flight 检查（renderer 同构：6+ 组件实例各自独立检查，模块级会互相阻塞）。
    * flow 未接线（deps.flow 缺省）时返回 null 降级——壳（w5）接线后语义完整。
    */
   let newTaskInFlight = false

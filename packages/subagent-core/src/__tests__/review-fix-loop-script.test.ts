@@ -15,7 +15,7 @@
 //
 // 注：弱格式通道相关测试（summarizeDegradedTrigger 直测 / F-1 前缀契约锁定 /
 // degraded 三落点锚点 / 兜底差集清单锚点）已随 fail-fast 改造整体退役——
-// 结构化返回失败即终判，脚本侧无 F-1 字面量、无降级可观测面；引擎侧
+// 结构化返回失败即终判，脚本侧无 F-1 字面量、无降级可观测性；引擎侧
 // DETERMINISTIC_SCHEMA_FAILURE_PREFIX 常量仍被宿主 execute-agent-call 重试分诊
 // 消费（output-collector.test.ts 侧覆盖），与本脚本无契约关系。
 import { execFile } from "node:child_process";
@@ -34,7 +34,7 @@ const WORKFLOW_SOURCE = readFileSync(
 
 /** 按函数名从源码文本截取完整函数段（参数括号配平后 brace 配平函数体）。
  *  抽取不到 → 显式报错（防漂移）。buildCallRecord 的解构参数含花括号，
- *  函数体起点必须从参数列表闭合括号之后找，不能直接 indexOf("{")。 */
+ *  函数体起点必须从参数列表的结束括号之后找，不能直接 indexOf("{")。 */
 function extractFn(name: string): string {
   const marker = "function " + name + "(";
   const start = WORKFLOW_SOURCE.indexOf(marker);
@@ -438,7 +438,7 @@ describe("review-fix-loop.js fixAgent=fallow-scan 显式拒收（RX2-F2）", () 
 // fixer 修错文件或读不到任务文档），因此逐字节锁定文档内容与组/条目的严格一致，
 // 以及组 → 文档 → 调用的一一对应。
 describe("review-fix-loop.js fixerDocPath + groupCalls（fixer 文件总线渲染与派发组装）", () => {
-  /** 从 marker 起截取完整语句（跳过字符串/模板串/行注释/块注释，depth-0 `;` 收口）。 */
+  /** 从 marker 起截取完整语句（跳过字符串/模板串/行注释/块注释，depth-0 `;` 收尾）。 */
   function extractStatement(marker: string): string {
     const start = WORKFLOW_SOURCE.indexOf(marker);
     if (start < 0) {
@@ -737,14 +737,14 @@ describe("review-fix-loop.js 结构化失败终判恢复指引锚点", () => {
     expect(WORKFLOW_SOURCE.match(/\+ REVIEWER_RECOVERY_HINT;/g)?.length).toBe(2);
   });
 
-  it("fail-fast 形态锚点：failFastAgent 包装存在、脚本无 F-1 字面量、无 degraded 可观测面", () => {
+  it("fail-fast 形态锚点：failFastAgent 包装存在、脚本无 F-1 字面量、无 degraded 可观测性", () => {
     // failFastAgent 单一声明 + reviewer/fixer/reviewer 解析失败原位重试 三处消费
     //（声明含 `(`，共 4 次；重试消费点 = 结果无效时的回注重派，2026-09-30 同步 dev-merge-gates）
     expect(WORKFLOW_SOURCE).toContain("function failFastAgent(call, failedLabel)");
     expect(WORKFLOW_SOURCE.match(/failFastAgent\(/g)?.length).toBe(4);
     // F-1 引擎前缀字面量不再内联（引擎侧常量仍被宿主重试分诊消费，与本脚本无契约关系）
     expect(WORKFLOW_SOURCE).not.toContain("Structured output failed deterministically");
-    // 弱格式降级可观测面零残留（degraded 三落点已整体拆除）
+    // 弱格式降级可观测性零残留（degraded 三落点已整体拆除）
     expect(WORKFLOW_SOURCE).not.toContain("degradedRounds");
     expect(WORKFLOW_SOURCE).not.toContain("degradedRoundKeys");
     expect(WORKFLOW_SOURCE).not.toContain("baselineDirtyPaths");

@@ -27,7 +27,7 @@ const apiMock = vi.hoisted(() => {
   const holder: { handler: ((msg: ServerMessage) => void) | null } = { handler: null }
   return {
     holder,
-    // bash 回执契约（dmg-r1-2）：默认 = 已执行并收口
+    // bash 回执契约（dmg-r1-2）：默认 = 已执行并收尾
     bash: vi.fn(() => Promise.resolve({ status: 'settled' as const })),
     abortBash: vi.fn(() => Promise.resolve()),
     streamSubscribe: vi.fn((_sid: string, handler: (msg: ServerMessage) => void) => {

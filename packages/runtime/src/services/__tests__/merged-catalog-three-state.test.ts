@@ -152,7 +152,7 @@ describe('D4: getMergedCatalogModels 合并视图单点', () => {
     expect(view!.models.map(m => m.id)).toEqual(SNAPSHOT_IDS)
   })
 
-  it('非快照内 provider → undefined（D6 快照闸门外不构成合并视图）', () => {
+  it('非快照内 provider → undefined（D6 快照门窗外不构成合并视图）', () => {
     expect(getMergedCatalogModels('my-custom-router')).toBeUndefined()
   })
 

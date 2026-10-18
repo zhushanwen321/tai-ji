@@ -440,7 +440,7 @@ export class AppServerConnection {
 
     let finalized = false;
     // 收割当前代：关闭 tee 流、child 置空（触发下次重建）、全部 pending reject。
-    // 双守卫：finalized 防同代 close/error 双触发；generation 比对防迟到的上一代
+    // 双检查：finalized 防同代 close/error 双触发；generation 比对防迟到的上一代
     // 事件误杀新代（正常时序不可达，防御性保留）。
     const finalize = (reason: string): void => {
       if (finalized || this.generation !== gen) return;

@@ -2,7 +2,7 @@
  * workflow-record 自描述 entry 的 schema 契约单源（W17 [D4]；词表/guard 收敛
  * 二轮复审候选 2；W1 [D1] v 升格 2）。
  *
- * 消费格局（core 写点 / 壳 loadAll v2 定界 / runtime 投影扫描）各自需要
+ * 消费格局（core 写点 / 壳 loadAll v2 定界 / runtime 派生视图扫描）各自需要
  * customType 字面量与版本判定，独立演化即静默漂移——本模块收敛两件事：
  * 1. customType 与 entry schema 版本常量（版本 bump 单点，写点与读判定同源）；
  * 2. 纯判定函数 classifyWorkflowRecordEntryData——entry data 的 v1/v2 分类。
@@ -20,7 +20,7 @@
  * 不在本模块的：
  * - v1 条目内 snapshot 的内部格式——v1 已冻结为兼容读面（D7）不再演化，无
  *   独立格式版本常量需要单源（entry 层 v 只管 entry schema 自身的演化）；
- * - runtime 投影的 runId 存在性守卫——投影键需求（record 需要 runId 做 Map 键），
+ * - runtime 派生视图的 runId 存在性检查——派生视图键需求（record 需要 runId 做 Map 键），
  *   非 entry schema 面，runtime 解码链自有等价校验。
  */
 
@@ -77,7 +77,7 @@ export interface WorkflowRecordRegisteredEntryData { // oe-exempt:20260929:frame
   slug: string;
   /**
    * workflow 脚本绝对路径（RunSpec.scriptPath——GUI 详情层展示全路径的唯一
-   * 投影源）。可缺省：旧注册条目无该字段，读侧兜底空串；新写侧恒带。
+   * 派生视图来源）。可缺省：旧注册条目无该字段，读侧兜底空串；新写侧恒带。
    */
   scriptPath?: string;
   startedAt: number;
@@ -95,19 +95,19 @@ export interface WorkflowRecordRegisteredEntryData { // oe-exempt:20260929:frame
 /**
  * v2 终态条目 data（设计 D1 条目契约表 workflow-record 行·终态列）。
  *
- * run 终局时写一条（[D2] 宿主投影裁决②：settled 终态条目仅 terminal 时写——
+ * run 终局时写一条（[D2] 宿主派生视图裁决②：settled 终态条目仅 terminal 时写——
  * 现状收编补写 settled 条目的行为随 D2 终止）：终局 + 摘要。字段与
- * run-settled record 帧同源（条目是 record 的投影锚，不是第二事实源）。
+ * run-settled record 帧同源（条目是 record 的派生视图锚点，不是第二事实源）。
  */
 export interface WorkflowRecordSettledEntryData { // oe-exempt:20260929:framework:workflow/record 协议契约类型——ports 类型契约先行、单实现常态（dev-0.10.5 已验收代码 merge 带入）
   v: typeof WORKFLOW_RECORD_ENTRY_VERSION;
   kind: "settled";
   runId: string;
   /**
-   * 收敛词（[D2] 宿主投影裁决②——schema 契约单源在本字段）：terminal 终局 =
+   * 收敛词（[D2] 宿主派生视图裁决②——schema 契约单源在本字段）：terminal 终局 =
    * 'done'（reason/outcome 必带）；interrupted 暂停态 = 'interrupted'（中断非终局
    * ——reason/outcome 缺省，细分语境由 errorCode 承载中断来源标记，可 resume，
-   * runtime 读侧三态投影的消费面）。
+   * runtime 读侧三态派生视图的消费方）。
    */
   status: "done" | "interrupted";
   /** 终态原因（= DoneReason，run.state.reason 同源；interrupted 形态缺省）。 */
@@ -141,7 +141,7 @@ export type WorkflowRecordEntryV2 =
  * reason:"v2" = v2 合法形态（载荷已过 kind 判定，形状校验归消费方解码层）——
  * **归入 ok:false 是刻意裁决**：ok 的语义是「v1 快照契约可消费」（runtime
  * parseSelfDescribedWorkflowSnapshot 的 `!ok → 跳过` 分支即 v2 的版本门）；
- * v2 消费方（壳 loadAll 定界 / runtime 投影扫描）按 reason === "v2" 取载荷。
+ * v2 消费方（壳 loadAll 定界 / runtime 派生视图扫描）按 reason === "v2" 取载荷。
  */
 export type WorkflowRecordEntryClassification =
   | { ok: true; snapshot: unknown }

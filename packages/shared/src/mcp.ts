@@ -9,9 +9,9 @@
  *（ClientMessageType + ReplyPayloadMap），case 分发由 runtime transport 层 handler 登记。
  *
  * 形状锚点：
- * - 条目值对象 = pi 1.0.0 实装 McpServerConfig 的 taiji 协议投影：传输字段由 command/url 有无
+ * - 条目值对象 = pi 1.0.0 实装 McpServerConfig 的 taiji 协议派生视图：传输字段由 command/url 有无
  *   表达（设计 D7 映射表，不落 `type` 键为表单序列化语义）；表单外键穷举按 D7 外键清单
- *  （type/timeout/toolExposure/auth/oauth），读侧原样保留投影——清单以文件为准；
+ *  （type/timeout/toolExposure/auth/oauth），读侧原样保留派生视图——清单以文件为准；
  * - 损坏错误态对齐 codemode 域 CodemodeSettingsCorruption / CodemodeEnabledResult 形态；
  * - 连接测试状态徽标 = 设计 D8 三类来源判别联合（每个状态可回答「值从哪来」，测试时刻快照
  *   而非运行中会话实时状态，范围 = 用户级文件）。
@@ -34,7 +34,7 @@ export type McpExposureLevel = 'codemode' | 'deferred' | 'direct' | 'hidden'
 /**
  * mcp.json 条目值对象（`mcpServers` 键名下的对象本体，不含名称键——名称是聚合唯一键，
  * 协议面独立承载）。两族传输字段全部可选：文件里已存在的坏条目（command 与 url 均缺，
- * pi 报错跳过类）照原样保留投影并以 `configError` 标注（设计 D4，不阻塞其余条目管理）；
+ * pi 报错跳过类）照原样保留派生视图并以 `configError` 标注（设计 D4，不阻塞其余条目管理）；
  * 写侧（add/update payload）的合法性由 runtime 保存校验 fail-fast 把关，类型不强约束
  *（command/url 同填的互斥拦截是运行时校验，D4 有意收紧项）。
  */
@@ -61,8 +61,8 @@ export interface McpServerEntryValue { // oe-exempt:20261004:framework:WS 协议
   // 代码模式可粘贴；编辑写回契约 = runtime store 按 D7 裁决保留/剥离）──
   /**
    * 显式传输类型键。表单序列化不落该键（传输类型由 command/url 有无表达）；文件中已有的
-   * 显式值原样投影。合法值闭集 = `"stdio"` / `"http"` / `"streamable-http"`（旧称，pi 实装
-   * 照常接受，设计 D7 代码模式段）——类型不收窄为闭集：坏值条目须照文件投影并由
+   * 显式值原样派生。合法值闭集 = `"stdio"` / `"http"` / `"streamable-http"`（旧称，pi 实装
+   * 照常接受，设计 D7 代码模式段）——类型不收窄为闭集：坏值条目须照文件派生并由
    * `configError` 标注，闭集校验归 runtime（D4 例外条款）。
    */
   type?: string
@@ -94,7 +94,7 @@ export interface McpOauthConfig { // oe-exempt:20261004:framework:WS 协议契�
 }
 
 /**
- * 清单条目（`mcp.list` reply 的服务器投影）：名称 + 条目值对象 + 校验错误标注。
+ * 清单条目（`mcp.list` reply 的服务器派生视图）：名称 + 条目值对象 + 校验错误标注。
  * 坏条目形态 = `configError` 非空（「配置有误」+ 错误摘要，设计 D8③ 读侧复刻校验探明），
  * 条目本体照文件原样保留，不阻塞其余条目管理（设计 D4）。
  */
@@ -165,7 +165,7 @@ export interface McpRemoveRequest { // oe-exempt:20261004:framework:WS 协议契
 
 /**
  * `mcp.setEnabled` 请求：目标条目名与目标启停态（§3.1「可启停（写入 enabled 字段）」最小
- * 语义的专用操作——runtime store 锁内仅翻转 enabled 键、其余键一律不触，不带清单投影
+ * 语义的专用操作——runtime store 锁内仅翻转 enabled 键、其余键一律不触，不带清单派生视图
  * 回写，D2 丢失窗口保持锁内亚秒级）。
  */
 export interface McpSetEnabledRequest { // oe-exempt:20261004:framework:WS 协议契约类型（两端共同 import），协议形状先行单实现常态
@@ -192,7 +192,7 @@ export type McpMutationResult = // oe-exempt:20261004:framework:WS 协议契约�
 
 /**
  * `mcp.test` 请求：目标条目名。连接测试通道（D3）按全量执行——`pi mcp list --json` 不接受
- * 单服务器参数，name 承载触发行参照，结果投影口径归 runtime 实装。
+ * 单服务器参数，name 承载触发行参照，结果派生视图口径归 runtime 实装。
  */
 export interface McpTestRequest { // oe-exempt:20261004:framework:WS 协议契约类型（两端共同 import），协议形状先行单实现常态
   name: string

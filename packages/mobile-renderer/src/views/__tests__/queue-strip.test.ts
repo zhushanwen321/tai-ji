@@ -1,18 +1,18 @@
 // QueueStrip 队列可视化测试（remote-use D7 / impl-plan U10）。
 //
 // 背景：busy 期消息被 core morph 移出对话流（投递所有权内核 u3b），移动壳此前无队列
-// 可视化——排队消息「消失」且触屏无撤销入口（设计 §2.3 A1）。D7 采用 = 投影数据源直连
+// 可视化——排队消息「消失」且触屏无撤销入口（设计 §2.3 A1）。D7 采用 = 派生视图数据源直连
 // + 流尾内嵌轻量队列条；取消成功后全文回输入框草稿（不回填即静默丢输入，G5 同族）。
 // 本测锁定三件事（验收条款逐条）：
 //   ① 排队条目渲染：消费 core `deliveryQueueEntries` 谓词（U20 下沉唯一定义点）——
 //     行集合/帧序/preview 与桌面 useQueueRows 同源（防壳内重写 lane 判定的第二定义点）
 //   ② 点取消调 delivery.cancel（app-runtime 透传出口，内核收回-重投语义 runtime 单点）
 //   ③ 取消成功后草稿回填：写入侧经 composerInjection 通道（core factory 单例）+ 消费端
-//     MobileComposer insertTextAtCursor 落输入框——取消编排端到端闭合
+//     MobileComposer insertTextAtCursor 落输入框——取消编排端到端完成
 //
 // mock 策略（对齐 truncated-history.test.ts「仅 transport 出口 mock、全链真实」立场）：
-// 仅 transport chat 域 cancelDelivery 出口模块级 vi.mock 隔离 WS；投影经 core 读口直写
-// （帧消费链路由 core useChat handler 承担，本层只读投影——桌面 use-queue-rows.test.ts
+// 仅 transport chat 域 cancelDelivery 出口模块级 vi.mock 隔离 WS；派生视图经 core 读口直写
+// （帧消费链路由 core useChat handler 承担，本层只读派生视图——桌面 use-queue-rows.test.ts
 // 同款立场）。消费端 DOM 断言：happy-dom 无 document.execCommand（insertTextAtCursor 的
 // 写入原语），以 ComposerInput stub 的 expose spy 锁定「真消费链调用了哪个输入 API、携带
 // 什么参数」——桌面 force-quit-draft-recovery-dom.test.ts 同款处置。
@@ -67,7 +67,7 @@ function entry(
   return { clientUuid, preview, state, lane }
 }
 
-/** 写 core 投影（state topic last-value 语义：每帧整体替换） */
+/** 写 core 派生视图（state topic last-value 语义：每帧整体替换） */
 function setProjection(sid: string, entries: DeliveryFrameEntry[]): void {
   const ref = getDeliveryProjectionRef()
   const next = new Map(ref.value)
@@ -132,11 +132,11 @@ describe('QueueStrip 条目渲染（D7 验收①：core 谓词单源）', () => 
     wrapper.unmount()
   })
 
-  it('空投影 / 无分区 → 结构性不渲染（无占位空态，随投影帧出现/收敛即时翻转）', async () => {
+  it('空派生视图 / 无分区 → 结构性不渲染（无占位空态，随派生视图帧出现/收敛即时翻转）', async () => {
     const wrapper = mountStrip()
     expect(wrapper.find('[data-testid="mobile-queue-strip"]').exists()).toBe(false)
 
-    // 投影帧到达 → 条即时出现（响应式，非仅挂载期快照）
+    // 派生视图帧到达 → 条即时出现（响应式，非仅挂载期快照）
     setProjection(SID, [entry('q1', 'queued', 'queued', '排队消息')])
     await flushPromises()
     expect(wrapper.find('[data-testid="mobile-queue-strip"]').exists()).toBe(true)
@@ -149,7 +149,7 @@ describe('QueueStrip 条目渲染（D7 验收①：core 谓词单源）', () => 
     wrapper.unmount()
   })
 
-  it('跨会话分区隔离：只渲染 props.sessionId 的投影分区', () => {
+  it('跨会话分区隔离：只渲染 props.sessionId 的派生视图分区', () => {
     setProjection('sid-other', [entry('q0', 'queued', 'queued', '别的会话排队')])
     setProjection(SID, [entry('q1', 'queued', 'queued', '本会话排队')])
     const wrapper = mountStrip()
@@ -309,7 +309,7 @@ describe('QueueStrip 草稿回填（D7 验收③：全文回输入框）', () =>
     wrapper.unmount()
   })
 
-  it('端到端：取消成功 → MobileComposer 消费端 insertTextAtCursor(text) 落输入框 + 槽位清空（一次性通道闭合）', async () => {
+  it('端到端：取消成功 → MobileComposer 消费端 insertTextAtCursor(text) 落输入框 + 槽位清空（一次性通道封住）', async () => {
     cancelDeliveryMock.mockResolvedValue({ clientUuid: 'q1', cancelled: true, content: '被撤销的文本' })
     setProjection(SID, [entry('q1', 'queued', 'queued', '排队消息')])
 

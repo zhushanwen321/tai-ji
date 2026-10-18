@@ -243,7 +243,7 @@ test('CR (batch real): chat 轮 idle 薄壳退出（V5①）+ revive 冷续写�
 
     // ── 预热 turn（主 session JSONL 首次 flush 触发）：pi session 延迟写入——首条
     // assistant 消息前文件不存在（AGENTS.md pi session 规则）。subagentAction 通道
-    // 不经主 LLM，若不先产生一轮主对话，主 session 文件不落盘 → getSubagents 投影
+    // 不经主 LLM，若不先产生一轮主对话，主 session 文件不落盘 → getSubagents 派生视图
     // （entry 游标 + journal tail 读 JSONL）恒空。真实用户场景 = 先有对话再派
     // subagent，预热 turn 与之同构。 ──
     const warmReply = await wsRoundTrip(port, {

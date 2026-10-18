@@ -4,7 +4,7 @@
  *
  * 覆盖：isDirty 快照矩阵（D13）/ save 校验与 apiKey 合并协议（D15b + D18 哨兵三态）/
  * wroteApiKey 语义 / 防线① provider 级字段分体系（catalog vs custom，设计 D1）/
- * B-1 凭证形态回传与切换守卫 / headers 行编辑 CRUD（W3 D7）/ D8 调用点应用语义
+ * B-1 凭证形态回传与切换检查 / headers 行编辑 CRUD（W3 D7）/ D8 调用点应用语义
  * （watch → reconcileBroadcast 纯核 → 机械应用，规则本体矩阵在 provider-edit-reconcile.test.ts）。
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
@@ -265,7 +265,7 @@ describe('防线① provider 级字段分体系（catalog vs custom，设计 D1�
     expect('type' in arg).toBe(false)
   })
 
-  it('custom：空串 baseUrl 不带键（truthy 守卫；runtime 侧空串同为「不变」语义）', async () => {
+  it('custom：空串 baseUrl 不带键（truthy 检查；runtime 侧空串同为「不变」语义）', async () => {
     // kind 缺失（旧数据/新建态）= custom 分支
     const { form } = mountForm()
     form.draft.baseUrl = '   '
@@ -277,7 +277,7 @@ describe('防线① provider 级字段分体系（catalog vs custom，设计 D1�
   })
 
   it('custom：空串 name 被 D15b 校验拦截（不调 setProvider → payload 不会带 name 键）', async () => {
-    // 空 name 在 save() 入口即被 D15b 拒绝，payload 层的 truthy 守卫是纵深防御（正常路径不可达）
+    // 空 name 在 save() 入口即被 D15b 拒绝，payload 层的 truthy 检查是纵深防御（正常路径不可达）
     const { form } = mountForm()
     form.draft.name = ''
     const result = await form.save()
@@ -287,7 +287,7 @@ describe('防线① provider 级字段分体系（catalog vs custom，设计 D1�
   })
 })
 
-describe('save：B-1 凭证形态回传与切换守卫', () => {
+describe('save：B-1 凭证形态回传与切换检查', () => {
   it('切换形态 → isDirty；保存 payload 透传 authMethod', async () => {
     const { form } = mountForm(makeProvider({ authMethod: 'api_key' }))
     expect(form.draft.authMethod).toBe('api_key')
@@ -299,7 +299,7 @@ describe('save：B-1 凭证形态回传与切换守卫', () => {
     expect(savePayload().authMethod).toBe('oauth')
   })
 
-  it('oauth→api_key 切换 + 空 key → 守卫拦截（oauthSwitchNeedsKey，不经 setProvider）', async () => {
+  it('oauth→api_key 切换 + 空 key → 检查拦截（oauthSwitchNeedsKey，不经 setProvider）', async () => {
     const { form } = mountForm(makeProvider({ authMethod: 'oauth' }))
     form.draft.authMethod = 'api_key'
     form.draft.apiKey = '' // 未填新 key

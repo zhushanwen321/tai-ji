@@ -1,5 +1,5 @@
 /**
- * useSessionTrace —— per-session trace 台账 store（trace-ui A41，ADR-0049 Map 分区派）。
+ * useSessionTrace —— per-session trace 登记清单 store（trace-ui A41，ADR-0049 Map 分区派）。
  *
  * 职责（design D4 渲染侧 + D5c）：
  * - 数据分区：header/entries/malformed/sessionEnd/leafId/source 按 sessionId 分区
@@ -62,11 +62,11 @@ export interface TraceSessionPartition {
   entries: unknown[]
   /** entry.id 去重集（B11 内存审计中危#9：分区级增量维护，消灭每次推送全量重扫 entries 的
    *  O(n²)）。与 entries 严格同步——唯二写点：全量快照替换（重建）与 mergeAppendedEntries
-   *  （增量 add）；纯内部去重状态，无消费面（不进模板/computed）。 */
+   *  （增量 add）；纯内部去重状态，无消费方（不进模板/computed）。 */
   seenIds: Set<string>
-  /** 台账截断标记（B11：正交字段，不新增 status 值——参照 source:'oversize' 先例）：
-   *  entries 达 TRACE_ENTRIES_SOFT_CAP 停止追加后置 true；消费面 = TraceView 现有
-   *  降级渲染分支（banner）。全量快照重拉时按新快照重置。 */
+  /** 登记清单截断标记（B11：正交字段，不新增 status 值——参照 source:'oversize' 先例）：
+   *  entries 达 TRACE_ENTRIES_SOFT_CAP 停止追加后置 true；消费方 = TraceView 现有
+   *  降级渲染分支（banner）。全量快照重新拉取时按新快照重置。 */
   truncated: boolean
   malformed: SessionTraceMalformedLine[]
   sessionEnd?: TraceSessionEndMeta
@@ -95,7 +95,7 @@ export interface TraceSessionPartition {
   searchText: string
   /** 选中行 key（drawer inspector 联动；null = 未选中，inspector 隐藏复原前 tab）。
    *  约定扩展：`<entryKey>#block-<N>` 寻址 assistant 聚合行内第 N 个 content block
-   *  （见 trace-display-items.ts 的 traceBlockKey——台账仍是「一行 = 一个 entry」，
+   *  （见 trace-display-items.ts 的 traceBlockKey——登记清单仍是「一行 = 一个 entry」，
    *  block 寻址纯展示层派生）。 */
   selectedKey: string | null
   /** 已展开子 block 的 assistant 行 key 集（chevron 切换；切视图保留）。 */
@@ -175,19 +175,19 @@ function ensureIncrementSubscription(sid: string): void {
  *
  * 为什么需要：runtime 在 getTraceEntries 内 getEntries 成功即写增量基线，随后 message_end
  * 触发的 sync 推送可能先于 RPC reply 到达 renderer——推送携带的 entry 既不在快照里、也不会
- * 被后续 sync 补发（runtime 基线已越过）。此时直接丢弃 = 台账永久缺行，只能靠手动重开/重试
+ * 被后续 sync 补发（runtime 基线已越过）。此时直接丢弃 = 登记清单永久缺行，只能靠手动重开/重试
  * 找回。回包 ready 后按序 flush（entry.id 去重使与快照重叠无害）；error 路径保留缓冲，
  * 重试 ready 时再 flush；session 删除时随 cleanup 一并丢弃。
  */
-// @data-owner #13 —— #13 trace 台账的 loading 窗口推送缓冲（trace 数据本体的过渡队列，
-// 主表 #13 唯一写入口三腿之一：回包 ready 后按序 flush、flush 后即空；原 W24-EX-B 豁免
+// @data-owner #13 —— #13 trace 登记清单的 loading 窗口推送缓冲（trace 数据本体的过渡队列，
+// 主表 #13 唯一写入口三路径之一：回包 ready 后按序 flush、flush 后即空；原 W24-EX-B 豁免
 // 系分类失当——缓冲的是数据本体非 UI 瞬态，随 #13 登记转正向注解，PR #186 MF1）
 const pendingAppends = new Map<string, Array<{ entries: unknown[]; leafId?: string | null }>>()
 
-/** trace 台账软上限（B11：内存审计中危#9——entries 无界增长随会话长度放大，是「活性
+/** trace 登记清单软上限（B11：内存审计中危#9——entries 无界增长随会话长度放大，是「活性
  *  无界」结构；5000 条后停止追加，完整性降级由 truncated 标记 + TraceView 降级 banner
  *  承载。软上限而非环形缓冲：entry.id 去重依赖全量 seen 集，滚动丢弃会失效致重复追加
- *  （设计 B11 被否项）。 */
+ *  （设计 B11 不采用项）。 */
 const TRACE_ENTRIES_SOFT_CAP = 5000
 
 /** 从 entries 构建 id 去重集（全量快照替换后重建 seenIds；增量路径不走此函数）。 */
@@ -222,7 +222,7 @@ function mergeAppendedEntries(
   if (payload.leafId !== undefined) s.leafId = payload.leafId
 }
 
-/** 增量腿入口：ready 分区去重追加；loading 分区入队缓冲（回包后 flush，防丢）；其余不增量。 */
+/** 增量路径入口：ready 分区去重追加；loading 分区入队缓冲（回包后 flush，防丢）；其余不增量。 */
 function applyTraceAppend(
   sid: string,
   payload: { entries: unknown[]; leafId?: string | null },
@@ -238,7 +238,7 @@ function applyTraceAppend(
     }
     if (s.status !== 'ready') return // 未加载过的分区不增量（打开时走全量）
     if (s.source === 'empty') {
-      // 未落盘 → 有增量说明数据出现：回 idle 由外部触发全量重拉（§3.1 失败路径「落盘后自动加载」）
+      // 未落盘 → 有增量说明数据出现：回 idle 由外部触发全量重新拉取（§3.1 失败路径「落盘后自动加载」）
       s.status = 'idle'
       needsReload = true
       return
@@ -305,7 +305,7 @@ export function ensureTraceLoaded(sid: string): void {
   if (shouldLoad) void loadTrace(sid)
 }
 
-/** 强制重拉（error 态重试按钮 / empty 态手动刷新）。 */
+/** 强制重新拉取（error 态重试按钮 / empty 态手动刷新）。 */
 export function retryTraceLoad(sid: string): void {
   void loadTrace(sid)
 }
@@ -317,7 +317,7 @@ const fetchingPromptSids = new Set<string>()
 /**
  * 现取当前 system prompt（§3.1 失败路径 / D2，C2 前端接线）：仅活跃 session 可用，非活跃
  * reject code=session_not_active。结果存展示摘要（计数/时间）；全文由 runtime 广播的
- * taiji:current-system-prompt DATA 行承载（增量腿自动追加，inspector 可看）。错误存 code，
+ * taiji:current-system-prompt DATA 行承载（增量路径自动追加，inspector 可看）。错误存 code，
  * 文案映射在组件层。重入保护：同 sid 在途时静默忽略（按钮 busy 态外的第二道防线）。
  */
 export async function fetchCurrentPrompt(sid: string): Promise<void> {

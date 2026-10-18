@@ -20,9 +20,9 @@ export function toErrorMessage(e: unknown): string {
 }
 
 /**
- * 从任意 thrown 值提取业务错误码（守卫式：仅当 `code` 是 string 时返回，否则 undefined）。
+ * 从任意 thrown 值提取业务错误码（检查式：仅当 `code` 是 string 时返回，否则 undefined）。
  *
- * 替代散落的 `(e as Error & { code?: string }).code` 裸断言（无运行时守卫，非 string code
+ * 替代散落的 `(e as Error & { code?: string }).code` 裸断言（无运行时检查，非 string code
  * 会谎报类型穿透）与「先读 unknown 再 typeof 收窄」两步样板。调用方以返回值做差异化
  * 分派（如 MODEL_NOT_CONFIGURED / SESSION_NOT_FOUND 特判）或以 `?? 兜底码` 重映射。
  */
@@ -146,12 +146,12 @@ export const ENGINE_MODEL_MISSING = 'ENGINE_MODEL_MISSING'
  * case "set_model" 的 `return error(id, "set_model", `Model not found: ${provider}/${modelId}`)`；RpcClient 对
  * `success:false` 帧 `reject(new Error(res.error))`（`infra/pi/rpc-client.ts:624`）——即错误
  * **无 code 字段**，只能按文本前缀分类（分类结果再经 taiji 注册表/凭据两判，见 U2）。
- * pi 版本升级后此文本变更即分类失守，受 C-proc-08 探针守卫（docs/pi-semantics.json PS-xx）。
+ * pi 版本升级后此文本变更即分类失守，受 C-proc-08 探针检查（docs/pi-semantics.json PS-xx）。
  */
 export const PI_MODEL_NOT_FOUND_PREFIX = 'Model not found:'
 
 /**
- * pi RPC 命令超时错误（D3a pi 半死自愈：超时判别收口为类型）。
+ * pi RPC 命令超时错误（D3a pi 半死自愈：超时判别收敛为类型）。
  *
  * [arch] 定义在 utils（services/infra 共享中立层）：services 层（message-dispatcher）
  * 需要 instanceof 运行时值判别，若定义在 infra/pi/rpc-client 会构成 services→infra 的

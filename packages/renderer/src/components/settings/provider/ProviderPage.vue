@@ -3,7 +3,7 @@
     Settings · Provider 菜单页（v6 spec §6.4 R4：手风琴就地编辑，取代 ProviderEditModal 双层 modal）。
     行布局：状态点 → 启用开关 → 名称(点击展开就地编辑) → 默认pill → 模型数 → dirty 徽章 → 删除。
     展开体：ProviderEditBody（凭据/模型/验证/额度 + sticky save-bar）。
-    dirty 守卫：展开行有未保存改动时，切换/收起/新建 → ConfirmDialog 二次确认。
+    dirty 检查：展开行有未保存改动时，切换/收起/新建 → ConfirmDialog 二次确认。
   -->
   <!-- 垂直节奏 = demo .gcard+.gcard 唯一 16px 档：根容器无 gap（对齐 AppearancePage 形态），
        页头→首卡 16px 由共享 .page-head margin-bottom 承担；GroupCard 相邻 16px 由
@@ -176,7 +176,7 @@
           <Trash2 />
         </Button>
 
-        <!-- 展开指示（demo：chevron-down 14px mid，闭合 -90°，展开归位） -->
+        <!-- 展开指示（demo：chevron-down 14px mid，收窄 -90°，展开归位） -->
         <ChevronDown
           class="size-[14px] shrink-0 text-neutral-mid transition-transform duration-[var(--duration-fast)]"
           :class="expandedId === p.id ? '' : '-rotate-90'"
@@ -202,7 +202,7 @@
       </GroupCard>
     </section>
 
-    <!-- dirty 守卫确认弹窗（切换/收起/新建时拦截未保存改动） -->
+    <!-- dirty 检查确认弹窗（切换/收起/新建时拦截未保存改动） -->
     <ConfirmDialog
       v-model:open="guardDialogOpen"
       variant="default"
@@ -436,7 +436,7 @@ async function onSetDefaultModel({ modelId, provider }: { modelId: string; provi
 /** 新建态 sentinel id（渲染合成行 + null provider 进 ProviderEditBody） */
 const NEW_ID = '__new__' as ProviderId
 
-// 手风琴展开 + dirty 守卫（R4）。wave4 提取为 composable 减轻 script setup 行数压力。
+// 手风琴展开 + dirty 检查（R4）。wave4 提取为 composable 减轻 script setup 行数压力。
 const {
   expandedId,
   currentBodyDirty,

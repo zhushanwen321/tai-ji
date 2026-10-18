@@ -4,7 +4,7 @@
 // （装配点 = subagent-service.setModel deps 闭包；本文件直接驱动
 // model-switch-wiring.ts 的生产实装，不经编排桩注入）。
 //
-// 覆盖面（设计锚点 §7.2 步骤①附加校验 / §7.4 全切转发面 / §7.5「run 已终局」行）：
+// 覆盖范围（设计锚点 §7.2 步骤①附加校验 / §7.4 全切转发路径 / §7.5「run 已终局」行）：
 //   ① assertRunNotTerminalForSwitch：journal fold 终局判定——run-settled 四值
 //      outcome 全拒（错误消息含 outcome 与 runId）；interrupted（显式转移帧 /
 //      事件流停止两种形态）与 missing（空事件流）放行。
@@ -13,10 +13,10 @@
 //      为成员 runId 清单。
 //   ③ resolveMemberEnginePortForSwitch：pi 成员窗口键透传 parentRunId（与
 //      routeWorkflowEngine 的 piEngine 注入同源）；非 pi 成员走
-//      resolveWorkflowWindowEnginePort（routing mock 断言通道与参数面——通道本体
+//      resolveWorkflowWindowEnginePort（routing mock 断言通道与参数范围——通道本体
 //      行为归 routing 自有测试域）；record / parentRunId 缺失 throw 归失败名单；
-//      native 位 + setModel 方法缺席装配损坏守卫 fail-fast；非 native 引擎不被
-//      守卫误伤；原生引擎锚 + engine 身份域丢失的 record 损坏经
+//      native 位 + setModel 方法缺席装配损坏检查 fail-fast；非 native 引擎不被
+//      检查误伤；原生引擎锚 + engine 身份域丢失的 record 损坏经
 //      resolveEngineRouteId 透传抛 RecordEngineIdentityError（与派发链同一裁决
 //      单点）。
 //
@@ -134,7 +134,7 @@ describe("assertRunNotTerminalForSwitch（§7.2 步骤①附加校验：终局 f
     await expect(assertRunNotTerminalForSwitch(runId)).resolves.toBeUndefined();
   });
 
-  it("事件流停止（running 快照、无终局帧、无活体集）→ 投影 interrupted → 放行", async () => {
+  it("事件流停止（running 快照、无终局帧、无活体集）→ 派生视图 interrupted → 放行", async () => {
     const runId = "wf-wiring-stalled";
     await seed(runId, [createdEvent(runId, BASE_TS), agentStartedEvent(BASE_TS + 1)]);
 
@@ -245,7 +245,7 @@ function fakeSwitchPort(
   return port as SetModelCapableEnginePort;
 }
 
-/** pi 成员 ExecutionRecord（engine 缺席 = pi 缺省投影，createRecord 真实构造）。 */
+/** pi 成员 ExecutionRecord（engine 缺席 = pi 缺省派生视图，createRecord 真实构造）。 */
 function makeMemberRecord(id: string, over: { parentRunId?: string; engine?: string } = {}): ExecutionRecord {
   return createRecord(id, {
     agent: "reviewer",
@@ -258,7 +258,7 @@ function makeMemberRecord(id: string, over: { parentRunId?: string; engine?: str
   });
 }
 
-describe("resolveMemberEnginePortForSwitch（U5 转发面：窗口键 + 路由 + 守卫）", () => {
+describe("resolveMemberEnginePortForSwitch（U5 转发路径：窗口键 + 路由 + 检查）", () => {
   it("pi 成员：resolveChatEnginePort 收到的 windowKey === parentRunId（窗口键透传），返回同 port", () => {
     const port = fakeSwitchPort("native");
     const resolveChatEnginePort = vi.fn(() => port);
@@ -351,8 +351,8 @@ describe("resolveMemberEnginePortForSwitch（U5 转发面：窗口键 + 路由 +
     ).toThrow(/setModel=native[\s\S]*no[\s\S]*setModel method[\s\S]*bg-broken/);
   });
 
-  it("capability 非 native（unsupported）不触发守卫——放行返回（聚合层预检先行，非 pi 路由同样适用）", () => {
-    // 守卫只拦「native 位 + 方法缺席」组合；unsupported 引擎成员必须到达聚合预检
+  it("capability 非 native（unsupported）不触发检查——放行返回（聚合层预检先行，非 pi 路由同样适用）", () => {
+    // 检查只拦「native 位 + 方法缺席」组合；unsupported 引擎成员必须到达聚合预检
     // 落 not-applicable（§8 场景 7 步骤④），拦在 wiring 会错位进失败名单。
     const port = fakeSwitchPort("unsupported");
     const record = makeMemberRecord("bg-legacy", { parentRunId: "run-window-5" });
@@ -400,7 +400,7 @@ describe("resolveMemberEnginePortForSwitch（U5 转发面：窗口键 + 路由 +
     const port = fakeSwitchPort("unsupported");
     routingMock.resolveWorkflowWindowEnginePort.mockReturnValue(port);
     // zcode 成员 settle 后出内存、无子 session 文件不在扫描集——唯一磁盘载体 =
-    // bound 物化的 manifest（boundMaterialize 写点产物，投影含 parentRunId/engine）。
+    // bound 物化的 manifest（boundMaterialize 写点产物，派生视图含 parentRunId/engine）。
     const manifestSourced = makeLightRecord({
       id: "bg-zc-settled",
       parentRunId: "run-window-8",

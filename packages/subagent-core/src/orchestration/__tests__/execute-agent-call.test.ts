@@ -188,12 +188,12 @@ describe("ADR-0122: 失败单次终态（无自动重试）", () => {
   });
 });
 
-// ── isOrphaned 守卫（OB2：S7 残留瞬时污染根除） ──
+// ── isOrphaned 检查（OB2：S7 残留瞬时污染根除） ──
 //
 // 谓词为 true 时 finalizeCall 跳过 trace.update，但 markDone 与
 // sessionId/sessionFile 同步保留。U4 锁定不传谓词时的现状回归。
 
-describe("isOrphaned 守卫", () => {
+describe("isOrphaned 检查", () => {
   it("U1: 谓词 () => true + 终态成功路径 → trace.update 0 次，markDone 保留（status done + result 已设置）", async () => {
     const { call, trace } = makeAgentCallAndTrace();
     const updateSpy = vi.spyOn(trace, "update");

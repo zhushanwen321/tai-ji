@@ -267,7 +267,7 @@ describe('pending 路径（runtime {...r,...r.payload} 解包的 view-ready 帧�
   })
 
   it('pending 返回无标记普通帧 → 不命中 overlay 队列（C4 语义不扩）', async () => {
-    // 原行为保真：pending 全量入 store（dialog 类供 hasPendingDialog 等消费面查询），
+    // 原行为保真：pending 全量入 store（dialog 类供 hasPendingDialog 等消费方查询），
     // currentFormRequest 只认 form 键
     vi.mocked(getPendingRequests).mockResolvedValue([
       mkPlainSelectReq('r-plain') as never as ExtensionUIRequest,

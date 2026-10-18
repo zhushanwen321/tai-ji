@@ -8,7 +8,7 @@
  * - active 态切换
  *
  * [HISTORICAL] 2026-09-16 五 tab 收敛为三 tab：两枚任务 tab 及其属性用例（子代理 / 工作流
- * 进行中计数 props）随侧栏任务 tab 退役删除——任务观察入口唯一化收口到 composer 任务托盘
+ * 进行中计数 props）随侧栏任务 tab 退役删除——任务观察入口唯一化收尾到 composer 任务托盘
  * （计数面 = panel/tray）。
  * [HISTORICAL] icon-only + count 数字形态随 demo .vtab 文字 tab 对齐退役（2026-10 M1 视觉复刻）：
  * 原「count 数字渲染 / badge 蓝点」两组用例随之改写为文字 tab 形态断言。

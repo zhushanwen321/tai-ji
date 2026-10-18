@@ -194,7 +194,7 @@ describe("dispose 收割（P0-1 U5：引擎集成面）", () => {
     expect(bootCount(f.stateFile)).toBe(1);
 
     // 窗口量级：dispose 全链不超 kill 链 + HARVEST_GRACE + 进程调度余量——
-    // 收割在 grace 量级窗口闭合（确定性收尾时序，非等待型挂起）
+    // 收割在 grace 量级窗口完成（确定性收尾时序，非等待型挂起）
     expect(disposeMs).toBeLessThan(ZCODE_KILL_GRACE_MS + ZCODE_APPSERVER_HARVEST_GRACE_MS + 2000);
   }, 30_000);
 

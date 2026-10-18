@@ -1,7 +1,7 @@
 /**
- * queue-projection —— session.delivery 投影的队列条目谓词（投递所有权内核 D7 / remote-use U20 下沉）。
+ * queue-projection —— session.delivery 派生视图的队列条目谓词（投递所有权内核 D7 / remote-use U20 下沉）。
  *
- * 投影数据源 = `getDeliveryProjectionRef()`（state topic last-value 全量快照，本目录
+ * 派生视图数据源 = `getDeliveryProjectionRef()`（state topic last-value 全量快照，本目录
  * effects/user-delivery 持有）；本文件承载其**过滤谓词**的单一定义点：
  *
  * `deliveryQueueEntries`（lane 判定，U20 自 renderer useQueueRows.ts 原样下沉——行为等价，

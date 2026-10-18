@@ -105,7 +105,7 @@ function sanitizeExplicitEntry(id: string, raw: unknown): ExplicitEngineEntry | 
   };
 }
 
-/** 条目形态守卫：非对象（含数组/null）→ warn 跳过整条。 */
+/** 条目形态检查：非对象（含数组/null）→ warn 跳过整条。 */
 function requireEntryObject(id: string, raw: unknown): Record<string, unknown> | undefined {
   if (typeof raw !== "object" || raw === null || Array.isArray(raw)) {
     logger.warn(

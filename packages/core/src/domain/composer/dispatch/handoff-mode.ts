@@ -18,7 +18,7 @@
  * 配置表达（P2 清单见 staging-mode.ts 头注）：
  * - enterGuard：isSessionActive 入口拦截（源 session streaming 中 handoff 必然失败，toast 而非英文 RPC 错）
  * - beforeEnter：互斥退出 fork 模式（forkSource 残留指向错误 session）
- * - beforeSend：发送兜底守卫（兑入口拦截后 session 才变 streaming 的竞态窗口；返回 true 已消费，
+ * - beforeSend：发送兜底检查（兑入口拦截后 session 才变 streaming 的竞态窗口；返回 true 已消费，
  *   不清草稿不退模式——回复结束后可直接重发）
  * - sendAction：reply = text.trim() || undefined（空备注允许，runtime 只发 template）
  * - isInProgress / abort：B 阶段（handoff turn 在源 session 跑，可取消）
@@ -97,7 +97,7 @@ export interface HandoffDeps {
   toastError: (msg: string) => void
   /** 源 session 是否正在 handoff（原 useChatStore().isHandingOff；StagingAction.isInProgress 派生用） */
   isHandingOff: (sessionId: string) => boolean
-  /** 源 session 是否活跃（streaming/派发中）。handoff 入口/发送双重守卫：runtime handoff
+  /** 源 session 是否活跃（streaming/派发中）。handoff 入口/发送双重检查：runtime handoff
    *  需要源 session 空闲跑一个 handoff turn，pi 的 prompt 在 turn 进行中会拒绝
    *  （"Agent is already processing"，pi 源码锚点 agent-session.ts:1181，已核对实装
    *  0.84.1 dist/core/agent-session.js:833 同语义），streaming 中 handoff 必然失败——入口直接拦截 +
@@ -108,7 +108,7 @@ export interface HandoffDeps {
 }
 
 /**
- * @param sessionId 当前 session id（null = landing 态，signal 守卫用）
+ * @param sessionId 当前 session id（null = landing 态，signal 检查用）
  * @param deps 发送副作用依赖（含 exitForkMode 做互斥）+ 跨域能力
  */
 export function useComposerHandoffMode(
@@ -148,7 +148,7 @@ export function useComposerHandoffMode(
     beforeEnter: () => {
       deps.exitForkMode()
     },
-    // 兜底守卫（入口拦截后的竞态窗口：进入模式后 session 才变 streaming）。返回 true 已消费
+    // 兜底检查（入口拦截后的竞态窗口：进入模式后 session 才变 streaming）。返回 true 已消费
     // （不走普通 send），不清草稿不退模式——回复结束后可直接重发。
     beforeSend: (_text, source) => {
       if (deps.isSessionActive(source.srcSessionId)) {

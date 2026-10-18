@@ -10,7 +10,7 @@
  *   total=0 / 未达告警档不渲染——常态渲染细条像「永远有事」的假信号）。
  *
  * mock 策略：useContextUsage 替身（受控分区对象）——组件纯读契约的唯一外部输入；
- * 分区行为（订阅/恢复腿/哨兵）归 use-context-usage.test.ts（层 1），本文件不重复。
+ * 分区行为（订阅/恢复路径/哨兵）归 use-context-usage.test.ts（层 1），本文件不重复。
  *
  * 运行：cd packages/renderer && npx vitest run src/__tests__/panel/composer-capacity-bar.test.ts
  */
@@ -42,7 +42,7 @@ function mountBar() {
 
 describe('渲染条件（无百分比不分档 / 未达告警档，不渲染）', () => {
   it.each([
-    ['unknown（首拉在途）', { status: 'unknown', used: 0, total: 0, percent: 0 } satisfies UsagePartition],
+    ['unknown（首次拉取在途）', { status: 'unknown', used: 0, total: 0, percent: 0 } satisfies UsagePartition],
     ['no-value（compact 后合法无值）', { status: 'no-value', used: 0, total: 0, percent: 0 } satisfies UsagePartition],
     ['ok 但 contextWindow 未知（total=0）', okPartition(85, 0)],
     // 仅告警显示（R2.3 / demo v-else-if contextPct>80）：≤80% 常态不渲染

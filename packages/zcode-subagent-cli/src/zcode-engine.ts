@@ -2,7 +2,7 @@
 //
 // ZcodeEngine：zcode 的 EnginePort 实现（2026-09 起单一 app-server 形态）。
 // 设计权威源：docs/architecture/zcode-engine-appserver-resident.md §3.3 D1（每引擎实例一条
-// 连接）/ D3（abort 链）/ D4（会话自包含）/ D5（capabilities）/ D6（停机面）。
+// 连接）/ D3（abort 链）/ D4（会话自包含）/ D5（capabilities）/ D6（停机路径）。
 //
 // 2026-09 breaking 重构（用户拍板，理由与代价见设计文档修订节）：
 //   - **删除 CLI spawn 降级链**（probe 冒烟门控 / protocol-drift 首败降级）：zcode 无公开
@@ -349,7 +349,7 @@ export class ZcodeEngine implements EnginePort {
     return { handle: this.appServerHandle(outcome), outcome };
   }
 
-  /** pre-aborted 短路收口：合成中止 outcome + 'shared' 锚定 handle。 */
+  /** pre-aborted 短路收尾：合成中止 outcome + 'shared' 锚定 handle。 */
   private abortedAppServerRun(task: AgentCallOpts, ctx: RunContext, startedAt: number): EngineRunResult {
     const outcome = this.finalizeOutcome(
       task,
@@ -370,7 +370,7 @@ export class ZcodeEngine implements EnginePort {
    *   新建会话）。重试轮 prompt 用 basePrompt 原样重跑（失败形态非 schema），文案补
    *   「已自动重试一次」句（retried 标记仅对真实发生的重试生效）。
    *
-   * 两次重试一次封顶各自独立（D6 被否①：多次重试/指数退避不做——重跑一轮=整任务
+   * 两次重试一次封顶各自独立（D6 不采用①：多次重试/指数退避不做——重跑一轮=整任务
    * 重算，一次封顶）。组合序：瞬时重试在前、schema 重试在后——瞬时重试轮 parsed 且
    * 校验失败时仍进 schema 重试（末次 attempt 语义，schema 重试编排保持现状不动）。
    *
@@ -443,7 +443,7 @@ export class ZcodeEngine implements EnginePort {
 
   /**
    * 单轮常驻执行：runTurn 组合面 + D3 abort 链 + 事件前移（text_delta 实时流出；
-   * 终态数据经 read 兜底收口后才 resolve——不变量 1/2）。
+   * 终态数据经 read 兜底收尾后才 resolve——不变量 1/2）。
    *
    * @param opts retried：瞬时重试轮标记——失败文案补「已自动重试一次」句（F-1/F-4）。
    */
@@ -507,7 +507,7 @@ export class ZcodeEngine implements EnginePort {
 
     try {
       const r = await turn;
-      // stop 优雅生效（终态在 grace 内到达）：宿主已取消——按中止终态收口（record
+      // stop 优雅生效（终态在 grace 内到达）：宿主已取消——按中止终态收尾（record
       // 终态迁移由编排层 CAS 决定）
       if (ctx.signal?.aborted === true) return abortedAppServerAttempt(ctx);
       return parsedAppServerAttempt(task, r);
@@ -527,12 +527,12 @@ export class ZcodeEngine implements EnginePort {
 
   /**
    * [attemptAppServerTurn 拆分] 失败分流（catch 半边）：
-   * - signal 已 aborted → 中止终态收口；
+   * - signal 已 aborted → 中止终态收尾；
    * - [P0-1 U4] 连接崩溃收割形态（failAllTurns 的错误，D6 可重试形态）判据：
    *   非 RPC error（服务端无明确应答——有应答即精确错误归类，非瞬时崩溃面）且
    *   conn 不存活。时序可靠性：catch 时刻紧随 onClose 收割，连接重建仅由
    *   conn.request 惰性触发——本链路中 runTurn finally 的 closeSession 对死连接
-   *   短路（channel 侧 !alive 守卫）、stop 只属 abort 链（已被 signal.aborted
+   *   短路（channel 侧 !alive 检查）、stop 只属 abort 链（已被 signal.aborted
    *   短路）——此刻无 request 可重建，判据可靠；
    * - 其余 → 精确错误终态。
    */
@@ -580,7 +580,7 @@ export class ZcodeEngine implements EnginePort {
    * D3 abort 链执行体（用户取消入口，fire-and-forget——与 turn promise 并行推进）：
    * stop 帧（超时 ZCODE_APPSERVER_STOP_TIMEOUT_MS）→ grace 窗口内 turn 落定即止
    * （不杀共享进程）→ 超窗 killChain（conn.shutdown 全序：SIGTERM→grace→SIGKILL）。
-   * turn 的最终落定由 attempt 主路径 await 收口，本链不直接产出终态。abort 与 create
+   * turn 的最终落定由 attempt 主路径 await 收尾，本链不直接产出终态。abort 与 create
    * 竞态（signal 先到、session 未建立）：等会话建立（带上限）再发 stop——否则 stop
    * 永远发不出，直接连坐杀共享进程。
    */
@@ -616,7 +616,7 @@ export class ZcodeEngine implements EnginePort {
         return graceRaceThenKill();
       }
     }
-    // [u-z2 修复轮] alive 守卫（与 closeSession 的 `!conn.alive` return 同款防御，
+    // [u-z2 修复轮] alive 检查（与 closeSession 的 `!conn.alive` return 同款防御，
     // 对称补齐）：进程在 abort 与本链发 stop 之间 finalize 完成的微窗口内，request
     // 首行 ensureStarted 会惰性 spawn 新一代进程再写 stop 帧——凭空拉起无人使用的
     // 进程。不 alive = 连接级失败形态（进程已死即已收割）：跳过 stop 落回 grace race
@@ -657,8 +657,8 @@ export class ZcodeEngine implements EnginePort {
     // [D3 顺带发现 6 / engine-provider-unification D3 换轨] wrapper 装载通道与引擎侧
     // 模型校验源同锚——两消费方走 preparer 同一解析函数（显式 sources > taiji 同步
     // 副本存在 > 真实 provider_config.json；生产 deps.sources 恒 undefined 走 default
-    // 链，回落判定点在该函数内单点收口），env 值 = 同步副本路径：校验链读
-    // merge(真实, 副本) 视图，wrapper 拦截分支读同一 merge 视图——视图统一收口在该锚
+    // 链，回落判定点在该函数内单点收敛），env 值 = 同步副本路径：校验链读
+    // merge(真实, 副本) 视图，wrapper 拦截分支读同一 merge 视图——视图统一收敛在该锚
     env.ZCODE_ENG_PROVIDER_CONFIG = resolvePersonalProviderConfigPath(this.deps.sources, engineDataDir);
     // 会话库隔离（设计 zcode-session-db-isolation.md D1/E4）：覆盖式写入隔离库路径，
     // 忽略宿主继承值（用户 shell 的同名 env 不得把我们重定向到别处；配置分层
@@ -669,7 +669,7 @@ export class ZcodeEngine implements EnginePort {
     env.ZCODE_SESSION_DB_PATH = sessionDbPath;
     delete env.ZCODE_SESSION_DB;
     // 父目录确保：把权限/磁盘错误提前到可读文案（引擎自身 ensureParentDir 也会建
-    // 父目录，此为提前失败面；失败向上 reject——run 错误语义①，不静默回落宿主库）。
+    // 父目录，此为提前失败情形；失败向上 reject——run 错误语义①，不静默回落宿主库）。
     fs.mkdirSync(path.dirname(sessionDbPath), { recursive: true });
     const conn = new AppServerConnection({
       cliPath,
@@ -714,7 +714,7 @@ export class ZcodeEngine implements EnginePort {
    * [P0-1 U5/D7] grace race 输掉（close 迟到/永不到达——stdio 被孙进程持有排空不
    * 尽等病态形态）时，channel.dispose() 内置的 dispose 收割（failAllTurns 先于退订，
    * SessionChannel.dispose）兜底在途 turn——在途 turn 收敛为「grace 窗口内明确失败」
-   * （设计 §3.4 退化路径闭合）；race 窗口与 awaitConnFinalized 同源同量级
+   * （设计 §3.4 退化路径完成）；race 窗口与 awaitConnFinalized 同源同量级
    * （ZCODE_APPSERVER_HARVEST_GRACE_MS）。正常 close 先到时 onClose 收割先行，
    * dispose 收割幂等 no-op（零回归）。
    */
@@ -732,9 +732,9 @@ export class ZcodeEngine implements EnginePort {
   }
 
   /**
-   * [R1 D6 主体] 引擎停机面：①fire 全部在途会话的 session/close 帧（不等待
+   * [R1 D6 主体] 引擎停机路径：①fire 全部在途会话的 session/close 帧（不等待
    * 应答——D6① 顺序规定：close 帧必须先于 SIGTERM，否则对面来不及处理即被杀）→
-   * ②同步 SIGTERM（conn.shutdown 调用内 killChain 前缀同步执行——同步面在返回
+   * ②同步 SIGTERM（conn.shutdown 调用内 killChain 前缀同步执行——同步部分在返回
    * Promise 前完成）→ ③grace → SIGKILL（异步面，Promise resolve 于进程退出）。
    * 幂等：运行时字段取走即置空，二次调用零副作用；dispose 后首个 run 经
    * ensureAppServerRuntime 自动重建（与崩溃重建同一代码路径，不变量 4）。
@@ -809,7 +809,7 @@ export class ZcodeEngine implements EnginePort {
       ? synthesizeTimeoutOutcome(task, final.output.stdoutText, ZCODE_ENGINE_ID).error ??
         engineTimeoutDetail(final.output.stdoutText)
       : final.abortMessage ??
-        `engine_run_failed: zcode 任务被中止（app-server abort 链收口，宿主合成终态）。` +
+        `engine_run_failed: zcode 任务被中止（app-server abort 链收尾，宿主合成终态）。` +
           `输出尾部: ${final.output.stdoutText.slice(-ZCODE_ERROR_TAIL_CHARS)}`;
     emit({ type: "error", message: outcome.error });
   }
@@ -975,7 +975,7 @@ export class ZcodeEngine implements EnginePort {
         // 相对路径（池时代旧 record）分支：dbPathRaw 同样来自 append-only JSONL
         // （不可信面），含 `..` 段可经 join 归一化逃逸池目录、绕过绝对路径分支的
         // 封闭白名单——join 后 resolve 归一化并做池目录前缀包含性校验，越界按非
-        // 白名单同款 warn + 拒绝 ①级、降 journal（防任意文件读的守卫缺口补齐）。
+        // 白名单同款 warn + 拒绝 ①级、降 journal（防任意文件读的检查缺口补齐）。
         const poolDir = path.resolve(
           resolvePoolDir(this.deps.engineDataDir(), ZCODE_ENGINE_ID, SHARED_POOL_KEY),
         );
@@ -1057,8 +1057,8 @@ export class ZcodeEngine implements EnginePort {
    * [U6 / §3.2.6 要点 3] resume 锚 → 历史前缀（interact-resume 的读半段）。
    *
    * 无锚 / 非 zcode 锚形态 → undefined（行为不变）。读通道失败（会话失效 / 控制
-   * 面错误）= 锚真失效的权威信号——宿主侧库投影预检查已退役（app-server 落库滞后
-   * 于 create 应答，分钟级窗 + 部分行永不落库，预检查系统性误判；resume 走
+   * 面错误）= 锚真失效的权威信号——宿主侧库派生视图预检查已退役（app-server 写盘滞后
+   * 于 create 应答，分钟级窗 + 部分行永不写盘，预检查系统性误判；resume 走
    * app-server resident 内存态才是真实活性判据），因此此处不再静默降级为无前缀
    * 裸跑，而是返回锚失效声明段：让模型知情「延续但无历史」，基于最新消息独立
    * 续推，而非在缺上下文时臆测连续性。用户消息照常执行，不炸轮。
@@ -1106,7 +1106,7 @@ export class ZcodeEngine implements EnginePort {
  * 弱类型 Record 透传，此处形状收窄）。pi 锚（sessionFile）对 zcode 引擎无意义，
  * 返回 undefined 走无前缀路径。
  *
- * dbPath 守卫与 read() ①级同字段同构：锚 sessionRef 与 handle/record 同源
+ * dbPath 检查与 read() ①级同字段同构：锚 sessionRef 与 handle/record 同源
  * append-only JSONL（不可信面），仅放行 zcodeDbPathAllowlist 封闭集合内精确匹配
  * （隔离库现役 + 宿主库「共享 HOME 时代」存量兼容锚点）。非集合内路径（含池时代
  * 相对路径——resume 锚场景读通道本就该走白名单库）→ 非法 zcode 锚，undefined 走
@@ -1171,8 +1171,8 @@ export function buildResumeInjectionSegment(
 /**
  * [U3] resume 读失败 → 锚失效声明段（纯函数，单测锁定文案契约）。
  *
- * resume 走 app-server resident 内存态，读失败即锚真失效的权威信号（宿主侧库投影
- * 预检查已退役——落库滞后使预检查系统性误判，见 buildResumeHistoryPrefix 方法头）。
+ * resume 走 app-server resident 内存态，读失败即锚真失效的权威信号（宿主侧库派生视图
+ * 预检查已退役——写盘滞后使预检查系统性误判，见 buildResumeHistoryPrefix 方法头）。
  * 声明段让模型知情「这是延续会话但历史不可恢复」，避免其在零上下文时臆测任务进展
  * 或假装记得（静默裸跑的缺陷面）；语义与 buildResumeInjectionSegment 的「延续且有
  * 历史」相对，尾部 `\n\n` 形态一致（与后续 prompt 空行分隔）。
@@ -1207,7 +1207,7 @@ type AttemptResult =
        * 反推）：conn-closed = 连接崩溃收割（failAllTurns 形态，判据 =
        * 非 RPC error 且 conn 不存活——catch 时刻重建仅由 conn.request 惰性触发，
        * 此前无 request，判据可靠）。缺席 = 非瞬时形态（RPC 错误/status=error 终态/
-       * send 未送达等），不参与重试（D6 被否③：status='error' 终态 v1 不重试）。
+       * send 未送达等），不参与重试（D6 不采用③：status='error' 终态 v1 不重试）。
        * （原 "timeout" 形态随 turn 双 timer 删除——channel 不再有时间判死来源。）
        */
       transient?: "conn-closed";
@@ -1440,7 +1440,7 @@ function authoritativeTerminalStatus(r: SessionTurnResult): string | undefined {
 }
 
 /**
- * [P0-1 U3/D5②] appserver 轮成功收口的 parsed 三态（read 兜底后的 response + schema
+ * [P0-1 U3/D5②] appserver 轮成功收尾的 parsed 三态（read 兜底后的 response + schema
  * 校验）。失败终态（isFailedTerminalStatus，"interrupted" 不在其中——不误判失败）
  * 先分流（§3.2 缺陷 B 不再假成功；schema 校验对失败形态无意义——失败终态的
  * response 是错误尾部，非结构化输出候选）。
@@ -1495,7 +1495,7 @@ function failedTerminalAppServerAttempt(r: SessionTurnResult): AttemptResult {
   };
 }
 
-/** appserver 轮失败收口的 run-failed 三态（结构化文案 + 会话 id 留痕）。 */
+/** appserver 轮失败收尾的 run-failed 三态（结构化文案 + 会话 id 留痕）。 */
 function failedAppServerAttempt(
   err: unknown,
   currentSessionId: string | undefined,

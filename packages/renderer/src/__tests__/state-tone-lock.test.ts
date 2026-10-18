@@ -139,7 +139,7 @@ describe('SUBAGENT_DOT_RULES 全集锁（[W2 D8] 状态点规则按 status 分�
     expect(subagentDotClass(subagent({ subagentId: 'r3', status: 'idle', stopReason: 'reopened' }))).toBe('bg-neutral-dim opacity-50')
   })
 
-  it('正常收口绿兜底与 running 非死亡组合 accent 兜底', () => {
+  it('正常收尾绿兜底与 running 非死亡组合 accent 兜底', () => {
     expect(subagentDotClass(subagent({ subagentId: 'r4', status: 'idle' }))).toBe('bg-success')
     expect(subagentDotClass(subagent({ subagentId: 'r5', status: 'running', stopReason: 'cancelled' }))).toBe('bg-accent')
   })

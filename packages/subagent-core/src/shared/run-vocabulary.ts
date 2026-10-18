@@ -49,7 +49,7 @@ export type RunDoneReason = "completed" | "failed" | "aborted" | "budget_limited
  *    三值（time_limited 为 run 级终局、interrupted 已移出 outcome——均不出现在
  *    call 帧，沿用「ask 级实装取值 = result.failureKind 映射」的值域边界纪律）。
  *
- * 值域跟随锚：shared `WorkflowRunOutcome`（投影派生输出口径的第三份字面量，
+ * 值域跟随锚：shared `WorkflowRunOutcome`（派生视图推算的输出口径的第三份字面量，
  * core↔shared 依赖方向不允许物理单源）经 runtime 侧双包值级等价断言钉住
  * （core ALL_RUN_OUTCOMES ≡ extractor 集合 ≡ shared 词表成员，runtime 单测）。
  */
@@ -203,7 +203,7 @@ export function runSettledOutcomeToDoneReason(outcome: RunOutcome, errorCode?: R
     default:
       // 词表外防御（判定核单点收敛）：穷尽 switch 无兜底时词表外值漏出
       // undefined，会击穿 RunSettlementEvidence.reason: string 契约（枚举 status /
-      // 注销 reason 等消费面直接透传）。运行时可达形态 = 历史 manifest 的
+      // 注销 reason 等消费方直接透传）。运行时可达形态 = 历史 manifest 的
       // outcome=interrupted 族（[D2] 前旧收编链物化，文件名未随 [D1] 迁移故磁盘
       // 可达，经 findRunSettlementEvidence 的 as RunOutcome 强转读入）——统一
       // 折叠 "failed" 诊断兜底容器（W2 D5 先例「interrupted → failed」：中断形态

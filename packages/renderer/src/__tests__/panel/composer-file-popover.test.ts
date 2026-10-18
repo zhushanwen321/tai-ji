@@ -10,7 +10,7 @@
  *   review-fixes §3.4 D7/#10）：无 sessionId + cwd 有值 → open-fetch 边沿拉取渲染候选；
  *   拉取失败回写**错误态**（浮层渲染「加载失败，点击重试」+ 行内重试重发拉取）；成功空结果
  *   → 空态「当前目录无匹配文件」（两因区分）；truncated → 底部「已截断」提示；open 边沿
- *   清陈旧候选 + cwd 快照守卫（迟到回执按发起时 cwd 归属裁决）；panel session 路用例全部保持
+ *   清陈旧候选 + cwd 快照检查（迟到回执按发起时 cwd 归属裁决）；panel session 路用例全部保持
  * - U30 AddMenuPopover 有 session → 含「文件」「命令」，不含「引用」
  * - U31 AddMenuPopover 无 session（landing）→ 不含「文件」「引用」，含「命令」
  * - U32 Composer onAddSelect('file') → cmdType='file', cmdOpen=true
@@ -210,7 +210,7 @@ describe('landing cwd 路（LP 组，u5 G1/D2）', () => {
     await wrapper.setProps({ open: true })
     await flushPromises()
     expect(getFileCandidatesByCwdMock).toHaveBeenCalledTimes(1)
-    // D7：失败回写错误态（被否的「降级空数组」不再适用）——浮层渲染错误行；
+    // D7：失败回写错误态（不采用的「降级空数组」不再适用）——浮层渲染错误行；
     // rejection 被 open-fetch catch，不冒泡 unhandled（vitest 对 unhandled 判失败，用例通过即无）
     const errRow = document.body.querySelector('[data-testid="cmd-file-error"]')
     expect(errRow).not.toBeNull()
@@ -269,7 +269,7 @@ describe('landing cwd 路（LP 组，u5 G1/D2）', () => {
     expect(document.body.querySelector('[data-testid="cmd-file-error"]')).toBeNull()
   })
 
-  it('LP5 cwd 快照守卫（B5/#10）：open 边沿清上一 cwd 陈旧候选；在途回执按发起时 cwd 归属、失配丢弃', async () => {
+  it('LP5 cwd 快照检查（B5/#10）：open 边沿清上一 cwd 陈旧候选；在途回执按发起时 cwd 归属、失配丢弃', async () => {
     vi.advanceTimersByTime(1001)
     // 第一拍：cwd A 拉到候选 a.ts
     getFileCandidatesByCwdMock.mockResolvedValueOnce({

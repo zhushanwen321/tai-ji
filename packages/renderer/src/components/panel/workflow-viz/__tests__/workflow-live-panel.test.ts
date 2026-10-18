@@ -2,7 +2,7 @@
  * WorkflowLivePanel 面板组件测试（workflow-visualization U5——三视角，TEST-STRATEGY §3）：
  *
  * - 构建者（白盒）：事件流数据经 mock RPC 注入 workflowStore 缓存分区；tab 模型经 expose
- *   与 DOM 事件直接驱动；store 挂载编排（活跃 run 登记 / 事件流首拉）断言 mock 调用
+ *   与 DOM 事件直接驱动；store 挂载编排（活跃 run 登记 / 事件流首次拉取）断言 mock 调用
  * - 使用者（黑盒 DOM）：每条用例至少一个用户可见断言——header 去重形态（D2 单 header
  *   终态：三槽零渲染）、trace 行状态与空值回归（D5 盘点锚）、
  *   事件流行与 ✂ 截断标注、错误二分形态（静态指引 vs 重试按钮）、phase 头卡轮次、tab 关闭回落
@@ -298,7 +298,7 @@ describe('WorkflowLivePanel · workflow tab 三子页（使用者黑盒 + 观察
     expect(err.find('[data-testid="wf-viz-events-retry"]').exists()).toBe(false) // 静态指引无重试
   })
 
-  it('事件流错误二分：通道错误 → 错误 + 重试按钮；点重试 force 重拉', async () => {
+  it('事件流错误二分：通道错误 → 错误 + 重试按钮；点重试 force 重新拉取', async () => {
     mockGetRunEvents.mockRejectedValueOnce(new Error('transport down'))
     const wrapper = await mountPanel()
     await wrapper.find('[data-testid="wf-viz-subpage-events"]').trigger('click')
@@ -311,7 +311,7 @@ describe('WorkflowLivePanel · workflow tab 三子页（使用者黑盒 + 观察
     await retryBtn.trigger('click')
     await flushPromises()
     expect(mockGetRunEvents).toHaveBeenCalledTimes(2)
-    // 重拉成功后错误态消失、事件列表出现（恢复路径闭环）
+    // 重新拉取成功后错误态消失、事件列表出现（恢复路径闭环）
     expect(wrapper.find('[data-testid="wf-viz-events-list"]').exists()).toBe(true)
   })
 
@@ -412,7 +412,7 @@ describe('WorkflowLivePanel · 多级 tab（使用者黑盒）', () => {
     expect(wrapper.find('[data-testid="wf-viz-agent-meta"]').text()).toContain('worker-0')
   })
 
-  it('workflowUpdate 信号（命中活跃 run）→ agent tab 快照重拉（§3.1-2/D8 信号刷新链）', async () => {
+  it('workflowUpdate 信号（命中活跃 run）→ agent tab 快照重新拉取（§3.1-2/D8 信号刷新链）', async () => {
     const wrapper = await mountPanel()
     await wrapper.find('[data-testid="wf-viz-trace-row-0"]').trigger('click')
     await flushPromises()
@@ -422,7 +422,7 @@ describe('WorkflowLivePanel · 多级 tab（使用者黑盒）', () => {
     store.triggerWorkflowReload(SID)
     await flushPromises()
     expect(loadSubagentDataMock).toHaveBeenCalledWith('agentcall:acs-0')
-    // 非活跃 session 的信号不触发重拉（纪元不自增）
+    // 非活跃 session 的信号不触发重新拉取（纪元不自增）
     loadSubagentDataMock.mockClear()
     store.triggerWorkflowReload('other-session')
     await flushPromises()
@@ -472,7 +472,7 @@ describe('WorkflowLivePanel · 多级 tab（使用者黑盒）', () => {
 // ── store 挂载编排（构建者白盒）──────────────────────────────────────────────
 
 describe('WorkflowLivePanel · store 挂载编排（构建者白盒）', () => {
-  it('挂载：活跃 run 登记 + 事件流首拉；卸载：条件释放活跃锚', async () => {
+  it('挂载：活跃 run 登记 + 事件流首次拉取；卸载：条件释放活跃锚', async () => {
     const store = useWorkflowStore()
     const wrapper = await mountPanel()
     expect(mockGetRunEvents).toHaveBeenCalledWith(SID, RUN_ID)

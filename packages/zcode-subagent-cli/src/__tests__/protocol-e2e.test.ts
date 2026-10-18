@@ -8,8 +8,8 @@
 //   ② run 期间 host/* 反向请求（handleReady）可达且可应答；
 //   ③ event 通知（text_delta 流 + 终态 message_end/turn_end，seq 单调）；
 //   ④ run 终态应答：outcome.content 与 handle.sessionRef（隔离库 dbPath）正确；
-//   ⑤ dispose 幂等应答 + 进程随 stdin 关闭退出（自灭守卫主判据的隐式验证）。
-// 驱动面自持（不走 core EngineClient——对端语义互证靠帧形状与 SDK 判别守卫对齐）。
+//   ⑤ dispose 幂等应答 + 进程随 stdin 关闭退出（自灭检查主判据的隐式验证）。
+// 驱动面自持（不走 core EngineClient——对端语义互证靠帧形状与 SDK 判别检查对齐）。
 
 import { spawn, type ChildProcess } from "node:child_process";
 import { mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
@@ -220,7 +220,7 @@ class EngineProc {
     this.child.kill("SIGKILL");
   }
 
-  /** 模拟宿主退出：关闭 stdin（自灭守卫主判据 = stdio EOF）。 */
+  /** 模拟宿主退出：关闭 stdin（自灭检查主判据 = stdio EOF）。 */
   endStdin(): void {
     this.child.stdin?.end();
   }
@@ -498,7 +498,7 @@ describe("bin e2e：final-frame 先落定 + 权威 turn.terminal 迟到的 stder
     }
   }
 
-  it("迟到 success（常态迟到）：run 成功，stderr 无迟到终态日志（降噪根修点）", { timeout: 60_000 }, async () => {
+  it("迟到 success（常态迟到）：run 成功，stderr 无迟到终态日志（降噪从根源修复点）", { timeout: 60_000 }, async () => {
     const { engine, runResp } = await runOnce(writeLateTerminalScenario("success"));
     try {
       expect(runResp.error).toBeUndefined();
@@ -514,7 +514,7 @@ describe("bin e2e：final-frame 先落定 + 权威 turn.terminal 迟到的 stder
   it("迟到 interrupted：降 debug 且 stderr 无输出（依赖 SDK cli-entry sink 对 debug 跳过写）", { timeout: 60_000 }, async () => {
     const { engine, runResp } = await runOnce(writeLateTerminalScenario("interrupted"));
     try {
-      // interrupted 不属失败终态（isFailedTerminalStatus 口径）——run 仍成功收口
+      // interrupted 不属失败终态（isFailedTerminalStatus 口径）——run 仍成功收尾
       expect(runResp.error).toBeUndefined();
       expect(engine.stderrOutput).not.toContain("权威终态晚于落定");
       expect(engine.stderrOutput).not.toContain("[debug]"); // debug 级不落 stderr（CONSOLE_SINK 语义对齐）

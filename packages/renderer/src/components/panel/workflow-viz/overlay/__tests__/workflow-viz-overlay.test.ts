@@ -138,7 +138,7 @@ describe('WorkflowVizOverlay 壳（黑盒 DOM）', () => {
     expect(e.defaultPrevented, '壳不消费 Esc（连 preventDefault 约定也不置位）').toBe(false)
   })
 
-  it('IME 守卫已随迁编排器：壳不再自行判定 isComposing（组合态 Esc 也不发 close）', async () => {
+  it('IME 检查已随迁编排器：壳不再自行判定 isComposing（组合态 Esc 也不发 close）', async () => {
     const wrapper = mountOverlay()
     window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', isComposing: true, bubbles: true }))
     await wrapper.vm.$nextTick()

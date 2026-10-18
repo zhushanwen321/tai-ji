@@ -95,7 +95,7 @@ describe("resolveModel — 第 0 层用户覆盖短路（不变量 4）", () => 
   it("覆盖在场且其余三层全部非法/缺席：仍解析成功（短路的独立可满足性）", () => {
     const overrideTarget = makeModel({ id: "target", provider: "ovr" });
     const reg = makeRegistry([overrideTarget]);
-    // ctxModel 不在 registry（第三层若触达，modelRefFromVerified 孪生守卫不炸但产物
+    // ctxModel 不在 registry（第三层若触达，modelRefFromVerified 孪生检查不炸但产物
     // 是 main-model）——产物必须仍是覆盖值，证明第三层未触达。
     const r = resolveModel(undefined, reg, undefined, makeModel({ id: "off-registry", provider: "nowhere" }), {
       model: "ovr/target",

@@ -3,7 +3,7 @@
  *
  * 被测对象：domain/composer/dispatch/submit.ts —— onFollowUp / onAbort。
  *
- * [退役] onSteer 与 submit() 包装已随 message.steer 协议腿退役同批删除（过度设计审计
+ * [退役] onSteer 与 submit() 包装已随 message.steer 协议路径退役同批删除（过度设计审计
  * 候选 8，msg-pipeline-debloat D6-3）：onSteer 的 boolean 契约用例与 submit() 的
  * catch → restoreInput 用例随被测符号一并移除，onFollowUp 契约保持。
  *

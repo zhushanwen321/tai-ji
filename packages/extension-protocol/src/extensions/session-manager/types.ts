@@ -33,7 +33,7 @@ export interface SessionManagerCreateParams {
    * 完成通知债权的幂等键（optional，notify-once D2/D6）：extension 侧
    * `crypto.randomUUID()` 前缀 `sm-` 生成。缺省/畸形 → runtime 不 arm、
    * `willNotify:false`、零完成通知——兼容判据从版本二分改为字段有无。
-   * 形态判定不在 params 守卫（畸形不构成 params 错误、动作照常执行），
+   * 形态判定不在 params 检查（畸形不构成 params 错误、动作照常执行），
    * 由 runtime 受理点消费 `isSessionManagerNotifyId` 作 arm 判据。
    */
   notifyId?: string
@@ -70,7 +70,7 @@ export interface SessionManagerAbortParams {
 /**
  * watch action 参数（notify-once D2/D6）：通知债权的纯应答通道，**单键寻址**——
  * runtime 按 `(调用方 parentSid, notifyId)` 反查 claim，parentSid 取自调用方连接身份、
- * **协议面不定义不携带**（可推导字段免传，多余字段被守卫拒绝）。不传 timeout、
+ * **协议面不定义不携带**（可推导字段免传，多余字段被检查拒绝）。不传 timeout、
  * fire-and-forget 长挂 select；每 claim 单 watch 槽（新覆盖旧，runtime 只 respond 最新）。
  */
 export interface SessionManagerWatchParams {
@@ -78,14 +78,14 @@ export interface SessionManagerWatchParams {
   notifyId: string
 }
 
-// ── params 运行时守卫（信任边界：params 来自 extension_ui_request，LLM 可控 JSON）──
+// ── params 运行时检查（信任边界：params 来自 extension_ui_request，LLM 可控 JSON）──
 // handler 侧 dispatch 前校验；非法 params 不再经 `as unknown as` 断言静默流入
 // sessionService（曾以 undefined 流入 create 的 cwd/label/prompt）。
 
 function isRecord(v: unknown): v is Record<string, unknown> {
   // 排数组严版（canonical = ext-guards isRecord），与同包 subagent-inflight 私有副本
   // 同款同义——六个 action 的 params schema 契约均为
-  // JSON object（extension 侧 Type.Object），数组属畸形输入走守卫拒绝闭环
+  // JSON object（extension 侧 Type.Object），数组属畸形输入走检查拒绝闭环
   return typeof v === 'object' && v !== null && !Array.isArray(v)
 }
 
@@ -93,7 +93,7 @@ function isOptionalString(v: unknown): boolean {
   return v === undefined || typeof v === 'string'
 }
 
-/** 可选数值字段（watch respond 守卫用）：undefined 放行，present 须为 number */
+/** 可选数值字段（watch respond 检查用）：undefined 放行，present 须为 number */
 function isOptionalNumber(v: unknown): boolean {
   return v === undefined || typeof v === 'number'
 }
@@ -107,11 +107,11 @@ function isOptionalNumberOrNull(v: unknown): boolean {
  * notifyId 形态入站自检（notify-once D2/D6，廉价防御级校验）——协议面单一权威：
  * extension 侧 `crypto.randomUUID()` 前缀 `sm-` 生成、runtime 生成的 `lifetimeNotifyId`
  * 同形态**同本函数**（防 kind=lifetime 的 watch 被自检拒掉）。形状 = `sm-` + RFC4122
- * 十六进制 UUID（8-4-4-4-12，大小写不敏感），总长构造性钉死 39 字符——超长/截断/
+ * 十六进制 UUID（8-4-4-4-12，大小写不敏感），总长构造性固定 39 字符——超长/截断/
  * 错前缀/非 UUID 体一律拒绝，无独立长度上限条款。
  *
- * 消费点：① watch params 守卫（拒绝即 error envelope）；② send/create 受理点 arm 判据
- * （缺省/畸形 → 不 arm + willNotify:false，动作本身照常执行——params 守卫刻意不查形态）。
+ * 消费点：① watch params 检查（拒绝即 error envelope）；② send/create 受理点 arm 判据
+ * （缺省/畸形 → 不 arm + willNotify:false，动作本身照常执行——params 检查刻意不查形态）。
  */
 const NOTIFY_ID_PATTERN = /^sm-[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$/
 
@@ -174,7 +174,7 @@ export function isSessionManagerListParams(v: unknown): v is SessionManagerListP
 }
 
 /**
- * watch：**封闭单键** `{notifyId}` 守卫（notify-once D2 形态入站自检）——
+ * watch：**封闭单键** `{notifyId}` 检查（notify-once D2 形态入站自检）——
  * 空载荷 / 缺字段 / 夹带任何额外字段（如 parentSid：归属由 runtime 取连接身份，
  * 协议面不定义）/ notifyId 非 string / 形态不符（缺 `sm-` 前缀、非 UUID 体、超长）
  * → false → handler dispatch 抛错走 respond({error}) 错误闭环（error envelope）。
@@ -291,15 +291,15 @@ const WATCH_REASON_SET: ReadonlySet<string> = new Set<SessionManagerWatchReason>
  * 折叠 cancelled——null 不在本类型内，消费方须同时处理。
  */
 export interface SessionManagerWatchRespondPayload {
-  /** 分拣键 (sessionId, reason) 的 reason 腿（D3 两层模型：cancelled/orphaned → 仅
+  /** 分拣键 (sessionId, reason) 的 reason 路径（D3 两层模型：cancelled/orphaned → 仅
    *  unregister；exited/deleted → 死亡新闻槽；completed/failed/stopped → 结果新闻） */
   reason: SessionManagerWatchReason
   /**
    * claim 所属子会话 id 回带——D3 槽键 (sessionId, deathSeq) / 分拣键 (sessionId,
-   * reason) / D9 文案 `<sid>` 的唯一数据源（收口腿闭包仅有父 sid，缺此字段则同父
+   * reason) / D9 文案 `<sid>` 的唯一数据源（收敛路径闭包仅有父 sid，缺此字段则同父
    * 多子 deathSeq 跨 child 碰撞）。claim 命中路径（settle/death/orphaned/二次校验）
    * 恒带；fail-closed（查无 claim）无 claim 可回带 → 缺席——该路径 reason 恒
-   * 'cancelled'，extension 静默收口不消费 sessionId。
+   * 'cancelled'，extension 静默收尾不消费 sessionId。
    */
   sessionId?: string
   /** death 批身份（per session 递增；同一死亡事件循环 respond 时 runtime 直供） */
@@ -308,7 +308,7 @@ export interface SessionManagerWatchRespondPayload {
   settleSeq?: number
   /** 本批兑现总笔数（同批每条应答携带同值）；death 侧 = 同 deathSeq 的 claim 数（D3 合批口径，runtime 直供，死亡/结果新闻正文消费 fulfills N） */
   fulfillsN?: number
-  /** death 应答携带：exit 腿诊断数据通路复刻（400 字截尾沿用现值），extension 文案构造消费 */
+  /** death 应答携带：exit 路径诊断数据通路复刻（400 字截尾沿用现值），extension 文案构造消费 */
   exitCode?: number | null
   stderrTail?: string
   /**
@@ -320,7 +320,7 @@ export interface SessionManagerWatchRespondPayload {
 }
 
 /**
- * watch respond payload 运行时守卫（extension 读侧不信任外部格式——AGENTS 关键规则 5）：
+ * watch respond payload 运行时检查（extension 读侧不信任外部格式——AGENTS 关键规则 5）：
  * null（旧 runtime 象限）/ 非 record / reason 缺失、非 string 或词表外 / 可选 meta
  * 类型不符 → false（可选字段缺席一律放行——含 sessionFilePath）。消费方对 false 与
  * null 同路折叠静默 unregister（fail-safe：未知 reason 不得落 default 误标）。

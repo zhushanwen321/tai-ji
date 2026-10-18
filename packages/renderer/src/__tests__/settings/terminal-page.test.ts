@@ -128,7 +128,7 @@ describe('TerminalPage 保存交互', () => {
     expect(payload.shellArgs).toEqual([])
   })
 
-  it('RD-4#7：保存 in-flight 期间按钮禁用（saving 守卫，防 65s 窗口重复点击并发覆盖）', async () => {
+  it('RD-4#7：保存 in-flight 期间按钮禁用（saving 检查，防 65s 窗口重复点击并发覆盖）', async () => {
     let resolveSave!: (v: { config: TerminalConfig; corrupted: boolean }) => void
     configMock.setTerminalConfig.mockImplementationOnce(
       () => new Promise((r) => { resolveSave = r }),

@@ -1,10 +1,10 @@
 <script setup lang="ts">
 import { AlertTriangle, Loader2 } from '@lucide/vue'
 // ui 包内相对导入（不经 @taiji/ui 顶层 barrel）：primitives 是顶层 barrel 的
-// 再导出来源，顶层 barrel 自引用会闭合循环依赖环
+// 再导出来源，顶层 barrel 自引用会封住循环依赖环
 import { Button } from '../button'
 // Dialog 系列直接文件导入（不经本目录 barrel）：本组件经 dialog/index.ts 再导出，
-// 目录 barrel 自引用同样闭合循环依赖环（R2 S-1，与顶层 barrel 修法同族）
+// 目录 barrel 自引用同样封住循环依赖环（R2 S-1，与顶层 barrel 修法同族）
 import Dialog from './Dialog.vue'
 import DialogContent from './DialogContent.vue'
 import DialogDescription from './DialogDescription.vue'

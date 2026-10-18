@@ -2,8 +2,8 @@
  * useBrowserOverlayStateSync —— 浮层开合/内容切换 → `browser:overlay-state` 上报
  * （display-containers §7.4 show 统一谓词事实源之一）。
  *
- * 背景：主进程 BrowserViewManager 的显示收口谓词 =「浮层开 ∧ 内容 browser ∧ 无错误态 ∧
- * 无相交 shieldsView 面」，其中浮层开合/内容/发起会话三项事实由 renderer 上报（preload
+ * 背景：主进程 BrowserViewManager 的显示收尾谓词 =「浮层开 ∧ 内容 browser ∧ 无错误态 ∧
+ * 无相交 shieldsView 范围」，其中浮层开合/内容/发起会话三项事实由 renderer 上报（preload
  * 契约：「BrowserPane 挂载/重开前先上报——谓词事实先于 show 请求；浮层关闭/换出 browser
  * 内容时立即上报」）。不上报则谓词恒假、view 永不显示。
  *

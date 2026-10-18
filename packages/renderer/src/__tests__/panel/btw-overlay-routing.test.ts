@@ -11,7 +11,7 @@
  *   既有族（本文件不重复）；重试仅限投递失败态（未送达保持挂起）；已终结应答丢弃 + 提示失效。
  * - 状态区退役（2026-10-15 用户裁决）：setStatus/setWidget per-session 源存在也不渲染——
  *   btw 状态区恒空（原「第四面状态区」移除，扩展状态行不进旁路线面板）。
- * - 运行期错误边界：确认条子树渲染异常被 BtwPanel onErrorCaptured 收口（行内错误 + 可重试，
+ * - 运行期错误边界：确认条子树渲染异常被 BtwPanel onErrorCaptured 收尾（行内错误 + 可重试，
  *   不外溢）。
  * - 并发排序：跨通道按 receivedAt 取最早，应答后晋升下一条。
  *
@@ -503,7 +503,7 @@ describe('⑤ 状态区退役（2026-10-15 用户裁决）：extension GUI 状�
 })
 
 describe('⑤ 运行期错误边界：btw 交互异常不外溢主面板', () => {
-  it('Guard 子树渲染抛错 → BtwPanel ec 收口：行内错误条 + 重试可达，面板根不倒（状态区已退役，注入点 = Guard stub）', async () => {
+  it('Guard 子树渲染抛错 → BtwPanel ec 收尾：行内错误条 + 重试可达，面板根不倒（状态区已退役，注入点 = Guard stub）', async () => {
     const w = mount(BtwPanel, {
       props: { sessionId: MAIN },
       global: {

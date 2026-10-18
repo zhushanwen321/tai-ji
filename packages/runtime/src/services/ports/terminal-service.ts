@@ -39,7 +39,7 @@ import type { TerminalInstanceSummary } from '@taiji/shared'
  *   （实例路由否定回执改用 unknown_terminal_id）
  *
  * 路由三码的不变量：只有 unknown_terminal_id 是「注册成员资格的否定回执」，是 renderer 关闭沿
- * 三腿回收的唯一判据（平行守卫只按 code 分档）。terminal_id_session_mismatch（交叉校验拒绝）
+ * 三路径回收的唯一判据（平行检查只按 code 分档）。terminal_id_session_mismatch（交叉校验拒绝）
  * 与 terminal_id_required（畸形帧拒绝）都走普通错误通道、不触发回收——同码会把仍存活实例
  * 误判为幽灵并回收（条目消失、输出此后无人接收而进程继续跑）。
  *
@@ -74,7 +74,7 @@ export interface ITerminalService {
   attach(sid: string, terminalId: string): void
   /**
    * 查询会话实例清单（`terminal.list` 对账 reply）。
-   * 范围钉死为「被查询会话」：枚举基准 = terminalId 键的**精确前缀** `term:<sid>:`
+   * 范围固定为「被查询会话」：枚举基准 = terminalId 键的**精确前缀** `term:<sid>:`
    * 且前缀后须紧邻纯数字序号段（禁按冒号切分取段，前提「sid 域不含冒号」见设计 §0.5 P7）；
    * 他会话实例不参与返回。
    * 清单来自注册表派生，条目 alive 恒 true（保留字段供 renderer 置 ptyAlive 镜像）。

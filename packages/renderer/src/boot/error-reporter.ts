@@ -119,7 +119,7 @@ interface BufferedError {
 
 /** 环形缓冲（FIFO，超上限驱逐最旧）；模块级，跨 report 调用共享（resetModules 后重置）。 */
 const ringBuffer: BufferedError[] = []
-/** 回放在途守卫：避免并发 replayBuffer 重复交付同一条目。 */
+/** 回放在途检查：避免并发 replayBuffer 重复交付同一条目。 */
 let replaying = false
 
 /** 入缓冲（按 message 去重计数）：同 message 已存在则累计 count + 刷新为最新 payload。 */
@@ -138,7 +138,7 @@ function bufferError(payload: RendererLogPayload): BufferedError {
 
 /**
  * 通道恢复回放：交付所有滞留的未交付条目（FIFO）。任一条目交付失败即停（通道又不可用），
- * 剩余留待下次成功时再放。replaying 守卫防并发重入。零抛错（reportRendererLog 自身已容错）。
+ * 剩余留待下次成功时再放。replaying 检查防并发重入。零抛错（reportRendererLog 自身已容错）。
  */
 async function replayBuffer(): Promise<void> {
   if (replaying) return
@@ -188,7 +188,7 @@ function report(source: RendererErrorSource, err: unknown, vueInfo?: string): vo
 }
 
 /**
- * RD-3#2：runtime 启动失败真因落台账。连接屏显示之外的可观测留痕——经 renderer-log
+ * RD-3#2：runtime 启动失败真因写入登记清单。连接屏显示之外的可观测留痕——经 renderer-log
  * 通道落 renderer-error-<date>.log（main 侧限流权威）。调用方 = App.vue（runtime-error
  * 推送 / get-runtime-start-error 拉取兜底到达时，与显示共用同一到达路径）。
  * 容错契约与 report 一致：任何环节异常静默（上报器不得成为新崩溃源）。

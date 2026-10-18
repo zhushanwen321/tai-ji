@@ -7,7 +7,7 @@ import { RENDERER_LOG, IMAGE_CACHE_WRITE, DEBUG_RUN_LOG_RETENTION, DIAGNOSTICS_E
 // 定义 SSOT = `packages/shared/src/ipc-payloads.ts`（C-comm-22 唯一类型源），本文件只 import
 // 用于 ElectronAPI 方法签名——从前在此处另立一份副本会与 main / renderer 侧静默漂移。
 
-export interface ElectronAPI { // oe-exempt:20261003:framework:类型契约先行——容器/编排/注册表契约层，D1 下游单元即为消费面
+export interface ElectronAPI { // oe-exempt:20261003:framework:类型契约先行——容器/编排/注册表契约层，D1 下游单元即为消费方
   /** 监听 runtime 端口事件 */
   onRuntimePort(callback: (port: number) => void): () => void
   /** 监听 runtime 启动失败事件 */
@@ -100,12 +100,12 @@ export interface ElectronAPI { // oe-exempt:20261003:framework:类型契约先�
   browserNavigate(sessionId: string, url: string): Promise<void>
   /** 隐藏 view（keep-alive，不销毁） */
   browserHide(sessionId: string): Promise<void>
-  /** 显示请求（恢复最近 rect）。收敛到显示收口谓词（§7.4 show 统一谓词）：
+  /** 显示请求（恢复最近 rect）。收敛到显示收敛谓词（§7.4 show 统一谓词）：
    *  show 当且仅当「浮层开 ∧ 内容 browser ∧ 无错误态 ∧ 无相交 shieldsView 面」，
    *  谓词为假时保持/进入隐藏（非失败） */
   browserShow(sessionId: string): Promise<void>
   /** 切换可见 view 到指定 session。浮层随行豁免（§5.1 规则 5）：浮层开 ∧ 内容 browser 时
-   *  换显整体豁免（view 保持发起会话的）；非显示收口谓词态只隐藏不显示（防残影复活） */
+   *  换显整体豁免（view 保持发起会话的）；非显示收敛谓词态只隐藏不显示（防残影复活） */
   browserFocus(sessionId: string): Promise<void>
   /** 设置 view 位置/尺寸（CSS px = DIP，不乘 dpr；renderer 经 getBoundingClientRect 推送） */
   browserSetRect(sessionId: string, rect: { x: number; y: number; width: number; height: number }): Promise<void>
@@ -122,7 +122,7 @@ export interface ElectronAPI { // oe-exempt:20261003:framework:类型契约先�
   browserGetZoom(sessionId: string): Promise<number>
   /** 读取 WebContentsView 内当前选区文本 + URL（二期扩展点，Wave 6 预留） */
   browserGetSelection(sessionId: string): Promise<{ text: string; url: string }>
-  /** 显示收口事实源之一（display-containers §7.4）：浮层开合/内容切换上报。
+  /** 显示收敛事实源之一（display-containers §7.4）：浮层开合/内容切换上报。
    *  契约：BrowserPane 挂载/重开前先上报（谓词事实先于 show 请求）；浮层关闭/换出 browser
    *  内容时立即上报——主进程侧联动隐藏 view（keep-alive）。非法 payload reject（error envelope） */
   browserSetOverlayState(state: {
@@ -131,7 +131,7 @@ export interface ElectronAPI { // oe-exempt:20261003:framework:类型契约先�
     content: OverlayContentKind | null
     sessionId: string | null
   }): Promise<void>
-  /** 显示收口事实源之一（§5.1 规则 6② / §6.7）：shieldsView 遮蔽面**全量**上报（替换语义）。
+  /** 显示收敛事实源之一（§5.1 规则 6② / §6.7）：shieldsView 遮蔽面**全量**上报（替换语义）。
    *  fullscreen=true 无条件隐藏 view；非全屏面与 view 矩形几何相交才隐藏（双阈值空间滞回），
    *  成员开态内 rect 变化（横幅改宽）也须重报。非法 payload reject（error envelope） */
   browserSetShields(payload: ShieldsFacesPayload): Promise<void>
@@ -282,7 +282,7 @@ export interface ElectronAPI { // oe-exempt:20261003:framework:类型契约先�
   // ── 诊断包导出（crash-forensics §3.3 D6 / u3a）─────────────────
   /**
    * 导出诊断包：main 先弹保存对话框（用户自选保存位置；payload.defaultPath 为初始目录），
-   * 打包双台账 + 日志尾部 + 水位摘录 + 触发状态表 + summary.md 为 zip。永不 reject——
+   * 打包双登记清单 + 日志尾部 + 水位摘录 + 触发状态表 + summary.md 为 zip。永不 reject——
    * 返回三态（exported 携带产物路径与摘要含知情文案 privacyNotice / canceled 用户取消
    * / error 携带具体 errno），调用方（u3b）按 status 分支展示。
    */

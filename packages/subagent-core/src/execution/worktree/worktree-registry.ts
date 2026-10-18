@@ -49,7 +49,7 @@ const JSON_INDENT = 2;
 const LOCK_STALE_MS = 30_000;
 const LOCK_RETRIES = 10;
 
-/** 注册表 JSON 顶层结构的运行时类型守卫。 */
+/** 注册表 JSON 顶层结构的运行时类型检查。 */
 function isRegistryData(value: unknown): value is { entries: WorktreeEntry[] } {
   return (
     typeof value === "object" &&

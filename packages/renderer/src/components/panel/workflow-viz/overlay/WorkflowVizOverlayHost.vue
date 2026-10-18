@@ -11,7 +11,7 @@
     renderer 控制器 workflow-viz-overlay.ts；本容器壳承载 workflow 与 scheduler 两类内容
     （browser 由 BrowserOverlay 承载，三壳互斥）；scheduler 内容下 run 相关 props 按无 run
     形态透传（run/dag/dagError = null，「运行」tab 由壳按 run 缺省禁用）；run
-    投影从 workflowStore 分区按 runId 选中（recordsOf 响应式读，workflowUpdate 信号触发
+    派生视图从 workflowStore 分区按 runId 选中（recordsOf 响应式读，workflowUpdate 信号触发
     的重新拉取经 store 自动到达）；节点六态/当前 phase/已用时长在本容器单处派生后经
     props 透传（壳与面板均为已派生输入，不自行判定）。
   - D10 回落动作序列：Guard emit fallback → 关 overlay（清瞬态）→ openDrawerTab('workflow')
@@ -109,7 +109,7 @@ const overlaySessionId = computed(() => {
   return cur !== null ? cur.payload.sessionId : ''
 })
 
-/** 当前 workflow run 投影（core OverlayContent → Host 的 run 选择形状；非 workflow 内容 = null）。 */
+/** 当前 workflow run 派生视图（core OverlayContent → Host 的 run 选择形状；非 workflow 内容 = null）。 */
 const overlayRun = computed<{ sessionId: string; runId: string } | null>(() => {
   const cur = overlayContent.value
   return cur !== null && cur.kind === 'workflow' ? cur.payload : null
@@ -128,7 +128,7 @@ watch(isOverlayShellOpen, (open) => {
   if (open) guardEpoch.value++
 }, { immediate: true })
 
-/** 当前 run 投影（workflowStore 分区按 runId 选中；信号触发的重拉经 store 响应式到达）。 */
+/** 当前 run 派生视图（workflowStore 分区按 runId 选中；信号触发的重新拉取经 store 响应式到达）。 */
 const runRecord = computed<WorkflowRunRecord | null>(() => {
   const cur = overlayRun.value
   if (cur === null) return null
@@ -211,7 +211,7 @@ const elapsedMs = computed<number | undefined>(() => {
 
 /** DAG 点击：phase 语义开 phase tab；agent 语义开挂接实例的钻取——实例行点击带
  *  callId 钻取该实例（多实例节点点具体行看具体 agent），节点其余区域取首个挂接实例
- *  （pending/无 sessionId 实例由 openAgentTab 内部守卫 no-op）。 */
+ *  （pending/无 sessionId 实例由 openAgentTab 内部检查 no-op）。 */
 function onSelect(payload: WorkflowVizDagClickPayload): void {
   if (payload.semantic === 'phase') {
     panelRef.value?.openPhaseTab(payload.phase)

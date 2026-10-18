@@ -7,7 +7,7 @@
  *   （缺此步时下游 insertChipAtSelection 的 range.deleteContents() 会作用到编辑器外 DOM）
  * - 分支②：savedRange 为空 + 本就无活选区 → 仅回焦，不触碰选区（既有兜底语义保持）
  *
- * 独立成文件的原因：restoreSelection 的跨边界加固是本轮改动面，用例需要直接构造
+ * 独立成文件的原因：restoreSelection 的跨边界加固是本轮改动范围，用例需要直接构造
  * 「anchor 在编辑器内、focus 在编辑器外」的 Selection；contenteditable.test.ts 走的是
  * useContenteditableInput 端到端链路，不复用其 setup 以免改动他人用例。
  *

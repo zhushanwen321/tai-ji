@@ -7,9 +7,9 @@
  *   （worker 已退出）不阻断 abort 主流程；runtime 缺失为 no-op
  * - abort listener 注册后，run 经任意终态路径收敛时 removeEventListener：
  *   abortRun（用户/预算/超时 abort）、terminateRunningRuns（session 切换）、
- *   消息面终态（return → onRunDone 包装收口）——修复 {once:true} 只在 abort
+ *   消息侧终态（return → onRunDone 包装收尾）——修复 {once:true} 只在 abort
  *   触发时自清的泄漏（同 signal 连续多 run 泄漏 listener）
- * - [OR-8] abortRun 收口残留 in-flight call（先收口再落盘）
+ * - [OR-8] abortRun 收尾残留 in-flight call（先收尾再落盘）
  */
 import { getEventListeners } from "node:events";
 
@@ -171,7 +171,7 @@ describe("[OR-3] abort 广播（abortRun / terminateRunningRuns）", () => {
     expect(runA.runtime).toBeUndefined();
   });
 
-  it("[OR-8] abortRun 收口残留 in-flight call：先收口再落盘，快照无 running 节点", async () => {
+  it("[OR-8] abortRun 收尾残留 in-flight call：先收尾再落盘，快照无 running 节点", async () => {
     const deps = makeDeps();
     const runId = await runWorkflow(makeSpec(), deps);
     const run = deps.runs.get(runId)!;
@@ -190,11 +190,11 @@ describe("[OR-3] abort 广播（abortRun / terminateRunningRuns）", () => {
 
     await abortRun(runId, deps, "mid-flight abort");
 
-    // 收口：call done + trace failed（Cancelled 文案；[H2 W3] trace.live 已删除）
+    // 收尾：call done + trace failed（Cancelled 文案；[H2 W3] trace.live 已删除）
     expect(call.status).toBe("done");
     expect(call.result?.error).toContain("Cancelled");
     expect(findByStep(run.state.trace, 1)?.status).toBe("failed");
-    // 落盘在收口之后：save 时 run 已无 running 节点
+    // 落盘在收尾之后：save 时 run 已无 running 节点
     expect(run.state.trace.toArray().every((n) => n.status !== "running")).toBe(true);
   });
 });
@@ -261,7 +261,7 @@ describe("[OR-7] signal abort listener run 终态移除", () => {
     expect(postSpy(handle).mock.calls.some((c) => (c[0] as { type?: string })?.type === "abort")).toBe(false);
   });
 
-  it("terminateRunningRuns 终止 → removeEventListener（不走 onRunDone 的路径也收口）", async () => {
+  it("terminateRunningRuns 终止 → removeEventListener（不走 onRunDone 的路径也收尾）", async () => {
     const deps = makeDeps();
     const { controller, added, removed } = makeSignal();
 

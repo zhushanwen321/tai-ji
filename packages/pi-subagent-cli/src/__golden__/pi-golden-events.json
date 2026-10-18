@@ -4,7 +4,7 @@
     "description": "pi 引擎 golden 事件序列（统一 AgentEvent 形态——spawn-event-adapter/session-runner 翻译后的 onEvent 出口序列，即 journal 落盘形态）",
     "source": "从 spawn-event-adapter.test.ts / session-runner 事件形状构造的典型流式序列：bash 工具调用（含 pendingTools 配对）→ 双段 text_delta → message_end（完整 usage）→ turn_end。字段形状与 handleSdkEvent 翻译产物逐一锚定（tool_start.toolName/args、tool_end.result/isError、text_delta.delta、message_end.usage 四项 token、turn_end）",
     "recordedAt": "2026-08-25",
-    "usageMapping": "message_end.usage = pi SDK message.usage（input/output/cacheRead/cacheWrite 四项 + cost.total 投影为 cost）"
+    "usageMapping": "message_end.usage = pi SDK message.usage（input/output/cacheRead/cacheWrite 四项 + cost.total 映射为 cost）"
   },
   "events": [
     { "type": "tool_start", "toolName": "bash", "args": { "command": "ls -la /tmp/probe" } },

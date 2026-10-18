@@ -39,7 +39,7 @@ describe('scanPendingEntries（单趟分流 + S-10 容错）', () => {
     expect(scan.unregisteredIds).toEqual(new Set(['bt-1', 'bt-2']))
   })
 
-  it('null/undefined/非对象元素跳过（先守卫再访问字段）', () => {
+  it('null/undefined/非对象元素跳过（先检查再访问字段）', () => {
     const scan = scanPendingEntries([null, undefined, 42, 'str', reg('bt-1')])
     expect(scan.registerEntries).toHaveLength(1)
     expect(scan.unregisteredIds.size).toBe(0)

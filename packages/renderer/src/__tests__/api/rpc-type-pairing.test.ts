@@ -22,7 +22,7 @@ import { command, RPC_BACKSTOP_TIMEOUT_MS } from '@taiji/core/transport/api'
 
 const __dirname = dirname(fileURLToPath(import.meta.url))
 // [tc-transport-consolidation u5] domain 真源已迁 core（壳 api/domains 仅剩 settings IPC 门面），
-// 扫描目标跟随真源，守卫强度不变。
+// 扫描目标跟随真源，检查强度不变。
 const domainsDir = resolve(__dirname, '../../../../core/src/transport/api/domains')
 
 /**

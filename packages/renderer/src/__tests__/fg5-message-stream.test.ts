@@ -37,7 +37,7 @@ function systemMsg(id: string, content: string, extra: Partial<Message> = {}): M
 }
 
 
-/** groupTurns 死导出已删（审计候选 1）——测试用回合透镜 = toRenderItems 的 turn 项提取。 */
+/** groupTurns 无调用点的导出已删（审计候选 1）——测试用回合透镜 = toRenderItems 的 turn 项提取。 */
 function groupTurns(messages: Message[]): MessageTurn[] {
   return toRenderItems(messages)
     .filter((i): i is { kind: 'turn'; turn: MessageTurn } => i.kind === 'turn')
@@ -334,7 +334,7 @@ describe('FG5 chat store 块类型扩展', () => {
    * 重复文本/跨类型计数 diff、message_start 时序、retry/queue session 隔离）随投递所有权内核
    * 整体退役——设计 §3.1 删除面 + §3.4+ 接管归属表：
    * - queue_update 帧降级为内核内部回执（u3b 删除 message.queue_update handler），不再直驱
-   *   renderer UI，也不再写 store 快照分区（[u5a] 该分区已删除）/ 驱动 pendingBuffer 计数腿（pushPending/
+   *   renderer UI，也不再写 store 快照分区（[u5a] 该分区已删除）/ 驱动 pendingBuffer 计数路径（pushPending/
    *   countDrained/drainN）；
    * - 投递入流改由「送达回执（message_end(user) 裸标记 id 精确匹配）+ reducer 通路」承担
    *   （替代计数 FIFO 文本匹配——重复文本/跨类型误配面从机制上消除）。
@@ -349,9 +349,9 @@ describe('FG5 chat store 块类型扩展', () => {
       type: 'message.queue_update',
       payload: { sessionId: 'sx', steering: ['继续'], followUp: ['下一步'] },
     })
-    // 置位腿退役：帧到达不产生任何 store 落点（[u5a] queueStates 分区及其读 API 已删除，
+    // 置位路径退役：帧到达不产生任何 store 落点（[u5a] queueStates 分区及其读 API 已删除，
     // 前身 getQueueState 断言随分区一并移除——无字段可查即结构性保证）
-    // drain 腿退役：buffered 条目不再经 queue_update 差集入流（其入流由送达回执承担）
+    // drain 路径退役：buffered 条目不再经 queue_update 差集入流（其入流由送达回执承担）
     store.applyMessageEvent('sx', {
       type: 'message.queue_update',
       payload: { sessionId: 'sx', steering: [] },

@@ -2,7 +2,7 @@
 //
 // C4-core-script-pipeline（convergence W4）单元测试：generate 校验管线下沉的
 // 行为锁定。覆盖 §4.2 W4 门全部条目：
-// - 五道闸逐字文案（期望串按 pi 现版 actionGenerate 源码逻辑手工构造——
+// - 五项校验逐字文案（期望串按 pi 现版 actionGenerate 源码逻辑手工构造——
 //   pi 侧行为不变是 CA2 前提，文案改动必须同步两处）；
 // - round-trip 失败报错含 YAML 诊断与 line/col（parseResourceMetaDetailed
 //   真实调用不 mock，与 pi 测试 TC2/TC5 同原则）；
@@ -174,7 +174,7 @@ function makeTmpRoot(): string {
 }
 
 // ============================================================
-// 五道闸（文案逐字对齐 pi 现版）
+// 五项校验（文案逐字对齐 pi 现版）
 // ============================================================
 
 describe("generateWorkflowScript 校验闸（文案逐字对齐 pi 现版）", () => {
@@ -349,11 +349,11 @@ describe("宿主预声明冲突拦截（闸 4 与 worker 包裹作用域一致�
 });
 
 // ============================================================
-// 宿主声明对账守卫（worker-script-builder 宿主段 ↔ 清单双向一致——
+// 宿主声明对账检查（worker-script-builder 宿主段 ↔ 清单双向一致——
 // builder 增删名字忘同步清单时在此红）
 // ============================================================
 
-describe("宿主声明对账守卫（worker-script-builder ↔ WORKER_IIFE_HOST_DECLARED_NAMES）", () => {
+describe("宿主声明对账检查（worker-script-builder ↔ WORKER_IIFE_HOST_DECLARED_NAMES）", () => {
   it("IIFE 宿主段声明名提取集与清单互查一致", () => {
     const src = readFileSync(new URL("../worker-script-builder.ts", import.meta.url), "utf8");
     const start = src.indexOf("'(async () => {'");
@@ -364,7 +364,7 @@ describe("宿主声明对账守卫（worker-script-builder ↔ WORKER_IIFE_HOST_
     for (const m of src.slice(start, end).matchAll(/^\s*'  (?:const|let|class|async function|function)\s+([\w$]+)/gm)) {
       names.add(m[1]);
     }
-    expect(names.size, "提取数为 0 = 提取器与源形态失配，守卫失效").toBeGreaterThan(0);
+    expect(names.size, "提取数为 0 = 提取器与源形态失配，检查失效").toBeGreaterThan(0);
     expect([...names].sort()).toEqual([...WORKER_IIFE_HOST_DECLARED_NAMES].sort());
   });
 });
@@ -390,7 +390,7 @@ describe("barrel exports probe", () => {
     const barrel = subagentCore as Record<string, unknown>;
     expect(barrel["DEFAULT_WORKFLOW_TMP_DIR"]).toBe(".pi/workflows/.tmp");
     // DEFAULT_WORKFLOW_SAVED_DIR 已随 2026-09-13 barrel 收窄出公共面（仅测试消费），
-    // 改深路径断言同名常量值不变（守卫强度不降）。
+      // 改深路径断言同名常量值不变（检查强度不降）。
     expect(DEFAULT_WORKFLOW_SAVED_DIR).toBe(".pi/workflows");
   });
 

@@ -70,7 +70,7 @@ const props = withDefaults(defineProps<{
   providerFilter?: ProviderId[]
   /**
    * U4「切换中」：true 时 trigger 显示转圈并**忽略开合与点选**（禁用重复点击；并发两条
-   * model.switch 在飞会让回执乱序与 session.modelId 双写竞争）。读条件由调用方判
+   * model.switch 在途会让回执乱序与 session.modelId 双写竞争）。读条件由调用方判
    * sessionId 等值后传入（本组件不感知 session）。
    */
   switching?: boolean

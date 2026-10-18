@@ -3,7 +3,7 @@
  *
  * 职责（一件事）：**重开线时文件 → chatStore 分区回放**——drawer 选中某条 btw 线时，
  * 经既有回放通路 `chatApi.getHistory(vid)`（session.history，runtime 侧 = getEntries →
- * liftHistoryToEntries → replayEntries 对 pi 会话文件的 applyEntry 投影）拉取快照，注入
+ * liftHistoryToEntries → replayEntries 对 pi 会话文件的 applyEntry 派生视图）拉取快照，注入
  * chatStore 的 `btw:` 分区（store.hydrate，内部 mergeBaselineWithLive 保尾部 live 实体）。
  * live ≡ reload 由共用同一 applyEntry reducer 构造性成立（等价性断言见本目录测试
  * btw-replay.test.ts + core apply-entry-equivalence 家族）。

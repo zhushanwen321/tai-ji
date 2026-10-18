@@ -12,7 +12,7 @@ function nextFormOverlaySurfaceKey(): string {
 /**
  * FormOverlay —— 统一提问表单壳（AskUserOverlay 泛化，设计 D5）。
  *
- * 三 extension（ask-user / scheduler / plan）的提问经 UI_FORM_MARKER 收口为一个表单协议，
+ * 三 extension（ask-user / scheduler / plan）的提问经 UI_FORM_MARKER 收敛为一个表单协议，
  * 本组件为 GUI 唯一渲染面：壳负责表头（脉冲点 + 单问标题 | 多问 tab 条）/ Submit 门 /
  * 取消；按问题 type 分派渲染器——choice（单选 auto-advance / 多选 / Other 卡片化）、
  * text（纯自由文本）、schedule（ScheduleForm 整表单）。
@@ -139,7 +139,7 @@ function isQuestionAnswered(q: FormQuestion): boolean {
   return st.selectedValues.length > 0
 }
 
-/** 全部问题已作答（Submit 启用守卫） */
+/** 全部问题已作答（Submit 启用检查） */
 const allAnswered = computed(() => questionsList.value.every(isQuestionAnswered))
 /** 未答题数（disabled tooltip 文案） */
 const unansweredCount = computed(() => questionsList.value.filter((q) => !isQuestionAnswered(q)).length)
@@ -170,7 +170,7 @@ const isLastQuestion = computed(() => activeIdx.value >= questionsList.value.len
 
 /** Tab / Shift+Tab 在问题间循环导航（多问题时生效）。
  *  IME 组合输入中（中文/日文输入法拼音未确认）按 Tab 可能是候选词选择操作，
- *  此时拦截 Tab 做问题切换会打断用户的输入法操作，故加 isComposing 守卫。 */
+ *  此时拦截 Tab 做问题切换会打断用户的输入法操作，故加 isComposing 检查。 */
 function onTabKey(e: KeyboardEvent): void {
   if (e.isComposing) return
   if (questionsList.value.length <= 1) return
@@ -183,8 +183,8 @@ function onTabKey(e: KeyboardEvent): void {
   }
 }
 
-/** Other input Enter（渲染器已过 IME isComposing 守卫）：非最后一题前进到下一题，
- *  最后一题不拦截（全答则提交，让按钮守卫语义一致）。 */
+/** Other input Enter（渲染器已过 IME isComposing 检查）：非最后一题前进到下一题，
+ *  最后一题不拦截（全答则提交，让按钮检查语义一致）。 */
 function onOtherEnter(): void {
   if (!isLastQuestion.value) {
     advanceToNext()
@@ -339,7 +339,7 @@ function onSubmit(): void {
       </template>
     </template>
 
-    <!-- actions：无边框，透明继承根。非最后一题显示"下一题"，最后一题显示"提交"(守卫 allAnswered) -->
+    <!-- actions：无边框，透明继承根。非最后一题显示"下一题"，最后一题显示"提交"(检查 allAnswered) -->
     <div class="flex items-center justify-end gap-2 px-3.5 pb-2.5 pt-1">
       <Button
         v-if="allowCancel"

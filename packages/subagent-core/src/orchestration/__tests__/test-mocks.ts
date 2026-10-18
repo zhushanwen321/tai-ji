@@ -89,7 +89,7 @@ export function mkCtx(
       getEntries: () => [...entries],
       getTree: () => [],
       getSessionName: () => undefined,
-      // pi 1.0 新增必选成员；本包测试不消费会话投影，误用即抛错（failLoud 约定）
+      // pi 1.0 新增必选成员；本包测试不消费会话派生视图，误用即抛错（failLoud 约定）
       buildSessionProjection: () => failLoud<SessionProjection>("ctx.sessionManager.buildSessionProjection"),
     },
     modelRegistry: failLoud<ModelRegistry>("ctx.modelRegistry"),

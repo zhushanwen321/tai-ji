@@ -155,7 +155,7 @@ describe("resolveZcodeModelRef（provider_config 单源）", () => {
 // ── 默认解析链（engine-provider-unification D3 换轨：副本存在→读 merge(真实,副本)
 // 视图，缺失→回落真实文件直读；路径函数仍按三态链返回单路径供 env 赋值）──
 // env 全局污染防护：本 describe 用例独占 TAIJI_AGENT_DATA_DIR 的 save/set/restore
-//（防线 global-setup 会把它钉死 tmp 树，这里指向本用例自建 dataDir）；homedir 经
+//（防线 global-setup 会把它固定为 tmp 树，这里指向本用例自建 dataDir）；homedir 经
 // zcHomeRef 指向 tmp 树内的 fakeHome——真实文件与副本都写在 tmp 内，零触碰真实目录。
 const DATA_DIR_ENV_KEY = "TAIJI_AGENT_DATA_DIR";
 const COPY_PROVIDER = "33333333-cccc-4000-8000-000000000003";

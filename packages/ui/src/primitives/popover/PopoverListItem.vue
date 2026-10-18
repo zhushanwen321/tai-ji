@@ -19,7 +19,7 @@
  */
 import { Check } from '@lucide/vue'
 // ui 包内相对导入（不经 @taiji/ui 顶层 barrel）：primitives 是顶层 barrel 的
-// 再导出来源，顶层 barrel 自引用会闭合循环依赖环
+// 再导出来源，顶层 barrel 自引用会封住循环依赖环
 import { Button } from '../button'
 import {
   POPOVER_LIST_ITEM_CLASS,

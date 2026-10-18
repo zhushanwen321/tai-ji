@@ -80,11 +80,11 @@ const RESTART_DECISION_REASONS: Record<SupervisorRestartTrigger, string> = {
   planned_rolling_restart: 'runtime exited with planned rolling-restart code (86); immediate restart with zero backoff and no crash count (design D5)',
 }
 
-// ── 崩溃台账：runtime 自身死亡判别式（crash-forensics §3.3 D1 shutdown 行第四挂点群）──
+// ── 崩溃登记清单：runtime 自身死亡判别式（crash-forensics §3.3 D1 shutdown 行第四挂点群）──
 
 /**
  * 滚动重启专用退出码（设计 D5；产生方 = runtime 滚动重启执行链，u7c 交付）。
- * main 侧是唯一在场消费者：runtime 被 SIGKILL 时自己写不了台账，supervisor 按此码
+ * main 侧是唯一在场消费者：runtime 被 SIGKILL 时自己写不了登记清单，supervisor 按此码
  * 识别 planned 退出。模块级导出供 u7c supervisor 侧接线（86→立即重启零退避）复用。
  *
  * u7c 起本常量是 shared `RUNTIME_PLANNED_EXIT_CODE` 的转发（SSOT 消除双 86 字面量，
@@ -92,7 +92,7 @@ const RESTART_DECISION_REASONS: Record<SupervisorRestartTrigger, string> = {
  */
 export const PLANNED_EXIT_CODE = RUNTIME_PLANNED_EXIT_CODE
 
-/** onRuntimeExit 台账分类结果（D1 runtime 自身事件三挂点 + 第四挂点的 exit 侧归宿）。 */
+/** onRuntimeExit 登记清单分类结果（D1 runtime 自身事件三挂点 + 第四挂点的 exit 侧归宿）。 */
 export type RuntimeExitJournalClass = 'planned-shutdown' | 'crash' | 'suppressed'
 
 /**
@@ -176,7 +176,7 @@ export class RuntimeSupervisor implements IRuntimeSupervisor {
    * before-quit 在 stop() 之前触发，此刻 child 大概率在场；runtime 未启动（mock）、
    * 已崩溃（onRuntimeExit 已清 child）、重启用尽等待手动重试等形态均为 false——
    * 这些形态写 runtime shutdown 行是假事件（runtime 并未发生「关闭」）。
-   * 判活形态对齐 start()/restartRuntime() 的 exitCode===null 守卫（killed 不可靠的
+   * 判活形态对齐 start()/restartRuntime() 的 exitCode===null 检查（killed 不可靠的
    * [HISTORICAL] 教训）。
    */
   get isRunning(): boolean {
@@ -202,11 +202,11 @@ export class RuntimeSupervisor implements IRuntimeSupervisor {
    * 时序：if child 活着 → 复用 → stop（清旧）→ findAvailablePort → spawn → waitForHealth → writePortFile。
    * 重置 stopping 标志（从崩溃重启或用户手动重试进入时，清掉上次的 stopping）。
    *
- * 并发串行化（AM2，TOCTOU 双 spawn 根修）：toggle 入口（restartForConfigChange）
- * 与启动链/崩溃重启并发时，双方都可能通过幂等守卫（守卫检查在 await stop 之前完成）
+ * 并发串行化（AM2，TOCTOU 双 spawn 从根源修复）：toggle 入口（restartForConfigChange）
+ * 与启动链/崩溃重启并发时，双方都可能通过幂等检查（检查检查在 await stop 之前完成）
    * → 双 spawn 抢端口。修复 = promise 链串行队列：
    * - 串行而非 join（共享同一 promise）：join 会让后到的 toggle 复用先到的启动结果——
-   *   拿到旧配置的启动端口（幂等守卫命中旧实例），违背「toggle 必须以新配置重启」的
+   *   拿到旧配置的启动端口（幂等检查命中旧实例），违背「toggle 必须以新配置重启」的
    *   语义；串行队列保证每次 start 调用独立执行幂等判定。
    * - 前序失败不阻塞后序：链条以 settle 后的空 promise 续接，失败不毒化队列。
    * - 只串行化本方法：stop()/restartRuntime() 不包——attemptRestart→start 已经过本
@@ -234,12 +234,12 @@ export class RuntimeSupervisor implements IRuntimeSupervisor {
    * 与 restartRuntime() 的差异：后者对存活进程幂等短路（直接广播端口不重启），
    * 恰恰违背「以新配置重启」的语义；本方法无条件 stop + 重新 spawn。
    *
-   * 编排（收口：原 bridge-handlers 复刻的 stop→start→广播编排上收至此，
+   * 编排（收敛：原 bridge-handlers 复刻的 stop→start→广播编排上收至此，
    * renderer 可见协议变为 supervisor 单点）：
    * 1. 排入 startChain 串行队列（AM2：与手动 start / 崩溃重启并发不双 spawn；
    *    队列续接语义同 start()——前序失败不毒化后序）；
    * 2. 队列内先广播 runtime-restarting 再动作（对齐崩溃重启链时序：renderer 的
-   *    useConnection 在 restarting 即收口 pending 并停自动重连；广播晚于 stop 会让
+   *    useConnection 在 restarting 即收尾 pending 并停自动重连；广播晚于 stop 会让
    *    多秒 stop+spawn+健康检查窗口内 renderer 无任何重连提示）；
    * 3. stop()（markStopping 防 exit 误判崩溃）→ doStart()（禁止调公开 start()——
    *    会再次排队 startChain 自死锁）→ 成功广播 runtime-port（新端口）。
@@ -267,7 +267,7 @@ export class RuntimeSupervisor implements IRuntimeSupervisor {
     this.broadcastToAllWindows('runtime-restarting', { attempt: 0 })
     await this.stop()
     try {
-      // doStart 前置 stop 已清 child，幂等守卫不命中 → 必然真 spawn（新配置生效的保证）
+      // doStart 前置 stop 已清 child，幂等检查不命中 → 必然真 spawn（新配置生效的保证）
       const port = await this.doStart()
       this.broadcastToAllWindows('runtime-port', port)
       return port
@@ -287,7 +287,7 @@ export class RuntimeSupervisor implements IRuntimeSupervisor {
     }
   }
 
-  /** start() 的原函数体（幂等守卫 + 完整启动时序），串行队列内执行（AM2）。 */
+  /** start() 的原函数体（幂等检查 + 完整启动时序），串行队列内执行（AM2）。 */
   private async doStart(): Promise<number> {
     // 重置停止标志（start 是新生命周期的开始，无论上次是崩溃还是主动 stop）
     this.policy.reset()
@@ -297,7 +297,7 @@ export class RuntimeSupervisor implements IRuntimeSupervisor {
 
     // 幂等：已有活进程则复用，不重复 spawn
     // [HISTORICAL] 用 exitCode===null 判活而非 !killed：自然崩溃时 killed 仍为 false，
-    // 仅 exitCode 由 null 变为退出码。避免崩溃后守卫误判存活、返回死端口（应用假死）。
+    // 仅 exitCode 由 null 变为退出码。避免崩溃后检查误判存活、返回死端口（应用假死）。
     if (this.child && this.child.exitCode === null && this._port !== null) {
       // runtime 存活复用：历史启动失败已非当前事实，清除（startError 语义 = 当前无已知失败）
       this.lastStartError = null
@@ -315,7 +315,7 @@ export class RuntimeSupervisor implements IRuntimeSupervisor {
 
     // [HISTORICAL] W5 改动 4：spawn 成功但 waitForHealth 可能失败（进程半活）。
     // 必须包 try-catch：失败时主动 stop() 清理半活 child，
-    // 否则 child 引用残留 → 下次 start 幂等守卫误判存活 → 返回死端口（应用假死）。
+    // 否则 child 引用残留 → 下次 start 幂等检查误判存活 → 返回死端口（应用假死）。
     try {
       await waitForHealth(port)
     } catch (e) {
@@ -451,10 +451,10 @@ export class RuntimeSupervisor implements IRuntimeSupervisor {
       reason: 'process alive (exitCode null) but HTTP liveness probe failed threshold '
         + `(${LIVENESS_FAIL_THRESHOLD} consecutive times); killing process tree before backoff restart`,
     })
-    // 崩溃台账双写（crash-forensics D1 第四挂点）：必须与 kill decision 同点在杀链
+    // 崩溃登记清单双写（crash-forensics D1 第四挂点）：必须与 kill decision 同点在杀链
     // 发起处记——下方 markStopping 后，本强杀的 exit 落 onRuntimeExit 的 stopping
     // 早退分支无行可写（D1：按 stopping 写 crash 会把正常退出记假 crash，故该分支
-    // 零写入），不在发起处记则 liveness 判死在台账永久缺席。
+    // 零写入），不在发起处记则 liveness 判死在登记清单永久缺席。
     crashJournal.append({ layer: 'runtime', event: 'unresponsive', reason: 'liveness-unhealthy' })
     // markStopping 防止 stop 触发的 exit 被 onRuntimeExit 当崩溃重复重启
     this.policy.markStopping()
@@ -478,7 +478,7 @@ export class RuntimeSupervisor implements IRuntimeSupervisor {
    * runtime 子进程退出处理（自然崩溃路径）。
    *
    * [HISTORICAL] 核心重启编排：
-   * 1. 清 child/port（幂等守卫不再误判存活）
+   * 1. 清 child/port（幂等检查不再误判存活）
    * 2. stopping 检查（主动退出短路）
    * 3. restart-policy 判定（计数上限）
    * 4. 退避后 start()（重启在途幂等）
@@ -489,15 +489,15 @@ export class RuntimeSupervisor implements IRuntimeSupervisor {
   private onRuntimeExit(code: number | null): void {
     // 先捕获 pid 再清状态：杀链决策日志需要「谁死了」（u5b kill decision 的 target 语义）
     const pid = this.child?.pid
-    // 清状态（幂等守卫据此判定无活进程）；token 随进程死亡失效（防旧 token 复用）
+    // 清状态（幂等检查据此判定无活进程）；token 随进程死亡失效（防旧 token 复用）
     this.child = null
     this._port = null
     this._token = null
 
-    // 崩溃台账（crash-forensics D1：runtime 自身事件由 main 侧写——runtime 被 SIGKILL
+    // 崩溃登记清单（crash-forensics D1：runtime 自身事件由 main 侧写——runtime 被 SIGKILL
     // 时自己写不了，supervisor 是唯一在场者）。分类判别式见 classifyRuntimeExit：
     // - planned-shutdown（exit 86）→ shutdown/planned；reason='planned' 是 schema 已知值
-    // - crash → crash/process_exit；reason 用既有 SupervisorRestartTrigger 词（台账
+    // - crash → crash/process_exit；reason 用既有 SupervisorRestartTrigger 词（登记清单
     //   reason 为开放枚举，未登记进 shared KNOWN_REASONS——那是 u1a 领地，开放语义允许携带）
     // - suppressed（stopping / before-quit 上下文）→ 零写入：本分支覆盖 app 级正常退出
     //   与 liveness 强杀两类 exit（后者的行在 forceRestartForLiveness 杀链发起处）
@@ -643,7 +643,7 @@ export class RuntimeSupervisor implements IRuntimeSupervisor {
 
   /**
    * 广播事件到所有存活窗口（复用 broadcastWindowList 模式）。
-   * 不存窗口引用（避免悬垂），每次实时 getAllWindows + isDestroyed 守卫。
+   * 不存窗口引用（避免悬垂），每次实时 getAllWindows + isDestroyed 检查。
    */
   private broadcastToAllWindows(channel: string, payload: unknown): void {
     for (const win of BrowserWindow.getAllWindows()) {

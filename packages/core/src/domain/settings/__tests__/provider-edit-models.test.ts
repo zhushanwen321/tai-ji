@@ -237,7 +237,7 @@ describe('D9 思考档位修复（reasoning 显式化 + 预设对齐 pi 过滤�
     expect(model.reasoning).toBe(true)
 
     // all-levels 分支同规则：存量最常见形态 = all-levels + reasoning 缺失，
-    // 救回路径必须闭合在这里（只联动非 all-levels 会让它不闭合）
+    // 救回路径必须封在这里（只联动非 all-levels 会让它封不住）
     const modelAll: LocalModel = { id: 'm2', name: 'M2' }
     m.pickStrategy(modelAll, 'all-levels')
     expect(modelAll.reasoning).toBe(true)
@@ -363,7 +363,7 @@ describe('save 回传规则（buildModelsPayload：B-2 只回传编辑副本 + B
     expect(payload[0]).not.toHaveProperty('headers')
   })
 
-  it('reasoning 显式 false 是合法值须回传（!== undefined 判定，不被 truthy 守卫吞）', () => {
+  it('reasoning 显式 false 是合法值须回传（!== undefined 判定，不被 truthy 检查吞）', () => {
     const payload = buildModelsPayload([{ id: 'm', name: 'M', reasoning: false }])
     // 协议形状 Array<string | object>：元素经运行时收窄后取字段（禁无 guard 断言）
     const first = payload[0]

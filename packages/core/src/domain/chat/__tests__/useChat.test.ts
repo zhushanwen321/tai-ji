@@ -8,16 +8,16 @@
  *
  * 历史注入的生产通路 = session 域 reconcile（use-session 点击切入统一入口，经
  * historyWindowFromReply 归一后写 store.hydrate/reconcileHistory）——原 useChat.hydrateHistory
- * 死导出已删（b05 候选 4），hydrate 相关用例改走 store.hydrate 验收路径。
+ * 导出但无任何调用点的代码已删（b05 候选 4），hydrate 相关用例改走 store.hydrate 验收路径。
  *
  * [u3b 退役] defer flush/S1 拒绝检测/1s 重投 timer/5 次熔断/handleSendRejected/pendingDirectSends
- * /steer pendingBuffer 计数腿相关 describe 已删除（设计 §3.1 删除面），由「统一 submit +
+ * /steer pendingBuffer 计数路径相关 describe 已删除（设计 §3.1 删除面），由「统一 submit +
  * delivery 帧 morph + 回执入流」describe 承接，git 可追溯。
  *
  * 模式（对齐 w4 store.test.ts）：effectScope + createChatStore（真实 store）+ mockDeps
  * （chatApi/sessionStore/toast vi.fn），streamSubscribe mock 捕获 handler
  * 供测试主动 emit 消息（模拟 WS 事件流）。beforeEach resetChatModuleStateForTest() 清
- * 模块级 streamSubscriptions + subscriptionStates + 内核投影（测试隔离）。
+ * 模块级 streamSubscriptions + subscriptionStates + 内核派生视图（测试隔离）。
  */
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 import { effectScope, nextTick, toRaw } from 'vue'
@@ -74,7 +74,7 @@ function makeFixture(): Fixture {
     subagentAction: vi.fn().mockResolvedValue(undefined),
     abort: vi.fn().mockResolvedValue(undefined),
     compact: vi.fn().mockResolvedValue(undefined),
-    // bash 回执契约（dmg-r1-2）：默认 = 已执行并收口（BashDispatchReceipt settled）
+    // bash 回执契约（dmg-r1-2）：默认 = 已执行并收尾（BashDispatchReceipt settled）
     bash: vi.fn().mockResolvedValue({ status: 'settled' }),
     abortBash: vi.fn().mockResolvedValue(undefined),
     getHistory: vi.fn().mockResolvedValue({ messages: [], truncated: false, loadedTurns: 0, totalTurnsEstimate: 0 }),
@@ -84,7 +84,7 @@ function makeFixture(): Fixture {
         streamHandlers.delete(sid)
       }
     }),
-    // [U5 消息撤回] 两条撤回 RPC 腿（默认成功臂；错误臂用例 mockResolvedValueOnce 覆写）
+    // [U5 消息撤回] 两条撤回 RPC 路径（默认成功臂；错误臂用例 mockResolvedValueOnce 覆写）
     revokeMessage: vi.fn().mockResolvedValue({ sessionId: 's1', revoked: true, content: '' }),
     cancelDelivery: vi.fn().mockResolvedValue({ clientUuid: 'u-x', cancelled: false }),
   }
@@ -333,11 +333,11 @@ describe('createUseChat factory 行为', () => {
     f.dispose()
   })
 
-  it('disposeSession：取消订阅 + 清内核投影，再 send 重新订阅', async () => {
+  it('disposeSession：取消订阅 + 清内核派生视图，再 send 重新订阅', async () => {
     const f = makeFixture()
     await f.useChat.send('s12', textToSegments('hi'))
     expect(f.chatApi.streamSubscribe).toHaveBeenCalledTimes(1)
-    // 预置投影 → dispose 清分区（clearDeliveryProjection 编排）
+    // 预置派生视图 → dispose 清分区（clearDeliveryProjection 编排）
     replaceDeliveryProjection('s12', [{ clientUuid: 'u-1', preview: 'p', state: 'queued', lane: 'queued' }])
     f.useChat.disposeSession('s12')
     expect(getDeliveryProjection('s12')).toHaveLength(0)
@@ -619,7 +619,7 @@ describe('session.delivery 帧消费与气泡 morph（u3b / D7）', () => {
     } as unknown as ServerMessage
   }
 
-  it('morph：steer 车道帧到达 → 乐观气泡移出对话流 + 投影落位（队列区数据）+ dispatching 占位回收', async () => {
+  it('morph：steer 车道帧到达 → 乐观气泡移出对话流 + 派生视图落位（队列区数据）+ dispatching 占位回收', async () => {
     const f = makeFixture()
     await f.useChat.send('m1', textToSegments('补充要求'))
     const bubbleId = f.chatStore.getMessages('m1').find((m) => m.role === 'user')!.id
@@ -629,7 +629,7 @@ describe('session.delivery 帧消费与气泡 morph（u3b / D7）', () => {
 
     // 气泡 morph：移出对话流（气泡 → 队列条目）
     expect(f.chatStore.getMessages('m1').some((m) => m.id === bubbleId)).toBe(false)
-    // 投影落位（单一数据源，u3c QueueBubble 消费）
+    // 派生视图落位（单一数据源，u3c QueueBubble 消费）
     expect(getDeliveryProjection('m1')).toHaveLength(1)
     expect(getDeliveryProjection('m1')[0]).toMatchObject({ clientUuid: bubbleId, state: 'in-flight', lane: 'steer' })
     // 非直发车道：dispatching 空窗占位回收（无「本条即将触发 message_start」语义）
@@ -637,7 +637,7 @@ describe('session.delivery 帧消费与气泡 morph（u3b / D7）', () => {
     f.dispose()
   })
 
-  it('direct 车道帧：气泡保持待确认（不 morph 不移除），投影照常落位', async () => {
+  it('direct 车道帧：气泡保持待确认（不 morph 不移除），派生视图照常落位', async () => {
     const f = makeFixture()
     await f.useChat.send('m2', textToSegments('直达消息'))
     const bubbleId = f.chatStore.getMessages('m2').find((m) => m.role === 'user')!.id
@@ -657,7 +657,7 @@ describe('session.delivery 帧消费与气泡 morph（u3b / D7）', () => {
 
     f.emit('m3', deliveryFrame('m3', [{ clientUuid: bubbleId, state: 'delivered', lane: 'steer' }]))
 
-    // delivered 条目：无 morph 动作（气泡既已不在也不重建；帧只更新投影）
+    // delivered 条目：无 morph 动作（气泡既已不在也不重建；帧只更新派生视图）
     expect(getDeliveryProjection('m3')[0]?.state).toBe('delivered')
     f.dispose()
   })
@@ -691,7 +691,7 @@ describe('session.delivery 帧消费与气泡 morph（u3b / D7）', () => {
     // 段保真：skill badge 段引用恒等（morph 暂存搬运非重建）+ 序列化文本与提交原样一致
     expect(toRaw(delivered.content)).toBe(segs)
     expect(segmentsToText(delivered.content as Segment[])).toBe('<taiji-skill name="deploy"/> --prod')
-    // 投影转 delivered（队列条目随即隐去）+ inflight 占位回收
+    // 派生视图转 delivered（队列条目随即隐去）+ inflight 占位回收
     expect(getDeliveryProjection('m4')[0]?.state).toBe('delivered')
     expect(f.chatStore.getInflight('m4')).toBe(0)
     f.dispose()
@@ -713,7 +713,7 @@ describe('session.delivery 帧消费与气泡 morph（u3b / D7）', () => {
     expect(f.chatStore.getMessages('m5').filter((m) => m.role === 'user')).toHaveLength(0)
     expect(getDeliveryProjection('m5')).toHaveLength(2)
     // 投递序回执：第一条先回（气泡回填），第二条后回——回填顺序与发送序一致
-    // [消息撤回 U8] 回执入流保号：重建气泡沿用提交时 clientUuid，可直接断言 id
+    // [消息撤回 U8] 回执入流保留原 id：重建气泡沿用提交时 clientUuid，可直接断言 id
     f.emit('m5', userEndFrame('m5', '第一条', ids[0]!.slice(2)))
     f.emit('m5', userEndFrame('m5', '第二条', ids[1]!.slice(2)))
     const users = f.chatStore.getMessages('m5').filter((m) => m.role === 'user')
@@ -730,11 +730,11 @@ describe('session.delivery 帧消费与气泡 morph（u3b / D7）', () => {
     f.dispose()
   })
 
-  it('occupancy idle 帧只写投影（flush 触发源退役——重投由内核驱动）', async () => {
+  it('occupancy idle 帧只写派生视图（flush 触发源退役——重投由内核驱动）', async () => {
     const f = makeFixture()
     await f.useChat.send('m6', textToSegments('hi'))
     f.emit('m6', msg('m6', 'session.occupancy', { turn: 'idle', compacting: false, bash: false }))
-    // 前身：全 idle + 队列非空 → flush 投递；退役后 occupancy 只维护投影，无任何投递编排
+    // 前身：全 idle + 队列非空 → flush 投递；退役后 occupancy 只维护派生视图，无任何投递编排
     expect(f.toast.error).not.toHaveBeenCalled()
     expect(f.toast.warning).not.toHaveBeenCalled()
     f.dispose()
@@ -948,20 +948,20 @@ describe('send 族 toast 抑制（D4-2 分类码：message_blocked→抑制 / �
   })
 })
 
-describe('恢复窗口过渡态的 message_start 收口 gate（crash-resilience T4 回流修复）', () => {
+describe('恢复窗口过渡态的 message_start 收尾 gate（crash-resilience T4 回流修复）', () => {
   // 缺陷背景（Gate B A7 真机）：恢复窗口（respawnPending）内用户发消息 → runtime 惰性恢复
   // join 先于 D7 自动恢复 timer 完成 → timer fire「already active/restoring — skip」→
   // session.restored 帧永不发布 → 前端过渡态只能等 30s 超时回落 dead 终态页（而 session
-  // 实际已活）。收口信号 = 恢复窗口内该 session 的 message_start 到达（新 pi 已在处理）。
+  // 实际已活）。收尾信号 = 恢复窗口内该 session 的 message_start 到达（新 pi 已在处理）。
 
-  it('respawnPending 内 message_start 到达 → 过渡态收口 + T4 条入流 + sessionStore.revive', async () => {
+  it('respawnPending 内 message_start 到达 → 过渡态收尾 + T4 条入流 + sessionStore.revive', async () => {
     const f = makeFixture()
     await f.useChat.send('s-join', textToSegments('hello during recovery'))
     f.chatStore.markRespawnPending('s-join')
 
     f.emit('s-join', msg('s-join', 'message.message_start', { messageId: 'a-join' }))
 
-    // 过渡态收口（同步于 enqueue 前——流式帧处理前 T4 条已在流内，先于 assistant 气泡）
+    // 过渡态收尾（同步于 enqueue 前——流式帧处理前 T4 条已在流内，先于 assistant 气泡）
     expect(f.chatStore.isRespawnPending('s-join')).toBe(false)
     expect(f.sessionStore.revive).toHaveBeenCalledWith('s-join')
     const notice = f.chatStore
@@ -986,11 +986,11 @@ describe('恢复窗口过渡态的 message_start 收口 gate（crash-resilience 
     f.dispose()
   })
 
-  it('restored 帧先行收口后 message_start 到达 → 二次收口 no-op（不插双条）', async () => {
+  it('restored 帧先行收尾后 message_start 到达 → 二次收尾 no-op（不插双条）', async () => {
     const f = makeFixture()
     await f.useChat.send('s-race', textToSegments('hi'))
     f.chatStore.markRespawnPending('s-race')
-    // 模拟 restored 帧先到（renderer useMessageEffects.handleSessionRestored 的收口三件套）
+    // 模拟 restored 帧先到（renderer useMessageEffects.handleSessionRestored 的收尾三件套）
     f.chatStore.clearRespawnPending('s-race')
     f.chatStore.appendRespawnNotice('s-race', 'restored', 'panel.message.respawnRestored')
 
@@ -1006,16 +1006,16 @@ describe('恢复窗口过渡态的 message_start 收口 gate（crash-resilience 
   })
 })
 
-// ── [u5a 收口扩展 / #12 对称腿] 扩展命令手敲链 pendingSend 复位 ──
+// ── [u5a 收尾扩展 / #12 对称路径] 扩展命令手敲链 pendingSend 复位 ──
 // pi 扩展命令（手敲 /schedule … 等）同步执行、无 message_start/agent_start 回流 →
 // pendingSend（受理上屏时置位、正常由 message_start 清）永久在挂 → isActive 并集判定
 // 恒 true（steer placeholder + abort 按钮卡死）。修复：handleSessionOccupancy 收到三维
 // 全 idle 权威帧时清 pendingSend（权威帧兜底乐观态；与 defer flush 判据同形）。
-// [ADR-0122 受理回执后上屏] idle 帧的收口对象 = 受理确认后置位的 pendingSend（reply 先于
+// [ADR-0122 受理回执后上屏] idle 帧的收尾对象 = 受理确认后置位的 pendingSend（reply 先于
 // idle 帧到达的正常时序）；idle 帧先于 reply 的极端时序下置位尚未发生（帧 no-op），命令
-// 条目的收口归 session.deliveryHandled 终局（U2① 用例锁定）——全事件驱动，无墙钟兜底。
+// 条目的收尾归 session.deliveryHandled 终局（U2① 用例锁定）——全事件驱动，无墙钟兜底。
 
-describe('扩展命令手敲链 pendingSend 复位（#12 对称腿）', () => {
+describe('扩展命令手敲链 pendingSend 复位（#12 对称路径）', () => {
   beforeEach(() => {
     resetChatModuleStateForTest()
   })
@@ -1025,7 +1025,7 @@ describe('扩展命令手敲链 pendingSend 复位（#12 对称腿）', () => {
     await f.useChat.send('ec1', textToSegments('/schedule list'))
     // 受理上屏后 pendingSend 置位（扩展命令无 message_start 可清）
     expect(f.chatStore.isPendingSend('ec1')).toBe(true)
-    // runtime 收口帧（message-dispatcher willExecuteAsExtensionCommand 命中后广播）：
+    // runtime 收尾帧（message-dispatcher willExecuteAsExtensionCommand 命中后广播）：
     // 扩展命令无 message_start，权威 idle 帧兜底清乐观态
     f.emit('ec1', msg('ec1', 'session.occupancy', { turn: 'idle', compacting: false, bash: false }))
     expect(f.chatStore.isActive('ec1')).toBe(false)
@@ -1129,7 +1129,7 @@ describe('[U5] useChat.revokeMessage（统一撤回编排）', () => {
     return { id, role: 'assistant', content: `msg-${id}`, status: 'complete', timestamp: Date.now() }
   }
 
-  /** 预置投影条目（在途路由判定数据源） */
+  /** 预置派生视图条目（在途路由判定数据源） */
   function seedProjection(sid: string, entries: Array<{ clientUuid: string; state: 'queued' | 'in-flight' | 'delivered' | 'failed'; lane?: 'direct' | 'steer' | 'queued' }>): void {
     replaceDeliveryProjection(sid, entries.map((e) => ({ clientUuid: e.clientUuid, preview: 'p', state: e.state, lane: e.lane ?? 'steer' })))
   }
@@ -1138,7 +1138,7 @@ describe('[U5] useChat.revokeMessage（统一撤回编排）', () => {
     resetDeliveryProjectionForTest()
   })
 
-  it('在途路由（投影条目未 delivered）→ 走 cancelDelivery 腿，不触达 revokeMessage RPC', async () => {
+  it('在途路由（派生视图条目未 delivered）→ 走 cancelDelivery 路径，不触达 revokeMessage RPC', async () => {
     const f = makeFixture()
     seedProjection('sr1', [{ clientUuid: 'u-1', state: 'queued' }])
     f.chatApi.cancelDelivery.mockResolvedValueOnce({ clientUuid: 'u-1', cancelled: true, content: '收回原文', segments: [{ type: 'text', text: '收回原文' }] })
@@ -1161,15 +1161,15 @@ describe('[U5] useChat.revokeMessage（统一撤回编排）', () => {
     f.dispose()
   })
 
-  it('已送达 → revokeMessage RPC；revoked:true → 重拉 history（reconcileHistory 链）+ 草稿剥标记回填', async () => {
+  it('已送达 → revokeMessage RPC；revoked:true → 重新拉取 history（reconcileHistory 链）+ 草稿剥标记回填', async () => {
     const f = makeFixture()
-    // 投影无该条目（已 morph 为 transcript）= 已送达
+    // 派生视图无该条目（已 morph 为 transcript）= 已送达
     f.chatApi.revokeMessage.mockResolvedValueOnce({ sessionId: 'sr3', revoked: true, content: `原文内容\n${TAG}` })
     f.chatApi.getHistory.mockResolvedValueOnce({ messages: [makeHistMsg('m1')], truncated: false, loadedTurns: 1, totalTurnsEstimate: 1 })
     await f.useChat.revokeMessage('sr3', 'entry-1')
     expect(f.chatApi.revokeMessage).toHaveBeenCalledWith('sr3', 'entry-1')
     expect(f.chatApi.cancelDelivery).not.toHaveBeenCalled()
-    // 重拉经 reconcileHistory 写入分区（live ≡ reload 汇合点）
+    // 重新拉取经 reconcileHistory 写入分区（live ≡ reload 汇合点）
     expect(f.chatApi.getHistory).toHaveBeenCalledWith('sr3')
     expect(f.chatStore.getMessages('sr3').map((m) => m.id)).toEqual(['m1'])
     // 草稿回填：content 剥标记后送 composer（D7）
@@ -1187,7 +1187,7 @@ describe('[U5] useChat.revokeMessage（统一撤回编排）', () => {
     f.dispose()
   })
 
-  it('重拉失败不阻断回填（撤回已生效——warn 留痕，restoreDraft 照做）', async () => {
+  it('重新拉取失败不阻断回填（撤回已生效——warn 留痕，restoreDraft 照做）', async () => {
     const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
     const f = makeFixture()
     f.chatApi.revokeMessage.mockResolvedValueOnce({ sessionId: 'sr5', revoked: true, content: `原文\n${TAG}` })

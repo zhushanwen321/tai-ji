@@ -238,7 +238,7 @@ describe("Trace update patch.result 缺省", () => {
 
 describe("Trace.fromArray 原样保留", () => {
   it("W1TC8: 超长 content 不被二次裁剪；已含标记的形态逐字节不变", () => {
-    // 旧版本未裁剪的快照重水合：20000 字符全长保留
+    // 旧版本未裁剪的快照重新加载：20000 字符全长保留
     const long = {
       ...makeTraceNode(0),
       result: makeResult("z".repeat(20000)),

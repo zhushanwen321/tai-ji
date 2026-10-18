@@ -320,7 +320,7 @@ describe("provider_config 补注入（D3 顺带发现 6：引擎校验源个人 
   });
 
   it("kind 按条目 api.type 派生（D3）：anthropic-messages → anthropic，openai-chat-completions → openai-compatible（透传真实条目同受派生）", () => {
-    // 守卫语义：合成 CLI 条目的协议形态必须与 providerRules 条目 api.type 一致
+    // 检查语义：合成 CLI 条目的协议形态必须与 providerRules 条目 api.type 一致
     // （v2 config.json kind 两值形态）——anthropic 协议条目落 openai-compatible 即
     // 注册表协议错配（请求期才暴露）。透传真实条目（provider_config.json 既有
     // anthropic 协议条目）同受派生 = D3 波及面登记的行为变化（错配顺带修正）。
@@ -601,7 +601,7 @@ describe("merge 对账（launcher 内嵌 JS × preparer TS——D3 双实装逐�
 
 describe("入口锚（argv[1] 改写）", () => {
   it("CLI 内看到的 argv[1] = 真实 CLI 路径（ZCODE_ENG_CLI_PATH），wrapper 路径不泄漏回 argv[1]", () => {
-    // 守卫语义：上游 provider bootstrap 以 argv[1] 为入口锚，从该路径邻近定位 CLI
+    // 检查语义：上游 provider bootstrap 以 argv[1] 为入口锚，从该路径邻近定位 CLI
     // 内建 provider 配置——wrapper 路径泄漏回 argv[1] 即启动期 provider 配置定位
     // 失败（真机事故形态：报「无法定位 CLI ZCode Built-in Provider Config」即退）。
     const h = setupHome({ v2: { provider: { p1: providerEntry("k1") } }, real: {} });

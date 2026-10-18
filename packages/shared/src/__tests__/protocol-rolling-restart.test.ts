@@ -79,7 +79,7 @@ describe('protocol rollingRestart 契约（u7b）', () => {
     const frames: RollingRestartStatusPayload[] = [
       { state: 'idle', inflight: { inFlight: 0 } },
       { state: 'deferred', reason: 'inflight', inflight: { inFlight: 3 }, deferDeadlineAt: 1_700_001_800_000 },
-      // errs 形态（D5 ④ 钉死）：计数取 null + reason=absent-report 独立标记
+      // errs 形态（D5 ④ 固定）：计数取 null + reason=absent-report 独立标记
       { state: 'deferred', reason: 'absent-report', inflight: { inFlight: null }, deferDeadlineAt: 1_700_001_800_000 },
       { state: 'countdown', reason: 'inflight', inflight: { inFlight: 1 }, deferDeadlineAt: 1_700_001_800_000 },
       { state: 'rolling', reason: 'hard-threshold', inflight: { inFlight: 2 } },

@@ -8,7 +8,7 @@
  * - 执行：workflowAction RPC + loadWorkflows 刷新（不做乐观写——workflow 状态由 runtime
  *   推送权威）；失败 toast（错误文案单 key panel.tray.workflowOpFailed，zh/en 同步登记）。
  * - sessionId 由调用方以 getter 注入（tab 消费 panelStore.focusedSessionId / tray 消费
- *   props.sessionId），getter 返回空时不发 RPC（守卫边界）。
+ *   props.sessionId），getter 返回空时不发 RPC（检查边界）。
  */
 import { useI18n } from 'vue-i18n'
 import { toErrorMessage } from '@taiji/core'

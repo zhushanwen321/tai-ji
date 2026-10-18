@@ -214,7 +214,7 @@ export class DialogGlobalQueue {
    * 的 current（handler 等用户输入卡死）时，processNext 的 `await item.handler` 永不 resume，
    * 尾部不会执行；只有 settleItem 里的 processNext 才能打破死锁，推进下一个。
    *
-   * [A2-2] 超时 timer 清理也统一收口在这里：任何路径抢先 settle（reject/rejectAll/超时
+   * [A2-2] 超时 timer 清理也统一收尾在这里：任何路径抢先 settle（reject/rejectAll/超时
    * 自身）都必须撤下 armed timer——handler 永挂时 processNext 内联的 clearTimeout 不可达，
    * 不在这里清则 timer 到期触发虚假「dialog timed out」warn 且句柄滞留至超时点。
    */

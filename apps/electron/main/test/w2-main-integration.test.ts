@@ -306,7 +306,7 @@ describe('W2-handler-error-log appendUpdateError 落盘', () => {
     expect(resolveProxyUrl({ mode: 'disabled' })).toBeUndefined()
   })
 
-  // 守卫：error-log 不得再自带代理 URL 解析本地实现（曾因与 proxy-config.resolveProxyUrl
+  // 检查：error-log 不得再自带代理 URL 解析本地实现（曾因与 proxy-config.resolveProxyUrl
   // 同构双实现存在 drift 隐患而收敛，D7 SSOT 要求）
   it('W2-handler-error-log error-log.ts 无本地代理解析双实现', () => {
     const src = readSource('apps/electron/main/update/error-log.ts')

@@ -4,21 +4,21 @@
 // `execution/assembly/types.ts`）。
 //
 // 本批迁入：`ExecutionRecord`（record 聚合根）、`AgentResult`（record 内嵌的单次
-// agent 调用结果值对象）、判定谓词 `isValidStopReason`、两个判别联合守卫
+// agent 调用结果值对象）、判定谓词 `isValidStopReason`、两个判别联合检查
 // （`isPiTranscriptRef` / `isZcodeTranscriptRef`）、`DEFAULT_AGENT_NAME`。
 // [⑥ 清理] `isReconnectableFinalReason` 随 manifest 重物化族（rematerialize*）退场删除
-// ——唯一消费点已消失，死守卫不留。
+// ——唯一消费点已消失，失效的检查不留。
 //
 // 依赖方向：只依赖 `./record-types.ts`（同层词汇）与 SDK 契约类型（`Turn` /
 // `ToolCall` / `WorktreeHandle` / `AgentFailureKind` / `AgentUsageTotal`）——**不 import
-// assembly / orchestration**，领域层在下由构造保证（值依赖环守卫 C-data-26 同批覆盖）。
+// assembly / orchestration**，领域层在下由构造保证（值依赖环检查 C-data-26 同批覆盖）。
 //
 // 刻意**不迁** `SubagentRecord`：字段证据（`eventLog: AgentEventLogEntry[]` +
 // `displayItems: DisplayItem[]`）表明它是**应用层读模型**（同时携带领域字段与展示
 // 载荷），不属领域实体；强行迁入会逼出「领域层 import 展示 DTO」的反向依赖。登记
 // §2.4 已按此证据更正早先的「只读视图归领域」判断。
 //
-// 过渡形态：`execution/assembly/types.ts` 仍 re-export 本文件全部导出（消费面零改动）。
+// 过渡形态：`execution/assembly/types.ts` 仍 re-export 本文件全部导出（消费方零改动）。
 
 import type {
   AgentFailureKind,
@@ -64,7 +64,7 @@ export type SubagentModelSource = "explicit" | "frontmatter" | "preference" | "d
  */
 export const DEFAULT_AGENT_NAME = "general-purpose";
 
-/** 窄化守卫：值是否为合法 StopReason 字面量（外部输入防御性解析用）。 */
+/** 窄化检查：值是否为合法 StopReason 字面量（外部输入防御性解析用）。 */
 export function isValidStopReason(value: string | undefined): value is StopReason {
   return (STOP_REASONS as readonly string[]).includes(value ?? "");
 }
@@ -95,12 +95,12 @@ export interface ModelOverride {
   setAt: number;
 }
 
-/** 判别联合收窄守卫：pi 锚分支。 */
+/** 判别联合收窄检查：pi 锚分支。 */
 export function isPiTranscriptRef(ref: TranscriptRef): ref is PiTranscriptRef {
   return ref.engine === "pi";
 }
 
-/** 判别联合收窄守卫：zcode 锚分支。 */
+/** 判别联合收窄检查：zcode 锚分支。 */
 export function isZcodeTranscriptRef(ref: TranscriptRef): ref is ZcodeTranscriptRef {
   return ref.engine === "zcode";
 }
@@ -130,7 +130,7 @@ export interface AgentResult { // oe-exempt:20260930:framework:领域值对象�
 /**
  * 所有执行路径的唯一状态源。
  *
- * 收口设计：一次执行的完整内容（text/thinking/toolCalls/usage）按 turn 收口在
+ * 汇总设计：一次执行的完整内容（text/thinking/toolCalls/usage）按 turn 汇总在
  * `turns: Turn[]` 里。eventLog / currentActivity / result 文本均从 turns[] 派生
  * （getEventLog / getCurrentActivity / getFullText），不再独立存储切片或缓冲。
  *
@@ -147,7 +147,7 @@ export interface ExecutionRecord { // oe-exempt:20260930:framework:领域聚合�
   readonly agent: string;
   /**
    * 模型留痕（R4/D6-① 可选化）：undefined = 用户未指定模型（引擎走自身缺省解析，
-   * 如 zcode 的 defaultModelSelection）——如实投影「未选择」，不伪造成 fallback 已选。
+   * 如 zcode 的 defaultModelSelection）——如实呈现「未选择」，不伪造成 fallback 已选。
    * 禁空串哨兵：写侧（resolveIdentityForEngine）与读侧水合（record-store-rebuild /
    * state-marker）均把空串归一为 undefined。
    */
@@ -184,8 +184,8 @@ export interface ExecutionRecord { // oe-exempt:20260930:framework:领域聚合�
   readonly depth: number;
   /**
    * 来源身份（H2 W1，D1）。缺省（undefined）语义 = "tool"（存量 record 零迁移）；
-   * "workflow" = workflow 脚本 agent() 派发（生产写入方 W2 接线）。过滤在投影/查询
-   * 消费面（list 默认滤 workflow origin），store 治理面（孤儿恢复/revive）全量可见。
+   * "workflow" = workflow 脚本 agent() 派发（生产写入方 W2 接线）。过滤在派生视图/查询
+   * 消费方（list 默认滤 workflow origin），store 治理面（孤儿恢复/revive）全量可见。
    * 持久化经 subagent-record entry。
    */
   readonly origin?: RecordOrigin;
@@ -198,8 +198,8 @@ export interface ExecutionRecord { // oe-exempt:20260930:framework:领域聚合�
   /**
    * [W0 / D1] origin="workflow" 时在 run 内的步骤索引（派发单源 = pump dispatch 的
    * callId/taskIndex，创建时随 originFields 写入）。additive：undefined（存量 record /
-   * tool 来源）零迁移。持久化经 subagent-record entry 与 binding sidecar（两持久化面
-   * 漏投影则重启后本字段回落 undefined，run 视图关联键缺失）。
+   * tool 来源）零迁移。持久化经 subagent-record entry 与 binding sidecar（两持久化路径
+   * 漏映射则重启后本字段回落 undefined，run 视图关联键缺失）。
    */
   readonly stepIndex?: number;
   /**
@@ -216,7 +216,7 @@ export interface ExecutionRecord { // oe-exempt:20260930:framework:领域聚合�
   readonly idleTimeoutMs?: number;
   /**
    * 实际执行引擎 id（P4 路由留痕，D9①）。创建时确定不可变；缺省（存量 record）
-   * = pi 投影（消费方零迁移）。持久化经 subagent-record entry。
+   * = pi 派生视图（消费方零迁移）。持久化经 subagent-record entry。
    */
   readonly engine?: string;
   /**
@@ -243,12 +243,12 @@ export interface ExecutionRecord { // oe-exempt:20260930:framework:领域聚合�
   /**
    * 终态三态对外语义（U3 C-outcome）。completeLegacyClosed 唯一写入点按 deriveOutcome
    * 一次计算，消费方只读本字段不再自行推导。向后兼容：旧 record / 磁盘重建
-   * record 无此字段，投影层按 projectOutcome 兜底（closed-legacy 语义）。
+   * record 无此字段，派生视图层按 projectOutcome 兜底（closed-legacy 语义）。
    */
   outcome?: ExecutionOutcome;
   /**
    * 离开批的终局标记（存量 entry 读侧兼容面——[collect 退役] 起**只读不写**）。
-   * 历史写点（批闭合 flush 落标 / E9 dispose 落标）已随 sync 批机制退役删除；磁盘上
+   * 历史写点（批收尾 flush 落标 / E9 dispose 落标）已随 sync 批机制退役删除；磁盘上
    * 存量 record 的 batchFinalized entry 必须容忍解析（旧 session 文件可读），标记保留
    * 为批域审计/孤儿 merge 透传面。undefined = 未离开批 / 退役后新记录。
    */
@@ -258,7 +258,7 @@ export interface ExecutionRecord { // oe-exempt:20260930:framework:领域聚合�
   // 全部可选、缺省 undefined = 旧语义零迁移（现有 record 构造不破坏）。
   /**
    * 展示维度：上一轮为什么停（旧 7 值 + 4 新展示值，见 {@link StopReason}）。
-   * undefined = 从未收口 / 旧数据。展示+排障；U6 起参与 isOccupied 占用判定
+   * undefined = 从未收尾 / 旧数据。展示+排障；U6 起参与 isOccupied 占用判定
    * （`running && stopReason === undefined`——W4 死亡纳管态 stopReason=failed 据此
    * 排除，[U5/D4] adoptEngineDeath 写点）。
    */
@@ -270,19 +270,19 @@ export interface ExecutionRecord { // oe-exempt:20260930:framework:领域聚合�
   epoch?: Epoch;
   /**
    * 放弃轮标记（通知 gate ②判据，单槽，随 binding 持久化）：
-   * abort 时置在飞轮；reopen 后残留标记自然失效。null 与 undefined 同义
+   * abort 时置在途轮；reopen 后残留标记自然失效。null 与 undefined 同义
    * （无标记——不存在清空操作，跨 epoch 丢弃由判定第一步承接）。
    */
   lastAbandonedRound?: AbandonedRoundMark | null;
   /**
    * 对话记录指针（引擎中立判别联合）。undefined = 锚尚未回填（spawn 窗口期）/
-   * 旧 record（迁移期仍读 sessionFile / engineHandle 投影）。
+   * 旧 record（迁移期仍读 sessionFile / engineHandle 派生视图）。
    */
   transcriptRef?: TranscriptRef;
 
   /** 完整执行内容，按 turn 组织。createRecord 初始化为 [空 turn]。 */
   turns: Turn[];
-  /** turn 计数（= turns.filter(closed).length，冗余存储供投影直接读）。 */
+  /** turn 计数（= turns.filter(closed).length，冗余存储供派生视图直接读）。 */
   turnCount: number;
   totalTokens: number;
   /** 运行期最近一次 error 事件的消息（getEventLog 派生 error 条目用）。 */
@@ -300,8 +300,8 @@ export interface ExecutionRecord { // oe-exempt:20260930:framework:领域聚合�
   // 按宽容形状处理（多余 JSON 字段无害）。
   /**
    * close 优雅关闭标志（M2-B3）。record 运行中调 `close {force:false}` 时置 true；
-   * 收口轮的轮次通知送达后收口落账消费（Continuation settle 分支 / one-shot 主干尾部，
-   * 顺序约束 [写死]——收口落账必须在通知链之后，提前会丢收口轮通知）。
+   * 收尾轮的轮次通知送达后收尾写入 journal 记录的消费（Continuation settle 分支 / one-shot 主干尾部，
+   * 顺序约束 [写死]——收尾写入 journal 记录必须在通知链之后，提前会丢收尾轮通知）。
    * undefined/false = 正常 idle 分流（轮次完成进 idle 等续聊）。
    * 仅 running 时有意义；force:true（立即终止）不走此标志。
    */

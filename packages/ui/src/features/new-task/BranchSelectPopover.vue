@@ -43,7 +43,7 @@ import { ref, computed, onMounted, nextTick } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { GitBranch, GitFork, Plus, GitGraph, TriangleAlert, Loader2 } from '@lucide/vue'
 // ui 原语走包内相对导入（不经 @taiji/ui 顶层 barrel）：new-task 组件经顶层 barrel
-// 再导出，顶层 barrel 自引用会闭合循环依赖环（R2 S-1）
+// 再导出，顶层 barrel 自引用会封住循环依赖环（R2 S-1）
 import { Input } from '../../primitives/input'
 import { PopoverActionItem, PopoverListItem } from '../../primitives/popover'
 import { useNewTaskDeps } from './new-task-deps'

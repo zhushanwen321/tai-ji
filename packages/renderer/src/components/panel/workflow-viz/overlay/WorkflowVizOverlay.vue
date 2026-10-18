@@ -5,7 +5,7 @@
   查询」的资源清理手法）。
 
   结构与分层（display-containers §6.5/§7.3）：面板 + 遮罩 + 两通道关闭（点遮罩 /
-  按钮）+ Tab 焦点陷阱注册 + IME 守卫 + 焦点契约（打开 focus 面板 / 关闭回 composer）
+  按钮）+ Tab 焦点陷阱注册 + IME 检查 + 焦点契约（打开 focus 面板 / 关闭回 composer）
   全部归 OverlayShell；本组件是挂进壳标题栏 slot 与 body 的 workflow 内容层。
   header 双态（scheduler 整合一级 tab，2026-10-06 用户裁决）：tab=runs = 六元素行
   （图标 + workflow 名 + slug + 状态 pill + errorCode + 已用时长，关闭钮归壳不计入
@@ -344,7 +344,7 @@ const tabSegments = computed<Array<{ value: OverlayTab; label: string; icon: typ
   { value: 'scheduler', label: t('panel.workflowViz.overlayTabScheduler'), icon: Clock },
 ])
 
-/** tab 点击（禁用判据在入口守卫，不依赖浏览器对 disabled 按钮的点击抑制）：无 run 时「运行」不可进。 */
+/** tab 点击（禁用判据在入口检查，不依赖浏览器对 disabled 按钮的点击抑制）：无 run 时「运行」不可进。 */
 function onTabClick(value: OverlayTab): void {
   if (value === 'runs' && props.run === null) return
   emit('update:tab', value)

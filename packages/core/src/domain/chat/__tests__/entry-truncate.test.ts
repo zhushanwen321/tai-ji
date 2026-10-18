@@ -8,8 +8,8 @@
  *   · reducer 双入口（applyEntry 累积 = live / replayEntries = reload）同一截断函数，
  *     非六类工具（MCP）大结果两路径产物 deep-equal 且都呈截断形态
  *   · live overlay（registry tool_call_end handler）与 reducer 同函数：对同一大 output
- *     的投影逐字节一致
- * - 六类工具 4KB 投影与 64KB 累积截断的层级关系：5KB output 累积态原样保留（投影截断
+ *     的派生视图逐字节一致
+ * - 六类工具 4KB 派生视图与 64KB 累积截断的层级关系：5KB output 累积态原样保留（派生视图截断
  *   是 truncate-tool-output.ts 的上层职责，reducer 不越权截到 4KB）
  */
 import { describe, it, expect } from 'vitest'
@@ -149,7 +149,7 @@ describe('live ≡ reload 截断层统一（D3 代价 C 根治）', () => {
     expect(state.messages[0]!.toolCalls![0]!.outputTruncated).toBe(true)
   })
 
-  it('六类工具 5KB output 累积态原样（64KB 累积截断不越权做 4KB 投影的活）', () => {
+  it('六类工具 5KB output 累积态原样（64KB 累积截断不越权做 4KB 派生视图的活）', () => {
     const fiveKB = asciiOfBytes(5120)
     const state = replayEntries([
       toolResultEntry('tc-read', fiveKB, 'read') as unknown as PiMessageEntry,

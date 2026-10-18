@@ -63,7 +63,7 @@ const legacyDraft = computed<ScheduleDraft | null>(() => {
   return scheduleDraftOf(req)
 })
 
-/** draft 守卫失败留痕（正常路径不可达——runtime isScheduleDraft 预检后才产帧；移动壳不静默：
+/** draft 检查失败留痕（正常路径不可达——runtime isScheduleDraft 预检后才产帧；移动壳不静默：
  *  cancel-only 卡片承接，请求方可得取消应答） */
 watch(() => props.request, (req) => {
   if (req?.scheduleCreate === true && scheduleDraftOf(req) === null) {
@@ -71,7 +71,7 @@ watch(() => props.request, (req) => {
   }
 })
 
-/** isFormQuestion 复核过滤后的问题集（滤除留痕对齐桌面 Panel 复核守卫；draft 源不含问题） */
+/** isFormQuestion 复核过滤后的问题集（滤除留痕对齐桌面 Panel 复核检查；draft 源不含问题） */
 const questions = computed<FormQuestion[]>(() => {
   const req = props.request
   if (!req || req.form !== true || req.scheduleCreate === true) return []
@@ -91,7 +91,7 @@ const draftQuestion = computed<ScheduleQuestion | null>(() =>
 )
 
 // 回传未送达错误行（role=alert 形态对齐 TokenInputView 错误行）：requestId 匹配当前展示
-// 请求才渲染——请求被摘除（卡片收口）或新请求到达时旧错误不残留
+// 请求才渲染——请求被摘除（卡片收尾）或新请求到达时旧错误不残留
 const showRespondError = computed(() => {
   const failedId = props.respondFailedId
   if (failedId === null || failedId === undefined) return false
@@ -103,7 +103,7 @@ const questionsList = computed<FormQuestion[]>(() =>
   isDraftMount.value && draftQuestion.value ? [draftQuestion.value] : questions.value,
 )
 
-/** 请求在场但无可渲染内容（空问题集 / draft 守卫失败）：cancel-only 卡片，不静默吞帧 */
+/** 请求在场但无可渲染内容（空问题集 / draft 检查失败）：cancel-only 卡片，不静默吞帧 */
 const showCancelOnly = computed(() => props.request !== undefined && !isDraftMount.value && questions.value.length === 0)
 const allowCancel = computed(() => props.request?.allowCancel !== false)
 
@@ -247,7 +247,7 @@ function showOtherInput(q: FormQuestion): boolean {
         </span>
       </div>
 
-      <!-- cancel-only：空问题集 / draft 守卫失败（不静默吞帧，请求方可得取消应答） -->
+      <!-- cancel-only：空问题集 / draft 检查失败（不静默吞帧，请求方可得取消应答） -->
       <p v-if="showCancelOnly" class="text-[12px] leading-1.5 text-neutral-mid" data-testid="mobile-form-empty">
         {{ t('mobile.formCard.emptyForm') }}
       </p>

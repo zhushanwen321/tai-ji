@@ -1,7 +1,7 @@
 /**
  * contenteditable 选区保存/恢复工厂 —— composer/input/selection-restore.ts。
  *
- * 从 contenteditable.ts useContenteditableInput 提取的内聚逻辑（单一变化轴
+ * 从 contenteditable.ts useContenteditableInput 提取的内聚逻辑（单一变化原因
  * 「夺焦前后选区状态」）：saveSelection/restoreSelection/placeCaretAtEnd 与
  * savedRange 闭包状态。工厂每调用一次产生独立实例（savedRange 实例级语义，
  * 每个 useContenteditableInput 实例互不共享）。

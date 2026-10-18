@@ -15,7 +15,7 @@
     复制 = 末条 assistant 正文（仅 text，不含思考/工具分区，2026-10-15 用户裁决——
     原 assistantToMarkdown 三分区展平随本裁决整体退役）。
     fork/handoff 点击进 composer staging 模式：可输入文本带上发送，也可不输入直接提交（空提交≈
-    原后台 fork/handoff，由 forkSessionAsk/handoff 空 content 守卫实现）。
+    原后台 fork/handoff，由 forkSessionAsk/handoff 空 content 检查实现）。
     非 subagent session：4 按钮全显；subagent session：复制/朗读（无 fork/handoff）。
   -->
   <div
@@ -90,7 +90,7 @@ import { computed } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { Check, Copy, GitFork, HandHelping, Loader2, Square, Volume2 } from '@lucide/vue'
 // primitives 直接路径（不经 @taiji/ui 顶层 barrel）：chat 组件被 barrel 再导出，
-// barrel 自引用会闭合一族循环依赖环（详见 BashOutputBlock.vue 同款注释）
+// barrel 自引用会封住一族循环依赖环（详见 BashOutputBlock.vue 同款注释）
 import { Button } from '../../primitives/button'
 import type { MessageTurn } from '@taiji/core/domain/chat'
 import { normalizeContent, type Message } from '@taiji/shared'
@@ -109,12 +109,12 @@ const { t } = useI18n()
 const deps = useChatViewDeps()
 
 /** fork/handoff hover action handler（经 deps 桥接 useTurnActions）。
- *  统一进 composer staging 模式（原 +Q 路径），主操作（后台 fork/handoff）由空提交守卫实现。 */
+ *  统一进 composer staging 模式（原 +Q 路径），主操作（后台 fork/handoff）由空提交检查实现。 */
 function onForkAsk(msg: Message): void { deps.onForkAsk(props.sessionId, msg) }
 function onHandoffAsk(msg: Message): void { deps.onHandoffAsk(props.sessionId, msg) }
 
 /** 朗读态（ai-voice-tts §5.1 状态机）：数据源 deps.speakStateOf（renderer useTtsPlayer
- *  全局单例任务态按 messageId 投影，D11——切 session 回来按钮仍显示正确播放态）。
+ *  全局单例任务态按 messageId 派生，D11——切 session 回来按钮仍显示正确播放态）。
  *  computed 内调用使单例 ref 变化可追踪；两字段未 provide（宿主未接语音能力/测试 mock 壳）
  *  返回 undefined → 按钮不渲染。 */
 const speakState = computed<SpeakState | undefined>(() => {

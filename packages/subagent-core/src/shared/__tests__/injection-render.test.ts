@@ -4,7 +4,7 @@
 // 覆盖 §4.2 W3 门全部条目：
 // - 与 pi 现输出逐字节等价（同一组入参，core 输出 === 按 pi-sw injector 现函数
 //   模板手工展开的期望串——期望串在本测试内构造，不 import pi-sw）；
-// - ModelEntry 守卫（红线 5）：undefined input 不抛且 caps 无 vision /
+// - ModelEntry 检查（红线 5）：undefined input 不抛且 caps 无 vision /
 //   contextWindow undefined 不渲染该元素且无 "undefined" 字样；
 // - provider 口径：存在时 provider/id 拼接 + (provider, id) 两段码点序、
 //   缺席/空串时裸 id + id 码点序、混合形态归一口径；
@@ -50,7 +50,7 @@ const MODEL_GUIDE = "MODEL-GUIDE";
 const agentOpts: ListFormatOptions = { guide: AGENT_GUIDE };
 const workflowOpts: ListFormatOptions = { guide: WORKFLOW_GUIDE };
 
-/** pi 现调用形态的 agent 数据（agent 清单注入投影：已按 name 码点序） */
+/** pi 现调用形态的 agent 数据（agent 清单注入派生视图：已按 name 码点序） */
 const piShapedAgents: AgentEntry[] = [
 	{
 		name: "coder",
@@ -77,7 +77,7 @@ const piShapedWorkflows: WorkflowEntry[] = [
 	},
 ];
 
-/** pi 现调用形态的 model 数据（toModelEntry 投影：全字段给齐且 provider 非空） */
+/** pi 现调用形态的 model 数据（toModelEntry 派生视图：全字段给齐且 provider 非空） */
 const piShapedModels: ModelEntry[] = [
 	{
 		provider: "xai",
@@ -179,7 +179,7 @@ describe("byte-exact parity with pi-sw current formatters", () => {
 });
 
 // ============================================================
-// ModelEntry 并集守卫（红线 5：除 id/name 外全字段 optional）
+// ModelEntry 并集检查（红线 5：除 id/name 外全字段 optional）
 // ============================================================
 
 describe("ModelEntry union guards (red-line 5)", () => {
@@ -215,7 +215,7 @@ describe("ModelEntry union guards (red-line 5)", () => {
 		expect(out).toContain("</model>");
 	});
 
-	it("contextWindow 为 0 是有效值：渲染 <contextWindow>0</contextWindow>（守卫只挡 undefined）", () => {
+	it("contextWindow 为 0 是有效值：渲染 <contextWindow>0</contextWindow>（检查只挡 undefined）", () => {
 		const entry: ModelEntry = { id: "glm", name: "GLM", contextWindow: 0 };
 		expect(formatModelList([entry], { guide: MODEL_GUIDE })).toContain(
 			"<contextWindow>0</contextWindow>",
@@ -244,7 +244,7 @@ describe("provider presence semantics", () => {
 		]);
 	});
 
-	it("provider 缺席：id 裸渲染 + 排序退化为 id 码点序（zsw 投影形态）", () => {
+	it("provider 缺席：id 裸渲染 + 排序退化为 id 码点序（zsw 派生视图形态）", () => {
 		const models: ModelEntry[] = [
 			{ id: "z-model", name: "Z" },
 			{ id: "a-model", name: "A" },
@@ -297,7 +297,7 @@ describe("per-section entry budget (red-line 7)", () => {
 		for (let i = 16; i <= 20; i++) {
 			expect(out).not.toContain(`n${String(i).padStart(2, "0")}`);
 		}
-		// 兜底指引是段内最后一行（闭合标签前）
+		// 兜底指引是段内最后一行（结束标签前）
 		const noticeIdx = out.indexOf(NOTICE);
 		const closeIdx = out.lastIndexOf("</available_subagents>");
 		expect(noticeIdx).toBeGreaterThan(0);
@@ -457,7 +457,7 @@ describe("invalid named reporting (D4-3/P5)", () => {
 		{ path: "/ws/.pi/workflows/broken.js", reason: "no valid resource metadata" },
 	];
 
-	it("非空条目 + invalids：条目行后、闭合标签前渲染 invalid 元素（逐字节）", () => {
+	it("非空条目 + invalids：条目行后、结束标签前渲染 invalid 元素（逐字节）", () => {
 		const out = formatWorkflowList(
 			[{ name: "chain", description: "三步链", path: "/abs/chain.js" }],
 			{ guide: WORKFLOW_GUIDE, invalids },

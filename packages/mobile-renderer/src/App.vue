@@ -72,8 +72,8 @@ provide(DIALOG_QUEUE_HANDLE_KEY, registerDialogQueueHandle)
 // useExtensionHostBridge 同类 provide）。bus 为独立实例：移动壳共享 bus 私居
 // companion-bridge（无导出面），本实例不 subscribe——状态迁移不依赖订阅（transition/getState
 // 直读分区 Map），订阅无事件源的 bus 属无效监听；桌面订阅才有的 ui-request 自动建 expanded
-// 分区（z-index 派生）与 session-destroyed cleanup 在移动壳消费面之外（移动壳未定义
-// --z-dialog，bandStyle 的 expanded 分支本就无有效投影）。
+// 分区（z-index 派生）与 session-destroyed cleanup 在移动壳消费方之外（移动壳未定义
+// --z-dialog，bandStyle 的 expanded 分支本就无有效派生视图）。
 provide(
   OVERLAY_LIFECYCLE_KEY,
   new OverlayLifecycle({
@@ -130,7 +130,7 @@ function onTokenSubmit(token: string): void {
 }
 
 // 连接成功即拉取会话列表（首屏数据；后续 config.sessions 广播经 SessionApiPort 自动更新）；
-// connected 边沿同时补拉 form/planReview 快照对账（静默重连保持视图挂载、sessionId 不变，
+// connected 边沿同时补充拉取 form/planReview 快照对账（静默重连保持视图挂载、sessionId 不变，
 // 断连期间到达的请求重连后补挂——dialog/permission 通道不在此列：dialog 另立任务、
 // permission 有超时撤窗有界）；并对当前活跃会话触发重连对账（U9/A6——断连期间完成的
 // turn + D1 链外残留窗口经 core 统一编排入口收敛；无活跃会话跳过，未 hydrate 由 core

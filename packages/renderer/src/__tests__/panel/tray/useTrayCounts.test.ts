@@ -4,14 +4,14 @@
  * 三视角（TEST-STRATEGY §3）：
  * - 构建者（白盒）：三件计数口径与谓词边界——running+stopReason（死亡纳管态）不落进行中、
  *   archived 归已结束（[两视图裁决 2026-09-16]）、workflow running 计入进行中、bash 两视图由
- *   background-task-bucket SSOT 谓词派生；D13 首拉触发与 retry 调用序；错误态/加载态暴露面
+ *   background-task-bucket SSOT 谓词派生；D13 首次拉取触发与 retry 调用序；错误态/加载态暴露面
  * - 使用者（黑盒）：本文件是纯逻辑面（无 DOM）；用户可见断言在 tray-native-panel.test.ts
  * - 观察者（形态）：同上（面板渲染形态由组件测试承载）
  *
  * mock 策略：
  * - `@/composables/features/sidebar/useBackgroundTasks` mock：bash 分区直接 mutate
  *   （状态根自身行为另有专项测试，本文件只验托盘消费口径）
- * - `@/api` mock：首拉 RPC（getSubagents/getWorkflows）结果可控；load* 写 store 分区的路径真实
+ * - `@/api` mock：首次拉取 RPC（getSubagents/getWorkflows）结果可控；load* 写 store 分区的路径真实
  * - 真实 pinia + 真实 store：计数跑真实 recordsOf 分区（不 mock store 派生链）
  *
  * 运行：cd packages/renderer && npx vitest run src/__tests__/panel/tray/useTrayCounts.test.ts
@@ -38,7 +38,7 @@ vi.mock('@/composables/features/sidebar/useBackgroundTasks', () => ({
   }),
 }))
 
-// ── mock：首拉 RPC（subagent/workflow 列表）──
+// ── mock：首次拉取 RPC（subagent/workflow 列表）──
 const apiMocks = vi.hoisted(() => ({
   // RT-4#8 起 API 返结构化形状 { subagents, oversize }（store 按此解构）
   getSubagents: vi.fn<(sessionId: string) => Promise<{ subagents: SubagentRecord[]; oversize?: boolean }>>(),
@@ -202,7 +202,7 @@ describe('useTrayCounts 计数口径与谓词边界（D2）', () => {
   })
 
   it('计数随 session 分区切换（各 session 独立，不串台）', async () => {
-    // 首拉 RPC 按 sid 返回不同列表：切 session 后计数跟随新分区（真实 load* 写分区路径）
+    // 首次拉取 RPC 按 sid 返回不同列表：切 session 后计数跟随新分区（真实 load* 写分区路径）
     apiMocks.getSubagents.mockImplementation(async (sid: string) => ({
       subagents:
         sid === SID2
@@ -306,7 +306,7 @@ describe('useTrayCounts session kind（第 4 件子会话，u7 / 设计 mode-sys
   })
 })
 
-describe('useTrayCounts D13 首拉触发与 retry', () => {
+describe('useTrayCounts D13 首次拉取触发与 retry', () => {
   it('挂载即拉：loadSubagents / loadWorkflows 各以当前 sessionId 调一次', async () => {
     const subagentStore = useSubagentStore()
     const workflowStore = useWorkflowStore()
@@ -320,12 +320,12 @@ describe('useTrayCounts D13 首拉触发与 retry', () => {
     })
     expect(loadSubSpy).toHaveBeenCalledWith(SID)
     expect(loadWfSpy).toHaveBeenCalledWith(SID)
-    // 拉取腿真正落到 RPC（store 内部未短路）
+    // 拉取路径真正落到 RPC（store 内部未短路）
     expect(apiMocks.getSubagents).toHaveBeenCalledWith(SID)
     expect(apiMocks.getWorkflows).toHaveBeenCalledWith(SID)
   })
 
-  it('sessionId 变化 → 按新 sid 重拉（历史桶依赖此腿）', async () => {
+  it('sessionId 变化 → 按新 sid 重新拉取（历史桶依赖此路径）', async () => {
     const subagentStore = useSubagentStore()
     const workflowStore = useWorkflowStore()
     const loadSubSpy = vi.spyOn(subagentStore, 'loadSubagents')
@@ -342,7 +342,7 @@ describe('useTrayCounts D13 首拉触发与 retry', () => {
     expect(apiMocks.getWorkflows).toHaveBeenLastCalledWith(SID2)
   })
 
-  it('retry(kind) 按类重拉：subagent / workflow → load*；bash → refresh', async () => {
+  it('retry(kind) 按类重新拉取：subagent / workflow → load*；bash → refresh', async () => {
     mountHarness()
     await vi.waitFor(() => expect(apiMocks.getWorkflows).toHaveBeenCalledTimes(1))
     vi.clearAllMocks()
@@ -403,10 +403,10 @@ describe('useTrayCounts 错误态与加载态暴露面（面板 retry 判据）'
   })
 })
 
-describe('P-invisible·任务托盘面：D9③ 派生投影抑制（btw 线不投影 subagent/workflow）', () => {
-  it('btw vid 挂托盘：线 owner 分区有派生记录仍构造性归零 + 不发首拉 RPC；bash（线自身任务）照常', async () => {
+describe('P-invisible·任务托盘面：D9③ 派生视图抑制（btw 线不映射 subagent/workflow）', () => {
+  it('btw vid 挂托盘：线 owner 分区有派生记录仍构造性归零 + 不发首次拉取 RPC；bash（线自身任务）照常', async () => {
     const vid = 'btw:line-tray-1'
-    // 线 owner 分区真实灌入派生记录（生产 = loadSubagents(vid) / 广播腿落分区）
+    // 线 owner 分区真实灌入派生记录（生产 = loadSubagents(vid) / 广播路径落分区）
     useSubagentStore().applyRecords(vid, [makeSubagent({ subagentId: 'a-line', status: 'running' })])
     // 种数据（applyRecords 已私有化，直写分区 ref）
     const workflowStore = useWorkflowStore()
@@ -426,7 +426,7 @@ describe('P-invisible·任务托盘面：D9③ 派生投影抑制（btw 线不�
     expect(data().lists.subagent.running.value).toHaveLength(0)
     expect(data().lists.workflow.running.value).toHaveLength(0)
     expect(data().counts.value.bash.total).toBe(1) // 边界：bash 不在派生抑制面
-    // 首拉被抑制（对线 vid 的 getSubagents/getWorkflows 零消费方 → 不发无效 RPC）
+    // 首次拉取被抑制（对线 vid 的 getSubagents/getWorkflows 零消费方 → 不发无效 RPC）
     expect(apiMocks.getSubagents).not.toHaveBeenCalledWith(vid)
     expect(apiMocks.getWorkflows).not.toHaveBeenCalledWith(vid)
   })

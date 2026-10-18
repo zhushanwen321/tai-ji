@@ -206,7 +206,7 @@ describe("setModelOnActiveChild — pi 错误应答三型映射 + 成功路径",
     }
   });
 
-  it("set_model 应答未知错误消息 → readback-failed（三型词表封闭映射的残余收口：生效状态不可信）", async () => {
+  it("set_model 应答未知错误消息 → readback-failed（三型词表封闭映射的残余收尾：生效状态不可信）", async () => {
     const child = new FakeChild();
     registerActiveChild(RUN_ID, child as unknown as ChildProcess);
     try {

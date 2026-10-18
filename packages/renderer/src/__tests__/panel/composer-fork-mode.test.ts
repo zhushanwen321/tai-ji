@@ -13,7 +13,7 @@
  * - U13 forkMode 发送后自动退出（调 forkSessionAsk + 模式 chip 消失）
  * - U14 Esc 退出 + 切 session 自动退出
  * - U15 streaming 中 fork 提交（Enter / Alt+Enter 走 fork，steer/followUp 不被调）
- * - U16 提交守卫经发送位形态断言（staging 双发锁 / 占用放行 / fork·handoff 空稿规则）
+ * - U16 提交检查经发送位形态断言（staging 双发锁 / 占用放行 / fork·handoff 空稿规则）
  *
  * mock 骨架收编 helpers/composer-mount.ts 单源（chat 模块工厂 + 兄弟子组件 stubs）；
  * useChat spy 句柄经 import { useChat } 取工厂级单例实例断言（与组件拿到的是同一批 vi.fn）。
@@ -211,7 +211,7 @@ describe('U15：streaming 中 fork 模式：Enter 提交 fork 而非 steer，发
     expect(wrapper.find('.stop-btn').exists()).toBe(false)
   })
 
-  it('streaming 无 staging → stop 按钮行为不变（回归守卫）', () => {
+  it('streaming 无 staging → stop 按钮行为不变（回归检查）', () => {
     const sid = 's-stream-plain'
     makeStreaming(sid)
     const wrapper = mountComposer({ sessionId: sid })
@@ -240,8 +240,8 @@ describe('U15：streaming 中 fork 模式：Enter 提交 fork 而非 steer，发
   })
 })
 
-// ── U16：提交守卫（staging 双发锁 / 占用期放行 / 空稿规则）────────────────
-describe('U16：提交守卫——staging 只看 isSending，非 staging 看「可提交」（占用不拦截）', () => {
+// ── U16：提交检查（staging 双发锁 / 占用期放行 / 空稿规则）────────────────
+describe('U16：提交检查——staging 只看 isSending，非 staging 看「可提交」（占用不拦截）', () => {
   it('staging 活跃 + streaming（isActive）+ 有输入 → fork 发送位可点（fork 提交不受流式拦截）', async () => {
     const sid = 's-can-submit-1'
     makeStreaming(sid)
@@ -280,9 +280,9 @@ describe('U16：提交守卫——staging 只看 isSending，非 staging 看「�
     await wrapper.vm.$nextTick()
     await wrapper.vm.$nextTick()
     // [u3c/D1] 前身 isBusy（= isActive ∨ isSending）拦截占用期提交——该半边是 renderer 侧车道
-    // 判定的残留，随「renderer 只提交不判定」退役：提交守卫只剩空输入与本地双发锁两类，
+    // 判定的残留，随「renderer 只提交不判定」退役：提交检查只剩空输入与本地双发锁两类，
     // 占用期（streaming）Enter 照常走统一提交（u3b 收敛后 renderer 不再分 steer 路由，
-    // lane 由内核判定），若被守卫拦截 send 不会被调。
+    // lane 由内核判定），若被检查拦截 send 不会被调。
     expect(chatApi.send).toHaveBeenCalled()
     expect(chatApi.steer).not.toHaveBeenCalled()
   })

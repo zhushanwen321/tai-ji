@@ -9,7 +9,7 @@
  * 任务条目形状直接用 @zhushanwen/extension-protocol 的 BackgroundTaskRegistryEntry（D9 数据契约
  * 零新造，与 bash_output 工具面的 snake_case 契约互不相干）。shared protocol.ts 侧是结构镜像
  *（shared 不依赖 extension-protocol），镜像 ⇔ 契约的逐字段全等由本文件 BackgroundTaskMirrorEqualsContract
- * 编译期守卫——任一侧形状漂移即 tsc 红。
+ * 编译期检查——任一侧形状漂移即 tsc 红。
  *
  * 注：本 domain 按 tc-transport-consolidation 终态落位 core 真源，未接入 renderer api/index.ts
  * 门面聚合（无 mock 轨——任务数据源自真实 runtime registry，mock 模式无此数据源，消费侧空态兜底）；
@@ -20,11 +20,11 @@ import type { BackgroundTaskRegistryEntry } from '@zhushanwen/extension-protocol
 import { RPC_BACKSTOP_TIMEOUT_MS } from '../pending'
 import { command } from '../request'
 
-// ── D9 编译期守卫：shared 镜像 ⇔ extension-protocol 契约逐字段全等 ──
+// ── D9 编译期检查：shared 镜像 ⇔ extension-protocol 契约逐字段全等 ──
 // 全等断言惯用法（比 extends 严：可选性/字面量成员任一差异即 false）。
 // 任一侧字段漂移（改名/增删/可选性/枚举成员）→ Equal 求值 false → Expect 约束在
 // 本文件 TS 2344 编译红（core typecheck 覆盖此处，shared __tests__ 不在 tsc include）。
-// 零运行时产物；守卫只比较条目元素形状（payload ['tasks'][number]），payload 顶层
+// 零运行时产物；检查只比较条目元素形状（payload ['tasks'][number]），payload 顶层
 // 会话分区字段（sessionId/corrupted）不在契约镜像范围。
 type Equal<X, Y> = (<T>() => T extends X ? true : false) extends (<T>() => T extends Y ? true : false) ? true : false
 type Expect<T extends true> = T
@@ -37,7 +37,7 @@ export type BackgroundTaskMirrorEqualsContract = Expect<Equal<
 >>
 
 /**
- * 拉取 session 的后台任务全量（runtime 直读 registry 的投影；目录/文件不存在 → 空数组）。
+ * 拉取 session 的后台任务全量（runtime 直读 registry 的派生视图；目录/文件不存在 → 空数组）。
  *
  * 返回 backgroundTask.tasks reply payload 全形（sessionId + tasks + corrupted），不折叠为
  * 纯数组——corrupted=true = registry 解析失败被 .corrupt 隔离的「损坏空表」（S7 错误条

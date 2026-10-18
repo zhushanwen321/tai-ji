@@ -44,7 +44,7 @@ export function assertEntryTimeBudget(ms: number | undefined): void {
  * tokens 预算入口断言（tool 入口的 tokens 字段是 Type.Number 直通，无 schema 下界）。
  *
  * 负值会被 Budget 的 `maxTokens > 0` 不变式静默升格为 unlimited（isExceeded/remaining
- * 的守卫语义——见 orchestration/models/budget.ts），显式设了预算却被忽略，在入口拦截。
+ * 的检查语义——见 orchestration/models/budget.ts），显式设了预算却被忽略，在入口拦截。
  * undefined = 未设预算（unlimited），放行；0 沿用既有语义（= unlimited）不在此拒。
  *
  * @throws Error 当 tokens 为负值

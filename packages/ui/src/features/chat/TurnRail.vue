@@ -129,11 +129,11 @@
 import { computed } from 'vue'
 import { Bot, ChevronDown, ChevronUp, User } from '@lucide/vue'
 // primitives 直接路径（不经 @taiji/ui 顶层 barrel）：chat 组件被 barrel 再导出，
-// barrel 自引用会闭合一族循环依赖环（详见 BashOutputBlock.vue 同款注释）
+// barrel 自引用会封住一族循环依赖环（详见 BashOutputBlock.vue 同款注释）
 import { Button } from '../../primitives/button'
 import type { MessageTurn } from '@taiji/core/domain/chat'
 import { turnStableId } from '@taiji/core/domain/chat'
-// 相对路径同 Button 先例：chat 组件被 barrel 再导出，barrel 自引用会闭合一族循环依赖环
+// 相对路径同 Button 先例：chat 组件被 barrel 再导出，barrel 自引用会封住一族循环依赖环
 import { railMemoFor } from './rail-turn-memo'
 import { RUNNING_LOADER_SVG } from './block-icon'
 import { useI18n } from 'vue-i18n'
@@ -261,7 +261,7 @@ const viewportStyle = computed(() => {
  * rail 节点摘要 per-turn memo（2026-08 streaming 性能优化）：
  * WeakMap 按 turn 引用缓存（引用同 ⇒ 内容同 ⇒ 摘要同，论证见 rail-turn-memo.ts），
  * 模板每 render 调用 railMemoFor 命中零重算。实装已上移为共享导出
- * ./rail-turn-memo.ts（TurnRail 渲染 + useMessageStreamRail 投影恒等判定
+ * ./rail-turn-memo.ts（TurnRail 渲染 + useMessageStreamRail 派生视图恒等判定
  * 消费同一 WeakMap——判定与渲染同源，签名漂移结构性不可能），此处仅 re-import。
  * agentIconClass（failed=danger 常驻红 / done=neutral-ico，§5.6B）随 memo 一并迁入。
  */

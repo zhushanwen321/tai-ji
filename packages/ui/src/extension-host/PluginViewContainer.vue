@@ -11,7 +11,7 @@
  * - closedViewIds：close 事件对 non-builtin 生效（本地 ref 移除，不持久化）
  *
  * builtin 判定：view.pluginId ∈ BUILTIN_PLUGIN_IDS（core builtin-contributions.ts 的
- * statusline / tasks 声明）→ 不可关闭（L2TabBar 不渲染 close 按钮，容器侧再守卫）。
+ * statusline / tasks 声明）→ 不可关闭（L2TabBar 不渲染 close 按钮，容器侧再检查）。
  *
  * icon：view.icon 当前无图标源（壳透传 undefined），统一以 default icon 兜底（见 DEFAULT_ICON）。
  *
@@ -84,7 +84,7 @@ function onSelect(viewId: string): void {
 
 function onClose(viewId: string): void {
   const view = views.value.find((v) => v.viewId === viewId)
-  // 守卫：builtin 不可关闭（L2TabBar 已不渲染其 close 按钮，双保险）
+  // 检查：builtin 不可关闭（L2TabBar 已不渲染其 close 按钮，双保险）
   if (!view || BUILTIN_PLUGIN_IDS.has(view.pluginId)) return
   closedViewIds.value.add(viewId)
   // 关闭当前 active 时回退由 activeView computed 自动落到下一个可见 view

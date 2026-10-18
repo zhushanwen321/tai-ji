@@ -78,7 +78,7 @@ function resolveSessionId(msg: IncomingPluginMessage, payload: Record<string, un
 
 const PLUGIN_STATUS_VALUES = new Set(['discovered', 'loaded', 'active', 'inactive', 'crashed'])
 
-// ── plugin:* 窄化守卫（返回 InternalEvent | null，null=解析失败；数量以 PLUGIN_HANDLERS 为准）──
+// ── plugin:* 窄化检查（返回 InternalEvent | null，null=解析失败；数量以 PLUGIN_HANDLERS 为准）──
 
 /**
  * statusbar 更新解析（CT-D5 毒化隔离，导出供单元测试）。
@@ -163,7 +163,7 @@ function parsePermissionRequest(msg: IncomingPluginMessage): InternalEvent | nul
 }
 
 /**
- * plugin:permissionRequestResolved 解析守卫（remote-use-mobile S5-V3 审批终局帧）。
+ * plugin:permissionRequestResolved 解析检查（remote-use-mobile S5-V3 审批终局帧）。
  * payload = { pluginId, requestId, approved }（activator 形状，与开窗 request 广播
  * 同源 requestId）。宽容窄化对齐 expired 消费端兼容链：requestId 缺失/非 string 置
  * 空串（消费端空 requestId 回退按 pluginId 匹配，不在此合成伪 id——合成值不匹配任何
@@ -263,7 +263,7 @@ function parseUiRequest(msg: IncomingPluginMessage): InternalEvent | null {
 }
 
 /**
- * plugin:viewUpdate 窄化守卫（s3 链路，MF-1 修复）。
+ * plugin:viewUpdate 窄化检查（s3 链路，MF-1 修复）。
  *
  * runtime plugin-rpc-setup.ts handleViewUpdate 广播 payload 形状：
  * { sessionId, viewId, pluginId, guiTree, updatedAt }（guiTree 为 GuiComponent[]）。
@@ -284,13 +284,13 @@ function parseViewUpdate(msg: IncomingPluginMessage): InternalEvent | null {
   }
 }
 
-// ── plugin-header-action-modal-points 帧守卫（AP-1）────────────────────
+// ── plugin-header-action-modal-points 帧检查（AP-1）────────────────────
 
 /**
- * plugin:headerActionUpdate 解析守卫（AP-1 徽标更新帧）。
+ * plugin:headerActionUpdate 解析检查（AP-1 徽标更新帧）。
  * payload = { pluginId, headerActionId, sessionId, badge?, tooltip?, disabled?, hidden? }。
  * sessionId 必带（AP-1 契约：渲染端按 (sessionId, headerActionId) 写会话分区；
- * 缺 → null 守卫失败丢弃 + error）。badge ≤4 字符的截断由渲染端承担，守卫存原文。
+ * 缺 → null 检查失败丢弃 + error）。badge ≤4 字符的截断由渲染端承担，检查存原文。
  */
 export function parseHeaderActionUpdate(msg: IncomingPluginMessage): InternalEvent | null {
   const payload = asRecord(msg.payload)
@@ -313,7 +313,7 @@ export function parseHeaderActionUpdate(msg: IncomingPluginMessage): InternalEve
   }
 }
 
-// ── 5 个 extension:* 窄化守卫（pluginId 一律 ''，wire 无该字段）──────
+// ── 5 个 extension:* 窄化检查（pluginId 一律 ''，wire 无该字段）──────
 
 function parseExtensionWidget(msg: IncomingPluginMessage): InternalEvent | null {
   const payload = asRecord(msg.payload)

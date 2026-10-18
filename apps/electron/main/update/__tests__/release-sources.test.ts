@@ -356,7 +356,7 @@ describe('fetchLatestRelease（github 分支）', () => {
     })
   })
 
-  it('github 404/500 → null（非 2xx 服务器已响应，对齐现状收口）', async () => {
+  it('github 404/500 → null（非 2xx 服务器已响应，对齐现状收尾）', async () => {
     const fetchMock = stubFetch()
     fetchMock.mockResolvedValue(jsonResponse({ message: 'Not Found' }, 404))
     await expect(fetchLatestRelease('github')).resolves.toBeNull()
@@ -377,7 +377,7 @@ describe('fetchLatestRelease（github 分支）', () => {
     await expect(fetchLatestRelease('github')).rejects.toMatchObject({ kind: 'bad-shape' })
   })
 
-  it('非法 JSON 响应体 → kind network（对齐现状「非法 JSON 按失败收口」归网络错误桶）', async () => {
+  it('非法 JSON 响应体 → kind network（对齐现状「非法 JSON 按失败收尾」归网络错误桶）', async () => {
     const fetchMock = stubFetch()
     fetchMock.mockResolvedValue(new Response('<html>gateway</html>', { status: 200 }))
     await expect(fetchLatestRelease('github')).rejects.toMatchObject({ kind: 'network' })
@@ -542,7 +542,7 @@ describe('fetchSourceRelease（完整产物，含原始 assets 数组）', () =>
     )
   })
 
-  it('404 → null（非 2xx 收口语义与 fetchLatestRelease 一致）', async () => {
+  it('404 → null（非 2xx 收尾语义与 fetchLatestRelease 一致）', async () => {
     const fetchMock = stubFetch()
     fetchMock.mockImplementation(async () => jsonResponse({ message: 'Not Found' }, 404))
     await expect(fetchSourceRelease('github')).resolves.toBeNull()

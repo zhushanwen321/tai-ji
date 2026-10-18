@@ -47,9 +47,9 @@ const mainConfig = defineConfig({
 // 产物 dist.bundle/index.cjs——给无 node_modules 解析面的宿主 vendoring（zsw：
 // 插件目录整体复制，无依赖安装链，marketplace 副本/inline 加载双形态都要能直跑）。
 // 与档 1 的本质差异：档 1 的 dist 仍把 ajv/yaml/proper-lockfile 留作外部依赖
-// （宿主有正常 node_modules 解析面），档 2 noExternal 全部运行时依赖后单文件
+// （宿主有正常 node_modules 解析路径），档 2 noExternal 全部运行时依赖后单文件
 // 自包含——vendored 消费只认文件不认解析链。仅 cjs（zsw 是纯 CJS 宿主），
-// dts 刻意关闭：zsw 无 TS 消费面，类型由主包 dist 的 .d.cts 承载。
+// dts 刻意关闭：zsw 无 TS 消费方，类型由主包 dist 的 .d.cts 承载。
 const bundleConfig = defineConfig({
   entry: { index: 'src/index.ts' },
   outDir: 'dist.bundle',

@@ -127,7 +127,7 @@ describe('bash effect（message.bashStart / message.bashResult）', () => {
     expect(store.getMessages(sid)[0].bashExecution?.excludeFromContext).toBe(true)
   })
 
-  it('T6: streaming 中 bash（延迟帧在 turn 收口后到达）→ bash 记录位于 assistant 之后（与文件位置一致，G2）', () => {
+  it('T6: streaming 中 bash（延迟帧在 turn 收尾后到达）→ bash 记录位于 assistant 之后（与文件位置一致，G2）', () => {
     const store = useChatStore()
     const sid = 's-bash-6'
     // run 级联：assistant streaming 中用户执行 `!` bash（bashStart 即时反馈）
@@ -143,7 +143,7 @@ describe('bash effect（message.bashStart / message.bashResult）', () => {
       type: 'message.bashStart',
       payload: { sessionId: sid, command: 'ls -la', excludeFromContext: false, timestamp: 1500 },
     } as ServerMessage)
-    // 级联结束：assistant 收口在前，bash 延迟帧（flush）在后——bash 落在 turn 末尾而非执行时刻
+    // 级联结束：assistant 收尾在前，bash 延迟帧（flush）在后——bash 落在 turn 末尾而非执行时刻
     store.applyMessageEvent(sid, {
       type: 'message.complete',
       payload: { sessionId: sid, stopReason: 'end_turn' },

@@ -7,7 +7,7 @@
  *   结果消费 results（每协议一行）/ error（整体性失败）
  * - discover（自动发现）：带 baseUrl/apiKey/providerType 全参，结果合并入模型清单（去重 + D9①）
  *
- * 接口即测试面（interface is the test surface）：行为矩阵见 provider-edit-discover.test.ts。
+ * 接口即测试入口（interface is the test surface）：行为矩阵见 provider-edit-discover.test.ts。
  */
 import { ref, type Ref } from 'vue'
 import type { ConnectionTestResultRow, ProviderInfo } from '@taiji/shared'

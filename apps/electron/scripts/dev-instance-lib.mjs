@@ -1,6 +1,6 @@
 // apps/electron/scripts/dev-instance-lib.mjs
 //
-// dev-instance.mjs 的可测纯函数层（MF-8 守卫测试的加载面；C-build-08 装配器）。
+// dev-instance.mjs 的可测纯函数层（MF-8 检查测试的加载范围；C-build-08 装配器）。
 // CLI 本体只保留参数解析 / 真实 fs / process.exit 编排，判定逻辑全部落本模块：
 //   - fnv1a / deriveParams：worktree 名 → 端口段 + 数据目录（同名单参稳定）
 //   - buildDevEnv：装配 env（剥泄漏变量 + 端口/数据目录统一注入）
@@ -48,7 +48,7 @@ export function resolveCustomDataDir(value, opts = {}) {
   if (!isWithinDevDataParent(resolved, devDataParent)) {
     throw new Error(
       `[dev-instance] --data-dir 必须落在 ${devDataParent} 目录之内（如 ${devDataParent}/my-experiment）: ${resolved}\n` +
-        `  值域约束原因：test-guard fs-guard 白名单与路径守卫按 ${devDataParent} 前缀放行，树外目录会绕过测试防线；` +
+        `  值域约束原因：test-guard fs-guard 白名单与路径检查按 ${devDataParent} 前缀放行，树外目录会绕过测试防线；` +
         `禁止指向真实数据目录 ~/.taiji。`,
     )
   }

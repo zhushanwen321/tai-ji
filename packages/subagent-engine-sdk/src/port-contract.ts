@@ -5,7 +5,7 @@
 // 点零改写；server.ts 的 parseCtxModel 模块级纯函数同批收编，实现以 pi 版为基线
 // 逐字迁移）。
 //
-// 为什么现在能收（W5/W7 双轨沉淀后的收编，不翻「SDK 类型闭包只收跨进程协议面」
+// 为什么现在能收（W5/W7 双轨合并后的收编，不翻「SDK 类型闭包只收跨进程协议面」
 // 的原始裁决）：两包过渡期镜像经 W10 conformance 套件验证字段逐字等价、双轨已
 // 稳定，收编即消除克隆而非改变边界语义。RunContext 含 AbortSignal/回调/EngineStream
 // 等非序列化成员，跨进程面经各包 server.ts 帧映射——故收主 barrel，不进 protocol/
@@ -13,13 +13,13 @@
 //
 // 命名：全量任务声明在 SDK 侧名 EngineAgentCallOpts（主 barrel 已有 protocol 的
 // AgentCallOpts 引擎面子集——16 字段协议 run.params.task 形态，两者是子集/全量
-// 关系，不可同名共存；两包 shim 转名 re-export 保本包消费面 AgentCallOpts 不变）。
+// 关系，不可同名共存；两包 shim 转名 re-export 保本包消费方 AgentCallOpts 不变）。
 //
 // onChildSpawned 统一采窄载荷形态（host/childSpawned 载荷形态；ChildProcess 句柄
 // 不跨协议面）——zcode 侧生产零调用（D6），形态统一无行为影响。
 //
 // 第三份镜像登记：core execution/engine/port.ts 的 RunContext 是宿主侧独立契约
-// （onChildSpawned 全 ChildProcess 句柄，概念域 = 宿主进程内），不收编、不 import
+// （onChildSpawned 全 ChildProcess 句柄，业务含义 = 宿主进程内），不收编、不 import
 // 本模块；漂移面由 W10 conformance 套件继续覆盖。
 
 import type {
@@ -46,7 +46,7 @@ export type EngineAgentCallOpts = SdkAgentCallOpts & {
 
 /**
  * 引擎进程内的 ctxModel 形态（core ModelInfo 的结构等价镜像——仅 id/provider 被引擎
- * 消费，name/reasoning 等字段透传保留防测试/未来消费面漂移）。
+ * 消费，name/reasoning 等字段透传保留防测试/未来消费方漂移）。
  */
 export interface EngineCtxModel {
   id: string;
@@ -70,7 +70,7 @@ export interface EngineStream {
  * host/poolResolved 通道/EngineHandleData）已整体退役，本常量不再跨进程透传，仅
  * 三类消费：① journal 落盘路径构造（core event-journal-wiring）；② 存量 record 兼容
  * （zcode read 旧相对 dbPath 的锚定分支 + 持久化 engineHandle.poolKey 字段——
- * record-store 读侧守卫要求非空，值恒本常量）；③ 引擎数据目录布局 SSOT paths.ts
+ * record-store 读侧检查要求非空，值恒本常量）；③ 引擎数据目录布局 SSOT paths.ts
  * 的签名参数。**值逐字不变**（存量 journal 落盘路径与记录含该值分段，改名不改值）。
  */
 export const SHARED_POOL_KEY = "shared";

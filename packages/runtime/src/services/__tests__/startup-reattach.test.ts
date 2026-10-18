@@ -11,12 +11,12 @@
  * - **A4 高水位延迟不依赖采样环**：冷启动逐拍即时查询——首拍高压推迟、缓解后恢复；
  *   mem-pressure 纯函数侧单样本判定的证据见 infra/__tests__/mem-pressure.test.ts。
  * - **A5 reattach-skipped 逐 session**：staleness 命中 / restore 失败 / 收割超时各自产生
- *   台账行（sessionId/reason 断言）；过滤排除不记（设计内「不恢复」语义，非异常）。
+ *   一条 journal 记录（sessionId/reason 断言）；过滤排除不记（设计内「不恢复」语义，非异常）。
  * - **A6 checkpoint 删除属主**：全部尝试完后文件被删（含全跳过/零候选形态）。
  * - **组合根挂点**：index.ts 源码顺序断言——runStartupReattach 在 await server.start() 之后
  *   （D3「listen 后」硬约束）。
  * - **收割 promise 交付**：startup-background-init 的 onOrphanReapChainScheduled 在调度后
- *   同步交付、链尾 settle 后 resolve（u5 消费面的接线证据）。
+ *   同步交付、链尾 settle 后 resolve（u5 消费方的接线证据）。
  *
  * 全部文件目标 = mkdtempSync(tmpdir) 自建自删（fs-guard 白名单）；递归删除带 maxRetries。
  * 运行：cd packages/runtime && npx vitest run src/services/__tests__/startup-reattach.test.ts
@@ -365,7 +365,7 @@ describe('A4 高水位延迟（mem-pressure 即时查询）', () => {
 })
 
 // ─────────────────────────────────────────────────────────────────────────────
-// A5 reattach-skipped 逐 session 台账
+// A5 reattach-skipped 逐 session journal 记录
 // ─────────────────────────────────────────────────────────────────────────────
 
 describe('A5 reattach-skipped 事件（逐 session 一条）', () => {
@@ -398,7 +398,7 @@ describe('A5 reattach-skipped 事件（逐 session 一条）', () => {
     expect(String(skips[1]?.detailDigest)).toContain(missingPath)
   })
 
-  it('过滤排除不记台账（设计内「不恢复」语义，非异常）', async () => {
+  it('过滤排除不记 journal 记录（设计内「不恢复」语义，非异常）', async () => {
     const h = makeHarness()
     seed(h, [
       entry({ piSessionId: 'resting', lastActivityAt: T0 - 3 * HOUR, lastViewedAt: T0 - 40 * MIN }),
@@ -408,7 +408,7 @@ describe('A5 reattach-skipped 事件（逐 session 一条）', () => {
     const report = await runStartupReattach(makeDeps(h), makeOptions(h))
     expect(report.excluded).toEqual(['resting'])
     expect(report.candidates).toEqual(['active'])
-    // 唯一台账行只属于候选失败/跳过面——resting 无任何事件
+    // 唯一 journal 记录行只属于候选失败/跳过两类——resting 无任何事件
     expect(skipEvents(h.events)).toHaveLength(0)
     expect(h.restore).not.toHaveBeenCalledWith('resting')
   })
@@ -515,7 +515,7 @@ describe('A6 checkpoint 删除（全部尝试完后无条件删）', () => {
 })
 
 // ─────────────────────────────────────────────────────────────────────────────
-// 组合根挂点（D3「listen 后」硬约束）+ 收割 promise 交付（startup-background-init 消费面）
+// 组合根挂点（D3「listen 后」硬约束）+ 收割 promise 交付（startup-background-init 消费方）
 // ─────────────────────────────────────────────────────────────────────────────
 
 describe('组合根挂点与收割 promise 交付', () => {
@@ -629,7 +629,7 @@ function makeBgDeps(onOrphanReapChainScheduled?: (completion: Promise<void>) => 
   }
 }
 // ─────────────────────────────────────────────────────────────────────────────
-// #27 reattach:deferred 广播挂点（高水位延迟进入/缓解退出，u7d 承接的横幅半腿）
+// #27 reattach:deferred 广播挂点（高水位延迟进入/缓解退出，u7d 承接的横幅半路径）
 // ─────────────────────────────────────────────────────────────────────────────
 
 describe('#27 reattach:deferred 广播（进入单发 + 缓解退出单发）', () => {

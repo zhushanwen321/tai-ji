@@ -5,7 +5,7 @@
 //   - 裸事件行（{type:...}）与包装事件行（{event:{type:...}}）两种形态都收；
 //   - 单行损坏 / 未知 type 不中断重放（append-only journal 中断写入是已知形态）；
 //   - 全部行无效（events.length === 0）→ undefined；
-//   - 重放投影：turns 文本聚合 / usage 聚合 / sessionId 取自 handle.sessionRef。
+//   - 重放派生视图：turns 文本聚合 / usage 聚合 / sessionId 取自 handle.sessionRef。
 //
 // journal 文件一律 mkdtempSync 自建自删（fs-guard 纪律：不触碰真实数据目录）。
 

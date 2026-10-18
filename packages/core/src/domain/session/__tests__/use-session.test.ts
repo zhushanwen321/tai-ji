@@ -183,7 +183,7 @@ describe('selectSession', () => {
     f.chat.isHydrated.mockReturnValue(true)
     f.chat.getHistory.mockResolvedValue({ messages: msgs, truncated: false, loadedTurns: 1, totalTurnsEstimate: 1 })
     await f.session.selectSession('sid-1')
-    // 旧幂等守卫已废：后台（agent-managed）session 的 turn 可能在前端不在场时完成，
+    // 旧幂等检查已废：后台（agent-managed）session 的 turn 可能在前端不在场时完成，
     // 切入必须刷新到最新 entries；失败静默（旧数据仍在，下次切入重试）
     expect(f.chat.getHistory).toHaveBeenCalledTimes(1)
     expect(f.chat.reconcileHistory).toHaveBeenCalledWith('sid-1', msgs, { truncated: false, loadedTurns: 1, totalTurnsEstimate: 1 })
@@ -632,7 +632,7 @@ describe('newSession（延迟 create 语义）', () => {
     f.dispose()
   })
 
-  it('TC-12 in-flight 守卫：未 resolve 时二次调用直接返回 null', async () => {
+  it('TC-12 in-flight 检查：未 resolve 时二次调用直接返回 null', async () => {
     const f = makeFixture({ withFlow: true })
     let release!: () => void
     f.flow.startFlow.mockImplementation(() => new Promise<void>((r) => { release = r }))
@@ -700,7 +700,7 @@ describe('bindSessionListBroadcast refCount', () => {
 })
 
 /**
- * 图片落盘编排收口测试（crash-resilience §3.3 D6-⑨，Gate B A9③ 缺陷#2 回流修复）。
+ * 图片落盘编排收敛测试（crash-resilience §3.3 D6-⑨，Gate B A9③ 缺陷#2 回流修复）。
  *
  * 断言 use-session 侧三条 hydrate 通路（首次切入 / 已 hydrate 刷新 / retryHistory）
  * 统一经 reconcileFromReply 触发 persistImagesNewestFirst——此前编排只挂
@@ -708,7 +708,7 @@ describe('bindSessionListBroadcast refCount', () => {
  * 引擎级语义（新→旧反转 / 超帽即停 / 幂等去重）由 chat/__tests__/image-cache-orchestration.test.ts
  * 覆盖，此处只测编排点挂接：注入 recording write port 断言「被调用 + sessionId + 新→旧序」。
  */
-describe('hydrate 通路图片落盘编排收口（D6-⑨ 缺陷#2）', () => {
+describe('hydrate 通路图片落盘编排收敛（D6-⑨ 缺陷#2）', () => {
   /** 记录型 write port：捕获 (sessionId, images 序)，回写全量 written。 */
   function makeRecordingPort() {
     const calls: Array<{ sessionId: string; order: string[] }> = []

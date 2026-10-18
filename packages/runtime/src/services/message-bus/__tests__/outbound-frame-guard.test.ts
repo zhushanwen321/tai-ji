@@ -1,10 +1,10 @@
 /**
- * u4a-outbound-guard 单元测试：server→client 出站帧双通路守卫（crash-resilience §3.3 D3）。
+ * u4a-outbound-guard 单元测试：server→client 出站帧双通路检查（crash-resilience §3.3 D3）。
  *
  * 覆盖映射（设计 D3 负面行为声明 + impl-plan u4a 验收条款）：
  * - push 截断后 seq 连续（截断版正常占 seq 入 ring，无 gap）——MessageBus 集成
  * - ring 回放 / 重订阅视角拿到同一份截断版（回放内容 === 在场广播内容）——P-publish-trunc 单测形态
- * - reply 超限替换 envelope 后 type:'error' 形态正确（前端 pending 可 reject 收口）
+ * - reply 超限替换 envelope 后 type:'error' 形态正确（前端 pending 可 reject 完成收尾）
  * - miss 兜底整条丢弃且后续消息 seq 仍连续（不占 seq 不触发 gap）
  * - 8MB 告警档（warn 日志含消息类型与字节数）；miss/still-oversize 丢弃分支 warn 先于 error
  *   （D3 代价 B「miss 消息必然先打告警」/ A10④「告警档先于截断档出现」）
@@ -87,7 +87,7 @@ function sentMessages(client: ReturnType<typeof makeClient>): ServerMessage[] {
 
 // ── guardOutboundPushFrame 纯函数 ──────────────────────────────────
 
-describe('guardOutboundPushFrame（push 通路守卫纯函数）', () => {
+describe('guardOutboundPushFrame（push 通路检查纯函数）', () => {
   it('小消息 passthrough：注册表未命中类型零开销路径，内容原样、入参零污染', () => {
     const msg: ServerMessage = { type: 'message.complete', payload: { sessionId: 's1', stopReason: 'end_turn' } }
     const before = JSON.stringify(msg)
@@ -304,7 +304,7 @@ describe('guardOutboundPushFrame（push 通路守卫纯函数）', () => {
     expect(errorSpy).toHaveBeenCalledOnce()
   })
 
-  it('守卫零抛错：resolveSessionFilePath 抛错不打断截断流程，占位路径退化为「（见 runtime 日志）」', () => {
+  it('检查零抛错：resolveSessionFilePath 抛错不打断截断流程，占位路径退化为「（见 runtime 日志）」', () => {
     const throwing: OutboundFrameGuardOptions = {
       ...SMALL_OPTS,
       resolveSessionFilePath: () => {
@@ -337,7 +337,7 @@ describe('guardOutboundPushFrame（push 通路守卫纯函数）', () => {
 
 // ── MessageBus 集成（seq 连续性 / ring 回放 / 重订阅） ─────────────
 
-describe('MessageBus.publish 出站守卫集成', () => {
+describe('MessageBus.publish 出站检查集成', () => {
   it('push 截断后 seq 连续：超限帧截断版正常占 seq 入 ring 广播，无 gap', () => {
     const bus = new MessageBus(100, SMALL_OPTS)
     const ws = makeClient()
@@ -434,7 +434,7 @@ describe('MessageBus.publish 出站守卫集成', () => {
     const before = JSON.stringify(msg)
     stringifySpy.mockClear()
     bus.publish('s1', msg)
-    // 单条消息全程恰好 1 次 stringify（守卫测量复用广播序列化，小消息零额外开销）
+    // 单条消息全程恰好 1 次 stringify（检查测量复用广播序列化，小消息零额外开销）
     expect(stringifySpy).toHaveBeenCalledTimes(1)
     stringifySpy.mockRestore()
     const received = sentMessages(ws)
@@ -462,7 +462,7 @@ describe('MessageBus.publish 出站守卫集成', () => {
 
 // ── reply 通路（ServerMessageBroker） ──────────────────────────────
 
-/** 最小 BrokerServices（reply 守卫不读 services，构造满足类型即可）。 */
+/** 最小 BrokerServices（reply 检查不读 services，构造满足类型即可）。 */
 const mockServices = {
   sessionService: { listPersistedSessions: () => [] },
   configService: { listProviders: () => [], getDefaultModel: () => null, loadSkills: () => [], loadAgents: () => [] },
@@ -473,8 +473,8 @@ const mockServices = {
   appInfo: { appVersion: '0.0.0', piVersion: '0.0.0' },
 } as unknown as BrokerServices
 
-describe('ServerMessageBroker.reply 出站守卫', () => {
-  it('reply 超限 → 整帧替换 type:error + payload_too_large 错误 envelope（id 保留，前端 pending 可 reject 收口）', () => {
+describe('ServerMessageBroker.reply 出站检查', () => {
+  it('reply 超限 → 整帧替换 type:error + payload_too_large 错误 envelope（id 保留，前端 pending 可 reject 完成收尾）', () => {
     const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {})
     const ws = makeWsClient()
     const broker = new ServerMessageBroker({ clients: new Set([ws]) }, mockServices, { warnBytes: 1024, truncateBytes: 4096 })
@@ -483,7 +483,7 @@ describe('ServerMessageBroker.reply 出站守卫', () => {
 
     expect(wsSent(ws)).toHaveLength(1)
     const sent = JSON.parse(wsSent(ws)[0][0] as string) as { type: string; id: string; payload: { code: string; message: string; sessionId?: string } }
-    // 错误 envelope 形态（core pending.resolveEnvelope 的 reject 收口前提：type==='error' + id 命中）
+    // 错误 envelope 形态（core pending.resolveEnvelope 的 reject 完成收尾前提：type==='error' + id 命中）
     expect(sent.type).toBe('error')
     expect(sent.id).toBe('req-42')
     expect(sent.payload.code).toBe('payload_too_large')
@@ -545,7 +545,7 @@ describe('ServerMessageBroker.reply 出站守卫', () => {
     expect(warnSpy).not.toHaveBeenCalled()
   })
 
-  it('reply 序列化失败（循环引用）→ 复用 error envelope 收口，不抛错不悬挂', () => {
+  it('reply 序列化失败（循环引用）→ 复用 error envelope 完成收尾，不抛错不悬挂', () => {
     const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {})
     const ws = makeWsClient()
     const broker = new ServerMessageBroker({ clients: new Set([ws]) }, mockServices, { warnBytes: 1024, truncateBytes: 4096 })

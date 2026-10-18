@@ -78,7 +78,7 @@ import * as wsClient from '../ws-client'
 // 已锚定：session/chat/config/model/plugin/composer/workspace/quota/project/preset/btw/usage（12 域）。
 // 未锚定（mock 保真度登记见 docs/TEST-STRATEGY.md §5）：settings（[C3] 字段读写已补齐为
 // 内存态 fixture 全域，但 onExtensions 转发沿用 extension 的宽类型偏差——锚定受其阻塞，
-// W08 收口时一并锚定）/ extension（onExtensions 宽类型为登记过的有意偏差，W08 收口）/
+// W08 收尾时一并锚定）/ extension（onExtensions 宽类型为登记过的有意偏差，W08 收尾）/
 // search（real 侧无单源 domain，编排归 useSearchModalDeps）/ git、file（独立 mock 文件，
 // 待后续同法锚定）。
 import type * as realSessionDomain from '../api/domains/session'
@@ -312,27 +312,27 @@ const cancelled = new Set<string>()
 /** 运行中的 setTimeout 句柄，resolve 后自动移除，避免 Set 无限增长 */
 // taste:allow-no-data-owner W24-EX-D（VITE_MOCK 测试基建，登记草稿）：mock 定时器句柄集合
 const timers = new Set<ReturnType<typeof setTimeout>>()
-// session.delivery mock 帧的 preview 截断长度（展示投影字段，非全文——与真实 runtime 帧同语义）。
+// session.delivery mock 帧的 preview 截断长度（展示派生视图字段，非全文——与真实 runtime 帧同语义）。
 // 值 SSOT = @taiji/shared DELIVERY_PREVIEW_MAX_CHARS（msg-pipeline-debloat D5-5 下沉：
 // runtime transport 与本 mock 同源同值，原「注释互指」双定义删除）。
 
 /**
  * 已广播 in-flight 投递条目、且流式序列尚未走完的 session（abort 终态帧依据）。
  * submitDelivery 登记、runSendStream settle（complete 或 aborted 中断退出）时清除——
- * abort 据此区分「有在飞投递可补终态帧」与「流已自然走完」（后者 abort 不补帧，保持既有行为）。
+ * abort 据此区分「有在途投递可补终态帧」与「流已自然走完」（后者 abort 不补帧，保持既有行为）。
  */
-// taste:allow-no-data-owner W24-EX-D（VITE_MOCK 测试基建，登记草稿）：在飞投递条目跟踪（abort 终态帧依据，非 GUI 数据）
+// taste:allow-no-data-owner W24-EX-D（VITE_MOCK 测试基建，登记草稿）：在途投递条目跟踪（abort 终态帧依据，非 GUI 数据）
 const inflightDeliveryEntries = new Map<string, { clientUuid: string; preview: string }>()
 
-/** 在飞 sleep 的 resolve 句柄（__clearTimers teardown 时统一 settle，防在飞 runSendStream 永久悬挂在 await sleep） */
-// taste:allow-no-data-owner W24-EX-D（VITE_MOCK 测试基建，登记草稿）：在飞 sleep resolve 句柄（teardown settle 用，非 GUI 数据）
+/** 在途 sleep 的 resolve 句柄（__clearTimers teardown 时统一 settle，防在途 runSendStream 永久悬挂在 await sleep） */
+// taste:allow-no-data-owner W24-EX-D（VITE_MOCK 测试基建，登记草稿）：在途 sleep resolve 句柄（teardown settle 用，非 GUI 数据）
 const pendingSleepResolves = new Set<() => void>()
 
 /** 清理所有未触发的 timer（测试 teardown / 模块卸载时调用） */
 export function __clearTimers(): void {
   for (const t of timers) clearTimeout(t)
   timers.clear()
-  // 清 timer 的同时 settle 全部挂起的 sleep promise：只 clearTimeout 不 settle 会把在飞的
+  // 清 timer 的同时 settle 全部挂起的 sleep promise：只 clearTimeout 不 settle 会把在途的
   // runSendStream 永久悬挂在 await sleep（promise 泄漏）；settle 后其下一轮 cancelled
   // 检查静默退出，teardown 不悬挂。
   for (const resolve of [...pendingSleepResolves]) resolve()
@@ -363,7 +363,7 @@ function emit(sessionId: string, msg: ServerMessageUnion): void {
 
 // [u5a 退役] mock 的 `queue_update` 镜像链（mockQueues / emitQueueUpdate /
 // emitDrainAssistantTurn + TIMING.steerDrain）已随 `chat.steer` / `chat.followUp` 删除——
-// 该链唯一职责是喂 QueueBubble 的 queue_update 快照（u3b 退役该消费腿，u3c 转 session.delivery
+// 该链唯一职责是喂 QueueBubble 的 queue_update 快照（u3b 退役该消费路径，u3c 转 session.delivery
 // 单源），删除后 mock 轨的提交链路只剩 submitDelivery（与真实 runtime 同通道）。
 
 function sleep(ms: number): Promise<void> {
@@ -420,7 +420,7 @@ function zcodeMockCandidates(): import('@taiji/shared').ImportCandidate[] {
 
 // ── 发现 B（create 幂等化）mock 面：clientUuid → 已建 session ─────────────────
 // 行为对齐 runtime create-idempotency（同 uuid 重试返回已建 session 不重复建号 +
-// TTL 保留 + 容量上限驱逐最老）；mock 无 spawn，登记面即内存投影。保持签名/行为
+// TTL 保留 + 容量上限驱逐最老）；mock 无 spawn，登记清单即内存派生视图。保持签名/行为
 // 双同构，防 mock 轨（VITE_MOCK UI 开发）把真实面已修的重复建号 bug 重新演一遍。
 const MOCK_CREATE_IDEMPOTENCY_TTL_MS = 600_000
 const MOCK_CREATE_IDEMPOTENCY_MAX_ENTRIES = 256
@@ -453,7 +453,7 @@ function recordMockCreate(clientUuid: string, session: SessionSummary): void {
 
 const sessionImpl = {
   /**
-   * session trace 台账全量（session-trace，design D4）。mock 轨道无真实 JSONL/pi 进程，
+   * session trace 条目清单全量（session-trace，design D4）。mock 轨道无真实 JSONL/pi 进程，
    * 恒返回 empty 快照（Trace 视图空态）；real 轨道走 runtime A1 混合路由。
    * 与 real domain 同接口（api/index 门面三元要求两侧同构）。
    */
@@ -487,7 +487,7 @@ const sessionImpl = {
    * override 生效面（对齐 real 关键语义，落 SessionSummary 可断言）：
    * presetId → launchPresetId（real create 即锁预设进 summary）、projectId → projectId
    * （D14 归属）、modelOverride → modelId、thinkingOverride → thinkingLevel（Landing Chip
-   * 覆盖值）。mock 无 pi/runtime，仅内存投影，不追求全仿真。
+   * 覆盖值）。mock 无 pi/runtime，仅内存派生视图，不追求全仿真。
    * clientUuid（发现 B）：同 uuid 幂等命中返回已建 session（不重复建号/不重复广播），
    * 见本文件 mockCreateByClientUuid 说明。
    */
@@ -614,7 +614,7 @@ const sessionImpl = {
     const targets = fixtureSessions.filter((s) => s.cwd === cwd)
     const deleted: string[] = []
     for (const s of targets) {
-      // 与 remove() 一致：findIndex 守卫 idx===-1，避免 splice(-1) 误删末尾元素。
+      // 与 remove() 一致：findIndex 检查 idx===-1，避免 splice(-1) 误删末尾元素。
       // targets 是 filter 快照（迭代安全），splice 在原 fixtureSessions 上原地删。
       const idx = fixtureSessions.findIndex((x) => x.id === s.id)
       if (idx === -1) continue
@@ -892,7 +892,7 @@ export const session: SessionDomain = sessionImpl
  * - 命令含 'empty' → empty-output：exitCode:0 + ''（覆盖空输出态）
  * - 命令含 'timeout' → 近似超时：cancelled:true + exitCode:null（覆盖取消态视觉；
  *   bashResultEffect 构造 entry 不读 error 字段、mock 无法注入 error:'timeout'
- *   标记（原写方 bash timer 收口已随 dormant 契约删除），用 cancelled 近似 + 长 delay
+ *   标记（原写方 bash timer 收尾已随 dormant 契约删除），用 cancelled 近似 + 长 delay
  *   模拟超时节奏）
  * - 命令含 'truncate' → truncated:true（覆盖 W4 截断标记视觉）
  *
@@ -939,7 +939,7 @@ function resolveBashMockBranch(
 const chatImpl = {
   /**
    * 拉 session 历史（深拷贝 fixture，避免外部突变污染）。
-   * [u6] 窗口契约字段必填（legacy historyTruncated 退役，偏差表 D7 双轨收口）；mock 无截断
+   * [u6] 窗口契约字段必填（legacy historyTruncated 退役，偏差表 D7 双轨收敛）；mock 无截断
    * （truncated=false，loadedTurns 数 fixture user 消息）。query 游标参数 mock 不模拟翻页
    * （fixture 无窗口概念，恒返回全量——与 truncated=false 一致）；类型引 real 域 HistoryQuery
    *（G4 锚定，杜绝内联形状漂移）。
@@ -982,9 +982,9 @@ const chatImpl = {
   async abort(sessionId: string): Promise<void> {
     // 标记取消，send 循环下一轮检测后退出
     cancelled.add(sessionId)
-    // [mock 投递状态机不悬挂] abort 时对在飞的 submitDelivery 条目补发终态帧：state 取
-    // 'failed'——shared DeliveryFrameEntry 投影态无 'aborted'（D5③ cancelled 不投影），
-    // 'delivered' 会伪造送达事实，'failed' 是唯一诚实表达「未送达」的投影终态。仅当该
+    // [mock 投递状态机不悬挂] abort 时对在途的 submitDelivery 条目补发终态帧：state 取
+    // 'failed'——shared DeliveryFrameEntry 派生视图态无 'aborted'（D5③ cancelled 不生成派生视图），
+    // 'delivered' 会伪造送达事实，'failed' 是唯一诚实表达「未送达」的派生视图终态。仅当该
     // session 有未走完的投递流时发（流已自然走完的 session abort 保持既有行为，不补帧）。
     const delivery = inflightDeliveryEntries.get(sessionId)
     if (delivery) {
@@ -1009,7 +1009,7 @@ const chatImpl = {
   // 让开发者能看到 loading 态（spinner + 取消按钮）。
   // 不模拟真实 shell 输出（与 send 的 mock 策略一致——只驱动 UI 状态机，不验证业务逻辑）。
   // happy path：普通命令 → exitCode:0 + '(mock) <command>'（保留原有行为，不破坏）。
-  // 回执（bash 投递可靠性契约）：mock 全分支都「已执行并收口」→ settled（与 real 轨
+  // 回执（bash 投递可靠性契约）：mock 全分支都「已执行并收尾」→ settled（与 real 轨
   // ChatApiPort.bash 同契约）。
   async bash(sessionId: string, command: string, excludeFromContext?: boolean): Promise<BashDispatchReceipt> {
     await sleep(TIMING.ack)
@@ -1048,7 +1048,7 @@ const chatImpl = {
 
   /**
    * [投递所有权内核 u3b] 统一提交 mock：与 send 同流（ack + 流式序列），并广播一条
-   * session.delivery 快照帧（direct/in-flight）供前端投影/morph 链路在 mock 模式可见。
+   * session.delivery 快照帧（direct/in-flight）供前端派生视图/morph 链路在 mock 模式可见。
    * 内核状态机不在 mock 层复刻（真实形态由 runtime 侧 u2/u3a 提供）——mock 只保证
    * 「提交 → 快照帧 → 回执」三帧在 mock 模式可达。
    */
@@ -1068,7 +1068,7 @@ const chatImpl = {
         entries: [{ clientUuid, preview: text.slice(0, DELIVERY_PREVIEW_MAX_CHARS), state: 'in-flight', lane: 'direct' }],
       },
     })
-    // 登记在飞条目（abort 终态帧依据）：流序列 settle（complete 或 cancelled 退出）即清，
+    // 登记在途条目（abort 终态帧依据）：流序列 settle（complete 或 cancelled 退出）即清，
     // 避免流走完后 session 再 abort 被误补 failed 帧。
     inflightDeliveryEntries.set(sessionId, { clientUuid, preview: text.slice(0, DELIVERY_PREVIEW_MAX_CHARS) })
     // [受理先于执行] 流启动推迟到 reply 之后（宏任务）：真实通道里 runtime 回受理 ack 后
@@ -1620,7 +1620,7 @@ function broadcastExtensions(): void {
 
 export const extension = {
   onExtensions: (h: GlobalHandler<unknown>) => extensionsSub.subscribe(h),
-  /** 主动重拉（对齐 runtime extension.list → 广播 config.extensions 刷新） */
+  /** 主动重新拉取（对齐 runtime extension.list → 广播 config.extensions 刷新） */
   async scan() {
     await sleep(TIMING.ack)
     broadcastExtensions()
@@ -2033,7 +2033,7 @@ const projectImpl = {
   async load(): Promise<import('@taiji/shared').ProjectStoreState> {
     return { projects: [], activeProjectId: '' }
   },
-  // [G4 锚定 ProjectDomain] 对齐 real 契约返回 void（原 mock 返回 state 属未登记偏差，随锚定收口；
+  // [G4 锚定 ProjectDomain] 对齐 real 契约返回 void（原 mock 返回 state 属未登记偏差，随锚定收尾；
   // mock 无持久化，save 即 ack）
   async save(state: import('@taiji/shared').ProjectStoreState): Promise<void> {
     void state
@@ -2049,7 +2049,7 @@ export const project: ProjectDomain = projectImpl
 // mock 无自定义预设持久化（CRUD 只改内存），但**内置目录必须非空**：模式可见性三态判定
 // （u5 设计 D5）把「presets 空 + 无错误」当「未加载 → 不渲染」，空列表会让非默认模式会话的
 // chip / 声明行永远落不到正常分支——[u7a] 补 DEFAULT_PRESETS 后 mock fixture 的
-// launchPresetId='builtin:session-dispatch' 才可解析出模式名（原为纯占位空列表，2026-09-19 收口）。
+  // launchPresetId='builtin:session-dispatch' 才可解析出模式名（原为纯占位空列表，2026-09-19 收尾）。
 import type { PiLaunchPreset } from '@taiji/shared'
 const mockPresets: PiLaunchPreset[] = DEFAULT_PRESETS.map((p) => ({ ...p }))
 const presetImpl = {
@@ -2141,14 +2141,14 @@ type MockTtsState = SanitizedTtsConfig
 const mockTtsState: MockTtsState = mockDefaultTtsConfig()
 
 const ttsImpl = {
-  /** 读脱敏配置投影：mock 内存态快照（深拷贝——调用方突变不污染 mock 态，fixture 惯例）。 */
+  /** 读脱敏配置派生视图：mock 内存态快照（深拷贝——调用方突变不污染 mock 态，fixture 惯例）。 */
   async getConfig(): Promise<ServerMessageMap['tts.getConfig:result']> {
     await sleep(TIMING.ack)
     return { config: JSON.parse(JSON.stringify(mockTtsState)) as SanitizedTtsConfig }
   },
 
   /**
-   * 保存配置：更新内存态（providerId 条目 + activeProvider）后回脱敏投影。mock 不做
+   * 保存配置：更新内存态（providerId 条目 + activeProvider）后回脱敏派生视图。mock 不做
    * runtime 写路校验（真实校验在 TtsService，ok 恒 true 与 quota mock「不模拟失败」口径一致）；
    * apiKeys 语义照协议（字符串非空 = 写入、null/空串 = 清除、'from-provider' = 模拟联动带入成功）。
    */
@@ -2166,7 +2166,7 @@ const ttsImpl = {
     return { ok: true, config: JSON.parse(JSON.stringify(mockTtsState)) as SanitizedTtsConfig }
   },
 
-  /** 拉三家表单投影：mock 内嵌静态演示数据（mock 本职 = 模拟 runtime，设计 §7.5）。 */
+  /** 拉三家表单派生视图：mock 内嵌静态演示数据（mock 本职 = 模拟 runtime，设计 §7.5）。 */
   async getCapabilities(): Promise<ServerMessageMap['tts.getCapabilities:result']> {
     await sleep(TIMING.ack)
     return {

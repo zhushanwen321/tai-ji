@@ -2,10 +2,10 @@
  * bottom-drawer layout 单测 —— display-containers u-w1-core 验收①「全局单键持久化 + clamp」。
  *
  * 覆盖：heightPct 全局单键（taiji:bottom-drawer-height）读写与重载恢复 / 默认 35 /
- * 损坏值回落 / 载入 clamp / 加载窗口守卫（在途快照不覆写窗口内新写）/
+ * 损坏值回落 / 载入 clamp / 加载窗口检查（在途快照不覆写窗口内新写）/
  * 拖拽 clamp（写侧 15%–70%）/ 显示期 clamp（读侧纯函数、**不写回**持久值）。
  *
- * 三视角：构建者白盒（KVSlot 生命周期 + 窗口守卫）、使用者黑盒（「拖到 50% 刷新后还是 50%；
+ * 三视角：构建者白盒（KVSlot 生命周期 + 窗口检查）、使用者黑盒（「拖到 50% 刷新后还是 50%；
  * 矮窗显示变矮但拉回窗口高度后回到 50%」的用户可见语义）、观察者形态（KV 落盘值形状）。
  *
  * 策略：KV 用内存 stub 实现 KVStorage（model-thinking-memory.test.ts 同款），platform 经
@@ -50,7 +50,7 @@ class StubKV implements KVStorage {
     if (initialRaw !== undefined) this.map.set(BOTTOM_DRAWER_HEIGHT_KEY, initialRaw)
   }
 
-  /** 关闸：之后的 get 挂起直到 openGateNow（控制预载完成时点，测加载窗口守卫） */
+  /** 关闸：之后的 get 挂起直到 openGateNow（控制预载完成时点，测加载窗口检查） */
   closeGate(): void {
     this.gate = new Promise((resolve) => {
       this.open = resolve
@@ -140,7 +140,7 @@ describe('heightPct 全局单键持久化（taiji:bottom-drawer-height）', () =
     expect(kv.setWrites).toEqual([]) // 读侧 clamp 不写回（S2「clamp 未写回」同语义）
   })
 
-  it('加载窗口守卫：预载在途时的拖拽新值不被在途旧快照覆写，且补写收敛到新值', async () => {
+  it('加载窗口检查：预载在途时的拖拽新值不被在途旧快照覆写，且补写收敛到新值', async () => {
     useKv('40')
     kv.closeGate()
     loadBottomDrawerHeightOnce() // get 挂起（加载窗口内）

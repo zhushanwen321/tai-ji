@@ -11,7 +11,7 @@
     内核 queued 排队（compaction-end flush）——两问题不混谈（2026-10 用户裁决）。
     staging 优先（fork/handoff，与视觉层 boxClass/placeholder 优先级对齐）：staging 活跃时 ⏎/Alt+⏎
       均提交 staging（发送位也替换为 staging 发送按钮，streaming 中同样生效）；handoff 的
-      streaming 拦截在 enterHandoffMode/handleHandoffSend（isSessionActive 守卫）。
+      streaming 拦截在 enterHandoffMode/handleHandoffSend（isSessionActive 检查）。
 
     [W4 迁移] 壳改写：消费 composer-shell.ts（core dispatch/context/model-thinking deps 组装 +
     视觉派生），ComposerInput 从 ui 包渲染（D5 占位：壳内硬编码渲染，P4 ExtensionHost 前不走
@@ -53,7 +53,7 @@
       >
         <!-- QueueBubble（v6 §8.5：内嵌 composer-box 顶部，去独立卡片/pulse/标签/chevron，
              仅 border-b 分隔）——6 区第 1 位。
-             [u3c/D7 单源化] 行数据 = session.delivery 状态帧投影（useQueueRows），
+             [u3c/D7 单源化] 行数据 = session.delivery 状态帧派生视图（useQueueRows），
              × 撤销 → delivery.cancel、failed 行重试 → delivery.resync -->
         <QueueBubble
           :rows="queueRows"
@@ -124,7 +124,7 @@
         class="composer-bar flex flex-nowrap items-center justify-end gap-0 px-2.5 pb-2.5 mt-1.5"
       >
         <!-- 左簇（landing 不渲染：demo ComposerBar 同判据「左簇挂载 = 有 session」，空态卸载——
-             r4 landing 对齐修复：原 AddMenuPopover 无 sessionId 守卫，空态左下角多出一颗「+」）：
+             r4 landing 对齐修复：原 AddMenuPopover 无 sessionId 检查，空态左下角多出一颗「+」）：
              `+`（序 0，不退化不裁剪）/ btw 旁路提问（序 0，退化序登记见
              use-composer-bar-density COMPOSER_BTW_BUTTON_DEGRADATION_ORDER）/ 任务托盘
              （左簇唯一聚合入口：aggregated 时单图标按钮承载托盘分段 + 插件 toolbar）/
@@ -148,7 +148,7 @@
                锚点保护态 v-show 样式折叠
                **不卸载**——`update:has-items` 的 emitter 与 useTrayCounts 数据面唯一实例都活在
                本组件内，保护态阈值附近的宽度抖动（拖拽窗口/分屏）每次 protect/unprotect 往返
-               若走 v-if 都会重订阅 + 重首拉。
+               若走 v-if 都会重订阅 + 重首次拉取。
                aggregated = 序 2 生效：托盘 + 插件 toolbar 收为**单图标**聚合按钮（角标仅运行数数字，
                禁多 icon 重叠），面板内分段展示。
                **可见性不吃 `leftCluster === 'absent'`**：若按「无条目」卸载托盘，emitter 永冻
@@ -372,7 +372,7 @@ const sessionStore = useSessionStore()
 const flow = useNewTaskFlow()
 // 对话态只读模式 chip（u4，判据与 E7 三态闸见 useComposerModeChip）
 const { modeChipPresetId, modeChipFallbackTo } = useComposerModeChip(() => props.sessionId, () => props.variant)
-// 项目 skill 的 cwd 源（ADR-0050 修订）：panel 态 = sessionStore 投影的 session cwd（创建时锁定，split 各 pane 天然分流）；landing 态 = flow.currentCwd（嵌套 ComputedRef 须显式 .value）
+// 项目 skill 的 cwd 源（ADR-0050 修订）：panel 态 = sessionStore 派生视图的 session cwd（创建时锁定，split 各 pane 天然分流）；landing 态 = flow.currentCwd（嵌套 ComputedRef 须显式 .value）
 const projectSkillsCwd = computed<string | null>(() => {
   if (props.variant === 'panel') {
     if (!props.sessionId) return null
@@ -388,7 +388,7 @@ const isActive = computed(() => (props.sessionId ? chatStore.isActive(props.sess
  *  landing = --radius 8px（unpacked.css .landing .composer，M9 交接项对齐）。 */
 const boxRadiusClass = computed(() => (props.variant === 'landing' ? 'rounded' : 'rounded-lg'))
 
-/** #13 retry 指示位数据源（store 由 W0/#8 维护，不可变 Map 更新触发响应）。[u3c] queueState 已退役：队列区数据源收敛为 session.delivery 帧投影（useQueueRows）。 */
+/** #13 retry 指示位数据源（store 由 W0/#8 维护，不可变 Map 更新触发响应）。[u3c] queueState 已退役：队列区数据源收敛为 session.delivery 帧派生视图（useQueueRows）。 */
 const retryState = computed(() => (props.sessionId ? chatStore.getRetryState(props.sessionId) : undefined))
 
 const draft = ref('')
@@ -401,7 +401,7 @@ const shellInputHolder = { ref: shellInputRef }
 /**
  * U4「切换中」（设计 §5.1 U4 语义②③）：core 的 `switching` 是**每实例**瞬态真值，
  * 但读条件必须判 `sessionId` 等值——split 面板/切 session 后不得残留旧面板的「切换中」，
- * 也不得误禁新 session 的 chip；语义③ = **任一在飞即禁全部模型/档位 chip**（防两条
+ * 也不得误禁新 session 的 chip；语义③ = **任一在途即禁全部模型/档位 chip**（防两条
  * 切换 RPC 并发 → 回执乱序与 `session.modelId` 双写竞争），故两个 chip 共用同一布尔。
  */
 const isSwitching = computed(
@@ -505,7 +505,7 @@ const {
   isBashMode,
 } = shell
 
-// [u3c/D7] 队列区行（session.delivery 帧投影）+ 撤销/重试编排（行数约束拆出 useQueueRows；
+// [u3c/D7] 队列区行（session.delivery 帧派生视图）+ 撤销/重试编排（行数约束拆出 useQueueRows；
 // 依赖 shell 的 restoreToDraft，故在解构后调用）
 const { rows: queueRows, hint: queueHint, onCancelEntry: onCancelQueueEntry, onRetryEntry: onRetryQueueEntry } =
   useQueueRows(sessionIdRef, { restoreDraft: restoreToDraft })
@@ -559,14 +559,14 @@ function onInputChange(text: string): void {
   resetBrowsing()
 }
 
-/** IME 组合态（window capture 监听，[GUI 快修④] 发送按钮 click 路径守卫消费） */
+/** IME 组合态（window capture 监听，[GUI 快修④] 发送按钮 click 路径检查消费） */
 const { composing } = useCompositionFlag()
 
 /** 键盘分发（composer-keydown.ts，U02 拆出）：staging 优先 ⏎ 提交（fork/handoff，含 streaming 中）；
  *  ⏎ / Alt+⏎ 全部汇入统一发送分发器（D6，u5b——Enter 按 sessionPhase 路由 direct/steer/queued；
  *  Alt+⏎ 保留 followUp 语义：steer 路由行走 followUp 下一轮，其余经分发器）；⇧⏎ 换行，↑/↓ 翻历史。
  *  命令浮层 open 时优先路由到浮层。[HISTORICAL] isActive→onSteer 与 isCompacting→onSend 两套
- *  分散判定（优先级倒挂根因）已退役，路由判定收口在 useComposerSend（core dispatch/send）。 */
+ *  分散判定（优先级倒挂根因）已退役，路由判定收敛在 useComposerSend（core dispatch/send）。 */
 const onKeydown = useComposerKeydown({
   cmdOpen,
   commandPopoverRef,
@@ -598,12 +598,12 @@ async function onStopClick(): Promise<void> {
 }
 
 /**
- * 发送按钮点击入口 [GUI 快修④ 三吞点收口]（staging / queue / send 三颗发送位按钮共用）：
- * 1. IME 组字守卫补 click 路径——composer-keydown 的 e.isComposing 守卫只覆盖回车，
+ * 发送按钮点击入口 [GUI 快修④ 三吞点收尾]（staging / queue / send 三颗发送位按钮共用）：
+ * 1. IME 组字检查补 click 路径——composer-keydown 的 e.isComposing 检查只覆盖回车，
  *    点击路径此前缺失（组字中点击会提交半截拼音/竞态文本）；组字中静默不发送（与
- *    keydown 守卫同语义，组字提交后再点/回车即发）。
+ *    keydown 检查同语义，组字提交后再点/回车即发）。
  * 2. canSubmit 与 draft 同步一帧竞态——点击瞬间分发器可能读到滞后一帧的 canSend/draft
- *    被守卫拦下（点了没反应）：canSubmit 为 false 时下一帧重读再走分发器（真·空输入/
+ *    被检查拦下（点了没反应）：canSubmit 为 false 时下一帧重读再走分发器（真·空输入/
  *    占用由 onSend 内 toast 反馈，不再静默）。
  */
 async function onSendClick(): Promise<void> {

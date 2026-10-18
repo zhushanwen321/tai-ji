@@ -214,7 +214,7 @@ export async function emitTodoBranch(
         texts: [
           "复现 token 过期场景",
           "定位 refreshToken 循环点",
-          "添加 maxRetry 守卫",
+          "添加 maxRetry 检查",
           "编写单元测试覆盖边界",
           "更新 auth 模块文档",
         ],
@@ -230,7 +230,7 @@ export async function emitTodoBranch(
     { id: 2, text: "定位 refreshToken 循环点", status: "completed" as const },
     {
       id: 3,
-      text: "添加 maxRetry 守卫",
+      text: "添加 maxRetry 检查",
       status: "completed" as const,
       isVerification: true,
     },
@@ -270,7 +270,7 @@ export async function emitTodoBranch(
               },
               {
                 icon: "check",
-                label: "#3: 添加 maxRetry 守卫",
+                label: "#3: 添加 maxRetry 检查",
                 status: "done",
                 depth: 0,
               },

@@ -124,7 +124,7 @@ export function useUrlBar(
    * §6.7 先行档约定（元素级监听冒泡先达 = 消费即 preventDefault）：编辑态消费 Esc 时置位
    * defaultPrevented，编排器（window bubble）看到已消费事件即让位——防「弃编辑 + 关浮层」
    * 双动作击穿。非编辑态不拦（行为分界）：Esc 不经本处理器走层级序（关浮层）。
-   * 结构上元素级监听仅在 Input 聚焦（= 编辑态）时收到真实按键，此守卫是显式契约锚点。 */
+   * 结构上元素级监听仅在 Input 聚焦（= 编辑态）时收到真实按键，此检查是显式契约锚点。 */
   function onUrlEscape(e: KeyboardEvent): void {
     if (!isEditingUrl.value) return
     e.preventDefault()

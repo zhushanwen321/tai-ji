@@ -15,10 +15,10 @@
 // core 无触发点，done record 的 journal 没有精确回收锚，按 mtime 兜底回收是既有口径的
 // 落地（原 D8 分域「journal 依赖 30 天 TTL 自然回收」）。
 //
-// 目录枚举边界（保留原 A9 守卫形态）：扫描把 engines/<engineId>/ 下每个子目录都
+// 目录枚举边界（保留原 A9 检查形态）：扫描把 engines/<engineId>/ 下每个子目录都
 // 遍历——zcode 隔离会话库 session-db/ 会被当子目录枚举，但 db.sqlite* 不匹配任何
-// 删除条件（只删 journal-*.jsonl 与 refs.json 残留），由 zcode 侧 A9 守卫测试
-//（公共 API + 枚举断言）钉死。
+// 删除条件（只删 journal-*.jsonl 与 refs.json 残留），由 zcode 侧 A9 检查测试
+//（公共 API + 枚举断言）固定。
 
 import * as fsSync from "node:fs";
 import { join } from "node:path";

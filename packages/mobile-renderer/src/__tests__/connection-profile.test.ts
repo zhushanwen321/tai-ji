@@ -1,7 +1,7 @@
 // connection-profile D4 三分支测试（remote-use U1.3）。
 //
 // 纯函数（resolveCredential / readQueryToken / wsUrlFromHost）+ 端口集成（resolve /
-// handleAuthSuccess / handleAuthFailure / adoptManualToken）两段。锁定 D4 三分支闭合：
+// handleAuthSuccess / handleAuthFailure / adoptManualToken）两段。锁定 D4 三分支补全：
 // - 分支①：query token 验身成功覆盖 storage + 抹地址栏（轮换重扫恢复路径）
 // - 分支②：query 坏 token 验身失败**不动**好 storage（坏链接不毁好凭据；地址栏 query 保留）
 // - 分支③：storage 来源失效清空 + 落 token 输入视图（E11）
@@ -95,7 +95,7 @@ describe('readQueryToken / wsUrlFromHost', () => {
   })
 })
 
-describe('D4 三分支闭合（端口集成）', () => {
+describe('D4 三分支补全（端口集成）', () => {
   it('分支①：query 验身成功覆盖 storage + 抹地址栏（轮换重扫恢复路径）', async () => {
     const { port, map, stripQuery } = makePort({ search: '?token=tok-new', stored: 'tok-old' })
     const resolved = await port.resolve()

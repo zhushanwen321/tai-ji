@@ -78,7 +78,7 @@ async function onSend(): Promise<void> {
     }
   } catch (e) {
     // 契约外异常防御（对齐桌面 useComposerSend catch 分支；core send 契约内不 throw）：
-    // 回填 + 错误行可见，console 记录供诊断（错误条单槽留给 core 失败面文案）
+    // 回填 + 错误行可见，console 记录供诊断（错误条单槽留给 core 失败情形文案）
     comp.setSegments(segments)
     sendFailed.value = true
     console.error('[mobile-composer] send failed:', e)
@@ -95,7 +95,7 @@ async function onStop(): Promise<void> {
   try {
     await useChatInstance.abort(sid)
   } catch (e) {
-    // 降级策略：abort RPC 失败仅记录——turn 收口由断连/runtime 事件兜底（core finalize 链）
+    // 降级策略：abort RPC 失败仅记录——turn 收尾由断连/runtime 事件兜底（core finalize 链）
     console.error('[mobile-composer] abort failed:', e)
   }
 }

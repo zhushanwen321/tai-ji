@@ -201,7 +201,7 @@ describe('createLifecycleEffects.openRestoreWindow（恢复窗口订阅）', () 
     expect(getSubscriptionState('s1')?.subscribed).toBe(true)
   })
 
-  it('幂等：已 subscribed 再调不重发 RPC（subscribeSession 内建守卫承接）', async () => {
+  it('幂等：已 subscribed 再调不重发 RPC（subscribeSession 内建检查承接）', async () => {
     f.effects.openRestoreWindow('s1')
     await flushSubscribes(f.subscribeRpc)
 
@@ -260,7 +260,7 @@ describe('createLifecycleEffects.onSessionRestored（revive + 提示条 + 重订
     expect(getSubscriptionState('s1')?.subscribed).toBe(true)
   })
 
-  it('invalidate 后的恢复窗口：markSessionDead 失效簿记 → onSessionRestored 重发不被幂等守卫短路', async () => {
+  it('invalidate 后的恢复窗口：markSessionDead 失效簿记 → onSessionRestored 重发不被幂等检查短路', async () => {
     f.effects.openRestoreWindow('s1')
     await flushSubscribes(f.subscribeRpc)
     expect(f.subscribeRpc).toHaveBeenCalledTimes(1)

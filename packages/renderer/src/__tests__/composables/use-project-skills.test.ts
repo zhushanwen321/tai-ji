@@ -8,13 +8,13 @@
  *
  * Wave3 新增 TC1-TC4（订阅 skill 缓存失效信号 + 失败不永久失败）：
  * - TC1：useGlobalSkills RPC 失败不置 globalLoaded（修复永久失败 bug，可重试）
- * - TC2：useGlobalSkills 订阅 global scope 失效信号触发 force 重拉
- * - TC3：useProjectSkills 订阅 project scope 失效信号清缓存重拉（版本号机制）
+ * - TC2：useGlobalSkills 订阅 global scope 失效信号触发 force 重新拉取
+ * - TC3：useProjectSkills 订阅 project scope 失效信号清缓存重新拉取（版本号机制）
  * - TC4：多实例共享模块级订阅（onSkillCacheInvalidated 只注册一次）
  *
  * 模块级状态重置：TC1-TC4 用 vi.resetModules() + 动态 import 重新加载 composable 模块，
  * 保证每个 it 拿到全新的 globalLoaded/globalInvalidateSubscribed/projectInvalidateSubscribed。
- * 现有 W4 用例（TC0 组）保持静态 import，不受模块级状态影响（其断言不依赖订阅守卫）。
+ * 现有 W4 用例（TC0 组）保持静态 import，不受模块级状态影响（其断言不依赖订阅检查）。
  * [C3] resetModules 同时重置 @taiji/core 的 transport 模块级单例——动态 import 组的 seam
  * 注入经 provideSeam（同实例动态 import 后 provide）。
  *
@@ -133,7 +133,7 @@ describe('useProjectSkills (W4)', () => {
     expect(loadError.value).toBe(true)
   })
 
-  it('RD-4#13：retry() 重拉成功 → projectSkills 填充 + loadError 清除', async () => {
+  it('RD-4#13：retry() 重新拉取成功 → projectSkills 填充 + loadError 清除', async () => {
     getProjectSkillsMock.mockRejectedValueOnce(new Error('rpc fail'))
     const cwd = ref<string | null>('/proj-x')
 
@@ -154,7 +154,7 @@ describe('useProjectSkills (W4)', () => {
 // ── Wave3 TC1-TC4：订阅 skill 缓存失效信号 + 失败不永久失败 ──────────
 // 模块级状态（globalLoaded/globalInvalidateSubscribed/projectInvalidateSubscribed）跨 it 持久，
 // 需每个 it 重置：vi.resetModules() 清模块缓存 + 重新 vi.mock + 动态 import 拿全新模块实例。
-// onSkillCacheInvalidated 订阅指向的 events 模块也需一起重置（否则旧订阅残留导致守卫计数错误）。
+// onSkillCacheInvalidated 订阅指向的 events 模块也需一起重置（否则旧订阅残留导致检查计数错误）。
 
 const SKILL_1: SkillInfo[] = [
   { id: 's1', name: 'skill1', description: 'one', enabled: true, source: 'agents', effective: true },
@@ -179,10 +179,10 @@ describe('useGlobalSkills / useProjectSkills (Wave3: 订阅失效信号)', () =>
   /**
    * 订阅 mock 工厂：记录所有注册的 handler，并按 scope 暴露「派发」入口。
    * 用途：
-   * - 用 vi.fn 断言注册次数（守卫验证）
+   * - 用 vi.fn 断言注册次数（检查验证）
    * - emit(scope) 直接调对应 handler（绕开 events，隔离 project/global handler 各测各的）
    * 关键：首次 useProjectSkills 实例化时 project 订阅先注册（calls[0] scope=project），
-   * useGlobalSkills() 内 global 订阅后注册（calls[1] scope=global）。两者各自带 scope 守卫。
+   * useGlobalSkills() 内 global 订阅后注册（calls[1] scope=global）。两者各自带 scope 检查。
    */
   function makeInvalidateMock() {
     const handlers: Array<(p: { scope: 'global' | 'project'; cwd?: string }) => void> = []
@@ -218,7 +218,7 @@ describe('useGlobalSkills / useProjectSkills (Wave3: 订阅失效信号)', () =>
     await vi.waitFor(() => expect(globalSkills.value).toEqual([]))
 
     // 关键断言：失败后可重试（globalLoaded 未被置 true）。mock 改 resolve([skill1]) 后，
-    // 模拟 global scope 失效信号 → loadGlobal(true) 强制重拉 → globalSkills 刷新为 [skill1]
+    // 模拟 global scope 失效信号 → loadGlobal(true) 强制重新拉取 → globalSkills 刷新为 [skill1]
     getGlobalSkills.mockResolvedValue(SKILL_1)
     inv.emitGlobal()
     await vi.waitFor(() => expect(globalSkills.value).toEqual(SKILL_1))
@@ -228,7 +228,7 @@ describe('useGlobalSkills / useProjectSkills (Wave3: 订阅失效信号)', () =>
     warnSpy.mockRestore()
   })
 
-  it('TC2: useGlobalSkills 订阅 global scope 失效信号触发 force 重拉', async () => {
+  it('TC2: useGlobalSkills 订阅 global scope 失效信号触发 force 重新拉取', async () => {
     const getGlobalSkills = vi.fn().mockResolvedValue(SKILL_1)
     const inv = makeInvalidateMock()
     await provideSeam({ getGlobalSkills, onSkillCacheInvalidated: inv.onSkillCacheInvalidated })
@@ -240,12 +240,12 @@ describe('useGlobalSkills / useProjectSkills (Wave3: 订阅失效信号)', () =>
 
     // mock 改返回 [skill1, skill2]，模拟 runtime 重扫后缓存更新
     getGlobalSkills.mockResolvedValue(SKILL_1_2)
-    // 派发 global scope 失效信号 → loadGlobal(true) force 重拉
+    // 派发 global scope 失效信号 → loadGlobal(true) force 重新拉取
     inv.emitGlobal()
     await vi.waitFor(() => expect(globalSkills.value).toEqual(SKILL_1_2))
     expect(getGlobalSkills).toHaveBeenCalledTimes(2)
 
-    // 再次调用 useGlobalSkills 不重复挂 global 订阅（globalInvalidateSubscribed 守卫）
+    // 再次调用 useGlobalSkills 不重复挂 global 订阅（globalInvalidateSubscribed 检查）
     const callsBefore = inv.onSkillCacheInvalidated.mock.calls.length
     useGlobalSkills()
     expect(inv.onSkillCacheInvalidated.mock.calls.length).toBe(callsBefore)
@@ -276,7 +276,7 @@ describe('useGlobalSkills / useProjectSkills (Wave3: 订阅失效信号)', () =>
     expect(getGlobalSkills).toHaveBeenCalledTimes(2)
   })
 
-  it('TC3: useProjectSkills 订阅 project scope 失效信号清缓存重拉（版本号机制）', async () => {
+  it('TC3: useProjectSkills 订阅 project scope 失效信号清缓存重新拉取（版本号机制）', async () => {
     const getProjectSkills = vi.fn().mockResolvedValue(SKILL_A)
     const inv = makeInvalidateMock()
     await provideSeam({ getProjectSkills, onSkillCacheInvalidated: inv.onSkillCacheInvalidated })
@@ -290,7 +290,7 @@ describe('useGlobalSkills / useProjectSkills (Wave3: 订阅失效信号)', () =>
 
     // mock 改返回 [skillA, skillB]，模拟项目目录变更后重扫
     getProjectSkills.mockResolvedValue(SKILL_A_B)
-    // 派发 project scope 失效信号 → 版本号++ → watch 清 skillsByCwd → 重拉当前 cwd
+    // 派发 project scope 失效信号 → 版本号++ → watch 清 skillsByCwd → 重新拉取当前 cwd
     inv.emitProject('/proj1')
     await vi.waitFor(() => expect(projectSkills.value).toEqual(SKILL_A_B))
     expect(getProjectSkills).toHaveBeenCalledTimes(2)
@@ -306,14 +306,14 @@ describe('useGlobalSkills / useProjectSkills (Wave3: 订阅失效信号)', () =>
     useProjectSkills(ref('/a'))
     useProjectSkills(ref('/b'))
 
-    // 关键断言：project 模块级订阅只挂一次（projectInvalidateSubscribed 守卫，[C3] 首次实例化时挂载）。
+    // 关键断言：project 模块级订阅只挂一次（projectInvalidateSubscribed 检查，[C3] 首次实例化时挂载）。
     // 注意：onSkillCacheInvalidated 总调用次数 = 1（仅 project 顶层订阅）；useGlobalSkills 未调用，无 global 订阅。
     expect(inv.onSkillCacheInvalidated).toHaveBeenCalledTimes(1)
 
     // 派发 project 信号 → 两实例各自 watch 版本号触发清自己的 skillsByCwd（版本号共享，触发次数=实例数）
     getProjectSkills.mockResolvedValue(SKILL_A_B)
     inv.emitProject()
-    // 等待 watch 生效（两实例各重拉一次自己的当前 cwd）
+    // 等待 watch 生效（两实例各重新拉取一次自己的当前 cwd）
     await vi.waitFor(() => expect(getProjectSkills.mock.calls.filter((c) => c[0] === '/a').length).toBeGreaterThanOrEqual(1))
     await vi.waitFor(() => expect(getProjectSkills.mock.calls.filter((c) => c[0] === '/b').length).toBeGreaterThanOrEqual(1))
   })

@@ -198,7 +198,7 @@ describe('D8 错误回包形状单源化', () => {
         errorResult.hint = 'use send_to_session to retry'
       }
       expect(errorResult.error).toBe('spawn failed')
-      // 交集扩展命中共享守卫；sessionId 字段不进错误文本（session-manager 现状语义）
+      // 交集扩展命中共享检查；sessionId 字段不进错误文本（session-manager 现状语义）
       expect(isChannelErrorResult(errorResult)).toBe(true)
       expect(formatChannelErrorText(errorResult)).toBe('spawn failed')
     })

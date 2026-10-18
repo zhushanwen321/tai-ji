@@ -232,7 +232,7 @@ watch(
 
 // RD-4#1 失败回弹：保存失败时 runtime 不广播（仅成功落盘后广播），store 仍持最近落盘值，
 // 而本组件的乐观编辑（commit）已让 localDirs 偏离。saveError 置位时强制从 props.dirs
-// （store 广播镜像）重拉，界面回弹至最近落盘值——不引入第二套本地状态。
+// （store 广播镜像）重新拉取，界面回弹至最近落盘值——不引入第二套本地状态。
 watch(
   () => props.saveError,
   (failed) => {
@@ -265,7 +265,7 @@ function commit(next: SkillDirConfig[]): void {
   emit('update-dirs', next.map((d) => ({ ...d })))
 }
 
-// ── 组内 ↑↓ 移动（splice 交换相邻，组首↑/组末↓ disabled 由模板守卫）──
+// ── 组内 ↑↓ 移动（splice 交换相邻，组首↑/组末↓ disabled 由模板检查）──
 function moveUp(scope: Scope, displayIdx: number): void {
   if (props.disabled || displayIdx <= 0) return
   const a = realIndex(scope, displayIdx - 1)

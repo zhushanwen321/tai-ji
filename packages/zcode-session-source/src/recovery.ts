@@ -31,7 +31,7 @@
  * $TMPDIR 治理面登记（2026-09-23 review round 1 MF-1-4）：L3 快照把会话库整库拷入
  * $TMPDIR 属「读快照」非「对话数据存放」——源库只读零触碰、副本即弃（OS 清空
  * $TMPDIR 无任何权威数据丢失面），已按此语义登记为 data-source-registry §4 ⑰
- * （ADR-0063 I2「对话数据禁入 $TMPDIR」的登记例外，taiji 侧消费面经该条豁免
+ * （ADR-0063 I2「对话数据禁入 $TMPDIR」的登记例外，taiji 侧消费方经该条豁免
  * review MUST「会话内容入 $TMPDIR」）。迁移 dataDir scratch 的长期方向与代价
  * 见该条目处置列——跨包 API 变更，另批裁决。
  */
@@ -231,7 +231,7 @@ export interface SnapshotOpenResult {
  * L3 快照兜底（单级）。拷贝集唯一定义 = db only + 自建 0 字节 -wal；-shm 永不进
  * 拷贝集。快照目录固定前缀 taiji-zcode-snap-；失败路径（拷贝/开库/表集合验证）
  * 在上抛前关闭连接并删除快照目录，成功路径由调用方 dispose 收尾。规模门在本函数
- * 同样生效（直接调用面也对齐规格）。
+ * 同样生效（直接调用点也对齐规格）。
  */
 export async function openViaSnapshot(dbPath: string): Promise<SnapshotOpenResult> {
   const dbBytes = statSync(dbPath).size

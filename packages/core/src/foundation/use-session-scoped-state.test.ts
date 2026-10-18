@@ -8,11 +8,11 @@
  * - cleanup(sid) 移除分区
  * - D-B2-1：cleanup 后 updateFor 对已删分区 no-op（迟到写拦截）+ 重新 init 出列后
  *   updateFor 恢复写入（删后同 id 重建不丢写）+ isDeleted 查询同生命周期
- *  （分区外辅助表的迟到写守卫口径延伸）
+ *  （分区外辅助表的迟到写检查口径延伸）
  * - 切 sid 后 current 切分区（不丢旧数据，切回恢复）
  * - null sid 返回默认实例不写 Map（防 null key 污染）
  * - registerSessionCleanup / triggerSessionCleanups 注册触发机制
- * - C-1 条件注册守卫三分支（有 scope dispose 反注册 / 无 scope 不 warn 不抛 /
+ * - C-1 条件注册检查三分支（有 scope dispose 反注册 / 无 scope 不 warn 不抛 /
  *   无 scope 时 cleanup 保留在注册表 = 前提 2）
  * - C-1 census 静态锁（扫描设施与快照单一源 = scripts/check-session-scoped-state-census.mjs，
  *   本文件薄包装消费其导出保持 CI 覆盖；快照 15 文件各 1 处，清单外新调用点即红）
@@ -29,7 +29,7 @@ import {
   triggerSessionCleanups,
   __clearSessionCleanupRegistryForTest,
 } from './use-session-scoped-state'
-// @ts-expect-error —— 无类型 .mjs 守卫脚本（Node 直跑形态），core 不为测试引入 allowJs；类型边界见下方别名
+// @ts-expect-error —— 无类型 .mjs 检查脚本（Node 直跑形态），core 不为测试引入 allowJs；类型边界见下方别名
 import { collectCallSites, compareCensusToSnapshot, CENSUS_SNAPSHOT } from '../../../../scripts/check-session-scoped-state-census.mjs'
 
 /** census 脚本（无类型 .mjs）的类型边界：仓库相对路径 → 非测试调用点次数 */
@@ -204,7 +204,7 @@ describe('W1 useSessionScopedState: Map 分区工厂', () => {
     expect(result.isDeleted('aux-map')).toBe(false)
     expect(result.isDeleted('never-created')).toBe(false)
 
-    // cleanup（session 销毁）→ true：分区外辅助表的迟到写守卫生效（与 updateFor 拦截同源）
+    // cleanup（session 销毁）→ true：分区外辅助表的迟到写检查生效（与 updateFor 拦截同源）
     result.cleanup('aux-map')
     expect(result.isDeleted('aux-map')).toBe(true)
 
@@ -345,7 +345,7 @@ describe('W1 registerSessionCleanup / triggerSessionCleanups 注册机制', () =
   })
 })
 
-describe('C-1 条件注册守卫（console-noise-triage D1：if (getCurrentScope())）', () => {
+describe('C-1 条件注册检查（console-noise-triage D1：if (getCurrentScope())）', () => {
   it('分支 1（有 scope）：dispose 后自身 cleanup 已反注册，trigger 不再触达其分区', async () => {
     const init = vi.fn(() => ({ v: 0 }))
     const sid = ref<string | null>('guarded-with-scope')
@@ -381,7 +381,7 @@ describe('C-1 条件注册守卫（console-noise-triage D1：if (getCurrentScope
         state = useSessionScopedState<{ v: number }>(sid, init)
         void state.current.value
       }).not.toThrow()
-      // 条件注册构造性消除 Vue「no active effect scope」dev warn（守卫前此处必 warn）
+      // 条件注册构造性消除 Vue「no active effect scope」dev warn（检查前此处必 warn）
       expect(warnSpy).not.toHaveBeenCalled()
 
       // 前提 2 载重：不挂 dispose → unregister 永不触发 → cleanup 留在注册表，
@@ -398,7 +398,7 @@ describe('C-1 条件注册守卫（console-noise-triage D1：if (getCurrentScope
   })
 })
 
-describe('C-1 census 静态锁（守卫后误调用的唯一入口拦，新调用点即红）', () => {
+describe('C-1 census 静态锁（检查后误调用的唯一入口拦，新调用点即红）', () => {
   // 扫描设施 + 快照单一源 = scripts/check-session-scoped-state-census.mjs（与 pre-commit
   // 干跑同一实现，零双口径）；匹配口径（双形态锁模式 / 工厂定义行排除 / 扫描剪枝）与
   // 快照修正流程登记在脚本头注释。锁模式回归（如漏掉泛型形态）会表现为 census 计数

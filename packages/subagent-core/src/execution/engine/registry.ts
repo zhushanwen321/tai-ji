@@ -40,7 +40,7 @@ export type EngineFactory = () => EnginePort;
  * 成员（capabilities/listModels/validateModel）直读本快照。
  *
  * 与 client/remote-engine.ts 的 RemoteEngineManifestSnapshot 是结构闭包（后者多出
- * core 中立类型包装；漂移由 protocol-closure 同族结构互证断言守卫）。
+ * core 中立类型包装；漂移由 protocol-closure 同族结构互证断言检查）。
  */
 export interface EngineManifestSnapshot {
   /** manifest `capabilities`（同步能力位权威，注册期读，无缓存）。 */
@@ -237,7 +237,7 @@ export class WindowScopeEngineError extends Error {
 /**
  * per-window 引擎的同步只读代理（D6）：构造同步无连接（底层 RemoteEngine 构造不
  * spawn——§3.5.3 代理形态）；同步只读成员（capabilities / listModels / validateModel）
- * 直读 manifest 注册期快照——8 处生产调用面的同步只读 3 处零改动兼容；连接级成员
+ * 直读 manifest 注册期快照——8 处生产调用点的同步只读 3 处零改动兼容；连接级成员
  * fail-fast（WindowScopeEngineError，指路窗口实例解析）。
  *
  * validateModel 的「catalog 省略 = 成员摘除」形态保形：RemoteEngine 构造器对省略
@@ -275,7 +275,7 @@ function portFactoryOf(descriptor: EngineDescriptor): EngineFactory {
 
 /**
  * [R1 D6] 触发引擎 dispose：同步调用拿 Promise 不 await（「触发不等待」，D6①——
- * dispose 的同步面〔fire close 帧 + 同步 SIGTERM〕由引擎实现保证在返回 Promise 前
+ * dispose 的同步部分〔fire close 帧 + 同步 SIGTERM〕由引擎实现保证在返回 Promise 前
  * 完成，registry 不等待异步段）。同步 throw 与异步 reject 均记日志吞掉，绝不外溢
  * 阻断调用方——重注册替换（D6②）与宿主收割（D6③）都是 best-effort 面，且 reject
  * 无人接会成为 unhandledRejection 崩宿主。两条 dispose 路径共用本函数。
@@ -424,7 +424,7 @@ function triggerActiveWindowEngineDispose(source: string): void {
  *     单例不 dispose（descriptor 替换、singleton 不删——新 portFactory 生效于单例
  *     缺席的下次 getEngine）。这是 reload / jiti 模块重载后 factory 重跑、
  *     discoverAndRegisterEngines 对同一磁盘 manifest 重扫的常态：等价重注册 dispose
- *     一个持有在飞 run 的引擎去换一个行为等价的引擎，是零收益纯破坏（杀令 B）。
+ *     一个持有在途 run 的引擎去换一个行为等价的引擎，是零收益纯破坏（杀令 B）。
  *   - 标识不等价 → 现状 dispose + 删单例（防泄漏语义保留——旧实例可能与新
  *     descriptor 不兼容，如引擎包升级后 bin 相同但能力面变化）。
  */

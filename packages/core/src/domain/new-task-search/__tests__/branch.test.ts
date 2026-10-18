@@ -1,8 +1,8 @@
 /**
  * branch git 分支编排单测（IF4）。
  *
- * 覆盖 plan TC-9：git 守卫（openBranchPopover）/ 直切（selectBranch/confirmDirtySwitch）/
- * 飞行中守卫 + 孤儿 promise（submitCreateBranch）。
+ * 覆盖 plan TC-9：git 检查（openBranchPopover）/ 直切（selectBranch/confirmDirtySwitch）/
+ * 飞行中检查 + 孤儿 promise（submitCreateBranch）。
  * gitApi mock 注入；模块级状态 beforeEach resetNewTaskFlow 隔离。
  */
 import { describe, expect, it, vi, beforeEach } from 'vitest'
@@ -47,7 +47,7 @@ describe('useNewTaskBranch', () => {
     resetNewTaskFlow()
   })
 
-  it('TC-9a: openBranchPopover git 守卫——非 git 目录抛错回 idle', () => {
+  it('TC-9a: openBranchPopover git 检查——非 git 目录抛错回 idle', () => {
     const gitApi = makeGitApi()
     const { branch, controller } = makeBranch(gitApi, { git: null })
     transition('landing')
@@ -56,7 +56,7 @@ describe('useNewTaskBranch', () => {
     expect(useNewTaskFlowState().state.value).toBe('idle')
   })
 
-  it('TC-9b: openBranchPopover git 守卫通过 → branch-popover', () => {
+  it('TC-9b: openBranchPopover git 检查通过 → branch-popover', () => {
     const gitApi = makeGitApi()
     const { branch } = makeBranch(gitApi, { git: {} })
     transition('landing')
@@ -64,7 +64,7 @@ describe('useNewTaskBranch', () => {
     expect(useNewTaskFlowState().state.value).toBe('branch-popover')
   })
 
-  it('TC-9c: openBranchModal 来源守卫——非 branch-popover 抛错回 idle', () => {
+  it('TC-9c: openBranchModal 来源检查——非 branch-popover 抛错回 idle', () => {
     const gitApi = makeGitApi()
     const { branch, controller } = makeBranch(gitApi, { git: {} })
     transition('landing')
@@ -129,7 +129,7 @@ describe('useNewTaskBranch', () => {
     expect(useNewTaskFlowState().state.value).toBe('landing')
   })
 
-  it('TC-9i: submitCreateBranch 飞行中守卫——重复提交直接 return 不调 gitApi', async () => {
+  it('TC-9i: submitCreateBranch 飞行中检查——重复提交直接 return 不调 gitApi', async () => {
     const gitApi = makeGitApi()
     const { branch } = makeBranch(gitApi, { sid: 's1', git: {} })
     // 飞行中：controller setBranchCreateInFlight(true) 语义直置模块级 ref
@@ -142,7 +142,7 @@ describe('useNewTaskBranch', () => {
     useNewTaskFlowController_setBranchCreateInFlight(false)
   })
 
-  it('TC-9j: submitCreateBranch 孤儿 promise 守卫——Esc 已离开 branch-modal → resolve 后不 transition', async () => {
+  it('TC-9j: submitCreateBranch 孤儿 promise 检查——Esc 已离开 branch-modal → resolve 后不 transition', async () => {
     const gitApi = makeGitApi()
     const { branch } = makeBranch(gitApi, { sid: 's1', git: {} })
     // createBranch 挂起（未 resolve）

@@ -1,5 +1,5 @@
 // engine-discovery-scan.test.ts —— [W4] 引擎发现器（impl-plan §2.4 / A4/A12）：
-// manifest schema 字段级正反例、三级搜索路径、L1 分隔符与非法条目、engines.json 投影
+// manifest schema 字段级正反例、三级搜索路径、L1 分隔符与非法条目、engines.json 派生视图
 // 合流与幂等零写、同 id 覆盖留痕、bin 不可执行标记、ensureEngineDiscovered 补扫。
 //
 // 纪律：fixture 一律 mkdtempSync(tmpdir()) 自建自删（禁真实数据目录）；L2 根在用例内
@@ -335,7 +335,7 @@ describe("manifest schema 字段级解析", () => {
     expect(manifestOf("mc-no-models").modelCatalog).toBeNull();
   });
 
-  it("displayName 可选（缺省不入快照，消费面回落 id）；description 仅形态校验", () => {
+  it("displayName 可选（缺省不入快照，消费方回落 id）；description 仅形态校验", () => {
     makeEnginePkg(tmpRoot, "plain", { capabilities: FULL_CAPABILITIES });
     const result = scanEngines(scanOpts({ roots: [tmpRoot] }));
     expect("displayName" in result.discovered[0].descriptor.manifest!).toBe(false);
@@ -417,7 +417,7 @@ describe("三级搜索路径", () => {
     ).toBe(true);
   });
 
-  it("L3 裸命令名经 PATH 解析；解析失败 → unusable 不进清单（投影 = 已发现且可执行）", () => {
+  it("L3 裸命令名经 PATH 解析；解析失败 → unusable 不进清单（派生视图 = 已发现且可执行）", () => {
     const binDir = path.join(tmpRoot, "pathbin");
     fs.mkdirSync(binDir);
     fs.writeFileSync(path.join(binDir, "l3-on-path"), BIN_CONTENT);
@@ -522,7 +522,7 @@ describe("冲突与失败", () => {
   });
 });
 
-// ── 装载与投影 ───────────────────────────────────────────────────
+// ── 装载与派生视图 ───────────────────────────────────────────────────
 
 describe("装载与注册表", () => {
   it("discoverAndRegisterEngines 装载 cli descriptor：hasEngine true、getEngine 返回 id 命中的 port（构造同步不 spawn）", () => {
@@ -556,7 +556,7 @@ describe("装载与注册表", () => {
     expect(ensureEngineDiscovered("ghost", opts)).toBe(false);
   });
 
-  it("engines.json 投影合流：发现 cli ∪ inproc 注册；幂等零写；契约 {v:1, engines} 不变", () => {
+  it("engines.json 派生视图合流：发现 cli ∪ inproc 注册；幂等零写；契约 {v:1, engines} 不变", () => {
     makeEnginePkg(tmpRoot, "projected", { capabilities: FULL_CAPABILITIES });
     registerEngine("pi", () => stubEngine("pi"));
     // L1 env 根通道经注入 opts 覆盖（语义同生产 env 读取，密闭化防宿主环境污染——
@@ -584,7 +584,7 @@ describe("装载与注册表", () => {
     }
   });
 
-  it("syncEnginesFile fail-safe：发现异常不阻塞投影（发现根全部不存在时仍写 inproc 清单）", () => {
+  it("syncEnginesFile fail-safe：发现异常不阻塞派生视图生成（发现根全部不存在时仍写 inproc 清单）", () => {
     registerEngine("pi", () => stubEngine("pi"));
     const agentDir = path.join(tmpRoot, "agent");
     syncEnginesFile(agentDir, HERMETIC_DISCOVERY);
@@ -592,7 +592,7 @@ describe("装载与注册表", () => {
     expect(file.engines).toEqual(["pi"]);
   });
 
-  it("零发现零注册时投影空清单（W11 删 inproc 后的终态语义预演）", () => {
+  it("零发现零注册时派生视图生成空清单（W11 删 inproc 后的终态语义预演）", () => {
     const agentDir = path.join(tmpRoot, "agent");
     syncEnginesFile(agentDir, HERMETIC_DISCOVERY);
     const file = JSON.parse(fs.readFileSync(getEnginesFilePath(agentDir), "utf8")) as SubagentEnginesFile;

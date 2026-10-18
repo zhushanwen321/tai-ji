@@ -83,7 +83,7 @@ const CONVERGENCE_HARD_CAP_MS = 1500
  *   `() => streamItems.value.length`。[过渡缺省] 未注入时取 Number.MAX_SAFE_INTEGER，交由
  *   virtua scrollToIndex 内部 clamp 到 [0, itemsLength-1]（virtua 0.50.0 实装 $scrollToIndex
  *   首行 `t = r(t, 0, $getItemsLength() - 1)`，r 为 min/max clamp），语义等价末项直取——
- *   U1→U2 接线窗口的兼容层（MessageStream 消费面本单元不改）。
+ *   U1→U2 接线窗口的兼容层（MessageStream 消费方本单元不改）。
  * @param opts.endOffset D2 真实底部原语的滚动目标正偏移（尾部块实测总高）。U2 由 tailEl RO
  *   注入。[过渡缺省] 未注入时 = 0（无尾部高度补偿，落点 = 旧版 align-end 语义）。
  * @param opts.onStickChange stickToBottom 翻转时的副作用回调（消费方可据此收起「回到最新」胶囊等）

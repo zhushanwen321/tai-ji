@@ -9,8 +9,8 @@
  *
  * 模块级单例的两个消费方：
  * - TurnRail.vue 渲染：railMemoFor 命中零重算（既有行为，原文迁出）。
- * - useMessageStreamRail 的 railTurns 投影恒等判定（streaming perf）：streaming 末位
- *   turn 每帧新引用 → 命中判定需比对「rail 可见投影签名」（memo 四字段）而非 turn
+ * - useMessageStreamRail 的 railTurns 派生视图恒等判定（streaming perf）：streaming 末位
+ *   turn 每帧新引用 → 命中判定需比对「rail 可见派生视图签名」（memo 四字段）而非 turn
  *   引用——与渲染消费同一 memo，每帧对末位 turn 至多算一次签名，且命中帧 TurnRail
  *   因 props 引用不变整体跳过重渲（零 vnode diff）。判定与渲染同源，签名漂移不可能。
  *
@@ -22,7 +22,7 @@ import { hasFailedTool } from '@taiji/core/domain/chat'
 import { summarizeTurnForRail, summarizeAssistantForRail } from '@taiji/core/domain/chat'
 
 /** memo 条目的纯数据形状（非待实现契约——无 implements/extends 变体，用 type 别名；导出 =
- * railMemoFor 返回类型可命名，消费方 useMessageStreamRail 做投影签名比对时字段有权威源） */
+ * railMemoFor 返回类型可命名，消费方 useMessageStreamRail 做派生视图签名比对时字段有权威源） */
 export type RailTurnMemo = {
   /** user 行摘要（summarizeTurnForRail，无 user turn 为空串——模板 `|| ' '` 兜底不变） */
   userSummary: string

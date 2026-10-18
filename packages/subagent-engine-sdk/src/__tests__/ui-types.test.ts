@@ -1,9 +1,9 @@
 // src/__tests__/ui-types.test.ts
 //
-// isUiResponse 四成员判别守卫（ui-types.ts，S7 修复引入）：引擎侧应答落位前
+// isUiResponse 四成员判别检查（ui-types.ts，S7 修复引入）：引擎侧应答落位前
 // 防宿主畸形帧静默流入 UI 队列。覆盖合法四形态（value/confirmed/cancelled/ack）
 // 与非法形态（非 object/null、类型不符、字面量不符），对齐消费方
-// packages/pi-subagent-cli/src/server.ts 的守卫语义。
+// packages/pi-subagent-cli/src/server.ts 的检查语义。
 
 import { isUiResponse } from "../ui-types.ts";
 import { describe, expect, it } from "vitest";

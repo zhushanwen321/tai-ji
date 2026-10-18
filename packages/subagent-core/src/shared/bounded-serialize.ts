@@ -34,10 +34,10 @@ const JSON_INDENT = 2;
  *
  * 截断边界（输出字符流层级，与对完整串 slice 逐字节等价）：逐段 append 时本段
  * 会使总长越过 budget → 只 append 本段前 (budget - 已累积) 字符（恰好 budget，
- * 可切在转义序列/括号中间，不补任何结构闭合）；越过（exceeded）才追加
+ * 可切在转义序列/括号中间，不做任何结构补全）；越过（exceeded）才追加
  * "\n... (truncated)" 标记——恰好 ===budget 不加（> 判定）。
  *
- * 祖先 Set 循环引用守卫：命中 → 整体回退 String(value)（同 (b) 整串回退语义）。
+ * 祖先 Set 循环引用检查：命中 → 整体回退 String(value)（同 (b) 整串回退语义）。
  */
 export function boundedPrettySerialize(value: unknown, budget: number): string {
   const ancestors = new Set<object>();
@@ -137,7 +137,7 @@ export function boundedPrettySerialize(value: unknown, budget: number): string {
       ancestors.delete(obj);
       return;
     }
-    // 顶层 undefined/function/symbol（调用方守卫后不可达；防御兜底对齐原生 "null"）
+    // 顶层 undefined/function/symbol（调用方检查后不可达；防御兜底对齐原生 "null"）
     append(JSON.stringify(v) ?? "null");
   }
 

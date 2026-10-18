@@ -1,6 +1,6 @@
 // src/execution/engine/host/pi-host-binding.ts
 //
-// pi 引擎的宿主侧绑定点（W6 建立；[W3 chat 域收口] 重写为纯协议形态）。
+// pi 引擎的宿主侧绑定点（W6 建立；[W3 chat 域收尾] 重写为纯协议形态）。
 // 职责 = pi 引擎的 EnginePort 解析与公共常量的宿主侧单一出口——chat 域 inproc 引擎
 // （inproc pi 引擎目录）已随 chat-domain-v1x-liveness-governance W3 删除，chat 轮次与 run
 // 域同样经协议客户端（RemoteEngine，registry 'pi' 由三级发现装载 cli descriptor）
@@ -14,7 +14,7 @@
 //     （发现器装载的 cli 形态 port，RemoteEngine）；未注册（引擎包
 //     未装/发现失败）→ 不可用 stub：路由层对 pi 恒同步短路（本地 pi 恒可用口径），
 //     真正的拒绝发生在首次 engine.run——stub 抛 EngineNotFoundError（含安装指引），
-//     由 SAR「不 reject」契约收口进 result.error。
+//     由 SAR「不 reject」契约收尾进 result.error。
 //
 // maxTurnsToWatchdogMs：maxTurns→watchdog 毫秒换算的 barrel 公共出口（U3/U4 / D7，
 // 两宿主预算一致性 S2 的函数级锚点）。原 inproc session-runner（已删） 定义随删件
@@ -63,7 +63,7 @@ export function maxTurnsToWatchdogMs(maxTurns: number): number {
  * 延迟到首次 run」契约）。
  *
  * @param getService 未消费（历史签名兼容位——inproc per-session DI 重绑形态随
- *   inproc pi 引擎目录 删除消亡；保留形参使 SAR 调用点零改动，W8 收口时随调用面一并清理）。
+ *   inproc pi 引擎目录 删除消亡；保留形参使 SAR 调用点零改动，W8 收尾时随全部调用点一并清理）。
  * @param windowKey 派发窗口键（U3：chat 轮次 = record.id；undefined = 无窗口作用域，
  *   registry 直取）。
  */
@@ -84,7 +84,7 @@ function piUnavailableEnginePort(): EnginePort {
   return {
     id: "pi",
     // 与 pi-subagent-cli manifest capabilities 逐位一致（快照权威；stub 的能力位
-    // 只被 gate 同步面在 run 前读取，真正的拒绝发生在 stub.run 抛 engine_not_found）。
+    // 只被 gate 同步部分在 run 前读取，真正的拒绝发生在 stub.run 抛 engine_not_found）。
     capabilities: () => ({
       schemaEnforcement: "native",
       steer: "unsupported",

@@ -247,11 +247,11 @@ export function useSessionScopedState<T>(
   // ② 注册落空（回调不被存下）③ 不抛错。条件注册构造性消除 ①——冷启动恒现的
   // onScopeDispose dev warn 即源于无 scope 调用。不包 try-catch（warn 是 console 输出，
   // try-catch 结构上拦不住、恒 no-op），不用 failSilently 第二参（把意图藏进布尔参数，
-  // 调用点读不出语义）——两个被否形态见 console-noise-triage 设计 D1。
+  // 调用点读不出语义）——两个不采用形态见 console-noise-triage 设计 D1。
   //
   // 为什么模块级单例不需要 scope cleanup：单例与模块同生命周期，本就不存在
   // 「scope 卸载」事件；cleanup 留在注册表由 triggerSessionCleanups 统一驱动即可
-  // （不挂 dispose 时 unregister 永不触发、条目保留恰是其正确语义，与守卫前行为一致）。
+  // （不挂 dispose 时 unregister 永不触发、条目保留恰是其正确语义，与检查前行为一致）。
   const unregister = registerSessionCleanup(cleanup)
   if (getCurrentScope()) {
     onScopeDispose(() => {

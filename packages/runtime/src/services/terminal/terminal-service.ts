@@ -113,7 +113,7 @@ export class TerminalService implements ITerminalService {
 
   /**
    * spawn 双形态（设计 §3.3「网络消息」）：
-   * - 不带 terminalId = 新建：分配编号 → spawn → 返回分配的 terminalId（编号收口 runtime）
+   * - 不带 terminalId = 新建：分配编号 → spawn → 返回分配的 terminalId（编号收敛 runtime）
    * - 带 terminalId = 指定：实例存活则幂等 no-op；不存在 → unknown_terminal_id
    * 两形态都先做会话段交叉校验（不一致 → terminal_id_session_mismatch）。
    */
@@ -277,7 +277,7 @@ export class TerminalService implements ITerminalService {
   }
 
   /**
-   * 实例路由校验（顺序钉死：交叉校验先于注册表查存——若先查存，`term:<他会话>:1` 会命中
+   * 实例路由校验（顺序固定：交叉校验先于注册表查存——若先查存，`term:<他会话>:1` 会命中
    * 他会话的存活实例并被错误写入）。返回 PTY 句柄；不存在 / 会话段不一致抛扁平错误。
    */
   private requireInstanceOrThrow(sid: string, terminalId: string): pty.IPty {
@@ -329,7 +329,7 @@ export class TerminalService implements ITerminalService {
    * kill 的 SIGKILL 升级兜底（RT-8#10）：SIGTERM 后 KILL_ESCALATION_MS 仍未退出
    * （shell trap 捕获/忽略 SIGTERM、子进程不在同进程组）时强杀，防孤儿进程 + fd 残留。
    * tracked 模式（用户 kill）：onExit 清理注册表后本 timer 自然 no-op——同 terminalId 是
-   * 绝不复用的，守卫 `ptyMap.get(terminalId) !== proc` 只作防御式兜背（防实现漂移）。
+   * 绝不复用的，检查 `ptyMap.get(terminalId) !== proc` 只作防御式兜背（防实现漂移）。
    */
   private scheduleKillEscalation(
     terminalId: string,

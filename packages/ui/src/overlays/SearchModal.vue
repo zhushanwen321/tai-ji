@@ -155,7 +155,7 @@ import { ref, computed, onUnmounted, watch, nextTick, type Component, type Compo
 import { Search, Terminal, FileText, Code, MessageSquare, Clock, Loader2 } from '@lucide/vue'
 import { useI18n } from 'vue-i18n'
 // ui 原语走包内相对导入（不经 @taiji/ui 顶层 barrel）：SearchModal 经顶层 barrel
-// 再导出，顶层 barrel 自引用会闭合循环依赖环（R2 S-1）
+// 再导出，顶层 barrel 自引用会封住循环依赖环（R2 S-1）
 import { Input } from '../primitives/input'
 import { registerUiModalSurface } from '../modal-surface-registrar'
 import { useSearch, useSearchJump, useSearchModal, segments } from '@taiji/core'
@@ -237,7 +237,7 @@ const query = ref('')
 const { query: externalQuery } = useSearchModal()
 
 // 与外部 useSearchModal.query 双向同步：打开时预填搜索词，输入时同步回单例。
-// 两个 watch 都加 !== 守卫保持对称，避免一方回写触发另一方形成死循环（W12）。
+// 两个 watch 都加 !== 检查保持对称，避免一方回写触发另一方形成死循环（W12）。
 watch(() => externalQuery.value, (v) => {
   if (v !== query.value) query.value = v
 }, { immediate: true })
@@ -263,7 +263,7 @@ let loadingTimer: ReturnType<typeof setTimeout> | undefined
 let debounceTimer: ReturnType<typeof setTimeout> | undefined
 
 /**
- * 拉取结果（编排归 useSearch.query；BC-9 loadSeq 守卫在 query 内部，此处不重复守卫 AH-C1）。
+ * 拉取结果（编排归 useSearch.query；BC-9 loadSeq 检查在 query 内部，此处不重复检查 AH-C1）。
  * AC-8.1：开扫 200ms 后显 loading（防闪烁），finally 清 timer+loading。
  * T5.4 容错：query 抛错 catch（不崩，清 loading，分组维持旧值/空态）。
  */
@@ -301,9 +301,9 @@ const total = computed(() => flatItems.value.length)
 
 function onKeydown(e: KeyboardEvent) {
   // IME 组合输入中不拦截：拼音/日文候选导航的 Enter/Arrow 属输入法操作，非浮层导航——
-  // 否则选中候选词会触发 confirmSel 跳转并关闭浮层（与表单 overlay/Composer 守卫一致）。
+  // 否则选中候选词会触发 confirmSel 跳转并关闭浮层（与表单 overlay/Composer 检查一致）。
   if (e.isComposing) return
-  // #9 AC-9.1：Tab/Shift+Tab 循环切类（先于 total 守卫，使空过滤态仍可继续切换出空类型）。
+  // #9 AC-9.1：Tab/Shift+Tab 循环切类（先于 total 检查，使空过滤态仍可继续切换出空类型）。
   if (e.key === 'Tab') {
     e.preventDefault()
     const types: (SearchType | null)[] = [null, 'command', 'file', 'symbol', 'session']
@@ -326,7 +326,7 @@ function onKeydown(e: KeyboardEvent) {
  * 浮层内的情况（input 自然会冒泡到 dialog div）；input 内 Escape 用户体感一致。
  */
 function onGlobalKeydown(e: KeyboardEvent) {
-  // IME 组合输入中 Esc 用于取消候选词，不关浮层（同 onKeydown 守卫）
+  // IME 组合输入中 Esc 用于取消候选词，不关浮层（同 onKeydown 检查）
   if (e.isComposing) return
   if (e.key === 'Escape') {
     e.preventDefault()
@@ -378,7 +378,7 @@ async function confirmSel(): Promise<void> {
 
 /** 查询变化 → debounce 120ms → 重置选中 + 拉新结果（AC-7.15） */
 watch(query, () => {
-  // MR-7.1 孤儿查询守卫：浮层关闭后 query 变化（close 分支置 ''）不得再调度 loadResults——
+  // MR-7.1 孤儿查询检查：浮层关闭后 query 变化（close 分支置 ''）不得再调度 loadResults——
   // 否则 close 后 120ms 仍有幽灵加载，且其 finally 可能清掉重开后的 loadingTimer（S-3）。
   if (!props.open) return
   errorMsg.value = '' // AC-8.5：新查询清除上一次 error（transient）
@@ -391,7 +391,7 @@ watch(query, () => {
 /**
  * 打开/关闭切换（immediate 处理初始 open=true 挂载场景）：
  * - open=true：加载初始结果（recent + suggested）
- * - open=false：清查询 + 重置状态 + 清定时器（AC-7.14 资源清理，MR-7.1 孤儿查询守卫）
+ * - open=false：清查询 + 重置状态 + 清定时器（AC-7.14 资源清理，MR-7.1 孤儿查询检查）
  */
 watch(() => props.open, (isOpen) => {
   if (isOpen) {
@@ -399,7 +399,7 @@ watch(() => props.open, (isOpen) => {
     // W1：open=true 时 nextTick 后 focus input（替代 reka-ui Dialog 默认聚焦首个可聚焦元素）。
     // Input 组件是单根组件（template 根为 <input>），ref 拿到 component instance，需用 $el 拿 DOM。
     nextTick(() => {
-      // $el 为 Element（ComponentPublicInstance），instanceof + focus 函数检查做运行时守卫
+      // $el 为 Element（ComponentPublicInstance），instanceof + focus 函数检查做运行时检查
       // （Input 根元素若换成非输入元素不崩）。Input 无 defineExpose → $el 恒为根 <input>，无 fallback 分支。
       const el = inputRef.value?.$el
       if (el instanceof HTMLElement && typeof el.focus === 'function') el.focus()

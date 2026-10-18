@@ -129,7 +129,7 @@ export function useChatViewDeps(
     }
     try {
       const nodes = await loadFileCandidates(realSid)
-      // 代际守卫（ADR-0049 updateFor(capturedSid) 同源思路）：await 期间 sessionId 可能已切到
+      // 代际检查（ADR-0049 updateFor(capturedSid) 同源思路）：await 期间 sessionId 可能已切到
       // 新 session——迟到的 file.search 结果属旧 session，写入会跨 session 串台（新 session 的
       // markdown 路径按旧文件集判定链接化）。不等则整体丢弃，由新 session 自己的加载负责落位。
       if (sid !== sessionId.value) return
@@ -142,7 +142,7 @@ export function useChatViewDeps(
       localFiles.value = nextBasenames
     } catch (e) {
       // 降级：load 失败时白名单为空集，markdown 路径降级纯文本（与无 env 一致，无回归）。
-      // 同样受代际守卫约束：旧 session 的失败结果不得清空新 session 已加载的白名单。
+      // 同样受代际检查约束：旧 session 的失败结果不得清空新 session 已加载的白名单。
       if (sid !== sessionId.value) return
       // [RD-1#8] 降级本身正确，但须留痕：否则「路径链接化能力消失」零日志零标记，
       // 排障时无法区分「session 无文件」与「file.search 失败」。
@@ -153,15 +153,15 @@ export function useChatViewDeps(
   }
   watch(sessionId, (sid) => { void refreshLocalFiles(sid) }, { immediate: true })
 
-  /** agent turn settled → 白名单刷新（complete / error 收口帧均触发；abort 经 complete{stopReason:'aborted'}）。
+  /** agent turn settled → 白名单刷新（complete / error 收尾帧均触发；abort 经 complete{stopReason:'aborted'}）。
    *  动机（2026-10-03 display-containers 交付复盘缺陷）：白名单快照在会话视图挂载时拉取（上方
-   *  watch 只随 sessionId 变化重拉），turn 内 agent 新建/删除的文件不进白名单 → 该 turn 回复里
-   *  反引号引用的新落盘文件路径不链接化（纯文本死链）。turn 收口帧是天然刷新锚点：此时本 turn
-   *  的全部写盘已完成。内容等价守卫保证无文件变化的 turn 零赋值零重渲染，常态成本 = 一次
+   *  watch 只随 sessionId 变化重新拉取），turn 内 agent 新建/删除的文件不进白名单 → 该 turn 回复里
+   *  反引号引用的新落盘文件路径不链接化（纯文本死链）。turn 收尾帧是天然刷新锚点：此时本 turn
+   *  的全部写盘已完成。内容等价检查保证无文件变化的 turn 零赋值零重渲染，常态成本 = 一次
    *  file.search RPC。
-   *  订阅生命周期：裸 events.on（useSessionEvents 有 getCurrentInstance 守卫，本装配器存在
+   *  订阅生命周期：裸 events.on（useSessionEvents 有 getCurrentInstance 检查，本装配器存在
    *  effectScope 直调形态不满足）+ watch(sessionId) 重订 + onScopeDispose 退订；切 sid 边界的
-   *  迟到帧由 refreshLocalFiles 内代际守卫兜底。 */
+   *  迟到帧由 refreshLocalFiles 内代际检查兜底。 */
   let unsubTurnSettle: (() => void) | null = null
   watch(sessionId, (sid) => {
     unsubTurnSettle?.()
@@ -204,7 +204,7 @@ export function useChatViewDeps(
     getChangeSetStatus: (sid: string, messageId: string) => chat.getChangeSetStatus(sid, messageId),
     isExpanded: (turnKey: string): boolean => turnExpansion.isExpanded(turnKey),
     isTakeover: (turnKey: string): boolean => turnExpansion.isTakeover(turnKey),
-    // [D3] pendingSend 投影桥接：UserBubble submitEdit 双发锁（「正在提交」最贴近的既有信号
+    // [D3] pendingSend 派生视图桥接：UserBubble submitEdit 双发锁（「正在提交」最贴近的既有信号
     // ——send/editAndResend 提交前置位、message_start 清；语义窄于 isActive）
     isPendingSend: (sid: string): boolean => chat.isPendingSend(sid),
     // D4 双通道：ui MarkdownRenderer ④路相对链接点击的 props 缺省 fallback（与上方
@@ -243,7 +243,7 @@ export function useChatViewDeps(
       void editAndResend(sid, messageId, segments)
     },
     // [U5 消息撤回 D6] 撤回统一单入口：UserBubble 透传 targetId，在途 cancel / 已送达
-    // 树内回退的路由判定只在 core useChat.revokeMessage 单点（内核投影复核分派）。
+    // 树内回退的路由判定只在 core useChat.revokeMessage 单点（内核派生视图复核分派）。
     onRevokeMessage: (sid: string, targetId: string): void => {
       void revokeMessage(sid, targetId)
     },
@@ -260,7 +260,7 @@ export function useChatViewDeps(
     /** 朗读（ai-voice-tts §5.1）：点击动作分流收敛在装配侧——idle = 朗读（清洗由
      *  useTtsPlayer 内部承担，文本源 = 消息正文 normalizeContent）；loading/playing =
      *  取消/停止（stop 与「点击停止」同源复用，§5.1 状态机非 idle 态点击语义）。
-     *  ui 包不 import renderer（反向依赖禁令），状态机数据面经 speakStateOf 投影。
+     *  ui 包不 import renderer（反向依赖禁令），状态机数据面经 speakStateOf 派生视图。
      *  朗读总开关（§5.2 通用配置）只在 idle 分支拦截：关闭时 toast「语音服务未配置」
      *  不发 RPC；非 idle 态点击 = 停止，不受开关约束（关掉开关也应能停掉在播的声音）。 */
     onSpeak: (sid: string, msg: Message): void => {
@@ -275,7 +275,7 @@ export function useChatViewDeps(
         tts.stop()
       }
     },
-    /** 朗读态查询：useTtsPlayer 全局单例（D11）按 messageId 投影，三态直通 */
+    /** 朗读态查询：useTtsPlayer 全局单例（D11）按 messageId 派生，三态直通 */
     speakStateOf: (messageId: string) => tts.speakStateOf(messageId),
     openDrawer: (tab, opts?): void => {
       drawer.open(tab as RightDrawerTab, opts)
@@ -298,7 +298,7 @@ export function useChatViewDeps(
      *  白名单与 resourceBaseDir 由上方 computed/watch 维护）。
      *  copyLabel 注入：ui 渲染模块不依赖壳 i18n 单例（D10 i18n 解耦），复制按钮 title 文案
      *  每次调用求值传入（locale 切换下一帧生效；迁移前由渲染模块 bake 的 t('composable.copyLabel')
-     *  逐字等价——文案等价由 ui markdown.test.ts C1/C2 断言守卫）。 */
+     *  逐字等价——文案等价由 ui markdown.test.ts C1/C2 断言检查）。 */
     renderMarkdown: (source: string, sid?: string) => {
       void sid // sid 仅作 sessionId 派生提示，实际白名单/基准目录由 watch(sessionId) 统一刷新（单 session 壳）
       return renderMarkdownSegments(source, {

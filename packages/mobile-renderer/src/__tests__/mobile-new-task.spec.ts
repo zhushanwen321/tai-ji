@@ -74,7 +74,7 @@ describe('NewTaskSheet 提交调 createSessionFlow（remote-use-mobile D7（移�
     wrapper.unmount()
   })
 
-  it('空字段提交被组件层拦截：提交键 disabled（required 守卫），不触编排', async () => {
+  it('空字段提交被组件层拦截：提交键 disabled（required 检查），不触编排', async () => {
     const wrapper = mountSheet()
     await wrapper.get('[data-testid="new-task-message"]').setValue('only message')
     // cwd 缺失 → 提交键 disabled（组件层拦截），click 不触达 onSubmit
@@ -125,7 +125,7 @@ describe('创建成功后首条消息自动发送编排（createMobileTask：创
     expect(mockSend).toHaveBeenCalledTimes(1)
     expect(wrapper.emitted('created')).toEqual([[createdSession]])
     expect(wrapper.emitted('close')).toBeTruthy()
-    // 发送失败只 console 留痕，不进表单错误提示（session 已存在，失败面仅首条消息投递）
+    // 发送失败只 console 留痕，不进表单错误提示（session 已存在，失败情形仅首条消息投递）
     expect(errSpy).toHaveBeenCalledWith('[mobile-task] first message send failed:', expect.any(Error))
     expect(wrapper.find('[data-testid="new-task-error"]').exists()).toBe(false)
     errSpy.mockRestore()

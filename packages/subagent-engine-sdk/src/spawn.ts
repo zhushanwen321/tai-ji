@@ -9,7 +9,7 @@
 //   禁止 'inherit'/fd 形态——否则宿主死后代仍持写端、EOF 永不到达，自灭主判据失效
 //   （R9-4②）。
 //
-// armEngineSelfDestruct 是引擎 CLI 的宿主死亡自灭守卫：主判据 stdio EOF，
+// armEngineSelfDestruct 是引擎 CLI 的宿主死亡自灭检查：主判据 stdio EOF，
 // 辅助判据 in-flight 反向请求计时超时（已 ack 的人机交互 / 两阶段长运行请求除外）。
 
 import { spawn } from "node:child_process";
@@ -123,7 +123,7 @@ export interface ReverseRequestClock {
   acked(id: string): void;
   /** 请求终结（应答完成/失败/取消）——彻底移出。 */
   settled(id: string): void;
-  /** 卸载守卫（引擎正常 shutdown 路径；自灭后幂等）。 */
+  /** 卸载检查（引擎正常 shutdown 路径；自灭后幂等）。 */
   dispose(): void;
 }
 
@@ -160,7 +160,7 @@ function killOwnProcessGroup(): void {
   try {
     process.kill(-pid, "SIGKILL");
   } catch (err) {
-    // 进程组杀失败（非组长 / Windows 形态差异）——回落单进程杀，任务子进程由
+    // 按进程组终止失败（非组长 / Windows 形态差异）——回落单进程杀，任务子进程由
     // 各自的 stdio EOF / 宿主回收层兜底。
     logger.warn(`process-group kill failed (${String(err)}), falling back to self kill`);
     process.kill(pid, "SIGKILL");
@@ -168,7 +168,7 @@ function killOwnProcessGroup(): void {
 }
 
 /**
- * 武装引擎侧自灭守卫。返回 ReverseRequestClock 给反向通道分发层登记请求生命周期。
+ * 武装引擎侧自灭检查。返回 ReverseRequestClock 给反向通道分发层登记请求生命周期。
  *
  * 判据：
  * - 主判据 stdio EOF：stdin 'end'（数据面读尽）或 'close'（fd 关闭）→ 立即自灭

@@ -9,7 +9,7 @@
 //   executeViaEngine（worktree 创建，record.worktreeHandle 绑定）
 //     → kickOffEngineRun（已删）→ runEngineTask（已删）catch（engine.run prepare
 //       期 reject，含协议握手 engine_capability_mismatch 形态；该中段随 one-shot
-//       engine-run 编排坍缩删除，现行 catch 面 = kickOffChatRound 主干）
+//       engine-run 编排收缩删除，现行 catch 面 = kickOffChatRound 主干）
 //     → finalizeFailed（CAS trySettleLegacyClosed 抢到锁）
 //     → finalizeRecord → doFinalizeRecord Step 3b cleanupWorktreeIfBound
 //     → worktreeManager.cleanup(record.worktreeHandle)。
@@ -63,7 +63,7 @@ describe("契约⑤：run 期失败路径清理前置副作用（worktree）", (
     expect(cleanup).toHaveBeenCalledWith(handle);
   });
 
-  it("无 worktree 绑定：cleanup 不被调（幂等守卫——非 worktree 任务零清理副作用）", async () => {
+  it("无 worktree 绑定：cleanup 不被调（幂等检查——非 worktree 任务零清理副作用）", async () => {
     const cleanup = vi.fn(async () => undefined);
     const record = makeRecord(undefined);
     await doFinalizeRecord(makeDeps(cleanup), record, { success: false } as AgentResult, "closed", "gc");

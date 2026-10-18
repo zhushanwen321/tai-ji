@@ -1017,7 +1017,7 @@ describe('[actions-anchor] 操作栏只挂末位 text 块', () => {
 
 // ─── 正文颜色逐消息派生（chat-flow-text-color D1）─────────────────────────────
 // pi 回合 =「assistant 消息 → 工具 → assistant 消息 → …」循环，mid-turn 气泡的 status
-// 要到回合级 message.complete 才收口；streaming prop 若直接跟 status，长工具回合中已
+// 要到回合级 message.complete 才收尾；streaming prop 若直接跟 status，长工具回合中已
 // 写完的正文一直滞留 streaming 灰。此处断言 Turn 的派生：streaming = status streaming
 // 且未 textFinalized（事实源 = core message_end 打标，见 registry markStreamingAssistantTextFinalized）。
 describe('正文颜色逐消息派生（chat-flow-text-color D1）', () => {

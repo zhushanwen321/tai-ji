@@ -139,7 +139,7 @@ describe('主会话驱逐与 btw 分区的边界（D5「主驱逐不联动」+ D
       // ④ 回填一致：btw 分区随后被逐（普通候选）→ 重载链再注入 → 内容与逐前一致
       h.store.evictSessionWithVirtual('btw:pi-1')
       expect(h.store.getMessages('btw:pi-1')).toEqual([])
-      expect(h.store.isHydrated('btw:pi-1')).toBe(false) // 回填闸门重开（重开线可再回放）
+      expect(h.store.isHydrated('btw:pi-1')).toBe(false) // 回填门禁重开（重开线可再回放）
       h.store.hydrate('btw:pi-1', btwHistory)
       expect(h.store.getMessages('btw:pi-1')).toEqual(btwHistory)
     } finally {
@@ -302,7 +302,7 @@ describe('AU1 D5 查看态保护：查看中的 btw 线不落阈值驱逐（evic
       h.store.evictIfNeeded() // 无查看保护 → 最旧的 btw 线照常被逐
 
       expect(h.store.getMessages('btw:pi-view')).toEqual([])
-      expect(h.store.isHydrated('btw:pi-view')).toBe(false) // 回填闸门重开（D5 可回填）
+      expect(h.store.isHydrated('btw:pi-view')).toBe(false) // 回填门禁重开（D5 可回填）
       expect(h.store.getMessages('f0')).toEqual([msgOf('f0', 'fill')])
       expect(h.store.getMessages('f7')).toEqual([msgOf('f7', 'fill')])
     } finally {

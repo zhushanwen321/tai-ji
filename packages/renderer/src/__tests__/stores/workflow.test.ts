@@ -10,20 +10,20 @@
  *   空列表直接覆盖 / oversize 降级保留旧分区）
  * - clearWorkflows 清空 records + 清 agentcall 映射；clearSession per-session 分区释放（ADR-0049）
  * - registerAgentCall / getAgentCallVirtualIdsByMain / clearAgentCallMapping agentcall 清理映射（U7 MUST_FIX 1）
- * - triggerWorkflowReload 信号驱动重拉 + running 空列表显式 warn（[ADR-0112] 500ms 延迟
+ * - triggerWorkflowReload 信号驱动重新拉取 + running 空列表显式 warn（[ADR-0112] 500ms 延迟
  *   重试已删——flush 缺失出声不补偿）
  * - [W0/D4] 拉取收敛 10 用例：per-session in-flight 合并（并发失效共享一次拉取）+ 可再武装
- *   dirty 补拉（起步竞态 / 终态吞没 / 补拉在途窗口再武装 / 失败分支同样 drain）+ 簿记三点
- *   清理（clearSession / clearWorkflows / $dispose 完成后无幻影补拉——已删 session 的 dirty
+ *   dirty 补充拉取（起步竞态 / 终态吞没 / 补充拉取在途窗口再武装 / 失败分支同样 drain）+ 簿记三点
+ *   清理（clearSession / clearWorkflows / $dispose 完成后无幻影补充拉取——已删 session 的 dirty
  *   不复活）+ 两 sid 并发互不吞（per-session 键粒度）
- * - [P3/D6] agentCallElapsedMs 投影消费纯函数（每 ask 已执行时长）
+ * - [P3/D6] agentCallElapsedMs 派生视图消费纯函数（每 ask 已执行时长）
  *
  * [HISTORICAL] overlay 相关用例（selectAgentCall/backFromAgentCall/isViewing/getViewingAgentCallId/
  * getActiveAgentCallVirtualId）已随 U7 overlay 移除删除。agent call 详情现走 drawer SubagentTab
  * （直接 getAgentCallHistory + setMessages + registerAgentCall），不经 store overlay 状态机。
  * [HISTORICAL] 2026-09-16 侧栏任务 tab 退役：sidebar 视图 2 用例（选中 runId / 读取当前
  * workflow / 返回列表三支）随 Agents/Flows tab 删除——同批删除的还有 store 的 per-panel
- * 选中状态与该三支读写函数（生产消费面全在退役面内）。
+ * 选中状态与该三支读写函数（生产消费方全在退役面内）。
  *
  * 运行：cd packages/renderer && npx vitest run src/__tests__/stores/workflow.test.ts
  */
@@ -155,7 +155,7 @@ describe('workflow store', () => {
 
 // ── found 会话存在性判定（待裁决项 4 行为锁，与 subagent store 同款）：runtime
 // getWorkflows 以 found=false 显式标记「会话不在册」，「读不到会话」保留分区不覆盖，
-// 「真实空列表」（found=true）直接覆盖。原连续空计数 strike 守卫随歧义根治整体退役。
+// 「真实空列表」（found=true）直接覆盖。原连续空计数 strike 检查随歧义根治整体退役。
 
 describe('workflow store — loadWorkflows found 会话存在性判定（待裁决项 4 行为锁）', () => {
   it('found=false（会话不在册）→ 保留分区不覆盖，不设 loadError（读不到 ≠ 数据为空）', async () => {
@@ -330,7 +330,7 @@ describe('workflow store — clearSession（per-session 分区释放，ADR-0049 
   })
 })
 
-describe('workflow store — triggerWorkflowReload（信号驱动重拉）', () => {
+describe('workflow store — triggerWorkflowReload（信号驱动重新拉取）', () => {
   beforeEach(() => {
     vi.useFakeTimers()
   })
@@ -387,7 +387,7 @@ describe('workflow store — triggerWorkflowReload（信号驱动重拉）', () 
     expect(sessionApi.getWorkflows).toHaveBeenCalledTimes(1)
   })
 
-  it('同 sid 连续 running 信号：共享在途拉取 + dirty 补拉一次（2 次 RPC，无延迟重试）', async () => {
+  it('同 sid 连续 running 信号：共享在途拉取 + dirty 补充拉取一次（2 次 RPC，无延迟重试）', async () => {
     vi.mocked(sessionApi.getWorkflows).mockResolvedValue({ workflows: [makeRecord()], oversize: false })
     const store = useWorkflowStore()
 
@@ -395,18 +395,18 @@ describe('workflow store — triggerWorkflowReload（信号驱动重拉）', () 
     store.triggerWorkflowReload('session-1', 'running')
     await vi.advanceTimersByTimeAsync(0)
     await vi.advanceTimersByTimeAsync(600)
-    // 第 2 次信号共享第 1 次在途拉取（置 dirty）；在途完成后 drain 补拉一次 → 共 2 次 RPC
+    // 第 2 次信号共享第 1 次在途拉取（置 dirty）；在途完成后 drain 补充拉取一次 → 共 2 次 RPC
     expect(sessionApi.getWorkflows).toHaveBeenCalledTimes(2)
   })
 })
 
-// ── [W0/D4] 拉取收敛：per-session in-flight 合并 + 可再武装 dirty 补拉 ──
+// ── [W0/D4] 拉取收敛：per-session in-flight 合并 + 可再武装 dirty 补充拉取 ──
 // 设计锚点 workflow-step-visibility-data-source D4：renderer 信号一次性不可重放，
-// 只合并不补拉会丢更新（起步竞态 / 终态吞没两个真实交织）；封顶版 dirty（只补一次）
-// 会在补拉在途窗口复刻终态吞没，dirty 必须可再武装。RPC 用手动放行的 deferred 队列
-// 精确控制在途窗口；队列空时同步抛错——幻影补拉经 loadError 可观测（非挂起等超时）。
+// 只合并不补充拉取会丢更新（起步竞态 / 终态吞没两个真实交织）；封顶版 dirty（只补一次）
+// 会在补充拉取在途窗口复刻终态吞没，dirty 必须可再武装。RPC 用手动放行的 deferred 队列
+// 精确控制在途窗口；队列空时同步抛错——幻影补充拉取经 loadError 可观测（非挂起等超时）。
 
-describe('workflow store — [W0/D4] 拉取收敛（in-flight 合并 + dirty 补拉）', () => {
+describe('workflow store — [W0/D4] 拉取收敛（in-flight 合并 + dirty 补充拉取）', () => {
   interface WorkflowsResult {
     workflows: WorkflowRunRecord[]
     oversize: boolean
@@ -432,7 +432,7 @@ describe('workflow store — [W0/D4] 拉取收敛（in-flight 合并 + dirty 补
     return deferred
   }
 
-  /** 排空微任务链（resolve 后 drain/补拉起 RPC 都在微任务里，断言调用计数前先排空） */
+  /** 排空微任务链（resolve 后 drain/补充拉取 RPC 都在微任务里，断言调用计数前先排空） */
 
   beforeEach(() => {
     rpcQueue.length = 0
@@ -443,12 +443,12 @@ describe('workflow store — [W0/D4] 拉取收敛（in-flight 合并 + dirty 补
     })
   })
 
-  /** 排空微任务链（resolve 后 drain/补拉起 RPC 都在微任务里，断言调用计数前先排空） */
+  /** 排空微任务链（resolve 后 drain/补充拉取 RPC 都在微任务里，断言调用计数前先排空） */
   async function flushMicrotasks(): Promise<void> {
     await new Promise((r) => setTimeout(r, 0))
   }
 
-  it('并发失效共享一次拉取：在途期间的新调用不另起 RPC、返回同一 promise；合并的 dirty 收敛为一次补拉', async () => {
+  it('并发失效共享一次拉取：在途期间的新调用不另起 RPC、返回同一 promise；合并的 dirty 收敛为一次补充拉取', async () => {
     const d1 = enqueueRpc()
     const d2 = enqueueRpc()
     const store = useWorkflowStore()
@@ -456,13 +456,13 @@ describe('workflow store — [W0/D4] 拉取收敛（in-flight 合并 + dirty 补
     expect(sessionApi.getWorkflows).toHaveBeenCalledTimes(1)
     // 在途窗口内两次新调用（并发失效）：共享在途拉取，不另起 RPC（pinia 对 async action
     // 的返回值包一层 then，promise 对象身份断言不可用——以「不另起 RPC + 双方都收敛到
-    // 补拉后终态」为可观测契约）
+    // 补充拉取后终态」为可观测契约）
     const second = store.loadWorkflows('s1')
     const third = store.loadWorkflows('s1')
     expect(sessionApi.getWorkflows).toHaveBeenCalledTimes(1)
     expect(store.isLoadingOf('s1')).toBe(true)
 
-    // 在途完成 → 两次合并信号收敛为一次补拉（3 信号 ≤ 2 次 RPC；无收敛则 3 次）
+    // 在途完成 → 两次合并信号收敛为一次补充拉取（3 信号 ≤ 2 次 RPC；无收敛则 3 次）
     d1.resolve({ workflows: [], oversize: false })
     await flushMicrotasks()
     expect(sessionApi.getWorkflows).toHaveBeenCalledTimes(2)
@@ -472,7 +472,7 @@ describe('workflow store — [W0/D4] 拉取收敛（in-flight 合并 + dirty 补
     expect(store.getRecordsBySession('s1')).toHaveLength(1)
   })
 
-  it('起步竞态：run-created 拉取在途期间 record 落盘 → 空结果不滞留（补拉拾起新落盘数据）', async () => {
+  it('起步竞态：run-created 拉取在途期间 record 落盘 → 空结果不滞留（补充拉取拾起新落盘数据）', async () => {
     const d1 = enqueueRpc()
     const d2 = enqueueRpc()
     const store = useWorkflowStore()
@@ -482,7 +482,7 @@ describe('workflow store — [W0/D4] 拉取收敛（in-flight 合并 + dirty 补
     const settled = store.loadWorkflows('s1')
     expect(sessionApi.getWorkflows).toHaveBeenCalledTimes(1)
 
-    // stale 空结果完成 → dirty 补拉拾起已落盘的 record（无补拉则「run 在、0 步骤」空壳滞留）
+    // stale 空结果完成 → dirty 补充拉取拾起已落盘的 record（无补充拉取则「run 在、0 步骤」空壳滞留）
     d1.resolve({ workflows: [], oversize: false })
     await flushMicrotasks()
     expect(sessionApi.getWorkflows).toHaveBeenCalledTimes(2)
@@ -491,7 +491,7 @@ describe('workflow store — [W0/D4] 拉取收敛（in-flight 合并 + dirty 补
     expect(store.getRecordsBySession('s1')[0]?.runId).toBe('wf-blind')
   })
 
-  it('终态吞没：最后终态信号合并进 stale 在途拉取 → 补拉送达终态（步骤不永久 running）', async () => {
+  it('终态吞没：最后终态信号合并进 stale 在途拉取 → 补充拉取送达终态（步骤不永久 running）', async () => {
     const staleRecord = makeRecord({
       runId: 'wf-term',
       status: 'running',
@@ -501,7 +501,7 @@ describe('workflow store — [W0/D4] 拉取收敛（in-flight 合并 + dirty 补
     const d2 = enqueueRpc()
     const store = useWorkflowStore()
     const first = store.loadWorkflows('s1')
-    // 最后一条终态信号在 stale 拉取在途窗口到达（合并进 stale 拉取——无 dirty 补拉则永久丢失）
+    // 最后一条终态信号在 stale 拉取在途窗口到达（合并进 stale 拉取——无 dirty 补充拉取则永久丢失）
     const terminal = store.loadWorkflows('s1')
 
     d1.resolve({ workflows: [staleRecord], oversize: false })
@@ -522,7 +522,7 @@ describe('workflow store — [W0/D4] 拉取收敛（in-flight 合并 + dirty 补
     expect(final?.agentCalls[0]?.status).toBe('completed')
   })
 
-  it('补拉在途窗口到达终态信号：dirty 可再武装（补拉的补拉），最终状态正确', async () => {
+  it('补充拉取在途窗口到达终态信号：dirty 可再武装（补充拉取的补充拉取），最终状态正确', async () => {
     const d1 = enqueueRpc()
     const d2 = enqueueRpc()
     const d3 = enqueueRpc()
@@ -532,20 +532,20 @@ describe('workflow store — [W0/D4] 拉取收敛（in-flight 合并 + dirty 补
     store.loadWorkflows('s1')
     d1.resolve({ workflows: [makeRecord({ runId: 'wf-r' })], oversize: false })
     await flushMicrotasks()
-    expect(sessionApi.getWorkflows).toHaveBeenCalledTimes(2) // 补拉 B 已起（在途）
+    expect(sessionApi.getWorkflows).toHaveBeenCalledTimes(2) // 补充拉取 B 已起（在途）
 
-    // 信号 C：补拉 B 在途窗口内到达 → 再置 dirty（可再武装语义的验证点；封顶版此处丢信号）
+    // 信号 C：补充拉取 B 在途窗口内到达 → 再置 dirty（可再武装语义的验证点；封顶版此处丢信号）
     store.loadWorkflows('s1')
     d2.resolve({ workflows: [makeRecord({ runId: 'wf-r', status: 'running' })], oversize: false })
     await flushMicrotasks()
-    expect(sessionApi.getWorkflows).toHaveBeenCalledTimes(3) // B 完成后 drain 判 dirty → 补拉 C
+    expect(sessionApi.getWorkflows).toHaveBeenCalledTimes(3) // B 完成后 drain 判 dirty → 补充拉取 C
     d3.resolve({ workflows: [makeRecord({ runId: 'wf-r', status: 'done', reason: 'completed' })], oversize: false })
     await first
     expect(store.getRecordsBySession('s1')[0]?.status).toBe('done')
     expect(sessionApi.getWorkflows).toHaveBeenCalledTimes(3)
   })
 
-  it('失败分支同样 drain：在途拉取失败不阻断 dirty 补拉（后续信号驱动的补拉照常送达）', async () => {
+  it('失败分支同样 drain：在途拉取失败不阻断 dirty 补充拉取（后续信号驱动的补充拉取照常送达）', async () => {
     const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {})
     try {
       const d1 = enqueueRpc()
@@ -556,18 +556,18 @@ describe('workflow store — [W0/D4] 拉取收敛（in-flight 合并 + dirty 补
 
       d1.reject(new Error('rpc down'))
       await flushMicrotasks()
-      expect(sessionApi.getWorkflows).toHaveBeenCalledTimes(2) // 失败后 dirty 补拉照常起
+      expect(sessionApi.getWorkflows).toHaveBeenCalledTimes(2) // 失败后 dirty 补充拉取照常起
       d2.resolve({ workflows: [makeRecord({ runId: 'wf-after-fail' })], oversize: false })
       await Promise.all([first, retry])
       expect(store.getRecordsBySession('s1')[0]?.runId).toBe('wf-after-fail')
-      expect(store.loadErrorOf('s1')).toBeNull() // 补拉成功清错误
+      expect(store.loadErrorOf('s1')).toBeNull() // 补充拉取成功清错误
     } finally {
       errorSpy.mockRestore()
     }
   })
 })
 
-// ── [W0/D4] 三点簿记清理（clearWorkflows / clearSession / $dispose）无幻影补拉 ──
+// ── [W0/D4] 三点簿记清理（clearWorkflows / clearSession / $dispose）无幻影补充拉取 ──
 
 describe('workflow store — [W0/D4] 拉取收敛簿记三点清理（已删 session 的 dirty 不复活）', () => {
   interface WorkflowsResult {
@@ -608,7 +608,7 @@ describe('workflow store — [W0/D4] 拉取收敛簿记三点清理（已删 ses
     await new Promise((r) => setTimeout(r, 0))
   }
 
-  it('clearSession：在途 + dirty 随分区释放，完成后无补拉（已删 session 的 dirty 不复活）', async () => {
+  it('clearSession：在途 + dirty 随分区释放，完成后无补充拉取（已删 session 的 dirty 不复活）', async () => {
     const d1 = enqueueRpc('s1')
     const store = useWorkflowStore()
     const first = store.loadWorkflows('s1')
@@ -617,13 +617,13 @@ describe('workflow store — [W0/D4] 拉取收敛簿记三点清理（已删 ses
 
     d1.resolve({ workflows: [makeRecord()], oversize: false })
     await first
-    // 无补拉：RPC 恒 1 次；幻影补拉会打到空队列（同步抛错 → loadError 分区可观测）
+    // 无补充拉取：RPC 恒 1 次；幻影补充拉取会打到空队列（同步抛错 → loadError 分区可观测）
     expect(sessionApi.getWorkflows).toHaveBeenCalledTimes(1)
     expect(store.loadErrorOf('s1')).toBeNull()
     expect(store.isLoadingOf('s1')).toBe(false)
   })
 
-  it('clearWorkflows：全表簿记清理，在途完成无补拉', async () => {
+  it('clearWorkflows：全表簿记清理，在途完成无补充拉取', async () => {
     const d1 = enqueueRpc('s1')
     const store = useWorkflowStore()
     const first = store.loadWorkflows('s1')
@@ -636,7 +636,7 @@ describe('workflow store — [W0/D4] 拉取收敛簿记三点清理（已删 ses
     expect(store.loadErrorOf('s1')).toBeNull()
   })
 
-  it('onScopeDispose（$dispose）：簿记清理，在途完成无补拉（HMR / store dispose）', async () => {
+  it('onScopeDispose（$dispose）：簿记清理，在途完成无补充拉取（HMR / store dispose）', async () => {
     const d1 = enqueueRpc('s1')
     const store = useWorkflowStore()
     const first = store.loadWorkflows('s1')
@@ -648,7 +648,7 @@ describe('workflow store — [W0/D4] 拉取收敛簿记三点清理（已删 ses
     expect(sessionApi.getWorkflows).toHaveBeenCalledTimes(1)
   })
 
-  it('per-session 键粒度：两 sid 并发拉取互不吞——各自在途、dirty 不跨 session 触发补拉', async () => {
+  it('per-session 键粒度：两 sid 并发拉取互不吞——各自在途、dirty 不跨 session 触发补充拉取', async () => {
     const dA1 = enqueueRpc('sa')
     const dA2 = enqueueRpc('sa')
     const dB1 = enqueueRpc('sb')
@@ -662,7 +662,7 @@ describe('workflow store — [W0/D4] 拉取收敛簿记三点清理（已删 ses
 
     // sa 在途窗口内信号 → 仅 sa 置 dirty
     store.loadWorkflows('sa')
-    // sa 完成 → 仅 sa 补拉（第 3 次 RPC）；sb 无 dirty → resolve 后无补拉
+    // sa 完成 → 仅 sa 补充拉取（第 3 次 RPC）；sb 无 dirty → resolve 后无补充拉取
     dA1.resolve({ workflows: [makeRecord({ runId: 'wf-a1' })], oversize: false })
     await flushMicrotasks()
     expect(sessionApi.getWorkflows).toHaveBeenCalledTimes(3)
@@ -675,7 +675,7 @@ describe('workflow store — [W0/D4] 拉取收敛簿记三点清理（已删 ses
   })
 })
 
-// ── [P3/D6] progress 投影消费纯函数（drawer/tray 共用推导单点）──
+// ── [P3/D6] progress 派生视图消费纯函数（drawer/tray 共用推导单点）──
 
 import { agentCallElapsedMs } from '@/stores/workflow'
 import type { WorkflowAgentCall } from '@taiji/shared'
@@ -737,7 +737,7 @@ describe('workflow store — [可视化 D9] deriveWorkflowRunElapsedMs（run 已
     expect(deriveWorkflowRunElapsedMs(run, NOW)).toBe(25_000) // 停在最后进展时刻，now 推进不增长
     expect(deriveWorkflowRunElapsedMs(run, NOW + 60_000)).toBe(25_000)
     // lastProgressAt 缺省 / 早于 start → null：无可靠停走锚不展示为确定的 0 值（v2 事件
-    // fold 投影恒不产出 health——中断 run 走此省略分支，消费方 '—'）
+    // fold 派生视图恒不产出 health——中断 run 走此省略分支，消费方 '—'）
     expect(deriveWorkflowRunElapsedMs(runWith({ status: 'interrupted' }), NOW)).toBeNull()
     expect(deriveWorkflowRunElapsedMs(runWith({ status: 'interrupted', health: { lastProgressAt: 1 } }), NOW)).toBeNull()
   })

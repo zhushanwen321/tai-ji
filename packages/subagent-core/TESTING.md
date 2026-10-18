@@ -1,7 +1,7 @@
 # subagent workflow 域测试方法论
 
 > 本文记录 subagent workflow 域（`packages/subagent-core` 的编排执行域 + shell 包 `extensions/universal/subagent-workflow`）的测试分层策略与执行方法，指导后续测试编写。
-> 源自 2026-07-30 修复「所有内置 workflow 100% 崩溃」时的经验沉淀——两个根因 bug 都是
+> 源自 2026-07-30 修复「所有内置 workflow 100% 崩溃」时的经验积累——两个根因 bug 都是
 > 「生成代码从未被真实执行」导致的，光靠字符串断言测不出来。
 > 全局测试策略见仓库根 [TEST-STRATEGY.md](../../TEST-STRATEGY.md)。
 

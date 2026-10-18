@@ -390,7 +390,7 @@ describe("createUiRequestHandlerForMode — dialog timeout 协同（LC-3/T2⑦�
     await handler({ method: "input", id: "t3", title: "In", placeholder: "p", timeout: 78 });
     expect(ctx.ui.input).toHaveBeenCalledWith("In", "p", { timeout: 78 });
 
-    // 未传 timeout：不加第三参（调用面严格 additive，与既有 (e) 零回归断言同形态）
+    // 未传 timeout：不加第三参（调用范围严格 additive，与既有 (e) 零回归断言同形态）
     await handler({ method: "input", id: "t4", title: "In2", placeholder: "p2" });
     expect(ctx.ui.input).toHaveBeenCalledWith("In2", "p2");
   });

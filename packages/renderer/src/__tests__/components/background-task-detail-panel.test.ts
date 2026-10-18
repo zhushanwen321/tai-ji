@@ -105,7 +105,7 @@ beforeEach(() => {
   usePanelStore().loadSession(ROOT_PANEL_ID, SID)
   partitionState = reactive({ tasks: [], loaded: true })
   vi.spyOn(navigator.clipboard, 'writeText').mockResolvedValue(undefined)
-  // output 默认回执：非跟随用例（元信息/kill 组）挂载首拉不落 debug 噪音
+  // output 默认回执：非跟随用例（元信息/kill 组）挂载首次拉取不落 debug 噪音
   vi.mocked(backgroundTaskApi.output).mockResolvedValue(outputReply())
   useToast().toasts.value = []
   vi.useFakeTimers({ now: FIXED_NOW })
@@ -199,7 +199,7 @@ describe('BackgroundTaskDetailPanel 元信息渲染（G2）', () => {
 })
 
 describe('BackgroundTaskDetailPanel 输出跟随（D7：2s interval + 停止条件）', () => {
-  it('running：挂载首拉一次，随后每 2s 重拉（fake timers 计次）', async () => {
+  it('running：挂载首次拉取一次，随后每 2s 重新拉取（fake timers 计次）', async () => {
     partitionState.tasks = [makeEntry()]
     selectTask(TASK_ID)
     vi.mocked(backgroundTaskApi.output).mockResolvedValue(outputReply({ text: 'tail-1' }))

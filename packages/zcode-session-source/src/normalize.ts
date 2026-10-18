@@ -1,6 +1,6 @@
 /**
  * zcode session id 归一化（自 runtime services/session/zcode-import/normalize.ts 迁入
- * 改造；runtime 侧旧文件已随共享基座实施收口删除（git 可追溯），本包为其唯一现行承载。
+ * 改造；runtime 侧旧文件已随共享基座实施收敛删除（git 可追溯），本包为其唯一现行承载。
  * 设计 §1.5「id 归一化
  * 收敛为基座/source 单点」——候选打标与转换 header 两个调用点 import 同源实现，
  * 各内联一份则单边漂移、打标失配即幂等失效）。

@@ -4,7 +4,7 @@
  * 锁定 respawn 链路缺口（缺口 #2）：pi 死亡时 runtime clearSession 清掉服务端订阅集合，
  * 前端 streamSubscriptions（events 层幂等标记）与 subscriptionStates（MessageBus 订阅
  * 状态 + in-flight 去重）若不同步失效，respawn 后 ensureStreamSubscription 被各层幂等
- * 守卫短路：events handler 不重挂（旧 handler 残留 → 重挂后双订阅双 dispatch）+
+ * 检查短路：events handler 不重挂（旧 handler 残留 → 重挂后双订阅双 dispatch）+
  * subscribe RPC 不重发（新 pi 的 message.* 定向推送无订阅者 → UI 卡「进行中…」）。
  *
  * 模式：对齐 useChat.test.ts 的 makeFixture（真实 createChatStore + vi.fn deps），
@@ -66,7 +66,7 @@ function makeFixture(): Fixture {
   setSubscriptionPorts({ subscribe: subscribeRpc, replay: vi.fn() })
   const deps: EnsureStreamSubDeps = {
     // [u4b 收窄] EnsureStreamSubDeps.chatApi = Pick<ChatApiPort, 'streamSubscribe'>，
-    // 只注入消费面（excess property check 不放行多余键）
+    // 只注入消费方（excess property check 不放行多余键）
     chatApi: { streamSubscribe },
     // [session-dead 第三环] warning：defer 重投熔断提示的注入面（本用例不触发）
     toast: { error: vi.fn(), warning: vi.fn() },
@@ -110,7 +110,7 @@ describe('invalidateStreamSubscription（session.exited 订阅失效）', () => 
     invalidateStreamSubscription(sid)
     expect(getSubscriptionState(sid)).toBeUndefined()
 
-    // respawn 后 ensure 不被幂等守卫短路：三层全部重发
+    // respawn 后 ensure 不被幂等检查短路：三层全部重发
     f.ensure(sid)
     expect(f.streamSubscribe).toHaveBeenCalledTimes(2)
     await flushSubscribes(f.subscribeRpc)

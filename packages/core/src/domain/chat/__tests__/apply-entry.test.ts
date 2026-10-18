@@ -70,9 +70,9 @@ describe('applyEntry —— entry 类型逐类型覆盖', () => {
     ])
   })
 
-  it('message/user：[簇 A2] defer flush 确认标记剥除——投影片段不含实现标记（live 帧 / reload 重放同点）', () => {
+  it('message/user：[簇 A2] defer flush 确认标记剥除——派生视图片段不含实现标记（live 帧 / reload 重放同点）', () => {
     // flush 提交文本尾附加 `<!--taiji:msg:<entry.id>-->`（user-delivery ①a 身份通道），pi 落盘
-    // entry 带标记 → 投影层单点剥除：live reducer 喂入与重开 replay 同经 convertMessageBody
+    // entry 带标记 → 派生视图层单点剥除：live reducer 喂入与重开 replay 同经 convertMessageBody
     // → 对话流不暴露标记，且剥后文本 = confirmDelivery overlay 文本（文本去重命中不双计）。
     const state = replayEntries([
       msgEntry('e-user-dm1', {

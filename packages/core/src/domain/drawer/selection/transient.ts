@@ -19,7 +19,7 @@ import { useSessionScopedState } from '../../../foundation/use-session-scoped-st
 import { drawerSessionKey } from '../control'
 
 /** 瞬时参数分区（per-session，useSessionScopedState，ADR-0049） */
-export interface TransientParamsState { // oe-exempt:20261003:framework:类型契约先行——selection 分区契约，renderer 消费面即本批 D1 单元
+export interface TransientParamsState { // oe-exempt:20261003:framework:类型契约先行——selection 分区契约，renderer 消费方即本批 D1 单元
   /** Doc tab 当前展示的命令名（如 '/commit'，点击用户气泡 slash chip 时设置） */
   selectedCommandName: string | null
   /** Detail tab 打开时立即展示的文件路径（变更集卡等非文件树入口设置，useDetailPane 消费后清空） */

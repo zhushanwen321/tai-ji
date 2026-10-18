@@ -1,5 +1,5 @@
 /**
- * RuntimeSupervisor 崩溃台账接线单测（crash-forensics-and-watchdog §3.3 D1，实施计划 u1f）。
+ * RuntimeSupervisor 崩溃登记清单接线单测（crash-forensics-and-watchdog §3.3 D1，实施计划 u1f）。
  *
  * 覆盖（验收：判别式真值表 + liveness 双写 + planned 86 + stopping 早退零写入）：
  * - classifyRuntimeExit 纯函数真值表：before-quit 上下文 × stopping × 退出码 8 组合，
@@ -68,7 +68,7 @@ vi.mock('../logs/main-logger.js', () => ({
   startMemoryWatermarkTimer: vi.fn(() => () => {}),
 }))
 
-// 台账断言面：捕获 append 调用（接线单测只断言「写了什么行」，不触文件系统）
+// 登记清单断言面：捕获 append 调用（接线单测只断言「写了什么行」，不触文件系统）
 const crashJournalAppend = vi.hoisted(() => vi.fn())
 vi.mock('../logs/crash-journal.js', () => ({
   crashJournal: { append: crashJournalAppend },
@@ -88,7 +88,7 @@ function onExitOf(callIndex: number): (code: number | null) => void {
   return call[1]
 }
 
-/** 台账 append 的全部事件行（断言辅助） */
+/** 登记清单 append 的全部事件行（断言辅助） */
 function journalEvents(): Array<Record<string, unknown>> {
   return crashJournalAppend.mock.calls.map((c) => c[0] as Record<string, unknown>)
 }
@@ -125,7 +125,7 @@ describe('classifyRuntimeExit 判别式真值表（D1：非 before-quit 且 ≠8
   })
 })
 
-describe('onRuntimeExit 台账接线', () => {
+describe('onRuntimeExit 登记清单接线', () => {
   beforeEach(() => {
     vi.clearAllMocks()
   })
@@ -220,14 +220,14 @@ describe('forceRestartForLiveness 第四挂点（unresponsive 与 kill decision 
     await sup.start()
 
     vi.useFakeTimers()
-    // 真实时序：forceRestartForLiveness 同步段（kill decision 日志 + 台账双写 +
+    // 真实时序：forceRestartForLiveness 同步段（kill decision 日志 + 登记清单双写 +
     // markStopping）先执行，随后进入 await stop()——exit 事件在 stopping 置位期间到达
     const restarting = sup.forceRestartForLiveness()
     const killDecision = mainLoggerMocks.warn.mock.calls.find(
       (c) => (c[1] as Record<string, unknown>)?.action === 'supervisor_force_kill_halfalive',
     )
     expect(killDecision).toBeDefined()
-    // 同点双写：台账行与 kill decision 日志同批产生（exit 之前）
+    // 同点双写：登记清单行与 kill decision 日志同批产生（exit 之前）
     expect(journalEvents()).toEqual([
       { layer: 'runtime', event: 'unresponsive', reason: 'liveness-unhealthy' },
     ])

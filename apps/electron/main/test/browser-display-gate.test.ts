@@ -1,5 +1,5 @@
 /**
- * 层级共存守卫单测（display-containers §7.4 / §5.1 规则 6——S9/S10 主进程侧断言）。
+ * 层级共存检查单测（display-containers §7.4 / §5.1 规则 6——S9/S10 主进程侧断言）。
  *
  * 覆盖：
  * 1. 纯策略（gateway/display-gate.ts）：双阈值空间滞回两半边（from shown / from hidden）+
@@ -8,7 +8,7 @@
  *    - S9：Toast 类 shieldsView rect 在缓冲带内往返 → view 无显隐翻转（from shown 半边）；
  *      相交隐藏后 rect 退到带内 → view 保持隐藏（from hidden 半边——区分单阈值退化的唯一判别态）；
  *      全屏阻塞面无条件隐藏 / 全关恢复（keep-alive 不丢状态）；
- *    - S10：关浮层 → 切走 → 切回 → 无 view 复显（focus 收口，防残影）；
+ *    - S10：关浮层 → 切走 → 切回 → 无 view 复显（focus 收敛，防残影）；
  *      浮层开着切 session → 换显豁免（浮层随行，视口不空白）；
  *    - 错误态联动隐藏 + 重试成功恢复（did-fail-load / render-process-gone 两类占位区分）；
  *    - 会话删除级联 browserDestroy（浮层态复位）+ 反向断言（删非发起会话浮层不动）。
@@ -95,7 +95,7 @@ describe('display-gate 纯策略', () => {
     expect(nextShieldHidden(true, [{ id: 'broken', fullscreen: false }], VIEW_RECT)).toBe(true)
   })
 
-  it('show 统一谓词真值表（§7.4 R3 收口）', () => {
+  it('show 统一谓词真值表（§7.4 R3 收敛）', () => {
     const base = { overlay: { open: true, content: 'browser' as const, sessionId: 'A' }, sessionId: 'A', hasError: false, shieldHidden: false }
     expect(computeShouldShow(base)).toBe(true)
     expect(computeShouldShow({ ...base, overlay: CLOSED_OVERLAY })).toBe(false)
@@ -222,7 +222,7 @@ function lastBounds(view: (typeof hoisted.createdViews)[number]): unknown {
 
 const HIDDEN = { x: 0, y: 0, width: 0, height: 0 }
 
-describe('BrowserViewManager × 层级共存守卫（S9/S10 主进程侧断言）', () => {
+describe('BrowserViewManager × 层级共存检查（S9/S10 主进程侧断言）', () => {
   beforeEach(() => {
     hoisted.createdViews.length = 0
     vi.spyOn(console, 'log').mockImplementation(() => {})
@@ -334,8 +334,8 @@ describe('BrowserViewManager × 层级共存守卫（S9/S10 主进程侧断言�
     })
   })
 
-  describe('S10：focus 收口 + 浮层随行豁免 + 无残影', () => {
-    it('关浮层 → 切走 → 切回 → 无 view 复显（focus 收口，防残影经 focus sync 旁路复活）', () => {
+  describe('S10：focus 收敛 + 浮层随行豁免 + 无残影', () => {
+    it('关浮层 → 切走 → 切回 → 无 view 复显（focus 收敛，防残影经 focus sync 旁路复活）', () => {
       const { win, mgr, view } = setupVisibleA()
 
       // ③ 关浮层 → 隐藏（keep-alive）
@@ -386,7 +386,7 @@ describe('BrowserViewManager × 层级共存守卫（S9/S10 主进程侧断言�
       expect(lastBounds(hoisted.createdViews[0])).toEqual(VIEW_RECT)
     })
 
-    it('浮层开但内容为 workflow 的换显场景：focus 换显只隐藏不显示（R4 对齐收口谓词）', () => {
+    it('浮层开但内容为 workflow 的换显场景：focus 换显只隐藏不显示（R4 对齐收敛谓词）', () => {
       const { mgr, view } = setupVisibleA()
       mgr.create('B', 'win-1')
       const viewB = hoisted.createdViews[1]

@@ -1,13 +1,13 @@
 /**
  * v3 失败保留策略 onFailure: 'forget' | 'retain'（设计 unified-delivery §3.5.3 /
  * §3.4 缺省值表）：
- * - 缺省按载荷类型：custom = retain（无人值守，失败留账下一边沿 / 重启重入队）/
+ * - 缺省按载荷类型：custom = retain（无人值守，失败留下一步边沿 / 重启重入队）/
  *   text = forget（交互在席，首败即停 + 显式上报，消费方可重发——runtime 现状）。
  * - retain：失败条目留守 queued，失败轮不主动重投（idle 下立即重投会形成「失败 →
  *   重投 → 失败」同步循环——首败即停红线的对偶面），等下一 settled 边沿 / 外部
  *   flush（事件驱动，无定时器）；不发 onSettled('rejected')（留守非终局）。
  * - forget：首败即停 + onSettled('rejected') 显式上报 + 从内核移除（v2 现状锚）。
- * - sendChecked 挂账条目恒 forget（同步失败回执契约与 retain 重投矛盾），显式申报
+ * - sendChecked 挂起条目恒 forget（同步失败回执契约与 retain 重投矛盾），显式申报
  *   retain 按 forget 处置 + 一次性 warn。
  * - retain 条目重投成功 → 正常 delivered 终局（onSettled('delivered')）。
  *
@@ -62,7 +62,7 @@ describe('retain：留守与下一边沿重投（事件驱动，无定时器）'
       handle.send(customMsg('subagents:notify', 'n-1'), { id: 'sid-1' })
       const callsAfterFirstFailure = port.sendCalls.length
       expect(callsAfterFirstFailure).toBeGreaterThan(0)
-      // 失败已发生（留守），idle 恒真——若主动重投会同步无限循环；断言本轮收口
+      // 失败已发生（留守），idle 恒真——若主动重投会同步无限循环；断言本轮收尾
       expect(port.sendCalls.length).toBe(callsAfterFirstFailure)
       expect(handle.depth()).toBe(1) // 留守条目回到待投队列
     } finally {
@@ -171,7 +171,7 @@ describe('onFailure 显式覆写', () => {
   })
 })
 
-describe('sendChecked 挂账条目恒 forget（同步失败回执契约优先）', () => {
+describe('sendChecked 挂起条目恒 forget（同步失败回执契约优先）', () => {
   it('checked 条目显式申报 retain → 按 forget 处置（reject + 移除）+ 一次性 warn', async () => {
     const port = makeMockPort({ send: () => transientReject })
     const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {})

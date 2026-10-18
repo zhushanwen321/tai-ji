@@ -15,15 +15,15 @@ describe('PROVIDER_API_TYPES（W1 SSOT）', () => {
     expect(PROVIDER_API_TYPES.length).toBe(2)
   })
 
-  it('ProviderApiType 类型可赋值为集合成员（编译期校验的运行期投影）', () => {
+  it('ProviderApiType 类型可赋值为集合成员（编译期校验的运行期映射）', () => {
     const t: ProviderApiType = 'anthropic-messages'
     expect(PROVIDER_API_TYPES).toContain(t)
   })
 })
 
 // SUBAGENT_RECORD_CUSTOM_TYPE 是 core 权威值的 renderer 镜像（shared 不依赖
-// core，无法直接 import 互证）——本锁钉死镜像侧字面量，与 core 侧
-// record-entry-collect.test.ts 的字面量锁构成双侧等值守卫：任一侧改值即红，
+// core，无法直接 import 互证）——本锁固定镜像侧字面量，与 core 侧
+// record-entry-collect.test.ts 的字面量锁构成双侧等值检查：任一侧改值即红，
 // 报错点就在改动所在的包。
 describe('SUBAGENT_RECORD_CUSTOM_TYPE（core 镜像等值锁）', () => {
   it('镜像值与 core 权威源字面量一致（subagent-record）', () => {

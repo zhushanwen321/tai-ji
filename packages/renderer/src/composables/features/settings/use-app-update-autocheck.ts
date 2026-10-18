@@ -12,7 +12,7 @@
  * 不致额外真实联网：main 侧 15min 缓存兜底，7.5~15min 间的补查请求命中缓存零请求。
  *
  * 依赖方向：本模块 → use-app-update-check（checkForUpdate，含 60s ipc 超时兜底）
- * + use-app-update-state（读 state 守卫）+ use-app-update-restore（启动恢复链）
+ * + use-app-update-state（读 state 检查）+ use-app-update-restore（启动恢复链）
  * + use-app-update-launch（启动结果通知）+ use-app-update-ipc。被 useAppUpdate.ts 消费。
  */
 import { onScopeDispose } from 'vue'
@@ -77,7 +77,7 @@ export function createAutoCheckAxis(deps: AutoCheckAxisDeps): AutoCheckAxis {
 
   /**
    * 上次联网检查发起时刻（epoch ms，0 = 从未）：恢复可见补查的阈值判定基准。
-   * 在真正发起联网检测时更新（runAutoCheck 联网分支），hidden 跳过与状态守卫
+   * 在真正发起联网检测时更新（runAutoCheck 联网分支），hidden 跳过与状态检查
    * 跳过均不更新——基准必须是「真实联网」而非「周期空转」。
    */
   let lastNetworkCheckAt = 0
@@ -103,7 +103,7 @@ export function createAutoCheckAxis(deps: AutoCheckAxisDeps): AutoCheckAxis {
   let disposed = false
 
   /**
-   * 自动检查可执行态守卫：idle/available/error/unsupported 才联网检测；
+   * 自动检查可执行态检查：idle/available/error/unsupported 才联网检测；
    * downloading/replacing/restarting/downloaded（升级流程态）跳过（不打断升级流程）。
    * runAutoCheck 与 visibility 补查共用同一判定。
    */
@@ -150,12 +150,12 @@ export function createAutoCheckAxis(deps: AutoCheckAxisDeps): AutoCheckAxis {
   }
 
   /**
-   * 自动检测单次执行：守卫检查 → 检测（force=false 走 15min 缓存，RM2.1）→ 排下一个 15min 周期定时器。
+   * 自动检测单次执行：检查判定 → 检测（force=false 走 15min 缓存，RM2.1）→ 排下一个 15min 周期定时器。
    *
-   * 守卫（canAutoCheck）：升级流程态跳过本次检查，但仍排下一次定时器，
+   * 检查（canAutoCheck）：升级流程态跳过本次检查，但仍排下一次定时器，
    * 保证升级完成后能继续周期检测。
    *
-   * visibility 守卫：document.hidden 时跳过联网检测（后台隐藏期间不发周期请求，
+   * visibility 检查：document.hidden 时跳过联网检测（后台隐藏期间不发周期请求，
    * 省 GitHub API 配额），恢复可见时由 onVisibilityChange 按时间阈值补查。
    *
    * force=false（批次 4 RM2.1）：周期检查走 release-checker 15min 缓存（含负缓存），

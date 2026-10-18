@@ -3,13 +3,13 @@
 /**
  * usePermissionRequest.test.ts —— 桌面壳装配薄接线 smoke。
  *
- * 状态机本体（畸形事件守卫 / permissions 拷贝 / BM3 失败保持 / D3 expired 撤窗 /
+ * 状态机本体（畸形事件检查 / permissions 拷贝 / BM3 失败保持 / D3 expired 撤窗 /
  * 新请求覆盖）单测在 packages/ui extension-host
  * __tests__/permission-request-controller.test.ts（双壳共享 factory）。本文件只钉
  * 桌面壳装配契约：
  *  - TC0: init 前调 usePermissionRequest() → fail-fast（装配时序错误显形，不静默）
  *  - TC1: init → app.provide(PERMISSION_TRANSPORT_KEY) 注入 factory transport 且与
- *    usePermissionRequest() state 同源（transport 回传驱动 state 收口）
+ *    usePermissionRequest() state 同源（transport 回传驱动 state 收尾）
  *  - TC2: 重复初始化幂等（HMR 防 listener 翻倍）：bus handler 数恒 1
  *
  * 运行：cd packages/renderer && npx vitest run src/composables/shell/__tests__/usePermissionRequest.test.ts
@@ -59,7 +59,7 @@ describe('usePermissionRequest 桌面壳装配薄接线', () => {
     expect(() => usePermissionRequest()).toThrow(/initPermissionRequest/)
   })
 
-  it('TC1: init → provide 注入 factory transport，与 usePermissionRequest() state 同源（回传驱动收口）', async () => {
+  it('TC1: init → provide 注入 factory transport，与 usePermissionRequest() state 同源（回传驱动收尾）', async () => {
     const { app, provided } = makeApp()
     initPermissionRequest(app as never, bus)
 
@@ -71,7 +71,7 @@ describe('usePermissionRequest 桌面壳装配薄接线', () => {
     expect(state.pluginId).toBe('tasks')
     expect(state.pending).toBe(true)
 
-    // 同源验证：provide 的 transport 回传成功 → usePermissionRequest() state 收口
+    // 同源验证：provide 的 transport 回传成功 → usePermissionRequest() state 收尾
     approvePermissions.mockResolvedValue(undefined)
     transport.approve('tasks', ['shell'])
     await vi.waitFor(() => expect(state.pending).toBe(false))

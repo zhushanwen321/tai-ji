@@ -2,7 +2,7 @@
  * mobile dist 绝对路径解析（remote-access D3）。
  *
  * 路径知识单侧持有：main 按运行环境解析绝对路径后经 argv `--mobile-dist=<path>`
- * 拼给 runtime，runtime 只消费不探测环境形态（D3 被否⑥：双侧持有路径知识是
+ * 拼给 runtime，runtime 只消费不探测环境形态（D3 不采用⑥：双侧持有路径知识是
  * pass-through 变体）。
  *
  * - dev（app 未打包）：`<仓库根>/packages/mobile-renderer/dist`（vite outDir 唯一输出；
@@ -45,7 +45,7 @@ export interface MobileDistAppSource {
  *
  * 消费点 = spawnRuntimeProcess（argv 拼参）与 bridge isMobileDistReady（面板点测）
  * ——三元组取法曾两处各自内联（漂移 = spawn 与面板点测对同一 dist 判定不一致），
- * 工厂收口为单点；三元组语义与 repoRoot 无关（两消费点的 repoRoot 概念域不同，
+ * 工厂收敛为单点；三元组语义与 repoRoot 无关（两消费点的 repoRoot 业务含义不同，
  * 不在此合并）。
  */
 export function resolveMobileDistEnv(appSource: MobileDistAppSource = app): MobileDistEnv {

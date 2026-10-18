@@ -1,6 +1,6 @@
 // src/execution/worktree/worktree-reconcile.ts
 //
-// worktree 物理面 ↔ 注册表双向对账（D5b）——自 worktree-manager.ts 按变化轴拆出
+// worktree 物理面 ↔ 注册表双向对账（D5b）——自 worktree-manager.ts 按变化原因拆出
 //（[U5] worktree-manager 收纳重建链后超 max-lines 限；对账是独立子系统：注册表与
 // tmpdir checkout / 分支物理面的周期性收敛，与创建/清理/重建的生命周期动作正交）。
 //
@@ -110,7 +110,7 @@ export class WorktreeReconciler {
   }
 
   /** 对账方向一（注册有 → 物理无）：条目的分支与 checkout 目录都已不存在 → 条目指向
-   *  幻影资源 → 移除条目（纯清账，不删任何仍存在的资源，幂等安全）。 */
+   *  幻影资源 → 移除条目（纯逐条处理完毕，不删任何仍存在的资源，幂等安全）。 */
   private async removePhantomRegistryEntries(
     registered: WorktreeEntry[],
     branchesByRepo: Map<string, Set<string>>,

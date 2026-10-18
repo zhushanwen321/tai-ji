@@ -108,7 +108,7 @@ export function unauthedProvider(): ProviderInfo {
   return { id: 'p2', name: 'Prov Two', apiKeySet: false, status: 'not_configured', models: [{ id: 'm2', name: 'Model Two' }] }
 }
 
-/** 聚合模型 fixture（scoped 过滤后形态，仅含白名单内 m1）。注入用于守卫：
+/** 聚合模型 fixture（scoped 过滤后形态，仅含白名单内 m1）。注入用于检查：
  *  useAuthedModelGroups 改为 providers 派生后，下拉候选必须不受 store.models 内容影响。 */
 export function modelFixtures(): ModelInfo[] {
   return [

@@ -46,7 +46,7 @@ const TERMINAL_FAILED_REAL =
 /** failed 无错误详情变体（P-Z2 降级形态注入材料）。 */
 const TERMINAL_FAILED_BARE =
   '{"method":"v4/telemetry/event","params":{"kind":"turn.terminal","status":"failed"}}';
-/** interrupted 终态（真实枚举成员——用户中断，不误判失败的回归面）。 */
+/** interrupted 终态（真实枚举成员——用户中断，不误判失败的回归测试）。 */
 const TERMINAL_INTERRUPTED_FRAME =
   '{"method":"v4/telemetry/event","params":{"kind":"turn.terminal","status":"interrupted"}}';
 /** 非真实枚举的 "error" 终态（容错分支——防协议漂移滑回假成功）。 */
@@ -126,7 +126,7 @@ function makeEngine(overrides: ScenarioOverrides): EngineFixture {
     sources: { v2ConfigPath: v2Path, personalProviderConfigPath: personalPath, builtinCatalogPath: path.join(tmpRoot, "absent-catalog.json") },
     processEnv: {
       PATH: process.env.PATH ?? "",
-      // 钉扎 appserver 定向（定向不探不降，与 zcode-engine-appserver.test.ts 同款）
+      // 固定 appserver 定向（定向不探不降，与 zcode-engine-appserver.test.ts 同款）
       TAIJI_ZCODE_MODE: "appserver",
       FAKE_SESSION_SCENARIO: scenarioFile,
     },
@@ -145,7 +145,7 @@ function makeCtx(overrides?: Partial<RunContext>): RunContext {
 }
 
 // ============================================================
-// status='failed'（真实帧形）→ run-failed（⛔P-Z2 门修正根修回归面）
+// status='failed'（真实帧形）→ run-failed（⛔P-Z2 门修正的从根源修复回归测试）
 // ============================================================
 
 describe("failed 终态分流（真实协议枚举：parsed 前消费 status → run-failed，不假成功）", () => {
@@ -234,12 +234,12 @@ describe("failed 终态分流（真实协议枚举：parsed 前消费 status →
 // ============================================================
 
 describe("非失败终态裁决（interrupted 随宿主 abort 主路径；error 容错防漂移）", () => {
-  it("status:'interrupted'（真实枚举成员）→ 不误判失败：parsed 收口（用户中断不属引擎失败，落定语义登记）", async () => {
+  it("status:'interrupted'（真实枚举成员）→ 不误判失败：parsed 收尾（用户中断不属引擎失败，落定语义登记）", async () => {
     const f = makeEngine({
       sendPushes: [...ZCODE_APPSERVER_GOLDEN.pushStream, TERMINAL_INTERRUPTED_FRAME],
     });
     const r = await f.engine.run(makeTask({ cwd: f.workspace }), makeCtx());
-    // 不分流：引擎侧不抢先把它终态化为失败（宿主 abort 主路径的收口语义保留）
+    // 不分流：引擎侧不抢先把它终态化为失败（宿主 abort 主路径的收尾语义保留）
     expect(r.outcome.error).toBeUndefined();
     expect(r.outcome.content).toBe(GOLDEN_FULL_TEXT);
     expect(r.outcome.exitCode).toBe(0);

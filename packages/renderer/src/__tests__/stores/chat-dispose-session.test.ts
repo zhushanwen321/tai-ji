@@ -75,7 +75,7 @@ describe('chat store disposeSession（W1：清理 per-session 全部状态）', 
     // changeSetStatuses 的 `${sid}:` 前缀条目已清理（W19 Fix-2 抽取的
     // deleteChangeSetStatusesFor 挂点）——此处补上原注释承诺的断言
     expect(store.getChangeSetStatus(sid, 'm1')).toBeUndefined()
-    // failedHistory 无公开读取器，经行为投影断言：Panel.vue 重试出口判据即
+    // failedHistory 无公开读取器，经行为派生视图断言：Panel.vue 重试出口判据即
     // `chat.failedHistory.has(sessionId)`，dispose 后为 false = 分区已清
     // （disposeSession 的 setRefs 遍历含 failedHistory，见 core domain/chat/store.ts:1108）
     expect(store.failedHistory.has(sid)).toBe(false)

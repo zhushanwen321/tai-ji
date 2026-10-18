@@ -143,7 +143,7 @@ export function fmtISO(d: Date): string {
   return `${y}-${m}-${day}`
 }
 
-// fmtWeekday 已随 i18n 收口（设计 D6）迁往 UsageDailyChart 组件层用 t() 渲染（复用 heatWeek* keys）
+// fmtWeekday 已随 i18n 收敛（设计 D6）迁往 UsageDailyChart 组件层用 t() 渲染（复用 heatWeek* keys）
 
 /* ── 过滤器状态 ── */
 
@@ -455,7 +455,7 @@ export function aggregateCacheMix(
 }
 
 /**
- * 明细台账分组：按 provider 分组，每组内按当前指标降序。
+ * 明细条目清单分组：按 provider 分组，每组内按当前指标降序。
  *
  * @param metric - 当前指标（组间与组内排序口径，G4 metric 贯穿）
  */

@@ -15,7 +15,7 @@
  * - renderer store/composable：useChatStore / useSessionStore / useSettingsStore / useNewTaskFlow /
  *   useModel / useHandoffActions / useSidebar / useToast / useForkModeChannel /
  *   useHandoffModeChannel / useImageAttachment / useI18n
- *   [u3c 退役] useCompactQueue 已随投递所有权内核退役（队列区数据源 = session.delivery 帧投影，
+ *   [u3c 退役] useCompactQueue 已随投递所有权内核退役（队列区数据源 = session.delivery 帧派生视图，
  *   见 composables/panel/useQueueRows.ts）；本文件的残留职责仅剩「撤销/回收文本回输入区」。
  *
  * 视觉派生（D1「视觉派生留壳」）：useComposerBoxClass + useComposerModeVisual 的逻辑并入本文件
@@ -141,9 +141,9 @@ export interface ComposerShellParams {
   isSending: Ref<boolean>
   /** per-session 草稿存储窄接口（ADR-0049：经 useSessionScopedState 分区，不暴露 Map 引用） */
   drafts: DraftStore
-  /** session 是否活跃（流式/派发）—— canSend/visual 守卫 */
+  /** session 是否活跃（流式/派发）—— canSend/visual 检查 */
   isActive: ComputedRef<boolean>
-  /** 命令浮层 open 态（useCommandPopoverTrigger 产物；命令动作表守卫——浮层 open 时动作表跳过） */
+  /** 命令浮层 open 态（useCommandPopoverTrigger 产物；命令动作表检查——浮层 open 时动作表跳过） */
   cmdOpen: Readonly<Ref<boolean>>
 }
 
@@ -223,7 +223,7 @@ export function useComposerShell(params: ComposerShellParams) {
     switchModel,
     setThinkingLevel,
     getThinkingLevelMap: (modelId: string) => {
-      // 旧版守卫：无 '/' 的 modelId（如空串/非完整模型 id）直接返回 undefined（all-levels），
+      // 旧版检查：无 '/' 的 modelId（如空串/非完整模型 id）直接返回 undefined（all-levels），
       // 不碰 providers。
       if (!modelId.includes('/')) return undefined
       const [providerId, modelName] = modelId.split('/')
@@ -339,14 +339,14 @@ export function useComposerShell(params: ComposerShellParams) {
 
   const hasInput = computed(() => draft.value.trim().length > 0)
 
-  // ── D6 发送路由（u5b）+ 发送位四态（u6b）：sessionPhase（occupancy 投影）单一派生 ─
+  // ── D6 发送路由（u5b）+ 发送位四态（u6b）：sessionPhase（occupancy 派生视图）单一派生 ─
   // 数据源 = chat store sessionPhase（session.occupancy 帧驱动 + stateSnapshot 快照恢复）。
   // 发送位四态（D6 表「发送位」列）与 ActivityStrip 从同一真值取数（不双真源）；与 ⏎ 分发器
   // 的关系见下方「故意分立」注——同源 ≠ 同输出。
   //
-  // turn 活跃判定取**并集**：occupancy 权威投影 ∨ 本地乐观视图（isActive = streaming 实体
+  // turn 活跃判定取**并集**：occupancy 权威派生视图 ∨ 本地乐观视图（isActive = streaming 实体
   // ∨ 乐观 pendingSend）。本地 send 的乐观置位先于 runtime occupancy 广播（RPC RTT 窗口），
-  // 只看投影会让窗口内 Enter 落 direct 被 canSend 守卫拦死（死键回退）——并集保持现状
+  // 只看派生视图会让窗口内 Enter 落 direct 被 canSend 检查拦死（死键回退）——并集保持现状
   // isActive→steer 语义；settling/compacting/bash 维度无本地乐观源，由权威帧独占。
   // sendRoute（三值浓缩）与发送位（需原始 turn/compacting/bash 维度细分——如 settling 单独
   // vs settling+bash 的 stop/queue 分档）共用同一 effective phase，不双真源。**两者输出故意
@@ -356,7 +356,7 @@ export function useComposerShell(params: ComposerShellParams) {
     const sid = sessionIdRef.value
     if (!sid) return IDLE_SESSION_PHASE // landing（无 session）无 occupancy 记录 → 全 idle
     const phase = chatStore.sessionPhase(sid)
-    // 本地乐观 busy 投影化为 dispatching（「已发起未确认」的 occupancy 语义）后过统一派生
+    // 本地乐观 busy 映射为 dispatching（「已发起未确认」的 occupancy 语义）后过统一派生
     // ——判定逻辑单点在 resolveSendRoute / 发送位派生，消费方复用同源不漂移。
     return isActive.value && phase.turn === 'idle' ? { ...phase, turn: 'dispatching' as const } : phase
   })
@@ -440,7 +440,7 @@ export function useComposerShell(params: ComposerShellParams) {
    * [HISTORICAL] 前身 isBusy = isActive ∨ isSending——isActive 半边是 renderer 侧车道判定的残留
    * （占用即拦截），随 D1「renderer 只提交不判定」退役（u3b 收 core send.ts 的 canSend 语义，
    * 壳层派生同批收窄归 u3c）。
-   * 仅约束普通 send；staging 发送不受本守卫拦（fork-ask 对源只读，streaming 中合法）。 */
+   * 仅约束普通 send；staging 发送不受本检查拦（fork-ask 对源只读，streaming 中合法）。 */
   const canSend = computed(() => hasInput.value && !isSending.value)
   /** 可提交：staging 活跃时只看本地双发锁（isSending）——streaming 中 fork 提交合法，
    *  handoff 的 streaming 拦截在入口（enterHandoffMode）+ 兜底（handleHandoffSend）。
@@ -493,7 +493,7 @@ export function useComposerShell(params: ComposerShellParams) {
       : t('panel.composer.handoffBannerDesc'),
   )
 
-  // ── 发送分流（core dispatch/send；[u3c/D1] 统一分发器：staging > canSend 守卫 >
+  // ── 发送分流（core dispatch/send；[u3c/D1] 统一分发器：staging > canSend 检查 >
   //    staging.send > landing（含 bash）> bash > /compact > send（统一 submit））──
   const { onSend } = useComposerSend({
     staging: { hasActiveStaging: staging.hasActiveStaging, send: staging.send, activeStaging: staging.activeStaging },

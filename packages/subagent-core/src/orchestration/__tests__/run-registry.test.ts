@@ -5,20 +5,20 @@
 //
 // 锁定语义：
 // a. 派生视图四相（[D2] interrupted 暂停态入状态机——事件流判据）：
-//    - run-settled 落账 → terminal（四值 outcome + errorCode）；
-//    - run-interrupted 落账（显式中断转移）→ interrupted（暂停态，非 terminal，
+//    - run-settled 写入 journal 记录 → terminal（四值 outcome + errorCode）；
+//    - run-interrupted 写入 journal 记录（显式中断转移）→ interrupted（暂停态，非 terminal，
 //      与活体无关）；事件流停止（fold 停在 running/settling + 活体集未命中 =
 //      host-died 判读）→ interrupted（快照末行 running 的僵尸在此消失）；
 //    - 活体集命中 → active（事件流正常推进）；空事件流 → missing / active。
 // b. [D9] abandon 全链移除断言：abandonElapsedInterruptedRuns 及常量/env 通道
-//    从模块导出面消失（功能裁撤验收锚——「数天后回来仍可 resume」的 run 不再
+//    从模块导出范围消失（功能裁撤验收锚——「数天后回来仍可 resume」的 run 不再
 //    被判死）；中断收编入口（adoptInterruptedRun → interruptRun）落
 //    run-interrupted 转移事件（非 run-settled 终态帧——[D2] 中断非终局）+ 中断
 //    条目（status 'interrupted'）补写回调恰一次。
 // c. mtime 退役断言：派生视图/收编源码零 mtime 消费（grep 断言）。
 //
 // [W2/V1 → D15] 收编的记录动作走 terminal-actions 中断编排入口（模块 journal
-// 单写者域）——测试注入面 = setRunEventJournalDirForTest（与帧落账同源）；seed
+// 单写者域）——测试注入路径 = setRunEventJournalDirForTest（与帧写入 journal 记录同源）；seed
 // 侧的本地 journal 实例与模块 journal 指向同一目录（文件层一致）。
 //
 // 测试红线：mkdtemp 自建自删、journal/manifest 全在 tmp、时钟经 now 参数注入
@@ -58,7 +58,7 @@ let journal: RunEventJournal;
 
 beforeEach(() => {
   dir = fs.mkdtempSync(path.join(os.tmpdir(), "run-registry-"));
-  // [D15] 收编链（scan/manifest/帧落账）统一走模块 journal 单写者域——注入
+  // [D15] 收编链（scan/manifest/帧写入 journal 记录）统一走模块 journal 单写者域——注入
   // 目录即覆盖；afterEach 复位（连带清 liveRunStates / 终局记录注册表）。
   setRunEventJournalDirForTest(dir);
   journal = createRunEventJournal(dir);
@@ -175,7 +175,7 @@ describe("派生视图四相（事件流判据，D9-1 → [D2] 暂停态）", ()
     expect(projection.state.lifecycle).toBe("running");
   });
 
-  it("空事件流：活体命中 → active（run-created 落账前窗口）；未命中 → missing", async () => {
+  it("空事件流：活体命中 → active（run-created 写入 journal 记录前窗口）；未命中 → missing", async () => {
     const live = await projectRunRegistryState(journal, "wf-reg-none", {
       activeRunIds: new Set(["wf-reg-none"]),
     });
@@ -187,7 +187,7 @@ describe("派生视图四相（事件流判据，D9-1 → [D2] 暂停态）", ()
     expect(missing.lastEventAt).toBeUndefined();
   });
 
-  it("纯函数入口 projectRunRegistryEvents：事件数组直投影（无 IO——判定输入只有事件流与活体集）", () => {
+  it("纯函数入口 projectRunRegistryEvents：事件数组直接生成派生视图（无 IO——判定输入只有事件流与活体集）", () => {
     // 派生视图消费 scan 产物（含 seq）——helper 产 input 形态，此处补 seq 组装
     const withSeq = (input: WorkflowRunEventInput, seq: number): WorkflowRunEvent => ({
       ...input,
@@ -334,7 +334,7 @@ describe("中断收编入口 adoptInterruptedRun（[D15]：幂等追加 run-inte
     ]);
   });
 
-  it("坏链守卫：run-created 帧损坏（fold 停在 created）→ skippedBrokenChain（run-interrupted 表外转移不可达）", async () => {
+  it("坏链检查：run-created 帧损坏（fold 停在 created）→ skippedBrokenChain（run-interrupted 表外转移不可达）", async () => {
     // 直写坏首帧 + 好后续帧：scan 丢弃坏行后 fold 停在 created（无创建帧可达态）
     fs.writeFileSync(
       path.join(dir, "wf-ad-7.record.jsonl"),
@@ -374,7 +374,7 @@ describe("中断收编入口 adoptInterruptedRun（[D15]：幂等追加 run-inte
   });
 });
 
-// ── pruneTerminalRunFiles 单源（Q2 收口：jsonl-run-store 本地实现已删） ──
+// ── pruneTerminalRunFiles 单源（Q2 收尾：jsonl-run-store 本地实现已删） ──
 
 describe("pruneTerminalRunFiles（已终局资格单源：fold 终态 + 保留窗口 + journal 成对删）", () => {
   const noopDeps = { warn: () => {}, debug: () => {}, toMsg: (e: unknown) => String(e) };

@@ -40,9 +40,9 @@
 import { onMounted, watch, type Ref } from 'vue'
 import type { ComposerInjectionStore, PendingInjection } from './injection-store'
 
-// 本模块消费面（focus / insertSessionChip? / insertTextAtCursor / insertFileChip）全部在
+// 本模块消费方（focus / insertSessionChip? / insertTextAtCursor / insertFileChip）全部在
 // 域级权威接口 ComposerInputInstance（../types，ADR-0058 归位）之内，直接消费权威接口，
-// 不再局部窄契约——与 send/submit/context-chips 的局部最小契约（dispatch 消费面字段不在
+// 不再局部窄契约——与 send/submit/context-chips 的局部最小契约（dispatch 消费方字段不在
 // 权威接口内）是两种互补形态，非漂移。
 import type { ComposerInputInstance } from '../types'
 

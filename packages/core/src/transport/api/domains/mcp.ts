@@ -47,7 +47,7 @@ export async function updateMcpServer(req: McpUpdateRequest): Promise<McpMutatio
 
 /**
  * 启停切换（§3.1「写入 enabled 字段」最小语义的专用操作）：runtime 仅翻转 enabled 键、
- * 不带清单投影回写（D2 丢失窗口保持锁内亚秒级）；reply entry = 写后落盘终态。
+ * 不带清单派生视图回写（D2 丢失窗口保持锁内亚秒级）；reply entry = 写后落盘终态。
  */
 export async function setMcpServerEnabled(req: McpSetEnabledRequest): Promise<McpMutationResult> {
   return command('mcp.setEnabled', req, RPC_BACKSTOP_TIMEOUT_MS)

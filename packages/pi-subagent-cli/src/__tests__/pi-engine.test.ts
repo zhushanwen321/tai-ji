@@ -8,7 +8,7 @@
 //     不可解析（PATH 无 pi）→ checks 反映 + engine_probe_failed recovery；
 //   - run 一次性任务：SpawnRunParams 还原（字段透传 / ctxModel 覆盖 / forkSource）、
 //     回调接线（onEvent/onHandleReady/onChildSpawned/onDelta/askUser）、
-//     EngineHandle + AgentOutcome 应答装配（usage 域映射 / toolCalls 投影）；
+//     EngineHandle + AgentOutcome 应答装配（usage 域映射 / toolCalls 派生视图）；
 //   - run 续聊轮（[H1 U3] run 派发形态，续聊 = 新 run + resume 锚点——[H1 U5] 起
 //     引擎侧无 interact 面；[modeless 波2] 轮终 settled 收割为引擎内建唯一语义）：
 //     resume 锚点透传（--session 穿透）+ recordId 锚定 handle；
@@ -65,7 +65,7 @@ class FakeChild extends EventEmitter {
     return true;
   }
 
-  /** 退出钩子（makeEngine fake runner 挂 onChildStateChanged 收口面）。 */
+  /** 退出钩子（makeEngine fake runner 挂 onChildStateChanged 收敛点）。 */
   onExitHook: (() => void) | undefined;
 
   die(code: number | null, signal: NodeJS.Signals | null): void {
@@ -92,7 +92,7 @@ function fakeSpawnRunner(children: FakeChild[], captured: Captured[]) {
     const cap: Captured = { params, callbacks, resolve: () => {} };
     captured.push(cap);
     registerActiveChild(params.recordId, child as unknown as ChildProcess);
-    // 对齐真实 executor 收口面：进程 exit → onChildStateChanged(exited) + run resolve
+    // 对齐真实 executor 收敛点：进程 exit → onChildStateChanged(exited) + run resolve
     child.onExitHook = () => {
       callbacks.onChildStateChanged?.({
         pid: child.pid,
@@ -362,7 +362,7 @@ describe("PiEngine.run（一次性任务形态）", () => {
     expect(childSpawned).toEqual([{ pid: 4321, killed: false }]);
     expect(deltas).toEqual(["stream-chunk"]);
 
-    // outcome 映射（usage 域 + toolCalls 投影；AgentOutcome 无 success 字段——
+    // outcome 映射（usage 域 + toolCalls 派生视图；AgentOutcome 无 success 字段——
     // 失败经 error/failureKind 表达）
     expect(outcome).toMatchObject({
       content: "done",

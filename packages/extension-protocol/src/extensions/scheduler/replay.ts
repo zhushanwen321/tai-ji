@@ -2,7 +2,7 @@
 // 与扩展同源单实现——pi 扩展（session_start 重放）与 taiji plugin（readEntries 镜像折叠）
 // 共用本函数，杜绝双实现漂移。
 //
-// 依赖面收敛（P7）：本文件零包外依赖——原实现的扩展侧错误消息守卫（toErrorMessage）
+// 依赖面收敛（P7）：本文件零包外依赖——原实现的扩展侧错误消息检查（toErrorMessage）
 // 与扩展共享 logger 以注入参数替代（ReplayFoldOptions.warn），
 // 错误降级语义（返回空 Map / 跳过损坏条目）在包内自足成立；扩展侧经薄 wrapper 注入
 // logger.warn 保持日志行为不变。
@@ -18,7 +18,7 @@ export interface ReplayFoldOptions {
   warn?: (message: string, context?: unknown) => void
 }
 
-/** error → message 的最小等价实现（不引入扩展侧守卫包依赖）。 */
+/** error → message 的最小等价实现（不引入扩展侧检查包依赖）。 */
 function toErrorMessage(e: unknown): string {
   return e instanceof Error ? e.message : String(e)
 }
@@ -76,7 +76,7 @@ export function replayFoldEntries(
   }
 }
 
-/** 步骤① 全量折叠：跳过非本扩展 entry 与守卫不过的损坏 entry；单条折叠抛错只跳过该条（MF-2）。 */
+/** 步骤① 全量折叠：跳过非本扩展 entry 与检查不过的损坏 entry；单条折叠抛错只跳过该条（MF-2）。 */
 function foldEntries(
   entries: Iterable<SchedulerEntryLike>,
   tasks: Map<string, ScheduledTask>,
@@ -85,12 +85,12 @@ function foldEntries(
   for (const entry of entries) {
     if (entry.type !== 'custom' || entry.customType !== TASK_ENTRY_TYPE) continue
     if (!isSchedulerEntryOp(entry.data)) continue
-    const op = entry.data // SchedulerEntryOp（守卫 isSchedulerEntryOp 收窄）
+    const op = entry.data // SchedulerEntryOp（检查 isSchedulerEntryOp 收窄）
 
     try {
       applyOp(tasks, op)
     } catch (err) {
-      // MF-2：守卫已按变体校验必填字段，但嵌套数据损坏（如 upsert task.history 非数组 →
+      // MF-2：检查已按变体校验必填字段，但嵌套数据损坏（如 upsert task.history 非数组 →
       // snapshotToTask 的 .map 抛）仍可能抛——逐条 try/catch 只跳过该条，
       // 不让外层整体 catch 把全部任务清成空 Map（一条损坏 entry 不得清空全部任务）
       options?.warn?.('skipping corrupted scheduler entry', { error: toErrorMessage(err) })
@@ -99,7 +99,7 @@ function foldEntries(
   }
 }
 
-/** 按 op 判别值分发到对应折叠函数；无 default——未知 op 静默跳过（守卫已排除，理论不可达）。 */
+/** 按 op 判别值分发到对应折叠函数；无 default——未知 op 静默跳过（检查已排除，理论不可达）。 */
 function applyOp(tasks: Map<string, ScheduledTask>, op: SchedulerEntryOp): void {
   switch (op.op) {
     case 'upsert':
@@ -171,9 +171,9 @@ function filterNonOwnerTasks(tasks: Map<string, ScheduledTask>, currentSessionFi
 }
 
 /**
- * 类型守卫：判断 entry.data 是否为合法 SchedulerEntryOp——按 op 变体校验必填字段，
+ * 类型检查：判断 entry.data 是否为合法 SchedulerEntryOp——按 op 变体校验必填字段，
  * 不只校验 op 判别值（MF-2 修复）。仅按判别值收窄时，损坏 entry `{op:'upsert'}`（缺 task）
- * 会通过守卫后在 snapshotToTask(undefined) 抛 TypeError，被外层整体 catch 捕获 → 返回空 Map
+ * 会通过检查后在 snapshotToTask(undefined) 抛 TypeError，被外层整体 catch 捕获 → 返回空 Map
  * → 一条损坏 entry 清空全部任务（违反「只忽略该条」的设计意图）。
  *
  * 变体必填校验：
@@ -183,7 +183,7 @@ function filterNonOwnerTasks(tasks: Map<string, ScheduledTask>, currentSessionFi
  *   delete  → taskId: string
  * 校验不过 → 返回 false，该条被跳过（不触发整体 catch）。
  *
- * 替代 `as { op?: unknown }` 结构断言（taste/no-unsafe-cast）：守卫函数内做真实校验，
+ * 替代 `as { op?: unknown }` 结构断言（taste/no-unsafe-cast）：检查函数内做真实校验，
  * Record<string, unknown> 配合 typeof/值校验，不是「无校验断言」。
  */
 function isSchedulerEntryOp(data: unknown): data is SchedulerEntryOp {

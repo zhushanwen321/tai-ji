@@ -80,9 +80,9 @@ import { formatCompactDuration, MS_PER_SECOND } from '@/lib/duration-format'
 const props = defineProps<{
   /** 实例列表（workflow tab = 全部 agentCalls；phase tab = 本 phase 归属实例）。 */
   calls: WorkflowAgentCall[]
-  /** run 投影状态（D9 stoppedInFlight 与 retrying 派生的 run 级输入）。 */
+  /** run 派生视图状态（D9 stoppedInFlight 与 retrying 派生的 run 级输入）。 */
   runStatus: WorkflowRunStatus
-  /** run 终局形态（停止着色映射输入；可缺省 = 未终局/旧投影）。 */
+  /** run 终局形态（停止着色映射输入；可缺省 = 未终局/旧派生视图）。 */
   runOutcome?: WorkflowRunOutcome
 }>()
 

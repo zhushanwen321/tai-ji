@@ -59,7 +59,7 @@ import { formatTokens, USAGE_HIGH_THRESHOLD } from './context-usage-display'
 const { t } = useI18n()
 
 const props = defineProps<{
-  /** session 分区键 + 恢复腿触发源（context-consistency D2：用量状态在 useContextUsage 分区，组件纯读） */
+  /** session 分区键 + 恢复路径触发源（context-consistency D2：用量状态在 useContextUsage 分区，组件纯读） */
   sessionId?: string
   /**
    * 当前复合 modelId（"provider/modelId"），受控 prop，由 Composer 下发。
@@ -72,7 +72,7 @@ const props = defineProps<{
 // [HISTORICAL] `variant` prop 已删（W3b）：对外 props 恒为 sessionId / modelId。
 
 // ── 上下文用量（context-consistency D2 终态）：per-session 分区纯读 ──
-// 订阅/恢复腿/0 帧哨兵全在 composable 内，组件只做 status → 显示映射（卡内同款实例读同一分区）。
+// 订阅/恢复路径/0 帧哨兵全在 composable 内，组件只做 status → 显示映射（卡内同款实例读同一分区）。
 const { current: usage } = useContextUsage(toRef(props, 'sessionId'))
 
 // ── hover-enter 额度查询（展示逻辑在 ContextCapacityCard，查询触发留触发器）──

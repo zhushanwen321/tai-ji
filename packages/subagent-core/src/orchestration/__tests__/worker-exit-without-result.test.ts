@@ -115,7 +115,7 @@ function makeHandle(isCurrent = true): WorkerHandle {
 // ── [F1] handleWorkerExit：exit(0) 无终态消息 → failed ──────────────
 
 
-/** [W2/V1] 六态机引导：journal 首帧（run-created）落账——finalizeRun/abortRun 等
+/** [W2/V1] 六态机引导：journal 首帧（run-created）写入 journal 记录——finalizeRun/abortRun 等
  *  活体终局入口的六态机裁决要求 created→dispatched 已在链上（生产链路由
  *  runWorkflow 正点发射承接；直测终局入口的用例经本 helper 补齐同一引导）。 */
 async function seedRunCreated(run: WorkflowRun): Promise<void> {
@@ -170,7 +170,7 @@ describe("handleWorkerExit — [F1] exit(0) 无终态消息", () => {
     const run = makeRunningRun();
     await seedRunCreated(run);
     // [D6(a) 第 1 步] 终局判定源 = 终局记录注册表：终局 fixture 注入注册表条目
-    // （生产经 dispatch 链 note）——stale 守卫据此判「已终态」。
+    // （生产经 dispatch 链 note）——stale 检查据此判「已终态」。
     noteRebuiltSettlement(run.runId, { outcome: "done", settledAt: Date.now() });
     const deps = makeDeps();
 
@@ -199,9 +199,9 @@ describe("handleWorkerExit — [F1] exit(0) 无终态消息", () => {
 // ── [R4-F1] handleWorkerError：error + exit(1) 同代际双派发只计一次 ────
 
 describe("handleWorkerError — [R4-F1] 同代际双事件幂等", () => {
-  it("worker 崩溃：error 事件先到 → 一次即 done,failed；exit(1) 委托后到 → settled 守卫丢弃", async () => {
+  it("worker 崩溃：error 事件先到 → 一次即 done,failed；exit(1) 委托后到 → settled 检查丢弃", async () => {
     // 真实时序：worker 崩溃 → onError 与 exit 几乎同时触发。第一个事件直接终态化
-    // （ADR-0122 无退避窗口），第二个事件被 stale 守卫丢弃——onRunDone 恰一次。
+    // （ADR-0122 无退避窗口），第二个事件被 stale 检查丢弃——onRunDone 恰一次。
     const run = makeRunningRun();
     await seedRunCreated(run);
     const deps = makeDeps();
@@ -255,7 +255,7 @@ describe("handleWorkerMessage — [F1] 终态消息标记", () => {
     expect(settledRecordOf(run.runId)).toMatchObject({ outcome: "done" });
   });
 
-  it("error 消息同样置 true（本 runtime 代际标记，供 exit(0) 判定与 R4-F1 幂等守卫消费）", async () => {
+  it("error 消息同样置 true（本 runtime 代际标记，供 exit(0) 判定与 R4-F1 幂等检查消费）", async () => {
     const run = makeRunningRun();
     await seedRunCreated(run);
     const deps = makeDeps();

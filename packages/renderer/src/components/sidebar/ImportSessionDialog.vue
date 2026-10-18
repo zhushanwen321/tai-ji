@@ -92,7 +92,7 @@
             </div>
           </PopoverContent>
         </Popover>
-        <!-- 「选择其他目录」（V8）：切扫描根重拉；虚线边框区分于筛选态 chip。
+        <!-- 「选择其他目录」（V8）：切扫描根重新拉取；虚线边框区分于筛选态 chip。
              自定义根时 title 展示根路径（观察者可见当前扫描位置）。
              仅 pi 源显示——rootDir 是 pi 目录扫描概念，zcode 源换根 out-of-scope -->
         <Button
@@ -386,7 +386,7 @@ function chooseSource(kind: ImportSourceKind): void {
   phase.value = 'list'
 }
 
-/** 返回重选来源（阶段二左上入口；候选数据保留，重进同源不重拉） */
+/** 返回重选来源（阶段二左上入口；候选数据保留，重进同源不重新拉取） */
 function backToSource(): void {
   phase.value = 'source'
 }
@@ -460,7 +460,7 @@ watch(
   { immediate: true },
 )
 
-// composable → prop：导入成功后的 close() 需传导回父层（v-model:open 收口）
+// composable → prop：导入成功后的 close() 需传导回父层（v-model:open 收尾）
 watch(dialogOpen, (isOpen) => {
   if (!isOpen && props.open) emit('update:open', false)
 })

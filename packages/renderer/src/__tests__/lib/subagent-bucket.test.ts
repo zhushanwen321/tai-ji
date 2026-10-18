@@ -50,7 +50,7 @@ describe('isRunningProjection 占用谓词（白盒：G2「正在跑」严格口
   it('仅 running 落 true（idle 不算在跑；[U6] 类型收窄后词表已两态）', () => {
     for (const status of ALL_STATUSES) {
       const expected = status === 'running'
-      expect(isRunningProjection(makeRecord(status)), `status=${status} 占用投影应 ${expected}`).toBe(expected)
+      expect(isRunningProjection(makeRecord(status)), `status=${status} 占用派生视图应 ${expected}`).toBe(expected)
     }
   })
 
@@ -66,7 +66,7 @@ describe('isRunningProjection 占用谓词（白盒：G2「正在跑」严格口
   it('result 在场不再参与判定（[U6] result 子句退役——轮终排除由 status 子句（U4 翻边 idle）+ runtime 第五归一承接；result 是数据非状态）', () => {
     // running + result + 无 stopReason：U4 部署边界旧 entry 的理论形态（归一层
     // `running && resumable===true → idle` 承接存量桥接；无 resumable 的 W16 前
-    // entry 无 result 字段）——renderer 层按占用判（在飞缺停因信号，保守计入）。
+    // entry 无 result 字段）——renderer 层按占用判（在途缺停因信号，保守计入）。
     expect(isRunningProjection(makeRecord('running', { result: 'round output' }))).toBe(true)
     // idle + result（U4 后轮终权威形态）→ status 子句排除
     expect(isRunningProjection(makeRecord('idle', { result: 'round output' }))).toBe(false)
@@ -95,7 +95,7 @@ describe('导出形态（观察者：SSOT 模块公共面齐全）', () => {
 // ── [B3] 全集覆盖矩阵（adversarial-review-fixes §3.3 B3）──────────────
 //
 // 护栏语义：Record<SubagentStatus, boolean> 断言表是显式的「枚举 → 占用归属」决策
-// 记录——shared 扩枚举后此表缺新键时，循环取值为 undefined 与实际投影值不等，本矩阵
+// 记录——shared 扩枚举后此表缺新键时，循环取值为 undefined 与实际派生视图值不等，本矩阵
 // 翻红；翻红处置 = 评估新值归属（「进行中类」值必须落 true，不得静默归 false 的
 // idle 半边），补键后再绿。矩阵与 ALL_STATUSES（shared SUBAGENT_STATUS_ALL）双源互证。
 
@@ -104,7 +104,7 @@ describe('[B3] 全集覆盖矩阵（SUBAGENT_STATUS_ALL 每值都有显式占用
    *  [U6] 类型收窄后全集 = 两态。 */
   const RUNNING_MATRIX: Record<SubagentStatus, boolean> = {
     running: true, // 唯一「进行中类」值（W4 纳管态经 stopReason 子句排除，见 P1 矩阵）
-    idle: false, // 两态收口：随时可续聊的空闲，不算在跑
+    idle: false, // 两态收尾：随时可续聊的空闲，不算在跑
   }
 
   it('每个枚举值的 streaming 形态（无附加形态字段）占用归属与断言表一致', () => {
@@ -126,7 +126,7 @@ describe('[B3] 全集覆盖矩阵（SUBAGENT_STATUS_ALL 每值都有显式占用
     expect(SUBAGENT_STATUS_ALL).toContain('running')
   })
 
-  it('[GUI 快修⑤ 投影面] idle record（含 turns/tokens 复活形态）落已结束桶（非 running）——冷重启后统计信号不丢展示位', () => {
+  it('[GUI 快修⑤ 派生视图范围] idle record（含 turns/tokens 复活形态）落已结束桶（非 running）——冷重启后统计信号不丢展示位', () => {
     const revived = makeRecord('idle', { stopReason: 'completed', turns: 4, totalTokens: 88000 })
     expect(isRunningProjection(revived)).toBe(false)
   })
@@ -138,23 +138,23 @@ describe('[B3] 全集覆盖矩阵（SUBAGENT_STATUS_ALL 每值都有显式占用
 // 同答案」。失败处置 = 判据矩阵有形态遗漏，补形态后重跑，禁止放宽断言（D7 门探针
 // 降级路径）。形态视角 = renderer 收到的 record（legacy 值已经 runtime 归一层映射）。
 // [modeless 波4] 旧 5/6/7 三行按 chatMode 区分的轮终形态（chat / one-shot / legacy
-// 缺省）坍缩为单一「轮终完成」形态——字段消亡后三者在 renderer 侧不可区分（亦无需区分）。
+// 缺省）合并退化为单一「轮终完成」形态——字段消亡后三者在 renderer 侧不可区分（亦无需区分）。
 
 describe('[P1 门] 形态 × 判据矩阵全量（8 现实形态，two-state-convergence D7/U6）', () => {
   /** 形态表：现实形态描述 + record 构造 + 占用期望（显式决策记录，缺行即遗漏） */
   const MATRIX: Array<{ name: string; rec: SubagentRecord; occupied: boolean }> = [
     {
       // 形态 1：§2.1 表「真在跑（观察时点）」
-      name: '1 真在跑（首轮在飞：running + result=∅ + stopReason=∅）',
+      name: '1 真在跑（首轮在途：running + result=∅ + stopReason=∅）',
       rec: makeRecord('running'),
       occupied: true,
     },
     {
-      // 形态 2：R4 MF-A 第 2+ 轮在飞型（轮始清点扩字段后的应有形态——markRoundStarted
-      // 已清上轮 stopReason，record 与首轮在飞同形）。若清点失效（stale stopReason
-      // 残留）本谓词将误排除——该失效由 subagent-core 轮始清点测试守卫，
-      // 本行钉住「扩字段后第 2+ 轮在飞不误排除」的renderer侧终态。
-      name: '2 第 2+ 轮在飞（轮始清点后：running + result=∅ + stopReason 已清）',
+      // 形态 2：R4 MF-A 第 2+ 轮在途型（轮始清点扩字段后的应有形态——markRoundStarted
+      // 已清上轮 stopReason，record 与首轮在途同形）。若清点失效（stale stopReason
+      // 残留）本谓词将误排除——该失效由 subagent-core 轮始清点测试检查，
+      // 本行钉住「扩字段后第 2+ 轮在途不误排除」的renderer侧终态。
+      name: '2 第 2+ 轮在途（轮始清点后：running + result=∅ + stopReason 已清）',
       rec: makeRecord('running'),
       occupied: true,
     },
@@ -173,7 +173,7 @@ describe('[P1 门] 形态 × 判据矩阵全量（8 现实形态，two-state-con
     },
     {
       // 形态 5：轮终完成（U4 翻边后轮终权威形态；[modeless 波4] 旧 chat/one-shot/
-      // legacy 缺省三行随 chatMode 字段消亡坍缩归一）
+      // legacy 缺省三行随 chatMode 字段消亡合并归一）
       name: '5 轮终完成（idle + result + completed）',
       rec: makeRecord('idle', { result: '(redacted)', stopReason: 'completed' }),
       occupied: false,
@@ -185,8 +185,8 @@ describe('[P1 门] 形态 × 判据矩阵全量（8 现实形态，two-state-con
       occupied: false,
     },
     {
-      // 形态 7：§3.4 第 7 行 中断收口（markSettled idle + interrupted 族）
-      name: "7 中断收口（idle + stopReason='interrupted'）",
+      // 形态 7：§3.4 第 7 行 中断收尾（markSettled idle + interrupted 族）
+      name: "7 中断收尾（idle + stopReason='interrupted'）",
       rec: makeRecord('idle', { stopReason: 'interrupted' }),
       occupied: false,
     },
@@ -204,7 +204,7 @@ describe('[P1 门] 形态 × 判据矩阵全量（8 现实形态，two-state-con
     }
   })
 
-  it('形态表恰好 8 行（D7 全量清单——[modeless 波4] 10 行随 chatMode 维度坍缩）', () => {
+  it('形态表恰好 8 行（D7 全量清单——[modeless 波4] 10 行随 chatMode 维度合并退化）', () => {
     expect(MATRIX).toHaveLength(8)
   })
 })
@@ -229,9 +229,9 @@ describe('[P1 门] 01a09f83 fixture 回放（严格口径 badge 计数 = 0）', 
 
   const fixtureRecords: SubagentRecord[] = SESSION_01A09F83_GHOST_FIXTURE.map(recordFromSpec)
 
-  it('fixture 完整性：39 个 record id（8 幽灵 + 29 one-shot 轮终 + 2 中断收口，与 §2.1 实测分布一致；[modeless 波4] 幽灵/one-shot 区分退化为 aliasId 前缀）', () => {
+  it('fixture 完整性：39 个 record id（8 幽灵 + 29 one-shot 轮终 + 2 中断收尾，与 §2.1 实测分布一致；[modeless 波4] 幽灵/one-shot 区分退化为 aliasId 前缀）', () => {
     expect(SESSION_01A09F83_GHOST_FIXTURE).toHaveLength(39)
-    // 37 条轮终（idle + result 在场）+ 2 条中断收口（无 result）
+    // 37 条轮终（idle + result 在场）+ 2 条中断收尾（无 result）
     expect(SESSION_01A09F83_GHOST_FIXTURE.filter((s) => s.hasResult)).toHaveLength(37)
     expect(SESSION_01A09F83_GHOST_FIXTURE.filter((s) => s.aliasId.startsWith('ghost-chat-'))).toHaveLength(8)
     expect(SESSION_01A09F83_GHOST_FIXTURE.filter((s) => s.aliasId.startsWith('oneshot-done-'))).toHaveLength(29)

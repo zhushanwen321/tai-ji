@@ -65,7 +65,7 @@ vi.mock('@/lib/ipc', async (importOriginal) => ({
 }))
 
 // ── mock api 域（deleteSession/deleteFolder/newSession + useNewTaskFlow ports 的并集）──
-// [M4-a] btw 域：useBtwTabData 登记通道的数据源（级联前端腿用例先拉取登记映射）。
+// [M4-a] btw 域：useBtwTabData 登记通道的数据源（级联前端路径用例先拉取登记映射）。
 const btwListMock = vi.hoisted(() => vi.fn())
 const removeMock = vi.hoisted(() => vi.fn(() => Promise.resolve()))
 const removeByCwdMock = vi.hoisted(() => vi.fn(() =>
@@ -415,8 +415,8 @@ describe('useSidebar deleteSession 触发 session-scoped cleanup（W5 / ADR-0049
   })
 })
 
-// ── [M4-a / btw-question D4 消费面①] deleteSession 级联的前端腿（m7/agentcall 先例同构）──
-// useBtwTabData 最小宿主：仅用于经真实 refresh 登记 mainSid → vid 映射（登记面先写后读）。
+// ── [M4-a / btw-question D4 消费方①] deleteSession 级联的前端路径（m7/agentcall 先例同构）──
+// useBtwTabData 最小宿主：仅用于经真实 refresh 登记 mainSid → vid 映射（登记清单先写后读）。
 const BtwHost = defineComponent({
   props: { sid: { type: String, required: true } },
   setup(props) {
@@ -429,9 +429,9 @@ function msg(id: string): Message {
   return { id, role: 'assistant', content: 'x', status: 'complete', timestamp: 0 }
 }
 
-describe('useSidebar deleteSession 级联前端腿：btw 线虚拟分区 + 派生键清理（M4-a）', () => {
+describe('useSidebar deleteSession 级联前端路径：btw 线虚拟分区 + 派生键清理（M4-a）', () => {
   it('U-M4a：枚举名下 btw 线 → 逐线清 vid 分区 + 派生 subagent/agentcall 键 → 清映射；他主名下线不受误伤', async () => {
-    // 登记面：真实 refresh 拉取 btw.list → reconcile 登记映射（M3-b 先写后读）
+    // 登记清单：真实 refresh 拉取 btw.list → reconcile 登记映射（M3-b 先写后读）
     btwListMock.mockResolvedValue([{ vid: 'btw:line-c1' }])
     const host = mount(BtwHost, { props: { sid: 's1' } })
     await flushPromises()

@@ -10,7 +10,7 @@
 // NDJSON 行循环 → close 留痕。
 //
 // stdout/stdin 用 process 全局（与 spawn.ts 同款先例——入口函数只在进程入口调用）。
-// 进程退出面：宿主 stdin EOF → 自灭守卫（薄层 arm）杀进程组；正常 dispose 不退进程。
+// 进程退出面：宿主 stdin EOF → 自灭检查（薄层 arm）杀进程组；正常 dispose 不退进程。
 
 import * as readline from "node:readline";
 
@@ -75,8 +75,8 @@ export function runEngineCliEntry(opts: RunEngineCliEntryOptions): void {
     }
   });
   rl.on("close", () => {
-    // stdin EOF：自灭守卫已挂（armEngineSelfDestruct 的 once('close') 杀进程组）；
-    // 此处仅留痕（守卫先注册，杀链不依赖本 handler）。
+    // stdin EOF：自灭检查已挂（armEngineSelfDestruct 的 once('close') 杀进程组）；
+    // 此处仅留痕（检查先注册，杀链不依赖本 handler）。
     logger.debug("stdin closed (host exit path)");
   });
 }

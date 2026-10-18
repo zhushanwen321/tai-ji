@@ -13,7 +13,7 @@
   保留：发送语义（⏎ 提交、⇧⏎ 换行、IME 组字放行——dom-core 免费提供）、exactMatch 直发
   （浮层内 ⏎ 精确命中 = 插 chip + 提交，与 Composer 同链）、双发锁展示面（disabled）。
   提交不回写本组件：emit('submit', segments) 交还 UserBubble（双发锁早退 + editAndResend
-  收口链在 ui 侧单点，契约见 chat-view-deps.ts EditComposerProps）。
+  收尾链在 ui 侧单点，契约见 chat-view-deps.ts EditComposerProps）。
 -->
 <template>
   <!-- 命令浮层：anchor = 编辑框盒子（slot），side=top 向上开、宽 = 盒宽（N3 min(72%,64ch)
@@ -169,7 +169,7 @@ function onInputChange(text: string): void {
     .map((s) => s.name)
 }
 
-/** 可提交：非空稿（trim 后）∧ 非提交在途。空稿守卫与 ui 侧 onEditorSubmit 的
+/** 可提交：非空稿（trim 后）∧ 非提交在途。空稿检查与 ui 侧 onEditorSubmit 的
  *  segmentsToText trim 双闸同语义（主 Composer canSend = hasInput ∧ ¬isSending 同构）。 */
 const canSubmit = computed(() => draft.value.trim().length > 0 && !props.disabled)
 

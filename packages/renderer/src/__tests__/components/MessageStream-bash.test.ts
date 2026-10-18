@@ -5,7 +5,7 @@
  *
  * [cw wave w3] T10/gap3/W5T1 三用例曾整体 skip（[HISTORICAL] 溯源）：MessageStream.vue 切到
  *   virtua <Virtualizer> 后，happy-dom 无真实 ResizeObserver/布局 → viewportSize=0 → 未被
- *   :keepMounted 钉扎的项（bash 是 system item，非 streaming 非 editing）不进渲染窗口 →
+ *   :keepMounted 固定的项（bash 是 system item，非 streaming 非 editing）不进渲染窗口 →
  *   DOM 找不到 BashOutputBlock。这是 happy-dom 测试环境限制而非真实回归（真实 Chromium 有 RO
  *   会正常窗口化）。现以 virtua mock 修复（Virtualizer → 全量渲染 scoped slot 的 stub，
  *   模式复用 MessageStream-kind.test.ts），三用例恢复运行。
@@ -211,7 +211,7 @@ describe('MessageStream bashExecution 路由', () => {
  * - bash 消息 DOM 存在（BashOutputBlock 真组件渲染）
  * - bash DOM 由 streaming turn 内 notices 渲染（[W3 v2] rule 4 归因，位于 turn-stub 根 div 内部）
  *
- * 钉扎算法的单元覆盖由 use-streaming-pin.test.ts（W3 共存防护系列）保证，顶层顺序守护同样
+ * 固定算法的单元覆盖由 use-streaming-pin.test.ts（W3 共存防护系列）保证，顶层顺序守护同样
  * 由该单测 + core message-turns.incremental.test.ts R4 接管；happy-dom 下经本文件的 virtua
  * mock（全量渲染 stub）驱动真实模板分支，本用例聚焦「mount 后共存双挂载 + rule 4 归因成立」。
  */
@@ -246,7 +246,7 @@ const coexistStubs = {
   ForkNotice: { name: 'ForkNotice', template: '<div />' },
 }
 
-describe('MessageStream 共存钉扎（W5T1，streaming turn + bash 消息双挂载）', () => {
+describe('MessageStream 共存固定（W5T1，streaming turn + bash 消息双挂载）', () => {
   beforeEach(() => {
     setActivePinia(createPinia())
     vi.stubGlobal('ResizeObserver', NoopResizeObserver)

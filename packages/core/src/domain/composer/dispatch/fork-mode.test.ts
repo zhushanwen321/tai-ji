@@ -125,7 +125,7 @@ describe('useComposerForkMode 公开返回面', () => {
     expect(deps.exitStagingMode).toHaveBeenCalled()
   })
 
-  it('forkEnterSignal 命中本 session 才触发 enter（跨组件通道守卫）', async () => {
+  it('forkEnterSignal 命中本 session 才触发 enter（跨组件通道检查）', async () => {
     const { deps, api } = setup('s1')
     deps.forkEnterSignal.value = { srcSessionId: 'other', fromMessageId: 'm' }
     await nextTick()

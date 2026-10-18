@@ -36,7 +36,7 @@ interface PendingUpdateData {
 }
 
 /**
- * 类型守卫：逐字段校验反序列化结果是否为合法的 PendingUpdateData。
+ * 类型检查：逐字段校验反序列化结果是否为合法的 PendingUpdateData。
  *
  * JSON.parse 结果类型为 any，直接 `as PendingUpdateData` 断言后 TS 不再保护，
  * `data.release` 缺失时运行时拿到 undefined，下游当 LatestReleaseInfo 用会崩。
@@ -110,7 +110,7 @@ export function readPendingUpdate(currentVersion: string): LatestReleaseInfo | n
     return null
   }
 
-  // 类型守卫逐字段校验：缺 release 或必要字段 → 视为损坏，清除后返回 null（见 S#6）
+  // 类型检查逐字段校验：缺 release 或必要字段 → 视为损坏，清除后返回 null（见 S#6）
   if (!isPendingUpdateData(parsed)) {
     console.warn('[pending-update] invalid schema, clearing')
     clearPendingUpdate()

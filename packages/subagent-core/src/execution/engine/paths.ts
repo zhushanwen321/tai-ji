@@ -1,7 +1,7 @@
 // src/execution/engine/paths.ts
 //
 // 引擎数据目录布局的 re-export shim：实现体单源 @zhushanwen/subagent-engine-sdk
-// （自本文件逐字等价移入 SDK，迁移处置 impl-plan §2.1 登记的「core 侧引用切换」收口）。
+// （自本文件逐字等价移入 SDK，迁移处置 impl-plan §2.1 登记的「core 侧引用切换」收尾）。
 // 设计决策（C-ext-15 同源推导要求单源）：engines 根锚定 getDataDir() 顶层。
 //
 // 本文件路径是 core package.json exports `./engine/paths` 子入口的解析目标，

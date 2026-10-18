@@ -56,7 +56,7 @@ export function guiComponent<T extends GuiComponentType>(
 /**
  * 设置 GUI widget。RPC 模式下用 marker 编码 GuiRenderResult JSON 进 string[]，
  * runtime event-adapter 检测 marker 解码为结构化 WS 帧（component + meta）。
- * 本函数无 isGui 守卫（仅查 ctx.ui?.setWidget 存在性），调用方需先判定
+ * 本函数无 isGui 检查（仅查 ctx.ui?.setWidget 存在性），调用方需先判定
  * isGuiCapable(ctx)——TUI 模式误调会把 marker 编码行推给原生 widget 造成乱码。
  *
  * meta（标题/状态/进度）由宿主壳层渲染成统一 head；extension 不再用 card 原语
@@ -78,12 +78,12 @@ export function guiSetWidget(
 }
 
 /**
- * [守卫单点化——本约束的说明全仓只写这一处，调用方不得再各自复写]
+ * [检查单点化——本约束的说明全仓只写这一处，调用方不得再各自复写]
  * 「isGuiCapable 外层判定不可省略，否则 TUI 误调 marker 乱码」：guiSetWidget 无
- * isGui 守卫（仅查 ctx.ui?.setWidget 存在性），TUI 模式误调会把 marker 编码行推
+ * isGui 检查（仅查 ctx.ui?.setWidget 存在性），TUI 模式误调会把 marker 编码行推
  * 给原生 widget 造成乱码。带双模内容的 widget 推送一律走 setWidgetDual，由本
  * helper 内化模式分派——消费方（todo/goal 及后续带 widget 的 extension）不再
- * 自持 isGui 判定与守卫注释。
+ * 自持 isGui 判定与检查注释。
  */
 
 /** 双模 widget 内容：按值立即构造两侧（构造均为廉价纯函数，成本可忽略）。 */
@@ -99,8 +99,8 @@ export interface DualWidgetContent {
  *  - content 为 undefined → 清屏 ctx.ui.setWidget(key, undefined)，模式无关
  *    （guiSetWidget 的清屏分支本就两臂同落 setWidget，判别是死分支）
  *  - 有内容 → isGuiCapable(ctx) ? guiSetWidget(gui) : setWidget(text)——TUI 分支
- *    推原生文本行，结构性不触达 marker（见上方守卫单点化说明）
- * hasUI 守卫留在调用方（goal FR-6.6 语义，本 helper 不感知）。
+ *    推原生文本行，结构性不触达 marker（见上方检查单点化说明）
+ * hasUI 检查留在调用方（goal FR-6.6 语义，本 helper 不感知）。
  */
 export function setWidgetDual(
   ctx: GuiContext,
@@ -165,7 +165,7 @@ export function validateWidgetIconPaths(value: unknown): WidgetIconPathsValidati
   if (value.length === 0) return { valid: false, reason: 'empty' }
   if (value.length > ICON_PATHS_MAX_ENTRIES) return { valid: false, reason: 'too-many' }
 
-  // Array.isArray 窄化出 any[]——显式落回 unknown[]，让逐条 typeof 守卫真正收窄到 string
+  // Array.isArray 窄化出 any[]——显式落回 unknown[]，让逐条 typeof 检查真正收窄到 string
   const entries = value as unknown[]
   const paths: string[] = []
   let total = 0

@@ -3,7 +3,7 @@
 // subagent relay 通道帧词表 SSOT（kind / dir / reject reason）。与 relay-env.ts（env 名
 // 与协议常量）同族——relay 通道跨进程契约的另一半：env 管激活与归属，帧管数据泵协议。
 //
-// 消费面：
+// 消费方：
 // - runtime relay-registry（socket 服务端）import 本单源构造/比较帧——此前 16 处
 //   字面量散布，协议演进时双侧改动的漂移只靠端到端行为测试兜底（失败信号离根因远）。
 // - relay.mjs（零依赖代理脚本）不能 import workspace 包，内嵌字面量镜像——镜像

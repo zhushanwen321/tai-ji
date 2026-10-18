@@ -4,11 +4,11 @@
  * 判定序（main.ts 打包分支唯一解析入口）：
  *   1. 外部值存在且 path.resolve 归一后位于 ~/.taiji 目录树内（含树根本身）→
  *      采信归一后的绝对路径（prod 自身目录树的合法子路径）。
- *   2. 其余一律钉死回 ~/.taiji：未设值 / 树外泄漏形态（宿主 shell 残留的
+ *   2. 其余一律固定回 ~/.taiji：未设值 / 树外泄漏形态（宿主 shell 残留的
  *      ~/.taiji-dev/... 等 dev 值 / 任意路径）。
  *
  * 缺省反转（getDataDir 缺省已改 ~/.taiji-dev）后，本函数是 prod 数据目录的
- * 唯一权威钉死点：打包 main 在启动早期赋值 process.env.TAIJI_AGENT_DATA_DIR，
+ * 唯一权威固定点：打包 main 在启动早期赋值 process.env.TAIJI_AGENT_DATA_DIR，
  * 之后 main→runtime spawn 显式透传；runtime 入口另有交叉断言
  * （TAIJI_AGENT_PACKAGED=1 必带 TAIJI_AGENT_DATA_DIR，缺一 fail-fast）兜住
  * spawn 漏传——两层合起来保证「prod 数据只能被显式声明触达，漏传变响亮报错
@@ -26,7 +26,7 @@
  * 默认）上 `~/.TAIJI` 类手滑变体与本函数钉回的 `~/.taiji` 是同一物理目录——钉回
  * 规范根即安全方向，采信变体不产生任何不同结果；Linux 大小写敏感卷上该变体是
  * 树外另一目录，钉回 prod 根正确。若此处 casefold，Linux 上会把真树外目录当
- * prod 树采信，弱化钉死保证，故不做。对照：shared 侧准入守卫
+ * prod 树采信，弱化固定保证，故不做。对照：shared 侧准入检查
  * （assertNotLeakedProdDataDir）漏判方向是「非 prod 进程写 prod」数据损失，
  * 故该处判定双侧 casefold——两处不对称是有意的（漏判代价不对称）。
  *

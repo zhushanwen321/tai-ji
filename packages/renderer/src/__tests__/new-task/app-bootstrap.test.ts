@@ -107,17 +107,17 @@ describe('App 启动编排（initApp：连接建立后始终进 landing 落地�
     expect(flow.state.value).toBe('dir-popover')
   })
 
-  it('首次启动：非 git 目录下 branch chip 守卫生效（gitInfo=null → openBranchPopover 抛守卫错，非 state 死锁）', async () => {
+  it('首次启动：非 git 目录下 branch chip 检查生效（gitInfo=null → openBranchPopover 抛检查错，非 state 死锁）', async () => {
     sessionCtrl.list.mockResolvedValue([])
     await useSidebar().initApp()
 
     const flow = useNewTaskFlow()
     expect(flow.state.value).toBe('landing')
     // 首次启动 currentSession=null → session.active=null → gitInfo=null
-    // openBranchPopover 命中「非 git 目录」守卫抛错（AC-3.7），这是设计守卫，不是 idle 死锁的非法转换
+    // openBranchPopover 命中「非 git 目录」检查抛错（AC-3.7），这是设计检查，不是 idle 死锁的非法转换
     expect(flow.gitInfo.value).toBeNull()
     expect(() => flow.openBranchPopover()).toThrow('非 git 目录')
-    // 守卫抛错后 state 被 reset 回 idle（AC-3.7 设计），区别于 landing→branch-popover 的合法路径
+    // 检查抛错后 state 被 reset 回 idle（AC-3.7 设计），区别于 landing→branch-popover 的合法路径
     expect(flow.state.value).toBe('idle')
   })
 
@@ -143,7 +143,7 @@ describe('App 启动编排（initApp：连接建立后始终进 landing 落地�
     expect(useSessionStore().activeId).toBeNull()
   })
 
-  it('HMR/重连幂等：appBootstrapped 守卫，第二次 initApp 直接 return 不重复编排', async () => {
+  it('HMR/重连幂等：appBootstrapped 检查，第二次 initApp 直接 return 不重复编排', async () => {
     sessionCtrl.list.mockResolvedValue([])
     await useSidebar().initApp()
     expect(sessionCtrl.list).toHaveBeenCalledTimes(1)
@@ -206,7 +206,7 @@ describe('onConnected：首次 vs 重连 connected 的 workspace 刷新（W8）'
     expect(useNewTaskFlow().state.value).toBe('landing')
   })
 
-  it('重连 connected（hasConnectedBefore=true）→ initApp 被守卫跳过，额外调 load 刷新 stale records', async () => {
+  it('重连 connected（hasConnectedBefore=true）→ initApp 被检查跳过，额外调 load 刷新 stale records', async () => {
     sessionCtrl.list.mockResolvedValue([])
     // 首次
     await useSidebar().onConnected()
@@ -215,7 +215,7 @@ describe('onConnected：首次 vs 重连 connected 的 workspace 刷新（W8）'
     await useSidebar().onConnected()
     // 重连后再调一次 load（刷新 stale），共 2 次
     expect(workspaceStoreMock.load).toHaveBeenCalledTimes(2)
-    // 核心（must_fix 断言）：重连时 sessionCtrl.list 不再被调（initApp 被 appBootstrapped 守卫跳过）
+    // 核心（must_fix 断言）：重连时 sessionCtrl.list 不再被调（initApp 被 appBootstrapped 检查跳过）
     expect(sessionCtrl.list).toHaveBeenCalledTimes(1)
   })
 
@@ -226,7 +226,7 @@ describe('onConnected：首次 vs 重连 connected 的 workspace 刷新（W8）'
     expect(flow.state.value).toBe('landing')
     // 重连
     await useSidebar().onConnected()
-    // state 仍 landing（initApp 守卫跳过，未重复编排）
+    // state 仍 landing（initApp 检查跳过，未重复编排）
     expect(flow.state.value).toBe('landing')
   })
 })

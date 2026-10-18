@@ -11,7 +11,7 @@
  * 语义清单（设计 §3.3 D5 采用段）：
  * - markSessionDead：markSessionError（流式终结或追加 error 消息，chat store 单一入口）
  *   + markDead（列表置灰）+ invalidateStreamSubscription（本地订阅簿记失效——服务端订阅
- *   已随 bus.clearSession 清除，不失效则 respawn 后 ensureStreamSubscription 被幂等守卫短路）。
+   *   已随 bus.clearSession 清除，不失效则 respawn 后 ensureStreamSubscription 被幂等检查短路）。
  *   保序依据：错误消息 / dead 态等 UI 反馈先落地（useMessageEffects 既有契约）。
  * - openRestoreWindow：恢复窗口订阅——invalidate 之后立即重发 subscribeSession（幂等，
  *   fire-and-forget，失败 console.warn 由 WS 重连 resubscribeAll 兜底自愈）。这是 restored /

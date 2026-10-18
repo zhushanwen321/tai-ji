@@ -4,7 +4,7 @@
  * 覆盖设计 §3.3 D1 的判定语义与边界批次：
  * - 单条 acceptance：受理即 delivered + onSettled 送达口径回调（confirmDelivered 驱动）
  * - 全 marker 批：受理后维持 in-flight 等回执（现状保守语义不变）
- * - 混合批（per-entry 粒度关键锁）：同批 marker + acceptance 各按各的申报落账——
+ * - 混合批（per-entry 粒度关键锁）：同批 marker + acceptance 各按各的申报写入记录——
  *   acceptance 直落 delivered，marker 维持 in-flight；envelope 挂载形态（取首条值）
  * 會丢此粒度，本用例即否决形态的回归锁
  * - 全 acceptance 批（死锁反例重演）：≥2 条无标记同批受理后全部落地，在途清零

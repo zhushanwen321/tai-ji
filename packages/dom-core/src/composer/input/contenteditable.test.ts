@@ -5,7 +5,7 @@
  * setText（caret start/end）、clear、syncEmpty、saveSelection/restoreSelection（savedRange
  * 生命周期 + D1 分区「活选区优先，savedRange 仅 blur 回退」：含跨边界活选区不采信 + 应用失败
  * 落末尾兜底）、moveCaretVertical（单行 at-edge）、clear 族（boundaryLen）、
- * onKeydown IME 守卫（composition 中不转发 keydown，composer-chip-insertion-semantics D2）。
+ * onKeydown IME 检查（composition 中不转发 keydown，composer-chip-insertion-semantics D2）。
  *
  * jsdom 限制：document.execCommand('insertText') 部分支持（paste 纯文本降级 / insertTextAtCursor
  * 不强测）；caretRangeFromPoint 未实现（moveCaretVertical 多行分支不测）。moveCaretVertical 单行
@@ -55,7 +55,7 @@ function setup(initialHtml = '', overrides: Partial<ContenteditableCallbacks> = 
 }
 
 
-/** 输入链三回调零触发断言单源（onInput/onSlashTrigger/onFileTrigger——组词与空态守卫的共同判别面）。 */
+/** 输入链三回调零触发断言单源（onInput/onSlashTrigger/onFileTrigger——组词与空态检查的共同判别面）。 */
 function expectCoreInputCallbacksIdle(c: {
   callbacks: Record<'onInput' | 'onSlashTrigger' | 'onFileTrigger', { not: { toHaveBeenCalled: () => void } }>
 }) {
@@ -440,7 +440,7 @@ describe('useContenteditableInput restoreSelection 活选区优先（设计 D1�
     cleanup?.()
   })
 
-  it('键盘路径活选区命中 → savedRange 不覆盖（光标留在活位置，失败模式 A 根修）', () => {
+  it('键盘路径活选区命中 → savedRange 不覆盖（光标留在活位置，失败模式 A 从根源修复）', () => {
     const c = setup('AAA BBB CCC')
     c.el.contentEditable = 'true'
     const textNode = c.el.firstChild as Text
@@ -671,13 +671,13 @@ describe('useContenteditableInput clear 族（boundaryLen 模式：只删「符�
   })
 })
 
-// ── IME 守卫（composer-chip-insertion-semantics 设计 D2「IME 确认不被劫持」的元素级防线）──
+// ── IME 检查（composer-chip-insertion-semantics 设计 D2「IME 确认不被劫持」的元素级防线）──
 // 浮层 Enter/Tab 分支的 composingRef/e.isComposing 双保险只覆盖浮层自身；产线上「组合态
 // Enter 不发送」的第一道（也是唯一必然生效的）防线在本文件 onKeydown 开头（contenteditable.ts:242
 // `if (composing.value || e.isComposing) return`）——组合中事件根本不转发到 composer 分发器
-// （forwardKeydown → composer-keydown）。此前该守卫零测试覆盖，renderer 的浮层用例因 target
+// （forwardKeydown → composer-keydown）。此前该检查零测试覆盖，renderer 的浮层用例因 target
 // 是纯 div 直挂分发器而绕过它。
-describe('useContenteditableInput onKeydown IME 守卫（composition 中不转发 keydown）', () => {
+describe('useContenteditableInput onKeydown IME 检查（composition 中不转发 keydown）', () => {
   let cleanup: () => void
   afterEach(() => {
     cleanup?.()
@@ -710,7 +710,7 @@ describe('useContenteditableInput onKeydown IME 守卫（composition 中不转�
     cleanup = c.cleanup
   })
 
-  it('compositionend 复位后 Enter 正常转发（守卫非恒真：正控证明上面两用例能区分回归）', () => {
+  it('compositionend 复位后 Enter 正常转发（检查非恒真：正控证明上面两用例能区分回归）', () => {
     const c = setup('done')
     c.composing.value = true
     c.onCompositionEnd() // 产线接线：`@compositionend`
@@ -725,14 +725,14 @@ describe('useContenteditableInput onKeydown IME 守卫（composition 中不转�
   })
 })
 
-// ── IME 组词守卫（onInput：组词中不序列化不弹层，空态同步照跑，compositionend 统一处理）──
-// 守卫形态：emitInput 与五路触发检测被 `if (composing.value) return` 拦下，syncEmpty
-// （isEmpty 判空，不含触发/序列化语义）在守卫前照跑——否则组词期 placeholder 与显在
+// ── IME 组词检查（onInput：组词中不序列化不弹层，空态同步照跑，compositionend 统一处理）──
+// 检查形态：emitInput 与五路触发检测被 `if (composing.value) return` 拦下，syncEmpty
+// （isEmpty 判空，不含触发/序列化语义）在检查前照跑——否则组词期 placeholder 与显在
 // 假文本瞬态重叠（demo 用 CSS :empty 伪类原生机制无此瞬态）。组词期间每次按键都会派发
-// input 事件，守卫缺失时组词假文本会反复跑五路触发检测并序列化草稿（浮层闪烁/误触发）。
+// input 事件，检查缺失时组词假文本会反复跑五路触发检测并序列化草稿（浮层闪烁/误触发）。
 // 接线闭环：ComposerInput.vue `@compositionstart="composing = true"` 置位 → 组词中 input
 // 全部短路 → `@compositionend="onCompositionEnd"` 复位后调 onInput() 统一处理一次。
-describe('useContenteditableInput onInput IME 组词守卫（组词中不序列化不弹层）', () => {
+describe('useContenteditableInput onInput IME 组词检查（组词中不序列化不弹层）', () => {
   let cleanup: () => void
   afterEach(() => {
     cleanup?.()
@@ -767,7 +767,7 @@ describe('useContenteditableInput onInput IME 组词守卫（组词中不序列�
     // 组词中 IME 假文本进 DOM（input 事件已派发，compositionend 未到）
     c.el.textContent = '组词假文本'
     c.onInput()
-    // isEmpty 跟随（placeholder 不与组词假文本瞬态重叠）；序列化与触发检测仍被守卫拦下
+    // isEmpty 跟随（placeholder 不与组词假文本瞬态重叠）；序列化与触发检测仍被检查拦下
     expect(c.isEmpty.value).toBe(false)
     expectCoreInputCallbacksIdle(c)
     cleanup = c.cleanup
@@ -790,7 +790,7 @@ describe('useContenteditableInput onInput IME 组词守卫（组词中不序列�
     cleanup = c.cleanup
   })
 
-  it('对照：composing=false（默认）时 onInput 照常序列化（守卫非恒真）', () => {
+  it('对照：composing=false（默认）时 onInput 照常序列化（检查非恒真）', () => {
     const c = setup('done')
     c.onInput()
     expect(c.callbacks.onInput).toHaveBeenCalledWith('done')

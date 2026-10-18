@@ -8,9 +8,9 @@
  * B2 [BLOCKER]：useChat.abortBash RPC 失败时 markBashError 写回 store 真正的 shallowRef，
  *               bash 消息被正确标 error（旧实现 { value: chat.messages } 写入丢失）。
  * M1 [MAJOR]：finalizeMessagesImpl 跳过 bashExecution 消息，assistant error 不会误杀
- *             共存中的 streaming bash（bashResult 到达时仍能找到 streaming bash 收口）。
- * M2 [MAJOR]：message.complete 驱动 finalizeSession 正常收口——isGenerating 复位、
- *             message 终态 complete，推进 10min 无二次收口（无 timeout warn）。
+ *             共存中的 streaming bash（bashResult 到达时仍能找到 streaming bash 收尾）。
+ * M2 [MAJOR]：message.complete 驱动 finalizeSession 正常收尾——isGenerating 复位、
+ *             message 终态 complete，推进 10min 无二次收尾（无 timeout warn）。
  *
  * 运行：cd packages/renderer && npx vitest run src/__tests__/stores/chat-bash-review-fix.test.ts
  */
@@ -21,7 +21,7 @@ import { apiProjectMock } from '../helpers/api-facade-mock'
 
 // ── api mock（B2 用：abortBash reject 触发 catch）──
 const apiMock = vi.hoisted(() => ({
-  // bash 回执契约（dmg-r1-2）：默认 = 已执行并收口
+  // bash 回执契约（dmg-r1-2）：默认 = 已执行并收尾
   bash: vi.fn(() => Promise.resolve({ status: 'settled' as const })),
   abortBash: vi.fn(() => Promise.resolve()),
   streamSubscribe: vi.fn((_sid: string, _handler: (msg: ServerMessage) => void) => () => {}),
@@ -99,7 +99,7 @@ describe('B1: streamingSessionIds 仅扫 role:assistant —— 纯 bash 不阻�
 describe('M1: finalizeMessagesImpl 跳过 bash —— assistant error 不误杀共存 streaming bash', () => {
   beforeEach(() => setActivePinia(createPinia()))
 
-  it('assistant 与 bash 并发 → assistant error 收口后，bash 仍 streaming，后续 bashResult 可正常收口', () => {
+  it('assistant 与 bash 并发 → assistant error 收尾后，bash 仍 streaming，后续 bashResult 可正常收尾', () => {
     const store = useChatStore()
     const sid = 's-m1'
     // assistant turn streaming
@@ -121,14 +121,14 @@ describe('M1: finalizeMessagesImpl 跳过 bash —— assistant error 不误杀�
     expect(before[0].status).toBe('streaming') // assistant
     expect(before[1].status).toBe('streaming') // bash
 
-    // assistant error 收口（finalizeSession('error') 走 finalizeMessagesImpl）
+    // assistant error 收尾（finalizeSession('error') 走 finalizeMessagesImpl）
     store.applyMessageEvent(sid, {
       type: 'message.error',
       payload: { sessionId: sid, message: 'assistant boom' },
     } as ServerMessage)
 
     const after = store.getMessages(sid)
-    // assistant 被收口为 error
+    // assistant 被收尾为 error
     expect(after[0].status).toBe('error')
     // 核心断言：bash 仍 streaming（不被 finalizeMessagesImpl 误杀）
     expect(after[1].status).toBe('streaming')
@@ -147,7 +147,7 @@ describe('M1: finalizeMessagesImpl 跳过 bash —— assistant error 不误杀�
       payload: { sessionId: sid, command: 'longcmd', excludeFromContext: false, timestamp: 1000 },
     } as ServerMessage)
 
-    // assistant error 收口（run 崩溃），bash 执行态仍 ephemeral 存在
+    // assistant error 收尾（run 崩溃），bash 执行态仍 ephemeral 存在
     store.applyMessageEvent(sid, {
       type: 'message.error',
       payload: { sessionId: sid, message: 'assistant boom' },
@@ -167,14 +167,14 @@ describe('M1: finalizeMessagesImpl 跳过 bash —— assistant error 不误杀�
   })
 })
 
-describe('M2: message.complete 正常收口 —— 状态复位且推进 10min 无二次收口', () => {
+describe('M2: message.complete 正常收尾 —— 状态复位且推进 10min 无二次收尾', () => {
   beforeEach(() => {
     vi.useFakeTimers()
     setActivePinia(createPinia())
   })
   afterEach(() => vi.useRealTimers())
 
-  it('message.complete 收口后状态复位，推进 10min 无二次收口', () => {
+  it('message.complete 收尾后状态复位，推进 10min 无二次收尾', () => {
     const store = useChatStore()
     const sid = 's-m2'
     store.applyMessageEvent(sid, {
@@ -183,7 +183,7 @@ describe('M2: message.complete 正常收口 —— 状态复位且推进 10min �
     } as ServerMessage)
     expect(store.isGenerating(sid)).toBe(true)
 
-    // 正常 complete 收口（reason='normal'）
+    // 正常 complete 收尾（reason='normal'）
     store.applyMessageEvent(sid, {
       type: 'message.complete',
       payload: { sessionId: sid, stopReason: 'end_turn' },
@@ -192,16 +192,16 @@ describe('M2: message.complete 正常收口 —— 状态复位且推进 10min �
     expect(store.getMessages(sid)[0].status).toBe('complete')
 
     // spy console.warn：finalizeSession 异常 reason 会打 dev warn（timeout 会命中此分支）。
-    // message.complete 走 normal，不打 warn。断言推进 10min 后无任何异常收口 warn（无二次收口）。
+    // message.complete 走 normal，不打 warn。断言推进 10min 后无任何异常收尾 warn（无二次收尾）。
     const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {})
 
-    // 推进 10min + 1s（远超正常收口所需时间）
+    // 推进 10min + 1s（远超正常收尾所需时间）
     vi.advanceTimersByTime(600_000 + 1_000)
 
-    // 核心断言：推进 10min 后无 timeout 收口，消息保持 complete（未被二次收口为 error）
+    // 核心断言：推进 10min 后无 timeout 收尾，消息保持 complete（未被二次收尾为 error）
     const timeoutWarns = warnSpy.mock.calls.filter((c) => String(c[0]).includes('reason=timeout'))
     expect(timeoutWarns).toHaveLength(0)
-    // 消息仍 complete（未被二次收口为 error）
+    // 消息仍 complete（未被二次收尾为 error）
     expect(store.getMessages(sid)[0].status).toBe('complete')
 
     warnSpy.mockRestore()

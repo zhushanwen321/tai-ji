@@ -22,7 +22,7 @@
  * - G1-T4: 回车后 useChat.send 未被调（bash 不走 LLM turn）
  *
  * 策略：
- * - 真 pinia + 真 chatStore（isActive 派生驱动 onSend 分流守卫）
+ * - 真 pinia + 真 chatStore（isActive 派生驱动 onSend 分流检查）
  * - mock useChat（spy 化 send/sendBash/abort...）
  * - mock useNewTaskFlow（spy 化 submitFirstMessage，捕获 bashCommand 第三参数）
  * - mock ComposerInput（emit input 设 draft + emit keydown Enter 触发 onSend，getSegments 还原 text 段）
@@ -181,18 +181,18 @@ describe('Landing 态 bash 首发的 mount 级集成（PR#116 review gap1）', (
 })
 
 /**
- * Landing.vue 模板尾部守卫（branch-review dmg-r1-1 回归）。
+ * Landing.vue 模板尾部检查（branch-review dmg-r1-1 回归）。
  *
- * 事故形态：CreateWorktreeModal 自闭合 `/>` 与 v-show 包裹层 `</div>` 之间混入
+ * 事故形态：CreateWorktreeModal 自关闭 `/>` 与 v-show 包裹层 `</div>` 之间混入
  * 字面反斜杠 + 空白——非空白常驻文本节点（condense 空白模式不剥除），在 landing
  * 内容态（composer 卡片下方）渲染用户可见的游离 `\` 字符。
  *
- * 守卫形态：@vue/compiler-sfc 提取模板块后用 @vue/compiler-dom 的 parse（纯解析、
+ * 检查形态：@vue/compiler-sfc 提取模板块后用 @vue/compiler-dom 的 parse（纯解析、
  * 无 transform——文本节点保持原始 TEXT 形态；compileTemplate 产出的 transform 后
  * AST 会把独立文本包进 TEXT_CALL，采不到）深度遍历，断言所有常驻 text 节点不含
- * 字面反斜杠。插值/指令表达式内的合法转义不在 text 节点列，不受本守卫影响。
+ * 字面反斜杠。插值/指令表达式内的合法转义不在 text 节点列，不受本检查影响。
  */
-describe('Landing.vue 模板尾部守卫（防游离反斜杠文本节点复发）', () => {
+describe('Landing.vue 模板尾部检查（防游离反斜杠文本节点复发）', () => {
   it('模板可编译且所有常驻文本节点不含字面反斜杠', () => {
     const filename = resolve(__dirname, '../../components/new-task/Landing.vue')
     const source = readFileSync(filename, 'utf-8')

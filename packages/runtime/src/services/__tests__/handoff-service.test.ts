@@ -3,11 +3,11 @@
  *
  * 覆盖新流程：runHandoff 让源 session 跑 handoff turn → 从 turn-end 终态帧提取 doc →
  * 新建 session + 注入 doc + 广播（无 doc/reply 字段，DM3）。abort / timeout /
- * 空文档 / 并发守卫 / 重试过滤两分支（willRetry 跳过 / stopReason:error 拒绝，U3②
+ * 空文档 / 并发检查 / 重试过滤两分支（willRetry 跳过 / stopReason:error 拒绝，U3②
  * D15.1 混合案 a+）/ buildHandoffPrompt 全覆盖。
  *
  * [U3②] 事件驱动形态：mock client emit pi 原始 agent_end 事件（onEvent 契约不变），
- * handoff 内部经 event-adapter 翻译投影消费——原「首个 agent_end 即收尾」的重试误杀
+ * handoff 内部经 event-adapter 翻译成派生视图消费——原「首个 agent_end 即收尾」的重试误杀
  * 由 willRetry 跳过 + stopReason 拒绝修复；原 extractFinalTextFromAgentEnd 直测族随
  * 函数退役删除（提取逻辑迁 event-adapter extractFinalContent，text 非 string 畸形归一
  * 语义以行为用例 TC-S1 锚定）。
@@ -319,7 +319,7 @@ describe('HandoffService', () => {
     }
   })
 
-  it('TC5: 并发守卫 — 同 session 再调 runHandoff 同步 reject（already in progress）', async () => {
+  it('TC5: 并发检查 — 同 session 再调 runHandoff 同步 reject（already in progress）', async () => {
     // 第一次不 emit agent_end，保持 pending
     const first = service.runHandoff('src-1').catch(() => {})
     await new Promise((r) => setTimeout(r, 0))
@@ -437,7 +437,7 @@ describe('HandoffService', () => {
     // M5: 测试 agent_end 与 abort 竞态的另一时序——abort 先到（inflight 有 entry），
     // agent_end 随后 resolve。abortHandoff 标记 abortedSessions + reject entry，
     // 但 agent_end 的 finalize 可能先执行（settled 保护）。
-    // 无论哪种时序，abortedSessions 守卫保证不创建新 session。
+    // 无论哪种时序，abortedSessions 检查保证不创建新 session。
     const runPromise = service.runHandoff('src-1')
     await new Promise((r) => setTimeout(r, 0))
 
@@ -455,7 +455,7 @@ describe('HandoffService', () => {
     })
 
     await expect(runPromise).rejects.toThrow('handoff aborted')
-    // abortedSessions 守卫阻断：createSession 未被调用
+    // abortedSessions 检查阻断：createSession 未被调用
     expect(sessionService.create).not.toHaveBeenCalled()
     // handoffStarted 已删除（wave:perf-w08），handoffComplete 不应广播
     const hasComplete = vi.mocked(broker.broadcast).mock.calls.some(
@@ -594,7 +594,7 @@ describe('HandoffService', () => {
 
       const opts = createOptions()
       // handoff 现状不传 presetId：不新增 preset 继承档（否则首次继承源 preset 的
-      // tools/noSkills 全套限制——夹带行为变更）。静态守卫见 binding-registry-hydrate Part 2。
+      // tools/noSkills 全套限制——夹带行为变更）。静态检查见 binding-registry-hydrate Part 2。
       expect(opts).not.toHaveProperty('presetId')
       // 防顺手继承漂移（CREATE_DERIVED_CALLERS 承诺）运行时面
       expect(opts).not.toHaveProperty('spawnSource')

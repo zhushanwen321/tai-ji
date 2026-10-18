@@ -13,7 +13,7 @@
  *   checkAndAutoUpgrade（migrateBuiltin 必须在 autoUpgrade 前——唯一硬序约束，否则
  *   autoUpgrade 仍会尝试升级打包内置包）→ getPiVersion（mutate appInfo + 补发 app.info）→
  *   skillRegistry.initGlobal → pluginService.initialize → ensureAutoRenameDefault。
- * 全串行的取舍：约束零竞态面 + best-effort 语义最易保持；代价 = 后台总完成时间为各段之和。
+ * 全串行的取舍：约束零竞态风险 + best-effort 语义最易保持；代价 = 后台总完成时间为各段之和。
  * ⑨ 孤儿 pi 收殓（integrity-hardening §3.4 D4a）不在串行链上——独立 5s 定时器，
  * 调度点在序列最前（宽限从启动起计，见函数体注释）。⑨b 后台任务收殓触发面 B
  * （file-lock-unification D2）在同一 5s 定时器内链式 await ⑨ 完成后执行（硬序

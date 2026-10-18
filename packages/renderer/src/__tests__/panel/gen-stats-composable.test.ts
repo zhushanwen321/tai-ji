@@ -1,14 +1,14 @@
 /**
  * useGenStats 单测 —— composer-gen-stats P4 层 1
- * （验收条款：帧写入分区 / model 不匹配丢弃 / model 缺省丢弃 / 恢复腿 in-flight 去重 / cleanup）。
+ * （验收条款：帧写入分区 / model 不匹配丢弃 / model 缺省丢弃 / 恢复路径 in-flight 去重 / cleanup）。
  *
  * 范式照抄 use-context-usage.test.ts（五件套蓝本的层 1 测试形态）：
  * - mock 边界：session.getGenStats RPC 经 '@taiji/core/transport/api' command 部分mock
  *   掉（spread actual 保留 events 真实通道，transport 层不在本层职责）；事件分发走真实
  *   events.dispatchSession 通道；
- * - 宿主组件：useSessionEvents 的 getCurrentInstance 守卫要求组件 setup 上下文，mount 宿主
+ * - 宿主组件：useSessionEvents 的 getCurrentInstance 检查要求组件 setup 上下文，mount 宿主
  *   expose composable 返回值；
- * - timer：实现内无 timer（恢复腿去重靠 Promise 原语），in-flight 窗口用受控 deferred +
+ * - timer：实现内无 timer（恢复路径去重靠 Promise 原语），in-flight 窗口用受控 deferred +
  *   setTimeout(0) macrotask 排空微任务链驱动（与蓝本同款，无 timer 依赖故无需 fake timers）。
  *
  * 运行：cd packages/renderer && npx vitest run src/__tests__/panel/gen-stats-composable.test.ts
@@ -31,7 +31,7 @@ import {
 import type { GenStatsFrame } from '@taiji/shared'
 import { genStatsFrame } from '../helpers/gen-stats-mount'
 
-// ── mock 边界：getGenStats RPC mock 掉（u3 未接线，恢复腿用受控 deferred 驱动）──
+// ── mock 边界：getGenStats RPC mock 掉（u3 未接线，恢复路径用受控 deferred 驱动）──
 // spread-actual mock 体单源在 helpers/transport-command-mock.ts（events 真实通道保留，
 // RPC_BACKSTOP_TIMEOUT_MS 透传 30_000；commandMock 为该 helper 导出的文件内单例，
 // beforeEach 编排受控 deferred）。
@@ -67,7 +67,7 @@ interface HostHandle {
 
 /**
  * 测试宿主组件：在 setup 内调 useGenStats（useSessionEvents 的 getCurrentInstance
- * 守卫要求组件 setup 上下文），expose 返回值（对齐 use-context-usage.test.ts 形态）。
+ * 检查要求组件 setup 上下文），expose 返回值（对齐 use-context-usage.test.ts 形态）。
  */
 function mountHost(initialSid: string | null, initialModel?: string): HostHandle {
   const sidRef = ref<string | null>(initialSid)
@@ -82,7 +82,7 @@ function mountHost(initialSid: string | null, initialModel?: string): HostHandle
     }),
   )
   mountedWrappers.push(wrapper)
-  // vm 属性经 test-utils 暴露为宽类型；断言前运行时守卫收缩（禁裸 as）
+  // vm 属性经 test-utils 暴露为宽类型；断言前运行时类型收窄（禁裸 as）
   const candidate = (wrapper.vm as { gen?: unknown }).gen
   if (!candidate || typeof candidate !== 'object' || !('current' in candidate)) {
     throw new Error('host 组件未暴露 gen')
@@ -194,10 +194,10 @@ describe('帧 handler：写入分区与 model 校验兜底', () => {
 
 })
 
-// ── 恢复腿（RPC + in-flight 去重 + recency 守卫）────────────
+// ── 恢复路径（RPC + in-flight 去重 + recency 检查）────────────
 
-describe('恢复腿：getGenStats RPC', () => {
-  it('挂载即触发恢复腿，reply（含全 null 帧）写入分区且不经 model 校验', async () => {
+describe('恢复路径：getGenStats RPC', () => {
+  it('挂载即触发恢复路径，reply（含全 null 帧）写入分区且不经 model 校验', async () => {
     const host = mountHost('A', 'prov-a/m1')
     await settle()
     expect(commandMock).toHaveBeenCalledWith(
@@ -231,7 +231,7 @@ describe('恢复腿：getGenStats RPC', () => {
     expect(host2.gen.current.value?.speed.current).toBe(35)
   })
 
-  it('settle 即清条目：resolve 后重新切入同一 sid 重拉（无条件恢复腿）', async () => {
+  it('settle 即清条目：resolve 后重新切入同一 sid 重新拉取（无条件恢复路径）', async () => {
     const host = mountHost('A', 'prov-a/m1')
     await settle()
     resolveForSid('A', genFrame('A', { speed: { current: 10, day: null, d7: null, d30: null } }))
@@ -249,7 +249,7 @@ describe('恢复腿：getGenStats RPC', () => {
     expect(host.gen.current.value?.speed.current).toBe(20)
   })
 
-  it('recency 守卫：RPC 发起后已有更新 live 帧落地 → 陈旧 reply 跳过写入（不回滚 newer 帧）', async () => {
+  it('recency 检查：RPC 发起后已有更新 live 帧落地 → 陈旧 reply 跳过写入（不回滚 newer 帧）', async () => {
     const host = mountHost('A', 'prov-a/m1')
     await settle()
 
@@ -264,7 +264,7 @@ describe('恢复腿：getGenStats RPC', () => {
     expect(host.gen.current.value?.speed.current).toBe(99)
   })
 
-  it('RPC 失败：保留分区缓存不降级，下次切入重拉自愈', async () => {
+  it('RPC 失败：保留分区缓存不降级，下次切入重新拉取自愈', async () => {
     const host = mountHost('A', 'prov-a/m1')
     await settle()
     dispatchFrame('A', genFrame('A'))

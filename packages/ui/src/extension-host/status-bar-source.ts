@@ -29,7 +29,7 @@ export interface StatusBarEntry {
   status?: StatusDot
 }
 
-/** StatusBar 数据源（对齐 S2 IF8 StatusBarController 消费面）。 */
+/** StatusBar 数据源（对齐 S2 IF8 StatusBarController 消费方）。 */
 export interface StatusBarSource {
   getItems(scope: 'per-session', sessionId: string): StatusBarEntry[]
   getItems(scope: 'global'): StatusBarEntry[]

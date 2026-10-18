@@ -1,5 +1,5 @@
 <!--
-  UsageDetailTable · 明细台账：按 provider 分组的可折叠表格。
+  UsageDetailTable · 明细登记清单：按 provider 分组的可折叠表格。
   前两个分组默认展开，其余收起。
 -->
 <template>
@@ -16,7 +16,7 @@
       <span class="text-right tabular-nums">{{ t('settings.usage.colShare') }}</span>
     </div>
 
-    <!-- 分组行 + 模型行（分组折叠钮 = demo 明细台账 fold：padding 8px 4px / chevron 12px / 无底色） -->
+    <!-- 分组行 + 模型行（分组折叠钮 = demo 明细登记清单 fold：padding 8px 4px / chevron 12px / 无底色） -->
     <template v-for="group in groups" :key="group.pid">
       <!-- 分组头 -->
       <div class="grid cursor-pointer select-none grid-cols-[minmax(180px,1fr)_84px_84px_84px_84px_104px_76px_108px] items-center gap-1 border-t border-hairline px-[4px] py-[8px]" @click="toggle(group.pid)">

@@ -2,11 +2,11 @@
  * useDetailPane —— 文件预览编排（#6，UC-6 点文件落地预览）+ detail 多文件 tab
  * （display-containers W3 §6.3/§7.1）。
  *
- * 职责（单一变化轴「文件预览内容加载 + tab 实例编排」）：
+ * 职责（单一变化原因「文件预览内容加载 + tab 实例编排」）：
  * - 注入语义（§6.3）：openPreview = 「未开新增并激活 / 已开仅激活 / 不设上限」；
  *   注入本体在 fileTreeStore.selectFile / openDetailTab（**同步**落分区——旧实现靠
  *   watch(selectedPath) 在组件挂载后才注入，git tab / 消息链接等 DetailPane 未挂载的入口
- *   会丢点击；现 store 分区是唯一事实源，本 composable 只做加载编排与视图投影）
+ *   会丢点击；现 store 分区是唯一事实源，本 composable 只做加载编排与视图呈现）
  * - 加载编排：per-tab 任务（git 改动文件 → git.getDiff(patch)；未改动 → file.read(content)），
  *   实例状态回写 fileTreeStore.detailTabs（per-session Map<path, 实例>，单值→map）
  * - keep-alive 多实例语义：每个打开的文件是一条独立状态实例（内容/模式态/滚动锚点），
@@ -44,7 +44,7 @@ export type { DetailViewMode, DetailTabState } from '@/stores/fileTree'
 const t = i18n.global.t
 
 /**
- * per-tab 请求版本号（L3 并发守卫：同 tab 内「初始加载 vs 模式切换重载」互相抢占时丢弃
+ * per-tab 请求版本号（L3 并发检查：同 tab 内「初始加载 vs 模式切换重载」互相抢占时丢弃
  * stale write）。模块级按 (sid, path) 记账——跨 DetailPane 重挂载仍连续（重挂载不得让
  * 旧请求的慢响应覆盖新内容）。旧实现是单实例全局 token，map 化后 token 随实例粒度记账。
  * taste:allow-no-data-owner W24-EX-C（非 GUI 数据技术结构）：请求版本号计数表，非 GUI 数据
@@ -63,7 +63,7 @@ function loadKey(sid: string, path: string): string {
 
 /**
  * session 销毁清理（模块级注册一次，triggerSessionCleanups 统一编排）：删除该 session
- * 的全部请求版本号记账键。loadTokens 只 set 不删（L3 并发守卫按键覆盖即可工作），
+ * 的全部请求版本号记账键。loadTokens 只 set 不删（L3 并发检查按键覆盖即可工作），
  * 长寿会话反复预览会无界累积——清理挂接在既有销毁沿（tab 关闭删单键见 closeTab /
  * session 删除删全键见本函数），不设定时器不上限。
  */
@@ -96,7 +96,7 @@ export function useDetailPane(sessionId: Ref<string | null>) {
   const store = useFileTreeStore()
   const sessionStore = useSessionStore()
 
-  /** 打开的 tab 实例列表（开序，per-session 分区投影） */
+  /** 打开的 tab 实例列表（开序，per-session 分区派生视图） */
   const tabs = computed(() => (sessionId.value ? store.getDetailTabs(sessionId.value) : []))
 
   /** 当前激活 tab 的 path */
@@ -163,7 +163,7 @@ export function useDetailPane(sessionId: Ref<string | null>) {
    * - diff 模式 → git.getDiff(sid, gitPath ?? path)
    * - preview 模式 → file.read(path, sid) cwd 守门
    * - 每次 await 后校验 token（stale write 防护）：旧请求被同 tab 新加载抢占时丢弃，
-   *   不覆盖新内容（U6 并发守卫，map 化后按 tab 粒度）
+   *   不覆盖新内容（U6 并发检查，map 化后按 tab 粒度）
    *
    * @param autoFallback diff 空 patch 时是否自动降级 preview：初始加载传 true（空 diff 无
    *   信息量，改显文件内容）；toggleView 传 false（用户主动选 Diff，尊重选择显空态）。
@@ -264,7 +264,7 @@ export function useDetailPane(sessionId: Ref<string | null>) {
 
   /**
    * 强制 diff 收敛（forceDiff 注入的模式修正，事件序无关）：
-   * 实例尚未展示内容（非 status='content'）即钉在 diff 模式——在途的非 diff 加载作废重拉
+   * 实例尚未展示内容（非 status='content'）即固定在 diff 模式——在途的非 diff 加载作废重新拉取
    * （token 自增即丢弃旧响应）。同 tick 双通道注入（ui 链接点击 = selectFile +
    * openDrawer({filePath})）不依赖两个监听器的 flush 先后：无论拉起先于还是后于强制注入，
    * 最终恒收敛为 diff 内容；已展示内容的实例走 §6.3「已开仅激活」，不改模式。
@@ -308,7 +308,7 @@ export function useDetailPane(sessionId: Ref<string | null>) {
     store.closeDetailTab(sid, path)
     // 请求版本号记账随实例销毁释放（唯一关闭入口，防长寿会话无界累积）。键已删使在途
     // 加载的 stale 判据随即成立——迟到回写本就被 updateDetailTab 的分区/tab 缺席 no-op
-    // 守卫拦住，双防线语义一致。
+    // 检查拦住，双防线语义一致。
     loadTokens.delete(loadKey(sid, path))
   }
 

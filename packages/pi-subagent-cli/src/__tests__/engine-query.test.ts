@@ -205,7 +205,7 @@ describe("validatePiModel", () => {
 // ── server.ts 分发位接线（pi-workflow-run-resource-model §3.3 决策 11） ──
 
 describe("EngineProtocolServer 查询面接线（分发位路由 engine-query）", () => {
-  it("listModels 请求 → fixture 数据目录内容；initialize 应答 models 同源（投影仅 id）", async () => {
+  it("listModels 请求 → fixture 数据目录内容；initialize 应答 models 同源（派生视图仅 id）", async () => {
     writeFixture("models.json", MODELS_JSON);
     writeFixture("auth.json", AUTH_JSON);
     const frames: ResponseFrame[] = [];

@@ -12,7 +12,7 @@
  * - errorHandled：onUpdateError SSOT 已处理错误后置 true（useAppUpdate.ts 的 subscribeProgress），
  *   performDownload/performInstall 的 catch 据此去重兜底（use-app-update-actions.ts）。
  * - pendingRestored：restore 链恢复「已有更新」提醒后置 true（use-app-update-restore.ts），
- *   checkForUpdate 的防覆盖守卫读取（use-app-update-check.ts）：恢复后联网检测失败/无新版
+ *   checkForUpdate 的防覆盖检查读取（use-app-update-check.ts）：恢复后联网检测失败/无新版
  *   不回退 idle——pending 标志证明曾检测到更新，除非版本比较已清否则应保持 available。
  */
 import { reactive } from 'vue'

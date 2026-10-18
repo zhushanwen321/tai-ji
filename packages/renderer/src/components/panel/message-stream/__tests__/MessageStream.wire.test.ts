@@ -189,7 +189,7 @@ describe('Turn.vue 接线 useTurnExpansion（w1）', () => {
     // [block-rendering M0] trace 容器恒渲染，折叠态仅 text 恒渲染（thinking 隐藏）
     expect(wrapper.find('.trace').exists()).toBe(true)
     expect(wrapper.findAllComponents({ name: 'Block' }).length).toBe(1)
-    // 回归守卫：collapse 确实被调用（expandedTurns 已被 onComplete 路径复位）。
+    // 回归检查：collapse 确实被调用（expandedTurns 已被 onComplete 路径复位）。
     // 若 onComplete 被改成 no-op，此处仍为 true，测试会失败（捕捉回归）。
     expect(expandedTurns.has('u1')).toBe(false)
   })

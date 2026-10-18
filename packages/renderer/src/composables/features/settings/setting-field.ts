@@ -12,7 +12,7 @@
  *   （如阈值输入框）在 persist 被调前已带脏值，回到 lastSaved 才是「回到已保存态」。
  * - {@link createMirrorSave}：镜像保存（dirs 形态）——不乐观更新（store 镜像只被成功落盘后的
  *   广播写入，dirs 域无 getter RPC），失败置 saveError 标志驱动 LoadPaths 从 store 镜像
- *   （最近落盘值）强制重拉回弹 + 常驻红字（RD-4#1：失败无广播，标志是唯一回弹信号），
+ *   （最近落盘值）强制重新拉取回弹 + 常驻红字（RD-4#1：失败无广播，标志是唯一回弹信号），
  *   toast error（e.message 原文）；每次保存尝试起点复位标志（成功即消、再失败再亮）。
  * - {@link createExplicitSave}：显式保存动作（整表单形态，按钮触发）——saving 防重入 +
  *   成功 toast（savedToastKey）/ 失败 toast（默认 e.message 原文，onError 覆盖）；
@@ -200,7 +200,7 @@ export function createSettingFieldGroup(): SettingFieldGroup {
 
 /**
  * 镜像保存（dirs 形态）：不乐观更新——LoadPaths 本地态靠广播推回，store 镜像恒为「最近落盘值」，
- * 失败时无广播，故由 saveError 标志驱动 LoadPaths 从 store 镜像强制重拉回弹 + 常驻红字（RD-4#1）；
+ * 失败时无广播，故由 saveError 标志驱动 LoadPaths 从 store 镜像强制重新拉取回弹 + 常驻红字（RD-4#1）；
  * 每次尝试起点复位标志（成功即消、再失败再亮）。失败 toast = e.message 原文 error。
  */
 export function createMirrorSave<T>(save: (arg: T) => Promise<void>): {

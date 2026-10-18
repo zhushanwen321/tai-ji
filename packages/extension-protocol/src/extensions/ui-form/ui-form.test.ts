@@ -1,5 +1,5 @@
 // ui-form.test.ts — 统一提问表单协议：类型双路径（payload 构造 / answers 解析）/
-// TUI 抛错契约 / uiFormInteract 四态折叠 / echo 检测 / isFormQuestion 与 isFormAnswers 守卫。
+// TUI 抛错契约 / uiFormInteract 四态折叠 / echo 检测 / isFormQuestion 与 isFormAnswers 检查。
 // 经 barrel（../../../index）导入：单测同时锚定新增导出面。
 
 import { describe, it, expect, vi } from 'vitest'
@@ -270,7 +270,7 @@ describe('uiFormInteract：echo 检测', () => {
     expect(result).toEqual({ ok: true, answers })
   })
 
-  it('回传是合法 JSON 但与 payload 不同 → 走形状守卫而非 echo（逐字节相等才命中）', async () => {
+  it('回传是合法 JSON 但与 payload 不同 → 走形状检查而非 echo（逐字节相等才命中）', async () => {
     // 非 FormAnswers 形状的 JSON 回包：不是 echo，按 non-json 折叠（区分两类故障）
     const { ctx } = makeCtx(async () => JSON.stringify({ formQuestions: [{ type: 'text', question: 'q' }] }))
 
@@ -280,7 +280,7 @@ describe('uiFormInteract：echo 检测', () => {
   })
 })
 
-describe('uiFormInteract：发送侧守卫失败策略', () => {
+describe('uiFormInteract：发送侧检查失败策略', () => {
   it('含不合法项 → 抛错并指明索引，不触达通道（调用方编码 bug，fail-fast）', async () => {
     const { ctx, selectMock } = makeCtx(async () => JSON.stringify({}))
     const bad = { type: 'choice', question: '缺 options' } as unknown as FormQuestion
@@ -302,7 +302,7 @@ describe('uiFormInteract：发送侧守卫失败策略', () => {
   })
 })
 
-describe('isFormQuestion 类型守卫', () => {
+describe('isFormQuestion 类型检查', () => {
   it('三类型最小合法形态 → true', () => {
     expect(isFormQuestion({ type: 'choice', question: 'q?', options: [{ label: 'a' }] })).toBe(true)
     expect(isFormQuestion({ type: 'text', question: 'q?' })).toBe(true)
@@ -350,12 +350,12 @@ describe('isFormQuestion 类型守卫', () => {
     expect(isFormQuestion([{ type: 'text', question: 'q?' }])).toBe(false)
   })
 
-  it('空 options 的 choice 形状合法（守卫只管形状，语义完备性归调用方/渲染器）', () => {
+  it('空 options 的 choice 形状合法（检查只管形状，语义完备性归调用方/渲染器）', () => {
     expect(isFormQuestion({ type: 'choice', question: 'q?', options: [] })).toBe(true)
   })
 })
 
-describe('isFormAnswers 形状守卫', () => {
+describe('isFormAnswers 形状检查', () => {
   it('合法 answers（含 __other 键与 JSON 序列化多选值）→ true', () => {
     expect(isFormAnswers({ db: 'pg', 'db__other': '理由', lang: '["ts","py"]' })).toBe(true)
   })

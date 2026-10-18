@@ -5,15 +5,15 @@
 // 规则：两个引擎包源码（src/**/*.ts，排除 __tests__/ 与 .mjs fixture）中，
 // node:child_process 的**值导入**（非 `import type`）即视为潜在 spawn/exec 入口，
 // 必须命中 allowlist（带理由注释）；同时正向断言每个引擎包存在 spawnEngineChild
-// 消费点（防「守卫绿但引擎根本没走 SDK 入口」的空转）。
+// 消费点（防「检查绿但引擎根本没走 SDK 入口」的空转）。
 //
-// 与 C-proc-09 守卫（.githooks/check_spawn_env_boundary.py）的分工——互不代偿：
+// 与 C-proc-09 检查（.githooks/check_spawn_env_boundary.py）的分工——互不代偿：
 //   - C-proc-09：spawn 点的 **env 出站卫生**（buildOutboundChildEnv 剥 deny 键），
 //     盖全仓进程创建点；
-//   - 本守卫：引擎包内 spawn 的**单一入口**（spawnEngineChild 硬编码 detached/
+//   - 本检查：引擎包内 spawn 的**单一入口**（spawnEngineChild 硬编码 detached/
 //     stdio 形态 + stdin fd 不外泄 R9-4②），只盖引擎包 src。
 //   - allowlist 的 ps/taskkill/kill 探测收割调用「不是任务子进程」（§7.2 R9-4③），
-//     两守卫都不因其红；收割语义守卫 = kill-chain 单测 + A3 真机门。
+//     两检查都不因其红；收割语义检查 = kill-chain 单测 + A3 真机门。
 //
 // 用法：node scripts/check-engine-spawn-guard.mjs [--roots <pkg-src>,<pkg-src>]
 // （--roots 覆盖 = 负样本自测入口；缺省 = 两引擎包 src）

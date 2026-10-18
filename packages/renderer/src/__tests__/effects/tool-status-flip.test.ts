@@ -35,7 +35,7 @@ vi.mock('@/composables/features/chat/useChat', () => ({
 
 // mock virtua/vue：passthrough Virtualizer（渲染所有子项，绕过 happy-dom 无 RO/viewportSize=0 的窗口化限制）。
 // [cw wave w3 历史 skip，已恢复]：原本 c-multi / c-full-cycle 因 virtua 在 happy-dom 下 viewportSize=0
-//   skip——未被 :keepMounted 钉扎的非末位 turn 不进渲染窗口 → DOM 找不到 turn-xray。现通过本 mock 恢复覆盖。
+//   skip——未被 :keepMounted 固定的非末位 turn 不进渲染窗口 → DOM 找不到 turn-xray。现通过本 mock 恢复覆盖。
 //   virtua 窗口化本身有独立单测（use-virtua-follow / use-message-stream-rail-virtua）覆盖；
 //   本测只验证 tool status 翻转链路（真 store + 真 applyMessageEvent + 多 turn 非末位翻转），不依赖窗口化行为。
 // vi.mock 为文件级（hoist），只影响本文件的 import，不影响其他测试文件。
@@ -236,7 +236,7 @@ describe('方案 c: mount MessageStream（真 store + 真虚拟滚动层）— t
 
   it('c-multi: 多 turn，running tool 在非末位 turn —— 验证虚拟窗口非末项 turn 翻转', async () => {
     // [cw wave w3 历史 skip，已恢复]：原本因 virtua 在 happy-dom 下 viewportSize=0 skip——未被 :keepMounted
-    //   钉扎的非末位 turn 不进渲染窗口 → DOM 找不到 turn-xray。现通过 mock virtua/vue 的 Virtualizer 为
+    //   固定的非末位 turn 不进渲染窗口 → DOM 找不到 turn-xray。现通过 mock virtua/vue 的 Virtualizer 为
     //   passthrough 组件恢复覆盖——virtua 窗口化有独立单测，本测只验证 tool status 翻转链路
     //   （真 store + 真 applyMessageEvent + 多 turn 非末位翻转）。
     const chat = useChatStore()

@@ -5,7 +5,7 @@
  * 实例编号 `term:<会话id>:<序号>`。**事实源在 runtime**（ptyMap 键集），renderer 侧持一份
  * 镜像供三处消费：
  * - 实例切换条内容（终端面板顶部，按会话列出存活实例）
- * - 入队守卫判据（write-queue 入队前校验「实例注册表含该 terminalId（未关闭）」——
+ * - 入队检查判据（write-queue 入队前校验「实例注册表含该 terminalId（未关闭）」——
  *   判据是**注册成员资格**，与 ptyAlive 存活镜像解耦）
  * - 关闭沿 / 对账的条目集合（三路径清理与 `terminal.list` 增删对账）
  *
@@ -99,7 +99,7 @@ export function setInstanceAlive(terminalId: string, alive: boolean): void {
   if (entry) entry.alive = alive
 }
 
-/** 入队守卫判据：实例注册表是否含该 terminalId（未关闭）——与 ptyAlive 镜像解耦。 */
+/** 入队检查判据：实例注册表是否含该 terminalId（未关闭）——与 ptyAlive 镜像解耦。 */
 export function hasInstance(terminalId: string): boolean {
   return registry.byId[terminalId] != null
 }

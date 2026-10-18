@@ -2,9 +2,9 @@
  * panel-view —— panel 主区/输入面渲染视图模型 + derivePanelView 派生纯函数。
  *
  * 背景（原始根因）：现行 Panel.vue 在组件 computed 里手工组合六个异构状态源
- * （session 绑定 / 消息有无 / flow 单例态 / dead / form overlay / trace），组合空间无穷举
- * 守卫——每个 bug 来自一个未被考虑的格子（flow 卡 landing → turn 结束后 composer 消失）。
- * 本模块把该组合收敛为单一纯函数：决策可穷举（G3，7 输入 = 2^7 = 128 组合全表单测守卫）、
+ * （session 绑定 / 消息有无 / flow 单例态 / dead / form overlay / trace），组合空间无检查
+ * 穷举——每个 bug 来自一个未被考虑的格子（flow 卡 landing → turn 结束后 composer 消失）。
+ * 本模块把该组合收敛为单一纯函数：决策可穷举（G3，7 输入 = 2^7 = 128 组合全表单测检查）、
  * 「flow 残留 × 输入面消失」在派生规则上不可表达（G2 结构免疫）。
  *
  * 设计要点：
@@ -44,7 +44,7 @@ export interface PanelViewInput {
   /**
    * pi 意外退出后的「引擎恢复中」过渡态（crash-resilience T4，chat store respawnPending
    * 分区）。抑制 dead：自动 respawn 窗口内对话流 + composer 保持（恢复完成由
-   * session.restored 收口；熔断/超时清除本标记后回落 dead 终态页）。用户手动强制退出
+   * session.restored 收尾；熔断/超时清除本标记后回落 dead 终态页）。用户手动强制退出
    * 不置本标记 → dead 行为不变。
    */
   isSessionRespawning: boolean
@@ -53,7 +53,7 @@ export interface PanelViewInput {
   /**
    * 有 pending 统一表单 overlay 请求待答（与 composer 互斥）。
    * 布尔语义（ui-presentation-protocol D5）：form 帧富交互表单（ask-user / scheduler /
-   * plan 三源收口，legacy 键经 renderer 归一层附加 form 后统一命中）替换 composer 的
+   * plan 三源收敛，legacy 键经 renderer 归一层附加 form 后统一命中）替换 composer 的
    * 输入面；Panel 拿到请求后按挂载源分流 FormOverlay 的 questions / draft props，
    * 组合表不扩维（union input 第三值兜底路线默认不做）。
    */
@@ -82,7 +82,7 @@ export type PanelView =
  *
  * 优先级 dead > trace > conversation > landing > empty；dead/trace 前置约束
  * 「sessionId 非空」在分支顺序上天然成立（先判空 session 提前返回）。
- * 全输入组合（7 输入 = 2^7 = 128）的行为由 __tests__/panel-view.test.ts 组合表守卫（验收 V5）。
+ * 全输入组合（7 输入 = 2^7 = 128）的行为由 __tests__/panel-view.test.ts 组合表检查（验收 V5）。
  */
 export function derivePanelView(input: PanelViewInput): PanelView {
   const { sessionId, isSessionDead, isSessionRespawning, isTraceView, hasFormOverlay, isFlowActive } = input

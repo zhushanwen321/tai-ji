@@ -11,9 +11,9 @@
  *   pinned 透传（hover 态无行内按钮 = false；pin 后有 = true——「必须显式透传」契约的可证伪断言）。
  *
  * mock 策略：
- * - `useTrayCounts` 替身（默认 fixture 模式）：三件计数/行集直接注入（口径与首拉触发另有
+ * - `useTrayCounts` 替身（默认 fixture 模式）：三件计数/行集直接注入（口径与首次拉取触发另有
  *   useTrayCounts.test.ts），本文件只验外壳三态判定与交互；`useReal` 模式透传真实现——
- *   U1 用例需要真实拉取腿可被 spy 计数（「面板开关不重发首拉 RPC」）。
+ *   U1 用例需要真实拉取路径可被 spy 计数（「面板开关不重发首次拉取 RPC」）。
  * - **真实** TrayNativePanel / TrayWidgetPanel：面板分流与 pinned 透传必须经真实组件落地
  *   （stub 会把「必须显式透传 pinned」测成空断言）；面板数据面经 TRAY_COUNTS_KEY 消费外壳实例
  *   （U1），故 `useTrayCounts` 替身的调用次数 = 数据面实例数（> 1 即面板自建第二实例）。
@@ -48,7 +48,7 @@ import type { BackgroundTaskEntry } from '@/lib/background-task-bucket'
 import type { SessionSummary, SubagentRecord, WorkflowRunRecord } from '@taiji/shared'
 import zhTray from '@/i18n/locales/zh-CN/tray'
 
-// ── mock：数据面（三件计数/行集；口径与首拉触发在 useTrayCounts.test.ts）──
+// ── mock：数据面（三件计数/行集；口径与首次拉取触发在 useTrayCounts.test.ts）──
 interface TrayState {
   bashRunning: BackgroundTaskEntry[]
   bashEnded: BackgroundTaskEntry[]
@@ -84,7 +84,7 @@ const trayState = reactive<TrayState>(createTrayState())
 /**
  * 数据面替身/透传开关（U1）：`calls` = useTrayCounts 调用次数 = 数据面实例创建次数——外壳
  * 只创建唯一实例并 provide，面板 inject 消费，故任意开合次数下都应恒为 1；`useReal` 打开时
- * 透传真实现（U1 用例用真实拉取腿 + spy 断言不重发首拉）。
+ * 透传真实现（U1 用例用真实拉取路径 + spy 断言不重发首次拉取）。
  */
 const trayCountsSwitch = vi.hoisted(() => ({ useReal: false, calls: 0 }))
 
@@ -873,17 +873,17 @@ describe('ComposerTray 会话切换（D12/A6：不残留旧 session 交互态）
   })
 })
 
-// ── ⑦ 数据面单例与首帧（U1/U2；真实 useTrayCounts + spy 拉取腿）──
+// ── ⑦ 数据面单例与首帧（U1/U2；真实 useTrayCounts + spy 拉取路径）──
 
-describe('ComposerTray 数据面单例（U1：面板不自建实例、开合不重发首拉 RPC）', () => {
+describe('ComposerTray 数据面单例（U1：面板不自建实例、开合不重发首次拉取 RPC）', () => {
   it('面板打开/关闭/换件/重开：数据面实例恒一个、loadSubagents / loadWorkflows 各仅一次', async () => {
-    // 真实数据面（外壳仍是唯一调用点）+ spy 拉取腿：断言的是 load RPC 次数，不是替身内部行为
+    // 真实数据面（外壳仍是唯一调用点）+ spy 拉取路径：断言的是 load RPC 次数，不是替身内部行为
     trayCountsSwitch.useReal = true
     const subagentStore = useSubagentStore()
     const workflowStore = useWorkflowStore()
     const loadSubSpy = vi.spyOn(subagentStore, 'loadSubagents').mockResolvedValue(undefined)
     const loadWfSpy = vi.spyOn(workflowStore, 'loadWorkflows').mockResolvedValue(undefined)
-    // 拉取腿被替身 → 数据直接种入分区（外壳三态与面板行集都读同一分区）
+    // 拉取路径被替身 → 数据直接种入分区（外壳三态与面板行集都读同一分区）
     subagentStore.applyRecords(SID, [makeSubagent({ subagentId: 'sa-1', status: 'running' })])
     // workflow 种数据：applyRecords 已私有化，直写分区 ref
     workflowStore.recordsBySession = new Map(workflowStore.recordsBySession).set(SID, [
@@ -906,7 +906,7 @@ describe('ComposerTray 数据面单例（U1：面板不自建实例、开合不�
     expect(trayCountsSwitch.calls).toBe(1)
     expect(loadSubSpy).toHaveBeenCalledTimes(1)
 
-    // 关闭 → 换另一件打开（旧面板卸载）→ 再关再开：每次重挂都不得重发首拉
+    // 关闭 → 换另一件打开（旧面板卸载）→ 再关再开：每次重挂都不得重发首次拉取
     await builtinButton('subagent').trigger('click')
     await nextTick()
     expect(panelKeys()).toEqual([])
@@ -940,7 +940,7 @@ describe('ComposerTray 首帧即列表（U2：hover 打开不闪加载态）', (
     expect(panelContentNodes('tray-subagent-row')).toHaveLength(1)
   })
 
-  it('bash：从未成功 list 过但有广播投递的任务 → 直出列表（loading 只吞「无数据的真首拉」）', async () => {
+  it('bash：从未成功 list 过但有广播投递的任务 → 直出列表（loading 只吞「无数据的真首次拉取」）', async () => {
     trayState.bashLoaded = false
     trayState.bashRunning = [makeTask({ taskId: 'bt-1' })]
     mountTray(makeWidgetSource(SID))

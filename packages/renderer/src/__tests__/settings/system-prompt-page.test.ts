@@ -169,7 +169,7 @@ describe('SystemPromptPage 保存交互', () => {
     expectErrorToastSaved('保存失败')
   })
 
-  it('RD-4#7：保存 in-flight 期间保存按钮禁用（saving 守卫，防 65s 窗口重复点击并发覆盖）', async () => {
+  it('RD-4#7：保存 in-flight 期间保存按钮禁用（saving 检查，防 65s 窗口重复点击并发覆盖）', async () => {
     configMock.getSystemPrompt.mockResolvedValueOnce({ config: defaultConfig(), corrupted: false })
     let resolveSave!: (v: { config: SystemPromptConfig; corrupted: boolean }) => void
     configMock.setSystemPrompt.mockImplementationOnce(

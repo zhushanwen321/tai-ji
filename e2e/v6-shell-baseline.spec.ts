@@ -5,7 +5,7 @@
  * 深度=D3 使用者视角（DOM 存在+可见+交互可触发），非状态机（vitest 集成测范围）、非视觉（S2 像素 diff 范围）。
  *
  * 数据流：复用 e2e/fixtures/launch-app.ts mock 轨（_electron.launch + 5 env 注入），
- * VITE_MOCK=true 让 renderer 自洽渲染（mockApi + useConnection mock 200ms 进 connected → App.vue 守卫放行 AppShell）。
+ * VITE_MOCK=true 让 renderer 自洽渲染（mockApi + useConnection mock 200ms 进 connected → App.vue 检查放行 AppShell）。
  * session list 含 e2eTestSession（id='e2e-files'，label='E2E 文件树测试'）与 s3（'API 性能优化'）。
  *
  * 范式参考：file-tree.spec.ts（gotoFileTree 激活 session）/ gui-components.spec.ts（activateSession + sendMessageAndWaitComplete）。

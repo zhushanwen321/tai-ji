@@ -306,7 +306,7 @@ describe('BrowserPane（错误通道，display-containers §5.3 两类占位区�
 // ── display-containers 修复组 B：§6.7 先行档对账 + retryCreate 口径（U3/U5）────
 
 describe('BrowserPane（display-containers §6.7 地址栏 Esc 先行档对账）', () => {
-  /** 模拟 Esc 栈序编排器（window bubble + defaultPrevented 守卫，§6.7 规格最小化） */
+  /** 模拟 Esc 栈序编排器（window bubble + defaultPrevented 检查，§6.7 规格最小化） */
   function attachOrchestrator(decisions: string[]): () => void {
     const onOrchestratorKeydown = (e: KeyboardEvent): void => {
       if (e.key !== 'Escape') return
@@ -381,12 +381,12 @@ describe('BrowserPane（retryCreate windowId 缺失口径，U5）', () => {
 
     const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {})
     mockBrowserCreate.mockClear()
-    // 清除 beforeEach 注入的 windowId → 重试路径守卫命中
+    // 清除 beforeEach 注入的 windowId → 重试路径检查命中
     window.history.replaceState({}, '', '/')
     await wrapper.find('[data-testid="browser-create-error"] button').trigger('click')
 
     expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining('windowId missing'))
-    expect(mockBrowserCreate, '守卫拦截：不发起创建').not.toHaveBeenCalled()
+    expect(mockBrowserCreate, '检查拦截：不发起创建').not.toHaveBeenCalled()
 
     warnSpy.mockRestore()
     window.history.replaceState({}, '', '/?windowId=win-1')

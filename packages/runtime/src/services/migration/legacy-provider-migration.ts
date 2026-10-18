@@ -48,8 +48,8 @@ export interface ProviderConfigMigrationReport {
 
 /**
  * 启动期幂等迁移：catalog provider 错位 apiKey → auth.json。
- * @param authStorage AuthStorage 实例（读 OAuth 冲突检查用；写入不走它——A1-4 收口）
- * @param credentialWriter auth.json 凭据写通道（A1-4 收口：经 AuthService.saveCredential 写入）
+ * @param authStorage AuthStorage 实例（读 OAuth 冲突检查用；写入不走它——A1-4 收敛）
+ * @param credentialWriter auth.json 凭据写通道（A1-4 收敛：经 AuthService.saveCredential 写入）
  * @returns MigrationReport
  */
 export async function migrateLegacyProviderConfig(
@@ -130,7 +130,7 @@ async function migrateCatalogApiKey(
   providerId: string,
   config: ConfigProviderConfig,
 ): Promise<void> {
-  // 写 apiKey 到 auth.json（A1-4 收口：经 credentialWriter，不再直接持有 authStorage.set）
+  // 写 apiKey 到 auth.json（A1-4 收敛：经 credentialWriter，不再直接持有 authStorage.set）
   await credentialWriter.saveCredential(providerId, { type: 'api_key', key: config.apiKey as string })
 
   // 删 models.json 条目（重建不含 apiKey 的配置）
@@ -252,7 +252,7 @@ export async function migrateProviderEnabledToWhitelist(configStore: IConfigStor
  * 不受影响），确保 G5 覆盖。两步各自 try/catch，互不阻断。
  *
  * @param authStorage AuthStorage 实例（读侧；写入经 credentialWriter）
- * @param credentialWriter auth.json 凭据写通道（A1-4 收口）
+ * @param credentialWriter auth.json 凭据写通道（A1-4 收敛）
  */
 export async function migrateProviderConfig(
   configStore: IConfigStore,

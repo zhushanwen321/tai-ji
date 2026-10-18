@@ -127,7 +127,7 @@ describe("JournalWriter 写失败（尽力而为语义）", () => {
     expect(existsSync(path)).toBe(false);
   });
 
-  // [加固] close 的 fsync 段与 writeChunk 同款 failed 收口：fsync 段抛错不上抛（close
+  // [加固] close 的 fsync 段与 writeChunk 同款 failed 收尾：fsync 段抛错不上抛（close
   // 不抛是 event-journal-wiring 接线契约——成功 run 被标 failed / catch 内 close 抛错取代原始
   // 错误 / finally 劈叉返回值三处后果的根源），warn 留证；不置 failed（数据已落盘，
   // 仍可作②级数据源）。

@@ -9,7 +9,7 @@
  *
  * 设计：**对齐 packages/runtime/src/infra/logger.ts 的 date+size 双策略轮转惯例**
  * （同构实现而非跨包复用——runtime logger 是绑定 runtime logsDir 的模块级单例，main
- * 无法 import；跨进程共享 writer 也不成立，D6 被否项③）。关键语义逐一继承：
+ * 无法 import；跨进程共享 writer 也不成立，D6 不采用项③）。关键语义逐一继承：
  * - date 轮转：按天文件名，跨天 end 旧流 → 惰性开新日期流（不 rename）
  * - size 轮转：**写入字节计数**（非每行 statSync）触发 .1 滚动，顺序硬约束：
  *   **end 旧流 → 等 'close'（在途写全部落盘）→ rename → 开新流 → 回放队列**——rename

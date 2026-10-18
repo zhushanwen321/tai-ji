@@ -90,7 +90,7 @@ describe("buildEngineModelsPromptAppend（defaultEngine 开关语义）", () => 
         "</available_bare_models>",
       ].join("\n"),
     );
-    // 文案语义守卫：指向上方核心段、不含 ZCode desktop 指引（那是无凭据形态专属）
+    // 文案语义检查：指向上方核心段、不含 ZCode desktop 指引（那是无凭据形态专属）
     const append = buildEngineModelsPromptAppend("bare");
     expect(append).toContain("use ids from <available_provider_models> above");
     expect(append).not.toContain("ZCode desktop");

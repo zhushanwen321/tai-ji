@@ -8,7 +8,7 @@
  *  - 观察者形态：计数未返回/拉取失败时计数段整体不渲染（含 ` · ` 分隔——避免闪 0 与
  *    失败误显示），data-testid=session-detail-card-msg-count 缺席即占位形态
  *
- * @taiji/core/transport/api 整模块 mock（command 可控 stub；本组件树对该模块消费面仅
+ * @taiji/core/transport/api 整模块 mock（command 可控 stub；本组件树对该模块消费方仅
  * command + RPC_BACKSTOP_TIMEOUT_MS）。
  * 运行：cd packages/renderer && npx vitest run src/__tests__/sidebar/session-item-message-count.test.ts
  */
@@ -110,7 +110,7 @@ describe('悬停详情卡消息计数（通道 2）', () => {
     expect(msgCountSegment()!.textContent).toBe('3 条消息')
   })
 
-  it('lastActiveAt 变化（失效键）→ 重拉（缓存不复用）', async () => {
+  it('lastActiveAt 变化（失效键）→ 重新拉取（缓存不复用）', async () => {
     commandMock.mockResolvedValue({ sessionId: SID, count: 3 })
     const before = mountItem(1000)
     await hover(before)

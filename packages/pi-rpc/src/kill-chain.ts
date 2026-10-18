@@ -29,7 +29,7 @@ export interface KillableChild {
   readonly pid?: number
   /** 发信号。返回 false = 进程已不存在（kill no-op）。 */
   kill(signal?: NodeJS.Signals | number): boolean
-  /** 注册 exit 监听（onExit 收尾钩子载体；重复触发由 settled 幂等守卫）。 */
+  /** 注册 exit 监听（onExit 收尾钩子载体；重复触发由 settled 幂等检查）。 */
   on(event: 'exit', listener: (code: number | null, signal: NodeJS.Signals | null) => void): unknown
 }
 
@@ -48,19 +48,19 @@ function isAlreadyExited(child: KillableChild): boolean {
  *      接手，信号已发出即承诺兑现）；
  *   3. exit 事件到达时执行 onExit 收尾钩子（调用方清 pending 等）。
  *
- * 进程存活守卫：runtime 侧调用方（RpcClient.kill 的幂等短路）+ 本函数前置
+ * 进程存活检查：runtime 侧调用方（RpcClient.kill 的幂等短路）+ 本函数前置
  * exitCode/signalCode 短路双层——后者是 U1 归并引入（pi-subagent-cli 的
- * killChild/killAllActiveChildren 调用点无调用方守卫，agent_end 回补 finally
+ * killChild/killAllActiveChildren 调用点无调用方检查，agent_end 回补 finally
  * 的 kill 常落在已回收进程上，前置短路保「零信号」语义）。
  *
- * kill 抛错守卫：经 safeKill 吞错（对齐 SDK killChain 的 safeKill 单源语义）
+ * kill 抛错检查：经 safeKill 吞错（对齐 SDK killChain 的 safeKill 单源语义）
  * ——进程恰在退出态检查与 kill 之间自退时 ChildProcess.kill 可能抛（zsub 实测
  * 经验），且本包消费方 killChild/killAllActiveChildren 是 void fire-and-forget
  * 无 .catch。kill 失败是尽力而为语义（对已死进程信号本就是 no-op），warn 留痕
  * 后吞掉。
  */
 /**
- * 发信号守卫包裹（单点收口，对齐 SDK killChain safeKill 同名语义）：kill 抛错吞掉
+ * 发信号检查包裹（单点收尾，对齐 SDK killChain safeKill 同名语义）：kill 抛错吞掉
  * + warn 留痕。日志走本包既有 console 约定（无 logger 依赖，spawn-args 同款
  * '[rpc]' 前缀）。
  */

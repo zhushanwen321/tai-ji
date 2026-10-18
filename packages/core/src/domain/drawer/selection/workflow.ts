@@ -12,7 +12,7 @@ import { useSessionScopedState } from '../../../foundation/use-session-scoped-st
 import { drawerSessionKey } from '../control'
 
 /** workflow 选中态（per-session 分区） */
-export interface WorkflowSelectionState { // oe-exempt:20261003:framework:类型契约先行——selection 分区契约，renderer 消费面即本批 D1 单元
+export interface WorkflowSelectionState { // oe-exempt:20261003:framework:类型契约先行——selection 分区契约，renderer 消费方即本批 D1 单元
   /** workflow tab 当前展示的 workflow 名；null=未选中（workflow tab 显空态） */
   selectedWorkflowName: string | null
 }

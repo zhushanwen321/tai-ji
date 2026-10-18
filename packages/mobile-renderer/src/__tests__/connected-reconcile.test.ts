@@ -88,7 +88,7 @@ describe('connected 边沿当前会话对账（U9/A6 接线）', () => {
     expect(mockRefreshHistory).toHaveBeenLastCalledWith('u9-rc-sid')
   })
 
-  it('无活跃会话翻 connected：refreshHistory 不被调（出口以活跃会话为参，壳层空值守卫）', async () => {
+  it('无活跃会话翻 connected：refreshHistory 不被调（出口以活跃会话为参，壳层空值检查）', async () => {
     wrapper = mountApp()
 
     shellConnectionState.value = 'connected'

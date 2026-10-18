@@ -325,7 +325,7 @@ describe('watchFileChangesForInvalidation（W19/D-9：ready 帧驱动失效 + ov
         chatStore.disposeSession('s1')
 
         await vi.advanceTimersByTimeAsync(300)
-        // RPC 正常发出（守卫在其后），但回写被拦：孤儿 gitOverlay/dirChangeCounts 分桶不重建
+        // RPC 正常发出（检查在其后），但回写被拦：孤儿 gitOverlay/dirChangeCounts 分桶不重建
         expect(mockGitStatus).toHaveBeenCalledTimes(1)
         expect(fileTreeStore.gitOverlay.has('s1')).toBe(false)
         expect(fileTreeStore.getDirChangeCount('s1', 'src')).toBe(0)

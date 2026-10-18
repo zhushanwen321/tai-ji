@@ -27,7 +27,7 @@ pi 进程 RPC 公共层——主 agent（runtime rpc-client）与 subagent（pi-
 3. **裸写错误策略**：runtime `sendRaw` 吞错（UI 响应 fire-and-forget，无恢复路径）vs pi-subagent-cli `writeStdinLine` 对 EPIPE throw（驱动冷恢复路径）。本包只提供 `tryWriteStdinLine` 原语 + `isBrokenPipeError` 判别单源，策略归消费方。
 4. **argv 编排顺序**：主 agent 与 subagent 模板的 flag 顺序不同（`buildPiMainAgentArgs` 的 skill/extension 在 tools 段前、基座 flag 前置；`buildPiSubagentSpawnArgs` 的 skill 在 tools 段后、mirror 段末尾）。pi 的 commander 解析对顺序无语义；保留两模板现状是「行为等价提取」迁移契约（快照测试锚定两侧输出与切换前逐字节一致），不是待清理债。
 5. **stdout 行分帧双源现状**：runtime 侧用本包 `attachLfOnlyLineReader`（StringDecoder + 剥 `\r` + 尾行 flush）；pi-subagent-cli 的 stdout pump 用 `@zhushanwen/subagent-engine-sdk` `pumpNdjsonLines`（与 zcode connection 共享的引擎中立单源，S4 簇 5b 已收敛）。两者正常路径行为一致（pi 输出恒 `\n` 定界），不强行合并——合并会让 zcode 间接依赖本包，违反「zcode 不经过此层」。
-6. **pi 杀链与 SDK killChain 分层**：pi 进程杀链单源在本包 `killPiProcess`（SIGCONT 前置 + 已退零信号短路 + 不等 SIGKILL 收尸的 settle 语义）——runtime rpc-client 与 pi-subagent-cli（killChild / dispose 收割）双侧消费。SDK `killChain`（SIGTERM 起 + SIGKILL 后有界收尸 + terminated/killed 判别返回值）继续服务 **zcode 引擎**（引擎中立层），不经本包——两链语义面不同（收尸等待 / 返回值 / 防御前置），是对「pi 进程」与「引擎中立」两个概念域的分别建模，非双轨。
+6. **pi 杀链与 SDK killChain 分层**：pi 进程杀链单源在本包 `killPiProcess`（SIGCONT 前置 + 已退零信号短路 + 不等 SIGKILL 收尸的 settle 语义）——runtime rpc-client 与 pi-subagent-cli（killChild / dispose 收割）双侧消费。SDK `killChain`（SIGTERM 起 + SIGKILL 后有界收尸 + terminated/killed 判别返回值）继续服务 **zcode 引擎**（引擎中立层），不经本包——两链语义面不同（收尸等待 / 返回值 / 防御前置），是对「pi 进程」与「引擎中立」两个业务含义域的分别建模，非双轨。
 7. **`buildOutboundChildEnv` 底层双 SSOT**：`@taiji/shared`（runtime 消费）与 SDK（引擎 CLI 独立 npm 发布需自包含）各一份，本包不复刻第三份——经 `buildChildEnv` 参数注入。
 
 ## 单侧消费的命令（防误认为双侧契约）

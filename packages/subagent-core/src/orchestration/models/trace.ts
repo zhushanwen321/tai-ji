@@ -32,7 +32,7 @@ export const TRACE_RESULT_MAX_CHARS = 8000;
  * （各半相等）是 doc 示例「8001 → 裁后 8000+标记 ≈ 8057」的前提
  * （rt-w1-design.json W1C2 / trimTraceResult 注释同款表述）——改 MAX 时
  * 需同步检查 head/tail 是否仍各半，及上述注释/文档示例数字。
- * 比例钉死在 trace.test.ts 断言中；变更需复查 detail-content.ts
+ * 比例固定在 trace.test.ts 断言中；变更需复查 detail-content.ts
  * 尾 5 行消费点（TUI 尾部预览依赖 tail 段）。
  */
 const TRIM_HEAD_CHARS = 4000;
@@ -65,7 +65,7 @@ function trimTraceResult(result: AgentResult | undefined): AgentResult | undefin
  * - nodes 只增不改索引顺序（append-only）
  * - update 只改单个 node 的 status/result/error/completedAt/sessionId
  * - byIndex 与 nodes 恒一致（每个 append/remove 同步维护，无惰性重建）；
- *   Map 值与数组元素引用共享（非拷贝），nodes 仍是持久化与 TUI 投影 SSOT
+ *   Map 值与数组元素引用共享（非拷贝），nodes 仍是持久化与 TUI 派生视图 SSOT
  * - 不含 verifyStrategy（G-020 删除，不迁移）
  */
 export class Trace {
@@ -74,13 +74,13 @@ export class Trace {
   private readonly byIndex = new Map<number, ExecutionTraceNode>();
 
   /**
- * 从已有节点数组重建 Trace（用于 RunStore 反序列化重水合）。
+ * 从已有节点数组重建 Trace（用于 RunStore 反序列化时重新加载运行状态快照）。
  *
  * 防御性拷贝——传入数组不被持有，外部 mutation 不影响 Trace。
  * 不验证节点顺序/唯一性（调用方保证快照来源可信）。
  * 不做裁剪——落盘快照已是 write 路径裁剪后形态，旧版本未裁剪长
- * content 重水合保持原样（read 路径无二次信息损失）。
- * 重水合后 call.traceNode（来自快照 calls[].traceNode，
+ * content 重新加载后保持原样（read 路径无二次信息损失）。
+ * 重新加载后 call.traceNode（来自快照 calls[].traceNode，
  * jsonl-run-store.ts:156 直接传入）与 Trace.nodes 副本非同引用——
  * D-10 引用共享仅 live append 路径成立。
  */
@@ -144,10 +144,10 @@ export class Trace {
   }
 
   /**
- * 按 stepIndex 移除节点（崩溃重建清理在飞 call 用）。
+ * 按 stepIndex 移除节点（崩溃重建清理在途 call 用）。
  *
  * 正常运行不调用（append-only 不变式）。仅 worker-message-pump 的 discardInFlightCalls
- * （rebuildRuntime 内，F2）清理被旧 runtime abort 的在飞 call 时用——移除其 trace
+ * （rebuildRuntime 内，F2）清理被旧 runtime abort 的在途 call 时用——移除其 trace
  * 节点，让重跑重发 agent-call 时 append 全新节点走全新执行路径（避免 stale
  * "running" 节点残留 + trace.update 命中旧节点导致新节点 orphan）。
  * stepIndex 不存在时 no-op（防御性）。

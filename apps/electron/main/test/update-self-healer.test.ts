@@ -602,7 +602,7 @@ describe('批次 5: updater.pid 互斥（§3.7.1 检查方）', () => {
   })
 
   it('mac 阳性：真实 bash updater.sh 进程 → 识别为 in-flight（defer），pid 文件保留', async () => {
-    // 回归守卫：加固用 ps -o command=（argv），不能退化为 comm=——脚本进程的 comm
+    // 回归检查：加固用 ps -o command=（argv），不能退化为 comm=——脚本进程的 comm
     // 恒为 "bash"（解释器映像），comm= 会把真实存活的脚本 100% 误判为 PID 复用，
     // 互斥 fail-open（2026-08 一致性审查实证）。本用例用真实 bash 脚本进程 + 真实 ps。
     Object.defineProperty(process, 'platform', { value: 'darwin', configurable: true })

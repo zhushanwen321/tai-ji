@@ -12,7 +12,7 @@ import { bootstrap } from './bootstrap'
 // 全局错误留痕（error-reporter 双面）：Vue 体系内 render/setup 错误在无 app 级
 // errorHandler 时会 rethrow，落 window error（同步路径）或 unhandledrejection
 // （调度器 promise 路径）；此处兜住两面写 console.error，防渲染单点错误零现场。
-// 上报通道不需要（远程壳无 IPC 落盘面）。
+// 上报通道不需要（远程壳无 IPC 落盘路径）。
 window.addEventListener('error', (e: ErrorEvent) => {
   // 资源加载错误事件无 error 对象与 message，非 JS 错误，跳过
   if (!e.error && !e.message) return

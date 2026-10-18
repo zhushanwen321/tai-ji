@@ -4,7 +4,7 @@
   header（workflow 名 + abort 两段式中止）+ phase 分组 +
   agent call 行（status 圆点 + agent + slug + tokens/turns/duration + running/pending）。
   phase 分组逻辑现居本组件（同数据结构 WorkflowRunRecord.agentCalls）——原实现侧
-  侧栏工作流详情视图已随任务 tab 退役（2026-09-16），workflow 详情统一收口本 tab，
+  侧栏工作流详情视图已随任务 tab 退役（2026-09-16），workflow 详情统一收敛本 tab，
   分组/dot/format 逻辑以本文件为唯一在役出处。
 
   agent call 本质是 subagent（D4）：点 agent call 行 → openSubagent({ virtualId: agentCallVirtualId(call.sessionId),
@@ -146,7 +146,7 @@
                 <span v-if="callTokenTotal(call) > 0">{{ formatTokens(callTokenTotal(call), 'tokens') }}</span>
                 <span v-if="call.turns !== undefined">· {{ call.turns }} {{ t('sidebar.workflowDetail.turnsUnit') }}</span>
               </div>
-              <!-- [W0/V6] failed 行错误摘要（record.error 投影，截断一行，title 全文）：
+              <!-- [W0/V6] failed 行错误摘要（record.error 派生视图，截断一行，title 全文）：
                    状态行转 failed 的同时错误可见（失败路径恢复指引），不再只靠红点 -->
               <div
                 v-if="call.status === 'failed' && call.error"

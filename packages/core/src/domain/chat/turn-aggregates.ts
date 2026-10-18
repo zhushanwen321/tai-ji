@@ -5,7 +5,7 @@ import type { MessageTurn } from './message-turns'
  * turn 级聚合事实（**整个 agent-turn** 口径，不是单条 assistant 消息口径）。
  *
  * 从 message-turns.ts 拆出（2026-09）：分组（什么构成一个 turn）与聚合（这个 turn 干了多少活）
- * 是两条独立变化轴。
+ * 是两条独立变化原因。
  *
  * 消费方 = TurnMeta 状态行（「工作中/已工作 + 时长 + 时刻区间 + 已生成 N tokens」），经 ui
  * `useTurnElapsed` 以 core 纯函数形式调用（live 与 reload 同一公式，重开 session 数值一致）。
@@ -29,8 +29,8 @@ import type { MessageTurn } from './message-turns'
  *   reload = session JSONL 同名 entry 字段（message-converter 同源），故历史会话零迁移即修好。
  *
  * 数字的完整性（不做估算的代价，显式接受）：usage 仅在一次 LLM 调用**结束后**才有——
- * 正在流式生成的那一段在收口前不计数，故状态行数字是「**已上报的真实累计**」：流式期显示
- * 已完成各段的累计（单段 turn 在这一段期间不显示数字），收口瞬间跳到完整值。全程无近似值。
+ * 正在流式生成的那一段在收尾前不计数，故状态行数字是「**已上报的真实累计**」：流式期显示
+ * 已完成各段的累计（单段 turn 在这一段期间不显示数字），收尾瞬间跳到完整值。全程无近似值。
  */
 export interface TurnAggregates {
   /** turn 起点（epoch ms）；无成员 = 0 */
@@ -60,7 +60,7 @@ export function deriveTurnAggregates(turn: MessageTurn): TurnAggregates {
 }
 
 /**
- * 单条 assistant 消息的产出结束时刻：消息收口与 thinking/toolCall 结束取最大。
+ * 单条 assistant 消息的产出结束时刻：消息收尾与 thinking/toolCall 结束取最大。
  * 消息结束时刻缺失（旧历史帧）时回退其开始时刻——与修复前行为等价（单条 assistant
  * 的 turn 会退化为 1s，属已知降级）。
  */

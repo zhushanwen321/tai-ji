@@ -108,7 +108,7 @@ const elRef = ref<HTMLDivElement | null>(null)
  *  placeholder 空态恒显不再依赖聚焦态） */
 const isFocused = ref(false)
 
-// contenteditable 输入机制（getText/syncEmpty/触发检测/光标滚动/选区保存恢复/IME 守卫/换行/粘贴）
+// contenteditable 输入机制（getText/syncEmpty/触发检测/光标滚动/选区保存恢复/IME 检查/换行/粘贴）
 // 逻辑在 core input/contenteditable.ts（W2 迁移，deps 注入 pasteImage）。
 // 两个 core 模块互依：contenteditable 的 onKeydown 要调 chip 模块的 handleBackspaceOnChip，
 // chip 模块的 onChanged/restoreSelection 要用 contenteditable 的 onInput/restoreSelection。
@@ -207,7 +207,7 @@ function onEditorMousedown(e: MouseEvent): void {
   }
 }
 
-// clear / setText / insertTextAtCursor 不再在组件定义：DOM 写入已收口进 core composable
+// clear / setText / insertTextAtCursor 不再在组件定义：DOM 写入已收敛进 core composable
 // （savedRange 闭包在 composable 内，组件层无法重置它；详见 contenteditable.ts 注释）。
 // 组件通过 defineExpose 透传 composable 返回的同名方法，维持对外 API 契约不变。
 

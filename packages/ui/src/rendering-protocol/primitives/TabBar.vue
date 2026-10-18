@@ -1,7 +1,7 @@
 <script setup lang="ts">
 /**
  * 标签栏组件（v6）——TC6 连体 pill 范式。
- * 与 extension-host/L2TabBar.vue 非双轨：概念域不同（本组件 = rendering-protocol 协议
+ * 与 extension-host/L2TabBar.vue 非双轨：业务含义不同（本组件 = rendering-protocol 协议
  * 推送原语，消费 extension 推送的 GuiComponent；L2TabBar = 宿主交互组件，消费本地
  * L2TabItem + v-model），勿合并。
  * 容器 bg-bg-input + rounded-lg + padding 3px（spec .gtabbar padding:3px）；

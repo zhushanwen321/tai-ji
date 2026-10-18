@@ -7,8 +7,8 @@
  * ScheduleFormResult JSON，今日 Panel onScheduleCreateSubmit 路径等价）。锁定：
  * - legacy scheduler 帧 → FormOverlay（draft 直挂）挂载，Composer 互斥不挂
  * - form 帧与 legacy scheduler 帧互斥分流（questions / draft 两源）
- * - draft 形状非法（isScheduleDraft 守卫失败）→ 不挂 overlay（正常路径不可达，
- *   runtime event-adapter 同守卫预检；防御分支回落 composer）
+ * - draft 形状非法（isScheduleDraft 检查失败）→ 不挂 overlay（正常路径不可达，
+ *   runtime event-adapter 同检查预检；防御分支回落 composer）
  * - scheduler 确认等待期 store 豁免 getter 语义锁定（hasPendingBlockingOverlay 按 form 键）
  * - submit/cancel 经 respond/cancel 回传 select 通道（扁平 FormResult / null）
  * - 排队接管序列（DOM 层）：同 session 先后到达两类帧 → 先到者挂载 → respond/cancel
@@ -127,7 +127,7 @@ describe('Panel overlay 挂载源分流（draft 源 ∨ questions 源互斥）',
     expect(wrapper.find('[data-testid="composer-box"]').exists()).toBe(false)
   })
 
-  it('draft 形状非法（守卫失败）→ 不挂 FormOverlay，Composer 兜底', () => {
+  it('draft 形状非法（检查失败）→ 不挂 FormOverlay，Composer 兜底', () => {
     mockState.overlayReq.value = { ...scheduleCreateReq, scheduleDraft: { kind: 'bogus' } }
 
     const wrapper = mountPanel('session-A')

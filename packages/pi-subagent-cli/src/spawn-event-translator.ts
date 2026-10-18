@@ -24,7 +24,7 @@ const TOOL_ACTIVITY_MIN_INTERVAL_MS = 1_000;
 /**
  * [U-A6] 工具执行期活性信号载体（`tool_execution_update` → onEvent 通道，不产数据）。
  *
- * 第一类 `activity` 变体已落地（F2 清账）：协议闭合联合的专用纯活性信号——双侧
+ * 第一类 `activity` 变体已落地（F2 登记项标记完成）：协议封闭联合的专用纯活性信号——双侧
  * reducer no-op、core event-journal-wiring 豁免 append（不进持久/重放面），语义见 SDK
  * contract-types AgentEvent 注释。历史借用形态（usage/error 双缺省的零写入
  * message_end）见 git 历史。
@@ -44,8 +44,8 @@ type AgentEventSink = (event: AgentEvent) => void;
  * tool_execution_start / tool_execution_update / tool_execution_end 事件一律携带
  * parentToolCallId（dist/core/nested-tool-calls.js 三处 emit 点），且嵌套调用不落
  * transcript（dist/core/extensions/types.d.ts executeTool 契约「It does not appear in
- * the transcript」）。过滤语义 = 与 transcript 投影对齐：reload 后嵌套调用只有外层一个
- * 工具块，live 期放行 start/end 会经下方翻译各产独立 tool_start/tool_end → 投影不一致。
+ * the transcript」）。过滤语义 = 与 transcript 派生视图对齐：reload 后嵌套调用只有外层一个
+ * 工具块，live 期放行 start/end 会经下方翻译各产独立 tool_start/tool_end → 派生视图不一致。
  * 未来任何 ctx.executeTool 调用源自动被本过滤覆盖（现役唯一发射源为 codemode 脚本）。
  *
  * start 与 end 必须同判同滤（两 handler 入口同一谓词）：仅滤 start 会让嵌套 end 对未注册
@@ -141,7 +141,7 @@ function handleAssistantMessageUpdate(raw: SdkEvent, agentEvent: AgentEventSink)
  *   ① 不把 partialResult 文本推给 onDelta——正文槽（text_delta 专用，见 agentEvent），
  *      工具输出混进 assistant 正文不可接受；
  *   ② 只在工具真产出时才发（纯信号，无心跳）——静默楔死工具**启动后零 update**（启动
- *      瞬间那条固定刷新至多让守卫多等一次窗口），照常被 30min 无进展守护回收，不因本信号
+ *      瞬间那条固定刷新至多让检查多等一次窗口），照常被 30min 无进展守护回收，不因本信号
  *      永续命。
  *
  * 节流：pi 已按 100ms 节流，这里再按 1s 收敛（对 30min 窗仍是密刷新；把合成事件的
@@ -159,7 +159,7 @@ function handleToolExecutionUpdate(
 
 /** agent_end → 轮收敛分派（非 willRetry 才是轮终）。 */
 function handleAgentEnd(raw: SdkEvent, opts: SdkTranslatorOpts): void {
-  // [F1.2 根修，Gate B 2026-09-09] pi rpc 模式 turn 完成后进程常驻不退出；旧 core
+  // [F1.2 从根源修复，Gate B 2026-09-09] pi rpc 模式 turn 完成后进程常驻不退出；旧 core
   // runSpawn 的 routeAgentEnd（agent_end → 非 willRetry → 终结子进程 → close →
   // runSpawn resolve）在 W7 协议化提取时丢失，导致 run 永不终态（事件流出齐全、
   // outcome 悬挂）。此处承载轮终收敛语义：message_end/turn_end 已先于 agent_end

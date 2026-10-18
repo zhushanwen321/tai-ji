@@ -17,7 +17,7 @@
  *  - WS 断连 pending 永不 settle（#17 F-1）：WS 超时 race 10s → reject → allSettled settled
  *    → 分组空态+toast（AC-17.1，不永久挂死）
  *  - 全源失败：四类空态 + toast（AC-17.3）
- *  - 乱序响应：loadSeq 守卫 seq!==loadSeq 丢弃旧结果（BC-9，D-022 骨架约束）
+ *  - 乱序响应：loadSeq 检查 seq!==loadSeq 丢弃旧结果（BC-9，D-022 骨架约束）
  *
  * 并发（BC-9）：loadSeq 模块级自增序列号，await 后比对，旧响应丢弃。
  */
@@ -62,7 +62,7 @@ export function useSearch(
   const commandRegistry = useCommandRegistry(activeSessionId, deps.commandStore)
   const recents = useRecents(deps.storage)
 
-  /** [BC-9 / D-022 骨架约束] loadSeq 序列号守卫（乱序响应不覆盖新结果） */
+  /** [BC-9 / D-022 骨架约束] loadSeq 序列号检查（乱序响应不覆盖新结果） */
   let loadSeq = 0
 
   /**
@@ -72,14 +72,14 @@ export function useSearch(
    * @returns 四类分组 Section[]（空组过滤，符号占位 D-001）
    */
   async function query(q: string, ctx: SearchCtx): Promise<Section[]> {
-    const seq = ++loadSeq // BC-9 守卫入口
+    const seq = ++loadSeq // BC-9 检查入口
 
     // AC-5.2：mock 模式走 searchMock fixture（search 无 real WS domain，D-026）。
     // 返回已是 Section[] 形态（{label, items}），符号占位恒加入（与 real 轨 groupByType 对齐 D-001）。
     if (ports.isMock) {
-      // [tc u3/D4-②] searchMock 可选端口守卫：isMock=true 而未装配属壳装配错误——显式抛错
+      // [tc u3/D4-②] searchMock 可选端口检查：isMock=true 而未装配属壳装配错误——显式抛错
       // 指向恢复动作（恢复路径：检查 useSearchModalDeps 的 VITE_MOCK 分支与 mock 模块导入），
-      // 不装配静默返空 stub（会掩盖装配错误，被否方案见设计 D4 契约前置决策）。
+      // 不装配静默返空 stub（会掩盖装配错误，不采用方案见设计 D4 契约前置决策）。
       if (!ports.searchMock) {
         throw new Error(
           'search: isMock=true 但 SearchPorts.searchMock 未装配——mock 构建下壳必须在 ' +
@@ -88,7 +88,7 @@ export function useSearch(
         )
       }
       const mockSections = await ports.searchMock(q)
-      // BC-9 守卫：旧响应丢弃
+      // BC-9 检查：旧响应丢弃
       if (seq !== loadSeq) return []
       // 补符号占位 section（mock fixture 无符号数据，与 real 轨 groupByType 占位行为一致 D-001）
       const symbolLabel = ports.t('search.sectionSymbol')
@@ -118,7 +118,7 @@ export function useSearch(
       querySessionSource(q), // WS + #17 超时 race + 源内子串过滤
     ])
 
-    // BC-9 守卫：旧响应丢弃（seq !== loadSeq 说明有更新查询）
+    // BC-9 检查：旧响应丢弃（seq !== loadSeq 说明有更新查询）
     if (seq !== loadSeq) return []
 
     // MR-4.2：单源 rejected 取空，不阻断其他源。file/session 源内已过滤，直接合并

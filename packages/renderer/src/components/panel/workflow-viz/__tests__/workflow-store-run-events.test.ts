@@ -4,15 +4,15 @@
  * 覆盖：
  * - loadWorkflowRunEvents 成功写入 runId 分区（ready + events）；在途合并（runEventsInflight
  *   原语承载——C-data-18 组装，force 在途窗口到达同样并入不另起 RPC）
- * - ready 缓存复用（非 force 不重发 RPC）/ force 覆盖重拉（信号触发 / 重试按钮语义）
+ * - ready 缓存复用（非 force 不重发 RPC）/ force 覆盖重新拉取（信号触发 / 重试按钮语义）
  * - 错误二分数据形态：record_not_found 结构化回执（errorCode）/ RPC 通道错误（errorMessage）；
- *   error 态非 force 不自动重拉（重试是用户显式动作）；oversize 降级（成功臂 events 恒空
+ *   error 态非 force 不自动重新拉取（重试是用户显式动作）；oversize 降级（成功臂 events 恒空
  *   + oversize 标志透传——RT-4#8「不可用 ≠ 无数据」分形）
  * - D11① 在途丢弃检查：settle 时活跃锚已切走/已清 → 结果丢弃不写缓存
  * - D11② overlay 关闭不清缓存（重开秒显）；LRU 上界 5（最旧非活跃驱逐、活跃 run 豁免）
  * - D11⑤ clearSession 清该 session 名下 run 缓存 + 活跃锚 + 在途去重簿记；其他 session 分区保留
  * - clearWorkflows 全清
- * - triggerWorkflowReload 活跃 run 联动 force 事件流重拉（§3.1-4 信号接线；非活跃不触发）
+ * - triggerWorkflowReload 活跃 run 联动 force 事件流重新拉取（§3.1-4 信号接线；非活跃不触发）
  *
  * 运行：cd packages/renderer && npx vitest run src/components/panel/workflow-viz/__tests__/workflow-store-run-events.test.ts
  */
@@ -20,7 +20,7 @@ import { describe, it, expect, beforeEach, vi } from 'vitest'
 import { createPinia, setActivePinia } from 'pinia'
 import { useWorkflowStore } from '@/stores/workflow'
 
-// mock sessionApi（store 内部调用；getWorkflowRunEvents = 本扩展的消费面）
+// mock sessionApi（store 内部调用；getWorkflowRunEvents = 本扩展的消费方）
 vi.mock('@taiji/core/transport/api/domains/session', () => ({
   getWorkflows: vi.fn(),
   getWorkflowRunEvents: vi.fn(),
@@ -42,7 +42,7 @@ const SID = 's-main'
 const RUN_A = 'wf-run-a'
 const RUN_B = 'wf-run-b'
 
-/** 事件流 reply 样本（骨架两行形态；截断标注语义归 gantt-segments 测试面） */
+/** 事件流 reply 样本（骨架两行形态；截断标注语义归 gantt-segments 测试） */
 function eventsReply(runId: string): { runId: string; events: Array<{ type: string; ts: number }> } {
   return {
     runId,
@@ -79,7 +79,7 @@ describe('workflowStore 事件流缓存：拉取与缓存复用', () => {
     expect(mockGetRunEvents).toHaveBeenCalledTimes(1)
   })
 
-  it('force 覆盖 ready 缓存重拉（workflowUpdate 信号 / 重试按钮语义）', async () => {
+  it('force 覆盖 ready 缓存重新拉取（workflowUpdate 信号 / 重试按钮语义）', async () => {
     const store = useWorkflowStore()
     store.setActiveWorkflowRun(SID, RUN_A)
     await store.loadWorkflowRunEvents(SID, RUN_A)
@@ -106,7 +106,7 @@ describe('workflowStore 事件流缓存：拉取与缓存复用', () => {
     let resolveRpc!: (v: unknown) => void
     mockGetRunEvents.mockReturnValueOnce(new Promise((resolve) => (resolveRpc = resolve)))
     const first = store.loadWorkflowRunEvents(SID, RUN_A)
-    // 信号触发的 force 重拉在首拉在途窗口到达——同 runId 仅首次发起，复用者共享 promise
+    // 信号触发的 force 重新拉取在首次拉取在途窗口到达——同 runId 仅首次发起，复用者共享 promise
     const forced = store.loadWorkflowRunEvents(SID, RUN_A, { force: true })
     expect(mockGetRunEvents).toHaveBeenCalledTimes(1)
     resolveRpc(eventsReply(RUN_A))
@@ -114,7 +114,7 @@ describe('workflowStore 事件流缓存：拉取与缓存复用', () => {
     expect(store.runEventsOf(RUN_A)?.status).toBe('ready')
   })
 
-  it('空 sid / runId 守卫：不发起 RPC 不写分区', async () => {
+  it('空 sid / runId 检查：不发起 RPC 不写分区', async () => {
     const store = useWorkflowStore()
     await store.loadWorkflowRunEvents('', RUN_A)
     await store.loadWorkflowRunEvents(SID, '')
@@ -149,7 +149,7 @@ describe('workflowStore 事件流缓存：错误二分数据形态', () => {
     expect(store.runEventsOf(RUN_A)).toMatchObject({ status: 'ready', events: [], oversize: true })
   })
 
-  it('error 态非 force 不自动重拉（重试 = 用户显式 force）', async () => {
+  it('error 态非 force 不自动重新拉取（重试 = 用户显式 force）', async () => {
     mockGetRunEvents.mockResolvedValue({ runId: RUN_A, code: 'record_not_found', message: '无记录' })
     const store = useWorkflowStore()
     store.setActiveWorkflowRun(SID, RUN_A)
@@ -288,7 +288,7 @@ describe('workflowStore 事件流缓存：生命周期清理', () => {
     const stale = store.loadWorkflowRunEvents(SID, RUN_A)
     expect(mockGetRunEvents).toHaveBeenCalledTimes(1)
 
-    // session 删除时首拉仍在途：分区 + 活跃锚 + 在途簿记一并释放
+    // session 删除时首次拉取仍在途：分区 + 活跃锚 + 在途簿记一并释放
     store.clearSession(SID)
     // 重开该 run（分区重建后的重挂载形态）：新调用发起独立 RPC——若在途簿记未释放，
     // 会静默并入已删除分区的陈旧在途（结果无 loading 占位可显示的空窗）
@@ -319,7 +319,7 @@ describe('workflowStore 事件流缓存：生命周期清理', () => {
 })
 
 describe('workflowStore：triggerWorkflowReload 活跃 run 事件流联动（§3.1-4 信号接线）', () => {
-  it('活跃 run 命中信号 session → force 重拉事件流', async () => {
+  it('活跃 run 命中信号 session → force 重新拉取事件流', async () => {
     const store = useWorkflowStore()
     store.setActiveWorkflowRun(SID, RUN_A)
     await store.loadWorkflowRunEvents(SID, RUN_A)

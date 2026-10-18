@@ -152,9 +152,9 @@ describe('tailLines × stripAnsi 顺序对拍', () => {
     const cases = [
       '', // 空串
       'plain line 1\nplain line 2', // 纯文本
-      '\x1b[31mred start', // 行首 ANSI 不闭合（色码到 EOF 不构成完整匹配）
+      '\x1b[31mred start', // 行首 ANSI 不结束（色码到 EOF 不构成完整匹配）
       'no color\n\x1b[32mgreen line\x1b[0m\n\x1b[1;34mheading\x1b[0m', // ANSI 行首行尾
-      '\x1b[31munclosed color\nspans line boundary\nstill red', // ANSI 状态跨行（开码不闭合）
+      '\x1b[31munclosed color\nspans line boundary\nstill red', // ANSI 状态跨行（开码不结束）
       'a\n\n\x1b[31m\n\x1b[0m\n', // 空行 + 孤立 ANSI 行 + 尾随换行
       '\x1b[32m✓ success\x1b[0m\n\x1b[1;34m── build output ──\x1b[0m\nfinal line of output', // 真实 bash 输出形态
       `${'x'.repeat(5000)}\n\x1b[31mtail line\x1b[0m`, // 长头部 + ANSI 尾行
@@ -181,7 +181,7 @@ describe('tailLines × stripAnsi 顺序对拍', () => {
     }
   }
 
-  /** 生成随机 ANSI 文本：普通词行 + 随机注入 SGR 色码（行首/行中/行尾，含不闭合码） */
+  /** 生成随机 ANSI 文本：普通词行 + 随机注入 SGR 色码（行首/行中/行尾，含不结束码） */
   function randomAnsiText(rand: () => number, targetLen: number): string {
     const words = ['build', 'step', 'ok', 'err', 'x', 'done', 'pass']
     const codes = ['\x1b[31m', '\x1b[0m', '\x1b[1;34m', '\x1b[38;5;196m', '\x1b[2J', '\r']

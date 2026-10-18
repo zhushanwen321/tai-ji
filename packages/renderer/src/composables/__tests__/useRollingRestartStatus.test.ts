@@ -1,7 +1,7 @@
 /**
  * useRollingRestartStatus 单元测试（crash-forensics-and-watchdog §3.3 D5 / D3，u7d + 偏差 #27）。
  *
- * 覆盖（验收 A1/A2 + B1 renderer 半腿）：
+ * 覆盖（验收 A1/A2 + B1 renderer 半路径）：
  * - 事件加速显示：deferred / countdown / forced 三广播分别驱动对应相位（sawRollingActive 置位）。
  * - #27 reattach:deferred：active=true → reattach-deferred 轻态；active=false → 清自身态
  *   且不触碰滚动重启态；缓解帧在 recovered 态不落井下石。

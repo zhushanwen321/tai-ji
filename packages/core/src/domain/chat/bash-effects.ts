@@ -12,7 +12,7 @@
  *   turn 内 notice 承担持久语义——规则 9 双通路以此分工（设计 D2 张力声明）。
  * - message.bashResult（dispatcher 双分支延迟或立即发布）：构造 bashExecution message
  *   entry（形态对照 apply-entry.ts bashExecution case 消费的 PiEntry 结构）→
- *   applyEntryFrameWithOverlay 骨架（喂 per-session reducer state + overlay 投影 + commit，
+ *   applyEntryFrameWithOverlay 骨架（喂 per-session reducer state + overlay 派生视图 + commit，
  *   effects/entry-overlay.ts——[u6.2 D13 联动] 从本文件与 registry 三处 effect 内联收敛）。
  * - message.bashAborted（dispatcher.abortBash 兜底终态，msg-pipeline-debloat D4-3 独立帧化）：
  *   只清 executingBash（UI 中止态），无 pi 文件对应物不产 entry。
@@ -60,7 +60,7 @@ export interface ExecutingBash {
 /**
  * per-session 执行态分区（shallowRef 整体替换保响应式；读方 = 渲染层/测试）。
  * taste:allow-no-data-owner W24-EX-B（已落定非草稿）：bash 执行中瞬时反馈态（非任何数据源
- * 的缓存投影——唯一事实来源就是 bashStart/bashResult 帧本身，终态即清、不持久化）；
+ * 的缓存派生视图——唯一事实来源就是 bashStart/bashResult 帧本身，终态即清、不持久化）；
  * 生命周期挂接 store.disposeSession 统一 cleanup 编排（D3 closure，见文件头注释）。
  * 2026-09-14 内存审计复核：量级维持可控，维持不治裁决（ADR-0069，原审计文档已删除 git 可追溯）
  * （防翻案锚：断连残留裁决曾翻案过一次，重审条件见原审计文档 §2.5 executingBash 行，git 可追溯）
@@ -76,7 +76,7 @@ function setExecutingBash(sessionId: string, state: ExecutingBash): void {
   executingBashMap.value = new Map(executingBashMap.value).set(sessionId, state)
 }
 
-/** 清指定 session 执行态（幂等）。写方三腿 + store.disposeSession cleanup 编排共四处调用。 */
+/** 清指定 session 执行态（幂等）。写方三路径 + store.disposeSession cleanup 编排共四处调用。 */
 export function clearExecutingBash(sessionId: string): void {
   if (!executingBashMap.value.has(sessionId)) return
   const next = new Map(executingBashMap.value)
@@ -119,7 +119,7 @@ export const bashStartEffect: MessageEffectHandler = (_ctx: MessageEffectContext
 
 /**
  * message.bashResult：构造 bashExecution message entry → applyEntryFrame（reducer 唯一
- * 入流通道）+ overlay 投影 commit（customStart 同款范式）。
+ * 入流通道）+ overlay 派生视图 commit（customStart 同款范式）。
  *
  * dispatcher 的双分支（streaming 待落列延迟到 agent_settled / 空闲立即）保证本帧到达时序
  * 构造性等于 pi 落盘时序——本 handler 无论延迟或立即到达都走同一条 entry 化路径。
@@ -139,7 +139,7 @@ export const bashResultEffect: MessageEffectHandler = (ctx: MessageEffectContext
   // entry 形态对齐 apply-entry.ts bashExecution case 消费的 PiMessageEntry（探针 ①：
   // excludeFromContext bash 仍写 entry，与普通 bash 同路径——见文件头注释）。timestamp 双写
   // （entry ISO + message ms，同源）镜像 pi 持久化形态；id 客户端生成（customStart 同款
-  // 先例）：reducer 从 entry.id 派生，overlay 投影与 reducer state 同 id（重开侧为 pi
+  // 先例）：reducer 从 entry.id 派生，overlay 派生视图与 reducer state 同 id（重开侧为 pi
   // uuidv7 entry id——id 值异源属 W21 已裁决的 live/reload 差异类）。
   const entry: PiMessageEntry = {
     type: 'message',
@@ -158,7 +158,7 @@ export const bashResultEffect: MessageEffectHandler = (ctx: MessageEffectContext
       ...(fullOutputPath !== undefined && { fullOutputPath }),
     },
   }
-  // 权威喂入 + overlay 投影 + commit（骨架 helper）：bashExecution 投影不依赖前置
+  // 权威喂入 + overlay 派生视图 + commit（骨架 helper）：bashExecution 派生视图不依赖前置
   // state（apply-entry bashExecution case 无条件 append），空 state 派生即本条消息。
   applyEntryFrameWithOverlay(ctx, sid, entry)
   // 终态到达清执行态（与 bashStartEffect 置位成对）
@@ -201,7 +201,7 @@ export function markBashError(
   sessionId: string,
   errorText: string,
 ): void {
-  // 错误路径清执行态（写方成对保证的第三腿：bashStart 置 / bashResult 清 / 此处兜底清）
+  // 错误路径清执行态（写方成对保证的第三路径：bashStart 置 / bashResult 清 / 此处兜底清）
   clearExecutingBash(sessionId)
   const prev = messages.value.get(sessionId)?.value ?? []
   // [S7] 复用 findLastStreamingBashIndex（手动注入 streaming bash 消息的种子场景防御）。

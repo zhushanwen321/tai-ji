@@ -30,7 +30,7 @@
             class="h-auto flex-1 justify-start gap-2 rounded-sm px-2 text-neutral-fg hover:bg-surface"
             :title="isExpanded(p.id) ? t('settings.preset.collapse') : t('settings.preset.expand')"
           >
-            <!-- demo：chevron 12px，闭合 -90°（指右），展开归位（指下） -->
+            <!-- demo：chevron 12px，收窄 -90°（指右），展开归位（指下） -->
             <ChevronDown
               class="size-3 shrink-0 text-neutral-dim transition-transform duration-[var(--duration-fast)] ease-[var(--ease)]"
               :class="isExpanded(p.id) ? '' : '-rotate-90'"

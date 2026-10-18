@@ -3,7 +3,7 @@
  *
  * 后台预下载成功后记录已下载文件信息（version/assetName/filePath/downloadedAt + 完整性），
  * 用户点击更新时 update:install handler 以它为安装权威源：读出 release + filePath
- * 直接 installUpdate（版本守卫 + 完整性校验在读取路径完成，见 readPreloadedUpdateRaw）。
+ * 直接 installUpdate（版本检查 + 完整性校验在读取路径完成，见 readPreloadedUpdateRaw）。
  *
  * 清除时机：
  *   - 版本不匹配（pending.version 与本次要安装的 release.version 不一致）→ 清除
@@ -71,7 +71,7 @@ interface PreloadedUpdateData {
 }
 
 /**
- * 类型守卫：逐字段校验反序列化结果是否为合法的 PreloadedUpdateData。
+ * 类型检查：逐字段校验反序列化结果是否为合法的 PreloadedUpdateData。
  *
  * JSON.parse 结果类型为 any，直接 `as PreloadedUpdateData` 断言后 TS 不再保护，
  * 缺字段运行时拿到 undefined。这里用 unknown + typeof 逐字段校验，
@@ -215,7 +215,7 @@ export async function readPreloadedUpdate(release: LatestReleaseInfo): Promise<s
     return null
   }
 
-  // 类型守卫逐字段校验：缺字段/类型错误 → 视为损坏，清除后返回 null（见 S#5）
+  // 类型检查逐字段校验：缺字段/类型错误 → 视为损坏，清除后返回 null（见 S#5）
   if (!isPreloadedUpdateData(parsed)) {
     console.warn('[preloaded-update] invalid schema, clearing')
     clearPreloadedUpdate()
@@ -296,7 +296,7 @@ export async function readPreloadedUpdateRaw(
     return null
   }
 
-  // 类型守卫含 release 字段校验：旧格式（无 release）isPreloadedUpdateData 返回 false → 清除
+  // 类型检查含 release 字段校验：旧格式（无 release）isPreloadedUpdateData 返回 false → 清除
   if (!isPreloadedUpdateData(parsed)) {
     console.warn('[preloaded-update] invalid schema, clearing')
     clearPreloadedUpdate()

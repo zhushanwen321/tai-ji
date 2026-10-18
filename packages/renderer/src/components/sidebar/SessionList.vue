@@ -507,7 +507,7 @@ watch(escCount, () => {
 /**
  * 点击 folder 确认按钮外部时复位确认态（与 SessionItem.onClickOutside 同范式）。
  * folder 标题行处于 v-for 循环（多个 folder），不便逐项挂 onClickOutside ref，故用
- * 单一 window pointerdown 监听（pointerdown 先于 click，比 click 更早收口确认态）。
+ * 单一 window pointerdown 监听（pointerdown 先于 click，比 click 更早收尾确认态）。
  *
  * 同级 folder 按钮冲突规避：点击另一 folder 的删除按钮时，该按钮的 @click.stop 会切
  * folderConfirmingCwd 到新 cwd。若此处无条件复位会覆盖新值。故只在「点击目标不在任何

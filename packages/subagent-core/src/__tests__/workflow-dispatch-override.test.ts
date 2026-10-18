@@ -12,8 +12,8 @@
 //     非复活路径既有盖章行为不变；
 //   - F1-17（D5 裁决）覆盖记账档位进执行通道：taskSpec.thinkingLevel = 解析链最终
 //     产物档位（记账档位在场 + 调用无显式档位；调用显式档位优先）；
-//   - U4a 事件管线闭合：journal 覆盖事件（model-override 帧）→ miss 重建
-//     （rebuildRunOverride 折叠 + 回填）→ 派发吃覆盖——真实调用链上的读面闭合。
+//   - U4a 事件管线补全：journal 覆盖事件（model-override 帧）→ miss 重建
+//     （rebuildRunOverride 折叠 + 回填）→ 派发吃覆盖——真实调用链上的读取侧补全。
 //
 // 替身形态：pi EnginePort = registerFakePiEngine（协议 seam 替身，FakeRun 捕获
 // task/ctx）；journal 经 setRunEventJournalDirForTest 注入 tmpdir（测试红线：不触
@@ -30,7 +30,7 @@ const { loggerMock } = vi.hoisted(() => ({
 }));
 vi.mock("../core/logger.ts", () => ({ getLogger: () => loggerMock }));
 
-// [F1-18] scanRunEvents 调用计数（透传包装，行为零变化）——负缓存用例的观测面：
+// [F1-18] scanRunEvents 调用计数（透传包装，行为零变化）——负缓存用例的观测点：
 // 派发链上该模块路径的全部消费者（覆盖重建 / 成员复用绑定）共享同一计数，按
 // runId 过滤归因。
 const { scanCalls } = vi.hoisted(() => ({ scanCalls: [] as string[] }));
@@ -330,10 +330,10 @@ describe("workflow 派发链覆盖消费（U4b）", () => {
   });
 
   // ============================================================
-  // 5. U4a 事件管线闭合（journal 覆盖事件 → miss 重建 → 派发消费）
+  // 5. U4a 事件管线补全（journal 覆盖事件 → miss 重建 → 派发消费）
   // ============================================================
 
-  it("U4a 事件管线闭合：journal 覆盖事件 → miss 重建（rebuildRunOverride 折叠 + 回填）→ 派发吃覆盖", async () => {
+  it("U4a 事件管线补全：journal 覆盖事件 → miss 重建（rebuildRunOverride 折叠 + 回填）→ 派发吃覆盖", async () => {
     const h = makeHarness();
     // 模拟 setModel run 级切换的持久化产物（生产写入面 = 壳 persistRunOverride 的
     // journal.append 同款帧）——内存表刻意不写（主 agent 重启后的 miss 形态）。
@@ -360,7 +360,7 @@ describe("workflow 派发链覆盖消费（U4b）", () => {
     run.settle({ content: "done" });
     await pending;
 
-    // 第二次派发（内存已回填）同样吃覆盖——重建只发生一次的回归面
+    // 第二次派发（内存已回填）同样吃覆盖——重建只发生一次的回归测试
     const pending2 = h.service.executeWorkflowAgent(baseOpts({ description: "research-b" }), "run-rebuild");
     await flush();
     const run2 = h.fake.runs[1]!;
@@ -396,7 +396,7 @@ describe("workflow 派发链覆盖消费（U4b）", () => {
     expect(run2.task.model).toBe("p/m");
   });
 
-  it("F1-18 修复回归：先派发登记负缓存 → resume 显式 model 落账+投影 → 重派吃覆盖（stale 登记不再遮蔽）", async () => {
+  it("F1-18 修复回归：先派发登记负缓存 → resume 显式 model 写入 journal 记录+派生视图 → 重派吃覆盖（stale 登记不再遮蔽）", async () => {
     const h = makeHarness();
     scanCalls.length = 0;
     const runId = "run-resume-ovr";
@@ -410,7 +410,7 @@ describe("workflow 派发链覆盖消费（U4b）", () => {
     const firstCount = countOf();
     expect(firstCount).toBeGreaterThanOrEqual(1);
 
-    // 2. run 中断 → resume 显式 model。投影回调接线复刻生产形态
+    // 2. run 中断 → resume 显式 model。派生视图回调接线复刻生产形态
     //    （extension makeDeps：deps 回调 → service.applyRunOverrideProjection）。
     //    journal seed 全走 journal.append 直写（resume-orchestration seedInterruptedRecord
     //    同款形态；不走 dispatchRunTrigger——它缓存 per-run 活体 fold checkpoint，
@@ -444,13 +444,13 @@ describe("workflow 派发链覆盖消费（U4b）", () => {
     };
     await resumeRun(runId, resumeDeps, { model: OVERRIDE_REF, now: () => Date.now() });
 
-    // 投影同步生效：内存表有值（重派走内存命中，不再依赖 journal 重扫）
+    // 派生视图同步生效：内存表有值（重派走内存命中，不再依赖 journal 重扫）
     expect(h.modelService.getModelOverride(runId)).toMatchObject({
       ref: { provider: OVERRIDE_MODEL.provider, modelId: OVERRIDE_MODEL.id },
     });
 
     // 3. 重派吃覆盖——修复前：负缓存 stale 登记短路 rebuild（内存 miss 通道）→
-    //    按旧模型 spawn，resume 模型意图静默丢失；修复后：投影写表 + 负缓存作废。
+    //    按旧模型 spawn，resume 模型意图静默丢失；修复后：派生视图写表 + 负缓存作废。
     const pending2 = h.service.executeWorkflowAgent(baseOpts({ description: "after-resume" }), runId);
     await flush();
     const run2 = h.fake.runs[1]!;
@@ -458,7 +458,7 @@ describe("workflow 派发链覆盖消费（U4b）", () => {
     run2.settle({ content: "done" });
     await pending2;
 
-    // 重派零重扫（内存命中优先）——锁定「写表 + 失效」投影形态，而非仅靠
+    // 重派零重扫（内存命中优先）——锁定「写表 + 失效」派生视图形态，而非仅靠
     // 负缓存失效触发 rebuild 重扫回填
     expect(countOf()).toBe(firstCount);
   });

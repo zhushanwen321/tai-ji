@@ -1,9 +1,9 @@
 /**
  * settings-lifecycle 迁移测试（W2 核心测试 1）。
  *
- * 覆盖：init 幂等守卫（两次 init 只注册一次订阅）；11 条订阅全部注册且 handler 写 store
+ * 覆盖：init 幂等检查（两次 init 只注册一次订阅）；11 条订阅全部注册且 handler 写 store
  * （fake transport 捕获订阅 + 手动触发 handler 验证 store 更新）；system 初始化从 storage
- * 读并 setSystem 持久化；refreshProviders 成功/失败分支；dispose 清订阅 + 守卫复位；
+ * 读并 setSystem 持久化；refreshProviders 成功/失败分支；dispose 清订阅 + 检查复位；
  * transport 未注入 fail-fast。
  */
 import type { ProviderId } from '@taiji/shared'
@@ -70,7 +70,7 @@ beforeEach(() => {
   lifecycle = createSettingsLifecycle()
 })
 
-describe('init 幂等守卫', () => {
+describe('init 幂等检查', () => {
   it('两次 init 只注册一次订阅（11 条 on* 各调一次）', async () => {
     provideBase()
     const { transport } = makeRecordingTransport()
@@ -91,7 +91,7 @@ describe('init 幂等守卫', () => {
     expect(transport.onTerminalConfig).toHaveBeenCalledTimes(1)
   })
 
-  it('dispose 后守卫复位，可重新 init 注册', async () => {
+  it('dispose 后检查复位，可重新 init 注册', async () => {
     provideBase()
     const { transport } = makeRecordingTransport()
     provideSettingsTransport(transport)
@@ -221,7 +221,7 @@ describe('refreshProviders 分支', () => {
     store.scopedModels.value = ['openai/gpt-4o']
     const { refreshProviders } = lifecycle
     await refreshProviders()
-    // undefined 不覆盖（对齐 onProviders handler 的守卫语义），由广播通道兜底推回
+    // undefined 不覆盖（对齐 onProviders handler 的检查语义），由广播通道兜底推回
     expect(store.scopedModels.value).toEqual(['openai/gpt-4o'])
   })
 
@@ -290,7 +290,7 @@ describe('transport 未注入 fail-fast', () => {
 describe('RD-3#10: init 失败可重试（成功后才置 initialized，失败回滚订阅）', () => {
   it('getSystem 抛错 → init reject + 订阅回滚 + initialized 不置位（换正常 storage 重试能重新注册）', async () => {
     // 自定义 storage：get 抛错（模拟配额/读取失败——原 void init() + initialized 先置位下
-    // 此失败仅 rejection 且被守卫吞为 no-op，主题停留默认且不可恢复）。
+    // 此失败仅 rejection 且被检查吞为 no-op，主题停留默认且不可恢复）。
     providePlatform({
       kind: 'mock',
       storage: {
@@ -309,20 +309,20 @@ describe('RD-3#10: init 失败可重试（成功后才置 initialized，失败�
     expect(transport.onProviders).toHaveBeenCalledTimes(1)
     expect(unsubs.every((u) => vi.mocked(u).mock.calls.length >= 1)).toBe(true)
 
-    // 关键：initialized 未置位 → 换正常 storage 后重试真正重新注册（不被守卫吞为 no-op）
+    // 关键：initialized 未置位 → 换正常 storage 后重试真正重新注册（不被检查吞为 no-op）
     const storage2 = new InMemoryStorage()
     providePlatform({ kind: 'mock', storage: storage2, webSocket: { create: () => ({}) as never } })
     await init() // 重试成功
     // onProviders 被调 2 次（首次失败回滚 + 重试注册）——证明失败可重试
     expect(transport.onProviders).toHaveBeenCalledTimes(2)
-    // 重试成功后 initialized 置位：第三次 init 为 no-op（幂等守卫恢复）
+    // 重试成功后 initialized 置位：第三次 init 为 no-op（幂等检查恢复）
     await init()
     expect(transport.onProviders).toHaveBeenCalledTimes(2)
   })
 })
 
 describe('A4: onProviders 推送 scopedModels 时 store 更新', () => {
-  it('A4: impl-token 存在（红阶段区分力守卫）', () => {
+  it('A4: impl-token 存在（红阶段区分力检查）', () => {
     expect(SCOPED_MODEL_CORE_TOKEN).toBe('scoped-model-core-v1')
   })
 

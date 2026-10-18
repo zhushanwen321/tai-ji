@@ -5,7 +5,7 @@
 //
 // journal 文件由宿主侧 EngineClient 的事件 journal 写入（core event-journal-wiring：
 // handle.data.eventsPath 回填是运行期落盘路径权威）。本模块读该 JSONL 文件、
-// 逐行解析 AgentEvent、经 SDK journal-replay 纯投影还原 SessionView。文件缺失 /
+// 逐行解析 AgentEvent、经 SDK journal-replay 纯派生视图还原 SessionView。文件缺失 /
 // 不可解析 / 无事件 → undefined（调用方落 ③级 outcome-only）。
 //
 // ①级 pi 原生读取（session-reconstructor）按 §2.7 保持 core 不随迁（deviations

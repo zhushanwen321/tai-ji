@@ -13,7 +13,7 @@
  * 读同一单例——两门面共享一份缓存，不存在第二份镜像。
  *
  * 🔒 三层架构：services 持有缓存策略（TTL/容量/prune），IO 经 IGitRepoResolver port 注入
- * （resolver 实例由组合根装配——本模块禁止 value import infra，C-comm-03 分层守卫）。
+ * （resolver 实例由组合根装配——本模块禁止 value import infra，C-comm-03 分层检查）。
  */
 import type { IGitRepoResolver, IGitRepoObserver, RepoObservation } from '../ports/git-info.js'
 
@@ -64,7 +64,7 @@ export class GitRepoObserver implements IGitRepoObserver {
 
   /**
    * 后置补挂 watch 联动回调（组合根装配顺序：init → 依赖单例的 gitStateService/trigger/watcher
-   * 依次构造 → 本方法绑定循环依赖的回调腿）。须在启动同步序列内、任何 readObservation 之前调用，
+   * 依次构造 → 本方法绑定循环依赖的回调路径）。须在启动同步序列内、任何 readObservation 之前调用，
    * 窗口内无缓存写入、无通知丢失。
    */
   setWatchCallbacks(cb: Pick<GitRepoObserverOptions, 'onObservationSet' | 'onPrune'>): void {

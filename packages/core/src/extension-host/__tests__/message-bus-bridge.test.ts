@@ -611,7 +611,7 @@ describe('MessageBusBridge', () => {
       expect(store.get('s2', 'a')!.badge).toBe('7')
     })
 
-    it('缺 sessionId 帧 → 守卫失败丢弃 + error，store 状态不变', () => {
+    it('缺 sessionId 帧 → 检查失败丢弃 + error，store 状态不变', () => {
       const { source, store, headerEvents, errors } = makeWired()
       source.emit({ type: 'plugin:headerActionUpdate', payload: { pluginId: 'p', headerActionId: 'a', badge: '3' } })
       expect(headerEvents).toHaveLength(0)

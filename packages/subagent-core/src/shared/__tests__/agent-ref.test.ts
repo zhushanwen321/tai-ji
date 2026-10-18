@@ -1,5 +1,5 @@
 /**
- * agent-ref 测试：displayAgentName 短名投影 + normalizeRef `..` 段拒绝（⛔2 样本集）
+ * agent-ref 测试：displayAgentName 短名映射 + normalizeRef `..` 段拒绝（⛔2 样本集）
  * + invalidAgentRefMessage 文案工厂 + normalizeWorkflowRef 三分裁决（sink 设计 U1）。
  *
  * 数据层不变式（displayAgentName 只服务显示出口）：非路径值原样返回。
@@ -70,7 +70,7 @@ describe("normalizeRef `..` 段拒绝（⛔2 样本集）", () => {
     expect(normalizeRef("/x/../y.md", ".md")).toBeNull();
   });
 
-  it("workflow .js 面：/x/../y.js 拒绝（normalizeRef 为 agent/workflow 双消费面）", () => {
+  it("workflow .js 面：/x/../y.js 拒绝（normalizeRef 为 agent/workflow 双消费方）", () => {
     expect(normalizeRef("/x/../y.js", ".js")).toBeNull();
   });
 

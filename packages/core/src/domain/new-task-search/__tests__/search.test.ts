@@ -1,7 +1,7 @@
 /**
  * useSearch 单测（IF6，core 版）。
  *
- * 覆盖 plan TC-1..TC-6 + DTO 映射：mock 轨 4 类型合并 + 符号占位、loadSeq 乱序守卫、
+ * 覆盖 plan TC-1..TC-6 + DTO 映射：mock 轨 4 类型合并 + 符号占位、loadSeq 乱序检查、
  * file 源直查、双源 reject 静默、WS 超时 race、截断、符号占位恒定。
  * （TC-3 stale cache teardown / TC-4 缓存命中用例随 fileSearchStore 缓存退役删除——缓存治理 U1 1-3。）
  * 端口全 vi.fn() 注入（SearchDeps），真实 createCommandStore。
@@ -124,7 +124,7 @@ describe('TC-1: mock 轨 4 类型合并 + 符号占位', () => {
   })
 })
 
-describe('TC-2: loadSeq 乱序守卫', () => {
+describe('TC-2: loadSeq 乱序检查', () => {
   it('第一次查询慢（永不 resolve），第二次快速：旧结果不覆盖第二次', async () => {
     const deps = makeDeps()
     const slowPending = new Promise<FileNode[]>(() => {}) // 永不 settle
@@ -307,7 +307,7 @@ describe('空查询：recents + 建议命令', () => {
   })
 })
 
-describe('mock 端口守卫（tc u3/D4-②：isMock=true 而未装配 searchMock 显式抛错）', () => {
+describe('mock 端口检查（tc u3/D4-②：isMock=true 而未装配 searchMock 显式抛错）', () => {
   it('isMock=true + searchMock 未装配 → reject 并指向恢复动作（不静默返空）', async () => {
     const deps = makeDeps()
     deps.ports.isMock = true

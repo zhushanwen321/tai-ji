@@ -13,7 +13,7 @@
 //      [U2 修正] 原注释自称「防止字段被误标可选后测试静默放行」——失准：必填→可选
 //      漂移不会在构造处爆红，可选项漂移的真正防线 = core 侧双向可赋值断言，见下
 //      describe 头注）；
-//   4. noop-safe 标记守卫：遍历 AGENT_EVENT_TYPE_NAMES 断言每个成员带
+//   4. noop-safe 标记检查：遍历 AGENT_EVENT_TYPE_NAMES 断言每个成员带
 //      `// noop-safe:` 一行标记（只查存在不查内容，缺标记 → console.warn）。
 //
 // 本文件不 import core（不变量：SDK 不得 import core；core 类型接入归 W2）。
@@ -72,17 +72,17 @@ type _NoTaskCtxDualWrite = AssertMutuallyAssignable<
 >;
 
 // C2-① 存量能力位逐一必填的类型面：任一**存量键**被误标可选即
-// REQUIRED_CAPABILITY_KEYS 投影形态不再可赋值给 Required 形态 → 红。
+// REQUIRED_CAPABILITY_KEYS 派生形态不再可赋值给 Required 形态 → 红。
 // [subagent-model-switch] 锁域从「整个 EngineCapabilities」收窄到 REQUIRED_CAPABILITY_KEYS
 // 11 键——首个可选新轴 setModel 进接口后，全接口 Required 形态必然含可选键（C2-②
-// 约定「新增轴走可选键」），锁意图（存量键必填）由词表投影承接；新增轴的缺省最弱档
+// 约定「新增轴走可选键」），锁意图（存量键必填）由词表派生承接；新增轴的缺省最弱档
 // 语义由 C2-② 用例守。
 type _CapabilityKeysAllRequired = AssertMutuallyAssignable<
   Pick<EngineCapabilities, (typeof REQUIRED_CAPABILITY_KEYS)[number]>,
   Required<Pick<EngineCapabilities, (typeof REQUIRED_CAPABILITY_KEYS)[number]>>
 >;
 
-// C2-① 存量 11 键名词表（逐一必填的运行时投影；新增轴走可选键，不进本词表）。
+// C2-① 存量 11 键名词表（逐一必填的运行时派生视图；新增轴走可选键，不进本词表）。
 const REQUIRED_CAPABILITY_KEYS = [
   "schemaEnforcement",
   "steer",
@@ -236,8 +236,8 @@ describe("契约类型运行时形状冒烟（必填缺失/多余字段在构造
   });
 });
 
-// ── 4. noop-safe 标记守卫（U2 事件词表锁）──
-describe("事件词表 noop-safe 标记守卫", () => {
+// ── 4. noop-safe 标记检查（U2 事件词表锁）──
+describe("事件词表 noop-safe 标记检查", () => {
   it("AGENT_EVENT_TYPE_NAMES 每个成员带 // noop-safe: 一行标记（缺标记 → warn；只查存在不查内容）", () => {
     const source = readFileSync(
       fileURLToPath(new URL("../protocol/contract-types.ts", import.meta.url)),
@@ -245,17 +245,17 @@ describe("事件词表 noop-safe 标记守卫", () => {
     );
     const start = source.indexOf("export const AGENT_EVENT_TYPE_NAMES");
     const end = source.indexOf("] as const", start);
-    // 搭接点硬红：词表声明形态变了守卫会空转，提取失败必须爆（防守卫假绿）
+    // 搭接点硬红：词表声明形态变了检查会空转，提取失败必须爆（防检查假绿）
     expect(start).toBeGreaterThan(-1);
     expect(end).toBeGreaterThan(start);
     const block = source.slice(start, end);
     for (const name of AGENT_EVENT_TYPE_NAMES) {
       const memberLine = block.split("\n").find((line) => line.includes(`"${name}"`));
       if (!memberLine?.includes("noop-safe:")) {
-        // no-op 安全性属运行时消费语义，不可静态判定——守卫只查标记存在不查内容
+        // no-op 安全性属运行时消费语义，不可静态判定——检查只查标记存在不查内容
         //（ADR-0071 宽容语义四行①的人工纪律最小机器化：缺标记告警可见，不阻断）
         console.warn(
-          `[noop-safe 守卫] 事件词表成员 "${name}" 缺 // noop-safe: 标记——补一行旧宿主 reducer 安全性论证`,
+          `[noop-safe 检查] 事件词表成员 "${name}" 缺 // noop-safe: 标记——补一行旧宿主 reducer 安全性论证`,
         );
       }
     }

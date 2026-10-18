@@ -16,7 +16,7 @@ import type {
   SessionRevokeMessageReply,
 } from '../protocol'
 import { TAIJI_NAV_COMMAND } from '../protocol'
-// 跨包可达性守卫：index.ts 对 protocol.ts 是显式 allowlist（非 export *），下游消费方
+// 跨包可达性检查：index.ts 对 protocol.ts 是显式 allowlist（非 export *），下游消费方
 // 只能经包根入口取符号——漏登记时值导入在解析期红、类型导入在 tsc 红。别名避免与
 // '../protocol' 直连导入同名冲突。
 import { TAIJI_NAV_COMMAND as TAIJI_NAV_COMMAND_FROM_ROOT } from '../index'

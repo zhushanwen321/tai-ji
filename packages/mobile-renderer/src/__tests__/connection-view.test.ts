@@ -76,7 +76,7 @@ describe('connection-view 转移优先级（三信号不变量）', () => {
     controller.handleAuthSuccess.mockClear()
   })
 
-  it('connected：切 connected + 置 hasConnectedOnce + 收口 submitting + 触发凭据处置', async () => {
+  it('connected：切 connected + 置 hasConnectedOnce + 收尾 submitting + 触发凭据处置', async () => {
     tokenSubmit.value = { submitting: true, error: null }
     await toCoreState('connected')
     expect(shellConnectionState.value).toBe('connected')
@@ -198,13 +198,13 @@ describe('submitRemoteToken 提交编排（TokenInputView 提交路径，含 cat
     expect(mockInitConnection).toHaveBeenCalledTimes(1)
   })
 
-  it('失败后可重试：再次提交走成功路径，submitting 置位且 error 清空（收口留给 auth 结果）', async () => {
+  it('失败后可重试：再次提交走成功路径，submitting 置位且 error 清空（收尾留给 auth 结果）', async () => {
     mockInitConnection.mockRejectedValueOnce(new Error('connect refused'))
     await submitRemoteToken('tok-retry')
     expect(tokenSubmit.value.error).toBe('failed')
 
     await submitRemoteToken('tok-retry')
-    // 编排提交成功 ≠ 提交中收口：auth 结果（connected / 拒绝）异步落地时才收口
+    // 编排提交成功 ≠ 提交中收尾：auth 结果（connected / 拒绝）异步落地时才收尾
     expect(tokenSubmit.value).toEqual({ submitting: true, error: null })
   })
 })

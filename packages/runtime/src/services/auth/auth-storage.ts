@@ -43,11 +43,11 @@ export interface OAuthCredential {
 export type Credential = ApiKeyCredential | OAuthCredential
 
 /**
- * auth.json 凭据写通道（A1-4 收口）：全 runtime 对 auth.json 的写入唯一入口是
+ * auth.json 凭据写通道（A1-4 收敛）：全 runtime 对 auth.json 的写入唯一入口是
  * AuthService.saveCredential（内部调 authStorage.set），其余消费方（setProvider 的
  * catalog apiKey / provider 导入 / legacy 迁移）经此窄接口注入，不再直接持有
  * authStorage.set——单一写入口保证与 pi 侧 refresh 写回的互斥语义可审计
- *（provider-config-quota 架构 §3.4 三 Store 收口表）。
+ *（provider-config-quota 架构 §3.4 三 Store 收敛表）。
  */
 export interface CredentialWriter {
   saveCredential(providerId: string, credential: Credential): Promise<void>

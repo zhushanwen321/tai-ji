@@ -85,7 +85,7 @@ export class GitChangeTrigger {
     if (changed) this.requestPush()
   }
 
-  /** dispose：撤销未放行的窗口收尾 timer（runtime shutdown 收口）。 */
+  /** dispose：撤销未放行的窗口收尾 timer（runtime shutdown 收尾）。 */
   dispose(): void {
     if (this.trailingTimer) {
       clearTimeout(this.trailingTimer)

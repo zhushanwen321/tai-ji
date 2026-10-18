@@ -7,7 +7,7 @@
 // taiji.subagentEngine.modelCatalog。
 //
 // 语义边界（deviation 登记，见任务书验收）：zcode 模型面是运行期动态的（桌面端
-// 登录态决定），构建期快照只服务于「静态目录消费面」（RemoteEngine.validateModel
+// 登录态决定），构建期快照只服务于「静态目录消费方」（RemoteEngine.validateModel
 // 的 manifest 判定）；dynamic 恒 true——快照未命中不构成同步拒（运行期
 // resolveZcodeModelRef 仍是权威）。无 v2 config（CI / 未登录宿主）→ models: []
 // 占位（显式空清单 = 生成器缺席态，运行期 listModels 诊断面给真值）。

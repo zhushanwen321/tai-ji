@@ -1,7 +1,7 @@
 /**
- * 过滤后台账行 → 列表渲染项派生（assistant 聚合行的子 block 内联展开）。
+ * 过滤后台清单行 → 列表渲染项派生（assistant 聚合行的子 block 内联展开）。
  *
- * 台账契约「一行 = 一个 entry」不变（core mapSessionTraceRows SSOT）：子 block 是单个
+ * 登记清单契约「一行 = 一个 entry」不变（core mapSessionTraceRows SSOT）：子 block 是单个
  * assistant entry 的 content 展开，纯展示层派生。selectedKey 寻址扩展为
  * `<entryKey>#block-<N>`（traceBlockKey 本文件 SSOT）——entry key 取值域（pi id /
  * `line:N` / `malformed:N` / `sidecar:session_end`）不含 `#`，分隔符无歧义。
@@ -23,7 +23,7 @@ export function parseTraceBlockKey(key: string): { parentKey: string; index: num
   return m ? { parentKey: m[1], index: Number(m[2]) } : null
 }
 
-/** 渲染项：台账行 / assistant 子 block 行 / context 分界行。 */
+/** 渲染项：登记清单行 / assistant 子 block 行 / context 分界行。 */
 export type TraceDisplayItem =
   | { kind: 'row'; row: TraceRow; expanded: boolean }
   | {

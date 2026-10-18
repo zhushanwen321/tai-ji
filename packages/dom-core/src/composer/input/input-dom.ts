@@ -183,7 +183,7 @@ export function getCaretLineRect(range: Range): DOMRect | null {
   }
 }
 
-// ── moveCaretVerticalOf 的编排 helper（按光标移动流程阶段拆分，主函数只留守卫与分派）──
+// ── moveCaretVerticalOf 的编排 helper（按光标移动流程阶段拆分，主函数只留检查与分派）──
 
 /**
  * 零 rect caret 解析结果：
@@ -214,7 +214,7 @@ interface CaretTargetContext {
 }
 
 /** 取选区首 Range；无选区（sel 缺失/rangeCount 0）或光标不在 el 内返回 null（调用方统一 noop）。
- *  命中时回传已窄化的 sel——window.getSelection() 的 null 性靠此处收口，调用方不再重复判空。 */
+ *  命中时回传已窄化的 sel——window.getSelection() 的 null 性靠此处收尾，调用方不再重复判空。 */
 function getInitialSelection(
   sel: Selection | null,
   el: HTMLElement,

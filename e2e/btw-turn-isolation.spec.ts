@@ -1,17 +1,17 @@
 /**
  * btw S7 真实进程 e2e —— 主 turn 进行中 btw 连发 3 条：主 turn 无 abort / 无 steer 注入 / 主流历史不含 btw 内容。
  *
- * 登记：E2E-BTW-01（docs/testing/e2e-map.json，R2 按改动面 on-diff，serial 空载串行，L3 真实 LLM）。
+ * 登记：E2E-BTW-01（docs/testing/e2e-map.json，R2 按改动范围 on-diff，serial 空载串行，L3 真实 LLM）。
  * 来源：btw-question 设计 §4 S7 负面场景 + impl-plan 验收计划 A7（L3 脚本）。
  * 通过标准（设计 S7 原文口径）：主 turn 全程无 abort / 无 steer 注入；主流历史不含 btw 内容（滚动检查）。
  *
  * 执行侧六要素（与 e2e-map E2E-BTW-01.note 同步维护，改其一须同 commit 改另一）：
  * - 触发：scope diff 命中（btw 会话生命周期 / 消息路由 / 协议帧 / vid 工厂 + spec 自身）时开发期
- *   按改动面执行；双凭证门 = env TAIJI_PI_LIVE=1 + 本机 provider 凭证（缺一 skip 不 fail——防
+ *   按改动范围执行；双凭证门 = env TAIJI_PI_LIVE=1 + 本机 provider 凭证（缺一 skip 不 fail——防
  *   `--project=electron` 全量扫跑烧 token，CI/PR/merge 门禁不跑本轨，AGENTS.md e2e 执行准则）。
  *   前置：real renderer bundle（`VITE_E2E=true pnpm run build:e2e`，不带 VITE_MOCK；mock 轨跑过
  *   之后必须重建——launch-real pre-flight 会 fail-fast 并给出重建命令）。
- * - 预算：test.setTimeout 300s；**主 turn 在飞窗口旋钮 = MAIN_PROMPT 里的 bash `sleep 40`**
+ * - 预算：test.setTimeout 300s；**主 turn 在途窗口旋钮 = MAIN_PROMPT 里的 bash `sleep 40`**
  *   （真实 LLM 三轮 btw 问答须在窗口内完成；窗口不足属预算校准 → 调 sleep 秒数，禁止放宽断言
  *   或膨胀其他预算换绿灯）；单事件等待 30-90s。
  * - 事件：listen WS 订阅 mainSid 与 btw vid 的 message.message_start / message.complete；负向监听
@@ -67,7 +67,7 @@ const SESSION_LABEL = 's7-btw-isolation'
 const MAIN_MARKER = 'TAIJI-S7-MAIN-7291'
 const BTW_MARKERS = ['TAIJI-S7-Q1-7291', 'TAIJI-S7-Q2-7291', 'TAIJI-S7-Q3-7291'] as const
 
-/** 主 turn 在飞窗口旋钮（六要素「预算」）：bash sleep 秒数，三轮 btw 问答须落其内。 */
+/** 主 turn 在途窗口旋钮（六要素「预算」）：bash sleep 秒数，三轮 btw 问答须落其内。 */
 const MAIN_TURN_SLEEP_S = 40
 const MAIN_PROMPT =
   `S7 main-turn task: first use the bash tool to run exactly \`sleep ${MAIN_TURN_SLEEP_S}\`, ` +
@@ -221,7 +221,7 @@ test('S7 (btw real): 主 turn 进行中 btw 连发 3 条 → 主 turn 无 abort 
   // 凭证双门（六要素「触发」）：真实 LLM 轨只在显式授权 + 本机凭证齐备时执行
   test.skip(
     process.env['TAIJI_PI_LIVE'] !== '1',
-    '真实 LLM 轨门：TAIJI_PI_LIVE=1 才执行（e2e 执行准则——开发期按改动面手动触发，CI/门禁不跑）',
+    '真实 LLM 轨门：TAIJI_PI_LIVE=1 才执行（e2e 执行准则——开发期按改动范围手动触发，CI/门禁不跑）',
   )
   const credSkip = realCredentialSkipReason()
   test.skip(credSkip !== null, credSkip ?? '')
@@ -309,11 +309,11 @@ test('S7 (btw real): 主 turn 进行中 btw 连发 3 条 → 主 turn 无 abort 
       ).toBe(true)
     }
 
-    // ── 断言 ①（窗口重叠）：第 3 轮完成时主 turn 仍在飞 ──
+    // ── 断言 ①（窗口重叠）：第 3 轮完成时主 turn 仍在途 ──
     const mainDoneBeforeRound3End = countOf(mainEvents, 'message.complete') > 0
     if (mainDoneBeforeRound3End) {
       writeDiag('s7-window.json', {
-        hint: `主 turn 在三轮完成前已结束——在飞窗口不足，调 MAIN_PROMPT sleep（当前 ${MAIN_TURN_SLEEP_S}s），不放宽断言`,
+        hint: `主 turn 在三轮完成前已结束——在途窗口不足，调 MAIN_PROMPT sleep（当前 ${MAIN_TURN_SLEEP_S}s），不放宽断言`,
         mainEventTypes: seenTypes(mainEvents),
         runtimeLogsTail: readRuntimeLogs(dataDir).slice(-3000),
       })
@@ -323,7 +323,7 @@ test('S7 (btw real): 主 turn 进行中 btw 连发 3 条 → 主 turn 无 abort 
       `第 3 轮 btw complete 时主 turn 已 message.complete——S7 窗口重叠断言失败（预算旋钮 = MAIN_TURN_SLEEP_S=${MAIN_TURN_SLEEP_S}）`,
     ).toBe(false)
 
-    // ── 断言 ①（无 abort）：等主 turn 正常收口 ──
+    // ── 断言 ①（无 abort）：等主 turn 正常收尾 ──
     const mainDone = await waitUntil(
       () => countOf(mainEvents, 'message.complete') > 0,
       MAIN_COMPLETE_TIMEOUT_MS,

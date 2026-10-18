@@ -7,7 +7,7 @@
 //
 // 闭包红线：本文件是 core 对上述包的唯一替代面——下方 Delivery*/DeliveryPortHandle
 // 结构化类型为手工转写（与 packages/session-delivery/src/types.ts、extensions/shared/
-// delivery-port/src/types.ts 逐字段结构兼容），禁止 import 两包（D9 闭包守卫扫描对象；
+// delivery-port/src/types.ts 逐字段结构兼容），禁止 import 两包（D9 闭包检查扫描对象；
 // core 是跨宿主包，extensions/shared 属 extensions 层，依赖方向 core ← extensions）。
 // 上游增删字段须手工同步本转写类型，漏同步由
 // extensions/universal/subagent-workflow/src/__tests__/notifier-receipt-anchor.test.ts
@@ -66,7 +66,7 @@ export interface DeliveryPort {
   isIdle(): boolean;
   /** 投递消息。返回受理回执或 void（扩展位——旧实现返回 void 兼容）。
    *  settle 契约（与 session-delivery DeliveryPort.send 一致）：返回 promise 时实现
-   *  必须 settle——内核按控制面粒度设有界兜底，超时按发送失败收口（迟到原请求与
+   *  必须 settle——内核按控制面粒度设有界兜底，超时按发送失败收尾（迟到原请求与
    *  重试可能构成重复投递，通道内判重由适配器/对端按裸标记负责）。 */
   send(
     msg: DeliveryMessage,
@@ -77,7 +77,7 @@ export interface DeliveryPort {
 }
 
 /**
- * 提交选项转写（与 delivery-port 的 DeliveryDeliverOptions / 内核提交选项消费面字段
+ * 提交选项转写（与 delivery-port 的 DeliveryDeliverOptions / 内核提交选项消费方字段
  * 结构兼容——手工转写契约，上游增删字段须同步本类型，漏同步由
  * extensions/universal/subagent-workflow/src/__tests__/notifier-receipt-anchor.test.ts
  * 行为锁拦截——typecheck 对删字段形态不亮红）。
@@ -102,7 +102,7 @@ export interface DeliverySubmitOptions {
   receiptAnchor?: "marker" | "acceptance";
 }
 
-/** 投递句柄（notifier 消费面：send / flush / dispose——诊断面 depth 等不入端口）。 */
+/** 投递句柄（notifier 消费方：send / flush / dispose——诊断 depth 等不入端口）。 */
 export interface DeliveryHandle {
   /** 唯一常规入口（合批窗口 + 空闲零延迟立即投）。 */
   send(msg: DeliveryMessage, opts?: DeliverySubmitOptions): void;
@@ -124,7 +124,7 @@ export interface CountActivePortOptions {
   currentSessionId?: string;
 }
 
-// ─── 投递端口槽消费面（pi 半区 DeliveryPort 的 core 转写）─────────────────
+// ─── 投递端口槽消费方（pi 半区 DeliveryPort 的 core 转写）─────────────────
 
 /**
  * deliver 受理结果转写（与 pi-delivery-port 的 DeliveryDeliverResult 结构兼容）：
@@ -136,7 +136,7 @@ export type PortDeliverResult =
   | { kind: "swallowed"; reason: string }
   | { kind: "rejected"; reason: string };
 
-/** deliver envelope 转写（与 pi-delivery-port 的 DeliveryEnvelope 消费面结构兼容）。 */
+/** deliver envelope 转写（与 pi-delivery-port 的 DeliveryEnvelope 消费方结构兼容）。 */
 export interface PortDeliverEnvelope {
   /** custom 载荷（原样透传；deliveryId 由端口在注入前统一写入 details）。 */
   payload: DeliveryCustomPayload;
@@ -151,8 +151,8 @@ export interface PortDeliverOptions {
 }
 
 /**
- * 投递端口句柄转写（notifier 消费面：deliver / flush——recover / metrics / dispose
- * 等面 notifier 零触达，不入转写；与 pi-delivery-port 的 DeliveryPortHandle 结构兼容）。
+ * 投递端口句柄转写（notifier 消费方：deliver / flush——recover / metrics / dispose
+ * 等方面 notifier 零触达，不入转写；与 pi-delivery-port 的 DeliveryPortHandle 结构兼容）。
  */
 export interface DeliveryPortHandle {
   /**
@@ -167,7 +167,7 @@ export interface DeliveryPortHandle {
 
 export interface NotifyDomainPorts {
   /** pending 活跃计数（pi 会话 entries 中 register − unregister 差集的数值）。
-   *  契约为 number 而非 pi 侧 CountActiveResult：core 消费面只读 count，契约面最窄；
+   *  契约为 number 而非 pi 侧 CountActiveResult：core 消费方只读 count，契约范围最窄；
    *  pi 壳注入时拆 `countActiveFromEntries(entries).count`。
    *  [F1] 第二参为可选过滤基准（CountActivePortOptions）——core 消费方（后代判定
    *  读侧）持有「被读 entries 所属 session」概念时必须传入，使跨 session 残留不进

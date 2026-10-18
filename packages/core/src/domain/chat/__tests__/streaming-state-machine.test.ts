@@ -95,14 +95,14 @@ describe('applySubagentStreamDelta', () => {
 })
 
 describe('finalizeSubagentStream', () => {
-  it('TC3 收口 + sealed 幂等：streaming 翻 complete，重复调 no-op', () => {
+  it('TC3 收尾 + sealed 幂等：streaming 翻 complete，重复调 no-op', () => {
     const { sm, messages } = makeMachine()
     messages.value = new Map([['subagent:x', shallowRef([streamingAssistant('a1')])]])
 
     sm.finalizeSubagentStream('subagent:x')
     expect(messages.value.get('subagent:x')!.value[0].status).toBe('complete')
 
-    // 重复收口：sealed 守卫，不再变化（引用稳定）
+    // 重复收尾：sealed 检查，不再变化（引用稳定）
     const snapshot = messages.value.get('subagent:x')!.value[0]
     sm.finalizeSubagentStream('subagent:x')
     expect(messages.value.get('subagent:x')!.value[0]).toBe(snapshot)
@@ -117,14 +117,14 @@ describe('finalizeSubagentStream', () => {
     expect(messages.value.get('subagent:x')!.value[0].status).toBe('complete')
   })
 
-  it('TC3c 收口写入产出结束时刻 endedAt（turn 聚合口径时间轴右端）；已有值不覆写', () => {
+  it('TC3c 收尾写入产出结束时刻 endedAt（turn 聚合口径时间轴右端）；已有值不覆写', () => {
     const { sm, messages } = makeMachine()
     messages.value = new Map([['subagent:x', shallowRef([streamingAssistant('a1')])]])
 
     sm.finalizeSubagentStream('subagent:x')
     expect(messages.value.get('subagent:x')!.value[0].endedAt).toBeTypeOf('number')
 
-    // 已有值不覆写（迟到收口不覆写真实终点）
+    // 已有值不覆写（迟到收尾不覆写真实终点）
     const second = makeMachine()
     second.messages.value = new Map([['subagent:y', shallowRef([streamingAssistant('a1', { endedAt: 1234 })])]])
     second.sm.finalizeSubagentStream('subagent:y')
@@ -133,7 +133,7 @@ describe('finalizeSubagentStream', () => {
 })
 
 describe('finalizeMessages', () => {
-  it('TC4 error 收口：streaming assistant → error + errorText 写 msg.error（content 不动）；running toolCall → error + endTime；bash 跳过', () => {
+  it('TC4 error 收尾：streaming assistant → error + errorText 写 msg.error（content 不动）；running toolCall → error + endTime；bash 跳过', () => {
     const { sm, messages } = makeMachine()
     const assistant = streamingAssistant('a1', { content: 'partial', toolCalls: [runningToolCall('tc1')] })
     const bash = bashMsg('b1')
@@ -175,7 +175,7 @@ describe('finalizeMessages', () => {
     expect(after.error).toBeUndefined()
   })
 
-  it('TC4b 已终态 message 只收口 toolCall；无 running toolCall 引用稳定', () => {
+  it('TC4b 已终态 message 只收尾 toolCall；无 running toolCall 引用稳定', () => {
     const { sm, messages } = makeMachine()
     const completeWithRunningTc = streamingAssistant('a1', { status: 'complete', toolCalls: [runningToolCall('tc1')] })
     const completeNoTc = streamingAssistant('a2', { status: 'complete' })
@@ -189,7 +189,7 @@ describe('finalizeMessages', () => {
     expect(after[1]).toBe(completeNoTc) // 无 running toolCall 保持引用稳定
   })
 
-  it('TC4c stream_error 收口：streaming → error；toolCall → error + endTime', () => {
+  it('TC4c stream_error 收尾：streaming → error；toolCall → error + endTime', () => {
     const { sm, messages } = makeMachine()
     const assistant = streamingAssistant('a1', { content: 'partial', toolCalls: [runningToolCall('tc1')] })
     messages.value = new Map([['s1', shallowRef([assistant])]])
@@ -202,7 +202,7 @@ describe('finalizeMessages', () => {
     expect(after.toolCalls![0].endTime).toBeTypeOf('number') // 非 normal/aborted 设 endTime
   })
 
-  it('TC4d disconnect 收口：streaming → error；toolCall → end_not_received + endTime（restart 同族）', () => {
+  it('TC4d disconnect 收尾：streaming → error；toolCall → end_not_received + endTime（restart 同族）', () => {
     const { sm, messages } = makeMachine()
     const assistant = streamingAssistant('a1', { content: 'partial', toolCalls: [runningToolCall('tc1')] })
     messages.value = new Map([['s1', shallowRef([assistant])]])
@@ -215,17 +215,17 @@ describe('finalizeMessages', () => {
     expect(after.toolCalls![0].endTime).toBeTypeOf('number')
   })
 
-  // [M2 error-visibility 不变量] 凡 streaming 收口产出 error 终态的 assistant 消息，
+  // [M2 error-visibility 不变量] 凡 streaming 收尾口产出 error 终态的 assistant 消息，
   // error 字段必非空——渲染层以「error 有无」区分纯 error（整条 danger）与追加形态
-  // （正文原色 + error 独立 danger 行）。errorText 缺失路径（断连 / 重启收口
+  // （正文原色 + error 独立 danger 行）。errorText 缺失路径（断连 / 重启收尾
   // 不带文案）若无兜底，崩溃前正常正文会被误判纯 error 整条染红。
-  it('TC4e errorText 缺失的 error 类收口：error 字段写 reason 兜底文案（追加形态不变量）', () => {
+  it('TC4e errorText 缺失的 error 类收尾：error 字段写 reason 兜底文案（追加形态不变量）', () => {
     const { sm, messages } = makeMachine()
     const assistant = streamingAssistant('a1', { content: 'partial' })
     messages.value = new Map([['s1', shallowRef([assistant])]])
 
     for (const reason of ['disconnect', 'restart'] as const) {
-      // 重置回 streaming 再收口（sealed 守卫：终态消息二次 finalize 不重写）
+      // 重置回 streaming 再收尾（sealed 检查：终态消息二次 finalize 不重写）
       messages.value = new Map([['s1', shallowRef([streamingAssistant('a1', { content: 'partial' })])]])
       sm.finalizeMessages('s1', reason)
       const after = messages.value.get('s1')!.value[0]
@@ -247,7 +247,7 @@ describe('finalizeMessages', () => {
     expect(after.error).toBe('会话出错，回复已中断。')
   })
 
-  it('TC4g 非 error reason 不写兜底：normal 收口 error 字段保持 undefined', () => {
+  it('TC4g 非 error reason 不写兜底：normal 收尾 error 字段保持 undefined', () => {
     const { sm, messages } = makeMachine()
     messages.value = new Map([['s1', shallowRef([streamingAssistant('a1', { content: 'full' })])]])
 
@@ -258,7 +258,7 @@ describe('finalizeMessages', () => {
     expect(after.error).toBeUndefined()
   })
 
-  it('TC4h 收口写入产出结束时刻 endedAt（turn 聚合时间轴右端）；已有值不覆写（不迟到覆写真实终点）', () => {
+  it('TC4h 收尾写入产出结束时刻 endedAt（turn 聚合时间轴右端）；已有值不覆写（不迟到覆写真实终点）', () => {
     const { sm, messages } = makeMachine()
     messages.value = new Map([['s1', shallowRef([
       streamingAssistant('a1'),
@@ -272,7 +272,7 @@ describe('finalizeMessages', () => {
     expect(after[1].endedAt).toBe(777)
   })
 
-  it('TC5 normal 收口：streaming → complete；toolCall → end_not_received 且不设 endTime；无 errorText 不追加', () => {
+  it('TC5 normal 收尾：streaming → complete；toolCall → end_not_received 且不设 endTime；无 errorText 不追加', () => {
     const { sm, messages } = makeMachine()
     const assistant = streamingAssistant('a1', { content: 'full', toolCalls: [runningToolCall('tc1')] })
     messages.value = new Map([['s1', shallowRef([assistant])]])
@@ -437,7 +437,7 @@ describe('applySubagentStreamChunk（§4.3 chunk 处理优先序）', () => {
 
     const after = messages.value.get(VID)!.value
     expect(after).toHaveLength(2)
-    expect(after[0].status).toBe('complete') // 旧消息实体就地收口（终态由 entry 链权威覆盖）
+    expect(after[0].status).toBe('complete') // 旧消息实体就地收尾（终态由 entry 链权威覆盖）
     expect(after[0].content).toBe('a')
     expect(after[1].status).toBe('streaming')
     expect(after[1].content).toBe('b') // 新消息增量并入新实体

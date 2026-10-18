@@ -17,7 +17,7 @@
  * - PV6 trace 输入面保留（D5/V4，一致性审查 R-U1）：trace 视图 → TraceView 替换对话流
  *   位置 + Composer 保留；trace + 表单请求 → overlay 承接应答
  * - PV7 respawn 过渡态（T4）：dead + respawnPending → 过渡条 + Composer
- *   保持（dead 占位被抑制）；收口后回落 dead 占位
+ *   保持（dead 占位被抑制）；收尾后回落 dead 占位
  *
  * mock 策略：vi.hoisted 模块级可变对象（对齐 ask-user-inline.test.ts / landing.test.ts
  * 既有基建）——useExtensionUI（ask-user 请求队列）与 useNewTaskFlow（flow 单例态）
@@ -245,7 +245,7 @@ describe('PV7: respawn 过渡态（T4：恢复窗口不进终态页）', () => {
     expect(wrapper.text()).not.toContain('会话进程已退出')
   })
 
-  it('过渡态收口（clearRespawnPending）→ 回落 dead 占位（熔断/超时/手动收口后的终态回归）', async () => {
+  it('过渡态收尾（clearRespawnPending）→ 回落 dead 占位（熔断/超时/手动收尾后的终态回归）', async () => {
     const sessionStore = useSessionStore()
     const chat = useChatStore()
     sessionStore.appendSession(makeSession('s1'))
@@ -262,11 +262,11 @@ describe('PV7: respawn 过渡态（T4：恢复窗口不进终态页）', () => {
     expect(wrapper.find('[data-testid="composer-box"]').exists()).toBe(false)
   })
 
-  it('message_start 收口语义（恢复窗口发消息的 join 路径：dead 复位 + T4 条）→ 对话流恢复，不进终态页', async () => {
+  it('message_start 收尾语义（恢复窗口发消息的 join 路径：dead 复位 + T4 条）→ 对话流恢复，不进终态页', async () => {
     // [T4 回流修复] Gate B A7 缺陷：恢复窗口内发消息经 runtime 惰性恢复
-    // join 完成，无 session.restored 帧 → 此前过渡态无收口信号，超时回落 dead 终态页。
-    // 修复后 useChat 的 message_start 收口 gate 执行同构三件套（clear + T4 条 + revive），
-    // 本用例锁定收口后的用户可见 DOM 终态（gate 链路见 respawn-pending.test.ts ⑧）。
+    // join 完成，无 session.restored 帧 → 此前过渡态无收尾信号，超时回落 dead 终态页。
+    // 修复后 useChat 的 message_start 收尾 gate 执行同构三件套（clear + T4 条 + revive），
+    // 本用例锁定收尾后的用户可见 DOM 终态（gate 链路见 respawn-pending.test.ts ⑧）。
     const sessionStore = useSessionStore()
     const chat = useChatStore()
     sessionStore.appendSession(makeSession('s1'))

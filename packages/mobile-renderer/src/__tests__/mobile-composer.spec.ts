@@ -1,5 +1,5 @@
 // MobileComposer 测试（remote-use U1.4c：中断键/发送键——发送正路 segments 形状 +
-// 空输入守卫；图片粘贴降级链以真实 paste 事件驱动，断言落 DOM 观察面）。
+// 空输入检查；图片粘贴降级链以真实 paste 事件驱动，断言落 DOM 观察面）。
 //
 // app-runtime 模块级 mock：隔离 core WS 依赖（测试禁触网络），直接断言组件层对
 // useChat.abort / useChat.send 的调用接线。MobileMessageStream 的 provide 链测试
@@ -126,7 +126,7 @@ describe('图片粘贴降级链（真实 paste 事件驱动）', () => {
     const dt = new DataTransfer()
     dt.items.add(file)
 
-    // 同步阶段：仅当剪贴板图片 item 产出 File 后才插「粘贴中」占位 badge（dom-core 守卫）
+    // 同步阶段：仅当剪贴板图片 item 产出 File 后才插「粘贴中」占位 badge（dom-core 检查）
     dispatchPaste(editable.element, dt)
     const pending = wrapper.find('.image-chip')
     expect(pending.exists()).toBe(true)

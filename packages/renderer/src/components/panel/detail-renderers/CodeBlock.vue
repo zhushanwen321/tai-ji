@@ -9,7 +9,7 @@
   taste-lint vue/no-v-html。
 
   首次加载 shiki 异步：加载中显示空（极短，单例建好后同步）。props.code 变化重新高亮，
-  用 renderSeq 序号守卫防旧渲染覆盖新内容（与 MarkdownRenderer 同模式）。
+  用 renderSeq 序号检查防旧渲染覆盖新内容（与 MarkdownRenderer 同模式）。
 -->
 <template>
   <!-- shiki codeToHtml 转义所有非 token 文本（只发 scoped span），输出 XSS 安全，与 MarkdownRenderer 同论证。
@@ -32,7 +32,7 @@
 /**
  * 代码高亮渲染器。
  * - props.code 变化（切文件）触发重新高亮；highlightCode 复用 shiki 单例。
- * - 序号守卫：异步高亮完成时若 code 已变，丢弃旧结果（防覆盖）。
+ * - 序号检查：异步高亮完成时若 code 已变，丢弃旧结果（防覆盖）。
  */
 import { ref, watch } from 'vue'
 import { highlightCode } from '@taiji/ui/features/chat/markdown'
@@ -56,7 +56,7 @@ watch(
     }
     const seq = ++renderSeq
     const rendered = await highlightCode(code, lang)
-    // 序号守卫：仅采纳最新一次结果
+    // 序号检查：仅采纳最新一次结果
     if (seq === renderSeq) html.value = rendered
   },
   { immediate: true },

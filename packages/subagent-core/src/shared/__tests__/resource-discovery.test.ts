@@ -735,8 +735,8 @@ describe("manifestCache（async readPackageManifest）", () => {
     expect(asyncReadCount()).toBe(first); // 合法解析 + 无 manifest → undefined 条目入缓存
   });
 
-  // [review 修复] 非对象 JSON 结构守卫：JSON.parse 对 "42" / '"str"' / "null" 等
-  // 合法 JSON 产出非对象值，parsePiField 显式守卫归 undefined（「无 manifest」语义），
+  // [review 修复] 非对象 JSON 结构检查：JSON.parse 对 "42" / '"str"' / "null" 等
+  // 合法 JSON 产出非对象值，parsePiField 显式检查归 undefined（「无 manifest」语义），
   // 不依赖 primitive 装箱 / null 抛 TypeError 落 catch 的巧合。
   it("非对象 JSON（42 / null / string / pi 字段非对象或数组）→ undefined 不抛，按合法解析结果缓存", async () => {
     const cases: Array<{ raw: string; label: string }> = [
@@ -744,7 +744,7 @@ describe("manifestCache（async readPackageManifest）", () => {
       { raw: "null", label: "null" },
       { raw: '"just-a-string"', label: "string" },
       { raw: '{"name":"p","pi":42}', label: "pi-field-not-object" },
-      // 数组能骗过 typeof "object" 守卫（装箱对象）——非合法 pi 容器，显式归 undefined
+      // 数组能骗过 typeof "object" 检查（装箱对象）——非合法 pi 容器，显式归 undefined
       { raw: '{"name":"p","pi":[]}', label: "pi-field-array" },
     ];
     // 每 case 独立子目录（缓存 key = package.json 绝对路径），互不命中；

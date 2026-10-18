@@ -44,7 +44,7 @@ import { deriveToolResultOutputs, isLooseRecord, isPlainRecord, parseDiffStat } 
  * BeforeSend hook 改写后可能不在文本尾）。
  *
  * 消费方（两处显示剥除，一律走下方全局派生形态 DEFER_FLUSH_MARKER_RE_GLOBAL，禁复制
- * 字面量）：① convertMessageBody user 投影剥标记（下方，live 帧 / reload 重放同点——
+ * 字面量）：① convertMessageBody user 派生视图剥标记（下方，live 帧 / reload 重放同点——
  * 显示层不暴露实现标记，且剥后基线文本 = confirmDelivery overlay 文本，
  * mergeBaselineWithLive 文本去重命中不双计）；② effects/user-delivery 纯文本降级分支
  * 的整帧剥标记入流。
@@ -64,7 +64,7 @@ export const DEFER_FLUSH_MARKER_RE_GLOBAL = new RegExp(
  * pi 原生 skill block 正则（存量格式，pi `_expandSkillCommand` 展开产物）：
  * `<skill name="..." location="..." ...>…</skill>`，紧随的空行分隔符一并吞入匹配区间——
  * pi 固定以 `block + "\n\n" + args` 拼接，吞掉 `\n\n` 后切片产出的 args 文本不带前导换行，
- * 与升级前 `match[3].trim()` 语义产出等价（场景 4⑤ 存量回归）。非贪婪匹配首个闭合标签
+ * 与升级前 `match[3].trim()` 语义产出等价（场景 4⑤ 存量回归）。非贪婪匹配首个结束标签
  * + g 标志全局迭代（多 block 全还原——升级前「只取首个」是捕获组锚定 `$` 的副产物，
  * 非契约）。骨架与升级前正则一致（属性 name → 可选 location → 其余属性透吃）。
  */
@@ -79,7 +79,7 @@ function toSkillSegment(name: string, location: string | undefined): Segment {
 
 /**
  * [R4 D7 三形态①] 剥除文本中全部 `<taiji-skill-data>...</taiji-skill-data>` 包裹块
- * （任意位置，findSkillDataBlockRange 循环切片——非贪婪语义止于首个闭合标签，逐块
+ * （任意位置，findSkillDataBlockRange 循环切片——非贪婪语义止于首个结束标签，逐块
  * 消费剩余后缀直至无完整块）。块是注入器产物非用户内容：块内内容整体丢弃、不参与
  * 后续标记解析（正常形态块内 `<skill>` 全文 / 降级形态块内标记清单 + 指引行均不
  * 还原）；块外正文全部保留（块与正文间的分隔空白属块外正文，逐字保留不 trim）。
@@ -126,7 +126,7 @@ function stripSkillDataBlocks(text: string): { body: string; stripped: boolean }
  * 优先级实现（apply-entry 测试锁定）：① 先剥块改写扫描域；降级块先扫描并整体占用
  * 区间（含块内嵌套标记与紧随指引行——指引行是块的组成部分，不作正文残留）；单标记
  * 与 pi block 后扫描，起点落入已占用区间的命中跳过。pi block 与两类 taiji 标记的正则
- * 前缀互不重叠（`<skill` vs `<taiji-skill`），互不误命中；未闭合的 `<taiji-skill-data>`
+ * 前缀互不重叠（`<skill` vs `<taiji-skill`），互不误命中；未封口的 `<taiji-skill-data>`
  * 残段（无完整块）不匹配任何标记正则，按 D8 透传语义保留为正文。
  */
 function parseSkillBlock(text: string): Segment[] | null {
@@ -209,7 +209,7 @@ function extractHistoryFileChanges(toolCalls: ToolCall[]): FileChange[] {
 
 // ── message entry 体 → Message（迁移自 convertSinglePiMessage）───────────────
 
-/** message entry 的 content 数组元素（宽形态，读取点运行时守卫）。 */
+/** message entry 的 content 数组元素（宽形态，读取点运行时检查）。 */
 interface PiContentPart {
   type: string
   text?: string
@@ -390,7 +390,7 @@ export function convertMessageBody(
   // text + skill + text + …（标记前后正文全保留），无命中时 textToSegments 纯 text。
   if (body.role === 'user' && acc.textContent) {
     // [簇 A2] 先剥 defer flush 确认标记再反解析：标记只服务 user-delivery ①a 身份确认
-    //（直接读 pi 原始 entry，不经本投影），显示层不暴露。live 帧与 reload 重放同经本点
+    //（直接读 pi 原始 entry，不经本派生视图），显示层不暴露。live 帧与 reload 重放同经本点
     // → live ≡ reload 构造性保持；剥后基线文本 = 条目原文 = confirmDelivery 的 appendUser
     // overlay 文本 → mergeBaselineWithLive 文本去重命中（不剥则带标记基线 vs 无标记 overlay
     // 失配，同一条消息双条显示）。skill 块解析在剥后进行——标记在文本尾附加，不影响块区间。
@@ -423,9 +423,9 @@ export function computeToolCallFill(body: PiMessageBody): {
 } {
   // [D6-⑧] 累积态条目级截断：live（applyEntryFrame）与 reload（replayEntries）共用本点，
   // 同函数同阈值——D3 代价 C 根治（非六类工具大结果两路径形态一致）。
-  // [perf] 归一 + 截断走共享派生（apply-entry-utils）：live tool_call_end 帧中 reducer 腿
-  //（applyEntryFrame）先于 overlay 腿（registry deriveToolCallEndOverlay）喂入，在此首算
-  // 并记入引用 memo；overlay 腿持同一 entry.message 引用，命中 memo——单帧同一 body 的
+  // [perf] 归一 + 截断走共享派生（apply-entry-utils）：live tool_call_end 帧中 reducer 路径
+  //（applyEntryFrame）先于 overlay 路径（registry deriveToolCallEndOverlay）喂入，在此首算
+  // 并记入引用 memo；overlay 路径持同一 entry.message 引用，命中 memo——单帧同一 body 的
   // 全文归一/encode 从两份降为一份。replay 路径各 body 引用互不相同恒 miss，产物与
   // inline 自算逐字节一致。
   // outputRaw 与 output 同源（stripAnsi 前/后），任一超限即双双截断（保持两字段头部对齐），
@@ -446,7 +446,7 @@ export function computeToolCallFill(body: PiMessageBody): {
     outputTruncated: outputs.output.truncated || (outputs.outputRaw?.truncated ?? false),
     // [chat-flow-timestamp U1] endTime 回填源 = toolResult body.timestamp；缺失/非 number
     // 不设字段（旧数据/畸形 body 无耗时语义——设计 §2.5 数据缺口语义「只显时刻不显耗时」）。
-    // typeof 运行时守卫：pi JSONL 是外部宽形态数据（usageField 同款防御模式）。
+    // typeof 运行时检查：pi JSONL 是外部宽形态数据（usageField 同款防御模式）。
     ...(typeof body.timestamp === 'number' && { endTime: body.timestamp }),
   }
 }

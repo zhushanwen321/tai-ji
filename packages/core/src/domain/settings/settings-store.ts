@@ -54,7 +54,7 @@ export function createSettingsStore() {
    * scopedModels 白名单非空时此处仅含白名单内模型（runtime aggregateModelsWithScoped）。
    * 其他「需要选模型」的场景（如 extension 模型配置，extension 解析走 pi 全量
    * modelRegistry 与 scoped 无关）应从 providers 派生全量候选，禁止借用本列表
-   * （useAuthedModelGroups 即为此范式，守卫测试见其 __tests__）。
+   * （useAuthedModelGroups 即为此范式，测试见其 __tests__）。
    */
   const models = ref<ModelInfo[]>([])
   const skills = ref<SkillInfo[]>([])
@@ -147,7 +147,7 @@ export function createSettingsStore() {
 
   /**
    * 写入 providers 权威快照（广播 / getProviders reply 推回）。
-   * scoped 守卫（reply + 广播双通道同一语义）：undefined = 通道未携带（旧 runtime），
+   * scoped 检查（reply + 广播双通道同一语义）：undefined = 通道未携带（旧 runtime），
    * 不覆盖已有值，由 config.providers 广播兜底推回。
    */
   function setProviders(next: ProviderInfo[], scoped?: string[]): void {

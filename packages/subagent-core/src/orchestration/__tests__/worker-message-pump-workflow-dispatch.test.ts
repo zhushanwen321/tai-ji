@@ -16,8 +16,8 @@
 //      trace node 终态摘要保真（node.result 来自 executeWorkflowAgent 的
 //      AgentResult 出口，D2「node 保留 result」）。
 //   3. 成功即终态化（D7 联动回归）：settle 后 record closed/gc + record 级
-//      pending:unregister（archive 出内存，run 视图经磁盘面回查终态）。
-//   4. 注入面回退：未注入 workflowAgentDispatch（旧测试 deps）→ deps.runner.run
+//      pending:unregister（archive 出内存，run 视图经磁盘内容回查终态）。
+//   4. 注入路径回退：未注入 workflowAgentDispatch（旧测试 deps）→ deps.runner.run
 //      被调（SAR 旧编排路径，W4 归位；两路互不串扰）。
 //
 // 替身形态与测试红线对齐 W2 workflow-agent-dispatch.test.ts：TAIJI_AGENT_DATA_DIR
@@ -171,9 +171,9 @@ describe("pump → executeWorkflowAgent 端到端", () => {
     await flush();
 
     // 1. dispatch 在途：真实 record 在 store（origin/parentRunId——views store 订阅的数据
-    //    前提）。经 views 同款查询面（queries.collectRecordsByParentRunId）断言命中，
+    //    前提）。经 views 同款查询路径（queries.collectRecordsByParentRunId）断言命中，
     //    再经 getMutable 拿真 record 验 originFields（listRunning 是 RecordSnapshot
-    //    轻投影，无 origin 字段——勿用）。
+    //    轻量派生视图，无 origin 字段——勿用）。
     const found = h.service.queries.collectRecordsByParentRunId("wf-pump-e2e-1", 100);
     expect(found).toHaveLength(1);
     expect(found[0]!.origin).toBe("workflow");

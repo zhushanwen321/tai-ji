@@ -4,7 +4,7 @@
  *
  * IF5 契约 + ES2：
  * ① 已 subscribed 且 fromSeq undefined → 幂等直接 return（subscribe 不被调用）
- * ② fromSeq 显式传入 → 跳过守卫发 RPC（reconcile backfill）
+ * ② fromSeq 显式传入 → 跳过检查发 RPC（reconcile backfill）
  * ③ snapshot/stateSnapshot 依次回放 replay 端口
  * ④ lastSeenSeq = max(reply.lastSeq, maxSnapshotSeq, maxStateSnapshotSeq, prevLastSeen)
  * ⑤ subscribe RPC 失败 → console.warn + 不标记 subscribed
@@ -47,7 +47,7 @@ describe('subscribeSession', () => {
     vi.restoreAllMocks()
   })
 
-  it('① 幂等守卫：已 subscribed 且 fromSeq undefined → 直接 return（subscribe 不被重复调用）', async () => {
+  it('① 幂等检查：已 subscribed 且 fromSeq undefined → 直接 return（subscribe 不被重复调用）', async () => {
     const { subscribe } = setup()
     subscribe.mockResolvedValue({ snapshot: [], stateSnapshot: [], lastSeq: 5 })
     await subscribeSession('s1')
@@ -59,7 +59,7 @@ describe('subscribeSession', () => {
 
   it('①b 并发 initial subscribe 去重（MF-2）：in-flight 期间重复调用复用同一 Promise（subscribe 只调一次）', async () => {
     const { subscribe } = setup()
-    // 挂起第一个 subscribe，制造「守卫通过后、await 前」的并发窗口
+    // 挂起第一个 subscribe，制造「检查通过后、await 前」的并发窗口
     let resolveFirst!: (v: { snapshot: ServerMessage[]; stateSnapshot: ServerMessage[]; lastSeq: number }) => void
     subscribe.mockImplementation(
       () => new Promise((resolve) => { resolveFirst = resolve }),
@@ -70,7 +70,7 @@ describe('subscribeSession', () => {
     resolveFirst({ snapshot: [], stateSnapshot: [], lastSeq: 5 })
     await Promise.all([p1, p2])
     expect(getSubscriptionState('s1')).toEqual({ lastSeenSeq: 5, subscribed: true })
-    // resolve 后再调 → subscribed 守卫拦截，仍不重复 RPC
+    // resolve 后再调 → subscribed 检查拦截，仍不重复 RPC
     await subscribeSession('s1')
     expect(subscribe).toHaveBeenCalledTimes(1)
   })
@@ -88,7 +88,7 @@ describe('subscribeSession', () => {
     expect(getSubscriptionState('s1')).toEqual({ lastSeenSeq: 10, subscribed: true }) // max(5, 10)
   })
 
-  it('② fromSeq 显式传入 → 跳过幂等守卫发 RPC（reconcile backfill，即使已 subscribed）', async () => {
+  it('② fromSeq 显式传入 → 跳过幂等检查发 RPC（reconcile backfill，即使已 subscribed）', async () => {
     const { subscribe } = setup()
     subscribe.mockResolvedValue({ snapshot: [], stateSnapshot: [], lastSeq: 5 })
     await subscribeSession('s1') // 首次订阅

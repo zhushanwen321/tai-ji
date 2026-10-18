@@ -76,7 +76,7 @@ export function isRendererConsoleDisabled(): boolean {
 // ── 入口（U2 事件回调直调）─────────────────────────────────────────
 
 /**
- * console-message 回调 params 的最小消费面（D1：只取四个标量字段构造 JSON 行，
+ * console-message 回调 params 的最小消费方（D1：只取四个标量字段构造 JSON 行，
  * 禁整体序列化 params——frame 是 WebFrameMain 结构对象，序列化即抛错/内存膨胀，
  * 本接口结构上将其排除）。main 进程内部契约（U2 直调），结构由 Electron 事件
  * 保证，不作运行时校验（对照：renderer-log-handler 的不可信 IPC payload 才校验）。

@@ -8,7 +8,7 @@
 // 打通；后续批次把 `handleFrame` / `dispatch` / `initialize` / 反向请求客户端与
 // `settleReverse` 逐步迁入，引擎差异经适配器钩子注入。
 //
-// 为什么放 SDK 而不是 core：引擎包不得依赖 core（边界守卫
+// 为什么放 SDK 而不是 core：引擎包不得依赖 core（边界检查
 // `.githooks/check-engine-sdk-boundary.mjs` / `scripts/check-engine-package-boundary.mjs`）；
 // SDK 是两个引擎唯一的共同依赖。
 import { toErrorMessage } from "../error-message.ts";
@@ -39,8 +39,8 @@ export interface ActiveRun { // oe-exempt:20260930:framework:SDK 协议面契约
 /**
  * 反向请求在途登记（引擎 → 宿主请求的应答等待项）。
  *
- * `method` 是 pi 引擎的扩展位（settle 时按通道守卫应答形态，如 askUser 的 UI 应答面
- * 检查）；zcode 无该通道守卫，可缺省。
+ * `method` 是 pi 引擎的扩展位（settle 时按通道检查应答形态，如 askUser 的 UI 应答
+ * 检查）；zcode 无该通道检查，可缺省。
  */
 export interface ReversePending { // oe-exempt:20260930:framework:SDK 协议面契约类型——两引擎服务器共用的应答等待项（pi 用 method 扩展位）
   resolve: (result: unknown) => void;

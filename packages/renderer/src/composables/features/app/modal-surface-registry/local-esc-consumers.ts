@@ -27,7 +27,7 @@
  * - node_modules 内 reka DismissableLayer 族：结构性不含（§6.7 R4 carve-out）——
  *   键盘可感知的 reka 托管弹层归聚合让位档（modal-surface-registry 登记表弹出层族行）。
  */
-export interface LocalEscConsumerEntry { // oe-exempt:20261003:framework:类型契约先行——容器/编排/注册表契约层，D1 下游单元即为消费面
+export interface LocalEscConsumerEntry { // oe-exempt:20261003:framework:类型契约先行——容器/编排/注册表契约层，D1 下游单元即为消费方
   /** 消费方 id */
   id: string
   /** 仓库根相对路径（对照基线扫描锚） */

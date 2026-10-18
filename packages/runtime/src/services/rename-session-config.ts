@@ -44,7 +44,7 @@ export function getAutoRenameEnabledPath(): string {
 
 /**
  * 读取 auto-rename 开关状态。标志文件存在=开，不存在/出错=关。
- * 不抛错（读异常一律当关，防御性设计）。
+ * 不抛错（读异常一律当关，容错处理）。
  */
 export function getAutoRenameEnabled(): boolean {
   try {
@@ -81,7 +81,7 @@ export function setAutoRenameEnabled(enabled: boolean): void {
  * 用 auto-rename-initialized 标记防止后续 boot 反复覆盖用户的关闭操作：
  *   - initialized 不存在 → 首次，创建 enabled flag（默认开）+ initialized 标记
  *   - initialized 存在 → 用户已设置过，不干预
- * 不抛错（与 getAutoRenameEnabled 防御性设计一致）。
+ * 不抛错（与 getAutoRenameEnabled 容错处理一致）。
  */
 export function ensureAutoRenameDefault(): void {
   try {
@@ -137,7 +137,7 @@ export function setRenameConfigLockTimingForTest(opts: SyncFileLockOptions): voi
 /**
  * 读取 rename 标题生成模型（"provider/modelId"，未设置返回空串）。
  * 文件不存在/坏 JSON/model 字段非法 → 空串（与 extension normalizeRenameConfig 的回退语义一致）。
- * 不抛错（读异常一律当未设置，防御性设计，与 getAutoRenameEnabled 一致）。
+ * 不抛错（读异常一律当未设置，容错处理，与 getAutoRenameEnabled 一致）。
  */
 export function getRenameModel(): string {
   try {
@@ -190,7 +190,7 @@ function isRenameMode(raw: unknown): raw is RenameMode {
 
 /**
  * 读取 rename 触发模式。文件不存在/坏 JSON/mode 字段缺失或非法 → first-stop
- * （与 extension normalizeRenameConfig 的回退语义一致）。不抛错（防御性设计，与 getRenameModel 一致）。
+ * （与 extension normalizeRenameConfig 的回退语义一致）。不抛错（容错处理，与 getRenameModel 一致）。
  */
 export function getRenameMode(): RenameMode {
   try {
@@ -311,7 +311,7 @@ function isValidRenameMaxLength(raw: unknown): raw is number {
 
 /**
  * 读取标题最大长度。文件不存在/坏 JSON/字段非法 → 50（与 extension normalize 回退语义一致）。
- * 不抛错（防御性设计，与 getRenameModel 一致）。读失败分通道（对齐 getRenamePrompt 的
+ * 不抛错（容错处理，与 getRenameModel 一致）。读失败分通道（对齐 getRenamePrompt 的
  * 缺失/损坏分通道纪律）：ENOENT = 文件从未配置，正常回退不留痕；非 ENOENT（EACCES/EISDIR
  * 等 IO 故障、坏 JSON）会掩盖用户已配置的值，先 logger.warn 留痕再回默认（返回语义不变）。
  */

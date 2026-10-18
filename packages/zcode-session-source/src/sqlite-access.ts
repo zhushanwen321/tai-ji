@@ -1,6 +1,6 @@
 /**
  * zcode 会话库只读访问层（自 runtime services/session/zcode-import/sqlite-access.ts
- * 迁入改造；runtime 侧旧文件已随共享基座实施收口删除（git 可追溯），本包为其唯一现行承载）。
+ * 迁入改造；runtime 侧旧文件已随共享基座实施收敛删除（git 可追溯），本包为其唯一现行承载）。
  *
  * 访问模式（沿用既有先例）：
  * - 只读连接（readonly 语义 = WAL 只读不阻塞宿主写入）；转换/查询全程不写库；
@@ -11,7 +11,7 @@
  * - 开库统一走四级恢复阶梯（recovery.ts，设计 §3.5 单一规格）——runtime（node）
  *   侧直开从来可用（F24），阶梯主要服务 bun 宿主侧的静息态 CANTOPEN（darwin bun；
  *   linux bun 静息态直开同样可用——bun 平台分叉矩阵登记在 __tests__/platform-matrix.ts）；
- * - schema 版本从「best-effort 诊断」升级为已知集闸门（KNOWN_ZCODE_SCHEMA_
+ * - schema 版本从「best-effort 诊断」升级为已知集门禁（KNOWN_ZCODE_SCHEMA_
  *   VERSIONS，版本超出已知集抛 ZcodeSchemaDriftError——错误码词表属消费侧，
  *   本包不私建 zcode_* 码）。
  *
@@ -55,7 +55,7 @@ export function zcodeImportDbAllowlist(dataDir: string): readonly string[] {
   return [zcodeIsolatedDbPath(dataDir), hostZcodeDbPath()]
 }
 
-/** schema 版本已知集（宿主 schema 0.16.5 消费面子集；版本超出即 drift 信号）。 */
+/** schema 版本已知集（宿主 schema 0.16.5 消费方子集；版本超出即 drift 信号）。 */
 export const KNOWN_ZCODE_SCHEMA_VERSIONS: readonly string[] = ['0.16.5']
 
 /** schema 版本不认识（读 schema_migration 失败或版本超出已知集）。 */
@@ -131,7 +131,7 @@ function asNumber(v: unknown, col: string): number {
   return v
 }
 
-/** sqlite 原始行（snake_case）→ ZcodeSessionRow，类型守卫后置（驱动返回 unknown，禁 any）。 */
+/** sqlite 原始行（snake_case）→ ZcodeSessionRow，类型检查后置（驱动返回 unknown，禁 any）。 */
 function rowToSessionRow(row: unknown): ZcodeSessionRow {
   if (typeof row !== 'object' || row === null) throw new Error('session 表返回非对象行')
   const r = row as Record<string, unknown>
@@ -266,7 +266,7 @@ function wrapDb(db: SqliteDb): ZcodeReadonlyDb {
 }
 
 /**
- * schema 版本已知集闸门：读 schema_migration 最新版本，超出 KNOWN_ZCODE_SCHEMA_
+ * schema 版本已知集门禁：读 schema_migration 最新版本，超出 KNOWN_ZCODE_SCHEMA_
  * VERSIONS（或表不可读）→ ZcodeSchemaDriftError（observedVersion 区分「有版本但不
  * 认识」与「表不可读」两种归因）。检查通过静默返回。
  */
@@ -304,7 +304,7 @@ export interface ZcodeSessionDbHandle {
 
 /**
  * 打开 zcode 会话库只读连接（编排入口：存在性检查 → 四级恢复阶梯 → schema 已知集
- * 闸门）。dbPath 不存在直接抛 Error（调用方映射「库不存在」语义）；阶梯耗尽抛
+ * 门禁）。dbPath 不存在直接抛 Error（调用方映射「库不存在」语义）；阶梯耗尽抛
  * SqliteUnreadableError（attempted 含已尝试级别）；schema 超出已知集抛
  * ZcodeSchemaDriftError。其余查询期错误原样上抛（驱动错误 / data 列 JSON 非法等），
  * 调用方按消费侧错误规格映射。

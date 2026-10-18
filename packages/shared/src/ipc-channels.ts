@@ -61,7 +61,7 @@ export const DEBUG_RUN_LOG_RETENTION = 'debug:run-log-retention' as const
  * 诊断包导出通道 [crash-forensics-and-watchdog §3.3 D6，实施计划 u3a]。
  *
  * invoke 通道：renderer（u3b 设置页 系统 分区 / 死态静态错误页入口）经此委托 main 打包
- * 诊断 zip——双台账现档 + 各层日志尾部 + 水位摘录 + 触发条件状态表 + summary.md（清单
+ * 诊断 zip——双条目清单现档 + 各层日志尾部 + 水位摘录 + 触发条件状态表 + summary.md（清单
  * 以 export-diagnostic-bundle.ts 头注释为准）。main 侧先弹保存对话框（用户自选保存位置，
  * D6），取消返回 { status: 'canceled' }；打包失败零抛错归一进 result.error（含具体
  * errno），invoke 无 rejection 面。选冒号式 `diagnostics:*`：对齐 'image-cache:*' /

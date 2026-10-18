@@ -13,13 +13,13 @@
  *   Enter → deps.send 恰一次（steer/followUp 均不被调）
  * - 行 1（全 idle）Enter → deps.send（与占用期同路径）
  * - Alt+⏎：steer 路由行（turn 活跃）→ followUp；其余行 → send
- * - steer 路由行 + 空输入 → 不提交（分发器空输入守卫）
+ * - steer 路由行 + 空输入 → 不提交（分发器空输入检查）
  *
  * 装配（真 pinia + 真 chatStore + mount Composer）：mock useChat / api（chat 组）/
  * useToast / ComposerInput + 壳 stub + 逐用例重置统一经 composer-queue-mount.ts 装配，
  * 断言引用 composerChatApiSpy 单例。
  *
- * occupancy 由 chat.setOccupancy 驱动（store 投影 = composer-shell sendRoute 的数据源）。
+ * occupancy 由 chat.setOccupancy 驱动（store 派生视图 = composer-shell sendRoute 的数据源）。
  *
  * 运行：cd packages/renderer && npx vitest run src/__tests__/panel/composer-dispatch-route.test.ts
  */
@@ -45,14 +45,14 @@ async function pressKey(wrapper: ReturnType<typeof mountComposer>, init: Keyboar
   await wrapper.vm.$nextTick() // onSend 是 async，需 flush
 }
 
-/** 驱动 occupancy 投影（sessionPhase 数据源） */
+/** 驱动 occupancy 派生视图（sessionPhase 数据源） */
 function setPhase(turn: 'idle' | 'dispatching' | 'generating' | 'settling', compacting = false, bash = false): void {
   useChatStore().setOccupancy('s1', { turn, compacting, bash })
 }
 
 /** 制造本地 busy 视图（streaming 实体 → isActive=true）。真实时序下 turn 活跃（occupancy
  *  generating）必然伴随本地 turn 实体（turn 由本 renderer 的 send 发起）——行 2/3 用例
- *  须同步驱动本地视图，镜像真实投影时序。 */
+ *  须同步驱动本地视图，镜像真实派生视图时序。 */
 function seedLocalBusy(sid = 's1'): void {
   useChatStore().applyMessageEvent(sid, {
     type: 'message.message_start',
@@ -151,7 +151,7 @@ describe('Composer 统一发送分发器（占用形态全部收敛 deps.send，
     expect(composerChatApiSpy.send).toHaveBeenCalledWith('s1', textToSegments('压缩后发'))
   })
 
-  it('steer 路由行 + 空输入 ⏎ → 不提交（分发器空输入守卫）', async () => {
+  it('steer 路由行 + 空输入 ⏎ → 不提交（分发器空输入检查）', async () => {
     setPhase('generating')
     seedLocalBusy()
     const wrapper = mountComposer()

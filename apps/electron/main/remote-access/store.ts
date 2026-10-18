@@ -58,7 +58,7 @@ function createDefaultRemoteAccessConfig(): RemoteAccessConfig {
  *
  * 适用磁盘态不可信的降级路径（读失败 / 损坏重建写回失败）：此类降级的内存配置若带
  * 随机新 token，面板会展示一个磁盘上不存在的 token，误导用户拿它去连（必然被拒）。
- * 空 token 是显式缺失形态——上游连接入口对空 token 有真值守卫（fullUrl 拼 URL 前
+ * 空 token 是显式缺失形态——上游连接入口对空 token 有真值检查（fullUrl 拼 URL 前
  * 校验 token，空值渲染空链接 + 空占位二维码），不产出假可用链接；且关态下入口卡
  * 整体隐藏。恢复通道：用户回面板重新开启时，setRemoteAccessEnabled 对缺失形态
  * 自愈补发新 token 并落盘，一步回到可用态。
@@ -68,7 +68,7 @@ function createDegradedRemoteAccessConfig(): RemoteAccessConfig {
 }
 
 /**
- * 结构守卫（禁 any 红线：unknown 经 shape 收窄后才按契约消费）。
+ * 结构检查（禁 any 红线：unknown 经 shape 收窄后才按契约消费）。
  * shape 判据（对象 + enabled boolean + token string）复用 shared 的
  * isRemoteAccessConfigShape 单源（runtime 读侧 import 同一谓词，判据不可能分叉）；
  * 本侧在其上叠加写侧从严策略：token 恒须 64 位 hex 小写（REMOTE_TOKEN_HEX64）+
@@ -90,7 +90,7 @@ function resolveRemoteAccessFilePath(dataDir?: string): string {
   return join(dataDir ?? getDataDir(), REMOTE_ACCESS_FILENAME)
 }
 
-/** Node 错误形态收窄（unknown → ErrnoException：携带 string code 的 Error，运行时守卫替代 any）。 */
+/** Node 错误形态收窄（unknown → ErrnoException：携带 string code 的 Error，运行时检查替代 any）。 */
 function isErrnoException(error: unknown): error is NodeJS.ErrnoException {
   return error instanceof Error && typeof (error as { code?: unknown }).code === 'string'
 }
@@ -180,7 +180,7 @@ function ensureRemoteAccessIntegrity(raw: string, dataDir?: string): RemoteAcces
  * issueRuntimeToken 的 writeFileSync + chmodSync 双保险形态）。fsync 段以只读 fd
  * 打开（fsync 不要求写权限），不改变 0600 语义。
  *
- * @param config 待写配置（调用方保证字段合法；本模块产出的配置均经结构守卫）
+ * @param config 待写配置（调用方保证字段合法；本模块产出的配置均经结构检查）
  * @param dataDir 可选数据根目录（测试注入）；缺省读 getDataDir()
  */
 export function writeRemoteAccessConfig(config: RemoteAccessConfig, dataDir?: string): void {
@@ -225,7 +225,7 @@ export function rotateRemoteAccessToken(dataDir?: string): RemoteAccessConfig {
  *
  * 降级缺失形态自愈：读侧降级产出的配置 token 为空（磁盘态不可信），直接落盘会写出
  * 开态 + 空 token 的半合法文件（runtime 读侧 fail-closed 全拒，面板却显示已开启）。
- * 本函数在 token 不合法时补发新 token，保证写出的配置恒经结构守卫，同时构成降级
+ * 本函数在 token 不合法时补发新 token，保证写出的配置恒经结构检查，同时构成降级
  * 后的恢复通道——用户回面板重新开启即获得新 token。
  *
  * @param enabled 目标开关状态

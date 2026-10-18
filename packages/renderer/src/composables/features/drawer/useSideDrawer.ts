@@ -28,7 +28,7 @@
  *   turn-skill-badge.test.ts（注释）。无需迁移。
  * [P4 s5 drawer-widget-removal] 原 B 项（useSidebar.ts consumePendingOpen）已随本 wave 删除
  *   （pendingOpen 机制整体移除）。
- * C 待 chat-w6 迁移（认知外文件，类型名已随 U7 收窄同步，仍经兼容层）：useChatViewDeps.ts
+ * C 待 chat-w6 迁移（来源不明的文件，类型名已随 U7 收窄同步，仍经兼容层）：useChatViewDeps.ts
  *   import { useSideDrawer, type RightDrawerTab }——chat-w6 迁移后改指向 core API。
  * D 可平滑迁移（改 import 指向 '@taiji/core/domain/drawer' 即可，~11 生产 + ~14 测试）：
  *   生产：useRunInTerminal.ts / useCloseShortcut.ts

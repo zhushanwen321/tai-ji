@@ -56,7 +56,7 @@ import type {
 
 // local-file 两条 IPC 通道的 payload 类型定义 SSOT = `@taiji/shared`
 // （packages/shared/src/ipc-payloads.ts，C-comm-22 唯一类型源）；此处 re-export 保持
-// gateway/local-file-handlers 与单测的既有消费面（本地探测结果 LocalFileProbeResult
+// gateway/local-file-handlers 与单测的既有消费方（本地探测结果 LocalFileProbeResult
 // 仍在本模块扩展）。
 export type {
   LocalFileReadReason,
@@ -92,7 +92,7 @@ export interface LocalFilePrefixOptions {
 /**
  * 构造 local-file:// 协议的允许前缀列表（每项带 trailing path.sep）。
  *
- * 打包态剔除 cwd（D2a 守卫）；dev 态保留。home 缺省回退 os.homedir()。
+ * 打包态剔除 cwd（D2a 检查）；dev 态保留。home 缺省回退 os.homedir()。
  * 可选路径参数缺省时跳过对应项（测试可用最小入参驱动）。
  * projectRoot 是 dev-only 成员，本函数对传入值无条件拼入——是否传（即打包态
  * 不出现该成员）由 main.ts 调用侧 isDev && TAIJI_DEV_PROJECT_ROOT 条件展开裁决。
@@ -150,7 +150,7 @@ export function isPathInAllowedPrefixes(filePath: string, allowedPrefixes: reado
 // 目录名集。每次准入现算（readdir 本地 fs µs 级），无缓存无时间平抑面（ADR-0122 事实
 // 驱动：磁盘目录集即事实源，读时直查）。
 
-/** 会话项目准入子树段字面量（单一收口；扩展新子目录改此处 + 同步 ADR/design 注记） */
+/** 会话项目准入子树段字面量（单一收敛；扩展新子目录改此处 + 同步 ADR/design 注记） */
 const SESSION_PROJECT_TMP_SEGMENT = '.tmp'
 
 /** 目录枚举 fs 切面（缺省 node:fs；单测注入桩） */

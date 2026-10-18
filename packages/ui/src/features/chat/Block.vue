@@ -117,7 +117,7 @@
     <!-- 正文 text 块：全 inline 统一正文样式（text-md/leading-[1.8]，D5 行类型定档 15px），颜色跟所属
          assistant 消息的文本活跃态（chat-flow-text-color D1：streaming→neutral-mid，定稿/缺省→
          neutral-fg）。streaming 由 Turn.unitBlockProps 按 textFinalized 逐消息派生（pi 回合级
-         message.complete 才收口 mid-turn 气泡 status，直接跟 status 会让长工具回合中已写完
+         message.complete 才收尾 mid-turn 气泡 status，直接跟 status 会让长工具回合中已写完
          的正文一直灰；单调不随兄弟 message 翻转）。group/text 命名分组承载行尾时刻的悬停/键盘聚焦两翼显现。
          streaming-tail 光标在 Turn.vue trace 容器末尾（跟在所有 block 后，不受 contentBlocks 时序影响）。
          [M2 形态统一] 唯一 error 形态 = 追加形态：content 崩溃前正文保持原色（可为空），
@@ -361,7 +361,7 @@
               <div v-if="argPath" class="border-b border-hairline pl-4 py-1.5 font-mono text-[length:var(--text-sm)] text-neutral-fg">
                 {{ argPath }}
               </div>
-              <!-- 输出文本区内容守卫：均空时不渲染（只剩命令块，无空白假展开）；
+              <!-- 输出文本区内容检查：均空时不渲染（只剩命令块，无空白假展开）；
                    限高滚动 + 行区间信息条由 BlockScrollBox 统一承担（含原 max-h-80 的 JSON 分支） -->
               <BlockScrollBox v-if="displayContent || outputRaw || parsedJsonOutput" surface="recessed">
                 <div :class="toolResultClass">
@@ -442,7 +442,7 @@ import type { BlockIconKind, RunningIconKind } from './block-icon'
 import { BLOCK_ICON_CLASS, BLOCK_ICON_LUCIDE, BLOCK_LABEL_CLASS, getBlockIcon } from './block-icon'
 import { MS_PER_SECOND, formatClock, formatDuration, formatJsonIfValid, shortenForHeader, tailLines, stripAnsi } from './format-utils'
 // primitives 直接路径（不经 @taiji/ui 顶层 barrel）：chat 组件被 barrel 再导出，
-// barrel 自引用会闭合一族循环依赖环（详见 BashOutputBlock.vue 同款注释）
+// barrel 自引用会封住一族循环依赖环（详见 BashOutputBlock.vue 同款注释）
 import { Button } from '../../primitives/button'
 import { useToolMeta } from './composables/useToolMeta'
 import { useCopy } from './composables/useCopy'
@@ -497,7 +497,7 @@ const props = defineProps<{
    *  [M2 形态统一] 纯 error 形态已消灭——错误文本只住 error 字段，content 恒为崩溃前
    *  正文（手动追加的错误消息 content 为空），渲染只有追加形态一种。thinking/tool 分支不消费。 */
   status?: MessageStatus
-  /** 错误文本（assistant Message.error 字段，status==='error' 时有值——收口兜底保证非空）。 */
+  /** 错误文本（assistant Message.error 字段，status==='error' 时有值——收尾兜底保证非空）。 */
   error?: string
   /** 所属 assistant message 时刻（epoch ms，行尾时刻显示） */
   messageTimestamp?: number
@@ -516,10 +516,10 @@ const { thinkingExpanded, toggleThinking, previewText, thinkingTailLines, thinkD
     collapsed: props.collapsed,
   })
 
-/** error 终态：msg.error 有值（收口侧兜底保证非空；!! 防御漏网产出点）→ 独立 danger 行。 */
+/** error 终态：msg.error 有值（收尾侧兜底保证非空；!! 防御漏网产出点）→ 独立 danger 行。 */
 const isAppendError = computed(() => props.status === 'error' && !!props.error)
 
-/** N6 思考行时长：startTime/endTime 双有值才推导（end<=start 视为数据缺口，守卫与
+/** N6 思考行时长：startTime/endTime 双有值才推导（end<=start 视为数据缺口，检查与
  *  useLiveToolDuration 终态分支同构）；口径 formatDuration 与工具行行尾耗时一致。 */
 const thinkingDuration = computed(() => {
   const start = props.thinkingStart
@@ -530,7 +530,7 @@ const thinkingDuration = computed(() => {
 })
 
 /** 思考是否已完结：endTime 晚于 startTime（实时链路 thinking_end 效果器填充；重载链路
- *  双 undefined → false，但历史块 working 恒 false，扫光判定不受影响）。守卫与
+ *  双 undefined → false，但历史块 working 恒 false，扫光判定不受影响）。检查与
  *  thinkingDuration 同构。 */
 const thinkingEnded = computed(() => {
   const start = props.thinkingStart
@@ -756,7 +756,7 @@ const guiComponent = computed<GuiComponent | undefined>(() => {
  * 1 行即可观察进度，点击才展开详情）。failed 终态默认展开（错误输出立即可见）。
  * mount 快照：toolCollapsed 仅在挂载时求值，Block key 不含 status（running→error 不 remount），
  * 故 streaming 中失败的工具不展开（只 header 染 danger），仅终态挂载（重开/回看）才展开（§3.3.1 选项 A）。
- * 被否：watch(tool.status) 强制展开——streaming 高度突变破坏跟底/回到底部浮层（P0 级风险）。
+ * 不采用：watch(tool.status) 强制展开——streaming 高度突变破坏跟底/回到底部浮层（P0 级风险）。
  */
 const toolCollapsed = ref(!isFailed.value)
 const toolExpanded = computed(() => !toolCollapsed.value)
@@ -813,7 +813,7 @@ const groupStatText = computed(() => {
  *    初值 = 恒收起（2026-10-15 裁决 ①A：原「组内有 running 成员则展开」例外已删——无论什么时候
  *    默认折叠，回看与直播形态一致），此后只由用户点击翻转。**不做 status 驱动的自动开合**：
  *    展开/收起翻转会让流式中的块高度突变、破坏贴底跟随（同 toolCollapsed 挂载快照的既有取舍，
- *    见该处注释的「被否」一条）。 ── */
+ *    见该处注释的「不采用」一条）。 ── */
 const groupCollapsed = ref(true)
 const groupExpanded = computed(() => !groupCollapsed.value)
 

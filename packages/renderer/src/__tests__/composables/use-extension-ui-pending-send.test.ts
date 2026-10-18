@@ -5,9 +5,9 @@
  *
  * 覆盖四形态（设计 §3.3 D1 采用项 1/2）：
  * - ① cancel 型（result=null，Esc / 取消按钮 / cancel() 同链）respond 送达后
- *     clearPendingSend(sid) 被调——pendingSend 假忙窗口收口
+ *     clearPendingSend(sid) 被调——pendingSend 假忙窗口收尾
  * - ② 提交型（result 非 null string）不清——pendingSend 桥接 respond→message_start
- *     由其正常清除（现状语义保留）；另含 boolean 守卫格（false 非 null 亦不清，
+ *     由其正常清除（现状语义保留）；另含 boolean 检查格（false 非 null 亦不清，
  *     防判据误写为 falsy 判定）
  * - ③ delivered=false（WS 断连）不清——现状保留路径，锚点只挂送达成功后
  * - ④ requests-invalidated 广播到达：按帧 sid removeRequest + clearPendingSend
@@ -106,7 +106,7 @@ beforeEach(() => {
   chatStoreMocks.clearPendingSend.mockClear()
 })
 
-describe('① cancel 型（result=null）respond 送达后收口 pendingSend（D1 采用项 1）', () => {
+describe('① cancel 型（result=null）respond 送达后收尾 pendingSend（D1 采用项 1）', () => {
   it('respond(requestId, null) 送达 → removeRequest + clearPendingSend(sid)', () => {
     const { result, dispose } = runWithScope(() => useExtensionUI(ref('sessionA')))
 
@@ -118,7 +118,7 @@ describe('① cancel 型（result=null）respond 送达后收口 pendingSend（D
     // 送达 + 出队（现状行为不回归）
     expect(sendExtensionUIResponse).toHaveBeenCalledWith('sessionA', 'r-cancel', 'select', null)
     expect(useExtensionUIStore().getRequestsBySession('sessionA')).toEqual([])
-    // cancel 型清除锚点：按请求归属 sid 收口假忙窗口
+    // cancel 型清除锚点：按请求归属 sid 收尾假忙窗口
     expect(chatStoreMocks.clearPendingSend).toHaveBeenCalledTimes(1)
     expect(chatStoreMocks.clearPendingSend).toHaveBeenCalledWith('sessionA')
     dispose()
@@ -153,7 +153,7 @@ describe('② 提交型（result≠null）不清——pendingSend 桥接 message
     dispose()
   })
 
-  it('boolean 守卫格：respond(requestId, false) 非 null 同样不清（判据严格 === null，非 falsy）', () => {
+  it('boolean 检查格：respond(requestId, false) 非 null 同样不清（判据严格 === null，非 falsy）', () => {
     const { result, dispose } = runWithScope(() => useExtensionUI(ref('sessionA')))
 
     emitBusUIRequest('sessionA', mkFormReq('r-bool'))
@@ -169,7 +169,7 @@ describe('⑤ expectTurn 三态矩阵（form-submit-busy-convergence 场景 7，
   // 矩阵 = {result null / 非 null} × {expectTurn true / undefined / false}：
   // - result=null → 清恒定（3 格，cancel 型语义不依赖 expectTurn）
   // - result≠null + true/undefined → 不清（2 格，桥接 message_start 照旧；
-  //   undefined = 存量扩展缺省态，truthy 简化（!expectTurn）会把这两格误清——D2 被否谱系）
+  //   undefined = 存量扩展缺省态，truthy 简化（!expectTurn）会把这两格误清——D2 不采用其余方案的理由）
   // - result≠null + false → 清（1 格，命令 handler 内 select 提交即收尾，消除 30s 假忙）
   // result 非 null 格取表单 answers JSON string（提交型主流形态，对齐 ② 用例输入面）；
   // 该输入面同时是 toExtensionUIRequest expectTurn 透传（D1 段 4）的因果断言——透传断
@@ -227,7 +227,7 @@ describe('③ delivered=false（WS 断连）不清——锚点只挂送达成功
     result.cancel('r-drop')
 
     expect(sendExtensionUIResponse).toHaveBeenCalledWith('sessionA', 'r-drop', 'select', null)
-    // 断连期请求保留（FormOverlay 不消失，现状行为）+ pendingSend 不收口
+    // 断连期请求保留（FormOverlay 不消失，现状行为）+ pendingSend 不收尾
     //（表单仍占输入面，假忙窗口不暴露——设计 §3.1 失败路径语义）
     expect(useExtensionUIStore().getRequestsBySession('sessionA')).toHaveLength(1)
     expect(chatStoreMocks.clearPendingSend).not.toHaveBeenCalled()
@@ -244,7 +244,7 @@ describe('④ requests-invalidated 广播按帧 sid 清（D1 采用项 2 / 探�
 
     emitBusRequestsInvalidated('sessionA', ['r-inv'], 'reclaimed')
 
-    // 表单移除（P2-2 既有行为）+ pendingSend 收口（D1 新增锚点）
+    // 表单移除（P2-2 既有行为）+ pendingSend 收尾（D1 新增锚点）
     expect(result.currentFormRequest.value).toBeUndefined()
     expect(useExtensionUIStore().getRequestsBySession('sessionA')).toEqual([])
     expect(chatStoreMocks.clearPendingSend).toHaveBeenCalledTimes(1)
@@ -252,7 +252,7 @@ describe('④ requests-invalidated 广播按帧 sid 清（D1 采用项 2 / 探�
     dispose()
   })
 
-  it('帧 sid 缺失 → 不清（跳过，与 removeRequest 同一守卫）', () => {
+  it('帧 sid 缺失 → 不清（跳过，与 removeRequest 同一检查）', () => {
     runWithScope(() => useExtensionUI(ref('sessionA')))
 
     // 事件契约 sessionId 可选；缺失帧整体跳过（无 sid 可清）

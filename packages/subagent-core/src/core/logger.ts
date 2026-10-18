@@ -17,7 +17,7 @@ import { getHostServices } from "./host-services.ts";
 export type LogLevel = "debug" | "warn" | "error";
 
 /** core logger 接口。与 pi-extension-logger 的 ExtensionLogger 结构兼容——
- *  u0-log 批次替换是纯 import 源替换，调用面（方法名/参数序）逐文件等价。 */
+ *  u0-log 批次替换是纯 import 源替换，调用范围（方法名/参数序）逐文件等价。 */
 export interface CoreLogger {
   debug(msg: string, data?: unknown): void;
   warn(msg: string, data?: unknown): void;

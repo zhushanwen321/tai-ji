@@ -4,7 +4,7 @@
  * [HISTORICAL] 2026-09-08 Gate B 泄漏事故：宿主 shell 的 TAIJI_AGENT_DATA_DIR=~/.taiji
  * 泄漏进 dev Electron，旧实现（`env ?? ~/.taiji-dev`）只在 undefined 兜底、泄漏值被
  * 采信 → dev app 整个跑在用户 prod 数据目录上。修复后语义（受控采信）：外部值仅当
- * 解析后位于 ~/.taiji-dev 树内才采信（装配器 per-worktree 实例目录），其余钉死回
+ * 解析后位于 ~/.taiji-dev 树内才采信（装配器 per-worktree 实例目录），其余固定回
  * ~/.taiji-dev——行为矩阵守护 = test/dev-data-dir.test.ts（纯函数直测）。
  *
  * 本文件守护 **main.ts 的接线**（2026-09-19 起解析逻辑提取到 utils/dev-data-dir.ts
@@ -84,7 +84,7 @@ describe('main.ts dev 数据目录接线（受控采信，R-13 修复守护）',
   })
 })
 
-describe('main.ts 打包数据目录接线（缺省反转后 prod 唯一权威钉死点）', () => {
+describe('main.ts 打包数据目录接线（缺省反转后 prod 唯一权威固定点）', () => {
   it('源码守护：isDev else 分支经 resolvePackagedDataDir 解析 TAIJI_AGENT_DATA_DIR', () => {
     expect(mainSource).toMatch(
       /process\.env\.TAIJI_AGENT_DATA_DIR = resolvePackagedDataDir\(process\.env, homedir\(\)\)/,
@@ -105,9 +105,9 @@ describe('main.ts 打包数据目录接线（缺省反转后 prod 唯一权威�
     }
   })
 
-  it('源码守护：打包分支自置位 TAIJI_AGENT_PACKAGED（getDataDir prod 值准入守卫的合法消费前提）', () => {
+  it('源码守护：打包分支自置位 TAIJI_AGENT_PACKAGED（getDataDir prod 值准入检查的合法消费前提）', () => {
     // C-proc-26 第二支柱：打包 main 持有 ~/.taiji 树值必须声明 prod 形态，
-    // 否则自身后续 getDataDir() 消费被准入守卫拦截。赋值语句在 main.ts 应唯一
+    // 否则自身后续 getDataDir() 消费被准入检查拦截。赋值语句在 main.ts 应唯一
     //（process-control 侧是对象属性注入，非本形态）。
     expect(mainSource).toMatch(/process\.env\.TAIJI_AGENT_PACKAGED = '1'/)
   })

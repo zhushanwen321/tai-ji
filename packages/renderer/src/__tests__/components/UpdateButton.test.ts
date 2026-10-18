@@ -61,7 +61,7 @@ describe('UpdateButton', () => {
   })
 
   it('W4TC9：available click 触发 performDownload', async () => {
-    // latestRelease 前置：controller.performDownload 无 release 短路不调 ipc（真实守卫语义）
+    // latestRelease 前置：controller.performDownload 无 release 短路不调 ipc（真实检查语义）
     setCardUpdateState({ state: 'available', latestRelease: makeCardRelease('0.9.0') })
     const wrapper = mount(UpdateButton)
     await wrapper.find('[data-testid="update-available"]').trigger('click')

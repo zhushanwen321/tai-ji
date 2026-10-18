@@ -2,7 +2,7 @@
  * blueprint-match.ts —— 蓝图-实例匹配规则纯函数（workflow-visualization 设计 §3.3-D2）。
  *
  * 蓝图节点 = 调用点（静态，名称可为模板如 `reviewer-<维度>-a<n>-r<轮>`）；运行时实例 =
- * WorkflowAgentCall（agent-started 事件的投影）。匹配算法（D2 形式化）：
+ * WorkflowAgentCall（agent-started 事件的派生视图）。匹配算法（D2 形式化）：
  * ① 两级「且」判据——先 phase（实例 phase 等于调用点归属 phase），再模板正则命中
  *   （节点 matchPattern，字面段精确 + 变量段通配）；② 多命中按「字面段总长降序」取
  *   更具体者；仍并列歧义 → 进未匹配分组并标注，不静默择一；③ 零命中实例同进未匹配

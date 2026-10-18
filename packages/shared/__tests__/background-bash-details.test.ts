@@ -8,7 +8,7 @@
  * 消费点：ui SystemNotice.vue 的 background-bash 分支（命中 → 结构化行；null → content 原文行，
  * 旧 session 逐字节回到现状渲染）。解析口径与 parseBgNotifyDetails 同款（shared 单点收敛）。
  *
- * 另含 SSOT + 机器守卫组：BackgroundBashDetails 字段镜像（扩展侧 notify.ts ↔ 宿主侧
+ * 另含 SSOT + 机器检查组：BackgroundBashDetails 字段镜像（扩展侧 notify.ts ↔ 宿主侧
  * message.ts）的行为断言，见文件尾 describe 注释。
  *
  * 运行：cd packages/shared && npx vitest run __tests__/background-bash-details.test.ts
@@ -136,7 +136,7 @@ describe('parseBackgroundBashDetails 防御矩阵：exitCode 类型异常 → �
   })
 })
 
-// ── SSOT + 机器守卫：BackgroundBashDetails 字段镜像（扩展侧 notify.ts ↔ 宿主侧 message.ts）──
+// ── SSOT + 机器检查：BackgroundBashDetails 字段镜像（扩展侧 notify.ts ↔ 宿主侧 message.ts）──
 //
 // 镜像两端（注释级手工镜像，两侧注释均声明「改动须同步另一侧」，本组用例把该纪律机器化）：
 // - 扩展侧权威（生产方）：extensions/universal/base-tool-enhance/src/background/notify.ts
@@ -144,7 +144,7 @@ describe('parseBackgroundBashDetails 防御矩阵：exitCode 类型异常 → �
 // - 宿主侧镜像（消费方）：packages/shared/src/message.ts
 //   · BackgroundBashEndReason 别名 + BackgroundBashDetails 接口 + parseBackgroundBashDetails
 //
-// 守卫形态 = 行为断言（不再做源码文本正则解析）：测试进程直接 import 生产端
+// 检查形态 = 行为断言（不再做源码文本正则解析）：测试进程直接 import 生产端
 // buildNotifyDetails，把真实产出喂给宿主解析器，逐项断言 D1 声明的三处对齐面
 // 「字段名、可空性、枚举值」。生产端一旦改产出（字段增删/改名/换枚举）本组即红——
 // 「生产端接口未漂移」由此锁定；对实现形态（多行化、类型别名、return 对象写法）零耦合，
@@ -173,7 +173,7 @@ function buildTask(overrides: Partial<BackgroundTask> = {}): BackgroundTask {
   }
 }
 
-describe('BackgroundBashDetails 字段镜像守卫（notify.ts ↔ message.ts，SSOT + 机器守卫）', () => {
+describe('BackgroundBashDetails 字段镜像检查（notify.ts ↔ message.ts，SSOT + 机器检查）', () => {
   it('字段名序列逐项相等：生产端产出 ↔ 宿主侧解析产出 ↔ D1 契约序', () => {
     const produced = buildNotifyDetails(buildTask())
     expect(Object.keys(produced)).toEqual([...MIRROR_FIELD_SEQUENCE])

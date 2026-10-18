@@ -1,6 +1,6 @@
 <!--
   展示组件 · ActivityStrip 对话流尾部活动条（session-occupancy u6a / D7 展示统一）。
-  数据源 = chat store 的 sessionPhase（occupancy 投影，runtime session.occupancy state topic
+  数据源 = chat store 的 sessionPhase（occupancy 派生视图，runtime session.occupancy state topic
   驱动的单一权威）+ executingBash 瞬时态（props 注入，core bash-effects 分区）。
 
   收编三处分散的「进行中」指示（原 compacting 浮层 / TurnMeta dispatching 思考占位 /
@@ -155,7 +155,7 @@ import { HoverCard, HoverCardContent, HoverCardTrigger } from '@/components/ui/h
 
 
 const props = defineProps<{
-  /** session id（occupancy 投影 / compacting reason 的查询键） */
+  /** session id（occupancy 派生视图 / compacting reason 的查询键） */
   sessionId: string
   /** 执行中 bash 瞬时态（core bash-effects 分区，MessageStream computed 注入；无则 undefined） */
   executingBash?: ExecutingBash
@@ -167,7 +167,7 @@ const props = defineProps<{
 const chat = useChatStore()
 const { t } = useI18n()
 
-/** 活动条行（单一变化轴：行类型 + 文案）。优先级 = 数组序（compacting > bash > waiting / thinking /
+/** 活动条行（单一变化原因：行类型 + 文案）。优先级 = 数组序（compacting > bash > waiting / thinking /
  *  settling，waiting 与 thinking 同档互斥——dispatching 优先三点等待行，subagentThinking 才落呼吸弧行）。 */
 interface ActivityRow {
   kind: 'compacting' | 'bash' | 'waiting' | 'thinking' | 'settling'
@@ -183,7 +183,7 @@ interface ActivityRow {
 }
 
 /** 待发队列条目计数（chip 口径，[compact-defer-composer-queue §2.1 → u3c 内核化]）：
- *  数据源 = session.delivery 帧投影（内核权威），口径与 composer 队列区（useQueueRows）同源
+ *  数据源 = session.delivery 帧派生视图（内核权威），口径与 composer 队列区（useQueueRows）同源
  *  ——谓词 = core deliveryQueueEntries（U20 下沉唯一定义点），非 direct 车道且未 delivered
  *  的条目计待发。
  *  count === 0 时 chip 不渲染（活动行仍在，压缩状态本身独立成立）。 */

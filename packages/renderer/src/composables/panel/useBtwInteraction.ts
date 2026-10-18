@@ -2,16 +2,16 @@
  * btw 内联确认条编排（D8 降级路径，唯一形态）——useExtensionUI 的 btw 交互段拆分
  * （依赖方向单向：本文件 → useExtensionUI / useBtwTabData / btw-pending-bookkeeping，无环）。
  *
- * V4 核实③不成立（plan-store 单全局 focusedSid 焦点投影，第二 usePlanState 实例会把
+ * V4 核实③不成立（plan-store 单全局 focusedSid 焦点派生视图，第二 usePlanState 实例会把
  * 主审批条读分区抢走 → S9b 互不抢占被破坏；修复面在领地外 plan-store/use-plan-sync）
  * → 按设计 D8 降级路径：五类请求（ask-user 富表单 / scheduler 表单 / plan 审批 /
  * 权限审批 / confirm·input·editor 简单 dialog）统一由 drawer 内联确认条独立轻实现
  * 呈现，富表单降档（choice→选项按钮、text→单行输入、schedule→预填草稿一键确认、
- * plan→三键+单行意见、editor→单行输入），**不回退主视图模态面**；降档契约登记于
+ * plan→三键+单行意见、editor→单行输入），**不回退主视图模态范围**；降档契约登记于
  * 实施计划偏差表。提交回路契约与降级态同源：走 D8 终态机表（useBtwTabData 簿记）；
  * 投递失败可重试（仅限未送达/未终结 requestId）；已终结 requestId 的应答丢弃并提示失效。
  *
- * 并发：本编排只读 vid 分区（store 分区 + 模块级簿记），主视图三模态面读主 sid 分区
+ * 并发：本编排只读 vid 分区（store 分区 + 模块级簿记），主视图三模态范围读主 sid 分区
  * ——两面同屏互不抢占、提交态按表单实例/vid 隔离（S9b）。
  */
 import { computed, watch, type Ref } from 'vue'
@@ -38,7 +38,7 @@ export interface BtwBarOption {
   description?: string
 }
 
-/** 降档 schedule 草稿（本地同形：ScheduleDraft 的消费面字段子集） */
+/** 降档 schedule 草稿（本地同形：ScheduleDraft 的消费方字段子集） */
 export interface BtwScheduleDraft {
   kind: 'once' | 'recurring'
   schedule: string
@@ -48,7 +48,7 @@ export interface BtwScheduleDraft {
   expires?: string
 }
 
-/** 降档表单问题（本地同形守卫收窄后的渲染面） */
+/** 降档表单问题（本地同形检查收窄后的渲染范围） */
 export interface BtwBarFormQuestion {
   type: 'choice' | 'text' | 'schedule'
   header?: string
@@ -59,7 +59,7 @@ export interface BtwBarFormQuestion {
   initial?: BtwScheduleDraft
 }
 
-/** schedule 草稿形状守卫（结构化收窄，禁 any；缺字段 = 不可降级确认，走取消支） */
+/** schedule 草稿形状检查（结构化收窄，禁 any；缺字段 = 不可降级确认，走取消支） */
 function toScheduleDraft(v: unknown): BtwScheduleDraft | null {
   if (typeof v !== 'object' || v === null) return null
   const d = v as Record<string, unknown>
@@ -81,7 +81,7 @@ function toBarQuestionKind(t: unknown): 'choice' | 'text' | 'schedule' | null {
   return null
 }
 
-/** 公共基底提取（header/question 双守卫；两者皆缺 = 非法项） */
+/** 公共基底提取（header/question 双检查；两者皆缺 = 非法项） */
 function toBarQuestionBase(
   q: Record<string, unknown>,
   kind: 'choice' | 'text' | 'schedule',
@@ -92,7 +92,7 @@ function toBarQuestionBase(
   return { type: kind, ...(header !== undefined ? { header } : {}), question }
 }
 
-/** choice 选项数组归一（非法项剔除——label 守卫；非数组/无有效项 = 空数组） */
+/** choice 选项数组归一（非法项剔除——label 检查；非数组/无有效项 = 空数组） */
 function toBarOptions(v: unknown): BtwBarOption[] {
   const out: BtwBarOption[] = []
   if (!Array.isArray(v)) return out
@@ -385,7 +385,7 @@ export function useBtwInteraction(vidRef: Ref<string | null>) {
     if (other.length > 0) answers[`${key}__other`] = other
   }
 
-  /** plan 审批降档回传（payload 形状 = extension-protocol PlanReviewResponse 判别联合——契约直引，手工序列化走 respond 通道；revise 单行意见 = 降档契约登记面；dismiss = 协议第三键搁置（非破坏），与主审批面同键集，无评论负载） */
+  /** plan 审批降档回传（payload 形状 = extension-protocol PlanReviewResponse 判别联合——契约直引，手工序列化走 respond 通道；revise 单行意见 = 降档契约登记清单；dismiss = 协议第三键搁置（非破坏），与主审批范围同键集，无评论负载） */
   function submitPlan(decision: 'approve' | 'revise' | 'dismiss'): void {
     const payload =
       decision === 'approve'

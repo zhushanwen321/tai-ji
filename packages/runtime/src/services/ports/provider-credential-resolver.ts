@@ -1,10 +1,10 @@
 /**
- * Provider 凭据域 ports —— 「给我 providerId、还你生效凭据」的唯一读取入口（D3 收口）。
+ * Provider 凭据域 ports —— 「给我 providerId、还你生效凭据」的唯一读取入口（D3 收敛）。
  *
  * 🔒 三层架构：services 定义 port，services/auth/provider-credential-resolver.ts 实现。
  * 背景：凭据读取历史上散落成 5 条互不知情的解析链（quota 私有三源链 / handleDiscoverModels
  * 只查 models.json / pi-provider-store 私有裸读 auth.json / AuthService 单源 / listProviders
- * 内联判定），本 port 是收口后的唯一通道，新场景不得再自建解析链。
+ * 内联判定），本 port 是收敛后的唯一通道，新场景不得再自建解析链。
  *
  * 消费方（后续迁移单元接线，迁移完成前不要提前改消费点）：
  * - 链 1 QuotaService.getCredential 的 auth.json / models.json 两段 → resolveProviderCredential
@@ -14,7 +14,7 @@
  * - 链 5 provider-config-helper.listProviders 的 apiKeySet 判定 → listCredentialBackedProviderIds
  *
  * 双形态存在的理由：listProviders / findValidDefaultModel 是**同步热路径**，若只有 async
- * 形态，调用方会继续内联同步拷贝（收口失效）；两形态在实现层共享同一份源优先级声明。
+ * 形态，调用方会继续内联同步拷贝（收敛失效）；两形态在实现层共享同一份源优先级声明。
  * 本文件只放类型，不得 value import services/infra（C-comm-03）。
  */
 
@@ -69,7 +69,7 @@ export interface IProviderCredentialResolver {
    *    provider 级 baseUrl——未配网关的内置 provider，此值即 pi 实际生效值。
    * ③ 两级皆无值 → undefined（消费方按「无生效 baseUrl」处置，不猜测默认值）。
    *
-   * 与凭据方法同源收口的理由：消费方（如 TTS 供应商联动的 baseUrl 预填）需要的是
+   * 与凭据方法同源收敛的理由：消费方（如 TTS 供应商联动的 baseUrl 预填）需要的是
    * 「provider 实际生效值」，port 文件头已明令新场景不得再自建解析链。
    */
   resolveProviderBaseUrl(providerId: string): string | undefined

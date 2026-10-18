@@ -45,14 +45,14 @@ export interface SubagentInFlightReport {
  */
 export const INFLIGHT_REPORT_ACK = '{"ack":true}' as const
 
-/** 运行时形状守卫（信任边界：帧内容来自 select 通道 payload，LLM/外部可控 JSON）。 */
+/** 运行时形状检查（信任边界：帧内容来自 select 通道 payload，LLM/外部可控 JSON）。 */
 
 function isRecord(v: unknown): v is Record<string, unknown> {
   return typeof v === 'object' && v !== null && !Array.isArray(v)
 }
 
 /**
- * SubagentInFlightReport 形状守卫：inFlight 非负整数、emittedAt 数字、sessionId
+ * SubagentInFlightReport 形状检查：inFlight 非负整数、emittedAt 数字、sessionId
  * 缺席或 string。event-adapter（u7b）路由分支消费；非法帧返回 false（调用方丢弃，
  * 不抛错不镜像）。
  */
@@ -64,7 +64,7 @@ export function isSubagentInFlightReport(v: unknown): v is SubagentInFlightRepor
   return true
 }
 
-/** 确认回包形状守卫（pi 侧 reporter 消费——非本字符串即未确认，折叠重试）。 */
+/** 确认回包形状检查（pi 侧 reporter 消费——非本字符串即未确认，折叠重试）。 */
 export function isInFlightReportAck(v: unknown): v is typeof INFLIGHT_REPORT_ACK {
   return v === INFLIGHT_REPORT_ACK
 }

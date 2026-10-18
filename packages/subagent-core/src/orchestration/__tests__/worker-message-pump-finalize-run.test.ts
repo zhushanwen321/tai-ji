@@ -124,7 +124,7 @@ function appendedUnregister(deps: ReturnType<typeof makeTracingDeps>): { customT
 // ── finalizeRun 直测 ─────────────────────────────────────────
 
 
-/** [W2/V1] 六态机引导：journal 首帧（run-created）落账——finalizeRun/abortRun 等
+/** [W2/V1] 六态机引导：journal 首帧（run-created）写入 journal 记录——finalizeRun/abortRun 等
  *  活体终局入口的六态机裁决要求 created→dispatched 已在链上（生产链路由
  *  runWorkflow 正点发射承接；直测终局入口的用例经本 helper 补齐同一引导）。 */
 async function seedRunCreated(run: WorkflowRun): Promise<void> {
@@ -132,7 +132,7 @@ async function seedRunCreated(run: WorkflowRun): Promise<void> {
 }
 
 describe("finalizeRun（D5-② 单写点直测）", () => {
-  it("[W2/V1] 五步恰好一次且有序：run-settled 六态机落账 → workflow-record 终态条目 → save → pending:unregister 直落 → onRunDone", async () => {
+  it("[W2/V1] 五步恰好一次且有序：run-settled 六态机写入 journal 记录 → workflow-record 终态条目 → save → pending:unregister 直落 → onRunDone", async () => {
     const run = makeRealRun("wf-fin-1");
     const deps = makeTracingDeps();
     await seedRunCreated(run);
@@ -253,7 +253,7 @@ describe("finalizeRun（D5-② 单写点直测）", () => {
     const ok = await finalizeRun(run, deps, "failed", { context: "test" });
 
     expect(ok).toBe(false);
-    // 让位路径不落账：注册表无条目、不 save、不直落、不通知
+    // 让位路径不写入 journal 记录：注册表无条目、不 save、不直落、不通知
     expect(settledRecordOf(run.runId)).toBeUndefined();
     expect(deps.store.save).not.toHaveBeenCalled();
     expect(appendedUnregister(deps)).toBeUndefined();
@@ -304,7 +304,7 @@ describe("finalizeRun（D5-② 单写点直测）", () => {
 
     expect(ok).toBe(true);
     expect(isRunSettled(run)).toBe(true);
-    // onRunDone 不被直落故障吞掉（终局链依赖其收口）
+    // onRunDone 不被直落故障吞掉（终局链依赖其收尾）
     expect(deps.onRunDone).toHaveBeenCalledTimes(1);
     const errLogs = errorSpy.mock.calls.map((c) => String(c[0]));
     expect(
@@ -347,7 +347,7 @@ describe("finalizeRun（D5-② 单写点直测）", () => {
     // 直落 entry 追加进权威 entries（pi.appendEntry 同步入账的生产语义）
     entries.push({ customType: appended!.customType, data: appended!.data });
 
-    // 消费面（goal 守卫 / pending_notifications 工具 / sweep 差集输入）现算：
+    // 消费方（goal 检查 / pending_notifications 工具 / sweep 差集输入）现算：
     // register 已被直落注销 entry 抵消 → 无活跃条目（重复 unregister 天然无重复语义）
     expect(collectActivePendingIds(entries).has("wf-fin-race")).toBe(false);
   });
@@ -384,7 +384,7 @@ describe("budget_limited 终态路径（dispatchAgentCall → finalizeRun）", (
     //（async await 边沿会推出存量 flushMicrotasks 窗口）。
     await flushMicrotasks(40);
 
-    // [W2/V1] 终局断言换源（六态机落账——两态机字段停更）
+    // [W2/V1] 终局断言换源（六态机写入 journal 记录——两态机字段停更）
     expect(isRunSettled(run)).toBe(true);
     expect(settledRecordOf(run.runId)).toMatchObject({ outcome: "failed", errorCode: "budget_limited" });
     // save 3 次 = dispatch 启动快照（8d52c0035 dispatch-time save，running 步骤

@@ -12,7 +12,7 @@
 // （调用方按校验失败处置——这两类值本就不可 IPC 传输，出现在比对面即编程错误）。
 //
 // 落位独立模块：消费方含 worker-message-pump（回放比对）与 terminal-actions
-// （agent-started 入参全文落账——canonical 形态与比对管道同源，parse 往返后
+// （agent-started 入参全文写入 journal 记录——canonical 形态与比对管道同源，parse 往返后
 // 再 canonical 化幂等）。两文件间已有 pump → terminal-actions 的依赖边，
 // 工具留在任一侧都会形成反向 import 成环（原实装居 pump、注释说明的正是该
 // 约束；第二消费方出现时抽出，依赖图保持无环）。

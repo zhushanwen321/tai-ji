@@ -144,7 +144,7 @@ describe("[U-A6] tool_execution_update 到达形态与活性信号", () => {
       // 工具静默楔死：1 小时内零 update（真实守护窗 30min 远小于该时间）
       vi.advanceTimersByTime(3_600_000);
 
-      // 启动那条至多把守卫多等一次窗口；1h 静默期内活性信号不增殖 → 守卫照常回收
+      // 启动那条至多把检查多等一次窗口；1h 静默期内活性信号不增殖 → 检查照常回收
       expect(h.events).toEqual([
         { type: "tool_start", toolName: "bash", args: undefined },
         ACTIVITY_EVENT,
@@ -178,8 +178,8 @@ describe("[U-A6] tool_execution_update 到达形态与活性信号", () => {
 // parentToolCallId（pi dist/core/nested-tool-calls.js 三处 emit 点，嵌套 id 形态
 // `${parentToolCallId}/${n}`），且嵌套调用不落 transcript（pi dist/core/extensions/
 // types.d.ts executeTool 契约「It does not appear in the transcript」）。过滤语义 =
-// 与 transcript 投影对齐：reload 后嵌套调用只有外层一个工具块，live 期放行 start/end
-// 会经本翻译层各产独立 tool_start/tool_end → 投影不一致（AGENTS.md 关键规则 9 /
+// 与 transcript 派生视图对齐：reload 后嵌套调用只有外层一个工具块，live 期放行 start/end
+// 会经本翻译层各产独立 tool_start/tool_end → 派生视图不一致（AGENTS.md 关键规则 9 /
 // codemode 设计 §3.3 D4）。
 //
 // start 与 end 必须同判同滤：仅滤 start 会让嵌套 end 对未注册 toolCallId 发出孤儿
@@ -260,13 +260,13 @@ describe("[codemode u5 / D4] 嵌套工具调用事件过滤（表驱动）", () 
   });
 });
 
-// [subagent 投影丢失修复] tool_execution_end result 的 content 块形状透传（表驱动）。
+// [subagent 派生视图丢失修复] tool_execution_end result 的 content 块形状透传（表驱动）。
 //
 // 丢失形态锚定：subagent 会话图片可见性依赖 tool_end.result.content 里的 image 块
-// 原样透传（下游 = journal 重放 + GUI 投影的提取源）。本层为逐字透传层——result
+// 原样透传（下游 = journal 重放 + GUI 派生视图的提取源）。本层为逐字透传层——result
 // 不压缩不改写，任何形状（纯文本 / 纯 image / 混合交错）逐块保留；此处表驱动锁定
 // 三种形状，防未来「翻译层顺手归一」回归（归一 = image 块丢失）。
-describe("[subagent 投影丢失修复] tool_execution_end result content 形状透传（表驱动）", () => {
+describe("[subagent 派生视图丢失修复] tool_execution_end result content 形状透传（表驱动）", () => {
   const IMG = { type: "image", data: "aGVsbG8taW1hZ2U=", mimeType: "image/png" };
 
   const ROWS: Array<{ name: string; content: unknown[]; details?: unknown }> = [
@@ -306,7 +306,7 @@ describe("[subagent 投影丢失修复] tool_execution_end result content 形状
       if (row.details !== undefined) {
         expect(toolEnd?.result?.details).toEqual(row.details);
       }
-      // record（journal 重放面）同样保留 image 块——GUI reload 腿的提取源
+      // record（journal 重放面）同样保留 image 块——GUI reload 路径的提取源
       const rec = h.record.turns[0]?.toolCalls[0];
       expect(rec?.result?.content).toEqual(row.content);
     });

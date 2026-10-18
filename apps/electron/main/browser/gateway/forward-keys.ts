@@ -35,7 +35,7 @@
 export type ContainerShortcutType = 'close' | 'toggle-bottom-drawer'
 
 /** before-input-event 的 input 子集（Electron Input 的键判定相关字段） */
-export interface ForwardInput { // oe-exempt:20261003:framework:类型契约先行——容器/编排/注册表契约层，D1 下游单元即为消费面
+export interface ForwardInput { // oe-exempt:20261003:framework:类型契约先行——容器/编排/注册表契约层，D1 下游单元即为消费方
   key: string
   control?: boolean
   meta?: boolean
@@ -49,7 +49,7 @@ export type ForwardedKey =
   | { kind: 'app'; accelerator: string }
 
 /** 解析后的 accelerator（mod 前缀组合） */
-export interface ParsedAccelerator { // oe-exempt:20261003:framework:类型契约先行——容器/编排/注册表契约层，D1 下游单元即为消费面
+export interface ParsedAccelerator { // oe-exempt:20261003:framework:类型契约先行——容器/编排/注册表契约层，D1 下游单元即为消费方
   key: string
   shift: boolean
 }
@@ -120,13 +120,13 @@ export function matchForwardedKey(input: ForwardInput, accelerators: Iterable<st
 }
 
 /** 清单变更报告（accepted = 实际入清单；rejected = 违反入清单约束被拒） */
-export interface ForwardKeyReport { // oe-exempt:20261003:framework:类型契约先行——容器/编排/注册表契约层，D1 下游单元即为消费面
+export interface ForwardKeyReport { // oe-exempt:20261003:framework:类型契约先行——容器/编排/注册表契约层，D1 下游单元即为消费方
   accepted: string[]
   rejected: string[]
 }
 
 /** 增量变更（注册/注销；§7.4「注册/注销时增量」触发面） */
-export interface ForwardKeyDelta { // oe-exempt:20261003:framework:类型契约先行——容器/编排/注册表契约层，D1 下游单元即为消费面
+export interface ForwardKeyDelta { // oe-exempt:20261003:framework:类型契约先行——容器/编排/注册表契约层，D1 下游单元即为消费方
   add?: readonly string[]
   remove?: readonly string[]
 }
@@ -188,12 +188,12 @@ export class ForwardKeyRegistry {
 export const forwardKeyRegistry = new ForwardKeyRegistry()
 
 /** before-input-event 的 event 子集 */
-export interface ForwardKeyEvent { // oe-exempt:20261003:framework:类型契约先行——容器/编排/注册表契约层，D1 下游单元即为消费面
+export interface ForwardKeyEvent { // oe-exempt:20261003:framework:类型契约先行——容器/编排/注册表契约层，D1 下游单元即为消费方
   preventDefault(): void
 }
 
 /** 转发目标窗口（取自 IWindowManager.get(windowId)） */
-export interface ForwardBridgeTargetWindow { // oe-exempt:20261003:framework:类型契约先行——容器/编排/注册表契约层，D1 下游单元即为消费面
+export interface ForwardBridgeTargetWindow { // oe-exempt:20261003:framework:类型契约先行——容器/编排/注册表契约层，D1 下游单元即为消费方
   isDestroyed(): boolean
   webContents: {
     send(channel: string, payload: unknown): void
@@ -201,7 +201,7 @@ export interface ForwardBridgeTargetWindow { // oe-exempt:20261003:framework:类
 }
 
 /** view 的 webContents 子集（结构化接口：真实 WebContents 与测试桩均适用） */
-export interface ForwardBridgeWebContents { // oe-exempt:20261003:framework:类型契约先行——容器/编排/注册表契约层，D1 下游单元即为消费面
+export interface ForwardBridgeWebContents { // oe-exempt:20261003:framework:类型契约先行——容器/编排/注册表契约层，D1 下游单元即为消费方
   on(event: 'before-input-event', listener: (event: ForwardKeyEvent, input: ForwardInput) => void): unknown
 }
 

@@ -8,13 +8,13 @@
  *   （原 W3TC3 用「不负责 sanitize sessionId」固化缺陷，已删除；改用纵深防御校验）
  *
  * 覆盖 getPiAgentDir（方案 B 布局对齐 pi：`<dataDir>/agent`）：
- * - env 注入 TAIJI_AGENT_DATA_DIR → `<dataDir>/agent`（旧两级布局已退役；正向断言即回归守卫）
+ * - env 注入 TAIJI_AGENT_DATA_DIR → `<dataDir>/agent`（旧两级布局已退役；正向断言即回归检查）
  * - 不传 env → 与 getDataDir() 推导一致
  * - env 无 TAIJI_AGENT_DATA_DIR → `~/.taiji-dev/agent`（缺省反转后的字面路径断言——
- *   缺省 = dev 目录（fail-safe default），prod 形态由打包 main 显式钉死 ~/.taiji，
+ *   缺省 = dev 目录（fail-safe default），prod 形态由打包 main 显式固定为 ~/.taiji，
  *   不得回归旧缺省 ~/.taiji）
  *
- * 覆盖 getDataDir prod 值准入守卫（C-proc-26 第二支柱，词法判定不触磁盘）：
+ * 覆盖 getDataDir prod 值准入检查（C-proc-26 第二支柱，词法判定不触磁盘）：
  * - prod 树值 + 无 PACKAGED → throw；+ PACKAGED=1 → 放行
  * - dev/tmp/未设/空串 → 不触发；词法出入树 resolve 消解后判定；前缀混淆 sep 边界放行
  * - 大小写变体 ~/.TAIJI → 判定双侧 casefold（大小写不敏感卷上词法树外 = 磁盘命中 prod）
@@ -59,7 +59,7 @@ describe('getAttachmentsDir（W3 IF4 纯函数）', () => {
 describe('getPiAgentDir（方案 B 布局对齐 pi）', () => {
   it('env 注入 TAIJI_AGENT_DATA_DIR → path.join(dataDir, "agent")（单层，无中间层）', () => {
     const env = { TAIJI_AGENT_DATA_DIR: '/custom/data' }
-    // 回归守卫：旧两级布局会返回带一层中间目录的路径（<dataDir>/<层>/agent），
+    // 回归检查：旧两级布局会返回带一层中间目录的路径（<dataDir>/<层>/agent），
     // 与上面的期望值不同 → 退化必红，无需再写第二条反向断言。
     expect(getPiAgentDir(env)).toBe(join('/custom/data', 'agent'))
   })
@@ -69,7 +69,7 @@ describe('getPiAgentDir（方案 B 布局对齐 pi）', () => {
   })
 
   it('env 无 TAIJI_AGENT_DATA_DIR → 缺省 ~/.taiji-dev/agent（fail-safe default，非 prod ~/.taiji、非系统 pi 的 ~/.pi/agent）', () => {
-    // 纯路径推导，不触碰磁盘。缺省反转回归守卫：旧缺省 ~/.taiji 必红。
+    // 纯路径推导，不触碰磁盘。缺省反转回归检查：旧缺省 ~/.taiji 必红。
     expect(getPiAgentDir({})).toBe(join(homedir(), '.taiji-dev', 'agent'))
     expect(getPiAgentDir({})).not.toBe(join(homedir(), '.taiji', 'agent'))
     expect(getPiAgentDir({})).not.toBe(join(homedir(), '.pi', 'agent'))
@@ -86,8 +86,8 @@ describe('getTtsCacheDir（TTS 朗读缓存，设计 §7.4）', () => {
   })
 })
 
-describe('getDataDir prod 值准入守卫（C-proc-26 第二支柱）', () => {
-  /** 守卫判定纯词法（resolve + 真实 homedir 树内判），构造值不触磁盘 */
+describe('getDataDir prod 值准入检查（C-proc-26 第二支柱）', () => {
+  /** 检查判定纯词法（resolve + 真实 homedir 树内判），构造值不触磁盘 */
   const PROD_ROOT = join(homedir(), '.taiji')
   const DEV_ROOT = join(homedir(), '.taiji-dev')
 
@@ -102,7 +102,7 @@ describe('getDataDir prod 值准入守卫（C-proc-26 第二支柱）', () => {
     expect(getDataDir({ TAIJI_AGENT_DATA_DIR: PROD_ROOT, TAIJI_AGENT_PACKAGED: '1' })).toBe(PROD_ROOT)
   })
 
-  it('dev 树值 / tmp 值 / 未设 / 空串 → 不触发守卫（缺省或原值）', () => {
+  it('dev 树值 / tmp 值 / 未设 / 空串 → 不触发检查（缺省或原值）', () => {
     expect(getDataDir({ TAIJI_AGENT_DATA_DIR: DEV_ROOT })).toBe(DEV_ROOT)
     expect(getDataDir({ TAIJI_AGENT_DATA_DIR: '/tmp/anything' })).toBe('/tmp/anything')
     expect(getDataDir({})).toBe(DEV_ROOT)

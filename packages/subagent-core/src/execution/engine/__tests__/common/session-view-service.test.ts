@@ -1,7 +1,7 @@
 // session-view-service.test.ts —— D1 journal 读取链收敛的守护测试。
 //
 // 三视角：①构建者——三级降级编排（①native ②journal ③outcome-only）逐级降级、
-// registry 分发查表；②使用者——投影 parity（zcode 现役 journal 形态的新旧链
+// registry 分发查表；②使用者——派生视图 parity（zcode 现役 journal 形态的新旧链
 // 等价：coarse 成功两事件 → ③级、失败 error 事件 → 物化 assistant）；
 // ③观察者——message_end 带 error 的记账语义（门②补录样本：现役 zcode 不产出，
 // 作为守护实现的回归校验数据源）。
@@ -68,7 +68,7 @@ async function writeJournal(path: string, events: AgentEvent[]): Promise<void> {
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 // ============================================================
-// 单一 handle guard（双守卫收敛点）
+// 单一 handle guard（双检查收敛点）
 // ============================================================
 
 describe("parseEngineHandle（唯一 guard）", () => {
@@ -201,7 +201,7 @@ describe("降级链编排", () => {
     ).rejects.toBeInstanceOf(RecordEngineIdentityError);
   });
 
-  it("①级命中：registry 查表分发到 native reader，SessionView 投影（usage 挂末 turn）", async () => {
+  it("①级命中：registry 查表分发到 native reader，SessionView 派生视图（usage 挂末 turn）", async () => {
     const view: SessionView = {
       engineId: "zcode",
       sessionId: "sess-1",
@@ -344,12 +344,12 @@ describe("降级链编排", () => {
       makeRecord({ result: "outcome text" }),
       dataDir,
     );
-    // 不是「仅 task」空壳：①级空 turn 被判不可用 → ③级占位投影
+    // 不是「仅 task」空壳：①级空 turn 被判不可用 → ③级占位派生视图
     expect(messages).toHaveLength(2);
     expect(messages[1]).toMatchObject({ role: "assistant", content: "outcome text" });
   });
 
-  it("①级混合 turn（含空 turn 但任一有实质内容）→ 不降级，真实内容原样投影", async () => {
+  it("①级混合 turn（含空 turn 但任一有实质内容）→ 不降级，真实内容原样映射", async () => {
     registerNativeSessionReader("zcode", async () => ({
       engineId: "zcode",
       sessionId: "sess-1",
@@ -360,7 +360,7 @@ describe("降级链编排", () => {
       source: "native",
     }));
     const messages = await readSubagentHistoryMessages(makeRecord(), dataDir);
-    // task + 两个 turn（空 turn 也随①级放行原样投影）
+    // task + 两个 turn（空 turn 也随①级放行原样映射）
     expect(messages).toHaveLength(3);
     expect(messages[2]).toMatchObject({ role: "assistant", content: "real answer" });
   });
@@ -425,10 +425,10 @@ describe("reader registry 分发", () => {
 });
 
 // ============================================================
-// 投影 parity（zcode 现役 journal 形态，新旧链等价）
+// 派生视图 parity（zcode 现役 journal 形态，新旧链等价）
 // ============================================================
 
-describe("②级重放投影 parity（基准 = 收敛前 runtime 手写链）", () => {
+describe("②级重放派生视图 parity（基准 = 收敛前 runtime 手写链）", () => {
   /** 走完整②级链（真 zcode reader ①级 miss → journal 重放）。 */
   async function replayViaJournal(
     events: AgentEvent[],
@@ -448,7 +448,7 @@ describe("②级重放投影 parity（基准 = 收敛前 runtime 手写链）", 
   }
 
   it("成功 journal（coarse 两事件：message_end+turn_end）→ 无 assistant 内容，降③级 outcome-only", async () => {
-    // 旧链推演：applyMessageEnd 无未闭合 turn → usage 丢弃；sawAssistantContent=false → ③级
+    // 旧链推演：applyMessageEnd 无未完成 turn → usage 丢弃；sawAssistantContent=false → ③级
     const messages = await replayViaJournal(
       [
         { type: "message_end", usage: { input: 12_599, output: 17, cacheRead: 512, cacheWrite: 0 } },
@@ -647,7 +647,7 @@ describe("message_end 携带 error 的记账语义（现役 zcode 不产出，�
       },
     });
     const messages = await readSubagentHistoryMessages(record, dataDir);
-    // turn_end 清 lastError（瞬态恢复语义，C5 reducer 守护行为）——投影无 error 记账
+    // turn_end 清 lastError（瞬态恢复语义，C5 reducer 守护行为）——派生视图无 error 记账
     expect(messages[1]?.status).toBe("complete");
     expect(messages[1]?.error).toBeUndefined();
   });

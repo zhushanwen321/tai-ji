@@ -270,24 +270,24 @@ describe('Project store: CRUD + 持久化', () => {
     expect(store.projects).toHaveLength(2) // 默认 + B
     expect(store.activeProjectId).toBe(DEFAULT_PROJECT_ID) // 回落默认，非首个
 
-    // 默认项目（DEFAULT_PROJECT_ID）不可删除（review MF-1 守卫：未归类 session 的兜底聚合）
+    // 默认项目（DEFAULT_PROJECT_ID）不可删除（review MF-1 检查：未归类 session 的兜底聚合）
     store.removeProject(DEFAULT_PROJECT_ID)
     expect(store.projects.map((p) => p.id)).toEqual([DEFAULT_PROJECT_ID, b])
 
     store.removeProject(b)
     expect(store.projects).toHaveLength(1) // 只剩默认（保底不删最后一个）
     store.removeProject(store.projects[0]!.id)
-    expect(store.projects).toHaveLength(1) // 默认项目守卫再拦一次
+    expect(store.projects).toHaveLength(1) // 默认项目检查再拦一次
   })
 
-  it('renameProject：命名项目改名生效；默认项目拒改（nameless 身份守卫，双保险见组件侧）', () => {
+  it('renameProject：命名项目改名生效；默认项目拒改（nameless 身份检查，双保险见组件侧）', () => {
     const store = useProjectStore()
     const id = store.addProject('A')
 
     store.renameProject(id, 'A2')
     expect(store.projects.find((p) => p.id === id)!.name).toBe('A2')
 
-    store.renameProject(id, '   ') // 空名守卫
+    store.renameProject(id, '   ') // 空名检查
     expect(store.projects.find((p) => p.id === id)!.name).toBe('A2')
 
     store.renameProject(DEFAULT_PROJECT_ID, '改默认')

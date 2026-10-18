@@ -18,7 +18,7 @@
  * - 退出命令：确认后 click → command('session.abortPlan')；失败 → E9 错误行就近呈现
  * - 右区三分支：ready 三键（修订/执行/搁置）/ revising / degraded（稳定窗放行后）/ 隐藏（仅左区）
  * - 窄窗换行策略（F-R2-2）：右区 grow+flex-wrap 反重叠契约 + 左区退出 shrink-0
- *   （jsdom 无布局，class 断言守卫策略不被改回 flex-1 收缩形态）
+ *   （jsdom 无布局，class 断言检查策略不被改回 flex-1 收缩形态）
  * - 场景 7（A7 降级 L1，DOM 存在性）：退出（isActive=false）后 PlanModeBar 不在 DOM；
  *   PanelContainer 无横幅/审批条挂载残留（findComponent 断言 PlanReviewBar 不在其树内）
  * - 挂载位：Panel 内 plan-mode-bar 行位于 .composer-band 之前（composer 正上方）
@@ -48,7 +48,7 @@ import { createPinia, setActivePinia } from 'pinia'
 import { InternalEventBus } from '@taiji/core'
 import type { PlanStateView } from '@taiji/shared'
 
-// ── mock ①：command（plan-store 首拉 RPC + 退出 session.abortPlan）——spread actual ──
+// ── mock ①：command（plan-store 首次拉取 RPC + 退出 session.abortPlan）——spread actual ──
 const commandMock = vi.hoisted(() => vi.fn())
 vi.mock('@taiji/core/transport/api', async (importActual) => {
   const actual = await importActual<typeof import('@taiji/core/transport/api')>()
@@ -202,7 +202,7 @@ describe('承接清单① 常驻挂载订阅（M1 硬约束）', () => {
     expect(wrapper.find('[data-testid="plan-review-approve"]').exists()).toBe(false)
 
     // isActive 帧到达（派生视图链广播）→ 整行渲染 → PlanReviewBar 创建。其 usePlanState
-    // watch immediate 会再触发一次首拉（生产语义 = 拉 runtime 最新快照，bus 内存态即
+    // watch immediate 会再触发一次首次拉取（生产语义 = 拉 runtime 最新快照，bus 内存态即
     // 权威源、不回退；mock 持久返回旧快照会造成假覆盖）——mock 演进到最新帧对齐生产。
     // 快照权威同步演进：PlanReviewBar 新实例 subscribe 拉取 getPendingRequests，runtime
     // 挂起表含 'pr-1'（extension-ui kind 事件与广播同源缓存）——空快照会让 retainOnly
@@ -233,7 +233,7 @@ describe('承接清单② focusedSid 注入迁移', () => {
     expect(usePlanStore().focusedSid).toBe(SID)
   })
 
-  it('首拉触发（loadPlanState RPC 随挂载发出）', async () => {
+  it('首次拉取触发（loadPlanState RPC 随挂载发出）', async () => {
     await mountBar()
     expect(commandMock.mock.calls.some((c) => c[0] === 'session.getPlanState')).toBe(true)
   })
@@ -457,7 +457,7 @@ describe('右区三分支（PlanReviewBar 情境渲染，宿主行内）', () =>
   })
 })
 
-describe('窄窗换行策略（F-R2-2 反重叠回归守卫）', () => {
+describe('窄窗换行策略（F-R2-2 反重叠回归检查）', () => {
   it('右区 = grow + flex-wrap（basis max-content）：窄窗放不下整体换行而非收缩覆盖左区', async () => {
     const wrapper = await mountBar(viewOf({ state: 'reviewing' }))
     emitPlanReviewRequest('pr-1')

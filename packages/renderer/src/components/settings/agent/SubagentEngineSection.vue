@@ -3,7 +3,7 @@
        Select w160）。loadError 行形态遵循 RD-4#8（卡内 padding 10/8/4 绝对 px + text-2xs
        令牌），重试钮保持 W2 卡内小钮档。 -->
   <GroupCard :title="t('settings.subagentEngine.title')">
-    <!-- RD-4#8：读配置失败常驻提示（默认值非已存值）+ 重试；控件禁用直到重拉成功 -->
+    <!-- RD-4#8：读配置失败常驻提示（默认值非已存值）+ 重试；控件禁用直到重新拉取成功 -->
     <div
       v-if="loadError"
       data-testid="subagent-engine-load-error"
@@ -108,7 +108,7 @@ const saving = engineField.busy
 
 /**
  * per-engine 默认模型字段（shallowRef：field 对象含内部 Ref（value/busy），深度 reactive 会
- * 把嵌套 Ref 自动解包、破坏 SettingField 语义，浅层只在重赋值（重拉）时触发行重算）。
+ * 把嵌套 Ref 自动解包、破坏 SettingField 语义，浅层只在重赋值（重新拉取）时触发行重算）。
  * load 后按「有清单的引擎」逐个创建；save resolve modelRef = 权威回填（runtime 校验后的 ref）。
  */
 const modelFields = shallowRef<Record<string, SettingField<string>>>({})
@@ -145,7 +145,7 @@ group.registerLoader(async () => {
   }
   modelFields.value = fields
 })
-/** 首拉/重试进行中禁用控件：堵「加载窗口内选中 → in-flight loader 用过期已存值 reset 回退显示」的竞态窗口 */
+/** 首次拉取/重试进行中禁用控件：堵「加载窗口内选中 → in-flight loader 用过期已存值 reset 回退显示」的竞态窗口 */
 const loading = ref(true)
 
 /** 加载/重试：字段便捷 load 注册进 group，loadAll 归并（任一失败置 loadError）。 */

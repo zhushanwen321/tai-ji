@@ -11,8 +11,8 @@
  *   PROJECTION_STATE_TYPES 头注；非「有快照 key 的全部类型」——occupancy/context/
  *   widget 等同样有快照 key 但属高频族，走限频）逐条 info；其余 state 类
  *   （occupancy / context / widget 等高频族）按 (sessionId, type) 滑窗限频——逐条会
- *   刷屏（后台 session 的 state 帧持续空投是设计内常态）。stream / transient 不观测：
- *   stream 空投由 ring 回放兜底（订阅时补）、transient 设计内可丢，观测它们只有噪声价值。
+ *   刷屏（后台 session 的 state 帧持续无订阅者投递——发布即丢弃、不补发——是设计内常态）。stream / transient 不观测：
+ *   stream 帧无订阅者时被丢弃、由 ring 回放补上（订阅时补），transient 设计内可丢，观测它们只有噪声价值。
  *
  * 正常路径（有 live 订阅者且送达成功）零日志——pull-push S5「无日志噪声」锚。
  * 日志经显式 logger 只落 runtime 主日志文件、不刷终端（排障入口 =
@@ -32,7 +32,7 @@ const PROJECTION_STATE_TYPES: ReadonlySet<string> = new Set([
   'session.commands',
 ])
 
-/** 非投影族 state 空投的限频窗口（同一 (sessionId, type) 窗口内只落首条 + 聚合行）。 */
+/** 非派生视图族 state 帧无订阅者投递的限频窗口（同一 (sessionId, type) 窗口内只落首条 + 聚合行）。 */
 const DELIVER_DROP_WINDOW_MS = 60_000
 
 /** per (sessionId, type) 限频窗口（session 销毁时随 clearBusObserveState 清理，键集有界）。 */

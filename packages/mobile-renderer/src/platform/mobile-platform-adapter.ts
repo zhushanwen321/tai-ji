@@ -75,7 +75,7 @@ class NativeWebSocketAdapter implements WebSocketLike {
   constructor(url: string) {
     this.native = new WebSocket(url)
     this.native.onopen = () => this.onopen?.()
-    // D8：关闭信息投影透传（code/reason/wasClean）——ws-client onclose 读 close 1001
+    // D8：关闭信息派生视图透传（code/reason/wasClean）——ws-client onclose 读 close 1001
     // 区分「服务重启中」与网络断；P6 探针证实浏览器 CloseEvent 可读该码
     this.native.onclose = (ev: CloseEvent) => this.onclose?.({ code: ev.code, reason: ev.reason, wasClean: ev.wasClean })
     this.native.onmessage = (ev: MessageEvent) => this.onmessage?.({ data: ev.data })

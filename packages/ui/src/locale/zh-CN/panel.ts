@@ -81,7 +81,7 @@ export default {
     handoffExit: '退出交接模式',
     handoffBannerTitle: 'Handoff 交接',
     handoffBannerDesc: '发送后将生成会话摘要，交接给新会话继续',
-    // handoff 入口/发送守卫 toast（handoff-mode.ts enterGuard/beforeSend：源 session 流式中拦截）。
+    // handoff 入口/发送检查 toast（handoff-mode.ts enterGuard/beforeSend：源 session 流式中拦截）。
     // [HISTORICAL] key 自 D8 泛化即被引用但双侧 locale 漏定义（toast 显裸 key），同批补齐
     handoffBusy: '当前会话正在处理中，暂无法交接',
     bashPlaceholder: '运行 bash 命令…（!! 前缀排除出上下文）',
@@ -690,8 +690,8 @@ export default {
     emptyFiltered: '当前过滤条件下无匹配行',
     // RPC 降级 banner（§3.1 失败路径：pi RPC 失败/非活跃 session 走文件直读，无实时增量）
     degradedFileSource: '来自磁盘文件（实时更新不可用）',
-    // B11 台账截断降级（软上限停采后提示台账不完整，truncated 正交字段消费文案）
-    truncatedLedger: '台账已达 5000 条上限，已停止追加',
+    // B11 条目清单截断降级（软上限停采后提示条目清单不完整，truncated 正交字段消费文案）
+    truncatedLedger: '条目清单已达 5000 条上限，已停止追加',
     // SYSTEM 无留痕降级（§3.1：留痕包未装/被禁/旧 session——现取通道在常驻扩展，接线前按钮置灰）
     systemNoTraceHint: '无留痕（该时段留痕 extension 未启用）',
     systemFetchCurrent: '现取当前值',
@@ -723,7 +723,7 @@ export default {
     inspectorCopied: '已复制',
     inspectorSubtitle: '来自 Trace 视图 · 选中 entry 的完整详情',
     inspectorRaw: '原始 entry JSON',
-    // [RD-2#5] safeJson 守卫文案：环形引用等不可序列化 / 超限截断
+    // [RD-2#5] safeJson 检查文案：环形引用等不可序列化 / 超限截断
     rawJsonUnserializable: '（内容无法序列化展示）',
     rawJsonTruncated: '…（内容过大，已截断）',
     // usage 行尾弱标注（互斥桶语义：cacheRead > input 是缓存命中的常态）

@@ -9,7 +9,7 @@
  *   options 归一 / method 超界恢复 + receivedAt）
  * - createCompanionDialogAdapters 投递层：TC5 无 sessionId 跳过；TC6 C4 四键排除
  *   （form ∨ askUser ∨ scheduleCreate ∨ planReview——统一表单/审批各归 useExtensionUI
- *   消费面，双壳固定同源）；TC10 onUiRequestExpired 撤窗（D2，requestId 反查 + miss noop）
+ *   消费方，双壳固定同源）；TC10 onUiRequestExpired 撤窗（D2，requestId 反查 + miss noop）
  * - transport 回传双通道（FR7/AC6/AC9）：TC7/TC8/TC8b 形状 + TC8c 未送达保留（M1/RD-3#1）
  *   + TC8d 通路级收尾锚点（ADR-0073 D4a：onPiResponseSettled 清在 delivered 判定之前）
  * - requestIdSessions 生命周期（G1 / memory-leak-remediation §3.4）：TC-G1a/b/d
@@ -313,7 +313,7 @@ describe('createCompanionDialogAdapters（C2/C3/C4 分流）', () => {
     vi.restoreAllMocks()
   })
 
-  it('TC5: 无 sessionId 事件跳过投递 + console.warn（双壳共用守卫）', () => {
+  it('TC5: 无 sessionId 事件跳过投递 + console.warn（双壳共用检查）', () => {
     const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
     const adapters = createCompanionDialogAdapters(bus)
     const handler = vi.fn()
@@ -332,7 +332,7 @@ describe('createCompanionDialogAdapters（C2/C3/C4 分流）', () => {
     const handler = vi.fn()
     const unsub = adapters.source.onUiRequest(handler)
 
-    // 四键逐键断言：各归 useExtensionUI 消费面（FormOverlay / PlanReviewBar / legacy 窗口期
+    // 四键逐键断言：各归 useExtensionUI 消费方（FormOverlay / PlanReviewBar / legacy 窗口期
     // 归一层），漏排除 = 空壳 dialog 误触 + 双 UI 并存（违反零重叠契约）
     const formKeys = ['form', 'askUser', 'scheduleCreate', 'planReview'] as const
     formKeys.forEach((key, i) => {

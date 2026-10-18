@@ -8,7 +8,7 @@
 //
 // 平台差异（相对桌面组装）：
 // - toast → 全局错误条（./error-bar 单槽单例；core toast 契约 { error, warning } 的移动
-//   呈现通道，remote-use A7/U14——revoke/stop/bash/compact 等 RPC 失败面对用户可见）
+//   呈现通道，remote-use A7/U14——revoke/stop/bash/compact 等 RPC 失败情形对用户可见）
 // - panel/navigation/hooks → no-op（移动壳无 panel/导航 store；SessionEntryPort 全成员
 //   可选缺省 no-op、链零新增步骤可跑，sessionEntry 订阅/LRU 步已接线——remote-use D2）
 // - turn 展开 → 壳内 per-session Map 分区（ADR-0049 范式；桌面 useTurnExpansion 的 mobile 子集）
@@ -60,7 +60,7 @@ const chatApiPort: ChatApiPort = {
   // 撤回已送达消息（session.revokeMessage RPC，消息撤回 D2）：实现在 session 域，
   // 经端口暴露给 useChat.revokeMessage 的已送达分支（与 subagentAction 的跨域暴露同理）
   revokeMessage: (sid, targetId) => sessionApi.revokeMessage(sid, targetId),
-  // 撤回在途条目（delivery.cancel RPC，内核 D6 统一入口的在途路由腿）
+  // 撤回在途条目（delivery.cancel RPC，内核 D6 统一入口的在途路由路径）
   cancelDelivery: (sid, clientUuid) => chatApi.cancelDelivery(sid, clientUuid),
   abort: chatApi.abort,
   compact: chatApi.compact,
@@ -167,7 +167,7 @@ export function createTurnExpansion(sessionId: Ref<string>) {
   }
 }
 
-// ── createUseSession（session 列表编排；panel/navigation/hooks 未接线面 no-op）────────
+// ── createUseSession（session 列表编排；panel/navigation/hooks 未接线点 no-op）────────
 
 const noop = (): void => {}
 
@@ -276,13 +276,13 @@ export async function createMobileTask(input: MobileNewTaskInput): Promise<Sessi
     await useChatInstance.send(result.session.id, result.migratedSegments)
   } catch (e) {
     // 降级策略：session 创建已成功，发送失败仅记录（乐观气泡由 core send 编排回滚），
-    // 不上抛——上抛会让表单误报「创建失败」，而实际失败面只是首条消息投递
+    // 不上抛——上抛会让表单误报「创建失败」，而实际失败情形只是首条消息投递
     console.error('[mobile-task] first message send failed:', e)
   }
   return result.session
 }
 
-// ── 导出（组件层消费面）──────────────────────────────────────────────
+// ── 导出（组件层消费方）──────────────────────────────────────────────
 // 仅暴露组件/测试实际消费的符号；useSessionInstance 与两个 api 端口是文件内组装细节，
 // 去 export 防「导出面 = API 面」的假象（外部断链由本文件 import 图自证）。
 
@@ -290,7 +290,7 @@ export { chatStore, sessionStore, useChatInstance }
 
 /**
  * 队列条目取消（remote-use D7/U10）：delivery.cancel RPC 透传（本文件 chatApiPort
- * 已接线的同一出口，QueueStrip 组件消费面）——内核收回-重投/不可撤判定全在 runtime
+ * 已接线的同一出口，QueueStrip 组件消费方）——内核收回-重投/不可撤判定全在 runtime
  * 单点，壳只透传 reply。
  */
 export function cancelDelivery(sessionId: string, clientUuid: string): Promise<DeliveryCancelReply> {
@@ -360,7 +360,7 @@ export function deleteSession(id: string): Promise<void> {
  * ② 12 步切入链（失败不阻断 revive：restore 成功 = runtime 侧 spawn+attach 已完成，
  *   revive 是 UI 死态清除，与切入成败解耦——不 revive 会留「进程已恢复、列表仍置灰」
  *   半完成窗口；降级出声对齐桌面 restoreSession 的 catch 分支）；
- * ③ revive（dead→idle 统一收口；非 dead 真态不被本地覆盖——core store.revive guard）。
+ * ③ revive（dead→idle 统一收尾；非 dead 真态不被本地覆盖——core store.revive guard）。
  */
 export async function restoreSession(id: string): Promise<void> {
   // 本文件构造 sessionApiPort 时必含 restoreSession 成员（上方实现对象字面量），构造性非空
@@ -370,7 +370,7 @@ export async function restoreSession(id: string): Promise<void> {
   } catch (e) {
     // 降级策略（对齐桌面 useSidebar.restoreSession 同分支）：切入失败不阻断 revive、
     // 不重抛——restore 成功后 revive 是 UI 死态清除，与切入成败解耦；一次性编排失败
-    // 用 console 留痕，不占用 core toast 通道的错误条单槽（错误条留给 core 失败面文案）
+    // 用 console 留痕，不占用 core toast 通道的错误条单槽（错误条留给 core 失败情形文案）
     console.warn(`[app-runtime.restoreSession] selectSession(${id}) failed after restore:`, e)
   }
   sessionStore.revive(id)

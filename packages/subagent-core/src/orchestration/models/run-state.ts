@@ -8,7 +8,7 @@
  * - error/scriptResult 仅终态有值（终局 run）
  * - 与 RunSpec 的区别：RunSpec 不可变（输入），RunExecutionSnapshot 可变（执行快照）
  *
- * [§2.1 注释回写] 本类型是**活体执行快照**（run 在内存中的状态面，TUI/GUI 投影读它），
+ * [§2.1 注释回写] 本类型是**活体执行快照**（run 在内存中的状态面，TUI/GUI 派生视图读它），
  * 生命周期判定的权威源是 record 事件流的 fold 与终局记录注册表（见 run-events.ts /
  * terminal-actions.ts）——本类型不承载生命周期轴（[D6(a)] status 字段已退役）。
  *
@@ -31,7 +31,7 @@ import type { DoneReason, WorkerLogEntry } from "./types.ts";
  * 不是「状态丢失 = 内存态权威」（详见 已归档设计档案 §2.1）。
  *
  * [D6(a)] 生命周期轴（status 字段）已退役：终局判定唯一走进程内终局记录注册表
- * （isRunSettled / settledRecordOf），展示投影走 runSummary（三态投影词表）——
+ * （isRunSettled / settledRecordOf），展示派生视图走 runSummary（三态派生视图词表）——
  * 本类型不再携带生命周期字段。
  */
 export interface RunExecutionSnapshot { // oe-exempt:20260929:framework:workflow/record 协议契约类型——ports 类型契约先行、单实现常态（dev-0.10.5 已验收代码 merge 带入）

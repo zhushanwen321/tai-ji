@@ -6,7 +6,7 @@
  * 增量、暴露读状态。原逻辑散落在三处：
  * - chat.ts：changeSetStatuses map + applyFileChanges + markChangeSetsSuperseded
  * - chat-readers.ts：mergeFileChanges（纯函数）
- * 此处收口为一个内聚模块。
+ * 此处收敛为一个内聚模块。
  *
  * 设计选择（option b，非 defineStore）：
  * applyFileChanges 同时写 messages（chat store 拥有）与 changeSetStatuses。若拆成独立的
@@ -25,7 +25,7 @@ import { findLastAssistantIndex } from './chunk-processor'
 // 相对路径直达定义处（mutations.ts）：经 '@taiji/core' barrel 回引会成环，ESM 序隐患
 import { commitMessages, type MessagesRef } from './mutations'
 
-/** 审查态集合（单向守卫内拦 ready 覆盖用）：用户交互驱动的终态，runtime 帧不得改写 */
+/** 审查态集合（单向检查内拦 ready 覆盖用）：用户交互驱动的终态，runtime 帧不得改写 */
 const REVIEW_STATUSES: ReadonlySet<ChangeSetStatus> = new Set(['partially-reviewed', 'resolved', 'superseded'])
 
 /**
@@ -98,17 +98,17 @@ export function createChangeSetController(
    * 处理 runtime 推送的文件变更帧（flow-2 FileChanges 通道，ADR-0024 D6/D7）。
    *
    * accumulating 帧（isFullSet=false）增量合并进目标 assistant message.fileChanges；
-   * ready 帧（isFullSet=true）用 git 对账后的全集替换（真值收口）。
+   * ready 帧（isFullSet=true）用 git 对账后的全集替换（真值收敛）。
    * 同 filePath 合并、status 取最新。变更集卡 5 态状态机的审查态
    * （partially-reviewed/resolved/superseded）由前端用户交互驱动，不经此函数。
    *
-   * 单向守卫（W18 纵深防御，03 D3-3；W18 review 扩展）：变更集状态只允许
+   * 单向检查（W18 纵深防御，03 D3-3；W18 review 扩展）：变更集状态只允许
    * accumulating → ready → 审查态单向推进，任何帧都不得覆盖已推进的状态。
    * runtime 侧串行 diff 链是帧序的主保证；此处防御未来任何顺序漏洞：
    * - 迟到的 accumulating 帧（目标 message 已 ready/进入审查态）整体丢弃：既不回写 status
    *   （「待审查」徽章回退「生成中」），也不合并 fileChanges（避免污染 ready 全集真值）；
    * - 迟到的 ready 帧（目标 message 已进入审查态）整体丢弃：W18 review 后 runtime 的 ready
-   *   绕过 turnGen 代际守卫恒推（否则变更集卡永久停在 accumulating），迟到 ready 可能晚于
+   *   绕过 turnGen 代际检查恒推（否则变更集卡永久停在 accumulating），迟到 ready 可能晚于
    *   用户审查操作到达——不得把已接受/已过期的卡写回「待审查」。
    */
   function applyFileChanges(
@@ -118,7 +118,7 @@ export function createChangeSetController(
     changeSetStatus: ChangeSetStatus,
     isFullSet: boolean,
   ): void {
-    // 单向守卫（见上方 applyFileChanges JSDoc）：
+    // 单向检查（见上方 applyFileChanges JSDoc）：
     // - accumulating 只能作为首帧或承接 accumulating；已推进到 ready/审查态后不再回退；
     // - ready 不覆盖审查态（partially-reviewed/resolved/superseded）；ready → ready 幂等重放放行
     //   （runtime 重推的同 messageId ready 全集，状态与数据均无害）。

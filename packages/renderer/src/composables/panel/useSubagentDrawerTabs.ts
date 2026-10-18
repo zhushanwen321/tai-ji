@@ -17,7 +17,7 @@ export interface SubagentDrawerTabsDeps { // oe-exempt:20261015:framework:tab �
   selectedSubagentId: ComputedRef<string | null> | Ref<string | null>
   /** 入口来源（tab 点击/关闭原样回传——workflow 返回按钮语义不受 tab 切换影响）。 */
   enteredFrom: ComputedRef<'chat' | 'workflow' | null> | Ref<'chat' | 'workflow' | null>
-  /** tab 文案（agent · slug；组件侧投影注入）。 */
+  /** tab 文案（agent · slug；组件侧派生视图注入）。 */
   labelOf: (vid: string) => string
   /** 停流回调（切 tab 停旧订阅；关闭至空态停流——空态时编排同时清 core 选中态）。 */
   stopStream: () => void

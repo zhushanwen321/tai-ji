@@ -57,8 +57,8 @@
   __tests__/panel/tray/tray-widget.test.ts 的「外壳契约复刻」宿主。
 
   ── 数据面归属（D2/D13）──
-  计数/首拉/错误态全部在 useTrayCounts，**唯一实例在本外壳创建**（面板随 Popover 开合反复
-  挂载/卸载，数据面必须活在外壳上：面板打开时数据已在，且打开/关闭不重发首拉 RPC）——创建即
+  计数/首次拉取/错误态全部在 useTrayCounts，**唯一实例在本外壳创建**（面板随 Popover 开合反复
+  挂载/卸载，数据面必须活在外壳上：面板打开时数据已在，且打开/关闭不重发首次拉取 RPC）——创建即
   provide(TRAY_COUNTS_KEY)，面板经 useTrayCountsContext inject 消费同一实例；行集与行内操作在
   TrayNativePanel 自持（面板 emits 为空，外壳无需回调）。
 -->
@@ -374,9 +374,9 @@ interface WidgetItem {
 const trayRootEl = ref<HTMLElement | null>(null)
 
 /**
- * built-in 三件计数（口径/首拉/错误态全在 useTrayCounts；本组件只做三态判定）。
+ * built-in 三件计数（口径/首次拉取/错误态全在 useTrayCounts；本组件只做三态判定）。
  * **数据面单例**：本组件是唯一实例创建者，创建即 provide 给面板（TRAY_COUNTS_KEY）——
- * 面板随 Popover 每次打开重新挂载，自建实例会在每次 hover 打开时重发首拉 RPC。
+ * 面板随 Popover 每次打开重新挂载，自建实例会在每次 hover 打开时重发首次拉取 RPC。
  */
 const tray = useTrayCounts(computed(() => props.sessionId))
 provide(TRAY_COUNTS_KEY, tray)

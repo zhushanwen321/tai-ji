@@ -4,7 +4,7 @@
 // P2 / zcode 引擎 P3 / 配置路由 P4）以本接口为实现契约，字段级变更先改本文件签名再改实现。
 //
 // 字段级扩展登记（接上文纪律——先改设计文档再扩接口）：
-//   - [R1 已实施 2026-08-30] EnginePort.dispose?()——引擎停机面。权威源：
+//   - [R1 已实施 2026-08-30] EnginePort.dispose?()——引擎停机路径。权威源：
 //     docs/architecture/zcode-engine-appserver-resident.md §3.3 D6 / §3.4 不变量 4。
 //   - [R4 已实施 2026-08-30] RunContext.onHandleReady——运行中句柄回填通道
 //     （同设计 §3.4 不变量 3：sessionRef 在 create 应答后经本回调送达编排层）。
@@ -212,7 +212,7 @@ export interface EnginePort {
    * （splitEngineModelRef 单一权威），不落 "<ref>/" 畸形。
    *
    * 未实现：model 透传，引擎自身 prepare 期校验兜底（现状语义）；pi 不实现（pi 链走
-   * 既有三层解析 + assertCanonicalModelRef 裁决，搬迁是大重构，设计 D2-2 被否②）。
+   * 既有三层解析 + assertCanonicalModelRef 裁决，搬迁是大重构，设计 D2-2 不采用②）。
    *
    * [⑦ 模型引用三元组化 · 字符串边界裁决] 本成员的 modelRef 参数**刻意保持字符串**，
    * 是 ModelRef 结构体传导链上保留的两类边界入口之一：
@@ -261,12 +261,12 @@ export interface EnginePort {
   setModel?(params: SetModelParams): Promise<SetModelResult>;
 
   /**
-   * [R1 D6] 可选停机面：释放引擎持有的常驻资源（如 app-server 常驻进程 / 长连接）。
+   * [R1 D6] 可选停机路径：释放引擎持有的常驻资源（如 app-server 常驻进程 / 长连接）。
    * 幂等契约（§3.4 不变量 4）：重复调用无副作用；dispose 后首个 run 自动重建（与
    * 「进程死后重建」同一代码路径）。可选成员保持向后兼容——无常驻资源的引擎（pi
    * 现状 spawn 单轮）不必实现。等待策略（D6①「触发不等待」）：宿主收割入口
    * （registry disposeEngines → markAllSpawnedChildrenDead）只同步调用拿 Promise 不
-   * await，引擎实现须自行保证同步面（立即 fire close 帧 + 同步 SIGTERM）在返回
+   * await，引擎实现须自行保证同步部分（立即 fire close 帧 + 同步 SIGTERM）在返回
    * Promise 前完成；grace→SIGKILL 升级序列属异步面（promise 段）。
    */
   dispose?(): Promise<void>;

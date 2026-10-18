@@ -7,8 +7,8 @@
  *
  * [2026-09-16 侧栏任务 tab 退役] 原 subagent/workflow 列表 retry handler
  * （onRetrySubagents/onRetryWorkflows）与随之的 subagent/workflow store 依赖已删除——
- * 两列表的挂载面（Agents/Flows tab）退役后无调用方，列表重拉腿现归 composer 任务托盘
- * （useTrayCounts 的 retry + watch(sessionId) 首拉）。
+ * 两列表的挂载范围（Agents/Flows tab）退役后无调用方，列表重新拉取路径现归 composer 任务托盘
+ * （useTrayCounts 的 retry + watch(sessionId) 首次拉取）。
  *
  * 依赖注入说明：useSidebar 的方法（selectSession/newSession/loadSessions/renameSession/
  * deleteSession/deleteFolder）由调用方注入——useSidebar 非单例（每次调用
@@ -177,7 +177,7 @@ export function useSidebarSessionActions(options: UseSidebarSessionActionsOption
     }
     // [u5a 退役] 前身此处调 clearQueueState 清 pi queue_update 快照（session-dead G1）——
     // queueStates 分区随投递所有权内核整体退役（本单元删除），无残留可清：队列区唯一数据源
-    // = session.delivery 投影，其本体由下方 drain 回收、展示随 runtime 快照帧收敛。
+    // = session.delivery 派生视图，其本体由下方 drain 回收、展示随 runtime 快照帧收敛。
     let drained: Array<{ content: string }> = []
     try {
       const reply = await delivery.drainDelivery(id)

@@ -26,7 +26,7 @@
  * dispose → bus.clearSession 全序列）已行为保持抽取至 session-entry-removal.ts——
  * **removeSessionEntry 顺序约束 SSOT（步骤序列 + 与 lifecycle.delete B5 段「didDestroy
  * 先行 → tombstone → dropPartition → trash」的跨文件顺序 + B5 禁止挂回本汇聚链）在该
- * 文件头**;本文件保留公开 wrapper（调用面与测试锁定面不变）。
+ * 文件头**;本文件保留公开 wrapper（调用点与测试锁定面不变）。
  */
 import { existsSync } from 'node:fs'
 import { isBtwVirtualId } from '@taiji/shared'
@@ -364,7 +364,7 @@ export class SessionService implements ISessionService, ILifecycleSessionOps, ID
    * 销毁收敛链编排（T8 有限拆分 2026-09，行为保持抽取）：removeSessionEntry 汇聚链的
    * 编排段（D1 journal 登记 → checkpoint/mirror 摘除 → … → bus.clearSession 全序列 + 跨文件 B5
    * 顺序约束说明）。顺序约束 SSOT 与 deps 接口（= 销毁扇出合作方清单）见
-   * session-entry-removal.ts 文件头；本 Facade 只保留公开 wrapper（四路删除路径的调用面
+   * session-entry-removal.ts 文件头；本 Facade 只保留公开 wrapper（四路删除路径的调用点
    * 与测试 spyOn 锁定面不变）。构造器尾部组装（deps 闭包全部惰性动态读，组装位置仅求
    * 阅读顺序自然）。
    */
@@ -1435,7 +1435,7 @@ export class SessionService implements ISessionService, ILifecycleSessionOps, ID
    * 进程退出 / forceQuit / restore 清场）。[T8 有限拆分 2026-09] 编排段（步骤序列 + 全部
    * 旁路设施挂点 + 销毁扇出）已整体迁入 session-entry-removal.ts——**顺序约束 SSOT 与
    * 收敛说明（含与 lifecycle.delete B5 段的跨文件顺序、B5 禁止挂回）在该文件头**。
-   * 本 wrapper 只保留公开签名：四路调用面与测试 vi.spyOn 锁定面在此，行为 = 一行委托。
+   * 本 wrapper 只保留公开签名：四路调用点与测试 vi.spyOn 锁定面在此，行为 = 一行委托。
    */
   removeSessionEntry(sessionId: string): void {
     this.entryRemoval.remove(sessionId)

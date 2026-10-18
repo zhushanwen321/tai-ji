@@ -244,7 +244,7 @@ describe('A44 drawer inspector 联动（选中切入临时页 / 返回复原 / �
     expect(wrapper.find('[data-testid="git-panel"]').exists()).toBe(false)
 
     // RightDrawerTab 体系不变：全量 L1 tab 按钮仍在（清单与 drawer-mode 注册表契约用例
-    // 同源——helpers/drawer-tabs.ts，生产注册表运行时投影；inspector 不占 tab 位；
+    // 同源——helpers/drawer-tabs.ts，生产注册表运行时派生视图；inspector 不占 tab 位；
     // terminal 已迁底抽屉不在 L1）
     for (const tab of L1_DRAWER_TABS) {
       expect(wrapper.find(`[data-testid="drawer-tab-${tab}"]`).exists(), `drawer-tab-${tab} 应存在`).toBe(true)
@@ -462,7 +462,7 @@ describe('SESSION 行溯源跳转失败的用户反馈（onJumpParent catch+toas
   })
 })
 
-describe('safeJson 守卫 + 损坏行行号未知降级（RD-2#5 / RD-2#6）', () => {
+describe('safeJson 检查 + 损坏行行号未知降级（RD-2#5 / RD-2#6）', () => {
   /** 快照 a1 toolCall block（content[1]）的 arguments 替换为指定值（引用直传，core 不克隆） */
   function snapshotWithToolCallArguments(args: unknown): ServerMessageMap['session.traceEntries'] {
     const snap = buildSnapshot()
@@ -499,7 +499,7 @@ describe('safeJson 守卫 + 损坏行行号未知降级（RD-2#5 / RD-2#6）', (
     view.unmount()
   })
 
-  it('[RD-2#5 回归锚] 正常 arguments → JSON 键值原样展示（守卫不改变正常路径输出）', async () => {
+  it('[RD-2#5 回归锚] 正常 arguments → JSON 键值原样展示（检查不改变正常路径输出）', async () => {
     const { view, args } = await mountBlockArguments(snapshotWithToolCallArguments({ path: 'a.ts', line: 3 }))
     expect(args.text()).toContain('"path"')
     expect(args.text()).toContain('a.ts')

@@ -16,7 +16,7 @@
  * [W3 迁移] 迁自 renderer composables/panel/useComposerContextChips.ts（零跨域 import 纯搬运）。
  * ComposerInputInstance 此处为本模块视角的最小契约（getSegments/removeImageChip），与域级
  * types.ts 权威接口 ComposerInputInstance（clear/setText/insertImageBadge/insertSlashChip/
- * insertFileChip 等 context 消费面）互补——壳层 ComposerInput.vue 的 defineExpose 同时满足
+ * insertFileChip 等 context 消费方）互补——壳层 ComposerInput.vue 的 defineExpose 同时满足
  * 两者（结构类型）。各自定义最小契约，避免强行扩展权威接口的契约边界。
  */
 import { ref, type Ref } from 'vue'

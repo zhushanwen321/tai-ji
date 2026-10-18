@@ -1,5 +1,5 @@
 /**
- * SourceImportSection 组件单测（code-harden RT-5#5 消费面）。
+ * SourceImportSection 组件单测（code-harden RT-5#5 消费方）。
  *
  * 锁定「不可读」三态区分：目录存在但不可读（error='unreadable'）的源渲染「目录不可读」
  * 文案，不渲染「未安装」也不渲染计数——「不可读」≠「未安装」≠「0 个」。

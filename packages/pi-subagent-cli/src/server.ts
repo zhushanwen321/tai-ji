@@ -196,8 +196,8 @@ export class EngineProtocolServer {
     // [H1 U3] chat 轮 = run 派发形态（每轮一进程，agent_settled 收敛即收割），
     // 同走 per-run 绑定；「会话跨 run 存活、askUser 固定绑定」的 chat 特判随
     // ChatSessionRegistry 退役（bindHostChannels 面已随 U5 删除）。
-    // [S7] 应答形态守卫在 settleReverse（host/askUser 通道 isUiResponse 判定，不合法
-    // 走 engine_protocol_bad_frame reject）——此处的 cast 是守卫后窄化，非无守卫裸 cast。
+    // [S7] 应答形态检查在 settleReverse（host/askUser 通道 isUiResponse 判定，不合法
+    // 走 engine_protocol_bad_frame reject）——此处的 cast 是检查后窄化，非无检查裸 cast。
     this.engine.bindAskUser?.((request: UiRequest) =>
       this.reverseRequestInternal("host/askUser", { runId, request }) as Promise<UiResponse>,
     );
@@ -399,7 +399,7 @@ export class EngineProtocolServer {
       pending.reject(new Error(`reverse request ${String(id)} rejected: ${toErrorMessage(frame.error)}`));
       return;
     }
-    // [S7] askUser 应答面守卫（A6 方向防御同族——宿主→引擎方向已有 assertResumeRunFrame
+    // [S7] askUser 应答面检查（A6 方向防御同族——宿主→引擎方向已有 assertResumeRunFrame
     // 先例）：畸形 UiResponse 不落 resolve（否则静默流入 ui-request-queue），复用
     // engine_protocol_bad_frame 语义走 reject。
     if (pending.method === "host/askUser" && !isUiResponse(frame.result)) {

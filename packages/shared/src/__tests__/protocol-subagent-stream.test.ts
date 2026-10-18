@@ -14,7 +14,7 @@
  * AssertExtends 裸别名属文档性断言，形状防线的承载 = 同文件值位置构造（payload/reply
  * 对象字面量赋给目标类型，excess/missing 属性检查真实生效）。另有运行期对象字面量
  * 可赋值断言（vitest）+ transient 标注源码扫描（注释字样属文本面，编译器不保护，
- * 运行期 grep 式断言守卫）。
+ * 运行期 grep 式断言检查）。
  *
  * 运行：cd packages/shared && npx tsc --noEmit && npx vitest run
  */
@@ -67,7 +67,7 @@ type _Assert_StateReply_sameAsMap = AssertExtends<
 // 设计内失败形态是 found:false 回执，error 只兜传输级失败）
 type _Assert_ErrorEnvelope = AssertHasKey<ServerMessageMapBase, 'error'>
 
-// ── transient 标注源码扫描（编译器不保护注释文本，运行期守卫）──────
+// ── transient 标注源码扫描（编译器不保护注释文本，运行期检查）──────
 
 const PROTOCOL_TS = resolve(fileURLToPath(import.meta.url), '..', '..', 'protocol.ts')
 const PROTOCOL_SOURCE = readFileSync(PROTOCOL_TS, 'utf8')

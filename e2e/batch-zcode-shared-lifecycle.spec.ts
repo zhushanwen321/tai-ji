@@ -4,7 +4,7 @@
  *
  * 单场景两断言面（一条 run 承载）：
  *  - A4/V4 zcode 懒加载单例不变：自定义模板两条 agent()（engine:"zcode"，不同名，
- *    各跑一段 bash sleep）顺序执行——两任务在飞期的 zcode 引擎进程（wrapper 落盘
+ *    各跑一段 bash sleep）顺序执行——两任务在途期的 zcode 引擎进程（wrapper 落盘
  *    `<engineDataDir>/engines/zcode/` 特征）pid 恒同（双任务同 pid + 任务间不退）。
  *    「现状行为即通过标准」：改造未动 zcode spawn 形态（shared-service 透传 registry
  *    保形），本轨 = manifest 显式声明后的路由保形回归。
@@ -12,7 +12,7 @@
  *    pid 消失——stdin EOF 自灭链/停机收割）。pi 薄壳的收尾回落已由
  *    batch-window-lifecycle（A1）/ batch-s4（A2）覆盖，本轨只验 zcode 面。
  *
- * 断言 ground truth = ps 进程表（/engines/zcode/ 特征，基线差分吸收环境常驻；
+ * 断言原始证据文档 = ps 进程表（/engines/zcode/ 特征，基线差分吸收环境常驻；
  * wrapper 进程 argv = node <engineDataDir>/engines/zcode/zcode-launcher.cjs，
  * 同进程 import zcode.cjs——app-server 即该 pid）。执行侧约定与
  * batch-window-lifecycle.spec.ts 同款。
@@ -238,7 +238,7 @@ test('ZSL (batch real): zcode 双任务同 pid（V4 懒加载单例回归）+ ta
     expect(done, `派发 turn 未在 ${MAIN_TURN_TIMEOUT_MS}ms 内完成（主 LLM 未调 workflow tool？）`).toBe(true)
     sub.events.length = 0
 
-    // ── V4 断言面①：r1 在飞，zcode 引擎进程出现（懒加载——首个任务触发 spawn） ──
+    // ── V4 断言面①：r1 在途，zcode 引擎进程出现（懒加载——首个任务触发 spawn） ──
     const up1 = await waitUntil(() => zcodeProcessSnapshot().pids.size > zcBase.pids.size, PROC_TIMEOUT_MS)
     if (!up1) {
       writeDiag('batch-zsl-proc-not-seen.json', {
@@ -248,13 +248,13 @@ test('ZSL (batch real): zcode 双任务同 pid（V4 懒加载单例回归）+ ta
         piLogsTail: readPiLogs(dataDir).slice(-3000),
       })
     }
-    expect(up1, 'r1 在飞期 zcode 引擎进程应出现（懒加载单例；特征 /engines/zcode/）').toBe(true)
+    expect(up1, 'r1 在途期 zcode 引擎进程应出现（懒加载单例；特征 /engines/zcode/）').toBe(true)
     const pidsR1 = [...zcodeProcessSnapshot().pids].filter((p) => !zcBase.pids.has(p))
-    expect(pidsR1.length, 'r1 在飞期新增 zcode 引擎进程应恰 1 个').toBe(1)
+    expect(pidsR1.length, 'r1 在途期新增 zcode 引擎进程应恰 1 个').toBe(1)
     const zcPid = pidsR1[0]!
     await page.screenshot({ path: testInfo.outputPath('zsl-r1-inflight.png'), fullPage: true })
 
-    // ── V4 断言面②：r2 在飞（sleep 25 出现），pid 恒同 ──
+    // ── V4 断言面②：r2 在途（sleep 25 出现），pid 恒同 ──
     const r2InFlight = await waitUntil(
       () => {
         const out = execSync('ps -axo command=', { encoding: 'utf8', timeout: 10_000 })
@@ -277,11 +277,11 @@ test('ZSL (batch real): zcode 双任务同 pid（V4 懒加载单例回归）+ ta
         runtimeLogsTail: readRuntimeLogs(dataDir).slice(-3000),
       })
     }
-    expect(r2InFlight, 'r2 的 sleep 25 应出现（第二条任务在飞；diag 见 journal 帧型）').toBe(true)
+    expect(r2InFlight, 'r2 的 sleep 25 应出现（第二条任务在途；diag 见 journal 帧型）').toBe(true)
     const pidsR2 = [...zcodeProcessSnapshot().pids].filter((p) => !zcBase.pids.has(p))
-    expect(pidsR2.includes(zcPid), `r2 在飞期引擎进程应仍是同一 pid ${zcPid}（双任务同 pid + 任务间不退；实际 ${pidsR2.join(',')}）`).toBe(true)
+    expect(pidsR2.includes(zcPid), `r2 在途期引擎进程应仍是同一 pid ${zcPid}（双任务同 pid + 任务间不退；实际 ${pidsR2.join(',')}）`).toBe(true)
 
-    // run 收口（journal completed）
+    // run 收尾（journal completed）
     const agentDir = path.join(dataDir, 'agent')
     const settled = await waitUntil(
       () => listFilesRecursive(agentDir, '.events.jsonl').some((f) =>
@@ -295,7 +295,7 @@ test('ZSL (batch real): zcode 双任务同 pid（V4 懒加载单例回归）+ ta
         piLogsTail: readPiLogs(dataDir).slice(-3000),
       })
     }
-    expect(settled, 'run 应 completed 收口（两条 zcode 任务均成功）').toBe(true)
+    expect(settled, 'run 应 completed 收尾（两条 zcode 任务均成功）').toBe(true)
 
     // ── V7 断言面：app.close() 后 zcode 引擎进程随宿主退出 ──
     await app.close()

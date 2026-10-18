@@ -12,7 +12,7 @@
  * + AgentUsage / ToolCallEntry / AgentFailureKind（自 SDK re-export，S4 簇 3 收编）
  * - ExecutionTraceNode / TracePatch / ToolCallEntry / WorkerLogEntry（trace 数据）
  *
- * 层归属：Engine（数据结构 + 不变式守卫）。
+ * 层归属：Engine（数据结构 + 不变式检查）。
  */
 
 import type {
@@ -55,7 +55,7 @@ export const ALL_DONE_REASONS: readonly DoneReason[] = [
 
 /**
  * DoneReason 的终止性判定（非正常完成）：通知/文案消费方区分「任务完成」与
- * 「run 因异常收口」（budget/time 耗尽或 abort 不是任务完成，模型可能把 done
+ * 「run 因异常收尾」（budget/time 耗尽或 abort 不是任务完成，模型可能把 done
  * 当成功汇报——防偷懒收尾指令只对终止性 reason 追加）。
  *
  * 穷举 switch 无 default：DoneReason 新增成员时 tsc 强制在此显式归类，
@@ -85,7 +85,7 @@ export function isTerminalDoneReason(reason: DoneReason): boolean {
  * 到 EnginePort.run 直达 pi 边界一次映射——SAR 链路上的 ExecuteOptions/AgentTaskSpec
  * 中间态消除（设计 docs/design/dual-track（已删 git 可追溯）§3.3 D6 / 终态四）。
  *
- * 终态命名按变化轴裁定为 AgentCallOpts，理由：
+ * 终态命名按变化原因裁定为 AgentCallOpts，理由：
  *   - 字段演进的首要驱动轴是「调用方要表达的任务语义」（agent() API 是唯一生产写入方，
  *     合流字段中 prompt/description/skill/skillPath/thinkingLevel 等多数派
  *     已是调用方命名）；
@@ -93,7 +93,7 @@ export function isTerminalDoneReason(reason: DoneReason): boolean {
  *     形式同构、语义同构的假差异（prompt≡task、slug=description 截断、effort≡thinkingLevel、
  *     persona≡skillPath+appendSystemPrompt 平铺），按「消假差异」原则并入调用方命名；
  *   - 持久化兼容反向锁定 prompt 形态：jsonl run 快照的 AgentCall.opts 与 worker 消息
- *     opts 均以 prompt 字段落盘，改名会破坏旧快照重水合。
+ *     opts 均以 prompt 字段落盘，改名会破坏旧快照重新加载。
  *
  * 引擎中立字段的并入方式（可选字段，原 AgentTaskSpec 独有字段去向）：
  *   - graceTurns / idleTimeoutMs：可选并入；
@@ -217,7 +217,7 @@ export interface AgentCallOpts {
 
 // [S4 簇 3 收编] 以下三个契约类型本地定义已删除，自 @zhushanwen/subagent-engine-sdk
 // re-export（type-only，import 方路径零改动，结构等价由 protocol-closure.test.ts
-// 断言族守卫）：
+// 断言族检查）：
 //   - AgentUsage ← SDK AgentOutcomeUsage（SDK 改名消歧：core 的两个同名 AgentUsage
 //     分属 execution 与 orchestration 域，本处锚定 orchestration 域——AgentResult.usage
 //     字段型，FR-7 跨 turn 累积）；
@@ -274,7 +274,7 @@ export interface AgentResult {
  /** True when the pi process exited with code 0. */
   error?: string;
  /**
- * [D5 诊断引用落账] 失败时子进程 stderr tee 文件绝对路径（成功缺省）。
+  * [D5 诊断引用写入 journal 记录] 失败时子进程 stderr tee 文件绝对路径（成功缺省）。
  * 产出侧 = 引擎终态应答 AgentOutcome.stderrTeePath（SDK contract-types，上报判据
  * 见彼处注释），经 workflow-dispatch outcomeToWorkflowResult 透传到本形态；消费侧
  * worker-message-pump dispatchAgentSettled 读本字段填 agent-settled 事件载荷。
@@ -332,7 +332,7 @@ export interface ExecutionTraceNode {
   sessionId?: string;
  /**
   * Session JSONL 绝对路径。finalizeCall 从 result.sessionFile 透传。
-  * 持久化到快照（serializeRun），跨 session 重水合后保留。
+  * 持久化到快照（serializeRun），跨 session 重新加载后保留。
   */
   sessionFile?: string;
 }

@@ -139,7 +139,7 @@ function errorTextOr(error: string | undefined, fallback: string): string {
  * P1-②：快照查找 `Model not found: <p>/<id>`；session.setModel checkAuth
  * `No API key for <p>/<id>`——两错误经 rpc-mode 外层 catch 以 response success:false
  * + error 文本到达）按设计 §7.5 映射；快照查找与 checkAuth 之外的残余消息 = pi
- * 内部异常，生效状态不可信——按回读失败形态收口（三型词表封闭映射：宿主处置 =
+ * 内部异常，生效状态不可信——按回读失败形态收尾（三型词表封闭映射：宿主处置 =
  * 错误应答 + 重试恢复，不虚构生效值）。checkAuth 词形是本分型的承重前提，已登记
  * docs/pi-semantics.json PS-75（pi bump 门禁重验集——pi 词形漂移时先同步本分型前缀）。
  */
@@ -216,7 +216,7 @@ function extractPiStateSnapshot(data: unknown): {
  *
  * 竞态窗口全覆盖（设计 §7.3）：命令与回读全程带存活检查——①定位时 ②命令写入
  * （投递判别式，stdin 死 = 进程死）③读应答等待 ④回读前复检 ⑤回读等待——任一
- * 时点发现退出即按「无活进程」形态收口；单阶段等待超时（SET_MODEL_STAGE_TIMEOUT_MS，
+ * 时点发现退出即按「无活进程」形态收尾；单阶段等待超时（SET_MODEL_STAGE_TIMEOUT_MS，
  * 秒级控制面单请求粒度，锚 CANCEL_SETTLE_GRACE_MS 量级）且进程仍存活才落回读
  * 失败形态——「退出」与「超时」两种结局严格互斥，不混淆。不悬挂（每阶段有界）、
  * 不部分生效（pi 侧 set_model 是原子命令，失败即未切换）。
@@ -225,7 +225,7 @@ function extractPiStateSnapshot(data: unknown): {
  * §6.4——热切档位以联动值为生效事实，生效值经 get_state 回读应答宿主；用户显式
  * 档位经覆盖记账在下一轮 spawn 由解析链裁决，跨轮边界档位以解析链为准）。
  */
-/** 回读前 stdin 可写判定（stdin 缺失/已毁 = 进程死亡在控制面的投影，与存活检查互补）。 */
+/** 回读前 stdin 可写判定（stdin 缺失/已毁 = 进程死亡在控制面的呈现，与存活检查互补）。 */
 function stdinWritable(child: ChildProcess): boolean {
   return child.stdin !== null && child.stdin !== undefined && !child.stdin.destroyed;
 }

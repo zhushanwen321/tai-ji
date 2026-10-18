@@ -27,14 +27,14 @@ import {
   type InFlightSnapshot,
 } from "../inflight-snapshot.ts";
 // W3 合并改写：inproc 引擎已删——句柄记账走 host/spawned-children 镜像（register +
-// reset 测试面）。
+// reset 测试）。
 import {
   killRecordChildWithEscalation,
   registerSpawnedChildForRecord,
   _resetCoreSpawnedChildrenMirrorForTest,
 } from "../host/spawned-children.ts";
 
-/** 最小 fake 子进程（EventEmitter + killed/pid 字段——hasLiveProcessHandle 消费面）。 */
+/** 最小 fake 子进程（EventEmitter + killed/pid 字段——hasLiveProcessHandle 消费方）。 */
 function makeFakeChild(): ChildProcess & EventEmitter {
   const child = new EventEmitter() as ChildProcess & EventEmitter;
   (child as { pid?: number }).pid = 4242;

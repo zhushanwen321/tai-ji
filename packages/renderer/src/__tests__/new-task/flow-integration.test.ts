@@ -24,7 +24,7 @@
  * - 重试场景（currentSession 已存在）→跳过 create 直接 send
  * - create reject→错误向上抛、不留僵尸 session
  * - 非法态（非 landing）提交→抛错
- * - 双击并发→in-flight 守卫 create 只调一次
+ * - 双击并发→in-flight 检查 create 只调一次
  *
  * 新设计下 landing 态 gitInfo 恒 null（无 session）→ branch 链路不可达，
  * 原 selectBranch/confirmDirtySwitch/submitCreateBranch 集成测试已删（组件层单测见 create-branch-modal.test.ts）。
@@ -221,7 +221,7 @@ describe('worktree 创建回灌（adoptWorktreeCwd，fix-new-worktree-not-switch
     expect(flow.currentCwd.value).toBe('/ws/new-wt')
   })
 
-  it('T-WT.2 守卫：非 worktree-modal 态 noop；同值 noop（不重复 record）', async () => {
+  it('T-WT.2 检查：非 worktree-modal 态 noop；同值 noop（不重复 record）', async () => {
     setGroups([mkSession({ id: 'old', cwd: '/ws', lastActiveAt: 1 })])
     const flow = useNewTaskFlow()
     await flow.startFlow()
@@ -376,12 +376,12 @@ describe('submitFirstMessage（landing 态首发提交：延迟 create+载入+�
     expect(flow.state.value).toBe('completed')
 
     // 新语义推论：send 失败后 flow 已终结（completed），再次 submitFirstMessage 撞
-    // 「非 landing」守卫抛错——重发走对话视图 composer（session 错误通道），不再经
+    // 「非 landing」检查抛错——重发走对话视图 composer（session 错误通道），不再经
     // new-task flow。「跳过 create 直接 send」的 retry 分支覆盖由 core flow.test.ts
     // TC-7（bindSession 构造 landing+currentSession）承接，本文件此路径已不可达。
     await expect(flow.submitFirstMessage(textToSegments('first'))).rejects.toThrow('非 landing')
     expect(createCtrl.create).toHaveBeenCalledTimes(1) // 未重复 create
-    expect(chatMock.send).toHaveBeenCalledTimes(1) // 守卫先于 send，未重发
+    expect(chatMock.send).toHaveBeenCalledTimes(1) // 检查先于 send，未重发
   })
 
   it('E2/E3 create reject→错误向上抛，不留僵尸 session（state 留 landing，currentSession=null）', async () => {
@@ -405,7 +405,7 @@ describe('submitFirstMessage（landing 态首发提交：延迟 create+载入+�
     expect(createCtrl.create).not.toHaveBeenCalled()
   })
 
-  it('双击并发→in-flight 守卫，create 只调一次', async () => {
+  it('双击并发→in-flight 检查，create 只调一次', async () => {
     setGroups([mkSession({ id: 'old', cwd: '/repo', lastActiveAt: 1 })])
     let resolveCreate!: (s: SessionSummary) => void
     createCtrl.create.mockReturnValueOnce(
@@ -416,7 +416,7 @@ describe('submitFirstMessage（landing 态首发提交：延迟 create+载入+�
     const flow = useNewTaskFlow()
     await flow.startFlow()
     const p1 = flow.submitFirstMessage(textToSegments('one'))
-    const p2 = flow.submitFirstMessage(textToSegments('two')) // in-flight 守卫→直接 return
+    const p2 = flow.submitFirstMessage(textToSegments('two')) // in-flight 检查→直接 return
     resolveCreate(mkSession({ id: 'solo', cwd: '/repo' }))
     await p1
     await p2

@@ -15,7 +15,7 @@
  * [W15/D-7.1] dirChangeCounts 是 gitOverlay 的预聚合派生（sid → dirPath → count，随 setGitOverlay
  * 一次构建）——非独立权威源，getDirChangeCount 行级读取 O(1)。
  *
- * [W28/D-7.2] projectVisibleRows 是唯一「树 → 可见行」投影点（纯函数，SSOT 仍是 tree）：
+ * [W28/D-7.2] projectVisibleRows 是唯一「树 → 可见行」派生视图生成点（纯函数，SSOT 仍是 tree）：
  * FileView 用 computed 包裹它，FileTreeRow 改纯行组件收 VisibleRow——树形递归渲染改为
  * 扁平可见行 + virtua 虚拟滚动（消除万级目录展开的全量 DOM 挂载）。4 facet 结构不变，
  * 13 个非测试消费方零迁移（R-21 排查结论见 W28 汇报）。
@@ -39,7 +39,7 @@ type LoadStatus = 'unloaded' | 'loading' | 'loaded' | 'error' | 'invalidated'
  * - status：5 态加载状态机
  * - reason：仅 error 态非空，来自 WS error envelope 的 code（routeInbound 透传到 Error.code）
  */
-export interface NodeState { // oe-exempt:20261003:framework:类型契约先行——容器/编排/注册表契约层，D1 下游单元即为消费面
+export interface NodeState { // oe-exempt:20261003:framework:类型契约先行——容器/编排/注册表契约层，D1 下游单元即为消费方
   status: LoadStatus
   /** error code（如 'out_of_cwd' / 'permission_denied' / 'timeout'），仅 status='error' 时有意义 */
   reason?: string
@@ -68,7 +68,7 @@ export type DetailViewMode = 'diff' | 'preview'
  * 每个打开的文件是一条独立实例记录，切 tab 不丢滚动位置（scrollTop）与面板内模式态
  * （viewMode diff/preview），已开实例再次命中仅激活、不重载不新增（§6.3 注入语义）。
  */
-export interface DetailTabState { // oe-exempt:20261003:framework:类型契约先行——容器/编排/注册表契约层，D1 下游单元即为消费面
+export interface DetailTabState { // oe-exempt:20261003:framework:类型契约先行——容器/编排/注册表契约层，D1 下游单元即为消费方
   /** 文件路径（tab 实例 key；tab 条显示 basename） */
   path: string
   /** 加载态：'idle' = 已注入待加载（DetailPane 挂载后由 useDetailPane 编排拉起） */
@@ -97,7 +97,7 @@ export interface DetailTabState { // oe-exempt:20261003:framework:类型契约�
 }
 
 /** per-session detail 展示分区（打开的 tab 列表（开序）+ 当前激活） */
-export interface DetailTabsPartition { // oe-exempt:20261003:framework:类型契约先行——容器/编排/注册表契约层，D1 下游单元即为消费面
+export interface DetailTabsPartition { // oe-exempt:20261003:framework:类型契约先行——容器/编排/注册表契约层，D1 下游单元即为消费方
   tabs: DetailTabState[]
   activePath: string | null
 }
@@ -124,7 +124,7 @@ function createDetailTab(path: string, forceDiff: boolean): DetailTabState {
 }
 
 /** [W2] 文件行数结构：tracked 改动 {add/del}，untracked 降级 {size}，无数据 null */
-interface LineStats { // oe-exempt:20261003:framework:类型契约先行——容器/编排/注册表契约层，D1 下游单元即为消费面
+interface LineStats { // oe-exempt:20261003:framework:类型契约先行——容器/编排/注册表契约层，D1 下游单元即为消费方
   add?: number
   del?: number
   size?: number
@@ -132,30 +132,30 @@ interface LineStats { // oe-exempt:20261003:framework:类型契约先行——�
 
 /**
  * [W28/D-7.2] 可见行数据结构（09 文档 §3.3.2 定案 + 审查修正）。
- * 供 virtua 虚拟滚动消费的扁平行——树仍是 SSOT，本行是渲染投影：
- * depth/expanded/childCount/gitStatus/lineStats 全部在投影时预计算，
+ * 供 virtua 虚拟滚动消费的扁平行——树仍是 SSOT，本行是渲染派生视图：
+ * depth/expanded/childCount/gitStatus/lineStats 全部在派生时预计算，
  * 替代旧递归 FileTreeRow 的 per-row computed（旧实现每行 12 个 computed）。
  *
  * hint 字段为审查修正扩展（09 文档草案未建模，代码现实要求保留）：
  * 旧递归组件对「已展开目录」按 nodeStates 渲染 loading/error/empty 三类子区占位行，
  * 扁平化后必须显式建模，否则展开在途/空目录的 UI 反馈丢失（行为回归）。
  */
-export interface VisibleRow { // oe-exempt:20261003:framework:类型契约先行——容器/编排/注册表契约层，D1 下游单元即为消费面
+export interface VisibleRow { // oe-exempt:20261003:framework:类型契约先行——容器/编排/注册表契约层，D1 下游单元即为消费方
   /** 节点相对路径（SSOT key；hint 行 = 所属目录 path） */
   path: string
   /** 显示名（hint 行为空串） */
   name: string
   /** 节点类型（hint 行恒 'dir'，实际渲染走 hint 分支） */
   type: 'file' | 'dir'
-  /** 缩进层级（投影时算好，替代递归 depth prop） */
+  /** 缩进层级（派生时算好，替代递归 depth prop） */
   depth: number
-  /** 目录是否展开（从 expandedPaths 投影） */
+  /** 目录是否展开（从 expandedPaths 派生） */
   expanded: boolean
-  /** 目录可见直接子项数（投影时计数；未加载 children / 文件行恒 0） */
+  /** 目录可见直接子项数（派生时计数；未加载 children / 文件行恒 0） */
   childCount: number
-  /** 文件角标（从 gitOverlay 投影） */
+  /** 文件角标（从 gitOverlay 派生） */
   gitStatus?: GitFileStatus
-  /** 行数 +N −M（投影时算好） */
+  /** 行数 +N −M（派生时算好） */
   lineStats?: LineStats
   ignored: boolean
   /**
@@ -179,14 +179,14 @@ const HINT_KEY_PREFIX: Record<NonNullable<VisibleRow['hint']>, string> = {
 
 /**
  * [W28/D-7.2] 扁平行 v-for 稳定 key：hint 行加类型前缀（与目录行 path 同值时防冲突），
- * 节点行直接用 path。hint 行跨投影稳定（同目录同态 → 同 key），无插删错位。
+ * 节点行直接用 path。hint 行跨派生稳定（同目录同态 → 同 key），无插删错位。
  */
 export function visibleRowKey(row: VisibleRow): string {
   return row.hint ? `${HINT_KEY_PREFIX[row.hint]}${row.path}` : row.path
 }
 
 /**
- * [W28/D-7.2] 唯一「树 → 可见行」投影点（纯函数，零副作用）。
+ * [W28/D-7.2] 唯一「树 → 可见行」派生视图生成点（纯函数，零副作用）。
  *
  * 语义 = 旧递归渲染（FileView.visibleNodes 顶层裁 + FileTreeRow 递归子行）的逐行等价：
  * - 顶层：filterText 命中判定（nodeMatchesFilter，仅祖先链保留）；
@@ -196,10 +196,10 @@ export function visibleRowKey(row: VisibleRow): string {
  * - 已展开目录按 nodeStates 渲染 loading/error/empty 占位行（与旧递归一致）。
  *
  * E7-a 更新策略：调用方（FileView）用 computed 包裹，依赖分桶后的细粒度 getter——
- * 展开/折叠/过滤/overlay 变化各触发一次全量重投影（O(可见行)，懒加载下是「已加载」子集）。
+ * 展开/折叠/过滤/overlay 变化各触发一次全量重新派生（O(可见行)，懒加载下是「已加载」子集）。
  * [W28 审查 Fix-2] gitOverlay 走 per-session getter 传参（与 getExpanded
  * 同款分桶）：computed 只追踪本 sid 分桶 key，异 sid overlay 回写（split mode 多面板
- * git.status）不触发本 sid 重投影——依赖 store 侧 setGitOverlay/rebuildDirChangeCounts
+ * git.status）不触发本 sid 重新派生——依赖 store 侧 setGitOverlay/rebuildDirChangeCounts
  * 用响应式 Map 的 keyed set（不再整体替换外层 ref）。
  *
  * @param getTree 取 session 树（computed 内读 store.getTree 触发响应式）
@@ -374,8 +374,8 @@ export const useFileTreeStore = defineStore('fileTree', () => {
 
   /**
    * [W28 审查 Fix-2] 取 session 的 git overlay 分桶（无则 undefined）。
-   * per-session 细粒度 getter（与 getExpanded 同款分桶模式）：投影 computed 经它读本
-   * sid 分桶，只追踪该 key——setGitOverlay 的 keyed set 不会让异 sid 更新触发本 sid 重投影。
+   * per-session 细粒度 getter（与 getExpanded 同款分桶模式）：派生视图 computed 经它读本
+   * sid 分桶，只追踪该 key——setGitOverlay 的 keyed set 不会让异 sid 更新触发本 sid 重新派生。
    */
   function getGitOverlay(sessionId: string): Map<string, GitFileStatus> | undefined {
     return gitOverlay.value.get(sessionId)
@@ -394,8 +394,8 @@ export const useFileTreeStore = defineStore('fileTree', () => {
    * 语义与旧 per-row 前缀扫描（path.startsWith(`${dirPath}/`)) 等价：
    * 对每个改动文件 path 'a/b/c.ts'，其所有非空祖先目录（'a'、'a/b'）计数 +1；
    * 根目录（dirPath=''，旧算法 prefix='/' 不匹配相对路径）不计数。
-   * [W28 审查 Fix-2] 用响应式 Map 的 keyed set（不整体替换外层 ref）——投影 computed
-   * 只追踪本 sid 分桶 key，异 sid 更新不触发重投影（E7-a 细粒度分桶的前提）。
+   * [W28 审查 Fix-2] 用响应式 Map 的 keyed set（不整体替换外层 ref）——派生视图 computed
+   * 只追踪本 sid 分桶 key，异 sid 更新不触发重新派生（E7-a 细粒度分桶的前提）。
    */
   function rebuildDirChangeCounts(sessionId: string): void {
     const overlay = gitOverlay.value.get(sessionId)
@@ -419,7 +419,7 @@ export const useFileTreeStore = defineStore('fileTree', () => {
   /**
    * [W2/W15] 统计目录子树内改动文件数（用于目录行的改动数徽章）。
    * [W15/D-7.1] 改读预聚合 Map（O(1)）——精确前缀语义（'src/'，兄弟目录 'src-other/' 不误算）
-   * 由 rebuildDirChangeCounts 的祖先目录投影保证。空 overlay / session 不存在 → 0。
+   * 由 rebuildDirChangeCounts 的祖先目录派生保证。空 overlay / session 不存在 → 0。
    */
   function getDirChangeCount(sessionId: string, dirPath: string): number {
     return dirChangeCounts.value.get(sessionId)?.get(dirPath) ?? 0
@@ -579,7 +579,7 @@ export const useFileTreeStore = defineStore('fileTree', () => {
    *
    * @param opts.forceDiff 强制 diff 模式（变更集卡/消息链接入口，绕过 gitOverlay 误判）。
    *   已开未加载（status='idle'）的实例升级为 diff；在途加载（'loading'/'error'）的模式修正
-   *   由 useDetailPane.ensureDiffMode 收敛（事件序无关，作废重拉）；已展示内容的实例仅激活
+   *   由 useDetailPane.ensureDiffMode 收敛（事件序无关，作废重新拉取）；已展示内容的实例仅激活
    *   （用户可见的已开 tab 不被改模式，§6.3）。
    */
   function openDetailTab(sessionId: string, path: string, opts?: { forceDiff?: boolean }): void {
@@ -642,7 +642,7 @@ export const useFileTreeStore = defineStore('fileTree', () => {
       map.set(s.path, s)
     }
     // [W28 审查 Fix-2] keyed set 替代整体替换外层 ref：gitOverlay 是 ref(深响应式 Map)，
-    // set(sid) 只触发本 sid key 的追踪者——投影 computed（经 getGitOverlay(sid) 读本分桶）
+    // set(sid) 只触发本 sid key 的追踪者——派生视图 computed（经 getGitOverlay(sid) 读本分桶）
     // 不被异 sid 回写触发（split mode 多面板 git.status 互不干扰，E7-a 细粒度分桶前提）。
     gitOverlay.value.set(sessionId, map)
     // [W15/D-7.1] 同步预聚合目录改动数（后续 loadTree 之外的 setGitOverlay 调用点天然携带新计数）
@@ -695,7 +695,7 @@ export const useFileTreeStore = defineStore('fileTree', () => {
     expandedPaths,
     nodeStates,
     gitOverlay,
-    // [W28/D-7.2] dirChangeCounts 暴露（投影 computed 的依赖源；9 文档「投影函数 + dirChangeCounts 暴露」）
+    // [W28/D-7.2] dirChangeCounts 暴露（派生视图 computed 的依赖源；9 文档「派生函数 + dirChangeCounts 暴露」）
     dirChangeCounts,
     selectedPaths,
     detailTabs,

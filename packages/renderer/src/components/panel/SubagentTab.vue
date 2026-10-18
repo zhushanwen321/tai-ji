@@ -235,8 +235,8 @@ import MessageStream from './MessageStream.vue'
 import ModelSelectPopover from './ModelSelectPopover.vue'
 import { PopoverTrigger } from '@/components/ui/popover'
 import { DEFAULT_ENGINE_ID } from '@/constants/engine-icons'
-// u6.1 chat facet 收口：对话流数据编排（chat store ops 面消费）下沉 composable，
-// 组件只保留 readers 面消费
+// u6.1 chat facet 收尾：对话流数据编排（chat store ops 范围消费）下沉 composable，
+// 组件只保留 readers 范围消费
 import { useSubagentTabData } from '@/composables/panel/useSubagentTabData'
 import { useSubagentDrawerTabs } from '@/composables/panel/useSubagentDrawerTabs'
 // subagent-model-switch §7.1（U1）：执行模型切换（回执写状态禁乐观写）+ 标签读取规则
@@ -275,7 +275,7 @@ function findAgentCall(acsId: string): WorkflowAgentCall | undefined {
   return undefined
 }
 
-/** 标题栏元信息形状（chat record 与 agentcall 快照两视图共用的投影）。 */
+/** 标题栏元信息形状（chat record 与 agentcall 快照两视图共用的派生视图）。 */
 type SubagentHeaderMeta = { agent: string; slug?: string; meta?: string; engine?: string; stopReason?: string }
 
 /** 三段式虚拟 id（chat 域 record）的标题栏元信息。 */
@@ -292,7 +292,7 @@ function subagentRecordMeta(vid: string): SubagentHeaderMeta | null {
     slug: record.slug || undefined,
     meta: thinkingLevel ? `thinking ${thinkingLevel}` : undefined,
     engine: record.engine || undefined,
-    // 停因词（U8b §3.2.8）：有值即投影——idle 与 A-lite 轮终 running-resumable 均携带
+    // 停因词（U8b §3.2.8）：有值即派生——idle 与 A-lite 轮终 running-resumable 均携带
     // 合法停因；「为什么停」一句话解释，不参与资格判定
     stopReason: record.stopReason,
   }
@@ -453,12 +453,12 @@ watch(
 
 /**
  * 非 pi 终态回填桥（D2）：
- * 非 pi 引擎无实时流通道，运行中打开的 tab 内容停在打开时刻——record 跨越收口
- * （running → 非 running）时重拉一次，对话流自动收敛到完整内容。四守卫：
+ * 非 pi 引擎无实时流通道，运行中打开的 tab 内容停在打开时刻——record 跨越收尾
+ * （running → 非 running）时重新拉取一次，对话流自动收敛到完整内容。四检查：
  * cur/prev 任一 null（agentcall / 未选中）跳过；vid 或 subId 变化 = 切换 subagent
  * 跳过（新 vid 由上方 activeTab watch 负责）；仅 running → 非 running 跨越
- * 触发（打开时已收口由首拉覆盖）；pi 引擎跳过（D5 零变化）。
- * [U8b 两态判据核对] 占用两态下 settle 写 idle——running → idle 即收口跨越，本判据
+ * 触发（打开时已收尾由首次拉取覆盖）；pi 引擎跳过（D5 零变化）。
+ * [U8b 两态判据核对] 占用两态下 settle 写 idle——running → idle 即收尾跨越，本判据
  * 无需改动即正确触发（idle → running 续轮走 pi 实时流 / 非 pi coarse 轮终再跨越，
  * 与旧 closed → running 复活行为一致）；legacy 五值同落非 running 半边，兼容不破。
  */

@@ -90,7 +90,7 @@ export interface LaunchConfigInput {
   pendingModel?: string | null
   /**
    * 用户 authored 选档（U2a 后 localThinkingLevel 唯一写点 = onThinkingSelect，
-   * 不含任何 auto 写入值——D1 authored 守卫的结构前提）。value 域。
+   * 不含任何 auto 写入值——D1 authored 检查的结构前提）。value 域。
    */
   pendingThinkingLevel?: string | null
   /** 用户显式选定的 preset id */
@@ -316,7 +316,7 @@ function resolveEffectiveModel(
  * thinkingLevel 档解析（D2）：explicit(authored 选档) > preset.thinkingLevel > 记忆表
  * （per-model，可用性校验后）> 最高可用档。
  *
- * - explicit 档信任上游 authored 守卫（U2a 后唯一写点 onThinkingSelect）+ runtime S-RT-5
+ * - explicit 档信任上游 authored 检查（U2a 后唯一写点 onThinkingSelect）+ runtime S-RT-5
  *   白名单兜底，此处不重复校验
  * - 记忆档可用性校验（不在该模型 supported levels 内则跳过——能力注册表变化致记忆键
  *   失效时回落最高可用档，防 landing 显示不可用档）

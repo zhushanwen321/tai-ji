@@ -100,7 +100,7 @@ type _CoreSdkKeyPairLock = [
 ];
 const _keyPairLock: _CoreSdkKeyPairLock = [true, true, true, true, true, true, true];
 
-// ── 能力位键集锁（U5 词表锁扩展：病灶 7「漏登 core 两表 → undefined 透传 → gate
+// ── 能力位键集锁（U5 词表锁扩展：问题点 7「漏登 core 两表 → undefined 透传 → gate
 //    放行」的编译期堵截）──
 // engine-manifest.ts 两表以 `satisfies` 声明（保留字面键集），`keyof typeof` 即真实键集：
 //   A：CONSERVATIVE_CAPABILITIES（12 键，含 maxTurns:false + setModel）⟷ EngineCapabilities

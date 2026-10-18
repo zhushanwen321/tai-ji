@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 // fake-pi.mjs — e2e 用的 fake pi rpc 子进程（PATH 注入名为 `pi` 的可执行 wrapper
-// 调本文件）。行为契约（对齐真 pi --mode rpc 的本测试消费面）：
+// 调本文件）。行为契约（对齐真 pi --mode rpc 的本测试消费方）：
 //   - `pi --version` 应答版本行（probe 语义）；
 //   - stdin JSONL 驱动：get_state → 应答 sessionFile/sessionId；
 //     prompt → 回放事件流（text_delta ×2 / tool_start / tool_end / turn_end /

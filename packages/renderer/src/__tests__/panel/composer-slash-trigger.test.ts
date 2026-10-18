@@ -4,7 +4,7 @@
  * 覆盖三组件的垂直切片：
  * - U1-U5 ComposerInput.onInput 触发检测（DOM 查询 + startsWith，不靠 getText 判 chip）
  * - U6-U8 CommandPopover.items query 过滤（slash 路径）
- * - U9-U10 Composer wiring（slash-trigger 事件路由 + +菜单不回归守卫）
+ * - U9-U10 Composer wiring（slash-trigger 事件路由 + +菜单不回归检查）
  *
  * mock 策略：
  * - U1-U5 直挂载 ComposerInput（根元素即 contenteditable div），setTextContent + trigger('input')，
@@ -215,9 +215,9 @@ describe('CommandPopover slash query 过滤（U6-U8）', () => {
   })
 
   // ── U8b 键盘导航幂等（回归：window capture + 事件冒泡双入口曾导致 ↑↓ 跳两项）──
-  // handleKeydown 对同一个 KeyboardEvent 第二次调用必须 no-op（defaultPrevented 守卫），
+  // handleKeydown 对同一个 KeyboardEvent 第二次调用必须 no-op（defaultPrevented 检查），
   // 否则 activeIndex 被增减两次 → 方向键跳两项。
-  it('U8b ArrowDown 同一事件二次调用 handleKeydown → activeIndex 只进 1（幂等守卫）', async () => {
+  it('U8b ArrowDown 同一事件二次调用 handleKeydown → activeIndex 只进 1（幂等检查）', async () => {
     await mountPopover('')
     const vm = wrapper!.vm as unknown as { handleKeydown: (e: KeyboardEvent) => boolean }
     // 第一次（模拟 window capture 入口）：消费成功，preventDefault
@@ -324,7 +324,7 @@ describe('CommandPopover slash query 过滤（U6-U8）', () => {
 
     const sent = wrapper!.emitted('select-and-send')
     expect(sent).toHaveLength(1)
-    // 直发 payload = 收敛读点项 + 原事件（D2 钉死传原事件、零合成）
+    // 直发 payload = 收敛读点项 + 原事件（D2 固定为传原事件、零合成）
     expect(sent![0][0]).toMatchObject({ type: 'slash', name: '/commit', originalEvent: enter })
     expect(wrapper!.emitted('select')).toBeFalsy() // 直发不经 select 通路
     expect(enter.defaultPrevented).toBe(true)
@@ -415,7 +415,7 @@ describe('Composer slash-trigger wiring（U9-U10）', () => {
     expect(cp.attributes('data-query')).toBe('co')
   })
 
-  it('U10 +菜单打开浮层后 emit slash-trigger null → 浮层不误关（slashTriggerActive=false 守卫）', async () => {
+  it('U10 +菜单打开浮层后 emit slash-trigger null → 浮层不误关（slashTriggerActive=false 检查）', async () => {
     const wrapper = mountComposer()
     await flushPromises()
     // ① +菜单选 slash → 打开浮层（onAddSelect，slashTriggerActive 仍 false）

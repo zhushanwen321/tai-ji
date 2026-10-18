@@ -1,7 +1,7 @@
 /**
  * 移动壳自有文案（zh-CN）：仅壳层新增 key（tab/列表/表单/composer 等壳 chrome 文案）。
  * 下沉域（ui 组件消费 key）不经本文件——直接来自 @taiji/ui/locale（i18n.ts 合并装配），
- * 双源副本零存在。双侧结构对齐由 __tests__/mobile-locale.test.ts 机器守卫。
+ * 双源副本零存在。双侧结构对齐由 __tests__/mobile-locale.test.ts 机器检查。
  */
 export default {
   mobile: {
@@ -101,7 +101,7 @@ export default {
 /**
  * connection 域（core transport 断连错误经 ports.t 构造，流入列表 loadError 等
  * 用户可见面）：key 集与桌面 renderer locale 同名域对齐，语义取桌面文案。不放
- * default export（mobile-locale 守卫要求壳自有文件顶层仅 mobile 命名空间，core
+ * default export（mobile-locale 检查要求壳自有文件顶层仅 mobile 命名空间，core
  * 接线文案不是壳 chrome），由 i18n.ts 装配点展开进 messages 顶层。
  */
 export const connectionZh = {

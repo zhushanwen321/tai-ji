@@ -2,7 +2,7 @@
 /**
  * TtsPage 组件单测（ai-voice-tts 任务书 u4 验收 2/4：表单控件存在性 + capabilities 失败禁用重试）。
  *
- * 控件存在性断言全部由 u1 mock 投影数据（@taiji/core/transport/mock/tts-data）驱动，对应
+ * 控件存在性断言全部由 u1 mock 派生视图数据（@taiji/core/transport/mock/tts-data）驱动，对应
  * 任务书验收 2 清单：
  * - MiniMax：情感/效果器/词典/AIGC 水印渲染；指令控件不渲染（supportsInstructions=false）
  * - StepFun：voice_label（音色标签）渲染且置灰（perModel.voiceLabelSupported=false）；
@@ -15,7 +15,7 @@
  * - 保存并测试：调 useTtsPlayer.speak（settings-tts-test 伪 id + 固定样句）
  * - 服务商选择：下拉单选（v0.10.8 卡片三选改版），选中家名直接可见
  *
- * mock 策略：vi.mock('@/api') 注入 tts spy（数据 fixture 取 core mock 投影）；useTtsPlayer
+ * mock 策略：vi.mock('@/api') 注入 tts spy（数据 fixture 取 core mock 派生视图）；useTtsPlayer
  * 注入可控桩；@taiji/ui/features/settings 用轻量 GroupCard stub（保留具名 slot）。
  *
  * 运行：cd packages/renderer && npx vitest run src/components/settings/tts/__tests__/tts-page.test.ts
@@ -126,10 +126,10 @@ function expectToastContaining(fragment: string): void {
 
 const sel = (w: ReturnType<typeof mount>, testid: string) => w.find(`[data-testid="${testid}"]`)
 
-describe('表单控件存在性（u1 mock 投影数据驱动，验收 2）', () => {
+describe('表单控件存在性（u1 mock 派生视图数据驱动，验收 2）', () => {
   it('MiniMax（默认选中家）：情感/效果器/词典/水印/LaTeX 渲染；指令与音色标签不渲染', async () => {
     const w = await mountPage()
-    // 投影 activeProvider = minimax（下拉触发器显示选中家名）
+    // 派生视图 activeProvider = minimax（下拉触发器显示选中家名）
     expect(sel(w, 'tts-provider-select').text()).toContain('MiniMax')
     expect(sel(w, 'tts-provider-key-status').exists()).toBe(true)
     // 情感枚举（emotions ×9）与语言增强渲染
@@ -219,7 +219,7 @@ describe('capabilities 拉取失败：表单禁用 + 重试（验收 4）', () =
     const w = await mountPage()
     expect(sel(w, 'tts-caps-failed').exists()).toBe(true)
     expect(sel(w, 'tts-caps-retry').exists()).toBe(true)
-    // 半态不渲染：无表单投影时表单区整体缺席
+    // 半态不渲染：无表单派生视图时表单区整体缺席
     expect(sel(w, 'tts-emotion-select-minimax').exists()).toBe(false)
     // 已保存配置值展示不受影响（§7.5）：服务商下拉与 Key 状态来自 getConfig 正常渲染
     expect(sel(w, 'tts-provider-select').exists()).toBe(true)

@@ -315,7 +315,7 @@ export class BtwService {
 
   /**
    * 启动孤儿补账——实装已抽 btw-orphan-reconcile.ts（同目录 sibling 拆分：判据 / BU5 扫描
-   * 降级闸 / 幂等语义随 doc 整段迁入，导出面与行为零变更）；本方法保留为组合根调用面
+   * 降级闸 / 幂等语义随 doc 整段迁入，导出面与行为零变更）；本方法保留为组合根调用点
    *（一行委托）。调用序不变：先本方法、后 rebuildFromDisk。
    */
   reconcileOrphanThreadDirs(): number {
@@ -667,7 +667,7 @@ export class BtwService {
 
   /**
    * 收尾口（shutdown / 测试收尾调用）。闲置扫描定时器已随 ADR-0122 退役，现为 no-op
-   * 形态保留（公共收尾调用面不破坏）。
+   * 形态保留（公共收尾调用点不破坏）。
    */
   dispose(): void {}
 

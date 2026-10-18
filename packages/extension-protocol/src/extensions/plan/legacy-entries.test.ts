@@ -34,12 +34,12 @@ describe('readLifecycleState：新字段直读', () => {
 })
 
 describe('readLifecycleState：旧 entry 映射（原 5 对等价契约的映射分支）', () => {
-  it("reviewState 'awaiting' → reviewing（等价对样本 0/② 的映射腿）", () => {
+  it("reviewState 'awaiting' → reviewing（等价对样本 0/② 的映射路径）", () => {
     expect(readLifecycleState({ reviewState: 'awaiting' }, true)).toBe('reviewing')
     expect(readLifecycleState({ reviewState: 'awaiting' }, false)).toBe('reviewing')
   })
 
-  it("reviewState 'revising' → revising（等价对样本 ① 的映射腿）", () => {
+  it("reviewState 'revising' → revising（等价对样本 ① 的映射路径）", () => {
     expect(readLifecycleState({ reviewState: 'revising' }, true)).toBe('revising')
     expect(readLifecycleState({ reviewState: 'revising' }, false)).toBe('revising')
   })

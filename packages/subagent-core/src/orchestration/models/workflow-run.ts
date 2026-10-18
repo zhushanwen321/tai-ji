@@ -7,11 +7,11 @@
  *
  * 生命周期判定归属（[D6(a)] 终态）：聚合**不承载生命周期状态**——终局判定唯一走
  * 六态机 dispatchRunTrigger 链与进程内终局记录注册表（terminal-actions 的
- * isRunSettled / settledRecordOf），展示投影走 runSummary（三态投影词表）。
+ * isRunSettled / settledRecordOf），展示派生视图走 runSummary（三态派生视图词表）。
  * 本类只管 runtime 资源的绑定/替换/释放（assignRuntime/replaceRuntime/
  * releaseRuntime）。
  *
- * 「终局 run 不可复活」的守卫面 = 调用方（聚合不设防）：
+ * 「终局 run 不可复活」的检查范围 = 调用方（聚合不设防）：
  * - runWorkflow：绑定对象是本函数内新建的聚合，结构性不可已终局；
  * - resume 接管（adoptResumedRun）：资格门按 record 流 fold 拒绝已终局 run
  *   （resume-run 的 already-settled / 非 interrupted 拒绝项）。
@@ -44,14 +44,14 @@ export interface WorkflowRunMeta {
   /**
    * ISO 时间戳，终局时刻（legacy 兼容读：活体终局的权威时序 = 终局记录注册表的
    * run-settled 帧时序（[W2/V1 D1] 后生产无写入方），本字段仅由旧持久化快照
-   * 重水合携带，作 runSummary 注册表 miss 时的回落读）。
+   * 重新加载时携带，作 runSummary 注册表 miss 时的回落读）。
    */
   completedAt?: string;
   /**
    * ISO 时间戳，最近一次中断（run-interrupted 转移事件）时刻；run-resumed 复活
    * 时清除（[D2] interrupted 是 lifecycle 暂停态——聚合不持生命周期轴，中断态经
-   * 本标记在投影面表达：runSummary 据此投影 'interrupted'，CLI/TUI 展示不再把
-   * 重水合中断 run 显示为僵尸「运行中」）。写点 = 壳侧 foldRecordStreamToRun
+   * 本标记在派生视图侧表达：runSummary 据此推算 'interrupted'，CLI/TUI 展示不再把
+   * 重新加载后的中断 run 显示为僵尸「运行中」）。写点 = 壳侧 foldRecordStreamToRun
    * （loadAll 重建）与 recoverCrashedRuns（收编链就地写入）。
    */
   interruptedAt?: string;
@@ -59,7 +59,7 @@ export interface WorkflowRunMeta {
    * 生效模型覆盖记账值（subagent-model-switch §6.6①/§7.4：journal 覆盖事件折叠进
    * run 状态的派生视图——生效覆盖值 = 最新一条，覆盖旧覆盖值不叠加）。写点 =
    * 壳侧 foldRecordStreamToRun（loadAll 重建，latestModelOverride 单点提取）；
-   * 无覆盖 undefined。记账投影面——派发侧覆写的消费判定归宿主覆盖通道（U4b），
+   * 无覆盖 undefined。记账派生视图侧——派发侧覆写的消费判定归宿主覆盖通道（U4b），
    * 本字段不回写事件流。
    */
   modelOverride?: WorkflowModelOverride;
@@ -80,7 +80,7 @@ export class WorkflowRun {
 
   /**
    * 创建聚合根。runtime 由调用方经 assignRuntime 注入（构造时恒 undefined——
-   * run 创建时无活 worker，重水合的 run 同样不恢复 runtime，worker 必须由
+   * run 创建时无活 worker，重新加载的 run 同样不恢复 runtime，worker 必须由
    * lifecycle 重新 start）。
    */
   constructor(
@@ -93,13 +93,13 @@ export class WorkflowRun {
     this.spec = spec;
     this.state = state;
     this.meta = meta;
-    // runtime 在构造时始终为 undefined——run 创建时无活 worker，loadAll 重水合
+    // runtime 在构造时始终为 undefined——run 创建时无活 worker，loadAll 重新加载
     // 时也不恢复 runtime（worker 必须由 lifecycle 重新 start）。
     this.runtime = undefined;
   }
 
   /**
-   * 从持久化快照重水合聚合根。与构造函数同语义。保留独立工厂标注重水合意图；
+   * 从持久化快照重新加载运行状态快照，得到聚合根。与构造函数同语义。保留独立工厂标注重新加载意图；
    * 调用方（D-4 kill-9 恢复）负责残留 running 形态的中断收编（recoverCrashedRuns）。
    */
   static reconstruct(runId: string, spec: RunSpec, state: RunExecutionSnapshot, meta: WorkflowRunMeta): WorkflowRun {
@@ -112,7 +112,7 @@ export class WorkflowRun {
    * 绑定 runtime（run 创建/复活后注入执行资源）。
    *
    * 前置：runtime===undefined（重复绑定抛错）。「终局 run 不可复活」由调用方
-   * 前置承载（见类注释守卫面——本类不持生命周期状态，无法自判）。
+   * 前置承载（见类注释检查范围——本类不持生命周期状态，无法自判）。
    */
   assignRuntime(rt: RunRuntime): void {
     if (this.runtime !== undefined) {
@@ -143,7 +143,7 @@ export class WorkflowRun {
    *
    * 原子地：释放旧 runtime（worker.terminate + abort）+ 绑定新 runtime。
    * 终态 run 的重建拒绝（G6-001）由调用方前置承载（isRunSettled 门，见类注释
-   * 守卫面）。[HISTORICAL] 唯一生产调用链 scheduleRebuild → rebuildRuntime 已随
+   * 检查范围）。[HISTORICAL] 唯一生产调用链 scheduleRebuild → rebuildRuntime 已随
    * 重试矩阵删除（ADR-0122）。
    */
   replaceRuntime(rt: RunRuntime): void {

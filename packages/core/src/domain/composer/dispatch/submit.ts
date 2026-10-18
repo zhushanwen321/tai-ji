@@ -1,13 +1,13 @@
 /**
  * Composer 提交动作（followUp / abort）。
  *
- * 职责单一：把 onFollowUp / onAbort 两个动作收口在此处，仅组合 useComposerRestore
+ * 职责单一：把 onFollowUp / onAbort 两个动作收敛在此处，仅组合 useComposerRestore
  * （clearInput）与 useChat（followUp / abort）提供的原语，不持任何状态。
  *
  * 提取到 composable 以满足 Composer.vue <script setup> 行数上限（300 行）。
  * onFollowUp 在分支内消费 useChat 失败信号（false → restoreSegments 恢复草稿）。
  *
- * [退役] onSteer 与 submit() 包装已随 ADR-0046 message.steer 协议腿退役同批删除
+ * [退役] onSteer 与 submit() 包装已随 ADR-0046 message.steer 协议路径退役同批删除
  * （过度设计审计候选 8）：Enter 统一走 onSend→routeSteer（steer 车道判定在 runtime 内核），
  * onSteer 生产调用方为 0；submit() 包装的 catch 对不抛错的 useChat 契约是 dead path 且
  * 生产调用方为 0。
@@ -32,7 +32,7 @@ interface ComposerInputInstance {
 }
 
 interface ComposerSubmitDeps {
-  /** 是否有输入（onFollowUp 前置守卫） */
+  /** 是否有输入（onFollowUp 前置检查） */
   hasInput: ComputedRef<boolean>
   /** inputRef（ComposerInput 实例 ref，getSegments 快照用） */
   inputRef: Ref<ComposerInputInstance | null>

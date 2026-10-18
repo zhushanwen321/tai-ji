@@ -1,5 +1,5 @@
 /**
- * 编排器单测族 · 模态共存让位与聚合让位真实事件序（display-containers §6.7 模态共存守卫 +
+ * 编排器单测族 · 模态共存让位与聚合让位真实事件序（display-containers §6.7 模态共存检查 +
  * R4 时序前提 / §8.2「聚合让位真实事件序」，对账 S8）。
  *
  * S8 断言半边（单测承载，真实事件序 = dispatchEvent + await nextTick，禁 mock 时序）：
@@ -78,7 +78,7 @@ describe('S8 模态共存（Esc 让位 + 让位递进）', () => {
     pressEsc()
     await nextTick()
     expect(dismisses.value, '设置页自己的 Esc 消费方动作（视觉最外层）').toBe(1)
-    expect(containerStates(), '两个抽屉原样不变（编排器让位守卫）')
+    expect(containerStates(), '两个抽屉原样不变（编排器让位检查）')
       .toEqual({ overlay: false, bottom: true, right: true })
 
     pressEsc()

@@ -376,7 +376,7 @@ describe('copyLabel 注入（宿主壳 i18n 文案注入）', () => {
   })
 
   it('C1: 桌面 zh 文案注入（t(\'composable.copyLabel\') = 复制）→ title 属性逐字等价', async () => {
-    // 桌面文案等价守卫：renderer i18n zh-CN/composable.ts copyLabel = '复制'
+    // 桌面文案等价检查：renderer i18n zh-CN/composable.ts copyLabel = '复制'
     const html = await freshRenderWithEnv('```ts\nconst x=1\n```\n', { copyLabel: '复制' })
     expect(html).toContain('class="md-codeblock__copy"')
     expect(html).toContain('title="复制"')

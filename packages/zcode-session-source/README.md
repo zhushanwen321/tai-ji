@@ -1,6 +1,6 @@
 # @zhushanwen/zcode-session-source
 
-zcode subagent 会话库（SQLite）的唯一只读读取基座。三个消费面：session-reader 扩展
+zcode subagent 会话库（SQLite）的唯一只读读取基座。三个消费方：session-reader 扩展
 （bun 宿主）、runtime 会话导入薄包装（node 侧）、未来新增的 coding-agent source。
 
 ## 内容
@@ -23,8 +23,8 @@ zcode subagent 会话库（SQLite）的唯一只读读取基座。三个消费�
   - 拷贝集唯一定义：db only + 自建 0 字节 `-wal`；`-wal`/`-shm` 在场绝不自动拷贝
     （防静默回滚），`-shm` 永不进拷贝集。
 - **sqlite-access**：行集查询（`getSessionTranscript`：session → message → part
-  三级表，联合序）、schema 版本已知集闸门（`KNOWN_ZCODE_SCHEMA_VERSIONS`）、
-  库路径投影与白名单集合（路径段常量同源 `@zhushanwen/subagent-engine-sdk`，
+  三级表，联合序）、schema 版本已知集门禁（`KNOWN_ZCODE_SCHEMA_VERSIONS`）、
+  库路径派生视图与白名单集合（路径段常量同源 `@zhushanwen/subagent-engine-sdk`，
   `dataDir` 由调用方传入，本包不做宿主路径推导）。
 
 ## 测试（D3 源级双跑）

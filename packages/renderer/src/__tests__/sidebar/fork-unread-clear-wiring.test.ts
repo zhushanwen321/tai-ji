@@ -1,5 +1,5 @@
 /**
- * R5 最后一跳闭合测试：core select 链 step 4 → `sessionEntry.clearUnread` 的端到端接线。
+ * R5 最后一跳完成测试：core select 链 step 4 → `sessionEntry.clearUnread` 的端到端接线。
  *
  * 背景（设计 `mode-system-composer-density` §8.2 S9 ②）：后台完成或被停止
  * 时未读点亮起，且**点开后消失**。fork-group.test.ts 的 R5 只做纯函数级断言（直接调
@@ -171,7 +171,7 @@ describe('R5 接线：selectSession（点开）→ core 链 step 4 清两源未�
     // 点开 = 真实走 core select 链（步 4 经 sessionEntry.clearUnread 端口）
     await sidebar.selectSession(sid)
 
-    // 最后一跳闭合：两源同点清空（清点若非 clearSessionUnread，至少一源残留 → 红）
+    // 最后一跳完成：两源同点清空（清点若非 clearSessionUnread，至少一源残留 → 红）
     expect(isUnread(sid)).toBe(false)
     expect(unreadByBranch.value.has(sid)).toBe(false)
   })

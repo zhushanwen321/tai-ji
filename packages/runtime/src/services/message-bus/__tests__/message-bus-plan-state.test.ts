@@ -1,14 +1,14 @@
 /**
- * message-bus plan 投影登记单测（plan 模式重设计 D1⑤）。
+ * message-bus plan 派生视图登记单测（plan 模式重设计 D1⑤）。
  *
  * 锁定 'session.planState' 的两表登记（照 'session.subagents' 同款断言口径）：
  * - TOPIC_TABLE：'state' 类（分配 seq、写快照、不入 ring）；
  * - STATE_TYPE_KEY_MAP：typeKey 'plan'（subscribe 的 stateSnapshot 含该帧）。
  *
  * 未入表的 fallback='stream' 永不写快照——若两表任一漏登记，本文件的
- * stateSnapshot/ring 断言即红（派生视图链六件套之一，静默失效面由测试显式锚定）。
+ * stateSnapshot/ring 断言即红（派生视图链六件套之一，静默失效风险由测试显式锚定）。
  *
- * D9③ 投影面边界（plan 状态机显式化）：selfReview 消费面止于审批请求帧，**不投影进
+ * D9③ 派生视图边界（plan 状态机显式化）：selfReview 消费方止于审批请求帧，**不映射进
  * session.planState 帧**（planState 帧有界前提不扩展）；state/resumeHint（D2 归一产物）
  * 经帧无损透传。
  *
@@ -65,7 +65,7 @@ describe('session.planState 两表登记（D1⑤）', () => {
   })
 })
 
-describe('D9③ 投影面边界：selfReview 不进 session.planState 帧', () => {
+describe('D9③ 派生视图边界：selfReview 不进 session.planState 帧', () => {
   it('entry 携带 selfReview → 派生 View 无 selfReview、帧经 bus 序列化全程无泄漏；state/resumeHint 无损透传', () => {
     const entry = {
       type: 'custom',
@@ -80,7 +80,7 @@ describe('D9③ 投影面边界：selfReview 不进 session.planState 帧', () =
         templateName: 'tech-design',
         state: 'reviewing',
         resumeHint: 'resubmit',
-        selfReview: '自审结论（消费面止于审批请求帧，不投影进本帧）',
+        selfReview: '自审结论（消费方止于审批请求帧，不映射进本帧）',
       },
     }
     const view = scanPlanStateEntries([entry])
@@ -97,7 +97,7 @@ describe('D9③ 投影面边界：selfReview 不进 session.planState 帧', () =
       payload: { sessionId: 's1', planState: view },
     } as unknown as ServerMessage)
     const received = ws.send.mock.calls.map((call: unknown[]) => JSON.parse(call[0] as string) as ServerMessage)
-    // 序列化全帧不含 selfReview（投影面止于审批请求帧，planState 帧有界前提不扩展）
+    // 序列化全帧不含 selfReview（派生视图边界止于审批请求帧，planState 帧有界前提不扩展）
     expect(JSON.stringify(received)).not.toContain('selfReview')
     const payload = received[0]!.payload as { planState: { state: string; resumeHint: string } }
     expect(payload.planState.state).toBe('reviewing')

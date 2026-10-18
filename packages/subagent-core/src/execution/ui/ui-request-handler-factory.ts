@@ -215,7 +215,7 @@ async function forwardInput(req: UiRequest, ui: HostUIChannel): Promise<UiRespon
 
 async function forwardEditor(req: UiRequest, ui: HostUIChannel): Promise<UiResponse> {
   // SDK editor 必填，但部分 host 运行时未实现——try/catch 降级 cancelled + warn（不卡队列）。
-  // 不用 typeof 守卫：editor 在类型上必填，typeof 检查会被 TS2367 拒（条件永假）。
+  // 不用 typeof 检查：editor 在类型上必填，typeof 检查会被 TS2367 拒（条件永假）。
   try {
     const text = await ui.editor(req.title ?? "", req.prefill);
     return text === undefined ? { cancelled: true } : { value: text };

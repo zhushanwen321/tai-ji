@@ -65,7 +65,7 @@ export function registerPrivilegedHandlers(deps: IpcHandlerDeps): void {
   // [HISTORICAL] defaultPath 兜底到 homedir：
   // 省略 defaultPath 时 macOS 原生目录选择器会用 OS 记忆的上次位置；若该位置已被删除，
   // Finder 会回退到 Documents（非预期，用户期望回退到 ~）。由渲染端传入候选 defaultPath
-  //（通常是 currentCwd），主进程 existsSync 守卫——存在则用，否则降级 homedir。
+  //（通常是 currentCwd），主进程 existsSync 检查——存在则用，否则降级 homedir。
   // 不能把"已删除目录"原样传给 dialog：否则又触发 OS 的 Documents 回退，丢失意义。
   ipcMain.handle(
     'pick-directory',
@@ -100,7 +100,7 @@ export function registerPrivilegedHandlers(deps: IpcHandlerDeps): void {
   // [HISTORICAL] defaultPath 兜底到 homedir（与 pick-directory 同一不变量）：
   // 省略 defaultPath 时 macOS 原生文件选择器会用 OS 记忆的上次位置；若该位置已被删除，
   // Finder 会回退到 Documents（非预期，用户期望回退到 ~）。由渲染端传入候选 defaultPath，
-  // 主进程 existsSync 守卫——存在则用，否则降级 homedir。
+  // 主进程 existsSync 检查——存在则用，否则降级 homedir。
   //
   // filters 透传：渲染端传入 Electron 原生 FileFilter[]（{name, extensions}），主进程不转换
   // 直接传给 dialog，让渲染端决定业务类型（图片/文档/视频），IPC 保持薄通道语义。

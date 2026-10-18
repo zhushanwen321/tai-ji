@@ -22,7 +22,7 @@ function formReq(overrides: Partial<ExtensionUIRequest>): ExtensionUIRequest {
   return { sessionId: 'btw:pi-1', requestId: 'r1', dialogKind: 'select', ...overrides }
 }
 
-describe('toScheduleDraft（schedule 草稿形状守卫）', () => {
+describe('toScheduleDraft（schedule 草稿形状检查）', () => {
   it('合法 once 草稿：必填三字段透传，可选字段缺省即省略（无 undefined 键）', () => {
     expect(toScheduleDraft({ kind: 'once', schedule: '2026-09-24T09:00', prompt: '跑巡检' }))
       .toEqual({ kind: 'once', schedule: '2026-09-24T09:00', prompt: '跑巡检' })
@@ -81,7 +81,7 @@ describe('toBarQuestionKind（choice/text/schedule 闭集收窄）', () => {
   })
 })
 
-describe('toBarQuestionBase（header/question 双守卫基底）', () => {
+describe('toBarQuestionBase（header/question 双检查基底）', () => {
   it('双有 → 透传；仅 question → header 省略；仅 header → question 落空串', () => {
     expect(toBarQuestionBase({ header: 'H', question: 'Q' }, 'text'))
       .toEqual({ type: 'text', header: 'H', question: 'Q' })

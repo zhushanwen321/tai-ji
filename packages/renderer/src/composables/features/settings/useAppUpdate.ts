@@ -2,10 +2,10 @@
  * useAppUpdate —— 自动升级的控制器工厂 + 单例 composable（w4 update-frontend）。
  *
  * 本文件是装配层：createAppUpdateController 产出可实例化控制器（订阅生命周期
- * subscribeProgress + 各轴装配），useAppUpdate() 是模块级惰性单例入口（消费面签名不变）。
- * 行为按变化轴拆在同目录 use-app-update-*.ts（依赖单向，均指向 use-app-update-state）：
+ * subscribeProgress + 各轴装配），useAppUpdate() 是模块级惰性单例入口（消费方签名不变）。
+ * 行为按变化原因拆在同目录 use-app-update-*.ts（依赖单向，均指向 use-app-update-state）：
  *
- * | 模块                       | 变化轴                                     |
+ * | 模块                       | 变化原因                                     |
  * |----------------------------|--------------------------------------------|
  * | use-app-update-state.ts    | state 容器（reactive 状态 + 跨轴标志）      |
  * | use-app-update-ipc.ts      | ipc 依赖缝（AppUpdateIpc + 真实 adapter）   |
@@ -59,7 +59,7 @@ import { createLaunchAxis } from './use-app-update-launch'
 // 同步上下文用不了 useI18n()，照抄同目录 useProviderImport.ts 的 global.t 模式（B2 review）
 const t = i18n.global.t
 
-/** 可实例化的更新控制器：state + 全部操作方法（组件/测试统一消费面） */
+/** 可实例化的更新控制器：state + 全部操作方法（组件/测试统一消费方） */
 export interface AppUpdateController {
   readonly state: UpdateStateContainer['state']
   checkForUpdate(force?: boolean, source?: CheckSource): Promise<void>
@@ -168,7 +168,7 @@ export function createAppUpdateController(
         // 必须在重查前显式置稳定态：performDownload 已置 downloading 且其 catch 会被
         // errorHandled 去重跳过，不置态则下方 checkForUpdate 捕获的 prevState='downloading'，
         // 重查恰逢 rateLimited 时假 downloading 被固化（UpdateCheckCard 无按钮 + 周期检查
-        // 守卫跳过 → UI 永久卡死）。置 available（latestRelease 仍在，重查成功即刷新；
+        // 检查跳过 → UI 永久卡死）。置 available（latestRelease 仍在，重查成功即刷新；
         // 极端情况下用户再点下载会再次 STALE → 再次自动重查，有出路非死锁）。
         st.state.state = 'available'
         console.info('[useAppUpdate] stale release detected, auto re-checking:', e.message)

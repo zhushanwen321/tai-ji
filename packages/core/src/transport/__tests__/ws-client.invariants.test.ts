@@ -56,12 +56,12 @@
 //   后退避簿记归零（reconnectAttempts=0 + reconnectStartedAt=null），不污染新连接。
 //
 // ⑦ 探活死链检测（probeAlive，remote 形态切前台补位）：connected 态下 probeAlive() 发 ping
-//   + 限时 5s 等任意入站帧——任何入站帧（含超界/坏 JSON 帧，onmessage 首行在守卫/parse 之前
+//   + 限时 5s 等任意入站帧——任何入站帧（含超界/坏 JSON 帧，onmessage 首行在检查/parse 之前
 //   清除）都是链路活性证据；超时无帧 → console.warn + close 走既有退避重连链（不动重连簿记，
 //   非 auth 拒绝、抑制位不涉及）。调用方 = use-connection visibility 切前台分支（仅 remote
 //   形态——移动壳无 IPC supervisor 事件补位；mock/local 直接 return，桌面死链检测仍由 TCP 层
 //   + IPC 事件兜底，零回归）。计时器清理点 = 入站帧 / onclose / clearTimers（disconnect、
-//   setFailed），单定时器不变量，超时回调带 gen 守卫不误杀换代后的新连接。断言点：超时 close
+//   setFailed），单定时器不变量，超时回调带 gen 检查不误杀换代后的新连接。断言点：超时 close
 //   + 重连可达 / 任意入站帧清除不 close / 非 connected no-op / 重复调用单定时器 / 清理不跨代。
 //   特征测试：ws-client.probe-alive.test.ts + use-connection-probe-alive.test.ts。
 //
@@ -164,10 +164,10 @@ describe('ws-client 不变量 ① 连接状态机', () => {
     expect(fakes.length).toBe(1)
   })
 
-  // 参数化覆盖单飞守卫（connect 内「存在非 CLOSED socket 即 return」分支）的两个 readyState
+  // 参数化覆盖单飞检查（connect 内「存在非 CLOSED socket 即 return」分支）的两个 readyState
   // 输入分区：connected（OPEN）与 connecting（CONNECTING）下重复 connect 一律幂等 no-op——
   // 不建新 WS、状态不被重置。CLOSING 分区由 single-flight 文件锁定（原 single-flight
-  // 「CONNECTING 期间重复 connect」用例与本用例锁同一守卫行，已收敛至此）。
+  // 「CONNECTING 期间重复 connect」用例与本用例锁同一检查行，已收敛至此）。
   it.each([
     { partition: 'connected（OPEN）', driveOpen: true },
     { partition: 'connecting（CONNECTING）', driveOpen: false },

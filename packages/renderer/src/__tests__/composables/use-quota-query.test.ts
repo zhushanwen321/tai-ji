@@ -133,7 +133,7 @@ describe('useQuotaQuery', () => {
 
     await onHoverEnter()
 
-    // 旧 data 不被 null 覆写（回归守卫：BL round1 #3）
+    // 旧 data 不被 null 覆写（回归检查：BL round1 #3）
     expect(data.value).toEqual(mockRow)
     // error 写入 reason 映射文案（i18n mock 返回 key 本身）
     expect(error.value).toBe('panel.context.quotaFailUnauthorized')

@@ -5,7 +5,7 @@ export default {
   compactFailed: '压缩失败：{msg}',
   bashFailed: 'Bash 执行失败：{msg}',
   // [U5 消息撤回 D8] 撤回编排 toast 文案（D8 错误规格表呈现列为 SSOT，与 core useChat 的
-  // REVOKE_ERROR_TOAST_KEYS 六键一一对应）+ 在途 cancel 腿与 RPC 传输失败文案
+  // REVOKE_ERROR_TOAST_KEYS 六键一一对应）+ 在途 cancel 路径与 RPC 传输失败文案
   revokeFailed: '撤回失败：{msg}',
   revokeCancelFailed: '撤销投递失败：{msg}',
   revokeDeliveredRace: '消息刚已送达，请再次点击撤回',

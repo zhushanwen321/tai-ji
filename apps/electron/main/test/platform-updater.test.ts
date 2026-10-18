@@ -38,7 +38,7 @@ vi.mock('node:child_process', () => ({
 vi.mock('electron', () => ({
   app: {
     get isPackaged() { return electronMocks.isPackaged },
-    get execPath() { return electronMocks.execPath }, // 注：实际用 process.execPath，这里 mock app 仅为守卫
+    get execPath() { return electronMocks.execPath }, // 注：实际用 process.execPath，这里 mock app 仅为检查
   },
 }))
 

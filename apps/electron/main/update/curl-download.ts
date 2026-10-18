@@ -96,7 +96,7 @@ export class CurlConnectionError extends UpdateError {
  * 单次 curl 运行的原始失败信号（内部控制流用，不导出）。
  *
  * 携带原始 exit code 供外层区分「exit 33 重下」与「直接映射抛出」两条路径；
- * 对用户的错误分类统一在 mapCurlExitToError 收口（对齐 download-asset 的
+ * 对用户的错误分类统一在 mapCurlExitToError 收敛（对齐 download-asset 的
  * RangeNotRespectedError 内部信号模式）。
  */
 class CurlExitError extends Error {

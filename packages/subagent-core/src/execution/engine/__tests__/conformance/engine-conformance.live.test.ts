@@ -13,7 +13,7 @@
 //
 // 措辞口径（R9-1）：「子进程零残留」= 一代子进程 + 组内后代；引擎自身 detached
 // 后代不判 fail（设计 §3.9 已接受代价）。POSIX 组探测（childSpawned pid 非组长）
-// 由 reverse-router 运行时告警承载，真机面挂 A3 手动门；Windows 无外部判据显式登记。
+// 由 reverse-router 运行时告警承载，真机验证挂 A3 手动门；Windows 无外部判据显式登记。
 
 import { spawn as childSpawn, type ChildProcess } from "node:child_process";
 import * as fs from "node:fs";

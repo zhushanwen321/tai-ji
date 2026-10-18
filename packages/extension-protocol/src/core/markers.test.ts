@@ -18,7 +18,7 @@ describe('core markers', () => {
 
   it('plan 审阅 payload/decision 类型可赋值（判别联合收窄编译断言）', () => {
     // 运行期仅验证类型导入存在与字面量可构造；形状精确性由消费侧（extension/
-    // runtime/前端）与 shared 契约测试（plan-protocol.test.ts）共同守卫
+    // runtime/前端）与 shared 契约测试（plan-protocol.test.ts）共同检查
     const request: PlanReviewRequest = {
       docs: [{ fileName: 'design.md', absPath: '/tmp/design.md', sourceSkill: 'tech-design', version: 1 }],
     }

@@ -2,7 +2,7 @@
  * shared/file-tree.ts — FileNode DTO（⑤code-arch §3，#1，D-012）
  *
  * 跨 runtime/前端 共享的纯结构 DTO。**不含 gitStatus**（D-012 树结构与 git 标注分离，
- * 标注走 gitOverlay 投影）。ignored? 标志：FileService 始终返回所有节点并对 .gitignore
+ * 标注走 gitOverlay 派生视图）。ignored? 标志：FileService 始终返回所有节点并对 .gitignore
  * 命中的节点填充 ignored=true；前端全量显示（2026-10-15 裁决，showIgnored 过滤开关退役），
  * 跟踪态由文件名颜色区分（未跟踪/ignored = 基线灰，跟踪 = 顶格白，FileTreeRow）。
  *

@@ -24,7 +24,7 @@ import type { ChildProcess } from "node:child_process";
 import { getLogger, type UiRequest, type UiRequestHandler, type UiResponse } from "@zhushanwen/subagent-engine-sdk";
 
 // 类型再导出（对齐 core 版惯例）：测试/消费方从本模块取契约类型，
-// SSOT = SDK ui-types（core 反向再导出保壳侧消费面）。
+// SSOT = SDK ui-types（core 反向再导出保壳侧消费方）。
 export type { UiRequest, UiRequestHandler, UiResponse } from "@zhushanwen/subagent-engine-sdk";
 
 import { toErrorMessage } from "./error-message.ts";
@@ -86,7 +86,7 @@ export function createUiRequestQueue(
       });
   }
 
-  // [R3] 子进程退出时 abort 所有 pending handler，队列不再阻塞（幂等守卫：
+  // [R3] 子进程退出时 abort 所有 pending handler，队列不再阻塞（幂等检查：
   // close + error 可能都触发）
   const onClose = (): void => {
     if (closed) return;
@@ -161,7 +161,7 @@ async function handleUiRequest(
   }
 }
 
-/** method-specific 字段值守卫（与原 inline 判定 1:1）。 */
+/** method-specific 字段值检查（与原 inline 判定 1:1）。 */
 function isStringValue(value: unknown): boolean {
   return typeof value === "string";
 }
@@ -175,7 +175,7 @@ function isArrayValue(value: unknown): boolean {
 }
 
 /** extractMethodFields 字段复制规格表（与 Pi rpc-types.ts 1:1，序 = 原复制序）。
- *  guard = in 命中后的值类型守卫（验不过不复制）；null = 仅 in 检查直赋。 */
+ *  guard = in 命中后的值类型检查（验不过不复制）；null = 仅 in 检查直赋。 */
 const METHOD_FIELD_COPY_SPECS: ReadonlyArray<{
   key: string;
   guard: ((value: unknown) => boolean) | null;

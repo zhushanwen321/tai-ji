@@ -43,7 +43,7 @@ export interface TerminalWriteQueue {
    * 入队写命令（预留接入点：消息流 tool 块「在终端运行」调；**当前仓内无生产调用方**）。
    * - PTY 已活 → 立即 write
    * - PTY 未活 → 入 pendingWrites，markAlive 时 flush；队列达 MAX_PENDING_WRITES 上限时丢弃最旧命令（drop-oldest，保留最新）
-   * - **关闭沿入队守卫**（设计 §3.3「实例关闭沿 renderer 资源处置」）：已配置 isRegistered
+   * - **关闭沿入队检查**（设计 §3.3「实例关闭沿 renderer 资源处置」）：已配置 isRegistered
    *   且实例不在注册表（已关闭）→ 拒绝入队（**不建档**，否则 getOrCreate 会为永不复用的
    *   terminalId 自动建档成幽灵实例态、命令静默滞留至会话删除）。
    */
@@ -87,7 +87,7 @@ export interface TerminalWriteQueueOptions {
    */
   onDrop?: TerminalDropNotifier
   /**
-   * 实例注册成员资格判据（关闭沿入队守卫，设计 §3.3）：返回 false → 拒绝入队、不建档。
+   * 实例注册成员资格判据（关闭沿入队检查，设计 §3.3）：返回 false → 拒绝入队、不建档。
    * **与 ptyAlive 镜像解耦**——已建档未 alive 实例（isRegistered=true / ptyAlive=false）
    * 仍入 pendingWrites，markAlive 时 flush（core 既有语义）。缺省（未注入）恒放行。
    */
@@ -135,7 +135,7 @@ export function createTerminalWriteQueue(
   }
 
   function enqueueWrite(terminalId: string, cmd: string): void {
-    // 关闭沿守卫：注册成员资格否定即拒绝（不建档——防幽灵实例态静默滞留）
+    // 关闭沿检查：注册成员资格否定即拒绝（不建档——防幽灵实例态静默滞留）
     if (opts?.isRegistered && !opts.isRegistered(terminalId)) return
     const s = getOrCreate(terminalId)
     if (s.ptyAlive) {

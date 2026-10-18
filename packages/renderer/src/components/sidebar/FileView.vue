@@ -2,7 +2,7 @@
   <!--
     展示组件 · 文件视图（#4，draft-five-states spec（demo）§B）。
     [W28/D-7.2] 树形递归渲染 → 扁平可见行（projectVisibleRows）+ virtua 虚拟滚动：
-    - 树数据仍是 SSOT（fileTreeStore 4 facet 不变），本组件持有唯一「树→可见行」投影 computed
+    - 树数据仍是 SSOT（fileTreeStore 4 facet 不变），本组件持有唯一「树→可见行」派生视图 computed
     - FileTreeRow 改纯行组件（收 VisibleRow），展开/选中交互在本层编排（useFileTree + useSideDrawer）
     - 头部（session label）与过滤框移到滚动区外固定——virtua Virtualizer 要求
       其 parentElement 即滚动容器且前方无内容（startMargin 动态高度脆弱），过滤器固定可见
@@ -75,7 +75,7 @@
         <Button variant="ghost" class="h-6 text-[length:var(--text-xs)] text-accent" data-testid="file-retry" @click="retry">{{ t('sidebar.fileView.retry') }}</Button>
       </div>
 
-      <!-- 空态两分支（E7-c：投影空）：
+      <!-- 空态两分支（E7-c：派生视图为空）：
            hasFilter = demo .ftree-empty 权威形态（横排 space-between、
            padding 14px 10px、--text-xs dim 文案、无图标；demo 文件树空态附「清空过滤」
            一键恢复按钮 = fileFilter('')，映射到既有 setFilter 通道，见 onClearFilter）；
@@ -104,7 +104,7 @@
         <p class="text-[length:var(--text-xs)] text-neutral-dim opacity-55">{{ t('sidebar.fileView.noFile') }}</p>
       </div>
 
-      <!-- 文件树：virtua 挂扁平行（可见行 = projectVisibleRows 投影）。2026-10-10 用户裁决
+      <!-- 文件树：virtua 挂扁平行（可见行 = projectVisibleRows 派生视图）。2026-10-10 用户裁决
            （「长文件名不做横向滚动，用省略号+悬停展示」）落定 demo .fname 契约：行宽 = 100%
            容器宽，名称超宽省略号截断 + title 悬停展示全名（FileTreeRow .fname 承接）；
            原 max-content 整树横滚架构退役（旧互斥登记作废）。
@@ -188,8 +188,8 @@ let unwatchInvalidation: (() => void) | null = null
 const rootState = computed(() => store.getNodeState(props.sessionId, ''))
 
 /**
- * [W28/D-7.2] 唯一「树 → 可见行」投影 computed（E7-a：computed 缓存投影，依赖分桶后的
- * 细粒度 getter——展开/折叠/过滤/overlay 变化触发一次 O(可见行) 重投影）。
+ * [W28/D-7.2] 唯一「树 → 可见行」派生视图 computed（E7-a：computed 缓存派生视图，依赖分桶后的
+ * 细粒度 getter——展开/折叠/过滤/overlay 变化触发一次 O(可见行) 重新派生）。
  * [W28 审查 Fix-2] overlay 走 per-session getter（getGitOverlay，
  * 与 getExpanded 同款分桶）——只追踪本 sid 分桶 key，异 sid git.status 回写不触发重算
  * （split mode 多面板隔离；store 侧 setGitOverlay 已改 keyed set 支撑）。

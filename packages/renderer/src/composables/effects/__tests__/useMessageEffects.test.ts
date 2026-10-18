@@ -8,7 +8,7 @@
  * core/src/domain/chat/__tests__/lifecycle-effects.test.ts 全覆盖）；本文件锁定：
  * - 桌面壳扩展四项接线：① extensionUIStore.clearSession（D6b/M8 清挂起弹窗分区）
  *   ② toast（首行 reason）③ 强杀分流（consumeForcedExit 命中 → 不进恢复窗口不建订阅）
- *   ④ respawn 过渡态及其回收（markRespawnPending / 30s timer / restored·熔断收口）
+ *   ④ respawn 过渡态及其回收（markRespawnPending / 30s timer / restored·熔断收尾）
  * - factory 原语透传：exited → markSessionDead 序列入参；restored/restoreFailed 回调转发
  * - 恢复窗口订阅经 factory（subscribe RPC 经 setSubscriptionPorts 捕获，壳不直调 subscribeSession）
  * - 非 lifecycle 回调：onMessageComplete → focusedSid + handleCompletion；onSubagents →
@@ -149,7 +149,7 @@ describe('createInboundEffects（§11.4 InboundEffects 接线）', () => {
     expect(storeMocks.toastError).toHaveBeenCalledTimes(1)
   })
 
-  it('[D5 接线] 意外退出 → 进 respawnPending 过渡态（壳扩展④），30s 无收口事件则超时回收', () => {
+  it('[D5 接线] 意外退出 → 进 respawnPending 过渡态（壳扩展④），30s 无收尾事件则超时回收', () => {
     vi.useFakeTimers()
     try {
       storeMocks.isRespawnPending.mockReturnValue(true)
@@ -183,7 +183,7 @@ describe('createInboundEffects（§11.4 InboundEffects 接线）', () => {
     }
   })
 
-  it('onSessionRestored → 收口过渡态（clearRespawnPending）+ core 序列经 factory（revive + restored 提示条 + 重订阅）', async () => {
+  it('onSessionRestored → 收尾过渡态（clearRespawnPending）+ core 序列经 factory（revive + restored 提示条 + 重订阅）', async () => {
     effects.onSessionRestored!('s1', { attempts: 2 })
 
     // 壳扩展④回收
@@ -196,14 +196,14 @@ describe('createInboundEffects（§11.4 InboundEffects 接线）', () => {
     await flushSubscribes()
   })
 
-  it('onSessionRestoreFailed → willRetry=true 中间失败：不收口过渡态、无提示条', () => {
+  it('onSessionRestoreFailed → willRetry=true 中间失败：不收尾过渡态、无提示条', () => {
     effects.onSessionRestoreFailed!('s1', { attempts: 1, willRetry: true, reason: 'attach failed' })
 
     expect(storeMocks.clearRespawnPending).not.toHaveBeenCalled()
     expect(storeMocks.appendRespawnNotice).not.toHaveBeenCalled()
   })
 
-  it('onSessionRestoreFailed → willRetry=false 熔断：恢复失败提示条（restoreFailed 形态）+ 收口过渡态', () => {
+  it('onSessionRestoreFailed → willRetry=false 熔断：恢复失败提示条（restoreFailed 形态）+ 收尾过渡态', () => {
     effects.onSessionRestoreFailed!('s1', { attempts: 2, willRetry: false, reason: 'attach hard-fail' })
 
     expect(storeMocks.appendRespawnNotice).toHaveBeenCalledWith('s1', 'restoreFailed', expect.any(String))

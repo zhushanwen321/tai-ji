@@ -11,11 +11,11 @@
   入口 = 指标聚合按钮 hover 聚合页（ContextCapacityCard），决策 6「数字仍在 hover 聚合」。
 
   契约：props = { sessionId?: string }，无 emits。数据纯读（useContextUsage 分区，
-  订阅/恢复腿/0 帧哨兵全在 composable）；contextWindow 未知（total=0）、无真值或 ≤80%
+  订阅/恢复路径/0 帧哨兵全在 composable）；contextWindow 未知（total=0）、无真值或 ≤80%
   不渲染（无百分比可分档或未达告警档——常态渲染细条反而像「永远有事」的假信号）。
 
   为什么独立成组件：① Composer.vue script 已贴 300 行硬门禁；② 细条带 useContextUsage
-  恢复腿（getContext RPC）——独立组件让 Composer mount 族测试可经 composerChildStubs
+  恢复路径（getContext RPC）——独立组件让 Composer mount 族测试可经 composerChildStubs
   stub 掉，不把 RPC 依赖泄进所有 Composer 级用例（panel 子组件 stub 的既有范式）。
 -->
 <template>
@@ -45,7 +45,7 @@ import { useContextUsage } from '@/composables/features/model/useContextUsage'
 import { capacityBarClass, CAPACITY_BAR_WARN_THRESHOLD } from './context-usage-display'
 
 const props = defineProps<{
-  /** session 分区键 + 恢复腿触发源（useContextUsage 分区范式，组件纯读） */
+  /** session 分区键 + 恢复路径触发源（useContextUsage 分区范式，组件纯读） */
   sessionId?: string
 }>()
 

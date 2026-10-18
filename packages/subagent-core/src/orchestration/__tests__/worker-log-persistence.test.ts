@@ -2,7 +2,7 @@
 //
 // [§2.1 errorLogs 持久化 / ADR-0094] 写入侧契约：worker 诊断日志在追加
 // run.state.errorLogs 的同时落一条 `worker-log` 事件到 record 流（重启可重建），
-// 且活体写入与落账共用同一单点（追加 + 尾部上限裁剪语义一致）。
+// 且活体写入与写入 journal 记录共用同一单点（追加 + 尾部上限裁剪语义一致）。
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
@@ -64,7 +64,7 @@ async function scanLogs(runId: string) {
   return events.filter((e) => e.type === "worker-log");
 }
 
-describe("worker 诊断日志落账（ADR-0094）", () => {
+describe("worker 诊断日志写入 journal 记录（ADR-0094）", () => {
   it("主线程 log 消息：入 errorLogs 且落一条 worker-log 事件", async () => {
     const run = makeRun("wf-log-1");
     await handleWorkerMessage(run, { type: "log", message: "step 1 done", phase: "p" }, makeDeps(), makeHandlers());

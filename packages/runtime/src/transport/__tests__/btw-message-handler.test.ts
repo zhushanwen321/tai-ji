@@ -75,7 +75,7 @@ function mockCtx(overrides?: Partial<BtwHandlerContext>) {
   return { ctx, publish, createLine, listLines, closeLine, getLine, resolveMain }
 }
 
-/** reply/sendError 调用面读取（ack 必回断言用）。 */
+/** reply/sendError 调用读取（ack 必回断言用）。 */
 function replyCalls(ctx: BtwHandlerContext) { return vi.mocked(ctx.reply).mock.calls }
 function errorCalls(ctx: BtwHandlerContext) { return vi.mocked(ctx.sendError).mock.calls }
 

@@ -1,5 +1,5 @@
 /**
- * 投影分类器逐路对拍测试（U1——设计 §7.2 分类器伪代码与 §4.2 判定树逐分支）。
+ * 派生视图分类器逐路对拍测试（U1——设计 §7.2 分类器伪代码与 §4.2 判定树逐分支）。
  * 来源注记：自 runtime zcode-import dev 演进版整文件移植（用例零改动，git 可追溯）。
  *
  * 用例与 §7.2 判定序一一对应（验收③覆盖证明，编号即下文 describe/it 前缀）：
@@ -8,7 +8,7 @@
  *   ① compact_summary 特判先于一切（kind 通道 + data.summary 旧数据通道，含 null）；
  *   ② semantics 六分支（a-f，含 b 的两个负例与 d-先于-f 的顺序锚——§6-D1 顺序即语义实证）；
  *   ③ 旧数据兜底链（model-only → isTimelineOnlyMessage 六通道 → fork 独立分支 →
- *      LEGACY 17 值 → 遗留提醒文本 → synthetic∧通知文本 → synthetic → role 收口）；
+ *      LEGACY 17 值 → 遗留提醒文本 → synthetic∧通知文本 → synthetic → role 收尾）；
  *   ④ fork 四通道专项（message.source / metadata.source / semantics.source / part 级
  *      source）+ forkContext 通道 + 四路回退优先级交互。
  *
@@ -175,7 +175,7 @@ describe('② semantics 六分支（顺序 = asar 原序）', () => {
     expect(classifyMessage(data, [])).toBe('visibleAssistant')
   })
 
-  it('c 落空（uiVisibility 缺失）且 f 三条件全不满足（origin=system）→ 兜底链 role 收口 visibleAssistant', () => {
+  it('c 落空（uiVisibility 缺失）且 f 三条件全不满足（origin=system）→ 兜底链 role 收尾 visibleAssistant', () => {
     const data: MsgData = {
       role: 'assistant',
       semantics: {
@@ -292,7 +292,7 @@ describe('③ 旧数据兜底链（无 semantics；顺序 = asar 原序）', () 
     ).toBe('providerContextOnly')
   })
 
-  it('4 负例：MESSAGE_SOURCES 独有值 workflow_launch 不在 LEGACY 17 → 落到 role 收口 realUserInput', () => {
+  it('4 负例：MESSAGE_SOURCES 独有值 workflow_launch 不在 LEGACY 17 → 落到 role 收尾 realUserInput', () => {
     expect(classifyMessage({ role: 'user', source: 'workflow_launch' }, [])).toBe('realUserInput')
   })
 
@@ -331,7 +331,7 @@ describe('③ 旧数据兜底链（无 semantics；顺序 = asar 原序）', () 
     expect(classifyMessage({ role: 'user' }, parts)).toBe('providerContextOnly')
   })
 
-  it('6 负例：通知文本但非 synthetic → 不判 providerContextOnly（∧ 条件）→ role 收口 realUserInput', () => {
+  it('6 负例：通知文本但非 synthetic → 不判 providerContextOnly（∧ 条件）→ role 收尾 realUserInput', () => {
     const parts: PartData[] = [textPart('<task-notification><task-id>x</task-id></task-notification>')]
     expect(classifyMessage({ role: 'user' }, parts)).toBe('realUserInput')
   })
@@ -360,7 +360,7 @@ describe('③ 旧数据兜底链（无 semantics；顺序 = asar 原序）', () 
     expect(classifyMessage({ role: 'user' }, parts)).toBe('hiddenSynthetic')
   })
 
-  it('8: 无 semantics 的 assistant → visibleAssistant（role 收口）', () => {
+  it('8: 无 semantics 的 assistant → visibleAssistant（role 收尾）', () => {
     expect(classifyMessage({ role: 'assistant' }, [textPart('hello')])).toBe('visibleAssistant')
   })
 
@@ -380,7 +380,7 @@ describe('④ fork 四通道专项（独立分支防穿透——设计 §7.2 for
 
   it('通道三：semantics.source=fork（六分支全落空的 semantics 形态）→ timelineOnly（独立分支捕获）', () => {
     // origin=real_user 被 synthetic=true 压掉 b 分支，providerVisibility 缺省压掉 d，
-    // origin 非 agent_runtime 压掉 f——落到兜底链后由 src==='fork' 独立分支收口
+    // origin 非 agent_runtime 压掉 f——落到兜底链后由 src==='fork' 独立分支收尾
     const data: MsgData = {
       role: 'user',
       synthetic: true,

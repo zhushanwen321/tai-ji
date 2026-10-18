@@ -189,7 +189,7 @@ describe("pump replay 校验增强 — cached 命中的输入一致性", () => {
     expect((settled as { outcome?: string }).outcome).toBe("failed");
   });
 
-  it("占位 opts（resume/重水合重建形态）→ 跳过比对直接回话（零误报，场景 13 约束）", async () => {
+  it("占位 opts（resume/重新加载重建形态）→ 跳过比对直接回话（零误报，场景 13 约束）", async () => {
     const { run, postMessage } = makeRunningRun("wf-replay-placeholder");
     // 旧格式 record 流重建的 call：帧无 input 载荷（agent-started 入参全文为 [U13]
     // 补齐，落地前落盘的流）→ opts 占位 { prompt: "" }
@@ -294,7 +294,7 @@ describe("D11 terminate 统一中断 — 全部 running run 被动失联转 inte
 
   it("resume 来源 run：terminate → run-interrupted(terminated) 落 record，非 failed 终局，可再 resume", async () => {
     const runId = "wf-resumed-origin";
-    // run-created 落账（fold 基线）+ run-interrupted（前置中断）+ run-resumed（复活）
+    // run-created 写入 journal 记录（fold 基线）+ run-interrupted（前置中断）+ run-resumed（复活）
     const journal = createRunEventJournal(journalDir);
     await journal.append(runId, {
       type: "run-created",

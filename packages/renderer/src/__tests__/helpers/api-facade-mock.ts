@@ -121,7 +121,7 @@ export function apiConfigSkillsDomainMock() {
 
 /**
  * workspace / worktree 域空载基座 mock（detect not-repo + worktree.list 空数组）：new-task
- * 流程（submitFirstMessage / initApp 的 cwd 预填）前置消费面。解析函数形态刻意区别于
+ * 流程（submitFirstMessage / initApp 的 cwd 预填）前置消费方。解析函数形态刻意区别于
  * 存量逐字内联副本（mockResolvedValue 链式）——同 apiConfigDomainMock 先例，避免与未迁移
  * 副本构成逐字克隆窗。
  */

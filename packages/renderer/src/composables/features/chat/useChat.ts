@@ -10,7 +10,7 @@
  *    useChatStore/useSessionStore/useToast/i18n），20 个消费方零 import 改动
  *    （对齐 w4 createChatStore + defineStore wrapper 模式）。
  *    [u3c] getCompactQueue 注入已随 useCompactQueue 退役摘除（队列区数据源 = session.delivery
- *    帧投影，见 composables/panel/useQueueRows.ts）。
+ *    帧派生视图，见 composables/panel/useQueueRows.ts）。
  * 2. ensureStreamSubscription 同名包装：core 版加 deps 参数（TD5），本包装注入 renderer deps，
  *    3 个复用点（useForkActions/useSidebar/useSessionStreamSync）零改动。
  * 3. re-export resetChatModuleState（as alias core 的 resetChatModuleStateForTest）：
@@ -65,7 +65,7 @@ const chatApiPort: ChatApiPort = {
   abortBash: chatApi.abortBash,
   getHistory: chatApi.getHistory,
   streamSubscribe: chatApi.streamSubscribe,
-  // [U5 消息撤回 D6] 统一撤回入口的两条 RPC 腿（实现在 session / chat 域，经端口暴露给
+  // [U5 消息撤回 D6] 统一撤回入口的两条 RPC 路径（实现在 session / chat 域，经端口暴露给
   // core useChat.revokeMessage 的路由分派）。revokeMessage 懒解引用（同 subagentAction：
   // 部分 mock 测试 vi.mock session 域时未导出新方法，调用时才读）。
   revokeMessage: (sid, targetId) => sessionApi.revokeMessage(sid, targetId),
@@ -94,7 +94,7 @@ function rendererSubDeps(): EnsureStreamSubDeps {
  * [U5 消息撤回 D7] 撤回 reply 的草稿回填注入——composerInjectionStore 一次性通道
  * （useSidebarSessionActions.forceQuit 回收同款跨组件树通路）：useChat 是全局编排器
  * （非 Composer 作用域），restoreToDraft 的 DOM 能力（Composer 壳）不可直取，经注入通道
- * 送入目标 session 的 composer。空输入/追加统一由 Composer 消费面（insertTextAtCursor）
+ * 送入目标 session 的 composer。空输入/追加统一由 Composer 消费方（insertTextAtCursor）
  * 处理——不覆盖用户正在输入的内容；槽位已有 text 时按 forceQuit 先例 '\n\n' 累积。
  * [MF-1-2] 注入通道为单值 text 语义（四符号体系 path/text/refSessionId 三互斥 schema，
  * 无 segments 承载位）——本路径纯文本回草稿；chips 完整恢复走队列区 restoreToDraft

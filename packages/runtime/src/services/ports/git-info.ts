@@ -76,7 +76,7 @@ export interface IGitRepoObserver {
  * git 信息读取 port（观测器之上的同步只读门面）。
  *
  * 实现约束（infra/system/git-info-reader.ts 门面）：
- * - readGitInfo 同步返回（GitInfo | undefined）：读观测器缓存并投影为旧形状；
+ * - readGitInfo 同步返回（GitInfo | undefined）：读观测器缓存并换算为旧形状；
  *   非 git 仓库 / branch 为空（含未出生分支）→ undefined（不抛，调用方留空字段）。
  * - pruneStaleCache：收缩动作打观测器单点（pruneCache），签名保留不变。
  */

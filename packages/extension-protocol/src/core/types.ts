@@ -194,12 +194,12 @@ export type TreeItemIcon = 'arrow' | 'check' | 'cross' | 'circle' | 'dot' | 'pau
 // 前端审批条渲染并经 respond 回传 PlanReviewResponse。
 // shared 侧 PlanStateView.docs 与 PlanDocMeta 同形（PlanDocMeta 保持同形镜像——
 // 值形状惯例；PlanLifecycleState 已 type-only 直引本包，D2 裁决：plan 状态机处
-// 同形惯例不适用）。形状漂移由双端注释互指 + 派生视图链契约测试守卫。
+// 同形惯例不适用）。形状漂移由双端注释互指 + 派生视图链契约测试检查。
 
 /**
  * 计划产物文档元数据——agent 调 register-doc 登记的一份产物。
  * version 由 extension 侧维护：修订后重写文档须重调 register-doc（version+1），
- * 前端凭 version 变化重拉 file.read 刷新渲染。
+ * 前端凭 version 变化重新拉取 file.read 刷新渲染。
  */
 export interface PlanDocMeta {
   /** 文件名（drawer L2 文档 tab 标题，不含目录） */
@@ -216,7 +216,7 @@ export interface PlanDocMeta {
  * submit-review 挂起审批时的 select payload（序列化为 options[0] JSON）。
  * extension 侧解析失败走 E5（logger.warn + tool result 报错提示重挂，垃圾数据不进对话流）。
  *
- * selfReview（自审结论，D9①③）：agent 提交审批前的自审摘要，投影面到审批请求帧为止
+ * selfReview（自审结论，D9①③）：agent 提交审批前的自审摘要，派生范围到审批请求帧为止
  * （不进 PlanStateView / session.planState 帧）；有界性由写侧 4KB 单点截断保证
  * （canonical 上限与截断 = src/extensions/plan/review-contract.ts，R3）。**optional 是兼容契约**：
  * 旧扩展不携带 → 宿主自审行不渲染的降级形态；submit-review 的必填硬门在 tool 层执行
@@ -230,7 +230,7 @@ export interface PlanReviewRequest {
 /**
  * 审批三键裁决（D3）：approve 确认执行 / revise 提交修订（必带评论）/ dismiss 搁置
  * （非破坏：不杀 turn、不丢状态，计划进度保留）。revise 携带评论、approve/dismiss
- * 不携带（结构上不可混带）。值域守卫 canonical 版 = src/extensions/plan/review-contract.ts
+ * 不携带（结构上不可混带）。值域检查 canonical 版 = src/extensions/plan/review-contract.ts
  * （运行时判别 TS 穷尽性管不到——未知值域降级语义见该模块「降级双分源」）。
  */
 export type PlanReviewDecision = 'approve' | 'revise' | 'dismiss'

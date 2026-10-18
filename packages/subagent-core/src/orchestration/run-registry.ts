@@ -7,8 +7,8 @@
 // 的启发式时代由此而来。本模块把判读换轨到结构判据：注册表 = record 流 fold 的
 // 派生视图，只消费 D5 事件流（不另立状态存储）——
 // - 事件流正常推进（本进程活体持有）→ 活跃（lifecycle 对齐状态机 fold 终帧）；
-// - run-settled 已落账 → 终局（outcome/errorCode 从事件与终局派生 manifest 读）；
-// - run-interrupted 已落账（[D2] 显式中断转移）或事件流停止（活体集未命中 =
+// - run-settled 已写入 journal 记录 → 终局（outcome/errorCode 从事件与终局派生 manifest 读）；
+// - run-interrupted 已写入 journal 记录（[D2] 显式中断转移）或事件流停止（活体集未命中 =
 //   host-died 判读）→ interrupted 暂停态，非 terminal——僵尸 running 构造性消除，
 //   恢复交互（resume，U2）以 lifecycle=interrupted 为资格判据。
 //
@@ -55,13 +55,13 @@ const logger = getLogger("run-registry");
 
 /** 派生视图判读四相。 */
 export type RunRegistryPhase =
-  /** 无事件证据且无活体持有——run 从未落账（或 record 已过保留期清理）。 */
+  /** 无事件证据且无活体持有——run 从未写入 journal 记录（或 record 已过保留期清理）。 */
   | "missing"
   /** 本进程活体持有（事件流正常推进）——lifecycle 对齐 fold 终帧。 */
   | "active"
-  /** 终局（run-settled 已落账）——outcome 见 state.outcome。 */
+  /** 终局（run-settled 已写入 journal 记录）——outcome 见 state.outcome。 */
   | "terminal"
-  /** 暂停态（[D2]）：run-interrupted 已落账（显式中断转移，无论活体）或事件流
+  /** 暂停态（[D2]）：run-interrupted 已写入 journal 记录（显式中断转移，无论活体）或事件流
    *  停止且活体未命中（host-died 派生视图判读）——非 terminal，可 resume。 */
   | "interrupted";
 
@@ -95,7 +95,7 @@ export interface RunProjectionOptions { // oe-exempt:20260929:framework:workflow
  *
  * 循环体单源 run-events.ts 的 foldRunEventFrames（与 terminal-actions 的 fold
  * 读口共享同一坏帧失效模式：保守停在最近一致态）；本侧只持注册表域的 warn 文案
- * 与 logger。消费面 = projectRunRegistryEvents（纯派生视图函数，任意 journal 源的
+ * 与 logger。消费方 = projectRunRegistryEvents（纯派生视图函数，任意 journal 源的
  * 查询/对账形态，不经进程内缓存）；收编链（adoptInterruptedRun）的 fold 不走
  * 本函数——经 terminal-actions 共享读口（[D6(b)] 检查点缓存）。
  */
@@ -119,8 +119,8 @@ function foldEvents(events: readonly WorkflowRunEvent[], runId: string): RunLife
  * - fold running/settling + 活体集命中 → active（事件流正常推进）；
  * - fold running/settling + 活体集未命中 → interrupted（事件流停止 = 进程死亡
  *   判读；状态字段不可信——快照末行 running 的僵尸在此判读下构造性消失）；
- * - 空事件流 + 活体集命中 → active（run-created 落账前的创建窗口）；
- * - 空事件流 + 未命中 → missing（无事件证据——从未落账，或已过保留期清理且
+ * - 空事件流 + 活体集命中 → active（run-created 写入 journal 记录前的创建窗口）；
+ * - 空事件流 + 未命中 → missing（无事件证据——从未写入 journal 记录，或已过保留期清理且
  *   消费方应回落 manifest 终局面）。
  */
 export function projectRunRegistryEvents(
@@ -230,7 +230,7 @@ export type AdoptInterruptedRunOutcome =
   | "skippedActive"
   /** 坏链 run（fold 停在 created——run-created 帧损坏/缺首帧，run-interrupted 表外转移）。 */
   | "skippedBrokenChain"
-  /** 空 record 流（无事件证据——从未落账或已过保留期清理）。 */
+  /** 空 record 流（无事件证据——从未写入 journal 记录或已过保留期清理）。 */
   | "skippedMissing";
 
 /** 收编 manifest 证据面目录（模块 journal 同源锚；`journalDir` = per-call 目录
@@ -245,13 +245,13 @@ function resolveManifestDirForAdopt(journalDir?: string): string | undefined {
  *
  * [D15] 记录动作统一走中断编排入口：run-interrupted 写入经 dispatchRunTrigger
  * per-run 串行队列（冷路径同走队列——离线收编无并发竞争成本），scan/manifest
- * 走模块 journal 单写者域（与帧落账同源，证据面一致）；三面证据前置是入口裁决点
+ * 走模块 journal 单写者域（与帧写入 journal 记录同源，证据面一致）；三面证据前置是入口裁决点
  * 的前置防御（跨进程防双帧），表内转移 fail-fast 让位（IllegalTransitionError →
  * skippedTerminal）是进程内第二道幂等。中断条目（status 'interrupted'）构造与
  * callCount 推导归 interruptRun 入口内聚——本函数只透传补写通道与载荷源。
  */
 /**
- * [adoptInterruptedRun 拆分] 收编前置裁决（三面证据 + 坏链守卫）：
+ * [adoptInterruptedRun 拆分] 收编前置裁决（三面证据 + 坏链检查）：
  * 返回 skipped* 让位理由；null = 前置全过、继续收编。lastEventAt 一并返回
  * （收编成功日志的静止锚点），前置不通过时为 undefined。
  */
@@ -279,7 +279,7 @@ async function precheckAdoption(
   if (opts?.hasSettledEntry !== undefined && (await opts.hasSettledEntry(runId))) {
     return { skipped: "skippedTerminal" };
   }
-  // 坏链守卫：fold 停在 created（首帧损坏）时 run-interrupted 表外转移——保守跳过
+  // 坏链检查：fold 停在 created（首帧损坏）时 run-interrupted 表外转移——保守跳过
   if (state.lifecycle === "created") return { skipped: "skippedBrokenChain" };
   return { skipped: null, lastEventAt: events[events.length - 1]!.ts };
 }

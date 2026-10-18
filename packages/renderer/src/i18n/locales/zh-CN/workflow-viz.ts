@@ -4,13 +4,13 @@
  * 命名空间形态：本模块 default export 只含 workflowViz 子树，由 aggregator
  * （locales/zh-CN.ts）展开并入 panel 命名空间（`panel: { ...panel, ...tray,
  * ...workflowViz }`）——运行时 key 前缀 = `panel.workflowViz.*`。en-US/workflow-viz.ts
- * 必须键集合完全一致（守卫 = .githooks/check_i18n_locale_sync.py +
+ * 必须键集合完全一致（检查 = .githooks/check_i18n_locale_sync.py +
  * __tests__/i18n/locale-sync-check.test.ts）。
  *
  * 文案单源注记：interrupted 态「已中断（可续跑）」复用 `panel.tray.workflowInterrupted`
  * （state-tone-lock 登记词源，不另立副本）；终态四值文案 = shared
  * WORKFLOW_RUN_OUTCOME_LABELS 单源（成功/失败/已取消/已超时），本模块只补 running
- * 与 done+outcome 缺省两个投影词。
+ * 与 done+outcome 缺省两个派生视图词。
  */
 export default {
   workflowViz: {

@@ -39,8 +39,8 @@ import type { SendPromptReason } from '@taiji/shared'
  *
  * 收敛说明（2026-09-17 ext-simplify-16 D4 同款）：本段曾是与
  * extension-protocol/src/core/types.ts 逐字手工镜像的 167 行副本（另有一套文本探针
- * 守卫测试）；依赖方向本就允许 plugin-sdk → extension-protocol（Bridge* 回包形状
- * 已如此），故改单行 re-export，镜像副本与守卫测试一并删除。导出名与类型面零变化
+ * 检查测试）；依赖方向本就允许 plugin-sdk → extension-protocol（Bridge* 回包形状
+ * 已如此），故改单行 re-export，镜像副本与检查测试一并删除。导出名与类型面零变化
  * （SDK 类型面零变化承诺不变）。
  *
  * @see docs/architecture/extension-gui-protocol.md
@@ -310,7 +310,7 @@ export type InterceptorHookType =
  * 插件在 handler 内自行按事件名过滤。
  *
  * [HISTORICAL] Fix-6：曾含 'onMessage' | 'onSessionCreate' | 'onSessionDestroy' 三个
- * 字面量——无注册面（createHookApi 不暴露对应方法）、无调用面（event-interpreter /
+ * 字面量——无注册面（createHookApi 不暴露对应方法）、无调用点（event-interpreter /
  * bridge-interop 不以此 key 调 executeHooks），属死类型，已删除（2026-08-15 W02 审查）。
  */
 export type ObserverHookType = 'onPiEvent'
@@ -507,13 +507,13 @@ export interface Phase1AgentAPI {
      * customType 服务端精确过滤，sinceEntryId 游标增量。
      */
     readEntries(sessionId: string, opts: { customType: string; sinceEntryId?: string }): Promise<PluginSessionEntries>
-    /** [AP-4/u2d] 状态查询（投影 {name, description?, source}）；会话未激活抛 SESSION_NOT_ACTIVE。 */
+    /** [AP-4/u2d] 状态查询（派生视图 {name, description?, source}）；会话未激活抛 SESSION_NOT_ACTIVE。 */
     getCommands(sessionId: string): Promise<Array<{ name: string; description?: string; source: string }>>
     onDidCreateSession(handler: (session: SessionInfo) => void): Disposable
     onDidDestroySession(handler: (session: SessionInfo) => void): Disposable
-    /** [AP-4/u5b] 会话激活订阅：session.switch 成功（含 auto-restore）时投递（徽标/列表补拉触发源）。 */
+    /** [AP-4/u5b] 会话激活订阅：session.switch 成功（含 auto-restore）时投递（徽标/列表补充拉取触发源）。 */
     onDidActivateSession(handler: (session: SessionInfo) => void): Disposable
-    /** [AP-4/u2d] entry 失效订阅：只发失效信号无 payload，收信号后 readEntries(sinceEntryId) 重拉。 */
+    /** [AP-4/u2d] entry 失效订阅：只发失效信号无 payload，收信号后 readEntries(sinceEntryId) 重新拉取。 */
     onEntriesInvalidated(
       sessionId: string,
       customType: string,
@@ -548,8 +548,8 @@ export interface SessionInfo {
 // ── Storage 类型 ─────────────────────────────────────────────────
 
 /**
- * @stable — [AP-4/u2d] 条目镜像投影：含 type/customType（共享折叠器 replayFoldEntries
- * 的首道守卫依赖这两个字段）；data 原样透传（域语义插件解）；pi 树结构噪声不出 runtime。
+ * @stable — [AP-4/u2d] 条目镜像派生视图：含 type/customType（共享折叠器 replayFoldEntries
+ * 的首道检查依赖这两个字段）；data 原样透传（域语义插件解）；pi 树结构噪声不出 runtime。
  */
 export interface PluginSessionEntry {
   id: string

@@ -3,7 +3,7 @@
  *
  * 主键迁移（terminal-multi-instance 设计 §2.2 四层锚点 / §3.3）：本模块三张表（输出缓冲 /
  * 广播订阅 / flush 监听）与订阅表全部从**会话 id** 迁移到**实例编号** `term:<sid>:<序号>`；
- * 实例注册表镜像 + 切换条状态在 terminal-instance-registry.ts（write-queue 入队守卫同源）。
+ * 实例注册表镜像 + 切换条状态在 terminal-instance-registry.ts（write-queue 入队检查同源）。
  *
  * 职责：
  * 1. per-instance 命令式输出 buffer（非响应式 chunks + 单调版本）+ rAF 输出写队列 + PTY 存活态
@@ -12,7 +12,7 @@
  * 3. 对外暴露实例维度 API（新建 / 切换 / 关闭 / 当前实例）+ spawn/attach/write/resize/kill/clear
  *    + registerFlushListener（TerminalView 调用）
  * 4. `terminal.list` 对账（⌘R / 会话激活 / 世代变更重连三触发点）+ 世代变更失效重置
- *    （auth token 判据）+ `unknown_terminal_id` 平行守卫（提示与焦点按触发面分档）
+ *    （auth token 判据）+ `unknown_terminal_id` 平行检查（提示与焦点按触发方分档）
  *
  * ── 分区生命周期上提（W27/D-6.2，R-22）+ 实例编号化 ────────────────────────
  * W14 缺口（09 文档 E6-c）：TerminalPartition 与 terminal.* 订阅随 TerminalView 组件实例销毁
@@ -153,14 +153,14 @@ const subscriptionUnsubs = new Map<string, () => void>()
 // taste:allow-no-data-owner W24-EX-A（ADR-0049 全局 sid 协调器/订阅注册基建，已登记）：flush 监听器注册表（键 = terminalId）
 const flushListeners = new Map<string, Set<(buffer: TerminalBuffer) => void>>()
 
-// ── 自动新建腿同会话互斥（dev-merge review dmg-r1-3）────────────────────────
+// ── 自动新建路径同会话互斥（dev-merge review dmg-r1-3）────────────────────────
 // `terminal.list` RPC 往返窗口内快速切走再切回，两轮激活各见空清单各 spawn 一档 → 同会话
 // 双默认 PTY（多余进程持续存活需手动关闭；旧版「ptyMap.has(sid) → no-op」幂等防线已随
 // 多实例化删除）。per-sid in-flight 表：后到激活轮复用先到轮的 spawn promise（ack 建档
 // 四件事幂等，复用方 await 同一落定即可）；settle（含失败）即摘除——失败后重试
-// （retrySpawn）不复用旧失败 promise。互斥只覆盖自动新建腿：「+」显式新建
+// （retrySpawn）不复用旧失败 promise。互斥只覆盖自动新建路径：「+」显式新建
 // （createWithToast → spawnTerminal）是用户显式意图不受限，runtime 无状态分配语义不动。
-// taste:allow-no-data-owner W24-EX-C（非 GUI 数据技术结构，已登记）：自动新建腿 per-sid in-flight
+// taste:allow-no-data-owner W24-EX-C（非 GUI 数据技术结构，已登记）：自动新建路径 per-sid in-flight
 // spawn promise 去重簿记（条目持 Promise 本体非 GUI 数据，对照 useGenStats inflightGenStatsFetch 先例；
 // 写方 = spawnTerminalAuto 单点 set / settle 摘除，cleanupSession 会话删除一并摘除；§4 ⑧ dmg-r1-1 补登）
 const autoSpawnInFlight = new Map<string, Promise<string>>()
@@ -267,7 +267,7 @@ function establishInstance(
 /**
  * 关闭沿 renderer 资源处置（设计 §3.3「实例关闭沿 renderer 资源处置」——主动关闭与自然
  * 退出同语义）：①输出分区移除；②terminal-write-queue 实例态清理（滞留命令丢弃，确有滞留时
- * 提示）；③模块级订阅退订。flush 监听器腿豁免（mount/unmount 自管理，视图随切换/卸载自然移除）。
+ * 提示）；③模块级订阅退订。flush 监听器路径豁免（mount/unmount 自管理，视图随切换/卸载自然移除）。
  */
 function releaseInstance(terminalId: string, opts: { promptPendingWrites: boolean }): void {
   const store = useTerminalWriteQueueStore()
@@ -358,7 +358,7 @@ function appendChunk(terminalId: string, chunk: string): void {
   const p = partition
   if (schedule && p !== null) {
     // rAF 回调捕获 terminalId + 分区引用：实例回收后迟到的回调只写孤儿对象，
-    // flushPending 的 `partitions.get(terminalId) !== p` 守卫保证不复活分区、不通知视图。
+    // flushPending 的 `partitions.get(terminalId) !== p` 检查保证不复活分区、不通知视图。
     requestAnimationFrame(() => flushPending(terminalId, p))
   }
 }
@@ -448,14 +448,14 @@ interface ReconcileResult {
  * - 清单内条目按 ack 同口径四件事建档（订阅建立幂等；不清空既有 pendingWrites——
  *   需保留 pendingWrites 的存活实例均在清单内）；
  * - 清单外条目按关闭沿三路径清理（含 ack 窗口内死亡产生的假阳幽灵）；
- * - **范围钉死 = 本次查询所属会话**（与查询会话无关的 terminalId 键不参与增删）；
+ * - **范围固定为本次查询所属会话**（与查询会话无关的 terminalId 键不参与增删）；
  * - 拉取失败：保留既有条目、下一次触发自然重试（**禁定时兜底**）。失败是否提示由调用方
- *   按触发点分腿（世代变更重连腿静默）。
+ *   按触发点分路径（世代变更重连路径静默）。
  */
 async function reconcileSession(sessionId: string): Promise<ReconcileResult> {
   // 纵深防护：请求发起时捕获连接世代判据（auth token，getCurrentToken 与世代重置同源）。
-  // await 落定后世代已变 = 响应属于旧连接世代，按失败腿丢弃（保留既有条目、不自动新建）。
-  // 当前接线下断连时 use-connection 的 pendingApi.rejectAll 已把在途请求 reject 走失败腿，
+  // await 落定后世代已变 = 响应属于旧连接世代，按失败路径丢弃（保留既有条目、不自动新建）。
+  // 当前接线下断连时 use-connection 的 pendingApi.rejectAll 已把在途请求 reject 走失败路径，
   // 本防护是第二层：传输层行为变化（旧响应不再被 reject 直达此处）时兜住「旧清单响应
   // 复活幽灵终端」，与 resetTerminalDomain 的世代重置语义配套。
   const generationToken = getCurrentToken()
@@ -463,7 +463,7 @@ async function reconcileSession(sessionId: string): Promise<ReconcileResult> {
   try {
     listed = await terminalApi.list(sessionId)
   } catch (e: unknown) {
-    // 失败分腿（设计 §3.3）：保留既有条目、不清空、不展示误导性空态；由下一次触发重试。
+    // 失败分路径（设计 §3.3）：保留既有条目、不清空、不展示误导性空态；由下一次触发重试。
     console.warn(`[terminal] terminal.list 拉取失败（保留既有条目，下次触发重试）: sid=${sessionId}`, e)
     return { ok: false, count: -1 }
   }
@@ -473,7 +473,7 @@ async function reconcileSession(sessionId: string): Promise<ReconcileResult> {
     if (!listedIds.has(terminalId)) releaseInstance(terminalId, { promptPendingWrites: true })
   }
   for (const item of listed) {
-    // 范围钉死：只对本次查询会话的编号建档（他会话编号为 runtime 异常形态，防御跳过）
+    // 范围固定为只对本次查询会话的编号建档（他会话编号为 runtime 异常形态，防御跳过）
     if (!isTerminalIdOfSession(item.terminalId, sessionId)) continue
     if (!hasInstance(item.terminalId)) establishInstance(item.terminalId, { alive: item.alive })
     else {
@@ -507,7 +507,7 @@ let lastConnectionToken: string | null | undefined = undefined
  *
  * 故模块求值时按当前连接态播种旧值（ws-client 只读取值面）：已有已知 token
  * （已连接 / 连接中 / 等待重连）即取为旧值，使「旧值不可得」只对应真正无任何已知 token
- * 的首次连接——该腿无输出历史与滞留命令，重置为空操作，正是 P6 的代价前提。
+ * 的首次连接——该路径无输出历史与滞留命令，重置为空操作，正是 P6 的代价前提。
  */
 function seedGenerationBaseline(): void {
   const token = getCurrentToken()
@@ -521,7 +521,7 @@ seedGenerationBaseline()
  * - 世代变更 → 终端域失效重置（见 resetTerminalDomain）；
  * - 同世代 → 不重置（闪断保持分区与订阅，重连后新输出恢复推进）；
  * - **旧 token 不可得（首次连接）→ 保守判为世代变更**（宁可清空过期历史，不可漏重置
- *   造成跨世代撞号串数据；首次连接腿无输出历史与滞留命令，重置为空操作）。
+ *   造成跨世代撞号串数据；首次连接路径无输出历史与滞留命令，重置为空操作）。
  */
 function handleConnectionEstablished(token: string | null): void {
   const generationChanged = lastConnectionToken === undefined || token !== lastConnectionToken
@@ -533,7 +533,7 @@ function handleConnectionEstablished(token: string | null): void {
  * 世代变更失效重置：①清空输出分区与切换条（含 flush 监听表——跨世代编号同形，残留监听
  * 随重置回收；视图 dispose 亦会反注册）；②terminal-write-queue 状态机清空（旧世代
  * 滞留命令随重置丢弃，**提示仅在确有滞留命令时发出**）；③模块级订阅表**先退订再清空**
- * （键跨世代同形，残留条目会命中订阅建立的幂等守卫导致新世代订阅静默 no-op）。
+ * （键跨世代同形，残留条目会命中订阅建立的幂等检查导致新世代订阅静默 no-op）。
  * 重置后按 `terminal.list` 拉取重建（新 runtime 清单为空 → 空态；**失败不提示**）。
  */
 function resetTerminalDomain(): void {
@@ -552,7 +552,7 @@ function resetTerminalDomain(): void {
       pendingBearingInstance = terminalId
     }
   }
-  // ③ 先退订再清空（防同形键命中幂等守卫）
+  // ③ 先退订再清空（防同形键命中幂等检查）
   for (const unsub of subscriptionUnsubs.values()) unsub()
   subscriptionUnsubs.clear()
   subscribedTerminalIds.clear()
@@ -657,9 +657,9 @@ export function useTerminal(sessionIdRef: Ref<string | null>) {
   }
 
   /**
-   * 自动新建默认实例（挂载/激活腿专用，见 autoSpawnInFlight 注释）：同会话已有在途自动
+   * 自动新建默认实例（挂载/激活路径专用，见 autoSpawnInFlight 注释）：同会话已有在途自动
    * 新建时**复用其 promise**（后到激活轮等先到轮落定，不发第二个 spawn RPC）；settle
-   * （含失败）后摘除标记，重试腿可再发。失败 rethrow（反馈职责归调用方，同 spawnTerminal）。
+   * （含失败）后摘除标记，重试路径可再发。失败 rethrow（反馈职责归调用方，同 spawnTerminal）。
    */
   function spawnTerminalAuto(cwd: string | undefined, cols: number, rows: number): Promise<string> {
     const sid = sessionIdRef.value
@@ -681,7 +681,7 @@ export function useTerminal(sessionIdRef: Ref<string | null>) {
   }
 
   /**
-   * 关闭实例（切换条 close）：杀进程 + **同步**释放界面侧资源（三腿，不驻留）。
+   * 关闭实例（切换条 close）：杀进程 + **同步**释放界面侧资源（三路径，不驻留）。
    * 进程终结后 runtime 的 terminal.exit 广播到达时走 handleInstanceExit（幂等收敛）。
    * 当前显示实例被关闭时 active 落相邻（无右取左，注册表内实现）。
    * kill RPC 通道类失败（非 unknown_terminal_id）→ handleRoutingError kill 分档 toast 反馈
@@ -708,9 +708,9 @@ export function useTerminal(sessionIdRef: Ref<string | null>) {
   }
 
   /**
-   * `unknown_terminal_id` 平行守卫（设计 §3.3）：任意已建档条目收到首个
+   * `unknown_terminal_id` 平行检查（设计 §3.3）：任意已建档条目收到首个
    * `unknown_terminal_id`（write / kill / attach / resize 均可触发）→ 执行关闭沿三路径清理。
-   * 判据 = runtime「该 terminalId 不在注册表」的否定回执（与关闭沿守卫同源）。
+   * 判据 = runtime「该 terminalId 不在注册表」的否定回执（与关闭沿检查同源）。
    * 用户可见语义按触发面分档：
    * - `write` 命中 → 经「输入可能丢失」通道告知（对齐死亡沿 pendingWrites 丢弃范式）
    *   + 迁焦点（焦点按关闭沿规则落相邻实例；**先告知后迁移**——prompt 在同步路径先发，
@@ -720,7 +720,7 @@ export function useTerminal(sessionIdRef: Ref<string | null>) {
    * 重复打击静默收敛（条目已回收 → 后续命中直接早退）。
    * **非 `unknown_terminal_id` 的失败分两档**（dmg-r1-4）：
    * - `kill` 失败 = 用户「关闭/终止」动作未生效（PTY 仍存活继续产输出），必须给可见反馈
-   *   （toast「关闭失败，实例仍在运行」，C-proc-21）：closeInstance 腿此前已同步释放界面侧
+    *   （toast「关闭失败，实例仍在运行」，C-proc-21）：closeInstance 路径此前已同步释放界面侧
    *   资源，这里按「实例仍活」重建镜像条目（establishInstance 幂等），使 UI 与 runtime 实况
    *   立即一致，不等下次 `terminal.list` 对账才「复活」；
    * - `write` / `attach` / `resize` 走普通错误通道留痕即可——write 的输入丢失面由 runtime
@@ -729,8 +729,8 @@ export function useTerminal(sessionIdRef: Ref<string | null>) {
   function handleRoutingError(terminalId: string, e: unknown, trigger: 'write' | 'kill' | 'attach' | 'resize'): void {
     const code = (e as { code?: string } | null)?.code
     if (code === 'unknown_terminal_id') {
-      // 三腿判据（与 handleInstanceExit 同形）：注册表 / 分区 / 订阅皆无才早退（重复打击静默）。
-      // 仅注册表条目已删而分区或订阅仍在场时不得早退——设计 §3.3 守卫覆盖「刚建立的订阅条目与
+      // 三路径判据（与 handleInstanceExit 同形）：注册表 / 分区 / 订阅皆无才早退（重复打击静默）。
+      // 仅注册表条目已删而分区或订阅仍在场时不得早退——设计 §3.3 检查覆盖「刚建立的订阅条目与
       // 分区」（注册表条目删 ≠ 已回收），此时仍需走 releaseInstance（幂等）回收。
       if (!hasInstance(terminalId) && !partitions.has(terminalId) && !subscribedTerminalIds.has(terminalId)) return
       // 先告知后迁移焦点：prompt 走同步路径先发；焦点迁移由视图对 active 变化的异步
@@ -741,7 +741,7 @@ export function useTerminal(sessionIdRef: Ref<string | null>) {
     }
     if (trigger === 'kill') {
       // C-proc-21：kill 失败 ≠ 已关闭——PTY 仍在运行，用户必须得到可见反馈 + UI 即时对齐
-      //（条目重建幂等：killTerminal 腿条目未释放时仅刷新存活镜像；closeInstance 腿在此复活）
+      //（条目重建幂等：killTerminal 路径条目未释放时仅刷新存活镜像；closeInstance 路径在此复活）
       console.warn(`[terminal] kill RPC 失败（实例仍在运行）: terminalId=${terminalId}`, e)
       useToast().warning(t('panel.terminal.closeFailed', { message: instanceLabel(terminalId) }))
       establishInstance(terminalId, { alive: true })
@@ -813,7 +813,7 @@ export function useTerminal(sessionIdRef: Ref<string | null>) {
     current,
     /** 实例与 PTY 控制。 */
     spawnTerminal,
-    /** 自动新建默认实例（挂载/激活腿专用，带同会话 in-flight 互斥）。 */
+    /** 自动新建默认实例（挂载/激活路径专用，带同会话 in-flight 互斥）。 */
     spawnTerminalAuto,
     selectInstance,
     closeInstance,

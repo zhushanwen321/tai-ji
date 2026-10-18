@@ -80,7 +80,7 @@ export interface WorkerHost {
  * 避免各自定义形状不一致的 handler bag（打破循环依赖）。
  *
  * 所有回调返回 Promise——允许 engine 层在回调内做 await 终局编排等异步操作
- *（record 事件流落账；store.save 现为 no-op 契约保留，见 Port 2）。
+ *（record 事件流写入 journal 记录；store.save 现为 no-op 契约保留，见 Port 2）。
  */
 export interface WorkerHandlers {
  /** Worker → Main 的业务消息（agent-call / return / error / log）。 */
@@ -108,7 +108,7 @@ export interface WorkerHandlers {
  * factory 注入（notifyDone —— 唤醒 parent agent 消费结果）。Engine 层不依赖
  * Pi SDK，通过 callback 把完成信号外推到 Interface 层。所有终局路径
  * （handleReturn / handleWorkerError / handleScriptError / abortRun /
- * dispatchAgentCall budget 终止）在终局编排后触发本回调（record 事件流落账；
+ * dispatchAgentCall budget 终止）在终局编排后触发本回调（record 事件流写入 journal 记录；
  * store.save 为 no-op 契约保留，不承担持久化）。
  */
 export interface LifecycleDeps {
@@ -130,12 +130,12 @@ export interface LifecycleDeps {
  */
   eventBus?: { emit(channel: string, data: unknown): void };
  /**
- * [reload-closeout D4] pending entry 权威落盘面（pi.appendEntry 的调用时解析注入）。
+ * [reload-closeout D4] pending entry 权威落盘位置（pi.appendEntry 的调用时解析注入）。
  *
  * finalizeRun 的 pending:unregister 持久化直走本面落盘（session JSONL 是唯一权威，
  * 不经 eventBus emit→listener 易失跳）。注入实现须在函数体内现读当前 pi（生产装配
  * workflow-events makeDeps：resolveCurrentPi().appendEntry）——与 log/onRunDone
- * 同款 volatile 形态，在飞 pump 持有的旧 deps 对象自动路由到新 pi。entry 写法与
+ * 同款 volatile 形态，在途 pump 持有的旧 deps 对象自动路由到新 pi。entry 写法与
  * status 映射归消费点（finalizeRun）单点定义，本成员只承载写通道。
  *
  * 可选——未注入时（旧测试 deps）finalizeRun 跳过直落（向后兼容；生产装配恒注入，
@@ -184,16 +184,16 @@ export interface LifecycleDeps {
     stepIndex?: number,
   ) => Promise<AgentResult>;
  /**
- * [F1-18 修复] resume 显式 model 落账后的宿主投影同步回调。
+ * [F1-18 修复] resume 显式 model 写入 journal 记录后的宿主派生视图同步回调。
  *
- * journal model-override 帧落盘只是持久化半边——宿主侧还有两个派生投影（覆盖记账
- * 内存表 + workflow 域覆盖重建负缓存），不同步则进程存活期内重派被旧投影遮蔽
+ * journal model-override 帧落盘只是持久化半边——宿主侧还有两个派生视图（覆盖记账
+ * 内存表 + workflow 域覆盖重建负缓存），不同步则进程存活期内重派被旧派生视图遮蔽
  * （内存表旧覆盖值内存命中 / 负缓存「已扫无覆盖」stale 登记短路 journal 重扫），
  * resume 的模型意图静默丢失。resume 写点（resume-run appendResumeModelOverride）
- * 落账成功后经本回调同步；宿主实现（extension makeDeps → SubagentService.
- * applyRunOverrideProjection）与既有 setModel 写点的「落账 + 内存表」双写形态对齐。
+ * 写入 journal 记录成功后经本回调同步；宿主实现（extension makeDeps → SubagentService.
+ * applyRunOverrideProjection）与既有 setModel 写点的「写入 journal 记录 + 内存表」双写形态对齐。
  *
- * 可选——未注入时（旧测试 deps）跳过投影（向后兼容，行为同修复前）；生产装配恒注入。
+ * 可选——未注入时（旧测试 deps）跳过派生视图（向后兼容，行为同修复前）；生产装配恒注入。
  * 载荷为结构类型（journal 帧拆装结果），不引 execution 域类型——本 ports 文件
  * 零 infra/execution 依赖纪律。
  */
@@ -217,7 +217,7 @@ export interface LifecycleDeps {
 }
 
 /**
- * [F1-18 修复] resume 显式 model 落账帧的拆装结果（投影回调载荷）。
+ * [F1-18 修复] resume 显式 model 写入 journal 记录帧的拆装结果（派生视图回调载荷）。
  * 与 orchestration model-override 帧的 model/thinkingLevel/ts 字段同构。
  */
 export interface RunOverrideProjection {

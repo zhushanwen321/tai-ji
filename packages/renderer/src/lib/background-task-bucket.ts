@@ -18,7 +18,7 @@
  * 类型取自 shared 协议镜像（偏差登记 #6：shared/src/index.ts 未具名导出，走
  * ServerMessageMap 索引；镜像 ⇔ extension-protocol 契约的逐字段全等由 core transport api
  * domain（packages/core/src/transport/api/domains/background-task.ts）的
- * BackgroundTaskMirrorEqualsContract 编译期守卫，任一侧漂移即 tsc 红）。
+ * BackgroundTaskMirrorEqualsContract 编译期检查，任一侧漂移即 tsc 红）。
  */
 import {
   isActiveBackgroundTaskState,

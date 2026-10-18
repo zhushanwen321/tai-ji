@@ -6,7 +6,7 @@
  *
  * 等价性证明结构（两层）：
  * 1. 本文件：用与生产 fork-mode.ts / handoff-mode.ts 逐字段同构的两份配置
- *    （同 key 字面量 / 同守卫逻辑 / 同 class 串）直接驱动骨架，以「副作用调用序列日志」
+ *    （同 key 字面量 / 同检查逻辑 / 同 class 串）直接驱动骨架，以「副作用调用序列日志」
  *    断言 enter → signal watch → esc / send 全链行为序列与泛化前实现一致
  *    （预期序列从泛化前 fork-mode.ts / handoff-mode.ts 源码逐行提炼，断言方式复用
  *    handoff-mode.test.ts 的 spy + toHaveBeenCalledWith 范式）。
@@ -63,7 +63,7 @@ interface DepsSpies extends Omit<StagingModeDeps,
   t: Spy<StagingModeDeps['t']>
 }
 
-/** 全 spy deps：每个副作用 push 标签到 log（与骨架/守卫触达的副作用一一对应） */
+/** 全 spy deps：每个副作用 push 标签到 log（与骨架/检查触达的副作用一一对应） */
 function makeDeps(): DepsSpies {
   const log: string[] = []
   const inputRef: StagingModeDeps['inputRef'] = ref(null)
@@ -232,7 +232,7 @@ function setupHandoff(sessionIdValue?: string | null) {
 // ── fork 形：enter / esc / send 行为与泛化前 fork-mode.ts 一致 ───────────────
 
 describe('fork 形配置：enter', () => {
-  it('enter 序列 = enterStagingMode → focus（fork 无守卫/互斥），mode 置 true', () => {
+  it('enter 序列 = enterStagingMode → focus（fork 无检查/互斥），mode 置 true', () => {
     const { deps, instance } = setupFork()
     deps.inputRef.value = { focus: () => {} }
 
@@ -324,7 +324,7 @@ describe('fork 形配置：handleSend', () => {
   })
 })
 
-describe('fork 形配置：signal watch 守卫（三条件与泛化前一致）', () => {
+describe('fork 形配置：signal watch 检查（三条件与泛化前一致）', () => {
   it('命中本 session → enter（source 克隆自 signal）', async () => {
     const { deps, instance, signal } = setupFork('s1')
     signal.value = { srcSessionId: 's1', fromMessageId: 'm1' }
@@ -390,7 +390,7 @@ describe('fork 形配置：asStagingAction（B 阶段缺省形态）', () => {
   })
 })
 
-// ── handoff 形：守卫 / 归一化 / B 阶段与泛化前 handoff-mode.ts 一致 ──────────
+// ── handoff 形：检查 / 归一化 / B 阶段与泛化前 handoff-mode.ts 一致 ──────────
 
 describe('handoff 形配置：enter（guard + 互斥）', () => {
   it('enterGuard 命中（isSessionActive）→ toast handoffBusy + 不进入（序列零副作用）', () => {
@@ -404,7 +404,7 @@ describe('handoff 形配置：enter（guard + 互斥）', () => {
     expect(deps.log).toEqual(['toast:panel.composer.handoffBusy'])
   })
 
-  it('正常 enter 序列 = exitForkMode → enterStagingMode（与泛化前顺序一致：守卫先于互斥）', () => {
+  it('正常 enter 序列 = exitForkMode → enterStagingMode（与泛化前顺序一致：检查先于互斥）', () => {
     const { deps, instance, exitForkMode } = setupHandoff()
     deps.inputRef.value = { focus: () => {} }
 
@@ -427,7 +427,7 @@ describe('handoff 形配置：enter（guard + 互斥）', () => {
   })
 })
 
-describe('handoff 形配置：handleSend（兜底守卫 + reply 归一化）', () => {
+describe('handoff 形配置：handleSend（兜底检查 + reply 归一化）', () => {
   it('beforeSend 兜底命中：返回 true 已消费，不清草稿不退模式不打 handoff', async () => {
     const { deps, instance, handoff, isSessionActive } = setupHandoff()
     instance.enter({ srcSessionId: 'src-1' })
@@ -550,7 +550,7 @@ describe('全链序列等价（enter → watch → esc / send）', () => {
     ])
   })
 
-  it('handoff 形全链 log = 泛化前 handoff-mode.ts 已知副作用序列（含守卫与互斥）', async () => {
+  it('handoff 形全链 log = 泛化前 handoff-mode.ts 已知副作用序列（含检查与互斥）', async () => {
     const { deps, instance, signal, isSessionActive } = setupHandoff('s1')
     deps.inputRef.value = { focus: () => {} }
 

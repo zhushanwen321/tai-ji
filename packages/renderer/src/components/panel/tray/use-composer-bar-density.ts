@@ -27,12 +27,12 @@
  * 能力标志来源：
  * - `pluginToolbarContributionCount`：ViewHost 的 `composer.toolbar` 挂载点当前缓存条目（挂载点把
  *   N 个贡献合成**一个** view，故只有布尔面 → 有内容记 1、无记 0；状态机只判定 `> 0`）。
- *   判定单份在 `./use-plugin-toolbar`（挂载点标识 + getView/guiTree 判定），本处只投影为计数。
+ *   判定单份在 `./use-plugin-toolbar`（挂载点标识 + getView/guiTree 判定），本处只映射为计数。
  * - `hasTrayItems`：**不由本文件推导**（托盘三态的唯一真源是 `useTrayCounts` 数据面，唯一实例在
  *   ComposerTray）——外壳经 `update:has-items` 事件上抛，本文件只承载该 ref。缺省 `true`
  *   （状态机的保守缺省），首帧后即被真实值覆盖。
  *
- * 首帧种子 = fitLevel 初值 0（全展开）：实测回调紧随 observe 到达，「先全展开再按实测收口」
+ * 首帧种子 = fitLevel 初值 0（全展开）：实测回调紧随 observe 到达，「先全展开再按实测收尾」
  * 是无闪烁的那一侧。
  *
  * [领地说明] 接线件落在 `panel/tray/` 下（u6b 领地 = Composer.vue 底栏区 + tray/**）；底栏其余部分
@@ -174,8 +174,8 @@ export function useComposerBarDensity(sessionId: Ref<string | null>): UseCompose
   const anchorProtected = ref(false)
 
   /**
-   * 插件 toolbar 贡献面（0/1：挂载点合成单 view，只有布尔面）——判定单份在 use-plugin-toolbar
-   * （挂载点标识 + getView/guiTree 判定不在此复制），本处只做布尔→计数的投影与 sid 空值守卫
+   * 插件 toolbar 贡献范围（0/1：挂载点合成单 view，只有布尔范围）——判定单份在 use-plugin-toolbar
+   * （挂载点标识 + getView/guiTree 判定不在此复制），本处只做布尔→计数的派生与 sid 空值检查
    * （内层 computed 惰性：sid 空时不触发挂载点查询，与旧短路行为等价）。
    */
   const pluginToolbarHasContribution = usePluginToolbarContribution(() => sessionId.value ?? '')

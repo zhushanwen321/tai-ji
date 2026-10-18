@@ -1,6 +1,6 @@
 /**
  * useRollingRestartStatus —— 滚动重启四态横幅 + reattach 高压延迟轻态（crash-forensics-
- * and-watchdog §3.3 D5/D3，实施单元 u7d + 偏差 #27 纵切片 renderer 半腿）。
+ * and-watchdog §3.3 D5/D3，实施单元 u7d + 偏差 #27 纵切片 renderer 半路径）。
  *
  * **双信号源**（D5 横幅契约「持续态必须可拉取」——broadcast 时序竞争教训）：
  * 1. 三个 WS 广播（rollingRestart:deferred / :countdown / :forced）+ reattach:deferred

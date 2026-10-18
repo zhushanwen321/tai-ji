@@ -1,6 +1,6 @@
 // zcode-session-db-isolation.test.ts —— 2026-09 会话库隔离的单元守护面（设计权威源：
 // docs/architecture/zcode-session-db-isolation.md D1/D2/D3 + §3.3 不变量 1/2/3；impl-plan
-// §2.3 W3 规格「单元」行 + 探针④）。池 GC 守卫（A9/不变量 6 的可执行断言）见
+// §2.3 W3 规格「单元」行 + 探针④）。池 GC 检查（A9/不变量 6 的可执行断言）见
 // zcode-session-db-pool-gc.test.ts；生产链白名单分支守护见
 // engine/__tests__/common/session-view-service-zcode-dbpath.test.ts。
 //
@@ -62,7 +62,7 @@ describe("路径单一来源（db-path 契约根，不变量 2）", () => {
     expect(zcodeDbPathAllowlist(dataDir)).toHaveLength(2);
   });
 
-  it("E5 误配守卫：隔离库路径与宿主库路径恒不等（配置错误在测试期拦截）", () => {
+  it("E5 误配检查：隔离库路径与宿主库路径恒不等（配置错误在测试期拦截）", () => {
     expect(zcodeSessionDbPath("/data-root")).not.toBe(hostZcodeDbPath());
   });
 });
@@ -151,7 +151,7 @@ describe("API 链集合成员判定（EnginePort.read，D2 第二站点）", () 
 
   it("dbPath = 相对路径含 `..` 逃逸池目录 → 拒绝①级（reader 零触达），落 outcome-only（防任意文件读）", async () => {
     // join 归一化后逃逸 `<dataDir>/engines/zcode/shared` 的形态必须与集合外绝对
-    // 路径同款拒绝——相对分支是绝对分支白名单的守卫缺口（2026-09 review 顺手修）
+    // 路径同款拒绝——相对分支是绝对分支白名单的检查缺口（2026-09 review 顺手修）
     const view = await engine.read(
       makeHandle({ sessionId: "sess-1", dbPath: path.join("..", "..", "evil.sqlite") }),
     );
@@ -274,7 +274,7 @@ let personalPath: string;
         // 不得让用户 shell 的同名 env 把会话重定向到别处
         ZCODE_SESSION_DB_PATH: "/evil/inherited.sqlite",
         ZCODE_SESSION_DB: "/evil/inherited-alias.sqlite",
-        // 钉扎 appserver 定向（定向不探不降，与 zcode-engine-appserver.test.ts 同款）
+        // 固定 appserver 定向（定向不探不降，与 zcode-engine-appserver.test.ts 同款）
         TAIJI_ZCODE_MODE: "appserver",
       },
     };

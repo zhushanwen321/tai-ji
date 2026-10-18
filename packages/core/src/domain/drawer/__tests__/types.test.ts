@@ -118,7 +118,7 @@ describe('drawer types：btw tab 扩展（btw-question D7，M3-a）', () => {
     expect(useBtwSelection().selectedBtwVid.value).toBeUndefined()
   })
 
-  it("'btw' 作 activeTab 写入分区可读回（DrawerPanel tab 元信息消费面）", () => {
+  it("'btw' 作 activeTab 写入分区可读回（DrawerPanel tab 元信息消费方）", () => {
     bindDrawerSessionId(ref<string | null>('sess-btw-tab'))
     const state = getDrawerControlState()
     expect(state.activeTab).not.toBe('btw')

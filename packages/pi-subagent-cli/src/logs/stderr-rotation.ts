@@ -5,7 +5,7 @@
 // @zhushanwen/subagent-engine-sdk logs/stderr-rotation.ts）。
 //
 // 落点背景：pi 任务子进程（pi --mode rpc）的 stderr 经 SDK spawnEngineChild pipe
-// 出来后此前无消费面（静默丢弃，且 pipe 写满会背压卡死子进程）——本模块提供
+// 出来后此前无消费方（静默丢弃，且 pipe 写满会背压卡死子进程）——本模块提供
 // 落盘 tee（文件名带任务子进程 pid，同 dataDir 双实例互不干扰）。
 
 import {

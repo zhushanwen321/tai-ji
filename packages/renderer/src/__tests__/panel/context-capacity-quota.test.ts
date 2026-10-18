@@ -31,8 +31,8 @@ import { apiConfigDomainMock } from '../helpers/api-facade-mock'
 // ── mock ──
 
 vi.mock('@/api', () => ({ project: { load: vi.fn().mockResolvedValue({ projects: [], activeProjectId: '' }), save: vi.fn().mockResolvedValue(undefined) },
-  // session.getContext：组件经 useContextUsage 恢复腿挂载即调（Phase 2.2 纯读改造）——
-  // mock 为永不 resolve 的 pending（本文件只测 quota 区与帧直驱显示，恢复腿行为在
+  // session.getContext：组件经 useContextUsage 恢复路径挂载即调（Phase 2.2 纯读改造）——
+  // mock 为永不 resolve 的 pending（本文件只测 quota 区与帧直驱显示，恢复路径行为在
   // use-context-usage.test.ts / context-usage-journeys.test.ts 覆盖）
   session: { getContext: vi.fn(() => new Promise(() => {})) },
   // config 域基座单源在 helpers/api-facade-mock.ts（on* 订阅家族 + terminal 读写基线）
@@ -299,7 +299,7 @@ describe('ComposerMetricsAggregate coding-plan 区', () => {
     })
 
     it('fetch fulfilled 带 reason（A2-4 失败态）→ 保留旧 data + 写 reason 文案，不覆写为 null', async () => {
-      // [HISTORICAL] 回归守卫（BL round1 #3）：runtime 失败契约是 data=null + reason
+      // [HISTORICAL] 回归检查（BL round1 #3）：runtime 失败契约是 data=null + reason
       // （非旧缓存 data），消费侧曾把旧缓存覆写为 null 且清空 error——失败既不显提示也不留旧值
       setupProviders([zhipuProvider])
       const quotaStore = useQuotaStore()
@@ -484,7 +484,7 @@ describe('ComposerMetricsAggregate coding-plan 区', () => {
     })
 
     it('D11 布局：失败态状态文字在左，两个按钮同组贴右端（结构断言，不依赖像素坐标）', async () => {
-      // [HISTORICAL] 回归守卫：footer 用 justify-between，两按钮若散作直接子项，失败态（3 子项）会把
+      // [HISTORICAL] 回归检查：footer 用 justify-between，两按钮若散作直接子项，失败态（3 子项）会把
       // 「刷新」挤到中间，与成功态（2 子项）的贴右位置跳变，且两个恢复动作看起来不相关。
       // jsdom 无布局引擎，故断言结构等价形态：按钮同属一个按钮组容器，且按钮组是 footer 的末子元素
       // （justify-between 下末子元素贴右端），状态文字是首子元素（贴左端）。

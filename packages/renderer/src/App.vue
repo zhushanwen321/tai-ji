@@ -23,7 +23,7 @@
           data-testid="runtime-error-cause"
           class="max-w-[320px] text-center text-[11.5px] text-neutral-dim"
         >{{ t('connection.errorCause', { message: runtimeStartError }) }}</span>
-        <!-- bootstrap 五步自身失败的真因（本地 cause 通道，与 runtimeStartError 台账通道分开显示） -->
+        <!-- bootstrap 五步自身失败的真因（本地 cause 通道，与 runtimeStartError 登记清单通道分开显示） -->
         <span
           v-if="bootstrapError"
           data-testid="bootstrap-error-cause"
@@ -125,16 +125,16 @@ const { state: connectionState, teardown, retryRuntime } = useConnection()
 // 全仓零消费——启动失败用户只能干等 60s 后看到通用 failed，真因永不可见。
 // 挂点选 App.vue 而非 core 编排：① failed 屏（真因显示位）就在本组件；② 状态转移
 // （置 failed 短路徒劳重连）归 core use-connection（经 ConnectionPorts 消费同一事件），
-// 本组件只管显示 + 台账，两层各司其职。推送 + 拉取双通道：boot 竞态下 main whenReady
+// 本组件只管显示 + 登记清单，两层各司其职。推送 + 拉取双通道：boot 竞态下 main whenReady
 // 发事件早于本组件挂载，webContents.send 静默丢失——拉取兜底对齐「时序竞争必须主动
 // 拉取」既有规则。connected 即清（陈旧真因不再显示）。
 const runtimeStartError = ref<string | null>(null)
 let removeRuntimeErrorListener: (() => void) | null = null
 // bootstrap 五步自身失败（initConnection 等步骤 reject）的真因：只上 failed 屏（本地 cause），
-// 不进 runtimeStartError 通道（该通道语义 = runtime 启动失败台账，混用污染归因）。
+// 不进 runtimeStartError 通道（该通道语义 = runtime 启动失败登记清单，混用污染归因）。
 const bootstrapError = ref<string | null>(null)
 
-/** 记录真因 + 落台账（幂等：同因去重；空消息丢弃）。状态转移归 core，本组件不置态 */
+/** 记录真因 + 写入登记清单（幂等：同因去重；空消息丢弃）。状态转移归 core，本组件不置态 */
 function handleRuntimeStartError(message: string): void {
   if (!message || runtimeStartError.value === message) return
   runtimeStartError.value = message
@@ -149,7 +149,7 @@ void getRuntimeStartError().then((message) => {
 // 启动编排（#1/#3）：连接建立后自动进 new-task landing（首次）或恢复最近 session。
 // 五步 bootstrap（onMounted）第 2 步 initConnection 提交连接编排——resolve = 编排已提交
 // 而非 connected（connectWs 异步握手不等待，D2 裁决②）；state==='connected' 是「连接成功」
-// 唯一可靠信号——watch 它触发 onConnected，appBootstrapped 守卫保证 HMR/重连幂等。
+// 唯一可靠信号——watch 它触发 onConnected，appBootstrapped 检查保证 HMR/重连幂等。
 const { onConnected } = useSidebar()
 // settings 订阅的 dispose（HMR/App 卸载销毁）+ models 兜底拉取（防订阅时序竞态）。
 // 订阅注册在 bootstrapSettingsCore（上见），此处只持有 dispose/refreshModels 句柄。
@@ -165,7 +165,7 @@ bindHandoffEffect()
 // 对齐派生态视野（isGenerating 由消息实体 per-session 惰性派生，D-3），消除惰性订阅盲区（非交互 session 终态事件丢失 → 侧栏卡 running）。
 // flush:'sync' 保证 appendSession 同 tick 建订阅（fork-ask 路径 send 前订阅就绪）。onScopeDispose 随 App 卸载退订。
 bindSessionStreamSync()
-// 队列状态帧投影的清理由 core 侧 per-session 键控承担（disposeSession / 测试 reset 双清理点，
+// 队列状态帧派生视图的清理由 core 侧 per-session 键控承担（disposeSession / 测试 reset 双清理点，
 // ADR-0049）；App 层不挂任何队列单例。
 // 内存压力降级消费（crash-forensics-and-watchdog §3.3 D4，u7d / 偏差 #28② 的 renderer 半边）：
 // 窗口级单例挂载（refCount 订阅，onScopeDispose 随 App 卸载退订）——订阅 watchdog:memoryPressure，
@@ -208,8 +208,8 @@ provide(MODAL_SURFACE_REGISTRAR_KEY, (registration: UiModalSurfaceRegistration):
   }
   return registerModalSurface({ surface, key, isOpen, rect })
 })
-// 入站超界帧守卫消费编排（crash-forensics-and-watchdog §3.3 D8）：模块级单例（状态源在
-// core ws-client），幂等安装一次——丢帧上报 + 终止阀静态提示态投影 + 切走切回重试订阅。
+// 入站超界帧检查消费编排（crash-forensics-and-watchdog §3.3 D8）：模块级单例（状态源在
+// core ws-client），幂等安装一次——丢帧上报 + 终止阀静态提示态派生视图 + 切走切回重试订阅。
 // App setup 顶层装配（与 bindForkNoticeEffect 同区），teardown 在 onBeforeUnmount 配对；
 // 提示条由 Panel.vue 会话视图承接（InboundFrameDroppedNotice）。
 installInboundFrameGuard()
@@ -232,10 +232,10 @@ onMounted(() => {
 })
 // [W8] onConnected 内部用模块级 hasConnectedBefore 区分首次 vs 重连：
 // - 首次 connected → initApp（内部含 workspaceStore.load + presetCwd）
-// - 重连 connected → initApp 因 appBootstrapped 守卫直接 return，records 停留在断连前 stale 数据
+// - 重连 connected → initApp 因 appBootstrapped 检查直接 return，records 停留在断连前 stale 数据
 //   （runtime 可能重启后从磁盘重载了新记录，如另一窗口写入），故额外 fire-and-forget load() 刷新。
 //   hasConnectedBefore 与 appBootstrapped 同为模块级，组件卸载重挂（非模块重载）时保留值，
-//   避免新实例误判为「首次」再调 initApp（被守卫吞）导致 load 不刷新。
+//   避免新实例误判为「首次」再调 initApp（被检查吞）导致 load 不刷新。
 watch(connectionState, (s) => {
   if (s === 'connected') {
     // RD-3#2：连接成功即清除启动失败真因（陈旧原因不再出现在后续 failed 屏）
@@ -265,7 +265,7 @@ onBeforeUnmount(() => {
   // 重挂可再次安装，不留残留 listener）
   removeRuntimeErrorListener?.()
   removeRuntimeErrorListener = null
-  // 入站守卫消费编排解绑（与 setup 顶层 installInboundFrameGuard 配对：HMR/测试卸载后
+  // 入站检查消费编排解绑（与 setup 顶层 installInboundFrameGuard 配对：HMR/测试卸载后
   // 重挂可再次安装；core 侧监听与 focus watch 不留残留）。
   uninstallInboundFrameGuard()
   // settings 订阅随 App 卸载销毁（HMR/测试场景）。不断在 AppShell unmount（断连）时销毁——

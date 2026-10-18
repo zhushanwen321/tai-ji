@@ -11,7 +11,7 @@
  *    解析错误；添加流裸形态保存拦截（解析层照常接受、切表单照常填充，拒绝在保存校验链路——
  *    包装形态指引，D7）；编辑流名称锁定 + 改包装键名拦截（改名 = 删除后重建，D7）；编辑流切换
  *    传输类型（§4 断言①用户入口：payload 只含新类型键，D7 键级切换）；
- *  - 启停切换调协议（setEnabled 专用操作，仅 name + enabled 不带条目投影回写，服务端终态校准）；
+ *  - 启停切换调协议（setEnabled 专用操作，仅 name + enabled 不带条目派生视图回写，服务端终态校准）；
  *    删除确认（取消不调协议，确认后删除）；
  *  - 连接测试按钮调协议 + 「测试中」过程态徽标；
  *  - 状态徽标三类来源（D8）：config「配置有误」/ ui-local「未测试·测试中·测试超时」/ probe
@@ -455,7 +455,7 @@ describe('McpSection（pi-mcp-management U3）', () => {
 
   // ── 清单行动作 ──
 
-  it('启停切换调协议：Switch 点击 → setEnabled 启停专用操作（仅 name + enabled，不带条目投影回写），服务端终态校准', async () => {
+  it('启停切换调协议：Switch 点击 → setEnabled 启停专用操作（仅 name + enabled，不带条目派生视图回写），服务端终态校准', async () => {
     const disabled = entryFixture('filesystem', { command: 'npx', enabled: false })
     mcpDomainMock.listMcpServers.mockResolvedValue(listFixture([entryFixture('filesystem')]))
     mcpDomainMock.setMcpServerEnabled.mockResolvedValue({ ok: true, entry: disabled })
@@ -467,7 +467,7 @@ describe('McpSection（pi-mcp-management U3）', () => {
 
     expect(mcpDomainMock.setMcpServerEnabled).toHaveBeenCalledTimes(1)
     // §3.1「写入 enabled 字段」最小语义：payload 只含 name + enabled（整条目回写会让
-    // 清单打开至切换之间的外部并发改动被旧投影覆盖，D2 丢失窗口失真——修复锚定见 R1
+    // 清单打开至切换之间的外部并发改动被旧派生视图覆盖，D2 丢失窗口失真——修复锚定见 R1
     // 审查条目 U4 / 修复组 mcp-list-runtime-ops（runlog aggregate-r1.md 可溯））
     expect(mcpDomainMock.setMcpServerEnabled).toHaveBeenCalledWith({
       name: 'filesystem',

@@ -20,7 +20,7 @@
 //
 // 发现时机（§3.4）：session_start 扫描一次 + 装载（装载结果即缓存——registry
 // descriptors）；hasEngine() 未命中走 ensureEngineDiscovered 同步补扫（只读 manifest
-// 不握手——portFactory 惰性，扫描绝不 spawn 引擎进程）。引擎清单投影（engines.json）
+// 不握手——portFactory 惰性，扫描绝不 spawn 引擎进程）。引擎清单派生视图（engines.json）
 // 归 engine-discovery.ts syncEnginesFile。
 //
 // 冲突与失败（A12）：manifest 缺必需字段/不可解析 → warn 跳过该包（不阻断其他引擎）；
@@ -153,8 +153,8 @@ export function scanEngines(opts: DiscoverEnginesOptions): DiscoveryScanResult {
 }
 
 /**
- * 历史发现装载的引擎 id 集（模块级；供 syncEnginesFile 投影时从注册表快照剔除
- * 历史装载——投影逻辑与装载逻辑同 bundle 闭包，无跨模块实例副本问题）。
+ * 历史发现装载的引擎 id 集（模块级；供 syncEnginesFile 派生视图生成时从注册表快照剔除
+ * 历史装载——派生视图逻辑与装载逻辑同 bundle 闭包，无跨模块实例副本问题）。
  */
 const loadedDiscoveryIdSet = new Set<string>();
 
@@ -180,7 +180,7 @@ export function discoverAndRegisterEngines(opts: DiscoverEnginesOptions): Discov
 }
 
 /**
- * 历史发现装载的引擎 id 快照（投影源计算消费面，见 engine-discovery.ts）。
+ * 历史发现装载的引擎 id 快照（派生视图源计算消费方，见 engine-discovery.ts）。
  */
 export function loadedDiscoveryIds(): string[] {
   return [...loadedDiscoveryIdSet];

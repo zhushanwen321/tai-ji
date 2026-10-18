@@ -383,7 +383,7 @@ export function deriveWorkflowGanttSegments(events: readonly WorkflowRunEventEnt
 // ── §3.3-D9：节点/行状态派生（trace 表与 DAG 共用同一函数——S2 构造性一致）────
 
 /**
- * call 级渲染态词表（D9：投影四值 + retrying 派生态；skipped 是节点级派生态、
+ * call 级渲染态词表（D9：派生视图四值 + retrying 派生态；skipped 是节点级派生态、
  * 不在 call 行出现）。
  */
 export type WorkflowCallDerivedStatus = 'pending' | 'running' | 'done' | 'failed' | 'retrying'
@@ -395,7 +395,7 @@ export interface WorkflowCallDerivedView { // oe-exempt:20261002:framework:workf
    * 在途（无 settled 帧）→ true。消费方按此叠加停止着色、不显示 running 蓝脉冲；
    * 着色映射随 run 终局 outcome（cancelled → 取消色、failed/time_limited → 失败色系）。
    *
-   * 「在途」= 已派发未收束（投影 running）；pending（零派发）不属在途——其终局后
+   * 「在途」= 已派发未收束（派生视图 running）；pending（零派发）不属在途——其终局后
    * 语义由 DAG skipped 态承载（D9：skipped 仅 run 终局后判定），不叠加停止着色。
    */
   stoppedInFlight: boolean
@@ -403,11 +403,11 @@ export interface WorkflowCallDerivedView { // oe-exempt:20261002:framework:workf
 
 /**
  * D9 call 级派生：retrying = 该 call 存在 agent-retrying 事件且尚无终局 settled。
- * 判定数据源 = U3 投影透出的 per-call attempts 计数（fold 行语义：失败尝试累计，
+ * 判定数据源 = U3 派生视图透出的 per-call attempts 计数（fold 行语义：失败尝试累计，
  * 无重试 undefined——fold attempts 仅由 agent-retrying 帧写入，attempts !== undefined
- * ⟺ 已落 retrying 帧；值 = 帧载荷 attempt，首败 = 1）。attempts 有值 ∧ 投影 running
- * 与「存在 retrying 帧 ∧ 无 settled」逐字等价（终局帧落盘时投影 status 已翻
- * done/failed，终局态优先；首败重试窗口——retrying 帧已落、settled 未落、投影
+ * ⟺ 已落 retrying 帧；值 = 帧载荷 attempt，首败 = 1）。attempts 有值 ∧ 派生视图 running
+ * 与「存在 retrying 帧 ∧ 无 settled」逐字等价（终局帧落盘时派生视图 status 已翻
+ * done/failed，终局态优先；首败重试窗口——retrying 帧已落、settled 未落、派生视图
  * running、attempts = 1——由此判据覆盖，这是 (attempts ?? 1) >= 2 下界判据系统性
  * 漏掉的窗口）。注意不得用 (attempts ?? 1) >= 1——会把无重试 running 误判 retrying。
  * 重试窗口内 retrying 态随重试边沿信号触发的重新拉取到达（U3 diff 维度），非仅事后可见。
@@ -452,7 +452,7 @@ export type WorkflowNodeDerivedStatus =
   | 'skipped'
 
 export interface WorkflowNodeDerivedInput { // oe-exempt:20261002:framework:workflow-viz 分段视图模型/派生契约类型——类型契约先行、单实现常态
-  /** run 投影状态（running/interrupted/done——done 即终局）。 */
+  /** run 派生视图状态（running/interrupted/done——done 即终局）。 */
   runStatus: WorkflowRunStatus
   /** 挂接到该节点的实例（D2 匹配结果；零实例 = 零实例挂接节点）。 */
   calls: ReadonlyArray<Pick<WorkflowAgentCall, 'status' | 'attempts'>>

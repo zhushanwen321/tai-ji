@@ -72,7 +72,7 @@ export function resolveEngineModelWithTranslation(
     return { engineModel: undefined, source: "default" };
   }
   // 清单成员校验仅对「有枚举面」的引擎生效：undefined/null = port 契约的「无自有
-  // 枚举面」形态（放行——引擎侧 validateModel 仍兜底；回归守卫：不可把无面引擎
+  // 枚举面」形态（放行——引擎侧 validateModel 仍兜底；回归检查：不可把无面引擎
   // 当空清单处理，否则偏好层被误跳过）；空数组 = 枚举面在册但当前无可用模型 → 跳过。
   const list = route.engine.listModels?.();
   const known = list === undefined || list === null || list.some((m) => m.id === translated);

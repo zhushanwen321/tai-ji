@@ -2,7 +2,7 @@
 //
 // 进程组收割（EngineClient 内部模块，从 engine-client.ts 拆出——max-lines 纪律）。
 //
-// 收割单一机制（impl-plan §2.2，v6 已删按 pid 补杀）：POSIX 负 pid 组杀
+// 收割单一机制（impl-plan §2.2，v6 已删按 pid 补杀）：POSIX 负 pid 按进程组终止
 // （SIGTERM → grace → SIGKILL 升级）；Windows taskkill /PID <pid> /T /F（按 pid 树）。
 // 「零残留」断言范围 = 一代子进程 + 组内后代（引擎自身 detached 后代不覆盖，
 // §7.2 R9-1 / 设计 §3.9 已接受代价）。
@@ -18,7 +18,7 @@ const logger = getLogger("subagents");
 const KILL_GRACE_MS = 5_000;
 
 /**
- * 组杀引擎 CLI：POSIX `process.kill(-pid)` 负 pid 组杀（引擎由 detached:true spawn =
+ * 按进程组终止引擎 CLI：POSIX `process.kill(-pid)` 负 pid 按进程组终止（引擎由 detached:true spawn =
  * 组长，组内含引擎 + 其任务子进程 = 一代子进程 + 组内后代）；Windows taskkill /T /F。
  */
 export function killProcessTree(pid: number, reason: string, opts: { engineId: string }): void {

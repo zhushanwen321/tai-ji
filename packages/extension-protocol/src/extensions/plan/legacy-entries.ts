@@ -30,7 +30,7 @@ export const PLAN_STATE_CUSTOM_TYPE = 'plan-state'
 /**
  * 生命周期状态读取（D2 读方①②共用映射，原扩展 state.ts / runtime extractor 内联拷贝的
  * 单源归并）：
- * ① 新字段直读（值域守卫：PLAN_LIFECYCLE_STATES 之外的垃圾值按缺失处理，落映射——
+ * ① 新字段直读（值域检查：PLAN_LIFECYCLE_STATES 之外的垃圾值按缺失处理，落映射——
  *    不信任外部写入）；
  * ② 旧 entry 无 state（或垃圾 state）时映射 reviewState（awaiting→reviewing /
  *    revising→revising / 其余值→planning|idle 按 isActive）。

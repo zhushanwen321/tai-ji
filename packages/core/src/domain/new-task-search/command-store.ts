@@ -3,7 +3,7 @@
  *
  * 来源：packages/renderer/src/stores/command.ts（pinia setup store）迁移为纯 factory。
  * 迁移约束（IF1）：不依赖 pinia；状态/操作函数语义逐条等价；消费方自行 .value（无 pinia unwrap）。
- * 壳旧 store 已随双轨收口（D7）删除，本 factory 是 command 状态的唯一实现。
+ * 壳旧 store 已随双轨收敛（D7）删除，本 factory 是 command 状态的唯一实现。
  *
  * 与源 store 的差异（core 包约束 + PlatformPort）：
  *  - storage 经参数注入（KVStorage async 接口），不直连 localStorage。
@@ -16,7 +16,7 @@
  *  - slash 命令：持有 runtime 推送的扩展命令（session.commands 通道），按 sessionId 隔离。
  *    解决的问题：CommandPopover 曾把 slashCommands 存在局部 ref，组件被 v-if 销毁重建
  *    （landing→panel 切换 / isGenerating 变化）时数据丢失，且 session.commands 只在
- *    切换/创建时推一次（runtime 不重广播 active session），重建后无补拉机制 → slash 浮层空。
+ *    切换/创建时推一次（runtime 不重广播 active session），重建后无补充拉取机制 → slash 浮层空。
  *    归位 store 后，组件重建读 store 即有数据（与 chat store 的 messages 分区同构，AGENTS.md 规则 7）。
  *  - 应用命令：全局内置命令（新建/搜索等），静态、与 session 无关。D-016 物理隔离——
  *    appCommands 独立 ref，session 切换只动 commandsBySession，不触发 appCommands 重算。

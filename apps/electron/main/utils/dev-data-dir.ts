@@ -9,14 +9,14 @@
  *      采信归一后的绝对路径（装配器 dev-instance.mjs 注入的
  *      ~/.taiji-dev/instances/<worktree> per-worktree 实例目录，多 worktree 并行
  *      dev 的数据隔离权威来源）。
- *   3. 其余一律钉死回 ~/.taiji-dev：未设值 / 泄漏形态（~/.taiji 等树外路径）/
+ *   3. 其余一律固定回 ~/.taiji-dev：未设值 / 泄漏形态（~/.taiji 等树外路径）/
  *      词法逃逸形态（~/.taiji-dev/../.taiji——resolve 消解 .. 后已不在树内）。
  *
  * [HISTORICAL] 2026-09-08 Gate B 泄漏事故：宿主 shell 的
  * TAIJI_AGENT_DATA_DIR=/Users/<user>/.taiji 泄漏进 dev Electron，旧实现
  * `env ?? ~/.taiji-dev` 只在 undefined 兜底、泄漏值被采信，dev app 整个跑在
  * 用户 prod 数据目录上。本函数保留该防线语义（树外一律拒绝），仅对树内
- * 实例目录放开采信（原无条件钉死使装配器实例层被静默覆盖，全部 dev 实例
+ * 实例目录放开采信（原无条件固定使装配器实例层被静默覆盖，全部 dev 实例
  * 共享 ~/.taiji-dev → Electron 单实例锁互踢，R-13）。
  *
  * 包含判定用 path.resolve + sep 边界（resolve 消解 ../ 与重复分隔符后再判，

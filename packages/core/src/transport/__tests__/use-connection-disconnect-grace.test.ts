@@ -3,10 +3,10 @@
  *
  * 锁定行为：网络断连（ws onclose → disconnected/reconnecting）与 IPC 崩溃
  * （restarting/failed）在 stateWatch 单一汇合点触发清理：
- * - 网络断连：pending.rejectAll 立即；在途流收口（onRuntimeUnavailable）**延迟**到
+ * - 网络断连：pending.rejectAll 立即；在途流收尾（onRuntimeUnavailable）**延迟**到
  *   DISCONNECT_GRACE_MS 到期且仍未 connected（宽限期内重连成功则由 ring 回放 /
- *   live 事件驱动正常收口，不误伤在途流——立即收口会被 sealed 守卫不可逆 error 化）。
- * - IPC 崩溃：立即收口（进程没了流物理不可能恢复），且清掉已 armed 的宽限 timer。
+ *   live 事件驱动正常收尾，不误伤在途流——立即收尾会被 sealed 检查不可逆 error 化）。
+ * - IPC 崩溃：立即收尾（进程没了流物理不可能恢复），且清掉已 armed 的宽限 timer。
  *
  * fake timers 覆盖超时兜底分支（timer 测试纪律）。
  *
@@ -102,7 +102,7 @@ describe('断连宽限兜底：网络断连 vs IPC 崩溃单一汇合', () => {
     vi.useRealTimers()
   })
 
-  it('网络断连（connected→reconnecting）→ rejectAll 立即；宽限期内不收口，到期仍断连 → onRuntimeUnavailable("disconnect")', async () => {
+  it('网络断连（connected→reconnecting）→ rejectAll 立即；宽限期内不收尾，到期仍断连 → onRuntimeUnavailable("disconnect")', async () => {
     const { teardown } = await setupConnected()
 
     // 模拟 ws onclose（同一 tick 内 disconnected → reconnecting，watch 收到最终值）
@@ -110,17 +110,17 @@ describe('断连宽限兜底：网络断连 vs IPC 崩溃单一汇合', () => {
     mockStateRef.value = 'reconnecting'
     await nextTick()
     expect(mockRejectAll).toHaveBeenCalledTimes(1)
-    // 宽限期内（9.9s）：不收口（等重连 + ring 回放）
+    // 宽限期内（9.9s）：不收尾（等重连 + ring 回放）
     vi.advanceTimersByTime(DISCONNECT_GRACE_MS - 100)
     expect(mockRuntimeCleanup).not.toHaveBeenCalled()
-    // 到期仍断连 → 收口（streaming 态复位不挂 10min streaming timer）
+    // 到期仍断连 → 收尾（streaming 态复位不挂 10min streaming timer）
     vi.advanceTimersByTime(100)
     expect(mockRuntimeCleanup).toHaveBeenCalledTimes(1)
     expect(mockRuntimeCleanup).toHaveBeenCalledWith('disconnect')
     teardown()
   })
 
-  it('宽限期内重连成功 → 到期不收口（ring 回放 / live 事件接管终态，不误伤在途流）', async () => {
+  it('宽限期内重连成功 → 到期不收尾（ring 回放 / live 事件接管终态，不误伤在途流）', async () => {
     const { teardown } = await setupConnected()
 
     mockStateRef.value = 'reconnecting'
@@ -129,13 +129,13 @@ describe('断连宽限兜底：网络断连 vs IPC 崩溃单一汇合', () => {
     vi.advanceTimersByTime(DISCONNECT_GRACE_MS / 2)
     mockStateRef.value = 'connected'
     await nextTick()
-    // 越过到期时刻：已 connected → 不收口
+    // 越过到期时刻：已 connected → 不收尾
     vi.advanceTimersByTime(DISCONNECT_GRACE_MS)
     expect(mockRuntimeCleanup).not.toHaveBeenCalled()
     teardown()
   })
 
-  it('断连→恢复→再断连 flapping：宽限从首次断连起算单窗口，累计到期限未恢复 → 收口一次', async () => {
+  it('断连→恢复→再断连 flapping：宽限从首次断连起算单窗口，累计到期限未恢复 → 收尾一次', async () => {
     const { teardown } = await setupConnected()
 
     mockStateRef.value = 'reconnecting'
@@ -147,14 +147,14 @@ describe('断连宽限兜底：网络断连 vs IPC 崩溃单一汇合', () => {
     mockStateRef.value = 'reconnecting'
     await nextTick()
     expect(mockRuntimeCleanup).not.toHaveBeenCalled()
-    // 首次断连起算满宽限 → 收口
+    // 首次断连起算满宽限 → 收尾
     vi.advanceTimersByTime(DISCONNECT_GRACE_MS / 2 + 100)
     expect(mockRuntimeCleanup).toHaveBeenCalledTimes(1)
     expect(mockRuntimeCleanup).toHaveBeenCalledWith('disconnect')
     teardown()
   })
 
-  it('IPC 崩溃（restarting）→ 立即收口不走宽限，且清掉已 armed 的宽限 timer（到期不二次触发）', async () => {
+  it('IPC 崩溃（restarting）→ 立即收尾不走宽限，且清掉已 armed 的宽限 timer（到期不二次触发）', async () => {
     const { teardown } = await setupConnected()
 
     // 先网络断连（arm 宽限），随后 runtime 崩溃（restarting 置态）
@@ -163,7 +163,7 @@ describe('断连宽限兜底：网络断连 vs IPC 崩溃单一汇合', () => {
     expect(mockRuntimeCleanup).not.toHaveBeenCalled()
     restartingCb!() // setRestarting → state=restarting
     await nextTick()
-    // 立即收口（pi 死了流物理不可能恢复，无宽限）
+    // 立即收尾（pi 死了流物理不可能恢复，无宽限）
     expect(mockRuntimeCleanup).toHaveBeenCalledTimes(1)
     expect(mockRuntimeCleanup).toHaveBeenCalledWith('restart')
     // 宽限 timer 已被清：推进到期时刻无二次触发
@@ -172,7 +172,7 @@ describe('断连宽限兜底：网络断连 vs IPC 崩溃单一汇合', () => {
     teardown()
   })
 
-  it('重连用尽（connected→failed，scheduleReconnect 超限置 failed）→ 立即收口（failed 分支不要求宽限）', async () => {
+  it('重连用尽（connected→failed，scheduleReconnect 超限置 failed）→ 立即收尾（failed 分支不要求宽限）', async () => {
     const { teardown } = await setupConnected()
 
     mockStateRef.value = 'failed'

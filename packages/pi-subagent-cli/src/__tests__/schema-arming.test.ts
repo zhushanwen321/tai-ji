@@ -2,7 +2,7 @@
 //
 // [D3 止血版] 武装断言单测（纯函数面，无子进程）：assertSchemaEnforcementArmed 的
 // 断言集 ①env 注入 / ②扩展在场 + capability 分流（native 生效 / emulated 豁免）+
-// 双形态恢复指引文案。接线面（runSpawnOnce spawn 前 fail-fast / 零 spawn / 断言②
+// 双形态恢复指引文案。接线点（runSpawnOnce spawn 前 fail-fast / 零 spawn / 断言②
 // 消费 extensionPaths 派生 argv）见 run-spawn-once.integration.test.ts。
 
 import { describe, expect, it } from "vitest";

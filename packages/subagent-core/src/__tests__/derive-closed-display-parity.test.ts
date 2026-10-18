@@ -1,9 +1,9 @@
-// derive-closed-display-parity — 成败推导单一权威守卫（core 侧）
+// derive-closed-display-parity — 成败推导单一权威检查（core 侧）
 //
 // 同构成败推导收敛到 execution-record.ts 的 deriveOutcome/projectOutcome（单一权威）。
 // 本文件锚定：① 权威函数行为；② core 侧消费方（execution/notify/notifier.ts buildLlmContent）
 // 源码不得写回手写同构 switch。
-// [u1-move 拆分] 壳侧消费方（interface/gui/bg-notify-render.ts renderRecordLines）的守卫段
+// [u1-move 拆分] 壳侧消费方（interface/gui/bg-notify-render.ts renderRecordLines）的检查段
 // 随壳件留守 pi extension 包，内联于
 // extensions/universal/subagent-workflow/src/__tests__/bg-notify-render.test.ts
 // （CONSUMER_SOURCE 锚定消费方源码 + LEGACY_DERIVATION_TOKENS 拦截同构 switch 写回）。
@@ -58,7 +58,7 @@ describe("deriveOutcome — 单一权威终态派生（行为锚定）", () => {
   });
 });
 
-describe("projectOutcome — 投影唯一出口（行为锚定）", () => {
+describe("projectOutcome — 派生视图唯一出口（行为锚定）", () => {
   it("running → undefined；closed 一等 outcome 直读；存量 record 兜底派生", () => {
     expect(projectOutcome({ status: "running" })).toBeUndefined();
     expect(projectOutcome({ status: "idle", closedReason: "gc", outcome: "failed" })).toBe("failed");
@@ -67,7 +67,7 @@ describe("projectOutcome — 投影唯一出口（行为锚定）", () => {
   });
 });
 
-describe("同构 switch 残留守卫（收敛删除后不得写回）— core 消费方", () => {
+describe("同构 switch 残留检查（收敛删除后不得写回）— core 消费方", () => {
   it("消费方源码可读（fail-loud 前置）", () => {
     for (const [key, p] of Object.entries(CONSUMER_SOURCES)) {
       expect(() => readFileSync(p, "utf-8"), `源文件不可读：${key} ${p}`).not.toThrow();

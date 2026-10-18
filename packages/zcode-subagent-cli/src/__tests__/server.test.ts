@@ -1,5 +1,5 @@
 // server.test.ts —— EngineProtocolServer 直测（dispatch 表驱动重构后的方法分发
-// 单测面；protocol-e2e 走 bin 子进程不计入本包 v8 覆盖率，server.ts 曾整文件 0 覆盖）。
+// 单测；protocol-e2e 走 bin 子进程不计入本包 v8 覆盖率，server.ts 曾整文件 0 覆盖）。
 //
 // engine = EnginePort 内存 fake（无子进程 / 无真实数据目录——本文件零 fs 触碰），
 // stdout 写入面注入内存 sink。覆盖：
@@ -206,7 +206,7 @@ describe("handleFrame 帧分类路由", () => {
 // ── 10 正向方法分发表 ──
 
 describe("methodHandlers 表驱动路由（逐方法 → EnginePort 成员）", () => {
-  it("initialize：版本协商 + 能力/模型目录应答（models 投影仅 id）", async () => {
+  it("initialize：版本协商 + 能力/模型目录应答（models 派生视图仅 id）", async () => {
     const engine = makeEngine();
     const { server, sink } = makeServer(engine);
     const resp = await request(server, sink, 1, "initialize", INIT_PARAMS);
@@ -559,7 +559,7 @@ describe("reverseRequest 客户端", () => {
       expect(resp.error).toBeUndefined();
       expect(resp.result).toEqual({ handle: HANDLE, outcome: FAKE_OUTCOME });
 
-      // warn 留痕（logger.warn 经注入 sink 落账，含方法名与 run 上下文）
+      // warn 留痕（logger.warn 经注入 sink 写入 journal 记录，含方法名与 run 上下文）
       expect(logs).toContainEqual(expect.objectContaining({
         level: "warn",
         component: "subagents",
@@ -570,7 +570,7 @@ describe("reverseRequest 客户端", () => {
     }
   });
 
-  it("write 同步抛错（stdout 已关）：就地收口 reject + clock.settled + pending 清理（异常不逃出 executor）", async () => {
+  it("write 同步抛错（stdout 已关）：就地收尾 reject + clock.settled + pending 清理（异常不逃出 executor）", async () => {
     const clockCalls: Array<{ op: string; id: string }> = [];
     const throwingWrite = vi.fn(() => {
       throw new Error("EPIPE: stdout closed");
@@ -589,7 +589,7 @@ describe("reverseRequest 客户端", () => {
     await expect(server.reverseRequest("host/log", { message: "bye" })).rejects.toThrow(
       /reverse request host\/log \(rev-1\) could not be written: EPIPE/,
     );
-    // started 已记、write 抛错后 settled 收口（无 acked）；pending 条目已随 reject 清理
+    // started 已记、write 抛错后 settled 收尾（无 acked）；pending 条目已随 reject 清理
     expect(clockCalls).toEqual([
       { op: "started", id: "rev-1" },
       { op: "settled", id: "rev-1" },

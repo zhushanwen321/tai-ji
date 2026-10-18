@@ -2,7 +2,7 @@
 //
 // 锁定 extractParsedOutput 纯函数契约——它被 collectOutcome 直接消费，决定
 // AgentResult.parsedOutput 字段。toUsageTotal / collectResponseText 已删除
-// （usage 收口进 getTotalUsage，text 收口进 getFullText，均在 execution-record.test 测）。
+// （usage 汇总进 getTotalUsage，text 汇总进 getFullText，均在 execution-record.test 测）。
 import { describe, expect, it } from "vitest";
 
 import {

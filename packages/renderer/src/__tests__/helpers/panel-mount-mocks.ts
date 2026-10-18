@@ -24,7 +24,7 @@ import { vi } from 'vitest'
 import { toastSpyModule } from './i18n-toast-mock'
 
 /** '@/composables/features/sidebar/useSidebar' mock 工厂（Panel 挂载窄面：三 async 动作键；
- *  与 chat-stream-mount 的 useSidebarMockModule 是不同消费面，不合并——键集与 async 语义都不同）。 */
+ *  与 chat-stream-mount 的 useSidebarMockModule 是不同消费方，不合并——键集与 async 语义都不同）。 */
 function panelSidebarMockModule() {
   return {
     useSidebar: () => ({

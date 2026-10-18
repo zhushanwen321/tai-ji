@@ -169,7 +169,7 @@ describe("FR-8: Orphan Recovery from Manifest", () => {
       createdAt: 1000,
     });
 
-    // 直接写磁盘注入非法 status（绕过 writeManifest 的 TS 类型守卫）。
+    // 直接写磁盘注入非法 status（绕过 writeManifest 的 TS 类型检查）。
     // crashed 不在 4 态枚举——它是重建派生态,意外出现在 manifest 应被跳过而非降级 failed。
     fs.writeFileSync(path.join(recordsDir, "bad-crashed.json"), JSON.stringify({
       id: "bad-crashed", rootSessionId: "session-main", agentName: "worker",

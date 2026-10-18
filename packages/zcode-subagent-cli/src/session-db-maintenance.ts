@@ -59,7 +59,7 @@ const SESSION_CHILD_TABLES: readonly string[] = [
   "tool_usage",
 ];
 
-/** node:sqlite DatabaseSync 的最小消费面（同步 API——sweep 是同步维护动作）。 */
+/** node:sqlite DatabaseSync 的最小消费方（同步 API——sweep 是同步维护动作）。 */
 interface SweepSqliteDb {
   exec: (sql: string) => void;
   prepare: (sql: string) => {

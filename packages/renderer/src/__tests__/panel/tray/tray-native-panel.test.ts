@@ -8,14 +8,14 @@
  * - 观察者（形态）：pin 门控（hover 态无行内按钮）、错误态 retry、断连提示条、加载态
  * - 构建者（白盒）：行点击归宿矩阵（drawer 三 tab）与 RPC 参数（计数口径在
  *   useTrayCounts.test.ts 覆盖）；数据面单例（U1：真实 useTrayCounts + spy 断言面板开合
- *   不重发首拉 RPC）
+ *   不重发首次拉取 RPC）
  *
  * mock 策略：
  * - 数据面经 `TRAY_COUNTS_KEY` **provide 替身**（非模块 mock）：面板已改 inject 消费外壳单例
  *   （U1），替身是 `UseTrayCountsReturn` 类型标注的固定数据面——契约漂移即编译报错；口径测试
  *   在同目录 useTrayCounts.test.ts，本文件只验渲染与交互
- * - U1 用例用**真实** useTrayCounts（外壳替身持有）+ spy 拉取腿（`loadSubagents` /
- *   `loadWorkflows`）：断言面板开合不重复触发首拉（旧实现每次 hover 打开都重发，是 U1 根因）
+ * - U1 用例用**真实** useTrayCounts（外壳替身持有）+ spy 拉取路径（`loadSubagents` /
+ *   `loadWorkflows`）：断言面板开合不重复触发首次拉取（旧实现每次 hover 打开都重发，是 U1 根因）
  * - 真实 pinia + 真实 subagent/workflow store：cancel 防误报读 store 真判据
  *   （isStreamingSubagent），workflow 操作回执路径真实
  * - `@taiji/core/transport/api/domains/*` mock：kill / workflowAction RPC 可控
@@ -142,7 +142,7 @@ vi.mock('@taiji/core/transport/api/domains/session', async (importOriginal) => {
   return { ...actual, workflowAction: vi.fn() }
 })
 
-// ── mock：store 首拉 RPC（面板不触发，防真实 transport 抖动）──
+// ── mock：store 首次拉取 RPC（面板不触发，防真实 transport 抖动）──
 vi.mock('@/api', async (importOriginal) => {
   const actual = await importOriginal<typeof import('@/api')>()
   return {
@@ -232,9 +232,9 @@ function mountPanel(kind: TrayKind, extra: { pinned?: boolean } = {}) {
 }
 
 /**
- * 模块级挂载点：用例只赋值（不各自收尾卸载），卸载统一由 afterEach 收口。
+ * 模块级挂载点：用例只赋值（不各自收尾卸载），卸载统一由 afterEach 收尾。
  * 失败安全：断言抛错不再跳过卸载（泄漏的组件/interval 会污染后续用例——本文件有用例断言
- * vi.getTimerCount()），卸载收口不依赖用例走完。范式对齐同目录 tray-widget / composer-tray。
+ * vi.getTimerCount()），卸载收尾不依赖用例走完。范式对齐同目录 tray-widget / composer-tray。
  * getTimerCount 与 unmount 成对的用例仍保留显式 unmount（卸载即断言的一部分，幂等安全）。
  */
 let wrapper: VueWrapper
@@ -405,7 +405,7 @@ describe('TrayNativePanel 分桶 tab 与行渲染（使用者黑盒）', () => {
   })
 })
 
-describe('TrayNativePanel [W0/V8] 合并投影消费锚定（盲区窗口 N/M 进度显式预期变化）', () => {
+describe('TrayNativePanel [W0/V8] 合并派生视图消费锚定（盲区窗口 N/M 进度显式预期变化）', () => {
   it('盲区窗口 record-only agentCalls → N/M 进度 0/N + 0% 进度条（旧形态 0/0 → 0/N）', async () => {
     // D2-R3 record-only 成行契约形状：id/agent/slug/status/startedAt/sessionId、phase undefined。
     // 显式预期变化（设计 V8）：盲区窗口托盘进度从 0/0（agentCalls 空）变为 0/N（record-only
@@ -426,7 +426,7 @@ describe('TrayNativePanel [W0/V8] 合并投影消费锚定（盲区窗口 N/M �
 
     const row = wrapper.find('[data-testid="tray-workflow-row"]')
     expect(row.exists()).toBe(true)
-    // N/M 计数：done=0 / total=4（合并投影使盲区窗口立即有值）
+    // N/M 计数：done=0 / total=4（合并派生视图使盲区窗口立即有值）
     expect(row.text()).toContain(msg(zhTray.tray.agentsLabel, { done: 0, total: 4 }))
     // 百分比：进度条宽度 0%（无终态步骤）
     const bar = row.find('[style*="width"]')
@@ -590,7 +590,7 @@ describe('TrayNativePanel 行内操作（pin 门控 + 两段式）', () => {
     expect(cancelSpy).toHaveBeenCalledWith(SID, 'sub-1')
   })
 
-  it('subagent cancel 迟到收口防误报：确认窗口期收口后第二击不发 RPC，toast「任务已结束」', async () => {
+  it('subagent cancel 迟到收尾防误报：确认窗口期收尾后第二击不发 RPC，toast「任务已结束」', async () => {
     const subagentStore = useSubagentStore()
     const running = makeSubagent({ subagentId: 'sub-1', status: 'running' })
     subagentStore.applyRecords(SID, [running])
@@ -603,7 +603,7 @@ describe('TrayNativePanel 行内操作（pin 门控 + 两段式）', () => {
     await flushPromises()
     expect(wrapper.find('[data-testid="tray-subagent-cancel-confirm"]').exists()).toBe(true)
 
-    // 迟到收口（轮终广播）：record 翻 idle，确认钮保留（可达性优先于态过滤）
+    // 迟到收尾（轮终广播）：record 翻 idle，确认钮保留（可达性优先于态过滤）
     subagentStore.applyRecords(SID, [makeSubagent({ subagentId: 'sub-1', status: 'idle' })])
     await flushPromises()
     const confirm = wrapper.find('[data-testid="tray-subagent-cancel-confirm"]')
@@ -686,7 +686,7 @@ describe('TrayNativePanel 行点击归宿矩阵（D2）', () => {
 })
 
 describe('TrayNativePanel 观察者形态（错误态 / 断连 / 加载态）', () => {
-  it('错误态：展示可读文案 + retry 按钮按类重拉', async () => {
+  it('错误态：展示可读文案 + retry 按钮按类重新拉取', async () => {
     trayState.subagentError = 'rpc-down'
     wrapper = mountPanel('subagent')
     await flushPromises()
@@ -749,7 +749,7 @@ describe('TrayNativePanel 观察者形态（错误态 / 断连 / 加载态）', 
     expect(banner.exists()).toBe(true)
     expect(banner.text()).toContain(zhTray.tray.disconnectBanner)
 
-    // 重连（数据拍恢复由 useBackgroundTasks 重连腿负责）→ 提示条消失
+    // 重连（数据拍恢复由 useBackgroundTasks 重连路径负责）→ 提示条消失
     wsMock.ref!.value = 'connected'
     trayState.bashFetchFailed = false
     await flushPromises()
@@ -780,7 +780,7 @@ describe('TrayNativePanel 加载态判据（U2：在途且该类无数据才占�
     expect(wrapper.find('[data-testid="tray-panel-empty"]').exists()).toBe(false)
   })
 
-  it('subagent：首拉在途（loading=true）且无任何记录 → 加载占位 + 不渲染分桶 tab', async () => {
+  it('subagent：首次拉取在途（loading=true）且无任何记录 → 加载占位 + 不渲染分桶 tab', async () => {
     trayState.subagentLoading = true
     wrapper = mountPanel('subagent')
     await flushPromises()
@@ -792,7 +792,7 @@ describe('TrayNativePanel 加载态判据（U2：在途且该类无数据才占�
     expect(wrapper.find('[data-testid="tray-panel-empty"]').exists()).toBe(false)
   })
 
-  it('workflow：首拉在途（loading=true）且无任何记录 → 加载占位 + 不渲染分桶 tab', async () => {
+  it('workflow：首次拉取在途（loading=true）且无任何记录 → 加载占位 + 不渲染分桶 tab', async () => {
     trayState.workflowLoading = true
     wrapper = mountPanel('workflow')
     await flushPromises()
@@ -837,11 +837,11 @@ describe('TrayNativePanel 加载态判据（U2：在途且该类无数据才占�
   })
 })
 
-describe('TrayNativePanel 数据面单例（U1：开合不重发首拉 RPC）', () => {
-  it('面板关闭再打开（卸载重挂）不触发重复首拉：loadSubagents / loadWorkflows 各仅外壳挂载一次', async () => {
+describe('TrayNativePanel 数据面单例（U1：开合不重发首次拉取 RPC）', () => {
+  it('面板关闭再打开（卸载重挂）不触发重复首次拉取：loadSubagents / loadWorkflows 各仅外壳挂载一次', async () => {
     const subagentStore = useSubagentStore()
     const workflowStore = useWorkflowStore()
-    // 拉取腿用 spy 计数（真实实现被替身：无 RPC，数据由用例直接种入分区）
+    // 拉取路径用 spy 计数（真实实现被替身：无 RPC，数据由用例直接种入分区）
     const loadSubSpy = vi.spyOn(subagentStore, 'loadSubagents').mockResolvedValue(undefined)
     const loadWfSpy = vi.spyOn(workflowStore, 'loadWorkflows').mockResolvedValue(undefined)
     subagentStore.applyRecords(SID, [makeSubagent({ subagentId: 'sub-1', status: 'running' })])
@@ -853,7 +853,7 @@ describe('TrayNativePanel 数据面单例（U1：开合不重发首拉 RPC）', 
     wrapper = mount(ShellHarness, { props: { sessionId: SID, open: false } })
     await flushPromises()
 
-    // 外壳挂载（= 数据面唯一实例创建点）即首拉，各一次
+    // 外壳挂载（= 数据面唯一实例创建点）即首次拉取，各一次
     expect(loadSubSpy).toHaveBeenCalledTimes(1)
     expect(loadSubSpy).toHaveBeenCalledWith(SID)
     expect(loadWfSpy).toHaveBeenCalledTimes(1)
@@ -920,7 +920,7 @@ describe('TrayNativePanel 首帧即列表（U2：有数据不闪加载态）', (
  * 断言手段 = vi.getTimerCount()（fake timers 挂起 timer 数；beforeEach 重设 fake clock 后基线为 0）。
  */
 describe('TrayNativePanel tick 空转治理（interval 仅随可见 running bash 行建撤）', () => {
-  it('bash 无 running 行（空态 / 仅已结束）零 interval；running 行出现即建、收口即撤、卸载无泄漏', async () => {
+  it('bash 无 running 行（空态 / 仅已结束）零 interval；running 行出现即建、收尾即撤、卸载无泄漏', async () => {
     // 仅已结束行：可见行耗时静态（durationMs），无 tick 消费者
     trayState.bashEnded = [
       makeTask({ taskId: 'bt-e1', state: 'exited', exitCode: 0, reason: 'natural', endedAt: T(3_000), durationMs: 50_000 }),
@@ -944,7 +944,7 @@ describe('TrayNativePanel tick 空转治理（interval 仅随可见 running bash
     await vi.advanceTimersByTimeAsync(1000)
     expect(wrapper.find('[data-testid="tray-bash-row"]').text()).toContain('00:38')
 
-    // 行收口（移出 running 行集）：interval 撤销
+    // 行收尾（移出 running 行集）：interval 撤销
     trayState.bashRunning = []
     await flushPromises()
     expect(vi.getTimerCount()).toBe(0)

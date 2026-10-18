@@ -7,7 +7,7 @@
 // - Submit 门判定（choice / Other 需文本 / text / schedule 委托）
 // - schedule 草稿回显 = 桌面 ScheduleForm 打开即确认路径的字节等价物
 //     （once 折叠往返 / recurring 原文 + expires 缺省 / model 预选 / prompt 必填门）
-// - C4 富交互帧判定与问题集 / 草稿收窄守卫
+// - C4 富交互帧判定与问题集 / 草稿收窄检查
 import { describe, expect, it } from 'vitest'
 import type { ExtensionUIRequest } from '@taiji/core/transport/api/domains/extension'
 import {
@@ -165,7 +165,7 @@ describe('schedule 草稿回显（桌面 ScheduleForm 打开即确认路径等�
   })
 })
 
-describe('帧标记守卫与字段收窄', () => {
+describe('帧标记检查与字段收窄', () => {
   it('isRichInteractionFrame：form/planReview 放行；普通 dialog 帧拒绝；非对象安全 false', () => {
     expect(isRichInteractionFrame({ form: true })).toBe(true)
     expect(isRichInteractionFrame({ planReview: true })).toBe(true)

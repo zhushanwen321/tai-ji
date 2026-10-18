@@ -7,7 +7,7 @@
 //   - 重试仍失败（连接崩溃族）：文案补「已自动重试一次」句（u-z2 留的 F-1 补句
 //     义务），boot 2 证据；
 //   - 不可重试形态不重试：RPC 错误（-32004/-32601 漂移）/ status=error 终态（D6
-//     被否③）/ 用户取消（aborted 短路）——各 create×1 无补句。
+//     不采用③）/ 用户取消（aborted 短路）——各 create×1 无补句。
 // （原预算继承面——resolveTransientRetryBudget 纯函数与显式总上界 env 门禁——随
 // turn 双 timer 删除一并移除：重试轮不再携带上界预算。）
 
@@ -32,7 +32,7 @@ const PROVIDER = "test-provider";
 const GOLDEN_FULL_TEXT = "你好，任务完成";
 /** 挂起场景：send 后零推送——turn 在途等待（crash 收割 / idle 判死的注入底座）。 */
 const HANG_PUSHES: string[] = [];
-/** 权威终态 turn.terminal 的 error 帧（status='error' 终态——D6 被否③的不可重试形态）。 */
+/** 权威终态 turn.terminal 的 error 帧（status='error' 终态——D6 不采用③的不可重试形态）。 */
 const TERMINAL_ERROR_FRAME =
   '{"method":"v4/telemetry/event","params":{"kind":"turn.terminal","status":"error"}}';
 
@@ -124,7 +124,7 @@ function makeEngine(overrides: ScenarioOverrides = {}): EngineFixture {
     sources: { v2ConfigPath: v2Path, personalProviderConfigPath: personalPath, builtinCatalogPath: path.join(tmpRoot, "absent-catalog.json") },
     processEnv: {
       PATH: process.env.PATH ?? "",
-      // 钉扎 appserver 定向（定向不探不降）
+      // 固定 appserver 定向（定向不探不降）
       TAIJI_ZCODE_MODE: "appserver",
       FAKE_STATE_FILE: stateFile,
       FAKE_SESSION_SCENARIO: scenarioFile,
@@ -221,10 +221,10 @@ describe("瞬时失败自动重试一次（P0-1 U4：新会话重跑）", () => 
 });
 
 // ============================================================
-// 不可重试形态不重试（D6 被否谱系 + 形态排除）
+// 不可重试形态不重试（D6 不采用其余方案的理由 + 形态排除）
 // ============================================================
 
-describe("不可重试形态不重试（一次会话收口，无补句）", () => {
+describe("不可重试形态不重试（一次会话收尾，无补句）", () => {
   it("RPC 错误（-32004 busy）：非瞬时形态 → 不重试（create×1）", async () => {
     const f = makeEngine({ sendError: { code: -32004, message: "Session is busy" } });
     const r = await f.engine.run(makeTask({ cwd: f.workspace }), makeCtx());
@@ -234,7 +234,7 @@ describe("不可重试形态不重试（一次会话收口，无补句）", () =
     expect(bootCount(f.stateFile)).toBe(1);
   }, 15_000);
 
-  it("漂移码（-32601）：R5 降级链专属语义，不进瞬时重试（D6 被否②）", async () => {
+  it("漂移码（-32601）：R5 降级链专属语义，不进瞬时重试（D6 不采用②）", async () => {
     const f = makeEngine({ sendError: { code: -32601, message: "method not found" } });
     const r = await f.engine.run(makeTask({ cwd: f.workspace }), makeCtx());
     expect(r.outcome.error).toContain("-32601");
@@ -242,7 +242,7 @@ describe("不可重试形态不重试（一次会话收口，无补句）", () =
     expect(createCount(f.stateFile)).toBe(1);
   }, 15_000);
 
-  it("status='error' 终态：D6 被否③（错误内容可能非瞬时）→ 不重试（create×1）", async () => {
+  it("status='error' 终态：D6 不采用③（错误内容可能非瞬时）→ 不重试（create×1）", async () => {
     const f = makeEngine({ replaceSendPushes: [TERMINAL_ERROR_FRAME] });
     const r = await f.engine.run(makeTask({ cwd: f.workspace }), makeCtx());
     expect(r.outcome.error).toMatch(/^engine_run_failed: app-server 终态 status=error/);
@@ -252,7 +252,7 @@ describe("不可重试形态不重试（一次会话收口，无补句）", () =
   }, 15_000);
 
   it("用户取消（turn 在途时 abort）：aborted 短路优先 → 不重试（create×1）", async () => {
-    const f = makeEngine(); // hang + stopBehavior terminal（stop 优雅生效 → aborted 收口）
+    const f = makeEngine(); // hang + stopBehavior terminal（stop 优雅生效 → aborted 收尾）
     const controller = new AbortController();
     setTimeout(() => controller.abort(), 80);
     const r = await f.engine.run(makeTask({ cwd: f.workspace }), makeCtx({ signal: controller.signal }));

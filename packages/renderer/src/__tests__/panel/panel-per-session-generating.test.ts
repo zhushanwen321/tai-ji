@@ -1,9 +1,9 @@
 /**
- * Panel per-session 生成态守卫回归测试。
+ * Panel per-session 生成态检查回归测试。
  *
  * 锁定 bug：Panel.vue 的 isGenerating 原用全局 chat.isStreaming，导致跨 session 误伤——
  * A 会话流式期间点「新建任务」切到空 session（sessionId=null），空 session 的 Landing
- * 被 !isGenerating 守卫挡住，落到分支兜底空态（「选择左侧会话开始」），new-task 渲染撕裂。
+ * 被 !isGenerating 检查挡住，落到分支兜底空态（「选择左侧会话开始」），new-task 渲染撕裂。
  *
  * 修复：isGenerating 改为 per-session computed scan（chat.isGenerating(sessionId)），
  * 从 message 实体派生，不再用全局 flag。
@@ -50,7 +50,7 @@ beforeEach(() => {
   flowState.isActive.value = false
 })
 
-describe('Panel per-session 生成态守卫（isGenerating 不跨 session 误伤）', () => {
+describe('Panel per-session 生成态检查（isGenerating 不跨 session 误伤）', () => {
   it('另一 session 流式中（sessionId=null）→ 渲染 Landing，不落兜底空态', () => {
     const chat = useChatStore()
     // 模拟 A 会话正在流式（message_start 创建 streaming entity）
@@ -83,7 +83,7 @@ describe('Panel per-session 生成态守卫（isGenerating 不跨 session 误伤
     expect(wrapper.find('[data-testid="landing"]').exists()).toBe(false)
   })
 
-  it('终态事件收口 streaming entity → isGenerating 恢复 false', () => {
+  it('终态事件收尾 streaming entity → isGenerating 恢复 false', () => {
     const chat = useChatStore()
     chat.applyMessageEvent('session-C', {
       type: 'message.message_start',

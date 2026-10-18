@@ -12,7 +12,7 @@
  * 构造手法（仓内先例对齐）：
  * - 真实 harness = runWorkflow + WorkerHostImpl（non-cloneable-return-e2e.test.ts
  *   先例）；崩溃注入 = 脚本内 setTimeout(process.exit)（worker_threads 内只终止
- *   本线程）+ 主线程 runner mock 首派永挂（模拟在飞 call），设计文档 §4 点名的
+ *   本线程）+ 主线程 runner mock 首派永挂（模拟在途 call），设计文档 §4 点名的
  *   TAIJI_SUBAGENT_TEST_INJECT_REBUILD_FAILURE 钩子用于「rebuild 失败」场景（S-D），
  *   本样本要的是 rebuild 成功重派，故不设该 env（设置即 rebuild 全失败、样本变质）。
  * - 重放代际不自杀：exit 定时器在 await agent() 返回后 clearTimeout——重放代际
@@ -98,7 +98,7 @@ function recordPathOf(runId: string): string {
  * - script 参数（failingPrompt 指定的 call）首次返回一般性失败 → 引擎重试矩阵
  *   落 agent-retrying 帧 → 第二次成功（execute-agent-call：result.error 非空且
  *   attempts < 3 可重试；缺省 failureKind = unknown = 可重试）。
- * - hungPrompt 指定的 call 首次派发永不返回（模拟在飞中崩溃/中断）；重放代际
+ * - hungPrompt 指定的 call 首次派发永不返回（模拟在途中崩溃/中断）；重放代际
  *   第 2 次调用立即成功——重建后的重放由此确定性穿过崩溃点。
  */
 function makeScriptedRunner(opts: {
@@ -114,7 +114,7 @@ function makeScriptedRunner(opts: {
       if (prompt === opts.hungPrompt) {
         const n = (hungCounts.get(prompt) ?? 0) + 1;
         hungCounts.set(prompt, n);
-        if (n === 1) return new Promise<AgentResult>(() => {}); // 在飞挂住
+        if (n === 1) return new Promise<AgentResult>(() => {}); // 在途挂住
         return Promise.resolve({ content: opts.successText });
       }
       if (opts.failingPrompt !== undefined && prompt === opts.failingPrompt) {
@@ -182,7 +182,7 @@ async function waitForRecord(
   }
 }
 
-/** 帧三元组投影（对拍断言的比对形态：跨运行的确定性骨架，剥 ts/runId 等易变面）。 */
+/** 帧三元组派生视图（对拍断言的比对形态：跨运行的确定性骨架，剥 ts/runId 等易变面）。 */
 function frameSignature(events: readonly WorkflowRunEvent[]): Array<[string, number | null, string | null]> {
   return events.map((e) => {
     const taskIndex = "taskIndex" in e ? (e.taskIndex as number) : null;
@@ -239,7 +239,7 @@ describe("U0 resume 代际 record 样本采集", () => {
         scriptSource: [
           'phase("alpha");',
           'await agent({ prompt: "u0-rs-task-0", description: "alpha-worker" });',
-          "// task-1 在飞时宿主中断（interruptRun）——重放代际立即成功穿过断点",
+          "// task-1 在途时宿主中断（interruptRun）——重放代际立即成功穿过断点",
           'await agent({ prompt: "u0-rs-task-1", description: "alpha-paused" });',
           "return { ok: true };",
         ].join("\n"),
@@ -258,7 +258,7 @@ describe("U0 resume 代际 record 样本采集", () => {
         10_000,
       );
 
-      // 中断：running → interrupted（落 run-interrupted 转移帧；旧 worker 的在飞
+      // 中断：running → interrupted（落 run-interrupted 转移帧；旧 worker 的在途
       // call 永挂不再产生任何帧——挂住的 runner promise 永不 resolve）
       await interruptRun(runId, {
         errorCode: "crashed",
@@ -309,7 +309,7 @@ describe("U0 resume 代际 record 样本采集", () => {
         expect(readFixtureSignature(RESUME_FIXTURE, "resume")).toEqual(frameSignature(events));
       } finally {
         // 释放第一代际 worker（挂住 pending 的旧代际；幂等）——防活跃线程泄漏进
-        // vitest worker 池。此时 run 已终局，迟到 exit 经 isRunSettled 守卫 no-op。
+        // vitest worker 池。此时 run 已终局，迟到 exit 经 isRunSettled 检查 no-op。
         staleRuntime?.release("terminal");
       }
     },

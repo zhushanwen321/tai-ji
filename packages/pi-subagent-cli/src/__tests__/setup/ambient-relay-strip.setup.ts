@@ -13,7 +13,7 @@
 // 应答 → host/handleReady 10s 超时：protocol-e2e / protocol-chat-e2e /
 // run-spawn-once 族成批确定性红，「自包含 fixture、零网络、零真 LLM」口径被
 // ambient 环境破坏（relay 分支是 pi-invocation 唯一的 env 覆盖通道，测试必须
-// 钉死直连 spawn 才能保证 fixture PATH 解析优先）。
+// 固定直连 spawn 才能保证 fixture PATH 解析优先）。
 //
 // pi-invocation.test.ts 此前已有同因的文件级消毒（[验收门修复] 注释，只护住了
 // 自己的 execPath/argv 断言）；本 setup 把消毒提到包级，覆盖全部 spawn 形态：

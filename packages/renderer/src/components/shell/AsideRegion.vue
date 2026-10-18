@@ -19,7 +19,7 @@
     <!-- 非 mac 顶部拖拽条带（跨平台窗口外壳设计 §6.3）：44px 高条带承载 win/linux 按住拖动窗口；
          mac 系统自带顶部拖拽，加 app-region 会重定义系统拖拽区，故 v-if 不渲染（A6 mac 回归按
          data-testid 断言不渲染）。双击条带 = 最大化/还原，是 -webkit-app-region:drag 的平台原生
-         行为，无需代码（真机验收 S2 双击腿覆盖）。命中面：圆点组（TrafficLight z-10）与导航按钮
+         行为，无需代码（真机验收 S2 双击路径覆盖）。命中范围：圆点组（TrafficLight z-10）与导航按钮
          （AppNavControls z-10，AppShell 层）均在本条带之上，且父链无 drag 声明，点击不受影响。
          折叠态分叉（已接受）：aside 折叠 = flexBasis:0 + overflow-hidden（本组件现状），条带随
          折叠被裁剪、win/linux 拖拽面缩回主面板 PanelHeader 的 22px 标题栏（不随折叠消失），与

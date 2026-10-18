@@ -9,7 +9,7 @@
  * - 切分不重不漏（归属总数守恒）
  * - 组头计数 = 组内实际会话数；空组显示组内空态
  * - 锚定切换只移动「谁展开 + 谁 带『当前』chip」，组位置与可见集不变
- * - folder 删除守卫（review MF-2）：removeByCwd 是 cwd 全量删除（项目无关），仅当某项目
+ * - folder 删除检查（review MF-2）：removeByCwd 是 cwd 全量删除（项目无关），仅当某项目
  *   分组恰好包含该 cwd 全量会话时才渲染删除按钮
  *
  * fixture 语义：sa/sd 归属 proj-a；sc 归属 proj-b；sb 未归类。
@@ -192,8 +192,8 @@ describe('SessionList: 锚定切换（平铺模式 = 锚定聚焦）', () => {
   })
 })
 
-describe('SessionList: folder 删除守卫随项目分组收紧（review MF-2 防护）', () => {
-  // folder 操作是目录模式组头元素，本 describe 断言其渲染守卫，预置分组模式
+describe('SessionList: folder 删除检查随项目分组收紧（review MF-2 防护）', () => {
+  // folder 操作是目录模式组头元素，本 describe 断言其渲染检查，预置分组模式
   beforeEach(() => {
     localStorage.setItem('taiji:sidebar-session-mode', 'groups')
   })
@@ -211,7 +211,7 @@ describe('SessionList: folder 删除守卫随项目分组收紧（review MF-2 �
     // removeByCwd 是 cwd 全量删除（项目无关），任一项目分组的删除都会连带删掉其他分组内
     // 不可见的 session → 按钮在所有分组隐藏
     expect(wrapper.findAll('[data-testid="folder-delete-btn"]')).toHaveLength(0)
-    // 非破坏性的「+」不受守卫约束，恒渲染
+    // 非破坏性的「+」不受检查约束，恒渲染
     expect(wrapper.findAll('[data-testid="folder-new-session-btn"]').length).toBe(3)
   })
 

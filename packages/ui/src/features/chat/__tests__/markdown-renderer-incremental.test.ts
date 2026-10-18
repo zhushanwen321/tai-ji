@@ -162,7 +162,7 @@ describe('W23 ①: 增量更新只重渲染尾段（真实 renderIncremental）'
 })
 
 describe('W23 ②: streaming-fence 占位（语言名 + loader 行，不跑 shiki/mermaid）', () => {
-  it('未闭合代码 fence：占位可见（lang=ts），零 shiki 高亮', async () => {
+  it('未结束代码 fence：占位可见（lang=ts），零 shiki 高亮', async () => {
     // 冻结静默时钟：silenceMs = performance.now() - lastContentAt 每帧重读（useMarkdownStreaming
     // runIncrementalRender），满载下 mount→首帧的 macrotask 边界可越过 200ms 阈值 → 首帧直接
     // finalize（占位转完整代码块）→ 占位断言假红。冻结后 silenceMs 恒 0、finalize 定时器不
@@ -183,7 +183,7 @@ describe('W23 ②: streaming-fence 占位（语言名 + loader 行，不跑 shik
     expect(wrapper.text()).toContain('intro paragraph')
   })
 
-  it('未闭合 mermaid fence：占位可见（lang=mermaid），不加载 mermaid', async () => {
+  it('未结束 mermaid fence：占位可见（lang=mermaid），不加载 mermaid', async () => {
     // 同上：冻结静默时钟，堵「满载首帧 silenceMs 越阈值 → 占位未现先 finalize」的假红窗口
     vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'performance'] })
     const { deps } = await createIncrementalDeps()
@@ -217,7 +217,7 @@ describe('W23 ③: 静默期 finalize 后完整渲染', () => {
     await vi.advanceTimersByTimeAsync(250)
     await new Promise((r) => realSetTimeout(r, 0))
     await nextTick()
-    // 占位消失，未闭合 fence 以完整代码块呈现（header 语言标签 + shiki pre + 源码可见）
+    // 占位消失，未结束 fence 以完整代码块呈现（header 语言标签 + shiki pre + 源码可见）
     expect(wrapper.find('[data-testid="md-streaming-fence"]').exists()).toBe(false)
     expect(wrapper.find('.md-codeblock').exists()).toBe(true)
     expect(wrapper.find('.md-codeblock__lang').text()).toContain('ts')
@@ -227,7 +227,7 @@ describe('W23 ③: 静默期 finalize 后完整渲染', () => {
 })
 
 describe('W23 ④: complete 消息渲染与旧版全量渲染等价（回归基线）', () => {
-  /** 完整文档（标题/段落/闭合 fence/列表/表格/行内代码，无 mermaid——mermaid 是组件态不走 v-html 等价口径） */
+  /** 完整文档（标题/段落/结束 fence/列表/表格/行内代码，无 mermaid——mermaid 是组件态不走 v-html 等价口径） */
   const COMPLETE_DOC = [
     '# Title',
     '',
@@ -286,7 +286,7 @@ describe('W23 ④: complete 消息渲染与旧版全量渲染等价（回归基�
     expect(inc.findAll('.md-codeblock')).toHaveLength(1)
   })
 
-  it('未闭合 fence 的 complete 消息（streaming=false）：finalize 直出完整代码块，与旧版等价', async () => {
+  it('未结束 fence 的 complete 消息（streaming=false）：finalize 直出完整代码块，与旧版等价', async () => {
     const unclosed = 'para.\n\n```ts\nconst a = 1'
     const { inc, legacy } = await mountBoth(unclosed)
     // 无占位残留（complete → 立即 finalize）
@@ -326,7 +326,7 @@ describe('chat-html-support ①: html-preview fence 识别与段切分（首词�
     expect(segs[0].content).toContain('graph LR')
   })
 
-  it('未闭合 fence：非 finalize → streaming-fence 占位（lang=html-preview）；finalize → 落成 html-preview 段', async () => {
+  it('未结束 fence：非 finalize → streaming-fence 占位（lang=html-preview）；finalize → 落成 html-preview 段', async () => {
     const { m } = await createIncrementalDeps()
     const open = '```html-preview\n/abs/report.html'
     const cache = m.createIncrementalRenderCache()

@@ -9,7 +9,7 @@
 //   rawStdout / exit —— 逐动作播放，播完回 run 终态应答；
 // - cancel：受理应答；FAKE_CANCEL_SETTLE=1 时同步收敛 run 终态（测收敛路径），
 //   缺省继续挂（测 3s 收敛窗口超时杀链）；
-// - spawnGrandchild：spawn 同组长眠子进程（不 detached → 与引擎同组，供组杀断言），
+// - spawnGrandchild：spawn 同组长眠子进程（不 detached → 与引擎同组，供按进程组终止断言），
 //   pid 经 childSpawned 上报。
 //
 // 反向请求应答（core → 引擎的帧②，id = 反向请求 id）由 stdin 循环统一分发：
@@ -314,10 +314,10 @@ if (MODE === "hang") {
         break;
     }
   });
-  // stdin EOF：宿主死亡信号。fake 引擎不实现自灭（自灭守卫归引擎包，SDK 层已测），
+  // stdin EOF：宿主死亡信号。fake 引擎不实现自灭（自灭检查归引擎包，SDK 层已测），
   // 但正常退出路径（dispose / 宿主杀组）会终止本进程——EOF 后保活由测试管理。
   rl.on("close", () => {
-    // 宿主 stdin 关闭：挂住直到被杀（孤儿场景由 pidfile 清扫/组杀处理）。
+    // 宿主 stdin 关闭：挂住直到被杀（孤儿场景由 pidfile 清扫/按进程组终止处理）。
     setInterval(() => {}, 60_000);
   });
   process.stderr.write("fake engine ready\n");

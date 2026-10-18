@@ -37,7 +37,7 @@ function isFenceCloser(line: string, opener: string): boolean {
 }
 
 /**
- * 阶段一：块级结构清理（逐行状态机）——围栏代码块整块丢弃（含未闭合时删至文末）、
+ * 阶段一：块级结构清理（逐行状态机）——围栏代码块整块丢弃（含未结束时删至文末）、
  * GFM 表格块整块丢弃（表头含 | + 下一行是分隔行判定进块，脱离竖线行出块）。
  */
 function stripBlockStructures(input: string): string {

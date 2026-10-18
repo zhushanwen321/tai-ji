@@ -38,7 +38,7 @@ import {
   resolveRestDbExpectation,
 } from './platform-matrix.ts'
 
-// ── per-file 私有 tmp 根（快照计数竞态的结构性根修）───────────────────────────
+// ── per-file 私有 tmp 根（快照计数竞态的结构性从根源修复）───────────────────────────
 // 快照目录住全局共享 tmpdir（taiji-zcode-snap-*），vitest 并发 worker 互相可见：
 // 差分计数断言会被其他文件的新建/清理双向污染（全量并发跑稳定红、单文件跑绿）。
 // 把 tmpdir 隔离到本文件私有根后，本文件的快照计数只看见自己的快照，零拷贝 /
@@ -235,7 +235,7 @@ describe('阶梯编排（openWithRecovery）', () => {
       const snapshotsBefore = snapshotDirNameSet()
       const opened = await openWithRecovery(join(fx.root, 'db.sqlite'))
       try {
-        // via 是两项开库行为（平台矩阵登记）的编排投影——known 红灯 = bun 捆绑
+        // via 是两项开库行为（平台矩阵登记）的编排派生视图——known 红灯 = bun 捆绑
         // sqlite 语义漂移警报；未登记平台仅断言命中合法级别之一（不假装知道分叉）
         const expectation = resolveRestDbExpectation()
         if (expectation.kind === 'known') {

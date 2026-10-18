@@ -17,7 +17,7 @@ import { taijiTestConfig, GLOBAL_SETUP_PATH, guardProjectSetup } from '../../../
 //   （如 update-self-healer.test.ts 在 vitest 环境经 getOldBackupPath 的
 //   dirname×3(process.execPath) 推导出真实 ~/.nvm/versions/node.old 并 rmSync——guard
 //   正确拦截但该用例需 mock execPath 才能修，文件在 u5a 领地外，缺陷已上报主 agent）。
-//   存量池接入 guard 是独立单元的工作，不在本配置内打折处理；globalSetup 层（env 钉死 +
+//   存量池接入 guard 是独立单元的工作，不在本配置内打折处理；globalSetup 层（env 固定 +
 //   真实数据目录 fail-fast）对 legacy 池仍生效。
 export default taijiTestConfig({
   test: {

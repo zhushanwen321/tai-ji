@@ -11,7 +11,7 @@ export const PI_ADAPTER_VERSION = "1.0.0";
 
 /** pi 域 schema env 名（宿主侧唯一活定义；structured-output 扩展读取它注册 tool——
  *  跨包契约另一端为该扩展的 ENV_SCHEMA 副本，等值由其
- *  tests/cross-package-contract.test.ts 守卫）。 */
+ *  tests/cross-package-contract.test.ts 检查）。 */
 export const SCHEMA_ENV_VAR = "PI_WORKFLOW_SCHEMA";
 
 /** schema env 上限的 KiB 数与每 KiB 字节数（E2BIG 防护）。 */

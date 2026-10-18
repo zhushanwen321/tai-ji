@@ -7,7 +7,7 @@
  * 与文件重放（get_entries → replayEntries）同一个 applyEntry，本文件锁定该等价性：
  *
  * 1. 同一条 custom entry：实时喂入构造的 store 状态 ≡ 重开 replayEntries（deep equal 关键字段）
- * 2. ref 消息与 reducer state 消息同源同 id（overlay 投影消费同一份派生）
+ * 2. ref 消息与 reducer state 消息同源同 id（overlay 派生视图消费同一份派生）
  * 3. display 覆写收敛到 reducer 单点（完成通知类 → false；非通知类三态透传）
  * 4. message_end（role custom）去双计（pi 双发同一 message 对象，customStart 已喂）
  * 5. 畸形 details 归一（与重开 isLooseRecord 同语义）
@@ -118,7 +118,7 @@ describe('custom 通知链 live ≡ reload（custom 双管线收敛守护网）'
     s.dispose()
   })
 
-  it('ref 消息与 reducer state 消息同源同 id（overlay 投影消费同一份派生）', () => {
+  it('ref 消息与 reducer state 消息同源同 id（overlay 派生视图消费同一份派生）', () => {
     const s = makeStore()
     const sid = 's-custom-ref'
     s.store.applyMessageEvent(sid, customStartMsg(sid, {
@@ -191,7 +191,7 @@ describe('custom 通知链 live ≡ reload（custom 双管线收敛守护网）'
         },
       },
     } as ServerMessage)
-    // 单点喂入：reducer 与 ref 各一条（双管线残留或回退去双计守卫时此处为 2 条 → 红）
+    // 单点喂入：reducer 与 ref 各一条（双管线残留或回退去双计检查时此处为 2 条 → 红）
     expect(s.store.testInternals._entryStatesForTest.get(sid)!.state.messages).toHaveLength(1)
     expect(s.store.getMessages(sid)).toHaveLength(1)
     s.dispose()
@@ -205,7 +205,7 @@ describe('custom 通知链 live ≡ reload（custom 双管线收敛守护网）'
     }))
     const refMsgs = s.store.getMessages(sid)
     const reducerMsgs = s.store.testInternals._entryStatesForTest.get(sid)!.state.messages
-    // 实时侧：窄化到 undefined（apply-entry isLooseRecord 守卫），与重开一致
+    // 实时侧：窄化到 undefined（apply-entry isLooseRecord 检查），与重开一致
     expect(refMsgs[0].details).toBeUndefined()
     expect(reducerMsgs[0].details).toBeUndefined()
     // 重开侧同 entry 同结果

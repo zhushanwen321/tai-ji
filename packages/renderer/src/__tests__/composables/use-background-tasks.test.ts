@@ -2,8 +2,8 @@
  * useBackgroundTasks 单测 —— 后台命令状态根（u-renderer-store 验收条款）。
  *
  * 覆盖（对照 impl-plan u-renderer-store 验收 + 探针 P6）：
- * - 拉取腿（C6）：mount 即拉、refresh 手动重拉、in-flight 去重、失败不降级；
- * - 广播腿：backgroundTask:updated → updateFor(capturedSid) 写「消息所属 sid」分区；
+ * - 拉取路径（C6）：mount 即拉、refresh 手动重新拉取、in-flight 去重、失败不降级；
+ * - 广播路径：backgroundTask:updated → updateFor(capturedSid) 写「消息所属 sid」分区；
  * - 双 session updateFor 竞态（M1）：切 sid 后退订窗口内的旧 sid 迟到广播写旧分区，
  *   不污染新分区（结构性消除竞态的行为锚）；
  * - P6 分区：双实例双 session，publish(sid=A) 后断言 B 分区无变化；
@@ -36,7 +36,7 @@ import type { BackgroundTaskEntry } from '@/lib/background-task-bucket'
 const listMock = vi.hoisted(() => vi.fn())
 vi.mock('@taiji/core/transport/api/domains/background-task', () => ({ list: listMock }))
 
-// ── mock 边界：ws 连接态受控 ref（重连恢复腿驱动；默认 connected，既有用例零影响）──
+// ── mock 边界：ws 连接态受控 ref（重连恢复路径驱动；默认 connected，既有用例零影响）──
 const wsMock = vi.hoisted(() => ({ ref: null as null | { value: string } }))
 vi.mock('@taiji/core/transport/ws-client', () =>
   wsStateModuleWithControlledRef('@taiji/core/transport/ws-client', wsMock, 'connected'),
@@ -141,10 +141,10 @@ afterEach(() => {
   __clearSessionCleanupRegistryForTest()
 })
 
-// ── 拉取腿（C6 唯一真相入口）──
+// ── 拉取路径（C6 唯一真相入口）──
 
-describe('拉取腿', () => {
-  it('mount 即拉：immediate 恢复腿对当前 sid 发 list，resolve 后分区填充 + loaded', async () => {
+describe('拉取路径', () => {
+  it('mount 即拉：immediate 恢复路径对当前 sid 发 list，resolve 后分区填充 + loaded', async () => {
     const host = mountHost('A')
     expect(listMock).toHaveBeenCalledWith('A')
     expect(host.tasks.current.value.loaded).toBe(false)
@@ -155,7 +155,7 @@ describe('拉取腿', () => {
     expect(host.tasks.current.value.loaded).toBe(true)
   })
 
-  it('切 sid 触发重拉：切到 B 后拉 B（切走期间广播已退订，缓存不可信）', async () => {
+  it('切 sid 触发重新拉取：切到 B 后拉 B（切走期间广播已退订，缓存不可信）', async () => {
     const host = mountHost('A')
     resolveList('A', [task('t1', 'running')])
     await settle()
@@ -169,7 +169,7 @@ describe('拉取腿', () => {
 
   it('in-flight 去重：同 sid 并发 refresh 复用同一 Promise，list 只发一次', async () => {
     const host = mountHost('A')
-    await settle() // 排空 immediate 恢复腿的在途（此时 A 已有一条在途）
+    await settle() // 排空 immediate 恢复路径的在途（此时 A 已有一条在途）
     expect(listMock).toHaveBeenCalledTimes(1)
     const p1 = host.tasks.refresh()
     const p2 = host.tasks.refresh('A')
@@ -198,13 +198,13 @@ describe('拉取腿', () => {
     host.sidRef.value = 'A'
     await nextTick()
     await settle()
-    // 切回 A：恢复腿无条件重拉（缓存过期不可信），旧缓存仍在 RPC 往返期显示
+    // 切回 A：恢复路径无条件重新拉取（缓存过期不可信），旧缓存仍在 RPC 往返期显示
     expect(host.tasks.current.value.loaded).toBe(true)
     expect(host.tasks.current.value.tasks.map((t) => t.taskId)).toEqual(['t1'])
   })
 })
 
-// ── 广播腿 + 双 session updateFor 竞态（M1）+ P6 分区 ──
+// ── 广播路径 + 双 session updateFor 竞态（M1）+ P6 分区 ──
 
 describe('广播写入与双 session 竞态', () => {
   it('广播 → updateFor(capturedSid) 写「消息所属 sid」分区', async () => {
@@ -301,10 +301,10 @@ describe('refCount 订阅收敛', () => {
 // 拦截簿记 = useSessionScopedState 的 deletedSids（本模块无自有抑制表，原 BG-7 簿记
 // 生命周期用例随其退役，防回归锚在 use-session-scoped-state.test.ts）。出列点 = 分区
 // 重建点（current 读取）——真实时序中销毁后视图必然切走（current 不再读该 sid），
-// 拦截成立；切回 = 新生命周期，拉取腿重拉。
+// 拦截成立；切回 = 新生命周期，拉取路径重新拉取。
 
 describe('session 销毁 cleanup', () => {
-  it('triggerSessionCleanups 后：切走期间迟到的广播 / RPC resolve 不僵尸式写回；切回 = 新生命周期重拉', async () => {
+  it('triggerSessionCleanups 后：切走期间迟到的广播 / RPC resolve 不僵尸式写回；切回 = 新生命周期重新拉取', async () => {
     const host = mountHost('A')
     // 留一条在途 list（模拟销毁时 RPC 未 resolve）
     await nextTick()
@@ -317,7 +317,7 @@ describe('session 销毁 cleanup', () => {
     resolveList('A', [task('ghost-rpc', 'running')])
     await settle()
 
-    // 切回 = 新生命周期：渲染读取分区即重建出列（先于 reply 落地的真实时序）+ 拉取腿重拉
+    // 切回 = 新生命周期：渲染读取分区即重建出列（先于 reply 落地的真实时序）+ 拉取路径重新拉取
     host.sidRef.value = 'A'
     await nextTick()
     expect(listMock).toHaveBeenLastCalledWith('A')
@@ -427,12 +427,12 @@ describe('损坏拍与断连恢复（S7/S6）', () => {
     expect(host.tasks.current.value.tasks.map((t) => t.taskId)).toEqual(['t1'])
   })
 
-  it('S6 重连恢复腿：ws disconnected→connected 边沿重拉当前 sid（非边沿不触发）', async () => {
+  it('S6 重连恢复路径：ws disconnected→connected 边沿重新拉取当前 sid（非边沿不触发）', async () => {
     const host = mountHost('A')
     await settle()
     resolveList('A', [task('t1', 'running')])
     await settle()
-    expect(listMock).toHaveBeenCalledTimes(1) // 挂载期仅拉取腿一次（watch 非 immediate）
+    expect(listMock).toHaveBeenCalledTimes(1) // 挂载期仅拉取路径一次（watch 非 immediate）
 
     if (!wsMock.ref) throw new Error('ws mock 未初始化')
     wsMock.ref.value = 'disconnected'

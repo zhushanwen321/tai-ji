@@ -217,7 +217,7 @@ describe('AuthService.cancel', () => {
     await new Promise((resolve) => setTimeout(resolve, 30))
 
     // 关键断言：旧 finally 不得删除新 flow 条目——新 flow 必须仍可取消。
-    // 无身份守卫时旧 finally 会把新条目一并删除，此处返回 cancelled:false，测试失败。
+    // 无身份检查时旧 finally 会把新条目一并删除，此处返回 cancelled:false，测试失败。
     expect(svc.cancel('xai')).toEqual({ cancelled: true })
     // 清理：确认两个 flow 均已收尾（无 auth.error——abort 是用户主动取消非错误）
     await vi.waitFor(() => {

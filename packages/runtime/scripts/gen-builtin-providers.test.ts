@@ -1,6 +1,6 @@
 // OAuth config 提取 fixture 测试：用 node_modules 里真实 oauth provider 源码断言
 // extractOAuthConfig 的提取结果（clientId/flow/endpoints/scopes/callbackPort）。
-// 直接读真实文件而非内嵌节选 —— pi-ai 升级后源码变化会破坏断言，正是本测试的回归守卫职责。
+// 直接读真实文件而非内嵌节选 —— pi-ai 升级后源码变化会破坏断言，正是本测试的回归检查职责。
 // 测试框架 vitest（禁 node:test / tsx --test）。
 import { describe, it, expect } from 'vitest'
 import { readFileSync } from 'node:fs'

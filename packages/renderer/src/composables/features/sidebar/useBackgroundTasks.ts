@@ -2,19 +2,19 @@
  * useBackgroundTasks —— 后台命令列表的 per-session 状态根
  *（docs/architecture/background-task-sidebar-view.md §3.3 D8①，u-renderer-store）。
  *
- * 职责：registry 全量投影的 per-session Map 分区（useSessionScopedState，ADR-0049）+
+ * 职责：registry 全量派生视图的 per-session Map 分区（useSessionScopedState，ADR-0049）+
  * 变更通道编排。两个数据来源：
- * - 拉取腿（C6 唯一真相入口）：watch sid 变化 / WS 重连 connected 边沿 / 调 refresh() 时
+ * - 拉取路径（C6 唯一真相入口）：watch sid 变化 / WS 重连 connected 边沿 / 调 refresh() 时
  *   `backgroundTask.list` RPC（切换/激活 session、打开 plugin tab 由消费层触发）；模块级
  *   in-flight 去重（同 sid 并发拉取复用同一 RPC Promise，各实例消费快照写各自分区，参照
  *   useContextUsage）；
- * - 广播腿（增量刷新）：`backgroundTask:updated` session 级广播——订阅收敛为**模块级
+ * - 广播路径（增量刷新）：`backgroundTask:updated` session 级广播——订阅收敛为**模块级
  *   refCount**（AGENTS 规则 2：同 sid 多实例只开一条底层 events.on 物理订阅；消费组件
  *   ——列表视图 + split mode 下 per-pane 多实例的 DetailPanel——只读写分区状态，不各自挂
  *   listener）。物理 handler 闭包捕获注册时 sid，分发经实例 listener →
  *   `updateFor(capturedSid)` 写「消息所属 sid」分区，结构性消除切 session 竞态（M1）。
  *
- * 分区形态：{ tasks: 全量投影, loaded: 是否成功拉到过一次, corrupted: 损坏拍 sticky 标志,
+ * 分区形态：{ tasks: 全量派生视图, loaded: 是否成功拉到过一次, corrupted: 损坏拍 sticky 标志,
  * fetchFailed: 最近一次 list RPC 失败 }。loaded 区分「从未拉取」与「拉到空表」（S6 全量空态
  * 判定需要）；corrupted/fetchFailed 分别驱动损坏错误条（S7，sticky——损坏后一拍的 corrupted:false
  * 空表广播不清位，由 tasks 非空的自愈拍清位）与断连提示条（S6）。拉取失败保留分区缓存不降级
@@ -25,7 +25,7 @@
  * 僵尸式写回：updateFor 对已删分区 no-op，D-B2-1 把拦截收进工厂单点，本模块不自养
  * 抑制簿记；同 sid 分区被重新 init 后出列，删除后同 id 重建不丢写）。
  *
- * 切走 session 后旧 sid 订阅释放（refCount--），其分区停更、切回时由拉取腿兜底刷新
+ * 切走 session 后旧 sid 订阅释放（refCount--），其分区停更、切回时由拉取路径兜底刷新
  *（C6：广播只做增量刷新，拉取是唯一真相入口）。
  */
 import { computed, onScopeDispose, reactive, watch } from 'vue'
@@ -42,7 +42,7 @@ const UPDATED_TYPE = 'backgroundTask:updated'
 
 /** per-session 分区形态。 */
 interface BackgroundTasksPartition {
-  /** registry 全量投影（list reply / 广播 payload 原样，不做二次加工）。 */
+  /** registry 全量派生视图（list reply / 广播 payload 原样，不做二次加工）。 */
   tasks: BackgroundTaskEntry[]
   /** 是否成功拉到过一次 list reply（空表也算）——区分「从未拉取」与「拉到空表」。 */
   loaded: boolean
@@ -80,7 +80,7 @@ function acquireBroadcastSubscription(sid: string): void {
   const unsub = events.on(sid, (msg) => {
     if (msg.type !== UPDATED_TYPE) return
     // session 通道 handler 无泛型收窄（events.ts 宽 MessageHandler）；payload 形状由
-    // shared protocol.ts ServerMessageMap 契约化，运行时仅守卫 tasks 数组（坏形状跳过本拍，
+    // shared protocol.ts ServerMessageMap 契约化，运行时仅检查 tasks 数组（坏形状跳过本拍，
     // 下拍广播/拉取自愈）。corrupted 缺省按 false（协议字段前向兼容，S7）。
     const payload = msg.payload as { tasks?: unknown; corrupted?: unknown }
     if (!Array.isArray(payload.tasks)) return
@@ -102,7 +102,7 @@ function releaseBroadcastSubscription(sid: string): void {
   }
 }
 
-// ── 模块级拉取 in-flight 去重（同 sid 并发 refresh/恢复腿复用同一 Promise）──
+// ── 模块级拉取 in-flight 去重（同 sid 并发 refresh/恢复路径复用同一 Promise）──
 //
 // 「同 key 复用 / settle 即清 / 引用比对防误删」生命周期收编于 createInflightDedup
 // （D9 共享原语，state-truth-sync §3.3）；本模块保留快照消费形态（各实例消费
@@ -144,7 +144,7 @@ export interface UseBackgroundTasksReturn {
   /** 当前 sid 的分区（computed 按 sidRef 惰性查分区；null sid 返回临时默认实例不写 Map）。 */
   current: ComputedRef<BackgroundTasksPartition>
   /**
-   * 手动重拉（C6：打开 plugin tab / WS 重连等场景由消费层触发）。省略参数时拉当前 sid。
+   * 手动重新拉取（C6：打开 plugin tab / WS 重连等场景由消费层触发）。省略参数时拉当前 sid。
    * 同 sid 在途拉取复用同一 Promise（去重）；失败保留分区缓存不降级（resolve 不 reject，
    * 调用方无需 try-catch）。
    */
@@ -187,9 +187,9 @@ export function useBackgroundTasks(sessionIdRef: Ref<string | null | undefined>)
    * 复用者与发起者**各自**消费快照写各自分区（分区 per-instance，共享 void Promise 会让
    * 复用者分区永不更新）。RPC 失败统一在上游 catch 成 null（debug 单次），各实例据 null
    * 置分区 fetchFailed（保留缓存不降级，S6 断连提示条条件之一），调用方无需 try-catch。
-   * settle 即清（下次切入重拉）+ 引用比对防误删由 factory 内建。
+   * settle 即清（下次切入重新拉取）+ 引用比对防误删由 factory 内建。
    * 回滚窗口说明：RPC 往返期间若更新的广播先落地，较旧的 reply 会短暂覆盖（list reply
-   * 是当下 registry 全量快照，后到写赢）；下一拍广播 / 下次切入重拉自愈，不做 recency 对账。
+   * 是当下 registry 全量快照，后到写赢）；下一拍广播 / 下次切入重新拉取自愈，不做 recency 对账。
    */
   function requestSharedList(sid: string): Promise<ListReplySnapshot | null> {
     return listFetchDedup.run(sid, () =>
@@ -231,16 +231,16 @@ export function useBackgroundTasks(sessionIdRef: Ref<string | null | undefined>)
     if (sid) acquireBroadcastSubscription(sid)
   }, { immediate: true })
 
-  // 拉取腿（C6）：每次进入 sid 视图无条件重拉（immediate 覆盖首挂载；切走期间广播已退订，
-  // 分区缓存可能过期，不能依赖缓存不拉——对齐 useContextUsage D3 恢复腿语义）。
+  // 拉取路径（C6）：每次进入 sid 视图无条件重新拉取（immediate 覆盖首次挂载；切走期间广播已退订，
+  // 分区缓存可能过期，不能依赖缓存不拉——对齐 useContextUsage D3 恢复路径语义）。
   watch(normalizedSid, (sid) => {
     if (sid) void fetchInto(sid)
   }, { immediate: true })
 
-  // 重连恢复腿（S6）：runtime 重启/WS 断连后 ring 为空（重放无补偿），列表停留旧缓存——
-  // connected 边沿重拉当前焦点 sid。每实例各自 watch 并写各自分区（badge 常驻实例 + 列表
+  // 重连恢复路径（S6）：runtime 重启/WS 断连后 ring 为空（重放无补偿），列表停留旧缓存——
+  // connected 边沿重新拉取当前焦点 sid。每实例各自 watch 并写各自分区（badge 常驻实例 + 列表
   // 视图实例同 sid 时 RPC 经 requestSharedList 去重收敛为一次）；不 immediate（挂载期由
-  // 拉取腿覆盖，仅响应断→连边沿）。
+  // 拉取路径覆盖，仅响应断→连边沿）。
   watch(getState(), (s) => {
     if (s === 'connected') void refresh()
   })

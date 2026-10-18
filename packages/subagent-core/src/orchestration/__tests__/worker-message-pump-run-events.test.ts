@@ -261,14 +261,14 @@ describe("dispatchAgentCall 落 ask 事件（dispatched + settled）", () => {
       durationMs: 7,
     });
   });
-  it("终局后再到达的 call 完成 → stale 守卫拦截，journal 零追加（terminal 后停止 append）", async () => {
+  it("终局后再到达的 call 完成 → stale 检查拦截，journal 零追加（terminal 后停止 append）", async () => {
     const run = makeRealRun("wf-ev-7");
     await dispatchRunCreated(run);
     const deps = makeDeps();
     deps.runner.run = vi.fn(async () => {
       // runner 执行窗内 run 被终态化（模拟 abort 竞态）
       // [D6(a) 第 1 步] 终局判定源 = 终局记录注册表：竞态终态化注入终局事实
-      // （生产 abortRun 经 dispatch 链 note）——stale 守卫据此拦截迟到 call 完成。
+      // （生产 abortRun 经 dispatch 链 note）——stale 检查据此拦截迟到 call 完成。
       noteRebuiltSettlement(run.runId, { outcome: "cancelled", settledAt: Date.now() });
       return { content: "late", durationMs: 1, toolCalls: [] } as AgentResult;
     });
@@ -300,7 +300,7 @@ describe("run-created 正点接线（无双帧 + 引导退役）", () => {
     const run = makeRealRun("wf-ev-dual");
     await dispatchRunCreated(run);
 
-    // 正点后的 ask 事件照常落账（fold 出 dispatched，agent-started 合法转移）
+    // 正点后的 ask 事件照常写入 journal 记录（fold 出 dispatched，agent-started 合法转移）
     const deps = makeDeps();
     deps.runner.run = vi.fn(async () =>
       ({ content: "ok", durationMs: 1, toolCalls: [] }) as AgentResult,
@@ -341,7 +341,7 @@ describe("run-created 正点接线（无双帧 + 引导退役）", () => {
         ts: Date.now(),
       }),
     ).rejects.toThrow(/非法 run 状态转移/);
-    // fail-fast 不落任何帧（事件在 run-created 落账前到达 = 接线错误，可归因）
+    // fail-fast 不写任何帧（事件在 run-created 写入 journal 记录前到达 = 接线错误，可归因）
     expect(await scanRunEvents("wf-ev-noseed")).toHaveLength(0);
   });
 });
@@ -442,14 +442,14 @@ describe("finalizeRun 的 run-settled errorCode 构造（DoneReason → RunError
   });
 });
 
-// ── 5. dispatchAgentCall 落账（[ADR-0122] 无重试轨迹） ──
+// ── 5. dispatchAgentCall 写入 journal 记录（[ADR-0122] 无重试轨迹） ──
 //
 // [HISTORICAL] 原「两次失败后成功 → dispatched→retrying×2→settled{attempt:3}」用例
 // 随重试矩阵删除（ADR-0122）——agent-retrying 帧不再产生（事件类型保留为 journal
 // 词表兼容，仅历史 record 含此帧）。「非重试终局零假帧」用例保留：失败单次终态化，
 // journal 恰三帧（run-created / agent-started / agent-settled）。
 
-describe("dispatchAgentCall 落账（失败单次终态，零假帧）", () => {
+describe("dispatchAgentCall 写入 journal 记录（失败单次终态，零假帧）", () => {
   it("失败 call（stale_context）→ journal 恰三帧：run-created / agent-started / agent-settled", async () => {
     const run = makeRealRun("wf-ev-noretry");
     await dispatchRunCreated(run);

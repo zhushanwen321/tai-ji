@@ -12,7 +12,7 @@
  *    mainSid，btw 分区 = 线 vid——D9③/M2-c），workflow store 映射（getAgentCallVirtualIdsByMain，
  *    agentcall 清理唯一通路）筛除 viewedVids 豁免集后返回待释放的 agentcall virtualId，
  *    core lru.ts 执行删除。正在查看的分区存活（drawer 不白屏）；豁免窗口外被驱逐 = getMessages(vid)
- *    返回 [] 静态白屏，恢复 = 用户重选 tab 触发 selectedSubagentId watch 重拉快照
+ *    返回 [] 静态白屏，恢复 = 用户重选 tab 触发 selectedSubagentId watch 重新拉取快照
  *    （一次性交互，设计登记取舍，不新增自动恢复机制）。
  *
  * 依赖方向：本文件是 features 层装配模块，可自由 import stores（stores 间禁止互相

@@ -225,7 +225,7 @@ describe('FileView W15 过滤防抖（A-1 竞态回归 + A-4 DOM 表现）', () 
     store.setNodeState('s1', 'src', { status: 'error', reason: 'timeout' })
     await nextTick()
 
-    // error 占位行渲染（hint 行 expanded=true 由投影保证）
+    // error 占位行渲染（hint 行 expanded=true 由派生视图保证）
     const errorRow = wrapper.find('[data-testid="file-tree-error-src"]')
     expect(errorRow.exists()).toBe(true)
     await errorRow.trigger('click')

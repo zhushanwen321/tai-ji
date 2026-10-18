@@ -6,7 +6,7 @@
 // taiji.subagentEngine.modelCatalog。
 //
 // 语义边界：pi 模型面是运行期动态的（provider 可用性 / 自定义 models.json 随时
-// 变化），构建期快照只服务于「静态目录消费面」（RemoteEngine.validateModel 的
+// 变化），构建期快照只服务于「静态目录消费方」（RemoteEngine.validateModel 的
 // manifest 判定）；dynamic 恒 true——快照未命中不构成同步拒（运行期 pi 本体解析
 // 仍是权威）。无 models.json（CI / 未配置宿主）→ models: [] 占位（显式空清单 =
 // 生成器缺席态，运行期 listModels 诊断面给真值）。**绝不把 apiKey 或任何凭据

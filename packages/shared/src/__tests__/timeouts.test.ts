@@ -27,7 +27,7 @@ describe('COMPACT_RPC_TIMEOUT_MS / RENDERER_RPC_MARGIN_MS（D3 compact 双端对
     expect(RENDERER_RPC_MARGIN_MS).toBe(60_000)
   })
 
-  it('校准链关系：renderer backstop = COMPACT + MARGIN > COMPACT（runtime 第一刀恒先收口）', () => {
+  it('校准链关系：renderer backstop = COMPACT + MARGIN > COMPACT（runtime 第一刀恒先收尾）', () => {
     // D3 不变量：renderer 恒不先于 runtime 判死。renderer 超时取
     // COMPACT_RPC_TIMEOUT_MS + RENDERER_RPC_MARGIN_MS 表达式（chat.ts 编译期同源），
     // 本断言守护「余量为正」这一前提——MARGIN ≤ 0 时表达式退化为零余量竞态前科形态。

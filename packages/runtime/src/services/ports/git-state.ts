@@ -70,12 +70,12 @@ export interface IGitStateService {
   getStatus(sessionId: string, cwd: string): Promise<GitStatusResult>
   /**
    * 写操作后失效（stage/unstage/commit/checkout/branch/worktree 等调用方主动触发）：
-   * 清除该 session 的 getStatus 缓存与在飞去重条目，下一次读取拿到新状态。
+   * 清除该 session 的 getStatus 缓存与在途去重条目，下一次读取拿到新状态。
    */
   invalidate(sessionId: string): void
   /**
    * 按 cwd 维度失效（perf W17：git.checkoutCwd 等 session-less 写操作，payload 无 sessionId）。
-   * 清除所有以该 cwd 结尾的 getStatus 缓存键（跨 session）与在飞条目——landing 态切分支
+   * 清除所有以该 cwd 结尾的 getStatus 缓存键（跨 session）与在途条目——landing 态切分支
    * 会改变共享该 cwd 的任意 session 的 branch/branches 视图，需全量失效。
    */
   invalidateByCwd(cwd: string): void

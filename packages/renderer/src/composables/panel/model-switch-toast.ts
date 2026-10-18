@@ -27,7 +27,7 @@ const CODE_TO_KEY: Record<string, string> = {
  * 返回 i18n key（不含翻译）；`general` 兜底。
  *
  * 输入宽松（unknown）：调用方拿到的可能是 Error、字符串、RPC 错误包——取 `code` 与 `message`
- * 时全部做类型守卫，绝不当 `any` 用。
+ * 时全部做类型检查，绝不当 `any` 用。
  */
 export function modelSwitchToastKey(err: unknown): string {
   const code = typeof err === 'object' && err !== null ? (err as ErrorWithCode).code : undefined

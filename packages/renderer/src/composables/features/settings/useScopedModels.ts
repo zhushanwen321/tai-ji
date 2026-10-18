@@ -17,7 +17,7 @@ import { optimisticUpdate, refCell } from '@taiji/core/foundation/optimistic-upd
 import type { ScopedRenderItem, SelectableModel } from '@taiji/ui/features/settings'
 
 // 防重入：setScopedModels 是整列表覆写，in-flight 期间的新触发会拿含乐观值的快照当 old，
-// 双失败时回滚互相错位 → 模块级 busy 守卫，操作进行中忽略新触发（对齐 ProviderPage.vue
+// 双失败时回滚互相错位 → 模块级 busy 检查，操作进行中忽略新触发（对齐 ProviderPage.vue
 // toggling Set 的「in-flight 忽略」范式；不做按钮禁用态，避免 busy 状态穿透 ui 组件 props）。
 let scopedMutationInFlight = false
 
@@ -75,7 +75,7 @@ export function useScopedModels() {
   // ── 操作函数（乐观更新协议：失败回滚 + rethrow）──
   // 回滚后 rethrow：调用方（ProviderPage）统一反馈 inline error + toast，此处不做 UI 副作用。
 
-  /** 公共 mutation 管线：busy 守卫 → 协议化乐观写 next → RPC → 写回权威值 / 回滚 rethrow。 */
+  /** 公共 mutation 管线：busy 检查 → 协议化乐观写 next → RPC → 写回权威值 / 回滚 rethrow。 */
   async function mutateScoped(next: string[]): Promise<void> {
     if (scopedMutationInFlight) return
     scopedMutationInFlight = true

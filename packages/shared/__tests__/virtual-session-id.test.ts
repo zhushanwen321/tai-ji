@@ -36,7 +36,7 @@ describe('subagent 三段式：工厂正向契约（INVAR-1.1 正面）', () => 
     expect(subagentVirtualId('sess-1', 'sub-a')).toBe('subagent:sess-1:sub-a')
   })
 
-  it('工厂产物恒过结构校验（生产 ≡ 校验闭合）', () => {
+  it('工厂产物恒过结构校验（生产 ≡ 校验补全）', () => {
     for (const [main, sub] of [
       ['s0', 'sa1'],
       ['20260922120000_ab12', 'sa-uuid-v4'],
@@ -123,7 +123,7 @@ describe('btw 两段式（第三家族，btw-question D2）', () => {
     expect(btwVirtualId('line-1')).toBe('btw:line-1')
   })
 
-  it('映射即 extract：extractBtwPiSessionId 去前缀即线 pi session id（往返闭合）', () => {
+  it('映射即 extract：extractBtwPiSessionId 去前缀即线 pi session id（往返一致）', () => {
     const piSid = '20260922120000_ab12'
     const vid = btwVirtualId(piSid)
     expect(extractBtwPiSessionId(vid)).toBe(piSid)
@@ -147,7 +147,7 @@ describe('btw 两段式（第三家族，btw-question D2）', () => {
     expect(() => btwVirtualId(btwVirtualId('line-1'))).toThrow(/禁冒号/)
   })
 
-  it('工厂产物恒过两段结构校验（生产 ≡ 校验闭合）', () => {
+  it('工厂产物恒过两段结构校验（生产 ≡ 校验补全）', () => {
     expect(isBtwVirtualId(btwVirtualId('20260922120000_ab12'))).toBe(true)
     expect(isBtwVirtualId(btwVirtualId('x-y_z.8'))).toBe(true)
   })

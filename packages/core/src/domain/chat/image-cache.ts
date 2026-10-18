@@ -50,7 +50,7 @@ interface ImageCacheGlobalState {
   imagePaths: Map<string, string>
   /** 内容 hash → in-flight 写入 Promise（同内容并发请求共享，防双写；@data-owner #35：主表 #35 图片缓存记账层，派生缓存非第二写方） */
   inflightWrites: Map<string, Promise<string | undefined>>
-  /** session 帽满标记（@data-owner #35：main 回执 quota-full 的派生投影；hydrate 重判 + disposeSession 失效，见下） */
+  /** session 帽满标记（@data-owner #35：main 回执 quota-full 的派生视图；hydrate 重判 + disposeSession 失效，见下） */
   quotaFullSessions: Set<string>
   /** sessionId → 该 session 落盘图的内容 hash 键集（dispose 按_sid 清理 imagePaths 的索引；@data-owner #35：主表 #35 图片缓存记账层，派生缓存非第二写方） */
   sessionImageKeys: Map<string, Set<string>>
@@ -196,7 +196,7 @@ export function requestImageWrite(sessionId: string, image: ImageCacheWriteImage
   if (cached !== undefined) return Promise.resolve(cached)
   const inflight = s.inflightWrites.get(key)
   if (inflight) return inflight
-  // 帽满 session 前置快速失败：不再发无效 IPC（超帽即停语义在编排层收口，
+  // 帽满 session 前置快速失败：不再发无效 IPC（超帽即停语义在编排层收尾，
   // 渲染组件无须各自自查也能拿到一致的 undefined → 占位降级）
   if (s.quotaFullSessions.has(sessionId)) return Promise.resolve(undefined)
   const port = resolvePort()

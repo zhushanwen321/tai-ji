@@ -3,7 +3,7 @@
  *
  * 覆盖 plan TC-4..TC-8：startFlow 不变量/幂等/终态重建、submitFirstMessage 主链路
  * （D1 单一解析层：ensure 数据就绪 → resolve 终值 → create；P5② 窗口语义）/bash 分支/
- * null guard/非 landing 抛错/createInFlight 守卫/send reject 交接定格/retry 迁移、closeOverlay 幂等。
+ * null guard/非 landing 抛错/createInFlight 检查/send reject 交接定格/retry 迁移、closeOverlay 幂等。
  * 全部端口 mock 注入（vi.fn()）；模块级状态 beforeEach resetNewTaskFlow + KV 单例 reset 隔离。
  */
 import { describe, expect, it, vi, beforeEach } from 'vitest'
@@ -340,7 +340,7 @@ describe('useNewTaskFlow', () => {
     await expect(flow.submitFirstMessage([textSeg('hello')])).rejects.toThrow('非 landing 态')
   })
 
-  it('TC-6d: createInFlight 守卫——飞行中重复 submitFirstMessage 幂等返回（端口零调用）', async () => {
+  it('TC-6d: createInFlight 检查——飞行中重复 submitFirstMessage 幂等返回（端口零调用）', async () => {
     const deps = makeDeps()
     const flow = useNewTaskFlow(deps)
     await enterLanding(flow)
@@ -398,7 +398,7 @@ describe('useNewTaskFlow', () => {
     const pending = flow.submitFirstMessage([textSeg('hello')])
     await flushMicrotasks()
     // 竞态步：create 飞行中用户点侧栏切 session（selectSession → cancelActiveFlow →
-    // transition('cancelled')，landing→cancelled 合法；随后 Landing 卸载，D4 守卫查 isActive 为 noop）
+    // transition('cancelled')，landing→cancelled 合法；随后 Landing 卸载，D4 检查查 isActive 为 noop）
     flow.cancelFlow()
     expect(useNewTaskFlowState().state.value).toBe('cancelled')
     openCreate()
@@ -608,7 +608,7 @@ describe('useNewTaskFlow', () => {
 
   it('preset-popover 打开时 setPendingPreset 成功写入——模式选择在 overlay 内完成，不阻断透传', async () => {
     // [HISTORICAL] 缺陷回归：用户在 landing 点 PresetSelectChip 展开模式 popover（state 进
-    // preset-popover），再点列表项时守卫 `state !== 'landing'` 把真实选择静默丢弃——
+    // preset-popover），再点列表项时检查 `state !== 'landing'` 把真实选择静默丢弃——
     // pendingPreset 恒 null → chip 文案不回显（props.modeName 源自 pendingPreset）、
     // 建出的 session launchPresetId=undefined。本用例复现「点击时的真实态 = preset-popover」。
     const deps = makeDeps({
@@ -642,7 +642,7 @@ describe('useNewTaskFlow', () => {
   })
 })
 
-// ── 对抗审查修复回归（E 取消语义 / A 消费侧保稿 / B uuid 黏滞 / G 守卫顺序） ──
+// ── 对抗审查修复回归（E 取消语义 / A 消费侧保稿 / B uuid 黏滞 / G 检查顺序） ──
 
 describe('useNewTaskFlow [E/B/A/G] 对抗审查修复', () => {
   beforeEach(() => {
@@ -803,7 +803,7 @@ describe('useNewTaskFlow [E/B/A/G] 对抗审查修复', () => {
     expect(uuid2).not.toBe(uuid1)
   })
 
-  it('G: startFlow 守卫顺序——completed + createInFlight（⌘N 撞 deliver 窗口）零副作用', async () => {
+  it('G: startFlow 检查顺序——completed + createInFlight（⌘N 撞 deliver 窗口）零副作用', async () => {
     const deps = makeDeps()
     const flow = useNewTaskFlow(deps)
     await enterLanding(flow)
@@ -817,7 +817,7 @@ describe('useNewTaskFlow [E/B/A/G] 对抗审查修复', () => {
 
     await flow.startFlow()
 
-    // 守卫前置后：不先改 state/bind 再早退——completed 不被销毁重建，导航零调用
+    // 检查前置后：不先改 state/bind 再早退——completed 不被销毁重建，导航零调用
     expect(useNewTaskFlowState().state.value).toBe('completed')
     expect(deps.ports.navigation.clearActiveSession).not.toHaveBeenCalled()
     expect(deps.ports.navigation.loadPanel).not.toHaveBeenCalled()

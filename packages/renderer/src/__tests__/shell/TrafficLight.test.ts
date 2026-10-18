@@ -28,7 +28,7 @@ vi.mock('@/composables/effects/usePlatformChrome', async () => {
   return installPlatformChromeMock('win')
 })
 
-/** @/lib/ipc mock：窗口控制 spy（TrafficLight 唯一消费面） */
+/** @/lib/ipc mock：窗口控制 spy（TrafficLight 唯一消费方） */
 const ipcMock = vi.hoisted(() => ({
   windowClose: vi.fn(),
   windowMinimize: vi.fn(),

@@ -45,7 +45,7 @@ export interface RemoteAccessConfig {
 
 /**
  * remote token 契约形态判据：64 位 hex 小写（32 字节随机值的 hex 编码）。
- * main 写侧守卫（isValidRemoteAccessConfig，从严校验）与 runtime 读侧
+ * main 写侧检查（isValidRemoteAccessConfig，从严校验）与 runtime 读侧
  * （parseRemoteAccessToken 的 token 分支）import 同一正则——判据分叉会造成
  * 「写侧放行、读侧拒绝」的静默通道失效，故 SSOT 上收至此，禁止本地重抄。
  */
@@ -54,13 +54,13 @@ export const REMOTE_TOKEN_HEX64 = /^[0-9a-f]{64}$/
 /**
  * remote-access.json 内容的无策略 shape 谓词：value 是对象 && enabled 是 boolean
  * && token 是 string，仅此三条。不含 hex / createdAt 判定——那是严格度策略，
- * 归两侧策略层（main 写侧守卫从严恒校验 hex+createdAt；runtime 读侧 enabled=false
+ * 归两侧策略层（main 写侧检查从严恒校验 hex+createdAt；runtime 读侧 enabled=false
  * 早退跳过 hex、fail-closed）。
  *
  * main（isValidRemoteAccessConfig）与 runtime（parseRemoteAccessToken）import 同一
  * 谓词作为 shape 判据单源——判据分叉会造成「写侧放行、读侧拒绝」的静默通道失效
  * （与 REMOTE_TOKEN_HEX64 上收同理），禁止两侧本地重抄。类型收窄刻意只到
- * Pick<enabled|token>（谓词验证过的字段），未验证的 createdAt 留给调用方守卫。
+ * Pick<enabled|token>（谓词验证过的字段），未验证的 createdAt 留给调用方检查。
  */
 export function isRemoteAccessConfigShape(value: unknown): value is Pick<RemoteAccessConfig, 'enabled' | 'token'> {
   if (typeof value !== 'object' || value === null) return false

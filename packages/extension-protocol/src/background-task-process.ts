@@ -7,8 +7,8 @@
  *  - runtime 侧：taiji background-task-reaper（孤儿收殓三分支判定），原实现在
  *    background-task-reaper.ts 原语区
  *
- * 分支语义（与 pi 实装对齐，勿单侧擅改）：Windows `taskkill /F /T`；POSIX 杀进程组
- * `kill -- -<pgid>`（后台任务 detached spawn 自成进程组，pgid = pid）；进程组杀不到时
+ * 分支语义（与 pi 实装对齐，勿单侧擅改）：Windows `taskkill /F /T`；POSIX 按进程组终止
+ * `kill -- -<pgid>`（后台任务 detached spawn 自成进程组，pgid = pid）；按进程组终止不到时
  * 回退单 pid + `pgrep -P` 递归杀残留子进程。
  *
  * 日志通道：本模块零日志依赖（protocol 零运行时依赖纪律）——回退路径的诊断经可选
@@ -47,7 +47,7 @@ export function isPidAlive(pid: number): boolean {
 
 /**
  * 杀整棵进程树（同步；收殓路径在 process.on("exit") 里跑，必须同步）。
- * POSIX 杀进程组（pgid = pid）一次性覆盖全部子孙；进程组杀不到（组长已死）回退
+ * POSIX 按进程组终止（pgid = pid）一次性覆盖全部子孙；按进程组终止不到（组长已死）回退
  * 单 pid + pgrep -P 递归清理残留子进程（先杀孙辈再杀子辈，防孙辈在父死后被
  * reparent 逃逸枚举）。Windows taskkill /F /T。幂等：目标已死时静默成功
  * （回退路径的诊断经 onFallback 上报，无回调则静默）。

@@ -8,9 +8,9 @@
 // 条目与其他文件（zcode session-db 的 db.sqlite）不动；③观察者——engines 根不存
 // 在 / stat 失败时 no-op 不抛（周期扫描最终一致）。
 //
-// A9 守卫形态保留：zcode 隔离会话库 session-db/ 会被当「分组目录」枚举，但
+// A9 检查形态保留：zcode 隔离会话库 session-db/ 会被当「分组目录」枚举，但
 // db.sqlite* 不匹配清理目标（只删 journal-*.jsonl 与 refs.json 残留）——引擎包侧
-// 结构前提守卫见 zcode-subagent-cli zcode-session-db-pool-gc.test.ts。
+// 结构前提检查见 zcode-subagent-cli zcode-session-db-pool-gc.test.ts。
 
 import { mkdirSync, mkdtempSync, existsSync, readdirSync, rmSync, writeFileSync, utimesSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -79,7 +79,7 @@ describe("cleanupExpiredJournals（journal TTL 回收，池抽象降级后唯一
     expect(existsSync(keepDir)).toBe(true);
   });
 
-  it("非清理目标文件不动（A9 守卫：zcode session-db 的 db.sqlite* 被枚举但不删，目录保留）", () => {
+  it("非清理目标文件不动（A9 检查：zcode session-db 的 db.sqlite* 被枚举但不删，目录保留）", () => {
     const sessionDbDir = join(tmpRoot, "engines", "zcode", "session-db");
     mkdirSync(sessionDbDir, { recursive: true });
     for (const name of ["db.sqlite", "db.sqlite-wal", "db.sqlite-shm"]) {

@@ -2,7 +2,7 @@
  * ActivityStrip subagentThinking 扩展条件测试（u3-thinking / subagent-drawer-blank §6.3）。
  *
  * 直接 mount ActivityStrip，chat store mock 三个读口（sessionPhase / isCompacting /
- * getCompactingReason——组件消费面全集中于此）。验证：
+ * getCompactingReason——组件消费方全集中于此）。验证：
  * - subagentThinking=false（可选 prop 默认）→ 无 thinking 行
  * - subagentThinking=true → thinking 行出现（文案复用 dispatching key「思考中…」）
  * - subagentThinking=true 且 turn=dispatching → 仍只有一行（条件合并不重复渲染）
@@ -13,7 +13,7 @@ import { describe, it, expect, beforeEach, vi } from 'vitest'
 import { mount } from '@vue/test-utils'
 import ActivityStrip from '@/components/panel/message-stream/ActivityStrip.vue'
 
-// chat store mock：ActivityStrip 消费面仅三读口（occupancy 投影 turn / compacting / reason）
+// chat store mock：ActivityStrip 消费方仅三读口（occupancy 派生视图 turn / compacting / reason）
 const chatState = vi.hoisted(() => ({
   turn: 'idle' as 'idle' | 'dispatching' | 'generating' | 'settling',
   compacting: false,

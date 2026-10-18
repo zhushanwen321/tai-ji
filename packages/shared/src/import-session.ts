@@ -222,7 +222,7 @@ export interface ImportReply {
  * 导入错误码字面量联合（错误规格表权威清单，与设计文档 D5 同章错误表一一对应）。
  *
  * 新增错误码必须在此登记，编译器强制 runtime/renderer 两端同步（防止改码后
- * renderer switch 静默失效，同 WorktreeErrorCode 守卫模式）。renderer 统一在
+ * renderer switch 静默失效，同 WorktreeErrorCode 检查模式）。renderer 统一在
  * 对话框内联展示恢复指引，不弹系统对话框。
  *
  * 例外：`import_sidecar_failed` 不是 error envelope 的 code——rename 落地后

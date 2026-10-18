@@ -4,10 +4,10 @@
  * 覆盖目标（设计 .tmp/update-reliability.tech-design.md §3.4.1 wrapper 五步，
  * 验收条款①：tasklist 轮询 / 60s 超时 / start /wait+空 title / errorlevel 检查 /
  * tmp+rename result 的 grep+单测断言）：
- *   - 五步全守卫 grep 级断言（含 certutil 复验、ping sleep 原语、/D= 不加引号、重启行）
+ *   - 五步全检查 grep 级断言（含 certutil 复验、ping sleep 原语、/D= 不加引号、重启行）
  *   - 变量注入：PARENT_PID（u1b 同契约）/sha256/version 等实际值落进 set 行
  *   - cmd 注入值校验：含 " % & | < > ^ ! 危险字符 → throw（cmd 无法等价 bash 转义模型）
- *   - parentPid 缺失 → throw（无可靠等待守卫宁可不升级）
+ *   - parentPid 缺失 → throw（无可靠等待检查宁可不升级）
  *
  * 字符串断言边界：本文件验证生成器产物内容；cmd 在 Windows 真机的运行时行为
  * （ping sleep 原语 P1 / tasklist+find 语义 P2 / certutil 解析 P4 / start /wait P13）
@@ -30,11 +30,11 @@ const VARS = {
   targetVersion: '0.9.11',
 }
 
-describe('u2a: win wrapper cmd 模板（§3.4.1 五步全守卫）', () => {
-  it('生成脚本含五步全部守卫且占位符全替换', () => {
+describe('u2a: win wrapper cmd 模板（§3.4.1 五步全检查）', () => {
+  it('生成脚本含五步全部检查且占位符全替换', () => {
     const script = buildWinUpdaterCmd(VARS)
 
-    // ── 验收条款①逐项守卫（grep 级断言）────────────────────────────
+    // ── 验收条款①逐项检查（grep 级断言）────────────────────────────
     const guards: Array<[string, string]> = [
       // 1. tasklist 轮询等待父退出 + 60s 超时 abort
       ['tasklist 轮询', 'tasklist /FI "PID eq %PARENT_PID%"'],
@@ -56,7 +56,7 @@ describe('u2a: win wrapper cmd 模板（§3.4.1 五步全守卫）', () => {
       ['重启行', 'start "" "%TARGET_EXE%"'],
     ]
     for (const [name, frag] of guards) {
-      expect(script, `应包含守卫: ${name} (${frag})`).toContain(frag)
+      expect(script, `应包含检查: ${name} (${frag})`).toContain(frag)
     }
 
     // /D= 值不加引号（NSIS 约定，m16）：不得出现引号包裹的 /D=
@@ -87,7 +87,7 @@ describe('u2a: win wrapper cmd 模板（§3.4.1 五步全守卫）', () => {
     expect(() => buildWinUpdaterCmd({ ...VARS, targetVersion: '0.9.11&calc' })).toThrow(/cmd 危险字符/)
   })
 
-  it('parentPid 缺失 → throw（与 mac/linux 同契约：无可靠等待守卫宁可不升级）', () => {
+  it('parentPid 缺失 → throw（与 mac/linux 同契约：无可靠等待检查宁可不升级）', () => {
     expect(() =>
       buildWinUpdaterCmd({ ...VARS, parentPid: '' } as unknown as typeof VARS),
     ).toThrow(/parentPid/)

@@ -228,7 +228,7 @@ export async function getSubagentHistory(sessionId: string, subagentId: string):
 
 /**
  * 拉取 subagent 进行中流状态（B2 subagent-stream-chunk §4.1，与 getSubagentHistory 同域同模式）：
- * RelayTee 既有内存状态的只读快照，增量 chunk 消息的失步恢复与接入首拉通道。
+ * RelayTee 既有内存状态的只读快照，增量 chunk 消息的失步恢复与接入首次拉取通道。
  * reply payload（同名 reply，payload 消费型）：{ found, msgSeq, lastDeltaSeq, lines }——
  * found=false = 该 record 当前无进行中流（未开始或已定稿，设计内合法回执非错误）；
  * found=true 时 lines = 当前消息累积全文（textAccumulated split 形态，消费端复用现有
@@ -406,7 +406,7 @@ export function revokeMessage(sessionId: string, targetId: string): Promise<Sess
  *   的 last-value 数组，renderer 一次性把当前状态灌入对应 store（替代 selectSession/submitFirstMessage
  *   内的主动拉取 RPC 兜底）。与 snapshot 独立——stateSnapshot 不受 fromSeq 增量过滤影响。
  * - lastSeq：当前 per-session seq 计数器，renderer 记为 lastSeenSeq 做 gap 检测基线。
- * - gap：fromSeq 早于 ring 最旧 seq（旧消息已被 FIFO 淘汰）时 true，renderer 需全量重拉而非增量 backfill。
+ * - gap：fromSeq 早于 ring 最旧 seq（旧消息已被 FIFO 淘汰）时 true，renderer 需全量重新拉取而非增量 backfill。
  *
  * fromSeq：可选，指定起始 seq 回拉（gap 检测触发 reconcile 时传当前缺失的 seq）。
  * 首次订阅不传（runtime 从 ring 末尾开始）。
@@ -458,10 +458,10 @@ export async function writeSegments(payload: {
 
 // ── session-trace（design D4，trace-ui 单元）──
 /**
- * 拉取 session trace 台账全量快照（session.getTraceEntries 端口，A1 混合路由：
+ * 拉取 session trace 条目清单全量快照（session.getTraceEntries 端口，A1 混合路由：
  * 活跃 session 走 RPC get_entries + 文件首行补 header；非活跃/降级走 JSONL 直读）。
  * reply payload = ServerMessageMap['session.traceEntries']（source/header/entries/
- * malformed/sessionEnd/leafId，结构镜像 runtime SessionTraceSnapshot）。增量腿不走本函数
+ * malformed/sessionEnd/leafId，结构镜像 runtime SessionTraceSnapshot）。增量路径不走本函数
  * （server-push session.traceEntryAppended，由 useSessionTrace 订阅 events 合并）。
  */
 export function getTraceEntries(

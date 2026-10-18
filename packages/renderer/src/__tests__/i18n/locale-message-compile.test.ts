@@ -5,7 +5,7 @@ import enUS from '@/i18n/locales/en-US'
 import zhCN from '@/i18n/locales/zh-CN'
 
 /**
- * renderer 组合 locale 的消息编译守卫测试。
+ * renderer 组合 locale 的消息编译检查测试。
  *
  * 背景（2026-10-15 事故）：vue-i18n 懒编译——t(key) 首次渲染时才编译文案。文案里的
  * 裸 `{` 被当占位符起始，token 非法即抛 INVALID_TOKEN_IN_PLACEHOLDER（code 2）；裸 `@`
@@ -13,7 +13,7 @@ import zhCN from '@/i18n/locales/zh-CN'
  * （MCP 添加弹窗切「代码」tab 白屏：codeHint / codePlaceholder 含字面 JSON 花括号）。
  *
  * 本测试遍历 renderer 装配后的全量 messages（ui 域经 @taiji/ui/locale/* 传入 +
- * renderer 自有域），对每条叶子文案跑真实编译器——SSOT 聚合层另有同型守卫
+ * renderer 自有域），对每条叶子文案跑真实编译器——SSOT 聚合层另有同型检查
  * （packages/ui/src/locale/__tests__/locale-message-compile.test.ts）。
  *
  * onError 必须挂「收集不抛」形态：裸调 baseCompile 不挂 onError 时解析器静默吞错，
@@ -47,8 +47,8 @@ function collectCompileIssues(locale: string, node: unknown, path: string) {
   return issues
 }
 
-describe('renderer 组合 locale 消息编译守卫', () => {
-  it('守卫自检：已知坏样本（裸 { 与裸 @）必须被检出（防 walker 失效假绿）', () => {
+describe('renderer 组合 locale 消息编译检查', () => {
+  it('检查自检：已知坏样本（裸 { 与裸 @）必须被检出（防 walker 失效假绿）', () => {
     const issues = collectCompileIssues('self-check', { brace: '{ "x": 1 }', at: 'run pnpm --filter @taiji/x build' }, '')
     expect(issues.map((issue) => issue.path).sort()).toEqual(['at', 'brace'])
   })

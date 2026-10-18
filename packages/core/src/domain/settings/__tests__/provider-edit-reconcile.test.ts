@@ -33,7 +33,7 @@ function makeSnapshot(overrides: Partial<FormSnapshot> = {}): FormSnapshot {
 
 /**
  * 分支① repaint 裁决获取（models 两用例共用）：非 dirty + 已初始化快照基线，
- * 非 repaint 即抛错（原用例内守卫同语义，类型收窄使 .models 直接可达）。
+ * 非 repaint 即抛错（原用例内检查同语义，类型收窄使 .models 直接可达）。
  */
 function repaintDecision(fresh: ProviderInfo): Extract<BroadcastReconcileDecision, { action: 'repaint' }> {
   const d = reconcileBroadcast(fresh, { authMethod: undefined }, false, makeSnapshot())

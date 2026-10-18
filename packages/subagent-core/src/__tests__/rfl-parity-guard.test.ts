@@ -1,4 +1,4 @@
-// check-rfl-parity.mjs 行为测试（机器锁步守卫的自测：守卫本身退化为恒绿 = 无守卫）。
+// check-rfl-parity.mjs 行为测试（机器锁步检查的自测：检查本身退化为恒绿 = 无检查）。
 //
 // 方法：脚本以子进程形态跑（node scripts/check-rfl-parity.mjs），用 PI_RFL / ZCODE_RFL
 // 环境变量指向 tmp 夹具，验证判定：
@@ -9,8 +9,8 @@
 //   ⑤ zcode 缺失 → SKIP + exit 0；但**已累积的失败不得被 SKIP 吞掉**
 //      （fail-closed：无 zcode 的环境/CI 里仍需拦下 pi 侧退化）
 // 夹具不依赖本机真实用户目录：pi 侧从仓库内真实文件派生（拷贝后改写），zcode 侧由
-// 内联片段合成（调度算法 + 池常量的真实形态），因此断言的是「守卫能否抓住真实形态的漂移」，
-// 而不是「守卫能否处理人造玩具输入」。
+// 内联片段合成（调度算法 + 池常量的真实形态），因此断言的是「检查能否抓住真实形态的漂移」，
+// 而不是「检查能否处理人造玩具输入」。
 
 import { execFile } from "node:child_process";
 import { copyFileSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
@@ -37,7 +37,7 @@ interface GuardResult {
   stderr: string;
 }
 
-/** 跑守卫（永不 reject：退出码是断言对象）。 */
+/** 跑检查（永不 reject：退出码是断言对象）。 */
 async function runGuard(env: Record<string, string>): Promise<GuardResult> {
   try {
     const res = await run("node", [GUARD], {
@@ -52,7 +52,7 @@ async function runGuard(env: Record<string, string>): Promise<GuardResult> {
 
 /**
  * zcode 夹具：从真实 .dwf.ts 截取调度相关片段（评审本机可能没有 zcode 安装——夹具缺失时
- * 用仓库内 pi 侧源码形态合成一个等价片段，保证守卫自测在任何机器上都可跑）。
+ * 用仓库内 pi 侧源码形态合成一个等价片段，保证检查自测在任何机器上都可跑）。
  * @param mutate 对片段文本做改写（注入漂移）
  */
 function buildZcodeFixture(dir: string, mutate?: (src: string) => string): string {
@@ -117,8 +117,8 @@ afterEach(() => {
   rmSync(dir, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 });
 });
 
-describe("check-rfl-parity.mjs（双实现锁步守卫行为）", () => {
-  it("两侧一致 → exit 0（夹具即真实 pi 源码，验证守卫对真实形态恒绿）", async () => {
+describe("check-rfl-parity.mjs（双实现锁步检查行为）", () => {
+  it("两侧一致 → exit 0（夹具即真实 pi 源码，验证检查对真实形态恒绿）", async () => {
     const zcode = buildZcodeFixture(dir);
     const res = await runGuard({ PI_RFL: piCopy, ZCODE_RFL: zcode, RFL_REQUIRE_ZCODE: "1" });
     expect(res.stderr).not.toContain("DRIFT"); // 上限断言：不得报漂移
@@ -179,7 +179,7 @@ describe("check-rfl-parity.mjs（双实现锁步守卫行为）", () => {
   });
 
   // 【回归】当初的 SKIP 分支不看已累积的 failures，直接 exit 0 —— 在无 zcode 的环境
-  // （CI）里把 pi 侧去重不变量退化、结构标记缺失等失败全部吞掉，守卫退化为恒绿。
+  // （CI）里把 pi 侧去重不变量退化、结构标记缺失等失败全部吞掉，检查退化为恒绿。
   // 这条锁住 fail-closed 语义：SKIP 只豁免「双实现对账」，不豁免已发生的失败。
   it("zcode 缺失 + pi 侧去重不变量退化 → 必须 exit 1（SKIP 不得吞掉已累积失败）", async () => {
     const brokenPi = join(dir, "pi-degenerate.cjs");
@@ -203,10 +203,10 @@ describe("check-rfl-parity.mjs（双实现锁步守卫行为）", () => {
   });
 });
 
-// ── A14 身份对齐（zcode 侧）：L1 标题守卫 + L2 归一算法与 pi 对齐 ──
-// 调度有 parity 守卫护住，身份对齐目前没有对等物；此组用内联算法快照驱动：
+// ── A14 身份对齐（zcode 侧）：L1 标题检查 + L2 归一算法与 pi 对齐 ──
+// 调度有 parity 检查护住，身份对齐目前没有对等物；此组用内联算法快照驱动：
 // ① 不剥标点（归一越激进误合并越高）；② 短标题不参与（TITLE_MATCH_MIN）；
-// ③ 前缀互含在「两边都够长」时兼容——用于 L1 编号撞车守卫（防新问题排到旧号被静默销账）。
+// ③ 前缀互含在「两边都够长」时兼容——用于 L1 编号撞车检查（防新问题排到旧号被静默关闭）。
 // 快照 = zcode workflow 侧身份对齐算法的实现副本（本测试不读本机真实用户目录）；
 // 快照与真实实现的锁步由 zcode 侧 review-fix-loop 的维护流程保证，不在单测职责内。
 describe("zcode 身份对齐算法（A14：标题归一 + 兼容判定）", () => {
@@ -257,7 +257,7 @@ const titlesCompatible = (a: string, b: string): boolean => {
     expect(api.titlesCompatible("a b", "c d")).toBe(false);
   });
 
-  it("L1 安全网：同前缀但确属不同问题时不得判为兼容（防新问题被当作旧条目的延续而静默销账）", async () => {
+  it("L1 安全网：同前缀但确属不同问题时不得判为兼容（防新问题被当作旧条目的延续而静默关闭）", async () => {
     const api = await loadIdentityApi();
     // 两边都够长、前缀相同但尾段不同——必须是 false（这是 A14 修的核心风险点）
     expect(api.titlesCompatible(

@@ -212,7 +212,7 @@ describe('PresetSelectChip 重入同步（G1 破口修复：explicitPresetId 跟
     await flushPromises()
     expect(wrapper.emitted('select')).toEqual([[{ presetId: 'custom:read-only' }]])
     expect(wrapper.find('[data-testid="chip-preset"]').text()).toContain('只读模式')
-    // ② startFlow 重入（多次 ⌘N / initApp 重试）：Landing 不重挂载（isActive 守卫），
+    // ② startFlow 重入（多次 ⌘N / initApp 重试）：Landing 不重挂载（isActive 检查），
     //    flow.pendingPreset 无条件重置为 null——修复前 explicitPresetId 残留旧选择，
     //    chip 显示「只读模式」而 submit 按默认预设创建（显示 ≠ 生效）
     pendingPreset.value = null

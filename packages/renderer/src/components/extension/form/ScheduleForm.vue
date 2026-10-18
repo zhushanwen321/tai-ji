@@ -13,7 +13,7 @@
  * - cron 预览引擎抽出 cron-preview.ts（script 行数上限；无状态纯函数零耦合）
  *
  * 时间折叠单点（D2）：once 模式提交前经 dateToOnceCron 折叠为一次性 cron，初值由
- * onceCronToDate 还原——两 helper 收口 @zhushanwen/extension-protocol（GUI/TUI 共用）。
+ * onceCronToDate 还原——两 helper 收敛 @zhushanwen/extension-protocol（GUI/TUI 共用）。
  * 下次运行预览为纯前端轻量计算（后端 croner 的子集），预览失败仅显示非阻塞警示、
  * 不禁止提交（表达式由创建端 parseSchedule/croner 验证）。
  * once 时刻选择 = DateTimePicker 自绘组件（原生 datetime-local 的弹出日历是 OS 渲染，
@@ -103,7 +103,7 @@ function pickCronChip(chip: { cron: string } | null): void {
   cronText.value = chip.cron
 }
 
-// ── once 时刻换算：pad2/toLocalInput 收口 datetime-local.ts（与 DateTimePicker 共用，
+// ── once 时刻换算：pad2/toLocalInput 收敛 datetime-local.ts（与 DateTimePicker 共用，
 //    本地墙钟语义与折叠单点一致）──
 
 const onceDate = computed<Date | null>(() => {
@@ -159,7 +159,7 @@ const modelGroups = computed<ModelPickerGroup[]>(() => {
   return [...map.values()]
 })
 
-// ── draft → 表单初值（预填，用户可改；isScheduleDraft 守卫已在挂载侧收窄）──
+// ── draft → 表单初值（预填，用户可改；isScheduleDraft 检查已在挂载侧收窄）──
 /** prompt/name 文本与 recurring 过期档的标量初值（draft 缺省回落空串/7d） */
 function initPromptNameAndExpires(d: ScheduleQuestion['initial']): void {
   promptText.value = d?.prompt ?? ''
@@ -263,7 +263,7 @@ const previewUnavailableHint = computed(() => {
 })
 
 // ── Esc 取消：document 级 capture（根 div 不可聚焦，焦点在 body 时根上的 keydown 收不到），
-// 卸载清理；capture 阶段保证子输入框未 stopPropagation 时也能收口。
+// 卸载清理；capture 阶段保证子输入框未 stopPropagation 时也能收尾。
 function onDocumentKeydown(e: KeyboardEvent): void {
   if (e.key !== 'Escape') return
   e.preventDefault()

@@ -16,7 +16,7 @@
 //   engine_handshake_timeout    initialize 超时（HANDSHAKE_TIMEOUT_MS=10s）→ 引擎不可用
 //   engine_crashed              进程意外退出 → 在途 run 失败（附 stderr 尾
 //                               STDERR_TAIL_CHARS=400 字符）；重建最多 3 次退避 1s/2s/4s
-//   engine_probe_failed         probe 失败 → 既有 fallback 三守卫不变
+//   engine_probe_failed         probe 失败 → 既有 fallback 三项检查不变
 //   engine_model_not_in_snapshot  setModel 目标模型不在子进程快照 → 宿主写覆盖意图
 //                               （模型本身有效，下一轮 spawn 现取目录）
 //   engine_credential_missing   setModel 子进程凭据校验失败（checkAuth 权威兜底）→
@@ -143,7 +143,7 @@ export class EngineSdkError extends Error {
     this.data = data;
   }
 
-  /** 协议 error 帧载荷投影。 */
+  /** 协议 error 帧载荷派生视图。 */
   toStructured(): ProtocolError {
     return { code: this.code, message: this.message, recovery: this.recovery, data: this.data };
   }

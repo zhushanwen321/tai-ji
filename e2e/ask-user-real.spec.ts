@@ -136,7 +136,7 @@ async function waitForAskUserRequest(events: any[], deadlineMs: number): Promise
   return undefined
 }
 
-/** 找问题列表[0]（formQuestions；用类型守卫收窄 unknown[]） */
+/** 找问题列表[0]（formQuestions；用类型检查收窄 unknown[]） */
 function firstQuestion(askUserReq: any): { header?: string; question: string; options?: unknown[] } {
   const qs = askUserReq.payload?.formQuestions as unknown[] | undefined
   const q = Array.isArray(qs) && qs.length > 0 ? qs[0] : undefined
@@ -284,7 +284,7 @@ test('A2: ask-user overlay 真实渲染 — overlay/Other 保留，页面无 com
 
     // ── 断言 3：overlay UI 无 comment 字样（comment UI/i18n 已删除）──
     // 注意：不能断言全页 —— 消息流可能渲染含 "comment" 的自由文本（faux 回复文本受控，
-    // 但 overlay 内部才是「comment UI 删除」的正确回归面，与原轨保持同一断言语义）。
+    // 但 overlay 内部才是「comment UI 删除」的正确回归测试，与原轨保持同一断言语义）。
     const overlayText = (await overlay.textContent()) ?? ''
     expect(overlayText.toLowerCase().includes('comment'),
       'overlay UI 文本不应含 "comment"（comment UI + i18n key 已删除）').toBe(false)

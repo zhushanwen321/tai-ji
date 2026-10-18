@@ -9,7 +9,7 @@
     按钮 h-[24px] / 12px 字 / dim / radius-xs；选中态 = demo Tier A 状态件选中范式
     （--sel-bg accent tint 底 + 中性亮字 + fw-mid + 1px --sel-edge 内描边）。
     inactive hover 只提亮文字（text-neutral-fg），不加底色——凹陷槽内加底色会显脏。
-    [HISTORICAL] 2026-09-16 五 tab 收敛为三 tab（Agents/Flows 退役，任务观察入口唯一化收口到
+    [HISTORICAL] 2026-09-16 五 tab 收敛为三 tab（Agents/Flows 退役，任务观察入口唯一化收敛到
     composer 任务托盘）——subagent/workflow 计数不再经侧栏。
     [HISTORICAL] icon-only + count 数字形态随 demo .vtab 文字 tab 对齐退役（2026-10 M1 视觉复刻）：
     sessionCount/fileCount props 保留（Sidebar 传参契约不动），组件内不再渲染。

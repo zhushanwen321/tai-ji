@@ -258,7 +258,7 @@ describe("abortWithFallback（abort 两级中断编排）", () => {
 
 import { killPidChain, probePidAlive } from "../kill-chain.ts";
 
-describe("killPidChain（run 级单 pid 杀链——SIGTERM → grace → SIGKILL，绝不组杀）", () => {
+describe("killPidChain（run 级单 pid 杀链——SIGTERM → grace → SIGKILL，绝不按进程组终止）", () => {
   beforeEach(() => {
     vi.useFakeTimers();
   });

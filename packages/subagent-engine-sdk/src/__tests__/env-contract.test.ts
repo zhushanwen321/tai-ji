@@ -1,7 +1,7 @@
 // src/__tests__/env-contract.test.ts
 //
 // buildEngineChildEnv 三层契约（W12，impl-plan §2.12 三层表逐行）+ buildOutboundChildEnv
-// 出站卫生 + 守卫断言「L0 基础设施键集合 ∩ L1 deny/剥除集合 = ∅」。
+// 出站卫生 + 检查断言「L0 基础设施键集合 ∩ L1 deny/剥除集合 = ∅」。
 // 三层表的每条规格在此对应至少一个断言：L0 注入项 / L1 恒高于 manifest 放行 /
 // L2 保留前缀拒绝 + 形态校验 + 非法丢弃 warn + 未声明不放行 warn。
 
@@ -143,7 +143,7 @@ describe("buildEngineChildEnv 三层契约", () => {
     expect(proc).toEqual({ MYENGINE_A: "1" });
   });
 
-  it("守卫断言：L0 基础设施键集合 ∩ L1 deny/剥除集合 = ∅", () => {
+  it("检查断言：L0 基础设施键集合 ∩ L1 deny/剥除集合 = ∅", () => {
     const denySet = new Set(ENGINE_ENV_DENY_LIST);
     const overlap = ENGINE_ENV_L0_INFRA_KEYS.filter((k) => denySet.has(k));
     expect(overlap).toEqual([]);

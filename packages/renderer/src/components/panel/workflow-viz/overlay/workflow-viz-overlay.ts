@@ -8,7 +8,7 @@
  * （overlayDag / overlayDagError，设计 §7.1「DAG 缓存留 renderer」）。全局单例语义不变
  * （开新 run 切换内容，SearchModal 范式；split mode 下盖全屏、绑定发起 pane 的 session
  * ——D11⑤）。关闭只切 open 标志：事件流缓存归 workflowStore（D11② overlay 关闭不清）、
- * DAG 侧 runtime 按 runId 缓存（仅成功），本模块不持第二份数缓存（open 时无条件重拉，
+ * DAG 侧 runtime 按 runId 缓存（仅成功），本模块不持第二份数缓存（open 时无条件重新拉取，
  * 代价 = 一次 RPC ack 延迟）。
  * - 入口改向桥接（D1）：core coordination.openWorkflow 改向为开 overlay——core headless
  *   不感知 renderer，经 bindWorkflowOverlayOpener/bindWorkflowRunLookup 注入（本模块
@@ -178,7 +178,7 @@ function isActive(sessionId: string, runId: string): boolean {
     && cur.payload.sessionId === sessionId && cur.payload.runId === runId
 }
 
-/** parse_failed 重试（失败不缓存故可重试；重拉当前 run）。 */
+/** parse_failed 重试（失败不缓存故可重试；重新拉取当前 run）。 */
 export function retryDagParse(): void {
   const cur = getOverlayControlState().current
   if (cur === null || cur.kind !== 'workflow') return

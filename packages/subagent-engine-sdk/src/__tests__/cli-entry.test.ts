@@ -139,20 +139,20 @@ describe("runEngineCliEntry logger sink：debug 不写 stderr（CONSOLE_SINK 语
   });
 });
 
-// in-process 插桩覆盖腿：V8 coverage 只统计 vitest 主进程，上方子进程用例里的
+// in-process 插桩覆盖路径：V8 coverage 只统计 vitest 主进程，上方子进程用例里的
 // sink 代码跑在 spawn 出的 node 子进程内，不进 lcov → coverage-gate 对 cli-entry.ts
 // 的 debug 降噪增量行（if + stderr.write）报 0 覆盖。本 describe 在主进程直调
 // runEngineCliEntry，让 sink 闭包被 V8 插桩命中（lcov 命中源）；行为断言与子进程
-// 腿同构（stderr 分级降噪 + host/log 全级别透传），真实 stdio 管道取证语义仍由
-// 子进程腿独立承担，两条腿互补不替代。
-describe("runEngineCliEntry logger sink：in-process 插桩覆盖腿", () => {
+// 路径同构（stderr 分级降噪 + host/log 全级别透传），真实 stdio 管道取证语义仍由
+// 子进程路径独立承担，两条路径互补不替代。
+describe("runEngineCliEntry logger sink：in-process 插桩覆盖路径", () => {
   afterAll(() => {
     // runEngineCliEntry 经 configureLoggerSink 把 sink 挂到 globalThis slot，
     // 用后清空防泄漏到同 worker 后续模块（logger.ts 的测试隔离出口）。
     resetLoggerSinkForTests();
   });
 
-  it("debug 跳过 stderr；warn/error 落 stderr；host/log 全级别透传（与子进程腿同构）", async () => {
+  it("debug 跳过 stderr；warn/error 落 stderr；host/log 全级别透传（与子进程路径同构）", async () => {
     const reverseCalls: Array<{ method: string; params: unknown }> = [];
     const fakeServer: CliProtocolServerSink = {
       handleFrame() {},

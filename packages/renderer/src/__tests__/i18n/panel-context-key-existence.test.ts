@@ -1,14 +1,14 @@
 // @vitest-environment node
 
 /**
- * panel.context 命名空间的 i18n key 存在性机器闸门（同款机制见 provider-edit-key-existence.test.ts）。
+ * panel.context 命名空间的 i18n key 存在性机器门禁（同款机制见 provider-edit-key-existence.test.ts）。
  *
  * 防的回归：组件把 t('panel.context.x') 新增/改名之后，若 locale 双侧（zh-CN / en-US）
- * 同时缺同一个 key，用户会看到裸 key（渲染出 panel.context.x 字符串）而现有守卫仍全绿：
+ * 同时缺同一个 key，用户会看到裸 key（渲染出 panel.context.x 字符串）而现有检查仍全绿：
  * - locale-sync-check 只比对双侧 key 集合一致，双侧同时缺同一个 key 抓不到；
- * - locale-key-usage-guard（存在 → 被引用的反向守卫）不校验「引用侧必有 locale」；
+ * - locale-key-usage-guard（存在 → 被引用的反向检查）不校验「引用侧必有 locale」；
  * - provider-edit-key-existence 只扫 settings.providerEdit 前缀，不覆盖 panel.context。
- * 本守卫补齐 panel.context 这条「UI 引用了 → locale 必须有」的通路。
+ * 本检查补齐 panel.context 这条「UI 引用了 → locale 必须有」的通路。
  *
  * 机制：扫 packages/ui/src 与 packages/renderer/src（排除 locale 文件与测试目录）
  * 中所有 `panel.context.<key>` 字面引用——要求 key 后紧跟引号/反引号收尾，动态拼接
@@ -67,7 +67,7 @@ function collectSourceRefs(): Map<string, string> {
   return refs
 }
 
-describe('panel.context i18n key 存在性机器闸门', () => {
+describe('panel.context i18n key 存在性机器门禁', () => {
   const refs = collectSourceRefs()
 
   it('源码扫描通路有效（扫到的 key 数量足以证明根路径与正则生效）', () => {

@@ -6,7 +6,7 @@
  *   干净安装（无插件无 statusline 项）+ trailing 原生动作 → 根元素常驻、按钮仍可见
  *   （防纯键盘不可发现——§5.1 裁决的表面变更）；无项且无原生动作 → 维持旧自隐藏语义
  * - TerminalToggleButton（renderer panel/，原 statusbar/ 落点已退役）：点击 = toggleBottomDrawer()（与 ⌃` 同一
- *   协调函数落点），aria-pressed 投影底抽屉开合态
+ *   协调函数落点），aria-pressed 派生视图底抽屉开合态
  *
  * 三视角：构建者白盒（trailing slot 注入通道 + 根 v-if 条件）、使用者黑盒（干净安装下按钮可见可点、
  * 点击开底抽屉）、观察者形态（按钮 testid/aria-pressed/title 文案）。
@@ -89,7 +89,7 @@ describe('StatusBar 原生动作通道（根 v-if 自隐藏条件扩展）', () 
 })
 
 describe('TerminalToggleButton（顶栏鼠标路径入口，三卡化 2026-10-04 迁 PanelHeader）', () => {
-  it('按钮常驻可点：title 文案 + aria-pressed 投影开合态；点击切换底抽屉（toggleBottomDrawer 同源）', async () => {
+  it('按钮常驻可点：title 文案 + aria-pressed 派生视图开合态；点击切换底抽屉（toggleBottomDrawer 同源）', async () => {
     const wrapper = mount(TerminalToggleButton)
     const button = wrapper.find('[data-testid="terminal-toggle-button"]')
     expect(button.exists()).toBe(true)

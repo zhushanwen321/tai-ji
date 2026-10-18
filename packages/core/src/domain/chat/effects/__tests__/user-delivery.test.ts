@@ -11,7 +11,7 @@
  *   direct 有本地气泡 → foreign=false 不入流（防双插语义不变）；观看端 foreign 无气泡 →
  *   入流补显（G4/V17 修复目标）。
  *
- * 与间接覆盖的分工：effects-delivery-receipt.test.ts 护帧消费主链（回执匹配/保号/整批）；
+ * 与间接覆盖的分工：effects-delivery-receipt.test.ts 护帧消费主链（回执匹配/保留原 id/整批）；
  * 本文件护「两端行为分叉」谓词语义（V16 桌面不变面 + V17 改变面的单测锚）。
  *
  * 运行：cd packages/core && npx vitest run src/domain/chat/effects/__tests__/user-delivery.test.ts
@@ -70,7 +70,7 @@ function entry(over: Partial<DeliveryFrameEntry> = {}): DeliveryFrameEntry {
   return { clientUuid: CLIENT_UUID, preview: 'hi', state: 'in-flight', lane: 'direct', ...over }
 }
 
-/** 发送端本地乐观气泡（appendUser 保号契约：气泡 id = 内核条目 clientUuid，hasLocalBubble 按 id 匹配）。 */
+/** 发送端本地乐观气泡（appendUser 保留原 id 契约：气泡 id = 内核条目 clientUuid，hasLocalBubble 按 id 匹配）。 */
 function localBubble(id: string): Message {
   return { id, role: 'user', content: [{ type: 'text', text: '本地乐观气泡' }], status: 'complete', timestamp: 0 }
 }
@@ -104,7 +104,7 @@ describe('D4 foreign 入流豁免精确化（remote-use-shell-unification D4：V
     const expected: Segment[] = [{ type: 'text', text: '外来消息' }]
     expect(ctx.appendUser).toHaveBeenCalledTimes(1)
     expect(ctx.appendUser).toHaveBeenCalledWith(SID, expected, CLIENT_UUID)
-    // 回执消费照常：投影转 delivered + 占位回收（入流豁免不影响回执侧）
+    // 回执消费照常：派生视图转 delivered + 占位回收（入流豁免不影响回执侧）
     expect(getDeliveryProjection(SID)[0]?.state).toBe('delivered')
     expect(ctx.inflightOf()).toBe(0)
   })
@@ -123,7 +123,7 @@ describe('D4 foreign 入流豁免精确化（remote-use-shell-unification D4：V
   })
 
   it('D4-AC3: 发送端 direct 有本地同 id 气泡 → 不入流（防双插语义不变，气泡原位保持）', () => {
-    // 场景：本端发送（direct 车道），乐观气泡已入流（id = clientUuid 保号同源）——
+    // 场景：本端发送（direct 车道），乐观气泡已入流（id = clientUuid 保留原 id 同源）——
     // hasLocalBubble 命中 → foreign=false → 降级入流豁免（修前由 lane 豁免、修后由 id 判定承接）
     replaceDeliveryProjection(SID, [entry({ lane: 'direct' })])
     const ctx = makeCtx([localBubble(CLIENT_UUID)])
@@ -133,7 +133,7 @@ describe('D4 foreign 入流豁免精确化（remote-use-shell-unification D4：V
 
     expect(consumed).toBe(true)
     expect(ctx.appendUser).not.toHaveBeenCalled()
-    // 回执侧照常执行：投影转态 + 占位回收与入流判定正交（发送端回执语义不变）
+    // 回执侧照常执行：派生视图转态 + 占位回收与入流判定正交（发送端回执语义不变）
     expect(getDeliveryProjection(SID)[0]?.state).toBe('delivered')
     expect(ctx.inflightOf()).toBe(0)
   })
@@ -144,7 +144,7 @@ describe('D4 foreign 入流豁免精确化（remote-use-shell-unification D4：V
     watcher.addInflight(1)
     sender.addInflight(1)
 
-    // 投影是模块级单例：两次调用各自重置条目（watcher 消费会转 delivered，sender
+    // 派生视图是模块级单例：两次调用各自重置条目（watcher 消费会转 delivered，sender
     // 若共用已转态条目则回执不命中、分叉对拍退化为消费 miss——须重置后再投同形态帧）
     replaceDeliveryProjection(SID, [entry({ lane: 'direct' })])
     const watcherConsumed = confirmKernelDeliveryOnMessageEnd(watcher, SID, userEndEntry('外来消息', UUID))
@@ -192,18 +192,18 @@ describe('D4 foreign 入流豁免精确化（remote-use-shell-unification D4：V
       message: { role: 'user', content: [{ type: 'text', text: fullText }], timestamp: 0 },
     })
 
-    // 整帧只入流一次（首个降级条目保号），第二个条目不因首条入流而行为漂移
+    // 整帧只入流一次（首个降级条目保留原 id），第二个条目不因首条入流而行为漂移
     expect(consumed).toBe(true)
     expect(ctx.appendUser).toHaveBeenCalledTimes(1)
     expect(getDeliveryProjection(SID).map((e) => e.state)).toEqual(['delivered', 'delivered'])
     expect(ctx.inflightOf()).toBe(0)
   })
 
-  it('D4-AC7: 内核收养条目 m- 形态回执 → 观看端 foreign 入流保号收养 id（2026-10-03 D3 A8 归因修复——shared 标记身份段不认 m- 形态时，回执在消费端构造性 miss、观看端 live 无人入流，live ≠ reload）', () => {
+  it('D4-AC7: 内核收养条目 m- 形态回执 → 观看端 foreign 入流保留原 id 收养 id（2026-10-03 D3 A8 归因修复——shared 标记身份段不认 m- 形态时，回执在消费端构造性 miss、观看端 live 无人入流，live ≠ reload）', () => {
     // 场景（探针实证）：外部 message.send 不带 clientUuid → registry 收养生成 m-<token>-<n>
-    // → 回显文本尾标记 <!--taiji:msg:m-...-->，投影条目 clientUuid = m- 形态。前端标记
+    // → 回显文本尾标记 <!--taiji:msg:m-...-->，派生视图条目 clientUuid = m- 形态。前端标记
     // 身份段收编 m- 分支后（MSG_ID_ADOPTED_SEGMENT），① 命中条目 → 无本地气泡 → foreign
-    // 降级入流，保号传收养 id 本体（e.clientUuid === bareId 分支）。
+    // 降级入流，保留原 id 传收养 id 本体（e.clientUuid === bareId 分支）。
     const ADOPTED = 'm-mustgqln-3'
     replaceDeliveryProjection(SID, [entry({ clientUuid: ADOPTED, lane: 'direct' })])
     const ctx = makeCtx()

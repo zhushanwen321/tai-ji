@@ -30,8 +30,8 @@ import { getPiAgentDir, PI_SESSION_TREE_SEGMENTS } from '@taiji/shared/paths'
 import { mainLogger } from '../logs/main-logger.js'
 import { runSaveDialogGuarded } from '../utils/save-dialog-guard.js'
 
-/** 保存对话框返回形态（diagnostics-export-ipc 的 SaveDialogResult 同款测试最小投影）。 */
-export interface SessionExportSaveDialogResult { // oe-exempt:20261012:framework:deps 注入契约面——生产 dialog 返回投影 + 测试桩单消费位，接口先立防测试走真 electron 通道（对齐 diagnostics-export-ipc 先例形态）
+/** 保存对话框返回形态（diagnostics-export-ipc 的 SaveDialogResult 同款测试最小派生视图）。 */
+export interface SessionExportSaveDialogResult { // oe-exempt:20261012:framework:deps 注入契约面——生产 dialog 返回派生视图 + 测试桩单消费位，接口先立防测试走真 electron 通道（对齐 diagnostics-export-ipc 先例形态）
   canceled: boolean
   filePath?: string
 }

@@ -227,7 +227,7 @@ describe('预检通道缺失 / pending（不挂死）', () => {
     expect(frame(wrapper).exists()).toBe(false)
   })
 
-  it('预检通道 reject（IPC 不可用）→ 跳过预检直接挂载（不钉死在降级）', async () => {
+  it('预检通道 reject（IPC 不可用）→ 跳过预检直接挂载（不固定在降级）', async () => {
     const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
     try {
       const wrapper = await mountInView({ path: '/abs/report.html' }, {
@@ -327,7 +327,7 @@ describe('源码态（deps.readArtifact 注入 + 宿主 #source 插槽）', () =
     expect(stub.attributes('data-content')).toBe('```html\n<html><body>hi</body></html>\n```')
   })
 
-  it('源码含 ``` 行首反引号 → 开栅长度抬升（不被源码提前闭合）', async () => {
+  it('源码含 ``` 行首反引号 → 开栅长度抬升（不被源码提前结束）', async () => {
     const readArtifact = vi.fn().mockResolvedValue({ content: 'intro\n```\ncode fence\n```' })
     const wrapper = await mountAndSwitchToSource(readArtifact)
     const content = wrapper.find('[data-testid="html-preview-source"]').attributes('data-content') ?? ''

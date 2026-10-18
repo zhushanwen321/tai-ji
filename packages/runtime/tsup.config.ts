@@ -38,7 +38,7 @@ export default defineConfig({
   // pi-subagent-workflow 深路径改走语义子入口）：engines/zcode/reader + constants +
   // engine/paths + relay-env（E-2 relay env 名/协议版本常量 SSOT，纯常量+纯函数，
   // 设计 §3.3.1 例外条款），运行时闭包 = node:fs + 纯常量；import 链其余均为
-  // type-only（bundle 后消失）。禁止扩大消费面到 launcher/preparer/parser/EnginePort
+  // type-only（bundle 后消失）。禁止扩大消费方到 launcher/preparer/parser/EnginePort
   // （依赖方向纪律）。require 条件解析到该包 dist CJS——core dist 未 build 时打包失败
   // 属预期（build 前置）
   // @earendil-works/pi-ai：能力注册表（pi-boundary-reliability U5）pi 同源档位计算——
@@ -93,7 +93,7 @@ export default defineConfig({
       throw new Error(`Runtime bundle too small (${sizeKB}KB), likely missing dependencies`)
     }
 
-    // esbuild 前缀剥离守卫（P5，2026-08-25）：CJS 输出会把字面量 import("node:sqlite")
+    // esbuild 前缀剥离开关（P5，2026-08-25）：CJS 输出会把字面量 import("node:sqlite")
     // 规约成裸名 import("sqlite")——Node 动态 import 裸名不走内置 fallback，zcode
     // reader①级在打包环境恒降级。reader 已改变量间接规避；此处拦截 esbuild 升级后
     // 输出形态变化导致的静默回归

@@ -18,7 +18,7 @@
  *   - message.message_start（chat-message-effects.ts:264）：建 streaming assistant（role:'assistant',
  *     status:'streaming'），isGenerating 派生为 true
  *   - message.complete（chat-message-effects.ts:300）：把 streaming assistant 翻终态（complete/error）
- *     + finalizeSession 收口，isGenerating 派生为 false
+ *     + finalizeSession 收尾，isGenerating 派生为 false
  *   模拟 runtime 推送：调 events.dispatchSession(sid, msg) 触发已注册 handler
  *
  * 运行：cd packages/renderer && npx vitest run composables/effects/__tests__/useSessionStreamSync-boundary.test.ts
@@ -162,7 +162,7 @@ describe('bindSessionStreamSync 边界验证（w2）', () => {
     expect(msgs[0].status).toBe('streaming')
     expect(msgs[0].role).toBe('assistant')
 
-    // 推 message.complete 收口
+    // 推 message.complete 收尾
     events.dispatchSession(sid, {
       type: 'message.complete',
       payload: { sessionId: sid, stopReason: 'stop' },

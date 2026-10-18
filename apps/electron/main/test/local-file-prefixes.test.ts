@@ -56,7 +56,7 @@ function devPrefixes(): string[] {
   })
 }
 
-describe('computeLocalFilePrefixes: 打包态（D2a 守卫）', () => {
+describe('computeLocalFilePrefixes: 打包态（D2a 检查）', () => {
   it('白名单不含文件系统根 /（Finder 启动 cwd=/ 时 startsWith("/") 恒真的塌缩已剔除）', () => {
     const prefixes = packagedPrefixes('/')
     // 带 trailing sep 后根目录本身就是 path.sep（'/'），逐项断言不存在
@@ -323,7 +323,7 @@ describe('computeLocalFileReadPrefixes: 读/预检 IPC 通道准入收窄', () =
     expect(read).not.toHaveBeenCalled()
   })
 
-  it('产物文件经读通道前缀正常读取（消费面不回归）', () => {
+  it('产物文件经读通道前缀正常读取（消费方不回归）', () => {
     const result = readLocalFileContent(`${DATA_DIR}/artifacts/s1/report.html`, computeLocalFileReadPrefixes(DATA_DIR), {
       statSync: () => ({ isDirectory: () => false, size: 11 }),
       readFileSync: () => new TextEncoder().encode('<h1>hi</h1>'),

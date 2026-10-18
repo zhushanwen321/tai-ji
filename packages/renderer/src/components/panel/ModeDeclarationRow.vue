@@ -22,7 +22,7 @@
  *    「模式已删除（id）」并**预告**「会话重启后将回落全工具」；已回落
  *    （`SessionSummary.launchPresetFallbackTo` 非空，pi 本次已以 builtin:full 启动）才声称
  *    「本次以全工具模式启动」。禁在未重启窗口内声称已用全工具（假陈述）。
- * ③ 加载失败（loadError 非空）→ **等同未加载：不渲染**（恢复通道 = 下一次 connected 自动补拉，
+ * ③ 加载失败（loadError 非空）→ **等同未加载：不渲染**（恢复通道 = 下一次 connected 自动补充拉取，
  *    见 usePiPresets.installPresetAutoLoad）。
  * 三态均不阻断会话。
  *

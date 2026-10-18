@@ -1,6 +1,6 @@
 /**
  * GitStateService 单测（perf W16 验收）：in-flight 单飞去重 / 分层 TTL 缓存 /
- * 非仓库负缓存 / invalidate 失效（含在飞竞态防护）。
+ * 非仓库负缓存 / invalidate 失效（含在途竞态防护）。
  *
  * executor 用手写 fake（记录调用 + 可编程结果），不真 spawn git——验证的是缓存与
  * 去重策略本身；真实 git 执行链路经 git-executor.test.ts 单独覆盖。
@@ -473,7 +473,7 @@ describe('GitStateService.numstat', () => {
     const result = await svc.getStatus('sid-u3', '/repo')
     expect(result.isRepo).toBe(false)
     expect(result.gitUnavailableReason).toBeUndefined()
-    // 负缓存：二次调用零 spawn（既有守卫保留）
+    // 负缓存：二次调用零 spawn（既有检查保留）
     await svc.getStatus('sid-u3', '/repo')
     expect(fake.countOf('status')).toBe(1)
   })
@@ -509,7 +509,7 @@ describe('GitStateService.numstat', () => {
     expect(fake.calls).toHaveLength(9)
   })
 
-  it('invalidate 与在飞执行的竞态：飞行中被失效的执行完成后不回写缓存（旧值不复活）', async () => {
+  it('invalidate 与在途执行的竞态：执行中被失效的执行完成后不回写缓存（旧值不复活）', async () => {
     const fake = createFakeExecutor()
     const svc = createService(fake.executor)
 

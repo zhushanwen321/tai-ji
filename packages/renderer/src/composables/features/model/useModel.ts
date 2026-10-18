@@ -2,7 +2,7 @@
  * useModel —— 模型切换 + 思考等级设置编排（R2 features 层，跨 api + stores 的唯一合法层）。
  *
  * 这是「api 调用只在 features 层」铁律（ADR-0028）的落点：所有 model.switch /
- * session.setThinkingLevel RPC 调用 + sessionStore 更新的编排统一收口于此，
+ * session.setThinkingLevel RPC 调用 + sessionStore 更新的编排统一收敛于此，
  * 上层（panel/useComposerModelThinking、features/useNewTaskFlow）不再直调 @/api。
  *
  * 两种态的统一处理：

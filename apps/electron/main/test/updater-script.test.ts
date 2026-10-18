@@ -1,8 +1,8 @@
 /**
  * u1a 单元测试：updater-script（bash 脚本生成器，纯函数）。
  *
- * 覆盖目标（设计 .tmp/update-reliability.tech-design.md §3.3.2 命令级守卫，验收条款①）：
- *   - mac 脚本 staging 状态机全守卫 grep 级断言：dmg 解包链退出码检查（hdiutil
+ * 覆盖目标（设计 .tmp/update-reliability.tech-design.md §3.3.2 命令级检查，验收条款①）：
+ *   - mac 脚本 staging 状态机全检查 grep 级断言：dmg 解包链退出码检查（hdiutil
  *     attach / ditto，批次 3 设计 §3.3.3-B）、主二进制存在检查、
  *     备份 mv 失败 abort、换装失败回滚、60s 超时 abort（PID 制 kill -0）、
  *     /Volumes 只读拒装、tmp+rename result 原子写、open 无 -n
@@ -14,7 +14,7 @@
  *   - 批次 3 S8：dmg 解包原语断言（mountpoint 选址 / detach 失败不阻断 /
  *     S2-S5 换装回滚段未被解包改造波及）
  *
- * 「字符串断言」的边界说明：本文件只验证脚本内容含守卫片段（生成器视角）；
+ * 「字符串断言」的边界说明：本文件只验证脚本内容含检查片段（生成器视角）；
  * 脚本真实执行行为（bash 能跑通、分支真的触发）由 updater-script-integration.test.ts 覆盖。
  *
  * 运行：cd apps/electron/main && npx vitest run test/updater-script.test.ts
@@ -47,18 +47,18 @@ const LINUX_VARS = {
   parentPid: '9999999',
 }
 
-describe('u1a: mac 脚本模板（staging 状态机 + §3.3.2 全守卫）', () => {
-  it('生成脚本含 §3.3.2 全部命令级守卫且占位符全替换', () => {
+describe('u1a: mac 脚本模板（staging 状态机 + §3.3.2 全检查）', () => {
+  it('生成脚本含 §3.3.2 全部命令级检查且占位符全替换', () => {
     const script = buildUpdaterScript(MAC_VARS)
 
-    // ── 验收条款①逐项守卫（grep 级断言，验收对照）─────────────────
+    // ── 验收条款①逐项检查（grep 级断言，验收对照）─────────────────
     const guards: Array<[string, string]> = [
       // dmg 解包链退出码显式检查（批次 3 §3.3.3-B：hdiutil attach + ditto）
       ['attach 退出码检查', 'if ! hdiutil attach -nobrowse -readonly "{{DMG_PATH}}"'],
       ['挂载失败错误码', 'fail "dmg mount failed'],
       ['ditto 退出码检查', 'if ! ditto "$SRC_APP" "$STAGED_APP"'],
       ['ditto 失败错误码', 'fail "ditto copy failed"'],
-      // 主二进制缺失错误码（RI1 守卫，S8：解包后主二进制存在检查保留）
+      // 主二进制缺失错误码（RI1 检查，S8：解包后主二进制存在检查保留）
       ['主二进制缺失错误码', 'fail "extract failed"'],
       // 备份 mv 失败 abort（RM7：不吞错）
       ['备份 mv 失败检查', 'if ! mv "$APP" "$APP_OLD"'],
@@ -82,7 +82,7 @@ describe('u1a: mac 脚本模板（staging 状态机 + §3.3.2 全守卫）', () 
     for (const [name, frag] of guards) {
       // guards 里的 {{DMG_PATH}} 片段是模板源形态，比对前替换为实际注入值
       const expected = frag.replaceAll('{{DMG_PATH}}', MAC_VARS.dmgPath)
-      expect(script, `应包含守卫: ${name} (${expected})`).toContain(expected)
+      expect(script, `应包含检查: ${name} (${expected})`).toContain(expected)
     }
 
     // ── tmp + rename 原子写 result（m12）───────────────────────────
@@ -114,7 +114,7 @@ describe('u1a: mac 脚本模板（staging 状态机 + §3.3.2 全守卫）', () 
     // pgrep pattern 匹配已废弃（PID 制 by construction，RM9）
     expect(script, '不得再使用 pgrep').not.toContain('pgrep')
     // 旧 rm-then-mv「.old 预恢复」已删除：S3 残余窗口态禁止脚本动 .old（手动恢复出口）
-    expect(script, 'S0 守卫段不得预恢复 .old').not.toContain('restored from .old')
+    expect(script, 'S0 检查段不得预恢复 .old').not.toContain('restored from .old')
 
     // ── 占位符全替换 + 实际值注入 ──────────────────────────────────
     expect(script, '不应残留 {{ 占位符').not.toMatch(/\{\{[^}]+\}\}/)
@@ -124,7 +124,7 @@ describe('u1a: mac 脚本模板（staging 状态机 + §3.3.2 全守卫）', () 
     expect(script, '成功标记').toContain('write_result "done"')
   })
 
-  it('parentPid 缺失 → throw（契约：无父 PID 就没有可靠等待守卫，禁止静默跳过）', () => {
+  it('parentPid 缺失 → throw（契约：无父 PID 就没有可靠等待检查，禁止静默跳过）', () => {
     expect(() =>
       buildUpdaterScript({ ...MAC_VARS, parentPid: '' } as unknown as typeof MAC_VARS),
     ).toThrow(/parentPid is required/)
@@ -211,7 +211,7 @@ describe('批次 3 S8: mac S1 段 dmg 解包原语（设计 §3.3.3-B）', () =>
 })
 
 describe('u1a: linux 脚本模板（PID 等待 + 只读检测 + 原子 result，无 staging）', () => {
-  it('生成脚本含 §3.3.3 守卫（PID 等待/超时/只读/原子 result）且占位符全替换', () => {
+  it('生成脚本含 §3.3.3 检查（PID 等待/超时/只读/原子 result）且占位符全替换', () => {
     const script = buildLinuxUpdaterScript(LINUX_VARS)
 
     const guards: Array<[string, string]> = [
@@ -239,7 +239,7 @@ describe('u1a: linux 脚本模板（PID 等待 + 只读检测 + 原子 result，
       ['残留 .old 清理', 'rm -f "$APP_OLD"'],
     ]
     for (const [name, frag] of guards) {
-      expect(script, `应包含守卫: ${name} (${frag})`).toContain(frag)
+      expect(script, `应包含检查: ${name} (${frag})`).toContain(frag)
     }
 
     // 后台重启（& 放后台；P9 探针覆盖稳定性）

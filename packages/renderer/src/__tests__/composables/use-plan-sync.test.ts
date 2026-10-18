@@ -1,8 +1,8 @@
 /**
- * usePlanState 单测 —— plan 模式重设计 u1-store 层 2（编排：订阅 / 首拉 / 视图透出）。
+ * usePlanState 单测 —— plan 模式重设计 u1-store 层 2（编排：订阅 / 首次拉取 / 视图透出）。
  *
  * 覆盖（plan-mode-redesign impl-plan u1-store（历史项目，未入库）验收条款）：
- * - 首拉 watch immediate：初始挂载即拉 + 切 session 再拉；RPC reject（reply success=false）
+ * - 首次拉取 watch immediate：初始挂载即拉 + 切 session 再拉；RPC reject（reply success=false）
  *   走错误通路（分区 loadError）断言
  * - WS 帧驱动状态流转：awaiting → revising → 无值（reviewing → reviewing → writing）
  * - updateFor 分区断言：session A 帧不污染 session B 分区；capturedSid 与切焦点竞态模拟
@@ -13,7 +13,7 @@
  * 范式照抄 gen-stats-composable.test.ts：
  * - mock 边界：command 部分 mock（spread actual 保留 events 真实通道——useSessionEvents 经
  *   主模块 events.on 订阅，测试侧 dispatchSession 与实现侧订阅经同一模块实例共享注册表）
- * - 宿主组件：useSessionEvents 的 getCurrentInstance 守卫要求组件 setup 上下文，mount 宿主
+ * - 宿主组件：useSessionEvents 的 getCurrentInstance 检查要求组件 setup 上下文，mount 宿主
  *   expose composable 返回值
  * - 实现/测试均无 timer 依赖，异步链用 setTimeout(0) macrotask 排空（无需 fake timers）
  *
@@ -94,7 +94,7 @@ interface HostHandle {
 }
 
 /**
- * 测试宿主组件：setup 内调 usePlanState（useSessionEvents 守卫要求组件 setup 上下文），
+ * 测试宿主组件：setup 内调 usePlanState（useSessionEvents 检查要求组件 setup 上下文），
  * expose 返回值（对齐 gen-stats-composable.test.ts 形态）。
  */
 function mountHost(initialSid: string | null): HostHandle {
@@ -109,7 +109,7 @@ function mountHost(initialSid: string | null): HostHandle {
     }),
   )
   mountedWrappers.push(wrapper)
-  // vm 属性经 test-utils 暴露为宽类型；断言前运行时守卫收缩（禁裸 as）
+  // vm 属性经 test-utils 暴露为宽类型；断言前运行时类型收窄（禁裸 as）
   const candidate = (wrapper.vm as { plan?: unknown }).plan
   if (!candidate || typeof candidate !== 'object' || !('view' in candidate)) {
     throw new Error('host 组件未暴露 plan')
@@ -119,7 +119,7 @@ function mountHost(initialSid: string | null): HostHandle {
 
 /**
  * 排空在途异步链。setTimeout(0) 是 macrotask：其回调执行前，所有已排队微任务（promise
- * 链 → 写分区）与 Vue watcher（含 useSessionEvents 的重订 / 首拉 watch）全部跑完。
+ * 链 → 写分区）与 Vue watcher（含 useSessionEvents 的重订 / 首次拉取 watch）全部跑完。
  */
 async function settle(): Promise<void> {
   await new Promise((r) => setTimeout(r, 0))
@@ -143,10 +143,10 @@ afterEach(() => {
   while (mountedWrappers.length) mountedWrappers.pop()?.unmount()
 })
 
-// ── 首拉（watch immediate：挂载与切换合一时点）────────────────
+// ── 首次拉取（watch immediate：挂载与切换合一时点）────────────────
 
-describe('首拉：watch immediate', () => {
-  it('初始挂载即首拉（immediate），RPC 参数带超时常量', async () => {
+describe('首次拉取：watch immediate', () => {
+  it('初始挂载即首次拉取（immediate），RPC 参数带超时常量', async () => {
     mountHost('A')
     await settle()
     expect(commandMock).toHaveBeenCalledTimes(1)
@@ -157,7 +157,7 @@ describe('首拉：watch immediate', () => {
     )
   })
 
-  it('切 session 再拉：A → B 第二次首拉，reply 写 B 分区；切回 A 恢复 A 分区缓存', async () => {
+  it('切 session 再拉：A → B 第二次首次拉取，reply 写 B 分区；切回 A 恢复 A 分区缓存', async () => {
     const host = mountHost('A')
     await settle()
     resolveLatestForSid('A', { sessionId: 'A', planState: planStateOf('A', { docs: [DOC] }) })
@@ -171,14 +171,14 @@ describe('首拉：watch immediate', () => {
     await settle()
     expect(host.plan.view.value?.skills).toEqual(['tech-design'])
 
-    // 切回 A：分区缓存即时恢复（第二次首拉在途不阻塞显示）
+    // 切回 A：分区缓存即时恢复（第二次首次拉取在途不阻塞显示）
     host.sidRef.value = 'A'
     await settle()
     expect(commandMock).toHaveBeenCalledTimes(3)
     expect(host.plan.view.value?.docs?.length).toBe(1)
   })
 
-  it('null sid 不首拉（无活跃 session），视图为空', async () => {
+  it('null sid 不首次拉取（无活跃 session），视图为空', async () => {
     const host = mountHost(null)
     await settle()
     expect(commandMock).not.toHaveBeenCalled()
@@ -192,7 +192,7 @@ describe('首拉：watch immediate', () => {
     await settle()
     expect(host.plan.loadError.value).toBeNull()
 
-    // 切走再切回，第二次首拉失败
+    // 切走再切回，第二次首次拉取失败
     host.sidRef.value = null
     await settle()
     host.sidRef.value = 'A'
@@ -244,7 +244,7 @@ describe('WS 帧：状态流转与分区隔离', () => {
 
   it('切焦点后各分区各自正确：旧分区帧数据保留，新分区不受影响', async () => {
     // 注：useSessionEvents 只订阅焦点 sid 通道（D1：不做非活跃 session 兜底，后台 session
-    // 切回靠首拉刷新）——非焦点 sid 的帧只能经切换竞态窗口入分区（上一用例覆盖）。
+    // 切回靠首次拉取刷新）——非焦点 sid 的帧只能经切换竞态窗口入分区（上一用例覆盖）。
     // 本用例断言切焦点后「新焦点分区为空、旧分区数据保留」的可见语义。
     const host = mountHost('A')
     await settle()
@@ -258,7 +258,7 @@ describe('WS 帧：状态流转与分区隔离', () => {
     expect(host.plan.view.value).toBeNull()
     expect(host.plan.stage.value).toBeNull()
 
-    // 切回 A：分区缓存保留（首拉在途也不丢显示）
+    // 切回 A：分区缓存保留（首次拉取在途也不丢显示）
     host.sidRef.value = 'A'
     await settle()
     expect(host.plan.view.value?.state).toBe('reviewing')
@@ -285,45 +285,45 @@ describe('WS 帧：状态流转与分区隔离', () => {
   })
 })
 
-// ── 活动补拉：新 session 首拉窗口丢帧补偿（2026-09-25 真机缺陷）──────────────
+// ── 活动补充拉取：新 session 首次拉取窗口丢帧补偿（2026-09-25 真机缺陷）──────────────
 
 /**
- * 缺陷时序（真机双形态实证）：session 创建即首拉 → plan-state entry 未落盘，reply
+ * 缺陷时序（真机双形态实证）：session 创建即首次拉取 → plan-state entry 未落盘，reply
  * INACTIVE 落分区 → session.planState 帧早于订阅送达或 runtime 水位竞态未发布 →
- * 两条腿全断且无再拉触发点 → 状态带永不渲染（需手动切走切回）。补偿锚点 =
+ * 两条路径全断且无再拉触发点 → 状态带永不渲染（需手动切走切回）。补偿锚点 =
  * assistant 消息活动（message_start = turn 内最早边沿；message.complete 兜底；/plan
- * 写 entry 是 turn 前置动作，必然早于消息开始，补拉必得真值）。限频双门（非活跃 +
+ * 写 entry 是 turn 前置动作，必然早于消息开始，补充拉取必得真值）。限频双门（非活跃 +
  * 冷却）内聚 plan-store。
  */
-describe('活动补拉：首拉早于 entry 落盘 + 帧不可靠窗口的丢帧补偿', () => {
+describe('活动补充拉取：首次拉取早于 entry 落盘 + 帧不可靠窗口的丢帧补偿', () => {
   /** assistant 消息活动帧（message_start 首选；payload 形状本 handler 不消费） */
   function dispatchActivity(sid: string, type: 'message.message_start' | 'message.complete' = 'message.message_start'): void {
     events.dispatchSession(sid, { type, payload: { sessionId: sid } })
   }
 
-  it('首拉回 INACTIVE + planState 帧全程未达 → 消息活动触发补拉 → 真值恢复 view', async () => {
+  it('首次拉取回 INACTIVE + planState 帧全程未达 → 消息活动触发补充拉取 → 真值恢复 view', async () => {
     const host = mountHost('A')
     await settle()
-    // 首拉 reply = INACTIVE（真机形态：plan-state entry 尚未落盘时冷读）
+    // 首次拉取 reply = INACTIVE（真机形态：plan-state entry 尚未落盘时冷读）
     resolveLatestForSid('A', { sessionId: 'A', planState: planStateOf('A', { isActive: false }) })
     await settle()
     expect(host.plan.view.value?.isActive).toBe(false)
 
-    // session.planState 帧不 dispatch（真机：帧早于订阅送达 / 未发布——两条腿全断）
+    // session.planState 帧不 dispatch（真机：帧早于订阅送达 / 未发布——两条路径全断）
 
-    // assistant 消息开始（turn 内最早活动信号）→ 补拉发出
+    // assistant 消息开始（turn 内最早活动信号）→ 补充拉取发出
     dispatchActivity('A')
     await settle()
-    expect(commandMock).toHaveBeenCalledTimes(2) // 首拉 + 补拉
+    expect(commandMock).toHaveBeenCalledTimes(2) // 首次拉取 + 补充拉取
 
-    // 补拉 reply = planning（entry 已落盘后的冷读真值）→ view 恢复活跃
+    // 补充拉取 reply = planning（entry 已落盘后的冷读真值）→ view 恢复活跃
     resolveLatestForSid('A', { sessionId: 'A', planState: planStateOf('A') })
     await settle()
     expect(host.plan.view.value?.isActive).toBe(true)
     expect(host.plan.stage.value).not.toBeNull()
   })
 
-  it('message.complete 同样触发补拉（长 turn 多消息兜底锚点）', async () => {
+  it('message.complete 同样触发补充拉取（长 turn 多消息兜底锚点）', async () => {
     const host = mountHost('A')
     await settle()
     resolveLatestForSid('A', { sessionId: 'A', planState: planStateOf('A', { isActive: false }) })
@@ -334,7 +334,7 @@ describe('活动补拉：首拉早于 entry 落盘 + 帧不可靠窗口的丢帧
     expect(commandMock).toHaveBeenCalledTimes(2)
   })
 
-  it('[ADR-0122] 无冷却门：紧随的后续活动信号同样按门条件触发补拉（时间节流已删）', async () => {
+  it('[ADR-0122] 无冷却门：紧随的后续活动信号同样按门条件触发补充拉取（时间节流已删）', async () => {
     const host = mountHost('A')
     await settle()
     resolveLatestForSid('A', { sessionId: 'A', planState: planStateOf('A', { isActive: false }) })
@@ -346,13 +346,13 @@ describe('活动补拉：首拉早于 entry 落盘 + 帧不可靠窗口的丢帧
     resolveLatestForSid('A', { sessionId: 'A', planState: planStateOf('A', { isActive: false }) })
     await settle()
 
-    // 紧随的第二条活动信号：仍按非活跃门直接补拉（无冷却节流）
+    // 紧随的第二条活动信号：仍按非活跃门直接补充拉取（无冷却节流）
     dispatchActivity('A')
     await settle()
     expect(commandMock).toHaveBeenCalledTimes(3)
   })
 
-  it('非活跃门：view 已被 live 帧点亮时活动信号不触发补拉（活跃态由帧链自持）', async () => {
+  it('非活跃门：view 已被 live 帧点亮时活动信号不触发补充拉取（活跃态由帧链自持）', async () => {
     const host = mountHost('A')
     await settle()
     dispatchPlanState('A', planStateOf('A')) // live 帧点亮
@@ -361,10 +361,10 @@ describe('活动补拉：首拉早于 entry 落盘 + 帧不可靠窗口的丢帧
 
     dispatchActivity('A')
     await settle()
-    expect(commandMock).toHaveBeenCalledTimes(1) // 仅首拉，无补拉
+    expect(commandMock).toHaveBeenCalledTimes(1) // 仅首次拉取，无补充拉取
   })
 
-  it('活跃冻结检测（F-W3-2）：view 活跃但帧链无进展时，消息边沿触发补拉', async () => {
+  it('活跃冻结检测（F-W3-2）：view 活跃但帧链无进展时，消息边沿触发补充拉取', async () => {
     const host = mountHost('A')
     await settle()
     // live 帧点亮 view（②形态：planning + docs，frameRev=1）——真机 6c3：此后帧链再无帧到达
@@ -372,24 +372,24 @@ describe('活动补拉：首拉早于 entry 落盘 + 帧不可靠窗口的丢帧
     await settle()
     expect(host.plan.view.value?.state).toBe('planning')
 
-    // 首条消息边沿：只立帧基准，不补拉（健康链路常态 turn 不产生补拉）
+    // 首条消息边沿：只立帧基准，不补充拉取（健康链路常态 turn 不产生补充拉取）
     dispatchActivity('A')
     await settle()
     expect(commandMock).toHaveBeenCalledTimes(1)
 
-    // 第二条边沿：frameRev 无增长 = planState 帧链疑死 → 补拉直读磁盘
+    // 第二条边沿：frameRev 无增长 = planState 帧链疑死 → 补充拉取直读磁盘
     dispatchActivity('A')
     await settle()
     expect(commandMock).toHaveBeenCalledTimes(2)
 
-    // 补拉 reply = 恢复后的磁盘真值（dispatching）→ 阶段指示收敛 ③已批准
+    // 补充拉取 reply = 恢复后的磁盘真值（dispatching）→ 阶段指示收敛 ③已批准
     resolveLatestForSid('A', { sessionId: 'A', planState: planStateOf('A', { docs: [DOC], state: 'dispatching' }) })
     await settle()
     expect(host.plan.view.value?.state).toBe('dispatching')
     expect(host.plan.stage.value).toBe('approved')
   })
 
-  it('帧链恢复自动静默：frameRev 增长（planState 帧到达）后，消息边沿不再补拉', async () => {
+  it('帧链恢复自动静默：frameRev 增长（planState 帧到达）后，消息边沿不再补充拉取', async () => {
     const host = mountHost('A')
     await settle()
     dispatchPlanState('A', planStateOf('A', { docs: [DOC], state: 'planning' }))
@@ -402,47 +402,47 @@ describe('活动补拉：首拉早于 entry 落盘 + 帧不可靠窗口的丢帧
     dispatchPlanState('A', planStateOf('A', { docs: [DOC], state: 'reviewing' }))
     await settle()
 
-    // 后续消息边沿：rev 有进展 → 不补拉（活跃态重新由帧链自持）
+    // 后续消息边沿：rev 有进展 → 不补充拉取（活跃态重新由帧链自持）
     dispatchActivity('A')
     await settle()
     expect(commandMock).toHaveBeenCalledTimes(1)
   })
 
-  it('补拉走 updateFor(sid)：焦点 session 的活动信号补拉写自身分区（capturedSid 语义）', async () => {
+  it('补充拉取走 updateFor(sid)：焦点 session 的活动信号补充拉取写自身分区（capturedSid 语义）', async () => {
     const host = mountHost('A')
     await settle()
     resolveLatestForSid('A', { sessionId: 'A', planState: planStateOf('A', { isActive: false }) })
     await settle()
 
-    // 切焦点到 B（A 的订阅退订，A 分区数据保留；后台 session 无消费面=无活动信号转发）
+    // 切焦点到 B（A 的订阅退订，A 分区数据保留；后台 session 无消费方=无活动信号转发）
     host.sidRef.value = 'B'
     await settle()
     resolveLatestForSid('B', { sessionId: 'B', planState: planStateOf('B', { isActive: false }) })
     await settle()
 
-    // 焦点 B 的活动信号正常补拉且只写 B 分区
+    // 焦点 B 的活动信号正常补充拉取且只写 B 分区
     dispatchActivity('B')
     await settle()
-    expect(commandMock).toHaveBeenCalledTimes(3) // A 首拉 + B 首拉 + B 补拉
+    expect(commandMock).toHaveBeenCalledTimes(3) // A 首次拉取 + B 首次拉取 + B 补充拉取
     resolveLatestForSid('B', { sessionId: 'B', planState: planStateOf('B') })
     await settle()
     expect(host.plan.view.value?.isActive).toBe(true)
   })
 })
 
-// ── 崩溃恢复对账：session.restored 边沿冷拉（F-W3-2 恢复链重确认）──────────────
+// ── 崩溃恢复对账：session.restored 边沿主动拉取（F-W3-2 恢复链重确认）──────────────
 
-describe('崩溃恢复对账：session.restored 边沿冷拉', () => {
-  it('restored 帧到达即冷拉磁盘真值（不切换焦点也有重确认触发点）', async () => {
+describe('崩溃恢复对账：session.restored 边沿主动拉取', () => {
+  it('restored 帧到达即主动拉取磁盘真值（不切换焦点也有重确认触发点）', async () => {
     const host = mountHost('A')
     await settle()
-    // view 停在恢复前的旧形态（首拉 deferred 未 resolve，分区为 null 也可——本用例断言拉取触发）
+    // view 停在恢复前的旧形态（首次拉取 deferred 未 resolve，分区为 null 也可——本用例断言拉取触发）
     events.dispatchSession('A', {
       type: 'session.restored',
       payload: { sessionId: 'A', attempts: 1 },
     })
     await settle()
-    expect(commandMock).toHaveBeenCalledTimes(2) // 首拉 + restored 冷拉
+    expect(commandMock).toHaveBeenCalledTimes(2) // 首次拉取 + restored 主动拉取
 
     resolveLatestForSid('A', { sessionId: 'A', planState: planStateOf('A', { docs: [DOC], state: 'dispatching' }) })
     await settle()
@@ -453,7 +453,7 @@ describe('崩溃恢复对账：session.restored 边沿冷拉', () => {
 // ── 评论草稿：usePlanState 转发接线 + 清理编排增量 ───────────────
 // 草稿的焦点分区语义本体（加/删/清只作用焦点、跨区隔离、null 焦点 no-op）归
 // plan-store.test.ts「评论草稿：焦点分区操作与 per-session 隔离」；此处只测
-// composable 转发接线（removeDraft 唯一杀伤点）与 cleanup 编排（重拉增量）。
+// composable 转发接线（removeDraft 唯一杀伤点）与 cleanup 编排（重新拉取增量）。
 
 describe('评论草稿：usePlanState 转发接线 + 清理编排增量', () => {
   it('草稿按焦点分区隔离：A/B 各自累积、切回恢复、删除只作用焦点', async () => {
@@ -480,7 +480,7 @@ describe('评论草稿：usePlanState 转发接线 + 清理编排增量', () => 
     const host = mountHost('A')
     await settle()
     // 草稿先于 view 建立会被 §3.5 enter 翻转清兜底清掉（null→active = 新审阅轮；本文件
-    // 首拉是受控 deferred、用例不 resolve → 分区 view 恒 null），真机时序是审阅态（view
+    // 首次拉取是受控 deferred、用例不 resolve → 分区 view 恒 null），真机时序是审阅态（view
     // 就绪）下才产生草稿——先帧后草稿对齐真机序列（参照 plan-store.test.ts 同类用例）
     dispatchPlanState('A', planStateOf('A', { docs: [DOC] }))
     await settle()
@@ -501,10 +501,10 @@ describe('评论草稿：usePlanState 转发接线 + 清理编排增量', () => 
 
     host.sidRef.value = 'A'
     await settle()
-    // A 分区重新惰性 init：草稿与 view 全空（下次进入重新首拉）
+    // A 分区重新惰性 init：草稿与 view 全空（下次进入重新首次拉取）
     expect(host.plan.drafts.value).toEqual([])
     expect(host.plan.view.value).toBeNull()
-    expect(commandMock).toHaveBeenCalledTimes(3) // 切回 A 触发重新首拉
+    expect(commandMock).toHaveBeenCalledTimes(3) // 切回 A 触发重新首次拉取
 
     host.sidRef.value = 'B'
     await settle()

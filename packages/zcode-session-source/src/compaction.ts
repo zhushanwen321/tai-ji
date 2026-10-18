@@ -5,7 +5,7 @@
  * git 可追溯），本包为现行唯一承载（原拆分背景——max-lines 自 converter.ts 拆出、测试
  * 锚定 converter 公共面——见 git 历史）。
  *
- * 依赖方向：本模块只消费 assistant-mapping 的运行时守卫；对 converter 仅 `import type`
+ * 依赖方向：本模块只消费 assistant-mapping 的运行时检查；对 converter 仅 `import type`
  * 取 ZcodeMessageInput 输入形态（类型引用编译期擦除，无运行时边——不构成循环依赖）。
  */
 

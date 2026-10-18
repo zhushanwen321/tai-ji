@@ -60,7 +60,7 @@ const EXPECTED_IDS = [
   'session-list-create-input',
 ]
 
-describe('两档登记清单 ↔ §6.7 扫描清单全等（守卫类）', () => {
+describe('两档登记清单 ↔ §6.7 扫描清单全等（检查类）', () => {
   it('九成员基线全等：八先行档 prevent-default + 一后行档 aggregate-yield', () => {
     expect(LOCAL_ESC_CONSUMERS.map((e) => e.id).sort()).toEqual(EXPECTED_IDS)
     expect(LOCAL_ESC_CONSUMERS.filter((e) => e.tier === 'first')).toHaveLength(8)

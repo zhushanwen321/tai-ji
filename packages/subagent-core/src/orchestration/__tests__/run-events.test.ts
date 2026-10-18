@@ -201,7 +201,7 @@ const runSettledTimeLimited: WorkflowRunEvent = {
 
 // ── 穷尽性处理样例 ────────────────────────────────────────────
 
-/** 剥离 seq 的载荷投影（seq 分配断言与载荷断言解耦用）。 */
+/** 剥离 seq 的载荷派生视图（seq 分配断言与载荷断言解耦用）。 */
 function stripSeq<T extends { seq: number }>(event: T): Omit<T, "seq"> {
   const { seq: _s, ...rest } = event;
   return rest;
@@ -628,7 +628,7 @@ describe("转移表完整性", () => {
     }
   });
 
-  it("(from, on, guard) 键无重复（guard 互斥性由运行时兜底守卫）", () => {
+  it("(from, on, guard) 键无重复（guard 互斥性由运行时兜底检查）", () => {
     const keys = RUN_TRANSITIONS.map((r) => `${r.from}|${r.on}|${r.guard ?? ""}`);
     expect(new Set(keys).size).toBe(keys.length);
   });
@@ -894,7 +894,7 @@ describe("record 实装（createRunEventJournal，临时目录自建自删）", 
     }
     const scanned = await journal.scan("wf-1758-a1");
     // [W1] append 分配的 seq 覆盖入参携带值（构造性单调：末水位 + 1）——样本
-    // 自带 seq 与分配序刻意不同（末位样本 11 ≠ 分配 6），恰好钉死「分配权在
+    // 自带 seq 与分配序刻意不同（末位样本 11 ≠ 分配 6），恰好坐实「分配权在
     // journal 实装、入参 seq 被无视」的契约
     expect(scanned.map((e) => e.seq)).toEqual([1, 2, 3, 4, 5, 6]);
     // 剥离 seq 后载荷逐字段一致（零漂移）
@@ -909,7 +909,7 @@ describe("record 实装（createRunEventJournal，临时目录自建自删）", 
     expect(existsSync(join(dir, "wf-1758-a1.record.jsonl"))).toBe(true);
   });
 
-  it("scan 不存在的 run → 空数组（未落账 / 已过保留期清理）", async () => {
+  it("scan 不存在的 run → 空数组（未写入 journal 记录 / 已过保留期清理）", async () => {
     await expect(createRunEventJournal(dir).scan("wf-never")).resolves.toEqual([]);
   });
 
@@ -1049,7 +1049,7 @@ describe("record 实装（createRunEventJournal，临时目录自建自删）", 
     // 追加新行从 1 起号（旧文件 maxSeq=0）；「带 seq 的行」从此严格递增
     const appended = await journal.append(runId, stripSeq(runSettledFailed));
     expect(appended.seq).toBe(1);
-    // 混合 fold：旧行不跳过 + 新行 seq 守卫生效——重放去重不误伤旧行
+    // 混合 fold：旧行不跳过 + 新行 seq 检查生效——重放去重不误伤旧行
     const mixed = await journal.scan(runId);
     expect(foldRunEventCheckpoint(mixed, () => {}).state).toEqual({
       lifecycle: "terminal",
@@ -1058,7 +1058,7 @@ describe("record 实装（createRunEventJournal，临时目录自建自删）", 
   });
 });
 
-// ── 删值后历史行兼容（词表缩窄前落账的存量 record 行）──────────
+// ── 删值后历史行兼容（词表缩窄前写入 journal 记录的存量 record 行）──────────
 //
 // [D2]/[D4]/[D5]/[D6] 词表重构的读侧契约：删值成员（armed / member-pool——
 // [D5]/[D6] 删除；旧 ask-* 前缀行——[D4] 改名）的历史行经 scan 的词表外坏行
@@ -1078,7 +1078,7 @@ describe("删值后历史行兼容（存量 record 行可解析或跳过计日�
     rmSync(dir, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 });
   });
 
-  /** 删值成员历史行 fixture（[D4]/[D5]/[D6] 词表重构前成员的真实落账形态——字符串直写，不经现词表类型）。 */
+  /** 删值成员历史行 fixture（[D4]/[D5]/[D6] 词表重构前成员的真实写入 journal 记录形态——字符串直写，不经现词表类型）。 */
   const legacyDeletedMemberLines = [
     JSON.stringify({
       type: "armed",
@@ -1124,7 +1124,7 @@ describe("删值后历史行兼容（存量 record 行可解析或跳过计日�
       // 计数落日志（含坏行数与文件路径——排障可定位到具体 record 流）
       expect(warnSpy.mock.calls[0]?.join(" ")).toContain("3");
       expect(warnSpy.mock.calls[0]?.join(" ")).toContain(`${runId}.record.jsonl`);
-      // 好行 fold 照常收敛（历史残行不阻塞终局投影）
+      // 好行 fold 照常收敛（历史残行不阻塞终局派生视图）
       const checkpoint = foldRunEventCheckpoint(events, () => {
         throw new Error("保留成员行不该被判坏帧");
       });
@@ -1165,12 +1165,12 @@ describe("删值后历史行兼容（存量 record 行可解析或跳过计日�
   });
 });
 
-// ── [W1] fold 检查点（seq 守卫：tail 截断重建后全量重读的幂等去重）──────────
+// ── [W1] fold 检查点（seq 检查：tail 截断重建后全量重读的幂等去重）──────────
 
-describe("foldRunEventCheckpoint（seq 守卫，D6 域 fold 去重）", () => {
+describe("foldRunEventCheckpoint（seq 检查，D6 域 fold 去重）", () => {
   const noop = (): void => {};
 
-  it("全量重放同一事件序列产出逐字段相等 checkpoint（纯函数幂等；[D3] phase 骨架与 [D2] 中断投影随链产出）", () => {
+  it("全量重放同一事件序列产出逐字段相等 checkpoint（纯函数幂等；[D3] phase 骨架与 [D2] 中断派生视图随链产出）", () => {
     const events: WorkflowRunEvent[] = [
       runCreated,
       phaseStarted,
@@ -1184,7 +1184,7 @@ describe("foldRunEventCheckpoint（seq 守卫，D6 域 fold 去重）", () => {
     expect(twice).toEqual(once);
     expect(once.state).toEqual({ lifecycle: "terminal", outcome: "done" });
     expect(once.lastSeq).toBe(11);
-    // [D3] phase 状态机投影半边：startedAt/settledAt 随转移事件落投影（settledBy
+    // [D3] phase 状态机派生视图半边：startedAt/settledAt 随转移事件写入派生视图（settledBy
     // "frame"——phase-settled 帧值，不参与对称自愈的推导翻回）
     expect(once.phases.get("review")).toEqual({
       phase: "review",
@@ -1360,7 +1360,7 @@ describe("foldRunEventCheckpoint（seq 守卫，D6 域 fold 去重）", () => {
     expect(framedThenRetry.phases.get("review")?.settledAt).toBe(TS + 130_000);
   });
 
-  it("[D2] 中断/复活投影：interrupted / resumed 骨架半边随转移事件产出（D10 预算算式的切段边界数据源）", () => {
+  it("[D2] 中断/复活派生视图：interrupted / resumed 骨架半边随转移事件产出（D10 预算算式的切段边界数据源）", () => {
     const chain: WorkflowRunEvent[] = [
       runCreated,
       agentStarted,

@@ -45,7 +45,7 @@ export type SourceOrder = UpdateSource[]
 
 /**
  * 两主域探测 URL（域值消费 release-sources 单一来源导出，D1 防漂移）。
- * 取主域下载域而非 API 域：D4 被否谱系 b——探测是域名级链路判定，不打真实 API 端点。
+ * 取主域下载域而非 API 域：D4 不采用其余方案的理由 b——探测是域名级链路判定，不打真实 API 端点。
  */
 const GITHUB_PROBE_URL = `https://${RELEASE_SOURCE_HOSTS.githubDownload}`
 const GITCODE_PROBE_URL = `https://${RELEASE_SOURCE_HOSTS.gitcodeDownload}`

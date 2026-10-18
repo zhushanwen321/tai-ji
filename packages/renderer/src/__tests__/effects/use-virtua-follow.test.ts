@@ -16,7 +16,7 @@
  * - U1 onSessionRebuild（置 NaN 快照 + 开抑制窗）
  * - U3 guard 语义迁移（D5 删 useMessageStreamScroll 后）：
  *   followToBottom() 默认非 force 受 guard（旧 MS6 等价）/ followToBottom(true) 完整重置面
- *   贴底回真 + 距底快照清零（旧 MS4/force 语义等价）；MS1-MS3/MS5/isStreaming 守卫的去留逐条
+ *   贴底回真 + 距底快照清零（旧 MS4/force 语义等价）；MS1-MS3/MS5/isStreaming 检查的去留逐条
  *   依据见迁移 describe 块注释
  *
  * INVAR-M4-2′（现行语义，取代旧 INVAR-M4-2「wheel-only + onScroll 只单向翻真」）：
@@ -478,7 +478,7 @@ describe('useVirtuaFollow', () => {
      * 用例以 U1 新 API 等价表达迁入本文件。旧用例逐条去留（MS1-MS6，旧文件已删）：
      * - MS4（onMounted → scrollToBottom(true)）：force 原语语义由 W1TC8 + 本组
      *   「force 完整重置面」覆盖；onMounted 接线本体已内联回 MessageStream.vue（D5②），
-     *   挂载首滚属接线面，挂载级测试不断言首滚（不在本测域）。
+     *   挂载首滚属接线点，挂载级测试不断言首滚（不在本测域）。
      * - MS5（messages.length → follow）：watch 本体迁 useMessageStreamFollowTriggers（U2），
      *   follow 原语的 guard 面由 W1TC5/W1TC6/W1TC7 + D7① 拖拽用例覆盖，不重复迁移。
      * - MS6（完成滚动不带 force、尊重 guard 不扯回）：→ 本组「followToBottom() 默认非 force」
@@ -486,7 +486,7 @@ describe('useVirtuaFollow', () => {
      * - MS1/MS2/MS3（isSessionActive 完成滚动 watch 三态）：watch 随 D5③ 删除（完成滚动改由
      *   「trace 折叠 → spacer 变化 → 静默跟随」+ clamp 回声覆盖）——API 等价表达 =
      *   静默跟随变体（贴底滚底）+ D7① clamp 回声（脱离翻 true），既有用例已覆盖，不重复迁移。
-     * - isStreaming 守卫触发语义：守卫在 U2 triggers 的末条文本长度 watch（useVirtuaFollow API
+     * - isStreaming 检查触发语义：检查在 U2 triggers 的末条文本长度 watch（useVirtuaFollow API
      *   无 isStreaming 概念）；其 guard 面即 followIfStuck rAF 内重读（W1TC7），不重复迁移。
      */
 

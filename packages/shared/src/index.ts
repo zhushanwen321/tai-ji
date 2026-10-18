@@ -28,7 +28,7 @@ export type {
   RollingRestartDeferredPayload, RollingRestartCountdownPayload, RollingRestartForcedPayload,
   RollingRestartStatusPayload,
   ReattachDeferReason, ReattachDeferredPayload,
-  // plan 模式投影域（plan-state entry 派生视图 + 产物元数据，形状与 extension-protocol 同形）
+  // plan 模式派生视图域（plan-state entry 派生视图 + 产物元数据，形状与 extension-protocol 同形）
   PlanDocMeta, PlanStateView,
   ConnectionTestResultRow,
   // delivery 域 DTO（投递所有权内核 D5/D7，u-contracts 定义 → u3a 收编根入口）：
@@ -147,7 +147,7 @@ export { BASE_PORT, DEV_PORT_OFFSET, MAX_PORT, ENV_WHITELIST_PREFIXES, AMBIENT_E
 
 export type { ProviderApiType } from './constants'
 // 崩溃韧性共享契约 SSOT（实施计划 u-foundation：
-// 出站帧守卫阈值 D3 / 全量读预检阈值 D5 / 历史双预算 D4 / 日志保留期 D6-⑦）。
+// 出站帧检查阈值 D3 / 全量读预检阈值 D5 / 历史双预算 D4 / 日志保留期 D6-⑦）。
 // 注意：readLogKeepDays 是 Node-only 函数（函数体访问 process.env）——本 barrel 被
 // renderer（浏览器）整包 import，import 本身安全（constants.ts 模块顶层无 process 访问），
 // 但 renderer 严禁调用（process 未定义 ReferenceError）；main / runtime 专用，
@@ -203,7 +203,7 @@ export type { ShieldRect, ShieldFace, ShieldsFacesPayload } from './ipc-payloads
 // 种类闭集——core overlay 域、main display-gate 校验、preload ElectronAPI 签名与
 // renderer ipc 封装四方共用同一词表，防漂移）。
 export type { OverlayContentKind } from './ipc-payloads'
-// 崩溃台账事件 Schema SSOT（docs/architecture/crash-forensics-and-watchdog.md §3.3 D1，
+// 崩溃条目清单事件 Schema SSOT（docs/architecture/crash-forensics-and-watchdog.md §3.3 D1，
 // 实施计划 u1a：layer/event/reason 枚举 + 字段集 + writer 接口——u1b runtime 与
 // u1c main 两 writer 共用，禁止复制定义；纯类型/常量无 node 依赖，barrel 安全）。
 export type {
@@ -384,7 +384,7 @@ export {
   WORKFLOW_RUN_EVENT_ENTRY_COVERAGE_LOCK,
 } from './workflow'
 // pi-preset 用具名导出（S-SH-3）：避免 export * 导致的命名冲突与 tree-shaking 不友好。
-// 所有 type / const / 运行时守卫均显式列出，新增导出时同步在此登记。
+// 所有 type / const / 运行时检查均显式列出，新增导出时同步在此登记。
 export type {
   ToolMode,
   ExtensionMode,

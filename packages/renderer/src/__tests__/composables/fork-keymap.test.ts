@@ -4,8 +4,8 @@
  * 结果，源码断言只额外锁「代码写法」，重命名 helper 即误红）。
  *
  * 覆盖 U15-U16：
- * - U15 ⌘G / ⌘⇧G 触发 + shift 守卫（forkFromLastAssistant / enterForkModeFromLastAssistant）
- * - 收尾 9 ⌘[/⌘]/⌘, 全局快捷键（canBack/canForward 守卫 + openSettings）
+ * - U15 ⌘G / ⌘⇧G 触发 + shift 检查（forkFromLastAssistant / enterForkModeFromLastAssistant）
+ * - 收尾 9 ⌘[/⌘]/⌘, 全局快捷键（canBack/canForward 检查 + openSettings）
  * - U16 composer focus 时禁用 fork/handoff 快捷键
  *
  * 策略：mount Sidebar（最小 stub 排除子组件）+ dispatchKey 派发，断言 mock 调用与
@@ -135,8 +135,8 @@ function focusComposer(): void {
   composerEl.focus()
 }
 
-// ── U15：⌘G / ⌘⇧G 触发 + shift 守卫 ────────────────────────────────────
-describe('U15：⌘G / ⌘⇧G 触发 fork 动作 + shift 守卫', () => {
+// ── U15：⌘G / ⌘⇧G 触发 + shift 检查 ────────────────────────────────────
+describe('U15：⌘G / ⌘⇧G 触发 fork 动作 + shift 检查', () => {
   it('⌘G（无 shift）触发 forkFromLastAssistant', async () => {
     const wrapper = mountSidebar()
     dispatchKey({ key: 'g', meta: true })
@@ -156,14 +156,14 @@ describe('U15：⌘G / ⌘⇧G 触发 fork 动作 + shift 守卫', () => {
     dispatchKey({ key: 'g', meta: true })
     await wrapper.vm.$nextTick()
     expect(forkFromLastAssistantMock).toHaveBeenCalledTimes(1)
-    // shift 守卫：⌘G（无 shift）不应同时触发 shift 项
+    // shift 检查：⌘G（无 shift）不应同时触发 shift 项
     expect(enterForkModeFromLastAssistantMock).not.toHaveBeenCalled()
   })
 })
 
 // ── 收尾 9：⌘[/⌘]/⌘, 从 AppShell 归位 useGlobalShortcuts ─────────────────
 // spec：05-sidebar-visual.md 收尾 9 —— keymap 加 3 键（mod+[ back / mod+] forward /
-// mod+, openSettings），canBack/canForward 守卫保留，不挂 commandId；AppShell 删散落块。
+// mod+, openSettings），canBack/canForward 检查保留，不挂 commandId；AppShell 删散落块。
 describe('收尾 9：⌘[/⌘]/⌘, 全局快捷键（从 AppShell 归位）', () => {
   it('⌘[ 触发 navigation.back（canBack=true）', async () => {
     const wrapper = mountSidebar()
@@ -206,7 +206,7 @@ describe('收尾 9：⌘[/⌘]/⌘, 全局快捷键（从 AppShell 归位）', (
     expect(nav.pointer).toBe(-1)
   })
 
-  it('composer 聚焦时 ⌘, 仍触发 openSettings（仅 fork/handoff 条目受 focus 守卫）', async () => {
+  it('composer 聚焦时 ⌘, 仍触发 openSettings（仅 fork/handoff 条目受 focus 检查）', async () => {
     // 前置：非聚焦态 ⌘, 必须正常触发（避免空绿）
     const wrapperUnfocused = mountSidebar()
     dispatchKey({ key: ',', meta: true })
@@ -233,7 +233,7 @@ describe('U16：composer focus 时 ⌘G 不触发 fork', () => {
     expect(forkFromLastAssistantMock).toHaveBeenCalledTimes(1)
     wrapperUnfocused.unmount()
 
-    // 聚焦 composer 后再按 ⌘G：focus 守卫应拦截，不触发 fork
+    // 聚焦 composer 后再按 ⌘G：focus 检查应拦截，不触发 fork
     forkFromLastAssistantMock.mockClear()
     const wrapper = mountSidebar()
     focusComposer()
@@ -242,7 +242,7 @@ describe('U16：composer focus 时 ⌘G 不触发 fork', () => {
     expect(forkFromLastAssistantMock).not.toHaveBeenCalled()
   })
 
-  it('composer 聚焦时 ⌘⇧G 也不触发 enterForkModeFromLastAssistant（shift 条目同样受守卫）', async () => {
+  it('composer 聚焦时 ⌘⇧G 也不触发 enterForkModeFromLastAssistant（shift 条目同样受检查）', async () => {
     const wrapper = mountSidebar()
     focusComposer()
     dispatchKey({ key: 'g', meta: true, shift: true })

@@ -13,7 +13,7 @@
  *   renderer 侧 catch（W2 接）。
  * - create 失败 reject（display-containers §7.4 错误通道）：manager.create 抛出经 handle
  *   变成 invoke rejection，renderer caller catch 落错误占位（重试 = create + show + navigate）。
- * - 显示收口 / 转发键清单的契约类通道（overlay-state / shields / forward-keys）payload
+ * - 显示收敛 / 转发键清单的契约类通道（overlay-state / shields / forward-keys）payload
  *   经 gateway 纯函数校验，非法即 reject（error envelope 带原因）。
  *
  * 依赖方向：browser-handlers → electron(ipcMain) + interfaces(BrowserViewManager type-only)
@@ -28,7 +28,7 @@ import { forwardKeyRegistry } from '../browser/gateway/forward-keys.js'
 /** 'browser:forward-keys' 的 op 字面量（set=全量重报；register/unregister=注册/注销增量） */
 /** 'browser:forward-keys' 的请求体（单 payload 对象，AGENTS 规则 #1）：
  *  set = 全量重报（替换整个清单）；add/remove = 注册/注销增量（可同请求组合） */
-interface ForwardKeyRequest { // oe-exempt:20261003:framework:类型契约先行——容器/编排/注册表契约层，D1 下游单元即为消费面
+interface ForwardKeyRequest { // oe-exempt:20261003:framework:类型契约先行——容器/编排/注册表契约层，D1 下游单元即为消费方
   set?: string[]
   add?: string[]
   remove?: string[]
@@ -107,8 +107,8 @@ export function registerBrowserHandlers(
     manager.show(sessionId)
   })
 
-  // 切换可见 view（Wave 4 per-session 隔离；display-containers §7.4 R3 收口后语义）：
-  // hide-only 收口 + 浮层随行豁免——非「浮层开 ∧ 内容 browser」态恒只隐藏不显示，
+  // 切换可见 view（Wave 4 per-session 隔离；display-containers §7.4 R3 收敛后语义）：
+  // hide-only 收敛 + 浮层随行豁免——非「浮层开 ∧ 内容 browser」态恒只隐藏不显示，
   // 显示唯一触发 = browser-view-manager.applyDisplay 统一谓词。
   // 场景：renderer watch(focusedSessionId) → 切 session 时调。
   ipcMain.handle('browser:focus', (_event, sessionId: string) => {
@@ -152,7 +152,7 @@ export function registerBrowserHandlers(
     },
   )
 
-  // ── 显示收口事实源上报（display-containers §7.4 show 统一谓词 / 层级共存守卫）────
+  // ── 显示收敛事实源上报（display-containers §7.4 show 统一谓词 / 层级共存检查）────
 
   // 浮层开合/内容切换上报：{ open, content, sessionId }（关浮层/换出 browser 内容 → 隐藏 view；
   // 重开 → 恢复显示）。非法 payload reject（error envelope）。

@@ -27,7 +27,7 @@ const emit = defineEmits<{
   'update:modelValue': [state: QuestionState]
   /** 单选选中普通选项后自动前进（壳切换 activeIdx） */
   advance: []
-  /** Other input 的 Enter（已过 IME isComposing 守卫）：壳决定前进到下一题或提交 */
+  /** Other input 的 Enter（已过 IME isComposing 检查）：壳决定前进到下一题或提交 */
   'other-enter': []
 }>()
 
@@ -201,7 +201,7 @@ function onOtherEnter(e: KeyboardEvent): void {
     <div class="flex min-w-0 flex-1 flex-col">
       <span class="text-[length:var(--text-sm)] font-normal leading-1.5 text-neutral-fg">{{ t('extensionUI.other') }}</span>
       <!-- 选中时展开输入框（独立成行，自动聚焦）。
-           @keydown.stop 阻止冒泡到卡片容器；Enter 单独处理（IME 守卫后上抛） -->
+           @keydown.stop 阻止冒泡到卡片容器；Enter 单独处理（IME 检查后上抛） -->
       <Input
         v-if="isOtherSelected()"
         ref="otherInputComp"

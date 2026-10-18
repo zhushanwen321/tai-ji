@@ -4,7 +4,7 @@
  *
  * 三路状态迁移：
  * - onInstallClick → showConfirmDialog 置 true（不触发 install）
- * - onConfirmInstall → 先关 Dialog 再调 performInstall（顺序契约：UI 先收口再执行）
+ * - onConfirmInstall → 先关 Dialog 再调 performInstall（顺序契约：UI 先收尾再执行）
  * - onLater → 仅关 Dialog，不触发 install
  *
  * 运行：cd packages/renderer && npx vitest run src/composables/features/settings/__tests__/useUpdateInstallActions.test.ts

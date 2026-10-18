@@ -53,7 +53,7 @@ const props = defineProps<{
   /** 主 session id（agentcall 快照的显式归属——overlay 绑定发起 session 不随焦点，D11⑤）。 */
   sessionId: string
   call: WorkflowAgentCall
-  /** run 投影状态（D9 派生输入）。 */
+  /** run 派生视图状态（D9 派生输入）。 */
   runStatus: WorkflowRunStatus
 }>()
 
@@ -69,7 +69,7 @@ const view = computed(() => deriveCallView(props.call, props.runStatus))
  * 复用 SubagentTab 的 agentcall 快照编排（零新拉取链）：currentRecord 传 null（三段式
  * subagent 专属兜底/种入分支不适用 agentcall 快照语义，agentcall 分支不读它）；
  * agentcallMainSid 显式传 props.sessionId——overlay agent tab 绑定发起 session，不经
- * 焦点 pane（焦点漂移窗口内的重拉仍打正确分区，D11⑤）。
+ * 焦点 pane（焦点漂移窗口内的重新拉取仍打正确分区，D11⑤）。
  */
 const { loadError, loadSubagentData } = useSubagentTabData({
   currentRecord: computed(() => null),
@@ -80,11 +80,11 @@ const { loadError, loadSubagentData } = useSubagentTabData({
 onMounted(() => {
   void loadSubagentData(virtualId.value)
 })
-// tab 复用实例切 call 时重拉快照（agentcall 快照只读语义：重拉覆盖分区）
+// tab 复用实例切 call 时重新拉取快照（agentcall 快照只读语义：重新拉取覆盖分区）
 watch(virtualId, (vid) => {
   void loadSubagentData(vid)
 })
-// [D8/§3.1-2] workflowUpdate 信号重拉：store 活跃 run 信号纪元自增（信号命中活跃 run）
+// [D8/§3.1-2] workflowUpdate 信号重新拉取：store 活跃 run 信号纪元自增（信号命中活跃 run）
 // → 重调本 tab 快照拉取（拉取时刻快照 + 信号触发重新拉取——对话流随 run 推进刷新）
 watch(() => store.activeRunSignalEpoch, () => {
   void loadSubagentData(virtualId.value)

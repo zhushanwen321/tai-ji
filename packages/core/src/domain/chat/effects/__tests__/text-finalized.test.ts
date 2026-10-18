@@ -3,7 +3,7 @@
  *
  * 设计锚点 = shared.Message.textFinalized 注释 + registry.ts markStreamingAssistantTextFinalized：
  * pi 回合 =「assistant 消息 → 工具 → assistant 消息 → …」循环，live 气泡 status 要到回合级
- * message.complete 才整体收口；message_end（assistant role）当下按位置给末条 streaming
+ * message.complete 才整体收尾；message_end（assistant role）当下按位置给末条 streaming
  * 气泡打 textFinalized，UI（Turn.unitBlockProps）据此逐消息派生正文颜色——长工具回合中
  * 已写完的正文不再滞留 streaming 灰。
  *

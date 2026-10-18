@@ -13,7 +13,7 @@
  *   复用 FileView error 态范式。
  * - RD-5#3（minor）：useFileSearch.load / useFileTree.loadTree overlay —— 降级路径
  *   补 console.warn 留痕（此前 catch{return[]} / allSettled rejected 分支零日志）。
- * - RD-5#5（minor）：useBrowserZoom —— session 切换的 async watch 加 seq 守卫
+ * - RD-5#5（minor）：useBrowserZoom —— session 切换的 async watch 加 seq 检查
  *   （丢弃 stale 响应）+ catch（IPC 失败不裸 reject）。
  *
  * 运行：
@@ -98,7 +98,7 @@ describe('RD-5#3 useFileSearch.load 失败留痕（降级空数组 + warn）', (
   })
 })
 
-// ── RD-5#5：useBrowserZoom seq 守卫 + catch ───────────────────────
+// ── RD-5#5：useBrowserZoom seq 检查 + catch ───────────────────────
 
 const zoomMocks = vi.hoisted(() => ({
   browserGetZoom: vi.fn(),
@@ -112,7 +112,7 @@ vi.mock('@/lib/ipc', () => ({
 
 import { useBrowserZoom } from '@/composables/features/browser/useBrowserZoom'
 
-describe('RD-5#5 useBrowserZoom seq 守卫 + catch', () => {
+describe('RD-5#5 useBrowserZoom seq 检查 + catch', () => {
   beforeEach(() => {
     zoomMocks.browserGetZoom.mockReset()
     zoomMocks.browserSetZoom.mockClear()

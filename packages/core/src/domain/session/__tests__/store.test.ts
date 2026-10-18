@@ -135,7 +135,7 @@ describe('createSessionStore', () => {
     store.applySnapshot({ groups: [{ cwd: '/a', sessions: [s1] }] })
 
     // owner 快照显式给空串/0 → 覆盖（与旧 patch 语义的差异点即在此：
-    // 磁盘扫描占位值的空守卫归 W15，见下方 TC-W15 组）
+    // 磁盘扫描占位值的空检查归 W15，见下方 TC-W15 组）
     store.applySnapshot('s1', { modelId: '', thinkingLevel: '', tokenCount: 0 })
     const after = store.list.value[0]
     expect(after.modelId).toBe('')
@@ -143,8 +143,8 @@ describe('createSessionStore', () => {
     expect(after.tokenCount).toBe(0)
   })
 
-  // ── W15 磁盘占位值守卫（D1b 按来源分流，双向断言）──────────────────
-  // 快照来源：source:'scan' = 磁盘扫描占位（守卫生效）；缺省 = owner 权威（D1b 照常）。
+  // ── W15 磁盘占位值检查（D1b 按来源分流，双向断言）──────────────────
+  // 快照来源：source:'scan' = 磁盘扫描占位（检查生效）；缺省 = owner 权威（D1b 照常）。
 
   it('TC-W15-1: 扫描来源快照的占位 modelId 空串不覆盖已知真值', () => {
     const store = createSessionStore()
@@ -165,31 +165,31 @@ describe('createSessionStore', () => {
     store.applySnapshot('s1', { tokenCount: 0, source: 'scan' })
     expect(store.list.value[0].tokenCount).toBe(512)
 
-    // 双字段同帧（scannedToSummary 产出形态）：占位 ''/0 都被守卫，真值均保留
+    // 双字段同帧（scannedToSummary 产出形态）：占位 ''/0 都被检查，真值均保留
     store.applySnapshot('s1', { modelId: '', tokenCount: 0, source: 'scan' })
     expect(store.list.value[0].modelId).toBe('m1')
     expect(store.list.value[0].tokenCount).toBe(512)
   })
 
-  it('TC-W15-3: owner 快照的权威空值必须覆盖旧名/旧值（防守卫扩大化）', () => {
+  it('TC-W15-3: owner 快照的权威空值必须覆盖旧名/旧值（防检查扩大化）', () => {
     const store = createSessionStore()
     const s1 = makeSession({ id: 's1', label: '旧名', modelId: 'm1', tokenCount: 100 })
     store.applySnapshot({ groups: [{ cwd: '/a', sessions: [s1] }] })
 
     // owner 权威空值（缺省来源，无 source:'scan'）：sessionName 空 = 未命名 = 权威空
     // （label 空值语义沿用登记表 #1——pi sessionName 空 = 未命名合法态，wire 到快照层
-    // 为 label:''；label 实例已撤销，PR #185 MF1，语义不变）必须覆盖旧名——守卫只对
+    // 为 label:''；label 实例已撤销，PR #185 MF1，语义不变）必须覆盖旧名——检查只对
     // 扫描来源生效，不得把 owner 空值语义一并拦掉（D1b 两条规则不混用）。
     store.applySnapshot('s1', { label: '' })
     expect(store.list.value[0].label).toBe('')
 
-    // owner 的 modelId:''/tokenCount:0 同理正常覆盖（与 TC-4b 同语义，此处锚定守卫未扩大化）
+    // owner 的 modelId:''/tokenCount:0 同理正常覆盖（与 TC-4b 同语义，此处锚定检查未扩大化）
     store.applySnapshot('s1', { modelId: '', tokenCount: 0 })
     expect(store.list.value[0].modelId).toBe('')
     expect(store.list.value[0].tokenCount).toBe(0)
   })
 
-  it('TC-W15-4: owner 快照的 modelId 真值正常覆盖（不因守卫误伤真值路径）', () => {
+  it('TC-W15-4: owner 快照的 modelId 真值正常覆盖（不因检查误伤真值路径）', () => {
     const store = createSessionStore()
     const s1 = makeSession({ id: 's1', modelId: 'provider/m-old', thinkingLevel: 'low' })
     store.applySnapshot({ groups: [{ cwd: '/a', sessions: [s1] }] })
@@ -201,12 +201,12 @@ describe('createSessionStore', () => {
     expect(after.thinkingLevel).toBe('high')
   })
 
-  it('TC-W15-5: 守卫边界——扫描快照的非占位字段照常合并；target 同为占位时覆盖等值无害', () => {
+  it('TC-W15-5: 检查边界——扫描快照的非占位字段照常合并；target 同为占位时覆盖等值无害', () => {
     const store = createSessionStore()
     const s1 = makeSession({ id: 's1', modelId: '', tokenCount: 0, status: 'idle' })
     store.applySnapshot({ groups: [{ cwd: '/a', sessions: [s1] }] })
 
-    // 守卫只拦占位空值：扫描快照的非守卫字段（label/status/thinkingLevel）与占位真值
+    // 检查只拦占位空值：扫描快照的非检查字段（label/status/thinkingLevel）与占位真值
     // （如未来扫描能读出的非空 modelId）照常 D1b 覆盖
     store.applySnapshot('s1', { label: '扫描名', status: 'done', thinkingLevel: 'high', modelId: 'scanned-true', source: 'scan' })
     const after = store.list.value[0]
@@ -215,7 +215,7 @@ describe('createSessionStore', () => {
     expect(after.thinkingLevel).toBe('high')
     expect(after.modelId).toBe('scanned-true')
 
-    // 覆盖后的非空 modelId 再次遭遇扫描占位快照 → 守卫生效保留真值（与 TC-W15-1 同语义）
+    // 覆盖后的非空 modelId 再次遭遇扫描占位快照 → 检查生效保留真值（与 TC-W15-1 同语义）
     store.applySnapshot('s1', { modelId: '', source: 'scan' })
     expect(store.list.value[0].modelId).toBe('scanned-true')
 
@@ -228,7 +228,7 @@ describe('createSessionStore', () => {
     expect(store.list.value.find((s) => s.id === 's2')?.tokenCount).toBe(0)
   })
 
-  it('TC-4d: 单 session 快照 undefined → 整条静默跳过（mergeViewSnapshot 空快照守卫，托管字段全保留）', () => {
+  it('TC-4d: 单 session 快照 undefined → 整条静默跳过（mergeViewSnapshot 空快照检查，托管字段全保留）', () => {
     const store = createSessionStore()
     const s1 = makeSession({ id: 's1', label: 'old', modelId: 'm1', status: 'active', tokenCount: 9 })
     store.applySnapshot({ groups: [{ cwd: '/a', sessions: [s1] }] })

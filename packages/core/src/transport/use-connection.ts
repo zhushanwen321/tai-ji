@@ -6,9 +6,9 @@
  * - 监听 runtime 重启（onRuntimePort 推新端口 → 断开重连）
  * - visibility 主动重连（切回前台且未连接时用最近 url 重连，不干等指数退避最长 30s）
  * - teardown()：取消全部监听 + 断开
- * - 模块级单例副作用 + initialised/dispatcherInstalled 幂等守卫（保持）
+ * - 模块级单例副作用 + initialised/dispatcherInstalled 幂等检查（保持）
  *
- * 连接发现收口（renderer-package-topology §2.4「连接发现策略可插拔」）：形态判定由
+ * 连接发现收敛（renderer-package-topology §2.4「连接发现策略可插拔」）：形态判定由
  * resolveConnectionMode() 薄谓词单点裁决，首连 init / HMR 重连 / retryRuntime 三处消费
  * 其结果；连接目标解析不进谓词（首连 knownPort→fallback 与 HMR resolveFallbackPort
  * 的目标解析语义不同，各分支原地保留，不伪合并）：
@@ -58,8 +58,8 @@ import { transportUnavailableError, notDeliveredError } from './errors'
 import { BASE_PORT, DEV_PORT_OFFSET } from '@taiji/shared'
 
 /**
- * 本地形态 runtime WS 地址（renderer-package-topology §2.4「连接发现策略收口」）。
- * 本函数是连接发现链路上该 URL 形态的唯一拼接点（收口单点）——新增连接发起路径
+ * 本地形态 runtime WS 地址（renderer-package-topology §2.4「连接发现策略收敛」）。
+ * 本函数是连接发现链路上该 URL 形态的唯一拼接点（收敛单点）——新增连接发起路径
  * 一律经 useConnection 的形态分支取得连接目标，禁止在分支外内联重拼。
  */
 function localRuntimeUrl(port: number): string {
@@ -67,7 +67,7 @@ function localRuntimeUrl(port: number): string {
 }
 
 /**
- * mock 形态连接地址（与 localRuntimeUrl 同款收口单点）。URL 只是 platform factory
+ * mock 形态连接地址（与 localRuntimeUrl 同款收敛单点）。URL 只是 platform factory
  * 的路由标识（'mock:' 前缀判别不再跨模块约定，S4），拼接点收在本函数内。
  */
 function mockRuntimeUrl(): string {
@@ -90,7 +90,7 @@ export interface ResolvedConnectionProfile {
  * 远程形态连接 profile 端口（topology §2.4「远程 = profile」；移动壳装配点注入实现）。
  * core 零 location / 零 storage 直读（headless 约束），URL 与凭据的解析全部委托壳层——
  * profile 策略的凭据来源分支（URL query 验身落 storage / storage 兜底 / 皆无落 token
- * 输入视图）在壳层实现内闭合，core 只消费解析结果。
+ * 输入视图）在壳层实现内完成，core 只消费解析结果。
  */
 export interface ConnectionProfilePort {
   resolve(): Promise<ResolvedConnectionProfile>
@@ -101,7 +101,7 @@ export interface ConnectionProfilePort {
  *
  * renderer（composables/useConnection.ts 装配点）注入实现：
  * - ipc → lib/ipc（getRuntimePort/getRuntimePortOffset/onRuntimePort/restartRuntime 等）。
- *   可选字段 = 形态判别的一半（init 收口点）：有值 = 本地形态，无值 = 远程形态。
+ *   可选字段 = 形态判别的一半（init 收敛点）：有值 = 本地形态，无值 = 远程形态。
  *   electron 装配恒注入（含 VITE_MOCK 构建——mock 由 env.isMock 优先分流，与 ipc 正交）
  * - visibility → visibilityState + visibilitychange 监听（壳层 DOM 实现）
  * - env → VITE_MOCK / DEV（core 不能读构建环境标志，由壳读）
@@ -160,7 +160,7 @@ export interface ConnectionPorts {
   onRuntimeUnavailable(reason: 'restart' | 'disconnect'): void
 }
 
-/** 本地形态 IPC 端口面（ipc 存在性判别收口后，本地分支内部使用的必有视图）。 */
+/** 本地形态 IPC 端口面（ipc 存在性判别收敛后，本地分支内部使用的必有视图）。 */
 type RuntimeIpcPorts = NonNullable<ConnectionPorts['ipc']>
 
 // ── 端口注入（C1 范式：模块级实现变量 + 注入函数 + 未注入 warn 降级） ──
@@ -182,7 +182,7 @@ function requirePorts(): ConnectionPorts | null {
   return portsImpl
 }
 
-// ── 模块级单例状态（W4/幂等守卫） ─────────────────────────────────
+// ── 模块级单例状态（W4/幂等检查） ─────────────────────────────────
 
 let dispatcherInstalled = false
 let removeTransportListener: (() => void) | null = null
@@ -211,10 +211,10 @@ let lastCredentials: ConnectCredentials | null = null
 // ── 断连宽限兜底（review findings-confirmation #1.2：纯网络断连零复位缺口）──
 
 /**
- * 网络断连宽限期：断连后不立即收口在途流，宽限期内重连成功则由 ring 回放 / live 事件
- * 驱动正常收口；到期仍未恢复才调 onRuntimeUnavailable 收口（streaming 态不再挂到
+ * 网络断连宽限期：断连后不立即收尾在途流，宽限期内重连成功则由 ring 回放 / live 事件
+ * 驱动正常收尾；到期仍未恢复才调 onRuntimeUnavailable 收尾（streaming 态不再挂到
  * streaming timer 10min）。取 10s 的依据：重连退避序列 1s+2s+4s=7s < 10s（覆盖 2-3 次
- * 退避尝试，秒级网络抖动无收口噪音）；gate v4 实测 30s 断连场景在 10s 即复位。
+ * 退避尝试，秒级网络抖动无收尾噪音）；gate v4 实测 30s 断连场景在 10s 即复位。
  */
 export const DISCONNECT_GRACE_MS = 10_000
 
@@ -229,17 +229,17 @@ function clearDisconnectGrace(): void {
 }
 
 /**
- * 网络断连宽限：到期仍非 connected → 收口在途流。
+ * 网络断连宽限：到期仍非 connected → 收尾在途流。
  *
- * 收口时机语义论证（「立即收口」被否决的原因）：网络断连大概率短暂可恢复（退避重连
+ * 收尾时机语义论证（「立即收尾」不采用的原因）：网络断连大概率短暂可恢复（退避重连
  * 1-30s），重连成功后 runtime MessageBus ring 回放补齐断连窗口内的 message.complete
  * （gate v4 已证实该回放链内容级工作）。若断连瞬间立即 finalizeAllStreaming，在途流被
- * 收口为 error 态，回放的 message.complete 因 sealed 守卫（D-010：complete handler 只
- * 收口 status==='streaming' 的实体）无法覆盖已收口的 error——可恢复的流被不可逆误伤。
- * 故选「等重连结果 + 超时兜底」：到期时已重连成功则不收口（回放失败子场景仍由既有
- * streaming timer 10min 兜底——不以误伤重连后在途流为代价缩短它）；到期仍断连才收口
+ * 收尾为 error 态，回放的 message.complete 因 sealed 检查（D-010：complete handler 只
+ * 收尾 status==='streaming' 的实体）无法覆盖已收尾的 error——可恢复的流被不可逆误伤。
+ * 故选「等重连结果 + 超时兜底」：到期时已重连成功则不收尾（回放失败子场景仍由既有
+ * streaming timer 10min 兜底——不以误伤重连后在途流为代价缩短它）；到期仍断连才收尾
  * （网络中断超宽限，error 语义成立）。IPC 崩溃路径（restarting/failed）不走宽限：进程
- * 没了流物理不可能恢复，立即收口（见 stateWatch）。
+ * 没了流物理不可能恢复，立即收尾（见 stateWatch）。
  *
  * 已 armed 则不重置：从首次断连起算单窗口，断连/恢复 flapping 下累计宽容有界。
  */
@@ -294,7 +294,7 @@ function connectWs(url: string, credentials: ConnectCredentials): void {
  * 仅本地形态调用（token 经 IPC 下发，S1-W1），ipc 由参数显式传入。
  * IPC 拿不到 token（抛错 / null）时降级为空串 token 握手探测（S4 裁决）：本地 runtime
  * 恒配置 token，skip 假设会在握手缺失下假 connected（U1.3 形态）；探测必被拒 → close
- * 走重连链，凭据恢复后由 onRuntimePort 路径重拉。重连不被阻断（探测照常发起连接）。
+ * 走重连链，凭据恢复后由 onRuntimePort 路径重新拉取。重连不被阻断（探测照常发起连接）。
  */
 async function refreshTokenAndConnect(ipc: RuntimeIpcPorts, url: string): Promise<void> {
   let token: string | null | undefined
@@ -394,14 +394,14 @@ export function useConnection() {
     // 入站消息分发器在任何模式下都安装（mock 模式仅收到 pong，无副作用）
     ensureDispatcher(ports)
 
-    // W4：安装 visibilitychange 监听（幂等——removeVisibilityListener 守卫防重复注册）。
+    // W4：安装 visibilitychange 监听（幂等——removeVisibilityListener 检查防重复注册）。
     // 用户从其它标签页 / 系统切回应用（visibilityState 变 visible）且当前未连接时，
     // 用最近一次 url 主动重连，不干等 ws-client 指数退避（最长 30s）。
     if (!removeVisibilityListener) {
       removeVisibilityListener = ports.visibility.onVisibilityChange(() => {
-        // 守卫 1：只有切回可见（visible）才重连，切到后台（hidden）不触发
+        // 检查 1：只有切回可见（visible）才重连，切到后台（hidden）不触发
         if (!ports.visibility.isVisible()) return
-        // 守卫 2：已连接就不重连（避免无谓连接触发）。
+        // 检查 2：已连接就不重连（避免无谓连接触发）。
         // remote 形态例外——切前台先探活（移动形态死链检测）：移动壳无 IPC supervisor 事件
         // 补位（桌面靠 runtime-restarting/runtime-failed 事件兜底），锁屏/基站切换形成的半开
         // TCP 使 state 恒 connected——发消息 send 返回 true 但对端收不到，65s pending sweep
@@ -412,11 +412,11 @@ export function useConnection() {
           probeAlive()
           return
         }
-        // 守卫 3：从未连过（无 url/凭据复用）则不触发——重连分支簿记前提；对上方探活分支
-        // 结构性不可达（connected 必有簿记），守卫顺序与现状一致（探活分支沿用同一前提）。
+        // 检查 3：从未连过（无 url/凭据复用）则不触发——重连分支簿记前提；对上方探活分支
+        // 结构性不可达（connected 必有簿记），检查顺序与现状一致（探活分支沿用同一前提）。
         if (!lastConnectedUrl || !lastCredentials) return
-        // 守卫 4：auth 拒绝抑制位生效（remote-use D8 全触发点覆盖——退避链在 ws-client
-        // scheduleReconnect 短路，本守卫覆盖切前台主动重连）→ 不自动重连，等 token 重试路径。
+        // 检查 4：auth 拒绝抑制位生效（remote-use D8 全触发点覆盖——退避链在 ws-client
+        // scheduleReconnect 短路，本检查覆盖切前台主动重连）→ 不自动重连，等 token 重试路径。
         if (isAuthRejectedSuppressed()) return
         connectWs(lastConnectedUrl, lastCredentials)
       })
@@ -441,7 +441,7 @@ export function useConnection() {
     // L10：WS 连接状态监听在任何模式都安装（含 mock），确保 mock 断连时也 rejectAll pending。
     // 此前在 mock 分支之后，mock 模式跳过安装 → mock 断连时 pending 永不 reject。
     // M1（W09 follow-up）：connected false→true 迁移时恢复全部 bus 订阅——runtime 侧
-    // ws onDisconnect → bus.unsubscribeAll(ws) 已清空该连接订阅，core 侧幂等守卫
+    // ws onDisconnect → bus.unsubscribeAll(ws) 已清空该连接订阅，core 侧幂等检查
     // （subscribed 标记）不会自行失效，不主动重发则重连后 session 级消息永久丢失
     // （W09 删除 broadcast 兜底路径后 publish 定向推送是唯一通道）。首次连接时
     // subscriptionStates 为空 → no-op，无副作用。
@@ -451,7 +451,7 @@ export function useConnection() {
     // 都经 state 迁移在此汇合调 pending.rejectAll + onRuntimeUnavailable（消两份触发逻辑）。
     // IPC 监听器（onRuntimeRestarting/onRuntimeFailed）只负责置态，不再各自携带清理副本。
     const stopStateWatch = watch(getState(), (newState, oldState) => {
-      // IPC 崩溃路径：进入 restarting/failed 即收口——任何旧态进入均适用（含未连上 /
+      // IPC 崩溃路径：进入 restarting/failed 即收尾——任何旧态进入均适用（含未连上 /
       // 重试中 runtime 崩溃，对齐原 IPC 监听器无条件清理语义）。runtime 崩溃 = pi 子进程
       // 没了 = 流物理不可能恢复，不走断连宽限（等下去没有意义），且清掉已 armed 的宽限
       // timer（避免到期二次触发）。
@@ -470,7 +470,7 @@ export function useConnection() {
         // （useFileTree catch 等）识别传输断开类失败——构造统一走 transport/errors 工厂单点
         // （与 request.ts send-fail reject 同源，D10①）。
         pendingApi.rejectAll(transportUnavailableError(ports.t('connection.disconnectedError')))
-        // 在途流不立即收口：等重连结果（ring 回放补齐终态），DISCONNECT_GRACE_MS 超时兜底。
+        // 在途流不立即收尾：等重连结果（ring 回放补齐终态），DISCONNECT_GRACE_MS 超时兜底。
         // 语义论证见 armDisconnectGrace 注释。
         armDisconnectGrace()
       }
@@ -483,7 +483,7 @@ export function useConnection() {
     // pre-auth 队列丢弃 → 立即 reject 对应 pending（任何模式都安装，对齐 stateWatch 体例）。
     // 队列消息与 request 层 pending 一一对应：TCP open → auth.result 窗口内 send() 入队的
     // 消息在 auth 失败 / 断连清队时永无 reply，若不在此 reject，pending 要等 request 层
-    // 65s sweep 才收口。错误构造走 transport/errors 工厂单点（code='disconnected' 供调用方
+    // 65s sweep 才收尾。错误构造走 transport/errors 工厂单点（code='disconnected' 供调用方
     // 识别传输断开类失败）；无 id 消息（非 RPC 型，如 flush 前 close 的 notify）无 pending 可收，跳过。
     // 未送达标记（notDelivered）：清队消息没抵达 runtime 消息处理链，可证明未执行——与
     // 断连 rejectAll（可能已送达）区分，消费方据它走「可证明未执行」路径。
@@ -496,7 +496,7 @@ export function useConnection() {
       })
     }
 
-    // ── 连接发现收口点（renderer-package-topology §2.4 / 连接派生 profile 策略 D4）──
+    // ── 连接发现收敛点（renderer-package-topology §2.4 / 连接派生 profile 策略 D4）──
     // 形态经 resolveConnectionMode 薄谓词单点裁决（mock 优先级依据见其注释），本处只做
     // 分派消费；目标解析（knownPort→fallback）与下方监听器安装是首连分支自有逻辑，不进谓词。
     const mode = resolveConnectionMode(ports)
@@ -526,10 +526,10 @@ export function useConnection() {
     })
 
     // 监听 runtime 崩溃重启中（主进程正在拉起新实例 → 进 restarting 态，停自动重连）。
-    // [review findings-confirmation #1.2] 监听器只置态；pending 清理 + 对话流收口
+    // [review findings-confirmation #1.2] 监听器只置态；pending 清理 + 对话流收尾
     // （onRuntimeUnavailable）统一在 stateWatch 汇合点执行（restarting 迁移分支），
     // 不在此携带副本——网络断连与 IPC 崩溃两条路径同一处触发。
-    // runtime 崩溃 = pi 子进程没了 = 流不可能继续，收口语义（chat 活跃态重置 + ask-user
+    // runtime 崩溃 = pi 子进程没了 = 流不可能继续，收尾语义（chat 活跃态重置 + ask-user
     // pending 清空，T5）见 stateWatch / onRuntimeUnavailable 注释。
     removeRuntimeRestartingListener = ipc.onRuntimeRestarting(() => {
       setRestarting()
@@ -543,7 +543,7 @@ export function useConnection() {
 
     // RD-3#2：runtime 启动失败（boot 的 startAndNotify 失败——binary 缺失/端口占用等）。
     // 失败后 main 不会自动重试，WS 对 fallback 端口的重试必不可能成功：收到推送即置
-    // failed（用户拿到重试入口），不再干等 60s 重连时长上限。connected 守卫防极端误伤：
+    // failed（用户拿到重试入口），不再干等 60s 重连时长上限。connected 检查防极端误伤：
     // waitForHealth 超时但 runtime 实际存活时推送与活连接并存，不干扰已建立的连接。
     removeRuntimeErrorListener = ipc.onRuntimeError(() => {
       if (getState().value !== 'connected') {
@@ -618,7 +618,7 @@ export function useConnection() {
       removeQueueDropListener()
       removeQueueDropListener = null
     }
-    // 断连宽限 timer 随 stateWatch 一同拆卸（teardown 后不应再有收口回调）
+    // 断连宽限 timer 随 stateWatch 一同拆卸（teardown 后不应再有收尾回调）
     clearDisconnectGrace()
     // W4：卸载 visibilitychange 监听（与 init 的安装配对，防内存泄漏 + 重复触发）
     if (removeVisibilityListener) {

@@ -2,7 +2,7 @@
 /**
  * L2TabBar（W4 · T2）——plugin view 二级 tab 栏（v6 l2-tabbar 视觉）。
  *
- * 与 rendering-protocol/primitives/TabBar.vue 非双轨：概念域不同（本组件 = 宿主交互
+ * 与 rendering-protocol/primitives/TabBar.vue 非双轨：业务含义不同（本组件 = 宿主交互
  * 组件，消费本地 L2TabItem + v-model，close 事件上抛；TabBar = rendering-protocol
  * 协议推送原语，渲染 extension 推送的 GuiComponent），勿合并。
  *

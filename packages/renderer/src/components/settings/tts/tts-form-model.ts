@@ -2,18 +2,18 @@
  * TTS 表单状态机（ai-voice-tts 设计 §5.2 / §7.3 D2/D3）——表单编辑态与落盘形状
  * `TtsConfig` 的双向变换，TtsPage 唯一数据通路。
  *
- * 渲染存在性由表单投影（TtsFormModel）静态依赖数据驱动（控件存在性规则：枚举类空数组 =
+ * 渲染存在性由表单派生视图（TtsFormModel）静态依赖数据驱动（控件存在性规则：枚举类空数组 =
  * 不渲染；数值类 null = 置灰；开关/结构类不在清单 / 为 0 = 不渲染），本文件不写任何
  * `providerId ===` 分支决定控件存在性。
  *
  * 设计约束「全部内置选项，不手填」（§5.2 开篇）：数值档位（语速/音量/音调/权重/效果器）
- * 由投影 NumberRange 生成为下拉档位，无自由数字输入；表单态数值字段一律以档位 id
- * （string）承载，buildConfig 时经 Number() + 投影 range 钳制转数值。
+ * 由派生视图 NumberRange 生成为下拉档位，无自由数字输入；表单态数值字段一律以档位 id
+ * （string）承载，buildConfig 时经 Number() + 派生视图 range 钳制转数值。
  *
  * vendor 子树形状知识（每家请求体的键序结构，设计 §7.2）集中在下方三家 buildVendor/
- * parseVendor 对内：渲染由投影驱动、落盘形状按厂商 API 原名原路径（D2 连带裁决——
- * runtime 打包 passthrough = vendor 子树恒等搬运，零字段名知识）。控件 id（投影 toggles
- * 成员、voiceModify tiers/effects 的 id）即厂商请求体对应子键名，键名映射随投影数据走。
+ * parseVendor 对内：渲染由派生视图驱动、落盘形状按厂商 API 原名原路径（D2 连带裁决——
+ * runtime 打包 passthrough = vendor 子树恒等搬运，零字段名知识）。控件 id（派生视图 toggles
+ * 成员、voiceModify tiers/effects 的 id）即厂商请求体对应子键名，键名映射随派生视图数据走。
  */
 import type {
   FormOption,
@@ -28,8 +28,8 @@ export interface TtsPronunciationRule {
   to: string
 }
 
-/** 单家表单编辑态（TtsProviderForm v-model 本体；null = 该控件投影不支持/未指定，不提交）。
- *  数值档位字段以档位 id（string）承载——Select 直绑形态，Number 转换收口在 buildConfig。 */
+/** 单家表单编辑态（TtsProviderForm v-model 本体；null = 该控件派生视图不支持/未指定，不提交）。
+ *  数值档位字段以档位 id（string）承载——Select 直绑形态，Number 转换收尾在 buildConfig。 */
 export interface TtsProviderFormState {
   baseUrl: string
   model: string
@@ -42,7 +42,7 @@ export interface TtsProviderFormState {
   pitch: string | null
   /** 风格指令（supportsInstructions false 恒空串，控件不渲染）。 */
   instructions: string
-  /** 采样率（pcmSampleRates 的 string id；null = 投影空数组，控件不渲染）。 */
+  /** 采样率（pcmSampleRates 的 string id；null = 派生视图空数组，控件不渲染）。 */
   sampleRate: string | null
   /** 声道（channels 空数组 = 不渲染恒 null）。 */
   channel: string | null
@@ -50,13 +50,13 @@ export interface TtsProviderFormState {
   emotion: string | null
   /** 语言增强（languages 空数组 = 不渲染；null = 「不指定」，vendor 不写）。 */
   languageBoost: string | null
-  /** 开关类（键 = 投影 toggles 成员 id，值 = 开/关）。 */
+  /** 开关类（键 = 派生视图 toggles 成员 id，值 = 开/关）。 */
   toggles: Record<string, boolean>
   /** 混合音色第二音色（maxTimbreVoices 0 = 区不渲染；null = 不混合，vendor 不写）。 */
   secondVoice: string | null
   /** 第二音色权重档位 id（secondVoice null 时无意义）。 */
   secondVoiceWeight: string | null
-  /** 效果器档位值（键 = 投影 voiceModify.tiers 成员 id，值 = 档位 id；voiceModify null = 区不渲染）。 */
+  /** 效果器档位值（键 = 派生视图 voiceModify.tiers 成员 id，值 = 档位 id；voiceModify null = 区不渲染）。 */
   voiceModifyValues: Record<string, string>
   /** 效果器效果（voiceModify.effects 选择；null = 不指定，不写 sound_effects）。 */
   voiceModifyEffect: string | null
@@ -89,7 +89,7 @@ const VOICE_MODIFY_STEP = 25
 /** 「范围内出厂锚点」：range 含 1 取 1（三家语速/音量 range 均含 1），越界取最近边界。 */
 const DEFAULT_UNIT_VALUE = 1
 
-/** 24kHz 是合成默认采样率（设计 §7.3：WAV 头「取 24000 或最近值」），投影含之即默认选中。 */
+/** 24kHz 是合成默认采样率（设计 §7.3：WAV 头「取 24000 或最近值」），派生视图含之即默认选中。 */
 const DEFAULT_SAMPLE_RATE = 24000
 
 /** clamp 到闭区间（非有限值回退 fallback）。 */
@@ -143,12 +143,12 @@ function firstOptionId(options: readonly FormOption[]): string | null {
   return options.length > 0 ? options[0].id : null
 }
 
-/** baseUrl 出厂默认 = 投影 isDefault 项（D4「出厂默认值」判定同源），缺省回退首项。 */
+/** baseUrl 出厂默认 = 派生视图 isDefault 项（D4「出厂默认值」判定同源），缺省回退首项。 */
 function defaultBaseUrl(form: TtsFormModel): string {
   return (form.baseUrlOptions.find((o) => o.isDefault) ?? form.baseUrlOptions[0])?.url ?? ''
 }
 
-/** 空白表单态（投影驱动的出厂骨架；getConfig 失败时设置页回默认骨架可重新保存，§5.4 末行）。 */
+/** 空白表单态（派生视图驱动的出厂骨架；getConfig 失败时设置页回默认骨架可重新保存，§5.4 末行）。 */
 export function emptyFormState(form: TtsFormModel): TtsProviderFormState {
   const toggles: Record<string, boolean> = {}
   for (const id of form.toggles) toggles[id] = false
@@ -199,7 +199,7 @@ export function perModelOf(
 }
 
 /**
- * 音色标签（StepFun voice_label）控件渲染条件 = 该家 perModel 表非空（投影登记了 per-model
+ * 音色标签（StepFun voice_label）控件渲染条件 = 该家 perModel 表非空（派生视图登记了 per-model
  * 联动的家才携带该控件；M0 全集：StepFun 非空 → 渲染，MiniMax/MiMo 空 → 不渲染），
  * 可用性再按选中模型的 voiceLabelSupported 置灰。数据驱动，无厂商 id 分支。
  */
@@ -269,14 +269,14 @@ function buildStepfunVendor(form: TtsFormModel, state: TtsProviderFormState): Re
   return vendor
 }
 
-/** MiniMax toggles → 请求体深路径（键 = 投影 toggles 成员 id；值恒布尔）。 */
+/** MiniMax toggles → 请求体深路径（键 = 派生视图 toggles 成员 id；值恒布尔）。 */
 const MINIMAX_TOGGLE_PATHS: Record<string, readonly string[]> = {
   text_normalization: ['voice_setting', 'text_normalization'],
   latex_read: ['voice_setting', 'latex_read'],
   aigc_watermark: ['aigc_watermark'],
 }
 
-/** 数值档位（音量/音调）→ voice_setting 深路径（投影 range null = 不写）。 */
+/** 数值档位（音量/音调）→ voice_setting 深路径（派生视图 range null = 不写）。 */
 function applyMinimaxNumericFields(vendor: Record<string, unknown>, form: TtsFormModel, state: TtsProviderFormState): void {
   if (form.volumeRange && state.volume !== null) {
     setPath(vendor, ['voice_setting', 'vol'], clampNumber(state.volume, form.volumeRange.min, form.volumeRange.max, form.volumeRange.min))
@@ -286,7 +286,7 @@ function applyMinimaxNumericFields(vendor: Record<string, unknown>, form: TtsFor
   }
 }
 
-/** 枚举类字段（情感/声道/语言增强；投影空数组 = 不写）。声道是数值语义（MiniMax audio_setting.channel int64）
+/** 枚举类字段（情感/声道/语言增强；派生视图空数组 = 不写）。声道是数值语义（MiniMax audio_setting.channel int64）
  *  ——Select 档位 id 恒 string，写 vendor 必须 Number 化（D3 验收实测：字符串直传被厂商 2013 invalid params 拒）。 */
 function applyMinimaxEnumFields(vendor: Record<string, unknown>, form: TtsFormModel, state: TtsProviderFormState): void {
   if (form.emotions.length > 0 && state.emotion) {
@@ -300,7 +300,7 @@ function applyMinimaxEnumFields(vendor: Record<string, unknown>, form: TtsFormMo
   }
 }
 
-/** toggles 清单 → 请求体深路径（MINIMAX_TOGGLE_PATHS 表驱动，键 = 投影 toggles 成员 id）。 */
+/** toggles 清单 → 请求体深路径（MINIMAX_TOGGLE_PATHS 表驱动，键 = 派生视图 toggles 成员 id）。 */
 function applyMinimaxToggles(vendor: Record<string, unknown>, form: TtsFormModel, state: TtsProviderFormState): void {
   for (const id of form.toggles) {
     const path = MINIMAX_TOGGLE_PATHS[id]
@@ -319,7 +319,7 @@ function applyMinimaxTimbreWeights(vendor: Record<string, unknown>, form: TtsFor
   }
 }
 
-/** 效果器（voiceModify 投影驱动：tiers 档位全量写入 + 可选 sound_effects）。 */
+/** 效果器（voiceModify 派生视图驱动：tiers 档位全量写入 + 可选 sound_effects）。 */
 function applyMinimaxVoiceModify(vendor: Record<string, unknown>, form: TtsFormModel, state: TtsProviderFormState): void {
   if (!form.voiceModify) return
   const modify: Record<string, unknown> = {}
@@ -349,8 +349,8 @@ function buildMinimaxVendor(form: TtsFormModel, state: TtsProviderFormState): Re
 }
 
 function buildMimoVendor(_form: TtsFormModel, _state: TtsProviderFormState): Record<string, unknown> {
-  // MiMo 借壳形态：采样率固定 24kHz、无音量/音调/情感字段，M0 投影无任何 vendor 控件
-  //（toggles/channels/emotions/languages 全空、maxTimbreVoices 0、词典 false，mock 投影同构）。
+  // MiMo 借壳形态：采样率固定 24kHz、无音量/音调/情感字段，M0 派生视图无任何 vendor 控件
+  //（toggles/channels/emotions/languages 全空、maxTimbreVoices 0、词典 false，mock 派生视图同构）。
   return {}
 }
 
@@ -392,7 +392,7 @@ export function buildConfig(providerId: TtsProviderId, form: TtsFormModel, state
   return config
 }
 
-/** 落盘形状 → 表单态（getConfig 回读投影；vendor 缺失字段回投影出厂默认，往返可逆）。 */
+/** 落盘形状 → 表单态（getConfig 回读派生视图；vendor 缺失字段回派生视图出厂默认，往返可逆）。 */
 export function formStateFromConfig(providerId: TtsProviderId, form: TtsFormModel, config: TtsConfig): TtsProviderFormState {
   const state = emptyFormState(form)
   const vendor = typeof config.vendor === 'object' && config.vendor !== null ? (config.vendor as Record<string, unknown>) : {}
@@ -422,7 +422,7 @@ function parseStepfunVendor(form: TtsFormModel, vendor: Record<string, unknown>,
   }
 }
 
-/** 数值档位回读（音量/音调；投影 range 开才读，档位 id string 承载）。 */
+/** 数值档位回读（音量/音调；派生视图 range 开才读，档位 id string 承载）。 */
 function parseMinimaxNumericFields(vendor: Record<string, unknown>, form: TtsFormModel, state: TtsProviderFormState): void {
   const vol = getPath(vendor, ['voice_setting', 'vol'])
   if (form.volumeRange && typeof vol === 'number') state.volume = String(vol)
@@ -496,11 +496,11 @@ function parseMinimaxVendor(form: TtsFormModel, vendor: Record<string, unknown>,
 
 /**
  * 每家 toggle 的布局分区：aigc_watermark 归「进阶」区（任务书长尾四区），其余归「风格」区。
- * 这是布局常量（驱动渲染位置），不影响控件存在性（存在性仍全由投影 toggles 清单决定）。
+ * 这是布局常量（驱动渲染位置），不影响控件存在性（存在性仍全由派生视图 toggles 清单决定）。
  */
 export function isLongtailToggle(id: string): boolean {
   return id === 'aigc_watermark'
 }
 
-/** 「不指定」空值选项的哨兵 id（reka SelectItem value 不接受空串；投影枚举 id 空间外）。 */
+/** 「不指定」空值选项的哨兵 id（reka SelectItem value 不接受空串；派生视图枚举 id 空间外）。 */
 export const NONE_OPTION_ID = '__none__'

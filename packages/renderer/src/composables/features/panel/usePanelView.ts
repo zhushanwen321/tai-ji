@@ -4,7 +4,7 @@
  * 职责边界：本 composable 只做「事实收集 + 单点派生」——把 Panel 组件里散落的七个
  * 异构状态源（session 绑定 / 消息有无 / dead / respawn 过渡态 / trace 视图 / form overlay 在场 /
  * flow 活跃）组装为 PanelViewInput，派生收敛到 core 纯函数 derivePanelView
- * （128 组合全表守卫，V5）。
+ * （128 组合全表检查，V5）。
  * Panel.vue 只 switch(panelView.kind)，禁止再直接组合这些状态做渲染判据（D5）。
  *
  * 互斥语义归属：dead 与 form overlay 的互斥由派生优先级吞掉（dead > form，derivePanelView
@@ -25,7 +25,7 @@ import { useSessionTrace } from '@/composables/features/trace/useSessionTrace'
 import { useExtensionUI } from '@/composables/useExtensionUI'
 
 /**
- * 派生 panel 渲染视图 + 统一表单 overlay 应答消费面。
+ * 派生 panel 渲染视图 + 统一表单 overlay 应答消费方。
  *
  * currentFormRequest/respond/cancel 一并透出：overlay 的渲染数据（formQuestions /
  * legacy scheduleDraft）与应答回调同源于 useExtensionUI，Panel 不再重复订阅。

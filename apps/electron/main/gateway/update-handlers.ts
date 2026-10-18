@@ -19,7 +19,7 @@
  *
  * [HISTORICAL] 不变量：
  * - 单 payload 对象规则：invoke payload 恒为单对象，禁止多 arg
- * - install/download 内 onProgress 转发为 'update:progress' 事件（win.isDestroyed 守卫）
+ * - install/download 内 onProgress 转发为 'update:progress' 事件（win.isDestroyed 检查）
  * - 错误转发为 'update:error' 事件（区分 UpdateError.stage / UpdateUnsupportedError.errorCode）
  * - orchestrator 是纯逻辑（不调 app.quit）；quit 由本 handler 在 triggerRestart=true 后调
  * - quit 用 setImmediate（ADR-0122：不猜「响应送达」时间窗——原 500ms 延迟已删；
@@ -664,7 +664,7 @@ export function registerUpdateHandlers(deps: IpcHandlerDeps): void {
     // updateSource 归一 + 枚举校验（多源 D3）：传了（非 undefined）先归一——三值原样、
     // 旧落盘值经 normalizeUpdateSourcePref 映射新标识符（v0.10.0 旧落盘值兼容），非法值抛错
     // ——handler 边界 fail-fast（对齐上方 boolean 校验先例），存储读取侧另有
-    // normalizeUpdateSourcePref 逐字段兜底（非法值回退默认 'auto'），两处共用同一守卫
+    // normalizeUpdateSourcePref 逐字段兜底（非法值回退默认 'auto'），两处共用同一检查
     if (settings.updateSource !== undefined) {
       const normalizedSource = normalizeUpdateSourcePref(settings.updateSource)
       if (normalizedSource === undefined) {

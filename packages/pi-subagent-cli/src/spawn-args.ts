@@ -76,7 +76,7 @@ export function buildSpawnArgs(
   // builtin:codemode 基座旗标（codemode 设计 D8，上游先追加）+ 下方 --extension
   // 白名单（pi 官方语义「-ne 下显式 -e 仍生效」，与 taiji 主 pi 基座形态一致；
   // 同时是 runtime 孤儿收殓的 argv 主判别位）；② --extension 逐项拼白名单路径
-  // （pi 公开承诺的加载通道，设计 D2 被否项 b：路径列表不走 env，与出站 env
+  // （pi 公开承诺的加载通道，设计 D2 不采用项 b：路径列表不走 env，与出站 env
   // 白名单机制解耦）。
   args.push("--no-extensions");
   appendExtensionArgs(args, params.extensionPaths);

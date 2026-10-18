@@ -19,7 +19,7 @@ export function escapeXml(str: string): string {
 
 /**
  * XML 注入段渲染骨架：`"\n\n<tag>"` 前导（衔接宿主 prompt 末尾）+ 引导语 +
- * 条目行 + 闭合标签，以 "\n" join。空条目返回空串（不注入）。
+ * 条目行 + 结束标签，以 "\n" join。空条目返回空串（不注入）。
  *
  * 三个 injector 共用此骨架保证段落结构逐字节同构；KV-cache 契约（顺序稳定 =
  * 注入段字节稳定）由调用方排序保证，本函数不重排。

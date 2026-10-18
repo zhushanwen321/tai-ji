@@ -31,7 +31,7 @@ describe('A21 entry→TraceRow kind 映射（12 kind 全覆盖 + 损坏行占位
     const rows = loadRows('synthetic-full-kinds.jsonl', { sessionEnd: true, leafId: 'u4' })
 
     const kindSeq = rows.map((r) => `${r.seq}:${r.kind}`).join(' ')
-    // 19 行 JSONL（含 handoff_marker 尾行）+ 1 行 sidecar = 20 行台账
+    // 19 行 JSONL（含 handoff_marker 尾行）+ 1 行 sidecar = 20 行条目清单
     expect(rows).toHaveLength(20)
     expect(kindSeq).toBe(
       [
@@ -94,7 +94,7 @@ describe('A21 entry→TraceRow kind 映射（12 kind 全覆盖 + 损坏行占位
 
   it('损坏行：占位可见、行号与原文保留、seq 连续、其余行不受影响', () => {
     const rows = loadRows('real-lifecycle-small.bad-lines.jsonl')
-    // 源 10 行 + 注入 2 行 = 12 行台账，seq 连续
+    // 源 10 行 + 注入 2 行 = 12 行条目清单，seq 连续
     expect(rows).toHaveLength(12)
     expect(rows.map((r) => r.seq)).toEqual(Array.from({ length: 12 }, (_, i) => i + 1))
 

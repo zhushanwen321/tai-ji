@@ -105,7 +105,7 @@ describe('MobileSessionList 会话列表（remote-use-mobile D7 列表行）', (
   })
 
   it('排序：runtime 组序原样渲染（A13 统一裁决——客户端 lastActiveAt 重排已删除），与数据源顺序一致', () => {
-    // 数据源故意按 lastActiveAt 乱序注入：客户端不重排，行序 = 数据源（runtime 组序投影）
+    // 数据源故意按 lastActiveAt 乱序注入：客户端不重排，行序 = 数据源（runtime 组序派生视图）
     testState.list.value = [
       makeSummary({ id: 's-mid', lastActiveAt: todayAt(TODAY_HOUR, TODAY_MINUTE) }),
       makeSummary({ id: 's-old', lastActiveAt: new Date(PAST_YEAR, PAST_MONTH_INDEX, PAST_DAY).getTime() }),

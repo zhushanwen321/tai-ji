@@ -27,20 +27,20 @@ function env(dataDir?: string): NodeJS.ProcessEnv {
 }
 
 describe('resolvePackagedDataDir 受控采信行为矩阵', () => {
-  describe('钉死分支（未设 / 泄漏 / 树外）', () => {
-    it('未设值 → 钉死 ~/.taiji（打包态正常形态：env 由 main 本块赋值，无需外部注入）', () => {
+  describe('固定分支（未设 / 泄漏 / 树外）', () => {
+    it('未设值 → 固定 ~/.taiji（打包态正常形态：env 由 main 本块赋值，无需外部注入）', () => {
       expect(resolvePackagedDataDir(env(undefined), HOME)).toBe(PROD_ROOT)
     })
 
-    it('空字符串 → 钉死（非空才算外部值）', () => {
+    it('空字符串 → 固定（非空才算外部值）', () => {
       expect(resolvePackagedDataDir(env(''), HOME)).toBe(PROD_ROOT)
     })
 
-    it('宿主残留 dev 值 ~/.taiji-dev/instances/... → 拒绝，钉死（镜像防泄漏：防打包版写 dev 目录）', () => {
+    it('宿主残留 dev 值 ~/.taiji-dev/instances/... → 拒绝，固定（镜像防泄漏：防打包版写 dev 目录）', () => {
       expect(resolvePackagedDataDir(env(path.join(DEV_ROOT, 'instances', 'dev-0.10.3')), HOME)).toBe(PROD_ROOT)
     })
 
-    it('树外绝对路径（/tmp 下任意目录）→ 拒绝，钉死', () => {
+    it('树外绝对路径（/tmp 下任意目录）→ 拒绝，固定', () => {
       expect(resolvePackagedDataDir(env(path.join(path.sep, 'tmp', 'leak')), HOME)).toBe(PROD_ROOT)
     })
 
@@ -52,7 +52,7 @@ describe('resolvePackagedDataDir 受控采信行为矩阵', () => {
       expect(resolvePackagedDataDir(env(`${PROD_ROOT}ish`), HOME)).toBe(PROD_ROOT)
     })
 
-    it('大小写变体 ~/.TAIJI → 拒绝，钉死规范根（设计内残差：不 casefold——大小写不敏感卷上钉回根即变体命中的同一物理目录，Linux 上变体是树外另一目录钉回也正确；casefold 反而会在 Linux 误采信）', () => {
+    it('大小写变体 ~/.TAIJI → 拒绝，固定规范根（设计内残差：不 casefold——大小写不敏感卷上钉回根即变体命中的同一物理目录，Linux 上变体是树外另一目录钉回也正确；casefold 反而会在 Linux 误采信）', () => {
       expect(resolvePackagedDataDir(env(path.join(HOME, '.TAIJI')), HOME)).toBe(PROD_ROOT)
       expect(resolvePackagedDataDir(env(path.join(HOME, '.TAIJI', 'agent')), HOME)).toBe(PROD_ROOT)
     })

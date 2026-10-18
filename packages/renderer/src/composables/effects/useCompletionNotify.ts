@@ -9,9 +9,9 @@
  *
  * 触发条件：
  *   仅「后台完成」响（sid !== focusedSessionId || document.visibilityState !== 'visible'）
- *   background subagent/workflow 仍在跑时不响：守卫 hasBackgroundWork 提前 return。
+ *   background subagent/workflow 仍在跑时不响：检查 hasBackgroundWork 提前 return。
  *     pi extension（pi-subagent-workflow）在 subagent 完成时用 triggerTurn:steer 续跑主 agent，
- *     最终 message.complete 到达时 background 已全 done、守卫放行——此刻才是 session 真正完成。
+ *     最终 message.complete 到达时 background 已全 done、检查放行——此刻才是 session 真正完成。
  *   stopReason: stop（成功）和 error（失败）都响，aborted 不响
  *   willRetry=true 不响（[retry-sound] pi auto-retry 中间失败，turn 未结束；也不标未读）——
  *     只有重试链终态（成功/重试用尽/不可重试错误）才响
@@ -45,11 +45,11 @@ export function handleCompletion(
   focusedSessionId: string | null,
   willRetry?: boolean,
 ): void {
-  // 0. [M4-a / btw-question D9③ 投影收窄·通知面抑制执行点②] btw 线完成不进全局通知：
-  // 提示音与 sidebar 未读标记都是主视图面——线的回复/完成通知走 drawer badge per-line
+  // 0. [M4-a / btw-question D9③ 派生视图收窄·通知方抑制执行点②] btw 线完成不进全局通知：
+  // 提示音与 sidebar 未读标记都是主视图范围——线的回复/完成通知走 drawer badge per-line
   // 通道（D7/D8 终态表），不落 `taiji:session-markers` localStorage（否则已删线的 vid
-  // 会成为永久死标记条目，违背 G4「不留下痕迹」）。派生键结构上到不了本面（message.complete
-  // 只携会话 id），本守卫针对线 vid 本体。
+  // 会成为永久死标记条目，违背 G4「不留下痕迹」）。派生键结构上到不了本范围（message.complete
+  // 只携会话 id），本检查针对线 vid 本体。
   if (isBtwVirtualId(sessionId)) return
   // 1. 过滤 stopReason：aborted 不触发
   if (stopReason === 'aborted') return
@@ -58,12 +58,12 @@ export function handleCompletion(
   //   此时响 error 音会在「失败→重试→成功」的 turn 里产生 error+success 双响，
   //   「3 次重试全失败」则连响 4 声 error（退避 2s/4s/8s，1s 防抖拦不住）。
   //   未读标记一并跳过：session 尚未真正结束，pi 续跑后的终态 complete 会重新走到这里。
-  //   排序在 background work 守卫之前：重试窗口内不涉及 background work 判定，越早拦越好。
+  //   排序在 background work 检查之前：重试窗口内不涉及 background work 判定，越早拦越好。
   if (willRetry === true) return
 
-  // 2. background subagent/workflow 守卫：主 turn 结束但 background 任务仍在跑时不触发完成提示。
+  // 2. background subagent/workflow 检查：主 turn 结束但 background 任务仍在跑时不触发完成提示。
   // pi extension（pi-subagent-workflow）会在 subagent 完成时用 triggerTurn:steer 续跑主 agent，
-  // 最终 message.complete 到达时 background 已全 done，此时守卫放行自然响。
+  // 最终 message.complete 到达时 background 已全 done，此时检查放行自然响。
   // 若此刻响，会在 subagent 还在跑时就误报「完成」（用户报告的 bug）。
   if (useBackgroundWork().hasBackgroundWork(sessionId)) return
 
@@ -71,8 +71,8 @@ export function handleCompletion(
   const isBackground = sessionId !== focusedSessionId || document.visibilityState !== 'visible'
   if (!isBackground) return
 
-  // 4. 标记未读：能走到这里说明已通过 background work 守卫（session 真正完成），无论是否响铃都标记。
-  //    守卫命中时上面已提前 return——此时 session 尚未真正完成，pi 会重触发 message.complete，故不标未读。
+  // 4. 标记未读：能走到这里说明已通过 background work 检查（session 真正完成），无论是否响铃都标记。
+  //    检查命中时上面已提前 return——此时 session 尚未真正完成，pi 会重触发 message.complete，故不标未读。
   markUnread(sessionId)
 
   // 5. 读取设置开关

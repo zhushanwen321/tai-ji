@@ -33,7 +33,7 @@ const flowMock = vi.hoisted(() => ({
   currentCwd: { value: null as string | null },
   presetCwd: vi.fn(),
   gitInfo: { value: null as { branch: string } | null },
-  // workspace.detect 三态（landing Git chip 可见性守卫）+ worktree 列表（branch 派生）
+  // workspace.detect 三态（landing Git chip 可见性检查）+ worktree 列表（branch 派生）
   mode: { value: 'not-repo' as string },
   worktreeItems: { value: [] as Array<{ path: string; branch: string; HEAD: boolean; bare: boolean }> },
   openDirPopover: vi.fn(),
@@ -48,7 +48,7 @@ const flowMock = vi.hoisted(() => ({
   openBranchModal: vi.fn(),
   setPendingPreset: vi.fn(),
   state: { value: 'idle' as string },
-  // [D4 卸载守卫] onMounted 自动 startFlow + onUnmounted isActive 才 cancelFlow
+  // [D4 卸载检查] onMounted 自动 startFlow + onUnmounted isActive 才 cancelFlow
   isActive: { value: false as boolean },
   // [perf-landing] 首发提交飞行标记（Landing 创建中过渡视图判据）
   isInflight: { value: false as boolean },
@@ -97,7 +97,7 @@ beforeEach(() => {
   flowMock.mode.value = 'plain-repo'
   flowMock.gitInfo.value = null
   flowMock.worktreeItems.value = []
-  // [D4] 卸载守卫输入默认非活跃（completed/cancelled 路径守卫 noop）；活跃用例单独设 true
+  // [D4] 卸载检查输入默认非活跃（completed/cancelled 路径检查 noop）；活跃用例单独设 true
   flowMock.isActive.value = false
   // [perf-landing] 创建中过渡视图默认不飞行；飞行用例单独设 true
   flowMock.isInflight.value = false
@@ -426,7 +426,7 @@ describe('Landing openDirDialog 异常处理（W3: AC-5.6）', () => {
   })
 })
 
-describe('Landing onUnmounted 卸载守卫（D4：视图卸载即终结 flow）', () => {
+describe('Landing onUnmounted 卸载检查（D4：视图卸载即终结 flow）', () => {
   it('D4-U1: 卸载时 flow 活跃（landing/overlay）→ cancelFlow 被调（封死状态漂留）', () => {
     flowMock.isActive.value = true
     const wrapper = mount(Landing, {
@@ -438,7 +438,7 @@ describe('Landing onUnmounted 卸载守卫（D4：视图卸载即终结 flow）'
     expect(flowMock.cancelFlow).toHaveBeenCalledTimes(1)
   })
 
-  it('D4-U2: 卸载时 flow 非活跃（completed/cancelled）→ 守卫 noop，不产生非法转换', () => {
+  it('D4-U2: 卸载时 flow 非活跃（completed/cancelled）→ 检查 noop，不产生非法转换', () => {
     flowMock.isActive.value = false
     const wrapper = mount(Landing, {
       props: { sessionId: null, currentCwd: null },
@@ -452,7 +452,7 @@ describe('Landing onUnmounted 卸载守卫（D4：视图卸载即终结 flow）'
 })
 
 // ── [不变式] Landing 全仓唯一挂载点 ─────────────────────────────────────
-// D4 卸载守卫（卸载即 cancelFlow）的正确性前提：Landing 只有一个挂载点。
+// D4 卸载检查（卸载即 cancelFlow）的正确性前提：Landing 只有一个挂载点。
 // 多面板（split）拓扑已删除（2026-07-24），唯一挂载点 = Panel.vue landing 分支。
 // 静态源码断言（同 sidebar-layout.test.ts 滚动修复先例）：扫描 src 下非测试源文件中
 // `<Landing` 模板标签，仅允许出现在 Panel.vue。此断言红 = 正在引入第二个挂载点，
@@ -461,7 +461,7 @@ describe('Landing onUnmounted 卸载守卫（D4：视图卸载即终结 flow）'
 // 脆弱性边界（有意接受）：静态扫描看不到动态渲染形态（<component :is> / h(Landing)），
 // 它是廉价哨兵不是完备证明；`<Landing` 字面量出现在注释/字符串会误报，失败信息自解释。
 describe('[不变式] Landing 唯一挂载点', () => {
-  it('<Landing 模板标签仅出现在 Panel.vue（D4 卸载守卫的前提）', () => {
+  it('<Landing 模板标签仅出现在 Panel.vue（D4 卸载检查的前提）', () => {
     const srcRoot = resolve(__dirname, '../..')
     const offenders = walkFiles(srcRoot, { extensions: ['.vue'], skipDirs: ['__tests__'] })
       .filter((full) => !full.endsWith('.test.vue') && !full.endsWith('.spec.vue'))

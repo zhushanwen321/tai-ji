@@ -3,7 +3,7 @@
  *
  * 内聚段抽自 btw-service.ts（max-lines 同目录内聚拆分，2026-09-22，纯移动零行为变更）：
  * 判据/降级闸/幂等语义随 doc 整段迁入；BtwService.reconcileOrphanThreadDirs 保留为
- * 组合根调用面（一行委托），消费方 import 路径零改动。isInsideBtwRoot 路径安全谓词
+ * 组合根调用点（一行委托），消费方 import 路径零改动。isInsideBtwRoot 路径安全谓词
  *（删除面必须位于 btw 根内）随本模块迁入——补账是其主消费方，关线/级联经 btw-service
  * import 复用（原为该类私有方法，非导出面成员）。
  * 依赖 = 窄结构接口（OrphanReconcileDeps），不反向 import btw-service（保持无环）。

@@ -13,8 +13,8 @@
  *
  * 四态派生（优先级 conflict > dirty > staged > clean）与原 GitZone 一致。
  *
- * 订阅收口（R2）：message.complete 订阅经 useSessionEvents（与 SideDrawer/CommandPopover/
- * ContextCapacityCard 同收口），不再直接 import @/api/events。依赖方向：shared 类型 + api(git)
+ * 订阅收尾（R2）：message.complete 订阅经 useSessionEvents（与 SideDrawer/CommandPopover/
+ * ContextCapacityCard 同收尾），不再直接 import @/api/events。依赖方向：shared 类型 + api(git)
  * + useSessionEvents。与 useChat/useSidebar 同属 features 层，但比它们轻——不触碰 stores，纯 per-session 数据 ref。
  *
  * per-session 状态隔离（ADR-0049）：result/commitMsg/error 三个 per-session 状态
@@ -137,7 +137,7 @@ export function useGitStatus(sessionIdRef: Ref<string | null> | (() => string | 
     if (!sid || pending.value) return
     pending.value = true
     // ADR-0049 checklist #3：写入捕获 sid 分区（与 runOp 同范式）——await 期间用户可能切
-    // session，读实时 sid 会把 A 的 git 状态写进 B 分区且被 pending 守卫挡住新拉取
+    // session，读实时 sid 会把 A 的 git 状态写进 B 分区且被 pending 检查挡住新拉取
     scoped.updateFor(sid, (p) => { p.error = '' })
     try {
       const r = await gitApi.status(sid)
@@ -198,8 +198,8 @@ export function useGitStatus(sessionIdRef: Ref<string | null> | (() => string | 
     { immediate: true },
   )
 
-  // agent_end 后刷新（G-R2-04/C14）：agent 改动文件后 git 状态变 stale，回合结束时重拉。
-  // 订阅会话级 message.complete（agent 回合结束）经 useSessionEvents 收口——随 sessionId 变化自动
+  // agent_end 后刷新（G-R2-04/C14）：agent 改动文件后 git 状态变 stale，回合结束时重新拉取。
+  // 订阅会话级 message.complete（agent 回合结束）经 useSessionEvents 收尾——随 sessionId 变化自动
   // 重订（先退订旧 sid 再订新 sid），避免轮询/filesystem watch。getter 模式（PanelContainer 传
   // () => activePanelSessionId.value）用本地 computed 归一为 useSessionEvents 所需的 Ref。
   const onMessage = useSessionEvents(sidRef)

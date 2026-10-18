@@ -5,7 +5,7 @@
 // [U2 两态迁移] 永久会话模型状态机 = running | idle（终态概念删除）；本文件谓词
 // 的「两态（running/closed）」语境自 v4 B-1 演化而来——「对话模式等待续聊」与
 // 「正在执行」曾同为 status="running" 靠派生谓词区分；U2 后「等待续聊」的权威
-// 词汇 = idle（markSettled 收口），谓词保留 = 既有判据形态不删（桥接期消费方
+// 词汇 = idle（markSettled 收尾），谓词保留 = 既有判据形态不删（桥接期消费方
 // 零改动；显式 idle 状态设计归后续单元）。谓词复用 lifecycle-manager.hasIdleTimer
 // （idle timer 是否 armed）与 core 侧 spawnedChildren 状态镜像读点
 // （engine/host/spawned-children.ts，活进程句柄是否存在），不新增状态记账。
@@ -17,8 +17,8 @@
 //     文件）。chat 轮终经 armIdleKeepalive（conversation-continuation.ts，
 //     [u7a 补挂] 唯一生产 arm 接线）挂 idle timer 保活 → hasArmedIdleTimer=true——
 //     超时处置 = RecordLifecycle.idleTimeoutRecycle（[U5] 进程回收，不动占用位）。
-//     notify 守卫（notify-host.ts）的放行谓词 = 旧终态遗留（idle ∧ closedReason
-//     有值，U2 桥接判据）/ idle（收口落账提示/轮次通知载荷）或 isResumable（idle）。
+//     notify 检查（notify-host.ts）的放行谓词 = 旧终态遗留（idle ∧ closedReason
+//     有值，U2 桥接判据）/ idle（收尾写入 journal 记录提示/轮次通知载荷）或 isResumable（idle）。
 //   - 正在执行：hasArmedIdleTimer=false、isResumable=false（running 直读为假）。
 
 import { hasIdleTimer } from "./lifecycle-manager.ts";
@@ -45,7 +45,7 @@ export function hasLiveProcessHandle(recordId: string): boolean {
  *
  * 判据：该 record 有 armed idle timer（lifecycle-manager.hasIdleTimer）。
  * 与 record.status === "idle"（isResumable 直读）正交——两态模型下 status idle
- * 是收口态，本谓词是 timer armed 保活态，勿混用。
+ * 是收尾态，本谓词是 timer armed 保活态，勿混用。
  *
  * [u7a 补挂后现状] arm 链已复活（chat 轮终 armIdleKeepalive——轮终保活，超时 =
  * [U5] idleTimeoutRecycle 进程回收），本谓词生产可真：closeSubagent 的「无在跑轮」

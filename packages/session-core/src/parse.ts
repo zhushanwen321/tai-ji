@@ -3,20 +3,20 @@
  *
  * 坏行语义（严格模型，设计 D1）：逐行 JSON.parse，语法错误或缺必填结构字段计入
  * skippedLines 并丢弃，不占位、不中断整体解析。宽松「坏行保留占位」形态是
- * core/session-trace 的私有语义（设计 D1 被否项），不进本基座。
+ * core/session-trace 的私有语义（设计 D1 不采用项），不进本基座。
  */
 
 import { readFile } from 'node:fs/promises'
 
 import { SESSION_MESSAGE_ROLES, type Entry, type ParseResult, type SessionMessageRole } from './types.js'
 
-/** role 值守卫：取数源 = SESSION_MESSAGE_ROLES（词表值清单，扩展点见该常量注释的穷尽断言）。 */
+/** role 值检查：取数源 = SESSION_MESSAGE_ROLES（词表值清单，扩展点见该常量注释的穷尽断言）。 */
 function isMessageRole(v: unknown): v is SessionMessageRole {
   return (SESSION_MESSAGE_ROLES as readonly string[]).includes(v as string)
 }
 
 /**
- * 归一化 message 字段：role 经值守卫收窄，缺/非法 role 时返回 undefined，
+ * 归一化 message 字段：role 经值检查收窄，缺/非法 role 时返回 undefined，
  * 调用方丢弃 message 字段（接口 role 必填，该行仍是合法 entry——message 缺省）。
  */
 function parseEntryMessage(raw: unknown): Entry['message'] | undefined {

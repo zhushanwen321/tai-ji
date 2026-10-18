@@ -1,12 +1,12 @@
 /**
- * useAppUpdate 可见性守卫单测（perf W05 Q1-6 + 补查时间阈值化）。
+ * useAppUpdate 可见性检查单测（perf W05 Q1-6 + 补查时间阈值化）。
  *
  * 覆盖（fake timers + document.hidden mock）：
  * - hidden 期间周期定时器照常触发，但不联网检测（checkForUpdate 零调用，连 hidden 多周期均不发）
  * - 恢复可见（visibilitychange → visible）：距上次联网检查 ≥7.5min 时立即补查
  *   （force=false 走缓存），不等下一个 15min 周期
  * - 补查后周期检测继续（runAutoCheck 重排下一次定时器）
- * - 状态守卫优先于 visibility 补查：升级流程态（downloaded）恢复可见不补查
+ * - 状态检查优先于 visibility 补查：升级流程态（downloaded）恢复可见不补查
  * - onScopeDispose：scope 卸载后 visibilitychange 不再触发检测
  * - 补查 await 窗口 dispose：runAutoCheck await 恢复后不排新周期 timer（W05 review）
  *
@@ -45,7 +45,7 @@ function fireVisibilityChange(): void {
   document.dispatchEvent(new Event('visibilitychange'))
 }
 
-/** hidden 启动装置：hidden 态挂 auto-check 链并推进过 30s 首查（hidden 守卫跳过联网，lastNetworkCheckAt 保持 0） */
+/** hidden 启动装置：hidden 态挂 auto-check 链并推进过 30s 首查（hidden 检查跳过联网，lastNetworkCheckAt 保持 0） */
 async function startHiddenAndSkipFirst(): Promise<{ result: AppUpdateControllerInternal; stop: () => void }> {
   setHidden(true)
   const handle = await startAutoCheckChain()
@@ -53,7 +53,7 @@ async function startHiddenAndSkipFirst(): Promise<{ result: AppUpdateControllerI
   return handle
 }
 
-describe('useAppUpdate 可见性守卫（Q1-6）', () => {
+describe('useAppUpdate 可见性检查（Q1-6）', () => {
   it('hidden 期间周期触发不联网检测：30s 首次 + 15min 周期均跳过 checkForUpdate', async () => {
     const { stop } = await startHiddenAndSkipFirst()
     expect(ipc.checkForUpdate).not.toHaveBeenCalled()
@@ -144,7 +144,7 @@ describe('useAppUpdate 可见性守卫（Q1-6）', () => {
     stop()
   })
 
-  it('状态守卫优先：downloaded 态恢复可见不补查（升级流程不被打断）', async () => {
+  it('状态检查优先：downloaded 态恢复可见不补查（升级流程不被打断）', async () => {
     setHidden(true)
     const { result, stop } = setupAppUpdate({ initAutoCheck: true })
     // 置为升级流程态：canAutoCheck=false，visibility 补查不发起

@@ -18,7 +18,7 @@
   实例行可点击（data-wfvz-instance 锚点）：画布 routeClick 优先路由实例行，
   上抛 callId 让宿主钻取该实例（多实例节点不再只能看第一个）。
 
-  守卫：node prop 违约（缺失 / id 非法）时 fail-fast throw——本组件渲染抛错由外层
+  检查：node prop 违约（缺失 / id 非法）时 fail-fast throw——本组件渲染抛错由外层
   WorkflowVizDagNodeGuard（errorCaptured 节点级边界）捕获并渲染占位错误态，不挂
   整画布（设计 §3.1 失败路径「单节点 SVG 生成失败 = 节点占位错误态不挂画布」）。
   errorCaptured 只捕获后代组件错误，边界必须是与本组件分离的父层组件。
@@ -107,7 +107,7 @@ const TEXT_CENTER_LIFT = 3
 /** 取半除数（行中心 = 行顶 + 行高/2；具名以过 no-magic-numbers）。 */
 const HALF = 2
 
-// fail-fast 守卫：prop 违约即抛（布局产物正常不可达；防御脏数据以占位错误态显形
+// fail-fast 检查：prop 违约即抛（布局产物正常不可达；防御脏数据以占位错误态显形
 // 而非静默渲染空卡）。抛出点被父层 WorkflowVizDagNodeGuard 捕获。
 if (!props.node || typeof props.node.id !== 'string' || props.node.id === '') {
   throw new Error('[WorkflowVizDagNode] node prop 违约：缺失或 id 非法')

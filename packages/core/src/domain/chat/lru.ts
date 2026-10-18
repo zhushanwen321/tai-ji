@@ -29,7 +29,7 @@
  *   统一入口 evictDerivedPartitions，两驱逐路径共用）
  * - agentcall:xxx 两段式虚拟 key 经注入回调联动驱逐（B9，memory-leak-remediation §3.3-B9）：
  *   主 session 被驱逐时由装配侧回调（agentCallEvictionsOf，workflow store 映射 ∖ viewedVids
- *   豁免）返回待释放的 agentcall virtualId，本模块执行删除——豁免源钉死 panel 枚举
+ *   豁免）返回待释放的 agentcall virtualId，本模块执行删除——豁免源固定为 panel 枚举
  *   （core/domain/drawer/control.ts getViewedVids），禁止 drawer 分区全枚举（曾开过 drawer
  *   的 session 焦点切走后分区保留，全枚举会永久过度豁免，R2 S1）。deleteSession 路径的
  *   agentcall 清理仍走 hooks.evictVirtualKeys（workflow 映射全量，无豁免——session 已删）
@@ -161,7 +161,7 @@ export interface LruEvictDeps {
    *
    * 两驱逐路径共用（evictIfNeeded 阈值路径 + evictSessionWithVirtual 显式路径）——
    * 显式路径消费方 deleteSession 会在 hooks.evictVirtualKeys 再全量清一次（含豁免 vid），
-   * 双重调用幂等（deleteMessageKey 有 has 守卫）。
+   * 双重调用幂等（deleteMessageKey 有 has 检查）。
    *
    * [btw-question D9③/M2-c] 形参按**被驱逐 sid 原形态**透传：主会话 = mainSid；btw 分区
    * 被驱逐时 = 线 vid（`btw:<piSessionId>`）——workflow 映射按线 vid 挂名（D9「btw 线名下
@@ -359,13 +359,13 @@ export function makeLruEvictDeps(
     // has 检查保留——避免无该 session 时也构造新 Map 触发无谓响应式。
     // W11 D-3: 删 key 时同步清 streaming flag 派生缓存（内联在此处而非各驱逐点，
     // 使 evictIfNeeded/evictSessionWithVirtual 的主 key 与虚拟 key 联动驱逐全路径覆盖）。
-    // flag 清理不受 has 守卫门控：keyless sid（messages 分区已不存在，但 flag 曾被
+    // flag 清理不受 has 检查门控：keyless sid（messages 分区已不存在，但 flag 曾被
     // isGenerating 查询创建）同样清理——Map.delete 幂等无代价，防 flag 残留慢泄漏。
     // W19 review Fix-2: 同点内联清 changeSetStatuses 前缀条目（同 D-3 模式——驱逐路径
     // 全覆盖：evictIfNeeded/evictSessionWithVirtual 主 key + subagent 虚拟 key 联动 +
     // evictVirtualKey 单虚拟 key）。此前仅 disposeSession 清理，LRU 驱逐不清 → map 泄漏，
     // 且 W19 后 ready 帧扫描语义首次依赖其生命周期（驱逐重进后历史 messageId 与残留
-    // status key 异源）。清理在 has 守卫外（幂等前缀删除，无条目时零代价）。
+    // status key 异源）。清理在 has 检查外（幂等前缀删除，无条目时零代价）。
     deleteMessageKey: (sid) => {
       if (messages.value.has(sid)) {
         deleteMessages(messages, sid)
