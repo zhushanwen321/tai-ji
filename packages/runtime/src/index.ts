@@ -1683,8 +1683,17 @@ async function main(): Promise<void> {
     void shutdown('uncaughtException', 1)
   })
 
+  // ── M3：subagent control server（listen 前初始化）──────────
+  // [D4 启动顺序 / D9 / m-rt-6] 必须先于 WS listen：init 内部的跨代 socket 探活最多
+  // 每个残留 1s，窗口内到达的 session.create/restore 会直接走进主 pi spawn——若
+  // control server 尚未激活，getControlSpawnEnv 返回 {}，该会话整个生命周期静默
+  // 回落 local transport（D9 禁止的「以为 runtime 在管、实际 local spawn」分裂）。
+  // 代价 = listen 就绪最多延后残留探活时长（远小于「托管态静默分裂」的代价）。
+  await initControlServerOrExit(effectiveRoot, messageBus)
+
   // D8-1（perf W29）：先 listen（端口即就绪）——迁移/探测等无 listen 前依赖的后置项
-  // 全部移入下方后台初始化块（06 §3.3 D8-1）。listen 前仅剩：同步迁移 + 服务构造 + setServices。
+  // 全部移入下方后台初始化块（06 §3.3 D8-1）。listen 前仅剩：同步迁移 + 服务构造 +
+  // setServices + control server 初始化（后者顺序约束见上方 m-rt-6 注释）。
   const tListen = performance.now()
   try {
     await server.start()
@@ -1694,9 +1703,6 @@ async function main(): Promise<void> {
     exitOnListenFailure(err, port)
   }
   console.log('[runtime] ready')
-
-  // ── M3：subagent control server（listen 后、后台初始化前）──────────
-  await initControlServerOrExit(effectiveRoot, messageBus)
   // B2 subagent-stream-chunk §4.1：session.getSubagentStreamState 数据源组合根接线。
   // [M3 relay-spawn-transport] 数据源 = control 镜像 tee（runtime transport 的实际
   //  供数面，degraded 标注随 tee 状态）。句柄归 index.ts（services 层不 value import

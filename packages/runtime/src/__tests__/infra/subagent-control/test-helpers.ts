@@ -6,6 +6,7 @@ import * as net from 'node:net'
 import { mkdtemp, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
+import { StringDecoder } from 'node:string_decoder'
 import { SUBAGENT_CONTROL_PROTOCOL_VERSION, SUBAGENT_CONTROL_FRAME_KINDS } from '@zhushanwen/subagent-engine-sdk'
 import { SubagentControlServer, type ControlServerOptions } from '../../../infra/subagent-control/control-server.js'
 
@@ -65,6 +66,8 @@ export class TestAgent {
   readonly frames: Array<Record<string, unknown>> = []
   private conn!: net.Socket
   private buffer = ''
+  /** 客户端侧同样流式解码（否则测试客户端自身会把跨 chunk 的 CJK 撕成 U+FFFD）*/
+  private readonly decoder = new StringDecoder('utf8')
   readonly opened: Promise<void>
   readonly closed: Promise<void>
 
@@ -78,7 +81,7 @@ export class TestAgent {
       this.conn.once('close', resolveClose)
     })
     this.conn.on('data', (d: Buffer) => {
-      this.buffer += d.toString('utf8')
+      this.buffer += this.decoder.write(d)
       let nl = this.buffer.indexOf('\n')
       while (nl !== -1) {
         const line = this.buffer.slice(0, nl)
@@ -96,6 +99,26 @@ export class TestAgent {
   /** 发送任意原始行（畸形帧/超长帧用例）。 */
   sendRaw(line: string): void {
     this.conn.write(`${line}\n`)
+  }
+
+  /**
+   * 发送原始字节块（UTF-8 跨 chunk 边界用例）：每块之间留 gap，保证服务端确实按
+   * 两个 chunk 收到（同一次 write 的切片可能被内核合并）。
+   */
+  async sendBuffers(chunks: Buffer[], gapMs = 50): Promise<void> {
+    for (let i = 0; i < chunks.length; i++) {
+      this.conn.write(chunks[i])
+      if (i < chunks.length - 1) await new Promise((r) => setTimeout(r, gapMs))
+    }
+  }
+
+  /** 暂停读取（背压下控制帧/数据帧顺序用例：让服务端 socket.write 返回 false）。 */
+  pause(): void {
+    this.conn.pause()
+  }
+
+  resume(): void {
+    this.conn.resume()
   }
 
   hello(id: string | number = 'h1', overrides: Record<string, unknown> = {}): void {
@@ -140,6 +163,18 @@ export class TestAgent {
     return this.frames
       .filter((f) => f.kind === SUBAGENT_CONTROL_FRAME_KINDS.engineFrame)
       .map((f) => String(f.line))
+  }
+
+  /** 帧序列中某 kind 的最后位置（顺序断言用）。 */
+  lastIndexOfKind(kind: string, channelId?: string): number {
+    let index = -1
+    for (let i = 0; i < this.frames.length; i++) {
+      const frame = this.frames[i]
+      if (frame.kind !== kind) continue
+      if (channelId !== undefined && frame.channelId !== channelId) continue
+      index = i
+    }
+    return index
   }
 
   closedFrames(): Array<Record<string, unknown>> {

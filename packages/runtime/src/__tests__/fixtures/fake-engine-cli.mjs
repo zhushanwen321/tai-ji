@@ -21,7 +21,16 @@
  * - `--stdin-pause-ms <n>`：先不消费 stdin（管道写满 → 背压），n ms 后恢复读取
  *   （慢读者恢复 → drain → down 队列冲刷；每帧恰好投递一次的回归用例）；
  * - `--stderr <text>`：启动即写一行 stderr（engine_closed.stderrTail 采集验证）；
- * - `--emit <json>`：启动即向 stdout 写一行（unsolicited 引擎帧下发验证）。
+ * - `--emit <json>`：启动即向 stdout 写一行（unsolicited 引擎帧下发验证）；
+ * - `--emit-size <n>`：启动即发一行 n 字节巨帧（上行帧超限用例）；
+ * - `--emit-lines <count> <bytes>`：启动即发 count 行、每行 bytes 字节（上行背压/顺序）；
+ * - `--emit-lines-on <token> <count> <bytes>`：stdin 行含 token 时发多行巨帧（
+ *   背压下控制帧 FIFO 顺序 / 连接级 overflow flush 用例的确定性入口）；
+ * - `--emit-split-utf8`：把「中\n」的 3 字节字符拆成 1+2 两次写出（R→C 解码回归）；
+ * - `--ack-stdin-bytes`：每行 stdin 回 `{type:'ack', bytes}`（A8 大 prompt 字节回执）；
+ * - `--echo-line`：每行 stdin 回 `{type:'echo', line}`（C→R 跨 chunk 解码回显）；
+ * - `--emit-host-child-frames`：随 `--spawn-child` 发 host/childSpawned 反向信封
+ *   （Windows child pid 集合登记用例）。
  *
  * 临时文件纪律：fixture 文件在仓内（territory 内自足），运行期不写任何数据目录；
  * server 侧 socket/pid 文件由测试注入 mkdtemp 目录。
@@ -44,6 +53,19 @@ if (emitRaw !== undefined) process.stdout.write(`${emitRaw}\n`)
 // 巨行发射（上行帧超限用例；尺寸不经 launch spec 传递——那会撑爆 engine_open 信封）
 const emitSize = Number(argOf('--emit-size') ?? '0')
 if (emitSize > 0) process.stdout.write(`w${'w'.repeat(emitSize)}\n`)
+// 多行巨帧（上行背压/顺序用例）：--emit-lines <count> <bytes>
+const emitLinesIdx = args.indexOf('--emit-lines')
+if (emitLinesIdx !== -1) {
+  const count = Number(args[emitLinesIdx + 1] ?? '0')
+  const size = Number(args[emitLinesIdx + 2] ?? '0')
+  for (let i = 0; i < count; i++) process.stdout.write(`${'w'.repeat(size)}\n`)
+}
+// UTF-8 跨 chunk 边界（R→C 解码回归）：把「中\n」的 3 字节字符拆成 1+2 写出
+if (has('--emit-split-utf8')) {
+  const bytes = Buffer.from('中\n', 'utf8')
+  process.stdout.write(bytes.subarray(0, 1))
+  setTimeout(() => process.stdout.write(bytes.subarray(1)), 30)
+}
 
 // 模拟引擎拉起的假 pi 子进程（同进程组——spawnEngineChild 契约 detached:false；
 // server 组杀负 pid 覆盖本进程与该子进程）
@@ -56,6 +78,14 @@ if (has('--spawn-child')) {
   })
   // 子进程 pid 上报（server 视角不透明行；测试经 engine_frame 解析收割断言用）
   process.stdout.write(`${JSON.stringify({ type: 'event', childPid: child.pid })}\n`)
+  // 真实引擎的 D7 反向通道信封形态（runtime 只读解析这两个 method 维护 pidSet）
+  if (has('--emit-host-child-frames')) {
+    process.stdout.write(`${JSON.stringify({
+      id: 'rev-child-1',
+      method: 'host/childSpawned',
+      params: { pid: child.pid, recordId: 'rec-1' },
+    })}\n`)
+  }
 }
 
 let buf = ''
@@ -91,6 +121,14 @@ if (!has('--no-read-stdin')) {
 }
 
 function handleLine(line) {
+  // 按 token 触发多行巨帧（背压/顺序用例）：先于 exit-on（同 token 场景由调用方避免）
+  const emitOnIdx = args.indexOf('--emit-lines-on')
+  if (emitOnIdx !== -1 && line.includes(args[emitOnIdx + 1])) {
+    const count = Number(args[emitOnIdx + 2] ?? '0')
+    const size = Number(args[emitOnIdx + 3] ?? '0')
+    for (let i = 0; i < count; i++) process.stdout.write(`${'w'.repeat(size)}\n`)
+    return
+  }
   // --exit-on 判定先于回包（退出语义优先）
   const exitToken = argOf('--exit-on')
   if (exitToken !== undefined && line.includes(exitToken)) {
@@ -103,6 +141,16 @@ function handleLine(line) {
     process.exit(code)
   }
   if (has('--hang')) return
+  // A8：大 prompt 送达字节数回执（200KB 正向直测；只回字节数，不放大响应）
+  if (has('--ack-stdin-bytes')) {
+    process.stdout.write(`${JSON.stringify({ type: 'ack', bytes: Buffer.byteLength(line, 'utf8') })}\n`)
+    return
+  }
+  // UTF-8 逐字回显（C→R 跨 chunk 解码回归）：原样 JSON 编码回一行
+  if (has('--echo-line')) {
+    process.stdout.write(`${JSON.stringify({ type: 'echo', line })}\n`)
+    return
+  }
   // 请求/响应回显：任何带 id 的 JSON 行回一行 response（engine-protocol 形态近似）
   try {
     const parsed = JSON.parse(line)

@@ -19,13 +19,15 @@
  */
 import * as net from 'node:net'
 import { spawn, type ChildProcess } from 'node:child_process'
-import { chmodSync, existsSync, mkdirSync, unlinkSync, writeFileSync } from 'node:fs'
+import { chmodSync, existsSync, unlinkSync } from 'node:fs'
 import { dirname, isAbsolute } from 'node:path'
+import { StringDecoder } from 'node:string_decoder'
 import { getDataDir, getPiAgentDir } from '@taiji/shared/paths'
 import {
   SUBAGENT_CONTROL_PROTOCOL_VERSION,
   SUBAGENT_CONTROL_FRAME_KINDS,
   SUBAGENT_CONTROL_CLOSED_REASONS,
+  ENGINE_TRANSPORT_ERROR_RECOVERY,
   EngineSdkError,
   resolveEngineNodeLaunch,
   type EngineNodeLaunch,
@@ -59,13 +61,17 @@ import {
   type SubagentControlClosedReason,
 } from './frames.js'
 import { ControlChannelRegistry, type EngineChannelRecord } from './channel-registry.js'
+import { ChannelDownQueue } from './down-queue.js'
 import { buildEngineLaunchEnv } from './engine-launch-env.js'
+import { collectWindowsTreeKillTargets, trackEngineChildPid } from './engine-child-pids.js'
 import { SubagentMirrorHub, type MirrorPublish } from './mirror.js'
+import { ConnectionOutboundQueue } from './outbound-queue.js'
+import { ensurePrivateControlDir, writeEnginePidFileAtomically } from './pid-file.js'
 import type { SubagentTeeStreamState } from './subagent-tee.js'
 import { killEngineGroup } from './process-kill.js'
 import { sweepOrphanEnginePids, sweepStaleControlSockets } from './sweep.js'
 import { findPiExecutable } from '../pi/find-pi-executable.js'
-import { getEngineRootsSpawnEnv } from '../../services/session/engine-roots.js'
+import { isPidAlive } from '../../utils/protocol-background-task.js'
 import { toErrorMessage } from '../../utils/errors.js'
 
 // ── 依赖注入（测试隔离用；生产全部走缺省推导）─────────────────────────────────
@@ -76,9 +82,10 @@ export type ControlServerOptions = {
   /** pi 二进制定位锚点（dev = apps/electron；缺省 process.cwd() 的同款 cwd 约定）。 */
   projectRoot?: string
   /**
-   * 引擎发现/执行器 env（getEngineRootsSpawnEnv 产物：TAIJI_AGENT_ENGINE_ROOTS +
-   * 打包态 TAIJI_AGENT_ENGINE_NODE/ELECTRON_RUN_AS_NODE）——引擎 env 基座与嵌套发现
-   * 共用。缺省按 projectRoot 推导（组合根注入以维持 infra 不 import services 的方向）。
+   * 引擎发现/执行器 env（组合根注入 getEngineRootsSpawnEnv 产物：TAIJI_AGENT_ENGINE_ROOTS
+   * + 打包态 TAIJI_AGENT_ENGINE_NODE/ELECTRON_RUN_AS_NODE）——引擎 env 基座与嵌套发现
+   * 共用。**组合根必注入**（infra 不 value import services 的方向约束，m-rt-9）；缺省
+   * 空对象仅用于不消费该矩阵的隔离测试。
    */
   engineNodeEnv?: Record<string, string>
   /** spawn 命令覆盖（测试注入；生产缺省 findPiExecutable(projectRoot) 只取其目录）。 */
@@ -109,6 +116,13 @@ export type ControlServerOptions = {
   connectionQueueMaxBytes?: number
   /** 启动 sweep 开关（缺省 true）。 */
   sweep?: boolean
+  /**
+   * 树杀平台判定覆盖（测试 Windows 树杀分支；缺省 process.platform）。仅影响
+   * 「引擎已死 → 逐 child pid 树杀」的分支选择，不改变 socket/spawn 平台语义。
+   */
+  killPlatform?: NodeJS.Platform
+  /** 树杀原语注入（测试观察 Windows 分支调用；缺省 killEngineGroup）。 */
+  killGroup?: (pid: number | null | undefined, context: string) => void
 }
 
 /** 在途 engine_open 登记（数据形状，非可实现契约——oe-audit 口径用 type 别名）。 */
@@ -123,6 +137,8 @@ type PendingOpen = {
 type ConnState = {
   id: string
   socket: net.Socket
+  /** 流式 UTF-8 解码器（m-rt-1：多字节字符跨 chunk 边界不得被逐段 toString 撕裂）。 */
+  decoder: StringDecoder
   helloDone: boolean
   /** 连接归属根会话（第一个 engine_open 确定；后续不一致 → engine_open_failed session）。 */
   rootSessionId: string | null
@@ -138,9 +154,11 @@ type ConnState = {
   pendingOpens: Map<string, PendingOpen>
   /** 已受理过的 engine_open requestId（按 id 幂等：重复 id → duplicate）。 */
   seenOpenIds: Set<string>
-  /** up 方向待写队列（socket 背压；{channelId, 行} FIFO 保 per-channel 顺序）。 */
-  upQueue: Array<{ channelId: string; line: string; bytes: number }>
-  upQueueBytes: number
+  /**
+   * up 方向待写队列（socket 背压）：engine_frame 与控制帧共用同一 FIFO（m-rt-2）——
+   * 控制帧不再绕过排队，背压期 engine_closed 不会越过已入队的 engine_frame。
+   */
+  out: ConnectionOutboundQueue
   /**
    * down 方向待写队列的**连接级聚合**字节数（各通道 pendingDownBytes 之和；D8
    * 「每连接每方向 256MB」的 down 侧防线）。
@@ -153,18 +171,16 @@ type ConnState = {
 type ChannelCtx = {
   rec: EngineChannelRecord
   conn: ConnState
-  /**
-   * down 方向**真正入队**的帧（背压期到达、尚未写 stdin 的帧）。已交给 Node 内部缓冲
-   * 的帧（`stdin.write` 返回 false 的那一帧仍已被受理）不入队——否则 drain 时会重写，
-   * 同一帧投递两次（R3-N1）。
-   */
-  pendingDown: Array<{ line: string; bytes: number }>
-  pendingDownBytes: number
-  /** 本通道已登记 drain 等待（write 背压或队列非空）；同一背压期只挂一个 once 监听。 */
-  downAwaitingDrain: boolean
+  /** down 方向（C→R engine_frame → 引擎 stdin）待写队列与背压状态。 */
+  down: ChannelDownQueue
   pendingUpFrames: number
   pendingUpBytes: number
   stderrTail: string
+  /**
+   * [D7 Windows 死亡链] 引擎反向通道上报的子进程 pid 集合（host/childSpawned /
+   * host/childStateChanged 信封解析；仅 Windows 树杀兜底消费，其余帧保持不透明）。
+   */
+  pidSet: Set<number>
   closeTimer: NodeJS.Timeout | null
   /** 控制面已裁决杀组（engine_close 超时 / 背压溢出 / 断连 fan-out / open 超时 / 递归树杀）。 */
   killRequested: boolean
@@ -182,6 +198,13 @@ type ChannelCtx = {
 
 /** spawn 同步失败呈现为引擎非零退出（127 = command not found 惯例）。 */
 const SPAWN_FAILURE_EXIT_CODE = 127
+
+/**
+ * 连接级溢出的排空上界（m-rt-2）：先 flush error 再 end；对端持续不读时只能显式关闭。
+ * 这是失败动作的回收层有界兜底（ADR-0122 回收层允许默认有界），不是对账补偿——
+ * 正常路径由 drain 事件驱动，定时器只在「客户端不消费」这一故障形态下兜底。
+ */
+const OVERFLOW_FLUSH_TIMEOUT_MS = 1_000
 
 /**
  * 连接静默关闭（best-effort）：半关闭/destroyed 流上 `socket.end()` 会同步抛
@@ -228,11 +251,13 @@ export class SubagentControlServer {
   private readonly resolveLaunch: (opts: EngineNodeLaunchOptions) => Promise<EngineNodeLaunch>
   private readonly execPath: string | undefined
   private readonly isElectronHost: boolean | undefined
+  private readonly killPlatform: NodeJS.Platform
+  private readonly killGroup: (pid: number | null | undefined, context: string) => void
 
   constructor(private readonly opts: ControlServerOptions) {
     this.dataDir = opts.dataDir ?? getDataDir()
     this.projectRoot = opts.projectRoot ?? process.cwd()
-    this.engineNodeEnv = opts.engineNodeEnv ?? getEngineRootsSpawnEnv(this.projectRoot)
+    this.engineNodeEnv = opts.engineNodeEnv ?? {}
     this.runtimeEnv = opts.runtimeEnv ?? { ...process.env }
     this.helloTimeoutMs = opts.helloTimeoutMs ?? CONTROL_HELLO_TIMEOUT_MS
     this.openTimeoutMs = opts.openTimeoutMs ?? ENGINE_OPEN_TIMEOUT_MS
@@ -245,6 +270,8 @@ export class SubagentControlServer {
     this.resolveLaunch = opts.resolveLaunch ?? resolveEngineNodeLaunch
     this.execPath = opts.execPath
     this.isElectronHost = opts.isElectronHost
+    this.killPlatform = opts.killPlatform ?? process.platform
+    this.killGroup = opts.killGroup ?? killEngineGroup
     const piCommand = opts.piCommand ?? safeFindPi(this.projectRoot)
     this.piDir = piCommand !== 'pi' ? dirname(piCommand) : undefined
     this.piAgentDir = opts.piAgentDir ?? getPiAgentDir()
@@ -253,9 +280,11 @@ export class SubagentControlServer {
     )
   }
 
-  /** 在册通道数（滚动重启在途面组合根消费）。 */
+  /** 在册通道数 + opening 占位（滚动重启在途面组合根消费；口径与 D8 上限一致）。 */
   get channelCount(): number {
-    return this.registry.channelCount
+    let openings = 0
+    for (const conn of this.conns.values()) openings += conn.pendingOpens.size
+    return this.registry.channelCount + openings
   }
 
   get listeningSocketPath(): string {
@@ -265,6 +294,11 @@ export class SubagentControlServer {
   /** 测试钩子：通道台账只读（生产无调用方）。 */
   getChannelForTest(channelId: string): EngineChannelRecord | undefined {
     return this.registry.get(channelId)
+  }
+
+  /** 测试钩子：活动连接数（溢出 flush 窗口 = 连接尚未销毁，生产无调用方）。 */
+  getConnectionCountForTest(): number {
+    return this.conns.size
   }
 
   /**
@@ -285,8 +319,10 @@ export class SubagentControlServer {
    */
   async init(): Promise<void> {
     if (this.server !== null) throw new Error('[subagent-control] server already initialized')
-    mkdirSync(getControlRunDir(this.dataDir), { recursive: true, mode: 0o700 })
-    mkdirSync(getControlEnginesDir(this.dataDir), { recursive: true, mode: 0o700 })
+    // 0700 是 socket 权限边界的前提：mkdirSync 的 mode 只对新建目录生效，存量 run/
+    // （旧 relay 时代默认 0755）必须显式收敛（planner③）。权限收敛失败按 fail-fast
+    // 处理——目录权限不满足时不应继续监听（D4 安全边界，早发现优于降级）。
+    this.ensurePrivateControlDirs()
 
     this.socketPath = getControlSocketPath(this.dataDir)
     assertSocketPathLength(this.socketPath)
@@ -330,6 +366,15 @@ export class SubagentControlServer {
     }
   }
 
+  /**
+   * 创建目录并强制收敛为 0700（含已存在目录）。win32 无 POSIX 权限位（named pipe 用
+   * 默认 ACL，设计允许显式登记），跳过 chmod。失败 fail-fast（权限面是认证边界）。
+   */
+  private ensurePrivateControlDirs(): void {
+    ensurePrivateControlDir(getControlRunDir(this.dataDir))
+    ensurePrivateControlDir(getControlEnginesDir(this.dataDir))
+  }
+
   /** 关停：全连接全通道组杀 + 关 server + 删 socket 文件。幂等（shutdown 与测试 afterEach 均可安全调用）。 */
   async destroy(): Promise<void> {
     if (this.deinitialized) return
@@ -364,6 +409,7 @@ export class SubagentControlServer {
     const conn: ConnState = {
       id: `conn-${++this.connSeq}`,
       socket,
+      decoder: new StringDecoder('utf8'),
       helloDone: false,
       rootSessionId: null,
       destroyed: false,
@@ -377,8 +423,7 @@ export class SubagentControlServer {
       }, this.helloTimeoutMs),
       pendingOpens: new Map(),
       seenOpenIds: new Set(),
-      upQueue: [],
-      upQueueBytes: 0,
+      out: new ConnectionOutboundQueue(socket, OVERFLOW_FLUSH_TIMEOUT_MS),
       downQueueBytes: 0,
       awaitingDrain: false,
     }
@@ -394,7 +439,7 @@ export class SubagentControlServer {
       this.ingestChunk(conn, chunk)
     })
     socket.on('drain', () => {
-      this.flushUpQueue(conn)
+      conn.out.flush()
     })
     socket.once('close', () => {
       // kill-on-disconnect（D4/D7）：主 pi/extension 死亡 → 该连接全部引擎组杀
@@ -404,17 +449,23 @@ export class SubagentControlServer {
 
   private ingestChunk(conn: ConnState, chunk: Buffer): void {
     if (conn.destroyed) return
-    const text = chunk.toString('utf8')
+    // 流式解码（m-rt-1）：StringDecoder 缓存被 chunk 边界截断的多字节序列，下个 chunk
+    // 补齐后才吐出完整字符——逐 chunk `toString('utf8')` 会把汉字/emoji 静默替换为 U+FFFD。
+    this.ingestText(conn, conn.decoder.write(chunk))
+  }
+
+  private ingestText(conn: ConnState, text: string): void {
+    if (conn.destroyed) return
     if (conn.discardingUntilNewline) {
       // 超长帧丢弃态（帧界未达即超限，流已失同步）：丢弃直到下一帧界，其后照常解析
       const nl = text.indexOf('\n')
       if (nl === -1) return
       conn.discardingUntilNewline = false
-      this.ingestChunk(conn, Buffer.from(text.slice(nl + 1), 'utf8'))
+      this.ingestText(conn, text.slice(nl + 1))
       return
     }
     conn.buffer += text
-    conn.bufferBytes += chunk.length
+    conn.bufferBytes += byteLengthOf(text)
     // 帧界未达即超限（partial-line 无换行）：按超长帧归因处置（关通道），进丢弃态直到
     // 下一帧界——连接保持可用（流式信封解析读前 1KB 提取归属，D8）
     if (conn.bufferBytes > this.maxFrameBytes && conn.buffer.indexOf('\n') === -1) {
@@ -575,8 +626,10 @@ export class SubagentControlServer {
       return
     }
     conn.seenOpenIds.add(key)
-    // 连接通道数上限（聚合防线；复用 engine_open_failed 帧，不新增帧类型）
-    if (this.registry.listByConnection(conn.id).length >= this.maxChannelsPerConnection) {
+    // 连接通道数上限（聚合防线；复用 engine_open_failed 帧，不新增帧类型）。计数必须
+    // 含 opening 占位（planner②）：并发 engine_open 在首批 spawn 完成前都只占
+    // pendingOpens、registry 尚为空——只数在册通道会让并发 open 绕过上限。
+    if (this.connectionChannelCount(conn) >= this.maxChannelsPerConnection) {
       this.replyOpenFailed(conn, frame.id, CONTROL_FRAME_ERROR_CODES.channelLimit,
         `connection channel limit (${String(this.maxChannelsPerConnection)}) reached`,
         'Close idle engine channels before opening more.')
@@ -601,6 +654,10 @@ export class SubagentControlServer {
     }
     conn.pendingOpens.set(key, opening)
     void this.spawnForOpening(conn, opening)
+  }
+
+  private connectionChannelCount(conn: ConnState): number {
+    return this.registry.listByConnection(conn.id).length + conn.pendingOpens.size
   }
 
   private async spawnForOpening(conn: ConnState, opening: PendingOpen): Promise<void> {
@@ -658,7 +715,19 @@ export class SubagentControlServer {
     }
     if (opening.aborted || conn.destroyed) {
       // spawn 与超时/断连的竞态：刚拿到的进程立即组杀，不回 engine_opened（迟到结果丢弃）
-      killEngineGroup(child.pid, `late-spawn ${spec.engineId}`)
+      this.killGroup(child.pid, `late-spawn ${spec.engineId}`)
+      return
+    }
+
+    // spawn 完成前不变量复检（planner②）：并发 open 的占位可能在 resolve/spawn
+    // 期间继续增长；超限则杀掉刚拿到的进程，不登记、不回 engine_opened。
+    if (this.connectionChannelCount(conn) > this.maxChannelsPerConnection) {
+      clearTimeout(opening.timer)
+      conn.pendingOpens.delete(opening.key)
+      this.killGroup(child.pid, `channel-limit ${spec.engineId}`)
+      this.replyOpenFailed(conn, frameIdOf(opening.key), CONTROL_FRAME_ERROR_CODES.channelLimit,
+        `connection channel limit (${String(this.maxChannelsPerConnection)}) reached`,
+        'Close idle engine channels before opening more.')
       return
     }
 
@@ -682,12 +751,24 @@ export class SubagentControlServer {
     const ctx: ChannelCtx = {
       rec,
       conn,
-      pendingDown: [],
-      pendingDownBytes: 0,
-      downAwaitingDrain: false,
+      down: new ChannelDownQueue({
+        channelId,
+        getStdin: () => rec.child?.stdin,
+        channelMaxBytes: this.channelQueueMaxBytes,
+        channelMaxFrames: this.channelQueueMaxFrames,
+        getConnectionBytes: () => conn.downQueueBytes,
+        setConnectionBytes: (bytes) => { conn.downQueueBytes = bytes },
+        connectionMaxBytes: this.connectionQueueMaxBytes,
+        onOverflow: (detail, connectionLevel) => {
+          this.writeErrorAndKill(ctx, CONTROL_FRAME_ERROR_CODES.backpressureOverflow,
+            connectionLevel ? `${detail} (connection-level)` : detail,
+            ENGINE_TRANSPORT_ERROR_RECOVERY.engine_backpressure_overflow)
+        },
+      }),
       pendingUpFrames: 0,
       pendingUpBytes: 0,
       stderrTail: '',
+      pidSet: new Set(),
       closeTimer: null,
       killRequested: false,
       intentionalClose: false,
@@ -698,7 +779,7 @@ export class SubagentControlServer {
     }
     this.ctxs.set(channelId, ctx)
     try {
-      writeFileSync(pidFile, JSON.stringify({
+      writeEnginePidFileAtomically(pidFile, {
         pid: child.pid ?? null,
         spawnedAt: Date.now(),
         engineId: spec.engineId,
@@ -708,7 +789,7 @@ export class SubagentControlServer {
         runtimePid: process.pid,
         instanceId: String(process.pid),
         hostKind: 'runtime-sidecar',
-      }))
+      })
     } catch (e) {
       // pid 文件是重启 sweep 依据，写失败不阻塞（当前 runtime 在管，退出走清理）
       console.warn(`[subagent-control] pid file write failed ${pidFile}:`, e)
@@ -757,6 +838,10 @@ export class SubagentControlServer {
   }
 
   private failOpening(conn: ConnState, opening: PendingOpen, code: string, message: string, recovery: string): void {
+    // 迟到失败不二次回包（m-rt-8）：超时/断连已裁决并删除占位后，resolveLaunch 才
+    // reject 的路径不得再发一帧 engine_open_failed（客户端 pending 已清，重复帧只会
+    // 污染协议面与后续「单应答」断言）。
+    if (opening.aborted || !conn.pendingOpens.has(opening.key)) return
     clearTimeout(opening.timer)
     conn.pendingOpens.delete(opening.key)
     this.replyOpenFailed(conn, frameIdOf(opening.key), code, message, recovery)
@@ -790,86 +875,7 @@ export class SubagentControlServer {
       })
       return
     }
-    this.writeDown(ctx, frame.line)
-  }
-
-  private writeDown(ctx: ChannelCtx, line: string): void {
-    const stdin = ctx.rec.child?.stdin
-    if (stdin === undefined || stdin === null || stdin.destroyed) {
-      console.debug(`[subagent-control] stdin unavailable, dropping frame channelId=${ctx.rec.channelId}`)
-      return
-    }
-    const bytes = byteLengthOf(line) + 1
-    // 背压中（已登记 drain 等待或队列非空）：只入队、不写——保持 FIFO，且绝不重写
-    // 已交给 Node 缓冲的帧（R3-N1：write 返回 false 时数据仍已被受理，drain 前会写出）。
-    if (ctx.downAwaitingDrain || ctx.pendingDown.length > 0) {
-      this.enqueueDown(ctx, stdin, line, bytes)
-      return
-    }
-    let ok = false
-    try {
-      ok = stdin.write(`${line}\n`)
-    } catch (e) {
-      // 引擎已死（EPIPE 族）：exit 帧链路接管，丢帧降级
-      console.debug(`[subagent-control] stdin write threw channelId=${ctx.rec.channelId}:`, toErrorMessage(e))
-      return
-    }
-    // write 返回 false 只表示内核缓冲已满：本帧已被 Node 受理并在 drain 前写出，因此
-    // 只登记 drain 等待、**不入队重写**（否则同一帧投递两次）。上限判定只在真正入队
-    // 时执行——健康写（返回 true）不贡献 downQueueBytes，不会因其它通道积压被聚合
-    // 上限误杀（R2-B-U-3）。
-    if (!ok) this.armDownDrain(ctx, stdin)
-  }
-
-  /** 背压期入队：判 per-channel + 连接聚合双上限（溢出 → error + 杀组，D8 不丢帧不静默）。 */
-  private enqueueDown(ctx: ChannelCtx, stdin: NonNullable<ChildProcess['stdin']>, line: string, bytes: number): void {
-    const channelOverflow = ctx.pendingDownBytes + bytes > this.channelQueueMaxBytes
-      || ctx.pendingDown.length + 1 > this.channelQueueMaxFrames
-    // 连接级聚合 = 各通道真正入队的 pendingDownBytes 之和（已交给 Node 缓冲的帧不在其中）。
-    const connectionOverflow = ctx.conn.downQueueBytes + bytes > this.connectionQueueMaxBytes
-    if (channelOverflow || connectionOverflow) {
-      const detail = connectionOverflow
-        ? `engine stdin queue overflow (connection aggregate ${String(ctx.conn.downQueueBytes + bytes)} bytes)`
-        : `engine stdin queue overflow (${String(ctx.pendingDownBytes + bytes)} bytes / ${String(ctx.pendingDown.length + 1)} frames queued)`
-      this.writeErrorAndKill(ctx, CONTROL_FRAME_ERROR_CODES.backpressureOverflow, detail, 'engine_backpressure_overflow')
-      return
-    }
-    ctx.pendingDown.push({ line, bytes })
-    ctx.pendingDownBytes += bytes
-    ctx.conn.downQueueBytes += bytes
-    this.armDownDrain(ctx, stdin)
-  }
-
-  /** 登记 drain 等待（同一背压期只挂一个 once 监听，避免 >10 帧触发监听器告警）。 */
-  private armDownDrain(ctx: ChannelCtx, stdin: NonNullable<ChildProcess['stdin']>): void {
-    if (ctx.downAwaitingDrain) return
-    ctx.downAwaitingDrain = true
-    stdin.once('drain', () => {
-      this.flushPendingDown(ctx)
-    })
-  }
-
-  private flushPendingDown(ctx: ChannelCtx): void {
-    ctx.downAwaitingDrain = false
-    const stdin = ctx.rec.child?.stdin
-    if (stdin === undefined || stdin === null || stdin.destroyed) return
-    while (ctx.pendingDown.length > 0) {
-      const next = ctx.pendingDown[0]
-      let ok = false
-      try {
-        ok = stdin.write(`${next.line}\n`)
-      } catch {
-        return // 引擎已死，exit 链路接管
-      }
-      // 已交给 Node（即便返回 false 也已被受理）→ 出队，绝不保留重写
-      ctx.pendingDown.shift()
-      ctx.pendingDownBytes -= next.bytes
-      ctx.conn.downQueueBytes = Math.max(0, ctx.conn.downQueueBytes - next.bytes)
-      if (!ok) {
-        this.armDownDrain(ctx, stdin)
-        return
-      }
-    }
+    ctx.down.push(frame.line)
   }
 
   /** engine_close（D4）：有界等待引擎退出（dispose 异步落盘窗），超时组杀；只影响本通道。 */
@@ -910,20 +916,25 @@ export class SubagentControlServer {
       console.debug(`[subagent-control] engine stdin error channelId=${channelId}:`, err.message)
     })
 
-    // stdout → engine_frame（行切分；引擎帧是不透明字符串载荷）。行超限（含无换行残片
-    // 超限——引擎死循环无换行输出同判）→ error + 杀组关通道（与下行同上限）。
+    // stdout → engine_frame（行切分；引擎帧是不透明字符串载荷）。流式解码（m-rt-1）
+    // 保证跨 chunk 的中文/emoji 不被逐段 toString 撕成 U+FFFD。
     let stdoutBuffer = ''
+    const stdoutDecoder = new StringDecoder('utf8')
     child.stdout?.on('data', (chunk: Buffer) => {
-      stdoutBuffer += chunk.toString('utf8')
+      stdoutBuffer += stdoutDecoder.write(chunk)
       let nl = stdoutBuffer.indexOf('\n')
       while (nl !== -1 && !conn.destroyed && this.ctxs.has(channelId)) {
         const line = stdoutBuffer.slice(0, nl)
         stdoutBuffer = stdoutBuffer.slice(nl + 1)
         nl = stdoutBuffer.indexOf('\n')
         if (line.trim().length === 0) continue
+        // [D7 Windows] 只读解析两个反向通道信封（其余帧保持不透明）：维护 child pid
+        // 集合供「引擎已死 → 逐 pid 树杀」兜底使用（m-rt-2/planner①）。
+        this.trackEngineChildPid(ctx, line)
         if (byteLengthOf(line) > this.maxFrameBytes) {
           this.writeErrorAndKill(ctx, CONTROL_FRAME_ERROR_CODES.frameTooLarge,
-            `engine stdout line exceeded ${String(this.maxFrameBytes)} bytes`, 'engine_frame_too_large')
+            `engine stdout line exceeded ${String(this.maxFrameBytes)} bytes`,
+            ENGINE_TRANSPORT_ERROR_RECOVERY.engine_frame_too_large)
           return
         }
         this.writeUp(conn, ctx, {
@@ -935,16 +946,18 @@ export class SubagentControlServer {
       }
       if (Buffer.byteLength(stdoutBuffer, 'utf8') > this.maxFrameBytes && this.ctxs.has(channelId)) {
         this.writeErrorAndKill(ctx, CONTROL_FRAME_ERROR_CODES.frameTooLarge,
-          `engine stdout partial line exceeded ${String(this.maxFrameBytes)} bytes`, 'engine_frame_too_large')
+          `engine stdout partial line exceeded ${String(this.maxFrameBytes)} bytes`,
+          ENGINE_TRANSPORT_ERROR_RECOVERY.engine_frame_too_large)
       }
     })
     child.stdout?.on('error', (err: Error) => {
       console.warn(`[subagent-control] engine stdout stream error channelId=${channelId}:`, err.message)
     })
 
-    // stderr → 有界尾部环（engine_closed.stderrTail，排障用）
+    // stderr → 有界尾部环（engine_closed.stderrTail，排障用）。流式解码同 stdout。
+    const stderrDecoder = new StringDecoder('utf8')
     child.stderr?.on('data', (chunk: Buffer) => {
-      ctx.stderrTail = (ctx.stderrTail + chunk.toString('utf8')).slice(-STDERR_TAIL_CHARS)
+      ctx.stderrTail = (ctx.stderrTail + stderrDecoder.write(chunk)).slice(-STDERR_TAIL_CHARS)
     })
     child.stderr?.on('error', (err: Error) => {
       console.debug(`[subagent-control] engine stderr stream error channelId=${channelId}:`, err.message)
@@ -1000,62 +1013,71 @@ export class SubagentControlServer {
         console.log(`[subagent-control] engine closed channelId=${channelId} code=${String(code)} signal=${String(signal)} reason=${reason}`)
       }
       if (shouldKillGroup) {
-        killEngineGroup(rec.pid, `${unexpectedForLog ? 'unexpected-exit' : 'intentional-close-exit'} channelId=${channelId}`)
+        this.killChannelGroup(ctx, `${unexpectedForLog ? 'unexpected-exit' : 'intentional-close-exit'} channelId=${channelId}`)
       }
     })
+  }
+
+  /**
+   * 引擎反向通道的两个 pid 信封解析（设计 D7）：实现见 engine-child-pids（本类只负责
+   * 在 stdout 行泵中调用）。
+   */
+  private trackEngineChildPid(ctx: ChannelCtx, line: string): void {
+    trackEngineChildPid(ctx.pidSet, line)
+  }
+
+  /**
+   * 通道组杀（D7）：POSIX 走负 pid 组杀（对已死组长仍有效）；Windows 引擎存活时按
+   * 引擎 pid 树杀，引擎已死（无树可枚举）时回退到反向通道登记的 child pid 集合逐个
+   * 树杀——否则存活 pi 子进程成为孤儿（m-rt-2/planner①）。
+   */
+  private killChannelGroup(ctx: ChannelCtx, context: string): void {
+    if (this.killPlatform !== 'win32') {
+      this.killGroup(ctx.rec.pid, context)
+      return
+    }
+    for (const pid of collectWindowsTreeKillTargets(ctx.rec.pid, ctx.pidSet, isPidAlive)) {
+      this.killGroup(pid, `${context} tree pid=${String(pid)}`)
+    }
   }
 
   // ── up 方向写出（socket 背压：per-channel + 连接聚合双上限）──────────────────
 
   private writeUp(conn: ConnState, ctx: ChannelCtx, frame: Record<string, unknown>): void {
+    if (conn.out.hasOverflowed) return // 连接级溢出已裁决：数据面帧不再入队（控制帧仍按 FIFO 收尾）
     const line = `${JSON.stringify(frame)}\n`
     const bytes = Buffer.byteLength(line, 'utf8')
     if (ctx.pendingUpBytes + bytes > this.channelQueueMaxBytes
       || ctx.pendingUpFrames + 1 > this.channelQueueMaxFrames) {
       this.writeErrorAndKill(ctx, CONTROL_FRAME_ERROR_CODES.backpressureOverflow,
-        `socket queue overflow for channel ${ctx.rec.channelId}`, 'engine_backpressure_overflow')
+        `socket queue overflow for channel ${ctx.rec.channelId}`,
+        ENGINE_TRANSPORT_ERROR_RECOVERY.engine_backpressure_overflow)
       return
     }
-    if (conn.upQueueBytes + bytes > this.connectionQueueMaxBytes) {
+    if (conn.out.pendingBytes + bytes > this.connectionQueueMaxBytes) {
       // 连接级聚合溢出：关整条连接 + 杀该连接全部引擎组，各通道显式失败（D8）
       this.overflowConnection(conn, 'connection queue overflow (aggregate)')
       return
     }
-    if (conn.upQueue.length > 0 || conn.awaitingDrain) {
-      conn.upQueue.push({ channelId: ctx.rec.channelId, line, bytes })
-      conn.upQueueBytes += bytes
-      ctx.pendingUpFrames++
-      ctx.pendingUpBytes += bytes
-      return
-    }
-    let ok = false
-    try {
-      ok = conn.socket.write(line)
-    } catch (e) {
-      console.debug('[subagent-control] frame write failed (connection half-closed or dead):', toErrorMessage(e))
-      return
-    }
-    if (!ok) conn.awaitingDrain = true
+    this.enqueueOutbound(conn, ctx, line, bytes)
   }
 
-  private flushUpQueue(conn: ConnState): void {
-    conn.awaitingDrain = false
-    while (conn.upQueue.length > 0 && !conn.awaitingDrain && !conn.destroyed) {
-      const next = conn.upQueue[0]
-      let ok = false
-      try {
-        ok = conn.socket.write(next.line)
-      } catch {
-        return // 连接已死，close 链路接管
+  /**
+   * 统一出站入队（m-rt-2）：数据帧与控制帧共用同一 per-connection FIFO。per-channel
+   * 计数只在真正入队时增加（直接写出的帧已被 Node 受理，不得重写——R3-N1）。
+   */
+  private enqueueOutbound(conn: ConnState, ctx: ChannelCtx | null, line: string, bytes: number): void {
+    if (conn.destroyed) return
+    const onDequeued = ctx === null
+      ? undefined
+      : (): void => {
+        ctx.pendingUpFrames -= 1
+        ctx.pendingUpBytes -= bytes
       }
-      conn.upQueue.shift()
-      conn.upQueueBytes -= next.bytes
-      const ctx = this.ctxs.get(next.channelId)
-      if (ctx !== undefined) {
-        ctx.pendingUpFrames--
-        ctx.pendingUpBytes -= next.bytes
-      }
-      if (!ok) conn.awaitingDrain = true
+    const result = conn.out.write(onDequeued === undefined ? { line, bytes } : { line, bytes, onDequeued })
+    if (result === 'queued' && ctx !== null) {
+      ctx.pendingUpFrames += 1
+      ctx.pendingUpBytes += bytes
     }
   }
 
@@ -1073,7 +1095,11 @@ export class SubagentControlServer {
   }
 
   private overflowConnection(conn: ConnState, reason: string): void {
+    if (conn.out.hasOverflowed) return
+    conn.out.markOverflowed()
     console.warn(`[subagent-control] ${reason} on ${conn.id}; killing all channels under the connection`)
+    const recovery = `${ENGINE_TRANSPORT_ERROR_RECOVERY.engine_backpressure_overflow} `
+      + 'Connection-level overflow: all engine channels on this connection were terminated.'
     for (const rec of this.registry.listByConnection(conn.id)) {
       const ctx = this.ctxs.get(rec.channelId)
       if (ctx === undefined) continue
@@ -1083,11 +1109,12 @@ export class SubagentControlServer {
         channelId: rec.channelId,
         code: CONTROL_FRAME_ERROR_CODES.backpressureOverflow,
         message: reason,
-        recovery: 'engine_backpressure_overflow (connection-level)',
+        recovery,
       })
       this.terminateChannel(ctx, SUBAGENT_CONTROL_CLOSED_REASONS.killedByControl, 'connection_overflow')
     }
-    conn.socket.destroy()
+    // 先 flush error 再 end（m-rt-2）：不再写完即 destroy（排队中的控制帧会丢失）。
+    conn.out.beginCloseAfterFlush()
   }
 
   /**
@@ -1096,6 +1123,7 @@ export class SubagentControlServer {
    * 先死、组员残留的树杀路径）立即 finalize。
    */
   private terminateChannel(ctx: ChannelCtx, reason: SubagentControlClosedReason, why: string): void {
+    if (ctx.killRequested || ctx.cleanedUp) return // 幂等：连接级 fan-out 与通道级溢出可能重叠裁决
     ctx.killRequested = true
     ctx.closedReason = reason
     if (ctx.rec.state === 'open') ctx.rec.state = 'closing'
@@ -1106,7 +1134,7 @@ export class SubagentControlServer {
     console.warn(`[subagent-control] kill decision action=terminate_channel channelId=${ctx.rec.channelId} `
       + `engineId=${ctx.rec.engineId} pid=${String(ctx.rec.pid)} rootSessionId=${ctx.rec.rootSessionId} `
       + `parentRecordId=${ctx.rec.parentRecordId ?? '-'} reason=${why}`)
-    killEngineGroup(ctx.rec.pid, `terminate channelId=${ctx.rec.channelId} (${why})`)
+    this.killChannelGroup(ctx, `terminate channelId=${ctx.rec.channelId} (${why})`)
     if (ctx.exitSeen) {
       this.finalizeClosed(ctx, null, null, reason)
     }
@@ -1125,10 +1153,7 @@ export class SubagentControlServer {
       ctx.closeTimer = null
     }
     // down 队列随通道终结释放：连接级聚合计数同步扣减（迟到 drain 不再回调本通道）。
-    ctx.conn.downQueueBytes = Math.max(0, ctx.conn.downQueueBytes - ctx.pendingDownBytes)
-    ctx.pendingDown = []
-    ctx.pendingDownBytes = 0
-    ctx.downAwaitingDrain = false
+    ctx.down.dispose()
     // 递归树杀（D4：父通道关闭/被杀 → 递归杀子通道引擎组；登记面 = recordId→parentRecordId）
     for (const childId of this.registry.findDescendantIds(rec.channelId)) {
       const childCtx = this.ctxs.get(childId)
@@ -1166,12 +1191,16 @@ export class SubagentControlServer {
   private writeFrame(conn: ConnState, frame: Record<string, unknown>): void {
     if (conn.destroyed) return
     const line = `${JSON.stringify(frame)}\n`
-    try {
-      conn.socket.write(line)
-    } catch (e) {
-      // best-effort 降级：对端半关闭/destroyed 流的同步写失败只留痕，通道死亡由 close 事件收尾
-      console.debug('[subagent-control] frame write failed (connection dead):', toErrorMessage(e))
+    const bytes = Buffer.byteLength(line, 'utf8')
+    const channelId = typeof frame.channelId === 'string' ? frame.channelId : null
+    const ctx = channelId !== null ? this.ctxs.get(channelId) ?? null : null
+    // 控制帧同样计入连接级聚合上限（防「客户端不读 → 错误帧无界增长」）；溢出后
+    // 不再复检（overflowConnection 自身的 error 帧必须能入队收尾）。
+    if (!conn.out.hasOverflowed && conn.out.pendingBytes + bytes > this.connectionQueueMaxBytes) {
+      this.overflowConnection(conn, 'connection queue overflow (control frames)')
+      if (conn.destroyed) return
     }
+    this.enqueueOutbound(conn, ctx, line, bytes)
   }
 
   /** 连接销毁单点：fan-out 杀该连接全部引擎组 + 占位/定时器清理（kill-on-disconnect）。 */
@@ -1184,8 +1213,7 @@ export class SubagentControlServer {
       opening.aborted = true
     }
     conn.pendingOpens.clear()
-    conn.upQueue = []
-    conn.upQueueBytes = 0
+    conn.out.dispose()
     for (const rec of this.registry.listByConnection(conn.id)) {
       const ctx = this.ctxs.get(rec.channelId)
       if (ctx === undefined) continue

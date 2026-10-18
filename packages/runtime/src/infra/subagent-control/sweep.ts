@@ -8,7 +8,10 @@
  * - 引擎 pid 文件：owner runtime 活着 → 跳过（它在管）；owner 死 → **立即收割**（不采
  *   用 mirror mtime 活跃度分级——runtime 死后 mirror 不再更新，判据恒过期；D7 明确
  *   退役该分级）。pid 复用防护保留（「宁不杀勿误杀」）：进程 start time 晚于
- *   spawn 登记 = pid 已被无关进程复用，只删记录不杀。
+ *   spawn 登记 = pid 已被无关进程复用，只删记录不杀；start time 取不到（Windows/
+ *   ps 不可用）= 无法验证身份 → 同样保守跳过击杀并保留记录（m-rt-3）。
+ * - kill 失败语义（m-rt-4）：kill 信号无同步成功回执——发出后做有界存活复核，
+ *   确认已死才删 pid 文件；仍存活则保留记录 + warn，下次启动再扫。
  * - 不引入周期性巡检：启动 sweep + 事件驱动（连接关闭/exit）足够（ADR-0122）。
  */
 import * as net from 'node:net'
@@ -73,19 +76,41 @@ function probeSocketAlive(socketPath: string): Promise<boolean> {
   })
 }
 
-/** 引擎 pid 文件登记形状（spawn 后原子写；畸形文件按 stale 删除）。 */
+/** 引擎 pid 文件登记形状（spawn 后原子写；畸形文件保留待人工核实，不静默销账）。 */
 type EnginePidFileRecord = {
   pid?: unknown
   spawnedAt?: unknown
   runtimePid?: unknown
+  instanceId?: unknown
 }
+
+/** sweep 依赖注入槽（测试观察杀链调用与 pid 身份判据；生产全部走缺省实现）。 */
+export type OrphanSweepDeps = {
+  isPidAlive?: (pid: number) => boolean
+  killProcessTree?: (pid: number, onFallback?: (step: string, err: unknown) => void) => void
+  getProcessStartTimeSec?: (pid: number) => number | undefined
+  /** kill 后存活复核的轮询上界（ms；回收层有界兜底，测试可注入小值）。 */
+  killConfirmTimeoutMs?: number
+}
+
+/** kill 后存活复核轮询间隔（确认动作的事实查询，不是时间推测对账）。 */
+const KILL_CONFIRM_POLL_MS = 10
+/** kill 后存活复核的缺省上界（回收层有界兜底；确认已死立即返回）。 */
+const KILL_CONFIRM_DEFAULT_TIMEOUT_MS = 500
 
 /**
  * 启动孤儿引擎收割：owner runtime 死亡的引擎组立即收割（组杀连带其 pi 子进程），
- * owner 活着的条目属另一活实例在管、不碰。fire-and-forget：失败保留 pid 文件供下次
- * 启动再扫（删文件会把杀不掉的孤儿从兜底视野永久销账）。
+ * owner 活着的条目属另一活实例在管、不碰。
+ *
+ * 失败语义（m-rt-4）：kill 是 fire-and-forget 信号，没有同步成功回执——这里在发出
+ * kill 后做一次有界存活复核，确认已死才删 pid 文件；仍存活（taskkill 失败/权限不足）
+ * 则保留记录 + warn，供下次启动再扫（删文件会把杀不掉的孤儿从兜底视野永久销账）。
  */
-export async function sweepOrphanEnginePids(dataDir: string): Promise<void> {
+export async function sweepOrphanEnginePids(dataDir: string, deps: OrphanSweepDeps = {}): Promise<void> {
+  const alive = deps.isPidAlive ?? isPidAlive
+  const kill = deps.killProcessTree ?? killProcessTree
+  const readStartTime = deps.getProcessStartTimeSec ?? getProcessStartTimeSec
+  const confirmTimeoutMs = deps.killConfirmTimeoutMs ?? KILL_CONFIRM_DEFAULT_TIMEOUT_MS
   const enginesDir = getControlEnginesDir(dataDir)
   let files: string[]
   try {
@@ -100,34 +125,82 @@ export async function sweepOrphanEnginePids(dataDir: string): Promise<void> {
     try {
       record = JSON.parse(readFileSync(pidFile, 'utf-8')) as EnginePidFileRecord
     } catch (e) {
-      console.warn(`[subagent-control] stale pid file removed (unreadable) ${pidFile}:`, e)
-      removeQuietly(pidFile)
+      // 不可解析 = 无法得知引擎 pid（原子写上线前的旧残片/外部损坏）。不能静默删档
+      // ——保留 + warn，交人工核实；后续 sweep 会继续提示。
+      console.warn(`[subagent-control] unreadable pid file kept (cannot attribute engine pid) ${pidFile}:`, e)
       continue
     }
     const enginePid = typeof record.pid === 'number' ? record.pid : null
     const runtimePid = typeof record.runtimePid === 'number' ? record.runtimePid : null
     const spawnedAt = typeof record.spawnedAt === 'number' ? record.spawnedAt : null
-    // owner runtime 活着 = 另一活实例在管（本机单实例守卫正常时不应发生，双保险跳过）
-    if (runtimePid !== null && isPidAlive(runtimePid)) continue
-    if (enginePid === null || !isPidAlive(enginePid)) {
+    // owner runtime 活着 = 另一活实例在管（本机单实例守卫正常时不应发生，双保险跳过）。
+    // instanceId 一致性校验（m-rt-5）：当前写点与 runtimePid 同值，读取它至少能识别
+    // 记录错配（写入方/版本漂移）；身份真正独立化（boot id + 可核对记录）是后续项。
+    if (runtimePid !== null && alive(runtimePid)) {
+      const instanceId = typeof record.instanceId === 'string' ? record.instanceId : null
+      if (instanceId !== null && instanceId !== String(runtimePid)) {
+        console.warn(
+          `[subagent-control] pid file ${basename(pidFile)} instanceId=${instanceId} does not match `
+          + `runtimePid=${String(runtimePid)}; owner identity unverifiable, keeping the record and skipping`,
+        )
+      }
+      continue
+    }
+    if (enginePid === null || !alive(enginePid)) {
       removeQuietly(pidFile)
       continue
     }
-    // pid 复用防护：现持有者启动晚于 spawn 登记 = 无关进程，只删过期记录不杀
-    if (spawnedAt !== null) {
-      const startSec = getProcessStartTimeSec(enginePid)
-      if (startSec !== undefined && !pidStartMatchesRegistered(startSec, undefined, spawnedAt)) {
-        console.warn(`[subagent-control] pid ${String(enginePid)} reused (started after registration), not killing — ${basename(pidFile)}`)
-        removeQuietly(pidFile)
-        continue
-      }
+    // pid 复用防护（「宁不杀勿误杀」）：无法取得 start time（Windows 无 ps / ps 超时）
+    // 或登记缺失 spawnedAt = 无法验证身份，保守跳过击杀并保留 pid 文件 + warn（m-rt-3）。
+    // Windows 的主死亡链是引擎 stdin EOF 自灭，sweep 只是兜底——宁漏杀勿误杀无关进程树。
+    if (spawnedAt === null) {
+      console.warn(
+        `[subagent-control] pid file ${basename(pidFile)} has no spawnedAt; cannot verify pid `
+        + `${String(enginePid)} identity, keeping the record and skipping kill (conservative)`,
+      )
+      continue
+    }
+    const startSec = readStartTime(enginePid)
+    if (startSec === undefined) {
+      console.warn(
+        `[subagent-control] cannot verify pid ${String(enginePid)} start time (ps unavailable); `
+        + `keeping ${basename(pidFile)} and skipping kill (conservative)`,
+      )
+      continue
+    }
+    if (!pidStartMatchesRegistered(startSec, undefined, spawnedAt)) {
+      console.warn(`[subagent-control] pid ${String(enginePid)} reused (started after registration), not killing — ${basename(pidFile)}`)
+      removeQuietly(pidFile)
+      continue
     }
     console.warn(`[subagent-control] reaping orphan engine group pid=${String(enginePid)} (${basename(pidFile)}; owner runtime dead)`)
-    killProcessTree(enginePid, (step, err) => {
+    kill(enginePid, (step, err) => {
       console.debug(`[subagent-control] orphan kill fallback (${step}) pid=${String(enginePid)}:`, err)
     })
-    removeQuietly(pidFile)
+    // 有界存活复核：确认已死才删档；杀链失败（权限/系统错误）保留记录下次再扫。
+    if (await waitForProcessDeath(enginePid, confirmTimeoutMs, alive)) {
+      removeQuietly(pidFile)
+    } else {
+      console.warn(
+        `[subagent-control] orphan engine pid=${String(enginePid)} still alive after kill; `
+        + `keeping ${basename(pidFile)} for the next sweep`,
+      )
+    }
   }
+}
+
+/** 轮询 pid 存活直到死亡或超时（事实查询；回收层有界兜底，成功杀灭后立即返回）。 */
+async function waitForProcessDeath(
+  pid: number,
+  timeoutMs: number,
+  alive: (pid: number) => boolean,
+): Promise<boolean> {
+  const deadline = Date.now() + timeoutMs
+  while (alive(pid)) {
+    if (Date.now() >= deadline) return false
+    await new Promise((resolve) => setTimeout(resolve, KILL_CONFIRM_POLL_MS))
+  }
+  return true
 }
 
 function removeQuietly(pidFile: string): void {

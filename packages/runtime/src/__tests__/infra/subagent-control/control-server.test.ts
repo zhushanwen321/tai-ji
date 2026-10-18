@@ -8,15 +8,19 @@
  */
 import { describe, it, expect, afterEach, vi } from 'vitest'
 import { readFile } from 'node:fs/promises'
-import { existsSync } from 'node:fs'
+import { chmodSync, existsSync, mkdirSync, readdirSync, statSync } from 'node:fs'
 import { join } from 'node:path'
 import {
   SUBAGENT_CONTROL_FRAME_KINDS,
   SUBAGENT_CONTROL_CLOSED_REASONS,
 } from '@zhushanwen/subagent-engine-sdk'
 import { isPidAlive } from '../../../utils/protocol-background-task.js'
-import { getEnginePidFilePath } from '../../../infra/subagent-control/paths.js'
-import { SubagentControlServer } from '../../../infra/subagent-control/control-server.js'
+import {
+  getControlEnginesDir,
+  getControlRunDir,
+  getEnginePidFilePath,
+} from '../../../infra/subagent-control/paths.js'
+import { SubagentControlServer, type ControlServerOptions } from '../../../infra/subagent-control/control-server.js'
 import {
   TestAgent,
   expectOpened,
@@ -33,7 +37,7 @@ const isWin32 = process.platform === 'win32'
 const tmpDirs: string[] = []
 const servers: SubagentControlServer[] = []
 
-async function setupServer(overrides = {}): Promise<{ server: SubagentControlServer; dataDir: string }> {
+async function setupServer(overrides: ControlServerOptions = {}): Promise<{ server: SubagentControlServer; dataDir: string }> {
   const dataDir = await makeTmpDir()
   tmpDirs.push(dataDir)
   const server = makeServer(dataDir, overrides)
@@ -268,10 +272,13 @@ describe('subagent-control server（真 socket 环回 + fixture 引擎）', () =
     // 第二帧在背压期真正入队，70KB > 64KB 队列上限 → 显式失败（不丢帧、不静默）。
     agent.sendFrame(channelId, `x${'y'.repeat(70 * 1024)}`)
     agent.sendFrame(channelId, `x${'y'.repeat(70 * 1024)}`)
-    await agent.waitForFrame(
+    const error = await agent.waitForFrame(
       (f) => f.kind === SUBAGENT_CONTROL_FRAME_KINDS.error && f.code === 'engine_backpressure_overflow',
       'overflow error frame',
     )
+    // m-rt-7：recovery 必须是可执行文案（SDK 词表），不能是错误码复读
+    expect(String(error.recovery)).toContain('reduce concurrent subagent fan-out')
+    expect(String(error.recovery)).not.toBe('engine_backpressure_overflow')
     const closed = await agent.waitForFrame((f) => f.kind === SUBAGENT_CONTROL_FRAME_KINDS.engineClosed, 'engine_closed')
     expect(closed.reason).toBe(SUBAGENT_CONTROL_CLOSED_REASONS.killedByControl)
     await waitFor(() => !isPidAlive(pid), 'engine killed after overflow')
@@ -284,10 +291,12 @@ describe('subagent-control server（真 socket 环回 + fixture 引擎）', () =
     agent.hello()
     const { channelId, pid } = expectOpened(await agent.open(launchSpec({ args: ['--hang'] }), 1))
     agent.sendFrame(channelId, 'z'.repeat(2048))
-    await agent.waitForFrame(
+    const oversizeError = await agent.waitForFrame(
       (f) => f.kind === SUBAGENT_CONTROL_FRAME_KINDS.error && f.code === 'engine_frame_too_large',
       'frame_too_large error',
     )
+    // m-rt-7：下行超限走 handleOversize，recovery 已是可执行指引（非错误码）
+    expect(String(oversizeError.recovery)).toContain('Split the payload')
     const closed = await agent.waitForFrame((f) => f.kind === SUBAGENT_CONTROL_FRAME_KINDS.engineClosed, 'engine_closed')
     expect(closed.reason).toBe(SUBAGENT_CONTROL_CLOSED_REASONS.killedByControl)
     await waitFor(() => !isPidAlive(pid), 'engine killed after oversize frame')
@@ -312,6 +321,11 @@ describe('subagent-control server（真 socket 环回 + fixture 引擎）', () =
       (f) => f.kind === SUBAGENT_CONTROL_FRAME_KINDS.error && f.code === 'engine_frame_too_large',
       'up-direction frame_too_large',
     )
+    const upOversizeError = agent.frames.find(
+      (f) => f.kind === SUBAGENT_CONTROL_FRAME_KINDS.error && f.code === 'engine_frame_too_large',
+    ) as Record<string, unknown>
+    // m-rt-7：recovery 是 SDK 恢复文案（不是错误码复读）
+    expect(String(upOversizeError.recovery)).toContain('Shrink the task/result payload')
     await agent.waitForFrame((f) => f.kind === SUBAGENT_CONTROL_FRAME_KINDS.engineClosed, 'engine_closed')
     await waitFor(() => !isPidAlive(pid), 'engine killed after up oversize')
     void channelId
@@ -525,5 +539,262 @@ describe('subagent-control server（真 socket 环回 + fixture 引擎）', () =
     await server.destroy()
     await waitFor(() => !isPidAlive(pid), 'engine killed by destroyAll')
     expect(existsSync(join(dataDir, 'run', `subagent-${process.pid}.sock`))).toBe(false)
+  })
+
+  // ── D5 修复组 G2（m-rt-1 / m-rt-2 / planner②/③/④ / A8）──────────────
+
+  it('m-rt-1：C→R 多字节 UTF-8 跨 chunk 边界不被撕裂（汉字拆两块 → 引擎收到原字）', { timeout: 20_000 }, async () => {
+    const { server } = await setupServer()
+    const agent = new TestAgent(server.listeningSocketPath)
+    await agent.opened
+    agent.hello()
+    const { channelId } = expectOpened(await agent.open(launchSpec({ args: ['--echo-line'] }), 1))
+
+    const frame = {
+      v: 1,
+      kind: SUBAGENT_CONTROL_FRAME_KINDS.engineFrame,
+      channelId,
+      line: '前中后',
+    }
+    const buf = Buffer.from(`${JSON.stringify(frame)}\n`, 'utf8')
+    const markerIndex = buf.indexOf(Buffer.from('中', 'utf8'))
+    expect(markerIndex).toBeGreaterThan(0)
+    // 在「中」的 3 字节序列内部切开：逐 chunk toString 会得到 U+FFFD
+    await agent.sendBuffers([buf.subarray(0, markerIndex + 1), buf.subarray(markerIndex + 1)])
+
+    const echoed = await agent.waitForFrame(
+      (f) => f.kind === SUBAGENT_CONTROL_FRAME_KINDS.engineFrame && String(f.line).includes('"echo"'),
+      'engine echo line',
+    )
+    const outer = JSON.parse(String(echoed.line)) as { type: string; line: string }
+    expect(outer.type).toBe('echo')
+    // control server 把 engine_frame.line 的**内层载荷**写入引擎 stdin（信封不透明）
+    expect(outer.line).toBe('前中后')
+    agent.destroy()
+  })
+
+  it('m-rt-1：R→C stdout 多字节 UTF-8 跨 chunk 边界不被撕裂（fixture 拆分「中」）', { timeout: 20_000 }, async () => {
+    const { server } = await setupServer()
+    const agent = new TestAgent(server.listeningSocketPath)
+    await agent.opened
+    agent.hello()
+    await agent.open(launchSpec({ args: ['--emit-split-utf8', '--hang'] }), 1)
+    await agent.waitFor(
+      (f) => f.kind === SUBAGENT_CONTROL_FRAME_KINDS.engineFrame && f.line === '中',
+      'split UTF-8 stdout reassembled',
+    )
+    agent.destroy()
+  })
+
+  it('A8：200KB 正向 prompt 经 control 通道完整送达引擎 stdin（字节数一致）', { timeout: 30_000 }, async () => {
+    const { server } = await setupServer()
+    const agent = new TestAgent(server.listeningSocketPath)
+    await agent.opened
+    agent.hello()
+    const { channelId } = expectOpened(await agent.open(launchSpec({ args: ['--ack-stdin-bytes'] }), 1))
+    // 200KB（含多字节 CJK）：既验证大帧完整送达，又覆盖大帧下的 UTF-8 解码
+    const prompt = '中'.repeat(50_000) + 'a'.repeat(200 * 1024 - 150_000)
+    expect(Buffer.byteLength(prompt, 'utf8')).toBe(200 * 1024)
+    agent.sendFrame(channelId, prompt)
+    const ack = await agent.waitForFrame(
+      (f) => f.kind === SUBAGENT_CONTROL_FRAME_KINDS.engineFrame && String(f.line).includes('"ack"'),
+      'engine stdin byte ack',
+    )
+    expect((JSON.parse(String(ack.line)) as { bytes: number }).bytes).toBe(Buffer.byteLength(prompt, 'utf8'))
+    agent.destroy()
+  })
+
+  it('m-rt-2：背压期控制帧不越过已排队数据帧（engine_closed 在全部 engine_frame 之后）', { timeout: 30_000 }, async () => {
+    const { server } = await setupServer({
+      channelQueueMaxBytes: 16 * 1024 * 1024,
+      connectionQueueMaxBytes: 64 * 1024 * 1024,
+      closeGraceMs: 2_000,
+    })
+    const agent = new TestAgent(server.listeningSocketPath)
+    await agent.opened
+    agent.hello()
+    const { channelId, pid } = expectOpened(await agent.open(
+      launchSpec({ args: ['--emit-lines-on', 'emit-now', '8', String(1024 * 1024), '--exit-on', 'die-now'] }),
+      1,
+    ))
+
+    // 客户端停止读取 → 服务端 socket 背压；引擎此时发 8MB 帧，全部进入 up 队列
+    agent.pause()
+    agent.sendFrame(channelId, 'emit-now')
+    await new Promise((r) => setTimeout(r, 300))
+    agent.sendFrame(channelId, 'die-now') // 引擎退出 → engine_closed 必须在已排队帧之后
+    await new Promise((r) => setTimeout(r, 300))
+    agent.resume()
+
+    await agent.waitForFrame(
+      (f) => f.kind === SUBAGENT_CONTROL_FRAME_KINDS.engineClosed && f.channelId === channelId,
+      'engine_closed after backpressure drained',
+    )
+    const closedIndex = agent.frames.findIndex(
+      (f) => f.kind === SUBAGENT_CONTROL_FRAME_KINDS.engineClosed && f.channelId === channelId,
+    )
+    const lastDataIndex = agent.lastIndexOfKind(SUBAGENT_CONTROL_FRAME_KINDS.engineFrame, channelId)
+    expect(lastDataIndex).toBeGreaterThanOrEqual(0)
+    expect(lastDataIndex).toBeLessThan(closedIndex)
+    const dataFrames = agent.frames.filter(
+      (f) => f.kind === SUBAGENT_CONTROL_FRAME_KINDS.engineFrame && f.channelId === channelId,
+    )
+    expect(dataFrames).toHaveLength(8)
+    await waitFor(() => !isPidAlive(pid), 'engine exited after die-now')
+    agent.destroy()
+  })
+
+  it('m-rt-2：连接级溢出先 flush error 再 end（暂停读取后恢复仍收到 error 帧）', { timeout: 30_000 }, async () => {
+    const { server } = await setupServer({
+      channelQueueMaxBytes: 64 * 1024 * 1024,
+      connectionQueueMaxBytes: 512 * 1024,
+    })
+    const agent = new TestAgent(server.listeningSocketPath)
+    await agent.opened
+    agent.hello()
+    const { channelId } = expectOpened(await agent.open(
+      // 3 × 300KB：首帧直接写（write=false → awaitingDrain），第二帧入队，第三帧使
+      // 连接级聚合 600KB > 512KB → overflow 裁决时队列非空（error 排在数据帧之后）。
+      launchSpec({ args: ['--emit-lines-on', 'emit-now', '3', String(300 * 1024)] }),
+      1,
+    ))
+    agent.pause()
+    agent.sendFrame(channelId, 'emit-now')
+    await new Promise((r) => setTimeout(r, 300)) // 第二帧使连接级聚合越界 → overflow 裁决
+    // m-rt-2 关键断言：overflow 后不得立即 destroy——error 帧需先 flush（有界等待），
+    // 客户端暂停读取期间连接必须仍登记（回退成「写完即 destroy」时这里已为 0）。
+    expect(server.getConnectionCountForTest()).toBe(1)
+    agent.resume()
+
+    const error = await agent.waitForFrame(
+      (f) => f.kind === SUBAGENT_CONTROL_FRAME_KINDS.error && f.code === 'engine_backpressure_overflow',
+      'connection overflow error delivered after flush',
+    )
+    expect(String(error.message)).toContain('connection queue overflow')
+    // m-rt-7：connection-level 成因标注必须在 recovery 文案里（不是错误码复读）
+    expect(String(error.recovery)).toContain('Connection-level overflow')
+    expect(String(error.recovery)).toContain('reduce concurrent subagent fan-out')
+    // error 是关闭前最后可依赖的失败信号：连接随后被 end（FIN）而非无痕 destroy
+    await agent.closed
+  })
+
+  it('planner②：opening 占位计入每连接 channel 上限（并发 open 不能绕过）', { timeout: 20_000 }, async () => {
+    const { server } = await setupServer({
+      maxChannelsPerConnection: 2,
+      openTimeoutMs: 60_000,
+      resolveLaunch: () => new Promise(() => {}), // 两个 open 都停在 opening 占位
+    })
+    const agent = new TestAgent(server.listeningSocketPath)
+    await agent.opened
+    agent.hello()
+    agent.send({ v: 1, kind: SUBAGENT_CONTROL_FRAME_KINDS.engineOpen, id: 'p1', launch: launchSpec() })
+    agent.send({ v: 1, kind: SUBAGENT_CONTROL_FRAME_KINDS.engineOpen, id: 'p2', launch: launchSpec() })
+    await waitFor(() => server.channelCount === 2, 'two pending openings counted')
+
+    const third = await agent.openExpectFailed(launchSpec(), 'p3')
+    expect(third.code).toBe('channel_limit')
+    expect(server.channelCount).toBe(2)
+    agent.destroy()
+  })
+
+  it.skipIf(isWin32)('planner③：存量 run/ 与 subagent-engines/ 0755 → init 收敛为 0700', { timeout: 20_000 }, async () => {
+    const dataDir = await makeTmpDir('ctl-perm-')
+    tmpDirs.push(dataDir)
+    const runDir = getControlRunDir(dataDir)
+    const enginesDir = getControlEnginesDir(dataDir)
+    mkdirSync(runDir, { recursive: true })
+    mkdirSync(enginesDir, { recursive: true })
+    chmodSync(runDir, 0o755) // 旧 relay 时代形态（mkdirSync mode 对已存在目录不生效）
+    chmodSync(enginesDir, 0o755)
+    expect(statSync(runDir).mode & 0o777).toBe(0o755)
+
+    const server = makeServer(dataDir)
+    servers.push(server)
+    await server.init()
+    expect(statSync(runDir).mode & 0o777).toBe(0o700)
+    expect(statSync(enginesDir).mode & 0o777).toBe(0o700)
+  })
+
+  it('planner④：pid 文件 tmp+rename 原子写（可解析、无 tmp 残留、0600）', { timeout: 20_000 }, async () => {
+    const { server, dataDir } = await setupServer()
+    const agent = new TestAgent(server.listeningSocketPath)
+    await agent.opened
+    agent.hello()
+    const { channelId } = expectOpened(await agent.open(launchSpec({ args: ['--hang'] }), 1))
+
+    const enginesDir = getControlEnginesDir(dataDir)
+    const entries = readdirSync(enginesDir)
+    expect(entries.some((name) => name.includes('.tmp-'))).toBe(false)
+    const pidFiles = entries.filter((name) => name.endsWith('.pid'))
+    expect(pidFiles).toHaveLength(1)
+    const pidFile = join(enginesDir, pidFiles[0])
+    const record = JSON.parse(await readFile(pidFile, 'utf-8')) as Record<string, unknown>
+    expect(record.pid).toBeGreaterThan(0)
+    expect(record.engineId).toBe('fake-engine')
+    expect(record.rootSessionId).toBe('sess-root-1')
+    if (!isWin32) expect(statSync(pidFile).mode & 0o777).toBe(0o600)
+    void channelId
+    agent.destroy()
+  })
+
+  it('m-rt-8：open 超时后迟到 resolveLaunch 失败 → 只回一帧 engine_open_failed', { timeout: 20_000 }, async () => {
+    let rejectLaunch!: (reason?: unknown) => void
+    const { server } = await setupServer({
+      openTimeoutMs: 100,
+      resolveLaunch: () => new Promise((_resolve, reject) => { rejectLaunch = reject }),
+    })
+    const agent = new TestAgent(server.listeningSocketPath)
+    await agent.opened
+    agent.hello()
+    const result = await agent.open(launchSpec(), 'late-open')
+    expect(result.failed?.code).toBe('engine_open_timeout')
+
+    rejectLaunch(new Error('late resolve failure'))
+    await new Promise((r) => setTimeout(r, 200))
+    const failures = agent.frames.filter(
+      (f) => f.kind === SUBAGENT_CONTROL_FRAME_KINDS.engineOpenFailed && String(f.id) === 'late-open',
+    )
+    expect(failures).toHaveLength(1)
+    agent.destroy()
+  })
+
+  it('planner①：Windows 树杀兜底 — 引擎已死后按 childSpawned 登记的 pid 逐个树杀', { timeout: 30_000 }, async () => {
+    const killed: number[] = []
+    const { server } = await setupServer({
+      killPlatform: 'win32',
+      // 注入树杀观察桩（不真杀）：验证 Windows 分支对 pidSet 的消费
+      killGroup: (pid: number | null | undefined) => { if (typeof pid === 'number') killed.push(pid) },
+    })
+    const agent = new TestAgent(server.listeningSocketPath)
+    await agent.opened
+    agent.hello()
+    const { channelId } = expectOpened(await agent.open(
+      launchSpec({ args: ['--spawn-child', '--emit-host-child-frames', '--exit-on', 'die-parent'] }),
+      1,
+    ))
+    // 等 host/childSpawned 反向信封被 runtime 读出并转发（pidSet 已登记）
+    await agent.waitFor(
+      (f) => f.kind === SUBAGENT_CONTROL_FRAME_KINDS.engineFrame && String(f.line).includes('host/childSpawned'),
+      'host/childSpawned envelope forwarded',
+    )
+    const childPid = parseChildPid(agent.engineFrameLines())
+    if (childPid === null) throw new Error('fixture did not report childPid')
+    expect(isPidAlive(childPid)).toBe(true)
+
+    try {
+      agent.sendFrame(channelId, 'die-parent') // 引擎退出，taskkill 树根已死
+      await agent.waitForFrame(
+        (f) => f.kind === SUBAGENT_CONTROL_FRAME_KINDS.engineClosed && f.channelId === channelId,
+        'engine_closed after parent exit',
+      )
+      await waitFor(() => killed.includes(childPid), 'child pid individually tree-killed on win32')
+    } finally {
+      try {
+        process.kill(childPid, 'SIGKILL')
+      } catch {
+        // 已死（正常分支）
+      }
+    }
+    agent.destroy()
   })
 })

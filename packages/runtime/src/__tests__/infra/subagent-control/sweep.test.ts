@@ -3,7 +3,7 @@
  * 孤儿引擎 pid 收割（owner runtime 死 → 立即组杀；owner 活 → 跳过；引擎已死 → 删档；
  * pid 复用 → 不杀只删）。附 paths 形状断言（socket 长度门禁 / pid 文件名清洗）。
  */
-import { describe, it, expect, afterEach } from 'vitest'
+import { describe, it, expect, afterEach, vi } from 'vitest'
 import * as net from 'node:net'
 import { spawn } from 'node:child_process'
 import { existsSync, writeFileSync, mkdirSync } from 'node:fs'
@@ -133,6 +133,76 @@ describe('孤儿引擎 pid 收割（owner runtime 死 → 立即组杀）', () =
 
     orphan.kill('SIGKILL')
     guarded.kill('SIGKILL')
+  })
+})
+
+describe('pid 判据与失败语义（m-rt-3 / m-rt-4）', () => {
+  it('m-rt-3：start time 不可得（Windows/ps 不可用）→ 保守跳过击杀并保留 pid 文件', { timeout: 20_000 }, async () => {
+    const dataDir = await makeTmpDir('ctl-pid-nostart-')
+    tmpDirs.push(dataDir)
+    const enginesDir = getControlEnginesDir(dataDir)
+    mkdirSync(enginesDir, { recursive: true })
+    const engine = spawn(process.execPath, ['-e', 'setInterval(() => {}, 1000)'], { stdio: 'ignore' })
+    const enginePid = engine.pid
+    if (enginePid === null || enginePid === undefined) throw new Error('spawn pid unavailable')
+    const pidFile = join(enginesDir, 'sess-x-fake-x-ch-x.pid')
+    writeFileSync(pidFile, JSON.stringify({
+      pid: enginePid,
+      spawnedAt: Date.now(),
+      runtimePid: 999_999_999,
+      instanceId: '999999999',
+      hostKind: 'runtime-sidecar',
+    }))
+
+    const kill = vi.fn()
+    await sweepOrphanEnginePids(dataDir, {
+      getProcessStartTimeSec: () => undefined,
+      killProcessTree: kill,
+    })
+    expect(kill).not.toHaveBeenCalled()
+    expect(isPidAlive(enginePid)).toBe(true)
+    expect(existsSync(pidFile)).toBe(true) // 保留 + warn（宁不杀勿误杀）
+
+    engine.kill('SIGKILL')
+  })
+
+  it('m-rt-4：kill 未能杀灭（权限/系统错误）→ 保留 pid 文件供下次 sweep', { timeout: 20_000 }, async () => {
+    const dataDir = await makeTmpDir('ctl-pid-killfail-')
+    tmpDirs.push(dataDir)
+    const enginesDir = getControlEnginesDir(dataDir)
+    mkdirSync(enginesDir, { recursive: true })
+    const engine = spawn(process.execPath, ['-e', 'setInterval(() => {}, 1000)'], { stdio: 'ignore' })
+    const enginePid = engine.pid
+    if (enginePid === null || enginePid === undefined) throw new Error('spawn pid unavailable')
+    const pidFile = join(enginesDir, 'sess-y-fake-y-ch-y.pid')
+    writeFileSync(pidFile, JSON.stringify({
+      pid: enginePid,
+      spawnedAt: Date.now(),
+      runtimePid: 999_999_999,
+      instanceId: '999999999',
+    }))
+
+    await sweepOrphanEnginePids(dataDir, {
+      // 匹配当前进程的 start time（通过 pid 复用防护），但 kill 是空操作
+      getProcessStartTimeSec: () => Math.floor(Date.now() / 1000),
+      killProcessTree: () => {},
+      killConfirmTimeoutMs: 30,
+    })
+    expect(isPidAlive(enginePid)).toBe(true)
+    expect(existsSync(pidFile)).toBe(true)
+
+    engine.kill('SIGKILL')
+  })
+
+  it('不可解析 pid 文件 → 保留 + warn（不静默销账）', { timeout: 20_000 }, async () => {
+    const dataDir = await makeTmpDir('ctl-pid-corrupt-')
+    tmpDirs.push(dataDir)
+    const enginesDir = getControlEnginesDir(dataDir)
+    mkdirSync(enginesDir, { recursive: true })
+    const pidFile = join(enginesDir, 'sess-z-fake-z-ch-z.pid')
+    writeFileSync(pidFile, '{"pid":')
+    await sweepOrphanEnginePids(dataDir)
+    expect(existsSync(pidFile)).toBe(true)
   })
 })
 
