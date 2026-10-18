@@ -114,6 +114,13 @@ Agent Runtime（一个 Node.js 进程）
 
 **依赖方向**: Transport → Service → ports → infra。Service 经 `services/ports/` 定义的 port 接口消费 pi 能力（`IPiEngine` / `IProcessManager` 由 `infra/pi/rpc-client.ts` + `process-manager.ts` 实现，收敛于 D24），不直接碰 pi 协议；Transport 不包含业务逻辑。
 
+### IPC 通道名 SSOT（ipc-channels.ts）
+
+preload 与 main 两侧全部 Electron IPC 通道名的唯一常量登记处（`packages/shared/src/ipc-channels.ts`，payload 类型伴生 `ipc-payloads.ts`）；renderer 经 preload `electronAPI` 方法面间接消费，不持通道名。_Avoid_：通道名内联字面量 / preload 本地副本。
+
+### 原子写助手（atomicWriteJsonFile）
+
+main 侧 JSON 落盘的单一实现（`apps/electron/main/utils/atomic-write-json.ts`：同目录 tmp（pid+seq 命名）+ rename + 失败清理 + 可选 fsync/mode 档），各 JSON 写方 import 使用，禁止保留本地副本。_Avoid_：手搓 tmp+rename / 裸 writeFileSync 直写主文件。
 
 ### 语义吸收层（pi-boundary-reliability，2026-08-28）
 
@@ -359,6 +366,10 @@ Session 级状态，表示 pi 进程正在工作（从用户发送消息到 agen
 **收取（consume）**：collect 等待器取走挂起条目的载荷并写 collected 终局；命中条目按条目键集全量逐键展开、终局按日志条目写一次；收取过的条目构造性不可再投递（收取唯一性——recover 差集排除）。时序契约：生产方 deliver 可先于注销 entry 落盘（如 managed 合批的 flushBatch 顺序），到达回调在 deliver 调用栈内同步触发——consume 时点 type/outcome 允许 undefined，消费方须以等待结束后的最终回填为准（诚实缺省，不虚构终态）。
 
 **collected 终局**：投递日志 ack outcome 新枚举值（结果已随 collect 返回到达 agent），差集重放视同已完结；collectRelease 解散等待集时未收挂起条目直通内核 flush（跳过合批窗口）恢复 push。
+
+**设计内等待（designed-in deferral）**：`port.send` 显式拒绝中表示「条目未被注入、等投递端下一边沿重提」的受理形态，载体 = SendReceipt 判别联合的 `{ accepted: false, deferred: DeliveryDeferReason }` 分支（词表内核单源导出：`merge-commit-hold` / `compaction-wait`）。_Avoid_：把这类拒绝称「失败」或「重试」——首败即停语义（ADR-0122）不适用于它；禁以裸字符串 reason 表达（判别联合是唯一合法形态）。
+
+**未知键（unknown key，collect 域）**：活跃集 ∪ 投递日志键集 ∪ 曾注册集的补集——collect 的不可等待输入：不进等待集、不伪装 waiting，按 errors 逐条返回（CollectSnapshotEntry 第五态 `"unknown"`）。_Avoid_：用 waiting 态遮蔽未知键。
 
 ### Side Drawer（原 Side Inspector）
 

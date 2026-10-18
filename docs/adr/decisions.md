@@ -652,6 +652,8 @@ WorkflowTab 步骤列表的数据源绑定从「workflow-record 全量快照（6
 
 **登记**：清查清单与删改记录 = `docs/todo/defense-mechanism-cleanup.md` 与 `.tmp/dev-flow/defense-scan/`（四分区清单 + 改动清单）；投递域重构与推送通道设计 = `.tmp/tech-design/` 产出（过程产物，决策以本条与 cleanup 登记为准）；AGENTS.md「防御机制第一原则」规则条目为本条的规则面派生视图。原「时间平抑类逻辑红线」为本体系判定层的既有条目，继续有效。
 
+**边界澄清（SendReceipt 设计内等待类型化申报，2026-10-18 架构审查裁决）**：首败即停的「失败」判定以 SendReceipt 拒绝分支的判别联合为准——`{ accepted: false, deferred: DeliveryDeferReason }`（设计内等待：条目未被注入、等投递端下一边沿重提，**不计首败**，词表 = 内核 `packages/session-delivery` 单源导出）与 `{ accepted: false, reason }`（真失败：计首败）互斥，由类型构造保证；内核消费点按判别字段分流，不维护字符串白名单。演进动因：白名单形态下生产点裸字面量与消费点集合两处独立演化，同族漂移两次现实击中（建白名单与三小时后补第二个 reason 各一次）；类型化通道防未来审查把判别联合当冗余「简化」回字符串。词条见 [CONTEXT.md「设计内等待」](../CONTEXT.md)。
+
 ### ADR-0128 subagent 流式通道 = 增量推送 + 按需拉取（2026-10-06 用户裁决，B2 设计裁决）
 
 **决策**：subagent 流式输出通道（relay 路径）采用「chunk 增量消息（带 msgSeq/deltaSeq 双序号）+ 按需拉取收敛」——不做周期快照、不做攒批。拉取触发 = 接入（订阅建立/记录刷新发现运行中 record/流中首条 chunk 缺前缀）与失步（deltaSeq 跳号）两类事件；恢复源 = 新增 RPC `session.getSubagentStreamState` 读取 RelayTee 既有内存状态（当前 msgSeq / 已发 delta 数 / 累积全文），产生端不保留 delta 历史。响应携带水位（记录已处理到哪的位置标记：lastDeltaSeq，这份全文含到第几条 delta），消费端凭水位去重缓冲回放。形态对标 Kubernetes ListAndWatch（接入 LIST 全量 → WATCH 增量 → 失步重新 LIST）。
