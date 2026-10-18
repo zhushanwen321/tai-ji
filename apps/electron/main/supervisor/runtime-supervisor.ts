@@ -49,9 +49,10 @@ import { mainLogger } from '../logs/main-logger.js'
 import { crashJournal } from '../logs/crash-journal.js'
 // u7c（crash-forensics D5 ④）：planned 退出码 SSOT 在 shared（RUNTIME_PLANNED_EXIT_CODE）
 // ——runtime 执行链（rolling-restart.ts）与 main 判别式双端消费；两进程依赖方向单向
-// （main → runtime），runtime 无法 import 本侧符号，故 SSOT 落 shared。本模块导出面
+// （main → runtime），runtime 无法 import 本侧符号，故 SSOT 落 shared。本模块导出的符号
 // 不变（PLANNED_EXIT_CODE 转发，u1f 既有测试与消费方 import 点不受影响）。
-import { RUNTIME_PLANNED_EXIT_CODE } from '@taiji/shared'
+// runtime-* 推送通道名同源 shared（ipc-channels SSOT，preload 侧同 import 消费）。
+import { RUNTIME_PLANNED_EXIT_CODE, RUNTIME_PORT, RUNTIME_ERROR, RUNTIME_RESTARTING, RUNTIME_FAILED } from '@taiji/shared'
 
 /**
  * 重启决策的触发源（杀链决策日志 D6-⑥ 的 trigger 字段）：
@@ -88,7 +89,7 @@ const RESTART_DECISION_REASONS: Record<SupervisorRestartTrigger, string> = {
  * 识别 planned 退出。模块级导出供 u7c supervisor 侧接线（86→立即重启零退避）复用。
  *
  * u7c 起本常量是 shared `RUNTIME_PLANNED_EXIT_CODE` 的转发（SSOT 消除双 86 字面量，
- * 导出面不变）。
+ * 导出的符号不变）。
  */
 export const PLANNED_EXIT_CODE = RUNTIME_PLANNED_EXIT_CODE
 
@@ -184,7 +185,7 @@ export class RuntimeSupervisor implements IRuntimeSupervisor {
   }
 
   /**
-   * 标记进入 app 级退出上下文（main.ts before-quit 调用；app 退出链不可逆，无复位面——
+   * 标记进入 app 级退出上下文（main.ts before-quit 调用；app 退出链不可逆，无复位路径——
    * start() 的复位仅为防御万一，正常时序不会在标记后再 start）。
    */
   markAppQuitting(): void {
@@ -264,12 +265,12 @@ export class RuntimeSupervisor implements IRuntimeSupervisor {
   /** restartForConfigChange 的队列内执行体（广播 → stop → 重新 spawn → 广播端口/失败广播）。 */
   private async doRestartForConfigChange(): Promise<number> {
     // attempt=0：单次尝试不进退避计数（非崩溃链；payload 形态与崩溃重启链一致）
-    this.broadcastToAllWindows('runtime-restarting', { attempt: 0 })
+    this.broadcastToAllWindows(RUNTIME_RESTARTING, { attempt: 0 })
     await this.stop()
     try {
       // doStart 前置 stop 已清 child，幂等检查不命中 → 必然真 spawn（新配置生效的保证）
       const port = await this.doStart()
-      this.broadcastToAllWindows('runtime-port', port)
+      this.broadcastToAllWindows(RUNTIME_PORT, port)
       return port
     } catch (e) {
       // 失败补 failed 终态广播：renderer 经既有 failed 态拿重试按钮，协议不变量
@@ -282,7 +283,7 @@ export class RuntimeSupervisor implements IRuntimeSupervisor {
       // renderer 若错过本次 runtime-failed 广播（boot 竞态 / 无窗口在场），拉取兜底通道
       // get-runtime-start-error 仍能取到真因——缺此行真因随当次广播窗口丢失
       this.lastStartError = message
-      this.broadcastToAllWindows('runtime-failed', { attempts: 0, message })
+      this.broadcastToAllWindows(RUNTIME_FAILED, { attempts: 0, message })
       throw e
     }
   }
@@ -356,22 +357,22 @@ export class RuntimeSupervisor implements IRuntimeSupervisor {
   /**
    * 启动 runtime 并通知渲染进程端口。
    *
-   * 成功：win.webContents.send('runtime-port', port)
-   * 失败：win.webContents.send('runtime-error', { message })（不抛出）
+   * 成功：win.webContents.send(RUNTIME_PORT, port)
+   * 失败：win.webContents.send(RUNTIME_ERROR, { message })（不抛出）
    *
    * 消除 main.ts whenReady/activate 两处重复的 spawn + 通知逻辑。
    */
   async startAndNotify(win: BrowserWindow): Promise<number> {
     try {
       const port = await this.start()
-      win.webContents.send('runtime-port', port)
+      win.webContents.send(RUNTIME_PORT, port)
       return port
     } catch (e) {
       const message = e instanceof Error ? e.message : String(e)
       // 记录真因（RD-3#2）：renderer 经 get-runtime-start-error 拉取兜底 boot 竞态丢推送
       this.lastStartError = message
       console.error(`[runtime] startAndNotify failed: ${message}`)
-      win.webContents.send('runtime-error', { message })
+      win.webContents.send(RUNTIME_ERROR, { message })
       return 0
     }
   }
@@ -388,7 +389,7 @@ export class RuntimeSupervisor implements IRuntimeSupervisor {
     // runtime 存活 → 幂等，直接广播当前端口
     if (this.child && this.child.exitCode === null && this._port !== null) {
       console.log(`[runtime] restartRuntime: already running on ${this._port}, broadcast port`)
-      this.broadcastToAllWindows('runtime-port', this._port)
+      this.broadcastToAllWindows(RUNTIME_PORT, this._port)
       return
     }
     // 重置策略：手动重试给一个新的 5 次配额（清停止标志 + 计数）
@@ -542,7 +543,7 @@ export class RuntimeSupervisor implements IRuntimeSupervisor {
         exitCode: code,
         reason: RESTART_DECISION_REASONS.planned_rolling_restart,
       })
-      this.broadcastToAllWindows('runtime-restarting', { attempt: this.policy.count })
+      this.broadcastToAllWindows(RUNTIME_RESTARTING, { attempt: this.policy.count })
       this.restartTimer = setTimeout(() => {
         this.restartTimer = null
         void this.attemptRestart()
@@ -590,7 +591,7 @@ export class RuntimeSupervisor implements IRuntimeSupervisor {
         target: { pid: context.pid },
         reason: `restart attempts exhausted (MAX_RESTARTS=${MAX_RESTARTS}); broadcasting runtime-failed, waiting for manual retry`,
       })
-      this.broadcastToAllWindows('runtime-failed', {
+      this.broadcastToAllWindows(RUNTIME_FAILED, {
         attempts: this.policy.count,
         message: `runtime 崩溃后已重试 ${this.policy.count} 次仍失败`,
       })
@@ -608,7 +609,7 @@ export class RuntimeSupervisor implements IRuntimeSupervisor {
       exitCode: context.exitCode,
       reason: RESTART_DECISION_REASONS[trigger],
     })
-    this.broadcastToAllWindows('runtime-restarting', { attempt })
+    this.broadcastToAllWindows(RUNTIME_RESTARTING, { attempt })
     this.restartTimer = setTimeout(() => {
       this.restartTimer = null
       void this.attemptRestart()
@@ -623,7 +624,7 @@ export class RuntimeSupervisor implements IRuntimeSupervisor {
     try {
       const newPort = await this.start()
       console.log(`[runtime] Restart succeeded on port ${newPort}`)
-      this.broadcastToAllWindows('runtime-port', newPort)
+      this.broadcastToAllWindows(RUNTIME_PORT, newPort)
     } catch (e) {
       const message = e instanceof Error ? e.message : String(e)
       // 重启失败同样刷新真因（RD-3#2）：failed 屏显示的始终是最近一次启动失败原因

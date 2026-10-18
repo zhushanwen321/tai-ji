@@ -10,7 +10,7 @@
  * 1. 容器键（⌃` / ⌘W，无条件转发）——判定与 window-factory 窗口级 before-input-event **逐字同源**
  *    （焦点位移不得改变键语义，两处判定漂移 = 「时灵时不灵」）；
  * 2. app 快捷键族（useGlobalShortcuts 注册项 + settings 可配置项）——renderer 注册处经 IPC 上报
- *    （本模块的 ForwardKeyRegistry），主进程不硬编码。同步触发面（§7.4 全量重报）：
+ *    （本模块的 ForwardKeyRegistry），主进程不硬编码。同步触发路径（§7.4 全量重报）：
  *    清单初始化上报 + 注册/注销增量 + settings 重录快捷键（shortcutOverrides 运行时可变）
  *    + renderer 重载（刷新 / 崩溃恢复后启动即重报）——漏报面 = 改键用户与崩溃恢复后页面聚焦态快捷键失灵。
  *
@@ -29,7 +29,9 @@
  *
  * 依赖方向：纯函数模块（无 electron 运行时依赖，可独立单测）；attachForwardKeyBridge 以
  * 结构化接口接收 webContents / window，由 browser-view-manager 在 create 时挂载。
+ * 通道名常量来自 @taiji/shared ipc-channels（纯常量包，无 electron 依赖）。
  */
+import { SHORTCUT, SHORTCUT_FORWARD } from '@taiji/shared'
 
 /** 容器键转发类型（与 'shortcut' IPC 通道既有字面量同词表：useCloseShortcut / 编排器消费） */
 export type ContainerShortcutType = 'close' | 'toggle-bottom-drawer'
@@ -125,7 +127,7 @@ export interface ForwardKeyReport { // oe-exempt:20261003:framework:类型契约
   rejected: string[]
 }
 
-/** 增量变更（注册/注销；§7.4「注册/注销时增量」触发面） */
+/** 增量变更（注册/注销；§7.4「注册/注销时增量」触发路径） */
 export interface ForwardKeyDelta { // oe-exempt:20261003:framework:类型契约先行——容器/编排/注册表契约层，D1 下游单元即为消费方
   add?: readonly string[]
   remove?: readonly string[]
@@ -226,9 +228,9 @@ export function attachForwardKeyBridge(
     const win = getTargetWindow()
     if (!win || win.isDestroyed()) return
     if (hit.kind === 'container') {
-      win.webContents.send('shortcut', hit.type)
+      win.webContents.send(SHORTCUT, hit.type)
     } else {
-      win.webContents.send('shortcut:forward', { accelerator: hit.accelerator })
+      win.webContents.send(SHORTCUT_FORWARD, { accelerator: hit.accelerator })
     }
   })
 }

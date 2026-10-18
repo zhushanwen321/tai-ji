@@ -224,7 +224,7 @@ export async function downloadUpdate(
       if (!failedOver) throw err
       outcome = failedOver
     }
-    // 下载成功登记（download-success，S1 多段生效断言观测面）：multiPart = 本次
+    // 下载成功登记（download-success，S1 多段生效断言观测点）：multiPart = 本次
     // 实际执行路径、engine = 实际完成下载的引擎，均取自 downloadAsset 返回值
     // （降级续传成功时为对侧续传那次调用的真实观测值）。
     logDownloadSuccess({

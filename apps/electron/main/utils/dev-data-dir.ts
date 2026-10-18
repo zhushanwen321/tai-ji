@@ -20,12 +20,15 @@
  * 共享 ~/.taiji-dev → Electron 单实例锁互踢，R-13）。
  *
  * 包含判定用 path.resolve + sep 边界（resolve 消解 ../ 与重复分隔符后再判，
- * 纯词法、不做 fs realpath——env 泄漏威胁模型是路径值本身，symlink 越界不在面内）。
+ * 纯词法、不做 fs realpath——env 泄漏威胁模型是路径值本身，symlink 越界不在面内）；
+ * 判定实现 = shared isPathWithinTree（不 casefold——与 prod 侧准入检查的不对称
+ * 见 shared/paths.ts 该函数头注释）。
  *
- * 依赖方向：无下游（纯函数，node:path）；行为矩阵守护 = main/test/dev-data-dir.test.ts，
+ * 依赖方向：无下游（纯函数，node:path + shared 常量）；行为矩阵守护 = main/test/dev-data-dir.test.ts，
  * main.ts 接线守护 = main/test/main-dev-datadir-pin.test.ts。
  */
 import path from 'node:path'
+import { DATA_DIR_ROOT_NAMES, isPathWithinTree } from '@taiji/shared/paths'
 
 /**
  * 解析 dev 模式的 taiji 数据目录（main.ts isDev 块调用）。
@@ -36,11 +39,11 @@ import path from 'node:path'
  */
 export function resolveDevDataDir(env: NodeJS.ProcessEnv, homedirPath: string): string {
   const external = env.TAIJI_AGENT_DATA_DIR
-  const fallback = path.join(homedirPath, '.taiji-dev')
+  const fallback = path.join(homedirPath, DATA_DIR_ROOT_NAMES.dev)
   if (env.TAIJI_E2E === '1' && external) return external
   if (external) {
     const resolved = path.resolve(external)
-    if (resolved === fallback || resolved.startsWith(fallback + path.sep)) return resolved
+    if (isPathWithinTree(resolved, fallback)) return resolved
   }
   return fallback
 }

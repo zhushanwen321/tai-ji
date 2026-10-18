@@ -12,11 +12,11 @@
  *   ① isDev 块经 resolveDevDataDir 解析（不回归自赋值 / 裸 ?? 采信形态）
  *   ② 赋值时序早于一切 getDataDir() 消费者（initMainLogger / initCrashJournal）
  *      与单实例锁（userData 派生自它）——晚于任一消费者 = 隔离失效面
- *   ③ userData 从 TAIJI_AGENT_DATA_DIR 派生（不硬编码 .taiji-dev——多 worktree 并行
- *      dev 的单实例锁隔离前提）
- *   ④ TAIJI_AGENT_PORT_OFFSET 刻意保持 ?? 语义（无泄漏风险面，不随本次修复改动）
+ *   ③ userData 从 TAIJI_AGENT_DATA_DIR 派生（兜底树根经 shared DATA_DIR_ROOT_NAMES，
+ *      不硬编码 .taiji-dev 字面量——多 worktree 并行 dev 的单实例锁隔离前提）
+ *   ④ TAIJI_AGENT_PORT_OFFSET 刻意保持 ?? 语义（无泄漏风险，不随本次修复改动）
  *   ⑤ utils/dev-data-dir.ts 的 e2e 豁免双条件形态（flag === '1' 且外部值非空，防豁免
- *      被弱化为无条件采信）+ 包含判定 sep 边界形态
+ *      被弱化为无条件采信）+ 包含判定经 shared isPathWithinTree（不 casefold）
  *
  * 运行：cd apps/electron/main && npx vitest run test/main-dev-datadir-pin.test.ts
  */
@@ -63,13 +63,16 @@ describe('main.ts dev 数据目录接线（受控采信，R-13 修复守护）',
     }
   })
 
-  it('源码守护：userData 从 TAIJI_AGENT_DATA_DIR 派生（不硬编码 .taiji-dev）', () => {
+  it('源码守护：userData 从 TAIJI_AGENT_DATA_DIR 派生（兜底树根经 shared 常量，不硬编码 .taiji-dev 字面量）', () => {
+    // 根名 SSOT = shared DATA_DIR_ROOT_NAMES（MF-1-7 收敛）：断言引用常量而非字面量，
+    // 派生结构（env ?? 兜底树根）与常量值正确性（shared paths.test.ts 直测）双重守护。
     expect(mainSource).toMatch(
-      /app\.setPath\('userData', path\.join\(process\.env\.TAIJI_AGENT_DATA_DIR \?\? path\.join\(homedir\(\), '\.taiji-dev'\), 'electron'\)\)/,
+      /app\.setPath\('userData', path\.join\(process\.env\.TAIJI_AGENT_DATA_DIR \?\? path\.join\(homedir\(\), DATA_DIR_ROOT_NAMES\.dev\), 'electron'\)\)/,
     )
+    expect(mainSource).not.toMatch(/'\.taiji-dev'/)
   })
 
-  it('源码守护：TAIJI_AGENT_PORT_OFFSET 保持 ?? 兜底语义（无泄漏风险面，刻意不动）', () => {
+  it('源码守护：TAIJI_AGENT_PORT_OFFSET 保持 ?? 兜底语义（无泄漏风险，刻意不动）', () => {
     expect(mainSource).toMatch(
       /process\.env\.TAIJI_AGENT_PORT_OFFSET = process\.env\.TAIJI_AGENT_PORT_OFFSET \?\? String\(DEV_PORT_OFFSET\)/,
     )
@@ -79,8 +82,14 @@ describe('main.ts dev 数据目录接线（受控采信，R-13 修复守护）',
     expect(utilSource).toMatch(/env\.TAIJI_E2E === '1' && external/)
   })
 
-  it('源码守护：树内包含判定用 sep 边界（非字符串前缀判，防 .taiji-devish 误放行）', () => {
-    expect(utilSource).toMatch(/resolved === fallback \|\| resolved\.startsWith\(fallback \+ path\.sep\)/)
+  it('源码守护：树内包含判定经 shared isPathWithinTree（不 casefold，sep 边界在单点实现）', () => {
+    // MF-1-7 收敛：内联 `resolved === fallback || startsWith(fallback + path.sep)` 移入
+    // shared isPathWithinTree 单点实现（sep 边界防 .taiji-devish 误放行由该函数单测
+    // 覆盖）。本断言守护 dev resolver 调用形态：必须 import 自 shared 且不传 casefold
+    // 选项（不 fold 语义 = 与 prod 准入检查的有意不对称，见 packaged-data-dir.ts 头注释）。
+    expect(utilSource).toMatch(/import \{ DATA_DIR_ROOT_NAMES, isPathWithinTree \} from '@taiji\/shared\/paths'/)
+    expect(utilSource).toMatch(/isPathWithinTree\(resolved, fallback\)/)
+    expect(utilSource).not.toMatch(/casefold:\s*true/)
   })
 })
 
@@ -112,9 +121,9 @@ describe('main.ts 打包数据目录接线（缺省反转后 prod 唯一权威�
     expect(mainSource).toMatch(/process\.env\.TAIJI_AGENT_PACKAGED = '1'/)
   })
 
-  it('源码守护：打包侧树内包含判定用 sep 边界（与 dev 侧同形态，防 .taijiish 误放行）', () => {
-    expect(packagedUtilSource).toMatch(
-      /resolved === fallback \|\| resolved\.startsWith\(fallback \+ path\.sep\)/,
-    )
+  it('源码守护：打包侧树内包含判定经 shared isPathWithinTree（与 dev 侧同形态，不 casefold）', () => {
+    expect(packagedUtilSource).toMatch(/import \{ DATA_DIR_ROOT_NAMES, isPathWithinTree \} from '@taiji\/shared\/paths'/)
+    expect(packagedUtilSource).toMatch(/isPathWithinTree\(resolved, fallback\)/)
+    expect(packagedUtilSource).not.toMatch(/casefold:\s*true/)
   })
 })

@@ -153,10 +153,19 @@ export type { ProviderApiType } from './constants'
 // 但 renderer 严禁调用（process 未定义 ReferenceError）；main / runtime 专用，
 // 完整警示见 constants.ts 内 JSDoc。
 export { OUTBOUND_FRAME_WARN_BYTES, OUTBOUND_FRAME_TRUNCATE_BYTES, RING_BUDGET_BYTES, READ_PRECHECK_MAX_BYTES, BYTES_PER_MB, HISTORY_BUDGET, DEFAULT_LOG_KEEP_DAYS, readLogKeepDays, RUNTIME_PLANNED_EXIT_CODE } from './constants'
-// Electron IPC 通道名 SSOT（u-foundation：renderer-log 上报通道 D2 /
-// image-cache 落盘通道族首成员 D6-⑨）；既有通道仍内联于 preload/main 不在此收敛，
-// 存量边界说明见 ipc-channels.ts 头注释。
-export { RENDERER_LOG, IMAGE_CACHE_WRITE, DEBUG_RUN_LOG_RETENTION, DIAGNOSTICS_EXPORT_BUNDLE, SESSION_EXPORT_JSONL, LOCAL_FILE_SERVABLE, LOCAL_FILE_READ } from './ipc-channels'
+// Electron IPC 通道名 SSOT（u-foundation：全量 invoke / 推送通道常量——preload 与
+// main 两侧注册 import 消费，renderer 经 preload electronAPI 方法面间接使用）。
+export {
+  RENDERER_LOG, IMAGE_CACHE_WRITE, DEBUG_RUN_LOG_RETENTION, DIAGNOSTICS_EXPORT_BUNDLE, SESSION_EXPORT_JSONL, LOCAL_FILE_SERVABLE, LOCAL_FILE_READ,
+  RUNTIME_PORT, RUNTIME_ERROR, RUNTIME_RESTARTING, RUNTIME_FAILED, GET_RUNTIME_PORT, GET_RUNTIME_PORT_OFFSET, GET_RUNTIME_TOKEN, GET_RUNTIME_START_ERROR, RUNTIME_RESTART,
+  CREATE_WINDOW, GET_WINDOWS, FOCUS_WINDOW, WINDOW_LIST_UPDATED, WINDOW_MINIMIZE, WINDOW_TOGGLE_MAXIMIZE, WINDOW_CLOSE, FULLSCREEN_CHANGED,
+  PICK_DIRECTORY, PICK_FILE, OPEN_EXTERNAL, REVEAL_IN_FOLDER, GET_DATA_DIR,
+  SHORTCUT, SHORTCUT_FORWARD,
+  BROWSER_CREATE, BROWSER_NAVIGATE, BROWSER_HIDE, BROWSER_SHOW, BROWSER_FOCUS, BROWSER_SET_RECT, BROWSER_DESTROY, BROWSER_BACK, BROWSER_FORWARD, BROWSER_SET_ZOOM, BROWSER_GET_ZOOM, BROWSER_GET_SELECTION, BROWSER_OVERLAY_STATE, BROWSER_SHIELDS, BROWSER_FORWARD_KEYS, BROWSER_STATE,
+  UPDATE_CHECK, UPDATE_DOWNLOAD, UPDATE_INSTALL, UPDATE_GET_PRELOADED, UPDATE_GET_LAUNCH_RESULT, UPDATE_GET_PROXY_CONFIG, UPDATE_SET_PROXY_CONFIG, UPDATE_TEST_PROXY, UPDATE_GET_PENDING, UPDATE_GET_SETTINGS, UPDATE_SET_SETTINGS, UPDATE_OPEN_MANUAL_DIR, UPDATE_PROGRESS, UPDATE_ERROR,
+  GET_REMOTE_ACCESS_INFO, ROTATE_REMOTE_ACCESS_TOKEN, SET_REMOTE_ACCESS_ENABLED,
+  SOUND_LIST, SOUND_PLAY,
+} from './ipc-channels'
 // local-file 预检 / 源码读取通道 payload 类型（chat-html-support §6.9 D9：preload 两文件 /
 // renderer lib/ipc / main local-file-prefixes 四方共用同一形态声明——C-comm-22 唯一类型源）。
 export type {
@@ -203,6 +212,9 @@ export type { ShieldRect, ShieldFace, ShieldsFacesPayload } from './ipc-payloads
 // 种类闭集——core overlay 域、main display-gate 校验、preload ElectronAPI 签名与
 // renderer ipc 封装四方共用同一词表，防漂移）。
 export type { OverlayContentKind } from './ipc-payloads'
+// browser:state view 状态推送载荷（display-containers W2：main 组装点 / preload
+// ElectronAPI 签名 / renderer ipc 封装三方共用同一形态声明，防漂移）。
+export type { BrowserFrameState } from './ipc-payloads'
 // 崩溃条目清单事件 Schema SSOT（docs/architecture/crash-forensics-and-watchdog.md §3.3 D1，
 // 实施计划 u1a：layer/event/reason 枚举 + 字段集 + writer 接口——u1b runtime 与
 // u1c main 两 writer 共用，禁止复制定义；纯类型/常量无 node 依赖，barrel 安全）。
@@ -369,14 +381,14 @@ export type {
 // [W2 D8] 状态中文显示名词表运行时常量（ALL = 值域全集 / LABELS = outcome → 中文
 // 显示名（成功/失败/已取消/已中断），通知渲染与 tray 文案消费它 / COVERAGE_LOCK =
 // WorkflowRunOutcome 联合 ⊆ ALL 的反向完备编译锁载体）——renderer 消费入口经此
-// 包根导出面（tray-tone workflowStatusLabel / state-tone-lock 文案断言段）。
+// 包根导出清单（tray-tone workflowStatusLabel / state-tone-lock 文案断言段）。
 export {
   WORKFLOW_RUN_OUTCOME_ALL,
   WORKFLOW_RUN_OUTCOME_LABELS,
   WORKFLOW_RUN_OUTCOME_COVERAGE_LOCK,
 } from './workflow'
 // [可视化 U2] workflow-visualization 协议冻结段的运行时常量（截断白名单五字段 /
-// 截断阈值 / 事件类型全集 + 反向完备编译锁）——消费入口经包根导出面（同上先例）。
+// 截断阈值 / 事件类型全集 + 反向完备编译锁）——消费入口经包根导出清单（同上先例）。
 export {
   WORKFLOW_RUN_EVENT_TRUNCATED_FIELDS,
   WORKFLOW_RUN_EVENT_TRUNCATE_BYTES,

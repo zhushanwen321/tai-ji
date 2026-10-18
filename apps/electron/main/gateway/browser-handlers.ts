@@ -20,6 +20,23 @@
  */
 import { ipcMain } from 'electron'
 import type { BrowserWindow } from 'electron'
+import {
+  BROWSER_CREATE,
+  BROWSER_NAVIGATE,
+  BROWSER_HIDE,
+  BROWSER_SHOW,
+  BROWSER_FOCUS,
+  BROWSER_BACK,
+  BROWSER_FORWARD,
+  BROWSER_SET_ZOOM,
+  BROWSER_GET_ZOOM,
+  BROWSER_GET_SELECTION,
+  BROWSER_DESTROY,
+  BROWSER_SET_RECT,
+  BROWSER_OVERLAY_STATE,
+  BROWSER_SHIELDS,
+  BROWSER_FORWARD_KEYS,
+} from '@taiji/shared'
 import type { BrowserViewManager } from '../browser/browser-view-manager.js'
 import { URL_PREVIEW_MAX_LENGTH, isAllowedNavigateUrl, isDangerousScheme } from './url-scheme-validators.js'
 import { parseOverlayDisplayState, parseShieldFacesPayload } from '../browser/gateway/display-gate.js'
@@ -78,7 +95,7 @@ export function registerBrowserHandlers(
 ): void {
   // 创建 view（attach 到 window，初始隐藏）。
   // §7.4 错误通道：create 失败抛出 → invoke reject（renderer caller catch 落错误占位 + 重试）。
-  ipcMain.handle('browser:create', async (_event, { sessionId, windowId }: { sessionId: string; windowId: string }) => {
+  ipcMain.handle(BROWSER_CREATE, async (_event, { sessionId, windowId }: { sessionId: string; windowId: string }) => {
     manager.create(sessionId, windowId)
   })
 
@@ -87,7 +104,7 @@ export function registerBrowserHandlers(
   // 渲染端 useUrlBar 也有黑名单（用户即时反馈），但 renderer 可被 XSS/console 绕过，
   // 主进程必须有第二层（白名单策略，独立于渲染端的黑名单，独立函数便于单测）。
   // scheme 校验失败时 invoke reject 带明确 reason，renderer .catch 接住后 toast。
-  ipcMain.handle('browser:navigate', async (_event, { sessionId, url }: { sessionId: string; url: string }) => {
+  ipcMain.handle(BROWSER_NAVIGATE, async (_event, { sessionId, url }: { sessionId: string; url: string }) => {
     if (isDangerousScheme(url)) {
       throw new Error(`[browser:navigate] rejected dangerous scheme: ${url.slice(0, URL_PREVIEW_MAX_LENGTH)}`)
     }
@@ -98,12 +115,12 @@ export function registerBrowserHandlers(
   })
 
   // 隐藏（keep-alive，不销毁）
-  ipcMain.handle('browser:hide', (_event, sessionId: string) => {
+  ipcMain.handle(BROWSER_HIDE, (_event, sessionId: string) => {
     manager.hide(sessionId)
   })
 
   // 显示（恢复最近 rect）
-  ipcMain.handle('browser:show', (_event, sessionId: string) => {
+  ipcMain.handle(BROWSER_SHOW, (_event, sessionId: string) => {
     manager.show(sessionId)
   })
 
@@ -111,42 +128,42 @@ export function registerBrowserHandlers(
   // hide-only 收敛 + 浮层随行豁免——非「浮层开 ∧ 内容 browser」态恒只隐藏不显示，
   // 显示唯一触发 = browser-view-manager.applyDisplay 统一谓词。
   // 场景：renderer watch(focusedSessionId) → 切 session 时调。
-  ipcMain.handle('browser:focus', (_event, sessionId: string) => {
+  ipcMain.handle(BROWSER_FOCUS, (_event, sessionId: string) => {
     manager.focus(sessionId)
   })
 
   // 历史导航（Wave 5）：后退 / 前进。sessionId 不存在或无法导航时无操作。
   // 单值 payload（裸 sessionId）。
-  ipcMain.handle('browser:back', (_event, sessionId: string) => {
+  ipcMain.handle(BROWSER_BACK, (_event, sessionId: string) => {
     manager.goBack(sessionId)
   })
-  ipcMain.handle('browser:forward', (_event, sessionId: string) => {
+  ipcMain.handle(BROWSER_FORWARD, (_event, sessionId: string) => {
     manager.goForward(sessionId)
   })
 
   // 缩放（Wave 5）：设置 / 读取缩放因子。
   // set-zoom 用单对象 payload（AGENTS 规则 #1，两个参数）；get-zoom 用裸 sessionId（单参数）。
-  ipcMain.handle('browser:set-zoom', (_event, { sessionId, factor }: { sessionId: string; factor: number }) => {
+  ipcMain.handle(BROWSER_SET_ZOOM, (_event, { sessionId, factor }: { sessionId: string; factor: number }) => {
     manager.setZoomFactor(sessionId, factor)
   })
-  ipcMain.handle('browser:get-zoom', (_event, sessionId: string) => {
+  ipcMain.handle(BROWSER_GET_ZOOM, (_event, sessionId: string) => {
     return manager.getZoomFactor(sessionId)
   })
 
   // 读取选区（二期扩展点，Wave 6 预留）
-  ipcMain.handle('browser:get-selection', (_event, sessionId: string) => {
+  ipcMain.handle(BROWSER_GET_SELECTION, (_event, sessionId: string) => {
     return manager.getSelection(sessionId)
   })
 
   // 销毁（removeChildView + webContents.destroy）
-  ipcMain.handle('browser:destroy', (_event, sessionId: string) => {
+  ipcMain.handle(BROWSER_DESTROY, (_event, sessionId: string) => {
     manager.destroy(sessionId)
   })
 
   // 设置 view 位置/尺寸（renderer 推送，CSS px = DIP，不乘 dpr）。
   // 单对象 payload（AGENTS 规则 #1）：{ sessionId, rect }。
   ipcMain.handle(
-    'browser:set-rect',
+    BROWSER_SET_RECT,
     (_event, { sessionId, rect }: { sessionId: string; rect: { x: number; y: number; width: number; height: number } }) => {
       manager.setRect(sessionId, rect)
     },
@@ -156,21 +173,21 @@ export function registerBrowserHandlers(
 
   // 浮层开合/内容切换上报：{ open, content, sessionId }（关浮层/换出 browser 内容 → 隐藏 view；
   // 重开 → 恢复显示）。非法 payload reject（error envelope）。
-  ipcMain.handle('browser:overlay-state', async (_event, payload: unknown) => {
+  ipcMain.handle(BROWSER_OVERLAY_STATE, async (_event, payload: unknown) => {
     manager.setOverlayState(parseOverlayDisplayState(payload))
   })
 
-  // shieldsView 遮蔽面全量上报：{ faces: [{ id, fullscreen, rect? }] }（模态表面聚合 §6.7
+  // shieldsView 遮蔽视图全量上报：{ faces: [{ id, fullscreen, rect? }] }（模态表面聚合 §6.7
   // 的 view 遮蔽族；全屏无条件隐藏 / 非全屏几何相交（双阈值滞回））。非法 payload reject。
-  ipcMain.handle('browser:shields', async (_event, payload: unknown) => {
+  ipcMain.handle(BROWSER_SHIELDS, async (_event, payload: unknown) => {
     manager.setShieldsViewFaces(parseShieldFacesPayload(payload))
   })
 
   // 转发键清单上报（§7.4 [MANDATORY]）：{ set?: string[], add?: string[], remove?: string[] }。
-  // set = 全量重报（清单初始化 / settings 重录快捷键 / renderer 重载两个触发面的收敛手段）；
+  // set = 全量重报（清单初始化 / settings 重录快捷键 / renderer 重载两个触发路径的收敛手段）；
   // add/remove = 注册/注销增量。入清单约束（仅 mod 前缀组合，Esc 不入）由 registry
   // 强制，违规项进 rejected（不入清单）。返回 { accepted, rejected } 供上报方核对。
-  ipcMain.handle('browser:forward-keys', async (_event, payload: unknown) => {
+  ipcMain.handle(BROWSER_FORWARD_KEYS, async (_event, payload: unknown) => {
     const request = parseForwardKeyRequest(payload)
     if (request.set) return forwardKeyRegistry.set(request.set)
     return forwardKeyRegistry.update({ add: request.add, remove: request.remove })

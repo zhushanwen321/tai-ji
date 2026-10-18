@@ -287,6 +287,35 @@ export interface ShieldsFacesPayload {
  * 手抄词表漂移静默通过，main 侧只剩运行时 throw 兜底。
  */
 export type OverlayContentKind = 'browser' | 'workflow' | 'scheduler'
+
+// ── browser:state view 状态推送（display-containers W2）──
+
+/**
+ * `browser:state` 推送载荷（main → renderer；BROWSER_STATE 通道）。
+ *
+ * main BrowserViewManager 托管状态（七字段）+ sessionId 组装的完整推送形态：
+ * preload ElectronAPI 签名 / renderer ipc 封装（BrowserPane 地址栏回填 + loading/
+ * error 态）/ main 侧组装点三方共用同一形态声明，防漂移。main 内部托管态类型 =
+ * `Omit<BrowserFrameState, 'sessionId'>`（browser-view-manager BrowserViewState 派生）。
+ */
+export interface BrowserFrameState {
+  sessionId: string
+  /** 当前 URL（did-navigate / did-navigate-in-page 更新） */
+  currentUrl: string
+  /** 是否加载中 */
+  isLoading: boolean
+  /** 最近一次加载错误（did-fail-load 记录；成功导航后清空） */
+  error: { errorCode: number; errorDescription: string; validatedURL: string } | null
+  /** render-process-gone 后非 null（进程崩溃原因；成功导航后清空）——
+   *  renderer 落「创建失败」占位族（§5.3 两类占位区分），重试 = create + show + navigate */
+  processGone: { reason: string } | null
+  /** 是否可后退（did-navigate 后同步 navigationHistory） */
+  canGoBack: boolean
+  /** 是否可前进 */
+  canGoForward: boolean
+  /** 当前缩放因子（setZoomFactor 后回推，useBrowserZoom 基准一致） */
+  zoomFactor: number
+}
 // ── local-file 预检与源码读取（LOCAL_FILE_SERVABLE / LOCAL_FILE_READ invoke 通道）
 //    [chat-html-support §6.9 D9 / §6.4 D4 / §8.2 S3] ─────────────────────────────
 

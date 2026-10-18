@@ -28,7 +28,7 @@ export const SAFE_KILL_NAMES = /(?:^|[\/\\])(?:node|node\.exe|pi|pi\.exe|pi-wind
 
 /** runtime 进程 cmdline 指纹：dev（tsx 跑源码）与打包（dist bundle）两种形态都显式注入该参数。 */
 const RUNTIME_CMDLINE_MARKER = '--builtin-plugins-dir='
-/** 残留 runtime SIGTERM → SIGKILL 的宽限上界（控制面秒级，对齐 STOP_TIMEOUT_MS 量级）。 */
+/** 残留 runtime SIGTERM → SIGKILL 的宽限上界（控制侧秒级，对齐 STOP_TIMEOUT_MS 量级）。 */
 export const RECLAIM_TERM_GRACE_MS = 2000
 const RECLAIM_POLL_MS = 50
 /** kill decision 日志里 cmdline 摘要截断长度。 */

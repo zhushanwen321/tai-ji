@@ -14,6 +14,15 @@
 import { ipcMain, BrowserWindow, dialog, shell } from 'electron'
 import { existsSync } from 'node:fs'
 import { homedir } from 'node:os'
+import {
+  OPEN_EXTERNAL,
+  REVEAL_IN_FOLDER,
+  PICK_DIRECTORY,
+  PICK_FILE,
+  WINDOW_MINIMIZE,
+  WINDOW_TOGGLE_MAXIMIZE,
+  WINDOW_CLOSE,
+} from '@taiji/shared'
 import type { IpcHandlerDeps } from '../interfaces.js'
 import { isValidAbsolutePath, isValidExternalUrl } from './input-validators.js'
 
@@ -29,7 +38,7 @@ import { isValidAbsolutePath, isValidExternalUrl } from './input-validators.js'
 export function registerPrivilegedHandlers(deps: IpcHandlerDeps): void {
   void deps
   // open-external：校验 http/https 后交给系统浏览器
-  ipcMain.handle('open-external', async (_event, url: string): Promise<boolean> => {
+  ipcMain.handle(OPEN_EXTERNAL, async (_event, url: string): Promise<boolean> => {
     // [HISTORICAL] 安全检查：只允许 http/https 协议（防 file:// / javascript: 等）
     if (!isValidExternalUrl(url)) return false
     try {
@@ -47,7 +56,7 @@ export function registerPrivilegedHandlers(deps: IpcHandlerDeps): void {
   // 下解析歧义，直接拒绝）。showItemInFolder 对不存在文件静默 no-op，存在性不校验——
   // session JSONL 可能恰在删除窗口内，静默降级比误报错诚实。风格对齐 open-external
   //（try/catch + 返回 false 降级）。
-  ipcMain.handle('reveal-in-folder', (_event, filePath: unknown): boolean => {
+  ipcMain.handle(REVEAL_IN_FOLDER, (_event, filePath: unknown): boolean => {
     if (!isValidAbsolutePath(filePath)) return false
     try {
       shell.showItemInFolder(filePath)
@@ -68,7 +77,7 @@ export function registerPrivilegedHandlers(deps: IpcHandlerDeps): void {
   //（通常是 currentCwd），主进程 existsSync 检查——存在则用，否则降级 homedir。
   // 不能把"已删除目录"原样传给 dialog：否则又触发 OS 的 Documents 回退，丢失意义。
   ipcMain.handle(
-    'pick-directory',
+    PICK_DIRECTORY,
     async (_event, options?: { title?: string; defaultPath?: string }) => {
       const focusedWin = BrowserWindow.getFocusedWindow()
       if (!focusedWin) return { canceled: true, path: null }
@@ -105,7 +114,7 @@ export function registerPrivilegedHandlers(deps: IpcHandlerDeps): void {
   // filters 透传：渲染端传入 Electron 原生 FileFilter[]（{name, extensions}），主进程不转换
   // 直接传给 dialog，让渲染端决定业务类型（图片/文档/视频），IPC 保持薄通道语义。
   ipcMain.handle(
-    'pick-file',
+    PICK_FILE,
     async (
       _event,
       options?: { title?: string; defaultPath?: string; filters?: Array<{ name: string; extensions: string[] }> },
@@ -135,16 +144,16 @@ export function registerPrivilegedHandlers(deps: IpcHandlerDeps): void {
 
   // ── 窗口控制（win/linux 自绘 traffic-light 圆点点击，shell spec §五方案 X）─────
   // mac 红黄绿是系统按钮不走这里。fromWebContents 按 sender 定位调用窗口，多窗口安全。
-  ipcMain.handle('window-minimize', (event) => {
+  ipcMain.handle(WINDOW_MINIMIZE, (event) => {
     BrowserWindow.fromWebContents(event.sender)?.minimize()
   })
-  ipcMain.handle('window-toggle-maximize', (event) => {
+  ipcMain.handle(WINDOW_TOGGLE_MAXIMIZE, (event) => {
     const win = BrowserWindow.fromWebContents(event.sender)
     if (!win) return
     if (win.isMaximized()) win.unmaximize()
     else win.maximize()
   })
-  ipcMain.handle('window-close', (event) => {
+  ipcMain.handle(WINDOW_CLOSE, (event) => {
     BrowserWindow.fromWebContents(event.sender)?.close()
   })
 }

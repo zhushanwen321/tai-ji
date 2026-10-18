@@ -12,6 +12,7 @@
  * 依赖方向：window-manager → interfaces + electron
  */
 import { BrowserWindow } from 'electron'
+import { FULLSCREEN_CHANGED } from '@taiji/shared'
 import type { WindowState } from '@taiji/shared'
 import type { IWindowManager } from '../interfaces.js'
 
@@ -52,10 +53,10 @@ export class WindowManager implements IWindowManager {
 
     // Notify renderer when macOS fullscreen state changes
     win.on('enter-full-screen', () => {
-      win.webContents.send('fullscreen-changed', { isFullscreen: true })
+      win.webContents.send(FULLSCREEN_CHANGED, { isFullscreen: true })
     })
     win.on('leave-full-screen', () => {
-      win.webContents.send('fullscreen-changed', { isFullscreen: false })
+      win.webContents.send(FULLSCREEN_CHANGED, { isFullscreen: false })
     })
 
     win.on('closed', () => {

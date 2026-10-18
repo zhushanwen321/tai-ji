@@ -20,7 +20,8 @@
  *
  * 包含判定用 path.resolve + sep 边界（resolve 消解 ../ 与重复分隔符后再判，
  * 纯词法、不做 fs realpath——env 泄漏威胁模型是路径值本身，symlink 越界不在面内，
- * 与 dev-data-dir.ts 同一威胁模型）。
+ * 与 dev-data-dir.ts 同一威胁模型）；判定实现 = shared isPathWithinTree
+ * （不 casefold，见下）。
  *
  * 大小写盲区（设计内残差）：包含判定不 casefold。大小写不敏感卷（macOS/Windows
  * 默认）上 `~/.TAIJI` 类手滑变体与本函数钉回的 `~/.taiji` 是同一物理目录——钉回
@@ -28,12 +29,14 @@
  * 树外另一目录，钉回 prod 根正确。若此处 casefold，Linux 上会把真树外目录当
  * prod 树采信，弱化固定保证，故不做。对照：shared 侧准入检查
  * （assertNotLeakedProdDataDir）漏判方向是「非 prod 进程写 prod」数据损失，
- * 故该处判定双侧 casefold——两处不对称是有意的（漏判代价不对称）。
+ * 故该处判定双侧 casefold——两处不对称是有意的（漏判代价不对称），经
+ * isPathWithinTree 的 opts.casefold 显式承载。
  *
- * 依赖方向：无下游（纯函数，node:path）；行为矩阵守护 = main/test/packaged-data-dir.test.ts，
+ * 依赖方向：无下游（纯函数，node:path + shared 常量）；行为矩阵守护 = main/test/packaged-data-dir.test.ts，
  * main.ts 接线守护 = main/test/main-dev-datadir-pin.test.ts（packaged describe）。
  */
 import path from 'node:path'
+import { DATA_DIR_ROOT_NAMES, isPathWithinTree } from '@taiji/shared/paths'
 
 /**
  * 解析打包模式的 taiji 数据目录（main.ts 打包分支调用）。
@@ -44,10 +47,10 @@ import path from 'node:path'
  */
 export function resolvePackagedDataDir(env: NodeJS.ProcessEnv, homedirPath: string): string {
   const external = env.TAIJI_AGENT_DATA_DIR
-  const fallback = path.join(homedirPath, '.taiji')
+  const fallback = path.join(homedirPath, DATA_DIR_ROOT_NAMES.prod)
   if (external) {
     const resolved = path.resolve(external)
-    if (resolved === fallback || resolved.startsWith(fallback + path.sep)) return resolved
+    if (isPathWithinTree(resolved, fallback)) return resolved
   }
   return fallback
 }

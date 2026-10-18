@@ -3,10 +3,10 @@
  * §6.9 D9）。
  *
  * 三个消费方共用本模块，准入分两面：
- * ① main.ts 的 `protocol.handle('local-file')` 协议 handler——渲染面（图片/iframe 服务），
+ * ① main.ts 的 `protocol.handle('local-file')` 协议 handler——渲染进程侧（图片/iframe 服务），
  *   准入 = 全量白名单 getAllowedLocalFilePrefixes
  * ② `localFile:servable` 预检 IPC（内联预览容器 HtmlPreviewInline 挂载前准入检查，经 deps
- *   probeArtifact?——v16 唯一渲染面）
+ *   probeArtifact?——v16 唯一渲染进程侧）
  * ③ `localFile:read` 源码读取 IPC（容器源码态 + useDetailPane 抽屉产物源码读取）
  *   ②③ 读/预检通道的准入 = 产物子树 getReadChannelPrefixes + 会话项目 `.tmp/` 子树
  *   （2026-10-15 ADR-0118 3d，getSessionTmpEncodeCwdDirs 正向对拍）——通道入参含模型
@@ -69,7 +69,7 @@ export function getAllowedLocalFilePrefixes(isDev: boolean): string[] {
 }
 
 /**
- * localFile:servable / localFile:read 两条 IPC 通道的当次准入前缀（读/预检收窄面）。
+ * localFile:servable / localFile:read 两条 IPC 通道的当次准入前缀（读/预检收窄范围）。
  *
  * 静态前缀 = 会话产物子树 `<dataDir>/artifacts/**`（computeLocalFileReadPrefixes），不复用
  * 协议 handler 的全量白名单——见文件头「准入分两面」。cwd 外非产物路径拿
@@ -92,7 +92,7 @@ export function getSessionTmpEncodeCwdDirs(): ReadonlySet<string> {
 
 /**
  * 注册 localFile:servable 预检 IPC 与 localFile:read 源码读取 IPC（形态对齐 privileged-handlers.ts
- * 的 ipcMain.handle）。准入只依赖 getDataDir()（产物子树收窄面，与 dev/prod 无关），不注入
+ * 的 ipcMain.handle）。准入只依赖 getDataDir()（产物子树收窄范围，与 dev/prod 无关），不注入
  * IpcHandlerDeps。
  *
  * 通道名 SSOT = `@taiji/shared` 的 `LOCAL_FILE_SERVABLE` / `LOCAL_FILE_READ`

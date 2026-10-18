@@ -67,7 +67,7 @@ const ERROR_DOC: Record<
 
 /**
  * 最小可读错误文档（iframe 内渲染给用户看；父页面 opaque origin 读不到状态码，错误文档
- * 是用户唯一的可见信号）。消息为固定字面量，不回显请求路径（不引入反射注入面）。
+ * 是用户唯一的可见信号）。消息为固定字面量，不回显请求路径（不引入反射注入风险）。
  */
 export function buildLocalFileErrorResponse(reason: 'not_found' | 'is_dir' | 'out_of_whitelist'): Response {
   const { status, message } = ERROR_DOC[reason]

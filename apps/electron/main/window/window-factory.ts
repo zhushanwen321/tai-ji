@@ -29,6 +29,7 @@ import { mainLogger } from '../logs/main-logger.js'
 import { crashJournal } from '../logs/crash-journal.js'
 import { handleRendererConsoleMessage, isRendererConsoleDisabled } from '../logs/renderer-console-handler.js'
 import { getDataDir } from '@taiji/shared/paths'
+import { SHORTCUT } from '@taiji/shared'
 import {
   createMainWindowStatePersistence,
   pickInitialSize,
@@ -40,7 +41,7 @@ import {
 /** Dev 模式 Vite URL（TAIJI_VITE_DEV_URL 可覆盖：多 worktree 并行 dev 时错开端口，如 1421）。
  *  注意：本常量同时是 will-navigate 导航白名单的 devOrigin（createWindow 内
  *  isAllowedAppNavigation 调用）——覆盖后导航白名单同步接受覆盖源（行为正确：应用实际
- *  从哪个端口加载就应放行哪个）；prod 下仅 loadFile，该覆盖无生效面。 */
+ *  从哪个端口加载就应放行哪个）；prod 下仅 loadFile，该覆盖无生效路径。 */
 export const VITE_DEV_URL = process.env.TAIJI_VITE_DEV_URL ?? 'http://localhost:1420'
 
 /** 等待 Vite dev server 就绪的总超时 */
@@ -387,7 +388,7 @@ export async function createWindow(
     showStaticErrorPage(win, windowId, options?.sessionId, deps.isDev)
   })
 
-  // renderer console 落盘监听（renderer-console-persist 设计 D1/U2）：被动收集面挂
+  // renderer console 落盘监听（renderer-console-persist 设计 D1/U2）：被动收集逻辑挂
   // webContents 事件族同段。旋钮判定在挂载时一次——TAIJI_RENDERER_CONSOLE_OFF 是
   // 模块加载读一次的语义（设计 D3④：app 启动后设 env 不生效，重启粒度），不在
   // 回调内逐条判。Electron 42 事件对象上字段直接平铺（Event<Params> 交集形态），
@@ -407,7 +408,7 @@ export async function createWindow(
   // renderer 假死登记清单（crash-forensics D1 renderer 行第三事件：unresponsive）。
   // 卡死是持续状态：记行后置位标记，'responsive'（恢复）复位——同一次持续卡死不
   // 重复记行，卡死↔恢复循环每次各记一行；窗口销毁后监听器与闭包标记随 webContents
-  // 一起回收，无清理面。main 侧此前无 webContents unresponsive 处理器（C-proc-12
+  // 一起回收，无需清理。main 侧此前无 webContents unresponsive 处理器（C-proc-12
   // 只覆盖 render-process-gone 崩溃恢复链），本挂点为纯新增，不改变既有行为。
   let unresponsiveJournaled = false
   win.webContents.on('unresponsive', () => {
@@ -435,13 +436,13 @@ export async function createWindow(
     if (input.key.toLowerCase() === 'w' && (input.control || input.meta)) {
       event.preventDefault()
       if (!win.isDestroyed()) {
-        win.webContents.send('shortcut', 'close')
+        win.webContents.send(SHORTCUT, 'close')
       }
     }
     if (input.key === '`' && input.control && !input.meta && !input.alt && !input.shift) {
       event.preventDefault()
       if (!win.isDestroyed()) {
-        win.webContents.send('shortcut', 'toggle-bottom-drawer')
+        win.webContents.send(SHORTCUT, 'toggle-bottom-drawer')
       }
     }
   })

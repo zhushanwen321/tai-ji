@@ -11,7 +11,7 @@
  *    { contextIsolation: true, nodeIntegration: false, sandbox: true }，
  *    无 preload、无持久注入——被嵌入页不能访问 Node / Electron API。仅限主进程一次性
  *    executeJavaScript 白名单用途（viewport meta 注入 / autoFit 读数 / getSelection，
- *    均一次性只读或幂等 meta 补齐，无常驻脚本面；与 §6.7④ 否决的常驻 preload 探测面
+ *    均一次性只读或幂等 meta 补齐，无常驻脚本面；与 §6.7④ 否决的常驻 preload 探测路径
  *    是两类风险，不构成「已有注入先例」的边界松动）。
  *
  * 2. WebContentsView 是 Electron 42 原生 API（`import { WebContentsView } from 'electron'`），
@@ -40,7 +40,7 @@
  *
  * 8. 显示收敛谓词（display-containers §7.4 show 统一谓词，R3 收敛）：view 显示的唯一触发 =
  *    「浮层开 ∧ 内容 browser ∧ 无错误态 ∧ 无相交 shieldsView 面」，收敛在 applyDisplay 单点
- *    （show / focus / 错误态 / shieldsView / 浮层开合与内容切换 / rect 推送全触发面经它求值），
+ *    （show / focus / 错误态 / shieldsView / 浮层开合与内容切换 / rect 推送全触发路径经它求值），
  *    禁止各触发点独立 show——否则 shieldsView 相交隐藏期间重开浮层会「show 竞态盖住模态」。
  *    focus() 收敛：非该态只隐藏不显示（防「关浮层 → 切走 → 切回」残影经 focus sync 旁路复活）；
  *    浮层随行豁免（§5.1 规则 5）：浮层开 ∧ 内容 browser 时 focus 换显整体豁免。策略纯函数在
@@ -65,6 +65,7 @@
  */
 import { WebContentsView, shell } from 'electron'
 import type { Rectangle } from 'electron'
+import type { BrowserFrameState } from '@taiji/shared'
 import type { IWindowManager } from '../interfaces.js'
 import { URL_PREVIEW_MAX_LENGTH, isAllowedNavigateUrl, isDangerousScheme } from '../gateway/url-scheme-validators.js'
 import { isValidExternalUrl } from '../gateway/input-validators.js'
@@ -96,25 +97,12 @@ const AUTO_FIT_MIN = 0.5
 /** autoFit 缩放上限：只缩小不放大（不溢出的页面保持 100%，避免把响应式页面强制放大失真） */
 const AUTO_FIT_MAX = 1.0
 
-/** 暂存的 view 状态（W2 经 IPC 回传 renderer） */
-export interface BrowserViewState { // oe-exempt:20261003:framework:类型契约先行——容器/编排/注册表契约层，D1 下游单元即为消费方
-  /** 当前 URL（did-navigate / did-navigate-in-page 更新） */
-  currentUrl: string
-  /** 是否加载中 */
-  isLoading: boolean
-  /** 最近一次加载错误（did-fail-load 记录；成功导航后清空） */
-  error: { errorCode: number; errorDescription: string; validatedURL: string } | null
-  /** render-process-gone 后非 null（进程崩溃原因；成功导航后清空）。
-   *  renderer 落「创建失败」占位族（§5.3 两类占位区分：创建失败 vs 页面加载失败），
-   *  重试 = create + show + navigate。 */
-  processGone: { reason: string } | null
-  /** 是否可后退（did-navigate 等事件后同步 webContents.navigationHistory，供 renderer 更新 back 按钮 disabled 态） */
-  canGoBack: boolean
-  /** 是否可前进 */
-  canGoForward: boolean
-  /** 当前缩放因子（setZoomFactor 后同步经 onBrowserState 推 renderer，让 useBrowserZoom 基准一致） */
-  zoomFactor: number
-}
+/**
+ * 暂存的 view 状态（W2 经 IPC 回传 renderer）。字段集 = `browser:state` 推送载荷去掉
+ * sessionId（组装时由回调注入），单一类型源 = shared BrowserFrameState
+ * （packages/shared/src/ipc-payloads.ts）——本类型只做 Omit 派生，不重复字段声明。
+ */
+export type BrowserViewState = Omit<BrowserFrameState, 'sessionId'>
 
 /** 单个 sessionId 对应的托管条目 */
 interface ManagedView { // oe-exempt:20261003:framework:类型契约先行——容器/编排/注册表契约层，D1 下游单元即为消费方
@@ -166,7 +154,7 @@ export class BrowserViewManager {
 
   /** 浮层开合态（renderer 经 browser:overlay-state 上报；显示收敛谓词事实源之一） */
   private overlayState: OverlayDisplayState = { ...CLOSED_OVERLAY }
-  /** shieldsView 遮蔽面集合（renderer 经 browser:shields 上报；全量替换语义） */
+  /** shieldsView 遮蔽视图集合（renderer 经 browser:shields 上报；全量替换语义） */
   private shieldFaces: ShieldFace[] = []
   /** 双阈值空间滞回状态（per session；gateway/display-gate.ts nextShieldHidden 的状态位） */
   private shieldHidden = new Map<string, boolean>()
@@ -324,7 +312,7 @@ export class BrowserViewManager {
     if (entry.isVisible) {
       entry.view.setBounds(rect)
     }
-    // 谓词重算触发面（§7.4 R4）：view rect 变化（resize）→ 滞回与相交判定重算
+    // 谓词重算触发路径（§7.4 R4）：view rect 变化（resize）→ 滞回与相交判定重算
     this.applyDisplay()
   }
 
@@ -334,7 +322,7 @@ export class BrowserViewManager {
    * 幂等：sessionId 不存在时无操作。
    *
    * 显式强制隐藏（不经谓词）；可见性由显示收敛谓词统一支配（applyDisplay），
-   * 后续触发面重算时若谓词为真会恢复显示（不变量 8）。
+   * 后续触发路径重算时若谓词为真会恢复显示（不变量 8）。
    *
    * [HISTORICAL] 修复浏览器页面残留问题：原实现只调 setBounds({0,0,0,0})，view 仍然
    * attach 在 contentView 树上。多次 session 切换后，如果状态管理出错，view 会意外显示。
@@ -367,7 +355,7 @@ export class BrowserViewManager {
 
   /**
    * 浮层开合/内容切换上报（browser:overlay-state IPC）。
-   * 谓词重算触发面（§7.4 R4）：重开浮层 → 恢复显示；关闭/换出 browser 内容 → 隐藏（keep-alive）。
+   * 谓词重算触发路径（§7.4 R4）：重开浮层 → 恢复显示；关闭/换出 browser 内容 → 隐藏（keep-alive）。
    */
   setOverlayState(state: OverlayDisplayState): void {
     this.overlayState = state
@@ -376,9 +364,9 @@ export class BrowserViewManager {
   }
 
   /**
-   * shieldsView 遮蔽面全量上报（browser:shields IPC；模态表面聚合 §6.7 的 view 遮蔽族）。
+   * shieldsView 遮蔽视图全量上报（browser:shields IPC；模态表面聚合 §6.7 的 view 遮蔽族）。
    * 全量替换语义（上报是事件提示 + 全量收敛，不做增量簿记/时间窗兑底）。
-   * 谓词重算触发面：成员开合 + 成员开态内 rect 变化（横幅文案随 level 改宽）都经此触发。
+   * 谓词重算触发路径：成员开合 + 成员开态内 rect 变化（横幅文案随 level 改宽）都经此触发。
    */
   setShieldsViewFaces(faces: ShieldFace[]): void {
     this.shieldFaces = faces
@@ -506,7 +494,7 @@ export class BrowserViewManager {
   }
 
   /**
-   * 显示收敛单点（不变量 8）：全部可见性触发面（show 请求 / focus / 错误态 / shieldsView /
+   * 显示收敛单点（不变量 8）：全部可见性触发路径（show 请求 / focus / 错误态 / shieldsView /
    * 浮层开合与内容切换 / rect 推送）收敛到此，按谓词补齐显隐差额（只在状态翻转时 actuator，
    * 避免重复 setBounds）。
    */
@@ -706,7 +694,7 @@ export class BrowserViewManager {
       state.error = null
       state.processGone = null
       notify()
-      // 谓词重算触发面（§7.4 联动①）：重试成功/导航成功 → 错误态清空，谓词为真则恢复显示
+      // 谓词重算触发路径（§7.4 联动①）：重试成功/导航成功 → 错误态清空，谓词为真则恢复显示
       this.applyDisplay()
     })
     wc.on('did-navigate-in-page', (_e, url: string) => {

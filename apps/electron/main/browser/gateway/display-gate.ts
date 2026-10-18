@@ -10,13 +10,13 @@
  *   ∧ 无错误态 ∧ 无相交 shieldsView 面。
  *
  * 双阈值空间滞回（§6.7 R5/R6，施密特触发结构）：
- *   - 进入隐藏 = 存在遮蔽面矩形与 view **原始**矩形相交（真重叠才隐藏）
- *   - 退出隐藏 = 全部遮蔽面矩形与 view **外扩**矩形（外扩 SHIELD_HYSTERESIS_PADDING_PX）
+ *   - 进入隐藏 = 存在遮蔽视图矩形与 view **原始**矩形相交（真重叠才隐藏）
+ *   - 退出隐藏 = 全部遮蔽视图矩形与 view **外扩**矩形（外扩 SHIELD_HYSTERESIS_PADDING_PX）
  *     仍完全不相交（含缓冲的明确分离才恢复）
  *   - 缓冲带（外扩相交 ∧ 原始不相交）内两切换条件皆假 → 双向状态保持（不翻转）。
  * 显式不采用 debounce / 时间滞回（AGENTS 时间平抑红线：双阈值空间解已可达成同一目的）。
  *
- * 谓词重算触发面（§7.4 R4 补全）：错误态变化（create 失败 / render-process-gone / did-fail-load
+ * 谓词重算触发路径（§7.4 R4 补全）：错误态变化（create 失败 / render-process-gone / did-fail-load
  * / 重试成功导航）+ shieldsView 成员开合或 rect 变化（横幅文案随 level 改宽）+ 浮层开合与内容切换
  * + view rect 推送链事件（resize）。全部由 BrowserViewManager 在对应事件点调 applyDisplay 收敛。
  *
@@ -31,7 +31,7 @@ export interface DisplayRect { // oe-exempt:20261003:framework:类型契约先�
   height: number
 }
 
-// shieldsView 遮蔽面形状（browser:shields payload 契约）SSOT 在 @taiji/shared
+// shieldsView 遮蔽视图形状（browser:shields payload 契约）SSOT 在 @taiji/shared
 // ipc-payloads.ts——preload ElectronAPI 签名 / renderer 聚合上报 / 本模块校验解析三方
 // 共用同一形态声明防漂移；既有导入路径（browser-view-manager / 测试）经此 re-export 不变。
 export type { ShieldFace, OverlayContentKind } from '@taiji/shared'
@@ -75,7 +75,7 @@ function faceHits(face: ShieldFace, rect: DisplayRect): boolean {
  * 双阈值空间滞回的单步转移（施密特触发）。
  *
  * @param prev 上一步的「因 shieldsView 隐藏」状态
- * @param faces 当前打开的遮蔽面集合（空 = 无遮蔽）
+ * @param faces 当前打开的遮蔽视图集合（空 = 无遮蔽）
  * @param viewRect view 当前显示矩形（原始矩形）
  * @returns 下一步状态：false→true 仅当某面与原始矩形相交；true→false 仅当全部面与外扩矩形仍不相交
  */

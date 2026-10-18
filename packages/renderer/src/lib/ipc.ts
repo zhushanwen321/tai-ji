@@ -7,7 +7,7 @@
  *
  * 依赖方向：无下游（读全局 window.electronAPI，类型经 declare global 自动可用）
  */
-import type { LatestReleaseInfo, UpdateStage, UpdateSettings, UpdateErrorPayload, ProxyTestResult, LaunchResult, UpdateCheckResult, UpdateInstallResult, RendererLogPayload, DiagnosticExportBundlePayload, DiagnosticExportBundleResult, SessionJsonlExportPayload, SessionJsonlExportResult, RemoteAccessInfo, RemoteAccessToggleResult, ShieldsFacesPayload, OverlayContentKind, LocalFileServableReason, LocalFileServableResult, LocalFileReadReason, LocalFileReadResult } from '@taiji/shared'
+import type { LatestReleaseInfo, UpdateStage, UpdateSettings, UpdateErrorPayload, ProxyTestResult, LaunchResult, UpdateCheckResult, UpdateInstallResult, RendererLogPayload, DiagnosticExportBundlePayload, DiagnosticExportBundleResult, SessionJsonlExportPayload, SessionJsonlExportResult, RemoteAccessInfo, RemoteAccessToggleResult, ShieldsFacesPayload, OverlayContentKind, BrowserFrameState, LocalFileServableReason, LocalFileServableResult, LocalFileReadReason, LocalFileReadResult } from '@taiji/shared'
 import type { ImageCacheWritePort } from '@taiji/core'
 
 /** preload 注入的 electronAPI（web/mock / node 测试环境为 undefined——后者连
@@ -287,22 +287,10 @@ export function onBrowserForwardKey(callback: (payload: { accelerator: string })
  * 监听主进程推送的 browser 状态变化（url/isLoading/error）。
  * 主进程 did-navigate / did-fail-load / did-start-loading 等事件触发时推送，
  * BrowserPane 据此更新地址栏真实 URL（防钓鱼）+ loading/error 态。
+ * 载荷形态 SSOT = @taiji/shared BrowserFrameState（browser:state 通道契约，C-comm-22）。
  * 返回取消订阅函数。无 IPC 时返回 no-op。
  */
-export function onBrowserState(
-  callback: (state: {
-    sessionId: string
-    currentUrl: string
-    isLoading: boolean
-    error: { errorCode: number; errorDescription: string; validatedURL: string } | null
-    /** 渲染进程崩溃（render-process-gone，§5.3 两类占位之二：创建失败/进程崩溃） */
-    processGone: { reason: string } | null
-    canGoBack: boolean
-    canGoForward: boolean
-    /** 当前缩放因子（autoFit 后主进程回推，BrowserPane 转发给 useBrowserZoom.setZoomFromRemote） */
-    zoomFactor: number
-  }) => void,
-): () => void {
+export function onBrowserState(callback: (state: BrowserFrameState) => void): () => void {
   // onBrowserState 在 preload 暴露（Wave 2 加）；类型经 declare global ElectronAPI 对齐。
   // 用可选链兜底旧 preload 未暴露的场景（mock/测试环境）。
   return (api as { onBrowserState?: (cb: typeof callback) => () => void })?.onBrowserState?.(callback) ?? (() => {})

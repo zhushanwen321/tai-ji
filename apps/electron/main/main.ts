@@ -16,7 +16,7 @@
  *    - TAIJI_AGENT_DATA_DIR = resolveDevDataDir(...)（受控采信：外部值仅当解析后
  *      位于 ~/.taiji-dev 树内才采信——装配器 per-worktree 实例目录；其余固定
  *      ~/.taiji-dev，2026-09-08 泄漏事故防线语义保留）
- *    - TAIJI_AGENT_PORT_OFFSET ?? DEV_PORT_OFFSET（无泄漏风险面，保持兜底语义）
+ *    - TAIJI_AGENT_PORT_OFFSET ?? DEV_PORT_OFFSET（无泄漏风险，保持兜底语义）
  *    - app.setPath('userData', 隔离目录)  ← 防 Chromium LevelDB LOCK 竞争
  *
  * 3. local-file:// 协议路径白名单 = computeLocalFilePrefixes 纯函数
@@ -63,9 +63,9 @@ import path from 'node:path'
 import { existsSync, mkdirSync, readdirSync, renameSync, rmSync, unlinkSync, writeFileSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { app, protocol, net, BrowserWindow } from 'electron'
-import { DEV_PORT_OFFSET } from '@taiji/shared'
+import { DEV_PORT_OFFSET, BROWSER_STATE } from '@taiji/shared'
 import type { CrashJournalWriter, LaunchResult } from '@taiji/shared'
-import { RUN_CHECKPOINT_FAILED_PREFIX, RUN_CHECKPOINT_FAILED_RETENTION, getRunStatePaths, getDataDir } from '@taiji/shared/paths'
+import { RUN_CHECKPOINT_FAILED_PREFIX, RUN_CHECKPOINT_FAILED_RETENTION, getRunStatePaths, getDataDir, DATA_DIR_ROOT_NAMES } from '@taiji/shared/paths'
 import { createMainContext } from './context.js'
 import type { MainContext } from './interfaces.js'
 import { RuntimeSupervisor } from './supervisor/runtime-supervisor.js'
@@ -169,7 +169,7 @@ const isDev = !app.isPackaged
 // ~/.taiji / 任意树外路径）一律固定回 ~/.taiji-dev，防宿主环境泄漏使 dev 读到
 // prod 数据。解析序（e2e 豁免 → 树内采信 → 固定）与 [HISTORICAL] 事故背景见
 // utils/dev-data-dir.ts。
-// PORT_OFFSET 无数据泄漏风险面，刻意保留 `??` 外部覆盖语义（不动）。
+// PORT_OFFSET 无数据泄漏风险，刻意保留 `??` 外部覆盖语义（不动）。
 if (isDev) {
   process.env.TAIJI_AGENT_DATA_DIR = resolveDevDataDir(process.env, homedir())
   process.env.TAIJI_AGENT_PORT_OFFSET = process.env.TAIJI_AGENT_PORT_OFFSET ?? String(DEV_PORT_OFFSET)
@@ -177,7 +177,7 @@ if (isDev) {
   // 从 TAIJI_AGENT_DATA_DIR 派生（而非硬编码 .taiji-dev）：多 worktree 并行 dev 时
   // 各实例用独立数据目录，userData 隔离随之成立——否则单实例锁互斥导致第二个 dev
   // 实例静默退出（subagent-drawer-blank 设计 §8.2 验收场景实测发现）。
-  app.setPath('userData', path.join(process.env.TAIJI_AGENT_DATA_DIR ?? path.join(homedir(), '.taiji-dev'), 'electron'))
+  app.setPath('userData', path.join(process.env.TAIJI_AGENT_DATA_DIR ?? path.join(homedir(), DATA_DIR_ROOT_NAMES.dev), 'electron'))
 } else {
   // 打包态：数据目录固定 ~/.taiji（外部注入值仅当 resolve 后位于 ~/.taiji 树内才
   // 采信——与 dev 侧 resolveDevDataDir 树检查镜像对称，防宿主 shell 残留的 dev 值
@@ -223,7 +223,7 @@ if (!gotSingleInstanceLock) {
 // 常量必须在下方启动块求值之前初始化（模块级 const 无提升）；落点 `<dataDir>/run/`，
 // run 目录文件名族 SSOT = @taiji/shared/paths RUN_* 常量族（【oe-audit C8】：原
 // 此处与 runtime-checkpoint.ts / export-diagnostic-bundle.ts 三处手抄字面量收敛为单点，
-// 「双胞胎显式对齐」的漂移面构造性消失）。
+// 「双胞胎显式对齐」的漂移风险构造性消失）。
 /** 本进程是否已为陈旧 checkpoint 记过 reattach-skipped（D3：重复失败不重复记事件）。 */
 let staleCheckpointReported = false
 
@@ -272,7 +272,7 @@ let launchResultCache: LaunchResult | null = null
 const browserViewManager = new BrowserViewManager(windows, (sid, state) => {
   const win = ctx.mainWindow
   if (win && !win.isDestroyed()) {
-    win.webContents.send('browser:state', { sessionId: sid, ...state })
+    win.webContents.send(BROWSER_STATE, { sessionId: sid, ...state })
   }
 })
 
@@ -390,7 +390,7 @@ app.whenReady().then(async () => {
     }, getSessionTmpEncodeCwdDirs())
     if (!probe.servable) {
       // 可读错误文档（§11 检查点 3）：父页面 opaque origin 读不到状态码，错误文档是
-      // 用户在 iframe 内唯一的可见信号；消息不回显路径（无反射注入面）
+      // 用户在 iframe 内唯一的可见信号；消息不回显路径（无反射注入风险）
       return buildLocalFileErrorResponse(probe.reason ?? 'not_found')
     }
     try {
@@ -400,7 +400,7 @@ app.whenReady().then(async () => {
       return decorateLocalFileResponse(response, probe.resolvedPath)
     } catch (err) {
       // 预检后文件被删 / 读取失败的残余窗口：降级为可读 404 文档。错误文档本身不回显路径
-      // （无反射注入面），诊断细分（errno + 路径）由 main 日志承载（§6.4 D4 子决策③）
+      // （无反射注入风险），诊断细分（errno + 路径）由 main 日志承载（§6.4 D4 子决策③）
       mainLogger.warn(`[main] local-file fetch failed (${probe.resolvedPath}): ${errorText(err)}`)
       return buildLocalFileErrorResponse('not_found')
     }
