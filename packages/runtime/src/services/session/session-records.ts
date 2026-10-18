@@ -108,7 +108,7 @@ import type { SessionRegisteredSource } from './session-state-projection.js'
  * - 失效自愈：游标指向的 entry 不在 pi 当前集合（"Entry not found"，session 文件被外部
  *   改写 / pi 重启）→ 丢 cursor 全量重拉重建（纯派生缓存可随时丢弃，正确性优先）。
  *
- * 数据写路径唯一 = 事件投影重算（[W1 / D6] entry 扫描与 事件 fold 在投影内
+ * 数据写路径唯一 = 事件派生视图重算（[W1 / D6] entry 扫描与 事件 fold 在投影内
  * 单点合并；派生 Map 是投影合并快照的镜像——syncCacheFromProjection）；发布经
  * messageBus stateSnapshot（'subagents' / 'workflows' typeKey，W12 语义延续）。
  *
@@ -157,7 +157,7 @@ export interface RecordEntriesCache {
   /** [reload-closeout D2] 送达水位：已发布 planState view（null = 从未发布过）。 */
   publishedPlanState: PlanStateView | null
   /**
-   * [W1 / D6] 事件投影（读请求唯一数据源）：entry 游标 + 事件 tail 双源
+   * [W1 / D6] 事件派生视图（读请求唯一数据源）：entry 游标 + 事件 tail 双源
    * 单点合并。惰性创建（首个失效拉取 / 读 RPC / 对账触达时）；销毁随 cache。
    */
   projection: SessionEventProjection | null
@@ -178,7 +178,7 @@ export interface RecordEntriesCache {
  * 中 trace 逐步落盘，若只比 status/reason（恒 running），GUI 详情的 agentCalls 整个 run
  * 期间收不到任何 reload 触发）。
  *
- * [W1 / D6] W0 的 settledSteps 终态计数维度退役，换步骤状态全序列：事件投影变更
+ * [W1 / D6] W0 的 settledSteps 终态计数维度退役，换步骤状态全序列：事件派生视图变更
  * （record 转态 / run 事件边沿）驱动信号后，「steps 不变但步骤行 running↔终态翻转」
  * 由 stepStatuses 序列差异承载（状态向量覆盖原终态计数的全部检测面且更精确——计数
  * 对同 run 两步骤互换状态盲，状态序列不盲）。结构补全（phase/agent 补齐、状态不变）
@@ -209,7 +209,7 @@ type EntriesSinceResult = { data?: { entries?: unknown[]; leafId?: string | null
  * reconcile-timer = 15s 定时对账腿。
  */
 type RecordRefreshTrigger = 'invalidate' | 'reconcile-settled' | 'reconcile-timer'
-/** 发布归因词表（可观测行 trigger 字段）：entry 批腿透传 refresh trigger，事件投影腿恒 'event-projection'。 */
+/** 发布归因词表（可观测行 trigger 字段）：entry 批腿透传 refresh trigger，事件派生视图腿恒 'event-projection'。 */
 type RecordPublishSource = RecordRefreshTrigger | 'event-projection'
 
 /**
@@ -451,7 +451,7 @@ export class SessionRecords {
     private readonly injector: SkillInjector = new SkillInjector(new LateBoundSkillSource()),
   ) {
     // [event-push-channel] journal 事件推送消费方注册：event-adapter marker 旁路经
-    // journal-report-router 送达本服务 → per-session 事件投影（applyJournalReport）。
+    // journal-report-router 送达本服务 → per-session 事件派生视图（applyJournalReport）。
     // 进程级单 sink（runtime 单 SessionRecords 实例；后注册覆盖先注册对齐 inflight 出口先例）。
     setJournalReportSink({
       applyJournalReport: (sessionId, report) => this.applyJournalReport(sessionId, report),
@@ -599,7 +599,7 @@ export class SessionRecords {
   }
 
   /**
-   * [W1 / D6] 取/建 per-session 事件投影（读请求唯一数据源；惰性创建）。
+   * [W1 / D6] 取/建 per-session 事件派生视图（读请求唯一数据源；惰性创建）。
    *
    * 冷启动协议（设计 D6「冷启动 = 从头流式读一次，此后全增量」）：
    * 1. entry 源就位——scanRecordFamilyEntriesFromSessionFile 流式扫描会话文件
@@ -676,13 +676,13 @@ export class SessionRecords {
 
   /**
    * [event-push-channel] journal 事件推送喂入（event-adapter marker 旁路 →
-   * journal-report-router → 本方法）：报告送达该 session 的事件投影（同步应用 =
+   * journal-report-router → 本方法）：报告送达该 session 的事件派生视图（同步应用 =
    * 域校验 + seq 缺口判定 + 缺口补读 + fold）→ 派生缓存同步 → 水位发布。
    *
    * 投影未就绪（缓存/投影未建）→ **就地建投影后应用**（D3 顺带发现 5 修复——原形态
    * 丢报等待投影创建时的冷读收敛，收敛点全在轮边界，轮内实时事件（round-started 等）
    * 全程到不了订阅方，托盘「进行中」计数停留旧态）。会话 meta 不可得（pi 延迟写入）
-   * 时 ensureProjection 落 entry-only 降级投影，报告应用失败仍返回 false（不回 ack，
+   * 时 ensureProjection 落 entry-only 降级派生视图，报告应用失败仍返回 false（不回 ack，
    * 行为与原形态一致）。同步应用（fold 与补读均为同步文件读）= 生效回执（D7）的前提。
    */
   private applyJournalReport(sessionId: string, report: SubagentJournalReport): boolean {
@@ -946,7 +946,7 @@ export class SessionRecords {
     }
 
     // [可观测性 2026-10-02] 发布观测：水位门后有帧才落一行（稳态零帧零日志）。
-    // trigger = 发布归因；elapsedMs = entry 轮耗时（事件投影腿缺省）；
+    // trigger = 发布归因；elapsedMs = entry 轮耗时（事件派生视图腿缺省）；
     // workflowFolds = workflowUpdate 信号涉及 run 的 fold 证据（缺席/停帧在观测面
     // 直接分形，空窗类事故一步定位）。
     if (frames.length > 0) {
@@ -1508,7 +1508,7 @@ export class SessionRecords {
     const cache = this.recordEntriesCaches.get(sessionId)
     if (cache) {
       if (cache.debounceTimer !== null) clearTimeout(cache.debounceTimer)
-      // [W1 / D6] 事件投影随 cache 同批销毁（停两域 tailer 的 watcher 与周期复查）
+      // [W1 / D6] 事件派生视图随 cache 同批销毁（停两域 tailer 的 watcher 与周期复查）
       cache.projection?.dispose()
       this.recordEntriesCaches.delete(sessionId)
     }
@@ -1518,7 +1518,7 @@ export class SessionRecords {
 // ── record 家族 merge helpers ──
 //
 // [W1 / D6] mergeSubagentRecords / mergeWorkflowRecords 已随读侧换源退役——数据写
-// 路径唯一化为 事件投影（applyEntryBatch → recompute → syncCacheFromProjection），
+// 路径唯一化为 事件派生视图（applyEntryBatch → recompute → syncCacheFromProjection），
 // 「同 id 后到覆盖」语义由投影源持有态承载；plan 家族的 merge helper 保留在下方。
 
 /**
@@ -1564,7 +1564,7 @@ function subagentsDifferFromPublished(current: Map<string, SubagentRecord>, publ
 /**
  * workflows 水位 diff：按差异 run 构造增量信号（新 run / status / reason / 步骤数 /
  * stepStatuses（status@attempts 全序列）/[W1 / D6] 步骤状态 / [可视化 U3]
- * phasesFingerprint 任一变化一条——事件投影驱动的转态在 steps 不变时由
+ * phasesFingerprint 任一变化一条——事件派生视图驱动的转态在 steps 不变时由
  * stepStatuses 序列承载信号；纯脚本 phase 转态与重试边沿由 phasesFingerprint /
  * stepStatuses 的 attempts 段承载）。run 消失（fullRebuild 后全集不再含该 run）不构造信号
  * ——信号面无删除形态，硬造旧状态帧只会发 stale 信息；消费端由下次真实变化或冷拉收敛。

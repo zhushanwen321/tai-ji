@@ -200,7 +200,7 @@
  * command('session.abortPlan') → runtime ensureActive + client.prompt('/plan abort')；
  * 退出唯一入口 = 本按钮（原 degraded 右区退出按钮已删，问题 5 去重）。
  * reply 失败 = promise reject → E9 恢复指引就近呈现、状态带保持原状；成功后 isActive=false
- * 由投影链广播驱动（本组件不本地改状态）。
+ * 由派生视图链广播驱动（本组件不本地改状态）。
  */
 import { computed, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
@@ -294,7 +294,7 @@ async function onExit(): Promise<void> {
   exiting.value = true
   exitError.value = null
   try {
-    // reply 契约（protocol.ts session.abortPlan）：ack void，退出结果经投影链广播推回；
+    // reply 契约（protocol.ts session.abortPlan）：ack void，退出结果经派生视图链广播推回；
     // 失败 = error envelope → promise reject（AGENTS.md 规则 5 的 renderer 实态）
     await command('session.abortPlan', { sessionId: sid }, RPC_BACKSTOP_TIMEOUT_MS)
   } catch (e) {

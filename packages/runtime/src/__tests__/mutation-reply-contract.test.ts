@@ -505,7 +505,7 @@ const MUTATION_RPC_REGISTRY: readonly MutationRegistryEntry[] = [
     type: 'session.abortPlan',
     branch: 'non-mutation',
     contract: 'excluded',
-    rationale: '动作类（终止运行中的 plan 审批流，非配置状态改值）：reply void ack，plan 状态经 session.planState 广播推回（投影链唯一承载，abort 前后无 mutation 生效值概念）',
+    rationale: '动作类（终止运行中的 plan 审批流，非配置状态改值）：reply void ack，plan 状态经 session.planState 广播推回（派生视图链唯一承载，abort 前后无 mutation 生效值概念）',
   },
   {
     type: 'session.forceQuit',

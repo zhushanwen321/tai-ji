@@ -48,7 +48,7 @@ function stubWarn(): ReturnType<typeof vi.spyOn> {
   return warnSpy
 }
 
-describe('isModelInRegistry — 注册表投影判定', () => {
+describe('isModelInRegistry — 注册表派生视图判定', () => {
   it('configService 未注入（null）→ true（fail-open，落双因文案）', () => {
     expect(isModelInRegistry(null, 'p1', 'm1')).toBe(true)
   })

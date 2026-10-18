@@ -2,7 +2,7 @@
  * DrawerPanel 测试（W3 · p3-strangler-domains::drawer，AC9/AC12 冒烟载体）。
  *
  * 三视角：
- * - 使用者（黑盒）：mount DrawerPanel（isOpen:true）断言注册表投影的 8 个 L1 tab 按钮 + 展开态内容区
+ * - 使用者（黑盒）：mount DrawerPanel（isOpen:true）断言注册表派生视图的 8 个 L1 tab 按钮 + 展开态内容区
  *   在 DOM 中存在；点关闭按钮触发 close emit（父组件消费 → isOpen=false → 收起）
  * - 构建者（白盒）：无内容面板 slot → 空态占位（icon + emptyText/emptyHint）；
  *   内容面板 slot 注入替换（无 fallback 双渲染）
@@ -36,7 +36,7 @@ function baseProps<T extends object>(overrides: T = {} as T) {
 }
 
 describe('DrawerPanel (AC9/AC12 首屏冒烟)', () => {
-  it('展开态：注册表投影的 8 个 L1 tab 按钮（terminal 迁底抽屉、browser 走浮层）+ 展开态内容区 DOM 存在', () => {
+  it('展开态：注册表派生视图的 8 个 L1 tab 按钮（terminal 迁底抽屉、browser 走浮层）+ 展开态内容区 DOM 存在', () => {
     const wrapper = mount(DrawerPanel, { props: baseProps() })
     for (const key of ['git', 'doc', 'detail', 'subagent', 'workflow', 'bashTask', 'plan', 'btw']) {
       expect(wrapper.find(`[data-testid="drawer-tab-${key}"]`).exists()).toBe(true)

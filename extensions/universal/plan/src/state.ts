@@ -334,7 +334,7 @@ export function getPlanState(
 
 export function persistPlanState(pi: ExtensionAPI, state: PlanState): void {
   // customType 判别键 = canonical 常量 PLAN_STATE_CUSTOM_TYPE（extension-protocol 导出，
-  // 值冻结——改即历史会话全部失联，冻结锚测试见 legacy-entries.test.ts）；runtime 投影链
+  // 值冻结——改即历史会话全部失联，冻结锚测试见 legacy-entries.test.ts）；runtime 派生视图链
   // （plan-state-extractor / session-records）消费同一常量。
   // optional 字段（templateProvided / selfReview / resumeHint / lastSubmitReviewDocsFingerprint）
   // 为 undefined 时 JSON 序列化自然消失，旧 entry 消费方对该字段惰性（D4 向后兼容）。

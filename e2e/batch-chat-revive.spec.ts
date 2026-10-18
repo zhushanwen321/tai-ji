@@ -338,7 +338,7 @@ test('CR (batch real): chat 轮 idle 薄壳退出（V5①）+ revive 冷续写�
 
     // ── V5④：历史完整（同 sessionFile 含两轮任务文本） ──
     const sessionFile = idle2!.sessionFile
-    expect(sessionFile, 'record 投影应携带 sessionFile 路径').toBeTruthy()
+    expect(sessionFile, 'record 派生视图应携带 sessionFile 路径').toBeTruthy()
     const sessionText = fs.readFileSync(sessionFile!, 'utf8')
     const hasRound1 = sessionText.includes('WL-CHAT-7777')
     const hasRevive = sessionText.includes('WL-CHAT-7778')

@@ -36,7 +36,7 @@ export type RunDoneReason = "completed" | "failed" | "aborted" | "budget_limited
  *
  * [D2] 词表变更登记（现行四值与重构前四值的差异，逐条显式登记）：
  * 1. **completed → done 改名**：与 shared `WorkflowRunStatus` 终局值 'done' 统一
- *    字面量——status 域与 outcome 域的成功/终局值同词，投影链无需两套叫法；
+ *    字面量——status 域与 outcome 域的成功/终局值同词，派生视图链无需两套叫法；
  * 2. **interrupted 移出 outcome（入 lifecycle 暂停态）**：「终局了却又没死透」的
  *    概念矛盾消除——中断 = run-interrupted 转移事件（running/settling →
  *    interrupted），可经 run-resumed 复活，非终局；

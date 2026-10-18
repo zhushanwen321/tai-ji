@@ -299,7 +299,7 @@ describe('ws-client 不变量 ③ close code 分流', () => {
     latestFake().triggerOpen()
     expect(goingAwayCount).toBe(0)
 
-    // 事件投影与真实 CloseEvent 对齐（P6 探针实测 {code:1001, reason, wasClean:true}）
+    // 合成事件与真实 CloseEvent 对齐（P6 探针实测 {code:1001, reason, wasClean:true}）
     latestFake().triggerClose({ code: 1001, reason: 'Server shutting down', wasClean: true })
     expect(goingAwayCount).toBe(1)
     // 文案信号不改重连机制：disconnected → 退避（1s）重连照走

@@ -421,7 +421,7 @@ export interface TerminalInstanceSummary {
  * 三腿回收的**唯一**判据（平行守卫只按 code 分档）——同码会把「仍在注册表内、进程仍活」的实例
  * 误判为幽灵并回收（条目消失、输出此后无人接收而进程继续跑）：
  * - `unknown_terminal_id`：对不存在实例的操作（write/resize/kill/attach 及 spawn 指定形态）——
- *   即「该 terminalId 不在 runtime 注册表」的否定回执，renderer 据此执行关闭沿三腿清理；
+ *   即「该 terminalId 不在 runtime 注册表」的否定回执，renderer 据此执行关闭沿三路径清理；
  * - `terminal_id_session_mismatch`：terminalId 的会话段与请求 sessionId 不一致（交叉校验拒绝）——
  *   走普通错误通道，**不触发回收**（实例仍活）；
  * - `terminal_id_required`：编号缺失（既有实例操作帧 write/resize/kill/attach）**或编号类型非法**
@@ -645,7 +645,7 @@ export interface ClientMessageMap {
   // plan 模式（plan 模式重设计 D1-⑥/D5）：getPlanState 状态首拉，reply 复用 session.planState
   // 广播 payload（同 session.getSubagents → session.subagents 复用形态）；abortPlan 为 PlanModeBar
   // 退出命令（确认 Popover 后），
-  // reply ack——退出结果经投影链 session.planState 广播推回，失败走 error envelope（E9）。
+  // reply ack——退出结果经派生视图链 session.planState 广播推回，失败走 error envelope（E9）。
   'session.getPlanState': { sessionId: string }
   'session.abortPlan': { sessionId: string }
   // [U7] 子代理引擎配置读写（payload：set 带 engineId；get 无参）
@@ -1160,7 +1160,7 @@ export type ServerMessageType =
   // 拉取 RPC 的 reply type（与 request 同名——session.subscribe / delivery.* 同款 payload
   // 消费型同名模式；payload 见 ServerMessageMapBase 对应条目）。
   | 'session.getSubagentStreamState'
-  // plan 模式状态投影广播（plan 模式重设计 D1）：stateSnapshot 'plan' typeKey 的 live 载体帧
+  // plan 模式状态派生视图广播（plan 模式重设计 D1）：stateSnapshot 'plan' typeKey 的 live 载体帧
   //（last-value 语义——重连/切回经 stateSnapshot 回放自动恢复）；冷启动/切换首拉走
   // session.getPlanState RPC，reply 复用本 payload。
   | 'session.planState'
@@ -2027,7 +2027,7 @@ export interface PlanDocMeta {
 }
 
 /**
- * plan 模式状态视图——session JSONL 内最后一条 plan-state entry 的派生投影（D1）。
+ * plan 模式状态视图——session JSONL 内最后一条 plan-state entry 的派生视图（D1）。
  *
  * 生命周期状态 `state`（plan 状态机显式化 D1/D2）：类型**直接引用 extension-protocol 的
  * `PlanLifecycleState`**（零依赖纯模块 type-only 引入，零运行时面；「本地同形」惯例在此不适用，
@@ -2247,7 +2247,7 @@ export interface ServerMessageMapBase {
     scheduleDraft?: unknown  // ScheduleDraft（@zhushanwen/extension-protocol），前端守卫收窄
     // planReview 审批扩展（仅 dialogKind='select' + planReview=true 时存在；plan 模式重设计 D5：
     // PLAN_REVIEW_MARKER select 通道，前端 C4 分流给 PlanReviewBar 不落 CompanionBand）。
-    // 审批条文档清单由 usePlanState 投影链（session.planState）承载，本帧不携带 docs。
+    // 审批条文档清单由 usePlanState 派生视图链（session.planState）承载，本帧不携带 docs。
     planReview?: boolean
     // 统一提问表单扩展（仅 dialogKind='select' + form=true 时存在；ui-presentation-protocol D1：
     // UI_FORM_MARKER select 通道，前端 C4 分流给 FormOverlay 渲染类型化问题集）。
@@ -2326,8 +2326,8 @@ export interface ServerMessageMapBase {
   //   消费方（store）拿 false 保留既有分区不覆盖、true 的空列表是真实空（直接覆盖）；缺省
   //   true（广播帧不带 = 权威数据帧 / mock / 旧 runtime）。
   'session.subagents': { sessionId: string; subagents: SubagentRecord[]; oversize?: boolean; found?: boolean }
-  // session.planState：plan 模式状态投影（runtime 读 session JSONL 最后一条 plan-state entry
-  // 派生，冷热两路径共用同一份派生代码）。live 腿 = 投影链 stateSnapshot('plan') 广播；
+  // session.planState：plan 模式状态派生视图（runtime 读 session JSONL 最后一条 plan-state entry
+  // 派生，冷热两路径共用同一份派生代码）。live 腿 = 派生视图链 stateSnapshot('plan') 广播；
   // 冷腿 = session.getPlanState RPC reply 复用本 payload。docs 缺省 = 旧 schema entry（D4 降级）。
   'session.planState': { sessionId: string; planState: PlanStateView }
   // session.subagentHistory：subagent 对话流消息（runtime 直读 subagent JSONL，复用 convertPiHistory）。
@@ -3333,7 +3333,7 @@ export interface ReplyPayloadMap {
   // session.forceQuit：强杀 pi 进程并走 stopped 收敛（终态经 session.exited 广播推回），reply message.status ack。
   'session.forceQuit': void       // reply message.status
   // session.abortPlan：PlanModeBar 退出（确认 Popover 后）→ runtime 转发 '/plan abort'（E10 挂起 select 联动在 extension 侧），
-  // reply message.status ack——退出后的状态变化经投影链 session.planState 广播推回（isActive=false），
+  // reply message.status ack——退出后的状态变化经派生视图链 session.planState 广播推回（isActive=false），
   // 前端 register<void> 不读 reply payload（session.forceQuit 同构形态）。失败走 error envelope（E9）。
   'session.abortPlan': void       // reply message.status
   // session.subscribe（runtime-message-bus wave:protocol-seq）：订阅某 session 的 live 事件流。

@@ -1,5 +1,5 @@
 /**
- * zcode 会话语义闭集写死锚（消息投影对齐设计 §6-D5，先例形态 =
+ * zcode 会话语义闭集写死锚（消息派生视图对齐设计 §6-D5，先例形态 =
  * host-db-suffix-parity.test.ts 的「SSOT 改错即红」）。
  * 来源注记：自 runtime test/zcode-semantics-parity.test.ts dev 演进版整文件移植
  * （用例零改动，git 可追溯）——SSOT 随实现迁入本包，锚随 SSOT 同址。

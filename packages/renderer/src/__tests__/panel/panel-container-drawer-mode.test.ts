@@ -204,7 +204,7 @@ beforeEach(() => {
 enableAutoUnmount(afterEach)
 
 describe('drawer-tab 注册表契约（L1 全量收敛点，display-containers §7.2）', () => {
-  it('drawer 打开态渲染注册表投影的全部 L1 tab（8 条终态，terminal/browser 均不在）+ 注册表形状 右 8/底 1/浮 2', async () => {
+  it('drawer 打开态渲染注册表派生视图的全部 L1 tab（8 条终态，terminal/browser 均不在）+ 注册表形状 右 8/底 1/浮 2', async () => {
     const panel = usePanelStore()
     panel.loadSession(ROOT_PANEL_ID, 's-tab-registry')
     openDrawerTab('git')

@@ -1,5 +1,5 @@
 /**
- * 事件投影（event-push-channel：runtime 读侧实时性载体 = journal 写入方推送，
+ * 事件派生视图（event-push-channel：runtime 读侧实时性载体 = journal 写入方推送，
  * 文件只做恢复读——ADR-0112「活状态走订阅推送、存储只做恢复源」）。
  *
  * 双源单点合并（设计 w1-run-record-journal-authority §3.1 环节 B / §3.3 D6）：
@@ -531,12 +531,12 @@ export interface SessionEventProjectionOptions { // oe-exempt:20260929:framework
 }
 
 /**
- * 每会话 事件投影：entry 源（applyEntryBatch）与 事件源（推送喂入 + 冷读）双源
+ * 每会话 事件派生视图：entry 源（applyEntryBatch）与 事件源（推送喂入 + 冷读）双源
  * 喂入，单点合并成 subagents/workflows 快照。
  *
  * 冷启动协议：构造后调用方先 applyEntryBatch（会话文件流式扫描或 get_entries
  * 全量）再 attach()（全目录冷读）——两源幂等，次序不敏感。事件源目录缺席
- * （会话 meta 不可得，如 pi 延迟写入窗口）→ 无事件源的 entry-only 降级投影，
+ * （会话 meta 不可得，如 pi 延迟写入窗口）→ 无事件源的 entry-only 降级派生视图，
  * 行为退化为 entry 通道单源。
  *
  * 推送喂入（applyJournalReport）的水位与去重（设计 §3.3）：per 文件持两个水位
@@ -621,7 +621,7 @@ export class SessionEventProjection {
 
   /**
    * [降级闩死修复 2026-10-02] 迟到事件源补接线（幂等，disposed 安全）：meta 缺席时
-   * 建出的 entry-only 降级投影，meta 可得后由升级腿补目录并重跑 attach 冷读（seq
+   * 建出的 entry-only 降级派生视图，meta 可得后由升级腿补目录并重跑 attach 冷读（seq
    * 守卫去重，entry 批与 fold 状态原位保留）；已接线 = 零成本早退。
    */
   attachEventSources(dirs: { recordsDir?: string; runJournalDir?: string }): void {

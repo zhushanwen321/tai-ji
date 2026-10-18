@@ -21,7 +21,7 @@ import type { PlanLifecycleState } from './state-machine'
 
 /**
  * plan-state entry 的 customType（pi appendEntry custom entry 判别键）。磁盘形态冻结：
- * 扩展写读两侧（persistPlanState / isPlanStateEntry）与 runtime 投影链（plan-state-extractor /
+ * 扩展写读两侧（persistPlanState / isPlanStateEntry）与 runtime 派生视图链（plan-state-extractor /
  * session-records）均消费本常量，值同源——改值即历史会话全部失联，禁改（冻结锚测试见
  * 本目录 legacy-entries.test.ts）。
  */

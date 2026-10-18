@@ -9,7 +9,7 @@
  * 字段。本测试证明「已入字段变化 → 签名变」+「静态 run 不变」（完备性无法靠
  * 测试证明，字段核对表见 WorkflowsView.ts computeRenderSignature doc）。
  *
- * [H2 W3] live 数据源切换：签名第 2 参从 node.live 直读改为 store record 投影
+ * [H2 W3] live 数据源切换：签名第 2 参从 node.live 直读改为 store record 派生视图
  * （Map<stepIndex, LiveProgressView>，经 collectNodeLiveProgress 配对注入）——
  * 字段口径不变（totalTokens/toolCallCount/elapsedSeconds/turns/eventLog.length/
  * currentActivity/lastError），本文件用 makeLiveView 直接构造投影驱动「已入字段
@@ -207,7 +207,7 @@ describe("computeRenderSignature — run 级字段", () => {
   });
 });
 
-describe("computeRenderSignature — 节点级字段（store record 投影）", () => {
+describe("computeRenderSignature — 节点级字段（store record 派生视图）", () => {
   it("节点 status 变化 → 签名变", () => {
     const a = makeRun({ nodes: [makeNode({ status: "running" })] });
     const b = makeRun({ nodes: [makeNode({ status: "failed" })] });

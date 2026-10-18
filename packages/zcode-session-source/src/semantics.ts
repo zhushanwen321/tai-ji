@@ -1,5 +1,5 @@
 /**
- * zcode 会话语义闭集 SSOT（消息投影对齐设计 §4.2 值域表 + §6-D5）。
+ * zcode 会话语义闭集 SSOT（消息派生视图对齐设计 §4.2 值域表 + §6-D5）。
  * 来源注记：自 runtime services/session/zcode-import dev 演进版移植（判定逻辑零改动，
  * git 可追溯），本包为现行唯一承载。
  *
@@ -94,7 +94,7 @@ export const PROJECTION_POLICIES = Object.freeze([
   'compactSummary',
 ] as const)
 
-/** 消息投影策略：PROJECTION_POLICIES 六策略 + unclassified 降级态（D4，不在闭集）。 */
+/** 消息派生视图策略：PROJECTION_POLICIES 六策略 + unclassified 降级态（D4，不在闭集）。 */
 export type ProjectionPolicy = (typeof PROJECTION_POLICIES)[number] | 'unclassified'
 
 export type SemanticsKind = (typeof SEMANTICS_KINDS)[number]

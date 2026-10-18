@@ -942,7 +942,7 @@ function tryTranslatePlanReviewSelect(
     requestId,
     dialogKind: 'select',          // taiji 对话框变体词表（respond 复用同形值回传）
     planReview: true,              // 标记 plan 审批富交互，前端据此路由到审批条（C4 过滤器）
-    // docs 不透传进帧：审批条文档清单由 usePlanState 投影链（session.planState）唯一承载
+    // docs 不透传进帧：审批条文档清单由 usePlanState 派生视图链（session.planState）唯一承载
     // selfReview 条件落键（D9③，plan 状态机显式化）：docs 不透传纪律保留，仅加这一个
     // 有界字段。截断在扩展写侧（canonical 上限与截断 = packages/extension-protocol/src/extensions/plan/review-contract.ts
     // 的 PLAN_SELF_REVIEW_MAX_BYTES / truncateSelfReview）——本透传层不截不拒（上限已在写侧

@@ -74,7 +74,7 @@ type _Assert_AbortPlan_union = AssertExtends<'session.abortPlan', ClientMessageT
 type _Assert_AbortPlan_map_key = AssertHasKey<ClientMessageMap, 'session.abortPlan'>
 type _Assert_AbortPlan_payload_exact = AssertExact<ClientMessageMap['session.abortPlan'], { sessionId: string }>
 type _Assert_AbortPlan_reply_key = AssertHasKey<ReplyPayloadMap, 'session.abortPlan'>
-// ack 型（状态变化经投影链广播推回，reply 仅确认命令受理——session.forceQuit 同构）
+// ack 型（状态变化经派生视图链广播推回，reply 仅确认命令受理——session.forceQuit 同构）
 type _Assert_AbortPlan_reply_void = AssertExact<ReplyPayloadMap['session.abortPlan'], void>
 
 // ── PlanStateView 字段契约：四必填 + 四 optional（optional 性 = 向后兼容契约）──

@@ -340,7 +340,7 @@ describe('clearIndependentTransient', () => {
 // 跨消息边界（推进重置 + 丢旧 buffer）/ 水位回放 / sealedMsgSeq 单调水位 /
 // 在途拉取 settle 即清（pullDedup factory，C-data-18）。分区状态经 _chunkPartitionsForTest
 // 只读断言、在途态经 _pullDedupForTest.has(key) 断言（行为断言为主，buffer / 在途槽
-// 无消息投影，状态读口是唯一观测点）。
+// 无消息派生视图，状态读口是唯一观测点）。
 
 /** chunk 状态机测试夹具：注入受控拉取执行器（deferred 手动 resolve/reject 控制时序） */
 function makeChunkMachine() {
@@ -359,7 +359,7 @@ function makeChunkMachine() {
   })
   const VID = subagentVirtualId('s1', 'bg-1')
   const RID = 'bg-1'
-  /** 分区状态只读断言口（buffer / sealedMsgSeq 无消息投影，唯一观测点） */
+  /** 分区状态只读断言口（buffer / sealedMsgSeq 无消息派生视图，唯一观测点） */
   const partition = () => sm._chunkPartitionsForTest.get(VID)!.get(RID)!
   /** (VID, RID) 在途拉取观测口（等价原分区 pullInFlight 字段：settle 即清由 factory 承接） */
   const pullInFlight = () => sm._pullDedupForTest.has(`${VID}::${RID}`)

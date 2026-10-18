@@ -1,5 +1,5 @@
 /**
- * workflow record 投影族（自 events-projection 拆出——subagent 域与 workflow 域
+ * workflow record 派生视图族（自 events-projection 拆出——subagent 域与 workflow 域
  * 是两个变化原因，投影判定各自独立演进；合并仲裁与 sources 持有态留主文件）。
  */
 import type {
@@ -47,7 +47,7 @@ function isWorkflowDoneReason(value: string): value is NonNullable<WorkflowRunRe
  * - fold 在场：runSettled 终帧 → done；状态机停 interrupted 暂停态
  *   （run-interrupted 帧在盘、无终局）→ interrupted（GUI 显示「已中断
  *   （可续跑）」）；其余 → running；
- * - fold 缺席（entry-only 降级投影：runJournalDir 缺席或 record 流被外部
+ * - fold 缺席（entry-only 降级派生视图：runJournalDir 缺席或 record 流被外部
  *   清理，条目是唯一来源）：settledEntry 三态自描述（schema 契约见 core
  *   workflow-record-entry），中断 run 不得回落显示「运行中」。
  */
@@ -216,7 +216,7 @@ export function projectV2Workflow(
     agentCalls: fold !== undefined ? projectAskStepsToAgentCalls(fold) : [],
     ...settlement,
     // [可视化 U3，设计 §3.1-4] phases 折叠透出（last-wins 单行快照，消费位 = block
-    // chips）+ run args 摘要（fold created 行透传）。fold 缺席（entry-only 降级投影）
+    // chips）+ run args 摘要（fold created 行透传）。fold 缺席（entry-only 降级派生视图）
     // 或无 phases 行不造键——缺省语义 = 旧投影无此字段。
     ...(fold !== undefined && fold.phases.size > 0 ? { phases: projectPhaseFolds(fold.phases) } : {}),
     ...(fold?.created?.argsSummary !== undefined ? { argsSummary: fold.created.argsSummary } : {}),

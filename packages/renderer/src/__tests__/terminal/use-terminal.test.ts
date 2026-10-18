@@ -246,7 +246,7 @@ describe('帧路由与实例隔离（按 terminalId 过滤）', () => {
 })
 
 describe('关闭沿与焦点落位', () => {
-  it('CL-1: closeInstance → kill RPC + 三腿清理 + active 落当前实例右邻（无右取左）', async () => {
+  it('CL-1: closeInstance → kill RPC + 三路径清理 + active 落当前实例右邻（无右取左）', async () => {
     terminalApiMock.spawn.mockResolvedValueOnce({ terminalId: T1 }).mockResolvedValueOnce({ terminalId: T2 })
     const { wrapper, terminal } = host('s1')
     await terminal.spawnTerminal('/tmp', 80, 24)
@@ -330,7 +330,7 @@ describe('自动新建腿同会话互斥（dmg-r1-3）', () => {
 })
 
 describe('terminal.list 对账', () => {
-  it('RC-1: 清单外条目按关闭沿三腿清理（含幽灵条目）', async () => {
+  it('RC-1: 清单外条目按关闭沿三路径清理（含幽灵条目）', async () => {
     terminalApiMock.spawn.mockResolvedValueOnce({ terminalId: T1 }).mockResolvedValueOnce({ terminalId: T2 })
     const { wrapper, terminal } = host('s1')
     await terminal.spawnTerminal('/tmp', 80, 24)

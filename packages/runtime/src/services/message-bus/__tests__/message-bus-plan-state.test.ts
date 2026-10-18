@@ -6,7 +6,7 @@
  * - STATE_TYPE_KEY_MAP：typeKey 'plan'（subscribe 的 stateSnapshot 含该帧）。
  *
  * 未入表的 fallback='stream' 永不写快照——若两表任一漏登记，本文件的
- * stateSnapshot/ring 断言即红（投影链六件套之一，静默失效面由测试显式锚定）。
+ * stateSnapshot/ring 断言即红（派生视图链六件套之一，静默失效面由测试显式锚定）。
  *
  * D9③ 投影面边界（plan 状态机显式化）：selfReview 消费面止于审批请求帧，**不投影进
  * session.planState 帧**（planState 帧有界前提不扩展）；state/resumeHint（D2 归一产物）

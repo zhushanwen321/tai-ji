@@ -1647,7 +1647,7 @@ export class RecordStore {
    * identity 定位两级：头部 64KB（首轮会话）→ 全文 fallback（续聊场景 identity
    * append 在尾部）；两级都找不到 → [身份换源] 事件流折叠（`foldOf(id)`，
    * id 经事件目录反查——见 fileToRecordId 字段注释）→ 两级皆空 → 写负缓存
-   * （防每轮全文重读）。[身份换源第二步] 旧 binding 兜底腿已退场（事件流是唯一
+   * （防每轮全文重读）。[身份换源第二步] 旧 binding 兜底路径已退场（事件流是唯一
    * 身份权威，无存量数据不留兼容读）。
    * 返回 null：文件消失/读失败/无 identity → 跳过。
    */
@@ -1668,7 +1668,7 @@ export class RecordStore {
     // [perf L-1] 磁盘索引查询（首扫惰性装载，miss/空索引时 get 恒 undefined = 无索引）。
     // 条目戳匹配 jsonl 当前 stat → 零内容读取构造缓存条目。undefined = 未命中
     // （落到下方探测），null = 负条目命中（零探测跳过）。
-    // [UF-1] 绑定 sidecar 存在的文件跳过索引投影：SessionsIndexEntry 不含
+    // [UF-1] 绑定 sidecar 存在的文件跳过索引派生视图：SessionsIndexEntry 不含
     // round（身份域子集），索引命中会把绑定承载的轮次域抹成 undefined。本 guard
     // 随绑定写点退场自然消失（写点仍在——run 应答回填 / settle 快照），读侧不消费
     // 载荷、只剩戳职责。
@@ -2001,7 +2001,7 @@ export class RecordStore {
   }
 
   /**
-   * [perf] 单 record 详情懒加载：内存 running record 投影全量；磁盘 record 全量重建
+   * [perf] 单 record 详情懒加载：内存 running record 派生视图全量；磁盘 record 全量重建
    * （reconstructFromFile）并套用同一 sidecar 状态矩阵。结果缓存在 FileCacheEntry.full，
    * stat 戳变化时随 light 一起失效。列表 collectRecords 返回 light（无 eventLog/
    * result/turns 等重数据），详情面板/工具 list 按需调本方法补齐。

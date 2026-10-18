@@ -505,7 +505,7 @@ describe("WorkflowsView tick 条件失效（200ms）", () => {
 });
 
 describe("WorkflowsView live 进度渲染（liveRecords 注入）", () => {
-  it("L1 agent 行 live 路径：tok/tools/elapsed 来自 store record 投影", () => {
+  it("L1 agent 行 live 路径：tok/tools/elapsed 来自 store record 派生视图", () => {
     const d = openDriver({
       liveRecords: () => [makeSub({ totalTokens: 1200, turns: 2 })],
     });

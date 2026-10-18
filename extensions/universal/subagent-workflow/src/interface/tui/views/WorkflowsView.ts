@@ -70,7 +70,7 @@ import {
 } from "./view-constants.ts";
 
 // L2 详情内容构建 + 滚动按键（纯函数）抽到 detail-content.ts（view 与其测试直接 import）。
-// [H2 W3] live 进度数据源 = store record 投影（LiveProgressView，替代 node.live）。
+// [H2 W3] live 进度数据源 = store record 派生视图（LiveProgressView，替代 node.live）。
 import {
   buildDetailContent,
   detailContentLength,
@@ -127,12 +127,12 @@ export interface ViewActions {
 // ── [H2 W3] live 数据源：store record 配对（设计 D2 进度源切换）─────────
 
 /**
- * 查询 + 配对：本 run 的 store records → running trace node 的 live 进度投影。
+ * 查询 + 配对：本 run 的 store records → running trace node 的 live 进度派生视图。
  *
  * **record ↔ trace node 对应关系（opts 标签映射 + 时间最近邻）**：
  *   - 候选 = 查询结果中 status==="running" 的 record（执行期 record 恒在内存源；
  *     archive 后的终态 record 从磁盘 light 重建，无 eventLog——但终态节点的渲染走
- *     node.result 终态摘要路径，不消费 record 投影）；
+ *     node.result 终态摘要路径，不消费 record 派生视图）；
  *   - 标签匹配 = `record.task === node.task`（record.task = opts.prompt，与
  *     node.task 同源——workflowCallToExecuteOptions 的 task 映射单点）；
  *   - 多候选（parallel 同 prompt）时取 startedAt 与 node.startedAt 差绝对值最小者
@@ -189,11 +189,11 @@ export function collectNodeLiveProgress(
  *
  * **字段核对表**（每字段 ↔ 渲染消费点 file:line，完备性唯一证据——测试只能证
  * 「已入字段变 → 签名变」，不能证无漏字段）。live 七字段经 collectNodeLiveProgress
- * 的 store record 投影（[H2 W3] 数据源从 node.live 切换，字段口径不变）：
+ * 的 store record 派生视图（[H2 W3] 数据源从 node.live 切换，字段口径不变）：
  *
  * | 签名字段 | 消费点 |
  * |---|---|
- * | displayStatusOf(run) 投影二值（[W2/V1 D1 第 6 行] 混合判源单点——v2 fold/注册表投影 ∨ v1 聚合读面）| WorkflowsView.ts renderHeader（statusDotStr+statusLabel 同串源）/ detail-content.ts statusLabel（statusDotStr 调用处）/ renderFooter |
+ * | displayStatusOf(run) 派生二值（[W2/V1 D1 第 6 行] 混合判源单点——v2 fold/注册表派生视图 ∨ v1 聚合读面）| WorkflowsView.ts renderHeader（statusDotStr+statusLabel 同串源）/ detail-content.ts statusLabel（statusDotStr 调用处）/ renderFooter |
  * | 秒桶 Math.floor(now/1000) | renderHeader formatElapsed（现算 elapsed）+ detail-content.ts（now 参与未完成节点 elapsed）|
  * | completed/total（节点 status 推导）| renderHeader |
  * | budget 量化值（tokens round-k + cost toFixed(4)=BUDGET_COST_DECIMALS，与 renderHeader budgetStr 同精度——第 3-4 位小数变化是可见变化）| renderHeader / saveTraceToFile |
@@ -891,7 +891,7 @@ function pushLevel1Header(
   }
 }
 
-/** L1 agent 行统计三元组：live 路径优先（运行中从 store record 投影读实时 token/tool + elapsed），
+/** L1 agent 行统计三元组：live 路径优先（运行中从 store record 派生视图读实时 token/tool + elapsed），
  *  终态回退 result 统计。 */
 function level1AgentCells(
   node: ExecutionTraceNode,

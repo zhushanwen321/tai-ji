@@ -6,7 +6,7 @@
 //   - entry 重建族（collectV2EntryPairs + v2PairToRecord ——登记 §3.3 后只剩当前版本
 //     通道：旧形态与未知版本结构性跳过，零幻影）；
 //   - 身份投影 identityFromFold（子文件无 identity entry 时的身份基底，id 入口见
-//     record-store.scanFile 的事件目录反查——事件流是唯一身份权威，binding 兜底腿
+//     record-store.scanFile 的事件目录反查——事件流是唯一身份权威，binding 兜底路径
 //     已随读侧换源退场，无存量数据不留兼容读）；
 //   - manifest 读投影（manifestToSubagent / mapManifestStatus）与写投影（terminal /
 //     batch / derived / legacyManifestStatusFields——session-reader 兼容契约的单点）；
@@ -300,7 +300,7 @@ function v2SettledOutcome(
  * 不承载 engine/sessionFile，回落组装见 v2EngineDomain）。
  *
  * 缺省纪律：v2 条目契约不承载的字段（patchFile / worktree / round / closedReason /
- * batchFinalized / 详情域）一律缺席——与 runtime 投影 projectV2Subagent 同口径，
+ * batchFinalized / 详情域）一律缺席——与 runtime 派生视图 projectV2Subagent 同口径，
  * 这些字段的权威源在 manifest 与子 session 文件。
  */
 export function v2PairToRecord(
@@ -594,7 +594,7 @@ export function baselineStatisticsFromFold(fold: RecordEventFoldState | undefine
 // ============================================================
 //
 // [身份换源第二步] 旧「三级优先级（fold > binding > manifest）参考实现」随 binding
-// 兜底腿一并退场：事件流已是身份权威，项目未上线无存量数据、不留兼容读——生产扫描
+// 兜底路径一并退场：事件流已是身份权威，项目未上线无存量数据、不留兼容读——生产扫描
 // 路径的身份基底 = identity entry → {@link identityFromFold}（record-store.scanFile），
 // binding 读侧零生产读路径（state-marker.ts 只剩读写原语与写面 merge）。
 

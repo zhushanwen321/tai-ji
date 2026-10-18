@@ -358,7 +358,7 @@ interface ActionResult {
 /**
  * enter（plan-mode-agent-enter U1）：agent 自动进入 plan 模式，无需用户确认。
  * plan 模式是只读子集（只读代码、产文档、不改源码），进入它不是危险操作，
- * 故不设确认闸门——进入事实由 GUI PlanModeBar 显形（投影链广播 isActive=true），
+ * 故不设确认闸门——进入事实由 GUI PlanModeBar 显形（派生视图链广播 isActive=true），
  * 用户随时可经 PlanModeBar 退出。进入核心复用 activatePlanMode（与 slash 命令同源）；
  * plan 模式提示词经 tool result content 直返（对本次调用的直接响应，同轮即见，
  * 不走对话流消息注入/steer 排队——slash 入口才经 sendMessage 注入）。已在 plan

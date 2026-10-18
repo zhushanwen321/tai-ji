@@ -7,7 +7,7 @@
  * - 订阅生命周期（subscribe / unsubscribe / unsubscribeAll / clearSession）逐事件
  *   info：6c3 类故障排障第一问「订阅建立时 stateSnapshot 里有没有 plan 帧」从此可检索；
  * - 投递失败（publish 完成写快照但无可送达的 live 连接）对 state 类落观测：
- *   GUI 投影五族（R11 域——state 类中投影链直接承载 GUI 状态的低频族，判据同
+ *   GUI 派生视图五族（R11 域——state 类中派生视图链直接承载 GUI 状态的低频族，判据同
  *   PROJECTION_STATE_TYPES 头注；非「有快照 key 的全部类型」——occupancy/context/
  *   widget 等同样有快照 key 但属高频族，走限频）逐条 info；其余 state 类
  *   （occupancy / context / widget 等高频族）按 (sessionId, type) 滑窗限频——逐条会
@@ -21,7 +21,7 @@
 import { logger } from '../../infra/logger.js'
 
 /**
- * GUI 状态投影五族白名单：state 类中「投影链直接承载 GUI 状态」的低频族（R11 域）。
+ * GUI 状态派生视图五族白名单：state 类中「派生视图链直接承载 GUI 状态」的低频族（R11 域）。
  * 这些类型的投递失败逐条落观测（状态迁移级频率，不构成噪声）；其余 state 类型走限频。
  */
 const PROJECTION_STATE_TYPES: ReadonlySet<string> = new Set([

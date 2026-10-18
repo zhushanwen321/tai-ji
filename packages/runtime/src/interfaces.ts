@@ -262,9 +262,9 @@ export interface ISessionService {
    */
   getWorkflows(sessionId: string): Promise<OversizeAwareResult<WorkflowRunRecord>>
   /**
-   * 获取 session 的 plan 模式状态投影（plan 模式重设计 D1⑥ 冷腿，session.getPlanState
+   * 获取 session 的 plan 模式状态派生视图（plan 模式重设计 D1⑥ 冷路径，session.getPlanState
    * RPC 后端）。纯磁盘读取（主 session JSONL 最后一条 plan-state entry → scanPlanStateEntries
-   * 派生，与 live 投影同一份派生代码），不依赖 pi 进程活跃；「从未进过 plan」形态归一
+   * 派生，与 live 路径同一份派生代码），不依赖 pi 进程活跃；「从未进过 plan」形态归一
    * 「未激活」缺省 View（reply 契约 planState 无 null 域）。
    */
   getPlanState(sessionId: string): Promise<PlanStateView>

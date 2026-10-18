@@ -1,5 +1,5 @@
 /**
- * zcode 消息投影分类器（消息投影对齐设计 §6-D1 / §7.2——ZCode app.asar 内
+ * zcode 消息派生视图分类器（消息派生视图对齐设计 §6-D1 / §7.2——ZCode app.asar 内
  * `getConversationMessageProjectionPolicy`（minified 标识 `Ss`）的逐条移植体）。
  * 来源注记：自 runtime services/session/zcode-import dev 演进版移植（判定逻辑零改动，
  * git 可追溯），本包为现行唯一承载。

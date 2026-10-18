@@ -123,7 +123,7 @@ export async function initRelayServer(opts: RelayServerOptions): Promise<void> {
   state = { server, registry, socketPath, isUnixSocket }
   console.log(`[relay] server listening at ${socketPath}`)
 
-  // 重启残留孤儿收割（§3.3-② 兜底腿；主腿是进程组传播）
+  // 重启残留孤儿收割（§3.3-② 兜底路径；主路径是进程组传播）
   void registry.sweepOrphanChildren().catch((e) => {
     console.warn('[relay] orphan sweep failed (non-fatal):', e)
   })

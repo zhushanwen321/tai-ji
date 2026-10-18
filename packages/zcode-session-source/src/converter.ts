@@ -6,8 +6,8 @@
  * 输入 = 单会话全量行集（message 按 sequence、part 按 (message.sequence, part.sequence)
  * 联合序，sqlite-access.getSessionTranscript）；输出 = canonical `Entry[]`（session-core
  * 严格 Entry 模型，parentId 顺序链完整）。三层映射：
- * ① 消息级投影分派——逐条消息先经 classifyMessage()（projection.ts，asar 移植体）判定
- *    六策略之一（或 unclassified），按消息投影对齐设计 §7.3 映射表落点（三类丢弃整条不产
+ * ① 消息派生视图分派——逐条消息先经 classifyMessage()（projection.ts，asar 移植体）判定
+ *    六策略之一（或 unclassified），按消息派生视图对齐设计 §7.3 映射表落点（三类丢弃整条不产
  *    entry + L1/L2 聚合降级，unclassified 丢弃 + 独立告警码）；② part 级映射——消息内部
  *    按 session-import-unified 设计 §3.4 权威映射表逐条实现：T1 header/session_info /
  *    T2 user / T3 assistant 按 step-finish 切段 / T3b 工具名映射 / T3c stopReason 映射 /
@@ -15,7 +15,7 @@
  *    D2 完整规格（三路关联判据 + 单条 compaction entry + firstKeptEntryId 三级锚悬空门 +
  *    1:N 最早联合序锚 + 孤儿二分），关联在发射前预扫描趟建立（compaction.ts）。
  *
- * 来源注记：消息投影分派 / 结构化降级（ImportDegradation 五码闭集）/ compaction D2 全规格 /
+ * 来源注记：消息派生视图分派 / 结构化降级（ImportDegradation 五码闭集）/ compaction D2 全规格 /
  * usage RT-5#1 缺省语义 / 时间戳 RT-5#8 不伪造 1970，均自 runtime zcode-import dev 演进版
  * 移植（git 可追溯）；dev 版内部的降级通道（孤儿/悬空/summary 不可用 → custom +
  * compaction_unlinked）随规格一并移植。

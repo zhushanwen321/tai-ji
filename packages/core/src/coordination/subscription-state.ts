@@ -447,7 +447,7 @@ export function updateLastSeenSeq(sessionId: string, seq: number): void {
  *
  * 背景：runtime 侧 ws onDisconnect → bus.unsubscribeAll(ws) 清空该连接全部订阅；而 core 侧
  * 幂等守卫（subscribed 标记 / useChat.streamSubscriptions）在重连后依然短路，导致订阅永不
- * 重建、session 级消息（含不可回放的 transient 类）永久丢失。W09 删除 broadcast 兜底腿后
+ * 重建、session 级消息（含不可回放的 transient 类）永久丢失。W09 删除 broadcast 兜底路径后
  * 此问题升级为 critical——publish 定向推送是唯一通道。
  *
  * 恢复语义（按条目状态分流）：

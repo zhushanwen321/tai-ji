@@ -2,7 +2,7 @@
   <!--
     审批条（plan 模式状态机显式化 D3/D4/D8/D9）。
     显示驱动公式（D4 单源，derivePlanReviewBarMode 承载）：ready ⇔ 挂起 planReview 请求
-    （runtime 注册表投影，唯一交互权威；presence 语义——ready 恒优先渲染）；revising ⇔
+    （runtime 注册表派生视图，唯一交互权威；presence 语义——ready 恒优先渲染）；revising ⇔
     state=revising；degraded ⇔ state=reviewing ∧ 无挂起 ∧ 稳定窗放行（组合持续 ≥2s 或
     冷拉真值豁免）；「已应答抑制窗」标记压制 degraded/revising；state=dispatching/approved
     不进审批条（执行方式表单是其唯一交互面）；其余不渲染。

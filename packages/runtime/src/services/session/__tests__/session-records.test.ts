@@ -41,7 +41,7 @@ vi.mock('../../../infra/pi/pi-paths.js', async (importOriginal) => {
 
 // [W1 / D6] 全文读路径 call-through spy（验收③「getWorkflows/getSubagents 不再调全文
 // 读路径」的代码断言载体）：行为保持真实实现（既有测试零影响），仅计数调用——
-// 正常体量会话走 事件投影不触达；oversize 分流（旧格式兼容路径）触达。
+// 正常体量会话走 事件派生视图不触达；oversize 分流（旧格式兼容路径）触达。
 vi.mock('../subagent-extractor.js', async (importOriginal) => {
   const actual = await importOriginal<typeof import('../subagent-extractor.js')>()
   return {
@@ -1229,7 +1229,7 @@ describe('plan-state 投影（D1③④）', () => {
   })
 })
 
-// ── [W1 / D6] 事件投影读侧换源 ────────────────────────────
+// ── [W1 / D6] 事件派生视图读侧换源 ────────────────────────────
 //
 // 验收对照：① 磁盘 v2 会话 entry-only 降级读投影（无 事件源时 getSubagents/
 // getWorkflows 经投影直接读 v2 注册/终态条目）；② v2 会话读投影（事件源胜出仲裁
@@ -1373,7 +1373,7 @@ describe('[W1] 读侧换源：磁盘 entry-only 投影 / v2 读投影 / 全文�
       const workflows = await records.getWorkflows('s1')
       expect(workflows.records).toHaveLength(1)
       expect(workflows.records[0]).toMatchObject({ runId: 'wf-1', status: 'running', scriptName: 'test-flow' })
-      // 步骤视图合并（W0 输入换源）：record 投影 overlay 到 事件 fold 骨架行
+      // 步骤视图合并（W0 输入换源）：record 派生视图 overlay 到 事件 fold 骨架行
       expect(workflows.records[0]!.agentCalls[0]).toMatchObject({ status: 'running', sessionId: 'sa-1' })
       // 验收③：正常体量会话零调用全文读路径
       expect(extractSubagentsMock).not.toHaveBeenCalled()

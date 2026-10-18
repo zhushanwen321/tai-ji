@@ -1,5 +1,5 @@
 /**
- * 事件投影直测（W1 [D6] runtime 读侧换源）：双源单点合并仲裁（事件源胜出 /
+ * 事件派生视图直测（W1 [D6] runtime 读侧换源）：双源单点合并仲裁（事件源胜出 /
  * 窗外条目兜底 / v1 冻结定界）+ 会话文件流式扫描（冷启动 entry 源）+ 有状态投影
  * （tail 目录 watcher 冷启动/增量/dispose）。
  *
@@ -958,7 +958,7 @@ describe('projectV2Workflow（run 域定界 + 事件 fold 骨架）', () => {
     expect(record.agentCalls[1]!.phase).toBeUndefined()
   })
 
-  it('中断形态条目（status=interrupted）在 fold 缺席兜底层 → interrupted（entry-only 降级投影不回落 running）', () => {
+  it('中断形态条目（status=interrupted）在 fold 缺席兜底层 → interrupted（entry-only 降级派生视图不回落 running）', () => {
     const registered = {
       v: 2 as const,
       kind: 'registered' as const,
@@ -979,7 +979,7 @@ describe('projectV2Workflow（run 域定界 + 事件 fold 骨架）', () => {
       callCount: 1,
       usedTokens: 0,
     }
-    // fold 缺席（runJournalDir 缺席的 entry-only 降级投影 / record 流被外部清理）
+    // fold 缺席（runJournalDir 缺席的 entry-only 降级派生视图 / record 流被外部清理）
     const record = projectV2Workflow(registered, interruptedEntry, undefined)!
     expect(record.status).toBe('interrupted')
     // 主链路不受影响：record 流在场时 fold 判据仍权威
@@ -1036,7 +1036,7 @@ describe('mergeEventProjection（单点合并）', () => {
     expect(merged.subagents.has('sa-foreign')).toBe(false)
   })
 
-  it('步骤视图合并（W0 输入换源）：record 投影按 (parentRunId, stepIndex) 覆盖 run 骨架行状态', () => {
+  it('步骤视图合并（W0 输入换源）：record 派生视图按 (parentRunId, stepIndex) 覆盖 run 骨架行状态', () => {
     const sources = initialEventProjectionSources()
     const registered = {
       v: 2 as const, kind: 'registered' as const, runId: 'wf-1', workflowName: 'f',

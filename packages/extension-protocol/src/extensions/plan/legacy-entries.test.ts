@@ -15,7 +15,7 @@ import { PLAN_LIFECYCLE_STATES } from './state-machine'
 import { PLAN_STATE_CUSTOM_TYPE, readLifecycleState, readResumeHint } from './legacy-entries'
 
 describe('PLAN_STATE_CUSTOM_TYPE 字面量冻结锚', () => {
-  it("恒为 'plan-state'（扩展写侧落盘与 runtime 投影链共用判别键，改即历史会话失联）", () => {
+  it("恒为 'plan-state'（扩展写侧落盘与 runtime 派生视图链共用判别键，改即历史会话失联）", () => {
     expect(PLAN_STATE_CUSTOM_TYPE).toBe('plan-state')
   })
 })

@@ -138,7 +138,7 @@ describe('W8 runtime 协议客户端接线（subagent-engine-history）', () => 
     // outcome-only（"(no outcome recorded)"），协议链生效即此断言成立。
     const assistant = messages.find((m) => m.role === 'assistant')
     expect(assistant?.content).toBe('fake turn')
-    // user task 前置投影（core 投影链复用）。
+    // user task 前置派生视图（core 派生视图链复用）。
     expect(messages[0]?.role).toBe('user')
     expect(messages[0]?.content).toBe('demo task')
     expect(spawnLogPids()).toHaveLength(1)

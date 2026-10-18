@@ -4,7 +4,7 @@
  * 覆盖（照 ask-user 检测测试形态，全部 mock 零真实 pi）：
  * - title=PLAN_REVIEW_MARKER 的 select 事件 → 成对产出 extension-ui kind + extension.ui_request
  *   广播帧，payload 含 planReview: true 标记（与 askUser: true 同构分流）；docs 不透传进帧
- *   （审批条文档清单由 usePlanState 投影链 session.planState 承载，死字段 planReviewDocs 已删）
+ *   （审批条文档清单由 usePlanState 派生视图链 session.planState 承载，死字段 planReviewDocs 已删）
  * - 普通 select（无 marker）不带 planReview 标记（plain dialog 分支形态不变）
  * - marker 命中但 payload 非法（非 JSON）→ 降级普通 select（payload 无 planReview，
  *   与 ask-user 检测失败降级同构边界）
@@ -37,7 +37,7 @@ function broadcastPayload(events: PiTranslatedEvent[]): Record<string, unknown> 
 }
 
 describe('EventAdapter PLAN_REVIEW_MARKER 检测路由（D5）', () => {
-  it('title=PLAN_REVIEW_MARKER + docs payload → 广播 extension.ui_request 含 planReview:true；docs 不透传（planState 投影链承载）', () => {
+  it('title=PLAN_REVIEW_MARKER + docs payload → 广播 extension.ui_request 含 planReview:true；docs 不透传（planState 派生视图链承载）', () => {
     const docs = [{ fileName: 'design.md', absPath: '/repo/.taiji-harness/slug/design.md', sourceSkill: 'tech-design', version: 1 }]
     const events = translate(
       selectEvent({ title: PLAN_REVIEW_MARKER, options: [JSON.stringify({ docs })] }),

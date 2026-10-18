@@ -1,6 +1,6 @@
 /**
  * workflow 步骤视图合并投影（W0 / 设计 workflow-step-visibility-data-source D2；
- * W1 换源后输入改喂 事件投影，纯函数本体保留）。
+ * W1 换源后输入改喂 事件派生视图，纯函数本体保留）。
  *
  * 职责：以 workflow 投影的 trace 节点为骨架（stepIndex/phase/agent/task），subagent
  * 投影按 (parentRunId, stepIndex) 圈定候选集后合并——「① 供编排结构，② 供运行时

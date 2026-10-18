@@ -125,7 +125,7 @@ export function derivePlanStage(view: PlanStateView | null): PlanStage | null {
 
 /**
  * 审批条分支公式（D4 单源——禁止消费方各自拼并集，F1「两个事实源的并集祈祷一致」的反面）：
- * - `ready ⇔ 挂起 planReview 请求存在`（runtime 注册表投影，唯一交互权威；**presence 语义
+ * - `ready ⇔ 挂起 planReview 请求存在`（runtime 注册表派生视图，唯一交互权威；**presence 语义
  *   ——ready 恒优先渲染**）
  * - 已应答抑制标记（ackMarked）压制一切 state 判定分支（degraded / revising）
  * - `revising ⇔ state=revising`（无挂起、无压制）

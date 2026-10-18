@@ -447,7 +447,7 @@ interface ReconcileResult {
  * 对账：清单 = 被查询会话在 runtime 注册表上的存活全集。
  * - 清单内条目按 ack 同口径四件事建档（订阅建立幂等；不清空既有 pendingWrites——
  *   需保留 pendingWrites 的存活实例均在清单内）；
- * - 清单外条目按关闭沿三腿清理（含 ack 窗口内死亡产生的假阳幽灵）；
+ * - 清单外条目按关闭沿三路径清理（含 ack 窗口内死亡产生的假阳幽灵）；
  * - **范围钉死 = 本次查询所属会话**（与查询会话无关的 terminalId 键不参与增删）；
  * - 拉取失败：保留既有条目、下一次触发自然重试（**禁定时兜底**）。失败是否提示由调用方
  *   按触发点分腿（世代变更重连腿静默）。
@@ -709,7 +709,7 @@ export function useTerminal(sessionIdRef: Ref<string | null>) {
 
   /**
    * `unknown_terminal_id` 平行守卫（设计 §3.3）：任意已建档条目收到首个
-   * `unknown_terminal_id`（write / kill / attach / resize 均可触发）→ 执行关闭沿三腿清理。
+   * `unknown_terminal_id`（write / kill / attach / resize 均可触发）→ 执行关闭沿三路径清理。
    * 判据 = runtime「该 terminalId 不在注册表」的否定回执（与关闭沿守卫同源）。
    * 用户可见语义按触发面分档：
    * - `write` 命中 → 经「输入可能丢失」通道告知（对齐死亡沿 pendingWrites 丢弃范式）

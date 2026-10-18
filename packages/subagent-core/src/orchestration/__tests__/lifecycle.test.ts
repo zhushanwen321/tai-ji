@@ -317,7 +317,7 @@ describe("runWorkflow", () => {
   });
 
   // [Q2/D9-1] run-created 正点接线（dispatchRunCreated 唯一生产调用点）：创建期
-  // 校验通过 + run 装配完成后落 journal 首帧——runWorkflow 返回 ⟹ 注册表投影可查
+  // 校验通过 + run 装配完成后落 journal 首帧——runWorkflow 返回 ⟹ 注册表派生视图可查
   //（active，fold 终帧 dispatched）。
   it("run-created 正点发射：runWorkflow 返回后 journal 首帧落账，投影 = active/dispatched", async () => {
     const journalDir = fs.mkdtempSync(path.join(os.tmpdir(), "lifecycle-run-created-"));

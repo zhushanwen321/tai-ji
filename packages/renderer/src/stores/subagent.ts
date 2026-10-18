@@ -93,7 +93,7 @@ function applyDeltaFrame(msg: StreamFrame, ctx: StreamFrameContext): void {
       ctx.chunkOps.seal(ctx.virtualId, ctx.recordId, payload.msgSeq)
     }
     // 只收口 streaming 实体。订阅保留（续聊轮的后续 chunk 仍可达，R1 构造性消解）；
-    // 定稿内容由 entry 帧投影链覆盖。
+    // 定稿内容由 entry 帧派生视图链覆盖。
     ctx.chatFinalizeStream(ctx.virtualId)
     return
   }

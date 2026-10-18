@@ -504,7 +504,7 @@ describe("⛔4 listHandler（limit 夹紧 + 过滤 + enrich，快照 = pi-sw 实
     expect(r.response.items.map((i) => i.subagentId)).toEqual(["old", "new"]);
   });
 
-  it("includeWorkflow:true → collectRecords 第三参 true（workflow record 投影放行，排查通道）", () => {
+  it("includeWorkflow:true → collectRecords 第三参 true（workflow record 派生视图放行，排查通道）", () => {
     // 过滤责任在 store 层（collectRecords 第三参），listHandler 只透传——stub 按第三参
     // 分流返回，模拟 store 的 includeWorkflow 放行形态。
     const toolRecord = makeRec({ id: "tool-1", startedAt: 1 });

@@ -2,10 +2,10 @@
 //
 // Workflow run 事件词表与 journal 接口类型层（设计 workflow-architecture-redesign §3.3 D5）。
 //
-// 为什么需要它：纯快照投影只有终态一帧，「怎么死的」无从回答——重试轨迹
+// 为什么需要它：纯快照派生视图只有终态一帧，「怎么死的」无从回答——重试轨迹
 // （第一波 21 秒全灭、重试波写完报告）完全不可见，重试能掩盖事故。本模块定义
 // run 级事件的词表（判别联合）与 journal 接口形态，为事件 journal（append/scan
-// 实装、快照投影、注册表投影）提供类型地基。
+// 实装、快照派生视图、注册表派生视图）提供类型地基。
 //
 // 范围边界：词表/类型层 + 状态机（合法转移表数据 + transition 纯函数）+
 // journal 实装（createRunEventJournal：JSONL 落 <dir>/<runId>.record.jsonl
@@ -197,7 +197,7 @@ function extractFailedRunErrorCode(run: WorkflowRun): RunErrorCode {
  * RecordEventEnvelope（u0）同构——两域 tail 原语（event-tail.ts）的去重语义
  * 对称落位。
  *
- * ts：D5 载荷表未列，但快照投影（calls[].startedAt / lastProgressAt 派生）与
+ * ts：D5 载荷表未列，但快照派生视图（calls[].startedAt / lastProgressAt 派生）与
  * 注册表新鲜度判据都要求事件自带时间——投影只消费事件流（快照与事件流双写时
  * 快照必然漂移；三通道采信顺序见本文件头部「终局证据读序」权威声明），没有
  * ts 的 journal 无法支撑投影，故信封层统一携带。
@@ -290,7 +290,7 @@ export interface RunCreatedEvent extends EventEnvelope { // oe-exempt:20260929:f
  *
  * taskIndex 对齐 AgentCall.id（= trace stepIndex，D-10 单源）——同一 call 的
  * started/retrying/settled 全链共享同一 taskIndex。D5 载荷表仅在 dispatched
- * 行列出 taskIndex，但快照投影按 calls[].id 关联事件与条目，settled/retrying
+ * 行列出 taskIndex，但快照派生视图按 calls[].id 关联事件与条目，settled/retrying
  * 缺 taskIndex 则无法定位归属 call（agentName 不唯一、attempt 单独不足），故
  * 三个 agent 事件统一携带。
  */
@@ -372,7 +372,7 @@ export interface AgentSettledEvent extends EventEnvelope { // oe-exempt:20260929
   /**
    * 结果全文（AgentResult 完整序列化形态，[D1] record 单源存储收敛——设计
    * §3.1 载荷表）。record 流是唯一事实源后，resume 的已完成调用缓存回放（零
-   * token）所需的 result 只能从本帧恢复——快照投影文件已删，无第二落点。
+   * token）所需的 result 只能从本帧恢复——快照派生视图文件已删，无第二落点。
    * result.sessionFile 同时承载执行树家族链的 sessionFile 数据源（[D16 ③]
    * session-reader 发现链的提取面——无需载荷补字段）。
    *
@@ -617,8 +617,8 @@ export interface RunEventJournal {
    */
   append(runId: string, event: WorkflowRunEventInput): Promise<WorkflowRunEvent>;
   /**
-   * 顺序扫描某 run 的全部事件（写入序）。消费方：快照投影（startedAt /
-   * lastProgressAt 派生）、注册表投影（事件流停止 = 待恢复态判读）、恢复对账。
+   * 顺序扫描某 run 的全部事件（写入序）。消费方：快照派生视图（startedAt /
+   * lastProgressAt 派生）、注册表派生视图（事件流停止 = 待恢复态判读）、恢复对账。
    * 终局后过保留期的清理（cap + TTL）不改变 scan 语义——清理后返回空流（该
    * run 的 journal 通道消失），消费方按本文件头部「终局证据读序」权威声明降级
    * 采信 state 快照 / manifest。
@@ -680,7 +680,7 @@ export const INITIAL_RUN_LIFECYCLE_STATE: RunLifecycleState = { lifecycle: "crea
  * 事件，控制终局路径需要落账时由调用侧合成 run-settled（见输出动作注释）。
  * watchdog-fired 已随 settled-watchdog 本体删除（pi-workflow-run-resource-model
  * 决策 6-D9）；host-died / abandon-elapsed 随 [W2 D2] 死形态清退删除（均无生产
- * 投递点：事件流停止的待恢复判读归注册表投影相，被动终局化走 adoptInterruptedRun
+ * 投递点：事件流停止的待恢复判读归注册表派生视图相，被动终局化走 adoptInterruptedRun
  * → settleRunAccounting 原语，不经状态机控制触发）。
  */
 export const CONTROL_TRIGGER_TYPES = [
@@ -903,13 +903,13 @@ export function transition(
   return { state: nextState, outputs: rule.outputs };
 }
 
-// ── journal fold 循环（投影侧共享单源）──────────────────────
+// ── journal fold 循环（派生视图侧共享单源）──────────────────────
 
 /**
  * 单个 agent call（步骤）的 fold 投影行：骨架行 + 终局。
  *
  * [W2 D7] 自 runtime events-projection.ts 上收（原 RunAskStepFold）——run 域
- * fold 单源后，runtime 投影消费 core fold 的骨架输出，不再自建第二套 fold。
+ * fold 单源后，runtime 派生视图消费 core fold 的骨架输出，不再自建第二套 fold。
  * [D4] 随事件词 agent-* 更名（ask → agent）。
  */
 export interface RunAskStepFold { // oe-exempt:20260929:framework:workflow/record 协议契约类型——ports 类型契约先行、单实现常态（dev-0.10.5 已验收代码 merge 带入）
@@ -932,12 +932,12 @@ export interface RunAskStepFold { // oe-exempt:20260929:framework:workflow/recor
   /**
    * [可视化 U1，设计 §3.3-D12] 最近一次重试（agent-retrying 帧值——单值快照，只够
    * 最近一次；多轮 attempt 起止只有事件流各帧可重构，workflow-visualization 设计
-   * §3.1-2）。runtime 投影透出供 retrying 派生态展示（shared WorkflowAgentCall.lastRetry）。
+   * §3.1-2）。runtime 派生视图透出供 retrying 派生态展示（shared WorkflowAgentCall.lastRetry）。
    */
   lastRetry?: { attempt: number; backoffMs: number; reason: string };
   /**
    * [可视化 U1，设计 §3.3-D12] token 分项（agent-settled 帧 result.usage 透传——
-   * AgentUsage 分项；result 缺省/usage 缺省 undefined）。runtime 投影消费填充
+   * AgentUsage 分项；result 缺省/usage 缺省 undefined）。runtime 派生视图消费填充
    * shared WorkflowAgentCall 的 inputTokens/outputTokens/turns 三字段（不设嵌套
    * usage 字段——同一信息禁止双轨，u2 冻结裁决）。
    */
@@ -1057,10 +1057,10 @@ export interface RunJournalFold { // oe-exempt:20260929:framework:workflow/recor
  * run 域落点）。全量 fold 与增量 fold（以既有 checkpoint 传入）共用本入口；旧
  * 格式行（无 seq，W1 前）不推进水位（见 foldRunEventFrames 注释）。
  *
- * 骨架半边的消费方 = runtime journal 投影（[W2 D7] fold 单源：runtime 的
+ * 骨架半边的消费方 = runtime journal 派生视图（[W2 D7] fold 单源：runtime 的
  * SessionEventProjection 以本 checkpoint 为 per-run tailer 状态，投影读
  * created/asks/phases/runSettled 合成 WorkflowRunRecord——「只要终帧状态」的
- * core 内消费面（run-state-evidence 清理资格 / 注册表投影 / pump 活体 fold）经
+ * core 内消费面（run-state-evidence 清理资格 / 注册表派生视图 / pump 活体 fold）经
  * foldRunEventFrames 只取 state，骨架半边零成本闲置。
  */
 export interface RunEventFoldCheckpoint extends RunJournalFold { // oe-exempt:20260929:framework:workflow/record 协议契约类型——ports 类型契约先行、单实现常态（dev-0.10.5 已验收代码 merge 带入）
@@ -1178,7 +1178,7 @@ function foldAgentSettledEvent(
   const existing = asks.get(event.taskIndex);
   const settled = { outcome: event.outcome, durationMs: event.durationMs, errorCode: event.errorCode, ts: event.ts };
   // [可视化 U1，设计 §3.3-D12] token 分项（result.usage 透传——AgentUsage 分项；
-  // result/usage 缺省 undefined，runtime 投影消费填充 shared 三字段）
+  // result/usage 缺省 undefined，runtime 派生视图消费填充 shared 三字段）
   const usage = event.result?.usage;
   const nextAsks = new Map(asks);
   nextAsks.set(
@@ -1265,10 +1265,10 @@ function applyAskFoldEvent(
 /**
  * fold 检查点入口（事件流 + 既有检查点 → 新检查点）：全量 fold 与增量 fold
  * （tail 续读 / 截断重建后全量重读，以既有 checkpoint 传入）共用本函数——
- * tail 消费方（壳 stall watchdog / runtime 投影）的增量接续面。
+ * tail 消费方（壳 stall watchdog / runtime 派生视图）的增量接续面。
  *
  * 产出 = 状态半边（state/lastSeq）+ 投影骨架半边（created/asks/phases/
- * interrupted/resumed/runSettled，[W2 D7] fold 单源：runtime journal 投影消费
+ * interrupted/resumed/runSettled，[W2 D7] fold 单源：runtime journal 派生视图消费
  * 骨架，不再自建第二套 fold）。骨架写入点在状态机转移裁决之后——坏帧行整体
  * 不写，骨架与状态同停在最近一致态。纯函数：初值 checkpoint（含 asks/phases
  * Map）不被变异（applyAskFoldEvent 写时克隆）。
@@ -1345,10 +1345,10 @@ export function foldRunEventCheckpoint(
 }
 
 /**
- * journal fold 循环（事件流 → 终帧状态，投影侧共享单源）：逐事件 transition
+ * journal fold 循环（事件流 → 终帧状态，派生视图侧共享单源）：逐事件 transition
  * （不传 ctx——fold 契约），坏帧保守停在最近一致态。内部委托
  * foldRunEventCheckpoint（seq 守卫单点），只投影 state——「只要终帧状态」的
- * 消费面（run-state-evidence 清理资格 / 注册表投影 / pump 活体 fold）。
+ * 消费面（run-state-evidence 清理资格 / 注册表派生视图 / pump 活体 fold）。
  *
  * 增量接续（需要水位的 tail 消费方）走 foldRunEventCheckpoint。
  */

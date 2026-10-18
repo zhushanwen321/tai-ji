@@ -701,7 +701,7 @@ describe('applyEntry —— entry 类型逐类型覆盖', () => {
   })
 
   // ── custom entry（纯数据，不进对话流）─────────────────────────────
-  it('custom entry：纯数据不进对话流——零消息投影、no-op 返回原 state 引用', () => {
+  it('custom entry：纯数据不进对话流——零消息派生视图、no-op 返回原 state 引用', () => {
     const initial = createInitialChatViewState()
     const state = applyEntry(initial, {
       type: 'custom', id: 'c-1', parentId: null, timestamp: ISO(1), customType: 'taiji.client-msg-id', data: { clientUuid: 'u-1', userEntryId: 'e-user-1' },

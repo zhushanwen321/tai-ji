@@ -31,7 +31,7 @@
  *
  * [U6] legacy 兼容值（done/failed/cancelled/crashed/closed）已从类型面删除：扩展写面
  * U2 起不再产出，历史 session 数据的旧值在解析边界（runtime normalizeSubagentStatus
- * 归一 + record 投影）映射为两态 + stopReason/closedReason 展示位，renderer 永不见
+ * 归一 + record 派生视图）映射为两态 + stopReason/closedReason 展示位，renderer 永不见
  * legacy 值（D5「边界归一」）。编译期破坏性收窄（tsc 全量拦截消费方）。
  */
 export type SubagentStatus = 'running' | 'idle'

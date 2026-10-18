@@ -201,7 +201,7 @@ describe('承接清单① 常驻挂载订阅（M1 硬约束）', () => {
     await flushAsync()
     expect(wrapper.find('[data-testid="plan-review-approve"]').exists()).toBe(false)
 
-    // isActive 帧到达（投影链广播）→ 整行渲染 → PlanReviewBar 创建。其 usePlanState
+    // isActive 帧到达（派生视图链广播）→ 整行渲染 → PlanReviewBar 创建。其 usePlanState
     // watch immediate 会再触发一次首拉（生产语义 = 拉 runtime 最新快照，bus 内存态即
     // 权威源、不回退；mock 持久返回旧快照会造成假覆盖）——mock 演进到最新帧对齐生产。
     // 快照权威同步演进：PlanReviewBar 新实例 subscribe 拉取 getPendingRequests，runtime

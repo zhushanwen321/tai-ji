@@ -1,10 +1,10 @@
 // src/orchestration/__tests__/run-registry.test.ts
 //
-// [Q2/D9-1 → workflow-run-resume-revision] run 注册表单测——D5 状态机投影面 +
+// [Q2/D9-1 → workflow-run-resume-revision] run 注册表单测——D5 状态机派生视图面 +
 // 中断收编入口（[D15] 中断路）+ 已终局 run 磁盘足迹裁剪单源。
 //
 // 锁定语义：
-// a. 投影四相（[D2] interrupted 暂停态入状态机——事件流判据）：
+// a. 派生视图四相（[D2] interrupted 暂停态入状态机——事件流判据）：
 //    - run-settled 落账 → terminal（四值 outcome + errorCode）；
 //    - run-interrupted 落账（显式中断转移）→ interrupted（暂停态，非 terminal，
 //      与活体无关）；事件流停止（fold 停在 running/settling + 活体集未命中 =
@@ -15,7 +15,7 @@
 //    被判死）；中断收编入口（adoptInterruptedRun → interruptRun）落
 //    run-interrupted 转移事件（非 run-settled 终态帧——[D2] 中断非终局）+ 中断
 //    条目（status 'interrupted'）补写回调恰一次。
-// c. mtime 退役断言：投影/收编源码零 mtime 消费（grep 断言）。
+// c. mtime 退役断言：派生视图/收编源码零 mtime 消费（grep 断言）。
 //
 // [W2/V1 → D15] 收编的记录动作走 terminal-actions 中断编排入口（模块 journal
 // 单写者域）——测试注入面 = setRunEventJournalDirForTest（与帧落账同源）；seed
@@ -103,20 +103,20 @@ function runInterruptedEvent(ts: number, errorCode?: RunErrorCode): WorkflowRunE
   };
 }
 
-/** 落 record 事件序列（appendFileSync 直写——投影测试不走 dispatch 链）。 */
+/** 落 record 事件序列（appendFileSync 直写——派生视图测试不走 dispatch 链）。 */
 async function seed(runId: string, events: readonly WorkflowRunEventInput[]): Promise<void> {
   for (const event of events) {
     await journal.append(runId, event);
   }
 }
 
-// ── a. 投影四相（[D2] interrupted 暂停态） ────────────────────
+// ── a. 派生视图四相（[D2] interrupted 暂停态） ────────────────────
 
-describe("投影四相（事件流判据，D9-1 → [D2] 暂停态）", () => {
+describe("派生视图四相（事件流判据，D9-1 → [D2] 暂停态）", () => {
   it("事件流停止（活体未命中 = host-died 判读）→ interrupted（非 terminal 待恢复态；僵尸 running 构造性消除）", async () => {
     await seed("wf-reg-int", [createdEvent("wf-reg-int", BASE_TS), agentStartedEvent(BASE_TS + 1)]);
 
-    // 快照末行 running 的僵尸形态（无活体持有）：投影 = interrupted
+    // 快照末行 running 的僵尸形态（无活体持有）：派生视图 = interrupted
     const projection = await projectRunRegistryState(journal, "wf-reg-int");
     expect(projection.phase).toBe("interrupted");
     expect(projection.state).toEqual({ lifecycle: "running" });
@@ -188,7 +188,7 @@ describe("投影四相（事件流判据，D9-1 → [D2] 暂停态）", () => {
   });
 
   it("纯函数入口 projectRunRegistryEvents：事件数组直投影（无 IO——判定输入只有事件流与活体集）", () => {
-    // 投影消费 scan 产物（含 seq）——helper 产 input 形态，此处补 seq 组装
+    // 派生视图消费 scan 产物（含 seq）——helper 产 input 形态，此处补 seq 组装
     const withSeq = (input: WorkflowRunEventInput, seq: number): WorkflowRunEvent => ({
       ...input,
       seq,
@@ -214,7 +214,7 @@ describe("投影四相（事件流判据，D9-1 → [D2] 暂停态）", () => {
 // ── c. mtime 启发式退役断言 ──────────────────────────────────
 
 describe("mtime 启发式退役（grep 断言）", () => {
-  it("grep 断言：注册表投影/收编源码零 mtime API 消费（判据 = 事件流 + 活体集）", () => {
+  it("grep 断言：注册表派生视图/收编源码零 mtime API 消费（判据 = 事件流 + 活体集）", () => {
     const source = fs.readFileSync(new URL("../run-registry.ts", import.meta.url), "utf8");
     // 代码级退役断言：文件 mtime/stat 读取 API 零调用（注释中的「mtime 启发式退役」
     // 描述措辞不受限——断言的是旧启发式的代码载体已删除）

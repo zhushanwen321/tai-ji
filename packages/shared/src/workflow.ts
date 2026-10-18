@@ -1,5 +1,5 @@
 /**
- * Workflow 数据模型 —— runtime 投影链的 shared 消费契约。
+ * Workflow 数据模型 —— runtime 派生视图链的 shared 消费契约。
  *
  * 数据来源：pi-subagent-workflow 扩展注册的 workflow 工具族（tool-declaration-slimming
  * D3 拆分后 = `workflow_run`（启动）/ `workflow_control`（status/abort/resume））。主 agent
@@ -272,7 +272,7 @@ export interface WorkflowRunPhaseFoldEntry {
 
 // ═══ Workflow 可视化（workflow-visualization 设计 §5-U2）：shared 协议类型冻结 ═══
 //
-// runtime 投影链与 renderer 可视化组件（overlay DAG / 事件流 / Gantt）的共同契约，
+// runtime 派生视图链与 renderer 可视化组件（overlay DAG / 事件流 / Gantt）的共同契约，
 // 纯加法冻结（不动本文件既有字段与类型签名）。
 //
 // 类型跟随的权威源（@taiji/shared 为 private 包、subagent-core 为 npm 发布包，

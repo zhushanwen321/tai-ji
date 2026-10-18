@@ -2,7 +2,7 @@
 //
 // [身份换源] 子文件无 identity entry 时，身份域从事件流折叠取得
 // （record-store.scanFile：identity entry → **事件流折叠**；[身份换源第二步] 后
-// binding 兜底腿已退场，折叠是 identity entry 之外的唯一身份源，统计域同源）。
+// binding 兜底路径已退场，折叠是 identity entry 之外的唯一身份源，统计域同源）。
 //
 // 背景（event-sourcing 收敛）：`.state` 收条与 `.record-binding` 读侧均已退场，
 // 事件流是身份域与统计域的唯一事实源（身份域 + model/thinkingLevel/worktree 在

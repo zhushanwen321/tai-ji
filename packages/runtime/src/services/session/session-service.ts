@@ -1237,7 +1237,7 @@ export class SessionService implements ISessionService, ILifecycleSessionOps, ID
    * ③ 失效链经 onPlanAborted 回调上抛（P2-2：/plan abort → extension controller.abort()
    * 解散挂起审批 select，响应永不可达——摘除 runtime pending + 广播失效帧，审批挂起中
    * 退出后重进 plan，僵尸 ready 审批条不再出现）；回调缺失跳过（仅测试最小构造形态）。
-   * 退出结果经投影链 session.planState 广播推回（isActive=false），不在此处回包——
+   * 退出结果经派生视图链 session.planState 广播推回（isActive=false），不在此处回包——
    * reply 由 transport handler 负责。
    */
   async abortPlan(sessionId: string): Promise<void> {

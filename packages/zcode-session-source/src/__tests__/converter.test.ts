@@ -16,7 +16,7 @@
  *    readZcodeSession → NormalizedSession 三键形状 + 重放 + degradations 装配 +
  *    文件名不变量。
  *
- * 自 runtime dev 演进版移植的净新增组（git 可追溯）：消息投影分派 describe（六策略
+ * 自 runtime dev 演进版移植的净新增组（git 可追溯）：消息派生视图分派 describe（六策略
  * 落点 / L1-L2 归类聚合 / unclassified sample / G1 user entry 数收敛）、T3c 新语义
  * （尾段零 usage 不变量门、RT-5#1 缺省语义 ×2、RT-5#8 不伪造 1970）、cancelled/error
  * turn 事故回归 7 用例；degradations 断言全部结构化（code/kind/source/count/sample
@@ -128,7 +128,7 @@ const BACKGROUND_SEMANTICS = {
 
 /** 厨房水槽行集：part 级映射全形态覆盖（切段/配对/映射/降级）。
  * 注意不得加入 timeline part：分类器 isTimelineOnlyMessage 会把整条消息判成
- * timelineOnly 丢弃（part 级 timeline 属消息级投影形态，由投影分派 describe 覆盖）。 */
+ * timelineOnly 丢弃（part 级 timeline 属消息级派生视图形态，由派生视图分派 describe 覆盖）。 */
 function kitchenSinkMessages(): ZcodeMessageInput[] {
   return [
     // m1 user：多 text part + file part（D6 丢弃计降级）
@@ -259,7 +259,7 @@ function replayEntries(entries: ParsedEntry[]): { messages: ReplayedMessage[]; o
     prev = e.id
   }
 
-  // 2) 消息投影（toolResult 并入所属 assistant 的 toolCall）
+  // 2) 消息派生视图（toolResult 并入所属 assistant 的 toolCall）
   const messages: ReplayedMessage[] = []
   const orphans: ParsedEntry[] = []
   let currentAssistant: ReplayedMessage | undefined
@@ -465,10 +465,10 @@ describe('映射全表（厨房水槽行集 → 产物 entry）', () => {
   })
 })
 
-// ── 消息级投影分派（classifyMessage → §7.3 落点映射表）──────────────────────────────
+// ── 消息派生视图分派（classifyMessage → §7.3 落点映射表）──────────────────────────────
 // 自 runtime dev 演进版移植（11 用例整组，git 可追溯）。
 
-describe('消息投影分派：六策略落点 + unclassified', () => {
+describe('消息派生视图分派：六策略落点 + unclassified', () => {
   it('realUserInput：带 semantics 新数据与无 semantics 旧数据同落 user entry（text part 逐条）', () => {
     const msgs: ZcodeMessageInput[] = [
       userMessage('m-sem', [textPart('带语义'), textPart('第二段')], { semantics: REAL_USER_SEMANTICS }),

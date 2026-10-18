@@ -746,7 +746,7 @@ export class SessionMessageHandler {
     // prompt('/plan abort') + 失效链回调上抛）在 service 层（session-service.ts abortPlan，
     // MF-1-7 下沉，形态对齐 subagentAction「handler 只透传 payload 字段」）；失效链消费
     // 单一出口在 server.ts（setOnPlanAborted → invalidatePendingUiRequests）。退出结果经
-    // 投影链 session.planState 广播推回，此处只回 message.status ack（renderer
+    // 派生视图链 session.planState 广播推回，此处只回 message.status ack（renderer
     // register<void> 不读 status 值，CL10 宽 string 形态）。
     const { sessionId } = msg.payload
     try {

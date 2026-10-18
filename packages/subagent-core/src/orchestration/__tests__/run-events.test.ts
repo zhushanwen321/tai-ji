@@ -1062,9 +1062,9 @@ describe("record 实装（createRunEventJournal，临时目录自建自删）", 
 //
 // [D2]/[D4]/[D5]/[D6] 词表重构的读侧契约：删值成员（armed / member-pool——
 // [D5]/[D6] 删除；旧 ask-* 前缀行——[D4] 改名）的历史行经 scan 的词表外坏行
-// 路径跳过 + 计数 warn（保守可诊断，不炸投影）；[D1] 历史数据处置——旧词表
+// 路径跳过 + 计数 warn（保守可诊断，不炸派生视图）；[D1] 历史数据处置——旧词表
 // 历史行不进入任何解析路径、无兼容读。崩溃残留流（事件流停在非 terminal 的
-// 未终局 run）不因词表缩窄产生坏帧——fold 停在最近一致态，注册表投影相
+// 未终局 run）不因词表缩窄产生坏帧——fold 停在最近一致态，注册表派生视图相
 // （run-registry「fold 停在非 terminal」判读）照常工作。
 
 describe("删值后历史行兼容（存量 record 行可解析或跳过计日志）", () => {
@@ -1136,7 +1136,7 @@ describe("删值后历史行兼容（存量 record 行可解析或跳过计日�
 
   it("崩溃残留流（事件流停在非 terminal 的未终局 run）fold 停最近一致态、零坏帧出声", async () => {
     // 崩溃 run 的 record 形态：无终态帧，事件流停在 running——词表缩窄后全部
-    // 行仍可解析，fold 停在 running（注册表投影相 interrupted 判读的输入形态）
+    // 行仍可解析，fold 停在 running（注册表派生视图相 interrupted 判读的输入形态）
     const runId = "wf-legacy-orphan";
     writeFileSync(
       join(dir, `${runId}.record.jsonl`),
@@ -1205,7 +1205,7 @@ describe("foldRunEventCheckpoint（seq 守卫，D6 域 fold 去重）", () => {
     expect(full.lastSeq).toBe(11);
   });
 
-  it("seq 跳号（gap）宽容放行——外部编辑形态不炸投影", () => {
+  it("seq 跳号（gap）宽容放行——外部编辑形态不炸派生视图", () => {
     const gapped: WorkflowRunEvent[] = [
       { ...runCreated, seq: 1 },
       { ...agentStarted, seq: 5 },
@@ -1418,7 +1418,7 @@ describe("foldRunEventCheckpoint（seq 守卫，D6 域 fold 去重）", () => {
     expect(ask?.lastRetry).toEqual({ attempt: 2, backoffMs: 2000, reason: "provider 503 (attempt 2)" });
   });
 
-  it("[可视化 U1] agent-settled 帧 result.usage 落 usage 分项（runtime 投影消费填充 shared 三字段）", () => {
+  it("[可视化 U1] agent-settled 帧 result.usage 落 usage 分项（runtime 派生视图消费填充 shared 三字段）", () => {
     const usage = { input: 1200, output: 340, cacheRead: 50, cacheWrite: 10, cost: 0.02, contextTokens: 1250, turns: 3 };
     const settledWithUsage: AgentSettledEvent = {
       ...agentSettledCompleted,

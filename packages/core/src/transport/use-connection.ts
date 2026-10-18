@@ -443,7 +443,7 @@ export function useConnection() {
     // M1（W09 follow-up）：connected false→true 迁移时恢复全部 bus 订阅——runtime 侧
     // ws onDisconnect → bus.unsubscribeAll(ws) 已清空该连接订阅，core 侧幂等守卫
     // （subscribed 标记）不会自行失效，不主动重发则重连后 session 级消息永久丢失
-    // （W09 删除 broadcast 兜底腿后 publish 定向推送是唯一通道）。首次连接时
+    // （W09 删除 broadcast 兜底路径后 publish 定向推送是唯一通道）。首次连接时
     // subscriptionStates 为空 → no-op，无副作用。
     //
     // [review findings-confirmation #1.2] 本 watch 是断连清理的**单一汇合点**：网络断连

@@ -220,8 +220,8 @@ export type {
   RunSwitchMemberState,
 } from "./execution/assembly/types.ts";
 
-// execution-record 投影函数族：record → 渲染态投影（outcome / elapsed / tool
-// calls），interface 渲染层唯一消费入口（live 进度投影面 = SubagentRecord 投影族）。
+// execution-record 派生视图函数族：record → 渲染态派生视图（outcome / elapsed / tool
+// calls），interface 渲染层唯一消费入口（live 进度派生视图面 = SubagentRecord 派生视图族）。
 export {
   computeElapsedSeconds,
   deriveOutcome,
@@ -686,13 +686,13 @@ export {
   type WorkflowRunEvent,
 } from "./orchestration/run-events.ts";
 
-// [Q2/D9-1] run 注册表（D5 状态机投影面）。[D9]（workflow-run-resume-revision）
+// [Q2/D9-1] run 注册表（D5 状态机派生视图面）。[D9]（workflow-run-resume-revision）
 // abandon 放弃窗终局化（abandonElapsedInterruptedRuns 及常量/env 通道）已随功能
 // 整体移除——「数天后回来仍可 resume」的 run 不再被判死，无主 run 磁盘清理归裁决
 // 点 7 对账清理（persistence/run-state-evidence 维护轮族）。中断收编原语 adoptInterruptedRun 与
-// 投影函数族消费全在 core 内部（收编链 u1b 接线）——按 D3 判定标准不进 barrel。
+// 派生视图函数族消费全在 core 内部（收编链 u1b 接线）——按 D3 判定标准不进 barrel。
 
-// run 投影（U7 / D8）：runSummary 以 core WorkflowRun 为准的投影（双投影分叉收口）。
+// run 派生视图（U7 / D8）：runSummary 以 core WorkflowRun 为准的派生视图（双派生视图分叉收口）。
 export { runSummary } from "./orchestration/workflow-run-summary.ts";
 
 // ── schema 助手（U9 / D9）─────────────────────────────────────

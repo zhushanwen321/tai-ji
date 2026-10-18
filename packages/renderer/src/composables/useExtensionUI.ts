@@ -259,7 +259,7 @@ function pickLegacyFields(
 }
 
 /**
- * planReview 源键搬运（白名单漏补 = 字段静默剥离——selfReview 是 D9③ 投影链终点，漏补即
+ * planReview 源键搬运（白名单漏补 = 字段静默剥离——selfReview 是 D9③ 派生视图链终点，漏补即
  * 「切回 session 有自审行、实时挂起无」半残形态）：planReview 标记（挂起枚举依赖）+
  * selfReview（自审结论，非 string 值不入店）。热帧（bus→toExtensionUIRequest）走本白名单，
  * 冷补（getPendingRequests 快照全量解包）不经本函数但同样携带两键——双入店路径的

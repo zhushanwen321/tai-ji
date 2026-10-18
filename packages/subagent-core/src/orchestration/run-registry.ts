@@ -1,13 +1,13 @@
 // src/orchestration/run-registry.ts
 //
-// Workflow run 注册表（D9-1）——D5 状态机的投影面。
+// Workflow run 注册表（D9-1）——D5 状态机的派生视图面。
 //
 // 为什么需要它：现状 run 状态判读只能读进程自写快照（state 文件末行 status），
 // 进程死亡后快照永远停在 running（僵尸）——「状态字段不可信、靠 mtime 新鲜度」
 // 的启发式时代由此而来。本模块把判读换轨到结构判据：注册表 = record 流 fold 的
-// 投影，只消费 D5 事件流（不另立状态存储）——
+// 派生视图，只消费 D5 事件流（不另立状态存储）——
 // - 事件流正常推进（本进程活体持有）→ 活跃（lifecycle 对齐状态机 fold 终帧）；
-// - run-settled 已落账 → 终局（outcome/errorCode 从事件与终局投影 manifest 读）；
+// - run-settled 已落账 → 终局（outcome/errorCode 从事件与终局派生 manifest 读）；
 // - run-interrupted 已落账（[D2] 显式中断转移）或事件流停止（活体集未命中 =
 //   host-died 判读）→ interrupted 暂停态，非 terminal——僵尸 running 构造性消除，
 //   恢复交互（resume，U2）以 lifecycle=interrupted 为资格判据。
@@ -51,9 +51,9 @@ import type { WorkflowRecordSettledEntryData } from "./workflow-record-entry.ts"
 
 const logger = getLogger("run-registry");
 
-// ── 投影（D9-1：注册表 = 状态机投影面）──────────────────────
+// ── 派生视图（D9-1：注册表 = 状态机派生视图面）──────────────────────
 
-/** 投影判读四相。 */
+/** 派生视图判读四相。 */
 export type RunRegistryPhase =
   /** 无事件证据且无活体持有——run 从未落账（或 record 已过保留期清理）。 */
   | "missing"
@@ -62,15 +62,15 @@ export type RunRegistryPhase =
   /** 终局（run-settled 已落账）——outcome 见 state.outcome。 */
   | "terminal"
   /** 暂停态（[D2]）：run-interrupted 已落账（显式中断转移，无论活体）或事件流
-   *  停止且活体未命中（host-died 投影判读）——非 terminal，可 resume。 */
+   *  停止且活体未命中（host-died 派生视图判读）——非 terminal，可 resume。 */
   | "interrupted";
 
-/** run 注册表投影（单一推导点，无独立状态存储）。 */
+/** run 注册表派生视图（单一推导点，无独立状态存储）。 */
 export interface RunRegistryProjection { // oe-exempt:20260929:framework:workflow/record 协议契约类型——ports 类型契约先行、单实现常态（dev-0.10.5 已验收代码 merge 带入）
   runId: string;
   /** D5 两维状态（fold 终帧；missing 时 = INITIAL_RUN_LIFECYCLE_STATE）。 */
   state: RunLifecycleState;
-  /** 投影判读（见 {@link RunRegistryPhase}）。 */
+  /** 派生视图判读（见 {@link RunRegistryPhase}）。 */
   phase: RunRegistryPhase;
   /** 事件流最后活动时刻（record 末帧 ts；空事件流 = undefined）。 */
   lastEventAt?: number;
@@ -81,7 +81,7 @@ export interface RunRegistryProjection { // oe-exempt:20260929:framework:workflo
   errorCode?: RunErrorCode;
 }
 
-/** 投影的活体判定输入（host-died 判据的互补面——活体集命中即未死）。 */
+/** 派生视图的活体判定输入（host-died 判据的互补面——活体集命中即未死）。 */
 export interface RunProjectionOptions { // oe-exempt:20260929:framework:workflow/record 协议契约类型——ports 类型契约先行、单实现常态（dev-0.10.5 已验收代码 merge 带入）
   /**
    * 本进程活体持有的 runId 集合（runs Map 的 key 视图）。缺省 = 空集（跨进程
@@ -95,7 +95,7 @@ export interface RunProjectionOptions { // oe-exempt:20260929:framework:workflow
  *
  * 循环体单源 run-events.ts 的 foldRunEventFrames（与 terminal-actions 的 fold
  * 读口共享同一坏帧失效模式：保守停在最近一致态）；本侧只持注册表域的 warn 文案
- * 与 logger。消费面 = projectRunRegistryEvents（纯投影函数，任意 journal 源的
+ * 与 logger。消费面 = projectRunRegistryEvents（纯派生视图函数，任意 journal 源的
  * 查询/对账形态，不经进程内缓存）；收编链（adoptInterruptedRun）的 fold 不走
  * 本函数——经 terminal-actions 共享读口（[D6(b)] 检查点缓存）。
  */
@@ -110,12 +110,12 @@ function foldEvents(events: readonly WorkflowRunEvent[], runId: string): RunLife
 }
 
 /**
- * 事件流 → 注册表投影（纯函数，单一推导点）。
+ * 事件流 → 注册表派生视图（纯函数，单一推导点）。
  *
- * 判读规则（[D2] interrupted 暂停态与投影相对齐）：
+ * 判读规则（[D2] interrupted 暂停态与派生视图相对齐）：
  * - fold terminal → terminal（errorCode 从 run-settled 帧）；
  * - fold interrupted（状态机暂停态——run-interrupted 帧已落）→ interrupted（显式
- *   转移即中断，与活体无关——收编后、resume 前的窗口投影恒暂停态）；
+ *   转移即中断，与活体无关——收编后、resume 前的窗口派生视图恒暂停态）；
  * - fold running/settling + 活体集命中 → active（事件流正常推进）；
  * - fold running/settling + 活体集未命中 → interrupted（事件流停止 = 进程死亡
  *   判读；状态字段不可信——快照末行 running 的僵尸在此判读下构造性消失）；
@@ -170,7 +170,7 @@ export function projectRunRegistryEvents(
   };
 }
 
-/** 指定 run 的注册表投影（record 读面入口——查询/对账消费形态）。 */
+/** 指定 run 的注册表派生视图（record 读面入口——查询/对账消费形态）。 */
 export async function projectRunRegistryState(
   journal: RunEventJournal,
   runId: string,
