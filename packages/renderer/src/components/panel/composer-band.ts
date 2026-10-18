@@ -8,13 +8,14 @@
  * Composer.vue 宽度契约「composer 与消息流同宽同缘」：内容列未触及 720px 封顶的
  * 面板宽度下，composer 左右缘与消息列对齐，不外扩出消息列。demo .composer 的
  * margin 14px 语义在该契约登记后被「同缘」裁决覆盖，不得改回更小的横向外距。
- * 顶距 mt-6（24px）：贴底跟随的最新内容行落在 composer 上方，不再贴着 composer
- * 顶缘（2026-10-15 用户裁决，修订 2026-10-11「顶距 0 贴合」裁决——贴底时最新行
- * 紧贴 composer 上沿被读作被覆盖；呼吸间距恢复为 demo .chat-scroll 24px 同值）。
+ * 顶距 mt-8（32px）：贴底跟随的最新内容行落在 composer 上方，不再贴着 composer
+ * 顶缘（2026-10-18 用户裁决加大呼吸间距，修订 2026-10-15 的 mt-6/demo 24px 同值裁决；
+ * 首次引入呼吸间距 = 2026-10-15，修订 2026-10-11「顶距 0 贴合」裁决——贴底时最新行
+ * 紧贴 composer 上沿被读作被覆盖）。
  * 落点选 band 外距而非流滚动区底部 padding：不触碰 MessageStream 滚动容器几何，
  * useVirtuaFollow D2 贴底数学零耦合。底 pb-3.5 沿 demo 浮框形态；gap-1.5 承接带内多行
  * （提示条 / overlay / composer）行距。
  * `.composer-band` class 是测试钩子（plan-mode-bar 挂载位断言等），勿删。
  */
 export const COMPOSER_BAND_CLASS =
-  'composer-band mt-6 flex flex-shrink-0 flex-col gap-1.5 px-[30px] pb-3.5'
+  'composer-band mt-8 flex flex-shrink-0 flex-col gap-1.5 px-[30px] pb-3.5'

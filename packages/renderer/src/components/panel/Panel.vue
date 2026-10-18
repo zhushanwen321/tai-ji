@@ -90,9 +90,9 @@
          统一表单 overlay（ui-presentation-protocol D5）：请求到达时 FormOverlay 覆盖
          composer 位置（互斥），对话历史全程可见，composer 消失输入禁止。
          [U7] overlay 移除后 composer 常驻（不再 v-if="!isViewingSubagent"）。 -->
-    <!-- 顶缘 mt-6：流滚动区底部 padding 仍为 0（贴合裁决），呼吸间距走 band 顶距
-         （2026-10-15 修订 10-11 顶距 0 裁决：贴底最新行不再紧贴 composer，见
-         composer-band.ts 注释）；左右 30px 与 MessageStream px-[30px] 同一内容列（Composer.vue 宽度契约
+    <!-- 顶缘 mt-8：流滚动区底部 padding 仍为 0（贴合裁决），呼吸间距走 band 顶距
+         （2026-10-18 加大呼吸间距，修订 10-15 的 mt-6 裁决：贴底最新行不再紧贴
+         composer，见 composer-band.ts 注释）；左右 30px 与 MessageStream px-[30px] 同一内容列（Composer.vue 宽度契约
          「composer 与消息流同宽同缘」，未封顶宽度下 composer 不外扩出消息列）。
          壳层类链单一来源 = composer-band.ts（BtwPanel 同壳），顶距走 padding 不走 gap——
          band 内 gap-1.5 是 RetryIndicator/overlay 内部行距，勿混用。 -->
