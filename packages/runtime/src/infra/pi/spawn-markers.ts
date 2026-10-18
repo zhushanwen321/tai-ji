@@ -5,14 +5,14 @@
  * ≡ getSessionsDir()」失效（SIP 下拿不到他进程 env，env 判据已被在案否决）。替代方案 =
  * spawn 时把实际传入的 `--extension` / `--skill` 值中位于「staged 专属三根」之一的子集
  * 覆盖写到 `<dataDir>/run/pi-spawn-markers.json`，reap 侧要求「argv 任一
- * --extension/--skill 值 ∈ 清单精确相等」。run/ 目录先例：relay socket（relay-paths.ts）。
+ * --extension/--skill 值 ∈ 清单精确相等」。run/ 目录先例：subagent control socket（infra/subagent-control/paths.ts）。
  *
  * 三根登记规则（值位于其一才登记；用户配置来源一律排除，设计 §6.12 + D-11 裁定）：
  *   ① 打包资源根      `*.app/Contents/Resources/extensions/`（electron-builder
  *                      extraResources 产物，打包版 builtin staged 集）
  *   ② dev 两形态（同源分流，D-11：V10① dev 正向收殓场景以清单非空为前提）
  *      ②-a dev 仓库资源根  `<repoRoot>/apps/electron/resources/extensions/`
- *                          （prepare 脚本 staged 产物；relay 脚本路径同源形态）
+ *                          （prepare 脚本 staged 产物）
  *      ②-b dev 仓库源码根  `<repoRoot>/extensions/<group>/<pkg>`
  *                          （resolver dev 分支 scanBundledExtensions 的实际产出——
  *                          分组层恒在，故以「extensions 段后 ≥2 段」词法判定；
@@ -44,7 +44,7 @@ import { getConfigDir } from './pi-paths.js'
 /** 清单文件名（<dataDir>/run/pi-spawn-markers.json）。 */
 export const SPAWN_MARKERS_FILE_NAME = 'pi-spawn-markers.json'
 
-/** run/ 目录名（先例：relay socket，relay-paths.ts getRelayRunDir 同款 <dataDir>/run 派生）。 */
+/** run/ 目录名（先例：control socket，infra/subagent-control/paths.ts 同款 <dataDir>/run 派生）。 */
 const RUN_DIR_NAME = 'run'
 
 /**
@@ -180,7 +180,7 @@ export function writeSpawnMarkersFile(
   fsDeps: SpawnMarkerFsDeps = defaultFsDeps,
 ): void {
   const finalPath = getSpawnMarkersPath(dataDir)
-  // run/ 不存在时自建（recursive 幂等；首启时 <dataDir>/run 尚未产生——先例 relay socket 同款）
+  // run/ 不存在时自建（recursive 幂等；首启时 <dataDir>/run 尚未产生——先例 control socket 同款）
   fsDeps.mkdirSync(dirname(finalPath), { recursive: true })
   // tmp 必须与终态文件同目录（跨文件系统 rename 不原子）；名含 pid/时戳/序号防并发 spawn 互撞
   const tmpPath = `${finalPath}.tmp-${process.pid}-${Date.now()}-${tmpSeq++}`

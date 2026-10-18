@@ -130,12 +130,11 @@ export class PiEngine implements EnginePort {
     };
   }
 
-  /** 探针（D7）：invocation 可解析（二进制/脚本存在）+ 版本解析。relay:false 显式
-   *  直连——探针测 pi 本体可解析性，经 relay 探到的是 runtime 健康，语义错位。 */
+  /** 探针（D7）：invocation 可解析（二进制/脚本存在）+ 版本解析。 */
   async probe(opts?: { force?: boolean }): Promise<ProbeReport> {
     if (!opts?.force && this.probeCache) return this.probeCache;
 
-    const invocation = getPiInvocation(["--version"], { relay: false });
+    const invocation = getPiInvocation(["--version"]);
     const invocationOk = isInvocationResolvable(invocation);
     const checks: ProbeReport["checks"] = [
       {
@@ -380,7 +379,7 @@ function buildRunOptionalFlags(task: AgentCallOpts, ctx: RunContext): Partial<Sp
     // fork-from 显式分叉源（协议 task.forkSource → --fork）。fork-from 与会话形态轮
     // 互不相交（fork-from 无 resume 键——宿主保证，续写走 resumeSessionFile）。
     ...(task.forkSource !== undefined ? { forkSource: task.forkSource } : {}),
-    // [F6] 根 session id 透传（relay 归属键 SESSION_ID 权威源；undefined 不挂键）。
+    // [F6] 根 session id 透传（嵌套引擎 engine_open 归属键；undefined 不挂键）。
     ...(ctx.sessionRootId !== undefined ? { sessionRootId: ctx.sessionRootId } : {}),
     // [D2 扩展加载显式化] 孙进程扩展路径集透传（协议 ctx 还原 → spawn-args 逐项拼
     // --extension；undefined 不挂键 = 不拼）。

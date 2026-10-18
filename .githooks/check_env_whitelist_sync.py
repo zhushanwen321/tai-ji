@@ -24,8 +24,8 @@ src/env.ts 的内联镜像（SDK 不得运行时 import @taiji/shared——F9）
 
 规则 3（2026-09-15 改名复查 R1-P1 补强）：env 名字面量镜像断言——SDK/引擎侧
 除 env.ts 两常量外还有多处字面量镜像（engine-manifest RESERVED_ENV_PREFIXES、
-relay-env 5 键、node-executor ENGINE_NODE_ENV、data-dir ×2、relay.mjs 零依赖
-镜像、zcode turn-timeout 2 键、system-prompt-trace preset-fallback 2 键（2026-09-20 R1
+control-env 2 键（L0 登记位）、node-executor ENGINE_NODE_ENV、data-dir ×2、
+zcode turn-timeout 2 键、system-prompt-trace preset-fallback 2 键（2026-09-20 R1
 评审补，shared PRESET_FALLBACK_ENV_KEYS ↔ extension types.ts 镜像 + deny 面不回退）），
 此前无机器断言，单侧改名/改动即静默漂移。
 A 类与权威侧（SSOT / shared paths.ts / SDK 同名常量）相等断言；B 类（无 SSOT
@@ -64,7 +64,6 @@ ENGINE_ENV_CONSTS = ['ENGINE_ENV_PREFIXES', 'ENGINE_ENV_DENY_LIST']
 #   B 类（形态）：无 SSOT 对应者，值必须以指定前缀开头（防旧名回退）
 SDK_DIR = PROJECT_ROOT / 'packages/subagent-engine-sdk/src'
 CORE_ENGINE_DIR = PROJECT_ROOT / 'packages/subagent-core/src/execution/engine'
-RELAY_MJS = PROJECT_ROOT / 'extensions/universal/subagent-workflow/relay/relay.mjs'
 
 STRING_CONST_RE_TMPL = r"(?:export\s+)?const\s+{name}(?:\s*:\s*string)?\s*=\s*['\"]([^'\"]+)['\"]"
 LOOSE_ARRAY_RE_TMPL = r"const\s+{name}\s*=\s*\[(.*?)\]"
@@ -196,19 +195,26 @@ def check_env_literal_mirrors() -> list[str]:
                 f'  SSOT：{ssot_prefixes}\n  镜像：{actual}'
             )
 
-    # A2 deny 清单双成员 ↔ SDK relay-env.ts 两键
-    deny_items = extract_const_items(ssot_text, 'ENGINE_ENV_DENY_LIST')
-    relay_env = SDK_DIR / 'relay-env.ts'
-    if deny_items is None:
-        errors.append('[ERROR] SSOT 未定义 ENGINE_ENV_DENY_LIST，规则 3 A2 无法锚定')
+    # A2 control env 两键 ↔ SDK env.ts L0 基础设施键登记（M3：relay 三键退役后的
+    # 键名 SSOT = src/control-env.ts；两键必须出现在 L0 清单，否则 L1 deny 剥除 /
+    # 嵌套继承面失锚——单侧改名或漏登记即本断言红）
+    control_env = SDK_DIR / 'control-env.ts'
+    l0_infra_keys = extract_const_items(read(SDK_DIR / 'env.ts'), 'ENGINE_ENV_L0_INFRA_KEYS')
+    if l0_infra_keys is None:
+        errors.append('[ERROR] SDK env.ts 未定义 ENGINE_ENV_L0_INFRA_KEYS，规则 3 A2 无法锚定')
     else:
-        for const_name, expected in [
-            ('RELAY_ENV_SESSION_ID', 'TAIJI_SUBAGENT_RELAY_SESSION_ID'),
-            ('RELAY_ENV_RECORD_ID', 'TAIJI_SUBAGENT_RELAY_RECORD_ID'),
-        ]:
-            expect_value(relay_env, const_name, expected, 'SSOT ENGINE_ENV_DENY_LIST 成员')
-            if expected not in deny_items:
-                errors.append(f'[ERROR] SSOT ENGINE_ENV_DENY_LIST 缺 `{expected}`（deny 面回退）')
+        for const_name in ['CONTROL_ENV_SOCKET', 'CONTROL_ENV_ROOT_SESSION_ID']:
+            expected = _extract_string_const(read(control_env), const_name) if control_env.exists() else None
+            if expected is None:
+                errors.append(
+                    f'[ERROR] {control_env.relative_to(PROJECT_ROOT)} 未定义 `{const_name}`'
+                    '（control env 键名 SSOT 丢失）'
+                )
+            elif expected not in l0_infra_keys:
+                errors.append(
+                    f'[ERROR] SDK env.ts ENGINE_ENV_L0_INFRA_KEYS 缺 `{expected}`'
+                    f'（control 键 L0 登记回退——嵌套 task pi 继承面失锚）'
+                )
 
     # A3 引擎 node 执行器 env ↔ SSOT ENGINE_ENV NODE
     m = re.search(r"NODE:\s*'([^']+)'", re.sub(r'//[^\n]*', '', ssot_text))
@@ -295,19 +301,7 @@ def check_env_literal_mirrors() -> list[str]:
     for f in [SDK_DIR / 'data-dir.ts', CORE_ENGINE_DIR / 'common' / 'data-dir.ts']:
         expect_value(f, 'TAIJI_DATA_DIR_ENV', 'TAIJI_AGENT_DATA_DIR', 'shared/src/paths.ts 读取名')
 
-    # A5 relay.mjs 零依赖镜像 ↔ SDK relay-env.ts 三键
-    if relay_env.exists() and RELAY_MJS.exists():
-        sdk_text = read(relay_env)
-        for const_name in ['RELAY_ENV_SOCKET', 'RELAY_ENV_SESSION_ID', 'RELAY_ENV_RECORD_ID']:
-            expected = _extract_string_const(sdk_text, const_name)
-            if expected is None:
-                errors.append(f'[ERROR] {relay_env.relative_to(PROJECT_ROOT)} 未定义 `{const_name}`')
-            else:
-                expect_value(RELAY_MJS, const_name, expected, 'SDK relay-env.ts 同名常量')
-
     # B 类形态断言（无 SSOT 对应，防旧名回退）
-    for const_name in ['RELAY_ENV_SOCKET', 'RELAY_ENV_NODE', 'RELAY_ENV_SCRIPT']:
-        expect_prefix(relay_env, const_name, 'TAIJI_SUBAGENT_RELAY_')
     zcode_consts = PROJECT_ROOT / 'packages/zcode-subagent-cli/src/constants.ts'
     for const_name in [
         'ZCODE_APPSERVER_STOP_TIMEOUT_ENV',
@@ -375,7 +369,7 @@ def main() -> int:
 
     print(f'[OK] {CONST_NAME} SSOT 单一性检查通过（定义点：shared/src/constants.ts）')
     print('[OK] ENGINE_ENV_PREFIXES / ENGINE_ENV_DENY_LIST SDK 镜像与 SSOT 逐项相等')
-    print('[OK] env 名字面量镜像（engine-manifest/relay-env/node-executor/data-dir×2/relay.mjs/zcode）断言通过')
+    print('[OK] env 名字面量镜像（engine-manifest/control-env/node-executor/data-dir×2/zcode）断言通过')
     return 0
 
 

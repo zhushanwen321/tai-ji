@@ -5,7 +5,7 @@
  * （`pnpm --filter @taiji/runtime start` 形态，验收脚本「重启 runtime」场景）与安装版
  * runtime 以同一数据目录 `~/.taiji` 并行双跑（端口不同不互抢）——新实例把旧实例的
  * session 当自己的 reattach + reaping orphan 杀幸存 subagent，退出时 destroyAll +
- * relay kill-on-disconnect 屠杀全部主 pi 与 subagent，单日 17 轮。根因 = 「同数据
+ * control 通道 kill-on-disconnect 屠杀全部主 pi 与 subagent，单日 17 轮。根因 = 「同数据
  * 目录已有活实例」零互斥；端口探活互斥从根断链（fail-fast 早于任何子进程 spawn）。
  *
  * 判定模型（端口活性为权威，文件只是候选来源）：

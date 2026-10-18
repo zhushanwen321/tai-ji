@@ -17,6 +17,7 @@
  * 业务参数。store.ts 仅做 ref 委托（纯转发，无逻辑），不再有模块级 *Impl 反模式
  * （原为绕 max-lines-per-function 拆分）。
  */
+import { ref } from 'vue'
 import type { ContentBlock, Message, ServerMessageMap, ToolCall } from '@taiji/shared'
 import { extractMainSessionId, isSubagentVirtualId } from '@taiji/shared'
 import {
@@ -123,7 +124,7 @@ export interface SubagentStreamChunk {
 }
 
 /**
- * session.getSubagentStreamState reply 快照（shared 协议投影别名）：RelayTee 既有内存
+ * session.getSubagentStreamState reply 快照（shared 协议投影别名）：SubagentTee 既有内存
  * 状态的只读视图。found=false = 该 record 当前无进行中流（未开始或已定稿）。
  */
 export type SubagentStreamStateSnapshot = ServerMessageMap['session.getSubagentStreamState']
@@ -142,6 +143,8 @@ interface SubagentChunkPartitionState {
   buffer: SubagentStreamChunk[]
   /** 已定稿最高消息序号（单调水位，从不重置；清除消息按携带 msgSeq 置位） */
   sealedMsgSeq: number
+  /** [M3 D6] live 流降级标注（reply.degraded 透传）：true = 镜像已停止发布，内容以落盘为准 */
+  degraded: boolean
 }
 
 /** 工厂依赖注入接口：全部 refs + setter + helpers 由 store 装配，本模块不直连外部状态。
@@ -249,6 +252,13 @@ export function createStreamingStateMachine(deps: StreamingStateMachineDeps) {
   const chunkPartitions = new Map<string, Map<string, SubagentChunkPartitionState>>()
 
   /**
+   * degraded 位的响应式版本号：分区表是纯流式簿记（非响应式，ADR-0049 例外），而 degraded
+   * 是 UI 可见流状态（SubagentTab 提示条，M3 D6）——位翻转时 bump 版本，读口先 track
+   * 版本再取分区真值（单一事实源 = 分区 degraded，不建第二份投影）。
+   */
+  const degradedVersion = ref(0)
+
+  /**
    * 同 record 在途拉取去重（C-data-18：禁止手写「同 key 并发异步去重 + settle 清理」
    * 同构实现，一律组装 createInflightDedup；key = `${virtualId}::${recordId}`）。
    * 槽独立于分区实例：分区清除/重建不弃在途拉取，其 settle（成功/失败）照常由 factory
@@ -258,7 +268,14 @@ export function createStreamingStateMachine(deps: StreamingStateMachineDeps) {
   const pullDedup = createInflightDedup<SubagentStreamStateSnapshot>()
 
   function createChunkPartition(): SubagentChunkPartitionState {
-    return { msgSeq: 0, expectedDeltaSeq: 0, buffer: [], sealedMsgSeq: 0 }
+    return { msgSeq: 0, expectedDeltaSeq: 0, buffer: [], sealedMsgSeq: 0, degraded: false }
+  }
+
+  /** 写分区 degraded 位（仅翻转时 bump 版本——读口依赖此版本建立响应式追踪）。 */
+  function setPartitionDegraded(state: SubagentChunkPartitionState, degraded: boolean): void {
+    if (state.degraded === degraded) return
+    state.degraded = degraded
+    degradedVersion.value += 1
   }
 
   function getOrCreateChunkPartition(virtualId: string, recordId: string): SubagentChunkPartitionState {
@@ -403,6 +420,10 @@ export function createStreamingStateMachine(deps: StreamingStateMachineDeps) {
    */
   function applySubagentStreamState(virtualId: string, recordId: string, response: SubagentStreamStateSnapshot): void {
     const state = getOrCreateChunkPartition(virtualId, recordId)
+    // 0. degraded（M3 D6）先于按序判定透传：reply 是 tee 当前状态的全量快照，非累计事件；
+    //    found=false 的降级回执（协议形态 msgSeq=0）会走分支 1 早退，故必须先采集。
+    //    非降级快照（字段缺省 = 未降级）覆盖回 false —— 查询快照即当前事实。
+    setPartitionDegraded(state, response.degraded === true)
     // 1. ≤ sealedMsgSeq → 已定稿，丢弃
     if (response.msgSeq <= state.sealedMsgSeq) return
     // 2. < 当前 msgSeq → 陈旧响应，丢弃
@@ -453,10 +474,12 @@ export function createStreamingStateMachine(deps: StreamingStateMachineDeps) {
     if (!byRecord) return
     if (recordId === undefined) {
       chunkPartitions.delete(virtualId)
+      degradedVersion.value += 1 // 降级读口响应式刷新（分区删除也是 degraded 位变化）
       return
     }
-    byRecord.delete(recordId)
+    if (!byRecord.delete(recordId)) return
     if (byRecord.size === 0) chunkPartitions.delete(virtualId)
+    degradedVersion.value += 1
   }
 
   /**
@@ -466,11 +489,25 @@ export function createStreamingStateMachine(deps: StreamingStateMachineDeps) {
    * shared isSubagentVirtualId——非三段键不属于任何 main session 名下）。
    */
   function clearSubagentChunkStateForSession(sessionId: string): void {
+    let cleared = false
     for (const virtualId of [...chunkPartitions.keys()]) {
       if (isSubagentVirtualId(virtualId) && extractMainSessionId(virtualId) === sessionId) {
         chunkPartitions.delete(virtualId)
+        cleared = true
       }
     }
+    if (cleared) degradedVersion.value += 1 // 降级读口响应式刷新（分区删除也是 degraded 位变化）
+  }
+
+  /**
+   * subagent 流降级读口（M3 D6 前端落点，组件/composable 消费）：true = 该 record 的 live
+   * 流已降级（镜像 seq 空洞 → runtime 停止发布，内容以落盘为准；重开/刷新可见完整历史）。
+   * 响应式依赖 degradedVersion（分区表非响应式，见其注释）；分区清除后回落 false。
+   */
+  function isSubagentStreamDegraded(virtualId: string, recordId: string): boolean {
+    // 版本依赖：degraded 位翻转时触发下游 computed 重算（分区表非响应式）
+    void degradedVersion.value
+    return chunkPartitions.get(virtualId)?.get(recordId)?.degraded ?? false
   }
 
   /**
@@ -544,6 +581,7 @@ export function createStreamingStateMachine(deps: StreamingStateMachineDeps) {
     applySubagentStreamState,
     requestSubagentStreamState,
     sealSubagentStream,
+    isSubagentStreamDegraded,
     clearSubagentChunkState,
     clearSubagentChunkStateForSession,
     finalizeMessages,

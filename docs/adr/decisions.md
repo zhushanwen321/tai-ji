@@ -664,6 +664,8 @@ WorkflowTab 步骤列表的数据源绑定从「workflow-record 全量快照（6
 
 **登记**：设计文档 `.tmp/tech-design/subagent-stream-chunk-design.md`（过程产物，不入库）；实施跨 shared / runtime / core / renderer 四包 + 本登记，清单见设计文档 §5。
 
+**【2026-10-18 现状更正（ADR-0145）】**：relay 通道已整体退役——本条产出端 = 引擎 fd3 raw mirror（`SubagentMirrorHub`）+ `SubagentTee`（`packages/runtime/src/infra/subagent-control/subagent-tee.ts`）；`session.getSubagentStreamState` 数据源 = runtime control server 的 tee，响应增 `degraded:boolean`（镜像 seq 空洞时 live 视图降级，reload 不受影响）。「增量推送 + 按需拉取」语义与触发源不变。
+
 ### ADR-0129 subagent 执行模型切换：用户覆盖语义与跨端命令通道（2026-10-06 用户裁决「按 A 做」）
 **决策**：
 - **用户覆盖赢**：`setModel` 在模型解析链第 0 层加用户覆盖记账，优先级高于 agent frontmatter 与脚本/调用参数显式指定的模型。
@@ -804,6 +806,7 @@ WorkflowTab 步骤列表的数据源绑定从「workflow-record 全量快照（6
 **ADR-0132 红线修订（2026-10-16 用户授权）**：本 ADR 的元数据供给写入修订 ADR-0132 的「taiji 全程零写入 `~/.zcode/` 任何文件」——仅允许写入两条**非秘密**元数据键（`account-provider:<pid>:identity` / `:auth-source`）；凭据仍全程 ZCode 自有、taiji 零 token/apiKey 注入、其余 `~/.zcode/` 文件仍零写入；该写入为用户 2026-10-16 授权的 hack 形态（ADR-0132 的 provider 配置零写入与副本落 taiji 数据目录语义不变）。
 
 **登记**：实装 = `packages/zcode-subagent-cli/src/appserver-launcher.ts`（安装门 + wrapper 落盘）/ `appserver-launcher-patches.ts`（三处改写 + 元数据供给）/ `packages/zcode-subagent-cli/src/preparer.ts` + `package.json`（目标家族 bigmodel-individual）/ 测试 `appserver-launcher.test.ts`（含补丁产物自读回归）+ `preparer.test.ts`；`docs/todo/engine-remote-membership-face.md` 附录的「ZCode 自身 bug」结论按本条修正。
+
 ### ADR-0144 provider API Key 明文回显 = 用户手势触发的单点只读 carve-out + 远程客户端可达性裁决（2026-10-18 交付裁决，fix-provider-save round 1 MF-1-4）
 
 **决策**：`config.revealProviderApiKey`（WS 请求；reply `config.providerApiKeyRevealed`）是 renderer 可达的唯一 provider 明文凭据通道，形态按五条红线收口：
@@ -827,3 +830,22 @@ WorkflowTab 步骤列表的数据源绑定从「workflow-record 全量快照（6
 **已接受的显示态残留**：外部轮换 api_key 而 `apiKeySet` 保持 true、`authMethod` 不变时，广播只携带布尔（`ProviderInfo` 无凭据指纹），编辑体无法察觉回显基线已过期——继续把旧值当作「所存值」展示；保存永不回写（`resolveApiKeyChange()` 对回显基线返回 undefined），恢复动作 = 关闭重开编辑体（重新回显按需读盘）。结构性消除需给 `ProviderInfo` 增凭据指纹（如 `apiKeyVersion` / `credentialUpdatedAt`）并在指纹变化时作废回显，禁止用时间推测代替。
 
 **登记**：数据源 = [data-source-registry.md](../architecture/data-source-registry.md) #65（provider 凭据与明文回显读通道）；约束 = 复用 C-proc-14（单点读取机器检查）与 C-data-01（单写 owner），**未新增约束族**；行为红线由 `packages/runtime/src/services/auth/__tests__/provider-credential-resolver.test.ts`「回显原值」组（oauth 不回落 / `$ENV` 原值 / custom 源）与 `packages/runtime/src/transport/settings-message-handler-reveal-apikey.test.ts`（reply 形状 + 单 reply）锁定。
+
+### ADR-0145 引擎 spawn 权收归 runtime + EngineTransport 双实现 + prompt response 唯一送达回执（2026-10-18 设计落地，relay-spawn-transport）
+
+**决策**：
+
+1. **进程拓扑**：托管态（runtime 存活）下引擎进程 spawn 权收归 runtime（subagent control server）；extension 只做控制客户端（`RuntimeEngineTransport`）。standalone（无 control env）继续 local spawn（`LocalEngineTransport`）。选择谓词单源 = SDK `isControlEnvActive`（`TAIJI_SUBAGENT_CONTROL_SOCKET` 非空 → runtime；空串/缺失 → local）；托管态连接失败显式报 `engine_transport_unavailable`，不静默回落 local。
+2. **传输契约**：`EngineTransport`（open/writeFrame/onFrame/onExit/close）定义在 extension ↔ engine 接缝，local 与 runtime 两实现共用；engine-protocol 语义（握手 / 请求-应答关联 / 反向路由 / 崩溃重建）留在 `EngineClient`。回执不放进 transport（transport 不理解 pi 协议），留在引擎的 run 生命周期。
+3. **送达回执语义**：`prompt` response 是唯一成功回执（pi 语义锚点 = PS-81，`docs/pi-semantics.json`；探针 `pi-semantics-prompt-response.test.ts`）；stdout 活性只用于零输出判定（prompt 写入后 30s 完全零输出 → `engine_prompt_not_delivered`）；pi 显式拒绝 → `engine_prompt_rejected`；stdin 不可用/EPIPE → 立即失败。**不加重试**（prompt 可能已产生副作用）。
+4. **实时流**：引擎以 fd3 raw mirror 保留 GUI live 流（runtime 注入 `TAIJI_ENGINE_RAW_MIRROR`；引擎 tap `child.stdout` 原始字节）；runtime 侧 `SubagentMirrorHub` + `SubagentTee` 翻译，seq 空洞 → `degraded:true`（停止发布 live 帧，reload 从 pi session/JSONL 恢复）；tee 是权威数据的派生视图，不是第二权威。
+5. **relay 退役**：relay 代理脚本与其协议探针/常量/接线整体删除——`packages/runtime/src/infra/relay/**`、SDK `relay-env.ts`/`relay-frames.ts`、core `./relay-env` 子入口、extension 的 relay 测试、bundle/verify 的 relay 资产拷贝与校验。
+6. **控制连接复用键**：extension 进程级共享 control 客户端按 `(socketPath, rootSessionId)` 复用（引用计数，归零 dispose）。一条控制连接只服务一个根会话——连接上首个 `engine_open` 固定 `rootSessionId`，通道关闭不重置，异根 open 以 `engine_open_failed{session}` 拒绝；无 run 上下文的探针以 spawn 期 temp 根独立成连接，不占用真根连接。实现 = core `transport/control-shared.ts`（`controlClientKey`）+ `transport/control-client.ts`（共享表/refcount）+ runtime `control-server.ts`（连接级根绑定）。
+7. **raw mirror seq 口径**：写侧 seq 按 `recordId` 在引擎进程内单调递增（跨 run 接续；丢弃也递增；首帧为 0），读取侧 record 生命周期 = 通道（= 引擎进程），两侧口径一致（读取侧坏帧/丢弃则表现为后续帧空洞）。任一 record 首帧非 0 或后续非 `last+1` → 该 record `degraded:true`，停止发布 live 帧；磁盘镜像与 reload 不受影响，其它 record/channel 不受影响。实现 = `packages/pi-subagent-cli/src/raw-mirror.ts`（`RawMirrorSeqRegistry`）+ runtime `mirror.ts`（`isMirrorSeqContinuous`）。
+8. **down 方向每帧恰好投递一次**：`stdin.write` 返回 false 只表示内核缓冲已满，该帧已被 Node 受理——不入队重写；背压期（`downAwaitingDrain` 或队列非空）到达的帧只入队，drain 时按 FIFO 各写出一次。上限判定只在真正入队时执行（per-channel 32MB/4096 帧 + 连接聚合 256MB），越界显式 `engine_backpressure_overflow` 并只关触发通道。实现 = runtime `control-server.ts` `writeDown`/`flushPendingDown`。
+9. **degraded 可见性（本轮实现边界）**：`markDegraded()` 只改 tee/查询态，不发布推送帧；`degraded` 在 `session.getSubagentStreamState` 拉取时落到 core 流状态机（拉取触发 = 订阅建立 / chunk 失步）。语义 = 重开/刷新后 visible；drawer 已开且 seq 空洞后无新 chunk 时提示条不即时出现。即时推送面未实现，偏差明细登记 impl-plan DC-8，由后续批次承接。
+10. **非缺省引擎首轮 probe→run 换代接受双 spawn**：per-root 键选型下，非缺省引擎新会话首轮 probe 以 spawn 期 temp 根建连并 spawn 引擎；run 携带真根时换代——旧通道只发 control `engine_close`、不先发 engine-protocol dispose，runtime `ENGINE_CLOSE_GRACE_MS`（3s）走满后组杀旧引擎并 spawn 真根引擎。接受为启动延迟成本（非功能错误；缺省 pi 免探不受影响），度量基线 = 启动延迟 +20% 重审；优化选项 = probe 携带权威根 / 换代前先 dispose。偏差明细登记 impl-plan DC-12。
+
+**依据**：事故根因 = relay 的 `drain` 早于 `accept`（stdin 无监听即 resume，大 prompt 静默丢失且无回执）+ 两个进程所有权；用户裁决的修复方向 M1（显式状态机 + 任务文本截断）→ M2（回执与零输出判定）→ M3（spawn 权收归 runtime，relay 删除）。设计文档 `.tmp/tech-design/relay-spawn-transport.md`（过程产物，不入库）。
+
+**登记**：实装 = `packages/runtime/src/infra/subagent-control/**`（control server / channel / mirror / tee / sweep）、`packages/subagent-core/src/execution/engine/client/transport/**`、`packages/pi-subagent-cli/src/{prompt-ack,raw-mirror}.ts`、SDK `protocol/control-protocol.ts` + `control-env.ts`；约束 C-proc-09 scope / C-proc-18 计数源 / C-proc-25 kill 链 / C-ext-27 子入口已同批更新；文档 = `architecture/subagent-engine-protocolization.md`、`architecture/env-propagation-boundary.md`、`TROUBLESHOOTING.md` #6-#9、`extensions/subagents/engine-development-guide.md`。

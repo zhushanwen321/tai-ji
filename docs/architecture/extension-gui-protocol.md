@@ -258,7 +258,7 @@ badge 的视觉态（亮/色/呼吸点）由 `meta.status` 决定，与 built-in
 | `renderCall(args)` | extension 在 execute 中构造 | `details.__gui__.call` | **M4** tool result block | 单向 |
 | `renderResult(result)` | extension 在 execute 中构造 | `details.__gui__.result` | **M4** tool result block | 单向 |
 | `setWidget(key, factory)` | `setWidgetDual()` helper（内部 `guiSetWidget` 直编码 GUI 臂） | extension_ui_request（marker 编码进 string[]） | **M17** composer 任务托盘的协议 widget 区 | 单向 |
-| `setStatus(key, text)` | 复用 pi 原生（已有效） | extension_ui_request | **M8** status bar | 单向 |
+| `setStatus(key, text)` | taiji 内静默 noop（底栏已退役，ADR-0141）；独立 pi CLI 不受影响 | extension_ui_request（翻译为 noop） | 无（原 **M8** status bar 已删） | 单向 |
 | `registerMessageRenderer` | extension 在 sendMessage 中构造 | `message.details.__gui__` | **M5** custom message | 单向 |
 | `ctx.ui.custom(factory)` | `uiFormInteract()` helper（extension-protocol ui-form 模块） | select 通道 + `UI_FORM_MARKER` + WS 回传 | **M11** companion | **双向** |
 
@@ -421,11 +421,9 @@ function refreshDisplay(ctx: ExtensionContext, todos: Todo[]) {
 }
 ```
 
-### 4.4 status（setStatus）
+### 4.4 status（setStatus）——taiji 内已退役
 
-**复用 pi 原生**，无需改动。`ctx.ui.setStatus()` 在 RPC 模式下已有效（fire-and-forget），event-adapter 已正确翻译。
-
-修复点仅在前端：将 status 从 SideDrawer footer 提升为全局底栏，并恢复 ANSI 着色（不再 stripAnsi）。
+**taiji 内静默 noop**：底栏 StatusBar 及其数据链已整体退役（[ADR-0141](../adr/decisions.md)）——`ctx.ui.setStatus()` 的 RPC 请求由 event-adapter 的 `translateStatusRequest()` 翻译为 noop，不广播、不保留颜色信息（`textRaw` 面随退役删除）。extension 无需改造（独立运行 pi CLI 时状态栏仍有意义）；taiji 内的进度/状态展示改用 composer 任务托盘 widget（§4.3）。
 
 ### 4.5 custom message（registerMessageRenderer）
 
@@ -650,7 +648,7 @@ if (method === 'setWidget') {
 }
 ```
 
-**setStatus 分支**：不再 stripAnsi（保留颜色信息），或提供 `textRaw` 字段。
+**setStatus 分支**：已随状态栏底栏退役整体删除（ADR-0141）——`translateStatusRequest()` 直接返回 noop，无 stripAnsi / `textRaw` 面。
 
 **handleToolExecutionUpdate 修正**（审查 S5）：当前把整个 `partialResult` 塞进 `detail`（单数），需改为提取 `partialResult.details`：
 
@@ -862,6 +860,8 @@ const ansiContent = computed(() => props.tool?.outputRaw)
 
 ### 9.4 全局 Status Bar（审查 C5——状态提升）
 
+> **[已废弃] 方案未采用**：状态栏底栏已整体退役（[ADR-0141](../adr/decisions.md)），状态展示由 composer 任务托盘的协议 widget 区承接（§4.3）；以下为原设计草案，仅供追溯。
+
 当前 status 绑死在 SideDrawer footer（SideDrawer.vue:104-116），SideDrawer 用 v-if 卸载时 status 丢失。需提取 composable：
 
 ```typescript
@@ -1064,7 +1064,7 @@ extension 用通用原语组合表达领域数据，不再有专属组件类型�
 |---------|---------|---------|-------------|
 | **tool result** | 纯文本 `{{ result }}` | Block.vue: `<span>{{ result }}</span>` + `font-mono whitespace-pre-wrap` | 加 `GuiComponentRenderer` 分支 + `AnsiRenderer` 兜底 |
 | **widget（M17）** | composer 任务托盘的协议 widget 区（已实现；原「对话流 WidgetArea」消费端已于 2026-09-16 退役，见 [D11](../design/composer-task-tray.md)） | 托盘 widget 区：icon 按钮行（`meta` 驱动 icon/badge/状态色）+ 面板内 `GuiComponentRenderer`（`guiTree` 逐项渲染） | `extension:widget`/`extension:widgetGui` 订阅 → ViewHostStore per-session 缓存 → 托盘消费；widget 不再进 SideDrawer/sidebar |
-| **status** | 纯文本 footer | SideDrawer.vue: `<footer><span>key</span><span>text</span></footer>` | 提取 `useExtensionStatus()` composable + 挂载到 Workspace 底部 |
+| **status** | **已退役**（底栏 StatusBar 及其数据链删除，ADR-0141；pi 原生 setStatus 在 taiji 内翻译为 noop） | — | 无需对接（独立 pi CLI 不受影响） |
 | **custom message** | BgNotifyCard（结构化）/ SystemNotice（纯文本）| MessageStream.vue: `v-else-if="bgNotify"` | 加 `message.details.__gui__` 检测 + `GuiComponentRenderer` |
 | **dialog** | **不存在** | — | 新建 `ExtensionUIDialog` + `extension.ui_request` handler |
 
@@ -1132,7 +1132,7 @@ taiji 已有 3 个结构化渲染范例，协议新增组件必须对齐其 CSS 
 本协议**不修改 pi 源码**，**不覆盖 pi 原有行为**。具体：
 
 - TUI 模式下 extension 的 renderResult/renderCall/setWidget(custom factory)/registerMessageRenderer 照常工作
-- RPC 模式下 pi 原有的 setWidget(string[]) / setStatus / select / confirm / input 行为不变
+- RPC 模式下 pi 原有的 setWidget(string[]) / select / confirm / input 行为不变；setStatus 在 taiji 内为静默 noop（底栏已退役，ADR-0141），独立 pi CLI 不受影响
 - `details.__gui__` 是 extension 自主放入的额外字段，pi 原样透传（agent-session.js `result: event.result` 零过滤），不与 pi 的任何逻辑冲突
 - 协议包是纯类型 + helper，零运行时副作用，不引入对 pi 的依赖
 

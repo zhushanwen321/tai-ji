@@ -7,6 +7,7 @@
 
 import type { ChildProcess } from "node:child_process";
 import os from "node:os";
+import { PassThrough } from "node:stream";
 
 import { isBrokenPipeError } from "@zhushanwen/pi-rpc";
 import { getLogger, pumpNdjsonLines } from "@zhushanwen/subagent-engine-sdk";
@@ -15,6 +16,8 @@ import { unregisterActiveChild } from "./active-children.ts";
 import { dispatchControlResponse } from "./control-responses.ts";
 import { toErrorMessage } from "./error-message.ts";
 import { extractGetStateFields, type GetStateResult } from "./get-state-handshake.ts";
+import type { PromptAckTracker, PromptAckResult } from "./prompt-ack.ts";
+import type { RawMirrorWriter } from "./raw-mirror.ts";
 import {
   deriveSessionFilePath,
   findSessionFileByHeaderId,
@@ -65,6 +68,12 @@ export interface RunEndState {
    * 成功 run 的真实轮数；undefined = agent_settled 未到达（失败路径），record 值即真实值。
    */
   settledTurnCount?: number;
+  /**
+   * [M2 D3] prompt 送达失败的结算结果（tracker onFailure 落位；collectRunResult
+   * 据此把退出码文案覆盖为 engine_prompt_not_delivered / engine_prompt_rejected
+   * 错误码前缀终态——不是裸「子进程退出 137」）。undefined = 送达链路无失败。
+   */
+  promptAckFailure?: PromptAckResult;
 }
 
 /** session 身份回填状态机（三路写同源；get_state 监听表随行持有）。 */
@@ -75,8 +84,8 @@ export interface SessionIdentityTracker { // oe-exempt:20260930:framework:CLI �
   noteHeader(header: SpawnSessionHeader): void;
   /** get_state response 监听登记（握手 + 迟到 response 自弃）。 */
   addStateListener(id: string, resolver: (data: unknown) => void): void;
-  /** response 帧分发（一次性消费；未知 id 自弃；失败帧以 undefined resolve）。 */
-  dispatchStateResponse(id: string | undefined, success: boolean, data: unknown): void;
+  /** response 帧分发（一次性消费；未知 id 自弃；失败帧以 undefined resolve）。@returns 是否消费了已登记的 get_state 应答。 */
+  dispatchStateResponse(id: string | undefined, success: boolean, data: unknown): boolean;
   /** get_state 字段落位（同步路径 + 握手兜底共用；新值才覆盖 + 重发 handleReady）。 */
   applyGetStateFields(fields: GetStateResult): void;
   /** 兜底反查（LC-4）：header/握手全 miss 时按 sessionId 后缀匹配 sessionDir。 */
@@ -138,10 +147,11 @@ export function createSessionIdentityTracker(
       });
     },
     dispatchStateResponse(id, success, data) {
-      if (id === undefined || !stateListeners.has(id)) return;
+      if (id === undefined || !stateListeners.has(id)) return false;
       const resolver = stateListeners.get(id);
       stateListeners.delete(id);
       resolver?.(success ? data : undefined);
+      return true;
     },
     applyGetStateFields,
     fallbackSessionFileByHeaderId() {
@@ -160,6 +170,27 @@ export function createSessionIdentityTracker(
   };
 }
 
+/** run 内 stdout/stdin 诊断计数（[M2 D3] 五元组的计数半面；spawn-runner 闭包读）。 */
+export interface PromptRunCounters {
+  /** stdin 已写字节（stdin-writer onBytesWritten 累计）。 */
+  bytesWritten: number;
+  /** 子进程 stdout 总字节（chunk 层累计，含 prompt 前的握手应答与未成行字节）。 */
+  stdoutBytes: number;
+  /** prompt 写入后的 stdout 字节（promptWritten 置位后按 chunk 累计，含未成行字节）。 */
+  stdoutBytesAfterPrompt: number;
+  /** prompt 已写入（spawn-runner 在 sendPromptCommand delivered 后置位）。 */
+  promptWritten: boolean;
+  /** get_state response 已应答（success 与否都算——证明 stdout 活着）。 */
+  getStateAnswered: boolean;
+  /** 最近一次 SdkEvent 的 type（pump event 分支更新）。 */
+  lastEventType?: string;
+}
+
+/** 新建归零计数器（spawn-runner 每 run 装配）。 */
+export function createPromptRunCounters(): PromptRunCounters {
+  return { bytesWritten: 0, stdoutBytes: 0, stdoutBytesAfterPrompt: 0, promptWritten: false, getStateAnswered: false };
+}
+
 /** stdout pump 接线依赖（runSpawnOnce 装配后的每 run 依赖集）。 */
 export interface StdoutPumpDeps {
   child: ChildProcess;
@@ -170,11 +201,27 @@ export interface StdoutPumpDeps {
   enqueueUi: (id: string, request: ExtensionUiRequest) => void;
   stderrTee: { close(): void } | undefined;
   runEnd: RunEndState;
+  /** [M2 D3] prompt 回执 tracker（response 分支分发 + chunk 层活性上报；缺省 = 旧形态直通，兼容既有装配/测试）。 */
+  promptAck?: PromptAckTracker;
+  /** [M2 D3] 诊断计数器（缺省 = 不计数，兼容既有装配/测试）。 */
+  runCounters?: PromptRunCounters;
+  /**
+   * [M3 D6] fd3 raw mirror 写入器（缺省 = 镜像通道未开通，stdout 走原 setEncoding
+   * 直路）。开通时 child.stdout 保持原始字节形态：tap 先挂（原始 Buffer，行切分在
+   * 写入器内），主解析链经 PassThrough 桥接后再 setEncoding（pumpNdjsonLines 单点）
+   * ——两条链消费同一次读取的同一 chunk 序列（tap 先注册，顺序一致）。
+   */
+  rawMirror?: RawMirrorWriter;
 }
 
-/** stdout 行消费（parseSpawnLine 分类 → 身份/事件/响应/UI 各通道）。 */
+/**
+ * stdout 行消费（parseSpawnLine 分类 → 身份/事件/响应/UI 各通道 + [M2 D3] 回执分发）。
+ * 字节计数与零输出活性上报**不在这里**：它们是 chunk 级事实（{@link wireChildStdoutPump}
+ * 的 noteStdoutChunk），行消费器只做解析——否则未成行的 partial chunk（极端大行
+ * 慢写）不产生行、既不计字节也不取消计时器，健康 pi 会被误判 not_delivered。
+ */
 function createLineConsumer(deps: StdoutPumpDeps): (line: string) => void {
-  const { recordId, identity, handleSdkEvent, enqueueUi } = deps;
+  const { recordId, identity, handleSdkEvent, enqueueUi, promptAck, runCounters } = deps;
   return (line: string): void => {
     const parsed = parseSpawnLine(line);
     if (parsed === null) return;
@@ -183,10 +230,16 @@ function createLineConsumer(deps: StdoutPumpDeps): (line: string) => void {
         identity.noteHeader(parsed.header);
         return;
       case "event":
+        if (runCounters !== undefined) runCounters.lastEventType = parsed.event.type;
         handleSdkEvent(parsed.event);
         return;
       case "response":
-        identity.dispatchStateResponse(parsed.id, parsed.success, parsed.data);
+        // [M2 D3] get_state response（无论 success）证明 stdout 活着 → 五元组置位；
+        // 同时分发 prompt 回执 tracker（只有 command==="prompt" 且 id 匹配才结算）。
+        if (identity.dispatchStateResponse(parsed.id, parsed.success, parsed.data) && runCounters !== undefined) {
+          runCounters.getStateAnswered = true;
+        }
+        promptAck?.dispatch(parsed.id, parsed.command, parsed.success, parsed.data, parsed.error);
         // [subagent-model-switch §7.3] 进程级控制应答等待表并行分发（setModel 通路
         // ——run 生命周期外的控制面操作等不到 per-run 监听表；两表按 id 各自一次性
         // 消费，未登记 id 各自自弃）。
@@ -196,6 +249,9 @@ function createLineConsumer(deps: StdoutPumpDeps): (line: string) => void {
         enqueueUi(parsed.id, parsed.request);
         return;
       case "invalid":
+        // [C-U1] invalid 行不产生事件，但同样的字节已经在 chunk 层上报过活性
+        // （noteStdoutChunk）——「只吐非 JSON / 缺 type 行」的健康 pi 不会在
+        // 30s 窗口被误杀。此处只留解析失败诊断。
         logger.debug(
           `[session-runner] invalid stdout line from ${recordId} (ignored): ${parsed.raw.slice(0, INVALID_LINE_LOG_CHARS)}`,
           { error: parsed.error },
@@ -311,7 +367,38 @@ export function wireChildStdoutPump(deps: StdoutPumpDeps): Promise<number> {
     deps.runEnd.resolveChatRun = resolveExit;
     const consumeLine = createLineConsumer(deps);
     const onClose = createCloseFinalizer(deps, resolveExit);
-    pumpNdjsonLines(child.stdout, consumeLine);
+    // [M2 D3 零输出判定] 活性/字节计数在 chunk 层（任意字节，含无换行的 partial
+    // chunk）——行消费器只做解析，避免「极端大行慢写」不产出完整行时计时器不被
+    // 取消而误走 engine_prompt_not_delivered + SIGKILL（设计 D3「任意字节」）。
+    // 注册序在解析链监听器之后：同一 chunk 内的完整行先完成解析（get_state /
+    // lastEventType 已落位），随后 chunk 上报只补「解析链仍在缓冲的未成行字节」的
+    // 活性证据；timer 已清时 onChannelActivity 为 no-op，不会重复 warn。
+    const noteStdoutChunk = (chunk: Buffer | string): void => {
+      if (chunk.length === 0) return;
+      if (deps.runCounters !== undefined) {
+        const bytes = typeof chunk === "string" ? Buffer.byteLength(chunk, "utf8") : chunk.length;
+        deps.runCounters.stdoutBytes += bytes;
+        if (deps.runCounters.promptWritten) deps.runCounters.stdoutBytesAfterPrompt += bytes;
+      }
+      deps.promptAck?.onChannelActivity();
+    };
+    if (deps.rawMirror !== undefined && child.stdout !== null) {
+      // [M3 D6] 镜像通道开通：tap 必须挂 setEncoding 之前——Node 的 setEncoding 是
+      // 流级状态（同一流上先注册的监听器同样收到解码后的 string），保持 child.stdout
+      // 不解码、把解码留给 PassThrough，tap 才能拿到原始 Buffer。
+      child.stdout.on("data", (chunk: Buffer) => {
+        deps.rawMirror?.tap(chunk);
+      });
+      const decoderInput = new PassThrough();
+      child.stdout.pipe(decoderInput);
+      pumpNdjsonLines(decoderInput, consumeLine);
+      // 解析链监听器（pump）先注册 → 同 chunk 先解析；chunk 活性紧随其后。
+      decoderInput.on("data", noteStdoutChunk);
+    } else {
+      pumpNdjsonLines(child.stdout, consumeLine);
+      // 同上：pump 监听器先注册（其 setEncoding 对后续监听器同样生效）。
+      child.stdout?.on("data", noteStdoutChunk);
+    }
     child.once("close", onClose);
     child.once("error", (err) => {
       logger.error(`[session-runner] child ${deps.recordId} error event`, {

@@ -1,14 +1,11 @@
-// D8 兼容公共面薄壳 + relay 透传测试（W8，设计 §3.6 D8 表 / H12，impl-plan §2.8）。
+// D8 兼容公共面薄壳测试（W8，设计 §3.6 D8 表 / H12，impl-plan §2.8）。
 //
 // 覆盖面：
 // - createZcodeEngine 薄壳：deps → 协议客户端映射（返回 RemoteEngine('zcode')，
 //   read 走协议；cliPath 覆盖 command；sources 忽略不抛）；
-// - relay 透传正反例（H12）：宿主 env 三键经 baseEnv → L0 注入引擎子进程（原样
-//   转发）；身份键 SESSION_ID/RECORD_ID 被 buildEngineChildEnv L1 deny 剥除
-//   （引擎按 run.params.ctx 重写，不靠 env 继承）；
+// - 引擎子进程 L0 env：deps.engineDataDir → TAIJI_AGENT_DATA_DIR 显式注入；
 // - registerZcodeEngine 薄壳：确保 'zcode' descriptor 注册（vendored 相对定位成功，
-//   workspace 布局 coreDir/../zcode-subagent-cli）；经 routeEngine 行为面断言；
-// - readRelayForwardEnv 原语：三键全有才转发（isRelayActive 同判），缺一 → undefined。
+//   workspace 布局 coreDir/../zcode-subagent-cli）；经 routeEngine 行为面断言。
 //
 // fake 引擎 CLI 复用 fixtures/fake-engine-cli.mjs（直接以 node 参数形态 spawn——
 // 不走引擎包发现，cliPath 显式覆盖，manifest 走 CONSERVATIVE 保守值）。
@@ -23,10 +20,6 @@ import {
   registerZcodeEngine,
   routeEngine,
 } from '@zhushanwen/subagent-core'
-// readRelayForwardEnv 的公共子入口（core barrel 不重复导出 relay 常量面——runtime
-// 既有 import 形态 @zhushanwen/subagent-core/relay-env，禁手写字符串镜像）。
-import { readRelayForwardEnv } from '@zhushanwen/subagent-core/relay-env'
-
 const FIXTURE_CLI = path.join(path.dirname(fileURLToPath(import.meta.url)), 'fixtures/fake-engine-cli.mjs')
 
 let tmpDir: string
@@ -141,56 +134,13 @@ describe('W8 D8 兼容公共面薄壳', () => {
   })
 })
 
-describe('W8 H12 relay 透传（正反例）', () => {
-  it('正例：三键原样转发到引擎子进程 env（L0）', async () => {
+describe('W8 D8 引擎子进程 L0 env 注入', () => {
+  it('数据根经 L0 显式注入（deps.engineDataDir → TAIJI_AGENT_DATA_DIR）', async () => {
     tmpDir = tmpDir ?? fs.mkdtempSync(path.join(os.tmpdir(), 'w8-d8-compat-'))
     dataDir = dataDir ?? path.join(tmpDir, 'data')
     fs.mkdirSync(dataDir, { recursive: true })
     setEnv('TAIJI_AGENT_DATA_DIR', dataDir)
-    const envEcho = await fakeCliEnvEcho({
-      engineDataDir: dataDir,
-      cliPath: FIXTURE_CLI,
-      processEnv: {
-        TAIJI_SUBAGENT_RELAY_SOCKET: '/tmp/relay.sock',
-        TAIJI_SUBAGENT_RELAY_NODE: '/usr/bin/node',
-        TAIJI_SUBAGENT_RELAY_SCRIPT: '/tmp/relay.mjs',
-      },
-    })
-    expect(envEcho['TAIJI_SUBAGENT_RELAY_SOCKET']).toBe('/tmp/relay.sock')
-    expect(envEcho['TAIJI_SUBAGENT_RELAY_NODE']).toBe('/usr/bin/node')
-    expect(envEcho['TAIJI_SUBAGENT_RELAY_SCRIPT']).toBe('/tmp/relay.mjs')
-  }, 20_000)
-
-  it('反例：身份键 SESSION_ID/RECORD_ID 被 L1 deny 剥除，不进引擎子进程 env', async () => {
-    tmpDir = tmpDir ?? fs.mkdtempSync(path.join(os.tmpdir(), 'w8-d8-compat-'))
-    dataDir = dataDir ?? path.join(tmpDir, 'data')
-    fs.mkdirSync(dataDir, { recursive: true })
-    setEnv('TAIJI_AGENT_DATA_DIR', dataDir)
-    const envEcho = await fakeCliEnvEcho({
-      engineDataDir: dataDir,
-      cliPath: FIXTURE_CLI,
-      processEnv: {
-        TAIJI_SUBAGENT_RELAY_SOCKET: '/tmp/relay.sock',
-        TAIJI_SUBAGENT_RELAY_NODE: '/usr/bin/node',
-        TAIJI_SUBAGENT_RELAY_SCRIPT: '/tmp/relay.mjs',
-        TAIJI_SUBAGENT_RELAY_SESSION_ID: 'parent-session',
-        TAIJI_SUBAGENT_RELAY_RECORD_ID: 'parent-record',
-      },
-    })
-    expect(envEcho['TAIJI_SUBAGENT_RELAY_SESSION_ID']).toBeUndefined()
-    expect(envEcho['TAIJI_SUBAGENT_RELAY_RECORD_ID']).toBeUndefined()
-    // 数据根经 L0 显式注入（deps.engineDataDir 映射）。
+    const envEcho = await fakeCliEnvEcho({ engineDataDir: dataDir, cliPath: FIXTURE_CLI })
     expect(envEcho['TAIJI_AGENT_DATA_DIR']).toBe(dataDir)
   }, 20_000)
-
-  it('readRelayForwardEnv：三键全有才转发；缺一 undefined（isRelayActive 同判）', () => {
-    const full = {
-      TAIJI_SUBAGENT_RELAY_SOCKET: '/tmp/s.sock',
-      TAIJI_SUBAGENT_RELAY_NODE: '/usr/bin/node',
-      TAIJI_SUBAGENT_RELAY_SCRIPT: '/tmp/r.mjs',
-    }
-    expect(readRelayForwardEnv(full)).toEqual({ socket: '/tmp/s.sock', node: '/usr/bin/node', script: '/tmp/r.mjs' })
-    expect(readRelayForwardEnv({ ...full, TAIJI_SUBAGENT_RELAY_SCRIPT: undefined })).toBeUndefined()
-    expect(readRelayForwardEnv({})).toBeUndefined()
-  })
 })

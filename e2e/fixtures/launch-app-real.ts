@@ -227,7 +227,7 @@ export async function launchRealApp(opts: RealLaunchOptions = {}): Promise<{
   }
 
   // 子进程 env：继承 process.env 后剥离 ELECTRON_RUN_AS_NODE（与 launch-app.ts mock 轨同款
-  // 构造性免疫）。该变量（relay 打包模式注入，agent bash / Electron 宿主内可见）会让
+  // 构造性免疫）。该变量（打包模式注入，agent bash / Electron 宿主内可见）会让
   // electron 二进制退化成纯 node 模式，不认 --remote-debugging-port → 全部用例
   // electron.launch `Process failed to launch!` + `Electron: bad option`——剧本级
   // `env -u ELECTRON_RUN_AS_NODE` 之外的第二道防线，直接裸跑 fixture 同样免疫。

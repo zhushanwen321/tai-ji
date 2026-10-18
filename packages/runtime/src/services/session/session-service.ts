@@ -33,10 +33,10 @@ import { isBtwVirtualId } from '@taiji/shared'
 import type { SessionSummary, SessionGroup, ServerMessage, ServerMessageMap, SubagentRecord, WorkflowRunRecord, BatchDeleteResult, SegmentsMetadataEntry, ProviderId, PlanStateView, SessionRevokeMessageReply, SendPromptReason, WorkflowRunEventsReply, WorkflowDagReply } from '@taiji/shared'
 import type { SubagentEngineConfigView } from '@zhushanwen/extension-protocol'
 // subagent 流状态只读快照形状（B2 subagent-stream-chunk §4.1）：type-only import——
-// services 层不 value import 有状态 IO infra（relay registry 句柄归组合根 index.ts，
+// services 层不 value import 有状态 IO infra（control server 句柄归组合根 index.ts，
 // 经 setSubagentStreamStateSource 晚绑定注入，同 setBtwService 模式），仅借 infra 侧
 // 接口类型对齐 wire 契约（与 shared session.getSubagentStreamState reply 逐字段一致）。
-import type { RelayTeeStreamState } from '../../infra/relay/relay-tee.js'
+import type { SubagentTeeStreamState } from '../../infra/subagent-control/subagent-tee.js'
 import type {
   ISessionService, IMessageBroker, SessionCreateOptions,
   IEventAdapter, IExtensionService, IConfigService,
@@ -157,12 +157,12 @@ const BG_RECONCILE_COMMAND = '/__taiji_bg_reconcile__'
 
 /**
  * subagent 流状态数据源端口（B2 subagent-stream-chunk §4.1，session.getSubagentStreamState
- * RPC 的数据源路由半）：(sessionId, recordId) → RelayTee 内存三元组只读投影，undefined =
+ * RPC 的数据源路由半）：(sessionId, recordId) → SubagentTee 内存三元组只读投影，undefined =
  * 该 record 无在管 tee（未注册 / child exit 已清理 / session 不匹配）。实现由组合根注入
- * （relay registry 句柄归 index.ts——「services 层不 value import 有状态 IO infra」同款
- * 约束，见 rollingRestart relayInFlight 接线注释）。
+ * （control server 句柄归 index.ts——「services 层不 value import 有状态 IO infra」同款
+ * 约束，见 rollingRestart engineChannelsInFlight 接线注释）。
  */
-export type SubagentStreamStateSource = (sessionId: string, recordId: string) => RelayTeeStreamState | undefined
+export type SubagentStreamStateSource = (sessionId: string, recordId: string) => SubagentTeeStreamState | undefined
 
 export class SessionService implements ISessionService, ILifecycleSessionOps, IDispatcherSessionOps, IScannerSessionOps {
   /**
@@ -235,7 +235,7 @@ export class SessionService implements ISessionService, ILifecycleSessionOps, ID
   private btwService: (Pick<BtwService, 'ensureProcess'> & Partial<Pick<BtwService, 'getLine'>>) | null = null
   /**
    * subagent 流状态数据源（B2 subagent-stream-chunk §4.1，组合根晚绑定注入）：实现与
-   * 语义见文件头 SubagentStreamStateSource。未注入（存量测试构造 / relay 未启用）时
+   * 语义见文件头 SubagentStreamStateSource。未注入（存量测试构造 / control 未启用）时
    * getSubagentStreamState 恒返回 found:false 缺省形态（协议合法回执，非错误）。
    */
   private subagentStreamStateSource: SubagentStreamStateSource | null = null
@@ -761,9 +761,9 @@ export class SessionService implements ISessionService, ILifecycleSessionOps, ID
   }
 
   /**
-   * 注入 subagent 流状态数据源（B2 subagent-stream-chunk §4.1；组合根在 initRelayServer
-   * 后接线）。消费面按调用时刻解析（闭包内 getActiveRelayRegistry 延迟取实例），注入
-   * 时机无需先于 relay server 激活。
+   * 注入 subagent 流状态数据源（B2 subagent-stream-chunk §4.1；组合根在
+   * initControlServer 后接线）。消费面按调用时刻解析（闭包内 getActiveControlServer
+   * 延迟取实例），注入时机无需先于 control server 激活。
    */
   setSubagentStreamStateSource(source: SubagentStreamStateSource): void {
     this.subagentStreamStateSource = source
@@ -1148,7 +1148,7 @@ export class SessionService implements ISessionService, ILifecycleSessionOps, ID
   async getSubagentHistory(sessionId: string, subagentId: string): Promise<HistoryFileReadResult> { return this.records.getSubagentHistory(sessionId, subagentId) }
   /**
    * 运行中 subagent 流状态只读快照（B2 subagent-stream-chunk §4.1，session.getSubagentStreamState
-   * RPC 后端）：单次同步读（数据源 = RelayTee 内存三元组，与 feed 同一事件循环串行，无锁——
+   * RPC 后端）：单次同步读（数据源 = SubagentTee 内存三元组，与 feed 同一事件循环串行，无锁——
    * 执行结构本身保证一致）。数据源未注入或源报告无该 record 条目 → found:false 缺省形态
    * （协议注释：无进行中流 = 合法回执非错误，msgSeq/lastDeltaSeq 恒 0、lines 恒空）。
    */

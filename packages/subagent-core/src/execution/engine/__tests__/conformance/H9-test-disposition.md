@@ -64,7 +64,7 @@ W5/W7 已把自包含件迁入引擎包（pi-subagent-cli / zcode-subagent-cli `
 | descendant-sweep / descendant-sweep-guards / kill-all-escalation / service-kill-escalation / spawned-children | 收割/杀链（SDK kill-chain + A3 真机门；镜像面 = protocol-blackbox） |
 | epipe-fallback / session-runner-epipe | EPIPE 兜底（pi 包 stdin-writer/spawn-runner 测试） |
 | keep-alive-no-progress / settled-watchdog / timeout-integration | 进度/超时判据（ADR-0047 域）。**处置改写（2026-09-09，Gate B 后纠正）**：原「pi 包 + A8 真机门」承接声称不成立——pi 包内无等价测试（grep keep-alive/no-progress/settled-watchdog/timeout-integration 零命中），Gate B 时点 A8 真机门为 blocked/manual、不构成承接证据；该三测试的行为面**随 keep-alive 协议化偏差登记**（impl-plan §5 2026-09-09 行：workflow 域单次 run 口径 agent_end 即终结，后台后代保活编排未随迁移），**不声称已承接** |
-| recursive-visibility-env / start-sync-model-guard / session-runner-schema-env | 引擎内 env 注入面（pi 包 spawn-args/relay-env 测试；W12 env 契约单测） |
+| recursive-visibility-env / start-sync-model-guard / session-runner-schema-env | 引擎内 env 注入面（pi 包 spawn-args 测试；W12 env 契约单测） |
 | rpc-mode / run-spawn-rpc-mode / run-spawn-integration / run-spawn-resume / run-spawn-edges / run-and-finalize-anchoring / run-spawn-stdout-callback-throw / spawn-worktree-guidance | run 全链编排（pi 包 spawn-runner/protocol-e2e；协议面 = W10 黑盒套件） |
 | session-runner-branch-cache-lru / session-runner-close-prune / session-runner-dispatch / session-runner-heartbeat-idle-fallback / session-runner-lifecycle-helpers | session-runner 内部机制（pi 包） |
 | max-turns-to-watchdog-ms | turn limiter 换算（pi 包 turn-limiter 测试） |

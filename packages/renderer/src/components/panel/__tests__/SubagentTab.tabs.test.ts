@@ -45,6 +45,11 @@ vi.mock('@/stores/panel', () => ({
   usePanelStore: () => ({ focusedSessionId: ref('main-1') }),
 }))
 
+// chat store readers 面（M3 D6 降级位读口）：本文件不测降级，恒 false 桩。
+vi.mock('@/stores/chat', () => ({
+  useChatStore: () => ({ isSubagentStreamDegraded: () => false }),
+}))
+
 // ── subagent store：records 双成员 fixture + drawer 二级 tab 状态（reactive）──
 const recordsFixture = reactive([
   { subagentId: 'sa-1', sessionFile: '/1.jsonl', agent: 'worker', slug: 'work', task: 't', status: 'running', model: 'p/a', engine: undefined },

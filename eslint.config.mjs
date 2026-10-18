@@ -10,7 +10,7 @@ const coreExports = JSON.parse(
 const coreSubentries = Object.keys(coreExports).filter((k) => k !== '.');
 const coreSubentryAllowlist = coreSubentries.map((k) => `@zhushanwen/subagent-core${k.slice(1)}`);
 const coreSubentryRegex = coreSubentries
-  .map((k) => k.slice(2)) // './relay-env' -> 'relay-env'，'./workflows/*' -> 'workflows/*'
+  .map((k) => k.slice(2)) // './engine/paths' -> 'engine/paths'，'./workflows/*' -> 'workflows/*'
   .map((frag) =>
     frag.endsWith('*')
       ? frag.slice(0, -1).replace(/[.*+?^${}()|[\]\\]/g, '\\$&') // 通配子入口 = 前缀放行
@@ -154,6 +154,25 @@ export default [
       'max-lines': ['warn', { max: 520, skipBlankLines: true, skipComments: true }],
     },
   },
+  // [M3 relay-spawn-transport u-m3-control] subagent control server：control 帧路由 /
+  // 通道台账 / 引擎 spawn 与按组收割 / fd3 raw mirror 接线的单点聚合文件（职责内聚，
+  // 再拆属独立重构任务）。1051 行 > 500 软上限，提额保留软上限告警（先例同型）。
+  {
+    files: ['packages/runtime/src/infra/subagent-control/control-server.ts'],
+    rules: {
+      'max-lines': ['warn', { max: 1060, skipBlankLines: true, skipComments: true }],
+    },
+  },
+  // [M3 relay-spawn-transport u-m2-prompt-ack] pi 引擎 spawn runner：spawn/握手/帧泵/
+  // prompt 送达回执（prompt-ack）接线 / fd3 raw mirror 装配的单点聚合文件（职责内聚，
+  // 再拆属独立重构任务）。prompt-ack 接线与 mirror 装配入列后折算 520 行 > 500 软上限，
+  // 按「微超即提额，保留软上限告警」先例（pi-provider-store）提额，长期应拆分。
+  {
+    files: ['packages/pi-subagent-cli/src/spawn-runner.ts'],
+    rules: {
+      'max-lines': ['warn', { max: 540, skipBlankLines: true, skipComments: true }],
+    },
+  },
   // [HISTORICAL·2026-09 idle-pi-reclamation] 空闲 pi 进程回收功能接入（reaper 装配 +
   // 生命周期挂钩）：runtime index.ts 是进程组装 barrel，main 基线 501 行即超，本次 +41。
   // 拆分归独立重构单元（设计文档已删除，git 历史可追溯），
@@ -263,8 +282,9 @@ export default [
       'max-lines': 'off',
     },
   },
-  // [HISTORICAL] logger.ts 是 runtime 日志设施的唯一聚合点：主日志/pi tee/relay tee 三形态
-  // writer（createPiStreamWriter 共享轮转，2026-09-11 u9 tee size 轮转）+ 内存水位打点与
+  // [HISTORICAL] logger.ts 是 runtime 日志设施的唯一聚合点：主日志 / pi session tee（createPiSessionLog）
+  // / pi-subagent 镜像 tee（createPiSubagentLog，pi-subagent-*）/ pi-crash 与 plugin-crash 写者
+  // （共享 createPiStreamWriter 轮转，2026-09-11 u9 tee size 轮转）+ 内存水位打点与
   // 自然日聚合（2026-09-11 u1e watermark-daily）共用 pendingLines/流引用/轮转序同一套状态机。
   // 拆分需重新设计写者注册与 flush 生命周期，属独立重构任务；与 protocol.ts override 同型。
   {
@@ -920,18 +940,6 @@ export default [
     files: ['packages/runtime/src/infra/pi/session-file-utils.ts'],
     rules: {
       'max-lines': ['warn', { max: 520, skipBlankLines: true, skipComments: true }],
-    },
-  },
-
-  // relay-registry.ts 是 relay 子进程注册表的唯一聚合点（握手/spawn/双向泵/断连杀/
-  // pid 文件 + 重启残留扫描兜底）。2026-09-24 孤儿活跃度分级收割入列后统计行越过
-  // 500：orphan 处置与 sweep 同属注册表生命周期职责，拆分归独立重构任务——按
-  // 「微超即提额，保留软上限告警」先例（pi-provider-store 520 / preset-service 520
-  // 同型）提额而非 off，超限即再暴露。
-  {
-    files: ['packages/runtime/src/infra/relay/relay-registry.ts'],
-    rules: {
-      'max-lines': ['warn', { max: 550, skipBlankLines: true, skipComments: true }],
     },
   },
 

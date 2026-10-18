@@ -2,7 +2,7 @@
 
 > 滚动快照，只留最新一份（启动新 Phase 前更新；历史版本直接删除，git 可追溯）。2026-09-13 由 `docs/feature-map/`（按日期命名）并入本目录并去掉日期后缀。
 
-**快照日期**: 2026-09-13（初版 2026-09-11，基线 fix-crash-runtime @ af812599a） | **状态**: 长跑稳定性专项三大子项全部交付收敛——crash-resilience（13 单元，设计文档已删除 git 可追溯）+ idle-pi-reclamation（6 单元）+ crash-forensics-and-watchdog（21 单元），三者双 Gate 绿（crash-forensics Gate B 终判通过，`a266e42f1`）；当前进行中：subagent 永久会话模型（见「〇、进行中」）。
+**快照日期**: 2026-09-13（初版 2026-09-11，基线 fix-crash-runtime @ af812599a） | **状态**: 长跑稳定性专项三大子项——crash-resilience（13 单元，设计文档已删除 git 可追溯）+ idle-pi-reclamation（6 单元，已按 ADR-0122 整体退役）+ crash-forensics-and-watchdog（21 单元），crash-resilience 与 crash-forensics 双 Gate 绿（crash-forensics Gate B 终判通过，`a266e42f1`）；当前进行中：subagent 永久会话模型（见「〇、进行中」）。
 
 ---
 
@@ -41,23 +41,24 @@
 
 ---
 
-## 二、空闲 pi 回收（idle-pi-reclamation，6 单元）
+## 二、空闲 pi 回收（idle-pi-reclamation，6 单元）——已整体退役（ADR-0122）
 
 ### 功能概述
 
-根治「30 天进程足迹只增不减」（实测 33 进程 3080MB，~10 个空闲 pi 各 80-141MB 常驻）：空闲 2h 且 30min 内未被查看的用户可见 session 由 reaper「最小摘除」（杀 pi 进程、保留 bus 分区订阅 seq 连续 + HistoryRebuildCache），下次使用惰性 restore（增量恢复，Gate B 实测 544ms）。维护通道（promptReload skill 变更风暴）出站+回程双路径豁免不重置空闲时钟；relay 子进程豁免（kill-on-disconnect 自理）；默认生效无需 opt-in（env `TAIJI_RUNTIME_PI_RECLAIM_*` 可调）。设计与实施计划已删除（git 历史可追溯）——idle-pi-reclamation.md / idle-pi-reclamation.impl-plan.md（u1a/u1b/u2/u3a/u3b/u4 + 偏差 R1-R14）。
+原方案（空闲 2h 且 30min 内未被查看的 session 由 reaper 最小摘除，下次使用惰性 restore）已按 ADR-0122 防御机制清查整体退役：`idle-pi-reaper` 模块、`reclaimManagedSession` 摘除编排、`TAIJI_RUNTIME_PI_RECLAIM_*` 阈值/env 旋钮与 real-pi 端到端回收测试均不在当前仓库，现行不再有基于空闲时钟的自动回收动作。设计与实施计划已删除（git 历史可追溯）——idle-pi-reclamation.md / idle-pi-reclamation.impl-plan.md。
+
+当前只保留查看时间戳这一确定性事实：`session.switch` 记录 `lastViewedAt`，由 crash-forensics 的 checkpoint 持久化，并作为 `startup-reattach` 真补集过滤的输入（活跃窗口 = `lastActivityAt` 2h / `lastViewedAt` 30min）；该事实不驱动任何回收动作。
 
 ### 关键落点
 
 | 层 | 载体 |
 |------|------|
-| 空闲信号 | `packages/runtime/src/infra/pi/rpc-client.ts`（idle signal 三写点：出站 maintenance 豁免 + 入站 pending maintenance response 排除 + sendPrompt touch） |
-| 查看窗口 | `lastViewedAt` per-sid map + `session.switch` 记录 + `RelayRegistry.hasByMainSessionId` 豁免（u1b acc603d4d） |
-| reaper | `packages/runtime/src/services/session/idle-pi-reaper.ts`（5min tick，豁免查询走 u3a 只读 accessor） |
-| 摘除编排 | `session-lifecycle.ts` `reclaimManagedSession`（七步：占座 reclaimInflight → 代际校验 → 最小摘除，绝不复用 removeSessionEntry） |
-| 阈值 SSOT | `packages/shared/src/constants.ts`（tick/idle/viewed，与 reaper fallback 双源一致性有检查测试） |
-| 前提约束 | C-state-12（replicated-state pollTimer 全关 = 回收保留 projection 的前提） |
-| 集成测试 | `packages/runtime/test/`（real-pi 端到端回收集成用例，CI 侧 TAIJI_SKIP_REAL_PI=1 仅本机真跑） |
+| 查看时间戳 | `packages/runtime/src/services/session/session-service.ts`（`lastViewedAtBySession` per-session map + `markSessionViewed` / 查询 / 删除）；写入触发 = `session.switch` 处理器入口（`getSummary` 之前；summary 命中与 `ensureActive` 自动恢复两条分支均记录，不依赖恢复成败；`packages/runtime/src/transport/session-message-handler.ts`） |
+| 清理挂点 | `packages/runtime/src/services/session/session-entry-removal.ts`（真删除汇聚点清理 `lastViewedAt` 条目） |
+| checkpoint 持久化 | `packages/runtime/src/services/session/runtime-checkpoint.ts`（`lastViewedAt` 条目字段，随 checkpoint 快照写入/读取） |
+| 过滤消费 | `packages/runtime/src/services/startup-reattach.ts` `shouldReattachEntry`（`lastViewedAt` 30min 窗口；活跃窗口常量 = 同文件 `REATTACH_ACTIVE_IDLE_MS` / `REATTACH_ACTIVE_VIEWED_MS`） |
+| 已退役面 | reaper 模块 / `reclaimManagedSession` / `TAIJI_RUNTIME_PI_RECLAIM_*` 阈值与环境旋钮 / real-pi 回收集成测试均不存在（ADR-0122 清查登记见 `docs/todo/defense-mechanism-cleanup.md`） |
+| 历史字段 | `packages/shared/src/crash-journal-schema.ts` 的 `reclaimed` 事件与 `idleMs` / `lastViewedAt` 字段保留，仅供旧 journal 解析，无新写入方 |
 
 ---
 
@@ -76,7 +77,7 @@
 | 诊断导出（E7） | `apps/electron/main/diagnostics/export-diagnostic-bundle.ts` + IPC（零新依赖 zip，缺文件降级）+ 设置页 SystemDiagnosticsSection + Panel.vue 死态块入口 + 知情文案三方共用 |
 | E5a checkpoint 恢复 | `packages/runtime/src/services/session/runtime-checkpoint.ts`（五契约：删除属主双轨 / staleness / tmp+rename / 失败现场保留 3 份 / 风暴防护）+ `startup-reattach.ts`（真补集过滤 + 收割 promise 等待 + 高水位即时查询延迟 + 并发 2）+ `infra/mem-pressure.ts` + main 侧冷启动可信度（resolveColdStartTrust / isolateStaleCheckpoint）；约束 C-proc-17 |
 | E5b 看门狗 | `packages/runtime/src/infra/watchdog.ts`（60s 采样环 + 70%/85% 两级阈值 + relief 持续性条件 + armed 门）；renderer `useMemoryPressure`（refCount 单订阅 + core `setLruMaxSessions` 可变窗压窗）；约束 C-proc-19（`TAIJI_RUNTIME_WATCHDOG_ARMED` 默认 off = Gate W 纯观测） |
-| E5c 滚动重启 | `packages/runtime/src/services/session/rolling-restart.ts`（在途谓词推迟【extension 聚合上报镜像 ∪ EnginePort 快照 ∪ relay-registry】+ 30min defer 上限 + 双维硬升级 92%/memPressure + SHUTDOWN_STEP_SEQUENCE 15 步打点 + 退出码 86）+ supervisor recordPlanned 零退避零计数 + RollingRestartBanner 四态横幅 + 只读 status RPC；约束 C-proc-18 |
+| E5c 滚动重启 | `packages/runtime/src/services/session/rolling-restart.ts`（在途谓词推迟【extension 聚合上报镜像 ∪ control 在途引擎通道（`engineChannelsInFlight` = control server channelCount，组合根 `index.ts:1733` 接线）】+ 30min defer 上限 + 双维硬升级 92%/memPressure + SHUTDOWN_STEP_SEQUENCE 15 步打点 + 退出码 86）+ supervisor recordPlanned 零退避零计数 + RollingRestartBanner 四态横幅 + 只读 status RPC；约束 C-proc-18 |
 | 在途上报通道 | `packages/extension-protocol/src/extensions/subagent-inflight/`（marker + 绝对计数 schema + ack）+ subagent-workflow 聚合上报 + runtime `inflight-mirror.ts`（五 spawn 形态预置 0 + 生命周期对账 + absent-report errs 判别） |
 | 批次补课 | tee size 轮转：`infra/logger.ts`（gzip `.1.gz` 单代 + `TAIJI_LOG_MAX_BYTES` 单旋钮，C-build-09，2026-09-13 改号）；入站 parse 检查：core `ws-client.ts` 80MB + 单 session 终止阀（C-comm-15）；O3-C superseded-by 注记 + `scripts/check-stale-ctx-audit-coverage.mjs` 审计覆盖检查；reap 判据 v2 marker 化（C-proc-20） |
 | Gate 状态 | Gate A 通过（六包 typecheck 0 + 七组测试全绿 + 全量 lint 0，1 真回归已修）；Gate B **终判通过**（8 PASS / 1 BLOCKED / 3 SCALED，`a266e42f1`）——A4 滚动重启退出链挂死已从根源修复（stop 时关存续 WS 连接，`3220a351c`）并真机复验（61 次 planned_rolling_restart 退出码 86、零 liveness 误杀）/ A6 BLOCKED（无生产注入钩子，单元级覆盖；u7a push 链生产悬挂已修 `90cdbefe6`，复验挂 swap 水位回落窗口）/ A5·A8 SCALED·替代口径；u8 Gate W 挂数据（V6 soak 约 2026-09-18） |
@@ -85,7 +86,7 @@
 
 ## 四、边界与登记残留（下一 Phase 启动前须知）
 
-- **V6 七天长跑 soak**（约 2026-09-18 到期）：足迹平台期 / 重启一致性 / PTY 存活 + P4 relay 真机路径 + 阈值校准——登记于 idle impl-plan §6，无自动提醒；到期后同为 crash-forensics u8 Gate W 武装复审的输入。
+- **V6 七天长跑 soak**（约 2026-09-18 到期）：足迹平台期 / 重启一致性 / PTY 存活 + P4 control 通道（subagent control socket）真机路径 + 阈值校准——登记于 idle-pi-reclamation 实施计划 §6（已删除，git 可追溯），无自动提醒；到期后同为 crash-forensics u8 Gate W 武装复审的输入。
 - **未交付面**：架构阶段二 E1/E7 与阶段三 E5 已由 crash-forensics-and-watchdog 交付（见第三节；E5b/c 武装挂 Gate W 未裁决）；仍 out-of-scope：E3/E4 架构级增量（崩溃分类差异化 respawn、在途 turn 一键重发、草稿持久化、面板级错误边界、getAppMetrics 联动）与 base64 剥离——各带书面重审触发条件，等登记数据驱动立项。
 - **crash-forensics Gate B 遗留**（终判通过后的残留，详见 impl-plan §7 v7，git 可追溯）：A6 BLOCKED 三条子断言——u7a push 链生产悬挂（已从根源修复 `90cdbefe6`，复验挂 swap 水位回落到 mem-pressure 阈值以下的窗口）与真实系统 swap 压力（97.7% ≥ 95% 阈值且无 env 旋钮，mock 违反 A4 no-mock 判据，双根因已登记）；A1 导出 zip 环节受 dev 窗口焦点自动化限制（打包逻辑有 15 用例）；A3 excluded 过滤路径不写 reattach-skipped 登记行（待裁决补行或改措辞）。
 - **待用户裁决**：A3 打包版复验（挂 prerelease）；CI real-pi 凭据注入。

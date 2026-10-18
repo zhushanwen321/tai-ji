@@ -63,7 +63,7 @@ describe('cleanExpiredLogs', () => {
       touch('runtime-2026-01-01.log.1', 10),
       touch('pi-2026-01-01-abc.jsonl', 10),
       touch('pi-crash-2026-01-01-abc.log', 10),
-      touch('pi-relay-2026-01-01-r1.jsonl', 10),
+      touch('pi-subagent-2026-01-01-r1.jsonl', 10),
       touch('plugin-crash-2026-01-01-w1.log', 10),
       touch('main-2026-01-01.log', 10),
       touch('renderer-error-2026-01-01.log', 10),

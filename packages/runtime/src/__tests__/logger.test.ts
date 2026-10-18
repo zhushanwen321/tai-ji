@@ -388,14 +388,14 @@ describe('pi 流 size 轮转（2026-09 日志膨胀修复）', () => {
     expect(runtimeLogText()).toContain('gzip failed')
   })
 
-  it('relay 原始字节镜像（Uint8Array）：轮转后字节级保真（无改写 / 无合并 / 无丢失）', async () => {
+  it('subagent 原始字节镜像（Uint8Array）：轮转后字节级保真（无改写 / 无合并 / 无丢失）', async () => {
     logger = await loadLogger({ TAIJI_LOG_MAX_BYTES: String(MAX) })
     logger.initLogger(dataDir)
-    const relay = logger.createPiRelayLog('relay-rot-1')
+    const subagentLog = logger.createPiSubagentLog('subagent-rot-1')
     const chunk = (i: number): Buffer => Buffer.from(JSON.stringify({ type: 'up', seq: String(i).padStart(3, '0'), pad: 'y'.repeat(24) }) + '\n')
     const total = Math.floor(MAX / chunk(0).length) * 2
-    for (let i = 0; i < total; i++) relay.write(chunk(i))
-    relay.end()
+    for (let i = 0; i < total; i++) subagentLog.write(chunk(i))
+    subagentLog.end()
     await logger.closeLogger()
 
     expect(gzFiles()).toHaveLength(1)

@@ -2,20 +2,23 @@
 
 > **本文件定位**：subagent 体系的**结构导航页**——回答「这套能力现在由哪些包组成、各包边界在哪、关键机制落在哪个模块」，并指向各主题的权威文档。机制细节不在本文件展开（避免与设计文档双源漂移）。
 >
-> **最后校准**：2026-09-29（workflow-run-resume-revision 落地后复核——run record 单源收敛 + 生命周期四态/中断暂停态 + phase 状态机 + 事件词对齐 pi + 终局编排单一入口 + resume 断点续跑，见 §4 状态机两行 / 介质归位行与 [ADR-0082](../../adr/decisions.md)）；2026-09-27（W2 状态机收敛登记后复核——run 五态机唯一权威 + outcome 四值 + record 意图原语即状态机 + manifest 三态投影口径 + abandon 注销差集已接受代价，见 §4 状态机两行与 [ADR-0080](../../adr/decisions.md)）；2026-09-26（W1 介质归位落地后复核——run/record 运行态移出主 session JSONL：journal 唯一事实源 + 注册/终态两条 v2 条目 + state/manifest 物化投影 + 收编统一恢复 + 保留窗口清理，见 §4 介质归位行与 [ADR-0094](../../adr/decisions.md)）；2026-09-16（collect / sync 批机制整体退役后复核——`service/` 收敛为六聚合、persistence 去 `sync-rebuild`、assembly 去 `collect-coordinator`；新增 `subagents` 批量 tool 与 fan-out 模板现状条目，见 §2 与 §4 批量编排行）；2026-09-13（永久会话模型落地后复核——状态机两态化 / `.state` 收条化 / in-flight 推送链重挂 / worktree-reconcile 拆分；同日 execution/ 顶层 51 文件按变化原因落入子目录——persistence / notify / worktree / ui / lifecycle / assembly，目录镜像本表分组，顶层仅留 subagent-service.ts 装配壳与 relay-env.ts（exports 子入口物理位置）；2026-09-11 校准的包拓扑仍有效，见 §7 历史沿革）。
+> **最后校准**：2026-10-18（relay-spawn-transport M3 落地后复核——托管态引擎由 runtime spawn、extension 只做 control 客户端；§1 拆 managed/standalone 两形态）；2026-09-29（workflow-run-resume-revision 落地后复核——run record 单源收敛 + 生命周期四态/中断暂停态 + phase 状态机 + 事件词对齐 pi + 终局编排单一入口 + resume 断点续跑，见 §4 状态机两行 / 介质归位行与 [ADR-0082](../../adr/decisions.md)）；2026-09-27（W2 状态机收敛登记后复核——run 五态机唯一权威 + outcome 四值 + record 意图原语即状态机 + manifest 三态投影口径 + abandon 注销差集已接受代价，见 §4 状态机两行与 [ADR-0080](../../adr/decisions.md)）；2026-09-26（W1 介质归位落地后复核——run/record 运行态移出主 session JSONL：journal 唯一事实源 + 注册/终态两条 v2 条目 + state/manifest 物化投影 + 收编统一恢复 + 保留窗口清理，见 §4 介质归位行与 [ADR-0094](../../adr/decisions.md)）；2026-09-16（collect / sync 批机制整体退役后复核——`service/` 收敛为六聚合、persistence 去 `sync-rebuild`、assembly 去 `collect-coordinator`；新增 `subagents` 批量 tool 与 fan-out 模板现状条目，见 §2 与 §4 批量编排行）；2026-09-13（永久会话模型落地后复核——状态机两态化 / `.state` 收条化 / in-flight 推送链重挂 / worktree-reconcile 拆分；同日 execution/ 顶层 51 文件按变化原因落入子目录——persistence / notify / worktree / ui / lifecycle / assembly，目录镜像本表分组，顶层仅留 subagent-service.ts 装配壳（exports 语义子入口物理位置 = execution/engine/paths.ts 与 execution/engine/engine-discovery-scan.ts）；2026-09-11 校准的包拓扑仍有效，见 §7 历史沿革）。
 > **历史**：本文件此前描述的是 M0 拆分前的**单包三层实现**（TUI / Runtime / Core 全在 extension 内，`session-runner.ts` / `session-factory.ts` / `executor` 等文件）。那些结构已随 core 抽包、引擎协议化、双轨收敛退役，对应实现迁至 `packages/subagent-core` 与两个引擎包（见 §7 历史沿革）。
 
 ---
 
 ## 1. 包拓扑
 
-subagent 能力现由 5 类包协作，跨进程边界只有一处（宿主 ↔ 引擎，走 engine-protocol v1 NDJSON stdio）。
+subagent 能力现由 5 类包协作；宿主到引擎的连接按 transport 分两种形态（契约 = core `execution/engine/client/transport/types.ts` 的 `EngineTransport`）：
+
+- **managed（托管态，`TAIJI_SUBAGENT_CONTROL_SOCKET` 非空）**：宿主 pi → runtime control socket（control 帧，`engine_frame` 为引擎协议信封）→ engine（stdio NDJSON）。引擎由 runtime spawn，extension 只持有控制客户端，不持有引擎子进程句柄。
+- **standalone（无 control env）**：宿主 pi → engine（stdio NDJSON + engine-protocol v1）。extension 直接 spawn 引擎，pidfile / reaper 仅该形态注册。
 
 ```
 ┌───────────────────────────────────────────────────────────────────────┐
 │ shell（宿主进程内）                                                     │
 │  extensions/universal/subagent-workflow   @zhushanwen/pi-subagent-workflow │
-│   - 工具面 / 命令 / TUI 渲染 / injectors / 宿主端口实现 / relay.mjs 代理  │
+│   - 工具面 / 命令 / TUI 渲染 / injectors / 宿主端口实现                 │
 └──────────────────────────────┬────────────────────────────────────────┘
                                │ 经 core barrel（semver 契约面）消费
 ┌──────────────────────────────▼────────────────────────────────────────┐
@@ -24,10 +27,19 @@ subagent 能力现由 5 类包协作，跨进程边界只有一处（宿主 ↔ 
 │   - execution/（执行·记录·通知域 + 引擎子域）                            │
 │   - orchestration/（workflow 域：脚本生成/校验/worker/运行存储）          │
 │   - core/（宿主端口）+ shared/（零依赖原语）                             │
+│   - transport/（LocalEngineTransport / RuntimeEngineTransport）         │
 │   - 通过 HostServices 端口反向依赖宿主（禁 pi SDK：闭包红线）             │
-└──────────────────────────────┬────────────────────────────────────────┘
-                               │ 同一份契约（SDK）
-┌──────────────────────────────▼────────────────────────────────────────┐
+└──────────┬───────────────────────────────────────────┬────────────────┘
+           │ standalone：直接 spawn（stdio）           │ managed：control socket
+           │                                           │ hello / engine_open / engine_frame 信封
+           │                         ┌─────────────────▼──────────────────┐
+           │                         │ runtime（独立进程，引擎 spawn 权）  │
+           │                         │  packages/runtime/src/infra/        │
+           │                         │  subagent-control/                  │
+           │                         │  control-server / mirror / tee      │
+           │                         └─────────────────┬──────────────────┘
+           │                                           │ spawn（stdio + fd3 raw mirror）
+┌──────────▼───────────────────────────────────────────▼──────────────────┐
 │ engine（独立子进程）                                                    │
 │  packages/pi-subagent-cli      @zhushanwen/pi-subagent-cli              │
 │  packages/zcode-subagent-cli   @zhushanwen/zcode-subagent-cli           │
@@ -37,13 +49,12 @@ subagent 能力现由 5 类包协作，跨进程边界只有一处（宿主 ↔ 
 ┌──────────────────────────────▼────────────────────────────────────────┐
 │ contract                                                               │
 │  packages/subagent-engine-sdk  @zhushanwen/subagent-engine-sdk          │
-│   - protocol/（方法/载荷/反向通道）+ port-contract + env/spawn/relay/    │
+│   - protocol/（方法/载荷/反向通道）+ port-contract + env/spawn/control-env │
 │     journal/kill-chain/nesting-guard/ui-* + node-executor + paths       │
 └────────────────────────────────────────────────────────────────────────┘
-        ▲
-        │ 宿主侧 relay 通道（tee 帧归属）
-   packages/runtime/src/infra/relay/（relay-env / relay-paths / relay-registry / relay-server / relay-tee）
 ```
+
+managed 形态的 runtime 侧落点 = `packages/runtime/src/infra/subagent-control/`（control-server / mirror / subagent-tee / engine-launch-env / frames / paths）。
 
 ## 2. 各包职责与关键模块
 
@@ -60,7 +71,6 @@ subagent 能力现由 5 类包协作，跨进程边界只有一处（宿主 ↔ 
 | `src/injectors/` | 提示注入器：engine-awareness / model-list / resource-list / subagent-list / workflow-list |
 | `src/interface/` | 注册胶水与展示，按职责分五子目录：`command/`（slash 命令壳与命令参数解析：commands / subagents / command-actions）、`format/`（纯格式化与展示口径：format / display-state / id-preview）、`gui/`（GUI 协议映射与宿主消息/组件适配：gui-mappers / bg-notify-render / subagent-actions）、`tool/`（pi tool 定义、schema 与执行期共享构件：subagent-tool / tool-subagents（批量编排入口，见 §4 批量编排行）/ tool-workflow / tool-workflow-script / tool-render / tool-shared 等）、`tui/`（终端视图与零件：tui-kit / list-view / list-component / views/WorkflowsView） |
 | `src/jsonl-run-store.ts` | workflow 运行存储（RunStore 端口的 record 流落盘实现）——record 单源 loadAll（v2 注册条目定界 → record 流 fold 重建，坏行停摆拒绝）+ 收编终态条目幂等补写（[ADR-0094](../../adr/decisions.md) 介质归位 / [ADR-0082](../../adr/decisions.md) D1 record store 单模式：state 快照已删、save = 显式 no-op，manifest 为派生缓存） |
-| `relay/relay.mjs` | 零依赖代理脚本（tee 子进程 stdout/stderr）；常量内嵌镜像，与 SDK 单源一致性由 conformance 断言锁定 |
 
 ### 2.2 host core — `packages/subagent-core`
 
@@ -68,7 +78,7 @@ subagent 能力现由 5 类包协作，跨进程边界只有一处（宿主 ↔ 
 
 | 子域 | 内容 |
 |---|---|
-| `src/execution/`（顶层） | 装配壳 `subagent-service.ts`（唯一直接留顶层的执行域文件——装配点入口）+ `relay-env.ts`（`./relay-env` exports 子入口物理位置）+ `service/`（六聚合：`session-baselines` / `record-lifecycle` / `record-access` / `workflow-dispatch` / `run-orchestration` / `chat-rounds`（Continuation 协作面聚合，自 run-orchestration 拆出）+ `service-bootstrap` / `service-constants`） |
+| `src/execution/`（顶层） | 装配壳 `subagent-service.ts`（唯一直接留顶层的执行域文件——装配点入口）+ `service/`（六聚合：`session-baselines` / `record-lifecycle` / `record-access` / `workflow-dispatch` / `run-orchestration` / `chat-rounds`（Continuation 协作面聚合，自 run-orchestration 拆出）+ `service-bootstrap` / `service-constants`） |
 | `src/execution/persistence/` | record 持久化轴：`record-store.ts`（内存 + 磁盘重建容器，意图原语唯一写入口 C-data-20；H4 三轴拆分后 = 容器 + 原语立面 + D7 写面收敛本体，三轴实现拆至 `record-store-terminal.ts`（终态原语轴）/ `record-store-rounds.ts`（轮次簿记轴 + RecordEventsWriteFace 事件写面接线层——record 事件文件追加与 v2 两条款写面的共享基础设施）/ `record-store-rebuild.ts`（重建与投影轴，v2 条目对读入 + 磁盘重建单规则）——轴文件经 ctx 注入写面，检查白名单覆盖 store 家族）、`execution-record.ts`（唯一状态对象与 CAS）、`finalize-record.ts`、`record-entry.ts`（subagent-record 族条目契约单源：v2 注册/终态两条目，v2-only 判别）、`record-events.ts`（record 事件文件 `<sa-id>.events`——六类事件词表 + seq 分配 + fold/tail 原语，唯一事实源）、`event-tail.ts`（事件流 tail 增量读取原语：watch/offset 续读/坏行宽容——run 与 record 两域共用）、`state-marker.ts` / `alive-store.ts`（轮终收条与写权声明 sidecar）、`manifest-store.ts` / `sessions-index.ts` / `session-reconstructor.ts`（持久化——manifest/state 均为 journal fold 的物化投影，`*.events` 清理走统一保留维护轮）、`engine-journal-gc.ts`（引擎 journal 30 天 TTL 回收定时器——子代理会话文件族的回收归 runtime 删主会话级联 session-content-cascade，ADR-0133）、`run-state-evidence.ts`（run 终局证据判定核 `findRunSettlementEvidence`——journal run-settled 帧 ∨ manifest 终局面三态判定，枚举与对账 sweep 共用；统一保留维护轮 `runRetentionMaintenanceRound` / `pruneTerminalRunFiles`——fold 终态资格判据 + 30 天保留窗口；`STATE_DIR_NAME` 布局常量单源） |
 | `src/execution/notify/` | 通知轴：`notifier.ts` / `notify-host.ts` / `notify-ledger.ts`（确认式送达） |
 | `src/execution/worktree/` | worktree 隔离轴：`worktree-manager.ts` / `worktree-git-ops.ts` / `worktree-reconcile.ts` / `worktree-registry.ts`（worktree 隔离与归档重建对账） |
@@ -87,7 +97,7 @@ subagent 能力现由 5 类包协作，跨进程边界只有一处（宿主 ↔ 
 
 两个独立引擎进程，各自实现同一份 engine-protocol v1 契约：
 
-- **pi 引擎**：spawn `pi` 子进程（RPC 模式），stdout pump 解析事件、握手取 session 身份、relay 身份键注入；`base-tool-enhance` 等扩展负责子进程侧行为。
+- **pi 引擎**：spawn `pi` 子进程（RPC 模式），stdout pump 解析事件、握手取 session 身份、子代理身份 env 写回（`applyIdentityEnvToChildEnv`）；`base-tool-enhance` 等扩展负责子进程侧行为。
 - **zcode 引擎**：只走 app-server RPC（禁 CLI spawn 链，约束 C-ext-20），共享宿主 HOME，会话库隔离到独立 sqlite（不进 GUI 侧边栏）。
 
 两包均只依赖 SDK（不依赖 core），保证引擎侧无宿主耦合。
@@ -104,7 +114,7 @@ subagent 能力现由 5 类包协作，跨进程边界只有一处（宿主 ↔ 
 
 反向通道（引擎 → 宿主）覆盖进度与交互：`host/streamDelta`（增量文本）、`host/askUser`（UI 请求）、`host/childSpawned`（子进程注册）、`host/childStateChanged`（任务子进程生命周期上报，C-pi-16）等。chat 域独立协议面（原第 9 通道 `host/roundLifecycle` 与 `interact` 方法）已随 H1（[subagent-chat-run-unification.md](../../architecture/subagent-chat-run-unification.md)）退役：续聊轮 = 新 run + resume 锚点（`RunParams.resume`），轮活性经 run 事件通道既有事件（含 `activity` 变体）与 run 终态应答承载（约束 C-proc-13，authority 已改挂该设计）。manifest conversation 位语义随永久会话模型增 `cold` 值（zcode 冷恢复：resume 读 + 新 session 注入，无热 steering）；capability gate 判据仍 `=== 'unsupported'` 拒绝（`true`/`cold` 均放行，[subagent-permanent-session-model.md](../../architecture/subagent-permanent-session-model.md) §3.2.6）。
 
-`run` 的上下文（`RunContextParams`）承载每次运行的定位信息：`taskId` / `recordId` / `sessionRootId`（relay 身份键权威源，见 F6 修复）等——引擎据它重写子进程的 relay 身份 env，不靠 env 继承。[池抽象降级 2026-09-13] 原 `ctx.poolKey` 字段与 `host/poolResolved` 反向通道（第 8 通道）已删——两引擎 poolKey 恒 `'shared'`，journal 固定落 `engines/<id>/shared/`；[permission 通道退役 2026-09-13] `host/permission` 骨架已删（两引擎 `permissionMode=native` 零 emit、core 零注入），反向通道现为 6 条。
+`run` 的上下文（`RunContextParams`）承载每次运行的定位信息：`taskId` / `recordId` / `sessionRootId`（子代理身份 env 的根会话权威源）等——引擎据它写回子进程身份 env（`applyIdentityEnvToChildEnv`），不靠 env 继承。[池抽象降级 2026-09-13] 原 `ctx.poolKey` 字段与 `host/poolResolved` 反向通道（第 8 通道）已删——两引擎 poolKey 恒 `'shared'`，journal 固定落 `engines/<id>/shared/`；[permission 通道退役 2026-09-13] `host/permission` 骨架已删（两引擎 `permissionMode=native` 零 emit、core 零注入），反向通道现为 6 条。
 
 ## 4. 关键机制（落点索引）
 
@@ -118,11 +128,11 @@ subagent 能力现由 5 类包协作，跨进程边界只有一处（宿主 ↔ 
 | 进程探活 | `persistence/alive-store.ts` | `.alive`（pid marker）= 跨进程写权声明——写面已全量归 RecordStore（`writeAliveMarker` 唯一包装 = `acquireWriteLease`，acquire 三时机：sessionFile 锚点确立 / resurrect 回边 / running 接管；cold-lookup 直写存量已消亡）；release 单出口 = close 收起（`markSettledOut`）；判活 pid 单判据（[subagent-record-persistence-consolidation.md](../../architecture/subagent-record-persistence-consolidation.md) D3 v7） |
 | chat→run 统一 | `assembly/conversation-continuation.ts` | ConversationContinuation = H1 chat→run 统一唯一新增组件（每 chatMode record 一个实例）：`onMessage` 状态迁移（idle → `reviveOrThrow` 万物可续 / 在途轮 D2 打断入队 / 轮间直派）、`dispatchRoundGuarded` 每轮派发（载荷组装 + 轮活性守护挂载 + 经泛化主干发起 run）、`settleRoundSuccess`/`settleRoundFailed` 轮末收尾（settle 簿记 + 通知门三元组路由 + armIdleKeepalive）；[subagent-chat-run-unification.md](../../architecture/subagent-chat-run-unification.md) §3.4 + [永久会话模型](../../architecture/subagent-permanent-session-model.md) §3.2.7 |
 | 空闲回收 | `lifecycle/lifecycle-manager.ts` | per-record idle timer——arm 面 u7a 重挂（`armIdleTimer`/`armIdleKeepalive`：轮成功收尾翻入保活 + 推 inFlight=0，新轮 disarm 翻回 executing），常量 `TAIJI_SUBAGENT_IDLE_TIMEOUT_MS` |
-| 嵌套生命周期 | `service/record-lifecycle.ts` `disposeAllRecords` + runtime `infra/relay/`（kill-on-disconnect） | **结构性限制：嵌套派发不能活过父的当前轮**。嵌套子（depth>0）record 挂在派生它的父 pi 进程内存：父轮末回收（U6 每轮=新进程）经 `disposeAllRecords("parent-shutdown")` 连带收起；runtime 侧父 relay socket 断开触发 kill-on-disconnect 连带杀链（crash-resilience §4.2 设计内防孤儿）。活跃嵌套子被连带关闭时 warn 留痕（恢复指引：嵌套结果只能轮内同步等待；已被连带关闭的查 subagents action:'list' 确认终态后重派——conversation 派发参数已随 modeless 波5 删除）。2026-09-14 嵌套载体实测登记（sa-6619371b/sa-d0885b60：嵌套子 workflow 未及运行即被关闭，父方对失败无感）；「宿主接管嵌套子生命周期」为架构级演进方向，未排期 |
+| 嵌套生命周期 | `service/record-lifecycle.ts` `disposeAllRecords` + runtime `infra/subagent-control/`（kill-on-disconnect） | **结构性限制：嵌套派发不能活过父的当前轮**。嵌套子（depth>0）record 挂在派生它的父 pi 进程内存：父轮末回收（U6 每轮=新进程）经 `disposeAllRecords("parent-shutdown")` 连带收起；runtime 侧父 control 连接断开触发 kill-on-disconnect 连带杀链（crash-resilience §4.2 设计内防孤儿）。活跃嵌套子被连带关闭时 warn 留痕（恢复指引：嵌套结果只能轮内同步等待；已被连带关闭的查 subagents action:'list' 确认终态后重派——conversation 派发参数已随 modeless 波5 删除）。2026-09-14 嵌套载体实测登记（sa-6619371b/sa-d0885b60：嵌套子 workflow 未及运行即被关闭，父方对失败无感）；「宿主接管嵌套子生命周期」为架构级演进方向，未排期 |
 | 引擎装载 | `engine/engine-discovery*.ts` → `registry.ts` → `routing.ts` | 三级发现装载 cli descriptor；core 壳侧零内建引擎（`pi` 亦经发现装载） |
 | 协议客户端 | `engine/client/remote-engine.ts` + `engine-client.ts` | 宿主侧唯一协议适配点：帧编解码、能力门、反向路由、句柄镜像 |
 | journal | `engine/common/event-journal.ts`  + `event-journal-wiring.ts` | 事件落盘（②级数据源）；固定分组 key `'shared'`（[池抽象降级] 无 retarget，路径构造即终值），30 天 mtime TTL 回收（`pool-manager.ts` `cleanupExpiredJournals`——journal 生命周期管理唯一清理机制，refs 计数已删） |
-| relay 通道 | shell `relay/relay.mjs` + `runtime/src/infra/relay/` | 代理脚本 tee 子进程输出；父身份键（SESSION_ID / RECORD_ID）由引擎按 `run.params.ctx` 重写，防误归属 |
+| control 通道 | runtime `infra/subagent-control/` + core `engine/client/transport/runtime.ts` | 托管态下引擎 spawn 权归 runtime（extension 只做控制客户端）；control socket 帧搬运 engine-protocol，kill-on-disconnect；fd3 raw mirror → `SubagentTee` 供 GUI live 流（seq 空洞 → degraded） |
 | 批量编排（fan-out） | shell `interface/tool/tool-subagents.ts` + core `workflows/fan-out.js` | `subagents` 批量 tool（tasks 数组、一跳扁平）是 2+ 独立任务并行的唯一批量入口：handler 转译 `runWorkflow("fan-out")` 走 workflow 单管道（tool 名收录 `WORKFLOW_TOOL_NAMES`），`parallel()` allSettled 派 N 个一次性成员——部分失败降 partial 不炸 run，run 收敛经「结果通知」行通道发一条聚合通知（结构化 results：task/taskIndex/status/summary/fullReportPath）。成员不可 message/续聊（one-shot，重派恢复），中途停止走 workflow tool abort（runId 同体系）。单数 `subagent` tool 只管单个可持续会话实体，不再有批派发参数。成员为 one-shot 批成员：message 被 workflow-origin 域检查拒绝（冷路径经 createRecord origin 透传 + 冷查治理口径 includeWorkflow:true 双修复可达，恢复指引 = re-dispatch via subagents）；close 对批成员 = 幂等收敛放行（裁决：close 为意愿动作，无 message 同款的结果语义误读面）。 |
 | 结果通知 | `notify/notifier.ts` + `notify/notify-ledger.ts` | 结果语义通知必须走确认式送达（持久账本 + 幂等键），约束 C-ext-19 |
 | 反向 UI | `ui/dialog-queue.ts` + `ui/ui-request-handler-factory.ts` + `host/host-ui-endpoint.ts` | 引擎 `host/askUser` → 宿主 UI 请求队列 → 应答回传 |
@@ -131,7 +141,7 @@ subagent 能力现由 5 类包协作，跨进程边界只有一处（宿主 ↔ 
 ## 5. 测试与验证
 
 - 单元/集成测试按包分布：`packages/subagent-core/src/**/__tests__/`、两个引擎包的 `src/__tests__/`、shell 的 `src/**/__tests__/`。
-- 协议一致性由 conformance 套件锁定（引擎 manifest、relay 常量镜像、run 帧映射）。
+- 协议一致性由 conformance 套件锁定（引擎 manifest、run 帧映射）；control 协议 kind/version/engine_closed reason 词表由 `packages/subagent-engine-sdk/src/__tests__/control-protocol.test.ts` 锁定，runtime 帧解析行为（形状守卫/别名合并/超长帧归因）由 `packages/runtime/src/__tests__/infra/subagent-control/control-frames.test.ts` 锁定，runtime 裁决 code → transport 错误码映射（D10）由 `packages/subagent-core/src/__tests__/transport-runtime.test.ts` 的同名映射用例锁定（客户端连接语义同文件；runtime `CONTROL_FRAME_ERROR_CODES` 词表本身暂无独立测试锚点）。
 - 分层与测试策略见仓库根 [TEST-STRATEGY.md](../../../docs/TEST-STRATEGY.md) 与 [docs/testing/](../../testing/)。
 
 ## 6. 约束与权威文档
@@ -156,7 +166,7 @@ subagent 能力现由 5 类包协作，跨进程边界只有一处（宿主 ↔ 
 | 子代理身份 env 与递归可见性（跨进程身份贯穿 / 键表 / 读者与失效后果 / 已知边界） | [docs/architecture/subagent-identity-and-recursive-visibility.md](../../architecture/subagent-identity-and-recursive-visibility.md) | [docs/architecture/subagent-permanent-session-model.md](../../architecture/subagent-permanent-session-model.md) |
 | 引擎中立抽象（已被引擎协议化取代） | subagent-engine-abstraction.md（已删除，git 可追溯；现行权威 = [docs/architecture/subagent-engine-protocolization.md](../../architecture/subagent-engine-protocolization.md)） |
 | GUI 可见性链（协议帧 → 前端） | subagent-engine-gui-visibility.md（已删除，git 可追溯；机制权威 = subagent-core engine/routing.ts 头注释） |
-| 实时通道 | subagent-realtime-channel.md（已删除，git 可追溯；机制权威 = relay/relay.mjs 与 pi-invocation.ts 注释） |
+| 实时通道 | subagent-realtime-channel.md（已删除，git 可追溯；机制权威 = runtime `infra/subagent-control/{mirror,subagent-tee}.ts` 与 `packages/pi-subagent-cli/src/raw-mirror.ts` 注释） |
 | 体系深化设计（方案层，含体系图与术语） | subagent-post-convergence-architecture.md（已删，git 可追溯；谱系见 subagent-core-package-extraction.md 头部） |
 | core 抽包与 barrel/semver 契约（D5） | [docs/architecture/subagent-core-package-extraction.md](../../architecture/subagent-core-package-extraction.md) |
 | 双轨收敛（双份实现归一） | subagent-dual-track-convergence.md（已删，git 可追溯） |

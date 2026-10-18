@@ -74,7 +74,7 @@ const LOG_FAMILIES: ReadonlyArray<{ prefix: string; note: string }> = [
   { prefix: 'main-', note: 'main 进程日志尾部（最后 256KB）' },
   { prefix: 'renderer-error-', note: 'renderer JS 错误落盘尾部（最后 256KB）' },
   { prefix: 'renderer-console-', note: 'renderer console warn/error 泛捕流落盘尾部（最后 256KB）' },
-  { prefix: 'pi-', note: 'pi stdout tee 尾部（最后 256KB；含 relay 镜像 / 崩溃取证同名前缀家族）' },
+  { prefix: 'pi-', note: 'pi stdout tee 尾部（最后 256KB；含 subagent 镜像 / 崩溃取证同名前缀家族）' },
 ]
 
 // run 目录运行态文件名族走 @taiji/shared/paths RUN_* SSOT（【oe-audit C8】：

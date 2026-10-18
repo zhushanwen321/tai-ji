@@ -8,5 +8,6 @@ export * from "./frames.ts";
 export * from "./methods.ts";
 export * from "./reverse-channels.ts";
 export * from "./error-codes.ts";
+export * from "./control-protocol.ts";
 export * from "./contract-types.ts";
 export * from "./schema.ts";

@@ -154,16 +154,72 @@ function resolveHostRequestTimeoutMs(opts: EngineSelfDestructOptions): number {
   return parsed;
 }
 
-/** 缺省自灭：先杀自己进程组（-pid，收割引擎 spawn 的任务子进程），失败回落杀自己。 */
-function killOwnProcessGroup(): void {
+/** taskkill 子进程的最小面（self-destruct 是 fire-and-forget：只挂 error + unref）。 */
+export type KillOwnProcessGroupSpawnResult = {
+  on(event: "error", listener: (err: Error) => void): unknown;
+  unref?: () => void;
+};
+
+/** 自灭杀链依赖（缺省 = 真实 platform / spawn / process.kill；测试注入分支用）。 */
+export type KillOwnProcessGroupDeps = {
+  readonly platform?: NodeJS.Platform;
+  readonly spawnFn?: (
+    command: string,
+    args: readonly string[],
+    options: { readonly stdio: "ignore"; readonly windowsHide: boolean },
+  ) => KillOwnProcessGroupSpawnResult;
+  readonly killFn?: (pid: number, signal: NodeJS.Signals) => unknown;
+};
+
+/**
+ * 缺省自灭：先杀自己进程组（收割引擎 spawn 的任务子进程），失败回落杀自己。
+ *
+ * 平台矩阵（设计 D7）：POSIX = 负 pid 组杀；Windows 无进程组信号语义，用
+ * `taskkill /PID <self> /T /F` 树杀（stdio ignore + fire-and-forget，不阻塞自灭链）。
+ * Windows 分支在 taskkill 根本起不来（spawn 同步抛错，或 child 'error'：PATH 缺
+ * System32 / EMFILE 等）时回落 `SIGKILL` 杀自己（R2A-N4）：只杀自己是「可接受
+ * 降级」（后代 pi 交给 runtime sweep / 组登记），但引擎自身必须停住——否则引擎事件
+ * 循环仍有活句柄时宿主死后引擎与 pi 都不死，比原行为更差。两条失败路径都 warn 留痕。
+ * 依赖可注入 = 平台分支单测 seam（不实跑 Windows）。
+ */
+export function killOwnProcessGroup(deps: KillOwnProcessGroupDeps = {}): void {
   const pid = process.pid;
+  const kill = deps.killFn ?? ((targetPid: number, signal: NodeJS.Signals) => process.kill(targetPid, signal));
+  if ((deps.platform ?? process.platform) === "win32") {
+    // [R2A-N4] taskkill 不可用时的自灭兜底（至少停引擎）：后代由 runtime sweep 收尾。
+    const fallbackSelfKill = (reason: string): void => {
+      logger.warn(`taskkill self-tree failed (${reason}); falling back to self SIGKILL`);
+      try {
+        kill(pid, "SIGKILL");
+      } catch (err) {
+        logger.warn(
+          `self SIGKILL fallback failed (${String(err)}); descendant pi may linger until runtime sweep`,
+        );
+      }
+    };
+    const spawnFn = deps.spawnFn
+      ?? ((command, args, options) => spawn(command, [...args], options));
+    try {
+      const child = spawnFn("taskkill", ["/PID", String(pid), "/T", "/F"], {
+        stdio: "ignore",
+        windowsHide: true,
+      });
+      child.on("error", (err) => {
+        fallbackSelfKill(String(err));
+      });
+      child.unref?.();
+    } catch (err) {
+      fallbackSelfKill(`spawn threw: ${String(err)}`);
+    }
+    return;
+  }
   try {
-    process.kill(-pid, "SIGKILL");
+    kill(-pid, "SIGKILL");
   } catch (err) {
     // 进程组杀失败（非组长 / Windows 形态差异）——回落单进程杀，任务子进程由
     // 各自的 stdio EOF / 宿主回收层兜底。
     logger.warn(`process-group kill failed (${String(err)}), falling back to self kill`);
-    process.kill(pid, "SIGKILL");
+    kill(pid, "SIGKILL");
   }
 }
 

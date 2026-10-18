@@ -39,6 +39,11 @@ vi.mock('@/stores/panel', () => ({
   usePanelStore: () => ({ focusedSessionId: ref('main-1') }),
 }))
 
+// chat store readers 面（M3 D6 降级位读口）：本文件不测降级，恒 false 桩。
+vi.mock('@/stores/chat', () => ({
+  useChatStore: () => ({ isSubagentStreamDegraded: () => false }),
+}))
+
 // ── subagent store：records 分区按 fixture 返回（chat 域 record 视图锚）────
 // drawer 二级 tab fixture（reactive——computed 依赖追踪，见 store mock 注释）
 const drawerTabsFixture = reactive({ tabs: [] as string[], active: null as string | null })

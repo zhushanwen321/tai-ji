@@ -1,7 +1,7 @@
 /**
  * uncaughtException 分级策略（2026-09-04 runtime 整机崩溃事故护栏，D 级最后一道）。
  *
- * 背景：relay 对端半关闭后子进程 stdout 回调里的同步 `conn.write` 抛 EPIPE，逃逸为
+ * 背景：socket 对端半关闭后子进程 stdout 回调里的同步 `conn.write` 抛 EPIPE，逃逸为
  * uncaughtException → 整机 graceful shutdown → 全部 session 中断（Electron 自动重启
  * 恢复实测 ~16s）。源头修复（writeFrame/endConn/conn error listener）已拦截已知路径，
  * 本模块是兜底分级：**连接级流错误**与**逻辑级崩溃**分开处置。

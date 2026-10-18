@@ -503,7 +503,7 @@ describe("run：协议载荷 → 本地 AgentCallOpts/RunContext", () => {
     }
   });
 
-  it("[F6] ctx.sessionRootId 缺省 → 还原后的 RunContext 无该键（additive 语义，relay 权威源缺省不注入）", async () => {
+  it("[F6] ctx.sessionRootId 缺省 → 还原后的 RunContext 无该键（additive 语义，归属键缺省不注入）", async () => {
     const engine = makeEngine();
     const { server, sink } = makeServer(engine);
     await request(server, sink, 0, "initialize", INIT_PARAMS);

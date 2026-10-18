@@ -187,7 +187,7 @@ core 负责：选引擎 → 建 journal → 派发任务 → 收集事件流 →
 | F5 | zcode 引擎**目录自包含但依赖 core 公共层**：静态 import `common/schema-emulation`（`zcode-engine.ts:45-47`，调用 969/1237）、`common/kill-chain`（`:49`、`connection.ts:42`）、`common/nesting-guard`（`connection.ts:43`）、`common/journal-replay`（`:51`）、`paths.ts`（`:64`）、`common/data-dir` + `registry.ts`（`registration.ts:11-12`）——**「只依赖 logger/错误工具」不成立**，这是 D7 的直接动因 | 上述行号 | 【实测】 |
 | F6 | pi 引擎**与宿主强耦合**：`PiEngine({getService})` 消费 `PiEngineService`（`pi-engine.ts:140-159`，含 `executeAndAwait`、`run:296`）；静态 import `session-runner.ts`（`:48-49`）、`lifecycle-manager.ts`（`:50-55`）、`stdin-writer.ts`（`:57-62`）；`engines/pi/reader.ts:32` import `session-reconstructor.ts`（core 基础设施，`record-store.ts:44` 也在用） | 上述行号 + `subagent-service.ts:377/2555-2580` | 【实测】 |
 | F7 | core 与宿主的唯一环境契约是 `HostServices`（`dataRoot`/`log`/`discoveryRoots?`），**只有 agents/skills/workflows 三个 kind，无 engines** | `core/host-services.ts:28-45`、`extensions/universal/subagent-workflow/src/host/pi-host.ts:138-150` | 【实测】 |
-| F8 | 已有**同款协议先例**：relay 代理用 NDJSON 握手 + `v` 版本 + reject reason + 退出码 10–13 | `relay/relay.mjs:1-30`、`execution/relay-env.ts:14-33`、subagent-realtime-channel.md（已删除，git 可追溯） | 【实测】 |
+| F8 | 已有**同款协议先例**：控制通道用单行 JSON 帧 + `v` 版本 + `hello_reject` reason + 结构化错误码词表 | `packages/subagent-engine-sdk/src/protocol/control-protocol.ts`、`packages/runtime/src/infra/subagent-control/control-server.ts` | 【实测】 |
 | F9 | 出站 env 有强制契约：子进程 env 必须经 `buildOutboundChildEnv`（C-proc-09）；**该函数在 `@taiji/shared`（产品包，zsw 不可依赖）**；检查 `check_spawn_env_boundary.py` 的 `SCAN_ROOTS` 只含 `packages/runtime/src` + `apps/electron/main`；pi 侧 `buildChildEnv` 直接 `{...process.env}`（`session-runner.ts:1759-1799`，未剥 5 个泄漏变量） | `packages/shared/src/spawn-env-contract.ts:121`、`.githooks/check_spawn_env_boundary.py:37-41` | 【实测】 |
 | F10 | 打包把引擎 inline；external 边界 = pi virtualModules；runtime 用 `noExternal` + **bare `import("sqlite")` 检查** | `scripts/bundle-extensions.mjs:23-56/281`、`packages/runtime/tsup.config.ts:54/85-95` | 【实测】 |
 | F11 | 宿主**直接调用将被删除的公共符号**：扩展 `src/index.ts:37/103`（`markAllSpawnedChildrenDead`）；zsw `lib/runner-core.js:75/161/428`（`registerZcodeEngine`/`createZcodeEngine`/`markAllSpawnedChildrenDead`）+ 自持引擎表 + 注入 `probe/getEngineFn/...` | 上述行号 | 【实测】 |
@@ -258,7 +258,7 @@ runtime 进程（GUI 详情页①级读）──spawn（按需 + idle 复用）�
 
 ### 3.3 引擎协议 v1
 
-**传输**：stdio NDJSON（每行一个 JSON 对象），与 zcode app-server / relay 同风格。
+**传输**：stdio NDJSON（每行一个 JSON 对象），与 zcode app-server / control 通道同风格。
 **帧型**（四类）：
 
 ```jsonc
@@ -418,12 +418,12 @@ runtime 进程（GUI 详情页①级读）──spawn（按需 + idle 复用）�
 **安全与 env（设计级契约；实现级键表/生成物/检查断言由代码承载——原 impl-plan §2.12 已删除，git 可追溯，入口 = 本节对应实现文件）**：
 凭据**不进协议**（引擎包自己解析自己的凭据）；引擎进程 env 由 SDK 的 `buildEngineChildEnv(baseEnv, opts)` 统一构建（D7）。
 **三层语义（高者覆盖低者）**：
-1. **基础设施层（core 在过滤之后注入）**——引擎数据根、执行器路径、nesting guard、**relay 三键（必须到达引擎，否则嵌套 subagent 静默回落直连）**；
-2. **deny / 显式剥除层（恒高于 manifest 放行）**——出站 deny 清单 + 产品凭证键 + 父身份键（relay 的 `SESSION_ID`/`RECORD_ID`）；
+1. **基础设施层（core 在过滤之后注入）**——引擎数据根、执行器路径、nesting guard、**control 两键（必须到达引擎与嵌套 task pi，否则嵌套 subagent 静默回落 local spawn）**；
+2. **deny / 显式剥除层（恒高于 manifest 放行）**——出站 deny 清单 + 产品凭证键 + 预设回落事实键；
 3. **manifest 放行层**——引擎专属命名空间前缀；**保留前缀拒绝表**（产品命名空间不得被第三方声明）；非法条目丢弃该前缀并 warn（包继续可用）。
 **不变量**：基础设施层键集合与 deny 集合恒不相交（检查断言）；用户无法为引擎注入其 manifest 未声明、引擎未实现消费的 env（已接受能力放弃，重审触发登记原在 impl-plan，已删除，git 可追溯）。
 
-**relay 转发语义（与 H12 一致）**：relay 的**连接三键必须透传**（嵌套 subagent 的唯一供数面，缺一即静默回落直连）；**父身份键必须剥除**，由引擎按运行上下文重写（防父身份误归属）。实现级键名与重写位置由代码承载（原 impl-plan §2.12 已删除，git 可追溯；入口 = 本节对应实现文件）。
+**control 透传语义（与 H12 一致）**：control 的**两键必须透传**（嵌套 subagent 的供数面，缺一即回落 local spawn）——runtime spawn 引擎时经 L0 注入，嵌套 task pi 经引擎出站 env 继承同值；归属键（`rootSessionId`/`parentRecordId`）由宿主 extension 侧 transport 按 RunContext 在 `engine_open` 帧携带（`engine_open` 是 C→R 帧，引擎进程不发送），不靠 env 继承。实现级键名与注入位置由代码承载（入口 = SDK `control-env.ts` 与 runtime `infra/subagent-control/engine-launch-env.ts`）。
 
 **基座常量来源（单源 + 构建期派生）**：SDK 的前缀/deny 常量由 `packages/shared/src/constants.ts` SSOT **构建期生成**
 （生成物名 `ENGINE_ENV_PREFIXES` / `ENGINE_ENV_DENY_LIST`，与 `modelCatalog` 同款构建期生成口径）；**检查断言**：L0 基础设施键集合 ∩ L1 deny/剥除集合 = ∅（防未来 deny 清单误伤 L0 键）。
@@ -576,7 +576,7 @@ pi 依赖宿主服务面更重——**两者拆分成本都不小**；zcode 仍�
 | H9 | 测试范围深路径消费（14 个扩展测试 + core 测试） | F12 | 随目录迁移；DoD 验证含 `pnpm extensions:test` + core test 全绿 | W10 |
 | H10 | env 契约归属 | F9 | SDK `buildEngineChildEnv`（含**引擎专属命名空间放行清单**）；检查 `SCAN_ROOTS` 扩展；pi 侧 `buildChildEnv` 迁移并补齐剥离 | W12 |
 | H11 | 引擎落盘路径（wrapper / stderr 日志 / 常驻进程） | `appserver-launcher.ts:144-156`、`zcode-engine.ts:656`、`connection.ts:577-578` | 随引擎包迁移；**stderr 日志轮转由引擎包自实现**（宿主 logger 只清 `runtime-`/`pi-` 前缀，看不见它）；写入面登记见 §3.9 | W11 |
-| H12 | relay 通道穿透新进程边界 | `relay-env.ts`、`relay.mjs` | 引擎 CLI 必须原样转发 relay env 与 stdio（嵌套 subagent）；A6 增嵌套用例 | W2/W8 |
+| H12 | control 通道穿透新进程边界 | `control-env.ts`、`control-server.ts` | 引擎 CLI 必须原样转发 control env 与 stdio（嵌套 subagent）；A6 增嵌套用例 | W2/W8 |
 
 #### 3.5.3 路由与执行时序契约（跨进程后必须显式登记的契约变更）
 
@@ -609,7 +609,7 @@ pi 依赖宿主服务面更重——**两者拆分成本都不小**；zcode 仍�
 | 面 | 规格 |
 |----|------|
 | 持有方 | runtime 自持 `EngineClient` 实例（与 pi 宿主实例**不共享**——两进程各自 spawn；同 id 会出现**两个常驻 CLI**） |
-| 回收层 | idle 5min → 发 `dispose`（**上界 3s，超时即杀**，对齐 `cancel`）并杀进程（定时器 owner = runtime 的 `EngineClient`）；**退出钩子落点 = `packages/runtime/src/index.ts` 的 `shutdown()` 内、与 relay 关停（`deinitRelayServer()`）并行发起（dispose 先发起、后共同收敛，relay 侧 3s 聚合上界）**（该文件只有单一 `shutdown()`、无通用钩子注册表；**不可用 `process.on('exit')`**——其回调不能 await，异步 dispose 会被 `process.exit` 截断） |
+| 回收层 | idle 5min → 发 `dispose`（**上界 3s，超时即杀**，对齐 `cancel`）并杀进程（定时器 owner = runtime 的 `EngineClient`）；**退出钩子落点 = `packages/runtime/src/index.ts` 的 `shutdown()` 内、与 control server 关停（`deinitControlServer()`）并行发起（dispose 先发起、后共同收敛，服务器侧有界等待）**（该文件只有单一 `shutdown()`、无通用钩子注册表；**不可用 `process.on('exit')`**——其回调不能 await，异步 dispose 会被 `process.exit` 截断） |
 | 与 pi 实例的关系 | **不共享连接**；zcode 两实例共享同一宿主 HOME 与**同一隔离库**（WAL 并发，与改造前同语义）；**单一数据根 env** 见下「数据根注入矩阵」 |
 | 量级 | 进程数 = 每宿主每 id 1 个常驻 CLI（典型 2 个）+ zcode 背后 app-server（宿主实例惰性建，runtime 侧 `read` 只读 sqlite **不启 app-server**）；首读延迟 150–400ms（冷）/ < 50ms（暖）；RSS 待实施期实测并回写本表 |
 | 验收 | A11 扩为「**含 runtime ①级读路径**」：先打开详情页触发 runtime spawn，再退宿主 `pgrep` |
@@ -674,7 +674,7 @@ pi 依赖宿主服务面更重——**两者拆分成本都不小**；zcode 仍�
 | 段 | 规则 |
 |----|------|
 | `bin` 名 → 绝对入口 | manifest `bin` 映射（包目录相对路径）+ 包目录绝对化；**不依赖 PATH**（staging 目录不在 PATH） |
-| 运行时选择（**宿主 × 平台二维**） | **设计决策**：打包态 pi 宿主的 `process.execPath` 是 Bun standalone binary（再拉就是又起一个 pi）→ **必须用注入的执行器**，单一名字（不复用 relay 的 node 键）、经基础设施层注入（不依赖继承，否则被剥除）；执行器为 Electron 二进制时同时注入 `ELECTRON_RUN_AS_NODE`；首次使用前跑 node 探针，失败 → `engine_not_found` + 指引。三宿主 × 三平台的完整解析矩阵、探针实现与 env 注入点由代码承载（原 impl-plan §2.9 已删除，git 可追溯；入口 = 本节对应实现文件） |
+| 运行时选择（**宿主 × 平台二维**） | **设计决策**：打包态 pi 宿主的 `process.execPath` 是 Bun standalone binary（再拉就是又起一个 pi）→ **必须用注入的执行器**，单一名字（`TAIJI_AGENT_ENGINE_NODE`）、经基础设施层注入（不依赖继承，否则被剥除）；执行器为 Electron 二进制时同时注入 `ELECTRON_RUN_AS_NODE`；首次使用前跑 node 探针，失败 → `engine_not_found` + 指引。三宿主 × 三平台的完整解析矩阵、探针实现与 env 注入点由代码承载（原 impl-plan §2.9 已删除，git 可追溯；入口 = 本节对应实现文件） |
 | Windows | 入口为 `.mjs` 时不需 shim；若引擎声明 `.cmd` → 禁止 `shell:true`（注入面），改用显式 `cmd.exe /c` + 参数数组 |
 | 安全 | 不 cwd 探测；引擎根只读 manifest，不执行用户 repo 内同名目录 |
 
@@ -842,12 +842,12 @@ RSS 实施期实测回写 §3.6 表；恢复 = 取消 runtime 路径（降②级
 | A3 | pi 外移等价性（workflow 域 + 子进程收割） | workflow 里派发 pi 任务；任务中 `kill -9` 子进程；宿主退出后 `ps`（Windows：`tasklist`） | 事件/record 等价；**SIGKILL 升级与按句检查不回归**（`childStateChanged` 镜像可观测）；子进程被收割无残留（**POSIX 按进程组终止 / Windows `taskkill /T /F` 两种形态各验一次**；**范围 = 一代子进程 + 组内后代**，引擎自身 detached 后代见 §3.9 已接受代价）；**POSIX：引擎上报的 `childSpawned` pid 做 `kill(-pid,0)` 组探测 → 不在同组即告警**（§3.6 D2 前提②；Windows 无外部判据，仅靠 SDK 层保证）；`markAllSpawnedChildrenDead` 兼容符号行为不变 | G5/G4 |
 | A4 | 新引擎零改 core | 写最小 `foo-subagent-cli`（fake），只装包 + manifest（含 capabilities） | 出现在选择器；`engine: foo` 可派发跑通；**core 仓库 diff = 0** | G1 |
 | A5 | 三形态分发 | workspace dev / Electron 打包产物 / zsw vendor 各跑一次 A1 | 三形态发现、握手、执行一致；打包产物里引擎包**不在** extension bundle 内；产物无裸 `import("sqlite")`；**产物 grep `require("@zhushanwen/subagent-engine-sdk")` 零命中**（`validate-runtime-bundle.sh` 新增一步——该脚本 DEPS 过滤 `workspace:*`，不能依赖 DEPS 断言）；**三宿主 × 三平台启动解析均通过**（含「打包态 pi 宿主能拉起引擎 CLI」+ **引擎子进程 env 含 `TAIJI_AGENT_ENGINE_NODE` 与（Electron 执行器时）`ELECTRON_RUN_AS_NODE=1` 且 argv 生效**）；zsw 形态显式验证「发现并驱动 zcode CLI」 | G6 |
-| A6 | 协议与版本/能力协商 | ①`protocol: 99`；②**被 gate 能力位**（如 `conversation` / `sandbox`）manifest 少声明一次 + **非 gate 能力位**（如 `personaInjection` / `eventGranularity`）弱于/强于握手各一次；③嵌套 subagent（relay 透传，**断言引擎子进程内 relay env 可见集合 = {SOCKET,NODE,SCRIPT}**，SESSION_ID/RECORD_ID 已剥并由引擎覆写；**承载层 = L0**）；④用户旋钮 `ZCODE_APPSERVER_TURN_*_TIMEOUT_MS` 跨进程生效 + **未声明前缀的引擎私有 env 不透传** + **`TAIJI_AGENT_API_KEY` 零命中**；⑤model 未命中（`dynamic=false` / `dynamic=true` 各一次）+ **manifest 省略 `modelCatalog` 的引擎 prompt 段落 == `buildCoreAlignedHint`** + **显式 `models:[]` → `buildEmptyModelsHint`**；⑥引擎 `listModels` 应答与 manifest 不一致 → **仅 warn + 任务仍跑通**；⑦**fork 判据的 OR 语义**：`steer=unsupported` 但 `conversation` 可用 → fork 放行（实装 `capability-gate.ts:67` 为「任一可用即支持」） | ①`engine_protocol_mismatch`（含双方版本 + 恢复）；②被 gate 位少声明 → **首个调用同步拒** + 恢复指引 = 「修 manifest / 升级引擎包」；非 gate 位不一致 → **仅 warn，不阻断**；③嵌套 relay 正常 + 可见集合断言通过；④旋钮生效 + 未声明 env 被剥且 warn + 凭证零命中；⑤`engine_model_unknown` 同步拒 / `engine_model_mismatch` 运行期失败 + 无斜杠 ref 留痕不畸形；⑥warn 留痕且无阻断；⑦fork 放行 | G2/G4 |
+| A6 | 协议与版本/能力协商 | ①`protocol: 99`；②**被 gate 能力位**（如 `conversation` / `sandbox`）manifest 少声明一次 + **非 gate 能力位**（如 `personaInjection` / `eventGranularity`）弱于/强于握手各一次；③嵌套 subagent（control 透传，**断言引擎子进程内 control 两键可见**，归属键由宿主 extension 侧 transport 在 `engine_open` 帧携带（C→R）；引擎只把 control env 传给 task pi；**承载层 = L0**）；④用户旋钮 `ZCODE_APPSERVER_TURN_*_TIMEOUT_MS` 跨进程生效 + **未声明前缀的引擎私有 env 不透传** + **`TAIJI_AGENT_API_KEY` 零命中**；⑤model 未命中（`dynamic=false` / `dynamic=true` 各一次）+ **manifest 省略 `modelCatalog` 的引擎 prompt 段落 == `buildCoreAlignedHint`** + **显式 `models:[]` → `buildEmptyModelsHint`**；⑥引擎 `listModels` 应答与 manifest 不一致 → **仅 warn + 任务仍跑通**；⑦**fork 判据的 OR 语义**：`steer=unsupported` 但 `conversation` 可用 → fork 放行（实装 `capability-gate.ts:67` 为「任一可用即支持」） | ①`engine_protocol_mismatch`（含双方版本 + 恢复）；②被 gate 位少声明 → **首个调用同步拒** + 恢复指引 = 「修 manifest / 升级引擎包」；非 gate 位不一致 → **仅 warn，不阻断**；③嵌套 control 链路正常 + 可见集合断言通过；④旋钮生效 + 未声明 env 被剥且 warn + 凭证零命中；⑤`engine_model_unknown` 同步拒 / `engine_model_mismatch` 运行期失败 + 无斜杠 ref 留痕不畸形；⑥warn 留痕且无阻断；⑦fork 放行 | G2/G4 |
 | A7 | 宿主零改动 | taiji 扩展与 zsw **业务逻辑**不改；允许的机械改动 = 依赖升级 + vendor 刷新 + 发现根注入 | A1-A6 通过；扩展 `index.ts:37/103` 与 zsw `runner-core.js:75/161/428` 的**业务调用点未改**而行为不变；zsw deps 映射后 `engineDataDir` 无漂移 | G3 |
 | A8 | 引擎崩溃/挂死隔离 | ①run 中 `kill -9` 引擎进程（POSIX）/ `taskkill /F /T`（Windows）；②引擎假死不回帧；③重建连续失败 4 次；④**宿主被 `kill -9`**（反向场景） | ①在途 run 失败（含 stderr 尾），下次 run 重建；**崩溃后：`list` 的 `resumable` 不说谎、后台通知不被 60s 合并窗口挂住、idle GC 可触发、孙进程零命中（POSIX `pgrep` / Windows `tasklist`）**；②按 idle 检测判定（不误杀活跃任务）；③标记不可用 + 派发报错含恢复指引；④**宿主 `kill -9` → 引擎经 stdin EOF 在阈值内自灭、组内后代零残留、同宿主内不出现同 id 双实例、双宿主互不误杀**；**负向**：静默长任务（>30s 无反向流量）**不被自灭**；被 ack 的 `host/askUser` 异步等待不被判超时 | G4 |
 | A9 | 迁移完成度（DoD） | 按 §3.8 D6 九条逐条验 | 九条全绿；`grep -r "engines/\(pi\|zcode\)" packages/subagent-core/src` 零生产命中 | G1/G2 |
 | A10 | 宿主表面不变量（zcode GUI / DB） | A1-A8 后（**N≥3 轮**）：打开 GUI 看会话列表；`sqlite3 "file:~/.zcode/cli/db/db.sqlite?mode=ro" "select count(*) from session where id in (<record 白名单>)"` 与 `tasks-index` 同查 | 宿主 zcode 会话列表**无新增 subagent 会话**；两库计数 = 0（白名单来源 = 本轮 record 的 `sessionRef.sessionId`，写入方归因即此） | G3 |
-| A11 | 宿主表面不变量（engines.json / 进程残留 / 数据根一致） | A1-A8 **含 runtime ①级读路径**（先打开详情页触发 runtime spawn）后（**N≥3 轮**）：检查 `engines.json` 形状；退宿主后 **POSIX**：`pgrep -f '<engine>-subagent-cli'` + `lsof -p <pid>`；**Windows 等效**：`tasklist /FI "PID eq <pid>"` + 无孙进程（`wmic process where "ParentProcessId=<pid>"` 或 `tasklist /V` 人工核）；向 runtime 发 SIGTERM（Windows：`taskkill /PID <runtimePid>`）并计时 | `engines.json` 仍是 `{v:1, engines: string[]}` 且消费方行为不变；**无遗留引擎/组内后代**（**三平台各验一次**：POSIX `pgrep` 零命中 / Windows `tasklist` 零命中；范围同 A3）、无 fd/socket 堆积（lsof 行数不增长）；**SIGTERM 关停后（dispose 发起起算）1s 内引擎进程消失**（退出钩子实效；注意 `shutdown()` 内 `await deinitRelayServer()` 有 3s grace，故 dispose 必须与 relay 关停**并行**）；**runtime ①级读打开的库路径 == pi 宿主引擎写入的库路径**（单数据根） | G3 |
+| A11 | 宿主表面不变量（engines.json / 进程残留 / 数据根一致） | A1-A8 **含 runtime ①级读路径**（先打开详情页触发 runtime spawn）后（**N≥3 轮**）：检查 `engines.json` 形状；退宿主后 **POSIX**：`pgrep -f '<engine>-subagent-cli'` + `lsof -p <pid>`；**Windows 等效**：`tasklist /FI "PID eq <pid>"` + 无孙进程（`wmic process where "ParentProcessId=<pid>"` 或 `tasklist /V` 人工核）；向 runtime 发 SIGTERM（Windows：`taskkill /PID <runtimePid>`）并计时 | `engines.json` 仍是 `{v:1, engines: string[]}` 且消费方行为不变；**无遗留引擎/组内后代**（**三平台各验一次**：POSIX `pgrep` 零命中 / Windows `tasklist` 零命中；范围同 A3）、无 fd/socket 堆积（lsof 行数不增长）；**SIGTERM 关停后（dispose 发起起算）1s 内引擎进程消失**（退出钩子实效；注意 `shutdown()` 内 control server 关停与 dispose **并行发起**，收敛等待有界）；**runtime ①级读打开的库路径 == pi 宿主引擎写入的库路径**（单数据根） | G3 |
 | A12 | 负面行为（反向验收） | ①同 id 两个包；②坏 manifest（含 `envPrefixes` 为 `""` / `"*"`）；③`bin` 缺失；④`defaultEngine` 指向已卸载引擎；⑤`engines:{"<id>":{enabled:false}}`；⑥迁移期 `TAIJI_SUBAGENT_ENGINE_MODE=inproc` 回退；⑦**冷启动（无 pi 进程）**；⑧全局 config.json 坏 JSON（存在但读不出来） | ①后者覆盖 + info 留痕；②坏包跳过（`envPrefixes` 非法条目 → **丢弃该前缀 + warn，引擎仍可用**）、其他引擎正常；③不进清单 + 派发报错含原因；④派发报错 `engine_not_found`（列已发现引擎 + 配置路径 + 安装指引），**不回落其它引擎**；⑤该引擎不进清单 + 派发报错含恢复指引；⑥迁移期回退可跑（适用期至 DoD#5）；⑦**已安装引擎全部可见（含第三方）**——回退源 = runtime 自身发现结果（无静态 JSON 兜底）；⑧派发前拒 `engine_config_unreadable`（不按内置缺省 pi 执行） | G1/G2 |
 | A13 | stderr 日志轮转（反向验收，含并发） | ①长跑 N 次任务（或人为刷屏）后检查 `logs/zcode-appserver-stderr-<pid>.log`；②**两个宿主（pi + runtime）同时长跑** | ①文件大小受上限（50MB）约束、超期（7 天）自动清理（**可执行步骤：`touch -d '8 days ago' <log>` 把 mtime 拨回后重跑清理**）；②双实例各自文件独立、**互不删除/重命名对方文件**、无 rename 失败（EPERM）静默丢失（**对方 pid 存活时其文件不得被删**；存活判据 = `process.kill(pid,0)` 跨实例探测） | 已接受代价 |
 
@@ -874,7 +874,7 @@ RSS 实施期实测回写 §3.6 表；恢复 = 取消 runtime 路径（降②级
 | W5 zcode 外移 | 新建 `@zhushanwen/zcode-subagent-cli` 包，搬 `engines/zcode/` + 前置文档改动 | W1–W4 | A1/A5/A9；实现级规格由代码承载（原 impl-plan §2.5，已删除） | 实现级细节由代码承载（入口 = `packages/zcode-subagent-cli`） |
 | W6 pi 宿主面下沉 | `PiEngineService` 9 成员拆 HostBridge + `spawnedChildren` 状态镜像（前置，强制） | W1–W3 | A2/A3/A8 前置；实现级规格由代码承载（原 impl-plan §2.6，已删除） | 实现级细节由代码承载（入口 = 本行职责对应实现文件） |
 | W7 pi 外移 | 新建 `@zhushanwen/pi-subagent-cli`（依赖 W6 产物） | W6 | A2/A3/A9；实现级规格由代码承载（原 impl-plan §2.7，已删除） | 实现级细节由代码承载（入口 = `packages/pi-subagent-cli`） |
-| W8 宿主接线 | runtime 成为协议客户端 + 扩展依赖声明 + D8 兼容公共面 + relay 透传 | W2/W4 | A7/A11；实现级规格由代码承载（原 impl-plan §2.8，已删除） | 实现级细节由代码承载（入口 = 本行职责对应实现文件） |
+| W8 宿主接线 | runtime 成为协议客户端 + 扩展依赖声明 + D8 兼容公共面 + control 通道接线 | W2/W4 | A7/A11；实现级规格由代码承载（原 impl-plan §2.8，已删除） | 实现级细节由代码承载（入口 = 本行职责对应实现文件） |
 | W9 打包与分发 | 引擎包 staging + 启动解析二维矩阵 + 数据根注入矩阵 + 新检查 | W1/W5/W7 | A5/A11；实现级规格由代码承载（原 impl-plan §2.9，已删除） | 实现级细节由代码承载（入口 = `scripts/bundle-extensions.mjs` 与边界检查脚本） |
 | W10 conformance 改造 | 协议黑盒套件 + 基线三层 + 录制/复跑 + H9 测试范围迁移 | W1/W2/W5/W7 | A1/A2/A4/A9；实现级规格由代码承载（原 impl-plan §2.10，已删除） | 实现级细节由代码承载（入口 = 本行职责对应实现文件） |
 | W11 壳侧去引擎化（DoD 收尾） | 清 H1–H4/H8/H11 + 删内建与 inproc + stderr 轮转引擎侧自实现 | W5/W7/W8/W9/W10/W12 | A5/A9/A11/A13；实现级规格由代码承载（原 impl-plan §2.11，已删除） | 实现级细节由代码承载（入口 = 本行职责对应实现文件） |

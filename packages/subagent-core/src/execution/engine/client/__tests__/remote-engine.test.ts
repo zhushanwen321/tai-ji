@@ -25,7 +25,7 @@ import {
 import { SubagentStream } from "../../../assembly/stream-sink.ts";
 import { getSubagentSessionDir } from "../../../assembly/path-encoding.ts";
 import { probePidAliveness } from "../pid-file.ts";
-import { getLogger, type UiRequest } from "@zhushanwen/subagent-engine-sdk";
+import { EngineSdkError, getLogger, type UiRequest } from "@zhushanwen/subagent-engine-sdk";
 import { getLogger as coreGetLogger } from "../../../../core/logger.ts";
 import {
   _resetHostUiRequestEndpointForTest,
@@ -277,7 +277,7 @@ describe("RemoteEngine run 帧映射", () => {
   });
 
   it("ctx.sessionRootId → wire ctx.sessionRootId 逐字保真；缺省不传 → wire 无该键（F6 additive）", async () => {
-    // 正向：根 session id 上 wire（pi 引擎 relay 归属键 SESSION_ID 的权威来源）
+    // 正向：根 session id 上 wire（pi 引擎 engine_open 归属键的权威来源）
     const withRoot = makeEngine();
     const { ctx: ctxRoot, events: eventsRoot } = makeCtx({ sessionRootId: "root-sess-f6" });
     await withRoot.engine.run({ prompt: "p" }, ctxRoot);
@@ -291,6 +291,15 @@ describe("RemoteEngine run 帧映射", () => {
 
     await withRoot.cleanup();
     await bare.cleanup();
+  });
+
+  it("[B-U-1] ctx.sessionRootId → client.ensureConnected(根 id)（engine_open 归属键权威源贯通）", async () => {
+    const fixture = makeEngine();
+    const spy = vi.spyOn(fixture.client, "ensureConnected");
+    const { ctx } = makeCtx({ sessionRootId: "root-sess-connect" });
+    await fixture.engine.run({ prompt: "p" }, ctx);
+    expect(spy).toHaveBeenCalledWith("root-sess-connect");
+    await fixture.cleanup();
   });
 
   it("[Option C] wire ctx.sessionDir = getSubagentSessionDir(env 同源推导)；ctx 显式注入优先", async () => {
@@ -381,7 +390,7 @@ describe("RemoteEngine run 帧映射", () => {
 describe("abort 分级（cancel 帧 + 收敛兜底窗）", () => {
   it("signal abort → cancel；引擎主动收敛（终态应答在兜底窗内）→ 引擎侧 abort 终态正常返回（窗满兜底不触发）", async () => {
     const controller = new AbortController();
-    const { engine, cleanup } = makeEngine(undefined, {
+    const { engine, client, cleanup } = makeEngine(undefined, {
       // run 受理后 delay 挂起（不与 --run-hang 组合——run-hang 丢弃 run 帧致
       // activeRun 恒 null，cancel-settle 永不生效，用例会退化为兜底窗路径）；
       // cancel 到达 → cancel-settle 同步回 abort 终态（引擎侧收敛，兜底窗不触发）。
@@ -393,7 +402,12 @@ describe("abort 分级（cancel 帧 + 收敛兜底窗）", () => {
     });
     const { ctx } = makeCtx({ signal: controller.signal });
     const runPromise = engine.run({ prompt: "p" }, ctx);
-    setTimeout(() => controller.abort(), 100);
+    // 先等连接就绪再 abort：本用例验证「run 受理后 cancel 收敛」，不是「连接期
+    // abort」。高负载下本地引擎 spawn + 握手可超 100ms，墙钟定时会把 cancel 抢在
+    // run 帧之前（fake engine 对无 activeRun 的 cancel 是 no-op → run 照常 60s
+    // 延迟 → 用例 15s 超时；HEAD 源码在同等负载下同样复现，属既存测试竞态）。
+    await waitForReady(client);
+    controller.abort();
     const result = await runPromise;
     expect(result.outcome.error).toContain("engine_run_failed: aborted (fake)");
     expect(result.outcome.exitCode).toBeNull(); // 被信号杀死判据
@@ -485,6 +499,73 @@ describe("失败分界（运行中合成 vs prepare 期 reject）", () => {
     });
     await cleanup();
   }, 20_000);
+});
+
+/**
+ * [m-core-2] 最小 EngineClient 替身：run 期错误注入（只实现 RemoteEngine.run 触达的
+ * 成员；真实引擎/控制通道不在本用例范围）。
+ */
+function makeStubClient(injected: {
+  connectError?: EngineSdkError;
+  requestError?: EngineSdkError;
+}): EngineClient {
+  const stub = {
+    ensureConnected: async (): Promise<void> => {
+      if (injected.connectError !== undefined) throw injected.connectError;
+    },
+    getInitializeDiagnostics: () => undefined,
+    registerRunRoute: () => () => {},
+    request: async (): Promise<unknown> => {
+      if (injected.requestError !== undefined) throw injected.requestError;
+      throw new Error("stub: no request result configured");
+    },
+    getPartialHandle: () => undefined,
+    cancelRun: async (): Promise<void> => {},
+    dispose: async (): Promise<void> => {},
+  };
+  return stub as unknown as EngineClient;
+}
+
+function makeStubEngine(client: EngineClient): RemoteEngine {
+  return new RemoteEngine({
+    engineId: "stub-engine",
+    client,
+    dataDir,
+    hostKind: "test",
+    manifest: { capabilities: { ...FAKE_MATCHED_CAPS } },
+  });
+}
+
+describe("[m-core-2] run 期 transport 失败码：合成 error outcome（不 reject）", () => {
+  const RUN_PHASE_CODES = [
+    "engine_transport_lost",
+    "engine_frame_too_large",
+    "engine_backpressure_overflow",
+    "unknown_channel",
+  ] as const;
+
+  for (const code of RUN_PHASE_CODES) {
+    it(`${code} → 正常返回 error outcome + 正常 handle`, async () => {
+      const engine = makeStubEngine(makeStubClient({
+        requestError: new EngineSdkError(code, `injected ${code}`, "inspect the transport"),
+      }));
+      const { ctx } = makeCtx();
+      const result = await engine.run({ prompt: "p" }, ctx);
+      expect(result.outcome.error).toContain(code);
+      expect(result.outcome.exitCode).toBeNull();
+      expect(result.handle.data.v).toBe(1);
+    });
+  }
+
+  it("同码在 prepare 期（ensureConnected 抛）→ 仍 reject，不产生 handle", async () => {
+    const engine = makeStubEngine(makeStubClient({
+      connectError: new EngineSdkError("engine_transport_lost", "connection lost before run", "reconnect"),
+    }));
+    const { ctx } = makeCtx();
+    await expect(engine.run({ prompt: "p" }, ctx)).rejects.toMatchObject({
+      code: "engine_transport_lost",
+    });
+  });
 });
 
 describe("gate 位多声明 run 期判定（W3 契约⑤接线：manifest vs initialize 应答）", () => {

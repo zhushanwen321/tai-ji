@@ -97,12 +97,9 @@ describe('deriveParams 端口派生', () => {  it('fnv1a 稳定且 32bit 无符�
 // ── env 装配 ──────────────────────────────────────────────────────────
 
 describe('buildDevEnv 泄漏剥除与统一注入', () => {
-  it('剥除 MANDATORY 泄漏清单（ELECTRON_RUN_AS_NODE + RELAY_STD* 三名）', () => {
+  it('剥除 MANDATORY 泄漏清单（ELECTRON_RUN_AS_NODE）', () => {
     const base = {
       ELECTRON_RUN_AS_NODE: '1',
-      TAIJI_SUBAGENT_RELAY_STDIN: '3',
-      TAIJI_SUBAGENT_RELAY_STDOUT: '4',
-      TAIJI_SUBAGENT_RELAY_STDERR: '5',
       PATH: '/usr/bin',
     }
     const env = buildDevEnv(deriveParams('t', '/tmp/i'), base)

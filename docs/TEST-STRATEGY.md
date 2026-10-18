@@ -396,7 +396,7 @@ pi 边界可靠性设计的测试范围落地（2026-08-27 事故对 → 四支�
 
 **裁决一：慢池拆分（真实 IO 用例隔离到 maxWorkers=1 组）——不做，两包均为深度负收益**。实测：subagent-core 真实 IO 文件串行总和 S=13.1s > 当前满并行墙钟 9.45s（拆后慢 39%）；zcode S=29.4s ≈ 包总时长 98.5%（拆后慢 273%）。且 vitest 4.x projects 分组调度契约是**严格串行**（`groupSpecs` 逐组 await，主组完整结束慢组才开跑），实际墙钟 = 主池 + S，比 max 公式更差。runtime 包 REAL_PI_TESTS 双池先例的动机是**防饿死**（真实 LLM 轮次的长等待窗口在 CPU 饱和下被拖 19 倍），不是墙钟优化——本地毫秒级 fake 子进程（zcode fake-appserver / subagent-core fake-engine）不满足该前提，满并行已是墙钟最优。分池门槛：只有「真实外部长等待（网络/LLM）在 CPU 饱和下被饿死」才建慢池。
 
-**裁决二：subagent-workflow 剩余耗时——架构固有，不动**（墙钟 14.3s / 944 用例）。求和大头的构成：review-fix-loop-e2e 13.1s（真实 worker 子进程）、relay-agent 4s（真实 relay.mjs + 环回 socket）属真实 IO 语义成本；~8-10s 是 7 个「装配真实入口」测试文件的首用例动态 import 整棵组合根——forks 池无磁盘 transform 缓存、每 fork 重复付，属架构固有。三个压缩方案全部否决：入口懒加载会动组合根装配时序（u7a 验收固定「extension 加载完成时触发」）；deps.optimizer 内联 `@zhushanwen/subagent-core` 会破坏 vi.mock 深路径与 barrel 的物理模块等价性（mock 静默失效风险）；改测试 import 形态违背 D3 裁决（2026-09-03，测试深路径统一经 alias 正则不改写）。
+**裁决二：subagent-workflow 剩余耗时——架构固有，不动**（墙钟 14.3s / 944 用例）。求和大头的构成：review-fix-loop-e2e 13.1s（真实 worker 子进程）属真实 IO 语义成本；~8-10s 是 7 个「装配真实入口」测试文件的首用例动态 import 整棵组合根——forks 池无磁盘 transform 缓存、每 fork 重复付，属架构固有。三个压缩方案全部否决：入口懒加载会动组合根装配时序（u7a 验收固定「extension 加载完成时触发」）；deps.optimizer 内联 `@zhushanwen/subagent-core` 会破坏 vi.mock 深路径与 barrel 的物理模块等价性（mock 静默失效风险）；改测试 import 形态违背 D3 裁决（2026-09-03，测试深路径统一经 alias 正则不改写）。
 
 **裁决三：根 `pnpm test` 包级并发预算——默认已最优，不调**。10 核机 4 重包对照实测（2026-09-15）：默认并发 31.6s < concurrency=2 的 32.9s < 串行 35.3s——并发膨胀（zcode 求和 +15%）被包间进程启动/IO 重叠收益抵消还有余。CI 不经此路径（走 `--filter <pkg> exec vitest run --shard=` 按包分 job）。
 

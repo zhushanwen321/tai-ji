@@ -1,7 +1,7 @@
 /**
  * openPiStreams 注册表摘除测试（memory-leak-remediation §3.4 G2，u8）。
  *
- * 收口「活性无界」问题：每个 pi spawn（主 session / relay subagent / crash log）在
+ * 收口「活性无界」问题：每个 pi spawn（主 session / subagent / crash log）在
  * openPiStreams 注册一条，原实现唯一清理点是 runtime 退出的 closeLogger——长跑进程内
  * Set 随工作流强度无界增长。G2 修复 = 流确认 close（fd 释放、缓冲全量落盘——已 close
  * 流无在途数据）后从 Set 摘除，closeLogger 兜底等待契约不变。

@@ -3,7 +3,7 @@
 //
 // 形态对齐 engine-protocol v1（stdout 独占 NDJSON；stdin 帧驱动）：
 // - initialize：应答 protocolVersion=1 + 最小 capabilities + envEcho（白名单键的
-//   process.env 摘要——relay 透传/剥除断言的数据源，非白名单键不回传防泄漏）；
+//   process.env 摘要——L0 env 注入断言的数据源，非白名单键不回传防泄漏）；
 // - read：应答 SessionView（turns=[{text:'fake turn',...}]，sessionId=本进程 pid——
 //   两次 read 的 sessionId 相同 = 实例复用断言面）；
 //   FAKE_READ_MODE=error → read 回 error 帧（降②级测试）；
@@ -27,11 +27,8 @@ const DISPOSE_MODE = argOf('--dispose-mode', process.env.FAKE_DISPOSE_MODE ?? 'o
 const SPAWN_LOG = process.env.FAKE_SPAWN_LOG ?? ''
 // env 回显白名单：只回传测试断言的协议面键（fixture 不做通用 env 转发）。
 const ENV_ECHO_KEYS = [
-  'TAIJI_SUBAGENT_RELAY_SOCKET',
-  'TAIJI_SUBAGENT_RELAY_NODE',
-  'TAIJI_SUBAGENT_RELAY_SCRIPT',
-  'TAIJI_SUBAGENT_RELAY_SESSION_ID',
-  'TAIJI_SUBAGENT_RELAY_RECORD_ID',
+  'TAIJI_SUBAGENT_CONTROL_SOCKET',
+  'TAIJI_SUBAGENT_CONTROL_ROOT_SESSION_ID',
   'TAIJI_AGENT_DATA_DIR',
 ]
 

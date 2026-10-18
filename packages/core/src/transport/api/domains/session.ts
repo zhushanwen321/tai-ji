@@ -228,7 +228,7 @@ export async function getSubagentHistory(sessionId: string, subagentId: string):
 
 /**
  * 拉取 subagent 进行中流状态（B2 subagent-stream-chunk §4.1，与 getSubagentHistory 同域同模式）：
- * RelayTee 既有内存状态的只读快照，增量 chunk 消息的失步恢复与接入首拉通道。
+ * SubagentTee 既有内存状态的只读快照，增量 chunk 消息的失步恢复与接入首拉通道。
  * reply payload（同名 reply，payload 消费型）：{ found, msgSeq, lastDeltaSeq, lines }——
  * found=false = 该 record 当前无进行中流（未开始或已定稿，设计内合法回执非错误）；
  * found=true 时 lines = 当前消息累积全文（textAccumulated split 形态，消费端复用现有

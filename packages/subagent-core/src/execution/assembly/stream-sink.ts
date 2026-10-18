@@ -18,7 +18,7 @@
 
 import type { ExtensionMode } from "./host-mode.ts";
 import { resolveHostMode } from "./host-mode.ts";
-import { isRelayActive } from "@zhushanwen/subagent-engine-sdk";
+import { usesRuntimeTransport } from "../engine/client/transport-selection.ts";
 
 /** UI streaming sink 的最小接口（ctx.ui.setWidget 的 duck-typed 子集）。
  *
@@ -106,10 +106,17 @@ export class SubagentStream {
 /**
  * background stream 创建策略（widget 私货通道退役步骤 2，E 方案 §6.3）。
  *
- * GUI（mode=rpc）+ relay 激活时不创建——drawer 实时改由 runtime tee 供数
- * （session.subagentEntriesAppended 帧），extension 停发 setWidget 私货，主 pi stdout
- * 卸载。TUI（widget 行是 TUI 用户的实时预览）与 relay 未激活环境（独立 pi / 无
- * taiji runtime）原样创建——universal 包自足性不绑架。
+ * GUI（mode=rpc）+ 托管态（实际使用 runtime transport：runtime 持有引擎 spawn 权）
+ * 时不创建——drawer 实时改由 runtime tee 供数（session.subagentEntriesAppended 帧），
+ * extension 停发 setWidget 私货，主 pi stdout 卸载。TUI（widget 行是 TUI 用户的实时
+ * 预览）与非托管环境（独立 pi / 无 taiji runtime）原样创建——universal 包自足性不绑架。
+ *
+ * [m-core-4] 判据必须用 `usesRuntimeTransport` 而非裸 control env：D9 逃生舱
+ * `TAIJI_SUBAGENT_TRANSPORT=local` 下 control env 仍在，但引擎由 extension 本地
+ * spawn（stdio 只有三根 pipe，没有 fd3/raw mirror）——按裸 env 抑制会同时失去
+ * widget 与 tee 两个供数源，GUI live 流整体静默缺失。`usesRuntimeTransport` 同时
+ * 表达「runtime transport 生效」与「runtime tee 可用」（D6：托管态 spawn 必开
+ * fd3 mirror）。
  *
  * env/mode 显式入参而非内部读 process.env：调用方语义（本 record 的宿主形态）一次
  * 确定，测试可注入，函数保持纯判定。
@@ -121,6 +128,6 @@ export function createBackgroundStream(
   env: NodeJS.ProcessEnv | Record<string, string | undefined>,
 ): SubagentStream | undefined {
   if (sink === null) return undefined;
-  if (isRelayActive(env) && resolveHostMode(mode) === "gui") return undefined;
+  if (usesRuntimeTransport(env) && resolveHostMode(mode) === "gui") return undefined;
   return new SubagentStream(recordId, sink);
 }

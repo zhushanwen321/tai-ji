@@ -32,8 +32,7 @@ export * from "./env.ts";
 export * from "./identity-env.ts";
 export * from "./spawn.ts";
 
-// W9 落地（impl-plan §2.9）：引擎 CLI 启动解析（宿主 × 平台二维矩阵 + node 执行器探针，
-// 探针复刻 runtime relay-env 先例）。
+// W9 落地（impl-plan §2.9）：引擎 CLI 启动解析（宿主 × 平台二维矩阵 + node 执行器探针）。
 export * from "./node-executor.ts";
 
 // stderr tee 轮转/清理单源（前缀参数化；两引擎包的 logs/stderr-rotation.ts 为薄包装）。
@@ -44,13 +43,9 @@ export * from "./logs/stderr-rotation.ts";
 // 两侧 import 同一常量。
 export * from "./zcode-db-paths.ts";
 
-// relay 通道 env 名与协议常量 SSOT（round1-reuse R9：core ./relay-env 子入口与 pi
-// 引擎包副本自本模块 re-export 收编，消 5 个 TAIJI_SUBAGENT_RELAY_* env 名双副本）。
-export * from "./relay-env.ts";
-
-// relay 通道帧词表 SSOT（kind / dir / reject reason）——runtime relay-registry import
-// 单源；零依赖 relay.mjs 内嵌镜像由 conformance relay 变体断言锁定（同 env 常量先例）。
-export * from "./relay-frames.ts";
+// [M3] control 通道 env 名 SSOT（TAIJI_SUBAGENT_CONTROL_* 两键 + transport 选择谓词；
+// 帧词表经上方 protocol/ barrel 出口）。
+export * from "./control-env.ts";
 
 // 「错误 → 可读字符串」与 best-effort 吞错 helper 单源（round1-reuse R11：core 与
 // pi/zcode 引擎包的微副本 re-export 收编；toErrorMessage 含 A8 修复——非 Error

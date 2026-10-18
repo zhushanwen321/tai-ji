@@ -42,17 +42,13 @@ import { createMemberRecord } from "./helpers/subagent-record-fixture.ts";
 import { v2Entries, v2RegisteredEntry } from "./helpers/v2-record-entry.ts";
 import { SubagentService } from "../subagent-service.ts";
 
-/** 剥身份/relay env：身份 env 会让 service 误判自己是子进程（跳过恢复扫描），
- *  relay env 属 pi-invocation/relay-env 存量测试的敏感面（测试纪律：env 剥离）。 */
+/** 剥身份 env：身份 env 会让 service 误判自己是子进程（跳过恢复扫描）。 */
 const ENV_KEYS_TO_STRIP = [
   "PI_SUBAGENT_ROOT_SESSION_ID",
   "PI_SUBAGENT_SELF_RECORD_ID",
   "PI_SUBAGENT_DEPTH",
   "PI_SUBAGENT_ROOT_CWD",
   "PI_SUBAGENT_FORK_DEPTH",
-  "TAIJI_SUBAGENT_RELAY_SOCKET",
-  "TAIJI_SUBAGENT_RELAY_NODE",
-  "TAIJI_SUBAGENT_RELAY_SCRIPT",
 ] as const;
 
 const ROOT_SESSION = "root-session-crash";

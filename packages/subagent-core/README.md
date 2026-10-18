@@ -54,10 +54,8 @@
 
 | 子入口 | 内容 |
 |--------|------|
-| `@zhushanwen/subagent-core/engines/zcode/reader` | zcode 引擎 session 历史读取（`readZcodeSessionView` / `ZcodeReaderError`） |
-| `@zhushanwen/subagent-core/engines/zcode/constants` | zcode 引擎常量（`ZCODE_ENGINE_ID` / 路径后缀 / 缺省模型等） |
 | `@zhushanwen/subagent-core/engine/paths` | 引擎数据目录路径推导（engines 根 / 池目录 / journal 路径） |
-| `@zhushanwen/subagent-core/relay-env` | relay 通道 env 名与协议常量 SSOT（extension / runtime / 代理三方共用） |
+| `@zhushanwen/subagent-core/engine/engine-discovery-scan` | 引擎发现扫描（runtime 冷启动回退链深路径消费：`session-records.ts`） |
 
 ### 资产子入口
 
@@ -65,7 +63,7 @@
 |--------|------|
 | `@zhushanwen/subagent-core/workflows/*` | 内置 workflow 脚本原文件（`chain.js` / `parallel.js` / `scatter-gather.js` / `map-reduce.js` / `review-fix-loop.js` + `review-fix-loop-utils.cjs` / `_shared/`），`require` 与 `import` 条件同径（D1 同字节直发） |
 
-仓内壳侧（pi extension）另有 `./* -> src/*` 通配深路径消费（`<pkg>/<域>/<路径>.ts` 形态）——该通配仅仓内保留，npm 发布面刻意收窄到上列受控入口（D5：exports 面即 semver 契约）。语义子入口精确条目优先于通配（Node exact-match-beats-pattern）。
+仓内壳侧（pi extension）与 npm 消费面均只走上列受控入口：开发态 `./* -> src/*` 通配已删除（D5 豁免终止），extensions 生产码写深路径由根 ESLint `no-restricted-imports` 拦截（C-ext-27，白名单动态读本包 exports）；壳测试侧带 `.ts` 后缀的深路径经壳 vitest alias 物理解析到 core `src`（不经 exports）。语义子入口精确条目优先于资产通配（Node exact-match-beats-pattern）。
 
 ## 宿主接入示例
 

@@ -14,6 +14,7 @@ import {
   armEngineSelfDestruct,
   DEFAULT_ENGINE_HOST_REQUEST_TIMEOUT_MS,
   ENGINE_HOST_REQUEST_TIMEOUT_ENV,
+  killOwnProcessGroup,
   spawnEngineChild,
 } from "../spawn.ts";
 
@@ -123,6 +124,88 @@ describe("spawnEngineChild", () => {
     const exitSignal = await Promise.race([exited, failure]);
     expect(exitSignal).toBe("SIGTERM");
   }, 15_000);
+});
+
+describe("killOwnProcessGroup（D7 平台矩阵；分支注入，不实跑 Windows）", () => {
+  it("win32 → taskkill /PID <self> /T /F（stdio ignore + fire-and-forget）", () => {
+    const calls: Array<{ command: string; args: readonly string[]; options: unknown }> = [];
+    const errorHandlers: Array<(err: Error) => void> = [];
+    const unref = vi.fn();
+    const kill = vi.fn();
+    killOwnProcessGroup({
+      platform: "win32",
+      killFn: kill,
+      spawnFn: (command, args, options) => {
+        calls.push({ command, args, options });
+        return {
+          on: (event: "error", listener: (err: Error) => void) => {
+            if (event === "error") errorHandlers.push(listener);
+            return undefined;
+          },
+          unref,
+        };
+      },
+    });
+
+    expect(calls).toEqual([
+      {
+        command: "taskkill",
+        args: ["/PID", String(process.pid), "/T", "/F"],
+        options: { stdio: "ignore", windowsHide: true },
+      },
+    ]);
+    expect(unref).toHaveBeenCalledTimes(1);
+    expect(kill).not.toHaveBeenCalled();
+    // [R2A-N4] taskkill 起不来（error 事件）→ 回落杀自己（至少停引擎），不反噬自灭链。
+    expect(errorHandlers).toHaveLength(1);
+    expect(() => errorHandlers[0]!(new Error("taskkill not found"))).not.toThrow();
+    expect(kill).toHaveBeenCalledTimes(1);
+    expect(kill).toHaveBeenCalledWith(process.pid, "SIGKILL");
+  });
+
+  it("[R2A-N4] win32 taskkill spawn 同步抛错（EMFILE 等）→ 回落 SIGKILL 杀自己（warn 留痕）", () => {
+    const kill = vi.fn();
+    expect(() => killOwnProcessGroup({
+      platform: "win32",
+      killFn: kill,
+      spawnFn: () => {
+        throw new Error("EMFILE: too many open files");
+      },
+    })).not.toThrow();
+    expect(kill).toHaveBeenCalledTimes(1);
+    expect(kill).toHaveBeenCalledWith(process.pid, "SIGKILL");
+  });
+
+  it("[R2A-N4] win32 回落杀自己也失败 → 不向外抛（自灭链不因兜底再抛而中断）", () => {
+    const kill = vi.fn(() => {
+      throw new Error("EPERM");
+    });
+    expect(() => killOwnProcessGroup({
+      platform: "win32",
+      killFn: kill,
+      spawnFn: () => {
+        throw new Error("spawn failed");
+      },
+    })).not.toThrow();
+    expect(kill).toHaveBeenCalledWith(process.pid, "SIGKILL");
+  });
+
+  it("posix → 负 pid 组杀（SIGKILL）", () => {
+    const kill = vi.fn();
+    killOwnProcessGroup({ platform: "darwin", killFn: kill });
+    expect(kill).toHaveBeenCalledTimes(1);
+    expect(kill).toHaveBeenCalledWith(-process.pid, "SIGKILL");
+  });
+
+  it("posix 组杀失败 → 回落单进程杀（既有语义不变）", () => {
+    const kill = vi.fn((pid: number) => {
+      if (pid < 0) throw new Error("ESRCH");
+      return true;
+    });
+    killOwnProcessGroup({ platform: "linux", killFn: kill });
+    expect(kill).toHaveBeenNthCalledWith(1, -process.pid, "SIGKILL");
+    expect(kill).toHaveBeenNthCalledWith(2, process.pid, "SIGKILL");
+  });
 });
 
 describe("armEngineSelfDestruct", () => {

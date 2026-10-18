@@ -1,31 +1,34 @@
 // src/execution/engine/client/engine-client.ts
 //
 // EngineClient：协议客户端（W2，impl-plan §2.2；与 zcode AppServerConnection 同型
-// 但引擎无关）。职责 = spawn 引擎 CLI / NDJSON 帧编解码 / 请求-应答 id 关联 /
-// 反向请求路由（见 reverse-router.ts）/ 崩溃重建（≤3 次指数退避 1s/2s/4s）/
-// dispose / killAll / stdout 行解析（半行残片有上限，见 MAX_LINE_BYTES）+
-// stderr 常驻排空（仅内存环缓冲尾 400 字符）。
+// 但引擎无关）。职责 = NDJSON 帧编解码 / 请求-应答 id 关联 / 反向请求路由（见
+// reverse-router.ts）/ 崩溃重建（≤3 次指数退避 1s/2s/4s）/ dispose / killAll /
+// stdout 行解析后的帧路由（非 NDJSON 丢弃留痕）+ stderr 常驻排空（仅内存环缓冲尾
+// 400 字符）。
 //
-// spawn 平台参数（impl-plan §2.2 必写死）：POSIX 引擎 CLI 以独立进程组 spawn
-// （detached:true，进程组收割前提）；Windows detached:false + windowsHide:true，
-// 收割走 taskkill /PID <pid> /T /F。spawn 点区分：SDK spawnEngineChild 是引擎包内
-// 「任务子进程」原语（硬编码 detached:false 且禁 detached 键，impl-plan §2.12）；
-// 本类 spawn 的是引擎 CLI 进程本身（impl-plan §2.2 detached:true），二者是协议两侧
-// 的两个 spawn 点，故此处直接用 node:child_process。env 仍必经 SDK
-// buildEngineChildEnv（三层契约，DAG 边 W12→W2）。
+// [M3] 进程面所有权已迁入 transport（设计 relay-spawn-transport §3.3 D5）：
+// spawn 引擎 CLI / stdio 接线 / pidfile / 进程组收割归 LocalEngineTransport
+// （transport/local.ts），control socket 通道归 RuntimeEngineTransport
+// （transport/runtime.ts），本类经 EngineTransport 契约消费；协议面（握手/请求关联/
+// 反向路由/崩溃重建）留守。transport 选择谓词（单源 = transport-selection.ts，底层
+// SDK isControlEnvActive）：
+// TAIJI_SUBAGENT_CONTROL_SOCKET 非空 → runtime transport（连接失败/hello 被拒 → 对应
+// transport 错误码，不静默 local）；空串/缺失 → local。pidfile/reaper 仅 local 模式注册
+// （impl-plan 验收③）：进程面收割段按 localTransport 实例有无编排。
 //
 // 引擎自灭 core 侧配套：spawn 不覆写引擎 stdin（stdio[0] = 'pipe' 独占管道，core
-// 是唯一写端）——引擎侧 stdio EOF 主判据（SDK armEngineSelfDestruct）的前提。
+// 是唯一写端）——引擎侧 stdio EOF 主判据（SDK armEngineSelfDestruct）的前提（职责
+// 在 transport 的 spawn 段，约束随实现走）。
+//
+// [D9 逃生舱] TAIJI_SUBAGENT_TRANSPORT=local → 强制 local transport（优先于 control
+// env 激活判定）；运行期严重故障的快速回退通道，一个发布周期后删除（设计 D9）。
 // 超时域划分（R9-2 / R9-2b）的实现与注释在 reverse-router.ts（反向面）与本文件
 // 正向请求段；run 不设墙钟（任务级默认无超时，AGENTS.md 规则 19 / ADR-0047）。
 
-import { spawn } from "node:child_process";
-import type { ChildProcess } from "node:child_process";
-
 import {
-  buildEngineChildEnv,
   CANCEL_SETTLE_GRACE_MS,
   ENGINE_PROTOCOL_VERSION,
+  ENGINE_TRANSPORT_ERROR_CODES,
   EngineSdkError,
   HANDSHAKE_TIMEOUT_MS,
   getLogger,
@@ -36,8 +39,6 @@ import {
   SET_MODEL_REQUEST_TIMEOUT_MS,
   STDERR_TAIL_CHARS,
   engineProtocolMismatchError,
-  hostKindOf,
-  resolveEngineNodeLaunch,
   type EngineHandleData,
   type InitializeResult,
   type RequestFrame,
@@ -46,18 +47,23 @@ import {
 } from "@zhushanwen/subagent-engine-sdk";
 
 import { SpawnedChildrenMirror, type MirrorChangeEvent } from "./mirror.ts";
-import {
-  removePidfile,
-  registerEnginePidfile,
-  sweepEnginePidfiles,
-} from "./pid-file.ts";
 import { routeReverseRequest, type ReverseRouterDeps } from "./reverse-router.ts";
 import {
   defaultEngineCmdlineMatcher,
   warnOnManifestDiagnostics,
   type EngineClientOptions,
 } from "./client-options.ts";
-import { killProcessTree, waitForChildExit } from "./reaper.ts";
+import { LocalEngineTransport } from "./transport/local.ts";
+import { RuntimeEngineTransport } from "./transport/runtime.ts";
+import {
+  SUBAGENT_TRANSPORT_ENV,
+  isForcedLocalTransport,
+  usesRuntimeTransport,
+} from "./transport-selection.ts";
+import type {
+  EngineTransport,
+  EngineTransportExitInfo,
+} from "./transport/types.ts";
 // [u7a 生产补挂] 反向通道镜像 → core 侧镜像桥接：in-flight 计数与生命周期谓词读 core
 // 全局镜像（recordId 键），而引擎侧子进程上报只落 EngineClient 镜像——本桥接实现
 // spawned-children.ts 头注「数据源①：反向通道上报落本镜像」的既登记契约（W3 协议化
@@ -66,6 +72,12 @@ import { coreSpawnedChildrenMirror } from "../host/spawned-children.ts";
 import { notifyInFlightChanged } from "../inflight-snapshot.ts";
 
 const logger = getLogger("subagents");
+
+/**
+ * [D9 逃生舱] transport 强制覆盖键（定义在 transport-selection.ts，与 stream-sink
+ * 的 widget 抑制判据单源；此处 re-export 保持既有导入面）。
+ */
+export { SUBAGENT_TRANSPORT_ENV };
 
 /**
  * 单条镜像事件 → core 镜像投影 + 在途推送（u7a 数据面桥接）：置死**或已退出** →
@@ -93,19 +105,39 @@ function bridgeMirrorEventToCoreMirror(event: MirrorChangeEvent, mirror: Spawned
   notifyInFlightChanged();
 }
 
-/** dispose 帧等待上界（设计 §3.6：dispose 上界 3s，超时即杀）。 */
+/**
+ * dispose 帧等待上界（设计 §3.6：dispose 上界 3s，超时即杀）。
+ */
 const DISPOSE_GRACE_MS = 3_000;
-/** SIGKILL 后收尸等待上限（kill-chain 同型有界兜底，reaper.waitForChildExit 消费）。 */
-const SIGKILL_REAP_TIMEOUT_MS = 10_000;
 /** 协议帧违规日志的回显截断长度（非 NDJSON 行 / 未知帧的诊断留痕）。 */
 const FRAME_ECHO_MAX_CHARS = 200;
+
 /**
- * stdout 半行残片上限（1 MiB 量级；按 UTF-16 code unit 计——NDJSON 载荷以 ASCII
- * 为主，与字节数同阶）。引擎持续输出不含换行的数据时残片本会无界增长：超限丢头
- * 留尾 + warn 一次（每引擎进程）；被截断的行在换行到达后必无法 JSON.parse，由
- * handleLine 的非 NDJSON 分支丢弃留痕（上限约束的是内存驻留，不是协议合法性）。
+ * connectOnce 错误码 preserve 白名单：这些 code 原样上抛 + 标记不可用，不包装成
+ * engine_crashed（「错误即语义」的宿主侧处置面 vs 进程意外死亡的分界）。协议版本
+ * 越界为既有成员；transport 五码为 M3 control 通道成员（runtime transport 生效——
+ * local 分支的失败码面不变：engine_not_found 等启动解析错误维持既有
+ * engine_crashed 包装，见 impl-plan u-m3-local「connectOnce preserve 白名单」）。
  */
-const MAX_LINE_BYTES = 1_048_576;
+const PRESERVED_CONNECT_ERROR_CODES: ReadonlySet<string> = new Set([
+  "engine_protocol_mismatch",
+  ...ENGINE_TRANSPORT_ERROR_CODES,
+]);
+
+function isPreservedConnectErrorCode(code: string): boolean {
+  return PRESERVED_CONNECT_ERROR_CODES.has(code);
+}
+
+/**
+ * [R2A-N3③] runtime 启动裁决失败（invalid_launch / spawn_failed，mapControlError 已
+ * 收敛为 engine_crashed）的保留判定：`data.controlCode` 是 mapControlError 写入的
+ * 机器标记。保留整个 EngineSdkError 而不是重包，使 runtime 帧的专用 recovery
+ *（如「Resolve the engine entry from the engine descriptor」）在真实 open 路径可见；
+ * 宿主侧兜底包装产生的 engine_crashed 没有该标记，仍按原有通用文案处理。
+ */
+function isPreservedControlCrash(err: EngineSdkError): boolean {
+  return err.code === "engine_crashed" && typeof err.data?.controlCode === "string";
+}
 
 /** 客户端连接状态。 */
 export type EngineClientState =
@@ -127,19 +159,6 @@ export interface RunRoute {
   onHandleReady?: (
     partial: Pick<EngineHandleData, "sessionRef">,
   ) => void | Promise<void>;
-}
-
-/** spawn 引擎 CLI 平台形态（impl-plan §2.2 必写死的两行）。 */
-interface EngineSpawnPlatformOptions {
-  detached: boolean;
-  windowsHide: boolean;
-}
-
-function engineSpawnPlatformOptions(): EngineSpawnPlatformOptions {
-  if (process.platform === "win32") {
-    return { detached: false, windowsHide: true };
-  }
-  return { detached: true, windowsHide: false };
 }
 
 interface PendingRequest {
@@ -171,22 +190,47 @@ export class EngineClient {
   private readonly opts: EngineClientOptions;
   private readonly reverseRouterDeps: ReverseRouterDeps;
   private state: EngineClientState = "idle";
-  private child: ChildProcess | undefined;
+  /** 引擎通道（每代引擎连接一份实例；open/close 生命周期 = 单通道，u-m3-local）。 */
+  private transport: EngineTransport | undefined;
+  /**
+   * 本次连接绑定的根 session id（run 路径 = RunContext.sessionRootId 权威值；
+   * 未注入 = undefined，由 runtime transport 以 control env 回落）。启动期连接前
+   * 由 ensureConnected(rootSessionId) 写入，engine_open 据此携带归属键。
+   */
+  private requestedRootSessionId: string | undefined;
   private nextRequestId = 1;
   private readonly pending = new Map<number, PendingRequest>();
   private readonly runRoutes = new Map<string, RunRoute>();
   private stderrTail = "";
   private unavailableReason: EngineSdkError | undefined;
-  private connectInFlight: Promise<void> | undefined;
-  private pidfileWritten: string | undefined;
+  /**
+   * 通道级 transport error 标记（onTransportError 置位、connectOnce 复位）。
+   * 通道级错误（error 帧 / 帧超限 / 队列溢出）的不可用是「通道死、control 连接仍活」
+   * 的中间态——随后的 engine_closed 只是通道终局回执，onTransportExit 据此回落 exited
+   * （下一次 run 可在同一连接上重新 engine_open；D5/D8，与 unknown_channel 同语义）。
+   * connect/握手失败的不可用（connectOnce catch）不置位：那是 [ADR-0122] 终局失败
+   * （unavailable 恒 throw），teardownProcess 关闭链迟到的 engine_closed 不得把状态
+   * 复活为 exited——否则下一次 run 会把终局错误（协议不匹配/握手超时）当作可重试、
+   * 重新 spawn 引擎。
+   */
+  private channelErrorUnavailable = false;
+  /**
+   * 「连接/根换绑」单飞槽（R2A-N2）：ensureConnected 的统一入口。成立前探针→run
+   * 并发调用会让两个调用方同时通过 ready 检查、双起 connectOnce（一个 run 握到
+   * 另一个的通道，engine_open 被误拆）。所有连接/换绑必须经本槽串行化；finally
+   * 以 promise 身份比对清位（旧代 finally 不得清掉后来者新设的代）。
+   */
+  private connectOrRebindInFlight: Promise<void> | undefined;
   private pidfileSwept = false;
+  /**
+   * 主动杀标记（日志分级消费点）：killAll/dispose 置位、connectOnce 复位——exit
+   * 投影据此区分「主动杀后的预期收敛（debug）」与「意外崩溃（warn 出声）」。进程面
+   * 的同名门在 transport 内部（收割跳过/去重），两侧在同一点位同步置位。
+   */
   private intentionalKill = false;
   /** run 期 host/handleReady 的最近回填（崩溃时在途 run 的合成 handle 数据源）。 */
   private lastPartialHandle: { sessionRef: Record<string, string> } | undefined;
   private initializeDiagnostics: InitializeResult | undefined;
-  private stdoutBuffer = "";
-  /** 半行残片截断告警已发标记（每引擎进程一次，attachFrameReader 重置）。 */
-  private stdoutOverflowWarned = false;
 
   constructor(opts: EngineClientOptions) {
     this.opts = opts;
@@ -218,9 +262,127 @@ export class EngineClient {
     return this.state === "disposed";
   }
 
-  /** 引擎 CLI 进程 pid（未连接 = undefined）。 */
+  /**
+   * local transport 投影（pidfile/reaper 仅 local 模式注册的编排门，impl-plan
+   * 验收③）：runtime transport 模式下为 undefined，进程面收割段全部缺席。
+   */
+  private get localTransport(): LocalEngineTransport | undefined {
+    return this.transport instanceof LocalEngineTransport ? this.transport : undefined;
+  }
+
+  /**
+   * transport 选择（D5 谓词，单源 = transport-selection.ts：isForcedLocalTransport /
+   * usesRuntimeTransport，底层 isControlEnvActive）：control env 非空 →
+   * RuntimeEngineTransport（control socket 通道；connect/hello 失败 →
+   * engine_transport_unavailable，不静默回退 local）；空串/缺失 → LocalEngineTransport
+   * （standalone）。每代引擎连接一份 transport 实例（open/close 生命周期 = 单通道）。
+   * protected = 测试 seam（错误码 preserve 白名单单测注入假 transport）。
+   */
+  protected resolveTransport(): EngineTransport {
+    const baseEnv = this.opts.baseEnv ?? process.env;
+    // [D9 逃生舱] 优先于 control env 激活判定：值 local → 强制 local（排障回退）。
+    if (isForcedLocalTransport(baseEnv)) {
+      logger.warn(
+        `[engine-client:${this.engineId}] ${SUBAGENT_TRANSPORT_ENV}=local → forcing local transport (D9 escape hatch)`,
+      );
+      return this.createLocalTransport();
+    }
+    if (usesRuntimeTransport(baseEnv)) {
+      logger.debug(`[engine-client:${this.engineId}] transport selected: runtime control channel`);
+      return new RuntimeEngineTransport({
+        engineId: this.opts.engineId,
+        hostKind: this.opts.hostKind,
+        baseEnv: this.opts.baseEnv,
+        onStderr: (chunk) => this.appendStderrTail(chunk),
+      });
+    }
+    // 设计 D5：「空串/缺失 → local（warn）」。生产日志默认不落 debug，回落原因必须
+    // 在 warn 级可见（排障面：standalone vs 托管态 control env 未注入）。
+    logger.warn(`[engine-client:${this.engineId}] transport selected: local (no control env)`);
+    return this.createLocalTransport();
+  }
+
+  /** local transport 装配（正常谓词与 D9 逃生舱共用，避免两处漂移）。 */
+  private createLocalTransport(): LocalEngineTransport {
+    return new LocalEngineTransport({
+      engineId: this.opts.engineId,
+      dataDir: this.opts.dataDir,
+      hostKind: this.opts.hostKind,
+      baseEnv: this.opts.baseEnv,
+      engineNode: this.opts.engineNode,
+      electronRunAsNode: this.opts.electronRunAsNode,
+      identityEnv: this.opts.identityEnv,
+      processEnv: this.opts.processEnv,
+      engineCmdlineMatcher:
+        this.opts.engineCmdlineMatcher ?? defaultEngineCmdlineMatcher(this.opts.command),
+      onStderr: (chunk) => this.appendStderrTail(chunk),
+      listLiveOrphanPids: () =>
+        this.mirror
+          .snapshot()
+          .filter((e) => e.state === "running" && !e.killed)
+          .map((e) => e.pid),
+    });
+  }
+
+  /**
+   * [B-U-1] 连接级根会话换绑：runtime 通道的 engine_open 归属键在 open 时固定，
+   * 后续同连接再 open 会被 runtime 以 `engine_open_failed session` 拒绝。因此当
+   * run ctx 提供权威根且与在通道实际绑定值不同（探针先以 control env 的 spawn 期
+   * 初值建连的场景）时，换代重连：关旧通道（runtime 杀组回收）→ 协议面清理 →
+   * 由调用方继续走 connectOnce 用新根 open。
+   *
+   * [R2A-N2] 调用方持单飞槽（connectOrRebindInFlight），因此本方法内部无并发第二
+   * 调用方；但 `await close` 期间仍可能发生直接 request / run 路由注册（不保证都经
+   * ensureConnected），且 transport 也可能被外部终局链替换——await 后必须复检，
+   * 否则会拆掉新 transport 或打断刚起的 run（TOCTOU）。
+   *
+   * 有在途请求/run 路由时不动连接（跑着的 run 不得被根换绑打断），warn 留痕；
+   * 单 pi 进程生命周期内根会话不应变化，命中该分支即宿主误用信号。
+   * 返回 true = 已换绑（调用方需重连）；false = 无需换绑或保持现状。
+   */
+  private async rebindRootSessionIfNeeded(): Promise<boolean> {
+    const requested = this.requestedRootSessionId;
+    const transport = this.transport;
+    if (requested === undefined || !(transport instanceof RuntimeEngineTransport)) return false;
+    if (transport.rootSessionId === requested) return false;
+    if (this.pending.size > 0 || this.runRoutes.size > 0) {
+      logger.warn(
+        `[engine-client:${this.engineId}] root session "${requested}" differs from the open channel `
+          + `("${transport.rootSessionId ?? "unknown"}") but requests/runs are in flight — keeping the current channel`,
+      );
+      return false;
+    }
+    logger.debug(
+      `[engine-client:${this.engineId}] rebinding engine channel root session `
+        + `"${transport.rootSessionId ?? "unknown"}" -> "${requested}"`,
+    );
+    await transport.close("root session rebind");
+    // [R2A-N2] await 后复检（单飞锁外的旁路）：
+    // ① 有人重建了通道（transport 换代）——绝不能用旧观察拆掉新 transport；
+    // ② 有在途请求/run 路由出现——换绑已不再安全，保持现状（旧通道仍可用）。
+    if (this.transport !== transport) {
+      logger.warn(
+        `[engine-client:${this.engineId}] engine channel changed while rebinding the root session — `
+          + "not tearing down the replacement transport",
+      );
+      return false;
+    }
+    if (this.pending.size > 0 || this.runRoutes.size > 0) {
+      logger.warn(
+        `[engine-client:${this.engineId}] requests/runs appeared while rebinding the root session — `
+          + "keeping the current channel",
+      );
+      return false;
+    }
+    if (this.disposed || this.state === "unavailable") return false;
+    this.teardownProcess("root session rebind");
+    this.state = "idle";
+    return true;
+  }
+
+  /** 引擎 CLI 进程 pid（未连接 / 已终局清理 = undefined）。 */
   get enginePid(): number | undefined {
-    return this.child?.pid;
+    return this.localTransport?.pid;
   }
 
   /** stderr 环形缓冲尾（engine_crashed 现场 / 诊断）。 */
@@ -243,8 +405,45 @@ export class EngineClient {
    * 初建失败一次即标记不可用（unavailable 恒 throw，错误附恢复指引），修复由用户
    * 排查后重启宿主承接。[HISTORICAL] 原退避 1s/2s/4s × 3 次自动重建已删。
    * 版本协商越界 → engine_protocol_mismatch + 直接标记不可用。
+   *
+   * [B-U-1 根会话权威] rootSessionId 可选：run 路径传 RunContext.sessionRootId
+   * （engine_open 归属键权威源）。连接已按 env 回落的旧根打开（如探针先于 run）
+   * 且当前无在途 run 时，换代重连让新的权威根生效；有在途 run 时保持旧连接并 warn
+   * （根会话在单 pi 进程生命周期内不变，跨根切换只可能来自宿主误用）。
+   *
+   * [R2A-N2 单飞] 连接与根换绑是同一个串行状态迁移：所有调用方在这里统一排队到
+   * 一个 connectOrRebind promise（不区分「首连/换代」）。这样探针后并行两个 run
+   * 不会双双通过 ready 检查后各起一代 connectOnce（旧实现会双连接并误拆新
+   * transport）。排队返回后按最新权威根再判一次：根是在等待期间才到的（探针先到）
+   * 就在本调用里补一次换代，而不是把旧根交给 run。
    */
-  async ensureConnected(): Promise<void> {
+  async ensureConnected(rootSessionId?: string): Promise<void> {
+    if (rootSessionId !== undefined && rootSessionId.length > 0) {
+      this.requestedRootSessionId = rootSessionId;
+    }
+    for (;;) {
+      this.assertConnectable();
+      const inFlight = this.connectOrRebindInFlight;
+      if (inFlight === undefined) break;
+      // 等当前代落地（成功/失败都由发起者与本调用共享终态）；落地后再看本调用
+      // 记录的权威根是否已被满足，未满足则进入下一轮（再取/再起一代）。
+      await inFlight;
+    }
+    this.assertConnectable();
+    if (this.state === "ready" && !this.needsRootRebind()) return;
+
+    const op = this.connectOrRebind();
+    this.connectOrRebindInFlight = op;
+    try {
+      await op;
+    } finally {
+      // 代数守卫：只清自己的槽（旧代 finally 不得清掉后来者新设的 promise）。
+      if (this.connectOrRebindInFlight === op) this.connectOrRebindInFlight = undefined;
+    }
+  }
+
+  /** 终结态检查（单点，保证排队前后一致地 fail-fast）。 */
+  private assertConnectable(): void {
     if (this.disposed) {
       throw new EngineSdkError(
         "engine_crashed",
@@ -255,48 +454,69 @@ export class EngineClient {
     if (this.state === "unavailable") {
       throw this.unavailableReason ?? new Error(`engine "${this.engineId}" is unavailable`);
     }
-    if (this.state === "ready") return;
-    if (this.connectInFlight) return this.connectInFlight;
+  }
 
-    this.connectInFlight = this.connectOnce();
-    try {
-      await this.connectInFlight;
-    } finally {
-      this.connectInFlight = undefined;
+  /** 权威根是否需要换代（只读判定；副作用在 rebindRootSessionIfNeeded）。 */
+  private needsRootRebind(): boolean {
+    const requested = this.requestedRootSessionId;
+    const transport = this.transport;
+    if (requested === undefined || !(transport instanceof RuntimeEngineTransport)) return false;
+    return transport.rootSessionId !== requested;
+  }
+
+  /** 单飞段：要么换代重连（ready + 根不一致），要么首连。 */
+  private async connectOrRebind(): Promise<void> {
+    if (this.state === "ready") {
+      const rebound = await this.rebindRootSessionIfNeeded();
+      if (!rebound) return;
     }
+    await this.connectOnce();
   }
 
   private async connectOnce(): Promise<void> {
     this.state = "connecting";
-    // 启动期清扫（每实例一次）：宿主崩溃残留的同 id 引擎孤儿 + 陈旧 pidfile。
-    if (!this.pidfileSwept) {
-      this.pidfileSwept = true;
-      const sweep = sweepEnginePidfiles({
-        engineDataDir: this.opts.dataDir,
-        engineId: this.engineId,
-        currentHostPid: process.pid,
-        matchesEngineCmdline: this.opts.engineCmdlineMatcher
-          ?? defaultEngineCmdlineMatcher(this.opts.command),
-      });
-      if (sweep.killed.length > 0) {
-        logger.warn(
-          `[engine-client:${this.engineId}] startup sweep killed stale orphan engine pids: ${sweep.killed.join(",")}`,
-        );
-      }
-      for (const removed of sweep.removed) {
-        logger.debug(`[engine-client:${this.engineId}] swept stale pidfile ${removed.file}: ${removed.reason}`);
-      }
-    }
-
+    this.intentionalKill = false;
+    this.channelErrorUnavailable = false;
     try {
-      await this.spawnAndInitialize();
+      // transport 选择（D5 谓词，见 resolveTransport；谓词失败 = engine_transport_unavailable
+      // 显式失败，经下方同一条 catch 标记不可用——不静默 local）+ 帧面订阅（open 后即可到达）。
+      const transport = this.resolveTransport();
+      this.transport = transport;
+      transport.onFrame((line) => this.handleLine(line));
+      transport.onExit((info) => this.onTransportExit(info));
+      // [M3] 传输面错误订阅（runtime 实现提供）：连接死亡 / 通道级 error 帧以具体码
+      // 收口在途请求（D5/D8，不包装 engine_crashed）。local 实现缺席。
+      transport.onTransportError?.((err) => this.onTransportError(err));
+      // 启动期清扫（每实例一次；仅 local transport——runtime 模式无 pidfile/reaper，
+      // 验收③）：宿主崩溃残留的同 id 引擎孤儿 + 陈旧 pidfile。
+      if (!this.pidfileSwept) {
+        this.pidfileSwept = true;
+        const local = this.localTransport;
+        if (local !== undefined) {
+          const sweep = local.sweepStalePidfiles();
+          if (sweep.killed.length > 0) {
+            logger.warn(
+              `[engine-client:${this.engineId}] startup sweep killed stale orphan engine pids: ${sweep.killed.join(",")}`,
+            );
+          }
+          for (const removed of sweep.removed) {
+            logger.debug(`[engine-client:${this.engineId}] swept stale pidfile ${removed.file}: ${removed.reason}`);
+          }
+        }
+      }
+
+      await this.spawnAndInitialize(transport);
       this.state = "ready";
     } catch (err) {
       this.teardownProcess("handshake failed");
       // [ADR-0122] 单次失败即显式上报 + 标记不可用（无自动重建）。
+      // transport 错误码白名单原样 preserve（不包装成 engine_crashed）：runtime
+      // 通道的 transport_unavailable/lost/open_timeout/frame_too_large/backpressure_overflow
+      // 与协议版本越界同属「错误即语义」面（impl-plan u-m3-local 验收②）；其余
+      // （含 engine_not_found 等启动解析错误）维持既有 engine_crashed 包装。
       const failure = err instanceof Error ? err : new Error(String(err));
       const unavailable =
-        err instanceof EngineSdkError && err.code === "engine_protocol_mismatch"
+        err instanceof EngineSdkError && (isPreservedConnectErrorCode(err.code) || isPreservedControlCrash(err))
           ? err
           : new EngineSdkError(
             "engine_crashed",
@@ -315,71 +535,22 @@ export class EngineClient {
     logger.error(`[engine-client:${this.engineId}] marked unavailable: ${reason.message}`);
   }
 
-  /** spawn 引擎 CLI + initialize 握手 + 版本协商 + 诊断留痕。 */
-  private async spawnAndInitialize(): Promise<void> {
-    this.intentionalKill = false;
-    const platformOpts = engineSpawnPlatformOptions();
-    // [W9] 启动解析（宿主 × 平台二维矩阵，impl-plan §2.9）：spawn argv 先经 SDK
-    // resolveEngineNodeLaunch 解析——打包态 pi 宿主必须用注入执行器
-    // TAIJI_AGENT_ENGINE_NODE（pi binary 不是 node 执行器）、runtime sidecar 用
-    // process.execPath、standalone 用 PATH node（缺 node / 探针失败 → engine_not_found）。
-    // Windows .cmd 入口在此改写为显式 cmd.exe /c + 参数数组（禁 shell:true）。
-    const baseEnv = this.opts.baseEnv ?? { ...process.env };
-    const launch = await resolveEngineNodeLaunch({
+  /** spawn 引擎通道（transport 层）+ initialize 握手 + 版本协商 + 诊断留痕。 */
+  private async spawnAndInitialize(transport: EngineTransport): Promise<void> {
+    // transport.open = spawn 引擎 CLI（stdio 接线 + env 三层契约 buildEngineChildEnv
+    // + 平台 spawn 形态 + pidfile 注册，local 实现）；initialize 握手留在本层
+    // （协议面——types.ts 契约边界：请求 id 关联/超时/版本协商不进 transport）。
+    await transport.open({
+      engineId: this.opts.engineId,
       entryPath: this.opts.command,
-      args: this.opts.args,
-      hostKind: hostKindOf(this.opts.hostKind, baseEnv),
-      env: baseEnv,
+      args: [...this.opts.args],
+      cwd: this.opts.cwd ?? process.cwd(),
+      envPrefixes: [...(this.opts.envPrefixes ?? [])],
+      // runtime 归属键：run 路径传 RunContext.sessionRootId（权威源）；未注入
+      // （探针 / standalone）传空串占位，由 runtime transport 以 control env 回落。
+      // local 实现忽略（types.ts rootSessionId 注）。
+      rootSessionId: this.requestedRootSessionId ?? "",
     });
-    const env = buildEngineChildEnv(baseEnv, {
-      dataDir: this.opts.dataDir,
-      engineNode: this.opts.engineNode ?? launch.command,
-      electronRunAsNode: this.opts.electronRunAsNode ?? launch.electronRunAsNode,
-      relay: this.opts.relay,
-      identityEnv: this.opts.identityEnv,
-      envPrefixes: this.opts.envPrefixes,
-      processEnv: this.opts.processEnv,
-    });
-
-    // stdin 恒 'pipe' 且独占（引擎自灭主判据 stdio EOF 的前提；不覆写、不继承）。
-    this.child = spawn(launch.command, launch.args, {
-      cwd: this.opts.cwd,
-      env,
-      ...platformOpts,
-      stdio: ["pipe", "pipe", "pipe"],
-    });
-    const child = this.child;
-    child.on("error", (err) => {
-      // spawn 本身失败（ENOENT 等）：让 initialize 超时/写失败路径统一收口。
-      logger.warn(`[engine-client:${this.engineId}] spawn error: ${err.message}`);
-      this.appendStderrTail(`spawn error: ${err.message}\n`);
-    });
-    // 管道死亡竞态（coverage-gate 满载 flaky 根因，2026-09）：引擎死后在途帧写入的
-    // EPIPE 以「异步 error 事件」投递——writeFrame 的同步 try/catch 接不到；stdin 无
-    // error 监听时 Node 对无监听 error 事件直接抛 uncaughtException（测试进程整轮
-    // 崩红、用例全绿）。挂监听吃掉预期内的管道死亡留 debug 痕迹；在途请求失败的
-    // 语义由 exit 事件 → teardownProcess 统一承担，不经管道错误路径。
-    for (const pipe of ["stdin", "stdout", "stderr"] as const) {
-      child[pipe]?.on("error", (err: Error) => {
-        logger.debug(`[engine-client:${this.engineId}] ${pipe} pipe error (engine died concurrently = expected): ${err.message}`);
-      });
-    }
-    child.stdout?.setEncoding("utf-8");
-    child.stdout?.on("data", (chunk: string) => this.onStdoutData(chunk));
-    child.stderr?.setEncoding("utf-8");
-    child.stderr?.on("data", (chunk: string) => this.appendStderrTail(chunk));
-    child.on("exit", (code, signal) => this.onEngineExit(code, signal));
-
-    if (child.pid !== undefined) {
-      this.pidfileWritten = registerEnginePidfile({
-        engineDataDir: this.opts.dataDir,
-        engineId: this.engineId,
-        hostKind: this.opts.hostKind,
-        hostPid: process.pid,
-        enginePid: child.pid,
-      });
-    }
-    this.attachFrameReader();
 
     // initialize 握手（HANDSHAKE_TIMEOUT_MS；版本越界 → mismatch + 不可用）。
     const initParams = {
@@ -417,38 +588,8 @@ export class EngineClient {
   }
 
   // ─────────────────────────────────────────────────────────────────────────
-  // stdout 行解析与帧路由
+  // 帧路由（stdout 行切分与残片上限在 transport 层；此处收已切好的行）
   // ─────────────────────────────────────────────────────────────────────────
-
-  private attachFrameReader(): void {
-    this.stdoutBuffer = "";
-    this.stdoutOverflowWarned = false;
-  }
-
-  private onStdoutData(chunk: string): void {
-    this.stdoutBuffer += chunk;
-    let newlineIndex = this.stdoutBuffer.indexOf("\n");
-    while (newlineIndex >= 0) {
-      const line = this.stdoutBuffer.slice(0, newlineIndex).replace(/\r$/, "");
-      this.stdoutBuffer = this.stdoutBuffer.slice(newlineIndex + 1);
-      if (line.trim().length > 0) this.handleLine(line);
-      newlineIndex = this.stdoutBuffer.indexOf("\n");
-    }
-    // 帧间残片留 buffer（OS 管道背压语义）。残片有上限：引擎持续输出不含换行的
-    // 数据时残片本会无界增长——超限丢头留尾，首截断 warn 一次、后续静默截断；
-    // 被截断的行在换行到达后由 handleLine 按 non-NDJSON 丢弃（协议契约 stdout 只
-    // 允许 NDJSON，无换行输出本身就是引擎侧违规，不构成需要保真的数据）。
-    if (this.stdoutBuffer.length > MAX_LINE_BYTES) {
-      this.stdoutBuffer = this.stdoutBuffer.slice(this.stdoutBuffer.length - MAX_LINE_BYTES);
-      if (!this.stdoutOverflowWarned) {
-        this.stdoutOverflowWarned = true;
-        logger.warn(
-          `[engine-client:${this.engineId}] stdout partial line exceeded ${MAX_LINE_BYTES} chars `
-            + `— dropping head and keeping tail (engine emitting non-newline output without completing a line?)`,
-        );
-      }
-    }
-  }
 
   private handleLine(line: string): void {
     let frame: unknown;
@@ -585,18 +726,15 @@ export class EngineClient {
   // ── 收割 / 停机 ──────────────────────────────────────────────────────────
 
   /**
-   * 宿主收割入口（D8 markAllSpawnedChildrenDead 落点）：组杀引擎 CLI（POSIX 负 pid 组杀 /
-   * Windows taskkill /T /F）+ 镜像整体置死 + pidfile 清理。在途请求以 engine_crashed
-   * 失败。「零残留」断言范围 = 一代子进程 + 组内后代（引擎自身 detached 后代不覆盖，
-   * impl-plan §7.2 R9-1 / 设计 §3.9 已接受代价）。
+   * 宿主收割入口（D8 markAllSpawnedChildrenDead 落点）：组杀引擎 CLI（transport
+   * close = POSIX 负 pid 组杀 / Windows taskkill /T /F + 有界收尸）+ 镜像整体置死
+   * + pidfile 清理。在途请求以 engine_crashed 失败。「零残留」断言范围 = 一代子进程
+   * + 组内后代（引擎自身 detached 后代不覆盖，impl-plan §7.2 R9-1 / 设计 §3.9 已
+   * 接受代价）。
    */
   async killAll(reason: string): Promise<void> {
     this.intentionalKill = true;
-    const child = this.child;
-    if (child !== undefined && child.pid !== undefined && child.exitCode === null) {
-      killProcessTree(child.pid, reason, { engineId: this.engineId });
-      await waitForChildExit(child, SIGKILL_REAP_TIMEOUT_MS);
-    }
+    await this.transport?.close(reason);
     this.teardownProcess(reason);
   }
 
@@ -606,7 +744,9 @@ export class EngineClient {
    */
   async dispose(): Promise<void> {
     if (this.state === "disposed") return;
-    if (this.state === "ready" && this.child !== undefined && this.child.exitCode === null) {
+    // local：进程存活才发 dispose 帧（死进程由 killAll 收割）；runtime：无 local 进程
+    // 句柄，通道存活由 request/writeFrame 回执表达（缺省继续，失败经 catch 兜底）。
+    if (this.state === "ready" && (this.localTransport?.isProcessAlive() ?? true)) {
       try {
         await this.request("dispose", {}, { timeoutMs: DISPOSE_GRACE_MS });
       } catch (err) {
@@ -622,9 +762,14 @@ export class EngineClient {
     this.state = "disposed";
   }
 
-  /** 引擎进程 exit：镜像整体置死 + pidfile 清理 + 在途请求失败 + 状态回落。 */
-  private onEngineExit(code: number | null, signal: NodeJS.Signals | null): void {
-    const detail = signal !== null ? `signal ${signal}` : `exit code ${code}`;
+  /**
+   * 引擎通道终局（transport exit 投影消费）：日志分级 + 协议面终局清理 + 状态回落。
+   * 进程面终局（孤儿收割/pidfile 删/句柄清理）已由 transport 内部在派发前完成。
+   * reason 是 runtime engine_closed 帧的归因值（local 缺席）——进诊断 detail。
+   */
+  private onTransportExit(info: EngineTransportExitInfo): void {
+    const reason = info.reason !== undefined ? `, reason ${info.reason}` : "";
+    const detail = info.signal !== null ? `signal ${info.signal}${reason}` : `exit code ${info.code}${reason}`;
     // intentionalKill 消费点：主动杀（killAll/dispose）后的 exit 是预期收敛（debug）；
     // 非主动杀 = 意外崩溃（warn 出声，供排障区分「引擎自己挂了」与「宿主收割」）。
     if (this.intentionalKill) {
@@ -633,21 +778,65 @@ export class EngineClient {
       logger.warn(`[engine-client:${this.engineId}] engine process exited unexpectedly (${detail})`);
     }
     this.teardownProcess(detail);
-    this.state = "exited";
+    // [ADR-0122] 状态回落复用 teardownProcess 的守卫（state !== unavailable /
+    // disposed），不再无条件重置：connect/握手失败标记的不可用是终局，teardownProcess
+    // 关闭链迟到的 engine_closed 不得把它复活为 exited。唯一例外 = 通道级 transport
+    // error 触发的不可用（channelErrorUnavailable）——通道死、control 连接仍活，本回执
+    // 即通道终局回执，回落 exited 让下一次 run 在同一连接上重建（D5/D8）。
+    if (this.state === "unavailable" && this.channelErrorUnavailable) {
+      this.state = "exited";
+    }
+    this.channelErrorUnavailable = false;
   }
 
   /**
-   * 进程死亡 / 失败后的统一清理（收割/组杀分支各成子函数，此处只做顺序编排）：
-   * 孤儿收割（镜像置死前）→ 镜像置死（失效语义 2+3）→ pidfile 删 → 在途请求
-   * engine_crashed（附 stderr 尾）→ run 路由清空 → 活引擎组杀兜底。
+   * 传输面错误（D5/D8：control 连接死亡 / 通道级 error 帧）：以具体码 reject 全部
+   * in-flight 请求（不包装 engine_crashed）。连接死亡保持 unavailable（不重试）；
+   * 通道级错误随后续 engine_closed 回落 exited（下次 run 可重建，与引擎崩溃同语义）。
+   * 顺序契约：先于该通道 engine_closed 的 onExit 清理——pending 已空，迟到的
+   * onExit 不会覆盖具体错误码。
+   */
+  private onTransportError(err: EngineSdkError): void {
+    if (this.disposed) return;
+    logger.warn(`[engine-client:${this.engineId}] transport error: ${err.message}`);
+    for (const [, pending] of this.pending) {
+      if (pending.timer !== undefined) clearTimeout(pending.timer);
+      pending.reject(err);
+    }
+    this.pending.clear();
+    this.runRoutes.clear();
+    this.lastPartialHandle = undefined;
+    this.mirror.killAll();
+    if (err.code === "unknown_channel") {
+      // [m-core-3] unknown_channel 是通道终局、control 连接仍活（runtime 该路径只发
+      // error 帧、不跟 engine_closed）：无条件 markUnavailable 会让状态永久停在
+      // unavailable（下一次 ensureConnected 直接抛旧错误）。回落 exited，让下一次
+      // run 在活连接上重新 engine_open（与 engine_closed 的收敛语义一致）。
+      if (this.state !== "unavailable" && this.state !== "disposed") this.state = "exited";
+    } else if (this.state !== "unavailable") {
+      // 通道级错误：不可用只是中间态（fail-fast 收口在途请求），随后的 engine_closed
+      // 由 onTransportExit 回落 exited（channelErrorUnavailable 消费点）——通道死、
+      // control 连接仍活，下一次 run 可在同一连接上重建。
+      this.channelErrorUnavailable = true;
+      this.markUnavailable(err);
+    }
+    // 通道/连接已裁决终局：让 transport 收敛（连接死亡时通道已清 → 立即 resolve；
+    // 通道级 error 时加入 engine_close 宽限/engine_closed 回收链）——fire-and-forget。
+    void this.transport?.close(`transport error: ${err.code}`);
+  }
+
+  /**
+   * 进程死亡 / 失败后的统一清理（进程面段委托 transport、协议面段留守，此处只做
+   * 顺序编排）：孤儿收割（镜像置死前，transport 幂等）→ 镜像置死（失效语义 2+3）→
+   * pidfile 删 → 在途请求 engine_crashed（附 stderr 尾）→ run 路由清空 → 活引擎
+   * 组杀兜底。runtime transport 无 local 进程面（引擎归 runtime）——发 engine_close
+   * 让 runtime 杀组回收（fire-and-forget：同步终局段不阻塞在途 reject 链）。
    */
   private teardownProcess(detail: string): void {
-    this.reapOrphansAfterUnexpectedDeath(detail);
+    const local = this.localTransport;
+    local?.reapOrphansAfterUnexpectedDeath(detail);
     this.mirror.killAll();
-    if (this.pidfileWritten !== undefined) {
-      removePidfile(this.pidfileWritten);
-      this.pidfileWritten = undefined;
-    }
+    local?.removePidfile();
     const err = engineCrashedError(detail, this.stderrTail);
     for (const [, pending] of this.pending) {
       if (pending.timer !== undefined) clearTimeout(pending.timer);
@@ -656,113 +845,19 @@ export class EngineClient {
     this.pending.clear();
     this.runRoutes.clear();
     this.lastPartialHandle = undefined;
-    this.killLeakedAliveChild(detail);
+    local?.killLeakedChild(detail);
+    if (local === undefined) {
+      void this.transport?.close(detail);
+    }
     if (this.state !== "unavailable" && this.state !== "disposed") {
       this.state = "exited";
     }
   }
 
-  /**
-   * [H1 U2 / 红线①收割链] 非主动死亡且引擎已死的路径，在镜像置死**之前**补发收割
-   * 信号：孤儿真因 = 引擎意外死时宿主未发收割信号（原先 alreadyDead 分支直接跳过
-   * killProcessTree），任务子进程留在无主进程组继续写 session 文件。插入点约束：
-   *   - 位置 = mirror.killAll() 置死清空之前——Windows 通道依赖镜像快照过滤活孤儿
-   *     （置死后全量项 killed=true 不可过滤）；
-   *   - 条件 = !intentionalKill && alreadyDead——主动 dispose 链已有两层杀（引擎
-   *     killAllActiveChildren SIGTERM+30s + 宿主 killAll 组杀 5s 升级），跳过即不叠加、
-   *     优雅窗零压缩、pi trap-flush 零截断；进程仍活的路径（握手失败重建）由
-   *     killLeakedAliveChild 组杀兜底承接。
-   */
-  private reapOrphansAfterUnexpectedDeath(detail: string): void {
-    if (!this.intentionalKill && this.child !== undefined) {
-      const dying = this.child;
-      const alreadyDead = dying.exitCode !== null || dying.signalCode !== null;
-      if (alreadyDead && dying.pid !== undefined) {
-        if (process.platform === "win32") {
-          // Windows：killProcessTree 的 taskkill 以引擎 pid 为树根，树根已死 → not
-          // found → 空操作（不可复用）——镜像通道收割（置死前快照，见下）。
-          this.reapOrphansViaMirrorSnapshot(detail);
-        } else {
-          // POSIX：复用 killProcessTree 负 pid 组杀（SIGTERM → 5s grace → SIGKILL
-          // 升级链内建，fire-and-forget 不阻塞同步 teardown）。组长死后进程组存活到
-          // 最后一员退出，组杀可达任务子进程（引擎 detached:true spawn = 组长，任务
-          // 子进程 detached:false 同组，组杀目标 -child.pid 不依赖镜像）。
-          // 无外层逐 pid 兜底（SIGTERM 同步返回后 5s 窗内孤儿必然仍活，同步校验恒
-          // 命中、立即兜底 = 优雅窗归零截断 trap-flush——升级链已覆盖残余职责）。
-          killProcessTree(
-            dying.pid,
-            `reap orphaned children after unexpected engine death (${detail})`,
-            { engineId: this.engineId },
-          );
-        }
-      }
-    }
-  }
-
-  /**
-   * 握手失败路径（版本越界/握手超时/启动僵死）引擎进程仍活着：必须组杀，否则
-   * crash 重建循环每次 spawn 泄漏一个常驻孤儿（测试机实测积累 370+）。主动杀
-   * （intentionalKill=true）与进程已死（exitCode/signalCode 非空）跳过重复发信号。
-   */
-  private killLeakedAliveChild(detail: string): void {
-    if (this.child !== undefined) {
-      const child = this.child;
-      this.child = undefined;
-      const alreadyDead = child.exitCode !== null || child.signalCode !== null;
-      if (!alreadyDead && !this.intentionalKill && child.pid !== undefined) {
-        killProcessTree(child.pid, detail, { engineId: this.engineId });
-      }
-      child.removeAllListeners();
-    }
-  }
-
-  /**
-   * [H1 U2 / 红线①Windows 通道] 镜像快照收割活孤儿：镜像快照同步抓清单（置死前，
-   * 全量项含引擎一生历史死 pid——镜像对已退出子进程只改 state 不删项、唯一清空点 =
-   * killAll）→ 过滤活孤儿（state === "running" && !killed，活孤儿 ≤ 并发数）→ 逐 pid
-   * **异步 spawn** taskkill /T /F fire-and-forget（树根 = 活着的任务子进程自身，树杀
-   * 有效；快照同步抓、杀动作异步发——与 POSIX fire-and-forget 对称；禁 spawnSync：
-   * 逐个同步 N×10s 上界会冻结 onEngineExit 同步回调、推迟 pending reject（Continuation
-   * 失败通知链源头）与宿主事件循环）。
-   */
-  private reapOrphansViaMirrorSnapshot(detail: string): void {
-    const liveOrphans = this.mirror.snapshot().filter((e) => e.state === "running" && !e.killed);
-    if (liveOrphans.length === 0) return;
-    logger.warn(
-      `[engine-client:${this.engineId}] reaping ${liveOrphans.length} orphaned task child(ren) via mirror snapshot after unexpected engine death (${detail})`,
-    );
-    for (const entry of liveOrphans) {
-      const killer = spawn("taskkill", ["/PID", String(entry.pid), "/T", "/F"], { stdio: "ignore" });
-      killer.unref();
-      killer.on("error", (err: Error) => {
-        // spawn 失败（taskkill 缺失等）留 debug 痕迹——残余孤儿由红线③登记承接
-        //（下一轮派发前兜底 / 宿主重启窗口）。
-        logger.debug(
-          `[engine-client:${this.engineId}] taskkill spawn failed for orphan pid ${entry.pid} (${err.message})`,
-        );
-      });
-    }
-  }
-
-  // ── pidfile ──────────────────────────────────────────────────────────────
-
-  // ── 帧写出口 ────────────────────────────────────────────────────────────
+  // ── 帧写出口（transport 委托）──────────────────────────────────────────────
 
   private writeFrame(frame: unknown): boolean {
-    const stdin = this.child?.stdin;
-    if (stdin === undefined || stdin === null || this.child === undefined || this.child.exitCode !== null) {
-      return false;
-    }
-    try {
-      stdin.write(`${JSON.stringify(frame)}\n`);
-      return true;
-    } catch (err) {
-      // 写失败 = 进程已死（EPIPE）——调用方按 false 走 engine_crashed 收口，debug 留痕。
-      logger.debug(
-        `[engine-client:${this.engineId}] stdin write failed: ${err instanceof Error ? err.message : String(err)}`,
-      );
-      return false;
-    }
+    return this.transport?.writeFrame(JSON.stringify(frame)) ?? false;
   }
 
   private sendResponse(id: string, result: unknown): boolean {

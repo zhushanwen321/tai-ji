@@ -21,7 +21,6 @@
     "index.ts",
     "skills/",
     "scripts/",
-    "relay/",
     "src/index.ts",
     "src/jsonl-run-store.ts",
     "src/session-lifecycle.ts",
@@ -91,7 +90,6 @@
   "devDependencies": {
     "@types/node": "^24.0.0",
     "@vitest/coverage-v8": "^4.1.9",
-    "@zhushanwen/subagent-engine-sdk": "workspace:*",
     "vitest": "^4.1.8"
   }
 }

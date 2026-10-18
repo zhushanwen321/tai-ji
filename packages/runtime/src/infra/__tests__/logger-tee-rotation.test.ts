@@ -12,7 +12,7 @@
  * 3. 跨段行级连续：.1.gz 解压段 + 主档拼接行序连续无缺行（轮转边界无在途写丢失）
  * 4. 尾部 flush 走新流：轮转完成后写入的尾部行经 closeLogger 落在新主档（A5 通过标准，
  *    openPiStreams 注册表 stream 引用轮转后更新）
- * 5. relay 形态同款：createPiRelayLog（D7 复刻点③ `pi-relay-*` 同款，与 session tee
+ * 5. subagent 镜像同款：createPiSubagentLog（D7 复刻点③ 同款，与 session tee
  *    共享 createPiStreamWriter）
  *
  * [合并裁决 2026-09] u9 的「打开时预滚（跨重启 stat 超阈值先滚动）」用例已删除：对方
@@ -193,18 +193,18 @@ describe('pi tee size 轮转（D7，.1.gz 口径）', () => {
     expect(mainContent.split('\n').flatMap((l) => extractIndices(l)).at(-1)).toBe(9) // 轮转窗口回放 + 后续行无丢失
   })
 
-  it('relay 形态同款：createPiRelayLog 旋段 pi-relay-*.jsonl.1.gz，pi- 前缀白名单覆盖保持', async () => {
+  it('subagent 形态同款：createPiSubagentLog 旋段 pi-subagent-*.jsonl.1.gz，pi- 前缀白名单覆盖保持', async () => {
     logger = await loadLogger({ TAIJI_LOG_MAX_BYTES: '150' })
     logger.initLogger(dataDir)
-    const recordId = 'relay-rec-3'
-    const relayLog = logger.createPiRelayLog(recordId)
-    // string 行级写入 + Uint8Array 原始字节镜像（relay up 方向 chunk 形态）混合写入
+    const recordId = 'subagent-rec-3'
+    const subagentLog = logger.createPiSubagentLog(recordId)
+    // string 行级写入 + Uint8Array 原始字节镜像（引擎 fd3 镜像 chunk 形态）混合写入
     for (let i = 0; i < 20; i++) {
-      relayLog.write(JSON.stringify({ i, pad: 'y'.repeat(8) }))
+      subagentLog.write(JSON.stringify({ i, pad: 'y'.repeat(8) }))
       await settleWrite()
     }
-    relayLog.write(new TextEncoder().encode('{"raw":"bytes-chunk"}\n'))
-    relayLog.end()
+    subagentLog.write(new TextEncoder().encode('{"raw":"bytes-chunk"}\n'))
+    subagentLog.end()
     await logger.closeLogger()
 
     const files = filesWithMarker(recordId)
@@ -212,8 +212,8 @@ describe('pi tee size 轮转（D7，.1.gz 口径）', () => {
     const main = files.filter((f) => f.endsWith('.jsonl') && !f.endsWith('.1.gz'))
     expect(rolled).toHaveLength(1)
     expect(main).toHaveLength(1)
-    // pi-relay- 前缀保持（旋段仍以 pi- 开头 = 保留期清理白名单可命中）
-    for (const f of files) expect(f.startsWith('pi-relay-')).toBe(true)
+    // pi-subagent- 前缀保持（旋段仍以 pi- 开头 = 保留期清理白名单可命中）
+    for (const f of files) expect(f.startsWith('pi-subagent-')).toBe(true)
     for (const f of rolled) expect(f.startsWith('pi-')).toBe(true)
     const all = [...rolled.map((f) => gunzipLines(f).join('\n')), ...main.map((f) => readLines(f).join('\n'))].join('\n')
     expect(all).toContain('"raw":"bytes-chunk"') // Uint8Array chunk 亦随轮转落盘不丢

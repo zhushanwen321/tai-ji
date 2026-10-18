@@ -333,7 +333,7 @@ describe("chat 工具域引擎路由分叉（U0：D4/D5/D10）", () => {
   // 2. pi 缺省守护（D5 字节级）
   // ============================================================
 
-  it("[F6] pi 路由 kickOffChatRound：runCtx 带 sessionRootId（initSession 注入的根 id，relay 归属键权威源）", async () => {
+  it("[F6] pi 路由 kickOffChatRound：runCtx 带 sessionRootId（initSession 注入的根 id，engine_open 归属键权威源）", async () => {
     // [S5 同根] initSession 读 env PI_SUBAGENT_ROOT_SESSION_ID 优先于 init.sessionId——
     // 在 pi subagent 进程内跑测试（该 env 已注入）必红。显式 stub 为 undefined（空串
     // 会被条件 spread 过滤为缺键，同样破坏断言），不依赖外层环境。
@@ -343,7 +343,7 @@ describe("chat 工具域引擎路由分叉（U0：D4/D5/D10）", () => {
     await vi.waitFor(() => expect(piEngine.runs.length).toBe(1));
     // initSession({sessionId: "test-session"}) 无 env → sessionRootId = "test-session"；
     // kickOffChatRound 是 pi 引擎 background 派发主路径（isPiRoute 恒路由至此，含
-    // workflow 域一次性 run），漏注 = GUI pi 派发 relay 拒绝 exit 13（Gate B F6 形态）。
+    // workflow 域一次性 run），漏注 = GUI pi 派发 engine_open 归属键缺失（Gate B F6 形态）。
     expect(piEngine.runs[0]!.ctx.sessionRootId).toBe("test-session");
     vi.unstubAllEnvs();
   });
@@ -526,7 +526,7 @@ describe("chat 工具域引擎路由分叉（U0：D4/D5/D10）", () => {
   // 6. [F6] sessionRootId 注入（execute / executeAndAwait 两 runCtx 构造点）
   // ============================================================
 
-  it("[F6] service.sessionRootId 注入 runCtx（根 session id 贯穿引擎派发——relay 归属键 SESSION_ID 权威源）", async () => {
+  it("[F6] service.sessionRootId 注入 runCtx（根 session id 贯穿引擎派发——engine_open 归属键权威源）", async () => {
     // 根进程形态：env 无 PI_SUBAGENT_ROOT_SESSION_ID 时 sessionRootId = init.sessionId。
     // 删除防外层 env 污染（该键存在时 initSession 走子进程形态，断言基准漂移）。
     const prevRootEnv = process.env["PI_SUBAGENT_ROOT_SESSION_ID"];

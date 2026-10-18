@@ -42,17 +42,14 @@ import {
  * mkdtemp(tmpdir) 自建自删（红线：零真实数据目录触碰）。
  */
 
-/** 剥身份/relay env（subagent-core 测试纪律同款）：身份 env 会让 service 误判自己是
- *  子进程跳过恢复扫描，relay env 改道 pi-invocation 的 relay 分支。 */
+/** 剥身份 env（subagent-core 测试纪律同款）：身份 env 会让 service 误判自己是
+ *  子进程跳过恢复扫描。 */
 const ENV_KEYS_TO_STRIP = [
   'PI_SUBAGENT_ROOT_SESSION_ID',
   'PI_SUBAGENT_SELF_RECORD_ID',
   'PI_SUBAGENT_DEPTH',
   'PI_SUBAGENT_ROOT_CWD',
   'PI_SUBAGENT_FORK_DEPTH',
-  'TAIJI_SUBAGENT_RELAY_SOCKET',
-  'TAIJI_SUBAGENT_RELAY_NODE',
-  'TAIJI_SUBAGENT_RELAY_SCRIPT',
 ] as const
 
 const ROOT_SESSION = 'root-cross-pkg'

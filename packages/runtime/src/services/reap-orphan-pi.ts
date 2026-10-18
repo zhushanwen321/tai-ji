@@ -48,15 +48,15 @@
  *   第二实例；dev/prod userData 不同、并存合法，「另一合法实例的 pi」由防线②的
  *   ppid=1 判据保护，单实例锁不承担该职责。
  *
- * 收殓范围（方案 B 显式声明，设计 §6.12）：v1 判据下孤儿 subagent/relay pi 不被
- * 收殓（其 --session-dir 指向 subagents/… ≠ 主 session 目录）；v2 下 subagent/relay pi
+ * 收殓范围（方案 B 显式声明，设计 §6.12）：v1 判据下孤儿 subagent pi 不被
+ * 收殓（其 --session-dir 指向 subagents/… ≠ 主 session 目录）；v2 下 subagent pi
  * 的 argv 由 pi-subagent-cli buildSpawnArgs 构造——恒定 --no-extensions 基座 +
  * --extension 白名单集（宿主自主 pi argv 的 staged 集按 structured-output 白名单收窄，
  * 经 wire ctx.extensionPaths 下发，structured-output 属 mandatory builtin 恒在 staged
- * 集即恒在清单；relay 路径同 argv 经握手帧交 runtime 受托 spawn）→ 四条合取①②③
+ * 集即恒在清单）→ 四条合取①②③
  * 全过，开始被收殓。方向是修复 v1 漏收（孤儿 subagent 同样烧 token），属预期改进。
- * 活跃 subagent/relay pi 的 ppid ≠ 1（直spawn 形态父为引擎 CLI 进程、relay 受托形态
- * 父为 runtime），不满足④，不受影响。孤儿收殓时序：pi 的直接父进程退出使其 reparent
+ * 活跃 subagent pi 的 ppid ≠ 1（父为引擎 CLI 进程或 runtime），不满足④，不受影响。
+ * 孤儿收殓时序：pi 的直接父进程退出使其 reparent
  * 到 ppid=1 后，下一轮 reap 收。
  *
  * 清单缺失 fail-safe（宁漏不误杀，方向对齐 D4b）：清单文件缺失/读不到/坏 JSON → 跳过
@@ -316,7 +316,7 @@ function defaultSignal(pid: number, signal: 'SIGKILL'): void {
 /**
  * 读进程启动时间（epoch ms）；ps 失败/目标不存在/解析失败返回 null（防线尽力而为）。
  * 单目标查询是毫秒级本地操作，10s 只是无 ps/假死兜底。SIGKILL 前 pid 复用复验的
- * 数据源（killOrphan 内两时点比对），与 relay-registry 同名私有的探针语义一致。
+ * 数据源（killOrphan 内两时点比对），与 pid/探活链同名私有实现语义一致。
  */
 function defaultReadProcessStartTime(pid: number): Promise<number | null> {
   return new Promise((resolve) => {

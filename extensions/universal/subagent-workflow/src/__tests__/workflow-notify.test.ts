@@ -22,7 +22,7 @@
 //   - 幂等键拒绝：同一 runId 重复 notifyDone（绕过内存 Set 层）不双投递
 //   - 回执销账：settled 边沿扫到送达 entry → ack → 同 runId 再收口零投递
 //   - 未-ack 重放恰好一次（at-least-once + 去重）：投递受理但回执不可达（模拟
-//     relay 瞬断消息丢失）→ 账本恢复重放恰好一次，二次恢复零重放
+//     连接瞬断消息丢失）→ 账本恢复重放恰好一次，二次恢复零重放
 //   - 已销账恢复零重发：正常送达 + 销账后重启恢复零重放
 //   - 降级路径：ledger 未 bind → fire-once 直发（triggerTurn 单通道，无 deliverAs）
 //
@@ -346,7 +346,7 @@ describe("notifyDone — 账本四步生命周期（C-ext-19 迁移）", () => {
     const { pi } = makePi();
     const run = makeRun();
 
-    // 投递受理但回执不可达（deliverPersists=false——模拟 relay 瞬断，消息丢失、
+    // 投递受理但回执不可达（deliverPersists=false——模拟连接瞬断，消息丢失、
     // custom_message entry 未落盘）
     mock.deliverPersists.value = false;
     notifyDone(pi, "wf-lost", runAsParam(run), new Set(), undefined, settlementFor(run.state.reason));

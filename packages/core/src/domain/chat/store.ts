@@ -788,7 +788,7 @@ export function createChatStore(options: ChatStoreOptions = {}) {
    * 混合，形态与主对话流 message.message_end / tool_call_* 帧的 entry 同构）。三步：
    * 1. PiEntry 逐条喂 reducer（applyEntryFrame，toolResult 的 deliveredToolResultIds
    *    幂等去重继承；与 reload 腿（getSubagentHistory）喂同一 reducer——live ≡ reload
-   *    构造性成立的 relay 侧锚点，等价性断言见 runtime __tests__/equivalence/relay-live-reload）。
+   *    构造性成立的 SubagentTee 侧锚点，等价性断言见 runtime __tests__/equivalence/subagent-live-reload.test.ts）。
    * 2. 基线投影：reducer state.messages 整体替换分区 ref（copy + truncate，对齐 setMessages
    *    形态）。定稿是权威：stream_delta 打字机中间态（applySubagentStreamDelta 建的 sa-*
    *    streaming 实体）被定稿取代（§6.2 覆盖语义）。已知限制：基线只含本连接存续期间的
@@ -1180,6 +1180,7 @@ export function createChatStore(options: ChatStoreOptions = {}) {
       streamingStateMachine.applySubagentStreamState(virtualId, recordId, response),
     requestSubagentStreamState: (virtualId: string, recordId: string) => streamingStateMachine.requestSubagentStreamState(virtualId, recordId),
     sealSubagentStream: (virtualId: string, recordId: string, msgSeq: number) => streamingStateMachine.sealSubagentStream(virtualId, recordId, msgSeq),
+    isSubagentStreamDegraded: (virtualId: string, recordId: string) => streamingStateMachine.isSubagentStreamDegraded(virtualId, recordId),
     clearSubagentChunkState: (virtualId: string, recordId?: string) => streamingStateMachine.clearSubagentChunkState(virtualId, recordId),
     clearSubagentChunkStateForSession: (sessionId: string) => streamingStateMachine.clearSubagentChunkStateForSession(sessionId),
     applySubagentEntries,
@@ -1269,6 +1270,7 @@ export type ChatStoreReaders = Pick<
   | 'isRespawnPending'
   | 'getInflight'
   | 'getHistoryWindow'
+  | 'isSubagentStreamDegraded'
 >
 
 

@@ -6,16 +6,20 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  buildExitErrorText,
   classifyFailureKind,
   collectOutcome,
   describeMissingParsedOutput,
+  describePromptAckFailure,
   DETERMINISTIC_SCHEMA_FAILURE_PREFIX,
   extractParsedOutput,
   isDeterministicSchemaFailureMsg,
+  isEngineSpawnDeliveryErrorMsg,
   isStaleContextErrorMsg,
   neutralizeStalePatterns,
   STALE_CONTEXT_PATTERNS,
 } from "../output-collector.ts";
+import type { PromptAckResult } from "../prompt-ack.ts";
 import type { ReplayRecordView, ToolCall } from "@zhushanwen/subagent-engine-sdk";
 
 // ============================================================
@@ -465,5 +469,73 @@ describe("collectOutcome — D5-③ failureKind 产出", () => {
       error: "extension runtime was superseded by a newer orchestration epoch",
     });
     expect(result.failureKind).toBe("unknown");
+  });
+});
+
+// ============================================================
+// [M2 D3/D10] 送达失败分诊
+// ============================================================
+
+describe("M2: 送达错误码分诊（确定性码前缀置前，防 stale 词表误诊）", () => {
+  const ackFailureError =
+    "engine_prompt_not_delivered: zero stdout after prompt write within 30000ms; diagnostics: pid=1 bytesWritten=9 stdoutBytes=0 stdoutBytesAfterPrompt=0 stdoutSeen=false getStateAnswered=false lastEventType=-. Recovery: re-run the task.";
+
+  it("engine_prompt_not_delivered 前缀 → unknown（可重试安全默认，非 stale）", () => {
+    expect(classifyFailureKind(ackFailureError)).toBe("unknown");
+    expect(isEngineSpawnDeliveryErrorMsg(ackFailureError)).toBe(true);
+  });
+
+  it("engine_prompt_rejected 且 pi error 含 aborted 词 → unknown（不被 stale 词表劫走——拒绝面可重试）", () => {
+    const msg =
+      "engine_prompt_rejected: pi rejected the prompt command: request aborted while busy. Recovery: check the pi-side reason.";
+    expect(classifyFailureKind(msg)).toBe("unknown");
+    expect(isStaleContextErrorMsg(msg)).toBe(true); // 词表本身会命中——分诊必须码前缀优先
+  });
+
+  it("engine_spawn_handshake_timeout → unknown（重启后重跑）", () => {
+    const msg =
+      "engine_spawn_handshake_timeout: engine spawn handshake did not complete in time. Recovery: restart taiji.";
+    expect(classifyFailureKind(msg)).toBe("unknown");
+  });
+
+  it("非送达错误码不误判（isEngineSpawnDeliveryErrorMsg 负例）", () => {
+    expect(isEngineSpawnDeliveryErrorMsg("pi child exited with code 15")).toBe(false);
+    expect(isEngineSpawnDeliveryErrorMsg("engine_crashed: stdout tail ...")).toBe(false);
+    expect(isEngineSpawnDeliveryErrorMsg(undefined)).toBe(false);
+  });
+});
+
+describe("M2: describePromptAckFailure（tracker 结算 → outcome.error 文案）", () => {
+  it("timeout → engine_prompt_not_delivered 前缀 + 诊断 detail + Recovery", () => {
+    const failure: PromptAckResult = {
+      kind: "timeout",
+      detail: "zero stdout after prompt write within 30000ms; diagnostics: pid=7 bytesWritten=3 stdoutBytes=0 stdoutBytesAfterPrompt=0 stdoutSeen=false getStateAnswered=false",
+    };
+    const text = describePromptAckFailure(failure);
+    expect(text.startsWith("engine_prompt_not_delivered:")).toBe(true);
+    expect(text).toContain("zero stdout after prompt write");
+    expect(text).toContain("pid=7");
+    expect(text).toContain("Recovery:");
+  });
+
+  it("lost → engine_prompt_not_delivered 前缀（detail 含 stdin-unavailable/epipe 区分）", () => {
+    const text = describePromptAckFailure({
+      kind: "lost",
+      reason: "epipe",
+      detail: "epipe: EPIPE on stdin write; diagnostics: pid=7 bytesWritten=3 stdoutBytes=0 stdoutBytesAfterPrompt=0 stdoutSeen=false getStateAnswered=false",
+    });
+    expect(text.startsWith("engine_prompt_not_delivered:")).toBe(true);
+    expect(text).toContain("epipe");
+  });
+
+  it("rejected → engine_prompt_rejected 前缀 + pi error 文本（与 not_delivered 分型防误诊）", () => {
+    const text = describePromptAckFailure({ kind: "rejected", detail: "model not found" });
+    expect(text.startsWith("engine_prompt_rejected:")).toBe(true);
+    expect(text).toContain("model not found");
+    expect(text).not.toContain("engine_prompt_not_delivered");
+  });
+
+  it("acked 不经此函数（正常 outcome，防御性抛错）", () => {
+    expect(() => describePromptAckFailure({ kind: "acked", disposition: "started" })).toThrow(/acked/);
   });
 });

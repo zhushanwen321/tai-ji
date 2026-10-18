@@ -280,19 +280,9 @@ describe("sendPromptCommand", () => {
     expect(raw.endsWith("\n")).toBe(true);
   });
 
-  it("child.stdin 已 destroyed → 静默跳过（guard 生效，不抛错）", () => {
-    const stdin = new PassThrough();
-    stdin.destroy();
-    const child = { stdin } as unknown as ChildProcess;
-
-    expect(() => sendPromptCommand(child, "task")).not.toThrow();
-    // destroyed 后 write 无效，但函数安全返回
-  });
-
-  it("child.stdin 为 null/undefined → 静默跳过（guard 生效）", () => {
-    const child = { stdin: null } as unknown as ChildProcess;
-    expect(() => sendPromptCommand(child, "task")).not.toThrow();
-  });
+  // [m-pi-5] 旧「静默跳过」两条用例（名称与新契约相反且只断言 not.toThrow）已删除；
+  // 现行契约 = delivered:false + 不登记（不武装计时），覆盖见下方「stdin 缺失 /
+  // stdin 已销毁」两例。
 
   // [V2 决策 3] streamingBehavior 可选参数：续聊热路径用 prompt+streamingBehavior 统一投递
   it("options.streamingBehavior='followUp' → 写入 streamingBehavior:followUp 字段", () => {
@@ -323,6 +313,66 @@ describe("sendPromptCommand", () => {
     const lines = readStdinLines(child);
     const cmd = lines[0] as { streamingBehavior?: string };
     expect(cmd.streamingBehavior).toBeUndefined();
+  });
+
+  // ── [M2 D3 送达回执] 判别式返回 + 回调装配 ──
+
+  it("返回 delivered:true + requestId；onRequestId 在写入前登记（无 response 先到竞态）", () => {
+    const events: string[] = [];
+    const stdin = new PassThrough();
+    const originalWrite = stdin.write.bind(stdin);
+    stdin.write = ((...args: unknown[]) => {
+      events.push("write");
+      return originalWrite(args[0] as string);
+    }) as typeof stdin.write;
+    const child = { stdin } as unknown as ChildProcess;
+
+    let gotId = "";
+    const sent = sendPromptCommand(child, "task", { onRequestId: (id) => {
+      events.push("register");
+      gotId = id;
+    } });
+
+    expect(sent.delivered).toBe(true);
+    expect(sent.requestId).toBe(gotId);
+    // 登记先于写入（D3：写前登记——两者同步完成，stdout 最早下个 tick 才投递）
+    expect(events).toEqual(["register", "write"]);
+    // 帧内 id 与登记 id 一致
+    const cmd = readStdinLines(child)[0] as { id: string };
+    expect(cmd.id).toBe(gotId);
+  });
+
+  it("onBytesWritten 携带写入行字节数（诊断 bytesWritten 计数源）", () => {
+    const child = makeChild();
+    const chunks: number[] = [];
+    sendPromptCommand(child, "count me", { onBytesWritten: (n) => chunks.push(n) });
+
+    expect(chunks).toHaveLength(1);
+    const raw = readStdin(child);
+    expect(chunks[0]).toBe(Buffer.byteLength(raw, "utf8")); // 含组帧 + 换行的确切字节
+  });
+
+  it("stdin 缺失 → delivered:false + reason，onRequestId 不登记（不悬挂计时）、不写入", () => {
+    const child = { stdin: null } as unknown as ChildProcess;
+    const registered: string[] = [];
+
+    const sent = sendPromptCommand(child, "task", { onRequestId: (id) => registered.push(id) });
+
+    expect(sent.delivered).toBe(false);
+    expect(sent.reason).toContain("stdin");
+    expect(registered).toEqual([]); // D3：stdin 不可用不登记，避免 tracker 悬挂计时
+  });
+
+  it("stdin 已销毁 → delivered:false（不写入、不登记）", () => {
+    const stdin = new PassThrough();
+    stdin.destroy();
+    const child = { stdin } as unknown as ChildProcess;
+    const registered: string[] = [];
+
+    const sent = sendPromptCommand(child, "task", { onRequestId: (id) => registered.push(id) });
+
+    expect(sent.delivered).toBe(false);
+    expect(registered).toEqual([]);
   });
 });
 

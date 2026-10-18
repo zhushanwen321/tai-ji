@@ -37,7 +37,7 @@ export default taijiTestConfig({
       // u-2c 删通配后测试解析不受影响。vi.mock / 动态 import 的 specifier 同走
       // vite 解析命中本条（解析后同一物理模块 ID，mock 语义不变）。
       // 仅命中带 .ts 后缀的深路径；barrel（`@zhushanwen/subagent-core` 无路径段）、
-      // 子入口（`relay-env` 等无 .ts 后缀）、testing/（上方字符串条目先行）均不命中。
+      // 子入口（`engine/paths` 等无 .ts 后缀）、testing/（上方字符串条目先行）均不命中。
       {
         find: /^@zhushanwen\/subagent-core\/(.+\.ts)$/,
         replacement: `${path.resolve(__dirname, "../../../packages/subagent-core/src")}/$1`,

@@ -1720,5 +1720,28 @@
       "test": "packages/runtime/src/infra/pi/__tests__/pi-semantics-signal-exit-codes.test.ts"
     },
     "verifiedWith": "1.0.0"
+  },
+  {
+    "id": "PS-81",
+    "claim": "prompt response 是唯一成功回执：pi-coding-agent `modes/rpc/rpc-mode.js` `case \"prompt\"` 中 `success(id, \"prompt\", { disposition })` 的唯一发送点在 `session.prompt(...)` 的 `preflightResult` 回调内（回调先置 `preflightSucceeded = true`），`.catch` 仅在 `!preflightSucceeded` 时 `output(error(id, \"prompt\", e.message))`——已受理后的异常不改写回执形状；`core/agent-session.js` 的 `prompt(text, options)` 预检调用点全集 = `handled`（扩展命令接管 / input handler 短路，2 处）/ `queued`（流式中排队）/ `started`（起轮前，先于 `_runAgentPrompt`），三态均表示 pi 已受理，不是失败分型。taiji 消费方 = `packages/pi-subagent-cli/src/prompt-ack.ts`（零输出看门狗只等 prompt response；stdout 活性只取消计时器不结算，disposition 收窄值域与三态语义整体承重于本断言）",
+    "piAnchor": [
+      {
+        "pkg": "pi-coding-agent",
+        "distPath": "dist/modes/rpc/rpc-mode.js",
+        "symbol": "case \"prompt\"（preflightResult → output(success)；.catch 的 !preflightSucceeded 守卫）",
+        "note": ":298-313 —— 启动 prompt 时声明 `preflightSucceeded = false`；`preflightResult: (disposition) => { preflightSucceeded = true; output(success(id, \"prompt\", { disposition })); }`（success 唯一发送点）；`.catch` :308-312 仅在 `!preflightSucceeded` 时 `output(error(id, \"prompt\", e.message))`【行号锚基于 pi@1.0.0；复核按符号名定位】"
+      },
+      {
+        "pkg": "pi-coding-agent",
+        "distPath": "dist/core/agent-session.js",
+        "symbol": "prompt(text, options) 的 preflightResult 调用点（disposition 值域）",
+        "note": ":1487-1594 —— `preflightResult?.(\"handled\")` :1494（扩展命令接管）/ :1504（input handler 短路）、`preflightResult?.(\"queued\")` :1525（isStreaming 排队后）、`preflightResult?.(\"started\")` :1594（`await this._runAgentPrompt(messages)` 之前）；prompt() 窗口内 disposition 字面量全集仅此四调用点【行号锚基于 pi@1.0.0；复核按符号名定位】"
+      }
+    ],
+    "guard": {
+      "type": "probe",
+      "test": "packages/runtime/src/infra/pi/__tests__/pi-semantics-prompt-response.test.ts"
+    },
+    "verifiedWith": "1.0.0"
   }
 ]
