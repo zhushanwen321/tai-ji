@@ -10,10 +10,11 @@
 //      ——record 主数据（主 session 文件里的 subagent-record entry）由引擎侧管理，
 //      其删除对 core 无触发点：done record 的 journal 没有精确回收锚，workflow 域
 //      （taskId 占位无 record 生命周期锚）同样无锚，只能按 mtime 兜底回收。子代理
-//      会话文件（<agentDir>/subagents 树：*.jsonl / sidecar / records manifest /
-//      *.events）不再有 TTL 清理——归属级联删除（主会话删 → 族删），外部删除主文件
-//      场景接受残留。
-//   2. worktree .patch 备份（<agentDir>/subagents/<enc>/sessions/<branch>.patch，
+//      会话文件（<root>/<rootSessionId>/subagents/ 树：*.jsonl / sidecar / records
+//      manifest / *.events；<root> = 会话存储树根 getSessionStoreDir()，布局推导
+//      权威 = assembly/path-encoding.ts）不再有 TTL 清理——归属级联删除（主会话删
+//      → 族删），外部删除主文件场景接受残留。
+//   2. worktree .patch 备份（<root>/<rootSessionId>/subagents/sessions/<branch>.patch，
 //      落盘源 = worktree/worktree-patch-collection.ts）。按 branch 命名、与 .jsonl
 //      basename 无关联，v2 条目契约不承载 patchFile/branch（record-store-rebuild
 //      缺省纪律，权威源在 manifest 与子 session 文件）——级联的引用并集（record id
