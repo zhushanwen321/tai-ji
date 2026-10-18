@@ -39,7 +39,7 @@
 // record 流的磁盘清理归裁决点 7 对账清理（无主 run 五件全删）——pi 壳域 run 域
 // 保留期不裁 record 流（prune 候选锚定 state 快照族，run-state-evidence [D1 后
 // 射程] 段），故「record 流被保留期裁剪、manifest 成终局事实最后落点」的形态在
-// 现行写入面无正常产生通道；findRunSettlementEvidence 的 manifest 兜底分支保留
+// 现行写侧无正常产生通道；findRunSettlementEvidence 的 manifest 兜底分支保留
 // 为残局防御（外部删除 / 清理部分失败），非设计内读序。
 //
 // interrupted 不是终局（[D2] interrupted 入 lifecycle 为暂停态）：run-interrupted
@@ -264,7 +264,7 @@ export interface RunCreatedEvent extends EventEnvelope { // oe-exempt:20260929:f
   scriptPath?: string;
   /**
    * run 级时间预算上界（ms，RunSpec.budgetTimeMs 原文——run 创建时的墙钟预算）。
-   * record 单源后 resume 无法从别处恢复原预算约束，本字段是唯一数据面：resume
+   * record 单源后 resume 无法从别处恢复原预算约束，本字段是唯一数据范围：resume
    * 重建 spec 时据此恢复（未显式传 time 即继承），复活 run 在错误重试重建时按
    * 「剩余活跃预算」（搁置时间不计）重排计时器；缺失 = 旧格式行（本载荷落地前的
    * 流）或创建时未设预算，两种形态一律回落不限时（旧格式行为不劣化）。可选 =
@@ -275,7 +275,7 @@ export interface RunCreatedEvent extends EventEnvelope { // oe-exempt:20260929:f
   /**
    * run 级 token 预算上界（RunSpec.budgetTokens 原文——run 创建时的 token 消耗上限，
    * Budget.isExceeded 的加权口径）。record 单源后 resume 无法从别处恢复原预算约束，
-   * 本字段是唯一数据面：resume 重建 spec 时据此恢复（未显式传 tokens 即继承），
+   * 本字段是唯一数据范围：resume 重建 spec 时据此恢复（未显式传 tokens 即继承），
    * 复活 run 的引擎侧 maxTokens 派生视图（lifecycle createRunningRun / worker-host budget
    * 注入）与 fresh run 同形；缺失 = 旧格式行（本载荷落地前的流）或创建时未设预算，
    * 两种形态一律回落不限制（旧格式行为不劣化）。可选 = 读取侧对旧格式行放行，
@@ -425,7 +425,7 @@ export interface RunInterruptedEvent extends EventEnvelope { // oe-exempt:202609
    * 纪律保留不删值，无新写入方）。
    */
   errorCode?: RunErrorCode;
-  /** 中断原因摘要（自由文本诊断面；可缺省）。 */
+  /** 中断原因摘要（自由文本诊断范围；可缺省）。 */
   reason?: string;
 }
 
@@ -502,7 +502,7 @@ export interface WorkflowModelOverride {
  * 的 `$MODEL`、不改重建 spec 的 run 级模型、不碰回放一致性比对——覆盖走宿主
  * 派发侧覆写（决策六②），三者在场时回放哈希不受扰动。
  *
- * 写入面 = 宿主切换编排（U4b）经 journal append 单点直写（seq 由 journal 实装
+ * 写侧 = 宿主切换编排（U4b）经 journal append 单点直写（seq 由 journal 实装
  * 分配，W1 seq 契约：新写行信封必填正整数 seq）；不经 dispatchRunTrigger——
  * model-override 是非转移记账事件（不占 RUN_TRANSITIONS 表行），
  * appendTransition 首行 transition() 对无转移表行事件必抛 IllegalTransitionError，
@@ -519,7 +519,7 @@ export interface ModelOverrideEvent extends EventEnvelope, WorkflowModelOverride
 /**
  * worker 诊断日志帧（[§2.1 errorLogs 持久化] ADR-0093）。
  *
- * **不参与生命周期状态机**：诊断面与状态面正交——fold 显式跳过本类事件（见
+ * **不参与生命周期状态机**：诊断范围与状态面正交——fold 显式跳过本类事件（见
  * foldRunEventCheckpoint），故不占 RUN_TRANSITIONS 表行，也不受终态吸收约束（run
  * 终局后迟到的诊断日志不会把 fold 判成坏帧）。唯一消费方 = `errorLogsFromEvents`
  * 重建（与活体写入同语义：按序追加 + 尾部上限裁剪）。
@@ -1297,7 +1297,7 @@ export function foldRunEventCheckpoint(
     if (typeof seq === "number" && seq <= checkpoint.lastSeq) {
       continue;
     }
-    // 诊断事件（worker-log）不进状态机：诊断面与状态面正交，且终态是吸收态——若让
+    // 诊断事件（worker-log）不进状态机：诊断范围与状态面正交，且终态是吸收态——若让
     // 它走 transition，run 终局后迟到的诊断日志会把 fold 判成坏帧。水位仍推进，避免
     // tail 消费方每轮重读同一批诊断行。
     // 记账事件（model-override）同款跳过（subagent-model-switch §6.6①）：宿主覆盖

@@ -81,7 +81,7 @@ function reportStalePiSkip(context: string): void {
  * Node 默认 exit 1，见登记 §1.4）。
  *
  * 消费方 = notify-host / record-store / finalize-record / chat-rounds /
- * subagent-service 的 `pi?.` 调用点（通知面 + 条目面，全部属「失败不影响主流程判定」
+ * subagent-service 的 `pi?.` 调用点（通知面 + 条目范围，全部属「失败不影响主流程判定」
  * 的旁路通道；record 终态/轮终的磁盘权威面走 journal/manifest，不经此通道）。
  *
  * `rethrowNonStale: true` 供「失败传播是设计契约、上游有自己的围栏与留痕」的写点

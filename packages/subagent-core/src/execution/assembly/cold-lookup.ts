@@ -14,7 +14,7 @@
 //（findForeignLiveInstance）+ 归属匹配（rootSessionId / 直接父，编排层）。任何 idle
 // record 都是候选（万物可续——closedReason/stopReason 只是展示位）；锚不可解析不在此
 // 拒绝——降级处置 = 同 id 带历史重开（markReopened），编排归 Continuation 派发检查
-//（磁盘重建源 = session 文件本身，冷查候选锚天然可解析；锚失效的现实触发面 = 内存
+//（磁盘重建源 = session 文件本身，冷查候选锚天然可解析；锚失效的现实触发范围 = 内存
 // idle record 的 transcript 被回收，发生在派发时点）。
 
 import * as fs from "node:fs";
@@ -63,7 +63,7 @@ export interface ColdLookupDeps {
 /**
  * [U6 / §3.2.6] 锚派生的消费方形状（transcriptAnchorOf / isAnchorResolvable 入参）：
  * ExecutionRecord 与 SubagentRecord（entry 重建）均结构满足。sessionFile = pi 锚的
- * 迁移期载体（写面未收编前 pi 锚的现行形态）；engineHandle.sessionRef = zcode 锚的
+ * 迁移期载体（写侧未收编前 pi 锚的现行形态）；engineHandle.sessionRef = zcode 锚的
  * 单源（引擎 onHandleReady 回传 {sessionId, dbPath}，经主 session entry 持久化——
  * record.transcriptRef 显式字段优先）。
  */
@@ -76,7 +76,7 @@ export interface AnchorProbeShape {
 
 /**
  * [U6 / §3.2.6 要点 1/2] record → transcript 锚的派生单点（引擎中立判别联合）：
- *   - 显式 transcriptRef（markReopened 写面 / 后续单元收编的 settle 写点）优先；
+ *   - 显式 transcriptRef（markReopened 写侧 / 后续单元收编的 settle 写点）优先；
  *   - zcode：engineHandle.sessionRef {sessionId, dbPath} 双键齐 → zcode 锚（内存
  *     record 的引擎回填面即锚的单源，避免双写漂移——binding 快照收编归 U7）；
  *   - pi：sessionFile 在 → pi 锚（现行载体）。
@@ -156,7 +156,7 @@ function zcodeSessionEntryExists(dbPath: string, sessionId: string): boolean {
  *   - zcode：sessionId+dbPath 库中条目存在（TTL 清理/外部删除 = 锚失效）。
  *  「锚失效 ≠ 拒绝续聊」的降级语义（markReopened 同 id 带历史重开，编排归
  *  Continuation 派发检查）[U3] 收窄为 pi 锚专属：pi transcript 即时落盘、预检查
- *  可靠，锚失效的现实触发面 = 文件被回收；zcode 锚不进预检查分流——库派生视图滞后
+ *  可靠，锚失效的现实触发范围 = 文件被回收；zcode 锚不进预检查分流——库派生视图滞后
  *  于 create 应答属系统性误判（理由详见 conversation-continuation reviveOrThrow
  *  注），带锚正常派发、锚活性由引擎真实 resume 结果承担。zcode 分支保留：探测面
  *  维持引擎中立完整，zcode 锚的判据不因降级收窄而失去单点归属。

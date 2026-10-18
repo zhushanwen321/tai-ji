@@ -222,7 +222,7 @@ export function isPathUnderSessionTmp(resolvedPath: string, encodeCwdDirs: Reado
  *
  * 两条 IPC 的消费域 = 会话产物子树 `<dataDir>/artifacts/`（HtmlPreviewInline 挂载前
  * size 预检 + 源码态读取、useDetailPane 抽屉产物源码读取——全部调用链只消费产物路径）。
- * 与渲染面协议 handler 的全量白名单（computeLocalFilePrefixes）分离：通道入参含模型消息
+ * 与渲染范围协议 handler 的全量白名单（computeLocalFilePrefixes）分离：通道入参含模型消息
  * 文本承载的路径载荷（html-preview fence），全量白名单含 `<dataDir>` 整前缀（含 pi agent
  * 目录的 auth.json 等凭据文件），读通道复用全量白名单 = 渲染进程可直读数据目录内任意
  * 文件文本。cwd 外非产物路径返回 `out_of_whitelist`，由调用方回落既有通道（useDetailPane
@@ -235,7 +235,7 @@ export function computeLocalFileReadPrefixes(dataDir: string): string[] {
 
 // ── local-file servable 预检谓词（chat-html-support §6.4 D4 子决策 / §6.9 D9）──────
 // 内联预览容器 HtmlPreviewInline（经 deps probeArtifact?）挂载前经 `localFile:servable` IPC
-// 预检（v16 唯一渲染面）；协议 handler 与预检必须复用本模块的同一谓词——边缘路径（.. 穿越 /
+// 预检（v16 唯一渲染范围）；协议 handler 与预检必须复用本模块的同一谓词——边缘路径（.. 穿越 /
 // // 冗余斜杠 / %2e2e 编码遍历 / 含 % # 空格的文件名）上两份平行实现必然分叉。
 
 /** 内部探测结果：比 IPC 出参多带规范化后的绝对路径（协议 handler 的 net.fetch 需要） */
@@ -376,7 +376,7 @@ export function probeLocalFileUrlPathname(
 // `out_of_cwd`）对主要产物路径不可达——源码态需要一条与 servable 预检**同一谓词函数**的
 // 读取通道。准入判定复用 probeLocalFileServable（白名单先行短路 → 存在性 → 目录性）；
 // IPC 通道侧前缀集 = computeLocalFileReadPrefixes 的产物子树（非协议 handler 全量白名单
-// ——通道入参含模型消息文本路径载荷，文本读取面限定在实际消费域）。读出的内容只经
+// ——通道入参含模型消息文本路径载荷，文本读侧限定在实际消费域）。读出的内容只经
 // CodeBlock 文本插值渲染（禁 v-html），不构成脚本执行面扩大。
 
 /** 源码态读取上限（与 runtime `file.read` 的 MAX_FILE_SIZE 同语义：1 MiB，超出截断） */

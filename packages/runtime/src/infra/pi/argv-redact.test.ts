@@ -1,6 +1,6 @@
 /**
  * argv 日志脱敏共享纯函数单测（设计 `mode-system-composer-density`
- * §7.2「argv 日志脱敏」+ §7.6 写入面 + 探针 P15）。
+ * §7.2「argv 日志脱敏」+ §7.6 写侧 + 探针 P15）。
  *
  * 锁定：
  * - 值型 flag（`--system-prompt` / `--append-system-prompt`）的值遮蔽为 `<N chars>`；

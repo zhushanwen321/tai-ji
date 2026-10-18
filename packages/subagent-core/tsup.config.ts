@@ -14,7 +14,7 @@ const bundleOnly = process.env.npm_lifecycle_event === 'build:bundle'
 // （src/ 前缀替换为 dist/），package.json exports 的语义子入口按同形路径映射
 // （./execution/relay-env -> dist/execution/relay-env.cjs 等）。
 // [W11/H3] 引擎子入口（./engines/zcode/{reader,constants}）已随内建引擎删除。
-// 主入口 index 之外的三个 entry 恰好是 exports 的三个语义子入口（D5 公共面）：
+// 主入口 index 之外的三个 entry 恰好是 exports 的三个语义子入口（D5 公共部分）：
 // runtime 复用链（D8）与 zsw 复用链（D6）只允许经语义子入口消费这些模块，
 // 语义子入口因此必须各自成为 bundle 入口——否则它们只存在于主入口 bundle 内部，
 // 无法被独立加载（单一 bundle 不做 chunk 拆分，模块实例也会分裂成两份）。
@@ -44,7 +44,7 @@ const mainConfig = defineConfig({
 })
 
 // ── 档 2：自包含 CJS bundle（host-surface D2） ──────────────────
-// 产物 dist.bundle/index.cjs——给无 node_modules 解析面的宿主 vendoring（zsw：
+// 产物 dist.bundle/index.cjs——给无 node_modules 解析范围的宿主 vendoring（zsw：
 // 插件目录整体复制，无依赖安装链，marketplace 副本/inline 加载双形态都要能直跑）。
 // 与档 1 的本质差异：档 1 的 dist 仍把 ajv/yaml/proper-lockfile 留作外部依赖
 // （宿主有正常 node_modules 解析路径），档 2 noExternal 全部运行时依赖后单文件

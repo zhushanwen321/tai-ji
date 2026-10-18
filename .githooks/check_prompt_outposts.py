@@ -248,7 +248,7 @@ def run(scan_root):
     exempt_hits = []  # (rel_path, lineno)
     unreadable_dirs = []  # os.walk onerror 收集（不可读目录 = 漏扫面，须显形）
     files = sorted(iter_ts_files(scan_root, unreadable_dirs))
-    staged = staged_files()  # 扫描面 = staged ∩ 规则树；提交者对自己提交的面负责
+    staged = staged_files()  # 扫描范围 = staged ∩ 规则树；提交者对自己提交的面负责
     scanned = 0
 
     for path in files:

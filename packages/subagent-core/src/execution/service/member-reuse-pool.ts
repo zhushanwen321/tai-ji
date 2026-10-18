@@ -45,11 +45,11 @@ import type { WorkflowRunEvent } from "../../orchestration/run-events.ts";
 const logger = getLogger("member-reuse-pool");
 
 /**
- * record 读注入面（[D6] 收窄：原 appendEvent 通道随 member-pool 词表成员删除——
- * 绑定写入归 agent-started 帧，由 pump dispatchAgentCall 链承载，不经本注入面）。
+ * record 读注入点（[D6] 收窄：原 appendEvent 通道随 member-pool 词表成员删除——
+ * 绑定写入归 agent-started 帧，由 pump dispatchAgentCall 链承载，不经本注入点）。
  * 生产装配在消费方（workflow-dispatch / terminal-actions 的 scanRunEvents 组装）。
  */
-export interface MemberReusePoolIo { // oe-exempt:20260927:framework:复用绑定 ports IO 契约（record 读面）——生产实现经 terminal-actions 单源，测试 fake 为第二变体
+export interface MemberReusePoolIo { // oe-exempt:20260927:framework:复用绑定 ports IO 契约（record 读侧）——生产实现经 terminal-actions 单源，测试 fake 为第二变体
   /** 顺序扫描某 run 的全部事件（fold 重建的读通道）。 */
   readonly scanEvents: (runId: string) => Promise<readonly WorkflowRunEvent[]>;
 }
@@ -175,7 +175,7 @@ export async function registerMemberRecord(
  * 后等价——原 clear 帧的 fold 清空语义由「终局后无后续 agent-started 帧」构造性
  * 承接）。
  *
- * @returns 恒 false（原「是否发出了 clear 事件」的诊断面——无事件可发，保留返回
+ * @returns 恒 false（原「是否发出了 clear 事件」的诊断范围——无事件可发，保留返回
  * 形状兼容既有测试断言）。
  */
 export async function clearMemberReusePool(runId: string, _io: MemberReusePoolIo): Promise<boolean> {

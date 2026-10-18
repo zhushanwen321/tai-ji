@@ -780,7 +780,7 @@ export class RuntimeServer implements IMessageBroker {
    * statusSetUpdate 投递挂点（pi1-disposition-chat-flow D7② 挂点迁移 + 断链修复）：
    * pi setStatus stdout 事件（event-adapter status-set → interpreter 路由）直达 pluginService
    * 的插件事件投递方法——原 BridgeHandler.handleStatusSetUpdate 中转随 bridge 退役删除。
-   * 断链修复落点 = 分发侧：新投递点按泛型 'onPiEvent' 键派发（与 hook-api 注册面泛型键
+   * 断链修复落点 = 分发侧：新投递点按泛型 'onPiEvent' 键派发（与 hook-api 注册点泛型键
    * 形状对齐，事件名在载荷 event 字段），修复「注册键 'onPiEvent' vs 分发键原始事件名」
    * 的既有错位（audit §4.2）。
    */

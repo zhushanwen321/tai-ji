@@ -25,7 +25,7 @@
  * 新增豁免必须附理由；理由消失（如对应插件/脚本改造完成）时同步移除条目。
  *
  * 用法：node scripts/check-layout-literals.mjs（每次全量扫描，毫秒级，无增量模式——
- * 触发面由 pre-commit 按路径控制）
+ * 触发范围由 pre-commit 按路径控制）
  */
 import { readFileSync, readdirSync, statSync } from 'node:fs'
 import { join, relative } from 'node:path'

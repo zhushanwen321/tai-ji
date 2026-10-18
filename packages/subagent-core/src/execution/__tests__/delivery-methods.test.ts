@@ -86,7 +86,7 @@ describe("会话形态续聊投递（run + resume 锚点）", () => {
     fs.rmSync(agentDir, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 });
   });
 
-  it("续聊 message → run 收到 resume 锚点（ctx.resume 唯一会话形态键）；轮终 round+1 翻 idle（[two-state-convergence U4] 写面翻边）", async () => {
+  it("续聊 message → run 收到 resume 锚点（ctx.resume 唯一会话形态键）；轮终 round+1 翻 idle（[two-state-convergence U4] 写侧翻边）", async () => {
     const beforeRound = record.round;
 
     await service.chatActions.deliverChatMessage(record, "next round msg");
@@ -108,7 +108,7 @@ describe("会话形态续聊投递（run + resume 锚点）", () => {
     // 模拟引擎 agent_settled 应答（轮末分流 = run 应答驱动，D7）
     run.settle({ content: "round text" });
 
-    // 等 detached 完成：round 累加、轮终翻 idle（[two-state-convergence U4/D3] 写面
+    // 等 detached 完成：round 累加、轮终翻 idle（[two-state-convergence U4/D3] 写侧
     // 翻边——idle 即 resumable，续聊经 revive 过站，SP-5 寻址链不查 status）
     await vi.waitFor(() => expect(record.round).toBe(beforeRound! + 1));
     expect(record.status).toBe("idle");
@@ -117,7 +117,7 @@ describe("会话形态续聊投递（run + resume 锚点）", () => {
   });
 
   it("[P3 ⛔ two-state-convergence U4] chat 轮终翻 idle → message → revive 过站直通：status 翻 running + 恰一条迁移 entry + 无其他簿记变更（round/closedReason 不动）", async () => {
-    // 前置：让 record 先真实轮终一轮（写面翻边 idle 形态——markRoundIdle 收尾）。
+    // 前置：让 record 先真实轮终一轮（写侧翻边 idle 形态——markRoundIdle 收尾）。
     // 等 stopReason（轮终产物）而非 round——makeIdleRecord 预置 round=1，round 判据
     // 会在 settle 前立即通过。
     await service.chatActions.deliverChatMessage(record, "first round");

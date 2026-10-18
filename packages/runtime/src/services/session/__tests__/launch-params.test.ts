@@ -708,7 +708,7 @@ describe('⛔ 探针 P2（D3 前提）：出厂 builtin:full 与无 preset 路�
     }
   })
 
-  it('merge 后 builtin:full 的 resolution 与无 preset 路径逐面直比（纯数据面）', async () => {
+  it('merge 后 builtin:full 的 resolution 与无 preset 路径逐面直比（纯数据范围）', async () => {
     const env = makeP2Env()
     // 路径 A：merge 后 getPreset('builtin:full')（真实存储态）→ resolve 展开
     const preset = env.presetService.getPreset('builtin:full')

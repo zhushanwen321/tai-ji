@@ -1,5 +1,5 @@
 /**
- * 后台任务收殓器（runtime 侧，双触发面 D2——docs/architecture/file-lock-unification-
+ * 后台任务收殓器（runtime 侧，双触发点 D2——docs/architecture/file-lock-unification-
  * and-reaper-sink.md §2.3 目标态数据流 / §3.2 D2 决策表 / §3.3 挂点论证）。
  *
  * 职责（G2 职责归位）：孤儿后台任务的收殓由 pi 生命周期的所有者（runtime）执行，
@@ -8,16 +8,16 @@
  * 错误防御）；行为原语自 ext-simplify-13 起统一取 @zhushanwen/extension-protocol
  * 子出口 `background-task`（pid 探测/处置原语 + registry 文件原语，跨端与 extension
  * 侧单一实现——此前各持一份逐字同构副本靠注释对齐，tail 签名已实际漂移），本文件
- * 只保留编排层：三分支判定、双触发面、统一锁 sync 版锁壳（utils/file-lock.ts
+ * 只保留编排层：三分支判定、双触发点、统一锁 sync 版锁壳（utils/file-lock.ts
  * withFileLockSync，与 extension 写侧互斥同一把 lockfile `<registry.json>.lock`）、
  * 写失败降级决策；protocol 原语的日志通道经 onLog/onFallback 回调注入 console 适配
  * （本文件 LOG_TAG 形态，与既有日志语义等价）。
  *
- * 两个入口（对应设计 §2.3 双触发面）：
- *  - reapSessionBackgroundTasks(agentDir, sessionId)：触发面 A——挂 session-service
+ * 两个入口（对应设计 §2.3 双触发点）：
+ *  - reapSessionBackgroundTasks(agentDir, sessionId)：触发点 A——挂 session-service
  *    removeSessionEntry 汇聚点（「该 session 的 pi 确认死亡」的精确时点，覆盖主动删/
  *    进程退出/forceQuit/restore 清场），fire-and-forget 不阻塞销毁收敛链。
- *  - reapAllSessionsBackgroundTasks(agentDir)：触发面 B——挂 startup-background-init
+ *  - reapAllSessionsBackgroundTasks(agentDir)：触发点 B——挂 startup-background-init
  *    启动期全量兜底扫描（硬序在孤儿 pi 收殓 reapOrphanPiProcesses 完成后执行，时序
  *    论证见设计 §2.3：若扫描先行，扫描时遗留 pi 尚活被分支①跳过，+5s 被杀后其
  *    detached 任务才孤儿化且此后无事件触达，漏收一个 app 周期），顺带 rmdir stale
@@ -47,7 +47,7 @@
  * 下个事件重试）；单目录扫描失败 warn 后不中断整体扫描。
  *
  * 为什么入口是 async 而核心全同步：核心含 spawnSync ps（单条 5s 超时上限）与同步
- * 文件锁 busy-wait，而触发面 A 的调用链（removeSessionEntry）是同步销毁收敛链——
+ * 文件锁 busy-wait，而触发点 A 的调用链（removeSessionEntry）是同步销毁收敛链——
  * 入口经 setImmediate 延后一拍执行同步核心，调用方 void + catch 即为真 fire-and-forget
  * （既不 await 结果，也不占用销毁链所在的当前事件循环拍）。
  */
@@ -89,7 +89,7 @@ const registryLog: RegistryFileLogFn = (level, event, detail) =>
 /**
  * 旧 reaper 全局锁的 lockfile 目录名（mkdir 形态，落 <baseDir>/reaper.lock）。
  * 扫描时须按名排除（否则会对锁目录做一次无谓的 registry 读取并计入 scannedDirs）；
- * 触发面 B 顺带清理其 stale 残留（见文件头「锁残留清理」）。
+ * 触发点 B 顺带清理其 stale 残留（见文件头「锁残留清理」）。
  */
 const REAPER_LOCK_DIRNAME = 'reaper.lock'
 
@@ -160,7 +160,7 @@ export function writeOrphanedTerminal(registryPath: string, entry: BackgroundTas
 
 // ──────────────────────── 三分支判定主体 ────────────────────────
 
-/** 单轮收殓统计（日志 + 测试断言面；写失败/保守跳过单独计数保持守恒）。 */
+/** 单轮收殓统计（日志 + 测试断言范围；写失败/保守跳过单独计数保持守恒）。 */
 export interface BackgroundTaskReapResult {
   /** 扫描的 sessionId 目录数（含无 registry / 无活跃条目的目录）。 */
   scannedDirs: number
@@ -172,7 +172,7 @@ export interface BackgroundTaskReapResult {
   finalizedOrphans: number
   /** 保守跳过：start time 无法获取 / 复用嫌疑不匹配 / 条目处置异常 / 终态写失败。 */
   conservativelySkipped: number
-  /** 触发面 B 顺带清理的 stale reaper.lock 残留目录数（触发面 A 恒 0）。 */
+  /** 触发点 B 顺带清理的 stale reaper.lock 残留目录数（触发点 A 恒 0）。 */
   staleLocksRemoved: number
 }
 
@@ -277,7 +277,7 @@ function reapSessionDirSync(sessionDir: string, deps: ResolvedReapDeps, result: 
   }
 }
 
-/** 触发面 A 核心：处置指定 session 的 registry（该目录不存在 = 从未有过后台任务，常态）。 */
+/** 触发点 A 核心：处置指定 session 的 registry（该目录不存在 = 从未有过后台任务，常态）。 */
 function reapOneSessionSync(agentDir: string, sessionId: string, deps: ResolvedReapDeps): BackgroundTaskReapResult {
   const result = emptyResult()
   const sessionDir = dirname(getSessionRegistryPath(agentDir, sessionId))
@@ -293,7 +293,7 @@ function reapOneSessionSync(agentDir: string, sessionId: string, deps: ResolvedR
   return result
 }
 
-/** 触发面 B 核心：扫全部 session 目录 + 清理 stale reaper.lock 残留。 */
+/** 触发点 B 核心：扫全部 session 目录 + 清理 stale reaper.lock 残留。 */
 function reapAllSessionsSync(agentDir: string, deps: ResolvedReapDeps): BackgroundTaskReapResult {
   const result = emptyResult()
   const baseDir = join(agentDir, BASE_TOOL_ENHANCE_DIRNAME)
@@ -345,14 +345,14 @@ function removeStaleReaperLock(baseDir: string, result: BackgroundTaskReapResult
   }
 }
 
-// ──────────────────────── 入口（双触发面） ────────────────────────
+// ──────────────────────── 入口（双触发点） ────────────────────────
 
 /** setImmediate 延后一拍：同步核心（spawnSync ps / 同步锁 busy-wait）不占用调用方当前事件循环拍。 */
 function deferToNextTick(): Promise<void> {
   return new Promise((resolve) => setImmediate(resolve))
 }
 
-/** 有实际收殓动作（或保守跳过）时的汇总日志（S4a/S4b「runtime 日志有收殓记录」的观测面）。
+/** 有实际收殓动作（或保守跳过）时的汇总日志（S4a/S4b「runtime 日志有收殓记录」的观测范围）。
  *  RT-5#9：conservativelySkipped 纳入触发条件——只有保守跳过的拍次此前完全零记录，
  *  跳过是否在发生不可观测。导出供单测直击条件矩阵（纯函数无状态）。 */
 export function logReapSummary(scope: string, result: BackgroundTaskReapResult): void {
@@ -367,7 +367,7 @@ export function logReapSummary(scope: string, result: BackgroundTaskReapResult):
 }
 
 /**
- * 触发面 A：收殓指定 session 的后台任务（挂 session-service removeSessionEntry
+ * 触发点 A：收殓指定 session 的后台任务（挂 session-service removeSessionEntry
  * 汇聚点，fire-and-forget）。幂等：终态条目跳过 + 属主活跳过，二次收殓天然 no-op。
  */
 export async function reapSessionBackgroundTasks(
@@ -382,8 +382,8 @@ export async function reapSessionBackgroundTasks(
 }
 
 /**
- * 触发面 B：启动期全量兜底扫描（挂 startup-background-init，硬序在
- * reapOrphanPiProcesses 完成后执行）——覆盖触发面 A 够不到的三类：上次运行崩溃/
+ * 触发点 B：启动期全量兜底扫描（挂 startup-background-init，硬序在
+ * reapOrphanPiProcesses 完成后执行）——覆盖触发点 A 够不到的三类：上次运行崩溃/
  * SIGKILL 遗留孤儿（本次运行无销毁事件）、启动期孤儿 pi 收殓所杀 pi 的 detached
  * 任务（不在 SessionService Map，依赖硬序）、从未激活即被删的 session。
  */

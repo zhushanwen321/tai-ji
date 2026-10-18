@@ -14,11 +14,11 @@
 //   3. 壳→聚合：允许（装配点），不检查。
 //   4. 跨聚合私有访问门（grep 级文本对照）：聚合 deps 接口中返回兄弟聚合实例的
 //      getter（`readonly getFoo: () => XxxAggregate` 形态）被映射后，正文
-//      `this.deps.getFoo().method(...)` 的 method 不在目标聚合 class 导出面
+//      `this.deps.getFoo().method(...)` 的 method 不在目标聚合 class 导出清单
 //      （非 private 成员）即红。防「聚合经 deps 拿兄弟实例调其内部」的未来回退；
 //      现状协作全部是窄函数接口注入（resolveIdentity / finalizeRecord 等），
 //      该通道应天然零命中。
-//      [阶段3 P3-4 覆盖面登记] 本检查可机械覆盖子集 = 「deps getter 直调」单一
+//      [阶段3 P3-4 覆盖范围登记] 本检查可机械覆盖子集 = 「deps getter 直调」单一
 //      文本形态；三条通道不覆盖、显式划归 code review 职责：① getter 返回类型
 //      接口化（结构兼容接口名 ≠ 聚合 class 名 → 不入 getter 映射）；② 实例缓存
 //      局部变量后调用；③ 聚合实例经方法/构造参数流入（import 门只封文件内静态
@@ -72,7 +72,7 @@ const ALLOWED_EDGES = new Map([
 ]);
 
 /** [H3/R6] SERVICE_DIR 下的支撑文件（非聚合）：类型声明 / 常量叶子 / 叶子 helper
- *  （零聚合状态：模块级内存表 + 纯函数 + io 注入面，无 deps、不 import 兄弟）/
+ *  （零聚合状态：模块级内存表 + 纯函数 + io 注入范围，无 deps、不 import 兄弟）/
  *  装配工厂的宿主。与聚合适用不同方向规则（检查 5）；聚合间登记清单门不覆盖支撑文件。
  *  [D1 拆边 Class C 第 4 步补登 2026-09-30] member-reuse-pool.ts 自
  *  orchestration/member-reuse-pool.ts 整体下沉至此——它是聚合外的叶子 helper
@@ -176,9 +176,9 @@ function extractAggregateClassNames() {
   return names;
 }
 
-/** 提取聚合 class 的导出面（非 private 成员名集合：方法/getter/字段）。
+/** 提取聚合 class 的导出清单（非 private 成员名集合：方法/getter/字段）。
  *  范围限定 export class 大括号体内（brace 平衡截断），避免 interface 成员与
- *  模块级对象字面量属性混入导出面造成漏报。 */
+ *  模块级对象字面量属性混入导出清单造成漏报。 */
 export function extractPublicSurface(source) {
   const classStart = source.search(/export\s+class\s+(\w+)/);
   if (classStart === -1) return null;
@@ -373,7 +373,7 @@ export function detectCycles(edges) {
   return cycles;
 }
 
-/** 检查 4 前置：聚合 class 名 → public 导出面（非 private 成员名集合）映射。 */
+/** 检查 4 前置：聚合 class 名 → public 导出清单（非 private 成员名集合）映射。 */
 function collectAggregateSurfaces(aggregateFiles, sources) {
   const surfaces = new Map(); // 聚合 class 名 → public 面
   for (const file of aggregateFiles) {
@@ -383,7 +383,7 @@ function collectAggregateSurfaces(aggregateFiles, sources) {
   return surfaces;
 }
 
-/** 检查 4：单个聚合文件内 deps getter 直调形态对照目标聚合导出面，
+/** 检查 4：单个聚合文件内 deps getter 直调形态对照目标聚合导出清单，
  *  this.deps.getFoo().method( 的 method 非 public 即红。 */
 export function checkAggregateGetterCalls(file, src, surfaces, aggregateClassNames, violations) {
   const getters = extractAggregateGetters(src, aggregateClassNames);
@@ -398,7 +398,7 @@ export function checkAggregateGetterCalls(file, src, surfaces, aggregateClassNam
     const surface = surfaces.get(targetClass);
     if (surface && !surface.has(method)) {
       violations.push(
-        `[跨聚合私有访问] ${file}: this.deps.${m[1]}().${method}(…) —— ${method} 不在 ${targetClass} 的导出面（public 成员）上` +
+        `[跨聚合私有访问] ${file}: this.deps.${m[1]}().${method}(…) —— ${method} 不在 ${targetClass} 的导出清单（public 成员）上` +
           `；聚合间协作走显式接口（窄函数注入），禁止穿透实例调内部`,
       );
     }

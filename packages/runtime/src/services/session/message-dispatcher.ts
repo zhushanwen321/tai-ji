@@ -6,7 +6,7 @@
  *
  * [投递所有权内核 u2] 用户消息路径（sendMessage）**内核化**：投递所有权移交
  * SessionDeliveryRegistry（D1 单一所有者）——本类保留「BeforeSend hook 拦截 + 入口 touch +
- * 错误面编排」，投递交由 `registry.submit()`（lane 判定 + 裸标记 + 内核 FIFO + 两阶段回执
+ * 错误范围编排」，投递交由 `registry.submit()`（lane 判定 + 裸标记 + 内核 FIFO + 两阶段回执
  * 全在注册表/内核侧）。退役面：busy 预检（rejectBusyPrecheck）、send.rejected 广播（budy
  * 类拒绝转译）、markSessionActive 三副作用（迁至注册表 deliverOne 的出站交接点，§3.4+ 表）、
  * skill 注入（迁至同一交接点——注入器所有权随出站交接点走）。保留面：BeforeSend hook
@@ -160,7 +160,7 @@ export class MessageDispatcher {
    */
   async sendMessage(sessionId: string, content: string, images?: Array<{ data: string; mimeType: string }>, clientUuid?: string, requireCommand?: string): Promise<{ blocked: boolean; rejected?: boolean; receipt?: DeliverySubmitResult; reason?: SendPromptReason }> {
     // ── per-session 受理串行链（到达序 = 内核提交序）──
-    // 前驱失败不毒化链（catch 吞 rejection，错误面已由链内各层自广播）。
+    // 前驱失败不毒化链（catch 吞 rejection，错误范围已由链内各层自广播）。
     const prev = this.sendMessageChains.get(sessionId) ?? Promise.resolve()
     const run = prev.catch(() => undefined).then(() => this.runAcceptance(sessionId, content, images, clientUuid, requireCommand))
     this.sendMessageChains.set(sessionId, run)
@@ -179,7 +179,7 @@ export class MessageDispatcher {
     clientUuid?: string,
     requireCommand?: string,
   ): Promise<{ blocked: boolean; rejected?: boolean; receipt?: DeliverySubmitResult; reason?: SendPromptReason }> {
-    // ── BeforeSend hook（提交前唯一拦截面）──
+    // ── BeforeSend hook（提交前唯一拦截点）──
     // blocked: 已广播 message.error（错误气泡），此处返回 {blocked:true} 让 handler 改发 error envelope。
     // modifiedContent: hook 改写后的文本（transform 语义，Fix-1），未改写时回退原文。
     // [D6/u5a] reason:'hook-blocked' 为回执面增量（hook 管道既有 reason 已随 message.error 上浮）。
@@ -210,7 +210,7 @@ export class MessageDispatcher {
   /**
    * requireCommand 探测（plugin-header-action-modal-points D6/u5a）：直连
    * client.getCommands()（不走 sessionService.getCommands 的 markDirty 查询语义——那是
-   * UI 状态查询面路径）。单次探测（ADR-0122：500ms×6 就绪轮询已删）；client 未附着 =
+   * UI 状态查询范围路径）。单次探测（ADR-0122：500ms×6 就绪轮询已删）；client 未附着 =
    * 未命中（拒发由调用方收尾）；探测 RPC 失败视同未命中，warn 留排查线索（非静默吞）。
    */
   private async ensureCommandAvailable(sessionId: string, requireCommand: string): Promise<boolean> {
@@ -238,7 +238,7 @@ export class MessageDispatcher {
    * pi 同步执行、不进模型、无 turn，P2 前提）。
    *
    * 分流契约（D1 逐条）：
-   * - **不经 runBeforeSendHook**：系统指令不是用户消息，不暴露给插件 veto/transform 改写面
+   * - **不经 runBeforeSendHook**：系统指令不是用户消息，不暴露给插件 veto/transform 改写侧
    *   （hook 的 transform 可破坏命令形态，D1 否决记录的第三缺陷）；
    * - **不经 registry.submit**：无裸标记尾附（标记会污染 command args 使 navigateTree throw）、
    *   无内核条目、无车道判定——信令不被 hold/排队（撤回编排自持 revoking hold，若经内核

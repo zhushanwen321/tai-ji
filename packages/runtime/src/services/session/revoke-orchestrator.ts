@@ -51,7 +51,7 @@ export const REVOKED_SIGNAL_CUSTOM_TYPE = 'taiji:revoked'
 export interface RevokeOrchestratorDeps {
   /** occupancy 空闲检查数据源（①——三维 turn/compacting/bash 的权威派生视图）。 */
   getSession(sessionId: string): IManagedSessionView | undefined
-  /** pi 拉活（⑤ 数据面 + ⑥ 信令前置交接共用；失败回 pi-reclaimed——D1/A10 无感拉活）。 */
+  /** pi 拉活（⑤ 数据范围 + ⑥ 信令前置交接共用；失败回 pi-reclaimed——D1/A10 无感拉活）。 */
   ensureActive(sessionId: string): Promise<IPiEngine>
   /**
    * workflow running 检查（①——D2 待验证② 落点核实结论：subagent-workflow 内存态在
@@ -107,7 +107,7 @@ interface TreeSnapshot {
   leafId: string | null
 }
 
-/** leafId 沿 parentId 回溯的活跃链（⑥ 校验谓词的数据面）。 */
+/** leafId 沿 parentId 回溯的活跃链（⑥ 校验谓词的数据范围）。 */
 interface ActiveChain {
   /** 回溯链上的 entry.id 集合（活跃路径派生——谓词按此集合判定，非字符串包含）。 */
   ids: Set<string>
@@ -240,7 +240,7 @@ function locateTarget(
 }
 
 /**
- * ① 空闲判定（D8 busy 触发面：turn 活跃 / compacting / settling / bash）。
+ * ① 空闲判定（D8 busy 触发点：turn 活跃 / compacting / settling / bash）。
  * [审计候选 13] 收敛为 occupancy 三维公式：isGenerating/isCompacting/isBashRunning 三布尔
  * 与 occupancy 同源同点写入（applySessionOccupancyTransition 转移表每行 flags+patch 原子派生，
  * C-data-19 禁绕开直写），四路 OR 与三维公式等价——留一份判定式，不留第二份镜像。
@@ -280,7 +280,7 @@ export class RevokeOrchestrator {
       // ── ② 内核 active 条目全量 cancel（D4：等价 exclude=全部，走既有 cancel 管道）────
       await this.cancelAllActiveEntries(registry, sessionId)
 
-      // ── 数据面拉活 + ③ 定位 + ④ 缓存清除 + ⑤ 信令前校验（含全部前置终态分支）──────
+      // ── 数据范围拉活 + ③ 定位 + ④ 缓存清除 + ⑤ 信令前校验（含全部前置终态分支）──────
       const prelude = await this.acquireTargetContext(sessionId, targetId)
       if (!('client' in prelude)) return prelude // 前置终态（busy 码族 / no-mapping / 幂等 revoked）
       const { client, located, expectedParentId } = prelude
@@ -324,7 +324,7 @@ export class RevokeOrchestrator {
   }
 
   /**
-   * ② 后数据面前置段：拉活 + 一次 get_entries（③⑤ 共用——设计 D2 ③「同一次
+   * ② 后数据范围前置段：拉活 + 一次 get_entries（③⑤ 共用——设计 D2 ③「同一次
    * get_entries」）+ ③ 定位 + ④ 缓存清除 + ⑤ 信令前校验。返回上下文（含 ⑤ 校验取出的
    * expectedParentId）或前置终态 reply（拉活失败 pi-reclaimed / 读失败 nav-failed /
    * 定位失败与不在活跃链 no-mapping / 幂等已撤 revoked:true）——调用方按 `'client' in`

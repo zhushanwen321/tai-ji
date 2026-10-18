@@ -49,7 +49,7 @@ import { toErrorMessage } from '../../utils/errors.js'
 import { getRuntimeCheckpointStore } from './runtime-checkpoint.js'
 // D5 在途镜像（crash-forensics §3.3 D5）：detach 同点位摘除 = 本链第 3 步。
 import { inflightMirror } from './inflight-mirror.js'
-// 收殓下沉触发面 A（file-lock-unification-and-reaper-sink §3.3）：孤儿后台任务收殓（第 11 步）。
+// 收殓下沉触发点 A（file-lock-unification-and-reaper-sink §3.3）：孤儿后台任务收殓（第 11 步）。
 import { reapSessionBackgroundTasks } from './background-task-reaper.js'
 import { getPiAgentDir } from '../../infra/pi/pi-paths.js'
 import type { IManagedSessionView } from './types.js'
@@ -119,7 +119,7 @@ export class SessionEntryRemovalOrchestrator {
   constructor(private readonly deps: SessionEntryRemovalDeps) {}
 
   /**
-   * 销毁收敛链本体：四路删除路径的唯一完成入口（覆盖面与顺序约束见文件头 SSOT 段）。
+   * 销毁收敛链本体：四路删除路径的唯一完成入口（覆盖范围与顺序约束见文件头 SSOT 段）。
    * 步骤序列 = 迁移前 SessionService.removeSessionEntry 体内顺序逐字保持。
    * 每步经 runDestroyStepIsolated 隔离（code-harden RT-4#1）：单步故障降级为日志 + journal 登记行，
    * 不再让 toSummary / dispose 扇出等任一步的异常打断收敛或上抛成 uncaughtException。
@@ -176,7 +176,7 @@ export class SessionEntryRemovalOrchestrator {
     // ——取消 pending 自动恢复 timer（5s 窗口内用户删除 session，若不取消，timer 触发会
     // 为已删 session spawn pi 再附着失败，空转 spawn+kill）。只清 timer 不清失败计数
     //（本汇聚链被 restoreSession 清场复用，清计数会破坏熔断——理由见 pi-respawn.cancel）。
-    // 覆盖面：主动删 / onSessionExit 进程退出（先 cancel 后 schedule，顺序安全）/ forceQuit
+    // 覆盖范围：主动删 / onSessionExit 进程退出（先 cancel 后 schedule，顺序安全）/ forceQuit
     // / restore 清场全部删除路径。
     runDestroyStepIsolated('respawn.cancel', sessionId, () => {
       this.deps.cancelRespawn(sessionId)
@@ -204,9 +204,9 @@ export class SessionEntryRemovalOrchestrator {
         console.error(`[session-service] onSessionDestroyed listener error (sessionId=${sessionId}):`, e)
       }
     }
-    // 收殓下沉触发面 A（D2，设计 docs/architecture/file-lock-unification-and-reaper-sink.md
+    // 收殓下沉触发点 A（D2，设计 docs/architecture/file-lock-unification-and-reaper-sink.md
     // §3.3 挂点论证）：本汇聚链是「该 session 的 pi 确认死亡」的精确时点（主动删 /
-    // onSessionExit 进程退出 / forceQuit 编排 / restore 清场全部经此），覆盖面大于
+    // onSessionExit 进程退出 / forceQuit 编排 / restore 清场全部经此），覆盖范围大于
     // pm.onSessionExit（后者只覆盖进程退出）。fire-and-forget：void + catch warn，
     // 入口内部 setImmediate 延后同步处置（含 spawnSync ps），不阻塞销毁收敛链。
     // registry 不存在（该 session 从未跑过后台任务）时为静默 no-op。
@@ -255,7 +255,7 @@ export class SessionEntryRemovalOrchestrator {
     runDestroyStepIsolated('messageBus.clearSession', sessionId, () => {
       this.deps.clearMessageBusSession(sessionId)
     })
-    // [B5 触发面收窄 2026-09-15] plugin sessionData 清理（tombstone + trash + 分区摘除）
+    // [B5 触发点收窄 2026-09-15] plugin sessionData 清理（tombstone + trash + 分区摘除）
     // 的历史挂点在本尾段，已迁出至 lifecycle.delete 真删除路径（session-lifecycle.ts delete
     // 内 B5 注释）。迁出理由与跨文件顺序约束见文件头 SSOT 段「B5 禁止挂回」。
   }

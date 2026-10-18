@@ -37,7 +37,7 @@ import { toErrorMessage } from '../utils/errors.js'
 /**
  * 出站点显式墙钟超时（§7.1.1 要素 4：60s < 前端 backstop RPC_BACKSTOP_TIMEOUT_MS = 65s
  * （packages/core/src/transport/api/pending.ts:37）——保证前端 backstop 窗口内必有 WS
- * 应答。量级依据：逐成员转发为控制面单请求（秒级收敛窗），聚合并发扇出常态远低于 60s；
+ * 应答。量级依据：逐成员转发为控制范围单请求（秒级收敛窗），聚合并发扇出常态远低于 60s；
  * 极端大 run 触发超时按通道行语义如实应答。超时到点先做一次结果文件 best-effort 检查
  * ——命中迟到真值按真实结果应答（略超时不吞真值）。
  */
@@ -61,7 +61,7 @@ export interface SubagentModelPromptClient { // oe-exempt:20261006:framework:出
   prompt(content: string): Promise<unknown>
 }
 
-export interface SubagentModelGatewayDeps { // oe-exempt:20261006:framework:网关适配器依赖注入面（组合根构造，单实现常态）
+export interface SubagentModelGatewayDeps { // oe-exempt:20261006:framework:网关适配器依赖注入范围（组合根构造，单实现常态）
   /** session pi 客户端提供者（workflowAction 同款 deps.pm.getClient 形态的窄口）。 */
   getClient(sessionId: string): SubagentModelPromptClient | undefined
   /** session 扫描（resolveSessionId 定位 + 结果目录数据根 cwd 解析的唯一来源）。 */
@@ -481,7 +481,7 @@ export function createSubagentModelSwitchGateway(deps: SubagentModelGatewayDeps)
           // 首个命中会把请求路由到非归属会话的 pi 进程，宿主归属校验拒绝）。
           return readEventsRootSessionId(eventsFile, 'record-created') === s.id
         } catch {
-          return false // 非法 record id = 白名单拒绝 = 未命中（检查读面不抛）
+          return false // 非法 record id = 白名单拒绝 = 未命中（检查读侧不抛）
         }
       })
     }

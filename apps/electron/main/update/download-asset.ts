@@ -169,7 +169,7 @@ const PROGRESS_THROTTLE_MS = 200
  * @returns 下载完成后最终文件路径（已通过校验）；multiPart = 本次是否实际走了
  *   多段路径（probe supported 且多段真实完成——降级单段/curl 接管均为 false）；
  *   engine = 本次成功完成下载的实际引擎（curl 接管与 undici 两态，降级后成功的
- *   以实际成功者为准）。两字段是 download-success 观测面的数据源（设计 §7.2
+ *   以实际成功者为准）。两字段是 download-success 观测范围的数据源（设计 §7.2
  *   error-log 行 / §8.2 S1：multiPart=true 断言防 probe 改造回归静默退化单段）。
  * @throws UpdateIntegrityError sha256/size 校验失败
  */
@@ -208,7 +208,7 @@ export async function downloadAsset(
     tempPath, finalPath, downloadedBytes, resumeState, onProgress, proxyConfig, proxyUrl,
   }
   // useMultiPart 提升到函数级：成功返回时作为 multiPart 观测值（download-success
-  // 观测面消费，见 @returns）。多段成功路径才置 true——降级单段 / curl 接管均保持 false。
+  // 观测范围消费，见 @returns）。多段成功路径才置 true——降级单段 / curl 接管均保持 false。
   let handledByCurl = false
   let useMultiPart = false
   if (getEnginePreference() === 'curl') {

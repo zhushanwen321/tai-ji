@@ -1,5 +1,5 @@
 /**
- * SessionRecords W0 观测面 + R11/6c3 从根源修复回归（pull-push-architecture W0 / D7）。
+ * SessionRecords W0 观测范围 + R11/6c3 从根源修复回归（pull-push-architecture W0 / D7）。
  *
  * 覆盖：
  * - 6c3 从根源修复回归：纯 plan session 首次拉取失败（pi client 不可得 / RPC 错误）后，修复前
@@ -269,7 +269,7 @@ describe('P-1 探针：cursor 管线与 WS 推送独立路径（pull-push §2 �
   })
 })
 
-describe('断点显形 warn + 发布观测（W0 观测面）', () => {
+describe('断点显形 warn + 发布观测（W0 观测范围）', () => {
   it('失效无缓存（未注册 session）落结构化 warn（此前静默 no-op 零日志）', () => {
     const { records } = makeRecords()
     records.invalidateRecordEntries('s-unknown', 'plan-state')
@@ -340,7 +340,7 @@ describe('断点显形 warn + 发布观测（W0 观测面）', () => {
 
 describe('发布归因 + workflowFolds fold 证据（可观测性 2026-10-02，event-push-channel 重演）', () => {
   // 事故场景重放（workflow 详情空窗）：run journal 先落 run-created，entry 路径送注册条目
-  // 后写侧追加 agent-started 并经 marker 通道推送——两路径发布在观测面上必须可归因、fold
+  // 后写侧追加 agent-started 并经 marker 通道推送——两路径发布在观测范围上必须可归因、fold
   // 证据可分形。（原「tailer 路径」随 event-tail watch 退役换轨为推送喂入；读活动事实 =
   // routeJournalReport 送达并应用，不再有 tailer 观测行。）
   it('推送路径发布落 trigger=event-projection + fold 证据推进；entry 路径对称', async () => {

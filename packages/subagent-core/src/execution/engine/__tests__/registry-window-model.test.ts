@@ -194,7 +194,7 @@ describe("registry D6：per-window 引擎不进 singletons，getEngine 返回同
     registerEngineDescriptor("pw", makeCliDescriptor("pw"));
     const a = getEngine("pw");
     const b = getEngine("pw");
-    expect(a).toBe(b); // 代理实现缓存（纯快照读面）
+    expect(a).toBe(b); // 代理实现缓存（纯快照读侧）
 
     const sharedPort = new FakeWindowEnginePort("shared");
     registerEngineDescriptor("zcode-like", makeCliDescriptor("zcode-like", { processModel: "shared-service" }));

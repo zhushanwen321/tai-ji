@@ -1,7 +1,7 @@
 /**
  * 品味规则（renderer-deepening D6③ / 验收 A8）：组件只碰 chat store 的 readers 面
  *
- * chat store 公共面约 60 项混装（状态 refs + 读方法 + 写操作 + LRU + 订阅类），
+ * chat store 公共部分约 60 项混装（状态 refs + 读方法 + 写操作 + LRU + 订阅类），
  * D6 按「组件渲染需要 vs 编排动作」切成两个 facet 类型（packages/core/src/domain/chat/store.ts）：
  * - ChatStoreReaders：状态 refs + 纯读查询（组件渲染可碰面）；
  * - ChatStoreOps：写操作 + LRU + 订阅类 + testInternals（编排/composable 专用面）。

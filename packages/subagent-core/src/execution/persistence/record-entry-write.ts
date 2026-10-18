@@ -47,7 +47,7 @@ export function toRegisteredEntryData(
   };
 }
 
-/** v2 终态条目构造载荷（终局写点共用输入面——ExecutionRecord 的统计/终局域字段子集）。 */
+/** v2 终态条目构造载荷（终局写点共用输入范围——ExecutionRecord 的统计/终局域字段子集）。 */
 export interface SettledEntrySource { // oe-exempt:20261001:framework:v2 终态条目构造载荷契约——自 record-store-terminal 原样搬迁（拆文件非新抽象），读侧消费 = record-store-rounds
   id: string;
   status: string;
@@ -68,7 +68,7 @@ export interface SettledEntrySource { // oe-exempt:20261001:framework:v2 终态�
 
 /**
  * ExecutionRecord → SettledEntrySource 映射（终局写点共用：容器终局写点与
- * face 缺省分支同款消费——条目面独立于事件面工作时载荷构造单源）。
+ * face 缺省分支同款消费——条目范围独立于事件流工作时载荷构造单源）。
  */
 export function settledEntrySourceOf(record: ExecutionRecord): SettledEntrySource {
   return {
@@ -180,7 +180,7 @@ const INTERRUPTED_FAMILY_STOP_REASONS: readonly string[] = [
 
 /**
  * D4 双面证据第二条的判别（「终态条目已存在且非 interrupted」）：settled 条目
- * 在场且停因非 interrupted 族才构成跳过证据——interrupted 族条目是「条目面先行
+ * 在场且停因非 interrupted 族才构成跳过证据——interrupted 族条目是「条目范围先行
  * 写、journal 帧缺失」的不对称窗口残留（appendEvent fire-and-forget 失败 /
  * 局部损坏），不构成跳过证据，收编须放行以追加 settled 帧修复 journal；停因
  * 缺失（契约外残缺形态）保守计为真终态（宁保留不重复）。
@@ -218,7 +218,7 @@ export function buildAdoptedSettledEntry(
 
 /**
  * entry-only 孤儿纠偏产物（登记 §3.3）：主 session 有 v2 注册条目、无子 session 文件、
- * 无事件文件（spawn 窗口期死亡）时的终态条目。事件面缺席 → 统计诚实 0，停因缺省
+ * 无事件文件（spawn 窗口期死亡）时的终态条目。事件流缺席 → 统计诚实 0，停因缺省
  * interrupted-by-restart；身份域无载荷可补（注册条目已在场）。
  */
 export function buildEntryOnlyOrphanSettledEntry(
@@ -338,7 +338,7 @@ export function buildCreatedEventPayload(
  * 引擎域签名对比（reportRecordTransition 写点——D3 表行 2）。归一形态：pi record
  * 的 engineHandle 缺省 = 空 sessionRef 桶（写入与对比共用同一归一，避免「record
  * 缺省 undefined vs 写入归一值」的伪差异把每次过程 transition 都误判为引擎域变化，
- * 事件面随高频调用放大）。签名三元组 = sessionFile/engine/engineHandle；**epoch
+ * 事件流随高频调用放大）。签名三元组 = sessionFile/engine/engineHandle；**epoch
  * 不参与签名**——epoch 递增由 record-reopened 帧单点承载（D3 表行 6），reopen 后
  * 的 transition 再落 bound 帧会重复表达同一迁移。
  */

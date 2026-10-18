@@ -38,7 +38,7 @@ const PROJECT_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), 
 
 /**
  * 跨进程契约串登记表：literal 串值必须逐字出现在每个 files 条目的代码字符串
- * 字面量中（不含注释）。串值或文件集变更 = 契约面变更，须与本表同 commit。
+ * 字面量中（不含注释）。串值或文件集变更 = 契约范围变更，须与本表同 commit。
  */
 const GROUPS = [
   {

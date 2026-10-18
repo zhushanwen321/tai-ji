@@ -13,7 +13,7 @@
  *   流顶声明行（u4/u5 已落地，本用例为回归断言——见下方用例注释）
  *
  * [2026-09-16 composer-task-tray] 工具条结构断言复核：托盘插在 `+ 添加` 菜单之后、
- * composer.toolbar 挂载点之前（设计 D1），不改变本 spec 原有断言面（输入区 / + 菜单 portal
+ * composer.toolbar 挂载点之前（设计 D1），不改变本 spec 原有断言范围（输入区 / + 菜单 portal
  * dialog / landing 判据均不受影响）；新增的两条挂载断言 = 托盘在 composer-bar 的挂载与
  * 隐藏判据（`v-if="sessionId"`，与 ComposerMetricsAggregate 同口径）。
  *

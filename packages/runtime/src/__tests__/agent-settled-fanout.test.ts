@@ -17,7 +17,7 @@ describe('fanOutSettled', () => {
   let warnSpy: ReturnType<typeof vi.spyOn>
 
   beforeEach(() => {
-    // 吞掉 warn 输出防测试刷屏；断言其调用次数与内容（异常隔离的观测面）
+    // 吞掉 warn 输出防测试刷屏；断言其调用次数与内容（异常隔离的观测范围）
     warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {})
   })
 

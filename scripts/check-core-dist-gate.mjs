@@ -5,7 +5,7 @@
  *
  * 背景：u-2c 删除 `./*` 开发态通配后，对 dist 产物做过三项一次性人工核验（结论仅存
  * commit message）：①主 bundle × 4 子入口重叠 module = 恰 4 个纯常量/函数模块；
- * ②4 子入口导出面 src↔dist 符号一致（3+9+5+8=25）；③require smoke。人工核验不可
+ * ②4 子入口导出清单 src↔dist 符号一致（3+9+5+8=25）；③require smoke。人工核验不可
  * 复跑——未来新增子入口 / tsup 配置漂移无机器拦截。本脚本把 ①② 固化为可复跑静态门
  * （③已有 scripts/smoke-core-dist.mjs 承载，不重复）。
  *
@@ -20,7 +20,7 @@
  * ESM 侧子入口经 chunk 共享（运行时同实例，无分裂），但 chunk 拆分形态由 tsup
  * splitting 决定，重叠监测对 ESM 同样保留（配置漂移翻回物理重复时仍被覆盖）。
  *
- * 门② 子入口导出面 src↔dist 符号比对：对 exports 的每条子入口（非 `.`、非通配），
+ * 门② 子入口导出清单 src↔dist 符号比对：对 exports 的每条子入口（非 `.`、非通配），
  * 从 src 入口（exports import 条件）解析具名导出符号，与 dist 对应 .d.cts
  * （exports require.types）及同基 .d.ts 的导出符号集双向比对，差集非空 = FAIL。
  * `export * from` 无法文本枚举——按依赖闭包检查同款 fail-closed 处理，直接 FAIL。
@@ -39,7 +39,7 @@ const ROOT = join(__dirname, '..')
 const CORE_DIR = join(ROOT, 'packages', 'subagent-core')
 const PKG_PATH = join(CORE_DIR, 'package.json')
 
-// 纯函数导出面（scripts/__tests__/check-core-dist-gate.test.mjs 直挂单测——发布门禁
+// 纯函数导出清单（scripts/__tests__/check-core-dist-gate.test.mjs 直挂单测——发布门禁
 // 解析逻辑的边界行为必须有机器锁定，见 MF-2）。仅 CLI 直跑时执行下方 main()。
 // gateTwo 额外接受 coreDir 注入（默认 CORE_DIR）——单测 fixture 落 tmpdir 用，CLI 不传。
 export {
@@ -180,13 +180,13 @@ function findModuleLevelMutableState(srcAbs) {
   return signals
 }
 
-// ---------- 导出面符号提取 ----------
+// ---------- 导出符号提取 ----------
 
 /**
  * 解析全部 `export { ... }` 块（可多行、含 `type X` 前缀与 `X as Y` 重命名）。
  * 解析不了的 part 记入 problems（fail-closed：宁可报错人工看，不静默漏符号）。
  */
-// export 块单项形态：标识符/default + 可选 as 重命名（重命名后符号才是导出面）
+// export 块单项形态：标识符/default + 可选 as 重命名（重命名后符号才是导出项）
 const EXPORT_PART_RE = /^([A-Za-z_$][\w$]*|default)(?:\s+as\s+([A-Za-z_$][\w$]*|default))?$/
 
 /** 花括号配对扫描：从 open 起找 depth 归零的结束 }（未封口返回 -1） */
@@ -239,7 +239,7 @@ function extractSrcExportNames(tsRaw, where) {
   if (/^export\s+default\b/m.test(t)) names.add('default')
   for (const m of t.matchAll(/^export\s+\*(?:\s+as\s+([A-Za-z_$][\w$]*))?\s+from\b/gm)) {
     if (m[1]) names.add(m[1])
-    else problems.push(`${where}: src 出现裸 export * from（重导出面无法文本枚举）——请展开为显式具名导出`)
+    else problems.push(`${where}: src 出现裸 export * from（重导出清单无法文本枚举）——请展开为显式具名导出`)
   }
   return { names, problems }
 }
@@ -255,7 +255,7 @@ function extractDtsExportNames(dtsRaw, where) {
   if (/^export\s+default\b/m.test(t)) names.add('default')
   for (const m of t.matchAll(/^export\s+\*(?:\s+as\s+([A-Za-z_$][\w$]*))?\s+from\b/gm)) {
     if (m[1]) names.add(m[1])
-    else problems.push(`${where}: d.ts 出现裸 export * from（导出面无法文本枚举）`)
+    else problems.push(`${where}: d.ts 出现裸 export * from（导出清单无法文本枚举）`)
   }
   return { names, problems }
 }
@@ -418,7 +418,7 @@ function reportExportDrift(sub, dctsRel, dtsRel, src, dcts, dts) {
   if (onlyInDistDcts.length > 0) fail(`${sub.key}: 仅 ${dctsRel} 有、src 缺: ${onlyInDistDcts.join(', ')}`)
   if (onlyInSrcDts.length > 0) fail(`${sub.key}: 仅 src 有、${dtsRel} 缺: ${onlyInSrcDts.join(', ')}`)
   if (onlyInDistDts.length > 0) fail(`${sub.key}: 仅 ${dtsRel} 有、src 缺: ${onlyInDistDts.join(', ')}`)
-  console.error(`    排查：tsup dts 配置漂移或 src 导出面变更未重建——cd packages/subagent-core && pnpm build 后重跑`)
+  console.error(`    排查：tsup dts 配置漂移或 src 导出清单变更未重建——cd packages/subagent-core && pnpm build 后重跑`)
 }
 
 /** 单子入口三向产物定位（src / .d.cts / .d.ts），任一缺失即 fail 并返回 null */
@@ -447,7 +447,7 @@ function locateSubentryFaces(pkg, sub, coreDir) {
   return { srcAbs, dctsRel, dctsAbs, dtsRel, dtsAbs }
 }
 
-/** 单子入口导出面比对：三向符号提取 → 解析 problems 优先 fail → 四向差集报告 */
+/** 单子入口导出清单比对：三向符号提取 → 解析 problems 优先 fail → 四向差集报告 */
 function checkSubentryFace(pkg, sub, coreDir) {
   const faces = locateSubentryFaces(pkg, sub, coreDir)
   if (faces === null) return
@@ -462,9 +462,9 @@ function checkSubentryFace(pkg, sub, coreDir) {
   reportExportDrift(sub, faces.dctsRel, faces.dtsRel, src, dcts, dts)
 }
 
-/** 门②：子入口导出面 src↔dist 符号比对（.d.cts + .d.ts 双格式，双向差集） */
+/** 门②：子入口导出清单 src↔dist 符号比对（.d.cts + .d.ts 双格式，双向差集） */
 function gateTwo(pkg, subentries, coreDir = CORE_DIR) {
-  console.log('[门②] 子入口导出面 src↔dist 符号比对（.d.cts + .d.ts 双格式，双向差集）')
+  console.log('[门②] 子入口导出清单 src↔dist 符号比对（.d.cts + .d.ts 双格式，双向差集）')
   if (subentries.length === 0) {
     console.log('  ⚠ exports 无子入口条目——门②空转（新增子入口自动纳入监测）')
     return
@@ -482,7 +482,7 @@ function main() {
   // ---------- 汇总 ----------
 
 if (failures === 0) {
-  console.log('✓ subagent-core dist 静态门通过（重叠 module 纯度 + 导出面零漂移）')
+  console.log('✓ subagent-core dist 静态门通过（重叠 module 纯度 + 导出清单零漂移）')
   process.exit(0)
 }
 console.error(`✗ subagent-core dist 静态门失败：${failures} 项 FAIL（上方 ✗ 行）`)

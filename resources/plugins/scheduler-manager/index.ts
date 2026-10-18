@@ -1,5 +1,5 @@
 /**
- * scheduler-manager —— taiji builtin plugin（任务管理面板；数据面零 scheduler 专属 API）。
+ * scheduler-manager —— taiji builtin plugin（任务管理面板；数据范围零 scheduler 专属 API）。
  *
  * 点位使用：
  * - headerAction：本会话启用任务数徽标（空任务无数字）+ 入口可见性（hidden）——
@@ -12,7 +12,7 @@
  *   分派，不经插件命令链）；本插件只经 views.update 持续推树，overlay 的 ViewHost
  *   消费（SCHEDULER_MODAL_VIEW_ID 分区）。内容树严格按 §3.1.1 字段操作对账表组装，表外零元素（G6）。
  * - action-bar：每任务三动作（暂停/恢复 toggle、立即执行 run、删除 rm）。
- * - 数据面：per-session 累计 entries（首次拉取全量 + sinceEntryId 增量 append），
+ * - 数据范围：per-session 累计 entries（首次拉取全量 + sinceEntryId 增量 append），
  *   折叠始终对累计全量调共享 replayFoldEntries（前缀依赖语义不被破坏）；游标失效
  *   （Entry not found）→ 丢弃累计全量重新拉取自愈（E11）；无 client → SESSION_NOT_ACTIVE
  *   → 按会话 status 分「恢复中/不可用」两态（E4）。树回退（消息撤回）经

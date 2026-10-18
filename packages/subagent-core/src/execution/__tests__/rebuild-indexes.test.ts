@@ -2,12 +2,12 @@
 //
 // [U4c / G1+G2+G4-S5] 缓存降级三锚点：
 //   - S5① 手动删 manifest/sessions-index → 重建照常无错误静默吞（boot 全量通道
-//     rebuildIndexes + 查询面惰性通道 mergedRecords 双通道各自可独立触发）；
+//     rebuildIndexes + 查询范围惰性通道 mergedRecords 双通道各自可独立触发）；
 //   - 失败降级：无 identity 的损坏/异构文件不在扫描集 → 不重建不抛（sessions-index
 //     「损坏静默回退全扫」同款先例）；幸存 manifest 不覆写（幂等补缺）；
-//   - G2 词汇双写：manifest 写面（markFinalized/markCancelled/markSettledOut）
+//   - G2 词汇双写：manifest 写侧（markFinalized/markCancelled/markSettledOut）
 //     旧 status 三态派生视图 + executionStatus/closedReason 并存。
-//     [collect 退役] markBatchFinalized 写面已删，批成员 manifest 改为存量读侧容忍用例。
+//     [collect 退役] markBatchFinalized 写侧已删，批成员 manifest 改为存量读侧容忍用例。
 
 import * as fs from "node:fs";
 import * as os from "node:os";
@@ -207,7 +207,7 @@ describe("[U4c/G1] rebuildIndexes 双通道 + S5 缓存可丢锚点", () => {
     store.dispose();
   });
 
-  it("惰性通道: 查询面（collectRecords）补建缺员 manifest；在途 record 不建（创建时不写契约保持）", () => {
+  it("惰性通道: 查询范围（collectRecords）补建缺员 manifest；在途 record 不建（创建时不写契约保持）", () => {
     const fileA = path.join(sessionsDir, "20260912T000003_lazy.jsonl");
     const fileLive = path.join(sessionsDir, "20260912T000004_live.jsonl");
     writeSessionJsonl(fileA, { id: "sa-lazy", task: "lazy task", startedAt: 1000, rootSessionId: "root-session" });
@@ -248,7 +248,7 @@ describe("[U4c/G1] rebuildIndexes 双通道 + S5 缓存可丢锚点", () => {
   });
 });
 
-describe("[U4c/G2] manifest 词汇双写——四写面旧三态派生视图 + executionStatus/closedReason 并存", () => {
+describe("[U4c/G2] manifest 词汇双写——四写侧旧三态派生视图 + executionStatus/closedReason 并存", () => {
   let rootDir: string;
   let sessionsDir: string;
   let recordsDir: string;
@@ -297,7 +297,7 @@ describe("[U4c/G2] manifest 词汇双写——四写面旧三态派生视图 + e
   });
 
   it("[collect 退役] 存量批成员 manifest（running 派生视图双写词汇）读侧容忍：重建派生视图可读", () => {
-    // 批写侧已删，构造磁盘遗留形态（原批写面 batchManifestRecord 产物词汇）：
+    // 批写侧已删，构造磁盘遗留形态（原批写侧 batchManifestRecord 产物词汇）：
     // legacy status=running + executionStatus=running + closedReason 缺省 + 无
     // 子 session 文件（manifest 源兜底派生视图路径）。
     fs.writeFileSync(

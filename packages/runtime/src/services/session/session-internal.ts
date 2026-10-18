@@ -15,7 +15,7 @@
  *
  * S3 写点归位（设计 D2②）：initializeManagedSession 从 ILifecycleSessionOps 移除
  * （迁入 SessionLifecycle 内部 registerSession，不再经 svc 回调）；sessions Map
- * 所有权迁 SessionLifecycle，本文件新增 ISessionRegistry（只读查询面，供 Facade
+ * 所有权迁 SessionLifecycle，本文件新增 ISessionRegistry（只读查询范围，供 Facade
  * 残余域读点改道）与 ISessionRegisterDeps（registerSession 的装配依赖窄注入）。
  *
  * 打断模块级循环：子模块 `import type { I*SessionOps } from './session-internal.js'`，
@@ -41,7 +41,7 @@ import type { PresetResolution } from '../preset-service.js'
  * 所有权迁 lifecycle 落入共享契约）。binding 扩展字段中 launchPresetId / projectId /
  * projectBindingPersisted 已收编进 IManagedSessionView（照 handedOffTo 先例）；
  * 余下 launchPresetFallbackTo / spawnSource / parentAgentSessionId 仍由 hydrateBindingMeta
- * 动态 patch、类型面经 as 转换读写（lifecycle fork / Facade toSummary 的既有模式），
+ * 动态 patch、类型范围经 as 转换读写（lifecycle fork / Facade toSummary 的既有模式），
  * 不入本形状。
  */
 export interface IManagedSessionRecord extends IManagedSessionView {
@@ -88,7 +88,7 @@ export interface ManagedSession extends IManagedSessionRecord {
 }
 
 /**
- * sessions Map 只读查询面（设计 D2②：Map 所有权迁 SessionLifecycle 后，Facade 残余域
+ * sessions Map 只读查询范围（设计 D2②：Map 所有权迁 SessionLifecycle 后，Facade 残余域
  * ~30 处读点的统一通道）。**Map 结构只读**——无 set/delete/clear（写点 3 处全在
  * lifecycle 所有者）；元素视图沿用现状可变语义：调用方拿到记录引用可直接读写字段
  * （ADR-0049 per-session Map 分区范式的既有约定），不包不可变壳。

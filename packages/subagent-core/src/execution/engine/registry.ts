@@ -162,7 +162,7 @@ export class EngineNotFoundError extends Error {
  * per-window 引擎不进 singletons——窗口实例由窗口对象持有（window-instances 表 +
  * routing/chat-rounds 的窗口状态），getEngine 对其返回**同步只读代理**（见
  * readOnlyEngineProxy）。readOnlyProxies 是代理的实现缓存（代理无进程无连接，纯
- * manifest 快照读——缓存的是快照读取面，不是活实例；descriptor 覆盖重注册时清掉）。
+ * manifest 快照读——缓存的是快照读侧，不是活实例；descriptor 覆盖重注册时清掉）。
  */
 const ENGINE_REGISTRY_SLOT_KEY = Symbol.for(GLOBAL_SLOT_KEYS.engineRegistry);
 
@@ -474,7 +474,7 @@ export function disposeEngines(): void {
  *     chat 轮次的窗口状态，取用走窗口实例解析单点），本函数返回同步只读代理
  *     （readOnlyEngineProxy：同步成员直答 manifest 快照、连接级成员 fail-fast——
  *     防漏改调用点静默 spawn 无人收割的薄壳 = G1 静默回归）。代理按 id 缓存
- *     （纯快照读面，无进程资源；descriptor 覆盖重注册时失效重建）。
+ *     （纯快照读侧，无进程资源；descriptor 覆盖重注册时失效重建）。
  */
 export function getEngine(id: string): EnginePort {
   const slot = getRegistrySlot();

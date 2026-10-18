@@ -715,7 +715,7 @@ describe("场景 15 — 同进程双 resume：恰一次生效，第二次明确�
   });
 });
 
-// ── 场景 9：跨进程双 resume（脚本层——锁互斥行为面）────────────
+// ── 场景 9：跨进程双 resume（脚本层——锁互斥行为范围）────────────
 
 describe("场景 9 — 跨进程双 resume：锁被占 → 明确拒绝（恰一成功）", () => {
   it("锁目录预置在场（另一进程持有）：ELOCKED 拒绝，文案指明另一进程 + 恢复指引", async () => {
@@ -978,7 +978,7 @@ describe("resumeRun — 段 6 接管失败补偿（僵尸 run 防线）", () => 
 // ════════════════════════════════════════════════════════════════════════════
 
 describe("resume 生效模型三档回落（决策七，与预算双轴同构）", () => {
-  /** resume 后取最近一条 run-resumed 帧（生效值落盘断言面）。 */
+  /** resume 后取最近一条 run-resumed 帧（生效值落盘断言范围）。 */
   async function lastResumedEvent(runId: string): Promise<Extract<WorkflowRunEvent, { type: "run-resumed" }>> {
     const events = await scanEvents(runId);
     const resumed = events.filter((e): e is Extract<WorkflowRunEvent, { type: "run-resumed" }> => e.type === "run-resumed");

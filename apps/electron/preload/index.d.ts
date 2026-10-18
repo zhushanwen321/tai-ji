@@ -34,7 +34,7 @@ export type {
 /**
  * servable 预检通道的 electronAPI 方法面（IPC 通道名 `localFile:servable`，
  * chat-html-support §6.9 D9）：内联预览容器 HtmlPreviewInline（经 deps `probeArtifact?`）
- * 挂载前预检（v16 唯一渲染面，ADR-0119）。准入前缀 = 会话产物子树
+ * 挂载前预检（v16 唯一渲染范围，ADR-0119）。准入前缀 = 会话产物子树
  * `<dataDir>/artifacts/**`（读/预检通道收窄面，非协议 handler 全量白名单）。
  */
 export interface LocalFileServableChannel {

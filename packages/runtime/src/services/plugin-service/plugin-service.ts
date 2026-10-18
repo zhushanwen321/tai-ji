@@ -612,7 +612,7 @@ export class PluginService implements IPluginService {
 
   /**
    * 拒绝插件本次权限申请（不回收已授权限）。对齐 WS 命令 plugin.denyPermissions。
-   * 与 revokePermissions（撤销全部已授权限并持久化，基线协议面保留）的语义分界：
+   * 与 revokePermissions（撤销全部已授权限并持久化，基线协议范围保留）的语义分界：
    * deny 只 resolve 挂起中的审批等待（无 pending 幂等 no-op），已授权限与持久化不动。
    */
   async denyPermissions(pluginId: string): Promise<void> {
@@ -733,7 +733,7 @@ export class PluginService implements IPluginService {
 
   /**
    * pi 侧事件向插件钩子的投递入口（pi1-disposition-chat-flow D7② 挂点迁移 + 断链修复）：
-   * statusSetUpdate 等内部事件经本方法以泛型 'onPiEvent' 键派发——与 hook-api 注册面的
+   * statusSetUpdate 等内部事件经本方法以泛型 'onPiEvent' 键派发——与 hook-api 注册点的
    * 泛型键形状对齐（hook-api 以 'onPiEvent' 为键写入 hookRegistry），修复原
    * handleBridgeEvent「分发键 = 原始事件名」的注册/分发键错位断链。
    *
@@ -785,7 +785,7 @@ export class PluginService implements IPluginService {
     this.sessionDataStore.flushSession(sessionId)
   }
 
-  // [B5 触发面收窄 2026-09-15] 原 clearSessionData facade 已删：全仓零调用点（真删除链
+  // [B5 触发点收窄 2026-09-15] 原 clearSessionData facade 已删：全仓零调用点（真删除链
   // 经模块级 clearRemovedSessionData 分发，session-lifecycle.ts delete 直调；生存路径
   // exit/forceQuit/restore 清场不清插件数据）。IPluginService 同名条目同批删除。
 

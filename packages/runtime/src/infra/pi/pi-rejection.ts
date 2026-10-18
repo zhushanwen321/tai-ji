@@ -20,7 +20,7 @@ export const PI_REJECTION_COMPACTING = 'Cannot submit a prompt while compaction 
 /** pi prompt() busy 类确定性拒绝原文（语义登记 PS-23，verifiedWith 以 pi-semantics.json 为准；探针锁检查——isStreaming 无 streamingBehavior 拒绝）。 */
 export const PI_REJECTION_PROCESSING = 'Agent is already processing'
 
-/** pi busy 类拒绝分型（D6；非 busy 类返回 null → 走普通错误面）。 */
+/** pi busy 类拒绝分型（D6；非 busy 类返回 null → 走普通错误范围）。 */
 export type PromptRejectionReason = 'compacting' | 'processing'
 
 /**

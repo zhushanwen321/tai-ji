@@ -11,7 +11,7 @@
 //     软超时已退役——谱系 #12，跨轮保留 × startedAt 一次性不刷新的组合下超时会
 //     误判在持声明陈旧）。
 // 写/删动作均经 RecordStore 意图原语收敛（G1：本模块不直接面向调用方，write/remove
-// 是 store 内部写面的实现件）。
+// 是 store 内部写侧的实现件）。
 
 import * as fs from "node:fs";
 

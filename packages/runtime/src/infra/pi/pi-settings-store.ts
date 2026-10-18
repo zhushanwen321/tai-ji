@@ -58,7 +58,7 @@
  *
  * 🔒 三层架构：本模块属 infra（直接碰文件系统），services 经 port 访问，不直接 import 本模块
  * （例外：错误类/损坏判定的 instanceof 传导可直连——config-service 捕获 SettingsCorruptedError
- * 同构于既有先例 isModelsStoreCorrupted，属协议面传导而非读写绕过 port）。
+ * 同构于既有先例 isModelsStoreCorrupted，属协议范围传导而非读写绕过 port）。
  */
 
 import { readdirSync, readFileSync } from 'node:fs'

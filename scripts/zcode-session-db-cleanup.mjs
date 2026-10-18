@@ -10,7 +10,7 @@
 // 实现纪律（设计 §3.2 D7 四不变量）：
 // - 白名单只来自结构化 entry 解析（JSON.parse 逐行），禁止文本/正则提取；
 // - I2 时间戳跨源交叉验证（唯一常量 I2_TOLERANCE_MS）；
-// - 删除面：宿主库 PRAGMA foreign_keys=ON + FK 依赖序（session 行删除，级联清理引用表），
+// - 删除范围：宿主库 PRAGMA foreign_keys=ON + FK 依赖序（session 行删除，级联清理引用表），
 //   input_history 无 FK 显式删；索引库零 FK → 四冲突源只读预检（命中两侧同时剔除）；
 // - 跨库顺序恒「先宿主后索引」，索引侧失败落残留清单 w5-residue-<ts>.json，
 //   --replay-residue 补删（含 R9-4 防篡改前置断言）。
@@ -119,7 +119,7 @@ function tableExists(db, name) {
 }
 
 /**
- * 索引库四冲突源只读预检（counts.sql W5 ② 同义；索引库零 FK，删除面不含这四源）。
+ * 索引库四冲突源只读预检（counts.sql W5 ② 同义；索引库零 FK，删除范围不含这四源）。
  * 返回命中的 id 集合——命中 id 两侧同时剔除（宿主行也不删）。
  */
 export function indexPrecheckHits(indexDb, ids) {
@@ -213,7 +213,7 @@ function partitionWhitelistByShape(whitelistRows, anomalies) {
   return { shaped, shapeInvalid };
 }
 
-/** 宿主库删除面行查询（直接集行 / 派生集行 / 直接集的非 subagent_child 子行）。 */
+/** 宿主库删除范围行查询（直接集行 / 派生集行 / 直接集的非 subagent_child 子行）。 */
 function queryHostDeletionRows(hostDbPath, shaped) {
   const host = new DatabaseSync(hostDbPath, { readOnly: true });
   let hostRows;
@@ -483,7 +483,7 @@ export function executeDeletion({
   };
 }
 
-/** 索引侧单 id 删除（删除面 = tasks + automation_runs.session_id + tasks.forked_from_task_id）。 */
+/** 索引侧单 id 删除（删除范围 = tasks + automation_runs.session_id + tasks.forked_from_task_id）。 */
 function deleteIndexRows(indexDbPath, id) {
   const idx = new DatabaseSync(indexDbPath);
   try {
@@ -713,7 +713,7 @@ function formatDeletionReport(analysis, result) {
 
 /**
  * 主路径：分析 → 确认 → 删除。分析硬校验失败（CleanupAbortError）与确认拒绝
- * 均不触达删除面。
+ * 均不触达删除范围。
  */
 async function runDeletionFlow({ args, paths, isTTY, stdin, outDir, now }) {
   const mode = resolveExecutionMode({ confirmCount: args.confirmCount, isTTY });

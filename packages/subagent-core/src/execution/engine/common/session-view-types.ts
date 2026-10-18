@@ -101,7 +101,7 @@ function isPlainRecord(v: unknown): v is Record<string, unknown> {
  * engineHandle 唯一检查（D1 双检查收敛点）。
  * 语义取收敛前 extractor 侧的严格版（两份 guard 此前已在「sessionRef 含非 string 值」
  * 维度分叉：extractor 整体拒绝、history 侧逐键过滤——收敛选整体拒绝，坏形状不进
- * record，读侧按缺 handle 降级 outcome-only，两侧行为面等价落点都是降级）：
+ * record，读侧按缺 handle 降级 outcome-only，两侧行为范围等价落点都是降级）：
  * - poolKey 缺失 / 非 string / 空串 → undefined（定位符不完整，读侧降③级）
  * - sessionRef 非 plain object 或含非 string 值 → undefined（整体拒绝）
  * - eventsPath 可选 string（空串视为缺省）

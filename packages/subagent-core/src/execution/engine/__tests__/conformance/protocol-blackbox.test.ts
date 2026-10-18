@@ -5,7 +5,7 @@
 //     validateModel/dispose/ping）× fake 引擎 CLI 往返；
 //   - 6 反向通道（host/log、host/askUser、host/streamDelta、
 //     host/handleReady、host/childSpawned、host/childStateChanged——[池抽象降级]
-//     原 host/poolResolved 通道已随 poolKey 协议面退役删除；[permission 退役]
+//     原 host/poolResolved 通道已随 poolKey 协议范围退役删除；[permission 退役]
 //     host/permission 已删——两引擎 permissionMode=native 零 emit）
 //     的 core 侧到达断言；
 //   - 错误帧：run 失败帧 / 未知方法帧（码原样透传）/ initialize 版本越界
@@ -164,7 +164,7 @@ describe("协议黑盒：9 正向方法 × fake 引擎回放", () => {
       )) as { entries: unknown[] };
       expect(Array.isArray(view.entries)).toBe(true);
 
-      // ping 协议方法往返（诊断面：不 throw 即通——客户端便捷方法已删，走裸 request）
+      // ping 协议方法往返（诊断范围：不 throw 即通——客户端便捷方法已删，走裸 request）
       await h.client.request("ping", {}, { timeoutMs: 5_000 });
     } finally {
       await h.client.dispose();
@@ -218,8 +218,8 @@ describe("协议黑盒：6 反向通道 core 侧到达", () => {
       await h.client.ensureConnected();
       await h.client.request("run", fixture.run.params);
 
-      // host/log：注入观测面已随 ReverseRouterDeps.log 注入点删除（恒走缺省
-      // logger facade），到达面由 engine-client.test 的 host/log 数据面用例覆盖。
+      // host/log：注入观测范围已随 ReverseRouterDeps.log 注入点删除（恒走缺省
+      // logger facade），到达面由 engine-client.test 的 host/log 数据范围用例覆盖。
       // host/streamDelta
       expect(h.streamDeltas).toEqual(["Hello", " world"]);
       // host/handleReady

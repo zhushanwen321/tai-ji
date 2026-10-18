@@ -461,7 +461,7 @@ describe("WorktreeManager", () => {
   // ============================================================
   // gitRunAsync 包装与 per-repo mutex（Phase 1 异步化新增）
   // ============================================================
-  describe("gitRunAsync（经 collectPatch/cleanup 公共面触达）", () => {
+  describe("gitRunAsync（经 collectPatch/cleanup 公共部分触达）", () => {
     it("非零退出：message 同构 + exitCode/stderr 属性（P-errshape：stderr 在 callback 第三参）", async () => {
       setupExecFile((args) => {
         if (args[0] === "diff") {

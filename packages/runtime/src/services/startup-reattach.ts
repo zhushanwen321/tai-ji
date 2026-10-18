@@ -138,7 +138,7 @@ export interface StartupReattachDeps {
    *
    * **广播形态选择（进入单发 + 缓解退出单发，非延迟中每拍重发）**：两种形态对「renderer
    * 重连错过退出帧」的陈旧态残留窗口等价（退出帧都是单发），每拍重发只增冗余帧；且 D3
-   * 高水位延迟只存在于启动后短窗口，协议面无只读拉取 RPC（「持续态必须可拉取」教训按状态
+   * 高水位延迟只存在于启动后短窗口，协议范围无只读拉取 RPC（「持续态必须可拉取」教训按状态
    * 生命周期区分适用——延迟是瞬态不是持续态）。残余窗口（进入后断连、退出也错过后重连）
    * 低概率，接受并已登记在 shared ReattachDeferredPayload 注释。
    */
@@ -153,7 +153,7 @@ export interface StartupReattachOptions {
   now?: () => number
   /** journal writer（reattach-skipped 事件）；缺省 getCrashJournal() 单例。 */
   journal?: CrashJournalWriter
-  /** checkpoint 读面与删除路径；缺省 getRuntimeCheckpointStore() 单例。 */
+  /** checkpoint 读侧与删除路径；缺省 getRuntimeCheckpointStore() 单例。 */
   checkpoint?: RuntimeCheckpointStore
   /** mem-pressure 即时查询注入（测试替身）；缺省 infra 真实现。 */
   queryMemPressure?: () => Promise<MemPressureSample>
@@ -175,7 +175,7 @@ export interface StartupReattachOptions {
   delay?: (ms: number) => Promise<void>
 }
 
-/** 编排结果（组合根/测试断言面）。 */
+/** 编排结果（组合根/测试断言范围）。 */
 export interface ReattachReport {
   /** 是否读到 checkpoint（false = clean/corrupt，编排零动作）。 */
   checkpointFound: boolean

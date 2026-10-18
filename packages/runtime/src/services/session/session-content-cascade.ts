@@ -14,7 +14,7 @@
  *   3. 删 session-reader 导出物（<agentDir>/tmp/session-view-<sid>.md，A21）。
  *   4. 删后台任务 registry 目录（<agentDir>/base-tool-enhance/<sid>/，A23）——
  *      先 await 收殓（幂等双跑：removeSessionEntry 已 fire-and-forget 挂过一次，
- *      此处显式 await 收尾在途收殓，防删目录与终态写入竞态）再 rmSync。触发面
+ *      此处显式 await 收尾在途收殓，防删目录与终态写入竞态）再 rmSync。触发点
  *      天然收窄到真删除路径（restore 清场等 session 存活路径不经本模块，E8）。
  *   5. trash 主文件（rejection 原样上抛——G4：trash 失败必须让删除整体报失败，
  *      此时下挂已清、本体还在，重试删除即达终态）。
@@ -56,7 +56,7 @@ import { isEnoent } from '../../utils/errors.js'
 type SubagentRecordEntry = SubagentRecordRegisteredEntryData | SubagentRecordSettledEntryData
 
 /**
- * 子代理会话文件族 sidecar 扩展名名单——本名单是这些 sidecar 的唯一删除面
+ * 子代理会话文件族 sidecar 扩展名名单——本名单是这些 sidecar 的唯一删除点
  * （删主会话级联；外部删除主文件场景接受残留，2026-10-12 裁决）。
  *
  * 现役/退场锚定（防名单与 subagent-core 写点漂移）：
@@ -113,8 +113,8 @@ export type SessionContentCascadeInput = {
   skipIfMainFileMissing: boolean
 }
 
-/** 依赖注入面（全部可注入——测试 zero mock-module、零真实数据目录）。 */
-export interface SessionContentCascadeDeps { // oe-exempt:20261012:framework:级联依赖注入面（lifecycle 组装注入 + 测试 fake，DI 端口先立单实现常态）
+/** 依赖注入范围（全部可注入——测试 zero mock-module、零真实数据目录）。 */
+export interface SessionContentCascadeDeps { // oe-exempt:20261012:framework:级联依赖注入范围（lifecycle 组装注入 + 测试 fake，DI 端口先立单实现常态）
   /** 主文件移入废纸篓（现行 sessionStore.trash；rejection 原样上抛，G4 语义）。 */
   trash: (filePath: string) => Promise<void>
   /** 主文件 sidecars 清理（session-lifecycle.purgeSessionSidecars 回调注入）。 */
@@ -209,7 +209,7 @@ export async function cascadeDeleteSessionContent(
   // 7. 主文件 sidecars（scanned 分支主文件缺失时也照清孤儿 sidecar——原语义保持）
   deps.purgeMainSidecars(sessionFilePath)
 
-  // 汇总出声（失败必出声；成功+有删除也留一行观测面）
+  // 汇总出声（失败必出声；成功+有删除也留一行观测范围）
   if (failures.length > 0) {
     deps.warn(`[session-content-cascade] cascade finished with ${failures.length} failure(s) for session ${sessionId} ` +
       `(familiesDeleted=${result.subagentFamiliesDeleted} familiesProtected=${result.subagentFamiliesProtected}); ` +

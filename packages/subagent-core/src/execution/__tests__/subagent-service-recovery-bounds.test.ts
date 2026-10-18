@@ -201,7 +201,7 @@ describe("record-access 越界检查（S11）", () => {
     fs.rmSync(agentDir, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 });
   });
 
-  // [S11] record-access 越界检查（review batch 回填）：disposed 后读面返回 undefined 不抛。
+  // [S11] record-access 越界检查（review batch 回填）：disposed 后读侧返回 undefined 不抛。
   it("record-access 越界检查：disposed 后 lookupRecordAnyState → undefined（不抛）", async () => {
     service.dispose();
     const record = service.queries.lookupRecordAnyState("any-id");

@@ -54,7 +54,7 @@ export function getEnginesFilePath(agentDir: string): string {
  * 收敛必须留可诊断信号——warn 携带失败原因与后果（engines.json 未更新、GUI 仍在读
  * 旧清单），静默吞错会把「引擎清单停旧值」伪装成「无变化」。
  */
-/** 发现注入面（测试密闭化）：透传 discoverAndRegisterEngines 的隔离选项——
+/** 发现注入点（测试密闭化）：透传 discoverAndRegisterEngines 的隔离选项——
  * env 覆盖 L1 宿主发现根读取，nodeModuleRoots 覆盖 L2 宿主 node_modules 解析域。
  * 缺省 = 生产语义（process.env + 宿主解析域）。测试必传密闭值（env:{} + 
  * nodeModuleRoots:[]），防宿主环境（如打包态 TAIJI_AGENT_ENGINE_ROOTS）污染注册表

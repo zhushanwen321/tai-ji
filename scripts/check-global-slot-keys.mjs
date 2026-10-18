@@ -27,7 +27,7 @@ const ROOT_FLAG = ARGS.indexOf("--root");
 const BASE = resolve(process.cwd(), ROOT_FLAG >= 0 ? ARGS[ROOT_FLAG + 1] : ".");
 
 /**
- * 扫描面 = subagent 体系三包（§2.6 的范围：core + engine SDK + 壳）。
+ * 扫描范围 = subagent 体系三包（§2.6 的范围：core + engine SDK + 壳）。
  * 其他 extension（如 goal/plan 共享的 `@zhushanwen/pi-goal.goalInit`）的槽键前缀与
  * 归属包一致，不属本约束范围。
  */

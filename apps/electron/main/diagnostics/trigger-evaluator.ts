@@ -155,7 +155,7 @@ export interface TriggerEvaluationResult {
   rows: TriggerConditionRow[]
   /** status=tripped 的条件 id（巡检 WARN 与 trigger-review 事件的驱动源）。 */
   trippedIds: number[]
-  /** 两本登记清单各自解析成功的事件数（no-data 判定的数据面证据）。 */
+  /** 两本登记清单各自解析成功的事件数（no-data 判定的数据范围证据）。 */
   parsedEventCount: { main: number; runtime: number }
   /** 两本登记清单各自的坏行数（JSON 解析失败/非对象/缺 ts——非静默，见文件头【坏行】）。 */
   skippedLineCount: { main: number; runtime: number }

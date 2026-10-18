@@ -135,7 +135,7 @@ function makeRec(over: Partial<SubagentRecord> = {}): SubagentRecord {
 }
 
 function makeService(over: Record<string, unknown> = {}): SubagentService {
-  // 聚合面形态对齐 subagent-service.ts D4：queries（读模型）与 chatActions（对话
+  // 聚合范围形态对齐 subagent-service.ts D4：queries（读模型）与 chatActions（对话
   // action 面）分组挂载，mock 按同构 key 装配（over 仍传平铺 key，最小化快照用例改动）。
   const m = {
     execute: vi.fn(),
@@ -156,7 +156,7 @@ function makeService(over: Record<string, unknown> = {}): SubagentService {
     execute: m.execute,
     cancel: m.cancel,
     // [modeless 波1] messageHandler 引擎轴资格判据经平铺访问器（真实 service 为
-    // 平铺方法，非 queries/chatActions 聚合面成员），stub 须同构挂载。
+    // 平铺方法，非 queries/chatActions 聚合范围成员），stub 须同构挂载。
     engineSupportsConversation: m.engineSupportsConversation,
     queries: {
       findRecord: m.findRecord,

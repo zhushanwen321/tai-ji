@@ -81,7 +81,7 @@ function poolDir(): string {
   return join(dataDir, 'engines', 'zcode', POOL_KEY)
 }
 
-/** 建出与 zcode 0.16.5 同形的三表最小 schema（zcode reader ①级的真实读取面）。
+/** 建出与 zcode 0.16.5 同形的三表最小 schema（zcode reader ①级的真实读侧）。
  * dbFile 缺省落池目录；宿主 db（存量兼容）用例显式传入 <home>/.zcode/cli/db/db.sqlite，
  * 隔离库（现役）用例显式传入 <dataDir>/engines/zcode/session-db/db.sqlite。 */
 async function createPoolDb(sessionId: string, dbFile = join(poolDir(), DB_RELATIVE)): Promise<void> {
@@ -231,7 +231,7 @@ describe('readEngineSubagentHistory（zcode 三级降级）', () => {
       dataDir,
     )
 
-    // db 存在但 runtime 不直读（①级已外移引擎协议面）→ ③级
+    // db 存在但 runtime 不直读（①级已外移引擎协议范围）→ ③级
     expect(messages).toHaveLength(2)
     expect(messages[1]?.content).toBe('LGTM outcome text')
     expect(JSON.stringify(messages)).not.toContain('thinking hard')

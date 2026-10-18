@@ -23,7 +23,7 @@
  * 调用方高频推送，且避免无谓刷新 mtime 使 extension 侧 mtime+size 缓存失效（多余失效会白读盘）。
  *
  * 多窗口同 app = last-write-wins（最后切换语言的窗口权威）：写路径单点、无跨窗广播，
- * 本文件只有 runtime 写（renderer 是客户端），不构成跨进程共享写面（不进 ADR 跨进程锁表）。
+ * 本文件只有 runtime 写（renderer 是客户端），不构成跨进程共享写侧（不进 ADR 跨进程锁表）。
  */
 import { existsSync, mkdirSync, readFileSync } from 'node:fs'
 import { join } from 'node:path'

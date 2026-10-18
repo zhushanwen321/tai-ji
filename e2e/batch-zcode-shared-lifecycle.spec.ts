@@ -2,7 +2,7 @@
  * BATCH-ZSL zcode shared-service 生命周期（pi-workflow-run-resource-model D3 验收
  * A4/A7，场景 V4/V7）。
  *
- * 单场景两断言面（一条 run 承载）：
+ * 单场景两断言范围（一条 run 承载）：
  *  - A4/V4 zcode 懒加载单例不变：自定义模板两条 agent()（engine:"zcode"，不同名，
  *    各跑一段 bash sleep）顺序执行——两任务在途期的 zcode 引擎进程（wrapper 落盘
  *    `<engineDataDir>/engines/zcode/` 特征）pid 恒同（双任务同 pid + 任务间不退）。
@@ -238,7 +238,7 @@ test('ZSL (batch real): zcode 双任务同 pid（V4 懒加载单例回归）+ ta
     expect(done, `派发 turn 未在 ${MAIN_TURN_TIMEOUT_MS}ms 内完成（主 LLM 未调 workflow tool？）`).toBe(true)
     sub.events.length = 0
 
-    // ── V4 断言面①：r1 在途，zcode 引擎进程出现（懒加载——首个任务触发 spawn） ──
+    // ── V4 断言范围①：r1 在途，zcode 引擎进程出现（懒加载——首个任务触发 spawn） ──
     const up1 = await waitUntil(() => zcodeProcessSnapshot().pids.size > zcBase.pids.size, PROC_TIMEOUT_MS)
     if (!up1) {
       writeDiag('batch-zsl-proc-not-seen.json', {
@@ -254,7 +254,7 @@ test('ZSL (batch real): zcode 双任务同 pid（V4 懒加载单例回归）+ ta
     const zcPid = pidsR1[0]!
     await page.screenshot({ path: testInfo.outputPath('zsl-r1-inflight.png'), fullPage: true })
 
-    // ── V4 断言面②：r2 在途（sleep 25 出现），pid 恒同 ──
+    // ── V4 断言范围②：r2 在途（sleep 25 出现），pid 恒同 ──
     const r2InFlight = await waitUntil(
       () => {
         const out = execSync('ps -axo command=', { encoding: 'utf8', timeout: 10_000 })
@@ -297,7 +297,7 @@ test('ZSL (batch real): zcode 双任务同 pid（V4 懒加载单例回归）+ ta
     }
     expect(settled, 'run 应 completed 收尾（两条 zcode 任务均成功）').toBe(true)
 
-    // ── V7 断言面：app.close() 后 zcode 引擎进程随宿主退出 ──
+    // ── V7 断言范围：app.close() 后 zcode 引擎进程随宿主退出 ──
     await app.close()
     const exited = await waitUntil(() => !zcodeProcessSnapshot().pids.has(zcPid), EXIT_GRACE_MS, 1_000)
     if (!exited) {

@@ -8,7 +8,7 @@
  * ≤30s 帧到达断言），不在本用例。
  *
  * 断连的实现载体（u3a 裁决，deviations 登记）：spec 自备 WS 客户端扮演断连者——它与
- * renderer 走完全相同的协议面（auth 握手 + session.subscribe + stateSnapshot 回放，
+ * renderer 走完全相同的协议范围（auth 握手 + session.subscribe + stateSnapshot 回放，
  * packages/core/src/coordination/subscription-state.ts resubscribeAll 同一 reply 消费
  * 通路）。不强制 renderer 侧断网（CDP emulateNetworkConditions 在 Electron e2e 未经
  * 验证，本单元只编写不执行，不押注未验证工具行为）；renderer 全程在线，其 GUI 收敛

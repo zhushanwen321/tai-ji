@@ -112,7 +112,7 @@ describe('reattach spawn 形态（自建附着编排；restore 离线路径不�
 
 describe('关线原语（btw.remove；级联归 M4-a）', () => {
   it('closeLine：杀进程 + 注册表移除 + 文件删除限定 btw 根内', async () => {
-    // 线文件写在 btw 根内（规范布局 D2：btw/<enc>/<mainSid>/，级联删除面）
+    // 线文件写在 btw 根内（规范布局 D2：btw/<enc>/<mainSid>/，级联删除范围）
     const inside = writeSessionFile(
       getBtwThreadDir(CWD, MAIN_SID), 'inside.jsonl',
       { type: 'session', version: 3, id: 'sid-inside', timestamp: 't', cwd: CWD }, [],

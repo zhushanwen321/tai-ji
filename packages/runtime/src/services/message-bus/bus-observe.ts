@@ -1,5 +1,5 @@
 /**
- * MessageBus 观测面（pull-push-architecture W0 / D7「发布/订阅侧结构化日志」）。
+ * MessageBus 观测范围（pull-push-architecture W0 / D7「发布/订阅侧结构化日志」）。
  *
  * 背景（R11/6c3）：个别 session 的 planState 广播消息全程零发布（真机多日观测），
  * 发布/订阅侧零日志——「消息没到」无法与「消息没发 / 没人订 / 连接不在线」区分，

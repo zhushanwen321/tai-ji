@@ -83,7 +83,7 @@ describe('forkViaCliPi：一次性 fork bootstrap 机制', () => {
     ).rejects.toMatchObject({ code: 'fork_failed', message: expect.stringContaining('spawn failed') })
   })
 
-  it('超时 → BtwError fork_failed timed out（控制面秒级有界，规则 #19）', async () => {
+  it('超时 → BtwError fork_failed timed out（控制范围秒级有界，规则 #19）', async () => {
     const script = writeFakePi('hang.js', sleepCode(30000))
 
     const t0 = Date.now()

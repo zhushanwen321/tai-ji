@@ -72,7 +72,7 @@ export const DEFAULT_OUTBOUND_FRAME_GUARD_OPTIONS: OutboundFrameGuardOptions = {
 // | message.bashResult                 | payload.output                          | string   | services/session/message-dispatcher.ts:1042 / :1115（穷举新发现——bash 终态帧的 output 全文；上游 pi bash RPC 自截是既有防线，本条目是其失效时的纵深） |
 // | terminal.data                      | payload.data                            | string   | services/terminal/terminal-service.ts:113（穷举新发现——PTY 输出块，用户 cat 大文件可达 MB 级；transient 类，miss 丢弃无 gap 风险） |
 //
-// 【判定不登记（控制面 / 有界载荷，逐类留痕防复穷举）】
+// 【判定不登记（控制范围 / 有界载荷，逐类留痕防复穷举）】
 //
 // - message.error / message.status / message.stream_error / send.rejected /
 //   message.complete / message.message_start / message.customStart / message.tool_call_update：

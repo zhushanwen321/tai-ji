@@ -9,7 +9,7 @@ pi1-disposition-chat-flow 设计 D5「pi 词汇合法持有点清单 + 泄漏并
   扫描 packages/runtime/src/services/ 与 packages/runtime/src/transport/ 的 .ts 源码，
   剥离注释后命中标识符 Pi[A-Z]* 即违规——pi 协议类型只允许出现在 infra/pi 内部，
   pi 原始事件必须经 infra/pi 翻译为内部类型后才进 services。
-  扫描面 = 本次提交（staged）触及的文件 ∩ 规则目录。提交者对自己提交的面负责；
+  扫描范围 = 本次提交（staged）触及的文件 ∩ 规则目录。提交者对自己提交的面负责；
   未暂存的在途改动归属其作者，其作者提交时本检查同样拦截——工作区他人的
   中间态不阻塞无关提交（与 oe-assert 只扫 staged 新增行、前端 ESLint 只扫
   staged 文件同构）。非 git 环境回退全仓扫描。

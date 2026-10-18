@@ -36,7 +36,7 @@ export function registerLogRetentionDebugHandler(): void {
       return result
     })
     mainLogger.debug('[log-retention-ipc] registered', { channel: DEBUG_RUN_LOG_RETENTION })
-  // eslint-disable-next-line taste/no-silent-catch -- 注册失败（极端：channel 被占）不能炸 main 启动；调试口缺席只影响 dev 触发面，每日定时器清理不受影响
+  // eslint-disable-next-line taste/no-silent-catch -- 注册失败（极端：channel 被占）不能炸 main 启动；调试口缺席只影响 dev 触发范围，每日定时器清理不受影响
   } catch {
     // no-op
   }

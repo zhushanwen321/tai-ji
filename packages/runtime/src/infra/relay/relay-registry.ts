@@ -43,7 +43,7 @@ import { getRelayChildrenDir, getRelayPidFilePath } from './relay-paths.js'
  * 分级——tee 镜像最近写入超过 {@link ORPHAN_IDLE_REAP_MS}（静默，纯资源占用）立即
  * 收割（现状行为）；仍在产出的孤儿登记 pending 延迟收割（重启风暴期「sweep 杀 →
  * crash-recovery 重派 → 再 sweep 杀」的振荡止血；ADR-0047：静默 ≠ 卡死，活跃产出
- * 不得判死），延迟有硬上限防无限活。量级为任务级（分钟），与控制面秒级超时不可
+ * 不得判死），延迟有硬上限防无限活。量级为任务级（分钟），与控制范围秒级超时不可
  * 互相挪用（超时默认按对象粒度校准）。
  */
 /** 量级换算基准：1 秒 / 1 分钟的毫秒数（孤儿处置族的阈值定义与日志换算共用）。 */
@@ -94,7 +94,7 @@ interface RelayGoodbyeFrame {
 type InboundFrame = RelayHandshakeFrame | RelayDataFrame | RelayGoodbyeFrame
 
 // reject 帧理由词表已收编 SDK relay-frames（RELAY_REJECT_REASONS 单源）；re-export
-// 维持本文件既有导出面。E-1 代理对 reason='version' 以退出码 10 退出。
+// 维持本文件既有导出清单。E-1 代理对 reason='version' 以退出码 10 退出。
 export type { RelayRejectReason }
 
 interface RegisteredEntry {
@@ -507,7 +507,7 @@ export class RelayRegistry {
       })
     } catch (e) {
       // spawn 同步失败（异常 spawn 形态）表现为「子进程非零退出」——exit 帧 127 + 断连，
-      // extension 走既有失败路径（§7 错误表：代理层失败不设独立错误面）
+      // extension 走既有失败路径（§7 错误表：代理层失败不设独立错误范围）
       console.error(`[relay] spawn failed recordId=${frame.recordId}:`, e)
       writeFrame(conn, { kind: RELAY_FRAME_KINDS.exit, code: SPAWN_FAILURE_EXIT_CODE, signal: null })
       endConn(conn)

@@ -72,7 +72,7 @@ describe("classifyWorkflowRecordEntryData 表驱动（failure reason 全分支�
   });
 });
 
-describe("classifyWorkflowRecordEntryData ok 分支（v1 兼容读面）", () => {
+describe("classifyWorkflowRecordEntryData ok 分支（v1 兼容读侧）", () => {
   it("v1 且 snapshot truthy → ok，snapshot 引用透传（不复制不校验形状）", () => {
     const snapshot = { v: "wf-run-v2", runId: "wf-1" };
     const result = classifyWorkflowRecordEntryData({ v: 1, snapshot, updatedAt: "2026-09-24T00:00:00Z" });
@@ -154,7 +154,7 @@ describe("词表零差集检查（期望词表 ↔ 判别联合）", () => {
 });
 
 describe("常量钉住", () => {
-  it("customType 与 entry schema 版本字面量锁（W1 起版本 = 2——v1 为兼容读面）", () => {
+  it("customType 与 entry schema 版本字面量锁（W1 起版本 = 2——v1 为兼容读侧）", () => {
     expect(WORKFLOW_RECORD_CUSTOM_TYPE).toBe("workflow-record");
     expect(WORKFLOW_RECORD_ENTRY_VERSION).toBe(2);
   });

@@ -273,7 +273,7 @@ export function lastWorkflowRecordFor(file: string, runId: string): WorkflowReco
 // ── run 完成 → done 增量信号帧到达的双锚计时（S1b/S2 共用，G1 必达窗口断言） ──
 
 /**
- * 双锚计时结果（reload-closeout-reliability 设计 §4 A1 新断言的观测面）。
+ * 双锚计时结果（reload-closeout-reliability 设计 §4 A1 新断言的观测范围）。
  * - tDoneRecord：主 session JSONL 末条 workflow-record 落 done 的首见时刻——完成锚
  *   （权威 record 落盘 = 系统语义上的「run 完成」，W17 last-wins 终态）。
  * - tFrameSeen：spec WS events 首见 status=done 增量信号帧的时刻——到达锚
@@ -403,7 +403,7 @@ function pidsMatching(markers: readonly string[]): number[] {
     .sort((a, b) => a - b)
 }
 
-/** 引擎 CLI 进程 pid 集（D2b 稳定性断言面：reload 前后同一集合 = 单例未被 dispose 重建） */
+/** 引擎 CLI 进程 pid 集（D2b 稳定性断言范围：reload 前后同一集合 = 单例未被 dispose 重建） */
 export function engineCliPids(): number[] {
   return pidsMatching(['pi-subagent-cli.mjs'])
 }

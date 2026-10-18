@@ -8,7 +8,7 @@
  * - D3 广播组装：registry 变更 → checkForChanges → messageBus.publish(sessionId,
  *   backgroundTask:updated { sessionId, tasks })——单 payload 对象、sessionId 必带（规则 1/7）
  * - P6 双 session 分区：A/B 双 watched，A 变更只 publish A（payload 不含 B 的任务）；反向同
- * - D8③ 退订：removeSessionEntry 汇聚点（与 reaper 触发面 A 同挂点）unwatch——销毁后变更
+ * - D8③ 退订：removeSessionEntry 汇聚点（与 reaper 触发点 A 同挂点）unwatch——销毁后变更
  *   不再广播
  * - bus 未注入（nullable）→ 广播 no-op 不抛（晚期注入语义）
  *
@@ -282,9 +282,9 @@ describe('removeSessionEntry watched 退订（D8③）', () => {
   })
 })
 
-// ── D2 触发面②组合根接线（index.ts adapterFactory 第三参）────────
+// ── D2 触发点②组合根接线（index.ts adapterFactory 第三参）────────
 
-describe('事件钩子 → checkForChanges 接线（D2 触发面②）', () => {
+describe('事件钩子 → checkForChanges 接线（D2 触发点②）', () => {
   it('bash 工具结束事件 → 组合根闭包触发 checkForChanges → watched 变更广播', () => {
     vi.useFakeTimers()
     const { service, messageBus } = createSetup()

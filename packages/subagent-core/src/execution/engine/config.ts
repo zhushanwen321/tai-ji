@@ -12,7 +12,7 @@
 // defaultEngine），其
 // SubagentsGlobalConfig 类型不含
 // engines 键（sanitize 未知键忽略）。本模块只取 engines 段并逐条目校验——独立解析
-// 避免 execution/config.ts 类型面为发现器扩键（发现器消费 raw 形态，字段级容错在本
+// 避免 execution/config.ts 类型范围为发现器扩键（发现器消费 raw 形态，字段级容错在本
 // 模块内做，坏条目 warn 跳过、不影响其他条目）。
 
 import * as fs from "node:fs";

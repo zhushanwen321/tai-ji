@@ -8,7 +8,7 @@
 // 测试族（service 落点）承接。
 //
 // 保留壳的原因（设计 v3 定形）：唯一装配点 session-lifecycle.ts（D-008 per-session
-// SAR 构造）——掏空只删 run() 内部编排，构造签名与公共面不变。model 解析归
+// SAR 构造）——掏空只删 run() 内部编排，构造签名与公共部分不变。model 解析归
 // service resolveIdentity（W2 迁移清单⑧，不双轨）。
 
 import type { AgentRunner } from "../../orchestration/models/ports.ts";

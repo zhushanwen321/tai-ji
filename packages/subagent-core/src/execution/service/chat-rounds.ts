@@ -1,8 +1,8 @@
-// [H3/D-R4-1 兑现] ChatRounds 聚合（Continuation 协作面 + kickOffChatRound 族）——
+// [H3/D-R4-1 兑现] ChatRounds 聚合（Continuation 协作范围 + kickOffChatRound 族）——
 // 自 run-orchestration.ts 拆出的第三文件（设计
 // docs/architecture/subagent-service-decomposition.md §3.1「ConversationContinuation 归
-// RunOrchestration 协作面」；拆分预案 = run-orchestration 头部 [G1 超限预授权拆分] 段
-// 登记的「备选 = 第三文件再拆 Continuation 协作面」，2026-09-13 design-code-sync 兑现：
+// RunOrchestration 协作范围」；拆分预案 = run-orchestration 头部 [G1 超限预授权拆分] 段
+// 登记的「备选 = 第三文件再拆 Continuation 协作范围」，2026-09-13 design-code-sync 兑现：
 // run-orchestration 折算 845 破 800 零余量锁定线，按预案拆出本文件并完成壳装配接线）。
 //
 // 单一职责：chat 域轮次编排——ConversationContinuation 实例表（continuations，本聚合
@@ -35,7 +35,7 @@
 //    RecordLifecycle 实例方法。
 // 2. 只搬不改：方法体除依赖通道替换（this.X → this.deps.Y()）外逐字节保留——
 //    通道替换清单 = 上方「本聚合 → RunOrchestration」六项协作回调；Continuation
-//    协作面内部互调（continuationFor/kickOffChatRound 等）随族同迁，保持 this 直调。
+//    协作范围内部互调（continuationFor/kickOffChatRound 等）随族同迁，保持 this 直调。
 // 3. 模块常量：STALE_CHILD_EXIT_WAIT_MS + delay 随唯一消费主体
 //   （killStaleChildBeforeDispatch）自 run-orchestration 迁入；PRIORITY_BACKGROUND /
 //    MS_PER_SECOND / SECONDS_PER_MINUTE 消费常量叶子文件 service-constants.ts。
@@ -104,7 +104,7 @@ const STALE_CHILD_EXIT_WAIT_MS = 300;
  * switch）作废旧句柄后，下一次 initSession 注入新代际的窗口量级 = extension 模块图
  * 重求值 + session_start 装配链（实测亚秒~秒级）。等到 = 轮终 pi 条目写落进新权威
  * session（正常路径完成写）；超时 = 降级跳过（磁盘 journal/manifest 面不受影响）+
- * warn 留痕含恢复指引。控制面单请求粒度，禁止放大为任务级墙钟预算。
+ * warn 留痕含恢复指引。控制范围单请求粒度，禁止放大为任务级墙钟预算。
  */
 const ROUND_FINAL_PI_READY_WAIT_MS = 2_000;
 
@@ -120,7 +120,7 @@ function delay(ms: number): Promise<void> {
  * [R1 打样模式 1] 聚合协作 deps——**全部晚绑定闭包，构造期零求值**。
  *
  * 窄结构类型只声明聚合真实消费的通道（不整实例注入）。四类成员：
- * - 断言面（assertReady）：deliverChatMessage 入口就绪门（本体在 SessionBaselines，
+ * - 断言范围（assertReady）：deliverChatMessage 入口就绪门（本体在 SessionBaselines，
  *   壳转发）。
  * - #1 留壳共享依赖 getter（getStore/getModelService/getNotifyHost/getPool/
  *   getWorktreeManager/getCwd/getPi）：
@@ -208,7 +208,7 @@ export interface ChatRoundsDeps {
 }
 
 /**
- * Continuation 协作面聚合：chat 域轮次编排（[D-R4-1 兑现] 自 run-orchestration 拆出）。
+ * Continuation 协作范围聚合：chat 域轮次编排（[D-R4-1 兑现] 自 run-orchestration 拆出）。
  *
  * 字段所有权（r0-inventory 清单①）：#31 continuations（Continuation 实例表）——
  * 本聚合唯一写者；壳 dispose 经 clearContinuations() 显式接口触达（C-4 兑现），
@@ -435,7 +435,7 @@ export class ChatRounds {
           ...(record.engineHandle ?? {}),
           sessionRef: filtered,
           // 持久化形状保留字段（record-store 读侧检查要求非空）；恒 'shared'——
-          // [池抽象降级 2026-09-13] 协议面 poolKey 已删，无引擎侧实际值。
+          // [池抽象降级 2026-09-13] 协议范围 poolKey 已删，无引擎侧实际值。
           poolKey: SHARED_POOL_KEY,
         };
         // [W1/R1 D1b] 新轮锚确立点（zcode 侧）：① 清空 transcriptRef 过渡锚——
@@ -855,7 +855,7 @@ export class ChatRounds {
   /**
    * [R4 / C-4 兑现] Continuation 实例全量清理显式接口——原壳 dispose 直调
    * `this.continuations.clear()` 的跨聚合边（r0-inventory 清单① C-4）：字段所有权
-   * 随 Continuation 协作面在本聚合，壳 dispose 编排改调本接口（聚合间零直写，G2）。
+   * 随 Continuation 协作范围在本聚合，壳 dispose 编排改调本接口（聚合间零直写，G2）。
    */
   clearContinuations(): void {
     this.continuations.clear();

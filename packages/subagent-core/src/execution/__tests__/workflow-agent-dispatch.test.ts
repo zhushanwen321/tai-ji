@@ -5,7 +5,7 @@
 // gate / D7 成功收尾 / adopt 豁免双点）。
 //
 // 锁以下组面：
-//   1. 注册面：record 带 origin:"workflow" + parentRunId；record 级
+//   1. 注册范围：record 带 origin:"workflow" + parentRunId；record 级
 //      pending:register/unregister 配对（D5：record 级照旧）。
 //   2. 池顺序（D3）：路由/预检失败先于池 acquire——零池占用 + 同步抛错 + 零孤儿 record。
 //   3. 守护（D4/M3 复刻）：arm 键 = record.id（ctx.taskId 即守护键）；双刷新源
@@ -59,7 +59,7 @@ import type { ExecutionRecord } from "../domain/record-model.ts";
 import { registerFakePiEngine, type FakePiEnginePort, type FakeRun } from "./helpers/fake-engine-port.ts";
 import { CTX_MODEL as ctxModel, emptyRegistry } from "./helpers/model-registry-mock.ts";
 import { makePi, type PiMock } from "./helpers/pi-mock.ts";
-// [D3 协议版 P6] armed 消费写入 journal 记录端到端用例：journal 注入面（orchestration/pump 公共
+// [D3 协议版 P6] armed 消费写入 journal 记录端到端用例：journal 注入点（orchestration/pump 公共
 // 测试钩子）+ journal 读回（run-events 唯一实装）。
 import {
   dispatchRunTrigger,
@@ -134,7 +134,7 @@ function soleRun(fake: FakePiEnginePort): FakeRun {
   return fake.runs[0]!;
 }
 
-/** 从 store 取内存 running record（getMutable 公共面）。 */
+/** 从 store 取内存 running record（getMutable 公共部分）。 */
 function runningRecord(store: RecordStore): ExecutionRecord {
   const running = store.listRunning();
   expect(running).toHaveLength(1);
@@ -190,10 +190,10 @@ afterEach(() => {
 });
 
 // ============================================================
-// 1. 注册面（origin/parentRunId + pending:register 配对）
+// 1. 注册范围（origin/parentRunId + pending:register 配对）
 // ============================================================
 
-describe("executeWorkflowAgent 注册面", () => {
+describe("executeWorkflowAgent 注册范围", () => {
   it("[U2 窗口键] piEngine 注入携带 parentRunId——pi 同步短路位是成员 run 的执行体，无键即 WindowScopeEngineError（batch-s4 真机首跑实锤的回归锁）", async () => {
     const { service, fake } = makeHarness();
     const runOrchestration = Reflect.get(service, "runOrchestration") as {
@@ -227,7 +227,7 @@ describe("executeWorkflowAgent 注册面", () => {
     // record 级 pending:register 照旧（与既有派发路径同款）
     const registered = pi.events.emit.mock.calls.find((c) => c[0] === "pending:register");
     expect(registered?.[1]).toMatchObject({ id: record.id, type: "subagent" });
-    // parentRunId 查询面（W1）命中
+    // parentRunId 查询范围（W1）命中
     expect(service.queries.collectRecordsByParentRunId("run-42", 10).map((r) => r.id)).toEqual([record.id]);
 
     run.settle({ content: "done" });

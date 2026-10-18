@@ -1,7 +1,7 @@
 /**
  * W9 runtime 侧引擎根推导/注入（services/session/engine-roots.ts）单测：
  * - dev/打包双形态 staged 目录推导（isPackaged 判定 + 目录存在性门控）；
- * - 注入面矩阵：staged 存在才注入 ROOTS；打包态才注入执行器两键（dev 不注入）；
+ * - 注入点矩阵：staged 存在才注入 ROOTS；打包态才注入执行器两键（dev 不注入）；
  * - ensureRuntimeEngineRootsEnv 幂等 + 显式值不覆盖。
  */
 
@@ -58,7 +58,7 @@ describe('getStagedEnginesDir（dev/打包双形态）', () => {
   })
 })
 
-describe('getEngineRootsSpawnEnv（注入面矩阵）', () => {
+describe('getEngineRootsSpawnEnv（注入点矩阵）', () => {
   it('dev：staged 存在 → 只注入 ROOTS，不注入执行器两键', () => {
     const staged = join(tmpRoot, 'resources', 'engines')
     mkdirSync(staged, { recursive: true })

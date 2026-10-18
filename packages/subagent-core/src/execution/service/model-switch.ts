@@ -84,7 +84,7 @@ export type ModelSwitchTarget =
   | { domain: "workflow-run"; runId: string };
 
 // ============================================================
-// 依赖注入面
+// 依赖注入范围
 // ============================================================
 
 /**
@@ -104,11 +104,11 @@ export interface ModelSwitchModelService { // oe-exempt:20261006:framework:类�
 }
 
 /**
- * setModel 编排的依赖注入面。转发通道（engineSetModel / runAggregate）与 workflow
+ * setModel 编排的依赖注入范围。转发通道（engineSetModel / runAggregate）与 workflow
  * 侧查询（assertRunNotTerminal / listAcceptedMemberRunIds / persistRunOverride）的
  * 生产实装在壳装配段（subagent-service.setModel deps 闭包）。
  */
-export interface ModelSwitchDeps { // oe-exempt:20261006:framework:setModel 编排依赖注入面（U3/U5/U4 接线点，端口先立单实现常态）
+export interface ModelSwitchDeps { // oe-exempt:20261006:framework:setModel 编排依赖注入范围（U3/U5/U4 接线点，端口先立单实现常态）
   /** 模型服务（步骤①校验 + 步骤③内存记账表写入）。 */
   readonly getModelService: () => ModelSwitchModelService;
 /**
@@ -190,8 +190,8 @@ const RACE_EXIT_NOTICE = "子进程在切换期间已退出，已记录，下次
 
 /**
  * 处置表「写记账后回错误应答」分型词表（行 3 快照型 / 行 7 回读失败型——catch 分支
- * 除 credential_missing 特判外的写面分型登记）。词表外引擎错误码 / 无码错误走同一
- * 写面兜底（「命令已送达、意图已表达」的保守归属，catch 实装按 credential_missing
+ * 除 credential_missing 特判外的写侧分型登记）。词表外引擎错误码 / 无码错误走同一
+ * 写侧兜底（「命令已送达、意图已表达」的保守归属，catch 实装按 credential_missing
  * 特判组织——特判 = SDK 词表全集减本词表）；shared 的 SUBAGENT_SET_MODEL_ACCOUNTED_
  * ERROR_CODES 是本词表的前端显示面映射（badge 亮灯依据，词表外码不亮 badge）。
  * **对账锚**：packages/runtime/src/infra/subagent-model-gateway.test.ts
@@ -277,7 +277,7 @@ async function validateSetModelTarget(
   return undefined;
 }
 
-/** 覆盖意图载体组装（§7.2 步骤③写面的记账形状；setAt = 意图写入时点）。 */
+/** 覆盖意图载体组装（§7.2 步骤③写侧的记账形状；setAt = 意图写入时点）。 */
 function buildModelOverride(model: ModelRef, thinkingLevel?: string): ModelOverride {
   return {
     ref: { provider: model.provider, modelId: model.modelId },
@@ -304,7 +304,7 @@ async function switchWorkflowRunModel(
   });
   // 处置表行 4（run 级聚合个别成员转发失败——以及全员成功行 1 的 run 级面）：
   // run 级意图恒写（§6.1③「一个成员失败不回滚其他成员」的直接推论；不写则已
-  // 热切成功的成员被下一轮 spawn 旧 argv 压回）。写面 = 内存表 + U4a 事件载体
+  // 热切成功的成员被下一轮 spawn 旧 argv 压回）。写侧 = 内存表 + U4a 事件载体
   //（await 持久化结果——失败上抛转报错应答，内存覆盖仍生效，§7.5）。
   deps.getModelService().setModelOverride(target.runId, override);
   await deps.persistRunOverride(target.runId, override);
@@ -312,7 +312,7 @@ async function switchWorkflowRunModel(
 }
 
 /**
- * chat 域分流（步骤②：活进程判定 → capability 预检 → 引擎转发；步骤③写面按
+ * chat 域分流（步骤②：活进程判定 → capability 预检 → 引擎转发；步骤③写侧按
  * §7.2 处置表分型）。
  */
 async function switchChatModel(
@@ -371,7 +371,7 @@ async function switchChatModel(
 
 const logger = getLogger("subagents");
 
-/** chat 域覆盖写入（步骤③写面）：持久化（store 原语——record 字段 + 事件帧）+
+/** chat 域覆盖写入（步骤③写侧）：持久化（store 原语——record 字段 + 事件帧）+
  *  内存记账表。切换不改写 record.model 盖章值（不变量 5 由 store 原语保证）。
  *
  *  写入返回值门（dmg-r1-10）：false = record 非内存实例，持久化两面（事件帧 +

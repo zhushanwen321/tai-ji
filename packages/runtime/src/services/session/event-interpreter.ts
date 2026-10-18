@@ -49,7 +49,7 @@ import { PingProbe } from './event-interpreter-ping.js'
 import { AgentSettledDelayer } from './event-interpreter-settled-delay.js'
 
 // [T4 协作对象拆分] 常量本体随域迁至协作对象文件（ping 三常量 → event-interpreter-ping.ts），
-// 此处 re-export 保住既有导出面
+// 此处 re-export 保住既有导出清单
 //（event-interpreter-ping-dispose.test.ts 等直接 import 本文件；SR6 SSOT）。
 export { PING_INTERVAL_MS, PING_FAIL_THRESHOLD, PING_WARN_FAIL_COUNT } from './event-interpreter-ping.js'
 import { toErrorMessage } from '../../utils/errors.js'

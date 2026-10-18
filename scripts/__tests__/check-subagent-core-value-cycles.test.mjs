@@ -70,7 +70,7 @@ describe("check-subagent-core-value-cycles", () => {
     });
     expect(run(dynamicDir).status).toBe(1);
 
-    // require 形态用 .cts（扫描面 = core src 的 .ts/.mts/.cts；.cjs 不在 core 源内）
+    // require 形态用 .cts（扫描范围 = core src 的 .ts/.mts/.cts；.cjs 不在 core 源内）
     const requireDir = makeFixture({
       "a.cts": 'const { b } = require("./b.cts");\nconst a = () => b();\nconsole.log(a);\n',
       "b.cts": 'const { a } = require("./a.cts");\nconst b = () => a();\nconsole.log(b);\n',

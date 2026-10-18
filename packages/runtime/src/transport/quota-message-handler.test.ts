@@ -58,7 +58,7 @@ describe('QuotaMessageHandler · quota.configure await 竞态（A1-5）', () => 
     expect(ctx.reply).toHaveBeenCalledWith(WS, 'm1', 'quota.configure:result', { ok: true })
   })
 
-  it('configure 返回 ok:false → reply 原样携带错误面', async () => {
+  it('configure 返回 ok:false → reply 原样携带错误范围', async () => {
     const ctx = mockContext({ configure: vi.fn().mockResolvedValue({ ok: false, error: 'boom' }) })
     const handler = new QuotaMessageHandler(ctx)
 

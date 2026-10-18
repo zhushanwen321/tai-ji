@@ -1129,7 +1129,7 @@ export interface ScanSessionsOptions {
  * 真实磁盘扫描轮——启动首扫必为真实轮，补账时序命中）。
  */
 /**
- * 旗标读写面（消费方：btw 孤儿补账闸，读 `.last`）：导出可变快照对象 = 零访问器行
+ * 旗标读写侧（消费方：btw 孤儿补账闸，读 `.last`）：导出可变快照对象 = 零访问器行
  *（max-lines 软上限下的紧凑透出），写者唯一 = 本文件；语义/置位复位时机见上方注释。
  */
 export const scanDegradedFlag = { last: false }

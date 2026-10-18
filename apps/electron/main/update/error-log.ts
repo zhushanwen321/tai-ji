@@ -1,16 +1,16 @@
 /**
- * 升级错误/诊断日志落盘（update-network-resilience D8 + 多源改造诊断面）。
+ * 升级错误/诊断日志落盘（update-network-resilience D8 + 多源改造诊断范围）。
  *
  * JSONL 格式，512KB 轮转 x2。失败登记七个 source 覆盖：
  * test-proxy / download / install / perform / preload /
  * engine-fallback / manual-claim（D8：前者为单引擎失败被另一引擎兜住的
  * 降级点落盘，后者为手动认领校验失败落盘）。
  *
- * 成功路径登记三个 source（多源改造新增，S1-S3 验收的观测面）：
+ * 成功路径登记三个 source（多源改造新增，S1-S3 验收的观测范围）：
  * source-selection（每轮检查的源顺序 / 胜出源 / auto 探测结果 / 各源 latest
- * tag——tags 是 F5 两源同步缺失形态的唯一客户端观测面；仅在排序/胜出源/
+ * tag——tags 是 F5 两源同步缺失形态的唯一客户端观测范围；仅在排序/胜出源/
  * 探测结果/tags 变化时写，首条必写）/ source-failover（跨源降级发生点）/
- * download-success（multiPart + engine，S1 多段生效断言的观测面）。三类成功
+ * download-success（multiPart + engine，S1 多段生效断言的观测范围）。三类成功
  * 登记与失败登记共用同一 JSONL 与轮转通道，写入容错语义一致（失败不抛）。
  *
  * 形态豁免说明（data-source-registry C-data-11 口径）：本文件是 append-only 诊断
@@ -74,7 +74,7 @@ export interface SourceFailoverLogInput {
 
 /** logDownloadSuccess 入参（供 u-download-failover 接线）。 */
 export interface DownloadSuccessLogInput {
-  /** 多段下载是否生效（probe 判定结果）——S1 多段生效断言的观测面 */
+  /** 多段下载是否生效（probe 判定结果）——S1 多段生效断言的观测范围 */
   multiPart: boolean
   /** 实际使用的下载引擎（S1 注记：curl 引擎按 update-network-resilience D7 语义放弃多段，multiPart=false 非回归） */
   engine: 'undici' | 'curl'
@@ -124,7 +124,7 @@ export interface UpdateErrorEntry {
   winner?: UpdateSource | null
   /** [source-selection] auto 探测结果 */
   probe?: SourceProbeOutcome
-  /** [source-selection] 各源 latest tag（F5 同步缺失形态的唯一客户端观测面） */
+  /** [source-selection] 各源 latest tag（F5 同步缺失形态的唯一客户端观测范围） */
   tags?: Partial<Record<UpdateSource, string>>
   /** [source-failover] 降级前源 */
   from?: UpdateSource
@@ -197,7 +197,7 @@ export function appendUpdateError(entry: UpdateErrorEntry): boolean {
  * 降频（设计写放量级入账的降频优化）：仅当排序 / 胜出源 / 探测结果 /
  * 各源 latest tag 任一变化时写入，常态恒定不重复写；首条必写。
  * tags 纳入变化检测维度：若不纳入，稳态下 tag 冻结在首条，F5（两源同步
- * 缺失）观测面失效——tag 变化频率受版本发布节流，写放量仍远低于每轮必写上界。
+ * 缺失）观测范围失效——tag 变化频率受版本发布节流，写放量仍远低于每轮必写上界。
  *
  * 快照以 JSON.stringify(input) 直接比较：依赖调用方以固定构造序生成同构输入
  * （同结构对象字面量），字符串比较仅用于「是否变化」判定，非语义规范化。
@@ -242,7 +242,7 @@ export function logSourceFailover(input: SourceFailoverLogInput): void {
  * 登记下载成功（download-success，成功路径登记）。
  *
  * 每次下载成功落一条（量级可忽略）。multiPart = probe 判定结果，是 S1
- * 多段生效断言的观测面（防 probe 改造回归静默退化单段——curl 引擎按
+ * 多段生效断言的观测范围（防 probe 改造回归静默退化单段——curl 引擎按
  * update-network-resilience D7 语义放弃多段，multiPart=false 非回归，断言失败先核对 engine 字段）。
  */
 export function logDownloadSuccess(input: DownloadSuccessLogInput): void {

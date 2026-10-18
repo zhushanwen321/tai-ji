@@ -31,13 +31,13 @@ import { mainLogger } from '../logs/main-logger.js'
 import { runSaveDialogGuarded } from '../utils/save-dialog-guard.js'
 
 /** 保存对话框返回形态（diagnostics-export-ipc 的 SaveDialogResult 同款测试最小派生视图）。 */
-export interface SessionExportSaveDialogResult { // oe-exempt:20261012:framework:deps 注入契约面——生产 dialog 返回派生视图 + 测试桩单消费位，接口先立防测试走真 electron 通道（对齐 diagnostics-export-ipc 先例形态）
+export interface SessionExportSaveDialogResult { // oe-exempt:20261012:framework:deps 注入契约范围——生产 dialog 返回派生视图 + 测试桩单消费位，接口先立防测试走真 electron 通道（对齐 diagnostics-export-ipc 先例形态）
   canceled: boolean
   filePath?: string
 }
 
-/** 依赖注入面：测试注入对话框桩 / 复制桩 / piAgentDir 桩，生产用 electron 与真实实现。 */
-export interface SessionExportIpcDeps { // oe-exempt:20261012:framework:deps 注入契约面——生产实现 + 测试桩双消费位，单实现常态（对齐 diagnostics-export-ipc DiagnosticsExportIpcDeps 先例形态）
+/** 依赖注入范围：测试注入对话框桩 / 复制桩 / piAgentDir 桩，生产用 electron 与真实实现。 */
+export interface SessionExportIpcDeps { // oe-exempt:20261012:framework:deps 注入契约范围——生产实现 + 测试桩双消费位，单实现常态（对齐 diagnostics-export-ipc DiagnosticsExportIpcDeps 先例形态）
   /** 保存对话框；缺省 dialog.showSaveDialog（聚焦窗口，无聚焦窗口直接 canceled） */
   showSaveDialog?: (options: { title: string; defaultPath?: string }) => Promise<SessionExportSaveDialogResult>
   /** 复制主体；缺省 fs.promises.copyFile（内核直复制，不读入内存缓冲） */

@@ -81,7 +81,7 @@ const OUTCOME_PLACEHOLDER_TEXT = "(no outcome recorded)";
 // 引擎 id 提取（record 路由段）
 // ============================================================
 
-/** 引擎路由裁决的输入面（record 快照与 ExecutionRecord 均结构满足）。 */
+/** 引擎路由裁决的输入范围（record 快照与 ExecutionRecord 均结构满足）。 */
 export interface EngineRouteSource {
   /** record.engine（'pi' | 'zcode' | ...；缺席 = pi 缺省）。 */
   engine?: unknown;
@@ -180,7 +180,7 @@ export function extractEngineId(record: SubagentRecordSnapshot): string {
  * 返回 undefined = 本级不可达/失败（编排层降②级）；reader 内部自行留 debug 日志。
  * 双端复用约束（设计 §3.3.7）：实现必须无状态纯函数、不 import 引擎运行时件。
  *
- * [W11/H1] 本模块零静态引擎依赖：①级 reader 全部经注入面注册——生产调用方 =
+ * [W11/H1] 本模块零静态引擎依赖：①级 reader 全部经注入点注册——生产调用方 =
  * runtime 协议客户端（W8 subagent-engine-history 把「协议 read」注册为引擎原生
  * reader，引擎 id 动态、zcode sqlite 直读在引擎进程内完成）；注册表初始为空，
  * 未注册引擎直接落②级 journal。
@@ -213,7 +213,7 @@ export function registerNativeSessionReader(engineId: string, reader: NativeSess
   getReaderSlot().set(engineId, reader);
 }
 
-/** 查表（未注册引擎返回 undefined → 编排层落③级，行为面与旧「无 native reader 分支」一致）。 */
+/** 查表（未注册引擎返回 undefined → 编排层落③级，行为范围与旧「无 native reader 分支」一致）。 */
 function lookupNativeSessionReader(engineId: string): NativeSessionReader | undefined {
   return getReaderSlot().get(engineId);
 }

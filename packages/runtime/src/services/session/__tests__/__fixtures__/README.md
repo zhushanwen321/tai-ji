@@ -9,7 +9,7 @@
 → 收响应后 EOF 退出）。全程无 prompt，零 LLM 调用。录制脚本：
 `packages/runtime/scripts/record-get-entries-fixtures.mjs`（pi 版本升级需重录时执行）。
 
-| 产物 | 源（core fixture） | 覆盖面 | 录得 entries |
+| 产物 | 源（core fixture） | 覆盖范围 | 录得 entries |
 |---|---|---|---|
 | `get-entries-1-mixed-kinds` | real-mixed-kinds.jsonl（真实 session 脱敏，124 行） | custom×44 / custom_message / model_change / id-less session_info 侧支 | 123 |
 | `get-entries-2-compaction-single` | synthetic-compaction-single.jsonl | compaction（firstKeptEntryId）+ model_change | 11 |

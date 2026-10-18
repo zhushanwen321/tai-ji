@@ -36,7 +36,7 @@ export interface MirrorEntry {
   killed: boolean;
   exitCode?: number;
   signal?: string;
-  /** 最近一次状态变更的墙钟时间戳（Date.now()，诊断面）。 */
+  /** 最近一次状态变更的墙钟时间戳（Date.now()，诊断范围）。 */
   updatedAt: number;
 }
 

@@ -119,7 +119,7 @@ export type RunErrorCode =
  * [D1] record 单源存储收敛改名（`.events.jsonl` → `.record.jsonl`）：record 流是
  * run 域唯一事实源（append-only），文件名换新后缀使旧格式两件套（旧 journal
  * `.events.jsonl` + state 快照 `<runId>.jsonl`）与新流在文件名层面天然可分——
- * 全部读取路径只认本后缀（旧两件不读、不写、不主动删，历史 run 从壳侧读取面
+ * 全部读取路径只认本后缀（旧两件不读、不写、不主动删，历史 run 从壳侧读侧
  * 消失即 D1 历史数据处置的预期行为）。
  *
  * 单源导出（barrel 上收）：core 内部全部落/扫点（本文件 recordPath、

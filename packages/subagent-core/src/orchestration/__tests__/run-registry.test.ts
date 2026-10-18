@@ -225,7 +225,7 @@ describe("mtime 启发式退役（grep 断言）", () => {
 // ── b. [D9] abandon 全链移除断言 ─────────────────────────────
 
 describe("[D9] abandon 全链移除（功能裁撤验收锚）", () => {
-  it("grep 断言：abandon 函数族与 env 通道从模块导出面消失（词表成员 interrupted_abandoned 保留为历史帧解析）", () => {
+  it("grep 断言：abandon 函数族与 env 通道从模块导出范围消失（词表成员 interrupted_abandoned 保留为历史帧解析）", () => {
     const source = fs.readFileSync(new URL("../run-registry.ts", import.meta.url), "utf8");
     expect(source).not.toMatch(/export\s+(async\s+)?function\s+abandonElapsedInterruptedRuns/);
     expect(source).not.toMatch(/export\s+const\s+RUN_ABANDON_WINDOW_MS_ENV/);
@@ -243,7 +243,7 @@ describe("[D9] abandon 全链移除（功能裁撤验收锚）", () => {
 //   终局——manifest 是 run-settled 终局事件的派生缓存，[D1]）；
 // - 双重启不重复追加：再次收编命中 fold interrupted / manifest / 条面证据
 //   → skippedTerminal，record 帧数不增长；
-// - 条目面证据（hasSettledEntry）独立拦截——覆盖「record 损坏但条目完好」的
+// - 条目范围证据（hasSettledEntry）独立拦截——覆盖「record 损坏但条目完好」的
 //   双面证据组合；
 // - 宽限窗 / 活跃保护 / 坏链（fold 停在 created）/ 空 record 的分类跳过。
 
@@ -308,7 +308,7 @@ describe("中断收编入口 adoptInterruptedRun（[D15]：幂等追加 run-inte
     ]);
   });
 
-  it("条目面证据（双面证据第二条）：hasSettledEntry=true → 跳过（record 损坏但条目完好的组合）", async () => {
+  it("条目范围证据（双面证据第二条）：hasSettledEntry=true → 跳过（record 损坏但条目完好的组合）", async () => {
     await seed("wf-ad-4", [createdEvent("wf-ad-4", BASE_TS), agentStartedEvent(BASE_TS + 1)]);
     const outcome = await adoptInterruptedRun("wf-ad-4", {
       now: BASE_TS + 1000,

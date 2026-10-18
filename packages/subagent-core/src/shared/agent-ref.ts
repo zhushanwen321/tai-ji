@@ -193,7 +193,7 @@ export const WORKFLOW_REF_EXT = ".js";
  * 不切 Windows `\` 分隔符，反之类推），且本模块避免引入平台分支。
  *
  * 包边界注记：GUI 侧（@taiji/shared display-name.ts）存在行为逐字节等价的同名
- * 实现——shared 不发 npm，core 运行时 import shared 需改 bundle/发布面，代价不成
+ * 实现——shared 不发 npm，core 运行时 import shared 需改 bundle/发布范围，代价不成
  * 比例，故双实现并存。两侧测试用同款向量互锚（`C:\\a\\worker.md` → `worker`），
  * 任一侧改语义须同步另一侧。
  */

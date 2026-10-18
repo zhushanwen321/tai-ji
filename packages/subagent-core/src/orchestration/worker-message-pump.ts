@@ -327,7 +327,7 @@ function isMalformedAgentCallMsg(msg: AgentCallMsg): boolean {
  * 差异，canonical 键序消除 IPC/重建往返的形态漂移——场景 13 零误报）。
  *
  * 跳过比对（返回 false）的三形态——比对即假 mismatch：
- * 1. 占位 opts（resume/重新加载重建的 call 无可比数据面时：旧格式 record 流的
+ * 1. 占位 opts（resume/重新加载重建的 call 无可比数据范围时：旧格式 record 流的
  *    agent-started 帧不携带入参全文（input 载荷为 [U13] 补齐，写侧随本设计
  *    落地）——新帧有 input 的重建走 opts 恢复，比对正常执行）；
  * 2. 失败历史（cached.result.error 在场——失败也是真实历史结果，重跑不保证更对
@@ -335,7 +335,7 @@ function isMalformedAgentCallMsg(msg: AgentCallMsg): boolean {
  * 3. 本次 resolve 失败（skill 丢失等——错误结果回放路径，非漂移信号）。
  */
 function detectReplayInputMismatch(cached: AgentCall, currentRaw: AgentCallMsg["opts"]): boolean {
-  // opts 缺省容错（mock/残缺形态）：无可比数据面即跳过比对
+  // opts 缺省容错（mock/残缺形态）：无可比数据范围即跳过比对
   if (cached.opts === undefined || cached.opts === null) return false;
   const recorded = cached.opts as unknown as Record<string, unknown>;
   const recordedKeys = Object.keys(recorded).filter((k) => recorded[k] !== undefined);
@@ -498,7 +498,7 @@ function dispatchAgentCall(
   dispatchAgentStarted(run, msg.callId, agentName, msg.phase, boundRecordId, resolved.opts);
 
   // [GUI 步骤实时可见 2026-09-14] 启动即持久化（[D1] 后 save 为壳侧 no-op 契约，
-  // 调用保留 = RunStore port 契约面）。火后模式与下方 .catch 同款。
+  // 调用保留 = RunStore port 契约范围）。火后模式与下方 .catch 同款。
   deps.store.save(run).catch((e: unknown) => {
     logger.error(`[workflow] store.save failed (dispatch trace stamp): ${toErrorMessage(e)}`);
   });

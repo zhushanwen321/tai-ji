@@ -4,7 +4,7 @@
 // 输出 = SplitModelRef 三元组（不再是裸 canonicalRef 串），trim 归一缺席、canonical
 // 空白回落显式输入、无斜杠 ref 拆分（契约④）都收敛在本入口单点——record 侧不再
 // 二次裁词形。字符串仅剩两类边界：输入的未裁决词形（EngineModelSelectorInput）与
-// EnginePort.validateModel 引擎契约面（跨包镜像，见 port.ts 边界裁决注释）。
+// EnginePort.validateModel 引擎契约范围（跨包镜像，见 port.ts 边界裁决注释）。
 
 import { describe, expect, it } from "vitest";
 

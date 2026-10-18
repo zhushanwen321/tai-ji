@@ -206,7 +206,7 @@ describe("[U4 / §3.2.3] 万物可续矩阵：closedReason × message + 唯一�
   it("锚失效（内存 idle record 的 transcript 被回收）+ message → markReopened：round 归零 + epoch+1 + stopReason=reopened + 新锚 binding + 摘要注入 + resume:undefined", async () => {
     // 场景构造：冷查重建（内存 idle record，锚文件在盘）→ 删除 transcript 文件
     //（模拟 30 天 GC 回收）→ message。可达性说明：record 出内存 + 文件被删 = 冷查
-    // 找不到（磁盘重建源 = jsonl/manifest）——「锚失效 + message」的现实触发面 =
+    // 找不到（磁盘重建源 = jsonl/manifest）——「锚失效 + message」的现实触发范围 =
     // record 仍在内存（或 manifest 源重建）而 transcript 被回收。
     const file = writeSessionJsonl(sessionsDir, { id: "sa-u4-reopen", rootSessionId: "root-session-cur" });
     const record = service.chatActions.getRecordForAction("sa-u4-reopen");

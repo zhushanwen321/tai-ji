@@ -17,7 +17,7 @@
  *    同判据，不扫 = 换段绕过。
  * 2. 源码 import 闭包：C/src 全量非测试源码（.ts/.mts/.cts/.js/.mjs/.cjs，
  *    .d.ts/.d.mts/.d.cts 声明文件豁免）的 import/export-from/动态 import/
- *    require 说明符不含禁用依赖。扫描面为可达闭包的超集（全量已发布源码；
+ *    require 说明符不含禁用依赖。扫描范围为可达闭包的超集（全量已发布源码；
  *    传递闭包经相对 import 的真实展开由检查项 3 的 worker 子图承载）。
  *    非测试源码中类型 import 同样违规——dist d.ts 会引用 pi 类型，npm 消费者
  *    （zsw 纯 CJS 无 TS loader）的 TS 编译面被拖入 pi SDK。
@@ -142,7 +142,7 @@ if (process.argv.includes('--self-test')) {
     console.error((green.stderr ?? '').split('\n').filter(Boolean).slice(0, 5).join('\n'))
   }
   if (!allOk) {
-    console.error('subagent-core 闭包检查自测未通过（注入不转红 / 移除不复绿——扫描面或 fail 链路断裂）')
+    console.error('subagent-core 闭包检查自测未通过（注入不转红 / 移除不复绿——扫描范围或 fail 链路断裂）')
     process.exit(1)
   }
   console.log('✓ 闭包检查自测通过（D9-① 与检查点 5 双探针注入-转红-移除-复绿，V6-① 有牙证据固化为可复现命令）')
@@ -184,7 +184,7 @@ for (const section of ['dependencies', 'peerDependencies', 'optionalDependencies
 }
 
 // ── 2. 源码 import 闭包（非测试源码全量扫描，扩展名见头注释检查项 2） ──────────
-// 已发布源码的 TS/JS 全形态扩展名都在扫描面（.mts/.cts/.js/.mjs/.cjs 漏扫 =
+// 已发布源码的 TS/JS 全形态扩展名都在扫描范围（.mts/.cts/.js/.mjs/.cjs 漏扫 =
 // 换扩展名绕过）；声明文件（.d.ts/.d.mts/.d.cts）豁免——不承载可执行 import，
 // 且其内容随实现文件进入检查项 2 的类型违规判据（非测试 type import 同样违规）。
 const SRC_EXTENSIONS = ['.ts', '.mts', '.cts', '.js', '.mjs', '.cjs']
@@ -296,7 +296,7 @@ for (const root of workerRoots) {
 // 3b. worker-script-builder.ts：eval:true 内联模板的承载文件。
 //     模板源码在字符串字面量里，在 worker 线程执行——其 require 面只允许 node
 //     内置，且禁止任何 host-services / notify-ports / 禁用依赖引用。该文件自身
-//     的真实 import（主线程、type-only）不在 call-form 扫描面，不误报。
+//     的真实 import（主线程、type-only）不在 call-form 扫描范围，不误报。
 //     [已知局限（前瞻性登记，当前零实例）] ① FROM_HOST_RE 只拦「指向
 //     host-services/notify-ports 的 from-import」——模板内其他裸 from-import
 //     不拦，与上方 require 面的 fail-closed 口径不一致；② 本条正则作用于全文、

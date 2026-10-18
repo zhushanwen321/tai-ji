@@ -124,7 +124,7 @@ export function buildTypecheckSteps() {
  *
  * 取向：宁可误 FAIL（保守）不可漏 FAIL——误 FAIL 的出口是豁免标记，漏 FAIL 复活机器盲区。
  * 形态清单外的行（function/class/enum/控制流/未识别）一律视为可执行。
- * .vue 含 template 渲染行为面，不做整文件排除（豁免标记通道仍可用）。
+ * .vue 含 template 渲染行为范围，不做整文件排除（豁免标记通道仍可用）。
  */
 export function hasExecutableLines(content, filePath) {
   if (filePath.endsWith('.vue')) return true
@@ -246,7 +246,7 @@ export function judgeNoLcov(report, readHead) {
         continue
       }
       const full = (head !== null && readHead(file, Infinity)) || head
-      if (full !== null && !hasExecutableLines(full, file)) continue // 纯类型/常量/聚合面，整文件排除
+      if (full !== null && !hasExecutableLines(full, file)) continue // 纯类型/常量/聚合类，整文件排除
       violations.push({
         file,
         package: pkg,

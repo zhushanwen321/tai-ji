@@ -649,7 +649,7 @@ describe("manifestCache（async readPackageManifest）", () => {
   //    偏差 #9：缺则将对应用例改写为 async 形态并入，不丢缓存行为覆盖）。原版直接
   //    断言 readPackageManifestSync 返回值；async 形态观察面 = readFile 计数 +
   //    user-extension-paths 结果（manifest undefined → processPackage 约定目录
-  //    fallback，pkgDir 无 {kind}/ 目录 → 零资源即 undefined 的行为面）。 ──
+  //    fallback，pkgDir 无 {kind}/ 目录 → 零资源即 undefined 的行为范围）。 ──
 
   it("坏 JSON → undefined 且不缓存：mtime 未变二次 discover 仍重读（计数递增）", async () => {
     // 起点即坏 JSON（无缓存条目）——若坏结果被缓存，二次调用不会重新 readFile。
@@ -774,7 +774,7 @@ describe("manifestCache（async readPackageManifest）", () => {
 });
 
 // ============================================================
-// conventionRootDirs（约定根推导导出面）
+// conventionRootDirs（约定根推导导出范围）
 // ============================================================
 
 describe("conventionRootDirs", () => {
@@ -798,7 +798,7 @@ describe("conventionRootDirs", () => {
   });
 
   it("与发现链同源：文件放在 conventionRootDirs 推导的根下会被 discoverResources 扫到", async () => {
-    // 守护导出面与 buildScanTargets 硬编码槽的单源性：若两者推导漂移
+    // 守护导出范围与 buildScanTargets 硬编码槽的单源性：若两者推导漂移
     // （导出改了、扫描槽没改），放在「导出说有」的根下的文件将扫不到
     const ws = tmpWorkspace();
     const prevExtPaths = process.env.TAIJI_EXTENSION_PATHS;

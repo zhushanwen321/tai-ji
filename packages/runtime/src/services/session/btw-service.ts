@@ -9,7 +9,7 @@
  *   ✅ 线进程生命周期（惰性 spawn / 闲置 30min destroy / 有待处理交互豁免计闲置 /
  *      回收前提醒挂点 onWillReclaim）
    *   ✅ reattach spawn 形态（restore/getHistory 离线路径按 `sessions/` 解析不通用——
- *      findScannedSession 只扫 sessions/，btw 线不在其扫描面，故自建附着编排：
+ *      findScannedSession 只扫 sessions/，btw 线不在其扫描范围，故自建附着编排：
  *      spawn → switch_session → 附着断言 → registerSession）
  *   ✅ `hidden: true` 注册（经既有 registerSession 汇聚点；不写 parentSession 血缘）
  *   ✅ 行为契约注入挂点（D9⑤：线会话建立时注入一次，载体 = spawn
@@ -34,25 +34,25 @@
  *      （P-fork-source 分支② 依据，回落由此在宿主侧显式编排）。
  *
  * V5（附着语义）同步核实：restore 路径 resolveRestoreTarget → findScannedSession 只扫
- * `sessions/`，btw 线目录不在其扫描面 ⇒ restoreSession/getHistory 离线路径对 btw 线不通用，
+ * `sessions/`，btw 线目录不在其扫描范围 ⇒ restoreSession/getHistory 离线路径对 btw 线不通用，
  * 必须走本文件 ensureProcess（附着编排实装）自建编排（spawn → switch_session → assertPiSessionFile）。
  * 悬空 tool-call 判「中断 turn」的失效支接线归 M3-c/M4-a（V5 残留项）。
  *
  * 关键红线呼应（AGENTS.md 关键规则）：
  *   #6 pi session 延迟写入：宿主从不创建/触碰线会话文件（fork 文件由 pi fork 链路写、
  *      回落线由 pi 首 flush 自建；本服务只读 header / 轮询目录 / 删除走显式关线）。
- *   #19 超时默认原则：fork bootstrap 属「控制面单请求」量级 → 秒级有界（10s）；
+ *   #19 超时默认原则：fork bootstrap 属「控制范围单请求」量级 → 秒级有界（10s）；
  *      线任务执行（prompt）不经本服务，无墙钟超时。
  *   #12 打包约束：fork bootstrap spawn 段已随拆分迁 btw-fork-exec.ts（约束同迁保持：
  *      只 spawn（经注入 piCommand）、不拼 ESM 模块元数据 URL 类路径——该属性在 CJS bundle
  *      下恒为 undefined，原文指回 AGENTS.md 关键规则 #12；出站 env 经 buildOutboundChildEnv）。
  *
- * sibling 模块拆分（max-lines 同目录内聚拆分，2026-09-22；导出面 / 行为 / 既有测试零变更）：
+ * sibling 模块拆分（max-lines 同目录内聚拆分，2026-09-22；导出清单 / 行为 / 既有测试零变更）：
  *   · btw-error.ts —— BtwError / BtwErrorCode 词汇表（fork 路径与本体共抛，防反向依赖成环）
  *   · btw-contract-inject.ts —— D9⑤ 契约文本 + trace 类型 + append 段组合器
  *   · btw-fork-exec.ts —— session 文件 header 只读解析 + 源状态三分支判定 + fork bootstrap
  *   · btw-orphan-reconcile.ts —— 启动孤儿补账（D5 / BU5 扫描降级闸）+ isInsideBtwRoot 谓词
- *   迁出符号在下方「导出面保持」块原样 re-export，外部 import 路径零改动。
+ *   迁出符号在下方「导出清单保持」块原样 re-export，外部 import 路径零改动。
  */
 import { existsSync, readdirSync, rmSync, statSync } from 'node:fs'
 import { basename, join } from 'node:path'
@@ -70,7 +70,7 @@ import { forkViaCliPi, inspectSourceState, readSessionHeader } from './btw-fork-
 import type { BtwSessionHeader, BtwSourceState } from './btw-fork-exec.js'
 import { isInsideBtwRoot, reconcileOrphanThreadDirs as reconcileOrphanDirs } from './btw-orphan-reconcile.js'
 
-// ─ 导出面保持（sibling 拆分前由本模块导出的符号原样 re-export；消费方 import 路径零改动）──
+// ─ 导出清单保持（sibling 拆分前由本模块导出的符号原样 re-export；消费方 import 路径零改动）──
 export { BTW_BEHAVIOR_CONTRACT, BtwError, composeContractAppendPrompt, forkViaCliPi, inspectSourceState, readSessionHeader }
 export type { BtwContractInjectionTrace, BtwSessionHeader }
 export { BTW_FORK_TIMEOUT_MS, hasDanglingToolCall } from './btw-fork-exec.js'
@@ -124,7 +124,7 @@ export interface BtwLineRecord {
   createdAt: number
   /** 有待处理交互（豁免计闲置；豁免随任一终态解除——派生通道见 deps.hasPendingUiRequests / setPendingInteraction）。 */
   pendingInteraction: boolean
-  /** 回收提醒态（协议面 = BtwThreadInfo.reclaimImminent；闲置回收退役后恒 false，wire 形状保留）。 */
+  /** 回收提醒态（协议范围 = BtwThreadInfo.reclaimImminent；闲置回收退役后恒 false，wire 形状保留）。 */
   reclaimImminent: boolean
   /** 行为契约注入轮数（= 会话建立次数：create 1 轮 + 每次 reattach +1）。 */
   contractRounds: number
@@ -158,7 +158,7 @@ export interface BtwCreateResult {
  * PiXxx 类型只许 infra/pi 内部——本服务只消费以下三键，故本地定义、不 import
  * ports 面 PiXxx 类型）。组合根 buildLineSpawnOptions 返回的 ports 面完整类型
  * 结构性满足本接口（多余字段协变放行），消费出口 = deps.processes.createSession
- *（Pick<IProcessManager> 契约面），pi 侧类型翻译归 ports/infra，不泄漏进本文件。
+ *（Pick<IProcessManager> 契约范围），pi 侧类型翻译归 ports/infra，不泄漏进本文件。
  */
 export interface BtwLineSpawnOptions {
   /** 进程工作目录（= 线 cwd）。 */
@@ -315,7 +315,7 @@ export class BtwService {
 
   /**
    * 启动孤儿补账——实装已抽 btw-orphan-reconcile.ts（同目录 sibling 拆分：判据 / BU5 扫描
-   * 降级闸 / 幂等语义随 doc 整段迁入，导出面与行为零变更）；本方法保留为组合根调用点
+   * 降级闸 / 幂等语义随 doc 整段迁入，导出清单与行为零变更）；本方法保留为组合根调用点
    *（一行委托）。调用序不变：先本方法、后 rebuildFromDisk。
    */
   reconcileOrphanThreadDirs(): number {
@@ -536,7 +536,7 @@ export class BtwService {
    * 编排 = spawn（env session-dir 线目录）→ switch_session（线文件）→ 附着断言 →
    * get_state 一致性检查 → rekey → registerSession(hidden:true)。不走 restoreSession
    * （其 resolveRestoreTarget/findScannedSession 只扫 sessions/，btw 线目录不在其
-   * 扫描面——V5 核实结论）。
+   * 扫描范围——V5 核实结论）。
    *
    * 行为契约每轮重注入（D9⑤「含重附着轮」）。
    * 线会话文件缺失（分支② 首 flush 前即被回收/删除）→ BtwError('thread_file_missing')：

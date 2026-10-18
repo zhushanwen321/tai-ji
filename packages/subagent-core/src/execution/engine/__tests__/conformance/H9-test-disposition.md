@@ -21,7 +21,7 @@ W5/W7 已把自包含件迁入引擎包（pi-subagent-cli / zcode-subagent-cli `
 | `execution/__tests__/spawn-event-adapter-rpc.test.ts` | pi `__tests__/spawn-event-adapter-rpc.test.ts` |
 | `execution/__tests__/turn-limiter.test.ts` | pi `__tests__/turn-limiter.test.ts` |
 | `execution/__tests__/turn-limiter-semantics.test.ts` | pi `__tests__/turn-limiter-semantics.test.ts` |
-| `execution/__tests__/spawn-args.test.ts` | pi `__tests__/spawn-args.test.ts`（core 副本的 `MAX_FORK_DEPTH` 断言面由 `recursive-visibility-baseline`/`nested-visibility` 族承接） |
+| `execution/__tests__/spawn-args.test.ts` | pi `__tests__/spawn-args.test.ts`（core 副本的 `MAX_FORK_DEPTH` 断言范围由 `recursive-visibility-baseline`/`nested-visibility` 族承接） |
 
 ## ① 随 SDK 原语迁移（1 文件）
 
@@ -33,11 +33,11 @@ W5/W7 已把自包含件迁入引擎包（pi-subagent-cli / zcode-subagent-cli `
 
 | 文件 | 改写内容 |
 |---|---|
-| `src/orchestration/__tests__/execute-agent-call.test.ts` | output-collector 深路径 import → `@zhushanwen/pi-subagent-cli` 公共导出面（25 用例绿） |
+| `src/orchestration/__tests__/execute-agent-call.test.ts` | output-collector 深路径 import → `@zhushanwen/pi-subagent-cli` 公共导出范围（25 用例绿） |
 | `execution/__tests__/subprocess-agent-runner-routing.test.ts` | `getChildByRecord` 深路径 → core 侧镜像 `host/spawned-children.ts coreSpawnedChildrenMirror().getChildByRecord`（pid 同构判据）；「退出后按句移除」断言移至 protocol-blackbox childStateChanged 用例（inproc 双模不回灌该通道，文件内已注记） |
 | `execution/__tests__/chat-engine-routing.test.ts` | 同上（镜像面改写） |
 | `execution/engine/__tests__/common/capability-gate.test.ts` | PiEngine/ZcodeEngine 内建构造 → 读两引擎包 package.json manifest `taiji.subagentEngine.capabilities`（同步成员唯一源；11 用例绿） |
-| `execution/engine/__tests__/conformance/contract.{probe,abort,read-degradation,agent-events}.test.ts` + `golden-replay.{pi,zcode}.test.ts` + `engine-conformance.live.test.ts` | conformance 契约套件整体协议黑盒化：RemoteEngine × fake 引擎 CLI / golden 语料改引擎包 `__golden__/` + 公共导出面 / live 门改「协议客户端 × 引擎包 CLI」形态（A2 真机形态本身） |
+| `execution/engine/__tests__/conformance/contract.{probe,abort,read-degradation,agent-events}.test.ts` + `golden-replay.{pi,zcode}.test.ts` + `engine-conformance.live.test.ts` | conformance 契约套件整体协议黑盒化：RemoteEngine × fake 引擎 CLI / golden 语料改引擎包 `__golden__/` + 公共导出范围 / live 门改「协议客户端 × 引擎包 CLI」形态（A2 真机形态本身） |
 
 ## ② 改写被阻塞 —— 保留 + W10 处置注记，W11 同批改写（4 文件）[v1.x W3 已收尾，见节尾回写注记]
 
@@ -45,14 +45,14 @@ W5/W7 已把自包含件迁入引擎包（pi-subagent-cli / zcode-subagent-cli `
 
 阻塞原因（同根）：这些文件 `vi.mock("…engines/pi/session-runner.ts")` 拦截的**是 core 生产代码的 inproc 深路径 import**（subagent-service / lifecycle 谓词等消费点在生产侧）——mock 目标改指引擎包或镜像需生产 import 先改线，而 W6 已把改线收敛到 W11 收尾（`subagent-service.ts` W7 注 + `lifecycle-predicates.test.ts` 仍深 import spawnedChildren 同证）。W11 删内建当轮必须同批改写这 4 个文件（每文件头部已留 `[W10 处置注记]`）。
 
-> **[v1.x W3 已收尾 —— 回写注记（2026-09-09）]** 上方 4 文件已随 commit `0df9ef8b3`（W3 删 inproc pi 引擎 + chat 协议化改线）处理完毕：`append-system-prompt-assembly.test.ts` 删除，其余 3 文件改写为协议等价断言（`explicit-agent-ref-guard.test.ts` / `delivery-methods.test.ts` / `gc-timer.test.ts`，现头注 `[W3 改写]` 可核）。原 `[W10 处置注记]` 已被 `[W3 改写]` 头注取代，W11 对这 4 文件无剩余改写面。本节标题、阻塞原因与文首统计行保留作 W10 时点历史（[HISTORICAL] 纪律），现行状态以本注记为准。
+> **[v1.x W3 已收尾 —— 回写注记（2026-09-09）]** 上方 4 文件已随 commit `0df9ef8b3`（W3 删 inproc pi 引擎 + chat 协议化改线）处理完毕：`append-system-prompt-assembly.test.ts` 删除，其余 3 文件改写为协议等价断言（`explicit-agent-ref-guard.test.ts` / `delivery-methods.test.ts` / `gc-timer.test.ts`，现头注 `[W3 改写]` 可核）。原 `[W10 处置注记]` 已被 `[W3 改写]` 头注取代，W11 对这 4 文件无剩余改写侧。本节标题、阻塞原因与文首统计行保留作 W10 时点历史（[HISTORICAL] 纪律），现行状态以本注记为准。
 
 ## ③ 声明废弃 —— 删除（34 文件 + 1 helper）
 
-统一理由（按文件另有侧重）：**被测行为 = 内建 pi/zcode inproc 编排实现**，协议化终态下该实现归引擎进程（W11 删除 core `engines/pi|zcode`）；行为面承接：
+统一理由（按文件另有侧重）：**被测行为 = 内建 pi/zcode inproc 编排实现**，协议化终态下该实现归引擎进程（W11 删除 core `engines/pi|zcode`）；行为范围承接：
 
 - **引擎内部行为**（spawn 参数/dispatch/LRU/心跳/EPIPE/收敛）→ `@zhushanwen/pi-subagent-cli` / `zcode-subagent-cli` 包内测试（W5/W7 迁移件，两包全绿）；
-- **协议契约面**（run/cancel/read/反向通道/错误帧/结构等价）→ W10 新协议黑盒套件 `conformance/protocol-blackbox.test.ts` + `client/__tests__/*`（W2）；
+- **协议契约范围**（run/cancel/read/反向通道/错误帧/结构等价）→ W10 新协议黑盒套件 `conformance/protocol-blackbox.test.ts` + `client/__tests__/*`（W2）；
 - **收割/杀链语义**（R9-1 口径：一代子进程 + 组内后代）→ SDK kill-chain 单测 + A3 真机门；
 - **inproc 双模过渡态**（TAIJI_SUBAGENT_ENGINE_MODE）本身 = DoD#5 删除对象，不保留锚定测试。
 
@@ -63,9 +63,9 @@ W5/W7 已把自包含件迁入引擎包（pi-subagent-cli / zcode-subagent-cli `
 | chatmode-first-round-closure-spawn / run-and-finalize-chatmode / run-spawn-chatmode-settled | chat 轮次收敛编排（pi 包 spawn-runner；chat 域 HostBridge 编排 W7 已登记 stage-3 gap） |
 | descendant-sweep / descendant-sweep-guards / kill-all-escalation / service-kill-escalation / spawned-children | 收割/杀链（SDK kill-chain + A3 真机门；镜像面 = protocol-blackbox） |
 | epipe-fallback / session-runner-epipe | EPIPE 兜底（pi 包 stdin-writer/spawn-runner 测试） |
-| keep-alive-no-progress / settled-watchdog / timeout-integration | 进度/超时判据（ADR-0047 域）。**处置改写（2026-09-09，Gate B 后纠正）**：原「pi 包 + A8 真机门」承接声称不成立——pi 包内无等价测试（grep keep-alive/no-progress/settled-watchdog/timeout-integration 零命中），Gate B 时点 A8 真机门为 blocked/manual、不构成承接证据；该三测试的行为面**随 keep-alive 协议化偏差登记**（impl-plan §5 2026-09-09 行：workflow 域单次 run 口径 agent_end 即终结，后台后代保活编排未随迁移），**不声称已承接** |
-| recursive-visibility-env / start-sync-model-guard / session-runner-schema-env | 引擎内 env 注入面（pi 包 spawn-args/relay-env 测试；W12 env 契约单测） |
-| rpc-mode / run-spawn-rpc-mode / run-spawn-integration / run-spawn-resume / run-spawn-edges / run-and-finalize-anchoring / run-spawn-stdout-callback-throw / spawn-worktree-guidance | run 全链编排（pi 包 spawn-runner/protocol-e2e；协议面 = W10 黑盒套件） |
+| keep-alive-no-progress / settled-watchdog / timeout-integration | 进度/超时判据（ADR-0047 域）。**处置改写（2026-09-09，Gate B 后纠正）**：原「pi 包 + A8 真机门」承接声称不成立——pi 包内无等价测试（grep keep-alive/no-progress/settled-watchdog/timeout-integration 零命中），Gate B 时点 A8 真机门为 blocked/manual、不构成承接证据；该三测试的行为范围**随 keep-alive 协议化偏差登记**（impl-plan §5 2026-09-09 行：workflow 域单次 run 口径 agent_end 即终结，后台后代保活编排未随迁移），**不声称已承接** |
+| recursive-visibility-env / start-sync-model-guard / session-runner-schema-env | 引擎内 env 注入点（pi 包 spawn-args/relay-env 测试；W12 env 契约单测） |
+| rpc-mode / run-spawn-rpc-mode / run-spawn-integration / run-spawn-resume / run-spawn-edges / run-and-finalize-anchoring / run-spawn-stdout-callback-throw / spawn-worktree-guidance | run 全链编排（pi 包 spawn-runner/protocol-e2e；协议范围 = W10 黑盒套件） |
 | session-runner-branch-cache-lru / session-runner-close-prune / session-runner-dispatch / session-runner-heartbeat-idle-fallback / session-runner-lifecycle-helpers | session-runner 内部机制（pi 包） |
 | max-turns-to-watchdog-ms | turn limiter 换算（pi 包 turn-limiter 测试） |
 | subagent-service-message-close | message-close 编排（chat 域 stage-3 gap 承接） |
@@ -92,13 +92,13 @@ W5/W7 已把自包含件迁入引擎包（pi-subagent-cli / zcode-subagent-cli `
 
 > 设计权威源：`docs/design/chat-domain-v1x-liveness-governance.md` §3.2 D2/D5 + §5 W6 行。
 > 本节回写 §③ 行「keep-alive-no-progress / settled-watchdog / timeout-integration」的
-> 处置改写注记（该行「不声称已承接」状态自本节起 supersede）——三测试行为面已随
+> 处置改写注记（该行「不声称已承接」状态自本节起 supersede）——三测试行为范围已随
 > W4/W6 落地，承接落点如下。原注记保留作历史，不删（[HISTORICAL] 纪律）。
 
 | 原测试 | 承接落点 | 状态 |
 |---|---|---|
 | keep-alive-no-progress | **W4 轮次活性监督器**（keep-alive 编排归属裁决 A：core 编排层持有「轮次活性权威」——no-progress 判定域按设计 D2 域分类收窄：run 域 resumable 无驱动任务归监督器三态；chat 域 idle 稳态豁免归 settled-watchdog/idle 机制）+ conformance 协议黑盒场景链 `conformance/round-liveness-supervisor.test.ts`（SIGTERM crash → 纳管 → 该唤醒 → 该放弃全链 / boot 分区 / 通知对账 / 重建不解管）+ W4 判定矩阵单测（`execution/__tests__/` 判定矩阵）。**[2026-09-28 后记] 轮次活性监督器经裁决整机清理（生产不可达断线死机器），上述承载文件均已删除，本行保留 W6 时点承接事实** | 已承接（W6 回写；监督器后已删） |
-| settled-watchdog | **含生产接线归属**：两段守护行为面 = 既有 core 原语套件（`execution/__tests__/subagent-service-recovery-bounds.test.ts`：armSettledWatchdog / mid-round no-progress / settled 硬顶 / 双 disarm 回收面）。**生产接线归属（D5「删件不同批重接 = 失守」约束）**：W4 已立协议事件 API 三入口——`execution/settled-watchdog.ts` 的 `refreshFromProtocolEvent`（协议事件行到达刷新中段）/ `noteRoundSettledFromProtocol`（settled 相位中段让位收尾段）/ `disarmRoundFromProtocol`（idle 相位/close/终态两段一并清），零新语义薄委托、与存量原语幂等并存；**W3 删 `engines/pi/session-runner.ts` 时必须同批把存量 arm/refresh/kill 接线（arm 点 = 轮开始；refresh 源 = host/streamDelta + host/roundLifecycle；kill/终态 = 既有杀链）换到这三个入口**——接线未重接完成前 W3 不得删件 | 已承接（协议事件面已立 + W3 重接认领） |
+| settled-watchdog | **含生产接线归属**：两段守护行为范围 = 既有 core 原语套件（`execution/__tests__/subagent-service-recovery-bounds.test.ts`：armSettledWatchdog / mid-round no-progress / settled 硬顶 / 双 disarm 回收面）。**生产接线归属（D5「删件不同批重接 = 失守」约束）**：W4 已立协议事件 API 三入口——`execution/settled-watchdog.ts` 的 `refreshFromProtocolEvent`（协议事件行到达刷新中段）/ `noteRoundSettledFromProtocol`（settled 相位中段让位收尾段）/ `disarmRoundFromProtocol`（idle 相位/close/终态两段一并清），零新语义薄委托、与存量原语幂等并存；**W3 删 `engines/pi/session-runner.ts` 时必须同批把存量 arm/refresh/kill 接线（arm 点 = 轮开始；refresh 源 = host/streamDelta + host/roundLifecycle；kill/终态 = 既有杀链）换到这三个入口**——接线未重接完成前 W3 不得删件 | 已承接（协议事件流已立 + W3 重接认领） |
 | timeout-integration | live conformance 门（`conformance/engine-conformance.live.test.ts`，`ENGINE_CONFORMANCE_LIVE=1 PI_LIVE_MODEL=<模型>`；设计验收 A7）——超时/abort/收敛行为在真机引擎 + 真实进程生命周期下验证；单测不再锚定 inproc 实现（原 timeout-integration 的「abort 超时强杀集成」语义由 W7 runtime 三级阶梯测试 + 本 live 门共同承载） | 已承接（live 门） |
 
 **W6 同批新增语义钉住**（conformance 领地，均绿于 `pnpm --filter @zhushanwen/subagent-core test`）：

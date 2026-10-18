@@ -8,7 +8,7 @@
  * 阈值边界 / 三类失效透传+提示（标记留正文、不进块）/ mapping_unavailable 无块 /
  * location 缺省补路径；D7 切源面（registry 映射来源 / 异常降级 / 不信任 marker 自带
  * location / cwd 接线与缺省边界 / LateBound 绑定语义）见文末 describe。
- * legacy get_commands 路径已随 D7 接线收尾删除；其专属断言面（`skill:` 前缀剥离 /
+ * legacy get_commands 路径已随 D7 接线收尾删除；其专属断言范围（`skill:` 前缀剥离 /
  * sourceInfo.path 缺失 / get_commands 整体失败 / sourceInfo.baseDir 不可消费）由
  * registry 等价面承接：裸名映射（①类）/ sourcePath 缺失（④）/ registry 扫描异常（②）/
  * References 行恒 dirname(sourcePath)（expectedBlock 逐字断言）。

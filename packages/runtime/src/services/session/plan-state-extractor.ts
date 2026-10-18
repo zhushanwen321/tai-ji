@@ -22,7 +22,7 @@
  * （reviewState/reviewStateSource）只作映射输入、永不透出进 View**（取代式演进；
  * selfReview 不派生，D9③：消费方止于审批请求帧 + entry 比较基线）。映射实现单源 =
  * extension-protocol legacy-entries（plan-mode-audit-remediation D-B4-1 下沉——原内联
- * 拷贝删除，扩展读方①同引一份；契约断言面 = protocol 包内 legacy-entries.test.ts）。
+ * 拷贝删除，扩展读方①同引一份；契约断言范围 = protocol 包内 legacy-entries.test.ts）。
  *
  * runtime 不 import extensions/ 源码（依赖方向不允许，同 subagent-extractor:194 先例），
  * entry data 按防御式逐字段检查消费；extension-protocol 是包依赖（tsup noExternal 已打包，

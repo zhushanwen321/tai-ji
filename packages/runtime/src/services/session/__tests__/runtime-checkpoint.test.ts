@@ -425,7 +425,7 @@ describe('runtime checkpoint 写失败可见性（code-harden RT-4#6）', () => 
     }
   })
 
-  it('成功写盘更新 last-success 时刻；从未写过时为 null（诊断导出面初始语义）', () => {
+  it('成功写盘更新 last-success 时刻；从未写过时为 null（诊断导出范围初始语义）', () => {
     const h = makeHarness(runDir)
     expect(h.store.getLastSuccessfulWriteAt()).toBeNull()
     h.store.upsertSession({ sessionId: 's1', activityAt: T0 })

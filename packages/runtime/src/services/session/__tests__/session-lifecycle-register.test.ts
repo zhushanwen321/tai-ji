@@ -2,7 +2,7 @@
  * SessionLifecycle.registerSession 直接测试（S3 写点归位，设计 D2②/P4）。
  *
  * registerSession（原 Facade.initializeManagedSession 迁入）的三件套锁定：
- * - 注册成功：session 对象构造（含 adapter 句柄）+ sessions Map 写入（Registry 只读面可见）
+ * - 注册成功：session 对象构造（含 adapter 句柄）+ sessions Map 写入（Registry 只读侧可见）
  * - onSessionRegistered **同步直发**：sessions.set 先于扇出、无 microtask 延迟
  *   （禁异步 bus/microtask 的设计约束在此可证伪）
  * - 扇出异常直接传播（不设隔离——与迁移前 Facade 体内顺序调用等价），异常中断后续
@@ -94,7 +94,7 @@ describe('SessionLifecycle.registerSession（S3 写点归位）', () => {
     expect(session.modelId).toBe('p/m')
   })
 
-  it('Map 写入：ISessionRegistry 只读面（get/has/keys/values）可见新条目', async () => {
+  it('Map 写入：ISessionRegistry 只读侧（get/has/keys/values）可见新条目', async () => {
     const env = makeEnv()
     await env.lifecycle.registerSession('s3', env.client, '/repo', 't')
     expect(env.lifecycle.has('s3')).toBe(true)

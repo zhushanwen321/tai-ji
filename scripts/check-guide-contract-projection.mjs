@@ -26,7 +26,7 @@
  * 形态；§3 保持「能力位全集 N 位」标题 + 表首列 `capabilityKey` 形态；§1 manifest 完整
  * 示例保持 ```json 围栏内含 "subagentEngine" 段形态。破坏形态 = 本检查红。
  *
- * 触发面：pre-commit 按 staged 路径接线（指南 / errors.ts / error-codes.ts /
+ * 触发范围：pre-commit 按 staged 路径接线（指南 / errors.ts / error-codes.ts /
  * engine-manifest.ts / contract-types.ts / zcode-subagent-cli 的 package.json 与
  * zcode-engine.ts），见 .githooks/install-hooks.sh 对应块。
  * 不设独立 SKIP_* 开关（R1 后惯例，总开关 SKIP_ALL_CHECKS 兜底）。

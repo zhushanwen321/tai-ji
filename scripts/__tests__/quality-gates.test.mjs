@@ -261,7 +261,7 @@ describe('judgeNoLcov：机器盲区判定（决策 4 判定边界）', () => {
     const { violations } = judgeNoLcov(report(Object.keys(files)), (f) => files[f])
     expect(violations.map((v) => v.file)).toEqual(['packages/foo/src/polyfill.ts'])
   })
-  it('.vue 文件保守不排除（template 渲染行为面）', () => {
+  it('.vue 文件保守不排除（template 渲染行为范围）', () => {
     const files = { 'packages/foo/src/Panel.vue': '<template>\n  <div>hi</div>\n</template>\n' }
     expect(judgeNoLcov(report(Object.keys(files)), (f) => files[f]).violations).toHaveLength(1)
   })

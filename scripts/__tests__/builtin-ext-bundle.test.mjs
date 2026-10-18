@@ -39,7 +39,7 @@ describe("builtin-ext-bundle (wave:builtin-ext-bundle)", () => {
 		// UI_FORM_MARKER，旧 ASK_USER_MARKER / PROTOCOL_VERSION 已随 a384df59d 换血移除），
 		// esbuild 应将其 inline 进 bundle（非 external）。若 inline 失败，bundle 里不会有这些标识符。
 		// 锚点换血记录（MF-2-1）：u5（a384df59d）ASK_USER_MARKER|PROTOCOL_VERSION →
-		// uiFormInteract|UI_FORM_MARKER——协议面再迁移时须同步更新此锚点，防过时恒红。
+		// uiFormInteract|UI_FORM_MARKER——协议范围再迁移时须同步更新此锚点，防过时恒红。
 		expect(src, "protocol runtime value 被 inline").toMatch(/uiFormInteract|UI_FORM_MARKER/);
 		// 反证：protocol 不应作为 external import 残留（@taiji 不是 virtualModule）
 		expect(src, "无 @taiji external 残留 import").not.toMatch(/from\s+["']@taiji\//);
@@ -300,7 +300,7 @@ describe("verify-staged checkManifest failure branches (M6a-09, MF-3)", () => {
  * plan 的 templates/ 由 bundle-extensions.mjs 专项拷贝（scripts/lib/staged-asset-dirs.mjs
  * 登记表驱动），不走 pi manifest 三字段——checkManifest 探测不到，缺失 = 打包版
  * list-template 恒 0 / select-template 恒 null 的静默失效（templates.ts scanTemplateDir
- * 防御性返回空清单、listTemplates 仅 warn）。共享登记表是唯一 postbuild 拦截面。
+ * 防御性返回空清单、listTemplates 仅 warn）。共享登记表是唯一 postbuild 拦截点。
  *
  * 构造模式（tmp mirror × spawnSync，同 check-guide-contract-projection 惯例）：
  * 检查脚本复制进 <tmp>/scripts/（REPO_ROOT 即 <tmp>，SSOT mandatory-extensions.json

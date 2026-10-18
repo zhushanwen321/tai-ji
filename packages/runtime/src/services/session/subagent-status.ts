@@ -88,7 +88,7 @@ export function normalizeSubagentStatus(
   if (!rawStatus) return { status: 'running' }
   if (OCCUPIED_STATUSES.has(rawStatus)) return normalizeOccupiedStatus(opts)
   // [U8 / 永久会话模型 §3.2.2] 两态新词直投：idle = 无任务在途可续聊（entry
-  // 写面 U2 起产出）。此前被当未知值落 closed 兜底——「空闲」被误读成终态。
+  // 写侧 U2 起产出）。此前被当未知值落 closed 兜底——「空闲」被误读成终态。
   if (rawStatus === 'idle') return { status: 'idle' }
   const legacy = LEGACY_TERMINAL_MAP.get(rawStatus)
   if (legacy) return normalizeLegacyTerminal(legacy)

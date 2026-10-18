@@ -236,7 +236,7 @@ afterEach(() => {
   vi.useRealTimers()
 })
 
-// ── 协议面：RPC 认领 ──────────────────────────────────────────────
+// ── 协议范围：RPC 认领 ──────────────────────────────────────────────
 
 describe('delivery 域 RPC 认领（D5 四 RPC）', () => {
   it('handles 认领 delivery.submit / cancel / drain / resync', () => {

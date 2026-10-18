@@ -89,7 +89,7 @@ function frameBytes(msg: ServerMessage): number {
   return Buffer.byteLength(JSON.stringify(msg), 'utf8')
 }
 
-/** ring 当前驻留帧（按 seq 顺序，浅拷贝）——subscribe snapshot 即 ring 窗口行为面。 */
+/** ring 当前驻留帧（按 seq 顺序，浅拷贝）——subscribe snapshot 即 ring 窗口行为范围。 */
 function ringSnapshot(bus: MessageBus, sid = 's1'): ServerMessage[] {
   return bus.subscribe(sid, makeClient()).snapshot
 }

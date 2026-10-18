@@ -2,7 +2,7 @@
 //
 // [PS-10/T6④] revive() 复位 orphanJudged + [U4a / D3b (a″)] 孤儿恢复活实例跳过。
 //
-// [登记 §3.3 迁移] 播种与断言全部走 v2 条目族（v1 全量快照写点及其读面已随兼容层删除
+// [登记 §3.3 迁移] 播种与断言全部走 v2 条目族（v1 全量快照写点及其读侧已随兼容层删除
 // ——旧 closedReason 等 v1 专属观察面不复存在）。两个恢复入口各承一臂：
 //   - entry-only 纠偏（recoverEntryOnlyOrphans，第一段）：主 session 有 v2 注册条目、
 //     无子文件、无事件文件——orphanJudged 的次级防线语义（appendEntry 失败 → 判据
@@ -89,7 +89,7 @@ function seedRecord(over: Partial<SubagentRecord> = {}): SubagentRecord {
   };
 }
 
-/** 恢复侧 store（新实例 = 重启形态；recordsDir 接线 = 事件面在场）。注入 appendEntry
+/** 恢复侧 store（新实例 = 重启形态；recordsDir 接线 = 事件流在场）。注入 appendEntry
  *  先行调用：抛错即中止（append 未落盘 → appended 不记），透传即捕获落盘产物。 */
 function makeStore(
   sessionsDir: string,
@@ -232,7 +232,7 @@ describe("[U4a / D3b (a″)] 孤儿恢复活实例跳过：现查探针（pid �
     store.recoverOrphanRecords("sess-orphan", mainFile);
 
     expect(appended).toHaveLength(0); // 跳过：不落任何收编 entry
-    // journal 零追加 + 收编 manifest 未物化（跳过是构造性的，不止条目面）
+    // journal 零追加 + 收编 manifest 未物化（跳过是构造性的，不止条目范围）
     expect(
       v2ReadEventLines(recordsDir, "sa-probe-1").some((e) => e.type === "record-settled"),
     ).toBe(false);
@@ -370,7 +370,7 @@ describe("收编入口（W1 D4：journal 重放 + 收编幂等）", () => {
     return store;
   }
 
-  /** 手工 v2 settled 条目行（D4 双面证据条目面的夹具构造——stopReason 可指定）。 */
+  /** 手工 v2 settled 条目行（D4 双面证据条目范围的夹具构造——stopReason 可指定）。 */
   function appendManualSettledEntry(id: string, stopReason: string): void {
     v2AppendMainSessionLine(mainFile, "subagent-record", {
       v: 2,
@@ -386,13 +386,13 @@ describe("收编入口（W1 D4：journal 重放 + 收编幂等）", () => {
     });
   }
 
-  // [W1 / D4 双面证据第二面判别] interrupted 族条目 = 「条目面先行写、journal 帧
+  // [W1 / D4 双面证据第二面判别] interrupted 族条目 = 「条目范围先行写、journal 帧
   // 缺失」不对称窗口残留（appendEvent fire-and-forget 失败），不构成跳过证据：
   // 收编放行 → 追加 settled 帧修复 journal（journal 唯一事实源承诺的自愈通道），
   // 二次重启由 fold settled 拦截不重复。
   it("夹具A journal 缺 settled 帧 + interrupted 终态条目 → 收编追加帧修复 journal，二次触发不重复", () => {
     seedCrashedRecord("sa-adopt-orphix");
-    // 崩溃前条目面先行写了一条 interrupted settled（journal 帧因写失败缺失的形态）
+    // 崩溃前条目范围先行写了一条 interrupted settled（journal 帧因写失败缺失的形态）
     appendManualSettledEntry("sa-adopt-orphix", "interrupted");
 
     const captured: unknown[] = [];

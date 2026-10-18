@@ -62,7 +62,7 @@ export interface ConcurrencyPool {
  *   concurrency-pool.test T-A2 锚定）。需要严格分层隔离的宿主应在条目侧
  *   自行保证，勿依赖 release 时点复查。
  *
- * 类保留内部消费（subagent-service 深路径）；对外导出面走 createConcurrencyPool
+ * 类保留内部消费（subagent-service 深路径）；对外导出范围走 createConcurrencyPool
  * 工厂（对象参数 + 策略枚举，不暴露本类名与位置参数构造——D7/U4 裁决）。
  */
 export class DefaultConcurrencyPool implements ConcurrencyPool {
@@ -154,7 +154,7 @@ export class DefaultConcurrencyPool implements ConcurrencyPool {
   }
 }
 
-/** createConcurrencyPool 选项（对象参数构造——导出面禁止位置参数歧义，D7/U4）。 */
+/** createConcurrencyPool 选项（对象参数构造——导出范围禁止位置参数歧义，D7/U4）。 */
 export interface CreateConcurrencyPoolOptions {
   /** 实例级最大并发配额。0/负数 clamp 到 1（防 acquire 永久排队死锁，C3 修复语义）。 */
   maxConcurrent: number;
@@ -166,9 +166,9 @@ export interface CreateConcurrencyPoolOptions {
 }
 
 /**
- * 并发池工厂（D7/U4 导出面）：宿主经此创建并发池，无需感知实现类。
+ * 并发池工厂（D7/U4 导出范围）：宿主经此创建并发池，无需感知实现类。
  *
- * 返回 ConcurrencyPool 接口而非 DefaultConcurrencyPool——barrel 导出面只认
+ * 返回 ConcurrencyPool 接口而非 DefaultConcurrencyPool——barrel 导出范围只认
  * 「对象参数 + 策略枚举」，实现类可内部替换，策略差异（pi=priority /
  * zsw=strict-fifo）显式化为参数而非两份复刻实现（深度分层公式与下限常量单源，
  * 公式见类注释与 slots 消费方）。

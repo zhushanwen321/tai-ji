@@ -53,7 +53,7 @@ function runBatch(h: Harness, events: ObservedEvent[], sessionId = SID): void {
 }
 
 describe('resume-decision：D4② 三条件判定', () => {
-  // 压缩成败无关契约：failed 形态在事件面同为 compaction-end{manual}（观察面只读 kind/reason，
+  // 压缩成败无关契约：failed 形态在事件范围同为 compaction-end{manual}（观察面只读 kind/reason，
   // errorMessage 不进本模块——该契约的检查位在 infra 翻译层测试），判定输入与成功路径逐字相同。
   it('工具压缩掐断活跃 turn（aborted turn-end + manual + 非 runtime 发起）→ 经内核提交续跑投递', () => {
     const h = makeHarness()

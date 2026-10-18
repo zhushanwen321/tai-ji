@@ -22,11 +22,11 @@ import { GLOBAL_SLOT_KEYS } from "../../../shared/global-slots.ts";
 
 // 镜像项（recordId 键 + killed 判据，与 client/mirror.ts 载荷契约同构）。
 export interface SpawnedChildMirrorEntry {
-  /** 引擎侧一次性子进程 pid（诊断面；recordId 才是镜像 key）。 */
+  /** 引擎侧一次性子进程 pid（诊断范围；recordId 才是镜像 key）。 */
   pid?: number;
   /** 必含判据（`child !== undefined && !child.killed` 同构）：true = 已被杀/已终止。 */
   killed: boolean;
-  /** 最近一次状态变更的墙钟时间戳（诊断面）。 */
+  /** 最近一次状态变更的墙钟时间戳（诊断范围）。 */
   updatedAt: number;
 }
 
@@ -98,7 +98,7 @@ export function coreSpawnedChildrenMirror(): CoreSpawnedChildrenMirror {
   return coreMirrorSlot();
 }
 
-// ── 公共面 API（subagent-service / SAR 消费）─────────────────────────
+// ── 公共部分 API（subagent-service / SAR 消费）─────────────────────────
 
 /**
  * 子进程注册（宿主记账回调 RunContext.onChildSpawned 的落点）：写镜像。

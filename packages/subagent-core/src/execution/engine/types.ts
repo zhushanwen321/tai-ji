@@ -9,7 +9,7 @@
 // 类型闭包 SSOT，core 反向 re-export 保上层消费方——import 方路径零改动；结构等价
 // 由 protocol-closure.test.ts 断言族检查）。[H1 U5/U6] InteractAction / InteractResult
 // 已随 chat 域 interact 面退役删除。
-// EngineHandle 留守本地：SDK 无此类型（协议面用裸 data 载荷），宿主侧句柄包装接口
+// EngineHandle 留守本地：SDK 无此类型（协议范围用裸 data 载荷），宿主侧句柄包装接口
 // 是 core 域概念。
 //
 // AgentResult 消歧（设计 §2.1/§3.3.5）：仓内有两个同名 AgentResult——

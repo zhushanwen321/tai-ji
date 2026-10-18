@@ -124,7 +124,7 @@ export interface DiagnosticCollectResult {
   exportedAt: string
 }
 
-/** buildDiagnosticEntries 注入面：dataDir 可注入（测试 mkdtemp），其余为动态推导。 */
+/** buildDiagnosticEntries 注入范围：dataDir 可注入（测试 mkdtemp），其余为动态推导。 */
 export interface CollectDiagnosticOptions {
   dataDir?: string
   /** app 版本（IPC 层注入 app.getVersion()；缺省 unknown——纯收集层不依赖 electron） */
@@ -151,7 +151,7 @@ function readTextIfExists(file: string): string | null {
 
 /**
  * 从登记清单事件提取最近一次出现的 piVersion（runtime 事件按 D1 schema 携带）。main 进程无
- * pi 二进制的同步版本查询面（runtime 侧是 spawn `pi --version` 异步获取），登记清单是
+ * pi 二进制的同步版本查询路径（runtime 侧是 spawn `pi --version` 异步获取），登记清单是
  * main 侧唯一已落盘的权威来源；全空返回 unknown（显式非静默）。
  * 【oe-audit C5】入参从原始行改为共享 parse 产物（events，与 detailPaths/首屏表格
  * 同一次 parseJournalLines 输出）——消除家族内并行 JSONL 循环。
@@ -452,7 +452,7 @@ export function normalizeFsError(err: unknown): { code: string; message: string 
   return { code: 'EUNKNOWN', message: err instanceof Error ? err.message : String(err) }
 }
 
-/** exportDiagnosticBundle 注入面：outPath 必传（D6 用户自选保存位置由 IPC 层先取得）。 */
+/** exportDiagnosticBundle 注入范围：outPath 必传（D6 用户自选保存位置由 IPC 层先取得）。 */
 export interface ExportDiagnosticBundleOptions extends CollectDiagnosticOptions {
   outPath: string
 }

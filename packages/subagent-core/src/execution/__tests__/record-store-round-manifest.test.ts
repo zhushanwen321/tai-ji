@@ -15,7 +15,7 @@
 //   4. 跨轮幂等：同一 record 多轮轮终重复写派生视图（缓存性质），manifest 恒为
 //      最新合法 idle 形态。
 //
-// 测试纪律：真实 fs 落盘断言（写面形态本身是断言对象）；fixture 一律 mkdtempSync
+// 测试纪律：真实 fs 落盘断言（写侧形态本身是断言对象）；fixture 一律 mkdtempSync
 // 自建自删（tmpdir），不触碰真实数据目录。
 
 import * as fs from "node:fs";
@@ -230,7 +230,7 @@ describe("manifest 来源身份派生视图与 markModelOverride 派生刷新（
     const watermarked = raw["eventsStamp"] as { mtimeMs: number; size: number };
     expect(watermarked.mtimeMs).toBe(stamp.mtimeMs);
     expect(watermarked.size).toBe(stamp.size);
-    // manifest 源反查：覆盖记账值随派生视图可达（session-reader / 查询面的读侧半边）。
+    // manifest 源反查：覆盖记账值随派生视图可达（session-reader / 查询范围的读侧半边）。
     const members = store.collectRecordsByParentRunId("wf-run-2", 50);
     const found = members.find((r) => r.id === "ovr-member");
     expect(found?.modelOverride?.ref).toEqual({ provider: "p1", modelId: "m9" });

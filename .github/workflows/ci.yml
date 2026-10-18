@@ -309,7 +309,7 @@ jobs:
       # R1-R3 新增 scripts 层护栏测试（check-unsafe-stream-writes / check-core-dist-gate /
       # gitcode-release-sync，纯函数 + mock fetch，不依赖 staged 产物）接入 CI——护栏测试
       # 自身也需要回归保护。
-      # npm-publish-surface-guard u3 同批追加 check-publish-surface（发布面检查本体单测，
+      # npm-publish-surface-guard u3 同批追加 check-publish-surface（发布范围检查本体单测，
       # vitest + tmpdir fixture 同上惯例）。
       # session-root-discovery R2-MF1 同批追加 check-layout-literals / check-provider-credential-reads
       # （检查正则/白名单回归，同上 fixture 惯例不依赖 staged 产物）。
@@ -460,7 +460,7 @@ jobs:
           ELECTRON_SKIP_BINARY_DOWNLOAD: '1'
         run: pnpm install --frozen-lockfile
 
-      # C-proc-11 发布面一致性检查（docs/design/npm-publish-surface-guard.md §3.3 D2）：
+      # C-proc-11 发布范围一致性检查（docs/design/npm-publish-surface-guard.md §3.3 D2）：
       # dist 发布包 files 白名单 ↔ 构建产出双向对齐（幽灵条目 / 产物目录反向覆盖 /
       # 自包含探针 / workspace 依赖发布闭包）。dist 产物被 .gitignore、干净 checkout
       # 上必红，刻意不挂 pre-commit（与 extensions 方向的刻意不对称，设计 D2）——
@@ -670,10 +670,10 @@ jobs:
       - name: Subagent-service boundary guard (H3)
         run: node scripts/check-subagent-service-boundary.mjs
 
-      # H4 record 持久化写面检查（与 pre-commit 同源直调；检查全量扫描
+      # H4 record 持久化写点检查（与 pre-commit 同源直调；检查全量扫描
       # packages/*/src + extensions/**/src 不依赖 staged 上下文）：store 外 record
-      # 写面直写（R1 六名写函数 + R2 subagent-record entry）零命中——本地 hook 按
-      # staged 路径触发，触发面外的包在 CI 面等价拦截（D7 通则，同上行 H3 /
+      # 写点直写（R1 六名写函数 + R2 subagent-record entry）零命中——本地 hook 按
+      # staged 路径触发，触发范围外的包在 CI 面等价拦截（D7 通则，同上行 H3 /
       # D9-① 的挂载理由）。
       - name: Record write surface guard (H4)
         run: node scripts/check-record-write-surface.mjs
@@ -707,7 +707,7 @@ jobs:
       # zcode-session-source bun 驱动双跑（D3 源级双跑，session-reader-shared-core U5，
       # 与 pre-commit 2h 段同源直调）：pi 扩展宿主是编译版 bun 二进制，bun:sqlite 是
       # 生产宿主唯一可用 sqlite 驱动——bun 趟只能在有 bun 的环境跑，本地开发者可无
-      # bun（check-bun-driver fail-open 放行），CI 是该路径的兜底覆盖面，故 --require-bun
+      # bun（check-bun-driver fail-open 放行），CI 是该路径的兜底覆盖范围，故 --require-bun
       # 把「bun 缺失」翻转为红。版本钉 1.3.8 = P-bun-host 实测版本（设计 D3 重审触发
       # 条件：bun 大版本升级改变 sqlite 语义须重验探针门后同步此处）。
       - uses: oven-sh/setup-bun@v2
@@ -720,7 +720,7 @@ jobs:
       # 产物内 sqlite 驱动探测代码必须保持「运行期解析」形态——esbuild 升级 / 驱动
       # 实现回改字面量会把 spec 静态化（bundle 成功但 staged 运行期 Cannot find
       # module，比不拆更糟）。pre-commit 2h-2 段只在 staged 命中 reader 源 /
-      # zcode-session-source 时触发，CI 是免 staged 前提下的兜底覆盖面（D7 通则，
+      # zcode-session-source 时触发，CI 是免 staged 前提下的兜底覆盖范围（D7 通则，
       # 与 check-bun-driver 同一挂载理由）——CI 无 staged 产物，--rebuild 先重建
       #（bundle-extensions <1s）再检查。
       - name: P-bundle gate (staged driver spec runtime-resolved form)

@@ -1,5 +1,5 @@
 /**
- * 移动壳静态托管（remote-access D3/E4/E5）——独立静态面 module（S3 拆分：原实现在
+ * 移动壳静态托管（remote-access D3/E4/E5）——独立静态托管 module（S3 拆分：原实现在
  * ConnectionManager 内，静态托管与连接生命周期是正交变化原因，抽出后 CM 只持可空
  * handler 引用）。
  *
@@ -11,12 +11,12 @@
  *   的 remoteAccess 入参），关态零挂载零探测由组合根「不调用不注入」构造性保证。
  *
  * 对外三件套：
- * - resolveMobileStaticRoot：启动期一次探测（E5），返回 dist 绝对路径或 null（禁用静态面）；
+ * - resolveMobileStaticRoot：启动期一次探测（E5），返回 dist 绝对路径或 null（禁用静态托管）；
  * - createMobileStaticHandler：由 distRoot 构造 (req,res) handler，注入 ConnectionManager；
  * - resolveMobileStaticPath：穿越判定纯函数（单测锚定）。
  *
  * 日志纪律（D3）：访问/拒绝日志只记剥除 query 后的 pathname——`GET /?token=...` 的
- * 完整 URL 不落盘，防 remote token 经静态面日志形成第三落盘通道。
+ * 完整 URL 不落盘，防 remote token 经静态托管日志形成第三落盘通道。
  */
 import type { IncomingMessage, ServerResponse } from 'node:http'
 import * as fs from 'node:fs'
@@ -63,7 +63,7 @@ const MOBILE_STATIC_CONTENT_TYPES: Record<string, string> = {
  * 4. 白名单外一律返回 null 且本函数不发起任何 fs 调用——不读白名单外任何路径（E4）。
  *    读取目标只可能是判定通过的 resolved 路径或 distRoot/index.html 兜底，无其他拼点。
  * 已知不防：dist 内 symlink 指向外部——产物由本仓构建链生成、无 symlink，且非网络
- * 输入面；产物来源变化时需复审。
+ * 输入范围；产物来源变化时需复审。
  */
 export function resolveMobileStaticPath(distRoot: string, pathname: string): string | null {
   let decoded: string
@@ -86,7 +86,7 @@ export function resolveMobileStaticPath(distRoot: string, pathname: string): str
  * - 关态（remoteAccess=false）→ null 且零 IO 零日志：静态 handler 不构造，HTTP 分派
  *   与无远程访问形态逐字节一致。
  * - 开态但未传 --mobile-dist / 目录不存在 / 指向普通文件 → 响亮 error（含 pnpm build
- *   与打包配置指引）+ null：静态面禁用，WS 与桌面面不受影响、不拒启（E5）。
+ *   与打包配置指引）+ null：静态托管禁用，WS 与桌面面不受影响、不拒启（E5）。
  * 返回 resolve 后的绝对路径（argv 值可能相对 cwd，统一规范化后作白名单判定基准）。
  */
 export function resolveMobileStaticRoot(options: {
@@ -139,7 +139,7 @@ export function createMobileStaticHandler(distRoot: string): MobileStaticHandler
   return async (req, res): Promise<void> => {
     try {
       const method = req.method ?? 'GET'
-      // 仅 GET/HEAD（D3）：静态面无写语义；其余方法 405 + Allow 头指明合法方法。
+      // 仅 GET/HEAD（D3）：静态托管无写语义；其余方法 405 + Allow 头指明合法方法。
       if (method !== 'GET' && method !== 'HEAD') {
         res.writeHead(HTTP_METHOD_NOT_ALLOWED, { Allow: 'GET, HEAD' })
         res.end()

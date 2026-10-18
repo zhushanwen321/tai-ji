@@ -13,8 +13,8 @@
  * 2. rename-session ext-config（getRenameModel / setRenameModel / getRenameMode /
  *    setRenameMode）：读改写 ${PI_CODING_AGENT_DIR}/config/rename-session-ext-config.json
  *    的 model / mode 字段（与 extension 的 llm-shared getConfigPath 路径契约对齐）。
- *    extension 事件面（turn_end / message_end / 工具 execute 检查）读时刷新（mtime+size
- *    缓存），本侧写入后下一事件自动生效（设计 rename-session-three-modes D1：事件面
+ *    extension 事件范围（turn_end / message_end / 工具 execute 检查）读时刷新（mtime+size
+ *    缓存），本侧写入后下一事件自动生效（设计 rename-session-three-modes D1：事件范围
  *    live 求值）。只改目标字段，保留文件内其他字段（enabled/maxTitleLength/thinkingLevel
  *    及未来新增）。RMW / 锁协议走共享基建 ext-config-rmw.ts（单一实现点）。
  */
@@ -208,8 +208,8 @@ export function getRenameMode(): RenameMode {
  * 非法值归一为 first-stop（extension 读侧 normalize 对非法值同回默认，写进去也不生效，
  * 不如归一——与 setRenameModel 对无 "/" ref 的归一纪律一致）。
  * 锁协议与 setRenameModel 共用同一把锁（同一文件，D1e）。
- * 生效时点：extension 事件面 live 读 config，写入后下一事件生效；rename_session 工具面
- * 只在 pi 进程起动时求值一次（设计 D1 求值时点边界，GUI 切换须提示「工具面对新会话生效」）。
+ * 生效时点：extension 事件范围 live 读 config，写入后下一事件生效；rename_session 工具侧
+ * 只在 pi 进程起动时求值一次（设计 D1 求值时点边界，GUI 切换须提示「工具侧对新会话生效」）。
  */
 export function setRenameMode(mode: RenameMode): void {
   const normalized = isRenameMode(mode) ? mode : DEFAULT_RENAME_MODE
@@ -286,7 +286,7 @@ export function getRenamePrompt(): RenamePromptSnapshot {
  * 设置 rename 标题提示词（读改写，合并覆盖 style + customInstruction 两字段，保留其他字段）。
  * style 非法归一 slug；instruction 非字符串归一空串、超长截断（extension 读侧同限，写侧先归一
  * 保证 reply 回读值 = 生效值）。单次 RMW 原子写（与 setRenameModel 共用同一把锁，D1e）。
- * 生效时点：extension 事件面 live 读 config，写入后下一次 rename 触发即生效，无需重启。
+ * 生效时点：extension 事件范围 live 读 config，写入后下一次 rename 触发即生效，无需重启。
  * 返回归一后生效值（renderer 保存成功后回填，与 setRenameMode 的 reply 语义一致）。
  */
 export function setRenamePrompt(style: RenameStyle, instruction: string): RenamePromptSnapshot {

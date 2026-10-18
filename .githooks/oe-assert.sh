@@ -82,7 +82,7 @@ for f in $SRC_FILES; do
   SYMS=$(printf '%s\n' "$ADDED" \
     | grep -oE 'export (async function|function|const|let|var|class) [A-Za-z_$][A-Za-z0-9_$]*' \
     | awk '{print $NF}' | sort -u)
-  # 具名花括号导出，跳过别名（export { x as y } 拦截面外）
+  # 具名花括号导出，跳过别名（export { x as y } 拦截范围外）
   SYMS="$SYMS
 $(printf '%s\n' "$ADDED" | grep -oE 'export [{][^}]*[}]' \
     | sed -E 's/export[[:space:]]*[{]//; s/[}]//' | tr ',' '\n' \

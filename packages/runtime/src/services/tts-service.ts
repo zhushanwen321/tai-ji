@@ -80,7 +80,7 @@ interface TtsStoreShape {
   providers: Partial<Record<TtsProviderId, TtsConfig>>
 }
 
-/** TtsProviderId 字面量全集（运行时判型用；类型面以 shared 联合为权威）。 */
+/** TtsProviderId 字面量全集（运行时判型用；类型范围以 shared 联合为权威）。 */
 const TTS_PROVIDER_IDS = ['stepfun', 'minimax', 'mimo'] as const satisfies readonly TtsProviderId[]
 
 /** getConfig 的兜底 activeProvider（全部未配置时派生视图仍需一个确定值；联合首成员，无行为影响）。 */
@@ -259,7 +259,7 @@ export class TtsService {
 
   /**
    * 合成并落盘，返回可播放的 WAV 文件路径。reply 只回 filePath——fromCache/chars/chunks
-   * 只进日志不进协议面（§7.1）。
+   * 只进日志不进协议范围（§7.1）。
    */
   async speak(text: string, sessionId?: string): Promise<{ filePath: string }> {
     // ① 读 tts.json + secrets/tts-<id>-apikey.txt（现读现用，无缓存）

@@ -37,7 +37,7 @@ DISABLE_RE = re.compile(r"eslint-disable")
 # 侧「文件迁走则 glob 跟走」策略对齐）。现前缀登记同一豁免语义——规则 A 目前只扫
 # extensions/ 前缀（C 侧由 eslint 的 packages/subagent-core/src no-console:error 块
 # 管住，src/core 豁免对应本条目前瞻条目），本条目
-# 保证规则 A 扫描面未来若扩到 packages/ 时豁免同步，与 eslint 侧 override
+# 保证规则 A 扫描范围未来若扩到 packages/ 时豁免同步，与 eslint 侧 override
 # （packages/subagent-core/src/core/**）一一对应。
 ALLOWED_CONSOLE_PREFIXES = (
     "packages/subagent-core/src/core/",

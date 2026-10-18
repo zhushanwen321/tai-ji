@@ -13,7 +13,7 @@
  * 范围裁定（W24 扩围）：`packages/renderer/src/**` + `packages/core/src/**` 全域（W4 首版
  * 仅 stores/，扩围随 W24 调用图收紧同批——plan W4 遗留裁决）。2026-10-04 再扩围纳入
  * `packages/mobile-renderer/src/**` + `packages/ui/src/**`（branch-review round 1 dmg-r1-2：
- * mobile-renderer 模块级缓存族零机器拦截、豁免标记无登记对应行也逃过豁免闭环——扫描面
+ * mobile-renderer 模块级缓存族零机器拦截、豁免标记无登记对应行也逃过豁免闭环——扫描范围
  * 必须随 GUI 数据消费包拓扑同步，登记表 §5 维护规约 6 承接后续新包）。runtime/ 主进程与
  * extensions/ 不在 GUI 数据层，不扫（runtime 侧声明经检查面 5 反向锁定，见登记表表头 6）。
  *

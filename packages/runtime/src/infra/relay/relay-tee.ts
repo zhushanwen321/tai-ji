@@ -105,7 +105,7 @@ export class RelayTee {
 
   constructor(private readonly opts: RelayTeeOptions) {
     // [btw-question D9③ / M1-a 键中段位约定] 虚拟键中段 = owner 会话的 piSessionId：
-    // btw 线的 relay 以线 vid 归属（opts.mainSessionId 是 bus 路由键，发布面保持 vid 原样），
+    // btw 线的 relay 以线 vid 归属（opts.mainSessionId 是 bus 路由键，发布范围保持 vid 原样），
     // 键构造前先 extract——vid 不入键，INVAR-1.1 三段式不破（M1a 值域断言对 `btw:` 前缀
     // fail-fast，未翻译即 throw）。非 btw 输入零变化。
     this.virtualId = subagentVirtualId(

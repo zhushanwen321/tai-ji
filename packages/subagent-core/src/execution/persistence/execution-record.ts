@@ -811,7 +811,7 @@ export function completeLegacyClosed(
 }
 
 /**
- * settleWorkflowRecord 的写入面注入（finalizeRecord 归 RecordLifecycle 显式接口，
+ * settleWorkflowRecord 的写侧注入（finalizeRecord 归 RecordLifecycle 显式接口，
  * 经调用方闭包回指）。
  */
 export interface WorkflowRecordSettleExec { // oe-exempt:20260929:framework:record settle exec contract per design D15
@@ -823,7 +823,7 @@ export interface WorkflowRecordSettleExec { // oe-exempt:20260929:framework:reco
  * finalizeRecord。CAS 拒绝（cancel/dispose 抢先 settle）静默跳过——既有语义逐字保持。
  *
  * [D1 拆边 Class C] 原定义在 `orchestration/terminal-actions.ts`，2026-09-30 下沉本模块：
- * 函数体只读 record 两态状态位 + 委托注入面——不读 run 生命周期 / 转移表 / 通知面，
+ * 函数体只读 record 两态状态位 + 委托注入点——不读 run 生命周期 / 转移表 / 通知面，
  * 是记录级持久化原语（编排语义零耦合），故归 persistence，编排侧不再被 execution
  * 反向 import。
  */

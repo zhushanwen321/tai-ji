@@ -247,7 +247,7 @@ export interface AgentProfile {
  *   保证「可用即跑」不因资产格式瑕疵丢失配置（先例：parseAgentWithMeta 的 MF-3
  *   fallback）。fallback 触达时写入 warnings（warn 可见，调用方决定呈现）。
  *
- * 与 parseAgentWithMeta 的关系：本函数是新增导出面（执行消费方），既有
+ * 与 parseAgentWithMeta 的关系：本函数是新增导出范围（执行消费方），既有
  * parseAgentWithMeta/loadByPath 语义零改动（含 engine 未注册 throw 的解析期校验）。
  * 本函数宽容语义不抛，故不做 engine 注册校验（执行校验归执行路径）。
  */

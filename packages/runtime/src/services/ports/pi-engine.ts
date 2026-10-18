@@ -220,11 +220,11 @@ export interface IPiEngine {
   /** 进程是否已退出。 */
   readonly exited: boolean
 
-  // ── 活动时钟（观测面） ──
+  // ── 活动时钟（观测范围） ──
   /**
    * 最近一次 pi 双向活动时刻（ms epoch）。
    * 写点（RpcClient 内部）：出站 sendCommand / 入站 handleMessage 全帧。初值 = spawn 时刻。
-   * 消费方为观测面（crash 取证「死前最后活动时刻」等）。原空闲回收判定消费
+   * 消费方为观测范围（crash 取证「死前最后活动时刻」等）。原空闲回收判定消费
    * （idle-pi-reclamation reaper + touchActivity 手动刷新）已随 ADR-0122 退役。
    */
   readonly lastActivityAt: number

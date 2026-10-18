@@ -27,7 +27,7 @@ export interface SaveDialogResult {
   filePath?: string
 }
 
-/** 依赖注入面：测试注入对话框桩 / 打包桩，生产用 electron 与真实实现。 */
+/** 依赖注入范围：测试注入对话框桩 / 打包桩，生产用 electron 与真实实现。 */
 export interface DiagnosticsExportIpcDeps {
   /** 保存对话框；缺省 dialog.showSaveDialog（聚焦窗口，无聚焦窗口直接 canceled） */
   showSaveDialog?: (options: { title: string; defaultPath?: string }) => Promise<SaveDialogResult>

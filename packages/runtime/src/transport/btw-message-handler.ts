@@ -1,5 +1,5 @@
 /**
- * BtwMessageHandler —— btw.* 三帧控制面路由（btw-question 设计 D6，M2-b）。
+ * BtwMessageHandler —— btw.* 三帧控制范围路由（btw-question 设计 D6，M2-b）。
  *
  * 结构对称 worktree-message-handler：handles 清单 + switch + 领域转发（BtwService）。
  *
@@ -75,7 +75,7 @@ export function buildBtwThreadListPayload(
 
 /**
  * 组合根注入的 btw routing 依赖（server RuntimeServerOptionalServices.btw 的形状）。
- * cwd/主 turn 信号的解析留组合根（活跃表 + 扫描面都在 SessionService）——transport 层
+ * cwd/主 turn 信号的解析留组合根（活跃表 + 扫描范围都在 SessionService）——transport 层
  * 不直连 sessions 内部状态。
  */
 export interface BtwRoutingDeps {
@@ -83,7 +83,7 @@ export interface BtwRoutingDeps {
   /**
    * 主会话解析（btw.create 用）：线 cwd = 主会话 cwd（D1/D2），mainTurnActive = 主 turn
    * 活跃信号（BtwCreateRequest 的可选增强——纯文本流式中文件级悬空 tool-call 不可判，
-   * 分支③ pill 判定用）。undefined = 活跃表与扫描面皆无 → main_session_not_found。
+   * 分支③ pill 判定用）。undefined = 活跃表与扫描范围皆无 → main_session_not_found。
    */
   resolveMain(mainSid: string): { cwd: string; mainTurnActive: boolean } | undefined
 }

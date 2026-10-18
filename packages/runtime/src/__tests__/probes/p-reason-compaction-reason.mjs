@@ -211,7 +211,7 @@ async function scenarioDuringActiveRun() {
     const warmed = await pi.waitEvent('agent_settled', 0, 60_000)
     check(!!warmed, '预热 turn 已 settle（压缩有可摘要内容）')
     const from = pi.events.length
-    // 不 await prompt（流式进行中才有掐断窗口）；reject 不判红（断言以事件面为准），失败原因留痕
+    // 不 await prompt（流式进行中才有掐断窗口）；reject 不判红（断言以事件范围为准），失败原因留痕
     void pi.rpc('prompt', { message: 'P-reason 活跃 run 场景' }).catch((e) => {
       console.error('[probe] prompt rpc 失败（留痕不判红）：', e)
     })

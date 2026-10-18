@@ -1,5 +1,5 @@
 /**
- * TTS driver 注册面（ai-voice-tts 设计 §7.3）——三家 driver 的唯一装配出口。
+ * TTS driver 注册点（ai-voice-tts 设计 §7.3）——三家 driver 的唯一装配出口。
  *
  * 消费方：u3 TtsService（speak 时按 activeProvider 现读 tts.json baseUrl 建 driver；
  * getCapabilities 回表单派生视图）与 u3b 组合根接线。能力表/表单派生视图/请求体组装/错误翻译等

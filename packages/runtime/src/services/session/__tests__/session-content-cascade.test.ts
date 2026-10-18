@@ -427,9 +427,9 @@ describe('cascadeDeleteSessionContent 执行顺序（验收⑥）', () => {
   })
 })
 
-// ── 验收⑤：A23 触发面收窄（restore 清场不触发）───────────────────────────────
+// ── 验收⑤：A23 触发点收窄（restore 清场不触发）───────────────────────────────
 
-describe('A23 触发面收窄（验收⑤，E8）', () => {
+describe('A23 触发点收窄（验收⑤，E8）', () => {
   it('removeSessionEntry 汇聚链（restore 清场同链）驱动后 base-tool-enhance 目录仍在', async () => {
     const p = makePool()
     activePoolRef.current = { agentDir: p.agentDir, sessionsRoot: p.sessionsRoot }

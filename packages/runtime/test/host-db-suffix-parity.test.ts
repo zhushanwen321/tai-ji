@@ -5,7 +5,7 @@
  * zcode-cli db-path.ts（引擎写侧）与 runtime sqlite-access.ts（import 读侧）import
  * 同一常量，不再是各自重声明的同形字面量。本检查四层：
  *   ① 权威常量值独立展开断言（期望值逐段写死——SSOT 自身被改错时红）；
- *   ② runtime 侧函数输出与权威常量 join 等价（同源引用的行为面断言）；
+ *   ② runtime 侧函数输出与权威常量 join 等价（同源引用的行为范围断言）；
  *   ③ 脚本字面量文本比对：scripts/zcode-session-db-cleanup.mjs 为纯 ESM（无 TS 构建
  *      链）无法 import SSOT，保留等价 JS 字面量——逐段比对权威常量；
  *   ④ 重声明扫描：契约相关源码树内四段数组字面量只允许出现在 SSOT 与脚本字面量
@@ -71,7 +71,7 @@ describe('① 路径段 SSOT（engine-sdk zcode-db-paths）值独立展开断言
   })
 })
 
-describe('② runtime 侧函数输出与 SSOT 常量 join 等价（同源引用行为面）', () => {
+describe('② runtime 侧函数输出与 SSOT 常量 join 等价（同源引用行为范围）', () => {
   it('zcodeIsolatedDbPath(dataDir) = join(dataDir, ...ZCODE_ISOLATED_DB_SEGMENTS)', () => {
     expect(zcodeIsolatedDbPath('/data-root')).toBe(join('/data-root', ...ZCODE_ISOLATED_DB_SEGMENTS))
   })

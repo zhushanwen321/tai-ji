@@ -179,7 +179,7 @@ describe('normalizeZcodeSessionId（T1 三步骤 + 后置条件 fail-fast）', (
   it('步骤③ 后置条件 fail-fast（message 带原 id；错误码 import_invalid_session 映射由薄包装承接——下方 prepareImport 用例锁定）', () => {
     for (const raw of ['', 'sess_', '_', '-']) {
       // eslint 参数循环内断言 message：空串/纯 sess_（剥后空）、'_'/'-'（字符集或首尾非法）。
-      // source 包错误面归消费侧（设计 §1.5 契约④）：normalize 抛普通 Error，本组只断言
+      // source 包错误范围归消费侧（设计 §1.5 契约④）：normalize 抛普通 Error，本组只断言
       // fail-fast + message；「后置条件不满足 → import_invalid_session」的映射断言在
       // prepareImport describe（'sess_' 归一化为空 / 'sess_-badid-0001' 首字符非法两组）。
       try {

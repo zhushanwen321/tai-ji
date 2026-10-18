@@ -74,7 +74,7 @@ const DATETIME_PAD_WIDTH = 2
 
 /**
  * 解析 ps 输出并过滤出 taiji 家族 pi 行（纯函数）。
- * 非数字 pid/ppid 的行（空行、异常输出）跳过——fail-open 只影响覆盖面不影响精确性。
+ * 非数字 pid/ppid 的行（空行、异常输出）跳过——fail-open 只影响覆盖范围不影响精确性。
  */
 export function parseMachinePiRows(psStdout: string): MachinePiRow[] {
   const rows: MachinePiRow[] = []

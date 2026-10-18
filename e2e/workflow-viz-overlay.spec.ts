@@ -501,7 +501,7 @@ test.describe('Workflow 可视化 overlay E2E', () => {
 
     // V1 演员载体断言固化：单 phase 7+ agent 演员（wf-mock-wide-phase，W-2 纵向边界
     // 载体）——7 节点全部挂载且态分布与 fixture 对账（4 done + 3 running）；列高越界的
-    // pan 兜底几何走查归 V1/L4（真机视口实算，非黑盒断言面）
+    // pan 兜底几何走查归 V1/L4（真机视口实算，非黑盒断言范围）
     overlay = await openOverlay(page, ACTORS.widePhase)
     for (let i = 0; i < 7; i++) {
       await expect(dagNode(overlay, `agent-L3-N${i}`)).toHaveAttribute('data-state', i < 4 ? 'done' : 'running')

@@ -81,7 +81,7 @@ describe('离线计算（pi-ai 同源）', () => {
         expect(computeSupportedLevels(input), `${p.id}/${m.id}`).toEqual(piDirect(input))
       }
     }
-    expect(total).toBeGreaterThan(1000) // fixture 覆盖面不缩水（当前 1220）
+    expect(total).toBeGreaterThan(1000) // fixture 覆盖范围不缩水（当前 1220）
   })
 
   it('档位过滤语义锚点：off=null 剔除、xhigh/max 仅显式映射才含、未映射档默认含', () => {

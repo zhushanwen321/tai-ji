@@ -78,8 +78,8 @@ const LEGACY_JOURNAL_SUFFIX = ".events.jsonl";
  * 不再携带快照行派生视图。不含 startedAt（旧 TTL 超龄判定字段，全量收编不判超龄，
  * 消费方为零的字段不进接口）。
  *
- * [W2/V1] transition/save 成员删除：终局化经收编原语（journal/manifest 写面，
- * 不经两态机快照）——快照写面不再是枚举读侧的职责（判据读者已随 D6 改接换源；
+ * [W2/V1] transition/save 成员删除：终局化经收编原语（journal/manifest 写侧，
+ * 不经两态机快照）——快照写侧不再是枚举读侧的职责（判据读者已随 D6 改接换源；
  * 候选来源已随 U2 改接换 journal 文件族）。
  */
 export interface WorkflowRunEnumerationStore { // oe-exempt:20260929:framework:workflow/record 协议契约类型——ports 类型契约先行、单实现常态（dev-0.10.5 已验收代码 merge 带入）

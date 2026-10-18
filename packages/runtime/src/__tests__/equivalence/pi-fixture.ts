@@ -40,7 +40,7 @@
  *
  * agent dir 隔离（凭证可见、扩展不可见）：spawn 时注入 PI_CODING_AGENT_DIR 指向 mkdtemp 临时
  * agent dir，只原样拷贝凭证类文件（auth.json / models.json / models-store.json，清单以 pi 0.84.1
- * 实装读取面为准，见 real-pi-gate.ts 的 copyCredentialFiles 注释）。不拷 settings.json、不放
+ * 实装读侧为准，见 real-pi-gate.ts 的 copyCredentialFiles 注释）。不拷 settings.json、不放
  * extensions/ 子目录——
  * 否则用户全局扩展集（settings.json packages/extensions 清单的 npm 扩展 + <agentDir>/extensions/
  * 自动发现）会随子进程加载，其 appendEntry 调用发射 entry_appended 事件，击穿
@@ -305,7 +305,7 @@ export async function spawnPiFixture(options: PiFixtureOptions = {}): Promise<Pi
   let fauxScriptEnv: { TAIJI_FAUX_SCRIPT?: string } = {}
   if (fauxMode) {
     // 脚本落 agentDir：pi 对该目录只读特定文件名（auth/models/settings），faux-responses.json
-    // 不在读取面，无扫描副作用；dispose 随 agentDir 一并清理
+    // 不在读侧，无扫描副作用；dispose 随 agentDir 一并清理
     const scriptPath = join(agentDir, 'faux-responses.json')
     writeFileSync(scriptPath, JSON.stringify(options.fauxResponses))
     fauxScriptEnv = { TAIJI_FAUX_SCRIPT: scriptPath }

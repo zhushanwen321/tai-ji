@@ -260,7 +260,7 @@ export function inspectEnginePackage(
 
   // ── modelCatalog（可选；缺省 = 不注入保持 undefined——解析器不得把省略填成
   //    models: []，否则省略与「显式空静态目录」不可区分，validateModel 的成员
-  //    实现差异与 buildEmptyModelsHint 触发面都会失真）──
+  //    实现差异与 buildEmptyModelsHint 触发范围都会失真）──
   const modelCatalog = parseModelCatalog(id, m["modelCatalog"]);
 
   const displayName = parseOptionalDisplayFields(m, id);

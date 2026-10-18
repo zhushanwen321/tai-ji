@@ -58,7 +58,7 @@ import { makePi, type PiMock } from "../../execution/__tests__/helpers/pi-mock.t
 
 // ── harness ──────────────────────────────────────────────────
 
-/** 按 stepIndex 查 trace 节点（Trace 公共查询面 = toArray 线性扫）。 */
+/** 按 stepIndex 查 trace 节点（Trace 公共查询范围 = toArray 线性扫）。 */
 function findByStep(trace: Trace, stepIndex: number) {
   return trace.toArray().find((n) => n.stepIndex === stepIndex);
 }
@@ -261,7 +261,7 @@ describe("pump → executeWorkflowAgent 端到端", () => {
   });
 });
 
-// ── 4：注入面回退（旧 deps 不注入 dispatch） ──────────────────
+// ── 4：注入点回退（旧 deps 不注入 dispatch） ──────────────────
 
 describe("workflowAgentDispatch 未注入回退", () => {
   it("旧 deps（仅 runner）→ deps.runner.run 被调（[H2 W4] SAR.run 已掏空为纯转调 executeWorkflowAgent，两分支执行体归一；生产恒注入 dispatch 本分支不可达，仅为旧测试 deps 形态兼容）", async () => {

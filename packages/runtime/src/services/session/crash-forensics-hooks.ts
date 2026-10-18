@@ -12,8 +12,8 @@ import { getRuntimeCheckpointStore } from './runtime-checkpoint.js'
 import { inflightMirror } from './inflight-mirror.js'
 
 /**
- * attach 挂点的 session 元数据读面（组装根窄注入，同 TraceSync/records 的 deps 模式）：
- * 条目查询经 lifecycle（Map 所有者）只读面，活动时间戳取 pi client 空闲信号，
+ * attach 挂点的 session 元数据读侧（组装根窄注入，同 TraceSync/records 的 deps 模式）：
+ * 条目查询经 lifecycle（Map 所有者）只读侧，活动时间戳取 pi client 空闲信号，
  * 查看时间戳取 Facade 的 per-sid 查看表。
  */
 export interface CrashLedgerHooksDeps {
@@ -27,7 +27,7 @@ export interface CrashLedgerHooksDeps {
  * 是 create / restore（含自动 respawn 与惰性恢复）/ fork 三入口的注册汇聚点（session-lifecycle
  * registerSession 在 sessions.set 之后同步直发），**一个挂点覆盖四类事件中的全部「附着」
  * 形态**——respawn 成功即 pi 重新附着，无需在 restore 链路另设挂点（单一收敛点 = 无双写）。
- * 元数据取既有读面：filePath/occupancy 来自 lifecycle 条目，lastActivityAt 取 pi client
+ * 元数据取既有读侧：filePath/occupancy 来自 lifecycle 条目，lastActivityAt 取 pi client
  * 空闲信号（u1a，attach 瞬间读不到则用本模块时钟兜底），lastViewedAt 取 per-sid 查看表。
  * journal 登记/checkpoint 都是旁路设施，本订阅体自带异常隔离（异常不外抛——否则会打断
  * registerSession 主链，把旁路故障放大成创建/恢复失败）。

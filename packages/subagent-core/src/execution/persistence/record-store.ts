@@ -5,12 +5,12 @@
 //
 // [H4 三轴拆分（2026-09-13）] 本文件保留容器职责（构造/字段/依赖注入/生命周期）+
 // 意图原语立面（public 签名不变，实现转发）+ 有状态扫描编排（fileCache/dirStamp/
-// 索引/孤儿恢复）；三轴实现拆至同级文件（D7 写面约束：`.state`/`.alive`/manifest
+// 索引/孤儿恢复）；三轴实现拆至同级文件（D7 写侧约束：`.state`/`.alive`/manifest
 // 写函数的调用与 import 只留在本文件，轴文件经 ctx 注入，检查零改动）：
 //   - record-store-terminal.ts —— 终态原语轴（终态/settle/意愿动作原语实现）
 //   - record-store-rounds.ts —— 轮次簿记轴（轮始/轮末收尾 + binding settle 快照）
 //   - record-store-rebuild.ts —— 重建与派生视图轴（buildRecord 单规则/entry 重建/
-//     manifest 派生视图/缓存戳类型——纯读纯派生视图，无写面）
+//     manifest 派生视图/缓存戳类型——纯读纯派生视图，无写侧）
 //
 // 职责：
 //   - 持有 running record（终态/回收 record 在 archive 时立即从内存移除）
@@ -25,7 +25,7 @@
 // 调用方说「发生了什么」，不说「写哪个文件」——文件布局知识收在本类内部。
 // 迁移已完成：全部写点经本 API，旧直写路径已删除（检查见 D7）。
 //
-// | 意图原语 | 语义 | 内部写面 |
+// | 意图原语 | 语义 | 内部写侧 |
 // |---------|------|---------|
 // | register(record) | 创建入册（既有方法，意图语义补齐） | entry（best-effort）+ 缓存一致性（stat 戳自校验承接） |
 // | appendEvent(id, event) | 事件追加（过程；turns 归约） | entry 变迁（best-effort） |
@@ -49,7 +49,7 @@
 // ── 字段级写点全集 → 操作映射（设计 §3.1 v4 十字段逐一归属）──
 //   ① status      —— 轮始重置→markRoundStarted；轮终翻边 idle（U4/D3）→markRoundIdle；
 //                    终态→markFinalized/markCancelled（内存冻结由调用方 completeLegacyClosed/
-//                    trySettleLegacyClosed 先行，store 收尾持久化写面）
+//                    trySettleLegacyClosed 先行，store 收尾持久化写侧）
 //   ② result      —— 轮始清→markRoundStarted；轮终写→markRoundIdle(outcome)；终态→
 //                    markFinalized 序言（completeLegacyClosed 冻结后随 entry/manifest 映射落盘）
 //   ③ round       —— 轮终 +1→markRoundIdle
@@ -81,7 +81,7 @@
 //      静默回退全扫，高版本忽略不重写。见 sessions-index.ts。
 //   5. [U4c / D5 缓存降级] manifest 与 sessions-index 均为可丢缓存（权威 = `.state`）：
 //      重建双通道 = boot revive 完成后全量（rebuildIndexes，宿主 boot 钩子接线）+
-//      查询面惰性（mergedRecords 对 manifest 缺员的磁盘重建 record 单点补建，每 id
+//      查询范围惰性（mergedRecords 对 manifest 缺员的磁盘重建 record 单点补建，每 id
 //      每进程一次）；重建失败静默降级（子 session 已 GC/损坏 → 该条跳过，整轮不抛）。
 
 import * as fs from "node:fs";
@@ -97,7 +97,7 @@ import { RECORD_EVENTS_SUFFIX, recordEventsPath } from "./record-events.ts";
 // [U7 / §3.2.7 统计口径] zcodeAnchorBasePath 供 zcode 锚的 binding/写权声明键派生
 // （U6-D2 交接：binding 键 = 锚基底 + 扩展名，pi 锚基底 = 子 session 文件路径）；
 // [身份换源第二步] scanFile 的身份/统计读侧已全部换源事件流折叠——本文件对
-// .record-binding 只剩戳职责（写面覆盖写变 mtime，击穿缓存），读函数零调用。
+// .record-binding 只剩戳职责（写侧覆盖写变 mtime，击穿缓存），读函数零调用。
 import type { StateMarker } from "./state-marker.ts";
 import { RECORD_BINDING_SIDECAR_EXT } from "./state-marker.ts";
 import { SUBAGENT_RECORD_CUSTOM_TYPE } from "./record-entry.ts";
@@ -115,7 +115,7 @@ import {
   toSettledEntryData,
   type V2EntryState,
 } from "./record-entry-write.ts";
-// [W1 / U2a] record 事件文件写面接线层（fold 缓存 + 写点幂等判定 + 物化编排）——
+// [W1 / U2a] record 事件文件写侧接线层（fold 缓存 + 写点幂等判定 + 物化编排）——
 // 轮次簿记轴承载（事件写入调用点主体 = RoundsCtx/TerminalCtx 注入位）。RecordStore
 // 是 record 域事件的唯一合法写者（单写者纪律，face 是容器的单点封装）。
 import { RecordEventsWriteFace } from "./record-store-rounds.ts";
@@ -127,7 +127,7 @@ import type { ManifestRecord, ManifestStore } from "./manifest-store.ts";
 import { INDEX_WRITE_MIN_INTERVAL_MS, loadIndex, saveIndex } from "./sessions-index.ts";
 import type { SessionsIndexEntry, SessionsIndexNegativeEntry } from "./sessions-index.ts";
 // [H4 三轴拆分] 重建与派生视图轴（record-store-rebuild.ts）：buildRecord 重建单规则 /
-// entry 重建族 / manifest 读写派生视图 / 缓存戳类型——纯读纯派生视图纯函数（无写面，
+// entry 重建族 / manifest 读写派生视图 / 缓存戳类型——纯读纯派生视图纯函数（无写侧，
 // D7 七名写函数零 import），容器扫描与原语实现共同消费。依赖方向单向：
 // store → rebuild（rebuild 不回 import store，无环）。
 import {
@@ -152,7 +152,7 @@ import {
 import type { FileCacheEntry, FileCacheValue, FileStamps, Stamp } from "./record-store-rebuild.ts";
 // [H4 三轴拆分] 终态原语轴（record-store-terminal.ts）：markFinalized/markCancelled/
 // markSettled/markSettledOut 等终态/settle/收尾动作原语实现 + binding settle 快照族——
-// 经 TerminalCtx 注入本类写面（七名写函数调用字面只留在本文件，D7 检查零改动）。
+// 经 TerminalCtx 注入本类写侧（七名写函数调用字面只留在本文件，D7 检查零改动）。
 // 依赖方向单向：store → terminal → {rebuild}（terminal 不回 import store，无环）。
 import { writeAtomicFileSync } from "../../shared/atomic-write.ts";
 import {
@@ -166,7 +166,7 @@ import {
 import type { TerminalCtx } from "./record-store-terminal.ts";
 // [H4 三轴拆分] 轮次簿记轴（record-store-rounds.ts）：appendEvent/markRoundStarted/
 // markRoundIdle/adoptEngineDeath 实现——轮次过程簿记（轮始重置/轮末收尾/事件归约/
-// 收养）。经 RoundsCtx 注入（records 共享 Map + persistSettledState 写面注入）。
+// 收养）。经 RoundsCtx 注入（records 共享 Map + persistSettledState 写侧注入）。
 // 依赖方向单向：store → rounds → {terminal, rebuild}（不回 import store，无环）。
 import {
   adoptEngineDeathImpl,
@@ -231,7 +231,7 @@ export type RecordStorePi = {
  *
  * 任何 mutate → notifyChange()（仅通知监听器；磁盘缓存靠 stat 戳自校验，不清空）。
  *
- * record 状态查询面（U10① D6）：按状态枚举 listRunning/collectRecords(statusFilter)、
+ * record 状态查询范围（U10① D6）：按状态枚举 listRunning/collectRecords(statusFilter)、
  * 按 id 查询 getMutable/findLightById/getFullRecord——方法签名即导出形态，本类零改动。
  *
  * @experimental execution 运行时面（设计 docs/design/subagent-core-sink-design.md（已删，git 可追溯） §3.3 D6）：
@@ -309,14 +309,14 @@ export class RecordStore {
   /**
    * [W1 / D3] record 事件文件接线层（`<manifestDir>/<sa-id>.events`——与 manifest
    * 同目录同主名，D3 落点裁决）。undefined（无 manifestDir 的纯内存测试形态）时
-   * 事件面空转（写点跳过、收编不可用），条目面（v2 两条款）独立于本字段照常经
+   * 事件流空转（写点跳过、收编不可用），条目范围（v2 两条款）独立于本字段照常经
    * pi appendEntry 通道工作（register/archive 的 face 缺省分支）。fold 缓存与写点
    * 幂等判定封装在 face 内部，容器只做薄转发。
    */
   private readonly eventStreamFace: RecordEventsWriteFace | undefined;
 
   /**
-   * [§3.1 markRoundIdle 簿记⑧] pending-notifications 轮终注销（发射点②）的注入面。
+   * [§3.1 markRoundIdle 簿记⑧] pending-notifications 轮终注销（发射点②）的注入点。
    * store 不直接依赖 pending 注册表（「零副作用编排」边界——文件布局收敛 ≠ 通知
    * 注册表依赖）；由 SubagentService 构造点注入 emitPendingUnregister 闭包（U5 收尾
    * 接线），缺省 no-op（纯内存测试形态不发射）。
@@ -324,8 +324,8 @@ export class RecordStore {
   private pendingUnregister: ((id: string, status: string) => void) | undefined;
 
   /**
-   * [H4 三轴拆分] 终态原语轴（record-store-terminal.ts）的写面通道：D7 七名写函数
-   * 的调用字面与 manifest/entry 写面收敛在本类（检查白名单物理边界 = 本文件），轴
+   * [H4 三轴拆分] 终态原语轴（record-store-terminal.ts）的写侧通道：D7 七名写函数
+   * 的调用字面与 manifest/entry 写侧收敛在本类（检查白名单物理边界 = 本文件），轴
    * 实现经注入消费——注入名避开七名（persistFinalized / acquireLease 等，见
    * TerminalCtx 注释）。构造时一次性绑定（this 闭包，运行时读字段——pi 等 setPi
    * 注入的通道随调用时点取值）。
@@ -335,7 +335,7 @@ export class RecordStore {
   /**
    * [H4 三轴拆分] 轮次簿记轴（record-store-rounds.ts）的通道：records 传共享 Map
    * 引用（零拷贝）；`.state` 收条经 persistSettledState 注入（避开七名）；轮终
-   * manifest 派生视图经 writeDerivedManifest 注入（[B2/簿记⑫]，D7 写面约束——manifest
+   * manifest 派生视图经 writeDerivedManifest 注入（[B2/簿记⑫]，D7 写侧约束——manifest
    * 写函数调用字面只留本文件，与 persistSettledState 注入先例同构）；pending
    * 注销经 emitPendingUnregister 闭包（调用时读 this.pendingUnregister——
    * setPendingUnregister 注入后生效）。
@@ -356,7 +356,7 @@ export class RecordStore {
     this.manifestDir = manifestDir;
     // [W1 / D3] 事件 journal 与 manifest 同目录接线（manifestDir = recordsDir，
     // subagent-service 构造点同语句保证不漂移）。缺省分支（纯内存测试形态）= 事件
-    // 面空转，条目面独立工作（register/archive 的 face 缺省分支）。
+    // 面空转，条目范围独立工作（register/archive 的 face 缺省分支）。
     this.eventStreamFace =
       manifestDir !== undefined
         ? new RecordEventsWriteFace(manifestDir, (customType, data) => {
@@ -366,14 +366,14 @@ export class RecordStore {
             active.appendEntry?.(customType, data);
           });
         }, (rec) => {
-          // [D2 决策 9] bound 物化写面（锚定就绪检查与写失败降级在被调函数内）——
+          // [D2 决策 9] bound 物化写侧（锚定就绪检查与写失败降级在被调函数内）——
           // 与轮终派生视图写同款「manifest 是物化派生视图不是条目」语义。调用字面只留本
           // 文件（R1 豁免清单），轴文件经构造参数注入消费。
           materializeBoundRecordManifest(manifestDir, derivedManifestRecord(recordToSubagent(rec)));
         })
         : undefined;
     // 终态轴通道绑定：写函数经箭头闭包**调用时解引用**（与原方法体内联调用同款
-    // 懒访问形态——vi.mock 部分模拟 alive-store 等场景下，未触达的写面不因构造期
+    // 懒访问形态——vi.mock 部分模拟 alive-store 等场景下，未触达的写侧不因构造期
     // 顶层解引用而报 mock 缺 key）；容器方法经 this 闭包（pi 通道在调用时点取值，
     // setPi 后生效）。
     this.terminalCtx = {
@@ -391,8 +391,8 @@ export class RecordStore {
       appendJournalEvent: (r, input) => {
         this.eventStreamFace?.appendJournal(r.id, input);
       },
-      // [② 读侧换源] fold 访问注入位（markResurrected 的 revive 基线水合读事件面
-      // 折叠——调用时解引用，事件面未接线（纯内存形态）返回 undefined = 水合 no-op）。
+      // [② 读侧换源] fold 访问注入位（markResurrected 的 revive 基线水合读事件流
+      // 折叠——调用时解引用，事件流未接线（纯内存形态）返回 undefined = 水合 no-op）。
       foldOf: (id) => this.eventStreamFace?.foldOf(id),
       notifyChange: () => this.notifyChange(),
     };
@@ -400,7 +400,7 @@ export class RecordStore {
     this.roundsCtx = {
       records: this.records,
       // [B2 / 簿记⑫] 轮终 manifest 派生视图——session-reader manifest 直读主路径的
-      // 数据源（轮终留内存 idle 的 record 不经任何终态/回收写点）。D7 写面约束：
+      // 数据源（轮终留内存 idle 的 record 不经任何终态/回收写点）。D7 写侧约束：
       // manifest 写函数调用字面只留本文件，轴文件经 ctx 注入（persistSettledState 先例）。
       writeDerivedManifest: (rec) => this.writeManifestPersisted(rec.id, derivedManifestRecord(recordToSubagent(rec))),
       emitPendingUnregister: (id, status) => this.pendingUnregister?.(id, status),
@@ -416,7 +416,7 @@ export class RecordStore {
 
   /** session_start 后由 SubagentService.initSession 调，注入真实 Pi handle；session
    *  结束（service.dispose 尾部 invalidatePiBinding）传 null 作废——pi 官方契约：
-   *  session 替换/重载后旧 handle 全方法抛 stale 错，dispose 后任何迟到的写面
+   *  session 替换/重载后旧 handle 全方法抛 stale 错，dispose 后任何迟到的写侧
    *  （register 的 appendEntry 等）不得触达它。设计为独立方法而非要求构造时必传——
    *  RecordStore 在 SubagentService 构造时即建（与 sessionsDir/manifestStore 一同
    *  初始化），但 this.pi 此时尚未注入。后续构造期外的 appendEntry 上报才有意义。 */
@@ -428,15 +428,15 @@ export class RecordStore {
    *  [W1 / D1·D3] v1 全量快照 entry 停写——record 诞生（→ running）经事件文件
    *  落 record-created 帧（唯一事实写）+ 主 session 一条 v2 注册条目（身份与锚点，
    *  经 pi appendEntry 通道；custom entry 不进 LLM context）。幂等：事件文件已有
-   *  创建帧（revive / 重启后重注册）时跳过两面。事件面未接线（无 recordsDir 的
-   *  纯内存测试形态）时条目面独立工作（无幂等面——无 journal 证据源可判）。
+   *  创建帧（revive / 重启后重注册）时跳过两面。事件流未接线（无 recordsDir 的
+   *  纯内存测试形态）时条目范围独立工作（无幂等面——无 journal 证据源可判）。
    *  [W1 / D5] record 事件文件首写 = 统一保留维护轮的 record 域触发点
    *  （record-only 会话的清理入口——run 域触发点在 pi 壳，本点只传 recordsDir）。 */
   register(record: ExecutionRecord): void {
     this.records.set(record.id, record);
     // [W1 / D3 表行 1] record-created 帧（唯一事实写）+ v2 注册条目（身份与锚点）。
-    // 幂等：事件文件已有创建帧（revive / 重启后重注册）时跳过两面；事件面未接线
-    // （纯内存形态）时条目面独立工作（无幂等面——无 journal 证据源可判）。
+    // 幂等：事件文件已有创建帧（revive / 重启后重注册）时跳过两面；事件流未接线
+    // （纯内存形态）时条目范围独立工作（无幂等面——无 journal 证据源可判）。
     if (this.eventStreamFace !== undefined) {
       // 首写判定先于 syncCreation（其内部幂等判定同源 = fold identity——语义
       // 单源，判定时机由本点承接以驱动维护轮触发）。
@@ -476,8 +476,8 @@ export class RecordStore {
    *
    * [W1 / D1·D2] v1 全量快照 entry 停写。真终局（completeLegacyClosed 已冻结 endedAt）
    * 时经 settleViaJournal 落 record-settled 帧 + v2 终态条目（终态冻结字段在
-   * completeLegacyClosed 已就绪——与 v1「archive 即完整终态记录」同点）；事件面未接线
-   * 时条目面独立工作（终态条目照常，零事件帧）。
+   * completeLegacyClosed 已就绪——与 v1「archive 即完整终态记录」同点）；事件流未接线
+   * 时条目范围独立工作（终态条目照常，零事件帧）。
    */
   archive(record: ExecutionRecord): void {
     this.records.delete(record.id);
@@ -498,7 +498,7 @@ export class RecordStore {
    * 类外状态写点上报（record-store 内的迁移点 register/archive 已内置）。
    *
    * [W1 / D2 停写写点] 本方法原承载的 v1 全量快照 entry（engineHandle / turns
-   * 过程派生视图——D2 明文停写面）退役：可观测面改走事件文件——引擎域（sessionFile/
+   * 过程派生视图——D2 明文停写侧）退役：可观测范围改走事件文件——引擎域（sessionFile/
    * engine/engineHandle/epoch）相对已写入 bound 帧变化时落 record-bound 帧（D3
    * 映射表行 2：spawn 回填）+ bound manifest 物化（zcode 运行窗口锚定，D2 决策 9）。
    * 引擎域未变（高频 turns 归约后的过渡调用）时零写入。pi 未注入（session_start
@@ -528,7 +528,7 @@ export class RecordStore {
    * 意图原语：事件追加（过程记录）。turns/eventLog/totalTokens 经 execution-record
    * 事件归约累积（字段⑧），随后 entry 变迁上报（best-effort——过程面可丢，重建由
    * 子 session 文件承接）。调用方按事件粒度决定调用频率（高频 delta 逐事件上报会
-   * 放大 entry 写面，编排粒度属调用方职责）。
+   * 放大 entry 写侧，编排粒度属调用方职责）。
    *
    * @returns false = id 不在内存（未注册/已回收）——事件丢弃并 debug 留痕。
    */
@@ -580,7 +580,7 @@ export class RecordStore {
 
   /**
    * 意图原语：正常终态（含 disposeAllRecords 编排性关闭，reason=parent-*，D8 矩阵）。
-   * 只吸收**持久化写面**——collectPatch / worktree cleanup / pending 注销① / onFinalized
+   * 只吸收**持久化写侧**——collectPatch / worktree cleanup / pending 注销① / onFinalized
    * 钩子留调用方编排（§3.1 副作用边界）。内存终态冻结（completeLegacyClosed/
    * trySettleLegacyClosed：置 idle + closedReason/stopReason 双写）亦留调用方——状态机操作非文件布局。
    *
@@ -595,7 +595,7 @@ export class RecordStore {
  * 接线退役（正常收尾归 markSettled、close 终态写点归 markSettledOut、编排性关闭归新编排）；
  * `.state` 旧格式由 U3 读侧单规则上行映射（finalized → idle + stopReason=reason）。
    *
-   * @returns true = 持久化写面完成；false = `.state` 未落（record 不应被视作已终态化）。
+   * @returns true = 持久化写侧完成；false = `.state` 未落（record 不应被视作已终态化）。
    * @deprecated U5 退役（归 markSettled / markSettledOut / 编排性关闭新编排承接）。
    */
   markFinalized(record: ExecutionRecord, closedReason?: ClosedReason): boolean {
@@ -605,7 +605,7 @@ export class RecordStore {
   /**
    * 意图原语：取消终态（tombstone）。写序与失败语义同 markFinalized（D8 v7）；区别
    * 仅 `.state` 载荷 = {status:"cancelled", endedAt}（重建判定分支消费精确结束时间）。
-   * 统一写点：cancelBackground 终态写面（record-lifecycle，U2a 迁移）。
+   * 统一写点：cancelBackground 终态写侧（record-lifecycle，U2a 迁移）。
    *
    * [U2 桥接期] 新模型下 cancel = 中断当前轮回 idle（不终态化，stopReason=interrupted）
    * ——U5 意愿动作接线后本原语退役为 markSettled("interrupted") 路径。
@@ -671,7 +671,7 @@ export class RecordStore {
 
   /**
    * [A6 / D3a 时机①] store 内部 acquire 动作——writeAliveMarker 的唯一包装（G1 口径
-   * = store 内部写面；非新意图原语）。spawn 侧 sessionFile 锚点确立（run 应答回填 /
+   * = store 内部写侧；非新意图原语）。spawn 侧 sessionFile 锚点确立（run 应答回填 /
    * 冷启动 resume 续轮）时由调用方挂钩（U2b），宿主开始往 session 文件写即声明写权。
    *
    * @throws Error 写失败原样上抛（acquire 失败 = 双写风险敞口，调用方响亮处理——
@@ -684,7 +684,7 @@ export class RecordStore {
   // ════════════════════════════════════════════════════════════
   // [永久会话模型 / U2] 新意图原语（设计 subagent-permanent-session-model.md
   // §3.2.2 事件表 / §3.2.3 reopen / §3.2.5 意愿动作表；u-foundation 骨架填肉）。
-  // 实现收在 store 内即满足 C-data-20 写面唯一入口约束（不外泄到类外）。
+  // 实现收在 store 内即满足 C-data-20 写侧唯一入口约束（不外泄到类外）。
   // ════════════════════════════════════════════════════════════
 
   /**
@@ -729,7 +729,7 @@ export class RecordStore {
    * merge——updateRecordBinding 不造新，reopen 的新文件锚必须走创建入口）；
    * [U7 / U6-D2 收编] zcode 锚同款落盘（锚键基底派生，见 zcodeAnchorBasePath）。
    * 宿主闭包 reopenRecord 的 engine 分派（run-orchestration 领地，U6b 接线）只构造
-   * pi 锚——zcode 路径接线前本分支经内存 idle record 的显式 transcriptRef 可达，写面
+   * pi 锚——zcode 路径接线前本分支经内存 idle record 的显式 transcriptRef 可达，写侧
    * 就位即 U6b 的依赖锚点。残留 lastAbandonedRound 不迁移（跨 epoch 自然失效，
    * §3.2.7——判定第一步以 record 当前 epoch 为基准丢弃旧世代回注）。`.alive` 写权
    * 声明迁移归调用方编排（acquireWriteLease 于新锚确立时）。
@@ -747,7 +747,7 @@ export class RecordStore {
    *      MutableRecord 映射写，先例 = conversation-continuation worktreeHandle 回填）；
    *   ② record 事件文件追加 `record-model-override` 帧（运行态唯一事实源——v2 条目
    *      registered 诞生时写 / settled 终态时写，均不覆盖运行中窗口；fold 后写覆盖
-   *      语义构造性满足「至多一个覆盖值」）。事件面未接线（纯内存测试形态）时内存
+   *      语义构造性满足「至多一个覆盖值」）。事件流未接线（纯内存测试形态）时内存
    *      面单独生效（与 register/archive 缺省分支同款取舍）。
    *
    * 历史事实零触碰：本原语不改写 `record.model` 盖章值、不追加任何回写历史的事件
@@ -776,7 +776,7 @@ export class RecordStore {
     // [顺带发现 4 / D3 缺陷五] manifest 派生视图随覆盖写点同步刷新（写序 = 事件帧先、
     // manifest 后——水位构造性新鲜）：磁盘快照在该写点不再停留陈旧值；zcode 成员的
     // manifest 兜底载体对 run 级查询（parentRunId 反查）保持新鲜可见（缺陷六可见性
-    // 窗口的收窄面）。与轮终 writeDerivedManifest 同款写面（D7：manifest 写函数调用
+    // 窗口的收窄面）。与轮终 writeDerivedManifest 同款写侧（D7：manifest 写函数调用
     // 字面只留本文件）。
     this.writeManifestPersisted(record.id, derivedManifestRecord(recordToSubagent(record)));
     this.notifyChange();
@@ -796,7 +796,7 @@ export class RecordStore {
    * 写点必须在通知链之后，提前调用会丢收尾轮通知）。worktree 回收（patch 落盘
    * 前移到收尾点）与 pending 注销补发的编排留调用方；本原语只吸收写权声明 +
    * worktreeHandle 清句（S5 修复——收尾即绑定消亡，重建检查据 hadWorktree 触发）
-   * 两写面。
+   * 两写侧。
    *
    * 幂等：release 对缺失 marker 静默、worktree 清句对无 handle no-op（重复 close /
    * dispose 重复调用无害）。record 留内存 idle（收尾 ≠ 内存回收——占用位不动，
@@ -849,13 +849,13 @@ export class RecordStore {
   }
 
   /**
-   * [W4 收敛] v2 收编 record 的终局停因查询（sweep 判据第三级同步只读面）。
-   * 读收编 manifest 物化（manifestDir/<id>.json——收编写面是同步原子写，读侧
+   * [W4 收敛] v2 收编 record 的终局停因查询（sweep 判据第三级同步只读侧）。
+   * 读收编 manifest 物化（manifestDir/<id>.json——收编写侧是同步原子写，读侧
    * 恒一致）：executionStatus==="idle" 且 stopReason 在场 = 收编终局，返回停因
    * （interrupted 族——注销条目经 mapReasonToStatus 落 aborted）；其余形态
    * （轮终/终态原语派生视图无 stopReason、文件缺失、解析失败）返回 undefined，判据
    * 保守维持现状分支。manifestStore 异步写形态（纯内存测试）读不到 = undefined，
-   * 与保守侧一致。v2 收编产物不在 findLightById 读取面——本方法是 sweep 对账
+   * 与保守侧一致。v2 收编产物不在 findLightById 读侧——本方法是 sweep 对账
    * 不把收编 record 误注销为 expired 的唯一判据源。
    */
   findAdoptedStopReasonSync(id: string): string | undefined {
@@ -1233,7 +1233,7 @@ export class RecordStore {
    *    面，isNonInterruptedSettledEvidence 判别），任一命中即跳过（宁保留不重复：
    *    record 侧 manifest 非终局专用——轮终/回收/bound 均写 running 派生视图，manifest
    *    在场不构成终态证据，与 run 侧三面证据的差异点）。interrupted 族条目不构成
-   *    跳过证据——它是「条目面先行写、journal 帧缺失」不对称窗口的残留，放行收编
+   *    跳过证据——它是「条目范围先行写、journal 帧缺失」不对称窗口的残留，放行收编
    *    以追加 settled 帧修复 journal（journal 唯一事实源承诺的自愈通道）。
    * 2. 幂等性由「fold 出的当前态是否已终态」判定——收编产物本身是 record-settled
    *    帧，下次重入被第 1 条拦截，事件文件重放不随重启追加增长。
@@ -1242,7 +1242,7 @@ export class RecordStore {
    * 缺省 interrupted-by-restart；统计终值取 fold 的轮终快照，缺帧诚实 0）→ 幂等补写
    * v2 终态条目（engine/engineHandle/sessionFile 取 fold 的 bound 帧——「journal
    * 整文件损坏但终态条目完好」的反向组合，条目缺则补）→ 物化 manifest（派生视图：
-   * session-reader 与查询面的重启可见性恢复通道——验收⑤的 v2 新路径）。
+   * session-reader 与查询范围的重启可见性恢复通道——验收⑤的 v2 新路径）。
    */
   adoptInterruptedRecord(
     id: string,
@@ -1280,7 +1280,7 @@ export class RecordStore {
 
   /** v2 孤儿收编共用检查（root 过滤 + 异宿主活体保护 + 定界判定）。 */
   private adoptV2Orphans(v2State: Map<string, V2EntryState>, rootSessionFilter: string | undefined): void {
-    if (this.eventStreamFace === undefined) return; // 事件面未接线：收编不可用（与调用方检查同判）
+    if (this.eventStreamFace === undefined) return; // 事件流未接线：收编不可用（与调用方检查同判）
     for (const [id, st] of v2State) {
       // 定界 = registered ∧ 无「非 interrupted 终态」条目（interrupted 族条目不构成
       // 跳过证据——journal 帧缺失的不对称窗口残留，放行收编修复 journal，D4）。
@@ -1338,7 +1338,7 @@ export class RecordStore {
   }
 
   /**
-   * [E2E 实测缺口 / 登记 §3.3 改 v2 读面] entry-born 孤儿恢复：v2 注册条目已落主 session、
+   * [E2E 实测缺口 / 登记 §3.3 改 v2 读侧] entry-born 孤儿恢复：v2 注册条目已落主 session、
    * 但子 session 文件从未创建（父进程死在 spawn 窗口期——register 写点与子进程首笔写入
    * 之间的窗口；外部删除子文件的已知边界同形）。
    *
@@ -1524,7 +1524,7 @@ export class RecordStore {
    *   3. 兜底（其余一切，含 .alive 在持形态）→ running（v4 B-1 可续聊语义）
    *
    * [U4a / D3b (a)] 原分支 3（.alive + pid 活 → running + externalInstance 派生视图）已
-   * 移除：探活缓存的读面角色由 (a′)(a″) 的 findForeignLiveInstance 现查探针替代，
+   * 移除：探活缓存的读侧角色由 (a′)(a″) 的 findForeignLiveInstance 现查探针替代，
    * status 判定与 .alive 解耦（终态判定由 `.state` 权威分支承接）。
    *
    * [perf]：逐文件 scanFile（stat 戳校验 + 头部 identity 轻量重建）。命中缓存的
@@ -1642,7 +1642,7 @@ export class RecordStore {
   }
 
   /**
-   * 扫描单文件：stat 戳（jsonl + record 绑定写面戳）校验，全同 →
+   * 扫描单文件：stat 戳（jsonl + record 绑定写侧戳）校验，全同 →
    * 复用缓存（零文件读取，含负缓存直接返回 null）；否则重建 light。
    * identity 定位两级：头部 64KB（首轮会话）→ 全文 fallback（续聊场景 identity
    * append 在尾部）；两级都找不到 → [身份换源] 事件流折叠（`foldOf(id)`，
@@ -1863,7 +1863,7 @@ export class RecordStore {
    */
   private ensureFileToRecordId(): void {
     const dir = this.manifestDir;
-    if (dir === undefined || this.eventStreamFace === undefined) return; // 事件面未接线：折叠路径不可用
+    if (dir === undefined || this.eventStreamFace === undefined) return; // 事件流未接线：折叠路径不可用
     const dirMtimeMs = statStamp(dir)?.mtimeMs ?? null;
     if (dirMtimeMs === null) return;
     if (this.fileToRecordId !== null && this.fileToRecordId.dirMtimeMs === dirMtimeMs) return;
@@ -1888,7 +1888,7 @@ export class RecordStore {
     this.fileToRecordId = { dirMtimeMs, byFile };
   }
 
-  /** 事件面写入点增量维护（同进程 record-bound 追加不触发目录 mtime 变化，见字段注释）。 */
+  /** 事件流写入点增量维护（同进程 record-bound 追加不触发目录 mtime 变化，见字段注释）。 */
   private noteFileToRecordId(id: string, sessionFile: string | undefined): void {
     if (sessionFile === undefined || sessionFile === "" || this.fileToRecordId === null) return;
     this.fileToRecordId.byFile.set(sessionFile, id);
@@ -1896,7 +1896,7 @@ export class RecordStore {
 
   /**
    * [身份换源第一步] 折叠身份路径：事件目录反查 id → fold → light 身份基底。
-   * 无事件面 / 反查 miss（无 record-bound 帧）/ 无创建帧 → undefined（调用方退 binding）。
+   * 无事件流 / 反查 miss（无 record-bound 帧）/ 无创建帧 → undefined（调用方退 binding）。
    */
   private identityFromFoldByFile(file: string): IdentityHeaderRecon | undefined {
     if (this.eventStreamFace === undefined) return undefined;

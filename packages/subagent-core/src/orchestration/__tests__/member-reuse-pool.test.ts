@@ -190,7 +190,7 @@ describe("member-reuse-pool（[D6]：agent-started.memberRecordId 承载 + fold 
     expect(foldMemberBindings(events).get("reviewer")).toBe("sa-1"); // 首派建绑——fold 不随内存换绑
     expect(loggerMock.warn).toHaveBeenCalledWith(expect.stringContaining("rebind"));
 
-    // clear 只释放内存（无 clear 事件可发），恒返回 false（诊断面形状保留）
+    // clear 只释放内存（无 clear 事件可发），恒返回 false（诊断范围形状保留）
     await expect(clearMemberReusePool("wf-never-touched", io)).resolves.toBe(false);
     await expect(clearMemberReusePool("wf-fold-4", io)).resolves.toBe(false);
     expect(peekMemberRecordId("wf-fold-4", "reviewer", io)).toBeUndefined();

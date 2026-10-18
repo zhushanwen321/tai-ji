@@ -1,5 +1,5 @@
 /**
- * 注册面单测：id → driver 分发与表单派生视图全集（u3 TtsService / getCapabilities 消费方）。
+ * 注册点单测：id → driver 分发与表单派生视图全集（u3 TtsService / getCapabilities 消费方）。
  */
 import { describe, expect, it } from 'vitest'
 import { createTtsDriver, getTtsFormModels } from './index.js'

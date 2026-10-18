@@ -26,7 +26,7 @@ import {
 } from './launch-params.js'
 import type { BtwLineSpawnContext } from './btw-service.js'
 
-/** 组合根注入面（sessionService 窄面 + 迁移门；测试注入 fake 直测回落链）。 */
+/** 组合根注入点（sessionService 窄面 + 迁移门；测试注入 fake 直测回落链）。 */
 export interface BtwLineSpawnOptionsDeps {
   /** D8-3 迁移门（组合根接 session-lifecycle getMigrationGate：迁移完成前禁启动 pi）。 */
   migrationGate(): Promise<unknown>

@@ -189,7 +189,7 @@ describe('RuntimeSupervisor restartForConfigChange（toggle 重启编排收敛�
     const sup = new RuntimeSupervisor()
     await expect(sup.restartForConfigChange()).rejects.toThrow('health timeout')
     // toggle 失败刷新真因：renderer 错过 runtime-failed 广播窗口（boot 竞态 / 无窗口在场）
-    // 时，startError 读取面（IPC get-runtime-start-error 的数据源）仍能拉到失败原因
+    // 时，startError 读侧（IPC get-runtime-start-error 的数据源）仍能拉到失败原因
     expect(sup.startError).toBe('health timeout')
     // 后续 start 成功 → 清除（startError 语义 = 最近一次失败，成功即非当前事实）
     await expect(sup.start()).resolves.toBe(43110)

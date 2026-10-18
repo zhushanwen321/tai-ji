@@ -115,9 +115,9 @@ jobs:
         if: steps.check_pre.outputs.should_publish == 'true'
         run: node scripts/smoke-core-dist.mjs
 
-      # 发布面一致性检查（约束 C-proc-11，docs/design/npm-publish-surface-guard.md）：
+      # 发布范围一致性检查（约束 C-proc-11，docs/design/npm-publish-surface-guard.md）：
       # 与正式线 release-npm.yml 同源直调（幽灵条目 + 反向覆盖 + 自包含探针）。
-      # 与 Smoke / Publish 同条件挂载——skip 分支不发布，发布面校验无对象，
+      # 与 Smoke / Publish 同条件挂载——skip 分支不发布，发布范围校验无对象，
       # 空跑构建反而破坏「skip 整体绿」语义（npm-prerelease.sh 阶段 4 轮询
       # CI conclusion，误红会被当发布失败）。
       - name: Publish surface guard

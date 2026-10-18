@@ -623,7 +623,7 @@ describe('relay server + registry（真 socket 环回 + 假 pi）', () => {
   })
 
   // idle pi reclamation D2 #3：hasByMainSessionId 真值表（reaper「在途 relay 子进程」
-  // 豁免判定的读面）。真注册/真清理链覆盖三态：无条目 false → 握手注册后 true →
+  // 豁免判定的读侧）。真注册/真清理链覆盖三态：无条目 false → 握手注册后 true →
   // 条目清理（断连即杀 → child exit → cleanupEntry）后 false。注册完成信号 = pid 文件
   // 落盘、清理完成信号 = pid 文件删除（与重复 recordId / 断连即杀用例同款信号，避免
   // 探测私有 Map）。
@@ -646,7 +646,7 @@ describe('relay server + registry（真 socket 环回 + 假 pi）', () => {
     expect(registry.hasByMainSessionId('main-1')).toBe(false)
   })
 
-  // idle pi reclamation D3 第 5 步尾扫读面（u3a）：listTargetsByMainSessionId 真值表。
+  // idle pi reclamation D3 第 5 步尾扫读侧（u3a）：listTargetsByMainSessionId 真值表。
   // kill 可调且有效 = kill 返回后 child 被杀（pid 文件删除 = child 'exit' → cleanupEntry
   // 的既有事件链；SIGKILL 直杀 ADR-0122，hang 模式 child 挂 60s 只会因被杀退出）；
   // 「杀完走注册表清理」断言同源，不探测私有 Map。

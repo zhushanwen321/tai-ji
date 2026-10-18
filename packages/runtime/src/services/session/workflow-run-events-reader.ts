@@ -1,7 +1,7 @@
 /**
  * workflow record 读侧派生视图族（workflow-visualization U3，设计 §3.1-4 / §3.1-5）。
  *
- * 两个拉取 RPC 的 record 文件读取面（SessionRecords 经注册条目 recordPath 锚点委托
+ * 两个拉取 RPC 的 record 文件读侧（SessionRecords 经注册条目 recordPath 锚点委托
  * 到达；本模块只管「给路径读内容」，路径发现归 SessionRecords 的派生视图源）：
  * - readRunEvents：单 run 事件流原文行（WorkflowRunEventEntry 判别联合）。行解析
  *   复用 events-projection 的 parseWorkflowRunEventFileLine（与活体派生视图 tailer 同一
@@ -10,7 +10,7 @@
  *   truncatedFields 标注。截断载荷仅供展示（D12 防误用边界：resume 的 $ARGS 恢复
  *   与 args 一致性校验在引擎侧读 record 原文全文字段，不经本通道）。record 文件超
  *   READ_PRECHECK_MAX_BYTES（32MB，D5 预检族）时降级——不全文读取（worker-log 行数
- *   无上界 + workflowUpdate 信号 force 重新拉取会放大读面），events 恒空 + oversize
+ *   无上界 + workflowUpdate 信号 force 重新拉取会放大读侧），events 恒空 + oversize
  *   标志（session.workflows RT-4#8 同款「不可用 ≠ 无数据」分形；DAG 通道豁免该预检
  *   ——成功结果 LRU 缓存内每 run 至多读一次，无信号级重复压力，接受单次全量读）。
  * - readDag：record 首帧 run-created 的 scriptSource 原文（不截断——DAG 解析不经

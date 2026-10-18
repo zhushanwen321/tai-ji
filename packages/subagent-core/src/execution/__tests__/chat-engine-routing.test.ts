@@ -202,7 +202,7 @@ function writeAgentMd(dir: string, engine: string): string {
 /** registry：可解析 "zcode/glm"（taskSpec 字段用例的显式 model），其余未配置。 */
 function fakeRegistry(): ModelRegistryLike {
   // [U1] getAvailable 与 find 必须同源：assertCanonicalModelRef 以 getAvailable 为
-  // 全等/孪生扫描面（D1④ 孪生检查需复扫 registry 全集）。旧 mock 只在 find 特判、
+  // 全等/孪生扫描范围（D1④ 孪生检查需复扫 registry 全集）。旧 mock 只在 find 特判、
   // getAvailable 返回空，与真实 registry 契约（find 可命中 ⇔ getAvailable 列出）不符。
   const AVAILABLE: ModelInfo[] = [{ id: "glm", name: "GLM", provider: "zcode", reasoning: true }];
   return {
@@ -632,7 +632,7 @@ describe("chat 引擎分支 U2：probe 失败 / journal / engineHandle", () => {
     const eventsPath = resolveJournalPath(agentDir, "zcode", "shared", handle.subagentId);
     expect(fs.existsSync(eventsPath)).toBe(false);
 
-    // [W1/D2 停写写点→事件面] engineHandle 过程派生视图改走事件文件：成功轮 modeless
+    // [W1/D2 停写写点→事件流] engineHandle 过程派生视图改走事件文件：成功轮 modeless
     // 收尾 = markRoundIdle（round-idle 帧 stopReason: completed，不终态化无 settled
     // 条目）；引擎锚经 record-bound 帧承载（运行中另经 bound manifest 物化可见），
     // 均无 eventsPath 键。
@@ -702,7 +702,7 @@ describe("chat 引擎分支 U2：probe 失败 / journal / engineHandle", () => {
     await vi.waitFor(() => expect(zcode.runs.length).toBe(1));
 
     // run 尚未 resolve（record 仍 running）：engineHandle 已回填且 [W1/D2 停写点→
-    // 事件面] record-bound 帧已落事件文件（bound manifest 物化同步可见——运行中
+    // 事件流] record-bound 帧已落事件文件（bound manifest 物化同步可见——运行中
     // GUI 的锚定通道，不再依赖过程 entry）。
     await vi.waitFor(() => {
       const events = scanRecordEventsFor(agentDir, handle.subagentId);
@@ -765,7 +765,7 @@ describe("chat 引擎分支 U2：probe 失败 / journal / engineHandle", () => {
       },
       poolKey: "shared",
     });
-    // [W1/D2 停写点→事件面] 补缺经 record-bound 帧写入 journal 记录（引擎域签名变化才追加），
+    // [W1/D2 停写点→事件流] 补缺经 record-bound 帧写入 journal 记录（引擎域签名变化才追加），
     // 且 ③ 的「无新字段」重复回调不产生第二条写噪（同 sessionFile 恰好一条 bound）。
     const boundEvents = scanRecordEventsFor(agentDir, handle.subagentId).filter(
       (e) => e.type === "record-bound",

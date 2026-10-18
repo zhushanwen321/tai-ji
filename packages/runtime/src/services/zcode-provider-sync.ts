@@ -122,7 +122,7 @@ const ZCODE_API_TYPE_MAP: Readonly<Record<string, string>> = {
  */
 const TRANSLATION_CHANNEL_PROVIDER_IDS = ['zai-coding-cn'] as const
 
-// ── 依赖注入面 ─────────────────────────────────────────────────
+// ── 依赖注入范围 ─────────────────────────────────────────────────
 
 /** 同步涉及的真实 zcode 文件路径与副本落盘路径（生产缺省由组合根拼装：真实文件在
  *  ~/.zcode 树下，副本路径按 engineDataDir 派生——接线单元实装）。 */

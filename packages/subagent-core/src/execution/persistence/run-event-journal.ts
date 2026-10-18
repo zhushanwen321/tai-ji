@@ -12,11 +12,11 @@
 // ——类型边在编译期擦除，值依赖环检查（C-data-26）不看它；词表值
 // （`RUN_EVENT_TYPES` / `RUN_EVENTS_SUFFIX`）已在 shared，不构成反向值边。
 //
-// [D1 拆边 Class C 第 3 步] 本模块同时承接 **journal 目录解析集群 + record 读面**
+// [D1 拆边 Class C 第 3 步] 本模块同时承接 **journal 目录解析集群 + record 读侧**
 // （`setRunEventJournalDirForTest` / `resolveRunEventJournal` / `runEventJournalPathOf`
 // / `runEventJournalDirOf` / `scanRunEvents`）——自 `orchestration/terminal-actions.ts`
 // 迁入，连同其 no-op 测试防线。为什么搬：目录解析是持久化策略（生产推导
-// `resolvePiWorkflowStateDir` + 测试注入 + vitest 防线），execution 侧读面
+// `resolvePiWorkflowStateDir` + 测试注入 + vitest 防线），execution 侧读侧
 // （`service/workflow-dispatch`）由此直连本模块，不再反向依赖编排层的值。编排侧
 // 写者（terminal-actions）反向 import 本节，并对既有消费点保留同名 re-export。
 import { join } from "node:path";
@@ -30,7 +30,7 @@ import type { RunEventJournal, WorkflowRunEvent, WorkflowRunEventInput } from ".
 import { resolvePiWorkflowStateDir } from "../assembly/workflow-state-root.ts";
 
 const journalLogger = getLogger("run-event-journal");
-/** 目录解析面日志通道：与搬迁前 terminal-actions 同源（"run-event-dispatch"），
+/** 目录解析范围日志通道：与搬迁前 terminal-actions 同源（"run-event-dispatch"），
  *  日志读者不受搬迁影响。 */
 const runEventDispatchLogger = getLogger("run-event-dispatch");
 
@@ -65,7 +65,7 @@ const RUN_EVENT_TYPE_SET: ReadonlySet<string> = new Set(RUN_EVENT_TYPES);
  * [W1 seq 契约] 携带 seq 的行按正整数校验（新写行信封必填）；seq 缺失放行——
  * W1 前的存量 journal 行无该字段（D7 惰性兼容读，旧 run 的 journal 直接进读源，
  * 行为完全不变）。运行时缺失与类型必填的张力由 foldRunEventFrames 的 typeof
- * 收窄承接（读取面单点声明）。
+ * 收窄承接（读侧单点声明）。
  */
 function isWorkflowRunEventLine(value: unknown): value is WorkflowRunEvent {
   if (typeof value !== "object" || value === null) return false;
@@ -89,8 +89,8 @@ function isWorkflowRunEventLine(value: unknown): value is WorkflowRunEvent {
 
 /**
  * [§3.2 共享坏行判定原语] record 流单行校验的问题分类（**规则**在 core 单源，
- * **文案**由各调用方自持——core 恢复读面出 ResumeRejectionError 英文文案、壳
- * strict 读面出 RecordStreamCorruptionError 中文文案，两者措辞与恢复指引本就不同，
+ * **文案**由各调用方自持——core 恢复读侧出 ResumeRejectionError 英文文案、壳
+ * strict 读侧出 RecordStreamCorruptionError 中文文案，两者措辞与恢复指引本就不同，
  * 共享的是「什么算坏行」）。
  */
 export type RunEventLineIssueKind =
@@ -120,7 +120,7 @@ export type RunEventLineResult =
  * seq（requireSeq 时必填正整数）/ outcome 词表。合法返回 null，问题以结构化
  * issue 返回（文案由调用方自持）。
  *
- * 信封存在性（type 为非空字符串）与词表成员资格分开报：两侧读面对「type 缺失」
+ * 信封存在性（type 为非空字符串）与词表成员资格分开报：两侧读侧对「type 缺失」
  * 的文案不同（core 复原为「词表外」、壳为「缺事件信封」），规则同源、文案各异。
  */
 function envelopeIssueOf(
@@ -146,15 +146,15 @@ function envelopeIssueOf(
 }
 
 /**
- * record 流单行校验原语（[§3.2] core 恢复读面与壳 strict 读面共用单源）。
+ * record 流单行校验原语（[§3.2] core 恢复读侧与壳 strict 读侧共用单源）。
  *
- * 规则集（两读面原先各写一份，规则漂移即「同一个坏行一边拒绝一边放行」）：
+ * 规则集（两读侧原先各写一份，规则漂移即「同一个坏行一边拒绝一边放行」）：
  *   非对象 → type 落词表 → ts 有限数值 → seq（可选要求）→ outcome 落词表（携带时）
  *   → agent-settled 必须携带 result 全文。（信封段拆见 envelopeIssueOf。）
  *
- * @param opts.requireSeq true = seq 信封必填且为正整数（core 恢复读面：坏 seq 是截断
+ * @param opts.requireSeq true = seq 信封必填且为正整数（core 恢复读侧：坏 seq 是截断
  *        证据）；false = 缺省放行（壳兼容档：W1 前存量行无该字段，D7 惰性兼容读）。
- *        seq 断档（逐行 +1）不属单行规则，由需要它的读面自行累计判定。
+ *        seq 断档（逐行 +1）不属单行规则，由需要它的读侧自行累计判定。
  */
 export function parseRecordStreamLine(
   line: string,
@@ -179,7 +179,7 @@ export function parseRecordStreamLine(
 /**
  * [§3.2 共享原语] legacy run-created 事件的 argsSummary 尽力恢复（旧格式帧回落通道）。
  *
- * 现行写入面 run-created 携带 args 全文，本原语只服务旧格式帧（无 args 字段）：
+ * 现行写侧 run-created 携带 args 全文，本原语只服务旧格式帧（无 args 字段）：
  * 未截断摘要可完整恢复；截断/不可解析/非对象回落空对象。**规则**在此单源，
  * 日志文案由调用方自持（core 恢复链与壳 fold 链各用自己的 logger 与措辞）。
  */
@@ -209,11 +209,11 @@ export function parseLegacyArgsSummary(argsSummary: string | undefined): LegacyA
  * 按显式目录取 run record 事件流文件路径（`<dir>/<runId><RUN_EVENTS_SUFFIX>`）。
  *
  * 「文件名 = runId + RUN_EVENTS_SUFFIX」策略的单源：createRunEventJournal.pathFor
- * 与 runEventJournalPathOf（及编排侧 resume 读面的 journalDir 注入分支）共用；
+ * 与 runEventJournalPathOf（及编排侧 resume 读侧的 journalDir 注入分支）共用；
  * record 路径的下游派生（如 resume 锁名剥后缀）一律以 RUN_EVENTS_SUFFIX /
  * 本函数为锚，禁止 `.record.jsonl` 字面量再源——后缀改名时这里改一处即全链跟随。
  * 不夹带 runId 白名单校验：校验是创建入口（createRunEventJournal.pathFor）的
- * 写侧防穿越策略，纯派生读面（读不到即 ENOENT 拒绝）不加写侧约束。
+ * 写侧防穿越策略，纯派生读侧（读不到即 ENOENT 拒绝）不加写侧约束。
  */
 export function runEventJournalPathIn(dir: string, runId: string): string {
   return join(dir, `${runId}${RUN_EVENTS_SUFFIX}`);
@@ -244,11 +244,11 @@ export function createRunEventJournal(dir: string): RunEventJournal {
 }
 
 // ══════════════════════════════════════════════════════════════
-// [D1 拆边 Class C 第 3 步] journal 目录解析集群 + record 读面
+// [D1 拆边 Class C 第 3 步] journal 目录解析集群 + record 读侧
 // ——自 `orchestration/terminal-actions.ts` 原样迁入（行为零变更）。
 //
-// 归位理由：目录解析（生产推导 / 测试注入 / vitest 防线）是持久化层策略，读面
-// （scanRunEvents）与写面 journal 实例同源；留在编排层会迫使 execution 侧消费者
+// 归位理由：目录解析（生产推导 / 测试注入 / vitest 防线）是持久化层策略，读侧
+// （scanRunEvents）与写侧 journal 实例同源；留在编排层会迫使 execution 侧消费者
 // 反向值导入编排层（`service/workflow-dispatch` 即此形态）。编排侧
 // （terminal-actions）反向 import 本节，并对既有消费点保留同名 re-export
 // （`setRunEventJournalDirForTest` 由编排侧同名包装转调——包装额外清编排侧两族进程内
@@ -264,7 +264,7 @@ const journalCache = new Map<string, RunEventJournal>();
 let runEventJournalDirForTest: string | undefined;
 let noopJournalWarned = false;
 
-/** 测试钩子（注入面 door；目录解析面随 [D1 拆边 Class C] 迁本模块）：注入 journal
+/** 测试钩子（注入点 door；目录解析范围随 [D1 拆边 Class C] 迁本模块）：注入 journal
  *  目录 + 清空按目录 keyed 的 journal 缓存（换目录注入即换实例）。
  *
  *  调用方：编排侧（terminal-actions）保留同名包装转调本函数，包装另清编排侧两族
@@ -341,7 +341,7 @@ export function resolveRunEventJournal(journalDir?: string): { dir: string; jour
  * resolvePiWorkflowStateDir，测试经 setRunEventJournalDirForTest 注入）。
  *
  * [W1 / D1] v2 注册条目的 recordPath 锚点字段经本函数寻址（lifecycle.runWorkflow
- * 写注册条目时消费）——锚点与 record 实写面同源，防条目指向漂移。vitest 无注入
+ * 写注册条目时消费）——锚点与 record 实写侧同源，防条目指向漂移。vitest 无注入
  * 防线（dir=""）下返回 undefined = 锚点不可寻址，调用方据此跳过条目写（禁触真实
  * 数据目录红线，与 no-op journal 同一防线语义）。
  *
@@ -367,14 +367,14 @@ export function runEventJournalDirOf(journalDir?: string): string | undefined {
 }
 
 /** [U4] run record 事件流只读访问器（成员复用绑定 fold 重建的读通道，决策 9 →
- *  [D6] 绑定字段查询辅助）——池侧不自建 journal 实例，读面统一走本模块解析，防绕过
- *  terminal-actions 的单写者纪律（写面唯一 = terminal-actions 转移写点 + U4b 宿主
+ *  [D6] 绑定字段查询辅助）——池侧不自建 journal 实例，读侧统一走本模块解析，防绕过
+ *  terminal-actions 的单写者纪律（写侧唯一 = terminal-actions 转移写点 + U4b 宿主
  *  切换编排的 model-override 记账直写 + resume 显式 model 参数的 model-override
  *  记账直写（resume-run.ts appendResumeModelOverride）三处合法写点，登记见
  *  run-events.ts RunEventJournal.append 单写者约束）与 no-op 测试防线。`journalDir` = per-call
  *  目录（runtime 侧收编扫描注入，缺省模块锚）。
  *
- *  [D1 拆边 Class C] execution 侧读面（`service/workflow-dispatch` 的成员复用绑定
+ *  [D1 拆边 Class C] execution 侧读侧（`service/workflow-dispatch` 的成员复用绑定
  *  装配）直连本模块——这是本类搬迁消掉的那条 execution → orchestration 值边。 */
 export async function scanRunEvents(runId: string, journalDir?: string): Promise<readonly WorkflowRunEvent[]> {
   const { journal } = resolveRunEventJournal(journalDir);

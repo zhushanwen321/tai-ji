@@ -1,7 +1,7 @@
 /**
  * [U7 → W4] SessionRecords 子代理引擎配置读写测试（getSubagentEngineConfig /
  * setSubagentDefaultEngine / setSubagentEngineDefaultModel）——Settings 引擎选择器
- * 与 per-engine 默认模型偏好的 runtime 数据面。
+ * 与 per-engine 默认模型偏好的 runtime 数据范围。
  *
  * 覆盖：engines.json 动态清单读取；冷启动回退源单源化（W4：engines.json 缺失/损坏
  * → runtime 自身三级发现，零命中返回空清单——静态 JSON 兜底已删，设计 §3.4 派生视图
@@ -125,7 +125,7 @@ describe('getSubagentEngineConfig', () => {
     })
   })
 
-  it('[W4] engines.json 缺失/损坏 → runtime 自身发现回退（deps.discoverEngines 注入面）', async () => {
+  it('[W4] engines.json 缺失/损坏 → runtime 自身发现回退（deps.discoverEngines 注入点）', async () => {
     writeJson('config.json', { version: 1, maxConcurrent: 6 })
     // 回退源 = runtime 自身发现结果（§3.4 派生视图表「冷启动回退源单源化」）
     const discovered = await makeRecords({ discoverEngines: () => ['zcode', 'foo'] }).getSubagentEngineConfig()

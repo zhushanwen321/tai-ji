@@ -559,7 +559,7 @@ describe('ImportService source 路由（SPI 编排层，设计 §3.3/§3.7）', 
     const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {})
 
     const reply = await svc.importSession({ sourcePath: '/stub/source-not-read-by-stub', projectId: 'proj-1', source: 'pi' })
-    // warning 聚合（§3.6）：degradations 非空 → conversion_degraded；明细不进契约面、日志留痕（D6）
+    // warning 聚合（§3.6）：degradations 非空 → conversion_degraded；明细不进契约范围、日志留痕（D6）
     expect(reply.warning).toBe('conversion_degraded')
     expect(reply.sessionId).toBe('stub-deg-00001')
     expect(reply.targetPath).toBe(join(getSessionsDir(), encodeCwd('/tmp/stub-deg-cwd'), 'stub-deg.jsonl'))

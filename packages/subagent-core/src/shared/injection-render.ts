@@ -58,7 +58,7 @@ export interface InvalidResource {
  * 注入段的最小模型派生视图——pi 数据派生视图（D-3 + 本仓 provider 补充）：
  * id/name 为条目最小必填（缺则无渲染意义），其余字段 optional（红线 5）。
  * provider/reasoning:boolean/input[]/contextWindow 全给（pi 派生视图形态）；
- * 渲染面消费 provider/reasoning/input/contextWindow。
+ * 渲染范围消费 provider/reasoning/input/contextWindow。
  */
 export interface ModelEntry {
 	id: string;
@@ -266,7 +266,7 @@ function compareByCodepoint(a: string, b: string): number {
  *   清单在场与否无关、但工具仍可用就必须注入的跨工具调度纪律（如勿
  *   poll 等待/预算缺省），零条目环境下不随清单消失。原样渲染不
  *   escapeXml（与 renderXmlSection 的 guide 同信任级：宿主注入文案，
- *   条目段的 guide 即此处理）；缺省不渲染（无纪律注入面的宿主保持
+ *   条目段的 guide 即此处理）；缺省不渲染（无纪律注入点的宿主保持
  *   纯「没有 + 去哪找」形态）；
  * - 空 roots 返回空串（不注入）：无清单可渲染时不输出 "roots: )" 空括号
  *   （约定根恒在生产不可达，纯防御分支——invalid 与 guide 同随不渲染）。

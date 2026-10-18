@@ -5,7 +5,7 @@
 - **双形态包（D4）**：workspace 消费 TS 源（exports 的 `import` 条件指向 `src/`），npm 消费 tsup 产物（dist ESM + CJS，`publishConfig` 在 publish 时整体替换 `exports`）。CJS 产物对 `@zhushanwen/extension-protocol` 设 tsup noExternal 防御性 bundle 边界——其 npm dist 仅 ESM，而 CJS 宿主（zsw，node>=20）的 require 链不能承载外部 ESM 依赖（设计 D4，见本仓 `docs/architecture/subagent-core-package-extraction.md` §3.3；当前 entry 闭包无 protocol 运行时引用、dist 实测零常量命中，未来一旦引入即 bundle）。其余依赖（ajv / yaml / proper-lockfile）保持外部依赖形态，均为常规 CJS 可 require 的双格式包。
 - **依赖闭包（D3）**：`@zhushanwen/extension-protocol` + `proper-lockfile` + `ajv` + `yaml`；宿主服务（日志 / 数据根 / 发现根 / 通知）经 `HostServices` 端口注入，core 闭包不含 pi SDK。
 - **workflows 资产（D1）**：内置 workflow 脚本（`.js` / `.cjs`）不参与编译，包内 `workflows/` 目录 src=dist 同字节直发，经 `./workflows/*` 子入口按原文件访问。
-- **公共 API 面即 semver 契约（D5）**：breaking 走 major；导出面收窄不放宽，新增导出走 minor。**0.x 例外**：`<1.0.0` 阶段按 npm 0.x 惯例 minor 可携带 breaking（caret 消费者被锁定在 `0.x` 精确版本，破坏面可控；已声明的行为变更如 `normalizeRef` 拒绝 `..` 段即以此承载）；1.0 起 breaking 严格走 major。
+- **公共 API 面即 semver 契约（D5）**：breaking 走 major；导出范围收窄不放宽，新增导出走 minor。**0.x 例外**：`<1.0.0` 阶段按 npm 0.x 惯例 minor 可携带 breaking（caret 消费者被锁定在 `0.x` 精确版本，破坏面可控；已声明的行为变更如 `normalizeRef` 拒绝 `..` 段即以此承载）；1.0 起 breaking 严格走 major。
 
 ## 公共 API
 
@@ -26,7 +26,7 @@
 | `AgentTaskSpec`, `AgentOutcome`, `AgentEvent` | type | 任务声明 / 执行结果 / 事件流（引擎中立） |
 | `SessionView`, `ReplayedTurn`, `EngineHandle`, `EngineHandleData` | type | 会话视图 / 回放轮次 / 运行句柄 |
 | `EngineCapabilities`, `ProbeReport`, `PersonaSpec` | type | 能力声明 / 探针报告 / persona 声明 |
-| `InteractAction`, `InteractResult` | type | 交互控制面（chatMode message/close/cancel + idle） |
+| `InteractAction`, `InteractResult` | type | 交互控制范围（chatMode message/close/cancel + idle） |
 | `ModelInfo`, `SubagentStream` | type | `RunContext` 成员类型（type-only，`SubagentStream` 由 core 内部构造） |
 | `routeEngine(opts)` | fn | 三层路由（调用参数 > frontmatter > 全局默认）+ probe fallback 编排的单一权威点 |
 | `EngineRouteOptions`, `EngineRouteResult`, `EngineRouting`, `EngineRoutingInput`, `EngineRoutingSource` | type | 路由层类型 |
@@ -44,7 +44,7 @@
 | `LintFinding`, `LintResult` | type | lint 发现项 / 结果 |
 | `discoverWorkflows(configOrCwd?)`, `loadWorkflows()`, `getWorkflow(name)`, `getWorkflowByPath(ref)`, `invalidateCache()` | fn | workflow 发现/加载/缓存失效（宿主 list 面与 registry 构造消费） |
 | `WorkflowScanConfig`, `CachedWorkflowMeta`, `WorkflowMeta`, `WorkflowSource` | type | 发现层类型（扫描目录声明 / 缓存 meta / 资源 meta / 来源标签） |
-| `AgentRunner`, `RunStore`, `WorkerHost`, `WorkerHandlers` | type | 编排层 port 契约（宿主自写 Infra 实现时的契约面） |
+| `AgentRunner`, `RunStore`, `WorkerHost`, `WorkerHandlers` | type | 编排层 port 契约（宿主自写 Infra 实现时的契约范围） |
 | `registerZcodeEngine(engineDataDir?)` | fn | 把 `zcode` 引擎登记进 registry（组合根调用，幂等、工厂惰性） |
 | `createZcodeEngine(deps)` | fn | zcode 引擎 DI 工厂（测试/宿主注入 `ZcodeEngineDeps`） |
 | `markAllSpawnedChildrenDead()` | fn | 全量收割记账（宿主 shutdown 钩子消费）：镜像整体置死，返回记账条数；实际终止经协议 cancel/close / EngineClient killAll，本函数不直接发任何进程信号 |
@@ -65,7 +65,7 @@
 |--------|------|
 | `@zhushanwen/subagent-core/workflows/*` | 内置 workflow 脚本原文件（`chain.js` / `parallel.js` / `scatter-gather.js` / `map-reduce.js` / `review-fix-loop.js` + `review-fix-loop-utils.cjs` / `_shared/`），`require` 与 `import` 条件同径（D1 同字节直发） |
 
-仓内壳侧（pi extension）另有 `./* -> src/*` 通配深路径消费（`<pkg>/<域>/<路径>.ts` 形态）——该通配仅仓内保留，npm 发布面刻意收窄到上列受控入口（D5：exports 面即 semver 契约）。语义子入口精确条目优先于通配（Node exact-match-beats-pattern）。
+仓内壳侧（pi extension）另有 `./* -> src/*` 通配深路径消费（`<pkg>/<域>/<路径>.ts` 形态）——该通配仅仓内保留，npm 发布范围刻意收窄到上列受控入口（D5：exports 面即 semver 契约）。语义子入口精确条目优先于通配（Node exact-match-beats-pattern）。
 
 ## 宿主接入示例
 
@@ -116,7 +116,7 @@ logger.debug("host configured");
 |------|------|------|
 | `core_host_not_configured` | 未 `configureCore` 即消费 | 按上节示例补注入后重试（错误信息内含指引） |
 | `core_module_load_failed`（require 链） | 安装形态 / node 版本问题 | node 版本要求 >= 20；`rm -rf node_modules && npm i` 重装；确认经包 `exports` 的 `require` 条件加载 dist CJS，而非手工深引 `dist/` 内部路径 |
-| `core_module_load_failed`（worker scriptPath） | workflow worker 启动时 `workerData.scriptPath` 缺失 | D1：workflow 脚本以 **scriptPath 目录锚定**加载——宿主 spawn worker 时必须注入脚本绝对路径（`workerData.scriptPath`），staged / npm 安装布局下无 node_modules 解析面可回退；请检查宿主 worker 宿主点的注入代码，勿改脚本内 require 包名 |
+| `core_module_load_failed`（worker scriptPath） | workflow worker 启动时 `workerData.scriptPath` 缺失 | D1：workflow 脚本以 **scriptPath 目录锚定**加载——宿主 spawn worker 时必须注入脚本绝对路径（`workerData.scriptPath`），staged / npm 安装布局下无 node_modules 解析范围可回退；请检查宿主 worker 宿主点的注入代码，勿改脚本内 require 包名 |
 
 ## 构建
 
@@ -127,15 +127,15 @@ pnpm run test
 pnpm run typecheck
 ```
 
-发布走本仓 changeset 管线；`publishConfig` 中的发布面与开发态 `exports` 必须同步维护（新增子入口时两处同改）。
+发布走本仓 changeset 管线；`publishConfig` 中的发布范围与开发态 `exports` 必须同步维护（新增子入口时两处同改）。
 
 ### 自包含 bundle 构建（`build:bundle`）
 
 `dist.bundle/index.cjs` 是**单文件自包含 CJS 产物**：tsup `noExternal` 把全部运行时依赖（`@taiji/*`、`ajv`、`yaml`、`proper-lockfile`）内联进产物，require 链上只剩 node 内建模块。
 
-用途：**无 node_modules 解析面的宿主 vendoring**——典型是 zcode 插件（zsw）：插件目录被整体复制进 marketplace 缓存 / inline 加载，没有依赖安装链，`require("@zhushanwen/subagent-core")` 无从解析。这类宿主把 `dist.bundle/index.cjs` 复制进自身目录后直接 `require("./vendor/subagent-core/dist/index.cjs")`（vendored 落位统一为 `vendor/subagent-core/dist/`），只认文件不认解析链。
+用途：**无 node_modules 解析范围的宿主 vendoring**——典型是 zcode 插件（zsw）：插件目录被整体复制进 marketplace 缓存 / inline 加载，没有依赖安装链，`require("@zhushanwen/subagent-core")` 无从解析。这类宿主把 `dist.bundle/index.cjs` 复制进自身目录后直接 `require("./vendor/subagent-core/dist/index.cjs")`（vendored 落位统一为 `vendor/subagent-core/dist/`），只认文件不认解析链。
 
-与常规 `dist/` 的分工：`dist/` 面向有正常 node_modules 解析面的消费者（npm 安装形态，依赖留外部）；`dist.bundle/` 面向 vendoring 形态。两档构建按 script 名分流（`tsup.config.ts` 读 `npm_lifecycle_event`）：`build` 行为不变，`build:bundle` 独立产出。
+与常规 `dist/` 的分工：`dist/` 面向有正常 node_modules 解析范围的消费者（npm 安装形态，依赖留外部）；`dist.bundle/` 面向 vendoring 形态。两档构建按 script 名分流（`tsup.config.ts` 读 `npm_lifecycle_event`）：`build` 行为不变，`build:bundle` 独立产出。
 
 vendoring 宿主接入片段：
 

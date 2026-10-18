@@ -307,7 +307,7 @@ describe('S#7 update-handlers: preload orchestration in update:check', () => {
    */
   function register(orch: MockOrchestrator): void {
     const checkForLatestRelease = vi.fn(async (): Promise<LatestReleaseInfo | null> => FIXTURE)
-    // fetchReleaseByTag 为 u-foundation 补的接口必需方法：handler 编排（本文件覆盖面）不
+    // fetchReleaseByTag 为 u-foundation 补的接口必需方法：handler 编排（本文件覆盖范围）不
     // 消费它（消费方是 orchestrator 下载降级，u-download-failover），桩空实现满足接口形状
     const mockChecker: IReleaseChecker = {
       checkForLatestRelease,

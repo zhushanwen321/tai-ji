@@ -80,11 +80,11 @@ function extractAgentDirJoinFirstSegments(sources: Map<string, string>): Array<[
 // ── 第一部分：taiji 侧路径结构断言（无条件跑，不依赖 pi 包）─────────────────────
 
 describe('getProviderExtrasPath 路径结构（pi 不扫描子目录落点）', () => {
-  it('providers.json 派生自 <piAgentDir>/config/providers.json——首段 config，不在 pi agentDir 顶层扫描面', () => {
+  it('providers.json 派生自 <piAgentDir>/config/providers.json——首段 config，不在 pi agentDir 顶层扫描范围', () => {
     const path = getProviderExtrasPath()
     expect(isAbsolute(path)).toBe(true)
     const segments = relative(getPiAgentDir(), path).split(sep)
-    // agentDir 顶层是 pi 的扫描面（models.json / settings.json / auth.json / themes/...）；
+    // agentDir 顶层是 pi 的扫描范围（models.json / settings.json / auth.json / themes/...）；
     // taiji 扩展域必须落在 config/ 子目录（pi 零引用，见第二部分检查）而非顶层
     expect(segments).toEqual(['config', 'providers.json'])
   })

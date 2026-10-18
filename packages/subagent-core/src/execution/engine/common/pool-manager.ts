@@ -35,7 +35,7 @@ const JOURNAL_PREFIX = "journal-";
 /** journal 文件名后缀。 */
 const JOURNAL_SUFFIX = ".jsonl";
 /**
- * 池时代 refs.json 的残留清理目标（[池抽象降级] 后不再有写面；存量文件按 mtime
+ * 池时代 refs.json 的残留清理目标（[池抽象降级] 后不再有写侧；存量文件按 mtime
  * 同 TTL 回收，处理降级过渡期残留）。
  */
 const LEGACY_REFS_FILENAME = "refs.json";

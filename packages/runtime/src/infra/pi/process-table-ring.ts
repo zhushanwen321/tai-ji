@@ -90,7 +90,7 @@ export interface RingSample { // oe-exempt:20261014:framework:环缓冲样本数
   rows: ReadonlyMap<number, ProcessRow>
 }
 
-export interface ProcessTableRingOptions { // oe-exempt:20261014:framework:构造 options 注入面（间隔/容量/env 覆盖，测试注入用，单实现常态）
+export interface ProcessTableRingOptions { // oe-exempt:20261014:framework:构造 options 注入点（间隔/容量/env 覆盖，测试注入用，单实现常态）
   /** 采样间隔（ms）；0 = 禁用采样环（start 为 no-op）。env TAIJI_SIGNAL_WATCH_INTERVAL_MS 可调。 */
   intervalMs?: number
   /** 环容量（样本数；超出丢最旧）。env TAIJI_SIGNAL_WATCH_CAPACITY 可调。 */
@@ -125,7 +125,7 @@ export class ProcessTableRing {
   private timer: ReturnType<typeof setInterval> | null = null
   /** 上一次 sample() 未回标志（防 ps 卡死时定时器叠加）。 */
   private inFlight = false
-  /** 连续 ps 失败次数（诊断面；任一成功采样清零）。 */
+  /** 连续 ps 失败次数（诊断范围；任一成功采样清零）。 */
   private failureCount = 0
 
   constructor(opts: ProcessTableRingOptions = {}) {
@@ -145,7 +145,7 @@ export class ProcessTableRing {
     return this.timer !== null
   }
 
-  /** 连续失败次数（观测面；成功即清零）。 */
+  /** 连续失败次数（观测范围；成功即清零）。 */
   get failures(): number {
     return this.failureCount
   }

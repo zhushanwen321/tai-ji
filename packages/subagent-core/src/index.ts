@@ -7,7 +7,7 @@
  * 新增导出走 minor，本文件刻意不使用 `export *`，逐名列出以使 diff 可审。
  * 内部实现细节（error-recovery / execute-agent-call / worker-script-builder 等
  * engine 编排件）不经 barrel 导出；host-surface 扩面（zsw 回接 U0，2026-08-30）
- * 后 port 的 Infra 实现与宿主组装件已列入公共面。
+ * 后 port 的 Infra 实现与宿主组装件已列入公共部分。
  *
  * 扩面判定标准（post-convergence D3）：壳非测试代码实际消费 ≥1 处即进 barrel——
  * 契约范围 = 壳的实际消费方，core 内部移动/重命名文件不再是对壳的隐性 breaking。
@@ -60,7 +60,7 @@ export {
   type NotifyDomainPorts,
 } from "./core/notify-ports.ts";
 
-// ── 引擎契约面（execution/engine）────────────────────────────
+// ── 引擎契约范围（execution/engine）────────────────────────────
 // EnginePort：subagent 执行引擎的唯一契约点（capabilities / probe / run / read 四必选
 // 面 + listModels / validateModel / dispose 可选扩展；[H1] interact 能力面已随
 // chat-run 统一退役，续聊 = run + resume 锚点——协议线对齐 SDK 9 正向方法集）。
@@ -107,7 +107,7 @@ export { syncEnginesFile } from "./execution/engine/engine-discovery.ts";
 // （G1：pi 引擎单一 CLI 形态，core 壳侧零内建引擎）。
 // [W8 D8 薄壳] markAllSpawnedChildrenDead：扩展 index.ts / zsw runner-core.js 的
 // 业务调用点。语义（[F-7 注释纠偏，如实口径]）= **仅镜像记账**——core 侧
-// spawnedChildren 镜像整体清空（engine/host/spawned-children.ts 公共面），
+// spawnedChildren 镜像整体清空（engine/host/spawned-children.ts 公共部分），
 // 不发任何进程信号（命名即语义：mark 镜像置死，非 kill 进程）；
 // 子进程活在引擎进程内，其回收链 = ① stdin-EOF 自灭（宿主退出 / EngineClient 销毁
 // → 引擎进程 stdin 断源自灭，正常路径）；② disposeEngines()（registry）显式触发全部
@@ -117,7 +117,7 @@ export { syncEnginesFile } from "./execution/engine/engine-discovery.ts";
 // 不构成真实收割（现状登记，workflow 包生产码不动）。
 export { markAllSpawnedChildrenDead } from "./execution/engine/host/spawned-children.ts";
 
-// [W8 D8 兼容公共面薄壳]（设计 §3.6 D8 表）：registerZcodeEngine 确保cli descriptor
+// [W8 D8 兼容公共部分薄壳]（设计 §3.6 D8 表）：registerZcodeEngine 确保cli descriptor
 // 注册（vendored 相对定位，失败回退 inproc 过渡）+ engineDataDir 记入；createZcodeEngine
 // 返回 RemoteEngine('zcode')（deps → 协议客户端映射，sources 不跨进程）。实现见
 // execution/engine/d8-compat.ts——engines/zcode/registration.ts 的同名符号不再经
@@ -229,7 +229,7 @@ export {
   projectOutcome,
 } from "./execution/persistence/execution-record.ts";
 
-// SubagentService 聚合面 + 进程单例访问器（post-convergence D8）：访问器经
+// SubagentService 聚合范围 + 进程单例访问器（post-convergence D8）：访问器经
 // globalThis[Symbol.for] slot 防 jiti 多实例分裂，/resume /fork 复用既有实例
 // （SR-3/SR-4 语义）。SubagentServiceInit 为构造依赖参数注入形态（modelService
 // 等，无全局查找，@experimental U10 / D6）。
@@ -388,11 +388,11 @@ export { isProcessAlive } from "./execution/persistence/alive-store.ts";
 // 并发池工厂（U3/U4 / D7）：queuePolicy 缺省 priority 保 pi 行为，zsw 消费
 // strict-fifo——策略差异显式化而非双实现。
 // [2026-09-13 barrel 收窄] createConcurrencyPool / CreateConcurrencyPoolOptions /
-// QueuePolicy 已出公共面（定义文件内部零使用，仅测试深路径消费）——池实例经
-// zsw 侧装配注入，core 公共面只留 ConcurrencyPool 契约类型。
+// QueuePolicy 已出公共部分（定义文件内部零使用，仅测试深路径消费）——池实例经
+// zsw 侧装配注入，core 公共部分只留 ConcurrencyPool 契约类型。
 export type { ConcurrencyPool } from "./execution/assembly/concurrency-pool.ts";
 
-// 模型引用切分原语（U1 契约面批件）：provider/model 引用切分（两宿主
+// 模型引用切分原语（U1 契约范围批件）：provider/model 引用切分（两宿主
 // maxTurns/model 换算同源）。[W11/H2] 实现体随 engines/zcode 删除迁至
 // shared/zcode-model-ref.ts（宿主侧原语，与引擎包各自单源）。[2026-09-29 account
 // 体系迁移同步] DEFAULT_PROVIDER_ID / ZCODE_FALLBACK_DEFAULT_MODEL / hasApiKey
@@ -410,7 +410,7 @@ export { discoverAgents } from "./execution/assembly/agents-assembly.ts";
 // scheduleTimeBudget / 上限常量）为组合根实际消费方，随 B-2 扩范围进 barrel
 // （D3 判定标准首次执行）。host-surface 扩面（zsw 回接 U0）同出 barrel：宿主壳
 // 组装 LifecycleDeps 需要亲手构造三个 port 实现与消费细粒度编排函数，深路径消费
-// 在 npm 形态不可达（发布面无 `./*` 通配）——宿主触点证据即 zsw 回接设计 D2。
+// 在 npm 形态不可达（发布范围无 `./*` 通配）——宿主触点证据即 zsw 回接设计 D2。
 export { abortRun, runWorkflow } from "./orchestration/lifecycle.ts";
 export {
   terminateRunningRuns,
@@ -517,7 +517,7 @@ export { SLUG_MAX_LENGTH } from "./orchestration/models/types.ts";
 export { isTerminalDoneReason } from "./orchestration/models/types.ts";
 
 // workflow 脚本资产面：registry 契约 + 实现 / 脚本 lint / 文件落盘（save / delete）
-// + skill 路径缓存清理——组合根装配与 workflow 工具面消费。
+// + skill 路径缓存清理——组合根装配与 workflow 工具范围消费。
 export type { WorkflowScriptRegistry } from "./orchestration/models/workflow-script-registry.ts";
 export { WorkflowScriptRegistryImpl } from "./orchestration/workflow-script-registry-impl.ts";
 // WorkflowScript 实体与按路径加载工厂（第三宿主零复刻脚本加载，G3/S5）。
@@ -754,14 +754,14 @@ export { escapeXml, renderXmlSection } from "./shared/xml-injection.ts";
 // agent 引用规范化（normalizeRef 含 `..` 段拒绝——G4 声明的唯一行为收紧，
 // ⛔2 样本集验证）+ 引用扩展名常量。
 // [2026-09-13 barrel 收窄] invalidAgentRefMessage / InvalidAgentRefMessageOptions
-// 已出公共面（报错文案工厂仅测试深路径消费，报错文案由 normalizeRef 自带）。
+// 已出公共部分（报错文案工厂仅测试深路径消费，报错文案由 normalizeRef 自带）。
 export {
   AGENT_REF_EXT,
   normalizeRef,
   WORKFLOW_REF_EXT,
 } from "./shared/agent-ref.ts";
 
-// ── workflow 契约面（U1）──────────────────────────────────────
+// ── workflow 契约范围（U1）──────────────────────────────────────
 // workflow 引用规范化（名/路径二分 + 保留字裁决，knownNames 宿主注入——内置
 // workflow 名不 core 硬编码）。
 // [2026-09-13 barrel 收窄] WORKFLOW_REF_RESERVED_NAMES / NormalizeWorkflowRefOptions /
@@ -792,8 +792,8 @@ export type {
   WorkflowEntry,
 } from "./shared/injection-render.ts";
 // [2026-09-13 barrel 收窄] ListFormatOptions / ModelListFormatOptions
-// 已出公共面（定义文件内部类型闭包或仅测试深路径消费）。
-// InvalidResource 随 P5 D4-3 入公共面（workflow-list-injector 经 barrel 消费——
+// 已出公共部分（定义文件内部类型闭包或仅测试深路径消费）。
+// InvalidResource 随 P5 D4-3 入公共部分（workflow-list-injector 经 barrel 消费——
 // extensions 源文件只从 barrel 消费 core 符号，H4 formatEmptyResourceList 同款先例）。
 
 // ── 原语（U6a）────────────────────────────────────────────────
@@ -803,7 +803,7 @@ export type {
 // （自 pi-sw helpers 平移，输出逐字节一致）。
 // [2026-09-13 barrel 收窄] atomicTmpPathFor 与本组类型族（AtomicTmpRef /
 // AtomicWriteFileOptions / AtomicWriteOptions / CleanupStaleTmpOptions /
-// CleanupStaleTmpResult）已出公共面（类型为定义文件内部闭包，tmp 命名仅测试
+// CleanupStaleTmpResult）已出公共部分（类型为定义文件内部闭包，tmp 命名仅测试
 // 深路径消费）；cleanupStaleTmpFiles / listStaleTmpFiles / parseAtomicTmpPath
 // 为弱活保留项（scripts/probe-third-host-integration.mjs 探针消费）。
 export {

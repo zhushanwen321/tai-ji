@@ -225,7 +225,7 @@ export function projectV2Workflow(
 
 /**
  * run 详情载荷的模型字段增强（subagent-model-switch §9 transport 行，U1 详情载荷
- * 透传——run 详情侧按成员标识逐成员携带、聚合面不取单一值）：
+ * 透传——run 详情侧按成员标识逐成员携带、聚合范围不取单一值）：
  * - **覆盖状态**：run 级覆盖（query.getRunOverride）分发到该 run 全部 agentCall 条目
  *   （run 级全切是 run 作用域意图，各成员条目携带同值；无覆盖不造键）；
  * - **成员标识**：权威成员的 record id 透传到 agentCall.memberRecordId——run 级模型
@@ -235,7 +235,7 @@ export function projectV2Workflow(
  * - **最近生效值**：成员 SubagentRecord 的增强产物（调用方先经 enhanceSubagentDetails
  *   派生——含 pi session model_change 尾条目读取与「仅 pi 成员」判定）按
  *   (parentRunId, stepIndex) 圈定后透传到对应 agentCall。同族替换可只发生在部分成员，
- *   聚合面不取单一值；一键多 attempt 的权威成员取与 workflow-step-merge.pickAuthoritativeRecord
+ *   聚合范围不取单一值；一键多 attempt 的权威成员取与 workflow-step-merge.pickAuthoritativeRecord
  *   同判据（running 优先、startedAt 最新——显示权威一致）。
  *
  * 纯函数（无 IO）；输入 runs/subagents 均为已合并派生产物，无增强项时返回原引用

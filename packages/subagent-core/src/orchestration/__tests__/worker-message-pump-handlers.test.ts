@@ -45,7 +45,7 @@ import { createRunEventJournal } from "../run-events.ts";
 
 // ── helpers ──────────────────────────────────────────────────
 
-/** 按 stepIndex 查 trace 节点（Trace 公共查询面 = toArray 线性扫）。 */
+/** 按 stepIndex 查 trace 节点（Trace 公共查询范围 = toArray 线性扫）。 */
 function findByStep(trace: Trace, stepIndex: number) {
   return trace.toArray().find((n) => n.stepIndex === stepIndex);
 }

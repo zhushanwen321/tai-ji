@@ -2,7 +2,7 @@
  * session.getSubagentStreamState RPC handler 测试（B2 subagent-stream-chunk §4.1，
  * u-runtime-rpc）：
  *
- * - 注册面：SessionMessageHandler routes 认领 session.getSubagentStreamState
+ * - 注册点：SessionMessageHandler routes 认领 session.getSubagentStreamState
  * - found true 分支：进行中 record → reply 原样透传 tee 三元组（found/msgSeq/lastDeltaSeq/lines）
  * - record 路由：record-a / record-b 交替请求各自返回，非本 record 请求不串；
  *   跨 sessionId 请求（recordId 在管但归属不一致）→ found:false
@@ -136,7 +136,7 @@ afterEach(() => {
   rmSync(agentDir, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 })
 })
 
-// ── 注册面 ────────────────────────────────────────────────────────
+// ── 注册点 ────────────────────────────────────────────────────────
 
 describe('SessionMessageHandler.handles（subagent-stream-state 域）', () => {
   it('认领 session.getSubagentStreamState', () => {

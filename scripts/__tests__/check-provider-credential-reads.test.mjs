@@ -137,7 +137,7 @@ describe('R4 词边界与注释剔除', () => {
     })
     expect(violationsOf(root)).toEqual([])
   })
-  it('正则对象词边界直测（导出面冒烟）', () => {
+  it('正则对象词边界直测（导出清单冒烟）', () => {
     expect(IDENTIFIER_RES.readAuthCredentials.test('x readAuthCredentials y')).toBe(true)
     expect(IDENTIFIER_RES.readAuthCredentials.test('readAuthCredentialsKey')).toBe(false)
     expect(GET_CONFIG_APIKEY_RE.test('getProviderConfig(id)?.apiKey')).toBe(true)

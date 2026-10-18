@@ -415,7 +415,7 @@ export function workflowWindowEngineState(runId: string): WorkflowWindowEngineSt
  * 窗口引擎实例创建通道的注入缝（进程形态判别 + 不经 registry 的实例创建）。
  *
  * 生产缺省 = **真实实现**（u5 网关真实化，ADR-0079 D6/§5 网关真实化升级目标）：
- * processModelOf 读 manifest 注册期快照（u-foundation 解析面：descriptor.manifest.
+ * processModelOf 读 manifest 注册期快照（u-foundation 解析范围：descriptor.manifest.
  * processModel，缺省 per-window）；createPort 经 descriptor portFactory 产出不经
  * registry singletons 缓存的新实例（实例登记与收尾归窗口状态，本通道零 singletons
  * 触达）。测试可注入替身网关（注入覆盖生产缺省——u2/u3 验收用例形态）。

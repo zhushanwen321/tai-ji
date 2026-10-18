@@ -64,7 +64,7 @@ export function registerViewRpcHandlers(
   })
 
   rpcServer.registerMethod('plugin.views.listMountPoints', async () => {
-    // 返回浅拷贝（T2 tradeoff：RPC 序列化边界不暴露内部数组引用，隔离写面）
+    // 返回浅拷贝（T2 tradeoff：RPC 序列化边界不暴露内部数组引用，隔离写侧）
     return [...service.mountPoints]
   })
 }

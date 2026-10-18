@@ -9,7 +9,7 @@
  *   maybeRollbackInterruptedUpdate 之后、bootstrapMainWindow 之前，见 main.ts）
  * - 真实 fs：seed 与断言都落在 <dataDir>/update/ 下
  *
- * [R1 升级为 CI 固定环节，2026-09-15] 本用例 pi/LLM 双无关（断言面 = main 进程 fs 层），从 real 轨
+ * [R1 升级为 CI 固定环节，2026-09-15] 本用例 pi/LLM 双无关（断言范围 = main 进程 fs 层），从 real 轨
  * （update-cleanup-real.spec.ts）升级进 CI 固定环节：装配改 mock 轨 launch-app.ts
  * （TAIJI_MOCK=1 跳过 runtime spawn——cleanupCompletedUpdate 在 main.ts whenReady，
  * 不依赖 runtime/renderer 形态，两种装配走同一 main 代码路径），并打 @p0-smoke 标签

@@ -1,4 +1,4 @@
-// [H3/R3] RecordAccess 聚合（域 #3/#8/#10/#13：孤儿/manifest 恢复 + 查询面 + action
+// [H3/R3] RecordAccess 聚合（域 #3/#8/#10/#13：孤儿/manifest 恢复 + 查询范围 + action
 // 网关 + 身份解析/record 创建）——自 SubagentService 上帝类 strangler 抽取的第三个
 // 聚合的**读建面**（设计 docs/architecture/subagent-service-decomposition.md §2.1 / §3.3 D5；
 // 成员归属以 r0-inventory.md 清单① + 域分区为准）。
@@ -6,12 +6,12 @@
 // [计划变更 D-R3-1] G1「每聚合 ≤700 行」与 R0 八域体量（分区实测 833 物理行）冲突，
 // 拆两文件（dev agent 停线报告、主 agent 核验追认）：本文件（读建面 #3/#8/#10/#13）
 // + record-lifecycle.ts（终态迁移
-// 写面 #4/#11/#17/#18，D5/H4 落点）。两文件组间零互调（已验证），各自独立 deps，
+// 写侧 #4/#11/#17/#18，D5/H4 落点）。两文件组间零互调（已验证），各自独立 deps，
 // 壳分别装配——聚合间零 import（G2 / R1 打样模式 3）。
 //
 // 单一职责：record 的**获得与可见性**——boot 孤儿自愈（manifest 重物化 / entry-born
 // 恢复）、身份解析与 record 创建注册、内存∪磁盘查询派生视图、message/close action 的
-// 归属校验网关（冷查/冷复活经 cold-lookup.ts）。终态迁移写面（close/cancel/finalize/
+// 归属校验网关（冷查/冷复活经 cold-lookup.ts）。终态迁移写侧（close/cancel/finalize/
 // dispose 批量回收）在 record-lifecycle.ts——D5「store 与终态迁移入口的唯一宿主」。
 //
 // [R1 打样模式——R3 落地]（模式权威定义见 session-baselines.ts 文件头）
@@ -20,7 +20,7 @@
 //    断言/调用时经壳 getter 现读；叶子模块实例（store/manifestStore/modelService）为
 //    #1 留壳共享依赖，getter 现读同一实例（晚绑定形态统一）——深绑测试的 store 读
 //    路径（ServiceInternals）保持生效，断言零改写。
-// 2. 转发壳写法：壳保留同名方法（含原可见性）单行转发；本聚合公共面 = 壳转发面，
+// 2. 转发壳写法：壳保留同名方法（含原可见性）单行转发；本聚合公共部分 = 壳转发面，
 //    聚合内部互调（recoverOrphanRecords /
 //    coldLookupDeps 消费）保持 private。原 private 方法因壳转发需要可见性放宽为
 //    public（strangler 必然，非行为变化）。
@@ -60,7 +60,7 @@ const logger = getLogger("subagents");
 /** resolveIdentity 的产物——一次确定、写入 record 后不再变。
  *  [R3] 接口本体自壳文件迁入（唯一生产者 resolveIdentity/resolveIdentityForEngine）；
  *  壳经 type import 消费（execute/executeAndAwait/workflow 派发链的局部类型标注），
- *  对外无导出面（原模块内私有接口）。
+ *  对外无导出范围（原模块内私有接口）。
  *  [R4/D6-②] resolved.model 可缺席：undefined = 用户未指定模型（引擎走自身缺省
  *  解析，如 zcode 的 defaultModelSelection）——pi 路径（resolveIdentity 三层解析）
  *  恒有值；引擎路径（resolveIdentityForEngine）在显式 model 缺席且引擎未裁决出
@@ -354,7 +354,7 @@ export class RecordAccess {
     return { mode: "background", subagentId: record.id, sessionFile: record.sessionFile, details };
   }
 
-  // ── 域 #8 查询面 ──
+  // ── 域 #8 查询范围 ──
 
   /**
    * 按 id 查内存 running record 的只读快照（G3-002 修复）。

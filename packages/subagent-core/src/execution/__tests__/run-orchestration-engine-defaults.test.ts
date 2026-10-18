@@ -7,7 +7,7 @@
 //   - chat 域：run-orchestration.resolveIdentityForRoute（service.execute）；
 //   - workflow 域：workflow-dispatch.resolveWorkflowIdentity（service.executeWorkflowAgent）。
 // 防御面：pi 路由恒不插层（pi 链自有三层解析，taiji 级偏好无意义——D6 不采用段）；
-// 直读面：config 在 service 构造后写入 → 派发仍读到（不经构造期 globalConfig 缓存，
+// 直读侧：config 在 service 构造后写入 → 派发仍读到（不经构造期 globalConfig 缓存，
 // 「settings 保存 → 活跃 session 派发」场景 S2 的自然操作序列）。
 //
 // 替身形态与 workflow-agent-dispatch-model-catalog.test.ts 同款（本地构造非 pi 引擎
@@ -182,7 +182,7 @@ function writeFrontmatterAgent(tmpRoot: string, name: string, model: string): st
 
 function makeHarness(engineDefaults?: Record<string, string>, engineHooks?: NonPiHooks): Harness {
   const tmpRoot = fs.mkdtempSync(path.join(os.tmpdir(), "d6-engine-defaults-"));
-  // 测试红线：store/引擎数据面不触真实数据目录
+  // 测试红线：store/引擎数据范围不触真实数据目录
   process.env.TAIJI_AGENT_DATA_DIR = path.join(tmpRoot, "engine-data");
   const agentDir = path.join(tmpRoot, "agent");
   if (engineDefaults !== undefined) writeEngineDefaults(agentDir, engineDefaults);

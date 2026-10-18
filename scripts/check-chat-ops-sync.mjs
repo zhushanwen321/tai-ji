@@ -4,8 +4,8 @@
  *
  * [HISTORICAL] 起因 2026-09-25（code-overdesign-audit 候选 6 / msg-pipeline-debloat
  * 设计 D5-4）：「组件禁做编排」边界登记两份——store.ts 的 ChatStoreOps Pick 字段清单
- * （类型面 SSOT）× taste-lint 规则 no-chat-ops-in-components 的 OPS_FIELDS 手写 Set
- * （lint 拦截面），靠「两处同步改」人工契约维护，实测漂移 13 项（lint 清单残留 5 个
+ * （类型侧 SSOT）× taste-lint 规则 no-chat-ops-in-components 的 OPS_FIELDS 手写 Set
+ * （lint 拦截范围），靠「两处同步改」人工契约维护，实测漂移 13 项（lint 清单残留 5 个
  * 已退役方法 + 漏拦 8 个现役 ops——组件调这些写口不亮红，规则承诺的边界有洞），无任何
  * 机器信号，靠事后对抗审查才抓出。本脚本把「两处同步改」变成可机检的失败。
  *
@@ -38,10 +38,10 @@ const ts = require('typescript')
 // fileURLToPath 而非 URL.pathname：Windows 上 pathname 返回 /D:/... 形态，resolve 叠加盘符成 D:\D:\（check-doc-symbol-drift.mjs 同款）
 const PROJECT_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
 
-/** 类型面 SSOT：ChatStoreOps Pick 字段清单所在文件与别名 */
+/** 类型侧 SSOT：ChatStoreOps Pick 字段清单所在文件与别名 */
 const STORE_REL = 'packages/core/src/domain/chat/store.ts'
 const FACET_TYPE_NAME = 'ChatStoreOps'
-/** lint 拦截面：OPS_FIELDS 手写 Set 所在规则文件与常量名 */
+/** lint 拦截范围：OPS_FIELDS 手写 Set 所在规则文件与常量名 */
 const RULE_REL = 'taste-lint/rules/no-chat-ops-in-components.mjs'
 const LINT_FIELD_CONST = 'OPS_FIELDS'
 

@@ -1,5 +1,5 @@
 /**
- * MessageBus 观测面测试（pull-push W0 / D7「发布/订阅侧结构化日志」）。
+ * MessageBus 观测范围测试（pull-push W0 / D7「发布/订阅侧结构化日志」）。
  *
  * 覆盖：
  * - 投递失败观测（S5「一次推送丢失在日志可检索」）：state 类零送达落 deliver-dropped

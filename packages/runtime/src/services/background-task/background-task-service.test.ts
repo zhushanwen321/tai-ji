@@ -5,7 +5,7 @@
  * 覆盖：
  * - P1 探针：并发写（循环 rename 新文件）× 并发读 1000 次 parse 成功率 100%（corrupted=0）
  * - D2 变更检测单广播源：mtime 轮询 + 事件钩子（checkForChanges 手动触发）+ 自写自检
- *   三触发面共享同一 last-seen——同变化至多广播一次；mtime 未变不重播
+ *   三触发点共享同一 last-seen——同变化至多广播一次；mtime 未变不重播
  * - D8 watched 集合：markWatched 基线不广播 / 垃圾 sid ENOENT 静默空表（不告警刷屏）
  * - D1 corrupt 语义：解析失败 → 空表 + corrupted 标记 + .corrupt 隔离，不 throw
  * - D6 kill 五分支矩阵：

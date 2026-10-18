@@ -65,7 +65,7 @@ export function isSessionDataCleared(sessionId: string): boolean {
 const activeStores = new Set<SessionDataStore>()
 
 /**
- * B5：真删除路径直调入口（lifecycle.delete 尾段，触发面收窄 2026-09-15）——对全部已注册
+ * B5：真删除路径直调入口（lifecycle.delete 尾段，触发点收窄 2026-09-15）——对全部已注册
  * store 实例执行 clearSession（tombstone 登记 + 分区摘除 + trash 软删除）。三条 session
  * 存活路径（pi 崩溃 exit / forceQuit / restore 清场）不经此入口：插件数据存活供
  * respawn / 复活后续写（详见 session-lifecycle.ts delete 内 B5 注释）。

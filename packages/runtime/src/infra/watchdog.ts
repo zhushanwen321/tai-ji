@@ -39,7 +39,7 @@
  * 采样回调全量 try/catch，失败记一次主日志 warn（模块级 once 防周期失败刷屏）后静默；
  * relief 动作（onRelief 注入）抛错同样吞掉——journal 照记（触发事实独立于动作成败）。
  *
- * 任务级墙钟语义声明（AGENTS 关键规则 19）：本模块是周期采样器（观测面），非任务超时
+ * 任务级墙钟语义声明（AGENTS 关键规则 19）：本模块是周期采样器（观测范围），非任务超时
  * ——60s 周期是 D4 设计规定的采样粒度，不属「任务级默认无超时」约束对象。
  */
 import { getHeapStatistics } from 'node:v8'
@@ -91,7 +91,7 @@ export interface WatchdogSample {
   usedPercent: number
 }
 
-/** 看门狗运行态快照（观测面：getStatus 暴露，测试断言共用）。 */
+/** 看门狗运行态快照（观测范围：getStatus 暴露，测试断言共用）。 */
 export interface WatchdogStatus {
   /** 最近一拍档位（从未采样 = 'normal'）。 */
   level: 'normal' | WatchdogMemoryLevel
@@ -129,7 +129,7 @@ export interface WatchdogOptions {
   now?: () => number
 }
 
-/** 看门狗运行句柄（stop 供 shutdown 链与测试收尾；getStatus 观测面）。 */
+/** 看门狗运行句柄（stop 供 shutdown 链与测试收尾；getStatus 观测范围）。 */
 export interface WatchdogHandle {
   stop(): void
   getStatus(): WatchdogStatus
@@ -212,7 +212,7 @@ export function classifyMemoryLevel(
  * 启动看门狗（组合根 listen 成功后调用一次；测试直接构造注入全量依赖）。
  *
  * 返回句柄持 stop（clearInterval；观测态随实例丢弃，不跨重启）。
- * 定时器 unref：采样是旁路观测面，不得阻止进程自然退出（对齐水位定时器形态）。
+ * 定时器 unref：采样是旁路观测范围，不得阻止进程自然退出（对齐水位定时器形态）。
  */
 export function startWatchdog(options: WatchdogOptions = {}): WatchdogHandle {
   const armed = options.armed ?? false

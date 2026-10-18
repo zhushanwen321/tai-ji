@@ -402,7 +402,7 @@ describe("abort 分级（cancel 帧 + 收敛兜底窗）", () => {
   }, 15_000);
 
   it("[S1 P1] cancel 收敛兜底窗常量 = 30s（pi 停轮收敛实测 15s 的 2× 量级——量级校准回归锚）", () => {
-    // 历史误校准：SDK CANCEL_SETTLE_GRACE_MS(3s) 是控制面单请求量级，被误用为
+    // 历史误校准：SDK CANCEL_SETTLE_GRACE_MS(3s) 是控制范围单请求量级，被误用为
     // 任务级停轮收敛窗 → 常驻引擎在 pi 正常收敛途中被按进程组终止（S1 主路径 8/8 失败）。
     // 本断言锚定兜底窗按被保护对象粒度（任务级）校准，防止再被「优化」回秒级。
     expect(CANCEL_SETTLE_GRACE_WINDOW_MS).toBe(30_000);
@@ -519,7 +519,7 @@ describe("gate 位多声明 run 期判定（W3 契约⑤接线：manifest vs ini
     await cleanup();
   });
 
-  it("非 gate 位不一致（personaInjection manifest 'flag' vs 应答 'prompt'）→ 不阻断：run 完成 + 诊断面仅 warn 留痕", async () => {
+  it("非 gate 位不一致（personaInjection manifest 'flag' vs 应答 'prompt'）→ 不阻断：run 完成 + 诊断范围仅 warn 留痕", async () => {
     const manifestCaps = { ...FAKE_MATCHED_CAPS, personaInjection: "flag" as const };
     const { engine, cleanup } = makeEngine(
       { capabilities: manifestCaps },

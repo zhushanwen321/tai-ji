@@ -13,7 +13,7 @@
 // resolveChatEnginePort / assertIdleTimeoutMsSafe）经壳 deps 回调指回本聚合实例方法。
 //
 // [2026-09-13 design-code-sync 兑现] [G1] 段预留的备选预案（第三文件再拆 Continuation
-// 协作面）落地：本文件折算 845 破 800 零余量锁定线，拆出 chat-rounds.ts（chat 域轮次
+// 协作范围）落地：本文件折算 845 破 800 零余量锁定线，拆出 chat-rounds.ts（chat 域轮次
 // 编排——Continuation 实例表 + 统一投递入口 + kickOffChatRound 轮次主干 + 轮末收尾协作
 // + SP-5 升级 gate + Continuation 生命周期显式接口）。两文件零互调零 import
 //（workflow-dispatch 同款形态）：
@@ -38,7 +38,7 @@
 //   → ChatRounds，2026-09-13 接线）；聚合内部互调（executeViaEngine/
 //   settleOneShotOutcome 族等）不经壳。
 // 3. 跨聚合边收敛（r0-inventory 清单① C-4/C-5）：
-//   - C-4（壳 dispose 直调 continuations.clear）：字段所有权随 Continuation 协作面迁
+//   - C-4（壳 dispose 直调 continuations.clear）：字段所有权随 Continuation 协作范围迁
 //     chat-rounds.ts，壳经其 clearContinuations() 显式接口（R4 兑现，接线 2026-09-13）。
 //   - C-5（onRecordFinalizedCleanup 跨域汇聚点 + abortContinuationQueue 队列清空）：
 //     本体迁 chat-rounds.ts；RecordLifecycle deps 回调（R3 装配时指壳方法）改指聚合
@@ -114,7 +114,7 @@ const logger = getLogger("subagents");
  * [R1 打样模式 1] 聚合协作 deps——**全部晚绑定闭包，构造期零求值**。
  *
  * 窄结构类型只声明聚合真实消费的通道（不整实例注入）。五类成员：
- * - 断言面（assertReady）：execute/executeAndAwait 入口就绪门
+ * - 断言范围（assertReady）：execute/executeAndAwait 入口就绪门
  *  （本体在 SessionBaselines，壳转发）。
  * - #1 留壳共享依赖 getter（getStore/getModelService/getNotifyHost/
  *   getPool/getWorktreeManager/getCwd）：
@@ -211,7 +211,7 @@ export function withWorktreeCwd(spec: AgentCallOpts): AgentCallOpts {
  * 域 #6/#7/#12/#14/#15 聚合：run 域执行编排（R4 自 SubagentService 抽取）。
  *
  * 字段所有权（r0-inventory 清单①）：#31 continuations（Continuation 实例表）已随
- * Continuation 协作面迁 chat-rounds.ts（2026-09-13 design-code-sync 接线）——该聚合
+ * Continuation 协作范围迁 chat-rounds.ts（2026-09-13 design-code-sync 接线）——该聚合
  * 唯一写者；壳 dispose 经其 clearContinuations() 显式接口触达（C-4 兑现），字段壳与
  * 本聚合零感知。
  */
@@ -470,7 +470,7 @@ export class RunOrchestration {
     // `initialize` 发现 → engine_capability_mismatch 该 run 失败 + record 标 failed，
     // 并**清理 run 前已建的前置副作用**（worktree 经 finalizeFailed → finalizeRecord
     // Step 3b cleanupWorktreeIfBound 清理）。非 gate 位不一致（无论强弱）一律
-    // warn 留痕不阻断（诊断面归 EngineClient，设计 §3.3 能力位段）。
+    // warn 留痕不阻断（诊断范围归 EngineClient，设计 §3.3 能力位段）。
     assertTaskShapeSupported(engine.id, engine.capabilities(), opts);
 
     // 沿既有拆解方向：identity 分支构造 → resolveIdentityForRoute、record 盖章 →
@@ -493,7 +493,7 @@ export class RunOrchestration {
     // 仅 sandbox 声明非 none 的引擎可达（现行 pi/zcode 均为 'emulated'——worktree
     // 创建/patch/回收执行者是下方 core 层 worktree-manager，引擎侧只消费 task.cwd）。
     if (typeof opts.worktree === "object") {
-      // [外部契约面登记] 对象形态 worktree（复用外部已创建的 WorktreeHandle）是
+      // [外部契约范围登记] 对象形态 worktree（复用外部已创建的 WorktreeHandle）是
       // ExecuteOptions.worktree 公共 API 契约的合法成员：本仓零调用，外仓（workflow
       // 脚本 / 独立引擎消费方）可能消费，分支本体保留。当前实现 handle 注入后**不回填**
       // record.worktreeHandle、不置 hadWorktree（与下方 true 分支不同）——外仓依赖
@@ -528,7 +528,7 @@ export class RunOrchestration {
     // 留守、失败 MF-6 落 idle 可恢复）。opts/identity 全量透传保 schema/maxTurns 等
     // 首轮声明（Continuation 续轮按 record 最小重建）。worktree===true 分支已回填
     // record.worktreeHandle，Continuation 派发时经 record.worktreeHandle 读取；对象形态
-    // 注入不回填（见上方外部契约面登记）。
+    // 注入不回填（见上方外部契约范围登记）。
     void engine;
     void isPiRoute;
     this.deps.startFirstChatRound(record, recordOpts);
@@ -736,7 +736,7 @@ export class RunOrchestration {
     // 抢锁（承接现状「cancel/dispose 抢先 → 静默跳过」检查语义）。
     // [P1b-1] 直写通道删除：closed/cancelled 终态判定不再在本方法直写——收敛至
     // worker-message-pump 的 settleWorkflowRecord 单点（D7 例外族 CAS + finalize 对
-    // 的唯一剩余处）；agent-settled/run-settled 事件面由同文件状态机接线段承载。
+    // 的唯一剩余处）；agent-settled/run-settled 事件流由同文件状态机接线段承载。
     if (record.origin === "workflow") {
       await settleWorkflowRecord(record, result, aborted ? "cancelled" : "gc", {
         finalizeRecord: (r, closedReason) => this.deps.finalizeRecord(record, r, "closed", closedReason),

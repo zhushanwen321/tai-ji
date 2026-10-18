@@ -85,7 +85,7 @@ describe('delete 立标判据 hasDestroySink（unreasonable#3 回归防线）', 
 
   it('btw 活线（在册 vid + ops 注入 → closeLine 终结扇出的销毁回调存在）→ hasDestroySink true，走 closeLine 不落主会话清理面', async () => {
     const { lifecycle, svc } = makeSessionLifecycleFixture()
-    // 组合根同款注入面（setBtwCascadeOps，官方「测试注入 fake / 置 null 复位」语义）：
+    // 组合根同款注入点（setBtwCascadeOps，官方「测试注入 fake / 置 null 复位」语义）：
     // 本用例钉审查 finding 1 的回退形态——判据若改回 `session !== undefined && !isBtwLine`
     //（btw 活线在册被错判无 sink），既有 3 用例全绿测不出，唯本象限红。真实装配下
     // hasDestroySink true 的消费点 = closeLine → fireLineTerminated → onLineTerminated →

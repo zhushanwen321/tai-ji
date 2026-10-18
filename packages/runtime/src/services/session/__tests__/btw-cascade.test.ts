@@ -162,7 +162,7 @@ describe('P-cascade：删主 session → 杀名下线进程 + 删线目录 + 注
     expect(pm.destroySession).toHaveBeenCalledWith(MAIN_SID)
   })
 
-  it('scanned（冷主）分支：主不在 active Map 仍级联（cwd 取扫描面真值）', async () => {
+  it('scanned（冷主）分支：主不在 active Map 仍级联（cwd 取扫描范围真值）', async () => {
     const { vid, threadDir } = await createLine('linepi-cold-main')
     const coldFile = join(fx, 'cold-main.jsonl')
     vi.spyOn(service, 'findScannedSession').mockReturnValue({

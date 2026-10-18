@@ -20,7 +20,7 @@ import type { McpServersService } from '../services/mcp-servers-service.js'
 
 /** 本域 handler 所需的最小 ctx 契约（结构兼容：组合根的 SettingsHandlerContext 注入
  * mcpServersService 后即满足，u2b 装配）。 */
-export interface McpHandlerContext extends MessageHandlerContext { // oe-exempt:20261004:framework:handler 注入缝上下文（组合根装配的最小 ctx 协议面）
+export interface McpHandlerContext extends MessageHandlerContext { // oe-exempt:20261004:framework:handler 注入缝上下文（组合根装配的最小 ctx 协议范围）
   mcpServersService: McpServersService
 }
 

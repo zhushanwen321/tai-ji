@@ -241,7 +241,7 @@ async function closeInstance(page: Page, terminalId: string): Promise<void> {
 
 /**
  * 当前显示终端的可见文本（xterm 默认 DOM 渲染器，视口行文本在 `.xterm-rows`）。
- * 渲染器若换 canvas/webgl，此读取面需同步改为 buffer 读取——本 spec 以 DOM 文本为断言面。
+ * 渲染器若换 canvas/webgl，此读侧需同步改为 buffer 读取——本 spec 以 DOM 文本为断言范围。
  */
 async function readTerminalText(page: Page): Promise<string> {
   const rows = page.locator('[data-testid="terminal-xterm"] .xterm-rows')

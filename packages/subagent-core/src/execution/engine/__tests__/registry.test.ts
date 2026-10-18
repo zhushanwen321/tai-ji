@@ -62,7 +62,7 @@ function makeFakeEngine(id: string): EnginePort {
   };
 }
 
-/** 带模型清单的假引擎（引擎模型段渲染的输入面；listModels 每次返回新数组实例——渲染必须与实例无关）。 */
+/** 带模型清单的假引擎（引擎模型段渲染的输入范围；listModels 每次返回新数组实例——渲染必须与实例无关）。 */
 function makeFakeEngineWithModels(
   id: string,
   models: Array<{ id: string; name?: string }>,

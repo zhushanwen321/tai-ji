@@ -16,7 +16,7 @@
 // unsupported → 同步拒）随派发参数删除退役——conversation 能力轴仍在 fork OR 借位
 // （assertTaskShapeSupported）、握手 mismatch（assertGateCapabilitiesMatched）、
 // message 资格门（engineConversationMessageUnsupportedError）三处消费；unsupported
-// 引擎的 start 从「即拒」放宽为「放行 + message 续聊拒」（与 LLM 工具面自洽）。
+// 引擎的 start 从「即拒」放宽为「放行 + message 续聊拒」（与 LLM 工具范围自洽）。
 //
 // [W3 协议化能力位方向判定（设计 §3.3 能力位表）] capabilities 的同步源 = manifest
 // 快照（注册期读，非握手缓存）。被 gate 判据涉及的能力位（steer+conversation /
@@ -32,7 +32,7 @@
 //     assertGateCapabilitiesMatched（core 侧判据；协议客户端握手尾接线归 client/ 领地）。
 //   - **非 gate 位**（personaInjection / eventGranularity / sessionRead / resume /
 //     interrupt / permissionMode / schemaEnforcement）不一致（无论强弱）→ 一律 warn
-//     留痕不阻断（诊断面 = EngineClient.warnOnManifestDiagnostics）。
+//     留痕不阻断（诊断范围 = EngineClient.warnOnManifestDiagnostics）。
 //
 // 调用点仍是两处（单点的是实现，不是调用点）：
 //   - chat 域：executeViaEngine 同步段、record 创建前（engine.capabilities() 同步可得，
@@ -121,7 +121,7 @@ export function assertTaskShapeSupported(
  * 方向（少声明方向在派发前已被 assertTaskShapeSupported 同步拦，握手不会发生——gate
  * 先行的结构性结果）；命中抛 EngineError(engine_capability_mismatch)，由首个 run 的
  * 协议路径转化为该 run 失败 + record 标 failed + 清理前置副作用（契约变更⑤）。
- * 非 gate 位不一致不进本判定（无论强弱一律 warn 留痕，归 EngineClient 诊断面）。
+ * 非 gate 位不一致不进本判定（无论强弱一律 warn 留痕，归 EngineClient 诊断范围）。
  *
  * 各 gate 位的「manifest 可用」取值语义与 assertTaskShapeSupported 逐条对偶：
  *   conversation 应答 'unsupported' 而 manifest 非 'unsupported' → mismatch

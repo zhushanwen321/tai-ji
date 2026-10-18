@@ -59,7 +59,7 @@ function makeMockClient(overrides: Partial<Record<string, unknown>> = {}): MockC
     onExit: vi.fn(),
     kill: vi.fn().mockResolvedValue(undefined),
     start: vi.fn().mockResolvedValue(undefined),
-    // lastActivityAt：活动时钟观测面（IPiEngine 结构要求）
+    // lastActivityAt：活动时钟观测范围（IPiEngine 结构要求）
     lastActivityAt: 0,
     exited: false,
     ...overrides,
@@ -218,7 +218,7 @@ function spyRestoreSuccessWithFacadeTail(setup: Setup, summary: Record<string, u
   })
 }
 
-/** [D3] session.restored 发布帧收集（S3①「恰好一条」断言面）。 */
+/** [D3] session.restored 发布帧收集（S3①「恰好一条」断言范围）。 */
 function restoredPublishCalls(setup: Setup): Array<[string, ServerMessage]> {
   return vi.mocked(setup.messageBus.publish).mock.calls.filter(([, m]) => (m as ServerMessage).type === 'session.restored') as Array<[string, ServerMessage]>
 }

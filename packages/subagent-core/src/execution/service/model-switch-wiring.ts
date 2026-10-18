@@ -2,7 +2,7 @@
 //
 // [subagent-model-switch §7.2/§7.4] setModel 生产 deps 的三个通道实现（装配点 =
 // subagent-service.setModel deps 闭包；实现独立成文件 = 壳装配段保持单行委托，
-// 编排本体 model-switch.ts 只依赖注入面不持有装配实现）。
+// 编排本体 model-switch.ts 只依赖注入范围不持有装配实现）。
 //
 //   - assertRunNotTerminalForSwitch：run 非终局判定（§7.2 步骤①附加校验）——run
 //     registry fold 终局唯一权威；

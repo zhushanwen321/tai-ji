@@ -9,7 +9,7 @@
  *   onDidCreateSession/onDidDestroySession 的订阅经注册表（handlerId → workerId）
  *   定向投递回对应 Worker（rpcServer.notify 通道，非全局广播）。
  *
- * AP-4 读面（plugin headerAction/modal 点位 U2）：readEntries（live only 条目镜像，
+ * AP-4 读侧（plugin headerAction/modal 点位 U2）：readEntries（live only 条目镜像，
  *   customType 服务端过滤 + sinceEntryId 游标增量）/ getCommands（纯查询直连 client，
  *   不经 sessionService 的 markDirty 语义）/ registerEntryInvalidation /
  *   unregisterEntryInvalidation（转调 EntryInvalidationDispatch 订阅注册表，u2c 产出）。
@@ -35,7 +35,7 @@ import { errorWithCode, toErrorMessage } from '../../../utils/errors.js'
 import { asOptionalString, asSafeKey, asString } from '../validation.js'
 
 /**
- * AP-4 读面 RPC 方法（U2）。读数据两方法 + entry 失效订阅注册族（对齐
+ * AP-4 读侧 RPC 方法（U2）。读数据两方法 + entry 失效订阅注册族（对齐
  * SESSION_EVENT_METHODS 注册族模式；entriesInvalidated 是 server→Worker notify、
  * 不进本表，方法名由 EntryInvalidationDispatch 的 ENTRY_INVALIDATION_NOTIFY_METHOD 承载）。
  * 方法名全集登记于 packages/shared/src/plugin-permission-map.ts 的 PLUGIN_RPC_METHODS。
@@ -80,7 +80,7 @@ export interface PluginSessionEntries {
 }
 
 /**
- * AP-4 读面的 runtime 侧依赖（单一注入点）。由 runtime 装配（plugin-rpc-setup 的
+ * AP-4 读侧的 runtime 侧依赖（单一注入点）。由 runtime 装配（plugin-rpc-setup 的
  * registerSessionRpcHandlers 实参）提供；缺失时读方法抛 SESSION_READ_NOT_WIRED。
  * [u5b 接线] pm 收窄为 getClient 窄结构面——PluginService 不持 IProcessManager，
  * 装配经 sessionService.getRpcClient（= pm.getClient 同源）适配。
@@ -125,7 +125,7 @@ const SESSION_EVENT_NOTIFY_METHODS = {
 } as const
 
 /**
- * SessionSummary（session-service 域）→ SessionInfo（插件 SDK 契约面）。
+ * SessionSummary（session-service 域）→ SessionInfo（插件 SDK 契约范围）。
  * 事件投递与 list/get 共用的字段映射单一真相。
  */
 export function sessionInfoFromSummary(s: SessionSummary): SessionInfo {
@@ -303,7 +303,7 @@ export interface SessionHandlers {
   /** session 事件注册表（S3-W2）：registerCreate/registerDestroy/registerActivate 的投递目标 */
   sessionEvents: SessionEventDispatch
   /**
-   * AP-4 读面依赖（U2）。可选：runtime 装配侧接线后读方法可用；缺失时读方法抛
+   * AP-4 读侧依赖（U2）。可选：runtime 装配侧接线后读方法可用；缺失时读方法抛
    * SESSION_READ_NOT_WIRED（装配缺陷显式报错，不伪装成 SESSION_NOT_ACTIVE——
    * 两者恢复动作不同，前者修装配、后者等会话恢复/走会话列表核验）。
    * [u5b] 生产装配已在 plugin-rpc-setup 接线（sessionService.getRpcClient 同源适配），
@@ -339,7 +339,7 @@ function toPluginSessionEntry(raw: unknown, customType: string): PluginSessionEn
  * 活跃路径过滤（readEntries 派生视图前的 raw entries 裁剪）：从 leafId 沿 parentId 回溯得
  * 活跃路径 id 集合，只保留链上条目——消息撤回（navigateTree 树回退）后，被撤子树的
  * custom op entry 不得再进入插件镜像的折叠输入（scheduler-manager 面板残留缺陷的
- * runtime 数据面落点；全量与增量两模式同过本过滤）。与 extensions 侧 todo/plan/goal/
+ * runtime 数据范围落点；全量与增量两模式同过本过滤）。与 extensions 侧 todo/plan/goal/
  * scheduler 的 filterActivePath、runtime infra/pi/entry-tree-builder 是设计登记的并行
  * 同构实现（extension 不能 import runtime 包的约束所致；census 收敛决策归阶段 6）。
  *
@@ -440,9 +440,9 @@ export function registerSessionRpcHandlers(
     }
   })
 
-  // ── AP-4 读面（U2，SESSION_READ_METHODS）──────────────────
+  // ── AP-4 读侧（U2，SESSION_READ_METHODS）──────────────────
   // customType 由请求参数服务端过滤：回包只含请求方指定域的条目（最小暴露面与
-  // 权限模型一致）；域字符串由调用方声明、runtime 不硬编码任何域（通用数据面）。
+  // 权限模型一致）；域字符串由调用方声明、runtime 不硬编码任何域（通用数据范围）。
   rpcServer.registerMethod(SESSION_READ_METHODS.readEntries, async (params) => {
     const sessionId = asSafeKey(params.sessionId, 'sessionId')
     // customType 形如 'pi-scheduler:task'（含冒号），走 asString 不走 SAFE_KEY 白名单

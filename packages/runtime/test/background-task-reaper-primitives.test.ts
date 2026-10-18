@@ -5,7 +5,7 @@
  * 覆盖（编排层断言，经真实入口 reapSessionBackgroundTasks / reapAllSessionsBackgroundTasks
  * 触发）：registry 读失败按空表继续 / corrupt 隔离 rename 失败原文件保留原位 / 终态写
  * tmp 落盘失败条目停留 running / rename 失败且 tmp 清理双诊断 / ②补杀分支终态写失败 /
- * 触发面 A 目录级异常 / 触发面 B baseDir 读失败（非 ENOENT warn）/ 单目录扫描异常跳过 /
+ * 触发点 A 目录级异常 / 触发点 B baseDir 读失败（非 ENOENT warn）/ 单目录扫描异常跳过 /
  * stale reaper.lock 残留非空（ENOTEMPTY）。
  *
  * pid 探测/处置原语（isPidAlive / killProcessTree / getProcessStartTimeSec /
@@ -287,10 +287,10 @@ describe('registry 读写错误分支（收殓不因 fs 问题崩溃）', () => 
   })
 })
 
-// ── 触发面 A/B 目录级错误跳过 ─────────────────────────
+// ── 触发点 A/B 目录级错误跳过 ─────────────────────────
 
 describe('目录级错误跳过（warn 后不中断、不外抛）', () => {
-  it('触发面 A：registry 探测本身抛错（existsSync 异常）→ 目录级 catch 兜底，结果正常返回', async () => {
+  it('触发点 A：registry 探测本身抛错（existsSync 异常）→ 目录级 catch 兜底，结果正常返回', async () => {
     const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {})
     try {
       const agentDir = makeAgentDir()
@@ -310,7 +310,7 @@ describe('目录级错误跳过（warn 后不中断、不外抛）', () => {
     }
   })
 
-  it('触发面 B：baseDir 读失败（非 ENOENT，如 EACCES）→ warn 放弃本轮、全零结果', async () => {
+  it('触发点 B：baseDir 读失败（非 ENOENT，如 EACCES）→ warn 放弃本轮、全零结果', async () => {
     const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {})
     try {
       const agentDir = makeAgentDir()
@@ -329,7 +329,7 @@ describe('目录级错误跳过（warn 后不中断、不外抛）', () => {
     }
   })
 
-  it('触发面 B：单目录扫描异常 → warn 跳过该目录，不中断其余目录扫描', async () => {
+  it('触发点 B：单目录扫描异常 → warn 跳过该目录，不中断其余目录扫描', async () => {
     const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {})
     try {
       const agentDir = makeAgentDir()

@@ -5,8 +5,8 @@
 // —— §4 验收场景脚本化（u-probe-verify）。
 //
 // 第三宿主纪律（G3 的可证伪前提）：本脚本对 subagent-core 的全部消费**仅凭 barrel
-// 导出面**——import 自 dist/index.cjs（构建产物），禁止任何 core 内部深路径 import；
-// 符号签名依据 dist/index.d.ts 导出类型面，不读 core 实现源码。
+// 导出清单**——import 自 dist/index.cjs（构建产物），禁止任何 core 内部深路径 import；
+// 符号签名依据 dist/index.d.ts 导出类型范围，不读 core 实现源码。
 //
 // 覆盖场景：
 //   S5① 列 agents        —— discoverAgents（tmp fixture agentDir）
@@ -49,7 +49,7 @@ import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
-// ── barrel 导出面（第三宿主唯一消费通道） ────────────────────
+// ── barrel 导出清单（第三宿主唯一消费通道） ────────────────────
 
 const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const coreRequire = createRequire(import.meta.url);
@@ -181,7 +181,7 @@ async function partA() {
   );
 
   // ── S5①：discoverAgents 装配（tmp fixture agentDir 作 hostRoot） ──
-  // hostRoots[].source 是封闭 8 值 ResourceSource 枚举（dist/index.d.ts 类型面）；
+  // hostRoots[].source 是封闭 8 值 ResourceSource 枚举（dist/index.d.ts 类型范围）；
   // 第三宿主注入项目级根走 "project-agents" 标签（序位高于 project-pi 的项目级通道）。
   const workspaceRoot = repoRoot;
   const entries = await core.discoverAgents(workspaceRoot, [{ dir: agentDir, source: "project-agents" }]);
@@ -248,7 +248,7 @@ async function partA() {
 // ══════════════════════════════════════════════════════════════
 
 async function partB() {
-  section("Part B · S5② workflow 契约面（normalizeWorkflowRef + loadWorkflowScriptByPath）");
+  section("Part B · S5② workflow 契约范围（normalizeWorkflowRef + loadWorkflowScriptByPath）");
 
   // 内置 workflow 名经 knownNames 宿主注入（内置名不 core 硬编码——wave1 裁决）。
   const ref = core.normalizeWorkflowRef("chain", { knownNames: ["chain", "map-reduce", "parallel"] });
@@ -417,7 +417,7 @@ async function verifyPartCJournalAppendEvidence(journal, runsDir, runId) {
 async function verifyPartCRecoveryOutcome(journal, runsDir, runId, runs, recovery, recoveredPayloads) {
   const recovered = runs.get(runId);
   // D15 中断收编：running 遗留 → interrupted 暂停态（非终局——崩溃 ≠ 失败，
-  // 可 resume）。聚合面 meta.interruptedAt 置位，runSummary 呈现 'interrupted'。
+  // 可 resume）。聚合上 meta.interruptedAt 置位，runSummary 呈现 'interrupted'。
   check(
     "S5③ recoverCrashedRuns: run 进 runs Map 且转 interrupted 暂停态（meta.interruptedAt 置位）",
     !!recovered && typeof recovered.meta.interruptedAt === "string",
@@ -434,7 +434,7 @@ async function verifyPartCRecoveryOutcome(journal, runsDir, runId, runs, recover
     String(recovered ? core.isRunSettled(recovered) : "no-run"),
   );
   check(
-    "S5③ state.error 携带恢复 reason（收编链诊断面）",
+    "S5③ state.error 携带恢复 reason（收编链诊断范围）",
     !!recovered &&
       typeof recovered.state.error === "string" &&
       recovered.state.error.includes("SIGKILL"),

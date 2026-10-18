@@ -666,7 +666,7 @@ describe('SessionService · dispatcher', () => {
       client.prompt.mockRejectedValueOnce(new Error('pi down'))
       await setup.service.sendMessage('sid-1', 'go')
       await flushDelivery()
-      // [u2] 非 busy 受理失败的错误面出口 = 内核失败出口（适配层 onDeliveryFailure），
+      // [u2] 非 busy 受理失败的错误范围出口 = 内核失败出口（适配层 onDeliveryFailure），
       // 文案带「消息投递失败」前缀但错因逐字可见（本轮迁移仅前缀演化，断言按错因收窄）
       const err = findBroadcast(setup, 'message.error')
       expect(err?.payload).toMatchObject({ sessionId: 'sid-1' })
@@ -1146,7 +1146,7 @@ describe('SessionService · Facade', () => {
 
     it('U-setInput-2b：session 存在但 usage 快照未就绪（fetch 失败保留空）返回 null——无快照与上下文真空显式分形', async () => {
       const { id } = await setup.seedSession()
-      // 不播种快照（mock getSessionStats 默认 {} → 拉取失败保留空）：读面 null 而非折叠为 0
+      // 不播种快照（mock getSessionStats 默认 {} → 拉取失败保留空）：读侧 null 而非折叠为 0
       expect(setup.service.getInputTokens(id)).toBe(null)
       expect(setup.service.getUsagePercent(id)).toBe(null)
     })

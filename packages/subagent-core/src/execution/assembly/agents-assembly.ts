@@ -40,7 +40,7 @@ const logger = getLogger("agents-assembly");
  *                  `~/.agents/agents`、`<workspaceRoot>/.pi/agents`、
  *                  `<workspaceRoot>/.agents/agents` 与 `TAIJI_EXTENSION_PATHS`
  *                  环境变量展开的扩展源码路径（resource-discovery buildScanTargets
- *                  固定槽位，注入 hostRoots 只是增列而非替换扫描面）
+ *                  固定槽位，注入 hostRoots 只是增列而非替换扫描范围）
  */
 export async function discoverAgents(
   workspaceRoot: string,

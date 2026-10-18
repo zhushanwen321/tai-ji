@@ -58,7 +58,7 @@ interface PhysicalWorktree {
   readonly mtimeMs: number;
 }
 
-/** 对账器的协作面（WorktreeManager 注入：git 执行器 + 注册表 + agentDir）。 */
+/** 对账器的协作范围（WorktreeManager 注入：git 执行器 + 注册表 + agentDir）。 */
 export interface WorktreeReconcilerDeps {
   /** git 命令执行器（manager.gitRunAsync 同一实例——写命令 per-repo mutex 共享）。 */
   readonly gitRunAsync: (args: string[], opts: { cwd: string; timeout?: number }) => Promise<string>;

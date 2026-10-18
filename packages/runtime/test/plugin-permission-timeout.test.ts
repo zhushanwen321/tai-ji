@@ -353,7 +353,7 @@ describe('审批超时生产装配接线（TAIJI_PLUGIN_PERMISSION_TIMEOUT_MS）
     vi.stubEnv('TAIJI_PLUGIN_PERMISSION_TIMEOUT_MS', '0')
     const service = buildService()
     expect(warnSpy.mock.calls.some((args) => args.join(' ').includes('is invalid'))).toBe(true)
-    // 回落值经行为面复核（默认 30min 不被 0/负值语义穿透）
+    // 回落值经行为范围复核（默认 30min 不被 0/负值语义穿透）
     const { activator, activation } = await startPending(service)
     await vi.advanceTimersByTimeAsync(30_000)
     expect(activator.getState('timeout-plugin')).toBe('ACTIVATING')

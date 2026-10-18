@@ -52,7 +52,7 @@ function die(msg) {
   process.exit(1);
 }
 
-// 纯逻辑导出面（scripts/__tests__/gitcode-release-sync.test.mjs 单测——MF-3：发布同步
+// 纯逻辑导出清单（scripts/__tests__/gitcode-release-sync.test.mjs 单测——MF-3：发布同步
 // 关键分支不再只靠人工真发布验证）。token/repo 在模块加载时读 env（测试先设 env 再动态 import）。
 export {
   apiCall, assetList, buildExistingAssetMap, checkEnv, createRelease,

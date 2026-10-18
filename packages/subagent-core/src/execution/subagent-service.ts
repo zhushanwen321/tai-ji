@@ -9,7 +9,7 @@ import { getLogger } from "../core/logger.ts";
 import type { AgentResult as WorkflowAgentResult, AgentCallOpts } from "../orchestration/models/types.ts";
 import { bestEffort, bestEffortPiCall } from "./assembly/best-effort.ts";
 // [V2 决策 3] lifecycle-manager idle timer：record 终态化/取消的 disarm 面
-// 路径防误杀）——[R3] 消费已随终态写面迁 service/record-lifecycle.ts；[R4]
+// 路径防误杀）——[R3] 消费已随终态写侧迁 service/record-lifecycle.ts；[R4]
 // DEFAULT_IDLE_TIMEOUT_MS 消费（assertIdleTimeoutMsSafe 错误文案基准）已随 run 域
 // 迁 service/run-orchestration.ts——本文件 lifecycle-manager 零 import。
 import { type ConcurrencyPool, DefaultConcurrencyPool } from "./assembly/concurrency-pool.ts";
@@ -18,7 +18,7 @@ import { type ConcurrencyPool, DefaultConcurrencyPool } from "./assembly/concurr
 // [R4] doFinalizeRoundToIdle（finalizeRoundToIdle wrapper）已随 run 域迁
 // service/run-orchestration.ts——壳内零消费。
 // [R4] ConversationContinuation 装配（continuations 队列 + continuationFor）已随
-// Continuation 协作面迁 service/chat-rounds.ts（2026-09-13 design-code-sync 接线）——
+// Continuation 协作范围迁 service/chat-rounds.ts（2026-09-13 design-code-sync 接线）——
 // 壳内零消费（装配面 = ChatRounds deps）。
 // [R1] 转发 getter 返回类型标注（值构造已迁聚合，仅 type 引用）。
 import type { ExecutionNestingContext } from "./engine/common/nesting-guard.ts";
@@ -27,7 +27,7 @@ import type { ExecutionNestingContext } from "./engine/common/nesting-guard.ts";
 // service/workflow-dispatch.ts——壳内零消费（机制注释随消费主体迁移）。
 import { setHostUiRequestEndpoint } from "./engine/host/host-ui-endpoint.ts";
 // [W6 宿主面下沉 → W3 纯镜像] killAll / killRecord / register 三函数经
-// spawnedChildren 状态镜像公共面（engine/host/spawned-children.ts）——子进程活在
+// spawnedChildren 状态镜像公共部分（engine/host/spawned-children.ts）——子进程活在
 // 引擎进程内，本模块只做镜像记账（终止意图位），实际终止经协议 interact cancel/close。
 // [R4] killRecordChildWithEscalation / registerSpawnedChildForRecord 消费已随 run 域迁
 // service/run-orchestration.ts + workflow-dispatch.ts——壳内剩 markAllSpawnedChildrenDead
@@ -71,11 +71,11 @@ import {
   resolveMemberEnginePortForSwitch,
 } from "./service/model-switch-wiring.ts";
 // [R4] ExecutionMode / ForkDepthExceededError / DEFAULT_AGENT_NAME / WorktreeHandle 消费
-// 已随 run 域迁聚合——types import 收窄为转发签名所需类型面。
+// 已随 run 域迁聚合——types import 收窄为转发签名所需类型范围。
 // [R1] 转发 getter 返回类型标注（实例已迁聚合，仅 type 引用）。
 import type { UiRequestObservability } from "./ui/ui-request-observability.ts";
 import { WorktreeManager } from "./worktree/worktree-manager.ts";
-// [H3/R6] 聚合面接口类型声明（queries/chatActions 消费方 + 构造参数）外移支撑文件
+// [H3/R6] 聚合范围接口类型声明（queries/chatActions 消费方 + 构造参数）外移支撑文件
 // 后经 type-only import 消费（编译后擦除，与 bootstrap→壳的 SubagentService 值边
 // 不构成值环）。
 import type {
@@ -93,10 +93,10 @@ import {
   SessionBaselines,
   type SubagentServiceSessionInit,
 } from "./service/session-baselines.ts";
-// [H3/R3] 域 #3/#4/#8/#10/#11/#13/#17/#18 聚合（record 读建面 + 终态迁移写面）——壳经
+// [H3/R3] 域 #3/#4/#8/#10/#11/#13/#17/#18 聚合（record 读建面 + 终态迁移写侧）——壳经
 // 转发方法透传，对外签名零变化。[计划变更 D-R3-1] G1 ≤700 与八域体量（833 物理行）
 // 冲突，拆两文件（dev agent 停线报告、主 agent 核验追认）：record-access.ts（#3/#8/#10/#13 读建面）+ record-lifecycle.ts
-//（#4/#11/#17/#18 终态写面，D5/H4 落点）；两聚合组间零互调零 import，壳分别装配。
+//（#4/#11/#17/#18 终态写侧，D5/H4 落点）；两聚合组间零互调零 import，壳分别装配。
 // [R4] ResolvedIdentity 的壳内消费（R3 过渡转发签名）已删——type import 随删转发清零。
 import { RecordAccess } from "./service/record-access.ts";
 import { RecordLifecycle } from "./service/record-lifecycle.ts";
@@ -106,7 +106,7 @@ import { coldLookupForAction, type ColdLookupDeps } from "./assembly/cold-lookup
 import { resurrectClosed } from "./persistence/execution-record.ts";
 import type { MemberReviveOutcome } from "./service/workflow-dispatch.ts";
 // [subagent-model-switch §6.2 读取规则 / §7.5 覆盖持久化行（U4b 接线）] workflow 域
-// 覆盖的 miss 重建读面（scanRunEvents——persistence 同层既有方向）与 run 覆盖事件的
+// 覆盖的 miss 重建读侧（scanRunEvents——persistence 同层既有方向）与 run 覆盖事件的
 // 折叠单点（latestModelOverride）。后者是 execution → orchestration 的新增值导入：
 // 折叠语义消费方单点（run-events「消费方单点 latestModelOverride」）优先于拆边纪律
 // ——手写折叠即双轨；拆边批可后续整族收编（登记单元 deviations）。
@@ -114,7 +114,7 @@ import { resolveRunEventJournal, scanRunEvents } from "./persistence/run-event-j
 import { latestModelOverride } from "../orchestration/run-events.ts";
 // [H3/R4] 域 #6/#7/#12/#14/#15 聚合（run 域执行编排）+ [D-R4-1] 拆分的 workflow 族
 // 聚合（executeWorkflowAgent 派发链）+ [2026-09-13 design-code-sync] 拆出的 chat 域
-// 轮次编排聚合（Continuation 协作面 + kickOffChatRound 族）——聚合组间零互调零
+// 轮次编排聚合（Continuation 协作范围 + kickOffChatRound 族）——聚合组间零互调零
 // import（跨文件协作经壳 deps 闭包，G2「经壳编排」形态），壳分别装配、经转发方法
 // 透传，对外签名零变化。
 import { ChatRounds } from "./service/chat-rounds.ts";
@@ -124,7 +124,7 @@ import type { AgentStreamSink } from "../shared/agent-stream.ts";
 
 const logger = getLogger("subagents");
 
-// [R6] 聚合面接口类型声明（SubagentQueries / SubagentChatActions / SubagentServiceInit）
+// [R6] 聚合范围接口类型声明（SubagentQueries / SubagentChatActions / SubagentServiceInit）
 // 已外移支撑文件 service/service-bootstrap.ts——壳经 type-only import 消费（编译后
 // 擦除），bootstrap→壳仅存的 SubagentService 值边（构造依赖）
 // 不构成值环（壳对 bootstrap 零 re-export）。
@@ -238,10 +238,10 @@ export class SubagentService {
       { cwd: init.cwd, uiRequestHandler: init.uiRequestHandler },
       {
         // [D4 late-bound getter `() => ({pi, disposed, piGeneration})`] assertReady 断言状态现读：
-        // pi（initSession 时点注入，经壳 getter 透传聚合，作废窗内聚合读面降级 null——[§1.4 (a)]）
+        // pi（initSession 时点注入，经壳 getter 透传聚合，作废窗内聚合读侧降级 null——[§1.4 (a)]）
         // + disposed（壳旗标）+ piGeneration（绑定代际，随 initSession 注入递增）。
         readAssertState: () => ({ pi: this.pi, disposed: this._disposed, piGeneration: this.baselines.piGeneration }),
-        // session 复活（initSession 内 revive 步骤回调）——旗标写点留壳（断言面同源）。
+        // session 复活（initSession 内 revive 步骤回调）——旗标写点留壳（断言范围同源）。
         reviveDisposed: () => {
           this._disposed = false;
         },
@@ -287,7 +287,7 @@ export class SubagentService {
     // [subagent-model-switch §6.2] 覆盖记账内存表的 miss 重建通道（读取规则：解析
     // 第 0 层读宿主内存表；内存 miss——主 agent 进程重启后首次解析——按域从持久化
     // 权威重建）。本闭包 = chat 域重建（执行记录链最新记录的 modelOverride 字段——
-    // 事件流折叠派生视图——scanFile 补派生 + 冷复活水合的读面）。workflow 域（runId 键）
+    // 事件流折叠派生视图——scanFile 补派生 + 冷复活水合的读侧）。workflow 域（runId 键）
     // 的 miss 重建 = deps.rebuildRunOverride 独立通道（journal 折叠 latestModelOverride
     // 单点，WorkflowDispatch 装配段注入），由 workflow-dispatch 派发链消费——注意
     // runId 键仍会先经本闭包（ModelConfigService.getModelOverride 对任意 miss 键调
@@ -310,10 +310,10 @@ export class SubagentService {
       getMainSessionFile: () => this.mainSessionFile,
       getExecNesting: () => this.execNesting,
     });
-    // [R3] 域 #4/#11/#17/#18 聚合（[U5] 意愿动作写面：dispose 批量收起/close 归档三路/
-    // cancel 中断/finalize 簇——D5「store 与写面入口的唯一宿主」，H4 落点）。跨聚合边
+    // [R3] 域 #4/#11/#17/#18 聚合（[U5] 意愿动作写侧：dispose 批量收起/close 归档三路/
+    // cancel 中断/finalize 簇——D5「store 与写侧入口的唯一宿主」，H4 落点）。跨聚合边
     // 收敛：C-5（onRecordFinalizedCleanup 汇聚点 + Continuation 队列清空，本体在壳
-    // #14 协作面）经 deps 回调。reconcile sweep 装配闭包调 finalizeRecord 经壳转发
+    // #14 协作范围）经 deps 回调。reconcile sweep 装配闭包调 finalizeRecord 经壳转发
     // 方法 late-bound 读取，装配点零改动。
     this.recordLifecycle = new RecordLifecycle({
       assertReady: () => this.assertReady(),
@@ -323,7 +323,7 @@ export class SubagentService {
       getNotifyHost: () => this.notifyHost,
       getSessionsDir: () => this.sessionsDir,
       getPi: () => this.pi,
-      // [R4 / C-5 兑现 / 2026-09-13 design-code-sync 接线] Continuation 协作面本体
+      // [R4 / C-5 兑现 / 2026-09-13 design-code-sync 接线] Continuation 协作范围本体
       //（continuations 队列 + onRecordFinalizedCleanup + abortAndClearQueue）已迁
       // ChatRounds 聚合——R3 装配时指向壳闭包的回调改指聚合显式接口（r0-inventory
       // 清单① C-5 收敛完成；聚合间零直写，G2）。
@@ -339,7 +339,7 @@ export class SubagentService {
       hasActiveContinuationRound: (id) => this.chatRounds.hasActiveContinuationRound(id),
     });
     // [R4] 域 #6/#7/#12/#14/#15 聚合（run 域执行编排 + pool/worktree 资源；
-    // [2026-09-13 design-code-sync] Continuation 协作面已迁 ChatRounds，chat 域轮次
+    // [2026-09-13 design-code-sync] Continuation 协作范围已迁 ChatRounds，chat 域轮次
     // 派发经下方 deps 回调编排）。deps 全晚绑定闭包（构造期零求值——#1 留壳共享依赖经 getter
     // 现读同一实例；R3 聚合显式接口直指 recordAccess/recordLifecycle，聚合间零私有
     // 互调 G2）。
@@ -368,7 +368,7 @@ export class SubagentService {
       // 编排」；one-shot 直派回调随分支消亡删除）。
       startFirstChatRound: (record, opts) => this.chatRounds.startFirstChatRound(record, opts),
     });
-    // [2026-09-13 design-code-sync 兑现] chat 域轮次编排聚合（Continuation 协作面 +
+    // [2026-09-13 design-code-sync 兑现] chat 域轮次编排聚合（Continuation 协作范围 +
     // kickOffChatRound 族 + SP-5 升级 gate + Continuation 生命周期显式接口——自
     // RunOrchestration 拆出的第三文件，拆分缘起与边界见 chat-rounds.ts 文件头）。
     // deps 全晚绑定闭包（构造期零求值——#1 留壳共享依赖与 R3 聚合显式接口同
@@ -472,9 +472,9 @@ export class SubagentService {
   // 与 emitPendingRegister / emitPendingUnregister 模块函数已整体搬移至 notify-host.ts
   //（本类经 this.notifyHost 消费；行为逐字节等价，搬移 + 依赖注入）。
 
-  // ── 对外聚合面（域 #0，壳终态保留 D3）（R0 重排）──
+  // ── 对外聚合范围（域 #0，壳终态保留 D3）（R0 重排）──
 
-  /** [D4 查询面聚合] 读模型消费方（壳 interface/ 视图与 tool 查询经此访问；
+  /** [D4 查询范围聚合] 读模型消费方（壳 interface/ 视图与 tool 查询经此访问；
    *  纯委托——方法本体保留 private 实现不重写，行为逐字节等价）。 */
   readonly queries: SubagentQueries = {
     findRecord: (id) => this.findRecord(id),
@@ -564,12 +564,12 @@ export class SubagentService {
   // ── 域 #3/#4/#8/#10/#11/#13/#17/#18 RecordAccess + RecordLifecycle 聚合转发（R3 抽取；
   // 本体 execution/service/record-access.ts + record-lifecycle.ts）──
 
-  /** [R3] 读建面聚合实例（域 #3 孤儿恢复 / #8 查询面 / #10 action 网关 / #13 身份解析与
+  /** [R3] 读建面聚合实例（域 #3 孤儿恢复 / #8 查询范围 / #10 action 网关 / #13 身份解析与
    *  record 创建的唯一宿主）。deps 全晚绑定闭包（装配见构造器），壳经下方同名方法
    *  透传，对外签名零变化。[D-R3-1] 与 RecordLifecycle 拆分的计划变更见聚合文件头。 */
   private readonly recordAccess: RecordAccess;
 
-  /** [R3] 终态迁移写面聚合实例（域 #4 回收面 / #11 close 三路 / #17 cancel / #18
+  /** [R3] 终态迁移写侧聚合实例（域 #4 回收面 / #11 close 三路 / #17 cancel / #18
    *  finalize 簇的唯一宿主——D5「store 与终态迁移入口的唯一宿主」，H4 落点）。
    *  deps 全晚绑定闭包（装配见构造器；C-5 跨域汇聚经回调），壳经下方同名方法透传，
    *  对外签名零变化。 */
@@ -604,7 +604,7 @@ export class SubagentService {
 
   // ── 域 #4 回收面 聚合转发（R3 抽取；本体 execution/service/record-lifecycle.ts）──
   // [不采用其余方案的理由 #3] 回收清单显式归 RecordLifecycle——disposeAllRecords/onParentFork/
-  // onParentNew 编排性关闭随终态写面迁移；壳只保留时序编排（检查点③：
+  // onParentNew 编排性关闭随终态写侧迁移；壳只保留时序编排（检查点③：
   // dispose 调用顺序与现状逐行等价，E9 先于批量 archive）。promoteSessionFileFromEngine
   // Handle（A 通道写点，清单②#1）为聚合内部互调成员，壳内零
   // 消费 → 零转发（R2 打样模式 2）。
@@ -634,8 +634,8 @@ export class SubagentService {
   // RunOrchestration/WorkflowDispatch，经 deps 装配闭包直指 recordAccess 聚合——
   // 壳内与全仓零剩余消费，删转发判据满足）。
 
-  // ── 域 #8 查询面 聚合转发（R3 抽取；本体 execution/service/record-access.ts）──
-  // 消费方 = queries 聚合面（D3 壳保留）+ Continuation handlers（R4 领地），壳保留
+  // ── 域 #8 查询范围 聚合转发（R3 抽取；本体 execution/service/record-access.ts）──
+  // 消费方 = queries 聚合范围（D3 壳保留）+ Continuation handlers（R4 领地），壳保留
   // 转发方法 → 调用点零改动。
 
   /** 按 id 查内存 running record 的只读快照（G3-002 修复）。本体已迁 RecordAccess
@@ -767,7 +767,7 @@ export class SubagentService {
   /** [R4] 域 #6-#15 核心编排聚合实例：run 域执行编排（execute/executeAndAwait 入口、
    *  引擎编排 + adopt 分诊、settleOneShotOutcome 终态收尾、pool/worktree 资源）。
    *  deps 全晚绑定闭包（装配见构造器），壳经下方同名方法透传，对外签名零变化。
-   *  [2026-09-13 design-code-sync] Continuation 协作面 + continuations 队列（C-4/C-5
+   *  [2026-09-13 design-code-sync] Continuation 协作范围 + continuations 队列（C-4/C-5
    *  宿主）已迁下方 chatRounds 聚合。 */
   private readonly runOrchestration: RunOrchestration;
 
@@ -775,7 +775,7 @@ export class SubagentService {
    *  与 runOrchestration 组间零互调零 import（跨文件协作经壳 deps 闭包）。 */
   private readonly workflowDispatch: WorkflowDispatch;
 
-  /** [2026-09-13 design-code-sync] chat 域轮次编排聚合实例（Continuation 协作面 +
+  /** [2026-09-13 design-code-sync] chat 域轮次编排聚合实例（Continuation 协作范围 +
    *  kickOffChatRound 族 + SP-5 升级 gate + Continuation 生命周期显式接口）。与
    *  runOrchestration 组间零互调零 import（跨文件协作经壳 deps 闭包双向编排）。 */
   private readonly chatRounds: ChatRounds;
@@ -857,7 +857,7 @@ export class SubagentService {
           ),
         // [U4a 事件管线消费 / U4b 接线] run 级覆盖意图持久化：run 事件流追加
         // `model-override` 记账帧（事件类型/词表/fold 均为 U4a 产物，本接线复用既有
-        // journal 写入口——非新持久化载体）。写入面说明（[F1-17] 裁决修正）：不走
+        // journal 写入口——非新持久化载体）。写侧说明（[F1-17] 裁决修正）：不走
         // dispatchRunTrigger 的真因是 model-override 为非转移记账事件（不占
         // RUN_TRANSITIONS 表行），appendTransition 首行 transition() 对无转移表行
         // 事件必抛 IllegalTransitionError——结构上进不了转移裁决链；RunDispatchSource
@@ -955,7 +955,7 @@ export class SubagentService {
 
   /**
    * [V2 决策 3 → H1 U2 改写 / U6 定形] message 统一投递入口（modeless：全 record）。
-   *  本体已迁 ChatRounds；壳纯转发（chatActions 聚合面消费）。 */
+   *  本体已迁 ChatRounds；壳纯转发（chatActions 聚合范围消费）。 */
   private async deliverChatMessage(record: ExecutionRecord, text: string): Promise<void> {
     return this.chatRounds.deliverChatMessage(record, text);
   }
@@ -970,7 +970,7 @@ export class SubagentService {
    *  已删除：SAR 构造 resolveHostPiEnginePort 的 getService 兼容位消费随 W8 收尾消失，
    *  全仓零调用（2026-09 死代码清扫）。引擎经协议 converse，不再回调宿主编排面。 */
 
-  // ── 壳生命周期编排与断言（dispose 时序留壳 = R3 检查点③；D4 断言面）（R0 重排）──
+  // ── 壳生命周期编排与断言（dispose 时序留壳 = R3 检查点③；D4 断言范围）（R0 重排）──
 
   private _disposed = false;
   // [B-7 已清] _seq 死字段（全文件零消费）按 r0-inventory 清单①登记于 R1 删除。
@@ -1002,7 +1002,7 @@ export class SubagentService {
     // [H1 U2/U6] Continuation 实例全量清理（路由注销面已随 interact 面退役）——
     // dispose 后容器不应再收 message。
     // [R4 / C-4 兑现 / 2026-09-13 接线] 原直调 this.continuations.clear() 的跨聚合写边
-    // 收敛为聚合显式接口（字段所有权随 Continuation 协作面迁 ChatRounds）。
+    // 收敛为聚合显式接口（字段所有权随 Continuation 协作范围迁 ChatRounds）。
     this.chatRounds.clearContinuations();
     // [collect 退役] 原 E9 批缓冲 dispose 转账（convertPendingSyncBufferToAsync）已随
     // sync 批机制整体删除——无批缓冲可转账，仍在跑成员由 disposeAllRecords 关闭。
@@ -1016,7 +1016,7 @@ export class SubagentService {
 
     this.store.dispose();
     // [§1.4 (a)] dispose 收尾显式作废 pi 句柄绑定（flush/persist 链之后的最后一步——
-    // 排在其前的关停投递链保留对旧句柄的最后一次尽力写；此后 late-bound 读面统一
+    // 排在其前的关停投递链保留对旧句柄的最后一次尽力写；此后 late-bound 读侧统一
     // 降级 null，下一次 initSession 注入新代际句柄恢复）。与 reload 分支的显式作废
     // 同机制（本体 SessionBaselines.invalidatePiBinding）。
     this.baselines.invalidatePiBinding("service dispose (session ended)");

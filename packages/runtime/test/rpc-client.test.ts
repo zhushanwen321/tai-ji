@@ -54,7 +54,7 @@ vi.mock('../src/infra/pi/pi-provider-store.js', async () =>
 vi.mock('../src/infra/logger.js', async () =>
   (await import('./helpers/rpc-client-mock')).loggerModule())
 
-/** 读取 RpcClient 内部 pending 数（反射，仅测试用；U1 pi-rpc 收敛后经 registry 部件 pendingSize 只读面）。 */
+/** 读取 RpcClient 内部 pending 数（反射，仅测试用；U1 pi-rpc 收敛后经 registry 部件 pendingSize 只读侧）。 */
 function pendingSize(client: unknown): number {
   return (client as { pendingRegistry: { pendingSize: number } }).pendingRegistry.pendingSize
 }

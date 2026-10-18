@@ -435,7 +435,7 @@ describe("model-switch — 应答两型 / run 非终局 fail-fast / 档位预检
     const unauthed = makeRegistry([makeModel({ id: "glm-5.3-flash" })], []);
     const h = makeHarness({ registry: unauthed });
     const reply = await setModel(h.deps, { domain: "chat", record: h.record }, TARGET_MODEL, "high");
-    // 无活进程路径直接走记账分支，但凭据预检已在前置校验段拦截——未到记账写面。
+    // 无活进程路径直接走记账分支，但凭据预检已在前置校验段拦截——未到记账写侧。
     expect(reply).toMatchObject({ scope: "error" });
     expect(h.record.modelOverride).toBeUndefined();
   });

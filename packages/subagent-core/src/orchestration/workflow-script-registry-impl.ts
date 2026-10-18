@@ -29,10 +29,10 @@ import {
   type WorkflowScanConfig,
 } from "./config-loader.ts";
 
-// ── barrel 导出面（sink 设计 U1：WorkflowScript 实体 + 按路径加载工厂）──
+// ── barrel 导出范围（sink 设计 U1：WorkflowScript 实体 + 按路径加载工厂）──
 
 // WorkflowScript 类（实体：sourceCode/validate/toExecutable 收敛）导出给 barrel
-// re-export——第三宿主仅凭导出面即可消费实体（G3），不再鸭子复刻整类（§2.2 A2）。
+// re-export——第三宿主仅凭导出范围即可消费实体（G3），不再鸭子复刻整类（§2.2 A2）。
 export { WorkflowScript };
 
 /**

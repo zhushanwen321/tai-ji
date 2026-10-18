@@ -8,7 +8,7 @@
  * - 其余 session 不受累：抛错后对另一 session 的 remove 全链正常完成。
  * - toSummary 抛错 → destroyedSummary 降级最小形状（宁发少知不发错），条目删除不被打断。
  *
- * crash journal 经 vi.mock 拦截（append 是 D1 journal 的断言面）；reaper / pi-paths mock 使
+ * crash journal 经 vi.mock 拦截（append 是 D1 journal 的断言范围）；reaper / pi-paths mock 使
  * 本单测 hermetic（不 spawnSync ps、不触真实目录）。checkpoint store 单例在空清单上
  * removeSession 为 no-op（不落盘），无需 mock。
  *

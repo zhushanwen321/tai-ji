@@ -1,4 +1,4 @@
-// [H3/R6] SubagentService 壳的支撑文件：聚合面接口类型声明（SubagentQueries /
+// [H3/R6] SubagentService 壳的支撑文件：聚合范围接口类型声明（SubagentQueries /
 // SubagentChatActions / SubagentServiceInit）+ 进程单例访问器族（SERVICE_SLOT_KEY /
 // getServiceSlot / getSubagentService / setSubagentService）。
 // R6 前同居壳文件（impl-plan §2 R6 行），外移达成 G1 壳终态（类体 ≤500 折算 +
@@ -23,7 +23,7 @@ import type { ExecutionRecord } from "../domain/record-model.ts";
 import type { RecordSnapshot, SubagentRecord } from "../assembly/types.ts";
 import { GLOBAL_SLOT_KEYS } from "../../shared/global-slots.ts";
 
-/** [D4 查询面聚合] 读模型轴（record 快照读取 + store 订阅）——Service 上的
+/** [D4 查询范围聚合] 读模型轴（record 快照读取 + store 订阅）——Service 上的
  *  `service.queries` 消费方。变化原因：改查询派生视图 / 过滤 / 订阅语义，只动 queries 组；
  *  Service 本体保留编排核（execute/executeAndAwait/cancel）与生命周期面。 */
 export interface SubagentQueries {

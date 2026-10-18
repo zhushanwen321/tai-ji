@@ -105,7 +105,7 @@ function subagentRecordEntries(id: string, status: string, entryId: string, extr
  *
  * 注册条目恒在场（身份域：runId/workflowName/scriptName/slug/startedAt/recordPath）；
  * status 非 running 再补终态条目（终局域：done/interrupted + reason + 统计摘要）。
- * v2 条目面不携 trace——agentCalls 由 run journal fold 供源（本文件 entry-only 装置无
+ * v2 条目范围不携 trace——agentCalls 由 run journal fold 供源（本文件 entry-only 装置无
  * run journal 目录，fold 恒缺席 → agentCalls 恒空）。
  */
 function workflowRecordEntries(
@@ -282,7 +282,7 @@ describe('送达水位发布门', () => {
     expect(signals).toHaveLength(3)
     expect(signals[2]).toEqual({ runId: 'run-2', status: 'done', reason: 'completed' })
 
-    // [登记 §3.3 迁移] 原「running 中仅步骤数变化（trace +1）也出信号」断言删除：v2 条目面
+    // [登记 §3.3 迁移] 原「running 中仅步骤数变化（trace +1）也出信号」断言删除：v2 条目范围
     // 不携 trace，agentCalls 由 run journal fold 供源——本文件 entry-only 装置（sessionStore
     // 恒空 → 无 run journal 目录）fold 缺席，agentCalls 恒空，步骤数/步骤状态维度无 entry 侧
     // 可达形态。该维度由 session-records.test.ts「派生视图驱动信号」用例（world 装置 + run journal
@@ -601,7 +601,7 @@ describe('U6d 全量重建 plan 路径的活跃路径裁剪', () => {
     expect(subFrame.payload.subagents.map((s) => s.subagentId)).toEqual(['sa-1', 'sa-2']) // 照实：不裁
   })
 
-  it('增量轮不裁剪（契约面）：delta 内 plan-state entry 无 leafId 回溯，原样进派生基线', async () => {
+  it('增量轮不裁剪（契约范围）：delta 内 plan-state entry 无 leafId 回溯，原样进派生基线', async () => {
     const { records, publish, client } = makeRecords()
     const fire = registerSession(records)
     fire('s1')

@@ -5,7 +5,7 @@
 // - initialize：应答 protocolVersion=1 + 最小 capabilities + envEcho（白名单键的
 //   process.env 摘要——relay 透传/剥除断言的数据源，非白名单键不回传防泄漏）；
 // - read：应答 SessionView（turns=[{text:'fake turn',...}]，sessionId=本进程 pid——
-//   两次 read 的 sessionId 相同 = 实例复用断言面）；
+//   两次 read 的 sessionId 相同 = 实例复用断言范围）；
 //   FAKE_READ_MODE=error → read 回 error 帧（降②级测试）；
 //   FAKE_READ_MODE=hang → read 不应答（dispose 上界测试的挂死场景）；
 //   FAKE_DISPOSE_MODE=hang → dispose 不应答不退出（聚合上界测试）；
@@ -25,7 +25,7 @@ const ENGINE_ID = argOf('--engine-id', 'fake')
 const READ_MODE = argOf('--read-mode', process.env.FAKE_READ_MODE ?? 'ok')
 const DISPOSE_MODE = argOf('--dispose-mode', process.env.FAKE_DISPOSE_MODE ?? 'ok')
 const SPAWN_LOG = process.env.FAKE_SPAWN_LOG ?? ''
-// env 回显白名单：只回传测试断言的协议面键（fixture 不做通用 env 转发）。
+// env 回显白名单：只回传测试断言的协议范围键（fixture 不做通用 env 转发）。
 const ENV_ECHO_KEYS = [
   'TAIJI_SUBAGENT_RELAY_SOCKET',
   'TAIJI_SUBAGENT_RELAY_NODE',
@@ -43,7 +43,7 @@ if (SPAWN_LOG !== '') {
   try {
     appendFileSync(SPAWN_LOG, `${process.pid}\n`)
   } catch {
-    // 计数失败不影响协议面
+    // 计数失败不影响协议范围
   }
 }
 
@@ -95,7 +95,7 @@ rl.on('line', (line) => {
           sessionId: String(process.pid),
           turns: [{ text: 'fake turn', thinking: '', toolCalls: [], closed: true }],
           source: 'native',
-          // envEcho 白名单摘要随 read 应答透出（SessionView 附加字段，宿主断言面）。
+          // envEcho 白名单摘要随 read 应答透出（SessionView 附加字段，宿主断言范围）。
           envEcho: Object.fromEntries(ENV_ECHO_KEYS.map((k) => [k, process.env[k]])),
         },
       })

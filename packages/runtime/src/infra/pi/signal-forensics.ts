@@ -543,7 +543,7 @@ export interface CaptureInput {
   managedPids?: readonly number[]
 }
 
-export interface CaptureDeps { // oe-exempt:20261014:framework:采集依赖注入面（环 + pid 注入，测试替身用，单实现常态）
+export interface CaptureDeps { // oe-exempt:20261014:framework:采集依赖注入范围（环 + pid 注入，测试替身用，单实现常态）
   ring: ProcessTableRing
   /** runtime 自身 pid。 */
   ownPid: number

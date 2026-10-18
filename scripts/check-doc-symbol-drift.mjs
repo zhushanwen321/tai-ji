@@ -43,7 +43,7 @@
  * 映射表 DOC_MODULE_MAP 是显式登记（文档 → 权威源码模块）。新增设计文档时在
  * 此登记映射，未登记的文档不检查（宁缺勿滥，误报面收敛到声明过的对照对）。
  *
- * 用法：node scripts/check-doc-symbol-drift.mjs（符号/路径检查始终全量——触发面
+ * 用法：node scripts/check-doc-symbol-drift.mjs（符号/路径检查始终全量——触发范围
  * 由 pre-commit 按路径控制，检查本身毫秒级无需增量；[G5] 注释 docs 引用检查读
  * git staged，无 staged 源码文件时零扫描。import 消费导出纯函数不触发主流程）
  */
@@ -72,7 +72,7 @@ const DOC_MODULE_MAP = {
   'docs/architecture/zcode-session-db-isolation.md': ['packages/subagent-core/src/execution/engine', 'packages/zcode-subagent-cli/src', 'packages/shared/src/paths.ts', 'packages/runtime/src/infra/pi/pi-paths.ts', 'scripts/zcode-session-db-cleanup.mjs'],
   // replay port 设计（subagent 完成回收在新架构上的重放移植）：M1/M2 落点在
   // pi-subagent-cli，M3 落点在 subagent-core execution（watchdog 复用 settled-watchdog
-  // 原语）；MAX_ATTEMPTS 引执行面、CANCEL_SETTLE_GRACE_MS 引协议面、DOC_MODULE_MAP 引检查
+  // 原语）；MAX_ATTEMPTS 引执行面、CANCEL_SETTLE_GRACE_MS 引协议范围、DOC_MODULE_MAP 引检查
   // 本体——按文档实际引用符号的所在模块逐条登记（宁准勿滥）。
   //
   // 引擎开发指南（docs/extensions/subagents/engine-development-guide.md）：登记蓝本 =
@@ -477,7 +477,7 @@ export function extractDocRefsInComment(commentText) {
  */
 export function buildDocsMdNameIndex(skipped) {
   const names = new Set()
-  // timeout：控制面单请求秒级上界（git index.lock 竞争等异常不给 pre-commit 无界挂起）；
+  // timeout：控制范围单请求秒级上界（git index.lock 竞争等异常不给 pre-commit 无界挂起）；
   // 超时 spawnSync 返回 status null → 走下方回退分支，与 git 不可用同路径降级
   const res = spawnSync('git', ['ls-files', '-z', '--', '*.md'], { cwd: PROJECT_ROOT, encoding: 'utf-8', timeout: 30_000 })
   if (res.status === 0 && typeof res.stdout === 'string') {
@@ -589,7 +589,7 @@ export function checkCommentDocRefs(files, docsMdNames, exempt = COMMENT_DOC_REF
 }
 
 /** staged 文件清单（指定 diff-filter）；git 不可用返回 null（无 git 上下文时跳过本检查面）。
- *  timeout：控制面单请求秒级上界，超时（status null）按 git 不可用同路径降级显形。 */
+ *  timeout：控制范围单请求秒级上界，超时（status null）按 git 不可用同路径降级显形。 */
 function gitStagedFiles(diffFilter) {
   const res = spawnSync('git', ['diff', '--cached', '--name-only', '-z', `--diff-filter=${diffFilter}`], { cwd: PROJECT_ROOT, encoding: 'utf-8', timeout: 30_000 })
   if (res.status !== 0 || typeof res.stdout !== 'string') return null
@@ -805,7 +805,7 @@ export function extractDataOwnerAnnotations(text) {
 }
 
 /** git grep 采集全仓注解（索引级毫秒级；无 git 上下文降级 available:false）。
- *  timeout：控制面单请求秒级上界，超时（status null）按 git 不可用同路径降级显形。 */
+ *  timeout：控制范围单请求秒级上界，超时（status null）按 git 不可用同路径降级显形。 */
 function collectDataOwnerAnnotations() {
   const res = spawnSync(
     'git',

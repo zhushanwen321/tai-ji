@@ -5,7 +5,7 @@
  * 职责（u-runtime-svc）：
  *  - registry 读：`<getPiAgentDir()>/base-tool-enhance/<sid>/registry.json`（损坏 →
  *    corrupt 语义：空表 + 错误标记，不 throw；垃圾 sid ENOENT 静默空表）
- *  - 变更检测（D2，三触发面共享同一 last-seen mtime 判定，单广播源）：
+ *  - 变更检测（D2，三触发点共享同一 last-seen mtime 判定，单广播源）：
  *      ① 2s mtime 轮询（变化才重读+广播）；
  *      ② pi 事件钩子（event-adapter 旁路转发，u-runtime-rpc 组合根接线到
  *         checkForChanges）触发对 watched 集合的一次完整变更检测；
@@ -189,7 +189,7 @@ export class BackgroundTaskService {
     return readOutputTail(entry.outputFile, { maxBytes, maxLines: OUTPUT_TAIL_MAX_LINES })
   }
 
-  // ── 变更检测（D2：三触发面共享同一 last-seen，单广播源） ───────────
+  // ── 变更检测（D2：三触发点共享同一 last-seen，单广播源） ───────────
 
   /** stat registry mtime；ENOENT（垃圾 sid / 从未有任务 / 自愈 rename 走空）静默 undefined。 */
   private statMtime(sessionId: string): number | undefined {

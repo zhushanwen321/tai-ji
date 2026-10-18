@@ -186,7 +186,7 @@ function attachConsoleCapture(page: Page): { errors: string[] } {
   return { errors }
 }
 
-interface JournalView { // oe-exempt:20260927:test:e2e 剧本内视图形状声明（DOM mock 类型，非架构契约面）
+interface JournalView { // oe-exempt:20260927:test:e2e 剧本内视图形状声明（DOM mock 类型，非架构契约范围）
   file: string
   runId: string
   frames: Record<string, unknown>[]
@@ -387,7 +387,7 @@ test('WRR-A6 (batch real): kill 注入薄壳后第二条 agent() respawn 完成�
 
     if (consoleCap.errors.length > 0) {
       writeDiag('batch-wrr-a6-console-errors.json', { errors: consoleCap.errors.slice(-50) })
-      console.warn(`[batch-wrr] A6 renderer console errors: ${consoleCap.errors.length} 条（diag 已落盘，非断言面）`)
+      console.warn(`[batch-wrr] A6 renderer console errors: ${consoleCap.errors.length} 条（diag 已落盘，非断言范围）`)
     }
     console.log(`[batch-wrr] A6 PASS：kill pid=${killedPid} → respawn pid=${respawnPid} → r2 done → run done`)
   } finally {
@@ -410,7 +410,7 @@ test('WRR-A6 (batch real): kill 注入薄壳后第二条 agent() respawn 完成�
  * ② record 事件文件（<recordsDir>/<sa-id>.events，注册条目 id 直接定址）：
  * record-round-started 恰 2（revive 续写轮）+ record-round-idle 恰 2。
  * 注：pi 成员 session 文件（sessions/ 树）的落盘时序对本 spec 不可靠（多轮实测
- * 只见主 session 落盘），不作为断言面——session 连续性由 record 单 id + 两轮
+ * 只见主 session 落盘），不作为断言范围——session 连续性由 record 单 id + 两轮
  * 事件承载（BATCH-08 通过标准的介质同型锚）。v2 条目落盘经 pi appendEntry
  * （JSONL flush 有延迟）——轮询等待 registered 出现。
  */
@@ -562,7 +562,7 @@ test('WRR-A8 (batch real): 同名 agent() 两次调用复用同一成员（membe
     await page.screenshot({ path: testInfo.outputPath('a8-done.png'), fullPage: true })
     if (consoleCap.errors.length > 0) {
       writeDiag('batch-wrr-a8-console-errors.json', { errors: consoleCap.errors.slice(-50) })
-      console.warn(`[batch-wrr] A8 renderer console errors: ${consoleCap.errors.length} 条（diag 已落盘，非断言面）`)
+      console.warn(`[batch-wrr] A8 renderer console errors: ${consoleCap.errors.length} 条（diag 已落盘，非断言范围）`)
     }
     console.log(`[batch-wrr] A8 PASS：memberRecordId 绑定恰 1、两轮同 session 文件、run done`)
   } finally {

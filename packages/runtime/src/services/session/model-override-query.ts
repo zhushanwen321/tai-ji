@@ -59,7 +59,7 @@ const OVERRIDE_TAIL_WINDOW_BYTES = OVERRIDE_TAIL_WINDOW_KB * BYTES_PER_KB
 /**
  * run id 白名单：`[\w-]{1,128}`（与 core record id 白名单 RECORD_ID_PATTERN /
  * gateway TARGET_ID_PATTERN 同式，同式漂移由各处注释锚定）。run journal 文件名
- * = runId + RUN_EVENTS_SUFFIX 直拼（core runEventJournalPathIn 读面刻意不夹带
+ * = runId + RUN_EVENTS_SUFFIX 直拼（core runEventJournalPathIn 读侧刻意不夹带
  * 校验），防穿越校验归本查询读入口，与 getRecordOverride 经 recordEventsPath
  * 白名单防御对称；runId 生产源 = 派生视图内 core 生成 runId，字符集 ⊆ 白名单。
  */
@@ -85,7 +85,7 @@ export interface ModelOverrideQuery {
   getRunOverride(sessionId: string, runId: string, resolved?: SessionMetaRef): SubagentModelOverrideStatus | undefined
 }
 
-export interface ModelOverrideQueryDeps { // oe-exempt:20261006:framework:查询工厂依赖注入面（SessionService 装配注入，单实现常态）
+export interface ModelOverrideQueryDeps { // oe-exempt:20261006:framework:查询工厂依赖注入范围（SessionService 装配注入，单实现常态）
   /** session 存储端口（sessionId → cwd / session 文件路径解析，scanSessions force 语义）。 */
   sessionStore: ISessionStore
   /** pi agent 目录锚（记录域 subagents/ 布局根；缺省 getPiAgentDir()，测试注入 tmp）。 */

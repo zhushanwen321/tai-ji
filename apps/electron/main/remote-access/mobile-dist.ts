@@ -28,9 +28,9 @@ export interface MobileDistEnv {
 }
 
 /**
- * electron app 注入面（resolveMobileDistEnv 的读取源；缺省绑 electron app，
+ * electron app 注入范围（resolveMobileDistEnv 的读取源；缺省绑 electron app，
  * 测试可注入桩——对齐 remote-access store dataDir 注入先例，保住可测性）。
- * resourcesPath 不在注入面：它是 process 属性而非 app 属性，恒直读
+ * resourcesPath 不在注入范围：它是 process 属性而非 app 属性，恒直读
  * process.resourcesPath（与两消费点原取法逐字段一致）。
  */
 export interface MobileDistAppSource {

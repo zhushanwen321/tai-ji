@@ -4,10 +4,10 @@
 // 同名域测试文件。本文件用例自 subagent-service.test.ts「execute() worktree 路径」
 // 块整块迁入（用例名与断言零改动，纯移动）；壳级生命周期/查询/emit 面用例留在
 // subagent-service.test.ts。同域姊妹文件：conversation-continuation.test.ts（Continuation
-// 协作面）/ chat-engine-routing.test.ts（引擎编排分叉）/ execute-nesting.test.ts /
+// 协作范围）/ chat-engine-routing.test.ts（引擎编排分叉）/ execute-nesting.test.ts /
 // execute-and-await-worktree.test.ts / delivery-methods.test.ts /
 // stream-sink-retirement.test.ts / explicit-agent-ref-guard.test.ts /
-// subagent-service-notify-gate.test.ts / workflow-agent-dispatch.test.ts（派发链 × run 域协作面）。
+// subagent-service-notify-gate.test.ts / workflow-agent-dispatch.test.ts（派发链 × run 域协作范围）。
 //
 // 覆盖（execute 入口 = RunOrchestration.execute，worktree 与 fork 解耦后）：
 //   1. worktree:true + fork:false → 解耦后正常（不抛 requires fork）

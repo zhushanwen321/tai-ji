@@ -1,6 +1,6 @@
 // src/execution/__tests__/record-binding.test.ts
 //
-// [UF-1] 跨重启续聊绑定（record↔sessionFile 映射）写面与事件流重建源。
+// [UF-1] 跨重启续聊绑定（record↔sessionFile 映射）写侧与事件流重建源。
 //
 // 背景：engine-CLI 化后子 session 文件只含 {session, model_change,
 // thinking_level_change, message} 条目族（无身份 entry），旧
@@ -9,11 +9,11 @@
 // 扫描源可见 3 条 record、message 链全部 not-found 的双注册表不同源形态）。
 //
 // 现行形态（[身份换源第二步] 后，本套件锁定）：
-//   ① 写面：sessionFile 回填点（轮应答 / idle 帧锚点 / run 域 outcome）经
+//   ① 写侧：sessionFile 回填点（轮应答 / idle 帧锚点 / run 域 outcome）经
 //      writeBindingForRecord 落 `<sessionFile>.record-binding`（best-effort，
-//      写失败 warn 不阻断派发主路径）——写面保留（读侧已换源事件流，绑定剩
+//      写失败 warn 不阻断派发主路径）——写侧保留（读侧已换源事件流，绑定剩
 //      戳职责与跨进程负缓存击穿职责）；
-//   ② 读面：record-store scanFile 在 identity miss 时据事件流折叠重建 light
+//   ② 读侧：record-store scanFile 在 identity miss 时据事件流折叠重建 light
 //      （created 身份域 + bound.sessionFile 反查键，模拟重启后空内存），
 //      findLightById/collectRecords 恢复 id→file 解析；
 //   ③ 全链：getRecordForAction（coldLookupForAction）→ 折叠重建 → register →
@@ -317,7 +317,7 @@ describe("[UF-1] record-store 据事件流折叠重建（跨重启空内存场�
     //    是打破负缓存的信号源）。
     expect(fs.existsSync(`${file}${RECORD_BINDING_SIDECAR_EXT}`)).toBe(false);
 
-    // ④ 除名内存源（archive 对 running record = 纯内存除名，零写面），让末次扫描
+    // ④ 除名内存源（archive 对 running record = 纯内存除名，零写侧），让末次扫描
     //    只走磁盘层：反查命中 → 打破负缓存 → 正常探测重建 → 可见。
     store.archive(rec);
     const records = store.collectRecords(10, "all", undefined);
@@ -328,15 +328,15 @@ describe("[UF-1] record-store 据事件流折叠重建（跨重启空内存场�
 });
 
 // ============================================================
-// D. [H2 S3] 来源身份（origin/parentRunId）往返保真（写面载荷 + 事件流读侧）
+// D. [H2 S3] 来源身份（origin/parentRunId）往返保真（写侧载荷 + 事件流读侧）
 // ============================================================
 //
 // [身份换源第二步] 后读侧身份源 = 事件流（identityFromFold 检查归一，D 套件锁定）；
-// binding 写面载荷单源（identityBindingPayload）与 merge 更新（updateRecordBinding）
-// 仍是生产写面——本节锁定写面检查归一行为（读侧检查 readRecordBinding 仍被
+// binding 写侧载荷单源（identityBindingPayload）与 merge 更新（updateRecordBinding）
+// 仍是生产写侧——本节锁定写侧检查归一行为（读侧检查 readRecordBinding 仍被
 // merge-or-create 写点消费，损坏残留不误判成合法载荷）。
 
-describe("[H2 S3] binding 身份面 origin/parentRunId 往返保真（写面载荷）", () => {
+describe("[H2 S3] binding 身份面 origin/parentRunId 往返保真（写侧载荷）", () => {
   let dir: string;
 
   beforeEach(() => {
@@ -413,7 +413,7 @@ describe("[H2 S3] binding 身份面 origin/parentRunId 往返保真（写面载�
 // Gate B S3 FAIL 根因的现行承载（[身份换源第二步] 后）：origin/parentRunId 随
 // record-created 帧落事件流，读侧检查归一在 identityFromFold（折叠身份派生视图）。
 // 本套件锁定：帧载荷 → 折叠重建 → 过滤（collectRecords 缺省排除 / includeWorkflow
-// + parentRunId 下钻可见）链路。binding 写面的同字段载荷单源性由 E 套件锁定。
+// + parentRunId 下钻可见）链路。binding 写侧的同字段载荷单源性由 E 套件锁定。
 
 describe("[H2 S3] record-store 据事件流重建 origin（D1 派生视图过滤端到端）", () => {
   let agentDir: string;
@@ -536,7 +536,7 @@ describe("[H2 S3] record-store 据事件流重建 origin（D1 派生视图过滤
 //
 // 禁经 state-marker 原语（writeRecordBinding）手构 fixture 断言——原语只验证
 // schema/normalize 白名单（U0 已覆盖），载荷构造才是生产链路。本套件锁定两个
-// 生产构造点的载荷含 stepIndex（写面——run 视图关联键的落盘路径），以及读侧
+// 生产构造点的载荷含 stepIndex（写侧——run 视图关联键的落盘路径），以及读侧
 // （[身份换源第二步] 后 = created 帧折叠重建）不丢字段。
 
 describe("[W0 / D1] binding 载荷 stepIndex（生产构造点）与折叠重建读侧", () => {

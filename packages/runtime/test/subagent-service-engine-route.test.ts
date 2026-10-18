@@ -194,7 +194,7 @@ describe('SessionService.getSubagentHistory engine routing (P5)', () => {
 
     const svc = createSvc(tempDir)
     // 现有链路读取了主 session 文件（派生视图冷启动流式扫描定位 record）——路由前置
-    // 数据面真实经过了会话文件读取（record 命中即文件已读，路由确实落在 pi 分支）
+    // 数据范围真实经过了会话文件读取（record 命中即文件已读，路由确实落在 pi 分支）
     const subagents = await svc.getSubagents(MAIN_SESSION_ID)
     expect(subagents.records.map((r) => r.subagentId)).toEqual(['bg-route-1'])
     expect(subagents.records[0]?.engine).toBeUndefined()

@@ -6,7 +6,7 @@
  * interrupted agent turn"（pi-semantics PS-61）——被掐断的 turn 今天靠「压缩结果通知自起 run」兜底，
  * 而那正是故事 C 竞态的另一半。本模块把它换成 runtime 侧判定 + 经投递内核 FIFO 的门内投递。
  *
- * 判定三条件（设计 §3.1 / D4②，逐条落到事件面）：
+ * 判定三条件（设计 §3.1 / D4②，逐条落到事件范围）：
  * 1. **manual**：`compaction_end.reason === 'manual'`（pi-semantics PS-62：pi 手动路径恒
  *    'manual'；自动压缩为 'threshold' | 'overflow'——auto 路径不掐 turn，pi 内部 post-run
  *    继续运行，无需续跑）；

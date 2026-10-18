@@ -39,7 +39,7 @@ async function startHarness(): Promise<Harness> {
     sendError: () => {},
   }, TOKEN)
   await conn.start()
-  // httpServer 是 private（生产 API 不暴露），测试经类型透视取真实端口与连接计数断言面。
+  // httpServer 是 private（生产 API 不暴露），测试经类型透视取真实端口与连接计数断言范围。
   const httpServer = (conn as unknown as { httpServer: HttpServer }).httpServer
   const addr = httpServer.address() as AddressInfo | null
   if (!addr) throw new Error('httpServer has no address after start()')

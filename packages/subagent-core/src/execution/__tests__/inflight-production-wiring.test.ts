@@ -173,7 +173,7 @@ describe("u7a 生产迁移点 → 在途推送（wiring）", () => {
   });
 });
 
-describe("u7a 数据面桥接：EngineClient 反向通道镜像 → core 镜像 + 推送", () => {
+describe("u7a 数据范围桥接：EngineClient 反向通道镜像 → core 镜像 + 推送", () => {
   let dataDir: string;
   let client: EngineClient;
   let seen: InFlightSnapshot[];

@@ -215,7 +215,7 @@ You are a worker.`);
 describe("builtin agents 数据合规", () => {
   // C5 过渡态收尾：10 模板已迁 @zhushanwen/subagent-core/agents/（C1/D-1）——经
   // ./workflows/* 子入口锚点解析 core 包根（与 src/host/pi-host.ts corePackageNpmRoot
-  // 同一锚，workspace 与发布形态同径），数据面断言随资产指向 core。
+  // 同一锚，workspace 与发布形态同径），数据范围断言随资产指向 core。
   const CORE_PKG_ROOT = path.resolve(
     path.dirname(createRequire(import.meta.url).resolve("@zhushanwen/subagent-core/workflows/README.md")),
     "..",

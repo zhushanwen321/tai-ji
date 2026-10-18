@@ -66,7 +66,7 @@ import type { ModelOverride, SubagentModelSource } from "../domain/record-model.
 // Agent 事件流（Core → Record 的唯一更新驱动）
 // ============================================================
 
-// [S4 簇 3 收编] 事件面契约类型单源化（type-only）：AgentEvent / AgentUsage /
+// [S4 簇 3 收编] 事件流契约类型单源化（type-only）：AgentEvent / AgentUsage /
 // AgentUsageTotal / ToolCallResult / ToolCall / InternalToolCall / Turn 的本地定义
 // 已删除，自 @zhushanwen/subagent-engine-sdk re-export（SDK protocol/contract-types.ts
 // 是类型闭包 SSOT，core 反向 re-export 保上层消费方——import 方路径零改动；
@@ -201,7 +201,7 @@ export class DirtyWorktreeError extends Error {
 // 模型切换 run 级聚合契约（设计 subagent-model-switch §7.1/§7.4；
 // u-foundation 定形，U5 实装——实装 = service/run-model-switch-aggregate.ts
 // runModelSwitchAggregate，签名 = RunModelSwitchAggregateCall = 契约 input
-// RunModelSwitchAggregateInput + resolveMemberPort 依赖注入面）
+// RunModelSwitchAggregateInput + resolveMemberPort 依赖注入范围）
 // ============================================================
 
 /**

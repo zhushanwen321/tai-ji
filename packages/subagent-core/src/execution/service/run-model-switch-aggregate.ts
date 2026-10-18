@@ -65,13 +65,13 @@ export type ResolveMemberEnginePort = (memberRunId: string) => SetModelCapableEn
 
 /**
  * 聚合调用输入 = 契约输入（assembly/types.ts RunModelSwitchAggregateInput，u-foundation
- * 定形）+ 本函数运行时必需的依赖注入面（引擎转发）。
+ * 定形）+ 本函数运行时必需的依赖注入范围（引擎转发）。
  *
- * [u-foundation 修正通道] 契约 input 未承载引擎访问面（u-foundation runlog「形状定形
+ * [u-foundation 修正通道] 契约 input 未承载引擎访问范围（u-foundation runlog「形状定形
  * 裁决」第 4 条预留「U5 消费时如有出入按实际联调修正并回写本条」）；本扩展类型即该
  * 修正的落地形态——契约文件不动（任务书领地禁碰），U2 接线按本类型消费。
  */
-export interface RunModelSwitchAggregateCall extends RunModelSwitchAggregateInput { // oe-exempt:20261006:framework:u-foundation 契约的修正通道注入面（契约文件领地禁碰，单实现常态）
+export interface RunModelSwitchAggregateCall extends RunModelSwitchAggregateInput { // oe-exempt:20261006:framework:u-foundation 契约的修正通道注入点（契约文件领地禁碰，单实现常态）
   /** per-member 引擎转发面（见 ResolveMemberEnginePort）。 */
   resolveMemberPort: ResolveMemberEnginePort;
 }
@@ -87,7 +87,7 @@ type MemberOutcome =
 /**
  * run 级全切聚合（契约 input 见 assembly/types.ts RunModelSwitchAggregateInput；
  * 本实装入参 = RunModelSwitchAggregateCall = 契约 input + resolveMemberPort 依赖
- * 注入面——实装签名落点即本函数，types.ts 形状 SSOT 注释指向此处）。
+ * 注入点——实装签名落点即本函数，types.ts 形状 SSOT 注释指向此处）。
  *
  * 语义（设计 §7.4，逐成员独立、受理序保序；成员转发并发扇出、结果按受理序组装
  * ——§7.1.1 出站点 60s 墙钟超时的量级匹配前提「逐成员秒级收敛窗 + 并发扇出」）：

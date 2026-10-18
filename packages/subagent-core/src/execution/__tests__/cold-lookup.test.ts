@@ -171,7 +171,7 @@ describe("[D4-③] coldLookupForAction 冷查/复活链", () => {
   // 登记态且跨重启不复活），被锁的水合行为是 main 设计上有意移除的。
 
   it("[P4-① ⛔ two-state-convergence U4] 轮终 idle record（markRoundIdle 产物：idle + .state 收条 + 无 closedReason）跨重启 readopt：wasClosed=true 三件套全量 + transition 恰一条 + .state 删除", () => {
-    // U4 写面翻边后正常轮终 = idle 形态落盘（stopReason=completed + .state 收条
+    // U4 写侧翻边后正常轮终 = idle 形态落盘（stopReason=completed + .state 收条
     // {status:"idle",reason:"completed"}，closedReason 无、endedAt 无）——跨重启
     // message 冷查链 wasClosed = status!=='running' = true 路径，与旧 closed 可重连
     // 形态统一 acquire（D3c 两形态统一）。

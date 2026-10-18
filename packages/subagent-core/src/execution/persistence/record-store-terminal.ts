@@ -10,10 +10,10 @@
 //     persistSettleSnapshot——U7 统计口径的写侧载荷）与写权 release 锚分派
 //     （releaseWriteLeaseImpl）。
 //
-// 变化原因 = 「record 持久化终态/收尾写面的编排规则」：写序（D8 v7）、锚分派
+// 变化原因 = 「record 持久化终态/收尾写侧的编排规则」：写序（D8 v7）、锚分派
 // （pi/zcode 双路径）、CAS 语义、词汇双写派生视图的选择集中在此文件。
 //
-// [D7 写面约束] 本文件不 import 任何 `.alive`/manifest 写函数——
+// [D7 写侧约束] 本文件不 import 任何 `.alive`/manifest 写函数——
 // 七名写函数的调用字面只留在 record-store.ts（检查 R1 与 eslint
 // no-restricted-imports 的白名单物理边界），经 TerminalCtx 注入（ctx 字段名
 // 刻意避开七名：persistFinalized / acquireLease / releaseLease）。
@@ -36,9 +36,9 @@ import type { ExecutionRecord } from "../domain/record-model.ts";
 const logger = getLogger("subagents");
 
 /**
- * 终态原语实现的 store 通道（D7 写面注入）。record-store.ts 构造时绑定真实写函数
+ * 终态原语实现的 store 通道（D7 写侧注入）。record-store.ts 构造时绑定真实写函数
  * 与容器方法——注入名刻意避开 R1 七名（writeFinalizedState 等），保证本文件可被
- * check-record-write-surface 扫描而不命中（写面唯一入口语义仍收敛在 store 家族）。
+ * check-record-write-surface 扫描而不命中（写侧唯一入口语义仍收敛在 store 家族）。
  */
 export interface TerminalCtx {
   /** `.alive` 写权声明（writeAliveMarker 注入位）。 */
@@ -63,7 +63,7 @@ export interface TerminalCtx {
   appendJournalEvent: (record: ExecutionRecord, input: RecordEventInput) => void;
   /**
    * [② 读侧换源] fold 访问注入位（markResurrected 的 revive 基线水合消费——
-   * record-store 构造点绑定 `this.eventStreamFace?.foldOf`；事件面未接线返回
+   * record-store 构造点绑定 `this.eventStreamFace?.foldOf`；事件流未接线返回
    * undefined = 水合 no-op，与纯内存测试形态对齐）。
    */
   foldOf: (id: string) => RecordEventFoldState | undefined;
@@ -105,7 +105,7 @@ function legacyTerminalWrite(
 
 /**
  * 意图原语：正常终态（含 disposeAllRecords 编排性关闭，reason=parent-*，D8 矩阵）。
- * 只吸收**持久化写面**——collectPatch / worktree cleanup / pending 注销① / onFinalized
+ * 只吸收**持久化写侧**——collectPatch / worktree cleanup / pending 注销① / onFinalized
  * 钩子留调用方编排（§3.1 副作用边界）。内存终态冻结（completeLegacyClosed/
  * trySettleLegacyClosed：置 idle + closedReason/stopReason 双写）亦留调用方——状态机操作非文件布局。
  *
@@ -113,7 +113,7 @@ function legacyTerminalWrite(
  * 接线退役（正常收尾归 markSettled、close 终态写点归 markSettledOut、编排性关闭归新编排）；
  * 磁盘终态读侧 = 事件流折叠单规则（重建一律 idle，stopReason 取折叠收条）。
  *
- * @returns true = 持久化写面完成（收条 sidecar 退场后本编排无前置失败路径）。
+ * @returns true = 持久化写侧完成（收条 sidecar 退场后本编排无前置失败路径）。
  * @deprecated U5 退役（归 markSettled / markSettledOut / 编排性关闭新编排承接）。
  */
 export function markFinalizedImpl(record: ExecutionRecord, _closedReason: ClosedReason | undefined, ctx: TerminalCtx): boolean {
@@ -125,7 +125,7 @@ export function markFinalizedImpl(record: ExecutionRecord, _closedReason: Closed
 /**
  * 意图原语：取消终态（tombstone）。写序与失败语义同 markFinalized（D8 v7）；差异
  * 仅 warn 标签与语义定位（收条 sidecar 退场后两者持久化编排完全同形）。
- * 统一写点：cancelBackground 终态写面（record-lifecycle，U2a 迁移）。
+ * 统一写点：cancelBackground 终态写侧（record-lifecycle，U2a 迁移）。
  *
  * [U2 桥接期] 新模型下 cancel = 中断当前轮回 idle（不终态化，stopReason=interrupted）
  * ——U5 意愿动作接线后本原语退役为 markSettled("interrupted") 路径。
@@ -232,7 +232,7 @@ export function markResurrectedImpl(record: ExecutionRecord, wasClosed: boolean,
 }
 
 /**
- * manifest 派生视图落盘（settle/收尾/回收共用的写面单点；写序敏感，
+ * manifest 派生视图落盘（settle/收尾/回收共用的写侧单点；写序敏感，
  * 调用方负责决定其后是否接 entry 上报 + 通知——见 commitDerivedTransition）。
  */
 function persistDerivedManifest(record: ExecutionRecord, ctx: TerminalCtx): void {
@@ -523,7 +523,7 @@ export function persistSettleSnapshot(basePath: string, record: ExecutionRecord,
  * 顺序约束 [写死]：收尾轮 settle → 轮次通知送达 → 终态写点 + 注销补发（终态写点
  * 必须在通知链之后，提前调用会丢收尾轮通知）。worktree 回收（patch 落盘前移到
  * 收尾点）与 pending 注销补发的编排留调用方；本原语只吸收写权声明 + worktreeHandle
- * 清句（S5 修复——收尾即绑定消亡，重建检查据 hadWorktree 触发）两写面。
+ * 清句（S5 修复——收尾即绑定消亡，重建检查据 hadWorktree 触发）两写侧。
  *
  * 幂等：release 对缺失 marker 静默、worktree 清句对无 handle no-op（重复 close /
  * dispose 重复调用无害）。record 留内存 idle（收尾 ≠ 内存回收——占用位不动，

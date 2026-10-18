@@ -187,7 +187,7 @@ describe("doFinalizeRecord — manifest status 透传 (M3 4 态)", () => {
     // mock writeManifest 抛错（模拟 disk full）。在 mock 内捕获「writeManifest 被调用时
     // finalized marker 是否已存在」——这是终态原语内部写序的关键断言：D8 v7 要求
     // manifest 先、写权释放后（若有人反转写序，本标志会是 false）。终态权威在本
-    // 用例里是事件流，但本用例刻意不接 manifestDir（事件面无接线）——故写序锚点取
+    // 用例里是事件流，但本用例刻意不接 manifestDir（事件流无接线）——故写序锚点取
     // 「写权仍持有」这一可观测事实（release 之前 manifest 必须已落盘）。
     const finalizedBeforeManifestWrite = { value: false };
     vi.spyOn(manifestStore, "writeManifest").mockImplementation(async () => {

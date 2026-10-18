@@ -159,7 +159,7 @@ describe('classifyPromptRejection —— pi 拒绝原文映射（D6 识别函数
     expect(classifyPromptRejection(`${PI_COMPACTING_MSG} (session s1)`)).toBe('compacting')
   })
 
-  it('非 busy 的 pi 错误（auth / 无模型等）→ null（走普通错误面）', () => {
+  it('非 busy 的 pi 错误（auth / 无模型等）→ null（走普通错误范围）', () => {
     expect(classifyPromptRejection('No model configured')).toBeNull()
     expect(classifyPromptRejection('Authentication failed: 401')).toBeNull()
     expect(classifyPromptRejection('')).toBeNull()

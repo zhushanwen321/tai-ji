@@ -748,7 +748,7 @@ function coercePresetsArray(presets: unknown[]): PiLaunchPreset[] {
   return validPresets
 }
 
-/** PresetUsageEntry 形状检查（FR-14 契约面）：count / lastUsed 均须有限数值。 */
+/** PresetUsageEntry 形状检查（FR-14 契约范围）：count / lastUsed 均须有限数值。 */
 function isPresetUsageEntry(value: unknown): value is PresetUsageEntry {
   if (typeof value !== 'object' || value === null || Array.isArray(value)) return false
   const entry = value as Record<string, unknown>
@@ -760,7 +760,7 @@ function isPresetUsageEntry(value: unknown): value is PresetUsageEntry {
  * usage 逐条目 coerce（FR-14 持久化字段读路折叠，与 coercePresetsArray 同策略）：
  * 形如 PresetUsageEntry 的条目原样透传；畸形条目丢弃 + warn（只记 presetId 键名，
  * 不记条目值）；usage 顶层非对象形状（数组/标量）→ 丢弃整个字段为 undefined。
- * load 容错不抛错语义不变，坏条目不再以伪造类型流入 renderer 契约面（preset.getUsage）。
+ * load 容错不抛错语义不变，坏条目不再以伪造类型流入 renderer 契约范围（preset.getUsage）。
  */
 function coerceUsage(raw: unknown): Record<string, PresetUsageEntry> | undefined {
   if (raw === undefined) return undefined

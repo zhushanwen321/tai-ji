@@ -118,7 +118,7 @@ export interface RunContext {
    * 重建 record 即拿到①②级读取钥匙，不再等 run resolve 后的终态回填。可选回调：
    * 不支持运行中回填的引擎（spawn 单轮、终态即回填）不调用，宿主语义不受影响。
    * [池抽象降级 2026-09-13] 原 poolKey 成员与 onPoolResolved 回调（引擎声明隔离池
-   * key、retarget journal 路径）已随 poolKey 协议面退役删除——两引擎 poolKey 恒
+   * key、retarget journal 路径）已随 poolKey 协议范围退役删除——两引擎 poolKey 恒
    * 'shared'（journal 固定落 engines/<id>/shared/），回调零信息量。
    */
   onHandleReady?: (partial: Pick<EngineHandleData, "sessionRef">) => void;
@@ -162,7 +162,7 @@ export interface EngineRunResult {
  * 宿主侧协议适配，engine/registry 只装 cli descriptor）——把本接口成员映射到
  * EngineClient 协议请求；引擎进程内各引擎（pi-subagent-cli / zcode-subagent-cli）实现
  * 各自本地 port-types 同构契约经协议暴露，与 core 契约的结构互证由 implements 关系在
- * typecheck 期承载。上层（工具面/workflow 引擎/GUI）只消费中立类型，不感知引擎。
+ * typecheck 期承载。上层（工具范围/workflow 引擎/GUI）只消费中立类型，不感知引擎。
  *
  * 贯穿纪律（设计 §3.3.1）：宿主编排——引擎只当单 agent 执行器，六家原生多 agent 机制
  * 一律禁用不依赖。

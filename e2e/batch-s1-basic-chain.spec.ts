@@ -19,7 +19,7 @@
  *     settled 条目 outcome === journal run-settled outcome；
  *   ④ W1 死字节断言：两族 v2 条目行不含 "eventLog" / "displayItems" 字符串。
  *
- * 可复用登记声明：本 spec 是 E2E-BATCH-01 的可复用真机资产（后续触碰批量 fan-out 行为面
+ * 可复用登记声明：本 spec 是 E2E-BATCH-01 的可复用真机资产（后续触碰批量 fan-out 行为范围
  * 时直接执行本文件，不再重建一次性剧本）；场景 S2/S4/S7 家族见 BATCH-02/04/06 登记行。
  *
  * 执行侧约定（与 e2e-map note 同步维护，改其一须同 commit 改另一）：
@@ -38,7 +38,7 @@
  * 形态说明：真实 Electron app 自启动（launchRealApp，非连 dev 实例），WS 直连驱动
  * session.create → message.send（TEST-STRATEGY 约定：不可自动化处用 WS 触发等效业务动作）；
  * 断言原始证据文档 = 主 session JSONL + journal 文件（磁盘事实，不依赖 DOM）——A6/BTW-01 同款。
- * 凭证播种：拷本机真实 provider 配置进临时 dataDir（只读源目录，写面恒为临时 dataDir；
+ * 凭证播种：拷本机真实 provider 配置进临时 dataDir（只读源目录，写侧恒为临时 dataDir；
  * TAIJI_BATCH_CREDENTIAL_SOURCE 可覆盖源目录，缺省 ~/.taiji/agent）。
  */
 import { test, expect, type Page, type TestInfo } from '@playwright/test'
@@ -509,7 +509,7 @@ test('S1 (batch real): subagents 双任务并行 → 一条 notifyDone 收齐 + 
 
     if (consoleCap.errors.length > 0) {
       writeDiag(testInfo, 'batch-s1-console-errors.json', { errors: consoleCap.errors.slice(-50) })
-      console.warn(`[batch-s1] renderer console errors: ${consoleCap.errors.length} 条（diag 已落盘，非断言面）`)
+      console.warn(`[batch-s1] renderer console errors: ${consoleCap.errors.length} 条（diag 已落盘，非断言范围）`)
     }
     console.log(`[batch-s1] PASS：runId=${runId}，journal=${journalFile}`)
   } finally {

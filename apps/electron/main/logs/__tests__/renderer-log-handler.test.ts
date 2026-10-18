@@ -29,7 +29,7 @@ vi.mock('electron', () => ({
   },
 }))
 
-/** handler 落盘记录形态（JSON 行反序列化后的最小断言面）。 */
+/** handler 落盘记录形态（JSON 行反序列化后的最小断言范围）。 */
 interface ErrorLine {
   ts: string
   windowId: number

@@ -213,7 +213,7 @@ type RecordRefreshTrigger = 'invalidate' | 'reconcile-settled' | 'reconcile-time
 type RecordPublishSource = RecordRefreshTrigger | 'event-projection'
 
 /**
- * [RT-4#8] getSubagents/getWorkflows 的读面结果：records + oversize 降级标志。
+ * [RT-4#8] getSubagents/getWorkflows 的读侧结果：records + oversize 降级标志。
  * oversize=true（session 文件 >32MB 预检阈值）时 records 恒空数组——「列表不可用」
  * 与「无记录」显式分形，transport reply 透传 oversize 供 renderer 面板显示降级提示。
  *
@@ -947,7 +947,7 @@ export class SessionRecords {
 
     // [可观测性 2026-10-02] 发布观测：水位门后有帧才落一行（稳态零帧零日志）。
     // trigger = 发布归因；elapsedMs = entry 轮耗时（事件派生视图路径缺省）；
-    // workflowFolds = workflowUpdate 信号涉及 run 的 fold 证据（缺席/停帧在观测面
+    // workflowFolds = workflowUpdate 信号涉及 run 的 fold 证据（缺席/停帧在观测范围
     // 直接分形，空窗类事故一步定位）。
     if (frames.length > 0) {
       logger.info('[session-records] record frames published', {
@@ -1313,7 +1313,7 @@ export class SessionRecords {
     // run 详情载荷增强（subagent-model-switch §9 transport 行）：run 级覆盖查询 +
     // 逐成员携带（最近生效值源 = 成员 SubagentRecord 的增强产物——先经
     // enhanceSubagentDetails 取成员派生值，再由 projectSubagentModelDetailIntoRuns
-    // 按 (parentRunId, stepIndex) 圈定权威成员分发到 agentCalls；聚合面不取单一值）。
+    // 按 (parentRunId, stepIndex) 圈定权威成员分发到 agentCalls；聚合范围不取单一值）。
     // resolved 透传：target 已在手，两处增强链共用同一锚（整帧一次解析，不再逐条自扫）。
     const resolved: SessionMetaRef = { cwd: target.cwd, filePath: target.filePath }
     const workflows = projectSubagentModelDetailIntoRuns(
@@ -1376,9 +1376,9 @@ export class SessionRecords {
 
   /**
    * [可视化 U3，设计 §3.1-4] 单 run 事件流原文拉取（session.getWorkflowRunEvents 后端）。
-   * record 路径发现 = 派生视图源 v2 注册条目的 recordPath 锚点（引擎写侧与实写面同源；
+   * record 路径发现 = 派生视图源 v2 注册条目的 recordPath 锚点（引擎写侧与实写侧同源；
    * 注册条目缺席 = 该 run 非本会话实体或 record 流已被清理 → 结构化 record_not_found，
-   * 与派生视图定界语义一致）。读取面（坏行宽容 / 大字段截断 / 错误臂）归 WorkflowRunEventsReader。
+   * 与派生视图定界语义一致）。读侧（坏行宽容 / 大字段截断 / 错误臂）归 WorkflowRunEventsReader。
    */
   async getWorkflowRunEvents(sessionId: string, runId: string): Promise<WorkflowRunEventsReply> {
     const recordPath = this.resolveWorkflowRecordPath(sessionId, runId)

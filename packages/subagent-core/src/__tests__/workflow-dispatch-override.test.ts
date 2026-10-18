@@ -335,7 +335,7 @@ describe("workflow 派发链覆盖消费（U4b）", () => {
 
   it("U4a 事件管线补全：journal 覆盖事件 → miss 重建（rebuildRunOverride 折叠 + 回填）→ 派发吃覆盖", async () => {
     const h = makeHarness();
-    // 模拟 setModel run 级切换的持久化产物（生产写入面 = 壳 persistRunOverride 的
+    // 模拟 setModel run 级切换的持久化产物（生产写侧 = 壳 persistRunOverride 的
     // journal.append 同款帧）——内存表刻意不写（主 agent 重启后的 miss 形态）。
     const journal = createRunEventJournal(h.journalDir);
     await journal.append("run-rebuild", {

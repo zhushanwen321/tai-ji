@@ -289,7 +289,7 @@ describe("[M1/M2 Gate B] 编排性终态化 manifest 反查索引 + 重启冷查
 
   it("M1 自愈: manifest 被停机竞态吞掉时，boot 从 entry 族 + journal 收编重物化反查索引", async () => {
     // 离线形态：v2 终态条目（interrupted 族 = 编排性关闭的 settle 停因）已随 pi flush
-    // 落盘、事件文件仅 record-created 帧（「条目面先行写、journal 终局帧缺失」的不对称
+    // 落盘、事件文件仅 record-created 帧（「条目范围先行写、journal 终局帧缺失」的不对称
     // 窗口），manifest 写未及落盘（无 records/<id>.json、无子文件、无绑定 sidecar）。
     // [v1 兼容层删除] v1 全量快照的 closedReason 兼容位已无载体——自愈出口从
     // rematerializeReconnectableEntryManifests（closedReason gate，现无可达输入）转为
@@ -339,7 +339,7 @@ describe("[M1/M2 Gate B] 编排性终态化 manifest 反查索引 + 重启冷查
     expect(fs.existsSync(manifestPath(agentDir, "sa-uc"))).toBe(false);
     expect(fs.existsSync(manifestPath(agentDir, "sa-cc"))).toBe(false);
     expect(fs.existsSync(manifestPath(agentDir, "sa-gc"))).toBe(false);
-    // 查询面不可见（保持现状语义），且孤儿恢复未追加任何 subagent-record entry（无改写）
+    // 查询范围不可见（保持现状语义），且孤儿恢复未追加任何 subagent-record entry（无改写）
     expect(restarted.queries.lookupRecordAnyState("sa-uc")).toBeUndefined();
     expect(restarted.queries.lookupRecordAnyState("sa-cc")).toBeUndefined();
     expect(restarted.queries.lookupRecordAnyState("sa-gc")).toBeUndefined();

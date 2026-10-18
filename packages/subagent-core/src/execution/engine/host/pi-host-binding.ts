@@ -6,7 +6,7 @@
 // 域同样经协议客户端（RemoteEngine，registry 'pi' 由三级发现装载 cli descriptor）
 // 发往 pi-subagent-cli 引擎进程（G1：pi 引擎单一 CLI 形态，core 壳侧零内建引擎）。
 //
-// 出口（[池抽象降级 2026-09-13] 原 PI_POOL_KEY 常量已随 poolKey 协议面退役删除，
+// 出口（[池抽象降级 2026-09-13] 原 PI_POOL_KEY 常量已随 poolKey 协议范围退役删除，
 // 消费方改用 SDK SHARED_POOL_KEY）：
 //   - resolveHostPiEnginePort：宿主侧（SAR / chat 域路由）pi EnginePort 解析——
 //     携带窗口键（chat 轮次 = record.id，U3）时经窗口实例解析单点（per-window 引擎

@@ -57,7 +57,7 @@ export { ENGINE_ROOTS_ENV, parseEngineRootsEnv, deriveNodeModuleRoots };
 export { inspectEnginePackage };
 export type { DiscoveredEngine, PackageInspection } from "./engine-inspect-package.ts";
 
-/** 扫描结果（诊断面：skip/unusable 逐包留痕原因，对应 A12 负面场景）。 */
+/** 扫描结果（诊断范围：skip/unusable 逐包留痕原因，对应 A12 负面场景）。 */
 export interface DiscoveryScanResult {
   discovered: DiscoveredEngine[];
   skipped: Array<{ pkgDir: string; reason: string }>;

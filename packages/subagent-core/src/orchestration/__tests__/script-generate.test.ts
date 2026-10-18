@@ -108,7 +108,7 @@ phases: [a]
 agent("w";
 `;
 
-// 宿主预声明冲突样本（闸 4 拼宿主段后新增的行为面）
+// 宿主预声明冲突样本（闸 4 拼宿主段后新增的行为范围）
 const HOST_NAME_ARGS_CONFLICT = `/* @pi-meta
 name: x
 description: d
@@ -389,7 +389,7 @@ describe("barrel exports probe", () => {
   it("缺省目录常量经 barrel 可达（值 = pi 布局）", () => {
     const barrel = subagentCore as Record<string, unknown>;
     expect(barrel["DEFAULT_WORKFLOW_TMP_DIR"]).toBe(".pi/workflows/.tmp");
-    // DEFAULT_WORKFLOW_SAVED_DIR 已随 2026-09-13 barrel 收窄出公共面（仅测试消费），
+    // DEFAULT_WORKFLOW_SAVED_DIR 已随 2026-09-13 barrel 收窄出公共部分（仅测试消费），
       // 改深路径断言同名常量值不变（检查强度不降）。
     expect(DEFAULT_WORKFLOW_SAVED_DIR).toBe(".pi/workflows");
   });

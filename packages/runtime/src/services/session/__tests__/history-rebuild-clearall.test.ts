@@ -2,7 +2,7 @@
  * history-rebuild-cache clearAll 出口单测（u7c，偏差 #28① ①）。
  *
  * 覆盖（B1 验收）：
- * - HistoryRebuildCache.clearAll：清空全部条目 + 返回清除条目数（观测面）+ 空缓存幂等；
+ * - HistoryRebuildCache.clearAll：清空全部条目 + 返回清除条目数（观测范围）+ 空缓存幂等；
  * - clearAll 后 get 走未命中（下次 getHistory 全量重建的缓存前提）；
  * - SessionHistoryReader.clearHistoryCache 透传出口在场（组合根 watchdog onRelief 接线点，
  *   接线行为由 watchdog.test.ts 的 onRelief 回调断言覆盖）。

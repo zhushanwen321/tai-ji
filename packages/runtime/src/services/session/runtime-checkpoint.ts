@@ -8,7 +8,7 @@
  * respawn 成功，由 session-service 挂点驱动）。
  *
  * 五契约（设计 §5「checkpoint 五契约」逐条映射，本模块落地其中 4 条；收割时序属 u5）：
- * 1. **删除属主双轨**：本模块提供 `removeSession`（摘除条目，非删文件）与只读面；**不提供
+ * 1. **删除属主双轨**：本模块提供 `removeSession`（摘除条目，非删文件）与只读侧；**不提供
  *    任何退出路径的删文件动作**——runtime 自身任何退出路径（planned / uncaught / 被强杀）
  *    一律不删 checkpoint 文件（D5 退出链论证：SIGINT/SIGTERM/uncaughtException 三源共用
  *    shutdown 序，app 级退出与 liveness 强杀共用 supervisor 同一 stop 杀链，「app 级识别
@@ -29,7 +29,7 @@
  * 「进程内 once、此后零日志」改为限流上报——首次失败立即 warn（保留 once 上报的首次
  * 即报语义），此后每 5min 至多一条（携带连续失败次数与最后成功写时刻）；连续失败达
  * 阈值落一条 crash journal 登记事件（reason=checkpoint-write-failed，每轮连续失败期只一条）。
- * `write()` 返回 bool 并维护两个诊断面：`getLastSuccessfulWriteAt()`（最后成功写盘时刻）
+ * `write()` 返回 bool 并维护两个诊断范围：`getLastSuccessfulWriteAt()`（最后成功写盘时刻）
  * 与 `isCheckpointStale()`（自上次成功写盘后有失败 = 磁盘快照落后内存真相，下次成功
  * 写盘清除）。影响面登记（不夸大）：checkpoint 是恢复增强，写失败的后果 = u5 reattach
  * 读到旧版快照（漏恢复/多恢复，消费侧 staleness guard 已挡住「复活已删 session」），
@@ -201,7 +201,7 @@ export class RuntimeCheckpointStore {
   private lastWriteFailureWarnAt: number | null = null
   /** 连续失败 journal 登记事件已落标志（每轮连续失败期只一条；成功写盘复位）。 */
   private writeFailureLedgered = false
-  /** 最后成功写盘时刻（epoch ms；null = 本进程从未成功写过。诊断导出面）。 */
+  /** 最后成功写盘时刻（epoch ms；null = 本进程从未成功写过。诊断导出范围）。 */
   private lastSuccessfulWriteAt: number | null = null
   /** checkpoint 陈旧标志：自上次成功写盘后有写入失败（磁盘快照落后内存真相），成功写盘清除。 */
   private checkpointStale = false
@@ -213,7 +213,7 @@ export class RuntimeCheckpointStore {
     this.failedSnapshotRetention = Math.max(1, options.failedSnapshotRetention ?? RUN_CHECKPOINT_FAILED_RETENTION)
   }
 
-  /** run 目录（诊断/测试断言面）。 */
+  /** run 目录（诊断/测试断言范围）。 */
   get runDir(): string {
     return this.dir
   }
@@ -223,23 +223,23 @@ export class RuntimeCheckpointStore {
     return join(this.dir, RUN_CHECKPOINT_FILENAME)
   }
 
-  /** 内存清单快照（诊断/测试断言面；order 无保证）。 */
+  /** 内存清单快照（诊断/测试断言范围；order 无保证）。 */
   listEntries(): RuntimeCheckpointEntry[] {
     return Array.from(this.entries.values()).map((e) => ({ ...e }))
   }
 
-  /** 本进程清单中的 session id（诊断/测试断言面）。 */
+  /** 本进程清单中的 session id（诊断/测试断言范围）。 */
   hasSession(sessionId: string): boolean {
     return this.entries.has(sessionId)
   }
 
-  /** 最后成功写盘时刻（epoch ms）；null = 本进程从未成功写过（诊断导出面，RT-4#6）。 */
+  /** 最后成功写盘时刻（epoch ms）；null = 本进程从未成功写过（诊断导出范围，RT-4#6）。 */
   getLastSuccessfulWriteAt(): number | null {
     return this.lastSuccessfulWriteAt
   }
 
   /**
-   * checkpoint 陈旧标志（诊断导出面，RT-4#6）：自上次成功写盘后发生过写入失败 = 磁盘
+   * checkpoint 陈旧标志（诊断导出范围，RT-4#6）：自上次成功写盘后发生过写入失败 = 磁盘
    * 快照落后内存真相（主文件停在上版）。下次成功写盘清除。消费方（诊断导出 / 排查）
    * 据此区分「checkpoint 新鲜」与「checkpoint 停更」。
    */
@@ -356,7 +356,7 @@ export class RuntimeCheckpointStore {
    * 失败 best-effort：清掉 tmp 残留 + 限流上报（RT-4#6），不抛。
    * 返回 bool（RT-4#6）：true = 成功落盘（更新 lastSuccessfulWriteAt、清 checkpointStale）；
    * false = 失败（置 checkpointStale，主文件保持上一版）。全部写入挂点（upsert/remove/
-   * refresh）在本模块内部消费该结果维护诊断面，调用方无需感知。
+   * refresh）在本模块内部消费该结果维护诊断范围，调用方无需感知。
    */
   private write(): boolean {
     let json: string

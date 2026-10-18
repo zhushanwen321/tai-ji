@@ -7,7 +7,7 @@
 // 1200+ 物理行），按内聚边界拆两个文件——本文件（workflow 族独立）+ run-orchestration.
 // ts（核心编排）。**实测与派发估算不符**：R0 重排后域段实测 1662 物理行 > 两文件容量
 // 上限（2×700），run-orchestration.ts 物理超限不可避免（偏差登记待主 agent 追认；
-// 备选方案 = 第三文件再拆 Continuation 协作面）。两文件零互调零 import（G2 / R1 打样
+// 备选方案 = 第三文件再拆 Continuation 协作范围）。两文件零互调零 import（G2 / R1 打样
 // 模式 3）：跨文件协作经壳 deps 回调编排（acquirePoolOrFinalize / settleOneShotOutcome
 // / outcomeToAgentResult / releaseRoundResources / resolveChatEnginePort /
 // assertIdleTimeoutMsSafe——壳装配闭包指 run-orchestration 实例方法）。
@@ -40,8 +40,8 @@ import { assertModelInCatalog } from "../../shared/model-catalog.ts";
 // assembly/orchestration 内部）不 import execution/service，无循环。
 // [U4 → D15/D6 → D1 Class C 第 3 步] scanRunEvents 直连持久化层（journal 目录解析
 // 集群随「目录解析是持久化策略」一并迁 execution/persistence/run-event-journal.ts），
-// 供成员复用绑定的 record 读注入面（MemberReusePoolIo 生产装配）——读面仍单源，
-// 写面单写者纪律（唯一写者 = orchestration/terminal-actions）不变。本 import 即
+// 供成员复用绑定的 record 读注入点（MemberReusePoolIo 生产装配）——读侧仍单源，
+// 写侧单写者纪律（唯一写者 = orchestration/terminal-actions）不变。本 import 即
 // D1 拆边 Class C 消掉的那条 execution → orchestration 值边（terminal-actions 侧
 // 曾保留同名 re-export 过渡，收尾已删并改直连持久化层）。
 import { scanRunEvents } from "../persistence/run-event-journal.ts";
@@ -50,7 +50,7 @@ import { scanRunEvents } from "../persistence/run-event-journal.ts";
 // core/logger，类型依赖只有 run-events 的 WorkflowRunEvent；无编排状态机语义）——
 // 本 import 即 D1 拆边 Class C 消掉的第四条 execution → orchestration 值边；编排侧
 // 消费方直连本模块（过渡期同名 re-export façade 收尾已删）。
-// 池的 record 读经 io 注入（读面单源），无环。
+// 池的 record 读经 io 注入（读侧单源），无环。
 import {
   lookupMemberRecordId,
   registerMemberRecord,
@@ -228,7 +228,7 @@ export class WorkflowDispatch {
   private readonly deps: WorkflowDispatchDeps;
 
   /**
-   * [U4 → D6 → D1 Class C] 成员复用绑定的 record 读注入面（本聚合单点装配；scan 经
+   * [U4 → D6 → D1 Class C] 成员复用绑定的 record 读注入点（本聚合单点装配；scan 经
    * persistence/run-event-journal 的 scanRunEvents 同源解析，不自建 journal 实例）。
    * append 通道随 [D6] 绑定消解删除——绑定随 agent-started 帧写入（pump
    * dispatchAgentCall 链），登记收尾只改内存（member-reuse-pool.registerMemberRecord）。
@@ -711,7 +711,7 @@ export class WorkflowDispatch {
     // 在 service 侧收敛，与 kickOffChatRound 的 createBackgroundStream 完全同款
     //（含 H1 widget 退役策略：GUI+relay 激活停发私货 / TUI·未激活原样创建 / sink
     // 未注入降级 undefined——照单继承 chat 域现行策略，非行为变化）。显式传 stream
-    // 时用传入值（测试注入面保留）。创建先于池 acquire（kickOffChatRound 同序：
+    // 时用传入值（测试注入点保留）。创建先于池 acquire（kickOffChatRound 同序：
     // acquire 失败早退时 stream 尚未 onDelta，无 widget/timer 副作用可泄漏）。
     const effectiveStream =
       stream ?? createBackgroundStream(record.id, this.deps.getStreamSink(), this.deps.getUiObservability().getMode(), process.env);
@@ -769,7 +769,7 @@ export class WorkflowDispatch {
       record.engineHandle = {
         sessionRef: handle.data.sessionRef,
         // 持久化形状保留字段（record-store 读侧检查要求非空）；恒 'shared'——
-        // [池抽象降级 2026-09-13] 协议面 poolKey 已删，无引擎侧实际值。
+        // [池抽象降级 2026-09-13] 协议范围 poolKey 已删，无引擎侧实际值。
         poolKey: SHARED_POOL_KEY,
         eventsPath: journal.path,
       };
@@ -784,7 +784,7 @@ export class WorkflowDispatch {
       // finalizeRecord），不保持 running 态。
       // [P1b-1] 静默吞失败路径的终态写入已经 transition 体系收敛：deps.finalizeFailed
       // 内部改调 worker-message-pump 的 settleWorkflowRecord 单点（原直写对删除），
-      // agent-settled 事件面由 pump call 完成链投递——失败不再绕过状态机体系无痕。
+      // agent-settled 事件流由 pump call 完成链投递——失败不再绕过状态机体系无痕。
       const failed = await this.deps.finalizeFailed(record, err);
       return mapToWorkflowAgentResult(failed);
     } finally {
@@ -799,14 +799,14 @@ export class WorkflowDispatch {
 
 // ── [H2 W2] workflow 域派发 helper（executeWorkflowAgent 专用，M3 语义逐项复刻）──
 
-/** ExecutionRecord 去只读视图（盖章写面的局部合法形态；本文件两处盖章点共用）。 */
+/** ExecutionRecord 去只读视图（盖章写侧的局部合法形态；本文件两处盖章点共用）。 */
 type MutableStampRecord = { -readonly [K in keyof ExecutionRecord]: ExecutionRecord[K] };
 
 /**
  * [subagent-model-switch §6.6] record.model / thinkingLevel 盖章（复活重新盖章与
  * taskSpec 二次咨询重盖章共用单点——「本轮启动前最后取值点定值，启动后不变」）。
  * 解析产物缺席（用户未指定且无任何候选，引擎走自身缺省解析）时保留原盖章——防误清
- * 历史事实（R4/D6-② 条件留空语义的同款取舍）。落盘侧：终态写面 identityBindingPayload
+ * 历史事实（R4/D6-② 条件留空语义的同款取舍）。落盘侧：终态写侧 identityBindingPayload
  * 落 model/thinkingLevel 内存现值，盖章后随终态收尾自然持久化。
  */
 function restampRecordModel(

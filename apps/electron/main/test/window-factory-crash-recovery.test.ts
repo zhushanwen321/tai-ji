@@ -128,7 +128,7 @@ const mainLoggerStubs = {
 
 vi.mock('../logs/main-logger.js', () => ({ mainLogger: mainLoggerStubs }))
 
-// 登记清单断言面：捕获 append 调用；未 init 的真实单例 append 本就是 no-op，
+// 登记清单断言范围：捕获 append 调用；未 init 的真实单例 append 本就是 no-op，
 // mock 形态与 window-factory-crash-journal.test.ts 同款，不改变既有用例行为
 const crashJournalAppend = vi.hoisted(() => vi.fn())
 vi.mock('../logs/crash-journal.js', () => ({

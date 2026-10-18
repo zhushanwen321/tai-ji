@@ -423,7 +423,7 @@ describe("RecordStore", () => {
       return sessionFile;
     }
 
-    // ── 输入 1: 新格式收条 {status:"idle", stopReason, endedAt}（writeSettledState 写面）──
+    // ── 输入 1: 新格式收条 {status:"idle", stopReason, endedAt}（writeSettledState 写侧）──
     it(".state 新格式 stopReason 非法值（外部损坏）→ idle + interrupted-by-restart 兜底", () => {
       const sessionFile = writeBaseSession();
       fs.writeFileSync(`${sessionFile}.state`, JSON.stringify({ status: "idle", reason: "garbage-reason" }), "utf-8");
@@ -440,7 +440,7 @@ describe("RecordStore", () => {
     // ── 输入 4: 无 sidecar → idle + interrupted-by-restart（崩溃在途 / 尚未收尾）──
     it("无任何 sidecar → idle + interrupted-by-restart（§3.2.4「文件不存在」行；.alive 不影响判定）", () => {
       const sessionFile = writeBaseSession();
-      // .alive 在持（异宿主探活形态）不参与 status 判定——探活读面走 findForeignLiveInstance 现查
+      // .alive 在持（异宿主探活形态）不参与 status 判定——探活读侧走 findForeignLiveInstance 现查
       writeAliveMarker(sessionFile, { pid: process.pid, id: SESSION_ID, startedAt: STARTED_AT });
       const store = new RecordStore(tmpDir);
       const found = store.collectRecords(100).find((r) => r.id === SESSION_ID);
@@ -862,7 +862,7 @@ describe("RecordStore", () => {
       expect(entry?.data.status).toBe("idle");
       expect(entry?.data.stopReason).toBe("interrupted-by-restart");
       expect(entry?.data.error).toBeUndefined();
-      // v2 下 result 全文的载体 = 子 session 文件（收编是状态迁移不是信息重建）：读面仍拿得到
+      // v2 下 result 全文的载体 = 子 session 文件（收编是状态迁移不是信息重建）：读侧仍拿得到
       const found = store.collectRecords(100, "all", "sess-orphan").find((r) => r.id === "sa-orphan-sp5");
       expect(found?.status).toBe("idle");
       expect(store.getFullRecord("sa-orphan-sp5")?.result).toBe("final answer text");
@@ -1159,7 +1159,7 @@ describe("RecordStore", () => {
       const r = makeRecord({ round: 1 });
       store.reportRecordTransition(r);
 
-      // v1 快照 entry（turns/engineHandle 过程派生视图）停写——可观测面移交事件文件
+      // v1 快照 entry（turns/engineHandle 过程派生视图）停写——可观测范围移交事件文件
       // （record-bound 帧引擎域感知，record-store-v2-journal.test.ts 覆盖）。
       expect(appended).toHaveLength(0);
     });
@@ -1434,7 +1434,7 @@ describe("record 写侧 v2：事件写点映射逐点（W1 D3 表对照）", () 
       sessionFile,
     });
 
-    // 引擎域未变的重复 transition：零追加（高频 turns 归约不放大事件面）。
+    // 引擎域未变的重复 transition：零追加（高频 turns 归约不放大事件流）。
     store.reportRecordTransition(rec);
     const eventsAfter = await v2ScanEvents(recordsDir, "sa-v2-bound");
     expect(eventsAfter).toHaveLength(2);

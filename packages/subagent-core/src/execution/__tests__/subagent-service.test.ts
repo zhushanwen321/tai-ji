@@ -88,7 +88,7 @@ describe("SubagentService", () => {
       expect(() => service.queries.findRecord("any")).toThrow(/session ended|session_start|new session/i);
     });
 
-    it("dispose 回收 session 句柄：替换窗口内迟到的写面不触达 stale pi（不崩进程）", () => {
+    it("dispose 回收 session 句柄：替换窗口内迟到的写侧不触达 stale pi（不崩进程）", () => {
       // [HISTORICAL] 2026-09-22 真机崩溃（登记见 已归档设计档案 §1.4，已根治）：
       // session 替换（newSession/fork）后 pi 旧 handle 全方法抛 stale 错（runner.invalidate
       // → assertActive），单例 Service 的 _pi 残留指向旧 session——替换窗口内迟到的
@@ -110,10 +110,10 @@ describe("SubagentService", () => {
       const service = new SubagentService({ cwd: agentDir, modelService });
       service.initSession({ pi: stalePi, sessionId: "s1" });
       service.dispose();
-      // dispose 后 queries 面被 disposed 检查拦截（上一用例锚定），迟到写面走 store 直驱
+      // dispose 后 queries 面被 disposed 检查拦截（上一用例锚定），迟到写侧走 store 直驱
       const store = Reflect.get(service, "store") as RecordStore;
 
-      // 替换窗口内迟到的 record 写面（形态：dispose 未覆盖到的 running record 收尾）
+      // 替换窗口内迟到的 record 写侧（形态：dispose 未覆盖到的 running record 收尾）
       const record = createRecord("late-round", {
         agent: "general-purpose",
         model: "test/model",
@@ -455,7 +455,7 @@ describe("SubagentService", () => {
   // ============================================================
   // execute() worktree 路径（worktree 与 fork 解耦）
   // → [H3/R5 测试归位] 整块迁至 run-orchestration.test.ts（run 域聚合同名域测试
-  //   文件；用例名与断言零改动）。此处不留转发桩——vitest 按文件发现，无注册面。
+  //   文件；用例名与断言零改动）。此处不留转发桩——vitest 按文件发现，无注册点。
   // ============================================================
 
   //
@@ -675,12 +675,12 @@ describe("[§1.4 (a)] pi 绑定作废（dispose 收尾 + 显式作废转发）",
     fs.rmSync(agentDir, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 });
   });
 
-  /** baselines 私有字段读面（深绑测试先例：Reflect.get(service, "字段")）。 */
+  /** baselines 私有字段读侧（深绑测试先例：Reflect.get(service, "字段")）。 */
   function baselinesOf(service: SubagentService): { pi: unknown; piGeneration: number } {
     return Reflect.get(service, "baselines") as { pi: unknown; piGeneration: number };
   }
 
-  it("initSession 注入后 invalidatePiBinding 作废 → 读面 null；再 initSession 新代际恢复", () => {
+  it("initSession 注入后 invalidatePiBinding 作废 → 读侧 null；再 initSession 新代际恢复", () => {
     const service = new SubagentService({ cwd: agentDir, modelService });
     const pi1 = makePi();
     service.initSession({ pi: pi1, sessionId: "s1" });
@@ -697,7 +697,7 @@ describe("[§1.4 (a)] pi 绑定作废（dispose 收尾 + 显式作废转发）",
     expect(baselinesOf(service).piGeneration).toBe(2);
   });
 
-  it("dispose 收尾显式作废：dispose 后读面 null（关停投递链之后的最后一步）", () => {
+  it("dispose 收尾显式作废：dispose 后读侧 null（关停投递链之后的最后一步）", () => {
     const service = new SubagentService({ cwd: agentDir, modelService });
     const pi = makePi();
     service.initSession({ pi, sessionId: "s-dispose" });

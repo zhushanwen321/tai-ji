@@ -8,7 +8,7 @@
  * 2. 纯判定函数 classifyWorkflowRecordEntryData——entry data 的 v1/v2 分类。
  *
  * 版本谱系：
- * - v1（W17 起）：全量快照形态 `{v:1, snapshot, updatedAt}`——兼容读面保留
+ * - v1（W17 起）：全量快照形态 `{v:1, snapshot, updatedAt}`——兼容读侧保留
  *   （D7 惰性兼容读，旧会话行为完全不变；写侧停写归 U1）；
  * - v2（W1 起，当前版本）：注册 + 终态两条小条目（kind 判别）——运行态数据
  *   移出主 session JSONL，事实源 = run journal（run-events.ts）。
@@ -18,7 +18,7 @@
  * runtime warnOnce 去重是两消费方各自的可观测性选择，收敛判定不收敛日志。
  *
  * 不在本模块的：
- * - v1 条目内 snapshot 的内部格式——v1 已冻结为兼容读面（D7）不再演化，无
+ * - v1 条目内 snapshot 的内部格式——v1 已冻结为兼容读侧（D7）不再演化，无
  *   独立格式版本常量需要单源（entry 层 v 只管 entry schema 自身的演化）；
  * - runtime 派生视图的 runId 存在性检查——派生视图键需求（record 需要 runId 做 Map 键），
  *   非 entry schema 面，runtime 解码链自有等价校验。
@@ -47,7 +47,7 @@ export const WORKFLOW_STATE_LINK_CUSTOM_TYPE = "workflow-state-link";
 
 /**
  * `workflow-record` entry 的 data schema 版本（W1 起 v2）。消费方按 v 判别
- * 解析，不认识的版本跳过而非猜测。v1 全量快照形态随版本门保留为兼容读面
+ * 解析，不认识的版本跳过而非猜测。v1 全量快照形态随版本门保留为兼容读侧
  * （D7，冻结不演化）。
  *
  * （const 声明 + 字面量初始化使类型收窄为字面量 2，无需 `as const`。）
@@ -63,7 +63,7 @@ export type WorkflowRecordEntryKind = (typeof WORKFLOW_RECORD_ENTRY_KINDS)[numbe
  * v2 注册条目 data（设计 D1 条目契约表 workflow-record 行·注册列）。
  *
  * run 创建时写一条：身份 + journal 锚点。recordPath 是 session-reader workflow
- * 发现链的主源数据基础（v2 注册条目是 run 步骤级详情读面的唯一发现锚点）。
+ * 发现链的主源数据基础（v2 注册条目是 run 步骤级详情读侧的唯一发现锚点）。
  */
 export interface WorkflowRecordRegisteredEntryData { // oe-exempt:20260929:framework:workflow/record 协议契约类型——ports 类型契约先行、单实现常态（dev-0.10.5 已验收代码 merge 带入）
   v: typeof WORKFLOW_RECORD_ENTRY_VERSION;
@@ -84,7 +84,7 @@ export interface WorkflowRecordRegisteredEntryData { // oe-exempt:20260929:frame
   /**
    * record 事件流绝对路径锚点（`<sessionDir>/workflow-state/<runId>.record.jsonl`
    * ——后缀经 core RUN_EVENTS_SUFFIX 单源常量，[D1] record 单源流命名；
-   * 写侧锚点与实写面同源见 terminal-actions.runEventJournalPathOf）——v2 条目
+   * 写侧锚点与实写侧同源见 terminal-actions.runEventJournalPathOf）——v2 条目
    * 的 recordPath 锚点字段（任务书 U0 职责 1）；保留窗口内 record 流在盘即可
    * 按锚点读步骤级家族链，窗口外回落 manifest 摘要级（session-reader 发现链
    * 三档，[D16③] 适配）。

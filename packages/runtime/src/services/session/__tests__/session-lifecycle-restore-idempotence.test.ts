@@ -50,7 +50,7 @@ function makeRestoreEnv() {
     switchSession: vi.fn(async (_sessionPath: string) => {}),
     setSessionName: vi.fn(async () => undefined),
   }
-  // notifyCreated 提取引用（接口类型抹掉 vi.fn 方法面，断言面直接用原 mock）
+  // notifyCreated 提取引用（接口类型抹掉 vi.fn 方法面，断言范围直接用原 mock）
   const notifyCreated = vi.fn()
   const svc: ILifecycleSessionOps = {
     getExtensionPaths: vi.fn(async () => [] as string[]),

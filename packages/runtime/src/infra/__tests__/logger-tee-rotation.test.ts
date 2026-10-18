@@ -4,11 +4,11 @@
  *
  * 收尾 198MB 实证问题（持续活跃 session 单文件无界累积）的行为验证。阈值经 env
  * `TAIJI_LOG_MAX_BYTES` 注入（pi tee 与主日志共用 MAX_FILE_BYTES，模块 import 时读取，
- * 每用例 resetModules + 动态 import 拿新实例；u9 的 opts.maxBytes 注入面已随合并移除）：
+ * 每用例 resetModules + 动态 import 拿新实例；u9 的 opts.maxBytes 注入点已随合并移除）：
  * 1. 超限旋段：旧段 gzip 归档 `.jsonl.1.gz`（单代，多轮轮转后 rename 原子覆盖）+ 主档
  *    截断续写（flags 'w'）
  * 2. `pi-` 前缀不变量：旋段文件名保持 pi- 开头——cleanExpiredLogs 白名单只认顶层
- *    pi-* 前缀，旋段逃出白名单 = 新的无清理写入面（架构 D6③ 原文约束）
+ *    pi-* 前缀，旋段逃出白名单 = 新的无清理写侧（架构 D6③ 原文约束）
  * 3. 跨段行级连续：.1.gz 解压段 + 主档拼接行序连续无缺行（轮转边界无在途写丢失）
  * 4. 尾部 flush 走新流：轮转完成后写入的尾部行经 closeLogger 落在新主档（A5 通过标准，
  *    openPiStreams 注册表 stream 引用轮转后更新）
@@ -154,7 +154,7 @@ describe('pi tee size 轮转（D7，.1.gz 口径）', () => {
     expect(main).toHaveLength(1)
     expect(files).toHaveLength(2)
     // pi- 前缀不变量（架构 D6③）：旋段以 pi- 开头 = cleanExpiredLogs 白名单
-    // （startsWith('pi-')）可命中，旋段不会成为无清理写入面
+    // （startsWith('pi-')）可命中，旋段不会成为无清理写侧
     for (const f of files) expect(f.startsWith('pi-')).toBe(true)
     expect(rolled[0]).toMatch(/^pi-.*\.jsonl\.1\.gz$/)
     // 跨段行级连续：.1.gz 解压段（旧段）+ 主档（新段）拼接无缺行、单调递增、止于最后写入行

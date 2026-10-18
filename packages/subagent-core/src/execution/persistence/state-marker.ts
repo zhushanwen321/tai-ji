@@ -4,7 +4,7 @@
 //
 // [身份换源第二步] 读侧现状：身份域与统计域的读源 = 事件流折叠（record-store.scanFile
 // 的 identityFromFoldByFile / receiptStatisticsFromFold / hydrateReviveBaseline）——
-// 本文件的 readRecordBinding 只剩写面 merge-or-create 消费（record-store-terminal 的
+// 本文件的 readRecordBinding 只剩写侧 merge-or-create 消费（record-store-terminal 的
 // persistSettleSnapshot / updateRecordBinding）；binding 写点（spawn 回填 / settle 快照
 // / reopen）仍在，写点退场是后续批次。`.state`/`.finalized`/`.cancelled` 收条 sidecar
 // 全族已退场（③）——收条由 `record-settled` / `record-round-idle` 事件帧承载，
@@ -120,21 +120,21 @@ export interface RecordBinding {
   /** 终态结束时间快照 ms（精确值，优于 light 路径的 jsonl mtime 近似）。 */
   endedAt?: number;
   /**
-   * [永久会话模型 §3.2.3 / u-foundation 类型面] 世代计数（reopen 防撞）：常态
+   * [永久会话模型 §3.2.3 / u-foundation 类型范围] 世代计数（reopen 防撞）：常态
    * undefined（与 0 同义），reopen 时 +1。**随 binding 持久化是硬要求**——防撞
    * 依赖跨重启单调，丢 epoch 会被二次 reopen 击穿（notifyId `id:epoch:round`
    * 防撞维度）。undefined（存量 binding）= epoch 0。
    */
   epoch?: Epoch;
   /**
-   * [§3.2.6 / u-foundation 类型面] 对话记录指针（引擎中立判别联合，pi=sessionFile /
+   * [§3.2.6 / u-foundation 类型范围] 对话记录指针（引擎中立判别联合，pi=sessionFile /
    * zcode=sessionId+dbPath）——binding 是锚的持久化承载面之一（内存 record 同名
    * 字段 + 主 session entry engineHandle.sessionRef 为另两面）。undefined（存量
    * binding / spawn 窗口期）= 锚未回填，读侧不参与重建（U6 续聊链接线消费）。
    */
   transcriptRef?: TranscriptRef;
   /**
-   * [§3.2.7 / u-foundation 类型面] 放弃轮标记（通知 gate ②判据，单槽，随 binding
+   * [§3.2.7 / u-foundation 类型范围] 放弃轮标记（通知 gate ②判据，单槽，随 binding
    * 持久化）：abort 时置在途轮 {epoch, round}；reopen（epoch+1）后残留自然失效。
    * null 与 undefined 同义（无标记）。
    */

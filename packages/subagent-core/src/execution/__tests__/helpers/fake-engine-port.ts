@@ -27,7 +27,7 @@ import type {
 } from "../../../execution/engine/types.ts";
 import { registerEngine } from "../../../execution/engine/registry.ts";
 
-/** 一次 run 调用的捕获（task + ctx + 结算控制面）。 */
+/** 一次 run 调用的捕获（task + ctx + 结算控制范围）。 */
 export class FakeRun {
   readonly task: AgentCallOpts;
   readonly ctx: RunContext;

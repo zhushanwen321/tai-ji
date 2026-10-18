@@ -12,7 +12,7 @@
 //    `() => ({pi, disposed})` 形态的全 deps 推广。聚合持过期引用会破 session 复活
 //    （dispose → initSession 翻转 disposed 旗标），一切运行时可变态必须断言/调用时现读。
 // 2. 转发壳写法：壳保留同名私有 getter（字段面）与同名方法（方法面）单行转发；
-//    聚合公共面 = 壳转发面 + 测试改写后的聚合路径，两面同源零漂移。
+//    聚合公共部分 = 壳转发面 + 测试改写后的聚合路径，两面同源零漂移。
 // 3. 跨聚合边收敛：他域直写本域字段的写点收敛为显式接口方法（本聚合：
 //    disposeSessionUi ← 壳 dispose 直写 uiRequestHandler，清单① C-3）；
 //    本域直写他域字段的写点收敛为 deps 显式回调（[modeless 波3] resetSettledRescan
@@ -182,7 +182,7 @@ export class SessionBaselines {
   /** [§1.4 (a)] 当前代际句柄的可用性。initSession 置 true；invalidatePiBinding 置 false。
    *  pi 会话替换（newSession / fork / switchSession / reload）后旧 runner 已失效
    *  （pi 语义断言 PS-30：每个方法首行 assertActive 抛错，文案含
-   *  "stale after session replacement"），而本聚合的 late-bound 读面在新 initSession
+   *  "stale after session replacement"），而本聚合的 late-bound 读侧在新 initSession
    *  之前仍持旧句柄引用——可用性旗标把该窗口内的读统一降级为 null，
    *  杜绝把已失效句柄传进 pi 调用。 */
   private _piUsable = false;
@@ -253,7 +253,7 @@ export class SessionBaselines {
 
   get pi(): PiLike | null {
     // [§1.4 (a)] 代际校验消费点：绑定被作废（session 替换窗 / dispose 后）时一律返回
-    // null——late-bound 读面是把句柄传进 pi 调用的唯一通道，此处收敛即全部
+    // null——late-bound 读侧是把句柄传进 pi 调用的唯一通道，此处收敛即全部
     // `pi?.` / `getPi()?.` 调用点不再触达失效句柄（PS-30 assertActive 抛错的根源消窗口）。
     if (this._piUsable) return this._pi;
     if (this._pi !== null && this.staleReadLoggedGeneration !== this._piGeneration) {
@@ -330,7 +330,7 @@ export class SessionBaselines {
     this._sessionRootId = envRoot ?? init.sessionId;
     this.initExecContextBaseline(envRoot, init.sessionId);
     // revive（dispose 的逆操作：/resume /fork /new 后复活）——壳 _disposed 旗标经 deps
-    // 回调复位（旗标所有权留壳：assertReady 断言面 readAssertState 的写侧）。
+    // 回调复位（旗标所有权留壳：assertReady 断言范围 readAssertState 的写侧）。
     this.deps.reviveDisposed();
     // [modeless 波3] 旧 settled 重扫状态复活重置（C-2 回调）随 E1 恢复面退役——
     // 批协调状态为协调器内存登记态，随 dispose()/clear() 全量清空，无跨 session 残留。
@@ -427,7 +427,7 @@ export class SessionBaselines {
    * （事件驱动唤醒，无轮询）；超时 → 返回 null（调用方降级为跳过 pi 写——磁盘 journal
    * / manifest 面不依赖 pi，已在等待前落盘的语义不受影响）。
    *
-   * 量级 = 控制面单请求粒度（秒级以内，调用方传参定死）：等待命中 = 窗口内轮终条目
+   * 量级 = 控制范围单请求粒度（秒级以内，调用方传参定死）：等待命中 = 窗口内轮终条目
    * 写不丢（落进 reload 后的新权威 session）；超时 = 极端情况降级，warn 留痕含恢复指引。
    *
    * 从未注入过句柄（_pi === null，headless / 纯内存测试形态）→ 不等待（没有「新代际

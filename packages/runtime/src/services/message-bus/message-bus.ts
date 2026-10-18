@@ -44,7 +44,7 @@ import {
 } from './outbound-frame-registry.js'
 import { getCrashJournal } from '../../infra/crash-journal.js'
 import { warnIfBacklogged } from '../../utils/backpressure-warn.js'
-// pull-push W0 观测面：订阅生命周期 + state 类投递失败的结构化日志（R11/6c3 零日志从根源修复）。
+// pull-push W0 观测范围：订阅生命周期 + state 类投递失败的结构化日志（R11/6c3 零日志从根源修复）。
 import {
   clearBusObserveState,
   observeClearSession,
@@ -329,7 +329,7 @@ const warnedStateNoKeyTypes = new Set<string>()
 
 /**
  * B7 预算驱逐遥测的周期汇总间隔（帧数）：首次驱逐必告警，此后每累计该帧数汇总一条，
- * 防高频驱逐刷屏（观测面零行为介入）。
+ * 防高频驱逐刷屏（观测范围零行为介入）。
  */
 const EVICT_WARN_INTERVAL_FRAMES = 1000
 

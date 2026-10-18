@@ -129,10 +129,10 @@ const RELAY_DIR_PACKAGES = new Set(["subagent-workflow"]);
  * parallel/map-reduce/scatter-gather + review-fix-loop 双件 + _shared/），E 包源码目录
  * 不再持有 workflows/。源路径因此改指 C 包——pi manifest 的 workflows 字段从不参与
  * 本拷贝（E 的 pi 字段迁移前后均只有 extensions/skills/agents，MANIFEST_RESOURCE_FIELDS
- * 循环对 workflows 不触发；也不给 E 补该声明：E 的 npm 发布面已不含 workflows/，加了
+ * 循环对 workflows 不触发；也不给 E 补该声明：E 的 npm 发布范围已不含 workflows/，加了
  * 会让 standalone pi 用户经 resource-discovery manifest 模式命中「声明路径不存在 →
  * 整包失败占位」，npm 安装形态的 workflow 发现已由 C 作为 E 的传递依赖 + C 包约定
- * 目录成立）。staged 布局无 node_modules 解析面，整目录复制后 worker 的
+ * 目录成立）。staged 布局无 node_modules 解析范围，整目录复制后 worker 的
  * workerData.scriptPath 目录锚定（require(dirname(scriptPath) + "/...-utils.cjs")，
  * 不经 node_modules）即成立——D1 既验证模式。
  *

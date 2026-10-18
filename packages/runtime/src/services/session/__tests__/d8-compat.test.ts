@@ -1,13 +1,13 @@
-// D8 兼容公共面薄壳 + relay 透传测试（W8，设计 §3.6 D8 表 / H12，impl-plan §2.8）。
+// D8 兼容公共部分薄壳 + relay 透传测试（W8，设计 §3.6 D8 表 / H12，impl-plan §2.8）。
 //
-// 覆盖面：
+// 覆盖范围：
 // - createZcodeEngine 薄壳：deps → 协议客户端映射（返回 RemoteEngine('zcode')，
 //   read 走协议；cliPath 覆盖 command；sources 忽略不抛）；
 // - relay 透传正反例（H12）：宿主 env 三键经 baseEnv → L0 注入引擎子进程（原样
 //   转发）；身份键 SESSION_ID/RECORD_ID 被 buildEngineChildEnv L1 deny 剥除
 //   （引擎按 run.params.ctx 重写，不靠 env 继承）；
 // - registerZcodeEngine 薄壳：确保 'zcode' descriptor 注册（vendored 相对定位成功，
-//   workspace 布局 coreDir/../zcode-subagent-cli）；经 routeEngine 行为面断言；
+//   workspace 布局 coreDir/../zcode-subagent-cli）；经 routeEngine 行为范围断言；
 // - readRelayForwardEnv 原语：三键全有才转发（isRelayActive 同判），缺一 → undefined。
 //
 // fake 引擎 CLI 复用 fixtures/fake-engine-cli.mjs（直接以 node 参数形态 spawn——
@@ -83,7 +83,7 @@ function fakeCliEnvEcho(opts: {
     .then((view) => (view as unknown as { envEcho?: Record<string, string | undefined> }).envEcho ?? {})
 }
 
-describe('W8 D8 兼容公共面薄壳', () => {
+describe('W8 D8 兼容公共部分薄壳', () => {
   it('createZcodeEngine 返回 RemoteEngine(zcode)：read 走协议（cliPath 指向 fake CLI）', async () => {
     tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'w8-d8-compat-'))
     dataDir = path.join(tmpDir, 'data')
@@ -98,7 +98,7 @@ describe('W8 D8 兼容公共面薄壳', () => {
     expect(view.source).toBe('native')
   }, 20_000)
 
-  it('registerZcodeEngine 薄壳：确保 zcode descriptor 注册（routeEngine 行为面断言）', async () => {
+  it('registerZcodeEngine 薄壳：确保 zcode descriptor 注册（routeEngine 行为范围断言）', async () => {
     tmpDir = tmpDir ?? fs.mkdtempSync(path.join(os.tmpdir(), 'w8-d8-compat-'))
     dataDir = dataDir ?? path.join(tmpDir, 'data')
     fs.mkdirSync(dataDir, { recursive: true })

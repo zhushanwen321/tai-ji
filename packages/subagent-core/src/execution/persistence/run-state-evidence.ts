@@ -383,7 +383,7 @@ function mtimeMsOf(full: string): number {
  * 为什么可选：三触发点各只天然持有一个域的精确目录锚（壳 run 首写持
  * `<sessionDir>/workflow-state`、core record 首写持 recordsDir、session_start 兜底
  * 双域）——强制两域必传会逼出「core 侧反推 pi sessionDir」或「壳侧反推 record
- * enc 段」两类推导漂移面。每域至少有一个持锚触发点，覆盖面由三触发点并集保证
+ * enc 段」两类推导漂移面。每域至少有一个持锚触发点，覆盖范围由三触发点并集保证
  * （幂等整轮，任一触发点缺一域只影响冗余度不影响覆盖）。 */
 export interface RetentionMaintenanceInput { // oe-exempt:20260929:framework:workflow/record 协议契约类型——ports 类型契约先行、单实现常态（dev-0.10.5 已验收代码 merge 带入）
   /** run 域状态目录（workflow-state——state 快照 + journal 成对清理）；undefined = 跳过 run 域。 */
@@ -502,7 +502,7 @@ export type RunSettlementEvidence =
  *   行级独立 JSON 不受早先坏行影响）→ terminal + reason（帧 (outcome, errorCode)
  *   经 runSettledOutcomeToDoneReason 联合派生——[W2 D5] sweep 补注销 reason 统一
  *   派生源第三处；budget_limited/time_limited 细分保留）；
- * - journal 无帧但 manifest 在盘（record 流缺场 + manifest 残局——现行写入面下
+ * - journal 无帧但 manifest 在盘（record 流缺场 + manifest 残局——现行写侧下
  *   record 流不被保留期裁剪（prune 候选排除，裁决点 7）、对账清理五件全删不留
  *   manifest，该组合只剩外部删除 / 清理部分失败残局两类来源）→ terminal +
  *   reason（manifest outcome 派生；无码细分退化为 outcome 兜底）；
@@ -593,7 +593,7 @@ export function findRunSettlementEvidence(stateDir: string, runId: string): RunS
       reason: runSettledOutcomeToDoneReason(journal.settled.outcome, journal.settled.errorCode),
     };
   }
-  // journal 无帧：manifest 终局面（残局防御——现行写入面下 record 流不被保留期
+  // journal 无帧：manifest 终局面（残局防御——现行写侧下 record 流不被保留期
   // 裁剪、对账清理五件全删，正常无此组合；见上方判定矩阵该行注释）
   const manifestPath = join(stateDir, `${runId}.json`);
   try {
@@ -624,7 +624,7 @@ export function findRunSettlementEvidence(stateDir: string, runId: string): RunS
 // 实现落点：维护轮族扩展（本文件——prune/maintenance 同族，[D9] abandon 移除后
 // 无主 run 的唯一磁盘清理通道），复用三触发点（新 run 首写 / record 首写 /
 // session_start 兜底——经壳侧 session-lifecycle 装配）；存活 session 引用集采集
-// = 壳侧注入面（collectAliveRunReferences，core 不 import pi SDK）；不复用
+// = 壳侧注入点（collectAliveRunReferences，core 不 import pi SDK）；不复用
 // createPiHostRunEnumeration（run 维度枚举 ≠ session 维度引用集采集，且维护轮
 // 不应依赖 pi 布局的 agentDir 活源）。
 //
@@ -634,7 +634,7 @@ export function findRunSettlementEvidence(stateDir: string, runId: string): RunS
 /** 对账清理的宿主注入依赖（引用集采集面 + 日志）。 */
 export interface OrphanRunReapDeps { // oe-exempt:20260929:framework:workflow/record 协议契约类型——ports 类型契约先行、单实现常态（dev-0.10.5 已验收代码 merge 带入）
   /**
-   * 存活 session 引用集采集（壳侧注入面——全池 session 文件流式扫描，秒级～
+   * 存活 session 引用集采集（壳侧注入点——全池 session 文件流式扫描，秒级～
    * 十秒级）：返回「全部存活 session 的注册引用并集」runId 集合。调用一次，
    * 结果复用于本轮全部判定（宽限窗判定不做增量）。
    */
@@ -685,7 +685,7 @@ type OrphanReapRegistry = Record<string, number>;
  *
  * ENOENT 静默返回空表（首轮无登记的正常空态——不存在 ≠ 损坏）；其余读失败 /
  * 损坏 JSON / 非登记表结构 warn 留证后按空表返回——持续损坏 = 宽限窗反复重起
- * 的循环，无 warn 则该循环不可见（观测面）。
+ * 的循环，无 warn 则该循环不可见（观测范围）。
  */
 function readOrphanReapRegistry(
   stateDir: string,
@@ -702,7 +702,7 @@ function readOrphanReapRegistry(
   }
   if (typeof parsed !== "object" || parsed === null) {
     // 合法 JSON 但非登记表结构（原始值/数组）——后果与损坏 JSON 同路（空表重
-    // 登记 + 宽限窗重起），同走 warn 观测面
+    // 登记 + 宽限窗重起），同走 warn 观测范围
     warnCorruptOrphanReapRegistry(
       fullPath,
       deps.warn,
@@ -717,7 +717,7 @@ function readOrphanReapRegistry(
   return out;
 }
 
-/** 损坏登记的观测面 warn（单点文案：文件路径 + 空重登记语义 + 恢复指引）。 */
+/** 损坏登记的观测范围 warn（单点文案：文件路径 + 空重登记语义 + 恢复指引）。 */
 function warnCorruptOrphanReapRegistry(
   fullPath: string,
   warn: (msg: string) => void,
@@ -796,7 +796,7 @@ export interface OrphanRunReapResult { // oe-exempt:20260929:framework:workflow/
  *    含历史遗留形态；manifest 单独在场不成候选：无 record 流与旧 journal 的孤儿
  *    manifest 是终局派生视图残留，prune 资格链已覆盖）；
  * 2. 引用集三代解析（collectAliveRunReferences 注入——壳侧全池 session 文件扫描，
- *    v2 注册条目 ∪ v1 快照条目 ∪ pre-W17 link 指针的并集，解析归壳侧注入面）；
+ *    v2 注册条目 ∪ v1 快照条目 ∪ pre-W17 link 指针的并集，解析归壳侧注入点）；
  * 3. 引用命中 → 跳过（保护——任一存活 session 引用即保留）；引用未命中 → 登记
  *    首判无主时刻（幂等：已登记保持首判时刻，宽限锚不随重扫漂移——「不采用锚
  *    mtime」的裁决：仅被 v1/link 引用的存量 run 创建于数周前，首轮判无主即删
@@ -898,7 +898,7 @@ export async function reapOrphanRuns(
   const runIds = collectOrphanCandidateRunIds(names);
   result.scanned = runIds.size;
 
-  // 引用集采集（壳侧注入面——三代解析归注入实现）
+  // 引用集采集（壳侧注入点——三代解析归注入实现）
   let referenced: ReadonlySet<string>;
   try {
     referenced = await deps.collectAliveRunReferences();

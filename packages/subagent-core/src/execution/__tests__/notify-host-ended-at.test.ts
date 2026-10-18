@@ -17,7 +17,7 @@
 //
 // 时钟：vi.useFakeTimers({ toFake: ["Date"] })——只 fake Date，不碰真实定时器
 //（本族零 timer 依赖；notifier 构造点无定时器武装）。
-// 数据面：createRecord 真工厂 + 真 NotifyHost（不 mock 映射内部），内存断言即真实对象。
+// 数据范围：createRecord 真工厂 + 真 NotifyHost（不 mock 映射内部），内存断言即真实对象。
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 

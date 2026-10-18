@@ -84,7 +84,7 @@ function nextPushId(): string {
 
 /**
  * kill 的 SIGKILL 升级延迟（RT-8#10）。超时量级按被保护对象的粒度校准（AGENTS 架构约定
- * #19）：这里是单个 PTY 进程的回收兜底——控制面/单对象粒级，秒级即可（对齐 shell-runner
+ * #19）：这里是单个 PTY 进程的回收兜底——控制范围/单对象粒级，秒级即可（对齐 shell-runner
  * 的 ESCALATION_DELAY_MS=5s 惯例），不是任务级墙钟。SIGTERM 可被 shell trap 捕获/忽略，
  * 无升级则 ignore trap 的 shell + 其子进程成为孤儿，fd 永久残留。
  */

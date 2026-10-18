@@ -105,7 +105,7 @@ describe.skipIf(!PI_DIST)(
       }
       expect(
         RPC_SRC.includes('case "remove') || RPC_SRC.includes('reclaim'),
-        'PS-65 漂移：RPC 命令面出现 remove/reclaim 类形态（疑似条目级收回原语）——pi 收回粒度上界不再队列级，对账器「全收+标记识别+三分处置」可被窄接口替代，复审 PS-64/PS-65',
+        'PS-65 漂移：RPC 命令范围出现 remove/reclaim 类形态（疑似条目级收回原语）——pi 收回粒度上界不再队列级，对账器「全收+标记识别+三分处置」可被窄接口替代，复审 PS-64/PS-65',
       ).toBe(false)
     })
 
@@ -115,7 +115,7 @@ describe.skipIf(!PI_DIST)(
       const win = RPC_SRC.slice(caseIdx, RPC_SRC.indexOf('};', caseIdx))
       expect(
         win.includes('session.clearQueue()'),
-        'PS-65 漂移：clear_queue 不再透传 session.clearQueue()（实装改形）——收回原语协议面变化，rpc-client.clearQueue 契约定位失败，复审 PS-65',
+        'PS-65 漂移：clear_queue 不再透传 session.clearQueue()（实装改形）——收回原语协议范围变化，rpc-client.clearQueue 契约定位失败，复审 PS-65',
       ).toBe(true)
       expect(
         count(RPC_SRC, 'session.clearQueue()'),
@@ -173,7 +173,7 @@ describe.skipIf(!PI_DIST)(
       ).toBe(true)
       expect(
         win.includes('await this.prompt('),
-        'PS-66 漂移：sendUserMessage 不再经 prompt()（另起投递通路？）——非流式忽略语义的覆盖面变化，复审 PS-66',
+        'PS-66 漂移：sendUserMessage 不再经 prompt()（另起投递通路？）——非流式忽略语义的覆盖范围变化，复审 PS-66',
       ).toBe(true)
     })
   },

@@ -1,7 +1,7 @@
 /**
  * no-chat-ops-in-components 规则用例（renderer-deepening D6③ / 验收 A8）。
  *
- * 覆盖面：组件 script / template 表达式的 ops 访问拦截（message 指向 facet SSOT）、
+ * 覆盖范围：组件 script / template 表达式的 ops 访问拦截（message 指向 facet SSOT）、
  * readers 字段放行、非组件文件放行（composable .ts / 组件目录外 .vue）、工厂直调、
  * 工厂包装（含声明晚于使用点的词法序陷阱）、无 import 边同名变量放行；三个 visitor
  * 的正反用例——create 文件域 gate（.spec/.test.vue 测试壳）、ImportDeclaration

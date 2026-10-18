@@ -11,7 +11,7 @@
 //
 // [U1 判定核抽取（workflow-run-store-convergence）] 第二个 describe 块 =
 // findRunSettlementEvidence 判定核直测：三态判定矩阵逐分支与 sweep 装配无关的
-// 直接断言面（枚举改接 U2 将复用该核，矩阵每分支需要不经 runReconcileSweep 的
+// 直接断言范围（枚举改接 U2 将复用该核，矩阵每分支需要不经 runReconcileSweep 的
 // 行为锁）。warn 断言经 configureCore 注入 log spy（logger facade 动态解析宿主）。
 //
 // | 改接后形态                          | sweep 判定              |
@@ -286,7 +286,7 @@ async function writeLiveJournal(runId: string): Promise<void> {
 }
 
 describe("[U1 判定核抽取] findRunSettlementEvidence 直测（矩阵逐分支）", () => {
-  // warn 断言面：configureCore 注入 log spy（内层 hooks 与外层 tmpDir 生命周期
+  // warn 断言范围：configureCore 注入 log spy（内层 hooks 与外层 tmpDir 生命周期
   // 组合——内层 afterEach 先于外层执行，resetCoreForTests 不影响外层 rmSync）。
   let logSpy: ReturnType<
     typeof vi.fn<(level: LogLevel, component: string, message: string, data?: unknown) => void>

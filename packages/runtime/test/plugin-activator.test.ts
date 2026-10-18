@@ -298,7 +298,7 @@ function createSilentHost(): ActivatorHost {
   }
 }
 
-describe('activate 超时覆盖参数（timeout-plugin-service D4：控制面 30s 保持 + activateTimeoutMs 逃生门）', () => {
+describe('activate 超时覆盖参数（timeout-plugin-service D4：控制范围 30s 保持 + activateTimeoutMs 逃生门）', () => {
   const flushAsync = () => new Promise<void>((r) => setImmediate(r))
 
   it('激活在途 loadPlugin 被拒 + markCrashed 连坐 → 终态 CRASHED（非 UNLOADED）', async () => {

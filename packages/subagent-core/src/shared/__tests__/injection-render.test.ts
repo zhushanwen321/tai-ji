@@ -1,6 +1,6 @@
 // src/shared/__tests__/injection-render.test.ts
 //
-// C3-core-render（convergence W3）单元测试：注入渲染面下沉的行为锁定。
+// C3-core-render（convergence W3）单元测试：注入渲染范围下沉的行为锁定。
 // 覆盖 §4.2 W3 门全部条目：
 // - 与 pi 现输出逐字节等价（同一组入参，core 输出 === 按 pi-sw injector 现函数
 //   模板手工展开的期望串——期望串在本测试内构造，不 import pi-sw）；

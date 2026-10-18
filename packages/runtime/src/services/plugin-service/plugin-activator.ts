@@ -90,7 +90,7 @@ export interface ActivatorOptions {
   permissionTimeoutMs?: number
   /**
    * 覆盖 activate 生命周期握手超时（ms）。timeout-plugin-service D4：activate 是
-   * 控制面单请求（默认 30s 保持不动），本参数是逃生门——重初始化插件的 onActivate
+   * 控制范围单请求（默认 30s 保持不动），本参数是逃生门——重初始化插件的 onActivate
    * 做重活（拉配置、建连接、预热缓存）时可放宽（对齐 fork 版 plugin-host-process
    * 构造器 loadTimeoutMs 先例；契约要求 onActivate 保持轻量，重活应移到首个工具
    * 调用或命令 handler）。测试可传小值加速超时路径。

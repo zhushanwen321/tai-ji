@@ -614,7 +614,7 @@ const snapshotCatalogModelsById = new Map<string, PiModelDefinition[]>(
 )
 
 /**
- * 清洗段的 providers.json 标记读取注入面（设计 D2 分层约束，审查 R3-3）。
+ * 清洗段的 providers.json 标记读取注入点（设计 D2 分层约束，审查 R3-3）。
  *
  * providers.json 的唯一读写者是 services 层 TaijiProviderStore（C-comm-03）——本层（infra/pi）
  * 不得 value import 其实现，标记读取经调用方注入的同步原语（与 TaijiProviderStore.getExtrasSync

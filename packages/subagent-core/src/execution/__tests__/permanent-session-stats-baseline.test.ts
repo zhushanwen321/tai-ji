@@ -12,7 +12,7 @@
 //      等价实现 = 折叠收条 turns 水合 record.turnCount——轮 N 的 turn 基点 = 事件
 //      流承载的累计值，不每轮从零）；
 //   ② 跨重启恢复 + 内存增量衔接无跳变：内存终值 == settle 收条事件 == 新 store
-//      重建值（settle 写点的 binding 快照仍在——写面不变，读侧已换源折叠）；
+//      重建值（settle 写点的 binding 快照仍在——写侧不变，读侧已换源折叠）；
 //   ③ zcode 锚 settle 快照收编（U6-D2 交接）+ 重启锚恢复（B-restart store 面）：
 //      锚键 binding 落盘 → entry 源可见 + 锚派生 → markResurrected zcode 分派
 //      （acquire 键 + foreign 探针 + 折叠水合）→ markReopened/markSettledOut 锚分派；
@@ -249,7 +249,7 @@ describe("U7② 跨重启恢复（内存终值 == settle 收条事件 == 重建�
     expect(memTurns).toBe(2);
     expect(memTokens).toBe(300);
 
-    // settle 快照（binding 写面——写侧不变）== 内存终值。
+    // settle 快照（binding 写侧——写侧不变）== 内存终值。
     const binding = readRecordBinding(child);
     expect(binding?.turns).toBe(memTurns);
     expect(binding?.totalTokens).toBe(memTokens);
@@ -447,7 +447,7 @@ describe("U7④ 归零覆盖回归：冷复活 entry 派生视图不再以归零
     writeIdentityChild(child, "bg-1");
 
     // 宿主 A：turns=5 / tokens=1500 / round=2 的完整生命周期（事件流 + binding
-    // 写面快照双双落盘）。
+    // 写侧快照双双落盘）。
     const storeA = newStore();
     const recA = piRecord("bg-1", child);
     recA.round = 2;
@@ -476,7 +476,7 @@ describe("U7④ 归零覆盖回归：冷复活 entry 派生视图不再以归零
     const rec = piRecord("bg-1", child);
     storeB.markResurrected(rec, true);
 
-    // 回归断言（[W1/D2 停写写点] + 事件面幂等）：冷复活对已注册 record（事件文件
+    // 回归断言（[W1/D2 停写写点] + 事件流幂等）：冷复活对已注册 record（事件文件
     // 已有 created 帧）零 entry 写——「归零 entry last-writer-wins 覆盖磁盘原值」的
     // 威胁面结构性消失（原 GUI 快修批次⑤；register 的 registered 条目只在事件首写
     // 时落，见 RecordEventsWriteFace.syncCreation 幂等判定）。
@@ -489,7 +489,7 @@ describe("U7④ 归零覆盖回归：冷复活 entry 派生视图不再以归零
     expect(rec.totalTokens).toBe(1500);
     expect(rec.round).toBe(2);
 
-    // 磁盘 binding 写面原值未被覆盖（merge 读侧不变——写面快照仍在，读侧已换源）。
+    // 磁盘 binding 写侧原值未被覆盖（merge 读侧不变——写侧快照仍在，读侧已换源）。
     expect(readRecordBinding(child)?.turns).toBe(5);
   });
 });

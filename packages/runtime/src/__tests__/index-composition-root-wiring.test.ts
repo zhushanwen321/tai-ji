@@ -3,7 +3,7 @@
  * （review S-11：组合根接线增量 0/81 覆盖）。
  *
  * 为什么是源码级断言：startWatchdog / startRollingRestart 的 armed 门（Gate W，
- * TAIJI_RUNTIME_WATCHDOG_ARMED 默认 off）在 off 时编排零动作——接线丢失只表现为观测面
+ * TAIJI_RUNTIME_WATCHDOG_ARMED 默认 off）在 off 时编排零动作——接线丢失只表现为观测范围
  * 静默消失（采样环不跑、status RPC 无数据源、水位数据缺口），进程不报错、行为断言
  * 无通路。检查沿用源码级先例（crash-journal-composition-root-wiring.test.ts 第 1 层、
  * crash-forensics-logger.test.ts「源码硬保证」段）：index.ts import 即执行 main()，

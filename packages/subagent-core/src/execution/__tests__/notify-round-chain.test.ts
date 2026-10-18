@@ -5,7 +5,7 @@
 //     N2 空回复回归的唯一防线——迁移保活）：chatMode 轮次通知正文经真实执行链路
 //     （execute → kickOffChatRound → 协议 engine.run → run 应答 settle →
 //     notifyComplete → BgNotifier → pi.sendMessage）流入本轮真实回复，非 "(empty)"。
-//   - 首轮闭环独有断言面（迁自壳 first-round-closure-service.test.ts；其余条目
+//   - 首轮闭环独有断言范围（迁自壳 first-round-closure-service.test.ts；其余条目
 //     core conversation-continuation.test.ts 已有同层更强覆盖，随壳文件删除）：
 //       T1  notifyComplete 入参形状（record 入参 = 轮终翻边后簿记，round/result 已写）；
 //       [M3] busy 对照：真在跑 background（镜像活进程 + 无 timer）仍挂合并窗口；
@@ -56,7 +56,7 @@ import { SubagentService } from "../subagent-service.ts";
 //
 // 波 2 改写对位：原「投递内核等价桩」（dedupe / busy gate / 合批窗口）随内核队列
 // 持有退役——port 形态下受理即入 pi 原生队列（忙时不拒），合批窗口在端口侧。
-// 本文件断言面只需三片：幂等键判重（同 id:round 吞）、merge 判定透传（hasRunning-
+// 本文件断言范围只需三片：幂等键判重（同 id:round 吞）、merge 判定透传（hasRunning-
 // Background 的 M3 判据回归锚）、非 merge 条目受理即注入（观察面 = pi.sendMessage）。
 
 type FakePortRecord = { id: string; merge: boolean };
@@ -84,7 +84,7 @@ function makeFakePort(inject: (message: unknown) => void) {
       return { kind: "accepted", id };
     },
     flush() {
-      // merge:true 条目在真实 port 走 60s 窗口；本文件对 merge 条目的断言面是
+      // merge:true 条目在真实 port 走 60s 窗口；本文件对 merge 条目的断言范围是
       // 「不立即注入」（窗口判定透传锚），无到期出站断言，flush 直通为空。
     },
   };
@@ -153,7 +153,7 @@ describe("[N2] chatMode 轮次通知正文：真实执行链路（协议引擎�
     service.initSession({ pi, sessionId: "root-session" });
     internals = service as unknown as ServiceInternals;
     fake = registerFakePiEngine();
-    // fake port 装配（闭包读 let pi——用例内换 pi 后注入面随新 spy）：非 merge 条目
+    // fake port 装配（闭包读 let pi——用例内换 pi 后注入点随新 spy）：非 merge 条目
     // 受理即注入 pi.sendMessage。
     currentFakePort = makeFakePort((message) => {
       pi.sendMessage(message as never, { triggerTurn: true });
@@ -224,7 +224,7 @@ describe("[N2] chatMode 轮次通知正文：真实执行链路（协议引擎�
   });
 });
 
-describe("首轮闭环独有断言面（迁自壳 first-round-closure-service.test.ts）", () => {
+describe("首轮闭环独有断言范围（迁自壳 first-round-closure-service.test.ts）", () => {
   let agentDir: string;
   let service: SubagentService;
   let internals: ServiceInternals;
@@ -246,7 +246,7 @@ describe("首轮闭环独有断言面（迁自壳 first-round-closure-service.te
     internals = service as unknown as ServiceInternals;
     fake = registerFakePiEngine();
     pi = makePi();
-    // fake port 装配（闭包读 let pi——用例内换 pi 后注入面随新 spy）。
+    // fake port 装配（闭包读 let pi——用例内换 pi 后注入点随新 spy）。
     currentFakePort = makeFakePort((message) => {
       pi.sendMessage(message as never, { triggerTurn: true });
     });
@@ -271,7 +271,7 @@ describe("首轮闭环独有断言面（迁自壳 first-round-closure-service.te
     await vi.waitFor(() => expect(fake.runs).toHaveLength(1));
     fake.runs[0]!.settle({ content: "first-round-done" });
 
-    // [two-state-convergence U4/D3] 写面翻边：轮终落 idle（idle 即 resumable）+
+    // [two-state-convergence U4/D3] 写侧翻边：轮终落 idle（idle 即 resumable）+
     // round 0→1（dedup key 递增）+ record.result 从应答 content 写入。
     await vi.waitFor(() => expect(spy).toHaveBeenCalled());
     const record = internals.store.getMutable(handle.subagentId);
@@ -318,7 +318,7 @@ describe("首轮闭环独有断言面（迁自壳 first-round-closure-service.te
     internals.notifyHost.notifyComplete(settled);
     expect(pi.sendMessage).toHaveBeenCalledTimes(1);
 
-    // 对照（busy 半边，本文件独有断言面）：真在跑的 background 工作（镜像活进程 +
+    // 对照（busy 半边，本文件独有断言范围）：真在跑的 background 工作（镜像活进程 +
     // 无 timer）计入合并窗口判定——done 通知以 merge:true 受理（窗口攒批成员，端口
     // 60s 窗口承载，不立即注入；合并窗口语义对真正的并发完成保留）。
     const busy = makeRecord("sa-busy");

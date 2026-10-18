@@ -6,7 +6,7 @@
  * - warn-once 去重：同 key 第二次降级不重复出声。
  * （subagent-extractor 的同款 warn 与前两处共用同一 helper；其链路级集成测试因 legacy
  * entries 构造成本未覆盖，由 utils/warn-once 单测保证机制。）
- * （workflow-extractor 的 state 文件降级 warn 随 [ADR-0095] v1/legacy 读面删除一并移除。）
+ * （workflow-extractor 的 state 文件降级 warn 随 [ADR-0095] v1/legacy 读侧删除一并移除。）
  *
  * 测试框架：vitest。运行：cd packages/runtime && npx vitest run src/services/session/__tests__/extractor-warn.test.ts
  */

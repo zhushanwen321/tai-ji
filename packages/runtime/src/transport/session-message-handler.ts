@@ -1123,7 +1123,7 @@ export class SessionMessageHandler {
 
   // ── delivery 域（投递所有权内核 D5，u3a）────────────────────────────────
   //
-  // 四 RPC = 内核适配器（u2 registry）的协议面：handler 只做「payload 校验 → 委托 →
+  // 四 RPC = 内核适配器（u2 registry）的协议范围：handler 只做「payload 校验 → 委托 →
   // reply」，lane 判定 / 队列收回 / 判重全在 registry（D1 单一判定源）。
   // 帧单发（msg-pipeline-debloat D4-4）：RPC 入口不再 sync()——内核每次真实变更经
   // onChange 内联同步发一帧（先于 reply 到达 renderer，reply 语义落地时 UI 状态已在位），
@@ -1135,7 +1135,7 @@ export class SessionMessageHandler {
     const { sessionId, content, images, clientUuid, segments } = msg.payload
     const registry = this.requireDeliveryRegistry(ws, msg, sessionId)
     if (!registry) return
-    // 字段校验（协议面防御：clientUuid 是内核判重锚 D5② 与出站标记身份源 D2，缺失即无判重语义）
+    // 字段校验（协议范围防御：clientUuid 是内核判重锚 D5② 与出站标记身份源 D2，缺失即无判重语义）
     if (typeof sessionId !== 'string' || sessionId === '' || typeof content !== 'string' || typeof clientUuid !== 'string' || clientUuid === '') {
       return this.ctx.sendError(ws, 'invalid_payload', 'delivery.submit requires non-empty sessionId, content and clientUuid', msg.id, { sessionId })
     }
@@ -1189,7 +1189,7 @@ export class SessionMessageHandler {
     // content 剥除出站裸标记（草稿恢复是用户面文本，投递元数据不进输入框；u3c restoreDraft 直取）
     const content = outcome.cancelled && outcome.content !== undefined ? stripDeliveryMarkers(outcome.content) : undefined
     // segments 快照（MF-1-2）：提交时经 attachSegments 持有的原始 segments，撤销成功才返回
-    // （渲染面按 ADR-0043 Segment[] 整段恢复 chips；无快照的条目不带键 → 纯文本恢复链）
+    // （渲染侧按 ADR-0043 Segment[] 整段恢复 chips；无快照的条目不带键 → 纯文本恢复链）
     return this.ctx.reply(ws, msg.id, 'delivery.cancel', {
       clientUuid,
       cancelled: outcome.cancelled,

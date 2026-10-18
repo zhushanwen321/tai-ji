@@ -221,7 +221,7 @@ export class UiRequestQueue {
   }
 }
 
-/** 兜底取值口径的单测观测面：min(effective + 60s, MAX)（与 handleRequest 内一致）。 */
+/** 兜底取值口径的单测观测范围：min(effective + 60s, MAX)（与 handleRequest 内一致）。 */
 export function resolveFallbackDelayMs(effective: number): number {
   return Math.min(effective + FALLBACK_MARGIN_MS, MAX_TIMER_DELAY_MS)
 }

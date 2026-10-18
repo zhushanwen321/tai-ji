@@ -303,9 +303,9 @@ describe("classifySubagentRecordEntryData（v2-only）", () => {
   });
 });
 
-// ── [subagent-detail-model-info] modelSource 写面（直测生产写侧——测试播种 helper
+// ── [subagent-detail-model-info] modelSource 写侧（直测生产写侧——测试播种 helper
 //    v2-record-entry 不派生该字段，绕开以锁生产行为）─────────────────────────────
-describe("modelSource 写面：注册/终态条目与 created 帧同域派生视图", () => {
+describe("modelSource 写侧：注册/终态条目与 created 帧同域派生视图", () => {
   it("注册条目：modelSource 在场落键 + 缺省不落键", () => {
     const entry = toRegisteredEntryData({
       id: "sa-1",

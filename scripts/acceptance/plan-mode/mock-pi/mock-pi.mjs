@@ -7,7 +7,7 @@
  * `.bak`），runtime 的 find-pi-executable 解析链（resources/pi 缺失时 PATH →
  * node_modules/.bin/pi）命中新 spawn；窗口结束 restore-mock-pi.mjs 三证恢复。
  *
- * 协议面 = `packages/runtime/src/infra/pi/pi-protocol.ts`（JSONL over stdin/stdout）：
+ * 协议范围 = `packages/runtime/src/infra/pi/pi-protocol.ts`（JSONL over stdin/stdout）：
  * - 命令应答 `{id, type:'response', command, success, error?, data?}`；未知命令回 error envelope；
  * - `extension_ui_response` 不回 RPC reply（与真实 pi rpc-mode 一致）；
  * - 事件帧经 lib/frames.mjs 构造（含 error envelope 与边界帧族）；

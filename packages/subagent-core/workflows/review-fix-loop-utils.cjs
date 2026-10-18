@@ -678,7 +678,7 @@ function buildReconciliationSection({ aggPath, fixResult, aggRound, fixRound }) 
  * 仅 round>1 使用；R1 保持现状全量深挖。
  */
 function buildR2ReviewPrompt({ header, round, max, roundDir, reportFile, aggPath, fixResult, aggRound, fixRound, knownRemaining, dormant, openIssues, reviewPrompt, reviewInstruction }) {
-  // 5.10 防注入：defer 理由自由文本是注入面（5.2-P3/5.10 不可信清单），必须包裹。
+  // 5.10 防注入：defer 理由自由文本是注入点（5.2-P3/5.10 不可信清单），必须包裹。
   const knownLines = knownRemaining && knownRemaining.length
     ? wrapUntrusted(knownRemaining.map((k) => "- " + k).join("\n"), "known_remaining")
     : "- (none)";

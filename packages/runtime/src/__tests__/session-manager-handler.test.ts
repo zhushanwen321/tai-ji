@@ -701,7 +701,7 @@ describe('SessionManagerHandler', () => {
   })
 
   describe('u8: 子会话 project 归属继承父会话（设计 D8 / 错误规格 E6）', () => {
-    // warn 断言用的 console spy 在每个用例后恢复（避免污染后续用例的 stderr 断言面）
+    // warn 断言用的 console spy 在每个用例后恢复（避免污染后续用例的 stderr 断言范围）
     afterEach(() => {
       vi.restoreAllMocks()
     })

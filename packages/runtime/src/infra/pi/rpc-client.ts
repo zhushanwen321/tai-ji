@@ -301,7 +301,7 @@ export class RpcClient implements IPiEngine {
     const spawnCwd = this.options.cwd ?? process.cwd()
 
     // argv 回显脱敏（设计 `mode-system-composer-density` §7.2 argv 日志脱敏
-    // / §7.6 写入面 / 探针 P15）：两个提示词 flag 的值只记 `<N chars>`，防 16k 正文落日志。
+    // / §7.6 写侧 / 探针 P15）：两个提示词 flag 的值只记 `<N chars>`，防 16k 正文落日志。
     console.log('[rpc] spawning pi:', piCmd, redactArgv(args), 'cwd:', spawnCwd)
 
     this.proc = spawn(piCmd, args, {
@@ -391,7 +391,7 @@ export class RpcClient implements IPiEngine {
     // 为什么必须在源头接线：proc.on('error') 只覆盖 spawn 失败；stdout/stderr 是独立
     // Readable stream，pi 崩溃 / 管道断裂（EPIPE / ECONNRESET）时它们各自 emit 'error'，
     // 若无 listener 则升级为 uncaughtException → runtime 主进程崩溃（2026-09-04 stdout
-    // 事故）。stdin 是 runtime → pi 的唯一写入面（sendCommand / sendRaw）；pi 半关闭
+    // 事故）。stdin 是 runtime → pi 的唯一写侧（sendCommand / sendRaw）；pi 半关闭
     // （写端已死）或崩溃后再写 stdin，流错误（EPIPE / ERR_STREAM_DESTROYED）异步 emit
     // 到 stdin——写调用本身不抛，try/catch 接不住；若无 listener 会被 uncaught-policy
     // log-continue 吞掉：_exited 不置位、pending 不 reject、自愈强杀不触发 → 后续每条
@@ -498,7 +498,7 @@ export class RpcClient implements IPiEngine {
 
   private handleMessage(msg: PiMessage): void {
     // 入站 touch：任何 stdout 帧（response / 事件）都证明 pi 在产出——活动时钟
-    // 供崩溃取证（pi 死前最后活动时刻）等观测面消费。
+    // 供崩溃取证（pi 死前最后活动时刻）等观测范围消费。
     this._lastActivityAt = Date.now()
     // If id matches a pending request, resolve it; otherwise emit as event.
     // resolve 只认 RPC response：pi 的 RpcResponse union 所有变体 type === 'response'
@@ -801,7 +801,7 @@ export class RpcClient implements IPiEngine {
    */
   /**
    * 最近一次 pi 双向活动时刻（ms epoch）。
-   * 只读暴露：消费方为观测面（crash 取证「死前最后活动时刻」等）。写点集中在
+   * 只读暴露：消费方为观测范围（crash 取证「死前最后活动时刻」等）。写点集中在
    * RpcClient 内部（出站 sendCommand / 入站 handleMessage），防止时钟被随意重置。
    * 原空闲回收判定（idle-pi-reclamation D1/D6-1 touchActivity + maintenance 豁免）
    * 已随 ADR-0122 防御机制清查退役。

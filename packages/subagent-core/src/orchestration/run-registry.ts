@@ -170,7 +170,7 @@ export function projectRunRegistryEvents(
   };
 }
 
-/** 指定 run 的注册表派生视图（record 读面入口——查询/对账消费形态）。 */
+/** 指定 run 的注册表派生视图（record 读侧入口——查询/对账消费形态）。 */
 export async function projectRunRegistryState(
   journal: RunEventJournal,
   runId: string,
@@ -186,7 +186,7 @@ export async function projectRunRegistryState(
 //
 // 幂等机制（双重启不重复追加的构造性保证）：
 // 1. 追加前查三面证据——record fold 已 terminal / manifest 已在 / 主 session
-//    终态或中断条目已存在（hasSettledEntry 注入面）——任一命中即跳过（宁保留不
+//    终态或中断条目已存在（hasSettledEntry 注入点）——任一命中即跳过（宁保留不
 //    重复：重复追加 run-interrupted 是 interrupted × run-interrupted 表外转移，
 //    fail-fast 让位语义的调用方前置防御）；
 // 2. 幂等性由「fold 出的当前态是否已中断/终局」判定——收编产物本身是
@@ -199,7 +199,7 @@ export interface AdoptInterruptedRunOptions { // oe-exempt:20260929:framework:wo
   now?: number;
   /** 中断来源标记（RunErrorCode 中断族：crashed / terminated / startup-sweep）。 */
   errorCode?: RunErrorCode;
-  /** 中断 reason 文本（run-interrupted 帧载荷 + 诊断面；缺省无 reason）。 */
+  /** 中断 reason 文本（run-interrupted 帧载荷 + 诊断范围；缺省无 reason）。 */
   reason?: string;
   /**
    * journal 目录（ADR-0081 目录参数化）：runtime 侧启动扫描注入
@@ -212,7 +212,7 @@ export interface AdoptInterruptedRunOptions { // oe-exempt:20260929:framework:wo
   /**
    * session 条目证据面：返回 true = 条目已给出终态或中断收敛 → 跳过收编追加
    * （覆盖「record 流整文件损坏但条目完好」的极端组合——条目即收敛证据，不追加
-   * 与既有条目构成两记录面矛盾）。壳注入条目读面；缺省 = 无条面证据（core 测试/
+   * 与既有条目构成两记录面矛盾）。壳注入条目读侧；缺省 = 无条面证据（core 测试/
    * 纯 record 形态）。
    */
   hasSettledEntry?: (runId: string) => boolean | Promise<boolean>;
@@ -275,7 +275,7 @@ async function precheckAdoption(
     const existingManifest = await readRunTerminalManifest(manifestDir, runId);
     if (existingManifest !== null) return { skipped: "skippedTerminal" };
   }
-  // 条目面（双面证据第二条——壳注入读面）
+  // 条目范围（双面证据第二条——壳注入读侧）
   if (opts?.hasSettledEntry !== undefined && (await opts.hasSettledEntry(runId))) {
     return { skipped: "skippedTerminal" };
   }

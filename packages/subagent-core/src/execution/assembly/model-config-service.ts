@@ -84,7 +84,7 @@ export class ModelConfigService {
    * [subagent-model-switch §6.2] 用户覆盖记账内存表（进程内当前意图）。
    * 键 = 覆盖作用域标识：chat 域 = subagent record id、workflow 域 = runId
    * （两键空间不相交，单表承载）。持久化权威 = chat 域 record.modelOverride 事件帧 /
-   * workflow 域 run 覆盖事件（U4a），本表是「进程内当前意图」的读取面（设计读取规则：
+   * workflow 域 run 覆盖事件（U4a），本表是「进程内当前意图」的读侧（设计读取规则：
    * 解析第 0 层读宿主内存表；内存 miss 按域重建）——写入点 = setModel 编排步骤③。
    */
   private readonly modelOverrides = new Map<string, ModelOverride>();

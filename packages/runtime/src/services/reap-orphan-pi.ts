@@ -98,7 +98,7 @@ export interface PsRow {
 
 /**
  * 解析 `ps -axo pid=,ppid=,command=` 输出（macOS/Linux 通用，`列名=` 抑制表头）。
- * 非数字 pid/ppid 的行（空行、异常输出）跳过——fail-open 只影响扫描覆盖面，不影响精确性。
+ * 非数字 pid/ppid 的行（空行、异常输出）跳过——fail-open 只影响扫描覆盖范围，不影响精确性。
  */
 export function parsePsOutput(stdout: string): PsRow[] {
   const rows: PsRow[] = []
@@ -285,7 +285,7 @@ const ARGV_SUMMARY_MAX = 200
 
 /**
  * argv 摘要：先经共享脱敏（设计 `mode-system-composer-density` §7.2
- * argv 日志脱敏 / §7.6 写入面 / 探针 P15）再做长度封顶——两处回显（本处与 rpc-client spawn
+ * argv 日志脱敏 / §7.6 写侧 / 探针 P15）再做长度封顶——两处回显（本处与 rpc-client spawn
  * 日志）必须共用同一实现，只堵一条等于没堵。脱敏保留非值 token，故 `--mode rpc` 等诊断串
  * 与 `detailDigest` 既有断言不受影响；提示词 flag 的值只记 `<N chars>`。
  */

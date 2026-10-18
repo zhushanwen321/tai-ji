@@ -42,7 +42,7 @@ export interface EnginePidfileContent {
   engineStartTime: string | null;
   engineId: string;
   hostKind: string;
-  /** 写入时刻（ISO 8601，诊断面）。 */
+  /** 写入时刻（ISO 8601，诊断范围）。 */
   writtenAt: string;
 }
 

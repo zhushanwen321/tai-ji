@@ -7,7 +7,7 @@
  *
  * sessions Map 所有权在 SessionLifecycle(S3 写点归位,设计 D2②:Map 连同写点 3 处
  * registerSession.set/removeEntry.delete/clear 迁入 lifecycle);本 Facade 残余域的
- * Map 读点统一经 lifecycle 的 ISessionRegistry 只读查询面(get/has/keys/values),
+ * Map 读点统一经 lifecycle 的 ISessionRegistry 只读查询范围(get/has/keys/values),
  * 对外查询方法退化为一行委托。写/删操作(removeSessionEntry 级)不经 Registry,由
  * Facade 委托 lifecycle(Map 所有者)。
  *
@@ -64,14 +64,14 @@ import { captureMachinePiDigest } from '../../infra/crash-correlation.js'
 // attach 预置与 reclaim 摘除，§3.3）：实现迁 crash-forensics-hooks.ts（行为保持抽取，
 // max-lines 门禁），本 Facade 保留调用点。
 import { buildCrashDetailDigest, registerCrashLedgerAttachHooks } from './crash-forensics-hooks.js'
-// main（file-lock-unification reaper 下沉，D2 触发面 A）：removeSessionEntry 汇聚点收殓
+// main（file-lock-unification reaper 下沉，D2 触发点 A）：removeSessionEntry 汇聚点收殓
 // 孤儿后台任务——[T8 有限拆分 2026-09] 调用点随销毁收敛链编排迁入 session-entry-removal.ts
 // （模块单例直接 import，语义不变），本 Facade 不再消费。
 // 后台任务数据域（background-task-sidebar D1/D2/D3/D8，u-runtime-rpc 组装）：
 // registry 读 + mtime 轮询 + kill 矩阵实现在 services/background-task/（u-runtime-svc），
 // 本 Facade 只做组装接线（组装点注释见构造器 backgroundTasks 赋值处）。
 import { BackgroundTaskService } from '../background-task/background-task-service.js'
-// [B5 触发面收窄 2026-09-15] plugin sessionData 清理分发已从本模块迁出——真删除路径
+// [B5 触发点收窄 2026-09-15] plugin sessionData 清理分发已从本模块迁出——真删除路径
 // （lifecycle.delete）侧 import 并调用（见 session-lifecycle.ts delete 内 B5 注释）；本模块
 // 的 removeSessionEntry 汇聚点同时收三条 session 存活路径（pi 崩溃 exit / forceQuit /
 // restore 清场），不得在此触发插件数据清理。
@@ -147,7 +147,7 @@ export const userStoppedMarkStore: UserStoppedMarkStore = {
 }
 
 /**
- * background 任务完成通知补投触发（bg-task-notify-durability 第二触发面）的内部命令与
+ * background 任务完成通知补投触发（bg-task-notify-durability 第二触发点）的内部命令与
  * per-session 节流窗口。命令名与扩展侧注册（extensions/universal/base-tool-enhance
  * src/index.ts 的 pi.registerCommand）是跨包字符串契约，字面量锤定不 import（先例
  * trace-sync 的 /__taiji_get_system_prompt__）——`/__` 双下划线前缀 = 内部命令（前端
@@ -222,7 +222,7 @@ export class SessionService implements ISessionService, ILifecycleSessionOps, ID
   private presetService: PresetService | null = null
   /**
    * BtwService 引用（组合根注入，btw-question B3 裁决 + M2-b）：ensureActive 对 btw vid
-   * 转自建附着编排（restore 路径 findScannedSession 只扫 sessions/，btw 线目录不在其扫描面
+   * 转自建附着编排（restore 路径 findScannedSession 只扫 sessions/，btw 线目录不在其扫描范围
    * ——V5 核实结论；D1⑥ 回收后续问的附着入口）。经 setter 注入（同 setConfigService
    * 模式，避免破坏现有测试构造点）；未注入时 btw vid fall through 既有 restore 链
    *（存量测试零变更，对 btw vid 的失败形态与注入前一致）。
@@ -327,9 +327,9 @@ export class SessionService implements ISessionService, ILifecycleSessionOps, ID
    * 接线三件事（构造器组装 + removeSessionEntry 退订）：
    * ① onTasksChanged → publishBackgroundTasksUpdate：组装 backgroundTask:updated payload
    *    经 messageBus session 级 publish（单 payload 对象、sessionId 必带，规则 1/7）；
-   * ② start()：2s mtime 轮询（D2 触发面①；事件钩子触发面②的组合根接线在 index.ts
+   * ② start()：2s mtime 轮询（D2 触发点①；事件钩子触发点②的组合根接线在 index.ts
    *    adapterFactory——EventAdapter 第三参，非本文件领地）；
-   * ③ removeSessionEntry 汇聚点 unwatch（D8③，与 reaper 触发面 A 同挂点）。
+   * ③ removeSessionEntry 汇聚点 unwatch（D8③，与 reaper 触发点 A 同挂点）。
    */
   backgroundTasks!: BackgroundTaskService
   /**
@@ -444,7 +444,7 @@ export class SessionService implements ISessionService, ILifecycleSessionOps, ID
       abortSession: (sessionId) => this.dispatcher.abort(sessionId, 'convergence'),
     })
     // trace/system-prompt 同步域（S4 迁出至 trace-sync.ts）：deps 窄注入——session 查询经
-    // lifecycle（Map 所有者）只读面，messageBus 经 getter 每次调用动态读（setter 晚期注入
+    // lifecycle（Map 所有者）只读侧，messageBus 经 getter 每次调用动态读（setter 晚期注入
     // 语义与原 Facade 字段直读逐字等价，未注入时广播 no-op）。
     this.traceSync = new TraceSync({
       pm: this.pm,
@@ -453,7 +453,7 @@ export class SessionService implements ISessionService, ILifecycleSessionOps, ID
       getMessageBus: () => this.messageBus,
     })
     // 模型控制域（S6 迁出至 session-model-control.ts）：deps 窄注入——session 定位经
-    // lifecycle 只读面、实例失效经 projection、trace 补充拉取经 traceSync（全部既有公有面）。
+    // lifecycle 只读侧、实例失效经 projection、trace 补充拉取经 traceSync（全部既有公有面）。
     this.modelControl = new SessionModelControl({
       getSession: (sessionId) => this.lifecycle.get(sessionId),
       getReplicatedStates: (sessionId) => this.projection.getReplicatedStates(sessionId),
@@ -477,7 +477,7 @@ export class SessionService implements ISessionService, ILifecycleSessionOps, ID
       resolveBtwThreadFile: (vid) => this.btwService?.getLine?.(vid)?.sessionFilePath,
     })
     // 状态派生视图域（S5 迁出至 session-state-projection.ts）：deps 窄注入——session 查询经
-    // lifecycle（Map 所有者）只读面，messageBus 经 getter 每次调用动态读（setter 晚期注入
+    // lifecycle（Map 所有者）只读侧，messageBus 经 getter 每次调用动态读（setter 晚期注入
     // 语义与原 Facade 字段直读逐字等价）；fetchContext / persistSessionOutcome /
     // tryPersistProjectBinding 留 Facade（ISessionService 契约 / dispatcher 窄接口单一实现 /
     // 私有 helper），经回调闭包注入（registerDeps 同款模式）。
@@ -493,7 +493,7 @@ export class SessionService implements ISessionService, ILifecycleSessionOps, ID
       tryPersistProjectBinding: (session) => this.tryPersistProjectBinding(session),
     })
     // subagent/workflow 记录域（S6 迁出至 session-records.ts）：deps 窄注入——session 存在性
-    // 经 lifecycle（Map 所有者）只读面，messageBus 经 getter 每次调用动态读（setter 晚期注入
+    // 经 lifecycle（Map 所有者）只读侧，messageBus 经 getter 每次调用动态读（setter 晚期注入
     // 语义与原 Facade 字段直读逐字等价）。
     // [W8] deprecated 死键 getExtensionPaths 已删除（W4 冷启动回退源单源化为
     // readDiscoveredEnginesFallback 后无消费方，构造点随 W8 宿主接线同批收尾）。
@@ -552,7 +552,7 @@ export class SessionService implements ISessionService, ILifecycleSessionOps, ID
     this.dispatcher = new MessageDispatcher(this, this.pm, this.workspaceService, messageBus)
     this.scanner = new SessionScanner(this, this.sessionStore, this.gitInfoReader)
 
-    // 消息撤回编排域（message-revoke D2，U4）：deps 窄注入——occupancy 经 lifecycle 只读面、
+    // 消息撤回编排域（message-revoke D2，U4）：deps 窄注入——occupancy 经 lifecycle 只读侧、
     // workflow 检查经 records 磁盘扫描（W17 workflow-record entry，run 启动冷路径立即落盘）、
     // history 缓存清理绑本 Facade 既有入口、信令经 dispatcher.sendSystemCommand 旁路。
     this.revokeOrchestrator = new RevokeOrchestrator({
@@ -876,7 +876,7 @@ export class SessionService implements ISessionService, ILifecycleSessionOps, ID
     this.skillSource.bind(source)
   }
 
-  /** [A1 接线] skillSource 占位的对外只读面（组合根 delivery registry 组装用）。 */
+  /** [A1 接线] skillSource 占位的对外只读侧（组合根 delivery registry 组装用）。 */
   get skillMappingSource(): SkillMappingSource {
     return this.skillSource
   }
@@ -1538,7 +1538,7 @@ export class SessionService implements ISessionService, ILifecycleSessionOps, ID
   }
 
   /**
-   * background 任务完成通知补投的 runtime 触发（bg-task-notify-durability 第二触发面）。
+   * background 任务完成通知补投的 runtime 触发（bg-task-notify-durability 第二触发点）。
    *
    * 背景：桌面「切走会话再切回」是同进程重新挂接——pi 进程存活、不重发 session_start
    * （真机实证；pi 1.0.0 实装锚点：session_start 事件 per AgentSession 只发一次——

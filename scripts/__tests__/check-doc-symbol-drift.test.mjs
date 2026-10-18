@@ -243,7 +243,7 @@ describe('R7 extractAdrRegistry', () => {
   it('合条标题收全部编号，标题正文提及的其他编号不收（承 ADR-XXXX 是引用不是定义）', () => {
     const md = [
       '### ADR-0001 / ADR-0002（digest）runtime 分层与手动 DI',
-      '### ADR-0102 run 侧 v1 读面整体删除（2026-09-30 用户裁决，承 ADR-0094 同款裁决的延伸）',
+      '### ADR-0102 run 侧 v1 读侧整体删除（2026-09-30 用户裁决，承 ADR-0094 同款裁决的延伸）',
     ].join('\n')
     const { defined, deprecated } = extractAdrRegistry(md)
     expect([...defined.keys()].sort()).toEqual(['ADR-0001', 'ADR-0002', 'ADR-0102'])

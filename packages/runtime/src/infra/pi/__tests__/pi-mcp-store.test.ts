@@ -144,7 +144,7 @@ describe('不变量 1 · 名称字符集（复刻 pi SERVER_NAME）', () => {
     ['my server', false], // 空格
     ['服务器', false], // 非 ASCII
     ['a.b', false], // 点
-    ['a/b', false], // 斜杠（路径注入面）
+    ['a/b', false], // 斜杠（路径注入点）
     ['a:b', false], // 冒号
     ['', false], // 空串
   ])('名称 %j 合法性 = %j', (name, valid) => {

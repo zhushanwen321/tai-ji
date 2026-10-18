@@ -52,7 +52,7 @@ export class SessionScanner {
       // active 路径（内存 Map）的 hidden 标记在 IManagedSessionView，本过滤真实生效；
       // persisted 路径（磁盘扫描）**无 hidden 字段**（ScannedSessionMeta/ScannedSession 均未承载，
       // 不经 toSummary 透传）——其条目恒过本过滤，本过滤**不是**磁盘路径的隐藏防线。
-      // 磁盘路径的隐藏靠目录隔离构造性成立（如 btw 线落 btw/ 根，不在 sessions/ 扫描面）。
+      // 磁盘路径的隐藏靠目录隔离构造性成立（如 btw 线落 btw/ 根，不在 sessions/ 扫描范围）。
       .filter(s => !s.hidden)
       .sort((a, b) => b.lastActiveAt - a.lastActiveAt)
     this.pruneGitCache(result)

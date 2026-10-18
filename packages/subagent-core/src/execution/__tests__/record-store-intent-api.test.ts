@@ -123,7 +123,7 @@ describe("RecordStore 意图 API 立面（U1 A1/A2/A5/A6）", () => {
   let sessionsDir: string;
   let manifestDir: string;
   let sessionFile: string;
-  /** Pi appendEntry mock（显式签名：可作 RecordStorePi 直传 + 断言面可用）。 */
+  /** Pi appendEntry mock（显式签名：可作 RecordStorePi 直传 + 断言范围可用）。 */
   let appendEntryMock: ReturnType<typeof vi.fn<(customType: string, data: unknown) => void>>;
   let store: RecordStore;
 

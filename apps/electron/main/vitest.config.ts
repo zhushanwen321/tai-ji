@@ -39,8 +39,8 @@ export default taijiTestConfig({
             'sessions/__tests__/**/*.test.ts',
             // main-run-state：真实文件 IO（run-state marker/checkpoint 写盘）+ mock 驱动
             // main.ts 真实 import 链（app.isPackaged=true 会执行打包 pin 分支改写
-            // TAIJI_AGENT_DATA_DIR）——写通路必须在 fs-guard 拦截面内
-            // （[HISTORICAL] 2026-09-23 污染事故：legacy 池无拦截面，pin 改写 env 后
+            // TAIJI_AGENT_DATA_DIR）——写通路必须在 fs-guard 拦截范围内
+            // （[HISTORICAL] 2026-09-23 污染事故：legacy 池无拦截范围，pin 改写 env 后
             // marker 落进真实 ~/.taiji）。
             'test/main-run-state.test.ts',
             // window-state：真实文件 IO（window-state.json 持久化语义——防抖写/close

@@ -8,7 +8,7 @@
  *   经 reviewState 映射 / 无 → planning|idle 按 isActive）、resumeHint 直读或由
  *   reviewStateSource:'resubmit' 同义映射、旧字段（reviewState/reviewStateSource）不透出、
  *   selfReview 不映射（D9③）；映射实现单源 = extension-protocol legacy-entries（D-B4-1
- *   下沉），契约断言面 = protocol 包内 legacy-entries.test.ts（原 shared fixture 等价对
+ *   下沉），契约断言范围 = protocol 包内 legacy-entries.test.ts（原 shared fixture 等价对
  *   驱动的平行断言随下沉删除，本文件保留派生管道自身行为）；
  * - 多 entry 取最后一条（单例状态，extension reconstructPlanState 逆序取首同构）；
  * - reset entry（isActive=false + skills/reviewState 清空 + docs 保留）派生保留 docs；
@@ -204,7 +204,7 @@ describe('scanPlanStateEntries：派生', () => {
   })
 
   it('旧 entry（升级前落盘）无 reviewStateSource/resumeHint 键：View 无 resumeHint（缺省不占位——renderer 据此渲染通用降级文案）', () => {
-    // extendedData() 不含 reviewStateSource/resumeHint = 状态机显式化前的完整写入面
+    // extendedData() 不含 reviewStateSource/resumeHint = 状态机显式化前的完整写侧
     const view = scanPlanStateEntries([planStateEntry(extendedData(), 'e1')])!
     expect(view.state).toBe('reviewing')
     expect('resumeHint' in view).toBe(false)
@@ -321,7 +321,7 @@ describe('scanPlanStateEntries：leafId 活跃路径裁剪', () => {
     expect(view.requirement).toBe('活跃路径上的 plan')
   })
 
-  it('leafId 缺省 = 现行为回归：全文件逆序取首（物理最后一条命中——增量合并路径不裁剪的契约面）', () => {
+  it('leafId 缺省 = 现行为回归：全文件逆序取首（物理最后一条命中——增量合并路径不裁剪的契约范围）', () => {
     const view = scanPlanStateEntries(branchedTreeEntries())!
     expect(view.requirement).toBe('被撤子树的 plan')
   })

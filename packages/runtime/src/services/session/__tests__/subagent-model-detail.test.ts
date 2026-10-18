@@ -10,7 +10,7 @@
  * - 出口接线：getSubagents（读 RPC）与 publishRecordChanges（live 全量帧）两出口都
  *   增强（renderer store 分区整帧替换语义，单出口增强会被另一出口冲掉）；
  * - run 详情侧逐成员携带：projectSubagentModelDetailIntoRuns（run 级覆盖分发全部
- *   agentCall；成员生效值按 (parentRunId, stepIndex) 圈定透传；聚合面不取单一值）。
+ *   agentCall；成员生效值按 (parentRunId, stepIndex) 圈定透传；聚合范围不取单一值）。
  *
  * 测试框架：vitest（从子包目录运行）。
  * 运行：cd packages/runtime && npx vitest run src/services/session/__tests__/subagent-model-detail.test.ts
@@ -432,7 +432,7 @@ describe('projectSubagentModelDetailIntoRuns — run 详情逐成员携带', () 
     // 非 pi 成员：无生效值派生（成员增强产物本就不携带）
   }
 
-  it('run 级覆盖分发全部成员 + 成员生效值逐成员透传（聚合面不取单一值）', () => {
+  it('run 级覆盖分发全部成员 + 成员生效值逐成员透传（聚合范围不取单一值）', () => {
     const runs = [
       {
         ...runBase,

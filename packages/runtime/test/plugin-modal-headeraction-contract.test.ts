@@ -1,8 +1,8 @@
 /**
  * plugin headerAction 点位契约测试（plugin-header-action-modal-points AP-1，u5b；
- * modal 机制已整体退役，本文件只保留 headerAction 与共存 RPC 的契约面）
+ * modal 机制已整体退役，本文件只保留 headerAction 与共存 RPC 的契约范围）
  *
- * 覆盖（impl-plan u5b 验收条款对应的 rpc-setup 契约面）：
+ * 覆盖（impl-plan u5b 验收条款对应的 rpc-setup 契约范围）：
  * - E15 INVALID_SESSION_ID 三方法：views.update / sendMessage / updateHeaderAction
  * - views.update 显式 sessionId 归属投递（payload.sessionId 直达 handleViewUpdate，
  *   ActiveSessionResolver 盖戳路径已删除——D1 不采用④）
@@ -62,7 +62,7 @@ async function dispatch(
   return lastResponse(port) as never
 }
 
-/** 捕获广播出线（wireRuntimeUiExits 注入面；broadcast 闭包回 true = 帧已发出） */
+/** 捕获广播出线（wireRuntimeUiExits 注入点；broadcast 闭包回 true = 帧已发出） */
 function wireCapturingExits() {
   const headerAction: HeaderActionUpdatePayload[] = []
   wireRuntimeUiExits({

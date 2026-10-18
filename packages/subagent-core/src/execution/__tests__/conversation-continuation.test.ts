@@ -740,7 +740,7 @@ describe("ConversationContinuation — 轮末分流（D7）与通知面", () => 
 
       // 防御形态触发：controller 丢失（MF-4 内部态错误——drain 检查 throw 面）
       record.controller = undefined;
-      // 首轮失败收敛 → settleRoundFailed 尾部 drain 触发 controller 检查 throw（修复后就地转错误面）
+      // 首轮失败收敛 → settleRoundFailed 尾部 drain 触发 controller 检查 throw（修复后就地转错误范围）
       cont.onRunSettled(makeOutcome({ content: "", error: "engine_crashed: child died" }));
 
       // 第一条 = 失败单发（既有语义）；第二条 = drain 检查失败的队列丢弃通知
@@ -1634,7 +1634,7 @@ describe("ConversationContinuation — [U6] zcode 锚分派与续聊派发", () 
       },
     });
     // 注：engineHandle.poolKey 是持久化 record 形状成员（读侧检查要求非空，值恒 'shared'），
-    // 不随 [池抽象降级] 协议面退役删除——resume 锚（ResumeAnchor）才不再携带 poolKey。
+    // 不随 [池抽象降级] 协议范围退役删除——resume 锚（ResumeAnchor）才不再携带 poolKey。
   }
 
   async function seedZcodeDb(): Promise<void> {
@@ -1977,7 +1977,7 @@ describe("集成：锚失效处置真链（pi reopen 链 + U1b 循环专防 + D1
 // ============================================================
 // [§1.4 (c)] 轮终链断头保护：链上异常降级 error 留痕，不升格为未处理 promise 拒绝
 // （pi rpc 模式无未处理拒绝处理器 → Node 默认 exit 1——登记 §1.4 死亡通道；成因不限
-// stale pi 一种）。vitest 对未处理拒绝默认判红 = 本组用例的隐式断言面。
+// stale pi 一种）。vitest 对未处理拒绝默认判红 = 本组用例的隐式断言范围。
 // ============================================================
 
 describe("[§1.4 (c)] 轮终链断头保护（voidRoundFinalChain）", () => {

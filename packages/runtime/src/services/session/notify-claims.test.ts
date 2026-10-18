@@ -417,7 +417,7 @@ describe('D10-E 结构性（附E E1-E8）', () => {
   it('E2 P busy 时通知到达 → ledger 材料产出与父运行状态无关（送达时机归 B-ledger courier）', () => {
     const l = makeLedger()
     armSent(l, 'sm-e2')
-    // settle 输入面不含父 busy 状态（签名 = sessionId + outcome）：同一序列恒产出同一材料
+    // settle 输入范围不含父 busy 状态（签名 = sessionId + outcome）：同一序列恒产出同一材料
     const b1 = l.settle(S, 'done')
     expect(b1.targets).toHaveLength(1)
     // 投递时机（父 settled 边沿 / 看门狗）是送达面职责，不在本状态机

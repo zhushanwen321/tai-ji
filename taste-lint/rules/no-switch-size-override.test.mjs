@@ -1,7 +1,7 @@
 /**
  * no-switch-size-override 规则用例（trace toolbar Switch 圆点溢出事故回归防线，修前红/修后绿）。
  *
- * 覆盖面：报错主路径（rem 类 h-3.5 w-6 / 绝对 px h-[20px] / w-full / size-4 / 事故原始
+ * 覆盖范围：报错主路径（rem 类 h-3.5 w-6 / 绝对 px h-[20px] / w-full / size-4 / 事故原始
  * 形态 `h-3.5 w-6 scale-90` 每个 token 各报一条）、合法形态放行（等比 scale-90、
  * shrink-0 / mt-0.5 / 定位类、无 class、min-w-* / max-h-* 负向后行不误报、跨行标签、
  * 自闭合标签、:class 字面量内 token 同样捕获）、范围检查（components/ui 豁免、

@@ -2,7 +2,7 @@
 // 唯一实现：writer 创建 + journaling onEvent + handle 回填 + close）。
 // 设计权威源：docs/design/dual-track（已删 git 可追溯）§3.3 D3-③ + 双轨清单 #6。
 //
-// [池抽象降级 2026-09-13] 原「占位池 key + onPoolResolved retarget」覆盖面已删——
+// [池抽象降级 2026-09-13] 原「占位池 key + onPoolResolved retarget」覆盖范围已删——
 // journal 落盘路径构造即终值（固定分组 key 'shared'，磁盘布局字节不变）。
 //
 // 覆盖：①固定分组 key 路径定稿（getter 恒构造值）；②先落盘再转发（forwardEvents）；

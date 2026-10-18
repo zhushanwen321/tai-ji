@@ -56,7 +56,7 @@ function wireFacadeContract(deps: RespawnTestDeps, orchestrator: RespawnOrchestr
 }
 
 describe('RespawnOrchestrator（崩溃上报 + 惰性恢复 join）', () => {
-  // respawn 终态命运收集（notify-once D5 信号源断言面）：onRespawnFate 是模块级订阅
+  // respawn 终态命运收集（notify-once D5 信号源断言范围）：onRespawnFate 是模块级订阅
   //（组合根单消费方），beforeEach 挂 afterEach 退订——订阅残留会跨用例串扰。
   let fates: RespawnFateEvent[] = []
   let unsubFate: (() => void) | undefined

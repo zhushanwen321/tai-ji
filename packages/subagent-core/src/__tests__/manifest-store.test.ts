@@ -25,7 +25,7 @@ const { renameErrorRef, dirSyncErrorPathRef, loggerMock } = vi.hoisted(() => ({
   renameErrorRef: { current: null as NodeJS.ErrnoException | null },
   // T-fsync：设置为目标 dir 路径后，open(dir, "r") 返回的 handle.sync() 会抛错
   dirSyncErrorPathRef: { current: null as string | null },
-  // 读面可诊断性断言：manifest-store 的 warn 通道（JSON 损坏留证；ENOENT 静默）。
+  // 读侧可诊断性断言：manifest-store 的 warn 通道（JSON 损坏留证；ENOENT 静默）。
   loggerMock: { debug: vi.fn(), warn: vi.fn(), error: vi.fn() },
 }));
 
@@ -535,7 +535,7 @@ describe("record 域 manifest 写入路径自由函数（W1/U2a/D2）", () => {
     });
   });
 
-  describe("读面 IO 故障分通道（ENOENT 静默降级 / 其余留痕后降级）", () => {
+  describe("读侧 IO 故障分通道（ENOENT 静默降级 / 其余留痕后降级）", () => {
     it("readManifest：非 ENOENT 读错误（ENOTDIR——父段被文件占据）→ null 不抛", async () => {
       const store = new ManifestStore(dir);
       fs.writeFileSync(path.join(dir, "sub"), "occupied");
@@ -549,7 +549,7 @@ describe("record 域 manifest 写入路径自由函数（W1/U2a/D2）", () => {
     });
   });
 
-  describe("读面损坏 JSON 的可诊断性（损坏 warn / ENOENT 静默）", () => {
+  describe("读侧损坏 JSON 的可诊断性（损坏 warn / ENOENT 静默）", () => {
     it("readManifest：ENOENT → null 且零 warn（合法缺省静默）", async () => {
       const store = new ManifestStore(dir);
       loggerMock.warn.mockClear();

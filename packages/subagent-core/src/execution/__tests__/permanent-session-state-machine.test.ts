@@ -400,7 +400,7 @@ describe("epoch 递增（reopen 防撞）", () => {
   });
 });
 
-// ── ⑤ markSettledOut 副作用矩阵（写权声明 + 收尾写入 journal 记录写面）──────────
+// ── ⑤ markSettledOut 副作用矩阵（写权声明 + 收尾写入 journal 记录写侧）──────────
 
 describe("markSettledOut 副作用矩阵", () => {
   it("markSettledOut：.alive release（release 出口①）+ entry 上报 + worktreeHandle 清句（占用位不动）", () => {

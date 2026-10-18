@@ -113,7 +113,7 @@ async function flushMicrotasks(ticks = 20): Promise<void> {
   }
 }
 
-/** deps.appendEntry 收到的 pending:unregister 落盘形态（直落 entry 断言面）。
+/** deps.appendEntry 收到的 pending:unregister 落盘形态（直落 entry 断言范围）。
  *  mock.calls 是参数元组，此处映射为 {customType, data} 命名形态。 */
 function appendedUnregister(deps: ReturnType<typeof makeTracingDeps>): { customType: string; data: unknown } | undefined {
   const call = deps.appendEntry.mock.calls.find((c) => c[0] === "pending:unregister");

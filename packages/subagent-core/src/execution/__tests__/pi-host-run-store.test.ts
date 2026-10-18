@@ -1,7 +1,7 @@
 // pi-host-run-store 回归锁：枚举读侧目录由调用方注入的 agentDir 活源驱动，
 // 不从进程 env/cwd/sessionFile 推测（两条推导路径均曾在 W2 D3 真机链实证
 // 错位致恒空转，见被测模块头注）。
-// 覆盖面（ADR-0081 / §4.1 场景 3、5；workflow-run-store-convergence U2 枚举改接）：
+// 覆盖范围（ADR-0081 / §4.1 场景 3、5；workflow-run-store-convergence U2 枚举改接）：
 // 1. 枚举目录形态（agentDir 活源 + 全 session 目录 + 回退根）；
 // 2. 终态返回形态 { runId, stateDir, status }（stateDir = 收编链 journalDir 注入源；
 //    status = 判定核三态映射——running/终态词/missing 跳过）；

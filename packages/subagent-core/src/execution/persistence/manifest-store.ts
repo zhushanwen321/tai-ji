@@ -9,7 +9,7 @@ import { writeAtomicFile, writeAtomicFileSync } from "../../shared/atomic-write.
 import { isMissingFsError } from "./fs-error.ts";
 import { recordEventsPath } from "./record-events.ts";
 import type { ClosedReason, ExecutionStatus } from "../domain/record-types.ts";
-// 类型面依赖（D5 终局派生视图词表单源）——纯 type import，无运行时循环
+// 类型范围依赖（D5 终局派生视图词表单源）——纯 type import，无运行时循环
 //（run-events 只依赖 core/logger 与 orchestration/models，不回指 execution 层）。
 import { RunErrorCode, RunOutcome } from "../../shared/run-vocabulary.ts";
 import { ALL_RUN_OUTCOMES } from "../../shared/run-vocabulary.ts";
@@ -37,11 +37,11 @@ export interface ManifestRecord {
    * session-reader（独立 npm 包独立进程）直读旧 status 做 identity 富字段派生
    * 与孤儿判定，删字段 = 外部消费方富字段降级。旧 status 只降权威地位不删字段。
    * 宿主内消费方不读本字段（终态判定走事件流折叠权威，D1）；本字段是词汇收敛
-   * （全景① ExecutionStatus+ClosedReason）在 manifest 写面的过渡锚。
+   * （全景① ExecutionStatus+ClosedReason）在 manifest 写侧的过渡锚。
    */
   executionStatus?: ExecutionStatus;
   /**
-   * [U8 / B-restart manifest 契约面] 实际执行引擎 id（引擎域下行）。zcode record
+   * [U8 / B-restart manifest 契约范围] 实际执行引擎 id（引擎域下行）。zcode record
    * 无子 session 文件（磁盘扫描缺员），manifest 是其重启可见性的兜底承载——
    * 缺 engine 域则 manifest 源派生视图丢引擎身份，U8b 与重启恢复无法路由读链。
    * 缺省 = pi。旧版 session-reader 未知字段跳过，无破坏。
@@ -84,7 +84,7 @@ export interface ManifestRecord {
    * [W4 收敛] v2 收编 record 的被动终局停因（record-settled 帧 stopReason 同名同值
    * ——interrupted-by-restart 族）。仅收编派生视图写入（buildAdoptedManifestProjection），
    * 轮终/终态原语派生视图不写——本字段是 sweep 判据第三级（findAdoptedStopReasonSync）
-   * 区分「收编终局」与「轮终 idle」的唯一依据：v2 收编产物不在 findLightById 读取面，
+   * 区分「收编终局」与「轮终 idle」的唯一依据：v2 收编产物不在 findLightById 读侧，
    * 判据缺席时收编 record 落 missing 分支被误注销为 expired（注销词统一手术的修复点）。
    * 不并入 closedReason：那是 close/cancel 意愿动作词族，被动收编停因不进该词表。
    */
@@ -190,7 +190,7 @@ export class ManifestStore {
    * 不阻塞 event loop）。
    *
    * 失败时原语尽力清理残留 tmp（debug 记录，不掩盖原错误）并原样上抛——
-   * 调用方（RecordStore 写面：writeManifestPersisted 缺省异步分支 / rebuildIndexes
+   * 调用方（RecordStore 写侧：writeManifestPersisted 缺省异步分支 / rebuildIndexes
    * 重建降级（debug 留痕））决定降级策略——各面降级策略分化见各调用点。
    */
   async writeManifest(record: ManifestRecord): Promise<void> {
@@ -343,7 +343,7 @@ export class ManifestStore {
 }
 
 // ============================================================
-// [W1 / D2 决策 9] record-bound 物化写面（record 域）
+// [W1 / D2 决策 9] record-bound 物化写侧（record 域）
 // ============================================================
 
 /**
@@ -369,7 +369,7 @@ export class ManifestStore {
  *     库依赖边）。
  *
  * 写失败降级（D2）：manifest 是派生视图不是事实源——写失败记日志跳过（不重试阻塞），
- * 锚定空窗延长但不消失（轮终/终态物化点与终态条目兜底）。区别于终态写面
+ * 锚定空窗延长但不消失（轮终/终态物化点与终态条目兜底）。区别于终态写侧
  * writeManifestPersisted 的响亮语义：被接管的 v1 路径逐事件自愈，此处物化点稀疏，
  * 降级语义显式声明。
  *

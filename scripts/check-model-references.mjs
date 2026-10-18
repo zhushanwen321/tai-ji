@@ -14,7 +14,7 @@
  *   其他 .md 的正文文本不误报——只读 frontmatter 块内行首键）。
  * - workflow 资产（.js meta）无模型声明字段（WorkflowMeta 无 model——P-C4 实测
  *   内置 workflows 零硬编码模型引用，脚本内 agent({model}) 全为运行时变量），
- *   无静态扫描面。
+ *   无静态扫描范围。
  * - 校验域 = pi 内置 provider 快照：引用用户自定义 provider 的资产会被判红——
  *   本仓发布资产不得依赖用户侧 provider 配置，红即正确。
  *

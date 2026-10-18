@@ -52,7 +52,7 @@ export interface PiHistoryTextPart { // oe-exempt:20261004:framework:存量 pi �
 
 /** pi 1.0.0 AgentMessage content 的 image 块（ToolResultMessage.content 恒为
  *  (Text|Image)[]，pi dist messages.ts:398 实锚）——[subagent 派生视图丢失修复] 联合补成员，
- *  此前漏声明致历史链 image 块在类型面不可表达（运行时 normalizePiToolResult 早已消费）。 */
+ *  此前漏声明致历史链 image 块在类型范围不可表达（运行时 normalizePiToolResult 早已消费）。 */
 export interface PiHistoryImagePart {
   type: 'image'
   data: string

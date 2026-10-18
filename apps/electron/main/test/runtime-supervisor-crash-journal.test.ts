@@ -68,7 +68,7 @@ vi.mock('../logs/main-logger.js', () => ({
   startMemoryWatermarkTimer: vi.fn(() => () => {}),
 }))
 
-// 登记清单断言面：捕获 append 调用（接线单测只断言「写了什么行」，不触文件系统）
+// 登记清单断言范围：捕获 append 调用（接线单测只断言「写了什么行」，不触文件系统）
 const crashJournalAppend = vi.hoisted(() => vi.fn())
 vi.mock('../logs/crash-journal.js', () => ({
   crashJournal: { append: crashJournalAppend },

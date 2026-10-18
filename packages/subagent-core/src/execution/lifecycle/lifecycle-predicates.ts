@@ -22,7 +22,7 @@
 //   - 正在执行：hasArmedIdleTimer=false、isResumable=false（running 直读为假）。
 
 import { hasIdleTimer } from "./lifecycle-manager.ts";
-// [W6 拆依赖] 活进程句柄读点改经 core 侧 spawnedChildren 状态镜像公共面
+// [W6 拆依赖] 活进程句柄读点改经 core 侧 spawnedChildren 状态镜像公共部分
 // （engine/host/spawned-children.ts），不再深路径 import inproc pi 引擎目录 内部——
 // 行为不变（镜像 ∪ inproc 权威 map 并读，见该文件头注释的过渡桥语义）。
 import { hasLiveProcessHandleCore } from "../engine/host/spawned-children.ts";

@@ -7,7 +7,7 @@
  * per-session seq/ring/stateSnapshot）——renderer chatStore 分区回放半边归 M2-c
  * （文件→applyEntry 回放等价），两侧合起来构成 P-isolation 全断言。
  *
- * 断言面（双通道：transient 直传 + stream 入 ring——分区语义与帧类型无关，载体选型见下）：
+ * 断言范围（双通道：transient 直传 + stream 入 ring——分区语义与帧类型无关，载体选型见下）：
  * 1. 两线（btw vid）并发交错流式 100 帧（transient `message.text_delta`）：各自订阅者
  *    只收自己的帧（sessionId + 内容标记双零泄漏）；无关会话订阅者零帧；
  * 2. stream 类帧（`message.stream_error`，payload {sessionId,content} 精确契约）5+3：

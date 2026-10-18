@@ -1,6 +1,6 @@
 // subagent-engine-history 协议客户端接线测试（W8 宿主接线，impl-plan §2.8 验收）。
 //
-// 覆盖面（真实 spawn fake 引擎 CLI——协议 IO 全真，fake 只是引擎实现替身）：
+// 覆盖范围（真实 spawn fake 引擎 CLI——协议 IO 全真，fake 只是引擎实现替身）：
 // ① 三级发现消费（L1 TAIJI_AGENT_ENGINE_ROOTS → manifest 自注册 → 按需 spawn）；
 // ② read 走协议（native reader 覆盖后 core 链①级 = 协议 read，派生视图复用）；
 // ③ 协议失败降②级 journal / 引擎未发现降③级 outcome-only（GUI source 标注的

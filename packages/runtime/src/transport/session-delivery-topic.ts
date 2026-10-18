@@ -115,7 +115,7 @@ export interface SessionDeliveryTopicDeps {
 /**
  * session.delivery 帧发布器（per-session onChange 订阅管理 + 全量快照发布）。
  *
- * 线程模型：JS 单线程——`sync()` 与 onChange 回调都在事件循环内串行执行，无并发写面；
+ * 线程模型：JS 单线程——`sync()` 与 onChange 回调都在事件循环内串行执行，无并发写侧；
  * 帧发布顺序 = 内核变更顺序（last-value 语义下只有最新帧有意义）。
  */
 export class SessionDeliveryTopic {

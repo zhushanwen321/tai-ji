@@ -39,7 +39,7 @@ export function settlementEvidenceToRunState(state: RunSettlementEvidence): Supe
 }
 
 /** 绑定面（SubagentService 供给；全部惰性——见文件头注）。 */
-export interface ReconcileSweepBinding { // oe-exempt:20260928:framework:sweep 依赖注入面 ports 契约先立——生产实现经 SubagentService 单点装配，测试 fake 为第二变体
+export interface ReconcileSweepBinding { // oe-exempt:20260928:framework:sweep 依赖注入范围 ports 契约先立——生产实现经 SubagentService 单点装配，测试 fake 为第二变体
   getStore(): RecordStore;
   getPi(): PiLike | null;
   /** 主 session 文件（sweep 差集输入源；未 flush/未知时 undefined = 空跑）。 */
@@ -86,7 +86,7 @@ export function runPendingReconcileSweepForService(binding: ReconcileSweepBindin
             ? { terminal: true, closedReason: disk.closedReason }
             : "active";
         }
-        // [W4 收敛] v2 收编 record 的第三级判据：v1 磁盘读取面（findLightById）不含
+        // [W4 收敛] v2 收编 record 的第三级判据：v1 磁盘读侧（findLightById）不含
         // 收编产物（events 帧 + manifest 派生视图），无本级时收编 record 落 missing 分支
         // 被误注销为 expired——注销词统一手术的修复点（与 run 侧 D6 判据源改接
         // findRunSettlementEvidence 同构：判据接终局证据，不接两态机持久化字段）。

@@ -50,7 +50,7 @@ export function scopeCovers(scopeList, file) {
   });
 }
 
-/** coverage：scope 匹配 ∪ asset ref 精等（asset 是自身触发面的一部分）。 */
+/** coverage：scope 匹配 ∪ asset ref 精等（asset 是自身触发范围的一部分）。 */
 export function ruleCovers(rule, file) {
   return scopeCovers(rule.scope, file) || rule.assets.some((a) => a.ref === file);
 }

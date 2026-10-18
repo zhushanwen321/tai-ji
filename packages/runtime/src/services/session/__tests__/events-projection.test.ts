@@ -760,7 +760,7 @@ describe('projectV2Subagent（事件源胜出 / 窗外兜底）', () => {
   })
 
   // [W1 / F2-2 轮终 error] record-round-idle.error 失败原因原文供源（词表裁决）：
-  // 供源分流与 stopReason 同构——settled 终局优先 → 最新轮终失败收条 → 条目面兜底；
+  // 供源分流与 stopReason 同构——settled 终局优先 → 最新轮终失败收条 → 条目范围兜底；
   // round-started 后旧失败原文随轮始清点语义不透传（对齐 v1 markRoundStartedImpl
   // 清残留死因，F2-1 同族红线）。
   it('轮终失败：round-idle.error 在场（无终局）→ error 取失败原因原文', () => {
@@ -863,7 +863,7 @@ describe('projectV2Workflow（run 域定界 + 事件 fold 骨架）', () => {
     }
   }
 
-  /** created + settled 两事件 fold（scriptPath 透传用例的最小事件面）。 */
+  /** created + settled 两事件 fold（scriptPath 透传用例的最小事件范围）。 */
   function createdSettledFold(runId: string) {
     return foldRunEventCheckpoint(
       [
@@ -1111,7 +1111,7 @@ describe('scanRecordFamilyEntriesFromSessionFile（冷启动流式 entry 源）'
 
 // ── 有状态派生视图（推送喂入 + 冷读集成）─────────────────────────
 
-/** journal 推送报告构造（event-push-channel 契约形态；emittedAt 诊断面固定值）。 */
+/** journal 推送报告构造（event-push-channel 契约形态；emittedAt 诊断范围固定值）。 */
 function journalReport(
   domain: 'run' | 'record',
   fileKey: string,

@@ -13,8 +13,8 @@
 //    （trySettleLegacyClosed(record + 内联 finalizeRecord 对）不再存在于
 //    run-orchestration / record-lifecycle——收尾后唯一剩余点在持久化层 settle 原语。
 //
-// doFinalizeRecord 经 vi.mock 拦截（避免真实 manifest/archive 写面）；journal 面
-// （pump 接线段）走 vitest no-op 防线（本文件不注入目录——断言面在 record 终态，
+// doFinalizeRecord 经 vi.mock 拦截（避免真实 manifest/archive 写侧）；journal 面
+// （pump 接线段）走 vitest no-op 防线（本文件不注入目录——断言范围在 record 终态，
 // journal 写入 journal 记录已由 run-event-dispatch / terminal-actions-run-events 两文件锁定）。
 
 import * as fs from "node:fs";
@@ -214,7 +214,7 @@ describe("直写通道删除断言（grep 等价的机器检查）", () => {
 
   it("收尾单点唯一性：trySettleLegacyClosed(record + finalizeRecord 委托仅存在于持久化层 settle 原语", () => {
     // [D1 拆边 Class C] settleWorkflowRecord 下沉 execution/persistence/execution-record.ts
-    // （记录级原语，零编排语义）——唯一剩余点在持久化层，编排层不再持有写面。
+    // （记录级原语，零编排语义）——唯一剩余点在持久化层，编排层不再持有写侧。
     const record = fs.readFileSync(path.join(here, "../persistence/execution-record.ts"), "utf8");
     expect(record).toContain("trySettleLegacyClosed(record, closedReason)");
   });

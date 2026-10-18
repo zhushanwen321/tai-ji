@@ -3,7 +3,7 @@
  *
  * deriveParams（fnv1a hash → 端口段）与 buildDevEnv 是纯函数、最易测，其 bug 形态
  * 正是 C-build-08 登记的事故类（端口/数据目录静默错配，验收证据绑错 worktree）。
- * 覆盖面：
+ * 覆盖范围：
  *   - 同 worktree 名端口稳定（重启不变，CDP 连接/日志可复现）
  *   - 不同名三端口段互不重叠（runtime offset 步进 10 段内不重叠）
  *   - buildDevEnv：泄漏变量剥除（workspace AGENTS.md MANDATORY 清单）+

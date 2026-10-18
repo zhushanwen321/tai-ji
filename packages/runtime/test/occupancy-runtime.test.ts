@@ -64,7 +64,7 @@ function frameTypes(publish: ReturnType<typeof vi.fn>): string[] {
   return publish.mock.calls.map((c: unknown[]) => (c[1] as ServerMessage).type)
 }
 
-/** 按 type 取发布消息（错误面断言用；无则 undefined）。 */
+/** 按 type 取发布消息（错误范围断言用；无则 undefined）。 */
 function publishedByType<T extends ServerMessage['type']>(
   publish: ReturnType<typeof vi.fn>,
   type: T,

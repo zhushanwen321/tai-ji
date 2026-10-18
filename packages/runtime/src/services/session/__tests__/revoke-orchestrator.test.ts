@@ -171,7 +171,7 @@ function makeHarness(opts: HarnessOptions = {}) {
       tree.entries = entries
       tree.leafId = leafId
     },
-    /** 卡住下一次起的 get_entries（编排数据面卡点构造）。 */
+    /** 卡住下一次起的 get_entries（编排数据范围卡点构造）。 */
     blockGetEntries: () => {
       getEntriesGate = new Promise<void>((resolve) => {
         releaseGate = resolve
@@ -354,7 +354,7 @@ describe('② nav-failed 幂等重试（A8/A12：⑥ 校验失败 → 重试命�
     expect(second).toEqual({ sessionId: SID, revoked: true, content: `帮我写个排序\n<!--taiji:msg:${UUID_A}-->` })
     // ⑤ 两分支均不发信令（防复活性跳转）：prompt 无新增调用
     expect(h.promptCalls).toHaveLength(1)
-    // 只消费了一次 get_entries（⑤ 数据面），无 ⑥ 校验读
+    // 只消费了一次 get_entries（⑤ 数据范围），无 ⑥ 校验读
     expect(h.client.getEntries.mock.calls.length).toBe(getEntriesBefore + 1)
     // 幂等分支补触发派生态失效（首次尝试可能已树回退但失效未触发——残影在此清除）
     expect(h.invalidateSpy).toHaveBeenCalledTimes(1)
@@ -437,7 +437,7 @@ describe('⑤ compaction_end 边沿不提前投递（A11：hold 窗口内判定�
     const t = standardTree()
     h.setTree(t.entries, t.leafId)
 
-    // 撤回开始并卡在数据面（get_entries gate——② 已快照过 active 集合）。① 空闲检查
+    // 撤回开始并卡在数据范围（get_entries gate——② 已快照过 active 集合）。① 空闲检查
     // 在此通过（view 空闲开局），compaction 在撤回窗口**内**开始（步骤见下）——这是
     // 「撤回进行中恰好有 compaction 短暂发生又结束」的真实时序。
     h.blockGetEntries()
@@ -462,7 +462,7 @@ describe('⑤ compaction_end 边沿不提前投递（A11：hold 窗口内判定�
     expect(h.promptCalls.filter((t2) => t2.startsWith(`/${TAIJI_NAV_COMMAND}`))).toHaveLength(0)
     expect(h.promptCalls).toHaveLength(0)
 
-    // 释放数据面卡点 → 编排走完（⑥ 校验过）→ finally 释放 hold → 持有期轮询退出 → 投递
+    // 释放数据范围卡点 → 编排走完（⑥ 校验过）→ finally 释放 hold → 持有期轮询退出 → 投递
     h.releaseGetEntries()
     const reply = await p
     expect(reply.revoked).toBe(true)
@@ -604,7 +604,7 @@ describe('派生态失效时序（⑥ 树回退校验通过后触发——信令
     const reply = await h.revoke('e2')
     expect(reply).toEqual({ sessionId: SID, revoked: true, content: `帮我写个排序\n<!--taiji:msg:${UUID_A}-->` })
 
-    // 取数时序：两次拉取即 ③⑤ 数据面（撤回前 leaf=e3）与 ⑥ 校验读（撤回后 leaf=L-e2），
+    // 取数时序：两次拉取即 ③⑤ 数据范围（撤回前 leaf=e3）与 ⑥ 校验读（撤回后 leaf=L-e2），
     // 值切换点 = prompt 副作用，构造性对齐真实 pi 的同 client 顺序处理
     expect(getEntriesLeafIds).toEqual(['e3', 'L-e2'])
     // 时序断言（vi 全局单调调用序）：失效晚于信令 prompt、也晚于 ⑥ 校验读（树回退确认后）
@@ -679,7 +679,7 @@ describe('错误码边界（D8）', () => {
     const h = makeHarness()
     const t = standardTree()
     h.setTree(t.entries, t.leafId)
-    // 拉活失败（编排数据面的 ensureActive——⑤ 之前）：直接构造 orchestrator 级失败
+    // 拉活失败（编排数据范围的 ensureActive——⑤ 之前）：直接构造 orchestrator 级失败
     const failing = new RevokeOrchestrator({
       getSession: () => undefined,
       ensureActive: async () => {

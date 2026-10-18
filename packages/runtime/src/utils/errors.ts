@@ -72,7 +72,7 @@ export const MODEL_NOT_CONFIGURED = 'MODEL_NOT_CONFIGURED'
 /**
  * session 无活跃 pi 进程时的状态变更类 RPC 错误码（code-harden RT-4#4）。
  *
- * 触发面：switchModel / setThinkingLevel 落在回收或崩溃窗口（session 条目还在、pi 进程
+ * 触发点：switchModel / setThinkingLevel 落在回收或崩溃窗口（session 条目还在、pi 进程
  * 已不在进程表）。语义 = fail-fast 拒绝而非降级假成功：transport server.ts 的全局 catch
  * 透传 `.code` + `details.sessionId`（L4 增强，与 MODEL_NOT_CONFIGURED 同通路），前端展示
  * 错误消息，用户重开 session 后重试。恢复动作内嵌在错误消息（「重开后可重试」）。
@@ -95,7 +95,7 @@ export const RESTORE_FAILED = 'RESTORE_FAILED'
 /**
  * settings.json 损坏时拒绝启动 pi 会话的错误码（pi 会话启动门禁，用户终裁 fail-fast）。
  *
- * 触发面：ProcessManager.createSession（pi 进程 spawn 唯一入口）顶部经
+ * 触发点：ProcessManager.createSession（pi 进程 spawn 唯一入口）顶部经
  * getSettingsCorruption() 现查命中——损坏（原路径 JSON 非法/不可读，或已被隔离出
  * `.corrupt-*` 副本）时不允许启动任何新 pi 进程（会话创建/恢复/fork/崩溃自动重生/
  * 短命 pi 全部经此单点被拒）。已运行会话不经此入口，不受影响。

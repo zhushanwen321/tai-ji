@@ -2,7 +2,7 @@
  * check-record-write-surface.mjs 单测（review MF-7：检查脚本零测试盲区）。
  *
  * C-data-20「store 外零直写」grep 兜底层的规则回归锚点——规则失真则检查静默失效
- * 或全仓提交被误拦。覆盖面：
+ * 或全仓提交被误拦。覆盖范围：
  *   - collectTsFiles：目录遍历边界（排除 __tests__ / test / node_modules / dist，
  *     排除 *.test.ts / *.d.ts，收集 .ts）
  *   - R1 命中：store 外 import writeFinalizedState 直调 / 类方法形态直写
@@ -75,7 +75,7 @@ describe('collectTsFiles 遍历边界', () => {
 // ── 正则/判定原语 ──────────────────────────────────────────────────────
 
 describe('规则原语', () => {
-  it('WRITE_FN_RE 命中八名真实导出（含 .alive 写/删两名 + U2 轮收尾写面 + bound 物化写面）', () => {
+  it('WRITE_FN_RE 命中八名真实导出（含 .alive 写/删两名 + U2 轮收尾写点 + bound 物化写点）', () => {
     for (const name of ['writeFinalizedState', 'writeCancelledState', 'writeSettledState', 'writeManifest', 'materializeBoundRecordManifest', 'saveIndex', 'writeAliveMarker', 'removeAliveMarker']) {
       expect(WRITE_FN_RE.test(`${name}(f)`)).toBe(true)
     }
@@ -83,7 +83,7 @@ describe('规则原语', () => {
     expect(WRITE_FN_RE.test('materializeManifest(f)')).toBe(false) // 近名不命中：名单须精确到真实导出名
   })
 
-  it('RECORD_ENTRY_WRITE_RE 双向同行形态命中，读面不命中', () => {
+  it('RECORD_ENTRY_WRITE_RE 双向同行形态命中，读侧不命中', () => {
     expect(RECORD_ENTRY_WRITE_RE.test('pi.appendEntry({ customType: "subagent-record", data })')).toBe(true)
     expect(RECORD_ENTRY_WRITE_RE.test(`data.customType === 'subagent-record' && onAppendEntry()`)).toBe(false)
   })
@@ -170,7 +170,7 @@ describe('scanRecordWriteSurface R2', () => {
   })
 })
 
-// ── R3：workflow-record entry 写面白名单（三写点宿主外违规）──────────
+// ── R3：workflow-record entry 写点白名单（三写点宿主外违规）──────────
 
 describe('scanRecordWriteSurface R3', () => {
   it('白名单外宿主 appendEntry + customType "workflow-record" → 违规', () => {

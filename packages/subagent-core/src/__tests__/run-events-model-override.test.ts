@@ -4,7 +4,7 @@
 // 契约）→ fold 派生视图端到端。任务书测试要求第 4 条（事件构造 → journal 追加 →
 // fold 产物端到端）。
 //
-// 覆盖面：
+// 覆盖范围：
 // - 词表同步：RUN_EVENT_TYPES 含 model-override（core 词表值域——journal 严格校验
 //   消费词表值，只改类型联合不改词表值时新事件行被判 type-outside-vocabulary 拒收）
 // - 事件构造：ModelOverrideEvent 样本合法（行校验 isWorkflowRunEventLine 放行；

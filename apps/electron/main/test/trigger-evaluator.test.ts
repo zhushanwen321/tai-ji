@@ -395,7 +395,7 @@ describe('#16 E2 型连坐', () => {
     expect(rowById(evaluate([], outside, T0).rows, 16).status).toBe('tripped')
   })
 
-  it('出 30 天窗口的同秒连坐不计（复发观测面为月级）', () => {
+  it('出 30 天窗口的同秒连坐不计（复发观测范围为月级）', () => {
     const old = [piCrash(T0 - 31 * DAY, 's1'), piCrash(T0 - 31 * DAY + 100, 's2'), piCrash(T0 - 31 * DAY + 200, 's3')]
     expect(rowById(evaluate([], old, T0).rows, 16).status).toBe('ok')
   })

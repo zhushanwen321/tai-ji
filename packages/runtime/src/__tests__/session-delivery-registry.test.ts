@@ -459,7 +459,7 @@ describe('u2 错误分类迁移（D6）', () => {
   it('pi 报 already processing（runtime 不知情的 turn）→ 首败即停显式上报（v3 busy 分型重试退役）', async () => {
     // v3：受理即出站下全部文本投递恒带 streamingBehavior，pi 忙时入队不拒
     //（agent-session.js:1515-1524）——processing 拒绝仅剩异常形态，按真失败首败即停
-    //（不反转 occupancy、不重试；错误面 = message.error 显式上报，用户裁决重发）
+    //（不反转 occupancy、不重试；错误范围 = message.error 显式上报，用户裁决重发）
     const h = makeHarness({ promptError: new Error(PI_PROCESSING_MSG) })
     h.registry.submit('s1', { content: '幽灵空闲撞墙', clientUuid: 'u-aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa' })
     await h.flush()

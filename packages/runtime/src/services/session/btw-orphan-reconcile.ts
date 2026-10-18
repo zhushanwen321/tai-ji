@@ -4,8 +4,8 @@
  * 内聚段抽自 btw-service.ts（max-lines 同目录内聚拆分，2026-09-22，纯移动零行为变更）：
  * 判据/降级闸/幂等语义随 doc 整段迁入；BtwService.reconcileOrphanThreadDirs 保留为
  * 组合根调用点（一行委托），消费方 import 路径零改动。isInsideBtwRoot 路径安全谓词
- *（删除面必须位于 btw 根内）随本模块迁入——补账是其主消费方，关线/级联经 btw-service
- * import 复用（原为该类私有方法，非导出面成员）。
+ *（删除范围必须位于 btw 根内）随本模块迁入——补账是其主消费方，关线/级联经 btw-service
+ * import 复用（原为该类私有方法，非导出清单成员）。
  * 依赖 = 窄结构接口（OrphanReconcileDeps），不反向 import btw-service（保持无环）。
  */
 import { existsSync, readdirSync, rmSync, statSync } from 'node:fs'
@@ -25,7 +25,7 @@ export interface OrphanReconcileDeps {
 }
 
 /**
- * 路径安全：删除面必须位于 btw 根内（closeLine/reconcile 防误删检查形态）。
+ * 路径安全：删除范围必须位于 btw 根内（closeLine/reconcile 防误删检查形态）。
  * 原为 BtwService 私有方法，随补账段迁出（closeLine / closeAllForMain 同 import 复用）。
  */
 export function isInsideBtwRoot(target: string): boolean {
@@ -44,7 +44,7 @@ export function isInsideBtwRoot(target: string): boolean {
  * 扫描路径降级（readdir EACCES/IO）会显式返回空列表、与「权威空」不可区分，冷主会话将全部
  * 落空 ⇒ 若不设闸会把全部线目录误判「主已删」清空（BU5：rm -rf 不可逆，摧毁裁决⑧持久化）。
  * 故 resolve 落空后先过 deps.isSessionScanDegraded 闸——降级即跳过整轮补账，warn 留痕、
- * 改下次启动重试（[HISTORICAL] 原注释「扫描路径 best-effort 返回列表而非抛错 ⇒ 触发面 =
+ * 改下次启动重试（[HISTORICAL] 原注释「扫描路径 best-effort 返回列表而非抛错 ⇒ 触发点 =
  * 主确已删」论证不成立：返回空列表正是降级形态之一，与主确已删不可区分，故须旗标透出）。
  * 非 pi 形态目录名跳过（junk 归 rebuild 的 warn 面，不代删）。
  * 幂等 + best-effort：无根零动作；单目录 rm 失败 warn 不阻断启动（P2 降级隔离），

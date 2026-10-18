@@ -1,7 +1,7 @@
 /**
  * no-unbounded-while-true 规则用例（complexity-debt-full-repayment U01 / 判定锚定，修前绿）。
  *
- * 覆盖面：walkStatements 判定主路径正反用例——无限循环变体（裸循环体 / 空体 / 只递增不比较 /
+ * 覆盖范围：walkStatements 判定主路径正反用例——无限循环变体（裸循环体 / 空体 / 只递增不比较 /
  * 只比较不递增 / 标识符错位 / 普通 = 赋值不算递增 / 普通赋值右侧比较不收集 / for-of 内层
  * break 不下潜 / for 头部 init-test-update 不收集 / 嵌套 while(true) 只豁免内层）、合法
  * 有界形态（break-return-throw 直退、if 三分支退出、计数器模式含前后缀与 -=、比较藏在

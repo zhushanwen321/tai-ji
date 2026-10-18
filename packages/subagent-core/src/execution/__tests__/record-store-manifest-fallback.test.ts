@@ -13,7 +13,7 @@
 //   4. 损坏 JSON / status 越界 → undefined（与 mergeManifestRecords 坏链保守侧同款）。
 //
 // markModelOverride 拒绝臂：调用方契约 = record 由调用方从 store 取出（getMutable），
-// 非 in-memory 实例（未注册 / 同 id 异实例）返回 false 且零写面。
+// 非 in-memory 实例（未注册 / 同 id 异实例）返回 false 且零写侧。
 //
 // 测试纪律：真实 fs 落盘断言；fixture 一律 mkdtempSync 自建自删（tmpdir），不触碰真实
 // 数据目录。
@@ -70,7 +70,7 @@ describe("findByIdManifestFallback（D3 缺陷五 manifest 兜底单 id 读取�
   });
 
   it("合法 manifest → 返回派生视图，身份域字段（origin/parentRunId/engine/engineHandle）逐字段可信", () => {
-    // 先经真实写面物化 manifest（register + markRoundIdle 派生视图），再以重启形态
+    // 先经真实写侧物化 manifest（register + markRoundIdle 派生视图），再以重启形态
     // 的新 store 实例（内存空）走兜底读取——对齐 model-switch-wiring 的重启恢复消费。
     const dbPath = path.join(tmpDir, "session-db", "db.sqlite");
     fs.mkdirSync(path.dirname(dbPath), { recursive: true });
@@ -145,7 +145,7 @@ describe("markModelOverride 身份检查臂（非 in-memory 实例拒绝）", ()
     setAt: 1234,
   } as const;
 
-  it("id 不在内存表（未注册）→ false，零写面", () => {
+  it("id 不在内存表（未注册）→ false，零写侧", () => {
     const store = new RecordStore(sessionsDir, undefined, { appendEntry: vi.fn() }, manifestDir);
     const ghost = makeRecord("ghost-ovr");
 
@@ -167,7 +167,7 @@ describe("markModelOverride 身份检查臂（非 in-memory 实例拒绝）", ()
     expect(store.markModelOverride(stranger, override)).toBe(false);
 
     expect(stranger.modelOverride).toBeUndefined();
-    // 注册实例与磁盘派生视图均保持无覆盖记账（写面零触碰）。
+    // 注册实例与磁盘派生视图均保持无覆盖记账（写侧零触碰）。
     expect(registered.modelOverride).toBeUndefined();
     expect(fs.existsSync(path.join(manifestDir, "real-ovr.json"))).toBe(false);
   });

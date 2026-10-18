@@ -88,7 +88,7 @@ function isWriteCommand(args: string[]): boolean {
 
 /**
  * [U5 / §3.2.5 worktree 续聊重建] 重建结果三分（设计三失败形态的返回面；形态③
- * IO 错不走本联合——直接响亮 throw，调用方按工具错误面重试）。
+ * IO 错不走本联合——直接响亮 throw，调用方按工具错误范围重试）。
  */
 export type WorktreeRebuildOutcome =
   /** 重建成功（patch 已恢复或无 patch 可恢复）——handle 回填 record.worktreeHandle。 */
@@ -189,7 +189,7 @@ export async function addWorktreeWithStaleRecovery(
       }
     }
   }
-  // 重试一次：仍失败照原样抛错（GitRunError——失败形态③ 响亮上抛，调用方按工具错误面重试）
+  // 重试一次：仍失败照原样抛错（GitRunError——失败形态③ 响亮上抛，调用方按工具错误范围重试）
   await gitRun(["worktree", "add", ...addArgs], { cwd: repo });
 }
 
@@ -341,7 +341,7 @@ export class WorktreeManager {
    *      续聊（transcript 仍有效，续聊资格判据不受工作区影响）+ 返回 conflict 供
    *      调用方发用户可见提示（含 patch 备份路径）——不降级 reopen；
    *   ③ 重建自身 IO 错（git 命令失败、磁盘满等）→ GitRunError/DirtyWorktreeError
-   *      响亮上抛（不静默回落，调用方按工具错误面重试）。
+   *      响亮上抛（不静默回落，调用方按工具错误范围重试）。
    *
    * repo 定位 [S5 修复：不依赖注册表]：repoPath 由调用方传入（run-orchestration
    * 传进程 cwd——与 create() 的 mainCwd 同源：record/session/binding 全按

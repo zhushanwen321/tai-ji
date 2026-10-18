@@ -1,11 +1,11 @@
 // src/execution/__tests__/record-origin.test.ts
 //
 // record 来源身份 origin/parentRunId（H2 W1，设计 subagent-workflow-record-unification
-// §3.3 D1）持久化链 + 查询面 + 治理面负向规格。
+// §3.3 D1）持久化链 + 查询范围 + 治理面负向规格。
 //
 // v2 单形态（W1 [D1]）：主 session 条目 = 注册（身份域）+ 终态（终局域）两条小条目，
-// 身份域 origin/parentRunId/stepIndex 只落在注册条目；v1 全量快照写点与读面已随兼容层
-// 删除（登记 §3.3），本文件同步到 v2 播种形态与断言面。
+// 身份域 origin/parentRunId/stepIndex 只落在注册条目；v1 全量快照写点与读侧已随兼容层
+// 删除（登记 §3.3），本文件同步到 v2 播种形态与断言范围。
 //
 // 锁四件事：
 //   1. 持久化链往返保真：register/archive 真实落盘（appendEntry 通路）→
@@ -14,7 +14,7 @@
 //      一律来自 store.register / store.archive 的真实落盘产物。
 //   2. 缺省负向：无 origin 的存量 record 落 v2 注册条目 origin="tool"（必填域归一），
 //      可选域 parentRunId/stepIndex 序列化自然缺省（零迁移）。
-//   3. 查询面：collectRecords 缺省过滤 origin==="workflow"（includeWorkflow 缺省
+//   3. 查询范围：collectRecords 缺省过滤 origin==="workflow"（includeWorkflow 缺省
 //      false）、includeWorkflow:true 放行；collectRecordsByParentRunId 按 run id
 //      精确列 record（内存 ∪ 磁盘重建口径，不过滤 origin）。
 //   4. 治理面负向保证（D1⑥）：recoverEntryOnlyOrphans / 重建派生视图不因 origin 过滤——
@@ -197,7 +197,7 @@ describe("record origin/parentRunId 持久化链（H2 W1）", () => {
   });
 });
 
-describe("collectRecords includeWorkflow 查询面（H2 W1）", () => {
+describe("collectRecords includeWorkflow 查询范围（H2 W1）", () => {
   let rootDir: string;
   let tmpDir: string;
 

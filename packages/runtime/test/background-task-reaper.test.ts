@@ -1,6 +1,6 @@
 /**
  * 后台任务收殓器测试（u-runtime-reaper，设计 docs/architecture/file-lock-unification-
- * and-reaper-sink.md §2.3/§3.2/§3.3 + §4 S4a/S4b 触发面语义）。
+ * and-reaper-sink.md §2.3/§3.2/§3.3 + §4 S4a/S4b 触发点语义）。
  *
  * 覆盖：
  * - 三分支判定（①属主活跳过 / ③属主死+任务死转终态 / ②属主死+任务活 kill+orphaned）
@@ -8,15 +8,15 @@
  * - registry 损坏 .corrupt 隔离 + 空表重建语义 / 版本不匹配 / 单条脏数据不报废全表
  * - 单条目处置异常 warn 跳过（幂等）
  * - 终态 LRU 裁剪（写侧 writeRegistryEntry RMW 语义对齐）
- * - 触发面 A：入口 setImmediate 延后（fire-and-forget 不占当前拍）+ session-service
+ * - 触发点 A：入口 setImmediate 延后（fire-and-forget 不占当前拍）+ session-service
  *   removeSessionEntry 挂接（真 SessionService 实例：不 await 销毁链、异常 catch warn）
- * - 触发面 B：startup-background-init 硬序（孤儿 pi 收殓完成后才扫描）+ pi 收殓
+ * - 触发点 B：startup-background-init 硬序（孤儿 pi 收殓完成后才扫描）+ pi 收殓
  *   失败仍扫描 + 不阻塞启动序列本身
  * - stale reaper.lock 残留清理（stale 移除 / fresh 保留）
  *
  * Mock 边界：pid 探测/处置原语全依赖注入（对齐 test/reap-orphan-pi.test.ts 惯例，
  * 零真实进程）；registry 落真实 tmp 文件系统（统一锁/原子写/corrupt 隔离走真实实现）；
- * 触发面 A/B 的挂接测试用 vi.fn 包装真实入口（默认实现透传真实行为，可按需覆写）。
+ * 触发点 A/B 的挂接测试用 vi.fn 包装真实入口（默认实现透传真实行为，可按需覆写）。
  *
  * 运行：cd packages/runtime && npx vitest run test/background-task-reaper.test.ts
  */
@@ -39,7 +39,7 @@ import { getPiAgentDir } from '../src/infra/pi/pi-paths.js'
 import { reapOrphanPiProcesses } from '../src/services/reap-orphan-pi.js'
 import type { StartupBackgroundDeps } from '../src/services/startup-background-init.js'
 
-// ── 触发面 A/B 挂接观测：包装真实入口为 vi.fn（默认实现 = 真实行为透传；挂接方
+// ── 触发点 A/B 挂接观测：包装真实入口为 vi.fn（默认实现 = 真实行为透传；挂接方
 // （session-service / startup-background-init）与本测试拿到的是同一 mock 实例）──
 vi.mock('../src/services/session/background-task-reaper.js', async (importOriginal) => {
   const actual = await importOriginal<typeof import('../src/services/session/background-task-reaper.js')>()
@@ -73,7 +73,7 @@ vi.mock('../src/services/reap-orphan-pi.js', async (importOriginal) => {
 
 /** 本次测试创建的 tmp 目录（afterEach 统一清理）。 */
 const tmpAgentDirs: string[] = []
-/** 触发面 A 集成用例在真实 pi agentDir 下创建的 session 目录（用后即清，防污染）。 */
+/** 触发点 A 集成用例在真实 pi agentDir 下创建的 session 目录（用后即清，防污染）。 */
 const realAgentDirSessionDirs: string[] = []
 
 function makeAgentDir(): string {
@@ -372,7 +372,7 @@ describe('错误容忍', () => {
     }
   })
 
-  it('触发面 A：session 目录不存在（从未跑过后台任务）→ 静默 no-op 不抛', async () => {
+  it('触发点 A：session 目录不存在（从未跑过后台任务）→ 静默 no-op 不抛', async () => {
     const agentDir = makeAgentDir()
     const { deps } = makeDeps()
     const result = await reapSessionBackgroundTasks(agentDir, 'never-existed', deps)
@@ -380,9 +380,9 @@ describe('错误容忍', () => {
   })
 })
 
-// ── 触发面 A 入口语义（fire-and-forget 安全性） ─────────────────────────────────────────────
+// ── 触发点 A 入口语义（fire-and-forget 安全性） ─────────────────────────────────────────────
 
-describe('触发面 A 入口：setImmediate 延后同步核心', () => {
+describe('触发点 A 入口：setImmediate 延后同步核心', () => {
   it('调用后当前拍不执行（void 返回不 await 安全），延后一拍才处置', async () => {
     const agentDir = makeAgentDir()
     const { alivePids, startTimes, startSecReads, deps } = makeDeps()
@@ -402,9 +402,9 @@ describe('触发面 A 入口：setImmediate 延后同步核心', () => {
   })
 })
 
-// ── 触发面 B 全量扫描 + stale reaper.lock ─────────────────────────────────────────────
+// ── 触发点 B 全量扫描 + stale reaper.lock ─────────────────────────────────────────────
 
-describe('触发面 B：reapAllSessionsBackgroundTasks 全量扫描', () => {
+describe('触发点 B：reapAllSessionsBackgroundTasks 全量扫描', () => {
   it('扫全部 session 目录并聚合结果；无 registry 的目录计入 scannedDirs', async () => {
     const agentDir = makeAgentDir()
     const { alivePids, startTimes, killCalls, deps } = makeDeps()
@@ -479,7 +479,7 @@ describe('终态 LRU 裁剪（MAX_TERMINAL_REGISTRY_ENTRIES）', () => {
   })
 })
 
-// ── 触发面 A 挂接：session-service removeSessionEntry 汇聚点 ─────────────────────────────────────────────
+// ── 触发点 A 挂接：session-service removeSessionEntry 汇聚点 ─────────────────────────────────────────────
 
 /** 最小依赖构造 SessionService：仅 removeSessionEntry 路径（构造器只存引用 + 注册 onSessionExit）。 */
 function makeSessionService(): SessionService {
@@ -497,7 +497,7 @@ function makeSessionService(): SessionService {
   )
 }
 
-describe('触发面 A 挂接（session-service.removeSessionDestroyed 汇聚点）', () => {
+describe('触发点 A 挂接（session-service.removeSessionDestroyed 汇聚点）', () => {
   it('removeSessionEntry 触发收殓：参数 (getPiAgentDir(), sessionId)，且不 await 销毁链（延后拍完成处置）', async () => {
     const service = makeSessionService()
     // 真实 registry + 真实 pid 探测：owner/task 均为确定已死 pid → 走③终态收尾
@@ -536,7 +536,7 @@ describe('触发面 A 挂接（session-service.removeSessionDestroyed 汇聚点�
   })
 })
 
-// ── 触发面 B 挂接：startup-background-init 硬序 ─────────────────────────────────────────────
+// ── 触发点 B 挂接：startup-background-init 硬序 ─────────────────────────────────────────────
 
 function makeStartupDeps(): StartupBackgroundDeps {
   return {
@@ -558,7 +558,7 @@ function makeStartupDeps(): StartupBackgroundDeps {
   }
 }
 
-describe('触发面 B 挂接（startup-background-init 硬序）', () => {
+describe('触发点 B 挂接（startup-background-init 硬序）', () => {
   it('孤儿 pi 收殓失败（reject 兜底后）仍执行 B 扫描——硬序只约束先后，不传递成败', async () => {
     vi.useFakeTimers()
     try {

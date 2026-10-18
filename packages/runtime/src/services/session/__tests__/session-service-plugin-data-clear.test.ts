@@ -1,5 +1,5 @@
 /**
- * B5 plugin sessionData 清理的触发面测试（memory-leak-remediation §3.1 + §3.2-B5；触发面
+ * B5 plugin sessionData 清理的触发点测试（memory-leak-remediation §3.1 + §3.2-B5；触发点
  * 收窄 2026-09-15）。
  *
  * 锁定语义「**真删除才清**」：清理（tombstone 登记 + 分区摘除 + trash 软删除）绑定用户
@@ -20,7 +20,7 @@
  * 装置：真 SessionService（session-service-checkpoint.test.ts createSetup 同款轻量桩）+
  * 真 SessionDataStore（tmp configDir，自注册进分发表）。trash port 注入式 mock（禁触真实
  * 废纸篓）；sessionStore.refreshAll/invalidateScanCache/trash spy 掉（provider 重扫与真实
- * 废纸篓不属本域断言面）。
+ * 废纸篓不属本域断言范围）。
  *
  * 运行：cd packages/runtime && npx vitest run src/services/session/__tests__/session-service-plugin-data-clear.test.ts
  */
@@ -107,7 +107,7 @@ function createSetup(): Setup {
     destroySession: vi.fn(async () => undefined),
     destroyAll: vi.fn(async () => undefined),
   }
-  // 真删除链尾的 refreshAll（pi provider 盘上重扫）与 trash（真实废纸篓）不属本域断言面：
+  // 真删除链尾的 refreshAll（pi provider 盘上重扫）与 trash（真实废纸篓）不属本域断言范围：
   // spy 掉——refreshAll/invalidateScanCache no-op 化，trash 落 tmp 内 rm（mockTrashFile 同款
   // 语义，保 existsSync 断言可判）。
   const sessionStore = new PiSessionStore()
@@ -221,7 +221,7 @@ function createRestoreLifecycle(service: SessionService, sid: string, bodyFile: 
   return { lifecycle, notifyCreated, removeEntryOnService, pm }
 }
 
-describe('B5 触发面收窄：真删除才清 plugin sessionData（§3.1 trash 绑定用户删除）', () => {
+describe('B5 触发点收窄：真删除才清 plugin sessionData（§3.1 trash 绑定用户删除）', () => {
   it('真删除（lifecycle.delete active 分支）：tombstone + 文件进 trash + 迟到 set 被丢弃', async () => {
     const sid = 'sid-delete-active'
     const { service } = createSetup()

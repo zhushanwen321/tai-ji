@@ -8,7 +8,7 @@
  *
  * after（本文件断言）：server.handleStatusSetUpdate → pluginService.notifyPiEvent →
  * executeHooks('onPiEvent', { event: 'plugin:statusSetUpdate', ...payload })——分发键 =
- * 泛型 'onPiEvent'（与 hook-api 注册面对齐），载荷平铺形状（事件名在 event 字段），
+ * 泛型 'onPiEvent'（与 hook-api 注册点对齐），载荷平铺形状（事件名在 event 字段），
  * hook-api 适配层解出 (eventName, payload) 后 statusline 消费形态 = { sessionId, key, text }。
  */
 import { describe, it, expect, vi } from 'vitest'
@@ -90,7 +90,7 @@ describe('statusSetUpdate delivery: notifyPiEvent dispatch key/shape (断链修�
 
 describe('statusSetUpdate delivery: end-to-end hook-api 适配 → statusline 消费形态', () => {
   /**
-   * 复刻 statusline 插件的注册面与解包适配（resources/plugins/statusline/index.ts）：
+   * 复刻 statusline 插件的注册点与解包适配（resources/plugins/statusline/index.ts）：
    * api.hooks.onPiEvent 注册（泛型键）→ handler 收 (eventName, payload)——
    * notifyPiEvent 的平铺 context 经 hook-api 适配层「event-interpreter 平铺」分支解包，
    * handler 第二参 = 剥离 event 元字段后的业务载荷 { sessionId, key, text }（键值直出）。

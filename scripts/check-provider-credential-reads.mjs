@@ -27,7 +27,7 @@
  * pi-provider-store 源码不含 readAuthCredentials），扫描目标是「会进产物的代码」。
  *
  * 用法：node scripts/check-provider-credential-reads.mjs（始终全量扫描——纯文本匹配
- * 毫秒级，触发面由 pre-commit 按路径控制）
+ * 毫秒级，触发范围由 pre-commit 按路径控制）
  */
 import { readFileSync, readdirSync, statSync } from 'node:fs'
 import path from 'node:path'
@@ -141,7 +141,7 @@ function scanDir(scanRoot, allowlists = {}) {
   return { violations, fileCount: files.length, lineCount }
 }
 
-// 导出面（测试消费）：scanDir 主体 + 三组正则（词边界行为直测）+ 白名单常量（收敛计数断言）。
+// 导出清单（测试消费）：scanDir 主体 + 三组正则（词边界行为直测）+ 白名单常量（收敛计数断言）。
 // 主流程仅直接执行时运行（node scripts/check-provider-credential-reads.mjs），测试 import
 // 零副作用——否则测试会隐式全量扫真实仓库（结果依赖工作区状态），且检查红时
 // process.exit(1) 会杀死 vitest worker。

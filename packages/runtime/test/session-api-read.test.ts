@@ -1,5 +1,5 @@
 /**
- * Session API 读面（AP-4，U2）单测
+ * Session API 读侧（AP-4，U2）单测
  *
  * 覆盖 plugin.sessions.readEntries / getCommands / registerEntryInvalidation /
  * unregisterEntryInvalidation 的主线程 handler（customType 服务端过滤派生视图、
@@ -73,7 +73,7 @@ interface FakeClientOverrides {
   commands?: PiCommandInfo[]
 }
 
-/** 假 IPiEngine：只实现读面消费的 getEntries/getCommands/exited（结构化最小面） */
+/** 假 IPiEngine：只实现读侧消费的 getEntries/getCommands/exited（结构化最小面） */
 function createFakeClient(overrides: FakeClientOverrides = {}): IPiEngine {
   return {
     exited: overrides.exited ?? false,
@@ -107,7 +107,7 @@ function customEntry(id: string, data: unknown, extra: Record<string, unknown> =
 
 // ── 主线程 handler ──────────────────────────────────────────────────────────
 
-describe('session read API — registerSessionRpcHandlers（AP-4 读面）', () => {
+describe('session read API — registerSessionRpcHandlers（AP-4 读侧）', () => {
   let rpc: PluginRpcServer
   let port: ReturnType<typeof createMockPort>
   let clients: Map<string, IPiEngine>

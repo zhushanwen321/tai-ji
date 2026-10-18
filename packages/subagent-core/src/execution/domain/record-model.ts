@@ -254,7 +254,7 @@ export interface ExecutionRecord { // oe-exempt:20260930:framework:领域聚合�
    */
   batchFinalized?: boolean;
 
-  // ── 永久会话模型新维度（§3.2.1；u-foundation 类型面，U2 实装写点）──
+  // ── 永久会话模型新维度（§3.2.1；u-foundation 类型范围，U2 实装写点）──
   // 全部可选、缺省 undefined = 旧语义零迁移（现有 record 构造不破坏）。
   /**
    * 展示维度：上一轮为什么停（旧 7 值 + 4 新展示值，见 {@link StopReason}）。

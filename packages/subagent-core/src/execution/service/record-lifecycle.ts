@@ -1,10 +1,10 @@
 // [H3/R3] RecordLifecycle 聚合（域 #4/#11/#17/#18：回收面 + close 三路 + cancel +
 // finalize 簇）——自 SubagentService 上帝类 strangler 抽取的第三个聚合的**终态迁移
-// 写面**（设计 docs/architecture/subagent-service-decomposition.md §2.1 / §3.3 D5；成员归属
+// 写侧**（设计 docs/architecture/subagent-service-decomposition.md §2.1 / §3.3 D5；成员归属
 // 以 r0-inventory.md 清单① + 域分区为准）。
 //
 // [计划变更 D-R3-1] G1「每聚合 ≤700 行」与 R0 八域体量（分区实测 833 物理行）冲突，
-// 拆两文件（dev agent 停线报告、主 agent 核验追认）：本文件（终态写面 #4/#11/#17/#18）
+// 拆两文件（dev agent 停线报告、主 agent 核验追认）：本文件（终态写侧 #4/#11/#17/#18）
 // + record-access.ts（读建面
 // #3/#8/#10/#13）。两文件组间零互调（已验证——终态组方法只消费 deps + 组内互调），
 // 各自独立 deps，壳分别装配——聚合间零 import（G2 / R1 打样模式 3）。
@@ -24,10 +24,10 @@
 //   互调（cancelBackground/close 收起 markSettledOut——旧 closeChatIdle 已改优雅收尾
 //   归档/finalizeRecord/promoteSessionFileFromEngineHandle）保持 private，不经壳。
 // 3. 跨聚合边收敛（r0-inventory 清单① C-4/C-5/C-6）：
-//    - C-5（onRecordFinalizedCleanup 跨域汇聚点，本体在壳 #14 Continuation 协作面）：
+//    - C-5（onRecordFinalizedCleanup 跨域汇聚点，本体在壳 #14 Continuation 协作范围）：
 //      deps.onRecordFinalizedCleanup 回调——disposeAllRecords/cancelBackground 直调点
 //      与 doFinalizeRecord deps.onFinalized 钩子闭包统一经此回调（现状显式注入形态
-//      天然兼容，清单①预判兑现）；R4 抽取 Continuation 协作面时回调改指聚合显式接口。
+//      天然兼容，清单①预判兑现）；R4 抽取 Continuation 协作范围时回调改指聚合显式接口。
 //    - C-6（reconcile sweep 装配闭包的终态化委托面）：闭包经壳 late-bound 读取壳
 //      转发方法——天然兼容聚合化，壳装配零改动（清单①预判兑现）。
 //    - C-4（壳 dispose 直调 continuations.clear）：#14 Continuation 状态清理，壳 dispose
@@ -72,9 +72,9 @@ const logger = getLogger("subagents");
  * [R1 打样模式 1] 聚合协作 deps——**全部晚绑定闭包，构造期零求值**。
  *
  * 窄结构类型只声明聚合真实消费的通道（不整实例注入）。跨域边两类：
- * - 断言面（assertReady）：close/cancel 入口的就绪门（本体在 SessionBaselines，壳转发）。
+ * - 断言范围（assertReady）：close/cancel 入口的就绪门（本体在 SessionBaselines，壳转发）。
  * - 跨域汇聚回调（onRecordFinalizedCleanup / abortContinuationQueue）：#14 Continuation
- *   协作面的终态清理与队列清空（C-5），壳装配指向壳方法；R4 抽取后改指聚合显式接口。
+ *   协作范围的终态清理与队列清空（C-5），壳装配指向壳方法；R4 抽取后改指聚合显式接口。
  *   [collect 退役] 原显式接口协作 getCollectCoordinator（#5 SyncCollect route 投递）
  *   随批机制退役删除。
  */
@@ -109,7 +109,7 @@ export interface RecordLifecycleDeps {
 }
 
 /**
- * 域 #4/#11/#17/#18 聚合：record 终态迁移写面（R3 自 SubagentService 抽取）。
+ * 域 #4/#11/#17/#18 聚合：record 终态迁移写侧（R3 自 SubagentService 抽取）。
  */
 export class RecordLifecycle {
   private readonly deps: RecordLifecycleDeps;
@@ -138,7 +138,7 @@ export class RecordLifecycle {
    *     后 worktree 重建链承接）；
    *   - 归档点补发注销（承接原 emitUnregister 语义，发射点①挂载归档原语）。
    *
-   *  [M1 sessionFile 锚点提升] 保留：先于 settle 原语——写面随之携带真实锚点。
+   *  [M1 sessionFile 锚点提升] 保留：先于 settle 原语——写侧随之携带真实锚点。
    *
    *  @param reason 关闭原因（parent-fork / parent-new / parent-shutdown——只作日志
    *         与 stopReason 映射输入）
@@ -173,7 +173,7 @@ export class RecordLifecycle {
       // 在途轮打断 + 队列清空（Continuation 打断编排的 dispose 侧触发——立即打断
       // 不挂起，排队消息随主 session 分叉作废）。
       this.deps.abortContinuationQueue(record.id);
-      // [M1 sessionFile 锚点提升] 先于 settle 原语——写面随之携带锚点。
+      // [M1 sessionFile 锚点提升] 先于 settle 原语——写侧随之携带锚点。
       this.promoteSessionFileFromEngineHandle(record);
       if (record.status === "running") {
         // [区1-U2] 打断作废 close 优雅收尾挂起（对齐 one-shot 域 settleOneShotOutcome
@@ -195,7 +195,7 @@ export class RecordLifecycle {
       // + cleanup。fire-and-forget（本函数同步签名；停机窗 await 会阻塞退出）。
       // [S5 修复] 发起先于 markSettledOut——markSettledOut 现清 record.worktreeHandle
       //（归档即绑定消亡），async 闭包在首个 await 前的同步段已捕获 handle 局部量，
-      // 但发起在前使两写面的时序不依赖该执行细节。
+      // 但发起在前使两写侧的时序不依赖该执行细节。
       if (record.worktreeHandle) {
         void this.archiveWorktreeResources(record, `disposeAllRecords (${reason})`);
       }
@@ -328,7 +328,7 @@ export class RecordLifecycle {
   /**
    * worktree 资源收尾（patch 前移 + cleanup，串行 async 链）。archiveRecord 与
    * disposeAllRecords（同步链 fire-and-forget）共用——失败 best-effort 留痕不阻断
-   * 归档写面（patch 失败 = 续聊重建时无备份可恢复，形态①降级承接；cleanup 失败
+   * 归档写侧（patch 失败 = 续聊重建时无备份可恢复，形态①降级承接；cleanup 失败
    * = reaper 兜底）。
    */
   private async archiveWorktreeResources(record: ExecutionRecord, source: string): Promise<void> {
@@ -427,7 +427,7 @@ export class RecordLifecycle {
     // 在途轮打断 + 队列清空（cancel 语义 = 停下这一轮——排队消息随用户显式叫停丢弃；
     // Continuation 实例保留：record 未消亡，续聊经 continuationFor 复用）。
     this.deps.abortContinuationQueue(record.id);
-    // [M1 sessionFile 锚点提升] 先于 settle 原语——写面随之携带锚点（spawn 窗口期
+    // [M1 sessionFile 锚点提升] 先于 settle 原语——写侧随之携带锚点（spawn 窗口期
     // cancel 的 record 经 engineHandle 提升后落真实子文件）。
     this.promoteSessionFileFromEngineHandle(record);
     if (record.status !== "running") {
@@ -508,7 +508,7 @@ export class RecordLifecycle {
     // goal defer 恒挂，设计 D7 连带理由；§1.4 out-of-scope）。
     // [P1b-1] 直写通道删除：closed/gc 终态判定收敛至 worker-message-pump 的
     // settleWorkflowRecord 单点（与 settleOneShotOutcome 同款；agent-settled/run-settled
-    // 事件面由 pump 状态机接线段承载——静默吞失败路径（workflow-dispatch catch 等
+    // 事件流由 pump 状态机接线段承载——静默吞失败路径（workflow-dispatch catch 等
     // 多调用方）经本方法自动接入同一收尾）。
     if (record.origin === "workflow") {
       await settleWorkflowRecord(record, failedResult, "gc", {

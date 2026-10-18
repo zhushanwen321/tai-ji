@@ -26,7 +26,7 @@
  * 保留终端输出。此前靠 44 份 config 逐字手抄落地，现由本工厂单点注入（CLI 显式传
  * --reporter 时仍会覆盖本默认值，临时诊断用法不受影响）。
  * `include` **不做**默认：vitest 自带默认 glob 比 `src/__tests__/**` 宽，给默认会静默
- * 缩小未声明 include 的包的扫描面，各包必须显式声明自己的收集面。
+ * 缩小未声明 include 的包的扫描范围，各包必须显式声明自己的收集面。
  */
 import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -38,7 +38,7 @@ export const FS_GUARD_PATH = join(GUARD_DIR, 'fs-guard.ts')
 export const ENV_PURITY_PATH = join(GUARD_DIR, 'env-purity.ts')
 
 /** junit 报告默认值（AGENTS.md MANDATORY）——各包不再手抄，用户同名字段可整体覆盖。
- *  注意：`include` 有意不做默认（会静默缩小未声明包的扫描面，见文件头）。 */
+ *  注意：`include` 有意不做默认（会静默缩小未声明包的扫描范围，见文件头）。 */
 const DEFAULTS = {
   reporters: ['default', 'junit'],
   outputFile: { junit: './test-results/vitest-junit.xml' },

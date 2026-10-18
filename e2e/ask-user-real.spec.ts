@@ -29,7 +29,7 @@
  *   （回写 result 序列化格式不变）。
  * - FormOverlay.vue onSubmit：Other 文本写独立 `${key}__other` 键，主 key 值过滤
  *   OTHER_VALUE 占位符（不留占位值），不产生 `__comment` key
- * - extension.ui_response 不广播：回写闭环以「pi 恢复 turn 的广播事件」为断言面
+ * - extension.ui_response 不广播：回写闭环以「pi 恢复 turn 的广播事件」为断言范围
  * - pi 恢复 turn 事件：message.message_start / message.complete（ServerMessageType）
  *
  * faux 翻轨要点：ask_user 触发改脚本化 toolCall（faux 队列步骤 1）——确定性触发，

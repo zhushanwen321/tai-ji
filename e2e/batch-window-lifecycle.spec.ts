@@ -16,7 +16,7 @@
  * （batch-s4/W1 已锚定 journal 介质，本 spec 不重复 journal 结构断言）。
  *
  * 执行侧约定（与 batch-s1/s3/s4 同款）：
- * - 触发：窗口资源模型行为面（engine 窗口实例表 / finalizeRun 收尾链 / 路由）改动时
+ * - 触发：窗口资源模型行为范围（engine 窗口实例表 / finalizeRun 收尾链 / 路由）改动时
  *   开发期空载串行执行；双凭证门 = TAIJI_PI_LIVE=1 + 本机 provider 凭证，缺一 skip
  *   不 fail；CI/PR/merge 门禁不跑本轨。
  * - 前置：VITE_E2E=true pnpm run build:e2e（real renderer bundle）。
@@ -214,7 +214,7 @@ function attachConsoleCapture(page: Page): { all: string[]; errors: string[] } {
   return { all, errors }
 }
 
-interface RunSettledView { // oe-exempt:20260927:test:e2e 剧本内视图形状声明（DOM mock 类型，非架构契约面）
+interface RunSettledView { // oe-exempt:20260927:test:e2e 剧本内视图形状声明（DOM mock 类型，非架构契约范围）
   runId: string
   outcome: string | undefined
 }
@@ -429,7 +429,7 @@ test('WL (batch real): 双 workflow 并发——短收尾不杀长窗口（V3）
     await page.screenshot({ path: testInfo.outputPath('wl-teardown.png'), fullPage: true })
     if (consoleCap.errors.length > 0) {
       writeDiag('batch-wl-console-errors.json', { errors: consoleCap.errors.slice(-50) })
-      console.warn(`[batch-wl] renderer console errors: ${consoleCap.errors.length} 条（diag 已落盘，非断言面）`)
+      console.warn(`[batch-wl] renderer console errors: ${consoleCap.errors.length} 条（diag 已落盘，非断言范围）`)
     }
     console.log(`[batch-wl] PASS：shortRunId=${shortRunId} 短收尾未波及长窗口；long completed 收尾后成员与薄壳均回落基线`)
   } finally {

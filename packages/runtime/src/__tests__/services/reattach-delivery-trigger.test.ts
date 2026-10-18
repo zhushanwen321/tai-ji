@@ -33,7 +33,7 @@ import type { SkillInjectionResult, SkillInjector, SkillNotice } from '../../ser
 
 const SID = 's-reattach-1'
 
-/** 滞留文本（无标记外来文本形态：subagent notifyDone / scheduler 提醒存量注入面）。 */
+/** 滞留文本（无标记外来文本形态：subagent notifyDone / scheduler 提醒存量注入点）。 */
 const STRANDED_TEXT = '滞留的外来通知文本'
 
 function makeView(): IManagedSessionView {
@@ -176,7 +176,7 @@ describe('无提交活动下的 reattach 收养重建（A5/V5）', () => {
     const runDir = mkdtempSync(join(tmpdir(), 'u4-reattach-trigger-'))
     try {
       // 只写 session.jsonl（restoreOne staleness guard 依赖 fileExists(entry.filePath)）。
-      // runtime-checkpoint.json 磁盘文件不写：checkpoint 读面被下方 mock store 覆盖，
+      // runtime-checkpoint.json 磁盘文件不写：checkpoint 读侧被下方 mock store 覆盖，
       // 真文件不进任何断言；deleteCheckpointFile 对不存在路径走 ENOENT 容错（返回 false）。
       writeFileSync(join(runDir, 'session.jsonl'), '{}\n')
       const h = makeRegistryHarness()

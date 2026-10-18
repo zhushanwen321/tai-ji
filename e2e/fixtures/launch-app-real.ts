@@ -123,12 +123,12 @@ const FAUX_ACTORS: Array<{ id: string; name: string; reasoning: boolean }> = [
 const FAUX_PROVIDER_EXT_DIR = path.join(REPO_ROOT, 'e2e', 'fixtures', 'faux-provider-ext')
 
 /**
- * 预置 faux 轨数据目录：settings.json + models.json + 响应脚本 + 子进程注入面
+ * 预置 faux 轨数据目录：settings.json + models.json + 响应脚本 + 子进程注入范围
  * （见文件头「注入链」）。settings/models 落 <dataDir>/agent/（runtime pi-paths
  * getPiAgentDir = <dataDir>/agent，同时是 RpcClient 注入 pi 的 PI_CODING_AGENT_DIR
  * ——runtime 门禁与 pi 模型解析同源）。
  *
- * 子进程注入面（workflow agent() / subagent 的 pi 孙进程）：
+ * 子进程注入范围（workflow agent() / subagent 的 pi 孙进程）：
  * - extensions/faux-llm-ext.ts 复制：孙进程扩展加载显式化（D2）后孙进程恒
  *   --no-extensions（自动发现全关）+ 仅加载白名单集，faux-llm-ext 不在生产白名单
  *   ——由 subagent-workflow pi-host 的 e2e 门放行（process.env.TAIJI_E2E=1 且

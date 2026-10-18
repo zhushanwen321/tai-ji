@@ -166,7 +166,7 @@ export default [
   },
   // [HISTORICAL·2026-09 dev-0.10.8 gate] transport 路由装配聚合点：RuntimeServer 是
   // setServices 三段装配（assignServices/createBroker/assembleHandlers）+ buildRoutes
-  // 全量路由表 + IMessageBroker 委托 + extension timeout 生命周期的唯一聚合面，职责内聚。
+  // 全量路由表 + IMessageBroker 委托 + extension timeout 生命周期的唯一聚合点，职责内聚。
   // 净代码行 505 微超 500（skill-route 注册与 btw 三帧路由入列时越过），先例 pi-provider-store
   // 「微超即提额，保留软上限告警」同型——拆分属独立重构任务，gate 收敛批次禁止拆文件重构，
   // 短期提额避免阻塞，长期应拆分。
@@ -202,7 +202,7 @@ export default [
       // 巨石拆出：sendMessage/abort/steer/followUp/compact + sendBash 家族），2026-09-09
       // chat-domain-v1x-liveness-governance W7 abort 超时三级阶梯（handleAbortRpcTimeout/
       // runAbortStallLadder/probeEngineAlive）入列时净代码行越过 500。职责内聚（abort
-      // 超时处置归 abort() 所在文件），阶梯抽独立文件需引入新的模块边界与构造注入面，
+      // 超时处置归 abort() 所在文件），阶梯抽独立文件需引入新的模块边界与构造注入范围，
       // 属独立重构任务。短期 max-lines override 避免阻塞，长期应拆分。
       'packages/runtime/src/services/session/message-dispatcher.ts',
     ],
@@ -304,14 +304,14 @@ export default [
       'max-lines': 'off',
     },
   },
-  // [H4 record 持久化收敛 / D7 检查分级] store 外禁 import record 写面函数——
+  // [H4 record 持久化收敛 / D7 检查分级] store 外禁 import record 写点函数——
   // eslint no-restricted-imports 是模块边界一级拦截（新增写者在 import 面即报错），
   // grep 门（scripts/check-record-write-surface.mjs）降为文本级兜底（拦类方法调用
-  // 与字面量写形态）。写面唯一入口 = RecordStore（packages/subagent-core/src/
-  // execution/persistence/record-store.ts，豁免）；测试文件豁免（mock/替身形态非生产写面）。
-  // 边界登记：manifest 写面是 ManifestStore 实例方法（writeManifest）——import 层
+  // 与字面量写形态）。写点唯一入口 = RecordStore（packages/subagent-core/src/
+  // execution/persistence/record-store.ts，豁免）；测试文件豁免（mock/替身形态非生产写点）。
+  // 边界登记：manifest 写点是 ManifestStore 实例方法（writeManifest）——import 层
   // 拦不住（装配点构造合法），该面由 grep 门 R1 兜底；writeRecordBinding /
-  // updateRecordBinding（UF-1 绑定 sidecar）不在 record 终态写面收敛范围，不拦。
+  // updateRecordBinding（UF-1 绑定 sidecar）不在 record 终态写点收敛范围，不拦。
   // barrel（packages/subagent-core/src/index.ts）零导出本组写函数，公开面不外泄。
   {
     files: ['packages/subagent-core/src/**/*.ts'],
@@ -555,8 +555,8 @@ export default [
   // import 拦截。与上方 core 块同规则 ID 但生效域不相交（ignores 让位），flat config 覆盖
   // 语义下互不拆除。本块对 *.test.*/*.spec.*/__tests__ 测试文件不可达（全局 ignores 硬排除），
   // 测试文件面由 pre-commit grep 段承载（设计 v10）。tsx --test 是 CLI 形态
-  // 无 import specifier，不进 lint 拦截面（由 docs/TEST-STRATEGY.md vitest 红线承载）。
-  // [no-unsafe-cast 扩展评估（决策 4 as 断言面）2026-09-26] renderer/runtime 不扩展该规则——
+  // 无 import specifier，不进 lint 拦截范围（由 docs/TEST-STRATEGY.md vitest 红线承载）。
+  // [no-unsafe-cast 扩展评估（决策 4 as 断言范围）2026-09-26] renderer/runtime 不扩展该规则——
   // 实测存量命中 143 处/75 文件，且前端 ESLint 为 --max-warnings=0 口径（warn 级也阻断），
   // 采纳即全仓 pre-commit 红灾；放弃依据与重审触发登记见设计文档 §3.3 决策 4（review-pipeline-redesign）。
   {
@@ -701,11 +701,11 @@ export default [
   // （record-store-rounds.ts，折算 101）在 500 基线内不设 override；重建与派生视图轴
   // （record-store-rebuild.ts，折算 539）超 500 基线——纯派生视图/重建规则聚合（buildRecord
   // 单规则 + entry 重建族 + manifest 读写派生视图 + 缓存戳类型），按 u-2a 同款过渡设
-  // max 700。D7 写面约束不变：七名写函数调用字面只留在 record-store.ts（轴文件经
+  // max 700。D7 写点约束不变：七名写函数调用字面只留在 record-store.ts（轴文件经
   // ctx 注入），check-record-write-surface 白名单零改动。
   // [W1 介质归位 2026-09-26] 写点改事件文件 + 收编入口 + Atomics.wait 退役（u2a/u7）
   // 后折算 805 微超 5 行——按「微超即提额」（pi-provider-store 508>500→520 同型）
-  // 提额 820 保留软上限告警；容器侧再拆属独立重构任务（事件写面接线族已在 rounds
+  // 提额 820 保留软上限告警；容器侧再拆属独立重构任务（事件写点接线族已在 rounds
   // 轴承接）。
   // [HISTORICAL·2026-10-01] dev-0.10.7 集成线多轮合并后折算 899（轮次 CAS 门与
   // 收编判定依据按「判定依据全文落档方法头注释」纪律入档，有效行天然膨胀）；rounds /
@@ -769,7 +769,7 @@ export default [
   // settleOneShotOutcome 16 阶段化拆解，均 ≤15）：行为保持提取的 helper 签名/花括号/
   // JSDoc 开销 +71 折算行（869）触发零余量告警，按 engine-client.ts 同款惯例抬至 900——
   // 按域再拆（如 chat-round 启动面独立模块）登记为后续重构债，拆分债本体不变。
-  // [2026-09-13 design-code-sync 兑现] [G1] 段备选预案落地：Continuation 协作面拆出
+  // [2026-09-13 design-code-sync 兑现] [G1] 段备选预案落地：Continuation 协作代码拆出
   // chat-rounds.ts 后，本文件 1077 物理行 / 549 折算——阈值保持 800（余量健康，
   // 增长即告警语义维持，禁止再抬）；chat-rounds.ts 793 物理行 / 365 折算，低于
   // packages 域 500 上限，无需 override（余量健康，不设零余量锁）。
@@ -844,7 +844,7 @@ export default [
     },
   },
   // [HISTORICAL] [u7a 生产补挂 2026-09-12] EngineClient 是引擎协议客户端唯一聚合点
-  // （spawn/帧编解码/反向路由/崩溃重建/pidfile），crash-forensics u7a 数据面桥接
+  // （spawn/帧编解码/反向路由/崩溃重建/pidfile），crash-forensics u7a 数据范围桥接
   // （反向通道镜像 → core 镜像映射 + 在途推送，D5）入列时净代码行 535 > 520。职责
   // 内聚（桥接消费本类镜像广播），抽独立模块仍余微超且引入新模块边界——微超即提额
   // 先例（session-service 650 / event-interpreter 700 同型）。提额而非 off：保留 650

@@ -3,7 +3,7 @@
  *
  * 缺陷背景：重启后线进程不在场（pm.getClient(vid) null）→ 离线尾读走通用链
  * getHistoryTailFromFile → scanSessions 对 btw vid 构造性 miss（线目录在 G4 隔离面
- * `agent/btw/…`，不在 sessions/ 扫描面）→ 静默空 → 线视图空态（「持久化不改变可见性」
+ * `agent/btw/…`，不在 sessions/ 扫描范围）→ 静默空 → 线视图空态（「持久化不改变可见性」
  * 裁决⑧被违背）。修复 = tailReadOffline 对 btw vid 先经 resolveBtwThreadFile（组合根接
  * BtwService 注册表）解析线文件，命中走同一 tailReadHistory 链；缺失/miss warn + 空页。
  *

@@ -1,5 +1,5 @@
 /**
- * scheduler-manager 插件行为面单测。
+ * scheduler-manager 插件行为范围单测。
  *
  * 构建者白盒 + 使用者黑盒：经 plugin-sdk createMockAgentAPI mock 驱动 activate()
  * 与注册的 command handlers，覆盖：

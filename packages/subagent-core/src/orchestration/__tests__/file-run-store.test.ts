@@ -96,7 +96,7 @@ function seedRunningRun(stateDir: string, runId: string, createdDaysAgo: number)
   return { stateFull, journalFull };
 }
 
-/** prune/维护轮的 spy deps（日志断言面）。 */
+/** prune/维护轮的 spy deps（日志断言范围）。 */
 function makeRetentionDeps(): { deps: PruneStateDeps; debugCalls: string[]; warnCalls: string[] } {
   const debugCalls: string[] = [];
   const warnCalls: string[] = [];
@@ -179,7 +179,7 @@ describe("pruneTerminalRunFiles — fold 终态 + 保留窗口（W1 D5）", () =
 
   it("废 cap 回归（结构断言）：60 个窗内终态 run 零裁剪（多 session 分摊不再互杀）", async () => {
     // [W1 / D5] cap 语义废除：PruneTerminalRunFilesOptions 已无 cap 字段（类型层
-    // 收敛），行为面 = 共享池内窗内终态数量再多也不触发「裁最旧」——另一 session
+    // 收敛），行为范围 = 共享池内窗内终态数量再多也不触发「裁最旧」——另一 session
     // 保留窗口内的终态 run 不再被本 session 的清理轮挤出（A-8 回归锚）；60 > 旧
     // 上限 50，兼锁「数量截断通道退役后不再截断」
     const stateDir = join(dataRoot, "workflow-state");
@@ -300,20 +300,20 @@ describe("runRetentionMaintenanceRound — run + record 两域同轮（W1 D5）"
     expect(existsSync(reopened)).toBe(true); // 35 天前的 settled 被 reopened 回边清除 → 永不清
   });
 
-  it("barrel 导出面可被触发点消费（typeof function，U7 接线路径）", () => {
+  it("barrel 导出范围可被触发点消费（typeof function，U7 接线路径）", () => {
     expect(typeof runRetentionMaintenanceRound).toBe("function");
   });
 });
 
 // ── cap 退役结构断言（W1 / D5：数量截断通道整体删除）──────────────────────
 //
-// cap 族符号（数量上限常量 / env 通道名 / 解析函数）与 cap 选项字段已从导出面
-// 与接口删除——保留窗口（fold 终态 ∧ 超窗）是唯一资格判据。行为面（窗内终态
+// cap 族符号（数量上限常量 / env 通道名 / 解析函数）与 cap 选项字段已从导出范围
+// 与接口删除——保留窗口（fold 终态 ∧ 超窗）是唯一资格判据。行为范围（窗内终态
 // 数量再多零裁剪）由上方「废 cap 回归（结构断言）」用例锁定（60 > 旧上限 50，
-// 不截断）；本段锁运行时导出面零复活。
+// 不截断）；本段锁运行时导出范围零复活。
 
 describe("cap 退役结构断言（W1 / D5）", () => {
-  it("run-state-evidence 导出面零 cap 族符号（键面不含数量截断通道命名形态）", async () => {
+  it("run-state-evidence 导出范围零 cap 族符号（键面不含数量截断通道命名形态）", async () => {
     // 拦截形态而非全名清单：cap 族三符号均含「数量上限 / MaxRuns」命名段——
     // 键面排除该段即零复活（词表级全名清扫由引擎 grep 验收承担，此处锁运行时面）
     const mod = await import("../../execution/persistence/run-state-evidence.ts");

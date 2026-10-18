@@ -113,7 +113,7 @@ describe.skipIf(!LIVE)("conformance run 层（协议客户端 × 引擎包 CLI�
     }
   }, 120_000);
 
-  it("pi：setModel 控制面最小面（capabilities 位声明核对 + 已退出 run 的结构化 not-active 错误帧）", async (testCtx) => {
+  it("pi：setModel 控制范围最小面（capabilities 位声明核对 + 已退出 run 的结构化 not-active 错误帧）", async (testCtx) => {
     const model = process.env["PI_LIVE_MODEL"];
     if (model === undefined || model === "") {
       testCtx.skip("PI_LIVE_MODEL 未设置（需真实 provider/model 凭据）——setModel conformance 面跳过");

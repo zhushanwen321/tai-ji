@@ -104,7 +104,7 @@ describe("executeAndAwait worktree 失败收尾", () => {
     const store = getStore(service);
     const archiveSpy = vi.spyOn(store, "archive");
     // 捕获 record id（executeAndAwait reject 时不返回 handle；listRunningMutable 是 running
-    // 过滤视图，[two-state-convergence U4] 轮终翻边 idle 后不承载「留内存」断言面）。
+    // 过滤视图，[two-state-convergence U4] 轮终翻边 idle 后不承载「留内存」断言范围）。
     // spy 只观察不替换实现（register 的入册副作用必须保持）。
     const registerSpy = vi.spyOn(store, "register");
 

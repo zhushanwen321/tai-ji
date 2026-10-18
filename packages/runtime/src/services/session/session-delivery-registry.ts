@@ -1481,7 +1481,7 @@ export function createSessionDeliveryRegistry(
     return {
       supportedPayloads: ['text'],
       // port.isIdle：v3 on-accept 下内核忙闲门禁旁路（scheduleFlush 不再读它），保留
-      // 读 view 供内核接口契约与诊断面；投递决策的唯一判定源 = holdReasonOf（仅
+      // 读 view 供内核接口契约与诊断范围；投递决策的唯一判定源 = holdReasonOf（仅
       // compaction/revoking）。
       isIdle: () => {
         const s = viewOf(sessionId)
@@ -1505,7 +1505,7 @@ export function createSessionDeliveryRegistry(
         // 合批窗口——本口常态收单条。splitComposed 保留作防御：handle.send 公开通路的
         // 普通队列在 in-flight 往返窗内积压多条时，内核仍会以 BATCH_SEP 拼批出站（内核
         // doSend 批量路径与 dispatchMode 正交）——拆段保证用户消息逐条进 transcript、
-        // 可单条撤销（v2 拆分契约原样保留，触发面收窄为该防御场景）。
+        // 可单条撤销（v2 拆分契约原样保留，触发点收窄为该防御场景）。
         const parts = splitComposed(msg.payload.content, state, handle)
         for (let i = 0; i < parts.length; i += 1) {
           // images 只随首段投递（合批拼接的 images 归属首条；一期 renderer 走路径模式不传
@@ -1772,7 +1772,7 @@ export function createSessionDeliveryRegistry(
     },
     hasDeliveryActivity(sessionId) {
       // 口径沿用 = handle.depth()（尚未被底层通道受理的排队条目数；reclaim 豁免 #5 与
-      // 查询面契约锁定）。v3 受理即出站后本地无排队——depth()>0 仅剩 compaction 持有
+      // 查询范围契约锁定）。v3 受理即出站后本地无排队——depth()>0 仅剩 compaction 持有
       // 窗口（唯一提交侧等待状态，压缩中不回收 pi 的豁免窗口随之收缩为该形态）。
       // 在途未确认不计入（与 v1 同）——pi 被回收后由 pi-restored 对账的 transcript 标记
       // 扫描恢复（D5②/G2），不靠豁免拦回收。

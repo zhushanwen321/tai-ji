@@ -1,13 +1,13 @@
 // src/execution/engine/d8-compat.ts
 //
-// [W8] D8 兼容公共面薄壳（设计 §3.6 D8 表 + impl-plan §2.8）：宿主零改动的机械保证。
+// [W8] D8 兼容公共部分薄壳（设计 §3.6 D8 表 + impl-plan §2.8）：宿主零改动的机械保证。
 // 三个符号的兼容形态：
 //   - registerZcodeEngine(engineDataDir) 薄壳：确保 id 'zcode' 的 cli descriptor 已
 //     注册，engineDataDir 经合成 env（TAIJI_AGENT_DATA_DIR）记入 descriptor portFactory；
 //   - createZcodeEngine(deps) → RemoteEngine('zcode')：deps → 协议客户端映射
 //     （engineDataDir → dataDir / cliPath → command / processEnv → baseEnv /
 //     sources 不跨进程——不变量 5「引擎不落盘宿主数据、自行解析凭据」）；
-//   - markAllSpawnedChildrenDead 收敛在 engine/host/spawned-children 公共面（[W3][F-7
+//   - markAllSpawnedChildrenDead 收敛在 engine/host/spawned-children 公共部分（[W3][F-7
 //     注释纠偏] 仅镜像记账——core 侧 spawnedChildren 镜像整体置死，不发进程信号；
 //     引擎进程回收 = stdin-EOF 自灭链（正常路径）+ disposeEngines() 显式触发
 //     cli 引擎 dispose（宿主 shutdown 链预留 API，现无生产接线），非「进程组收割」）。

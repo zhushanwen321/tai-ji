@@ -61,14 +61,14 @@ import { killProcessTree, waitForChildExit } from "./reaper.ts";
 // [u7a 生产补挂] 反向通道镜像 → core 侧镜像桥接：in-flight 计数与生命周期谓词读 core
 // 全局镜像（recordId 键），而引擎侧子进程上报只落 EngineClient 镜像——本桥接实现
 // spawned-children.ts 头注「数据源①：反向通道上报落本镜像」的既登记契约（W3 协议化
-// 后 ctx.onChildSpawned 不被调用，该数据面悬空致计数恒 0），见 crash-forensics §7 v7。
+// 后 ctx.onChildSpawned 不被调用，该数据范围悬空致计数恒 0），见 crash-forensics §7 v7。
 import { coreSpawnedChildrenMirror } from "../host/spawned-children.ts";
 import { notifyInFlightChanged } from "../inflight-snapshot.ts";
 
 const logger = getLogger("subagents");
 
 /**
- * 单条镜像事件 → core 镜像映射 + 在途推送（u7a 数据面桥接）：置死**或已退出** →
+ * 单条镜像事件 → core 镜像映射 + 在途推送（u7a 数据范围桥接）：置死**或已退出** →
  * markKilled，running → register（同 recordId 重 spawn 覆盖，与引擎侧 Map 同语义）。
  * 判据必须是 `state === "exited" || entry.killed` 而非只看 killed：pi 子进程自行
  * 退出/崩溃时引擎侧上报 `state:"exited", killed:false`（child.killed 只在我方 kill
@@ -118,7 +118,7 @@ export type EngineClientState =
 
 /**
  * run 作用域反向通知路由（RemoteEngine.run 注册，终态后注销）。
- * 回调允许返回 Promise（数据面 10s 应答检查的计时对象；同步回调不受检查影响）。
+ * 回调允许返回 Promise（数据范围 10s 应答检查的计时对象；同步回调不受检查影响）。
  * [H1 U6] 轮次相位消费口（旧第 9 反向通道）已随 chat 域相位机退役删除。
  */
 export interface RunRoute {
@@ -204,7 +204,7 @@ export class EngineClient {
     };
     this.mirror.onChange((event) => {
       // [u7a 生产补挂] 反向通道镜像事件同步映射进 core 侧镜像 + 推送在途计数
-      //（数据面桥接，见 bridgeMirrorEventToCoreMirror 与文件头 u7a 注释）。
+      //（数据范围桥接，见 bridgeMirrorEventToCoreMirror 与文件头 u7a 注释）。
       bridgeMirrorEventToCoreMirror(event, this.mirror);
     });
   }
@@ -233,7 +233,7 @@ export class EngineClient {
     return this.lastPartialHandle;
   }
 
-  /** initialize 应答（诊断面；RemoteEngine 诊断留痕用）。 */
+  /** initialize 应答（诊断范围；RemoteEngine 诊断留痕用）。 */
   getInitializeDiagnostics(): InitializeResult | undefined {
     return this.initializeDiagnostics;
   }
@@ -509,7 +509,7 @@ export class EngineClient {
   // ── 正向请求 ────────────────────────────────────────────────────────────
 
   /**
-   * 发帧①并等帧②。opts.timeoutMs = 数据面超时域（initialize 等）；不传 = 任务级
+   * 发帧①并等帧②。opts.timeoutMs = 数据范围超时域（initialize 等）；不传 = 任务级
    * 默认无超时（run，AGENTS.md 规则 19 / ADR-0047）。
    */
   request(method: string, params: unknown, opts?: { timeoutMs?: number }): Promise<unknown> {
@@ -569,9 +569,9 @@ export class EngineClient {
   }
 
   /**
-   * [subagent-model-switch §7.3] setModel 类型化调用点（cancelRun 同族）：控制面单
+   * [subagent-model-switch §7.3] setModel 类型化调用点（cancelRun 同族）：控制范围单
    * 请求，上界 SET_MODEL_REQUEST_TIMEOUT_MS（10s——≥ 引擎侧两阶段窗 2×3s + 协议
-   * 余量；控制面单请求必须秒级有界，宿主不悬挂）。错误经 error 帧 reject 为
+   * 余量；控制范围单请求必须秒级有界，宿主不悬挂）。错误经 error 帧 reject 为
    * EngineSdkError（code 原样保留——三型失败分型 + engine_run_not_active 无活进程
    * 形态，宿主编排按 §7.2 处置表分派）。
    */

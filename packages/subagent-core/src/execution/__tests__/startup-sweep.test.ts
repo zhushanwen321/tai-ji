@@ -201,7 +201,7 @@ describe("startupSweep（机制退役设计 §4.1 假树直调）", () => {
     const stateDir = makeSlugStateDir("--fixture-slug--");
     await seedRunningRun(stateDir, "wf-sweep-ok", Date.now() - 3 * 60 * 60 * 1000);
     await seedRunningRun(stateDir, "wf-sweep-bad", Date.now() - 3 * 60 * 60 * 1000);
-    // wf-sweep-bad 的 journal 读面破坏（EACCES）——判定核保守按 running 进收编，
+    // wf-sweep-bad 的 journal 读侧破坏（EACCES）——判定核保守按 running 进收编，
     // scan 分通道上抛，收编失败
     chmodSync(join(stateDir, `wf-sweep-bad${RUN_EVENTS_SUFFIX}`), 0o000);
     try {

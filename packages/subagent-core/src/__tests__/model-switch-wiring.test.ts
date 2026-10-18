@@ -35,7 +35,7 @@ import type {
   SetModelResult,
 } from "@zhushanwen/subagent-engine-sdk";
 
-// routing mock：非 pi 成员的窗口实例解析通道断言面。factory 补齐
+// routing mock：非 pi 成员的窗口实例解析通道断言范围。factory 补齐
 // disposeWorkflowWindowEngineState（terminal-actions 顶层导入，本测试不触达）。
 const routingMock = vi.hoisted(() => ({
   resolveWorkflowWindowEnginePort: vi.fn(),

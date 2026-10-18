@@ -51,9 +51,9 @@ export default defineConfig({
   // taiji-plugin-sdk：插件契约 SSOT（D28 方向反转）——runtime 的 plugin-types
   // 薄壳 re-export 其类型与 PermissionConstants 常量值。纯 TS 源码包（main 直指
   // src/index.ts，零 dependencies），esbuild 直接编译，同 pi-file-lock 先例
-  // @zhushanwen/subagent-engine-sdk [W11/A5]：runtime 经 subagent-core 协议面传递消费
+  // @zhushanwen/subagent-engine-sdk [W11/A5]：runtime 经 subagent-core 协议范围传递消费
   // SDK 原语（buildEngineChildEnv / spawnEngineChild 等），workspace TS 源码包无 dist
-  // 解析面，必须内联进 bundle（否则打包态 Cannot find module）
+  // 解析范围，必须内联进 bundle（否则打包态 Cannot find module）
   // @zhushanwen/pi-rpc [U1 subagent-permanent-session-model]：pi 进程 RPC 公共层
   // （argv 构造 / LF-only 分帧 / pending 表 / 命令帧组装 / 杀链 / 出站 env 组装），
   // rpc-client 薄壳消费——同 pi-file-lock 形态（exports 直指 src 的纯 TS 源码包，

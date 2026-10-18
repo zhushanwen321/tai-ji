@@ -173,7 +173,7 @@ describe("runReconcileSweep 差集补发", () => {
 
   it("[notify-once D7③] type=session → 显式 skip：不入 workflow run-state 判据、不补注销（防误销活跃 claim）", () => {
     // notifyId 对 FileRunStore 必 missing——若落入 workflow 判据，「查不到即补注销」
-    // 会把活跃债权 claim 销掉（G2 查询面破坏）。本用例三重钉住：skip 桶 / 判据零调用 /
+    // 会把活跃债权 claim 销掉（G2 查询范围破坏）。本用例三重钉住：skip 桶 / 判据零调用 /
     // 零写入。
     writeSessionFile([reg("sm-123e4567-e89b-12d3-a456-426614174000", "session")]);
     const workflowLookup = vi.fn(() => "missing" as SupervisedRecordState);

@@ -546,7 +546,7 @@ describe('core ↔ shared setModel 聚合应答形状对账（协议契约不变
 
   it('core 处置表「写记账后回错误」分型 ≡ shared SUBAGENT_SET_MODEL_ACCOUNTED_ERROR_CODES（词表值级对账——core 扩码 shared 漏跟即红）', () => {
     // 词表登记注释的机器锚（shared protocol.ts / core model-switch.ts 双侧注释同指本处）：
-    // badge 亮灯词表必须与 core 处置表写面分型逐值一致——core 新增记账型错误码而 shared
+    // badge 亮灯词表必须与 core 处置表写侧分型逐值一致——core 新增记账型错误码而 shared
     // 漏跟时，前端对新增分型静默不亮 badge（同族 SET_MODEL_ERROR_CODES ⊆ wire reason
     // 断言的姊妹锚）。
     expect([...ACCOUNTED_SET_MODEL_ERROR_CODES]).toEqual([...SUBAGENT_SET_MODEL_ACCOUNTED_ERROR_CODES])

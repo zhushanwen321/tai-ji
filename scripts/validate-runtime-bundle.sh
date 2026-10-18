@@ -330,7 +330,7 @@ done
 
 # 启动 runtime，等待 ready，发送 health check，清理
 RUNTIME_PID=""
-# 数据目录隔离：验证 runtime 的全部写面（日志 / runtime.port / crash journal /
+# 数据目录隔离：验证 runtime 的全部写侧（日志 / runtime.port / crash journal /
 # 单实例注册）必须落临时目录，禁止写任何真实数据目录（prod ~/.taiji 或 dev 树）。
 # 同时剥 TAIJI_AGENT_PACKAGED：宿主泄漏该标志会使验证 runtime 按打包态解析不存在
 # 的捆绑 pi 二进制、boot 即挂（spawn-env-contract 探针 P1 实锤）。

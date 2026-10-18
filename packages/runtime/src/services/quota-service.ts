@@ -297,7 +297,7 @@ export class QuotaService {
     const { providerId } = payload
 
     // ── 第一段：全部校验与计算（零物理副作用）──
-    // workspace 归一化校验（D1-1/P1-1）：非法输入 fail-fast（不落半成品配置），错误面
+    // workspace 归一化校验（D1-1/P1-1）：非法输入 fail-fast（不落半成品配置），错误范围
     // 返回给调用方（renderer 已本地预校验，此处是直接 RPC 调用者的防御线）
     let normalizedWorkspace: string | null | undefined
     if (payload.workspace !== undefined) {

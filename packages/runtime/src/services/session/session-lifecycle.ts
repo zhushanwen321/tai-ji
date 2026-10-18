@@ -118,7 +118,7 @@ function fireDeathDisposition(sessionId: string, disposition: SessionDeathDispos
 // 统一回填入口（sidecar-binding-sync 设计文档拍板接线在此），同样随 R3 收敛。新写
 // services 代码不得再效仿此处直引 infra。
 import { getPiAgentDir, getSessionsDir } from '../../infra/pi/pi-paths.js'
-// B5 触发面收窄（memory-leak-remediation §3.1 + §3.2-B5，2026-09-15）：真删除路径的
+// B5 触发点收窄（memory-leak-remediation §3.1 + §3.2-B5，2026-09-15）：真删除路径的
 // plugin sessionData 清理分发（tombstone + 分区摘除 + trash 软删除）。挂点从 removeSessionEntry
 // 汇聚点收窄到本模块 delete——汇聚点四路收殓中三路（pi 崩溃 exit / forceQuit / restore 清场）
 // session 存活，无条件清理会把存活 session 的插件数据 tombstone+trash。跨服务模块级分发
@@ -268,7 +268,7 @@ function resolveCreateEffectiveThinkingLevel(
 }
 
 /**
- * [M4-a / btw-question D4 消费方① + D9④] btw 级联操作注入面（组合根在 BtwService 构造后
+ * [M4-a / btw-question D4 消费方① + D9④] btw 级联操作注入点（组合根在 BtwService 构造后
  * 经 setBtwCascadeOps 注入；结构化窄依赖 = BtwService 的 closeLine / closeAllForMain 两原语
  * 结构性满足，测试注入 fake / 置 null 复位）。
  *
@@ -320,7 +320,7 @@ export class SessionLifecycle implements ISessionRegistry {
     private readonly userStoppedOps?: { forceQuitFallback: (sessionId: string) => Promise<void> },
   ) {}
 
-  // ── ISessionRegistry：sessions Map 只读查询面（Facade 残余域读点的统一通道）──
+  // ── ISessionRegistry：sessions Map 只读查询范围（Facade 残余域读点的统一通道）──
 
   get(sessionId: string): IManagedSessionRecord | undefined { return this.sessions.get(sessionId) }
   has(sessionId: string): boolean { return this.sessions.has(sessionId) }
@@ -468,7 +468,7 @@ export class SessionLifecycle implements ISessionRegistry {
     //      等价形态——upsert 在上方 emit 内同步发生，随后 removeSession 即达「从未建档」的
     //      post-condition（单线程同步序；崩溃恰落两调用之间的最坏后果 = 维持豁免前行为：
     //      重启 reattach 白跑一趟）。撤销后无回写路径：reaper 搭车 refreshSessions 只更
-    //      **已存在**条目、不新增。不豁免的后果：btw 线目录不在 sessions/ 扫描面，
+    //      **已存在**条目、不新增。不豁免的后果：btw 线目录不在 sessions/ 扫描范围，
     //      reattach 编排按 checkpoint 对 vid 走 restore → resolveRestoreTarget 构造性
     //      SESSION_NOT_FOUND → journal 噪音 + 无效恢复尝试。
     //      从根源修复应在 session-service 订阅体内按 isBtwVirtualId 早退——该文件不入本单元领地，
@@ -1072,7 +1072,7 @@ export class SessionLifecycle implements ISessionRegistry {
         console.warn(`[session-lifecycle] btw cascade failed (sessionId=${sessionId}):`, toErrorMessage(e))
       }
     }
-    // B5 触发面收窄（memory-leak-remediation §3.1 + §3.2-B5）：plugin sessionData（内存分区
+    // B5 触发点收窄（memory-leak-remediation §3.1 + §3.2-B5）：plugin sessionData（内存分区
     // + 磁盘文件）与 session 本体一同进废纸篓——trash 绑定**真删除**，active / scanned 两
     // 分支共用本点（用户删除非活跃 session 的插件数据同样随本体清理）。三条 session 存活
     // 路径刻意**不清**：pi 崩溃（session-service onSessionExit）/ forceQuit（dispatcher

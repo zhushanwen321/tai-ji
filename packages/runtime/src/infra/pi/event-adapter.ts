@@ -1881,7 +1881,7 @@ export interface PiEventClient {
  * 纯订阅器：不持有业务态（currentMessageId/writeContents/diffChain 帧序态全部移到 interpreter），
  * 不直接 send —— 把翻译结果交给注入的 interpreter 回调（interpreter 决定副作用：转发/hook/diff/回写）。
  *
- * [u-runtime-svc] 第三个可选参数：后台任务变更检测的事件旁路（D2 触发面②）。customType
+ * [u-runtime-svc] 第三个可选参数：后台任务变更检测的事件旁路（D2 触发点②）。customType
  * background-bash 消息（exit 边沿）与 bash 工具调用结束（spawn 路径）到达时，旁路回调
  * 被触发对 BackgroundTaskService 的 watched 集合跑一次变更检测（u-runtime-rpc 组合根
  * 接线到 service.checkForChanges）。旁路不进翻译输出（PiTranslatedEvent 零改动、纯旁路
@@ -1964,7 +1964,7 @@ export class EventAdapter {
   }
 
   /**
-   * 后台任务旁路判定（D2 触发面②）：raw pi 事件形态直读（翻译层不动）——
+   * 后台任务旁路判定（D2 触发点②）：raw pi 事件形态直读（翻译层不动）——
    * ① customType background-bash 消息（exit 边沿，notify.ts → message_start custom）；
    * ② bash 工具调用结束（spawn 路径，tool_execution_end.toolName === 'bash'）。
    * spawn/exit 均先写 registry 后发事件（spawn-background.ts/poller.ts 时序），钩子

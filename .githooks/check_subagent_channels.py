@@ -17,7 +17,7 @@ custom 消息注入点唯一性检查（C-ext-19，pi-boundary-reliability §3.3
   交互式注入（extension-conventions.md
   「Event handler 消息注入」节）不属禁令对象，豁免须定性登记（文件白名单或行级
   g4-allow 注释）。
-  规则 2（--model）："--model" 字面量不得出现在模型引用白名单外（扫描面保持
+  规则 2（--model）："--model" 字面量不得出现在模型引用白名单外（扫描范围保持
   subagent-workflow 域——全 extensions 的模型引用漂移由 MODELREF 检查
   E2E-MODELREF-01 单独看护，不在本检查重复扩面）：扩展域内字符串→模型身份只允许经
   shared/model-ref.ts（assertCanonicalModelRef，切片 1 U1），禁裸串拼
@@ -172,7 +172,7 @@ def main() -> int:
     root = Path(root_arg).resolve() if root_arg else Path(__file__).resolve().parent.parent
 
     if not mode_all:
-        # staged 模式：extensions/ 无 staged 变更时无扫描面；有则全量扫描
+        # staged 模式：extensions/ 无 staged 变更时无扫描范围；有则全量扫描
         #（拦「任一扩展文件被改时新增的违规」，与 --all 同语义）
         staged = [f for f in staged_files(root) if f.startswith(f"{EXT_PREFIX}/")]
         if not staged:

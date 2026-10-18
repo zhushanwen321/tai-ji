@@ -9,7 +9,7 @@
  * 后续随 §7.3 runtime 改动落地，文件已扩到覆盖 no-credential 显式失败、cookie 空串清除、
  * 按 credentialSource 解析凭证（D3，含 exclusive 不回退其它 auth 形态）、删除与写入顺序 /
  * 半提交、finishFetch 五出口与在途写回检查、失败路径节流、clearProviderState 等。
- * **当期覆盖面以各 describe 列表为准**（条目随改动增删，此处不逐条罗列，避免与用例脱节）。
+ * **当期覆盖范围以各 describe 列表为准**（条目随改动增删，此处不逐条罗列，避免与用例脱节）。
  *
  * 运行：cd packages/runtime && npx vitest run test/services/quota-service.test.ts
  */

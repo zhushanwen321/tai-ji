@@ -6,12 +6,12 @@
  * 三段同属 createLine 的 fork 分支一体（读源 → 判状态 → 执行 fork；readSessionHeader
  * 兼作 createLine 的 fork 文件验收与 rebuild 的线文件 header 读取）。全部为
  * fixture 可驱动的纯函数/一次性执行体，不触服务状态；btw-service 保持原样 re-export
- *（导出面零变更），`from '.../btw-service.js'` 消费路径零改动
+ *（导出清单零变更），`from '.../btw-service.js'` 消费路径零改动
  *（inspectSourceState / forkViaCliPi 的既有测试同）。
  *
  * 关键红线呼应（AGENTS.md 关键规则）：
  *   #6 pi session 延迟写入：宿主只读源/线文件，fork 文件由 pi fork 链路写；
- *   #19 超时默认原则：fork bootstrap 属「控制面单请求」量级 → 秒级有界（10s）；
+ *   #19 超时默认原则：fork bootstrap 属「控制范围单请求」量级 → 秒级有界（10s）；
  *   #12 打包约束：本模块只 spawn（经注入 piCommand），不拼 ESM 模块元数据 URL 类路径
  *      （该属性在 CJS bundle 下恒为 undefined——原文随段从 btw-service 迁入此处）；
  *      bootstrap 出站 env 经 buildOutboundChildEnv（C-proc-09）。
@@ -25,12 +25,12 @@ import { toErrorMessage } from '../../utils/errors.js'
 import { BtwError } from './btw-error.js'
 
 /**
- * fork bootstrap 就绪上限（控制面单请求量级，规则 #19）：实测双旗标 fork 落盘 206ms
+ * fork bootstrap 就绪上限（控制范围单请求量级，规则 #19）：实测双旗标 fork 落盘 206ms
  *（V2 探针 A），10s 覆盖慢机/冷缓存；超时 → 回落无 fork 分支（不静默：pill 标 no-source）。
  */
 export const BTW_FORK_TIMEOUT_MS = 10_000
 
-/** fork bootstrap 目录轮询节拍（扫到新增 .jsonl 即收进程；控制面内部采样间隔，规则 #19 秒级量级）。 */
+/** fork bootstrap 目录轮询节拍（扫到新增 .jsonl 即收进程；控制范围内部采样间隔，规则 #19 秒级量级）。 */
 const FORK_POLL_INTERVAL_MS = 50
 
 /**

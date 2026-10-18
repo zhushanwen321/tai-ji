@@ -406,7 +406,7 @@ export class SessionHistoryReader {
    *
    * 错误处理（D6-4）：
    * - 增量报 "Entry not found"（pi 实测文案，E 大写 not 小写）→ 丢缓存 → 全量重新拉取。
-   *   触发面：缓存跨 pi 进程存活且 session 文件被外部改写（D6-1 的 removeSessionEntry
+   *   触发点：缓存跨 pi 进程存活且 session 文件被外部改写（D6-1 的 removeSessionEntry
    *   清理已结构性消除常态触发，此为防御兜底）。
    * - 其他错误（超时/pi 内部错误）→ 与现状同链降级（尾读），缓存不动（下次重试仍走 since）。
    *
@@ -580,7 +580,7 @@ export class SessionHistoryReader {
    * session 的窗口可能欠填、totalTurnsEstimate 偏大（设计 D3 允许的降级面，内容正确性优先）。
    *
    * [btw-question 重载链修复] btw vid 分支先于通用链：线目录在 G4 隔离面
-   *（`agent/btw/<encodeCwd>/<mainSid>/`，构造性不在 sessions/ 扫描面），通用链的
+   *（`agent/btw/<encodeCwd>/<mainSid>/`，构造性不在 sessions/ 扫描范围），通用链的
    * scanSessions 对 btw vid 必 miss → 静默空（重启后线视图空态的根因）。分支收窄在
    * isBtwVirtualId 判定内，非 btw 路径逐字节原行为；cursor 翻页离线路径同走本方法，
    * btw 线「加载更早」一并生效。
@@ -737,7 +737,7 @@ export class SessionHistoryReader {
 
   /**
    * 清空全部历史重建缓存（u7c：memory-relief 可回收物 ① 的 reader 出口——组合根
-   * watchdog onRelief 接线经 SessionService 透传至此）。返回清除条目数（观测面）。
+   * watchdog onRelief 接线经 SessionService 透传至此）。返回清除条目数（观测范围）。
    */
   clearHistoryCache(): number {
     return this.historyCache.clearAll()

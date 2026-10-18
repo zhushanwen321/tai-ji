@@ -420,7 +420,7 @@ if [ -d "$OUTPUT_DIR/mac-arm64" ]; then
         # web 构建（build 编排 build:mobile 先行产出）+ electron-builder extraResources
         # 复制 → <Resources>/mobile-dist。index.html 是 runtime 同源静态托管入口，
         # 缺失 = 构建编排漏跑 build:mobile 或 extraResources 漏配（supervisor prod 分支
-        # 拼 --mobile-dist 时 runtime 启动会报 E5 静态面禁用，这里在产物级提前拦截）。
+        # 拼 --mobile-dist 时 runtime 启动会报 E5 静态范围禁用，这里在产物级提前拦截）。
         MOBILE_DIST_DIR="$APP_PATH/Contents/Resources/mobile-dist"
         if [ -f "$MOBILE_DIST_DIR/index.html" ]; then
             grep -q "Content-Security-Policy" "$MOBILE_DIST_DIR/index.html" \

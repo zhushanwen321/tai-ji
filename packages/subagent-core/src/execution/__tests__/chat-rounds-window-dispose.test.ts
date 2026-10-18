@@ -150,7 +150,7 @@ function makeRunningRecord(id: string): ExecutionRecord {
 }
 
 /** ChatRounds 直构（stdout-wedge 单测同款；本测试触达面补齐 store/pool/通知面）。
- *  overrides = 逐成员覆盖注入面（[§1.4 (a)] 等待排序用例消费）。 */
+ *  overrides = 逐成员覆盖注入点（[§1.4 (a)] 等待排序用例消费）。 */
 function makeChatRounds(record: ExecutionRecord, overrides: Partial<ChatRoundsDeps> = {}): ChatRounds {
   const store = {
     // 轮终簿记的最小语义 mimic：翻 idle + round+1（revive 资格判定依赖 status 翻边）。
@@ -327,7 +327,7 @@ describe("[§1.4 (a)] 轮终收尾句柄就绪等待（finalizeRoundToIdle × wa
     await Promise.resolve();
     await Promise.resolve();
     expect(waitForPiReady).toHaveBeenCalledTimes(1);
-    // 等待期间：FinalizeDeps 组装未开始（pi 读取 = 簿记写面入口，未触达）。
+    // 等待期间：FinalizeDeps 组装未开始（pi 读取 = 簿记写侧入口，未触达）。
     expect(getPi).not.toHaveBeenCalled();
 
     resolveWait!(newPi);

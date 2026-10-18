@@ -1,7 +1,7 @@
 // src/execution/__tests__/batch-finalized.test.ts
 //
-// [collect 退役 / 登记 §3.3] 读侧检查：sync 批写面（flushBatch / markBatchFinalized
-// 原语）与 v1 全量快照兼容读面（toSubagentRecordEntry / rebuildEntryRecord）已整体
+// [collect 退役 / 登记 §3.3] 读侧检查：sync 批写侧（flushBatch / markBatchFinalized
+// 原语）与 v1 全量快照兼容读侧（toSubagentRecordEntry / rebuildEntryRecord）已整体
 // 删除，本文件守的是**现行 v2 条目与存量 manifest 的读侧容忍面**——旧 session 文件
 // 必须可读：
 //
@@ -105,7 +105,7 @@ describe("[collect 退役] v2 条目 / 存量 manifest 读侧容忍——旧 ses
 
   it("v2 注册 + 终态条目经真实落盘→末条扫描派生视图读回终局域，不炸", () => {
     // 现行主 session 条目契约 = 注册 + 终态两条小条目（record-entry.ts v2）。旧
-    // 「落标 entry」（batchFinalized=true）已无任何 v2 写入侧，兼容读面亦随 v1 快照
+    // 「落标 entry」（batchFinalized=true）已无任何 v2 写入侧，兼容读侧亦随 v1 快照
     // 层删除——本用例守 v2 条目对经真实落盘 → scanLastRecordEntries 派生视图的终局域
     // 保真（终态条目携带的字段读回不丢）。
     const seedPi = makeWritingPi();
@@ -115,7 +115,7 @@ describe("[collect 退役] v2 条目 / 存量 manifest 读侧容忍——旧 ses
       seedPi.appendEntry(SUBAGENT_RECORD_CUSTOM_TYPE, entry);
     }
 
-    // 读侧：真实 readFileSync 扫描 + 派生（store 测试后门访问，零 mock 断言面）
+    // 读侧：真实 readFileSync 扫描 + 派生（store 测试后门访问，零 mock 断言范围）
     const fresh = new RecordStore(sessionsDir, undefined, { appendEntry: appendEntryMock }, manifestDir);
     const scanned = fresh.scanLastRecordEntries(mainFile);
     const a = scanned.find((r) => r.id === "sa-bf-a");
@@ -138,7 +138,7 @@ describe("[collect 退役] v2 条目 / 存量 manifest 读侧容忍——旧 ses
   });
 
   it("存量批成员 manifest（批时代产物词汇）无子文件锚时 manifest 源兜底派生视图可读", () => {
-    // 磁盘遗留形态：批写面 batchManifestRecord 产物词汇（legacy status 三态与
+    // 磁盘遗留形态：批写侧 batchManifestRecord 产物词汇（legacy status 三态与
     // executionStatus 并存）+ 无子 session 文件（manifest 源兜底路径）。
     fs.writeFileSync(
       path.join(manifestDir, "sa-bf-manifest.json"),

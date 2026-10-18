@@ -3,7 +3,7 @@
 // 的载体，空指引 = 拦截了但不知道怎么修）。
 //
 // W10 协议黑盒化：断言对象从内建 PiEngine/ZcodeEngine（inproc，W11 删除）改为
-// RemoteEngine × fake 引擎 CLI（协议 probe 帧往返）——成功/失败两形态都经协议面。
+// RemoteEngine × fake 引擎 CLI（协议 probe 帧往返）——成功/失败两形态都经协议范围。
 // 引擎内 probe 细节（版本探测、二进制检查）随 W5/W7 归各引擎包测试。
 
 import { mkdtempSync, rmSync } from "node:fs";

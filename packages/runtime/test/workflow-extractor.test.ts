@@ -6,7 +6,7 @@ import { extractWorkflowsFromSessionFile } from '../src/services/session/workflo
 import { READ_PRECHECK_MAX_BYTES } from '@taiji/shared'
 
 /**
- * workflow-extractor 测试（[ADR-0095] v1 读面删除后的骨架契约）。
+ * workflow-extractor 测试（[ADR-0095] v1 读侧删除后的骨架契约）。
  *
  * 提取器已不再从 entry 派生 WorkflowRunRecord（workflow 列表唯一数据源 =
  * events-projection 的 record 流 fold + v2 注册/终态条目）——本文件锚定
@@ -55,8 +55,8 @@ describe('extractWorkflowsFromSessionFile', () => {
   })
 
   // [ADR-0095] 删除回归：历史格式条目（workflow-record v1 全量快照 / v2 注册条目 /
-  // workflow-state-link 指针）一律不派生 records——v1 读面删除后冷路径恒空，
-  // 历史 run 从本提取器数据面退空即预期行为（列表数据源 = events-projection 派生视图）。
+  // workflow-state-link 指针）一律不派生 records——v1 读侧删除后冷路径恒空，
+  // 历史 run 从本提取器数据范围退空即预期行为（列表数据源 = events-projection 派生视图）。
   it('历史格式条目（v1 快照 / v2 条目 / state-link 指针）恒不产出 records', () => {
     const snapshot = {
       v: 'wf-run-v2',

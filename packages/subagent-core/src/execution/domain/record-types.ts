@@ -60,10 +60,10 @@ export type RecordOrigin = "tool" | "workflow";
  *   user-close      — 用户手动 close action（含对话模式 close）
  *   cancelled       — 用户取消（close(force:true) / cancelBackground）
  *   gc              — 通用完成/失败（一次执行自然结束、超时、错误等无专属 reason 的终态）
- *   disconnected    — 历史数据读面兜底（读 sidecar 空内容/损坏 → disconnected：正常结束
- *                     但死因不可考）。现行事件流 fold 与 binding 快照读面都不产该值
+ *   disconnected    — 历史数据读侧兜底（读 sidecar 空内容/损坏 → disconnected：正常结束
+ *                     但死因不可考）。现行事件流 fold 与 binding 快照读侧都不产该值
  *                     （「死因不可考」的现行兜底展示 = interrupted-by-restart）；值域
- *                     成员保留供磁盘/内存历史数据（sidecar 时代写入）的读面判定与
+ *                     成员保留供磁盘/内存历史数据（sidecar 时代写入）的读侧判定与
  *                     RECONNECTABLE 集合成员资格。
  */
 export type ClosedReason = 'parent-shutdown' | 'parent-fork' | 'parent-new' | 'user-close' | 'cancelled' | 'gc' | 'disconnected';
@@ -77,7 +77,7 @@ export class ResurrectDeniedError extends Error {}
 
 /**
  * ClosedReason 中 6 个可写终态原因（运行时检查用——防御性解析外部输入时校验成员资格）。
- * disconnected 是历史数据读面兜底、现行链路无写点（sidecar 读面已退场），不在本清单；
+ * disconnected 是历史数据读侧兜底、现行链路无写点（sidecar 读侧已退场），不在本清单；
  * StopReason 全枚举 = 本清单 + disconnected + NEW_STOP_REASONS + ROUND_TERMINAL_STOP_REASONS。
  */
 export const CLOSED_REASONS: readonly ClosedReason[] = [

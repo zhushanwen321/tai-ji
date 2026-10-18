@@ -176,7 +176,7 @@ describe('switchModel — Model not found 三型分型（U2/§3.4）', () => {
     }
   })
 
-  it('判定函数单测：前缀匹配 + 激活分型（导出面，供 PS 探针与上层复用）', () => {
+  it('判定函数单测：前缀匹配 + 激活分型（导出清单，供 PS 探针与上层复用）', () => {
     expect(isPiModelNotFoundError(new Error('Model not found: a/b'))).toBe(true)
     expect(isPiModelNotFoundError(new Error('modelX not found'))).toBe(false)
     const passthrough = Object.assign(new Error('x'), { code: SESSION_NOT_FOUND })

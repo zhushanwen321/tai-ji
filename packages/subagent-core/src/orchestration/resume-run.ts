@@ -690,7 +690,7 @@ function resumedModelSpread(model: string | undefined): { model: string } | Reco
 
 /**
  * 段 5 run-resumed 帧载荷组装（resumeRunLocked 拆出）：各条件 spread 段——reason /
- * host 缺席不落键；本次复活实际生效的预算随帧落盘（跨崩溃存续的数据面）仅 > 0 落
+ * host 缺席不落键；本次复活实际生效的预算随帧落盘（跨崩溃存续的数据范围）仅 > 0 落
  * 字段——未设/0/负值不落（与 run-created 同款条件式），读取侧按「最近一条
  * run-resumed 的字段 ?? run-created 的字段」回落。生效模型同款落盘（三档回落
  * 落定值，canonical ref；缺省不落 = 未指定且无覆盖记账的复活与现状同形）。

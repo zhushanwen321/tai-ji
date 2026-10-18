@@ -183,7 +183,7 @@ export function registerAllRpcMethods(ctx: RpcSetupContext): void {
     // [D6/u5b] 插件写路径透传（替换既有静默 no-op）：sessionId 必填校验在 session-api
     // handler 层（asSafeKey → INVALID_SESSION_ID）；requireCommand 透传给 dispatcher 的
     // 原子校验（restore 后、busy 预检前，E14 防漏进模型）。回执 {blocked, reason?} 由
-    // handler 层映射为 {accepted, reason}。role 在插件契约面保留（AP-4），runtime 管道
+    // handler 层映射为 {accepted, reason}。role 在插件契约范围保留（AP-4），runtime 管道
     // 仅支持 user prompt 语义（既有行为——旧实现同样丢弃 role）。
     sendMessage: async (sessionId: string, _role: string, content: string, requireCommand?: string) => {
       if (!deps.sessionService) {
@@ -200,7 +200,7 @@ export function registerAllRpcMethods(ctx: RpcSetupContext): void {
     },
     // S3-W2：session 生命周期事件注册表（registerCreate/registerDestroy 方法在此注册）
     sessionEvents: ctx.sessionEvents,
-    // [u2d 移交 / u5b 接线] AP-4 读面依赖：live client 经 sessionService.getRpcClient
+    // [u2d 移交 / u5b 接线] AP-4 读侧依赖：live client 经 sessionService.getRpcClient
     // （= pm.getClient 同源），sessionFile 经 getSummary，失效订阅表与
     // PluginService.notifyEntryInvalidation 派发共享同一实例——SESSION_READ_NOT_WIRED 装配缺口消除。
     sessionRead: {

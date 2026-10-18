@@ -12,10 +12,10 @@
 // 轮次语义演进（SP-5 升级链、A-lite 展示位、U7 统计口径的轮终快照）集中在此。
 // binding settle 快照本体在终态原语轴（record-store-terminal.ts），本文件消费。
 //
-// [D7 写面约束] 同终态轴：`.state` 写函数与两个 manifest 物化面（轮终派生视图
-// writeDerivedManifest / bound 物化 materializeBoundManifest）均经 ctx 或写面构造
+// [D7 写侧约束] 同终态轴：`.state` 写函数与两个 manifest 物化面（轮终派生视图
+// writeDerivedManifest / bound 物化 materializeBoundManifest）均经 ctx 或写侧构造
 // 参数注入，本文件零 R1 字面、零写函数 import（manifest-store 写函数调用字面只留
-// record-store.ts——写面检查 R1 的豁免清单）。依赖方向单向：rounds → {terminal, rebuild}，
+// record-store.ts——写侧检查 R1 的豁免清单）。依赖方向单向：rounds → {terminal, rebuild}，
 // 不回 import store。
 
 import { getLogger } from "../../core/logger.ts";
@@ -25,8 +25,8 @@ import { zcodeAnchorBasePath } from "./state-marker.ts";
 import { persistSettleSnapshot } from "./record-store-terminal.ts";
 import { summarizeResultForJournal } from "./record-entry-write.ts";
 import { zcodeRefOf } from "./record-store-rebuild.ts";
-// [W1 / U2a] 事件文件写面接线层（fold 缓存 + 写点幂等判定 + 物化编排）的依赖面：
-// u0 契约层原语（词表/fold/seq 单源）+ terminal 轴载荷构造 + manifest 物化写面。
+// [W1 / U2a] 事件文件写侧接线层（fold 缓存 + 写点幂等判定 + 物化编排）的依赖面：
+// u0 契约层原语（词表/fold/seq 单源）+ terminal 轴载荷构造 + manifest 物化写侧。
 import * as fs from "node:fs";
 
 import { SUBAGENT_RECORD_CUSTOM_TYPE } from "./record-entry.ts";
@@ -64,7 +64,7 @@ import type { RoundSettlementOutcome } from "./finalize-record.ts";
 const logger = getLogger("subagents");
 
 /**
- * 轮次原语实现的 store 通道（D7 写面注入，同 TerminalCtx 口径——注入名避开
+ * 轮次原语实现的 store 通道（D7 写侧注入，同 TerminalCtx 口径——注入名避开
  * R1 七名）。records 传共享 Map 引用（与容器同一 Map，零拷贝——写入直达成
  * store 内存态，与原 this.records 访问同对象）。
  */
@@ -77,7 +77,7 @@ export interface RoundsCtx {
    * idle 的 record 不经任何终态/回收写点，缺本写则 records/ 目录长期缺席该 record，
    * session-reader 的 manifest 直读主路径（zcode 定点直读 / pi isRecordManifest 扫描）
    * 永不命中。写的是派生视图（缓存性质，与 markSettled 的 manifest 落盘字节同源），
-   * 重复写幂等无害。D7 写面约束：本文件不 import manifest 写函数，落盘经本注入位。
+   * 重复写幂等无害。D7 写侧约束：本文件不 import manifest 写函数，落盘经本注入位。
    */
   writeDerivedManifest: (record: ExecutionRecord) => void;
   /** pending-notifications 轮终注销（发射点②；未注入时容器侧 no-op）。 */
@@ -97,7 +97,7 @@ export interface RoundsCtx {
  * 意图原语：事件追加（过程记录）。turns/eventLog/totalTokens 经 execution-record
  * 事件归约累积（字段⑧），随后 entry 变迁上报（best-effort——过程面可丢，重建由
  * 子 session 文件承接）。调用方按事件粒度决定调用频率（高频 delta 逐事件上报会
- * 放大 entry 写面，编排粒度属调用方职责）。
+ * 放大 entry 写侧，编排粒度属调用方职责）。
  *
  * @returns false = id 不在内存（未注册/已回收）——事件丢弃并 debug 留痕。
  */
@@ -140,7 +140,7 @@ export function appendEventImpl(id: string, event: AgentEvent, ctx: RoundsCtx): 
  * ——三种来源与「在途双轮始」的内存形态完全同形：running + stopReason/result/
  * endedAt 全 undefined）∪ idle（轮终后直接轮始 / reopen 后——markReopened 保持
  * idle 翻边归轮始），且 onAbandoned→drain（acquire 被打断、无 run 产生、不终态化）
- * 的合法连续轮始连事件面 fold 也同形（同 round 双 started 帧无 idle 帧）。原语层
+ * 的合法连续轮始连事件流 fold 也同形（同 round 双 started 帧无 idle 帧）。原语层
  * 加「running 拒绝门」只能拒绝全部合法轮始（误伤首轮/续轮/revive 主链）或写成
  * 永不触发的检查。双轮始的生产防护在 Continuation 编排层构造性成立
  * （dispatchRoundGuarded 的 activeRunId 单飞窗 + 终态门 + 复查到轮始之间无 await
@@ -390,11 +390,11 @@ export function adoptEngineDeathImpl(id: string, opts: { error: string }, ctx: R
 
 
 // ============================================================
-// [W1 / U2a] RecordEventsWriteFace——record 事件文件写面接线层
+// [W1 / U2a] RecordEventsWriteFace——record 事件文件写侧接线层
 // ============================================================
 //
 // 为什么在本文件：事件写入的调用点主体 = RoundsCtx/TerminalCtx 注入位（轮次粒度
-// 帧 / reopened / settled 均经轴文件 ctx 写入）——face 是这些注入位的共享写面
+// 帧 / reopened / settled 均经轴文件 ctx 写入）——face 是这些注入位的共享写侧
 // 基础设施，与轮次簿记同文件聚合（容器经薄转发消费，见 record-store.ts 各写点）。
 //
 // 同步性设计（写点是同步方法，pi 工具 handler 同步链直调）：
@@ -421,7 +421,7 @@ export class RecordEventsWriteFace {
     private readonly recordsDir: string,
     /** 主 session 条目上报通道（v2 两条款经 pi appendEntry 落主 session——D1）。 */
     private readonly appendEntry: (customType: string, data: unknown) => void,
-    /** bound manifest 物化写面（D2 决策 9）——record-store.ts 构造点绑定
+    /** bound manifest 物化写侧（D2 决策 9）——record-store.ts 构造点绑定
      *  materializeBoundRecordManifest(recordsDir, derivedManifestRecord(recordToSubagent(rec)))。
      *  经构造参数注入的理由同 RoundsCtx 的 writeDerivedManifest：manifest 写函数调用
      *  字面只留 record-store.ts（R1 豁免清单），本文件不 import 写函数。 */
@@ -430,7 +430,7 @@ export class RecordEventsWriteFace {
     this.journal = createRecordEventStream(recordsDir);
   }
 
-  // ── fold 读面 ─────────────────────────────────────────────
+  // ── fold 读侧 ─────────────────────────────────────────────
 
   /** 同步 fold（缓存 miss → 文件全量装载；文件缺 ENOENT = 空 journal 态）。 */
   foldOf(id: string): RecordEventFoldState {
@@ -486,7 +486,7 @@ export class RecordEventsWriteFace {
     // 全缺 = spawn 未回填（无锚可写入）：零写入（transition 的过程面消费到此为止）。
     if (sessionFile === undefined && engineHandle === undefined && engine === undefined) return;
     if (isBoundSignatureUnchanged(this.foldOf(record.id).bound, sessionFile, engine, engineHandle)) {
-      return; // 引擎域签名未变：零追加（事件面不随过程调用放大）
+      return; // 引擎域签名未变：零追加（事件流不随过程调用放大）
     }
     this.appendEvent(record.id, buildBoundEventPayload(record));
     // bound manifest 物化（与轮终簿记⑫同款派生视图——manifest 是物化派生视图不是

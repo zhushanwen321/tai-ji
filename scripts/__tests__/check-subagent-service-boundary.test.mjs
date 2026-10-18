@@ -1,12 +1,12 @@
 /**
  * check-subagent-service-boundary.mjs 单测（review MF-6：检查脚本零测试盲区）。
  *
- * 覆盖面：
+ * 覆盖范围：
  *   - parseImport：合法形态（named / type named / default / namespace / re-export）、
  *     噪声行（null）、as 重命名取原名
  *   - logicalImportLines：跨行 named import 合并为单逻辑行（漏检盲区锚点）
  *   - resolveServiceTarget / isShellTarget：目录注入 fixture 下的命中与放行
- *   - extractPublicSurface：fixture class 导出面抽取（private 排除 / constructor 排除 /
+ *   - extractPublicSurface：fixture class 导出清单抽取（private 排除 / constructor 排除 /
  *     大括号平衡截断）
  *   - checkSupportShellImports / checkSupportFileImports：登记清单放行 / 未登记命中两分支
  *   - checkAggregateGetterCalls：命中（非 public 成员）与放行（public 成员）两分支
@@ -142,9 +142,9 @@ describe('resolveServiceTarget / isShellTarget（fixture 注入）', () => {
   })
 })
 
-// ── extractPublicSurface：导出面抽取 ───────────────────────────────────
+// ── extractPublicSurface：导出清单抽取 ───────────────────────────────────
 
-describe('extractPublicSurface 导出面抽取', () => {
+describe('extractPublicSurface 导出清单抽取', () => {
   it('非 private 成员入面，private/constructor 排除', () => {
     const src = [
       'export class RecordAccess {',

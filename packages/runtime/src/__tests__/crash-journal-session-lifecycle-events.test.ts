@@ -216,7 +216,7 @@ describe('D1 journal session 生命周期事件接线（u1d1）', () => {
     expect(deleteds).toHaveLength(1)
     expect(deleteds[0]).toMatchObject({ layer: 'pi', event: 'deleted', sessionId: 'sid-del' })
 
-    // 抑制语义核心断言：exit handler 静默路径不产生 crash（挂 exit handler 事件面即错）
+    // 抑制语义核心断言：exit handler 静默路径不产生 crash（挂 exit handler 事件范围即错）
     expect(events.some((e) => e.event === 'crash')).toBe(false)
   })
 
@@ -227,7 +227,7 @@ describe('D1 journal session 生命周期事件接线（u1d1）', () => {
     await pm.createSession('sid-crash', '/project')
     await svc.initializeManagedSession('sid-crash', {} as unknown as IPiEngine, '/project', 'label')
 
-    // 5s 后自动 respawn 的 restore 内核 mock（真实实现会磁盘扫描，测试只关心事件面）
+    // 5s 后自动 respawn 的 restore 内核 mock（真实实现会磁盘扫描，测试只关心事件范围）
     vi.spyOn(svc, 'restoreSession').mockResolvedValue({ id: 'sid-crash' } as never)
 
     // 崩溃现场：先有 stderr 输出，再异常退出（code 1）

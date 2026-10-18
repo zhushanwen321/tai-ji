@@ -59,7 +59,7 @@ export const UI_LINKS_ANCHOR = 'function resolveHrefPath'
 export const FOLD_SEMANTIC_ANCHORS = ["rel.startsWith('/')", "if (seg === '..')", 'parts.pop()']
 
 // 函数体截取原语与产物目录公式检查同款收敛：scripts/lib/guard-report.mjs（本文件 main /
-// self-test 的本地引用经上方 import 绑定；export 保持既有公共面）。
+// self-test 的本地引用经上方 import 绑定；export 保持既有公共部分）。
 export { extractFunctionBlock }
 
 /** 剥签名行（三份签名仅函数名 / export 修饰不同，对拍对象是签名行之后的函数体）。 */

@@ -21,7 +21,7 @@
  *
  * 触发点语义：`'pi-restored'`（registry 的 ReconcileTrigger）——transcript 标记扫描 +
  * clear_queue 三分处置（自有条目重投 / 带标记无记录重建 / 无标记外来文本收养）在
- * reattach 后的唯一正确触发面。刻意不在每次 session attach 上触发（`getOrCreateDelivery`
+ * reattach 后的唯一正确触发点。刻意不在每次 session attach 上触发（`getOrCreateDelivery`
  * 会挂 watchdog/settled 订阅，常驻面扩张非本缺口所需；lazy 激活路径的提交类入口已自建运行时）。
  *
  * 恢复后动作链（统一投递波 4，磁盘 outbox）：本包装触发的 `reconcile('pi-restored')` 在

@@ -19,7 +19,7 @@ import { buildBtwThreadListPayload } from './transport/btw-message-handler.js'
 import { scanDegradedFlag } from './infra/pi/session-file-utils.js'
 // D8-3 迁移门与 create/restore spawn 同约束（组合根后台序列 setMigrationGate 注入，读侧在
 // btw-line-spawn-options 工厂——getMigrationGate 经下方 createBtwLineSpawnOptionsFactory 接线）。
-// [M4-a] setBtwCascadeOps：deleteSession/deleteByCwd 的 btw 级联支线注入面（session-lifecycle）；
+// [M4-a] setBtwCascadeOps：deleteSession/deleteByCwd 的 btw 级联支线注入点（session-lifecycle）；
 // subscribeSessionDeathDisposition：notify-once D5 死亡处置登记（delete/suppress 汇聚点）。
 import { getMigrationGate, setBtwCascadeOps, subscribeSessionDeathDisposition } from './services/session/session-lifecycle.js'
 // [M4-a] 线终结的插件 sessionData 真删清理（onLineTerminated 扇出，与主会话 delete B5 段同源）。
@@ -258,7 +258,7 @@ function cancelRollingRestart(): void {
 
 /**
  * 启动内存水位定时器（组合根 listen 成功后调用一次）。
- * unref：水位打点是纯观测面，不得阻止进程自然退出（shutdown 显式 clearInterval 是
+ * unref：水位打点是纯观测范围，不得阻止进程自然退出（shutdown 显式 clearInterval 是
  * 第一道，unref 是不阻塞退出路径的兜底）。
  */
 function startMemoryWatermarkTimer(
@@ -1000,7 +1000,7 @@ async function main(): Promise<void> {
       },
     })
     // EventAdapter：纯翻译器，把翻译结果喂给 interpreter 编排。
-    // 第三参（background-task-sidebar D2 触发面②，u-runtime-rpc）：后台任务事件旁路——
+    // 第三参（background-task-sidebar D2 触发点②，u-runtime-rpc）：后台任务事件旁路——
     // customType background-bash（exit 边沿）与 bash 工具结束（spawn 路径）到达时对
     // watched 集合跑一次变更检测（与 2s 轮询/自写自检共享同一 last-seen，单广播源非第二源）。
     // sessionService 为闭包引用（createAdapter 先于其构造声明，工厂体仅在 session 建立时执行，
@@ -1727,7 +1727,7 @@ async function main(): Promise<void> {
   server.setRollingRestartStatusProvider(() => rollingRestartHandleLocal.getStatus())
 
   // ── u6（crash-forensics-and-watchdog D4）：内存看门狗启动 ─────────────
-  // 挂点 = listen 后、与水位定时器同区（同为内存观测面；设计 D4 未指明 listen 前后，
+  // 挂点 = listen 后、与水位定时器同区（同为内存观测范围；设计 D4 未指明 listen 前后，
   // 取「listen 后与 background-init 并行」的端口先就绪序）。武装门 Gate W 默认 off
   // （TAIJI_RUNTIME_WATCHDOG_ARMED）——off 时纯观测：采样环照跑补全水位数据，relief 与
   // renderer 通知不执行（设计 §3.2 方案 B）。

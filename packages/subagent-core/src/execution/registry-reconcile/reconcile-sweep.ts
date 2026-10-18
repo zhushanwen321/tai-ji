@@ -45,7 +45,7 @@
   //    register（id = notifyId `sm-` 前缀），收尾通道 = watch 应答 unregister + extension
   //    session_start 重启收尾路径，**不入 workflow run-state 判据**——notifyId 对
 //    FileRunStore 查无 state 文件 → 「不存在 → 补注销」判据会把活跃 claim 误销
-//    （G2 查询面破坏），故在分流前拦下，不调任何判据。
+//    （G2 查询范围破坏），故在分流前拦下，不调任何判据。
 
 import * as fs from "node:fs";
 
@@ -84,7 +84,7 @@ export interface ReconcileSweepDeps {
   appendEntry?: (customType: string, data: unknown) => void;
 }
 
-/** sweep 结果（日志 + 测试断言面）。 */
+/** sweep 结果（日志 + 测试断言范围）。 */
 export interface ReconcileSweepResult {
   /** 补发 unregister 的注册 id。 */
   reconciled: string[];
@@ -151,7 +151,7 @@ function sweepSingleRegister(
     ? deps.lookupRecordState(id)
     : deps.lookupWorkflowRunState?.(id);
   if (state === undefined) {
-    // deps 未注入 workflow 判据：无收尾通道，保守跳过（向后兼容——判据注入面
+    // deps 未注入 workflow 判据：无收尾通道，保守跳过（向后兼容——判据注入点
     // 缺席 ≠ 条目可注销）。
     result.skippedNonSubagent.push(id);
     return;

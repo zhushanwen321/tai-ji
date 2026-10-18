@@ -13,7 +13,7 @@
 scripts/acceptance/plan-mode/
 ├── README.md                     # 本文件
 ├── mock-pi/
-│   ├── mock-pi.mjs               # pi 替身主程序（JSONL over stdin/stdout，--mode rpc 协议面）
+│   ├── mock-pi.mjs               # pi 替身主程序（JSONL over stdin/stdout，--mode rpc 协议范围）
 │   ├── lib/frames.mjs            # 协议帧构造器（含 error envelope + 边界帧族）
 │   ├── lib/scenario.mjs          # 场景剧本加载 + 参数化（优先级：默认 < 剧本 < config < env）
 │   ├── lib/session-writer.mjs    # session JSONL plan-state 快照写入（现版 persistPlanState 形态）

@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * check-publish-surface.mjs —— packages/ 方向 npm 发布面一致性检查
+ * check-publish-surface.mjs —— packages/ 方向 npm 发布范围一致性检查
  * （约束 C-proc-11，设计 docs/architecture/npm-publish-surface-guard.md）。
  *
  * 背景：npm 对 files 白名单里磁盘上不存在的条目静默跳过——白名单承诺与构建产出
@@ -50,7 +50,7 @@ import { fileURLToPath, pathToFileURL } from 'node:url'
 const __dirname = dirname(fileURLToPath(import.meta.url))
 const ROOT = join(__dirname, '..')
 
-// 纯函数 + rootDir 注入导出面（scripts/__tests__/check-publish-surface.test.mjs
+// 纯函数 + rootDir 注入导出清单（scripts/__tests__/check-publish-surface.test.mjs
 // 用 tmpdir fixture 驱动，不依赖真实仓库状态）。仅 CLI 直跑时执行下方 main()。
 export {
   discoverGuardedPackages,
@@ -286,7 +286,7 @@ function checkSelfContained(entryFile, entryRel = 'dist.bundle/index.cjs', pkgRe
       problems.push(
         [
           `自包含档 ${entryRel} 含外部依赖 require("${spec}")`,
-          `  ——自包含档必须内联全部运行时依赖（vendoring 宿主无 node_modules 解析面）`,
+          `  ——自包含档必须内联全部运行时依赖（vendoring 宿主无 node_modules 解析范围）`,
           `  修复：核对 ${pkgRel}/tsup.config.ts bundleConfig.noExternal 后重新构建`,
         ].join('\n'),
       )
@@ -508,11 +508,11 @@ function main() {
   if (failures.length > 0) {
     for (const f of failures) console.error(f)
     console.error(
-      `✗ 发布面一致性未通过（${guarded.length} 个 dist 发布包扫描，${failures.length} 处红）——按上方修复指引处理后重跑 node scripts/check-publish-surface.mjs`,
+      `✗ 发布范围一致性未通过（${guarded.length} 个 dist 发布包扫描，${failures.length} 处红）——按上方修复指引处理后重跑 node scripts/check-publish-surface.mjs`,
     )
     process.exit(1)
   }
-  console.log(`✓ 发布面一致（${guarded.length} 个 dist 发布包：幽灵条目 / 产物目录反向覆盖 / 自包含探针 / workspace 依赖发布闭包 全绿）`)
+  console.log(`✓ 发布范围一致（${guarded.length} 个 dist 发布包：幽灵条目 / 产物目录反向覆盖 / 自包含探针 / workspace 依赖发布闭包 全绿）`)
   process.exit(0)
 }
 

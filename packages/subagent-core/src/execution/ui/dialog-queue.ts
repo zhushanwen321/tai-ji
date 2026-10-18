@@ -86,7 +86,7 @@ function dialogTimeoutLogMessage(req: UiRequest, waitedMs: number): string {
 
 // ── 类型再导出（W7 / R3 S-A + R4-S③：SSOT 迁 @zhushanwen/subagent-engine-sdk
 // src/ui-types.ts，结构等价；队列实现本体留 core——壳侧 host/askUser 消费端与
-// inproc 过渡链路同样消费该类型面。双向可赋值断言挂本包 typecheck 断言族
+// inproc 过渡链路同样消费该类型范围。双向可赋值断言挂本包 typecheck 断言族
 // （contract-closure），漂移编译期可抓。 ──
 export type { UiMethod, UiRequest, UiRequestHandler, UiResponse } from "@zhushanwen/subagent-engine-sdk";
 import type { UiRequest, UiRequestHandler, UiResponse } from "@zhushanwen/subagent-engine-sdk";

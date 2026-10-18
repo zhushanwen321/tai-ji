@@ -24,7 +24,7 @@ function obsOf(branch: string | undefined): RepoObservation {
 }
 
 /**
- * 可编程 fake 观测面：values[cwd] = 当前重解析值（refreshOne 每轮只读一次）；
+ * 可编程 fake 观测范围：values[cwd] = 当前重解析值（refreshOne 每轮只读一次）；
  * 测试在两轮 refresh 之间用 stubResolved 切换值模拟分支切换 / 冷缓存翻新。
  */
 function createFakeObservations() {

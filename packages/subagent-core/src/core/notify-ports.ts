@@ -66,7 +66,7 @@ export interface DeliveryPort {
   isIdle(): boolean;
   /** 投递消息。返回受理回执或 void（扩展位——旧实现返回 void 兼容）。
    *  settle 契约（与 session-delivery DeliveryPort.send 一致）：返回 promise 时实现
-   *  必须 settle——内核按控制面粒度设有界兜底，超时按发送失败收尾（迟到原请求与
+   *  必须 settle——内核按控制范围粒度设有界兜底，超时按发送失败收尾（迟到原请求与
    *  重试可能构成重复投递，通道内判重由适配器/对端按裸标记负责）。 */
   send(
     msg: DeliveryMessage,
@@ -89,7 +89,7 @@ export interface DeliverySubmitOptions {
    * 期望注入时机（unified-delivery §3.3 timing 词条的转写位；与 pi-delivery-port
    * 的 DeliveryTiming 结构兼容）。直发兜底路径不消费（pi.sendMessage({triggerTurn})
    * 单通道 = steer 形态）；字段为影子契约对上游提交面的同步修正位（波 2）。
-   * "steer"/"followUp" 是 pi 注入通道词汇，合法持有点 = 通知域窄端口契约面
+   * "steer"/"followUp" 是 pi 注入通道词汇，合法持有点 = 通知域窄端口契约范围
    * （与 execution/notify/notify-host.ts PiLike.deliverAs 注解同位——core 内
    * pi 通道词汇的接口形状注解形态）。
    */
@@ -113,7 +113,7 @@ export interface DeliveryHandle {
 }
 
 /** countActiveFromEntries 的过滤选项（[F1] 与 pending-notifications 的
- *  CountActiveOptions 对齐的子集——core 契约面只暴露跨 session 基准一个字段）。 */
+ *  CountActiveOptions 对齐的子集——core 契约范围只暴露跨 session 基准一个字段）。 */
 export interface CountActivePortOptions {
   /**
    * [W4 读侧过滤②] 跨 session 残留过滤基准：传入时端口实现按「register entry 的

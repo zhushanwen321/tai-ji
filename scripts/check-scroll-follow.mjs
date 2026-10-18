@@ -16,7 +16,7 @@
  *   `scrollToIndex(` 调用只许出现在白名单文件（WHITELIST）：
  *   - useVirtuaFollow.ts —— follow 原语本体（末项索引直取 + offset=tailHeight 唯一实现处）
  *   - useMessageStreamRail.ts —— rail 导航跳转（align:'start'，合法独立用途，设计 D7④）
- *   范围外既有合法调用点（TraceView.vue trace 独立链路 / 测试 mock 断言）不在扫描面内、
+ *   范围外既有合法调用点（TraceView.vue trace 独立链路 / 测试 mock 断言）不在扫描范围内、
  *   天然不红（影响面审 r2 MF1 全量枚举核实）。
  *
  * 检查 2（R3 禁用模式，§4.4④ / D6）：`findItemIndex(` 与 `scrollSize` 同行组合——

@@ -348,7 +348,7 @@ export class SkillInjector {
    *   派生）。缺省 = 只用 global 扫描（project skill 不进映射）——不猜 cwd，缺就是调用方
    *   未接线，宁缺毋错。
    *
-   * 错误面：内部 RPC / fs 失败全部转为降级或透传 + notice（D8 禁止静默），本方法不向
+   * 错误范围：内部 RPC / fs 失败全部转为降级或透传 + notice（D8 禁止静默），本方法不向
    * 调用方抛业务错误；调用方（dispatcher）把 notices 在 client 发送成功后经 bus 发布。
    */
   async inject(client: IPiEngine, text: string, sessionCwd?: string): Promise<SkillInjectionResult> {

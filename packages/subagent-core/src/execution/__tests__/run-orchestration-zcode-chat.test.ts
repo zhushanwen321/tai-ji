@@ -158,7 +158,7 @@ describe("U6b：zcode chatMode 的 Continuation 接线（B-firstround + B-routin
     zcodeDir = fs.mkdtempSync(path.join(os.tmpdir(), "u6b-zcode-db-"));
     zcodeDb = path.join(zcodeDir, "db.sqlite");
     prevDataDirEnv = process.env["TAIJI_AGENT_DATA_DIR"];
-    // 测试红线：store/引擎数据面不触真实数据目录
+    // 测试红线：store/引擎数据范围不触真实数据目录
     process.env.TAIJI_AGENT_DATA_DIR = path.join(agentDir, "engine-data");
     clearEngines();
     zcode = new ZcodeColdEngine();
@@ -306,7 +306,7 @@ describe("U6b：zcode chatMode 的 Continuation 接线（B-firstround + B-routin
       sessionRef: { sessionId: "sess_cold_2", dbPath: zcodeDb },
     });
     // 回填经 store.reportRecordTransition 感知落 record-bound 帧（[W1/D2 停写写点]
-    // 改写面：engineHandle 过程派生视图不再落 v1 快照 entry——事件文件是新承载，
+    // 改写侧：engineHandle 过程派生视图不再落 v1 快照 entry——事件文件是新承载，
     // zcode 运行窗口锚定经 bound manifest 物化（D2 决策 9）对 GUI 可见）。
     const boundEvents = scanRecordEvents(record.id);
     expect(boundEvents.at(-1)).toMatchObject({

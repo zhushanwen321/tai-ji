@@ -32,7 +32,7 @@ const HOURS_PER_DAY = 24
 const TRIGGER_PATROL_INTERVAL_MS =
   HOURS_PER_DAY * MINUTES_PER_HOUR * SECONDS_PER_MINUTE * MS_PER_SECOND
 
-/** 依赖注入面：测试注入内存 fixture / 替身 logger 与 writer，生产用默认实现。 */
+/** 依赖注入范围：测试注入内存 fixture / 替身 logger 与 writer，生产用默认实现。 */
 export interface TriggerPatrolDeps {
   /** 读 main.jsonl 行数组；缺省读 <dataDir>/logs/crashes/main.jsonl。 */
   readMainLines?: () => string[]
@@ -47,7 +47,7 @@ export interface TriggerPatrolDeps {
 export interface TriggerPatrolResult {
   /** 本次越线的条件 id（空数组 = 常态无越线）。 */
   trippedIds: number[]
-  /** 完整评估结果（状态表 / 坏行计数——no-data 非静默的可观测面）。 */
+  /** 完整评估结果（状态表 / 坏行计数——no-data 非静默的可观测范围）。 */
   evaluated: TriggerEvaluationResult
 }
 
@@ -95,7 +95,7 @@ export function startTriggerPatrol(options: { intervalMs?: number } = {}): () =>
     try {
       runTriggerPatrol()
     } catch (err) {
-      // 巡检是旁路观测面：自身异常不得反噬 main 启动链，记 WARN 等下一轮
+      // 巡检是旁路观测范围：自身异常不得反噬 main 启动链，记 WARN 等下一轮
       mainLogger.warn(`[trigger-patrol] 巡检异常（不影响下一轮）: ${err instanceof Error ? err.message : String(err)}`)
     }
   }

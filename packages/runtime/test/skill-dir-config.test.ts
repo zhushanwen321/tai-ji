@@ -137,7 +137,7 @@ describe('skill-dir-config buildDirConfigs', () => {
     expect(configs.every(c => c.enabled === false)).toBe(true)
   })
 
-  it('preset 不含 claude 目录（2026-09 移除：预设成员无法真正删除 + 非默认扫描面）', () => {
+  it('preset 不含 claude 目录（2026-09 移除：预设成员无法真正删除 + 非默认扫描范围）', () => {
     expect(PRESET_SKILL_DIRS.some(p => p.includes('.claude'))).toBe(false)
     expect(PRESET_AGENT_DIRS.some(p => p.includes('.claude'))).toBe(false)
     expect(PRESET_EXTENSION_DIRS.some(p => p.includes('.claude'))).toBe(false)

@@ -7,7 +7,7 @@
  * - doFetch：providers.json 读出的 workspace 经 QuotaFetcherConfig.workspaceUrl 注入 fetcher
  * - not_configured 透传：fetcher 报 not_configured 时失败态原样透传（data=null + reason）
  *
- * 测试框架：vitest。策略：真实文件系统（临时目录）+ 注入假 fetcher（URL 注入面断言），
+ * 测试框架：vitest。策略：真实文件系统（临时目录）+ 注入假 fetcher（URL 注入点断言），
  * 与 provider-write-side-switch.test.ts 同模式。
  *
  * 运行：cd packages/runtime && npx vitest run src/services/__tests__/quota-service-workspace.test.ts
@@ -45,7 +45,7 @@ let dir: string
 let agentDir: string
 let extrasStore: TaijiProviderStore
 
-/** 记录注入面的假 fetcher（auth=['cookie']，与 opencode 同形态）。 */
+/** 记录注入点的假 fetcher（auth=['cookie']，与 opencode 同形态）。 */
 let lastConfig: QuotaFetcherConfig | undefined
 let nextOutcome: QuotaFetchOutcome = { ok: false, reason: 'not_configured' }
 

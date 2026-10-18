@@ -107,7 +107,7 @@ export function buildReopenSummaryPrompt(input: {
  *     选型，原地 resume 续写被 -32031 卡死不可用），新 sessionRef 经
  *     onHandleReady 回传；
  *   - pi（缺省）：recordId + sessionFile 续写原文件。
- * [池抽象降级 2026-09-13] 原 poolKey 字段已随 ResumeAnchor 协议面退役删除——
+ * [池抽象降级 2026-09-13] 原 poolKey 字段已随 ResumeAnchor 协议范围退役删除——
  * 两引擎恒 'shared'，锚点补全 handle 无需池定位。
  */
 export function resumeAnchorOf(record: ExecutionRecord): ResumeAnchor {
@@ -378,7 +378,7 @@ export class ConversationContinuation {
   // ── 派发（§3.4 dispatchRound）────────────────────────────────────
 
   /**
-   * 同步检查段 + 占位（构造性单飞）：检查 throw 直达调用方（tool 错误面——
+   * 同步检查段 + 占位（构造性单飞）：检查 throw 直达调用方（tool 错误范围——
    * async 函数内的 throw 会变 rejected promise，`void` 调用丢传导，故检查必须
    * 在同步段完成）；activeRunId 同步占位，dispatchRoundAsync 的 await 窗内
    * 重入被拒（单写者构造性保证的实现面）。
@@ -623,7 +623,7 @@ export class ConversationContinuation {
    *    degrade-reopen → 形态①（patch 丢失/分支不存在）→ 摘要注入全新 session 直派
    *                   （同 [U4] 续轮 transcript 丢失分支同构——不推进世代，
    *                   markReopened CAS 仅收 idle，偏差同族登记）；
-   *    throw        → 形态③ IO 错响亮（转失败轮末分流——onRoundRejected，工具错误面/
+   *    throw        → 形态③ IO 错响亮（转失败轮末分流——onRoundRejected，工具错误范围/
    *                   失败通知可见，不静默回落；返回 { kind: "rejected" }，调用方
    *                   本轮作废）。
    */
@@ -769,7 +769,7 @@ export class ConversationContinuation {
   /**
    * 队列 drain：abort 收敛（单写者前置满足）后按序派发；多条聚合为一轮输入。
    *
-   * [A2] 内部续派路径的检查 throw 必须就地转错误面：本方法运行在 settle 后续派
+   * [A2] 内部续派路径的检查 throw 必须就地转错误范围：本方法运行在 settle 后续派
    *（settleRoundSuccess/settleRoundFailed 尾部，async 函数体内的同步调用）与
    * onRoundAbandoned 的 fire-and-forget 链上，dispatchRoundGuarded 的同步检查 throw
    *（锚点缺失 / worktree 绑定丢失 / controller 缺失）若逃逸即成 unhandled rejection
@@ -778,7 +778,7 @@ export class ConversationContinuation {
    * firstRound=false 走锚点检查 → throw。转换语义：失败通知（独立载荷过 notifyGate
    * 门，与 settleRoundFailed 失败单发同构——record 轮终落 idle 可续聊，载荷
    * closed+failed 仅是文案载体）+ 队列丢弃留痕（warn）。onMessage 同步入口的检查
-   * throw 保留（设计 §3.1 失败路径表的工具错误面，不经本方法）。
+   * throw 保留（设计 §3.1 失败路径表的工具错误范围，不经本方法）。
    */
   private drain(): void {
     // 终态簿记冻结（close/cancel 抢先收尾窗——endedAt 已设）不复活，排队消息作废

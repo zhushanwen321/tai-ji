@@ -33,7 +33,7 @@
  * 形态说明：
  * - WS 直连驱动（TEST-STRATEGY 既定约定：UI/OS dialog 不可自动化处用 WS 触发等效业务动作）：
  *   session.create → message.send（主长 turn）→ btw.create → message.send × 3（vid 串行）。
- *   S7 断言面全部落在事件帧与 pi session JSONL，不依赖 DOM。
+ *   S7 断言范围全部落在事件帧与 pi session JSONL，不依赖 DOM。
  * - L3 真实 LLM（impl-plan A7 方式列）：faux 统一队列无法表达「主长 turn × btw 三短问」的进程间
  *   异构节奏（两进程独立 shift 同一序列、turn 边界结构性对齐），model-keyed 分道被 btw spawn 的
  *   inheritSessionModel（model: undefined，argv 无 --model）挡死——不翻 L2.5，理由登记 e2e-map note。
@@ -87,7 +87,7 @@ const JSONL_FLUSH_TIMEOUT_MS = 20_000
 /** 本机 provider 凭证源目录（taiji 数据目录的 agent 子树，运行时动态推导）。
  * TAIJI_S7_CREDENTIAL_SOURCE 可覆盖：真实安装的凭证文件形态因版本/安装方式而异
  * （auth.json/models.json 不必然在默认 agent 子树，如 dev 实例目录），覆盖值指向
- * 含同名文件的 agent 目录即可，spec 只读该目录、写面仍恒为临时 dataDir。 */
+ * 含同名文件的 agent 目录即可，spec 只读该目录、写侧仍恒为临时 dataDir。 */
 function sourceAgentDir(): string {
   const override = process.env['TAIJI_S7_CREDENTIAL_SOURCE']
   if (override && override.trim() !== '') return override
@@ -335,7 +335,7 @@ test('S7 (btw real): 主 turn 进行中 btw 连发 3 条 → 主 turn 无 abort 
     expect(mainStopReason, `主 turn stopReason 应非 aborted（收到 "${String(mainStopReason)}"）`).not.toBe('aborted')
     expect(mainStopReason, `主 turn stopReason 应非 error（收到 "${String(mainStopReason)}"）`).not.toBe('error')
 
-    // ── 断言 ②（事件面负向）：监听窗内无 error / rejected / exited 帧 ──
+    // ── 断言 ②（事件范围负向）：监听窗内无 error / rejected / exited 帧 ──
     const badMainFrames = mainEvents.filter((e) =>
       e.type === 'message.error' || e.type === 'send.rejected' || e.type === 'session.exited')
     if (badMainFrames.length > 0) {
@@ -343,7 +343,7 @@ test('S7 (btw real): 主 turn 进行中 btw 连发 3 条 → 主 turn 无 abort 
     }
     expect(
       badMainFrames.map((e) => e.type),
-      '主会话监听窗内不应出现 message.error / send.rejected / session.exited（= steer/abort/失败 注入面）',
+      '主会话监听窗内不应出现 message.error / send.rejected / session.exited（= steer/abort/失败 注入范围）',
     ).toEqual([])
 
     mainSub.ws.close()

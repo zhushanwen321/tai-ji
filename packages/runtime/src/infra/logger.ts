@@ -69,7 +69,7 @@ const MAX_FILE_BYTES = Number(process.env.TAIJI_LOG_MAX_BYTES) || DEFAULT_MAX_FI
 /**
  * pi tee 单文件 size 轮转阈值（crash-forensics §3.3 D7：50MB 上限，收尾 198MB 实证）。
  * [dev-0.9.17 合并] pi tee 与主日志共用 MAX_FILE_BYTES（TAIJI_LOG_MAX_BYTES env 单旋钮），
- * 无独立阈值常量——u9 的 opts.maxBytes 注入面与 PI_TEE_MAX_FILE_BYTES 已随 .1.gz
+ * 无独立阈值常量——u9 的 opts.maxBytes 注入点与 PI_TEE_MAX_FILE_BYTES 已随 .1.gz
  * gzip 实现取代而删除（裁决见 crash-forensics impl-plan §7 v5）。
  */
 const SECONDS_PER_MINUTE = 60
@@ -392,7 +392,7 @@ function cleanExpiredLogs(): void {
   for (const name of entries) {
     // 只清理本模块产出的日志文件（runtime-* / pi-*.jsonl / pi-crash-*.log / plugin-crash-*.log /
     // signal-forensics-*.jsonl）。pi-crash-* 靠 pi- 前缀覆盖；plugin-crash-*（u5b D6-⑤，
-    // plugin worker 崩溃取证）是新写入面，写入与清理通道同步落地（D6-⑦：有写入无清理 =
+    // plugin worker 崩溃取证）是新写侧，写入与清理通道同步落地（D6-⑦：有写入无清理 =
     // 新债）；signal-forensics-*（2026-10-13 信号归因取证，infra/pi/signal-forensics.ts
     // 自写不入 logger 流）同理同步登记。runtime-uncaught-<date>.log（uncaught-policy 的
     // appendProcessEscapeLog 逃逸取证，非本模块产出）也由 runtime- 前缀覆盖——
@@ -694,7 +694,7 @@ export function recordWatermarkDailySample(sample: MemoryWatermarkSample, now: D
     acc.samples += 1
     acc.coverageEnd = iso
     watermarkDailyAcc = acc
-  // eslint-disable-next-line taste/no-silent-catch -- 聚合是水位定时器回调的旁路观测面，不得打断水位行落盘（writeLogEntry 同款容错哲学）
+  // eslint-disable-next-line taste/no-silent-catch -- 聚合是水位定时器回调的旁路观测范围，不得打断水位行落盘（writeLogEntry 同款容错哲学）
   } catch {
     // no-op
   }

@@ -9,7 +9,7 @@
  * 不触真实系统命令与文件系统。运行：cd packages/runtime && npx vitest run src/infra/system/trash.test.ts
  *
  * RT-8#2 后实现为数组参数形态（execFileSync，trash CLI 优先、osascript 回落），
- * 本文件锁语义与出站契约；注入面（argv 原样、路径不进 AppleScript 源码）由
+ * 本文件锁语义与出站契约；注入点（argv 原样、路径不进 AppleScript 源码）由
  * test/trash-command-injection.test.ts 锁定。
  */
 import { execFileSync } from 'node:child_process'

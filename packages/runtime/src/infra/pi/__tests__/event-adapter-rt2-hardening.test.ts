@@ -73,7 +73,7 @@ describe('EventAdapter RT-2 加固：translate 隔离显形（#3a）', () => {
     const errSpy = vi.spyOn(console, 'error').mockImplementation(() => {})
     let adapterFailLogged = false
     try {
-      // 触发面：handleToolExecutionUpdate → normalizeWithTailCap 的 content 条目直读
+      // 触发点：handleToolExecutionUpdate → normalizeWithTailCap 的 content 条目直读
       //（pi 字段漂移致数组内混入 null 条目）
       // 修复前此 emit 同步抛出（translate 在 try 外），interpret 收不到任何事件
       client.emit(updateEvent([null]))

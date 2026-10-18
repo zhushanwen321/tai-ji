@@ -95,7 +95,7 @@ describe('parsePsOutput（ps 三列解析）', () => {
     ])
   })
 
-  it('空行与非数字列行跳过（fail-open 只影响覆盖面不影响精确性）', () => {
+  it('空行与非数字列行跳过（fail-open 只影响覆盖范围不影响精确性）', () => {
     const out = ['', 'garbage line', '   ', '  1 2 x'].join('\n')
     expect(parsePsOutput(out)).toEqual([{ pid: 1, ppid: 2, command: 'x' }])
   })

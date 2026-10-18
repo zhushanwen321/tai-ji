@@ -14,7 +14,7 @@
  *   - entry 线性增长 + advance nextRunAt 单调递增
  *
  * [L2.5 faux 翻轨] LLM 演员是 faux 脚本（真 pi 进程 + 真 scheduler extension + 假 LLM）。
- * 断言面全在扩展写盘的 entry 形态与工具 / 命令反馈（与模型智能无关），确定性、零 token、
+ * 断言范围全在扩展写盘的 entry 形态与工具 / 命令反馈（与模型智能无关），确定性、零 token、
  * 凭证无关（agentDir 预置 faux settings/models，无需 ~/.pi/agent/auth.json）。S17/S4/S12
  * 的 dispatch 注入 turn 同样消费 faux 队列（注入 prompt 的响应步骤预排余量）。
  *
@@ -110,7 +110,7 @@ const EXTENSION_PATH = path.join(REPO_ROOT, 'extensions', 'universal', 'schedule
 /**
  * rename-session 扩展（S22 显式 --extension 加载 + config.enabled=true）：
  * 「宿主 auto-rename 不被合成轮触发」的判别力来源（first-stop 入口只在 stopReason==='stop'
- * 触发，合成轮为 'aborted'）。缺省场景不加载它——避免多余事件 handler 影响既有断言面。
+ * 触发，合成轮为 'aborted'）。缺省场景不加载它——避免多余事件 handler 影响既有断言范围。
  */
 const RENAME_SESSION_EXT_PATH = path.join(REPO_ROOT, 'extensions', 'universal', 'rename-session')
 /**
@@ -379,7 +379,7 @@ function captureNotifyFrame(msg, state) {
 }
 
 /**
- * extension_ui_request 帧分发：捕获 notify（命令路径断言面）+ 按场景 uiActor 应答。
+ * extension_ui_request 帧分发：捕获 notify（命令路径断言范围）+ 按场景 uiActor 应答。
  * 帧契约（pi 0.84.4 dist/modes/rpc/rpc-mode.js）：stdout 输出
  * {type:'extension_ui_request', id, method, ...}，stdin 回
  * {type:'extension_ui_response', id, ...reply}（cancelled:true → resolve undefined；
@@ -468,7 +468,7 @@ function resolveTurnEndWaiter(msg, state) {
 
 /**
  * spawn 一个 pi 进程（加载 scheduler + faux provider extension，关 builtin tools——
- * 模型的工具面只剩 scheduler 的 schedule/schedule_control，工具调用由 faux 队列预设）。
+ * 模型的工具范围只剩 scheduler 的 schedule/schedule_control，工具调用由 faux 队列预设）。
  * 返回 RPC 控制 API。
  *
  * @param {{ piBin: string, cwd: string, sessionDir: string, sessionFile?: string, label: string,
@@ -1694,7 +1694,7 @@ async function runS14(piBin) {
   }
 }
 
-// ── A 类：命令路径创建表单场景（设计 §6.2 命令面 / §7.6 探针表 / §8.3 e2e 影响面）──
+// ── A 类：命令路径创建表单场景（设计 §6.2 命令范围 / §7.6 探针表 / §8.3 e2e 影响面）──
 
 /** 恰 1 条 upsert entry 时取其 task 字段，否则 null。 */
 function getSingleUpsertTask(upserts) {

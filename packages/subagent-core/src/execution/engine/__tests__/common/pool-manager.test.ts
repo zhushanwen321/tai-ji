@@ -1,7 +1,7 @@
 // pool-manager.test.ts —— journal 生命周期管理单测（[池抽象降级 2026-09-13] 后唯一
 // 机制：cleanupExpiredJournals 的 30 天 mtime TTL 回收）。
 //
-// 降级删除面（原 acquirePool/refs.json 引用计数/归零删池原生状态/cleanup-failed
+// 降级删除范围（原 acquirePool/refs.json 引用计数/归零删池原生状态/cleanup-failed
 // 标记/cleanupSpawnedFiles——历史形态见 git）：本文件不再覆盖。
 //
 // 三视角：①构建者——超龄 journal/refs 残留删除、目录回收边界；②使用者——未超龄

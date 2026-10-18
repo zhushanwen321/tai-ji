@@ -97,7 +97,7 @@ const _assertRunEventTypeWordlist: Exclude<
 > extends never ? true : never = true
 
 /**
- * run journal 文件行解析器（event-tail parseLine 注入面，run 域）。
+ * run journal 文件行解析器（event-tail parseLine 注入点，run 域）。
  *
  * 检查对齐 core run-events isWorkflowRunEventLine 的最宽共同判定面：JSON 对象 +
  * type 落词表 + ts 有限数值 + seq（携带时）正安全整数 + outcome（agent-settled /
@@ -273,7 +273,7 @@ function resolveSubagentStopReason(
  * [projectV2Subagent 拆分] error 供源（与 stopReason 分流同构，W1 终态同步 F2-2
  * 裁决）：settled 终局原文 → 轮终失败收条（round-started 后 lastEvent 非
  * round-idle，上轮失败原文随轮始清点语义不透传——对齐 v1 markRoundStartedImpl
- * 清残留死因）→ 条目面兜底（fold 缺席 = 事件流未接线的旧实体）。
+ * 清残留死因）→ 条目范围兜底（fold 缺席 = 事件流未接线的旧实体）。
  */
 function resolveSubagentError(
   fold: RecordEventFoldState | undefined,
@@ -306,7 +306,7 @@ function resolveSubagentResult(
 
 /**
  * [projectV2Subagent 拆分] 统计字段归并：settled 终局 → 轮终收条（roundIdle）→
- * 条目面兜底（事件 fold 缺席 = 事件流未接线的旧实体）。
+ * 条目范围兜底（事件 fold 缺席 = 事件流未接线的旧实体）。
  */
 function resolveSubagentStats(
   settled: RecordEventFoldState['settled'],
@@ -322,7 +322,7 @@ function resolveSubagentStats(
 
 /**
  * [projectV2Subagent 拆分] 绑定半边归并：engine 绑定（record-bound 事件）优先，
- * 条目面兜底；sessionFile 同构（bound 携带则胜出，null 为契约缺省）。engineHandle
+ * 条目范围兜底；sessionFile 同构（bound 携带则胜出，null 为契约缺省）。engineHandle
  * 两侧形态不同（bound = 结构化 sessionRef 整体透传，entry = 同形字符串）——返回
  * 类型按原组装表达式自然推导（union），不在此窄化。
  */

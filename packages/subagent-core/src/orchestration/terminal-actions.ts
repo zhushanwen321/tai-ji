@@ -50,7 +50,7 @@ import {
   type WorkflowRunEvent,
   type WorkflowRunEventInput,
 } from "./run-events.ts";
-// [D1 拆边 Class C 第 3 步] journal 目录解析集群 + record 读面（scanRunEvents）迁
+// [D1 拆边 Class C 第 3 步] journal 目录解析集群 + record 读侧（scanRunEvents）迁
 // 持久化层 `execution/persistence/run-event-journal.ts`——目录解析是持久化策略，留在
 // 编排层会迫使 execution 侧消费者反向值导入编排层。本文件（编排侧唯一写者 + 终局
 // 编排入口）反向 import 复用同源解析，并对既有消费点保留同名 re-export（全仓既有
@@ -104,7 +104,7 @@ import { runSettledOutcomeToDoneReason } from "../shared/run-vocabulary.ts";
 const JOURNAL_EVENT_TYPES: ReadonlySet<string> = new Set(RUN_EVENT_TYPES);
 
 /** run-created 载荷 argsSummary 的截断上限（行内摘要的体积上限——摘要供展示/
- * 日志读面；args 全文随帧另落 args 字段，设计 §3.1 载荷表 run-created 行「args」）。 */
+ * 日志读侧；args 全文随帧另落 args 字段，设计 §3.1 载荷表 run-created 行「args」）。 */
 const RUN_ARGS_SUMMARY_MAX_CHARS = 256;
 
 /**
@@ -135,7 +135,7 @@ function enqueueRunDispatch<T>(runId: string, task: () => Promise<T>): Promise<T
 }
 
 /**
- * 测试钩子（journal 注入面；door 已随 [D1 拆边 Class C 第 3 步] 迁持久化层
+ * 测试钩子（journal 注入点；door 已随 [D1 拆边 Class C 第 3 步] 迁持久化层
  * `execution/persistence/run-event-journal.ts`，本函数保留同名包装）：转调持久化层
  * 钩子（注入 journal 目录 + 清按目录 keyed 的 journal 缓存）后，连带清本模块两族
  * 进程内状态——活体态缓存与终局记录注册表（run-events.test 同款 teardown 纪律）。
@@ -564,7 +564,7 @@ export function dispatchRunCreated(run: WorkflowRun, rootSessionId?: string): Pr
     scriptSource: run.spec.scriptSource,
     // args 全文（设计 §3.1 载荷表 run-created 行「args」）：D14 逐字段深度比对与
     // resume 重放的 $ARGS 恢复依赖完整 args——argsSummary 截断摘要只覆盖小 args
-    // 的未截断形态，截断即两处读面退化（比对拒绝 / $ARGS 回落 {}）。
+    // 的未截断形态，截断即两处读侧退化（比对拒绝 / $ARGS 回落 {}）。
     args: run.spec.args,
     argsSummary: summarizeRunArgs(run.spec.args),
     // scriptPath 锚定（worker 沙箱相对 require 的目录来源）：空值不落字段——
@@ -572,12 +572,12 @@ export function dispatchRunCreated(run: WorkflowRun, rootSessionId?: string): Pr
     ...(run.spec.scriptPath ? { scriptPath: run.spec.scriptPath } : {}),
     // 时间预算（RunSpec.budgetTimeMs）：仅 > 0 落字段——未设/0/负值不落（旧格式
     // 形态保持，读侧回落不限时）；resume 继承恢复 + 重试重建按剩余活跃预算重排的
-    // 唯一数据面（与 scriptPath/model 同款条件式）
+    // 唯一数据范围（与 scriptPath/model 同款条件式）
     ...(run.spec.budgetTimeMs !== undefined && run.spec.budgetTimeMs > 0
       ? { budgetTimeMs: run.spec.budgetTimeMs }
       : {}),
     // token 预算（RunSpec.budgetTokens）：与 budgetTimeMs 同款条件式（仅 > 0 落字段）
-    // ——resume 继承恢复的唯一数据面（Budget.isExceeded 加权口径的上限）
+    // ——resume 继承恢复的唯一数据范围（Budget.isExceeded 加权口径的上限）
     ...(run.spec.budgetTokens !== undefined && run.spec.budgetTokens > 0
       ? { budgetTokens: run.spec.budgetTokens }
       : {}),
@@ -1035,7 +1035,7 @@ export async function interruptRun(
   opts?: {
     /** 中断来源标记（crashed / terminated / startup-sweep——RunErrorCode 中断族成员）。 */
     errorCode?: RunErrorCode;
-    /** 中断原因摘要（自由文本诊断面）。 */
+    /** 中断原因摘要（自由文本诊断范围）。 */
     reason?: string;
     /** journal 目录（ADR-0081 目录参数化——runtime 侧收编链注入；缺省 = 模块锚）。 */
     journalDir?: string;

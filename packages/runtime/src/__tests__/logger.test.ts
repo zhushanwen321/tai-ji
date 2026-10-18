@@ -232,7 +232,7 @@ describe('logger.ts WriteStream 化（D10-1/D10-2）', () => {
     mkdirSync(dir, { recursive: true })
     const oldRuntime = join(dir, 'runtime-2026-07-01.log')
     const oldPi = join(dir, 'pi-2026-07-01-abc.jsonl')
-    // pi-crash-* 前缀同属 pi- 清理覆盖面（writePiCrashLog 产物，U3-4）
+    // pi-crash-* 前缀同属 pi- 清理覆盖范围（writePiCrashLog 产物，U3-4）
     const oldPiCrash = join(dir, 'pi-crash-2026-07-01-abc.log')
     const recent = join(dir, 'runtime-2026-08-15.log')
     const unrelated = join(dir, 'other-file.txt')

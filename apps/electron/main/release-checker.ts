@@ -93,7 +93,7 @@ const RATE_LIMIT_BACKOFF_MS =
  * [枚举同步锚点] 成员与 shared 的 UpdateSource 联合类型一一对应
  * （packages/shared/src/update.ts——shared 只导出类型无运行时值常量；适配层
  * RELEASE_SOURCE_HOSTS 的键是 host 用途名而非源名，不可作源枚举）。新增源时
- * 同批更新本常量，防类型面与运行时枚举双轨漂移。
+ * 同批更新本常量，防类型侧与运行时枚举双轨漂移。
  */
 const KNOWN_UPDATE_SOURCES: readonly UpdateSource[] = ['github', 'gitcode']
 
@@ -417,18 +417,18 @@ export class ReleaseChecker implements IReleaseChecker {
   }
 
   /**
-   * 登记本轮检查的源选择结果（source-selection 成功登记，S1/S2/F5 观测面）。
+   * 登记本轮检查的源选择结果（source-selection 成功登记，S1/S2/F5 观测范围）。
    *
    * probe 观测口径（R1-U1a 接线）：
    * - auto 路径透传 resolver 最近一次排序决策的探测详情（getLastProbeOutcome，
-   *   S2 观测面）：executed=true + results（Partial<Record> → SourceProbeRecord[]
+   *   S2 观测范围）：executed=true + results（Partial<Record> → SourceProbeRecord[]
    *   映射，basis 取决策通道 via 原值——ProbeSourceOutcome 不含探测手段明细，
    *   决策通道即本次排序依据；缺键源如实缺项不捏造，代理短路下仅 github 键）。
    *   返回 null 为防御性兜底（理论上 auto 必有决策）→ executed=false +
    *   reason 'resolver-internal'。
    * - 显式偏好路径不产生探测决策，维持 executed=false + reason
    *   'explicit-preference'（resolver 对显式偏好将详情重置为 null，语义一致）。
-   * tags = 各源 fetch 响应的 latest tag（F5 同步缺失观测面），
+   * tags = 各源 fetch 响应的 latest tag（F5 同步缺失观测范围），
    * 该源无响应（失败/退避短路）则缺 key。
    */
   private logSourceSelection(

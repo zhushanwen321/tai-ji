@@ -18,7 +18,7 @@ import { vi, type Mock } from "vitest";
 import type { PiLike } from "../../notify/notify-host.ts";
 
 /**
- * makePi 产物的精确 mock 类型（断言面：appendEntry.mock.calls / sendMessage.mock 等）。
+ * makePi 产物的精确 mock 类型（断言范围：appendEntry.mock.calls / sendMessage.mock 等）。
  * 成员签名取自 PiLike 对应方法——Mock<具体签名> 结构上可赋给 PiLike（历史内联版
  * `ReturnType<typeof vi.fn>` 是 Procedure|Constructable 宽联合，才被迫 `as unknown as` 强转）。
  */

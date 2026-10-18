@@ -1,10 +1,10 @@
 /**
- * D9⑤ 行为契约注入面（btw-question 设计 D9⑤ / V6 载体 ① `--append-system-prompt`）。
+ * D9⑤ 行为契约注入点（btw-question 设计 D9⑤ / V6 载体 ① `--append-system-prompt`）。
  *
  * 内聚段抽自 btw-service.ts（max-lines 同目录内聚拆分，2026-09-22，纯移动零行为变更）：
  * 契约文本 + trace 记录类型 + 「模式 append 段 ⊕ 契约」组合器——三者同属契约注入的
  * 数据与纯逻辑面；施加点（buildEstablishOptions / 每轮 trace 调用）留在 BtwService。
- * btw-service 保持原样 re-export（导出面零变更）；对账单测
+ * btw-service 保持原样 re-export（导出清单零变更）；对账单测
  *（__tests__/btw-contract-inject.test.ts）消费路径零改动。
  * 最终裁决角色 / 失败三支 / 子通道归属（V6）语义见契约文本 doc 与设计 D9⑤，本模块不复述。
  */

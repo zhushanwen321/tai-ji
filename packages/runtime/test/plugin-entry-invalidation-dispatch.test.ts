@@ -184,7 +184,7 @@ describe('PluginService.notifyEntryInvalidation 定向投递', () => {
       getDescriptor: vi.fn(() => ({ pluginId: 'pA', pluginPath: '/tmp/pA' })),
       getAllDescriptors: () => [],
     }
-    // 会话存在性谓词走真实注入面（listPersistedSessions 扁平 id 集）——s1/s2 可注册
+    // 会话存在性谓词走真实注入点（listPersistedSessions 扁平 id 集）——s1/s2 可注册
     const sessionServiceMock = {
       listPersistedSessions: () => [{ sessions: [{ id: 's1' }, { id: 's2' }] }],
     }

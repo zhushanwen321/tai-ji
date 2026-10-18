@@ -145,7 +145,7 @@ function subagentRecordEntry(
 /**
  * 自描述 workflow-record entry 族（W1 v2：注册条目恒有 + 非 running 时终态条目）。
  *
- * 第 5 参 = 注册条目的 recordPath 锚点（v2 run 步骤级详情读面发现锚；旧 v1 快照的
+ * 第 5 参 = 注册条目的 recordPath 锚点（v2 run 步骤级详情读侧发现锚；旧 v1 快照的
  * trace 参数随运行态移出条目删除——agentCalls 现由 run journal fold 供骨架，需要
  * 步骤断言的用例自建 `workflow-state/<runId>.record.jsonl`）。
  */
@@ -1329,7 +1329,7 @@ describe('[W1] 读侧换源：磁盘 entry-only 派生视图 / v2 读派生视�
       expect(workflows.records[0]).toMatchObject({ runId: 'run-1', status: 'running', scriptName: 'test-flow' })
       // [W1 / D6] 步骤视图换源：v2 条目不内嵌 trace；无 run journal fold 时步骤行由
       // subagent record overlay（[W0 / D1] parentRunId + stepIndex 合并）合成——
-      // 原「v1 快照 trace → agentCalls」断言随兼容层删除，fold 供骨架的覆盖面由
+      // 原「v1 快照 trace → agentCalls」断言随兼容层删除，fold 供骨架的覆盖范围由
       // 本 describe 后续 事件流 用例承担。
       expect(workflows.records[0]!.agentCalls[0]).toMatchObject({ id: 0, agent: 'worker', status: 'running', sessionId: 'sa-1' })
     } finally {
@@ -1476,7 +1476,7 @@ describe('[W1] 读侧换源：磁盘 entry-only 派生视图 / v2 读派生视�
       expect(subFrames).toHaveLength(1)
       expect((subFrames[0]![1] as { payload: { subagents: Array<{ subagentId: string; status: string; stopReason: string }> } }).payload.subagents)
         .toEqual([expect.objectContaining({ subagentId: 'sa-1', status: 'idle', stopReason: 'completed' })])
-      // RPC 读面同源：getSubagents 与已发布帧一致（读请求唯一数据源 = 派生视图）
+      // RPC 读侧同源：getSubagents 与已发布帧一致（读请求唯一数据源 = 派生视图）
       const rpc = await records.getSubagents('s1')
       expect(rpc.records[0]).toMatchObject({ subagentId: 'sa-1', status: 'idle', stopReason: 'completed' })
     } finally {

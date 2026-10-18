@@ -465,11 +465,11 @@ describe("runWorkflow", () => {
     const runId = await runWorkflow(spec, deps);
     const run = deps.runs.get(runId)!;
 
-    // 生产行为面①：budgetTimeMs>0 → RunRuntime.timeBudgetTimer 被真实挂载
+    // 生产行为范围①：budgetTimeMs>0 → RunRuntime.timeBudgetTimer 被真实挂载
     //（scheduleTimeBudget 产出的 Node timer，非死代码 spy）
     expect(run.runtime?.timeBudgetTimer).toBeDefined();
 
-    // 生产行为面②：到期后 abortRun(time_limited) 真实触发——run 终局（[W2/V1]
+    // 生产行为范围②：到期后 abortRun(time_limited) 真实触发——run 终局（[W2/V1]
     // 断言换源：两态机字段停更，经终局记录判定），reason/error/通知全部落位
     //（文件级 beforeEach 已 fake timers）
     await vi.advanceTimersByTimeAsync(3000);

@@ -191,7 +191,7 @@ function shellPids(): Set<number> {
   return new Set(parsed.processes.map((p) => p.pid))
 }
 
-interface SubagentListItem { // oe-exempt:20260927:test:e2e 剧本内视图形状声明（DOM mock 类型，非架构契约面）
+interface SubagentListItem { // oe-exempt:20260927:test:e2e 剧本内视图形状声明（DOM mock 类型，非架构契约范围）
   subagentId: string
   sessionFile: string | null
   slug: string
@@ -322,7 +322,7 @@ test('CR (batch real): chat 轮 idle 薄壳退出（V5①）+ revive 冷续写�
       })
     }
     expect(respawnSeen, `revive 后新薄壳应在 ${REVIVE_SPAWN_BUDGET_MS}ms 内 respawn（实际 ${respawnMs}ms；超线归因 spawn/握手/续写分段）`).toBeTruthy()
-    console.log(`[batch-cr] revive respawn：${respawnMs}ms（预算 ${REVIVE_SPAWN_BUDGET_MS}ms）；事件面首批：${firstEvents.slice(0, 6).join(',') || '（无）'}`)
+    console.log(`[batch-cr] revive respawn：${respawnMs}ms（预算 ${REVIVE_SPAWN_BUDGET_MS}ms）；事件范围首批：${firstEvents.slice(0, 6).join(',') || '（无）'}`)
 
     // ── V5③：续写轮完成（running→idle，turns 增至 2） ──
     const idle2 = await waitUntil(async () => {

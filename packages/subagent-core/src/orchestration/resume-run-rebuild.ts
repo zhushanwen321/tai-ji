@@ -112,7 +112,7 @@ function draftsToReplayCalls(
     // dispatchAgentStarted）parse 回对象——detectReplayInputMismatch 的比对由此
     // 可比（worker 重放脚本重发同 callId 消息时，cached.opts 与本次 opts 走同一
     // canonical 哈希比对，非确定性漂移可检出）。旧格式帧无 input 载荷 → 落占位
-    // {prompt:""}（比对跳过维持——结构性无可比数据面）。
+    // {prompt:""}（比对跳过维持——结构性无可比数据范围）。
     const call = new AgentCall(taskIndex, d.opts ?? { prompt: "" }, linked);
     call.attempts = d.attempts;
     call.status = "done";
@@ -198,7 +198,7 @@ function parseAgentInput(input: string): AgentCallOpts | undefined {
 }
 
 /**
- * argsSummary → args 尽力恢复（旧格式帧回落通道）：现行写入面 run-created 帧
+ * argsSummary → args 尽力恢复（旧格式帧回落通道）：现行写侧 run-created 帧
  * 携带 args 全文（rebuildRunFromRecord 优先消费）；本函数只服务旧格式帧（无
  * args 字段——设计 §3.1 载荷表落地前落盘的流）。未截断摘要可完整恢复；截断/
  * 不可解析回落空对象 + warn（旧格式流的 $ARGS 语义限制，留痕可诊断）。

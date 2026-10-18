@@ -208,7 +208,7 @@ function makeProbeHarness(opts: ProbeHarnessOptions = {}) {
       tree.entries = entries
       tree.leafId = leafId
     },
-    /** mock transcript 快照（撤回前后对比的数据面——经 get_entries 同一观察通道取）。 */
+    /** mock transcript 快照（撤回前后对比的数据范围——经 get_entries 同一观察通道取）。 */
     snapshotTranscript: async (): Promise<{ entries: unknown[]; leafId: string | null }> => {
       const msg = (await client.getEntries()) as { data?: { entries?: unknown; leafId?: unknown } }
       const entries = msg.data?.entries
@@ -318,7 +318,7 @@ describe('A6 信令不污染（探针：transcript 撤回前后对比 + 命令�
 })
 
 describe('A9 workflow-running 拦截回执（探针：mock workflow 派生视图）', () => {
-  it('派生视图含 running run → {revoked:false, error:"workflow-running"}，零信令、树逐字不变、数据面零拉取', async () => {
+  it('派生视图含 running run → {revoked:false, error:"workflow-running"}，零信令、树逐字不变、数据范围零拉取', async () => {
     const h = makeProbeHarness({
       workflowRuns: [{ id: 'wf-1', status: 'running' }],
       rewind: { target: 'e2', parent: 'e1' }, // 信令若被错误发出，树会变——反向断言锚
@@ -337,7 +337,7 @@ describe('A9 workflow-running 拦截回执（探针：mock workflow 派生视图
     // 树逐字不变（entries + leafId 均未动）
     const after = await h.snapshotTranscript()
     expect(after).toEqual(before)
-    // 拦截先于数据面：编排零 get_entries 拉取（此后仅 +1 = after 快照自身的对照读）
+    // 拦截先于数据范围：编排零 get_entries 拉取（此后仅 +1 = after 快照自身的对照读）
     expect(h.client.getEntries.mock.calls.length).toBe(getEntriesBeforeRevoke + 1)
     // ④ history 缓存清理与 ⑥′ 派生态失效均未触达（撤回未发生，拦截先于缓存步骤）
     expect(h.evictSpy).not.toHaveBeenCalled()

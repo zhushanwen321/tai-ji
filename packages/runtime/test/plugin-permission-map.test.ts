@@ -101,7 +101,7 @@ describe('plugin-permission-map SSOT（AC-I6）', () => {
     const orphans = [...registeredMethods].filter(m => !ssot.has(m))
     expect(orphans, `methods registered but missing from PLUGIN_RPC_METHODS: ${orphans.join(', ')}`).toEqual([])
     // 数量级回归锚点：47（agent5 commands3 config3 hooks2 notify1 sessionData4
-    // sessions8 storage8 tools2 ui6 views2 workspace3）+ AP-4 读面 6（readEntries/
+    // sessions8 storage8 tools2 ui6 views2 workspace3）+ AP-4 读侧 6（readEntries/
     // getCommands/register+unregisterEntryInvalidation 4 + activate 族 2）+ ui 命令式
     // 点位 1（updateHeaderAction，[u5b] handler 已落地转正）= 54。
     // registeredMethods.size 同步锚点：54/54。
@@ -139,7 +139,7 @@ describe('plugin-permission-map SSOT（AC-I6）', () => {
       'plugin.sessions.list', 'plugin.sessions.get', 'plugin.sessions.getActive',
       'plugin.sessions.registerCreate', 'plugin.sessions.registerDestroy',
       'plugin.sessions.unregisterCreate', 'plugin.sessions.unregisterDestroy',
-      // AP-4 读面（U2）：数据读 + entry 失效订阅族 + 激活订阅族（[u5b] handler 均已实装）
+      // AP-4 读侧（U2）：数据读 + entry 失效订阅族 + 激活订阅族（[u5b] handler 均已实装）
       'plugin.sessions.readEntries', 'plugin.sessions.getCommands',
       'plugin.sessions.registerEntryInvalidation', 'plugin.sessions.unregisterEntryInvalidation',
       'plugin.sessions.registerActivate', 'plugin.sessions.unregisterActivate',

@@ -115,7 +115,7 @@ afterEach(() => {
   loggerMock.error.mockClear();
 });
 
-/** 构造最小 closed 通知（G4 文案断言面在 buildLlmContent 段）。 */
+/** 构造最小 closed 通知（G4 文案断言范围在 buildLlmContent 段）。 */
 const notifyRecord = (id: string, extra: Record<string, unknown> = {}) => ({
   id,
   status: "closed" as const,

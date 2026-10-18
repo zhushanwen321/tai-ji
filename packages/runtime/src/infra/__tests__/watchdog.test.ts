@@ -265,12 +265,12 @@ describe('renderer 广播通知（WatchdogMemoryPressurePayload 契约）', () =
     const status = h.handle.getStatus()
     expect(status.lastSample).not.toBeNull()
     expect(status.consecutiveAboveWarn).toBe(WATCHDOG_SUSTAIN_TICKS + 2)
-    expect(status.level).toBe('critical') // 判定照算（观测面）
+    expect(status.level).toBe('critical') // 判定照算（观测范围）
     h.handle.stop()
   })
 })
 
-describe('采样观测与收尾（oe-audit C4：24h 采样环已删，观测面 = lastSample + 计数器）', () => {
+describe('采样观测与收尾（oe-audit C4：24h 采样环已删，观测范围 = lastSample + 计数器）', () => {
   beforeEach(() => {
     vi.useFakeTimers()
   })

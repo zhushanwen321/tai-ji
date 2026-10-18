@@ -243,7 +243,7 @@ describe('extractSrcExportNames', () => {
     expect([...names].sort()).toEqual(['A', 'B', 'D', 'I', 'NS', 'T', 'default'])
     expect(problems).toEqual([])
   })
-  it('裸 export * from 记 problems（重导出面无法文本枚举）', () => {
+  it('裸 export * from 记 problems（重导出清单无法文本枚举）', () => {
     const { problems } = extractSrcExportNames('export * from "./x"', 't')
     expect(problems.some((p) => p.includes('export * from'))).toBe(true)
   })
@@ -362,7 +362,7 @@ describe('gateTwo', () => {
       rmSync(dir, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 })
     }
   })
-  it('导出面漂移 → fail 差集（串联 reportExportDrift）', () => {
+  it('导出清单漂移 → fail 差集（串联 reportExportDrift）', () => {
     const dir = makeFixture({ 'src/sub.ts': SRC, 'dist/sub.d.cts': 'export { A }\n', 'dist/sub.d.ts': DCTS_FULL })
     try {
       const { errors } = withCapturedConsole(() => gateTwo(PKG, [SUB], dir))

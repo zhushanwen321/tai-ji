@@ -2,7 +2,7 @@
 //
 // [collect 退役 + v1 快照退役] sync collect 批机制本体（SyncCollectDomain/E9 dispose
 // 转账/flushBatch/预算热读/manifest 屏障）与 v1 全量快照写点（reportSubagentRecord /
-// toSubagentRecordEntry）已整体删除，本文件保留的非批覆盖面（真实文件通路）：
+// toSubagentRecordEntry）已整体删除，本文件保留的非批覆盖范围（真实文件通路）：
 //   1. 存量 entry 读侧检查：终态字段经 v2 条目对（registered/settled）扫描派生视图可见
 //      （派生口径 = collectV2EntryPairs + v2PairToRecord，rebuildEntryRecord 已退役）；
 //   2. entry-born orphan 收编（recoverEntryOnlyOrphans）+ 收编幂等；P-rebuild /

@@ -102,7 +102,7 @@ describe("capability-gate（D3-④ 拦截矩阵）", () => {
     //——zcode record 无 pi sessionFile 锚，检查按锚缺失给 message/reopen 指引）。
     expect(() => gate(ZCODE_CAPS, { fork: true })).not.toThrow();
     expect(() => gate(ZCODE_CAPS, { forkFromSessionFile: "/tmp/sess.jsonl" })).not.toThrow();
-    // 能力位未变的拦截面（maxTurns）不随 conversation/sandbox 升级回退
+    // 能力位未变的拦截范围（maxTurns）不随 conversation/sandbox 升级回退
     const err = gateError(ZCODE_CAPS, { maxTurns: 10 });
     expect(err.code).toBe("engine_capability_unsupported");
     expect(err.message).toMatch(/不支持 maxTurns/);
@@ -136,7 +136,7 @@ describe("capability-gate（D3-④ 拦截矩阵）", () => {
     }
   });
 
-  it("[V4④ 正向] steer/fork 通道族双 unsupported 的引擎仍拦（cold 之外的历史拦截面不回退）", () => {
+  it("[V4④ 正向] steer/fork 通道族双 unsupported 的引擎仍拦（cold 之外的历史拦截范围不回退）", () => {
     const unsupported: EngineCapabilities = { ...ZCODE_CAPS, steer: "unsupported", conversation: "unsupported" };
     const cases: Array<[TaskShapeForGate, RegExp]> = [
       [{ fork: true }, /不支持 fork/],
@@ -229,7 +229,7 @@ describe("assertGateCapabilitiesMatched（manifest vs initialize 应答，gate �
     expect(() => assertGateCapabilitiesMatched("fake", strong, strong)).not.toThrow();
   });
 
-  it("非 gate 位不一致 → 不判定不抛（无论强弱一律 warn 留痕，归 EngineClient 诊断面）", () => {
+  it("非 gate 位不一致 → 不判定不抛（无论强弱一律 warn 留痕，归 EngineClient 诊断范围）", () => {
     const manifest = { ...ZCODE_CAPS, personaInjection: "file" as const, eventGranularity: "stream" as const, sessionRead: "full" as const, resume: "native" as const, interrupt: "native" as const, permissionMode: "native" as const, schemaEnforcement: "native" as const };
     const weaker = { ...ZCODE_CAPS, personaInjection: "prompt" as const, eventGranularity: "coarse" as const, sessionRead: "outcome-only" as const, resume: "unsupported" as const, interrupt: "kill-only" as const, permissionMode: "fixed" as const, schemaEnforcement: "emulated" as const };
     expect(() => assertGateCapabilitiesMatched("fake", manifest, weaker)).not.toThrow();

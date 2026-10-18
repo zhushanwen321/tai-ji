@@ -20,7 +20,7 @@
  *      形态：薄壳随派发窗口生灭，run 收尾 finalizeRun 遍历窗口实例 dispose 杀薄壳）。
  *
  * 可复用登记声明：本 spec 是 E2E-BATCH-04 的可复用真机资产（后续触碰 abort/收尾/
- * 引擎进程回收行为面时直接执行本文件，不再重建一次性剧本）。
+ * 引擎进程回收行为范围时直接执行本文件，不再重建一次性剧本）。
  *
  * 执行侧约定（与 E2E-BATCH-01 同族）：
  * - 触发：scope diff 命中时开发期按改动范围空载串行执行；双凭证门 = TAIJI_PI_LIVE=1 +
@@ -569,7 +569,7 @@ test('S4 (batch real): 派发后 abort → run-settled(cancelled) + 通知照达
     await page.screenshot({ path: testInfo.outputPath('s4-aborted.png'), fullPage: true })
     if (consoleCap.errors.length > 0) {
       writeDiag('batch-s4-console-errors.json', { errors: consoleCap.errors.slice(-50) })
-      console.warn(`[batch-s4] renderer console errors: ${consoleCap.errors.length} 条（diag 已落盘，非断言面）`)
+      console.warn(`[batch-s4] renderer console errors: ${consoleCap.errors.length} 条（diag 已落盘，非断言范围）`)
     }
     console.log(`[batch-s4] PASS：runId=${runId} cancelled 收尾、通知照达、零成员任务残留、引擎宿主薄壳已退出`)
   } finally {

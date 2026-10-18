@@ -1,7 +1,7 @@
 /**
  * W2 TDD 测试：ReleaseChecker（自动升级检测后端，多源编排版）。
  *
- * 多源改造（update-multi-source §4.2①-⑥）后的覆盖面：
+ * 多源改造（update-multi-source §4.2①-⑥）后的覆盖范围：
  *   W2TC1 happy path：主源 /releases/latest 返回 v0.9.0 → 胜出即出循环（次源零请求）
  *   W2TC2 三重 prerelease 过滤：防御 b（prerelease/draft）checker 循环内拦截 →
  *         该源「无新版」→ 次源；防御 c（tag 正则）→「该源无新版」（循环内 per-source）
@@ -1290,7 +1290,7 @@ describe('manifest 填充与源归类', () => {
 })
 
 // ════════════════════════════════════════════════════════════════
-// 诊断接线（S1/S2/F5 观测面）：source-selection / source-failover
+// 诊断接线（S1/S2/F5 观测范围）：source-selection / source-failover
 // ════════════════════════════════════════════════════════════════
 describe('诊断登记接线', () => {
   let originalFetch: typeof globalThis.fetch
@@ -1327,7 +1327,7 @@ describe('诊断登记接线', () => {
       order: ['github', 'gitcode'],
       winner: 'gitcode',
       probe: { executed: false, reason: 'resolver-internal' },
-      tags: { gitcode: 'v0.9.0' }, // github 无响应 → 缺 key（F5 观测面语义）
+      tags: { gitcode: 'v0.9.0' }, // github 无响应 → 缺 key（F5 观测范围语义）
     })
     expect(errorLogMocks.logSourceFailover).toHaveBeenCalledWith({
       segment: 'check',
@@ -1386,7 +1386,7 @@ describe('诊断登记接线', () => {
     )
   })
 
-  it('auto 路径透传 resolver 探测详情（S2 观测面）：executed=true + results 对齐 getLastProbeOutcome', async () => {
+  it('auto 路径透传 resolver 探测详情（S2 观测范围）：executed=true + results 对齐 getLastProbeOutcome', async () => {
     resolverMocks.getLastProbeOutcome.mockReturnValue({
       via: 'probe',
       decidedAt: 1_700_000_000_000,

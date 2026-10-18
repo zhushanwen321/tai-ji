@@ -2,7 +2,7 @@
 //
 // 覆盖（impl-plan §2.2 / 验收 A6①⑦ / A8①④ / §7.2 R9-2/R9-2b/R9-3）：
 //   帧往返 / initialize 握手与 pidfile 写入 / 反向通知路由（含镜像落项）/
-//   host/askUser ack 两阶段 / 超时域二分（数据面 10s 判死 vs 交互面不计时，fake timers）/
+//   host/askUser ack 两阶段 / 超时域二分（数据范围 10s 判死 vs 交互面不计时，fake timers）/
 //   崩溃重建 3 次退避 + 不可用 / 版本协商 mismatch / killAll 按进程组终止（POSIX 真进程）/ dispose。
 // stdin fd 不外泄（R9-4②）由 SDK spawn 单测兜底，core 侧不重测。
 
@@ -220,7 +220,7 @@ describe("EngineClient 反向通知路由（run 作用域 + 镜像）", () => {
     expect(client.mirror.size).toBe(0);
   });
 
-  it("host/log 数据面 → 缺省 logger facade 不抛（log 注入点已删，恒走缺省）", async () => {
+  it("host/log 数据范围 → 缺省 logger facade 不抛（log 注入点已删，恒走缺省）", async () => {
     const { client, cleanup } = makeClient({
       args: [
         FAKE_ENGINE,
@@ -273,7 +273,7 @@ describe("stdout 半行上限（MAX_LINE_BYTES：残片丢头留尾，防无界�
   }, 20_000);
 });
 
-describe("镜像桥接 → core 镜像映射（u7a 数据面桥接）", () => {
+describe("镜像桥接 → core 镜像映射（u7a 数据范围桥接）", () => {
   // bridge 写的是 core 进程级单例镜像（globalThis[Symbol.for] 槽），测试间必须隔离。
   beforeEach(() => {
     _resetCoreSpawnedChildrenMirrorForTest();
@@ -388,7 +388,7 @@ describe("host/askUser ack 两阶段（R9-2）", () => {
 });
 
 describe("超时域二分（fake timers，R9-2 / R9-2b）", () => {
-  it("快答数据面挂起 10s → 引擎故障：杀进程 + 在途 run 失败（engine_crashed）", async () => {
+  it("快答数据范围挂起 10s → 引擎故障：杀进程 + 在途 run 失败（engine_crashed）", async () => {
     vi.useFakeTimers();
     const { client, cleanup } = makeClient({
       args: [
