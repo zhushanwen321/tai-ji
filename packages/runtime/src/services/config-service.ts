@@ -35,6 +35,11 @@ import {
   type RenameStyle,
   type CodemodeEnabledResult,
   type CodemodeSetEnabledResult,
+  type NetworkProxyConfig,
+  type NetworkProxyStats,
+  type NetworkProxyStatsRange,
+  type NetworkProxyTestResult,
+  type NetworkProxyValidationResult,
 } from '@taiji/shared'
 import type { IConfigService } from '../interfaces.js'
 import type { RenamePromptSnapshot } from './rename-session-config.js'
@@ -75,6 +80,13 @@ import {
   setSmartContextExcludedModels as setSmartContextExcludedModelsImpl,
   type SmartContextConfigSnapshot,
 } from './smart-context-config.js'
+import {
+  getNetworkProxyConfig as getNetworkProxyConfigImpl,
+  setNetworkProxyConfig as setNetworkProxyConfigImpl,
+  getNetworkProxyStats as getNetworkProxyStatsImpl,
+  resetNetworkProxyStats as resetNetworkProxyStatsImpl,
+  testNetworkProxyConnection as testNetworkProxyConnectionImpl,
+} from './network-proxy-config.js'
 import { loadAppConfig as loadAppConfigImpl, saveAppConfig as saveAppConfigImpl, type SaveAppConfigResult } from './app-config-store.js'
 import { isModelsStoreCorrupted as isModelsStoreCorruptedImpl } from '../infra/pi/pi-provider-store.js'
 import { SETTINGS_CORRUPTED, errorCodeOf, toErrorMessage } from '../utils/errors.js'
@@ -433,6 +445,34 @@ export class ConfigService implements IConfigService {
   /** 设置排除模型列表（过滤无 "/" 条目去重后写入 excludedModels 字段）。 */
   setSmartContextExcludedModels(models: string[]): void {
     setSmartContextExcludedModelsImpl(models)
+  }
+
+  // ── LLM 网络代理配置（llm-network-proxy 设计，单行委托 network-proxy-config）──
+  // 独立 ext-config 文件（写入 0600）+ stats 读聚合 + 测试连接两段探测，逻辑在域模块内。
+
+  /** 读取网络代理配置快照（文件缺失/坏 JSON/字段非法回默认值）。 */
+  getNetworkProxyConfig(): NetworkProxyConfig {
+    return getNetworkProxyConfigImpl()
+  }
+
+  /** 写入网络代理配置（校验失败返回错误清单不落盘；成功持锁 RMW 覆盖四字段，mode 0o600）。 */
+  setNetworkProxyConfig(config: NetworkProxyConfig): NetworkProxyValidationResult {
+    return setNetworkProxyConfigImpl(config)
+  }
+
+  /** 测试连接两段探测（TCP 连代理 + 规则非空时经代理探规则首条主机名 443）。 */
+  testNetworkProxyConnection(config: NetworkProxyConfig): Promise<NetworkProxyTestResult> {
+    return testNetworkProxyConnectionImpl(config)
+  }
+
+  /** 读取请求统计（按时间范围聚合；all 档超限截断时附 truncatedNote）。 */
+  getNetworkProxyStats(range: NetworkProxyStatsRange): { stats: NetworkProxyStats[]; truncatedNote?: string } {
+    return getNetworkProxyStatsImpl(range)
+  }
+
+  /** 追加重置水位行（读侧只累计最后一个水位之后的行，效果 = 清零）。 */
+  resetNetworkProxyStats(): void {
+    resetNetworkProxyStatsImpl()
   }
 
   // ── Scoped Models（委托 provider-extras-store）──

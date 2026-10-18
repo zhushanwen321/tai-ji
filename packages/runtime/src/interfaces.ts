@@ -41,6 +41,11 @@ import type {
   CodemodeEnabledResult,
   CodemodeSetEnabledResult,
   SendPromptReason,
+  NetworkProxyConfig,
+  NetworkProxyStats,
+  NetworkProxyStatsRange,
+  NetworkProxyTestResult,
+  NetworkProxyValidationResult,
 } from '@taiji/shared'
 import type { SubagentEngineConfigView } from '@zhushanwen/extension-protocol'
 import type { SaveAppConfigResult } from './services/app-config-store.js'
@@ -663,6 +668,17 @@ export interface IConfigService {
   setSmartContextThresholds(thresholds: number[]): void
   /** 设置排除模型列表（过滤无 "/" 条目去重后写入 excludedModels 字段）。 */
   setSmartContextExcludedModels(models: string[]): void
+  // ── LLM 网络代理配置（llm-network-proxy 设计 §5 U3）──
+  /** 读取网络代理配置快照（ext-config 文件，缺失/坏 JSON/字段非法回默认值）。 */
+  getNetworkProxyConfig(): NetworkProxyConfig
+  /** 写入网络代理配置：校验失败返回错误清单不落盘；成功持锁 RMW 覆盖四字段（文件 0600）。 */
+  setNetworkProxyConfig(config: NetworkProxyConfig): NetworkProxyValidationResult
+  /** 测试连接两段探测（TCP 连代理 + 规则非空时经代理探规则首条主机名 443），失败段可归因。 */
+  testNetworkProxyConnection(config: NetworkProxyConfig): Promise<NetworkProxyTestResult>
+  /** 读取请求统计（24h/7d 时间过滤 / all 截断保尾窗口累计；截断发生时附 truncatedNote）。 */
+  getNetworkProxyStats(range: NetworkProxyStatsRange): { stats: NetworkProxyStats[]; truncatedNote?: string }
+  /** 追加重置水位行（读侧只累计最后一个水位之后的行，效果 = 统计清零）。 */
+  resetNetworkProxyStats(): void
   // ── Scoped Models（scoped-model 设计文档 §3.3 D2）──
   /** 读取 scoped models 白名单（providers.json 顶层 scopedModels 字段）。空数组 = 未启用。 */
   getScopedModels(): string[]

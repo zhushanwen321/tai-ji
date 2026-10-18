@@ -29,10 +29,17 @@ function tmpPathOf(filePath: string, uniqueSuffix?: string): string {
   return `${filePath}.tmp_${uniqueSuffix ?? nextTmpSuffix()}`
 }
 
-export function atomicWrite(filePath: string, data: string, uniqueSuffix?: string): void {
+/**
+ * @param mode 可选的落盘文件权限（如 0o600）。经 writeFileSync 的 mode 参数在创建 tmp 时
+ *   一次性生效（无「先 0644 落盘再补 chmod」的权限竞态窗口），rename 后目标文件继承该
+ *   权限——rename 在 POSIX/NTFS 上保留 tmp 的 inode 与权限位。不传时与既有行为逐字节
+ *   一致（默认 tmp 名 + umask 决定权限），既有调用方零行为变化。
+ */
+export function atomicWrite(filePath: string, data: string, uniqueSuffix?: string, mode?: number): void {
   const tmpPath = tmpPathOf(filePath, uniqueSuffix)
   try {
-    writeFileSync(tmpPath, data, 'utf-8')
+    if (mode !== undefined) writeFileSync(tmpPath, data, { encoding: 'utf-8', mode })
+    else writeFileSync(tmpPath, data, 'utf-8')
     renameSync(tmpPath, filePath)
   } catch (e) {
     try { unlinkSync(tmpPath) } catch { void 0 /* 清理失败不掩盖原错误 */ }
