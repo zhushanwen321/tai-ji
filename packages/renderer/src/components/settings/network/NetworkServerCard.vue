@@ -45,7 +45,7 @@
       </SettingRow>
       <SettingRow :label="t('settings.network.port')">
         <Input
-          v-model="draft.port"
+          v-model="portDraft"
           data-testid="network-port-input"
           type="number"
           :min="1"
@@ -150,6 +150,16 @@ const { error: toastError } = useToast()
 const draft = defineModel<NetworkProxyDraft>('draft', { required: true })
 defineProps<{ /** 保存中（由 page 的 createExplicitSave.saving 透传，防重入） */ saving: boolean }>()
 const emit = defineEmits<{ save: [] }>()
+
+/** 端口草稿边界（draft 契约 = port 字符串承载，network-page-model 头注）：type=number 透传到
+ * 原生 input 后，Vue 内建 v-model 对 number 输入经 looseToNumber 产出数字——边界处还原
+ * 字符串，保存/测试的 Number 化仍由 buildConfigFromDraft + shared 校验统一承担。 */
+const portDraft = computed<string>({
+  get: () => draft.value.port,
+  set: (v) => {
+    draft.value.port = String(v)
+  },
+})
 
 /** 协议 Select 桥（reka 回填 AcceptableValue；运行时判型收窄回 NetworkProxyProtocol，TtsPage 同款）。 */
 const protocolModel = computed<NetworkProxyDraft['protocol']>({

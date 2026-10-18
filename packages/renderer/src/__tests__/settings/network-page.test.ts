@@ -270,6 +270,23 @@ describe('NetworkPage（llm-network-proxy U4 网络代理页）', () => {
     wrapper.unmount()
   })
 
+  it('测试连接·改端口后（A14 真机缺陷回归）：number input 的 v-model 经 looseToNumber 产出数字，边界还原字符串承载——测试不炸且归因文案照常渲染', async () => {
+    const wrapper = mountPage()
+    await flushPromises()
+
+    // type=number 透传原生 input 后 Vue v-model 恒经 looseToNumber：用户编辑端口即得数字
+    // 草稿（修复前此处 draft.port.trim is not a function，onTest 同步抛错）
+    await setInput(wrapper, 'network-port-input', '1')
+    await wrapper.find('[data-testid="network-test-btn"]').trigger('click')
+    await flushPromises()
+
+    expect(transportApiMock.testNetworkProxy).toHaveBeenCalledTimes(1)
+    const result = wrapper.find('[data-testid="network-test-result"]')
+    expect(result.exists()).toBe(true)
+    expect(result.text()).toContain('代理连接成功')
+    wrapper.unmount()
+  })
+
   it('广播订阅：草稿干净时广播刷新表单；unmount 调用清理函数', async () => {
     const unsub = vi.fn()
     let handler: ((config: NetworkProxyConfig) => void) | null = null
