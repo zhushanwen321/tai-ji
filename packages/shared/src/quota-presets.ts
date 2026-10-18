@@ -1,7 +1,7 @@
 /**
  * Coding Plan 额度查询 — Provider 预设配置。
  *
- * SSOT：5 个内置 provider 的 fetcher 映射、认证方式、自动关联规则。
+ * SSOT：内置 provider 的 fetcher 映射、认证方式、自动关联规则。
  * 设计文档：docs/architecture/v3-specs/coding-plan-quota/design.md §2.2.1
  */
 
@@ -38,7 +38,7 @@ export interface QuotaPreset {
   requiresWorkspace?: boolean
 }
 
-/** 内置 5 个 provider 预设（SSOT）。 */
+/** 内置 provider 预设（SSOT）。 */
 export const QUOTA_PRESETS: QuotaPreset[] = [
   {
     fetcher: 'zhipu',
@@ -98,6 +98,21 @@ export const QUOTA_PRESETS: QuotaPreset[] = [
     requiresWorkspace: true,
     helpUrl: 'https://opencode.ai/',
     helpText: '登录 opencode.ai 后，从浏览器 DevTools → Application → Cookies 复制完整 cookie 字符串',
+  },
+  {
+    fetcher: 'opendesign',
+    label: 'OpenDesign Coding Plan',
+    auth: ['cookie'],
+    match: {
+      baseUrlPattern: 'open-design.ai',
+      namePattern: '\\bopendesign\\b',
+    },
+    // 资源维度：额度挂在具体 workspace 下（2026-10-18 实测：额度查询 API 只认
+    // better-auth 会话 cookie，provider 的 sk-amr API Key 不被接受；workspace 由
+    // URL 路径决定，x-vela-workspace-id 请求头非必需）
+    requiresWorkspace: true,
+    helpUrl: 'https://open-design.ai/',
+    helpText: '登录 open-design.ai 后，在浏览器 DevTools 的 Network 面板找任意 amr-api 请求，复制其 Cookie 与 x-vela-workspace-id（workspace id）',
   },
 ]
 

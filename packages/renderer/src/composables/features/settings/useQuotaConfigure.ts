@@ -40,17 +40,18 @@ import { useQuotaStore } from '@/stores/quota'
  * Workspace 草稿的保存前归一化（模块级辅助）。
  * - 空 → required 报错（不发 RPC）。D13：空不再解释为「清除」，UI 侧由 readiness 置灰
  *   拦住这条路，这里只是对称的防御（直接调用 saveAndTest 时也不会产出空串）
- * - 非空 → shared 归一化校验（完整 URL / 裸 wrk_ id → 规范额度页 URL）
+ * - 非空 → shared 归一化校验（按 fetcher 分流：完整 URL / 裸 id → 规范额度查询 URL）
  * - 非法输入 → invalid 报错（不发 RPC）；errorKey 由调用方经 i18n 渲染
  */
 function normalizeWorkspaceDraft(
   raw: string,
+  fetcherId: string | undefined,
 ): { ok: true; payload: string } | { ok: false; errorKey: string } {
   const trimmed = raw.trim()
   if (!trimmed) {
     return { ok: false, errorKey: 'settings.providerEdit.quotaWorkspaceRequired' }
   }
-  const normalized = normalizeQuotaWorkspaceUrl(trimmed)
+  const normalized = normalizeQuotaWorkspaceUrl(trimmed, fetcherId)
   if (!normalized.ok) {
     return { ok: false, errorKey: 'settings.providerEdit.quotaWorkspaceInvalid' }
   }
@@ -478,10 +479,11 @@ export function useQuotaConfigure(inputs: QuotaConfigureInputs): QuotaConfigureM
 
     configureError.value = ''
 
-    // Workspace：明文回显字段，传归一化后的草稿（D13：永不传 ''）；空 / 非法输入本地拦截
+    // Workspace：明文回显字段，传归一化后的草稿（D13：永不传 ''）；空 / 非法输入本地拦截。
+    // 归一化分流按当前草稿 fetcher（与 runtime 侧同源：同 input 同 fetcher 同规则）
     let workspacePayload: string | undefined
     if (needsWorkspace.value) {
-      const normalized = normalizeWorkspaceDraft(draft.value.workspace)
+      const normalized = normalizeWorkspaceDraft(draft.value.workspace, draftFetcher ?? activePreset.value?.fetcher)
       if (!normalized.ok) {
         configureError.value = t(normalized.errorKey)
         return

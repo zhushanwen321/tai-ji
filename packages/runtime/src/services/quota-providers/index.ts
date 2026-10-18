@@ -2,7 +2,7 @@
  * Quota provider fetcher 注册表。
  *
  * QUOTA_FETCHERS: Map<fetcherId, ProviderQuotaFetcher>
- * 5 个内置 provider fetcher，为后续 plugin 化铺路。
+ * 内置 provider fetcher，为后续 plugin 化铺路。
  */
 
 import type { ProviderQuotaFetcher } from '@taiji/shared'
@@ -11,6 +11,7 @@ import { kimiFetcher } from './kimi.js'
 import { minimaxFetcher } from './minimax.js'
 import { mimoFetcher } from './mimo.js'
 import { opencodeFetcher } from './opencode.js'
+import { opendesignFetcher } from './opendesign.js'
 
 /** 内置 fetcher 注册表。key = fetcher id（匹配 QuotaPreset.fetcher）。 */
 export const QUOTA_FETCHERS: Map<string, ProviderQuotaFetcher> = new Map([
@@ -19,4 +20,5 @@ export const QUOTA_FETCHERS: Map<string, ProviderQuotaFetcher> = new Map([
   [minimaxFetcher.id, minimaxFetcher],
   [mimoFetcher.id, mimoFetcher],
   [opencodeFetcher.id, opencodeFetcher],
+  [opendesignFetcher.id, opendesignFetcher],
 ])
