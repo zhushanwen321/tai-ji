@@ -635,7 +635,7 @@ pi 依赖宿主服务面更重——**两者拆分成本都不小**；zcode 仍�
 | `registerZcodeEngine(engineDataDir)` | 薄壳：确保 id `zcode` 的 CLI descriptor 已注册，并把 `engineDataDir` 记入 descriptor（见下映射） | zsw 改用发现器后 |
 | `createZcodeEngine(deps)` | 返回 `RemoteEngine('zcode')`（实现 `EnginePort`） | 同上 |
 
-**deps → CLI 进程映射（zsw 调用面实测：`runner-core.js:163` 传 `{engineDataDir, cliPath?}`，`registration.ts:22` 的
+**deps → CLI 进程映射（zsw 调用点实测：`runner-core.js:163` 传 `{engineDataDir, cliPath?}`，`registration.ts:22` 的
 `engineDataDir` 为必填）**：
 
 | 旧 deps 字段 | 新落点 | 说明 |

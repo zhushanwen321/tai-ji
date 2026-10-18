@@ -220,7 +220,7 @@ pi 进程（每 session 一个）                     runtime（Node sidecar） 
 
 **D8：session 隔离与生命周期（选定）**
 - **采用**：① renderer 侧任务状态用 `useSessionScopedState` 工厂建 per-session Map 分区（ADR-0049 范式，`core/src/foundation/use-session-scoped-state.ts:103`），WS handler 一律 `updateFor(capturedSid)`；**WS 消息 listener 收敛为模块级单例注册（refCount 或应用生命周期持有），消费组件（列表视图 + split mode 下 per-pane 多实例的 DetailPanel）只读写分区状态，不各自挂 listener**（AGENTS.md 规则 2：Event bus listener 防重复注册）；**筛选桶状态同样按 session 分区，组件纯读，禁 watch(sessionId) 清空**（设计期经独立筛选分区 composable 承载，该模块已随 L2 视图退役删除；同语义现由 composer 任务托盘 bash 面板自持）；② 轮询/广播域严格以 sessionId 为键（registry 目录、message-bus publish、store 分区三层同键）；③ **watched 集合生命周期**：session 首次 `backgroundTask.list` RPC 即加入 watched（D3），退订挂 session 销毁汇聚点（session-service `removeSessionEntry`，与 reaper 触发面 A 同挂点，R1 审查建议采纳）——watched 集合上界 = 运行期内被查看过的 session 数，每 session 成本 = 1 次 stat/2s，可忽略；垃圾 sessionId（renderer 传错）同样入集合但 stat ENOENT 按空表静默处理（不告警刷屏，R2 I4）；split mode 双 pane 双 session 并存时 watched 自然是两 pane session 的并集（各自 list 过）；④ `session-destroyed` → renderer 分区清理（`useSidebar.deleteSession` 统一编排既有链路）+ runtime 侧移出 watched；⑤ fork/新 session 的 registry 目录为空 → 空态（C5，正确语义）。
-- **不采用**：全局单列表 + 过滤（违背 ADR-0049，切 session 竞态面大）；专设 subscribe/unsubscribe 协议消息（D3 已否）。
+- **不采用**：全局单列表 + 过滤（违背 ADR-0049，切 session 竞态风险大）；专设 subscribe/unsubscribe 协议消息（D3 已否）。
 - **证据**：ADR-0049（架构规则 8）+ 规则 2；message-bus per-session seq（`message-bus.ts:180-186`）；ViewHostStore 双键分区同款先例（§2.2）；`removeSessionEntry` 汇聚点先例（reaper 触发面 A）。
 - **效果**：G4 构造性成立（三层同键隔离）；listener 无重复注册面。
 

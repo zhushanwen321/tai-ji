@@ -103,7 +103,7 @@
 
 | 依赖 | 触点 | 性质 | 处置（→ §3.3 D3） |
 |------|------|------|------|
-| `@zhushanwen/pi-extension-logger` | 非测试 import 共 30 处（execution / orchestration / **shared/resource-discovery.ts**） | 宿主协作件（自身 peer 依赖 pi SDK） | **port 化**：core 内部 log 端口，调用面极薄（全是 getLogger） |
+| `@zhushanwen/pi-extension-logger` | 非测试 import 共 30 处（execution / orchestration / **shared/resource-discovery.ts**） | 宿主协作件（自身 peer 依赖 pi SDK） | **port 化**：core 内部 log 端口，调用范围极薄（全是 getLogger） |
 | `@earendil-works/pi-coding-agent` | 硬触点 5 文件：`engine/common/data-dir.ts` 与 `orchestration/config-loader.ts` 与 `orchestration/skill-discovery.ts` 的 `getAgentDir`（后两处为运行时值导入）、`ui-request-handler-factory.ts` 的 ExtensionContext 类型、`jsonl-run-store.ts` 的类型 | pi SDK 硬依赖 | **port 化 / 留壳**：数据根与发现根参数化（config-loader/skill-discovery 走 discovery/data 根端口）；jsonl-run-store 是 RunStore port 的 pi 实现留壳 |
 | `@zhushanwen/session-delivery` | `notifier.ts` 的 `createDelivery`（运行时投递） | pi 宿主协作件（已发 npm 0.3.0，但语义是 taiji 桌面投递） | **port 化**：通知端口 |
 | `@zhushanwen/pi-pending-notifications` | `session-pending.ts` 的 `countActiveFromEntries` | pi 宿主协作件（peer pi SDK，且传递依赖 logger） | **port 化**：并入通知端口 |
@@ -167,10 +167,10 @@ export interface HostServices {
    *  未 configureCore 即消费 → 抛 core_host_not_configured（§3.4，错误含宿主接入示例
    *  路径）；导出 DEFAULT_DATA_ROOT（~/.subagent-core）供宿主显式采用 */
   dataRoot(): string;
-  /** 结构化日志：对齐现 getLogger 调用面（level/component/message/data）。缺省 console
+  /** 结构化日志：对齐现 getLogger 调用范围（level/component/message/data）。缺省 console
    *  （debug 级缺省 no-op，对齐 pi-extension-logger 语义防未配置窗口刷屏；warn/error
    *  保持 console——一致性审查 r2 注记）。
-   *  解析时机契约：core 保留 getLogger(component) 调用面，返回 facade 代理 logger——
+   *  解析时机契约：core 保留 getLogger(component) 调用范围，返回 facade 代理 logger——
    *  每次 log 调用时动态解析当前宿主实现。模块顶层 `const logger = getLogger(...)`
    *  （切面内实测 30 处全部为此形态）保持合法：configureCore 前的日志落缺省 console，
    *  配置后已缓存的顶层 logger 透明切换到宿主实现，无模块加载顺序依赖。 */
