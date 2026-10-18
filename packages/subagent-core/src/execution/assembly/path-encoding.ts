@@ -83,3 +83,19 @@ export function getSubagentRecordsDir(agentDir: string, mainCwd: string): string
 export function getSubagentModelSwitchResultsDir(agentDir: string, mainCwd: string): string {
   return path.join(agentDir, "subagents", encodeCwd(mainCwd), "model-switch");
 }
+
+/**
+ * 获取 subagent 定向消息请求结果目录（subagent-composer 2026-10-18，通道回执载体——
+ * /subagent-model 结果文件同款机制：client.prompt 对命令 handler 异常不拒绝（真机实测），
+ * 失败必须经请求作用域结果文件传回）。布局 = `<subagent 数据根>/message/`，数据根与
+ * getSubagentRecordsDir 同族（同 (agentDir, mainCwd) 入参、同 enc 段），extension
+ * （/subagents message 写入侧）与 runtime（session-records 读取侧）两侧 import 本单源。
+ * 文件形态 = `<requestId>.json`，请求作用域生命周期（写后读、读后即删）。
+ *
+ * @param agentDir agent 配置目录（如 ~/.pi/agent）
+ * @param mainCwd 树根主 agent 的工作目录（与 getSubagentRecordsDir 同一编码键）
+ * @returns 定向消息结果目录绝对路径
+ */
+export function getSubagentMessageResultsDir(agentDir: string, mainCwd: string): string {
+  return path.join(agentDir, "subagents", encodeCwd(mainCwd), "message");
+}

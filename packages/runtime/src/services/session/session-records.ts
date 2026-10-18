@@ -23,7 +23,8 @@
  * Facade 消费面：对外 9 方法 + invalidateRecordEntries 一行委托（ISessionService 契约
  * 不变，transport/index.ts 组合根经 Facade 委托到达——u-s5 同款形态）。
  */
-import { readFileSync, statSync } from 'node:fs'
+import { randomUUID } from 'node:crypto'
+import { existsSync, readFileSync, statSync, unlinkSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { dirname, join } from 'node:path'
 import type {
@@ -86,6 +87,7 @@ import type { WorkflowDagReply, WorkflowRunEventsReply } from '@taiji/shared'
 import { getPiAgentDir } from '../../infra/pi/pi-paths.js'
 import { logger } from '../../infra/logger.js'
 import { discoverAndRegisterEngines, engineConversationCapable } from '@zhushanwen/subagent-core/engine/engine-discovery-scan'
+import { getSubagentMessageResultsDir } from '@zhushanwen/subagent-core'
 import { isStrictlyUnder } from '../../utils/path-utils.js'
 import type { ISessionStore } from '../ports/session.js'
 import { toErrorMessage } from '../../utils/errors.js'
@@ -1010,6 +1012,7 @@ export class SessionRecords {
   ): SubagentRecord {
     const override = recordModelOverride(sessionId, query, record, resolved)
     const recent = recordRecentEffectiveModel(record)
+    ensureEngineRegistryForProjection()
     const chatCapable = engineConversationCapable(extractRecordEngine(record))
     return {
       ...record,
@@ -1472,7 +1475,13 @@ export class SessionRecords {
     if (action === 'cancel') {
       // 错误指向恢复动作：字段缺失是调用方协议错误，fail-fast 让 WS error envelope 暴露
       if (!params.subagentId) throw new Error('[session-service] subagentAction cancel: subagentId is required')
-      await client.prompt(`/subagents cancel ${params.subagentId}`)
+      // 结果文件回执（subagent-composer 2026-10-18）：client.prompt 对命令 handler 异常
+      // 不拒绝（resolve 语义），失败必须经请求作用域结果文件传回——renderer cancelSubagent
+      // 依赖 rejection 回滚乐观翻边。目录单源 = core getSubagentMessageResultsDir（与
+      // extension 写入侧同 enc 段）；读后即删（请求作用域生命周期，model-switch 通道同款）。
+      const cancelRequestId = randomUUID()
+      await client.prompt(`/subagents cancel ${params.subagentId} --req=${cancelRequestId}`)
+      this.consumeSubagentActionResultFile(sessionId, cancelRequestId)
       return
     }
     if (action === 'message') {
@@ -1485,7 +1494,12 @@ export class SessionRecords {
       // cancel/workflows 内部命令不挂（设计显式跳过，守卫白名单登记）。
       // [A1 接线] session cwd 作 project 扫描基准（D7）。
       const injection = await this.injector.inject(client, params.text, this.deps.getSessionCwd?.(sessionId))
-      await client.prompt(`/subagents message ${params.subagentId} ${encodeDirectiveText(injection.text)}`)
+      // 结果文件回执（同上）：messageHandler 同步拒绝（resurrect 守卫 / 无锚点 / 能力门）
+      // 与成功派发都经文件传回，失败抛分型错误 → WS error envelope → composer 车道
+      // toast + restoreSegments 恢复草稿（吞错会让 composer 把失败当成功，真机实测缺陷）。
+      const messageRequestId = randomUUID()
+      await client.prompt(`/subagents message ${params.subagentId} --req=${messageRequestId} ${encodeDirectiveText(injection.text)}`)
+      this.consumeSubagentActionResultFile(sessionId, messageRequestId)
       // [D-A2-2] notice 在发送成功后发布（与 dispatcher 时机契约同款）；prompt 失败路径
       // throw 不发。定向文本无 u- 标记 → skillNotice 的 clientUuid 缺省（类型可空）。
       publishSkillNotices(this.deps.getMessageBus(), sessionId, params.text, injection.notices)
@@ -1498,6 +1512,53 @@ export class SessionRecords {
     const injection = await this.injector.inject(client, params.task, this.deps.getSessionCwd?.(sessionId))
     await client.prompt(`/subagents start ${params.slug} ${encodeDirectiveText(injection.text)}`)
     publishSkillNotices(this.deps.getMessageBus(), sessionId, params.task, injection.notices)
+  }
+
+  /**
+   * 消费 /subagents 结果文件（subagent-composer 2026-10-18，model-switch 通道读侧同款）：
+   * 读一次 + 即删（请求作用域）。目录单源 = core getSubagentMessageResultsDir(agentDir,
+   * session cwd)——与 extension 写入侧（ENV_ROOT_CWD || ctx.cwd）同 enc 段；本侧 cwd 取
+   * deps.getSessionCwd（同一会话 cwd 投影）。缺失 = 通道级失败（handler 崩在写文件前 /
+   * 旧扩展无 --req 面）如实抛；scope:error → 抛分型错误（code 进 error envelope）。
+   */
+  private consumeSubagentActionResultFile(sessionId: string, requestId: string): void {
+    const cwd = this.deps.getSessionCwd?.(sessionId)
+    const resultsFile = cwd === undefined
+      ? undefined
+      : join(getSubagentMessageResultsDir(getPiAgentDir(), cwd), `${requestId}.json`)
+    let raw: string | undefined
+    try {
+      if (resultsFile !== undefined && existsSync(resultsFile)) {
+        raw = readFileSync(resultsFile, 'utf8').slice(0, 256 * 1024)
+      }
+    } catch (e) {
+      console.warn(`[session-service] subagent action result file read failed: ${toErrorMessage(e)}`)
+    } finally {
+      if (resultsFile !== undefined) {
+        try {
+          unlinkSync(resultsFile)
+        } catch { /* 读失败/并发读删竞态时 best-effort 清理，不遮蔽主错误面 */ }
+      }
+    }
+    if (raw === undefined) {
+      throw new Error(
+        'subagent action result missing——宿主命令回执缺失（通道失败）。恢复：重试该操作；' +
+        '若持续失败确认 pi 会话进程仍活跃（重新激活会话后重试）',
+      )
+    }
+    let parsed: unknown
+    try {
+      parsed = JSON.parse(raw)
+    } catch {
+      throw new Error('subagent action result corrupted（回执 JSON 解析失败，写读两侧同仓演化畸形）')
+    }
+    const file = parsed as { scope?: string; error?: { code?: string; message?: string } }
+    if (file.scope === 'error') {
+      const err = new Error(file.error?.message ?? 'subagent action rejected (no message)')
+      ;(err as Error & { code?: string }).code = file.error?.code ?? 'subagent_action_failed'
+      throw err
+    }
+    // scope:'ok'（或未知 scope 的宽容读：无 error 即成功——写读两侧同仓，畸形面归通道守卫）
   }
 
   // ── 销毁清理（Facade removeSessionEntry 第 ⑤ 步直调，与 TraceSync/SessionStateProjection.onSessionDisposed 并列）──
@@ -1826,6 +1887,30 @@ function defaultRuntimeEngineDiscovery(): string[] {
     dataDir: getDataDir(),
   })
   return result.discovered.map((entry) => entry.id)
+}
+
+/**
+ * 投影期能力派生的注册表装载（幂等单次，subagent-composer chatCapable）：引擎注册表
+ * 只在「engines.json 缺失 → 发现回退」路径被动装载——engines.json 在场（模板种子 /
+ * 常态安装）时全进程零扫描，getEngineDescriptor 恒 undefined，能力派生恒保守 false。
+ * 本处在首个 record 能力派生前触发一次全量扫描；env 根由 ProcessManager 构造期
+ * ensureRuntimeEngineRootsEnv 补齐（先于任何发现调用点），此后扫描可命中 staged 引擎。
+ * 进程生命周期内只扫一次：引擎集变更（装包/升级）经引擎包升级流程重启生效，注册表
+ * same-id 覆盖语义对单次扫描内的重复发现幂等。扫描失败 warn 后按保守缺省派生（false）。
+ */
+let projectionEngineDiscoveryDone = false
+function ensureEngineRegistryForProjection(): void {
+  if (projectionEngineDiscoveryDone) return
+  projectionEngineDiscoveryDone = true
+  try {
+    discoverAndRegisterEngines({
+      hostKind: 'runtime',
+      agentDir: getPiAgentDir(),
+      dataDir: getDataDir(),
+    })
+  } catch (e) {
+    console.warn(`[session-records] engine discovery for chatCapable projection failed: ${toErrorMessage(e)}`)
+  }
 }
 
 /**

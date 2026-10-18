@@ -613,7 +613,7 @@ export { reapOrphanRuns } from "./execution/persistence/run-state-evidence.ts";
 // rootCwd 贯穿 env 名单源（根进程无 env → ctx.cwd 兜底，与 SessionBaselines 推导
 // 同式——壳侧复制推导式时经此常量锚定 env 名防漂移）。壳生产消费必须走 barrel。
 export { ENV_ROOT_CWD } from "./execution/service/session-baselines.ts";
-export { getSubagentRecordsDir, getSubagentModelSwitchResultsDir } from "./execution/assembly/path-encoding.ts";
+export { getSubagentRecordsDir, getSubagentModelSwitchResultsDir, getSubagentMessageResultsDir } from "./execution/assembly/path-encoding.ts";
 
 // resolvePiSessionScopedDir：pi 宿主 sessionDir 布局（cwd slug + existsSync 探测）
 // 的单一权威源——pi 壳 session-lifecycle 的 resolveSessionDir 经 opts.agentDir
