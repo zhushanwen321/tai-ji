@@ -123,6 +123,23 @@ function normalizeHostList(raw: unknown): string[] {
 }
 
 /**
+ * 主机名条目写侧去重（设计 §3.1 文件不变量「同一主机名只存在一条规则」在保存侧的执行点）：
+ * 归一化后同键保留首条（大小写/末尾点变体算同一条，与匹配语义同一归一化函数）。匹配幂等
+ * 所以重复无行为差异，但文件形态按不变量收敛（D2 一致性审查 U5）。
+ */
+function dedupeHostList(entries: string[]): string[] {
+  const seen = new Set<string>()
+  const out: string[] = []
+  for (const entry of entries) {
+    const key = normalizeHostname(entry)
+    if (seen.has(key)) continue
+    seen.add(key)
+    out.push(entry)
+  }
+  return out
+}
+
+/**
  * 读取网络代理配置。文件不存在/坏 JSON/字段非法 → 对应字段回默认值（与 extension 读取侧
  * 回退语义一致）。不抛错（防御性读侧，getSmartContextConfig 同款）。
  */
@@ -156,8 +173,8 @@ export function setNetworkProxyConfig(next: NetworkProxyConfig): NetworkProxyVal
   rmwExtConfigField(getNetworkProxyConfigPath(), {}, networkProxyDefaultBase, (base) => {
     base['enabled'] = next.enabled
     base['proxy'] = next.proxy
-    base['noProxy'] = [...next.noProxy]
-    base['rules'] = [...next.rules]
+    base['noProxy'] = dedupeHostList(next.noProxy)
+    base['rules'] = dedupeHostList(next.rules)
   }, NETWORK_PROXY_CONFIG_FILE_MODE)
   return { ok: true }
 }

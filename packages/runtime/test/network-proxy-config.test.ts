@@ -129,6 +129,20 @@ describe('setNetworkProxyConfig（校验失败不落盘 / 成功 RMW 0600 / 序�
     const bad = { ...validConfig(), enabled: 'yes' } as unknown as NetworkProxyConfig
     expect(setNetworkProxyConfig(bad)).toEqual(validateNetworkProxyConfig(bad))
   })
+
+  it('写侧去重（设计 §3.1 文件不变量「条目唯一」的保存侧执行点）：归一化同键保留首条', () => {
+    mkdirSync(join(getPiAgentDir(), 'config'), { recursive: true })
+    const duped = validConfig({
+      rules: ['api.anthropic.com', 'API.Anthropic.com.', 'api.openai.com', 'api.anthropic.com'],
+      noProxy: ['localhost', 'LocalHost', '127.0.0.1'],
+    })
+    const result = setNetworkProxyConfig(duped)
+    expect(result.ok).toBe(true)
+    const parsed = JSON.parse(readFileSync(configPath(), 'utf-8')) as Record<string, unknown>
+    // 大小写/末尾点变体算同一条（与匹配语义同一 normalizeHostname）；保留首条原样写法
+    expect(parsed['rules']).toEqual(['api.anthropic.com', 'api.openai.com'])
+    expect(parsed['noProxy']).toEqual(['localhost', '127.0.0.1'])
+  })
 })
 
 describe('RMW 与 extension 侧锁协议互通（写后字段不丢）', () => {
