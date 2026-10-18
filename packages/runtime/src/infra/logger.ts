@@ -44,8 +44,8 @@
  *   sessionLog.end()
  *   await closeLogger()                     // shutdown：flush 所有写流后进程才可退出
  */
-import { createReadStream, createWriteStream, mkdirSync, readdirSync, renameSync, statSync, unlinkSync, type WriteStream } from 'node:fs'
-import { join } from 'node:path'
+import {createReadStream, createWriteStream, existsSync, mkdirSync, readdirSync, renameSync, rmSync, statSync, type WriteStream, unlinkSync} from 'node:fs'
+import {dirname, join} from 'node:path'
 import { pipeline } from 'node:stream/promises'
 // [crash-resilience §3.3 D6-⑦] 保留天数两进程共读同一函数（env 覆盖 || 默认）——merge 裁决保留 shared SSOT 形态
 import { readLogKeepDays } from '@taiji/shared'
@@ -536,6 +536,62 @@ export interface PiSessionLog {
   write(line: string | Uint8Array): void
   /** 结束写入（session 销毁 / pi exit 时调）。end 后 write 为 no-op。 */
   end(): void
+}
+
+/**
+ * [session-store-layout-inversion D5 补] rekey 时迁移会话 tee：create 路径 tee 先按
+ * tempId 落树、pi 真实 id 回读后 rekey——只换进程表键不迁移文件会让 turn 输出留在
+ * tempId 树成为孤儿（删除会话只回收真实 id 树，G1 破口）。旧树 logs/ 全部文件
+ * （含 size 轮转 .N.gz）逐个 mv 到新树 logs/；同名冲突（新树已有同日文件，restore
+ * 场景）跳过 + warn 不覆盖——两边都是 append-only 的 pi 输出，文件级合并在 logger
+ * 层不做（交给排障者按 boundary 行人工拼接，双方 boundary 行都在）。
+ * 旧树迁空后删除（防半空目录残留）。任一 fs 失败 best-effort 不抛（tee 迁移失败
+ * 不阻断会话创建；失败形态 = 文件留旧树，同旧布局平铺语义，无数据丢失）。
+ */
+export function migratePiSessionLogTree(oldSessionId: string, newSessionId: string): void {
+  if (!logsDir || oldSessionId === newSessionId) return
+  const fromDir = sessionLogFileOrNull(oldSessionId, 'probe') // <root>/<oldId>/logs/probe
+  const toDir = sessionLogFileOrNull(newSessionId, 'probe')
+  if (!fromDir || !toDir) return
+  const from = dirname(fromDir)
+  const to = dirname(toDir)
+  let entries: string[]
+  try {
+    entries = readdirSync(from)
+  } catch {
+    return // 旧树无 logs（无 tee 产生）→ 无需迁移
+  }
+  try {
+    mkdirSync(to, { recursive: true })
+  } catch {
+    return
+  }
+  for (const name of entries) {
+    const src = join(from, name)
+    const dst = join(to, name)
+    try {
+      if (existsSync(dst)) {
+        writeLogEntry('warn', '[logger] migratePiSessionLogTree: target exists, skip (boundary lines on both sides)', {
+          from: src,
+          to: dst,
+        })
+        continue
+      }
+      renameSync(src, dst)
+    } catch (e) {
+      writeLogEntry('warn', '[logger] migratePiSessionLogTree: rename failed (file stays in old tree)', {
+        src,
+        dst,
+        error: String(e),
+      })
+    }
+  }
+  try {
+    const rest = readdirSync(from)
+    if (rest.length === 0) rmSync(from, { recursive: true, force: true })
+  } catch {
+    // 清理失败不抛（半空目录无害）
+  }
 }
 
 /**

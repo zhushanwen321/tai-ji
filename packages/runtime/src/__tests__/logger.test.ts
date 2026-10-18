@@ -572,3 +572,43 @@ describe('logger 基础行为（自 test/logger.test.ts 归并）', () => {
     expect(matches).toHaveLength(1)
   })
 })
+
+describe('migratePiSessionLogTree（rekey tee 迁移，session-store-layout-inversion D5 补）', () => {
+  it('旧树文件全部迁到新树、旧树目录清除', async () => {
+    logger = await loadLogger()
+    logger.initLogger(dataDir)
+    const oldTree = join(dataDir, 'ext-sessions', 'sid-old', 'logs')
+    mkdirSync(oldTree, { recursive: true })
+    writeFileSync(join(oldTree, 'pi-2026-10-18.jsonl'), '{"first":"segment"}\n')
+    writeFileSync(join(oldTree, 'pi-2026-10-18.1.gz'), 'gz-bytes')
+
+    logger.migratePiSessionLogTree('sid-old', 'sid-new')
+
+    const newTree = join(dataDir, 'ext-sessions', 'sid-new', 'logs')
+    expect(existsSync(join(newTree, 'pi-2026-10-18.jsonl'))).toBe(true)
+    expect(existsSync(join(newTree, 'pi-2026-10-18.1.gz'))).toBe(true)
+    expect(existsSync(oldTree)).toBe(false) // 迁空后旧树目录清除
+  })
+
+  it('同名冲突跳过不覆盖（双方 boundary 行保留，warn 出声）', async () => {
+    logger = await loadLogger()
+    logger.initLogger(dataDir)
+    const oldTree = join(dataDir, 'ext-sessions', 'sid-old', 'logs')
+    const newTree = join(dataDir, 'ext-sessions', 'sid-new', 'logs')
+    mkdirSync(oldTree, { recursive: true })
+    mkdirSync(newTree, { recursive: true })
+    writeFileSync(join(oldTree, 'pi-2026-10-18.jsonl'), 'old\n')
+    writeFileSync(join(newTree, 'pi-2026-10-18.jsonl'), 'new\n')
+    logger.migratePiSessionLogTree('sid-old', 'sid-new')
+
+    expect(readFileSync(join(newTree, 'pi-2026-10-18.jsonl'), 'utf8')).toBe('new\n') // 不覆盖
+    expect(existsSync(oldTree)).toBe(true) // 冲突文件留旧树（不丢数据；skip warn 走
+    // writeLogEntry 进 runtime log——落盘面依赖主日志初始化，本用例不锚定）
+  })
+
+  it('旧树无 logs 目录 → no-op 不抛', async () => {
+    logger = await loadLogger()
+    logger.initLogger(dataDir)
+    expect(() => logger!.migratePiSessionLogTree('sid-none', 'sid-new')).not.toThrow()
+  })
+})
