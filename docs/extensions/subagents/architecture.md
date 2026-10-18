@@ -130,7 +130,7 @@ subagent 能力现由 5 类包协作，跨进程边界只有一处（宿主 ↔ 
 ## 5. 测试与验证
 
 - 单元/集成测试按包分布：`packages/subagent-core/src/**/__tests__/`、两个引擎包的 `src/__tests__/`、shell 的 `src/**/__tests__/`。
-- 协议一致性由 conformance 套件锁定（引擎 manifest、control 帧映射、run 帧映射）。
+- 协议一致性由 conformance 套件锁定（引擎 manifest、run 帧映射）；control 帧词表/映射由 `packages/subagent-engine-sdk/src/__tests__/control-protocol.test.ts` + `packages/runtime/src/__tests__/infra/subagent-control/control-frames.test.ts` 锁定（客户端连接语义见 `packages/subagent-core/src/__tests__/transport-runtime.test.ts`）。
 - 分层与测试策略见仓库根 [TEST-STRATEGY.md](../../../docs/TEST-STRATEGY.md) 与 [docs/testing/](../../testing/)。
 
 ## 6. 约束与权威文档

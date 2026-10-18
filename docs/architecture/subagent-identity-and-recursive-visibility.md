@@ -51,7 +51,7 @@ core 派发 run（run.params.task + ctx.identity 信封；宿主侧构造单点 
 |---|---|---|
 | manifest 主路径（父侧全文投影，收口点写入） | 收口后 manifest 命中：全文不变 | 无降级（时机限定：收口后；在途 run 与崩溃未收口 record 无 manifest） |
 | record 重建链（manifest 缺席：`session-reconstructor` / `record-store-rebuild`） | `record.task` = 前 2000 字符 + 截断标记（GUI 列表/详情展示与该路径检索用截断文本） | 可接受：展示/检索投影非正确性通路 |
-| session-reader P-fallback（manifest miss：`discovery/subagents.ts` / `find.ts` / `family.ts`） | 富化与回退全文检索只覆盖前 2000 字符 | 可接受：P-fallback 本身是降级路径，身份/路由字段不受影响 |
+| session-reader P-fallback（manifest miss：`discovery/subagents.ts` 尾行 identity 富化 + `core/family.ts` 消费；`discovery/find.ts` 子串检索） | P-fallback 的 task 富化与子串检索只覆盖前 2000 字符 | 可接受：P-fallback 本身是降级路径，身份/路由字段不受影响 |
 
 LLM 可见渲染面（execution-tree 既有 50 字符上限）不变；全文恢复源 = pi session 首条 user 消息与父侧 manifest。该降级与重审基线（manifest 命中率 / P-fallback 触发次数 / 2000 字内外 query miss）登记于 relay-spawn-transport 设计 §3.7 已接受代价（P-5）。
 

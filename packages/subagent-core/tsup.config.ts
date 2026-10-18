@@ -14,7 +14,8 @@ const bundleOnly = process.env.npm_lifecycle_event === 'build:bundle'
 // （src/ 前缀替换为 dist/），package.json exports 的语义子入口按同形路径映射
 // （./execution/engine/paths -> dist/execution/engine/paths.cjs 等）。
 // [W11/H3] 引擎子入口（./engines/zcode/{reader,constants}）已随内建引擎删除。
-// 主入口 index 之外的三个 entry 恰好是 exports 的三个语义子入口（D5 公共面）：
+// 主入口 index 之外的 2 个 entry 即 exports 的两个语义子入口（D5 公共面），
+// 连同主入口共 3 个 entry：
 // runtime 复用链（D8）与 zsw 复用链（D6）只允许经语义子入口消费这些模块，
 // 语义子入口因此必须各自成为 bundle 入口——否则它们只存在于主入口 bundle 内部，
 // 无法被独立加载（单一 bundle 不做 chunk 拆分，模块实例也会分裂成两份）。
