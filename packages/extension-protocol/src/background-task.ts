@@ -10,18 +10,24 @@
  *    字段注释），orphaned 终态由 runtime 写入（收殓下沉，设计
  *    docs/architecture/file-lock-unification-and-reaper-sink.md D2）。
  *
- * 目录布局（per-session 隔离）：
- *   <agentDir>/base-tool-enhance/<sessionId>/registry.json
- *   （agentDir = pi getAgentDir() 同源 dataDir，由调用方解析传入，不硬编码）
+ * 目录布局（per-session 隔离，session 存储树域 5）：
+ *   <dataDir>/ext-sessions/<sessionId>/background-tasks/registry.json
+ *   （shared 推导单点 = getSessionBackgroundTasksDir；写侧 extension 不 import
+ *   shared，以同公式镜像推导——SESSION_STORE_DIR_SEGMENT / BACKGROUND_TASKS_DIR_SEGMENT
+ *   段常量，字面量一致性由 scripts/check-artifact-dir-formula-sync.mjs 对拍守护）
  *
  * 字段名/语义/枚举值与写侧现状逐字段一致（基线：extensions/universal/
  * base-tool-enhance/src/background/types.ts + registry.ts），禁止在此单侧改名。
  */
 
-/** registry 文件名（<agentDir>/base-tool-enhance/<sessionId>/ 下）。 */
+/** registry 文件名（<dataDir>/ext-sessions/<sessionId>/background-tasks/ 下）。 */
 export const BACKGROUND_TASK_REGISTRY_FILENAME = 'registry.json' as const
 
-/** 后台任务根目录名（<agentDir>/ 下，内含 per-sessionId 子目录）。 */
+/**
+ * [遗留] 旧布局（<agentDir>/base-tool-enhance/<sessionId>/registry.json）的根目录名
+ * 段——换根到 session 存储树后布局不再经过该目录（现行布局见文件头「目录布局」），
+ * 仓内生产代码零消费（仅测试保活断言 + npm 出口 re-export 保留）；退役待出口面裁决。
+ */
 export const BASE_TOOL_ENHANCE_DIRNAME = 'base-tool-enhance' as const
 
 /**
