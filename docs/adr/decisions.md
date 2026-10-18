@@ -766,13 +766,13 @@ WorkflowTab 步骤列表的数据源绑定从「workflow-record 全量快照（6
 
 **不采用**：① spawn 注入 `HTTPS_PROXY` 环境变量——路由语义受 env 变量表达力限制（无结构化规则、无快速添加数据源）、请求量观测无实现位（env 路由在 pi 进程内完成，taiji 侧无统一计数点）、且需放宽 `ENV_WHITELIST_PREFIXES` env 传播边界（安全边界改动）、依赖 pi 自装分发器的未承诺行为；② extension 自建本地中转网关 + 改服务商 baseURL 指向网关——把网络层代理上移成应用层网关，需自建转发服务器全套（鉴权头桥接 / 流式透传 / 错误归因），与用户已有自建网关用法重复，且 pi `registerProvider` 覆盖语义与 taiji provider 管理冲突。
 
-**登记**：实装 = `extensions/universal/network-proxy/`（分流分发器 + 配置热重载 + 计数落盘）+ `packages/shared/src/network-proxy.ts`（配置 schema 与校验）；验收工具与漂移探针 = `scripts/network-proxy-mocks/`（mock 代理 / 最小 SOCKS5 服务，自签证书 mock LLM 端点）。设计过程产物 `.tmp/tech-design/llm-network-proxy.md`（不入库，git 不可追溯），本条即该裁决的现行登记处。
+**登记**：实装 = `extensions/universal/network-proxy/`（分流分发器 + 配置热重载 + 计数落盘）+ `packages/shared/src/network-proxy.ts`（配置 schema 与校验）；验收工具 = `scripts/network-proxy-mocks/`（mock 代理 / 最小 SOCKS5 服务，自签证书 mock LLM 端点）；漂移探针 = `scripts/network-proxy-drift-probe.mjs`。设计过程产物 `.tmp/tech-design/llm-network-proxy.md`（不入库，git 不可追溯），本条即该裁决的现行登记处。
 
 ### ADR-0142 代理凭据与 pi API key 同安全模型：明文 + 文件 0600，不引入跨进程加密（2026-10-18 设计裁决，llm-network-proxy）
 
 **决策**：LLM 网络代理的代理服务器凭据（用户名/密码）明文存 ext-config 文件，文件创建时显式 `mode 0o600`（目录维持 0755）——与 pi 自身 `auth.json` 存 API key 的文件级安全模型一致（实测 pi 与 taiji 两侧 `auth.json` 均为 0600、所在目录均为 0755，pi 的保护在文件级不在目录级）。不引入加密：Electron safeStorage 是 main 进程 API，runtime（Node 子进程）不可用，为非服务端凭据引入跨进程加密通道复杂度不成比例。runtime 侧写入路径须携带 mode：`packages/runtime/src/utils/fs-utils.ts` 的 `atomicWrite` 基建以 umask 默认产 0644，为该配置落盘增加 mode 透传（或写后 chmod），此文件固定 0600；锁文件独立于配置文件，mode 差异不影响锁语义。
 
-**登记**：实装落点 = `packages/runtime/src/services/network-proxy-config.ts`（写侧，mode 0600）+ `packages/runtime/src/utils/fs-utils.ts`（atomicWrite mode 透传）+ `extensions/universal/network-proxy/`（读侧，`llm-shared` 的 `saveConfig`/`loadConfig` 已带 0600）。设计过程产物同 ADR-0141（不入库），本条即该裁决的现行登记处。
+**登记**：实装落点 = `packages/runtime/src/services/network-proxy-config.ts`（写侧，mode 0600）+ `packages/runtime/src/utils/fs-utils.ts`（atomicWrite mode 透传）+ `extensions/universal/network-proxy/`（读侧，`llm-shared` 的 `saveConfig` 已带 0o600——`loadConfig` 为读侧函数，不涉及 mode）。设计过程产物同 ADR-0141（不入库），本条即该裁决的现行登记处。
 
 ### ADR-0143 请求统计 = 追加式 JSONL + 读侧聚合，截断保尾 5MB/1MB（2026-10-18 设计裁决，llm-network-proxy）
 

@@ -31,4 +31,4 @@ taiji 桌面端经设置页「网络代理」读写（runtime RMW 写侧）；�
 - socks5：`Socks5ProxyAgent` 调优经 `connect: buildConnector({ autoSelectFamilyAttemptTimeout: 2000 })` 的 **connector 函数形态**（对象形态首个请求建隧道时 TypeError）；`proxyTls` 是「代理连接走 TLS」开关，不可当调优参数袋
 - 两协议 agent 均挂防崩溃 error listener（对齐 pi `withUndiciErrorListener` 形态）
 
-上述契约由 `src/__tests__/dispatcher.test.ts` 构造形态冒烟测试锁定；undici 升级时该测试是第一道回归防线。
+上述契约由 `src/__tests__/dispatcher-construction.test.ts` 构造形态冒烟测试锁定；undici 升级时该测试是第一道回归防线。
