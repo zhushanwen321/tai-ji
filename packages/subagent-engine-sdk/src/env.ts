@@ -52,6 +52,12 @@ export const ENGINE_ENV_L0_INFRA_KEYS: readonly string[] = [
   'TAIJI_SUBAGENT_RELAY_SOCKET',
   'TAIJI_SUBAGENT_RELAY_NODE',
   'TAIJI_SUBAGENT_RELAY_SCRIPT',
+  // [M3] control 两键（键名 SSOT = src/control-env.ts）：runtime 注入主 pi 与引擎的
+  // L0 基础设施键，嵌套 task pi 经引擎出站 env 继承同值——终端替代 relay 三键位
+  // （relay 键随 u-m3-delete 退役，本清单届时同批收缩）。刻意不进 ENGINE_ENV_DENY_LIST：
+  // 引擎/嵌套 extension 是合法读者（transport 选择谓词 + engine_open 归属键）。
+  'TAIJI_SUBAGENT_CONTROL_SOCKET',
+  'TAIJI_SUBAGENT_CONTROL_ROOT_SESSION_ID',
 ];
 
 /** relay 三键形态（宿主 relay 激活时三值同时非空，全有或全无）。 */

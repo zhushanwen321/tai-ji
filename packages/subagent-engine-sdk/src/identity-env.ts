@@ -57,3 +57,14 @@ export const SUBAGENT_IDENTITY_ENV = {
   /** worktree 隔离标志（"true" = 是）。 */
   worktree: "PI_SUBAGENT_WORKTREE",
 } as const;
+
+/**
+ * [M1 D2] 任务文本进 env 的截断上限（字符数）：写入点 = pi 引擎 spawn-runner 的
+ * applyContentIdentityKeys——写 `params.task` 前 2000 字符 + 截断标记
+ * `…[truncated N chars]`；env 读取点（appendSubagentIdentityEntry）零改动（读 env 值
+ * 即用）。全文以 pi session 文件首条 user 消息与父侧 manifest 为准（manifest 主路径
+ * 保留全文；截断只影响 manifest 缺席时的重建链/P-fallback 投影，降级面逐层判定登记
+ * 见设计 D2 消费方矩阵与 §3.7）。目的：控制面（握手帧）与 execve env 不再随任务正文
+ * 线性膨胀（ARG_MAX/E2BIG 族无界暴露的写入点根因修复）。
+ */
+export const PI_SUBAGENT_TASK_MAX_CHARS = 2_000;

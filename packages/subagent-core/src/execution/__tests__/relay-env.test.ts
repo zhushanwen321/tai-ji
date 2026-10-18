@@ -48,6 +48,8 @@ describe('relay env SSOT', () => {
       SOCKET_UNREACHABLE: 11,
       SOCKET_CLOSED: 12,
       MISSING_IDENTITY: 13,
+      // [M1] accept 超时（u-foundation 登记 SSOT；relay.mjs 侧随 u-m1-relay 同批加镜像）
+      ACCEPT_TIMEOUT: 15,
     });
   });
 

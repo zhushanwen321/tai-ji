@@ -31,6 +31,10 @@ export const RELAY_EXIT_CODES = {
   SOCKET_CLOSED: 12,
   /** 归属 env（SESSION_ID/RECORD_ID）缺失——防无归属帧污染广播。 */
   MISSING_IDENTITY: 13,
+  /** [M1] awaiting_accept 超时（TAIJI_RELAY_ACCEPT_TIMEOUT_MS 可覆盖）——accept 回执
+   *  窗口的显式失败（时间窗根因登记见设计 D1：控制面握手回执窗口，非补偿掩盖；
+   *  M3 删除 relay 时随 relay 一并消亡）。引擎侧映射 engine_spawn_handshake_timeout。 */
+  ACCEPT_TIMEOUT: 15,
 } as const;
 
 /** 激活判定：三 env 同时非空才走 relay，任一缺失回落直连 spawn 真实引擎（TUI/独立引擎零回归）。 */

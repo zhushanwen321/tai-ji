@@ -148,6 +148,15 @@ describe("buildEngineChildEnv 三层契约", () => {
     const overlap = ENGINE_ENV_L0_INFRA_KEYS.filter((k) => denySet.has(k));
     expect(overlap).toEqual([]);
   });
+
+  it("[M3] L0 清单登记 control 两键（relay 三键同族位，M3 删除 relay 后同批收缩）；deny 面不含 control 两键（引擎/嵌套 extension 是合法读者）", () => {
+    expect(ENGINE_ENV_L0_INFRA_KEYS).toContain("TAIJI_SUBAGENT_CONTROL_SOCKET");
+    expect(ENGINE_ENV_L0_INFRA_KEYS).toContain("TAIJI_SUBAGENT_CONTROL_ROOT_SESSION_ID");
+    // M3 删除 relay 前 relay 三键仍在册（双注册过渡；u-m3-delete 同批收缩）
+    expect(ENGINE_ENV_L0_INFRA_KEYS).toContain("TAIJI_SUBAGENT_RELAY_SOCKET");
+    expect(ENGINE_ENV_DENY_LIST).not.toContain("TAIJI_SUBAGENT_CONTROL_SOCKET");
+    expect(ENGINE_ENV_DENY_LIST).not.toContain("TAIJI_SUBAGENT_CONTROL_ROOT_SESSION_ID");
+  });
 });
 
 describe("buildOutboundChildEnv（SDK 版出站卫生）", () => {
@@ -199,5 +208,9 @@ describe("常量镜像自洽", () => {
   it("deny 清单含模式回落两键（SDK 镜像与 shared SSOT 逐项相等由 check_env_whitelist_sync.py 兜底；本断言防镜像内单侧漏项）", () => {
     expect(ENGINE_ENV_DENY_LIST).toContain("TAIJI_PRESET_FALLBACK_FROM");
     expect(ENGINE_ENV_DENY_LIST).toContain("TAIJI_PRESET_FALLBACK_TO");
+  });
+
+  it("[M3] TAIJI_ENGINE_RAW_MIRROR 不进 SDK deny（设计 D6：引擎自己要读 fd 3 镜像标志，deny 即自断；task pi 剥除落 shared SPAWN_ENV_OUTBOUND_DENY_LIST）", () => {
+    expect(ENGINE_ENV_DENY_LIST).not.toContain("TAIJI_ENGINE_RAW_MIRROR");
   });
 });

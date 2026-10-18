@@ -34,6 +34,15 @@ export const SPAWN_ENV_OUTBOUND_DENY_LIST: readonly string[] = [
    * git hook / npm script 等后代进程均可读取 WS 凭证（安全级危害）。
    */
   'TAIJI_RUNTIME_TOKEN',
+  /**
+   * [M3 relay-spawn-transport D4/D6] 引擎 raw mirror 通道标志：runtime 交给引擎进程
+   * 的「fd 3 是 raw stdout 镜像通道」L0 注入键，合法消费者只有引擎进程自身（引擎
+   * tap child.stdout 写 fd 3 供 GUI 实时流）。task pi（顶层/嵌套）零消费——泄漏会把
+   * 镜像语义误推给任务侧并暴露 runtime 引擎托管拓扑，出站一律剥除。引擎自身收取
+   * 不受影响（runtime 在 buildEngineChildEnv 之后 L0 显式注入，剥除发生在注入之前）；
+   * 刻意不进 ENGINE_ENV_DENY_LIST（引擎自己要读，deny 即自断）。
+   */
+  'TAIJI_ENGINE_RAW_MIRROR',
 ]
 
 // ─────────────────────────────────────────────────────────────────────────────
