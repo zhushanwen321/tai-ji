@@ -247,8 +247,10 @@ describe('worktree 创建回灌（adoptWorktreeCwd，fix-new-worktree-not-switch
 
     await flow.submitFirstMessage(textToSegments('go'))
 
-    // create 用 adopted pendingCwd（/ws/new-wt），而非 defaultCwd（/ws）
-    expect(createCtrl.create).toHaveBeenCalledWith('/ws/new-wt', 'go', undefined, undefined, undefined, 'high')
+    // create 用 adopted pendingCwd（/ws/new-wt），而非 defaultCwd（/ws）。
+    // 第 7 参 = clientUuid（create 幂等键，core new-task-search/flow.ts 黏滞槽生成）：
+    // 桌面适配器 rest 透传不吞参，uuid 原样到达 api 实现（具体值由黏滞槽决定，核 core flow.test）。
+    expect(createCtrl.create).toHaveBeenCalledWith('/ws/new-wt', 'go', undefined, undefined, undefined, 'high', expect.any(String))
   })
 })
 
@@ -317,7 +319,7 @@ describe('submitFirstMessage（landing 态首发提交：延迟 create+载入+�
     await flow.submitFirstMessage(textToSegments('hello world'))
 
     // create 用 workspaceStore.defaultCwd（最近工作区 cwd=/repo）；label=提示词前10字（'hello world' 11 字符 → 截断+省略号）
-    expect(createCtrl.create).toHaveBeenCalledWith('/repo', 'hello worl…', undefined, undefined, undefined, 'high')
+    expect(createCtrl.create).toHaveBeenCalledWith('/repo', 'hello worl…', undefined, undefined, undefined, 'high', expect.any(String))
     expect(session.activeId).toBe('new-1') // activeId 绑定
     expect(session.list.map((s) => s.id)).toContain('new-1') // appendSession 入组
     // panel 载入 active panel
@@ -343,7 +345,7 @@ describe('submitFirstMessage（landing 态首发提交：延迟 create+载入+�
     await flow.submitFirstMessage(textToSegments('go'))
 
     // create 用 pendingCwd（/picked），而非 workspaceStore.defaultCwd（/last-repo）；label='go'（≤10 原文）
-    expect(createCtrl.create).toHaveBeenCalledWith('/picked', 'go', undefined, undefined, undefined, 'high')
+    expect(createCtrl.create).toHaveBeenCalledWith('/picked', 'go', undefined, undefined, undefined, 'high', expect.any(String))
   })
 
   it('cwd 来源：无 pendingCwd 时用 workspaceStore.defaultCwd', async () => {
@@ -357,7 +359,7 @@ describe('submitFirstMessage（landing 态首发提交：延迟 create+载入+�
     await flow.submitFirstMessage(textToSegments('go'))
 
     // create 用 workspaceStore.defaultCwd（最近活跃 cwd=/last-repo）；label='go'（≤10 原文）
-    expect(createCtrl.create).toHaveBeenCalledWith('/last-repo', 'go', undefined, undefined, undefined, 'high')
+    expect(createCtrl.create).toHaveBeenCalledWith('/last-repo', 'go', undefined, undefined, undefined, 'high', expect.any(String))
   })
 
   it('重试场景（currentSession 已存在）→跳过 create 直接 send', async () => {
@@ -437,7 +439,7 @@ describe('submitFirstMessage（landing 态首发提交：延迟 create+载入+�
     await flow.submitFirstMessage(imageSegments)
 
     // 纯图无 text：label 走 deriveSessionLabel('') 兜底为「无提示词」
-    expect(createCtrl.create).toHaveBeenCalledWith('/repo', '无提示词', undefined, undefined, undefined, 'high')
+    expect(createCtrl.create).toHaveBeenCalledWith('/repo', '无提示词', undefined, undefined, undefined, 'high', expect.any(String))
     expect(chatMock.send).toHaveBeenCalledWith('img-only', imageSegments)
     expect(flow.state.value).toBe('completed')
   })
