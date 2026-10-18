@@ -792,19 +792,8 @@ export class SubagentControlServer {
       return
     }
     const bytes = byteLengthOf(line) + 1
-    // 队列上限前置检查（溢出 → error + 杀组 + engine_closed，D8 不丢帧不静默）：
-    // per-channel 上限 + 每连接 down 方向聚合上限（各通道 pendingDownBytes 之和）
-    // 两级同判——聚合越界只关本通道（其它通道不受影响），不升连整条连接。
-    const channelOverflow = ctx.pendingDownBytes + bytes > this.channelQueueMaxBytes
-      || ctx.pendingDown.length + 1 > this.channelQueueMaxFrames
-    const connectionOverflow = ctx.conn.downQueueBytes + bytes > this.connectionQueueMaxBytes
-    if (channelOverflow || connectionOverflow) {
-      const detail = connectionOverflow
-        ? `engine stdin queue overflow (connection aggregate ${String(ctx.conn.downQueueBytes + bytes)} bytes)`
-        : `engine stdin queue overflow (${String(ctx.pendingDownBytes + bytes)} bytes / ${String(ctx.pendingDown.length + 1)} frames queued)`
-      this.writeErrorAndKill(ctx, CONTROL_FRAME_ERROR_CODES.backpressureOverflow, detail, 'engine_backpressure_overflow')
-      return
-    }
+    // 先尝试写：只有返回 false（需入队，即真正产生驻留）时才判上限。健康通道的写入
+    // （返回 true）不贡献 downQueueBytes，不能因其它通道的积压被连接级聚合上限误杀。
     let ok = false
     try {
       ok = stdin.write(`${line}\n`)
@@ -814,6 +803,19 @@ export class SubagentControlServer {
       return
     }
     if (!ok) {
+      // 入队前上限检查（溢出 → error + 杀组 + engine_closed，D8 不丢帧不静默）：
+      // per-channel 上限 + 每连接 down 方向聚合上限（各通道 pendingDownBytes 之和）
+      // 两级同判——聚合越界只关本通道（其它通道不受影响），不升连整条连接。
+      const channelOverflow = ctx.pendingDownBytes + bytes > this.channelQueueMaxBytes
+        || ctx.pendingDown.length + 1 > this.channelQueueMaxFrames
+      const connectionOverflow = ctx.conn.downQueueBytes + bytes > this.connectionQueueMaxBytes
+      if (channelOverflow || connectionOverflow) {
+        const detail = connectionOverflow
+          ? `engine stdin queue overflow (connection aggregate ${String(ctx.conn.downQueueBytes + bytes)} bytes)`
+          : `engine stdin queue overflow (${String(ctx.pendingDownBytes + bytes)} bytes / ${String(ctx.pendingDown.length + 1)} frames queued)`
+        this.writeErrorAndKill(ctx, CONTROL_FRAME_ERROR_CODES.backpressureOverflow, detail, 'engine_backpressure_overflow')
+        return
+      }
       ctx.pendingDown.push({ line, bytes })
       ctx.pendingDownBytes += bytes
       ctx.conn.downQueueBytes += bytes
@@ -957,18 +959,24 @@ export class SubagentControlServer {
         clearTimeout(ctx.closeTimer)
         ctx.closeTimer = null
       }
-      // 引擎意外退出（非控制面裁决）→ 无条件组杀（D7：负 pid 对已死组长仍有效，
-      // 覆盖其 pi 子进程孤儿）；控制面裁决路径的组杀已在 terminateChannel 执行。
-      // engine_close（intentional）窗内自行退出是正常关闭路径（D7 两分），不计意外。
-      const unexpected = !ctx.killRequested && !ctx.intentionalClose
+      // 日志分类与组杀判据解耦：
+      // - unexpectedForLog：非控制面裁决且非 engine_close（intentional）窗内退出 → 「意外退出」
+      //   warn 口径（D7 两分）；
+      // - shouldKillGroup：只要 exit 且未经控制面裁决（killRequested）就组杀——组杀只收割
+      //   残留子进程（负 pid 对已死组长仍有效），engine_close 窗内引擎自行退出同样要
+      //   兜底其孤儿（不能因日志口径而失去兜底）。
+      const unexpectedForLog = !ctx.killRequested && !ctx.intentionalClose
+      const shouldKillGroup = !ctx.killRequested
       const reason: SubagentControlClosedReason = ctx.closedReason
         ?? (signal !== null ? SUBAGENT_CONTROL_CLOSED_REASONS.engineSignal : SUBAGENT_CONTROL_CLOSED_REASONS.engineExit)
       this.finalizeClosed(ctx, code, signal, reason)
-      if (unexpected) {
+      if (unexpectedForLog) {
         console.warn(`[subagent-control] engine exited unexpectedly channelId=${channelId} code=${String(code)} signal=${String(signal)}; killing group`)
-        killEngineGroup(rec.pid, `unexpected-exit channelId=${channelId}`)
       } else {
         console.log(`[subagent-control] engine closed channelId=${channelId} code=${String(code)} signal=${String(signal)} reason=${reason}`)
+      }
+      if (shouldKillGroup) {
+        killEngineGroup(rec.pid, `${unexpectedForLog ? 'unexpected-exit' : 'intentional-close-exit'} channelId=${channelId}`)
       }
     })
   }

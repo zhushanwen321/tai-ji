@@ -186,10 +186,14 @@ export function parseControlInboundFrame(line: string): ControlInboundFrame | nu
 //
 // SDK ENGINE_TRANSPORT_ERROR_CODES 族是 extension 侧 transport 错误面；引擎通道裁决
 // 帧的 code 是 runtime 侧行内词表（设计 §3.4.3 只点名 session/channel_limit，spawn
-// 失败透传 SDK EngineSdkError.code 如 engine_not_found）。消费方（core control-shared）
-// 会按 code 收敛为 transport 错误码（非 engine_ 前缀的 open 裁决码统一落
-// engine_transport_unavailable，unknown_channel 在非 close 竞态落
-// engine_transport_lost），词表扩充时须同步核对消费侧映射。
+// 失败透传 SDK EngineSdkError.code 如 engine_not_found）。消费方（core control-shared
+// 的 mapControlError）逐 code 收敛：engine_ 前缀码原样透传
+//（engine_open_timeout / engine_frame_too_large / engine_backpressure_overflow）；
+// 非 engine_ 前缀按语义分流——channel_limit → engine_backpressure_overflow、
+// invalid_launch / spawn_failed → engine_crashed、session / duplicate →
+// engine_transport_unavailable、unknown_channel（非 close 竞态）→ engine_transport_lost，
+// 词表未覆盖的其它非 engine_ code 才落 engine_transport_unavailable。
+// 词表扩充时须同步核对消费侧映射。
 
 export const CONTROL_FRAME_ERROR_CODES = {
   sessionMismatch: 'session',

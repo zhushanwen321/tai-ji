@@ -23,6 +23,7 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
 import {
   createFd3RawMirrorWriter,
+  createRawMirrorSeqRegistry,
   createRawMirrorWriter,
   createSharedFd3Sink,
   isRawMirrorActive,
@@ -69,6 +70,43 @@ describe("raw mirror 写入器（行切分 / 帧形态 / seq）", () => {
     expect(frames.every((f) => f.v === 1 && f.recordId === "rec-1")).toBe(true);
     expect(decodeFrames(frames)).toEqual(["aaa", "bbb", "ccc"]);
     expect(writer.stats).toEqual({ written: 3, dropped: 0 });
+  });
+
+  it("同 recordId 连续两 run（writer 重建）→ seq 由进程级计数器接续，不从 0 重开", () => {
+    // 回归 R2-B-U-1：workflow 成员复用 = 同 recordId 在后续 run 再次派发；写侧 seq 若
+    // per-run 重置，读取侧 RecordMirror（生命周期 = 通道/引擎进程）会把 seq 回落判为
+    // 空洞并永久停发 live 流。计数器载体 = 注册表（引擎进程级），writer 只取初始值递增。
+    const { sink, frames } = collectingSink();
+    const registry = createRawMirrorSeqRegistry();
+
+    const run1 = createRawMirrorWriter({
+      recordId: "rec-reuse",
+      sink,
+      seqCounter: registry.counterFor("rec-reuse"),
+    });
+    run1.tap(Buffer.from("a\nb\n", "utf8"));
+    run1.dispose();
+
+    // 其它 record 不受影响：各自的计数器从 0 起
+    const other = createRawMirrorWriter({
+      recordId: "rec-other",
+      sink,
+      seqCounter: registry.counterFor("rec-other"),
+    });
+    other.tap(Buffer.from("x\n", "utf8"));
+    other.dispose();
+
+    // 第二轮 run：writer 新建，但同一 recordId 的计数器已推进到 2
+    const run2 = createRawMirrorWriter({
+      recordId: "rec-reuse",
+      sink,
+      seqCounter: registry.counterFor("rec-reuse"),
+    });
+    run2.tap(Buffer.from("c\nd\n", "utf8"));
+    run2.dispose();
+
+    expect(frames.filter((f) => f.recordId === "rec-reuse").map((f) => f.seq)).toEqual([0, 1, 2, 3]);
+    expect(frames.filter((f) => f.recordId === "rec-other").map((f) => f.seq)).toEqual([0]);
   });
 
   it("跨 chunk 行重组 + 多字节字符劈在 chunk 边界：完整行才产出，b64 保真（含 CJK/astral）", () => {

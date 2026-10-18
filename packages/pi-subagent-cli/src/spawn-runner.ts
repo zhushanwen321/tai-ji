@@ -642,7 +642,8 @@ export async function runSpawnOnce(
   // 完成 / 异常 / 取消三路都经过）。
   let ackTracker: PromptAckTracker | undefined;
   // [M3 D6] fd3 raw mirror 写入器（env 宣告才创建；per-run，finally 必达 dispose
-  // ——fd 属引擎进程不关闭，跨 run 复用）。
+  // ——fd 属引擎进程不关闭，跨 run 复用）。seq 归属 recordId（进程级计数器）：
+  // workflow 成员复用导致同 recordId 再次 run 时序号接续，不从 0 重开。
   let rawMirror: RawMirrorWriter | undefined;
 
   // prepare 期校验前置（model 缺失 fail-fast 先于临时文件创建）：writeAppendPromptFile

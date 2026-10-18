@@ -357,6 +357,48 @@ describe('subagent-control server（真 socket 环回 + fixture 引擎）', () =
     agent.destroy()
   })
 
+  it('down 聚合上限只在入队时判定：慢通道积压到上限，健康通道小帧仍写入且不被杀', { timeout: 30_000 }, async () => {
+    // 回归 R2-B-U-3：上限判定曾在 stdin.write 之前执行，健康写（返回 true、不进
+    // pendingDown）也会被其它通道的积压压死。这里慢通道把连接级聚合推到恰好上限
+    //（等于上限不算越界），健康通道的小帧写入返回 true → 不得触发聚合溢出。
+    // 慢通道首帧取 1MB（远大于任何平台管道缓冲）确保 write 必然返回 false 而入队，
+    // 不依赖具体管道容量；随后再用 4KB 帧把聚合顶到恰好上限。
+    const limit = 1024 * 1024 + 4096
+    const { server } = await setupServer({
+      channelQueueMaxBytes: 8 * 1024 * 1024,
+      connectionQueueMaxBytes: limit,
+      closeGraceMs: 500,
+    })
+    const agent = new TestAgent(server.listeningSocketPath)
+    await agent.opened
+    agent.hello()
+    const slow = expectOpened(
+      await agent.open(launchSpec({ engineId: 'fake-engine-slow', args: ['--no-read-stdin'] }), 'slow'),
+    )
+    const healthy = expectOpened(
+      await agent.open(launchSpec({ engineId: 'fake-engine-healthy', args: [] }), 'healthy'),
+    )
+
+    // 慢通道：1MB 帧入队（write 必返回 false），再用 4KB 帧把聚合顶到恰好上限
+    //（入队判据为 > limit；等于上限不算越界）
+    agent.sendFrame(slow.channelId, 'x'.repeat(1024 * 1024 - 1))
+    agent.sendFrame(slow.channelId, 'x'.repeat(4096 - 1))
+    // 同一连接上的下一帧：健康通道（读 stdin）小帧——写返回 true，不入队
+    agent.sendFrame(healthy.channelId, JSON.stringify({ id: 'healthy-ping' }))
+
+    // 健康通道仍能正常往返（真正写入 + 引擎回包），而非仅被静默丢帧
+    await agent.waitFor(
+      (f) => f.kind === SUBAGENT_CONTROL_FRAME_KINDS.engineFrame
+        && String(f.line).includes('healthy-ping'),
+      'healthy channel still writes through',
+    )
+    expect(server.getChannelForTest(healthy.channelId)?.state).toBe('open')
+    expect(server.getChannelForTest(slow.channelId)?.state).toBe('open')
+    expect(agent.errorFrames().some((f) => f.channelId === healthy.channelId)).toBe(false)
+    expect(agent.errorFrames().some((f) => f.channelId === slow.channelId)).toBe(false)
+    agent.destroy()
+  })
+
   it('engine_close 窗内正常退出 → 不打「exited unexpectedly」warn（intentional 路径日志口径）', { timeout: 20_000 }, async () => {
     const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {})
     const logSpy = vi.spyOn(console, 'log').mockImplementation(() => {})
@@ -377,6 +419,45 @@ describe('subagent-control server（真 socket 环回 + fixture 引擎）', () =
     )
     expect(closed.reason).toBe(SUBAGENT_CONTROL_CLOSED_REASONS.engineExit)
     await waitFor(() => !isPidAlive(pid), 'engine exited in close grace window')
+
+    const warned = warnSpy.mock.calls.map((args) => args.map(String).join(' ')).join('\n')
+    expect(warned).not.toContain('exited unexpectedly')
+    const logged = logSpy.mock.calls.map((args) => args.map(String).join(' ')).join('\n')
+    expect(logged).toContain(`engine closed channelId=${channelId}`)
+    expect(logged).toContain('reason=engine_exit')
+    agent.destroy()
+  })
+
+  it('engine_close 受理 + 引擎带子进程自行退出 → 组杀兜底仍收割残留子进程，且日志不误报', { timeout: 20_000 }, async () => {
+    // 回归 R2-B-U-2：intentionalClose 曾同时抑制 exit 后的 killEngineGroup，
+    // engine_close 窗内引擎自行退出时残留子进程失去孤儿兜底。现在两判据解耦：
+    // 日志按 intentional 口径（不报意外），组杀按「exit 且未 killRequested」照常执行。
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    const logSpy = vi.spyOn(console, 'log').mockImplementation(() => {})
+    const { server } = await setupServer({ closeGraceMs: 2_000 })
+    const agent = new TestAgent(server.listeningSocketPath)
+    await agent.opened
+    agent.hello()
+    const { channelId, pid } = expectOpened(
+      await agent.open(launchSpec({ args: ['--spawn-child', '--exit-on', 'dispose-now', '--exit-delay-ms', '200'] }), 1),
+    )
+    await agent.waitFor((f) => f.kind === SUBAGENT_CONTROL_FRAME_KINDS.engineFrame, 'childPid event')
+    const childPid = parseChildPid(agent.engineFrameLines())
+    if (childPid === null) throw new Error('fixture did not report childPid')
+    expect(isPidAlive(childPid)).toBe(true)
+
+    // dispose 帧送达（引擎 200ms 后自行退出）→ engine_close 先受理（intentionalClose）
+    agent.sendFrame(channelId, 'dispose-now')
+    agent.send({ v: 1, kind: SUBAGENT_CONTROL_FRAME_KINDS.engineClose, channelId })
+
+    const closed = await agent.waitForFrame(
+      (f) => f.kind === SUBAGENT_CONTROL_FRAME_KINDS.engineClosed && f.channelId === channelId,
+      'engine_closed after intentional close',
+    )
+    expect(closed.reason).toBe(SUBAGENT_CONTROL_CLOSED_REASONS.engineExit)
+    await waitFor(() => !isPidAlive(pid), 'engine exited in close grace window')
+    // 关键断言：组杀兜底不被日志分类豁免
+    await waitFor(() => !isPidAlive(childPid), 'orphan child reaped by group kill on intentional exit')
 
     const warned = warnSpy.mock.calls.map((args) => args.map(String).join(' ')).join('\n')
     expect(warned).not.toContain('exited unexpectedly')

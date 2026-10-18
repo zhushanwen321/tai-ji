@@ -15,8 +15,11 @@
 //     接线），顺序与主解析链一致（tap 先注册，先收同一 chunk）；
 //   - 行切分在字节层完成（跨 chunk 的 UTF-8 多字节字符留在缓冲里等到完整行再
 //     b64——`chunk.toString('utf8')` 逐 chunk 解码会把多字节字符劈坏）；
-//   - `seq` per record 单调递增，**丢弃也递增**（丢弃由 runtime 侧 seq 空洞检测 +
-//     degraded 显式标注）；
+//   - `seq` **per recordId** 单调递增（跨 run 不重置），**丢弃也递增**（丢弃由 runtime
+//     侧 seq 空洞检测 + degraded 显式标注）。引擎进程可服务多个 run；workflow 成员复用
+//     会让同一 recordId 在后续 run 再次派发——计数归进程级 per-record 注册表持有，
+//     writer（per run）只取初始值并递增，因此「同一 record 的 seq 只增不回落」在跨 run
+//     面同样成立（读取侧 RecordMirror 生命周期 = 通道/引擎进程，两侧口径一致）；
 //   - 写策略 = 非阻塞 best-effort：fd3 不存在/写失败/队列 >1MB → 丢弃并计数，warn
 //     一次；不阻塞 pi stdout 消费、不影响 run（live 流是派生视图，权威数据仍是 pi
 //     session 文件 + journal）。
@@ -56,6 +59,36 @@ export type RawMirrorFrame = {
   b64: string;
 };
 
+/**
+ * per-record seq 计数器（引擎进程级共享；writer 取初始值后原地递增）。
+ * 不作 run 结束重置：同 recordId 的第二轮 run 必须接续上一轮的序号，否则读取侧
+ * 会把 seq 回落判为空洞并永久停发 live 流。
+ */
+export type RawMirrorSeqCounter = { value: number };
+
+/** per-recordId 计数器注册表（进程级共享；同一 recordId 恒返回同一计数器实例）。 */
+export type RawMirrorSeqRegistry = {
+  counterFor(recordId: string): RawMirrorSeqCounter;
+};
+
+/**
+ * 创建 per-record 计数器注册表。条目随引擎进程生命周期保留（每个被镜像过的
+ * recordId 一条，值是小整数）——不按 run 清理，正是跨 run 单调契约的载体。
+ */
+export function createRawMirrorSeqRegistry(): RawMirrorSeqRegistry {
+  const counters = new Map<string, RawMirrorSeqCounter>();
+  return {
+    counterFor(recordId: string): RawMirrorSeqCounter {
+      let counter = counters.get(recordId);
+      if (counter === undefined) {
+        counter = { value: 0 };
+        counters.set(recordId, counter);
+      }
+      return counter;
+    },
+  };
+}
+
 /** 写入统计（dispose 后只读快照）。 */
 export type RawMirrorStats = {
   /** 已写入 sink 的帧数（seq 不在此计数——丢弃帧不落 sink 但同样消耗 seq）。 */
@@ -80,7 +113,7 @@ export type RawMirrorSink = {
   offError?: (handler: (err: unknown) => void) => void;
 };
 
-/** fd3 raw mirror 写入器（per run）。 */
+/** fd3 raw mirror 写入器（per run；seq 归属 recordId，跨 run 接续）。 */
 export type RawMirrorWriter = {
   /** 喂入 stdout 原始字节 chunk（与主解析链同一数据源；内部行切分）。 */
   tap(chunk: Buffer): void;
@@ -109,18 +142,24 @@ export type RawMirrorWriterOptions = {
   maxQueueBytes?: number;
   /** 告警出口（缺省 SDK logger.warn；测试注入捕获）。 */
   warn?: (message: string) => void;
+  /**
+   * per-record seq 计数器（引擎进程级共享；缺省新建从 0 起的独立计数器——单测/一次性
+   * 写入器形态）。生产工厂按 recordId 从 {@link RawMirrorSeqRegistry} 取同一实例。
+   */
+  seqCounter?: RawMirrorSeqCounter;
 };
 
 /**
- * 创建 per-run 写入器。行切分缓冲用 Buffer 列表（防超长行跨 chunk 累积的 O(n²)
- * 拷贝）；仅完整行（\n 界）才产出帧——残留尾部随 run 结束丢弃（NDJSON 语义，
- * 与 pumpNdjsonLines 一致）。
+ * 创建 per-run 写入器（`seq` 来自 per-record 计数器，不随 run 重置）。行切分缓冲用
+ * Buffer 列表（防超长行跨 chunk 累积的 O(n²) 拷贝）；仅完整行（\n 界）才产出帧——
+ * 残留尾部随 run 结束丢弃（NDJSON 语义，与 pumpNdjsonLines 一致）。
  */
 export function createRawMirrorWriter(opts: RawMirrorWriterOptions): RawMirrorWriter {
   const maxQueueBytes = opts.maxQueueBytes ?? RAW_MIRROR_MAX_QUEUE_BYTES;
   const warn = opts.warn ?? defaultWarn;
   const pending: Buffer[] = [];
-  let seq = 0;
+  // seq 归属 recordId 而非 run：共享计数器跨 run 接续（见 {@link RawMirrorSeqCounter}）。
+  const seqCounter = opts.seqCounter ?? { value: 0 };
   let queuedBytes = 0;
   let failed = false;
   let disposed = false;
@@ -188,10 +227,11 @@ export function createRawMirrorWriter(opts: RawMirrorWriterOptions): RawMirrorWr
 
   const emitLine = (line: Buffer): void => {
     // seq 先递增——丢弃也递增（设计 D6；runtime 侧靠 seq 空洞检测丢弃）。
+    // 计数器 per recordId 进程级共享：跨 run 接续，不在此处重置。
     const frame: RawMirrorFrame = {
       v: 1,
       recordId: opts.recordId,
-      seq: seq++,
+      seq: seqCounter.value++,
       b64: line.toString("base64"),
     };
     const wire = `${JSON.stringify(frame)}\n`;
@@ -307,6 +347,9 @@ export function createSharedFd3Sink(
   };
 }
 
+/** 进程级 per-record seq 注册表（长驻引擎跨 run 服务同一 record 时序号连续）。 */
+const fd3SeqRegistry = createRawMirrorSeqRegistry();
+
 let sharedFd3Sink: SharedFd3Sink | null = null;
 /** persistent error 后新 run 不再重建 sink（fd3 已坏，避免每个 run 重复尝试与告警）。 */
 let fd3Unavailable = false;
@@ -367,5 +410,10 @@ export function createFd3RawMirrorWriter(opts: {
   }
   const sink = getSharedFd3Sink(warn);
   if (sink === null) return undefined;
-  return createRawMirrorWriter({ recordId: opts.recordId, warn, sink });
+  return createRawMirrorWriter({
+    recordId: opts.recordId,
+    warn,
+    sink,
+    seqCounter: fd3SeqRegistry.counterFor(opts.recordId),
+  });
 }

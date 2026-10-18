@@ -7,11 +7,13 @@
  * control close → dispose 该通道全部 record），并同步落盘磁盘镜像
  * `pi-subagent-<date>-<recordId>.jsonl`。
  *
- * seq 连续性检查（D6）：写侧「丢弃也递增」且每个 record 从 0 起——读取侧要求首帧
- * `seq === 0`、其后严格 `last+1`；任一不满足即判定该 record 的 live 派生视图出现空洞，
- * `markDegraded()` 停止发布 live entries/chunks 并让状态查询带 `degraded: true`（显式
- * 标注，不静默）。磁盘镜像与 reload 腿不受影响：tee 只是可由权威数据（pi session 文件
- * + journal）重建的派生视图。
+ * seq 连续性检查（D6）：写侧 seq **per recordId** 单调递增（引擎进程级计数器，跨 run
+ * 接续、丢弃也递增），读取侧 record 生命周期 = 通道（= 引擎进程），两侧口径一致——
+ * workflow 成员复用使同 recordId 第二轮 run 继续沿用同一 RecordMirror。因此首帧
+ * `seq === 0`（该 record 在本引擎进程的首次镜像）、其后严格 `last+1`；任一不满足即判定
+ * 该 record 的 live 派生视图出现空洞，`markDegraded()` 停止发布 live entries/chunks 并让
+ * 状态查询带 `degraded: true`（显式标注，不静默）。磁盘镜像与 reload 腿不受影响：tee
+ * 只是可由权威数据（pi session 文件 + journal）重建的派生视图。
  *
  * 帧解析容错：畸形行（非 JSON/字段缺失）丢弃 + 计数，不抛出不升连——单个坏帧不影响
  * 其他 record/channel；attributable 的空洞语义仍由 seq 检查承担（坏帧同样消耗写侧 seq，
@@ -57,14 +59,16 @@ type RecordMirror = {
   channelId: string
   tee: SubagentTee
   log: MirrorLogSink
-  /** 已处理帧的最大 seq（首个帧登记；其后必须 +1 连续）。 */
+  /** 已处理帧的最大 seq（首个帧登记；其后必须 +1 连续）。跨 run 保留：写侧 seq 按
+   * recordId 进程级单调，record 复用（workflow 成员第二轮）时必须接续而非重置。 */
   lastSeq: number | undefined
   degraded: boolean
 }
 
 /**
- * seq 连续性判定（纯函数，单测直构）：写侧每个 record 从 0 起、丢弃也递增，因此首帧
- * 必为 seq 0（首帧被写侧丢弃时，读取侧首个到达帧 seq>0 = 空洞，必须显式降级）；
+ * seq 连续性判定（纯函数，单测直构）：写侧 seq 按 recordId 在引擎进程内单调递增
+ *（per-record 计数器，跨 run 不重置）、丢弃也递增，因此该 record 在本引擎进程的
+ * 首帧必为 seq 0（首帧被写侧丢弃时，读取侧首个到达帧 seq>0 = 空洞，必须显式降级）；
  * 其后必须严格 last+1。
  */
 export function isMirrorSeqContinuous(previous: number | undefined, next: number): boolean {

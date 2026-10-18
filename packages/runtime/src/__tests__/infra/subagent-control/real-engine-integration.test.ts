@@ -21,6 +21,7 @@
 import { existsSync, mkdirSync, symlinkSync } from 'node:fs'
 import { delimiter, dirname, join, resolve } from 'node:path'
 
+import type { ServerMessage } from '@taiji/shared'
 import { afterEach, describe, expect, it } from 'vitest'
 
 import {
@@ -254,6 +255,106 @@ describe.skipIf(skipReason !== null)('control server × 真实 pi-subagent-cli �
       await waitFor(() => !isPidAlive(opened.pid), 'real engine process reaped')
       await waitFor(() => !isPidAlive(childPid), 'fake pi child reaped with engine group')
       expect(server.getChannelForTest(opened.channelId)).toBeUndefined()
+    } finally {
+      host.stop()
+    }
+  })
+
+  it('同通道连续两 run 同 recordId → seq 跨 run 接续（第二轮不判 degraded，live 流持续）', { timeout: 120_000 }, async () => {
+    // 回归 R2-B-U-1（真实写侧 → 真实读取侧）：workflow 成员复用会让同一 recordId 在
+    // 后续 run 再次派发。写侧 seq 若 per-run 重置，读取侧 RecordMirror（生命周期 =
+    // 通道/引擎进程）会把第二轮首帧判为空洞并永久停发 live 流。这里两轮 run 共用
+    // resume.recordId，断言 live chunk 持续增长且从未 degraded。
+    const dataDir = await makeTmpDir('real-engine-reuse-')
+    tmpDirs.push(dataDir)
+    const fakePiDir = join(dataDir, 'fake-pi-bin')
+    mkdirSync(fakePiDir, { recursive: true })
+    symlinkSync(FAKE_PI, join(fakePiDir, 'pi'))
+
+    const published: Array<{ sid: string; msg: ServerMessage }> = []
+    const server = makeServer(dataDir, {
+      piCommand: join(fakePiDir, 'pi'),
+      runtimeEnv: {
+        PATH: `${fakePiDir}${delimiter}${process.env.PATH ?? ''}`,
+        HOME: process.env.HOME ?? '',
+      },
+      closeGraceMs: 1_000,
+      publish: (sid: string, msg: ServerMessage) => published.push({ sid, msg }),
+    })
+    servers.push(server)
+    await server.init()
+
+    const agent = new TestAgent(server.listeningSocketPath)
+    agents.push(agent)
+    await agent.opened
+    agent.hello('real-engine-reuse-hello')
+
+    const reuseRecordId = 'rec-workflow-member-reuse'
+    const opened = expectOpened(await agent.open(
+      launchSpec({
+        engineId: 'pi',
+        entryPath: REAL_ENGINE_BIN,
+        args: [],
+        cwd: dataDir,
+        envPrefixes: ['PI_'],
+        rootSessionId: ROOT_SID,
+      }),
+      'reuse-open',
+    ))
+    const host = new ControlHost(agent)
+    host.channelId = opened.channelId
+    host.startReverseResponder()
+
+    const chunkCount = (): number => published.filter((p) => p.msg.type === 'subagent.stream_chunk').length
+    const runOnce = (runId: string, frameId: number): Promise<EngineFrame> => host.request(frameId, 'run', {
+      runId,
+      task: { prompt: 'say hi', description: 'record reuse e2e', agent: 'worker' },
+      ctx: {
+        cwd: dataDir,
+        sessionDir: join(dataDir, 'subagent-sessions'),
+        model: 'fake-provider/fake-model',
+        sessionRootId: ROOT_SID,
+      },
+      resume: { recordId: reuseRecordId },
+    }, 45_000)
+
+    try {
+      const init = await host.request(1, 'initialize', {
+        protocolVersion: ENGINE_PROTOCOL_VERSION,
+        hostInfo: { name: 'runtime-record-reuse-e2e', version: '0.0.0', dataRoot: dataDir },
+        engineConfig: {},
+      })
+      expect(init.error).toBeUndefined()
+
+      // 第一轮 run：镜像 record 建立，live chunk 到达。假 pi 每轮固定发 2 条
+      // text_delta（fixture 契约）；等满 2 条再取水位，排除「第一轮 fd3 帧迟到」
+      // 被误算成第二轮产出的可能。
+      const run1 = await runOnce('run-reuse-1', 10)
+      expect(run1.error).toBeUndefined()
+      await waitFor(() => chunkCount() >= 2, 'live chunks from first run')
+      const chunksAfterRun1 = chunkCount()
+      expect(server.getStreamStateByRecord(ROOT_SID, reuseRecordId)?.degraded).toBeUndefined()
+
+      // 第二轮 run：同 recordId 再次派发——写侧 seq 接续，读取侧不得判 degraded；
+      // 再等满 2 条增量 = 第二轮确实持续发布 live 流。
+      const run2 = await runOnce('run-reuse-2', 11)
+      expect(run2.error).toBeUndefined()
+      await waitFor(
+        () => chunkCount() >= chunksAfterRun1 + 2,
+        'live chunks continue on second run',
+      )
+      expect(server.getStreamStateByRecord(ROOT_SID, reuseRecordId)?.degraded).toBeUndefined()
+
+      // 收尾：dispose + engine_close → 真实引擎进程树回收
+      const dispose = await host.request(3, 'dispose', {})
+      expect((dispose.result as { ok?: boolean }).ok).toBe(true)
+      agent.send({ v: ENGINE_PROTOCOL_VERSION, kind: SUBAGENT_CONTROL_FRAME_KINDS.engineClose, channelId: opened.channelId })
+      const closed = await agent.waitForFrame(
+        (f) => f.kind === SUBAGENT_CONTROL_FRAME_KINDS.engineClosed && f.channelId === opened.channelId,
+        'engine_closed from reused-record channel',
+      )
+      expect(closed.reason).toBe(SUBAGENT_CONTROL_CLOSED_REASONS.killedByControl)
+      await waitFor(() => !isPidAlive(opened.pid), 'real engine process reaped (reuse case)')
     } finally {
       host.stop()
     }
