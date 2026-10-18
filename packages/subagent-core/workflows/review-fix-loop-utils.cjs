@@ -1496,13 +1496,17 @@ function filterDormantFromRecon(reconSeen, reconEscalate, dormant) {
 }
 
 /**
- * rfl 仪表（tier-1 §7.5）：run 存储根解析——~/.review-fix-loop/<slug>/<runId>。
- * slug = git toplevel 路径的分隔符替换为 '-'（rev-parse 失败用 cwd——非 git 项目）；
- * home 不可写（mkdir 抛错）降级 tmpDir 并返回 degraded=true（调用方 log WARN）。
- * 目录创建在此完成（mkdir recursive）；依赖注入（exec/mkdir）供单测 stub。
+ * rfl 仪表（tier-1 §7.5）：run 存储根解析——
+ * <skillDataRoot>/review-fix-loop/rfl/<slug>/<runId>。skillDataRoot 缺省 =
+ * ~/.agents/skill-data，SKILL_DATA_DIR env 非空时作根替代（skill-data 产物根 SSOT，
+ * skill-data-redesign impl-spec §2.3 node 直跑域；rfl.mjs 同根读取）。
+ * slug = git toplevel 路径的分隔符替换为 '-'（rev-parse 失败用 cwd——非 git 项目；
+ * rfl 仪表的 repoSlug 维度，与 project-slug 是两个维度，生成逻辑保持不变）；
+ * 根不可写（mkdir 抛错）降级 tmpDir 并返回 degraded=true（调用方 log WARN）。
+ * 目录创建在此完成（mkdir recursive）；依赖注入（exec/mkdir/env）供单测 stub。
  * @returns { root: string, slug: string, degraded: boolean }
  */
-function resolveRunRoot({ runId, cwd, homeDir, tmpDir, exec, mkdir }) {
+function resolveRunRoot({ runId, cwd, homeDir, tmpDir, exec, mkdir, env }) {
   const os = require("os");
   const execFn = exec || ((cmd) =>
     require("child_process").execSync(cmd, { encoding: "utf-8", timeout: 5_000 }).trim());
@@ -1514,7 +1518,10 @@ function resolveRunRoot({ runId, cwd, homeDir, tmpDir, exec, mkdir }) {
   } catch { toplevel = ""; }
   const baseDir = toplevel || workDir;
   const slug = String(baseDir).split(path.sep).filter(Boolean).join("-") || "default";
-  const primary = path.join(homeDir || os.homedir(), ".review-fix-loop", slug, String(runId));
+  const envCfg = env || process.env;
+  const envRoot = envCfg && typeof envCfg.SKILL_DATA_DIR === "string" ? envCfg.SKILL_DATA_DIR.trim() : "";
+  const dataRoot = envRoot || path.join(homeDir || os.homedir(), ".agents", "skill-data");
+  const primary = path.join(dataRoot, "review-fix-loop", "rfl", slug, String(runId));
   try {
     mkdirFn(primary);
     return { root: primary, slug, degraded: false };

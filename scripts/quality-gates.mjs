@@ -16,8 +16,12 @@
  *      file_gate 豁免同款）同步覆盖本判定；② 可执行行口径见 hasExecutableLines——
  *      interface/type/常量/纯导出聚合等无可执行分支的文件整文件排除。
  *   4. metrics-gate：子进程调用 metrics-gate.py（在 coverage-gate 之后——它消费同 base 的
- *      .review/coverage.json 真实覆盖率）。warn 档与 high_crap 靶子清单按决策 4 降级为机器
+ *      coverage.json 真实覆盖率）。warn 档与 high_crap 靶子清单按决策 4 降级为机器
  *      报告呈报（不逐条 LLM 核查），只有 fail 档影响本门判定。
+ *
+ * 产物目录：coverage.json / metrics.json 读取优先新根
+ * `~/.agents/skill-data/pr-review/<project-slug>/`（经 scripts/skill-data-dir.mjs 解析），
+ * 缺产物时回退旧 `.review/`（迁移过渡期，design.md §7 风险 2）。
  *
  * base 口径两侧差异有意保留（参数化承载，设计 §5-U1）：
  *   --side dev-merge  → base = `git merge-base github/main HEAD`（fallback main）——分支增量
@@ -33,6 +37,7 @@ import { delimiter, dirname, join } from 'node:path'
 import { homedir } from 'node:os'
 import { fileURLToPath } from 'node:url'
 import { resolve } from 'node:path'
+import { skillDataDir } from './skill-data-dir.mjs'
 
 const PY_REL_DIR = join('.agents', 'skills', 'pr-cr-fix', 'scripts')
 const COVERAGE_PY = 'coverage-gate.py'
@@ -223,7 +228,8 @@ function looksExecutable(body) {
 }
 
 /**
- * 机器盲区判定（决策 4）。输入 = coverage-gate.py 产出的 report（.review/coverage.json），
+ * 机器盲区判定（决策 4）。输入 = coverage-gate.py 产出的 report（coverage.json，读取
+ * 优先新 pr-review 目录、回退旧 `.review/`——见 createDefaultDeps 的 readReviewJson），
  * 其中每个 OK 包的 files_without_lcov = 「base...HEAD diff 新增且无 lcov 记录」清单的
  * 截断前 10 条（py no_lcov[:10]）——单轮呈报不全；FAIL 判定不受影响（列表内 ≥1 即 FAIL），
  * 已修文件重跑 gates 后新条目顶上，fixer 迭代收敛补全。「diff 新增」语义由 py 的 diff
@@ -307,11 +313,21 @@ export function createDefaultDeps(cwd = process.cwd()) {
   const root = execFileSync('git', ['rev-parse', '--show-toplevel'], {
     cwd, encoding: 'utf-8', stdio: ['ignore', 'pipe', 'pipe'],
   }).trim()
+  // 产物目录迁移过渡期（design.md §7 风险 2）：coverage.json / metrics.json 读取
+  // 优先新 pr-review 目录（skill-data-dir.mjs 单一解析出口），缺产物时回退旧 `.review/`
+  // （向后兼容在途分支与 py 写方降级只写旧目录的情形）。回退是设计内合法路径。
+  let reviewDir = null
+  try {
+    reviewDir = skillDataDir('pr-review', root)
+  } catch {
+    // realpath 失败（root 异常）→ 保持 null，读取全部走旧目录回退
+  }
   // 门禁子进程统一用自举后的 env：typecheck 的 pnpm/npx 直接受益；coverage-gate.py /
   // metrics-gate.py 以 {**os.environ} 继承本 env，其内部的 npx vitest / fallow 同样受益
   const gateEnv = buildGateEnv()
   return {
     root,
+    reviewDir,
     git: (args) => execFileSync('git', args, { cwd: root, encoding: 'utf-8', stdio: ['ignore', 'pipe', 'pipe'] }),
     exec: (cmd, args, relCwd) => spawnSync(cmd, args, { cwd: join(root, relCwd), encoding: 'utf-8', env: gateEnv }),
     runPython: (args) => spawnSync(args[0], args.slice(1), { cwd: root, encoding: 'utf-8', env: gateEnv }),
@@ -319,6 +335,20 @@ export function createDefaultDeps(cwd = process.cwd()) {
     readJson: (rel) => {
       try {
         return JSON.parse(readFileSync(join(root, rel), 'utf-8'))
+      } catch {
+        return null
+      }
+    },
+    readReviewJson: (name) => {
+      if (reviewDir) {
+        try {
+          return JSON.parse(readFileSync(join(reviewDir, name), 'utf-8'))
+        } catch {
+          // 新目录缺产物 → 回退旧目录
+        }
+      }
+      try {
+        return JSON.parse(readFileSync(join(root, '.review', name), 'utf-8'))
       } catch {
         return null
       }
@@ -436,11 +466,14 @@ function runCoverageGate(deps, base, gates) {
 
 /** [runGates 拆分] gate 3：机器盲区判定（judgeNoLcov，见其头注释）。 */
 function runBlindspotGate(deps, gates) {
-  const report = deps.readJson('.review/coverage.json')
+  const report = deps.readReviewJson('coverage.json')
   if (!report) {
     return {
       exitCode: 2,
-      error: { message: 'coverage.json 读取/解析失败（coverage-gate.py 已跑但产物不可用）', detail: join(deps.root, '.review', 'coverage.json') },
+      error: {
+        message: 'coverage.json 读取/解析失败（coverage-gate.py 已跑但产物不可用）',
+        detail: join(deps.reviewDir ?? join(deps.root, '.review'), 'coverage.json'),
+      },
     }
   }
   const blindspot = judgeNoLcov(report, deps.readHead)
@@ -478,7 +511,7 @@ function runMetricsGate(deps, base, gates) {
 
 /** [runGates 拆分] metrics 报告呈报摘要（决策 4：降级为机器报告，不逐条 LLM 核查）。 */
 function buildMetricsBrief(deps) {
-  const metricsReport = deps.readJson('.review/metrics.json')
+  const metricsReport = deps.readReviewJson('metrics.json')
   return metricsReport
     ? {
         warn: (metricsReport.warn || []).map((w) => `${w.path || (w.files || []).join(',') || '?'}${w.line ? ':' + w.line : ''} ${w.reason || ''}`.trim()).slice(0, 20),

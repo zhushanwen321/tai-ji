@@ -40,21 +40,25 @@ function okRunPython() {
   return () => ({ status: 0, stdout: 'Gate ok', stderr: '' })
 }
 
-/** 组装全绿 deps（可逐项覆盖）；readJson 返回最小 coverage/metrics 产物形态 */
+/** 组装全绿 deps（可逐项覆盖）；readJson / readReviewJson 返回最小 coverage/metrics 产物形态。
+ *  reviewDir=null = 新产物目录不可用，readReviewJson 与 readJson 同走旧 `.review/` 回退语义。 */
 function makeDeps(overrides = {}) {
+  const jsonStub = (rel) =>
+    rel.endsWith('coverage.json')
+      ? { verdict: 'pass', packages: {} }
+      : rel.endsWith('metrics.json')
+        ? { verdict: 'pass', warn: [], targets: { high_crap: [] } }
+        : null
   return {
     root: '/fake-root',
+    reviewDir: null,
     git: fakeGit({ 'merge-base github/main HEAD': 'abc123def\n', 'merge-base main HEAD': 'abc123def\n' }),
     exec: okExec(),
     runPython: okRunPython(),
     exists: () => true,
     readHead: () => null,
-    readJson: (rel) =>
-      rel.endsWith('coverage.json')
-        ? { verdict: 'pass', packages: {} }
-        : rel.endsWith('metrics.json')
-          ? { verdict: 'pass', warn: [], targets: { high_crap: [] } }
-          : null,
+    readJson: jsonStub,
+    readReviewJson: jsonStub,
     ...overrides,
   }
 }

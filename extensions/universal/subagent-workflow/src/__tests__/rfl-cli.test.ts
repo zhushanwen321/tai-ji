@@ -54,14 +54,15 @@ afterEach(() => {
 });
 
 function writeRun(repoSlug: string, runId: string, state: Record<string, unknown>): string {
-  const dir = join(home, ".review-fix-loop", repoSlug, runId);
+  const dir = join(home, ".agents", "skill-data", "review-fix-loop", "rfl", repoSlug, runId);
   mkdirSync(dir, { recursive: true });
   writeFileSync(join(dir, "state.json"), JSON.stringify(state), "utf8");
   return dir;
 }
 
 async function rfl(args: string[]): Promise<{ stdout: string; stderr: string }> {
-  return run(process.execPath, [RFL_PATH, ...args], { env: { ...process.env, HOME: home } });
+  // SKILL_DATA_DIR 显式置空：防宿主环境残留值把 ROOT 重定向出 HOME 隔离树
+  return run(process.execPath, [RFL_PATH, ...args], { env: { ...process.env, HOME: home, SKILL_DATA_DIR: "" } });
 }
 
 describe("A7 rfl CLI（list/stats/trends/clean）", () => {

@@ -192,6 +192,7 @@ export declare function resolveRunRoot(opts: {
   tmpDir?: string;
   exec?: (cmd: string) => string;
   mkdir?: (p: string) => void;
+  env?: Record<string, string | undefined>;
 }): { root: string; slug: string; degraded: boolean; [key: string]: unknown };
 export declare function computeOrigin(
   entry: { [key: string]: unknown },

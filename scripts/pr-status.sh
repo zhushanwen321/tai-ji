@@ -25,7 +25,7 @@
 
 set -euo pipefail
 
-REVIEW_DIR=".review"
+REVIEW_DIR=""  # 空 = 未显式指定（git root 解析后按新目录优先解析；显式 --review-dir 恒优先）
 
 while [[ $# -gt 0 ]]; do
     case "$1" in
@@ -40,6 +40,16 @@ done
 
 GIT_ROOT="$(git rev-parse --show-toplevel 2>/dev/null || { echo "Not a git repo" >&2; exit 1; })"
 cd "$GIT_ROOT"
+
+# 产物目录解析（impl-spec §2.2）：新 pr-review 目录存在时优先，否则回退旧 `.review/`
+#（迁移过渡期 design.md §7 风险 2）。显式 --review-dir 参数不经此解析。
+if [[ -z "$REVIEW_DIR" ]]; then
+    REVIEW_DIR=".review"
+    REVIEW_DIR_NEW="$(node "$GIT_ROOT/scripts/skill-data-dir.mjs" pr-review "$GIT_ROOT" 2>/dev/null || true)"
+    if [[ -n "$REVIEW_DIR_NEW" && -d "$REVIEW_DIR_NEW" ]]; then
+        REVIEW_DIR="$REVIEW_DIR_NEW"
+    fi
+fi
 
 BRANCH="$(git branch --show-current)"
 BASE="main"
@@ -134,7 +144,7 @@ if review_dir.is_dir():
         reverse=True,
     )
     if not rounds:
-        # 简短轮次：直接 .review/latest/aggregated.md
+        # 简短轮次：直接 <REVIEW_DIR>/latest/aggregated.md
         latest = review_dir / "latest" / "aggregated.md"
         if latest.is_file():
             rounds = [latest.parent]
@@ -184,6 +194,7 @@ stage1 = {
 marker = review_dir / "premerge-result"
 last_run = "never"
 last_result = "not_run"
+marker_head = ""
 if marker.is_file():
     try:
         text = marker.read_text()
@@ -193,8 +204,24 @@ if marker.is_file():
         m = re.search(r'result="([^"]*)"', text)
         if m:
             last_result = m.group(1)
+        m = re.search(r'headCommit="([^"]*)"', text)
+        if m:
+            marker_head = m.group(1)
     except Exception:
         pass
+
+# head 锚（design.md §7 风险 3）：worktree 删除重建可复用同一 project-slug，旧 marker
+# （无 headCommit 行的旧版产物）或 marker 与当前 HEAD 不一致 → 不判 ready。
+# 缺失/不一致都记 head_matched=False，result 字段保持 PASS/STALE 语义不变（供诊断），
+# ready 综合判定另行排除。
+current_head = ""
+try:
+    current_head = subprocess.run(
+        ["git", "rev-parse", "HEAD"], capture_output=True, text=True, cwd=git_root,
+    ).stdout.strip()
+except Exception:
+    pass
+head_matched = bool(marker_head) and marker_head == current_head
 
 if last_result == "PASS":
     import time
@@ -207,16 +234,20 @@ stage2 = {
     "marker_file": str(marker),
     "last_run": last_run,
     "result": last_result,
+    "head_commit": marker_head,
+    "current_head": current_head,
+    "head_matched": head_matched,
 }
 
 # ── 综合 ready_to_submit
 # stage1.clean 不作为硬条件：「单轮不循环」下 aggregated.md 的 must_fix 是修复前快照，
 # 修复闭合由 pr-cr-fix 主 agent 校验 worker 回执保证（软 gate），不由本脚本读快照数字保证。
-# 硬 gate = PR 存在 + 本地已同步 + pre-merge PASS。
+# 硬 gate = PR 存在 + 本地已同步 + pre-merge PASS + marker head 锚匹配当前 HEAD。
 ready = (
     stage0["pr_exists"] is True
     and stage0["local_ahead_of_origin"] == 0
     and stage2["result"] == "PASS"
+    and stage2["head_matched"] is True
 )
 
 out = {

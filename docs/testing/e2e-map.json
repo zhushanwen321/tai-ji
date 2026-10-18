@@ -2581,6 +2581,31 @@
       "owner": "pre-commit（AC7 extension-host 边界检查）",
       "authority": "scripts/verify-extension-host-boundaries.mjs",
       "run": "node scripts/verify-extension-host-boundaries.mjs"
+    },
+    {
+      "id": "E2E-SKILLDATA-01",
+      "summary": "skill-data 产物根解析器与 PR 状态读取脚本：skill-data-dir.mjs（segment 白名单 + project-slug = realpath+sha256 前八位 + SKILL_DATA_DIR 替代根）与 pr-status.sh（premerge marker 的 headCommit 锚读取）",
+      "scope": [
+        "scripts/skill-data-dir.mjs",
+        "scripts/pr-status.sh"
+      ],
+      "layer": "L1",
+      "assets": [
+        {
+          "kind": "script",
+          "ref": "scripts/skill-data-dir.mjs"
+        },
+        {
+          "kind": "script",
+          "ref": "scripts/pr-status.sh"
+        }
+      ],
+      "trigger": "on-diff",
+      "serial": false,
+      "run": "node scripts/skill-data-dir.mjs pr-review && bash scripts/pr-status.sh",
+      "owner": "scripts/",
+      "authority": "docs/TEST-STRATEGY.md#e2e-资产归宿纪律三态-r1r2r3",
+      "note": "skill-data 迁移（2026-10-18）补登：解析器为 gate 脚本族单一出口，slug 向量基准见 .tmp/skill-data-redesign/impl-spec.md §3（真机对账由 workflow/gate 脚本内向量自证承担）；pr-status.sh 直跑为只读状态输出，改脚本自身时冒烟。R2 态：真实运行形态 = pr-cr-fix 阶段 3b / dev-merge 人工触发"
     }
   ]
 }

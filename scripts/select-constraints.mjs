@@ -15,7 +15,11 @@
  *                                                               # 末行输出 "constraints-check PASS|FAIL"（cw e2e-sh 标记行兼容）
  *
  * 输出：
- *   - 落盘 .review/constraints.md（review agent 按「存在时必须消费」约定读取）
+ *   - 落盘 constraints.md（review agent 按「存在时必须消费」约定读取）。产物目录迁移
+ *     过渡期（design.md §7 风险 2）双写：新根 `~/.agents/skill-data/pr-review/<slug>/`
+ *     为主 + 旧 `.review/constraints.md` 同步写——reviewer 契约（共享实体，dev-merge
+ *     agents/review-*.md 写死旧路径）未全切前旧路径必须继续有效，否则约束核对静默
+ *     跳过；契约全切后的残留清理批删旧写。
  *   - stdout 同步打印摘要 + 命中清单（供主 agent 直接贴进 subagent task prompt）
  *
  * 退出码：0 成功（--check 模式下死链 = 2）
@@ -25,11 +29,15 @@ import { readFileSync, writeFileSync, mkdirSync, existsSync } from "node:fs";
 import { execSync } from "node:child_process";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+import { skillDataDir } from "./skill-data-dir.mjs";
 
 const SCRIPT_DIR = dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = resolve(SCRIPT_DIR, "..");
 const JSON_PATH = join(REPO_ROOT, "docs/constraints.json");
-const OUT_PATH = join(REPO_ROOT, ".review/constraints.md");
+// 路径解析全仓单一出口（impl-spec §2.2）；REPO_ROOT 恒存在，解析不会失败
+const OUT_NEW_DIR = skillDataDir("pr-review", REPO_ROOT);
+const OUT_PATH = join(OUT_NEW_DIR, "constraints.md");
+const OUT_LEGACY_PATH = join(REPO_ROOT, ".review/constraints.md");
 
 // ---------- 参数 ----------
 
@@ -116,9 +124,17 @@ for (const c of hit) {
 const content = lines.join("\n") + "\n";
 mkdirSync(dirname(OUT_PATH), { recursive: true });
 writeFileSync(OUT_PATH, content);
+// 旧路径过渡期同步写（失败不 fail——主目标新目录已写，stderr 出声）
+try {
+  mkdirSync(dirname(OUT_LEGACY_PATH), { recursive: true });
+  writeFileSync(OUT_LEGACY_PATH, content);
+} catch (e) {
+  console.error(`[select-constraints] WARN: 旧路径 ${OUT_LEGACY_PATH} 写入失败（${e.message}）——` +
+    `未切新路径的 reviewer 契约将读不到约束清单；恢复：确认 ${dirname(OUT_LEGACY_PATH)} 可写后重跑`);
+}
 
 console.log(content);
-console.log(`[select-constraints] 已写入 ${OUT_PATH}（命中 ${hit.length}/${data.constraints.length} 条，变更文件 ${uniqueFiles.length} 个）`);
+console.log(`[select-constraints] 已写入 ${OUT_PATH}（双写: ${OUT_LEGACY_PATH}，过渡期）（命中 ${hit.length}/${data.constraints.length} 条，变更文件 ${uniqueFiles.length} 个）`);
 
 if (checkMode) {
   if (checkFailures.length > 0) {

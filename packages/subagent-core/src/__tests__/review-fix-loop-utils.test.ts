@@ -1277,8 +1277,8 @@ describe("T-3: tracked severity 'unknown' 守卫（reconcile 新 ID 不覆盖自
 
 // ── A5: resolveRunRoot（rfl 仪表 T3，tier-1 §7.5） ─────────────────
 
-describe("A5 resolveRunRoot: 存储根解析（git slug / 非 git cwd / home 不可写降级）", () => {
-  it("A5 git 目录：toplevel 路径 slug 化为 <home>/.review-fix-loop/<slug>/<runId>，目录已创建", () => {
+describe("A5 resolveRunRoot: 存储根解析（git slug / 非 git cwd / 根不可写降级 / SKILL_DATA_DIR 覆盖）", () => {
+  it("A5 git 目录：toplevel 路径 slug 化为 <home>/.agents/skill-data/review-fix-loop/rfl/<slug>/<runId>，目录已创建", () => {
     const home = mkdtempSync(join(tmpdir(), "rfl-root-home-"));
     try {
       const made: string[] = [];
@@ -1294,7 +1294,7 @@ describe("A5 resolveRunRoot: 存储根解析（git slug / 非 git cwd / home 不
       });
       expect(degraded).toBe(false);
       expect(slug).toBe("Users-x-proj-my-repo");
-      expect(root).toBe(join(home, ".review-fix-loop", "Users-x-proj-my-repo", "wf-test-1"));
+      expect(root).toBe(join(home, ".agents", "skill-data", "review-fix-loop", "rfl", "Users-x-proj-my-repo", "wf-test-1"));
       expect(made).toEqual([root]);
     } finally {
       rmSync(home, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 });
@@ -1313,13 +1313,13 @@ describe("A5 resolveRunRoot: 存储根解析（git slug / 非 git cwd / home 不
       });
       expect(degraded).toBe(false);
       expect(slug).toBe("tmp-plain-docs");
-      expect(root).toBe(join(home, ".review-fix-loop", "tmp-plain-docs", "run-42"));
+      expect(root).toBe(join(home, ".agents", "skill-data", "review-fix-loop", "rfl", "tmp-plain-docs", "run-42"));
     } finally {
       rmSync(home, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 });
     }
   });
 
-  it("A5 home 不可写：降级 tmpDir 并返回 degraded=true（调用方 log WARN）", () => {
+  it("A5 根不可写：降级 tmpDir 并返回 degraded=true（调用方 log WARN）", () => {
     const home = "/definitely/not/writable/home";
     const fallbackTmp = mkdtempSync(join(tmpdir(), "rfl-root-tmp-"));
     try {
@@ -1331,7 +1331,7 @@ describe("A5 resolveRunRoot: 存储根解析（git slug / 非 git cwd / home 不
         tmpDir: fallbackTmp,
         exec: () => "/repo/top",
         mkdir: (p: string) => {
-          // primary 路径抛错（模拟 home 只读），降级路径成功
+          // primary 路径抛错（模拟根只读），降级路径成功
           if (p.startsWith(home)) throw new Error("EACCES");
           made.push(p);
         },
@@ -1357,7 +1357,34 @@ describe("A5 resolveRunRoot: 存储根解析（git slug / 非 git cwd / home 不
       // mkdir recursive 已真实创建（existsSync 验证）
       const { existsSync } = require("node:fs");
       expect(existsSync(root)).toBe(true);
-      expect(root).toContain(join(home, ".review-fix-loop", "Users-x-a b-c", "wf-real-1"));
+      expect(root).toContain(join(home, ".agents", "skill-data", "review-fix-loop", "rfl", "Users-x-a b-c", "wf-real-1"));
+    } finally {
+      rmSync(home, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 });
+    }
+  });
+
+  it("A5 SKILL_DATA_DIR 非空：作 skill-data 根替代（home 维度不参与）；空串/空白回退缺省根", () => {
+    const home = mkdtempSync(join(tmpdir(), "rfl-root-env-"));
+    try {
+      const { root } = resolveRunRoot({
+        runId: "wf-env-1",
+        cwd: "/repo/top",
+        homeDir: home,
+        exec: () => "/repo/top",
+        mkdir: () => {},
+        env: { SKILL_DATA_DIR: "/custom/data-root" },
+      });
+      expect(root).toBe(join("/custom/data-root", "review-fix-loop", "rfl", "repo-top", "wf-env-1"));
+      // 空白值 = 非空判定不通过，回退 <home>/.agents/skill-data
+      const fallback = resolveRunRoot({
+        runId: "wf-env-2",
+        cwd: "/repo/top",
+        homeDir: home,
+        exec: () => "/repo/top",
+        mkdir: () => {},
+        env: { SKILL_DATA_DIR: "   " },
+      });
+      expect(fallback.root).toBe(join(home, ".agents", "skill-data", "review-fix-loop", "rfl", "repo-top", "wf-env-2"));
     } finally {
       rmSync(home, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 });
     }

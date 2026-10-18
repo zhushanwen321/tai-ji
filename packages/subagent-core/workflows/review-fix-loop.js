@@ -474,11 +474,13 @@ const os = require("os");
 
 const RUN_ID = ($ARGS._runId && typeof $ARGS._runId === "string") ? $ARGS._runId : "run-" + Date.now();
 // rfl 仪表（tier-1 §6.8/§7.5）：state 持久化迁出 $TMPDIR（系统清理即丢失）——
-// ~/.review-fix-loop/<repo-slug>/<runId>/；$TMPDIR 仅作 home 不可写时的降级。
-// 旧 $TMPDIR run 不迁移（易失数据不抢救），loadState 只从新位置读。
+// <skill-data>/review-fix-loop/rfl/<repo-slug>/<runId>/（skill-data 根 = ~/.agents/skill-data，
+// SKILL_DATA_DIR env 非空时作根替代）；$TMPDIR 仅作该根不可写时的降级。
+// 旧落点（legacy：$TMPDIR 与 ~/.review-fix-loop/）run 不迁移（易失数据不抢救），
+// loadState 只从新位置读。
 const { root: RUN_ROOT, degraded: RUN_ROOT_DEGRADED } = resolveRunRoot({ runId: RUN_ID, cwd: process.cwd() });
 if (RUN_ROOT_DEGRADED) {
-  log("WARN: ~/.review-fix-loop not writable, falling back to $TMPDIR: " + RUN_ROOT);
+  log("WARN: skill-data review-fix-loop root not writable, falling back to $TMPDIR: " + RUN_ROOT);
 }
 const STATE_FILE = RUN_ROOT + "/state.json";
 

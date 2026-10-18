@@ -272,11 +272,13 @@ let rflHomeDir: string;
 beforeEach(() => {
   sessionDir = mkdtempSync(join(tmpdir(), "rfl-e2e-"));
   fixtureDir = mkdtempSync(join(tmpdir(), "rfl-e2e-agents-"));
-  // rfl 仪表（tier-1 T3）：state.json 现落 ~/.review-fix-loop/——HOME 重定向到
-  // 临时目录，防测试写真实 home（worker_threads 在 new Worker 时拷贝主线程 env
-  // 快照，stubEnv 先于起 run 即可让 worker 侧 os.homedir() 读到隔离值）。
+  // rfl 仪表（tier-1 T3）：state.json 现落 <HOME>/.agents/skill-data/review-fix-loop/rfl/
+  // ——HOME 重定向到临时目录，防测试写真实 home（worker_threads 在 new Worker 时拷贝
+  // 主线程 env 快照，stubEnv 先于起 run 即可让 worker 侧 os.homedir() 读到隔离值）；
+  // SKILL_DATA_DIR 一并置空，防宿主残留值把存储根重定向出隔离树。
   rflHomeDir = mkdtempSync(join(tmpdir(), "rfl-e2e-home-"));
   vi.stubEnv("HOME", rflHomeDir);
+  vi.stubEnv("SKILL_DATA_DIR", "");
   // 压缩 script-error 重试矩阵的真实指数退避（1+2+4s → 3ms；fail-fast 用例走完
   // 重试矩阵才收敛 failed，退避占单用例耗时大头）。生产默认不变，见
   // worker-message-pump RETRY_BACKOFF_BASE_ENV 测试通道。
@@ -1216,7 +1218,7 @@ describe("startup fail-fast (ADR-0003 D6)", () => {
   // ── A6: rfl 仪表 e2e（tier-1 T3+T4：存储迁移 + calls[] 采集） ──
 
   it(
-    "A6: state.json 落 ~/.review-fix-loop/<slug>/<runId>/ 且 calls[] 十字段全集 + phaseTimings 采集（默认剧本）",
+    "A6: state.json 落 <HOME>/.agents/skill-data/review-fix-loop/rfl/<slug>/<runId>/ 且 calls[] 十字段全集 + phaseTimings 采集（默认剧本）",
     async () => {
       // 剧本：R1 1 must-fix → fix → R2 clean（two-round clean 终止）
       const runner = makeScenarioRunner({
@@ -1248,9 +1250,10 @@ describe("startup fail-fast (ADR-0003 D6)", () => {
       const outcome = assertScriptOutcome(result.scriptResult);
       expect(outcome.terminated).toBe("clean");
 
-      // T3 存储迁移：runDir 位于 HOME（已 stub 到 rflHomeDir）下 .review-fix-loop/<slug>/<runId>
+      // T3 存储迁移：runDir 位于 HOME（已 stub 到 rflHomeDir）下
+      // .agents/skill-data/review-fix-loop/rfl/<slug>/<runId>
       expect(typeof outcome.runDir).toBe("string");
-      expect(outcome.runDir).toContain(join(rflHomeDir, ".review-fix-loop"));
+      expect(outcome.runDir).toContain(join(rflHomeDir, ".agents", "skill-data", "review-fix-loop", "rfl"));
       // 引擎注入的 _runId 覆盖用户预传值（A3 语义）——state 目录名 = 引擎 runId
       expect(outcome.runDir).not.toContain(userRunId);
       expect(result.runId).toBeTruthy();

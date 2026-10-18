@@ -1,7 +1,9 @@
 #!/usr/bin/env node
 // rfl.mjs — review-fix-loop run 数据查询 CLI（tier-1 §7.4，零依赖 node 脚本）
 //
-// 读取 ~/.review-fix-loop/<repo-slug>/<runId>/state.json（workflow 脚本落盘），
+// 读取 <skill-data>/review-fix-loop/rfl/<repo-slug>/<runId>/state.json（workflow 脚本落盘；
+// skill-data 根 = ~/.agents/skill-data，SKILL_DATA_DIR env 非空时作根替代。
+// legacy 旧根 ~/.review-fix-loop/ 不读取、不迁移），
 // 派生指标现算不落盘。M0 数据结构（calls/batches[].rounds[].phaseTimings）为全集，
 // M1/M2 字段（issues[].origin/dormant/scores）缺省容错显示。
 //
@@ -14,7 +16,10 @@ import { existsSync, readdirSync, readFileSync, rmSync, statSync } from "node:fs
 import { homedir } from "node:os";
 import { join } from "node:path";
 
-const ROOT = join(homedir(), ".review-fix-loop");
+// SKILL_DATA_DIR 覆盖仅 node 直跑域生效（runtime→pi 子进程链会剥除该 env，
+// extension 内置版收不到——skill-data-redesign impl-spec §2.3）。
+const SKILL_DATA_ROOT = (process.env.SKILL_DATA_DIR || "").trim() || join(homedir(), ".agents", "skill-data");
+const ROOT = join(SKILL_DATA_ROOT, "review-fix-loop", "rfl");
 
 function isDir(p) {
   try { return statSync(p).isDirectory(); } catch { return false; }
