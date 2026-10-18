@@ -134,7 +134,7 @@ must_fix: <数字>
 
 ## Schema 输出
 
-agent 必须通过 `structured-output` tool 返回 JSON：
+agent 必须**顶层直接调用** `structured-output` tool 返回 JSON（[MANDATORY] 禁止经 `codemode` 或其他工具包装调用，如 `tools.structured_output(...)`——引擎只识别顶层 `structured-output` 工具调用事件；包装调用在扩展侧看似成功、引擎侧判「从未调用」→ 确定性 schema 失败并终止整个 workflow）：
 
 ```json
 {
