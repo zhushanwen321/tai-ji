@@ -22,6 +22,7 @@ import { describe, it, expect, vi, afterEach } from 'vitest'
 import type { SettingsTransport, DiscoverModelsRequest } from '@taiji/core/domain/settings'
 import type {
   LlmRetryConfig,
+  NetworkProxyConfig,
   PiLaunchPreset,
   ProviderId,
   ProviderSource,
@@ -74,6 +75,12 @@ describe('settings-transport-adapter · @/api 门面八元全量转发矩阵（u
     bell: false,
   }
   const PROBE_RETRY: LlmRetryConfig = { enabled: true, maxRetries: 1, baseDelayMs: 2 }
+  const PROBE_NETWORK_PROXY: NetworkProxyConfig = {
+    enabled: true,
+    proxy: { protocol: 'http', host: '127.0.0.1', port: 7890, username: '', password: '' },
+    noProxy: ['localhost'],
+    rules: ['api.anthropic.com'],
+  }
   const PROBE_QUOTA_PAYLOAD: QuotaConfigurePayload = { providerId: 'probe-provider', enabled: true }
   const PROBE_PRESET: PiLaunchPreset = {
     id: 'probe-preset',
@@ -147,6 +154,8 @@ describe('settings-transport-adapter · @/api 门面八元全量转发矩阵（u
     getSystemPrompt: fwd('config', 'getSystemPrompt', [], (t) => t.getSystemPrompt()),
     getTerminalConfig: fwd('config', 'getTerminalConfig', [], (t) => t.getTerminalConfig()),
     getRetryConfig: fwd('config', 'getRetryConfig', [], (t) => t.getRetryConfig()),
+    getNetworkProxyConfig: fwd('config', 'getNetworkProxyConfig', [], (t) => t.getNetworkProxyConfig()),
+    getNetworkProxyStats: fwd('config', 'getNetworkProxyStats', ['all'], (t, range) => t.getNetworkProxyStats(range)),
     getWorktreeRootDir: fwd('settings', 'getWorktreeRootDir', [], (t) => t.getWorktreeRootDir()),
     getSetupScript: fwd('settings', 'getSetupScript', [], (t) => t.getSetupScript()),
     getBareSetupScript: fwd('settings', 'getBareSetupScript', [], (t) => t.getBareSetupScript()),
@@ -190,6 +199,11 @@ describe('settings-transport-adapter · @/api 门面八元全量转发矩阵（u
     setSystemPrompt: fwd('config', 'setSystemPrompt', [PROBE_SYSTEM_PROMPT], (t, cfg) => t.setSystemPrompt(cfg)),
     setTerminalConfig: fwd('config', 'setTerminalConfig', [PROBE_TERMINAL], (t, cfg) => t.setTerminalConfig(cfg)),
     setRetryConfig: fwd('config', 'setRetryConfig', [PROBE_RETRY], (t, cfg) => t.setRetryConfig(cfg)),
+    setNetworkProxyConfig: fwd('config', 'setNetworkProxyConfig', [PROBE_NETWORK_PROXY], (t, cfg) =>
+      t.setNetworkProxyConfig(cfg),
+    ),
+    testNetworkProxy: fwd('config', 'testNetworkProxy', [PROBE_NETWORK_PROXY], (t, cfg) => t.testNetworkProxy(cfg)),
+    resetNetworkProxyStats: fwd('config', 'resetNetworkProxyStats', [], (t) => t.resetNetworkProxyStats()),
     setWorktreeRootDir: fwd('settings', 'setWorktreeRootDir', ['probe-root'], (t, dir) => t.setWorktreeRootDir(dir)),
     setSetupScript: fwd('settings', 'setSetupScript', ['probe-script'], (t, script) => t.setSetupScript(script)),
     setBareSetupScript: fwd('settings', 'setBareSetupScript', ['probe-script'], (t, script) =>
@@ -264,6 +278,7 @@ describe('settings-transport-adapter · @/api 门面八元全量转发矩阵（u
     onSkills: fwd('config', 'onSkills', [probeHandler], (t, h) => t.onSkills(h)),
     onAgents: fwd('config', 'onAgents', [probeHandler], (t, h) => t.onAgents(h)),
     onExtensions: fwd('extension', 'onExtensions', [probeHandler], (t, h) => t.onExtensions(h)),
+    onNetworkProxyConfig: fwd('config', 'onNetworkProxyConfig', [probeHandler], (t, h) => t.onNetworkProxyConfig(h)),
     onSkillDirs: fwd('config', 'onSkillDirs', [probeHandler], (t, h) => t.onSkillDirs(h)),
     onAgentDirs: fwd('config', 'onAgentDirs', [probeHandler], (t, h) => t.onAgentDirs(h)),
     onExtensionDirs: fwd('config', 'onExtensionDirs', [probeHandler], (t, h) => t.onExtensionDirs(h)),
