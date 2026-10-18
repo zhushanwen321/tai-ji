@@ -17,7 +17,7 @@ import { useI18n } from 'vue-i18n'
 import { Input } from '@/components/ui/input'
 import { Checkbox } from '@/components/ui/checkbox'
 import type { ChoiceQuestion } from '@zhushanwen/extension-protocol'
-import { OTHER_VALUE, type QuestionState } from './question-state'
+import { OTHER_VALUE, type QuestionState } from '@taiji/ui/form-protocol'
 
 const props = defineProps<{
   question: ChoiceQuestion

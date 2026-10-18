@@ -6,7 +6,7 @@
  * 回传经 App 编排走 extension.ui_response 既有通路）：
  * - form 帧（新 form / legacy askUser / scheduleCreate 归一后）：堆叠单列渲染 choice / text /
  *   schedule 回显三类问题（触控形态；桌面 FormOverlay 是 tab 逐题形态——真差异，编码契约
- *   同构，纯逻辑单点在 shell/form-protocol）。legacy scheduleCreate draft 源包装为单 schedule
+ *   同构，纯逻辑单点在 @taiji/ui/form-protocol 双壳共享）。legacy scheduleCreate draft 源包装为单 schedule
  *   题直挂（桌面 FormOverlay.draftQuestion 同式），submit 回传扁平 ScheduleFormResult JSON；
  *   questions 源 submit 回传 FormAnswers JSON envelope。
  * - planReview 审批帧：自审结论展示 + 批准 / 搁置双键（payload 与桌面 PlanReviewBar 同契约
@@ -24,6 +24,7 @@ import type { ExtensionUIRequest } from '@taiji/core/transport/api/domains/exten
 import { isFormQuestion, type FormQuestion, type ScheduleDraft, type ScheduleQuestion } from '@zhushanwen/extension-protocol'
 import { onceCronToDate } from '@zhushanwen/extension-protocol'
 import type { PlanReviewFrameForView } from '../shell/companion-bridge'
+import { scheduleDraftOf } from '../shell/form-protocol'
 import {
   OTHER_VALUE,
   draftToScheduleFormResult,
@@ -32,10 +33,9 @@ import {
   isQuestionAnswered,
   isScheduleEchoReady,
   questionKey,
-  scheduleDraftOf,
   scheduleEchoResult,
   type QuestionState,
-} from '../shell/form-protocol'
+} from '@taiji/ui/form-protocol'
 
 const props = defineProps<{
   /** 队首 form 类请求（undefined = 该节不渲染） */

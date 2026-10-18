@@ -39,7 +39,7 @@ import type { FormQuestion, ScheduleDraft, ScheduleQuestion } from '@zhushanwen/
 import ChoiceQuestion from './ChoiceQuestion.vue'
 import TextQuestion from './TextQuestion.vue'
 import ScheduleForm from './ScheduleForm.vue'
-import { OTHER_VALUE, initialQuestionState, type QuestionState } from './question-state'
+import { encodeFormAnswers, initialQuestionState, isQuestionAnswered as isAnswered, questionKey, type QuestionState } from '@taiji/ui/form-protocol'
 import { registerModalSurface } from '@/composables/features/app/modal-surface-registry'
 
 const props = withDefaults(defineProps<{
@@ -81,10 +81,7 @@ const questionsList = computed<FormQuestion[]>(() =>
   props.questions ?? (draftMount.value ? [draftQuestion.value] : []),
 )
 
-// ── 问题 key（header 缺省时用 question 文本——与协议 askUserKey fallback 同规则）──
-function qKey(q: FormQuestion): string {
-  return q.header ?? q.question
-}
+// ── 问题 key：共享件 questionKey（header 缺省回落 question 全文，协议 fallback 规则）──
 
 // ── tab 状态 ──
 const activeIdx = ref(0)
@@ -99,7 +96,7 @@ watch(questionsList, (qs) => {
   const next: Record<string, QuestionState> = {}
   for (const q of qs) {
     if (q.type === 'schedule') continue
-    const key = qKey(q)
+    const key = questionKey(q)
     next[key] = states.value[key] ?? initialQuestionState()
   }
   states.value = next
@@ -122,21 +119,10 @@ function setScheduleRef(key: string, el: Element | ComponentPublicInstance | nul
 }
 
 // ── 已答判定 + Submit 门（AskUserOverlay:161-186 逐字继承；schedule 委托 canSubmit）──
-/** 问题是否已作答（choice：普通选项选中 ≥1 或 Other 选中且有文本；text：非空；
- *  schedule：渲染器 canSubmit——预填草稿视为有效） */
+/** 问题是否已作答：共享判定（@taiji/ui/form-protocol）+ 桌面侧状态折算入参
+ *  （choice/text 取壳 states；schedule 取渲染器 canSubmit——预填草稿视为有效） */
 function isQuestionAnswered(q: FormQuestion): boolean {
-  if (q.type === 'schedule') return scheduleRefs.get(qKey(q))?.canSubmit ?? false
-  const st = states.value[qKey(q)]
-  if (!st) return false
-  // text 题 / 空 options 的退化 choice：otherText 有值即答完
-  if (q.type === 'text' || q.options.length === 0) return st.otherText.trim().length > 0
-  // 有选项：Other 选中必须有文本才算答完
-  const otherSelected = st.selectedValues.includes(OTHER_VALUE)
-  if (otherSelected && !st.otherText.trim()) {
-    // Other 选中但没文本：检查是否还选了其他选项（多选场景）
-    return st.selectedValues.some((v) => v !== OTHER_VALUE)
-  }
-  return st.selectedValues.length > 0
+  return isAnswered(q, states.value[questionKey(q)], scheduleRefs.get(questionKey(q))?.canSubmit ?? false)
 }
 
 /** 全部问题已作答（Submit 启用检查） */
@@ -197,33 +183,18 @@ function onOtherEnter(): void {
 function onSubmit(): void {
   // legacy scheduleCreate 挂载源：扁平 ScheduleFormResult JSON 直传
   if (draftMount.value) {
-    const result = scheduleRefs.get(qKey(draftQuestion.value))?.submit() ?? null
+    const result = scheduleRefs.get(questionKey(draftQuestion.value))?.submit() ?? null
     if (result !== null) emit('submit', result)
     return
   }
-  const answers: Record<string, string> = {}
-  for (const q of questionsList.value) {
-    const key = qKey(q)
-    if (q.type === 'schedule') {
-      const result = scheduleRefs.get(key)?.submit() ?? null
-      if (result === null) return // 提交瞬间复核未过（once 时刻已过等）——整表中止
-      answers[key] = result // value = JSON.stringify(ScheduleFormResult)（D2）
-      continue
-    }
-    const st = states.value[key]
-    if (!st) continue
-    if (q.type === 'choice' && q.options.length > 0) {
-      // selected 只含真实选项 label（过滤 OTHER_VALUE 占位符）
-      const vals = st.selectedValues.filter((v) => v !== OTHER_VALUE)
-      if (vals.length > 0) {
-        answers[key] = q.multi ? JSON.stringify(vals) : vals[0]
-      }
-    }
-    // Other 自由文本写独立 key `${key}__other`；text 题答案只写 __other 不写主 key（D2）
-    if (st.otherText) {
-      answers[`${key}__other`] = st.otherText
-    }
-  }
+  // questions 源：FormAnswers envelope 编码走共享单点（@taiji/ui/form-protocol，与移动壳同契约）；
+  // schedule 题经渲染器 submit() 取 JSON（提交瞬间复核未过 → null → 整表中止，与内联实现同语义）
+  const answers = encodeFormAnswers(
+    questionsList.value,
+    states.value,
+    (q) => scheduleRefs.get(questionKey(q))?.submit() ?? null,
+  )
+  if (answers === null) return // 提交瞬间复核未过（once 时刻已过等）——整表中止
   emit('submit', JSON.stringify(answers))
 }
 </script>
@@ -255,7 +226,7 @@ function onSubmit(): void {
       <div v-else class="flex items-center gap-0.5">
         <Button
           v-for="(q, i) in questionsList"
-          :key="qKey(q)"
+          :key="questionKey(q)"
           variant="ghost"
           :class="[
             'rounded-sm px-2.5 py-1 text-[length:var(--text-xs)] font-normal transition-colors',
@@ -300,21 +271,21 @@ function onSubmit(): void {
 
       <ChoiceQuestion
         v-if="activeQuestion.type === 'choice'"
-        v-model="states[qKey(activeQuestion)]"
+        v-model="states[questionKey(activeQuestion)]"
         :question="activeQuestion"
         @advance="advanceToNext"
         @other-enter="onOtherEnter"
       />
       <TextQuestion
         v-else
-        v-model="states[qKey(activeQuestion)]"
+        v-model="states[questionKey(activeQuestion)]"
         :question="activeQuestion"
       />
     </div>
 
     <!-- body ②：schedule 题全部常挂 v-show（表单状态在渲染器内部，切 tab 不重置）；
          context 行由壳补（渲染器整表单迁移不含 context 呈现） -->
-    <template v-for="(q, i) in questionsList" :key="qKey(q)">
+    <template v-for="(q, i) in questionsList" :key="questionKey(q)">
       <template v-if="q.type === 'schedule'">
         <p
           v-if="i === activeIdx"
@@ -332,7 +303,7 @@ function onSubmit(): void {
         </p>
         <ScheduleForm
           v-show="i === activeIdx"
-          :ref="(el) => setScheduleRef(qKey(q), el)"
+          :ref="(el) => setScheduleRef(questionKey(q), el)"
           :question="q"
           @cancel="emit('cancel')"
         />

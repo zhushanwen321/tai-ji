@@ -9,7 +9,7 @@ import { computed } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { Textarea } from '@/components/ui/textarea'
 import type { TextQuestion } from '@zhushanwen/extension-protocol'
-import type { QuestionState } from './question-state'
+import type { QuestionState } from '@taiji/ui/form-protocol'
 
 const props = defineProps<{
   question: TextQuestion
