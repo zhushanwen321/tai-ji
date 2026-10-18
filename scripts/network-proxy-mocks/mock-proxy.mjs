@@ -23,12 +23,14 @@
  * 就绪信号：stdout 单行 JSON——[mock-proxy] {"ready":true,"proxyPort":N,"endpointPort":M,"caFile":"...","recordFile":"..."}
  */
 
+import crypto from "node:crypto";
 import fs from "node:fs";
 import http from "node:http";
 import net from "node:net";
 import os from "node:os";
 import path from "node:path";
 import process from "node:process";
+import tls from "node:tls";
 import zlib from "node:zlib";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
@@ -113,9 +115,10 @@ export async function startMockProxy(opts = {}) {
     appendRecord({ host, port, ts: new Date().toISOString() });
 
     if (opts.blockUpstream) {
-      // 接受 CONNECT 但不桥接：客户端 TLS 握手将失败（场景 3「代理可达但出口不通」形态）
-      clientSocket.write("HTTP/1.1 200 Connection Established\r\n\r\n");
-      setTimeout(() => clientSocket.destroy(), 50);
+      // 接受 CONNECT 但不桥接：客户端 TLS 握手将失败（场景 3「代理可达但出口不通」形态）。
+      // 断开挂在 write 的 flush 回调上（事件序：200 写完内核缓冲后才销毁），保证 200
+      // 先于断开被客户端读到——客户端因此能区分「代理拒绝 CONNECT」与本形态
+      clientSocket.write("HTTP/1.1 200 Connection Established\r\n\r\n", () => clientSocket.destroy());
       return;
     }
 
@@ -183,6 +186,72 @@ async function curlRun(args) {
   } catch (err) {
     return { ok: false, stdout: err?.stdout ?? Buffer.alloc(0), stderr: String(err?.stderr ?? err?.message ?? err) };
   }
+}
+
+/**
+ * 场景 8 构造的最小 WS 客户端（零 npm 依赖；Node 内置 WebSocket 不可配自签 TLS 信任）：
+ * 经 mock 代理 CONNECT api.anthropic.com:443 → 隧道内 TLS → WS upgrade（101）→
+ * 发掩码 text 帧 → 等 echo。返回收到的 echo 文本（断言承载）。
+ */
+function wsEchoViaProxy(proxyPort, caFile, host = "api.anthropic.com", text = "ws-probe-42") {
+  return new Promise((resolve, reject) => {
+    let tlsSock = null;
+    const guard = setTimeout(() => fail(new Error("WS echo 经代理 10s 无进展")), 10_000);
+    const proxySock = net.connect(proxyPort, "127.0.0.1");
+    const fail = (err) => {
+      clearTimeout(guard);
+      tlsSock?.destroy();
+      proxySock.destroy();
+      reject(err instanceof Error ? err : new Error(String(err)));
+    };
+    proxySock.on("error", fail);
+    proxySock.on("connect", () => {
+      proxySock.write(`CONNECT ${host}:443 HTTP/1.1\r\nhost: ${host}:443\r\n\r\n`);
+    });
+
+    // 1) CONNECT：收齐响应头后校验 200，随后把流交给 TLS
+    let connBuf = Buffer.alloc(0);
+    proxySock.on("data", function onData(c) {
+      connBuf = Buffer.concat([connBuf, c]);
+      const headEnd = connBuf.indexOf("\r\n\r\n");
+      if (headEnd < 0) return;
+      proxySock.removeListener("data", onData);
+      const statusLine = connBuf.subarray(0, connBuf.indexOf("\r\n")).toString("ascii");
+      if (!statusLine.startsWith("HTTP/1.1 200")) return fail(new Error(`CONNECT 未获 200：${statusLine}`));
+
+      // 2) 隧道内 TLS（SNI/校验按 api.anthropic.com，caFile 为端点自签信任锚）
+      tlsSock = tls.connect({ socket: proxySock, servername: host, ca: fs.readFileSync(caFile) }, () => {
+        // 3) WS upgrade 请求
+        const key = crypto.randomBytes(16).toString("base64");
+        tlsSock.write(`GET /v1/ws HTTP/1.1\r\nhost: ${host}\r\nupgrade: websocket\r\nconnection: upgrade\r\nsec-websocket-key: ${key}\r\nsec-websocket-version: 13\r\n\r\n`);
+      });
+      tlsSock.on("error", fail);
+
+      // 4) 101 响应头 + 单帧 echo（服务端帧不掩码）流式解析；echo 到手即回 close 收尾
+      let wsBuf = Buffer.alloc(0);
+      tlsSock.on("data", (c) => {
+        wsBuf = Buffer.concat([wsBuf, c]);
+        const headEnd = wsBuf.indexOf("\r\n\r\n");
+        if (headEnd < 0) return;
+        const statusLine = wsBuf.subarray(0, wsBuf.indexOf("\r\n")).toString("ascii");
+        if (!statusLine.startsWith("HTTP/1.1 101")) return fail(new Error(`WS 握手未获 101：${statusLine}`));
+        // 101 到手即发掩码 text 帧（客户端→服务端必掩码，RFC 6455 §5.3）
+        const payload = Buffer.from(text, "utf8");
+        const mask = crypto.randomBytes(4);
+        const masked = Buffer.from(payload);
+        for (let i = 0; i < masked.length; i += 1) masked[i] ^= mask[i % 4];
+        tlsSock.write(Buffer.concat([Buffer.from([0x81, 0x80 | payload.length]), mask, masked]));
+        const frames = wsBuf.subarray(headEnd + 4);
+        if (frames.length < 2) return;
+        const len = frames[1] & 0x7f;
+        if (frames.length < 2 + len) return;
+        tlsSock.removeAllListeners("data");
+        clearTimeout(guard);
+        tlsSock.end(Buffer.from([0x88, 0x00])); // close 帧（status 0x0000 无附加）
+        resolve(frames.subarray(2, 2 + len).toString("utf8"));
+      });
+    });
+  });
 }
 
 async function selftest() {
@@ -282,6 +351,15 @@ async function selftest() {
     check("C: block-upstream 客户端出站失败（curl 非零退出）", !cRun.ok, cRun.stderr.slice(-200));
     const recC = JSON.parse(fs.readFileSync(c.recordFile, "utf8"));
     check("C: block-upstream 仍记录 CONNECT", Array.isArray(recC.targets) && recC.targets.length >= 1, JSON.stringify(recC).slice(0, 200));
+
+    // D) 场景 8 构造：WS upgrade 经代理 CONNECT 隧道（101 交换 + text 帧 echo 全链路）
+    //    端点侧 = mock-endpoint 的 WS upgrade 分支；客户端侧 = 手写最小 WS 交换（零依赖）
+    const wsEcho = await wsEchoViaProxy(a.port, a.caFile).catch((err) => `ERR: ${err?.message ?? err}`);
+    check(
+      "D: WS upgrade 经 CONNECT 隧道（101 + mock-ws-echo 回显）",
+      wsEcho === "mock-ws-echo: ws-probe-42",
+      String(wsEcho).slice(0, 160),
+    );
 
     console.log(failures.length === 0 ? "[mock-proxy] SELFTEST PASS" : `[mock-proxy] SELFTEST FAIL（${failures.length} 项）`);
     process.exitCode = failures.length === 0 ? 0 : 1;

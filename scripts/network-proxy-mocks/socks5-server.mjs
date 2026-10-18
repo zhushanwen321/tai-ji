@@ -21,7 +21,8 @@
  * 就绪信号：stdout 单行 JSON——[socks5-server] {"ready":true,"port":N,"endpointPort":M,"caFile":"...","recordFile":"..."}
  *
  * 协议范围：仅 CONNECT（其余命令回 REP=7 command not supported）；
- * ATYP 支持 IPv4 / 域名 / IPv6；握手段 10s 无进展即断开（防垃圾连接悬挂）。
+ * 请求 ATYP 解析支持 IPv4 / 域名 / IPv6（CONNECT 回复恒以 ATYP=0x01 IPv4 零地址占位应答，
+ * 见 socksReply）；握手段 10s 无进展即断开（防垃圾连接悬挂）。
  */
 
 import fs from "node:fs";
@@ -102,9 +103,13 @@ function makeHandshakeReader(socket) {
   return { read, done: () => clearTimeout(timeout) };
 }
 
-function socksReply(rep, atyp) {
+function socksReply(rep) {
   // VER REP RSV ATYP BND.ADDR(4B 0.0.0.0) BND.PORT(2B 0)
-  return Buffer.from([0x05, rep, 0x00, atyp, 0, 0, 0, 0, 0, 0]);
+  // 回复恒 ATYP=0x01（IPv4 零地址占位，RFC 1928 允许 BND.ADDR 占位零值）：消费端按
+  // ATYP 定长解析（curl / undici socks5-client 对 IPv4 形态恒读 10 字节整）；若回显请求
+  // ATYP，IPv6 目标（0x04）会被按 16B 地址 + 2B 端口 = 22 字节解析，10 字节回复致客户端
+  // 挂起等待至超时
+  return Buffer.from([0x05, rep, 0x00, 0x01, 0, 0, 0, 0, 0, 0]);
 }
 
 function bytesToIpv6(buf) {
@@ -184,7 +189,7 @@ export function startSocks5Server(opts = {}) {
       } else if (atyp === 0x04) {
         host = bytesToIpv6(await reader.read(16));
       } else {
-        socket.write(socksReply(0x08, atyp)); // address type not supported
+        socket.write(socksReply(0x08)); // address type not supported
         return socket.destroy();
       }
       const portBuf = await reader.read(2);
@@ -193,7 +198,7 @@ export function startSocks5Server(opts = {}) {
       appendRecord({ host, port, ts: new Date().toISOString() });
 
       if (cmd !== 0x01) {
-        socket.write(socksReply(0x07, atyp)); // command not supported
+        socket.write(socksReply(0x07)); // command not supported
         return socket.destroy();
       }
 
@@ -201,14 +206,14 @@ export function startSocks5Server(opts = {}) {
       const upstream = net.connect(target.port, target.host);
       upstream.on("error", () => {
         try {
-          socket.write(socksReply(0x01, atyp)); // general SOCKS server failure
+          socket.write(socksReply(0x01)); // general SOCKS server failure
         } catch {
           // 客户端已断开
         }
         socket.destroy();
       });
       upstream.on("connect", () => {
-        socket.write(socksReply(0x00, atyp));
+        socket.write(socksReply(0x00));
         upstream.pipe(socket);
         socket.pipe(upstream);
       });
