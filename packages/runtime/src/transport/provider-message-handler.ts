@@ -202,7 +202,7 @@ export class ProviderMessageHandler {
    * - auth.json 是 oauth 时限下不可回显且不回落（不显示 models.json 的历史残留值）。
    * 无凭据则 available:false（UI 以 toast 反馈，不写保存条）；读取异常交给 server 层统一错误包。
    *
-   * 明文凭据 carve-out 与其可达性裁决（remote token 持有者可调用，已接受）见 ADR-0141；
+   * 明文凭据 carve-out 与其可达性裁决（remote token 持有者可调用，已接受）见 ADR-0144；
    * 行为红线（oauth 不回落 / `$ENV` 原值）见 resolver 单测。
    */
   private async handleRevealProviderApiKey(

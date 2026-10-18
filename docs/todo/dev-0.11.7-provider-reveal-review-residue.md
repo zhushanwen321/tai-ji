@@ -31,7 +31,7 @@ OAuth 退出 presence 事实回写、端点草稿值谓词、测试三态桩等�
 ## 已处理（终态存档）
 
 - must-fix：两轮共 8 条全部修复并经下一轮 reviewers 复核 clean（回显生命周期、discover 凭据
-  取值、OAuth presence 三态、ADR-0141 明文 carve-out 与远程可达性裁决、registry #65/#66 登记）。
+  取值、OAuth presence 三态、ADR-0144 明文 carve-out 与远程可达性裁决、registry #65/#66 登记）。
 - diff 归属 minor（合入前当批修复）：SG-1 registry 链接、SG-2 `Cookie:` 头名剥离、
   SG-3 runtime 重复归一化测试块删除、SG-4/SG-6 登记措辞、SG-9 `!cmd` 原值测试、
   SG-10 runtime configure 归一化、SG-12 discover 注释、SG-13 i18n 恢复指引、
