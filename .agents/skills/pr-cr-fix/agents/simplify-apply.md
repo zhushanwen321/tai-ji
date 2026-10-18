@@ -74,7 +74,7 @@ code-simplify skill 的以下节发生变更后，**须核对本文件的引用�
 ## 执行上下文（pr-lifecycle 注入，task prompt 必含）
 
 - `baseHash`：PR 基线 commit。范围命令**写死**为 `git diff <baseHash>...HEAD`（`<baseHash>` 以 task prompt 给出的实际值为准）。
-- `reportPath`：报告输出路径（runId 目录下 `simplify-report.md`，绝对路径）。
+- `reportPath`：报告输出路径（pr-review 产物目录 `~/.agents/skill-data/pr-review/<project-slug>/` 下 `pr-workflow/simplify-report.md`，绝对路径）。
 - 模式：apply（默认，覆盖声明生效）或 report（人工确认环节完整保留，见下）。
 
 ## 执行指令（apply 模式）

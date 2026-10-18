@@ -56,8 +56,13 @@ node 解析，原因见上 [HISTORICAL] #3）。未声明的包记 SKIP 并给�
       探针模式不自动传播。报告包条目带 downstream_of 字段标明联动来源。
 退出码：0 = pass；1 = fail（增量不足或测试失败）；2 = 工具错误（git 异常 / 记账不闭合 /
       all-SKIP 配置错误 / argv 参数错误）
-产出：.review/coverage.json（packages 增量口径 + files 全文件级真实覆盖率，
-      后者供 metrics-gate.py 替换 fallow 静态估算消费）
+产出：coverage.json（packages 增量口径 + files 全文件级真实覆盖率，后者供
+      metrics-gate.py 替换 fallow 静态估算消费）。产物目录迁移过渡期（design.md §7
+      风险 2）双写：新根 `~/.agents/skill-data/pr-review/<project-slug>/`（经
+      node scripts/skill-data-dir.mjs 解析）与旧 `.review/` 同内容——读方脚本（入 git
+      随分支传播）未全切前旧路径必须继续有效；读方全部切完后的残留清理批删双写。
+      coverage.json 带 base + headCommit 双锚（headCommit 供 pr-pre-merge.sh 防止
+      worktree 重建后「base 相同但内容过期」的陈旧产物被采信，design.md §7 风险 3）。
 """
 
 from __future__ import annotations
@@ -107,6 +112,48 @@ def sh(cmd: list[str], cwd: Path | None = None) -> subprocess.CompletedProcess:
     return subprocess.run(cmd, cwd=cwd, capture_output=True, text=True)
 
 
+def resolve_review_dirs(repo_root: Path) -> tuple[Path, Path | None]:
+    """解析 gate 产物目录 → (旧 .review/ 目录, 新 pr-review 目录或 None)。
+
+    新目录经 node scripts/skill-data-dir.mjs 解析（impl-spec §2.2：路径解析全仓单一出口，
+    slug = realpath + sha256 前 8 位）。解析失败（node 缺失 / 脚本缺失）不炸门禁：
+    WARN 后返回 None，产物照常落旧目录——旧路径在过渡期必须持续有效（design.md §7
+    风险 2 的读方兼容面），新目录写失败只降级不出声跳过。
+    """
+    legacy = repo_root / ".review"
+    script = repo_root / "scripts" / "skill-data-dir.mjs"
+    try:
+        proc = subprocess.run(
+            ["node", str(script), "pr-review", str(repo_root)],
+            capture_output=True, text=True, timeout=15)
+    except OSError as e:
+        print(f"WARN: 新产物目录解析失败（node 调用异常：{e}），本 run 只写旧目录 "
+              f"{legacy}；恢复：确认 node 可用且 scripts/skill-data-dir.mjs 存在后重跑",
+              file=sys.stderr)
+        return legacy, None
+    if proc.returncode != 0 or not proc.stdout.strip():
+        print(f"WARN: 新产物目录解析失败（skill-data-dir.mjs exit={proc.returncode}："
+              f"{proc.stderr.strip()[:200]}），本 run 只写旧目录 {legacy}；"
+              f"恢复：检查 scripts/skill-data-dir.mjs 完整性后重跑", file=sys.stderr)
+        return legacy, None
+    return legacy, Path(proc.stdout.strip())
+
+
+def write_coverage_json(review_dirs: tuple[Path, Path | None], payload: dict) -> None:
+    """coverage.json 唯一写出口：旧目录 + 新目录同内容双写（迁移过渡期，design.md §7 风险 2）。
+
+    新目录为 None（解析失败降级）时只写旧目录。mkdir parents=True：新目录按日期首次
+    创建时父链（~/.agents/skill-data/pr-review/<slug>）尚不存在。
+    """
+    legacy_dir, new_dir = review_dirs
+    text = json.dumps(payload, indent=2, ensure_ascii=False)
+    legacy_dir.mkdir(exist_ok=True)
+    (legacy_dir / "coverage.json").write_text(text)
+    if new_dir is not None:
+        new_dir.mkdir(parents=True, exist_ok=True)
+        (new_dir / "coverage.json").write_text(text)
+
+
 def git_diff_names(repo_root: Path, base: str) -> list[str]:
     """git diff --name-only，带瞬态空输出防护。
 
@@ -139,7 +186,7 @@ def warn_if_head_equals_base(repo_root: Path, base: str) -> None:
 
     repo 根按当前 cwd 解析（git rev-parse --show-toplevel）；在 main worktree
     （HEAD=base）里跑时 git diff 恒空，脚本会按「无带 src/ 改动的 vitest 包」
-    判 pass 并覆写 .review/coverage.json 为空报告——静默假 pass 与该脚本防假
+    判 pass 并覆写 coverage.json 产物为空报告——静默假 pass 与该脚本防假
     pass 的设计意图相悖。此处比较 rev-parse 出的 SHA（不同 ref 名指向同一
     commit 时同样命中）；base ref 解析失败时不 warn（后续 git diff 会以
     exit 2 正常报错），不改任何正常路径行为。
@@ -150,7 +197,7 @@ def warn_if_head_equals_base(repo_root: Path, base: str) -> None:
     if head.returncode == 0 and tip.returncode == 0 and head_sha and head_sha == tip.stdout.strip():
         print(f"WARN: HEAD 与 base={base} 指向同一 commit，git diff 恒为空。若当前目录是 "
               f"main worktree（或任何 HEAD=={base} 的 worktree）属跑错位置：空 diff 会被判 "
-              f"pass 并覆写 .review/coverage.json；请到 feature worktree 根目录重跑本脚本。"
+              f"pass 并覆写 coverage.json 产物；请到 feature worktree 根目录重跑本脚本。"
               f"确属有意在 {base} 上自检时忽略本警告", file=sys.stderr)
 
 
@@ -480,6 +527,11 @@ def main() -> None:
     DEBUG = "--debug" in args
 
     repo_root = Path(subprocess.check_output(["git", "rev-parse", "--show-toplevel"], text=True).strip())
+    review_dirs = resolve_review_dirs(repo_root)
+    # head 锚（design.md §7 风险 3）：写进 coverage.json 供 pr-pre-merge.sh 双比对——
+    # worktree 删除重建可复用同一 project-slug，base 相同 ≠ 产物新鲜；解析失败写空串，
+    # 读方按缺失处理（视为不匹配并拦截）
+    head_commit = sh(["git", "rev-parse", "HEAD"], repo_root).stdout.strip()
     warn_if_head_equals_base(repo_root, base)
     pkgs, unmeasured = changed_packages(repo_root, base)
     if only:
@@ -531,10 +583,10 @@ def main() -> None:
         # git_diff_names 已在源头拦截瞬态空 diff；到达此处 = diff 非空但没有
         # src/ 改动的 vitest 包（纯 docs/scripts 改动），合法 pass
         print(f"Gate-1.6 pass：base={base} 无带 src/ 改动的 vitest 包")
-        (repo_root / ".review").mkdir(exist_ok=True)
-        (repo_root / ".review" / "coverage.json").write_text(json.dumps(
-            {"verdict": "pass", "base": base, "packages": {}, "unmeasured": unmeasured,
-             "note": "no changed vitest packages"}, indent=2))
+        write_coverage_json(review_dirs, {
+            "verdict": "pass", "base": base, "headCommit": head_commit,
+            "packages": {}, "unmeasured": unmeasured, "note": "no changed vitest packages",
+        })
         sys.exit(0)
 
     report: dict[str, dict] = {}
@@ -648,17 +700,18 @@ def main() -> None:
     if report and all(v.get("status") == "SKIP" for v in report.values()):
         print("ERROR: 全部包 SKIP（无一声明 @vitest/coverage-v8）——门禁空转视为配置错误，"
               "不判 pass。恢复：见上方各包 SKIP 行的启用指引", file=sys.stderr)
-        (repo_root / ".review").mkdir(exist_ok=True)
-        (repo_root / ".review" / "coverage.json").write_text(json.dumps(
-            {"verdict": "error", "base": base, "packages": report,
-             "reason": "all packages SKIPped - coverage provider undeclared everywhere"}, indent=2))
+        write_coverage_json(review_dirs, {
+            "verdict": "error", "base": base, "headCommit": head_commit,
+            "packages": report,
+            "reason": "all packages SKIPped - coverage provider undeclared everywhere",
+        })
         sys.exit(2)
 
-    out = {"verdict": verdict, "base": base, "min_incremental": min_pct,
+    out = {"verdict": verdict, "base": base, "headCommit": head_commit,
+           "min_incremental": min_pct,
            "min_file_incremental": min_file_pct, "file_gate_min_lines": min_file_lines,
            "packages": report, "files": file_cov, "unmeasured": unmeasured}
-    (repo_root / ".review").mkdir(exist_ok=True)
-    (repo_root / ".review" / "coverage.json").write_text(json.dumps(out, indent=2, ensure_ascii=False))
+    write_coverage_json(review_dirs, out)
     print(f"Gate-1.6 verdict={verdict}  min_incremental={min_pct}%  (base={base}, pkgs={len(report)})")
     for pkg, e in report.items():
         if e.get("status") == "OK":
@@ -666,7 +719,11 @@ def main() -> None:
                   f"({e['covered_executable_added_lines']}/{e['executable_added_lines']} 可执行新增行) {e.get('overall','')}")
         else:
             print(f"  {e['status']:<4} {pkg}: {e.get('reason') or e.get('note')}")
-    print(f"报告: {repo_root / '.review' / 'coverage.json'}")
+    legacy_dir, new_dir = review_dirs
+    if new_dir is not None:
+        print(f"报告: {new_dir / 'coverage.json'}（双写: {legacy_dir / 'coverage.json'}，过渡期）")
+    else:
+        print(f"报告: {legacy_dir / 'coverage.json'}")
     sys.exit(1 if verdict == "fail" else 0)
 
 

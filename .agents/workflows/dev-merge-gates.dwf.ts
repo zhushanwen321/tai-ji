@@ -101,7 +101,14 @@ const MAX_COMMIT_REPAIRS = 2; // content 类 commit 拦截每组每轮补修上�
 const FIXER_CONCURRENCY = 3; // fix 组并行上限（组间文件不相交才并行）
 const REVIEWER_BATCH = 4; // review 分批并行（同 review-fix-loop）
 const AGENT_DIR = ".agents/skills/dev-merge/agents";
-const REPORT_ROOT = ".tmp/dev-merge-review";
+// skillDataDir 探针常量（impl-spec §2.1；与 review-fix-loop / pr-lifecycle 镜像逐字一致）：
+// slug 探针输出 basename-realhash8（realpath + sha256 前 8 位）；REPORT_ROOT 由 main 内
+// 探针组装为 ~/.agents/skill-data/dev-merge/<project-slug>/（产物迁出 worktree，随项目留存）
+const NODE_PROJECT_SLUG =
+  "const p=require('fs').realpathSync(process.argv[1]);" +
+  "const h=require('crypto').createHash('sha256').update(p).digest('hex').slice(0,8);" +
+  "process.stdout.write(p.split('/').filter(Boolean).pop()+'-'+h)";
+const NODE_HOME = "process.stdout.write(require('os').homedir())";
 const GATES_SCRIPT = "scripts/quality-gates.mjs";
 const CHANGESET_SCRIPT = "scripts/changeset-check.mjs";
 // skill 实体脚本（workspace 根共享 + worktree 内 symlink 即时生效，不入 git、无介质错速窗口）；
@@ -1165,6 +1172,25 @@ async function main(): Promise<Record<string, unknown>> {
 
     const headRes = await world.run("git", ["rev-parse", "--short", "HEAD"]);
     const topic = `dmg-${headRes.exitCode === 0 ? headRes.stdout.trim() : "run"}`;
+    // 报告根（skill-data，impl-spec §2.1）：projectRoot 取 git toplevel（在 worktree 根发起；
+    // realpath 由 slug 探针内部规范化，解析失败报错不静默）
+    const reportTopRes = await world.run("git", ["rev-parse", "--show-toplevel"]);
+    if (reportTopRes.exitCode !== 0 || reportTopRes.stdout.trim() === "") {
+      throw new Error(`无法解析项目根（git rev-parse --show-toplevel 失败，exit ${reportTopRes.exitCode}）：${reportTopRes.stderr.trim() || "无 stderr"}；确认在 worktree 根发起后重新发起`);
+    }
+    const reportHomeRes = await world.run("node", ["-e", NODE_HOME]);
+    const reportSlugRes = await world.run("node", ["-e", NODE_PROJECT_SLUG, reportTopRes.stdout.trim()]);
+    const reportHome = reportHomeRes.exitCode === 0 ? reportHomeRes.stdout.trim() : "";
+    const reportSlug = reportSlugRes.exitCode === 0 ? reportSlugRes.stdout.trim() : "";
+    if (reportHome === "" || !/^.+-[0-9a-f]{8}$/.test(reportSlug)) {
+      throw new Error(
+        `skillDataDir 探针失败（home=${reportHome || "未解析"}，slug=${reportSlug || "未解析"}）：报告根无法落定。` +
+          `恢复动作：确认 node 可执行后重新发起。探针明细：home exit=${reportHomeRes.exitCode} ${reportHomeRes.stderr.trim()}；slug exit=${reportSlugRes.exitCode} ${reportSlugRes.stderr.trim()}`,
+      );
+    }
+    const REPORT_ROOT = `${reportHome}/.agents/skill-data/dev-merge/${reportSlug}`;
+    // 约束清单消费根（pr-review 段，原项目内 .review/；reviewer 按段内 constraints.md 核对）
+    const prReviewDir = `${reportHome}/.agents/skill-data/pr-review/${reportSlug}`;
     const runDir = `${REPORT_ROOT}/${topic}`;
     const records: DmgRecord[] = [];
     // run 级提交待办（改造点 1）：blocked 组转待办 {轮次, 组, 文件, 报错摘要}——随终态带出呈报
@@ -1325,7 +1351,7 @@ async function main(): Promise<Record<string, unknown>> {
         `审查对象 = 分支增量 diff：git diff ${base}...HEAD（只审增量，不审全库；cwd = feature worktree 根）。`,
         `审查范围两路覆盖：先 git diff ${base}...HEAD 看已提交改动，再 git status --porcelain 与 git diff 看未提交工作区改动（上轮修复或提交拦截的改动可能停在工作区），两路都要覆盖。`,
         `1. 读 agent 定义 ${agentPath} 全文，按其清单逐项执行。`,
-        `2. 读 .review/constraints.md，「执行」列含 review:review-${dim} 的约束逐条核对（条目归属以执行列 enforcement.agent 为权威，dimensions 分类值不参与归属判定）。`,
+        `2. 读 ${prReviewDir}/constraints.md，「执行」列含 review:review-${dim} 的约束逐条核对（条目归属以执行列 enforcement.agent 为权威，dimensions 分类值不参与归属判定）。`,
         `3. 报告写入 ${reportPath}（先建目录），逐条发现含 severity / files / evidence / guidance。`,
         `4. 只读审查：除报告文件外绝不修改任何文件。`,
         `5. 返回严格 JSON（无多余字段）：{ "reportFile": "${reportPath}", "mustFix": <critical+major 总数>, "suggestion": <minor 总数>, "issues": [ { "title", "severity", "files": [...], "evidence", "guidance" } ] }——mustFix/suggestion 只数 issues 数组（本轮新发现）；对账未清条目经 reconciliation 申报、不重复计数；上轮清单条目只能经 reconciliation 申报、不得写进 issues（重报按结构化违规处置）；无发现返回空 issues 与 0。`,

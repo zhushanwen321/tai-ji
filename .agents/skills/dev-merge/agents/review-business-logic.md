@@ -13,7 +13,7 @@ task prompt 中必须包含：
 - `output`：审查报告写入路径（形态以派发 prompt 为准——zcode workflow 给 workspace 相对路径，手工派发通常给绝对路径，按收到的值原样使用）
 
 
-阶段 2 前置产物 `<repo>/.review/constraints.md`（`node scripts/select-constraints.mjs --base <base>` 产出，base 与审查 diff 同口径、由编排侧指定，本 agent 只消费该文件不自行生成；存在时必须消费）：条目归属以「执行」列为权威——执行列含 `review:review-business-logic` 的条目归本维度，必须逐条核对（dimensions 分类值不参与归属判定）；machine 条目已由 pre-commit 拦截，作背景知识；需要完整表述时 Read「权威源」列指向的文档原文（清单中的 summary 仅导航）。
+阶段 2 前置产物 `~/.agents/skill-data/pr-review/<project-slug>/constraints.md`（pr-review 产物目录，实际目录经项目 `node scripts/skill-data-dir.mjs pr-review` 解析；`node scripts/select-constraints.mjs --base <base>` 产出，base 与审查 diff 同口径、由编排侧指定，本 agent 只消费该文件不自行生成；存在时必须消费）：条目归属以「执行」列为权威——执行列含 `review:review-business-logic` 的条目归本维度，必须逐条核对（dimensions 分类值不参与归属判定）；machine 条目已由 pre-commit 拦截，作背景知识；需要完整表述时 Read「权威源」列指向的文档原文（清单中的 summary 仅导航）。
 
 ## 通用判据（read 引用，不内嵌）
 
@@ -26,7 +26,7 @@ task prompt 中必须包含：
 
 ## 项目特化检查
 
-本维度的项目检查项已收编 `docs/constraints.json`（登记 SSOT），经 `.review/constraints.md` 按本维度（business-logic）消费——清单执行列含 `review:review-business-logic` 的条目逐条核对，约束内容全文以「权威源」列指向的文档为准。主要承接条目导航：
+本维度的项目检查项已收编 `docs/constraints.json`（登记 SSOT），经 pr-review 产物目录的 constraints.md（`~/.agents/skill-data/pr-review/<project-slug>/`）按本维度（business-logic）消费——清单执行列含 `review:review-business-logic` 的条目逐条核对，约束内容全文以「权威源」列指向的文档为准。主要承接条目导航：
 
 - emit 单 payload / listener refCount / 错误重置 isGenerating + streamingMessage → C-comm-11（authority: AGENTS.md）
 - streaming message 生命周期时序 → C-state-18（authority: STANDARDS.md §3.3）
@@ -39,7 +39,7 @@ task prompt 中必须包含：
 
 1. **获取变更范围**：在项目根目录执行 `git diff <base>...HEAD --stat` 确认变更文件列表，再执行 `git diff <base>...HEAD` 获取完整 diff（`<base>` = 派发 prompt 指定的基线，见「口径以派发 prompt 为准」节）。
 2. **按通用判据执行**：Read 两个技能文件，按 code-domain-review 五步协议过全部变更（意图判断 / 逻辑推演 / 副作用系统检查），按 code-harden 策略裁决表核对每个错误路径（分级输入 = 项目特化检查的 FEATURE-PRIORITIES 分级 + C-proc-21 契约）。
-3. **项目特化检查**：读 `.review/constraints.md`，对执行列含 `review:review-business-logic` 的条目逐条核对（上方导航表 + 清单内其余命中条目）；约束内容需要完整表述时 Read 其 authority 文档原文。
+3. **项目特化检查**：读 pr-review 产物目录的 constraints.md，对执行列含 `review:review-business-logic` 的条目逐条核对（上方导航表 + 清单内其余命中条目）；约束内容需要完整表述时 Read 其 authority 文档原文。
 4. **输出审查报告**到 `output` 路径。
 
 ## 输出格式
@@ -87,7 +87,7 @@ agent 必须**顶层直接调用** `structured-output` tool 返回 JSON（[MANDA
 **口径以派发 prompt 为准**：workflow 派发（dev-merge-gates / pr-lifecycle / review-fix-loop）时，diff 基线、约束加载基线、报告路径、结构化键集四项均以派发 prompt 指定的值为准，本文件各处的 `<base>` / `output` / JSON 形态仅为缺省说明。
 
 - **diff 基线**：`<base>` = 派发 prompt 指定的基线 ref（dev-merge-gates 侧 = merge-base 分支增量；pr-cr-fix 侧 = main 累积口径）。手工派发无 prompt 契约时用 `main...HEAD`，并在报告开头注明基线。
-- **约束加载基线**：`.review/constraints.md` 生成命令的 `--base <base>` 与审查 diff 同口径，由编排侧指定；本 agent 只消费该文件，不自行生成。
+- **约束加载基线**：constraints.md（pr-review 产物目录 `~/.agents/skill-data/pr-review/<project-slug>/`）生成命令的 `--base <base>` 与审查 diff 同口径，由编排侧指定；本 agent 只消费该文件，不自行生成。
 - **报告路径**：`output` = 派发 prompt 指定的报告写入路径（zcode workflow 给 workspace 相对路径，手工派发通常给绝对路径；按收到的值原样使用）。
 - **结构化键集**：按派发路径返回对应键集——
   - **dev-merge-gates（zcode workflow）**：`{ "reportFile", "mustFix", "suggestion", "issues": [ { "title", "severity": "critical"|"major"|"minor", "files": [...], "evidence", "guidance" } ], "reconciliation": [ { "prevId", "status": "fixed"|"not-fixed"|"regressed"|"escalate", "evidence" } ] }`——issues 必填（无发现返回空数组，mustFix/suggestion 须与 issues 计数一致：critical+major 计 mustFix、minor 计 suggestion）；reconciliation 第 2 轮起必填（逐条申报上轮活跃条目，fixed 须附亲自核实的证据；escalate 仅用于申报已延迟（deferred）条目的上下文复活）。

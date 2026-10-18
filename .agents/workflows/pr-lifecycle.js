@@ -131,6 +131,13 @@ const skipSet = new Set(skipSteps);
 // ── 常量与脚本级状态（与 zcode 版同值） ──
 const fs = require("fs");
 const { spawn } = require("child_process");
+// skillDataDir 探针常量（impl-spec §2.1；与 review-fix-loop saved 版镜像逐字一致）：
+// slug 探针输出 basename-realhash8（realpath + sha256 前 8 位）
+const NODE_PROJECT_SLUG =
+  "const p=require('fs').realpathSync(process.argv[1]);" +
+  "const h=require('crypto').createHash('sha256').update(p).digest('hex').slice(0,8);" +
+  "process.stdout.write(p.split('/').filter(Boolean).pop()+'-'+h)";
+const NODE_HOME = "process.stdout.write(require('os').homedir())";
 const MAX_GATE_ROUNDS = 3; // gate 修复子循环上限
 const PR_URL_RE = /^https:\/\/github\.com\/.+\/pull\/\d+$/;
 const REVIEWER_BATCH = 4; // review 分批并行
@@ -331,7 +338,7 @@ function fileExists(path) {
 // pre-merge marker（pr-pre-merge.sh 唯一写入方）：result="PASS" 形态（fs 直读，无 cat 依赖）
 function readPremergeMarker() {
   try {
-    const m = fs.readFileSync(".review/premerge-result", "utf-8").match(/result="([^"]+)"/);
+    const m = fs.readFileSync(prReviewDir + "/premerge-result", "utf-8").match(/result="([^"]+)"/);
     return m ? m[1] : null;
   } catch {
     return null;
@@ -607,7 +614,7 @@ const reviewerVerdictSchema = {
   type: "object",
   required: ["reportFile", "mustFix", "suggestion", "reconciliation"],
   properties: {
-    reportFile: { type: "string", description: "报告文件路径（workspace 相对，<runDir>/round-<n>/review-<dimension>.md）" },
+    reportFile: { type: "string", description: "报告文件路径（绝对路径，<runDir>/round-<n>/review-<dimension>.md）" },
     mustFix: { type: "number", description: "critical+major 数（与报告一致）" },
     suggestion: { type: "number", description: "minor 数" },
     reconciliation: {
@@ -634,7 +641,7 @@ const aggregationSchema = {
   type: "object",
   required: ["reportFile", "issues", "groups"],
   properties: {
-    reportFile: { type: "string", description: "聚合报告路径（workspace 相对）" },
+    reportFile: { type: "string", description: "聚合报告路径（绝对路径）" },
     issues: {
       type: "array",
       description: "本轮合并裁决后的全部问题清单（延续复用 id，新问题不填 id）",
@@ -771,7 +778,7 @@ async function runCrFixOnce(diffBase, batch1Paths, attempt) {
   const dims = batch1Paths.map((p) => ({ path: p, name: dimensionName(p) }));
   const headRes = await runCmd("git", ["rev-parse", "--short", "HEAD"]);
   const topic = "prl-" + (headRes.exitCode === 0 ? headRes.stdout.trim() : "run");
-  const runDir = ".tmp/review-fix-loop/" + topic;
+  const runDir = rflReportRoot + "/" + topic;
   const issues = [];
   let lastVerdicts = [];
   let lastFix = null;
@@ -877,12 +884,12 @@ async function runCrFixOnce(diffBase, batch1Paths, attempt) {
               "第 " + round + "/" + maxRounds + " 轮评审（维度：" + d.name + "；topic=" + topic + "，round=" + round + "）。",
               "",
               "第一步：Read 评审定义文件 " + d.path + "——其中是你的完整审查 checklist，按它执行审查。",
-              "审查范围：先跑 git diff " + diffBase + "...HEAD 看已提交改动，再跑 git status --porcelain 与 git diff 看未提交工作区改动（统一 commit 的降级路径——fixes 未申报 affectedFiles / git add 全失败——会让修复停在工作区，属本次审查范围内），两路都要覆盖。约束清单存在时必读消费：.review/constraints.md（「执行」列含 review:review-" + d.name + " 的条目逐条核对——条目归属以执行列 enforcement.agent 为权威，dimensions 分类值不参与归属判定；权威源文档按需 Read 原文）。",
-              skipSet.has("constraints") ? "注意：本次 constraints step 被跳过，.review/constraints.md 可能是旧 run 残留——清单与当前 diff 明显不符时以代码事实为准。" : "",
+              "审查范围：先跑 git diff " + diffBase + "...HEAD 看已提交改动，再跑 git status --porcelain 与 git diff 看未提交工作区改动（统一 commit 的降级路径——fixes 未申报 affectedFiles / git add 全失败——会让修复停在工作区，属本次审查范围内），两路都要覆盖。约束清单存在时必读消费：" + prReviewDir + "/constraints.md（「执行」列含 review:review-" + d.name + " 的条目逐条核对——条目归属以执行列 enforcement.agent 为权威，dimensions 分类值不参与归属判定；权威源文档按需 Read 原文）。",
+              skipSet.has("constraints") ? "注意：本次 constraints step 被跳过，" + prReviewDir + "/constraints.md 可能是旧 run / 旧 worktree / 旧分支残留（约束清单已迁出 worktree，不再随目录删除重置）——清单与当前 diff 明显不符时以代码事实为准。" : "",
               "只读审查：禁止修改、新建、删除任何代码文件。",
               reconBlock,
               "",
-              "把完整报告写到 " + rDir + "/review-" + d.name + ".md（workspace 相对路径，需要时先创建目录）：每条问题一节，含 [critical|major|minor] file:line、描述、修复方向（guidance，一句可执行的修复指引）、证据（你读到的代码事实）。这份文档是聚合器的唯一输入——审查结果与修复指南全部以文档承载，不通过返回值传递。",
+              "把完整报告写到 " + rDir + "/review-" + d.name + ".md（绝对路径，需要时先创建目录）：每条问题一节，含 [critical|major|minor] file:line、描述、修复方向（guidance，一句可执行的修复指引）、证据（你读到的代码事实）。这份文档是聚合器的唯一输入——审查结果与修复指南全部以文档承载，不通过返回值传递。",
               "完成后返回 JSON：reportFile、mustFix（critical+major 数，与报告一致）、suggestion（minor 数）、reconciliation（" + (round > 1 ? "对上一轮问题清单逐条申报" : "本轮返回空数组 []") + "）。",
             ].filter(Boolean).join("\n"),
             schema: reviewerVerdictSchema,
@@ -1231,7 +1238,7 @@ async function runCrFixOnce(diffBase, batch1Paths, attempt) {
             "",
             "第 " + round + " 轮修复（组 " + g.id + "；topic=" + topic + "，round=" + round + "）。",
             "",
-            "第一步：Read 你的修复任务文档 " + docPath + "（workspace 相对路径）——组内问题清单、证据与修复指南（guidance）全部在其中，按它逐条修复。聚合总报告可作补充上下文：" + agg.reportFile,
+            "第一步：Read 你的修复任务文档 " + docPath + "（绝对路径）——组内问题清单、证据与修复指南（guidance）全部在其中，按它逐条修复。聚合总报告可作补充上下文：" + agg.reportFile,
             "",
             "要求：",
             "1. 问题清单条目经聚合方独立核实，预设为真。核实后确信某条是误报 → 放 disputed 申诉（evidence 必须含 file:line 反证 + 指明聚合方核实遗漏了什么；空洞申诉是 ES3 违规），不盲改；给不出反证就修复。disputed 不终止流程，由人类在 run 结束后裁决。",
@@ -1537,6 +1544,30 @@ async function runCrFixOnce(diffBase, batch1Paths, attempt) {
 
 // ══ 9 step 主流程 ══
 
+// ── skillDataDir 解析（impl-spec §2.1；与 zcode 版同构——cr-fix 报告根与原 .review/
+// 产物根在此落定）。projectRoot 取 git toplevel（workflow 在仓库根发起，show-toplevel 即
+// 项目根；realpath 由 slug 探针内部完成——symlink/尾斜杠/.. 形态全部规范化，解析失败报错
+// 不静默）。
+const skillDataTopRes = await runCmd("git", ["rev-parse", "--show-toplevel"]);
+if (skillDataTopRes.exitCode !== 0 || skillDataTopRes.stdout.trim() === "") {
+  fail("无法解析项目根（git rev-parse --show-toplevel 失败，exit " + skillDataTopRes.exitCode + "）：" +
+    (skillDataTopRes.stderr.trim() || "无 stderr") + "；确认在仓库根发起后重新发起");
+}
+const skillDataHomeRes = await runCmd("node", ["-e", NODE_HOME]);
+const skillDataSlugRes = await runCmd("node", ["-e", NODE_PROJECT_SLUG, skillDataTopRes.stdout.trim()]);
+const skillDataHome = skillDataHomeRes.exitCode === 0 ? skillDataHomeRes.stdout.trim() : "";
+const skillDataSlug = skillDataSlugRes.exitCode === 0 ? skillDataSlugRes.stdout.trim() : "";
+if (skillDataHome === "" || !/^.+-[0-9a-f]{8}$/.test(skillDataSlug)) {
+  fail("skillDataDir 探针失败（home=" + (skillDataHome || "未解析") + "，slug=" + (skillDataSlug || "未解析") +
+    "）：cr-fix 报告根与 pr-review 产物根无法落定。恢复动作：确认 node 可执行后重新发起。探针明细：home exit=" +
+    skillDataHomeRes.exitCode + " " + skillDataHomeRes.stderr.trim() + "；slug exit=" + skillDataSlugRes.exitCode + " " + skillDataSlugRes.stderr.trim());
+}
+// rflReportRoot = cr-fix 循环报告根（review-fix-loop 段）；prReviewDir = 原 .review/ 产物根
+// （pr-review 段，constraints/coverage/metrics/premerge-marker/pr-workflow 三文件）
+const rflReportRoot = skillDataHome + "/.agents/skill-data/review-fix-loop/" + skillDataSlug;
+const prReviewDir = skillDataHome + "/.agents/skill-data/pr-review/" + skillDataSlug;
+log("[skill-data] cr-fix 报告根=" + rflReportRoot + "；pr-review 产物根=" + prReviewDir);
+
 phase("发起前检查");
 // base 锁定（step 体系外的幂等读——preflight 被 skipSteps 跳过时 baseHash 依然锁定）：
 // 下游 changeset 复核（pr-meta）/ static-gate 的 skill-yaml 条件校验 / coverage 的
@@ -1731,8 +1762,8 @@ await step("pr-meta", async () => {
     log("[pr-meta] changeset 复核：已齐（changeset-check 无 WARN），零起草——正常路径起草主责在 dev-merge gates 环节");
   }
   prTitle = v.title;
-  writeFileEnsured(".review/pr-workflow/pr-title.txt", v.title);
-  writeFileEnsured(".review/pr-workflow/pr-body.md", v.body);
+  writeFileEnsured(prReviewDir + "/pr-workflow/pr-title.txt", v.title);
+  writeFileEnsured(prReviewDir + "/pr-workflow/pr-body.md", v.body);
 });
 
 // step 4：pr-submit（push 分支 + 开/更新 PR）
@@ -1740,8 +1771,8 @@ await step("pr-submit", async () => {
   if (!prTitle) throw new Error("pr-submit 前置产物缺失：pr-meta 未 done（被跳过或失败）；请先补 PR 标题或去掉 skipSteps 中的 pr-meta");
   const res = await runCmd("bash", [
     "scripts/pr-submit.sh",
-    "--title-file", ".review/pr-workflow/pr-title.txt",
-    "--body-file", ".review/pr-workflow/pr-body.md",
+    "--title-file", prReviewDir + "/pr-workflow/pr-title.txt",
+    "--body-file", prReviewDir + "/pr-workflow/pr-body.md",
     "--base", base,
   ], 600_000);
   if (res.exitCode === 0) {
@@ -1755,25 +1786,25 @@ await step("pr-submit", async () => {
   const detail = res.stderr + "\n" + res.stdout;
   if (res.exitCode === 2) throw new Error("pr-submit exit 2（git push 失败）：检查远端连通性/分支保护后重新发起（PR 已建时重跑幂等更新）。" + tailLines(detail, 10));
   if (res.exitCode === 3) throw new Error("pr-submit exit 3（gh 已认证但调用失败）：查 gh auth status / API 限流后重新发起。" + tailLines(detail, 10));
-  if (res.exitCode === 5) throw new Error("pr-submit exit 5（title/body 文件缺失）：检查 .review/pr-workflow/pr-title.txt 与 pr-body.md。" + tailLines(detail, 10));
+  if (res.exitCode === 5) throw new Error("pr-submit exit 5（title/body 文件缺失）：检查 " + prReviewDir + "/pr-workflow/pr-title.txt 与 pr-body.md。" + tailLines(detail, 10));
   throw new Error("pr-submit 失败（exit " + res.exitCode + "）：\n" + tailLines(detail, 20));
 });
 
 phase("约束加载与覆盖率/度量门禁");
-// step 5：constraints（约束动态加载 → .review/constraints.md，reviewer 消费）
+// step 5：constraints（约束动态加载 → pr-review 段 constraints.md，reviewer 消费）
 await step("constraints", async () => {
   const res = await runCmd("node", ["scripts/select-constraints.mjs", "--base", base]);
   if (res.exitCode !== 0) {
     throw new Error("select-constraints.mjs 失败（exit " + res.exitCode + "）：\n" + tailLines(res.stderr + "\n" + res.stdout, 15) + "\n检查 docs/constraints.json 与脚本输出后重新发起");
   }
-  if (!fileExists(".review/constraints.md")) {
-    throw new Error("constraints step exit 0 但未产出 .review/constraints.md；检查脚本版本与输出后重新发起");
+  if (!fileExists(prReviewDir + "/constraints.md")) {
+    throw new Error("constraints step exit 0 但未产出 " + prReviewDir + "/constraints.md；检查脚本版本与输出后重新发起");
   }
 });
 
 // ── gate-suite 辅助（coverage/metrics 产物解析与失败上下文） ──
 function readCoverageJson() {
-  return readJsonFile(".review/coverage.json");
+  return readJsonFile(prReviewDir + "/coverage.json");
 }
 async function sharedSrcArgs() {
   const names = await runCmd("git", ["diff", baseHash + "..HEAD", "--name-only"]);
@@ -1818,19 +1849,19 @@ async function coverageFixContext(covPassed) {
   }
   if (lines.length === 0) return "coverage.json 无 FAIL 包明细：以失败输出定位。";
   return [
-    "coverage.json 失败明细（.review/coverage.json）：",
+    "coverage.json 失败明细（pr-review 段 coverage.json）：",
     ...lines,
     "要求：为未覆盖文件补单元测试（测试放对应包的测试目录），或修复失败测试；不修改产品逻辑凑覆盖率、不放松阈值。",
   ].join("\n");
 }
 function metricsFixContext(metPassed) {
   if (metPassed) return "metrics-gate 本道已通过（无失败明细，本轮失败在另一道 gate）。";
-  const m = readJsonFile(".review/metrics.json");
+  const m = readJsonFile(prReviewDir + "/metrics.json");
   const fails = (m && m.fail) || [];
   const warns = (m && m.warn) || [];
   if (fails.length === 0 && warns.length === 0) return "metrics.json 不可读或无明细：以失败输出定位。";
   return [
-    "metrics.json 明细（.review/metrics.json，全量无截断——逐条修复全部条目）：",
+    "metrics.json 明细（pr-review 段 metrics.json，全量无截断——逐条修复全部条目）：",
     ...fails.map((f) => "- FAIL [" + f.type + "] " + (f.path || (f.files || []).join(",")) + " " + (f.name || "") + " — " + (f.reason || "")),
     ...warns.map((f) => "- WARN [" + f.type + "] " + (f.path || (f.files || []).join(",")) + " " + (f.name || "") + " — " + (f.reason || "")),
     "要求：按明细修复（降复杂度/解除循环依赖/清理 unresolved import/重复块提取共享 helper）；不放松 .fallowrc.json 阈值。",
@@ -1863,7 +1894,7 @@ await step("gate-suite", async () => {
       const covJson = readCoverageJson();
       const pct = coveragePctOf(covJson);
       gates.coverage = (covJson && covJson.verdict) || "pass"; // fallback：final-gates 被 skip 时终态披露仍有初跑读数（final-gates onPass 会覆盖）
-      gates.metrics = (readJsonFile(".review/metrics.json") || {}).verdict || "pass";
+      gates.metrics = (readJsonFile(prReviewDir + "/metrics.json") || {}).verdict || "pass";
       log("[gate-suite] coverage=" + gates.coverage + (pct !== null ? "(" + pct + "%)" : "") + " metrics=" + gates.metrics + (round > 1 ? "（第 " + round + " 轮收敛）" : "（首轮全绿）"));
       // PR 规模披露（非门禁）：dev 线累积 diff 的体量让用户知情，供 push 授权决策参考
       const stat = await runCmd("git", ["diff", "--stat", baseHash + "...HEAD"]);
@@ -1999,7 +2030,7 @@ await step("simplify", async () => {
   } catch (e) {
     throw new Error("simplify 契约文件缺失：" + contractPath + "（" + String(e) + "）。恢复：确认该文件存在于当前 worktree 后重新发起");
   }
-  const reportPath = ".review/pr-workflow/simplify-report.md";
+  const reportPath = prReviewDir + "/pr-workflow/simplify-report.md";
   const v = await askAgent(
     {
       prompt: [
@@ -2090,7 +2121,7 @@ await step("final-gates", async () => {
     },
     async () => {
       const cov = lastCovJson || (lastCovJson = readCoverageJson());
-      const met = readJsonFile(".review/metrics.json");
+      const met = readJsonFile(prReviewDir + "/metrics.json");
       const marker = readPremergeMarker();
       gates.coverage = (cov && cov.verdict) || "pass";
       gates.metrics = (met && met.verdict) || "pass";

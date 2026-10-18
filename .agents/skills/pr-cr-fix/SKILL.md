@@ -104,7 +104,7 @@ python3 <workspace 根>/.agents/skills/pr-cr-fix/scripts/validate-skill-yaml.py 
 python3 .agents/skills/pr-cr-fix/scripts/metrics-gate.py --base main
 ```
 
-- 产出 `.review/metrics.json`（fail/warn 清单 + 高 CRAP 靶子清单）；exit 1 = fail，exit 2 = 工具错误（中止；fallow 缺失时同样 exit 2 并给出安装命令）
+- 产出 metrics.json 于 pr-review 产物目录 `~/.agents/skill-data/pr-review/<project-slug>/`（fail/warn 清单 + 高 CRAP 靶子清单；实际目录经 `node scripts/skill-data-dir.mjs pr-review` 解析，本节下称「pr-review 产物目录」）；exit 1 = fail，exit 2 = 工具错误（中止；fallow 缺失时同样 exit 2 并给出安装命令）
 - 阈值 SSOT = 仓库根 `.fallowrc.json` 的 `health` 节；脚本读取该文件，禁止在命令行另传阈值
 
 ### Gate-1.5 判定
@@ -112,7 +112,7 @@ python3 .agents/skills/pr-cr-fix/scripts/metrics-gate.py --base main
 | verdict | 含义 | 动作 |
 |---------|------|------|
 | `fail` | 有 fail 级 introduced 问题 | **打回**：派 worker 修复 → 重跑本脚本，上限 3 轮；超限停手上报用户 |
-| `warn` | 仅 warn 级 | 放行；`.review/metrics.json` 的 warn + targets 清单随 gates 输出呈报为机器报告（不做逐条 LLM 核查，见「metrics warn 档消费约定」节） |
+| `warn` | 仅 warn 级 | 放行；metrics.json 的 warn + targets 清单随 gates 输出呈报为机器报告（不做逐条 LLM 核查，见「metrics warn 档消费约定」节） |
 | `pass` | 干净 | 放行 |
 
 ### 门禁项分级
@@ -134,11 +134,11 @@ python3 .agents/skills/pr-cr-fix/scripts/metrics-gate.py --base main
 
 **口径 [MANDATORY]**：**增量覆盖率 ≥ 80% 才达标**（业界事实标准：Sonar Way 默认「coverage on new code ≥80%」门禁，调研见 `references/coverage-industry-research.md`）。与 Gate-1.5 互补：Gate-1.5 是静态结构度量（不跑测试），Gate-1.6 跑测试量「新代码有没有被测到」。与 renderer 全量 thresholds gate（vitest.config 内、CI 强制）互补：全量阈值防整体退化，增量阈值防「新代码不写测试」。TEST-STRATEGY.md §7「以增量覆盖率为准」的工具化落地。
 
-**执行顺序：coverage-gate 先跑，metrics-gate 后跑。** coverage-gate 产出 `.review/coverage.json` 的 `files` 节（全文件级真实 lcov 覆盖率），metrics-gate 消费它把 complexity warn 中**真实文件覆盖 ≥80%** 的条目移入 covered 列表（出 warn、保留证据链），替换 fallow 静态估算。阶段 1 初跑与 3a 复跑均按 **coverage → metrics** 顺序；coverage.json 缺失或 base 不匹配时 metrics-gate 自动降级静态估算（不阻塞，报告标注 `fallow-static`）。两道 gate 都失败时按上下文重合度聚合派发：失败常同文件同源，主 agent 把两份失败明细（uncovered_files + metrics fail 清单）合成一份修复任务派单个 worker（同一文件的多类问题一次修完），修完 commit 后按序重跑两道——对应 zcode 路径 2 gate-suite step 的同款约定。
+**执行顺序：coverage-gate 先跑，metrics-gate 后跑。** coverage-gate 产出 pr-review 产物目录的 coverage.json `files` 节（全文件级真实 lcov 覆盖率），metrics-gate 消费它把 complexity warn 中**真实文件覆盖 ≥80%** 的条目移入 covered 列表（出 warn、保留证据链），替换 fallow 静态估算。阶段 1 初跑与 3a 复跑均按 **coverage → metrics** 顺序；coverage.json 缺失或 base 不匹配时 metrics-gate 自动降级静态估算（不阻塞，报告标注 `fallow-static`）。两道 gate 都失败时按上下文重合度聚合派发：失败常同文件同源，主 agent 把两份失败明细（uncovered_files + metrics fail 清单）合成一份修复任务派单个 worker（同一文件的多类问题一次修完），修完 commit 后按序重跑两道——对应 zcode 路径 2 gate-suite step 的同款约定。
 
 ### 执行（主 agent 直接跑）
 
-**运行位置必须是 feature worktree 根目录**：repo 根按当前 cwd 解析，在 main worktree（HEAD=base）本脚本得到空 diff，会按「无带 src/ 改动的 vitest 包」打印 pass 并覆写 `.review/coverage.json` 为空报告（exit 0 静默假 pass）。脚本侧有守卫：HEAD 与 base 指向同一 commit 时打印 WARN 提示可能跑错 worktree。
+**运行位置必须是 feature worktree 根目录**：repo 根按当前 cwd 解析，在 main worktree（HEAD=base）本脚本得到空 diff，会按「无带 src/ 改动的 vitest 包」打印 pass 并覆写 pr-review 产物目录的 coverage.json 为空报告（exit 0 静默假 pass）。脚本侧有守卫：HEAD 与 base 指向同一 commit 时打印 WARN 提示可能跑错 worktree。
 
 ```bash
 python3 .agents/skills/pr-cr-fix/scripts/coverage-gate.py --base main
@@ -148,14 +148,14 @@ python3 .agents/skills/pr-cr-fix/scripts/coverage-gate.py --base main --extra-pa
 
 - 参数按空格分隔取值（`--flag value`）；等号写法（`--base=develop`）与未识别参数会 fail-fast exit 2，`--flag` 缺值同样 exit 2 并给出用法
 - 自动检测 base...HEAD 改动过 `src/` 的 vitest 包（含 `extensions/shared/<lib>` 三层目录），逐包跑 `vitest run --coverage`（lcov），解析 lcov DA 行命中 × git diff 新增行号（精确路径匹配），算**可执行新增行覆盖率**
-- **判定**：任一被 gate 包增量 < 80%（默认）、**文件级增量门槛违规**（新增可执行行 ≥8 的单文件自身覆盖率 < 60%，防单文件盲区被包百分比稀释；可调 `--min-file-incremental` / `--file-gate-min-lines`）或测试失败 → `verdict=fail` exit 1；**登记式豁免**：文件头注释 `coverage-file-gate-exempt: <理由>`（组合根装配面/跨环境分支等单轨不可达形态）退出文件级门槛（包级仍卡），报告 file_gate.exempt 可见不静默；记账不闭合 / all-SKIP / git 瞬态异常 → exit 2（工具错误，修复后重跑）；产出 `.review/coverage.json`（packages 增量口径 + file_gate 违规/豁免清单 + files 全文件级真实覆盖率 + files_without_lcov 盲区清单）。SKIP 语义：按 package.json **声明**判定（非 node 解析），出现 SKIP 即配置漂移，按报告内指引补声明
+- **判定**：任一被 gate 包增量 < 80%（默认）、**文件级增量门槛违规**（新增可执行行 ≥8 的单文件自身覆盖率 < 60%，防单文件盲区被包百分比稀释；可调 `--min-file-incremental` / `--file-gate-min-lines`）或测试失败 → `verdict=fail` exit 1；**登记式豁免**：文件头注释 `coverage-file-gate-exempt: <理由>`（组合根装配面/跨环境分支等单轨不可达形态）退出文件级门槛（包级仍卡），报告 file_gate.exempt 可见不静默；记账不闭合 / all-SKIP / git 瞬态异常 → exit 2（工具错误，修复后重跑）；产出 pr-review 产物目录的 coverage.json（packages 增量口径 + file_gate 违规/豁免清单 + files 全文件级真实覆盖率 + files_without_lcov 盲区清单 + headCommit 锚——记录生成时的 HEAD hash，供 pr-pre-merge 校验读数未过期）。SKIP 语义：按 package.json **声明**判定（非 node 解析），出现 SKIP 即配置漂移，按报告内指引补声明
 - **下游传播（两种机制，互补）**：
   - **shared 手工传播**：包选择只收自身有 `src/` 改动的包，shared 改动不传播下游；diff 含 `packages/shared/**/src/**` 时传 `--extra-packages packages/runtime,packages/renderer`——实跑两包全量插桩测试，作为 shared 改动的下游兜底。**连带效应**：renderer vitest.config 内的全量 thresholds（CI 强制口径）随之生效，thresholds breach 视同测试失败走 FAIL 路径（与本次改动无关的全量退化同样拦截；该失败输出与 uncovered_files 增量口径不同源，排障注意区分）
   - **extension 下游自动传播**（2026-10-16 增；数据源 = 仓库根 `extension-dependencies.json` 反向映射，与 check-extension-dependencies.mjs 同源）：diff 含被 extensions 依赖的 `packages/*/src/**` 时，依赖方 extension 目录**自动**并入包集实跑测试，无需传参——下游包无 src/ 改动、增量口径恒过（total=0 → 100%），价值在测试执行：依赖方测试失败即 FAIL。当前映射：`packages/extension-protocol` → 10 个 extension；`packages/subagent-core` → notify-ledger-host / canvas / session-manager / subagent-workflow；`packages/session-core`、`packages/zcode-session-source` → session-reader；`packages/session-delivery`、`packages/zcode-subagent-cli`、`packages/pi-subagent-cli` → subagent-workflow。**背景**：#42 subagent-core 重构（dormant 复活即迁出）破坏 subagent-workflow 的 B6 e2e 旧断言，PR 阶段零可见、靠 merge 前全量套件兜住（595a02acb 补救）——本机制把该盲区前移到 PR 门禁。**边界**：传播源只含 `packages/*`（extension→extension 不传播）；一跳不递归；`--packages` 探针模式不自动传播（探针 = 定向读数）；stdout 打 `DOWNSTREAM` 行、报告包条目带 `downstream_of` 字段，不静默
 - `--packages <pkg[,pkg2...]>` 是交集过滤器（支持逗号分隔多包；单包/子集探针用，会以探针产物覆盖 coverage.json，探针后重跑全量恢复）；`--extra-packages <pkg[,pkg2...]>` 是追加器（同样支持逗号分隔多包），两者语义不同、可共存。**注意**：修复 worker 还在运行时本地读数会被污染——Gate-1.6 必须在干净工作区（全部改动已 commit）跑
 - 排障降载开关：时序类随机失败（单包复跑绿、gate 跑红）时用 `TAIJI_COVERAGE_GATE_SERIAL=1 python3 .agents/skills/pr-cr-fix/scripts/coverage-gate.py --base main` 串行复跑——该 env 使测试文件串行执行，只排除 CPU 并发对时序敏感用例的干扰，不改变断言与覆盖范围
 
-**Gate-1.6 判定**：fail → 派测试专项 subagent 补测试 → 重跑（上限 3 轮）。补测试优先级看 `.review/coverage.json` 的 uncovered_files 清单（按可执行新增行缺口排序）。
+**Gate-1.6 判定**：fail → 派测试专项 subagent 补测试 → 重跑（上限 3 轮）。补测试优先级看 coverage.json 的 uncovered_files 清单（按可执行新增行缺口排序）。
 
 ### 怎么看覆盖率（人工排查）
 
@@ -179,14 +179,14 @@ type-safety / test-coverage 两维度不在可选集内：类型与测试维度�
 
 ### 阶段 1.5 / 1.6 产物消费约定
 
-`.review/metrics.json`（阶段 1.5 必然产出）与 `.review/coverage.json`（阶段 1.6）是机器报告，消费方 = gates 的机器输出（dev-merge 侧由 `scripts/quality-gates.mjs` 聚合呈报，pr-cr-fix 侧由 gate-suite 的 coverage-gate / metrics-gate 输出承载）：
+metrics.json（阶段 1.5 必然产出）与 coverage.json（阶段 1.6）落在 pr-review 产物目录，是机器报告，消费方 = gates 的机器输出（dev-merge 侧由 `scripts/quality-gates.mjs` 聚合呈报，pr-cr-fix 侧由 gate-suite 的 coverage-gate / metrics-gate 输出承载）：
 
 - **metrics warn 档**（含 `targets.high_crap` 靶子清单）降级为机器报告——gates 输出原样呈报清单，不做逐条 LLM 核查（warn 档是启发式信号，逐条核查发现密度低）；需要深查时人工调用 code-overdesign-audit / architecture-decay-audit
 - **coverage.json** 的 `uncovered_files` 与 `files_without_lcov` 由 coverage-gate 自身机器判定（增量 <80% / 文件级门槛 / 无 lcov 记录 → FAIL），修复面走 gate 修复子循环，不经人审维度
 - **循环依赖条目**（metrics fail/warn）由 review-monorepo-impact 消费（仅显式 `reviewers` 指定该维度时）
 
 
-### 阶段 2 前置：约束动态加载（`.review/constraints.md` 产物）
+### 阶段 2 前置：约束动态加载（constraints.md 产物，落 pr-review 产物目录）
 
 进入阶段 2 前主 agent 先跑（三路径共用，workflow 派的 review agent 与手工派的 subagent 都按 agent 定义内的消费约定自读）：
 
@@ -194,7 +194,7 @@ type-safety / test-coverage 两维度不在可选集内：类型与测试维度�
 node scripts/select-constraints.mjs --base main
 ```
 
-按 diff 范围从 `docs/constraints.json`（架构约束登记 SSOT）选择命中约束，落盘 `.review/constraints.md`：scope 为 `global` 的核心不变量每次必载，其余按改动路径前缀命中（只改 renderer 不载 extension 约束）。6 个 review agent 定义均含消费约定——清单「执行」列含 `review:review-<本维度>` 的条目必须逐条核对（条目归属以执行列 enforcement.agent 为权威，dimensions 分类值不参与归属判定）；需要完整表述时 Read「权威源」列指向的文档原文（清单里的 summary 仅导航）。
+按 diff 范围从 `docs/constraints.json`（架构约束登记 SSOT）选择命中约束，落盘 pr-review 产物目录的 constraints.md：scope 为 `global` 的核心不变量每次必载，其余按改动路径前缀命中（只改 renderer 不载 extension 约束）。6 个 review agent 定义均含消费约定——清单「执行」列含 `review:review-<本维度>` 的条目必须逐条核对（条目归属以执行列 enforcement.agent 为权威，dimensions 分类值不参与归属判定）；需要完整表述时 Read「权威源」列指向的文档原文（清单里的 summary 仅导航）。
 
 ### [MANDATORY] 路径选择
 
@@ -244,7 +244,7 @@ node scripts/select-constraints.mjs --base main
 
 **发起前披露义务 [MANDATORY]**（与路径 2 同款）：告知用户 simplifyMode 默认 **apply**——code-simplify 的「先报告、确认后改」确认断点已被该模式显式覆盖，**A 档（行为不变）高置信简化会在 push 授权之前自动改码并独立 commit**（`refactor: code-simplify — N 项`）；B 档（行为敏感）与低置信项只进报告不落地。用户不接受时传 `simplifyMode: "report"`。
 
-**终态与处置**：return 契约与处置动作与路径 2 完全一致（`status=awaiting-push` 含 `prUrl/terminated/simplify/gates/sweptFiles/skippedSteps/review/nextAction`；`status=failed` 含 `failedStep/error/recovery`，pr-submit 已成功时另含 `prUrl`）——按路径 2「终态映射表」执行：awaiting-push → 逐项披露 skippedSteps + sweptFiles + 请求 push 授权；failed → 按 failedStep/error 处置后重新发起（可带 skipSteps 接管已人工裁决的 step）。**断点恢复差异**：pi 无 ResumeWorkflowRun——run 被中断（用户停止/provider 故障/进程退出）与 failed 终态处置后**都重新发起**（cr-fix 重跑 = loop 整体重跑，fix commit 已进 git 历史，已修复问题不再报出，通常 1-2 轮收敛）。中断时若有 gate 子进程在跑（abort 只终止 workflow 线程，不杀 detached 的 gate 子树），重发起前先确认无残留（`pgrep -f "pr-pre-merge|coverage-gate|metrics-gate"`），避免孤儿 gate 与新 run 并发写 `.review/` 读数。
+**终态与处置**：return 契约与处置动作与路径 2 完全一致（`status=awaiting-push` 含 `prUrl/terminated/simplify/gates/sweptFiles/skippedSteps/review/nextAction`；`status=failed` 含 `failedStep/error/recovery`，pr-submit 已成功时另含 `prUrl`）——按路径 2「终态映射表」执行：awaiting-push → 逐项披露 skippedSteps + sweptFiles + 请求 push 授权；failed → 按 failedStep/error 处置后重新发起（可带 skipSteps 接管已人工裁决的 step）。**断点恢复差异**：pi 无 ResumeWorkflowRun——run 被中断（用户停止/provider 故障/进程退出）与 failed 终态处置后**都重新发起**（cr-fix 重跑 = loop 整体重跑，fix commit 已进 git 历史，已修复问题不再报出，通常 1-2 轮收敛）。中断时若有 gate 子进程在跑（abort 只终止 workflow 线程，不杀 detached 的 gate 子树），重发起前先确认无残留（`pgrep -f "pr-pre-merge|coverage-gate|metrics-gate"`），避免孤儿 gate 与新 run 并发写 pr-review 产物目录读数。
 
 cr-fix 内联循环的熔断语义与路径 2 完全一致：某 agent `mustFix === 0 且 suggestion === 0` 判 clean（修复范围 = 全部等级）；连续 3 轮 must_fix 不降 → `terminated=stuck`；问题经 2 次修复均复发（regressed）→ `terminated=needs-redesign`（fixAttempts 计修复失败次数，not-fixed 由 stuck 防线承接；deferred 条目唯一复活入口 = reviewer 对注入清单的结构化 escalate 申报）；fixer 疑似误报走 `disputed` 申述（file:line 反证，格式非法即 ES3 违规；合法申述豁免 must-fix 记账并随 failed 终态 error 的申述清单带出）；cr-fix `stuck`/`max-rounds`/`needs-redesign`/`needs-human` 一律 failed 人工接管（不放行，语义同路径 2 门禁收紧条款）。
 
@@ -280,7 +280,7 @@ CreateWorkflow:
 | scriptResult.status | 主 agent 动作 |
 |---|---|
 | `awaiting-push` | ① **逐项披露 skippedSteps**（每项 step + reason——被跳过的门禁必须让用户知情后才谈 push）与 `review` 判定（cr-fix 空集/回退/逃生舱的判定依据）；② 汇报 prUrl / gates（coverage/metrics/premerge）/ terminated / simplify / **sweptFiles（终态清扫清单——非空时逐文件列出，push 授权即对其否决）**；③ 请求 push 授权。**push 恒 `git push github HEAD:<branch> --force-with-lease`**（与 workflow 内 pr-submit.sh 同构：无条件 `--force-with-lease`，lease 在快进场景无副作用、远端有新提交时安全拒绝）；push 后验证远端 ref（`git rev-parse HEAD github/<branch>` 一致） |
-| `failed` | 按 `failedStep` + `error`（内含恢复指引）处置：gate 修复子循环 3 轮超限 → 人工修复、显式路径 commit 后**重新发起**；gate-suite/final-gates exit 2（工具错误）→ 按输出修复后重新发起；pr-submit exit 2/3/5 → 按 error 指引（远端连通性 / `gh auth status`）后重新发起；cr-fix `stuck`/`max-rounds`/`needs-redesign` → 读 error 中报告路径（`.tmp/review-fix-loop/prl-<hash>/round-N/`）人工判定：**误报 → 重新发起并带 skipSteps 含 `"cr-fix"`（接管，终态逐项披露）；真问题 → 修复 commit 后重新发起**；cr-fix `needs-human` → 按 error 中申述清单（fixer 反证 file:line）逐项裁决（真问题修复 commit 后重新发起，误报带 skipSteps 接管），裁决结论逐项披露 |
+| `failed` | 按 `failedStep` + `error`（内含恢复指引）处置：gate 修复子循环 3 轮超限 → 人工修复、显式路径 commit 后**重新发起**；gate-suite/final-gates exit 2（工具错误）→ 按输出修复后重新发起；pr-submit exit 2/3/5 → 按 error 指引（远端连通性 / `gh auth status`）后重新发起；cr-fix `stuck`/`max-rounds`/`needs-redesign` → 读 error 中报告路径（`~/.agents/skill-data/review-fix-loop/<project-slug>/prl-<hash>/round-N/`）人工判定：**误报 → 重新发起并带 skipSteps 含 `"cr-fix"`（接管，终态逐项披露）；真问题 → 修复 commit 后重新发起**；cr-fix `needs-human` → 按 error 中申述清单（fixer 反证 file:line）逐项裁决（真问题修复 commit 后重新发起，误报带 skipSteps 接管），裁决结论逐项披露 |
 
 **断点恢复语义**：run 被**中断**（非 failed 终态——用户停止 / provider 故障 / 进程退出）→ `ResumeWorkflowRun` 原地续跑（引擎 journal 重放：已完成的确定性 gate 与 ask 零成本重放）；**failed 终态**（gate 超限 / cr-fix 熔断 / 工具错误）→ 处置后**重新发起**（可带 skipSteps 跳过已人工接管的 step）。cr-fix 重跑 = loop 整体重跑（fix commit 已进 git 历史，重跑面向当前 diff，已修复问题不再报出，通常 1-2 轮收敛）。脚本有结构性错误（编译诊断 / 逻辑错）→ 编辑 run 的脚本文件后 `AmendWorkflow`（导入已完成工作为缓存，只重付改动部分）。
 
@@ -309,7 +309,7 @@ electron-build 排除条件刻意收得很紧：`packages/runtime/**` 任何改�
 **Step 1 — 确认变更范围**（主 agent 自己跑）：
 ```bash
 git diff main...HEAD --stat
-node scripts/select-constraints.mjs --base main   # 产出 .review/constraints.md（命中约束清单，reviewer 消费）
+node scripts/select-constraints.mjs --base main   # 产出 pr-review 产物目录的 constraints.md（命中约束清单，reviewer 消费）
 ```
 
 **Step 2 — 并行派 reviewer subagent**：选中维度全派。**并行上限 ≤5**（全局 AGENTS.md subagent 约束），按维度子集数分批（超过 5 个维度分两批；不足 5 个一批派完；或按全局规则「一般用 3 个」分三批）。每个 subagent 的 task 必须包含：
@@ -317,7 +317,7 @@ node scripts/select-constraints.mjs --base main   # 产出 .review/constraints.m
 - worktree cwd（绝对路径，避免 multi-worktree cwd 陷阱）+ 审查 `git diff main...HEAD` 的全部变更
 - focus（见下方「维度 → Agent 映射」表对应审查焦点）
 - agent 定义文件路径（`<repo>/.agents/skills/dev-merge/agents/review-<维度>.md`；subagent 须复读原文获得完整 checklist，含其通用判据 read 引用的用户级技能文件）
-- `.review/constraints.md` 命中约束清单（存在时必须消费：「执行」列含 `review:review-<本维度>` 的条目逐条核对——条目归属以执行列 enforcement.agent 为权威；权威源文档按需 Read 原文）
+- pr-review 产物目录的 constraints.md 命中约束清单（存在时必须消费：「执行」列含 `review:review-<本维度>` 的条目逐条核对——条目归属以执行列 enforcement.agent 为权威；权威源文档按需 Read 原文）
 - `output 路径：<绝对路径>` + `Write report to: <绝对路径>`（双措辞兼容 agent 约定）
 - 「输出格式：YAML frontmatter（verdict/must_fix）+ Findings 表格（优先级 | 文件 | 行号 | 类别 | 描述 | 修复方向），优先级用 MUST_FIX/SUGGESTION/INFO」
 - 「完成后用 structured-output 返回 `{report_file, must_fix, suggestion}`」
@@ -367,7 +367,7 @@ Pi Extension 接口契约 checklist（SDK 签名核对 / spec 偏差记录 / sch
 
 ### 3a — 终局三道 gate（主 agent 直接按序跑）
 
-阶段 2 修复会改代码，1.5/1.6 初跑读数已过期。**顺序固定 coverage → metrics → pre-merge**（coverage 的 files 节供 metrics 分流，见 1.6；pre-merge 注入值来自 coverage-gate 测试判定）。**① 同样必须在 feature worktree 根目录运行**——repo 根按当前 cwd 解析，HEAD 与 base 同一 commit（main worktree）时空 diff 会被判 pass 并覆写 `.review/coverage.json`，跑错位置会让终值变成空报告假 pass（见 1.6 运行位置警示）：
+阶段 2 修复会改代码，1.5/1.6 初跑读数已过期。**顺序固定 coverage → metrics → pre-merge**（coverage 的 files 节供 metrics 分流，见 1.6；pre-merge 注入值来自 coverage-gate 测试判定）。**① 同样必须在 feature worktree 根目录运行**——repo 根按当前 cwd 解析，HEAD 与 base 同一 commit（main worktree）时空 diff 会被判 pass 并覆写 pr-review 产物目录的 coverage.json，跑错位置会让终值变成空报告假 pass（见 1.6 运行位置警示）：
 
 ```bash
 # ① coverage-gate：测试第 2 遍（插桩口径）+ 覆盖率终值；diff 含 shared src 时同样传 --extra-packages（见 1.6；extension 下游自动传播无需传参）
@@ -378,7 +378,7 @@ python3 .agents/skills/pr-cr-fix/scripts/metrics-gate.py --base main
 bash scripts/pr-pre-merge.sh --test-result <PASS|FAIL> --quiet
 ```
 
-- ③ 注入值 = ① 的测试判定（任一被 gate 包测试失败 → 注入 FAIL）。脚本校验 `.review/coverage.json` 存在且 base 与当前一致（防注入过期读数），不一致 exit 2 → 恢复：重跑 ① 后再 ③
+- ③ 注入值 = ① 的测试判定（任一被 gate 包测试失败 → 注入 FAIL）。脚本校验 pr-review 产物目录的 coverage.json 存在且 base 与 head 双锚与当前一致（headCommit 锚 = ① 生成时记录的 HEAD hash，HEAD 前进后旧读数失效，防注入过期读数），不一致 exit 2 → 恢复：重跑 ① 后再 ③
 - **任一 gate FAIL 仍走完 ③ 写 marker**（pr-status.sh 可见终态），Gate-3a 拦截不 push；按失败输出派 worker / 测试 subagent 修复后**从 ① 头部重跑**。路径 2 例外：pr-lifecycle 的 final-gates 在 coverage 失败时短路返回（不跑 metrics/pre-merge、marker 不写），直接进修复子循环——省时且语义等价（修复轮从 ① 头部重跑覆盖全部三道）
 
 **Gate-3a**（硬 gate）：三道 gate 全部 exit 0 且 marker `result=PASS` 才继续。coverage-gate exit 1 → 增量不足派测试 subagent 补测试 / 测试失败按失败用例派 worker；metrics-gate fail → 派 worker 修复；pre-merge FAIL → 按失败步骤对应工种修复。
@@ -469,7 +469,7 @@ push 了发布 tag（`v*`/`npm-*`）时必须等 CI 构建完成并验证产物�
 | Gate-2（只跑循环）`terminated=needs-human` | fixer 误报申述转人工：按 `result.disputed` 反证逐项裁决——真问题修复后进阶段 3，误报 ack 后进阶段 3；裁决结论逐项披露（disputed 条目格式非法仍会 fix-failure，见 fix-failure 行） |
 | Gate-2（只跑循环）`terminated=stuck` | 看 aggregated.md 判断是 reviewer 误报还是真问题；误报可人工 ack 后进阶段 3，真问题上报用户（两版 pr-lifecycle 全链的 stuck 一律 failed，处置见下行 pr-lifecycle 行——不适用本行 ack 语义） |
 | Gate-2（路径 1/2）cr-fix 环境类失败（review-failure / aggregator-failure / fix-failure） | pr-lifecycle 已自动重试 1 次（fix-failure 且工作区有未提交残留时不重试直接 failed——error 文案自带说明）；failed 终态按 `error` 恢复指引处置（检查引擎凭证 / 模型配额后重新发起，cr-fix 整体重跑） |
-| Gate-2（路径 1/2）cr-fix 终态 `stuck` / `max-rounds` / `needs-redesign` | failedStep=cr-fix：读 error 中报告路径（`.tmp/review-fix-loop/prl-<hash>/`）人工判定——误报重新发起并带 skipSteps 含 `"cr-fix"`，真问题修复 commit 后重新发起 |
+| Gate-2（路径 1/2）cr-fix 终态 `stuck` / `max-rounds` / `needs-redesign` | failedStep=cr-fix：读 error 中报告路径（`~/.agents/skill-data/review-fix-loop/<project-slug>/prl-<hash>/`）人工判定——误报重新发起并带 skipSteps 含 `"cr-fix"`，真问题修复 commit 后重新发起 |
 | Gate-2（路径 1/2）cr-fix 终态 `needs-human` | failedStep=cr-fix：按 error 中申述清单（fixer 反证 file:line）逐项裁决——真问题修复 commit 后重新发起，误报带 skipSteps 含 `"cr-fix"` 接管，裁决结论逐项披露 |
 | 3a coverage-gate exit 1 | 注入 `--test-result FAIL` 写 marker 后拦截：增量不足派测试 subagent 补测试、测试失败按失败用例派 worker；从 3a ① 重跑 |
 | 3a pre-merge exit 2（coverage.json 缺失 / base 不一致） | 工具错误：重跑 3a ① coverage-gate 后再 ③ |

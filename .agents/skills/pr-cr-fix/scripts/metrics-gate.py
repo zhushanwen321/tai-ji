@@ -9,15 +9,20 @@
 且无 --coverage 数据时覆盖率是估算值（无测试路径的文件 cov≈0，CC>=5 即触发 CRAP>=30），
 把认知复杂度/CRAP 放进 fail 档会误杀。故门禁与报告用同一份 audit JSON、两套阈值在脚本内显式判定。
 
-真实覆盖率消费（2026-08-21 接入）：同 base 的 `.review/coverage.json`（Gate-1.6 coverage-gate
+真实覆盖率消费（2026-08-21 接入）：同 base 的 coverage.json（Gate-1.6 coverage-gate
 产出）存在时，complexity warn 条目按**文件级 lcov 真实覆盖率**分流——≥80% 移入 covered 列表
 （出 warn，保留展示与证据链），<80% 或无 lcov 记录留 warn 并附 coverage_real 注记；数据缺失/
 base 不匹配时整体降级回 fallow 静态估算（行为同旧版）。运行顺序：coverage-gate 先跑、
 metrics-gate 后跑（SKILL.md 阶段 1.5/1.6 执行序）。
 
+产物目录迁移过渡期（design.md §7 风险 2）：coverage.json 读取优先新根
+`~/.agents/skill-data/pr-review/<project-slug>/`（经 node scripts/skill-data-dir.mjs 解析），
+缺产物时回退旧 `.review/`（向后兼容在途分支）；metrics.json 双写新旧两目录（dev-merge
+reviewer 契约写死 `.review/metrics.json`，读方全切前旧路径必须继续有效）。
+
 用法：python3 metrics-gate.py [--base main]
 退出码：0 = pass/warn（放行）；1 = fail（打回）；2 = 工具/运行错误（中止，含 argv 参数错误）
-产出：.review/metrics.json（阶段 2 review agent 的靶子清单来源）
+产出：metrics.json（阶段 2 review agent 的靶子清单来源；带 base + headCommit 锚）
 """
 
 from __future__ import annotations
@@ -56,13 +61,32 @@ WARN_DEAD_CODE_KINDS = [
 REAL_COVERAGE_COVERED_PCT = 80.0
 
 
+def resolve_review_dir(repo_root: Path) -> Path:
+    """coverage.json 读取目录：优先新 pr-review 目录，缺产物时回退旧 `.review/`。
+
+    迁移过渡期（design.md §7 风险 2）读方策略：新目录解析失败或尚无产物（含 coverage-gate
+    降级只写旧目录的情形）→ 回退旧目录。回退是设计内合法路径（双写期两目录同源），不 WARN。
+    """
+    script = repo_root / "scripts" / "skill-data-dir.mjs"
+    try:
+        proc = subprocess.run(["node", str(script), "pr-review", str(repo_root)],
+                              capture_output=True, text=True, timeout=15)
+        if proc.returncode == 0 and proc.stdout.strip():
+            new_dir = Path(proc.stdout.strip())
+            if (new_dir / "coverage.json").is_file():
+                return new_dir
+    except OSError:
+        pass
+    return repo_root / ".review"
+
+
 def load_real_coverage(repo_root: Path, base: str) -> dict[str, dict] | None:
-    """读 Gate-1.6 产出的 .review/coverage.json files 节。
+    """读 Gate-1.6 产出的 coverage.json files 节（新目录优先，缺则回退旧 `.review/`）。
 
     返回 None（整体降级 fallow 静态估算）的条件：文件缺失 / JSON 损坏 / base 不匹配 /
     files 节为空。调用方必须先跑 coverage-gate（同 base）才有真实数据。
     """
-    p = repo_root / ".review" / "coverage.json"
+    p = resolve_review_dir(repo_root) / "coverage.json"
     if not p.is_file():
         return None
     try:
@@ -266,10 +290,33 @@ def main() -> None:
     report = run_audit(repo_root, base)
     result = judge(report, thresholds, real_cov)
     result["base"] = base
+    # head 锚（design.md §7 风险 3，与 coverage.json 同款对称处理）；解析失败写空串
+    result["headCommit"] = subprocess.run(["git", "rev-parse", "HEAD"], cwd=repo_root,
+                                          capture_output=True, text=True).stdout.strip()
 
-    out_dir = repo_root / ".review"
-    out_dir.mkdir(exist_ok=True)
-    (out_dir / "metrics.json").write_text(json.dumps(result, indent=2, ensure_ascii=False))
+    # 双写（design.md §7 风险 2）：新 pr-review 目录为主，旧 .review/ 过渡期同步——
+    # dev-merge reviewer 契约写死 `.review/metrics.json`，读方全切后的残留清理批删旧写。
+    # 旧写失败不 fail（主目标已写），stderr 出声。
+    legacy_dir = repo_root / ".review"
+    new_dir: Path | None = None
+    script = repo_root / "scripts" / "skill-data-dir.mjs"
+    try:
+        proc = subprocess.run(["node", str(script), "pr-review", str(repo_root)],
+                              capture_output=True, text=True, timeout=15)
+        if proc.returncode == 0 and proc.stdout.strip():
+            new_dir = Path(proc.stdout.strip())
+    except OSError:
+        pass
+    text = json.dumps(result, indent=2, ensure_ascii=False)
+    if new_dir is not None:
+        new_dir.mkdir(parents=True, exist_ok=True)
+        (new_dir / "metrics.json").write_text(text)
+    else:
+        print(f"WARN: 新产物目录解析失败，metrics.json 只写旧目录 {legacy_dir}；"
+              f"恢复：确认 node 可用且 scripts/skill-data-dir.mjs 存在后重跑", file=sys.stderr)
+    legacy_dir.mkdir(exist_ok=True)
+    (legacy_dir / "metrics.json").write_text(text)
+    out_dir = new_dir if new_dir is not None else legacy_dir
 
     s = result["stats"]
     print(f"Gate-1.5 verdict={result['verdict']}  fail={s['fail']} warn={s['warn']} "
@@ -281,7 +328,8 @@ def main() -> None:
     for item in result["warn"]:
         loc = item.get("path") or ",".join(item.get("files", []))
         print(f"  WARN [{item['type']}] {loc}:{item.get('line', '')} — {item.get('reason')}")
-    print(f"报告: {out_dir / 'metrics.json'}")
+    print(f"报告: {out_dir / 'metrics.json'}"
+          + (f"（双写: {legacy_dir / 'metrics.json'}，过渡期）" if new_dir is not None else ""))
     sys.exit(1 if result["verdict"] == "fail" else 0)
 
 

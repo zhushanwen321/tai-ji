@@ -21,4 +21,4 @@ EOF
 npx stryker run
 ```
 
-判定参考：mutation score ≥ 60% 可接受、≥ 80% 良好；存活的 mutant 逐个看——要么断言缺（补），要么等价变异（记录豁免）。产出不进 `.review/`（临时深检，结论写进当次补测的 commit/PR 描述即可）。
+判定参考：mutation score ≥ 60% 可接受、≥ 80% 良好；存活的 mutant 逐个看——要么断言缺（补），要么等价变异（记录豁免）。产出不进 pr-review 产物目录 `~/.agents/skill-data/pr-review/<project-slug>/`（临时深检，结论写进当次补测的 commit/PR 描述即可）。

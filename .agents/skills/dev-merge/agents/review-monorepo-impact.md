@@ -16,10 +16,10 @@ name: review-monorepo-impact
 task prompt 中必须包含：
 - `output`：审查报告写入路径（形态以派发 prompt 为准——zcode workflow 给 workspace 相对路径，手工派发通常给绝对路径，按收到的值原样使用）
 
-阶段 1.5 产物 `<repo>/.review/metrics.json` 存在时必须消费其中的循环依赖条目（见步骤 3）。
+阶段 1.5 产物 `~/.agents/skill-data/pr-review/<project-slug>/metrics.json`（pr-review 产物目录，实际目录经项目 `node scripts/skill-data-dir.mjs pr-review` 解析）存在时必须消费其中的循环依赖条目（见步骤 3）。
 
 
-阶段 2 前置产物 `<repo>/.review/constraints.md`（`node scripts/select-constraints.mjs --base <base>` 产出，base 与审查 diff 同口径、由编排侧指定，本 agent 只消费该文件不自行生成；存在时必须消费）：条目归属以「执行」列为权威——执行列含 `review:review-monorepo-impact` 的条目归本维度，必须逐条核对（dimensions 分类值不参与归属判定）；machine 条目已由 pre-commit 拦截，作背景知识；需要完整表述时 Read「权威源」列指向的文档原文（清单中的 summary 仅导航）。
+阶段 2 前置产物 `~/.agents/skill-data/pr-review/<project-slug>/constraints.md`（pr-review 产物目录，实际目录经项目 `node scripts/skill-data-dir.mjs pr-review` 解析；`node scripts/select-constraints.mjs --base <base>` 产出，base 与审查 diff 同口径、由编排侧指定，本 agent 只消费该文件不自行生成；存在时必须消费）：条目归属以「执行」列为权威——执行列含 `review:review-monorepo-impact` 的条目归本维度，必须逐条核对（dimensions 分类值不参与归属判定）；machine 条目已由 pre-commit 拦截，作背景知识；需要完整表述时 Read「权威源」列指向的文档原文（清单中的 summary 仅导航）。
 
 ## 执行步骤
 
@@ -29,7 +29,7 @@ task prompt 中必须包含：
    - extensions 包间依赖的分组/登记以 `extension-dependencies.json` 为 SSOT（`node scripts/check-extension-dependencies.mjs` 校验），新增/变更 extensions 依赖时核对该登记与实际一致
    - `.changeset/config.json` 现无 `fixed`/`linked` 组；若 merge 阶段新增分组，须核对组内版本同步不被本 diff 破坏
 3. **循环依赖检查**（消费阶段 1.5 度量报告，禁止手工 `grep` 追 import 链——确定性计算归机器）：
-   - 读 `<repo>/.review/metrics.json` 的 `fail`/`warn` 中 `circular-dependency` 条目；新增 cycle 在 Gate-1.5 已 fail 打回，若仍流到本维度说明是门禁后新增或脚本未覆盖场景 → MUST_FIX
+   - 读 pr-review 产物目录的 metrics.json 的 `fail`/`warn` 中 `circular-dependency` 条目；新增 cycle 在 Gate-1.5 已 fail 打回，若仍流到本维度说明是门禁后新增或脚本未覆盖场景 → MUST_FIX
    - inherited cycle（存量）：变更若加重纠缠（如向既有 cycle 中加新模块、深化相互依赖）→ SUGGESTION
    - extensions 之间的依赖必须单向（如 subagent-workflow → structured-output，不能反向）——cycle 的架构方向合理性判断是本维度的职责，cycle 的存在性检测不是
 4. **公共 API 变更**：
@@ -87,7 +87,7 @@ agent 必须**顶层直接调用** `structured-output` tool 返回 JSON（[MANDA
 **口径以派发 prompt 为准**：workflow 派发（dev-merge-gates / pr-lifecycle / review-fix-loop）时，diff 基线、约束加载基线、报告路径、结构化键集四项均以派发 prompt 指定的值为准，本文件各处的 `<base>` / `output` / JSON 形态仅为缺省说明。
 
 - **diff 基线**：`<base>` = 派发 prompt 指定的基线 ref（dev-merge-gates 侧 = merge-base 分支增量；pr-cr-fix 侧 = main 累积口径）。手工派发无 prompt 契约时用 `main...HEAD`，并在报告开头注明基线。
-- **约束加载基线**：`.review/constraints.md` 生成命令的 `--base <base>` 与审查 diff 同口径，由编排侧指定；本 agent 只消费该文件，不自行生成。
+- **约束加载基线**：constraints.md（pr-review 产物目录 `~/.agents/skill-data/pr-review/<project-slug>/`）生成命令的 `--base <base>` 与审查 diff 同口径，由编排侧指定；本 agent 只消费该文件，不自行生成。
 - **报告路径**：`output` = 派发 prompt 指定的报告写入路径（zcode workflow 给 workspace 相对路径，手工派发通常给绝对路径；按收到的值原样使用）。
 - **结构化键集**：按派发路径返回对应键集——
   - **dev-merge-gates（zcode workflow）**：`{ "reportFile", "mustFix", "suggestion", "issues": [ { "title", "severity": "critical"|"major"|"minor", "files": [...], "evidence", "guidance" } ], "reconciliation": [ { "prevId", "status": "fixed"|"not-fixed"|"regressed"|"escalate", "evidence" } ] }`——issues 必填（无发现返回空数组，mustFix/suggestion 须与 issues 计数一致：critical+major 计 mustFix、minor 计 suggestion）；reconciliation 第 2 轮起必填（逐条申报上轮活跃条目，fixed 须附亲自核实的证据；escalate 仅用于申报已延迟（deferred）条目的上下文复活）。
