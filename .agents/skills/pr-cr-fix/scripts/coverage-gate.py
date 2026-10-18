@@ -317,8 +317,14 @@ def run_coverage(pkg_dir: Path, npx_cmd: str, flat_layout: bool = False) -> tupl
     lcov = pkg_dir / "coverage" / "lcov.info"
     cov_include = "." if flat_layout else "src"
     cov_exclude = "__tests__/**" if flat_layout else "src/**/__tests__/**"
+    # 并行度默认 5（2026-10-18 用户裁决）：本脚本经 workspace 根 .agents 被全部 worktree
+    # （含 main）共享，改这里即全局生效；coverage 门禁是降载场景不追求极限速度，
+    # 默认 workers 从 vitest 推导值（10 核 = 9）降到 5，避免与 IDE / dev 实例抢核。
+    # 可用 TAIJI_VITEST_MAX_WORKERS 覆盖（如临时恢复高并行度）。
+    max_workers = (os.environ.get("TAIJI_VITEST_MAX_WORKERS") or "5").strip() or "5"
     cmd = [
         npx_cmd, "vitest", "run", "--coverage",
+        f"--maxWorkers={max_workers}",
         "--coverage.reporter=lcov", "--coverage.reporter=json-summary",
         "--coverage.reportsDirectory=coverage",
         f"--coverage.include={cov_include}",

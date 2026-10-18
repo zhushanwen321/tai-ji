@@ -342,8 +342,8 @@ if [[ -f "package.json" ]]; then
 fi
 
 if ! $TEST_RAN && [[ -f "vitest.config.ts" ]]; then
-    echo "  运行 npx vitest run ..."
-    run_check "Vitest 单元测试" npx vitest run
+    echo "  运行 npx vitest run --maxWorkers=${TAIJI_VITEST_MAX_WORKERS:-5} ..."
+    run_check "Vitest 单元测试" npx vitest run --maxWorkers="${TAIJI_VITEST_MAX_WORKERS:-5}"
     TEST_RAN=true
 fi
 
