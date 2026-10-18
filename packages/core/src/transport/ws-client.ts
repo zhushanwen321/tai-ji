@@ -288,7 +288,7 @@ export function isInboundValveTripped(sessionId: string): boolean {
   return inboundValveTrippedSessions.has(sessionId)
 }
 
-  /** 测试钩子：清空入站检查全部模块级状态（对齐 resetSubscriptionStates 模式）。 */
+/** 测试钩子：清空入站检查全部模块级状态（对齐 resetSubscriptionStates 模式）。 */
 export function _resetInboundGuardForTest(): void {
   inboundDropStreakBySession.clear()
   inboundValveTrippedSessions.clear()

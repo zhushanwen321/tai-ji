@@ -150,7 +150,7 @@ export function createInitialChatViewState(): ChatViewState {
   }
 }
 
-  // ── 确定性派生工具（toMs / Record 检查在 apply-entry-utils.ts）────────────────
+// ── 确定性派生工具（toMs / Record 检查在 apply-entry-utils.ts）────────────────
 
 /**
  * 本条 entry 派生 Message 的确定性 id 基。
@@ -161,7 +161,7 @@ function deriveBaseId(entry: PiEntryBase, messageCount: number): string {
   return entry.id ?? `e${messageCount}`
 }
 
-  // ── commit 段：ChatStateCollector（state 记账抽象，两条 fold 路径的唯一分叉点）──────
+// ── commit 段：ChatStateCollector（state 记账抽象，两条 fold 路径的唯一分叉点）──────
 
 /**
    * ChatViewState 记账抽象：派生段构造 Message / ToolCall 后经此提交，读口供 handler 的

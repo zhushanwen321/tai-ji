@@ -52,7 +52,7 @@ export function bindDrawerSessionId(bound: Ref<string | null>): void {
   boundSid.value = bound
 }
 
-  /** 读取当前绑定分区键（coordination 层检查分发 / FR-9 清理用）。null = 未绑定或绑定值为 null */
+/** 读取当前绑定分区键（coordination 层检查分发 / FR-9 清理用）。null = 未绑定或绑定值为 null */
 export function getBoundSessionId(): string | null {
   return sidRef.value
 }

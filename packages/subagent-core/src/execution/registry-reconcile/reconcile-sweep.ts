@@ -41,9 +41,9 @@
 //    丢失无补发通道）→ 保守跳过，显式偏差登记（impl-plan §5 #5）：挂着不处理的方向代价 =
 //    每孤儿 bash 注册 1 条静态虚报，无空转驱动源（goal 检查读侧过滤已使子 session
 //    不受污染，本 session 虚报 defer 由熔断限损）。
-  //  - type=session → **显式 skip**（notify-once D7③）：managed session 完成通知债权的
-  //    register（id = notifyId `sm-` 前缀），收尾通道 = watch 应答 unregister + extension
-  //    session_start 重启收尾路径，**不入 workflow run-state 判据**——notifyId 对
+//  - type=session → **显式 skip**（notify-once D7③）：managed session 完成通知债权的
+//    register（id = notifyId `sm-` 前缀），收尾通道 = watch 应答 unregister + extension
+//    session_start 重启收尾路径，**不入 workflow run-state 判据**——notifyId 对
 //    FileRunStore 查无 state 文件 → 「不存在 → 补注销」判据会把活跃 claim 误销
 //    （G2 查询范围破坏），故在分流前拦下，不调任何判据。
 

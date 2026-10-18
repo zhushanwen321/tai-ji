@@ -130,19 +130,6 @@ function changedFiles(base) {
   }
 }
 
-/** --staged 输入源：暂存文件（pre-commit 场景——HEAD 尚未包含本次提交，base...HEAD diff 取不到） */
-function stagedFiles() {
-  try {
-    // 与 changedFiles 同款 --diff-filter=d：删除不产生登记义务
-    return execSync("git diff --cached --name-only --diff-filter=d", { cwd: REPO_ROOT, encoding: "utf8" })
-      .split("\n")
-      .filter(Boolean);
-  } catch {
-    console.error("[select-affected-e2e] git diff --cached 失败：仓库状态异常");
-    process.exit(2);
-  }
-}
-
 /** 门禁判定专用输入源（--staged 形态）：仅新增/改名进看护目录的暂存文件。
  *
  * 登记义务只由「新资产进入看护目录」产生——这正是 --staged/--check 的存在目的
@@ -150,7 +137,8 @@ function stagedFiles() {
  * 目录（scripts/ 等，watchedRoots 注释所警示的「孤资产共享目录」），对其中存量
  * 非资产文件的行内修改（注释/文案/测试名）与 e2e 资产登记无关；原实现把修改
  * 也纳入判定，导致任何 scripts/ 存量脚本的编辑都被逼去 e2e-map 登记。
- * 规则选择（selectRules）仍用全量 stagedFiles——不受本收窄影响。 */
+ * --staged 只做防漏登记判定不渲染清单；--check 的规则选择仍用全量
+ * changedFiles——不受本收窄影响。 */
 function stagedAddedFiles() {
   return execSync("git diff --cached --name-only --diff-filter=AR", { cwd: REPO_ROOT, encoding: "utf8" })
     .split("\n")

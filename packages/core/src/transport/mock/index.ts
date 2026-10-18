@@ -2049,7 +2049,7 @@ export const project: ProjectDomain = projectImpl
 // mock 无自定义预设持久化（CRUD 只改内存），但**内置目录必须非空**：模式可见性三态判定
 // （u5 设计 D5）把「presets 空 + 无错误」当「未加载 → 不渲染」，空列表会让非默认模式会话的
 // chip / 声明行永远落不到正常分支——[u7a] 补 DEFAULT_PRESETS 后 mock fixture 的
-  // launchPresetId='builtin:session-dispatch' 才可解析出模式名（原为纯占位空列表，2026-09-19 收尾）。
+// launchPresetId='builtin:session-dispatch' 才可解析出模式名（原为纯占位空列表，2026-09-19 收尾）。
 import type { PiLaunchPreset } from '@taiji/shared'
 const mockPresets: PiLaunchPreset[] = DEFAULT_PRESETS.map((p) => ({ ...p }))
 const presetImpl = {

@@ -420,7 +420,7 @@ export async function runWorkflow(
   // 修复形态裁决：run-created 入队先行（候选②），候选①「created 态缓冲重放」被
   // 否——重放 = 靠引导静默补齐时序倒置，与 pump dispatchRunTrigger 的既有裁决
   // （表外转移 fail-fast 不补投）冲突。await 留在 store.save 之后原位，保持
-    // 「runWorkflow 返回 ⟹ 派生视图可查」语义不变。
+  // 「runWorkflow 返回 ⟹ 派生视图可查」语义不变。
   // 取舍登记：workerHost.start 抛错路径上 created 帧可能已落 journal（孤儿首帧，
   // runId 不复用、无 fold 消费方，可接受）；失败 = journal IO 错误，取证侧降级
   // 不阻断创建主链（对齐 SW-DATA-3：error 留痕后继续——此时该 run 的后续事件因

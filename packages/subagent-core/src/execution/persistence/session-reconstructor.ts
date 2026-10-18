@@ -459,7 +459,7 @@ function rebuildTurns(entries: JsonlEntry[]): RebuiltTurns {
   return { turns, lastError, totalTokens, lastEntryTsMs };
 }
 
- /** 组装 ReconstructedRecord（终态派生视图：status 恒 closed/gc + 身份字段归一化 + 派生数据）。 */
+/** 组装 ReconstructedRecord（终态派生视图：status 恒 closed/gc + 身份字段归一化 + 派生数据）。 */
 function buildReconstructedRecord(
   sessionFile: string,
   identity: SubagentIdentityData,
@@ -469,8 +469,8 @@ function buildReconstructedRecord(
   thinkingLevel: string | undefined,
 ): ReconstructedRecord {
   // 终态 status：最后一条 assistant message 的 stopReason 推导（与 finalizeRecord 的判定一致）。
- // SP-1：done/failed 合并为统一收尾态，cancelled 由 tombstone override（record-store 层），本函数不感知。
- // [U2 两态] 内部词汇无 closed——重建基底 status 恒 idle（已收尾语义），终态遗留位
+  // SP-1：done/failed 合并为统一收尾态，cancelled 由 tombstone override（record-store 层），本函数不感知。
+  // [U2 两态] 内部词汇无 closed——重建基底 status 恒 idle（已收尾语义），终态遗留位
   // closedReason="gc" 保留（buildRecord sidecar 矩阵随后覆盖/校正）。
   const status: ExecutionStatus = "idle";
   // closedReason 统 gc（通用完成/失败）。error/aborted 的区分由 error 字段保留。

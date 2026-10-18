@@ -254,7 +254,7 @@ function typecheckAgentMeta(
   if (tools === null) return null;
   const model = isString(o.model) ? o.model : undefined;
   const engine = isString(o.engine) ? o.engine : undefined;
-    // D3 可选执行字段（maxTurns/disallowedTools/skills）：与 tools 同风格映射
+  // D3 可选执行字段（maxTurns/disallowedTools/skills）：与 tools 同风格映射
   // （空数组 [] 同 tools 保留键——列表字段族空列表语义一致）。严格层对非法类型
   // reject（minor-2..5 既有精神：不静默丢弃非法字段）——宽容降级是
   // parseAgentProfile（agent-registry）的职责，不在本严格层。

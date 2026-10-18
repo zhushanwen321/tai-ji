@@ -4,10 +4,7 @@
 // 上游：subagent-tool（execute/query/cancel）、TUI（onChange/collectRecords）。
 // session_start 时经 initSession 注入 pi；modelRegistry/entries 归 ModelConfigService.initModel。
 
-import { getLogger } from "../core/logger.ts";
-
 import type { AgentResult as WorkflowAgentResult, AgentCallOpts } from "../orchestration/models/types.ts";
-import { bestEffort, bestEffortPiCall } from "./assembly/best-effort.ts";
 // [V2 决策 3] lifecycle-manager idle timer：record 终态化/取消的 disarm 面
 // 路径防误杀）——[R3] 消费已随终态写侧迁 service/record-lifecycle.ts；[R4]
 // DEFAULT_IDLE_TIMEOUT_MS 消费（assertIdleTimeoutMsSafe 错误文案基准）已随 run 域
@@ -121,8 +118,6 @@ import { ChatRounds } from "./service/chat-rounds.ts";
 import { RunOrchestration } from "./service/run-orchestration.ts";
 import { WorkflowDispatch } from "./service/workflow-dispatch.ts";
 import type { AgentStreamSink } from "../shared/agent-stream.ts";
-
-const logger = getLogger("subagents");
 
 // [R6] 聚合范围接口类型声明（SubagentQueries / SubagentChatActions / SubagentServiceInit）
 // 已外移支撑文件 service/service-bootstrap.ts——壳经 type-only import 消费（编译后

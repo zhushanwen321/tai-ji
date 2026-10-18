@@ -13,7 +13,7 @@
 // endpoint 槽位把「handler 何时注册」（session_start）与「EngineClient 何时构造」
 // （首次引擎使用，晚于 session_start）解耦；② [D3] cli 引擎单例跨 reload 存活
 // （registry D2b 幂等重注册不 dispose），adoption 只更新本槽、不重建 EngineClient
-  // ——若构造期固化，在途 run 的 host/askUser 会路由到旧 ctx 的 handler（assertActive
+// ——若构造期固化，在途 run 的 host/askUser 会路由到旧 ctx 的 handler（assertActive
 // 抛错 → {cancelled:true} 静默取消）。globalThis[Symbol.for] 持有防 jiti 双路径
 // 加载分裂（registry.ts 同款惯例）。
 
