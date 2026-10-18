@@ -54,6 +54,16 @@ def path_to_pattern(rel_path):
     return re.escape(stem).replace("\\.", "\\\\.")
 
 
+def points_at_sibling_only(line, old):
+    """命中行是否只指向同 stem 不同扩展名的兄弟文件（如旧 preload.js 删除后行内引用
+    全部是 preload.ts）——去扩展名匹配的副作用误伤，非残留，豁免。行内含任一旧扩展名
+    具体引用、或只有裸 stem 引用（指向不明，旧文件删除后失效）时按残留处理。"""
+    stem = re.sub(r"\.[^./]+$", "", old)
+    old_ext = old[len(stem):]
+    exts = re.findall(re.escape(stem) + r"\.([A-Za-z0-9]+)", line)
+    return bool(exts) and all("." + e != old_ext for e in exts)
+
+
 def grep_pattern(pattern):
     out = subprocess.run(
         ["git", "grep", "-E", "-I", "-n", "-e", pattern, "--", *SCAN_PATHSPEC],
@@ -75,6 +85,8 @@ def main():
     for old in removed:
         pattern = path_to_pattern(old)
         for line in grep_pattern(pattern):
+            if points_at_sibling_only(line, old):
+                continue
             ref_file = line.split(":", 1)[0]
             if (old, ref_file) in PATH_REF_EXEMPT:
                 continue

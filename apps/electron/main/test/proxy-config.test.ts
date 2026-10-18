@@ -24,9 +24,9 @@
  * 运行：cd apps/electron/main && npx vitest run test/proxy-config.test.ts
  */
 import { describe, it, expect, beforeEach, afterEach } from 'vitest'
-import { mkdtempSync, readFileSync, writeFileSync, existsSync } from 'node:fs'
+import { mkdtempSync, readFileSync, writeFileSync, existsSync, statSync, readdirSync } from 'node:fs'
 import { tmpdir } from 'node:os'
-import { join } from 'node:path'
+import { dirname, join } from 'node:path'
 import {
   encryptCredential,
   decryptCredential,
@@ -329,6 +329,22 @@ describe('C: readProxyConfig / writeProxyConfig', () => {
   it('disabled 模式写入后读取保持 disabled', () => {
     writeProxyConfig({ mode: 'disabled' })
     expect(readProxyConfig()).toEqual({ mode: 'disabled' })
+  })
+
+  it('落盘为 0600 凭据档、缩进 2 + 尾换行、无 .tmp 残留（原子写单一助手）', () => {
+    writeProxyConfig({
+      mode: 'manual',
+      httpProxy: 'http://user:pass@host:8080',
+    })
+
+    const filePath = getProxyConfigPath()
+    // 凭据档 0600：文件承载 safeStorage 降级时的明文 base64 凭据，禁 group/other 读取
+    expect(statSync(filePath).mode & 0o777).toBe(0o600)
+    // 落盘形态 = JSON.stringify(data, null, 2) + 尾换行（单一助手序列化契约）
+    const raw = readFileSync(filePath, 'utf-8')
+    expect(raw).toBe(`${JSON.stringify(JSON.parse(raw), null, 2)}\n`)
+    // 原子写完成后目录内无 .tmp 中间产物残留
+    expect(readdirSync(dirname(filePath)).filter((f) => f.endsWith('.tmp'))).toEqual([])
   })
 })
 

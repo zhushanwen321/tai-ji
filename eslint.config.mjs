@@ -34,7 +34,6 @@ export default [
       'packages/*/dist/**',
       // subagent-core 本地 bundle 产物（untracked、gitignored，构建后不重排 lint 代码风格）
       'packages/*/dist.bundle/**',
-      'apps/electron/preload/preload.js',
       'apps/electron/resources/pi/**',
       'apps/electron/resources/extensions/**',
       // [W11] 引擎包 staging 产物（bundle-extensions esbuild 输出，gitignored 构建产物）

@@ -36,12 +36,13 @@
  *   + curl-download + error-log + @taiji/shared + node:fs/stream
  *   （hash 为无网络依赖的纯函数叶子模块，见 hash.ts / review S#13）
  */
-import { createWriteStream, createReadStream, mkdirSync, renameSync, statSync, unlinkSync, existsSync, readFileSync, writeFileSync } from 'node:fs'
+import { createWriteStream, createReadStream, mkdirSync, renameSync, statSync, unlinkSync, existsSync, readFileSync } from 'node:fs'
 import path from 'node:path'
 import { Readable } from 'node:stream'
 import { pipeline } from 'node:stream/promises'
 import { ProxyAgent } from 'undici'
 import type { ReleaseAsset, IProxyConfig } from '@taiji/shared'
+import { atomicWriteJsonFile } from '../utils/atomic-write-json.js'
 import { getUpdateDir } from './constants.js'
 import { hashFileSha256 } from './hash.js'
 import { resolveProxyUrl, stripCredential } from './proxy-config.js'
@@ -1292,12 +1293,9 @@ async function downloadMultiPart(
  */
 function saveResumeState(state: IResumeState): void {
   try {
-    // 原子写（批次 5 m12 / §3.7.2）：先写 .tmp 再 rename，避免读到半截 JSON
+    // 原子写（已收敛至单一助手 atomicWriteJsonFile）：避免读到半截 JSON
     // （半截 state 会被 loadResumeState 的 parse 失败分支吞掉，丢掉续传进度）
-    const resumeStateFile = getResumeStateFile()
-    const tmpPath = `${resumeStateFile}.tmp`
-    writeFileSync(tmpPath, JSON.stringify(state, null, 2)) // eslint-disable-line no-magic-numbers -- JSON 缩进 2 空格
-    renameSync(tmpPath, resumeStateFile)
+    atomicWriteJsonFile(getResumeStateFile(), state)
   } catch (err) {
     // best-effort：resume state 只是续传优化，写入失败不应中断下载，下次重头下即可
     console.warn('[download] save resume state failed:', err)

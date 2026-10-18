@@ -28,10 +28,11 @@
  *   + error-log + ../release-checker（降级 by-tag 查询的默认实现，经 IReleaseChecker
  *   接口消费）+ @taiji/shared
  */
-import { mkdirSync, renameSync, writeFileSync } from 'node:fs'
+import { mkdirSync } from 'node:fs'
 import { URL } from 'node:url'
 import type { LatestReleaseInfo, ReleaseAsset, UpdateSource, UpdateStage } from '@taiji/shared'
 import { UPDATE_STALE_RELEASE } from '@taiji/shared'
+import { atomicWriteJsonFile } from '../utils/atomic-write-json.js'
 import { downloadAsset } from './download-asset.js'
 import { createPlatformUpdater } from './platform-updater.js'
 import { pickPlatformAsset } from './pick-platform-asset.js'
@@ -593,14 +594,9 @@ function handleScriptRef(ref: UpdateScriptRef): { triggerRestart: boolean } {
  */
 function writeUpdateResult(status: string, version: string, error?: string): void {
   const data = { status, version, at: new Date().toISOString(), error }
-  const resultFile = getUpdateResultFile()
-  // 原子写（批次 5 m12 / §3.7.2）：先写 .tmp 再 renameSync，读方（self-healer）不会
-  // 读到半截 JSON——半截 replacing 会被 corrupt-json 分支误判触发回滚。
-  const tmpPath = `${resultFile}.tmp`
-  // eslint-disable-next-line no-magic-numbers -- 2 = JSON 缩进空格数（人类可读）
-  writeFileSync(tmpPath, JSON.stringify(data, null, 2))
-  // 同目录 rename：同卷原子替换（目标已存在时覆盖）
-  renameSync(tmpPath, resultFile)
+  // 原子写（批次 5 m12 / §3.7.2，已收敛至单一助手 atomicWriteJsonFile）：读方
+  // （self-healer）不会读到半截 JSON——半截 replacing 会被 corrupt-json 分支误判触发回滚
+  atomicWriteJsonFile(getUpdateResultFile(), data)
 }
 
 /**

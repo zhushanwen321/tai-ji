@@ -411,11 +411,12 @@ describe('cleanupCompletedUpdate', () => {
     expect(existsSync(linuxUpdaterLog)).toBe(true)
   })
 
-  it('[A-G2] 原子写孤儿 tmp（update-result.json.tmp / resume-state.json.tmp）→ 终态清理一并删除', async () => {
+  it('[A-G2] 原子写孤儿 tmp（update-result / resume-state 的 pid+seq tmp）→ 终态清理一并删除', async () => {
     seedArtifacts()
-    // 实际原子写实现的两类孤儿 tmp（写崩残留，半截 JSON）+ 一个通用 .tmp（模式覆盖未来新原子写点）
-    const resultTmp = path.join(updateDir, 'update-result.json.tmp')
-    const resumeTmp = path.join(updateDir, 'resume-state.json.tmp')
+    // 实际原子写实现（atomicWriteJsonFile）的两类孤儿 tmp（写崩残留，半截 JSON，
+    // tmp 名含 pid+序号）+ 一个通用 .tmp（模式覆盖固定名与未来新原子写点）
+    const resultTmp = path.join(updateDir, `update-result.json.${process.pid}-1.tmp`)
+    const resumeTmp = path.join(updateDir, `resume-state.json.${process.pid}-2.tmp`)
     const genericTmp = path.join(updateDir, 'download-chunk.tmp')
     writeFileSync(resultTmp, '{"status":"repl')
     writeFileSync(resumeTmp, '{"downloadedBytes":')
