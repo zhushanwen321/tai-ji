@@ -109,6 +109,22 @@ const NODE_PROJECT_SLUG =
   "const h=require('crypto').createHash('sha256').update(p).digest('hex').slice(0,8);" +
   "process.stdout.write(p.split('/').filter(Boolean).pop()+'-'+h)";
 const NODE_HOME = "process.stdout.write(require('os').homedir())";
+// ISO 时间探针（run.json startedAt/endedAt 用；workflows 禁 argless new Date()——无参 Date
+// 每次求值不同破坏 journal 重放确定性，经 world.run 走 journal 后重放值稳定）
+const NODE_ISO_NOW = "process.stdout.write(new Date().toISOString())";
+// run.json 写盘探针（含轮转归档）：终态写 run.json 前若已存在且 startedAt 不同（同 topic =
+// 同 HEAD 重跑的新 run），先把旧文件 rename 为 run-<旧startedAt 冒号换连字符>.json 归档——
+// 该族同 HEAD 重跑覆盖写 round 产物属既有预期语义，但 run 级分析终态不随之冲掉；
+// startedAt 相同 = resume/journal 重放，直接覆写
+const WRITE_RUN_JSON =
+  "const fs=require('fs');" +
+  "require('fs').mkdirSync(require('path').dirname(process.argv[1]),{recursive:true});" +
+  "const incoming=JSON.parse(process.argv[2]);" +
+  "if(fs.existsSync(process.argv[1])){try{const old=JSON.parse(fs.readFileSync(process.argv[1],'utf8'));" +
+  "if(old&&typeof old.startedAt==='string'&&old.startedAt!==''&&old.startedAt!==incoming.startedAt){" +
+  "fs.renameSync(process.argv[1],process.argv[1].replace(/run\\.json$/,'run-'+old.startedAt.split(':').join('-')+'.json'));" +
+  "}}catch(e){}}" +
+  "fs.writeFileSync(process.argv[1],JSON.stringify(incoming,null,2))";
 const GATES_SCRIPT = "scripts/quality-gates.mjs";
 const CHANGESET_SCRIPT = "scripts/changeset-check.mjs";
 // skill 实体脚本（workspace 根共享 + worktree 内 symlink 即时生效，不入 git、无介质错速窗口）；
@@ -1192,6 +1208,25 @@ async function main(): Promise<Record<string, unknown>> {
     // 约束清单消费根（pr-review 段，原项目内 .review/；reviewer 按段内 constraints.md 核对）
     const prReviewDir = `${reportHome}/.agents/skill-data/pr-review/${reportSlug}`;
     const runDir = `${REPORT_ROOT}/${topic}`;
+    // ── run.json 元数据（统一 run manifest 终态落盘用；git 探针失败降级空串——分析侧按
+    // 缺字段处理，不阻塞主流程）──
+    // projectRoot 与 worktreePath 同值（git toplevel：worktree 场景即本 run 的工作树绝对
+    // 路径，R4 多 worktree 并行的区分依据）
+    const runProjectRoot = reportTopRes.stdout.trim();
+    const brMetaRes = await world.run("git", ["rev-parse", "--abbrev-ref", "HEAD"]);
+    const runBranch = brMetaRes.exitCode === 0 ? brMetaRes.stdout.trim() : "";
+    const headMetaRes = await world.run("git", ["rev-parse", "HEAD"]);
+    const runHeadCommit = headMetaRes.exitCode === 0 ? headMetaRes.stdout.trim() : "";
+    // baseCommit 解析为 hash（base 可能是显式 ref 名；解析失败降级 base 字面量）
+    const baseHashRes = await world.run("git", ["rev-parse", base]);
+    const baseCommit = baseHashRes.exitCode === 0 ? baseHashRes.stdout.trim() : base;
+    // startedAt（run.json 轮转归档判据；探针结果经 journal 记录，resume/重放值稳定）
+    const runNowRes = await world.run("node", ["-e", NODE_ISO_NOW]);
+    const startedAt = runNowRes.exitCode === 0 ? runNowRes.stdout.trim() : "";
+    // mustFixTrajectory：逐轮活跃 must-fix 计数序列（该循环词表 must-fix = critical+major，
+    // 见 activeMustFix 口径；与 run.json/final 消费侧同源）。推点 = 每轮聚合裁决后的活跃
+    // 计数；失败终态轮无聚合数据不推
+    const mustFixTrajectory: number[] = [];
     const records: DmgRecord[] = [];
     // run 级提交待办（改造点 1）：blocked 组转待办 {轮次, 组, 文件, 报错摘要}——随终态带出呈报
     // 主 agent 逐组判定补提交或还原；非空时收敛终态改判 needs-human（finishBr）
@@ -1208,7 +1243,10 @@ async function main(): Promise<Record<string, unknown>> {
     const attributableFiles = new Set<string>();
     for (const f of csDraftedFiles) attributableFiles.add(f);
 
-    function finishBr(terminated: DmgBrResult["terminated"], rounds: number, message: string): DmgBrResult {
+    /** 终态收尾（构造 DmgBrResult + run.json 落盘后返回；ledger.json 已由 rebuildLedger
+     *  逐轮落盘，此处只补 run manifest）。落盘 fail-open：分析数据缺失不改变终态语义，
+     *  失败仅 WARN——终态返回优先。 */
+    async function finishBr(terminated: DmgBrResult["terminated"], rounds: number, message: string): Promise<DmgBrResult> {
       const disputedRecs = records.filter((r) => r.status === "disputed");
       let term = terminated;
       let msg = message;
@@ -1222,6 +1260,37 @@ async function main(): Promise<Record<string, unknown>> {
       if ((term === "clean" || term === "converged") && deferredCommits.length > 0) {
         term = "needs-human";
         msg += `；审查已收敛，${deferredCommits.length} 组提交待办随 deferredCommits 呈报（${deferredCommits.map((d) => `第 ${d.round} 轮组 ${d.group}`).join("、")}）——逐组判定补提交或还原后再进第 2 步`;
+      }
+      // run.json：统一 run manifest（设计 §5.1）。attempt 恒 1——本 workflow 无 attempt 机制，
+      // 同 HEAD 重跑覆盖写 round 产物属既有预期，run.json 防覆盖由 WRITE_RUN_JSON 轮转归档
+      // 承担；model 脚本内不可得（run 级 subagent_model 承载，zcode 无脚本侧读取口）置 null
+      const nowRes = await world.run("node", ["-e", NODE_ISO_NOW]);
+      const runDoc = {
+        workflow: "dev-merge-gates",
+        segment: "dev-merge",
+        host: "zcode",
+        projectRoot: runProjectRoot,
+        worktreePath: runProjectRoot,
+        branch: runBranch,
+        baseCommit,
+        headCommit: runHeadCommit,
+        attempt: 1,
+        model: null,
+        startedAt,
+        endedAt: nowRes.exitCode === 0 ? nowRes.stdout.trim() : "",
+        terminated: term,
+        rounds,
+        mustFixTrajectory: [...mustFixTrajectory],
+      };
+      try {
+        const wRun = await world.run("node", ["-e", WRITE_RUN_JSON, `${runDir}/run.json`, JSON.stringify(runDoc)]);
+        if (wRun.exitCode !== 0) {
+          log(`WARN: [branch-review] run.json 落盘失败（不影响流程结果，run manifest 缺失）：${tailLines(`${wRun.stderr}\n${wRun.stdout}`, 3)}`);
+        } else {
+          log(`[branch-review] run.json 已落盘：${runDir}/run.json`);
+        }
+      } catch (e) {
+        log(`WARN: [branch-review] run.json 落盘异常（不影响流程结果）：${e instanceof Error ? e.message : String(e)}`);
       }
       return {
         terminated: term,
@@ -1906,12 +1975,13 @@ async function main(): Promise<Record<string, unknown>> {
         // 自动重修——每轮 fixer + 全维度审查的循环浪费；人工处置后重新发起
         const blockedBroken = records.filter((r) => r.commitBlocked === true && r.status === "open");
         if (blockedBroken.length > 0) {
-          brResult = finishBr("needs-human", round, `提交待办组条目对账未通过（${blockedBroken.map((r) => r.id).join("、")}）——不再自动重修，人工处置后重新发起本 workflow；提交待办见 deferredCommits`);
+          brResult = await finishBr("needs-human", round, `提交待办组条目对账未通过（${blockedBroken.map((r) => r.id).join("、")}）——不再自动重修，人工处置后重新发起本 workflow；提交待办见 deferredCommits`);
           break;
         }
 
         const active = activeMustFix();
         log(`[branch-review] 第 ${round} 轮后：活跃 must-fix ${active.length} 条${active.length > 0 ? `（${active.map((r) => r.id).join("、")}）` : ""}；聚合报告 ${agg.reportFile}`);
+        mustFixTrajectory.push(active.length);
         report({ stage: "branch-review", round, activeMustFix: active.length, openAll: records.filter((r) => r.status === "open").length, fixClaimed: records.filter((r) => r.status === "fix-claimed").length, deferredCommits: deferredCommits.length });
 
         if (active.length === 0) {
@@ -1931,21 +2001,21 @@ async function main(): Promise<Record<string, unknown>> {
           if (sweep.swept.length > 0) exitMsg += `；终态清扫 ${sweep.swept.length} 文件一笔 residual sweep 提交（sweptFiles 披露）`;
           if (sweep.left.length > 0) exitMsg += `；清扫排除/无主残留 ${sweep.left.length} 项留工作区（披露清单逐项列明）`;
           if (sweep.failed) {
-            brResult = finishBr("needs-human", round, `${exitMsg}；终态清扫 commit 处置失败，残留人工处置后再进第 2 步合并`);
+            brResult = await finishBr("needs-human", round, `${exitMsg}；终态清扫 commit 处置失败，残留人工处置后再进第 2 步合并`);
           } else {
-            brResult = finishBr(round === 1 ? "clean" : "converged", round, exitMsg);
+            brResult = await finishBr(round === 1 ? "clean" : "converged", round, exitMsg);
           }
           break;
         }
         if (round === maxRounds) {
-          brResult = finishBr("max-rounds", round, `轮次上限 ${maxRounds} 耗尽仍有 ${active.length} 条 must-fix 活跃——残留见 remaining 字段；人工处置后重新发起本 workflow，按 SKILL 1.7 CR 门语义不进合并`);
+          brResult = await finishBr("max-rounds", round, `轮次上限 ${maxRounds} 耗尽仍有 ${active.length} 条 must-fix 活跃——残留见 remaining 字段；人工处置后重新发起本 workflow，按 SKILL 1.7 CR 门语义不进合并`);
           break;
         }
         stuckCount = active.length >= prevActive ? stuckCount + 1 : 0;
         prevActive = active.length;
         if (stuckCount >= STUCK_THRESHOLD) {
           const stubborn = active.filter((r) => r.uncleanRounds >= 2);
-          brResult = finishBr(
+          brResult = await finishBr(
             "stuck",
             round,
             `连续 ${stuckCount} 轮 must-fix 不降（${active.map((r) => r.id).join("、")}）${stubborn.length > 0 ? `；顽固条目（≥2 轮未清，优先人工裁决）：${stubborn.map((r) => r.id).join("、")}` : ""}——常见根因：修复互相打架 / 定性争议；人工处置后重新发起`,
@@ -1963,13 +2033,13 @@ async function main(): Promise<Record<string, unknown>> {
       }
     } catch (e) {
       if (e instanceof TerminalError) {
-        brResult = finishBr(e.kind, round, e.message);
+        brResult = await finishBr(e.kind, round, e.message);
       } else {
         throw e;
       }
     }
     if (brResult === null) {
-      brResult = finishBr("max-rounds", round, "循环异常退出且无定向终态（不应发生）——按失败处置");
+      brResult = await finishBr("max-rounds", round, "循环异常退出且无定向终态（不应发生）——按失败处置");
     }
   });
 

@@ -154,6 +154,22 @@ const NODE_PROJECT_SLUG =
   "const h=require('crypto').createHash('sha256').update(p).digest('hex').slice(0,8);" +
   "process.stdout.write(p.split('/').filter(Boolean).pop()+'-'+h)";
 const NODE_HOME = "process.stdout.write(require('os').homedir())";
+// ISO 时间探针（run.json startedAt/endedAt 用；workflows 禁 argless new Date()——无参 Date
+// 每次求值不同破坏 journal 重放确定性，经 world.run 走 journal 后重放值稳定）
+const NODE_ISO_NOW = "process.stdout.write(new Date().toISOString())";
+// run.json 写盘探针（含轮转归档）：终态写 run.json 前若已存在且 startedAt 不同（同 topic =
+// 同 HEAD 重跑的新 run），先把旧文件 rename 为 run-<旧startedAt 冒号换连字符>.json 归档——
+// 该族同 HEAD 重跑覆盖写 round 产物属既有预期语义，但 run 级分析终态不随之冲掉；
+// startedAt 相同 = resume/journal 重放，直接覆写
+const WRITE_RUN_JSON =
+  "const fs=require('fs');" +
+  "require('fs').mkdirSync(require('path').dirname(process.argv[1]),{recursive:true});" +
+  "const incoming=JSON.parse(process.argv[2]);" +
+  "if(fs.existsSync(process.argv[1])){try{const old=JSON.parse(fs.readFileSync(process.argv[1],'utf8'));" +
+  "if(old&&typeof old.startedAt==='string'&&old.startedAt!==''&&old.startedAt!==incoming.startedAt){" +
+  "fs.renameSync(process.argv[1],process.argv[1].replace(/run\\.json$/,'run-'+old.startedAt.split(':').join('-')+'.json'));" +
+  "}}catch(e){}}" +
+  "fs.writeFileSync(process.argv[1],JSON.stringify(incoming,null,2))";
 
 // 终态收集面（对齐 zsw 版 buildAwaitingPushResult 字段）
 const skippedSteps: { step: string; reason: string }[] = [];
@@ -174,6 +190,10 @@ let crFixBranch = "";
 // coverage/metrics/premerge-marker/pr-workflow 三文件）
 let rflReportRoot = "";
 let prReviewDir = "";
+// run.json 元数据（统一 run manifest 落盘用）。projectRoot 与 worktreePath 同值（git
+// toplevel：worktree 场景即本 run 的工作树绝对路径，R4 多 worktree 并行的区分依据）；
+// branch 直接复用 crFixBranch（preflight 被 skip 时为空串——降级披露）
+let runProjectRoot = "";
 // cr-fix 是否实际执行（区分「空集/接管跳过」与「跑了但未收敛」——simplify 前置条件用）
 let crFixRan = false;
 // 维度集判定披露（终态逐项披露用——preflight 落定分支形态，cr-fix step 落定最终集）
@@ -371,6 +391,10 @@ interface ReviewerVerdict {
   mustFix: number;
   /** minor 数 */
   suggestion: number;
+  /** 逐条问题清单（分析落盘 problems.json 用，不参与计数与控制流）：ref 即报告内问题节锚点
+   *  （review-<维度>#<序>，行序即序号）、level 与报告分级一致（critical|major|minor）、title
+   *  一句话；缺失/畸形按空数组处理不 fail（向后兼容） */
+  problems?: { ref: string; level: string; title: string }[];
   /** R1 恒空数组；R2+ 对上一轮问题清单逐条申报 */
   reconciliation: ReconEntry[];
 }
@@ -391,6 +415,10 @@ interface AggIssueInput {
   adjudication: "evidence" | "unverified" | "downgraded";
   /** unverified/downgraded 时必填裁决原因 */
   note?: string;
+  /** 来源引用清单（aggregated.json 分析落盘用）：[] = 本轮新发现；非空 = 上轮延续或多
+   *  reviewer 合并，元素 {round, ref}——round = 来源轮次，ref = 原问题 id 或来源 reviewer
+   *  报告锚点。缺失按 [] 处理不 fail（向后兼容） */
+  sourceRefs?: { round: number; ref: string }[];
 }
 
 interface FixGroup {
@@ -652,8 +680,21 @@ async function runCrFixOnce(diffBase: string, batch1Paths: string[], attempt: nu
   let lastAggPath: string | null = null;
   let prevMustFix = 0;
   let numStreak = 0;
+  // mustFixTrajectory 数据源：逐轮 critical 活跃计数序列（severity 词表 critical/major/minor，
+  // 与 run.json 同源；final.json 计算字段）。推点 = 每轮聚合裁决后的活跃计数 + 两个收敛出口
+  // （清单已清补 0）；失败终态轮无聚合数据不推
+  const criticalTrajectory: number[] = [];
+  // run.json startedAt（每次 attempt 独立取——attempt 2 重试写同 runDir 时经轮转归档保留
+  // attempt 1 的 run 记录；探针结果经 journal 记录，resume/重放值稳定）
+  let startedAt = "";
+  {
+    const nowRes = await runNode(["-e", NODE_ISO_NOW]);
+    if (nowRes.exitCode === 0) startedAt = nowRes.stdout.trim();
+  }
 
-  function finish(terminated: CrFixLoopResult["terminated"], round: number, message: string): CrFixLoopResult {
+  /** 终态收尾（构造 CrFixLoopResult + final.json/run.json 落盘后返回）。落盘 fail-open：
+   *  分析数据缺失不改变终态语义，失败仅 WARN 附注——终态返回优先。 */
+  async function finish(terminated: CrFixLoopResult["terminated"], round: number, message: string): Promise<CrFixLoopResult> {
     const disputedRecs = issues.filter((i) => i.status === "disputed");
     const disputed = disputedRecs.map((i) => ({
       id: i.id, title: i.title, severity: i.severity, evidence: i.disputeEvidence ?? "",
@@ -665,7 +706,60 @@ async function runCrFixOnce(diffBase: string, batch1Paths: string[], attempt: nu
     const remaining = issues
       .filter((i) => i.status === "open" || i.status === "regressed")
       .map((i) => ({ id: i.id, title: i.title, severity: i.severity, status: i.status }));
-    return { terminated, rounds: round, runDir, aggregatedFile: lastAggPath, remaining, disputed, message };
+    const result: CrFixLoopResult = { terminated, rounds: round, runDir, aggregatedFile: lastAggPath, remaining, disputed, message };
+    {
+      // 计算字段：fixAttempts 是 issue 级内存条目字段（修复失败次数），落盘取最大值；
+      // mustFixTrajectory = 逐轮 critical 活跃计数序列（与 run.json 同源）
+      const fixAttemptsMax = issues.length > 0 ? Math.max(...issues.map((i) => i.fixAttempts)) : 0;
+      // final.json：直写字段 = CrFixLoopResult return 契约全集逐一对齐；fixAttemptsMax /
+      // mustFixTrajectory 为新增计算字段
+      const finalDoc = {
+        terminated: result.terminated,
+        rounds: result.rounds,
+        runDir: result.runDir,
+        aggregatedFile: result.aggregatedFile,
+        remaining: result.remaining,
+        disputed: result.disputed,
+        message: result.message,
+        fixAttemptsMax,
+        mustFixTrajectory: [...criticalTrajectory],
+      };
+      // run.json：统一 run manifest（设计 §5.1）；model 脚本内不可得（run 级 subagent_model
+      // 承载，zcode 无脚本侧读取口）置 null
+      const runDoc = {
+        workflow: "prl-cr-fix",
+        segment: "review-fix-loop",
+        host: "zcode",
+        projectRoot: runProjectRoot,
+        worktreePath: runProjectRoot,
+        branch: crFixBranch,
+        baseCommit: baseHash,
+        headCommit: "",
+        attempt,
+        model: null,
+        startedAt,
+        endedAt: "",
+        terminated: result.terminated,
+        rounds: result.rounds,
+        mustFixTrajectory: [...criticalTrajectory],
+      };
+      try {
+        // 探针与写盘同处 fail-open 保护内：git/node 探针失败降级空串，不阻断终态返回
+        const nowRes = await runNode(["-e", NODE_ISO_NOW]);
+        if (nowRes.exitCode === 0) runDoc.endedAt = nowRes.stdout.trim();
+        const headRes = await world.run("git", ["rev-parse", "HEAD"]);
+        if (headRes.exitCode === 0) runDoc.headCommit = headRes.stdout.trim();
+        const wRun = await runNode(["-e", WRITE_RUN_JSON, `${runDir}/run.json`, JSON.stringify(runDoc)]);
+        const wFinal = await runNode(["-e", WRITE_FILE, `${runDir}/final.json`, JSON.stringify(finalDoc, null, 2)]);
+        if (wRun.exitCode !== 0 || wFinal.exitCode !== 0) {
+          log(`WARN: 终态落盘失败（run.json exit ${wRun.exitCode}，final.json exit ${wFinal.exitCode}）——终态数据以本次返回值为准`);
+          result.message += `；（注：终态落盘失败 run=${wRun.exitCode}/final=${wFinal.exitCode}）`;
+        }
+      } catch (e) {
+        log(`WARN: 终态落盘异常（不影响流程结果）：${e instanceof Error ? e.message : String(e)}`);
+      }
+    }
+    return result;
   }
 
   log(`[cr-fix] attempt=${attempt}：base=${diffBase}，维度 ${dims.length} 个，maxRounds=${maxRounds}，报告目录=${runDir}`);
@@ -690,6 +784,7 @@ async function runCrFixOnce(diffBase: string, batch1Paths: string[], attempt: nu
         forceRedispatch = true;
         continue;
       }
+      criticalTrajectory.push(0);
       return finish("converged", round, "全部维度 clean 且无活跃问题，提前收敛");
     }
 
@@ -760,7 +855,7 @@ async function runCrFixOnce(diffBase: string, batch1Paths: string[], attempt: nu
                 reconBlock,
                 "",
                 `把完整报告写到 ${rDir}/review-${d.name}.md（绝对路径，需要时先创建目录）：每条问题一节，含 [critical|major|minor] file:line、描述、修复方向（guidance，一句可执行的修复指引）、证据（你读到的代码事实）。这份文档是聚合器的唯一输入——审查结果与修复指南全部以文档承载，不通过返回值传递。`,
-                `完成后返回 JSON：reportFile、mustFix（critical+major 数，与报告一致）、suggestion（minor 数）、reconciliation（${round > 1 ? "对上一轮问题清单逐条申报" : "本轮返回空数组 []"}）。`,
+                `完成后返回 JSON：reportFile、mustFix（critical+major 数，与报告一致）、suggestion（minor 数）、problems（逐条问题清单，每条 {ref, level, title}——ref 即报告内问题节锚点（review-${d.name}#<序>，行序即序号）、level 与报告分级一致（critical|major|minor）、title 一句话；条数合计须等于 mustFix+suggestion）、reconciliation（${round > 1 ? "对上一轮问题清单逐条申报" : "本轮返回空数组 []"}）。`,
             ];
             let lastErr = "";
             for (let retryAttempt = 1; retryAttempt <= 2; retryAttempt++) {
@@ -794,11 +889,37 @@ async function runCrFixOnce(diffBase: string, batch1Paths: string[], attempt: nu
                 evidence: typeof r.evidence === "string" ? r.evidence : "",
               }))
           : [],
+        // problems 只承载分析落盘（不参与计数与控制流）：缺失/畸形按空数组处理不 fail
+        problems: Array.isArray(v.problems)
+          ? v.problems
+              .filter((p): p is { ref: string; level: string; title: string } => p !== null && typeof p === "object")
+              .map((p) => ({
+                ref: typeof p.ref === "string" ? p.ref : "",
+                level: typeof p.level === "string" ? p.level : "",
+                title: typeof p.title === "string" ? p.title : "",
+              }))
+          : [],
       }));
     } catch (e) {
       return finish("review-failure", round, `reviewer 调用失败：${String(e)}`);
     }
     lastVerdicts = verdicts;
+
+    // reviewer 原始发现落盘（round-N/problems.json，设计 §5.4）：脚本从各 reviewer 结构化返回
+    // 的 problems 序列化，外层 {round, problems}、元素 {ref, level, title}（与 tech-review-loop
+    // 既有形真同构，不新增 file/evidence——分析侧按 ref 回查 reviewer md 报告原文）。落盘
+    // fail-open：失败 WARN 不阻塞主流程
+    {
+      const problemsDoc = {
+        round,
+        problems: verdicts.flatMap((v) => v.problems ?? []),
+      };
+      try {
+        await writeViaNode(`${rDir}/problems.json`, JSON.stringify(problemsDoc, null, 2));
+      } catch (e) {
+        log(`WARN: problems.json 落盘失败（${rDir}/problems.json，不影响流程结果）：${e instanceof Error ? e.message : String(e)}`);
+      }
+    }
 
     const rawClean = verdicts.every((v) => v.mustFix === 0 && v.suggestion === 0);
     const reconUnfixed = verdicts.some((v) => v.reconciliation.some((r) => r.status !== "fixed"));
@@ -817,6 +938,7 @@ async function runCrFixOnce(diffBase: string, batch1Paths: string[], attempt: nu
         forceRedispatch = true;
         continue;
       }
+      criticalTrajectory.push(0);
       return finish(round === 1 ? "clean" : "converged", round, `第 ${round} 轮全部维度 clean${round > 1 ? "（修复已确认收敛，清单已清）" : ""}`);
     }
 
@@ -843,10 +965,11 @@ async function runCrFixOnce(diffBase: string, batch1Paths: string[], attempt: nu
       '2. 逐条证据裁决：有真实代码证据 → adjudication="evidence"；reviewer 未给实证 → "unverified"；臆测/纯风格指控 → "downgraded" + note。unverified/downgraded 同样写进聚合报告供人复核，但只有 evidence 条目会进修复队列。',
       round > 1 ? `3. 延续条目复用问题清单 id；新条目分配 id，格式 MF-${round}-<序号>（如 MF-${round}-1）。` : "3. 全部为新问题，分配 id 格式 MF-1-<序号>（MF-1-1、MF-1-2…）。",
       "4. 修复分组：把 evidence 条目按相关性和独立性分组——同文件/同模块/同根因的问题归同组（一个 agent 修一组）；不同组的文件集必须不相交（组间可并行修复、互不冲突）。单条问题独立成组即可；问题间无关联时不要强行合并。",
+      `5. 逐条申报来源 sourceRefs（分析用）：延续上轮的条目填 [{round: <原问题首见轮>, ref: "<原问题 id>"}]；由多份 reviewer 报告合并的条目为每个来源填一项（{round: ${round}, ref: "<来源报告锚点，如 review-<维度>#<序>"}）；本轮新发现填 []。`,
       "",
       `产出——聚合总报告 ${rDir}/aggregated.md：## Summary（一句话）+ "- Must-fix: N" + "- Suggestions: N" + 问题表（ID|严重度|文件|证据|修复方向；新问题 ID 列写 pending）+ 修复分组表（组ID|问题ID|涉及文件|分组依据）+ 裁决说明（unverified/downgraded 及原因）。`,
       "工作流会从你返回的 groups + issues 数据确定性派生每组的修复任务文档（aggregate-4-fixer-<k>.md，合并后的 guidance 随文档直达修复者）——返回 JSON 里的 guidance 字段务必具体可执行。",
-      "返回 JSON：reportFile + issues（本轮合并后的全部问题清单，含裁决标记）+ groups（修复分组：每组 {id, issueIds, files, note}，覆盖全部 evidence 条目；无 evidence 条目时 groups=[]）。",
+      "返回 JSON：reportFile + issues（本轮合并后的全部问题清单，含裁决标记与 sourceRefs 来源申报）+ groups（修复分组：每组 {id, issueIds, files, note}，覆盖全部 evidence 条目；无 evidence 条目时 groups=[]）。",
     ]
       .filter(Boolean)
       .join("\n");
@@ -873,6 +996,29 @@ async function runCrFixOnce(diffBase: string, batch1Paths: string[], attempt: nu
       return finish("aggregator-failure", round, `聚合失败（重试后仍败）：${aggErr}`);
     }
     lastAggPath = agg.reportFile;
+
+    // 聚合产物结构化落盘（round-N/aggregated.json，设计 §5.3）：脚本从聚合 agent 的既有
+    // 结构化返回（Aggregation）确定性序列化——issues + groups 原样，issues 元素补 sourceRefs
+    // （缺失/非数组按 [] 处理，向后兼容；null/非对象元素丢弃防 spread 畸形）。agent 不写
+    // json 第二产物，不做 md↔json 互校（同源于一次结构化返回）。落盘 fail-open。
+    {
+      const aggDoc = {
+        round,
+        reportFile: agg.reportFile,
+        issues: (agg.issues ?? [])
+          .filter((i): i is NonNullable<typeof i> => i !== null && typeof i === "object")
+          .map((i) => ({
+            ...i,
+            sourceRefs: Array.isArray(i.sourceRefs) ? i.sourceRefs.filter((s) => s !== null && typeof s === "object") : [],
+          })),
+        groups: agg.groups ?? [],
+      };
+      try {
+        await writeViaNode(`${rDir}/aggregated.json`, JSON.stringify(aggDoc, null, 2));
+      } catch (e) {
+        log(`WARN: aggregated.json 落盘失败（${rDir}/aggregated.json，不影响流程结果）：${e instanceof Error ? e.message : String(e)}`);
+      }
+    }
 
     let seq = 0;
     // null 元素防御：LLM 数组元素可能为 null（与 fixes/disputed/deferred 同款防御），
@@ -1003,6 +1149,9 @@ async function runCrFixOnce(diffBase: string, batch1Paths: string[], attempt: nu
     const active = issues.filter((i) => i.status === "open" || i.status === "regressed");
     const mustFix = active.filter((i) => i.severity !== "minor").length;
     const suggestion = active.filter((i) => i.severity === "minor").length;
+    // mustFixTrajectory 推点：逐轮 critical 活跃计数（severity 词表 critical/major/minor；
+    // 与 mustFix 的 critical+major 口径有意不同——设计 §5.1 按族定义）
+    criticalTrajectory.push(active.filter((i) => i.severity === "critical").length);
     report({ stage: "cr-fix", round, reviewers: ordered.map((d) => d.name), mustFix, suggestion, openIssues: active.map((i) => i.id) });
 
     if (mustFix > 0 && mustFix >= prevMustFix) numStreak += 1;
@@ -1321,7 +1470,27 @@ async function runCrFixOnce(diffBase: string, batch1Paths: string[], attempt: nu
         it.disputeEvidence = typeof d.evidence === "string" ? d.evidence : "";
       }
     }
-    log(`第 ${round} 轮修复：fixed=${fixedCount}，disputed=${merged.disputed.length}，deferred=${merged.deferred.length}${merged.commitMessage ? `，commit=${merged.commitMessage}` : ""}`);
+    // 逐问题对账落盘（round-N/result.json，设计 §5.2）：fix 完成后的问题清单态序列化。
+  // disposition 词表 fixed|not-fixed|disputed|regressed 映射内存 status：fixed→fixed、
+  // regressed→regressed、disputed→disputed（evidence = disputeEvidence 反证）、
+  // open/deferred→not-fixed（deferred 是有意退出修复队列的未修复条目）。落盘 fail-open。
+  {
+    const resultDoc = issues.map((i) => ({
+      issueId: i.id,
+      disposition:
+        i.status === "fixed" ? "fixed"
+        : i.status === "regressed" ? "regressed"
+        : i.status === "disputed" ? "disputed"
+        : "not-fixed",
+      ...(i.status === "disputed" && i.disputeEvidence ? { evidence: i.disputeEvidence } : {}),
+    }));
+    try {
+      await writeViaNode(`${rDir}/result.json`, JSON.stringify(resultDoc, null, 2));
+    } catch (e) {
+      log(`WARN: result.json 落盘失败（${rDir}/result.json，不影响流程结果）：${e instanceof Error ? e.message : String(e)}`);
+    }
+  }
+  log(`第 ${round} 轮修复：fixed=${fixedCount}，disputed=${merged.disputed.length}，deferred=${merged.deferred.length}${merged.commitMessage ? `，commit=${merged.commitMessage}` : ""}`);
   }
 
   return finish(
@@ -1380,6 +1549,7 @@ log(`node 可执行：${nodeAbs}`);
   const skillDataRoot = `${home}/.agents/skill-data`;
   rflReportRoot = `${skillDataRoot}/review-fix-loop/${slug}`;
   prReviewDir = `${skillDataRoot}/pr-review/${slug}`;
+  runProjectRoot = topRes.stdout.trim();
   log(`[skill-data] cr-fix 报告根=${rflReportRoot}；pr-review 产物根=${prReviewDir}`);
 }
 
