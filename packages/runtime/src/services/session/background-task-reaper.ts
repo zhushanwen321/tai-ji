@@ -3,9 +3,9 @@
  * and-reaper-sink.md §2.3 目标态数据流 / §3.2 D2 决策表 / §3.3 挂点论证）。
  *
  * 职责（G2 职责归位）：孤儿后台任务的收殓由 pi 生命周期的所有者（runtime）执行，
- * extension 不再做全局扫描/全局锁。判定逻辑移植自 extensions/universal/
- * base-tool-enhance/src/reaper.ts（三分支判定 + pid 复用防御 + registry 损坏隔离 +
- * 错误防御）；行为原语自 ext-simplify-13 起统一取 @zhushanwen/extension-protocol
+ * extension 不再做全局扫描/全局锁。判定逻辑移植自 base-tool-enhance 侧已下沉删除的
+ * reaper（u-bte-remove 单元下沉时删除，git 历史可查；三分支判定 + pid 复用防御 +
+ * registry 损坏隔离 + 错误防御）；行为原语自 ext-simplify-13 起统一取 @zhushanwen/extension-protocol
  * 子出口 `background-task`（pid 探测/处置原语 + registry 文件原语，跨端与 extension
  * 侧单一实现——此前各持一份逐字同构副本靠注释对齐，tail 签名已实际漂移），本文件
  * 只保留编排层：三分支判定、双触发面、统一锁 sync 版锁壳（utils/file-lock.ts
@@ -24,7 +24,8 @@
  *    存储树（`<dataDir>/ext-sessions/`，session-store-layout-inversion 域 5）一级 sid
  *    目录，非合法 sessionId 形态目录一律跳过（isPiSessionId，D7 树内遍历规约）。
  *
- * 三分支判定（移植 reaper.ts 文件头 §3.5 原文语义）：
+ * 三分支判定（移植自原 base-tool-enhance 侧 reaper 文件头的原文语义，该文件已随
+ * u-bte-remove 下沉删除，git 历史可查）：
  *  ①属主活跳过——ownerPiPid 进程仍活 → 跳过（活进程的合法任务；宁漏杀勿误杀，
  *    桌面端并行 session 的合法任务靠此防线豁免；kill(pid,0) 判活，ESRCH=死/EPERM=活。
  *    extension 版的显式 `ownerPiPid === process.pid` 防御在本侧被 isPidAlive 蕴含
