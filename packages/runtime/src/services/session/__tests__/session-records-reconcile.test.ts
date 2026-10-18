@@ -1,18 +1,18 @@
 /**
  * SessionRecords 送达水位对账直测（reload-closeout D2+D6，u1）。
  *
- * 覆盖（A3 全部沉淀单测 + A5 反向 + 定时腿/实施期门③/profiling 门①）：
+ * 覆盖（A3 全部转化为单测 + A5 反向 + 定时路径/实施期门③/profiling 门①）：
  * - 发布门换基线：发布判定 = 当前派生快照 vs 已发布快照（水位），补发帧构造来源 =
  *   水位 diff 差异集（非 merge 变化信号）；稳态快照==水位零帧。
- * - A3a/A3b 守卫/发布门跳自愈：hasSession 瞬态 false / bus 未注入窗口 → publish 未发生
+ * - A3a/A3b 检查/发布门跳自愈：hasSession 瞬态 false / bus 未注入窗口 → publish 未发生
  *   → 水位滞留 → 对账触发补发（fetch 空增量下仍补发——merge 信号基线对事故主形态失明的
  *   反证）；补发后快照==水位==权威。
- * - A3c 断连空投行为锁定：publish 完成（零订阅者不可观测于 runtime 侧）→ 水位推进 →
+ * - A3c 断连丢弃行为锁定：publish 完成（零订阅者不可观测于 runtime 侧）→ 水位推进 →
  *   重连后 diff 空（该形态由 stateSnapshot 回放覆盖，水位结构性不触发）。
- * - 定时腿（15s 服务级单例 timer）：内容落缓存自启、cursor=null 跳过（门③）、扫描域
+ * - 定时路径（15s 服务级单例 timer）：内容落缓存自启、cursor=null 跳过（门③）、扫描域
  *   清零随 onSessionDisposed 停、与在途拉取经 inflight 合并。
  * - A5 反向：无 reload 演进序列帧只在真实变化时发（帧序列为改动前子集），消费端最终
- *   视图等价；fullRebuild 内容不变零帧（cursor 自愈全量重拉旧形态发冗余帧——已知差异）。
+ *   视图等价；fullRebuild 内容不变零帧（cursor 自愈全量重新拉取旧形态发冗余帧——已知差异）。
  * - profiling 门①：单轮对账耗时 ≤100ms/session/轮（real timers，faux 规模）。
  *
  * 分层：mock 层 = deps 5 方法（与 session-records.test.ts 同形态）；extractor 生产代码
@@ -57,7 +57,7 @@ function recordEntry(customType: string, entryId: string, data: Record<string, u
 /**
  * v2 subagent-record 条目族（W1 [D1]：「注册 + 终态两条小条目」）。
  *
- * 注册条目恒在场（身份域：id/agent/task/slug/家族链/起点；rootSessionId 默认 's1' 供投影
+ * 注册条目恒在场（身份域：id/agent/task/slug/家族链/起点；rootSessionId 默认 's1' 供派生视图
  * 的会话归属过滤）；status 非 running 再补终态条目（终局域：停因/统计/引擎锚/结果全文）。
  * extra 按键域路由：终局域键 → settled，其余 → registered（生产写侧 toRegisteredEntryData /
  * toSettledEntryData 同形态）。返回整族由调用处 spread 进 entries 数组。
@@ -198,7 +198,7 @@ function framesOf(publish: ReturnType<typeof vi.fn>, type: string): Array<[strin
   return publish.mock.calls.filter(([, m]) => (m as { type: string }).type === type) as Array<[string, unknown]>
 }
 
-/** 走一轮「失效 → 防抖 → 全量拉取」把派生缓存落上内容（发布与否随守卫/bus 状态）。 */
+/** 走一轮「失效 → 防抖 → 全量拉取」把派生缓存落上内容（发布与否随检查/bus 状态）。 */
 async function seedRound(
   records: SessionRecords,
   fire: (sid: string) => void,
@@ -237,13 +237,13 @@ describe('送达水位发布门', () => {
     expect(framesOf(publish, 'session.planState')).toHaveLength(1)
   })
 
-  it('稳态零帧：快照==水位 → 重复对账（agent_settled 腿）零帧', async () => {
+  it('稳态零帧：快照==水位 → 重复对账（agent_settled 路径）零帧', async () => {
     const { records, publish, client } = makeRecords()
     const fire = registerSession(records)
     await seedRound(records, fire, client, [...subagentRecordEntries('sa-1', 'running', 'e1')], 'e1')
     expect(publish).toHaveBeenCalledTimes(1)
 
-    // 空增量：派生不变、水位已推进 → agent_settled 腿零帧
+    // 空增量：派生不变、水位已推进 → agent_settled 路径零帧
     client.getEntries.mockResolvedValue({ data: { entries: [], leafId: 'e1' } })
     records.reconcileRecordEntries('s1')
     await Promise.resolve()
@@ -285,11 +285,11 @@ describe('送达水位发布门', () => {
     // [登记 §3.3 迁移] 原「running 中仅步骤数变化（trace +1）也出信号」断言删除：v2 条目面
     // 不携 trace，agentCalls 由 run journal fold 供源——本文件 entry-only 装置（sessionStore
     // 恒空 → 无 run journal 目录）fold 缺席，agentCalls 恒空，步骤数/步骤状态维度无 entry 侧
-    // 可达形态。该维度由 session-records.test.ts「投影驱动信号」用例（world 装置 + run journal
+    // 可达形态。该维度由 session-records.test.ts「派生视图驱动信号」用例（world 装置 + run journal
     // 追加 record 终态 → stepStatuses 翻转）覆盖。
   })
 
-  it('fullRebuild 内容不变零帧（cursor 自愈全量重拉旧形态发冗余帧——A5 已知差异锁定）', async () => {
+  it('fullRebuild 内容不变零帧（cursor 自愈全量重新拉取旧形态发冗余帧——A5 已知差异锁定）', async () => {
     const { records, publish, client } = makeRecords()
     const fire = registerSession(records)
     await seedRound(records, fire, client, [...subagentRecordEntries('sa-1', 'running', 'e1')], 'e1')
@@ -307,21 +307,21 @@ describe('送达水位发布门', () => {
   })
 })
 
-// ── A3：守卫/发布门跳静默丢自愈（注入单测）──────────────────────────────────
+// ── A3：检查/发布门跳静默丢自愈（注入单测）──────────────────────────────────
 
-describe('A3 守卫/发布门跳自愈（注入单测）', () => {
+describe('A3 检查/发布门跳自愈（注入单测）', () => {
   beforeEach(() => { vi.useFakeTimers() })
   afterEach(() => { vi.useRealTimers() })
 
   it('A3a hasSession 瞬态 false：publish 未发生 → 水位滞留 → 对账触发补发（fetch 空增量）', async () => {
-    let alive = false // 瞬态 false：session 未销毁（如 bus 重建窗口），守卫拦发布
+    let alive = false // 瞬态 false：session 未销毁（如 bus 重建窗口），检查拦发布
     const { records, publish, client } = makeRecords({ hasSession: vi.fn(() => alive) })
     const fire = registerSession(records)
     await seedRound(records, fire, client, [...subagentRecordEntries('sa-1', 'running', 'e1')], 'e1')
     // merge 已完成（cache 有 record）但 publish 未发生 → 水位滞留
     expect(publish).not.toHaveBeenCalled()
 
-    // 守卫恢复 + pi 侧无新增（fetch 空增量）——merge 信号基线下无帧可发，水位门必须补发
+    // 检查恢复 + pi 侧无新增（fetch 空增量）——merge 信号基线下无帧可发，水位门必须补发
     alive = true
     client.getEntries.mockResolvedValue({ data: { entries: [], leafId: 'e1' } })
     records.reconcileRecordEntries('s1')
@@ -355,8 +355,8 @@ describe('A3 守卫/发布门跳自愈（注入单测）', () => {
     expect(framesOf(publish, 'session.subagents')).toHaveLength(1)
   })
 
-  it('A3c 断连空投行为锁定：publish 完成（零订阅者形态）→ 水位推进 → 重连后 diff 空', async () => {
-    // runtime 侧不可观测订阅者——fake bus 的 publish 恒完成 = 断连空投形态的可达注入。
+  it('A3c 断连丢弃行为锁定：publish 完成（零订阅者形态）→ 水位推进 → 重连后 diff 空', async () => {
+    // runtime 侧不可观测订阅者——fake bus 的 publish 恒完成 = 断连丢弃形态的可达注入。
     // 行为锁定：publish 完成即推进（回放覆盖该形态，水位结构性不触发补发）
     const { records, publish, client } = makeRecords()
     const fire = registerSession(records)
@@ -371,9 +371,9 @@ describe('A3 守卫/发布门跳自愈（注入单测）', () => {
   })
 })
 
-// ── agent_settled 腿（reconcileRecordEntries 入口）──────────────────────────
+// ── agent_settled 路径（reconcileRecordEntries 入口）──────────────────────────
 
-describe('agent_settled 腿（reconcileRecordEntries）', () => {
+describe('agent_settled 路径（reconcileRecordEntries）', () => {
   beforeEach(() => { vi.useFakeTimers() })
   afterEach(() => { vi.useRealTimers() })
 
@@ -400,9 +400,9 @@ describe('agent_settled 腿（reconcileRecordEntries）', () => {
 
     let release!: (v: GetEntriesResult) => void
     client.getEntries.mockImplementation(async () => new Promise<GetEntriesResult>((resolve) => { release = resolve }))
-    records.reconcileRecordEntries('s1') // 腿 A：拉取挂起（inflight 已设）
+    records.reconcileRecordEntries('s1') // 路径 A：拉取挂起（inflight 已设）
     await Promise.resolve()
-    records.reconcileRecordEntries('s1') // 腿 B：对账撞在途 → 复用 inflight
+    records.reconcileRecordEntries('s1') // 路径 B：对账撞在途 → 复用 inflight
     await Promise.resolve()
     release({ data: { entries: [], leafId: 'e1' } })
     await Promise.resolve()
@@ -417,13 +417,13 @@ describe('重注册空水位', () => {
   beforeEach(() => { vi.useFakeTimers() })
   afterEach(() => { vi.useRealTimers() })
 
-  it('销毁后重注册：新缓存空水位 → 首拉 diff 全量非空 → 全量首发布', async () => {
+  it('销毁后重注册：新缓存空水位 → 首次拉取 diff 全量非空 → 全量首发布', async () => {
     const { records, publish, client } = makeRecords()
     const fire = registerSession(records)
     await seedRound(records, fire, client, [...subagentRecordEntries('sa-1', 'running', 'e1')], 'e1')
     expect(framesOf(publish, 'session.subagents')).toHaveLength(1)
 
-    // 销毁（水位随 cache 同批清理）→ 重注册 → 首失效全量重拉（cursor=null）
+    // 销毁（水位随 cache 同批清理）→ 重注册 → 首失效全量重新拉取（cursor=null）
     records.onSessionDisposed('s1')
     await seedRound(records, fire, client, [...subagentRecordEntries('sa-1', 'running', 'e1')], 'e1')
     const subFrames = framesOf(publish, 'session.subagents')
@@ -432,7 +432,7 @@ describe('重注册空水位', () => {
   })
 })
 
-// ── A5 反向：无 reload 回归面（消费端最终视图等价 + 帧序列为改动前子集）──────
+// ── A5 反向：无 reload 回归验证（消费端最终视图等价 + 帧序列为改动前子集）──────
 
 describe('A5 反向：无 reload 演进序列', () => {
   beforeEach(() => { vi.useFakeTimers() })
@@ -528,9 +528,9 @@ describe('profiling 门①：单轮对账耗时（real timers）', () => {
 })
 
 // ════════════════════════════════════════════════════════════════════
-// 撤回派生态失效契约（message-revoke U6d）：丢 cursor 强制全量重建——plan 腿
+// 撤回派生态失效契约（message-revoke U6d）：丢 cursor 强制全量重建——plan 路径
 // 全量扫描接 leafId 活跃路径裁剪（被撤子树 plan-state 不进派生态）、subagent/workflow
-// 腿照实不裁（run 真实执行过）、三水位字段刻意存续（照实族内容不变零冗余帧）
+// 路径照实不裁（run 真实执行过）、三水位字段刻意存续（照实族内容不变零冗余帧）
 // ════════════════════════════════════════════════════════════════════
 
 /** [U6d] 树链 fixture 包装：覆写 parentId（上方 helper 钉 null，分支 fixture 需要链）。 */
@@ -582,11 +582,11 @@ async function settleRefresh(): Promise<void> {
   await Promise.resolve()
 }
 
-describe('U6d 全量重建 plan 腿活跃路径裁剪', () => {
+describe('U6d 全量重建 plan 路径的活跃路径裁剪', () => {
   beforeEach(() => { vi.useFakeTimers() })
   afterEach(() => { vi.useRealTimers() })
 
-  it('首拉（cursor=null 全量）+ 分支 leafId：plan 派生 = 活跃路径值；subagent 照实保留被撤分支 run', async () => {
+  it('首次拉取（cursor=null 全量）+ 分支 leafId：plan 派生 = 活跃路径值；subagent 照实保留被撤分支 run', async () => {
     const { records, publish, client } = makeRecords()
     const fire = registerSession(records)
     fire('s1')
@@ -644,7 +644,7 @@ describe('U6d invalidateDerivedState 撤回失效契约', () => {
     records.invalidateDerivedState('s1')
     await settleRefresh()
 
-    // 全量重拉（无 since 参——cursor 已丢）+ plan 收敛 + subagent 水位 diff 恒空零帧
+    // 全量重新拉取（无 since 参——cursor 已丢）+ plan 收敛 + subagent 水位 diff 恒空零帧
     expect(client.getEntries).toHaveBeenCalledWith()
     expect(framesOf(publish, 'session.planState')).toHaveLength(2)
     expect(lastPlanRequirement(publish)).toBe('活跃路径 plan')
@@ -660,7 +660,7 @@ describe('U6d invalidateDerivedState 撤回失效契约', () => {
     await flushDebounce()
     client.getEntries.mockClear()
 
-    // 在途增量轮：deferred promise 挂起（15s 定时腿与撤回并发的真实竞态形态）
+    // 在途增量轮：deferred promise 挂起（15s 定时路径与撤回并发的真实竞态形态）
     let releaseInc!: (v: GetEntriesResult) => void
     client.getEntries.mockImplementation(async (since?: string) => {
       if (since !== undefined) {

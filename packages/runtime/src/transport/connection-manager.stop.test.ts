@@ -1,12 +1,12 @@
 /**
- * ConnectionManager.stop() 回归测试（A4 挂死根修，2026-09-12）。
+ * ConnectionManager.stop() 回归测试（A4 挂死从根源修复，2026-09-12）。
  *
  * 缺陷：旧 stop() 仅 `httpServer.close(cb)`——回调在全部存量连接结束后才触发，而 ws 8.21
  * external-server 模式的 `wss.close()` 不关闭存量连接；滚动重启场景（main/renderer 存活、
  * 仅 runtime 退出）renderer 的 WS 连接保持、无人发 close 帧 → 回调永不触发 → runtime 永不
  * 退出 → LivenessMonitor 判死强杀，计划内零退避路径失效（Gate B A4 FAIL 根因）。
  *
- * 根修语义（本套件逐条断言）：
+ * 从根源修复语义（本套件逐条断言）：
  * 1. 有 authed WS 客户端连接时 stop() 必然 resolve（修复前挂死）
  * 2. authed 客户端收到优雅 close 帧 1001 Going Away
  * 3. 未 auth 连接（握手中）同样被关闭、不阻塞 stop

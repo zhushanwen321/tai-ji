@@ -364,7 +364,7 @@ describe('详情载荷字段面 — publishRecordChanges live 帧出口', () => 
         },
       })
       // get_entries 全量返回条目集（pi 内存 entries 与磁盘 JSONL 行同构；全量拉取
-      // fullRebuild 先清投影再应用——entries 空会清掉冷读产物，故必须喂条目）。
+      // fullRebuild 先清派生视图再应用——entries 空会清掉冷读产物，故必须喂条目）。
       // makeRecords 的默认 client 被 depsOverrides 前置，这里经 deps.pm 直改不可行，
       // 改为构造后替换：refreshRecordEntries 每次经 pm.getClient 取 client。
       const recordsAny = records as unknown as { deps: SessionRecordsDeps }

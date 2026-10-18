@@ -4,10 +4,10 @@
  * 覆盖（impl-plan u6 验收行逐项）：
  * - A1 阈值判定：70%/85% 两级各命中与不命中（classifyMemoryLevel 纯函数边界 + 集成拍广播档位）。
  * - A2 持续性条件：单周期越线不触发 relief；连续 2 周期触发；中间回落重置连续计数。
- * - A3 memory-relief 事件落台账：layer/event/reason/heapUsed/rss 字段断言（D1 schema）。
+ * - A3 memory-relief 事件落 journal：layer/event/reason/heapUsed/rss 字段断言（D1 schema）。
  * - A4 降级反弹缓解：relief 执行后未回落不重复执行；回落后再连续越线可再次执行。
  * - Gate W 武装门：armed=false 纯观测（采样照跑、无广播无 relief）。
- * - 广播 payload 字段（WatchdogMemoryPressurePayload 契约）+ 环容量淘汰 + stop 收口。
+ * - 广播 payload 字段（WatchdogMemoryPressurePayload 契约）+ 环容量淘汰 + stop 收尾。
  *
  * 全程 fake timers（60s 采样周期真实等待不可接受）；memoryUsage/heapSizeLimit/journal
  * 全量注入，无真实 process/v8 依赖、零 fs 写删。
@@ -29,7 +29,7 @@ import type { WatchdogMemoryPressurePayload } from '@taiji/shared'
 const HEAP_LIMIT = 1_000_000_000
 const SAMPLE_MS = DEFAULT_WATCHDOG_SAMPLE_INTERVAL_MS
 
-/** 按百分比构造 memoryUsage mock（heapUsed = pct% × HEAP_LIMIT；rss 恒 2e9 供台账断言）。 */
+/** 按百分比构造 memoryUsage mock（heapUsed = pct% × HEAP_LIMIT；rss 恒 2e9 供 journal 断言）。 */
 function usageAtPercent(pct: number): () => NodeJS.MemoryUsage {
   return () => ({ heapUsed: Math.round((HEAP_LIMIT * pct) / 100), rss: 2_000_000_000 } as NodeJS.MemoryUsage)
 }
@@ -173,7 +173,7 @@ describe('A2 持续性条件 + A4 反弹缓解（armed=true）', () => {
   })
 })
 
-describe('A3 memory-relief 事件落台账（D1 schema 字段）', () => {
+describe('A3 memory-relief 事件落 journal（D1 schema 字段）', () => {
   beforeEach(() => {
     vi.useFakeTimers()
   })
@@ -205,7 +205,7 @@ describe('A3 memory-relief 事件落台账（D1 schema 字段）', () => {
     h.handle.stop()
   })
 
-  it('onRelief 注入动作抛错：台账照记（触发事实独立于动作成败），异常不逃逸', () => {
+  it('onRelief 注入动作抛错：journal 照记（触发事实独立于动作成败），异常不逃逸', () => {
     const journalAppend = vi.fn()
     const handle = startWatchdog({
       armed: true,
@@ -270,7 +270,7 @@ describe('renderer 广播通知（WatchdogMemoryPressurePayload 契约）', () =
   })
 })
 
-describe('采样观测与收口（oe-audit C4：24h 采样环已删，观测面 = lastSample + 计数器）', () => {
+describe('采样观测与收尾（oe-audit C4：24h 采样环已删，观测面 = lastSample + 计数器）', () => {
   beforeEach(() => {
     vi.useFakeTimers()
   })

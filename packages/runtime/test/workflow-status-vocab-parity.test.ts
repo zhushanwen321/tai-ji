@@ -7,7 +7,7 @@
 // 覆盖：
 // - shared `WorkflowRunStatus` 三值快照（编译期 `satisfies` 锚定——shared 收窄即此处
 //   编译红；扩值未跟即运行期红）。
-// - core 投影面（`runSummary`，run 状态的唯一投影）三种形态逐一产出的 status 全部落
+// - core 派生视图（`runSummary`，run 状态的唯一派生视图）三种形态逐一产出的 status 全部落
 //   在 shared 词表内，且三形态恰好覆盖词表三成员（running / interrupted / done）。
 //
 // 为什么在 runtime 侧断言：core 与 shared 不允许物理单源（private 包 × npm 发布包），
@@ -61,12 +61,12 @@ function makeRun(shape: {
   } as unknown as WorkflowRun
 }
 
-describe('status 词表双包值级等价（[§2.2] core 投影 ≡ shared）', () => {
+describe('status 词表双包值级等价（[§2.2] core 派生视图 ≡ shared）', () => {
   it('shared 词表快照（三值；扩缩值即本用例红——两侧同步显式重审）', () => {
     expect([...SHARED_WORKFLOW_RUN_STATUSES].sort()).toEqual(['done', 'interrupted', 'running'])
   })
 
-  it('core runSummary 三形态逐一投影，恰好覆盖 shared 三成员', () => {
+  it('core runSummary 三形态逐一派生视图，恰好覆盖 shared 三成员', () => {
     const projected = [
       runSummary(makeRun({})).status,
       runSummary(makeRun({ interruptedAt: '2026-09-30T01:00:00.000Z' })).status,
@@ -75,7 +75,7 @@ describe('status 词表双包值级等价（[§2.2] core 投影 ≡ shared）', 
     expect(new Set(projected)).toEqual(new Set(SHARED_WORKFLOW_RUN_STATUSES))
   })
 
-  it('投影值恒落在 shared 词表内（含终局原因各形态）', () => {
+  it('映射值恒落在 shared 词表内（含终局原因各形态）', () => {
     const shapes = [
       {},
       { interruptedAt: '2026-09-30T01:00:00.000Z' },

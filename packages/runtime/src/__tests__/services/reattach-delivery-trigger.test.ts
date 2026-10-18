@@ -11,7 +11,7 @@
  *    锁定「必须先建运行时」这一硬约束（本测试是该缺口的回归防线）。
  *
  * 材料：真 createDelivery 内核 + 真 registry（fake pi client / fake session view）；
- * 编排腿用真 runStartupReattach + fake checkpoint（tmp 目录，fs-guard 白名单内）。
+ * 编排路径用真 runStartupReattach + fake checkpoint（tmp 目录，fs-guard 白名单内）。
  *
  * 运行：cd packages/runtime && npx vitest run src/__tests__/services/reattach-delivery-trigger.test.ts
  */
@@ -172,7 +172,7 @@ describe('无提交活动下的 reattach 收养重建（A5/V5）', () => {
     expect(entries!.active.length + entries!.tombstones.length).toBeGreaterThan(0)
   })
 
-  it('端到端编排腿：runStartupReattach（checkpoint 单候选）→ restore 包装被调 → 收养路径触发', async () => {
+  it('端到端编排路径：runStartupReattach（checkpoint 单候选）→ restore 包装被调 → 收养路径触发', async () => {
     const runDir = mkdtempSync(join(tmpdir(), 'u4-reattach-trigger-'))
     try {
       // 只写 session.jsonl（restoreOne staleness guard 依赖 fileExists(entry.filePath)）。

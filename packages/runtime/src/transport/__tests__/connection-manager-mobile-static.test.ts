@@ -1,7 +1,7 @@
 /**
  * remote-access U1.1：移动壳静态托管 handler（D3）+ 穿越防护（E4）+ dist 缺失处置（E5）。
  * S3 拆分后形态：静态实现与开态判定（resolveMobileStaticRoot / createMobileStaticHandler）
- * 在 mobile-static.ts，本文件锚定 ConnectionManager 消费面——注入 handler 后的 HTTP
+ * 在 mobile-static.ts，本文件锚定 ConnectionManager 消费方——注入 handler 后的 HTTP
  * 分派行为；开态判定/纯函数/裸 handler 单测在 mobile-static.test.ts。
  *
  * 语义锚点（remote-access 设计 §3.3 D3 / §3.4 E4/E5）：
@@ -228,7 +228,7 @@ describe('ConnectionManager mobile static hosting (U1.1)', () => {
   })
 
   // ── D3：handler 未注入 = 不挂载（行为与远程访问引入前逐字节一致）───────────────
-  // 开态守卫（mobileDist 单独出现不构成开态）已随挂载裁决上移组合根，归属
+  // 开态检查（mobileDist 单独出现不构成开态）已随挂载裁决上移组合根，归属
   // mobile-static.test.ts 的 resolveMobileStaticRoot 关态用例。
 
   describe('handler 未注入（关态 / E5 禁用）不挂载', () => {

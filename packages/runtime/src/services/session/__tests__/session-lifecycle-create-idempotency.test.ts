@@ -10,7 +10,7 @@
  * - ② 不同 uuid / 无 uuid → 各自独立创建（回归：uuid 缺省行为与旧版一致）
  * - ③ TTL 过期后同 uuid 再来 → 新建（回收策略生效）
  * - 补：create 失败即清登记（失败不缓存，同 uuid 重试可重建）
- * - 补：登记面有界（容量上限驱逐最老）
+ * - 补：登记清单有界（容量上限驱逐最老）
  *
  * 装置：session-lifecycle-create-label.test.ts makeCreateEnv 同款（全协作者 mock +
  * 真 registerSession 编排），唯一差异 = getState 按 spawn 序返回唯一 session id
@@ -191,7 +191,7 @@ describe('create clientUuid 幂等（发现 B，SessionLifecycle 集成）', () 
   })
 })
 
-describe('CreateIdempotencyRegistry 回收策略（登记面有界）', () => {
+describe('CreateIdempotencyRegistry 回收策略（登记清单有界）', () => {
   it('in-flight 共用同一 Promise（exec 恰一次），落定后 TTL 内复用', async () => {
     const registry = new CreateIdempotencyRegistry()
     let resolveExec!: (s: SessionSummary) => void

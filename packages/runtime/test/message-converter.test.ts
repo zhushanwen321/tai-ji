@@ -85,7 +85,7 @@ describe('convertPiHistory', () => {
     expect(messages[0].toolCalls![0].output).toBe('command failed')
   })
 
-  // [subagent 投影丢失修复] 历史 toolResult 的 image 块必须随 fill 保留（表驱动：纯 image /
+  // [subagent 派生视图丢失修复] 历史 toolResult 的 image 块必须随 fill 保留（表驱动：纯 image /
   // 混合 content）——与 core reducer（computeToolCallFill）同源提取，此前漏取致重开后
   // 工具结果图片丢失。
   const imgPart: PiHistoryImagePart = { type: 'image', data: 'aGVsbG8taW1hZ2U=', mimeType: 'image/png' }
@@ -188,7 +188,7 @@ describe('convertPiHistory - skill block parsing', () => {
     const content = messages[0].content as any[]
     expect(content.find((s) => s.type === 'skill')?.name).toBe('x')
     // [语义变更登记 2026-09-07] D7 升级时本形态曾锁定「尾部纯空白保留为 text segment」
-    // （preserve-content policy）；簇 A2（decf7d289，defer 队列标记确认通道）在 user 投影
+    // （preserve-content policy）；簇 A2（decf7d289，defer 队列标记确认通道）在 user 派生视图
     // 剥 defer marker 后统一 trimEnd（core convertMessageBody 单点）——剥后基线文本 =
     // confirmDelivery overlay 文本，mergeBaselineWithLive 文本去重命中不双计。本形态
     // trimEnd 后无剩余正文 → 不产 text segment，仅 skill（与 core e-user-pi2 形态一致）。

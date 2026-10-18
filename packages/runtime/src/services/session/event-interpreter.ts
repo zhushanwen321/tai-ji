@@ -10,7 +10,7 @@
  *   4. status/extension-ui 路由到 server（注册超时）
  *   5. subagent/workflow record 失效信号（W18 D4：entry_appended 主信号 + bg-notify/
  *      workflow-result/tool-call-end 兜底信号 → onRecordEntriesInvalidated——事件直写
- *      退役，数据写路径唯一 = journal 投影重算（sessionService 派生缓存是投影快照镜像））
+ *      退役，数据写路径唯一 = journal 派生视图重算（sessionService 派生缓存是派生视图快照镜像））
  *
  * 持有的可变态（从 event-adapter 迁来）：
  *   - currentMessageId（message_start 设置，file_changes 挂载目标）
@@ -29,7 +29,7 @@
  *     副作用回调的纯同步编排（无内部状态，不牵动主循环时序，评估为低风险）
  * 保留在本类：file_changes 帧序三件套（diffChain/turnGen/turnFinalizing 与 turn-start/end、
  * tool-call hook 链交织，抽取牵动主循环时序）、session-manager 路由（单 case 5 行透传，
- * 不构成独立变化轴量）、occupancy 原语与 UserStoppedGate（多模块共享原语/门面，非本类私有域）。
+ * 不构成独立变化原因量）、occupancy 原语与 UserStoppedGate（多模块共享原语/门面，非本类私有域）。
  *
  * [ADR-0024 D5] git 作为唯一真值源：写操作后 diff 当前 git status，agent_end 推 ready 全集。
  * 非 git 仓库 / cwd 缺省 → 跳过 diff（不推 file_changes）。
@@ -90,8 +90,8 @@ export const IDLE_SESSION_OCCUPANCY: SessionOccupancy = { turn: 'idle', compacti
  * 唯一写入口：全部挂点（interpreter #2-#6 经 onOccupancyTransition 回调、dispatcher
  * #1/#7-#9/#11 与 forceQuit/compact 兜底、deliverText 置位、agent_end/agent_settled 副作用、
  * onSessionExit 全复位）均已改调 applySessionOccupancyTransition（u3b 迁移完成）；
- * 本函数降级为原语的内部机制（合并 + 去重 + state-topic 广播腿），不再被挂点直调。
- * OccupancyPublisher 取 IMessageBus 的结构化窄投影（只依赖 publish，test mock 友好）。
+ * 本函数降级为原语的内部机制（合并 + 去重 + state-topic 广播路径），不再被挂点直调。
+ * OccupancyPublisher 取 IMessageBus 的结构化窄视图（只依赖 publish，test mock 友好）。
  *
  * [session-dead-structural-fixes D2] 本函数自 u2 起降级为 applySessionOccupancyTransition
  * 原语的内部机制（u3b 挂点迁移完成后原语是唯一写入口，u3c readonly 收紧后绕开原语的
@@ -125,8 +125,8 @@ export function updateSessionOccupancy(
  * - reject-processing → isGenerating=true（A1 止血转正：pi 拒绝「已有一个 turn 在跑」是
  *   权威信号，反转幽灵空闲）；
  * - reject-other → isGenerating=false（compacting 拒绝与非 busy 真失败：turn 没跑起来）；
- * - full-reset / abort-stall-force-kill → 三布尔全复位（进程死亡腿，agent_settled 永不到达）；
- * - abort-stall-converged → idle（预留行：兄弟分支 abort 阶梯「重试收敛」收口，挂点接线
+ * - full-reset / abort-stall-force-kill → 三布尔全复位（进程死亡路径，agent_settled 永不到达）；
+ * - abort-stall-converged → idle（预留行：兄弟分支 abort 阶梯「重试收敛」收尾，挂点接线
  *   由 fix-subagent-no-notification 合并方完成，本单元只登记派生定义）。
  */
 const SESSION_OCCUPANCY_TRANSITIONS: Record<
@@ -164,9 +164,9 @@ const SESSION_OCCUPANCY_TRANSITIONS: Record<
  * 「合并 occupancy 三维 → 按转移类型派生三布尔 → 幂等比较 → 广播」。
  *
  * - 通路归属：广播走既有 state-topic 通路（bus.publish = 实时广播 + 快照写入/重订阅回放
- *   双腿，见 MessageBus topicOf 分流），禁止绕过 state topic 裸 publish。
+ *   双路径，见 MessageBus topicOf 分流），禁止绕过 state topic 裸 publish。
  * - announce-idle 特例（registerSession 宣告帧收编行，Gate B V6b④）：合并/派生均为 no-op，
- *   跳过全等去重强制广播当前投影——对象初值即 idle 时全等去重会短路广播，而宣告帧职责
+ *   跳过全等去重强制广播当前派生视图——对象初值即 idle 时全等去重会短路广播，而宣告帧职责
  *   恰恰是「宣告」（重订阅回放必达），不是「转移」。
  * - 三布尔直写在 session 记录（派生存储，幂等无广播语义）；occupancy 合并与去重复用
  *   updateSessionOccupancy 既有机制。
@@ -200,7 +200,7 @@ export function applySessionOccupancyTransition(
 // ── userStopped 标记门面（ADR-0122 事件顺序契约）──
 
 // [历史形态] 原 D4 收敛环（3s 静默观察窗 + pendingSettled 代数上限）已随 ADR-0122
-// 事实驱动清查删除：窗满清标记 = 用时间猜「补发腿流完」，属补偿猜测。
+// 事实驱动清查删除：窗满清标记 = 用时间猜「补发路径流完」，属补偿猜测。
 
 /**
  * userStopped 门面。
@@ -222,7 +222,7 @@ export function applySessionOccupancyTransition(
  * pi@1.0.0 rpc-mode.js:327-329 abort 分支 → agent-session.js:1873-1884 abort() →
    * pi-agent-core agent.js:218-220 可选链单行体，语义登记 PS-74）；port session_start
    * 差集重放 / scheduler 旁路源起的 turn 被 noteAgentStart 拦截再 abort（被掐通知已
-   * 注入上下文，回执销账由投递日志 details-id 凭据承接，不重复投递）。
+   * 注入上下文，回执关闭由投递日志 details-id 凭据承接，不重复投递）。
  *
  * 「被掐 turn 的 settled 永不到达」（pi 收尾挂死）归显式上报链：PingProbe（ADR-0047，
  * 60s ping × 3 连续失败）→ onSilentAbort → forceQuitSession。
@@ -279,7 +279,7 @@ export class UserStoppedGate {
 
   /**
    * 显式投递放行（sendPrompt 等经 runtime 的投递调用）：清标记。投递前调用——
-   * 新意图不受任何闸门拦截。
+   * 新意图不受任何门禁拦截。
    */
   consumeForExplicitDelivery(sessionId: string): void {
     if (!this.hasUserStoppedMark(sessionId)) return
@@ -316,11 +316,11 @@ export const userStoppedGate = new UserStoppedGate()
 // OccupancySettleWindow / occupancySettleWindow）已整体退役：空闲发命令后 occupancy 的
 // 回落改由 pi 权威事实驱动——handled 响应即回落（session-delivery-registry deliverOne）；
 // started/queued 形态下回合事件按 pi 事件流推进，进程死亡由 onSessionExit 链
-// full-reset 与断连失败上报收口（ADR-0122——原 sweepInFlight 承接腿已随终局事件化退役）。
+// full-reset 与断连失败上报收尾（ADR-0122——原 sweepInFlight 承接路径已随终局事件化退役）。
 // 时间平抑类机制净减一（D3④ ADR 登记）。
 
 /** plain object 判定（type-safety review：plugin hook 返回值是不可信边界——Worker/
- * sandbox 里的第三方代码可返回任意值，改写前必须 shape 守卫，畸形值丢弃改写保原值）。 */
+ * sandbox 里的第三方代码可返回任意值，改写前必须做 shape 检查，畸形值丢弃改写保原值）。 */
 function isPlainRecord(v: unknown): v is Record<string, unknown> {
   return typeof v === 'object' && v !== null && !Array.isArray(v)
 }
@@ -374,7 +374,7 @@ export interface EventInterpreterOptions {
    * session.label 事件路径的唯一写方，toSummary/config.sessions 读它；session.renamed
    * 广播帧由 event-adapter 从事件 payload 直接转发，pi 是权威源）。
    * [HISTORICAL] label 的 ReplicatedState 实例及其 markDirty 失效接线已撤销（PR #185
-   * MF1：实例 .get() 生产零消费，防抖重拉 get_state 属无效 RPC，事件直写即终态形态）。
+   * MF1：实例 .get() 生产零消费，防抖重新拉取 get_state 属无效 RPC，事件直写即终态形态）。
    */
   onSessionRenamed?: (sessionId: string, name: string | undefined) => void
   /**
@@ -428,7 +428,7 @@ export interface EventInterpreterOptions {
    */
   onOccupancyTransition?: (transition: SessionOccupancyTransition) => void
   /**
-   * session-trace 增量腿补拉回调（design D4 / A33，组合根注入 sessionService.syncTraceEntries）。
+   * session-trace 增量路径补充拉取回调（design D4 / A33，组合根注入 sessionService.syncTraceEntries）。
    *
    * 触发源四类：trace-trigger（message_end / agent_settled / entry_appended 三类现存事件
    * 作触发信号——pi 无 append 级广播）+ compaction-end（compaction entry append 先于
@@ -437,9 +437,9 @@ export interface EventInterpreterOptions {
    */
   onTraceSync?: (sessionId: string, trigger: string) => void
   /**
-   * [reload-closeout D2] 送达水位对账腿回调（agent_settled 触发，组合根注入
+   * [reload-closeout D2] 送达水位对账路径回调（agent_settled 触发，组合根注入
    * sessionService.reconcileRecordEntries——重跑 fetch→merge→publish 管线，发布门 =
-   * 已发布快照水位，守卫/发布门处曾丢的帧补发）。fire-and-forget（回调内部自带
+   * 已发布快照水位，检查/发布门处曾丢的帧补发）。fire-and-forget（回调内部自带
    * inflight 合并与扫描域门），不阻塞 interpret 批次。
    */
   onRecordReconcile?: (sessionId: string) => void
@@ -470,8 +470,8 @@ export interface EventInterpreterOptions {
   /**
    * W18（data-source-governance P3.1）：自描述 record entry 到达 → subagent/workflow/plan
    * 派生缓存失效。组合根注入 sessionService.invalidateRecordEntries——markDirty + 防抖
-   * get_entries(since) 增量重拉。数据写路径唯一 = journal 投影重算（[W1 / D6] applyEntryBatch
-   * 双源单点合并，session-records.ts 模块头「数据写路径唯一」同口径；派生 Map 是投影
+   * get_entries(since) 增量重新拉取。数据写路径唯一 = journal 派生视图重算（[W1 / D6] applyEntryBatch
+   * 双源单点合并，session-records.ts 模块头「数据写路径唯一」同口径；派生 Map 是派生视图
    * 合并快照的镜像——syncCacheFromProjection），事件 payload 永不直写缓存
    * （ReplicatedState「事件只做失效」不变量；W12-W18 过渡态例外至此撤销）。
    * customType 失效信号转发行为不变；record 三族消费方 invalidateRecordEntries 内部
@@ -485,7 +485,7 @@ export interface EventInterpreterOptions {
    * - entry_appended{customType: string}（主信号，adapter 对任意 custom entry 产出）
    * - subagent-bg-notify / subagent tool-call-end / workflow-result / workflow tool-call-end
    *   （兜底信号：extension 在同一状态迁移点既 append 自描述 entry 又发上述事件——主信号
-   *   丢失（W22 混沌）时兜底触发重拉收敛）
+   *   丢失（W22 混沌）时兜底触发重新拉取收敛）
    */
   onRecordEntriesInvalidated?: (sessionId: string, customType: string) => void
   /**
@@ -503,14 +503,14 @@ export interface EventInterpreterOptions {
 const FILE_MUTATING_TOOLS = new Set(['write', 'edit', 'bash'])
 
 /**
- * [RT-4#9] PiTranslatedEvent.kind 编译期穷尽守卫：五段处理（handle 结构 case +
+ * [RT-4#9] PiTranslatedEvent.kind 编译期穷尽检查：五段处理（handle 结构 case +
  * handleConversationEvent / handleTurnLifecycleEvent / handleRoutingEvent / handleMetaEvent）
  * 的 case 并集必须 == kind 全集（当前 23 个）。types.ts 新增 kind 而五段未接线时，
  * 本登记表缺键 → `Record<PiTranslatedEvent['kind'], true>` 注解编译红（多键同理），
  * 接线遗漏在编译期显形（此前仅靠人工核对，新增 kind = 该类型事件永久静默丢弃）。
  * 运行时兜底 = handleMetaEvent default warn。
  *
- * 穷尽检查一处收口：五段结构使单段函数的 default 分支收窄不到 never（TS 不知道前序段
+ * 穷尽检查收敛在一处：五段结构使单段函数的 default 分支收窄不到 never（TS 不知道前序段
  * 已消费哪些 kind），故约束集中在本登记表——Record 注解对键集做全等检查，与全量
  * switch + never 收窄等价，且把 kind 清单从控制流降为纯数据。
  */
@@ -558,7 +558,7 @@ export class EventInterpreter {
    * 链上每段 catch 兜底，diffChain 永不 reject（单帧失败不断链）。
    */
   private diffChain: Promise<void> = Promise.resolve()
-  /** 回合代际守卫：turn-start 自增；链上执行时 gen 不匹配 → 丢弃 accumulating（ready 绕过恒推，见 sendDiffFileChanges） */
+  /** 回合代际检查：turn-start 自增；链上执行时 gen 不匹配 → 丢弃 accumulating（ready 绕过恒推，见 sendDiffFileChanges） */
   private turnGen = 0
   // ── 协作对象（T4 拆分：构造时装配，状态与逻辑见各自文件；本类只持委托挂点）──
   /** composer-gen-stats LLM 请求窗口状态机（genstats-speed-llm-window D1/D3，登记方向 ①）。 */
@@ -586,8 +586,8 @@ export class EventInterpreter {
    * B1（memory-leak-remediation §3.2-B1，2026-09-14）：pi turn 中崩溃 → onSessionExit →
    * adapter.detach → 本 dispose 后事件源已退订，turn-end 永不再达，ping 循环失去唯一停止点；
    * pingProbe.stop 幂等且已
-   * in-flight 的 tick 被 `timer === null` 守卫拦截（SR1）。settling 延迟 timer 与 disposed
-   * 短路标志同迁 settledDelayer（T4），本方法只做两腿委托。
+   * in-flight 的 tick 被 `timer === null` 检查拦截（SR1）。settling 延迟 timer 与 disposed
+   * 短路标志同迁 settledDelayer（T4），本方法只做两路径委托。
    */
   dispose(): void {
     this.settledDelayer.dispose()
@@ -639,7 +639,7 @@ export class EventInterpreter {
         // text_delta / thinking_delta 占 streaming 期事件量绝对大头，等价性依据：
         // 两者的 payload 是 { sessionId, delta, contentIndex? }（event-adapter :99-106），
         // 永不带 customType，跳过的两个检查函数（handleSubagentBgNotify / handleWorkflowResult
-        // 首行 customType 守卫）对它们恒 early-return，行为与走 handle 完全一致。
+        // 首行 customType 检查）对它们恒 early-return，行为与走 handle 完全一致。
         // 运行时护栏（W09 review 补）：快速路径条件额外要求 payload 无 customType——
         // 未来若新增带 customType 的 delta 产出点，缺此护栏会静默绕过两个检查函数，
         // 此处强制其回落完整 handle 路径。
@@ -660,7 +660,7 @@ export class EventInterpreter {
   }
 
   /**
-   * W1 单事件隔离的 catch 腿（原 interpret catch 内联体逐字迁移）：终态事件自身
+   * W1 单事件隔离的 catch 路径（原 interpret catch 内联体逐字迁移）：终态事件自身
    * handler 抛错时的兜底副作用（防 isGenerating / occupancy 永久滞留）+ 统一错误
    * 日志。只搬运不改执行顺序与日志文案。
    */
@@ -680,7 +680,7 @@ export class EventInterpreter {
       }
       // occupancy #3 兜底：handleTurnEnd 早段（send 帧 / onContextUpdate）抛错时
       // settling 写入未达——与 onTurnFinalize 兜底同构，防 turn 卡 generating
-      // （session 永久占用投影，renderer 永走 steer/defer 路由）。
+      // （session 永久占用派生视图，renderer 永走 steer/defer 路由）。
       try {
         this.opts.onOccupancyTransition?.('settling')
       } catch (occErr) {
@@ -716,7 +716,7 @@ export class EventInterpreter {
    * 五段合计覆盖与原单一 switch 的 case 集合逐一对应，命中语义与分发顺序不变。
    */
   private handle(ev: PiTranslatedEvent): void {
-    // [RT-4#9] 编译期穷尽守卫（纯类型检查激活点，全 case 覆盖时运行时恒 no-op）。
+    // [RT-4#9] 编译期穷尽检查（纯类型检查激活点，全 case 覆盖时运行时恒 no-op）。
     assertTranslatedEventHandled(ev)
     switch (ev.kind) {
       case 'tool-call-start':
@@ -740,9 +740,9 @@ export class EventInterpreter {
     if (this.handleConversationEvent(ev)) return
     if (this.handleTurnLifecycleEvent(ev)) return
     if (this.handleRoutingEvent(ev)) return
-    // 分发守卫（composer-genstats-ttft 设计 §3.5 + [RT-4#9]）：未注册 case 的 kind 此前是
+    // 分发检查（composer-genstats-ttft 设计 §3.5 + [RT-4#9]）：未注册 case 的 kind 此前是
     // 静默失败（五段分发无 default warn）——新 kind 漏分发会静默丢采样锚点等，显形 warn
-    // 不再静默丢弃（该类型事件永久静默丢失 = 分叉形态）；编译期穷尽守卫 HANDLED_EVENT_KINDS
+    // 不再静默丢弃（该类型事件永久静默丢失 = 分叉形态）；编译期穷尽检查 HANDLED_EVENT_KINDS
     // 因测试/绕过路径漏红时本运行时兜底仍可达。
     if (this.handleMetaEvent(ev)) return
     console.warn(
@@ -767,8 +767,8 @@ export class EventInterpreter {
           this.opts.executeHooks?.('onPiEvent', { event: 'message_end', entry: endPayload?.entry }).catch(() => {})
         }
         // composer-gen-stats（genstats-speed-llm-window D1/D2）：assistant message_end 帧 =
-        // LLM 请求窗口闭合点（先于工具执行到达，pi 语义 P1）→ 结算窗口时长（role 守卫与
-        // payload 防御提取在协作对象内）。委托原样保留转发后的调用位置——闭合时点语义不变。
+        // LLM 请求窗口关闭点（先于工具执行到达，pi 语义 P1）→ 结算窗口时长（role 检查与
+        // payload 防御提取在协作对象内）。委托原样保留转发后的调用位置——关闭时点语义不变。
         this.llmWindows.settleOnMessageEnd(ev.message)
         // subagent bg-notify：更新内存态终态 → 广播 session.subagents
         this.handleSubagentBgNotify(ev.message)
@@ -783,8 +783,8 @@ export class EventInterpreter {
         })
         return true
       case 'record-entry-appended':
-        // W18：自描述 record entry 到达 → 派生缓存失效（sessionService 防抖增量重拉）。
-        // 事件 payload 不进数据缓存——数据写路径唯一 = journal 投影重算（[W1 / D6]，
+        // W18：自描述 record entry 到达 → 派生缓存失效（sessionService 防抖增量重新拉取）。
+        // 事件 payload 不进数据缓存——数据写路径唯一 = journal 派生视图重算（[W1 / D6]，
         // 上方 onRecordEntriesInvalidated JSDoc 同口径）。
         this.opts.onRecordEntriesInvalidated?.(this.sessionId, ev.customType)
         return true
@@ -842,12 +842,12 @@ export class EventInterpreter {
         this.settledDelayer.handleSettled()
         return true
       case 'trace-trigger':
-        // session-trace 增量腿（A33）：触发事件到达 → 追赶式 since 补拉（fire-and-forget，
+        // session-trace 增量路径（A33）：触发事件到达 → 追赶式 since 补充拉取（fire-and-forget，
         // 不阻塞本批次；拉到 delta 后由 syncTraceEntries 广播 session.traceEntryAppended）。
         this.opts.onTraceSync?.(this.sessionId, ev.trigger)
         return true
       case 'record-reconcile-trigger':
-        // [reload-closeout D2] 送达水位对账腿（agent_settled，fire-and-forget——回调内部
+        // [reload-closeout D2] 送达水位对账路径（agent_settled，fire-and-forget——回调内部
         // 重跑 record 派生管线并按已发布快照水位补发，不阻塞本批次）
         this.opts.onRecordReconcile?.(this.sessionId)
         return true
@@ -893,7 +893,7 @@ export class EventInterpreter {
    *   publish / 收敛环回调等）时补写 'idle'——settling→idle 是唯一正常边沿，副作用抛错
    *   不补写 = occupancy 永久 settling、终态不可达（消息恒入 defer 队列；abort/full-reset
    *   复位属特定边沿，正常链不可依赖）。
-   * ② ping 生命期收口：turn-start → agent_settled（[RT-4#2②]，原为 turn-start → turn-end）。
+   * ② ping 生命期收尾：turn-start → agent_settled（[RT-4#2②]，原为 turn-start → turn-end）。
    *   settling 期探测持续——pi 收尾挂死时 3 次失败触发 onSilentAbort 收敛；探测成功即
    *   不算卡死（ADR-0047 静默≠卡死，不用固定墙钟判死）。settled 处理完成（无论成败）
    *   即停（B1 防 ping 永续）。
@@ -958,7 +958,7 @@ export class EventInterpreter {
   private handleMetaEvent(ev: PiTranslatedEvent): boolean {
     switch (ev.kind) {
       case 'thinking-level':
-        // W7/W9 数据源治理：thinking_level_changed 只做失效——markDirty 置 dirty + 防抖重拉
+        // W7/W9 数据源治理：thinking_level_changed 只做失效——markDirty 置 dirty + 防抖重新拉取
         // get_state（唯一写路径），事件 payload 不再是 thinkingLevel 的数据源（session.thinkingLevelSet
         // WS 帧由 event-adapter 翻译直发，前端即时更新不依赖任何缓存回写）。
         this.opts.thinkingLevelState?.()?.markDirty()
@@ -972,7 +972,7 @@ export class EventInterpreter {
         return true
       case 'hook':
         // userStopped 挂点：标记存活期间，非显式投递引发的 agent_start 一律
-        // 再 abort（掐 notify replay 补发腿 / scheduler / auto-retry 开的 turn）。
+        // 再 abort（掐 notify replay 补发路径 / scheduler / auto-retry 开的 turn）。
         // 标记不在时 no-op——正常会话（含显式投递开 turn）零额外开销（单次 Set 查询）。
         if (ev.eventType === PI_EVENT.agentStart) {
           userStoppedGate.noteAgentStart(this.sessionId)
@@ -1029,7 +1029,7 @@ export class EventInterpreter {
     // contentIndex 锚点（§11 检查点 3：pi toolcall_start 提供，模型输出 tool_use 时——无此锚点
     // 时同 turn 内 text 在 tool 之后 contentBlocks 顺序会错位）与 messageId 挂载目标从
     // interpreter 缓存补进 entry。锚点缺失（旧 pi/异常）时字段缺省，前端退化为 append 尾部。
-    // arguments 经 isPlainRecord 守卫（hook 改写已守卫；未改写路径的 ev.input 若为 pi 契约外
+    // arguments 经 isPlainRecord 检查（hook 改写已检查；未改写路径的 ev.input 若为 pi 契约外
     // 畸形值同样归一为 {}，不进 wire 帧）
     ev.entry.arguments = isPlainRecord(input) ? input : {}
     const contentIndex = this.toolCallContentIndex.get(toolCallId)
@@ -1160,12 +1160,12 @@ export class EventInterpreter {
    * 帧序不变量（by-construction）：
    * 1. 单飞串行链——diff 计算入 per-session promise 链按触发序串行，turn-end 的 ready
    *    排链尾 → 恒晚于所有在途 accumulating；
-   * 2. 回合代际守卫（仅 accumulating）——捕获排链时的 turnGen，链上执行时（含 await 窗口后
-   *    send 前）不匹配即丢弃，上回合迟到 accumulating 不落新回合。ready 绕过守卫恒推
+   * 2. 回合代际检查（仅 accumulating）——捕获排链时的 turnGen，链上执行时（含 await 窗口后
+   *    send 前）不匹配即丢弃，上回合迟到 accumulating 不落新回合。ready 绕过检查恒推
    *    （03 §3.1「ready 恒推」；W18 review）：pi followUp 续跑（triggerTurn）会立即开新 turn
    *    （turnGen++），若 ready 也按代际丢弃，本回合变更集卡永久停在 accumulating——前端无
    *    恢复路径（markChangeSetsSuperseded 仅 git.commit 触发、hydrate 不写 changeSetStatus）。
-   *    迟到的 ready 挂排链时捕获的旧 messageId，前端按 messageId 分区 + 单向守卫幂等；
+   *    迟到的 ready 挂排链时捕获的旧 messageId，前端按 messageId 分区 + 单向检查幂等；
    * 3. turnFinalizing 压制——turn-end 后到达的 accumulating 直接 no-op。
    *
    * 返回链尾 promise：handleToolCallEnd await 它以保持「accumulating 先于 tool_call_end」；
@@ -1184,7 +1184,7 @@ export class EventInterpreter {
     // writeContents 捕获引用快照：turn-end / turn-start 排链后替换新 Map，链上计算仍持旧引用
     const writeContents = this.writeContents
     const run = async (): Promise<void> => {
-      // 回合代际守卫（仅 accumulating，见上方 JSDoc 第 2 条）：排链到执行之间可能已跨 turn
+      // 回合代际检查（仅 accumulating，见上方 JSDoc 第 2 条）：排链到执行之间可能已跨 turn
       if (changeSetStatus === 'accumulating' && gen !== this.turnGen) {
         console.debug(`[event-interpreter] file_changes accumulating dropped by turn-generation guard sid=${this.sessionId}`)
         return
@@ -1194,7 +1194,7 @@ export class EventInterpreter {
       const changes: FileChange[] = fileChangeDiff.diffSnapshots(current)
       if (changes.length === 0) return
       const numstatMap = await fileChangeDiff.numstat(cwd)
-      // 二次 gen 校验（仅 accumulating）：采集 await 窗口内跨 turn 的迟到帧不发出（守卫覆盖整个链上生命周期）
+      // 二次 gen 校验（仅 accumulating）：采集 await 窗口内跨 turn 的迟到帧不发出（检查覆盖整个链上生命周期）
       if (changeSetStatus === 'accumulating' && gen !== this.turnGen) {
         console.debug(`[event-interpreter] file_changes accumulating dropped by turn-generation guard (post-await) sid=${this.sessionId}`)
         return
@@ -1231,7 +1231,7 @@ export class EventInterpreter {
    * W12-W18 过渡期本方法曾直写 SubagentsState 包装实例（applyNotify 合并终态 + 广播），
    * W18 起事件直写退役：extension 在 record 状态迁移点已 append 自描述 subagent-record
    * entry（entry_appended 主信号），本事件降级为兜底失效信号——主信号丢失（广播被拦截 /
-   * 事件流损坏）时仍触发 get_entries 重拉收敛（equivalence 混沌用例场景 5）。
+   * 事件流损坏）时仍触发 get_entries 重新拉取收敛（equivalence 混沌用例场景 5）。
    *
    * details 不再解析（customType 判定即失效条件）；customStart WS 帧由上方 'message'
    * 分支照常转发前端（BgNotifyCard 渲染不受影响）。

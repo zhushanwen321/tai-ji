@@ -100,7 +100,7 @@ function makeHarness(opts: HarnessOptions = {}) {
   let releaseGate: (() => void) | null = null
   const evictSpy = vi.fn()
   const invalidateSpy = vi.fn()
-  // 撤回信号广播腿经 deps.notifyEntryInvalidation 注入（[MF-1-7] 生产 = 组合根注册
+  // 撤回信号广播路径经 deps.notifyEntryInvalidation 注入（[MF-1-7] 生产 = 组合根注册
   // pluginService.notifyEntryInvalidation 闭包，经 SessionService setter 流转）
   const signalSpy = vi.fn()
 
@@ -259,12 +259,12 @@ describe('U4 撤回编排：happy path（⑧ 信令不污染 + ⑦ 前置）', (
     expect(h.promptCalls).toEqual([`/${TAIJI_NAV_COMMAND} e2`])
   })
 
-  it('裸 uuid 形态 targetId（U8 保号，无 u- 前缀）→ 进双通道，通道 b 末尾锚命中', async () => {
+  it('裸 uuid 形态 targetId（U8 保留原 id，无 u- 前缀）→ 进双通道，通道 b 末尾锚命中', async () => {
     const h = makeHarness({ rewind: { target: 'e2', parent: 'e1' } })
     const t = standardTree()
     h.setTree(t.entries, t.leafId)
 
-    // U8 外来条目保号：气泡/内核条目 id 为裸 uuid（无 u- 前缀），裸标记恰以裸 uuid 落盘
+    // U8 外来条目保留原 id：气泡/内核条目 id 为裸 uuid（无 u- 前缀），裸标记恰以裸 uuid 落盘
     const reply = await h.revoke(UUID_A)
 
     expect(reply).toEqual({ sessionId: SID, revoked: true, content: `帮我写个排序\n<!--taiji:msg:${UUID_A}-->` })
@@ -548,7 +548,7 @@ describe('⑦ revoking 进 hold 判定 + 与 compacting 叠加', () => {
   })
 })
 
-describe('⑧ 信令不污染（A6 单测腿：prompt 只收命令串、无标记尾附、不经内核）', () => {
+describe('⑧ 信令不污染（A6 单测路径：prompt 只收命令串、无标记尾附、不经内核）', () => {
   it('u- 形态经通道 b 定位：命令串 = TAIJI_NAV_COMMAND 拼装 + 定位出的 entryId，prompt 文本不含裸标记', async () => {
     const h = makeHarness({ rewind: { target: 'e2', parent: 'e1' } })
     h.setTree(
@@ -592,7 +592,7 @@ describe('派生态失效时序（⑥ 树回退校验通过后触发——信令
       return msg
     })
     // 失效时点的树快照（SessionRecords.invalidateDerivedState 同步触发 fire-and-forget
-    // 全量重算——重算消费调用时点的树；记录调用时点可变树状态即重算消费面）
+    // 全量重算——重算消费调用时点的树；记录调用时点可变树状态即重算消费方）
     const consumedTrees: Array<{ leafId: string | null; hasLabel: boolean }> = []
     h.invalidateSpy.mockImplementation(() => {
       consumedTrees.push({
@@ -617,7 +617,7 @@ describe('派生态失效时序（⑥ 树回退校验通过后触发——信令
   })
 })
 
-describe('撤回信号广播（插件镜像重建腿：与派生态失效恒配对，U7）', () => {
+describe('撤回信号广播（插件镜像重建路径：与派生态失效恒配对，U7）', () => {
   it('⑥′ 时点：撤回信号广播晚于信令 prompt 与 ⑥ 校验读，且与 invalidateDerivedState 成对触发', async () => {
     const h = makeHarness({ rewind: { target: 'e2', parent: 'e1' } })
     const t = standardTree()
@@ -627,13 +627,13 @@ describe('撤回信号广播（插件镜像重建腿：与派生态失效恒配�
     expect(reply).toEqual({ sessionId: SID, revoked: true, content: `帮我写个排序\n<!--taiji:msg:${UUID_A}-->` })
 
     // 时序（vi 全局单调调用序）：信号晚于信令 prompt 与 ⑥ 校验读（树回退确认后——
-    // 信令前广播 = 插件重拉仍读撤回前数据，无效重建）
+    // 信令前广播 = 插件重新拉取仍读撤回前数据，无效重建）
     expect(h.signalSpy).toHaveBeenCalledTimes(1)
     expect(h.signalSpy).toHaveBeenCalledWith(SID)
     const signalOrder = h.signalSpy.mock.invocationCallOrder[0]!
     expect(signalOrder).toBeGreaterThan(h.client.prompt.mock.invocationCallOrder[0]!)
     expect(signalOrder).toBeGreaterThan(h.client.getEntries.mock.invocationCallOrder[1]!)
-    // 恒配对：records 失效腿先行同批触发（同处 invalidateDerived 私有入口）
+    // 恒配对：records 失效路径先行同批触发（同处 invalidateDerived 私有入口）
     expect(h.invalidateSpy).toHaveBeenCalledTimes(1)
     expect(h.invalidateSpy.mock.invocationCallOrder[0]).toBeLessThan(signalOrder)
   })

@@ -12,7 +12,7 @@ import type { ServerMessage } from '@taiji/shared'
 import { subagentVirtualId, isSubagentVirtualId, extractMainSessionId } from '@taiji/shared'
 
 /** 本层旧截断阈值（256KB，已退役）——大 payload 透传用例以「超旧阈值仍有量」为形，
- *  防护语义改由下游出站守卫承担（见 describe 内注释）。 */
+ *  防护语义改由下游出站检查承担（见 describe 内注释）。 */
 const TEE_FORMER_LIMIT_BYTES = 256 * 1024
 
 function createTee() {
@@ -295,9 +295,9 @@ describe('RelayTee 隔离与放弃', () => {
 })
 
 describe('RelayTee toolResult entry 全量透传（不在此层截断）', () => {
-  // [subagent 投影丢失修复] 本层曾有 >256KB 整体替换截断——image 块/输出文本/details
+  // [subagent 派生视图丢失修复] 本层曾有 >256KB 整体替换截断——image 块/输出文本/details
   // 全丢且 reload 才恢复，与主会话 tool_call_end 帧（无此层截断）形成通道水位劈叉。
-  // 量级防护单点 = 下游出站守卫（outbound-frame-registry 已注册
+  // 量级防护单点 = 下游出站检查（outbound-frame-registry 已注册
   // session.subagentEntriesAppended：8MB 告警 + 32MB 契约保持式截断）。
 
   it('大 payload tool result（含 image 块 + details）全量透传，结构字段与内容无损', () => {

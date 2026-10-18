@@ -15,7 +15,7 @@
  * 状态机（设计 D2 表；「删除」= 记录移除）：
  * ```
  *   ——arm——▶ armed ──markInjected（受理回执）──▶ injected ──settle(kind=claim)──▶ fulfilled{outcomeSnapshot}
- *   armed ──disarmDeliveryFailed（投递失败腿）──▶ 删除（静默：无 respond、无 undelivered 计数）
+ *   armed ──disarmDeliveryFailed（投递失败路径）──▶ 删除（静默：无 respond、无 undelivered 计数）
  *   未终结 claim ──abortClaims（handleAbort 入口同步抹除）──▶ aborted ──onRespond(true)──▶ 删除
  *   未终结 ──orphanByParent（父死亡批量）/ onRespond(false)（respond 失败）──▶ orphaned（吸收态）
  *   armed·injected·fulfilled ──onSessionDeath（delete/forceQuit 汇聚点，先于杀进程）──▶ 删除
@@ -29,11 +29,11 @@
  *   若按「armed/injected 悬挂」扫描会在 TTL 后把全部存活 session 的终身 watch 销成孤儿，
  *   构造性破坏裁决2。lifetime 可被 orphan/死亡/clear 终结，其 orphaned 照常进 TTL 回收。
  * - **死亡批量即时删除**（设计 D2 死亡行新态=「删除」，无中间态）：respond 素材随返回值带出；
- *   其 respond 失败时记录已不在册，`onRespond` 记 absent 空转——残留 register 由收口腿
+ *   其 respond 失败时记录已不在册，`onRespond` 记 absent 空转——残留 register 由收尾路径
  *   （D7③）清理，与附录 C-9 口径一致。其余 respond（settle/catch-up/abort/late-watch）
  *   走统一回收：`onRespond(true)` → 删除；`onRespond(false)` → orphaned + 计数（触发器①）。
  * - **TTL 三类扫描**（设计 D7/D2 行）：① kind=claim 的 armed/injected 悬挂；② fulfilled-no-watch；
- *   ③ orphaned 达 TTL 回收（≥ 下界窗口保证杀父重启后收口腿拿得到精确 orphaned 应答）。
+ *   ③ orphaned 达 TTL 回收（≥ 下界窗口保证杀父重启后收尾路径拿得到精确 orphaned 应答）。
  *   扫描转移时 watch 已挂 → 返回 `respondOrphaned` 信号（调用方须同步 respond，防孤儿 promise）。
  *   aborted 不入扫描（bridge 契约：每条 respond 素材必回一次 onRespond；session 删除兜底清理）。
  * - **undeliveredResults**：每次转入 orphaned（任一触发器）+1，按被管理子会话 sessionId 分桶，
@@ -42,7 +42,7 @@
  *   空批不产 respond 不占号）；sessionId 不复用 + 空批不产号 ⇒ clearSession 清零安全。
  */
 
-/** TTL 下界 = 10min（设计审查条款：≥10min——保证杀父重启窗口内 orphaned 记录仍在、收口腿拿得到精确应答）。 */
+/** TTL 下界 = 10min（设计审查条款：≥10min——保证杀父重启窗口内 orphaned 记录仍在、收尾路径拿得到精确应答）。 */
 
 // ─── 词表（runtime 自持，非协议词形）────────────────────────────────────────
 
@@ -125,7 +125,7 @@ export interface SettleBatch {
   targets: RespondTarget[]
 }
 
-/** 死亡批量结果（D5 收口：同 deathSeq 同批终结）。 */
+/** 死亡批量结果（D5 收尾：同 deathSeq 同批终结）。 */
 export interface DeathBatch {
   deathSeq: number
   /** 本批终结的 kind=claim 笔数（D6：fulfills N = 同 deathSeq 的 claim 数） */
@@ -154,7 +154,7 @@ export interface OrphanBatch {
 export interface SweepResult {
   /** 本轮转入 orphaned 的记录（无 watch：仅状态转移 + 计数） */
   orphaned: ClaimView[]
-  /** 其中 watch 已挂者 → 调用方须同步 respond 结束语（extension 按 D3 例外1 静默收口） */
+  /** 其中 watch 已挂者 → 调用方须同步 respond 结束语（extension 按 D3 例外1 静默收尾） */
   respondOrphaned: RespondTarget[]
   /** orphaned 达 TTL 回收删除的记录数 */
   purged: number
@@ -175,7 +175,7 @@ export interface ClaimLedger {
   arm(p: { parentSid: string; notifyId: string; kind: ClaimKind; sessionId: string }): ArmResult
   /** 受理回执（send 路径 = delivery onSettled('delivered') 经 envelope meta；create 路径 = sendDirect 受理）。 */
   markInjected(parentSid: string, notifyId: string): boolean
-  /** 投递失败腿（sendChecked reject / sendDirect throw）：armed → 静默删除（E7：零通知零计数）。 */
+  /** 投递失败路径（sendChecked reject / sendDirect throw）：armed → 静默删除（E7：零通知零计数）。 */
   disarmDeliveryFailed(parentSid: string, notifyId: string): boolean
   /** watch 开表（单键寻址 (parentSid, notifyId)；单 watch 槽覆盖语义见 WatchRouting）。 */
   openWatch(parentSid: string, notifyId: string, watchId: string): WatchRouting
@@ -322,7 +322,7 @@ export function createClaimLedger(deps: ClaimLedgerDeps = {}): ClaimLedger {
   const isLive = (r: ClaimRecord): boolean =>
     r.state === 'armed' || r.state === 'injected' || r.state === 'fulfilled'
 
-  // ─── arm / 受理回执 / 投递失败腿 ────────────────────────────────────────
+  // ─── arm / 受理回执 / 投递失败路径 ────────────────────────────────────────
 
   function arm(p: { parentSid: string; notifyId: string; kind: ClaimKind; sessionId: string }): ArmResult {
     const key = keyOf(p.parentSid, p.notifyId)
@@ -349,7 +349,7 @@ export function createClaimLedger(deps: ClaimLedgerDeps = {}): ClaimLedger {
 
   function disarmDeliveryFailed(parentSid: string, notifyId: string): boolean {
     const r = getRecord(parentSid, notifyId)
-    if (!r || r.state !== 'armed') return false // 投递失败腿只作用于 armed（D2 表）
+    if (!r || r.state !== 'armed') return false // 投递失败路径只作用于 armed（D2 表）
     unlink(r)
     return true
   }
@@ -417,7 +417,7 @@ export function createClaimLedger(deps: ClaimLedgerDeps = {}): ClaimLedger {
         transition(r, 'aborted') // 保留至 onRespond：已终结态对迟到 watch 仍可应答、且不可被 settle 兑现
         targets.push(targetOf(r, r.watchId, { type: 'aborted' }))
       } else {
-        unlink(r) // 无 watch = 无应答对象 → 静默销账当场删除
+        unlink(r) // 无 watch = 无应答对象 → 静默关闭（当场删除）
       }
     }
     return { aborted, targets }
@@ -460,7 +460,7 @@ export function createClaimLedger(deps: ClaimLedgerDeps = {}): ClaimLedger {
 
   function onRespond(parentSid: string, notifyId: string, ok: boolean): RespondDisposition {
     const r = getRecord(parentSid, notifyId)
-    if (!r) return 'absent' // 死亡批量已删 / 已回收：无册可转（残留清理由收口腿兜底，C-9）
+    if (!r) return 'absent' // 死亡批量已删 / 已回收：无册可转（残留清理由收尾路径兜底，C-9）
     if (ok) {
       unlink(r) // respond 成功即删记录（D7 回收策略）
       return 'deleted'

@@ -14,7 +14,7 @@
  * 最小集，构造期零 fs 触点）+ 真实 SessionMessageHandler 直调 handleSessionMessage
  * （mockContext 范式仿 transport/__tests__/session-message-handler-workflow-viz.test.ts）。
  * 数据源以假 source 替身注入（复刻组合根 index.ts 的闭包形态——relay registry 句柄归
- * 组合根，registry 半的 tee 存在性路由在 relay-registry 单测面，此处覆盖 service/handler
+ * 组合根，registry 半的 tee 存在性路由在 relay-registry 单测，此处覆盖 service/handler
  * 链的路由与分支语义）。
  *
  * 运行：cd packages/runtime && npx vitest run src/services/session/__tests__/session-service-subagent-stream-state.test.ts

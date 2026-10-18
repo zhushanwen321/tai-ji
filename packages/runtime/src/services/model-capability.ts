@@ -56,7 +56,7 @@ type ThinkingLevelModelParam = Parameters<typeof getPiSupportedThinkingLevels>[0
  * 实装（0.84.1 dist/models.js）只读 reasoning + thinkingLevelMap（两级门控：!reasoning →
  * ['off']；再按 thinkingLevelMap 过滤 EXTENDED_THINKING_LEVELS）。传最小形状经
  * unknown 收窄与 scripts/diff-probe-thinking.mjs 直调同款；语义锚点由 U7 探针族
- * （pi-semantics）+ diff-probe 接线（改比对对象为本计算路径）持续守卫。
+ * （pi-semantics）+ diff-probe 接线（改比对对象为本计算路径）持续检查。
  */
 export function computeSupportedLevels(model: ModelCapabilityInput): string[] {
   return getPiSupportedThinkingLevels(model as unknown as ThinkingLevelModelParam)
@@ -67,7 +67,7 @@ export function computeSupportedLevels(model: ModelCapabilityInput): string[] {
  * 无状态直调：逐模型现调 computeSupportedLevels（微秒级纯函数，见文件头说明）。
  */
 // @data-owner #20（data-source-registry.md）：supportedLevels 唯一写入口 = 本纯函数
-// （config.providers reply 与 broadcast 两路同标，投影一次）；无缓存态故无第二写方。
+// （config.providers reply 与 broadcast 两路同标，派生视图生成一次）；无缓存态故无第二写方。
 export function attachSupportedLevels(providers: ProviderInfo[]): ProviderInfo[] {
   return providers.map(p => ({
     ...p,

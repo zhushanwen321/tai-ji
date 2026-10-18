@@ -18,7 +18,7 @@ const __dirname = dirname(fileURLToPath(import.meta.url))
 const MOCK_BOOTSTRAP = resolve(__dirname, 'fixtures/plugin-bootstrap-process.mock.cjs')
 const NOOP_ESM_LOADER = resolve(__dirname, 'fixtures/noop-esm-loader.cjs')
 
-/** disconnect 宽限注入值（生产默认 250ms 不变；配套守卫窗口 sleep 等比缩小）。 */
+/** disconnect 宽限注入值（生产默认 250ms 不变；配套检查窗口 sleep 等比缩小）。 */
 const TEST_DISCONNECT_GRACE_MS = 50
 
 function createHost(): {
@@ -141,7 +141,7 @@ describe('PluginHostProcess', () => {
     expect(crashes[0].pluginIds).toContain('crash-test')
     // R3: disconnect 先于 exit 触发 crash（IPC channel 先断），error 为两事件之一
     expect(crashes[0].error).toMatch(/exit|disconnect/)
-    // RT-6#5：crash 收口即删 processes Map——崩溃进程不再作为幽灵条目滞留（对齐
+    // RT-6#5：crash 收尾即删 processes Map——崩溃进程不再作为幽灵条目滞留（对齐
     // handleProcessCleanExit 的清理口径），只读反查路径不再命中已崩进程。
     expect(host.getProcessHandleById(processId)).toBeUndefined()
   })
@@ -162,7 +162,7 @@ describe('PluginHostProcess', () => {
 
     await waitFor(() => crashes.length >= 1)
     expect(crashes[0].error).toContain('mock fatal error')
-    // RT-6#5：crash 收口即删 processes Map（幽灵条目不再滞留，见 TC5 同款注释）
+    // RT-6#5：crash 收尾即删 processes Map（幽灵条目不再滞留，见 TC5 同款注释）
     expect(host.getProcessHandleById(processId)).toBeUndefined()
   })
 
@@ -185,7 +185,7 @@ describe('PluginHostProcess', () => {
     // rpcServer 已 unregister：invoke 应报 Worker not found
     await expect(rpc.invoke(processId, 'test.method', {})).rejects.toThrow(/not found/i)
 
-    // 等待事件传播，terminated 守卫应阻止 crash 回调（覆盖 grace 定时器到期后的形态）
+    // 等待事件传播，terminated 检查应阻止 crash 回调（覆盖 grace 定时器到期后的形态）
     await new Promise((resolve) => setTimeout(resolve, TEST_DISCONNECT_GRACE_MS + 50))
     expect(crashes.length).toBe(0)
   })
@@ -225,7 +225,7 @@ describe('PluginHostProcess', () => {
     expect(host.getProcessHandleById('trusted-1')).toBeUndefined()
   })
 
-  // ── TC11: 崩溃回调幂等守卫 ───────────────────────────────────
+  // ── TC11: 崩溃回调幂等检查 ───────────────────────────────────
   it('TC11: crash callback fires exactly once (idempotent guard)', async () => {
     const { host } = createHost()
     track(host)
@@ -241,8 +241,8 @@ describe('PluginHostProcess', () => {
 
     await waitFor(() => crashes.length >= 1)
 
-    // 等足够时间让后续事件（如额外 exit/disconnect）传播，守卫应阻止重复回调
-    // （sleep 覆盖 grace 定时器到期：到期后幂等守卫必须拦住第二次回调）
+    // 等足够时间让后续事件（如额外 exit/disconnect）传播，检查应阻止重复回调
+    // （sleep 覆盖 grace 定时器到期：到期后幂等检查必须拦住第二次回调）
     await new Promise((resolve) => setTimeout(resolve, TEST_DISCONNECT_GRACE_MS + 50))
     expect(crashes.length).toBe(1)
   })
@@ -271,7 +271,7 @@ describe('PluginHostProcess', () => {
     handle.postMessage({ type: 'fatalThenExit' })
 
     await waitFor(() => crashes.length >= 1)
-    // RT-6#5：crash 收口即删两处 Map（processes + processInstances）——旧 child 的监听
+    // RT-6#5：crash 收尾即删两处 Map（processes + processInstances）——旧 child 的监听
     // 已在崩溃路径摘除，迟到 exit 无法再触碰任何 handle（M6a-03 语义由 removeAllListeners
     // 承接，不再依赖 createProcess 的残留清理 lookup）。
     expect(host.getProcessHandleById(processId)).toBeUndefined()

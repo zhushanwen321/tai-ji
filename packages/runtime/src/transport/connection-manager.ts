@@ -55,7 +55,7 @@ function tokenEquals(a: string, b: string): boolean {
 }
 
 // ── 移动壳静态托管（remote-access D3/E4/E5）────────────────────────────────
-// 实现已抽至 infra/mobile-static.ts（S3 拆分：静态托管与连接生命周期是正交变化轴；
+// 实现已抽至 infra/mobile-static.ts（S3 拆分：静态托管与连接生命周期是正交变化原因；
 // 文件 IO 属 infra 领地——runtime-layering.md §2 transport 层不碰 node:fs）。
 // 开态判定（remote-access flag → dist 探测 → handler 构造）归组合根（index.ts），
 // 本模块只消费注入的 handler（见 ConnectionManagerOptions.mobileStaticHandler）。
@@ -242,7 +242,7 @@ export class ConnectionManager {
       console.error('[runtime] unhandled error in handleMessage:', err)
       // RT-1#3：兜底信封补 sessionId（裁决 7：错误消息必须可归属 session）——server 主漏斗
       // 二次抛（error envelope 发送失败）落到这里时，缺 sessionId 的信封会让前端按
-      // session 隔离规则丢弃该错误。可选链提取 + typeof 守卫（畸形帧 payload 不可信）。
+      // session 隔离规则丢弃该错误。可选链提取 + typeof 检查（畸形帧 payload 不可信）。
       const rawSessionId = (msg.payload as { sessionId?: unknown } | undefined)?.sessionId
       const details = typeof rawSessionId === 'string' && rawSessionId ? { sessionId: rawSessionId } : undefined
       try {
@@ -322,7 +322,7 @@ export class ConnectionManager {
   /**
    * 关闭：清理全部计时器 + 优雅关闭全部存量 WS 连接 + 关闭 WS / HTTP。
    *
-   * [A4 挂死根修]（2026-09-12，crash-forensics Gate B A4 复验）：旧实现直接
+   * [A4 挂死从根源修复]（2026-09-12，crash-forensics Gate B A4 复验）：旧实现直接
    * `httpServer.close(callback)` 等回调——Node 语义是回调在**全部存量连接结束**后才触发，
    * 而本服务 ws 库 8.21 以 external-server 模式（`{ server }` 注入）创建，其 `close()`
    * 对存量连接只摘 upgrade 监听、不主动关闭（websocket-server.js 的 noServer||server
@@ -331,7 +331,7 @@ export class ConnectionManager {
    * 连接保持、无人发 close 帧 → close 回调永不触发 → shutdown 序列停在 conn.stop →
    * runtime 不退出（退出码 86 不可达）→ LivenessMonitor 3 连败判死强杀，计划内零退避
    * 路径退化成崩溃退避。SIGTERM 全 app 退出路径 renderer 进程先亡、连接随之断开，缺陷
-   * 因此从未暴露。根修 = 服务端主动逐连接发 close 帧（滚动重启后 renderer 重连新 runtime
+   * 因此从未暴露。从根源修复 = 服务端主动逐连接发 close 帧（滚动重启后 renderer 重连新 runtime
    * 正是设计预期恢复路径，ws-client 对任意 close 码统一走 scheduleReconnect）。
    */
   async stop(): Promise<void> {

@@ -4,7 +4,7 @@
  * G5「失效机制故障可自愈」：watcher 熔断后现状「冻结到重启」——兜底定时器按固定周期
  * （FALLBACK_RESCAN_INTERVAL_MS = 5min）无条件重扫 globalCache + 全部活跃 projectCache cwd：
  *  - F1: watcher 正常 → 兜底周期到也重扫（无条件重扫语义）；值未变不广播（广播链下游 =
- *        reloadOrchestrator 全量 idle session pi reload + renderer 重拉，无差别周期广播违背
+ *        reloadOrchestrator 全量 idle session pi reload + renderer 重新拉取，无差别周期广播违背
  *        「watcher 正常时兜底成本可忽略」的设计成本口径）
  *  - F2: watcher 熔断 → 兜底周期内重扫收敛、新 skill 出现在列表并经 onChange 广播（A6 单测化）
  *  - F3: 熔断 → 兜底 → 再熔断循环不发散（扫描次数线性、定时器不累积、通知只随值变化、
@@ -133,7 +133,7 @@ describe('skillRegistry 周期兜底重扫（U2 / cache-governance G5）', () =>
     expect(callsWith('')).toBe(2)
     expect(callsWith(cwd)).toBe(2)
     // 值未变不广播：onChange 下游 = reloadOrchestrator（global 通知 = 全量 idle session pi reload）
-    // + renderer 失效重拉，无差别周期广播违背「watcher 正常时兜底成本可忽略」
+    // + renderer 失效重新拉取，无差别周期广播违背「watcher 正常时兜底成本可忽略」
     expect(onChangeSpy).not.toHaveBeenCalled()
     expect(vi.getTimerCount()).toBe(1)
   })

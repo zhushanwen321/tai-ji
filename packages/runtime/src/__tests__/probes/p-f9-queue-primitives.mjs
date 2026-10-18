@@ -184,7 +184,7 @@ async function main() {
       // turn_end 边沿立即 steer（settling 窗口 = turn_end..agent_settled）
       await rpc('steer', { message: settleSteer })
       const settled2 = await waitEvent('agent_settled', turnEnd.idx, 30_000)
-      check(!!settled2, 'settling 窗口已闭合（agent_settled 到达）')
+      check(!!settled2, 'settling 窗口已封闭（agent_settled 到达）')
       await sleep(1500) // 观察窗：settling 之后是否有 drain
       const stateAfterSettle = await rpc('get_state', {})
       const pendingAfterSettle = stateAfterSettle.data?.pendingMessageCount

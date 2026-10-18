@@ -14,7 +14,7 @@
  *   3. 删 session-reader 导出物（<agentDir>/tmp/session-view-<sid>.md，A21）。
  *   4. 删后台任务 registry 目录（<agentDir>/base-tool-enhance/<sid>/，A23）——
  *      先 await 收殓（幂等双跑：removeSessionEntry 已 fire-and-forget 挂过一次，
- *      此处显式 await 收口在途收殓，防删目录与终态写入竞态）再 rmSync。触发面
+ *      此处显式 await 收尾在途收殓，防删目录与终态写入竞态）再 rmSync。触发面
  *      天然收窄到真删除路径（restore 清场等 session 存活路径不经本模块，E8）。
  *   5. trash 主文件（rejection 原样上抛——G4：trash 失败必须让删除整体报失败，
  *      此时下挂已清、本体还在，重试删除即达终态）。
@@ -107,7 +107,7 @@ export type SessionContentCascadeInput = {
   sessionsRoot: string
   /**
    * active 分支语义：true = 主文件已不存在时整体零动作（现行 purgeActiveSessionFile
-   * 守卫「外部已删则整体零动作」）；false = scanned 分支语义（主文件不存在仍清孤儿
+   * 检查「外部已删则整体零动作」）；false = scanned 分支语义（主文件不存在仍清孤儿
    * sidecar，A21/A23 照清——session-view 与后台任务目录不依赖主文件内容）。
    */
   skipIfMainFileMissing: boolean
@@ -198,7 +198,7 @@ export async function cascadeDeleteSessionContent(
   // 4. A21：session-reader 导出物（主会话的；子代理的在各族内顺带删）
   removeSessionViewExport(join(agentDir, SESSION_VIEW_TMP_DIRNAME, `session-view-${sessionId}.md`), failures, deps.warn)
 
-  // 5. A23：后台任务 registry 目录（先收殓后删目录——收口在途收殓，防竞态）
+  // 5. A23：后台任务 registry 目录（先收殓后删目录——收尾在途收殓，防竞态）
   await removeBackgroundTaskRegistryDir(agentDir, sessionId, deps)
 
   // 6. trash 主文件（rejection 上抛：下挂已清、本体还在的可恢复形态）
@@ -255,7 +255,7 @@ function collectSubagentFamilyCandidates(
 }
 
 /**
- * 单行 → subagent-record 候选（type/customType/classify 逐层守卫；非命中返回 null）。
+ * 单行 → subagent-record 候选（type/customType/classify 逐层检查；非命中返回 null）。
  * 坏 id / 坏 sessionFile（白名单外 / 树外）丢弃该项并 console.warn（不可信源字段，
  * 对齐 session-records.ts 的 sessionFile 树内校验先例）。
  */
@@ -534,7 +534,7 @@ function removeSessionViewExport(
 /**
  * A23：后台任务 registry 目录删除（`<agentDir>/base-tool-enhance/<sessionId>/`）。
  * 先 await 收殓（removeSessionEntry 汇聚点已 fire-and-forget 过一次，此处幂等双跑
- * 收口「杀进程 + 写 orphaned 终态」的在途执行——目录删除先于收殓完成会让终态写入
+ * 收尾「杀进程 + 写 orphaned 终态」的在途执行——目录删除先于收殓完成会让终态写入
  * 撞已删目录），再整目录 rmSync（recursive + force，与既有目录级联同幂等形态）。
  * 收殓失败不阻断目录删除（进程已被杀，残留条目无属主；失败出声）。
  */
@@ -561,7 +561,7 @@ async function removeBackgroundTaskRegistryDir(
   }
 }
 
-// ── 守卫 helpers ──────────────────────────────────────────────────────────────
+// ── 检查 helpers ──────────────────────────────────────────────────────────────
 
 /** child 是否严格落在 parent 树内（resolve 归一 + 同前缀 + 非自身；session-records.ts 同式先例）。 */
 function isStrictlyUnder(parent: string, child: string): boolean {

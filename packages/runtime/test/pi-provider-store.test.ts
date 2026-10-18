@@ -183,7 +183,7 @@ describe('pi-provider-store — models.json', () => {
       expect(def).toBeNull() // 无其他有 model 的 provider
     })
 
-    it('partial upsert（无 models 键）保留 defaultProvider/defaultModel（spec §8 OAuth 守卫）', () => {
+    it('partial upsert（无 models 键）保留 defaultProvider/defaultModel（spec §8 OAuth 检查）', () => {
       // builtin override-only provider：models.json 条目本无 models 数组（models undefined），
       // 模拟 clearApiKey 剥离 apiKey / quota 覆写 / QuickSetup 保存不携带 models 的真实场景。
       writeModels({
@@ -197,7 +197,7 @@ describe('pi-provider-store — models.json', () => {
 
       const outcome = upsertProvider('anthropic', { name: 'Anthropic', apiKey: 'sk-test-2' })
 
-      // 守卫契约：models 未参与本次更新 → 不触碰 settings 的 default，无 newDefault 回退
+      // 检查契约：models 未参与本次更新 → 不触碰 settings 的 default，无 newDefault 回退
       expect(outcome).toEqual({})
       const settings = readSettings()
       expect(settings.defaultProvider).toBe('anthropic')

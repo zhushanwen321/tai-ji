@@ -67,7 +67,7 @@ const BYTES_PER_KB = 1024
 const DEFAULT_MAX_FILE_MB = 50
 const MAX_FILE_BYTES = Number(process.env.TAIJI_LOG_MAX_BYTES) || DEFAULT_MAX_FILE_MB * BYTES_PER_KB * BYTES_PER_KB
 /**
- * pi tee 单文件 size 轮转阈值（crash-forensics §3.3 D7：50MB 上限，收口 198MB 实证）。
+ * pi tee 单文件 size 轮转阈值（crash-forensics §3.3 D7：50MB 上限，收尾 198MB 实证）。
  * [dev-0.9.17 合并] pi tee 与主日志共用 MAX_FILE_BYTES（TAIJI_LOG_MAX_BYTES env 单旋钮），
  * 无独立阈值常量——u9 的 opts.maxBytes 注入面与 PI_TEE_MAX_FILE_BYTES 已随 .1.gz
  * gzip 实现取代而删除（裁决见 crash-forensics impl-plan §7 v5）。
@@ -135,7 +135,7 @@ const openPiStreams = new Set<PiStreamState>()
  * openPiStreams 摘除。每个 pi spawn（主 session / withEphemeralPi / relay subagent /
  * crash log）各注册一条，原实现唯一清理点是 runtime 退出的 closeLogger——长跑进程内
  * Set 随工作流强度无界增长（~0.5-2KB/条，两组审计独立发现）。摘除条件三合一（全满足才删）：
- * - ended：写入已终止（write 第一道守卫），不再有新数据进流；
+ * - ended：写入已终止（write 第一道检查），不再有新数据进流；
  * - 无在途轮转：轮转续体可能重开新流回放 pending 行（rotatePiStream），窗口内摘除会让
  *   closeLogger 漏等回放流；
  * - 无存活流（undefined 或 destroyed）：'close' 事件即 fd 已释放、缓冲全量落盘——
@@ -639,14 +639,14 @@ export const MEMORY_WATERMARK_INTERVAL_MS = WATERMARK_INTERVAL_MINUTES * SECONDS
 //
 // 设计 D1：既有水位 5min 定时器处聚合，自然日窗口一条（rss/heapUsed min/max/avg +
 // coverage 起止戳，评估器条件 #4/#5 数据源，coverage<50% 由评估器降权）；明细 5min 行
-// 仍只进 runtime-*.log 不进台账。**钩子位置的事实依据**：水位定时器本体在组合根
+// 仍只进 runtime-*.log 不进 journal。**钩子位置的事实依据**：水位定时器本体在组合根
 // index.ts startMemoryWatermarkTimer，其每拍回调恰调用本模块 formatMemoryWatermarkLine
 // 一次（唯一生产消费点）——聚合钩子挂该函数即「既有 5min 水位定时器处」，采样链迁移
 // 时钩子必须随迁。**日内重启处置（D1 原文）**：聚合态在本模块内存、重启即清零——重启
 // 后从进程内首个样本起算当日剩余窗口，coverage 戳随条目落盘；当日未完结不写（只写
 // 完整窗口）。**依赖方向（循环依赖破除后单向）**：本模块 import crash-journal
 // （getCrashJournal），crash-journal 不反向 import logger——其留痕出口经组合根
-// initCrashJournal(dataDir, logger) 注入；台账单例未初始化时 getCrashJournal 返回
+// initCrashJournal(dataDir, logger) 注入；journal 单例未初始化时 getCrashJournal 返回
 // no-op（crash-journal 契约）。
 
 /** 单个自然日窗口的水位聚合态（模块内存态，重启清零——D1 日内重启处置）。 */
@@ -669,7 +669,7 @@ let watermarkDailyAcc: WatermarkDailyAccumulator | undefined
 
 /**
  * 记录一个水位样本进自然日聚合窗口；检测到日翻转时先把**已完结的前一日窗口**写进
- * 崩溃台账（event=watermark-daily）再开新窗口。now 缺省当前时刻，测试注入固定时刻
+ * 崩溃 journal（event=watermark-daily）再开新窗口。now 缺省当前时刻，测试注入固定时刻
  * 控制日翻转（真实 IO 不与 fake timers 交互——writer 是真实异步流）。
  */
 export function recordWatermarkDailySample(sample: MemoryWatermarkSample, now: Date = new Date()): void {
@@ -701,12 +701,12 @@ export function recordWatermarkDailySample(sample: MemoryWatermarkSample, now: D
 }
 
 /**
- * 把一个已完结的自然日窗口写成一条 watermark-daily 台账事件。字段映射（schema 无统计
+ * 把一个已完结的自然日窗口写成一条 watermark-daily journal 事件。字段映射（schema 无统计
  * 专字段）：顶层 rss/heapUsed = 当日**平均值**（评估器趋势判定主形态）；min/max 与
- * coverage 起止戳内嵌 detailDigest（JSON，百字节级 ≪ 2KB 上限）。台账未初始化（no-op
+ * coverage 起止戳内嵌 detailDigest（JSON，百字节级 ≪ 2KB 上限）。journal 未初始化（no-op
  * 单例）时窗口数据丢弃——no-sink 窗口不伪装成已落盘（与「重启清零」同语义）。
  *
- * **digest 键名契约（d2 评估器消费面）**：heap 族 max 键名 = `heapMax`（非 `heapUsedMax`）——
+ * **digest 键名契约（d2 评估器消费方）**：heap 族 max 键名 = `heapMax`（非 `heapUsedMax`）——
  * 评估器 extractWatermarkSample（apps/electron/main/diagnostics/trigger-evaluator.ts）
  * 对 #4「回收态存量致水位不回落」取 `digest.heapMax` 为当日 heap 峰值，缺失则回退顶层
  * `heapUsed`（当日**平均**）。键名不齐时趋势判定会静默退化为均值口径（无错误、无告警），
@@ -832,7 +832,7 @@ function createPiStreamWriter(file: string): PiSessionLog {
           pushPendingPiLine(state, data, bytes)
           return
         }
-        // 写入前守卫（审查 W30 Fix-9）：writableEnded = end() 已调、flush 未完（正常被
+        // 写入前检查（审查 W30 Fix-9）：writableEnded = end() 已调、flush 未完（正常被
         // state.ended 拦截，此处防御外部直接调 stream.end() 的场景）——等同 end 语义，no-op。
         if (state.stream?.writableEnded) return
         // size 轮转（写入字节计数，与主日志同款）：达阈值 → 异步轮转，本行入队。
@@ -844,7 +844,7 @@ function createPiStreamWriter(file: string): PiSessionLog {
         // write 返回 false = 背压（缓冲堆积）。日志行量级 KB、磁盘正常不触发；慢盘时
         // 内存增长与轮转窗口 pendingLines 同源，已由容量上限兜底（审查 W30 Fix-6）。
         // ensurePiStream 惰性打开（首写开流）——勿在其前检查 state.stream（合并事故：
-        // 残留 u9 版「先显式打开再检查」的前置守卫会把首行全部丢弃且流永不打开）。
+        // 残留 u9 版「先显式打开再检查」的前置检查会把首行全部丢弃且流永不打开）。
         ensurePiStream(state).write(data)
         state.bytesWritten += bytes
       // eslint-disable-next-line taste/no-silent-catch -- pi stdout 落盘失败（磁盘满/权限）不影响 runtime 主流程；best-effort 容错

@@ -3,7 +3,7 @@
  * skill/extension 路径解析、替换系统提示词、launch preset 解析、preset + override
  * 的 client options 子集构建。原实现分居 Facade 4 方法（getSkillPaths /
  * getExtensionPaths / getReplaceSystemPrompt / getLaunchPresetOptions）与 lifecycle
- * 私有 buildPresetClientOptions，同概念域合并（消费方：lifecycle create/restore/fork
+ * 私有 buildPresetClientOptions，同业务含义域合并（消费方：lifecycle create/restore/fork
  * 三处 spawn 路径，经 ILifecycleSessionOps 委托到达——窄接口声明不变）。
  *
  * 零私有状态：全部依赖经参数传入（configStore / extensionService / configService /
@@ -68,7 +68,7 @@ export async function resolveExtensionPaths(extensionService: IExtensionService,
   try {
     return await extensionService.getExtensionPaths(cwd)
   } catch (e) {
-    // builtin staged 断链自带结构化 code，原样贯通（既有 fail-fast 语义与 handler 消费面不变）
+    // builtin staged 断链自带结构化 code，原样贯通（既有 fail-fast 语义与 handler 消费方不变）
     if (typeof e === 'object' && e !== null && (e as NodeJS.ErrnoException).code === BUILTIN_EXTENSIONS_MISSING) throw e
     // 其余装载器异常：包一层带恢复指引后 rethrow（与 BUILTIN_MISSING 同族，消息内嵌
     // 恢复动作——检查数据目录可读性 / 禁用可疑扩展后重试）

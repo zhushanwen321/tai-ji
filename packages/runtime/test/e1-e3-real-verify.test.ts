@@ -102,8 +102,8 @@ describe('E1/E3 分体系 real 层持久化（自建 fixture）', () => {
       undefined,
       undefined,
       undefined,
-      // M2fg 恒注入形态：凭据判定经 resolver 批量 sync 版（auth.json 腿指向临时目录，
-      // 恒 miss；models.json 腿经真 PiConfigStore 读 fixture）
+      // M2fg 恒注入形态：凭据判定经 resolver 批量 sync 版（auth.json 路径指向临时目录，
+      // 恒 miss；models.json 路径经真 PiConfigStore 读 fixture）
       new ProviderCredentialResolver({
         authService: { getCredential: async () => undefined },
         authStorage: new AuthStorage(join(piAgentDir, 'auth.json')),

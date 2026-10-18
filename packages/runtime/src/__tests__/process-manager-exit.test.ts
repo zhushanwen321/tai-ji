@@ -43,7 +43,7 @@ const fakeProc = {
     on: vi.fn(),
   },
   // 模拟真实进程：收到 SIGTERM/SIGKILL 后异步死亡（信号致死 → exit code null）。
-  // 让 destroySession 的 kill() 快速收口（不必等 2s SIGKILL 兜底超时）。
+  // 让 destroySession 的 kill() 快速收尾（不必等 2s SIGKILL 兜底超时）。
   kill: vi.fn((signal?: string) => {
     if (signal === 'SIGTERM' || signal === 'SIGKILL') {
       queueMicrotask(() => {

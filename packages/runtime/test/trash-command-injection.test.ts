@@ -5,7 +5,7 @@
  * 单一数组元素原样传入、不经任何 shell 解释；失败回落 osascript 同样数组参数，
  * 且 stderr 并入重抛的错误消息（不再 2>/dev/null 吞真因）。
  *
- * Mock 策略：child_process 整模块 mock（不 spawn 真实进程）+ platform 钉死
+ * Mock 策略：child_process 整模块 mock（不 spawn 真实进程）+ platform 固定
  * darwin（走 mac 分支）。buildOutboundChildEnv / logger / toErrorMessage 用
  * 真实实现（纯函数 / 未 initLogger 时 no-op，无文件系统副作用）。
  *

@@ -40,7 +40,7 @@ vi.mock('node:fs', async () => {
       if (dir.includes('disabled-ext')) {
         return JSON.stringify({ name: 'disabled-ext', version: '1.0.0' })
       }
-      // S8：畸形 name（非 string）—— resolveExtension 用 typeof 守卫 fallback 到 basename
+      // S8：畸形 name（非 string）—— resolveExtension 用 typeof 检查 fallback 到 basename
       if (dir.includes('malformed-name-ext')) {
         return JSON.stringify({ name: 123, version: '1.0.0' })
       }
@@ -159,7 +159,7 @@ describe('resolveExtensions', () => {
   it('S8: 畸形 package.json name（非 string）fallback 到 basename', () => {
     const dir = '/ext/malformed-name-ext'
     const result = resolveExtension(dir, 'user', new Set())
-    // name 字段为 number（123），typeof 守卫失败 → fallback 到 basename(dir)
+    // name 字段为 number（123），typeof 检查失败 → fallback 到 basename(dir)
     expect(result.name).toBe('malformed-name-ext')
     // basename 不是 mandatory 包 → 普通处理：未 disabled 则 loadable
     expect(result.loadable).toBe(true)

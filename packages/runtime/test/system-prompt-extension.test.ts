@@ -306,7 +306,7 @@ describe('@zhushanwen/pi-system-prompt', () => {
   })
 
   // [review 修复 R4] pi CLI 的 -nc 是 --no-context-files 的等价短形式（cli/args.ts），
-  // 守卫须双形式命中——只匹配长形式时手动以 -nc 启动 pi 的用户绕过 opt-out。
+  // 检查须双形式命中——只匹配长形式时手动以 -nc 启动 pi 的用户绕过 opt-out。
   it('-nc 短形式在 argv → 全局同样不注入，append 仍生效', async () => {
     const factory = await loadPlugin()
     writeGlobalAgents('GLOBAL_RULES')

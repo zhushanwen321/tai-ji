@@ -147,7 +147,7 @@ async function flushMicrotasks(): Promise<void> {
   for (let i = 0; i < 10; i++) await Promise.resolve()
 }
 
-/** 切换 view busy/idle（经转移原语派生，isIdle 读同源标志；u3c 单写原语收口——fixture 直写禁令对测试同样生效） */
+/** 切换 view busy/idle（经转移原语派生，isIdle 读同源标志；u3c 单写原语收尾——fixture 直写禁令对测试同样生效） */
 function setBusy(h: ReturnType<typeof makeHarness>, busy: boolean): void {
   applySessionOccupancyTransition(h.view, null, busy ? 'generating' : 'idle')
 }
@@ -157,7 +157,7 @@ beforeEach(() => {
 })
 
 afterEach(() => {
-  // ClaimLedger 内部清扫定时器收口（每 harness 一个实例，登记制统一 dispose）
+  // ClaimLedger 内部清扫定时器收尾（每 harness 一个实例，登记制统一 dispose）
   while (spawnedLedgers.length > 0) spawnedLedgers.pop()!.dispose()
   vi.useRealTimers()
 })
@@ -344,7 +344,7 @@ describe('A5-d7-sideeffects-vitest: D7 保留的置位副作用在 port.send 成
     handle.send({ payload: { kind: 'text', content: 'q' } })
     expect(h.view.isGenerating).toBe(true) // busy 本态
 
-    // settled 边沿（多源唤醒腿）+ microtask 链完成 → 投递置位
+    // settled 边沿（多源唤醒路径）+ microtask 链完成 → 投递置位
     setBusy(h, false)
     h.emitSettled()
     await flushMicrotasks()
@@ -416,7 +416,7 @@ describe('P9-accept-receipt-vitest: 受理回执（onSettled delivered → markI
     // await 返回时回执已落——比 pi stdout 上任何后续 settled 帧的处理更早（FIFO 帧序）
     expect(h.claims.getClaim('parent-1', NID)?.state).toBe('injected')
 
-    // 模拟组合根 settle 兑现腿（首个 settled 帧到达）→ 即刻兑现，无 armed 悬挂缺口
+    // 模拟组合根 settle 兑现路径（首个 settled 帧到达）→ 即刻兑现，无 armed 悬挂缺口
     const batch = h.claims.settle('s1', 'done')
     expect(batch.settleSeq).toBe(1)
     expect(batch.fulfilled).toHaveLength(1)

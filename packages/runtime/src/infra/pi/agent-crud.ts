@@ -19,7 +19,7 @@ import type { ScanSourceType } from '@taiji/shared'
  * RT-3#11 单段校验：name（用户可编辑的 agent.name||id，经
  * resources-message-handler → config-service 链路进入）必须是纯文件名——
  * basename 自等、非 `..`/`.`、不含任何路径分隔符。`../` 可越界写/删 agents
- * 目录之外的任意 *.md，写删两侧对称守卫；fileName = name[.md] 由追加后缀
+ * 目录之外的任意 *.md，写删两侧对称检查；fileName = name[.md] 由追加后缀
  * 派生，不引入分隔符，故校验 name 即覆盖 join 的实际操作数。
  */
 function assertSingleSegment(name: string): void {
@@ -65,7 +65,7 @@ export function listAgentFiles(dirs?: string[]): AgentFileEntry[] {
     try {
       files = readdirSync(rawDir).filter(f => f.endsWith('.md'))
     } catch (e) {
-      // RT-3#11 收口：目录读失败静默 continue → agent 从列表消失且零痕迹；
+      // RT-3#11 收尾：目录读失败静默 continue → agent 从列表消失且零痕迹；
       // ENOENT 是正常竞态保持安静，其余（权限等）留痕供排查
       if (!isENOENT(e)) {
         logger.warn('[agent-crud] failed to read agent directory, its agents are not listed', {
@@ -118,7 +118,7 @@ export function deleteAgentFile(name: string): boolean {
     unlinkSync(filePath)
     return true
   } catch (e) {
-    // RT-3#11 收口：裸 return false 让删除失败与「不存在」不可区分；
+    // RT-3#11 收尾：裸 return false 让删除失败与「不存在」不可区分；
     // ENOENT 竞态安静返 false，其余留痕（含路径与原因）
     if (!isENOENT(e)) {
       logger.warn('[agent-crud] failed to delete agent file', {

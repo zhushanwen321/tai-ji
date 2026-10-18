@@ -3,8 +3,8 @@
  *
  * 组合真 pi-mcp-store（路径经 setMcpStorePathForTest 重定向 mkdtemp 自建自删）+
  * fake probeRunner（防真进程 spawn），锁定 infra 组合层的缝：
- * - list 投影：空文件 = 空清单 + corruption null（§3.1 同形态）；损坏 = servers 空 +
- *   corruption 有值（S6 读侧错误态）；坏条目 configError 标注照原样投影（D4/D8③）；
+ * - list 派生视图：空文件 = 空清单 + corruption null（§3.1 同形态）；损坏 = servers 空 +
+ *   corruption 有值（S6 读侧错误态）；坏条目 configError 标注照原样映射（D4/D8③）；
  * - add：ADR-0065 verbatim 原样写入 + 写后落盘终态回读；显式 type:"streamable-http"
  *   原样落盘（§4 断言② 对齐——闭集含旧称不误拦）；重名/归并同名/name_invalid/混填
  *   拦截信封（corruption 缺省）；损坏拒入信封（corruption 携带，S6 fail-fast）；
@@ -57,13 +57,13 @@ function writeRaw(content: string): void {
 
 const STDIO_ENTRY: McpServerEntryValue = { command: 'npx', args: ['-y', 'server-filesystem', '.'] }
 
-describe('PiMcpServers.list（读投影）', () => {
+describe('PiMcpServers.list（读派生视图）', () => {
   it('文件不存在 = 空清单 + corruption null（与「文件存在但无条目」同形态，§3.1）', () => {
     const { servers, runner } = makeServers()
     expect(servers.list()).toEqual({ servers: [], corruption: null, agentDir: getPiAgentDir() })
   })
 
-  it('正常条目投影：name + value 原样 + 无 configError；filePath 来自 activePath', () => {
+  it('正常条目派生视图：name + value 原样 + 无 configError；filePath 来自 activePath', () => {
     writeRaw(JSON.stringify({ mcpServers: { fs: STDIO_ENTRY } }))
     const { servers, runner } = makeServers()
     const result = servers.list()
@@ -80,7 +80,7 @@ describe('PiMcpServers.list（读投影）', () => {
     expect(result.corruption?.corruptCopyPath).toBeNull()
   })
 
-  it('坏条目照原样投影 + configError 标注（D4 不阻塞其余条目管理，D8③）', () => {
+  it('坏条目照原样映射 + configError 标注（D4 不阻塞其余条目管理，D8③）', () => {
     writeRaw(JSON.stringify({ mcpServers: { ok: STDIO_ENTRY, bad: { description: 'no transport' } } }))
     const { servers, runner } = makeServers()
     const result = servers.list()
@@ -92,7 +92,7 @@ describe('PiMcpServers.list（读投影）', () => {
     expect(ok?.configError).toBeUndefined()
   })
 
-  it('非对象坏条目投影空对象 + configError 标注（协议对象类型边界，值以标注承载）', () => {
+  it('非对象坏条目映射为空对象 + configError 标注（协议对象类型边界，值以标注承载）', () => {
     writeRaw(JSON.stringify({ mcpServers: { weird: 'just a string' } }))
     const { servers, runner } = makeServers()
     const result = servers.list()
@@ -190,7 +190,7 @@ describe('PiMcpServers.update（外键判别分叉两语义，ADR-0065 transform
     expect(result.entry.value.type).toBeUndefined()
   })
 
-  it('含外键 entry = code 整体替换语义：外键以 entry 为准（含外键投影回写/代码模式）', () => {
+  it('含外键 entry = code 整体替换语义：外键以 entry 为准（含外键派生视图回写/代码模式）', () => {
     writeRaw(JSON.stringify({
       mcpServers: { fs: { ...STDIO_ENTRY, timeout: 30, oauth: { clientId: 'old' } } },
     }))
@@ -254,7 +254,7 @@ describe('PiMcpServers.setEnabled（启停专用操作，§3.1「写入 enabled 
     expect(JSON.parse(readFileSync(mcpPath, 'utf-8')).mcpServers.fs).toEqual(STDIO_ENTRY)
   })
 
-  it('带外键条目：外键原样保留（以锁内最新读为底，非清单旧投影）', () => {
+  it('带外键条目：外键原样保留（以锁内最新读为底，非清单旧派生视图）', () => {
     writeRaw(JSON.stringify({
       mcpServers: { fs: { url: 'https://example.com', type: 'http', timeout: 5, oauth: { clientId: 'c1' } } },
     }))

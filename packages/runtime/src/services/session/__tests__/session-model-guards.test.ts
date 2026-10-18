@@ -1,6 +1,6 @@
 /**
  * session-model-guards 三谓词直测（MF-4-2）：`Model not found` 三型分型的两判 +
- * 激活上界 env 解析。此前仅经消费面（session-model-control）注入 mock 间接覆盖，
+ * 激活上界 env 解析。此前仅经消费方（session-model-control）注入 mock 间接覆盖，
  * 谓词本体分支从未被测试执行——本文件直测分支矩阵：
  *
  * - isModelInRegistry：null configService fail-open / provider 缺失 / model 缺失 /
@@ -24,7 +24,7 @@ interface ProviderStub {
 
 /**
  * 最小 configService stub——只实装被测函数消费的 listProviders()。
- * IConfigService 是大型接口，测试只注入单一依赖面（与消费面测试的注入风格一致）。
+ * IConfigService 是大型接口，测试只注入单一依赖面（与消费方测试的注入风格一致）。
  */
 function makeConfigService(
   providers: ProviderStub[],
@@ -35,7 +35,7 @@ function makeConfigService(
   } as unknown as IConfigService
 }
 
-/** console.warn spy 集中管理（fail-open 腿断言有痕 + 不污染测试输出）。 */
+/** console.warn spy 集中管理（fail-open 路径断言有痕 + 不污染测试输出）。 */
 let warnSpy: ReturnType<typeof vi.spyOn> | undefined
 
 afterEach(() => {

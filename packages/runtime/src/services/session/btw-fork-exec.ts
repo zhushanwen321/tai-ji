@@ -93,7 +93,7 @@ export type BtwSourceState =
  * 结构（content item `toolResult.toolCallId` / message role toolResult 的
  * `toolCallId` 字段），判定只影响 pill 标注不影响 fork 内容（fork 逐字节复制）。
  *
- * 分解件（metrics-gate 复杂度偿还）：单 entry 形状守卫归 asPiMessageEntry、单
+ * 分解件（metrics-gate 复杂度偿还）：单 entry 形状检查归 asPiMessageEntry、单
  * content item 判定归 collectContentItemIds，本函数只做两集合收集与差集判定。
  */
 export function hasDanglingToolCall(entries: readonly unknown[]): boolean {
@@ -107,7 +107,7 @@ interface DanglingCheckMessage {
   content?: unknown
 }
 
-/** entry 形状守卫：非 message entry / message 非对象 → undefined（判定面外，跳过）。 */
+/** entry 形状检查：非 message entry / message 非对象 → undefined（判定面外，跳过）。 */
 function asPiMessageEntry(raw: unknown): DanglingCheckMessage | undefined {
   if (typeof raw !== 'object' || raw === null) return undefined
   const entry = raw as { type?: string; message?: DanglingCheckMessage | null }
@@ -143,11 +143,11 @@ function collectToolCallIds(entries: readonly unknown[]): { callIds: Set<string>
 }
 
 /**
- * 检查 fork 源状态（D3 分支② 判定；语义对齐 pi `forkFrom` 守卫——缺失/空/无 header
+ * 检查 fork 源状态（D3 分支② 判定；语义对齐 pi `forkFrom` 检查——缺失/空/无 header
  * 即不可 fork——并**更严**一档：header-only（零非 header entry）也判不可用，构造性
  * 杜绝「空上下文线」击穿 G2；pi 对 header-only 会产出空快照文件，宿主前置拦截）。
- * pi 守卫与 header-only 行为断言登记 PS-51（verifiedWith 以 pi-semantics.json 为准，
- * 逐 claim 行号见该条目 piAnchor：forkFrom 守卫 throw / append 循环
+ * pi 检查与 header-only 行为断言登记 PS-51（verifiedWith 以 pi-semantics.json 为准，
+ * 逐 claim 行号见该条目 piAnchor：forkFrom 检查 throw / append 循环
  * 对 header-only 源零 append 仍产出文件），durable 探针 = btw-pi-fork-semantics.test.ts。
  * 读侧容忍尾部半行（append 中读到未写完的行直接丢弃，不整文件判废）。
  */

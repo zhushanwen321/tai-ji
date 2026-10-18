@@ -1,15 +1,15 @@
 /**
- * workflow 步骤视图合并投影测试（W0 / 设计 workflow-step-visibility-data-source
+ * workflow 步骤视图合并派生视图测试（W0 / 设计 workflow-step-visibility-data-source
  * D2 R1-R3 / D4 / D5）。
  *
  * 覆盖（验收对齐设计 §4 与 U2 单测清单；entry 契约 = v2 registered/settled 两条小条目
  * ——v2 条目不承载 trace/agentCalls，其供源在 run journal fold，故 entry 载 trace 的
- * 冷热 fixture 对拍随 v1 快照兼容层删除，对应项改由 journal 投影面承载）：
+ * 冷热 fixture 对拍随 v1 快照兼容层删除，对应项改由 journal 派生视图承载）：
  * 1. 合并矩阵全形态：trace 独有 / record 独有 / 双有 / 一键多 record 收敛（双 running
- *    tiebreak + 僵尸 running × 新 attempt 终态，设计检查点③）/ 无 stepIndex 守卫 /
+ *    tiebreak + 僵尸 running × 新 attempt 终态，设计检查点③）/ 无 stepIndex 检查 /
  *    跨 run 桶隔离 / 幂等；
  * 2. R1 两态→四态映射矩阵 13 值域逐行（StopReason 全枚举，含中断族三值与兜底行）；
- * 3. subagent-record v2 条目 → SubagentRecord 身份域投影（parentRunId/stepIndex/origin）；
+ * 3. subagent-record v2 条目 → SubagentRecord 身份域派生视图（parentRunId/stepIndex/origin）；
  * 4. 水位信号：steps / 步骤状态序列变化触发信号、同值重放去重 + V10 信号量上界
  *    （4-agent run 信号条数 ≤ 迁移波次数）；
  * 5. V9 重试三段序列（设计 §4.1 V9）：同一 (parentRunId, stepIndex) 键下 attempt1
@@ -32,7 +32,7 @@ import type { IProcessManager, IPiEngine } from '../../ports/pi-engine.js'
 import type { ISessionStore } from '../../ports/session.js'
 import type { SubagentRecord, WorkflowAgentCall, WorkflowRunRecord } from '@taiji/shared'
 
-// ── fixture 构造（手造 entry / 投影对象，U1 透传链无关——parentRunId 已在现行 entry）──
+// ── fixture 构造（手造 entry / 派生视图对象，U1 透传链无关——parentRunId 已在现行 entry）──
 
 /** SubagentRecord 直构（合并函数单元输入；必填字段最小化 + overrides）。 */
 function rec(overrides: Partial<SubagentRecord> & Pick<SubagentRecord, 'subagentId'>): SubagentRecord {
@@ -76,7 +76,7 @@ function traceCall(id: number, overrides: Partial<WorkflowAgentCall> = {}): Work
  * `[...subagentRecordEntry({ ... })]`。
  *
  * 身份字段缺省值：agent/slug/task 造数据；rootSessionId 缺省 's1' = SessionRecords
- * harness 的会话 id（journal 投影按 rootSessionId === sessionId 过滤注册条目）；
+ * harness 的会话 id（journal 派生视图按 rootSessionId === sessionId 过滤注册条目）；
  * origin 缺省 'tool'；depth 0；startedAt 缺省 0。overrides 里未识别的键（parentRunId/
  * stepIndex/origin/rootSessionId/agent/slug/task/parentRecordId/depth/startedAt）进
  * 注册条目；终态键（stopReason/outcome/error/endedAt/turns/totalTokens/model/
@@ -204,11 +204,11 @@ function workflowRecordEntry(
 // ── 1. 合并矩阵全形态 ─────────────────────────────────────────────────────
 
 describe('合并矩阵全形态（D2 R2/R3）', () => {
-  it('trace 独有（无有效候选——候选集空 / 同 run 候选全被守卫排除）：骨架行维持原样，record 原对象引用保持', () => {
+  it('trace 独有（无有效候选——候选集空 / 同 run 候选全被检查排除）：骨架行维持原样，record 原对象引用保持', () => {
     const record = wf([traceCall(0, { status: 'done', phase: 'R1' })])
     // 形态一：候选集空（派发前置失败早退路径——无 record 产生）
     expect(mergeWorkflowStepRecords([record], [])[0]).toBe(record)
-    // 形态二：候选存在但全部无 stepIndex（守卫排除后 run 无有效候选）——trace-only 视图
+    // 形态二：候选存在但全部无 stepIndex（检查排除后 run 无有效候选）——trace-only 视图
     const guarded = [rec({ subagentId: 'sa-legacy', parentRunId: 'run-1', stepIndex: undefined, status: 'idle', stopReason: 'completed' })]
     const merged = mergeWorkflowStepRecords([record], guarded)
     expect(merged[0]).toBe(record)
@@ -268,7 +268,7 @@ describe('合并矩阵全形态（D2 R2/R3）', () => {
     expect(row.turns).toBe(8)
     expect(row.inputTokens).toBe(10) // record 只有 totalTokens 总量，input/output 拆分保留 trace
     expect(row.outputTokens).toBe(5)
-    expect(row.lastProgressAt).toBe(900) // calls[] 投影保留 trace
+    expect(row.lastProgressAt).toBe(900) // calls[] 派生视图保留 trace
   })
 
   it('一键多 record 收敛——多条 running 取 startedAt 最新（rebuildRuntime 瞬态 tiebreak）', () => {
@@ -314,7 +314,7 @@ describe('合并矩阵全形态（D2 R2/R3）', () => {
     expect(merged.agentCalls[0]!.sessionId).toBe('sa-zombie')
   })
 
-  it('无 stepIndex 守卫：record 有 parentRunId 但无 stepIndex（旧 session entry）不成行', () => {
+  it('无 stepIndex 检查：record 有 parentRunId 但无 stepIndex（旧 session entry）不成行', () => {
     const record = wf([])
     const candidates = [
       rec({
@@ -404,10 +404,10 @@ describe('R1 两态→四态映射矩阵（D2 R1，StopReason 13 值域逐行）
   })
 })
 
-// ── 3. 提取器投影透出（P2：v2 条目 data 已有，投影透出）───────────────────
+// ── 3. 提取器派生视图透出（P2：v2 条目 data 已有，派生视图透出）───────────────────
 
-describe('subagent-extractor 投影透出 workflow 身份域', () => {
-  it('subagent-record v2 注册条目的 parentRunId / stepIndex / origin 投影进 SubagentRecord', () => {
+describe('subagent-extractor 派生视图透出 workflow 身份域', () => {
+  it('subagent-record v2 注册条目的 parentRunId / stepIndex / origin 映射进 SubagentRecord', () => {
     const entries = [
       ...subagentRecordEntry({
         id: 'sa-wf-1', origin: 'workflow', parentRunId: 'run-x', stepIndex: 2,
@@ -421,7 +421,7 @@ describe('subagent-extractor 投影透出 workflow 身份域', () => {
     expect(records[0]!.origin).toBe('workflow')
   })
 
-  it('无 workflow 身份域字段（tool 来源）投影归一 undefined（零迁移读侧容忍）', () => {
+  it('无 workflow 身份域字段（tool 来源）映射归一 undefined（零迁移读侧容忍）', () => {
     const records = scanSubagentEntries([...subagentRecordEntry({ id: 'sa-old', status: 'idle', stopReason: 'completed' })])
     expect(records[0]!.parentRunId).toBeUndefined()
     expect(records[0]!.stepIndex).toBeUndefined()

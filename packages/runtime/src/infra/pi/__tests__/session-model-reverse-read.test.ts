@@ -282,7 +282,7 @@ describe('U7 语义切换锚定：sidecar 不再是读取来源（U8 后 readMod
 // ════════════════════════════════════════════════════════════════════
 // fixture = 真实 pi 文件形态：首行 header（有 id 无 parentId，pi getEntries() 排除、
 // 文件直读包含——trimFileEntriesToActivePath 剥离后才不触发 computeActivePathEntries
-// 单根守卫降级）+ 带 id/parentId 链的 entries。撤回形态 = 被撤子树按文件序先于 label 锚。
+// 单根检查降级）+ 带 id/parentId 链的 entries。撤回形态 = 被撤子树按文件序先于 label 锚。
 
 describe('U6d 活跃路径逆读：分支下旧子树 model_change 不命中', () => {
   /** 带树链的行（真实 pi entry 均有 id；parentId 指向当时叶子）。 */

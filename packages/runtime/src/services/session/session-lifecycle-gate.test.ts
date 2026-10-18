@@ -45,7 +45,7 @@ function makeFakeAdapter(): IEventAdapter {
  * S2 ISP 化（设计 §4.2 场景 B 主验收点）：svc 结构性满足 lifecycle 窄接口，svc stub 强转彻底消失。
  * S3 写点归位：initializeManagedSession 从 svc stub 移除（接口已删）——注册走真
  * registerSession（sessions Map 所有权在 lifecycle），装配依赖经 registerDeps 注入
- * fake adapterFactory；svc stub 面收窄为 10 方法 = 现接口实际消费面。
+ * fake adapterFactory；svc stub 面收窄为 10 方法 = 现接口实际消费方。
  */
 function makeEnv() {
   const svc: ILifecycleSessionOps = {
@@ -257,7 +257,7 @@ describe('SessionLifecycle × migration gate（D8-3）', () => {
   })
 })
 
-describe('SessionLifecycle.delete（W19：sidecar 四后缀全家族清理，W11 观察项收口）', () => {
+describe('SessionLifecycle.delete（W19：sidecar 四后缀全家族清理，W11 观察项收尾）', () => {
   it('active 与 scanned 两分支都 unlink .meta/.preset/.project/.handoff 全部四后缀', async () => {
     const { lifecycle, svc, sessionStore } = makeEnv()
     const suffixes = ['.meta.json', '.preset.json', '.project.json', '.handoff.json']

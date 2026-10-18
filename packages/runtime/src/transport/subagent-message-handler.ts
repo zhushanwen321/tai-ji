@@ -9,7 +9,7 @@
  * 错误按设计 §5.2 分型：gateway 分型错误（e.code 透传）经本 handler catch →
  * ctx.sendError 显式带 sessionId（gateway.resolveSessionId 解析——subagent.setModel
  * payload 无 sessionId 字段，而会话隔离红线要求错误信封必带；全局 catch 只透传
- * payload.sessionId，覆盖不了本域，故 catch 收口在本 handler）。
+ * payload.sessionId，覆盖不了本域，故 catch 收尾在本 handler）。
  */
 import type { WebSocket as WsType } from 'ws'
 import type { ClientMessage, ClientMessageType } from '@taiji/shared'
@@ -41,7 +41,7 @@ export class SubagentMessageHandler {
   }
 
   /**
-   * subagent.setModel：目标二选一守卫 → 宿主 setModel → reply 回执（应答三形态
+   * subagent.setModel：目标二选一检查 → 宿主 setModel → reply 回执（应答三形态
    * 原样透传——应答值是唯一权威，handler 不改写）；失败经 catch → sendError 带
    * sessionId。回执写状态在前端（禁乐观写），handler 不广播显示态。
    */

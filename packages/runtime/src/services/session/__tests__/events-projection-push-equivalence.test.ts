@@ -4,7 +4,7 @@
  * ① 推送-补读等价性：同一事件序列下「纯推送喂入 ≡ 推送+缺口补读混合喂入 ≡
  *    纯文件冷读」——派生视图（合并快照）终态逐字段一致（对齐 apply-entry-equivalence
  *    范式：喂入源换轨后派生视图终态不变）。run / record 两域各一组。
- * ② 断连收敛：pi 进程死亡（推送通道终结）→ 重开 session → 新投影 attach() 冷读
+ * ② 断连收敛：pi 进程死亡（推送通道终结）→ 重开 session → 新派生视图 attach() 冷读
  *    收敛到与推送喂入一致的终态（journal 是磁盘事实源，冷读 = 恢复读）。
  * ③ 终局条目补读触发（设计 §3.3 终局一致性 / D6）：终态条目（entry 通道）在场而
  *    推送丢失终局事件行 → recompute 判定「fold 落后于条目通道」→ 一次补读收敛。
@@ -207,7 +207,7 @@ describe('推送-补读等价性（喂入源换轨，派生视图终态不变）
 // ── ② 断连收敛 ────────────────────────────────────────────────
 
 describe('断连收敛（pi 进程死亡 → 重开 session → 冷读收敛）', () => {
-  it('推送喂入中断后丢失的增量，由重开投影的 attach() 冷读收敛到同一终态', () => {
+  it('推送喂入中断后丢失的增量，由重开派生视图的 attach() 冷读收敛到同一终态', () => {
     const events = runSequence()
     const world = makeWorld('reconnect')
     try {
@@ -219,10 +219,10 @@ describe('断连收敛（pi 进程死亡 → 重开 session → 冷读收敛）'
         expect(liveProjection.applyJournalReport(report('run', 'wf-1', [event]))).toBe(true)
       }
       const liveAtDeath = liveProjection.workflows.get('wf-1')
-      expect(liveAtDeath).toMatchObject({ status: 'running' }) // 中断窗口：步骤 1 在飞
+      expect(liveAtDeath).toMatchObject({ status: 'running' }) // 中断窗口：步骤 1 在途
       liveProjection.dispose()
 
-      // 重开 session：新投影冷读（既有进程退出链 → 恢复横幅 → 派生视图重建）
+      // 重开 session：新派生视图冷读（既有进程退出链 → 恢复横幅 → 派生视图重建）
       const reopened = makeProjection(world)
       reopened.applyEntryBatch([workflowRegisteredEntry])
       reopened.attach()
@@ -246,7 +246,7 @@ describe('断连收敛（pi 进程死亡 → 重开 session → 冷读收敛）'
 // ── ③ 终局条目补读触发 ────────────────────────────────────────
 
 describe('终局条目补读触发（D6：entry 通道晚于 fold → 一次补读收敛）', () => {
-  it('run 域：run-settled 推送丢失且无后续事件 → 终态条目到达触发补读，run 投影翻 done', () => {
+  it('run 域：run-settled 推送丢失且无后续事件 → 终态条目到达触发补读，run 派生视图翻 done', () => {
     const events = runSequence()
     const world = makeWorld('final-run')
     try {
@@ -282,7 +282,7 @@ describe('终局条目补读触发（D6：entry 通道晚于 fold → 一次补�
     }
   })
 
-  it('record 域：record-settled 推送丢失 → 终态条目到达触发补读，subagent 投影翻 idle', () => {
+  it('record 域：record-settled 推送丢失 → 终态条目到达触发补读，subagent 派生视图翻 idle', () => {
     const events = recordSequence('sa-1')
     const world = makeWorld('final-record')
     try {

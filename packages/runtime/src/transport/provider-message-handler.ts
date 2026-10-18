@@ -4,7 +4,7 @@
  *
  * Extracted from settings-message-handler.ts to reduce file size（该文件同类先例：
  * config-preferences-message-handler.ts 同款 class + handle() switch 形态；case 体自
- * 原文件逐一原样迁移，行为保持）。本域共享编排收口：reconcileDefaultModelAfterProviderChange
+ * 原文件逐一原样迁移，行为保持）。本域共享编排收尾：reconcileDefaultModelAfterProviderChange
  * （defaultModel 对账广播）+ broadcastProviderList（provider 列表变更广播）。
  *
  * handle() 是纯路由器（查表 type → 私有方法，case 体逐一原样迁入 handleXxx 私有
@@ -25,7 +25,7 @@ import { attachSupportedLevelsSafe } from './message-broker.js'
  * wasFixed:true 时写回 settings.json）。config.defaults 广播收敛在本 helper 内一次，消除 5 handler
  * 各自编排的遗漏根因（applyImportProviders 曾漏维护，commit cd41254ba 局部补）。
  *
- * broadcastProviderList 不在此收口（决策 D3：语义正交——provider 列表变更 vs defaultModel 对账；
+ * broadcastProviderList 不在此收尾（决策 D3：语义正交——provider 列表变更 vs defaultModel 对账；
  * 且 applyImport 只成功时广播、其它总广播，留各 handler 更清晰）。
  */
 function reconcileDefaultModelAfterProviderChange(
@@ -38,7 +38,7 @@ function reconcileDefaultModelAfterProviderChange(
   // source 用 shared DefaultModelSource 联合的合法成员，按调用场景映射
   //（provider-updated=增改/启停/导入，provider-deleted=删除），由本参数的类型在调用点
   // 强制校验。ServerMessage 大联合实例化下 type/payload 联动约束仍缺失（broadcast 非
-  // 泛型，无法在此钉死单一消息类型），但 source 参数已把非法字面量挡在编译期。
+  // 泛型，无法在此固定为单一消息类型），但 source 参数已把非法字面量挡在编译期。
   ctx.broadcast({
     type: 'config.defaults',
     id: ctx.nextPushId(),

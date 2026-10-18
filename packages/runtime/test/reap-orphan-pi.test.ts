@@ -1,5 +1,5 @@
 /**
- * reapOrphanPiProcesses 收殓状态机定向测试（CRAP 靶子：killOrphan）。
+ * reapOrphanPiProcesses 收殓状态机定向测试（CRAP 检查清单：killOrphan）。
  *
  * 全依赖注入设计（listProcesses / signal / readSpawnMarkers /
  * readProcessStartTime 均可替换），零真实进程、零真实等待、零真实 fs。覆盖

@@ -32,7 +32,7 @@ export class McpMessageHandler {
     switch (msg.type) {
       case 'mcp.list': {
         // 清单读（§3.1 打开时拉取一次）：读以文件为准——损坏 → servers 空 + corruption
-        // 有值（S6 损坏提示渲染数据源），文件不存在 = 空清单同形态；坏条目照原样投影
+        // 有值（S6 损坏提示渲染数据源），文件不存在 = 空清单同形态；坏条目照原样派生视图
         // 带 configError 标注（D4）。
         const result = this.ctx.mcpServersService.list()
         this.ctx.reply(ws, msg.id, 'mcp.list:result', result)
@@ -56,7 +56,7 @@ export class McpMessageHandler {
       }
       case 'mcp.setEnabled': {
         // 启停（§3.1「写入 enabled 字段」最小语义）：专用操作仅翻转 enabled 键、不带
-        // 清单投影回写（D2 丢失窗口保持锁内亚秒级），reply entry = 写后落盘终态。
+        // 清单派生视图回写（D2 丢失窗口保持锁内亚秒级），reply entry = 写后落盘终态。
         const { name, enabled } = msg.payload
         const result = this.ctx.mcpServersService.setEnabled(name, enabled)
         this.ctx.reply(ws, msg.id, 'mcp.setEnabled:result', result)

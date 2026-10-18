@@ -12,7 +12,7 @@ import { deriveClosedDisplay } from '@taiji/shared'
  * idle + stopReason/closedReason 展示位合成（D5「legacy 值映射」，chatMode 形态位
  * 已随 modeless 波4 字段消亡删除），renderer 永不见 legacy 值。
  *
- * runtime 的 subagent-extractor（磁盘路径：自描述 entry 投影 + legacy toolResult 配对
+ * runtime 的 subagent-extractor（磁盘路径：自描述 entry 派生 + legacy toolResult 配对
  * 路径）共用此函数，避免多处手写映射漂移（历史 bug：event-interpreter 的三元缺
  * completed/crashed 归一）。
  *
@@ -33,7 +33,7 @@ export interface NormalizedSubagentStatus {
    * 桥接第五归一不合成——存量 entry 自带 A-lite 展示位（completed/failed）。
    */
   derivedStopReason?: string
-  /** legacy closed 归一保留的 L2 诊断位（SubagentRecord.closedReason 下行，§3.2.9 台账第 1 条另行退役） */
+  /** legacy closed 归一保留的 L2 诊断位（SubagentRecord.closedReason 下行，§3.2.9 登记第 1 条另行退役） */
   derivedClosedReason?: string
 }
 
@@ -56,7 +56,7 @@ function closedDisplayToStopReason(display: 'done' | 'failed' | 'cancelled'): st
   return display === 'done' ? 'completed' : display
 }
 
-/** 占用族（running/pending/active——pi 各出口命名不一致的历史堆叠，语义等价「有任务在飞」） */
+/** 占用族（running/pending/active——pi 各出口命名不一致的历史堆叠，语义等价「有任务在途」） */
 const OCCUPIED_STATUSES: ReadonlySet<string> = new Set(['running', 'pending', 'active'])
 
 /** legacy 终态查表描述：stopReason 直投值。 */
@@ -87,7 +87,7 @@ export function normalizeSubagentStatus(
 ): NormalizedSubagentStatus {
   if (!rawStatus) return { status: 'running' }
   if (OCCUPIED_STATUSES.has(rawStatus)) return normalizeOccupiedStatus(opts)
-  // [U8 / 永久会话模型 §3.2.2] 两态新词直投：idle = 无任务在飞可续聊（entry
+  // [U8 / 永久会话模型 §3.2.2] 两态新词直投：idle = 无任务在途可续聊（entry
   // 写面 U2 起产出）。此前被当未知值落 closed 兜底——「空闲」被误读成终态。
   if (rawStatus === 'idle') return { status: 'idle' }
   const legacy = LEGACY_TERMINAL_MAP.get(rawStatus)

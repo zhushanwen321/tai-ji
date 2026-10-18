@@ -1,5 +1,5 @@
 /**
- * MF-1: initSandbox 的 process 守卫测试（process.kill 封堵 + process.ppid 屏蔽）。
+ * MF-1: initSandbox 的 process 检查测试（process.kill 封堵 + process.ppid 屏蔽）。
  *
  * R2 审查发现 MF-2（process.kill/process.ppid DoS 防护）发布时零测试覆盖。initSandbox
  * 修改全局 process 对象，无法在 vitest worker 内安全 in-process 调用（污染所有后续测试，
@@ -60,7 +60,7 @@ function runFixture(): Promise<GuardResult> {
   })
 }
 
-describe('MF-1: initSandbox process 守卫（process.kill / process.ppid）', () => {
+describe('MF-1: initSandbox process 检查（process.kill / process.ppid）', () => {
   // 临时 tsconfig 生命周期 = describe 级（mkdtemp 自建自删，测试红线）
   beforeAll(() => {
     tsxTsconfig = createTsxPathsTsconfig()

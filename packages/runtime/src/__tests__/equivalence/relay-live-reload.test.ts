@@ -1,22 +1,22 @@
 /**
  * relay live ≡ reload 等价性断言。
  *
- * 不变量：同一 subagent 任务的 drawer 对话流，两条供数腿喂同一个 core reducer 产出全等 state——
- * - live 腿：真实 RelayTee（infra/relay/relay-tee.ts，生产 tee 翻译层）消费合成 child stdout
+ * 不变量：同一 subagent 任务的 drawer 对话流，两条供数路径喂同一个 core reducer 产出全等 state——
+ * - live 路径：真实 RelayTee（infra/relay/relay-tee.ts，生产 tee 翻译层）消费合成 child stdout
  *   字节流（pi RPC 事件 JSONL），产出的 session.subagentEntriesAppended entry 帧序列
  *   （PiToolCallEntryForm overlay 形态按 applySubagentEntries 同规则剔除，不进 reducer）
  *   → replayEntries；
- * - reload 腿：getSubagentHistory pi 直读链的转换尾段 getHistoryFromFilePath
+ * - reload 路径：getSubagentHistory pi 直读链的转换尾段 getHistoryFromFilePath
  *   （parseJsonl + filterObjectEntries + mapSessionEntries + convertPiHistory，session-service.ts
  *   直读分支同款）→ Message[]。
  *
  * 断言形态对齐同目录 live-reload.test.ts（W21 store 级同构）——差异只在数据来源免真实 LLM：
- * 两腿 fixture 由同一逻辑会话常量派生（「同一任务」的结构性保证），stdout 事件序列 ≡ JSONL
+ * 两路径 fixture 由同一逻辑会话常量派生（「同一任务」的结构性保证），stdout 事件序列 ≡ JSONL
  * 追加顺序的协议依据与主对话流相同（message_end 是持久化唯一触发点，event-adapter.ts W5 注释）。
  *
  * 归一化口径（物理差异非实现差异）：fixture JSONL entry 不写顶层 id——pi 在 emit message_end
  * **之后**才 appendMessage 分配 uuidv7（tee 侧结构性拿不到，live-reload.test.ts 因此剥 reload 侧
- * id），此处不写 id 使两腿 deriveBaseId 走同一 `e<N>` 派生；消息体 timestamp 两腿同源，
+ * id），此处不写 id 使两路径 deriveBaseId 走同一 `e<N>` 派生；消息体 timestamp 两路径同源，
  * toolResult 回填不落时间戳字段，无其他归一点。
  *
  * 运行：cd packages/runtime && npx vitest run src/__tests__/equivalence/relay-live-reload.test.ts
@@ -37,7 +37,7 @@ const MAIN_SID = 's-eq-relay-main'
 const RECORD_ID = 'rec-eq-relay-1'
 const VIRTUAL_ID = subagentVirtualId(MAIN_SID, RECORD_ID)
 
-// ── 同一 subagent 任务的逻辑会话（两腿 fixture 的唯一事实源）──────────────────
+// ── 同一 subagent 任务的逻辑会话（两路径 fixture 的唯一事实源）──────────────────
 //
 // 两轮形态覆盖续聊轮（R1 根因场景）+ 工具调用全链（R2：assistant 带 toolCall →
 // toolResult 回填 → 总结 assistant），usage/fileChanges 提取路径随消息体两侧同源透传。
@@ -70,7 +70,7 @@ const CONVERSATION = {
   },
 } as const
 
-/** 逻辑会话 → pi session JSONL 行（reload 腿：SessionManager._persist 形态）。 */
+/** 逻辑会话 → pi session JSONL 行（reload 路径：SessionManager._persist 形态）。 */
 function toSessionJsonlLines(): string[] {
   const c1 = CONVERSATION.round1
   const c2 = CONVERSATION.round2
@@ -113,7 +113,7 @@ function toSessionJsonlLines(): string[] {
 }
 
 /**
- * 逻辑会话 → child stdout 事件行（live 腿：pi --mode rpc 事件流，顺序 ≡ JSONL 追加顺序）。
+ * 逻辑会话 → child stdout 事件行（live 路径：pi --mode rpc 事件流，顺序 ≡ JSONL 追加顺序）。
  * 含 message_start / text_delta / toolcall_end 锚点等 tee 全管线输入；事件 wire 字段名
  * （args/result/toolCallId/isError）以 pi-protocol.ts 为准（ADR-0037）。
  */
@@ -155,7 +155,7 @@ function toChildStdoutLines(): string[] {
       result: { content: [{ type: 'text', text: c1.toolResult.text }], details: null },
     }),
     // pi 对同一 toolResult 双发（R2-S1，chaos real-pi 同证）：message_end 携带持久化权威
-    // timestamp（与 JSONL 腿同源 1200）。live 侧 endTime 经 U3 last-wins 收敛为权威值 ≡ reload；
+    // timestamp（与 JSONL 路径同源 1200）。live 侧 endTime 经 U3 last-wins 收敛为权威值 ≡ reload；
     // 缺此帧则 live endTime = 客户端时钟（Gate A 实测漂移源）
     JSON.stringify({
       type: 'message_end',
@@ -191,7 +191,7 @@ describe('equivalence: relay live ≡ reload（tee entry 帧 × getSubagentHisto
   })
 
   it('tee entry 帧序列 replayEntries 产出 == JSONL 直读链产出（messages deep equal + reducer 确定性）', async () => {
-    // ── live 腿：真实 RelayTee 消费合成 stdout → 收集两种 WS 帧 ──
+    // ── live 路径：真实 RelayTee 消费合成 stdout → 收集两种 WS 帧 ──
     const frames: Array<{ sessionId: string; msg: ServerMessage }> = []
     const tee = new RelayTee({
       mainSessionId: MAIN_SID,
@@ -204,7 +204,7 @@ describe('equivalence: relay live ≡ reload（tee entry 帧 × getSubagentHisto
       (f): f is { sessionId: string; msg: ServerMessage & { payload: { entries: unknown[] } } } =>
         f.msg.type === 'session.subagentEntriesAppended',
     )
-    // 非空守卫（防 0 == 0 空转）：8 帧各 1 entry = 6 条 message（user×2 / assistant×3 /
+    // 非空检查（防 0 == 0 空转）：8 帧各 1 entry = 6 条 message（user×2 / assistant×3 /
     // toolResult×1，R2-S1 双发含 message_end 权威帧）+ 1 条 toolCall overlay form。overlay
     // form 是 tool_execution_start 的 UI running 态载体（timestamp 运行时生成非确定值），
     // 不进 reducer 不变量——下方 liveEntries 按 applySubagentEntries 同规则剔除，此处只
@@ -267,7 +267,7 @@ describe('equivalence: relay live ≡ reload（tee entry 帧 × getSubagentHisto
     expect(liveEntries).toHaveLength(7)
     const liveState = replayEntries(liveEntries)
 
-    // ── reload 腿：getSubagentHistory pi 直读链尾段（JSONL fixtures 驱动）──
+    // ── reload 路径：getSubagentHistory pi 直读链尾段（JSONL fixtures 驱动）──
     dir = await mkdtemp(join(tmpdir(), 'relay-equiv-'))
     const filePath = join(dir, 'subagent-session.jsonl')
     await writeFile(filePath, toSessionJsonlLines().join('\n') + '\n', 'utf-8')
@@ -279,7 +279,7 @@ describe('equivalence: relay live ≡ reload（tee entry 帧 × getSubagentHisto
     // reducer 确定性（chaos 不变量 0 同款）：同一 live 序列两次重放全等
     expect(replayEntries(liveEntries)).toEqual(liveState)
 
-    // 结构守卫：工具链路完整回填（非孤儿）、五条投影消息角色序符合两轮形态
+    // 结构检查：工具链路完整回填（非孤儿）、五条派生视图消息角色序符合两轮形态
     expect(liveState.orphanToolResults).toHaveLength(0)
     expect(reloadMessages.map((m) => m.role)).toEqual(['user', 'assistant', 'assistant', 'user', 'assistant'])
     const withTool = reloadMessages[1]

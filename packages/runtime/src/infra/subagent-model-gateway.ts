@@ -177,7 +177,7 @@ function mapChatReplyToWireReply(reply: Record<string, unknown>): SubagentSetMod
 }
 
 /**
- * scope:workflow-run aggregate → wire 聚合应答（结构等价投影：core
+ * scope:workflow-run aggregate → wire 聚合应答（结构等价派生视图：core
  * RunSwitchAggregateResult ≡ wire SubagentSetModelAggregateReply，形状 SSOT 注释在
  * core types.ts；「两处漂移由 U1 接线测试对账」的映射点即此处）。failures[].reason
  * 两侧同为开放值域（已知三型 ∪ 词表外透传码——透传不筛选不归一，对账锚 =
@@ -481,7 +481,7 @@ export function createSubagentModelSwitchGateway(deps: SubagentModelGatewayDeps)
           // 首个命中会把请求路由到非归属会话的 pi 进程，宿主归属校验拒绝）。
           return readEventsRootSessionId(eventsFile, 'record-created') === s.id
         } catch {
-          return false // 非法 record id = 白名单拒绝 = 未命中（守卫读面不抛）
+          return false // 非法 record id = 白名单拒绝 = 未命中（检查读面不抛）
         }
       })
     }

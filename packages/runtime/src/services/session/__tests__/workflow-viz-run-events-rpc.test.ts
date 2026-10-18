@@ -13,7 +13,7 @@
  * - session.getWorkflowDag：错误码四形态全枚举（parse_failed / no_script_source /
  *   record_not_found / path_rejected）+ runId 内存缓存仅缓存成功结果（失败不缓存故
  *   parse_failed 可重试；成功缓存命中不再读盘）+ 缓存 LRU 上界 5（第 6 个 run 逐出
- *   最旧——被逐出者重拉读盘、最近者仍缓存命中）。
+ *   最旧——被逐出者重新拉取读盘、最近者仍缓存命中）。
  *
  * 测试写删目标 = mkdtemp tmp 自建自删（红线：vitest guard）；getPiAgentDir 经 vi.mock
  * 指向 tmp（路径白名单判定域 = tmp，path_rejected 用 recordPath 落 tmp 外构造）。
@@ -75,14 +75,14 @@ function overThresholdText(pad = 'x'): string {
 const DAG_SCRIPT = [
   'phase("review")',
   'parallel([',
-  // 可区分 label：同 phase 无名调用点（双 '*'）会被解析器按不可区分调用点合并收口，
+  // 可区分 label：同 phase 无名调用点（双 '*'）会被解析器按不可区分调用点合并收尾，
   // 本测试锚定通道透传形态而非解析器语义（合并在 parser 单测覆盖）
   '  () => agent("reviewer-security", { prompt: "sec", label: "security" }),',
   '  () => agent("reviewer-perf", { prompt: "perf", label: "perf" }),',
   '])',
 ].join('\n')
 
-/** 单调用点脚本（1 节点）——LRU 淘汰测试里换脚本观察「重拉读盘 vs 缓存命中」。 */
+/** 单调用点脚本（1 节点）——LRU 淘汰测试里换脚本观察「重新拉取读盘 vs 缓存命中」。 */
 const SOLO_SCRIPT = 'agent("solo-agent", { prompt: "x" })'
 
 /** 写 run journal fixture（覆盖式；行 = core 事件 JSONL）。 */
@@ -286,7 +286,7 @@ describe('session.getWorkflowDag（§3.1-5 DAG 透出通道）', () => {
     expect(reply2).toHaveProperty('dag')
   })
 
-  it('dagCache LRU 上界 5：第 6 个 run 逐出最旧——被逐出者改盘重拉生效，最近者改盘仍命中旧缓存', async () => {
+  it('dagCache LRU 上界 5：第 6 个 run 逐出最旧——被逐出者改盘重新拉取生效，最近者改盘仍命中旧缓存', async () => {
     const RUNS = ['run-1', 'run-2', 'run-3', 'run-4', 'run-5', 'run-6']
     const recordOf = (rid: string): string => join(dir, 'workflow-state', `${rid}.record.jsonl`)
     const writeSoloJournal = (rid: string): void => {
@@ -306,12 +306,12 @@ describe('session.getWorkflowDag（§3.1-5 DAG 透出通道）', () => {
       const reply = await records.getWorkflowDag(SID, rid)
       expect(reply).toHaveProperty('dag')
     }
-    // run-6（最近使用）仍缓存命中：改盘换脚本后重拉返回旧缓存（2 节点，不读盘）
+    // run-6（最近使用）仍缓存命中：改盘换脚本后重新拉取返回旧缓存（2 节点，不读盘）
     writeSoloJournal('run-6')
     const hitReply = await records.getWorkflowDag(SID, 'run-6')
     if (!('dag' in hitReply)) throw new Error('expected success arm')
     expect(hitReply.dag.nodes).toHaveLength(2)
-    // run-1（最旧、已被 run-6 挤出上界）重拉重新读盘解析：新脚本 1 节点生效
+    // run-1（最旧、已被 run-6 挤出上界）重新拉取重新读盘解析：新脚本 1 节点生效
     writeSoloJournal('run-1')
     const evictedReply = await records.getWorkflowDag(SID, 'run-1')
     if (!('dag' in evictedReply)) throw new Error('expected success arm')

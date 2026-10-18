@@ -320,7 +320,7 @@ describe('u2 对账器三分处置（D3）', () => {
 })
 
 // ── 假标记字面量身份判据（MF-1-1 B2 判据收敛 + MF-2-1 尾附锚收窄） ──────────────
-// 两轮判据收敛的回归面：① MF-1-1 把宽松手写 BARE_MARKER_RE（`[^>]*` 任意内容）收敛为
+// 两轮判据收敛的回归测试：① MF-1-1 把宽松手写 BARE_MARKER_RE（`[^>]*` 任意内容）收敛为
 // SSOT 双形态（uuid / m-），非合法形态不再构成投递身份；② MF-2-1 把 rebuild 判定锚从
 // 「全文提取 id」收窄为「出站尾附锚」（原文文末精确 endsWith——msg-pipeline-debloat
 // D5-3/P5 口径统一后不再 trimEnd）——文本中部/前部的合法形态标记字面量（用户从
@@ -463,7 +463,7 @@ describe('u2 错误分类迁移（D6）', () => {
     const h = makeHarness({ promptError: new Error(PI_PROCESSING_MSG) })
     h.registry.submit('s1', { content: '幽灵空闲撞墙', clientUuid: 'u-aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa' })
     await h.flush()
-    // occupancy 不伪造 busy：turn 保持 idle（markDispatchingIfIdle 置位后经 reject-other 收口）
+    // occupancy 不伪造 busy：turn 保持 idle（markDispatchingIfIdle 置位后经 reject-other 收尾）
     expect(h.view.occupancy?.turn).toBe('idle')
     expect(h.view.isGenerating).toBe(false)
     // 首败即停：条目移出内核（不留幽灵）+ message.error 广播可见 + 零重试
@@ -914,16 +914,16 @@ describe('in-flight 撤销二段式归宿（dmg-r1-2）：意图集持有至兑�
   })
 })
 
-// ── 缺陷修复回归④（dmg-r1-4）：合批分段中途失败只对未受理段走失败面 ───────────
+// ── 缺陷修复回归④（dmg-r1-4）：合批分段中途失败只对未受理段走失败路径 ───────────
 // 缺陷：批 [A,B] 中 A 段已受理进 pi 后 B 段失败 → port.send 整体 reject → 内核对 A、B
 // 全部 reject + removeActive + 广播「消息投递失败」——A 实际已进 transcript，重开 session
 // 后与失败提示矛盾（信号失真）。修复 = 逐段受理登记（confirmAccepted）：已受理段转
-// in-flight 出批留守（等回执/对账），仅未受理段走失败面。
+// in-flight 出批留守（等回执/对账），仅未受理段走失败路径。
 
-describe('合批分段中途失败（dmg-r1-4）：已受理段留守，失败面只落未受理段', () => {
+describe('合批分段中途失败（dmg-r1-4）：已受理段留守，失败路径只落未受理段', () => {
   it('三段批 [A 挂起受理 | B 成功 | C 失败]：A、B in-flight 留守，C 入口即拦 + 单条失败广播', async () => {
     const h = makeHarness()
-    // prompt 序列：首次挂起（拉住 A 段在途，让 B、C 挂账成同批）、二次成功（B）、三次失败（C）
+    // prompt 序列：首次挂起（拉住 A 段在途，让 B、C 挂起成同批）、二次成功（B）、三次失败（C）
     let resolveFirstPrompt: (() => void) | undefined
     h.client.prompt.mockImplementation(async (text: string) => {
       h.promptCalls.push([text, undefined, undefined])
@@ -939,18 +939,18 @@ describe('合批分段中途失败（dmg-r1-4）：已受理段留守，失败�
     const idB = 'u-d4000002-0000-4000-8000-000000000002'
     const idC = 'u-d4000003-0000-4000-8000-000000000003'
     h.registry.submit('s1', { content: '段A', clientUuid: idA }) // 批[A] 在途（prompt 挂起）
-    h.registry.submit('s1', { content: '段B', clientUuid: idB }) // checked 挂账
-    h.registry.submit('s1', { content: '段C', clientUuid: idC }) // checked 挂账
+    h.registry.submit('s1', { content: '段B', clientUuid: idB }) // checked 挂起
+    h.registry.submit('s1', { content: '段C', clientUuid: idC }) // checked 挂起
     await h.flush()
     expect(h.promptCalls).toHaveLength(1)
 
-    // A 段受理成功 → confirmAccepted 出批留守 → pump 把挂账的 B、C 锁成同批
+    // A 段受理成功 → confirmAccepted 出批留守 → pump 把挂起的 B、C 锁成同批
     resolveFirstPrompt!()
     await h.flush()
     expect(h.promptCalls).toHaveLength(3) // B 成功 + C 失败
     await h.flush()
 
-    // 失败面只落 C：单条广播（修复前：A 的 waiter 同被 reject → 2 条误报）
+    // 失败路径只落 C：单条广播（修复前：A 的 waiter 同被 reject → 2 条误报）
     const errors = h.published.filter((m) => m.type === 'message.error')
     expect(errors).toHaveLength(1)
     expect(errors[0]).toMatchObject({

@@ -8,25 +8,25 @@
  *     → EventAdapter.handleEntryAppended（翻译 record-entry-appended）
  *     → EventInterpreter.handleConversationEvent → onRecordEntriesInvalidated
  *     → SessionRecords.invalidateRecordEntries（防抖 SCALAR_STATE_DEBOUNCE_MS）
- *     → refreshRecordEntries（getEntries 全量，cursor=null 首拉）
+ *     → refreshRecordEntries（getEntries 全量，cursor=null 首次拉取）
  *     → applyRecordEntries → mergePlanState → publishRecordChanges
  *     → MessageBus.publish（state 类 typeKey='plan'：stateSnapshot 覆盖 + 定向推送订阅 ws）
  *
  * 真机证据锚点（排障会话已核实，此处以测试固化语义防回归）：
  * - pi stdout tee：/plan command handler 的 appendEntry 同步 _emit entry_appended
  *   （agent-session.js bindCore appendEntry：appendCustomEntry 后立即广播，无 turn 边界延迟）；
- * - W18 防抖 300ms 后的 getEntries 首拉返回全量 entries 含 plan-state（cursor 随 leafId 推进，
+ * - W18 防抖 300ms 后的 getEntries 首次拉取返回全量 entries 含 plan-state（cursor 随 leafId 推进，
  *   后续 15s 对账 sweep 全走增量——tee rpc_14→rpc_17 链）。
  *
- * 两个用例分别锁定「实时腿」（订阅在发布前建立，帧经 broadcastText 直达）与
- * 「恢复腿」（发布早于订阅，帧经 subscribe 应答 stateSnapshot 回放——切走再切回/
+ * 两个用例分别锁定「实时路径」（订阅在发布前建立，帧经 broadcastText 直达）与
+ * 「恢复路径」（发布早于订阅，帧经 subscribe 应答 stateSnapshot 回放——切走再切回/
  * 断连重连的恢复语义）。
  *
- * 第四用例锁定「空投黑洞机制」（2026-09-24 真机会话 01a0d509 形态 B 判定固化）：
- * publish 时无订阅者 → 水位照样推进（u0 校准：publish 调用完成即推进）→ 15s 定时腿与
- * agent_settled 腿 diff 恒空不补发 → 帧仅经 subscribe stateSnapshot 恢复。该形态下
- * 黑洞持续 = 设计内（对账腿只覆盖「merge 已对、publish 跳丢」，空投靠快照兜底），
- * 恢复触发点全在消费侧（重连/切回的重订阅）——本用例把这一判定钉死，防止后续把
+ * 第四用例锁定「丢弃且不补发机制」（2026-09-24 真机会话 01a0d509 形态 B 判定固化）：
+ * publish 时无订阅者 → 水位照样推进（u0 校准：publish 调用完成即推进）→ 15s 定时路径与
+ * agent_settled 路径 diff 恒空不补发 → 帧仅经 subscribe stateSnapshot 恢复。该形态下
+ * 黑洞持续 = 设计内（对账路径只覆盖「merge 已对、publish 跳丢」，丢弃靠快照兜底），
+ * 恢复触发点全在消费侧（重连/切回的重订阅）——本用例把这一判定固定为，防止后续把
  * 水位语义改掉时无测试显形。
  *
  * 运行：cd packages/runtime && npx vitest run src/services/session/__tests__/plan-state-first-entry-frame.test.ts
@@ -51,7 +51,7 @@ function piEntryAppendedEvent(customType: string, data: Record<string, unknown>)
   }
 }
 
-/** 首 plan-state entry 的 data（真机 fixture 投影：/plan 进入 planning 态）。 */
+/** 首 plan-state entry 的 data（真机 fixture 派生视图：/plan 进入 planning 态）。 */
 const PLAN_ENTRY_DATA: Record<string, unknown> = {
   isActive: true,
   planFilePath: '/tmp/taiji-plan/theme/plan.md',
@@ -62,7 +62,7 @@ const PLAN_ENTRY_DATA: Record<string, unknown> = {
   state: 'planning',
 }
 
-/** get_entries 全量响应（cursor=null 首拉形态：entries + leafId）。 */
+/** get_entries 全量响应（cursor=null 首次拉取形态：entries + leafId）。 */
 function getEntriesResponse(entries: unknown[], leafId: string): Record<string, unknown> {
   return { data: { entries, leafId } }
 }
@@ -88,7 +88,7 @@ function makePipeline(entriesForFirstPull: unknown[], leafId = 'leaf-1') {
       }
     },
     // 按生产 cursor 三路径分流：无参（cursor=null 全量）返回 fixture；带 since（增量）
-    // 返回空批——对账腿的稳态形态（真机 15s sweep 空增量 rpc 同形）。
+    // 返回空批——对账路径的稳态形态（真机 15s sweep 空增量 rpc 同形）。
     getEntries: vi.fn(async (since?: string) =>
       since === undefined ? getEntriesResponse(entriesForFirstPull, leafId) : { data: { entries: [], leafId } },
     ),
@@ -133,7 +133,7 @@ describe('全链：首个 plan-state entry → session.planState 帧及时发布
   beforeEach(() => { vi.useFakeTimers() })
   afterEach(() => { vi.useRealTimers() })
 
-  it('实时腿：订阅先建立，entry_appended → 防抖 → 全量拉取 → 帧经 ws 直达（isActive:true 首帧）', async () => {
+  it('实时路径：订阅先建立，entry_appended → 防抖 → 全量拉取 → 帧经 ws 直达（isActive:true 首帧）', async () => {
     const entries = [
       { type: 'model_change', id: 'e0' },
       { type: 'thinking_level_change', id: 'e1' },
@@ -156,11 +156,11 @@ describe('全链：首个 plan-state entry → session.planState 帧及时发布
     expect(frames).toHaveLength(1)
     expect((frames[0].payload as { planState: { isActive: boolean; state: string } }).planState)
       .toMatchObject({ isActive: true, state: 'planning' })
-    // 拉取走全量（cursor=null 首拉，无 since 参数）
+    // 拉取走全量（cursor=null 首次拉取，无 since 参数）
     expect(p.client.getEntries).toHaveBeenCalledWith()
   })
 
-  it('恢复腿：帧发布早于订阅，subscribe 应答 stateSnapshot 含 plan 帧（切走再切回恢复语义）', async () => {
+  it('恢复路径：帧发布早于订阅，subscribe 应答 stateSnapshot 含 plan 帧（切走再切回恢复语义）', async () => {
     const entries = [{ type: 'custom', customType: 'plan-state', data: PLAN_ENTRY_DATA, id: 'e-plan-1' }]
     const p = makePipeline(entries)
     p.fireRegistered('s1')
@@ -195,23 +195,23 @@ describe('全链：首个 plan-state entry → session.planState 帧及时发布
     expect(planStateFrames(p.received)).toHaveLength(1)
   })
 
-  it('空投黑洞机制（真机 01a0d509 形态 B）：无订阅者 publish 后水位推进 → 定时/settled 两腿不补发，帧仅经 subscribe 快照恢复', async () => {
+  it('丢弃且不补发机制（真机 01a0d509 形态 B）：无订阅者 publish 后水位推进 → 定时/settled 两路径不补发，帧仅经 subscribe 快照恢复', async () => {
     const entries = [{ type: 'custom', customType: 'plan-state', data: PLAN_ENTRY_DATA, id: 'e-plan-1' }]
     const p = makePipeline(entries)
     p.fireRegistered('s1')
     p.makeAdapter('s1').attach(p.client)
 
-    // renderer 订阅窗口（真机 20:09:35.89-20:18:24 订阅未建立）：publish 照常发生但空投
+    // renderer 订阅窗口（真机 20:09:35.89-20:18:24 订阅未建立）：publish 照常发生但丢弃
     p.emitPiEvent(piEntryAppendedEvent('plan-state', PLAN_ENTRY_DATA))
     await vi.advanceTimersByTimeAsync(SCALAR_STATE_DEBOUNCE_MS)
     expect(planStateFrames(p.received)).toHaveLength(0) // 无订阅者：无直推（真机 20:09:36.204）
 
-    // agent_settled 腿同样不补（publish 调用已完成，水位已推进——对账腿只覆盖 publish 跳丢形态）
+    // agent_settled 路径同样不补（publish 调用已完成，水位已推进——对账路径只覆盖 publish 跳丢形态）
     p.records.reconcileRecordEntries('s1')
     await vi.advanceTimersByTimeAsync(0)
     expect(planStateFrames(p.received)).toHaveLength(0)
 
-    // 恢复腿（真机 20:18:25.082 重连重订阅）：帧仅经 subscribe 应答 stateSnapshot 回放
+    // 恢复路径（真机 20:18:25.082 重连重订阅）：帧仅经 subscribe 应答 stateSnapshot 回放
     const sub = p.bus.subscribe('s1', p.ws)
     const snapshotFrames = planStateFrames(sub.stateSnapshot)
     expect(snapshotFrames).toHaveLength(1)

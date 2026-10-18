@@ -119,7 +119,7 @@ export function asStringArray(value: unknown, field: string): string[] {
 /**
  * 断言 value 缺省（undefined）或是 string，否则抛 `INVALID_<FIELD>`。
  *
- * 可选字段的类型守卫：缺省合法放行（undefined），present 但类型错即拒绝——
+ * 可选字段的类型检查：缺省合法放行（undefined），present 但类型错即拒绝——
  * 与 asString 的区别仅在不把「缺省」当错误。
  */
 export function asOptionalString(value: unknown, field: string): string | undefined {
@@ -136,7 +136,7 @@ export function asOptionalString(value: unknown, field: string): string | undefi
 /**
  * 断言 value 是普通对象（非 null/数组），否则抛 `INVALID_<FIELD>`。
  *
- * 嵌套结构（command / options / guiTree 条目）的第一层形状守卫；字段级校验
+ * 嵌套结构（command / options / guiTree 条目）的第一层形状检查；字段级校验
  * 由调用方在解构后用本模块其它工具继续做。
  */
 export function asRecord(value: unknown, field: string): Record<string, unknown> {

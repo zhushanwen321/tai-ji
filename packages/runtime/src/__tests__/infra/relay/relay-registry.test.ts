@@ -673,7 +673,7 @@ describe('relay server + registry（真 socket 环回 + 假 pi）', () => {
 
   // B2 subagent-stream-chunk §4.1 registry 半（getStreamStateByRecord 三分支真值表）。
   // session-service-subagent-stream-state.test.ts 以假 source 替身只覆盖 service/handler
-  // 链（其头注释声称的「registry 半的 tee 存在性路由在 relay-registry 单测面」即本用例）：
+  // 链（其头注释声称的「registry 半的 tee 存在性路由在 relay-registry 单测中」即本用例）：
   // 防串读分支（recordId 命中但 mainSessionId 不一致视同无条目）是 RPC 双键路由的安全
   // 分支，必须直测——条目结构（mainSessionId 字段/entries Map 键）重构时此处是红灯。
   // stream-open 模式假 pi 消费 text_delta 后 tee 恒处 in-flight 刻度（无 message_end），

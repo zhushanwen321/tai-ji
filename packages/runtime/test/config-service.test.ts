@@ -40,7 +40,7 @@ let configService: ConfigService
 
 /**
  * M2fg 恒注入形态：凭据判定经 resolver 批量 sync 版（D3 唯一通道）。
- * auth.json 腿指向临时目录（零凭据 miss），models.json 腿经真 configStore。
+ * auth.json 路径指向临时目录（零凭据 miss），models.json 路径经真 configStore。
  */
 function makeResolver(store: PiConfigStore): ProviderCredentialResolver {
   return new ProviderCredentialResolver({
@@ -508,7 +508,7 @@ describe('ConfigService.loadAgents · sourceType 随来源推断（W1，修复 t
 
 // ── LLM retry 域委托（llm-retry-settings 设计 §3.4：单行委托注入 port）──────────
 
-describe('ConfigService · resolver 显式守卫访问器（R2 S-1 修复契约机器锁定，R3 S-4 补测）', () => {
+describe('ConfigService · resolver 显式检查访问器（R2 S-1 修复契约机器锁定，R3 S-4 补测）', () => {
   it('两参构造 + 调 provider 三方法 → 带恢复指引的 Error（非静默成功 / 非深处 TypeError）', async () => {
     // 与上方 llmRetrySettings 未注入抛错用例同模式：少参构造 = 测试构造错误，报错指向恢复动作
     const svc = new ConfigService(tmpDir, configStore)

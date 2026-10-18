@@ -8,7 +8,7 @@
  * - 崩溃上报集成：非主动退出（triggerExit）→ crashExit 显式上报（不做自动 restore）；
  * - ②反向（A7）：forceQuit 不触发崩溃上报——事实核验（只读确认）：forceQuitSession 在
  *   message-dispatcher 手工编排，不经 pm.onSessionExit 链；真实 kill 路径的 exit 事件被
- *   双层守卫拦截（rpc-client.kill 置 _killing 跳过 exitCallback + process-manager 按
+ *   双层检查拦截（rpc-client.kill 置 _killing 跳过 exitCallback + process-manager 按
  *   clientToId 无条目拦截 intentional destroy）——本 mock 的 destroySession 与真实行为
  *   同构（仅删 Map 不触发 exitCb），故 forceQuit 后不可能产生崩溃上报；
  * - ③join：恢复窗口内并发 ensureActive 返回同一 in-flight Promise、restore 内核只
@@ -200,7 +200,7 @@ function createSetup(): Setup {
     clientMap,
     createSessionSpy,
     // 真实 process-manager 的 onExit 在回调上层前先清 processes/clientToId 条目
-    //——triggerExit 同构模拟，否则 crashExit 的 isActive 守卫读到残留 client 而错误 no-op。
+    //——triggerExit 同构模拟，否则 crashExit 的 isActive 检查读到残留 client 而错误 no-op。
     triggerExit: (sid, code, stderr = '') => {
       clientMap.delete(sid)
       exitCb?.(sid, code, stderr)

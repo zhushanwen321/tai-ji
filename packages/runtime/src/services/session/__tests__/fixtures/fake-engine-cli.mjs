@@ -115,7 +115,7 @@ rl.on('line', (line) => {
 })
 rl.on('close', () => {
   // stdin EOF = 父进程（vitest worker）已退出或管道关闭：立即自退，防孤儿泄漏
-  // （2026-09-15 实测整日累积 123 个孤儿——dispose/组杀路径覆盖不了 worker 被强杀、
+  // （2026-09-15 实测整日累积 123 个孤儿——dispose/按进程组终止路径覆盖不了 worker 被强杀、
   // 断言失败提前退出的场景）。hang 模式（READ/DISPOSE）不受影响：那些场景父进程
   // 活着、stdin 开着，close 不触发，仍由测试 SIGKILL 收尾。
   process.exit(0)

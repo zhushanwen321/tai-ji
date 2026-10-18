@@ -1,6 +1,6 @@
 /**
  * 移动壳静态托管（remote-access D3/E4/E5）——独立静态面 module（S3 拆分：原实现在
- * ConnectionManager 内，静态托管与连接生命周期是正交变化轴，抽出后 CM 只持可空
+ * ConnectionManager 内，静态托管与连接生命周期是正交变化原因，抽出后 CM 只持可空
  * handler 引用）。
  *
  * 职责边界：
@@ -92,7 +92,7 @@ export function resolveMobileStaticPath(distRoot: string, pathname: string): str
 export function resolveMobileStaticRoot(options: {
   /**
    * 远程访问开态（--remote-access flag 解析值）。false 时 mobileDist 单独出现（手工只传
-   * --mobile-dist 不开 flag）不构成开态：不探测、不日志，直接 null——开态守卫在此，
+   * --mobile-dist 不开 flag）不构成开态：不探测、不日志，直接 null——开态检查在此，
    * 组合根直传 argv 布尔，不经 remoteTokenProvider 装配痕迹推断。
    */
   remoteAccess: boolean

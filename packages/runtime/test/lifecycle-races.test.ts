@@ -3,7 +3,7 @@
  *
  * 覆盖缺陷组：
  * 1. LC-C1（并发开关错配，W2）：
- *    - pendingReplies 复合键 `${pluginId}:${op}`——activate/deactivate 并发在飞时
+ *    - pendingReplies 复合键 `${pluginId}:${op}`——activate/deactivate 并发在途时
  *      activated/deactivated 回复精确匹配各自 op 的 entry，不张冠李戴
  *    - deactivatePlugin 对 ACTIVATING 态的取消标志（激活完成 → finally 反卷停用）
  *    - loadPlugin 回复按 pluginId 匹配——同宿主并发加载 N 插件不互相消费回复
@@ -199,7 +199,7 @@ describe('生命周期竞态（lifecycle races）', () => {
   })
 
   // ── LC-C1: 复合键确定性场景（fake timers 推进验证无假超时）───────
-  it('LC-C1: pendingReplies 复合键——deactivate 与 re-activate 并发在飞时 deactivated/activated 回复各归各（fake timers 推进 30s 无假超时副作用）', async () => {
+  it('LC-C1: pendingReplies 复合键——deactivate 与 re-activate 并发在途时 deactivated/activated 回复各归各（fake timers 推进 30s 无假超时副作用）', async () => {
     vi.useFakeTimers()
     const flush = () => vi.advanceTimersByTimeAsync(0)
 
@@ -224,7 +224,7 @@ describe('生命周期竞态（lifecycle races）', () => {
     await act1
     expect(activator.getState('p')).toBe('ACTIVE')
 
-    // 2) 并发窗口：deactivate 在飞（DEACTIVATING）+ 立即重入 activate——
+    // 2) 并发窗口：deactivate 在途（DEACTIVATING）+ 立即重入 activate——
     //    旧实现两 entry 以 pluginId 单键互相覆盖，是回复错配的触发场景
     let deactDone = false
     const deact = activator.deactivatePlugin('p', scriptedHost).then(() => { deactDone = true })

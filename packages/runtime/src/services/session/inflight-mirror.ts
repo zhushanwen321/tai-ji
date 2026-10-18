@@ -52,7 +52,7 @@ export interface InFlightMirror {
   /** 声明该 session 的 extension 注入态（spawn 时刻由 u4/u5 按实际注入列表调用；唯一写方）。 */
   setInjected(sessionId: string, injected: boolean): void
   /**
-   * spawn 形态预置 0（条目建立腿之一）：新建或重置该 session 条目为 inFlight=0、
+   * spawn 形态预置 0（条目建立路径之一）：新建或重置该 session 条目为 inFlight=0、
    * hasEverReported=false。调用方 = u4/u5（新 session / respawn / reattach / lazy restore / fork，
    * 收敛为 registerSession 单挂点）。
    */

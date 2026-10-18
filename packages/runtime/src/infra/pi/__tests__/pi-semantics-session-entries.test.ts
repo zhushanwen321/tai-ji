@@ -3,17 +3,17 @@
  *
  * 登记条目（docs/pi-semantics.json）：「plain appendEntry 写入的 type=custom entry 不进
  * LLM 上下文；进上下文的是 custom_message entry（sessionEntryToContextMessages 对其余
- * 类型返回 []）」——事故 A 审查期实测；「live ≡ reload」等价性的 entry 投影依据。
+ * 类型返回 []）」——事故 A 审查期实测；「live ≡ reload」等价性的 entry 派生视图依据。
  *
  * PS-29 探针（同文件）：appendCustomEntry 落盘形态含 customType/data/timestamp——entry
  * 字面量固定六字段 {type:"custom", customType, data, id, parentId, timestamp}（data 原样
  * 引用无克隆），core 绑定 appendEntry(customType, data) 同参数序直呼委托。rename-session
- * 计量落账（usage-page-fixes §3.3 ③④）依赖该形态；pi 升级若改字段名/裁剪 data/timestamp，
+ * 计量落盘（usage-page-fixes §3.3 ③④）依赖该形态；pi 升级若改字段名/裁剪 data/timestamp，
  * scanner ④ 分类静默失效（rename 账整桶消失），由本探针拦截。
  *
  * 断言方式：静态形态断言（函数窗口内的分支清单 + 兜底 return [] + 无 plain-custom 分支；
  * PS-29 的 entry 字面量正则 + core 绑定委托链）+ 行为级断言（动态 import
- * dist/core/session-manager.js：sessionEntryToContextMessages 投影直调；SessionManager
+ * dist/core/session-manager.js：sessionEntryToContextMessages 派生函数直调；SessionManager
  * 原型桩直调 appendCustomEntry 断言落盘形态，不触真实 session 文件、零 fs 写）。dist
  * 不可达 / 动态 import 失败时 skip 不 fail；不进 REAL_PI_TESTS 分池。
  *
@@ -31,7 +31,7 @@ const SKIP_REASON = PI_DIST
   : 'node_modules/@earendil-works/pi-coding-agent/dist 不可达（cwd 上溯 6 级未命中）'
 if (!PI_DIST) console.warn(`[pi-semantics] skip：${SKIP_REASON}`)
 
-/** 行为级断言用：动态 import session-manager.js（纯投影函数 + SessionManager 类，依赖 fs/crypto/pi-ai 均可解析）。 */
+/** 行为级断言用：动态 import session-manager.js（纯映射函数 + SessionManager 类，依赖 fs/crypto/pi-ai 均可解析）。 */
 type SessionManagerModule = {
   sessionEntryToContextMessages?: (entry: Record<string, unknown>) => unknown[]
   SessionManager?: { prototype: object }
@@ -55,17 +55,17 @@ function functionWindow(text: string, header: string): string {
 }
 
 describe.skipIf(!PI_DIST)(
-  `PS-09 探针：sessionEntryToContextMessages 投影白名单（代码形态断言${SKIP_REASON ? `｜skip：${SKIP_REASON}` : ''}）`,
+  `PS-09 探针：sessionEntryToContextMessages 派生视图白名单（代码形态断言${SKIP_REASON ? `｜skip：${SKIP_REASON}` : ''}）`,
   () => {
     const src = readFileSync(join(PI_DIST as string, 'core', 'session-manager.js'), 'utf-8')
 
     it('白名单分支：message / custom_message / branch_summary / compaction，兜底 return []', () => {
       const win = functionWindow(src, 'export function sessionEntryToContextMessages(entry)')
-      expect(win, 'PS-09 漂移：sessionEntryToContextMessages 函数消失/改名——entry→上下文投影改形，复核 PS-09 锚点').not.toBe('')
+      expect(win, 'PS-09 漂移：sessionEntryToContextMessages 函数消失/改名——entry→上下文映射改形，复核 PS-09 锚点').not.toBe('')
       for (const t of ['message', 'custom_message', 'branch_summary', 'compaction']) {
         expect(
           win.includes(`entry.type === "${t}"`),
-          `PS-09 漂移：白名单分支 "${t}" 消失——投影面变化，复核 PS-09（live ≡ reload 等价性依据）`,
+          `PS-09 漂移：白名单分支 "${t}" 消失——派生视图变化，复核 PS-09（live ≡ reload 等价性依据）`,
         ).toBe(true)
       }
       expect(win.includes('return []'), 'PS-09 漂移：兜底 return [] 消失——未知类型将进上下文？复核 PS-09').toBe(true)
@@ -126,7 +126,7 @@ describe.skipIf(!PI_DIST)(
       const win = methodWindowUntil(agentSessionSrc, 'appendEntry: (customType, data) => {', 'setSessionName:')
       expect(
         win,
-        'PS-29 漂移：core 绑定 appendEntry 消失/改名——extension 落账入口改形，复核 PS-29 锚点',
+        'PS-29 漂移：core 绑定 appendEntry 消失/改名——extension 落盘入口改形，复核 PS-29 锚点',
       ).not.toBe('')
       expect(
         win.includes('this.sessionManager.appendCustomEntry(customType, data)'),

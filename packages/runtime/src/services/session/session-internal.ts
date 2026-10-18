@@ -5,8 +5,8 @@
  * （grep 'this.svc.'）拆三个窄接口——lifecycle 10 / dispatcher 6 / scanner 2 方法。
  * 跨消费者共享 2 方法（removeSessionEntry 为 lifecycle+dispatcher 共用，
  * getActiveSummaries 为 lifecycle+scanner 共用）按消费者在多个窄接口**重复声明、
- * 单一实现**——SessionService implements 三窄接口即编译期防签名漂移守卫
- * （真 ISP：每个消费者可见面 = 实际消费面）。
+ * 单一实现**——SessionService implements 三窄接口即编译期防签名漂移检查
+ * （真 ISP：每个消费者可见面 = 实际消费方）。
  *
  * 原宽接口 21 方法中 4 个不进任何窄接口：applyContextUpdate（声明于 ISessionService，
  * 组合根以具体类接线）、handleTurnUsageSideEffects / handleTurnEndSideEffects
@@ -45,7 +45,7 @@ import type { PresetResolution } from '../preset-service.js'
  * 不入本形状。
  */
 export interface IManagedSessionRecord extends IManagedSessionView {
-  /** EventAdapter 运行时句柄（pi 事件订阅唯一持有者，detach 即收口）。 */
+  /** EventAdapter 运行时句柄（pi 事件订阅唯一持有者，detach 即收尾）。 */
   adapter: IEventAdapter
 }
 
@@ -70,7 +70,7 @@ export interface ManagedSession extends IManagedSessionRecord {
   /**
    * 归属 project id 的内存态持有（D14 语义修正，2026-08-04）。
    *
-   * 与 launchPresetId 同模式：create 路径 sidecar 已放行落盘（V9-④ 根修），仅异常时序
+   * 与 launchPresetId 同模式：create 路径 sidecar 已放行落盘（V9-④ 从根源修复），仅异常时序
    * 下 .project.json 缺失，内存态兜底持有 projectId，供 forkSession 继承 / toSummary
    * 透传 / setProject 同步。
    */
@@ -78,7 +78,7 @@ export interface ManagedSession extends IManagedSessionRecord {
   /**
    * agent-managed session 标记的内存态持有（B-2）。
    *
-   * 与 launchPresetId/projectId 同模式：create 路径 sidecar 已放行落盘（V9-④ 根修），
+   * 与 launchPresetId/projectId 同模式：create 路径 sidecar 已放行落盘（V9-④ 从根源修复），
    * 仅异常时序下 .agent.json 缺失，内存态兜底持有，
    * 供 session-manager list 按 spawnSource 过滤 / toSummary 透传（前端 AI badge）。
    */
@@ -96,7 +96,7 @@ export interface ManagedSession extends IManagedSessionRecord {
 export interface ISessionRegistry {
   /** 只读查 Map（active 判定 + 元素字段读改；含 adapter 句柄）。 */
   get(sessionId: string): IManagedSessionRecord | undefined
-  /** Map 是否含此 id（销毁后防 publish 守卫 / hasSession）。 */
+  /** Map 是否含此 id（销毁后防 publish 检查 / hasSession）。 */
   has(sessionId: string): boolean
   /** 全部 session id 迭代（getActiveSessionIds）。 */
   keys(): IterableIterator<string>
@@ -124,8 +124,8 @@ export interface ISessionRegisterDeps {
  *
  * S3 写点归位（设计 D2②）：initializeManagedSession 移出本接口——注册逻辑迁入
  * SessionLifecycle.registerSession（sessions Map 所有者内部直调），lifecycle 不再
- * 经 svc 回调 Facade 完成注册（「回调 hub」引力以新形式残留的被否形态）。
- * detachSession / getSession 同理不在本接口——S3 后 lifecycle 经所有权自查收口
+ * 经 svc 回调 Facade 完成注册（「回调 hub」引力以新形式残留的不采用形态）。
+ * detachSession / getSession 同理不在本接口——S3 后 lifecycle 经所有权自查收尾
  * （this.detachSession / this.get，Registry 面），两者仅 dispatcher+组合根消费。
  *
  * 含跨消费者共享方法（重复声明、单一实现）：removeSessionEntry（dispatcher
@@ -184,7 +184,7 @@ export interface IDispatcherSessionOps {
   getSession(sessionId: string): IManagedSessionView | undefined
   /** 从 Map 删除条目（仅删条目，不 detach adapter / 不 destroy 进程）。 */
   removeSessionEntry(sessionId: string): void
-  /** Detach adapter（按 id 查 Map）。pi 事件订阅经 EventAdapter 唯一持有，detach 即收口。 */
+  /** Detach adapter（按 id 查 Map）。pi 事件订阅经 EventAdapter 唯一持有，detach 即收尾。 */
   detachSession(sessionId: string): void
 }
 

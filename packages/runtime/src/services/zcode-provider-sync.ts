@@ -22,7 +22,7 @@
  *     ∪ 内建目录 account: 直通家族）
  *
  * 凭据读取红线（C-proc-14）：pi 侧凭据只经 ProviderCredentialResolver 单通道，
- * 禁止自建解析链（守卫 scripts/check-provider-credential-reads.mjs）。
+ * 禁止自建解析链（检查 scripts/check-provider-credential-reads.mjs）。
  * 跨包红线：runtime 不 import zcode-subagent-cli——zcode-builtin.json 定位逻辑与
  * preparer.ts locateZcodeBuiltinCatalog 同源复制（本文件 locateZcodeBuiltinCatalogSync，
  * 语义对齐 preparer.ts:246-294；漂移防线 = u2b 侧对账）。
@@ -795,7 +795,7 @@ export interface ZcodeModelListPaths extends Pick<ZcodeProviderSyncPaths, 'realP
  * 直通家族（[engine-ref-translation D3] 2026-10-13/14 用户裁决——account 条目凭据走
  * zcode CLI 账号体系不经个人 provider 表，无 apiKey 过滤；与 preparer listZcodeModels
  * 的 account 段对账锁步，跨包红线：runtime 不 import zcode-subagent-cli）。
- * 任一源不可读按空集继续（查询面失败安全，非同步面）。
+ * 任一源不可读按空集继续（查询环节失败安全，非同步环节）。
  */
 export function deriveZcodeEngineModels(paths: ZcodeModelListPaths): ZcodeEngineModelEntry[] {
   const byId = new Map<string, ModelListEntry>()

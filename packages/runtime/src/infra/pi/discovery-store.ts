@@ -17,8 +17,8 @@
  *
  * 与 settings.json 的关系（ADR §理由 2 + 方案 C 决策）：
  *   discovery.json = SSOT（taiji 自有，UI 读写此）。
- *   settings.json.skills = 派生投影（pi 原生经 collectSettingsSkillPaths 读此加载 skill）。
- *   每次 discovery.json 的 skill 路径变更，由 pi-provider-store 同步投影到 settings.json.skills。
+ *   settings.json.skills = 派生派生视图（pi 原生经 collectSettingsSkillPaths 读此加载 skill）。
+ *   每次 discovery.json 的 skill 路径变更，由 pi-provider-store 同步映射到 settings.json.skills。
  *
  * 🔒 三层架构：本模块属 infra（直接碰文件系统），services 经 port 访问。
  */
@@ -133,7 +133,7 @@ function createDiscoveryStore(path: string): JsonStore<DiscoveryConfig> {
   })
 }
 
-/** discovery.json 路径：<piAgentDir>/discovery.json。导出供 pi-provider-store 投影逻辑复用。 */
+/** discovery.json 路径：<piAgentDir>/discovery.json。导出供 pi-provider-store 派生视图逻辑复用。 */
 export function getDiscoveryPath(): string {
   return `${getPiAgentDir()}/discovery.json`
 }
@@ -164,7 +164,7 @@ export function writeDiscovery(config: DiscoveryConfig): void {
 /**
  * 合并某 kind 的 project + global 路径为有序扁平数组（方案 §2.1）。
  * project 在前 = 项目优先级 > 全局；去重保留首次出现（靠前胜出）。
- * 供 pi-provider-store settings 投影 + session-service pi 启动参数等「需扁平合并」的消费方。
+ * 供 pi-provider-store settings 派生视图 + session-service pi 启动参数等「需扁平合并」的消费方。
  */
 export function resolveLoadPaths(cfg: DiscoveryConfig, kind: DiscoveryKind): string[] {
   const { projectPaths, globalPaths } = cfg[kind]

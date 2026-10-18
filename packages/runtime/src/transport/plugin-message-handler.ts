@@ -23,7 +23,7 @@ export class PluginMessageHandler {
   ]
 
   async handlePluginMessage(msg: ClientMessage, ws: WsType): Promise<void> {
-    // D3: service-not-available 前置守卫（与 extension 的 requireExt 同形）。
+    // D3: service-not-available 前置检查（与 extension 的 requireExt 同形）。
     if (!this.ctx.pluginService) {
       return this.ctx.sendError(ws, 'handler_error', 'Plugin service not available', msg.id)
     }
@@ -57,7 +57,7 @@ type PluginHandledType =
 /** 按 type 字面量收窄 ClientMessage（查表 key = 运行时 guard，与原 switch narrowing 同构）。 */
 type PluginMsgOf<K extends ClientMessageType> = Extract<ClientMessage, { type: K }>
 
-/** 表驱动 case handler 统一签名。pluginService 由主函数前置守卫后显式传递（收窄丢失补偿）。 */
+/** 表驱动 case handler 统一签名。pluginService 由主函数前置检查后显式传递（收窄丢失补偿）。 */
 type PluginCaseHandler = (
   ctx: PluginHandlerContext,
   msg: ClientMessage,
@@ -100,7 +100,7 @@ async function handlePluginDenyPermissions(ctx: PluginHandlerContext, msg: Plugi
 }
 
 /**
- * E6（AP-3/D2）args 标量守卫：GUI 点击来源把 args 变成用户可点输入，非标量值
+ * E6（AP-3/D2）args 标量检查：GUI 点击来源把 args 变成用户可点输入，非标量值
  * （嵌套对象/数组）等于给插件间传结构化 payload 开无 schema 旁路——runtime 主线程
  * 入口拒绝、不 dispatch handler。未知键无从校验（args 无 schema），只校验值域。
  */

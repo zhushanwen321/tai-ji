@@ -1,5 +1,5 @@
 /**
- * RpcClient handleMessage resolve 守卫回归测试（data-source-governance review findings #7）。
+ * RpcClient handleMessage resolve 检查回归测试（data-source-governance review findings #7）。
  *
  * 锁定：
  * - pi 0.84.1 新增 bash_execution_update 流事件复用发起 bash RPC 的 id 且先于 response 到达
@@ -9,11 +9,11 @@
  *   bash command」）。handleMessage 仅凭 id 命中 pending 就 resolve 会把首条 delta 误当
  *   response（真 response 到达时 pending 已删 → 真实 output 丢失，bash() shape guard 落
  *   [protocol error: malformed] fallback——`!` bash live 输出丢失事故的根因）。
- * - 守卫：resolve 只认 type === 'response'（pi rpc-types.ts RpcResponse union 所有变体
+ * - 检查：resolve 只认 type === 'response'（pi rpc-types.ts RpcResponse union 所有变体
  *   type:'response'）；非 response 的带 id 消息走 listener 路径（event-adapter NULL_EVENTS
  *   已登记 bash_execution_update 为 no-op）。
  *
- * 红性：删掉 handleMessage 的 type 守卫后 T1 三条断言（pending 未被流事件 settle /
+ * 红性：删掉 handleMessage 的 type 检查后 T1 三条断言（pending 未被流事件 settle /
  * resolve 到真 response 的 output / 流事件进 listener）必红。
  *
  * 策略：与 rpc-client-bash.test.ts 同构——mock node:child_process + readline，捕获 stdin
@@ -66,7 +66,7 @@ async function nextMacrotask(): Promise<void> {
 
 // ── Tests ────────────────────────────────────────────────────────
 
-describe('RpcClient handleMessage resolve 守卫（type === "response"）', () => {
+describe('RpcClient handleMessage resolve 检查（type === "response"）', () => {
   let client: RpcClient
 
   beforeEach(async () => {
@@ -98,7 +98,7 @@ describe('RpcClient handleMessage resolve 守卫（type === "response"）', () =
     // 1) 流事件先到（复用同一 RPC id，对齐 pi 0.84.1 agent-session.js:2210 的 emit 形态）
     emitPiLine({ type: 'bash_execution_update', id: sent.id, delta: '/Users/x\n' })
     await nextMacrotask()
-    // pending 未被流事件 settle（删守卫时此处红：首条 delta 已误 resolve）
+    // pending 未被流事件 settle（删检查时此处红：首条 delta 已误 resolve）
     expect(settled).toBe(false)
 
     // 2) 真 response 后到 → resolve 到的是真 response（data.output 为真值而非 protocol error fallback）
@@ -113,15 +113,15 @@ describe('RpcClient handleMessage resolve 守卫（type === "response"）', () =
     expect(result.output).toBe('/Users/x\n')
     expect(result.exitCode).toBe(0)
 
-    // 3) 流事件走 listener 路径不吞（删守卫时此处红：bash_execution_update 被 pending resolve 吞掉）。
-    //    delta 是 pi 0.84.1 流事件顶层字段（PiMessage 宽类型未声明，运行时守卫式断言）
+    // 3) 流事件走 listener 路径不吞（删检查时此处红：bash_execution_update 被 pending resolve 吞掉）。
+    //    delta 是 pi 0.84.1 流事件顶层字段（PiMessage 宽类型未声明，运行时检查式断言）
     expect(
       events.some((e) => e.type === 'bash_execution_update' && e.id === sent.id
         && (e as { delta?: unknown }).delta === '/Users/x\n'),
     ).toBe(true)
   })
 
-  // T2: 守卫反向对照——response 消息仍走 pending resolve，不泄漏进 listener
+  // T2: 检查反向对照——response 消息仍走 pending resolve，不泄漏进 listener
   it('T2: response（带 pending id）resolve 后不进 onEvent listener', async () => {
     const events: PiMessage[] = []
     client.onEvent((e) => events.push(e))

@@ -1,10 +1,10 @@
 /**
- * 投影专用 bus 视图构建（自 session-service.ts getProjectionBusWithGenStatsTap 行为保持
+ * 派生视图专用 bus 视图构建（自 session-service.ts getProjectionBusWithGenStatsTap 行为保持
  * 抽取）：wrapped 对象构建不依赖 Facade 状态，仅 bus 身份与 state_changed 后置 tap 两个
  * 参数——memoize（按 bus 身份缓存 wrapped）仍归 Facade（projectionBusView 字段）。
  *
  * 透传全部 IMessageBus 方法，仅在 publish session.state_changed 后同步触发写 2 tap
- * （重登记 + 推快照帧）。全 runtime 唯一 state_changed 生产点 = 投影的
+ * （重登记 + 推快照帧）。全 runtime 唯一 state_changed 生产点 = 派生视图的
  * publishStateChangedFromSnapshot（publish 前有同值 diff 抑制），故「bus 边界拦截该
  * type」≡「在 state_changed 广播处挂接」——不触碰 session-state-projection.ts 即可
  * 拿到真汇聚点（composer-gen-stats 设计 D4 写 2 挂接点的实装核实结论）。

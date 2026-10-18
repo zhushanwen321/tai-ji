@@ -36,7 +36,7 @@ export const ENGINE_NODE_ENV = ENGINE_LAUNCH_ENV_KEYS.NODE
  * staged 引擎根绝对路径（双形态：打包 = <cwd>/engines；dev = <projectRoot>/resources/engines）。
  * 目录不存在返回 undefined——调用方据此决定是否注入（缺省不注入，见文件头）。
  */
-/** 打包态 staged 缺失 warn 的 once 守卫（注入面每次 pi spawn 都会调用，防刷屏）。 */
+/** 打包态 staged 缺失 warn 的 once 检查（注入面每次 pi spawn 都会调用，防刷屏）。 */
 let warnedPackagedStagedMissing = false
 
 export function getStagedEnginesDir(projectRoot: string): string | undefined {

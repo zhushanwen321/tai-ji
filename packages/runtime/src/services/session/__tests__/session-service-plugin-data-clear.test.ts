@@ -5,7 +5,7 @@
  * 锁定语义「**真删除才清**」：清理（tombstone 登记 + 分区摘除 + trash 软删除）绑定用户
  * 删除——lifecycle.delete（active / scanned 两分支）尾段经模块级 clearRemovedSessionData
  * 分发，插件数据与 session 本体一同进废纸篓（§3.1）；didDestroy 投递先行，插件 worker
- * 迟到的 set()/delete() 由 tombstone 写守卫丢弃（不复活文件）。
+ * 迟到的 set()/delete() 由 tombstone 写检查丢弃（不复活文件）。
  *
  * 三条 session **存活**路径反例（回归锚：曾因清理无条件挂在 removeSessionEntry 汇聚点，
  * pi 崩溃 respawn / forceQuit / restore 后插件空状态、旧数据只在废纸篓）：
@@ -36,7 +36,7 @@ const mockTrashFile = async (filePath: string): Promise<void> => {
   trashState.calls.push(filePath)
   rmSync(filePath, { force: true })
 }
-// getPiAgentDir → tmp（removeSessionEntry 的 reapSessionBackgroundTasks fire-and-forget 腿
+// getPiAgentDir → tmp（removeSessionEntry 的 reapSessionBackgroundTasks fire-and-forget 路径
 // 读该目录，session-service-background-task.test.ts 同款隔离）
 const paths = vi.hoisted(() => ({ agentDir: '' }))
 vi.mock('../../../infra/pi/pi-paths.js', async (importOriginal) => {
@@ -139,7 +139,7 @@ function createDispatcher(service: SessionService): MessageDispatcher {
     ensureActive: vi.fn(async () => { throw new Error('forceQuit path must not call ensureActive') }),
   }
   const pm = {
-    // forceQuit 入口守卫：getClient 非 null 才走强杀编排（null 会早退不触发收殓链）
+    // forceQuit 入口检查：getClient 非 null 才走强杀编排（null 会早退不触发收殓链）
     getClient: vi.fn(() => ({ lastActivityAt: CLIENT_ACTIVITY_AT, exited: false } as unknown as IPiEngine)),
     destroySession: vi.fn(async () => undefined),
   }
@@ -235,13 +235,13 @@ describe('B5 触发面收窄：真删除才清 plugin sessionData（§3.1 trash 
     // 用户删除（session-message-handler session.delete RPC 同链：facade.delete → lifecycle.delete）
     await service.delete(sid)
 
-    // 清理是 void…catch 分发（异步腿），trash 到达是微任务
+    // 清理是 void…catch 分发（异步路径），trash 到达是微任务
     await vi.waitFor(() => expect(trashState.calls).toContain(dataFile(sid)))
     expect(isSessionDataCleared(sid)).toBe(true)
     expect(existsSync(dataFile(sid))).toBe(false)
     expect(service.getSummary(sid)).toBeUndefined() // 真销毁完成（内存条目已收殓）
 
-    // didDestroy fire-and-forget 后插件 worker 迟到的 set：被写守卫丢弃，不复活文件
+    // didDestroy fire-and-forget 后插件 worker 迟到的 set：被写检查丢弃，不复活文件
     store.set(sid, 'k2', 'late-write')
     store.flushAll()
     expect(existsSync(dataFile(sid))).toBe(false)

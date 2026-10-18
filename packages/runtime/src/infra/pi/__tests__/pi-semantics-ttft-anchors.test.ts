@@ -22,8 +22,8 @@
  *   ① lazy ensure/slot 工厂（openai-completions 的 ensure*Block / responses-shared 的
  *      createSlot+getSlot）：block 创建分支内同步 push *_start，delta 站点先取 block；
  *   ② wire content_block_start/delta 映射（anthropic / bedrock）：start 事件分支建块 +
- *      push *_start，delta 分支按 index 查块 + 类型守卫，块只在 start 分支创建；
- *   ③ 守卫分支紧邻（google / mistral）：`if (!currentBlock)` 建块分支 push *_start 与
+ *      push *_start，delta 分支按 index 查块 + 类型检查，块只在 start 分支创建；
+ *   ③ 检查分支紧邻（google / mistral）：`if (!currentBlock)` 建块分支 push *_start 与
  *      delta push 同迭代紧邻。
  * taiji 依赖面：adapter 仅对 text_start / thinking_start / toolcall_start 产 llm-first-output
  * （单点收）——pi 若出现「产 delta 不先产 *_start」的 provider，该模型 TTFT 恒 null 静默
@@ -56,7 +56,7 @@ function allIndices(src: string, marker: string): number[] {
 
 /**
  * 通用不变量：marker 的每个出现位置，向前 window 字符内存在 preceding 之一。
- * 用于「delta 站点前置守卫/start 推送」型断言；返回失败位置的序号供报错定位。
+ * 用于「delta 站点前置检查/start 推送」型断言；返回失败位置的序号供报错定位。
  */
 function assertEveryPrecededBy(
   src: string,
@@ -132,7 +132,7 @@ describe.skipIf(SKIP_REASON !== '')(
 
     it('A3 工具循环后续轮：prepareNextTurn 之后、steering 注入与流式调用之前恰发一次 turn_start', () => {
       expect(runLoopBody, 'PS-46 漂移：runLoop 函数体切片为空——复核 agent-loop.js 结构').not.toBe('')
-      // runLoop 内唯一发射点，且位于 lastCompletedTurn 守卫内（首轮入口锚由 A1/A2 承担）
+      // runLoop 内唯一发射点，且位于 lastCompletedTurn 检查内（首轮入口锚由 A1/A2 承担）
       expect(
         allIndices(runLoopBody, 'type: "turn_start"').length,
         'PS-46 漂移：runLoop 内 turn_start 出现次数 ≠ 1——逐请求锚点前提变化',
@@ -212,7 +212,7 @@ describe.skipIf(SKIP_REASON !== '')(
     })
 
     // ── ① openai-responses-shared（openai-responses / codex / azure 委托）──
-    describe('openai-responses-shared：createSlot 播报 *_start，delta 站点经 getSlot 存在性守卫', () => {
+    describe('openai-responses-shared：createSlot 播报 *_start，delta 站点经 getSlot 存在性检查', () => {
       const src = read('openai-responses-shared.js')
       const createSlotBody = src.slice(src.indexOf('const createSlot = (outputIndex, item) => {'), src.indexOf('const getOrCreateSlot = (outputIndex, item) => {'))
 
@@ -221,10 +221,10 @@ describe.skipIf(SKIP_REASON !== '')(
         expect(createSlotBody).toContain('type: "thinking_start"')
         expect(createSlotBody).toContain('type: "text_start"')
         expect(createSlotBody, 'createSlot 不再播报 toolcall_start（或函数切片错位）').toContain('type: "toolcall_start"')
-        // getSlot 类型不匹配返回 undefined → delta 站点 if (!slot) continue 守卫成立的前提
+        // getSlot 类型不匹配返回 undefined → delta 站点 if (!slot) continue 检查成立的前提
         expect(
           src.includes('return slot?.type === type ? slot : undefined;'),
-          'PS-47 漂移：getSlot 不再按存在性+类型返回 undefined——delta 守卫前提破裂，复核 openai-responses-shared.js',
+          'PS-47 漂移：getSlot 不再按存在性+类型返回 undefined——delta 检查前提破裂，复核 openai-responses-shared.js',
         ).toBe(true)
       })
 
@@ -232,7 +232,7 @@ describe.skipIf(SKIP_REASON !== '')(
         assertEveryPrecededBy(src, 'type: "text_delta"', ['getSlot(event.output_index, "text")'], 350, 'responses text_delta')
         assertEveryPrecededBy(src, 'type: "thinking_delta"', ['getSlot(event.output_index, "thinking")'], 350, 'responses thinking_delta')
         // 助手本体推送 toolcall_delta；调用点全部传 slot（getSlot/getOrCreateSlot 取得，
-        // 前置守卫见各站点 if (!slot) continue）
+        // 前置检查见各站点 if (!slot) continue）
         const helper = /const pushToolCallDelta = \(slot, delta\) => \{[\s\S]*?type: "toolcall_delta"/.exec(src)
         expect(helper, 'PS-47 漂移：pushToolCallDelta 助手消失或不再推送 toolcall_delta——复核 openai-responses-shared.js').not.toBeNull()
         const callSites = allIndices(src, 'pushToolCallDelta(').length
@@ -240,8 +240,8 @@ describe.skipIf(SKIP_REASON !== '')(
       })
     })
 
-    // ── ② anthropic-messages：content_block_start 建块播报 / delta 按 index 查块 + 类型守卫 ──
-    describe('anthropic-messages：delta 分支按 index 查块 + 类型守卫（块只在 start 分支创建）', () => {
+    // ── ② anthropic-messages：content_block_start 建块播报 / delta 按 index 查块 + 类型检查 ──
+    describe('anthropic-messages：delta 分支按 index 查块 + 类型检查（块只在 start 分支创建）', () => {
       const src = read('anthropic-messages.js')
       const startBranch = src.slice(src.indexOf('else if (event.type === "content_block_start") {'), src.indexOf('else if (event.type === "content_block_delta") {'))
 
@@ -254,14 +254,14 @@ describe.skipIf(SKIP_REASON !== '')(
         expect(src).toContain('const blocks = output.content;')
       })
 
-      it('delta 站点全部前置 findIndex 查块 + block 类型守卫（无块不产 delta）', () => {
+      it('delta 站点全部前置 findIndex 查块 + block 类型检查（无块不产 delta）', () => {
         assertEveryPrecededBy(src, 'type: "text_delta"', ['block && block.type === "text"'], 400, 'anthropic text_delta')
         assertEveryPrecededBy(src, 'type: "thinking_delta"', ['block && block.type === "thinking"'], 400, 'anthropic thinking_delta')
         assertEveryPrecededBy(src, 'type: "toolcall_delta"', ['block && block.type === "toolCall"'], 400, 'anthropic toolcall_delta')
       })
     })
 
-    // ── ② bedrock-converse-stream：start 处理器建 toolCall 块播报 / delta 处理器守卫建块 ──
+    // ── ② bedrock-converse-stream：start 处理器建 toolCall 块播报 / delta 处理器检查建块 ──
     describe('bedrock-converse-stream：handleContentBlockStart 播报 toolcall_start，delta 处理器无块先建块播报', () => {
       const src = read('bedrock-converse-stream.js')
       const startIdx = src.indexOf('function handleContentBlockStart')
@@ -275,7 +275,7 @@ describe.skipIf(SKIP_REASON !== '')(
         expect(startFn, 'toolUse 块创建不再播报 toolcall_start').toContain('type: "toolcall_start"')
       })
 
-      it('text delta 无块先建块播报 text_start；toolcall delta 前置既有 toolCall 块守卫；thinking 分支含建块播报', () => {
+      it('text delta 无块先建块播报 text_start；toolcall delta 前置既有 toolCall 块检查；thinking 分支含建块播报', () => {
         expect(deltaFn, 'PS-47 漂移：handleContentBlockDelta 切片为空——复核 bedrock-converse-stream.js 结构').not.toBe('')
         expect(
           /if \(!block\) \{[\s\S]{0,250}type: "text_start"[\s\S]{0,200}type: "text_delta"/.test(deltaFn),
@@ -283,7 +283,7 @@ describe.skipIf(SKIP_REASON !== '')(
         ).toBe(true)
         expect(
           /else if \(delta\?\.toolUse && block\?\.type === "toolCall"\) \{[\s\S]{0,400}type: "toolcall_delta"/.test(deltaFn),
-          'PS-47 漂移：toolcall delta 失去既有 toolCall 块守卫（块由 start 处理器创建并播报）——复核 handleContentBlockDelta',
+          'PS-47 漂移：toolcall delta 失去既有 toolCall 块检查（块由 start 处理器创建并播报）——复核 handleContentBlockDelta',
         ).toBe(true)
         expect(
           /else if \(delta\?\.reasoningContent\) \{[\s\S]*?if \(!thinkingBlock\) \{[\s\S]{0,300}type: "thinking_start"/.test(deltaFn),
@@ -292,7 +292,7 @@ describe.skipIf(SKIP_REASON !== '')(
       })
     })
 
-    // ── ③ google-generative-ai / mistral-conversations：守卫分支紧邻建块播报 ──
+    // ── ③ google-generative-ai / mistral-conversations：检查分支紧邻建块播报 ──
     describe('google-generative-ai：!currentBlock 建块分支播报 *_start 与 delta 同迭代', () => {
       const src = read('google-generative-ai.js')
 
@@ -303,7 +303,7 @@ describe.skipIf(SKIP_REASON !== '')(
       })
     })
 
-    describe('mistral-conversations：守卫分支建块播报 *_start 与 delta 紧邻', () => {
+    describe('mistral-conversations：检查分支建块播报 *_start 与 delta 紧邻', () => {
       const src = read('mistral-conversations.js')
 
       it('delta 站点前置建块播报（text/thinking/toolcall）', () => {
@@ -313,7 +313,7 @@ describe.skipIf(SKIP_REASON !== '')(
       })
     })
 
-    // ── 族闭合：responses 系包装实现委托 processResponsesStream（无独立流式实现）──
+    // ── 全族覆盖：responses 系包装实现委托 processResponsesStream（无独立流式实现）──
     it('openai-responses 系包装（codex / azure）委托 openai-responses-shared 的 processResponsesStream', () => {
       for (const f of ['openai-codex-responses.js', 'azure-openai-responses.js']) {
         const src = read(f)

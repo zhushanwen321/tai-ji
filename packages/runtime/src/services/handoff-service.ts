@@ -126,11 +126,11 @@ export class HandoffService {
    * 触发 handoff：让源 session 跑 handoff turn 生成文档，新建 session，注入文档，广播完成。
    *
    * 流程：
-   * 1. 并发守卫（inflight Map）。
+   * 1. 并发检查（inflight Map）。
    * 2. getHistory 判空（无历史不可 handoff）。
    * 3. getSession 取 cwd + label。
    * 4. ensureActive 拿源 session 的 IPiEngine。
-    * 5. 注册事件监听（projectHandoffTurnEnd 投影消费，U3②）+ timeout + exit 探测，建 agentEndPromise（W3/W4）。
+    * 5. 注册事件监听（projectHandoffTurnEnd 派生视图消费，U3②）+ timeout + exit 探测，建 agentEndPromise（W3/W4）。
    *    settle（resolve/reject）前先 cleanupInflight 移除 entry，关闭 settle 后到 finally
    *    之间 abort 仍生效的窗口；poll srcClient.exited 兜底检测 pi 中途退出（最长挂 10 分钟）。
    * 6. fire-and-forget 发送 handoff prompt（await 只确认 pi 收到 ack）。
@@ -148,14 +148,14 @@ export class HandoffService {
     reply?: string,
     options?: { modelOverride?: string; thinkingOverride?: string },
   ): Promise<void> {
-    // 1. 并发守卫：同一 session 不可并发 handoff
+    // 1. 并发检查：同一 session 不可并发 handoff
     if (this.inflight.has(srcSessionId)) {
       throw new Error(`handoff already in progress for session ${srcSessionId}`)
     }
 
     // 1.5 清理上次 handoff 残留的 aborted 标记。上次 abort 若在 agentEndPromise reject 路径
     // 结束（未走到 8.5 检查点），abortedSessions 会残留 → 本次正常 handoff 在 8.5 误判 throw。
-    // 此处清理保证每次 runHandoff 从干净状态开始（inflight 守卫已确保上次 handoff 不在跑）。
+    // 此处清理保证每次 runHandoff 从干净状态开始（inflight 检查已确保上次 handoff 不在跑）。
     this.abortedSessions.delete(srcSessionId)
 
     // 2. 获取对话历史（兼容离线 session，走文件尾读）—— 仅用于判空

@@ -22,7 +22,7 @@ import { EventEmitter } from 'node:events'
 import { ShellRunner } from '../src/infra/shell-runner.js'
 import type { SpawnFn } from '../src/services/ports/shell-runner.js'
 
-/** 10MB = 10 * 1024 * 1024（与被测实现同值；用字面量保持「实现若漂移本用例红」的守卫性） */
+/** 10MB = 10 * 1024 * 1024（与被测实现同值；用字面量保持「实现若漂移本用例红」的检查性） */
 // eslint-disable-next-line no-magic-numbers -- 10MB 帽，对齐 git-executor
 const CAP_BYTES = 10 * 1024 * 1024
 /** 管道典型 chunk（Node stream highWaterMark 量级） */

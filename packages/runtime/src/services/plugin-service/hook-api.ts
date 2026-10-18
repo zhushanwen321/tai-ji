@@ -10,11 +10,11 @@
  *   等 5 个方法，每个方法生成 handlerId、保存到本地 map、发 RPC 注册，
  *   并返回 Disposable。
  *
- * Worker 侧 hook 执行：主线程经 `plugin.hooks.invoke` 到达 Worker 有两腿（D2）：
- *   - request 腿（block/transform 类）：结果作为 RPC 响应原样回传主线程，
+ * Worker 侧 hook 执行：主线程经 `plugin.hooks.invoke` 到达 Worker 有两路径（D2）：
+ *   - request 路径（block/transform 类）：结果作为 RPC 响应原样回传主线程，
  *     executeHookRequest 是该 request 的执行入口（plugin-bootstrap.handleIncomingRequest
  *     调用，闭包 handlers Map 经 setHookExecutor 模块级胶水桥接）；
- *   - observe notification 腿（observe 类，D2-2）：无 id 通知，executeHookRequest
+ *   - observe notification 路径（observe 类，D2-2）：无 id 通知，executeHookRequest
  *     执行后 fire-and-forget（不产生响应，零往返）。
  */
 

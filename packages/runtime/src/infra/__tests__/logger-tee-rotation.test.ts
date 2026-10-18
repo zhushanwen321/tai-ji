@@ -2,7 +2,7 @@
  * pi stdout tee 单文件 size 轮转测试（crash-forensics-and-watchdog §3.3 D7，单元 u9；
  * dev-0.9.17 合并后对齐 .1.gz gzip 口径——u9 的 .1 平面滚动实现被对方取代）。
  *
- * 收口 198MB 实证问题（持续活跃 session 单文件无界累积）的行为验证。阈值经 env
+ * 收尾 198MB 实证问题（持续活跃 session 单文件无界累积）的行为验证。阈值经 env
  * `TAIJI_LOG_MAX_BYTES` 注入（pi tee 与主日志共用 MAX_FILE_BYTES，模块 import 时读取，
  * 每用例 resetModules + 动态 import 拿新实例；u9 的 opts.maxBytes 注入面已随合并移除）：
  * 1. 超限旋段：旧段 gzip 归档 `.jsonl.1.gz`（单代，多轮轮转后 rename 原子覆盖）+ 主档
@@ -130,7 +130,7 @@ afterEach(async () => {
 
 describe('pi tee size 轮转（D7，.1.gz 口径）', () => {
   it('超限旋段：旧段 gzip 单代 .1.gz + 主档截断续写，pi- 前缀保持，跨段行级连续止于尾行', async () => {
-    // 阈值/行数口径（flake 根修 2026-09-15）：行 ~28B、600B 阈值 → 轮转边界落在
+    // 阈值/行数口径（flake 从根源修复 2026-09-15）：行 ~28B、600B 阈值 → 轮转边界落在
     // i≈21 / i≈41，末段（主档）≈20 行。轮转窗口的 pending 回放时序会让边界漂移
     // ±数行（真实 fs flush 时机不定，200B/40 行口径下实测幸存尾行数 9..15 波动，
     // 「≥10」断言余量被吃穿）——600B/61 行让末段相对断言下限留 10 行余量，两个

@@ -47,7 +47,7 @@ vi.mock('node:child_process', () => ({
  * Phase 1 路径迁移适配：extensions/npm/tmp 已从 settingsDir 子树迁出到 dataDir 根层，
  * ExtensionService/ExtensionResolver 不再 join(settingsDir, ...)。此工厂把三个目录注入回
  * testSettingsDir 子目录，让现有 fixture（settingsDir/npm、settingsDir/extensions、settingsDir/tmp）继续生效。
- * 只需传 installer 和 extensionSettings（各测试差异点），路径注入统一在此收口。
+ * 只需传 installer 和 extensionSettings（各测试差异点），路径注入统一在此收尾。
  */
 function createExtensionService(
   testSettingsDir: string,

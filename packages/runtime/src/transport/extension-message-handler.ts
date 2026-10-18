@@ -77,7 +77,7 @@ export class ExtensionMessageHandler {
     }
     // 路由表 key 与 msg.type 字面量同源（上方 routes 逐 key 登记），查表命中即类型匹配；
     // TS 无法静态关联索引访问与 key（correlated types，microsoft/TypeScript#30581），
-    // `as never` 是该不变式下的类型层收口，运行时分发行为与原 switch 完全一致。
+    // `as never` 是该不变式下的类型层收尾，运行时分发行为与原 switch 完全一致。
     await handler(msg as never, ws)
   }
 
@@ -283,9 +283,9 @@ export class ExtensionMessageHandler {
   }
 
   /**
-   * D3: service-not-available 前置守卫（此前 7 处同形 inline）。
+   * D3: service-not-available 前置检查（此前 7 处同形 inline）。
    * 返回窄化后的 IExtensionService；service 缺席时已发送 handler_error 并返回 undefined，
-   * 调用方 `if (!svc) return` 即可。类型守卫必须留在调用方——TS 不收窄 `this.ctx.X`
+   * 调用方 `if (!svc) return` 即可。类型检查必须留在调用方——TS 不收窄 `this.ctx.X`
    * 的属性访问，但能收窄函数返回值。
    */
   private requireExt(ws: WsType, id?: string): IExtensionService | undefined {

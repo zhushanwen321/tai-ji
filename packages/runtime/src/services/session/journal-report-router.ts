@@ -10,7 +10,7 @@
  * 形态先例 = inflight-mirror（module 级单例，event-adapter 写、services 域消费）：
  * 路由不依赖载荷自报 sessionId（连接归属——adapter 以帧所在 pi 连接的 sessionId
  * 路由），消费方 = SessionRecords（构造期注册 sink，applyJournalReport 委托到
- * per-session 投影）。
+ * per-session 派生视图）。
  *
  * 无 sink（SessionRecords 未注册 / 测试窄环境）→ applyReport 返回 false：adapter
  * 不回 ack（写侧按 D5 首败 warn + 缓冲丢弃），事件不丢——派生视图创建时 attach()
@@ -23,7 +23,7 @@ export interface JournalReportSink { // oe-exempt:20261003:framework:消费方�
   /**
    * 报告送达：按 sessionId 路由到该会话的事件派生视图。同步应用（fold + 缺口补读
    * 均为同步文件读）——返回 true = 已应用（adapter 据此回 ack，生效回执语义 D7）；
-   * false = 无消费方/投影未就绪（不 ack，写侧按失败折叠）。
+   * false = 无消费方/派生视图未就绪（不 ack，写侧按失败折叠）。
    */
   applyJournalReport(sessionId: string, report: SubagentJournalReport): boolean
 }

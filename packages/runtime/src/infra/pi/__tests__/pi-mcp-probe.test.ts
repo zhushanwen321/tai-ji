@@ -195,7 +195,7 @@ describe('mapServerReport · pi state 枚举映射穷尽表驱动（D8）', () =
     expect(report?.status).toEqual(expectStatus)
   })
 
-  it('未知 state 守卫为 failed（不信任外部格式，不编造状态）', () => {
+  it('未知 state 检查为 failed（不信任外部格式，不编造状态）', () => {
     const report = mapServerReport({ ...base, name: 'srv', state: 'some-future-state', tools: [] })
     expect(report?.status).toEqual({ kind: 'failed', state: 'failed' })
   })

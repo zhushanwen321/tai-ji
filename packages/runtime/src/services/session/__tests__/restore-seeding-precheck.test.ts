@@ -33,7 +33,7 @@ import { fileURLToPath } from 'node:url'
 import { READ_PRECHECK_MAX_BYTES } from '@taiji/shared'
 const { reverseReads } = vi.hoisted(() => ({ reverseReads: [] as { totalBytesRead: number }[] }))
 
-// 包装逆序分块读工具（行为不变）+ 记录读取量：判定腿「不触全量」的机械断言锚点
+// 包装逆序分块读工具（行为不变）+ 记录读取量：判定路径「不触全量」的机械断言锚点
 vi.mock('../../../utils/history-reverse-read.js', async (importOriginal) => {
   const actual = await importOriginal<typeof import('../../../utils/history-reverse-read.js')>()
   return {
@@ -175,7 +175,7 @@ describe('P-restore-skip 分支一（失忆半边）：尾 session_end 变体 + 
     const afterResult = simulateAppendAndTrace(after, oldTailId)
     expect(afterResult.leafId).toBe(oldTailId)
     expect(afterResult.connected).toBe(true)
-    // 判定腿不触全量：尾扫命中即止，读取量 ~首块量级
+    // 判定路径不触全量：尾扫命中即止，读取量 ~首块量级
     expect(reverseReads).toHaveLength(1)
     expect(reverseReads[0].totalBytesRead).toBeLessThan(2 * 1024 * 1024)
     // 预检 warn（含大小与原因）

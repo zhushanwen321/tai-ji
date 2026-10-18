@@ -377,7 +377,7 @@ export class ModelService implements IModelService, ProviderConnectionTestServic
   /**
    * 给 ProviderInfo.models 逐模型标注 supportedLevels（view-ready，renderer 零推导）。
    * piVersion 形参为 IModelService 契约位（缓存键时代的组分，接口签名由
-   * interfaces.ts 钉死），直调形态下不消费。
+   * interfaces.ts 固定为），直调形态下不消费。
    */
   attachSupportedLevels(providers: ProviderInfo[], _piVersion?: string): ProviderInfo[] {
     return attachSupportedLevels(providers)

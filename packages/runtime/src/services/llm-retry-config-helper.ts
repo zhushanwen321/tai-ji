@@ -57,7 +57,7 @@ export function resolveRetryConfig(raw: unknown): LlmRetryConfigSnapshot {
   const timeoutMs = providerRaw?.['timeoutMs']
   // 0 特判（isPositiveFiniteNumber）：写侧 validateLlmRetryConfig 必拒 0（合法域整数
   // 1-600000），0 不是合法超域值而是「写侧不可能产出」的值——读侧清为未设（不出现
-  // 键 = 跟随全局 httpIdleTimeoutMs 语义），闭合写读往返对称；>600000 的超域存量值
+  // 键 = 跟随全局 httpIdleTimeoutMs 语义），保证写读往返对称；>600000 的超域存量值
   // 仍按 D7 原样返回不改。
   if (isPositiveFiniteNumber(timeoutMs)) {
     provider.timeoutMs = timeoutMs

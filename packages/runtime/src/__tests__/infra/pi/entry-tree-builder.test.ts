@@ -1002,7 +1002,7 @@ describe('rebuildHistoryFromEntries 活跃路径裁剪（message-revoke U6a）',
 
   it('leafId 缺省 + 有分支（现行为）：不裁剪，旧分支照文件序渲染（撤回链清缓存前的旧行为基线）', () => {
     // 该基线正是撤回编排必须显式清 history-rebuild-cache 的原因：缓存未清时旧分支
-    // 仍按全文件渲染；显式清缓存 → 下次全量重建带 leafId → 投影正确。
+    // 仍按全文件渲染；显式清缓存 → 下次全量重建带 leafId → 映射正确。
     const { messages } = rebuildHistoryFromEntries(branchedEntries(), null)
     expect(messages.map((m) => m.role)).toEqual(['user', 'assistant', 'user', 'assistant', 'user'])
     expect(messages.some((m) => contentToText(m.content) === '发错的消息')).toBe(true)

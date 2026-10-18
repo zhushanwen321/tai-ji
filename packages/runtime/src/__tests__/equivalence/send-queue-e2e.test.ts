@@ -183,7 +183,7 @@ describe.skipIf(!FAUX_PI_READY)(`send queue e2e faux pi${FAUX_PI_READY ? '' : `�
       })
 
       // ── 3. 长任务（dispatcher 同款先置位后 prompt：busy 前提的 runtime 侧标志）──
-      // u3c readonly 收口：经原语 #1 'dispatching' 行（对齐 dispatcher markSessionActive 语义）
+      // u3c readonly 收尾：经原语 #1 'dispatching' 行（对齐 dispatcher markSessionActive 语义）
       applySessionOccupancyTransition(view, null, 'dispatching')
       const sendResp = await targetFx.sendCommand('prompt', {
         message: 'Count from 1 to 40, one number per line, plain text only. Do not use any tools.',

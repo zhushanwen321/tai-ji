@@ -30,7 +30,7 @@
  *    segments 快照经磁盘 meta 行补记跨重启存活（撤销编排的全文 segments 返回在重启后成立）。
  *
  * 单例约束（§3.4）：同 sessionId 必须复用同一 handle——多 handle 并发投递竞态无保护。
- * [HISTORICAL] sd-u6 完成回流曾复用本注册表；notify-once 废弃 CompletionBackflow 后回流腿
+ * [HISTORICAL] sd-u6 完成回流曾复用本注册表；notify-once 废弃 CompletionBackflow 后回流路径
  * 消失，禁止自行 createDelivery 的单例约束仍由现行消费方（session_manager send 排队 /
  * create 直投 / landing 首发）共守。
  *
@@ -189,7 +189,7 @@ export interface SessionDeliveryRegistry {
   drain(sessionId: string): Array<{ clientUuid: string; content: string; segments?: Segment[] }>
   /** 断连重报判重（delivery.resync）：返回命中终态判重记录（含 transcript 回执证据）的 uuid */
   resync(sessionId: string, clientUuids: readonly string[]): Promise<string[]>
-  /** 内核条目双视图（D9②；帧装配由 u3a 经 handle 投影视图消费） */
+  /** 内核条目双视图（D9②；帧装配由 u3a 经 handle 派生视图消费） */
   entries(sessionId: string): DeliveryEntriesFull | undefined
   /**
    * pi 文本队列镜像计数（queue_update 全量快照；§3.6 新增消费）：快照口径 = 文本镜像
@@ -210,12 +210,12 @@ export interface SessionDeliveryRegistry {
   /** 对账器入口（五触发点共用；内部自行节流与幂等） */
   reconcile(sessionId: string, trigger: ReconcileTrigger): Promise<void>
   /**
-   * pi 断连事件输入（ADR-0122 命令终局事件化的断连腿）：
+   * pi 断连事件输入（ADR-0122 命令终局事件化的断连路径）：
    * pi 进程退出/断连时由 onSessionExit 链调用（removeSessionEntry 与 MessageBus 清理之前，
    * 通知必须仍可达订阅者）。挂起的在途投递批量转显式失败终局：撤销待收回条目按撤销意图
    * 兑现（文本随进程死亡离场）；其余 in-flight 条目转 failed + message.error 逐条显式
    * 上报（「执行结果未确认，重发前请核对」）。queued 条目不触碰（未触达底层通道，随队列
-   * 存活）。本方法替代已退役的 sweepInFlight 蒸发收口与 65s 时间窗。
+   * 存活）。本方法替代已退役的 sweepInFlight 蒸发收尾与 65s 时间窗。
    */
   onPiDisconnected(sessionId: string): void
   /**
@@ -326,9 +326,9 @@ export function piContentText(content: unknown): string {
   return text
 }
 
-/** 边沿唤醒后的复核延迟（一个 macrotask）：边沿源（pi 事件流）的各监听腿（interpreter 的
- * occupancy 投影置位/复位与注册表内部标志）在同一次事件分发内同步执行完毕后，等待者的
- * 复核才能看到持有终态——消除「边沿先到、投影后翻」的监听序竞态。 */
+/** 边沿唤醒后的复核延迟（一个 macrotask）：边沿源（pi 事件流）的各监听路径（interpreter 的
+ * occupancy 派生视图置位/复位与注册表内部标志）在同一次事件分发内同步执行完毕后，等待者的
+ * 复核才能看到持有终态——消除「边沿先到、派生视图后翻」的监听序竞态。 */
 function holdEdgeTick(): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, 0))
 }
@@ -344,15 +344,15 @@ function holdEdgeTick(): Promise<void> {
  * 可管（§3.7「为什么不需要 hold / busy 机制」）。
  * 'revoking'（消息撤回 D2①）= 撤回编排进行中——撤回的树回退语义要求窗口内无新消息
  * 投出（新分支上「凭空出现」破坏 G2），与 piCompactingBlocked 同型：registry 私有
- * 标志（不在 occupancy 投影通道），经 currentHold 判定生效。**保留不退役**（u5a 裁决：
+ * 标志（不在 occupancy 派生视图通道），经 currentHold 判定生效。**保留不退役**（u5a 裁决：
  * 任务书退役清单只列 bash 持有；目标 5「撤销编排行为不变」以本标志为承重——revoke
  * 编排窗口内新提交仍走排队等待；设计 §3.6 已在 v7 将 revoking 移出退役清单，与本保留裁决一致）。
  */
 type HoldReason = 'compacting' | 'revoking'
 
 /**
- * 持有判定（唯一判定源，读 runtime 权威 occupancy 投影）：compaction 持有唯一保留
- * （view.isCompacting = 手动压缩窗口投影，生产 = session.compaction_start 置位）。
+ * 持有判定（唯一判定源，读 runtime 权威 occupancy 派生视图）：compaction 持有唯一保留
+ * （view.isCompacting = 手动压缩窗口派生视图，生产 = session.compaction_start 置位）。
  */
 function holdReasonOf(view: IManagedSessionView | undefined): HoldReason | null {
   if (!view) return null // 无视图（测试/异常装配）按可投，投递阶段 ensureActive 失败可见
@@ -424,7 +424,7 @@ interface RuntimeState {
    * 释放 = 编排 try/finally 全路径（含 busy / no-mapping 等提前 return）。泄漏形态 =
    * 该 session 后续提交永久 queued 挂起（恢复通道仅重启 app），故释放契约不可缺。
    * 经 currentHold 第四判定输入生效（piCompactingBlocked 同型，勿复用 compacting
-   * 投影通道）；置位/释放入口 = beginRevokeHold / endRevokeHold（互斥自检在置位内）。
+   * 派生视图通道）；置位/释放入口 = beginRevokeHold / endRevokeHold（互斥自检在置位内）。
    */
   revoking: boolean
   /**
@@ -438,7 +438,7 @@ interface RuntimeState {
   pendingRevoke: Set<string>
   /**
    * 扩展命令 name 清单快照（pi1-disposition-chat-flow D2①，pi 句柄附着时经 get_commands
-   * 拉取，pi respawn 后随 watchClient 重拉）。undefined = 未就绪或拉取失败。
+   * 拉取，pi respawn 后随 watchClient 重新拉取）。undefined = 未就绪或拉取失败。
    * 消费点 = isUnmarkedEntry（无标记出站判定）：清单缺失时全量按普通消息出站
    * （D2 分支 c 兜底；实际被接管时 handled 响应仍驱动终局，D2③）。
    */
@@ -589,12 +589,12 @@ export function createSessionDeliveryRegistry(
   /**
    * 无标记文本 → 活跃无标记条目身份回查（D2②）：无标记文本两族——agent 通路整条（合批
    * 语义，非降级）或无标记条目（命令/技能，出站不注标）。无标记条目经内核活跃集全文精确
-   * 匹配回条目身份——disposition 受理终局接线（deliverOne 的 confirmDelivered / 撤销守卫）
+   * 匹配回条目身份——disposition 受理终局接线（deliverOne 的 confirmDelivered / 撤销检查）
    * 依赖段身份。匹配域限于 unmarkedEntryIds 在册条目：无标记普通文本（'acceptance' 锚 /
    * agent 通路）不劫持身份（受理登记提前会断 onSendOk 的 acceptance 落地链）；串行投递
    * （内核 in-flight 防重）下同文本条目按队列序逐个消费，不会跨条目错配。误配形态 = 外来
    * 无标记文本恰与某活跃无标记条目全文相等（极窄，后果 = 终局通知错位、原条目由断连事件
-   * 收口），普通消息出站恒带标记。
+   * 收尾），普通消息出站恒带标记。
    */
   function matchUnmarkedEntryId(text: string, state: RuntimeState, handle: DeliveryHandleV2): string | undefined {
     for (const e of handle.entriesFull().active) {
@@ -607,7 +607,7 @@ export function createSessionDeliveryRegistry(
 
   /**
    * 剩余段切出（段间 gap / 批尾 tail 共用）：非 BATCH_SEP 起始 = 结构不符——放弃拆分整条
-   * 投递（不猜测切分——宁合不裂），返回 false 由调用方整条收口；BATCH_SEP 之后的未知文本
+   * 投递（不猜测切分——宁合不裂），返回 false 由调用方整条收尾；BATCH_SEP 之后的未知文本
    * 非空才成段（agent 通路条目无标记）。
    */
   function pushRemainderPart(parts: ComposedPart[], raw: string, label: string, state: RuntimeState): boolean {
@@ -645,7 +645,7 @@ export function createSessionDeliveryRegistry(
       if (record === undefined) {
         // 撤销/已确认段：出站标记恒尾附（withDeliveryMarker 写侧同形），按标记字面量
         // 定位段终点整段跳过（含段文本与标记）；全部段被跳过时返回空 parts（调用方
-        // 零段投递 = 全批撤销/已确认的合法收口）
+        // 零段投递 = 全批撤销/已确认的合法收尾）
         const lit = markerLiteral(bare)
         const markerEnd = text.indexOf(lit, cursor)
         if (markerEnd < 0) {
@@ -715,8 +715,8 @@ export function createSessionDeliveryRegistry(
    * [D3③] CP6 回落窗已退役（pi1-disposition-chat-flow）：空闲发命令后 occupancy 的
    * 回落改由 pi 权威事实驱动——handled 响应即回落（deliverOne D3②）；started/queued
    * 形态下回合事件按 pi 正常事件流到达（事件异常不可达 = 进程死亡，由 onSessionExit
-   * 链的 occupancy full-reset 与断连失败上报收口，ADR-0122——原 sweepInFlight
-   * transcript 比对收口属时间窗扫描，已随命令终局事件化退役）。
+   * 链的 occupancy full-reset 与断连失败上报收尾，ADR-0122——原 sweepInFlight
+   * transcript 比对收尾属时间窗扫描，已随命令终局事件化退役）。
    */
 
   /** 唤醒该 session 全部持有期等待者（边沿到达；幂等——无等待者 no-op）。 */
@@ -730,11 +730,11 @@ export function createSessionDeliveryRegistry(
    * - compacting-pi / compacting（pi 侧事实）：watchClient 的 compaction_end 监听 + 句柄
    *   变更自愈点（piCompactingBlocked 复位处）；
    * - revoking：endRevokeHold（编排 try/finally 必达）；
-   * - view 维度（compacting 投影）：转移执行方（dispatcher compacting-end 转移后）经
+   * - view 维度（compacting 派生视图）：转移执行方（dispatcher compacting-end 转移后）经
    *   notifyHoldRelease 端口驱动。
-   * - agent_settled 多播（ensureSettledSub 常挂）仍作为多源唤醒腿保留（对 v3 剩余持有
+   * - agent_settled 多播（ensureSettledSub 常挂）仍作为多源唤醒路径保留（对 v3 剩余持有
    *   形态幂等无害；对账触发点①同点驱动）。
-   * [u5a 退役登记] v2 的 settling / bash 维度随本地队列退役（唤醒腿保留，无对应等待者
+   * [u5a 退役登记] v2 的 settling / bash 维度随本地队列退役（唤醒路径保留，无对应等待者
    * 时幂等）。
    * （watchdog 30s 周期兜底唤醒已随 ADR-0122 防御机制清查退役——等待者唤醒归事件边沿。）
    */
@@ -745,7 +745,7 @@ export function createSessionDeliveryRegistry(
   }
 
   /**
-   * 等待可投（持有期边沿驱动）：持有释放边沿到达 → 一拍复核（等边沿源各监听腿同步执行
+   * 等待可投（持有期边沿驱动）：持有释放边沿到达 → 一拍复核（等边沿源各监听路径同步执行
    * 完毕）→ 仍持有则继续等下一边沿；释放即以**前一个持有原因**触发对账（触发点①②③，
    * 原轮询语义保持）。disposed 后等待者不悬挂（B3——边沿唤醒后循环首查 disposed 即返回）。
    */
@@ -766,7 +766,7 @@ export function createSessionDeliveryRegistry(
   function currentHold(sessionId: string, state: RuntimeState): HoldReason | 'compacting-pi' | null {
     const fromView = holdReasonOf(viewOf(sessionId))
     if (fromView !== null) return fromView
-    // revoking 判定（消息撤回 D2）：registry 私有标志，不进 occupancy 投影通道——
+    // revoking 判定（消息撤回 D2）：registry 私有标志，不进 occupancy 派生视图通道——
     // view 优先保持「叠加时按 view 原因报告」的最小改动语义（叠加 hold 任一非 null 即持有）。
     if (state.revoking) return 'revoking'
     return state.piCompactingBlocked ? 'compacting-pi' : null
@@ -774,11 +774,11 @@ export function createSessionDeliveryRegistry(
 
   /**
    * prompt + compaction 拒绝等待重提（v3 受理即出站的唯一重试场景）：
-   * - 'compacting'（TOCTOU：手动压缩已开始但 view 投影未落，holdReasonOf 读不到）→
+   * - 'compacting'（TOCTOU：手动压缩已开始但 view 派生视图未落，holdReasonOf 读不到）→
    *   'reject-other' 复位 turn + 置 `piCompactingBlocked`（pi 侧权威事实），**按
    *   compaction_end 事件释放**（事件驱动，不按挂钟轮询——规则 19：等边沿，不烧预算；
    *   也防事件丢失时死循环）后循环重提（§3.6 compaction 持有保留）。
-   * - 其余错误原样抛（内核按受理失败首败即停收口，ADR-0122）。**[u5a 退役] v2 的
+   * - 其余错误原样抛（内核按受理失败首败即停收尾，ADR-0122）。**[u5a 退役] v2 的
    *   'processing' 分型重试随忙闲门禁退役**：受理即出站下全部文本投递恒带
    *   streamingBehavior（intent 映射），pi 忙时入队不拒（agent-session.js:1515-1524）
    *   ——processing 拒绝仅剩「无 behavior 直投（sendDirect，新 session 必 idle 无竞态）
@@ -826,7 +826,7 @@ export function createSessionDeliveryRegistry(
   }
 
   /**
-   * 投递前置守卫（抑制/撤销）：entryId 缺席（agent 通路段）恒放行；抑制 = rebuild 判定
+   * 投递前置检查（抑制/撤销）：entryId 缺席（agent 通路段）恒放行；抑制 = rebuild 判定
    * 已送达（只记账不碰 pi）；撤销 = 持有期条目离册（撤销只终结未受理条目）。
    */
   function skipSuppressedOrRevoked(state: RuntimeState, handle: DeliveryHandleV2, entryId?: string): boolean {
@@ -851,11 +851,11 @@ export function createSessionDeliveryRegistry(
   }
 
   /**
-   * dispatching 收口（幂等门 = 仅恰在 dispatching 时执行）：
-   * - 'reject-other'：[RT-4#10] prompt 真失败收口（不卡 dispatching）。全部真失败均经
-   *   本腿收口（含 processing 拒绝——u5a 退役分型重试后按真失败抛出、不再反转
-   *   occupancy；compacting 拒绝在 promptAwaitingCompaction 内等待重提不抛、不经本腿）
-   *   ——幂等门只收口仍停留 dispatching 的形态。
+   * dispatching 收尾（幂等门 = 仅恰在 dispatching 时执行）：
+   * - 'reject-other'：[RT-4#10] prompt 真失败收尾（不卡 dispatching）。全部真失败均经
+   *   本路径收尾（含 processing 拒绝——u5a 退役分型重试后按真失败抛出、不再反转
+   *   occupancy；compacting 拒绝在 promptAwaitingCompaction 内等待重提不抛、不经本路径）
+   *   ——幂等门只收尾仍停留 dispatching 的形态。
    * - 'idle'：[D3②] handled 终局主动回落（命令接管后输入已消费、无回合要跑；回落后的 idle
    *   是终态事实）。
    */
@@ -900,7 +900,7 @@ export function createSessionDeliveryRegistry(
 
   /**
    * 单条出站交接（port.send 的逐条实现 + sendDirect 共用）：
-   * 抑制/撤销守卫 → 持有等待（v3 仅 compaction/revoking——受理即出站无忙闲等待）→
+   * 抑制/撤销检查 → 持有等待（v3 仅 compaction/revoking——受理即出站无忙闲等待）→
    * 显式投递放行 → ensureActive → skill 注入 → prompt（compaction 拒绝等待重提）→
    * 受理终局 → skillNotice → 记账置位。occupancy 置位先于 prompt 且仅空闲时置位
    *（markDispatchingIfIdle）；lastActiveAt/workspace 记账晚于 prompt 受理
@@ -945,7 +945,7 @@ export function createSessionDeliveryRegistry(
   /**
    * handled 终局通知（D1③）：一次性事件消息（非 last-value 快照），一对一告知前端该
    * clientUuid 已离开投递系统——前端消费（U2）= 复用回滚三件套静默清除乐观气泡，无错误
-   * 提示。通知缺席（断连窗口丢失）由 D1⑤ 孤儿对账兜底（投影判据双分支）。
+   * 提示。通知缺席（断连窗口丢失）由 D1⑤ 孤儿对账兜底（派生视图判据双分支）。
    */
   function notifyDeliveryHandled(sessionId: string, clientUuid: string): void {
     deps.getMessageBus()?.publish(sessionId, {
@@ -977,7 +977,7 @@ export function createSessionDeliveryRegistry(
       notifyWaiters(state) // 自愈即边沿：唤醒持有期等待者复核（MF-1-9）
     }
     if (changed || wasUnattached) {
-      // [D2 清单新鲜度] 附着 / 重生后命令清单快照重拉（异步，不阻塞投递腿；只经已附着
+      // [D2 清单新鲜度] 附着 / 重生后命令清单快照重新拉取（异步，不阻塞投递路径；只经已附着
       // 句柄读取不拉起 pi——就绪前按旧快照 / 缺失兜底判定，分支 c 覆盖行为正确性）。
       void refreshCommandList(sessionId, state)
     }
@@ -992,7 +992,7 @@ export function createSessionDeliveryRegistry(
       if (e.type === 'message_end') confirmByMessageEnd(state, handle, e.message)
       else if (e.type === 'compaction_end') {
         state.piCompactingBlocked = false // pi 侧压缩结束 = 持有释放条件（D6）
-        notifyWaiters(state) // 压缩结束边沿：唤醒持有期等待者（MF-1-9；interpreter 同事件内复位投影）
+        notifyWaiters(state) // 压缩结束边沿：唤醒持有期等待者（MF-1-9；interpreter 同事件内复位派生视图）
         void reconcile(sessionId, 'compaction-end')
       } else if (e.type === 'queue_update') {
         // queue_update 全量快照（pi 每次队列变更广播；§3.6 新增消费）：文本镜像口径
@@ -1014,7 +1014,7 @@ export function createSessionDeliveryRegistry(
 
   /**
    * 送达回执（D2 第二阶段）：message_end(user) 文本命中裸标记 → 条目 delivered。
-   * 标记 id 精确匹配（身份）取代计数 FIFO / 文本匹配（D2 被否项①②）。
+   * 标记 id 精确匹配（身份）取代计数 FIFO / 文本匹配（D2 不采用项①②）。
    */
   function confirmByMessageEnd(
     state: RuntimeState,
@@ -1202,7 +1202,7 @@ export function createSessionDeliveryRegistry(
   async function rebuildEntry(sessionId: string, rt: SessionRuntime, id: string, text: string): Promise<void> {
     if (rt.pendingRevoke.has(id)) {
       // 撤销待收回条目不重建重投（dmg-r1-2 防御：正常不可达——待收回条目 submitted
-      // 在册必走 own/settledRevokes 分支；意图留守由收回兑现或断连事件兑现收口）
+      // 在册必走 own/settledRevokes 分支；意图留守由收回兑现或断连事件兑现收尾）
       warn('rebuild: skipped pending-revoke entry (revoke intent held), sid=', sessionId, id)
       return
     }
@@ -1260,8 +1260,8 @@ export function createSessionDeliveryRegistry(
    * 一次性语义（outboxReplayed）：pi 未附着（client 缺席，transcript 判重不可用）时本轮
    * 放弃且不置位——defer 到下一触发点（reattach 恢复链的 reconcile 是 'pi-restored' 唯一
    * 常规来源；磁盘记录持久，不丢不炸）。执行轮中途失败不重试（重放体幂等：在册/终局 skip
-   * 保证重跑不双投，但失败面理论不可达——store 读取容错、transcript 判重自兜、submitToKernel
-   * 内部收口失败面）。
+   * 保证重跑不双投，但失败情形理论不可达——store 读取容错、transcript 判重自兜、submitToKernel
+   * 内部收尾失败情形）。
    */
   async function replayUndelivered(sessionId: string, rt: SessionRuntime): Promise<void> {
     const store = rt.store
@@ -1296,7 +1296,7 @@ export function createSessionDeliveryRegistry(
         record.unmarked === true
           ? await transcriptHasExactText(sessionId, rt, text)
           : await transcriptHasMarker(sessionId, rt, id)
-      if (delivered) rt.suppressed.add(id) // 出站守卫读 suppressed，必须先于 submitToKernel 置位
+      if (delivered) rt.suppressed.add(id) // 出站检查读 suppressed，必须先于 submitToKernel 置位
       await submitToKernel(sessionId, rt, {
         id,
         text,
@@ -1447,7 +1447,7 @@ export function createSessionDeliveryRegistry(
 
   // ── 触发点装配（settled 边沿） ───────────────────────────────
 
-  /** settled 边沿订阅（触发点① + 持有期等待者多源唤醒腿）：settled → 唤醒持有期等待者（幂等腿）+ 对账（槽位滞留自愈 V2）。 */
+  /** settled 边沿订阅（触发点① + 持有期等待者多源唤醒路径）：settled → 唤醒持有期等待者（幂等路径）+ 对账（槽位滞留自愈 V2）。 */
   function ensureSettledSub(sessionId: string, state: RuntimeState): void {
     if (state.unsubSettled || state.disposed) return
     state.unsubSettled = deps.subscribeAgentSettled((sid) => {
@@ -1501,7 +1501,7 @@ export function createSessionDeliveryRegistry(
           throw new Error(`[session-delivery] unsupported payload kind: ${msg.payload.kind}`)
         }
         const images = msg.payload.images
-        // v3 受理即出站：生产提交全走 sendChecked（单条挂账直投）+ 内核 on-accept 忽略
+        // v3 受理即出站：生产提交全走 sendChecked（单条登记直投）+ 内核 on-accept 忽略
         // 合批窗口——本口常态收单条。splitComposed 保留作防御：handle.send 公开通路的
         // 普通队列在 in-flight 往返窗内积压多条时，内核仍会以 BATCH_SEP 拼批出站（内核
         // doSend 批量路径与 dispatchMode 正交）——拆段保证用户消息逐条进 transcript、
@@ -1516,7 +1516,7 @@ export function createSessionDeliveryRegistry(
             ...(i === 0 && images !== undefined && images.length > 0 ? { images } : {}),
           }, part.id)
           // 受理登记（dmg-r1-4）：prompt 受理成功即申报——已受理段转 in-flight 出批留守
-          //（等回执/对账）；后续段失败收口时仅未受理段走失败面，已进 pi 的段不再误报
+          //（等回执/对账）；后续段失败收尾时仅未受理段走失败情形，已进 pi 的段不再误报
           //「消息投递失败」（无 id 段无条目，跳过）。条目已被撤销/已随 handled 终局时
           // 登记幂等 false。
           if (part.id !== undefined) handle.confirmAccepted(part.id)
@@ -1692,7 +1692,7 @@ export function createSessionDeliveryRegistry(
       const first = rt.handle.cancel(clientUuid)
       if (first.kind === 'cancelled') {
         rt.pendingRevoke.delete(clientUuid) // 终态兜底清集（正常路径已由流程点清除）
-        // 撤销即出册（R2-A2）：判定锚随条目终结清账，防同文本后续条目被反查到死记录
+        // 撤销即出册（R2-A2）：判定锚随条目终结清除，防同文本后续条目被反查到死记录
         rt.submitted.delete(bareMarkerId(clientUuid))
         return { cancelled: true, content: payloadText(first.entry.payload), ...(segmentsSnapshot !== undefined ? { segments: segmentsSnapshot } : {}) }
       }
@@ -1830,7 +1830,7 @@ export function createSessionDeliveryRegistry(
     notifyHoldRelease(sessionId) {
       // hold 解除边沿输入端口（MF-1-9）：compacting-end 等外部 view 维度复位后由转移
       // 执行方调用；无运行时（未创建/已 dispose）幂等 no-op。[u5a 退役登记] v2 的
-      // bash-end 唤醒腿随 bash 持有退役（bash-dispatcher 调用点保留，本端口对无等待者
+      // bash-end 唤醒路径随 bash 持有退役（bash-dispatcher 调用点保留，本端口对无等待者
       // 场景幂等无害）——v3 的等待者只剩 compaction / revoking 持有形态。
       const rt = runtimes.get(sessionId)
       if (!rt) return
@@ -1909,7 +1909,7 @@ export function createSessionDeliveryRegistry(
     if (result.kind === 'cancelled') rt.submitted.delete(bareMarkerId(id))
   }
 
-  /** 无 client（pi 未附着）时的撤销收口：transcript 不可读 → 本地终结（未投递即撤销）。 */
+  /** 无 client（pi 未附着）时的撤销收尾：transcript 不可读 → 本地终结（未投递即撤销）。 */
   async function settleCancelWithoutReclaim(
     sessionId: string,
     rt: SessionRuntime,

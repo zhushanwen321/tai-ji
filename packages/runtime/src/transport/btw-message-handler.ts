@@ -23,7 +23,7 @@
  *   线列表恢复由 btw.list RPC 拉取兜底（M2-a 双通道契约）。
  * - **消息通路零新增（D6）**：线内发送复用 `message.send`（sessionId = btw vid）、
  *   帧族复用 `message.*`——本 handler 不触碰 message.* 族（M2-b 验收③）。
- * - **P2 降级隔离**：领域错误经 sendHandlerError 收口（BtwError → code 原样透传；
+ * - **P2 降级隔离**：领域错误经 sendHandlerError 收尾（BtwError → code 原样透传；
  *   未知错误 → 兜底 'btw_failed'），单帧失败不影响主链路。
  *
  * 依赖注入（B2/B1 授权接线）：组合根（index.ts）构造 BtwService 后经
@@ -88,7 +88,7 @@ export interface BtwRoutingDeps {
   resolveMain(mainSid: string): { cwd: string; mainTurnActive: boolean } | undefined
 }
 
-/** BtwMessageHandler 的 context（messaging 共享面 + btw 领域依赖）。 */
+/** BtwMessageHandler 的 context（messaging 共享依赖 + btw 领域依赖）。 */
 export interface BtwHandlerContext extends MessageHandlerContext {
   btwService: BtwServiceFace
   resolveMain: BtwRoutingDeps['resolveMain']
@@ -116,7 +116,7 @@ function toForkState(kind: BtwCreateResult['snapshotKind']): BtwForkState {
 export class BtwMessageHandler {
   constructor(private ctx: BtwHandlerContext) {}
 
-  /** 本 handler 认领的 ClientMessageType 清单（D6 三帧；无 btw.send / btw.close——被否项）。 */
+  /** 本 handler 认领的 ClientMessageType 清单（D6 三帧；无 btw.send / btw.close——不采用项）。 */
   readonly handles: ClientMessageType[] = ['btw.create', 'btw.list', 'btw.remove']
 
   async handleBtwMessage(msg: ClientMessage, ws: WsType): Promise<void> {
@@ -141,7 +141,7 @@ export class BtwMessageHandler {
             mainTurnActive: main.mainTurnActive,
           })
           // 成功后广播全量线列表（state topic 'btw'，publish 于 mainSid）——先广播后 ack：
-          // publishThreadList 自带 best-effort 守卫，构造性不阻断 reply。
+          // publishThreadList 自带 best-effort 检查，构造性不阻断 reply。
           this.publishThreadList(result.mainSid)
           return this.ctx.reply(ws, msg.id, 'btw.create', {
             vid: result.vid,

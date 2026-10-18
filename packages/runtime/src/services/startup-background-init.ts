@@ -43,7 +43,7 @@ import type { PluginService } from './plugin-service/plugin-service.js'
 export interface StartupBackgroundDeps {
   configStore: PiConfigStore
   authStorage: AuthStorage
-  /** auth.json 凭据写通道（A1-4 收口）：legacy step1 迁移的 apiKey 写入经 AuthService。 */
+  /** auth.json 凭据写通道（A1-4 收尾）：legacy step1 迁移的 apiKey 写入经 AuthService。 */
   credentialWriter: CredentialWriter
   extensionService: ExtensionService
   pm: ProcessManager

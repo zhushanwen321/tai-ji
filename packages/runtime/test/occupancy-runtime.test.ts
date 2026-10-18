@@ -305,7 +305,7 @@ describe('MessageDispatcher occupancy 挂点', () => {
     expect(promptFn).toHaveBeenCalled()
     const frames = occupancyFrames(publish)
     expect(frames).toEqual([{ sessionId: 's1', turn: 'dispatching', compacting: false, bash: false }])
-    // 帧序（[RT-4#10] 合并收口）：occupancy 置位先于 prompt——RPC 往返窗内对预检/回收豁免
+    // 帧序（[RT-4#10] 合并收尾）：occupancy 置位先于 prompt——RPC 往返窗内对预检/回收豁免
     // 不再呈 idle；lastActiveAt/record 记账面（D-18「成功才显示 working」）仍在 prompt
     // 受理成功后（markSessionActive 尾置，occupancy 同值转移去重不二播）
     expect(seq.indexOf('prompt')).toBeGreaterThanOrEqual(0)
@@ -343,9 +343,9 @@ describe('MessageDispatcher occupancy 挂点', () => {
     // 迁移面（§3.4 错误规格表「压缩中 direct 投递撞 Cannot submit...」行）：条目回 queued，
     // compaction_end 后再投——持有而非失败/丢弃（D6 适配器 catch 面处置）
     expect(registry.entries('s1')?.active[0]).toMatchObject({ state: 'queued' })
-    // 帧序（[RT-4#10] 合并收口）：投递起腿写 dispatching → busy 类拒绝在 registry
+    // 帧序（[RT-4#10] 合并收尾）：投递路径起始写 dispatching → busy 类拒绝在 registry
     // promptAwaitingCompaction（classifyBusyRejection 分型）内复位 idle + 置
-    // piCompactingBlocked（持有等 compaction_end）——显式收口帧序列，而非旧的「零帧」
+    // piCompactingBlocked（持有等 compaction_end）——显式收尾帧序列，而非旧的「零帧」
     expect(occupancyFrames(publish)).toEqual([
       { sessionId: 's1', turn: 'dispatching', compacting: false, bash: false },
       { sessionId: 's1', turn: 'idle', compacting: false, bash: false },
@@ -362,8 +362,8 @@ describe('MessageDispatcher occupancy 挂点', () => {
     expect(result.blocked).toBe(false)
     expect(frameTypes(publish)).toContain('message.error')
     expect(String(publishedByType(publish, 'message.error')?.payload.message)).toContain('auth failed')
-    // 帧序（[RT-4#10] 合并收口）：投递起腿写 dispatching → 非 busy 真失败由投递腿 catch 面
-    // 收口回 idle（不卡 dispatching）；原断言意图保留：终态不得停留 dispatching
+    // 帧序（[RT-4#10] 合并收尾）：投递路径起始写 dispatching → 非 busy 真失败由投递路径 catch 面
+    // 收敛回 idle（不卡 dispatching）；原断言意图保留：终态不得停留 dispatching
     expect(occupancyFrames(publish)).toEqual([
       { sessionId: 's1', turn: 'dispatching', compacting: false, bash: false },
       { sessionId: 's1', turn: 'idle', compacting: false, bash: false },
@@ -417,7 +417,7 @@ describe('MessageDispatcher occupancy 挂点', () => {
   it('#7 失败路径：bash transport 抛错 → finally 仍复位 bash=false（⑤ bashResult/message.error 保留）', async () => {
     const { dispatcher, publish } = makeDispatcher({ bashBehavior: 'error' })
     const result = await dispatcher.sendBash('s1', 'bad')
-    expect(result.status).toBe('settled') // 已执行并收口（回执携带执行状态）
+    expect(result.status).toBe('settled') // 已执行并收尾（回执携带执行状态）
     const frames = occupancyFrames(publish)
     expect(frames.at(-1)).toMatchObject({ bash: false })
     expect(frameTypes(publish)).toContain('message.bashResult')
@@ -454,7 +454,7 @@ describe('MessageDispatcher occupancy 挂点', () => {
     // finally 兜底复位（interpreter 的 compaction_end #6 不到达）。
     const { dispatcher, publish, session, compactFn } = makeDispatcher({ compactBehavior: 'error' })
     compactFn.mockImplementation(async () => {
-      // 模拟 compaction_start 已到达（interpreter #5 语义）：经原语置位（u3c readonly 收口；
+      // 模拟 compaction_start 已到达（interpreter #5 语义）：经原语置位（u3c readonly 收尾；
       // publish 传 null 与改前直写一致不广播）。
       // 注：RT-4#10 起 dispatcher 预检通过后自己先广播一帧 compacting=true（关重入窗口），
       // 故本用例应见「true → false」两帧：前者是预检后置位帧，后者是 finally 复位帧。

@@ -1,16 +1,16 @@
 /**
- * subagent-extractor 畸形输入 / 投影守卫定向测试（CRAP 靶子：collectV2SubagentPair /
+ * subagent-extractor 畸形输入 / 派生视图检查定向测试（CRAP 检查清单：collectV2SubagentPair /
  * projectV2SubagentRecord / parseLegacyToolCallBlock / projectSubagentStartArgs /
  * projectLegacyToolResultData / buildLegacySubagentRecord）。
  *
- * [登记 §3.3] v1 全量快照投影（projectSelfDescribedSubagentRecord）与 v1 entry 扫描已随
- * 兼容层整体删除（项目未上线、无 v1 数据）——自描述投影用例改用现行 v2「注册 + 终态」
- * 条目对播种，断言收敛到幸存投影面：身份域透传（origin 字面量守卫 / parentRunId /
+ * [登记 §3.3] v1 全量快照派生视图（projectSelfDescribedSubagentRecord）与 v1 entry 扫描已随
+ * 兼容层整体删除（项目未上线、无 v1 数据）——自描述派生视图用例改用现行 v2「注册 + 终态」
+ * 条目对播种，断言收敛到幸存派生视图：身份域透传（origin 字面量检查 / parentRunId /
  * stepIndex）、缺省可选字段 → undefined / null（不发明默认值）、elapsedSeconds 派生、
  * engine/engineHandle 透传、同 id 后到覆盖。
  *
- * 已有 subagent-extractor.test.ts 覆盖正常路径（条目对投影 / bg-notify 终态 /
- * sessionFile 回退扫描）；本文件专测形状守卫族——输入源是 LLM 生成的 toolCall
+ * 已有 subagent-extractor.test.ts 覆盖正常路径（条目对派生视图 / bg-notify 终态 /
+ * sessionFile 回退扫描）；本文件专测形状检查族——输入源是 LLM 生成的 toolCall
  * arguments / toolResult 文本 JSON.parse 产物 / extension 写入的 entry data（全部
  * 不可信），畸形值不得以谎报类型直达 SubagentRecord（下游 readFileSync 对非 string
  * sessionFile 会 throw）。
@@ -70,7 +70,7 @@ function settledEntry(overrides: Record<string, unknown> = {}): Record<string, u
   }
 }
 
-/** v1 专有字段在 v2 投影上无载体：键不出现（不是「键在场值为 undefined」）。 */
+/** v1 专有字段在 v2 派生视图上无载体：键不出现（不是「键在场值为 undefined」）。 */
 function expectAbsentKey(record: SubagentRecord, key: string): void {
   expect(Object.prototype.hasOwnProperty.call(record, key)).toBe(false)
 }
@@ -102,8 +102,8 @@ function pair(toolResultText: string, block: Record<string, unknown> = startBloc
   ]
 }
 
-describe('v2 subagent-record 条目投影守卫（collectV2SubagentPair / projectV2SubagentRecord）', () => {
-  it('注册条目 id 非字符串 → 该条目跳过，同批其余合法注册条目照常产出（在飞态）', () => {
+describe('v2 subagent-record 条目派生视图检查（collectV2SubagentPair / projectV2SubagentRecord）', () => {
+  it('注册条目 id 非字符串 → 该条目跳过，同批其余合法注册条目照常产出（在途态）', () => {
     const records = scanSubagentEntries([
       registeredEntry({ id: 123 }), // id 畸形：number
       registeredEntry({ id: 'sub-ok' }),
@@ -133,9 +133,9 @@ describe('v2 subagent-record 条目投影守卫（collectV2SubagentPair / projec
     expect(r.result).toBeUndefined()
     expect(r.parentRunId).toBeUndefined()
     expect(r.stepIndex).toBeUndefined()
-    // origin 字面量守卫：非法值 → undefined（= tool 语义，不发明出处）
+    // origin 字面量检查：非法值 → undefined（= tool 语义，不发明出处）
     expect(r.origin).toBeUndefined()
-    // v1 投影的 agent/slug/task 兜底（general-purpose / 空串）已随兼容层删除：
+    // v1 派生视图的 agent/slug/task 兜底（general-purpose / 空串）已随兼容层删除：
     // v2 身份域原样透传注册条目值
     expect(r.agent).toBe('worker')
     expect(r.slug).toBe('w1')
@@ -185,11 +185,11 @@ describe('v2 subagent-record 条目投影守卫（collectV2SubagentPair / projec
     expect(running[0].elapsedSeconds).toBeUndefined()
   })
 
-  // R3-1（H2 阶段 3 一致性审查修复）：origin 透传断言——此前投影白名单漏 origin，
+  // R3-1（H2 阶段 3 一致性审查修复）：origin 透传断言——此前派生视图白名单漏 origin，
   // renderer 过滤面（badge 计数 / hasRunning / 列表桶）origin 恒 undefined，workflow
-  // record 运行期虚亮。守卫语义对齐 core readEntryOriginFields：仅认 'tool'|'workflow'
+  // record 运行期虚亮。检查语义对齐 core readEntryOriginFields：仅认 'tool'|'workflow'
   // 字面量，非法值/缺省 → undefined（= tool 语义，存量 record 零迁移）。
-  it('身份域透传：origin 字面量守卫 + parentRunId/stepIndex 透传（renderer 过滤面 / run 视图数据源契约）', () => {
+  it('身份域透传：origin 字面量检查 + parentRunId/stepIndex 透传（renderer 过滤面 / run 视图数据源契约）', () => {
     const projected = scanSubagentEntries([
       registeredEntry({ id: 'sub-wf', origin: 'workflow', parentRunId: 'run-1', stepIndex: 2 }),
       registeredEntry({ id: 'sub-tool', origin: 'tool' }),
@@ -207,7 +207,7 @@ describe('v2 subagent-record 条目投影守卫（collectV2SubagentPair / projec
     expect(byId('sub-absent')?.origin).toBeUndefined()
   })
 
-  it('engine/engineHandle 透传：终态条目携带则原样投影，缺省则键不出现（不填默认值）', () => {
+  it('engine/engineHandle 透传：终态条目携带则原样派生视图，缺省则键不出现（不填默认值）', () => {
     const engineHandle = {
       sessionRef: { sessionId: 'z-1', dbPath: '/db/z.sqlite' },
       eventsPath: '/journal/z.jsonl',
@@ -242,7 +242,7 @@ describe('v2 subagent-record 条目投影守卫（collectV2SubagentPair / projec
   })
 })
 
-describe('legacy toolCall arguments 守卫（parseLegacyToolCallBlock + projectSubagentStartArgs）', () => {
+describe('legacy toolCall arguments 检查（parseLegacyToolCallBlock + projectSubagentStartArgs）', () => {
   const startArgs = { action: 'start', startParam: { agent: 'worker', slug: 'w', task: 't' } }
   const bgResult = JSON.stringify({ action: 'start', subagentId: 'sub-bg', sessionFile: null, bgResponse: { status: 'running' } })
 
@@ -253,11 +253,11 @@ describe('legacy toolCall arguments 守卫（parseLegacyToolCallBlock + projectS
     expect(scanSubagentEntries(entries)).toEqual([])
   })
 
-  it('startParam 非对象（string / array / null / 缺失）→ 跳过（LLM 畸形参数不进投影）', () => {
+  it('startParam 非对象（string / array / null / 缺失）→ 跳过（LLM 畸形参数不进派生视图）', () => {
     for (const bad of ['just-a-string', ['array'], null, undefined]) {
       const entries = [
         { type: 'message', message: { role: 'assistant', content: [toolCallBlock({ action: 'start', startParam: bad })] } },
-        // 有 bgResponse 的配对 toolResult（无 toolCall 配对则本就无记录——需成对验证守卫拆散配对）
+        // 有 bgResponse 的配对 toolResult（无 toolCall 配对则本就无记录——需成对验证检查拆散配对）
         { type: 'message', message: { role: 'toolResult', toolName: 'subagent', toolCallId: 'tc-1', content: [{ type: 'text', text: bgResult }] } },
       ]
       expect(scanSubagentEntries(entries)).toEqual([])
@@ -277,13 +277,13 @@ describe('legacy toolCall arguments 守卫（parseLegacyToolCallBlock + projectS
   })
 })
 
-describe('legacy toolResult 文本 JSON 守卫（projectLegacyToolResultData）', () => {
+describe('legacy toolResult 文本 JSON 检查（projectLegacyToolResultData）', () => {
   function withToolResult(text: string): Array<Record<string, unknown>> {
     return pair(text)
   }
 
   it('JSON.parse 产物非 plain object（string / number / array / null）→ 整条丢弃不产出', () => {
-    // 任意合法 JSON 都能 parse 成功——parse 成功 ≠ 形状正确，守卫在此
+    // 任意合法 JSON 都能 parse 成功——parse 成功 ≠ 形状正确，检查在此
     expect(scanSubagentEntries(withToolResult('"just a string"'))).toEqual([])
     expect(scanSubagentEntries(withToolResult('42'))).toEqual([])
     expect(scanSubagentEntries(withToolResult('[1,2,3]'))).toEqual([])
@@ -298,20 +298,20 @@ describe('legacy toolResult 文本 JSON 守卫（projectLegacyToolResultData）'
       bgResponse: { status: 7, message: ['nope'] },
     })))
     expect(records).toHaveLength(1)
-    // 配对成立（bgResponse 存在即产出记录），畸形字段归守卫缺省
+    // 配对成立（bgResponse 存在即产出记录），畸形字段归检查缺省
     expect(records[0].subagentId).toBe('sub-bg')
     expect(records[0].sessionFile).toBeNull() // 畸形 sessionFile → null（不透传 number）
   })
 
-  it('listResponse 畸形族：items 非数组 / running 非数字 / 元素级畸形——全部守卫不崩，配对 bgResponse 时合法 item 照常投影', () => {
-    // items 非数组 + running 畸形：parse 投影为 { running: 0, items: [] }，不崩不产记录
+  it('listResponse 畸形族：items 非数组 / running 非数字 / 元素级畸形——全部检查不崩，配对 bgResponse 时合法 item 照常映射', () => {
+    // items 非数组 + running 畸形：parse 映射为 { running: 0, items: [] }，不崩不产记录
     expect(scanSubagentEntries(pair(JSON.stringify({
       action: 'list',
       listResponse: { running: 'many', items: 'not-an-array' },
     })))).toEqual([])
 
     // items 元素级畸形（'garbage-item' 字符串 / 无 subagentId 的坏 item）：过滤后合法
-    // sub-a 照常投影（bgResponse 配对成立 → 记录产出，listItem 状态/sessionFile 生效）
+    // sub-a 照常映射（bgResponse 配对成立 → 记录产出，listItem 状态/sessionFile 生效）
     const records = scanSubagentEntries(pair(JSON.stringify({
       action: 'start',
       subagentId: 'sub-x',
@@ -334,7 +334,7 @@ describe('legacy toolResult 文本 JSON 守卫（projectLegacyToolResultData）'
   })
 })
 
-describe('legacy record 构造守卫（buildLegacySubagentRecord：sessionFile 三级回退链）', () => {
+describe('legacy record 构造检查（buildLegacySubagentRecord：sessionFile 三级回退链）', () => {
   it('sessionFile 回退链：listItem.sessionFile 优先于 toolResult.sessionFile', () => {
     const records = scanSubagentEntries(pair(JSON.stringify({
       action: 'start',

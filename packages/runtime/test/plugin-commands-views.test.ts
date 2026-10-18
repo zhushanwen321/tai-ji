@@ -2,7 +2,7 @@
  * Commands/Views 双域 RPC 回路测试（s3-w2 runtime-circuit）
  *
  * 覆盖 design-review testCases：
- * - AC2: register→invoke 闭环（主线程 registry 建表 + worker invoke 分发两条腿）
+ * - AC2: register→invoke 闭环（主线程 registry 建表 + worker invoke 分发两条路径）
  * - AC10: mountPoints.sync 注入 → plugin.views.listMountPoints 返回一致
  * - ES1: commands.unregister 不存在 commandId 幂等 no-op
  * - ES2: views.update 无活跃 session 广播丢弃 + warning
@@ -380,7 +380,7 @@ describe('PluginService 接线（commands/views RPC）', () => {
       params: { pluginId: 'p1', viewId: 'v1', guiTree: [] },
     })
 
-    // 旧 ES2「无活跃 session 丢弃 + warning」路径已删除（D1 被否④）：缺 sessionId 是
+    // 旧 ES2「无活跃 session 丢弃 + warning」路径已删除（D1 不采用④）：缺 sessionId 是
     // 插件作者错误，显式 INVALID_SESSION_ID 拒绝 + 零广播（不猜测不投递）
     const wrapper = port.messages[0] as { response: { error?: { code?: string; message?: string } } }
     expect(wrapper.response.error?.code).toBe('INVALID_SESSION_ID')

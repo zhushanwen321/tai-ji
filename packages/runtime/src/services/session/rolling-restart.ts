@@ -2,7 +2,7 @@
  * rolling-restart —— 优雅滚动重启执行链（crash-forensics-and-watchdog.md §3.3 D5，
  * 实施单元 u7c）。
  *
- * 职责（单一变化轴「滚动重启决策与推迟编排」）：
+ * 职责（单一变化原因「滚动重启决策与推迟编排」）：
  * - 触发：看门狗 critical 档（u6 广播 watchdog:memoryPressure level='critical'）进入
  *   决策——warn 档是 relief 降级（u6），不进本模块。
  * - 推迟判定谓词（D5 ①，两源并集；2026-09-13 oe-audit 删第三源「引擎侧快照」——
@@ -30,7 +30,7 @@
  * - 状态可拉取（D5 ③）：getStatus 返回 RollingRestartStatusPayload，经只读 RPC
  *   rollingRestart.status 供 renderer 重连/刷新后拉取恢复横幅；deferred/forced/countdown
  *   广播只作加速显示（「broadcast 时序竞争」教训）。
- * - 台账（D1/D5）：deferred 开始记 rolling-restart-deferred（携带当时镜像在途计数）；
+ * - journal 登记（D1/D5）：deferred 开始记 rolling-restart-deferred（携带当时镜像在途计数）；
  *   forced 记 rolling-restart-forced（reason=hard-threshold | defer-limit）；执行记
  *   rolling-restart。
  *
@@ -38,7 +38,7 @@
  * u6「代码完整交付、武装挂门」语义延伸到重启编排。armed 由组合根按
  * TAIJI_RUNTIME_WATCHDOG_ARMED 解析传入（与 watchdog 同一 resolveWatchdogConfig 结果）。
  *
- * best-effort 契约（对齐 watchdog/mem-pressure）：决策链全量容错，判定/台账/广播任一
+ * best-effort 契约（对齐 watchdog/mem-pressure）：决策链全量容错，判定/journal 登记/广播任一
  * 异常不逃逸出定时器回调与广播入口。
  *
  * 任务级墙钟语义声明（AGENTS 关键规则 19）：defer 上限与 countdown 是 D5 设计规定的
@@ -67,7 +67,7 @@ import { inflightMirror, type InFlightMirror } from './inflight-mirror.js'
 // 常量与默认值（初值随 Gate W 校准）
 // ─────────────────────────────────────────────────────────────────────────────
 
-/** env 旋钮：推迟上限 ms（设计 §5 钉死命名，A4 注入短上限端到端验证 defer-limit 路径）。 */
+/** env 旋钮：推迟上限 ms（设计 §5 固定命名，A4 注入短上限端到端验证 defer-limit 路径）。 */
 export const ENV_ROLLING_RESTART_DEFER_LIMIT_MS = 'TAIJI_ROLLING_RESTART_DEFER_LIMIT_MS'
 
 /**
@@ -105,15 +105,15 @@ const PERCENT_SCALE = 100
  * 顺序契约（D5 退出链）：首步 = 取消推迟定时器（app 级退出 / 86 执行中不得再入滚动
  * 重启）；引擎池 dispose 在 server.stop 之后、closeLogger 之前（杀链期间日志与 stderr
  * tee 要经 logger 落盘，closeLogger 先行则现场丢失）；close-crash-journal 在
- * closeLogger 之前（台账尾部行——server.stop→destroyAll 触发的 shutdown/deleted 行经
- * 异步缓冲——必须等落盘后才能 process.exit，且台账 close 自身的降级日志仍能经 logger
+ * closeLogger 之前（journal 尾部行——server.stop→destroyAll 触发的 shutdown/deleted 行经
+ * 异步缓冲——必须等落盘后才能 process.exit，且 journal close 自身的降级日志仍能经 logger
  * 落盘）。中间步骤与 index.ts 既有链逐行同序（只加打点，不重排）。
  *
  * 终端 PTY 清理（terminal-multi-instance u4）挂 server-stop 紧随其后：与
  * server.stop→destroyAll 同一语义（先关入口再杀子进程——server.stop 之后不再有
  * terminal.spawn 请求，注册表冻结，清理后不会被新建实例回填；先杀后关则关停窗口内
  * spawn 的新 PTY 逃逸）。位置在 server-stop 与 engine-pool-dispose 之间，不改 u7c
- * 钉死的 engine-pool-dispose 相对约束。
+ * 固定的 engine-pool-dispose 相对约束。
  */
 export const SHUTDOWN_STEP_SEQUENCE = [
   'cancel-rolling-restart',
@@ -192,7 +192,7 @@ export interface RollingRestartOptions {
   /**
    * relay 在途子进程数（D5 判定源 ②：kill-on-disconnect 同一注册表的 size）。生产由
    * 组合根接线（index.ts 持有 registry 句柄）；**未注入 = 0 = 谓词该维不贡献**（services
-   * 层禁止 value import 有状态 IO infra，check_services_infra_import 守卫）。
+   * 层禁止 value import 有状态 IO infra，check_services_infra_import 检查）。
    */
   relayInFlight?: () => number
   /** heap 用量百分比（0-100；缺省即时查 process.memoryUsage / v8 heap_size_limit）。 */
@@ -203,7 +203,7 @@ export interface RollingRestartOptions {
   onExecute?: () => void
   /** WS 广播出口（缺省无动作；组合根注入 server.broadcast 包装）。 */
   broadcast?: (type: RollingRestartBroadcastType, payload: RollingRestartBroadcastPayload) => void
-  /** 台账 writer（缺省 getCrashJournal()；测试注入 spy 断言事件字段）。 */
+  /** journal writer（缺省 getCrashJournal()；测试注入 spy 断言事件字段）。 */
   journal?: CrashJournalWriter
   /** 推迟上限 ms（默认 30min；env TAIJI_ROLLING_RESTART_DEFER_LIMIT_MS）。 */
   deferLimitMs?: number
@@ -244,7 +244,7 @@ interface InflightEvaluation {
  * 启动滚动重启编排（组合根 listen 成功后调用一次；测试直接构造注入全量依赖）。
  *
  * 定时器 unref：推迟/预告定时器不得阻止进程自然退出（对齐水位定时器/watchdog 形态）；
- * shutdown 首步 cancel 是显式收口。
+   * shutdown 首步 cancel 是显式收尾。
  */
 export function startRollingRestart(options: RollingRestartOptions = {}): RollingRestartHandle {
   const armed = options.armed ?? false
@@ -308,7 +308,7 @@ export function startRollingRestart(options: RollingRestartOptions = {}): Rollin
     return await memPressureHigh()
   }
 
-  /** 用量快照（台账 heapUsed 字段；判定源缺省实现的字节值，字段全可空原则下可缺省）。 */
+  /** 用量快照（journal heapUsed 字段；判定源缺省实现的字节值，字段全可空原则下可缺省）。 */
   function heapUsedBytes(): number | undefined {
     try {
       return process.memoryUsage().heapUsed

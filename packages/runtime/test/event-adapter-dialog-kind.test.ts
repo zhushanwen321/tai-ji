@@ -158,7 +158,7 @@ describe('D6 mapping table: runtime-internal marker channels (no frontend broadc
     expect(events.filter((e) => e.kind === 'message')).toHaveLength(0)
   })
 
-  it('select + SUBAGENT_INFLIGHT_MARKER → 翻译层守卫零输出（旁路消费）', () => {
+  it('select + SUBAGENT_INFLIGHT_MARKER → 翻译层检查零输出（旁路消费）', () => {
     const payload = JSON.stringify({ sessionId: 'p1', records: [] })
     const events = translate({ type: 'extension_ui_request', method: 'select', id: 'req-inf', title: SUBAGENT_INFLIGHT_MARKER, options: [payload] } as PiTestEvent as never, SID)
     expect(events).toEqual([])

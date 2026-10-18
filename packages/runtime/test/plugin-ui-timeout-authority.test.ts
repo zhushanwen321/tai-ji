@@ -565,7 +565,7 @@ describe('expired 撤窗广播分流（R1-1）', () => {
 
 // ══════════════════════════════════════════════════════════════════
 // MF-2/MF-3 sessionId 注入回归（自 plugin-ui-dialog.test.ts 归并）
-// 无 sid 的 uiRequest 会被前端 C2 守卫丢弃 → plugin dialog 永不弹出。
+// 无 sid 的 uiRequest 会被前端 C2 检查丢弃 → plugin dialog 永不弹出。
 // ══════════════════════════════════════════════════════════════════
 
 describe('UI Dialog sessionId 注入（MF-2/MF-3 R2 回归）', () => {
@@ -620,7 +620,7 @@ describe('UI Dialog sessionId 注入（MF-2/MF-3 R2 回归）', () => {
 
     const call = broadcasts.find(m => m.type === 'plugin:uiRequest')
     expect(call).toBeDefined()
-    // 注入缺失回归：无 sid 的 uiRequest 会被前端 C2 守卫按 sessionId 分区丢弃
+    // 注入缺失回归：无 sid 的 uiRequest 会被前端 C2 检查按 sessionId 分区丢弃
     expect(call!.payload.sessionId).toBeUndefined()
 
     service.handleUiResponse(call!.payload.requestId as string, true)

@@ -95,8 +95,8 @@ describe('SettingsMessageHandler · model.switch reply 回传生效值（U6 / C-
     expect(replies[0].payload).toEqual({ sessionId: 'sess-1', provider: 'zai-coding-cn', modelId: 'glm-5.3' })
   })
 
-  it('返回值空串（U6 降级守卫：无 sessionService / 无活跃 session / 非法复合串）→ reply 按请求值回显，不产畸形 payload', async () => {
-    // 空串是 U6 降级契约（plugin-rpc-setup setModel 守卫三分支返回 ''）——
+  it('返回值空串（U6 降级检查：无 sessionService / 无活跃 session / 非法复合串）→ reply 按请求值回显，不产畸形 payload', async () => {
+    // 空串是 U6 降级契约（plugin-rpc-setup setModel 检查三分支返回 ''）——
     // indexOf('/') 为 -1 落入请求值回显兜底，reply 形态保持 { sessionId, provider, modelId } 完整，
     // 消费方（renderer）不收到空 provider/modelId 的畸形帧。
     const { ctx, replies } = mockCtx('')

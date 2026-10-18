@@ -2,7 +2,7 @@
  * 行为契约注入挂点（btw-question D9⑤ / 探针 P-contract-inject）。
  * 断言窗口 = 线会话建立后首个 prompt 请求的载体（当前载体 = spawn
  * `--append-system-prompt` 组合，prompt 期注入；子通道归属随 V6 核实钉固）。
- * oracle M1 落点：traceContractInjection 记录（trace 可断言处）+ spawn options
+ * 最终裁决角色 M1 落点：traceContractInjection 记录（trace 可断言处）+ spawn options
  * 载体断言；UI 反向断言（btw 流无契约渲染）随 M2-b 消息通路落地。
  */
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'

@@ -96,7 +96,7 @@ describe('TerminalMessageHandler 缺编号防御（write/resize/kill/attach 逐�
         'msg-1',
       )
       // 缺编号不是「注册成员资格的否定回执」——不得复用 unknown_terminal_id（后者是 renderer
-      // 关闭沿三腿回收的唯一判据，设计 §3.3）
+      // 关闭沿三路径回收的唯一判据，设计 §3.3）
       expect(ctx.sendError).not.toHaveBeenCalledWith(ws, 'unknown_terminal_id', expect.any(String), 'msg-1')
       expect(ctx.reply).not.toHaveBeenCalled()
     })

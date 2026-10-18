@@ -8,7 +8,7 @@
  *
  * 后续随 §7.3 runtime 改动落地，文件已扩到覆盖 no-credential 显式失败、cookie 空串清除、
  * 按 credentialSource 解析凭证（D3，含 exclusive 不回退其它 auth 形态）、删除与写入顺序 /
- * 半提交、finishFetch 五出口与在途写回守卫、失败路径节流、clearProviderState 等。
+ * 半提交、finishFetch 五出口与在途写回检查、失败路径节流、clearProviderState 等。
  * **当期覆盖面以各 describe 列表为准**（条目随改动增删，此处不逐条罗列，避免与用例脱节）。
  *
  * 运行：cd packages/runtime && npx vitest run test/services/quota-service.test.ts
@@ -46,7 +46,7 @@ vi.mock('../../src/services/quota-providers/index.js', () => ({
   QUOTA_FETCHERS: mockFetchers,
 }))
 
-// ── mock pi-provider-store：模拟 quota 配置持久化 ──（凭据读取已收口 resolver，M2fg）
+// ── mock pi-provider-store：模拟 quota 配置持久化 ──（凭据读取已收敛到 resolver，M2fg）
 vi.mock('../../src/infra/pi/pi-provider-store.js', () => ({
   getProviderConfig: vi.fn(() => undefined),
   upsertProvider: vi.fn(() => ({})),
@@ -502,7 +502,7 @@ describe('QuotaService — W6: 不同 providerId 并发 update 不丢数据', ()
   })
 })
 
-// ── [A2-2] 凭证解析链（三形态；auth.json/models.json 两段经 resolver，M2fg 收口）──
+// ── [A2-2] 凭证解析链（三形态；auth.json/models.json 两段经 resolver，M2fg 收尾）──
 
 describe('QuotaService — A2-2: api-key 形态优先级（secrets > resolver 两段）', () => {
   it('secrets 专属 key 与 resolver 命中并存时优先 secrets（resolver 不被调用）', async () => {
@@ -619,7 +619,7 @@ describe('QuotaService — A2-2: oauth 形态与 kimi 双形态降级', () => {
 })
 
 /**
- * M2b：链 1 迁移到 resolver（设计 D3 收口）。
+ * M2b：链 1 迁移到 resolver（设计 D3 收尾）。
  *
  * 语义边界：secrets 专属额度 key 是 Coding Plan 私有语义，仍优先且不并入 resolver；
  * 其后的 auth.json / models.json 两段统一走 resolver async 版。
@@ -838,7 +838,7 @@ describe('QuotaService — fetcher 抛异常时防御兜底 [A2-1 契约不 thro
 //
 // 背景：U2-t1 只更新了既有 36 用例的断言方向，零新增；本文件所属设计清单要求的新行为
 // （no-credential / cookie 空串清除与失败语义 / 按 credentialSource 解析凭证 /
-// lastFailure 清理 / credentialSource 落盘继承链 / 在途 fetch 写回守卫 / 失败路径节流不断）
+// lastFailure 清理 / credentialSource 落盘继承链 / 在途 fetch 写回检查 / 失败路径节流不断）
 // 全部由本节补齐。每条用例的断言都落在调用方可见面（返回 data/reason、getCached、
 // providers.json 落盘结果、secrets 文件系统状态），而非内部私有字段。
 // ══════════════════════════════════════════════════════════════════════════
@@ -1333,7 +1333,7 @@ describe('QuotaService — U2⑤: credentialSource 落盘继承链（§7.5 分�
   })
 })
 
-describe('QuotaService — U2⑥: 在途 fetch 写回守卫（§7.5 清单 / 改动 4）', () => {
+describe('QuotaService — U2⑥: 在途 fetch 写回检查（§7.5 清单 / 改动 4）', () => {
   it('fetch 在途期间 configure 换类型：旧 fetch 落地不回写缓存/lastFetchTime，返回当前 getCached 真相，新类型首个 fetch 不被 throttle 压制', async () => {
     // 防的回归（writeChain 只保证已发生的写互不交错，管不住在途落地这一扇门）：
     // hover 在途（旧类型、旧凭据已在内存）→ 设置页换类型 → removeEntry 删旧行 →
@@ -1375,7 +1375,7 @@ describe('QuotaService — U2⑥: 在途 fetch 写回守卫（§7.5 清单 / 改
     await new Promise((r) => setImmediate(r))
     expect(svc.getCached('p').data?.label).toBe('kimi-new')
 
-    // 旧类型 fetch 迟到落地：守卫丢弃其全部写
+    // 旧类型 fetch 迟到落地：检查丢弃其全部写
     resolveOld({ ok: true, data: { label: 'zhipu-stale', wins: [] as never } })
     const oldResult = await oldFetchP
 
@@ -1384,7 +1384,7 @@ describe('QuotaService — U2⑥: 在途 fetch 写回守卫（§7.5 清单 / 改
     expect(oldResult.data?.label).toBe('kimi-new') // RPC 返回当前 getCached 真相，不是旧行
     expect(oldResult.reason).toBeUndefined()
 
-    // 守卫同时不写 lastFetchTime（写点已迁到完成时刻）：新类型首个 hover fetch 不被压制。
+    // 检查同时不写 lastFetchTime（写点已迁到完成时刻）：新类型首个 hover fetch 不被压制。
     // 若 lastFetchTime 仍写在发起处，这里 elapsed≈0 < 10s 会直接返回缓存、kimi fetcher 不再被调。
     kimiMockFetchQuota.mockResolvedValueOnce({ ok: true, data: { label: 'kimi-second', wins: [] as never } })
     const hover = await svc.fetch('p')
@@ -1396,7 +1396,7 @@ describe('QuotaService — U2⑥: 在途 fetch 写回守卫（§7.5 清单 / 改
 describe('QuotaService — U2⑦: 失败路径的节流不断（§7.5 清单 / 改动 4 出口覆盖）', () => {
   it('fetchFailed 后 10s 内第二次 hover 不发真实请求（lastFetchTime 写点迁移后失败出口同等覆盖）', async () => {
     // 防的回归：既有 throttle 测试只断言成功路径；lastFetchTime 写点从「doFetch 开头」
-    // 迁到「守卫后的完成时刻」时，若只放在成功出口旁，持续失败的 provider（凭证缺失 /
+    // 迁到「检查后的完成时刻」时，若只放在成功出口旁，持续失败的 provider（凭证缺失 /
     // unauthorized）每次 hover 都发真实请求并落一条 warn——请求与日志速率失去上界
     // （表 A #13「每次一条 warn」的速率前提正是一次性开头写的覆盖全部出口）。
     vi.useFakeTimers()

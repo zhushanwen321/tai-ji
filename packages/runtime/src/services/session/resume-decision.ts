@@ -18,9 +18,9 @@
  *    `turn-end{stopReason:'aborted'}` 收尾（pi-agent-core runLoop 在 abort 时产出 aborted
  *    assistant message → turn_end/agent_end；pi 侧 `await abort()` 保证 agent_end 必先于
  *    compaction_start 到达），本模块记 `lastTurnCutByAbort` 并在 compaction_start 快照。
- *    不读 occupancy：abort→压缩链在 pi 内同步推进，runtime 投影到 compaction_start 时 turn
- *    相位已回落 settling/idle（实测序见探针 P-reason，语义登记 pi-semantics PS-61/PS-62），
- *    投影不是可靠判据。
+   *    不读 occupancy：abort→压缩链在 pi 内同步推进，runtime 派生视图到 compaction_start 时 turn
+   *    相位已回落 settling/idle（实测序见探针 P-reason，语义登记 pi-semantics PS-61/PS-62），
+   *    派生视图不是可靠判据。
  *
  * 投递口径（D4② 后半句）：
  * - **经内核 FIFO**：投递只经 `submitResumeDelivery`（组合根注入 = registry.submit）——
@@ -81,7 +81,7 @@ export const RESUME_DELIVERY_TEXT =
 export interface ResumeDecision {
   /** 事件批观察（interpreter.interpret 之前调用；同一批内按到达序 fold）。 */
   observe(sessionId: string, events: readonly ObservedEvent[]): void
-  /** 解释后收口（interpreter.interpret 之后调用）：执行投递判定与投递。 */
+  /** 解释后收尾（interpreter.interpret 之后调用）：执行投递判定与投递。 */
   settle(sessionId: string): void
   /**
    * runtime 发起 compact 的标记入口（实现者 = 组合根的 sessionService.compact 装饰包装）。

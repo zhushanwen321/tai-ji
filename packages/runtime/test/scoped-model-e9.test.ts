@@ -124,7 +124,7 @@ describe('E9: aggregateModels scoped 行为锁定', () => {
 
     // 全量输出，保序
     expect(ids).toEqual(['gpt-4', 'gpt-3.5-turbo', 'claude-opus'])
-    // 守卫调用：空列表也必须读 scoped 配置（区分旧实现无读取）
+    // 检查调用：空列表也必须读 scoped 配置（区分旧实现无读取）
     expect(getScopedModels).toHaveBeenCalledOnce()
   })
 

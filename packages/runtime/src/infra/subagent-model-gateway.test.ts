@@ -1,7 +1,7 @@
 /**
  * SubagentModelSwitchGateway 生产适配器测试（subagent-model-switch §7.1.1，U6）。
  *
- * 覆盖（三路主轴 + 映射 + 守卫 + handler 集成）：
+ * 覆盖（三路主轴 + 映射 + 检查 + handler 集成）：
  * - 成功：mock client.prompt 回调写 tmp 结果文件 → 应答映射（chat 两型 / run 级聚合）
  *   + 文件读后即删；
  * - 超时：fake timers 推进 + 迟到真值命中按真实结果应答；未命中 reject 通道失败
@@ -307,9 +307,9 @@ describe('createSubagentModelSwitchGateway — 通道失败（§7.5 通道行）
   })
 })
 
-// ── 守卫：目标解析 / 会话激活 ────────────────────────────────────────────
+// ── 检查：目标解析 / 会话激活 ────────────────────────────────────────────
 
-describe('createSubagentModelSwitchGateway — 守卫', () => {
+describe('createSubagentModelSwitchGateway — 检查', () => {
   it('目标解析不到（无 journal / events 锚）：subagent_target_not_found', async () => {
     const gw = createSubagentModelSwitchGateway(deps())
     const err = await gw.setModel(setModelParams('sa-ghost')).catch((e: Error & { code?: string }) => e)
@@ -480,14 +480,14 @@ describe('SubagentMessageHandler ← 生产网关注入（组合根形态）', (
 // ── core ↔ shared 聚合应答形状类型级对账（[F1-21]）─────────────────────────
 //
 // 防线背景：protocol.ts「两处漂移由 U1 接线测试对账」的落点即此处——core
-// RunSwitch*（形状 SSOT）与 shared protocol SubagentSetModel*（wire 投影）是两份
+// RunSwitch*（形状 SSOT）与 shared protocol SubagentSetModel*（wire 派生视图）是两份
 // 独立声明（shared 不依赖 subagent-core，物理单源不可行），core 改形而无本对账时
 // gateway 的 unknown→as 盲 cast 零编译红、wire 载荷静默漂移（击穿设计 §7.1
 // 「聚合三组件恒保留」硬不变量）。断言形态 = 双向 extends 编译锁（字段类型漂移
 // 即红）+ keyof 双向差集锁（字段改名/删除/新增即红——含可选字段：可选属性缺席
 // 不破坏结构可赋值，双向 extends 对可选字段改名不红，缺口由差集在 keyof 层显形）
 // + 错误码词表值级对账：reason 联合为开放值域（已知三型 ∪ 词表外透传码）后，
-// 「词表 ⊆ wire reason 联合」不再具备编译级守卫力，词表同步改由
+// 「词表 ⊆ wire reason 联合」不再具备编译级检查力，词表同步改由
 // SUBAGENT_SET_MODEL_FAILURE_REASON_CODES 值级断言锚定（扩位漏跟即红）。
 // 已知逃逸面（[F3-2]）：嵌套可选字段单侧扩位 MutuallyAssignable/SameKeys 均不抓
 // （SameKeys 只比顶层键集，嵌套对象内部的可选扩位两侧互赋值仍成立），由 U1 接线
@@ -518,7 +518,7 @@ describe('core ↔ shared setModel 聚合应答形状对账（协议契约不变
   it('RunSwitchMemberFailure ≡ SubagentSetModelMemberFailure 且 SET_MODEL_ERROR_CODES ⊆ wire reason 联合', () => {
     const shape: MutuallyAssignable<RunSwitchMemberFailure, SubagentSetModelMemberFailure> = true
     expect(shape).toBe(true)
-    // reason 两侧均为开放值域（已知三型 ∪ 透传码），⊆ 方向不再具备编译级守卫力；
+    // reason 两侧均为开放值域（已知三型 ∪ 透传码），⊆ 方向不再具备编译级检查力；
     // 词表同步对账由下方 SUBAGENT_SET_MODEL_FAILURE_REASON_CODES 值级锚承接。本断言
     // 保留为「词表成员逐个可赋 reason 联合」的形态记录。
     const reasonValues: SubagentSetModelMemberFailure['reason'][] = [...SET_MODEL_ERROR_CODES]

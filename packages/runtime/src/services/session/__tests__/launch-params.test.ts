@@ -263,7 +263,7 @@ describe('buildPresetFallbackEnv（F1b：回落事实 → pi 出站 env）', () 
 })
 
 describe('buildPresetClientOptions', () => {
-  /** 最小 resolution 形状（消费面字段）。 */
+  /** 最小 resolution 形状（消费方字段）。 */
   function resolution(overrides: Partial<PresetResolution> = {}): PresetResolution {
     return {
       skillPaths: [],
@@ -527,7 +527,7 @@ describe('L2 探针 create 链（readBackCreateState 消费）', () => {
  * P2 探针环境：真实 PresetService（真实 pi-presets.json 读盘 + mergePresets）+
  * 真实 ExtensionService（真实 resolveExtensions/dedupe/applyPresetMode 过滤链，仅
  * resolver/extSettings 两个数据 port fake）+ SessionLifecycle 真实 resolveCreateLaunch
- * 编排——spawn 参数经 mock pm.createSession 捕获，持久化面经 fake sessionStore 捕获。
+ * 编排——spawn 参数经 mock pm.createSession 捕获，持久化路径经 fake sessionStore 捕获。
  *
  * 扩展布局（真实目录 + 真实 package.json，让 readPkgMeta/tier/loadable 推导真跑）：
  *   normal-a（settings 源，可加载）/ normal-b（settings 源，disabled）/ normal-c（discovery 源）
@@ -587,8 +587,8 @@ function makeP2Env(userPresetsFile?: unknown) {
     getSkillPaths: () => [skillDir],
   } as unknown as IConfigStore
   // 真实存在的 pi session 文件（P2 探针环境模拟已 flush 的 session；persistPresetBinding
-  // 经 sessionStore mock 注入，真实文件仅为环境真实性——V9-④ 根修后 create 路径已放行
-  // existsSync 守卫，不再依赖文件存在性）
+  // 经 sessionStore mock 注入，真实文件仅为环境真实性——V9-④ 从根源修复后 create 路径已放行
+  // existsSync 检查，不再依赖文件存在性）
   const sessionFile = join(root, 'pi-session.jsonl')
   writeFileSync(sessionFile, '{"type":"session"}\n')
   // svc 三方法委托真实实现链（resolveCreateLaunch 编排真实执行）
@@ -728,7 +728,7 @@ describe('⛔ 探针 P2（D3 前提）：出厂 builtin:full 与无 preset 路�
     expect(resolution.skillPaths).toBeUndefined()
   })
 
-  it('持久化面：唯一差异 = launchPresetId meta + .preset.json sidecar（D3 声明面，无第三差异）', async () => {
+  it('持久化路径：唯一差异 = launchPresetId meta + .preset.json sidecar（D3 声明面，无第三差异）', async () => {
     try {
       const presetEnv = makeP2Env()
       const presetSummary = await presetEnv.lifecycle.create(presetEnv.cwd, 't', { presetId: 'builtin:full' })
@@ -742,7 +742,7 @@ describe('⛔ 探针 P2（D3 前提）：出厂 builtin:full 与无 preset 路�
       expect(presetSummary.modelId).toBe(bareSummary.modelId)
       expect(presetSummary.thinkingLevel).toBe(bareSummary.thinkingLevel)
       // sidecar 面：.preset.json 写入条件 = presetId 存在（preset 写 / bare 不写）；
-      // V9-④ 根修后 create 路径携 skipJsonlExistsGuard 放行守卫（.jsonl 未 flush 也落盘）
+      // V9-④ 从根源修复后 create 路径携 skipJsonlExistsGuard 放行检查（.jsonl 未 flush 也落盘）
       expect(presetEnv.persistPresetBinding).toHaveBeenCalledWith(presetEnv.sessionFile, 'builtin:full', { skipJsonlExistsGuard: true })
       expect(bareEnv.persistPresetBinding).not.toHaveBeenCalled()
     } finally {

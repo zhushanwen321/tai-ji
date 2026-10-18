@@ -294,7 +294,7 @@ describe('SessionMessageHandler session.import', () => {
     const ws = mockWs()
     // zcode 源形态：sourcePath 是 db 路径占位、以 sessionId + dbPath 定位（契约注释语义）；
     // dbPath 取白名单集合内值（隔离库，进程内同函数推导——测试 env 的 dataDir 被 test-guard
-    // 钉死 tmp，不触真实数据目录）
+    // 固定为 tmp，不触真实数据目录）
     const allowedDbPath = zcodeImportDbAllowlist(getDataDir())[0]
     const payload = {
       sourcePath: allowedDbPath,

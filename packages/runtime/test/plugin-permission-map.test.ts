@@ -43,7 +43,7 @@ interface ServiceInternals {
 /**
  * SSOT 已登记、RPC handler 尚未实装的方法豁免表（u2d 批次建立）。[u5b 已清空]：
  * activate 订阅族（session-api 六点扩表）与 ui 命令式点位（ui-api updateHeaderAction）
- * handler 均已落地——豁免表保留空集形态供后续批次复用（登记即债务，落地即清账）。
+ * handler 均已落地——豁免表保留空集形态供后续批次复用（登记即债务，落地即关闭）。
  */
 const PENDING_U5B_METHODS: ReadonlySet<string> = new Set<string>([])
 

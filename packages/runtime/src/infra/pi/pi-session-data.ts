@@ -51,7 +51,7 @@ export interface PiHistoryTextPart { // oe-exempt:20261004:framework:存量 pi �
 }
 
 /** pi 1.0.0 AgentMessage content 的 image 块（ToolResultMessage.content 恒为
- *  (Text|Image)[]，pi dist messages.ts:398 实锚）——[subagent 投影丢失修复] 联合补成员，
+ *  (Text|Image)[]，pi dist messages.ts:398 实锚）——[subagent 派生视图丢失修复] 联合补成员，
  *  此前漏声明致历史链 image 块在类型面不可表达（运行时 normalizePiToolResult 早已消费）。 */
 export interface PiHistoryImagePart {
   type: 'image'
@@ -239,10 +239,10 @@ export interface PiSessionUsageEntry extends PiSessionEntryBase { // oe-exempt:2
 
 /**
  * context_edit entry（pi 1.0.0 新增：branch 内对更早 model 可见 entry 的编辑记录，不进 LLM
- * 上下文——pi 官方语义是原始历史不变，重放时在投影层应用替换）。对应 pi ContextEditEntry
+ * 上下文——pi 官方语义是原始历史不变，重放时在派生视图层应用替换）。对应 pi ContextEditEntry
  *（session-manager.js appendContextEdit 字面量：targetId/replacement）。
  * replacement = null（删除语义）或 { content: string | content parts 数组 }。
- * taiji 当前对话流不显示（原始历史不变的投影语义，PS-60 树重放链路按 unknown 跳过）。
+ * taiji 当前对话流不显示（原始历史不变的派生视图语义，PS-60 树重放链路按 unknown 跳过）。
  */
 export interface PiSessionContextEditEntry extends PiSessionEntryBase { // oe-exempt:20261004:framework:存量 pi 会话数据模型接口随 max-lines 拆分迁移自 pi-protocol.ts，非新增单实现设计
   type: 'context_edit'

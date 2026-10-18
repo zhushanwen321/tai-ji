@@ -2,9 +2,9 @@
  * Session API 读面（AP-4，U2）单测
  *
  * 覆盖 plugin.sessions.readEntries / getCommands / registerEntryInvalidation /
- * unregisterEntryInvalidation 的主线程 handler（customType 服务端过滤投影、
+ * unregisterEntryInvalidation 的主线程 handler（customType 服务端过滤派生视图、
  * sinceEntryId 游标透传、live only 前提 SESSION_NOT_ACTIVE、订阅注册表转调与
- * 拒绝回执、纯查询直连投影收窄、装配缺口 SESSION_READ_NOT_WIRED）与 Worker 侧
+ * 拒绝回执、纯查询直连映射收窄、装配缺口 SESSION_READ_NOT_WIRED）与 Worker 侧
  * createSessionApi 代理（readEntries/getCommands RPC 形状、onEntriesInvalidated
  * 注册 → 定向通知派发 → dispose 注销）。
  *
@@ -140,11 +140,11 @@ describe('session read API — registerSessionRpcHandlers（AP-4 读面）', () 
   })
 
   describe('plugin.sessions.readEntries', () => {
-    it('按 customType 精确过滤 + 投影五字段形状（type/customType 保留、data 原样、噪声字段剥除）', async () => {
+    it('按 customType 精确过滤 + 映射五字段形状（type/customType 保留、data 原样、噪声字段剥除）', async () => {
       const taskData = { op: 'toggle', taskId: 'a1b2c3d4', enabled: false }
       fakeClient = createFakeClient({
         // 线性链式树（真实 pi 全量批形态：每条 entry 挂前一条下，parent 链完整）——
-        // readEntries 投影前有活跃路径过滤（leafId 回溯），fixture 必须让目标条目在
+        // readEntries 派生视图前有活跃路径过滤（leafId 回溯），fixture 必须让目标条目在
         // leaf 链上（e-parent 悬空的断链全量批在真实数据中不存在）
         entries: [
           { id: 'e-parent', timestamp: 't', type: 'message', data: { text: 'root' } },
@@ -170,7 +170,7 @@ describe('session read API — registerSessionRpcHandlers（AP-4 读面）', () 
       expect(entry.customType).toBe(TARGET_CUSTOM_TYPE)
       // data 原样透传（引用相等——域语义插件解，不改写）
       expect(entry.data).toBe(taskData)
-      // 投影不含 pi 树结构噪声（parentId 等不出 runtime）
+      // 派生视图不含 pi 树结构噪声（parentId 等不出 runtime）
       expect('parentId' in entry).toBe(false)
       // 信封字段：sessionFile（折叠过滤必需）+ leafEntryId（下次 sinceEntryId）
       expect(result.sessionFile).toBe('/data/sessions/s1.jsonl')
@@ -205,7 +205,7 @@ describe('session read API — registerSessionRpcHandlers（AP-4 读面）', () 
       expect(resp.error?.code).toBe(SESSION_NOT_ACTIVE)
     })
 
-    it('畸形条目丢弃（非对象 / id 或 timestamp 非 string）不进投影', async () => {
+    it('畸形条目丢弃（非对象 / id 或 timestamp 非 string）不进派生视图', async () => {
       fakeClient = createFakeClient({
         entries: [
           'not-an-object',
@@ -241,7 +241,7 @@ describe('session read API — registerSessionRpcHandlers（AP-4 读面）', () 
   })
 
   describe('plugin.sessions.getCommands（纯查询直连）', () => {
-    it('投影收窄到 {name, description, source}——sourceInfo 等宿主内部元信息不出面', async () => {
+    it('映射收窄到 {name, description, source}——sourceInfo 等宿主内部元信息不出面', async () => {
       clients.set('s1', createFakeClient({
         commands: [
           { name: 'schedule', description: '定时任务', source: 'extension', sourceInfo: { path: '/ext/scheduler.ts', source: 'extension' } },
@@ -255,7 +255,7 @@ describe('session read API — registerSessionRpcHandlers（AP-4 读面）', () 
         { name: 'schedule', description: '定时任务', source: 'extension' },
         { name: 'compact', description: undefined, source: 'pi' },
       ])
-      // 关键负断言：投影对象上不存在 sourceInfo 键（不是 undefined 而是剥除）
+      // 关键负断言：派生视图对象上不存在 sourceInfo 键（不是 undefined 而是剥除）
       expect('sourceInfo' in commands[0]).toBe(false)
     })
 

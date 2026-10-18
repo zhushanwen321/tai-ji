@@ -66,7 +66,7 @@ export const minimaxCapabilities: TtsCapabilities = {
  * 音色：官方系统音色清单的核心中文（普通话）子集（2026-09-30 官方清单抓取——全集 229+
  * 条含多语言与 beta 变体，M0 下拉内置核心八音色；male-qn-qingse 实测 200）。设置页表单
  * 是唯一参数入口（D2——vendor 子树由表单生成，用户不接触 JSON），未内置音色在 M0
- * 无配置入口；扩充即往本数组增项，由表单投影透传到下拉。
+ * 无配置入口；扩充即往本数组增项，由表单派生视图透传到下拉。
  */
 const VOICES: ReadonlyArray<{ id: string; label: string }> = [
   { id: 'male-qn-qingse', label: '青涩青年音色' },

@@ -157,7 +157,7 @@ export class PluginRpcServer {
    * @param params - 请求参数
    *
    * [ADR-0122 退役登记] invoke 墙钟（原 HOOK_HANDLER_TIMEOUT_MS 5s 等）已删——
-   * Worker 不回复时 pending 悬挂，由 dispose rejectAll 收口。
+   * Worker 不回复时 pending 悬挂，由 dispose rejectAll 收尾。
    */
   invoke(workerId: string, method: string, params: Record<string, unknown>): Promise<unknown> {
     const worker = this.workers.get(workerId)

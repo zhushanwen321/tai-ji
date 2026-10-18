@@ -177,7 +177,7 @@ function endConn(conn: Socket): void {
  * ADR-0122 防御清理：原 SIGCONT/SIGTERM/grace 等待阶梯已随 pi-rpc kill-chain 的
  * grace 退役收敛为直杀形态，graceMs 消费参数随之消失；「杀链必 resolve、永不
  * reject」契约维持——close 路径 `void killRelayChild(...)` fire-and-forget 无 catch，
- * killPiProcess 内 kill 已收口 safeKill 吞错（kill 尽力而为语义），promise 结构性
+ * killPiProcess 内 kill 已收尾 safeKill 吞错（kill 尽力而为语义），promise 结构性
  * 必 resolve，本 .catch 从「必要兜底」降级为纵深防御（防未来 kill-chain 新增异步
  * 抛出路径），reject 内容降级 debug 留痕。
  *
@@ -196,7 +196,7 @@ export function killRelayChild(child: ChildProcess): Promise<void> {
 }
 
 /**
- * 归属校验第一段（§4.1）：握手帧字段形状守卫——mainSessionId/recordId/cwd 非空
+ * 归属校验第一段（§4.1）：握手帧字段形状检查——mainSessionId/recordId/cwd 非空
  * string、argv 全 string、env 是对象。
  */
 function hasValidHandshakeFrameShape(frame: RelayHandshakeFrame): boolean {
@@ -258,7 +258,7 @@ export class RelayRegistry {
   private readonly inflightKills = new Set<Promise<void>>()
   /** pending 孤儿复查 timer（armOrphanRecheck 武装；destroyAll 清除）。 */
   private orphanRecheckTimer: NodeJS.Timeout | null = null
-  /** 复查 timer 的 sweep 重入守卫。 */
+  /** 复查 timer 的 sweep 重入检查。 */
   private orphanSweepInFlight = false
   private readonly piCommand: string
 
@@ -360,7 +360,7 @@ export class RelayRegistry {
         return
       }
       // 握手后：消费 down 方向数据帧与 goodbye 预告帧，其余忽略。
-      // dir==='down' / b64:string 的运行时不变量由 tryParseFrame 的 data 帧形状守卫
+      // dir==='down' / b64:string 的运行时不变量由 tryParseFrame 的 data 帧形状检查
       // 单点定义——畸形帧在解析层已按 null 丢弃，此处不再重复编码该判据；
       // null（畸形帧）按连接显形（首帧 warn + 计数，见 noteDroppedDataFrame）
       const frame = this.tryParseFrame(line)
@@ -418,7 +418,7 @@ export class RelayRegistry {
     try {
       const parsed = JSON.parse(line) as InboundFrame
       if (typeof parsed !== 'object' || parsed === null || typeof parsed.kind !== 'string') return null
-      // data 帧形状守卫：b64 缺失/非 string 时 Buffer.from 抛 TypeError，且本调用点在
+      // data 帧形状检查：b64 缺失/非 string 时 Buffer.from 抛 TypeError，且本调用点在
       // readline 回调内无捕获——畸形帧按 malformed 丢弃（数据阶段仅丢帧不断连，同连接
       // 后续帧仍有效；与握手首帧 malformed 的 reject+断连语义按阶段区分）
       if (parsed.kind === RELAY_FRAME_KINDS.data && (parsed.dir !== RELAY_FRAME_DIRS.down || typeof parsed.b64 !== 'string')) return null
@@ -431,7 +431,7 @@ export class RelayRegistry {
   /** 握手校验（§3.1 版本协商 + §4.1 归属校验）+ 注册 + spawn + 子进程事件挂载。 */
   private registerHandshake(conn: Socket, frame: RelayHandshakeFrame): void {
     // 版本锁定（严等而非只拒更新版）：协议两侧（relay.mjs 与 registry）同仓同发、
-    // verifiedWith 版本门禁钉死同源——跨版本静默容忍只会把方言漂移推迟到数据阶段
+    // verifiedWith 版本门禁固定为同源——跨版本静默容忍只会把方言漂移推迟到数据阶段
     // 解析爆炸；严等让漂移在握手即显式失败（代理退出码 10）。
     if (typeof frame.v !== 'number' || frame.v !== RELAY_PROTOCOL_VERSION) {
       writeFrame(conn, { kind: RELAY_FRAME_KINDS.reject, reason: RELAY_REJECT_REASONS.version, supported: [RELAY_PROTOCOL_VERSION] })
@@ -459,7 +459,7 @@ export class RelayRegistry {
 
     const pidFile = getRelayPidFilePath(frame.recordId, this.opts.dataDir)
     // 接管清理（pid 覆盖泄漏归置）：同 recordId 重派（crash-recovery 等）会覆盖旧 pid
-    // 文件，旧进程自此失去台账登记——无人会再杀它，成为无主泄漏。覆盖前读旧登记，
+    // 文件，旧进程自此失去 journal 登记——无人会再杀它，成为无主泄漏。覆盖前读旧登记，
     // 旧 pid 活且异于新 pid → 先收割旧进程（与 orphan sweep 同款信号链）。
     this.reapSupersededPidIfAlive(pidFile, frame.recordId, child.pid ?? null)
     const tee = new RelayTee({
@@ -589,8 +589,8 @@ export class RelayRegistry {
         })
       }
       // 清理交还 exit handler（cleanupEntry 幂等且被其无条件复跑）：kill 链 resolve 只代表
-      // SIGKILL 已发出（进程可能仍在 D 状态收尾），此刻注销会把活孤儿提前销账——账面
-      // 与真实进程态一致（真实 exit 才销账），杀链失败时条目留册由尾扫再杀。
+      // SIGKILL 已发出（进程可能仍在 D 状态收尾），此刻注销会把活孤儿提前从账本移除——账面
+      // 与真实进程态一致（真实 exit 才移除条目），杀链失败时条目留册由尾扫再杀。
       // 杀链登记 inflightKills：关停窗口内 runtime 退出前由 destroyAll 等待其收尾
       // （SIGKILL 发出即承诺兑现），防杀链 promise 随 runtime 进程消亡中断漏补刀。
       const killP = killRelayChild(entry.child)
@@ -747,7 +747,7 @@ export class RelayRegistry {
 
   /**
    * 接管前收割旧登记进程（注册路径调用）：同 recordId 的新 spawn 覆盖 pid 文件前，
-   * 旧登记里活着的旧 pid 是将被台账遗忘的泄漏进程——按 orphan 同款信号链收割。
+   * 旧登记里活着的旧 pid 是将被 journal 遗忘的泄漏进程——按 orphan 同款信号链收割。
    * 新 pid 为 null（spawn 异常形态）或旧登记缺失/已死时 no-op。
    */
   private reapSupersededPidIfAlive(pidFile: string, recordId: string, newPid: number | null): void {
@@ -805,8 +805,8 @@ export class RelayRegistry {
         if ((e as NodeJS.ErrnoException)?.code === 'ESRCH') {
           // kill 抛 ESRCH = 进程已死，正是收割目标状态
         } else {
-          // 其他 errno（EPERM 等）：进程没杀掉，台账不销账——保留 pid 文件供下次
-          // sweep 再扫（删文件会把杀不掉的活孤儿从兜底视野里永久销账）
+          // 其他 errno（EPERM 等）：进程没杀掉，journal 保留条目——保留 pid 文件供下次
+          // sweep 再扫（删文件会把杀不掉的活孤儿从兜底视野里永久移除）
           console.warn(`[relay] orphan SIGKILL failed, keeping pid file for next sweep recordId=${recordId} pid=${String(pid)}:`, toErrorMessage(e))
           return
         }

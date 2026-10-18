@@ -6,13 +6,13 @@
  *   （对齐 replayEarlyFrameBuffer 的 D5 范式）——首个 listener（EventAdapter 翻译链）
  *   抛错不再中断循环，本帧对后续 listener（handoff 的 agent_end 探测）必达，异常不再
  *   被 readline line handler 的 catch 误记「stdout parse error」。
- * - #4 形状守卫（bash 式，对照 getAvailableModels）：getCommands 的 data.commands
+ * - #4 形状检查（bash 式，对照 getAvailableModels）：getCommands 的 data.commands
  *   缺失/非数组、getSessionStats 的 data 缺失、compact 的 data 缺失/缺 port 契约三必填
  *   字段（summary/firstKeptEntryId/tokensBefore）均 warn + reject，不再 `?? []`
  *   / `?? {}` 折合法空值形态（曾致命令面板静默清空、协议异常被「无值」语义掩盖）。
  *   合法空值（commands=[]）仍照常 resolve——协议异常与合法空值分流。
  * - #6 proc 'error' terminate 出口：error（spawn ENOENT 等无伴随 exit 的形态）补齐
- *   exit 处置链全部收口——_exited 置位 + rejectAll + piSessionLog.end() + exitCallbacks
+ *   exit 处置链全部收尾——_exited 置位 + rejectAll + piSessionLog.end() + exitCallbacks
  *   通知（code=null）；error 后 exit 再到场时通知幂等（恰好一次）。
  *
  * 策略：与 rpc-client-response-guard.test.ts 同构——mock node:child_process + emitPiLine
@@ -126,7 +126,7 @@ describe('RpcClient RT-2 加固：listener 隔离（#3b）', () => {
   })
 })
 
-describe('RpcClient RT-2 加固：响应形状守卫（#4）', () => {
+describe('RpcClient RT-2 加固：响应形状检查（#4）', () => {
   let client: RpcClient
 
   beforeEach(async () => {
@@ -189,10 +189,10 @@ describe('RpcClient RT-2 加固：响应形状守卫（#4）', () => {
     warnSpy.mockRestore()
   })
 
-  it('compact：对象缺必填字段 → reject malformed（字段级守卫：port 契约三必填缺一即协议异常）', async () => {
+  it('compact：对象缺必填字段 → reject malformed（字段级检查：port 契约三必填缺一即协议异常）', async () => {
     const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {})
     const p = client.compact()
-    // 只有 summary，缺 firstKeptEntryId / tokensBefore——顶层对象守卫放行、字段级守卫拦截的形态
+    // 只有 summary，缺 firstKeptEntryId / tokensBefore——顶层对象检查放行、字段级检查拦截的形态
     await expect(respondWith(client, () => p, { command: 'compact', data: { summary: 's' } })).rejects.toThrow(
       'compact: malformed response from pi (data is not a CompactionResult with summary/firstKeptEntryId/tokensBefore)',
     )

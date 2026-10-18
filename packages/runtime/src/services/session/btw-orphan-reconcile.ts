@@ -25,7 +25,7 @@ export interface OrphanReconcileDeps {
 }
 
 /**
- * 路径安全：删除面必须位于 btw 根内（closeLine/reconcile 防误删守卫形态）。
+ * 路径安全：删除面必须位于 btw 根内（closeLine/reconcile 防误删检查形态）。
  * 原为 BtwService 私有方法，随补账段迁出（closeLine / closeAllForMain 同 import 复用）。
  */
 export function isInsideBtwRoot(target: string): boolean {
@@ -41,10 +41,10 @@ export function isInsideBtwRoot(target: string): boolean {
  * 调用序（组合根）：**先本函数、后 rebuildFromDisk**——先清孤儿目录，重建只登记在场主线。
  * 判据 = deps.resolveMainSessionFile(mainSid) 不可解析（主文件已 trash / 从未落盘——
  * 分支线首 flush 前主会话无文件的形态重启后主/线同归于此，判定正确），**且本轮扫描可信**：
- * 扫描腿降级（readdir EACCES/IO）会显式返回空列表、与「权威空」不可区分，冷主会话将全部
+ * 扫描路径降级（readdir EACCES/IO）会显式返回空列表、与「权威空」不可区分，冷主会话将全部
  * 落空 ⇒ 若不设闸会把全部线目录误判「主已删」清空（BU5：rm -rf 不可逆，摧毁裁决⑧持久化）。
  * 故 resolve 落空后先过 deps.isSessionScanDegraded 闸——降级即跳过整轮补账，warn 留痕、
- * 改下次启动重试（[HISTORICAL] 原注释「扫描腿 best-effort 返回列表而非抛错 ⇒ 触发面 =
+ * 改下次启动重试（[HISTORICAL] 原注释「扫描路径 best-effort 返回列表而非抛错 ⇒ 触发面 =
  * 主确已删」论证不成立：返回空列表正是降级形态之一，与主确已删不可区分，故须旗标透出）。
  * 非 pi 形态目录名跳过（junk 归 rebuild 的 warn 面，不代删）。
  * 幂等 + best-effort：无根零动作；单目录 rm 失败 warn 不阻断启动（P2 降级隔离），

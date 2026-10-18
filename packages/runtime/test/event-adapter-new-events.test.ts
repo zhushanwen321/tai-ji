@@ -516,7 +516,7 @@ describe('EventAdapter: new event translations (FR-1~FR-6)', () => {
       expect(sent.find(m => m.type === 'message.complete')).toBeUndefined()
     })
 
-    it('turn_end 无 usage.totalTokens → 不触发 onContextUpdate（守卫）', async () => {
+    it('turn_end 无 usage.totalTokens → 不触发 onContextUpdate（检查）', async () => {
       const onContextUpdate = vi.fn()
       const { adapter } = createAdapter({ onContextUpdate })
       dispatchOne(adapter, {
@@ -563,7 +563,7 @@ describe('EventAdapter: new event translations (FR-1~FR-6)', () => {
   // 只剥 partial）。fixture 的 error 子对象只带 adapter 消费的 errorMessage 子集——完整
   // AssistantMessage 另有 role/content/usage 等字段（PiErrorSubEvent 局部形态同款取舍）。
   // reason 分流：error（provider 真错）→ message.stream_error；aborted（用户中止）→ noop
-  // （中止由 message_end/agent_end 的 stopReason='aborted' 通路收口，非 error 终态）。
+  // （中止由 message_end/agent_end 的 stopReason='aborted' 通路收尾，非 error 终态）。
   // [HISTORICAL] 旧 fixture `{type:'error', content:'...'}` 是 pi 从不发送的形状：生产读
   // sub.content 恒 undefined，测试绿而 provider 真错文本（401/限流/上下文溢出）永不显形。
   // ════════════════════════════════════════════════════════════════════
@@ -589,7 +589,7 @@ describe('EventAdapter: new event translations (FR-1~FR-6)', () => {
       })
     })
 
-    it('aborted 分支：降级 noop 不产 stream_error 帧（中止由 agent_end stopReason 通路收口）', async () => {
+    it('aborted 分支：降级 noop 不产 stream_error 帧（中止由 agent_end stopReason 通路收尾）', async () => {
       dispatchOne(adapter, {
         type: 'message_update',
         assistantMessageEvent: {

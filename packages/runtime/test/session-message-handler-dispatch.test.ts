@@ -93,7 +93,7 @@ describe('SessionMessageHandler 分发路由（W1 表驱动重构回归锚定）
       expect(cap.replies).toHaveLength(0)
     })
 
-    it('其它错误 → sendError(RESTORE_FAILED) 兜底（spawn pi / initialize 失败统一归口）', async () => {
+    it('其它错误 → sendError(RESTORE_FAILED) 兜底（spawn pi / initialize 失败统一汇入此处）', async () => {
       const { cap, handler } = makeHandler({
         restoreSession: vi.fn().mockRejectedValue(new Error('pi spawn failed')),
       })

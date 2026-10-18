@@ -113,7 +113,7 @@ describe('错误码翻译表（§7.2 注④实测四形态）', () => {
   })
 })
 
-describe('能力表与表单投影（§7.3）', () => {
+describe('能力表与表单派生视图（§7.3）', () => {
   it('能力表：端点 / Bearer / maxInputChars 1000 / speedRange [0.5,2] / 指令支持', () => {
     expect(stepfunCapabilities.endpointPath).toBe('/audio/speech')
     expect(stepfunCapabilities.authHeader).toBe('bearer')
@@ -123,7 +123,7 @@ describe('能力表与表单投影（§7.3）', () => {
     expect(stepfunCapabilities.perModel['stepaudio-3-tts']).toEqual({ instructionMaxChars: 500, voiceLabelSupported: false })
   })
 
-  it('表单投影：baseUrlOptions 默认项唯一（isDefault）且含 Step Plan 集群', () => {
+  it('表单派生视图：baseUrlOptions 默认项唯一（isDefault）且含 Step Plan 集群', () => {
     const defaults = stepfunFormModel.baseUrlOptions.filter((o) => o.isDefault).map((o) => o.url)
     expect(defaults).toEqual(['https://api.stepfun.com/v1'])
     expect(stepfunFormModel.baseUrlOptions.map((o) => o.url)).toContain('https://api.stepfun.com/step_plan/v1')

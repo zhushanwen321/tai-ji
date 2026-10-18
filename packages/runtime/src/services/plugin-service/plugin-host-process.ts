@@ -6,7 +6,7 @@
  * - sandbox 插件独占子进程；trusted 插件共享（≤10 插件/进程）
  * - IPC 走 fork 默认 channel（child.send/process.on('message')），经 WorkerPort 适配
  *   （{ postMessage: child.send }）注册进 PluginRpcServer——HostToWorkerMessage 消息族零改动复用
- * - 崩溃检测：exit（非 0）/ error / fatal_error 消息 → crash 回调（status 幂等守卫）；
+ * - 崩溃检测：exit（非 0）/ error / fatal_error 消息 → crash 回调（status 幂等检查）；
  *   exit(0) → clean exit 清理不报 crash（L-5，对齐 Worker 版 handleWorkerCleanExit）；
  *   disconnect → grace 延迟分流（exit 事件权威裁决，仅存活进程断开才报 crash）
  *
@@ -25,7 +25,7 @@ import { PluginRpcServer, type RpcIdentity } from './plugin-rpc-server.js'
 import { resolveAndValidateFile, dispatchHostRpcMessage, safeDispatchHostMessage, isRecordMessage } from './plugin-host.js'
 
 /**
- * plugin-worker crash 台账行使用 schema 登记的扩展字段 processId/pid/signal/pluginIds
+ * plugin-worker crash journal 行使用 schema 登记的扩展字段 processId/pid/signal/pluginIds
  * （偏差 #32③：扩展字段登记 SSOT = shared crash-journal-schema.ts CrashJournalEvent，
  * 本地不再重复声明；crash-forensics §3.3 D1 plugin-worker crash 行：fork 宿主崩溃身份
  * 与致死信号）。writer 以 spread 序列化原样落盘 JSONL；exitCode 走 schema 既有字段。
@@ -227,7 +227,7 @@ export class PluginHostProcess implements PluginHostProcessContract {
    * 先置 status='terminated' 再 graceful kill（SIGTERM→SHUTDOWN_KILL_TIMEOUT_MS→SIGKILL），
    * 与 shutdown() 升级链对称——避免恶意/卡死子进程抵抗 SIGTERM 导致 orphan 泄漏
    *（MF-3：hot-reload/deactivate 路径的旧版子进程残留）。kill 后 exit/disconnect 事件
-   * 到达时被幂等守卫拦截，不会误触发 crash 回调（R3）。
+   * 到达时被幂等检查拦截，不会误触发 crash 回调（R3）。
    */
   async terminateProcess(processId: string): Promise<void> {
     const child = this.processInstances.get(processId)
@@ -267,7 +267,7 @@ export class PluginHostProcess implements PluginHostProcessContract {
     }
   }
 
-  /** 反向索引删除（带归属守卫：只删当前映射仍指向 processId 的条目，防误删重建后的新映射） */
+  /** 反向索引删除（带归属检查：只删当前映射仍指向 processId 的条目，防误删重建后的新映射） */
   private removeIndexEntries(processId: string, pluginIds: string[]): void {
     for (const pid of pluginIds) {
       if (this.pluginToProcess.get(pid) === processId) {
@@ -289,7 +289,7 @@ export class PluginHostProcess implements PluginHostProcessContract {
   async shutdown(): Promise<void> {
     // 对齐 terminateProcess 的 pre-mark（与 Worker 版 plugin-host.shutdown 同款）：
     // SIGTERM kill 触发的 exit(code=null)/disconnect 先到时，status='terminated'
-    // 幂等守卫拦截，不把正常关停误报为崩溃
+    // 幂等检查拦截，不把正常关停误报为崩溃
     for (const handle of this.processes.values()) handle.status = 'terminated'
     const children = [...this.processInstances.values()]
     await Promise.allSettled(
@@ -492,12 +492,12 @@ export class PluginHostProcess implements PluginHostProcessContract {
     // crash（假崩溃 toast + CRASHED 标记 + crashCounts 累积）。故 disconnect 不做
     // 即时裁决，只挂 grace 兜底，权威分流交给 exit handler：
     // - exit 随后到达 → clean exit（code 0）/ crash（code≠0）已完成清理，grace
-    //   到期时 handle 已删/已标记，幂等守卫直接返回
+    //   到期时 handle 已删/已标记，幂等检查直接返回
     // - grace 窗口内 exit 未到（进程仍存活）→ IPC 单方面断开的真异常 → 报 crash
     // - 窗口内 rebuild 已换新 child（processId 是 `sandbox-<pluginId>` 确定值，重建
     //   不换 id）→ 本定时器捕获的是旧 child 实例，必须按实例归属放行：旧 child 的
     //   迟到 disconnect/exit 不归新 handle 管（TC13：stale child late exit 不得
-    //   crash 新 handle；removeAllListeners 只摘旧 child 的监听器，摘不掉已在飞的
+    //   crash 新 handle；removeAllListeners 只摘旧 child 的监听器，摘不掉已在途的
     //   本定时器）
     child.on('disconnect', () => {
       const graceTimer = setTimeout(() => {
@@ -531,7 +531,7 @@ export class PluginHostProcess implements PluginHostProcessContract {
   /**
    * exit code 0 的子进程清理（L-5，对齐 Worker 版 handleWorkerCleanExit）：正常退出
    * 与崩溃分流——不报 crash（onCrash 不触发、不进上层 crashCounts/rebuild 链）。
-   * 幂等守卫与 crash 路径同款（crashed/terminated 已处理过则跳过；terminateProcess /
+   * 幂等检查与 crash 路径同款（crashed/terminated 已处理过则跳过；terminateProcess /
    * shutdown 的 pre-mark 路径自带清理，不会重复到达这里）。
    */
   private handleProcessCleanExit(processId: string): void {
@@ -547,12 +547,12 @@ export class PluginHostProcess implements PluginHostProcessContract {
   }
 
   /**
-   * 崩溃统一处理：status 幂等守卫（crashed/terminated 不重复触发）。
+   * 崩溃统一处理：status 幂等检查（crashed/terminated 不重复触发）。
    * 对齐 handleWorkerCrash 语义；重启 outOfScope（C5，由上层 wiring 决定）。
    *
    * exitMeta 仅 exit 事件路径携带（退出码/信号权威源）；error/disconnect/fatal_error
-   * 路径无退出语义，台账行落显式 null（「不知道 ≠ 没打点」）。计划内终止（terminate
-   * / shutdown 的 pre-mark）被幂等守卫先拦，不产生 crash 事件。
+   * 路径无退出语义，journal 行落显式 null（「不知道 ≠ 没打点」）。计划内终止（terminate
+   * / shutdown 的 pre-mark）被幂等检查先拦，不产生 crash 事件。
    */
   private handleProcessCrash(
     processId: string,
@@ -567,8 +567,8 @@ export class PluginHostProcess implements PluginHostProcessContract {
     this.rpcServer.unregisterWorker(processId)
     this.removeIndexEntries(processId, pluginIds)
 
-    // 台账双写（crash-forensics §3.3 D1 plugin-worker crash 行：worker 退出计数器驱动
-    // 点/崩溃统一处理汇聚点补台账行，与 status 幂等守卫同点——同一进程不重复记）。
+    // journal 双写（crash-forensics §3.3 D1 plugin-worker crash 行：worker 退出计数器驱动
+    // 点/崩溃统一处理汇聚点补 journal 行，与 status 幂等检查同点——同一进程不重复记）。
     // best-effort：writer append 自吞错不向崩溃链传播。code 0 正常退出走
     // handleProcessCleanExit，不经此处（正常退出不产生事件）。经中间变量传入
     // （扩展字段过 schema 闭接口的 excess property check）。
@@ -587,7 +587,7 @@ export class PluginHostProcess implements PluginHostProcessContract {
     // M6a-03：kill 兜底——fatal_error 消息路径子进程可能仍存活（发完消息不退出 = 进程
     // 泄漏）。崩溃时强制终止。
     //
-    // RT-6#5 三处收口（对齐下方 handleProcessCleanExit 的清理口径）：
+    // RT-6#5 三处收尾（对齐下方 handleProcessCleanExit 的清理口径）：
     // ① 裸 child.kill() 只发一次 SIGTERM，忽略 SIGTERM 的子进程会残留为 orphan。改用
     //    terminateProcess / shutdown 同款的 killChildGracefully（SIGTERM →
     //    SHUTDOWN_KILL_TIMEOUT_MS → SIGKILL 升级链）。返回 Promise 不 await——崩溃链是

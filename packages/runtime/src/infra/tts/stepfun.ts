@@ -57,7 +57,7 @@ export const stepfunCapabilities: TtsCapabilities = {
  * 音色枚举：官方清单 36 个 Voice ID 全集（2026-09-30 官方文档抓取；设计前提 10——
  * cixingnansheng 实测合成通过，`default` 非法值 400 voice_id_invalid）。
  * 注：末四个仅 stepaudio-2.5-tts / step-tts-2 支持（step-tts-mini 不支持），模型×音色
- * 组合约束不进 M0 表单投影形状，无效组合由厂商 4xx → tts_vendor_error 暴露。
+ * 组合约束不进 M0 表单派生视图形状，无效组合由厂商 4xx → tts_vendor_error 暴露。
  */
 const VOICES: ReadonlyArray<{ id: string; label: string }> = [
   { id: 'cixingnansheng', label: '磁性男声' },

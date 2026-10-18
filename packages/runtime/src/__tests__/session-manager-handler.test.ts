@@ -37,7 +37,7 @@ function makeMockSessionService(overrides: Partial<ISessionService> = {}): ISess
     abort: vi.fn(),
     getRpcClient: vi.fn(),
     getActiveSessionIds: vi.fn(),
-    // session 文件路径解析（respond payload sessionFilePath）的内存态腿：缺省无文件
+    // session 文件路径解析（respond payload sessionFilePath）的内存态路径：缺省无文件
     getSession: vi.fn().mockReturnValue(undefined),
     ...overrides,
   } as unknown as ISessionService
@@ -135,7 +135,7 @@ async function runStatusScenario(
 /**
  * watch 路由族用例共用脚手架：mock options + getSummary 覆盖 + claim arm→injected（sendDirect
  * 受理回执锚形态）+ 可选 settle 预兑现。summaryOverrides 传 undefined → getSummary 返回
- * undefined（二次校验①「session 已不在」腿）；传 {} 即默认归属材料。返回 opts 与已接线的
+ * undefined（二次校验①「session 已不在」路径）；传 {} 即默认归属材料。返回 opts 与已接线的
  * handler，供用例续做 openWatch / handle 断言。
  */
 function makeWatchFixture(
@@ -154,8 +154,8 @@ function makeWatchFixture(
 }
 
 describe('SessionManagerHandler', () => {
-  // 红阶段守卫：验证 session-manager extension 存在（区分力检查）
-  it('session-manager extension 存在（红阶段守卫）', () => {
+  // 红阶段检查：验证 session-manager extension 存在（区分力检查）
+  it('session-manager extension 存在（红阶段检查）', () => {
     const extensionPath = resolve(process.cwd(), '../../extensions/universal/session-manager/package.json')
     expect(existsSync(extensionPath), `session-manager extension should exist at ${extensionPath}`).toBe(true)
   })
@@ -463,7 +463,7 @@ describe('SessionManagerHandler', () => {
       expect(response.truncated).toBe(false)
     })
 
-    it('畸形 params（send.prompt 非法）→ respond({error})，不流入 sessionService（params 信任边界守卫）', async () => {
+    it('畸形 params（send.prompt 非法）→ respond({error})，不流入 sessionService（params 信任边界检查）', async () => {
       const opts = makeMockOptions()
       const handler = new SessionManagerHandler(opts)
 
@@ -757,7 +757,7 @@ describe('SessionManagerHandler', () => {
 
       await handler.handle('req-1', 'sid-parent', 'create', { cwd: '/test' })
 
-      // 缺省即「不写 .project.json」（session-lifecycle 空值守卫），等价于落默认项目
+      // 缺省即「不写 .project.json」（session-lifecycle 空值检查），等价于落默认项目
       expect(createOptionsOf(opts.sessionService).projectId).toBeUndefined()
       // 不阻断：created 结果照常回写（notify-once D6：无 prompt → willNotify:false + lifetimeNotifyId）
       expect(opts.sendExtensionUiResponse).toHaveBeenCalledWith(
@@ -826,7 +826,7 @@ describe('SessionManagerHandler', () => {
   // `expect(promise).toBeInstanceOf(Promise)` 对任意 async 函数恒真，无独立判别力；
   // handle 接线的真实行为验证由上方 U4-A1~A6 各 action 用例承担。
 
-  // ─── notify-once watch 桥（设计 D2/D6/U3；验收：params 守卫两面 / 路由三分支 /
+  // ─── notify-once watch 桥（设计 D2/D6/U3；验收：params 检查两面 / 路由三分支 /
   //     respond 回写 / ownership / 二次校验两态 / TTL 已挂 watch 同步 respond）────────
   describe('notify-once watch 路由：单键寻址三分支 + respond 前二次归属校验', () => {
     const VALID_NID = 'sm-12345678-1234-4234-8234-123456789012'
@@ -838,16 +838,16 @@ describe('SessionManagerHandler', () => {
       return respondAt(opts)
     }
 
-    it('params 守卫通过：封闭单键 {notifyId}（sm- 形态）→ 进入路由零 error', async () => {
+    it('params 检查通过：封闭单键 {notifyId}（sm- 形态）→ 进入路由零 error', async () => {
       const opts = makeMockOptions()
       const handler = new SessionManagerHandler(opts)
       await handler.handle('req-watch', 'sid-parent', 'watch', { notifyId: VALID_NID })
       const payload = respondAt(opts)
       expect(payload.error).toBeUndefined()
-      expect(payload.reason).toBe('cancelled') // 查无 claim → fail-closed（守卫通过后的路由应答）
+      expect(payload.reason).toBe('cancelled') // 查无 claim → fail-closed（检查通过后的路由应答）
     })
 
-    it('params 守卫拒绝：空载荷 / 夹带额外字段 / notifyId 形态非法 → respond({error}) error envelope', async () => {
+    it('params 检查拒绝：空载荷 / 夹带额外字段 / notifyId 形态非法 → respond({error}) error envelope', async () => {
       const badParams: Array<Record<string, unknown>> = [
         {},
         { notifyId: VALID_NID, parentSid: 'forged' },
@@ -859,7 +859,7 @@ describe('SessionManagerHandler', () => {
         const handler = new SessionManagerHandler(opts)
         await handler.handle('req-watch', 'sid-parent', 'watch', params)
         const payload = respondAt(opts)
-        expect(payload.error, `params=${JSON.stringify(params)} 应被守卫拒绝`).toMatch(/invalid params for session-manager action 'watch'/)
+        expect(payload.error, `params=${JSON.stringify(params)} 应被检查拒绝`).toMatch(/invalid params for session-manager action 'watch'/)
       }
     })
 
@@ -893,7 +893,7 @@ describe('SessionManagerHandler', () => {
       await handler.handle('req-watch', 'sid-parent', 'watch', { notifyId: VALID_NID })
       expect(opts.sendExtensionUiResponse).not.toHaveBeenCalled() // 挂起
 
-      // settle 兑现腿（组合根形态：素材回执循环 + handler 写回通道）
+      // settle 兑现路径（组合根形态：素材回执循环 + handler 写回通道）
       const batch = opts.claims!.settle('s1', 'done')
       deliverRespondTargets(opts.claims!, batch.targets, handler.watchRespond, {
         sessionFilePath: '/tmp/s1.jsonl',
@@ -1042,7 +1042,7 @@ describe('SessionManagerHandler', () => {
       const opts = makeMockOptions({
         sessionService: makeMockSessionService({
           abort: vi.fn().mockImplementation(async () => {
-            // abort 执行时点断言：此刻债权已销账（入口同步抹除先于 await）
+            // abort 执行时点断言：此刻债权已抹除（入口同步抹除先于 await）
             expect(opts.claims!.getClaim('sid-parent', VALID_NID)).toBeUndefined()
           }),
         }),
@@ -1071,7 +1071,7 @@ describe('SessionManagerHandler', () => {
         }),
       })
       const handler = new SessionManagerHandler(opts)
-      // 制造一笔 orphaned（respond 失败腿）→ 计数 +1
+      // 制造一笔 orphaned（respond 失败路径）→ 计数 +1
       opts.claims!.arm({ parentSid: 'sid-parent', notifyId: VALID_NID2, kind: 'claim', sessionId: 's1' })
       opts.claims!.onRespond('sid-parent', VALID_NID2, false)
       expect(opts.claims!.undeliveredCount('s1')).toBe(1)

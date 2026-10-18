@@ -3,7 +3,7 @@
  * MessageBus 分区无串扰。
  *
  * 口径：fixture/mock 轨（真 MessageBus + 内存 BusClient，零 pi 零 token，凭证无关）。
- * 覆盖 runtime 侧分区收口点 = MessageBus.publish 的定向推送（per-session 订阅集合 +
+ * 覆盖 runtime 侧分区收尾点 = MessageBus.publish 的定向推送（per-session 订阅集合 +
  * per-session seq/ring/stateSnapshot）——renderer chatStore 分区回放半边归 M2-c
  * （文件→applyEntry 回放等价），两侧合起来构成 P-isolation 全断言。
  *

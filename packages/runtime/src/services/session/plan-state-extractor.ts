@@ -1,5 +1,5 @@
 /**
- * plan-state-extractor — plan 模式状态投影域（plan 模式重设计 D1④，照 subagent-extractor /
+ * plan-state-extractor — plan 模式状态派生视图域（plan 模式重设计 D1④，照 subagent-extractor /
  * workflow-extractor 同族形态）。
  *
  * `scanPlanStateEntries(entries)` 是 plan 状态唯一派生函数：实时（SessionRecords 增量拉取）
@@ -8,24 +8,24 @@
  *
  * 派生语义 = 读 session **活跃路径内最后一条**合法 plan-state entry（extension 侧
  * reconstructPlanState 的逆序取首同构——entry 顺序即时间顺序，每次状态迁移整体重写快照，
- * 无 per-key merge；[message-revoke U6d] 活跃路径裁剪 = G2 二分的未来状态随树腿，被撤
+ * 无 per-key merge；[message-revoke U6d] 活跃路径裁剪 = G2 二分的未来状态随树路径，被撤
  * 子树的 plan-state entry 不进派生态——live（SessionRecords 全量重建传 leafId）/ 冷启
- * （文件腿 trimFileEntriesToActivePath）三处同批，见 scanPlanStateEntries 注释）。
+ * （文件路径 trimFileEntriesToActivePath）三处同批，见 scanPlanStateEntries 注释）。
  *
  * schema 兼容（D4）：entry data 无版本字段（版本号字段 + 迁移逻辑已被 D1 明文否决），新旧
- * schema 靠**字段级 optional 判存在**消解——skills/docs 逐字段守卫透传，不做
- * v 守卫（与 subagent/workflow extractor 的 v !== 1 早退是刻意差异，依据 D4「版本号字段被否」）。
+ * schema 靠**字段级 optional 判存在**消解——skills/docs 逐字段检查透传，不做
+ * v 检查（与 subagent/workflow extractor 的 v !== 1 早退是刻意差异，依据 D4「版本号字段不采用」）。
  *
  * 派生归一（plan 状态机显式化 D2 读方②）：产出 View **恒携带 `state`**（新 entry 直读 /
  * 旧 entry 经 reviewState 映射（awaiting→reviewing、revising→revising、无→planning|idle
  * 按 isActive）），resumeHint 直读或由 reviewStateSource:'resubmit' 同义映射；**旧字段
  * （reviewState/reviewStateSource）只作映射输入、永不透出进 View**（取代式演进；
- * selfReview 不投影，D9③：消费面止于审批请求帧 + entry 比较基线）。映射实现单源 =
+ * selfReview 不派生，D9③：消费方止于审批请求帧 + entry 比较基线）。映射实现单源 =
  * extension-protocol legacy-entries（plan-mode-audit-remediation D-B4-1 下沉——原内联
  * 拷贝删除，扩展读方①同引一份；契约断言面 = protocol 包内 legacy-entries.test.ts）。
  *
  * runtime 不 import extensions/ 源码（依赖方向不允许，同 subagent-extractor:194 先例），
- * entry data 按防御式逐字段守卫消费；extension-protocol 是包依赖（tsup noExternal 已打包，
+ * entry data 按防御式逐字段检查消费；extension-protocol 是包依赖（tsup noExternal 已打包，
  * 与 event-adapter 的 marker 常量同引法）。
  */
 import { readFileSync, statSync } from 'node:fs'
@@ -40,7 +40,7 @@ import {
 } from '@zhushanwen/extension-protocol'
 import { parseJsonl } from '../../utils/jsonl.js'
 import { isEnoent } from '../../utils/errors.js'
-// 活跃路径裁剪（message-revoke U6d）：U6a 交付的导出 SSOT 纯函数 + 文件腿喂数单点
+// 活跃路径裁剪（message-revoke U6d）：U6a 交付的导出 SSOT 纯函数 + 文件路径喂数单点
 //（剥 header / 文件尾 leaf 派生），plan 派生读者按 census §4.2 复用、不自含重复实现
 import { computeActivePathEntries } from '../../infra/pi/session-entry-mapper.js'
 import { trimFileEntriesToActivePath } from '../../infra/pi/session-file-utils.js'
@@ -68,7 +68,7 @@ const MAX_PLAN_REQUIREMENT_LENGTH_BYTES = 65_536
 
 /**
  * 「未激活」缺省 View（无 entry / ENOENT / oversize 降级共用，对齐 extension
- * DEFAULT_PLAN_STATE 的 View 域投影）。导出给 SessionRecords 的 publish 归一
+ * DEFAULT_PLAN_STATE 的 View 域派生）。导出给 SessionRecords 的 publish 归一
  * （全量重建发现 entry 被外部清空 → 缺省 View 发布帧，见 mergePlanState）。
  */
 export const INACTIVE_PLAN_STATE_VIEW: PlanStateView = {
@@ -82,7 +82,7 @@ export const INACTIVE_PLAN_STATE_VIEW: PlanStateView = {
  * entry 扫描器：从 entry 列表派生 plan 状态视图（D1④）。
  *
  * [message-revoke U6d] 派生语义升级为「**活跃路径内**最后一条」合法 plan-state entry
- * （G2 二分的未来状态随树腿——plan 状态 = 当前状态，被撤子树的 plan-state entry 不得
+ * （G2 二分的未来状态随树路径——plan 状态 = 当前状态，被撤子树的 plan-state entry 不得
  * 进派生态）：提供 leafId 时先经 computeActivePathEntries（U6a 导出 SSOT）裁剪再逆序扫；
  * 缺省 = 现行为（全文件逆序取首）。调用点契约（U6a 同款）：仅全量重建路径传 leafId、
  * 增量合并路径不传（delta 是活跃路径后缀切片，裁剪是全树语义，统一传会在窗口越界误裁）。
@@ -108,7 +108,7 @@ export function scanPlanStateEntries(entries: unknown[], leafId?: string): PlanS
 }
 
 /**
- * 单条 entry → PlanStateView（type/customType/data 逐层守卫，非 plan-state entry 或坏
+ * 单条 entry → PlanStateView（type/customType/data 逐层检查，非 plan-state entry 或坏
  * data 返回 null）。字段映射规则：
  * - 四必填字段：isActive 严格 `=== true`（其他形态归 false——View 契约是 boolean，防御
  *   extension 侧异常写入）；三个 string 字段空串归一 null（normalizeNonEmptyString）。
@@ -156,10 +156,10 @@ function normalizeNonEmptyString(v: unknown, capTo?: number): string | null {
 }
 
 /**
- * optional 字段派生（D4 + D2 读方② 归一）：skills 要求 string[]、docs 逐元素守卫（坏元素
+ * optional 字段派生（D4 + D2 读方② 归一）：skills 要求 string[]、docs 逐元素检查（坏元素
  * 过滤）；state 恒携带（readLifecycleState 归一）、resumeHint 条件落键（readResumeHint）；
  * 旧字段 reviewState/reviewStateSource **只作映射输入、不透出进 View**（D2 取代式演进）；
- * selfReview 不投影（D9③——投影面止于审批请求帧，planState 帧有界前提不扩展）。
+ * selfReview 不派生（D9③——派生范围止于审批请求帧，planState 帧有界前提不扩展）。
  */
 function applyOptionalPlanFields(view: PlanStateView, d: Record<string, unknown>): void {
   if (isStringArray(d.skills)) {
@@ -177,13 +177,13 @@ function applyOptionalPlanFields(view: PlanStateView, d: Record<string, unknown>
   if (resumeHint !== undefined) view.resumeHint = resumeHint
 }
 
-/** string[] 守卫（skills 透传前置条件，空数组合法——extension 侧语义由其自行定义）。 */
+/** string[] 检查（skills 透传前置条件，空数组合法——extension 侧语义由其自行定义）。 */
 function isStringArray(v: unknown): v is string[] {
   return Array.isArray(v) && v.every((item) => typeof item === 'string')
 }
 
 /**
- * docs 元素逐字段守卫 → PlanDocMeta（shared 契约四字段；坏元素返回 null 被过滤——
+ * docs 元素逐字段检查 → PlanDocMeta（shared 契约四字段；坏元素返回 null 被过滤——
  * 单文档元数据损坏不拖垮整组产物清单，未损坏部分照常显示）。
  */
 function parsePlanDocMeta(v: unknown): PlanDocMeta | null {
@@ -201,7 +201,7 @@ function parsePlanDocMeta(v: unknown): PlanDocMeta | null {
 }
 
 /**
- * 从主 session JSONL 文件提取 plan 状态视图（冷启动 / getPlanState RPC 路径，D1⑥ 冷腿）。
+ * 从主 session JSONL 文件提取 plan 状态视图（冷启动 / getPlanState RPC 路径，D1⑥ 冷路径）。
  *
  * 读取文件 → parseJsonl → [message-revoke U6d] trimFileEntriesToActivePath（剥 header +
  * 文件尾 leaf 回溯——pi 树重放规则保证文件尾即活跃叶子（PS-60 实锚 dist/core/
@@ -213,7 +213,7 @@ function parsePlanDocMeta(v: unknown): PlanDocMeta | null {
  * 读失败分级（照 subagent-extractor extractSubagentsFromSessionFile 契约）：
  * - 文件不存在（ENOENT）→ 「未激活」缺省 View（合法边界：pi session 文件延迟写入，文件
  *   都不存在必然无 plan-state entry；缺省形态对齐 extension DEFAULT_PLAN_STATE 的 View 域
- *   投影——isActive:false + 三 string 字段 null）。
+ *   派生——isActive:false + 三 string 字段 null）。
  * - 其他读错误（EACCES / EISDIR 等）→ 原样上抛（RPC 报错；降级缺省 View 会把「读失败」
  *   与「从未进过 plan」混淆）。
  * - oversize（> READ_PRECHECK_MAX_BYTES 32MB）→ warn 留痕 + 缺省 View 降级（G3 峰值治理

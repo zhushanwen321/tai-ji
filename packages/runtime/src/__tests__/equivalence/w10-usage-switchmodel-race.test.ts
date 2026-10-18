@@ -98,13 +98,13 @@ function makeFixture(): Fixture {
   return { svc, bus, client, setCurrentModel: (m) => { currentModel = m } }
 }
 
-/** 播种激活 session + 四实例（usage 快照落位 = 当前模型的 pi 权威 contextUsage 投影；label/queue 已撤销 PR #185）。 */
+/** 播种激活 session + 四实例（usage 快照落位 = 当前模型的 pi 权威 contextUsage 派生视图；label/queue 已撤销 PR #185）。 */
 async function seedActiveSession(fx: Fixture, sessionId: string): Promise<void> {
   await fx.svc.initializeManagedSession(sessionId, {} as unknown as IPiEngine, '/tmp', 'race')
   await vi.advanceTimersByTimeAsync(1) // flush 四实例播种 refetch
 }
 
-/** 此刻 get_session_stats().contextUsage 的投影（竞态用例的权威终态基准，直接调 mock RPC）。 */
+/** 此刻 get_session_stats().contextUsage 的派生视图（竞态用例的权威终态基准，直接调 mock RPC）。 */
 async function authoritativeProjection(
   fx: Fixture,
 ): Promise<{ inputTokens: number; contextLimit: number; usagePercent: number }> {
@@ -155,7 +155,7 @@ describe('W10 竞态回归：switchModel 与 context.update 乱序到达（结�
 
     // W12：即时广播退役——防抖到点三实例收敛后，快照挂钩发布帧。D1 协议收敛
     //（context-consistency Phase 1）后 usage 只在 context.update 帧：mock 权威按当前
-    // 模型 B 的窗口 100k / percent 20 投影（与旧「快照 tokens × resolver 新窗口重算」的
+    // 模型 B 的窗口 100k / percent 20 派生视图（与旧「快照 tokens × resolver 新窗口重算」的
     // 20 同值——切换前后等价）；state_changed 帧不再携带 usage（协议层已删三字段）。
     await vi.advanceTimersByTimeAsync(SCALAR_STATE_DEBOUNCE_MS + 50)
     const contextUpdate = lastPublished(fx, 'context.update')

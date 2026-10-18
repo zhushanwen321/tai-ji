@@ -1,12 +1,12 @@
 /**
- * SessionStateProjection — session 级状态投影域（S5 从 SessionService 迁出，
- * 设计 D2②：replicated states 快照投影族 + context/usage 副作用域同族合并——
+ * SessionStateProjection — session 级状态派生视图域（S5 从 SessionService 迁出，
+ * 设计 D2②：replicated states 快照派生视图族 + context/usage 副作用域同族合并——
  * 可观察输出同为「session 级状态向 renderer 发布」）。
  *
- * 上半（快照投影族，原 Facade 方法族逐字随迁）：per-session ReplicatedState 实例组
+ * 上半（快照派生视图族，原 Facade 方法族逐字随迁）：per-session ReplicatedState 实例组
  * （四实例：thinkingLevel / modelId / usage / commands）的注册与播种、三条 fetch 窄访问器
  * （get_state / get_session_stats / get_commands，fetch 成功后挂钩发布
- * context.update / session.commands / session.state_changed——「投影一次」，W12/D7）。
+ * context.update / session.commands / session.state_changed——「派生一次」，W12/D7）。
  *
  * 下半（context/usage 副作用域，原 Facade 方法逐字随迁）：事件链路副作用
  * （applyContextUpdate 事件只失效 / handleTurnUsageSideEffects turn_end 兜底 /
@@ -58,13 +58,13 @@ import {
  * 事件与 RPC 响应永不直接写实例数据（只 markDirty）。session.thinkingLevel /
  * modelId 会话字段缓存是登记的永久双写形态（PR #185 S2 裁决，2026-08-20，登记表
  * #4/#5 修订）：播种 refetch 三实例异步竞速 + get_state 失败退避（1s/5s/15s）窗口内
- * 快照未就绪，state_changed 组合投影 fallback 读该缓存；toSummary（session 列表）
+ * 快照未就绪，state_changed 组合派生视图 fallback 读该缓存；toSummary（session 列表）
  * 亦消费该字段。usage 双写已终结（W10）。
  *
  * [HISTORICAL] label / queue 深度两实例已撤销（PR #185 data-governance review MF1/MF2，
  * 2026-08-20）：两实例 .get() 生产零消费，markDirty 触发的防抖 get_state 拉取纯浪费 RPC，
  * 真值路径分别是 session_info_changed 事件直写 setLabelCache（label 唯一真值源）与
- * queue_update 帧内 pendingMessageCount（= pi 队列深度推送投影，renderer 对账直读帧值）。
+ * queue_update 帧内 pendingMessageCount（= pi 队列深度推送派生视图，renderer 对账直读帧值）。
  * 「完成 W7/W8 发布通道」属新功能开发，不在 review 修复范畴，按登记表 #1/#6 修订记录在案。
  */
 export interface SessionReplicatedStates {
@@ -76,7 +76,7 @@ export interface SessionReplicatedStates {
 
 /**
  * onSessionRegistered 订阅目标的结构化窄面（组装根传入 lifecycle；测试可传 plain
- * object——G2：stub 面 = 消费面，单方法）。
+ * object——G2：stub 面 = 消费方，单方法）。
  */
 export interface SessionRegisteredSource {
   onSessionRegistered(handler: (sessionId: string) => void): void
@@ -89,9 +89,9 @@ export interface SessionRegisteredSource {
 export interface SessionStateProjectionDeps {
   /** pi 进程管理（getClient：fetch 窄访问器的活跃判定 + RPC client）。 */
   pm: IProcessManager
-  /** sessions Map 只读查询（lifecycle 所有者）：副作用域 session 定位 + 销毁守卫。 */
+  /** sessions Map 只读查询（lifecycle 所有者）：副作用域 session 定位 + 销毁检查。 */
   getSession(sessionId: string): IManagedSessionView | undefined
-  /** sessions Map 存在性查询（publish 前销毁守卫：已销毁不 publish，防 bus 重建已 clearSession 的 entry）。 */
+  /** sessions Map 存在性查询（publish 前销毁检查：已销毁不 publish，防 bus 重建已 clearSession 的 entry）。 */
   hasSession(sessionId: string): boolean
   /** MessageBus 当前值（Facade setter 晚期注入，未注入时 null → 广播 no-op）。 */
   getMessageBus(): IMessageBus | null
@@ -104,8 +104,8 @@ export interface SessionStateProjectionDeps {
 }
 
 /**
- * D1（context-consistency Phase 1）：get_session_stats 响应是否为「合法无值」投影。
- * 与 createUsageStateConfig.fetchSnapshot 的投影口径镜像对齐：
+ * D1（context-consistency Phase 1）：get_session_stats 响应是否为「合法无值」派生视图。
+ * 与 createUsageStateConfig.fetchSnapshot 的派生视图口径镜像对齐：
  * - stats / stats.contextUsage 非对象 = 协议异常（fetchSnapshot 会 throw WireSnapshotSchemaError，
  *   实例退避重试）——fetch 未成功，不发占位帧，返回 false；
  * - contextUsage.tokens 非 number（pi tokens=null，compact 后无新 turn）= 空快照 {}——
@@ -119,7 +119,7 @@ function isUsageNoValueProjection(stats: Record<string, unknown> | undefined): b
 }
 
 /**
- * W12：state_changed 组合投影的 diff 基线形状（2 字段；sessionId 是 map key 恒同值，不参与 diff）。
+ * W12：state_changed 组合派生视图的 diff 基线形状（2 字段；sessionId 是 map key 恒同值，不参与 diff）。
  * buildStateChangedPayload 产出的 payload 含 sessionId 字段，结构上是本形状的超集，可直接入基线。
  * D1：usage 三字段已从基线删除（协议收敛，payload 不再携带 usage）。
  */
@@ -129,11 +129,11 @@ interface SessionStateChangedBaseline {
 }
 
 /**
- * W12：modelId / thinkingLevel 两实例快照 → session.state_changed 组合投影 payload。
+ * W12：modelId / thinkingLevel 两实例快照 → session.state_changed 组合派生视图 payload。
  * 快照缺失字段 fallback 双写缓存（session.modelId / thinkingLevel）——登记的永久形态
  * （PR #185 S2 裁决，2026-08-20）：播种 refetch 异步竞速 + 失败退避窗口内 .get() 为
  * undefined，缓存兜底（写方 = switchModel / setThinkingLevel RPC 成功后直写）。
- * D1（context-consistency Phase 1）：usage 三字段不再投影（usage 只经 context.update 帧，
+ * D1（context-consistency Phase 1）：usage 三字段不再派生（usage 只经 context.update 帧，
  * 旧「无快照 ?? 0 基线」编码随协议删除）。
  */
 function buildStateChangedPayload(
@@ -149,8 +149,8 @@ function buildStateChangedPayload(
 }
 
 /**
- * W12：state_changed 组合投影的 diff 判定（2 字段全等 → 同值组合不重复发帧）。
- * thinkingLevel 的 30s 周期兜底重拉会高频触发发布挂钩，靠本判定抑制重复帧。
+ * W12：state_changed 组合派生视图的 diff 判定（2 字段全等 → 同值组合不重复发帧）。
+ * thinkingLevel 的 30s 周期兜底重新拉取会高频触发发布挂钩，靠本判定抑制重复帧。
  */
 function stateChangedPayloadEquals(a: SessionStateChangedBaseline, b: SessionStateChangedBaseline): boolean {
   return a.modelId === b.modelId
@@ -165,7 +165,7 @@ export class SessionStateProjection {
    * 进程退出汇聚，dispose 停防抖/退避/周期兜底全部定时器）。
    */
   private readonly replicatedStates = new Map<string, SessionReplicatedStates>()
-  /** W12：state_changed 组合投影的 diff 基线（per-session，onSessionDisposed 一并清除）。 */
+  /** W12：state_changed 组合派生视图的 diff 基线（per-session，onSessionDisposed 一并清除）。 */
   private readonly lastPublishedStateChanged = new Map<string, SessionStateChangedBaseline>()
 
   constructor(private readonly deps: SessionStateProjectionDeps) {}
@@ -203,7 +203,7 @@ export class SessionStateProjection {
    * 处理 context.update（pi agent_end/turn_end 推送 inputTokens + totalTokens）。session 级状态单一 owner。
    * index.ts onContextUpdate 经 Facade 一行委托仅调本方法。
    *
-   * W12（data-source-governance P1.5）：事件只做失效——usage markDirty 后防抖重拉
+   * W12（data-source-governance P1.5）：事件只做失效——usage markDirty 后防抖重新拉取
    * get_session_stats，快照应用后经 fetchSessionStatsSnapshot 的挂钩发布 context.update
    * （payload 全字段来自 usage 实例快照），旧「事件即时值 + resolver 窗口重算再转发」的
    * 事件直写中间层已删（plan W12 步骤 3）。事件参数不再进任何 payload；发布延迟 =
@@ -216,7 +216,7 @@ export class SessionStateProjection {
    * 权威值（结构自愈，见 switchModel 注释的 W10 段）。
    */
   applyContextUpdate(sessionId: string, _inputTokens: number, _totalTokens?: number): void {
-    // usage 失效（事件只做失效——markDirty 置 dirty + 防抖重拉 get_session_stats 快照，
+    // usage 失效（事件只做失效——markDirty 置 dirty + 防抖重新拉取 get_session_stats 快照，
     // usage 实例唯一数据写路径）。0 值事件同样失效（与 W10 行为一致：失效在旧 0 值门控之前）。
     this.replicatedStates.get(sessionId)?.usage.markDirty()
   }
@@ -225,14 +225,14 @@ export class SessionStateProjection {
    * turn_end 单 turn 副作用（W3 迁移自 attachUsageListener turn_end 分支）。
    *
    * 承载 turn_end 时机的 project sidecar 兜底补写——第一个 turn_end 时 pi 已完成该轮
-   * flush（session 文件已存在），existsSync 守卫通过。label 持久化已不在此承载
+   * flush（session 文件已存在），existsSync 检查通过。label 持久化已不在此承载
    *（W1 数据源治理：活跃 label 唯一写入口 = renameSession/create/fork 的 set_session_name RPC）。
    */
   handleTurnUsageSideEffects(sessionId: string): void {
     const session = this.deps.getSession(sessionId)
     if (!session) return
     // D14 语义修正：turn_end 时 pi 已完成 flush（文件存在）→ 兜底补写归属 project sidecar
-    //（create 时文件未落盘被 existsSync 守卫跳过，内存态 projectId 在此落盘）。
+    //（create 时文件未落盘被 existsSync 检查跳过，内存态 projectId 在此落盘）。
     this.deps.tryPersistProjectBinding(session)
   }
 
@@ -272,7 +272,7 @@ export class SessionStateProjection {
    * agent_settled 副作用（session-dead 2026-09-10 补丁）：run 级联结束 → occupancy #4 'idle'
    * 转移（session-dead-structural-fixes D2 挂点迁移，u3b——原直写 isGenerating=false 改调
    * 'idle' 行，原语原子完成「isGenerating=false 派生 + turn='idle' 合并」；interpreter 侧 #4
-   * 幂等去重，settled 边沿时投影即时归位）。
+   * 幂等去重，settled 边沿时派生视图即时归位）。
    *
    * 与上方 agent_end 副作用的分工（pi 实装依据）：`agent_end` 由 Agent 每次 attempt 发出，
    * retry / auto-compaction 续跑会**重发**，本身不是 run 终点；真正的终点是 `_runAgentPrompt`
@@ -302,10 +302,10 @@ export class SessionStateProjection {
    * 拉取上下文用量并触发广播（restoreSession / forkSession 兜底用）。
    *
    * W12：广播职责归 usage fetch 挂钩（publishContextFromSnapshot）——本方法只做「查询即
-   * 失效」（fetchContext 内 markDirty → 防抖重拉 → 快照应用后挂钩发布）。fetchContext 返回
+   * 失效」（fetchContext 内 markDirty → 防抖重新拉取 → 快照应用后挂钩发布）。fetchContext 返回
    * null（compact 后无值）时不失效，快照保持旧值——对齐旧「null 不广播」语义。
    * 注意：挂钩发布的广播可能早于前端订阅新 sessionId 通道（时序竞争，见架构约定 #7），
-   * 前端 useContextUsage composable 的恢复腿（每次切入视图拉 session.getContext）保证到达。
+   * 前端 useContextUsage composable 的恢复路径（每次切入视图拉 session.getContext）保证到达。
    * fire-and-forget 语义：失败不阻塞 session 恢复。
    */
   async fetchAndBroadcastContext(sessionId: string): Promise<void> {
@@ -317,7 +317,7 @@ export class SessionStateProjection {
     }
   }
 
-  // ── 快照投影族（原 Facade 私有方法族逐字随迁）──
+  // ── 快照派生视图族（原 Facade 私有方法族逐字随迁）──
 
   /**
    * W7/W8：注册 per-session 实例组（四实例）并 refetch 播种。
@@ -334,7 +334,7 @@ export class SessionStateProjection {
       existing.commands.dispose()
     }
     // W12：modelId / thinkingLevel 的 fetch 走带 state_changed 发布挂钩的包装（快照应用后
-    // 组合投影）；usage / commands 的 fetch 各自带发布挂钩（fetchSessionStatsSnapshot /
+    // 组合派生视图）；usage / commands 的 fetch 各自带发布挂钩（fetchSessionStatsSnapshot /
     // fetchCommandsSnapshot），无需裸 fetchState。
     // [code-harden RT-4#3] diagnosticLabel：实例身份进失败 warn 日志（字段域 + sessionId），
     // 快照退避/耗尽不再零线索。
@@ -386,11 +386,11 @@ export class SessionStateProjection {
    * resolve 后 doFetch 的 applySnapshot 在微任务链上先于宏任务执行，发布读到的必是已应用
    * 快照）。播种 refetch / context 事件失效（applyContextUpdate）/ fetchContext 查询失效 /
    * switchModel 失效的每次 fetch 都经本入口 ⇒ stateSnapshot 的 context last-value 恒 ==
-   * owner 快照（「投影一次」，D7）。fetch 失败（throw）不发布——快照未变。
+   * owner 快照（「派生一次」，D7）。fetch 失败（throw）不发布——快照未变。
    *
-   * D1（context-consistency Phase 1）：fetch 成功且投影为空快照（pi tokens=null 合法无值）
+   * D1（context-consistency Phase 1）：fetch 成功且派生视图为空快照（pi tokens=null 合法无值）
    * 时挂钩改发「无值占位帧」（仅含 sessionId，typeKey='context' last-value 显式登记无值态，
-   * 切回的 stateSnapshot 回放可区分「该 session 无值」与「从未收到帧」）。空投影判定在
+   * 切回的 stateSnapshot 回放可区分「该 session 无值」与「从未收到帧」）。空派生视图判定在
    * fetch 返回值上做而非实例 .get()——ownerSnapshotMerge 对空快照保持旧值，.get() 拿到的
    * 是旧值不是「空」；.get() 为 undefined（从未 fetch 成功 / 退避窗口）时值可能马上就来，
    * 不发占位帧防消费方误写 no-value。
@@ -436,7 +436,7 @@ export class SessionStateProjection {
 
   /**
    * D1（context-consistency Phase 1）：无值占位帧——仅含 sessionId 的 context.update。
-   * 触发条件 = 本次 fetch 成功且投影为空快照（pi tokens=null；见 fetchSessionStatsSnapshot
+   * 触发条件 = 本次 fetch 成功且派生视图为空快照（pi tokens=null；见 fetchSessionStatsSnapshot
    * 的判定注释）。写入 typeKey='context' 的 last-value 后，stateSnapshot 回放能区分「该
    * session 无值」与「从未收到帧」。协议层语义：字段缺失 = 无值（0 基线帧已随 D1 消失）。
    */
@@ -456,8 +456,8 @@ export class SessionStateProjection {
    *
    * W12：fetch 成功后排一次 session.commands 发布（setTimeout 0 宏任务——fetch promise
    * resolve 后 doFetch 的 applySnapshot 在微任务链上先于宏任务执行，发布读到的必是已应用
-   * 快照）。播种 refetch / 查询即失效（getCommands）/ 防抖重拉的每次 fetch 都经本入口 ⇒
-   * stateSnapshot 的 commands last-value 恒 == owner 快照（「投影一次」，D7）。fetch 失败
+   * 快照）。播种 refetch / 查询即失效（getCommands）/ 防抖重新拉取的每次 fetch 都经本入口 ⇒
+   * stateSnapshot 的 commands last-value 恒 == owner 快照（「派生一次」，D7）。fetch 失败
    * （throw）不发布——快照未变，无需刷新 last-value。
    */
   private async fetchCommandsSnapshot(sessionId: string): Promise<unknown> {
@@ -474,7 +474,7 @@ export class SessionStateProjection {
   private publishCommandsSnapshot(sessionId: string): void {
     if (!this.deps.hasSession(sessionId)) return // session 已销毁：不 publish（防 bus 重建已 clearSession 的 entry）
     const commands = this.replicatedStates.get(sessionId)?.commands.get()?.commands
-    if (commands === undefined) return // 快照未就绪（首拉失败窗口）：不发（对齐旧路径失败不发）
+    if (commands === undefined) return // 快照未就绪（首次拉取失败窗口）：不发（对齐旧路径失败不发）
     const msg: ServerMessage = { type: 'session.commands', payload: { sessionId, commands } }
     this.deps.getMessageBus()?.publish(sessionId, msg)
   }
@@ -491,8 +491,8 @@ export class SessionStateProjection {
    * 未落定实例 .get() 为 undefined；get_state 失败退避（1s/5s/15s）窗口同理。缓存由
    * switchModel / setThinkingLevel RPC 成功后直写保持最新，兜底值即 pi 生效值。
    * D1（context-consistency Phase 1）：usage 三字段已从本帧删除——usage 只经 context.update
-   * 一条帧贯穿，本方法不再投影 usage（旧「无快照 ?? 0 基线」随协议删除）。
-   * diff 抑制：thinkingLevel 的 30s 周期兜底重拉会高频触发挂钩，同值组合不重复发帧。
+   * 一条帧贯穿，本方法不再派生 usage（旧「无快照 ?? 0 基线」随协议删除）。
+   * diff 抑制：thinkingLevel 的 30s 周期兜底重新拉取会高频触发挂钩，同值组合不重复发帧。
    */
   private publishStateChangedFromSnapshot(sessionId: string): void {
     if (!this.deps.hasSession(sessionId)) return // session 已销毁：不 publish（防 bus 重建已 clearSession 的 entry）
@@ -516,7 +516,7 @@ export class SessionStateProjection {
 
   /**
    * W12：modelId / thinkingLevel 实例的 fetch 包装——get_state 快照应用后挂钩发布
-   * session.state_changed（组合投影）。与 fetchStateSnapshot 的关系：多一层「fetch 落定
+   * session.state_changed（组合派生视图）。与 fetchStateSnapshot 的关系：多一层「fetch 落定
    * （成功或失败）→ setTimeout 0 宏任务发布」（宏任务晚于 doFetch 的 applySnapshot 微任务
    * 链，成功路径发布读到的必是已应用快照）。失败路径同样排发布：payload 走快照缺失的
    * fallback 双写缓存（永久形态，见 publishStateChangedFromSnapshot 注释）——对齐旧

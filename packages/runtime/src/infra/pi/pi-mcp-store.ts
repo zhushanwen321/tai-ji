@@ -71,7 +71,7 @@ import { getMcpConfigPath } from './pi-paths.js'
 // ─────────────────────────────────────────────────────────────────────────────
 
 /** 清单单条目：文件原样值 + 读侧标注。坏条目照原样保留（config 可能是任意 JSON 值）。 */
-export interface McpServerEntryView { // oe-exempt:20261004:framework:store 读侧跨层投影形状（infra→transport→renderer，坏条目原样投影契约）
+export interface McpServerEntryView { // oe-exempt:20261004:framework:store 读侧跨层派生视图形状（infra→transport→renderer，坏条目原样派生视图契约）
   name: string
   /** 文件中的原样条目值（D4：坏条目照原样保留，不阻塞其余条目管理）。 */
   config: unknown
@@ -80,7 +80,7 @@ export interface McpServerEntryView { // oe-exempt:20261004:framework:store 读�
 }
 
 /** mcp.json 快照（拉取口径，读以文件为准）。 */
-export interface McpSnapshot { // oe-exempt:20261004:framework:store 读侧跨层投影形状（mcp.json 快照拉取契约，读以文件为准）
+export interface McpSnapshot { // oe-exempt:20261004:framework:store 读侧跨层派生视图形状（mcp.json 快照拉取契约，读以文件为准）
   /** 当前生效路径（getMcpConfigPath() 或测试重定向值）。 */
   filePath: string
   /** 文件整体损坏（JSON 语法错误 / 顶层非对象 / mcpServers 非对象 / 不可读）——true 时 servers 恒空。 */
@@ -578,7 +578,7 @@ export function removeMcpServer(name: string): boolean {
 /**
  * 启停切换专用操作（§3.1「可启停（写入 enabled 字段）」最小语义，写死）：锁内重读磁盘
  * 最新内容后仅翻转该条目的 enabled 键，其余键一律不触——不走 update 的条目值回写路径
- *（清单投影为底的全量替换会把「清单打开至切换之间」的外部并发改动（终端 pi mcp 命令 /
+ *（清单映射为底的全量替换会把「清单打开至切换之间」的外部并发改动（终端 pi mcp 命令 /
  * 手编）静默覆盖，丢失窗口从 D2 声明的锁内亚秒级放大到 UI 会话级；混填条目亦不会被
  * form 路径规范化改写）。false 落 enabled:false 键，true 删键（缺省启用，对齐 pi 自身
  * 写路径与 buildFormConfig 语义）。不跑保存校验：本操作不改传输字段，条目合法性与

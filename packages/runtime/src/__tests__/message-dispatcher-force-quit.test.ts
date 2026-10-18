@@ -78,7 +78,7 @@ function makeMocks(opts: MockOpts = {}): ForceQuitMocks {
   const persistOutcomeFn = vi.fn(() => { callOrder.push('persist') })
   const removeEntryFn = vi.fn(() => { callOrder.push('remove') })
 
-  // S2 ISP 化：结构性满足 dispatcher 窄接口（6 方法 = 实际消费面），无强转。
+  // S2 ISP 化：结构性满足 dispatcher 窄接口（6 方法 = 消费方实际用到的全部），无强转。
   // ensureActive/getSession 不在 forceQuit/abort 收敛路径上，空 mock 即可。
   const svcGetSession = vi.fn()
   const svc: IDispatcherSessionOps = {
@@ -150,7 +150,7 @@ describe('MessageDispatcher forceQuit —— sidebar 强制退出', () => {
 
   it('FQ5: 无活跃进程但 occupancy≠idle（条目还在、turn 卡 generating）→ 继续完整收敛而非「幂等成功」假成功', async () => {
     // [code-harden RT-4#1] 旧行为：无 client 一律「幂等成功」返回——占用态卡死且事件源
-    // 已断（无进程可产生 agent_settled）时，isGenerating/turn 投影永久滞留。改为继续收敛。
+    // 已断（无进程可产生 agent_settled）时，isGenerating/turn 派生视图永久滞留。改为继续收敛。
     const m = makeMocks({ active: false })
     const stuckSession = { ...makeMockSession(), occupancy: { turn: 'generating', compacting: false, bash: false } }
     ;(m.svcGetSession as ReturnType<typeof vi.fn>).mockReturnValue(stuckSession)

@@ -1,5 +1,5 @@
 /**
- * QuotaMessageHandler 测试 — A1-5 configure await 竞态守卫（round 1 review SUGGESTION）。
+ * QuotaMessageHandler 测试 — A1-5 configure await 竞态检查（round 1 review SUGGESTION）。
  *
  * 测试框架：vitest（从 vitest 导入 describe/it/expect/vi，禁 node:test）。
  * 运行命令：cd packages/runtime && npx vitest run src/transport/quota-message-handler.test.ts

@@ -165,7 +165,7 @@ export class UiRequestQueue {
 
   /**
    * 防泄漏兜底到期（仅 cancel 通知丢失 / Worker 死亡时触发）：与 cancelRequest 同样
-   * 的清理（删项 + 撤窗广播 + 放行），resolve(undefined) 仅收口 promise——Worker 侧
+   * 的清理（删项 + 撤窗广播 + 放行），resolve(undefined) 仅收尾 promise——Worker 侧
    * 早已 UI_TIMEOUT reject 或已死亡，无幽灵替答。warn 标注兜底触发原因。
    */
   private expireFallback(requestId: string): void {

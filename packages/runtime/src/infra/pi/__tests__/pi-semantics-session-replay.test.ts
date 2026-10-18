@@ -8,12 +8,12 @@
  * - ADR-0076 撤回持久化安全——navigateTree 回退后 appendLabelChange 落 LabelEntry
  *   到文件尾（parentId = 回退后 leaf），重启重放叶子的 parentId 链不含被撤子树，
  *   回退不复活；
- * - message-revoke U6a/U6d 文件腿裁剪——taiji trimFileEntriesToActivePath /
+ * - message-revoke U6a/U6d 文件路径裁剪——taiji trimFileEntriesToActivePath /
  *   computeActivePathEntries 取文件尾 entry id 回溯，与 pi 重放语义同构全靠本条。
  *
  * 断言方式（P-D1 代码形态断言）：静态直读 dist/core/session-manager.js 与
  * dist/core/agent-session.js 的方法/函数窗口，关键代码片段存在性 + 次序断言，
- * 失真即红（重放准则改形 = 撤回可能复活/文件腿裁剪错叶，ADR-0076 降级路径 P1
+ * 失真即红（重放准则改形 = 撤回可能复活/文件路径裁剪错叶，ADR-0076 降级路径 P1
  * 触发评估）。dist 不可达时 skip 不 fail；不进 REAL_PI_TESTS 分池。
  *
  * 运行：cd packages/runtime && npx vitest run src/infra/pi/__tests__/pi-semantics-session-replay.test.ts
@@ -69,7 +69,7 @@ describe.skipIf(!PI_DIST)(
       const loadIdx = win.indexOf('loadEntriesFromFile(this.sessionFile)')
       expect(
         loadIdx,
-        'PS-60 漂移：加载路径不再经 loadEntriesFromFile 读全文件——复核 PS-60（文件腿裁剪喂数前提）',
+        'PS-60 漂移：加载路径不再经 loadEntriesFromFile 读全文件——复核 PS-60（文件路径裁剪喂数前提）',
       ).toBeGreaterThanOrEqual(0)
       // pi 1.0.0 起「装载 + 建索引」抽成共享 _loadEntries（构造器 preloaded 分支与本路径共用），
       // _buildIndex 移入其中尾部——链式两跳断言：_setSessionFile → _loadEntries → _buildIndex
@@ -112,7 +112,7 @@ describe.skipIf(!PI_DIST)(
       ).toBe(true)
       expect(
         win.includes('this.leafId = entry.id'),
-        'PS-60 漂移：追加不再推进 leafId——叶子≠文件尾，taiji 文件腿裁剪取尾将错叶，复核 PS-60',
+        'PS-60 漂移：追加不再推进 leafId——叶子≠文件尾，taiji 文件路径裁剪取尾将错叶，复核 PS-60',
       ).toBe(true)
     })
 
@@ -148,7 +148,7 @@ describe.skipIf(!PI_DIST)(
       const guardIdx = win.indexOf('if (label && !summaryText)')
       expect(
         guardIdx,
-        'PS-60 漂移：label 落锚的守卫形态（label && !summaryText）消失——复核 PS-60',
+        'PS-60 漂移：label 落锚的检查形态（label && !summaryText）消失——复核 PS-60',
       ).toBeGreaterThanOrEqual(0)
       expect(
         win.indexOf('this.sessionManager.appendLabelChange(targetId, label)'),
@@ -156,22 +156,22 @@ describe.skipIf(!PI_DIST)(
       ).toBeGreaterThan(guardIdx)
     })
 
-    it('sessionEntryToContextMessages：label 类型不在投影分支内（落文件尾的撤回锚不进 LLM 上下文）', () => {
+    it('sessionEntryToContextMessages：label 类型不在映射分支内（落文件尾的撤回锚不进 LLM 上下文）', () => {
       const win = moduleFnWindow(SM_SRC, 'export function sessionEntryToContextMessages(entry)')
       expect(win, 'PS-60 漂移：sessionEntryToContextMessages 函数消失/改签名——复核 PS-60').not.toBe('')
       for (const t of ['message', 'custom_message', 'branch_summary', 'compaction']) {
         expect(
           win.includes(`entry.type === "${t}"`),
-          `PS-60 漂移：投影分支 ${t} 消失——entry 投影词表变化，复核 PS-60`,
+          `PS-60 漂移：映射分支 ${t} 消失——entry 映射词表变化，复核 PS-60`,
         ).toBe(true)
       }
       expect(
         win.includes('entry.type === "label"'),
-        'PS-60 漂移：label 类型开始投影为 LLM 消息——撤回锚将进入模型上下文，复核 PS-60 与 ADR-0076',
+        'PS-60 漂移：label 类型开始映射为 LLM 消息——撤回锚将进入模型上下文，复核 PS-60 与 ADR-0076',
       ).toBe(false)
       expect(
         win.includes('return [];'),
-        'PS-60 漂移：非投影类型的 return [] 兜底消失——投影词表改形，复核 PS-60',
+        'PS-60 漂移：非派生视图类型的 return [] 兜底消失——映射词表改形，复核 PS-60',
       ).toBe(true)
     })
   },

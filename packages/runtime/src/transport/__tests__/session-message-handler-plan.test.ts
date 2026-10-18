@@ -16,9 +16,9 @@
  *      src/services/session/__tests__/session-service-abort-plan.test.ts
  * - message.abort 失效链（D6，plan-mode-state-machine F4①，S15 锚定）：
  *   ① invalidatePendingUiRequests 先于 sessionService.abort 调用（失效帧前置——「失效帧
- *      必达」由本前置腿保证，abort 抛错时帧已发布；finally 在该形态对帧无增量）；
- *   ② sessionService.abort 抛错时失效帧仍发布（归因 = 前置腿，非 finally）；
- *   ③ finally 腿判别断言（删 finally 腿即红）：前置 invalidate 自身抛错时 finally 仍
+ *      必达」由本前置路径保证，abort 抛错时帧已发布；finally 在该形态对帧无增量）；
+ *   ② sessionService.abort 抛错时失效帧仍发布（归因 = 前置路径，非 finally）；
+ *   ③ finally 路径判别断言（删 finally 路径即红）：前置 invalidate 自身抛错时 finally 仍
  *      发布失效帧 / abort 在途窗口内新到挂起被 finally 追加摘除。
  *
  * Mock 边界：全部 mock（ctx 仿 session-message-handler-background-task 测试装置），不起真实 pi。
@@ -73,7 +73,7 @@ describe('SessionMessageHandler.handles（plan 域）', () => {
   })
 })
 
-// ── session.getPlanState（D1⑥ 冷启动首拉）───────────────────────
+// ── session.getPlanState（D1⑥ 冷启动首次拉取）───────────────────────
 
 describe('SessionMessageHandler session.getPlanState', () => {
   it('冷路径透传：调 sessionService.getPlanState（SessionRecords 冷路径消费口）+ reply session.planState 形状', async () => {
@@ -186,7 +186,7 @@ describe('SessionMessageHandler message.abort（D6 失效链：invalidate 前置
     })
   })
 
-  it('S15：sessionService.abort 抛错时失效帧仍发布（必达 = 前置腿保证，finally 此时空转）', async () => {
+  it('S15：sessionService.abort 抛错时失效帧仍发布（必达 = 前置路径保证，finally 此时空转）', async () => {
     const abort = vi.fn(async () => {
       // F4① 实锤形态：pi 不在活跃表时 dispatcher getClientOrThrow 直接 throw（abort 的 try 之外）
       throw new Error('pi not in active table')
@@ -199,39 +199,39 @@ describe('SessionMessageHandler message.abort（D6 失效链：invalidate 前置
       handler.handleSessionMessage(msg('message.abort', { sessionId: SID }), mockWs()),
     ).rejects.toThrow('pi not in active table')
 
-    // 失效帧仍必达（renderer 据此摘除挂起请求，不留僵尸 ready）——归因 = 前置腿
+    // 失效帧仍必达（renderer 据此摘除挂起请求，不留僵尸 ready）——归因 = 前置路径
     // （同步先于 await abort 执行，抛错时帧已发布；finally 在本形态对帧无增量）。
-    // 本用例锁前置序；finally 腿的独有行为由下方两条判别用例锁定（删 finally 本用例照绿）。
+    // 本用例锁前置序；finally 路径的独有行为由下方两条判别用例锁定（删 finally 本用例照绿）。
     expect(ctx.invalidatePendingUiRequests).toHaveBeenCalledWith(SID, 'turn-aborted')
     expect(abort).toHaveBeenCalledWith(SID)
     expect(ctx.reply).not.toHaveBeenCalled()
   })
 
-  // ── finally 腿判别断言（无 finally 时以下用例即红，锁 finally 存在性）────────
+  // ── finally 路径判别断言（无 finally 时以下用例即红，锁 finally 存在性）────────
 
-  it('finally 腿判别：前置 invalidate 自身抛错时 finally 仍发布失效帧', async () => {
+  it('finally 路径判别：前置 invalidate 自身抛错时 finally 仍发布失效帧', async () => {
     let invalidateCalls = 0
     const invalidatePendingUiRequests = vi.fn(() => {
       invalidateCalls += 1
-      if (invalidateCalls === 1) throw new Error('bus publish failed') // 前置腿自身失败
+      if (invalidateCalls === 1) throw new Error('bus publish failed') // 前置路径自身失败
     })
     const abort = vi.fn(async () => {})
     const ctx = mockContext({ abort } as unknown as ISessionService)
     ctx.invalidatePendingUiRequests = invalidatePendingUiRequests
     const handler = new SessionMessageHandler(ctx)
 
-    // 前置腿异常传播（行为不变），abort 未被触达
+    // 前置路径异常传播（行为不变），abort 未被触达
     await expect(
       handler.handleSessionMessage(msg('message.abort', { sessionId: SID }), mockWs()),
     ).rejects.toThrow('bus publish failed')
 
-    // finally 腿重试并发布失效帧——唯一来源 = finally（无 finally 时只有 1 次失败调用）
+    // finally 路径重试并发布失效帧——唯一来源 = finally（无 finally 时只有 1 次失败调用）
     expect(invalidatePendingUiRequests).toHaveBeenCalledTimes(2)
     expect(invalidatePendingUiRequests).toHaveBeenNthCalledWith(2, SID, 'turn-aborted')
     expect(abort).not.toHaveBeenCalled()
   })
 
-  it('finally 腿判别：abort 在途窗口内新到挂起被追加摘除（invalidate 在 abort 完成后再执行一次）', async () => {
+  it('finally 路径判别：abort 在途窗口内新到挂起被追加摘除（invalidate 在 abort 完成后再执行一次）', async () => {
     // 迷你 pending 注册表（仿 server.invalidatePendingUiRequests 摘除语义：摘空后再调
     // 空清单不发布，零成本）
     const pending = new Set<string>()
@@ -241,7 +241,7 @@ describe('SessionMessageHandler message.abort（D6 失效链：invalidate 前置
       pending.clear()
     })
     const abort = vi.fn(async () => {
-      // abort 在途窗口（如 cascade 解散期间）新登记的挂起——前置腿已执行，管不到它
+      // abort 在途窗口（如 cascade 解散期间）新登记的挂起——前置路径已执行，管不到它
       pending.add('req-window-1')
     })
     const ctx = mockContext({ abort } as unknown as ISessionService)

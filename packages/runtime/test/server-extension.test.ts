@@ -265,7 +265,7 @@ describe('RuntimeServer: extension message routing', () => {
       })
 
       expect(sessionService.getRpcClient).toHaveBeenCalledWith('sess-1')
-      // W2 收口后转发走 sendExtensionUiResponse(id, result, method)
+      // W2 收尾后转发走 sendExtensionUiResponse(id, result, method)
       // confirm + true → pi 鸭子类型字段 {id, confirmed:true}
       expect(mockSendExtensionUiResponse).toHaveBeenCalledWith('req-1', true, 'confirm')
     })

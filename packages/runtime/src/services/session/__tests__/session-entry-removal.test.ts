@@ -2,13 +2,13 @@
  * SessionEntryRemovalOrchestrator 销毁收敛链单步隔离测试（code-harden RT-4#1）。
  *
  * 锁定：
- * - 链内某步抛错（disposeProjection）→ 该步降级为 console.error + crash 台账
+ * - 链内某步抛错（disposeProjection）→ 该步降级为 console.error + crash journal
  *   （reason=destroy-chain-step-failed），**后续步骤继续收敛**（removeEntry /
  *   disposeRecords / clearMessageBusSession 必达），onSessionDestroyed 扇出照常。
  * - 其余 session 不受累：抛错后对另一 session 的 remove 全链正常完成。
  * - toSummary 抛错 → destroyedSummary 降级最小形状（宁发少知不发错），条目删除不被打断。
  *
- * crash journal 经 vi.mock 拦截（append 是 D1 台账的断言面）；reaper / pi-paths mock 使
+ * crash journal 经 vi.mock 拦截（append 是 D1 journal 的断言面）；reaper / pi-paths mock 使
  * 本单测 hermetic（不 spawnSync ps、不触真实目录）。checkpoint store 单例在空清单上
  * removeSession 为 no-op（不落盘），无需 mock。
  *
@@ -92,7 +92,7 @@ describe('SessionEntryRemovalOrchestrator 销毁链单步隔离（RT-4#1）', ()
     expect(vi.isMockFunction(reaperModule.reapSessionBackgroundTasks)).toBe(true)
   })
 
-  it('dispose 抛错：该步降级日志+台账，后续步骤继续收敛（removeEntry / 其余 dispose / bus 清理必达）', () => {
+  it('dispose 抛错：该步降级日志+journal，后续步骤继续收敛（removeEntry / 其余 dispose / bus 清理必达）', () => {
     const deps = makeDeps({
       disposeProjection: () => { throw new Error('projection dispose exploded') },
     })
@@ -107,7 +107,7 @@ describe('SessionEntryRemovalOrchestrator 销毁链单步隔离（RT-4#1）', ()
     expect(deps.calls).toContain('disposeRecords:s1')
     expect(deps.calls).toContain('clearBus:s1')
     expect(deps.destroyedHandler).toHaveBeenCalledWith(expect.objectContaining({ id: 's1' }))
-    // 失败落 crash 台账（RT-4#1：失败记台账）
+    // 失败落 crash journal（RT-4#1：失败记 journal）
     expect(journalAppends).toContainEqual(expect.objectContaining({
       layer: 'runtime',
       event: 'crash',
@@ -159,10 +159,10 @@ describe('SessionEntryRemovalOrchestrator 销毁链单步隔离（RT-4#1）', ()
     }))
   })
 
-  it('全链无异常：零隔离台账行（deleted 台账照常，隔离路径不产生噪音事件）', () => {
+  it('全链无异常：零隔离 journal 行（deleted journal 照常，隔离路径不产生噪音事件）', () => {
     const orchestrator = new SessionEntryRemovalOrchestrator(makeDeps())
     orchestrator.remove('s1')
-    // 第 1 步 deleted 台账行恒在（D1 唯一挂点）；无任何 destroy-chain-step-failed 行
+    // 第 1 步 deleted journal 行恒在（D1 唯一挂点）；无任何 destroy-chain-step-failed 行
     expect(journalAppends).toEqual([
       expect.objectContaining({ layer: 'pi', event: 'deleted', sessionId: 's1' }),
     ])

@@ -63,7 +63,7 @@ describe('MessageBus · session.occupancy state topic', () => {
       payload: { sessionId: 's1', turn: 'generating', compacting: true, bash: false },
     } as ServerMessage)
     bus.unsubscribeAll(wsA) // 断连
-    // 重连：新 ws 订阅，从 stateSnapshot 恢复占用投影（不依赖当时的 live 广播）
+    // 重连：新 ws 订阅，从 stateSnapshot 恢复占用派生视图（不依赖当时的 live 广播）
     const wsB = makeWs()
     const replay = bus.subscribe('s1', wsB)
     expect(replay.stateSnapshot).toHaveLength(1)

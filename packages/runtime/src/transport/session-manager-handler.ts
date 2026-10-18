@@ -11,14 +11,14 @@
  * send/create 受理点 arm、watch 单键寻址路由（fail-closed / wait / catch-up 三分支）、
  * handleAbort 入口同步抹除、respond 前二次归属校验；state→协议 reason 的词形映射
  * （toWatchRespondPayload）与 respond 回执循环（deliverRespondTargets / runClaimSweep）
- * 以导出函数形态供组合根 index.ts 共用（settle/death/TTL 清扫腿），保证映射单点。
+ * 以导出函数形态供组合根 index.ts 共用（settle/death/TTL 清扫路径），保证映射单点。
  *
  * [架构备注，PR #189 review] 本 handler 承载业务编排（归属校验 / list 过滤 / history
  * tailTurns 截断；notify-once 导出助手 collectStderrTail / toWatchRespondPayload /
  * deliverRespondTargets / runClaimSweep 供组合根 index.ts 反向 import 共用，及
  * node:crypto randomUUID 的 lifetimeNotifyId 生成），与 transport「纯路由」定义有偏差；
  * 迁移 services/session/（interface 经 ports 暴露）是既定方向、待后续 wave——助手与
- * node:crypto 依赖随迁，组合根消费面同步消失。当前留在 transport 与 Quota/Preset handler
+ * node:crypto 依赖随迁，组合根消费方同步消失。当前留在 transport 与 Quota/Preset handler
  * 先例一致。
  */
 import { randomUUID } from 'node:crypto'
@@ -84,7 +84,7 @@ function logNotifyIdAbsence(action: 'send' | 'create'): void {
  * pending 项（pi 实装 dist/modes/rpc/rpc-mode.js handleInputLine 的 extension_ui_response
  * 分支按 id resolve pendingExtensionRequests，1.0.0 实读；既有锚
  * rpc-client.ts:1129-1133）。watch 长挂 select 无 timeout，pi 侧不超时清项（PS-59）；
- * 写成功未消费的残余由 TTL 清扫腿（D7③）兜底。
+ * 写成功未消费的残余由 TTL 清扫路径（D7③）兜底。
  */
 export type WatchRespondFn = (
   parentSid: string,
@@ -188,9 +188,9 @@ type SessionManagerDispatchResult =
   | SessionManagerErrorResult
 
 /**
- * 单个 action 的分发路由：params 类型守卫与执行体成对登记。
- * 守卫是类型谓词——通过后 params 在类型层即收窄为 P，免除旧 switch
- * 每分支一次的 as unknown as 断言（守卫与执行体同表登记，天然不会漂移）。
+ * 单个 action 的分发路由：params 类型检查与执行体成对登记。
+ * 检查是类型谓词——通过后 params 在类型层即收窄为 P，免除旧 switch
+ * 每分支一次的 as unknown as 断言（检查与执行体同表登记，天然不会漂移）。
  */
 interface SessionManagerRoute<P> {
   isParams: (v: unknown) => v is P
@@ -230,7 +230,7 @@ export interface SessionManagerHandlerOptions {
  * SessionManagerHandler — 处理 agent-managed session 的 7 个 action（含 notify-once watch 纯应答通道）。
  *
  * handle() 是唯一入口，由 EventInterpreter.onSessionManagerRequest 调用。
- * dispatch() 纯分发（各分支只 return 结果），回写统一由 respond() 收口；
+ * dispatch() 纯分发（各分支只 return 结果），回写统一由 respond() 收尾；
  * 错误走同一通道 respond({error})。
  */
 export class SessionManagerHandler {
@@ -259,7 +259,7 @@ export class SessionManagerHandler {
 
     try {
       const result = await this.dispatch(action, parentSessionId, params, requestId)
-      // null = watch 分支已自行收口（fail-closed / 立即 respond / 挂等 deferred）——
+      // null = watch 分支已自行收尾（fail-closed / 立即 respond / 挂等 deferred）——
       // watch 的应答键是 watchId 且多数路径晚于本次调用返回，不走常规 respond。
       if (result === null) return
       this.respond(parentSessionId, requestId, result)
@@ -291,7 +291,7 @@ export class SessionManagerHandler {
     return this.opts.sendExtensionUiResponse(parentSid, watchId, JSON.stringify(payload), 'select') === true
   }
 
-  /** 组合根共用的 respond 适配（settle/death/TTL 清扫腿把素材交给同一写回通道语义）。 */
+  /** 组合根共用的 respond 适配（settle/death/TTL 清扫路径把素材交给同一写回通道语义）。 */
   readonly watchRespond: WatchRespondFn = (parentSid, watchId, payload) =>
     this.respondWatch(parentSid, watchId, payload)
 
@@ -308,9 +308,9 @@ export class SessionManagerHandler {
   }
 
   /**
-   * action 路由表（查表分发）：params 守卫与 handler 成对登记，新增 action
-   * 只加一行，不再以 6 路 &&/|| 守卫链 + switch 推高 dispatch 圈复杂度
-   * （metrics-gate maxCyclomatic=15 守卫）。
+   * action 路由表（查表分发）：params 检查与 handler 成对登记，新增 action
+   * 只加一行，不再以 6 路 &&/|| 检查链 + switch 推高 dispatch 圈复杂度
+   * （metrics-gate maxCyclomatic=15 检查）。
    */
   private readonly routes: {
     readonly [K in SessionManagerAction]: SessionManagerRoute<SessionManagerParams[K]>
@@ -346,13 +346,13 @@ export class SessionManagerHandler {
     }
 
   /**
-   * action 分发：查表执行（守卫 → handler），回写统一由 handle/respond 收口。
+   * action 分发：查表执行（检查 → handler），回写统一由 handle/respond 收尾。
    *
-   * 信任边界守卫（与 action 侧 '__malformed__' narrowing 同等防线）：params 来自
+   * 信任边界检查（与 action 侧 '__malformed__' narrowing 同等防线）：params 来自
    * extension_ui_request（LLM 可控 JSON），逐 action 校验，非法即 throw 走 handle
    * 的 respond({error}) 错误闭环——禁止把畸形字段以 undefined 静默流入 sessionService。
    * 泛型 K 使映射表索引化简为 SessionManagerRoute<SessionManagerParams[K]>，
-   * 守卫通过后 params 类型自动收窄，无需断言（关联联合的标准写法）。
+   * 检查通过后 params 类型自动收窄，无需断言（关联联合的标准写法）。
    */
   private async dispatch<K extends SessionManagerAction>(
     action: K,
@@ -388,7 +388,7 @@ export class SessionManagerHandler {
    *   错误对象携 sessionId 走恢复路径）。
    * - lifetime：claims 在册时无条件 arm（与 claim 双键独立，杜绝撞幂等键），
    *   `lifetimeNotifyId` 恒随结果返回（claims 缺席 = 停用象限：仍返键但未入册，
-   *   extension 开表将 fail-closed 静默收口）。
+   *   extension 开表将 fail-closed 静默收尾）。
    * - 原子回滚（D2）：sendDirect throw → claim 与 lifetime 一并静默 disarm（会话存但
    *   extension 收到 error 不会开表，留记录必悬挂）。
    */
@@ -422,7 +422,7 @@ export class SessionManagerHandler {
     // 父 session 由路由上下文（interpreter sessionId）决定，不信任 extension 请求参数（防伪造父 id）
     // A'（2026-08-24）：persistLabel=true —— agent 传 label 时是显式命名（语义性），
     // 持久化且防 auto-rename 覆盖；未传 label 则 no-op（见 session-lifecycle persistExplicitLabel）
-    // projectId：undefined 时空值守卫（persistCreateSidecars）跳过 sidecar 落盘 = 落默认项目。
+    // projectId：undefined 时空值检查（persistCreateSidecars）跳过 sidecar 落盘 = 落默认项目。
     const session = await this.opts.sessionService.create(cwd, label, {
       spawnSource: 'agent',
       parentAgentSessionId: parentSessionId,
@@ -468,7 +468,7 @@ export class SessionManagerHandler {
    *   错误对象携 sessionId 走恢复路径）。
    * - lifetime：claims 在册时无条件 arm（与 claim 双键独立，杜绝撞幂等键），
    *   `lifetimeNotifyId` 恒随结果返回（claims 缺席 = 停用象限：仍返键但未入册，
-   *   extension 开表将 fail-closed 静默收口）。
+   *   extension 开表将 fail-closed 静默收尾）。
    * - claim arm 先于 lifetime arm（claim 重复时早抛，不留未开表的 lifetime 悬挂）。
    */
   private armCreateClaims(
@@ -552,7 +552,7 @@ export class SessionManagerHandler {
     }
     // notify-once D2 受理点 arm：notifyId 缺省/畸形 → 不 arm + willNotify:false + once 日志；
     // 形态合法但同键重复 → isError 回包（幂等不变量的执行点）。arm 在投递前——
-    // 投递失败腿（catch 同步 disarm）保证失败不留幽灵记录（E7：零通知零 undelivered 计数）。
+    // 投递失败路径（catch 同步 disarm）保证失败不留幽灵记录（E7：零通知零 undelivered 计数）。
     const claims = this.opts.claims
     const validNotifyId = isSessionManagerNotifyId(notifyId)
     if (!validNotifyId) {
@@ -577,7 +577,7 @@ export class SessionManagerHandler {
             payload: { kind: 'text', content: prompt },
             // notifyId 穿 envelope additive meta（D2）：delivery 内核 onSettled 回执读 meta
             // 完成 armed→injected 受理锚定；parentSid 同携（回执侧无须反查归属）。
-            // rejected 回执 → 投递失败腿 disarm。
+            // rejected 回执 → 投递失败路径 disarm。
             ...(armed ? { meta: { notifyId: armedNotifyId, parentSid: parentSessionId } } : {}),
           },
           // D1 申报制：agent 通路出站文本不附裸标记（无回执锚点），申报 'acceptance' = 受理
@@ -586,7 +586,7 @@ export class SessionManagerHandler {
         )
       return { queued: true, willNotify: armed }
     } catch (e) {
-      // 投递失败腿（D2 状态机）：armed → 静默删除（主 agent 已同步收到工具 error）
+      // 投递失败路径（D2 状态机）：armed → 静默删除（主 agent 已同步收到工具 error）
       if (armedNotifyId !== undefined) claims?.disarmDeliveryFailed(parentSessionId, armedNotifyId)
       return { error: toErrorMessage(e), hint: SEND_UNREACHABLE_HINT }
     }
@@ -690,7 +690,7 @@ export class SessionManagerHandler {
    * abort 分支 + notify-once D4 主 abort 抹除钉位：入口**同步** `abortClaims`（先于
    * `await sessionService.abort`——防 abort 诱发的 settled('stopped') 在 await 间隙
    * 抢先兑现，场景6 时序性假红）；已挂 watch 的 claim 立即 respond 'cancelled'
-   *（静默收口，D3 例外1）+ onRespond 回执，无 watch 者当场删除。
+   *（静默收尾，D3 例外1）+ onRespond 回执，无 watch 者当场删除。
    */
   private async handleAbort(parentSessionId: string, params: SessionManagerAbortParams): Promise<SessionManagerAbortResult> {
     const { sessionId } = params
@@ -712,7 +712,7 @@ export class SessionManagerHandler {
    * - fail-closed：查无 claim（含 claims 停用象限）→ 立即 respond cancelled（无 claim 可回带，
    *   不携 sessionId——D-4），防长挂 select 泄漏；
    * - wait：未兑现 → 挂等（单 watch 槽新覆盖旧，被覆盖的旧 watch 永不 respond，
-   *   悬 promise 已知无害 P1）——本次调用零 respond，应答由 settle/death/abort/TTL 腿晚达；
+   *   悬 promise 已知无害 P1）——本次调用零 respond，应答由 settle/death/abort/TTL 路径晚达；
    * - respond：已兑现/已终结 → 立即应答，**respond 前二次归属校验**（D6 两态）：
    *   session 已不在（getSummary 缺失）→ 'exited'（死亡通知不凭空消失，'deleted' 仅由删除
    *   编排点登记）；session 仍在但归属失效 → 'cancelled'（静默）；仍有效 → 快照应答。
@@ -725,7 +725,7 @@ export class SessionManagerHandler {
   ): Promise<null> {
     const claims = this.opts.claims
     if (!claims) {
-      // 停用象限：无 claim 可寻址 → 与 fail-closed 同形（extension 静默 unregister 收口）
+      // 停用象限：无 claim 可寻址 → 与 fail-closed 同形（extension 静默 unregister 收尾）
       this.respondWatch(parentSessionId, watchId, { reason: 'cancelled' })
       return null
     }
@@ -735,7 +735,7 @@ export class SessionManagerHandler {
         this.respondWatch(parentSessionId, watchId, { reason: 'cancelled' })
         return null
       case 'wait':
-        // deferred：无应答对象变更，promise 挂起至 settle/death/abort/TTL 腿晚达
+        // deferred：无应答对象变更，promise 挂起至 settle/death/abort/TTL 路径晚达
         return null
       case 'respond': {
         const t = routing.target

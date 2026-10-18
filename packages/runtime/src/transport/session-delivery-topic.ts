@@ -3,11 +3,11 @@
  *
  * 职责两面：
  * 1. **帧 DTO 装配**（D5/D9②）：内核条目 → 协议帧条目 `{clientUuid, preview, state, lane}`。
- *    数据来源**必须是 handle 的投影视图** `projection()`（D9②/D5③：活跃条目全量 + delivered
- *    仅最近 deliveredWindow 条完整条目，cancelled 不投影）——全量视图含 tombstone 元数据与
+ *    数据来源**必须是 handle 的派生视图** `projection()`（D9②/D5③：活跃条目全量 + delivered
+ *    仅最近 deliveredWindow 条完整条目，cancelled 不映射）——全量视图含 tombstone 元数据与
  *    cancelled 记录，直接装配会把判重内部结构泄漏进帧（D9②「双视图分离」正是为此，
- *    MF-1-13 拆名后投影专用入口 = projection，误用全量编译期即红）。
- *    投影过滤规则本身归内核（u1），本文件只做形态转换，**不重实现窗口/过滤**（双定义即漂移源）。
+ *    MF-1-13 拆名后派生视图专用入口 = projection，误用全量编译期即红）。
+ *    派生视图过滤规则本身归内核（u1），本文件只做形态转换，**不重实现窗口/过滤**（双定义即漂移源）。
  * 2. **变更驱动发布**（D7/G3）：内核 `onChange` 订阅（条目创建/迁移/终态）→ 发布一帧全量快照。
  *    **禁止轮询**——帧是 last-value 语义，每次变更发一帧即收敛；稳态额外成本 = O(1)/变更。
  *
@@ -15,7 +15,7 @@
  * last-value 快照 + 不入 ring（断连重连 / 切回 session 经 subscribe 的 stateSnapshot 回放恢复，
  * V5/G2 的「队列区自动恢复」即此语义）。本文件是运行侧装配点，登记表只认类型不认装配位置。
  *
- * 零抛错（对齐 outbound-frame-guard 哲学）：帧投影是展示面辅助通路——装配失败不得拖垮
+ * 零抛错（对齐 outbound-frame-guard 哲学）：帧派生视图是展示面辅助通路——装配失败不得拖垮
  * delivery.* RPC 的受理回执与 session.subscribe 主链（降级 = 本帧不发 + warn 留痕，
  * 下一变更/下一次装配入口自动重试）。
  *
@@ -39,13 +39,13 @@ import type { SessionDeliveryRegistry } from '../services/session/session-delive
  * 剥除投递标记（展示/草稿恢复面）= @taiji/shared 唯一实现（msg-pipeline-debloat D5-2
  * 统一：shared revoke-restore 的宽松剥除——剥标记本体 + 紧邻单个前导换行，不 trimEnd，
  * 用户尾换行保留）。本模块再导出维持既有 import 路径（session-message-handler 与
- * transport 测试面），本地无第二份剥除正则。宽松形态依据 = ADR-0077（判定严格 /
+ * transport 测试），本地无第二份剥除正则。宽松形态依据 = ADR-0077（判定严格 /
  * 剥除宽松——m- 收养条目标记与残缺形态同样剥净，统一实现不收严）。
  */
 export { stripDeliveryMarkers }
 
 /**
- * 内核条目态 → 帧条目态（D5③：cancelled 不投影）。`DeliveryEntryState` 全键 Record =
+ * 内核条目态 → 帧条目态（D5③：cancelled 不映射）。`DeliveryEntryState` 全键 Record =
  * **字面量逐字面对齐义务的编译期拦截**（计划 §5 D-2：shared 帧 DTO 内联字面量双定义，
  * 内核侧新增/改名字面量 → 本表缺键即 tsc 红；帧侧改名字面量 → 值不匹配即 tsc 红）。
  * null = 该态不进帧（调用方须显式处理，禁静默透传）。
@@ -65,24 +65,24 @@ const FRAME_LANE_OF: Readonly<Record<DeliveryLane, DeliveryFrameEntry['lane']>> 
   queued: 'queued',
 }
 
-/** 内核条目态 → 帧条目态（null = 不投影，见 {@link FRAME_STATE_OF}）。 */
+/** 内核条目态 → 帧条目态（null = 不映射，见 {@link FRAME_STATE_OF}）。 */
 export function frameStateOf(state: DeliveryEntryState): DeliveryFrameEntry['state'] | null {
   return FRAME_STATE_OF[state]
 }
 
-/** 内核车道 → 帧车道（编译期对齐守卫经 {@link FRAME_LANE_OF} 全键覆盖）。 */
+/** 内核车道 → 帧车道（编译期对齐检查经 {@link FRAME_LANE_OF} 全键覆盖）。 */
 export function frameLaneOf(lane: DeliveryLane): DeliveryFrameEntry['lane'] {
   return FRAME_LANE_OF[lane]
 }
 
-/** 帧条目 preview（D5：展示投影字段，**禁止当全文消费**——草稿恢复走 cancel/drain reply 全文）。 */
+/** 帧条目 preview（D5：展示派生视图字段，**禁止当全文消费**——草稿恢复走 cancel/drain reply 全文）。 */
 export function deliveryPreview(text: string): string {
   return stripDeliveryMarkers(text).trim().slice(0, DELIVERY_PREVIEW_MAX_CHARS)
 }
 
 /**
- * 投影视图 → 帧条目数组（保持内核序：活跃条目 FIFO → delivered 窗口，u3c 队列区按帧序渲染）。
- * 投影中残留的 cancelled（内核不投影，理论不可达）跳过而非静默转其他态——不谎报状态。
+ * 派生视图 → 帧条目数组（保持内核序：活跃条目 FIFO → delivered 窗口，u3c 队列区按帧序渲染）。
+ * 派生视图中残留的 cancelled（内核不映射，理论不可达）跳过而非静默转其他态——不谎报状态。
  * 模块私有：唯一消费点是本文件 publish（帧装配封闭在 topic 装配层）。
  */
 function deliveryFrameEntries(projection: DeliveryEntriesProjection): DeliveryFrameEntry[] {
@@ -173,7 +173,7 @@ export class SessionDeliveryTopic {
     return registry.getDelivery(sessionId)
   }
 
-  /** 发布一帧全量快照（投影视图 → 帧 DTO）；bus 缺省静默跳过（与既有 publish 点 null-safe 惯例一致）。 */
+  /** 发布一帧全量快照（派生视图 → 帧 DTO）；bus 缺省静默跳过（与既有 publish 点 null-safe 惯例一致）。 */
   private publish(sessionId: string, handle: DeliveryHandleV2): void {
     const bus = this.deps.getBus()
     if (!bus) return

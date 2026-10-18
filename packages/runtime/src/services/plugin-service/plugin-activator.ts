@@ -36,7 +36,7 @@ import type { PluginHostContract as PluginHost } from './plugin-host.js'
 // 方法签名本地使用。
 export type { StatusChangeCallback } from './plugin-hot-reload.js'
 
-// P8 收口：PluginHost 契约已迁移到供应商 plugin-host.ts（PluginHostContract）。
+// P8 收尾：PluginHost 契约已迁移到供应商 plugin-host.ts（PluginHostContract）。
 // 此处 re-export 为 `PluginHost` 之名，保持所有既有导入（plugin-host.ts 本身、
 // 5 个测试文件 import `PluginHost as ActivatorHost`）不破坏（NON-BREAKING）。
 export type { PluginHostContract as PluginHost } from './plugin-host.js'
@@ -114,14 +114,14 @@ export class PluginActivator {
   /**
    * 进行中的生命周期回复等待。key 为复合键 `${pluginId}:${op}`（op ∈
    * 'activate' | 'deactivate'，D6 并发模型）：同一插件 activate/deactivate 并发
-   * 在飞时两个 entry 互不覆盖，activated/deactivated 回复按 (pluginId, replyType)
+   * 在途时两个 entry 互不覆盖，activated/deactivated 回复按 (pluginId, replyType)
    * 精确匹配到各自 op 的 entry。旧 pluginId 单键实现 Map.set 互相覆盖 + 旧 entry
    * 的超时 timer 到点无条件 delete 新 entry，是回复错配（activated 回复被
    * deactivate 的 entry 消费）、假超时、宿主/Worker 幽灵态的根源。
    */
   private pendingReplies = new Map<string, PendingReply>()
   /**
-   * 取消标志（D6 并发守卫）：ACTIVATING 期间收到 deactivate 请求的插件集合，
+   * 取消标志（D6 并发检查）：ACTIVATING 期间收到 deactivate 请求的插件集合，
    * 由 doActivatePlugin 的 finally 消费（成功 → 立即反卷真实 deactivate；否则 →
    * 终一化 UNLOADED）。
    * 选「取消标志」而非「排队」的理由：排队需要 per-plugin 队列 + 消费循环 +
@@ -133,7 +133,7 @@ export class PluginActivator {
   private deactivateRequested = new Set<string>()
   /**
    * 进行中的激活 promise（pluginId → in-flight activatePlugin）。
-   * 幂等守卫的支撑状态：重入 activatePlugin 返回同一 promise 而非静默丢弃，
+   * 幂等检查的支撑状态：重入 activatePlugin 返回同一 promise 而非静默丢弃，
    * 使「批准权限后 re-activate」能 await 到挂起中那次激活的完成。
    */
   private activationInFlight = new Map<string, Promise<void>>()
@@ -250,7 +250,7 @@ export class PluginActivator {
     }
   }
 
-  /** activatePlugin 的实际激活流程（守卫全过后执行；拆出以支持 in-flight 注册）。 */
+  /** activatePlugin 的实际激活流程（检查全过后执行；拆出以支持 in-flight 注册）。 */
   private async doActivatePlugin(
     pluginId: string,
     event: ActivationEvent,
@@ -394,10 +394,10 @@ export class PluginActivator {
     // 但 CRASHED 等边缘态下残留的 pending 也在此一并清理。）
     this.resolvePermissionApproval(pluginId, false)
 
-    // D6 并发守卫：ACTIVATING 中不直接走停用主流程——① 激活早期（assignWorker/
+    // D6 并发检查：ACTIVATING 中不直接走停用主流程——① 激活早期（assignWorker/
     // loadPlugin 未完成）getWorkerHandle 可能拿不到句柄，主流程会「假成功」停用而
     // 激活继续跑完把插件拉回 ACTIVE（幽灵复活）；② 直接发 deactivate 会与 activate
-    // 消息并发在飞，正是旧单键 pendingReplies 回复错配的触发场景。处理：设取消标志
+    // 消息并发在途，正是旧单键 pendingReplies 回复错配的触发场景。处理：设取消标志
     // （由 doActivatePlugin 的 finally 消费：成功 → 立即反卷真实 deactivate；否则 →
     // 终一化 UNLOADED），状态改写 DEACTIVATING 使审批醒来的激活经 ACTIVATING 状态
     // 检查作废，最后 await in-flight 激活尝试——deactivatePlugin 返回时停用语义已
@@ -472,7 +472,7 @@ export class PluginActivator {
       this.pendingPermissions.delete(pluginId)
     }
     // D6 复合键：activate/deactivate 两个 op 的 pending entry 都要清理（并发开关
-    // 在飞时卸载，任一残留都会悬挂到已卸载插件的回复匹配上）
+    // 在途时卸载，任一残留都会悬挂到已卸载插件的回复匹配上）
     for (const op of ['activate', 'deactivate'] as const) {
       const pendingReply = this.pendingReplies.get(`${pluginId}:${op}`)
       if (pendingReply) {
@@ -540,7 +540,7 @@ export class PluginActivator {
    *
    * 处理 activated / deactivated / error 三种回复类型。D6 复合键精确匹配：
    * activated/deactivated 回复各自找对应 op（'activate'/'deactivate'）的 entry——
-   * activate 与 deactivate 并发在飞时（如 DEACTIVATING 态重入激活），回复不再
+   * activate 与 deactivate 并发在途时（如 DEACTIVATING 态重入激活），回复不再
    * 张冠李戴到另一 op 的 pending（旧单键实现 activated 回复会 resolve 掉
    * deactivate 的等待、反之亦然，引发假超时与 Worker/宿主幽灵态）。
    */
@@ -560,10 +560,10 @@ export class PluginActivator {
     if (msg.type === 'error') {
       // error 回复不带 op 维度（plugin-bootstrap 的 activate/deactivate 失败路径都发
       // 同型 {type:'error', pluginId, error}，见其 post 调用），无法精确归属——把该
-      // 插件全部在飞 entry resolve(false)：activate/deactivate 两 op 的失败终态都收敛
-      // UNLOADED，fail-fast 优于各自挂到超时。activate/deactivate 各自至多一个在飞
+      // 插件全部在途 entry resolve(false)：activate/deactivate 两 op 的失败终态都收敛
+      // UNLOADED，fail-fast 优于各自挂到超时。activate/deactivate 各自至多一个在途
       // entry（pendingReplies 以 `${pluginId}:${op}` 复合键存取，Map 键唯一，不依赖
-      // DEACTIVATING 入口守卫——DEACTIVATING 态重入激活时 activate 消息按 Worker IPC
+      // DEACTIVATING 入口检查——DEACTIVATING 态重入激活时 activate 消息按 Worker IPC
       // FIFO 排队于 deactivate 之后，回复按复合键精确归属，无错配面），不存在误伤面。
       for (const op of ['activate', 'deactivate'] as const) {
         const key = `${msg.pluginId}:${op}`
@@ -731,13 +731,13 @@ export class PluginActivator {
   /**
    * 激活失败终态写点（V6② crash 连坐守护）。
    *
-   * 激活在飞期间同宿主 load 超时 / Worker crash 链（plugin-host handleWorkerCrash →
+   * 激活在途期间同宿主 load 超时 / Worker crash 链（plugin-host handleWorkerCrash →
    * PluginService crash callback → markCrashed）已把本插件置 CRASHED 时，激活自身的
    * 失败终态不得覆盖为 UNLOADED——handleWorkerRebuilt 只重载 CRASHED 态插件，覆盖会让
    * 被连坐插件在 rebuild 后被跳过（Gate B V6② 实测：同宿主正常插件未自动重载，需手动
    * toggle 恢复）。UNLOADED 的合法语义（首次安装锁 / 权限被拒 / 审批等待超时取消 /
    * 无 crash 参与的激活握手失败）不受影响：仅当状态已被 crash 链接管（CRASHED）时让位。
-   * 权限等待路径不经此守卫：其作废检查（state !== 'ACTIVATING' 提前 return）已天然
+   * 权限等待路径不经此检查：其作废检查（state !== 'ACTIVATING' 提前 return）已天然
    * 保留 CRASHED。
    */
   private settleActivationFailure(pluginId: string): void {
@@ -773,7 +773,7 @@ export class PluginActivator {
   /**
    * 发送 activate/deactivate 消息并等待回复（无墙钟，ADR-0122 退役登记：原
    * ACTIVATE_TIMEOUT_MS 30s / DEACTIVATE_TIMEOUT_MS 5s 握手墙钟已删——插件不回复时
-   * 悬挂等待，处置归用户（管理界面停用/卸载）；Worker crash 由 crash 回调链收口）。
+   * 悬挂等待，处置归用户（管理界面停用/卸载）；Worker crash 由 crash 回调链收尾）。
    */
   private sendAndWaitReply(
     handle: { workerId: string; postMessage(message: unknown): void },

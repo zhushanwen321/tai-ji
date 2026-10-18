@@ -3,7 +3,7 @@
  *
  * [W20 架构位] 派生规则（content parts 解析 / skill 剖离 / toolResult 配对 / compaction /
  * branchSummary / custom / bashExecution / fileChanges / usage）已全部迁入 core reducer：
- * packages/core/src/domain/chat/apply-entry.ts（applyEntry —— D5 单一 reducer，D7 投影一次）。
+ * packages/core/src/domain/chat/apply-entry.ts（applyEntry —— D5 单一 reducer，D7 派生视图生成一次）。
  * 本文件保留 wire 层职责：RPC reply / JSONL 读到的原始形态 → pi entry 列表（liftHistoryToEntries）
  * → 喂 core reducer → Message[]。
  *

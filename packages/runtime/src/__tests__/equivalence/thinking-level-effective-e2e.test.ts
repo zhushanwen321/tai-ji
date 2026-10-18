@@ -35,7 +35,7 @@ import { spawnPiFixture, FAUX_PI_READY, FAUX_PI_SKIP_REASON, type PiFixture } fr
 
 const SID = 'g5-thinking-level'
 
-/** get_available_models 返回项的消费面（pi-ai Model 的宽形态，只声明用到的字段）。 */
+/** get_available_models 返回项实际用到的形态（pi-ai Model 的宽形态，只声明用到的字段）。 */
 interface AvailableModel {
   id: string
   provider: string

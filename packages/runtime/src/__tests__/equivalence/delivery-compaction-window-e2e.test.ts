@@ -7,7 +7,7 @@
  * 形态与 send-queue-e2e.test.ts（S1）/ completion-backflow-e2e.test.ts（S2）同款：spawn 真实
  * pi rpc 子进程（目标 session），驱动器接上 **真实** SessionDeliveryRegistry（真 delivery 内核，
  * v3 on-accept 装配），仅 SessionService 由驱动器以最小内存态 view + 事件泵替换。压缩窗口由
- * runtime 权威投影（`view.isCompacting`，生产路径 = session.compaction_start 置位）构造——
+ * runtime 权威派生视图（`view.isCompacting`，生产路径 = session.compaction_start 置位）构造——
  * 被测语义是「唯一保留的提交侧等待状态（pi 硬拒绝一切 prompt，agent-session.js:1498-1500）
  * 期间持有 → 压缩结束按 FIFO 逐条投递」，与压缩算法本身无关（压缩由 pi 执行）。
  *
@@ -30,7 +30,7 @@
  * 「压缩窗口的持有与释放按序投递」，非模型智能；门控 FAUX_PI_READY（只判 binary，凭证无关）。
  *
  * 运行：cd packages/runtime && npx vitest run src/__tests__/equivalence/delivery-compaction-window-e2e.test.ts
- * 登记：docs/testing/e2e-map.json E2E-EQUIV-01（equivalence 目录族，R2 按改动面触发）
+ * 登记：docs/testing/e2e-map.json E2E-EQUIV-01（equivalence 目录族，R2 按改动范围触发）
  */
 
 import { describe, it, expect } from 'vitest'
@@ -75,7 +75,7 @@ function makeView(id: string, cwd: string, label: string): IManagedSessionView {
     tokenCount: 0,
     inputTokens: 0,
     isGenerating: false,
-    // 压缩窗口前提：runtime 权威 occupancy 投影的压缩标志（生产 = compaction_start 置位）
+    // 压缩窗口前提：runtime 权威 occupancy 派生视图的压缩标志（生产 = compaction_start 置位）
     isCompacting: true,
     isBashRunning: false,
     bashRunToken: undefined,
@@ -192,7 +192,7 @@ describe.skipIf(!FAUX_PI_READY)(`delivery compaction window e2e faux pi${FAUX_PI
       const replyA = registry.submit(targetSessionId!, { content: `${MARK_A} 第一条`, clientUuid: CLIENT_UUID_A })
       const replyB = registry.submit(targetSessionId!, { content: `${MARK_B} 第二条`, clientUuid: CLIENT_UUID_B })
 
-      // 压缩窗口 = 不可投 → lane/state 双 queued（唯一判定源读 runtime 权威投影）
+      // 压缩窗口 = 不可投 → lane/state 双 queued（唯一判定源读 runtime 权威派生视图）
       expect(replyA, `压缩中提交应落 queued 车道：${JSON.stringify(replyA)}`).toMatchObject({ clientUuid: CLIENT_UUID_A, lane: 'queued', state: 'queued' })
       expect(replyB, `压缩中提交应落 queued 车道：${JSON.stringify(replyB)}`).toMatchObject({ clientUuid: CLIENT_UUID_B, lane: 'queued', state: 'queued' })
       const handle = registry.getOrCreateDelivery(targetSessionId!)

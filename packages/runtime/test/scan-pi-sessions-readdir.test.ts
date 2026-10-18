@@ -9,7 +9,7 @@
  */
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 
-// readdirSync / existsSync 由本测试控制（existsSync=true 跳过 L163 守卫，触发 readdirSync）
+// readdirSync / existsSync 由本测试控制（existsSync=true 跳过 L163 检查，触发 readdirSync）
 const fsMock = vi.hoisted(() => ({
   existsSync: vi.fn(() => true),
   readdirSync: vi.fn(() => [] as string[]),
@@ -70,7 +70,7 @@ describe('W1/L8: scanPiSessions readdirSync 保护', () => {
     errSpy.mockRestore()
   })
 
-  it('目录不存在 → 仍返回空数组（既有守卫不变）', () => {
+  it('目录不存在 → 仍返回空数组（既有检查不变）', () => {
     fsMock.existsSync.mockReturnValue(false)
     expect(scanPiSessions()).toEqual([])
     // existsSync=false 时不应走到 readdirSync

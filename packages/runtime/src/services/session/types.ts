@@ -91,10 +91,10 @@ export interface IManagedSessionView {
    */
   readonly isBashRunning: boolean
   /**
-   * bash 执行的「代次令牌」（composer-bash-execute W1 竞态守卫，纯运行时态不进 toSummary）。
+   * bash 执行的「代次令牌」（composer-bash-execute W1 竞态检查，纯运行时态不进 toSummary）。
    *
    * sendBash 每次 await client.bash() 前生成新 token 存入此字段；await 返回后比对 token 是否未变。
-   * abortBash 在广播 cancelled bashResult 终态前旋转此 token（清 undefined），标记「已被 abort 抢先收口」。
+   * abortBash 在广播 cancelled bashResult 终态前旋转此 token（清 undefined），标记「已被 abort 抢先收尾」。
    * sendBash 检测到 token 变化（!== 自身 token）时静默跳过 bashResult/error 终态广播——
    * 避免与 abortBash 的 cancelled bashResult 撞出双终态（先 cancelled 后真实结果，前端渲染错乱）。
    */
@@ -114,7 +114,7 @@ export interface IManagedSessionView {
    */
   pendingBashResults?: PendingBashResultData[]
   /**
-   * 会话占用状态投影（session-occupancy-send-closure D3/P3）——turn 三阶段 + compacting/bash
+   * 会话占用状态派生视图（session-occupancy-send-closure D3/P3）——turn 三阶段 + compacting/bash
    * 三维的权威聚合，唯一写方 = updateSessionOccupancy（幂等写 + 变化才广播 session.occupancy
    * state 帧）。与上方 isGenerating/isCompacting/isBashRunning 同源同点写入（11 挂点见设计
    * D3 转移表），但维度划分不同：isGenerating 覆盖 dispatching+generating 两段，turn 把
@@ -122,7 +122,7 @@ export interface IManagedSessionView {
    *
    * 可选（undefined = idle）：registerSession 显式初始化为 idle；测试 mock 与历史构造点
    * 缺省时由 updateSessionOccupancy 按 idle 兜底合并，不强制所有构造点同步改。
-   * 运行时内部状态，不进 toSummary（对外投影只经 session.occupancy state 帧）。
+   * 运行时内部状态，不进 toSummary（对外派生只经 session.occupancy state 帧）。
    */
   occupancy?: SessionOccupancy
   thinkingLevel?: string
@@ -157,7 +157,7 @@ export interface IManagedSessionView {
    * launch preset id 的内存态持有（W-RT-4，设计文档 §4.2）。
    *
    * 与 handedOffTo 同族收编（照其先例）：字段实携在 session 对象上（create/restore/fork
-   * 经 hydrateBindingMeta 动态 patch），且有跨文件读者——toSummary 投影到
+   * 经 hydrateBindingMeta 动态 patch），且有跨文件读者——toSummary 派生到
    * SessionSummary.launchPresetId、forkSession 继承源 preset（W-RT-5 内存态兑底）。
    * 类型不声明才是泄漏抽象（此前消费方各自 as-cast 读同一形状）。
    *
@@ -169,7 +169,7 @@ export interface IManagedSessionView {
    * 归属 project id 的内存态持有（D14 语义修正）。
    *
    * 与 launchPresetId 同族收编：写入链 = create/fork options 携带 + setProject 直写
-   * （active 路径）；读者 = toSummary 投影 / fork 继承 / handoff 承接继承。
+   * （active 路径）；读者 = toSummary 派生 / fork 继承 / handoff 承接继承。
    * 持久化走 `.project.json` sidecar；空值（undefined）= 默认项目（未归类）。
    */
   projectId?: string
@@ -185,7 +185,7 @@ export interface IManagedSessionView {
  * forceQuit 的调用源分型（session-dead-structural-fixes D4 置位点分型）。
  *
  * 仅「用户要停」的来源置 userStopped 标记：K1（用户强制退出）与 K2（用户 abort 无响应的
- * 超时强杀收口）。K3/K5/K6/K7/K8（restore 清场 / delete / destroyAll / 孤儿收殓 / 异常退出
+ * 超时强杀收尾）。K3/K5/K6/K7/K8（restore 清场 / delete / destroyAll / 孤儿收殓 / 异常退出
  * 收敛）不置——pi 崩溃等非用户意图场景不继承「停止」，restore 后 notify replay 属设计内
  * 行为照常补投（设计 §3.3 D4）。
  */
@@ -207,7 +207,7 @@ export type ForceQuitSource = 'user_force_quit' | 'abort_timeout'
 export interface UserStoppedMarkStore {
   /** 置标记（forceQuitSession K1/K2 置位分型的唯一写入口）。 */
   markUserStopped(sessionId: string, source: ForceQuitSource): void
-  /** 标记是否存活（restoreSession 返回前检测 + 收敛环 agent_start 拦截守卫）。 */
+  /** 标记是否存活（restoreSession 返回前检测 + 收敛环 agent_start 拦截检查）。 */
   hasUserStoppedMark(sessionId: string): boolean
   /** 清单条标记（收敛消费 / delete / 显式投递放行经 gate 门面调用）。 */
   clearUserStoppedMark(sessionId: string): void
@@ -225,11 +225,11 @@ export interface UserStoppedMarkStore {
  * 行分组：
  * - turn 四相：dispatching / generating / settling / idle（#1/#2/#3/#4 挂点语义）；
  * - compacting± / bash±：与 turn 正交维度的置位/复位（#5/#6/#7/#11 挂点）；
- * - full-reset：三维全复位（#10 forceQuit/进程退出失败路径腿）；
- * - reject-processing / reject-other：A1 止血的转正（prompt 失败按 pi 拒绝分型收口，
+ * - full-reset：三维全复位（#10 forceQuit/进程退出失败路径）；
+ * - reject-processing / reject-other：A1 止血的转正（prompt 失败按 pi 拒绝分型收尾，
  *   processing → isGenerating=true+generating 以 pi 拒绝为权威信号；其余 → 复位 idle）；
- * - announce-idle：registerSession 宣告帧收编行——强制广播当前投影，跳过全等去重
- *   （Gate B V6b④；内部合并/派生均为 no-op，走 state-topic 通路双腿）；
+ * - announce-idle：registerSession 宣告帧收编行——强制广播当前派生视图，跳过全等去重
+ *   （Gate B V6b④；内部合并/派生均为 no-op，走 state-topic 通路双路径）；
  * - abort-stall-converged / abort-stall-force-kill：为 fix-subagent-no-notification 分支
  *   abort 三级阶梯预留的两行（D8 对齐点①），本单元只登记枚举与派生定义，挂点接线由
  *   兄弟分支合并方完成。
@@ -254,7 +254,7 @@ export type SessionOccupancyTransition =
  * occupancy 转移原语的写视图（session-dead-structural-fixes D2/u3c readonly 收紧的配套）。
  *
  * IManagedSessionView 的三布尔 readonly 化后，applySessionOccupancyTransition 的内部派生写
- * 需要一个可变视图——本接口即原语内部对 session 记录的最小可写投影（id + occupancy + 三布尔）。
+ * 需要一个可变视图——本接口即原语内部对 session 记录的最小可写视图（id + occupancy + 三布尔）。
  * readonly 不参与 TS 结构兼容判定，ManagedSession / IManagedSessionView 可直接传入；
  * 原语是三布尔与 occupancy 的唯一合法写点（C-data-19），本接口不得用于原语之外的写路径。
  */
@@ -442,7 +442,7 @@ export type PiTranslatedEvent =
    * 触发拉取」由派发层订阅者存在性守住，record 三族消费方 invalidateRecordEntries
    * 内部早退门保留、行为不变。interpreter 据此触发
    * onRecordEntriesInvalidated（组合根注入 sessionService
-   * .invalidateRecordEntries：markDirty → 防抖 get_entries(since) 增量重拉 → entry 扫描写入
+   * .invalidateRecordEntries：markDirty → 防抖 get_entries(since) 增量重新拉取 → entry 扫描写入
    * 派生缓存）。事件 payload 不进任何数据缓存（ReplicatedState「事件只做失效」不变量）。
    */
   | { kind: 'record-entry-appended'; customType: string }
@@ -452,7 +452,7 @@ export type PiTranslatedEvent =
    * 'compacting-start' 行（isCompacting 派生 + occupancy 合并 + state 帧广播原子完成）。
    * onCompactingStateChange 回调通道为「与原语 compacting± 行幂等的冗余通道，勿新增使用」
    * （u3c 裁决：与 interpreter 内 onOccupancyTransition 通道汇入同一原语行，保留仅因
-   * 删除牵连组合根接线与存量测试断言的接口级变更超收口单元领地——新挂点一律走
+   * 删除牵连组合根接线与存量测试断言的接口级变更超出本单元领地——新挂点一律走
    * onOccupancyTransition 通道）。
    * reason 驱动前端文案区分手动（'manual'）/自动（'threshold'|'overflow'）。
    */
@@ -479,7 +479,7 @@ export type PiTranslatedEvent =
    */
   | { kind: 'compaction-end'; reason: string; result?: unknown; aborted: boolean; errorMessage?: string }
   /**
-   * session-trace 增量腿触发信号（design D4 / A33）—— pi 无「每次 append 都广播」的 entry
+   * session-trace 增量路径触发信号（design D4 / A33）—— pi 无「每次 append 都广播」的 entry
    * 事件，改用现存事件作触发：message_end / agent_settled / entry_appended（pi 原始事件名）
    * 到达 → interpreter 调 onTraceSync 回调（sessionService.syncTraceEntries：get_entries(since)
    * 追赶式拉 delta → 广播 session.traceEntryAppended）。compaction_end 走 compaction-end kind，
@@ -489,7 +489,7 @@ export type PiTranslatedEvent =
   /**
    * 送达水位对账触发信号（reload-closeout D2）—— agent_settled（run 级联结束）到达 →
    * interpreter 调 onRecordReconcile 回调（sessionService.reconcileRecordEntries：重跑
-   * fetch→merge→publish 管线，发布门 = 已发布快照水位，diff 非空补发——守卫/发布门处
+   * fetch→merge→publish 管线，发布门 = 已发布快照水位，diff 非空补发——检查/发布门处
    * 曾丢的帧下轮触发必补发）。组合注册追加（withRecordReconcileTrigger，照抄
    * trace-trigger 先例），只由 agent_settled 产出。
    */

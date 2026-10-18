@@ -431,7 +431,7 @@ describe('ImportService.importSession', () => {
     await expect(catchCode(() => svc.importSession({ sourcePath: join(root, 'no-cwd.jsonl'), projectId: 'proj-1' })))
       .resolves.toBe('import_invalid_session')
 
-    // 首行为字面量 null（r5-MF1）：parse 产物非 object 须被运行时守卫拦下转
+    // 首行为字面量 null（r5-MF1）：parse 产物非 object 须被运行时检查拦下转
     // import_invalid_session，不得逃逸原始 TypeError 被 handler 兜底成 import_failed
     writeFileSync(join(root, 'null-first.jsonl'), 'null\n')
     await expect(catchCode(() => svc.importSession({ sourcePath: join(root, 'null-first.jsonl'), projectId: 'proj-1' })))
@@ -727,7 +727,7 @@ describe('ImportService source 路由（SPI 编排层，设计 §3.3/§3.7）', 
     expect(existsSync(join(targetDir, 'stub-dom.jsonl'))).toBe(false)
   })
 
-  it('注册表缺项 → import_source_missing（防御分支：闭合联合 + 组合根全注册下仅版本不匹配可达）', async () => {
+  it('注册表缺项 → import_source_missing（防御分支：封闭联合 + 组合根全注册下仅版本不匹配可达）', async () => {
     // U2 阶段 zcode 尚未注册（U3 加入）——空表构造即可触达；同时锁「未知源字面量不静默走 pi」
     const svc = makeImportService(new Map<ImportSourceKind, SessionImportSource>())
     await expect(catchCode(() => svc.importSession({ sourcePath: '/any.jsonl', projectId: 'proj-1', source: 'zcode' })))

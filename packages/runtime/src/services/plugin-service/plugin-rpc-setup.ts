@@ -59,7 +59,7 @@ export async function findFiles(pattern: string, cwd: string): Promise<string[]>
 /**
  * 向后兼容的 test helper（P6 后为 no-op）。
  *
- * 活跃 session 缓存已从模块级全局状态收口为 `ActiveSessionResolver` 实例（每个
+ * 活跃 session 缓存已从模块级全局状态收尾为 `ActiveSessionResolver` 实例（每个
  * PluginService 持有自己的 resolver，缓存随实例生灭）。测试每个 beforeEach 创建
  * 新 service，resolver 天然干净，故此 helper 不再需要真正清理——保留导出仅为不破坏
  * 既有测试 import（plugin-agent-real.test.ts）。
@@ -158,10 +158,10 @@ export function registerAllRpcMethods(ctx: RpcSetupContext): void {
     getDescriptor: ctx.getDescriptor,
   })
 
-  // Storage RPC handlers — P6 收口到 api/storage-api.ts（与其它域一致）
+  // Storage RPC handlers — P6 收尾到 api/storage-api.ts（与其它域一致）
   registerStorageRpcHandlers(rpcServer, storageHandlersFrom(storage))
 
-  // Notify RPC handler — P6 收口到 api/notify-api.ts（fire-and-forget via broadcastFn）
+  // Notify RPC handler — P6 收尾到 api/notify-api.ts（fire-and-forget via broadcastFn）
   registerNotifyRpcHandler(rpcServer, { ...notifyHandlersFrom(deps.broadcastFn), limiter: notifyLimiter })
 
   // ── Sessions RPC handlers ────────────────────────────────
@@ -211,7 +211,7 @@ export function registerAllRpcMethods(ctx: RpcSetupContext): void {
   })
 
   // ── Config RPC handlers ──────────────────────────────────
-  // key 前缀约定委托 config-api（P7 收口），与 plugin-service.ts 共用单一真相源。
+  // key 前缀约定委托 config-api（P7 收尾），与 plugin-service.ts 共用单一真相源。
   registerConfigRpcHandlers(rpcServer, {
     get: async (pluginId: string, key: string) => {
       return storage.get(pluginId, toConfigKey(key))
@@ -348,7 +348,7 @@ export function registerAllRpcMethods(ctx: RpcSetupContext): void {
   // ── Views RPC handlers ───────────────────────────────────
   // views.update → handleViewUpdate（[D1/u5b] payload.sessionId 显式归属投递——旧
   // ActiveSessionResolver 盖戳猜测路径已删除：空闲会话是 modal 推树的常态而非边缘，
-  // "第一个 active 会话"猜测会把推送丢弃或落错分区（D1 被否④））。
+  // "第一个 active 会话"猜测会把推送丢弃或落错分区（D1 不采用④））。
   // listMountPoints → 读挂载点集合副本（AC10：sync 注入→查询一致）。
   // wave:perf-w08（02 文档 D1-1，R-06）：广播出口为 ctx.publishViewUpdate——
   // bus 已装配时按 sessionId 定向 publish（plugin:viewUpdate 归 transient 类，

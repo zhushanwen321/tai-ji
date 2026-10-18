@@ -40,7 +40,7 @@ afterEach(() => {
 describe('history-rebuild-cache：segments.json sidecar 降级 warn（RT-5#6）', () => {
   it('sidecar 结构损坏（entries 非数组）→ 全降级占位文本前 warn（含路径）', async () => {
     const sessionId = 'warn-rt5-s1'
-    // getAttachmentsDir(sessionId) 落在测试钉死的 tmp dataDir（白名单内），mkdtemp 额外
+    // getAttachmentsDir(sessionId) 落在测试固定为的 tmp dataDir（白名单内），mkdtemp 额外
     // 证据目录由 fixture 语义自持：直接写坏 sidecar
     const sidecarDir = getAttachmentsDir(sessionId)
     mkdirSync(sidecarDir, { recursive: true })

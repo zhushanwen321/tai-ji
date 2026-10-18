@@ -1,14 +1,14 @@
 /**
  * equivalence fixture 样本 —— pending:register / pending:unregister / 投递日志 entry
  * （v1 账本存量 + v2 port schema）混入对话流序列时 applyEntry reducer 的确定性与
- * 投影口径（notify-once 设计 U5⑥；unified-delivery 波 2 随 entry schema v2 同步更新）。
+ * 派生视图口径（notify-once 设计 U5⑥；unified-delivery 波 2 随 entry schema v2 同步更新）。
  *
  * 静态 fixture（不 spawn pi、凭证无关，属凭证无关 unit 轨——勿登记 REAL_PI_TESTS）。
  *
  * 断言三点：
  * 1. **确定性**：同一 entry 序列两次重放 deep-equal（「消息列表 = entry 日志的纯函数」
  *    纯度契约在通知域样本上成立——live ≡ reload 构造性不变量的样本级复核）；
- * 2. **零投影**：pending 差集 entry 与投递日志 entry（plain custom 通道，不进 LLM
+ * 2. **零派生**：pending 差集 entry 与投递日志 entry（plain custom 通道，不进 LLM
  *    上下文、不产对话流消息）重放后 messages 不增不减、不打断 message 派生；
  * 3. **双 fold 路径同 reducer**：applyEntry 单条逐喂 ≡ replayEntries 批量（实时/重放
  *    两条链路喂同一 reducer 的构造性保证在本样本上成立）。
@@ -158,12 +158,12 @@ describe('equivalence：pending/投递日志 entry 样本的 applyEntry reducer 
     const first = replayEntries(seq)
     const second = replayEntries(seq)
     expect(first).toEqual(second)
-    // 非空守卫（防空转）：3 条 message entry（user + 2 assistant）全数投影
+    // 非空检查（防空转）：3 条 message entry（user + 2 assistant）全数映射出
     expect(first.messages).toHaveLength(3)
     expect(first.orphanToolResults).toHaveLength(0)
   })
 
-  it('零投影：pending 差集与投递日志 entry（v1 存量 + v2 schema）不产消息、不位移 message 派生 id', () => {
+  it('零派生：pending 差集与投递日志 entry（v1 存量 + v2 schema）不产消息、不位移 message 派生 id', () => {
     const seq = buildSequence()
     const full = replayEntries(seq)
     const messagesOnly = seq.filter((e) => e.type !== 'custom')

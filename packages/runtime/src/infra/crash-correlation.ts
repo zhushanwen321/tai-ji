@@ -10,7 +10,7 @@
  * crash journal 扩展字段，人查与机查（trigger-evaluator #16 E2 型连坐）都无需再手工
  * 重放取证。
  *
- * 两个采集器（调用点 rpc-client.writeCrashLogIfNeeded / session-service pi-crash 台账行）：
+ * 两个采集器（调用点 rpc-client.writeCrashLogIfNeeded / session-service pi-crash journal 行）：
  * ① 同步机器面 pi 快照（`ps -axo pid=,ppid=,command=` 过滤 pi-darwin-arm64 行，~10ms）——
  *    回答「我死的时候机器上还有哪些同族 pi 活着、各自 ppid 归属谁」；
  * ② 异步统一日志关联采样（`log show` 崩溃时刻 ±5s 窗口，darwin-only，fire-and-forget）——
@@ -166,7 +166,7 @@ export function captureMachinePiSnapshotSection(selfPid: number | null, runPs: R
 /**
  * crash journal 扩展字段 machinePiDigest 用的紧凑摘要（同步 best-effort）。
  * 失败返回 ''（journal 字段全可空语义，「不知道 ≠ 没打点」；与 section 不同，journal
- * 无 per-field 备注位，空串即「未采到」）。调用点：session-service pi-crash 台账行。
+ * 无 per-field 备注位，空串即「未采到」）。调用点：session-service pi-crash journal 行。
  * 注意：调用时刻 pi 已死，rows 只含幸存同族进程（死亡者自身不可见，死亡证据在
  * exitCode/detailDigest 与统一日志采样里）。
  */

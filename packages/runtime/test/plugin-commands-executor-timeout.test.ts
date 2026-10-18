@@ -5,7 +5,7 @@
  * - 命令定义级 timeoutMs 声明取值链全分支（同 D1：合法正数 / <=0 与 Infinity
  *   opt-out / 非法回落默认 / clamp）；
  * - 超时错误消息诚实化（等了多久 / declared-or-default / 调整指引）；
- * - busy 并发守卫提示（含已等待时长与出路，错误规格表「命令执行中重复触发」行）。
+ * - busy 并发检查提示（含已等待时长与出路，错误规格表「命令执行中重复触发」行）。
  */
 
 import { describe, it, expect, vi, afterEach } from 'vitest'
@@ -164,7 +164,7 @@ describe('命令执行超时取值链（D4，同 D1 链路）', () => {
   })
 })
 
-describe('busy 并发守卫提示（错误规格表「命令执行中重复触发」行）', () => {
+describe('busy 并发检查提示（错误规格表「命令执行中重复触发」行）', () => {
   afterEach(() => {
     vi.useRealTimers()
   })

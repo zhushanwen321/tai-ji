@@ -60,11 +60,11 @@ export interface ResolvedExtension {
  *     packages[] 安装的 mandatory 包走 'settings' 源、打包内置走 'npm' 源，都当 mandatory；
  *     discovery 目录里的扩展即使 name 命中 mandatory SSOT 也不当 mandatory，避免误判）
  *
- * S8 修复：对 package.json 畸形 name（非 string）用 typeof 守卫，fallback 到 basename。
+ * S8 修复：对 package.json 畸形 name（非 string）用 typeof 检查，fallback 到 basename。
  */
 export function resolveExtension(dir: string, source: ExtensionSource, disabled: DisabledSet): ResolvedExtension {
   const meta = readPkgMeta(dir)
-  // S8：package.json name 字段类型未知（JSON.parse 可能返回 number/object），用 typeof 守卫
+  // S8：package.json name 字段类型未知（JSON.parse 可能返回 number/object），用 typeof 检查
   let name = typeof meta.name === 'string' ? meta.name : basename(dir)
   // P7：discovery 源 path 可能是入口文件（index.ts/index.js/单文件，复刻 pi 的
   // collectAutoExtensionEntries 返回入口路径），其 package.json 在 dirname(dir) 处。

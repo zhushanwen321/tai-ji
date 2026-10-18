@@ -76,7 +76,7 @@ function makeMocks(opts: MockOpts = {}) {
   const isBashRunning = opts.isBashRunning ?? false
   const isGenerating = opts.isGenerating ?? false
   const isCompacting = opts.isCompacting ?? false
-  // [u3b 预检改读 occupancy] sendPrompt 预检输入源改为 occupancy 投影（sendBash 预检仍读
+  // [u3b 预检改读 occupancy] sendPrompt 预检输入源改为 occupancy 派生视图（sendBash 预检仍读
   // 三布尔不动）。fixture 镜像真实链路的原子同步（原语「合并 + 派生」双写合一）。
   const session = makeMockSession({
     isBashRunning,
@@ -108,11 +108,11 @@ function makeMocks(opts: MockOpts = {}) {
   // 到达 fake client——fake 须补齐该接口成员
   const client = { prompt: promptFn, bash: bashFn, abortBash: abortBashFn, touchActivity: vi.fn() } as unknown as IPiEngine
 
-  // wave:perf-w09（D1-2）：dispatcher 只依赖 publish 抽象（broker 双写腿已删），mock bus 收集发布消息
+  // wave:perf-w09（D1-2）：dispatcher 只依赖 publish 抽象（broker 双写路径已删），mock bus 收集发布消息
   const broadcasts: ServerMessage[] = []
   const bus = { publish: vi.fn((_sid: string, m: ServerMessage) => { broadcasts.push(m) }) } as unknown as IMessageBus
 
-  // S2 ISP 化：结构性满足 dispatcher 窄接口（6 方法 = 实际消费面），无强转
+  // S2 ISP 化：结构性满足 dispatcher 窄接口（6 方法 = 消费方实际用到的全部），无强转
   const svc: IDispatcherSessionOps = {
     ensureActive: vi.fn(async () => client),
     getSessionByClient: vi.fn(() => session),
@@ -201,7 +201,7 @@ describe('MessageDispatcher sendBash —— 并发放宽 + 双分支延迟（w2 
     // finally isBashRunning 复位
     expect(session.isBashRunning).toBe(false)
     // 正常返回
-    expect(result).toEqual({ status: 'settled' }) // 回执 settled（已执行并收口）
+    expect(result).toEqual({ status: 'settled' }) // 回执 settled（已执行并收尾）
 
     // 级联结束（agent_settled → flushPendingBashResults）→ 按序以帧发布 + 清空待落列
     dispatcher.flushPendingBashResults('s1')
@@ -296,7 +296,7 @@ describe('MessageDispatcher sendBash —— 正常路径（T5）', () => {
     // isBashRunning 复位 false（finally 兜底）
     expect(session.isBashRunning).toBe(false)
     // 正常返回
-    expect(result).toEqual({ status: 'settled' }) // 回执 settled（已执行并收口）
+    expect(result).toEqual({ status: 'settled' }) // 回执 settled（已执行并收尾）
   })
 
   it('T5b: excludeFromContext=true 透传到 bashStart/bashResult', async () => {
@@ -328,8 +328,8 @@ describe('MessageDispatcher sendBash —— 错误路径（T6, S2 对称兜底�
     const errMsg = broadcasts.find((m) => m.type === 'message.error')
     expect(errMsg).toBeDefined()
     expect(errMsg!.payload).toMatchObject({ sessionId: 's1', message: 'pi boom' })
-    // [S2] 与 abortBash 对称兜底：前端 message.error handler 只收口 streaming assistant
-    // （不收口 role:'system' 的 streaming bash），故补发 bashResult 终态让 bash 收口。
+    // [S2] 与 abortBash 对称兜底：前端 message.error handler 只收尾 streaming assistant
+    // （不收尾 role:'system' 的 streaming bash），故补发 bashResult 终态让 bash 收尾。
     const end = findBashResult(broadcasts)
     expect(end).toBeDefined()
     expect(end!.payload).toMatchObject({
@@ -344,7 +344,7 @@ describe('MessageDispatcher sendBash —— 错误路径（T6, S2 对称兜底�
     expect(end!.payload.output).toContain('pi boom')
     // finally isBashRunning 复位
     expect(session.isBashRunning).toBe(false)
-    // 回执 settled+error（已执行并收口——执行失败非预检拒绝，消费方不得恢复草稿）
+    // 回执 settled+error（已执行并收尾——执行失败非预检拒绝，消费方不得恢复草稿）
     expect(result).toEqual({ status: 'settled', error: 'pi boom' })
   })
 })
@@ -402,7 +402,7 @@ describe('MessageDispatcher abortBash（T8 + P6 断言④孤儿形态）', () =>
     expect(session.isBashRunning).toBe(false)
   })
 
-  it('T8c: 无 bash 在跑 → 守卫短路 { sent:false } + 不调 client.abortBash（回执真实化：不得回 aborted）', async () => {
+  it('T8c: 无 bash 在跑 → 检查短路 { sent:false } + 不调 client.abortBash（回执真实化：不得回 aborted）', async () => {
     const { dispatcher, abortBashFn, broadcasts, session } = makeMocks({})
 
     const result = await dispatcher.abortBash('s1')
@@ -416,13 +416,13 @@ describe('MessageDispatcher abortBash（T8 + P6 断言④孤儿形态）', () =>
 
 })
 
-describe('MessageDispatcher sendBash 空命令（D4-3 哨兵不变式守卫删除）', () => {
+describe('MessageDispatcher sendBash 空命令（D4-3 哨兵不变式检查删除）', () => {
   beforeEach(() => vi.clearAllMocks())
 
-  it("D4-3: 空命令不再哨兵早退——sendBash('') 正常走执行链（哨兵帧退役为独立 message.bashAborted 后，空命令守卫的「保哨兵形态不变式」职责消灭）", async () => {
+  it("D4-3: 空命令不再哨兵早退——sendBash('') 正常走执行链（哨兵帧退役为独立 message.bashAborted 后，空命令检查的「保哨兵形态不变式」职责消灭）", async () => {
     const { dispatcher, bashFn, broadcasts, session } = makeMocks({})
 
-    // 旧守卫：console.warn + 拒绝回执早退——它存在的唯一理由是保证 bashResult 帧
+    // 旧检查：console.warn + 拒绝回执早退——它存在的唯一理由是保证 bashResult 帧
     // command 恒非空、与 command:'' 哨兵帧永不混淆。哨兵帧退役为独立帧类型后不变式不再需要。
     const result = await dispatcher.sendBash('s1', '', false)
 

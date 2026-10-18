@@ -7,7 +7,7 @@
  * 决策语义（线进程 = 附着态启动，逐字段对齐 lifecycle.spawnRestoreClient）：
  *   - preset 回落链：线 launch 快照取主会话 preset——`findScannedSession(mainSid)
  *     ?.launchPresetId ?? BUILTIN_PRESET_IDS.FULL`（sidecar 缺失回落 builtin:full =
- *     FR-10 兜底；活跃/冷会话统一读扫盘面，spawnRestoreClient 同源）；
+ *     FR-10 兜底；活跃/冷会话统一读磁盘扫描，spawnRestoreClient 同源）；
  *   - resolution 回落：preset 解析出 skillPaths/extensionPaths 时取 resolution 值，
  *     resolution 缺失或 skillPaths undefined 时回落全局解析；
  *   - 模型终态：`model: undefined` + `inheritSessionModel: true`——pi CLI --model 恒
@@ -30,7 +30,7 @@ import type { BtwLineSpawnContext } from './btw-service.js'
 export interface BtwLineSpawnOptionsDeps {
   /** D8-3 迁移门（组合根接 session-lifecycle getMigrationGate：迁移完成前禁启动 pi）。 */
   migrationGate(): Promise<unknown>
-  /** 主会话扫盘查询（活跃/冷统一读扫盘面——launchPresetId 取主会话创建档）。 */
+  /** 主会话扫盘查询（活跃/冷统一读磁盘扫描——launchPresetId 取主会话创建档）。 */
   findScannedSession(sessionId: string): { launchPresetId?: string } | undefined
   /** launch preset 解析（PresetService.resolve 委托；undefined = 未注入/解析失败）。 */
   getLaunchPresetOptions(presetId: string, cwd: string): Promise<PresetResolution | undefined>
@@ -54,7 +54,7 @@ export function createBtwLineSpawnOptionsFactory(
     // D8-3 迁移门（与 create/restore 同约束）：provider 迁移完成前禁启动 pi。
     await deps.migrationGate()
     // 线 launch 快照取主会话 preset（工具/权限面 = 主会话创建档；活跃/冷会话统一读
-    // 扫盘面——spawnRestoreClient 同源，sidecar 缺失回落 builtin:full = FR-10 兜底）。
+    // 磁盘扫描——spawnRestoreClient 同源，sidecar 缺失回落 builtin:full = FR-10 兜底）。
     const presetId = deps.findScannedSession(ctx.mainSid)?.launchPresetId ?? BUILTIN_PRESET_IDS.FULL
     const resolution = await deps.getLaunchPresetOptions(presetId, ctx.cwd)
     // 组合形态逐字段对齐 lifecycle.spawnRestoreClient（线进程 = 附着态启动）：模型终态

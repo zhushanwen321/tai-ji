@@ -266,7 +266,7 @@ describe('MessageDispatcher — 写入时机 record', () => {
       ensureActive: vi.fn().mockResolvedValue(mockClient),
       getSessionByClient: vi.fn().mockReturnValue(activeSession),
     }
-    // getClient → undefined：无附着 client 形态（sendPrompt 入口 touch 的空守卫分支）
+    // getClient → undefined：无附着 client 形态（sendPrompt 入口 touch 的空检查分支）
     const pm = { getClient: vi.fn(() => undefined) }
     // wave:perf-w09（D1-2）：dispatcher 4 参（svc/pm/workspace/bus），broker 依赖已删
     const bus = { publish: vi.fn() } as unknown as ConstructorParameters<typeof MessageDispatcher>[3]
@@ -296,7 +296,7 @@ describe('MessageDispatcher — 写入时机 record', () => {
       ensureActive: vi.fn(),
       getSessionByClient: vi.fn(),
     }
-    // getClient → undefined：无附着 client 形态（sendPrompt 入口 touch 的空守卫分支）
+    // getClient → undefined：无附着 client 形态（sendPrompt 入口 touch 的空检查分支）
     const pm = { getClient: vi.fn(() => undefined) }
     // wave:perf-w09（D1-2）：dispatcher 4 参（svc/pm/workspace/bus），broker 依赖已删
     const bus = { publish: vi.fn() } as unknown as ConstructorParameters<typeof MessageDispatcher>[3]
@@ -327,7 +327,7 @@ describe('MessageDispatcher — 写入时机 record', () => {
       ensureActive: vi.fn().mockRejectedValue(new Error('restore failed')),
       getSessionByClient: vi.fn(),
     }
-    // getClient → undefined：无附着 client 形态（sendPrompt 入口 touch 的空守卫分支）
+    // getClient → undefined：无附着 client 形态（sendPrompt 入口 touch 的空检查分支）
     const pm = { getClient: vi.fn(() => undefined) }
     // wave:perf-w09（D1-2）：dispatcher 4 参（svc/pm/workspace/bus），broker 依赖已删
     const bus = { publish: vi.fn() } as unknown as ConstructorParameters<typeof MessageDispatcher>[3]
@@ -341,7 +341,7 @@ describe('MessageDispatcher — 写入时机 record', () => {
     dispatcher.setDeliveryRegistry(registry)
 
     // [u2 受理口径 D9⑤] ensureActive 失败不再同步 reject：消息已受理入内核，
-    // 失败经 message.error 广播可见（投递终态失败面），record（三副作用）不执行
+    // 失败经 message.error 广播可见（投递终态失败路径），record（三副作用）不执行
     const result = await dispatcher.sendMessage('s1', 'hello')
     await flushDelivery(30)
     expect(result.blocked).toBe(false)

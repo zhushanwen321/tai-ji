@@ -1,7 +1,7 @@
 /**
  * setSkillPaths 两步写失败回滚测试（code-harden RT-3#8）。
  *
- * 场景：discovery.json 写入成功后，settings.json 投影（updateSettingsFields 跨进程锁）
+ * 场景：discovery.json 写入成功后，settings.json 派生视图（updateSettingsFields 跨进程锁）
  * 失败（settings 父目录只读 → lockfile mkdir EACCES）→ discovery 必须回滚为写前内容，
  * 错误原样上抛——否则 pi 读到的 skills 与 taiji 视图分歧到下一次成功写。
  *
@@ -38,7 +38,7 @@ afterEach(() => {
 })
 
 describe('setSkillPaths · 两步写失败回滚（RT-3#8）', () => {
-  it('settings 投影失败 → discovery 回滚为写前内容，错误上抛', () => {
+  it('settings 派生视图失败 → discovery 回滚为写前内容，错误上抛', () => {
     // 前置：discovery 已有一组路径（回滚目标）。路径必须真实存在——partitionByScope
     // 的脏数据过滤会剔除不存在的自定义绝对路径（ADR §5）， fixture 目录真建。
     const origDir = join(dir, 'skills-orig')
@@ -48,7 +48,7 @@ describe('setSkillPaths · 两步写失败回滚（RT-3#8）', () => {
     setSkillPaths([{ path: origDir, enabled: true, scope: 'global' }])
     const before = getSkillPaths()
 
-    // settings 父目录只读 → 投影（updateSettingsFields 锁创建）失败
+    // settings 父目录只读 → 派生视图（updateSettingsFields 锁创建）失败
     chmodSync(readonlyDir, 0o555)
     try {
       expect(() => setSkillPaths([{ path: newDir, enabled: true, scope: 'global' }])).toThrow()

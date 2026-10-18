@@ -1,5 +1,5 @@
 /**
- * 单实例互斥守卫单测（probe 判定矩阵 + register 原子写）。
+ * 单实例互斥检查单测（probe 判定矩阵 + register 原子写）。
  *
  * probe 侧注入 fake isPortReachable / isPidAlive 隔离网络与进程表；register/读文件走
  * mkdtemp 真目录（防线路线：tmp 自建自删）。核心断言面：活实例拒绝（双来源）、

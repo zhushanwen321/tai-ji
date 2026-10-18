@@ -4,11 +4,11 @@
  * 两段：
  * - filterReadableWorkflowSignals 直测（纯函数契约）：不可读 run 被过滤（信号不发）、
  *   可读 run 保留、判定不可得（readableRunIds=null）放行、全不可读 → 空集（水位不推进，
- *   下一轮投影变更 / 对账腿重新进入 diff = 推迟到下一轮触发，不给定时器）。
+ *   下一轮派生视图变更 / 对账路径重新进入 diff = 推迟到下一轮触发，不给定时器）。
  * - 发射链路构造性锁（端到端）：真实 SessionRecords + fake 依赖，驱动
  *   subscribe → invalidate → 防抖 → get_entries 拉取 → publish，断言 bus 收到
  *   session.workflowUpdate 且 getWorkflows 同刻返回该 run（found=true）——「信号发出时
- *   数据必然可读」由本测试钉死；信号源与读源解耦的实现漂移会打红此测试。
+ *   数据必然可读」由本测试固定；信号源与读源解耦的实现漂移会打红此测试。
  *
  * 背景：renderer 的 500ms running 信号盲等重试已随本项删除（时间平抑类兜底），其正确性
  * 依据 = 本构造性时序；登记见 stores/workflow.ts triggerWorkflowReload 的
@@ -47,7 +47,7 @@ describe('filterReadableWorkflowSignals — 发射前可读性门（待裁决项
     expect(filtered).toEqual([{ runId: 'wf-readable', status: 'running' }])
   })
 
-  it('全部不可读 → 空集（本轮不发；水位不推进 → 下一轮投影变更 / 对账腿重试 = 推迟语义）', () => {
+  it('全部不可读 → 空集（本轮不发；水位不推进 → 下一轮派生视图变更 / 对账路径重试 = 推迟语义）', () => {
     expect(filterReadableWorkflowSignals(signals, readable([]))).toEqual([])
   })
 
@@ -56,7 +56,7 @@ describe('filterReadableWorkflowSignals — 发射前可读性门（待裁决项
     expect(all).toEqual(signals)
   })
 
-  it('readableRunIds=null（投影不可得，防御读法）→ 放行（判据缺失不拦截信号）', () => {
+  it('readableRunIds=null（派生视图不可得，防御读法）→ 放行（判据缺失不拦截信号）', () => {
     expect(filterReadableWorkflowSignals(signals, null)).toEqual(signals)
   })
 
@@ -80,7 +80,7 @@ describe('SessionRecords workflowUpdate 发射链路 — 信号发出时数据�
     rmSync(tempDir, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 })
   })
 
-  /** v2 workflow 注册条目（events-projection scanWorkflowV2Entry 的键守卫最小面 + 常用字段）。 */
+  /** v2 workflow 注册条目（events-projection scanWorkflowV2Entry 的键检查最小面 + 常用字段）。 */
   function workflowRegisteredEntry(runId: string): Record<string, unknown> {
     return {
       type: 'custom',
@@ -152,7 +152,7 @@ describe('SessionRecords workflowUpdate 发射链路 — 信号发出时数据�
       expect(harness.published.some((m) => m.type === 'session.workflowUpdate')).toBe(true)
     })
 
-    // 信号载荷 = 投影内可读 run；同刻读路径立即返回同一 run（构造性：信号源 = 读源投影）
+    // 信号载荷 = 派生视图内可读 run；同刻读路径立即返回同一 run（构造性：信号源 = 读源派生视图）
     const updateFrame = harness.published.find((m) => m.type === 'session.workflowUpdate')
     const update = (updateFrame!.payload as { update: { runId: string; status: string } }).update
     expect(update.runId).toBe('wf-gate-1')

@@ -1,6 +1,6 @@
 /**
  * workflow record 派生视图族（自 events-projection 拆出——subagent 域与 workflow 域
- * 是两个变化原因，投影判定各自独立演进；合并仲裁与 sources 持有态留主文件）。
+ * 是两个变化原因，派生判定各自独立演进；合并仲裁与 sources 持有态留主文件）。
  */
 import type {
   RunAskStepFold,
@@ -23,7 +23,7 @@ function toIso(ms: number): string {
   return new Date(ms).toISOString()
 }
 
-/** shared WorkflowDoneReason 词表集合（core DoneReason 收窄用，值级守卫）。 */
+/** shared WorkflowDoneReason 词表集合（core DoneReason 收窄用，值级检查）。 */
 const WORKFLOW_DONE_REASON_SET: ReadonlySet<string> = new Set([
   'completed',
   'failed',
@@ -32,13 +32,13 @@ const WORKFLOW_DONE_REASON_SET: ReadonlySet<string> = new Set([
   'time_limited',
 ])
 
-/** 值级守卫（Set.has 无类型窄化能力——显式谓词窄化到 shared 信号面词表）。 */
+/** 值级检查（Set.has 无类型窄化能力——显式谓词窄化到 shared 信号面词表）。 */
 function isWorkflowDoneReason(value: string): value is NonNullable<WorkflowRunRecord['reason']> {
   return WORKFLOW_DONE_REASON_SET.has(value)
 }
 
 /**
- * [projectV2Workflow 拆分] 三态投影（事件源胜出仲裁的判据面）。
+ * [projectV2Workflow 拆分] 三态派生（事件源胜出仲裁的判据面）。
  *
  * [D2] fold 在场 = 事件流 已接线，三态全由 fold 定，条目 status 不参与——条目是
  * append-only last-wins 快照，resume 复活只补写 registered 条目、留存的中断形态
@@ -187,11 +187,11 @@ function resolveWorkflowSettlement(
 }
 
 /**
- * v2 workflow 实体的合并投影：事件 fold 供骨架（ask 步骤行）与终局，注册/
+ * v2 workflow 实体的合并派生视图：事件 fold 供骨架（ask 步骤行）与终局，注册/
  * 终态条目供 scriptName/slug/reason 词表与统计摘要。
  *
  * 定界（run 域的 session 归属）：注册或终态条目缺席 = 该 run 非本会话实体
- * （workflow-state 目录按 cwd 共享，其他会话的 run 只存在于 run journal——不进投影）。
+ * （workflow-state 目录按 cwd 共享，其他会话的 run 只存在于 run journal——不进派生视图）。
  */
 export function projectV2Workflow(
   registered: WorkflowRecordRegisteredEntryData | undefined,
@@ -217,7 +217,7 @@ export function projectV2Workflow(
     ...settlement,
     // [可视化 U3，设计 §3.1-4] phases 折叠透出（last-wins 单行快照，消费位 = block
     // chips）+ run args 摘要（fold created 行透传）。fold 缺席（entry-only 降级派生视图）
-    // 或无 phases 行不造键——缺省语义 = 旧投影无此字段。
+    // 或无 phases 行不造键——缺省语义 = 旧派生视图无此字段。
     ...(fold !== undefined && fold.phases.size > 0 ? { phases: projectPhaseFolds(fold.phases) } : {}),
     ...(fold?.created?.argsSummary !== undefined ? { argsSummary: fold.created.argsSummary } : {}),
   }
@@ -238,7 +238,7 @@ export function projectV2Workflow(
  *   聚合面不取单一值；一键多 attempt 的权威成员取与 workflow-step-merge.pickAuthoritativeRecord
  *   同判据（running 优先、startedAt 最新——显示权威一致）。
  *
- * 纯函数（无 IO）；输入 runs/subagents 均为已合并投影产物，无增强项时返回原引用
+ * 纯函数（无 IO）；输入 runs/subagents 均为已合并派生产物，无增强项时返回原引用
  * （零拷贝快路径，调用方 getWorkflows 每次读 RPC 消费）。sessionId 是覆盖查询的
  * 定位锚首参（query 实装按 session cwd 分片定位记录域文件——无全局 id 索引）。
  * resolved = 调用方一次解析的 session 定位锚（SessionMetaRef）：逐 run 的覆盖查询

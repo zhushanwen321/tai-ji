@@ -24,7 +24,7 @@
  *      --mode rpc / 交互 shell）——常驻发送方（终端里手敲 kill）。
  *    对头部候选补采 `ps -p <pid> -o lstart=`（进程启动时刻）：启动时刻贴近死亡
  *    时刻 = 强信号（先起进程再下手）。
- * ③ 落盘双写：crash 台账 `signal-forensics` 事件（schema 扩展值，含 ≤2KB digest +
+ * ③ 落盘双写：crash journal `signal-forensics` 事件（schema 扩展值，含 ≤2KB digest +
  *    detailPath）+ 全量记录 JSONL 追加到 `<dataDir>/logs/signal-forensics-<date>-
  *    <sid>.jsonl`（logger.ts cleanExpiredLogs 同前缀白名单覆盖，保留期清理自动接管）。
  *
@@ -67,7 +67,7 @@ const RECORD_COMMAND_MAX_CHARS = 300
 const DIGEST_TOP_N = 3
 /** digest 降级形态的命令行截断长度。 */
 const DIGEST_COMPACT_CMD_MAX_CHARS = 60
-/** 毫秒 → 秒换算（uptimeSec 落库）。 */
+/** 毫秒 → 秒换算（uptimeSec 持久化）。 */
 const MS_PER_SECOND = 1_000
 /** sessionId 文件名安全化最大长度（对齐 logger.ts createPiSessionLog 同规则）。 */
 const SESSION_ID_MAX_LENGTH = 64
@@ -140,7 +140,7 @@ export function commandTier(command: string): SuspicionTier {
 }
 
 /** 候选发送方记录（ring 观测 + fresh 快照 diff + lstart 补采的三源合并）。 */
-export interface SenderCandidate { // oe-exempt:20261014:framework:候选发送方数据模型（crash 台账 digest 与测试共用的单一数据契约，非投机抽象）
+export interface SenderCandidate { // oe-exempt:20261014:framework:候选发送方数据模型（crash journal digest 与测试共用的单一数据契约，非投机抽象）
   pid: number
   ppid: number
   command: string
@@ -379,8 +379,8 @@ export function classifySenders(input: ClassifyInput): ClassifyResult {
 // 记录组装与落盘
 // ─────────────────────────────────────────────────────────────────────────────
 
-/** 一次死亡信号取证的全量记录（JSONL 一行；schema 台账事件是它的 ≤2KB 摘要）。 */
-export interface SignalForensicsRecord { // oe-exempt:20261014:framework:取证记录数据模型（台账事件 + JSONL 双写共用的单一数据契约）
+/** 一次死亡信号取证的全量记录（JSONL 一行；schema journal 事件是它的 ≤2KB 摘要）。 */
+export interface SignalForensicsRecord { // oe-exempt:20261014:framework:取证记录数据模型（journal 事件 + JSONL 双写共用的单一数据契约）
   /** 记录时刻（ISO 8601 UTC）。 */
   ts: string
   sessionId: string
@@ -454,7 +454,7 @@ function truncateCandidates(candidates: SenderCandidate[]): SenderCandidate[] {
 }
 
 /**
- * 台账 digest（≤2KB 硬上限，schema 契约）。三级降级保可解析性优先：
+ * journal digest（≤2KB 硬上限，schema 契约）。三级降级保可解析性优先：
  * 全量 → 压 cmd 长度 → 只留计数；任一级仍超限再硬截断（极少触发）。
  */
 export function buildDigest(record: SignalForensicsRecord): string {
@@ -513,7 +513,7 @@ export function buildDigest(record: SignalForensicsRecord): string {
  * 已登记进 logger.ts cleanExpiredLogs 白名单（D6-⑦：有写入就有清理），保留期清理自动
  * 接管，无需自建轮转。best-effort：任何失败（磁盘满/权限）返回 null，不向调用链抛错。
  *
- * @returns detailPath（相对 dataDir，供台账 detailPath 字段）；失败返回 null。
+ * @returns detailPath（相对 dataDir，供 journal detailPath 字段）；失败返回 null。
  */
 export function writeForensicsDetailFile(record: SignalForensicsRecord): string | null {
   try {
@@ -551,7 +551,7 @@ export interface CaptureDeps { // oe-exempt:20261014:framework:采集依赖注�
   listProcesses: () => Promise<string>
   /** lstart 补采（可选；不注入则 startedAt 恒 null）。 */
   readProcessStartTime?: (pid: number) => Promise<number | null>
-  /** 台账 writer（可选；不注入则只写 detail 文件）。 */
+  /** journal writer（可选；不注入则只写 detail 文件）。 */
   journal?: CrashJournalWriter
   /** detail 文件写入（可选；不注入则不落全量记录）。 */
   writeDetailFile?: (record: SignalForensicsRecord) => string | null
@@ -567,7 +567,7 @@ export interface CaptureResult { // oe-exempt:20261014:framework:采集结果数
 
 /**
  * 一次死亡信号取证编排：取环历史（同步）→ 新快照（异步 best-effort）→ 分类 →
- * lstart 补采 → 组记录 → 台账事件 + detail 文件双写。
+ * lstart 补采 → 组记录 → journal 事件 + detail 文件双写。
  *
  * 本函数自身可抛（调用方 orchestration 错误）；生产入口 reportPiExitSignalForensics
  * 全路径捕获。新快照失败不抛（降级为 freshSnapshotAvailable=false 的记录）。
@@ -631,7 +631,7 @@ export async function captureSignalForensics(
       layer: 'pi',
       event: 'signal-forensics',
       sessionId: input.sessionId,
-      // 扩展字段登记面（schema CrashJournalEvent）：pid/ppid/exitCode/uptimeSec/detailPath
+      // 扩展字段登记清单（schema CrashJournalEvent）：pid/ppid/exitCode/uptimeSec/detailPath
       pid: input.deadPid,
       ppid: deps.ownPid,
       exitCode: input.exitCode,

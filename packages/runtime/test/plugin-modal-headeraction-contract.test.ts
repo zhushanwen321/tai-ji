@@ -5,7 +5,7 @@
  * 覆盖（impl-plan u5b 验收条款对应的 rpc-setup 契约面）：
  * - E15 INVALID_SESSION_ID 三方法：views.update / sendMessage / updateHeaderAction
  * - views.update 显式 sessionId 归属投递（payload.sessionId 直达 handleViewUpdate，
- *   ActiveSessionResolver 盖戳路径已删除——D1 被否④）
+ *   ActiveSessionResolver 盖戳路径已删除——D1 不采用④）
  * - sendMessage 回执映射逐 reason 值（{blocked,reason} → {accepted:false,reason}；成功 → {accepted:true}）
  * - requireCommand 空串/全空白 → INVALID_REQUIRE_COMMAND 入口拒绝（B-F5）
  * - updateHeaderAction 校验 + plugin:headerActionUpdate 广播形状
@@ -13,7 +13,7 @@
  * - B-F2：广播出线未接线 → updateHeaderAction 回 {updated:false}（不假成功）；
  *   broadcastFn 缺失 warn-drop 同理（真实装配全链）
  * - B-F4：deps.sessionService 缺失 → console.error 留痕 + {blocked:true, reason:'error'}
- * - togglePlugin plugin:statusChange 广播（E2 修复：disable/enable 腿 renderer 触发源）
+ * - togglePlugin plugin:statusChange 广播（E2 修复：disable/enable 路径 renderer 触发源）
  *
  * 运行：cd packages/runtime && npx vitest run test/plugin-modal-headeraction-contract.test.ts
  */
@@ -136,7 +136,7 @@ describe('E15：三方法 sessionId 必填（缺/非法 → INVALID_SESSION_ID�
 })
 
 describe('views.update 显式 sessionId 归属投递（D1）', () => {
-  it('payload.sessionId 直达 handleViewUpdate（不经活跃会话解析——D1 被否④路径已删除）', async () => {
+  it('payload.sessionId 直达 handleViewUpdate（不经活跃会话解析——D1 不采用④路径已删除）', async () => {
     const rpc = new PluginRpcServer()
     const port = createMockPort()
     rpc.registerWorker('w1', port)
@@ -416,7 +416,7 @@ describe('B-F2/B-F4：真实 PluginService 装配链（registerRpcMethods；deps
   })
 })
 
-describe('togglePlugin plugin:statusChange 广播（E2 修复：disable/enable 腿 renderer 触发源）', () => {
+describe('togglePlugin plugin:statusChange 广播（E2 修复：disable/enable 路径 renderer 触发源）', () => {
   let tmpDir: string
 
   /** 最小 PluginService，另暴露 mock broker 供广播断言 */
@@ -480,15 +480,15 @@ describe('togglePlugin plugin:statusChange 广播（E2 修复：disable/enable �
     expect(broadcastFrames(broker).filter((f) => f.type === 'plugin:statusChange')).toHaveLength(0)
   })
 
-  it('广播信封与 crashed 腿同构：type/id/payload 三键一致；statusChange payload 键集 = StatusChangeCallback 契约', async () => {
+  it('广播信封与 crashed 路径同构：type/id/payload 三键一致；statusChange payload 键集 = StatusChangeCallback 契约', async () => {
     const { service, broker } = buildServiceWithBroker()
     ;(service as unknown as { registerWorkerCallbacks(): void }).registerWorkerCallbacks()
 
-    // crashed 腿（既有广播点）
+    // crashed 路径（既有广播点）
     const host = (service as unknown as { host: { onCrash?: (workerId: string, pluginIds: string[], error: unknown) => void } }).host
     host.onCrash!('w1', ['pC'], new Error('worker died'))
 
-    // toggle disable 腿（既有广播点）
+    // toggle disable 路径（既有广播点）
     await service.togglePlugin('p1', false)
 
     const frames = broadcastFrames(broker)

@@ -51,7 +51,7 @@ describe('statusSetUpdate delivery: server → pluginService.notifyPiEvent (D7�
     expect(notifyPiEvent).toHaveBeenCalledWith('plugin:statusSetUpdate', { sessionId: 's1', key: 'todo', text: '2/5', textRaw: '2/5' }, 's1')
   })
 
-  it('pluginService 未注入时不抛（可选依赖守卫）', () => {
+  it('pluginService 未注入时不抛（可选依赖检查）', () => {
     const server = new RuntimeServer(0, '/tmp/test-project')
     expect(() => server.handleStatusSetUpdate({ sessionId: 's1', key: 'k', text: 'v' })).not.toThrow()
   })

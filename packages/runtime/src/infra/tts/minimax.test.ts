@@ -172,7 +172,7 @@ describe('错误码翻译表（业务层 base_resp + HTTP 层）', () => {
   })
 })
 
-describe('能力表与表单投影（§7.3）', () => {
+describe('能力表与表单派生视图（§7.3）', () => {
   it('能力表：t2a_v2 / maxInputChars 3000 / 不支持指令 / speedRange [0.5,2]', () => {
     expect(minimaxCapabilities.endpointPath).toBe('/t2a_v2')
     expect(minimaxCapabilities.authHeader).toBe('bearer')
@@ -181,7 +181,7 @@ describe('能力表与表单投影（§7.3）', () => {
     expect(minimaxCapabilities.supportsInstructions).toBe(false)
   })
 
-  it('表单投影：情感 ×9 / 声道枚举单双 / 音量音调值域 / 默认 baseUrl 唯一', () => {
+  it('表单派生视图：情感 ×9 / 声道枚举单双 / 音量音调值域 / 默认 baseUrl 唯一', () => {
     expect(minimaxFormModel.emotions).toHaveLength(9)
     expect(minimaxFormModel.channels.map((c) => c.id)).toEqual(['1', '2'])
     expect(minimaxFormModel.volumeRange).toEqual({ min: 0.5, max: 10, step: 0.5 })
@@ -192,7 +192,7 @@ describe('能力表与表单投影（§7.3）', () => {
     expect(minimaxFormModel.baseUrlOptions.map((o) => o.url)).toContain('https://api.minimaxi.com/v1')
   })
 
-  it('投影 id 形态：toggles 与 voiceModify tiers 均为 vendor 子键名裸键（D5 F1-8/F1-11 回归——renderer 按裸键查落盘路径/直写子树，路径前缀形态静默丢值或双前缀错位）', () => {
+  it('派生视图 id 形态：toggles 与 voiceModify tiers 均为 vendor 子键名裸键（D5 F1-8/F1-11 回归——renderer 按裸键查落盘路径/直写子树，路径前缀形态静默丢值或双前缀错位）', () => {
     expect(minimaxFormModel.toggles).toEqual(['text_normalization', 'latex_read', 'aigc_watermark'])
     expect(minimaxFormModel.voiceModify?.tiers.map((t) => t.id)).toEqual(['pitch', 'intensity', 'timbre'])
     expect(minimaxFormModel.voiceModify?.effects.map((e) => e.id)).toEqual(['spacious_echo', 'auditorium_echo', 'lofi_telephone', 'robotic'])

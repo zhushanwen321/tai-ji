@@ -46,7 +46,7 @@ vi.mock('../src/infra/pi/pi-paths.js', () => ({
 }))
 
 // detectBareWorkspaceCached 经 workspace-detector，mock 避免真实 cwd 探测
-// （pruneBareCache 已随批 4 U10 观测器合并删除：收缩动作收口在 IGitInfoReader.pruneStaleCache 单点）
+// （pruneBareCache 已随批 4 U10 观测器合并删除：收缩动作收敛在 IGitInfoReader.pruneStaleCache 单点）
 vi.mock('../src/services/worktree/workspace-detector.js', () => ({
   detectBareWorkspaceCached: () => false,
 }))
@@ -71,7 +71,7 @@ function makeSessionStore(): ISessionStore {
   } as unknown as ISessionStore
 }
 
-/** S2 ISP 化：结构性满足 scanner 窄接口（2 方法 = 实际消费面），无强转。 */
+/** S2 ISP 化：结构性满足 scanner 窄接口（2 方法 = 消费方实际用到的全部），无强转。 */
 function makeSvc(): IScannerSessionOps {
   return {
     getActiveSummaries: vi.fn(() => []),

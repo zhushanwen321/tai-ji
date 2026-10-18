@@ -106,7 +106,7 @@ interface OpenedZcodeDb {
   dispose: () => void
 }
 
-/** 打开只读连接（统一入口：存在性 → 四级恢复阶梯 → schema 已知集闸门）+ 阶梯日志。 */
+/** 打开只读连接（统一入口：存在性 → 四级恢复阶梯 → schema 已知集门禁）+ 阶梯日志。 */
 async function openDb(dbPath: string): Promise<OpenedZcodeDb> {
   const handle = await openZcodeSessionDb(dbPath).catch((e: unknown) => {
     throw openFailed(e, dbPath)

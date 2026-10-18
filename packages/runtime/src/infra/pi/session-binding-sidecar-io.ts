@@ -55,13 +55,13 @@ export const sessionMetaCache = new Map<string, CachedSessionMeta>()
 /**
  * persistBindingSidecar 的可选行为开关。
  *
- * skipJsonlExistsGuard（V9-④ 根修，2026-09-09）：跳过「JSONL 未落盘即跳过」守卫。
+ * skipJsonlExistsGuard（V9-④ 从根源修复，2026-09-09）：跳过「JSONL 未落盘即跳过」检查。
  * 仅限 create 路径使用——调用方以「本 session 刚由本进程创建」这一事实替代文件存在性
  * 判据（getState 成功 + registerSession 成功后 session 必然真实，.jsonl 未 flush 只是
  * pi 延迟写入窗口）。规则 #6 禁止的是创建/触碰 pi session .jsonl 本体（openSync('wx')
  * EEXIST 卡死），sidecar 是 taiji 自有文件且经 atomicWrite 落盘、不触碰 .jsonl，放行
  * 不违反规则 #6。非 create 路径（fork/restore/setProject 等）禁用——文件不存在仍应
- * 跳过（防为已清理/创建失败的 session 留孤儿 sidecar），守卫默认语义保持不变。
+ * 跳过（防为已清理/创建失败的 session 留孤儿 sidecar），检查默认语义保持不变。
  */
 export interface PersistBindingSidecarOpts {
   /** 写后是否失效目录列举 TTL 缓存（默认 true，opt-out 语义见 persistBindingSidecar docstring）。 */
@@ -72,7 +72,7 @@ export interface PersistBindingSidecarOpts {
 
 /**
  * sidecar 家族公共写入（preset/project/agent binding 共用骨架）：
- * 空路径守卫 + JSONL 未落盘守卫（规则 #6：绝不创建 sidecar；create 路径可经
+ * 空路径检查 + JSONL 未落盘检查（规则 #6：绝不创建 sidecar；create 路径可经
  * skipJsonlExistsGuard 放行，见 PersistBindingSidecarOpts）+ 原子写 + 双层缓存失效
  * （sessionMetaCache 必失效；scanDirCache 默认失效，见 invalidateScanDir 说明）。
  * 差异点参数化：sidecar 路径 helper、tmpfile 前缀、目录级扫描缓存的豁免开关。
@@ -90,7 +90,7 @@ export interface PersistBindingSidecarOpts {
 /**
  * sidecar 持久化形状（S12 序列化边界最小约束）：各家族 binding 的公共底座——
  * JSON.stringify 产出的对象（preset/project/agent 家族字段各异，由各自
- * 调用方类型进一步收窄；读侧经 readBindingSidecar 的 decode 守卫回调校验）。
+ * 调用方类型进一步收窄；读侧经 readBindingSidecar 的 decode 检查回调校验）。
  */
 export type PersistedSidecarBinding = Readonly<Record<string, unknown>>
 
@@ -124,8 +124,8 @@ export function persistBindingSidecar(
 }
 
 /**
- * sidecar 家族公共读取：读文件 + JSON.parse + 调用方字段守卫回调。
- * sidecar 不存在/损坏/守卫不过 → undefined（降级不抛错）。
+ * sidecar 家族公共读取：读文件 + JSON.parse + 调用方字段检查回调。
+ * sidecar 不存在/损坏/检查不过 → undefined（降级不抛错）。
  *
  * [消费方登记] 同 persistBindingSidecar——preset/project/agent 家族经
  * session-file-utils.ts re-export 消费，仅限 sidecar 家族模块消费（model 家族消费方
@@ -137,7 +137,7 @@ export function persistBindingSidecar(
  * - JSON parse 拒绝（文件损坏）→ warn + quarantineCorruptFile 隔离保取证副本——
  *   binding sidecar 无 JSONL 兜底真源（与 meta/handoff sidecar 不同），损坏即用户
  *   归属数据丢失，隔离副本是唯一恢复入口；
- * - 守卫不过（合法 JSON 但字段形状不符）→ warn 一次（路径+原因）——可能是版本
+ * - 检查不过（合法 JSON 但字段形状不符）→ warn 一次（路径+原因）——可能是版本
  *   演进产生的旧形态，不隔离（隔离会消灭旧形态的可恢复性）。
  */
 const warnedSidecarPaths = new Set<string>()
@@ -226,7 +226,7 @@ export function invalidateScanDirCache(): void {
  *
  * 为什么经函数而非导出变量：scanDirCache / scanDirLastNow 是 let 可变绑定，跨模块
  * 赋值不可行（ESM 导出绑定对导入方只读），缓存状态随 persistBindingSidecar 骨架迁入
- * 本模块后，file-utils 侧 scanPiSessions 的读写统一收口到 lookup/refresh 函数对。
+ * 本模块后，file-utils 侧 scanPiSessions 的读写统一收尾到 lookup/refresh 函数对。
  *
  * 时钟回拨防护：now 落到上次观测之前 → 墙钟被回拨，expiresAt 的单调性假设失效 →
  * 缓存不可信，强制重扫并以回拨后的时钟重建基准（几行代码的轻量防护）。观测基准

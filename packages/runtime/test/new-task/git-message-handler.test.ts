@@ -188,7 +188,7 @@ describe('GitMessageHandler git.commit 路由（D5 重构：commit 后广播 cha
       payload: { sessionId: 's1', status: 'committed' },
     })
     expect(cap.errors).toHaveLength(0)
-    // W17 审查 Fix-4：invocationCallOrder（全局单调递增调用序）钉死「invalidate 在 reply 前」——
+    // W17 审查 Fix-4：invocationCallOrder（全局单调递增调用序）固定「invalidate 在 reply 前」——
     // 前端收到 committed ack 后可能立即刷新 git zone，失效晚于 reply 会让刷新命中 2s 旧缓存
     const invalidateOrder = gitService.invalidateStatusCache.mock.invocationCallOrder[0] ?? -1
     const replyOrder = reply.mock.invocationCallOrder[0] ?? -1

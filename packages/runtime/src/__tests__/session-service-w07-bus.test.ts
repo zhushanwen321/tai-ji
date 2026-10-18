@@ -7,7 +7,7 @@
  * - session.exited（onSessionExit 进程退出路径）：stream topic——带 seq，且 publish 必须发生在
  *   removeSessionEntry（内部 bus.clearSession 清订阅者集合）之前，否则订阅 renderer 收不到。
  *
- * wave:perf-w09（D1-2）已收口：broadcast 双写腿已删——context.update / session.exited 只走
+ * wave:perf-w09（D1-2）已收尾：broadcast 双写路径已删——context.update / session.exited 只走
  * bus.publish（恰好一次），broker 只收 config.sessions（全局消息）。
  *
  * 运行：cd packages/runtime && npx vitest run src/__tests__/session-service-w07-bus.test.ts
@@ -49,7 +49,7 @@ function makeEnv() {
 
   let exitHandler: ((sessionId: string, code: number | null, stderr: string) => void) | null = null
   // W12：client 需供四实例播种 fetch（getState/getSessionStats）——usage 快照就位后
-  // context.update 挂钩才有值可发（percent 3.90625 → 投影 round = 4，与旧 resolver 重算同值）
+  // context.update 挂钩才有值可发（percent 3.90625 → 派生视图 round = 4，与旧 resolver 重算同值）
   const client = {
     getCommands: vi.fn(async () => []),
     getState: vi.fn(async () => ({
@@ -121,7 +121,7 @@ describe('SessionService × MessageBus（wave:perf-w07）', () => {
     const ctxMsg = findMsg(parseSent(online), 'context.update')
     expect(ctxMsg).toBeDefined()
     expect(typeof ctxMsg!.seq).toBe('number')
-    // payload = usage 实例快照投影（percent 3.90625 → round 4；与旧「事件值 + resolver 重算」
+    // payload = usage 实例快照派生视图（percent 3.90625 → round 4；与旧「事件值 + resolver 重算」
     // 的 round(5000 / 128000 * 100) = 4 同值——切换前后等价）
     expect(ctxMsg!.payload).toMatchObject({
       sessionId: 's-ctx',
@@ -137,7 +137,7 @@ describe('SessionService × MessageBus（wave:perf-w07）', () => {
     expect(ctxFromSnapshot!.payload).toMatchObject({ inputTokens: 5000, usagePercent: 4 })
     expect(findMsg(late.snapshot, 'context.update')).toBeUndefined()
 
-    // wave:perf-w09（D1-2）：broadcast 腿已删——context.update 不再进 broker 盲广播
+    // wave:perf-w09（D1-2）：broadcast 路径已删——context.update 不再进 broker 盲广播
     expect(findMsg(broadcasts, 'context.update')).toBeUndefined()
   })
 
@@ -158,7 +158,7 @@ describe('SessionService × MessageBus（wave:perf-w07）', () => {
     expect(exited!.payload).toMatchObject({ sessionId: 's-exit', code: 1 })
     expect((exited!.payload as { reason: string }).reason).toContain('boom stderr tail')
 
-    // wave:perf-w09（D1-2）：session.exited 的 broadcast 腿已删；config.sessions（全局）仍走 broker
+    // wave:perf-w09（D1-2）：session.exited 的 broadcast 路径已删；config.sessions（全局）仍走 broker
     expect(findMsg(broadcasts, 'session.exited')).toBeUndefined()
     expect(findMsg(broadcasts, 'config.sessions')).toBeDefined()
 

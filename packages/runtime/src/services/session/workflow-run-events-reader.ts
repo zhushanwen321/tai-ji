@@ -1,16 +1,16 @@
 /**
- * workflow record 读侧投影族（workflow-visualization U3，设计 §3.1-4 / §3.1-5）。
+ * workflow record 读侧派生视图族（workflow-visualization U3，设计 §3.1-4 / §3.1-5）。
  *
  * 两个拉取 RPC 的 record 文件读取面（SessionRecords 经注册条目 recordPath 锚点委托
- * 到达；本模块只管「给路径读内容」，路径发现归 SessionRecords 的投影源）：
+ * 到达；本模块只管「给路径读内容」，路径发现归 SessionRecords 的派生视图源）：
  * - readRunEvents：单 run 事件流原文行（WorkflowRunEventEntry 判别联合）。行解析
- *   复用 events-projection 的 parseWorkflowRunEventFileLine（与活体投影 tailer 同一
+ *   复用 events-projection 的 parseWorkflowRunEventFileLine（与活体派生视图 tailer 同一
  *   解析原语 + 同一坏行宽容语义——禁新写解析，任务书红线）；大字段 2KB 截断
  *   （shared WORKFLOW_RUN_EVENT_TRUNCATE_BYTES 单源常量，五字段白名单）+ 每行
  *   truncatedFields 标注。截断载荷仅供展示（D12 防误用边界：resume 的 $ARGS 恢复
  *   与 args 一致性校验在引擎侧读 record 原文全文字段，不经本通道）。record 文件超
  *   READ_PRECHECK_MAX_BYTES（32MB，D5 预检族）时降级——不全文读取（worker-log 行数
- *   无上界 + workflowUpdate 信号 force 重拉会放大读面），events 恒空 + oversize
+ *   无上界 + workflowUpdate 信号 force 重新拉取会放大读面），events 恒空 + oversize
  *   标志（session.workflows RT-4#8 同款「不可用 ≠ 无数据」分形；DAG 通道豁免该预检
  *   ——成功结果 LRU 缓存内每 run 至多读一次，无信号级重复压力，接受单次全量读）。
  * - readDag：record 首帧 run-created 的 scriptSource 原文（不截断——DAG 解析不经
@@ -94,7 +94,7 @@ const _dagFamilyBidirectionalLock: _DagFamilyBidirectionalLock = [
   true, true, true, true, true, true, true,
 ]
 
-/** record 文件读原语：全量读 + 逐行复用投影解析器（坏行宽容跳过计 warn——对齐活体 tailer 的 onSkippedLines 语义）。 */
+/** record 文件读原语：全量读 + 逐行复用派生视图解析器（坏行宽容跳过计 warn——对齐活体 tailer 的 onSkippedLines 语义）。 */
 function readWorkflowRecordFile(recordPath: string): WorkflowRunEvent[] {
   const content = readFileSync(recordPath, 'utf8')
   const events: WorkflowRunEvent[] = []
@@ -250,7 +250,7 @@ function projectWorkerLog(event: Extract<WorkflowRunEvent, { type: 'worker-log' 
  * worker-log.entry.message（键 entryMessage）五大字段按白名单截断并标注）。词表/
  * 字段形态跟随 core WorkflowRunEvent 联合与
  * shared WorkflowRunEventEntry u2 冻结契约（两端的覆盖编译锁守漂移）。
- * 本函数只做类型分派；每型字段形态自成一族投影函数，拆开各自演化。
+ * 本函数只做类型分派；每型字段形态自成一族映射函数，拆开各自演化。
  */
 function projectRunEventEntry(event: WorkflowRunEvent): WorkflowRunEventEntry {
   switch (event.type) {
@@ -290,7 +290,7 @@ function projectRunCreated(event: Extract<WorkflowRunEvent, { type: 'run-created
     runId: event.runId,
     workflowName: event.workflowName,
     // 读侧回退：早于 argsSummary 写侧字段的存量 run-created 行以 undefined 放行
-    // （parseWorkflowRunEventFileLine 守卫面不含该字段）——回退空串对齐 shared 必填
+    // （parseWorkflowRunEventFileLine 检查面不含该字段）——回退空串对齐 shared 必填
     // 契约，防 reply JSON 序列化丢键后 renderer 渲染字面 undefined。
     argsSummary: event.argsSummary ?? '',
     ...(args !== undefined ? { args } : {}),
@@ -362,7 +362,7 @@ function projectModelOverride(event: Extract<WorkflowRunEvent, { type: 'model-ov
 }
 
 /**
- * record 读侧投影服务（SessionRecords 单实例持有——DAG 成功缓存随服务实例生命周期、
+ * record 读侧派生视图服务（SessionRecords 单实例持有——DAG 成功缓存随服务实例生命周期、
  * LRU 上界 5，runId → WorkflowDag 仅缓存成功结果）。sessionId 经参数透传进 reply 两臂
  * （协议恒带——C-comm-05 会话隔离），会话定界本身归 SessionRecords 的路径发现。
  */
@@ -394,7 +394,7 @@ export class WorkflowRunEventsReader {
     }
   }
 
-  /** 路径白名单守卫（复用 isStrictlyUnder(getPiAgentDir()) 先例——recordPath 是 session JSONL 提取物，不可信）。 */
+  /** 路径白名单检查（复用 isStrictlyUnder(getPiAgentDir()) 先例——recordPath 是 session JSONL 提取物，不可信）。 */
   private isPathAllowed(recordPath: string): boolean {
     return isStrictlyUnder(getPiAgentDir(), recordPath)
   }

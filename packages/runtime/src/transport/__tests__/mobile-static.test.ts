@@ -1,6 +1,6 @@
 /**
  * mobile-static 单测（S3 拆分产物）：静态托管 module 的三个独立可测面——
- * 1. resolveMobileStaticRoot：挂载判定 + E5 探测（关态守卫「mobileDist 单独出现不
+ * 1. resolveMobileStaticRoot：挂载判定 + E5 探测（关态检查「mobileDist 单独出现不
  *    构成开态」自 ConnectionManager 迁入此处——开态判据是显式 remoteAccess 布尔，
  *    不再从 remoteTokenProvider 装配痕迹推断）；关态零探测副作用（无 statSync、无日志）。
  * 2. createMobileStaticHandler：裸 httpServer 挂 handler（无需 ConnectionManager
@@ -87,7 +87,7 @@ describe('mobile-static module (S3)', () => {
   // ── 开态判定 + E5 探测（挂载裁决迁入组合根判据的 module 半边）────────────────
 
   describe('resolveMobileStaticRoot（开态判定 + E5 探测）', () => {
-    it('关态守卫（自 ConnectionManager 迁入）：remoteAccess=false 时 mobileDist 单独出现不构成开态——null + 零日志 + 零探测 IO', () => {
+    it('关态检查（自 ConnectionManager 迁入）：remoteAccess=false 时 mobileDist 单独出现不构成开态——null + 零日志 + 零探测 IO', () => {
       const statSpy = vi.spyOn(fs, 'statSync')
       const errorSpy = spyConsole('error')
       const warnSpy = spyConsole('warn')

@@ -51,7 +51,7 @@ describe('fetchCurrentSystemPrompt（常驻扩展现取通道）', () => {
     await expect(svc.fetchCurrentSystemPrompt(SID)).rejects.toMatchObject({ code: 'session_busy' })
   })
 
-  it('成功路径：发命令 → 轮询 since 命中 custom entry → 返回值 + 基线滚动 + 台账增量广播', async () => {
+  it('成功路径：发命令 → 轮询 since 命中 custom entry → 返回值 + 基线滚动 + journal 增量广播', async () => {
     const { svc, client, publishSpy, promptCalls, sinceBaselineRef } = makeSessionServiceEnv({ active: true, sid: SID })
     const result = await svc.fetchCurrentSystemPrompt(SID)
     // 命令发出（双下划线内部命令，不经 LLM）
@@ -65,7 +65,7 @@ describe('fetchCurrentSystemPrompt（常驻扩展现取通道）', () => {
       charCount: 11,
       fetchedAt: '2026-08-20T10:00:00.000Z',
     })
-    // 台账增量：traceEntryAppended 广播（含 sessionId，规则 7）带现取 entry
+    // journal 增量：traceEntryAppended 广播（含 sessionId，规则 7）带现取 entry
     const push = publishSpy.mock.calls.find(([, m]) => (m as ServerMessage).type === 'session.traceEntryAppended')
     expect(push).toBeDefined()
     const payload = (push?.[1] as { payload: { sessionId: string; entries: unknown[]; leafId: string | null } }).payload

@@ -25,7 +25,7 @@ export interface ViewService {
    * 视图更新处理（校验 + 下行广播 plugin:viewUpdate）。
    * [plugin-header-action-modal-points D1/u5b] payload.sessionId 显式必填——归属投递按
    * 调用方声明的会话（modal 内容绑打开时所在会话）；旧「ActiveSessionResolver 盖戳猜测
-   * 第一个活跃会话」路径已删除（D1 被否④：空闲会话常态下推送被丢弃/落错分区）。
+   * 第一个活跃会话」路径已删除（D1 不采用④：空闲会话常态下推送被丢弃/落错分区）。
    */
   handleViewUpdate: (pluginId: string, viewId: string, guiTree: GuiComponent[], sessionId: string) => void
 }
@@ -48,7 +48,7 @@ export function registerViewRpcHandlers(
     const pluginId = asString(params.pluginId, 'pluginId')
     const viewId = asSafeKey(params.viewId, 'viewId')
     // [D1/u5b] sessionId 显式必填（E15）：缺/非法 → INVALID_SESSION_ID 拒绝，不走
-    // ActiveSessionResolver 盖戳猜测（被否④），按 payload.sessionId 定向投递 publish。
+    // ActiveSessionResolver 盖戳猜测（不采用④），按 payload.sessionId 定向投递 publish。
     const sessionId = asSafeKey(params.sessionId, 'sessionId')
     const guiTree = params.guiTree
     if (!Array.isArray(guiTree)) {

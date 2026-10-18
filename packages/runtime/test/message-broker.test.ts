@@ -228,13 +228,13 @@ describe('ServerMessageBroker broadcast 哨兵豁免清单（AP-2）', () => {
 })
 
 /**
- * RT-1#8：send() 的 stringify 守卫（照 reply :168-174 形态）。
+ * RT-1#8：send() 的 stringify 检查（照 reply :168-174 形态）。
  *
  * send 是 sendError 的最后手段路径（sendError → this.send(error envelope)）——
- * 序列化失败若直抛，异常沿调用方冒泡且 error envelope 无从发出。守卫收口为
+ * 序列化失败若直抛，异常沿调用方冒泡且 error envelope 无从发出。检查收敛为
  * error envelope：新 envelope 是受控构造的纯字符串 payload，序列化不再失败（结构上不递归）。
  */
-describe('ServerMessageBroker RT-1#8 (send stringify 守卫)', () => {
+describe('ServerMessageBroker RT-1#8 (send stringify 检查)', () => {
   it('循环引用 payload → send 不抛，改发 error envelope（code=send_serialization_failed）', async () => {
     const { ServerMessageBroker } = await import('../src/transport/message-broker.js')
     const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {})
@@ -258,14 +258,14 @@ describe('ServerMessageBroker RT-1#8 (send stringify 守卫)', () => {
       }
       expect(sent.type).toBe('error')
       expect(sent.payload.code).toBe('send_serialization_failed')
-      // 守卫留痕
+      // 检查留痕
       expect(errorSpy).toHaveBeenCalledWith(expect.stringContaining('send serialization failed'), expect.any(TypeError))
     } finally {
       errorSpy.mockRestore()
     }
   })
 
-  it('正常 payload → send 原样序列化发送（守卫零行为变化）', async () => {
+  it('正常 payload → send 原样序列化发送（检查零行为变化）', async () => {
     const { ServerMessageBroker } = await import('../src/transport/message-broker.js')
     const ws = makeMockWs()
     const pool: ClientPool = { clients: new Set([ws]) }

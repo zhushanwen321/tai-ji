@@ -48,11 +48,11 @@ export class SessionScanner {
       .map(s => this.scannedToSummary(s))
 
     const result = [...active, ...persisted]
-      // 隐藏 session（公共 session）不进 sidebar 列表。**两腿的 hidden 语义不同（防误信）**：
-      // active 腿（内存 Map）的 hidden 标记在 IManagedSessionView，本过滤真实生效；
-      // persisted 腿（磁盘扫描）**无 hidden 字段**（ScannedSessionMeta/ScannedSession 均未承载，
-      // 不经 toSummary 透传）——其条目恒过本过滤，本过滤**不是**磁盘腿的隐藏防线。
-      // 磁盘腿的隐藏靠目录隔离构造性成立（如 btw 线落 btw/ 根，不在 sessions/ 扫描面）。
+      // 隐藏 session（公共 session）不进 sidebar 列表。**两路径的 hidden 语义不同（防误信）**：
+      // active 路径（内存 Map）的 hidden 标记在 IManagedSessionView，本过滤真实生效；
+      // persisted 路径（磁盘扫描）**无 hidden 字段**（ScannedSessionMeta/ScannedSession 均未承载，
+      // 不经 toSummary 透传）——其条目恒过本过滤，本过滤**不是**磁盘路径的隐藏防线。
+      // 磁盘路径的隐藏靠目录隔离构造性成立（如 btw 线落 btw/ 根，不在 sessions/ 扫描面）。
       .filter(s => !s.hidden)
       .sort((a, b) => b.lastActiveAt - a.lastActiveAt)
     this.pruneGitCache(result)
@@ -87,8 +87,8 @@ export class SessionScanner {
       status: (outcome ?? 'idle') as SessionStatus,
       lastActiveAt: s.lastModified,
       // modelId 来自 scanSessionMeta 第七读的反向读 JSONL 真源（scan 占位语义）。
-      // source:'scan' 标记让合并侧（core mergeViewSnapshot 守卫）能按来源分流——扫描占位
-      // 空值不覆盖实例/广播真值（#2 空串覆盖事故防线）；owner 快照的显式空值不受此守卫。
+      // source:'scan' 标记让合并侧（core mergeViewSnapshot 检查）能按来源分流——扫描占位
+      // 空值不覆盖实例/广播真值（#2 空串覆盖事故防线）；owner 快照的显式空值不受此检查。
       modelId: s.modelId ?? '',
       tokenCount: 0,
       source: 'scan',

@@ -6,12 +6,12 @@
  * - 变体 1「内核有在途共存」：自有条目在槽位滞留 + 外来文本同轮被收回 → 自有优先回队首
  *   重投、外来收养排其后（相对序保持），均无重复投递。
  * - 变体 2「纯外来滞留」：内核无在途、pi 槽位有外来文本（「空闲 + 槽位非空」两条件的
- *   纯外来形态）→ 收养以新 id 正常投递（不丢弃、不原样回塞——D3 被否项①②形态排除）。
+ *   纯外来形态）→ 收养以新 id 正常投递（不丢弃、不原样回塞——D3 不采用项①②形态排除）。
  *
  * 材料：真实 createDelivery 内核 + 真实 registry + mock pi client（clear_queue / get_entries /
  * prompt 替身）。
  *
- * 分工边界：单腿收养断言（投递 1 次 + 标记 1 个 + lane）由 registry 单测
+ * 分工边界：单路径收养断言（投递 1 次 + 标记 1 个 + lane）由 registry 单测
  * session-delivery-registry.test.ts 的 adopt 用例承担；本文件变体 2 的独有面 =
  * 「空闲 + 槽位非空」occupancy 前置 + 重复对账（watchdog 触发点）幂等零新增。
  * e2e 层暂无收养回归（completion-backflow-e2e 只覆盖完成回流链，不覆盖 adopt）——待补。

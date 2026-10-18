@@ -56,7 +56,7 @@ export interface ImportServiceDeps {
   /**
    * source 注册表（组合根装配，设计 §3.3/G2）：key = ImportSourceKind，第三源接入 =
    * 表加一项 + 新实现模块，编排层与 RPC 契约零改动。本表缺项 = runtime 与 renderer
-   * 版本不匹配（类型闭合联合 + 组合根全注册下不可达，仅 WS JSON 注入未知字面量可达）。
+   * 版本不匹配（类型封闭联合 + 组合根全注册下不可达，仅 WS JSON 注入未知字面量可达）。
    */
   sources: ReadonlyMap<ImportSourceKind, SessionImportSource>
 }

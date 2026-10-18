@@ -1,14 +1,14 @@
 /**
- * 孤儿收殓 → 崩溃台账 reaped 事件接线测试（crash-forensics-and-watchdog §3.3 D1
+ * 孤儿收殓 → 崩溃 journal reaped 事件接线测试（crash-forensics-and-watchdog §3.3 D1
  * reaped 行，实施单元 u1d2）。
  *
  * 锁定（验收条款逐条对照）：
- * - ① 判据命中处置成功 → 台账 reaped 事件：layer=pi、结构化 pid/ppid、detailDigest
+ * - ① 判据命中处置成功 → journal reaped 事件：layer=pi、结构化 pid/ppid、detailDigest
  *   内嵌 argv 判据摘要（v2 marker 判据：argv 匹配 spawn 清单 + ppid=1 + argv 头部）。
  * - ④ 防误记：判据未命中（ppid≠1 / marker 清单外值）零事件；处置失败（SIGKILL
  *   非 ESRCH 错误）不记 reaped。
  *
- * 台账走真实 writer（initCrashJournal → mkdtemp tmp 目录 → closeCrashJournal 确定性
+ * journal 走真实 writer（initCrashJournal → mkdtemp tmp 目录 → closeCrashJournal 确定性
  * flush 后逐行 JSON.parse），顺带锁住「writer spread 序列化保留 schema 外扩展字段
  * （pid/ppid）」的行为——mock 断言不到落盘形态。收殓依赖全部 fake 注入（零真实
  * ps/信号/延时），写删目标全部 mkdtemp 自建自删（fs-guard 合规）。
@@ -61,7 +61,7 @@ function psStdout(rows: PsRow[]): string {
   return rows.map(r => `  ${r.pid}   ${r.ppid} ${r.command}`).join('\n') + '\n'
 }
 
-/** SIGKILL no-op 注入（台账测试不真发信号；ESRCH 形态见各用例 override）。 */
+/** SIGKILL no-op 注入（journal 测试不真发信号；ESRCH 形态见各用例 override）。 */
 function noopSignal(): ReapOrphanOptions['signal'] {
   return () => {}
 }
@@ -77,7 +77,7 @@ function makeOptions(rows: PsRow[], overrides?: Partial<ReapOrphanOptions>): Rea
   }
 }
 
-/** 读台账活跃档全部行（不存在 = 零事件）。 */
+/** 读 journal 活跃档全部行（不存在 = 零事件）。 */
 function readJournalRecords(): Array<Record<string, unknown>> {
   const p = join(dataDir, 'logs', 'crashes', 'runtime.jsonl')
   if (!existsSync(p)) return []
@@ -87,7 +87,7 @@ function readJournalRecords(): Array<Record<string, unknown>> {
     .map(l => JSON.parse(l) as Record<string, unknown>)
 }
 
-describe('reap-orphan-pi → 崩溃台账 reaped 事件（D1 矩阵 reaped 行）', () => {
+describe('reap-orphan-pi → 崩溃 journal reaped 事件（D1 矩阵 reaped 行）', () => {
   it('① 判据命中且处置成功：一条 reaped 事件，含 pid/ppid 与 argv 判据摘要', async () => {
     initCrashJournal(dataDir)
     const result = await reapOrphanPiProcesses(makeOptions([
@@ -112,7 +112,7 @@ describe('reap-orphan-pi → 崩溃台账 reaped 事件（D1 矩阵 reaped 行�
     expect(digest).toContain('--mode rpc')
   })
 
-  it('④ 防误记：判据未命中（ppid=并存实例 pid / marker 清单外值）→ 零台账事件', async () => {
+  it('④ 防误记：判据未命中（ppid=并存实例 pid / marker 清单外值）→ 零 journal 事件', async () => {
     initCrashJournal(dataDir)
     const result = await reapOrphanPiProcesses(makeOptions([
       row(601, 40842, piCmd()), // 另一合法实例的活跃 pi（ppid=对方 runtime）
@@ -139,7 +139,7 @@ describe('reap-orphan-pi → 崩溃台账 reaped 事件（D1 矩阵 reaped 行�
     expect(records[0]!.pid).toBe(702)
   })
 
-  it('④ 处置失败（SIGKILL 抛非 ESRCH）→ 进 failed，台账记 reap-failed（不记 reaped）', async () => {
+  it('④ 处置失败（SIGKILL 抛非 ESRCH）→ 进 failed，journal 记 reap-failed（不记 reaped）', async () => {
     initCrashJournal(dataDir)
     const boom = new Error('operation not permitted')
     const result = await reapOrphanPiProcesses(makeOptions(

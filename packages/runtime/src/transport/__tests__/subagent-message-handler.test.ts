@@ -7,7 +7,7 @@
  * - 错误分型经 sendError：gateway 分型错误（e.code）透传 + **sessionId 必带**
  *   （gateway.resolveSessionId 解析——subagent.setModel payload 无 sessionId 字段，
  *   会话隔离红线由本用例钉住）；
- * - 目标二选一守卫（双缺 / 双给 → invalid_payload）；
+ * - 目标二选一检查（双缺 / 双给 → invalid_payload）；
  * - gateway 未注入 → subagent_model_switch_unwired 可操作错误（不落 unknown_type）。
  *
  * 测试框架：vitest（从子包目录运行）。
@@ -228,9 +228,9 @@ describe('SubagentMessageHandler — 错误分型与 sessionId 信封', () => {
   })
 })
 
-// ── 守卫与未接线形态 ─────────────────────────────────────────
+// ── 检查与未接线形态 ─────────────────────────────────────────
 
-describe('SubagentMessageHandler — 目标守卫与未接线', () => {
+describe('SubagentMessageHandler — 目标检查与未接线', () => {
   it('recordId 与 runId 双缺：invalid_payload，不触达 gateway', async () => {
     const gateway = mockGateway()
     const { ctx, sendError } = mockCtx(gateway)

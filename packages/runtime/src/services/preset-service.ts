@@ -126,7 +126,7 @@ function validatePresetPromptSegment(
  * 入参为 unknown（而非 PiLaunchPreset）：导入路在 coercePreset 之前先跑本函数（顺序不可颠倒），
  * 此时条目还是文件来的 raw 值。非对象入参直接放行（条目级形状由 coercePreset 负责）。
  *
- * 抛 PresetGuardError（既有守卫家族）→ preset-message-handler 的 catch 转成 `preset_guard_error`
+ * 抛 PresetGuardError（既有检查家族）→ preset-message-handler 的 catch 转成 `preset_guard_error`
  * envelope 回 renderer，handler 无需改动。
  */
 export function validatePresetPrompt(preset: unknown): void {
@@ -192,7 +192,7 @@ export interface PresetResolution {
    * 由 `resolveLaunchPresetOptions`（launch-params.ts）在 fallback 分支附加——**不是**
    * `PresetService.resolve()` 的产物（resolve 只认已到手的 preset 定义）。
    *
-   * 两个消费面口径不同，勿混：
+   * 两个消费方口径不同，勿混：
    * - **UI 披露位**（`SessionSummary.launchPresetFallbackTo`）仅 restore 置位；create/fork
    *   不置位（回落照常发生但 UI 不披露）。
    * - **trace env 三路同注**：create/restore/fork 均经 `buildPresetFallbackEnv` 出站，
@@ -299,13 +299,13 @@ export class PresetService {
     }
     this.corruptedState = undefined
     const obj = read.obj
-    // 逐项类型守卫：只接受形似 PiLaunchPreset 的对象，丢弃畸形项（防御性，不抛错）。
+    // 逐项类型检查：只接受形似 PiLaunchPreset 的对象，丢弃畸形项（防御性，不抛错）。
     // W-RT-1：coercePreset 经 shared isPiLaunchPreset 做 toolMode/extensionMode 枚举白名单校验。
     const presets = coercePresetsArray(
       Array.isArray(obj['presets']) ? obj['presets'] as unknown[] : [],
     )
     // usage 逐条目 coerce（FR-14 持久化字段读路折叠，与 coercePresetsArray 同策略：
-    // 坏条目丢弃 + warn，不丢整个容器、不抛错；形状守卫后即类型化值，无裸断言）
+    // 坏条目丢弃 + warn，不丢整个容器、不抛错；形状检查后即类型化值，无裸断言）
     const usage = coerceUsage(obj['usage'])
     const defaultPresetId = typeof obj['defaultPresetId'] === 'string' ? obj['defaultPresetId'] as string : undefined
     const file: PiPresetsFile = {
@@ -329,7 +329,7 @@ export class PresetService {
   }
 
   /**
-   * 降级态守卫（M4/RT-7#2）：pi-presets.json 损坏隔离后拒绝一切写入语义。
+   * 降级态检查（M4/RT-7#2）：pi-presets.json 损坏隔离后拒绝一切写入语义。
    * savePresetsFile 入口统一拦截实际落盘；deletePreset 另在方法入口拦截（骨架视图里
    * 「预设不存在 → no-op 成功」是对降级态的谎言——被删项可能就在 .corrupt 副本里）。
    */
@@ -456,7 +456,7 @@ export class PresetService {
    *   - 强制 builtin:false（防止用户传 builtin:true 伪造内置预设）
    */
   savePreset(preset: PiLaunchPreset): void {
-    // 唯一写点入口守卫：模式提示词整条拒绝（形状 / 段限 / 合计限），抛 PresetGuardError。
+    // 唯一写点入口检查：模式提示词整条拒绝（形状 / 段限 / 合计限），抛 PresetGuardError。
     // 放在 builtin 字段保护之前：非法提示词不应因后续保护逻辑改写而混过（且避免无谓读盘）。
     validatePresetPrompt(preset)
     const file = this.loadPresetsFile()
@@ -500,7 +500,7 @@ export class PresetService {
     if (DEFAULT_PRESETS.some(p => p.id === presetId)) {
       throw new PresetGuardError(`cannot delete builtin preset '${presetId}'`)
     }
-    // 降级态守卫在方法入口而非 savePresetsFile：骨架视图里「条目不存在 → no-op 成功」
+    // 降级态检查在方法入口而非 savePresetsFile：骨架视图里「条目不存在 → no-op 成功」
     // 是对降级态的谎言（被删项可能就在 .corrupt 副本里），必须拒绝（M4/RT-7#2）
     this.assertNotCorrupted()
     const file = this.loadPresetsFile()
@@ -748,7 +748,7 @@ function coercePresetsArray(presets: unknown[]): PiLaunchPreset[] {
   return validPresets
 }
 
-/** PresetUsageEntry 形状守卫（FR-14 契约面）：count / lastUsed 均须有限数值。 */
+/** PresetUsageEntry 形状检查（FR-14 契约面）：count / lastUsed 均须有限数值。 */
 function isPresetUsageEntry(value: unknown): value is PresetUsageEntry {
   if (typeof value !== 'object' || value === null || Array.isArray(value)) return false
   const entry = value as Record<string, unknown>
@@ -909,7 +909,7 @@ function coercePresetStringArrayFields(preset: PiLaunchPreset, issues: string[])
  * 不通过返回 undefined（loadPresetsFile 会丢弃）。
  *
  * 必填契约（id/name/builtin/order + toolMode/extensionMode 枚举白名单）由 shared
- * isPiLaunchPreset 单点守卫（W-RT-1 收编：本文件旧 VALID_TOOL_MODES /
+ * isPiLaunchPreset 单点检查（W-RT-1 收编：本文件旧 VALID_TOOL_MODES /
  * VALID_EXTENSION_MODES 双轨白名单已删，白名单 SSOT = shared pi-preset.ts）。
  * 脏数据（如导入文件里 toolMode: "DROP TABLE"）不在白名单 → 返回 undefined，preset
  * 被丢弃，避免 resolveToolArgs/resolveExtensionPaths 的 switch 落空。
@@ -920,7 +920,7 @@ function coercePresetStringArrayFields(preset: PiLaunchPreset, issues: string[])
  */
 function coercePreset(raw: unknown): PiLaunchPreset | undefined {
   if (!isPiLaunchPreset(raw)) return undefined
-  // 守卫已把 raw narrow 到 PiLaunchPreset，直接浅拷贝（无需双重断言）。
+  // 检查已把 raw narrow 到 PiLaunchPreset，直接浅拷贝（无需双重断言）。
   // 可选字段此刻未经校验（isPiLaunchPreset 只保证必填契约），下方逐项折叠。
   const preset: PiLaunchPreset = { ...raw }
   const issues: string[] = []

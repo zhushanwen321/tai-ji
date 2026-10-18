@@ -268,7 +268,7 @@ describe('spawn 清单读取与 fail-safe 降级（V10④：宁漏不误杀）',
     }
   })
 
-  it('清单非字符串数组（JSON 对象）→ 跳过收殓 + warn 日志（格式守卫，防类型混淆误判）', async () => {
+  it('清单非字符串数组（JSON 对象）→ 跳过收殓 + warn 日志（格式检查，防类型混淆误判）', async () => {
     const dataDir = makeMarkersDataDir()
     try {
       mkdirSync(join(dataDir, 'run'), { recursive: true })

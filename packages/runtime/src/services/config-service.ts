@@ -132,7 +132,7 @@ export class ConfigService implements IConfigService {
     private configStore: IConfigStore,
     /**
      * auth.json 存储读取/清理能力（OAuth 路径 B）。
-     * 不含 'set'——写入唯一经 credentialWriter（A1-4 收口）：
+     * 不含 'set'——写入唯一经 credentialWriter（A1-4 收尾）：
      * I9 清理①：setProvider 保存 apiKey 时清 auth.json oauth 凭据（both provider 切换凭据源）；
      * I8：deleteProvider 时同步清 auth.json（防 OAuth token 永久残留）。
      * 可选注入：未注入时两处清理 no-op（测试/无 OAuth 场景）。
@@ -156,11 +156,11 @@ export class ConfigService implements IConfigService {
      */
     private llmRetrySettings?: ILlmRetrySettings,
     /**
-     * Provider 凭据解析唯一通道（D3 收口，链 5 消费点）：listProviders 的凭据判定经其批量
+     * Provider 凭据解析唯一通道（D3 收尾，链 5 消费点）：listProviders 的凭据判定经其批量
      * sync 版单次取（auth.json ∪ models.json）。M2fg 删降级后无回退——生产恒注入；参数保持
      * 可选只为不强迫与 provider 无关的测试构造点（terminal-config / streaming-idle 等 46 处）
      * 注入替身，listProviders / toggleProviderEnabled / removeProviderByKind 消费点经
-     * resolver() 访问器显式守卫锁定恒注入前提（少参构造 + 调这三法 = 带恢复指引的 Error，
+     * resolver() 访问器显式检查锁定恒注入前提（少参构造 + 调这三法 = 带恢复指引的 Error，
      * 属测试构造错误；不用 `!` 断言——那会把 undefined 静默传进必参，深处 TypeError 才暴露）。
      */
     private providerCredentialResolver?: IProviderCredentialResolver,
@@ -181,7 +181,7 @@ export class ConfigService implements IConfigService {
   ) {}
 
   /**
-   * auth.json 凭据写通道（A1-4 收口）：setProvider 的 catalog apiKey 写入与
+   * auth.json 凭据写通道（A1-4 收尾）：setProvider 的 catalog apiKey 写入与
    * applyImportProviders 的凭据导入经此（AuthService.saveCredential），不再直接
    * 持有 authStorage.set。setter 注入：AuthService 依赖 configService
    * （listBuiltinProviders 取 oauthConfig），组合根在 AuthService 构造后回填——
@@ -207,7 +207,7 @@ export class ConfigService implements IConfigService {
   // ── Provider CRUD（委托 provider-config-helper）─────────────────
 
   /**
-   * resolver 显式守卫访问器：可选构造参数 + 消费点统一断言。与 provider 无关的构造点
+   * resolver 显式检查访问器：可选构造参数 + 消费点统一断言。与 provider 无关的构造点
    * （skill-registry 局部实例只调 loadSkills 等）不经此路径不受影响；调到 provider 三方法
    * 而未注入 = 构造错误，报错指向恢复动作（注入 resolver / 改用 provider 无关实例），
    * 不做 `!` 断言把 undefined 静默传进必参。
@@ -230,7 +230,7 @@ export class ConfigService implements IConfigService {
   }
 
   listProviders(): ProviderInfo[] {
-    // 显式守卫 = 恒注入前提（组合根 index.ts 装配序测试锁定；M2fg 删降级后无回退）
+    // 显式检查 = 恒注入前提（组合根 index.ts 装配序测试锁定；M2fg 删降级后无回退）
     return listProvidersImpl(this.configStore, this.authStorage, this.providerExtrasStore, this.resolver())
   }
 
@@ -438,7 +438,7 @@ export class ConfigService implements IConfigService {
   // ── Scoped Models（委托 provider-extras-store）──
 
   /**
-   * 显式守卫 = 恒注入前提（组合根 index.ts 恒注入；构造参数非后置回填，无窗口期）。
+   * 显式检查 = 恒注入前提（组合根 index.ts 恒注入；构造参数非后置回填，无窗口期）。
    * 三个消费点（model-service / provider-message-handler / message-broker）全经组合根
    * 实例；与 provider 无关的局部实例（skill-registry）不触此法。静默返回 [] 会把
    * 「装配错误」伪装成「白名单为空」的合法状态广播出去，与 write 侧 modifyScopedModels

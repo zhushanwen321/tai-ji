@@ -1,14 +1,14 @@
 /**
  * SessionEntryRemovalOrchestrator — session 销毁收敛链编排（「唯一完成入口」的编排段）。
  *
- * ★★★ removeSessionEntry 顺序约束 SSOT 在此（r2-23 收敛文档收口，T8 有限拆分 2026-09）★★★
+ * ★★★ removeSessionEntry 顺序约束 SSOT 在此（r2-23 收敛文档收尾，T8 有限拆分 2026-09）★★★
  *
  * 全 runtime 全部 session 删除路径的「完成」语义都汇聚于 SessionService.removeSessionEntry
  * → 本编排器，四路覆盖：① lifecycle.delete 主动删；② onSessionExit pi 进程异常退出；
  * ③ dispatcher.forceQuit 用户强杀；④ restoreSession 清场（clearExistingSessionForRestore）。
  * 「销毁完成」的步骤序列即约束本体，体内顺序是行为等价的一部分（勿调换）：
  *
- *   1. crash journal `deleted` 台账行（D1：唯一挂点，不能挂 onSessionExit 链——主动删
+ *   1. crash journal `deleted` 登记行（D1：唯一挂点，不能挂 onSessionExit 链——主动删
  *      先删进程表，exit handler 反查无条目静默返回，挂错点事件永不产生）
  *   2. checkpoint 摘条目（D3 detach；destroyAll/shutdown 刻意不经本链，checkpoint 原样
  *      保留 = 下次 unclean 启动的恢复依据）
@@ -42,7 +42,7 @@
  * reaper 为模块单例，直接 import（测试 vi.mock 按模块路径拦截，与消费方所在文件无关）。
  */
 import type { SessionSummary } from '@taiji/shared'
-// D1 台账（crash-forensics §3.3 D1）：deleted 事件唯一挂点 = 本链第 1 步。
+// D1 journal 登记（crash-forensics §3.3 D1）：deleted 事件唯一挂点 = 本链第 1 步。
 import { getCrashJournal } from '../../infra/crash-journal.js'
 import { toErrorMessage } from '../../utils/errors.js'
 // D3 checkpoint（crash-forensics §3.3 D3，u4）：detach 挂点 = 本链第 2 步。
@@ -65,7 +65,7 @@ export interface SessionEntryRemovalDeps {
   getSession: (sessionId: string) => IManagedSessionView | undefined
   /** 销毁 9 步第 ② 步：Map 条目删除（所有者执行，纯删除不发事件）。 */
   removeEntry: (sessionId: string) => void
-  /** summary 投影（Facade 共享 helper，销毁通知富化用）。 */
+  /** summary 派生（Facade 共享 helper，销毁通知富化用）。 */
   toSummary: (session: IManagedSessionView) => SessionSummary
   /** u8：取消 pending 自动恢复 timer（只清 timer 不清熔断计数，理由见 pi-respawn.cancel）。 */
   cancelRespawn: (sessionId: string) => void
@@ -79,7 +79,7 @@ export interface SessionEntryRemovalDeps {
   unwatchBackgroundTasks: (sessionId: string) => void
   /** wave:perf-w20：历史重建缓存 + lastLeafId 清理（historyReader.onSessionDisposed）。 */
   disposeHistoryReader: (sessionId: string) => void
-  /** session-trace（A33）：trace 增量腿基线与串行链清理。 */
+  /** session-trace（A33）：trace 增量路径基线与串行链清理。 */
   disposeTraceSync: (sessionId: string) => void
   /** W7/W8/W12：per-session 实例组销毁 + state_changed diff 基线清理。 */
   disposeProjection: (sessionId: string) => void
@@ -89,14 +89,14 @@ export interface SessionEntryRemovalDeps {
   clearMessageBusSession: (sessionId: string) => void
 }
 
-/** 台账 detailDigest 上限（设计 D1 防漏设计①：内嵌摘要 ≤2KB，与 pi-respawn 同口径）。 */
+/** journal 登记 detailDigest 上限（设计 D1 防漏设计①：内嵌摘要 ≤2KB，与 pi-respawn 同口径）。 */
 const CRASH_DIGEST_MAX_CHARS = 2048
 
 /**
  * 销毁收敛单步异常隔离（code-harden RT-4#1）：销毁链任一步抛错不得打断后续步骤——
  * 销毁已完成的事实不变，其余旁路设施摘除 / 扇出 / 清理必须继续收敛（终态必达）。
- * 失败逐步落 console.error + crash 台账（reason=destroy-chain-step-failed）供事后归因。
- * 台账 append 自身 fire-and-forget（writer 契约不抛，crash-journal.ts），无需二次防护。
+ * 失败逐步落 console.error + crash journal 登记（reason=destroy-chain-step-failed）供事后归因。
+ * journal 登记 append 自身 fire-and-forget（writer 契约不抛，crash-journal.ts），无需二次防护。
  * 模块级函数形态：removeSessionEntry 编排链与 SessionService.onSessionExit 收敛链共用
  * 同一隔离范式（两链是同一「销毁收敛」语义的两个入口，不各留一份实现）。
  */
@@ -121,19 +121,19 @@ export class SessionEntryRemovalOrchestrator {
   /**
    * 销毁收敛链本体：四路删除路径的唯一完成入口（覆盖面与顺序约束见文件头 SSOT 段）。
    * 步骤序列 = 迁移前 SessionService.removeSessionEntry 体内顺序逐字保持。
-   * 每步经 runDestroyStepIsolated 隔离（code-harden RT-4#1）：单步故障降级为日志 + 台账行，
+   * 每步经 runDestroyStepIsolated 隔离（code-harden RT-4#1）：单步故障降级为日志 + journal 登记行，
    * 不再让 toSummary / dispose 扇出等任一步的异常打断收敛或上抛成 uncaughtException。
    */
   remove(sessionId: string): void {
-    // ── 第 1-4 步：「该 session 已不存在」的旁路设施摘除（台账/checkpoint/mirror/收敛环）──
-    // D1 台账（crash-forensics §3.3 D1 写入点矩阵 deleted 行）：deleted 事件唯一挂点 = 本
-    // 汇聚链（lifecycle.delete 主动删与 onSessionExit 异常退收殓的公共收口，注释自述即此
+    // ── 第 1-4 步：「该 session 已不存在」的旁路设施摘除（journal 登记/checkpoint/mirror/收敛环）──
+    // D1 journal 登记（crash-forensics §3.3 D1 写入点矩阵 deleted 行）：deleted 事件唯一挂点 = 本
+    // 汇聚链（lifecycle.delete 主动删与 onSessionExit 异常退收殓的公共收尾，注释自述即此
     // 语义）。不能挂 onSessionExit 链：用户主动删走 destroySession 先删进程表 → exit handler
     // 反查无条目静默返回，不经该链，挂错点事件永不产生（抑制语义，设计 D1 deleted 行）。
     runDestroyStepIsolated('crash-journal.deleted', sessionId, () => {
       getCrashJournal().append({ layer: 'pi', event: 'deleted', sessionId })
     })
-    // D3 checkpoint（u4）detach 挂点（紧接上条台账行）：本汇聚链是「该 session 已不存在」
+    // D3 checkpoint（u4）detach 挂点（紧接上条登记行）：本汇聚链是「该 session 已不存在」
     // 的精确时点（主动删 / 进程退出 / forceQuit / restore 清场全覆盖），从活跃清单摘除
     // 条目。pi 意外崩死也走本点（先摘后 respawn 成功再经 onSessionRegistered 重新加入，
     // 5s 窗口内 runtime 自身再崩则该 session 不在 checkpoint——设计 D3「respawn pending
@@ -215,7 +215,7 @@ export class SessionEntryRemovalOrchestrator {
     })
     // background-task-sidebar D8③（u-runtime-rpc③）：watched 集合退订——session 销毁后
     // 该 sid 的 registry 不再参与 mtime 轮询/变更检测。与 reapSessionBackgroundTasks 同挂
-    // 本汇聚链（主动删 / 进程退出 / forceQuit / restore 清场全覆盖，D8④ runtime 侧腿）。
+    // 本汇聚链（主动删 / 进程退出 / forceQuit / restore 清场全覆盖，D8④ runtime 侧路径）。
     runDestroyStepIsolated('backgroundTasks.unwatch', sessionId, () => {
       this.deps.unwatchBackgroundTasks(sessionId)
     })
@@ -230,7 +230,7 @@ export class SessionEntryRemovalOrchestrator {
     runDestroyStepIsolated('historyReader.onSessionDisposed', sessionId, () => {
       this.deps.disposeHistoryReader(sessionId)
     })
-    // session-trace（A33）：同汇聚点清 trace 增量腿基线与串行链（与 historyCache 同因——
+    // session-trace（A33）：同汇聚点清 trace 增量路径基线与串行链（与 historyCache 同因——
     // 基线跨进程存活无意义；链已 settled，删 Map 条目只释放槽位）。S4：清理随域迁入
     // TraceSync（各域 onSessionDisposed 直调形态）。
     runDestroyStepIsolated('traceSync.onSessionDisposed', sessionId, () => {
@@ -243,7 +243,7 @@ export class SessionEntryRemovalOrchestrator {
       this.deps.disposeProjection(sessionId)
     })
     // W18：销毁 record entry 派生缓存（同汇聚点）。停防抖定时器（在途 inflight 的拉取
-    // 完成后 applyRecordEntries 的 hasSession 守卫拦住发布，不复活已清 bus 条目）。S6 起
+    // 完成后 applyRecordEntries 的 hasSession 检查拦住发布，不复活已清 bus 条目）。S6 起
     // 清理随域迁入 records（onSessionDisposed 直调形态，traceSync/projection 同款）。
     runDestroyStepIsolated('records.onSessionDisposed', sessionId, () => {
       this.deps.disposeRecords(sessionId)

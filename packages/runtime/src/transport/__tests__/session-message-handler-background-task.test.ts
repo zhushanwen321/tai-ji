@@ -4,7 +4,7 @@
  *
  * 覆盖：
  * - handles 认领 backgroundTask.list / output / kill
- * - list：reply backgroundTask.tasks 形状（sessionId 必带 + tasks 全量投影，D3）；
+ * - list：reply backgroundTask.tasks 形状（sessionId 必带 + tasks 全量派生视图，D3）；
  *   副作用 = 加入 watched 集合（D8③ 订阅语义由 list 隐含：list 后 registry 变更触发
  *   onTasksChanged 变更检测回调）
  * - output：正常 tail 形状（text/truncated/lost:false，D7）+ 输出文件缺失 lost 降级
@@ -152,7 +152,7 @@ describe('SessionMessageHandler backgroundTask 端口缺省', () => {
 // ── backgroundTask.list ─────────────────────────────────────────
 
 describe('SessionMessageHandler backgroundTask.list', () => {
-  it('reply backgroundTask.tasks 形状：sessionId 必带 + registry 全量投影 + corrupted:false 正常拍；markWatched 基线不广播', async () => {
+  it('reply backgroundTask.tasks 形状：sessionId 必带 + registry 全量派生视图 + corrupted:false 正常拍；markWatched 基线不广播', async () => {
     writeRegistry([makeEntry(), makeEntry({ taskId: 'bt-1789-other', state: 'exited', exitCode: 0 })])
     const onTasksChanged = vi.fn()
     const svc = makeService(onTasksChanged)

@@ -1,9 +1,9 @@
 /**
- * NpmGitInstaller.installGit 出站 env 契约锁定（C-proc-09 收编回归，原守卫豁免条目）。
+ * NpmGitInstaller.installGit 出站 env 契约锁定（C-proc-09 收编回归，原检查豁免条目）。
  *
  * 收编后锁定的不变式：
  * 1. deny 清单两键（TAIJI_AGENT_PACKAGED / TAIJI_RUNTIME_TOKEN）无论从哪条通路进父 env，
- *    都不出现在 git clone 的子进程 env（credential helper / npm script 后代进程泄道收口）；
+ *    都不出现在 git clone 的子进程 env（credential helper / npm script 后代进程泄道收尾）；
  * 2. 白名单基座键（PATH/HOME）不因契约接线丢失（Node spawn env 整体替换语义）；
  * 3. 代理键被显式 forward——入站白名单 ENV_WHITELIST_PREFIXES 不含任何 PROXY 键，
  *    漏 forward 则用户代理环境下 GitHub clone（extension 安装主场景）直接失效；

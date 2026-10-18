@@ -13,7 +13,7 @@
  * - detach（removeSessionEntry 汇聚点）→ 条目摘除（query 回 undefined 口径）。
  * - respawn 重注册 = 新 epoch：曾上报条目经 detach + 重注册回预置 0。
  * - reclaim 成功 → 条目摘除；reclaim 返回 false（未回收）→ 条目保留（与 checkpoint 同语义）。
- * - fork：新 sessionId 带血缘参数走同一 registerSession 汇聚点 → 预置（fork 归属核实收口；
+ * - fork：新 sessionId 带血缘参数走同一 registerSession 汇聚点 → 预置（fork 归属核实收尾；
  *   完整 forkSession 编排无现成测试装置，用 session-lifecycle-register.test.ts 同款
  *   parentSession/forkEntryId 注册形态覆盖汇聚点语义）。
  *

@@ -13,7 +13,7 @@
  * [已不可达用例删除登记] 原「D14①b（G2）无标记条目宽限后静默终局」「D3③ sweep
  * occupancy 收尾」两 describe 随 sweepInFlight（10s 宽限 + transcript 比对）整体退役
  * （ADR-0122 命令终局事件化：回执长时间不到的唯一现实成因 = 进程死亡，由断连事件
- * 收口）而不可达，2026-10-05 投递域清理批次删除。
+ * 收尾）而不可达，2026-10-05 投递域清理批次删除。
  *
  * 运行：cd packages/runtime && npx vitest run src/services/session/__tests__/session-delivery-commands.test.ts
  */

@@ -1,7 +1,7 @@
 /**
- * SessionSummary 投影组装（自 session-service.ts toSummary 行为保持抽取）。
+ * SessionSummary 派生组装（自 session-service.ts toSummary 行为保持抽取）。
  *
- * 为什么独立函数：toSummary 是「IManagedSessionView → SessionSummary」的纯投影
+ * 为什么独立函数：toSummary 是「IManagedSessionView → SessionSummary」的纯派生
  * （git 信息读 + bare workspace 检测 + usage 快照派生 + binding 内存态透传），不依赖
  * Facade 其余状态——gitInfoReader 与 replicated states 读点参数化后即可模块级化。
  * Facade 保留同名方法一行委托（ISessionService/窄接口契约面不变）。

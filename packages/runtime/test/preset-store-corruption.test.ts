@@ -126,7 +126,7 @@ describe('RT-7#2 PresetService：损坏读隔离 + 拒绝空骨架覆写', () =>
     expect(onDisk.presets[0].id).toBe('corruption-test-custom')
   })
 
-  it('builtin 保护仍先于降级态守卫（既有语义不因本修复漂移）', () => {
+  it('builtin 保护仍先于降级态检查（既有语义不因本修复漂移）', () => {
     writeFileSync(join(tmpDir, 'pi-presets.json'), 'not-json', 'utf-8')
     const service = makeService()
     service.getAllPresets()

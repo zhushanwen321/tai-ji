@@ -1,10 +1,10 @@
 /**
- * AttachmentStore 模块直接测试（S1 附件存储迁出，设计 §4.2 场景 B——模块测试面）。
+ * AttachmentStore 模块直接测试（S1 附件存储迁出，设计 §4.2 场景 B——模块测试范围）。
  *
  * 边界用例（20MB 上限拒绝 / 路径穿越拒绝）直接对模块测试：不经 WS 链路、不构造
  * Facade（本文件 import 无 session-service，机器可 grep 验证）。
  *
- * 与 test/session-service.test.ts「业务持久化写安全守卫」互补：彼处经 Facade 委托
+ * 与 test/session-service.test.ts「业务持久化写安全检查」互补：彼处经 Facade 委托
  * 入口锁定 S1 迁移后端到端行为不变（探针 P3），此处锁定新模块可独立构造与直接测试。
  *
  * 真实文件 I/O：writeImage/migrateImage/writeSegmentsMetadata 写真实 attachments/tmpdir
@@ -247,7 +247,7 @@ describe('AttachmentStore · writeSegmentsMetadata', () => {
     await expect(store.writeSegmentsMetadata('att-store-tmpfail-1', makeEntry('u-fail'))).rejects.toThrow(
       'write-segments-metadata failed',
     )
-    // 失败后无正式 sidecar 落地（外层 catch 收口，不留下半截状态）
+    // 失败后无正式 sidecar 落地（外层 catch 收尾，不留下半截状态）
     expect(existsSync(join(dir, 'segments.json'))).toBe(false)
     expect(errSpy).toHaveBeenCalledWith('[session-service] writeSegmentsMetadata failed:', expect.any(Error))
     errSpy.mockRestore()

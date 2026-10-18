@@ -621,7 +621,7 @@ describe('setMcpServerEnabled · 启停专用操作（仅翻转 enabled 键，�
     expect(produced.enabled).toBeUndefined()
   })
 
-  it('吃进锁内最新磁盘内容：外部并发改动（新字段/新条目）不被清单旧投影覆盖（D2）', () => {
+  it('吃进锁内最新磁盘内容：外部并发改动（新字段/新条目）不被清单旧派生视图覆盖（D2）', () => {
     useFile({ mcpServers: { s: { command: 'npx' }, other: { url: 'https://x' } } })
     // 模拟清单打开后外部手编改动
     writeFileSync(

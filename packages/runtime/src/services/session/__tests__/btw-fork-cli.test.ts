@@ -141,7 +141,7 @@ describe('createLine 默认 fork 装配链（resolvePiCommand → forkViaCliPi �
         ${sleepCode(5000)}
       `
       h.deps.resolvePiCommand = () => writeFakePi('chain.js', chainBody)
-      // get_state 读回须与 fork header id 一致（附着一致性守卫）
+      // get_state 读回须与 fork header id 一致（附着一致性检查）
       h.state = { sessionId: 'cli', sessionFile: forkFile }
       h.deps.forkSession = undefined // 强制走默认 CLI 链
 

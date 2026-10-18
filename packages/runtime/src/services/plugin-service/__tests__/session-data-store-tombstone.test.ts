@@ -5,7 +5,7 @@
  * 锁定：
  * - clearSession：tombstone 登记（先于 trash，trash 失败时迟到写同样被丢）+ 分区摘除
  *   （flushTimer 取消）+ 文件进 trash（mock 记录，不触真实废纸篓）
- * - 迟到写守卫：clear 后 set()/delete() 丢弃 + warn；不复活文件（flushAll/dispose 后
+ * - 迟到写检查：clear 后 set()/delete() 丢弃 + warn；不复活文件（flushAll/dispose 后
  *   磁盘无新文件）；不重建内存分区（hasPartition false）
  * - flushTimer 取消：clear 前已排定的 500ms flush 被 dropPartition 清掉，不再写盘
  *   （「迟到 set 是唯一文件复活入口」的前半句源码依据）
@@ -96,7 +96,7 @@ describe('B5 clearSession：tombstone 登记 + 分区摘除 + trash 软删除', 
   })
 })
 
-describe('B5 迟到写守卫：set/delete 丢弃 + 不复活文件 + 不重建分区', () => {
+describe('B5 迟到写检查：set/delete 丢弃 + 不复活文件 + 不重建分区', () => {
   it('迟到 set()：warn + 丢弃，flushAll 后文件不复活、分区不重建', async () => {
     const store = newStore()
     store.set('sid-b', 'k1', 'v1')
@@ -108,9 +108,9 @@ describe('B5 迟到写守卫：set/delete 丢弃 + 不复活文件 + 不重建�
 
     const warned = warnSpy.mock.calls.some((c: unknown[]) => String(c[0]).includes('dropped late sessionData.set'))
     expect(warned).toBe(true)
-    // 守卫先于 getPartition：写路径不重建分区
+    // 检查先于 getPartition：写路径不重建分区
     expect(store.hasPartition('sid-b')).toBe(false)
-    // keys 只读不守（设计裁决：get/keys 不在守卫面）——lazy 读已删文件得空集
+    // keys 只读不守（设计裁决：get/keys 不在检查面）——lazy 读已删文件得空集
     expect(store.keys('sid-b')).toEqual([])
 
     store.flushAll() // 即便强制 flush，也无 dirty 可写

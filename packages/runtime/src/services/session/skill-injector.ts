@@ -63,7 +63,7 @@ export interface SkillMappingSource {
 export class LateBoundSkillSource implements SkillMappingSource {
   private target: SkillMappingSource | null = null
 
-  /** 绑定真源（组合根一次性调用；重复 bind 以最后一次为准，无守卫——单调用点无歧义）。 */
+  /** 绑定真源（组合根一次性调用；重复 bind 以最后一次为准，无检查——单调用点无歧义）。 */
   bind(source: SkillMappingSource): void {
     this.target = source
   }
@@ -135,7 +135,7 @@ const FRONTMATTER_CLOSED_DELIM_LEN = 4
 
 /**
  * stripFrontmatter 镜像：BOM 剥除 → 换行归一 → frontmatter 边界剥离（extractFrontmatter）。
- * 无 frontmatter / 闭合缺失时原文返回；有 frontmatter 时 body 已 trim（对齐实装，pi 展开处
+ * 无 frontmatter / 封闭缺失时原文返回；有 frontmatter 时 body 已 trim（对齐实装，pi 展开处
  * 再 trim 一次属幂等，保留同款双 trim 形态以求逐字）。
  */
 function stripFrontmatterPi(content: string): string {
@@ -345,7 +345,7 @@ export class SkillInjector {
    * 的 pi 对齐 `<skill>` 全文列表，降级形态块内为标记清单 + 指引行。
    *
    * @param sessionCwd session 工作目录（registry project 扫描基准，来自 session cwd
-   *   投影）。缺省 = 只用 global 扫描（project skill 不进映射）——不猜 cwd，缺就是调用方
+   *   派生）。缺省 = 只用 global 扫描（project skill 不进映射）——不猜 cwd，缺就是调用方
    *   未接线，宁缺毋错。
    *
    * 错误面：内部 RPC / fs 失败全部转为降级或透传 + notice（D8 禁止静默），本方法不向

@@ -1,5 +1,5 @@
 /**
- * PS-56 探针：pi agent-loop 工具 execute 返回值的错误标记约定——W4 throw 范式前提守卫。
+ * PS-56 探针：pi agent-loop 工具 execute 返回值的错误标记约定——W4 throw 范式前提检查。
  *
  * 登记条目（docs/pi-semantics.json PS-56，pi 1.0.0 起语义更新）：agent-loop
  * executePreparedToolCall 正常路径 return { result, isError: result.isError === true }
@@ -61,7 +61,7 @@ describe.skipIf(!AGENT_CORE_DIST)(
       expect(
         catchIdx !== -1 && errFlagIdx > catchIdx,
         'PS-56 漂移：isError: true 不再位于 catch 分支内（W4 throw 范式「错误路径 throw 即呈现」' +
-          '前提失锚）。恢复动作：复核 catch 分支后更新本探针与 PS-56',
+          '前提定位失败）。恢复动作：复核 catch 分支后更新本探针与 PS-56',
       ).toBe(true)
     })
 

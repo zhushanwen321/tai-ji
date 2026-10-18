@@ -6,14 +6,14 @@
  *   == get_state + get_session_stats + get_commands 逐字段」→ it 1：四实例（W7/W8 生产配置，
  *   label / queue 深度实例已随 PR #185 MF1/MF2 撤销）+
  *   MessageBus（生产类）经真实 pi RPC 喂入；state topic 三类消息按 session-service 既有发布口径
- *   （fetchContext / fetchAndBroadcastCommands / broadcastSessionState 投影）构造 publish。
+ *   （fetchContext / fetchAndBroadcastCommands / broadcastSessionState 派生视图）构造 publish。
  *   断言的是「广播 last-value == 发布后的独立第二次权威拉取」——W12 把发布源切实例快照后
- *   断言仍成立（任何内部源都必须等于权威 RPC 投影）。
+ *   断言仍成立（任何内部源都必须等于权威 RPC 派生视图）。
  * - W21 定案联动（store 纯累积，W21 verifier 裁决 2 硬前置）→ it 2：事件帧经 core store 生产
  *   入口（applyMessageEvent → registry → applyEntryFrame）喂入后，断言 reducer state（权威镜像）
  *   ≡ get_entries 重放；渲染 ref（overlay 路径）与重开视图（hydrate 权威重放）的消息条数 +
  *   role 序列 deep equal（原 console.log 探针已升级为真实断言；id 形态差异是 W21 裁决的
- *   遗留态，收敛投影归后续 wave）。
+ *   遗留态，收敛派生视图归后续 wave）。
  *
  * 双喂形态（W21 verifier 备忘 1）：生产 registry 中 toolResult 经 tool_call_end + message_end
  * 两帧都喂 reducer（it 2 帧语料天然含双通道），applyEntry toolResult 覆盖式配对回填幂等——
@@ -22,7 +22,7 @@
  * fixture 进程复用（验收 4，总时长 <120s 预算）：整 describe 一个 pi 进程（beforeAll/afterAll），
  * 两用例共享累积事件流；it 2 以事件起点标记切分本用例增量（it 1 的事件不进本次 live 侧）。
  *
- * faux LLM 轨（L2.5 翻轨）：验证对象是「实例快照/广播 == 权威 RPC 投影」与 store 喂入
+ * faux LLM 轨（L2.5 翻轨）：验证对象是「实例快照/广播 == 权威 RPC 派生视图」与 store 喂入
  * 同构，非模型智能——事件风暴的三轮 turn 响应与 it2 的 bash 工具轮由 fauxResponses 脚本
  * 固定（单一队列逐轮消费，消费序 = r1 → r2 → followup → bash toolCall → 总结文本），
  * 断言语义与翻轨前一致。usage 数值按 faux 估算口径断言 typeof number + 与权威拉取逐字段
@@ -70,12 +70,12 @@ async function waitUntil(label: string, predicate: () => boolean, timeoutMs = 5_
   }
 }
 
-/** unknown → Record 运行时守卫收窄（宽 wire 形态断言用，禁 any 契约） */
+/** unknown → Record 运行时检查收窄（宽 wire 形态断言用，禁 any 契约） */
 function asRecord(value: unknown): Record<string, unknown> {
   return typeof value === 'object' && value !== null ? (value as Record<string, unknown>) : {}
 }
 
-/** message_end 帧携带的 entry（运行时守卫收窄；非 message_end 帧返回 undefined） */
+/** message_end 帧携带的 entry（运行时检查收窄；非 message_end 帧返回 undefined） */
 function entryOfMessageEndFrame(frame: ServerMessage): PiEntry | undefined {
   if (frame.type !== ('message.message_end' as string)) return undefined
   const payload = (frame as { payload?: unknown }).payload
@@ -152,7 +152,7 @@ describe.skipIf(!FAUX_PI_READY)(
       const commandsState = new ReplicatedState(createCommandsStateConfig(fetchCommands))
       // 四实例（label / queue 深度实例已撤销，PR #185 MF1/MF2：.get() 生产零消费——
       // label 真值 = session.renamed 帧事件 payload + setLabelCache 直写；深度真值 =
-      // queue_update 帧内 pendingMessageCount 推送投影，两者均不经实例快照）
+      // queue_update 帧内 pendingMessageCount 推送派生视图，两者均不经实例快照）
       const states = [thinkingLevelState, modelIdState, usageState, commandsState]
       const bus = new MessageBus()
 
@@ -187,7 +187,7 @@ describe.skipIf(!FAUX_PI_READY)(
         () => agentEnds() >= agentEndsBefore + 2,
         TURN_TIMEOUT_MS,
       )
-      // 投递证据守卫：队列经历「非空 → 清空」完整生命周期（pi drain 时 dequeue + _emitQueueUpdate；
+      // 投递证据检查：队列经历「非空 → 清空」完整生命周期（pi drain 时 dequeue + _emitQueueUpdate；
       // 清空事件必须在非空事件之后，防止 session 启动期的空队列事件造成假阳性）
       await waitUntil(
         'followup drain queue_update (depth back to 0)',
@@ -203,7 +203,7 @@ describe.skipIf(!FAUX_PI_READY)(
       )
       usageState.markDirty()
 
-      // 风暴含队列操作守卫（防空转）：确实观测到非空 followUp 的 queue_update 事件
+      // 风暴含队列操作检查（防空转）：确实观测到非空 followUp 的 queue_update 事件
       expect(queueUpdates().some((e) => Array.isArray(e.followUp) && e.followUp.length > 0)).toBe(true)
 
       // 切模型（同模型幂等 set_model——W7 同款安全形态；生产接线：switchModel RPC 成功响应 →
@@ -225,7 +225,7 @@ describe.skipIf(!FAUX_PI_READY)(
       // session_info_changed 不再触发实例失效——label 实例已撤销，PR #185 MF1）
       if (countOf('thinking_level_changed') > thinkingLevelChangedBefore) thinkingLevelState.markDirty()
 
-      // ── 风暴期生产发布点：state topic 三类消息按 session-service 既有投影口径 publish ──
+      // ── 风暴期生产发布点：state topic 三类消息按 session-service 既有派生视图口径 publish ──
       const publishStats = await fetchStats()
       const publishCu = asRecord(publishStats.contextUsage)
       if (typeof publishCu.tokens !== 'number') {
@@ -238,7 +238,7 @@ describe.skipIf(!FAUX_PI_READY)(
       const publishThinking =
         typeof publishState.thinkingLevel === 'string' ? publishState.thinkingLevel : undefined
 
-      // context.update（session-service.fetchContext 投影口径）
+      // context.update（session-service.fetchContext 派生视图口径）
       bus.publish(sid, {
         type: 'context.update',
         payload: {
@@ -279,12 +279,12 @@ describe.skipIf(!FAUX_PI_READY)(
       const authModelId = `${authModel.provider as string}/${authModel.id as string}`
       const authPercent = typeof authCu.percent === 'number' ? authCu.percent : 0
 
-      // ── 实例快照逐字段 == 权威投影 ──
+      // ── 实例快照逐字段 == 权威派生视图 ──
       expect(modelIdState.get()).toEqual({ modelId: authModelId })
       expect(thinkingLevelState.get()).toEqual({
         thinkingLevel: typeof authState.thinkingLevel === 'string' ? authState.thinkingLevel : undefined,
       })
-      // usage 投影口径 = 实例配置（min(round, 100) clamp，对齐 MAX_USAGE_PERCENT）
+      // usage 派生视图口径 = 实例配置（min(round, 100) clamp，对齐 MAX_USAGE_PERCENT）
       expect(usageState.get()).toEqual({
         inputTokens: authCu.tokens,
         contextLimit: typeof authCu.contextWindow === 'number' ? authCu.contextWindow : 0,
@@ -292,10 +292,10 @@ describe.skipIf(!FAUX_PI_READY)(
       })
       expect(commandsState.get()?.commands).toEqual(authCommands)
 
-      // 风暴后队列清空守卫（followUp 已投递 = 深度回 0 的合法态）
+      // 风暴后队列清空检查（followUp 已投递 = 深度回 0 的合法态）
       expect(authState.pendingMessageCount).toBe(0)
 
-      // ── stateSnapshot 广播内容逐字段 == 权威投影（late subscriber 视角：重连恢复通道）──
+      // ── stateSnapshot 广播内容逐字段 == 权威派生视图（late subscriber 视角：重连恢复通道）──
       const ws: BusClient = { readyState: 1, send: () => {} }
       const { stateSnapshot } = bus.subscribe(sid, ws)
       const byType = new Map(stateSnapshot.map((m) => [m.type, m]))
@@ -362,7 +362,7 @@ describe.skipIf(!FAUX_PI_READY)(
         interpreter.interpret(translate(ev as unknown as PiEvent, sid))
         await new Promise((r) => setTimeout(r, 0))
       }
-      expect(liveEndEntries.length).toBeGreaterThanOrEqual(2) // 非空守卫（防 0==0 空转）
+      expect(liveEndEntries.length).toBeGreaterThanOrEqual(2) // 非空检查（防 0==0 空转）
 
       // u6.1 收编：_entryStatesForTest 已并入 testInternals 命名空间（对齐 core custom-start-equivalence.test.ts 的嵌套路径）
       const reducerLive = store.testInternals._entryStatesForTest.get(sid)?.state
@@ -397,7 +397,7 @@ describe.skipIf(!FAUX_PI_READY)(
       expect(reducerLive!.orphanToolResults).toHaveLength(0)
       expect(reducerLive!.lastAssistantWithToolCalls).toBe(reloadTailState.lastAssistantWithToolCalls)
 
-      // 工具链路覆盖守卫：assistant 带 toolCalls 且 toolResult 已回填（输出含探针串）
+      // 工具链路覆盖检查：assistant 带 toolCalls 且 toolResult 已回填（输出含探针串）
       const toolOwner = reloadTailState.messages.find((m) => (m.toolCalls?.length ?? 0) > 0)
       expect(toolOwner).toBeDefined()
       expect(toolOwner?.toolCalls?.[0]?.output).toContain('w22-store')
@@ -406,7 +406,7 @@ describe.skipIf(!FAUX_PI_READY)(
       //   流式 assistant 气泡）与「重开视图」（生产重开链路 get_entries → replayEntries → hydrate
       //   首入）的消息条数 + role 序列 deep equal——live 喂入与权威重放在用户可见对话流层面一致。
       //   （原 console.log 探针恒真，已升级为断言；id 形态不比——overlay 乐观 u-<uuid> 与
-      //   reducer e<N> 派生是 W21 裁决的遗留差异，收敛投影归后续 wave。）
+      //   reducer e<N> 派生是 W21 裁决的遗留差异，收敛派生视图归后续 wave。）
       const refMsgs = store.getMessages(sid)
       const reopenScope = effectScope(true)
       const reopenStore = reopenScope.run(() => createChatStore())!
@@ -416,7 +416,7 @@ describe.skipIf(!FAUX_PI_READY)(
       expect(reopenMsgs.map((m) => m.role)).toEqual(refMsgs.map((m) => m.role))
       reopenScope.stop()
 
-      // 探针有效性守卫（防 0==0 空转）：overlay 路径确已产出实体（乐观 user + assistant 气泡）
+      // 探针有效性检查（防 0==0 空转）：overlay 路径确已产出实体（乐观 user + assistant 气泡）
       expect(refMsgs.length).toBeGreaterThanOrEqual(2)
       expect(refMsgs.some((m) => m.role === 'user' && m.id.startsWith('u-'))).toBe(true)
 

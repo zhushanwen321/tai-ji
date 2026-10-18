@@ -131,7 +131,7 @@ describe('wave:runtime-wiring · TC1/TC2 session-service send 回调双写', () 
     // session 级：bus.publish 被调（'s1', msg），恰好一次（D1-2 单通道）
     expect(messageBus.publish).toHaveBeenCalledTimes(1)
     expect(messageBus.publish).toHaveBeenCalledWith('s1', msg)
-    // wave:perf-w09（D1-2）：broadcast 腿已删——盲广播不再发生
+    // wave:perf-w09（D1-2）：broadcast 路径已删——盲广播不再发生
     expect(broker.broadcast).not.toHaveBeenCalled()
   })
 
@@ -405,7 +405,7 @@ describe('wave:runtime-wiring · TC8 session.commands 激活发布（W12 快照�
       await new Promise((r) => setTimeout(r, 10))
     }
 
-    // session.commands 单通道（wave:perf-w09 D1-2）：只 bus.publish，broadcast 腿已删。
+    // session.commands 单通道（wave:perf-w09 D1-2）：只 bus.publish，broadcast 路径已删。
     // payload 数据源 = commands 实例快照（W12），值与 mock RPC 返回逐字段一致。
     //（publish 总数可能含 modelId/thinkingLevel 播种失败后的 state_changed 兜底帧——
     // fakeClient 无 getState，与本用例的 commands 通道断言无关，按 type 过滤。）
@@ -545,7 +545,7 @@ describe('M2c: 组合根 providerCredentialResolver 装配接线（源码级 + q
     const authPath = join(quotaDir, 'auth.json')
     writeFileSync(authPath, JSON.stringify({ 'zai-coding-cn': { type: 'api_key', key: 'k-from-auth-json' } }))
     const authStorage = new AuthStorage(authPath)
-    // 生产形态：resolver 的 auth.json 明文腿经 AuthService.getCredential（index.ts 同款装配）
+    // 生产形态：resolver 的 auth.json 明文路径经 AuthService.getCredential（index.ts 同款装配）
     const authService = new AuthService({
       authStorage,
       getOAuthConfig: () => undefined,

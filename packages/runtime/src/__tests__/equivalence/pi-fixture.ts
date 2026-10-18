@@ -276,7 +276,7 @@ export async function spawnPiFixture(options: PiFixtureOptions = {}): Promise<Pi
       `real pi unavailable：${realGate.REAL_PI_SKIP_REASON} —— 真实 pi 用例必须以 describe.skipIf(!REAL_PI_READY) 包裹`,
     )
   }
-  // faux 轨 model 值域守卫（PiFixtureOptions.model 注释）：undefined = FAUX_MODEL；
+  // faux 轨 model 值域检查（PiFixtureOptions.model 注释）：undefined = FAUX_MODEL；
   // null = 不拼 --model（entry 恢复用例）；字符串必须 'faux/' 前缀——真实模型 id 直接
   // throw（faux 零网络、cost 恒 0 是本轨红线，误指定从静默忽略升级为显式报错）。
   if (fauxMode && typeof options.model === 'string' && !options.model.startsWith('faux/')) {
@@ -408,7 +408,7 @@ export async function spawnPiFixture(options: PiFixtureOptions = {}): Promise<Pi
     }
   })
 
-  // 内层原始发送（id 配对响应）；外层守卫版 sendCommand 对 prompt 入口套 busy 护栏
+  // 内层原始发送（id 配对响应）；外层检查版 sendCommand 对 prompt 入口套 busy 护栏
   const rawSendCommand = (
     type: string,
     params: Record<string, unknown> = {},

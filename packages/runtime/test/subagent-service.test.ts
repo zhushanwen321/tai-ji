@@ -11,7 +11,7 @@ import type { ScannedSessionMeta } from '../src/infra/pi/session-file-utils.js'
 /**
  * W3 测试：SessionService.getSubagents + getSubagentHistory
  *
- * [W1 / D6 读侧换源] subagent 列表数据源 = journal 投影的 entry 源（v2
+ * [W1 / D6 读侧换源] subagent 列表数据源 = journal 派生视图的 entry 源（v2
  * subagent-record 注册 + 终态条目对），不再是 legacy toolCall/toolResult 配对。
  *
  * 用真实临时文件验证端到端链路：

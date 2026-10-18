@@ -134,7 +134,7 @@ describe.skipIf(!FAUX_PI_READY)(
 
   // faux 轨（L2.5 翻轨）：toolCalls 步骤 100% 确定——真实 LLM 时代的「偶尔纯文本回复
   // 不调工具」三连发重试护栏 [HISTORICAL 2026-08-22] 已随翻轨删除（脚本化 toolCall
-  // 不存在不确定性；语料守卫仍要求 toolcall 事件存在，断言强度不变）。hook 显式超时
+  // 不存在不确定性；语料检查仍要求 toolcall 事件存在，断言强度不变）。hook 显式超时
   // 保留（[HISTORICAL] 2026-08-20 PR #185：vitest 默认 hookTimeout 10s 在负载下先杀
   // hook）。
   beforeAll(async () => {
@@ -161,7 +161,7 @@ describe.skipIf(!FAUX_PI_READY)(
   it('wire 契约：全部 message_update 事件无顶层 message 字段', () => {
     const fx = fixture!
     const updates = fx.collectEvents((e) => e.type === 'message_update')
-    // 语料守卫：含工具调用的对话必有 message_update 流
+    // 语料检查：含工具调用的对话必有 message_update 流
     expect(updates.length).toBeGreaterThan(0)
     for (const u of updates) {
       expect('message' in u && u.message !== undefined).toBe(false)

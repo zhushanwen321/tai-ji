@@ -19,7 +19,7 @@
  * 驱动方式：真 pi 进程 + faux LLM（零网络零 token，凭证无关；同 p-f9 探针范式）。
  *
  * 语义登记：docs/pi-semantics.json PS-61（manual 掐断语义与事件序）/ PS-62（reason 词表）；
- * 静态锚探针 src/infra/pi/__tests__/pi-semantics-compaction-resume.test.ts 同守卫族——
+ * 静态锚探针 src/infra/pi/__tests__/pi-semantics-compaction-resume.test.ts 同检查族——
  * 本脚本验行为序（真机实测），静态锚锁 dist 锚文本（pi bump 门禁自动跑），pi 升级两层同验。
  *
  * 运行：cd packages/runtime && node src/__tests__/probes/p-reason-compaction-reason.mjs

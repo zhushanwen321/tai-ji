@@ -37,7 +37,7 @@
  *
  * best-effort 契约（对齐 crash-journal/mem-pressure：旁路设施故障不放大为调用链故障）：
  * 采样回调全量 try/catch，失败记一次主日志 warn（模块级 once 防周期失败刷屏）后静默；
- * relief 动作（onRelief 注入）抛错同样吞掉——台账照记（触发事实独立于动作成败）。
+ * relief 动作（onRelief 注入）抛错同样吞掉——journal 照记（触发事实独立于动作成败）。
  *
  * 任务级墙钟语义声明（AGENTS 关键规则 19）：本模块是周期采样器（观测面），非任务超时
  * ——60s 周期是 D4 设计规定的采样粒度，不属「任务级默认无超时」约束对象。
@@ -68,9 +68,9 @@ const PERCENT_SCALE = 100
 export const WATCHDOG_SUSTAIN_TICKS = 2
 
 /**
- * env 旋钮名（设计 §5 钉死 `TAIJI_RUNTIME_WATCHDOG_*` 前缀，ENV_WHITELIST_PREFIXES 按前缀
+ * env 旋钮名（设计 §5 固定为 `TAIJI_RUNTIME_WATCHDOG_*` 前缀，ENV_WHITELIST_PREFIXES 按前缀
  * 放行）。旋钮值 SSOT 暂在本模块本地定义（shared/constants.ts 领地外，u6 汇报登记）；
- * `_FORCE_PCT`（D5 硬升级 92%）属 u7c 滚动重启消费面，本单元不解析不消费。
+ * `_FORCE_PCT`（D5 硬升级 92%）属 u7c 滚动重启消费方，本单元不解析不消费。
  */
 export const ENV_WATCHDOG_ARMED = 'TAIJI_RUNTIME_WATCHDOG_ARMED'
 export const ENV_WATCHDOG_WARN_PCT = 'TAIJI_RUNTIME_WATCHDOG_WARN_PCT'
@@ -85,7 +85,7 @@ export interface WatchdogSample {
   heapUsed: number
   /** v8.getHeapStatistics().heap_size_limit（bytes）。 */
   heapSizeLimit: number
-  /** process.memoryUsage().rss（bytes）（台账用量快照字段与 schema rss 对齐）。 */
+  /** process.memoryUsage().rss（bytes）（journal 用量快照字段与 schema rss 对齐）。 */
   rss: number
   /** heap 用量占比（0-100）。 */
   usedPercent: number
@@ -119,17 +119,17 @@ export interface WatchdogOptions {
   memoryUsage?: () => NodeJS.MemoryUsage
   /** heap 上限来源注入（测试固定分母；缺省 v8.getHeapStatistics().heap_size_limit）。 */
   heapSizeLimit?: () => number
-  /** memory-relief 动作（清可回收物；生产接线在组合根，缺省无动作——广播与台账仍执行）。 */
+  /** memory-relief 动作（清可回收物；生产接线在组合根，缺省无动作——广播与 journal 仍执行）。 */
   onRelief?: () => void
   /** renderer 广播出口（组合根注入 server.broadcast 包装；armed 且越线拍每拍调用）。 */
   broadcast?: (payload: WatchdogMemoryPressurePayload) => void
-  /** 台账 writer（缺省 getCrashJournal()；测试注入 spy 断言事件字段）。 */
+  /** journal writer（缺省 getCrashJournal()；测试注入 spy 断言事件字段）。 */
   journal?: CrashJournalWriter
   /** 时钟注入（采样 ts；测试配 fake timers 断言）。 */
   now?: () => number
 }
 
-/** 看门狗运行句柄（stop 供 shutdown 链与测试收口；getStatus 观测面）。 */
+/** 看门狗运行句柄（stop 供 shutdown 链与测试收尾；getStatus 观测面）。 */
 export interface WatchdogHandle {
   stop(): void
   getStatus(): WatchdogStatus
@@ -248,18 +248,18 @@ export function startWatchdog(options: WatchdogOptions = {}): WatchdogHandle {
     return sample
   }
 
-  /** relief 执行点：动作 best-effort + 台账落 memory-relief 事件（触发事实独立于动作成败）。 */
+  /** relief 执行点：动作 best-effort + journal 落 memory-relief 事件（触发事实独立于动作成败）。 */
   function fireRelief(sample: WatchdogSample): void {
     reliefAvailable = false
     try {
       onRelief?.()
     } catch (e) {
-      // relief 动作失败不阻断台账与后续采样（旁路降级设施故障不放大，文件头契约）；
+      // relief 动作失败不阻断 journal 与后续采样（旁路降级设施故障不放大，文件头契约）；
       // relief 由反弹缓解锁保障单水位周期至多一次，此处 warn 不会刷屏。
       logger.warn(`[watchdog] onRelief action failed: ${e instanceof Error ? e.message : String(e)}`)
     }
-    // 台账字段（D1 schema）：level 走 reason='warn-tier'（触发条件档位 = 告警线持续，
-    // 已知值登记面复用）；用量快照 = heapUsed + rss（schema 同名字段直通）。
+    // journal 字段（D1 schema）：level 走 reason='warn-tier'（触发条件档位 = 告警线持续，
+    // 已知值登记清单复用）；用量快照 = heapUsed + rss（schema 同名字段直通）。
     journal.append({
       layer: 'runtime',
       event: 'memory-relief',

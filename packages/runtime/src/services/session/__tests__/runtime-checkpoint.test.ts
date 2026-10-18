@@ -4,7 +4,7 @@
  * 覆盖（验收条款逐条对照，五契约中本模块落的 4 条）：
  * - **完整性降级 / 原子写**：tmp+rename（写成功不留 tmp；残留 tmp 不影响 read——「中途崩
  *   溃读旧版」的可观测形态）；写失败（只读目录）主文件保持上一版完整内容。
- * - **解析失败降级**：损坏文件 → 一条 `checkpoint-corrupt` 台账事件 + 失败现场隔离 +
+ * - **解析失败降级**：损坏文件 → 一条 `checkpoint-corrupt` journal 事件 + 失败现场隔离 +
  *   read 返回 undefined（不抛，调用方退 lazy）。
  * - **失败现场**：`runtime-checkpoint-failed-<ts>.json` 保留最近 3 份（新失败覆盖最旧）。
  * - **rename 同域失败幂等**：ENOENT = already-absent（已隔离）；EACCES = residual（原地
@@ -385,7 +385,7 @@ describe('runtime checkpoint 写失败可见性（code-harden RT-4#6）', () => 
     }
   })
 
-  it.skipIf(isRoot)('连续失败达阈值落台账事件（每轮连续失败期一次）；成功写盘复位后新一轮再落', () => {
+  it.skipIf(isRoot)('连续失败达阈值落 journal 事件（每轮连续失败期一次）；成功写盘复位后新一轮再落', () => {
     const h = makeHarness(runDir)
     const warnSpy = vi.spyOn(logger, 'warn').mockImplementation(() => {})
     try {
@@ -403,11 +403,11 @@ describe('runtime checkpoint 写失败可见性（code-harden RT-4#6）', () => 
         detailPath: join(runDir, CHECKPOINT_FILENAME),
       })
 
-      // 同一轮连续失败期内继续失败：不重复台账
+      // 同一轮连续失败期内继续失败：不重复 journal
       h.store.upsertSession({ sessionId: 's-extra', activityAt: T0 })
       expect(ledgerAt('checkpoint-write-failed')).toHaveLength(1)
 
-      // 成功写盘：清 stale、复位计数（新一轮失败可再落台账）
+      // 成功写盘：清 stale、复位计数（新一轮失败可再落 journal）
       chmodSync(runDir, 0o700)
       h.setNow(T0 + 10)
       h.store.upsertSession({ sessionId: 's-ok', activityAt: T0 + 10 })

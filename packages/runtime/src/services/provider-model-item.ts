@@ -1,5 +1,5 @@
 /**
- * 模型项 pi-schema 守卫（U6①，**写侧与启动清洗侧共享的谓词单点**）。
+ * 模型项 pi-schema 检查（U6①，**写侧与启动清洗侧共享的谓词单点**）。
  *
  * 从 provider-config-helper 抽出（该文件超 max-lines 上限 → 正面提取，非 disable）：
  * 谓词的消费者有两侧——services 层写入口（`applyProviderWritePolicy` 的模型级转译）与

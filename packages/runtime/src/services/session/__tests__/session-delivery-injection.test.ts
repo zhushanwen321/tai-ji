@@ -100,19 +100,19 @@ describe('A2-MF-C：deliverText 挂 skill 注入', () => {
     expect(occupancyAtPrompt).toEqual({ turn: 'dispatching', isGenerating: true })
   })
 
-  it('[RT-4#10] prompt 失败按拒绝分型收口终态：processing 拒绝 → idle（v3 busy 分型重试退役）', async () => {
+  it('[RT-4#10] prompt 失败按拒绝分型定终态：processing 拒绝 → idle（v3 busy 分型重试退役）', async () => {
     const h = makeHarness()
     ;(h.client.prompt as ReturnType<typeof vi.fn>).mockRejectedValue(
       new Error('prompt failed: Cannot ... Agent is already processing'),
     )
     await expect(h.registry.sendDirect('s1', 'x')).rejects.toThrow('Agent is already processing')
-    // v3：processing 不再分型反转（busy 分型重试随忙闲门禁退役）——与一切真失败同型收口
+    // v3：processing 不再分型反转（busy 分型重试随忙闲门禁退役）——与一切真失败同型收尾
     //（'reject-other'：turn 没跑起来 → idle，错误经调用方 throw 显式上报）
     expect(h.view.isGenerating).toBe(false)
     expect((h.view as unknown as { occupancy?: { turn: string } }).occupancy?.turn).toBe('idle')
   })
 
-  it('[RT-4#10] prompt 失败按拒绝分型收口终态：非 busy 真失败 → idle（不卡 dispatching）', async () => {
+  it('[RT-4#10] prompt 失败按拒绝分型定终态：非 busy 真失败 → idle（不卡 dispatching）', async () => {
     const h = makeHarness()
     ;(h.client.prompt as ReturnType<typeof vi.fn>).mockRejectedValue(new Error('EPIPE gone'))
     await expect(h.registry.sendDirect('s1', 'x')).rejects.toThrow('EPIPE gone')
@@ -131,7 +131,7 @@ describe('A2-MF-C：deliverText 挂 skill 注入', () => {
 
   it('busy 入队 → settled flush 的投递同样经注入（queued 路径不旁路）', async () => {
     const h = makeHarness()
-    // busy 置位/复位经转移原语（u3c 单写原语收口；publish null 与改前直写一致零广播）
+    // busy 置位/复位经转移原语（u3c 单写原语收尾；publish null 与改前直写一致零广播）
     applySessionOccupancyTransition(h.view, null, 'generating')
     const handle = h.registry.getOrCreateDelivery('s1')
     handle.send({ payload: { kind: 'text', content: '排队的消息' } })
@@ -151,14 +151,14 @@ describe('A2-MF-C：deliverText 挂 skill 注入', () => {
     ;(h.client.prompt as ReturnType<typeof vi.fn>).mockRejectedValue(new Error('pi reject'))
     await expect(h.registry.sendDirect('s1', 'x')).rejects.toThrow('pi reject')
     // skillNotice 零发布（notice 时机契约否定面不变）；[RT-4#10] occupancy 帧例外——
-    // 前移置位 + 失败收口会产生 dispatching/idle 两帧（合法投影，不属于 notice 否定面）
+    // 前移置位 + 失败收尾会产生 dispatching/idle 两帧（合法派生视图，不属于 notice 否定面）
     expect(h.publish.mock.calls.filter(([, m]) => (m as { type: string }).type === 'session.skillNotice')).toHaveLength(0)
   })
 
   it('notices 为空：不发布 skillNotice（no-op 零噪音）；真注入器纯文本 no-op 原文通过', async () => {
     const h = makeHarness()
     await h.registry.sendDirect('s1', '纯文本')
-    // skillNotice 零发布；occupancy 帧是 D2 挂点迁移后的合法投影输出（'dispatching'），
+    // skillNotice 零发布；occupancy 帧是 D2 挂点迁移后的合法派生视图输出（'dispatching'），
     // 不在本断言否定面内（顺序契约用例已单独锁定）
     expect(h.publish.mock.calls.filter(([, m]) => (m as { type: string }).type === 'session.skillNotice')).toHaveLength(0)
     // 真 SkillInjector：无标记在 parseSkillMarkers 短路，不触达映射源与任何 RPC

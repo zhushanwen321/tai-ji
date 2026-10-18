@@ -1,5 +1,5 @@
 /**
- * 同数据目录单实例互斥守卫（唯一「拒绝双 runtime」判定点）。
+ * 同数据目录单实例互斥检查（唯一「拒绝双 runtime」判定点）。
  *
  * 背景 [HISTORICAL] 2026-09-22 批量 subagent exit 143 事故：独立 runtime 进程
  * （`pnpm --filter @taiji/runtime start` 形态，验收脚本「重启 runtime」场景）与安装版

@@ -5,8 +5,8 @@
 //
 // [ADR-0095] runtime extractor 值级判定集合（WORKFLOW_RUN_OUTCOMES）随 v1 读面删除——
 // 原三方等价（core ≡ extractor ≡ shared）收敛为双包断言；经提取链的漏升回归行为面
-// 随提取器投影面一并删除（runtime workflow 列表数据源 = events-projection 投影，
-// outcome 投影判据单源在 core runSettledOutcomeToDoneReason）。
+// 随提取器派生视图一并删除（runtime workflow 列表数据源 = events-projection 派生视图，
+// outcome 派生视图判据单源在 core runSettledOutcomeToDoneReason）。
 import { describe, expect, it } from 'vitest'
 
 import { ALL_RUN_OUTCOMES } from '@zhushanwen/subagent-core'

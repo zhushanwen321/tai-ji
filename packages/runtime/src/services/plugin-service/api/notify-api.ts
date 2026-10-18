@@ -10,7 +10,7 @@
  * 转发到主线程。
  *
  * 此前 handler 内联在 plugin-rpc-setup.ts、Worker 侧代理内联在 plugin-bootstrap.ts。
- * P6 收口到本 api 文件，与其它 6 个域保持一致。
+ * P6 收尾到本 api 文件，与其它 6 个域保持一致。
  *
  * 单一广播真相源：broadcastPluginNotification() 封装"组装 plugin:notification
  * payload + 调用 broadcastFn"，plugin.notify 与 plugin.ui.notify 两个 RPC 入口共用。

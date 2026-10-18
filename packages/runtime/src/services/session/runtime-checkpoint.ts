@@ -17,7 +17,7 @@
  * 2. **staleness guard**：消费侧（u5）职责——reattach 前校验 session 文件存在。本模块的
  *    贡献 = `read()` 返回 undefined 语义（文件缺失 = 无快照，不是空清单）与 filePath 字段
  *    如实落盘（null = 未知，不伪造成空串）。
- * 3. **完整性降级**：原子写（tmp + rename）；解析失败 → `checkpoint-corrupt` 台账事件 +
+ * 3. **完整性降级**：原子写（tmp + rename）；解析失败 → `checkpoint-corrupt` journal 登记事件 +
  *    失败现场隔离 + 返回 undefined（调用方退既有 lazy 恢复，不抛）。
  * 4. **失败现场**：`<runDir>/runtime-checkpoint-failed-<ts>.json` 保留最近 3 份（新失败
  *    覆盖最旧）。
@@ -28,7 +28,7 @@
  * **写失败可见性（code-harden RT-4#6，在契约 5 风暴防护之内的增强）**：写失败上报从
  * 「进程内 once、此后零日志」改为限流上报——首次失败立即 warn（保留 once 上报的首次
  * 即报语义），此后每 5min 至多一条（携带连续失败次数与最后成功写时刻）；连续失败达
- * 阈值落一条 crash 台账事件（reason=checkpoint-write-failed，每轮连续失败期只一条）。
+ * 阈值落一条 crash journal 登记事件（reason=checkpoint-write-failed，每轮连续失败期只一条）。
  * `write()` 返回 bool 并维护两个诊断面：`getLastSuccessfulWriteAt()`（最后成功写盘时刻）
  * 与 `isCheckpointStale()`（自上次成功写盘后有失败 = 磁盘快照落后内存真相，下次成功
  * 写盘清除）。影响面登记（不夸大）：checkpoint 是恢复增强，写失败的后果 = u5 reattach
@@ -50,7 +50,7 @@
  * 显式登记：reattach 进行中崩溃会丢失「尚未附着项」的清单（errs = 漏恢复，退化 lazy）；
  * 这正是设计「后续 unclean 覆写接管」通道的实现形态。
  *
- * 依赖注入（测试可注入）：目录 / 时钟 / 台账 writer 全经 options 传入，生产缺省走
+ * 依赖注入（测试可注入）：目录 / 时钟 / journal writer 全经 options 传入，生产缺省走
  * getDataDir() 动态推导（禁止硬编码绝对路径）+ 模块级单例。单例风格对齐 crash-journal：
  * `getRuntimeCheckpointStore()` 懒初始化（生产零新增组合根接线），未写入前零副作用。
  */
@@ -84,10 +84,10 @@ export const CHECKPOINT_VERSION = 1
 // eslint-disable-next-line no-magic-numbers -- 5min 限流窗口是审计定值（RT-4#6「每 5min 一条」），非可调魔数
 export const WRITE_FAILURE_WARN_INTERVAL_MS = 5 * 60_000
 
-/** 连续写失败落 crash 台账事件的阈值（每轮连续失败期只一条；成功写盘复位）。 */
+/** 连续写失败落 crash journal 登记事件的阈值（每轮连续失败期只一条；成功写盘复位）。 */
 export const WRITE_FAILURE_LEDGER_THRESHOLD = 3
 
-/** 台账 detailDigest 上限（设计 D1 防漏设计①：内嵌摘要 ≤2KB，与 pi-respawn 同口径）。 */
+/** journal detailDigest 上限（设计 D1 防漏设计①：内嵌摘要 ≤2KB，与 pi-respawn 同口径）。 */
 const CRASH_DIGEST_MAX_CHARS = 2048
 
 /**
@@ -179,7 +179,7 @@ export interface RuntimeCheckpointOptions {
   dir?: string
   /** 时钟注入（测试 fake 时间戳；缺省 Date.now）。 */
   now?: () => number
-  /** 台账 writer（checkpoint-corrupt 事件）；缺省 getCrashJournal() 单例。 */
+  /** journal writer（checkpoint-corrupt 事件）；缺省 getCrashJournal() 单例。 */
   journal?: CrashJournalWriter
   /** 失败现场保留份数；缺省 3（D3）。 */
   failedSnapshotRetention?: number
@@ -199,7 +199,7 @@ export class RuntimeCheckpointStore {
   private writeFailureCount = 0
   /** 上条写失败 warn 时刻（null = 本进程尚未报过；首次失败恒即报）。 */
   private lastWriteFailureWarnAt: number | null = null
-  /** 连续失败台账事件已落标志（每轮连续失败期只一条；成功写盘复位）。 */
+  /** 连续失败 journal 登记事件已落标志（每轮连续失败期只一条；成功写盘复位）。 */
   private writeFailureLedgered = false
   /** 最后成功写盘时刻（epoch ms；null = 本进程从未成功写过。诊断导出面）。 */
   private lastSuccessfulWriteAt: number | null = null
@@ -251,7 +251,7 @@ export class RuntimeCheckpointStore {
    * 读 checkpoint 主文件（消费侧 = u5 reattach 编排；staleness guard 的第 0 步）。
    *
    * 契约：文件不存在 → undefined（无快照，非空清单）；解析/形状失败 → **记一次
-   * `checkpoint-corrupt` 台账事件 + 隔离失败现场**并返回 undefined（完整性降级：调用方
+   * `checkpoint-corrupt` journal 登记事件 + 隔离失败现场**并返回 undefined（完整性降级：调用方
    * 退既有 lazy 恢复，不抛异常——checkpoint 是恢复增强，损坏不得升级为启动失败）。
    */
   read(): RuntimeCheckpointFile | undefined {
@@ -386,7 +386,7 @@ export class RuntimeCheckpointStore {
       this.reportWriteFailure(`write failed: ${(e as NodeJS.ErrnoException).code ?? e}`)
       return false
     }
-    // 成功写盘：刷新最后成功时刻、清陈旧标志、复位连续失败计数与台账事件轮次
+    // 成功写盘：刷新最后成功时刻、清陈旧标志、复位连续失败计数与 journal 登记事件轮次
     this.lastSuccessfulWriteAt = this.now()
     this.checkpointStale = false
     this.writeFailureCount = 0
@@ -432,8 +432,8 @@ export class RuntimeCheckpointStore {
    * 写失败限流上报（code-harden RT-4#6，替代「进程内 once、此后零日志」）：
    * - 首次失败立即 warn（保留 once 上报的首次即报语义——契约 5 风暴防护）；
    * - 此后每 5min 至多一条 warn，携带连续失败次数与最后成功写时刻（stale 可归因）；
-   * - 连续失败达阈值落一条 crash 台账事件（reason=checkpoint-write-failed，每轮连续
-   *   失败期只一条）——warn 在滚动日志里会被轮转，台账是持久结构化证据。
+   * - 连续失败达阈值落一条 crash journal 登记事件（reason=checkpoint-write-failed，每轮连续
+   *   失败期只一条）——warn 在滚动日志里会被轮转，journal 是持久结构化证据。
    * 成功写盘复位全部计数与标志（见 write()）。
    */
   private reportWriteFailure(message: string): void {

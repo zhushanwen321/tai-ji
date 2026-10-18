@@ -2,15 +2,15 @@
  * ClaimLedger 单测 —— D10 语义矩阵全 32 case（notify-once 设计附A 逐条）+ P9 事件序用例。
  *
  * 每条 it 对应附A 一行（名称含 case id，★ = 设计标注的专项断言）。矩阵的「通知?」列在
- * 本层投影为 **respond 素材 → 送达通知数**：
+ * 本层派生为 **respond 素材 → 送达通知数**：
  *   - 桥接/扩展的生产词形映射在 u-bridge / u-ext；本文件按设计 D4（outcome→status）与
  *     D3（settled/death 送达、aborted/orphaned 静默例外1、死亡新闻槽 (sessionId,deathSeq)
- *     首条发声、settled 按 (sessionId,reason,settleSeq) 合批）复刻最小投影，断言矩阵期望。
+ *     首条发声、settled 按 (sessionId,reason,settleSeq) 合批）复刻最小派生，断言矩阵期望。
  *   - 矩阵中纯 extension/renderer 侧的行为（50ms 攒批、文案、register 落盘）不在本层，
  *     断言其 ledger 前置（批身份 seq / fulfills N / 零材料 ⇒ 零通知），由 u-ext 用例承接其余。
  *
  * 材料形态：零 I/O 纯状态机 + 注入手动时钟；vitest fake timers（文件头规则）保证工厂内的
- * TTL 清扫 setInterval 不落真实事件循环。状态机腿/TTL/计数器/幂等不变量见
+ * TTL 清扫 setInterval 不落真实事件循环。状态机路径/TTL/计数器/幂等不变量见
  * notify-claims-state.test.ts。
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
@@ -47,7 +47,7 @@ afterEach(() => {
   vi.useRealTimers()
 })
 
-// ─── 测试侧投影（复刻设计 D4/D3 口径；生产映射在 u-bridge / u-ext）──────────
+// ─── 测试侧派生（复刻设计 D4/D3 口径；生产映射在 u-bridge / u-ext）──────────
 
 /** D4 outcome → 通知 status（词形同 completion-backflow outcomeToStatus：error→failed、stopped→stopped、其余 completed）。 */
 function outcomeStatus(o: SettleOutcome): 'completed' | 'failed' | 'stopped' {
@@ -92,7 +92,7 @@ function armCreated(l: ClaimLedger, claimId: string, lifetimeId: string, withPro
   l.openWatch(P, lifetimeId, `w-${lifetimeId}`)
 }
 
-/** 静默 settle 投影：settle 产空兑现批 + 零送达通知（矩阵「不通知」列的本层断言形态）。 */
+/** 静默 settle 派生：settle 产空兑现批 + 零送达通知（矩阵「不通知」列的本层断言形态）。 */
 function expectSilentSettle(l: ClaimLedger, outcome: SettleOutcome): void {
   const b = l.settle(S, outcome)
   expect(b.fulfilled).toHaveLength(0)
@@ -290,7 +290,7 @@ describe('D10-D 生命周期（附D D1-D7b）', () => {
     }
     expect(deliveredCount(d.targets)).toBe(1) // 死亡新闻槽：同 (sessionId,deathSeq) 一条
     expect(l.count()).toBe(0) // 即时删除
-    // 迟到 exit 腿查无记录自然静默（设计 D5）
+    // 迟到 exit 路径查无记录自然静默（设计 D5）
     expect(l.onSessionDeath(S, 'exit').targets).toHaveLength(0)
   })
 
@@ -306,7 +306,7 @@ describe('D10-D 生命周期（附D D1-D7b）', () => {
     expect(l.onRespond(P, 'sm-d2-lt', true)).toBe('absent') // 即时删除：死亡 respond 失败也无册可转
   })
 
-  it('D3★ P abort_session 后 settle(stopped) → 静默销账（零注入零计数）', () => {
+  it('D3★ P abort_session 后 settle(stopped) → 静默关闭（零注入零计数）', () => {
     const l = makeLedger()
     armSent(l, 'sm-d3')
     expect(l.arm({ parentSid: P, notifyId: 'sm-d3-lt', kind: 'lifetime', sessionId: S })).toEqual({ ok: true })
@@ -352,7 +352,7 @@ describe('D10-D 生命周期（附D D1-D7b）', () => {
     expect(d.targets.map((t) => t.payload.type)).toEqual(['death', 'death'])
     expect(deliveredCount(d.targets)).toBe(1)
     for (const t of d.targets) expect((t.payload as { cause: string }).cause).toBe('delete')
-    // 汇聚点已删记录 → 并发迟到 exit 腿查无记录自然静默（防双事件竞态）
+    // 汇聚点已删记录 → 并发迟到 exit 路径查无记录自然静默（防双事件竞态）
     const late = l.onSessionDeath(S, 'exit')
     expect(late.terminated).toHaveLength(0)
     expect(late.targets).toHaveLength(0)
@@ -371,7 +371,7 @@ describe('D10-D 生命周期（附D D1-D7b）', () => {
     // warn 素材（notifyId/sessionId）齐备；触发器② 不产 respond（父进程已死）
     expect(ob.orphaned.map((v) => v.notifyId).sort()).toEqual(['sm-d7a-1', 'sm-d7a-2', 'sm-d7a-lt'])
     expect(l.undeliveredCount(S)).toBe(3)
-    // 父重启收口腿：迟到 watch → 精确 orphaned 应答（记录在 TTL ≥10min 窗口内仍在）
+    // 父重启收尾路径：迟到 watch → 精确 orphaned 应答（记录在 TTL ≥10min 窗口内仍在）
     const routing = l.openWatch(P, 'sm-d7a-1', 'w-restart')
     expect(routing.action).toBe('respond')
     expect((routing as { target: RespondTarget }).target.payload).toEqual({ type: 'orphaned' })
@@ -443,7 +443,7 @@ describe('D10-E 结构性（附E E1-E8）', () => {
     expect(l.count()).toBe(0)
   })
 
-  it('E4 旧 runtime 不识 watch → 台账级等价：查无 claim fail-closed + 零材料零通知', () => {
+  it('E4 旧 runtime 不识 watch → 登记级等价：查无 claim fail-closed + 零材料零通知', () => {
     // 旧 runtime 无本账本 = 任何 watch 查无 claim（bridge 折叠静默）；新账本零 arm 恒零材料
     const fresh = makeLedger()
     expect(fresh.openWatch(P, 'sm-e4', 'w-e4')).toEqual({ action: 'fail-closed' })
@@ -503,7 +503,7 @@ describe('D10-E 结构性（附E E1-E8）', () => {
     const l = makeLedger()
     l.arm({ parentSid: P, notifyId: 'sm-p9-c', kind: 'claim', sessionId: S })
     l.arm({ parentSid: P, notifyId: 'sm-p9-c-lt', kind: 'lifetime', sessionId: S })
-    // 桥接对两键都发受理回执（lifetime 进 injected 也无妨——kind 守卫双保险）
+    // 桥接对两键都发受理回执（lifetime 进 injected 也无妨——kind 检查双保险）
     expect(l.markInjected(P, 'sm-p9-c')).toBe(true)
     expect(l.markInjected(P, 'sm-p9-c-lt')).toBe(true)
     const b = l.settle(S, 'done')

@@ -1,5 +1,5 @@
 /**
- * RpcClient W1 单元测试（U1-U5）+ stdin stream error 收口（RT-2#1）。
+ * RpcClient W1 单元测试（U1-U5）+ stdin stream error 处置（RT-2#1）。
  *
  * 覆盖 plan.json：
  * - U1: sendCommand 归一 payload→data
@@ -273,9 +273,9 @@ describe('RpcClient W1', () => {
   })
 })
 
-// ── RT-2#1：stdin 流错误源头收口（同族 stdout/stderr 处置链）──────────
+// ── RT-2#1：stdin 流错误源头处置（同族 stdout/stderr 处置链）──────────
 
-describe('RpcClient stdin stream error 收口（RT-2#1）', () => {
+describe('RpcClient stdin stream error 处置（RT-2#1）', () => {
   let client: RpcClient
 
   beforeEach(async () => {

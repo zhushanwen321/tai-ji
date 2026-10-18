@@ -4,11 +4,11 @@
  * 验证 restoreSession 在 switchSession 成功后 get_state 读回生效 model+thinkingLevel，
  * 通过 registerSession 新参 metaOverride 播种。r3 校准：metaOverride 恒提供（读回成功/
  * 失败两路径同构），每字段独立走「读回值 → 扫描 meta 值 → ''」兜底链——restore 任何
- * 情况不播种全局默认（D2 被否谱系：全局默认播种 = restore 窗口显示他 session 的假值，违 G4）。
+ * 情况不播种全局默认（D2 不采用记录：全局默认播种 = restore 窗口显示他 session 的假值，违 G4）。
  *
  * [缓存治理 U8a W3/W4] restore 播种不再写任何持久层（原写点⑤ sidecar 自愈已退役，
  * 持久层唯一写方 = pi JSONL；兜底扫描 meta 值 U7 起即反向读 JSONL 真值）。原写点③/⑤
- * 正断言随写点退役改写为「磁盘零写入」负守卫。
+ * 正断言随写点退役改写为「磁盘零写入」负检查。
  *
  * 测试场景（r3 校准后）：
  * 1. 读回成功全字段 → 播种真值
@@ -135,7 +135,7 @@ describe('U2 restoreSession 播种（D2 设计）', () => {
     }))
     // mock normalizeSessionFileInPlace（归一化 noop）。[U8a W3/W4] persistModelBinding
     // 及其骨架转发已随写点退役移除——session-lifecycle / restore-seeding 对本模块的
-    // 消费面只剩 cleanupMigrateResidues + normalizeSessionFileInPlace。
+    // 消费方只剩 cleanupMigrateResidues + normalizeSessionFileInPlace。
     normalizeSessionFileInPlaceMock = vi.fn()
     vi.doMock('../infra/pi/session-file-utils.js', () => ({
       normalizeSessionFileInPlace: normalizeSessionFileInPlaceMock,
@@ -277,7 +277,7 @@ describe('U2 restoreSession 播种（D2 设计）', () => {
     expect(session).toBeDefined()
     // r3 校准：metaOverride 恒提供（含双失败路径），双无值字段播种 '' 占位——
     // configStore 的 default-model（'default-provider/default-model'）恰好不该出现：
-    // 全局默认播种 = restore 窗口显示他 session 的假值（D2 被否谱系，违 G4「不知道显示占位」）
+    // 全局默认播种 = restore 窗口显示他 session 的假值（D2 不采用记录，违 G4「不知道显示占位」）
     expect(session!.modelId).toBe('')
     expect(session!.thinkingLevel).toBe('')
   })

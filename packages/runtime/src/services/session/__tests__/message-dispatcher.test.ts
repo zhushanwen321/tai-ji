@@ -62,7 +62,7 @@ interface HarnessOptions {
   /** get_commands 清单（命令识别用例注入；缺省 [] = 空清单）。 */
   commands?: Array<{ name: string; source: string }>
   sessionByClient?: Partial<IManagedSessionView>
-  /** [CP6 移植] deps.getSession 的返回视图（收口窗回调重查/置位断言用；缺省同 session）。 */
+  /** [CP6 移植] deps.getSession 的返回视图（收尾窗回调重查/置位断言用；缺省同 session）。 */
   sessionView?: unknown
   /** workspace.record 同步抛错（best-effort 副作用的降级路径用例注入）。 */
   recordWorkspaceError?: Error
@@ -235,7 +235,7 @@ describe('MessageDispatcher × 内核出站交接（u2）', () => {
     expect(r1.blocked).toBe(true)
     expect(r2.blocked).toBe(false)
     expect(r2.receipt).toMatchObject({ lane: 'direct' })
-    // 唯一 msg-2 进入内核投递（msg-1 被否决零投递）
+    // 唯一 msg-2 进入内核投递（msg-1 不采用决零投递）
     const prompts = h.client.prompt.mock.calls.map((c) => String(c[0]))
     expect(prompts).toHaveLength(1)
     expect(prompts[0]).toContain('msg-2')
@@ -275,7 +275,7 @@ describe('MessageDispatcher × 内核出站交接（u2）', () => {
     expect('clientUuid' in (msg?.payload ?? {})).toBe(false)
   })
 
-  it('投递失败（prompt 抛错）→ message.error 广播 + isGenerating 复位 + 不发 skillNotice（提示不空投）', async () => {
+  it('投递失败（prompt 抛错）→ message.error 广播 + isGenerating 复位 + 不发 skillNotice（提示不丢弃）', async () => {
     const h = makeHarness({ promptError: new Error('rpc dead') })
     h.injectState.notices = [notice('skill_missing', ['ghost'])]
     await h.dispatcher.sendMessage('s1', '带 skill 的消息')
@@ -314,7 +314,7 @@ describe('MessageDispatcher × 内核出站交接（u2）', () => {
     expect(h.published.filter((m) => m.type !== 'session.occupancy')).toHaveLength(0)
   })
 
-  // [MF-1-8 退役] steerMessage / followUpMessage 转发腿测试已删除：消费方经 delivery.submit
+  // [MF-1-8 退役] steerMessage / followUpMessage 转发路径测试已删除：消费方经 delivery.submit
   // 统一提交（u3b 内核化保持），协议侧 message.steer / message.follow_up 条目同批退役。
 })
 

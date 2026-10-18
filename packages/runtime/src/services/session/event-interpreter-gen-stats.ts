@@ -1,7 +1,7 @@
 /**
  * LlmWindowSampler — composer-gen-stats 的 LLM 请求窗口状态机（genstats-speed-llm-window D1/D3）。
  *
- * [协作对象，T4 拆分] 从 event-interpreter.ts 按变化轴抽出：窗口锚点（turnStartedAt）与
+ * [协作对象，T4 拆分] 从 event-interpreter.ts 按变化原因抽出：窗口锚点（turnStartedAt）与
  * 已结算窗口（llmWindowDurationMs）两个状态字段及配对/消费逻辑自成一个封闭状态机，与
  * interpreter 主编排无共享状态（解释见 event-interpreter.ts 头注「协作对象」节）。
  *
@@ -9,7 +9,7 @@
  * - turn-start        → onTurnStart()：重锚起算时钟 + 重锚清除不变量
  * - llm-request-start → onRequestStart()：TTFT 请求锚点重锚（记 requestStartedAt + 清 ttftMs/firstOutputAt）
  * - llm-first-output  → onFirstOutput()：首输出结算（幂等 first-wins）
- * - message message_end → settleOnMessageEnd()：assistant end 帧闭合窗口（role 守卫）
+ * - message message_end → settleOnMessageEnd()：assistant end 帧关闭窗口（role 检查）
  * - turn-usage        → consume()：组装 GenStatsSample 采样（一次性消费，未注入 sink 时零行为）
  */
 import type { ServerMessage } from '@taiji/shared'
@@ -41,7 +41,7 @@ export class LlmWindowSampler {
    *（每轮必到，异常配对才有唯一锚），且不把 provider 首包延迟（TTFT 段）敏感度引入
    *「生成速度」语义。代价 = 窗口不含「请求发出→首事件」准备段（context 转换 + HTTP 握手），
    * 测得值略偏乐观——设计内接受的偏差（D1 量级声明）；重审触发 = 用户反馈显示值系统性
-   * 高于体感。[HISTORICAL] 被否：以 pi turn_start 为速度起算——窗口会混入 steering
+   * 高于体感。[HISTORICAL] 不采用：以 pi turn_start 为速度起算——窗口会混入 steering
    * 注入段，语义更差（composer-genstats-ttft 后 turn_start 已移出 NULL_EVENTS 翻译为
    * llm-request-start，仅供下方 TTFT 锚点消费；速度窗口口径不变）。
    */
@@ -61,7 +61,7 @@ export class LlmWindowSampler {
    */
   private requestStartedAt: number | null = null
   /**
-   * 本请求窗口内首个输出信号到达时刻（first-wins 幂等守卫判据：非 null 表示已结算，
+   * 本请求窗口内首个输出信号到达时刻（first-wins 幂等检查判据：非 null 表示已结算，
    * 后续 llm-first-output 直接 return）。onRequestStart 重锚时同步清。
    */
   private firstOutputAt: number | null = null
@@ -121,9 +121,9 @@ export class LlmWindowSampler {
    * assistant message_end 帧到达 → 结算 LLM 请求窗口（D1：assistant message_start →
    * assistant message_end 的 runtime 本地时钟差，不含工具执行时间）。
    *
-   * role 守卫（D2）：仅 entry.message.role === 'assistant' 时结算——user/toolResult 的
+   * role 检查（D2）：仅 entry.message.role === 'assistant' 时结算——user/toolResult 的
    * message_end 帧同经 message case 全量下发（MESSAGE_END_ALLOWED_ROLES），custom 的
-   * subagent-directive 亦然，无守卫会被错误闭合截断 duration（D3 第八行）。
+   * subagent-directive 亦然，无检查会被错误关闭截断 duration（D3 第八行）。
    *
    * 缺起防御（D3 第二行）：turnStartedAt 为 null（runtime 中途启动/丢 message_start）时
    * 静默跳过，不产窗口——与「无配对 turn-start → durationMs=null」现行契约同语义。
@@ -151,13 +151,13 @@ export class LlmWindowSampler {
    * duration，须 §3.5 承诺的 durationMs=null。
    *
    * 未注入 sink（存量单测形态）→ 整块跳过（连状态清 null 都不做），与原内联
-   * `if (this.opts.onGenStats)` 守卫逐字等价。
+   * `if (this.opts.onGenStats)` 检查逐字等价。
    */
   consume(sessionId: string, usage: TurnUsageSampleFields): void {
     if (!this.onGenStats) return
     // durationMs 改源 llmWindowDurationMs（genstats-speed-llm-window D1）：assistant
     // message_end 结算的 LLM 请求窗口（不含工具执行时间）。null = 真缺闭/缺起（pi
-    // 崩溃/断连致闭合帧不到达，或 runtime 中途启动/丢 message_start 致无起算点，
+    // 崩溃/断连致关闭帧不到达，或 runtime 中途启动/丢 message_start 致无起算点，
     // 设计 §3.1 失败路径 / D3 矩阵）→ 速度样本由 service 侧跳过（命中率照常）。
     // 消费后置 null（一次性语义）。保留 turnStartedAt 清 null（防纵深，D3 零成本）：
     // 缺配对的后续 turn-usage 不得拿旧锚点算出系统性偏大 duration（§3.5 一致性）。

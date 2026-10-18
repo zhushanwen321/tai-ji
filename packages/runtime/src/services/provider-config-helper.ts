@@ -23,12 +23,12 @@ import { pickModelCapabilityFields } from './model-mapper.js'
 import type { IProviderCredentialResolver } from './ports/provider-credential-resolver.js'
 
 /** auth.json 存储能力（ConfigService 注入，与 ConfigService 构造函数 authStorage 同构）。
- * 不含 'set'——写入唯一经 credentialWriter（A1-4 收口，AuthService.saveCredential）。 */
+ * 不含 'set'——写入唯一经 credentialWriter（A1-4 收尾，AuthService.saveCredential）。 */
 type AuthStorageAccessors = Pick<AuthStorage, 'remove' | 'hasOAuth' | 'hasOAuthSync' | 'hasCredentialSync' | 'listCredentialIds'>
 
 /**
  * providers.json 存储能力（ConfigService 注入，A1-5 写侧切换）。
- * getExtrasSync：modelStates 清理的写入守卫先读（避免无谓写盘/空条目）。
+ * getExtrasSync：modelStates 清理的写入检查先读（避免无谓写盘/空条目）。
  * cleanScopedModelsResidue：scoped-model——删除链清顶层 scopedModels 中该 provider 条目。
  */
 export type ProviderExtrasAccessors = Pick<TaijiProviderStore, 'modify' | 'getExtrasSync' | 'cleanScopedModelsResidue'>
@@ -152,7 +152,7 @@ function isValidThinkingLevelMap(v: unknown): v is Record<string, string | null>
 
 /**
  * headers 校验 + prototype-pollution 清洗（B-4a/B-4b，对齐 compat 的 sanitize 模式：
- * 类型守卫通过后、赋值前剔除 __proto__/prototype/constructor）。
+ * 类型检查通过后、赋值前剔除 __proto__/prototype/constructor）。
  * 与 compat 的差异：headers 契约是 Record<string, string>，value 非 string 直接 throw
  * （pi schema Type.Record(String, String)——静默剔除坏 value 会让「保存成功但 header 丢失」
  * 无从排查）；compat value 是 unknown 只剔 undefined。
@@ -226,12 +226,12 @@ function mergeModelStates(
  * - catalog provider：builtin 模型启停是合法状态（B-2 后 payload 只含 override 条目，
  *   builtin id 不在其中），retainIds = payload ∪ builtin 模板模型 id——既非 payload 也
  *   非 builtin 的键（已删除的 override 模型）剔除。
- * 写入守卫（避免无谓写盘与空条目）：有显式启停更新，或已有 modelStates 需按保留
+ * 写入检查（避免无谓写盘与空条目）：有显式启停更新，或已有 modelStates 需按保留
  * 集合清理时才 modify。先读（getExtrasSync）与 modify 锁内重读有微小 TOCTOU 窗口
  * （同 provider 并发写），最坏情况跳过一次清理，不损坏数据。
  * await 对齐 authMethod 的 MF-1 语义：modify 失败 reject 上抛（handler try-catch
  * 转 sendError），不静默吞。返回 modify promise（结果 ProviderExtras 被丢弃，故
- * Promise<unknown>）供调用方条件 await（守卫不通过时返回 undefined，不产生微任务
+ * Promise<unknown>）供调用方条件 await（检查不通过时返回 undefined，不产生微任务
  * 边界——同 applyProviderCredentials 的时序契约）。
  */
 function persistModelStates(
@@ -395,7 +395,7 @@ function buildCatalogProviderInfo(
 ): ProviderInfo {
   // C1 契约「catalog 凭据 = id ∈ 有凭据源」；override?.apiKey 是 catalog provider
   // 手动填 key 的旧数据（迁移前错位）合理扩展，双源判定避免遗漏。
-  // D3 链 5（凭据收口）：credentialIdSet 由 resolver 批量 sync 版单次给出（auth.json ∪
+  // D3 链 5（凭据收尾）：credentialIdSet 由 resolver 批量 sync 版单次给出（auth.json ∪
   // models.json，构造必需注入——M2fg）。
   const apiKeySet = credentialIdSet.has(id) || !!override?.apiKey
   const overrideModels = override?.models ?? []
@@ -467,9 +467,9 @@ function buildCustomProviderInfo(
  * （迁移失败窗口兼容）。未注入 extrasStore 时 extras 恒空：authMethod 退回 apiKey 推断、
  * quota 为 undefined（与迁移后 models.json 已剥离寄生字段的读值一致）。
  *
- * D3 链 5（凭据读路径收口）：apiKeySet / status 的凭据判定经 credentialResolver 的批量
+ * D3 链 5（凭据读路径收尾）：apiKeySet / status 的凭据判定经 credentialResolver 的批量
  * sync 版单次取（`listCredentialBackedProviderIds`，auth.json ∪ models.json 各单次读）。
- * resolver 构造必需（M2fg 收口：生产组合根恒注入，`new Set(authIds)` 内联回退已删除）——
+ * resolver 构造必需（M2fg 收尾：生产组合根恒注入，`new Set(authIds)` 内联回退已删除）——
  * 保持批量单次读盘的 B3 不变量，禁止退回 per-provider 循环。
  */
 export function listProviders(
@@ -569,7 +569,7 @@ function applyProviderCredentials(
   if (apiKey !== undefined && apiKey.trim() !== '') {
     if (isCatalogProvider(providerId) && credentialWriter) {
       // catalog provider: apiKey → auth.json (0600), strip from models.json
-      // A1-4 收口：写入经 credentialWriter（AuthService.saveCredential），authStorage.set
+      // A1-4 收尾：写入经 credentialWriter（AuthService.saveCredential），authStorage.set
       // 的直接调用全 runtime 只剩 auth-service.ts 内部。
       // MF-1（stale 广播 + 静默丢 key）：await 落盘后再 delete merged.apiKey +
       // upsertProvider。fire-and-forget 时 withFileLock 未落盘 → handler 同步返回后
@@ -1053,7 +1053,7 @@ function applyValidatedModelFields(
 
 /**
  * compat 透传/清洗/删除（前端 compat 编辑器回传的兼容性覆盖必须写回，否则编辑保存即丢失
- * 用户手动配置的 compat）。类型守卫对齐 isValidThinkingLevelMap：必须排除 null
+ * 用户手动配置的 compat）。类型检查对齐 isValidThinkingLevelMap：必须排除 null
  * （typeof null === 'object'）与数组（typeof [] === 'object'），否则下游遍历 null 会崩
  * 或把数组当对象写入。显式 undefined + base 有值 → 删除（「清除所有 compat」按钮语义）。
  */
@@ -1063,7 +1063,7 @@ function applyModelCompat(
   base: Partial<ConfigModelDefinition>,
 ): void {
   if (m.compat != null && typeof m.compat === 'object' && !Array.isArray(m.compat)) {
-    // sanitize compat（守卫通过后、赋值前）：
+    // sanitize compat（检查通过后、赋值前）：
     // - 剔除 __proto__/prototype/constructor 防 prototype pollution（compat 类型是
     //   Record<string, unknown> 前向兼容扩展点，不能假定 key 安全）
     // - 剔除 undefined value（避免 JSON 序列化丢 key 造成困惑）
@@ -1145,10 +1145,10 @@ function persistAuthMethod(
 
 /**
  * model 级 enabled 状态落 providers.json（G3 写侧切换，从 setProvider 提取）：extrasStore 注入
- * 时委托 persistModelStates（保留集合计算与写入守卫见该函数），未注入 + 有显式启停更新时丢弃 +
+ * 时委托 persistModelStates（保留集合计算与写入检查见该函数），未注入 + 有显式启停更新时丢弃 +
  * warn（宁丢不写错位——生产恒注入）。
  *
- * 返回 modify promise 供调用方条件 await（守卫不通过 / 未注入返回 undefined，不产生微任务
+ * 返回 modify promise 供调用方条件 await（检查不通过 / 未注入返回 undefined，不产生微任务
  * 边界）。await 对齐 authMethod 的 MF-1 语义：modify 失败 reject 上抛（handler try-catch 转
  * sendError），不静默吞。
  */
@@ -1209,7 +1209,7 @@ function shouldSkipUpsert(skipUpsert: boolean | undefined, existingConfig: unkno
 /**
  * 清网关标记 - 写序契约第二步（从 setProvider 提取）：先删 models.json 键（已由载体删除）、后清
  * extras 标记。仅 gatewayToClear 信号为真时才读 extras；先读一次，标记不存在则短路不调 modify
- * （extrasStore.modify 无内容 diff 守卫，避免无谓写盘）。本函数在 upsert 之后调用。
+ * （extrasStore.modify 无内容 diff 检查，避免无谓写盘）。本函数在 upsert 之后调用。
  *
  * 返回 modify promise 供调用方条件 await（信号为假 / 标记不存在返回 undefined，不产生微任务
  * 边界）。
@@ -1230,12 +1230,12 @@ function clearGatewayMarker(
 }
 
 /**
- * 新建 provider 分支（拆分自 setProvider）：边界1 白名单守卫 + coding-plan 额度显示
+ * 新建 provider 分支（拆分自 setProvider）：边界1 白名单检查 + coding-plan 额度显示
  * 自动开启（新增即默认同意，§2.2.1）——写入在返回前完成（toast 只报真实写入）。
  * 边界1（wave3 TC5 / C2）不受 skipUpsert 影响：catalog 定义在 pi 内置 catalog，无
  * models.json 条目时 provider 依然存在可用（内置定义 + auth.json 凭据），`<id>/*`
- * 不是死引用；且守卫幂等（pattern 已存在 no-op），首次配置凭据的 catalog 用户不能因
- * 「不物化条目」而漏启用。条件/守卫见 quota-auto-enable.ts。
+ * 不是死引用；且检查幂等（pattern 已存在 no-op），首次配置凭据的 catalog 用户不能因
+ * 「不物化条目」而漏启用。条件/检查见 quota-auto-enable.ts。
  */
 async function provisionNewProvider(
   configStore: IConfigStore,
@@ -1255,14 +1255,14 @@ async function provisionNewProvider(
 }
 
 /**
- * 新建 / 更新 provider（wave3 边界1 白名单守卫 + I9 auth.json 清理 + catalog 分体系）。
+ * 新建 / 更新 provider（wave3 边界1 白名单检查 + I9 auth.json 清理 + catalog 分体系）。
  * 纯函数：configStore / authStorage / extrasStore / credentialWriter 经参数注入
  * （原 ConfigService.setProvider 逐字搬迁）。
  *
  * A1-5 写侧切换：authMethod 写 config/providers.json（extrasStore），不再寄生 models.json；
  * quota 分支已删除（历史死分支，无前端调用方——防复活，quota 配置唯一写路径是
  * QuotaService.configure → providers.json）。**例外**：新建分支额度显示自动开启经 extrasStore 写 quota（quota-auto-enable.ts）。
- * A1-4 收口：catalog apiKey 写入经 credentialWriter（AuthService.saveCredential），
+ * A1-4 收尾：catalog apiKey 写入经 credentialWriter（AuthService.saveCredential），
  * 不再直接持有 authStorage.set。
  */
 export async function setProvider(
@@ -1273,7 +1273,7 @@ export async function setProvider(
   providerId: string,
   data: SetProviderInput,
 ): Promise<{ newDefault?: { provider: ProviderId; modelId: string }; quotaAutoEnabled?: boolean }> {
-  // wave3：existingConfig===undefined 判定「新建 provider」（边界1 白名单守卫用）
+  // wave3：existingConfig===undefined 判定「新建 provider」（边界1 白名单检查用）
   const existingConfig = configStore.getProviderConfig(providerId)
   const existing = existingConfig ?? {}
   // A1：merged 提前声明——catalog 分支 delete merged.apiKey 需在声明之后（原顺序触发 TDZ TS2448/2454）
@@ -1313,7 +1313,7 @@ export async function setProvider(
     //
     // S2（round 1 review suggestion）：旧实现只合并不清理（{...current, ...updates}）——
     // 编辑体删除某自定义模型后其 modelStates 条目残留，同 id 重新添加时旧 disabled 复活。
-    // 改按保留集合（retainIds）重建（保留集合计算与写入守卫见 persistModelStates）。
+    // 改按保留集合（retainIds）重建（保留集合计算与写入检查见 persistModelStates）。
     // 保留集合内：本次显式 enabled 优先，未显式传的保留既有状态（不丢未标注模型的状态）。
     // （「条件 await」与丢弃分支归 persistModelStatesIfInjected。）
     const modelStatesFlush = persistModelStatesIfInjected(
@@ -1354,7 +1354,7 @@ export async function setProvider(
     result = configStore.upsertProvider(providerId, merged)
   }
   // 边界1（wave3 TC5 / C2）+ coding-plan 额度显示自动开启：拆分至 provisionNewProvider
-  //（守卫与自动开启的语义/时序契约见其注释——await 在返回前完成，toast 只报真实写入）。
+  //（检查与自动开启的语义/时序契约见其注释——await 在返回前完成，toast 只报真实写入）。
   let quotaAutoEnabled = false
   if (existingConfig === undefined) {
     quotaAutoEnabled = await provisionNewProvider(configStore, extrasStore, credentialWriter, providerId, data, merged)

@@ -10,7 +10,7 @@
  *   1. 活跃 rename 走 RPC：setSessionName 被调 + 不再直写 persistSessionName；
  *      client 不可用（pi 崩溃窗口）/ RPC 失败必须 throw（禁静默丢写）
  *   2. create / forkSession 显式 label 走 RPC（失败不阻断创建）
- *   3. 派生 label（basename(cwd)）不触发 RPC（退役为显示派生，auto-rename 守卫照常通过）
+ *   3. 派生 label（basename(cwd)）不触发 RPC（退役为显示派生，auto-rename 检查照常通过）
  *   4. 非活跃 rename 经短命 pi（W11：withEphemeralPi 附着 + set_session_name RPC，
  *      persistSessionName 直写已删——绝对写规则全线生效）
  *
@@ -97,7 +97,7 @@ function makeEnv() {
     findScannedSession: vi.fn(() => undefined),
     fetchAndBroadcastContext: vi.fn(async () => {}),
     notifySessionCreated: vi.fn(),
-    // S2 ISP 化：结构性满足 lifecycle 窄接口（10 方法 = 实际消费面），无强转
+    // S2 ISP 化：结构性满足 lifecycle 窄接口（10 方法 = 消费方实际用到的全部），无强转
     removeSessionEntry: vi.fn(),
     getActiveSummaries: vi.fn(() => []),
   }
@@ -194,7 +194,7 @@ describe('SessionLifecycle · W1 label 链路切 pi set_session_name RPC', () =>
 
       expect(client.setSessionName).toHaveBeenCalledTimes(1)
       expect(client.setSessionName).toHaveBeenCalledWith('重构计划')
-      // 直写路径已随 W11 全删（persistSessionName 不存在），回归守卫由 R1 承担
+      // 直写路径已随 W11 全删（persistSessionName 不存在），回归检查由 R1 承担
       // 内存 label 更新（label 只有内存态一份数据——label 实例已撤销，PR #185 MF1）
       expect(session.label).toBe('重构计划')
       // 列表缓存失效仍触发（侧栏立即显示新名）
@@ -227,7 +227,7 @@ describe('SessionLifecycle · W1 label 链路切 pi set_session_name RPC', () =>
 
   // ── 断言组 2：create / fork 语义性 label 走 RPC（A' 分流）────────────
   describe('断言组 2：create / forkSession 语义性 label → set_session_name RPC（A\'）', () => {
-    it("create(派生预览名，默认无 persistLabel) → setSessionName 不被调（A' display-only，防覆盖守卫恢复）", async () => {
+    it("create(派生预览名，默认无 persistLabel) → setSessionName 不被调（A' display-only，防覆盖检查恢复）", async () => {
       const client = makeClient({
         getState: vi.fn<() => Promise<Record<string, unknown> | undefined>>()
           .mockResolvedValue({ sessionId: 'pi-1', sessionFile: join(tmpDir, 'pi-1.jsonl') }),
@@ -237,7 +237,7 @@ describe('SessionLifecycle · W1 label 链路切 pi set_session_name RPC', () =>
       await env.lifecycle.create(tmpDir, '修复登录bu…')
 
       // A'（2026-08-24）：前端派生预览名不持久化——pi 内存 sessionName 保持空，
-      // pi-rename-session 防覆盖守卫照常通过（W1 曾持久化预览名致 auto-rename 全量失效）
+      // pi-rename-session 防覆盖检查照常通过（W1 曾持久化预览名致 auto-rename 全量失效）
       expect(client.setSessionName).not.toHaveBeenCalled()
     })
 

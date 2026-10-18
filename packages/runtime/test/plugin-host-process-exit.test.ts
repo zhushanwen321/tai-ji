@@ -80,7 +80,7 @@ describe('PluginHostProcess exit 分流（L-5）', () => {
     expect(reportedId).toBe(processId)
     expect(pluginIds).toContain('live-disconnect')
     expect(String(error)).toMatch(/disconnect/i)
-    // RT-6#5：crash 收口即删 processes Map（幽灵条目不再滞留，与 clean-exit 清理对称）
+    // RT-6#5：crash 收尾即删 processes Map（幽灵条目不再滞留，与 clean-exit 清理对称）
     expect(host.getProcessHandleById(processId)).toBeUndefined()
   }, 10_000)
 
@@ -92,7 +92,7 @@ describe('PluginHostProcess exit 分流（L-5）', () => {
     expect(host.getProcessHandleById(processId)).toBeUndefined()
 
     // 等待 kill 触发的 exit/disconnect 事件传播 + grace 窗口过期：pre-mark 的
-    // terminated 守卫与 disconnect 幂等检查都不应误报 crash
+    // terminated 检查与 disconnect 幂等检查都不应误报 crash
     await new Promise((r) => setTimeout(r, TEST_DISCONNECT_GRACE_MS + 300))
     expect(onCrash).not.toHaveBeenCalled()
   }, 10_000)

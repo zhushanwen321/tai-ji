@@ -117,7 +117,7 @@ export interface UiRequestMeta {
   timeoutMs?: number
 }
 
-/** 从 handler params 提取控制字段（类型守卫窄化，非法值不进 meta——queue 侧回落兜底）。 */
+/** 从 handler params 提取控制字段（类型检查窄化，非法值不进 meta——queue 侧回落兜底）。 */
 function extractUiRequestMeta(params: Record<string, unknown>): UiRequestMeta {
   const meta: UiRequestMeta = {}
   if (typeof params.requestId === 'string' && params.requestId.length > 0) {

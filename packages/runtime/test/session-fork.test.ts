@@ -180,7 +180,7 @@ describe('createForkedSessionFile · streaming JSONL 竞态（末行残行静默
       { type: 'message', id: 'u1', parentId: null, timestamp: '2026-07-07T01:00:01.000Z', message: { role: 'user', content: [{ type: 'text', text: 'hi' }] } },
       { type: 'message', id: 'a1', parentId: 'u1', timestamp: '2026-07-07T01:00:02.000Z', message: { role: 'assistant', content: [{ type: 'text', text: 'hello' }] } },
     ].map((l) => JSON.stringify(l)).join('\n')
-    // 残行：a2 的 JSON 写到一半被切断（合法 JSON 前缀，但缺闭合 → parse 失败）
+    // 残行：a2 的 JSON 写到一半被切断（合法 JSON 前缀，但缺结束括号 → parse 失败）
     const truncatedLine = '\n{"type":"message","id":"a2","parentId":"a1","timestamp":"2026-07-07T01:00:03.000Z","message":{"role":"assistant","content":[{"type":"text","text":"streaming'
     await writeFile(src, fullLines + truncatedLine)
 

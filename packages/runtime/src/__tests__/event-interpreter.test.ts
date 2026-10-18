@@ -203,7 +203,7 @@ describe('EventInterpreter compaction 编排 (M4 事件驱动)', () => {
 //
 // 锁定 U1 状态机回归：turnStartedAt（LLM 窗口起算锚点）+ llmWindowDurationMs（已结算窗口）+
 // turn-usage 消费（durationMs 改源，一次性清 null）+ turn-start 重锚清除不变量 +
-// assistant message_end role 守卫。八行用例与设计 D3 矩阵表逐一对应（U3）。
+// assistant message_end role 检查。八行用例与设计 D3 矩阵表逐一对应（U3）。
 describe('EventInterpreter composer-gen-stats LLM 窗口 D3 配对矩阵', () => {
   /** gen-stats 专用 interpreter 工厂（照抄 makeInterpreter 形态，多注入 onGenStats 采样回调）。 */
   function makeGenStatsInterpreter() {
@@ -382,7 +382,7 @@ describe('EventInterpreter composer-gen-stats LLM 窗口 D3 配对矩阵', () =>
     expect(lastSample(onGenStats).durationMs).toBe(2_000)
   })
 
-  it('⑧ △他角色 end 混入：start → user/toolResult/custom 的 message_end → 真 assistant end → usage → durationMs=完整窗口（role 守卫）', () => {
+  it('⑧ △他角色 end 混入：start → user/toolResult/custom 的 message_end → 真 assistant end → usage → durationMs=完整窗口（role 检查）', () => {
     vi.useFakeTimers()
     vi.setSystemTime(1_000)
     const { interp, onGenStats } = makeGenStatsInterpreter()
@@ -390,7 +390,7 @@ describe('EventInterpreter composer-gen-stats LLM 窗口 D3 配对矩阵', () =>
     interp.interpret([{ kind: 'turn-start', messageId: 'm1' }])
     vi.advanceTimersByTime(6_000) // 真窗口：t1 = 7000
     // MESSAGE_END_ALLOWED_ROLES 全量下发：user / toolResult / custom 的 end 帧同经 case 'message'，
-    // role 守卫必须放过它们不闭合窗口（否则 duration 被截断、锚点被误清）
+    // role 检查必须放过它们不关闭窗口（否则 duration 被截断、锚点被误清）
     interp.interpret([{ kind: 'message', message: makeMessageEndFrame('user') }])
     interp.interpret([{ kind: 'message', message: makeMessageEndFrame('toolResult') }])
     interp.interpret([{ kind: 'message', message: makeMessageEndFrame('custom') }])
@@ -399,7 +399,7 @@ describe('EventInterpreter composer-gen-stats LLM 窗口 D3 配对矩阵', () =>
     interp.interpret([makeTurnUsage()])
 
     expect(onGenStats).toHaveBeenCalledTimes(1)
-    // 完整窗口 6000：user/toolResult/custom end 未截断，assistant end 正常闭合
+    // 完整窗口 6000：user/toolResult/custom end 未截断，assistant end 正常封窗
     expect(lastSample(onGenStats).durationMs).toBe(6_000)
   })
 })
@@ -408,7 +408,7 @@ describe('EventInterpreter composer-gen-stats LLM 窗口 D3 配对矩阵', () =>
 //
 // 锁定 LlmWindowSampler 双锚点扩展（requestStartedAt / firstOutputAt / ttftMs）：锚点重锚
 // 清除、first-wins 幂等、无输出信号即结束 ttftMs=null（无 0 污染）、工具轮重锚（TTFT
-// 不含工具执行的契约钉）、error turn 不产脏样本、consume 一次性语义 + 分发守卫 warn。
+// 不含工具执行的契约钉）、error turn 不产脏样本、consume 一次性语义 + 分发检查 warn。
 describe('EventInterpreter composer-genstats-ttft TTFT 采样锚点（S7 契约）', () => {
   function makeGenStatsInterpreter() {
     const sent: ServerMessage[] = []
@@ -613,12 +613,12 @@ describe('EventInterpreter composer-genstats-ttft TTFT 采样锚点（S7 契约�
     expect(lastSample(onGenStats).ttftMs).toBeNull()
   })
 
-  it('G1 分发守卫：未注册 case 的 kind 出声 warn（不静默丢弃）；既有 kind 零 warn', () => {
+  it('G1 分发检查：未注册 case 的 kind 出声 warn（不静默丢弃）；既有 kind 零 warn', () => {
     vi.useFakeTimers()
     const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {})
     const { interp } = makeGenStatsInterpreter()
 
-    // 既有 kind 全谱采样（各段分发命中）：不得触发守卫 warn
+    // 既有 kind 全谱采样（各段分发命中）：不得触发检查 warn
     interp.interpret([
       { kind: 'noop' },
       { kind: 'turn-start', messageId: 'm1' },

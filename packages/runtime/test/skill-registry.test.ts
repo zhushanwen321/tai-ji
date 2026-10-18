@@ -459,15 +459,15 @@ describe('skillRegistry (W2 rebuild)', () => {
       await p
 
       // 核心 1：in-flight 完成后旧结果（staleSkills）写不回缓存——
-      // invalidateAllProjects 清了 projectInFlight，getProjectSkills 的守卫检测到 key 已不存在，跳过 set。
+      // invalidateAllProjects 清了 projectInFlight，getProjectSkills 的检查检测到 key 已不存在，跳过 set。
       // 重新 getProjectSkills 触发新一次 scanFn（返回 []），缓存值应为空而非 staleSkills。
       const skillsAfter = await reg.getProjectSkills(cwd)
       expect(skillsAfter).toEqual([])
       // scanFn 被调用两次（首次 in-flight + invalidate 后重扫），证明缓存被清后确实重扫了
       expect(scanFn).toHaveBeenCalledTimes(2)
 
-      // 核心 2：in-flight 期间不应再挂 watcher（守卫跳过 setupProjectWatcher）——
-      // invalidateAllProjects 后 watch 调用次数应为 0（首次 in-flight 守卫跳过 + 重扫时项目无 skill 目录 dirs 为空）
+      // 核心 2：in-flight 期间不应再挂 watcher（检查跳过 setupProjectWatcher）——
+      // invalidateAllProjects 后 watch 调用次数应为 0（首次 in-flight 检查跳过 + 重扫时项目无 skill 目录 dirs 为空）
       expect(chokidar.watch).not.toHaveBeenCalled()
     } finally {
       reg.dispose()

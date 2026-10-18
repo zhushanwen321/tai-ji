@@ -13,7 +13,7 @@
  * 2. rename-session ext-config（getRenameModel / setRenameModel / getRenameMode /
  *    setRenameMode）：读改写 ${PI_CODING_AGENT_DIR}/config/rename-session-ext-config.json
  *    的 model / mode 字段（与 extension 的 llm-shared getConfigPath 路径契约对齐）。
- *    extension 事件面（turn_end / message_end / 工具 execute 守卫）读时刷新（mtime+size
+ *    extension 事件面（turn_end / message_end / 工具 execute 检查）读时刷新（mtime+size
  *    缓存），本侧写入后下一事件自动生效（设计 rename-session-three-modes D1：事件面
  *    live 求值）。只改目标字段，保留文件内其他字段（enabled/maxTitleLength/thinkingLevel
  *    及未来新增）。RMW / 锁协议走共享基建 ext-config-rmw.ts（单一实现点）。

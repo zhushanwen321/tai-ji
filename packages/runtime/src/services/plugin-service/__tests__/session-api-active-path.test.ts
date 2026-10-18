@@ -1,12 +1,12 @@
 /**
- * readEntries 活跃路径过滤（消息撤回投影残留修复，U7）单元验收测试。
+ * readEntries 活跃路径过滤（消息撤回派生视图残留修复，U7）单元验收测试。
  *
  * 两块：
- * 1. filterEntriesToActivePath 纯函数（投影前裁剪）：有分支 fixture 被撤子树剔除 /
+ * 1. filterEntriesToActivePath 纯函数（派生视图前裁剪）：有分支 fixture 被撤子树剔除 /
  *    leafId 缺失·null·悬空三态防御回退（不过滤，回归钉）/ parentId 环防环终止 /
  *    线性批（增量形态父链越批）不丢数据 / 无树信息 legacy 不过滤。
  * 2. handler 级集成（真实 PluginRpcServer.dispatch → readEntries handler）：过滤真实
- *    接入读链路 + 对外五字段投影契约零变更（parentId 仍不出 runtime）。
+ *    接入读链路 + 对外五字段派生视图契约零变更（parentId 仍不出 runtime）。
  *
  * 运行：cd packages/runtime && npx vitest run src/services/plugin-service/__tests__/session-api-active-path.test.ts
  */
@@ -46,7 +46,7 @@ function branchedTree(): { entries: Record<string, unknown>[]; leafId: string } 
   }
 }
 
-describe('filterEntriesToActivePath：活跃路径裁剪（投影前）', () => {
+describe('filterEntriesToActivePath：活跃路径裁剪（派生视图生成前）', () => {
   it('有分支 fixture：被撤子树（含 task op）剔除，活跃路径条目全保留且保持文件序', () => {
     const t = branchedTree()
     const filtered = filterEntriesToActivePath(t.entries, t.leafId)
@@ -68,7 +68,7 @@ describe('filterEntriesToActivePath：活跃路径裁剪（投影前）', () => 
     expect(filterEntriesToActivePath(t.entries, 'nope')).toEqual(t.entries)
   })
 
-  it('parentId 环 → 防环守卫终止（不死循环、不抛），回溯可达条目保留', () => {
+  it('parentId 环 → 防环检查终止（不死循环、不抛），回溯可达条目保留', () => {
     const entries = [
       entry('a', 'c'), // 环：a → c → b → a
       entry('b', 'a'),
@@ -100,7 +100,7 @@ describe('filterEntriesToActivePath：活跃路径裁剪（投影前）', () => 
 })
 
 describe('readEntries handler 集成：过滤接入读链 + 对外契约零变更', () => {
-  it('被撤子树的 task op 不在回包；活跃路径 task op 仍为精确五字段投影（parentId 不出 runtime）', async () => {
+  it('被撤子树的 task op 不在回包；活跃路径 task op 仍为精确五字段派生视图（parentId 不出 runtime）', async () => {
     const t = branchedTree()
     const fakeClient = {
       exited: false,
@@ -130,7 +130,7 @@ describe('readEntries handler 集成：过滤接入读链 + 对外契约零变�
         params: { pluginId: 'p1', sessionId: 's1', customType: 'pi-scheduler:task' },
       })
 
-    // 第一轮：撤回后树——被撤子树的 task op（e3）被裁剪，其余条目非 task 域被投影过滤，
+    // 第一轮：撤回后树——被撤子树的 task op（e3）被裁剪，其余条目非 task 域被派生视图过滤，
     // 两道收窄叠加后回包 = 空集；游标照常透出（下次 sinceEntryId 语义不变）
     await read(1)
     const result1 = (sent[0]?.response?.result ?? {}) as {
@@ -142,7 +142,7 @@ describe('readEntries handler 集成：过滤接入读链 + 对外契约零变�
     expect(result1.leafEntryId).toBe('e6')
     expect(result1.sessionFile).toBe('/sessions/s1.jsonl')
 
-    // 第二轮：task op 落在活跃路径——投影契约回归（精确五字段、无 parentId）
+    // 第二轮：task op 落在活跃路径——派生视图契约回归（精确五字段、无 parentId）
     fakeClient.getEntries = async () => ({
       data: {
         entries: [
