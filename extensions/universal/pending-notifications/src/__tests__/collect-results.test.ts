@@ -22,7 +22,7 @@ import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-a
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import pendingNotificationsExtension from "../index";
-import { computeCollectWaitKeys, countActiveFromEntries, scanRegisteredIds, scanUnregisterStatuses } from "../state";
+import { computeCollectWaitKeys, countActiveFromEntries } from "../state";
 
 // ── delivery-port 全模块 mock（vi.mock 工厂提升，经 vi.hoisted 共享引用） ──
 
@@ -230,38 +230,10 @@ describe("computeCollectWaitKeys（collect_results 缺省等待集，工具侧�
 	});
 });
 
-describe("scanRegisteredIds（曾注册集：未知 id 判定源之一）", () => {
-	it("含已注销 register（register+unregister 对在册）的 id 在册；null 元素容错", () => {
-		const entries = [
-			makeRegisterEntry("done-1"),
-			{ customType: "pending:unregister", data: { id: "done-1", reason: "completed", status: "completed" } },
-			makeRegisterEntry("active-1"),
-			null,
-		];
-		const ids = scanRegisteredIds(entries as unknown[]);
-		expect(ids.has("done-1")).toBe(true);
-		expect(ids.has("active-1")).toBe(true);
-		expect(ids.has("ghost")).toBe(false);
-	});
-});
-
-describe("scanUnregisterStatuses（注销 status 回填源：collect_results outcome 缺失回填）", () => {
-	it("映射产物 status 在册的注销 entry 收进映射；词表外/畸形不收（不虚构终态）", () => {
-		const entries: unknown[] = [
-			{ customType: "pending:unregister", data: { id: "ok-1", reason: "completed", status: "completed" } },
-			{ customType: "pending:unregister", data: { id: "bad-1", reason: "x", status: "not-a-status" } },
-			{ customType: "pending:unregister", data: { id: "bad-2", reason: "x" } },
-			{ customType: "pending:unregister", data: { reason: "completed", status: "completed" } },
-			{ customType: "other", data: { id: "ok-1", status: "failed" } },
-			null,
-		];
-		const statuses = scanUnregisterStatuses(entries);
-		expect(statuses.get("ok-1")).toBe("completed");
-		expect(statuses.has("bad-1")).toBe(false);
-		expect(statuses.has("bad-2")).toBe(false);
-		expect(statuses.size).toBe(1);
-	});
-});
+// scanPendingFields（终局回填字段视图）的用例已随 MF-2-1 单点收敛移至 protocol：
+// packages/extension-protocol/src/pending-entries.test.ts「字段映射视图」describe
+// （register 首见 type + 注销 status 词表成员判定，同一规则供本包回填与
+// delivery-port 快照基线消费）。
 
 // ────────────────────────────────────────────────────
 // collect_results 工具（mock port 注入）
@@ -376,15 +348,17 @@ describe("collect_results tool", () => {
 		// execute 同步段已跑到 await（collectArm + onCollectArrival 订阅完成）
 		const arrivalCb = setup.port.onCollectArrival.mock.calls[0][0] as () => void;
 		const unsubscribe = setup.port.onCollectArrival.mock.results[0].value as ReturnType<typeof vi.fn>;
+		// 端口 consume 的真实返回形态（MF-1-6）：只含 {id, content, details}——type/outcome
+		// 由工具侧终局回填（register entry 在册 → type；注销不在册 → outcome 缺省）
 		setup.port.consume.mockReturnValueOnce([
-			{ id: "w-1", type: "workflow", outcome: "completed", content: "payload" },
+			{ id: "w-1", content: "payload" },
 		]);
 
 		arrivalCb();
 		const res = await promise;
 
 		expect(res.details.collected).toEqual([
-			{ id: "w-1", type: "workflow", outcome: "completed", content: "payload" },
+			{ id: "w-1", type: "workflow", content: "payload" },
 		]);
 		expect(res.details.stillOpen).toEqual([]);
 		expect(setup.port.collectRelease).toHaveBeenCalledTimes(1);
@@ -400,9 +374,10 @@ describe("collect_results tool", () => {
 
 		const promise = runCollect(setup, {});
 		const arrivalCb = setup.port.onCollectArrival.mock.calls[0][0] as () => void;
-		// 端口 consume 的真实返回形态：载荷在、outcome 取不到（注销尚未落盘）
+		// 端口 consume 的真实返回形态：载荷在、type/outcome 取不到（注销尚未落盘——
+		// register 已落盘但本用例镜像 deliver 栈内时点，mock 按最简形态不给 type）
 		setup.port.consume.mockReturnValueOnce([
-			{ id: "sm-1", type: "session", content: "2 queued messages done", details: { fulfills: 2 } },
+			{ id: "sm-1", content: "2 queued messages done", details: { fulfills: 2 } },
 		]);
 
 		arrivalCb(); // deliver 同步栈前半：consume 取走载荷，outcome 缺失
@@ -426,7 +401,7 @@ describe("collect_results tool", () => {
 		const promise = runCollect(setup, {});
 		const arrivalCb = setup.port.onCollectArrival.mock.calls[0][0] as () => void;
 		setup.port.consume.mockReturnValueOnce([
-			{ id: "w-1", type: "workflow", content: "payload without unregister" },
+			{ id: "w-1", content: "payload without unregister" },
 		]);
 
 		arrivalCb();
@@ -447,14 +422,14 @@ describe("collect_results tool", () => {
 		const promise = runCollect(setup, { timeout_ms: 5_000 });
 		const arrivalCb = setup.port.onCollectArrival.mock.calls[0][0] as () => void;
 		setup.port.consume
-			.mockReturnValueOnce([{ id: "fast", type: "bash", outcome: "completed", content: "fast done" }])
+			.mockReturnValueOnce([{ id: "fast", content: "fast done" }])
 			.mockReturnValue([]);
 
 		arrivalCb(); // fast 到达，slow 仍等
 		await vi.advanceTimersByTimeAsync(5_000);
 		const res = await promise;
 
-		expect(res.details.collected).toEqual([{ id: "fast", type: "bash", outcome: "completed", content: "fast done" }]);
+		expect(res.details.collected).toEqual([{ id: "fast", type: "workflow", content: "fast done" }]);
 		expect(res.details.stillOpen).toEqual([{ id: "slow" }]);
 		expect(setup.port.collectRelease).toHaveBeenCalledTimes(1);
 	});
@@ -484,14 +459,14 @@ describe("collect_results tool", () => {
 		const promise = runCollect(setup, {}, controller.signal);
 		const arrivalCb = setup.port.onCollectArrival.mock.calls[0][0] as () => void;
 		setup.port.consume
-			.mockReturnValueOnce([{ id: "w-1", type: "workflow", outcome: "completed", content: "partial" }])
+			.mockReturnValueOnce([{ id: "w-1", content: "partial" }])
 			.mockReturnValue([]);
 
 		arrivalCb(); // w-1 到达
 		controller.abort(); // 用户打断
 		const res = await promise; // 不抛错即通过
 
-		expect(res.details.collected).toEqual([{ id: "w-1", type: "workflow", outcome: "completed", content: "partial" }]);
+		expect(res.details.collected).toEqual([{ id: "w-1", type: "workflow", content: "partial" }]);
 		expect(res.details.stillOpen).toEqual([{ id: "w-2" }]);
 		expect(setup.port.collectRelease).toHaveBeenCalledTimes(1);
 	});
@@ -509,20 +484,23 @@ describe("collect_results tool", () => {
 		expect(setup.port.collectRelease).toHaveBeenCalledTimes(1);
 	});
 
-	it("未知 id → errors 逐条列出、不阻断已知子集（collectArm 只收已知键）", async () => {
+	it("未知 id → errors 逐条列出、不阻断已知子集（collectArm 收全量键，unknown 态由端口定态回流）", async () => {
 		setup.entries.push(makeRegisterEntry("w-1"));
-		setup.port.collectArm.mockReturnValue([{ id: "w-1", state: "waiting" }]);
+		setup.port.collectArm.mockReturnValue([
+			{ id: "w-1", state: "waiting" },
+			{ id: "ghost", state: "unknown" },
+		]);
 
 		const promise = runCollect(setup, { ids: ["w-1", "ghost", "ghost"] });
 		const arrivalCb = setup.port.onCollectArrival.mock.calls[0][0] as () => void;
-		setup.port.consume.mockReturnValueOnce([{ id: "w-1", type: "workflow", outcome: "completed", content: "ok" }]);
+		setup.port.consume.mockReturnValueOnce([{ id: "w-1", content: "ok" }]);
 
 		arrivalCb();
 		const res = await promise;
 
-		// 已知子集照常等待并收取
-		expect(setup.port.collectArm).toHaveBeenCalledWith(["w-1"]);
-		expect(res.details.collected).toEqual([{ id: "w-1", type: "workflow", outcome: "completed", content: "ok" }]);
+		// 已知子集照常等待并收取；显式 ids 全量（去重）交端口定态（MF-1-5：未知判定单点在端口）
+		expect(setup.port.collectArm).toHaveBeenCalledWith(["w-1", "ghost"]);
+		expect(res.details.collected).toEqual([{ id: "w-1", type: "workflow", content: "ok" }]);
 		// 未知 id 去重后逐条列出
 		expect(res.details.errors).toEqual([
 			{ id: "ghost", reason: expect.stringContaining("unknown id") },
@@ -530,12 +508,20 @@ describe("collect_results tool", () => {
 		expect(res.content[0].text).toContain("ghost");
 	});
 
-	it("全部 ids 未知 → 立即返回 errors，端口零触达", async () => {
+	it("全部 ids 未知 → 立即返回 errors（collectArm 定态全 unknown，不进入等待）", async () => {
+		setup.port.collectArm.mockReturnValue([
+			{ id: "ghost-a", state: "unknown" },
+			{ id: "ghost-b", state: "unknown" },
+		]);
+
 		const res = await runCollect(setup, { ids: ["ghost-a", "ghost-b"] });
 
 		expect(res.details.collected).toEqual([]);
+		expect(res.details.stillOpen).toEqual([]);
 		expect(res.details.errors).toHaveLength(2);
-		expect(setup.port.collectArm).not.toHaveBeenCalled();
+		// 未知键不登记等待集：不订阅到达回调、不挂满超时
+		expect(setup.port.onCollectArrival).not.toHaveBeenCalled();
+		expect(setup.port.collectArm).toHaveBeenCalledWith(["ghost-a", "ghost-b"]);
 	});
 
 	it("已完结 id（register+unregister 在册）不算未知 → collectArm 收键（第四态/快照收取入口）", async () => {

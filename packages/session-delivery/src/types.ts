@@ -95,18 +95,34 @@ export interface DeliveryMessage {
 // ─── 端口（注入运行时能力） ──────────────────────────────────
 
 /**
- * port.send 的受理回执（U2 回执口径扩展位）。
+ * 设计内等待原因（F1-13）：port 半区投递端的「注入门禁 hold」——这些拒绝不是失败
+ * （host.sendMessage 未调用，条目从未被注入），内核不计首败，条目留守等投递端下一
+ * 边沿重新提交。两端唯一契约点：内核消费（onSendReceipt 的 deferred 分流）与 port
+ * 产单（`{ accepted: false, deferred }`）共用本词表——新增成员属内核行为变更，不是
+ * 端口私货。
+ * - 'merge-commit-hold'：port 合批提交窗的注入门禁（窗口结束 kernel.flush 重提）。
+ * - 'compaction-wait'：port compaction 提交侧等待的第二道防线（覆盖提交同步链与
+ *   compaction 边沿交叠的残余窗口；compaction 终态边沿复位唤醒重提）。
+ */
+export type DeliveryDeferReason = 'merge-commit-hold' | 'compaction-wait'
+
+/**
+ * port.send 显式受理回执（U2 回执口径扩展位）。
  *
  * 受理 = 底层通道接受了消息（进入投递路径），**不等于送达事实**——送达判定由
  * 调用方按自身回执锚点确认（如扩展侧扫描 custom_message entry）。旧 port 实现
  * 返回 void 不受影响（void = 受理未知，按成功处理，与既有内核语义一致）。
+ *
+ * 拒绝分支为判别联合（deferred 与 reason 互斥，MF-1-4）：
+ * - `{ accepted: false, deferred }` = 设计内等待（见 DeliveryDeferReason）——内核
+ *   不计首败，条目留守（onSendDeferred）；
+ * - `{ accepted: false, reason }` = 显式拒绝（消息未进入任何通道，走错误重试路径，
+ *   reason 进 warn 日志与 reject 链）。
  */
-export interface SendReceipt {
-  /** 受理结果。false = 底层显式拒绝（消息未进入任何通道，走错误重试路径）。 */
-  accepted: boolean
-  /** 拒绝原因（accepted:false 时携带，进 warn 日志与 reject 链）。 */
-  reason?: string
-}
+export type SendReceipt =
+  | { accepted: true }
+  | { accepted: false; deferred: DeliveryDeferReason }
+  | { accepted: false; reason?: string }
 
 /** 内核与外部世界的唯一接口（D2 端口注入）。 */
 export interface DeliveryPort {

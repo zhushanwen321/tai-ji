@@ -9,6 +9,8 @@ export {
   type DeliveryConfig,
   type DeliveryHandle,
   type SendReceipt,
+  // 设计内等待契约（MF-1-4）：port 半区产单与内核消费的唯一词表点
+  type DeliveryDeferReason,
   // u-contracts（投递所有权内核契约根）：条目状态机/双视图
   type DeliveryLane,
   type DeliveryEntryState,

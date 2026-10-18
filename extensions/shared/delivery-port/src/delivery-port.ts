@@ -45,7 +45,7 @@
 // 变），随后按「collectKey 键集 ∩ 在途等待集 ≠ ∅」分流——命中 → 挂起缓冲（纯内存，
 // 不进投递内核）+ onCollectArrival 唤醒等待器；未命中 → push 现状零变化。挂起不独立
 // 持久化，投递日志即耐久层：崩溃后差集重放按未投递重投（push），收取过的条目写
-// collected 终局（ack outcome 扩值）构造性退出差集。等待器三 API（collectArm 四态
+// collected 终局（ack outcome 扩值）构造性退出差集。等待器三 API（collectArm 五态
 // 快照 / consume 全键展开收取 / collectRelease 解散等待集 + 未收条目直通内核跳过
 // 合批窗口）。session 替换路径 abort 先于 dispose 归并中断语义；extension 重载在
 // collect 阻塞期不可达（设计 §3.1 [重绑] 登记），dispose 只做在途等待器 warn 留痕
@@ -72,8 +72,7 @@ import type {
   DeliveryIntent,
 } from "@zhushanwen/session-delivery";
 import {
-  PENDING_REGISTER_ENTRY_TYPE,
-  PENDING_UNREGISTER_ENTRY_TYPE,
+  scanPendingEntries,
   type MappedPendingStatus,
 } from "@zhushanwen/extension-protocol";
 
@@ -247,15 +246,16 @@ export function createDeliveryPort(host: DeliveryPortHost): DeliveryPortHandle {
     subscribeSettled: (cb) => host.onAgentSettled(cb),
     send(msg: DeliveryMessage, intent: DeliveryIntent) {
       // merge-commit 期 hold：默认通道组聚合窗口（文件头分组放行段）。设计内等待
-      // 非失败，不计 settleRejected（内核 retain warn 逐条留痕可查）。
+      // 非失败，不计 settleRejected（内核 retain warn 逐条留痕可查）。deferred 字段
+      // 产单（MF-1-4：DeliveryDeferReason 判别联合，内核零字符串白名单）。
       if (mergeCommitting) {
-        return { accepted: false, reason: "merge-commit-hold" };
+        return { accepted: false as const, deferred: "merge-commit-hold" as const };
       }
       // 提交侧 compaction 等待（§3.8）的第二道防线：pump 的缓冲挂起是常态路径
       // （提交前统一预检），本检查覆盖「提交同步链与 compaction 边沿交叠」的
       // 残余窗口。标记 true 即留账（内核 retain）等唤醒边沿重投。
       if (compacting) {
-        return { accepted: false, reason: "compaction-wait" };
+        return { accepted: false as const, deferred: "compaction-wait" as const };
       }
       const payload = msg.payload;
       if (payload.kind !== "custom") {
@@ -588,10 +588,10 @@ export function createDeliveryPort(host: DeliveryPortHost): DeliveryPortHandle {
   // ─── collect 挂起面（result-collect 设计 §3.1②）────────────
 
   /**
-   * 登记在途等待集 + 对每个 key 按四态判据定态（同步段：JS 单线程内无交错窗口，
+   * 登记在途等待集 + 对每个 key 按五态判据定态（同步段：JS 单线程内无交错窗口，
    * 与 deliver 分流读同一等待集——I3 等待集原子性）。
    *
-   * 四态（快照单键一条）：
+   * 五态（快照单键一条；前四态 = result-collect 设计 §3.1② 判据）：
    * - ready：键 ∈ 某日志条目键集且该条目已有终局（acked ∪ delivered）→ 读侧快照
    *   收取（不写新终局——已注入条目再写 collected 会让日志宣称「未注入过」）；
    * - in-push-pipeline：键 ∈ 日志条目键集、条目无终局（已过分流点，在 push 管线
@@ -599,12 +599,10 @@ export function createDeliveryPort(host: DeliveryPortHost): DeliveryPortHandle {
    * - unregistered-no-entry：键曾注册已注销、不属任何日志条目键集 → 按 unregister
    *   entry 的 status 定 outcome 进 collected（无载荷快照形态）；
    * - waiting：活跃（register 在册无注销）且无日志条目 → 登记等待集，后续 deliver
-   *   命中被挂起。
-   *
-   * 契约外输入防御：键未注册且无条目（「未知 id」——判定源 = 活跃集 ∪ 投递日志 ∪
-   * 曾注册集的补集，工具侧组装 errors）不登记等待集（防空等到 timeout 挂死）、不
-   * 虚构终态；快照按 waiting 形态表达（state 词表无第五态），语义由工具侧未知判定
-   * 覆盖。
+   *   命中被挂起；
+   * - unknown（MF-1-5 第五态）：键未注册且无条目——判定源 = 活跃集 ∪ 投递日志 ∪
+   *   曾注册集的补集。不登记等待集（防空等到 timeout 挂死）、不虚构终态；工具侧
+   *   读本态组装 errors（不再伪装 waiting——端口是唯一未知判定点，词表诚实表达）。
    */
   function collectArm(keys: string[]): CollectSnapshot {
     if (disposed) throw new Error("collectArm on disposed delivery port");
@@ -633,9 +631,9 @@ export function createDeliveryPort(host: DeliveryPortHost): DeliveryPortHandle {
         collectWaitingKeys.add(key);
         snapshot.push({ id: key, state: "waiting" });
       } else {
-        // 未知键（未注册且无条目）：不登记等待（防挂死）、不虚构终态；词表内按
-        // waiting 表达——errors 组装归工具侧（活跃集 ∪ 日志键集 ∪ 曾注册集补集）。
-        snapshot.push({ id: key, state: "waiting" });
+        // 未知键（未注册且无条目）：不登记等待（防挂死）、不虚构终态——显式 unknown
+        // 态（工具侧读快照组装 errors，errors 判定归端口五态判据单点）。
+        snapshot.push({ id: key, state: "unknown" });
       }
     }
     return snapshot;
@@ -644,13 +642,15 @@ export function createDeliveryPort(host: DeliveryPortHost): DeliveryPortHandle {
   /**
    * 取走挂起缓冲全部条目，按条目键集全量逐键展开（每键一条、载荷共享同一日志
    * 条目——managed 合批条目多键一次收齐），collected 终局按日志条目写一次且仅写
-   * 从未注入的挂起条目（I1 收取唯一性）。终局写失败降级：先写终局后返回的正常
-   * 收取路径上 appendEntry 偶发抛错 → warn 留痕、载荷照常返回（条目无终局记录，
-   * 差集重放可能重投为 push——偶发语义按设计 §3.4 处置，不向等待器传播）。
+   * 从未注入的挂起条目（I1 收取唯一性）。返回条目只含 {id, content, details}——
+   * type/outcome 映射归消费方终局回填的单遍扫描（MF-1-6：端口不再对每次 consume
+   * 全量扫描 session entries，单次 collect 的到达处理量与全部历史条目数解耦）。
+   * 终局写失败降级：先写终局后返回的正常收取路径上 appendEntry 偶发抛错 → warn
+   * 留痕、载荷照常返回（条目无终局记录，差集重放可能重投为 push——偶发语义按设计
+   * §3.4 处置，不向等待器传播）。
    */
   function consume(): CollectedEntry[] {
     if (disposed) return [];
-    const pending = scanPendingBaseline(host.readSessionEntries());
     const results: CollectedEntry[] = [];
     const consumed = [...collectBuffer.values()];
     collectBuffer.clear();
@@ -668,8 +668,6 @@ export function createDeliveryPort(host: DeliveryPortHost): DeliveryPortHandle {
       for (const key of rec.collectKey ?? []) {
         results.push({
           id: key,
-          type: pending.registerTypes.get(key),
-          outcome: pending.unregisterStatus.get(key),
           content: rec.payload.content,
           details: rec.payload.details,
         });
@@ -805,14 +803,16 @@ export function createDeliveryPort(host: DeliveryPortHost): DeliveryPortHandle {
 /**
  * collectArm / consume 的 pending 对账基线（从当前 session entries 现算——第四态
  * 判据跨 register / unregister / 投递日志三源，JS 单线程内现算无交错窗口，I3）。
- * register 首见去重、unregister 全局抵消（与 @zhushanwen/extension-protocol
- * applyPendingDiff 差集规则同口径；本包只读对账不维护差集产品语义，独立轻量扫描
- * 不引 pending-notifications 的产品归一——type 原样透传，归一化归消费方）。
+ * 字段映射（register 首见 type / 注销 status）单点在 protocol scanPendingEntries
+ * （MF-2-1：与 pending-notifications 工具侧终局回填共用同一映射规则，首见语义统一
+ * 为首条胜出——本包原持的本地映射段已删）；本包只读对账不维护差集产品语义，自派生
+ * registeredIds 分类集（不引 pending-notifications 的产品归一——type 原样透传，
+ * 归一化归消费方）。
  */
 interface PendingBaseline {
   /** 曾注册集（全部 register entries 的 id，含已注销）。 */
   registeredIds: Set<string>;
-  /** 注册条目 id → type 原样（string 才收；归一化归 pending 消费方）。 */
+  /** 注册条目 id → type 原样（protocol 首见规则单点；归一化归 pending 消费方）。 */
   registerTypes: Map<string, string>;
   /** 已注销集（unregister entry id 全局抵消）。 */
   unregisteredIds: Set<string>;
@@ -820,43 +820,18 @@ interface PendingBaseline {
   unregisterStatus: Map<string, MappedPendingStatus>;
 }
 
-const MAPPED_STATUS_VALUES: ReadonlySet<string> = new Set([
-  "completed",
-  "failed",
-  "cancelled",
-  "expired",
-  "time_limited",
-  "aborted",
-]);
-
 function scanPendingBaseline(entries: readonly unknown[]): PendingBaseline {
-  const baseline: PendingBaseline = {
-    registeredIds: new Set(),
-    registerTypes: new Map(),
-    unregisteredIds: new Set(),
-    unregisterStatus: new Map(),
-  };
-  for (const entry of entries) {
-    if (!isPlainObject(entry) || entry["type"] !== "custom") continue;
-    const data = entry["data"];
-    if (!isPlainObject(data)) continue;
-    const id = data["id"];
-    if (typeof id !== "string" || id === "") continue;
-    if (entry["customType"] === PENDING_REGISTER_ENTRY_TYPE) {
-      // 首见去重（协议 register 首见规则同口径；id 全局唯一前提下的防御形态）
-      if (!baseline.registeredIds.has(id)) {
-        baseline.registeredIds.add(id);
-        if (typeof data["type"] === "string") baseline.registerTypes.set(id, data["type"]);
-      }
-    } else if (entry["customType"] === PENDING_UNREGISTER_ENTRY_TYPE) {
-      baseline.unregisteredIds.add(id);
-      const status = data["status"];
-      if (typeof status === "string" && MAPPED_STATUS_VALUES.has(status)) {
-        baseline.unregisterStatus.set(id, status as MappedPendingStatus);
-      }
-    }
+  const scan = scanPendingEntries(entries);
+  const registeredIds = new Set<string>();
+  for (const { data } of scan.registerEntries) {
+    if (typeof data.id === "string" && data.id !== "") registeredIds.add(data.id);
   }
-  return baseline;
+  return {
+    registeredIds,
+    registerTypes: scan.registerTypes,
+    unregisteredIds: scan.unregisteredIds,
+    unregisterStatus: scan.unregisterStatuses,
+  };
 }
 
 /** 键集 ∩ 等待集 ≠ ∅（deliver 挂起分流的匹配判定）。 */

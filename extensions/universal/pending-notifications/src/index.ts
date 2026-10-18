@@ -51,7 +51,10 @@
  */
 
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
-import { mapReasonToStatus as mapReasonToStatusImpl } from "@zhushanwen/extension-protocol";
+import {
+	mapReasonToStatus as mapReasonToStatusImpl,
+	scanPendingFields,
+} from "@zhushanwen/extension-protocol";
 import { getDeliveryPort, type CollectedEntry } from "@zhushanwen/pi-delivery-port";
 import { getLogger } from "@zhushanwen/pi-extension-logger";
 import { Type } from "typebox";
@@ -62,8 +65,6 @@ import {
 	hasPendingId,
 	isPendingActive,
 	normalizePendingType,
-	scanRegisteredIds,
-	scanUnregisterStatuses,
 	type PendingEntry,
 	type PendingKind,
 	type PendingStatus,
@@ -327,7 +328,7 @@ export default function pendingNotificationsExtension(pi: ExtensionAPI): void {
 
 	/** collect_results 执行体（工厂闭包：读 currentSessionId 缺省集过滤基准）。
 	 *
-	 * 执行序（设计 §3.1③）：等待键集计算 → collectArm（端口同步段登记 + 四态快照）→
+	 * 执行序（设计 §3.1③）：等待键集计算 → collectArm（端口同步段登记 + 五态快照）→
 	 * 快照合并组装（ready ∪ unregistered-no-entry 进 collected；in-push-pipeline 进
 	 * stillOpen 附 note；waiting 留守）→ await 到达/超时/abort 三者先到 → consume +
 	 * collectRelease → 返回。AbortSignal 捕获后正常 return（禁抛错路径——pi 契约下抛错
@@ -341,37 +342,22 @@ export default function pendingNotificationsExtension(pi: ExtensionAPI): void {
 		const entries = ctx.sessionManager.getEntries();
 		const timeoutMs = params.timeout_ms ?? COLLECT_DEFAULT_TIMEOUT_MS;
 
-		// 等待键集：显式 ids 只留已知子集（未知 → errors 逐条列出，不整体拒绝）；
-		// 缺省 = computeCollectWaitKeys（活跃 − lifetime 死亡债权 − 跨 session 残留，
-		// currentSessionId 空串回退同款）。未知判定源 = 活跃集 ∪ 曾注册集（本 session
-		// entries）∪ 投递日志键集——日志键集不可工具侧直读，但其成员键恒「先注册后投递」
-		// 且与注册条目同落本 session entries，活跃集 ∪ 曾注册集已覆盖全部可等待键；
-		// 纯日志无注册的键由端口四态判据定态（无键旧条目不参与键集匹配，§3.1③ 兼容口径）。
-		const unknownIds: string[] = [];
+		// 等待键集：显式 ids 全量交端口五态判决定态（unknown 态键由快照回流进
+		// errors，MF-1-5：未知判定单点在端口——工具侧不再重扫 entries 算「活跃集 ∪
+		// 曾注册集」补集）；缺省 = computeCollectWaitKeys（活跃 − lifetime 死亡债权
+		// − 跨 session 残留，currentSessionId 空串回退同款）。
 		let waitKeys: string[];
 		if (params.ids) {
-			const everRegistered = scanRegisteredIds(entries);
-			const activeIds = new Set(countActiveFromEntries(entries).ids);
-			const known: string[] = [];
-			for (const id of new Set(params.ids)) {
-				if (activeIds.has(id) || everRegistered.has(id)) known.push(id);
-				else unknownIds.push(id);
-			}
-			waitKeys = known;
+			waitKeys = [...new Set(params.ids)];
 		} else {
 			waitKeys = computeCollectWaitKeys(entries, currentSessionId);
 		}
 
-		const errors: CollectErrorEntry[] = unknownIds.map((id) => ({
-			id,
-			reason: "unknown id — not an active pending operation and never registered in this session",
-		}));
-
-		// 等待集为空：立即返回，不进入等待、不触端口（设计 §3.1③ 边界语义）。
+		// 等待集为空：立即返回，不进入等待、不触端口（设计 §3.1③ 边界语义）。显式
+		// ids 全量交端口定态后空集只剩两种形态（空数组 / 缺省集空），均不产 errors。
 		if (waitKeys.length === 0) {
 			const details: CollectToolDetails = { collected: [], stillOpen: [] };
-			if (errors.length > 0) details.errors = errors;
-			debugLog("debug", "collect_results: empty wait set, returning immediately", { errors });
+			debugLog("debug", "collect_results: empty wait set, returning immediately");
 			return { content: [{ type: "text" as const, text: formatCollectDetails(details) }], details };
 		}
 
@@ -395,11 +381,13 @@ export default function pendingNotificationsExtension(pi: ExtensionAPI): void {
 			};
 		}
 
-		// collectArm：端口同步段登记等待集 + 四态快照（每 key 一条）。
+		// collectArm：端口同步段登记等待集 + 五态快照（每 key 一条；unknown 态 =
+		// 端口未知判定单点回流）。
 		const snapshot = port.collectArm(waitKeys);
 		const collected: CollectedEntry[] = [];
 		const stillOpen: StillOpenEntry[] = [];
 		const waitingIds: string[] = [];
+		const unknownIds: string[] = [];
 		for (const snap of snapshot) {
 			switch (snap.state) {
 				case "ready":
@@ -420,8 +408,16 @@ export default function pendingNotificationsExtension(pi: ExtensionAPI): void {
 				case "waiting":
 					waitingIds.push(snap.id);
 					break;
+				case "unknown":
+					// 未知 id（端口五态判据单点判定）：逐条列出、不阻断已知子集。
+					unknownIds.push(snap.id);
+					break;
 			}
 		}
+		const errors: CollectErrorEntry[] = unknownIds.map((id) => ({
+			id,
+			reason: "unknown id — not an active pending operation and never registered in this session",
+		}));
 
 		// 到达等待：事件驱动（onCollectArrival）不轮询；到达/超时/abort 三者先到。
 		// 完成判据 = 全部等待键出现在已收取集合（到达即 consume 取走载荷+终局）。
@@ -460,17 +456,21 @@ export default function pendingNotificationsExtension(pi: ExtensionAPI): void {
 		collected.push(...port.consume());
 		port.collectRelease();
 
-		// outcome 缺失回填（设计 §3.1③ 字段来源表：outcome 与 pending:unregister 的
-		// status 对齐）：「等待中同步到达」的挂起条目在端口 consume 时点，生产方的注销
-		// entry 尚未落盘（managed flushBatch 的 deliver 与 unregisterPending 同步段相邻、
-		// deliver 先行；端口 consume 由到达回调在 deliver 栈内同步触发），outcome 恒取
-		// 空。await 恢复后生产方同步栈已完成（注销 entry 已落盘），按本 session entries
-		// 现算回填；注销不在册的条目保持 undefined（诚实缺省，不虚构终态）。
-		if (collected.some((c) => c.outcome === undefined)) {
-			const statuses = scanUnregisterStatuses(ctx.sessionManager.getEntries());
+		// type/outcome 缺失回填（设计 §3.1③ 字段来源表：type 与 pending:register 的
+		// type 对齐、outcome 与 pending:unregister 的 status 对齐；MF-1-6：端口 consume
+		// 只返回 {id, content, details}，终态字段统一由本处单遍扫描回填）：「等待中
+		// 同步到达」的挂起条目在端口 consume 时点，生产方的注销 entry 尚未落盘
+		// （managed flushBatch 的 deliver 与 unregisterPending 同步段相邻、deliver 先
+		// 行；端口 consume 由到达回调在 deliver 栈内同步触发），outcome 恒取空。await
+		// 恢复后生产方同步栈已完成（注销 entry 已落盘），按本 session entries 现算回填；
+		// 注销不在册的条目保持 undefined（诚实缺省，不虚构终态）。快照收取条目
+		// （ready / unregistered-no-entry）的 type/outcome 已由端口 collectArm 填充，
+		// 回填只补缺不覆盖。
+		if (collected.some((c) => c.outcome === undefined || c.type === undefined)) {
+			const fields = scanPendingFields(ctx.sessionManager.getEntries());
 			for (const c of collected) {
-				const status = statuses.get(c.id);
-				if (c.outcome === undefined && status !== undefined) c.outcome = status;
+				if (c.type === undefined) c.type = fields.registerTypes.get(c.id);
+				if (c.outcome === undefined) c.outcome = fields.unregisterStatuses.get(c.id);
 			}
 		}
 

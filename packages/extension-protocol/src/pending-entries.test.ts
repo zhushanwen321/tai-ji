@@ -3,9 +3,11 @@ import {
   PENDING_REGISTER_ENTRY_TYPE,
   PENDING_UNREGISTER_ENTRY_TYPE,
   scanPendingEntries,
+  scanPendingFields,
   applyPendingDiff,
   collectActivePendingIds,
   mapReasonToStatus,
+  MAPPED_PENDING_STATUSES,
   type MappedPendingStatus,
 } from './pending-entries'
 
@@ -17,6 +19,11 @@ const reg = (id: string, extra: Record<string, unknown> = {}) => ({
 const unreg = (id: string) => ({
   customType: 'pending:unregister',
   data: { id },
+})
+
+const unregStatus = (id: string, status: unknown) => ({
+  customType: 'pending:unregister',
+  data: { id, reason: 'fixture', status },
 })
 
 describe('PENDING_*_ENTRY_TYPE 常量（落盘契约字符串锁定）', () => {
@@ -53,6 +60,78 @@ describe('scanPendingEntries（单趟分流 + S-10 容错）', () => {
     ])
     expect(scan.registerEntries).toEqual([{ data: {} }])
     expect(scan.unregisteredIds.size).toBe(0)
+  })
+})
+
+describe('字段映射视图（MF-2-1 单点：register 首见 type + 注销 status，collect 链路统一规则）', () => {
+  it('registerTypes 首条胜出：同 id 重复不覆盖（后条带不同 type 亦然）', () => {
+    const scan = scanPendingEntries([reg('bt-1', { type: 'bash' }), reg('bt-1', { type: 'workflow' })])
+    expect(scan.registerTypes.get('bt-1')).toBe('bash')
+  })
+
+  it('首条无 type 则该 id 恒无映射——不被后续重复条目补位（首见语义单点，旧工具版补位行为废除）', () => {
+    const scan = scanPendingEntries([reg('bt-1'), reg('bt-1', { type: 'bash' })])
+    expect(scan.registerTypes.has('bt-1')).toBe(false)
+  })
+
+  it('registerTypes id 非法（非 string / 空串）不入字段视图；type 非 string 不收', () => {
+    const scan = scanPendingEntries([
+      reg('', { type: 'bash' }),
+      { customType: 'pending:register', data: { id: 42, type: 'bash' } },
+      reg('ok-1', { type: 7 }),
+    ])
+    expect(scan.registerTypes.size).toBe(0)
+  })
+
+  it('unregisterStatuses 仅收 MAPPED_PENDING_STATUSES 成员；同 id 末次合法值胜出，后条非法不抹除前条', () => {
+    const scan = scanPendingEntries([
+      unregStatus('bt-1', 'completed'),
+      unregStatus('bt-1', 'not-a-status'),
+      unregStatus('bt-2', 42),
+      unregStatus('bt-3', 'active'),
+      unreg('bt-4'),
+    ])
+    expect(scan.unregisterStatuses.get('bt-1')).toBe('completed')
+    expect(scan.unregisterStatuses.has('bt-2')).toBe(false)
+    expect(scan.unregisterStatuses.has('bt-3')).toBe(false) // 'active' 是初始态不在终态词表
+    expect(scan.unregisterStatuses.has('bt-4')).toBe(false)
+    expect(scan.unregisterStatuses.size).toBe(1)
+  })
+
+  it('unregisterStatuses 空串 id 不入字段视图（diff 层 unregisteredIds 语义不动）', () => {
+    const scan = scanPendingEntries([unregStatus('', 'completed')])
+    expect(scan.unregisterStatuses.size).toBe(0)
+    expect(scan.unregisteredIds.has('')).toBe(true)
+  })
+
+  it('register/unregister 分流互不串扰：其余 customType 与 null 元素不进字段视图', () => {
+    const scan = scanPendingEntries([
+      { customType: 'other:event', data: { id: 'x', type: 'bash', status: 'failed' } },
+      null,
+      reg('bt-1', { type: 'workflow' }),
+      unregStatus('bt-1', 'failed'),
+    ])
+    expect(scan.registerTypes.get('bt-1')).toBe('workflow')
+    expect(scan.unregisterStatuses.get('bt-1')).toBe('failed')
+    expect(scan.registerTypes.has('x')).toBe(false)
+    expect(scan.unregisterStatuses.has('x')).toBe(false)
+  })
+
+  it('scanPendingFields = 字段映射投影（终局回填消费面：查表补 type/outcome）', () => {
+    const fields = scanPendingFields([
+      reg('done-1', { type: 'workflow' }),
+      unregStatus('done-1', 'completed'),
+      reg('active-1', { type: 'subagent' }),
+      unregStatus('bad-1', 'not-a-status'),
+      unregStatus('bad-2', undefined),
+      { customType: 'pending:unregister', data: { status: 'completed' } },
+    ])
+    expect(fields.registerTypes.get('done-1')).toBe('workflow')
+    expect(fields.registerTypes.get('active-1')).toBe('subagent')
+    expect(fields.unregisterStatuses.get('done-1')).toBe('completed')
+    expect(fields.unregisterStatuses.has('bad-1')).toBe(false)
+    expect(fields.unregisterStatuses.has('bad-2')).toBe(false)
+    expect(fields.unregisterStatuses.size).toBe(1)
   })
 })
 
@@ -176,5 +255,26 @@ describe('mapReasonToStatus（reason→status 落盘契约权威单点，D10）'
   it('未知 reason 落 default 兜底 completed（未来新词不再静默误标口径的登记处）', () => {
     expect(mapReasonToStatus('some-future-reason')).toBe('completed')
     expect(mapReasonToStatus('')).toBe('completed')
+  })
+})
+
+describe('MAPPED_PENDING_STATUSES（值集单源导出，MF-1-5）', () => {
+  it('Set 成员恰等于 MappedPendingStatus 联合（派生自 REASON_STATUS_MAP，无第二份词表）', () => {
+    // Record 全键字面量：MappedPendingStatus 长出第 7 个成员即编译错（同上「禁扩词表」手法）
+    const fullVocabulary: Record<MappedPendingStatus, true> = {
+      completed: true,
+      failed: true,
+      cancelled: true,
+      expired: true,
+      time_limited: true,
+      aborted: true,
+    }
+    expect(MAPPED_PENDING_STATUSES.size).toBe(Object.keys(fullVocabulary).length)
+    for (const status of MAPPED_PENDING_STATUSES) {
+      expect(fullVocabulary[status as MappedPendingStatus]).toBe(true)
+    }
+    // 词表外值不在集（消费方成员判定的拒收分支）
+    expect(MAPPED_PENDING_STATUSES.has('active')).toBe(false)
+    expect(MAPPED_PENDING_STATUSES.has('not-a-status')).toBe(false)
   })
 })

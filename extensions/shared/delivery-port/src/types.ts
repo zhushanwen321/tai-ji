@@ -84,11 +84,12 @@ export type DeliveryDeliverResult =
 /**
  * 收取条目（collect 面返回给等待器的单条结果；字段来源设计 §3.1③ 字段来源表）：
  * id = 收取展开键（单债权条目 = 生产方申报的操作 id；managed 合批条目逐键展开，
- * 每键一条、载荷共享）；type = pending:register 的 PendingType 词表
- * （workflow/subagent/bash/session）；outcome 与 pending:unregister 的 status 词表
- * 对齐（protocol mapReasonToStatus 单一权威点，不建第三套终态词表）；
- * content/details = 通知载荷原样；note 标记特殊态说明（如 managed 域「注销无条目
- * 分支完结，无独立载荷快照」）。
+ * 每键一条、载荷共享）；type 与 outcome 与 pending 词表对齐（protocol
+ * mapReasonToStatus 单一权威点，不建第三套终态词表）——两字段的两条填充路径：
+ * collectArm 快照收取（ready / unregistered-no-entry，端口按日志基线填）与消费方
+ * 终局回填（consume 条目，等待结束后按 session entries 现算填，见 consume 时序
+ * 契约）；content/details = 通知载荷原样；note 标记特殊态说明（如 managed 域「注销
+ * 无条目分支完结，无独立载荷快照」）。
  */
 export interface CollectedEntry { // oe-exempt:20261017:framework:collect 批量收取对外契约（收取条目形态）
   id: string;
@@ -100,21 +101,23 @@ export interface CollectedEntry { // oe-exempt:20261017:framework:collect 批量
 }
 
 /**
- * collectArm 快照的单键定态（四态判据，设计 §3.1②）：
+ * collectArm 快照的单键定态（五态判据，设计 §3.1② 四态 + MF-1-5 第五态 unknown）：
  * - ready：键 ∈ 某日志条目键集且该条目已有终局记录（delivered ∪ collected ∪
  *   discarded）→ 可快照收取；
  * - in-push-pipeline：键 ∈ 某日志条目键集、条目无终局（已过分流点，在 push 管线
  *   排队待注入）→ 不收取不等待；
  * - unregistered-no-entry：键曾注册且已注销、不属任何日志条目键集 → 按 unregister
  *   的 status 定 outcome 进 collected（无载荷快照形态）；
- * - waiting：活跃且无日志条目 → 登记等待，后续 deliver 命中等待集被挂起。
+ * - waiting：活跃且无日志条目 → 登记等待，后续 deliver 命中等待集被挂起；
+ * - unknown：键未注册且无条目（活跃集 ∪ 投递日志键集 ∪ 曾注册集的补集）→ 不登记
+ *   等待集、不虚构终态——工具侧读本态组装 errors（未知判定单点在端口）。
  *
  * entry 仅 ready / unregistered-no-entry 在册（载荷与终态信息；字段命名对齐
  * §3.1③ 字段来源表，与 CollectedEntry 同构、缺 id——id 即本条目的键）。
  */
 export interface CollectSnapshotEntry { // oe-exempt:20261017:framework:collect 批量收取对外契约（快照单键定态）
   id: string;
-  state: "ready" | "in-push-pipeline" | "unregistered-no-entry" | "waiting";
+  state: "ready" | "in-push-pipeline" | "unregistered-no-entry" | "waiting" | "unknown";
   entry?: Omit<CollectedEntry, "id">;
 }
 
@@ -220,11 +223,21 @@ export interface DeliveryPortHandle { // oe-exempt:20261017:framework:进程级�
   dispose(): void;
   /**
    * collect 面（result-collect 设计 §3.1② 端口挂起面，方法语义以该节为准）。
-   * collectArm：同步段登记在途等待集 + 对每个 key 按四态判据定态（快照形态
-   * CollectSnapshotEntry）。
+   * collectArm：同步段登记在途等待集 + 对每个 key 按五态判据定态（快照形态
+   * CollectSnapshotEntry——unknown 态键不登记等待集，由消费方组装 errors）。
    */
   collectArm(keys: string[]): CollectSnapshot;
-  /** 取走已到达的挂起条目（载荷 + 终态），写 collected 终局（收取过的条目不可再投递）。 */
+  /**
+   * 取走已到达的挂起条目（每键展开 {id, content, details}；type/outcome 不由端口
+   * 填充——消费方在等待结束后按 session entries 单遍扫描回填，MF-1-6），写 collected
+   * 终局（收取过的条目不可再投递）。
+   *
+   * 时序契约（MF-1-7 契约化登记）：生产方 deliver 可先于注销 entry 落盘（如 managed
+   * 合批的 flushBatch 顺序：recordManagedNotify → deliver → unregisterPending 循环），
+   * 到达回调在 deliver 调用栈内同步触发——consume 时点注销 entry 可能尚未落盘，
+   * type/outcome 允许取不到（undefined）。消费方不依赖 consume 时点的终态字段，
+   * 以等待结束后的最终回填为准（诚实缺省，不虚构终态）。
+   */
   consume(): CollectedEntry[];
   /** 解散等待集；未收挂起条目直通内核 flush（跳过 60s 合批窗口，恢复 push）。 */
   collectRelease(): void;

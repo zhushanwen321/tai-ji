@@ -695,11 +695,14 @@ describe("collect 挂起分流与收取（合批多键）", () => {
 		// 同实例 recover 不重放挂起条目（已受理在册）
 		expect(port.recover()).toBe(0);
 
-		// consume：按条目键集全量逐键展开（每键一条、载荷共享），终局按日志条目写一次
+		// consume：按条目键集全量逐键展开（每键一条、载荷共享），终局按日志条目写一次。
+		// 返回条目只含 {id, content, details}——type/outcome 归消费方终局回填（MF-1-6）
 		const collected = port.consume();
 		expect(collected).toHaveLength(2);
-		expect(collected[0]).toMatchObject({ id: "k-a", type: "bash", content: "managed batch done" });
-		expect(collected[1]).toMatchObject({ id: "k-b", type: "bash", content: "managed batch done" });
+		expect(collected[0]).toMatchObject({ id: "k-a", content: "managed batch done" });
+		expect(collected[1]).toMatchObject({ id: "k-b", content: "managed batch done" });
+		expect(collected[0]).not.toHaveProperty("type");
+		expect(collected[0]).not.toHaveProperty("outcome");
 		expect(collected[0]!.details).toEqual(collected[1]!.details);
 		const acks = h.ackEntries();
 		expect(acks).toHaveLength(1); // 一条条目一个终局（I1）
@@ -759,7 +762,7 @@ describe("collect 挂起分流与收取（合批多键）", () => {
 	});
 });
 
-describe("collectArm 四态快照", () => {
+describe("collectArm 五态快照", () => {
 	beforeEach(() => {
 		vi.useFakeTimers();
 		vi.setSystemTime(T0);
@@ -832,12 +835,12 @@ describe("collectArm 四态快照", () => {
 		expect(h.sent).toHaveLength(0); // 挂起
 	});
 
-	it("未知键（未注册且无条目）：不登记等待集（deliver 不挂起）、不虚构终态", () => {
+	it("未知键（未注册且无条目）：显式 unknown 态——不登记等待集（deliver 不挂起）、不虚构终态", () => {
 		const h = makeHost();
 		const port = createDeliveryPort(h.host);
 		const snap = port.collectArm(["k-ghost"]);
-		// state 词表无第五态：按 waiting 表达，但等待集未登记——工具侧未知判定组装 errors
-		expect(snap[0]).toEqual({ id: "k-ghost", state: "waiting" });
+		// 第五态 unknown（MF-1-5）：端口未知判定单点——快照诚实表达，工具侧读本态组装 errors
+		expect(snap[0]).toEqual({ id: "k-ghost", state: "unknown" });
 		expect(deliverManaged(port, "mg-ghost", ["k-ghost"]).kind).toBe("accepted");
 		expect(h.sent).toHaveLength(1); // 未挂起（防空等到 timeout）
 	});

@@ -356,7 +356,7 @@ Session 级状态，表示 pi 进程正在工作（从用户发送消息到 agen
 
 **collect 挂起**：条目已落投递日志但暂缓进投递内核，留在端口挂起缓冲（deliver 入口按「键集 ∩ 等待集 ≠ ∅」分流）等收取或释放；纯内存态、无独立持久化——日志记录受理前已落盘，任何时点崩溃重启按未投递重放（挂起不丢）。
 
-**收取（consume）**：collect 等待器取走挂起条目的载荷并写 collected 终局；命中条目按条目键集全量逐键展开、终局按日志条目写一次；收取过的条目构造性不可再投递（收取唯一性——recover 差集排除）。
+**收取（consume）**：collect 等待器取走挂起条目的载荷并写 collected 终局；命中条目按条目键集全量逐键展开、终局按日志条目写一次；收取过的条目构造性不可再投递（收取唯一性——recover 差集排除）。时序契约：生产方 deliver 可先于注销 entry 落盘（如 managed 合批的 flushBatch 顺序），到达回调在 deliver 调用栈内同步触发——consume 时点 type/outcome 允许 undefined，消费方须以等待结束后的最终回填为准（诚实缺省，不虚构终态）。
 
 **collected 终局**：投递日志 ack outcome 新枚举值（结果已随 collect 返回到达 agent），差集重放视同已完结；collectRelease 解散等待集时未收挂起条目直通内核 flush（跳过合批窗口）恢复 push。
 

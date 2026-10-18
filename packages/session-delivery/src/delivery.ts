@@ -28,9 +28,9 @@
  *
  * 失败语义（ADR-0122 首败即停，2026-10-05 用户裁决，backoff 自动重试链退役）：
  * port.send 失败（含 accepted:false）一次即收尾——checked 条目 reject + 从内核移除；
- * 非 checked 条目 onSettled('rejected') 逐条显式上报 + 从内核移除。唯一例外：accepted:false
- * 且 reason 为设计内等待（SEND_DEFERRED_REASONS，如 port 合批提交窗 hold）不计首败，
- * 条目留守等投递端下一边沿重提（onSendDeferred）。重试决策归消费方
+ * 非 checked 条目 onSettled('rejected') 逐条显式上报 + 从内核移除。唯一例外：拒绝
+ * 回执为 deferred 形态（设计内等待，DeliveryDeferReason——如 port 合批提交窗 hold）
+ * 不计首败，条目留守等投递端下一边沿重提（onSendDeferred）。重试决策归消费方
  * （人看页面通知、agent 收失败回执），内核只做忠实投递与事实上报。
  *
  * onSettled 记账口径（D9⑤ 升级）：
@@ -103,6 +103,7 @@ import { DeliveryReclaimError } from './errors.js'
 import { LruSet } from './lru.js'
 import type {
   DeliveryConfig,
+  DeliveryDeferReason,
   DeliveryEntry,
   DeliveryEntriesFull,
   DeliveryEntriesProjection,
@@ -114,10 +115,8 @@ import type {
   DeliveryMessage,
   DeliveryPayload,
   DeliveryPort,
-  DeliveryProofCheck,
   DeliveryReceiptAnchor,
   DeliveryStore,
-  DeliveryStoreRecord,
   DeliveryTerminalRecord,
   SendReceipt,
 } from './types.js'
@@ -293,18 +292,6 @@ const DEFAULT_CONFIG: Required<
   intent: 'interrupt-at-turn-boundary',
   mergeWindowMs: 0,
 }
-
-/**
- * port.send 显式拒绝（accepted:false）中的设计内等待 reason 白名单（F1-13）：这些
- * reason 是投递端的「设计内等待」——条目从未被注入（host.sendMessage 未调用），
- * 不是失败。命中时不计首败（onSendDeferred），条目留守等投递端下一边沿重新提交；
- * 白名单外的 reason 与 throw 路径维持首败即停（onSendFail）。
- * - 'merge-commit-hold'：port 合批提交窗的注入门禁（窗口结束 kernel.flush 重提）。
- * - 'compaction-wait'：port compaction 提交侧等待的第二道防线（覆盖提交同步链与
- *   compaction 边沿交叠的残余窗口；onCompactionEdge 复位唤醒重提）——forget 条目
- *   在此窗口被当首败即静默丢弃，与 F1-13 同类（P0 fail-fast 契约）。
- */
-const SEND_DEFERRED_REASONS: ReadonlySet<string> = new Set(['merge-commit-hold', 'compaction-wait'])
 
 /** 派生视图默认窗口（D5③）；同时是 delivered 完整条目留存上限（环形）。 */
 const DEFAULT_DELIVERED_WINDOW = 50
@@ -799,15 +786,15 @@ export function createDelivery(
   }
 
   /**
-   * 受理判定（U2 回执口径）：显式 `{accepted:false}` 按 reason 分流——设计内等待
-   * reason（SEND_DEFERRED_REASONS，F1-13）走设计内等待收尾 onSendDeferred（暂不收，
-   * 非失败）；其他 reason 走发送失败收尾（首败语义）；void / `{accepted:true}` /
-   * 其他形态 = 受理成功（旧 port 兼容）。
+   * 受理判定（U2 回执口径）：拒绝分支按判别字段分流（MF-1-4）——`{ accepted: false,
+   * deferred }` 为设计内等待（DeliveryDeferReason，F1-13）走 onSendDeferred 收尾
+   * （暂不收，非失败）；`{ accepted: false, reason }` 走发送失败收尾（首败语义）；
+   * void / `{ accepted: true }` = 受理成功（旧 port 兼容）。
    */
   function onSendReceipt(receipt: SendReceipt | void): void {
     if (receipt !== undefined && receipt.accepted === false) {
-      if (receipt.reason !== undefined && SEND_DEFERRED_REASONS.has(receipt.reason)) {
-        onSendDeferred(receipt.reason)
+      if ('deferred' in receipt) {
+        onSendDeferred(receipt.deferred)
         return
       }
       onSendFail(new Error(receipt.reason ?? 'port.send rejected (accepted:false)'))
@@ -902,8 +889,8 @@ export function createDelivery(
   }
 
   /**
-   * 设计内等待收尾（F1-13）：port.send 返回 accepted:false 且 reason 为设计内等待
-   * （SEND_DEFERRED_REASONS，如 port 合批提交窗的 'merge-commit-hold'——注入门禁
+   * 设计内等待收尾（F1-13）：port.send 返回 `{ accepted: false, deferred }`（设计内
+   * 等待，DeliveryDeferReason——如 port 合批提交窗的 'merge-commit-hold'：注入门禁
    * hold，窗口结束后投递端会 kernel.flush() 重提）时，条目从未被注入（host.sendMessage
    * 未调用），拒绝不是失败：不计首败——不 store.discard、不 removeActive、不
    * onSettled('rejected')、checked waiter 不 reject（受理未发生亦无首败），条目保持
@@ -911,7 +898,7 @@ export function createDelivery(
    * 重提）。本轮不主动 pump：提交窗未结束时重投必再次被 hold（同步循环，与 retain
    * 分支「失败轮不主动重投」同理）——重投触发由投递端的窗口结束 flush 承诺。
    */
-  function onSendDeferred(reason: string): void {
+  function onSendDeferred(reason: DeliveryDeferReason): void {
     if (disposed) return
     const batch = inflightBatch
     inFlight = false

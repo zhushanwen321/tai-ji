@@ -21,10 +21,8 @@
  *   register entry 无需迁移——差集语义不读该键
  */
 import {
-	PENDING_UNREGISTER_ENTRY_TYPE,
 	applyPendingDiff,
 	scanPendingEntries,
-	type MappedPendingStatus,
 } from "@zhushanwen/extension-protocol";
 
 /** 异步操作类型（来源：workflow / subagent / bash 后台任务 / session 完成通知债权） */
@@ -126,60 +124,11 @@ export function computeCollectWaitKeys(entries: unknown[], currentSessionId: str
 }
 
 /**
- * 曾注册集：entries 中全部 pending:register entry 的 id（含已注销）。
- * collect_results 未知 id 判定源之一（活跃集 ∪ 投递日志键集 ∪ 曾注册集 的补集 =
- * 未知）——已完结任务（register+unregister 对在册）不算未知，走第四态收取。
+ * collect 终局回填的字段视图单点在 protocol scanPendingFields（register 首见
+ * type + 注销 status 的 MAPPED 成员，与 delivery-port 快照基线同一映射规则，
+ * MF-2-1；回填时序背景见 index.ts collectResults 回填段）——本文件不持有
+ * 字段映射实现。
  */
-export function scanRegisteredIds(entries: unknown[]): Set<string> {
-	const ids = new Set<string>();
-	for (const { data } of scanPendingEntries(entries).registerEntries) {
-		if (typeof data.id === "string") ids.add(data.id);
-	}
-	return ids;
-}
-
-/**
- * 已注销 id → 注销 status 映射（entries 现算）：collect_results 返回组装前对 outcome
- * 缺失条目回填用（result-collect 设计 §3.1③ 字段来源表——outcome 与 pending:unregister
- * 的 status 对齐）。回填原因：「等待中同步到达」的挂起条目在端口 consume 时点，生产方
- * 的注销 entry 尚未落盘（managed flushBatch 的 deliver 与 unregisterPending 同步段相邻、
- * deliver 先行——端口 consume 由到达回调在 deliver 栈内同步触发），outcome 恒取空；工具
- * 侧 await 恢复后生产方同步栈已完成（注销已落盘），此处现算补齐。
- *
- * protocol scanPendingEntries 不返回注销 entry 的 data（仅收 id），本函数独立轻扫其
- * status 字段（写侧全部落盘点——emit listener / bte 对账 / core sweep / workflow 直落
- * ——均带 protocol mapReasonToStatus 映射产物 status）；词表外/畸形不收（与 delivery-port
- * scanPendingBaseline 的 MAPPED_STATUS_VALUES 同口径，不虚构终态）。「同口径」指六值
- * 词表相等——端口 scanPendingBaseline 另查 entry.type === "custom" 前置过滤，本函数不
- * 查：合法数据下行为一致（customType 仅存在于 custom entry），勿把「同口径」照抄为
- * 过滤逻辑全等。protocol 只导出 MappedPendingStatus 类型未导出值集，本集合与其封闭
- * 联合同步维护。
- */
-const MAPPED_STATUS_VALUES: ReadonlySet<string> = new Set([
-	"completed",
-	"failed",
-	"cancelled",
-	"expired",
-	"time_limited",
-	"aborted",
-]);
-
-export function scanUnregisterStatuses(entries: unknown[]): Map<string, MappedPendingStatus> {
-	const statuses = new Map<string, MappedPendingStatus>();
-	for (const raw of entries) {
-		if (!raw || typeof raw !== "object") continue;
-		const entry = raw as { customType?: unknown; data?: unknown };
-		if (entry.customType !== PENDING_UNREGISTER_ENTRY_TYPE) continue;
-		if (!entry.data || typeof entry.data !== "object") continue;
-		const data = entry.data as Record<string, unknown>;
-		if (typeof data.id !== "string" || data.id === "") continue;
-		const status = data.status;
-		if (typeof status === "string" && MAPPED_STATUS_VALUES.has(status)) {
-			statuses.set(data.id, status as MappedPendingStatus);
-		}
-	}
-	return statuses;
-}
 
 /**
  * 写侧前置判断①：entries 中是否已存在该 id 的 register entry（无论注销与否）。

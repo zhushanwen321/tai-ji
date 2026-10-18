@@ -20,8 +20,8 @@ import type { DeliveryMessage } from '../src/types.js'
 import { MemoryDeliveryStore, customMsg, makeBusyParkPort, makeMockPort, textMsg } from './helpers.js'
 
 const transientReject = { accepted: false as const, reason: 'transient' }
-/** 设计内等待拒（F1-13）：port 合批提交窗 hold（entry 未注入，非失败）。 */
-const holdReject = { accepted: false as const, reason: 'merge-commit-hold' }
+/** 设计内等待拒（F1-13，MF-1-4 判别联合 deferred 字段）：port 合批提交窗 hold（entry 未注入，非失败）。 */
+const holdReject = { accepted: false as const, deferred: 'merge-commit-hold' as const }
 
 describe('onFailure 缺省按载荷类型', () => {
   it('custom 条目缺省 retain：首败留守 queued（非移除）', () => {
@@ -279,9 +279,10 @@ describe('设计内等待拒不计首败（F1-13，onSendDeferred）', () => {
 
   it('compaction-wait 拒同判据：forget 条目留守在册不弃不上报，边沿重提受理成功', () => {
     // port 第二道防线（提交同步链与 compaction 边沿交叠的残余窗口）返回的
-    // compaction-wait 与 hold 同为设计内等待：当首败处置即静默丢弃（从未注入），
-    // 违背 P0 fail-fast 契约——白名单成员资格由本用例锁定
-    const port = makeMockPort({ send: () => ({ accepted: false as const, reason: 'compaction-wait' }) })
+    // compaction-wait 与 hold 同为设计内等待（deferred 判别字段承载，MF-1-4）：
+    // 当首败处置即静默丢弃（从未注入），违背 P0 fail-fast 契约——deferred 词表
+    // 成员资格由本用例锁定
+    const port = makeMockPort({ send: () => ({ accepted: false as const, deferred: 'compaction-wait' as const }) })
     const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {})
     const onSettled = vi.fn()
     const handle = createDelivery(port, { onSettled })

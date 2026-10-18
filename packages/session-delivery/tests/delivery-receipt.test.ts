@@ -118,3 +118,65 @@ describe('port.send receipt（U2 回执口径）', () => {
     handle.dispose()
   })
 })
+
+describe('拒绝分支判别联合分流（MF-1-4：deferred 与 reason 互斥）', () => {
+  beforeEach(() => {
+    vi.useFakeTimers()
+  })
+  afterEach(() => {
+    vi.useRealTimers()
+  })
+
+  it('deferred 形态（设计内等待）→ 不计首败：条目留守 queued、无 onSettled、本轮不重投', () => {
+    const onSettled = vi.fn()
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    const send = vi.fn((): SendReceipt => ({ accepted: false, deferred: 'merge-commit-hold' }))
+    const port = makePort({ send })
+    const handle = createDelivery(port, { onSettled })
+    try {
+      handle.send(textMsg('d1'), { id: 'did-1', onFailure: 'forget' })
+      // B1 不变量：deferred 不计首败——条目留守 queued、无 onSettled('rejected')、本轮不 pump
+      expect(handle.entriesFull().active[0]).toMatchObject({ id: 'did-1', state: 'queued' })
+      expect(onSettled).not.toHaveBeenCalled()
+      expect(send).toHaveBeenCalledTimes(1)
+    } finally {
+      warnSpy.mockRestore()
+      handle.dispose()
+    }
+  })
+
+  it('reason 形态（真失败）与 deferred 互斥：首败即停 rejected（两分支不并存）', () => {
+    const onSettled = vi.fn()
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    const port = makePort({
+      // reason 分支不接受 deferred 词表成员的特殊待遇——词表值作为 reason 出现仍按失败处理
+      send: (): SendReceipt => ({ accepted: false, reason: 'merge-commit-hold' }),
+    })
+    const handle = createDelivery(port, { onSettled })
+    try {
+      handle.send(textMsg('d2'), { id: 'did-2', onFailure: 'forget' })
+      expect(onSettled).toHaveBeenCalledTimes(1)
+      expect(onSettled.mock.calls[0]?.[1]).toBe('rejected')
+      expect(handle.entriesFull().active).toHaveLength(0)
+    } finally {
+      warnSpy.mockRestore()
+      handle.dispose()
+    }
+  })
+
+  it('deferred 后唤醒重投不变：下一边沿重提受理成功转 in-flight（B3）', () => {
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    const send = vi.fn((): SendReceipt => ({ accepted: false, deferred: 'compaction-wait' }))
+    const port = makePort({ send })
+    const handle = createDelivery(port)
+    try {
+      handle.send(textMsg('d3'), { id: 'did-3', onFailure: 'forget' })
+      send.mockImplementation(() => undefined) // 投递端窗口结束（compaction 边沿 / merge 窗口尾）
+      handle.flush()
+      expect(handle.entriesFull().active[0]).toMatchObject({ id: 'did-3', state: 'in-flight' })
+    } finally {
+      warnSpy.mockRestore()
+      handle.dispose()
+    }
+  })
+})
