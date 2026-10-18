@@ -138,8 +138,9 @@ export class WorktreeReconciler {
     }
   }
 
-  /** 对账方向二（物理有 → 注册无）：按 enc 段（encodeCwd(mainCwd)）聚合，活信号 =
-   *  session 存储树 <storeRoot>/<sid>/subagents/sessions/*.alive 中存活的 pid（session-runner
+  /** 对账方向二（物理有 → 注册无）：活信号按全局 pid 集聚合（换根后不再按 enc 段
+   *  ——见头注释语义变化登记），来源 = session 存储树
+   *  <storeRoot>/<sid>/subagents/sessions/*.alive 中存活的 pid（session-runner
    *  first header 时写入，崩溃残留不删）：
    *    - 无活 pid：残留判死，checkout mtime 超 SPAWN_GRACE_MS 才清（防误清另一
    *      进程 worktree add 完成到 registry.add 落盘之间的 create 窗口）；
@@ -308,8 +309,10 @@ export class WorktreeReconciler {
   }
 
   /**
-   * 收集 enc 段的活 pid：<agentDir>/subagents/<enc>/sessions/*.alive 中
-   * readAliveMarker 解析成功且 isProcessAlive 的 pid（去重）。
+   * 收集全部活 pid：session 存储树 `<storeRoot>/<sid>/subagents/sessions/*.alive`
+   * 中 readAliveMarker 解析成功且 isProcessAlive 的 pid（去重，<storeRoot> =
+   * shared getSessionStoreDir 即 `<dataDir>/ext-sessions/`；按一级目录合法
+   * sessionId 形态逐棵会话树枚举，聚合键与 enc 分区无关）。
    * 崩溃残留的 .alive（pid 已死）天然过滤掉——这正是「死活判据」的物理面来源。
    */
   private collectAllAlivePids(): number[] {
