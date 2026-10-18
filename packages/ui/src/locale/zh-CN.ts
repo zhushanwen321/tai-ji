@@ -3,7 +3,7 @@
  *
  * 域文件级下沉规则：凡 ui 组件（features/chat、features/settings、features/new-task、
  * extension-host、overlays）消费任何 key 的域文件整体迁入本模块（无 key 级拆分——
- * 同一域文件内双源漂移面大于整域迁移）；纯 renderer 壳消费的域文件留守 renderer 壳。
+ * 同一域文件内双源漂移风险大于整域迁移）；纯 renderer 壳消费的域文件留守 renderer 壳。
  * 当前聚合的迁移域（grep ui src 的 t() key 前缀 ∩ renderer 域文件交集实测）：
  * common / settings / panel / newTask / extensionUI / search / composable。
  *

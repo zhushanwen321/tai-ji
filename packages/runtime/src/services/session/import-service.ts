@@ -46,7 +46,7 @@ export { ImportServiceError } from './import-source.js'
 export type { ImportArtifact, ImportSourceDeps, SessionImportSource } from './import-source.js'
 import { ImportServiceError, type SessionImportSource } from './import-source.js'
 
-/** projectId 存在性校验的最小依赖面（结构化接口：组合根传 ProjectStore，测试可注入 stub）。 */
+/** projectId 存在性校验的最小依赖范围（结构化接口：组合根传 ProjectStore，测试可注入 stub）。 */
 export interface ImportProjectSource {
   load(): { projects: ReadonlyArray<{ id: string }>; activeProjectId: string }
 }

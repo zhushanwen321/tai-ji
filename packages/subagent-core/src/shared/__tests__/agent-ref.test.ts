@@ -82,7 +82,7 @@ describe("normalizeRef `..` 段拒绝（⛔2 样本集）", () => {
     expect(normalizeRef("~/../x.md", ".md")).toBeNull();
   });
 
-  it("无扩展名校验面同样拒绝（收紧在 ext 校验之前）", () => {
+  it("无扩展名校验侧同样拒绝（收紧在 ext 校验之前）", () => {
     expect(normalizeRef("/x/../y.md")).toBeNull();
   });
 
@@ -204,7 +204,7 @@ describe("normalizeWorkflowRef 三分裁决", () => {
     });
   });
 
-  it("路径分支：.. 段拒绝（⛔2 同面——路径域收紧对 workflow 原语生效）", () => {
+  it("路径分支：.. 段拒绝（⛔2 同一处——路径域收紧对 workflow 原语生效）", () => {
     expect(normalizeWorkflowRef("/x/../y.js", { knownNames })).toEqual({
       kind: "invalid",
       ref: "/x/../y.js",

@@ -295,7 +295,7 @@ export function useQuotaConfigure(inputs: QuotaConfigureInputs): QuotaConfigureM
     return { ready: missing.length === 0, missing }
   })
 
-  /** 展示派生面（只读）：UI 分层 / 凭证区形态 / 警示分档 / 帮助链接一次派生到位 */
+  /** 展示派生逻辑（只读）：UI 分层 / 凭证区形态 / 警示分档 / 帮助链接一次派生到位 */
   const view = computed<QuotaSectionView>(() => {
     const undetermined = !fetcherIdDraft.value || readiness.value.missing.includes('type')
     const exclusiveApplicable = supportsExclusiveCredential(authKinds.value)
@@ -334,7 +334,7 @@ export function useQuotaConfigure(inputs: QuotaConfigureInputs): QuotaConfigureM
     }
   })
 
-  /** 测试结果面（只读）：成功行 / 失败归一 / 旧缓存保留 */
+  /** 测试结果侧（只读）：成功行 / 失败归一 / 旧缓存保留 */
   const test = computed<QuotaTestView>(() => ({
     status: testStatus.value,
     row: quotaData.value,

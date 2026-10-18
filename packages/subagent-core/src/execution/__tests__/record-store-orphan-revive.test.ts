@@ -3,7 +3,7 @@
 // [PS-10/T6④] revive() 复位 orphanJudged + [U4a / D3b (a″)] 孤儿恢复活实例跳过。
 //
 // [登记 §3.3 迁移] 播种与断言全部走 v2 条目族（v1 全量快照写点及其读侧已随兼容层删除
-// ——旧 closedReason 等 v1 专属观察面不复存在）。两个恢复入口各承一臂：
+// ——旧 closedReason 等 v1 专属观察侧不复存在）。两个恢复入口各承一臂：
 //   - entry-only 纠偏（recoverEntryOnlyOrphans，第一段）：主 session 有 v2 注册条目、
 //     无子文件、无事件文件——orphanJudged 的次级防线语义（appendEntry 失败 → 判据
 //     不自愈，重判资格完全由缓存承载；revive() 复位）只在此入口可达；
@@ -28,7 +28,7 @@ const { loggerMock } = vi.hoisted(() => ({
 vi.mock("../../core/logger.ts", () => ({ getLogger: () => loggerMock }));
 
 import { RecordStore } from "../persistence/record-store.ts";
-// [W1 / U2a] 收编入口断言的观察面（u0 契约层 scan/路径原语）。
+// [W1 / U2a] 收编入口断言的观察侧（u0 契约层 scan/路径原语）。
 import { createRecordEventStream, recordEventsPath } from "../persistence/record-events.ts";
 import type { RecordEvent } from "../persistence/record-events.ts";
 import { createRecord } from "../persistence/execution-record.ts";

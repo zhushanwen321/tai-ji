@@ -177,7 +177,7 @@ describe("U6b：zcode chatMode 的 Continuation 接线（B-firstround + B-routin
   });
 
   /** [W1/D3] 读 record 事件文件全部事件行（journal 落点 = getSubagentRecordsDir，
-   *  与 manifest 同目录——观察面独立于被测 store）。 */
+   *  与 manifest 同目录——观察侧独立于被测 store）。 */
   function scanRecordEvents(id: string): Array<Record<string, unknown>> {
     const recordsDir = getSubagentRecordsDir(agentDir, agentDir);
     const file = path.join(recordsDir, `${id}.events`);

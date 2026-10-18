@@ -40,7 +40,7 @@ import { delivery } from '@/api/domains/delivery'
 import { useChatStore } from '@/stores/chat'
 import { useToast } from '@/composables/useToast'
 
-/** 队列区一行（展示面所需最小字段；lane 只参与过滤不掉进行数据）。 */
+/** 队列区一行（展示侧所需最小字段；lane 只参与过滤不掉进行数据）。 */
 export interface QueueRow {
   /** 内核条目 id = 乐观气泡 id（`u-<uuid>`），撤销/重试的对账锚 */
   clientUuid: string

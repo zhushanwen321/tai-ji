@@ -100,7 +100,7 @@ function fail(msg) {
 // worker 运行时经 workerData.scriptPath 定位自身目录——内置 workflow 在 npm 包内，
 // process.cwd() 是用户项目目录，不能作为锚点；scriptPath 注入是 worker 契约的显式前提
 // （D1 加固），缺席即 fail-fast，不回退 cwd——消除从用户目录误加载/被植入同名
-// review-fix-loop-utils.cjs 的代码加载面。
+// review-fix-loop-utils.cjs 的代码加载路径侧。
 // 校验先于 $ARGS 白名单执行；fail 为函数声明（提升可用），沿用同一失败输出协议。
 // 空串形态 = record 流为 scriptPath 载荷落地前的旧格式（resume 重建无锚可恢复），
 // 与缺席同拦——不回退 cwd 的安全语义不变。
@@ -1774,7 +1774,7 @@ for (let batchIndex = 1; batchIndex <= BATCHES.length; batchIndex++) {
 
     // affected_files 并入 state.fixImpactFiles（5.3/5.5）：recheck scope = modifiedFiles ∪ fixImpactFiles
     //（收集归一与统一 commit 的 stagePaths 同构——collectAffectedFiles 单一实现；此处
-    // 不过滤存在性：impact 语义是"fixer 声称触碰过"，误报路径也应进 recheck 观察面）
+    // 不过滤存在性：impact 语义是"fixer 声称触碰过"，误报路径也应进 recheck 观察侧）
     state.fixImpactFiles = collectAffectedFiles(fixResult.fixes);
 
     // m4: 先初始化容器——aggregator 合法返回可不含 must_fix_ids（schema 可选）→

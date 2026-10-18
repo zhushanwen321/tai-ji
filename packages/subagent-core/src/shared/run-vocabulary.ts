@@ -65,7 +65,7 @@ export type RunOutcome = (typeof ALL_RUN_OUTCOMES)[number];
  * 终局/中断错误码：「怎么死的」（终局）与「为什么此刻被中断」（中断）的结构化编码。
  *
  * 词表复用两族既有实装，不造新词（D5-1）：
- * - 引擎错误码：SDK 协议固定词表（engine_crashed 等 9 个）+ 引擎自报透传面
+ * - 引擎错误码：SDK 协议固定词表（engine_crashed 等 9 个）+ 引擎自报透传侧
  *   （engine_ 前缀、core 不解释文案的 passthrough 契约）。显式并列
  *   EngineProtocolErrorCode 而非只留模板面——固定词表是该 union 的权威枚举源，
  *   SDK 侧词表演进（含非 engine_ 前缀的新码）自动跟进；
@@ -78,7 +78,7 @@ export type RunOutcome = (typeof ALL_RUN_OUTCOMES)[number];
  * budget_limited 是 run 级终局码（dispatchFinalRunSettle 生产：DoneReason 同名
  * 字面量恒等映射）——不描述引擎/agent 怎么失败，描述「为什么此刻被判终局」
  * （harness 系统层裁决）。不复用既有族的依据：engine_ 前缀有「引擎自报」契约
- * （SDK error-codes.ts 透传面，预算耗尽是宿主侧裁决非引擎上报，借用即伪造自
+ * （SDK error-codes.ts 透传侧，预算耗尽是宿主侧裁决非引擎上报，借用即伪造自
  * 报）；AgentFailureKind 是 agent 级失败分诊三态（预算耗尽不是 agent 失败形态）。
  *
  * [D2] time_limited 保留为历史帧解析成员：升格为 RunOutcome 独立值后，新写入方

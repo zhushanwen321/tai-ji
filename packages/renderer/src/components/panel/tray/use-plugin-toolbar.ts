@@ -1,5 +1,5 @@
 /**
- * usePluginToolbarContribution —— 插件 toolbar 挂载点（composer.toolbar）的贡献面判定。
+ * usePluginToolbarContribution —— 插件 toolbar 挂载点（composer.toolbar）的贡献点判定。
  *
  * W3a 从 ComposerTray 抽出（该组件 `<script setup>` 已贴 300 行硬门禁）：聚合入口可见条件
  * 「托盘有条目 或 插件有贡献」与聚合面板承接段共用这一判定，唯一消费方在 ComposerTray。

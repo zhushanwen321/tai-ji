@@ -279,7 +279,7 @@ function assertNever(value: never): string {
  * 内部 ExecutionStatus → 对外 state 映射（永久会话模型两态，U2 迁移）。
  * 真实映射只有两条：
  *   running → active / idle → idle（永久会话无 ended 形态——空闲即可续聊；旧
- *   closed→ended 映射随终态概念删除，「上一轮为什么停」经 stopReason 披露，U8 派生视图面）。
+ *   closed→ended 映射随终态概念删除，「上一轮为什么停」经 stopReason 披露，U8 派生视图侧）。
  * ExternalState 即两态联合。
  * 未来内部加态必须扩展此处，漏加会在 default 分支编译报错（而非静默返回 undefined
  * 让 state 字段以无主值进入 listResponse JSON）。
@@ -491,7 +491,7 @@ export async function cancelHandler(
  * 历史重开）；在途轮存在 → D2 打断（abort + 入队）。真实拒绝情形（三类）：异进程占用
  *（ResurrectDeniedError 含 pid）/ 归属不匹配 / workflow 域边界（results are collected
  * by the workflow run——一次性成员不可续聊，重派走 `subagents` tool）。interrupt 输入字段
- * 保留（[A4] 工具 schema 兼容面——extensions subagent-tool-schema 仍声明该字段）但
+ * 保留（[A4] 工具 schema 兼容范围——extensions subagent-tool-schema 仍声明该字段）但
  * 不参与分派（D2 统一打断语义）。
  *
  * 归属检查：getRecordForAction 内部校验 rootSessionId + 直接父。

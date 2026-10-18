@@ -174,7 +174,7 @@ export interface RecordCreatedEvent extends RecordEventEnvelope { // oe-exempt:2
   /** 思考档位留痕（同上；undefined = 未指定）。 */
   thinkingLevel?: string;
   /**
-   * 创建时启用 worktree 隔离（与 .record-binding 的 worktree 同源；重建面
+   * 创建时启用 worktree 隔离（与 .record-binding 的 worktree 同源；重建侧
    * hadWorktree 的恢复源）。undefined/false = 未启用。
    */
   worktree?: boolean;
@@ -238,7 +238,7 @@ export interface RecordRoundIdleEvent extends RecordEventEnvelope { // oe-exempt
   /**
    * 轮终 result 摘要锚（record-settled.resultSummary 同款截断摘要；可选——旧
    * 事件行与空结果轮缺席）。承接 v1 轮终 result 显示信号（U8b：轮终迁移
-   * 恰翻 result，是「轮终等待续聊」的展示面）——W1 停写 v1 entry 后轮终粒度的
+   * 恰翻 result，是「轮终等待续聊」的展示侧）——W1 停写 v1 entry 后轮终粒度的
    * result 断供由本锚补齐（终局全文仍只在 v2 终态条目一次性写，D1）。
    */
   resultSummary?: string;
@@ -339,7 +339,7 @@ const RECORD_EVENT_TYPE_SET: ReadonlySet<string> = new Set(RECORD_EVENT_TYPES);
 /**
  * 值级事件行判定：JSON 对象 + type 落词表内 + seq 正整数 + ts 有限数值（信封
  * 全词表必填）。载荷字段不在此校验——解码归消费方（与 run 侧
- * isWorkflowRunEventLine 的最宽共同判定面同哲学：词表外 type / 信封坏值 = 坏行，
+ * isWorkflowRunEventLine 的最宽共同判定逻辑同哲学：词表外 type / 信封坏值 = 坏行，
  * 载荷形状损坏由 fold/消费方各自的检查承接）。
  */
 export function parseRecordEventLine(value: unknown): RecordEvent | null {

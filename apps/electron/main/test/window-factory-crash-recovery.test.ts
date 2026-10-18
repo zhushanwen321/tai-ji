@@ -162,7 +162,7 @@ async function createProdWindow(factory: FactoryModule, windowId: string): Promi
   return win
 }
 
-/** 驱动一次渲染进程崩溃（details 形态对齐 Electron RenderProcessGoneDetails 最小面）。 */
+/** 驱动一次渲染进程崩溃（details 形态对齐 Electron RenderProcessGoneDetails 最小子集）。 */
 function crash(win: FakeBrowserWindow, reason = 'oom', exitCode = -1): void {
   win.webContents.emit('render-process-gone', {}, { reason, exitCode })
 }

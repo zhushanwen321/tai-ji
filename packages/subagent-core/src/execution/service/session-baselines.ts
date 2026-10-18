@@ -11,8 +11,8 @@
 // 1. 依赖注入形态：deps 全晚绑定闭包（构造期零求值）——D4 late-bound getter
 //    `() => ({pi, disposed})` 形态的全 deps 推广。聚合持过期引用会破 session 复活
 //    （dispose → initSession 翻转 disposed 旗标），一切运行时可变态必须断言/调用时现读。
-// 2. 转发壳写法：壳保留同名私有 getter（字段面）与同名方法（方法面）单行转发；
-//    聚合公共部分 = 壳转发面 + 测试改写后的聚合路径，两面同源零漂移。
+// 2. 转发壳写法：壳保留同名私有 getter（字段侧）与同名方法（方法侧）单行转发；
+//    聚合公共部分 = 壳层的转发逻辑 + 测试改写后的聚合路径，两面同源零漂移。
 // 3. 跨聚合边收敛：他域直写本域字段的写点收敛为显式接口方法（本聚合：
 //    disposeSessionUi ← 壳 dispose 直写 uiRequestHandler，清单① C-3）；
 //    本域直写他域字段的写点收敛为 deps 显式回调（[modeless 波3] resetSettledRescan
@@ -77,7 +77,7 @@ export const disposedUiRequestStub: UiRequestHandler = () => Promise.resolve({ c
 
 /** session_start 注入参数（session 级）。
  *  [R1] 接口本体自壳文件迁入（唯一消费者 = SessionBaselines.initSession）；壳经类型
- *  别名 re-export 保持对外符号面（SubagentServiceSessionInit 仍从 subagent-service.ts
+ *  别名 re-export 保持对外符号名侧（SubagentServiceSessionInit 仍从 subagent-service.ts
  *  导出，消费方零改动）。 */
 export interface SubagentServiceSessionInit {
   pi: PiLike;
@@ -118,7 +118,7 @@ export interface SubagentServiceSessionInit {
  *   过期引用破 session 复活，必须断言时现读。
  * - 复活回调（reviveDisposed）：initSession 对壳旗标的写点显式化。
  *   [modeless 波3] 旧 resetSettledRescan 回调（#5 SyncCollect 的 settledRescanState
- *   复活重置，清单① C-2）随 E1 恢复面退役删除。
+ *   复活重置，清单① C-2）随 E1 恢复侧退役删除。
  * - 跨域编排回调（getStore/getNotifyHost/recoverOrphans/runPendingReconcileSweep）：
  *   initSession 复活后的跨域编排时序（R3/R4 域）以回调注入，聚合→壳零 import（D4）；
  *   R3/R4 抽取后同点改指聚合显式接口。
@@ -134,7 +134,7 @@ export interface SessionBaselinesDeps {
    *  [§1.4 (a)] setPi 参数含 null：invalidatePiBinding 作废时同步清空 store 的句柄快照
    *  （RecordStore.setPi 本就接受 null——RecordStorePi 联合含 null）。 */
   readonly getStore: () => { setPi(pi: PiLike | null): void; revive(): void };
-  /** NotifyHost 窄门面（revive；通知面 #1 留壳）。 */
+  /** NotifyHost 窄门面（revive；通知侧 #1 留壳）。 */
   readonly getNotifyHost: () => { revive(): void };
   /** [跨域编排回调] 孤儿终态恢复（#3 RecordLifecycle 域方法；R3 改指聚合显式接口）。 */
   readonly recoverOrphans: () => void;
@@ -247,7 +247,7 @@ export class SessionBaselines {
     this._rootCwd = envRootCwd && envRootCwd !== "" ? envRootCwd : init.cwd;
   }
 
-  // ── 壳只读透传面（getter）──
+  // ── 壳只读透传侧（getter）──
   // [R1 打样模式 2] 壳侧同名私有 getter 逐个透传到这些成员；写点全部收敛在本聚合
   // 方法内（D1 单写者）。getter 与存储字段分离 = 壳/测试只读，防写路径旁路聚合。
 
@@ -278,7 +278,7 @@ export class SessionBaselines {
    * [F6] 当前根 session id 的只读访问——引擎接线方（SAR 等）构造 RunContext 注入
    * `ctx.sessionRootId`（pi 引擎 relay 归属键 SESSION_ID 权威源）。initSession 后有值
    * （根进程 = 本 session id；嵌套 = env 贯穿的真 ROOT）。壳保留同名公共方法转发（D3+
-   * 壳终态永久保留面）。
+   * 壳终态永久保留范围）。
    */
   getSessionRootId(): string | null {
     return this._sessionRootId;
@@ -290,7 +290,7 @@ export class SessionBaselines {
   }
 
   /** session_start 注入 pi + revive（modelRegistry/entries 归 ModelConfigService.initModel）。
-   *  跨域编排（store.setPi/revive、通知面 revive、孤儿恢复、监督器 boot、对账 sweep）经
+   *  跨域编排（store.setPi/revive、通知侧 revive、孤儿恢复、监督器 boot、对账 sweep）经
    *  deps 回调按原时序逐行执行——时序语义与抽取前逐行等价，见各回调注释。 */
   initSession(init: SubagentServiceSessionInit): void {
     // [§1.4 (a)] 新代际注入：代际 +1 + 可用性翻真（作废窗结束）。句柄写点全文唯一
@@ -332,7 +332,7 @@ export class SessionBaselines {
     // revive（dispose 的逆操作：/resume /fork /new 后复活）——壳 _disposed 旗标经 deps
     // 回调复位（旗标所有权留壳：assertReady 断言范围 readAssertState 的写侧）。
     this.deps.reviveDisposed();
-    // [modeless 波3] 旧 settled 重扫状态复活重置（C-2 回调）随 E1 恢复面退役——
+    // [modeless 波3] 旧 settled 重扫状态复活重置（C-2 回调）随 E1 恢复侧退役——
     // 批协调状态为协调器内存登记态，随 dispose()/clear() 全量清空，无跨 session 残留。
     this.deps.getStore().revive();
     this.deps.getNotifyHost().revive();

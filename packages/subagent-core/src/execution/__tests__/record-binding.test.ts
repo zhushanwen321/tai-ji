@@ -22,7 +22,7 @@
 //      矩阵构造性保证）；终态后绑定保留——保留选项由此套件锁定；
 //   ⑤ 绑定写失败（只读目录）不阻塞派发主路径。
 //   ⑥ [H2 S3] origin/parentRunId/stepIndex 身份域随 record-created 帧往返保真
-//      （原 binding 身份面职责已随读侧换源移入事件载荷）。
+//      （原 binding 身份侧职责已随读侧换源移入事件载荷）。
 //
 // fixture 一律 mkdtempSync 自建自删（tmpdir），不触碰真实数据目录。
 
@@ -288,7 +288,7 @@ describe("[UF-1] record-store 据事件流折叠重建（跨重启空内存场�
   it("[②B] 负缓存事件侧信号：bound 帧追加进既有事件文件且无 binding 写 → 下次扫描必须可见", () => {
     // 时序（生产形态：spawn 未回填 → 首扫负缓存 → 回填写入 journal 记录）：负缓存条目没有 id、
     // 不能按 `<id>.events` 取戳，jsonl/binding 戳全不变——若无事件侧反查，回填后的
-    // record 在磁盘扫描层永久不可见（列表面有内存源遮蔽，archive 除名后即暴露）。
+    // record 在磁盘扫描层永久不可见（列表侧有内存源遮蔽，archive 除名后即暴露）。
     const file = writePlainChildSession(sessionsDir);
     const store = new RecordStore(sessionsDir, undefined, undefined, recordsDir);
     // ① register（无 sessionFile——spawn 未回填）：事件文件只有 created 帧。
@@ -336,7 +336,7 @@ describe("[UF-1] record-store 据事件流折叠重建（跨重启空内存场�
 // 仍是生产写侧——本节锁定写侧检查归一行为（读侧检查 readRecordBinding 仍被
 // merge-or-create 写点消费，损坏残留不误判成合法载荷）。
 
-describe("[H2 S3] binding 身份面 origin/parentRunId 往返保真（写侧载荷）", () => {
+describe("[H2 S3] binding 身份侧 origin/parentRunId 往返保真（写侧载荷）", () => {
   let dir: string;
 
   beforeEach(() => {
@@ -443,7 +443,7 @@ describe("[H2 S3] record-store 据事件流重建 origin（D1 派生视图过滤
     });
     const store = new RecordStore(sessionsDir, undefined, undefined, recordsDir);
 
-    // 默认 list（includeWorkflow 缺省 false）：workflow record 被排除（S3 FAIL 的验收面）
+    // 默认 list（includeWorkflow 缺省 false）：workflow record 被排除（S3 FAIL 的验收侧）
     expect(store.collectRecords(10, "all", undefined)).toHaveLength(0);
     // includeWorkflow:true：可见且字段保真
     const visible = store.collectRecords(10, "all", undefined, true);
@@ -774,7 +774,7 @@ describe("[UF-1] SubagentService 集成：回填点绑定落盘 + 跨重启 mess
     // 主路径不受影响：回填推进 + 轮终收尾照常
     await vi.waitFor(() => expect(record.round).toBe(2));
     expect(record.sessionFile).toBe(sessionFile);
-    // 记账面如实留痕：绑定缺失 + warn
+    // 记账侧如实留痕：绑定缺失 + warn
     expect(fs.existsSync(`${sessionFile}${RECORD_BINDING_SIDECAR_EXT}`)).toBe(false);
     expect(loggerMock.warn).toHaveBeenCalledWith(
       expect.stringContaining("record binding write failed"),

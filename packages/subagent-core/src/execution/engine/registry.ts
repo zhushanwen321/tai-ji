@@ -47,7 +47,7 @@ export interface EngineManifestSnapshot {
   capabilities: EngineCapabilities;
   /**
    * manifest `modelCatalog` 三态（W4 §2.4：缺省 = 不注入保持 undefined；null 合法等价
-   * 省略；`models: []` 仅作者显式声明）。解析器不得把省略填成 `[]`——否则「无枚举面」
+   * 省略；`models: []` 仅作者显式声明）。解析器不得把省略填成 `[]`——否则「无枚举情形」
    * 语义不可达。
    */
   modelCatalog?: { dynamic: boolean; models: ModelCatalogEntry[] } | null;
@@ -339,7 +339,7 @@ function stableDescriptorKey(value: unknown): string {
  * = 除 portFactory 外的全部字段）：
  *   - kind（cli / inproc 实现形态不同 = 不同引擎）
  *   - command + args（spawn 面：bin 路径与启动参数）
- *   - capabilities（能力位——引擎包升级改能力面时标识必须变化，触发 dispose 换新
+ *   - capabilities（能力位——引擎包升级改能力侧时标识必须变化，触发 dispose 换新
  *     实例，否则与「真换引擎」场景自相矛盾）
  *   - manifest 余项（modelCatalog + displayName + processModel——manifest 派生版本面）
  *   - packageVersion（package.json version——包版本面：升级即使 bin/capabilities
@@ -426,7 +426,7 @@ function triggerActiveWindowEngineDispose(source: string): void {
  *     discoverAndRegisterEngines 对同一磁盘 manifest 重扫的常态：等价重注册 dispose
  *     一个持有在途 run 的引擎去换一个行为等价的引擎，是零收益纯破坏（杀令 B）。
  *   - 标识不等价 → 现状 dispose + 删单例（防泄漏语义保留——旧实例可能与新
- *     descriptor 不兼容，如引擎包升级后 bin 相同但能力面变化）。
+ *     descriptor 不兼容，如引擎包升级后 bin 相同但能力侧变化）。
  */
 export function registerEngineDescriptor(id: string, descriptor: EngineDescriptor): void {
   const slot = getRegistrySlot();

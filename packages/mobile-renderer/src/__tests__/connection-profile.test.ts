@@ -126,7 +126,7 @@ describe('D4 三分支补全（端口集成）', () => {
     expect(onTokenInputRequired).toHaveBeenCalledTimes(1)
   })
 
-  it('皆无：resolve 不带凭据（E2 通路，连接发起面无异常路径）；验身失败通知落输入视图', async () => {
+  it('皆无：resolve 不带凭据（E2 通路，连接发起侧无异常路径）；验身失败通知落输入视图', async () => {
     const { port, map, onTokenInputRequired } = makePort({})
     const resolved = await port.resolve()
     expect(resolved).toEqual({ url: 'ws://192.168.1.5:3210' })

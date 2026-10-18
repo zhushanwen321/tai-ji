@@ -484,7 +484,7 @@ const sessionImpl = {
 
   /**
    * [G4 锚定 SessionDomain] 参数与 real 域 create 全等（含 override 四参 + clientUuid）。
-   * override 生效面（对齐 real 关键语义，落 SessionSummary 可断言）：
+   * override 生效范围（对齐 real 关键语义，落 SessionSummary 可断言）：
    * presetId → launchPresetId（real create 即锁预设进 summary）、projectId → projectId
    * （D14 归属）、modelOverride → modelId、thinkingOverride → thinkingLevel（Landing Chip
    * 覆盖值）。mock 无 pi/runtime，仅内存派生视图，不追求全仿真。
@@ -513,7 +513,7 @@ const sessionImpl = {
    * Mock fork：模拟 runtime 截断 + 新进程，返回新 session。
    * mock 模式无真实 JSONL 截断，仅创建空 session（历史由前端 selectSession 拉）。
    * [G4 锚定 SessionDomain] 类型锚定保证与 real 域 fork 签名全等（编译强制，不再靠注释承诺）。
-   * override 生效面同 create（modelOverride → modelId / thinkingOverride → thinkingLevel，
+   * override 生效范围同 create（modelOverride → modelId / thinkingOverride → thinkingLevel，
    * ADR-0056 Staging Mode 覆盖优先于源 preset）；血缘字段落 parentSession（FR-20 fallback 键：
    * mock 无 sessionFile，恒用源 sessionId）+ forkEntryId；projectId 继承父归属（real fork 同语义）。
    */
@@ -771,7 +771,7 @@ const sessionImpl = {
   /**
    * Mock handoff（fast-handoff：stub resolve 即可，E2E 走 runtime 真路径）。
    * [G4 锚定 SessionDomain] options 形参补齐与 real 域全等；mock 不支持仿真——无 runtime
-   * HandoffService / handoff turn 可跑，modelOverride/thinkingOverride 无生效面（显式登记，
+   * HandoffService / handoff turn 可跑，modelOverride/thinkingOverride 无生效范围（显式登记，
    * 非静默丢弃；登记同步 docs/TEST-STRATEGY.md §5 mock 保真度表）。
    */
   async handoff(_sessionId: string, _reply?: string, _options?: { modelOverride?: string; thinkingOverride?: string }): Promise<void> {

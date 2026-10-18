@@ -107,7 +107,7 @@ const streamSubscriptions = new Map<string, () => void>()
  * shared protocol.ts）= 错误的
  * 用户可见呈现已由 runtime 侧编排——compact_busy → 对话流 system 提示（dispatcher
  * stream_warn）；compact_failed → interpreter 对话流（compaction 级失败）或 session
- * 状态面（ensureActive 失败）；message_blocked → 错误气泡（dispatcher 广播——BeforeSend
+ * 状态侧（ensureActive 失败）；message_blocked → 错误气泡（dispatcher 广播——BeforeSend
  * hook 否决，message.send / message.bash / delivery.submit 三 handler 统一落此码）。
  * 此时再弹全局错误 toast 属双提示，抑制。
  *
@@ -143,7 +143,7 @@ const BLOCKED_CLASSIFIED_CODE: MessageBlockedCode = MESSAGE_BLOCKED_CODE
  *
  * 用途（**仅作 toast 抑制提示，不参与投递判定**）：sendBash 据
  * 「本次调用窗口内终态帧是否到达」决定是否抑制失败 toast——终态已渲染时气泡终态是权威
- * 呈现面，再弹「失败」措辞 toast 冗余且误导（如超时后命令仍在跑）。投递判定（是否恢复
+ * 呈现侧，再弹「失败」措辞 toast 冗余且误导（如超时后命令仍在跑）。投递判定（是否恢复
  * `!command` 草稿）只看 RPC 回执状态（BashDispatchReceipt）：帧是可丢弃的推送信号，帧
  * 丢失不得导致「未执行」误判（误判会触发草稿恢复 → 用户重发 → 命令双执行）。
  * 计数在 streamSubscribe 回调内**同步**递增（先于 coalescer dispatch，不受合帧节拍影响）。
@@ -211,7 +211,7 @@ const extensionCommandErrorLastShownAt = new Map<string, number>()
  * [RD-1#9 / R1-B12 双轨收敛] 未列 session.* 帧类型的一次性 dev warn（观测补齐，非行为变更）。
  *
  * streamSubscribe 回调的 session.* switch default 对「有意 no-op」的帧（exited/restored/
- * commands/stats_update 等，消费方在 renderer 侧 message bus 或另一订阅面）与「协议漂移」
+ * commands/stats_update 等，消费方在 renderer 侧 message bus 或另一订阅侧）与「协议漂移」
  * （runtime 新增而前端漏接）不可区分——去重后一次/类型，dev 下留痕、生产零开销。
  * 「dev 门 + Set 去重 + warn」三段式收敛到 registry.createDevOnceFrameWarn 工厂（与
  * registry 未注册 message.* 帧观测同一实现）；session.* 前缀过滤是本调用点的语义差异，
@@ -789,7 +789,7 @@ function handleSessionFrame(
     default: {
       // [RD-1#9] 未列 session.* 类型的 no-op 观测（dev，一次/类型）：本分支对
       // session.exited / restored / restoreFailed / commands / stats_update 等帧是
-      // 「有意的 no-op」（消费方在 renderer 侧 message bus 或另一订阅面），但旧实现
+      // 「有意的 no-op」（消费方在 renderer 侧 message bus 或另一订阅侧），但旧实现
       // 零痕迹——协议漂移（runtime 新增 session.* 而前端漏接）在 dev 下不可见。
       // Set 去重防刷屏；非 session.* 前缀（app.info / config.* / plugin:* 等全局帧
       // 经同一 streamSubscribe 到达，本就由其他域消费）不 warn，避免误报噪音。
@@ -1026,7 +1026,7 @@ export function createUseChat(deps: UseChatDeps) {
    * 发送消息：统一 submit（乐观气泡 + delivery.submit）。
    *
    * [R2-A5 失败信号] 返回值（Promise<boolean>）：true = 提交成功或无事
-   * 发生（空输入/空白 prompt 早退——无投递动作、无丢失面，调用方无需恢复）；false =
+   * 发生（空输入/空白 prompt 早退——无投递动作、无丢失风险，调用方无需恢复）；false =
    * RPC 失败（内部已消化——transport 级 toast、hook 否决级经 runtime 错误气泡抑制
    * toast；乐观副作用已回滚）——调用方（dispatch send）据
    * `=== false`（严格比较——false = RPC 失败需恢复草稿）restoreSegments
@@ -1154,7 +1154,7 @@ export function createUseChat(deps: UseChatDeps) {
    * 非执行中按普通发送处理（避免 Alt+⏎ 死键）。
    *
    * [R2-A5 失败信号] 返回值（Promise<boolean>）：true = 提交成功或无事
-   * 发生（空输入/空白 prompt 早退无丢失面）；false = RPC 失败（内部已消化 + 回滚乐观
+   * 发生（空输入/空白 prompt 早退无丢失风险）；false = RPC 失败（内部已消化 + 回滚乐观
    * 副作用，不 throw——transport 级 toast、hook 否决级经 runtime 错误气泡抑制 toast）
    * ——调用方（composer submit.onFollowUp）据 `=== false`
    * restoreSegments 恢复草稿，否则 clearInput 已清空的输入静默丢失。
@@ -1259,7 +1259,7 @@ export function createUseChat(deps: UseChatDeps) {
         return false
       }
       // 'started' | 'settled'：已执行 → true（恢复 !command 会双执行）。失败原因可见提示；
-      // 终态帧已渲染时抑制（气泡终态是权威呈现面——超时三步指引或错误输出，再弹「失败」
+      // 终态帧已渲染时抑制（气泡终态是权威呈现侧——超时三步指引或错误输出，再弹「失败」
       // 措辞 toast 冗余且误导），①b 抑制极性不变。
       if (receipt.error && !terminalFrameRendered()) {
         deps.toast.error(deps.t('composable.bashFailed', { msg: receipt.error }))
@@ -1308,7 +1308,7 @@ export function createUseChat(deps: UseChatDeps) {
    *   - compact_busy（dispatcher busy 预检拒绝）：对话流 system 提示已由 runtime stream_warn
    *     编排 → 抑制 toast。
    *   - compact_failed（pi 层失败 / ensureActive 恢复失败）：interpreter 对话流（compaction
-   *     级，含 aborted 取消语义）或 session 状态面已呈现 → 抑制 toast。
+   *     级，含 aborted 取消语义）或 session 状态侧已呈现 → 抑制 toast。
    *   - 其余（未知分类码 / pending 机械码 timeout·overflow·unknown / 无码断连）：runtime
    *     侧呈现未发生，保守 toast 兜底（AGENTS.md 规则 #3 错误必须可见）。
    * 不 throw（consumer fire-and-forget）。compacting 态由 session.compacted 复位（interpreter 发，必达）。
@@ -1327,7 +1327,7 @@ export function createUseChat(deps: UseChatDeps) {
     } catch (e) {
       if (isTransportLevelFailure(e, COMPACT_CLASSIFIED_CODES)) {
         // transport 级失败：runtime 侧无分类码呈现，toast 兜底。分类码级失败由 runtime
-        // 编排的呈现面（对话流 / session 状态）承担，不在此 toast。
+        // 编排的呈现侧（对话流 / session 状态）承担，不在此 toast。
         const msg = toErrorMessage(e)
         deps.toast.error(deps.t('composable.compactFailed', { msg }))
         console.warn(`[useChat] compact RPC failed (transport-level, toast fallback)`, e)
@@ -1353,7 +1353,7 @@ export function createUseChat(deps: UseChatDeps) {
    * 委托 submitSegments：与 send 同通路（segmentsToPrompt + delivery.submit），image 段
    * 经 segmentsToText 产出裸路径进 prompt 文本（不丢）。
    * [R2-A5 失败信号] 返回值（Promise<boolean>）：true = 提交成功或无事发生（空白 prompt/
-   * active session 早退无丢失面）；false = RPC 失败（内部已消化——transport 级 toast、
+   * active session 早退无丢失风险）；false = RPC 失败（内部已消化——transport 级 toast、
    * hook 否决级经 runtime 错误气泡抑制 toast）。
    *
    * 显式接收 sessionId：编辑可发生在非 active 的 standby panel，不能依赖全局 activeId。

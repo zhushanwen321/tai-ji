@@ -7,7 +7,7 @@
 // [U1 归并] buildSpawnArgs / parseSpawnModelRef
 // 的实现本体已上移 @zhushanwen/pi-rpc spawn-args 模块（主/从两侧模板单源，设计
 // subagent-permanent-session-model §3.3.2）——本文件按「先并存后切换」完成切换：
-// re-export 保持既有导入面（index.ts / spawn-runner / __tests__ 零改动），包内
+// re-export 保持既有导入范围（index.ts / spawn-runner / __tests__ 零改动），包内
 // 不再保留同型私有实现（S7 grep 无双轨）。本地保留的是非同型面：schema env
 // 注入桥（pi-subagent-cli 特有，[D1] 输入源 = wire task.schema 的派生值）、
 // 环境信息块、SdkEvent 翻译纯函数。
@@ -29,7 +29,7 @@ import type { SdkEvent } from "./spawn-event-adapter.ts";
 
 const logger = getLogger("session-runner");
 
-// ── pi-rpc spawn-args 模块 re-export（导入面兼容） ──
+// ── pi-rpc spawn-args 模块 re-export（导入范围兼容） ──
 
 export { parseSpawnModelRef };
 export type { SpawnModelRef };

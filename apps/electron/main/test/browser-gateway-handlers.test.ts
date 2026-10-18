@@ -8,7 +8,7 @@
  *    非法 payload reject（error envelope）+ 合法 payload 路由到 manager / registry。
  *
  * Mock 策略：vi.mock('electron') 捕获 ipcMain.handle 到 Map（update-handlers.test.ts 同款）；
- * BrowserViewManager 以桩替换（只断言转发面，不重复 manager 语义——语义在 browser-display-gate.test.ts）。
+ * BrowserViewManager 以桩替换（只断言转发行为，不重复 manager 语义——语义在 browser-display-gate.test.ts）。
  *
  * 运行：cd apps/electron/main && npx vitest run test/browser-gateway-handlers.test.ts
  */

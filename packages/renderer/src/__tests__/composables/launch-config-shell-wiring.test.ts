@@ -64,7 +64,7 @@ const presetApiMock = vi.hoisted(() => ({
   setDefault: vi.fn().mockResolvedValue(undefined),
 }))
 
-// '@/api' 单一 mock：session 重定向（createflow 范式）+ preset 可控 + mount 期防御面
+// '@/api' 单一 mock：session 重定向（createflow 范式）+ preset 可控 + mount 期防御机制
 //（project/model/composer，composer-model-reasoning 范式）
 vi.mock('@/api', async (importActual) => {
   const actual = await importActual<typeof import('@/api')>()
@@ -79,7 +79,7 @@ vi.mock('@/api', async (importActual) => {
   }
 })
 
-// useChat 单一 mock：send/sendBash spy（A 的 submit 主链路终点）+ mount 期防御面（B）
+// useChat 单一 mock：send/sendBash spy（A 的 submit 主链路终点）+ mount 期防御机制（B）
 const chatApiMock = {
   ...chatApiMethodsMock(),
   sendBash: vi.fn(() => Promise.resolve()),

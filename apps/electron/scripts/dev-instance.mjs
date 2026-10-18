@@ -14,7 +14,7 @@
  *      - TAIJI_AGENT_PORT_OFFSET    100 + (hash%40)*10（runtime 端口段 = 3210+offset 起
  *        10 个，offset 步进 10 保证实例段不重叠；打包版 offset=0 天然避开）
  *   2. 数据目录 ~/.taiji-dev/instances/<worktree>/，首次从只读模板
- *      ~/.taiji-dev.template/ 复制（模板只含配置面，运行时状态见 EXCLUDES）；
+ *      ~/.taiji-dev.template/ 复制（模板只含配置部分，运行时状态见 EXCLUDES）；
  *      Electron userData / 单实例锁从 TAIJI_AGENT_DATA_DIR 派生（main.ts），自动隔离。
  *   3. 透传 TAIJI_DEV_BACKGROUND=1（外部设置时 window-factory 走 showInactive 不抢前台焦点，
  *      AI agent 真机验收必须带——见 browser-automation skill 对策 2）。
@@ -82,7 +82,7 @@ function resolveInstanceName(cliName) {
 
 // ── 模板管理 ──────────────────────────────────────────────────────
 
-/** 从现有 ~/.taiji-dev 生成只读模板（配置面白名单 + 预置快速默认模型）；
+/** 从现有 ~/.taiji-dev 生成只读模板（配置部分白名单 + 预置快速默认模型）；
  *  --seed-from <旧模板路径> 时改从旧数据目录名的模板种子（白名单复制语义不变，
  *  TEMPLATE_DIR_EXCLUDES 挡旧 sessions/日志/调度数据——非数据迁移，见 R3）。 */
 function initTemplate(force, seedFrom) {

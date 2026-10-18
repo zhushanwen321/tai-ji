@@ -1,7 +1,7 @@
 // src/active-children.ts
 //
 // 当前活跃子进程记账（自 spawn-runner.ts 提取）：镜像上报 / dispose 收割
-// 消费；引擎进程内权威。spawn-runner.ts re-export 全部导出保持既有导入面
+// 消费；引擎进程内权威。spawn-runner.ts re-export 全部导出保持既有导入范围
 // （index.ts / pi-engine.ts / __tests__ 均从 spawn-runner 导入）。
 //
 // [U1 归并] dispose 收割切 pi-rpc killPiProcess（与 spawn-runner killChild /
@@ -18,7 +18,7 @@ const logger = getLogger("session-runner");
 /** 活跃子进程表（recordId → child）。 */
 const activeChildren = new Map<string, ChildProcess>();
 
-/** 注册活跃子进程（interact 热路径投递面）。 */
+/** 注册活跃子进程（interact 热路径投递路径）。 */
 export function registerActiveChild(recordId: string, child: ChildProcess): void {
   activeChildren.set(recordId, child);
 }

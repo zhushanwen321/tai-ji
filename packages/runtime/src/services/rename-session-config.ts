@@ -1,5 +1,5 @@
 /**
- * rename-session 配置域（pi-rename-session extension 的全部 runtime 侧配置面）。
+ * rename-session 配置域（pi-rename-session extension 的全部 runtime 侧配置范围）。
  *
  * 从 worktree-config-helper.ts 抽出（P1-7 名实拆分：原文件名只对应 worktree 偏好域，
  * 本域与其落盘路径/契约对象均不同）。本模块两部分落盘形态不同，注意区分：

@@ -3,7 +3,7 @@
  * 副作用域从 SessionService 迁出后的直接测试——G2 形态：stub pm/client + 真实
  * MessageBus，不构造 Facade 全家桶，import 不含 session-service）。
  *
- * 覆盖四块（对应实现迁移面）：
+ * 覆盖四块（对应实现迁移侧）：
  * - 订阅播种：subscribe 注册的 handler 触发 registerReplicatedStates（四实例 + refetch
  *   立即拉取）；幂等注册 dispose 旧实例。
  * - 快照派生视图核心路径：fetch 成功后 setTimeout 0 宏任务发布 context.update /

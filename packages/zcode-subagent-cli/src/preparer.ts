@@ -100,7 +100,7 @@ function strArray(v: unknown): string[] {
 }
 
 /**
- * 读个人 provider 源 JSON（~/.zcode/v2/provider_config.json——GUI 管理面写入、
+ * 读个人 provider 源 JSON（~/.zcode/v2/provider_config.json——GUI 管理侧写入、
  * app-server 注册表实际装载的 provider 清单）。文件缺失/损坏/非对象 → undefined
  * （消费方语义：直读形态 = 空源，凭据检查给出 engine_credential_missing 的
  * fail-fast；merge 形态 = 该侧缺席，由 merge 规则裁决）。

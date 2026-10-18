@@ -347,7 +347,7 @@ describe("fan-out.js aggregate 可选归约（D4）", () => {
   });
 });
 
-describe("fan-out.js 模块形态与参数面契约", () => {
+describe("fan-out.js 模块形态与参数侧契约", () => {
   it("顶层 return 使其不可作为 ES module import（pi worker 脚本，非可导入模块）", async () => {
     await expect(import("../../workflows/fan-out.js" as string)).rejects.toThrow();
   });

@@ -1,7 +1,7 @@
 // 移动壳 form/planReview 类请求链装配（remote-use-mobile D7（移动壳 v1 功能集裁定）form 行恢复：消除「请求方无限等待」）。
 //
 // 链路锁定：bus 'ui-request'（companion-bridge 模块级 form 通道，C4 门排除出 CompanionBand
-// 的富交互面）→ App 聊天视图 MobileFormCard 渲染 → 作答 → sendExtensionUIResponse 回传
+// 的富交互入口）→ App 聊天视图 MobileFormCard 渲染 → 作答 → sendExtensionUIResponse 回传
 // （extension.ui_response 既有通路，method 透传）→ 卡片出队收尾。
 //
 // 装配 + 通道一体断言（桌面同构语义锚定 useExtensionUI.test.ts / use-extension-ui-* 测试族）；
@@ -11,7 +11,7 @@
 //
 // mock 策略：extension 域（sendExtensionUIResponse/getPendingRequests）模块级 vi.mock
 // 隔离 WS（断言回传参数与送达布尔）；请求注入经 __testing.mobileExtensionBus.emit
-// （生产订阅面 = form 通道 bus 订阅）。
+// （生产订阅侧 = form 通道 bus 订阅）。
 //
 // 运行：cd packages/mobile-renderer && npx vitest run src/__tests__/mobile-form.spec.ts
 import { describe, expect, it, vi, beforeEach, afterEach } from 'vitest'
@@ -51,7 +51,7 @@ async function mountChatView(sessionId: string) {
   return wrapper
 }
 
-/** 发一条 bus 归一后的 form 类 ui-request 事件（C4 放行面） */
+/** 发一条 bus 归一后的 form 类 ui-request 事件（C4 放行范围） */
 function emitFormRequest(request: Record<string, unknown>, sessionId = 'sid-form'): void {
   __testing.mobileExtensionBus.emit({
     kind: 'ui-request',
@@ -391,7 +391,7 @@ describe('移动壳 form 请求链（remote-use-mobile D7 form 行恢复）', ()
   })
 })
 
-describe('form 通道 respond 防御面（无 App 装配的通道级断言）', () => {
+describe('form 通道 respond 防御机制（无 App 装配的通道级断言）', () => {
   beforeEach(() => {
     mockSendResponse.mockReset().mockReturnValue(true)
     mockGetPending.mockReset().mockResolvedValue([])

@@ -1,5 +1,5 @@
 /**
- * SubagentMessageHandler 测试（subagent-model-switch §7.1 入口层，U1 验收面）。
+ * SubagentMessageHandler 测试（subagent-model-switch §7.1 入口层，U1 验收侧）。
  *
  * 覆盖（mock 宿主应答回执范式）：
  * - 应答到达才回执：reply 载荷 = mock gateway 应答原样透传（chat 两型 / run 级聚合

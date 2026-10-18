@@ -740,7 +740,7 @@ export interface IModelService {
   /** Set thinking level for a session's pi subprocess. Returns pi-effective level (P3: pi clamps unsupported levels). */
   setThinkingLevel(sessionId: string, level: string): Promise<string>
 
-  /** 给 ProviderInfo.models 逐模型标注 supportedLevels（U5 能力注册表服务面，pi 同源计算，
+  /** 给 ProviderInfo.models 逐模型标注 supportedLevels（U5 能力注册表服务侧，pi 同源计算，
    *  签名与 ModelService 逐字对齐——view-ready 字段，renderer 零推导）。 */
   attachSupportedLevels(providers: ProviderInfo[], piVersion?: string): ProviderInfo[]
   /** 在线对账（U6 D2②）：session 附着后调用，返回本次 drift 项（引擎不可用/RPC 失败降级返回 []）。 */

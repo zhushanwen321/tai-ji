@@ -240,7 +240,7 @@ function addEdge(edges, file, sibling) {
   edges.get(file).add(sibling);
 }
 
-/** 检查 2：聚合 → 壳（一律禁，type 也不许——壳符号面只许壳自己 re-export）。
+/** 检查 2：聚合 → 壳（一律禁，type 也不许——壳的符号只许壳自己 re-export）。
  *  命中返回违规文本，非壳目标返回 null。dirs.{serviceDir,execDir} 可注入（MF-6 测试）。 */
 export function checkAggregateShellImport(file, parsed, dirs = {}) {
   const serviceDir = dirs.serviceDir ?? SERVICE_DIR;

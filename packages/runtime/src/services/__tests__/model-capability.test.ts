@@ -235,7 +235,7 @@ describe('对账编排（日志 + 事件上报路径）', () => {
   })
 })
 
-describe('ModelService 服务面挂载', () => {
+describe('ModelService 服务侧挂载', () => {
   function makeService(engine: unknown, providers: ProviderInfo[]): ModelService {
     const svc = new ModelService({ discoverFromApi: vi.fn() } as unknown as IModelSource)
     svc.setServices(
@@ -261,7 +261,7 @@ describe('ModelService 服务面挂载', () => {
     warnSpy.mockRestore()
   })
 
-  it('attachSupportedLevels 透传能力面：下发模型信息含 supportedLevels 字段', () => {
+  it('attachSupportedLevels 透传能力侧：下发模型信息含 supportedLevels 字段', () => {
     const svc = makeService(undefined, [])
     const decorated = svc.attachSupportedLevels([provider('p', [model('m')])])
     expect(decorated[0].models[0].supportedLevels).toEqual(['off'])

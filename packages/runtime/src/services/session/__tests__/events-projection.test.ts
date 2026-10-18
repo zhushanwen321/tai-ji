@@ -676,7 +676,7 @@ describe('projectV2Subagent（事件源胜出 / 窗外兜底）', () => {
 
   // [W1 / F1-46 轮终 result] record-round-idle 携带 result 摘要锚（D3 词表裁决①）：
   // 轮终粒度的 result 断供修复——承接 v1 U8b 轮终 result 显示信号（「轮终等待续聊」
-  // 的展示面），终局全文仍只在 v2 终态条目一次性写（D1）。
+  // 的展示侧），终局全文仍只在 v2 终态条目一次性写（D1）。
   it('轮终摘要透传：round-idle.resultSummary 在场（无终态条目）→ result 取轮终摘要', () => {
     const roundIdle = {
       type: 'record-round-idle' as const,
@@ -731,7 +731,7 @@ describe('projectV2Subagent（事件源胜出 / 窗外兜底）', () => {
     expect(record.result).toBe('new round summary')
   })
 
-  it('终局面优先：settled 在场（晚于 round-idle）→ 条目全文 / 终局摘要锚', () => {
+  it('终局条目优先：settled 在场（晚于 round-idle）→ 条目全文 / 终局摘要锚', () => {
     const fold = {
       identity: createdEvent('sa-1'),
       bound: undefined,

@@ -18,8 +18,8 @@
  *   4. [G5] staged 源码/测试文件（.ts/.vue/.mjs/.js 等）注释内 docs 引用存在性：
  *      Form A `docs/<path>` 仓库相对引用 + Form B `<文档名>.md` 裸文件名引用，
  *      目标不存在即拦截（staged 含 .md 删除时扩为全仓扫描——被删文档可能被任意
- *      源码注释引用，引用面无法局部化）。只扫注释（AST trivia，字符串/模板/
- *      正则字面量内的 docs/ 字样不进检查面），性能：日常只扫 staged 文件。
+ *      源码注释引用，引用范围无法局部化）。只扫注释（AST trivia，字符串/模板/
+ *      正则字面量内的 docs/ 字样不进检查范围），性能：日常只扫 staged 文件。
  *   5. 数据源登记锚点反向校验：`docs/architecture/data-source-registry.md` 行内
  *      声称「声明处 `@data-owner #N`」时，源码里必须真存在 `@data-owner #N` 注解。
  *      [2026-09-17] 起因：缓存治理批删掉缓存实现时，`@data-owner #20` 注解随实现
@@ -29,9 +29,9 @@
  *   6. ADR 编号唯一占用与引用存在性：decisions.md 内 `### ADR-XXXX` 标题编号
  *      不得重复占用（同号两条 = 引用无法消歧）；引用域（根 AGENTS.md + docs/
  *      递归 .md）内的 `ADR-XXXX` 引用必须命中现行标题编号 ∪ 已否谱系编号
- *      （`- **ADR-XXXX**` 行——被推翻决策的合法历史引用面）。decisions.md 自身
+ *      （`- **ADR-XXXX**` 行——被推翻决策的合法历史引用范围）。decisions.md 自身
  *      正文引用同查（定义行与已否行除外）；合条标题（`### ADR-0001 / ADR-0002`）
- *      收全部编号。源码注释内 ADR 引用不在本面（文档面检查，与第二检查同构）。
+ *      收全部编号。源码注释内 ADR 引用不在本面（文档侧检查，与第二检查同构）。
  *
  * 退出码契约：0=全部通过；1=存在违规；2=检查器配置故障（DOC_MODULE_MAP 登记路径
  * 缺失/不可访问——检查自身输入坏了，恢复动作指向映射表，与「检查不通过」可区分）。
@@ -41,7 +41,7 @@
  * 不带反引号——带反引号即按现状引用检查，这正是本检查的判定口径。
  *
  * 映射表 DOC_MODULE_MAP 是显式登记（文档 → 权威源码模块）。新增设计文档时在
- * 此登记映射，未登记的文档不检查（宁缺勿滥，误报面收敛到声明过的对照对）。
+ * 此登记映射，未登记的文档不检查（宁缺勿滥，误报风险收敛到声明过的对照对）。
  *
  * 用法：node scripts/check-doc-symbol-drift.mjs（符号/路径检查始终全量——触发范围
  * 由 pre-commit 按路径控制，检查本身毫秒级无需增量；[G5] 注释 docs 引用检查读
@@ -64,7 +64,7 @@ const PROJECT_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), 
  * 值为目录（递归收 .ts，排除 __tests__/test）或精确文件。
  */
 const DOC_MODULE_MAP = {
-  // coding-plan-quota 设计（v3-specs）：符号面 = runtime services（quota-auto-enable /
+  // coding-plan-quota 设计（v3-specs）：符号侧 = runtime services（quota-auto-enable /
   // provider-config-helper / quota-service 的 getCached / quota-providers 的 QUOTA_FETCHERS）
   // + shared paths（getDataDir）。§1.1 与「共享包适配点」章节的 statusline 参考源符号
   // （getAgentDir）与占位形态叙述（${ENV_VAR}）非本仓符号，不带反引号书写（书写约定见头部）。
@@ -72,7 +72,7 @@ const DOC_MODULE_MAP = {
   'docs/architecture/zcode-session-db-isolation.md': ['packages/subagent-core/src/execution/engine', 'packages/zcode-subagent-cli/src', 'packages/shared/src/paths.ts', 'packages/runtime/src/infra/pi/pi-paths.ts', 'scripts/zcode-session-db-cleanup.mjs'],
   // replay port 设计（subagent 完成回收在新架构上的重放移植）：M1/M2 落点在
   // pi-subagent-cli，M3 落点在 subagent-core execution（watchdog 复用 settled-watchdog
-  // 原语）；MAX_ATTEMPTS 引执行面、CANCEL_SETTLE_GRACE_MS 引协议范围、DOC_MODULE_MAP 引检查
+  // 原语）；MAX_ATTEMPTS 引执行侧、CANCEL_SETTLE_GRACE_MS 引协议范围、DOC_MODULE_MAP 引检查
   // 本体——按文档实际引用符号的所在模块逐条登记（宁准勿滥）。
   //
   // 引擎开发指南（docs/extensions/subagents/engine-development-guide.md）：登记蓝本 =
@@ -343,7 +343,7 @@ function checkPathRefs(docs, skipped) {
 // ─── 第三检查：源码注释内 docs 引用存在性（G5）───────────────────────────
 // [G5] 起因 2026-09-17：源码注释引用已删除设计文档（panel-view-derivation 族等）
 // 悬空存活无任何机器信号，与第二检查拦的「文档引用不存在路径」方向相反：这里是
-// 「源码引用不存在文档」。判定口径（按误报面校准）：
+// 「源码引用不存在文档」。判定口径（按误报风险校准）：
 //   1. Form A `docs/<path>` 相对引用——目标（文件或目录）不存在即悬空；
 //   2. Form B 裸 `<文档名>.md` 引用——须同行含 docs 叙述语境词（FORM_B_CONTEXT_RE）
 //      才视为文档引用（裸 .md 文件名大量出现于运行时产物描述：诊断 zip 的
@@ -355,7 +355,7 @@ function checkPathRefs(docs, skipped) {
 //      前文以连字符结尾（本行是断字路径尾部续行，如 xxx-collect-and- ⏎
 //      reaper-sink.md）——单行均无法解析完整目标。
 // 性能：日常只扫 staged 源码文件；staged 含 .md 删除时全仓扫描（被删文档可能被
-// 任意源码注释引用，引用面无法局部化）。
+// 任意源码注释引用，引用范围无法局部化）。
 // 豁免登记：注释里历史性提及已删除文档但未带标注、且确需保留的，在
 // COMMENT_DOC_REF_EXEMPT 登记（文件路径::引用字面量 + 理由）；禁止为「新代码里
 // 的悬空引用」加豁免——那走改注释。
@@ -371,7 +371,7 @@ const FULL_SCAN_PRUNE_DIRS = new Set(['node_modules', '.git', 'dist', 'dist.bund
  *  与第二检查 REPO_PATH_RE 同口径。 */
 const DOCS_PATH_RE = /(?<![\w@.\-/])docs\/[\w@.\/-]+/g
 /** Form B：裸 .md 文件名引用。不含 /（含路径前缀的非 docs 引用如 packages/x/README.md
- *  不属 docs 引用面，不检查）；左边界同 Form A。 */
+ *  不属 docs 引用范围，不检查）；左边界同 Form A。 */
 const MD_NAME_RE = /(?<![\w@.\-/])[\w@.-]+\.md\b/g
 /** 历史性提及标注（同一行出现即豁免）：仓库书写约定允许注释叙述已删除文档的
  *  历史（描述事故/迁移史须显式标注「已删除/已废弃 + git 可追溯」），未标注的
@@ -588,7 +588,7 @@ export function checkCommentDocRefs(files, docsMdNames, exempt = COMMENT_DOC_REF
   return violations
 }
 
-/** staged 文件清单（指定 diff-filter）；git 不可用返回 null（无 git 上下文时跳过本检查面）。
+/** staged 文件清单（指定 diff-filter）；git 不可用返回 null（无 git 上下文时跳过本项检查）。
  *  timeout：控制范围单请求秒级上界，超时（status null）按 git 不可用同路径降级显形。 */
 function gitStagedFiles(diffFilter) {
   const res = spawnSync('git', ['diff', '--cached', '--name-only', '-z', `--diff-filter=${diffFilter}`], { cwd: PROJECT_ROOT, encoding: 'utf-8', timeout: 30_000 })
@@ -598,7 +598,7 @@ function gitStagedFiles(diffFilter) {
 
 /**
  * 第三检查入口：staged 源码/测试文件注释扫描；staged 含 .md 删除时扩为全仓
- * （被删文档可能被任意源码注释引用，引用面无法局部化）。
+ * （被删文档可能被任意源码注释引用，引用范围无法局部化）。
  */
 function checkStagedCommentDocRefs(skipped) {
   const staged = gitStagedFiles('ACMR')
@@ -703,7 +703,7 @@ function reportDataOwnerAnchors(dataOwner) {
 /** 报告段 5：ADR 编号唯一占用与引用存在性（无违规返回 false） */
 function reportAdrRegistry(adr) {
   if (!adr.available) {
-    console.error(`[adr-registry] 登记处缺失：${ADR_REGISTRY_REL} 不存在——ADR 引用面无从判定（登记处被删时引用须同批清理）`)
+    console.error(`[adr-registry] 登记处缺失：${ADR_REGISTRY_REL} 不存在——ADR 引用范围无从判定（登记处被删时引用须同批清理）`)
     return true
   }
   let printed = false
@@ -774,7 +774,7 @@ function reportOk(commentScan, dataOwner, adr, pathRefDocs, skipped) {
   reportSkipped(skipped)
 }
 
-// ── 检查面 5：数据源登记锚点反向校验（登记表 → 源码注解）──────────────────
+// ── 检查 5：数据源登记锚点反向校验（登记表 → 源码注解）──────────────────
 // [2026-09-17] 起因：缓存治理批删掉缓存实现时 `@data-owner #20` 注解随实现体消失，
 // 登记表却仍声称「声明处 `@data-owner #20` 注解」——taste-lint 的 require-data-owner-
 // annotation 只查反向（注解 → 条目号存在），此方向无机器信号。
@@ -819,7 +819,7 @@ function collectDataOwnerAnnotations() {
   return { available: true, entries }
 }
 
-/** 检查面 5：双向锁定—登记表声称的注解必须真在（且注解引用的条目号必须在登记表）。 */
+/** 检查 5：双向锁定—登记表声称的注解必须真在（且注解引用的条目号必须在登记表）。 */
 function checkDataOwnerAnchors() {
   const docAbs = path.join(PROJECT_ROOT, DATA_OWNER_REGISTRY_REL)
   if (!existsSync(docAbs)) return { available: false, claims: [], missing: [], unknown: [], annotationCount: 0 }
@@ -837,7 +837,7 @@ function checkDataOwnerAnchors() {
   }
 }
 
-// ── 检查面 6：ADR 编号唯一占用与引用存在性───────────────────────────
+// ── 检查 6：ADR 编号唯一占用与引用存在性───────────────────────────
 // 起因 2026-10-04：ADR-0074/0075/0076 三个编号被 2026-10-01 窗口条目重占（同号
 // 两条存活多日无机器信号），AGENTS.md/DESIGN.md 多处引用语义错位（拉为主义写成
 // 0075、exec-skills 写成 0074、symlink 白名单写成 0076），靠审计人工发现后重编
@@ -845,12 +845,12 @@ function checkDataOwnerAnchors() {
 //   1. 唯一占用：decisions.md 内 `### ADR-XXXX` 标题编号不得重复占用——重复 =
 //      两条决策共享一个编号，任何引用都无法消歧（本次事故形态）；
 //   2. 引用存在：引用域内 `ADR-XXXX` 必须命中现行标题编号 ∪ 已否谱系编号
-//      （`- **ADR-XXXX**` 行——被推翻决策的合法历史引用面）。
-// 检查域 = 根 AGENTS.md + docs/ 递归 .md（文档面，与第二检查同构）；decisions.md
+//      （`- **ADR-XXXX**` 行——被推翻决策的合法历史引用范围）。
+// 检查域 = 根 AGENTS.md + docs/ 递归 .md（文档侧，与第二检查同构）；decisions.md
 // 自身正文引用同查（定义行与已否行本身不算引用）；合条标题与合条已否行收全部
 // 编号（`### ADR-0001 / ADR-0002（digest）` → 0001、0002 都算已定义）。
 // 源码注释内的 ADR 引用不在本面（注释面已有 G5 管 docs 路径引用；源码侧 ADR
-// 引用面未来按需另立）。constraints.json 的 adrRef 锚点不在本面（结构校验归
+// 引用范围未来按需另立）。constraints.json 的 adrRef 锚点不在本面（结构校验归
 // validate-constraints.mjs）。
 
 const ADR_REGISTRY_REL = 'docs/adr/decisions.md'
@@ -951,8 +951,8 @@ function collectAdrRefDocs(skipped) {
   return docs
 }
 
-/** 检查面 6：登记清单唯一占用 + 引用域悬空扫描（decisions.md 缺失 = 登记处被删，
- *  引用面无从判定，显形提示而非静默通过）。 */
+/** 检查 6：登记清单唯一占用 + 引用域悬空扫描（decisions.md 缺失 = 登记处被删，
+ *  引用范围无从判定，显形提示而非静默通过）。 */
 function checkAdrRegistry(skipped) {
   const docAbs = path.join(PROJECT_ROOT, ADR_REGISTRY_REL)
   if (!existsSync(docAbs)) return { available: false, defined: new Map(), deprecated: new Set(), refDocCount: 0, duplicates: [], dangling: [] }

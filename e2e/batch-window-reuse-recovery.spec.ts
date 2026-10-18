@@ -360,7 +360,7 @@ test('WRR-A6 (batch real): kill 注入薄壳后第二条 agent() respawn 完成�
     // record 流 agent 面：r1 failed + r2 done。
     // errorCode 断言口径：agent 级 errorCode 实装 = result.failureKind（枚举
     // stale_context/schema_deterministic/unknown，dispatchAgentSettled 映射），崩溃
-    // 分诊不在该枚举面（engine_crashed 是 run 级 RunErrorCode 值）——r1 的
+    // 分诊不在该枚举里（engine_crashed 是 run 级 RunErrorCode 值）——r1 的
     // errorCode 现状恒 unknown，不作断言。
     const agentSettled = run.frames.filter((f) => f['type'] === 'agent-settled')
     expect(agentSettled.length, 'agent-settled 应恰 2 帧（两条 agent()）').toBe(2)
@@ -500,7 +500,7 @@ test('WRR-A8 (batch real): 同名 agent() 两次调用复用同一成员（membe
     expect(settledFrames.length, 'run-settled 应恰 1 帧').toBe(1)
     expect(settledFrames[0]?.['outcome'], 'run 应 done 收尾').toBe('done')
 
-    // record 流复用面（D6 绑定消解后语义）：member-pool 事件已删，「同名复用」
+    // record 流复用（D6 绑定消解后语义）：member-pool 事件已删，「同名复用」
     // 承载于 agent-started 载荷字段 memberRecordId——首派（新建成员）缺省，续写
     // （复用既有成员）携带。恰 1 条携带 = 第二次调用复用；2 条全缺省 = 第二次
     // 误建新成员（复用通道未命中）。

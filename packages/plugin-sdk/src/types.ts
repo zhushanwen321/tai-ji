@@ -8,13 +8,13 @@
  * D4 单源化说明）与 @taiji/shared（SendPromptReason 回执词表，msg-pipeline-debloat
  * D4-6）。
  *
- * 消费方（runtime 侧薄壳，保持其既有导入面不变）：
+ * 消费方（runtime 侧薄壳，保持其既有导入范围不变）：
  *   packages/runtime/src/services/plugin-service/plugin-types.ts          （主域 + Bridge/AgentAPI/Tool 等）
  *   packages/runtime/src/services/plugin-service/plugin-types/hook-types.ts（Hook 域）
  *   descriptor / rpc 子域亦经本文件（SDK）re-export 消费，无本地副本。
  *
  * 修改契约：直接编辑本文件（类型名/结构零变化承诺——runtime 薄壳 re-export 依赖
- * 导入面稳定）。
+ * 导入范围稳定）。
  *
  * 历史：2026-09-05 前本文件由 packages/plugin-sdk/scripts/sync-types.sh 从
  * runtime 的 plugin-types 自动生成（runtime 为真相源的镜像方向）；D28 审计
@@ -391,7 +391,7 @@ export interface HookResult {
  * 不出现在前端↔runtime 的共享协议中。
  *
  * 分层标注（IF2）：
- * - @stable — 稳定契约范围（Phase1AgentAPI 核心面 storage/notify/sessions、
+ * - @stable — 稳定契约范围（Phase1AgentAPI 核心部分 storage/notify/sessions、
  *   PermissionConstants、PluginRpcErrorCodes、Disposable、SessionInfo、PluginStateStorage）
  * - @experimental — 已显式降级的 API（events 插件间事件总线：未实现，调用即抛
  *   NOT_IMPLEMENTED；已移出稳定面）
@@ -467,9 +467,9 @@ export interface PluginModule {
 // 待 tool/hook 域各自稳定、API 表面收敛后再独立。
 
 /**
- * @stable — Phase 1 最小集 AgentAPI 核心面（storage/notify/sessions）。
+ * @stable — Phase 1 最小集 AgentAPI 核心部分（storage/notify/sessions）。
  *
- * 此核心面是插件可依赖的稳定契约：storage（全局/工作区存储）、notify（通知）、
+ * 此核心部分是插件可依赖的稳定契约：storage（全局/工作区存储）、notify（通知）、
  * sessions（会话查询、消息发送与生命周期事件订阅）。events 面已降级为
  * @experimental（见下方 events 字段注释）。
  */
@@ -493,8 +493,8 @@ export interface Phase1AgentAPI {
      * （restore 后校验，未命中拒发 reason:'command-missing'——命令串永不漏进模型）；
      * present 但空串/全空白在 runtime 入口拒绝（INVALID_REQUIRE_COMMAND）。
      * 回执 reason 词表 = @taiji/shared 的 SendPromptReason 单点（D4-6）：busy/compacting/bash
-     * 退役值已删（「排队取代拒绝」，运行面只产 command-missing/hook-blocked/error）；分支
-     * 只看 accepted，reason 是诊断/文案面。
+     * 退役值已删（「排队取代拒绝」，运行期只产 command-missing/hook-blocked/error）；分支
+     * 只看 accepted，reason 是诊断/文案侧。
      */
     sendMessage(params: {
       sessionId: string
@@ -729,7 +729,7 @@ export interface HookEntry {
 
 /**
  * @proposed — Phase 2 AgentAPI 扩展范围（tools/hooks/config/sessionData/ui/agent/
- * workspace/commands/views），在 Phase 1 核心面上叠加，API 表面仍在演进。
+ * workspace/commands/views），在 Phase 1 核心部分上叠加，API 表面仍在演进。
  */
 export interface Phase2AgentAPI extends Phase1AgentAPI {
   readonly tools: {

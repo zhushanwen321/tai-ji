@@ -1,6 +1,6 @@
 // src/orchestration/run-registry.ts
 //
-// Workflow run 注册表（D9-1）——D5 状态机的派生视图面。
+// Workflow run 注册表（D9-1）——D5 状态机的派生视图侧。
 //
 // 为什么需要它：现状 run 状态判读只能读进程自写快照（state 文件末行 status），
 // 进程死亡后快照永远停在 running（僵尸）——「状态字段不可信、靠 mtime 新鲜度」
@@ -51,7 +51,7 @@ import type { WorkflowRecordSettledEntryData } from "./workflow-record-entry.ts"
 
 const logger = getLogger("run-registry");
 
-// ── 派生视图（D9-1：注册表 = 状态机派生视图面）──────────────────────
+// ── 派生视图（D9-1：注册表 = 状态机派生视图侧）──────────────────────
 
 /** 派生视图判读四相。 */
 export type RunRegistryPhase =
@@ -121,7 +121,7 @@ function foldEvents(events: readonly WorkflowRunEvent[], runId: string): RunLife
  *   判读；状态字段不可信——快照末行 running 的僵尸在此判读下构造性消失）；
  * - 空事件流 + 活体集命中 → active（run-created 写入 journal 记录前的创建窗口）；
  * - 空事件流 + 未命中 → missing（无事件证据——从未写入 journal 记录，或已过保留期清理且
- *   消费方应回落 manifest 终局面）。
+ *   消费方应回落 manifest 终局条目）。
  */
 export function projectRunRegistryEvents(
   events: readonly WorkflowRunEvent[],
@@ -212,7 +212,7 @@ export interface AdoptInterruptedRunOptions { // oe-exempt:20260929:framework:wo
   /**
    * session 条目证据面：返回 true = 条目已给出终态或中断收敛 → 跳过收编追加
    * （覆盖「record 流整文件损坏但条目完好」的极端组合——条目即收敛证据，不追加
-   * 与既有条目构成两记录面矛盾）。壳注入条目读侧；缺省 = 无条面证据（core 测试/
+   * 与既有条目构成两条记录相互矛盾）。壳注入条目读侧；缺省 = 无条面证据（core 测试/
    * 纯 record 形态）。
    */
   hasSettledEntry?: (runId: string) => boolean | Promise<boolean>;

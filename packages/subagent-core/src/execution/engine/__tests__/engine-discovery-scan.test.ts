@@ -327,11 +327,11 @@ describe("manifest schema 字段级解析", () => {
     makeEnginePkg(tmpRoot, "mc-no-models", { modelCatalog: { dynamic: false }, capabilities: FULL_CAPABILITIES });
     const result = scanEngines(scanOpts({ roots: [tmpRoot] }));
     const manifestOf = (id: string) => result.discovered.find((d) => d.id === id)!.descriptor.manifest!;
-    // 缺省 = 不注入（解析器不得把省略填成 models: []——「无枚举面」语义必须可达）
+    // 缺省 = 不注入（解析器不得把省略填成 models: []——「无枚举情形」语义必须可达）
     expect("modelCatalog" in manifestOf("mc-omitted")).toBe(false);
     expect(manifestOf("mc-null").modelCatalog).toBeNull();
     expect(manifestOf("mc-explicit").modelCatalog).toEqual({ dynamic: true, models: [{ id: "m1" }] });
-    // models 缺失 = 无有效枚举面 → null（不是 []——[] 是作者显式「有面但空」声明）
+    // models 缺失 = 无有效枚举侧 → null（不是 []——[] 是作者显式「有面但空」声明）
     expect(manifestOf("mc-no-models").modelCatalog).toBeNull();
   });
 
@@ -536,10 +536,10 @@ describe("装载与注册表", () => {
     const port = getEngine("loaded");
     expect(port.id).toBe("loaded");
     // 同步成员直读 manifest 快照（W2 RemoteEngine 形态）：无 modelCatalog →
-    // listModels 返回 null（无枚举面）、validateModel 成员不实现（构造器摘除）
+    // listModels 返回 null（无枚举情形）、validateModel 成员不实现（构造器摘除）
     expect(port.listModels?.()).toBeNull();
     expect(typeof port.validateModel).toBe("undefined");
-    // 显式 modelCatalog → listModels 返回数组（有枚举面）
+    // 显式 modelCatalog → listModels 返回数组（有枚举侧）
     const portWithCatalog = getEngine("loaded-catalog");
     expect(portWithCatalog.listModels?.()).toEqual([{ id: "m1" }]);
   });
@@ -576,7 +576,7 @@ describe("装载与注册表", () => {
       syncEnginesFile(agentDir, l1EnvOpts);
       expect(fs.statSync(filePath).mtimeMs).toBe(statAfterFirst.mtimeMs);
 
-      // 发现面变化（新增引擎包）触发重写
+      // 发现侧变化（新增引擎包）触发重写
       makeEnginePkg(tmpRoot, "second-projected", { capabilities: FULL_CAPABILITIES });
       syncEnginesFile(agentDir, l1EnvOpts);
       const updated = JSON.parse(fs.readFileSync(filePath, "utf8")) as SubagentEnginesFile;

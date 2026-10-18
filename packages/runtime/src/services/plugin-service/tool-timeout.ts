@@ -17,7 +17,7 @@ export const DEFAULT_TOOL_EXECUTE_TIMEOUT_MS = 1_800_000
  * Node setTimeout delay 安全上限（2^31-1）：超域 delay 会被 Node 塌缩为 1ms 立即
  * 触发（语义反转：刚发起就超时）。权威源 @zhushanwen/subagent-core/shared/timer-delay.ts
  * （dialog-queue 同款 clamp 惯例）——runtime 尚无该符号的 import 先例，本地同值定义
- * （平台常量无漂移面），避免首创跨包深路径耦合。
+ * （平台常量无漂移情形），避免首创跨包深路径耦合。
  */
 const MAX_TIMER_DELAY_MS = 2_147_483_647
 

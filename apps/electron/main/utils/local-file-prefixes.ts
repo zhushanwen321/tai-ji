@@ -13,7 +13,7 @@
  *     应用全部会话的项目根（session cwd）下的 `.tmp/` 子树。派生不经 renderer
  *     （决策②否决的 session cwd 动态注册不回归）：main 自有 sessions 目录
  *     （getPiSessionsDir，`<dataDir>/agent/sessions/<encodeCwd>/`）的 encodeCwd 目录名
- *     与候选路径做正向对拍（见 isPathUnderSessionTmp）。风险面 = 用过项目集合的 .tmp/
+ *     与候选路径做正向对拍（见 isPathUnderSessionTmp）。风险 = 用过项目集合的 .tmp/
  *     可读，与 ~/Downloads 既有用户内容成员同粒度（且该 .tmp 本就是对应 session agent
  *     可全量读写的域）。仅限 `.tmp` 字面量——项目其余路径仍不可预览（已接受代价保留）
  *   - projectRoot（仅 dev + 装配器注入）：worktree 项目根。dev-instance.mjs 装配的
@@ -377,7 +377,7 @@ export function probeLocalFileUrlPathname(
 // 读取通道。准入判定复用 probeLocalFileServable（白名单先行短路 → 存在性 → 目录性）；
 // IPC 通道侧前缀集 = computeLocalFileReadPrefixes 的产物子树（非协议 handler 全量白名单
 // ——通道入参含模型消息文本路径载荷，文本读侧限定在实际消费域）。读出的内容只经
-// CodeBlock 文本插值渲染（禁 v-html），不构成脚本执行面扩大。
+// CodeBlock 文本插值渲染（禁 v-html），不构成脚本执行范围扩大。
 
 /** 源码态读取上限（与 runtime `file.read` 的 MAX_FILE_SIZE 同语义：1 MiB，超出截断） */
 export const MAX_LOCAL_FILE_READ_BYTES = 1_048_576
@@ -396,7 +396,7 @@ function defaultReadFile(filePath: string): Uint8Array {
  *
  * 谓词与 servable 预检 / 协议 handler 同源（probeLocalFileServable）——越界路径一律
  * `out_of_whitelist` 且不触 fs（检查顺序是安全性质，不构成存在性探测通道）。准入域由
- * 调用方传入的前缀集裁决：IPC 读通道传 computeLocalFileReadPrefixes 的产物子树（收窄面），
+ * 调用方传入的前缀集裁决：IPC 读通道传 computeLocalFileReadPrefixes 的产物子树（收窄范围），
  * 协议 handler 面如需全文读取才传 computeLocalFilePrefixes 全量白名单。
  *
  * @param rawPath 绝对路径或 `~` 形态路径（IPC 入参）

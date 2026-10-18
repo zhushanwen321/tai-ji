@@ -19,7 +19,7 @@
  *   渲染（禁 v-html，文本插值/<pre>）
  *
  * HTML 形态（chat-html-support v16 形态变更，§6.4 D4）：.html/.htm 恢复 code 类 shiki
- * 源码高亮（渲染态退役，预览面收敛到消息流内联容器 HtmlPreviewInline）；产物目录文件
+ * 源码高亮（渲染态退役，预览区域收敛到消息流内联容器 HtmlPreviewInline）；产物目录文件
  * （session cwd 外，runtime file.read 的 cwd 守门不可达）的抽屉源码读取走 localFile:read
  * 白名单通道（§6.9 D9，readFileContent 两通道分发）。
  *

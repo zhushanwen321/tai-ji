@@ -109,7 +109,7 @@ export type WorkflowRefInvalidReason =
   | "reserved" // 名分支命中保留字（保留字裁决优先于 knownNames）
   | "unknown_name" // 裸名未命中 knownNames
   | "not_absolute" // 路径分支：相对路径无基准
-  | "parent_segment" // 路径分支：含 `..` 段（⛔2 同面）
+  | "parent_segment" // 路径分支：含 `..` 段（⛔2 同一处）
   | "bad_ext"; // 路径分支：非 .js
 
 /**
@@ -135,7 +135,7 @@ export type NormalizedWorkflowRef =
  * 清单异常含保留字也不放行（`..` 若被当名接受会绕过路径域的 ⛔2 收紧）。
  *
  * 路径分支复用 normalizeRef(WORKFLOW_REF_EXT)：`..` 段拒绝、~/ 展开、扩展名校验
- * 与 agent 域同面（G1：同一校验语义）。
+ * 与 agent 域同一处（G1：同一校验语义）。
  */
 export function normalizeWorkflowRef(
   ref: string,

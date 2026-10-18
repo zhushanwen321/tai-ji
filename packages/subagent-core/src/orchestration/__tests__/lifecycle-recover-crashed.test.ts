@@ -1,7 +1,7 @@
 // lifecycle-recover-crashed.test.ts —— recoverCrashedRuns 崩溃恢复装配测试（U7/D8/B1
 // → workflow-run-resume-revision [D2]/[D15]/[D1] 后形态）。
 //
-// 三步序列 = loadAll → 中断收编 → evict（[D15] 发起面第三路，经
+// 三步序列 = loadAll → 中断收编 → evict（[D15] 发起侧第三路，经
 // terminal-actions.interruptRun 入口；v1 兼容尾段已删除——收编只追加
 // run-interrupted 转移事件，不覆盖任何文件）。本文件用真实 WorkflowRun +
 // mock RunStore（可观察调用序列）。

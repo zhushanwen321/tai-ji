@@ -35,7 +35,7 @@
  *   read.ts——converter 聚焦纯转换映射，开库→查询→转换→dispose 组合编排在彼）。
  *   header 由库内 session 行构造：id 归一化（normalizeZcodeSessionId）、timestamp 取
  *   session 创建时间、cwd 缺省留空——zcode 会话无 cwd 概念，不伪造（D1）。
- *   首行 `{type:'session', version:3, ...header}` 不由本模块产出（属序列化装配面：
+ *   首行 `{type:'session', version:3, ...header}` 不由本模块产出（属序列化装配逻辑：
  *   导入薄包装 / reader 侧各自拼装）。
  * - 时间不可解不伪造（RT-5#8）：session.timeCreated / message.time.created 不可解时
  *   timestamp 键缺省（header.timestamp / entry.timestamp / message.timestamp 均可选），
@@ -379,7 +379,7 @@ export function convertZcodeTranscript(
   }
 
   // T1：session_info entry（name = session.title；空 title 不带 name 字段——可选语义）。
-  // 首行 header（{type:'session', version:3, ...header}）不在此产出（序列化装配面）。
+  // 首行 header（{type:'session', version:3, ...header}）不在此产出（序列化装配逻辑）。
   emitEntry('session_info', headerTimestamp, typeof session.title === 'string' && session.title.length > 0 ? { name: session.title } : {})
 
   for (const [msgIndex, msg] of messages.entries()) {

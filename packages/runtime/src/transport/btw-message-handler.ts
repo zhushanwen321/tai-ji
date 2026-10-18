@@ -47,7 +47,7 @@ import type { BtwCreateResult, BtwService } from '../services/session/btw-servic
 type BtwForkState = ServerMessageMap['btw.create']['forkState']
 
 /**
- * handler 消费的 BtwService 窄面（四原语转发；结构化窄依赖 = 测试注入纯 fake 无 cast，
+ * handler 消费的 BtwService 窄接口（四原语转发；结构化窄依赖 = 测试注入纯 fake 无 cast，
  * 组合根传完整 BtwService 结构性满足）。
  */
 export type BtwServiceFace = Pick<BtwService, 'createLine' | 'listLines' | 'closeLine' | 'getLine'>
@@ -158,7 +158,7 @@ export class BtwMessageHandler {
         if (typeof mainSid !== 'string' || !mainSid) {
           return this.ctx.sendError(ws, 'btw_failed', 'btw.list requires a non-empty mainSid', msg.id)
         }
-        // 纯 reply（不 publish）：注册表枚举是同步只读过滤（listLines 内无抛错面），
+        // 纯 reply（不 publish）：注册表枚举是同步只读过滤（listLines 内无抛错路径），
         // 异常兜底仍有 server handleMessage 的全局 catch → error envelope（ack 必回成立）。
         return this.ctx.reply(ws, msg.id, 'btw.list', buildBtwThreadListPayload(this.ctx.btwService, mainSid))
       }

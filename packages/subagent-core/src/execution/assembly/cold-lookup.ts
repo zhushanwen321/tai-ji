@@ -150,7 +150,7 @@ function zcodeSessionEntryExists(dbPath: string, sessionId: string): boolean {
 }
 
 /**
- * [U4 / §3.2.3 判据一单点 → U6 引擎分派] transcript 锚可解析性（通用锚探测面——
+ * [U4 / §3.2.3 判据一单点 → U6 引擎分派] transcript 锚可解析性（通用锚探测侧——
  * fork 检查等非降级消费点经此取判据）：
  *   - pi：sessionFile 在盘可读（现行判据不变——`{sessionFile}` 字面量入参兼容）；
  *   - zcode：sessionId+dbPath 库中条目存在（TTL 清理/外部删除 = 锚失效）。
@@ -158,7 +158,7 @@ function zcodeSessionEntryExists(dbPath: string, sessionId: string): boolean {
  *  Continuation 派发检查）[U3] 收窄为 pi 锚专属：pi transcript 即时落盘、预检查
  *  可靠，锚失效的现实触发范围 = 文件被回收；zcode 锚不进预检查分流——库派生视图滞后
  *  于 create 应答属系统性误判（理由详见 conversation-continuation reviveOrThrow
- *  注），带锚正常派发、锚活性由引擎真实 resume 结果承担。zcode 分支保留：探测面
+ *  注），带锚正常派发、锚活性由引擎真实 resume 结果承担。zcode 分支保留：探测侧
  *  维持引擎中立完整，zcode 锚的判据不因降级收窄而失去单点归属。
  */
 export function isAnchorResolvable(record: AnchorProbeShape): boolean {
@@ -331,7 +331,7 @@ function resurrectColdRecord(
  *  分支——候选定位 → 准入检查 → 归属/直接父校验 → 重建注册。
  *
  *  [U4] allowReconnect 参数退役保留：两态下 idle 全候选（万物可续），message 专属的
- *  「可重连集把门」语义消亡——close/cancel 等其余 action 的冷查可见面随之统一为
+ *  「可重连集把门」语义消亡——close/cancel 等其余 action 的冷查可见部分随之统一为
  *  「占用位可见即可操作」（对已收尾 record 操作 = 幂等收尾写入 journal 记录，符合新语义）。
  *  参数保留是因调用方 record-access.ts 的签名面（领地外）不做破坏性变更。
  *

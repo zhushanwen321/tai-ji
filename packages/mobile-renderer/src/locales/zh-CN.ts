@@ -100,7 +100,7 @@ export default {
 
 /**
  * connection 域（core transport 断连错误经 ports.t 构造，流入列表 loadError 等
- * 用户可见面）：key 集与桌面 renderer locale 同名域对齐，语义取桌面文案。不放
+ * 用户可见部分）：key 集与桌面 renderer locale 同名域对齐，语义取桌面文案。不放
  * default export（mobile-locale 检查要求壳自有文件顶层仅 mobile 命名空间，core
  * 接线文案不是壳 chrome），由 i18n.ts 装配点展开进 messages 顶层。
  */

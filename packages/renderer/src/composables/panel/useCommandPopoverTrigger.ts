@@ -68,7 +68,7 @@ export interface CommandSelectPayload {
   slug?: string
 }
 
-/** exactMatch 直发通道 payload（通道缺口④，编译器强制）：select 字段面 + 原始 Enter 事件 */
+/** exactMatch 直发通道 payload（通道缺口④，编译器强制）：select 字段侧 + 原始 Enter 事件 */
 export interface CommandSelectAndSendPayload extends CommandSelectPayload {
   /** 原始 Enter KeyboardEvent（window capture 已 preventDefault + stopPropagation 截断） */
   originalEvent: KeyboardEvent
@@ -169,7 +169,7 @@ export function useCommandPopoverTrigger(
   )
 
   /**
-   * 活跃触发域判定（D2b 责任面判据）：五路 triggerActive 找 true 的那路，取其 query ref。
+   * 活跃触发域判定（D2b 职责范围判据）：五路 triggerActive 找 true 的那路，取其 query ref。
    * 活跃域至多一个（触发符检测按光标位置单激活）；判据是 active 标记**非 query ref 非空**
    * （失活域的 query ref 保留旧值不清，makeTriggerHandler null 分支只关浮层不清 query）；
    * +菜单路径（onAddSelect）不设 active——无活跃域返回 null（无清理对象，no-op-safe）。

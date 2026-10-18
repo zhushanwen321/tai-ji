@@ -182,7 +182,7 @@ export function parseEnvPrefixes(id: string, raw: unknown): string[] {
       );
       continue;
     }
-    if (seen.has(upper)) continue; // 大小写不敏感去重（env 名在 POSIX 侧语义即不区分大小写冲突面）
+    if (seen.has(upper)) continue; // 大小写不敏感去重（env 名在 POSIX 侧语义即不区分大小写冲突风险）
     seen.add(upper);
     out.push(item);
   }
@@ -191,11 +191,11 @@ export function parseEnvPrefixes(id: string, raw: unknown): string[] {
 
 /**
  * modelCatalog 字段级解析（三态必写死，§2.4）：
- *   缺省 → undefined（不注入——「无枚举面」必须可达）；
+ *   缺省 → undefined（不注入——「无枚举情形」必须可达）；
  *   null → null（合法等价省略）；
  *   对象 → { dynamic: 缺省 true, models: 条目数组 }；models 缺失/非数组 → null + warn
- *   （显式声明了 catalog 却无有效 models = 无有效枚举面，取 null 而非 []——[] 是
- *   「有枚举面但空」的作者显式声明，不得代填）。
+ *   （显式声明了 catalog 却无有效 models = 无有效枚举侧，取 null 而非 []——[] 是
+ *   「有枚举侧但空」的作者显式声明，不得代填）。
  */
 export function parseModelCatalog(
   id: string,

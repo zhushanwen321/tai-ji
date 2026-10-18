@@ -381,7 +381,7 @@ describe("⛔4 startHandler（校验 + 启动，快照 = pi-sw 实测）", () =>
       ctxModel: CTX_MODEL,
       signal,
     });
-    // 常量与响应同源（宿主 adapter 复用面）
+    // 常量与响应同源（宿主 adapter 复用范围）
     expect(BG_MESSAGE).toBe("detached, will notify on completion (auto-injected message, do not poll)");
     expect(NOTIFY_CONTRACT).toBe("ledger+at-least-once");
   });

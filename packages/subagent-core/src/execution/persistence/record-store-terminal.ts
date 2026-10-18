@@ -86,7 +86,7 @@ function legacyTerminalWrite(
 ): boolean {
   if (record.sessionFile !== undefined) {
     // 终态 usage 快照随 binding 落盘（维持 doFinalizeRecord Step3a 现状——light
-    // 列表面的唯一低成本 usage 源）。binding 内部 best-effort（缺失不造残缺身份）。
+    // 列表侧的唯一低成本 usage 源）。binding 内部 best-effort（缺失不造残缺身份）。
     updateRecordBinding(record.sessionFile, {
       totalTokens: record.totalTokens,
       turns: record.turnCount,
@@ -160,7 +160,7 @@ export function markCancelledImpl(record: ExecutionRecord, ctx: TerminalCtx): bo
  * 物理对象 = 会话库条目（dbPath 单库共享，双宿主开同一 dataDir 时互斥语义与 pi
  * 同构），声明键 = transcriptRef 派生锚基底（zcodeAnchorBasePath）。zcode 无
  * 文件锚（settle 不写收条 sidecar——无文件锚），legacy 删位动作只对 pi 路径。
- * zcode 的异进程占用探针收编到 acquire 点（cold-lookup 探针面只覆盖 sessionFile
+ * zcode 的异进程占用探针收编到 acquire 点（cold-lookup 探针侧只覆盖 sessionFile
  * 形态——findColdLookupCandidate 对无 sessionFile 候选不探）。
  *
  * [U7 / §3.2.7] revive 统计基线水合先于 acquire/register：冷复活链的 createRecord
@@ -343,14 +343,14 @@ export function markSettledImpl(record: ExecutionRecord, stopReason: StopReason,
  * merge——updateRecordBinding 不造新，reopen 的新文件锚必须走创建入口）；
  * [U7 / U6-D2 收编] zcode 锚同款落盘（锚键基底派生，见 zcodeAnchorBasePath）。
  * **binding 写失败 = 拒绝重开**（§3.4 失败语义）：epoch 未落盘时推进内存世代会让
- * 二次 reopen 防撞击穿——内存面回滚（transcriptRef/round/epoch/stopReason 还原，
+ * 二次 reopen 防撞击穿——内存侧回滚（transcriptRef/round/epoch/stopReason 还原，
  * record 保持原 idle 形态可重试）并返回 false，走调用方既有拒绝路径（reviveOrThrow
  * 响亮报错 + Recovery 指引，不崩进程）。残留 lastAbandonedRound 不迁移（跨 epoch
  * 自然失效，§3.2.7——判定第一步以 record 当前 epoch 为基准丢弃旧世代回注）。
  * `.alive` 写权声明迁移归调用方编排（acquireWriteLease 于新锚确立时）。
  *
  * @returns true = 重开完成；false = CAS 拒绝（record 非 idle）或 binding 持久化
- *          失败（内存面已回滚，record 保持重开前形态）。
+ *          失败（内存侧已回滚，record 保持重开前形态）。
  */
 export function markReopenedImpl(record: ExecutionRecord, transcriptRef: TranscriptRef, ctx: TerminalCtx): boolean {
   if (record.status !== "idle") {
@@ -474,7 +474,7 @@ export function identityBindingPayload(record: ExecutionRecord): BindingIdentity
     model: record.model,
     thinkingLevel: record.thinkingLevel,
     worktree: record.worktreeHandle !== undefined || record.hadWorktree === true,
-    // [H2 S3 / W0 D1] 来源身份三字段：引擎子文件身份面在本 sidecar 上，漏写则重启后
+    // [H2 S3 / W0 D1] 来源身份三字段：引擎子文件身份侧在本 sidecar 上，漏写则重启后
     // workflow record 逃过 D1 派生视图过滤 / run 视图步骤索引静默缺失。
     origin: record.origin,
     parentRunId: record.parentRunId,

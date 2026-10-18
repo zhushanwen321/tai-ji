@@ -365,7 +365,7 @@ describe('虚拟 key 清理登记（M3-b 登记结构；deleteSession 消费方�
     const w = mountHost(SID_A)
     await settle(w)
 
-    expect(text(w, 'threads')).toBe('2') // 使用者可见面
+    expect(text(w, 'threads')).toBe('2') // 使用者可见部分
     expect(getBtwVirtualIdsByMain(SID_A)).toEqual(['btw:t1', 'btw:t2'])
     clearBtwVirtualKeyMapping(SID_A)
     expect(getBtwVirtualIdsByMain(SID_A)).toEqual([])
@@ -382,7 +382,7 @@ describe('虚拟 key 清理登记（M3-b 登记结构；deleteSession 消费方�
     // 负载下 settle 的微任务冲刷可能早于 mock resolve，setMessages 落在 watch 创建前会被
     // 基线吞掉——unread 恒 0 且无重算路径（CI 两次连红取证：分区 btw:t2=1 而 host
     // unread=0，8s 轮询不自愈）。等 threads 派生视图到位（与 watch 创建同拍，先写派生视图后建
-    // watch）再制造增长，构造性保证观察面在册。
+    // watch）再制造增长，构造性保证观察点在册。
     await waitForProjection(w, 'threads', '2')
 
     chat.setMessages('btw:t2', [msg('b1')])

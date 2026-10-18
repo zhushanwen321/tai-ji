@@ -73,7 +73,7 @@ interface FakeClientOverrides {
   commands?: PiCommandInfo[]
 }
 
-/** 假 IPiEngine：只实现读侧消费的 getEntries/getCommands/exited（结构化最小面） */
+/** 假 IPiEngine：只实现读侧消费的 getEntries/getCommands/exited（结构化最小子集） */
 function createFakeClient(overrides: FakeClientOverrides = {}): IPiEngine {
   return {
     exited: overrides.exited ?? false,

@@ -9,7 +9,7 @@
  * crash-forensics-logger.test.ts「源码硬保证」段）：index.ts import 即执行 main()，
  * 无法直测，对源文件文本断言符号存在性。
  *
- * 检查面（crash-forensics-and-watchdog D3-D6 组合根装配）：
+ * 检查侧（crash-forensics-and-watchdog D3-D6 组合根装配）：
  * - startWatchdog：内存看门狗启动（off 时纯观测——采样环必须照跑补全 Gate W 前置水位数据）
  * - watchdog:memoryPressure broadcast：renderer 通知出口 + 同拍喂滚动重启编排（D5 决策输入）
  * - setRollingRestartStatusProvider：rollingRestart.status 只读 RPC 数据源（「broadcast

@@ -72,7 +72,7 @@
             {{ row.truncatedKeys.join(', ') }}
           </span>
         </div>
-        <!-- 大字段截断文本（展示原样前缀；禁 parse 消费——展示面语义） -->
+        <!-- 大字段截断文本（展示原样前缀；禁 parse 消费——展示语义） -->
         <p
           v-if="row.detail"
           class="mt-0.5 break-all pl-1 font-mono text-[length:var(--text-3xs)] leading-relaxed text-neutral-faint"

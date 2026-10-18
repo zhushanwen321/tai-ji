@@ -1,6 +1,6 @@
 // src/protocol/contract-types.ts
 //
-// 引擎面契约类型 SSOT（协议两侧不许各写一份；core 反向 re-export 保上层消费方）。
+// 引擎侧契约类型 SSOT（协议两侧不许各写一份；core 反向 re-export 保上层消费方）。
 // 设计权威源：docs/architecture/subagent-engine-protocolization.md §3.5.1 D7 类型闭包表 +
 // impl-plan §2.1「类型闭包处置」。
 //
@@ -14,7 +14,7 @@
 //   - WorktreeHandle ← core execution/assembly/types.ts:349（SDK 结构等价副本——设计 §3.5.1
 //     点名「AgentCallOpts.worktree 的 WorktreeHandle 即这类副本」）
 //
-// ==================== 字段归属判据 1-7（协议宪法·字段面；新增 wire 字段依序裁决，
+// ==================== 字段归属判据 1-7（协议宪法·字段侧；新增 wire 字段依序裁决，
 // 先到先定。条文全文 = engine-protocol.ts 头注；删改史与判据 why =
 // docs/adr/decisions.md ADR-0071） ====================
 // 1. 引擎不消费它，任务能否正确完成？能 → 宿主自持不上协议。
@@ -29,7 +29,7 @@
 // 7. （能力位消费点登记）每个能力位登记消费点与 wire 载体，执行通道缺失如实登记；
 //    未登记位 = 违宪（首个登记条目 = steer）。
 //
-// 演进政策（字段面）：新增字段/事件变体/方法/通道过新增门槛（消费方 + 降级路径 +
+// 演进政策（字段侧）：新增字段/事件变体/方法/通道过新增门槛（消费方 + 降级路径 +
 // 能力位绑定三件齐）才进协议，无消费方不进协议；A 型同形改名默认 additive 双读 +
 // major 清除，B 型机制替换同批合法（对端同仓 + ADR 登记）——三条全文见
 // engine-protocol.ts 头注，minor 协商触发条件见 ADR-0071。
@@ -470,7 +470,7 @@ export interface AgentOutcome {
 }
 
 // ============================================================
-// AgentCallOpts 引擎面子集（协议 run.params.task）
+// AgentCallOpts 引擎侧子集（协议 run.params.task）
 // ============================================================
 
 /**
@@ -485,7 +485,7 @@ export interface ModelCatalogEntry { // oe-exempt:20260929:framework:workflow/re
 }
 
 /**
- * 单次 agent 调用的任务声明——引擎面子集（协议 run.params.task；core 全量
+ * 单次 agent 调用的任务声明——引擎侧子集（协议 run.params.task；core 全量
  * AgentCallOpts 22 字段留 core，core 侧反向 re-export 保消费方）。
  *
  * 字段归属判据（协议演进宪法 ADR-0071 成文，权威源
@@ -493,7 +493,7 @@ export interface ModelCatalogEntry { // oe-exempt:20260929:framework:workflow/re
  * docs/adr/decisions.md ADR-0071；
  * 本注释是判据与存量结论的派生整理，新增字段按决策树依序裁决后在此登记）：
  *   ① 引擎不消费它任务能否正确完成？能 → 宿主自持不上协议（「正确」含满足字段
- *      声明携带的约束面——轮次预算/超时等约束被引擎忽略即任务语义受损，视为消费）；
+ *      声明携带的约束侧——轮次预算/超时等约束被引擎忽略即任务语义受损，视为消费）；
  *   ② 描述「任务是什么」(what) 还是「在什么环境跑/怎么跑」(where/how)？
  *      what → task（预算/验收类约束 = 任务自带语义归 task，宿主偏好参数走③）；
  *   ③ 引擎能否自行推导该环境值且与宿主恒等？能 → 不上协议（推导权归引擎，设计期

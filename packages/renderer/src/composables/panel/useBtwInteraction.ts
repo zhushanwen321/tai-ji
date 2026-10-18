@@ -3,7 +3,7 @@
  * （依赖方向单向：本文件 → useExtensionUI / useBtwTabData / btw-pending-bookkeeping，无环）。
  *
  * V4 核实③不成立（plan-store 单全局 focusedSid 焦点派生视图，第二 usePlanState 实例会把
- * 主审批条读分区抢走 → S9b 互不抢占被破坏；修复面在领地外 plan-store/use-plan-sync）
+ * 主审批条读分区抢走 → S9b 互不抢占被破坏；修复范围在领地外 plan-store/use-plan-sync）
  * → 按设计 D8 降级路径：五类请求（ask-user 富表单 / scheduler 表单 / plan 审批 /
  * 权限审批 / confirm·input·editor 简单 dialog）统一由 drawer 内联确认条独立轻实现
  * 呈现，富表单降档（choice→选项按钮、text→单行输入、schedule→预填草稿一键确认、
@@ -223,7 +223,7 @@ export function useBtwInteraction(vidRef: Ref<string | null>) {
     const key = draftKeyOf(active.value, vidRef.value)
     return key === null ? null : (btwBarDrafts.get(key) ?? null)
   })
-  /** 模板绑定面（v-model 写入当前分键草稿；无活动请求时为只读空表，写入无副作用） */
+  /** 模板绑定侧（v-model 写入当前分键草稿；无活动请求时为只读空表，写入无副作用） */
   const formSel = computed<Record<string, string[]>>(() => curDraft.value?.sel ?? {})
   const formText = computed<Record<string, string>>(() => curDraft.value?.text ?? {})
   const planComment = computed<string>({

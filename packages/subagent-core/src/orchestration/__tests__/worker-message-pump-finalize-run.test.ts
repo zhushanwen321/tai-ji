@@ -70,7 +70,7 @@ function makeRealRun(runId: string): WorkflowRun {
   return run;
 }
 
-/** deps mock：副作用打点进单一顺序数组（断言四步顺序）。appendEntry 是直落权威面
+/** deps mock：副作用打点进单一顺序数组（断言四步顺序）。appendEntry 是直写权威存储的部分
  *  （[reload-closeout D4]）；eventBus 保留观察 register emit——断言 unregister 不再
  *  经 emit（发射点已删）。 */
 function makeTracingDeps(): LifecycleDeps & {

@@ -1,5 +1,5 @@
 /**
- * agentCall.memberRecordId 透出测试（run 级模型切换成员键对齐——dmg-r1-2 修复面）。
+ * agentCall.memberRecordId 透出测试（run 级模型切换成员键对齐——dmg-r1-2 修复侧）。
  *
  * 跨端成员键对齐锚：run 级切换聚合应答的成员标识（subagent-core
  * listAcceptedMemberRunIdsForSwitch 的 record id）≡ 详情载荷 agentCall.memberRecordId

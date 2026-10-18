@@ -17,7 +17,7 @@
  *
  * 依赖方向：本文件是 features 层装配模块，可自由 import stores（stores 间禁止互相
  * import 的编排外置约定）；不回 import stores/chat.ts（防 defineStore 装配环）——
- * 回调是纯查询，无需 chat store 实例（驱逐执行面在 core lru.ts）。
+ * 回调是纯查询，无需 chat store 实例（驱逐执行侧在 core lru.ts）。
  *
  * 被驱逐分区的白屏恢复语义：agentcall 分区无 live 写入者（D4 只读契约），不自愈；
  * SubagentTab 重挂载/重选时经 getAgentCallHistory + setMessages + registerAgentCall 重建。

@@ -406,7 +406,7 @@ export function materializeBoundRecordManifest(
 // run 级终局派生视图（[P1b-2 / D5-④] manifest-write 输出动作的落点）
 // ============================================================
 //
-// ManifestRecord 是 record（ask）域持久面——一个 workflow run 对应多条 record
+// ManifestRecord 是 record（ask）域持久化侧——一个 workflow run 对应多条 record
 //（每 ask 一条，origin="workflow" + parentRunId），run 自身无 record。run 级
 // outcome 硬套 ManifestRecord 全形会把 record 必填身份字段（rootSessionId 等）
 // 填成假数据，故 run 终局派生视图用同族轻量载体 RunTerminalManifest，落点与 run

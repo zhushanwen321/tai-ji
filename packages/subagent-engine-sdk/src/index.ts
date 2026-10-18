@@ -65,7 +65,7 @@ export * from "./journal-io.ts";
 // 引擎进程内契约范围七符号 + parseCtxModel（S4 簇 1：pi/zcode port-types.ts 本地镜像
 // 收编，两包改 re-export shim。收主 barrel 不进 protocol/——RunContext 含
 // AbortSignal/回调非序列化成员；全量任务声明名 EngineAgentCallOpts 避让 protocol
-// 的 AgentCallOpts 引擎面子集）。
+// 的 AgentCallOpts 引擎侧子集）。
 export * from "./port-contract.ts";
 
 // 引擎 CLI 进程入口样板（S4 簇 2：pi/zcode main.ts 同构段收编，两包收缩为薄层；

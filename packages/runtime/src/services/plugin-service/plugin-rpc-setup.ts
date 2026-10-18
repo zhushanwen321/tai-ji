@@ -136,7 +136,7 @@ export function registerAllRpcMethods(ctx: RpcSetupContext): void {
   wireRuntimeUiExits({
     // broadcast 回传是否真正发出（false = broadcastFn 缺失 warn 丢弃）——
     // ui-api 据此拒绝「假成功」回执（B-F2：updateHeaderAction 回 {updated:false}），
-    // 装配缺陷不再被包装成插件面的成功。
+    // 装配缺陷不再被包装成插件侧的成功。
     broadcastHeaderActionUpdate: (payload) => {
       if (deps.broadcastFn) {
         deps.broadcastFn('plugin:headerActionUpdate', payload)

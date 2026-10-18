@@ -146,7 +146,7 @@ export const TOPIC_TABLE: Readonly<Record<string, TopicKind>> = {
   // 故不入 outbound-frame-registry 大字段表。装配点 = transport 侧
   // （session-message-handler.ts + session-delivery-topic.ts，u3a；本表只认类型）。
   'session.delivery': 'state',
-  // widget 两类型 state 类化（scheduler-widget-push D3）：widget 显示面是覆盖式 last-value
+  // widget 两类型 state 类化（scheduler-widget-push D3）：widget 显示侧是覆盖式 last-value
   // （消费端只关心每 (session, widgetKey) 最后一帧）——分配 seq、写 stateSnapshot（typeKey
   // 从 payload.widgetKey 派生，见 STATE_TYPE_KEY_PAYLOAD_DERIVED）、不入 ring、照常广播
   // live 订阅者。效果：widget 帧退出对话 ring（不再被对话帧冲刷，容量全部留给对话帧），

@@ -170,7 +170,7 @@ function consumeDeliveryReceipt(sid: string, clientUuid: string): Segment[] | un
  * 纯文本。非 text part（image 等）不拼接。text parts 按顺序拼接与 reducer 的 textContent
  * 累加同语义（apply-entry-convert）。
  * [R1-b04-候选2] 模块私有（生产仅同文件 confirmKernelDeliveryOnMessageEnd 消费，测试
- * 直接 import = 0）——收窄多余公开面。
+ * 直接 import = 0）——收窄多余公开导出。
  */
 function extractUserContentText(entry: PiMessageEntry): string {
   const content = entry.message.content

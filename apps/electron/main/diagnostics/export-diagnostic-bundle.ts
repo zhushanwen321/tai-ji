@@ -22,7 +22,7 @@
  *
  * 【纯度分层】收集清单计算（buildDiagnosticEntries）/ summary 渲染（buildSummaryMarkdown）/
  * 水位行摘录（extractRecentWatermarkLines）/ zip 字节构造（minimal-zip.ts buildZipArchive）
- * 与 IO 编排（exportDiagnosticBundle）分离；副作用面收敛在后者，deps 全部可注入
+ * 与 IO 编排（exportDiagnosticBundle）分离；副作用收敛在后者，deps 全部可注入
  * （main 池 vitest 直测，夹具 mkdtemp tmpdir 自建自删，禁触真实数据目录）。
  *
  * 【失败降级】清单项缺失（如首事件前登记清单尚未建立）= 降级跳过不抛错，进 missing 显式

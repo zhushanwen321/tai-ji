@@ -52,14 +52,14 @@ export interface RemoteEngineManifestSnapshot {
    * 省略；`models: []` 仅作者显式声明）。解析器**不得**把省略填成 `[]`——省略与
    * 显式 `[]` 的下游语义不同：validateModel 成员实现与否（构造器摘除判定）；
    * listModels 上 dynamic:false 的显式 `[]` 走 buildEmptyModelsHint（显式空清单），
-   * 省略走 buildCoreAlignedHint（无枚举面）——填充会让该区分不可达。
+   * 省略走 buildCoreAlignedHint（无枚举情形）——填充会让该区分不可达。
    */
   modelCatalog?: { dynamic: boolean; models: ModelCatalogEntry[] } | null;
   /**
    * manifest `taiji.subagentEngine.processModel`（U0 / 设计 §3.3 决策 3）：宿主实例
    * 管理分流判据（per-window → 窗口作用域实例；shared-service → registry 单例）。
    * 缺省 undefined = 解析层缺省 'per-window'（轻壳是常态）。RemoteEngine 自身不消费
-   * 本字段（引擎实例行为与形态无关——形态是宿主管理面），承载仅为与 registry 的
+   * 本字段（引擎实例行为与形态无关——形态是宿主管理侧），承载仅为与 registry 的
    * EngineManifestSnapshot 结构闭包一致（漂移由 typecheck 期同形约束承载）。
    */
   processModel?: "per-window" | "shared-service";
@@ -283,7 +283,7 @@ export class RemoteEngine implements EnginePort {
   /**
    * listModels 四态映射（必写死）：
    *   省略 modelCatalog / models null → 返回 null（buildCoreAlignedHint 语义）；
-   *   dynamic:true 且 `models: []` → 返回 null（「无静态枚举面」：dynamic:true 声明
+   *   dynamic:true 且 `models: []` → 返回 null（「无静态枚举情形」：dynamic:true 声明
    *     清单运行期由引擎凭据链动态发现，静态空目录 ≠ 无模型——与 validateModel 的
    *     dynamic:true 放行对称化。若映射为 []，model-prompt 会走 buildEmptyModelsHint
    *     注入「no credentialed models — configure the provider in ZCode desktop first」
@@ -360,7 +360,7 @@ export class RemoteEngine implements EnginePort {
   }
 
   /**
-   * 协议 run 映射。task 收窄为引擎面子集（model/cwd 改挂 run.params.ctx，协议层
+   * 协议 run 映射。task 收窄为引擎侧子集（model/cwd 改挂 run.params.ctx，协议层
    * 单列——SDK AgentCallOpts 注释的字段裁决；schema 本体经
    * wire task.schema 单字段承载，PI_WORKFLOW_SCHEMA env 由引擎侧派生——H1 schema
    * 传输归位）；事件经 run 作用域
@@ -673,7 +673,7 @@ function buildRunRouteHandlers(ctx: RunContext): RunRoute {
  *
  * shared-service 降级出口（①②的 zcode 分支）：不杀任何进程、不触发任何 dispose
  * ——stall warn 出声（ADR-0047 静默 ≠ 卡死：活跃产出不得判死，无进展的判定由
- * 任务级无进展检测承载，core 不在回收路径上另开通知面）。
+ * 任务级无进展检测承载，core 不在回收路径上另开通知侧）。
  */
 
 /**
@@ -834,7 +834,7 @@ function armedReceiptTimeoutOutcome(engineId: string, runId: string): SdkAgentOu
   };
 }
 
-/** core AgentCallOpts → SDK 引擎面子集（宿主自持字段不透传，SDK 契约类型注释裁决）。 */
+/** core AgentCallOpts → SDK 引擎侧子集（宿主自持字段不透传，SDK 契约类型注释裁决）。 */
 function toSdkTaskSubset(task: AgentCallOpts): SdkAgentCallOpts {
   return {
     prompt: task.prompt,

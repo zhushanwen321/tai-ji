@@ -292,7 +292,7 @@ export async function waitForRuntime(dataDir: string, timeoutMs = RUNTIME_START_
  * <dataDir>/runtime-token——main spawn runtime 时写入，轮询等文件出现）。auth 失败直接
  * 抛错（token 文件缺失 = runtime 未起或装配断链，fail-fast）。
  */
-/** runtime WS 帧最小面（e2e 只消费 type/id/payload；更深结构由调用方按需收窄） */
+/** runtime WS 帧最小字段集（e2e 只消费 type/id/payload；更深结构由调用方按需收窄） */
 export interface WsFrame {
   id?: string
   type?: string

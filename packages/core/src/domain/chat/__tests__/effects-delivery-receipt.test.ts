@@ -52,7 +52,7 @@ const CLIENT_UUID = `u-${UUID}`
 
 /**
  * 真实计数语义的 inflight（区别于纯 mock——命中回收断言读数值，非调用记录）。
- * incrementInflight 已随 ctx 成员收敛删除（增量归 store 方法面）——测试预置计数走
+ * incrementInflight 已随 ctx 成员收敛删除（增量归 store 方法侧）——测试预置计数走
  * 本闭包的 addInflight 直写 Map，与 store.incrementInflight 增量语义等价。
  */
 function makeCtx(localMessages: Message[] = []): MessageEffectContext & { inflightOf: () => number; addInflight: (n?: number) => void } {

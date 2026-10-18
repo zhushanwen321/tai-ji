@@ -25,7 +25,7 @@
 // 该形态本就无从收编——判定核与收编入口都以 journal 为证据源，设计 §3.1
 // 步骤 2）。status 不再读快照行（快照对 v2 run 永停 running，非事实源），改调
 // 共享判定核 findRunSettlementEvidence（journal run-settled 尾向帧 ∨ manifest
-// 终局面 + 保守矩阵，与对账 sweep 判据字节级同源）：running → "running"；
+// 终局条目 + 保守矩阵，与对账 sweep 判据字节级同源）：running → "running"；
 // terminal → 对应终态词（reason）；missing → 候选跳过不入结果——候选来自
 // journal 文件族，「journal 不存在」的 missing 仅竞态窗口（枚举中文件被删）
 // 可达，无事实可保留、跳过是唯一诚实动作。
@@ -68,7 +68,7 @@ const SESSIONS_DIR_NAME = "sessions";
 const LEGACY_JOURNAL_SUFFIX = ".events.jsonl";
 
 /**
- * WorkflowRun 枚举 store 窄口（run 枚举读侧对 run 持久化域的最小依赖面，结构
+ * WorkflowRun 枚举 store 窄口（run 枚举读侧对 run 持久化域的最小依赖范围，结构
  * 类型——调用方传符合形态的枚举实现即可，不 import orchestration 具体类，
  * 保持本模块可独立编译 + 单测）。
  *

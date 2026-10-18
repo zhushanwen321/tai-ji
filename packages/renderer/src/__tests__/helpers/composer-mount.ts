@@ -13,7 +13,7 @@
  *   force-quit-draft-recovery-dom：stores/chat + stores/session 委托工厂或仅
  *   composerChildStubs，mock 段各自内联（见下方差异化清单）
  * - composer-bar-density-wiring / composer-smoke：session mock / 子组件 stub /
- *   ComposerInput 共用面复用
+ *   ComposerInput 共用部分复用
  * - composer-history-cache：仅 composerChildStubs
  *
  * 另供两类变体工厂：makeComposerChatApiMock（useChat 的 spy 对象——断言需直接引用
@@ -38,7 +38,7 @@
  * 差异化部分（有意不收敛，各测试文件自留）：
  * - ComposerInput mock：expose 的 spy 面不同者自留（insertFileChip / insertSessionChip /
  *   insertSlashChip+insertSkillChip / 完整 expose 面带 insertTextAtCursor）；
- *   density-wiring 与 smoke 的共用面（clear/setText/insertSlashChip/getSegments +
+ *   density-wiring 与 smoke 的共用部分（clear/setText/insertSlashChip/getSegments +
  *   input 事件捕获）收敛为 makeComposerInputMock 工厂
  * - composer-session-injection：sessionStore 需可变 active（vi.hoisted sessionState），
  *   保留本地；本 helper 只提供静态 active: undefined 版
@@ -344,7 +344,7 @@ export function makeTypeAndEnter(ComposerInputMock: Component) {
  * ComposerInput mock 工厂（density-wiring / smoke / bash-mode / compact-queue /
  * dispatch-route / btw-button 共用 expose 面）：input 事件捕获进 lastInputText 供
  * getSegments 读段；testid 锚点供冒烟断言。beforeEach 重置 lastInputText.value = ''
- * 即可复用于下一用例。lastSetText 记录 setText 收到的值（孤儿草稿恢复类用例的落值观察面）。
+ * 即可复用于下一用例。lastSetText 记录 setText 收到的值（孤儿草稿恢复类用例的落值观察点）。
  * extraEmits 供变体追加事件声明（makeFocusableComposerInputMock
  * 的 focus/blur 即经此注入）。expose 含 getText（Composer.vue 切 session 存草稿读它），
  * setup 返回 clear/setText 供 wrapper.vm 直取断言（bash/queue/dispatch 的 vm.clear 面）。

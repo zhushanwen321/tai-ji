@@ -24,7 +24,7 @@
 
 ### 功能概述
 
-按崩溃面设五道防线，目标「单个组件出错不再杀死 session、崩溃后用户能自动恢复、每次崩溃都有日志可查」：extension 异步回调检查（消灭 9/3 实锤的最大崩溃源）、renderer 错误边界与崩溃自动恢复（熔断防循环）、出站帧传输预算、历史读取/传输双层内存预算（游标分页）、pi 崩溃自动 respawn（join 语义 + 用户可见）。设计与实施计划已删除（git 历史可追溯）——crash-resilience.md（v9，独有档案已并入 crash-forensics-and-watchdog.md 附录 D）/ crash-resilience.impl-plan.md（13 单元 5 Wave + 偏差 D1-D19）。
+按崩溃场景设五道防线，目标「单个组件出错不再杀死 session、崩溃后用户能自动恢复、每次崩溃都有日志可查」：extension 异步回调检查（消灭 9/3 实锤的最大崩溃源）、renderer 错误边界与崩溃自动恢复（熔断防循环）、出站帧传输预算、历史读取/传输双层内存预算（游标分页）、pi 崩溃自动 respawn（join 语义 + 用户可见）。设计与实施计划已删除（git 历史可追溯）——crash-resilience.md（v9，独有档案已并入 crash-forensics-and-watchdog.md 附录 D）/ crash-resilience.impl-plan.md（13 单元 5 Wave + 偏差 D1-D19）。
 
 ### 关键落点
 

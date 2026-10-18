@@ -11,10 +11,10 @@
  * 1. 两线（btw vid）并发交错流式 100 帧（transient `message.text_delta`）：各自订阅者
  *    只收自己的帧（sessionId + 内容标记双零泄漏）；无关会话订阅者零帧；
  * 2. stream 类帧（`message.stream_error`，payload {sessionId,content} 精确契约）5+3：
- *    per-session seq 1..N 单调无缺口（分区独立计数）+ ring 快照（重放面）只含本线帧；
- * 3. transient 不入 ring（重放面分区：迟到订阅者拿不到 transient 快照，分区构造性成立）；
+ *    per-session seq 1..N 单调无缺口（分区独立计数）+ ring 快照（重放侧）只含本线帧；
+ * 3. transient 不入 ring（重放侧分区：迟到订阅者拿不到 transient 快照，分区构造性成立）；
  * 4. btw.list 状态广播（handler 广播面）按 mainSid 分区：各主会话订阅者只收自己的
- *    全量线列表，stateSnapshot('btw') 恢复面同样分区。
+ *    全量线列表，stateSnapshot('btw') 恢复侧同样分区。
  *
  * 运行：cd packages/runtime && npx vitest run src/transport/__tests__/btw-p-isolation.test.ts
  */
@@ -123,7 +123,7 @@ describe('P-isolation：两线并发流式分区无串扰（runtime MessageBus �
     expect(fa.every(m => sidOf(m) === VID_A)).toBe(true)
     expect(fb.every(m => sidOf(m) === VID_B)).toBe(true)
 
-    // ring 快照（重放面）同分区：迟到订阅者只回放本线帧，lastSeq 为本线水位
+    // ring 快照（重放侧）同分区：迟到订阅者只回放本线帧，lastSeq 为本线水位
     const late = makeClient()
     const sub = bus.subscribe(VID_A, late.client)
     expect(sub.snapshot).toHaveLength(5)
@@ -133,7 +133,7 @@ describe('P-isolation：两线并发流式分区无串扰（runtime MessageBus �
     expect(sub.lastSeq).toBe(5)
   })
 
-  it('transient 不入 ring：只发 transient 的会话，迟到订阅者快照为空（重放面分区构造性成立）', () => {
+  it('transient 不入 ring：只发 transient 的会话，迟到订阅者快照为空（重放侧分区构造性成立）', () => {
     const bus = new MessageBus()
     bus.publish(VID_A, transientDelta(VID_A, 0))
     bus.publish(VID_A, transientDelta(VID_A, 1))
@@ -144,7 +144,7 @@ describe('P-isolation：两线并发流式分区无串扰（runtime MessageBus �
     expect(sub.lastSeq).toBe(0)
   })
 
-  it('btw.list 状态广播按 mainSid 分区：live 面只收本主会话，stateSnapshot 恢复面同样分区', () => {
+  it('btw.list 状态广播按 mainSid 分区：live 面只收本主会话，stateSnapshot 恢复侧同样分区', () => {
     const bus = new MessageBus()
     const mainA = 'main-sid-a'
     const mainB = 'main-sid-b'
@@ -160,7 +160,7 @@ describe('P-isolation：两线并发流式分区无串扰（runtime MessageBus �
     expect(gotA[0]?.type).toBe('btw.list')
     expect(payload(gotA[0]!).mainSid).toBe(mainA)
 
-    // 恢复面：mainB 迟到订阅经 stateSnapshot('btw') 只拿到自己的全量线列表
+    // 恢复侧：mainB 迟到订阅经 stateSnapshot('btw') 只拿到自己的全量线列表
     const lateB = makeClient()
     const subB = bus.subscribe(mainB, lateB.client)
     const stateFrames = subB.stateSnapshot.filter(m => m.type === 'btw.list')

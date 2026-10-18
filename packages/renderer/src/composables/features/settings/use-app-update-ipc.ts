@@ -1,7 +1,7 @@
 /**
  * useAppUpdate 的 ipc 依赖缝（seam）。
  *
- * 本接口是 useAppUpdate 控制器对 settings 域升级 IPC 的全部依赖面（10 个方法与
+ * 本接口是 useAppUpdate 控制器对 settings 域升级 IPC 的全部依赖范围（10 个方法与
  * @/api/domains/settings 现有导出一一对齐）。控制器与各轴工厂只认本接口：
  * 生产装配传 createRealAppUpdateIpc()（逐函数转发 @/api/domains/settings），
  * 测试注入内存 adapter——依赖方向反转后测试无需 vi.mock @/api 层。
@@ -28,7 +28,7 @@ import {
   onUpdateError as onUpdateErrorApi,
 } from '@/api/domains/settings'
 
-/** useAppUpdate 的 ipc 依赖面（与 @/api/domains/settings 的升级导出一一对应） */
+/** useAppUpdate 的 ipc 依赖范围（与 @/api/domains/settings 的升级导出一一对应） */
 export interface AppUpdateIpc {
   /** 检测最新可用版本。opts.force 强制刷新缓存（默认走 1h 缓存） */
   checkForUpdate(opts?: { force?: boolean }): Promise<UpdateCheckResult>

@@ -71,7 +71,7 @@ function askUserEcho(outcome: RunOutcome): string | undefined {
 }
 
 describe("D3：reverse-router host/askUser 槽现读（构造期固化已消除）", () => {
-  it("EngineClient 构造后登记应答端 → 反向请求路由到该 handler（构造期无固化面）", async () => {
+  it("EngineClient 构造后登记应答端 → 反向请求路由到该 handler（构造期不固化值的情形）", async () => {
     // 构造时槽为空——旧行为（构造期固化 uiRequestHandler）会把 undefined 固化进
     // reverseRouterDeps，本 run 将收 {unsupported:true}；现读语义下应正常应答。
     const client = new EngineClient({

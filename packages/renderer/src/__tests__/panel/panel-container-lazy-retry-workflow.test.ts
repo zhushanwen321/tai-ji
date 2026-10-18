@@ -154,7 +154,7 @@ describe('抽屉 workflow 回落内容懒加载内部自动重试（display-cont
     expect(wrapper.find('[data-testid="async-retry-btn"]').exists()).toBe(false)
     expect(wrapper.find('[data-testid="workflow-loaded"]').exists()).toBe(false)
 
-    // ② 第 1 轮退避（300ms）到点 → 内部自动重试 → 内容渲染、占位消失（恢复面成立，零交互）
+    // ② 第 1 轮退避（300ms）到点 → 内部自动重试 → 内容渲染、占位消失（恢复逻辑成立，零交互）
     await vi.advanceTimersByTimeAsync(300)
     await flushPromises()
     expect(lazy.workflowLoads).toBe(2)

@@ -3,7 +3,7 @@
  *
  * 误放行会让「注释引用已删除文档」继续悬空存活（panel-view-derivation 事故形态）；
  * 误报会拦死正常提交——两条都机器锁定：
- *   R1 JS/TS 注释区间提取（字符串/模板/正则字面量内的 docs/ 字样不进检查面）
+ *   R1 JS/TS 注释区间提取（字符串/模板/正则字面量内的 docs/ 字样不进检查范围）
  *   R2 .vue 注释区间（script 块 parser + 模板 HTML 注释，偏移平移正确）
  *   R3 引用形态提取（Form A docs/ 相对 + Form B 裸 .md 文件名，span 去重）
  *   R4 悬空判定与豁免（历史标注行 / Form B 语境门 / 换行续行碎片 / 豁免表）
@@ -215,7 +215,7 @@ describe('R6 extractDataOwnerClaims', () => {
     ])
   })
 
-  it('无「声明处」前缀的注解提及不产生声明（反向校验只吃声明面，避免误报）', () => {
+  it('无「声明处」前缀的注解提及不产生声明（反向校验只吃声明侧，避免误报）', () => {
     expect(extractDataOwnerClaims('注解 `@data-owner #1` 已删除（历史）')).toEqual([])
   })
 })

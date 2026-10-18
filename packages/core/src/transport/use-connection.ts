@@ -262,7 +262,7 @@ function armDisconnectGrace(): void {
  * subscribe RPC + replay dispatcher 灌入 core subscription-state（gap 检测副作用依赖）。
  *
  * dispatcher 可选注入（D9）——core 内部测试 seam，与 configureRouteInbound 的可选 ports
- * 同体例，不出现在壳装配面（壳装配仍只调 useConnection().init()）：注入时直接安装
+ * 同体例，不出现在壳装配侧（壳装配仍只调 useConnection().init()）：注入时直接安装
  * （不调 configureRouteInbound，defaultPorts 不参与），测试可经真实 configureRouteInbound
  * 的 TransportPorts 显式传参替换三件套，消 vi.mock 模块内部；缺省按现状构造，生产行为不变。
  */

@@ -313,7 +313,7 @@ describe('A15 turnExpansionMap 已注册（删除路径可清）', () => {
   })
 })
 
-describe('app-runtime 编排出口接线（A3/A4 壳层编排面）', () => {
+describe('app-runtime 编排出口接线（A3/A4 壳层编排侧）', () => {
   it('deleteSession 出口 = core 销毁唯一编排点（api.remove → triggerSessionCleanups）', async () => {
     const cleanupSpy = vi.fn()
     trackCleanup(cleanupSpy)

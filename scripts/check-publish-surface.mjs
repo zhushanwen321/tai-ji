@@ -221,7 +221,7 @@ function checkGhostEntries(pkgDir, files, pkgName) {
   for (const entry of files) {
     // npm files 官方排除语义（"!path"）：排除规则声明的是「从 tarball 里扣掉」，
     // 不是文件存在性承诺——磁盘上无需存在对应路径，不参与幽灵检查（体积估算
-    // 同理跳过：无法从 include 求和里正确扣除排除面，跳过 = 保守高估，warning
+    // 同理跳过：无法从 include 求和里正确扣除被排除的条目，跳过 = 保守高估，warning
     // 方向安全）。
     if (entry.startsWith('!')) continue
     if (entry.includes('*')) {
@@ -397,7 +397,7 @@ function indexWorkspacePackages(packagesDir) {
  * publish 后人工登记——已发布 → registry 可解析）∨ X 有 pending changeset
  * （本次发布会发布）。两信号皆无 → 红。
  *
- * 信号误报面（注释备案）：假绿仅限「清单错登未发布包」——禁预登纪律兜底；
+ * 信号误报风险（注释备案）：假绿仅限「清单错登未发布包」——禁预登纪律兜底；
  * 假红方向安全（X 已发布但清单漏登 → 红 → 按指引核对 npm 后登记即绿）。
  * devDependencies 不进 tarball 依赖树不查；外部依赖（ajv 等）registry 存在性
  * 零网络不可验，不在成员索引即跳过（与本脚本零第三方依赖取向一致）。

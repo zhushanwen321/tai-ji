@@ -100,7 +100,7 @@ export const RESTORE_FAILED = 'RESTORE_FAILED'
  * `.corrupt-*` 副本）时不允许启动任何新 pi 进程（会话创建/恢复/fork/崩溃自动重生/
  * 短命 pi 全部经此单点被拒）。已运行会话不经此入口，不受影响。
  *
- * 用户面：消息含 settings.json 绝对路径 + `.corrupt-*` 副本路径（若有）+ 修复指引
+ * 用户侧：消息含 settings.json 绝对路径 + `.corrupt-*` 副本路径（若有）+ 修复指引
  * 「修复或删除该文件后重试，无需重启」；transport 中央 catch 透传本 code 为 error
  * envelope（与 MODEL_NOT_CONFIGURED 同通路），renderer 经既有双语错误模板插值呈现。
  */
@@ -119,13 +119,13 @@ export const SESSION_ACTIVATE_FAILED = 'SESSION_ACTIVATE_FAILED'
 
 /**
  * pi 报 `Model not found` 且模型**不在** taiji 注册表（配置已被删/改名）。
- * 用户面：「该模型已不存在，请重新选择」。
+ * 用户侧：「该模型已不存在，请重新选择」。
  */
 export const MODEL_NOT_FOUND = 'MODEL_NOT_FOUND'
 
 /**
  * pi 报 `Model not found`、模型**在**注册表内，但 provider **无凭据**。
- * 用户面：「该 provider 未配置凭据，请到设置填写 API Key」。
+ * 用户侧：「该 provider 未配置凭据，请到设置填写 API Key」。
  * 不重载既有 MODEL_NOT_CONFIGURED——后者含义是「session 未配默认模型」（引导去设置选默认模型）。
  */
 export const PROVIDER_CREDENTIAL_MISSING = 'PROVIDER_CREDENTIAL_MISSING'
@@ -134,7 +134,7 @@ export const PROVIDER_CREDENTIAL_MISSING = 'PROVIDER_CREDENTIAL_MISSING'
  * pi 报 `Model not found`、模型在注册表、凭据齐备——即运行中进程的模型快照尚未同步（新配置刚写入、
  * 等待 provider-live-sync 扩展刷新）**或**配置里含使 pi 拒载的坏内容（两因不机器可分）。
  *
- * 用户面 = **双因文案**：「若刚改过配置，请稍等两秒重试；若持续失败，请到设置页检查 provider 配置」
+ * 用户侧 = **双因文案**：「若刚改过配置，请稍等两秒重试；若持续失败，请到设置页检查 provider 配置」
  * （设计 D11：不做 taiji 侧模型配置合法性判定，pi 自身 `getError()` 全文落运行日志作为机器证据）。
  */
 export const ENGINE_MODEL_MISSING = 'ENGINE_MODEL_MISSING'

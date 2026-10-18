@@ -728,7 +728,7 @@ describe('⛔ 探针 P2（D3 前提）：出厂 builtin:full 与无 preset 路�
     expect(resolution.skillPaths).toBeUndefined()
   })
 
-  it('持久化路径：唯一差异 = launchPresetId meta + .preset.json sidecar（D3 声明面，无第三差异）', async () => {
+  it('持久化路径：唯一差异 = launchPresetId meta + .preset.json sidecar（D3 声明侧，无第三差异）', async () => {
     try {
       const presetEnv = makeP2Env()
       const presetSummary = await presetEnv.lifecycle.create(presetEnv.cwd, 't', { presetId: 'builtin:full' })

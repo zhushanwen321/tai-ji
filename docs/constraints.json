@@ -1377,7 +1377,7 @@
         },
         {
           "type": "machine",
-          "hook": "install-hooks.sh §node:test grep 段（NODE_TEST_HITS 段——测试文件面拦截载体：eslint 全局 ignores 硬排除测试文件，测试文件经 pre-commit 模板 grep 拦截）"
+          "hook": "install-hooks.sh §node:test grep 段（NODE_TEST_HITS 段——测试文件侧拦截载体：eslint 全局 ignores 硬排除测试文件，测试文件经 pre-commit 模板 grep 拦截）"
         }
       ]
     },
@@ -2167,7 +2167,7 @@
     },
     {
       "id": "C-build-08",
-      "summary": "per-worktree dev 实例装配器唯一入口（2026-09-12）：`pnpm dev` 必须经 apps/electron/scripts/dev-instance.mjs——按 worktree 名 hash 稳定派生 Vite/CDP 端口与 TAIJI_AGENT_PORT_OFFSET（runtime 段，offset 步进 10 不重叠），数据目录隔离到 ~/.taiji-dev/instances/<worktree>/（首启从只读模板 ~/.taiji-dev.template/ 复制，模板只含配置面、运行时状态白名单排除，默认模型预置快速可用模型（具体型号随本机配置，不入库））；AI agent 真机验收必须 TAIJI_DEV_BACKGROUND=1（showInactive 不抢前台焦点）。禁止绕过装配器多开 dev（固定端口互占 + 共享数据目录互写，验收证据无法绑定 worktree——2026-09-12 H3 Gate B 归因困境成因）；Electron userData/单实例锁从 TAIJI_AGENT_DATA_DIR 派生，装配器是四点联动（vite server/electron loadURL/CDP/runtime 段）一致性的唯一保证，单点手改端口必致静默错配",
+      "summary": "per-worktree dev 实例装配器唯一入口（2026-09-12）：`pnpm dev` 必须经 apps/electron/scripts/dev-instance.mjs——按 worktree 名 hash 稳定派生 Vite/CDP 端口与 TAIJI_AGENT_PORT_OFFSET（runtime 段，offset 步进 10 不重叠），数据目录隔离到 ~/.taiji-dev/instances/<worktree>/（首启从只读模板 ~/.taiji-dev.template/ 复制，模板只含配置侧、运行时状态白名单排除，默认模型预置快速可用模型（具体型号随本机配置，不入库））；AI agent 真机验收必须 TAIJI_DEV_BACKGROUND=1（showInactive 不抢前台焦点）。禁止绕过装配器多开 dev（固定端口互占 + 共享数据目录互写，验收证据无法绑定 worktree——2026-09-12 H3 Gate B 归因困境成因）；Electron userData/单实例锁从 TAIJI_AGENT_DATA_DIR 派生，装配器是四点联动（vite server/electron loadURL/CDP/runtime 段）一致性的唯一保证，单点手改端口必致静默错配",
       "scope": [
         "apps/electron/scripts/dev-instance.mjs",
         "apps/electron/package.json",
@@ -2510,7 +2510,7 @@
     },
     {
       "id": "C-build-10",
-      "summary": "thinking 档位词表跟随检查（ext-simplify-17 D5 + ext-simplify-18 D6 扩面）：scripts/check-thinking-levels.mjs 在 pre-commit 按路径触发（llm-shared resolve.ts / pi-rpc types.ts / subagent-core model-ref.ts / pnpm-lock.yaml / 脚本自身），从 pi-ai dist types.d.ts 递归展开 ModelThinkingLevel 联合成员与 llm-shared THINKING_LEVELS + pi-rpc THINKING_LEVELS + subagent-core THINKING_ORDER 三副本双向比对，不一致非零退出（pi 版本 bump 引起联合变化时红灯指向副本同步）；subagent-core THINKING_ORDER 为 T3 比对面（ext-simplify-18 D6：成员集合一致性，不判低→高顺序——顺序语义由 subagent-core 自身测试锚定）",
+      "summary": "thinking 档位词表跟随检查（ext-simplify-17 D5 + ext-simplify-18 D6 扩大范围）：scripts/check-thinking-levels.mjs 在 pre-commit 按路径触发（llm-shared resolve.ts / pi-rpc types.ts / subagent-core model-ref.ts / pnpm-lock.yaml / 脚本自身），从 pi-ai dist types.d.ts 递归展开 ModelThinkingLevel 联合成员与 llm-shared THINKING_LEVELS + pi-rpc THINKING_LEVELS + subagent-core THINKING_ORDER 三副本双向比对，不一致非零退出（pi 版本 bump 引起联合变化时红灯指向副本同步）；subagent-core THINKING_ORDER 为 T3 比对面（ext-simplify-18 D6：成员集合一致性，不判低→高顺序——顺序语义由 subagent-core 自身测试锚定）",
       "scope": [
         "extensions/shared/llm-shared/src/resolve.ts",
         "packages/pi-rpc/src/types.ts",
@@ -2894,7 +2894,7 @@
     },
     {
       "id": "C-proc-24",
-      "summary": "引擎协议未知成员宽容语义四行（运行时成文契约，与编译期词表锁互补）：①未知 event.type → 旧宿主 reducer default no-op 安全落空（词表成员带 noop-safe 论证标记）；②未知正向 method → 引擎回 error 帧 engine_method_unsupported（engine_ 前缀透传面新码，旧宿主收到不崩；引擎实装义务绑定下一引擎适配层立项随批带上 + conformance 用例，当前无消费方不实装）；③未知 host/* 反向通道 → 宿主回 {unsupported:true}（由 askUser 语境泛化到全通道），发送方引擎走自身降级路径；④未知可选键 → advisory 忽略、behavior 键必有门（判据 6），不存在无门依赖。执行方式 = review（四行与词表头注、engine-development-guide.md 引擎义务条目成文核对）+ 检查锚点（测试文件路径）= packages/subagent-core/src/execution/engine/__tests__/conformance/protocol-blackbox.test.ts（未知 method 错误码原样透传既有断言）、packages/subagent-engine-sdk/src/__tests__/protocol-schema.test.ts（事件词表/enum 枚举面）；条文权威 = ADR-0071。触发形态双登记（「新引擎适配层立项」双保险）：① select-constraints 按 scope 代码/文档 diff 命中——SDK src 全域（引擎侧应答 helper 实装面）+ protocol + conformance + engine-adaptation 六引擎映射文档（立项期与实装期两侧 diff 均加载本约束）；② 立项 tech-design 必读 engine-development-guide.md §2.1 未知 method 应答义务条目（无代码 diff 阶段的传导主通道，指南精确路径已在 scope）",
+      "summary": "引擎协议未知成员宽容语义四行（运行时成文契约，与编译期词表锁互补）：①未知 event.type → 旧宿主 reducer default no-op 安全落空（词表成员带 noop-safe 论证标记）；②未知正向 method → 引擎回 error 帧 engine_method_unsupported（engine_ 前缀透传逻辑新码，旧宿主收到不崩；引擎实装义务绑定下一引擎适配层立项随批带上 + conformance 用例，当前无消费方不实装）；③未知 host/* 反向通道 → 宿主回 {unsupported:true}（由 askUser 语境泛化到全通道），发送方引擎走自身降级路径；④未知可选键 → advisory 忽略、behavior 键必有门（判据 6），不存在无门依赖。执行方式 = review（四行与词表头注、engine-development-guide.md 引擎义务条目成文核对）+ 检查锚点（测试文件路径）= packages/subagent-core/src/execution/engine/__tests__/conformance/protocol-blackbox.test.ts（未知 method 错误码原样透传既有断言）、packages/subagent-engine-sdk/src/__tests__/protocol-schema.test.ts（事件词表/enum 枚举形态）；条文权威 = ADR-0071。触发形态双登记（「新引擎适配层立项」双保险）：① select-constraints 按 scope 代码/文档 diff 命中——SDK src 全域（引擎侧应答 helper 实装面）+ protocol + conformance + engine-adaptation 六引擎映射文档（立项期与实装期两侧 diff 均加载本约束）；② 立项 tech-design 必读 engine-development-guide.md §2.1 未知 method 应答义务条目（无代码 diff 阶段的传导主通道，指南精确路径已在 scope）",
       "scope": [
         "packages/subagent-engine-sdk/src/**",
         "packages/subagent-core/src/execution/engine/__tests__/conformance/**",
@@ -2986,7 +2986,7 @@
     },
     {
       "id": "C-proc-27",
-      "summary": "非 workspace 结构接线登记（S1，2026-09-24 源自 PR #20 review-findings 组 D 检查化）：管辖区（packages/ extensions/ resources/plugins/）内含 package.json、但不在 pnpm-workspace.yaml globs 内的包必须在 docs/structure-wiring.json 逐条登记机器管线接线点（CI typecheck 锚点 / 测试装配 script / 发布线成员 / coverage 测量面），登记锚点须在目标文件中真实存在，双向对账（磁盘有而登记无 = 未登记即红；登记有而磁盘无 = 删包残留即红）；豁免清单（测试夹具/内嵌示例）显式登记可审计。新顶层结构第一笔 commit 只做接线与登记——ed6735b47 式「一 commit 三坑」（新包落线时 CI/coverage/检查面全漏）由本检查在 commit 时拦截",
+      "summary": "非 workspace 结构接线登记（S1，2026-09-24 源自 PR #20 review-findings 组 D 检查化）：管辖区（packages/ extensions/ resources/plugins/）内含 package.json、但不在 pnpm-workspace.yaml globs 内的包必须在 docs/structure-wiring.json 逐条登记机器管线接线点（CI typecheck 锚点 / 测试装配 script / 发布线成员 / coverage 测量侧），登记锚点须在目标文件中真实存在，双向对账（磁盘有而登记无 = 未登记即红；登记有而磁盘无 = 删包残留即红）；豁免清单（测试夹具/内嵌示例）显式登记可审计。新顶层结构第一笔 commit 只做接线与登记——ed6735b47 式「一 commit 三坑」（新包落线时 CI/coverage/检查范围全漏）由本检查在 commit 时拦截",
       "scope": [
         "docs/structure-wiring.json",
         "scripts/check-structure-wiring.mjs",
@@ -3030,7 +3030,7 @@
     },
     {
       "id": "C-ext-26",
-      "summary": "注册操作终局通知必达：workflow run 成功/失败/取消一律出终局通知（C-ext-19 确认式送达在 workflow 域的细化，D7）；终局派生由 run 显式状态机统一裁决（ADR-0091）——persistTerminalProjection 单写点、errorCode/stderrTeePath 从事件流读回，禁止旁路补发第二通知面",
+      "summary": "注册操作终局通知必达：workflow run 成功/失败/取消一律出终局通知（C-ext-19 确认式送达在 workflow 域的细化，D7）；终局派生由 run 显式状态机统一裁决（ADR-0091）——persistTerminalProjection 单写点、errorCode/stderrTeePath 从事件流读回，禁止旁路补发第二通知侧",
       "scope": [
         "extensions/universal/subagent-workflow/**",
         "packages/subagent-core/src/orchestration/**"

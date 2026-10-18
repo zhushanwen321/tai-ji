@@ -24,7 +24,7 @@ import { createRecord, updateFromEvent } from "../persistence/execution-record.t
 // 两侧 reducer 各自以 Date.now() 给 toolCall 打 startedTs（execution-record.ts
 // applyToolStart / SDK journal-replay 副本同形）——真实墙钟下同一事件喂两侧跨毫秒
 // 边界时 startedTs 差 1ms，toEqual 对拍即挂（负载下偶发红）。fake timers 固定时钟
-// 让两侧打戳恒同值，对拍回归纯 reducer 语义等价（本文件的被测面）。
+// 让两侧打戳恒同值，对拍回归纯 reducer 语义等价（本文件的被测对象）。
 beforeEach(() => {
   vi.useFakeTimers({ now: 1_700_000_000_000 });
 });
@@ -69,7 +69,7 @@ afterEach(() => {
   vi.useRealTimers();
 });
 
-/** 断言两侧 reducer 的状态面等价（turns 全文 + 计数 + usage + 末次错误）。 */
+/** 断言两侧 reducer 的状态侧等价（turns 全文 + 计数 + usage + 末次错误）。 */
 function expectParity(core: ExecutionRecord, sdk: ReplayRecordView): void {
   expect(sdk.turns).toEqual(core.turns);
   expect(sdk.turnCount).toBe(core.turnCount);

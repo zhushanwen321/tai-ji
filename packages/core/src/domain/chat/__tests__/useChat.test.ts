@@ -121,7 +121,7 @@ describe('createUseChat factory 行为', () => {
     resetChatModuleStateForTest()
   })
 
-  // [u5a 退役] 前身「clearQueueState 转发 core store」用例已删：转发面随 store 侧（queueStates
+  // [u5a 退役] 前身「clearQueueState 转发 core store」用例已删：转发逻辑随 store 侧（queueStates
   // 分区 + clearQueueState 方法）一并删除，无转发可测——pi 槽位回收由 delivery.drain 承担。
 
   it('send 流程：统一 submit——appendUser 乐观气泡 + submitDelivery（content + clientUuid = 气泡 id）', async () => {
@@ -380,7 +380,7 @@ describe('createUseChat factory 行为', () => {
   it('compact pi 层失败（envelope 分类码 compact_failed）：抑制 toast，interpreter 对话流呈现', async () => {
     const f = makeFixture()
     // compact RPC reject 携带分类码 compact_failed：pi 层失败必发 compaction_end{errorMessage}
-    // → interpreter 已编排对话流呈现；ensureActive 失败由 session 状态面呈现。catch 不 toast。
+    // → interpreter 已编排对话流呈现；ensureActive 失败由 session 状态侧呈现。catch 不 toast。
     f.chatApi.compact.mockRejectedValueOnce(Object.assign(new Error('上下文压缩失败'), { code: 'compact_failed' }))
     await f.useChat.compact('s16')
     expect(f.toast.error).not.toHaveBeenCalled()
@@ -804,7 +804,7 @@ describe('subagent.directive 广播消费', () => {
 //
 // 极性（[消息投递可靠性 A-bash] 契约修订后）：投递判定（true/false）只看 RPC 回执
 // （BashDispatchReceipt status），bashResult 帧观测计数只作 toast 抑制提示——
-// ① 本次窗口终态帧已渲染 → 抑制失败 toast（气泡终态是权威呈现面）；
+// ① 本次窗口终态帧已渲染 → 抑制失败 toast（气泡终态是权威呈现侧）；
 // ② 终态未渲染 → toast 是唯一提示，不抑制；
 // ③ 回执不可达（reject 无回执：断连 rejectAll / backstop 超时）→ 保守返回 true
 //    （命令可能已执行，恢复 !command 会双执行）+「状态未知」诚实 toast（不得说「失败」，
@@ -856,7 +856,7 @@ describe('sendBash ①b toast 抑制（D2 极性：终态已渲染→抑制 / �
     // 端口层把「消息未送达 runtime」的传输失败翻译为 rejected 回执（可证明未执行）
     f.chatApi.bash.mockResolvedValue({ status: 'rejected', error: 'transport unavailable (ws not open)' })
     const ok = await f.useChat.sendBash('b3', 'echo hi', false)
-    // 原偏差登记（「无终态可呈现 → 抑制」）= !command 静默丢失面，随 [消息投递可靠性
+    // 原偏差登记（「无终态可呈现 → 抑制」）= !command 静默丢失风险，随 [消息投递可靠性
     // A-bash] 契约清除：与 send catch 同款——toast 可见 + false 交调用方恢复草稿；
     // ①b 抑制仅限「本次窗口终态帧已渲染」形态（见上方极性三分）。
     expect(f.toast.error).toHaveBeenCalledTimes(1)
@@ -892,7 +892,7 @@ describe('sendBash ①b toast 抑制（D2 极性：终态已渲染→抑制 / �
 //
 // 判别式：error envelope 携带 runtime 分类码 'message_blocked'（BeforeSend hook 否决——
 // runtime dispatcher 已广播 message.error 错误气泡，delivery.submit handler 同码回 error
-// envelope 让 renderer 回滚乐观气泡）→ 抑制 toast，错误气泡是权威呈现面；transport 级
+// envelope 让 renderer 回滚乐观气泡）→ 抑制 toast，错误气泡是权威呈现侧；transport 级
 //（断连 / 超时，无码或机械码）→ 保守 toast 兜底（错误可见性优先）。
 // send / followUp / editAndResend 三通路同一接法（对齐 sendBash/compact 先例）。
 describe('send 族 toast 抑制（D4-2 分类码：message_blocked→抑制 / 无码→兜底）', () => {
@@ -1271,7 +1271,7 @@ describe('消息投递可靠性：bash 投递回执（验收⑦a-⑦d）', () =>
 
     // 终态帧 = 用户可见恢复锚 → true（调用方恢复 !command 会与终态气泡双份）
     expect(await sending).toBe(true)
-    expect(f.toast.error).not.toHaveBeenCalled() // ①b toast 抑制极性不变（气泡终态是权威呈现面）
+    expect(f.toast.error).not.toHaveBeenCalled() // ①b toast 抑制极性不变（气泡终态是权威呈现侧）
     f.dispose()
   })
 

@@ -591,7 +591,7 @@ describe('McpSection（pi-mcp-management U3）', () => {
     dispatchGlobal({ id: `push_broadcast_${broadcastSeq++}`, type: 'mcp:testResult', payload: { name, testId, badge } })
   }
 
-  it('广播帧 connected：徽标从「测试中」转终态「已连接（N 个工具）」（S1 判定面）', async () => {
+  it('广播帧 connected：徽标从「测试中」转终态「已连接（N 个工具）」（S1 判定侧）', async () => {
     mcpDomainMock.listMcpServers.mockResolvedValue(listFixture([entryFixture('filesystem')]))
     const w = mountSection()
     await flushPromises()
@@ -606,7 +606,7 @@ describe('McpSection（pi-mcp-management U3）', () => {
     wrapper?.unmount()
   })
 
-  it('广播帧 failed：徽标转「连接失败」+ 详情展开 error 全文（S4 判定面）', async () => {
+  it('广播帧 failed：徽标转「连接失败」+ 详情展开 error 全文（S4 判定侧）', async () => {
     mcpDomainMock.listMcpServers.mockResolvedValue(listFixture([entryFixture('broken')]))
     const w = mountSection()
     await flushPromises()

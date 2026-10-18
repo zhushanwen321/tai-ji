@@ -34,7 +34,7 @@ import type { PluginContext } from '../../../../packages/runtime/src/services/pl
 import type { GuiComponent, ScheduledTask, TreeItem } from '../../../../packages/extension-protocol/src/index.ts'
 
 /** sendMessage 回执 reason 词表（与 SDK sendMessage 签名的闭集同源 = SendPromptReason 三值；
- *  busy/compacting/bash 退役值已删，运行面不再产出，mock 不得注入） */
+ *  busy/compacting/bash 退役值已删，运行态不再产出，mock 不得注入） */
 type SendReceipt = {
   accepted: boolean
   reason?: 'command-missing' | 'hook-blocked' | 'error'
@@ -136,7 +136,7 @@ interface Harness {
 async function setup(opts: {
   readScript?: Array<PluginSessionEntries | Error>
   session?: SessionInfo
-  /** 冷启动 list() 返回面（空数组 → 无焦点会话分支） */
+  /** 冷启动 list() 返回值（空数组 → 无焦点会话分支） */
   sessions?: SessionInfo[]
   sendMessageReceipt?: SendReceipt
   sendMessageError?: Error

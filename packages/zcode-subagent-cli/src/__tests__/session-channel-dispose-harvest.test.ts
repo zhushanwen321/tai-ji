@@ -5,7 +5,7 @@
 // P-Z3 的「close 事件吞没」在真实子进程形态不可确定性注入（Node child 进程退出后
 // stdio 关闭即触发 close 事件）——真实现场归 Gate B；本文件用 mock 连接承载机制层
 // 可判定形态：不触发 onClose（= close 吞没的机制等价物）→ dispose → 在途 turn 收敛
-// 为明确失败。与 zcode-engine-dispose.test.ts（fake-appserver 子进程集成面）互补。
+// 为明确失败。与 zcode-engine-dispose.test.ts（fake-appserver 子进程集成测试）互补。
 //
 // 覆盖：
 //   ① close 吞没形态：dispose 触发 failAllTurns——在途 turn 于 dispose 时收割

@@ -11,7 +11,7 @@
   - 无 QueueBubble / Staging banner / ContextChipsBar（image chip 内联在 contenteditable 内，
     无独立管理行）/ 拖拽落位 / bash 豁免 / per-session 草稿分区 / ↑↓ 历史召回。
   保留：发送语义（⏎ 提交、⇧⏎ 换行、IME 组字放行——dom-core 免费提供）、exactMatch 直发
-  （浮层内 ⏎ 精确命中 = 插 chip + 提交，与 Composer 同链）、双发锁展示面（disabled）。
+  （浮层内 ⏎ 精确命中 = 插 chip + 提交，与 Composer 同链）、双发锁的展示（disabled）。
   提交不回写本组件：emit('submit', segments) 交还 UserBubble（双发锁早退 + editAndResend
   收尾链在 ui 侧单点，契约见 chat-view-deps.ts EditComposerProps）。
 -->
@@ -88,7 +88,7 @@ import { provideComposerInputDeps } from '@/composables/panel/composer-input-dep
 /**
  * props 契约 = chat-view-deps.ts EditComposerProps（UserBubble 经 component :is 注入）。
  * - segments：原消息 segments，挂载整框回填为真 chip；
- * - disabled：isPendingSend 透传（双发锁展示面，语义同 Composer isSending）；
+ * - disabled：isPendingSend 透传（双发锁的展示，语义同 Composer isSending）；
  * - messageId：编辑目标定位锚（ui 侧 editAndResend 消费），本组件仅用于目标变更重填。
  */
 const props = withDefaults(

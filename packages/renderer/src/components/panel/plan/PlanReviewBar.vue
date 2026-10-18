@@ -281,7 +281,7 @@ function submit(decision: 'approve' | 'revise' | 'dismiss'): void {
  */
 const resubmitting = ref(false)
 /**
- * 就近错误行（D8 失败双分支的呈现面）：分区级状态（plan-store reviewNudgeError）——
+ * 就近错误行（D8 失败双分支的呈现侧）：分区级状态（plan-store reviewNudgeError）——
  * turn 事件 handler 经 store action 写「消息所属 sid」分区（updateFor(capturedSid) 语义），
  * 无实例级 session 状态（ADR-0049；焦点切换后错误随分区保留/隔离）。
  */

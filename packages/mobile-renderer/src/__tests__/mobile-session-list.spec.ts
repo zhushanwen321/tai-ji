@@ -7,7 +7,7 @@
 // app-runtime 模块级 mock：组件消费的导出（sessionStore.listLoadError / activeId、
 // sessionList、loadSessions、selectSession、chatStore）替换为测试可写 ref + vi.fn，隔离
 // core WS 依赖（测试禁触网络）。ref 在 mock 工厂内创建，测试经 import 拿到同一实例驱动
-// 场景。chatStore 是 A14 状态派生的输入源（u20）——轻量判定面 mock（DeriveStatusChat +
+// 场景。chatStore 是 A14 状态派生的输入源（u20）——轻量判定侧 mock（DeriveStatusChat +
 // isActive/isCompacting），派生行为矩阵归 core session-derivations.test.ts。
 //
 // 运行：cd packages/mobile-renderer && npx vitest run src/__tests__/mobile-session-list.spec.ts

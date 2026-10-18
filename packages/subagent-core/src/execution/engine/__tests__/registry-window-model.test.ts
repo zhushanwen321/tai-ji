@@ -147,7 +147,7 @@ afterEach(() => {
 // ── D6：getEngine 二分 ──────────────────────────────────────
 
 describe("registry D6：per-window 引擎不进 singletons，getEngine 返回同步只读代理", () => {
-  it("验收④a：per-window 引擎 getEngine → 代理同步只读直答（capabilities/listModels/validateModel 转发底层快照面），不抛不连", () => {
+  it("验收④a：per-window 引擎 getEngine → 代理同步只读直答（capabilities/listModels/validateModel 转发底层快照侧），不抛不连", () => {
     registerEngineDescriptor("pw", makeCliDescriptor("pw", {
       modelCatalog: { dynamic: false, models: [{ id: "only-model" }] },
     }));

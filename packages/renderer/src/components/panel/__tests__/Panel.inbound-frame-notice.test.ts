@@ -9,7 +9,7 @@
  * Mock 策略（Panel 挂载测试最小完备集，同 Panel.dead-diagnostics-export.test.ts）：
  * - mock core：捕获 onInboundFrameDropped 回调（用真实 useInboundFrameGuard 消费它）+
  *   retryInboundDroppedSession/subscribeSession 调用断言；
- * - mock '@/lib/ipc'（reportRendererLog）——上报面非本用例关注点（unit 文件已覆盖）；
+ * - mock '@/lib/ipc'（reportRendererLog）——上报侧非本用例关注点（unit 文件已覆盖）；
  * - mock 重型子组件（MessageStream/Composer/Landing/FormOverlay）；Panel 与
  *   useInboundFrameGuard/InboundFrameDroppedNotice 均真实渲染；
  * - 真实 Pinia（检查的 focus watch 数据源 = panel store focusedSessionId）。

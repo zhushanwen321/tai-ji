@@ -54,7 +54,7 @@ export type SetModelCapableEnginePort = EnginePort & {
 };
 
 /**
- * 成员引擎转发面：成员 runId → 该成员引擎的 setModel 通道（per-member 解析——混合
+ * 成员到引擎的转发：成员 runId → 该成员引擎的 setModel 通道（per-member 解析——混合
  * 引擎 run 的成员经 per-agent engine 字段路由到不同引擎，§8 场景 7）。宿主侧解析
  * 归调用方（U2 编排：成员 record 的 engine 留痕 + 窗口实例解析单点
  * resolveWorkflowWindowEnginePort(runId, engineId)），聚合函数不触 record 存储。
@@ -72,7 +72,7 @@ export type ResolveMemberEnginePort = (memberRunId: string) => SetModelCapableEn
  * 修正的落地形态——契约文件不动（任务书领地禁碰），U2 接线按本类型消费。
  */
 export interface RunModelSwitchAggregateCall extends RunModelSwitchAggregateInput { // oe-exempt:20261006:framework:u-foundation 契约的修正通道注入点（契约文件领地禁碰，单实现常态）
-  /** per-member 引擎转发面（见 ResolveMemberEnginePort）。 */
+  /** per-member 引擎转发侧（见 ResolveMemberEnginePort）。 */
   resolveMemberPort: ResolveMemberEnginePort;
 }
 

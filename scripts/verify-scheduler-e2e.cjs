@@ -33,7 +33,7 @@
  *      （无 turn_end）——驱动器用 sendCommand() 只等 prompt ack，随后轮询请求帧与 notify 帧。
  *
  * 断言源（命令路径）：命令路径**无 tool 调用**，用户可见反馈走 ctx.ui.notify →
- * extension_ui_request{method:'notify', message, notifyType} 帧（getNotifies() 捕获面 +
+ * extension_ui_request{method:'notify', message, notifyType} 帧（getNotifies() 捕获范围 +
  * 文案断言），落盘证据仍读 customType='pi-scheduler:task' entry —— 双轨断言。
  *
  * uiActor 应答器（extension_ui_request → extension_ui_response）：
@@ -369,7 +369,7 @@ function scheduleFormAnswer(question, result) {
   }
 }
 
-/** notify 帧入 state.notifies（命令路径反馈的捕获面；单向帧无应答）。 */
+/** notify 帧入 state.notifies（命令路径反馈的捕获范围；单向帧无应答）。 */
 function captureNotifyFrame(msg, state) {
   state.notifies.push({
     id: typeof msg.id === 'string' ? msg.id : String(msg.id),
@@ -523,7 +523,7 @@ function spawnSession(opts) {
   const captured = []
   // 跨 chunk 可变状态：stdout 行缓冲 / turn_end 等待者 / sessionFile 缓存 /
   // ui 应答器（extension_ui_request → extension_ui_response）/
-  // notify 捕获面 + 非预期表单请求记录（命令路径断言 / 模型路径回归检查）
+  // notify 捕获范围 + 非预期表单请求记录（命令路径断言 / 模型路径回归检查）
   const state = {
     stdoutBuf: '',
     turnEndResolver: null,

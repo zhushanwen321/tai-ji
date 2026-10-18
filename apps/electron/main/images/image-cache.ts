@@ -66,7 +66,7 @@ const MIME_EXTENSIONS: Record<string, string> = {
   'image/gif': '.gif',
 }
 
-/** 本模块全部 fs 动作的参数面（测试注入 tmpdir；生产缺省动态推导）。 */
+/** 本模块全部 fs 动作的参数侧（测试注入 tmpdir；生产缺省动态推导）。 */
 export interface ImageCacheDirs {
   /** 数据根目录（缺省 getDataDir()） */
   dataDir?: string
@@ -206,7 +206,7 @@ function sessionFileNameMatchesDir(fileName: string, dirName: string): boolean {
 /**
  * sessions 树枚举/条目探测失败（readdir / statSync）是否按「会话文件可能存在」保守保护：
  * ENOENT = 目录未建立（pi 延迟写入窗口下合法
- * 不存在）或枚举后条目已被并发删除（合法窗口）；其他错误码（EACCES 等）= 枚举面未知
+ * 不存在）或枚举后条目已被并发删除（合法窗口）；其他错误码（EACCES 等）= 枚举侧未知
  * → 保守保护并 console.warn 出声（静默保护会让枚举故障不可见）。
  */
 function readdirFailureMeansSessionFileMayExist(dir: string, err: unknown): boolean {

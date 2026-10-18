@@ -46,7 +46,7 @@ function makeHarness(overrides: {
   createResult?: Partial<SessionSummary>
   ensureActiveError?: Error
   recordWorkspaceError?: Error
-  /** false = 不接受理回执（P9 否定面：armed 悬挂交 TTL）；缺省 true（组合根同款接线） */
+  /** false = 不接受理回执（P9 否定用例：armed 悬挂交 TTL）；缺省 true（组合根同款接线） */
   wireReceipt?: boolean
 } = {}) {
   const calls: CallLog = []
@@ -360,7 +360,7 @@ describe('A5-d7-sideeffects-vitest: D7 保留的置位副作用在 port.send 成
     expect(h.view.isGenerating).toBe(true)
   })
 
-  it('prompt 失败不置位（成功后置位语义的否定面）', async () => {
+  it('prompt 失败不置位（成功后置位语义的否定用例）', async () => {
     const h = makeHarness()
     h.client.prompt.mockRejectedValue(new Error('pi reject'))
     const handle = h.registry.getOrCreateDelivery('s1')
@@ -423,7 +423,7 @@ describe('P9-accept-receipt-vitest: 受理回执（onSettled delivered → markI
     expect(batch.fulfilled[0].notifyId).toBe(NID)
   })
 
-  it('否定面：回执缺位（registry 未接 onSettledMessage）→ settle 不兑现（armed 悬挂，交 TTL 清扫）', async () => {
+  it('否定用例：回执缺位（registry 未接 onSettledMessage）→ settle 不兑现（armed 悬挂，交 TTL 清扫）', async () => {
     const h = makeHarness({ wireReceipt: false })
     await h.handler.handle('req-1', 'parent-1', 'send', {
       sessionId: 's1',

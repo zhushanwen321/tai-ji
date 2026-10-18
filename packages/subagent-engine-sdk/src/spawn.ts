@@ -111,13 +111,13 @@ export const ENGINE_HOST_REQUEST_TIMEOUT_ENV = "TAIJI_ENGINE_HOST_REQUEST_TIMEOU
 /** 计时巡检周期（ms）。仅为辅助判据的采样粒度，不构成行为契约。 */
 const SWEEP_INTERVAL_MS = 1_000;
 
-/** 反向请求计时面操作接口（消费方 = 引擎 CLI 的反向通道分发层）。 */
+/** 反向请求计时侧操作接口（消费方 = 引擎 CLI 的反向通道分发层）。 */
 export interface ReverseRequestClock {
-  /** 反向请求已发出（未 ack）——进入计时面。 */
+  /** 反向请求已发出（未 ack）——进入计时侧。 */
   started(id: string): void;
   /**
    * 收到 ack（两阶段第一阶段：已 ack 的 host/askUser、HostBridge.executeAndAwait
-   * 的 ack）——移出计时面但不终结（R9-2：已 ack 的等待不计入 in-flight 超时，
+   * 的 ack）——移出计时侧但不终结（R9-2：已 ack 的等待不计入 in-flight 超时，
    * ADR-0047 静默 ≠ 卡死）。
    */
   acked(id: string): void;
@@ -174,7 +174,7 @@ function killOwnProcessGroup(): void {
  * - 主判据 stdio EOF：stdin 'end'（数据范围读尽）或 'close'（fd 关闭）→ 立即自灭
  *   （宿主死后无人再写协议帧，引擎继续跑只烧 token）；
  * - 辅助判据 in-flight 反向请求计时：未 ack 的反向请求超过 hostRequestTimeoutMs
- *   仍无 ack → 宿主大概率已死（EOF 未达或正在关闭）→ 自灭。**排除面**：已 ack 的
+ *   仍无 ack → 宿主大概率已死（EOF 未达或正在关闭）→ 自灭。**排除情形**：已 ack 的
  *   host/askUser 与两阶段 ack 的长运行 HostBridge.executeAndAwait（ack 后等待任意
  *   时长合法，漏此项即「>30s pi 任务被自灭」turnTimeoutMs 同型事故）。
  *
@@ -185,7 +185,7 @@ export function armEngineSelfDestruct(opts: EngineSelfDestructOptions): ReverseR
   const timeoutMs = resolveHostRequestTimeoutMs(opts);
   const killSelf = opts.killSelf ?? killOwnProcessGroup;
 
-  // pending = 已发出未 ack（计时面）；settled/acked 请求不在面内。
+  // pending = 已发出未 ack（计时侧）；settled/acked 请求不计入计时侧。
   const pending = new Map<string, number>();
   let disposed = false;
 

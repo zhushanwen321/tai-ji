@@ -341,7 +341,7 @@ describe('PluginService: registerSendMessageHook', () => {
       // S3-W2：session 生命周期事件接线（registerSendMessageHook 内挂）
       setOnSessionCreated: vi.fn(),
       setOnSessionDestroyed: vi.fn(),
-      // u5a relay ③：激活回调注册（追加式列表）——mock 跟进接口面
+      // u5a relay ③：激活回调注册（追加式列表）——mock 跟进接口侧
       onSessionActivated: vi.fn(),
     }
 

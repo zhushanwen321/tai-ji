@@ -148,7 +148,7 @@ describe('boot/error-reporter 三件套', () => {
     const payload = lastReport()
     expect(payload.source).toBe('unhandledrejection')
     expect(payload.message).toContain('rejection-boom')
-    // 捕获面不干扰用户可见界面
+    // 捕获点不干扰用户可见界面
     expectGoodChildAlive(container)
   })
 

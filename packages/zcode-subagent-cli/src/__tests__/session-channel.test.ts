@@ -494,7 +494,7 @@ describe("onActivity（tool 执行期活性）", () => {
   // session/event 每隔 ~1.0s 推一帧 tool.updated {kind:"progress"}——既非
   // final-frame（无 response）也非 delta（无 delta 字段），此前不产生任何宿主可见
   // 回调，「仅工具执行、零正文」形态下宿主侧无进展守护饿死误杀。onActivity 即该
-  // 帧族的宿主刷新面（引擎映射 AgentEvent {type:"activity"}）。
+  // 帧族的宿主刷新逻辑（引擎映射 AgentEvent {type:"activity"}）。
   function toolUpdatedProgressFrame(
     elapsedMs: number,
     stdoutTail: string
@@ -628,7 +628,7 @@ describe("权威终态迟到分级日志", () => {
     expect(lateTerminalLogs()).toEqual([]); // 常态迟到零日志（降噪从根源修复点）
   }, 10_000);
 
-  it("迟到 failed：warn 保留（假成功识破防御面），文案含原样 status；lastTerminalError 照常入账", async () => {
+  it("迟到 failed：warn 保留（假成功识破防御机制），文案含原样 status；lastTerminalError 照常入账", async () => {
     const { ch, workspacePath } = makeChannel({
       dropTurnTerminal: true,
       extraSendPushes: [

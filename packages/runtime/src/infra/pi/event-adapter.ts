@@ -1865,7 +1865,7 @@ function logInterpretFailure(sessionId: string, eventCount: number, err: unknown
 export type WsSender = (msg: ServerMessage) => void
 
 /**
- * pi 事件订阅端的最小能力面（EventAdapter.attach 入参，结构窄化）。
+ * pi 事件订阅端的最小能力侧（EventAdapter.attach 入参，结构窄化）。
  *
  * sendExtensionUiResponse 可选（IPiEngine / RpcClient 天然满足）：仅 subagent 在途上报的
  * ack 回包用（u7b）；缺省时在途帧仍写镜像，仅不回 ack（reporter 按既有折叠重试）。

@@ -91,9 +91,9 @@ describe('MobileComposer 发送失败契约（D6：false → 草稿回填 + 内�
 
     expect(sendMock).toHaveBeenCalledTimes(1)
     expect(sendMock).toHaveBeenCalledWith('sid-idle', [{ type: 'text', text: 'hello draft' }])
-    // D6 用户可见面①：原文回填（可重发，不静默丢输入）
+    // D6 用户可见部分①：原文回填（可重发，不静默丢输入）
     expect(readDraft(wrapper)).toBe('hello draft')
-    // D6 用户可见面②：内联错误行（form 通道 respondFailedId 范式）
+    // D6 用户可见部分②：内联错误行（form 通道 respondFailedId 范式）
     const errLine = wrapper.find('[data-testid="mobile-composer-send-error"]')
     expect(errLine.exists()).toBe(true)
     expect(errLine.attributes('role')).toBe('alert')

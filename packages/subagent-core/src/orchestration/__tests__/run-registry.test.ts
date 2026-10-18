@@ -1,6 +1,6 @@
 // src/orchestration/__tests__/run-registry.test.ts
 //
-// [Q2/D9-1 → workflow-run-resume-revision] run 注册表单测——D5 状态机派生视图面 +
+// [Q2/D9-1 → workflow-run-resume-revision] run 注册表单测——D5 状态机派生视图侧 +
 // 中断收编入口（[D15] 中断路）+ 已终局 run 磁盘足迹裁剪单源。
 //
 // 锁定语义：

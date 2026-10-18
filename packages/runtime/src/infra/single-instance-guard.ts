@@ -34,7 +34,7 @@ import path from 'node:path'
 import { RUNTIME_INSTANCE_FILE, type RuntimeInstanceRecord } from '@taiji/shared'
 
 // 文件名与记录形状的单一权威在 shared（supervisor port-discoverer 同源消费）；此处
-// re-export 保持本模块既有导入面（测试/调用方）零改动。
+// re-export 保持本模块既有导入侧（测试/调用方）零改动。
 export { RUNTIME_INSTANCE_FILE }
 export type { RuntimeInstanceRecord }
 

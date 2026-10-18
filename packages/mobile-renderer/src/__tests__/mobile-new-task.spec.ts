@@ -107,7 +107,7 @@ describe('创建成功后首条消息自动发送编排（createMobileTask：创
     expect(mockSend).toHaveBeenCalledWith('sid-new', [{ type: 'text', text: 'demo task' }])
     expect(wrapper.emitted('created')).toEqual([[createdSession]])
     expect(wrapper.emitted('close')).toBeTruthy()
-    // 用户可见面：编排成功后表单不出现错误提示
+    // 用户可见部分：编排成功后表单不出现错误提示
     expect(wrapper.find('[data-testid="new-task-error"]').exists()).toBe(false)
     wrapper.unmount()
   })

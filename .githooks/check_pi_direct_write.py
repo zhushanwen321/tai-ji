@@ -180,7 +180,7 @@ ALLOWLIST: dict[str, str] = {
 # 特征正则（按调用形态锚定，不用行号——行号键随脚本漂移永不生效，教训 impl-plan
 # D-10）。放行时写点语句匹配任一特征 = 已登记写点静默放行；不匹配 = 仍放行
 # （登记滞后不阻断提交）但输出 [WARN] 提示同步登记表与本表，防新增写点在文件级
-# 键下静默扩面。新增 ALLOWLIST 条目时应同步登记特征。
+# 键下静默扩大范围。新增 ALLOWLIST 条目时应同步登记特征。
 # ---------------------------------------------------------------------------
 ALLOWLIST_STMT_PATTERNS: dict[str, tuple[re.Pattern, ...]] = {
     # writeAtomic 内唯一写调用（fsMod.writeFileSync(tmp, content) 形态）
@@ -368,7 +368,7 @@ def check_file(filepath: Path) -> tuple[list[str], list[str]]:
             # allowlist：文件级登记例外（data-source-registry.md §4，§5 第 3 条闭环）
             if rel_str in ALLOWLIST:
                 # 语句级特征校验：匹配已登记特征 = 已评审写点静默放行；不匹配 = 新增
-                # 写点，保持文件级放行（登记滞后不阻断提交）但 WARN 可见（防静默扩面）
+                # 写点，保持文件级放行（登记滞后不阻断提交）但 WARN 可见（防静默扩大范围）
                 patterns = ALLOWLIST_STMT_PATTERNS.get(rel_str)
                 if patterns is not None and not any(p.search(stmt) for p in patterns):
                     errors.append(

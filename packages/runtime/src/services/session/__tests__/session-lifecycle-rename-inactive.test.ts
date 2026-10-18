@@ -32,7 +32,7 @@ import type { ScannedSession } from '../types.js'
  */
 function makeEnv(scanned?: ScannedSession) {
   // S2 ISP 化：结构性满足 lifecycle 窄接口（10 方法 = 实际消费方），无强转。
-  // 本测试路径只真实消费 findScannedSession，其余空 vi.fn 仅为满足接口面
+  // 本测试路径只真实消费 findScannedSession，其余空 vi.fn 仅为满足接口侧
   const svc: ILifecycleSessionOps = {
     findScannedSession: vi.fn(() => scanned ?? undefined),
     toSummary: vi.fn(),

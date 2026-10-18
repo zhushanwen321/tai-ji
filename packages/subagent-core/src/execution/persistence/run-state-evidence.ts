@@ -108,7 +108,7 @@ export interface PruneTerminalRunFilesOptions { // oe-exempt:20260929:framework:
   ttlMs?: number;
 }
 
-/** pruneTerminalRunFiles 的执行结果（宿主日志/健康面用）。 */
+/** pruneTerminalRunFiles 的执行结果（宿主日志/健康检查侧用）。 */
 export interface PruneTerminalRunFilesResult { // oe-exempt:20260929:framework:workflow/record 协议契约类型——ports 类型契约先行、单实现常态（dev-0.10.5 已验收代码 merge 带入）
   /** 扫描到的 state 文件数（glob 命中、排除 journal）。 */
   scanned: number;
@@ -269,7 +269,7 @@ async function pruneTerminalRunFootprint(
   result.scanned = stateNames.length;
 
   const now = Date.now();
-  // 候选计数锚：判据②监控不随清理 opt-out 失明（默认窗兜底，仅用于日志面）
+  // 候选计数锚：判据②监控不随清理 opt-out 失明（默认窗兜底，仅用于日志侧）
   const windowForCandidates = retentionMs ?? DEFAULT_STATE_TTL_MS;
   for (const name of stateNames) {
     const runId = name.slice(0, -".jsonl".length);
@@ -383,7 +383,7 @@ function mtimeMsOf(full: string): number {
  * 为什么可选：三触发点各只天然持有一个域的精确目录锚（壳 run 首写持
  * `<sessionDir>/workflow-state`、core record 首写持 recordsDir、session_start 兜底
  * 双域）——强制两域必传会逼出「core 侧反推 pi sessionDir」或「壳侧反推 record
- * enc 段」两类推导漂移面。每域至少有一个持锚触发点，覆盖范围由三触发点并集保证
+ * enc 段」两类推导漂移风险。每域至少有一个持锚触发点，覆盖范围由三触发点并集保证
  * （幂等整轮，任一触发点缺一域只影响冗余度不影响覆盖）。 */
 export interface RetentionMaintenanceInput { // oe-exempt:20260929:framework:workflow/record 协议契约类型——ports 类型契约先行、单实现常态（dev-0.10.5 已验收代码 merge 带入）
   /** run 域状态目录（workflow-state——state 快照 + journal 成对清理）；undefined = 跳过 run 域。 */
@@ -487,7 +487,7 @@ export type RunSettlementEvidence =
   | { kind: "missing" };
 
 /**
- * 按 runId 同步查 run 的终局证据——journal run-settled 帧 ∨ manifest 终局面的
+ * 按 runId 同步查 run 的终局证据——journal run-settled 帧 ∨ manifest 终局条目的
  * 三态判定核。枚举改接（启动扫描，pi-host-run-store.ts）与对账 sweep 判据
  * （sweep-binding）共用同一份判定逻辑（设计 §3.3 决策 2：抽取共用而非各写一份
  * 尾向扫描——两份尾扫 = 新的一对并存实现，正是该设计要消灭的形态）。同步形态：
@@ -549,7 +549,7 @@ function scanJournalLastSettledFrame(recordPath: string): JournalScan {
   return settled !== undefined ? { kind: "frame", settled } : { kind: "noFrame" };
 }
 
-/** [findRunSettlementEvidence 拆分] manifest 终局面（残局防御）。undefined = 无
+/** [findRunSettlementEvidence 拆分] manifest 终局条目（残局防御）。undefined = 无
  * manifest / 无 outcome / ENOENT——交回调用方兜底；非 ENOENT 读错误原样上抛（保守挂起）。 */
 function readManifestSettlement(
   manifestPath: string,
@@ -593,7 +593,7 @@ export function findRunSettlementEvidence(stateDir: string, runId: string): RunS
       reason: runSettledOutcomeToDoneReason(journal.settled.outcome, journal.settled.errorCode),
     };
   }
-  // journal 无帧：manifest 终局面（残局防御——现行写侧下 record 流不被保留期
+  // journal 无帧：manifest 终局条目（残局防御——现行写侧下 record 流不被保留期
   // 裁剪、对账清理五件全删，正常无此组合；见上方判定矩阵该行注释）
   const manifestPath = join(stateDir, `${runId}.json`);
   try {
@@ -776,7 +776,7 @@ function deleteOrphanRunFootprint(stateDir: string, runId: string): number {
   return deleted;
 }
 
-/** 对账清理执行结果（宿主日志/健康面用）。 */
+/** 对账清理执行结果（宿主日志/健康检查侧用）。 */
 export interface OrphanRunReapResult { // oe-exempt:20260929:framework:workflow/record 协议契约类型——ports 类型契约先行、单实现常态（dev-0.10.5 已验收代码 merge 带入）
   /** 扫描的 run 候选数（record 流 + 旧 journal 文件族并集的 runId 数）。 */
   scanned: number;

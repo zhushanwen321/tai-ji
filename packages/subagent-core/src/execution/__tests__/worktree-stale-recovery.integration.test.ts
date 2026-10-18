@@ -46,7 +46,7 @@ describe("[1.2/1.3] worktree patch 判定前置 + 陈旧 git 元数据恢复（�
 
   beforeEach(() => {
     outerDir = fs.mkdtempSync(path.join(ORIG_TMPDIR, "wt-stale-recovery-"));
-    // 物理面根重定向：os.tmpdir() 跟随 TMPDIR env（darwin/linux 均如此）
+    // 磁盘侧根重定向：os.tmpdir() 跟随 TMPDIR env（darwin/linux 均如此）
     process.env.TMPDIR = outerDir;
 
     agentDir = path.join(outerDir, "agent");
@@ -77,7 +77,7 @@ describe("[1.2/1.3] worktree patch 判定前置 + 陈旧 git 元数据恢复（�
     return path.join(os.tmpdir(), "pi-subagents", encodeCwd(repo), BRANCH);
   }
 
-  /** git 侧是否登记了该分支的 worktree（物理面判据）。 */
+  /** git 侧是否登记了该分支的 worktree（物理（磁盘）侧判据）。 */
   function worktreeRegistered(): boolean {
     return git(repo, "worktree", "list", "--porcelain").includes(`refs/heads/${BRANCH}`);
   }

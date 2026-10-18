@@ -63,7 +63,7 @@ function randomTokenSuffix(): string {
   return Math.random().toString(RANDOM_TOKEN_RADIX).slice(RANDOM_TOKEN_SLICE_START)
 }
 
-/** 构造依赖（窄面）：MessageDispatcher 构造持有本类，按宿主成员接线。 */
+/** 构造依赖（窄接口）：MessageDispatcher 构造持有本类，按宿主成员接线。 */
 export interface BashDispatcherDeps {
   /** ensureActive（必要时 restore）——sendBash 入口交接。 */
   ensureActive(sessionId: string): Promise<IPiEngine>

@@ -181,7 +181,7 @@ event handler（如 `tool_execution_end`）中向 LLM 注入提示词/通知消�
 
 扩展域内任何「发现可执行 skill / 校验技能可用」一律走共享包 `@zhushanwen/pi-exec-skills`（`extensions/shared/exec-skills/`）：`detectExecSkills` 自研扫描直读磁盘 = **发现**（表单列出可用技能，技能热装即时可见，无 reload 滞后）；`resolveSkills` = **执行门禁**（pi 注册表 `pi.getCommands()` 过滤 `source === "skill"` 确认 pi 实际认得，注入前把关）——扫描与门禁两段消费语义闭环，**禁止各扩展自扫 skill 目录或直用 pi 注册表快照形成第二实现**。
 
-- **原因**：`pi.getCommands()` 返回 resource loader 的启动加载集（reload 才刷新的滞后快照）——发现面用它会让新装技能不可见；执行面它才是权威（快照滞后只造成「刚装技能本 turn 门禁拒绝」，重试即过）
+- **原因**：`pi.getCommands()` 返回 resource loader 的启动加载集（reload 才刷新的滞后快照）——发现范围用它会让新装技能不可见；执行侧它才是权威（快照滞后只造成「刚装技能本 turn 门禁拒绝」，重试即过）
 - **检查**：依赖登记方向经 `check-extension-dependencies.mjs` 双向校验——包 package.json dependencies/peerDependencies 声明的 `@zhushanwen/*` / `@taiji/*` 包未登记进 extension-dependencies.json 该条目 dependsOn 即红（漏登记，含 shared 库条目存在性），dependsOn 引用的 workspace 内包无法解析同样即红（悬空引用）；pi bump 的目录/overrides 语义漂移由共享包对拍测试兜住（[docs/pi-semantics.json](../pi-semantics.json) PS-53 探针）
 - **约束登记**：[docs/constraints.json](../constraints.json) C-ext-30
 
@@ -271,7 +271,7 @@ event handler（如 `tool_execution_end`）中向 LLM 注入提示词/通知消�
 
 #### 启动配置声明 [强制]
 
-**新增配置面必须二选一**：
+**新增配置侧必须二选一**：
 
 - **package.json `taiji.startupConfig` 声明**（推荐，装好即就绪）：声明 `{ "path": "<相对 agentDir 的路径>", "content": { ...默认内容... } }`，宿主 runtime 启动序列统一 ensure（机制实现：`packages/runtime/src/services/extension-startup-config.ts`）——应用装好打开、一个 session 都没建时配置文件即存在、可发现、可手编
 - **「不建文件 + load 侧缺失回落默认」形态**：extension 加载时文件不存在不报错，回落代码内默认值（如 subagent-workflow 改造前的形态）

@@ -32,7 +32,7 @@ const WORKFLOW_DONE_REASON_SET: ReadonlySet<string> = new Set([
   'time_limited',
 ])
 
-/** 值级检查（Set.has 无类型窄化能力——显式谓词窄化到 shared 信号面词表）。 */
+/** 值级检查（Set.has 无类型窄化能力——显式谓词窄化到 shared 信号侧词表）。 */
 function isWorkflowDoneReason(value: string): value is NonNullable<WorkflowRunRecord['reason']> {
   return WORKFLOW_DONE_REASON_SET.has(value)
 }
@@ -202,7 +202,7 @@ export function projectV2Workflow(
   const runSettled = fold?.runSettled
   const status = resolveWorkflowStatus(fold, runSettled, settledEntry)
   // reason 词表收窄：core DoneReason ⊃ shared WorkflowDoneReason（core 另含
-  // invalid_args 等扩展值，shared 信号面不认——词表外按缺省归一，不硬透传）
+  // invalid_args 等扩展值，shared 信号侧不认——词表外按缺省归一，不硬透传）
   const reason =
     settledEntry?.reason !== undefined && isWorkflowDoneReason(settledEntry.reason)
       ? settledEntry.reason

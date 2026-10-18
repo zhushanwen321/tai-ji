@@ -2,7 +2,7 @@
 
 证据基准：v2.1.88 npm 产物反解快照（claude-code-source-code 知识库）；官方 mirror（GitHub anthropics/claude-code）无源码，只有 CHANGELOG/docs。下文所有 `file:line` 均指该反解快照仓库内路径；上游运行时语义的权威源为 node_modules 实装版。
 
-taiji 靶面类型权威：`packages/subagent-engine-sdk/src/protocol/`（contract-types.ts / methods.ts / reverse-channels.ts / frames.ts / schema.ts）与 `src/ui-types.ts`。
+taiji 目标类型类型权威：`packages/subagent-engine-sdk/src/protocol/`（contract-types.ts / methods.ts / reverse-channels.ts / frames.ts / schema.ts）与 `src/ui-types.ts`。
 
 ## 1. 接入形态与进程拓扑
 
@@ -121,7 +121,7 @@ result 帧携带累计 usage（`NonNullableUsage`，零值形态见 src/services
 | AgentOutcomeUsage.turns | `num_turns` | src/QueryEngine.ts:624（`messages.length - 1`）、857、987（turnCount 按 user 消息计数） |
 | AgentOutcome.durationMs | `duration_ms`（另有 API 侧 `duration_api_ms`） | src/QueryEngine.ts:622-623 |
 
-message_end 的单消息增量：流式路径下 `stream_event > message_start/message_delta` 的 usage 经 updateUsage 累积、message_stop 时并入 totalUsage（src/QueryEngine.ts:789-816）；assistant 消息块级 usage 在 `message.message.usage`。分模型明细在 `modelUsage`（record：inputTokens/outputTokens/cacheReadInputTokens/cacheCreationInputTokens/webSearchRequests/costUSD/contextWindow/maxOutputTokens），taiji 靶面无分模型维度，聚合或丢弃。
+message_end 的单消息增量：流式路径下 `stream_event > message_start/message_delta` 的 usage 经 updateUsage 累积、message_stop 时并入 totalUsage（src/QueryEngine.ts:789-816）；assistant 消息块级 usage 在 `message.message.usage`。分模型明细在 `modelUsage`（record：inputTokens/outputTokens/cacheReadInputTokens/cacheCreationInputTokens/webSearchRequests/costUSD/contextWindow/maxOutputTokens），taiji 目标类型无分模型维度，聚合或丢弃。
 
 ## 6. session 记录与 read 重建
 

@@ -1,6 +1,6 @@
 // src/__tests__/record-store-intent-api.test.ts
 //
-// [U1 / record 持久化收敛 §3.1] RecordStore 意图级操作 API 立面专属测试。
+// [U1 / record 持久化收敛 §3.1] RecordStore 意图级操作 API 对外接口专属测试。
 //
 // 覆盖（验收条款 A1/A5/A6）：
 //   - A1 九意图原语齐备（register/appendEvent/markRoundStarted/markRoundIdle/
@@ -118,7 +118,7 @@ function makeSubagentRecord(id: string, over: Partial<SubagentRecord> = {}): Sub
   };
 }
 
-describe("RecordStore 意图 API 立面（U1 A1/A2/A5/A6）", () => {
+describe("RecordStore 意图 API 对外接口（U1 A1/A2/A5/A6）", () => {
   let tmpDir: string;
   let sessionsDir: string;
   let manifestDir: string;
@@ -170,7 +170,7 @@ describe("RecordStore 意图 API 立面（U1 A1/A2/A5/A6）", () => {
 
   const manifestPathOf = (id: string): string => path.join(manifestDir, `${id}.json`);
 
-  /** [W1/D3] 事件文件末条事件行（观察面独立于被测 store——直读 .events 文件）。 */
+  /** [W1/D3] 事件文件末条事件行（观察侧独立于被测 store——直读 .events 文件）。 */
   const lastJournalEvent = (dir: string, id: string): Record<string, unknown> | undefined => {
     try {
       const lines = fs
@@ -190,7 +190,7 @@ describe("RecordStore 意图 API 立面（U1 A1/A2/A5/A6）", () => {
   // ============================================================
   // A1 十原语齐备
   // ============================================================
-  describe("A1 意图原语立面", () => {
+  describe("A1 意图原语的对外接口", () => {
     it("九意图原语 + store 内部 acquire 动作齐备（[collect 退役] markBatchFinalized 原语已删）", () => {
       const fns = [
         "register",
@@ -249,7 +249,7 @@ describe("RecordStore 意图 API 立面（U1 A1/A2/A5/A6）", () => {
       );
     });
 
-    it("sessionFile 缺失 → binding 快照面跳过（warn 留痕），manifest/entry 照常", () => {
+    it("sessionFile 缺失 → binding 快照侧跳过（warn 留痕），manifest/entry 照常", () => {
       const record = makeRecord("bg-3");
       store.register(record);
       trySettleLegacyClosed(record, "gc");

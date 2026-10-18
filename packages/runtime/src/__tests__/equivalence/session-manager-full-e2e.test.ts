@@ -19,7 +19,7 @@
  * - U9-S5 fail-closed 静默：watch 查无 claim → 立即 respond 'cancelled'（不携 sessionId，D-4）
  * - U9-D1 死亡收尾：子会话意外退出 → watch 挂等 claim 恰收一条 reason:'exited'
  *  （携 exitCode/stderrTail + deathSeq/fulfillsN），destroy 迟到二次发声幂等（notify-once
- *  D5「死亡也通知恰一次」第一承诺的执行面）
+ *  D5「死亡也通知恰一次」第一承诺的执行侧）
  * - U9-D2 死亡词形分派：cause=delete → reason:'deleted'（不携退出现场字段）
  *
  * 环境约定照抄 equivalence 族（pi-fixture.ts）：真实 spawn（禁 mock 子进程）。faux LLM 轨
@@ -65,7 +65,7 @@ const FIXED_LABEL = 'u9-smoke'
 /** watch 三路径轨的固定初始 prompt：携带 → willNotify:true → extension arm claim + 经 marker 通道开表 */
 const FIXED_PROMPT = 'Run a trivial task and report done.'
 
-/** respond 回写记录（sendExtensionUiResponse 捕获面；watch 断言按 requestId 过滤） */
+/** respond 回写记录（sendExtensionUiResponse 捕获侧；watch 断言按 requestId 过滤） */
 interface RecordedRespond {
   requestId: string
   /** select value 原样（JSON 字符串）；cancelled（null）路径为 null */
@@ -78,7 +78,7 @@ interface ChainOptions {
   withPrompt?: boolean
 }
 
-/** runFullChain 返回面（既有两用例消费 result/fx/cleanup；watch 三路径另消费账本/写回捕获/喂入通道） */
+/** runFullChain 返回侧（既有两用例消费 result/fx/cleanup；watch 三路径另消费账本/写回捕获/喂入通道） */
 interface FullChain {
   result: FullChainResult
   fx: PiFixture
@@ -153,7 +153,7 @@ async function runFullChain(options: ChainOptions = {}): Promise<FullChain> {
     sessionDir,
     commandTimeoutMs: STEP_TIMEOUT_MS,
     // create_managed_session 自 tool-declaration-slimming D4 起 exposure=deferred（不进
-    // 模型声明面），faux 脚本直呼工具名会被 pi 判 "Tool not found"——extension_ui_request
+    // 模型声明侧），faux 脚本直呼工具名会被 pi 判 "Tool not found"——extension_ui_request
     // 不发出、全链路断流。经全局 settings defaultTools 预激活（'+name' 增量条目，与生产
     // spawn 经 settings 激活工具同通道）；tool_search 检索发现路径不是本文件被测对象
     // （marker 通道闭环），其行为由 pi-codemode-settings.test.ts 覆盖。
@@ -480,7 +480,7 @@ describe.skipIf(!FAUX_PI_READY)(`session-manager full e2e faux pi${FAUX_PI_READY
   //     clearSession（组合根 index.ts speakSessionDeath 同函数同序三步）——faux 轨无真实
   //     子 pi 进程可 kill（同①困境：进程死亡事件边界在组合根 pm.onSessionExit，不在本
   //     文件可触碰面），exit 现场以 pm 上报形态注入 extra（stderrTail 经真实 collectStderrTail）；
-  //     被测面 = 死亡批分流 → 词形映射（toWatchRespondPayload cause 分派 exited/deleted +
+  //     被测对象 = 死亡批分流 → 词形映射（toWatchRespondPayload cause 分派 exited/deleted +
   //     退出现场附加）→ watch 写回通道闭环 + 发声幂等。
   it('U9-S3 watch 开表挂等：marker 通道 watch → handler deferred → settle 兑现 respond', { timeout: 80_000 }, async () => {
     const w = await openClaimWatchChain()
@@ -543,7 +543,7 @@ describe.skipIf(!FAUX_PI_READY)(`session-manager full e2e faux pi${FAUX_PI_READY
     }
   })
 
-  // ── 死亡收尾（notify-once D5「死亡也通知恰一次」执行面；装配偏离见上方偏离登记④）────
+  // ── 死亡收尾（notify-once D5「死亡也通知恰一次」执行侧；装配偏离见上方偏离登记④）────
   // 两用例共用前置 = openClaimWatchChain + 开表挂等（claim 经真实 handler wait 路由登记
   // watch 槽），死亡路径按组合根 speakSessionDeath 同函数同序三步直调（onSessionDeath →
   // deliverRespondTargets → clearSession），被测对象是死亡批 → 词形映射 → watch 写回通道

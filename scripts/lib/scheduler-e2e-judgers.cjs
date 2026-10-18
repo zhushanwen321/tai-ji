@@ -2,7 +2,7 @@
  * pi-scheduler e2e 驱动器（scripts/verify-scheduler-e2e.cjs）的判定器纯函数族。
  *
  * 职责边界：输入 → 判定/推算 的确定性纯函数（无 IO、无进程、无时钟）；
- * 场景编排（runS*）、pi 进程 spawn、JSONL 文件读取等副作用面留在驱动器本体。
+ * 场景编排（runS*）、pi 进程 spawn、JSONL 文件读取等副作用留在驱动器本体。
  * 抽出动机：判定器自错（协议形状判定漂移 / 分支回归）= e2e 假绿 / 假红不可辨，
  * 须有直接单测锁定（scripts/__tests__/verify-scheduler-e2e.test.mjs）。
  */

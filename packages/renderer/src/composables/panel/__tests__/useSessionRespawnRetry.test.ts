@@ -12,7 +12,7 @@
  * mock 策略：@/api / @/stores/session / useToast 全 stub（与同目录 useChatViewDeps.test.ts
  * 同范式——测试目标只有编排与分支，不跑真实 store/RPC）。vue-i18n 不在此 mock：包级
  * setupFiles（vitest-i18n-setup.ts）的 t() 已从 zh-CN locale 解析，断言中文文案——key 漂移
- * 或删除会因回退返回原 key 而使断言失败，自带防漂移面。
+ * 或删除会因回退返回原 key 而使断言失败，自带防漂移机制。
  */
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 

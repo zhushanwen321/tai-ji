@@ -18,7 +18,7 @@
  *      与 engine/paths 子入口（纯函数确定性输出）；5 个入口的 .d.cts 类型产物
  *      做存在性断言（[W11] 起为 3+1 个入口）。语义边界如实登记：V7 golden 回放跑在 src TS 源（步骤 3 的
  *      vitest），dist 侧行为范围 = 上述主入口 + paths 子入口断言，d.cts 仅验证
- *      存在性（不做内容 / TS 编译面校验）
+ *      存在性（不做内容 / TS 编译期校验）
  *   3. golden 回放：vitest run 跑 conformance 免 LLM 免二进制测试集
  *      （golden-replay.pi/zcode + contract.probe/abort/agent-events/read-degradation，
  *      全部 fake 注入），质量资产随 dist 形态可用
@@ -109,7 +109,7 @@ for (const spec of CJS_ENTRY_SPECS) {
 }
 
 console.log('  [2/3] dist 类型产物存在性断言（exports require.types → dist .d.cts，5 入口）...')
-// npm 消费者的 TS 编译面走 exports require 条件的 types 字段——声明存在但 dist
+// npm 消费者的 TS 编译期走 exports require 条件的 types 字段——声明存在但 dist
 // .d.cts 未产出（tsup dts 配置漂移）会让消费者类型解析断裂。路径按 exports
 // require 条件映射推导（不手工拼），映射本身漂移也在此报错。
 const pkgRaw = JSON.parse(readFileSync(join(CORE_DIR, 'package.json'), 'utf8'))

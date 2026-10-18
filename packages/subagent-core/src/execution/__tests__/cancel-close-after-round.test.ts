@@ -11,7 +11,7 @@
 // archiveAfterClosingRound 意外收尾。违背 §3.2.5 cancel 语义「暂停这一轮（可以
 // 继续聊）」——用户 cancel 后的正常续聊轮被自动收尾。
 //
-// 集成面 = registerFakePiEngine 协议替身（与 conversation-continuation.test.ts
+// 集成测试侧 = registerFakePiEngine 协议替身（与 conversation-continuation.test.ts
 // 同源 setup 形态）。
 
 import * as fs from "node:fs";

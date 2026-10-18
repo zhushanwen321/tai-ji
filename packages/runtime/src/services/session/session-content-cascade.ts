@@ -38,7 +38,7 @@
  * （session-lifecycle.ts，漏删线目录由启动孤儿补账 reconcileOrphanThreadDirs 兜底），
  * 即主删时 btw 线同批消亡、不存在「线仍存活引用子代理族而扫描看不见」的窗口。未来
  * btw 删除时序与主删解耦（closeAllForMain 移出 deleteSession 同批 / 异步延迟删线）时，
- * 扫描根必须扩为 sessions ∪ btw 两树，否则构成共享族误删面。
+ * 扫描根必须扩为 sessions ∪ btw 两树，否则构成共享族误删风险。
  */
 
 import { existsSync, readdirSync, readFileSync, rmSync, unlinkSync } from 'node:fs'
@@ -288,7 +288,7 @@ function parseSubagentRecordLine(line: string): SubagentFamilyCandidate | null {
  *
  * 形态参照 subagent-workflow extension 的 collectAliveWorkflowRunReferences（sessions
  * 根 + 全 slug 子目录 *.jsonl，逐行 JSON.parse），两处差异：
- * - 收集面：那边 workflow-record 三代；这边 subagent-record v2（registered id /
+ * - 收集侧：那边 workflow-record 三代；这边 subagent-record v2（registered id /
  *   settled id+sessionFile）。
  * - 失败语义反转（文件头已述）：任何文件读失败 / 坏行 → 返回 null（引用状态不可知），
  *   调用方放弃全部子代理族删除。
@@ -423,7 +423,7 @@ function deleteOneFamily(
       removeFileBestEffort(sessionFile + ext, label, result, deps)
     }
     // manifest 与 .events 与子会话文件同 enc 段（path-encoding.ts 布局不变量：
-    // records 与 sessions 同 <enc> 段物理相邻）——由 sessionFile 推导，无漂移面。
+    // records 与 sessions 同 <enc> 段物理相邻）——由 sessionFile 推导，无漂移情形。
     const recordsDir = join(dirname(sessionFile), '..', 'records')
     removeFileBestEffort(join(recordsDir, `${candidate.id}.json`), label, result, deps)
     removeFileBestEffort(join(recordsDir, `${candidate.id}${RECORD_EVENTS_SUFFIX}`), label, result, deps)

@@ -16,7 +16,7 @@
 // 升级同行，0.84.4 下该参数报 Unknown built-in extension）——快照值再增该 token 对。
 // [HISTORICAL] 第三处有意偏离：pi-mcp-management P11 起主 agent 模板基座再恒带
 // `--extension builtin:mcp`（内置 MCP 扩展是 mcp.json 的唯一消费方，不装载则界面
-// 保存的配置零生效）；subagent 模板不加（设计 §5 U1 辐射面裁决：N×M 连接放大 +
+// 保存的配置零生效）；subagent 模板不加（设计 §5 U1 波及范围裁决：N×M 连接放大 +
 // mcp_servers 提示词节 + direct 档首 prompt 延迟，subagent 消费 MCP 工具为零证据
 // 场景不预付）——本文件 subagent 段快照不含该 token，与 pi-subagent-cli 测试同为
 // 「subagent 不受传导」回归锚。
@@ -235,7 +235,7 @@ describe('buildPiSubagentSpawnArgs（subagent 模板）', () => {
     expect(args[args.indexOf('--extension') + 1]).toBe('builtin:codemode')
   })
 
-  it('回归锚：subagent 模板不含 builtin:mcp（P11 仅主模板装载——subagent 装载会引入 N×M 连接放大与启动延迟，设计 §5 U1 辐射面裁决；本断言防未来误传导）', () => {
+  it('回归锚：subagent 模板不含 builtin:mcp（P11 仅主模板装载——subagent 装载会引入 N×M 连接放大与启动延迟，设计 §5 U1 波及范围裁决；本断言防未来误传导）', () => {
     const args = buildPiSubagentSpawnArgs(baseParams)
     expect(args).not.toContain('builtin:mcp')
   })

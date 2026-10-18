@@ -17,7 +17,7 @@
 // WorktreeRegistry（<agentDir>/subagents/worktrees.json）。判据从终态 marker
 // 状态机降为 pid 死活一条——进程崩溃无人写终态时也能正确回收。
 //
-// [D5b 对账] scan 末尾追加双向 diff（reconcileWithPhysical）：物理面（tmpdir
+// [D5b 对账] scan 末尾追加双向 diff（reconcileWithPhysical）：物理（磁盘）侧（tmpdir
 // checkout 目录 + git branch --list）与注册表互相对账——注册表条目丢失（锁前
 // last-write-wins 遗留 / 锁降级窗口）或物理资源被外部清掉时收敛，注册表注释
 // 声称的「tmpdir + 分支对账兜底」由此成为代码。
@@ -87,7 +87,7 @@ function isWriteCommand(args: string[]): boolean {
 }
 
 /**
- * [U5 / §3.2.5 worktree 续聊重建] 重建结果三分（设计三失败形态的返回面；形态③
+ * [U5 / §3.2.5 worktree 续聊重建] 重建结果三分（设计三失败形态的返回侧；形态③
  * IO 错不走本联合——直接响亮 throw，调用方按工具错误范围重试）。
  */
 export type WorktreeRebuildOutcome =
@@ -526,7 +526,7 @@ export class WorktreeManager {
   }
 
   /**
-   * 扫描并清理 pi-sub-* 孤儿 worktree + 物理面对账（D5b）。
+   * 扫描并清理 pi-sub-* 孤儿 worktree + 物理（磁盘）侧对账（D5b）。
    *
    * 阶段一（既有）：遍历全局注册表（<agentDir>/subagents/worktrees.json），
    * 按 pid 死活判孤儿。不依赖当前 cwd 是否 git repo——注册表里记了 repo 路径，
@@ -539,7 +539,7 @@ export class WorktreeManager {
    *                                       add 恒写宿主 pid，不再产生 pid=0）
    *   pid == 0 且未超宽限               → 跳过（宽限防误清）
    *
-   * 阶段二（D5b）：物理面（tmpdir checkout + 分支）与注册表双向 diff 收敛——
+   * 阶段二（D5b）：物理（磁盘）侧（tmpdir checkout + 分支）与注册表双向 diff 收敛——
    * 兑现 worktree-registry.ts 头注释声称的「tmpdir + 分支对账兜底」。全流程
    * 幂等、失败仅日志（对账失败不阻断 session_start）。
    */

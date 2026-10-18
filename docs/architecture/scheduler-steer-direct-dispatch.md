@@ -1,4 +1,4 @@
-# scheduler 投递模型简化：steer 直投（ext-simplify-08 投递面 supersede）
+# scheduler 投递模型简化：steer 直投（ext-simplify-08 投递侧 supersede）
 
 > **一句话结论**：把 scheduler 的到期投递从「session-delivery 内核 park 队列（busy gate + 防重标记 + TTL + 合批 + per-message settled 回调记账）」简化为「tick 到期直接 `pi.sendMessage(steer)` + 受理即记账」；删除 delivery handle 装配、防重标记、`QUEUE_DEDUPE_TTL`、`handleSettled` 与 `schedule` 工具的 `force` 参数。触发链：2026-09-14 验收观测 idle 期 ~10min 精确延迟投递 → 归因为投递链时序反转缺陷 → 用户裁决投递模型过重，提醒类注入应立即 steer 打断，整体大幅简化。
 

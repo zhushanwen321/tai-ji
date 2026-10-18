@@ -237,7 +237,7 @@ describe('PlanReviewBar 分支公式（D4 单源：ready ⇔ 挂起注册表，p
     expect(wrapper.find('[data-testid="plan-review-approve"]').exists()).toBe(true)
   })
 
-  it('分支④ dispatching 不进审批条（执行方式表单是其唯一交互面）', async () => {
+  it('分支④ dispatching 不进审批条（执行方式表单是其唯一交互入口）', async () => {
     const wrapper = await mountBar(viewOf({ state: 'dispatching' }))
     await flushAsync()
 

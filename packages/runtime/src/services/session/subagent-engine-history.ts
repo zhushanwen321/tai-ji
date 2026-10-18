@@ -1,6 +1,6 @@
 /**
  * subagent-engine-history —— runtime 的非 pi 引擎历史详情读取 + 协议客户端接线
- * （W8 宿主接线，设计 §3.6 宿主面 / impl-plan §2.8）。
+ * （W8 宿主接线，设计 §3.6 宿主侧 / impl-plan §2.8）。
  *
  * [W8 前] 本文件是「core session-view-service 三级降级链」的薄调用（①引擎原生
  * reader ②journal ③outcome-only，①级 = core 内建 zcode sqlite 直读）。
@@ -47,7 +47,7 @@ import { toErrorMessage } from '../../utils/errors.js'
 /** record 引擎路由段的缺省引擎：存量 record 无 engine 字段 → 按 pi 派生（零迁移）。 */
 export const DEFAULT_SUBAGENT_ENGINE = 'pi'
 
-// ── 协议客户端管理面 ───────────────────────────────────────────
+// ── 协议客户端管理侧 ───────────────────────────────────────────
 
 // ADR-0122 退役登记（2026-10-05）：协议引擎 idle 回收（ENGINE_IDLE_REUSE_MS 5min →
 // dispose）已删——引擎实例进程级自持直至 shutdown dispose（退出钩子仍收尾）。shutdown

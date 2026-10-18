@@ -32,7 +32,7 @@ import { createProviderEditModels, type ProviderEditModelsModule } from '../prov
 /** i18n stub：返回 key 本身（校验调用参数而非翻译）。 */
 const tStub = createTStub()
 
-// fake transport 工厂迁 ./helpers/fake-transport（[C3] seam 方法面全覆盖共享工厂）
+// fake transport 工厂迁 ./helpers/fake-transport（[C3] seam 方法侧全覆盖共享工厂）
 // provider fixture 工厂 / tStub / effectScope 生命周期迁 ./helpers/provider-edit-testbed
 
 /** 当前注入的 fake transport（模块级，供断言用）。 */

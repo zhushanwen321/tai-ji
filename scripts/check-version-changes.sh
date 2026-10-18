@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# check-version-changes.sh — 扫描本次改动，输出需要版本处理的包列表（人工定 type 的决策面）
+# check-version-changes.sh — 扫描本次改动，输出需要版本处理的包列表（人工定 type 的决策范围）
 #
 # 设计依据：/tmp/versioning-longterm-design.md §4.1
 #
@@ -31,7 +31,7 @@ usage() {
   cat <<'EOF'
 Usage: bash scripts/check-version-changes.sh [git-diff-range]
 
-扫描本次改动，输出需要版本处理的包列表（人工定 type 的决策面）。
+扫描本次改动，输出需要版本处理的包列表（人工定 type 的决策范围）。
 
 参数：
   git-diff-range   git diff range，默认 main..HEAD（merge 时传 merge commit range）
@@ -335,7 +335,7 @@ while (frontier.length) {
   }
   frontier = next;
 }
-// 依据 §4.3 规则二：自己 src 也改了的包属于 CHANGED/UNDECLARED 决策面，不列入 DEPENDENTS。
+// 依据 §4.3 规则二：自己 src 也改了的包属于 CHANGED/UNDECLARED 决策范围，不列入 DEPENDENTS。
 // 闭包遍历仍经过它们（以触达更深层的纯 dependent），只是不在 DEPENDENTS 输出中列出。
 const dependents = Object.keys(layer)
   .filter(n => layer[n] > 0 && !triggeringPackages.has(n))
@@ -359,7 +359,7 @@ const declaredTypeConflicts = changedList.filter(n => new Set(declared[n].map(d 
 // --- 已发布 changeset 残留检测（警告级，纯信息增量，不改变任何段/退出码/下游行为）---
 // 背景：已消费的 changeset（apply-version.sh 消费即删除）可能被旧分支 merge 复活，重新进入
 // CHANGED_PACKAGES 被人工误当新声明 → 重复 bump + CHANGELOG 重复条目。此处只把警告投放到
-// 人工定 type 的决策面，不擅自排除（排除会破坏「人工决策、脚本机械执行」的语义边界）。
+// 人工定 type 的决策范围，不擅自排除（排除会破坏「人工决策、脚本机械执行」的语义边界）。
 // 双信号（任一命中即警告）：
 //   git       文件曾在历史中被删除，且删除前内容与当前一致（内容比对防止开发分支上同名不同内容的正常重建误报）
 //   changelog body 首个非空行（= apply-version.sh 生成的 CHANGELOG 条目文本）已出现在声明包的 CHANGELOG.md

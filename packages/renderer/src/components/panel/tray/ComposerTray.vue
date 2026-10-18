@@ -424,7 +424,7 @@ const hasTrayItems = computed(() => builtinItems.value.length > 0 || widgetItems
 watch(hasTrayItems, (value) => emit('update:hasItems', value), { immediate: true })
 
 /**
- * 插件 headerAction 可见面（聚合面板首段的渲染条件；与左簇挂载点互斥——左簇只在
+ * 插件 headerAction 可见性（聚合面板首段的渲染条件；与左簇挂载点互斥——左簇只在
  * leftCluster==='expanded' 挂 HeaderActionsHost，聚合态同一数据源改由本面板承载，
  * demo composer-bar spec §2.1 B3「定时任务 + 托盘 → layers 单钮」的入口承接）。
  */
@@ -433,7 +433,7 @@ const hasHeaderActions = computed(() =>
   !!headerActionsSource && hasVisibleHeaderActions(headerActionsSource, props.sessionId),
 )
 
-/** 插件 toolbar 贡献面 + 聚合入口可见条件（W3a：托盘有条目 / 插件 toolbar 有贡献 /
+/** 插件 toolbar 贡献点 + 聚合入口可见条件（W3a：托盘有条目 / 插件 toolbar 有贡献 /
  *  headerAction 有入口三者任一，皆无不留死入口；贡献判定实现见 use-plugin-toolbar，
  *  headerAction 判定 = hasVisibleHeaderActions——与密度状态机的 absent 判据同构，
  *  缺一会造成「状态机判 aggregated 而聚合钮不渲染」的入口丢失）。 */

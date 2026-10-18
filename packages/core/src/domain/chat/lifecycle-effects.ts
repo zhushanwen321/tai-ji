@@ -27,7 +27,7 @@
  * 恢复提示条写入走 chat store appendRespawnNotice（liveOnly system 提示条，customType
  * 分支渲染），两形态文案经 notices 参数注入——core 不持有 i18n。
  *
- * 依赖方向：纯 core（chat store 动作面 + session store 动作面 + 订阅编排），零壳面
+ * 依赖方向：纯 core（chat store 动作侧 + session store 动作侧 + 订阅编排），零壳面
  * （无 toast / subagent / extensionUI）。deps 为结构类型，renderer 的 Pinia 包装 store
  * 与移动壳 store 实例均满足（方法闭包持原始 ref，pinia unwrap 不影响方法调用）。
  */
@@ -36,14 +36,14 @@ import type { PiRespawnNoticeVariant } from '@taiji/shared'
 import { invalidateStreamSubscription } from './useChat'
 import { subscribeSession } from '../../coordination/subscription-state'
 
-/** session store 生命周期动作面（markDead 置灰 / revive 复位；createSessionStore 产物子集）。 */
+/** session store 生命周期动作侧（markDead 置灰 / revive 复位；createSessionStore 产物子集）。 */
 export interface LifecycleSessionActions { // oe-exempt:20261003:framework:D5 设计裁决的 core factory 契约范围——factory 即唯一实现点是设计形态，非待扩展口
   markDead(sessionId: string): void
   revive(sessionId: string): void
 }
 
 export interface LifecycleEffectsDeps { // oe-exempt:20261003:framework:D5 设计裁决的 core factory 契约范围——factory 即唯一实现点是设计形态，非待扩展口
-  /** chat store 动作面：markSessionError（session 级错误统一入口，含流式终结）+ appendRespawnNotice（恢复提示条写入点）。 */
+  /** chat store 动作侧：markSessionError（session 级错误统一入口，含流式终结）+ appendRespawnNotice（恢复提示条写入点）。 */
   chat: Pick<ChatStoreInstance, 'markSessionError' | 'appendRespawnNotice'>
   session: LifecycleSessionActions
 }

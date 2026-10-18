@@ -55,7 +55,7 @@ import { getPiAgentDir } from '../../infra/pi/pi-paths.js'
 import type { IManagedSessionView } from './types.js'
 
 /**
- * 销毁收敛链的窄依赖面：即「销毁一个 session 必须通知/清理的全部合作方」清单——
+ * 销毁收敛链的窄依赖范围：即「销毁一个 session 必须通知/清理的全部合作方」清单——
  * 接口成员本身就是销毁扇出面的显式登记（新增销毁侧合作方 = 新增一个成员 + 序列一步）。
  * 晚期注入状态一律经闭包动态读，禁止构造期拷贝引用（setMessageBus/setOnSessionDelete
  * 等 setter 晚于编排器组装）。

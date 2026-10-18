@@ -2,7 +2,7 @@
  * useSidebar deleteSession/deleteFolder 跨 store 清理 + 空态出口测试
  * （W1 / S3+S4 / D7；原 useSidebar-delete-empty-state.test.ts 已并入本文件，同 SUT 同 mock 面）。
  *
- * 锁定 deleteSession / deleteFolder 的修复面：
+ * 锁定 deleteSession / deleteFolder 的修复范围：
  * - S3：删除时调 fileTree.clearSession(id) + useChat.disposeSession(id)
  * - S4：删 active 后 selectSession(next) 失败时 fallback 到 navigation.push({ view: 'chat' })
  * - [G1 / 2026-09-14 内存审计 §3.4] U-G1：三 Map 分区（terminal 写队列 / slash 命令历史 /
@@ -386,7 +386,7 @@ describe('newSession 延迟 create 分支排除保护（D7 排除说明）', () 
     expect(flow.state.value).toBe('landing')
     // 排除保护核心：newSession 延迟 create 分支只 push 不重复 startFlow。若误用无参
     // startFlow 二次触发，pendingCwd 会被置 null，刚回灌的 fallback cwd 丢失。
-    // landing 态无绑定 session，公开面 currentCwd 即 pendingCwd 的派生视图
+    // landing 态无绑定 session，对外公开的 currentCwd 即 pendingCwd 的派生视图
     expect(flow.currentCwd.value).toBe('/repo')
 
     scope.stop()
@@ -437,7 +437,7 @@ describe('useSidebar deleteSession 级联前端路径：btw 线虚拟分区 + �
     await flushPromises()
     expect(getBtwVirtualIdsByMain('s1')).toEqual(['btw:line-c1'])
 
-    // 分区面：线分区 + 派生键（D9③ 中段位约定：owner = 线 piSessionId）+ agentcall（按线 vid 挂名）
+    // 分区：线分区 + 派生键（D9③ 中段位约定：owner = 线 piSessionId）+ agentcall（按线 vid 挂名）
     const chat = useChatStore()
     chat.setMessages('btw:line-c1', [msg('l1')])
     chat.setMessages(subagentVirtualId('line-c1', 's1'), [msg('d1')])

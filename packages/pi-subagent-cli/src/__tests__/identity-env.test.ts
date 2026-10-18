@@ -17,7 +17,7 @@ const BASE_PARAMS = {
 };
 
 describe("applyIdentityEnvToChildEnv（§2.7 身份 env 写回）", () => {
-  it("run 参数面：selfRecordId / agent / task / rootCwd 回落 spawn cwd", () => {
+  it("run 参数侧：selfRecordId / agent / task / rootCwd 回落 spawn cwd", () => {
     const env: Record<string, string> = {};
     applyIdentityEnvToChildEnv(env, BASE_PARAMS, {});
     expect(env[KEY.selfRecordId]).toBe("sa-child");

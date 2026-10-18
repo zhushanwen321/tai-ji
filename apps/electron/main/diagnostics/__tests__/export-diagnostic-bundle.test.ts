@@ -323,7 +323,7 @@ describe('export-diagnostic-bundle（crash-forensics D6 u3a）', () => {
       expect(zipNames).toContain('crashes/runtime.jsonl')
       expect(zipNames).toContain('watermark-recent-24h.log')
       // summary.md 内容断言（版本/触发表/DiagnosticReports 指引/知情文案）——
-      // 从收集面断言（zip 内字节与收集面同源，同参数下 buildDiagnosticEntries 确定性输出）
+      // 从收集侧断言（zip 内字节与收集侧同源，同参数下 buildDiagnosticEntries 确定性输出）
       const collected = buildDiagnosticEntries({ appVersion: '0.9.16', now: NOW })
       const summary = collected.entries.find((e) => e.archivePath === 'summary.md')?.content ?? ''
       expect(summary).toContain('app 版本：0.9.16')

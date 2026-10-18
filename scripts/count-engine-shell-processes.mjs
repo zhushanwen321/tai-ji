@@ -2,7 +2,7 @@
 // scripts/count-engine-shell-processes.mjs
 //
 // pi-workflow-run-resource-model U2 交付：引擎宿主薄壳（pi-subagent-cli 形态）的
-// 存活实例计数——A1/A3 验收的 ps 计数回落判定面（设计 §4.1 V1/V3，评审 F4 前置）。
+// 存活实例计数——A1/A3 验收的 ps 计数回落判定逻辑（设计 §4.1 V1/V3，评审 F4 前置）。
 //
 // 特征串权威源（从 spawn 参数实装读取，非记忆）：
 // - `pi-subagent-cli`：引擎 CLI bin basename（packages/pi-subagent-cli/package.json

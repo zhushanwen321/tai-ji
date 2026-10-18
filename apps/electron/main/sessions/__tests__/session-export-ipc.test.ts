@@ -8,7 +8,7 @@
  * - sessionFile 缺失：EINVALID 可消费错误（renderer 禁用入口外的纵深防御）
  * - 源文件不存在（树内路径）：具体 errno（ENOENT）可消费
  * - canceled 不产生文件
- * - 三树放行面：sessions / subagents / btw 三棵树内的路径都放行
+ * - 三树放行范围：sessions / subagents / btw 三棵树内的路径都放行
  * - 默认文件名清洗：suggestedName 剥目录成分 + 非法字符清洗 + .jsonl 后缀保证
  * - 注册幂等：重复注册不重复 handle（防 Electron「second handler」炸启动）
  *
@@ -112,7 +112,7 @@ describe('session-export-ipc（session:export-jsonl）', () => {
     expect(capturedDefaultPath).toBe('我的会话.jsonl')
   })
 
-  it('三树放行面：subagents / btw 两棵树内的路径同样放行导出', async () => {
+  it('三树放行范围：subagents / btw 两棵树内的路径同样放行导出', async () => {
     const subSrc = seedSessionFile('subagents', ['c-proj-b', 'sub-sid-1.jsonl'])
     saveResult = { canceled: false, filePath: join(tmpDir, 'out-sub.jsonl') }
     const subResult = await invoke({ sessionId: 'sub-sid-1', sessionFile: subSrc })

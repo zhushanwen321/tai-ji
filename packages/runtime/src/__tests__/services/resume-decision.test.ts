@@ -4,7 +4,7 @@
  * 锁定判定三条件（manual + 非 runtime 发起 + compaction_start 前 turn 被掐断）与两条投递口径
  * （经内核 FIFO / 队列里已有用户消息时跳过）的**全部组合路径**，以及孤儿 compaction-end 容错。
  * deps 全部 fake（无 fs / 无 pi / 无内核）：本模块是纯判定逻辑，投递出口以 spy 断言调用形态
- * （用户可见面 = 唯一经内核 FIFO 的续跑投递文本）。
+ * （用户可见部分 = 唯一经内核 FIFO 的续跑投递文本）。
  *
  * 运行：cd packages/runtime && npx vitest run src/__tests__/services/resume-decision.test.ts
  */
@@ -53,7 +53,7 @@ function runBatch(h: Harness, events: ObservedEvent[], sessionId = SID): void {
 }
 
 describe('resume-decision：D4② 三条件判定', () => {
-  // 压缩成败无关契约：failed 形态在事件范围同为 compaction-end{manual}（观察面只读 kind/reason，
+  // 压缩成败无关契约：failed 形态在事件范围同为 compaction-end{manual}（观察侧只读 kind/reason，
   // errorMessage 不进本模块——该契约的检查位在 infra 翻译层测试），判定输入与成功路径逐字相同。
   it('工具压缩掐断活跃 turn（aborted turn-end + manual + 非 runtime 发起）→ 经内核提交续跑投递', () => {
     const h = makeHarness()

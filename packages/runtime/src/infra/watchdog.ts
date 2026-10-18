@@ -32,7 +32,7 @@
  * 回落 → 不重复执行；回落后再越线 → 可再次执行」）取本实现口径。
  *
  * 武装门（Gate W，设计 §3.2 方案 B / §5 env 命名）：`TAIJI_RUNTIME_WATCHDOG_ARMED` 默认
- * off——代码完整交付但降级动作默认不武装。off 时采样照跑（判定面运行，getStatus 可查），
+ * off——代码完整交付但降级动作默认不武装。off 时采样照跑（判定侧运行，getStatus 可查），
  * relief 与 renderer 通知都不执行。
  *
  * best-effort 契约（对齐 crash-journal/mem-pressure：旁路设施故障不放大为调用链故障）：
@@ -136,7 +136,7 @@ export interface WatchdogHandle {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// env 旋钮解析（env 是运维逃生旋钮不是校验面，非法值 warn 回落默认，不 throw）
+// env 旋钮解析（env 是运维逃生旋钮不是校验侧，非法值 warn 回落默认，不 throw）
 // ─────────────────────────────────────────────────────────────────────────────
 
 /**
@@ -284,7 +284,7 @@ export function startWatchdog(options: WatchdogOptions = {}): WatchdogHandle {
         return
       }
       consecutiveAboveWarn++
-      if (!armed) return // Gate W off：纯观测（判定面照算，lastSample 可查），无动作无通知
+      if (!armed) return // Gate W off：纯观测（判定侧照算，lastSample 可查），无动作无通知
       broadcast?.({
         level,
         heapUsed: sample.heapUsed,

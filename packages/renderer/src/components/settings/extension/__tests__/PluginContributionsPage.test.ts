@@ -79,7 +79,7 @@ import { toContributionInfos } from '@/composables/shell/useExtensionHostBridge'
 import { makeQuotaModuleStub } from '@taiji/core/testing'
 import { makeSettingsTransportStub } from '@/__tests__/helpers/settings-transport-stub'
 
-/** 构造 SettingsTransport stub（[C3] 共享工厂：全 seam 方法面中性默认）。 */
+/** 构造 SettingsTransport stub（[C3] 共享工厂：全 seam 方法侧中性默认）。 */
 function stubTransport(): SettingsTransport {
   return makeSettingsTransportStub()
 }

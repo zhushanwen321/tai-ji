@@ -272,7 +272,7 @@ export function startRollingRestart(options: RollingRestartOptions = {}): Rollin
   let deferDeadlineAt: number | undefined
   let deferTimer: NodeJS.Timeout | undefined
   let countdownTimer: NodeJS.Timeout | undefined
-  /** 一次句柄一次执行（execute 后拒绝再入——重启序开始后决策面必须静默）。 */
+  /** 一次句柄一次执行（execute 后拒绝再入——重启序开始后决策侧必须静默）。 */
   let executed = false
 
   function clearTimers(): void {
@@ -282,7 +282,7 @@ export function startRollingRestart(options: RollingRestartOptions = {}): Rollin
     countdownTimer = undefined
   }
 
-  // ── 判定面（D5 ①）──
+  // ── 判定侧（D5 ①）──
 
   function evaluateInflight(): InflightEvaluation {
     let total = 0
@@ -317,7 +317,7 @@ export function startRollingRestart(options: RollingRestartOptions = {}): Rollin
     }
   }
 
-  // ── 动作面（D5 ②③）──
+  // ── 动作侧（D5 ②③）──
 
   function journalAppend(event: CrashJournalEventName, reason: string | undefined, summary: RollingRestartInflightSummary): void {
     journal.append({

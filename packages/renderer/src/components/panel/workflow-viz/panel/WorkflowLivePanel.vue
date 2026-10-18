@@ -113,7 +113,7 @@ const activeTab = computed<WorkflowLiveTab | undefined>(() =>
 )
 
 /** agent tab 归属 call 反查（activeTab.callId → run.agentCalls；run 更新后 trace 行对象
- *  换引用，详情面按 id 重查保持最新派生视图）。 */
+ *  换引用，详情侧按 id 重查保持最新派生视图）。 */
 const activeCall = computed<WorkflowAgentCall | undefined>(() => {
   const tab = activeTab.value
   if (tab?.kind !== 'agent' || tab.callId === undefined) return undefined

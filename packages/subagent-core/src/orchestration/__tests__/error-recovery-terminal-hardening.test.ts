@@ -73,7 +73,7 @@ function makeRealRun(runId: string, opts: { budgetTimeMs?: number } = {}): Workf
 }
 
 function makeDeps(opts: {
-  /** appendEntry（pending:unregister 直落权威面）同步抛错（模拟 reload 转换窗 assertActive）。 */
+  /** appendEntry（pending:unregister 直写权威存储的部分）同步抛错（模拟 reload 转换窗 assertActive）。 */
   appendThrows?: boolean;
   /** onRunDone 同步抛错（模拟 evictDoneRunsBeyondCap 等收尾异常）。 */
   onRunDoneThrows?: boolean;

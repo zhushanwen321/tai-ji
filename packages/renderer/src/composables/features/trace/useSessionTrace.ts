@@ -202,7 +202,7 @@ function buildSeenIds(entries: unknown[]): Set<string> {
 
 /** 增量合并核心：entry.id 去重追加 + leafId 滚动（protocol「消费端按 entry.id 去重追加」；
  * ready 增量分支与 loading 缓冲 flush 共用同一份语义）。B11：去重用分区级 seenIds 增量
- * add；达软上限后停止追加并置 truncated（leafId 仍滚动——单字符串非内存面，且保持
+ * add；达软上限后停止追加并置 truncated（leafId 仍滚动——单字符串不占内存，且保持
  * core 边界计算输入最新）。 */
 function mergeAppendedEntries(
   s: TraceSessionPartition,

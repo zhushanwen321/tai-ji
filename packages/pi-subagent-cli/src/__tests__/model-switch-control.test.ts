@@ -439,7 +439,7 @@ function makeSink() {
 describe("server setModel dispatch — 协议一致性（U3）", () => {
   it("引擎 capability 声明非 native → setModel 请求回 engine_capability_unsupported 结构化错误（明确错误而非崩）", async () => {
     const engine = new PiEngine();
-    // manifest/实装漂移模拟：声明位翻 unsupported（实装仍在——防御的是声明面）
+    // manifest/实装漂移模拟：声明位翻 unsupported（实装仍在——防御的是声明侧）
     vi.spyOn(engine, "capabilities").mockReturnValue({
       ...engine.capabilities(),
       setModel: "unsupported",

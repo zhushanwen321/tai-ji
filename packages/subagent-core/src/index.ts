@@ -1,15 +1,15 @@
 /**
- * @zhushanwen/subagent-core — 公共 API barrel（D5 定稿 + post-convergence B-2 扩面）
+ * @zhushanwen/subagent-core — 公共 API barrel（D5 定稿 + post-convergence B-2 扩大范围）
  *
  * 公共 API 面 = 本文件导出 + package.json exports 的语义子入口
  * （./engine/paths、./engine/engine-discovery-scan、./relay-env——[W11/H3] 引擎
  * 子入口 ./engines/zcode/* 已随内建引擎删除）+ ./workflows/* 资产子入口。exports 面即 semver 契约（D5）：收窄不放宽——
  * 新增导出走 minor，本文件刻意不使用 `export *`，逐名列出以使 diff 可审。
  * 内部实现细节（error-recovery / execute-agent-call / worker-script-builder 等
- * engine 编排件）不经 barrel 导出；host-surface 扩面（zsw 回接 U0，2026-08-30）
+ * engine 编排件）不经 barrel 导出；host-surface 扩大范围（zsw 回接 U0，2026-08-30）
  * 后 port 的 Infra 实现与宿主组装件已列入公共部分。
  *
- * 扩面判定标准（post-convergence D3）：壳非测试代码实际消费 ≥1 处即进 barrel——
+ * 扩大范围判定标准（post-convergence D3）：壳非测试代码实际消费 ≥1 处即进 barrel——
  * 契约范围 = 壳的实际消费方，core 内部移动/重命名文件不再是对壳的隐性 breaking。
  * 未进 barrel 的内部实现细节仍不经此导出；`./*` -> src 开发态通配已随 u-2a/u-2b
  * 从 package.json 删除，深路径归一由消费侧单元（u-2b/u-2c）收尾，barrel 是公共
@@ -25,7 +25,7 @@
  * 检查 + dist 冒烟链消费）。
  *
  * 设计权威源：docs/architecture/subagent-core-package-extraction.md §3.3 D5；
- * docs/design/subagent-core-sink-design.md（已删，git 可追溯）（sink 下沉收尾扩面，2026-08-31）；
+ * docs/design/subagent-core-sink-design.md（已删，git 可追溯）（sink 下沉收尾扩大范围，2026-08-31）；
  * 宿主接入示例见包 README（§3.4 core_host_not_configured 恢复指引的落点）。
  */
 
@@ -62,7 +62,7 @@ export {
 
 // ── 引擎契约范围（execution/engine）────────────────────────────
 // EnginePort：subagent 执行引擎的唯一契约点（capabilities / probe / run / read 四必选
-// 面 + listModels / validateModel / dispose 可选扩展；[H1] interact 能力面已随
+// 面 + listModels / validateModel / dispose 可选扩展；[H1] interact 能力侧已随
 // chat-run 统一退役，续聊 = run + resume 锚点——协议线对齐 SDK 9 正向方法集）。
 // types.ts：引擎中立类型（宿主与引擎适配器共同消费，宿主不感知具体引擎）。
 export type {
@@ -202,7 +202,7 @@ export type { ClosedReason, ExecutionMode, ExecutionOutcome, ExecutionStatus, Ex
 export type { ExecutionRecord, ModelOverride } from "./execution/domain/record-model.ts";
 // [subagent-model-switch U6] setModel 编排应答契约 type-only 导出：/subagent-model 命令
 // handler（extension 壳）消费——壳生产消费纪律禁止深路径 import；type-only 编译期擦除，
-// 零运行时面。形状 SSOT 仍在 service/model-switch.ts。
+// 零运行时情形。形状 SSOT 仍在 service/model-switch.ts。
 export type {
   ChatSetModelReply,
   ModelSwitchTarget,
@@ -221,7 +221,7 @@ export type {
 } from "./execution/assembly/types.ts";
 
 // execution-record 派生视图函数族：record → 渲染态派生视图（outcome / elapsed / tool
-// calls），interface 渲染层唯一消费入口（live 进度派生视图面 = SubagentRecord 派生视图族）。
+// calls），interface 渲染层唯一消费入口（live 进度派生视图侧 = SubagentRecord 派生视图族）。
 export {
   computeElapsedSeconds,
   deriveOutcome,
@@ -234,7 +234,7 @@ export {
 // （SR-3/SR-4 语义）。SubagentServiceInit 为构造依赖参数注入形态（modelService
 // 等，无全局查找，@experimental U10 / D6）。
 // [H3/R6] 单例访问器 + Init 接口外移支撑文件 service/service-bootstrap.ts，本
-// barrel 直接改指向该文件（导出符号面不变；壳对 bootstrap 零 re-export——防壳↔
+// barrel 直接改指向该文件（导出符号名侧不变；壳对 bootstrap 零 re-export——防壳↔
 // bootstrap 值环，设计 v4 import 纪律）。对外消费方零感知。
 // [2026-09-13 barrel 收窄] createSubagentService（全仓零消费，定义文件内部亦零
 // 使用）已连定义删除——第三宿主参数注入构造改走 `new SubagentService(init)`
@@ -408,7 +408,7 @@ export { discoverAgents } from "./execution/assembly/agents-assembly.ts";
 // runWorkflow / abortRun：run 生命周期 free functions（D-12）——orchestration 的
 // 最小宿主入口。更细粒度编排（terminateRunningRuns / evictDoneRunsBeyondCap /
 // scheduleTimeBudget / 上限常量）为组合根实际消费方，随 B-2 扩范围进 barrel
-// （D3 判定标准首次执行）。host-surface 扩面（zsw 回接 U0）同出 barrel：宿主壳
+// （D3 判定标准首次执行）。host-surface 扩大范围（zsw 回接 U0）同出 barrel：宿主壳
 // 组装 LifecycleDeps 需要亲手构造三个 port 实现与消费细粒度编排函数，深路径消费
 // 在 npm 形态不可达（发布范围无 `./*` 通配）——宿主触点证据即 zsw 回接设计 D2。
 export { abortRun, runWorkflow } from "./orchestration/lifecycle.ts";
@@ -531,7 +531,7 @@ export type { LintResult } from "./shared/script-lint.ts";
 // parseWorkflowDag：scriptSource → WorkflowDag 静态蓝图（workflow-visualization
 // 设计 §3.1-3 / §3.3-D2，U1；runtime session.getWorkflowDag RPC 的解析入口，
 // 解析失败 fail-fast 结构化错误——不产半个错误 DAG）。类型跟随锚：core 为定义源
-// （解析器产物类型），shared workflow.ts 的 WorkflowDag 族为 u2 协议冻结面、
+// （解析器产物类型），shared workflow.ts 的 WorkflowDag 族为 u2 协议冻结部分、
 // 双侧等值同 commit 同步（锁定形态见 workflow-dag-parser.ts 头注释）。
 export { parseWorkflowDag, WORKFLOW_DAG_DEFAULT_PHASE } from "./shared/workflow-dag-parser.ts";
 export type {
@@ -724,7 +724,7 @@ export {
   assertEntryTokenBudget,
   assertSlugWithinLimit,
 } from "./shared/entry-guards.ts";
-// 资源发现面（W2③）：discoverResources——agent .md / workflow .js 的多源统一发现
+// 资源发现侧（W2③）：discoverResources——agent .md / workflow .js 的多源统一发现
 // （ADR-031）——多源扫描 + stem last-writer-wins 合并 + realpath 去重。宿主（zsw
 // 回接）经 ScanConfig.hostRoots 注入发现根（source 标签即 ResourceSource 槽位键）；
 // 深路径消费在 npm/vendored 发布形态不可达（exports 无

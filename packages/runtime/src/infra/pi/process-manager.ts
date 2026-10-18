@@ -21,7 +21,7 @@ import { getCrashJournal } from '../crash-journal.js'
 import { ProcessTableRing } from './process-table-ring.js'
 import { reportPiExitSignalForensics } from './signal-forensics.js'
 // W9（设计 §3.7 Electron 打包态）：staged 引擎根推导 + pi 子进程注入（ROOTS +
-// 打包态执行器两键）；构造期补齐 runtime 自身发现面的 L1 env（打包态无 node_modules）
+// 打包态执行器两键）；构造期补齐 runtime 自身发现逻辑的 L1 env（打包态无 node_modules）
 import {
   ensureRuntimeEngineRootsEnv,
   getEngineRootsSpawnEnv,
@@ -68,7 +68,7 @@ export class ProcessManager implements IProcessManager {
   constructor(private readonly projectRoot: string) {
     // 懒初始化：不在构造函数中执行同步 I/O，避免阻塞事件循环
     // piPath 在首次 createSession 时才解析
-    // W9：runtime 自身发现面 env 补齐（幂等；staged 引擎根存在才写）——打包态无
+    // W9：runtime 自身发现逻辑 env 补齐（幂等；staged 引擎根存在才写）——打包态无
     // node_modules（L2 空），不补齐则 runtime ①级读引擎零命中。唯一的构造期 I/O =
     // existsSync 一次 stat（engine-roots 推导），量级远低于「懒初始化」要规避的
     // pi 路径扫描，且必须早于任何引擎发现调用点。

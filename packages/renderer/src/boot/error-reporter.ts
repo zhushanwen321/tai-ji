@@ -2,11 +2,11 @@
  * Renderer 全局错误捕获三件套（D2-① / u2-renderer-errors）。
  *
  * E3 教训：renderer 崩溃前零日志——9/9 OOM 崩溃后 `~/.taiji/logs/` 里没有任何
- * renderer 侧现场。本模块在 app 创建后立即安装三个捕获面：
+ * renderer 侧现场。本模块在 app 创建后立即安装三个捕获点：
  * ① `app.config.errorHandler`——组件 render / setup / 生命周期钩子错误（Vue 体系内；
  *    handler 不 rethrow，Vue 不再走默认 console 报错链路，组件树不卸载）
  * ② `window` error 事件——Vue 体系外的全局 JS 错误（addEventListener 形态，等价
- *    window.onerror 捕获面且不覆盖第三方注册；资源加载错误事件无 message，跳过）
+ *    window.onerror 捕获点且不覆盖第三方注册；资源加载错误事件无 message，跳过）
  * ③ `unhandledrejection`——未接住的 Promise rejection
  * 捕获后组装错误记录（时间戳 / 错误栈 / 可选 performance.memory 快照 / 当前
  * sessionId / 来源）经 electronAPI.reportRendererLog 上报，main 侧落盘

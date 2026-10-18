@@ -1003,7 +1003,7 @@ describe('ComposerTray 序 4 聚合单入口（aggregated）', () => {
   // ── W3a：聚合入口可见条件扩展 + 聚合面板承接插件 toolbar ──
 
   it('aggregated + 托盘全无条目但插件 toolbar 有贡献 → 聚合入口仍渲染；面板含发丝分隔 + toolbar ViewHost', async () => {
-    // 挂载点视图只经 getView 可见、不进 getViewIds 枚举（聚合入口可见条件的独立判定面）
+    // 挂载点视图只经 getView 可见、不进 getViewIds 枚举（聚合入口可见条件的独立判定侧）
     const toolbarSource: ViewHostSource = {
       getViewIds: () => [],
       getView: (sid, viewId) =>

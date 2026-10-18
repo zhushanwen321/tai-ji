@@ -308,7 +308,7 @@ describe('A3 收割等待（P9 消灭双持）', () => {
     expect(existsSync(h.checkpointPath)).toBe(false)
   })
 
-  it('收割 promise 意外 reject（契约违背的防御面）→ 按未收割处理（宁 lazy 不双持）', async () => {
+  it('收割 promise 意外 reject（契约违背的防御机制侧）→ 按未收割处理（宁 lazy 不双持）', async () => {
     const h = makeHarness()
     seed(h, [entry({ piSessionId: 'a', lastActivityAt: T0 - MIN })])
     const report = await runStartupReattach(
@@ -352,7 +352,7 @@ describe('A4 高水位延迟（mem-pressure 即时查询）', () => {
     expect(report.restored).toEqual(['a'])
   })
 
-  it('mem 查询意外抛错（契约违背的防御面）→ 不阻塞恢复', async () => {
+  it('mem 查询意外抛错（契约违背的防御机制侧）→ 不阻塞恢复', async () => {
     const h = makeHarness()
     seed(h, [entry({ piSessionId: 'a', lastActivityAt: T0 - MIN })])
     h.settleHarvest()
@@ -499,7 +499,7 @@ describe('A6 checkpoint 删除（全部尝试完后无条件删）', () => {
     expect(report.checkpointFound).toBe(false)
     expect(report.candidates).toEqual([])
     expect(h.restore).not.toHaveBeenCalled()
-    // 零动作形态下不应等待收割（无 spawn 风险面）
+    // 零动作形态下不应等待收割（无 spawn 风险情形）
     expect(harvestAwaited).toBe(false)
     expect(report.checkpointDeleted).toBe(false)
   })
@@ -671,7 +671,7 @@ describe('#27 reattach:deferred 广播（进入单发 + 缓解退出单发）', 
     expect(onDeferredBroadcast).not.toHaveBeenCalled()
   })
 
-  it('广播出口抛错（契约违背的防御面）→ 异常被吞、进入/退出两帧都尝试、编排照常完成', async () => {
+  it('广播出口抛错（契约违背的防御机制侧）→ 异常被吞、进入/退出两帧都尝试、编排照常完成', async () => {
     const h = makeHarness()
     seed(h, [entry({ piSessionId: 'a', lastActivityAt: T0 - MIN })])
     h.settleHarvest()

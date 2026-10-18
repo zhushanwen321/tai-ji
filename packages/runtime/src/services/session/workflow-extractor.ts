@@ -7,7 +7,7 @@
  * workflow-state-link 指针 + state 文件）不再识别，历史 run 从本提取器数据范围退空即
  * 预期行为（项目未上线无历史数据，不迁移不兼容，同 record 侧裁决）。
  *
- * 保留面 = session-file-extraction 共享骨架的消费壳（读失败分级：ENOENT → 空数组；
+ * 保留范围 = session-file-extraction 共享骨架的消费壳（读失败分级：ENOENT → 空数组；
  * >32MB → oversize 降级标记）——renderer 侧栏 stale 检查与「会话过大」显示依赖该
  * 语义，records 恒空数组。
  */

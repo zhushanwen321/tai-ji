@@ -8,11 +8,11 @@
 // 为什么现在能收（W5/W7 双轨合并后的收编，不翻「SDK 类型闭包只收跨进程协议范围」
 // 的原始裁决）：两包过渡期镜像经 W10 conformance 套件验证字段逐字等价、双轨已
 // 稳定，收编即消除克隆而非改变边界语义。RunContext 含 AbortSignal/回调/EngineStream
-// 等非序列化成员，跨进程面经各包 server.ts 帧映射——故收主 barrel，不进 protocol/
-// 子入口（protocol/ 是 semver 收窄的跨进程可序列化面）。
+// 等非序列化成员，跨进程侧经各包 server.ts 帧映射——故收主 barrel，不进 protocol/
+// 子入口（protocol/ 是 semver 收窄的跨进程可序列化部分）。
 //
 // 命名：全量任务声明在 SDK 侧名 EngineAgentCallOpts（主 barrel 已有 protocol 的
-// AgentCallOpts 引擎面子集——16 字段协议 run.params.task 形态，两者是子集/全量
+// AgentCallOpts 引擎侧子集——16 字段协议 run.params.task 形态，两者是子集/全量
 // 关系，不可同名共存；两包 shim 转名 re-export 保本包消费方 AgentCallOpts 不变）。
 //
 // onChildSpawned 统一采窄载荷形态（host/childSpawned 载荷形态；ChildProcess 句柄
@@ -20,7 +20,7 @@
 //
 // 第三份镜像登记：core execution/engine/port.ts 的 RunContext 是宿主侧独立契约
 // （onChildSpawned 全 ChildProcess 句柄，业务含义 = 宿主进程内），不收编、不 import
-// 本模块；漂移面由 W10 conformance 套件继续覆盖。
+// 本模块；漂移风险由 W10 conformance 套件继续覆盖。
 
 import type {
   AgentCallOpts as SdkAgentCallOpts,
@@ -35,7 +35,7 @@ import type {
 import type { SetModelParams, SetModelResult } from "./protocol/methods.ts";
 
 /**
- * 引擎进程内全量任务声明 = SDK AgentCallOpts 引擎面子集 + 协议 ctx 还原字段（model/
+ * 引擎进程内全量任务声明 = SDK AgentCallOpts 引擎侧子集 + 协议 ctx 还原字段（model/
  * cwd——SDK 契约把它们从 task 移到 run.params.ctx，进程内接口合回单对象；
  * server.ts 做 ctx→task 还原，与 core RemoteEngine.toSdkTaskSubset 镜像）。
  */
@@ -154,7 +154,7 @@ export interface EnginePort {
   listModels?(): Array<{ id: string; name?: string }> | null;
   validateModel?(modelRef: string | undefined): { canonicalRef: string };
   /**
-   * [subagent-model-switch §7.3] 可选面：执行中模型热切换（协议 setModel 正向方法的
+   * [subagent-model-switch §7.3] 可选能力：执行中模型热切换（协议 setModel 正向方法的
    * 进程内承载）。实现引擎须 capabilities.setModel = 'native' 同批声明（位与方法
    * 成对进出——capabilities 注释的消费点登记）；server 分发行在位非 native 时回
    * engineSetModelUnsupportedError 结构化错误（契约行为 = 明确错误而非崩）。

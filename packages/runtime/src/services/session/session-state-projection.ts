@@ -75,7 +75,7 @@ export interface SessionReplicatedStates {
 }
 
 /**
- * onSessionRegistered 订阅目标的结构化窄面（组装根传入 lifecycle；测试可传 plain
+ * onSessionRegistered 订阅目标的结构化窄接口（组装根传入 lifecycle；测试可传 plain
  * object——G2：stub 面 = 消费方，单方法）。
  */
 export interface SessionRegisteredSource {

@@ -681,7 +681,7 @@ describe("doFinalizeRoundToIdle — chatMode 轮次完成进 idle (M2-A)", () =>
     expect(record.lastError).toBe("watchdog kill");
   });
 
-  it("D7 失败轮 lastError 写失败原因（排障面——renderer 在 result 非 undefined 时不显示 error，无视觉影响）", async () => {
+  it("D7 失败轮 lastError 写失败原因（排障侧——renderer 在 result 非 undefined 时不显示 error，无视觉影响）", async () => {
     const { deps, store } = makeDeps();
     const record = makeMinimalRecord({ id: "rec-fail-last-error" });
     record.lastError = undefined;

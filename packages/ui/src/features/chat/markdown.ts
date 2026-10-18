@@ -20,7 +20,7 @@
  *  避免与 highlight 回调的 `<pre` 跳过机制双重逻辑）。
  *
  * XSS 安全（html:true + 分通道净化，设计 markdown-html-sanitize-render D1-D3）：
- * 用户 HTML 经出口 DOMPurify 两级白名单净化（markdown-sanitize.ts——GitHub 风格标签/属性面，
+ * 用户 HTML 经出口 DOMPurify 两级白名单净化（markdown-sanitize.ts——GitHub 风格标签/属性清单，
  * class/style/data-* 构造性全剥）；可信 renderer 输出（fence/math_inline/math_block/
  * code_inline/md_trusted_inline 五个摘出点）经 nonce 哨兵摘出-回填绕过净化，逐字节保留。
  * shiki codeToHtml 转义所有非 token 文本（只发 scoped <span>），linkify 识别的 <a> 加

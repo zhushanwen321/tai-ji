@@ -3,8 +3,8 @@
 // [§2.1b 会计重建] run 计数的**帧推导单源**：从 record 事件流算 budget 会计三值。
 //
 // 背景：run 的活体预算累计在 `Budget`（`consume` 每次尝试 + `incrementCallCount` 每次
-// 派发），但 record 流只承载 `agent-settled` 帧的 `result.usage`——重启/resume 重建面
-// 此前一律 `new Budget()` 归零，展示层因此把「重启后」显示成 0 消耗。本函数给重建面
+// 派发），但 record 流只承载 `agent-settled` 帧的 `result.usage`——重启/resume 重建侧
+// 此前一律 `new Budget()` 归零，展示层因此把「重启后」显示成 0 消耗。本函数给重建侧
 // 一个统一的帧推导口径：
 //   - usedTokens / usedCost：对 `agent-settled.result.usage` 走 `Budget.consume` 的
 //     **同一加权口径**（input*1 + output*2 + cacheRead*0.02 + cacheWrite*0），避免第二
@@ -44,14 +44,14 @@ export function runAccountingFromEvents(
 }
 
 /**
- * 重建面预算构造：条目真值优先，缺席回落帧推导。
+ * 重建侧预算构造：条目真值优先，缺席回落帧推导。
  *
  * @param settled v2 终态条目（`usedTokens > 0` 时视为真值；0 = 条目来自旧版本写点或
  *                无消耗 run，此时帧推导同样给出 0，不会劣化）
  * @param events record 事件流
- * @param maxTimeMs 生效墙钟预算（resume 重建面传；fresh 折叠面不传）
- * @param maxTokens 生效 token 预算（resume 重建面传，与 maxTimeMs 同款条件式；
- *                fresh 折叠面不传——壳侧折叠的预算上限挂 spec 不挂 budget）
+ * @param maxTimeMs 生效墙钟预算（resume 重建侧传；fresh 折叠侧不传）
+ * @param maxTokens 生效 token 预算（resume 重建侧传，与 maxTimeMs 同款条件式；
+ *                fresh 折叠侧不传——壳侧折叠的预算上限挂 spec 不挂 budget）
  */
 export function rebuildBudget(
   settled: { usedTokens: number; callCount: number } | undefined,

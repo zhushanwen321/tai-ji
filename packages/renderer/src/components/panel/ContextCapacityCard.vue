@@ -156,7 +156,7 @@
  * ContextCapacityCard 脚本 —— 原 ContextCapacityPopover 的浮层内容逻辑整体迁移
  * （用量读映射 / quota 展示派生 / refreshQuota 刷新路径），触发器相关（hover-enter 查询 /
  * 触发器文案着色）留在原 Popover——quota 查询不进本卡的原因：store 全局共享、
- * 双实例同源收敛，而查询触发语义属于「hover 指标 chip」这一交互面（聚合触发器同样挂）。
+ * 双实例同源收敛，而查询触发语义属于「hover 指标 chip」这一交互侧（聚合触发器同样挂）。
  */
 import { ref, computed, toRef, inject } from 'vue'
 import { useI18n } from 'vue-i18n'

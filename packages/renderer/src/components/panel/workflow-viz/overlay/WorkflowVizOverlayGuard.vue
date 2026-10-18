@@ -14,7 +14,7 @@
   （overlay 已随 fallback 关闭，用户经 drawer 达成「打开 workflow」的意图）。无
   「连续失败计数后直落 drawer」机制（D10：每次点击入口均重试 overlay）。
 
-  边界自身 render 不消费响应式子树（failed 分支为空），自身抛错面结构性为零。
+  边界自身 render 不消费响应式子树（failed 分支为空），自身抛错路径结构性为零。
 -->
 <template>
   <template v-if="!failed">

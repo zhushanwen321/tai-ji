@@ -166,7 +166,7 @@ function makeDeps(): {
     eventBus: { emit },
     onRunDone: vi.fn(),
     log: vi.fn(),
-    // 预算重排捕获面（D10：首次挂表 + 重试重建重排共用同一 deps 注入点）
+    // 预算重排捕获侧（D10：首次挂表 + 重试重建重排共用同一 deps 注入点）
     scheduleTimeBudget: vi.fn((runId: string, ms: number) => {
       budgetSchedules.push({ runId, ms });
       return undefined;

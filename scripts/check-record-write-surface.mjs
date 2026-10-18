@@ -26,7 +26,7 @@
 //      appendSettledEntry 等以 Entry 结尾的写通道名）与 customType 引用
 //      （SUBAGENT_RECORD_CUSTOM_TYPE 常量或 "subagent-record" 字面量）在调用窗口
 //      内同现，只许 store 家族（record-store.ts 本体 + record-store-rounds.ts 的
-//      RecordEventsWriteFace 容器——W1 v2 两条款写点宿主）与常量定义面
+//      RecordEventsWriteFace 容器——W1 v2 两条款写点宿主）与常量定义所在文件
 //      （record-entry.ts）。appendEntry 是 pi 全局通路，全域禁不可行，按
 //      customType 限定到「写」形态（读侧失效回调/类型声明不拦）。
 //   R3 workflow-record entry 写点白名单（W1 新增；D15/D7 裁决点 7 扩）：append 条目
@@ -326,7 +326,7 @@ function scanWindowRules(rel, i, window, flags, violations) {
   const hasSubagentType = SUBAGENT_RECORD_TYPE_RE.test(window);
   const hasWorkflowType = WORKFLOW_RECORD_TYPE_RE.test(window);
   if (!hasSubagentType && !hasWorkflowType) return;
-  // R2：subagent-record entry 直写（store 家族 + 常量定义面外违规）。
+  // R2：subagent-record entry 直写（store 家族 + 常量定义所在文件外违规）。
   if (
     hasSubagentType &&
     !flags.isStore &&

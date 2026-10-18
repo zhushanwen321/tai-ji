@@ -34,8 +34,8 @@ const MODEL_LIST_LIMIT = 20;
  * 可 mock）。
  *
  * [§2.1 改名] 原名 `ModelCatalogEntry` 与 SDK 引擎协议里的 `ModelCatalogEntry`
- *（`@zhushanwen/subagent-engine-sdk` 的 manifest/能力面载荷）同名异义：两者形状相近
- * 但归属不同（本类型 = pi 侧注册表目录，SDK 类型 = 引擎声明面），同名会让读者误以为
+ *（`@zhushanwen/subagent-engine-sdk` 的 manifest/能力侧载荷）同名异义：两者形状相近
+ * 但归属不同（本类型 = pi 侧注册表目录，SDK 类型 = 引擎声明侧），同名会让读者误以为
  * 同一契约。改为 `PiRegistryModelEntry` 后各自可检索。
  */
 export interface PiRegistryModelEntry { // oe-exempt:20260929:framework:workflow/record 协议契约类型——ports 类型契约先行、单实现常态（dev-0.10.5 已验收代码 merge 带入）

@@ -77,7 +77,7 @@ describe("getInFlightSnapshot：双谓词绝对计数（D5 求值位置 = 状态
     const child = makeFakeChild();
     registerSpawnedChildForRecord(id, child);
     // W3 镜像形态：killed 判据由镜像置死位承载（注册后改 child 引用字段不进镜像——
-    // 生产置死路径 = killRecordChildWithEscalation 杀链记账面 / 引擎反向通道）。
+    // 生产置死路径 = killRecordChildWithEscalation 杀链记账侧 / 引擎反向通道）。
     killRecordChildWithEscalation(id, "test");
     expect(getInFlightSnapshot().inFlight).toBe(0);
   });

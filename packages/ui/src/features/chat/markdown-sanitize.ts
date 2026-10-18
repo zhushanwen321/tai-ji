@@ -9,7 +9,7 @@
  *
  * 两级白名单 = hast-util-sanitize defaultSchema（GitHub 风格 sanitation）翻译：
  * - 标签 = defaultSchema tagNames（去 input——taiji 管线无 GFM task-list 的
- *   `<input checkbox>` 产出面）；
+ *   `<input checkbox>` 产出形态）；
  * - 属性 = defaultSchema 属性表翻译（全局 '*' 表 + 按标签项合并为 DOMPurify 平面白名单；
  *   className 值级项与 data-* 脚注属性不翻译——class/data-* 构造性全剥是 D1 裁决）；
  * - URI = DOMPurify 默认 ALLOWED_URI_REGEXP，不自定义（R8 裁决）：默认正则的

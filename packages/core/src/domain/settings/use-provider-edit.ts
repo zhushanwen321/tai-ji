@@ -10,7 +10,7 @@
  *
  * 本 facade 只做两件事：① 三 module 装配（互相依赖的注入点在此接线）② provider 变化时的
  * 重置序（载入 → 瞬态重置 → 快照捕获，原 watch(props.provider) 的执行序逐字保持）。
- * 返回面收敛为 3 组子 interface（form / discover / models），调用方按组消费。
+ * 返回结构收敛为 3 组子 interface（form / discover / models），调用方按组消费。
  *
  * 历史导出清单（CONTEXT_OPTIONS / THINKING_STRATEGIES / API_KEY_CLEAR_SENTINEL / LocalModel /
  * ThinkingStrategy / DiscoverAction 等）已归位各 module，经 settings 域 barrel（index.ts）
@@ -30,7 +30,7 @@ import type { ProviderEditModelsModule } from './provider-edit-models'
 import { createProviderEditModels } from './provider-edit-models'
 
 /**
- * Provider 编辑会话 —— 3 组子 interface（原 31 成员扁平返回面的收敛形态）：
+ * Provider 编辑会话 —— 3 组子 interface（原 31 成员扁平返回结构的收敛形态）：
  * - form     表单草稿 / dirty / headers CRUD / save
  * - discover test / discover 探活
  * - models   模型清单 CRUD

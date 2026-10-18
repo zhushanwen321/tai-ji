@@ -21,7 +21,7 @@
 | `CoreLogger`, `LogLevel` | type | logger 端口类型（`HostServices.log` 契约成员） |
 | `configureNotifyDomain(ports)` | fn | 注入通知域窄端口（投递内核工厂 + pending 活跃计数），成员可选、缺席降级 |
 | `NotifyDomainPorts` | type | 通知域端口结构（结构化签名，core 不 import 通知实现包） |
-| `EnginePort` | type | subagent 执行引擎唯一契约点（run / interact / read / probe 四能力面） |
+| `EnginePort` | type | subagent 执行引擎唯一契约点（run / interact / read / probe 四能力侧） |
 | `RunContext`, `EngineRunResult` | type | `EnginePort.run` 的运行期上下文与结果 |
 | `AgentTaskSpec`, `AgentOutcome`, `AgentEvent` | type | 任务声明 / 执行结果 / 事件流（引擎中立） |
 | `SessionView`, `ReplayedTurn`, `EngineHandle`, `EngineHandleData` | type | 会话视图 / 回放轮次 / 运行句柄 |

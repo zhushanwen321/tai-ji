@@ -377,7 +377,7 @@ const matchedPreset = computed(() => {
   return matchQuotaPreset({ baseUrl: p?.baseUrl, name: p?.name })
 })
 
-// 业务编排全在 core 三组 module（[C4] 31 成员扁平返回面收敛为 form / discover / models 三组
+// 业务编排全在 core 三组 module（[C4] 31 成员扁平返回结构收敛为 form / discover / models 三组
 // 子 interface，调用方按组消费）。整份 session 传给展示接线 composable（useCatalogDisplay
 // 按组读 test 状态与模型数）；本组件每组只解构模板绑定所需成员，不再逐名消费 28 名扁平面。
 const edit = useProviderEdit(toRef(props, 'provider'), { t })

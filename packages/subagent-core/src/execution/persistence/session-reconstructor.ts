@@ -107,7 +107,7 @@ export interface SubagentIdentityData {
   parentSessionId?: string;
   /**
    * 来源身份（H2 S3 修复）。旧文件缺失 → undefined（= "tool" 语义，缺省零迁移）。
-   * standalone 形态（identity entry 链）的 workflow record 经本字段在重建面保留
+   * standalone 形态（identity entry 链）的 workflow record 经本字段在重建侧保留
    * origin 过滤语义；读取侧经 normalizeReconOrigin 检查归一（非法值 → undefined）。
    */
   origin?: RecordOrigin;
@@ -162,7 +162,7 @@ interface RecordIdentityFields {
   worktree?: boolean;
   /**
    * 来源身份（H2 S3 修复，来自 identity custom entry 经检查归一；旧文件 undefined =
-   * "tool" 语义）。漏本字段则全量重建面（getFullRecord → reconstructFromFile）丢
+   * "tool" 语义）。漏本字段则全量重建侧（getFullRecord → reconstructFromFile）丢
    * origin，workflow record 逃过 D1 派生视图过滤。
    */
   origin: RecordOrigin | undefined;

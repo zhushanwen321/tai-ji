@@ -126,7 +126,7 @@ export interface LifecycleDeps {
  *
  * [reload-closeout D4] 终局路径的 pending:unregister 持久化不走
  * 本端口（emit→内存 listener 是易失跳：reload 转换窗/多 extension factory 顺序窗
- * 内丢失即注销 entry 永缺位）——finalizeRun 改经下方 appendEntry 直落权威面。
+ * 内丢失即注销 entry 永缺位）——finalizeRun 改经下方 appendEntry 直写权威存储的部分。
  */
   eventBus?: { emit(channel: string, data: unknown): void };
  /**

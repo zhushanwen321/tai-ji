@@ -283,7 +283,7 @@ describe('Entry 失效订阅四路清理接线', () => {
       setSendMessageHook: vi.fn(),
       setOnSessionCreated: vi.fn(),
       setOnSessionDestroyed,
-      // u5a relay ③：registerSendMessageHook 现亦注册激活回调（追加式列表）——mock 跟进接口面
+      // u5a relay ③：registerSendMessageHook 现亦注册激活回调（追加式列表）——mock 跟进接口侧
       onSessionActivated: vi.fn(),
       listPersistedSessions: () => [{ sessions: [{ id: 's1' }, { id: 's2' }] }],
     }

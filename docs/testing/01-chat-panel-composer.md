@@ -927,7 +927,7 @@ pnpm dev
 
 ### 10.1 前置：data-testid 已落地
 
-对话流组件已大量补齐 testid（`turn-{index}` / `block-text` / `tool-block-header` / `change-set-card` 等，见 §3 清单），E2E 可直接以 testid 锚定；未覆盖的交互面再随用例补。
+对话流组件已大量补齐 testid（`turn-{index}` / `block-text` / `tool-block-header` / `change-set-card` 等，见 §3 清单），E2E 可直接以 testid 锚定；未覆盖的交互侧再随用例补。
 
 ### 10.2 测试场景
 
@@ -1122,7 +1122,7 @@ expect(m.tableScrollW).toBeLessThanOrEqual(m.hostW + 1)         // 不撑爆宿�
 
 | 约束 | 说明 |
 |------|------|
-| ✅ data-testid 已落地 | turn-*/block-text/tool-block-header/change-set-card/subagent-directive-bubble/pending-bubble-list/load-more-history 等已可用（见 §3 清单）；新增交互面随组件补，未覆盖处才退回文本/class 锚点 |
+| ✅ data-testid 已落地 | turn-*/block-text/tool-block-header/change-set-card/subagent-directive-bubble/pending-bubble-list/load-more-history 等已可用（见 §3 清单）；新增交互侧随组件补，未覆盖处才退回文本/class 锚点 |
 | ⚠️ mock 流式耗时 | 一轮约 3-4 秒。E2E timeout 给 15s，用 `toBeVisible({timeout})` 等终态，禁止固定 sleep |
 | ❌ mock 不模拟失败 | 错误路径（message.error/stream_error）无法 mock E2E 触发，只能单测验证（chat-streaming-reset.test.ts） |
 | ❌ mock 不模拟 WS 断连 | WS 生命周期（断连/重连）只能非 MOCK 测 |

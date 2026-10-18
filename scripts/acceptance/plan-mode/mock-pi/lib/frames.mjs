@@ -63,7 +63,7 @@ export function messageEnd(role, text, extra = {}) {
  */
 export function planReviewSelect({ id = `pr-${nextSeq()}`, docs = [], selfReview, message } = {}) {
   const payload = { docs };
-  // selfReview 前向兼容键（U3b 透传面）：现版 runtime 不透传，携带有界字段不改路由。
+  // selfReview 前向兼容键（U3b 透传路径）：现版 runtime 不透传，携带有界字段不改路由。
   if (selfReview !== undefined) payload.selfReview = selfReview;
   return {
     type: 'extension_ui_request',

@@ -66,7 +66,7 @@ describe.skipIf(SKIP_REASON !== '')(
       // 唯一性 = steer/followUp/_queueSteer/_queueFollowUp 无 input hook 的结构性依据：
       // transform 询问点不在任何 steer 侧函数中出现（steer 通路无改写侧的静态证明）
       expect(agentSession.match(/hasHandlers\("input"\)/g), 'hasHandlers("input") 出现 >1 处——transform 询问面扩大，复核 PS-26 锚点').toHaveLength(1)
-      expect(agentSession.match(/\.emitInput\(/g), '.emitInput( 出现 >1 处——input 事件发射面扩大，复核 PS-26 锚点').toHaveLength(1)
+      expect(agentSession.match(/\.emitInput\(/g), '.emitInput( 出现 >1 处——input 事件发射侧扩大，复核 PS-26 锚点').toHaveLength(1)
     })
 
     it('pi-coding-agent prompt()：文本替换仅由 hook transform 结果驱动（非 transform 不改文本）', () => {

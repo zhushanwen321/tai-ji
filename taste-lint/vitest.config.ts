@@ -8,7 +8,7 @@ import { taijiTestConfig } from '../test-guard/factory.ts'
 // 目标非空由 scripts/check-ci-vitest-targets.mjs（G2）检查。
 //
 // root 钉在本目录：include 以 config 所在目录为基准解析，无论从仓库根（--config
-// 指入）还是从 taste-lint/ 目录直接跑，收集面一致，不依赖 cwd。规则用例经
+// 指入）还是从 taste-lint/ 目录直接跑，收集范围一致，不依赖 cwd。规则用例经
 // import.meta.url 自定位仓库根（不依赖 cwd），root 切换不影响其被测根解析。
 export default taijiTestConfig({
   root: fileURLToPath(new URL('.', import.meta.url)),

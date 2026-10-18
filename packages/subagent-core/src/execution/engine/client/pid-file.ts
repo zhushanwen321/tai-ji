@@ -104,7 +104,7 @@ export function removePidfile(path: string): void {
 }
 
 // ============================================================
-// EngineClient 编排面（spawn 成功写入 + 启动清扫的一次式调用）
+// EngineClient 编排侧（spawn 成功写入 + 启动清扫的一次式调用）
 // ============================================================
 
 export interface EnginePidfileRegistration {

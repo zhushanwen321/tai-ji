@@ -61,7 +61,7 @@ export interface RunEndState {
   resolveChatRun?: (code: number) => void;
   /**
    * resolve 时刻的真实轮数快照（agent_settled 传出，见 SdkTranslatorOpts.onAgentSettled）。
-   * agent_settled 消费方随后按轮清零 record.turnCount（SP-9），收集面以本快照恢复
+   * agent_settled 消费方随后按轮清零 record.turnCount（SP-9），收集侧以本快照恢复
    * 成功 run 的真实轮数；undefined = agent_settled 未到达（失败路径），record 值即真实值。
    */
   settledTurnCount?: number;

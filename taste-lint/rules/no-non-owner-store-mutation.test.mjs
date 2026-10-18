@@ -147,7 +147,7 @@ test('R2/W24: 三层转发（load → applyVia(形参 s) → mutation）→ 报�
   expect(messages[0].message).toMatch(/data-source-registry\.md/);
 });
 
-test('R2/W24: 同转发结构但实参非 store（未绑定写通道）→ 通过（超集不扩大误报面）', () => {
+test('R2/W24: 同转发结构但实参非 store（未绑定写通道）→ 通过（超集不扩大误报范围）', () => {
   const messages = lint(
     'import { useSessionStore } from "@/stores/session"\n' +
       'function applyVia(s, snapshot) {\n' +
@@ -279,7 +279,7 @@ test('R2/W24: 对象方法包装 box.grab().applySnapshot（MemberExpression rec
   expect(messages[0].message).toMatch(/grab/);
 });
 
-test('R2/W24: 非 store 的表达式体箭头 / 对象方法返回值调 applySnapshot → 通过（收尾不扩大误报面）', () => {
+test('R2/W24: 非 store 的表达式体箭头 / 对象方法返回值调 applySnapshot → 通过（收尾不扩大误报范围）', () => {
   const messages = lint(
     'import { useSessionStore } from "@/stores/session"\n' +
       'const keepFactoryVisible = useSessionStore\n' +

@@ -228,7 +228,7 @@
     ],
     "guard": {
       "type": "observe",
-      "note": "处置建议已在 troubleshooting 观察项 #1（taiji 侧不依赖挂起窗口的信号语义；runtime 无 TUI 交互面）"
+      "note": "处置建议已在 troubleshooting 观察项 #1（taiji 侧不依赖挂起窗口的信号语义；runtime 无 TUI 交互侧）"
     },
     "verifiedWith": "1.0.0"
   },
@@ -296,7 +296,7 @@
     ],
     "guard": {
       "type": "observe",
-      "note": "消费方：sw delivery-port 投递日志的『跨重启不丢』限定语义 = OS 崩溃/断电窗口（无 fsync 的真实残余面），进程强杀不丢已 append entry。pi 升级时重验：_appendEntry 是否引入异步 flush/debounce"
+      "note": "消费方：sw delivery-port 投递日志的『跨重启不丢』限定语义 = OS 崩溃/断电窗口（无 fsync 的真实残余风险），进程强杀不丢已 append entry。pi 升级时重验：_appendEntry 是否引入异步 flush/debounce"
     },
     "verifiedWith": "1.0.0"
   },
@@ -377,7 +377,7 @@
   },
   {
     "id": "PS-21",
-    "claim": "注册工具的 parameters schema 是 pi 注入给模型的权威展示面：agent-session 把注册工具装入 agent.state.tools，agent-core 每轮流式调用经 createContextSnapshot 把 state.tools 带入请求上下文，pi-ai provider 层 convertTools 对每个工具取 tool.parameters 原样映射进 provider 请求体（anthropic input_schema / openai function.parameters）——API tools 段即模型可见的 schema 全文，ASP/任务文本不放 schema 重复不影响模型拿到结构",
+    "claim": "注册工具的 parameters schema 是 pi 注入给模型的权威展示侧：agent-session 把注册工具装入 agent.state.tools，agent-core 每轮流式调用经 createContextSnapshot 把 state.tools 带入请求上下文，pi-ai provider 层 convertTools 对每个工具取 tool.parameters 原样映射进 provider 请求体（anthropic input_schema / openai function.parameters）——API tools 段即模型可见的 schema 全文，ASP/任务文本不放 schema 重复不影响模型拿到结构",
     "piAnchor": [
       {
         "pkg": "pi-coding-agent",
@@ -406,7 +406,7 @@
     ],
     "guard": {
       "type": "observe",
-      "note": "承重：subagent-workflow U3「ASP 单点注入、删 task 后缀」（agent-opts-resolver.ts formatSchemaInstruction 与 session-runner.ts runSpawn 头注引用本条）——若 pi 升级后不再把注册工具 parameters 下发进请求体，模型将失去 schema 展示面，structured-output 指令链断裂且 ASP 的 {value} 包装契约失去对位；PS-20 的 observe 检查只覆盖校验链不覆盖展示面。pi 升级时重验：convertTools 是否仍原样映射 tool.parameters、state.tools 是否仍随流式调用上下文下发。观察记录：bcadf4c22 live-verification（structured-output 全链实测，schema 经工具定义对模型生效）"
+      "note": "承重：subagent-workflow U3「ASP 单点注入、删 task 后缀」（agent-opts-resolver.ts formatSchemaInstruction 与 session-runner.ts runSpawn 头注引用本条）——若 pi 升级后不再把注册工具 parameters 下发进请求体，模型将失去 schema 展示侧，structured-output 指令链断裂且 ASP 的 {value} 包装契约失去对位；PS-20 的 observe 检查只覆盖校验链不覆盖展示侧。pi 升级时重验：convertTools 是否仍原样映射 tool.parameters、state.tools 是否仍随流式调用上下文下发。观察记录：bcadf4c22 live-verification（structured-output 全链实测，schema 经工具定义对模型生效）"
     },
     "verifiedWith": "1.0.0"
   },
@@ -837,7 +837,7 @@
       {
         "pkg": "pi-coding-agent",
         "distPath": "dist/core/session-manager.js",
-        "symbol": "_persist / appendCompaction / _rewriteFile（append-only 承重面）",
+        "symbol": "_persist / appendCompaction / _rewriteFile（append-only 关键部分）",
         "note": "同 PS-18 锚点：_persist :724-753（首写 wx、此后 appendFileSync :753 追加）；appendCompaction :803-818 追加不重写；_rewriteFile :693-705 截断重写仅限加载期（空文件归一 :627 / 版本迁移 :634 / branch 换新文件 :1143）【行号锚基于 pi@0.84.4；1.0.0 复核按符号名定位】"
       }
     ],
@@ -872,7 +872,7 @@
   },
   {
     "id": "PS-42",
-    "claim": "`ctx.modelRegistry.refresh(options?, signal?)` 的语义面：① **每次调用都重读磁盘配置**（`ModelRuntime.refresh()` 首行 `this.config = await ModelConfig.load(this.modelsPath)`，随后 `rebuildProviders()` 按新配置重组、`updateModelSnapshot()` 刷新快照）——新增/删除 provider 与模型均立即生效；② `allowNetwork:false` 时 provider 相位只跑本地恢复（pi-ai `runProviderRefreshPhase(..., allowNetwork=false)`）并在**凭据解析/入网之前 return**——结构性零网络；③ 末段 `queueAvailabilityRefresh` 重算 configuredProviders 与 available（auth.json 类凭据变更同样生效）；④ 返回 `{aborted, errors}`，且 **schema/解析类配置失败时 `errors.size=0`、`aborted=false`——唯一有效判据是随后调用的 `getError()`**",
+    "claim": "`ctx.modelRegistry.refresh(options?, signal?)` 的语义侧：① **每次调用都重读磁盘配置**（`ModelRuntime.refresh()` 首行 `this.config = await ModelConfig.load(this.modelsPath)`，随后 `rebuildProviders()` 按新配置重组、`updateModelSnapshot()` 刷新快照）——新增/删除 provider 与模型均立即生效；② `allowNetwork:false` 时 provider 相位只跑本地恢复（pi-ai `runProviderRefreshPhase(..., allowNetwork=false)`）并在**凭据解析/入网之前 return**——结构性零网络；③ 末段 `queueAvailabilityRefresh` 重算 configuredProviders 与 available（auth.json 类凭据变更同样生效）；④ 返回 `{aborted, errors}`，且 **schema/解析类配置失败时 `errors.size=0`、`aborted=false`——唯一有效判据是随后调用的 `getError()`**",
     "piAnchor": [
       {
         "pkg": "pi-coding-agent",
@@ -942,7 +942,7 @@
         "pkg": "pi-agent-core",
         "distPath": "dist/harness/compaction/compaction.js",
         "symbol": "getAssistantUsage / calculateContextTokens",
-        "note": ":92 usage.totalTokens || input+output+cacheRead+cacheWrite；getAssistantUsage 跳过 aborted/error/零 usage——pi 自己的检查面（对照：agent-session 两处未检查）【行号锚基于 pi@0.84.4；1.0.0 复核按符号名定位】"
+        "note": ":92 usage.totalTokens || input+output+cacheRead+cacheWrite；getAssistantUsage 跳过 aborted/error/零 usage——pi 自己的检查逻辑（对照：agent-session 两处未检查）【行号锚基于 pi@0.84.4；1.0.0 复核按符号名定位】"
       }
     ],
     "guard": {
@@ -959,7 +959,7 @@
         "pkg": "pi-coding-agent",
         "distPath": "dist/modes/rpc/rpc-mode.js",
         "symbol": "extension_ui_response 应答分派（handleInputLine 内 pendingExtensionRequests resolve 后 return）",
-        "note": ":614-626 —— `parsed.type === \"extension_ui_response\"` 分支：get → delete → pending.resolve(response) → return（早退，不落 :629 handleCommand）；resolve 回调体 :71-74（createDialogPromise，cleanup + Promise resolve）与 :178-187（editor，cancelled/value 分派 resolve）均零 output()/session 调用；select 请求面 :84 createDialogPromise（method: \"select\"）【行号锚基于 pi@0.84.4；1.0.0 复核按符号名定位】"
+        "note": ":614-626 —— `parsed.type === \"extension_ui_response\"` 分支：get → delete → pending.resolve(response) → return（早退，不落 :629 handleCommand）；resolve 回调体 :71-74（createDialogPromise，cleanup + Promise resolve）与 :178-187（editor，cancelled/value 分派 resolve）均零 output()/session 调用；select 请求侧 :84 createDialogPromise（method: \"select\"）【行号锚基于 pi@0.84.4；1.0.0 复核按符号名定位】"
       }
     ],
     "guard": {
@@ -970,7 +970,7 @@
   },
   {
     "id": "PS-46",
-    "claim": "turn_start 逐 LLM 请求恰发一次（composer-genstats-ttft TTFT 起算锚点前提，设计 §3.2）：pi-agent-core runLoop 内层循环每轮迭代在 prepareNextTurn 之后 emit 一次 turn_start（原生 auto-compaction 运行在 prepareNextTurn 内、先于锚点——TTFT 窗口不含原生压缩；工具执行发生在上一轮 turn_end 之后——亦不含，工具后下一轮 turn_start 重新起算）；首个请求的 turn_start 由 runAgentLoop / runAgentLoopContinue 入口（agent_start 后、runLoop 调用前）emit；锚点后、streamAssistantResponse 前的 steering 注入段计入窗口（通常毫秒级，设计接受）。taiji 依赖面：event-adapter handleTurnStart 翻译 llm-request-start → LlmWindowSampler.onRequestStart 重锚（清 ttftMs/firstOutputAt 重锚清除不变量）。pi 升级后若此前提漂移：TTFT 系统性偏大（锚点早于压缩）/ 偏小（晚于首输出）/ 恒 null（不再逐请求 emit）",
+    "claim": "turn_start 逐 LLM 请求恰发一次（composer-genstats-ttft TTFT 起算锚点前提，设计 §3.2）：pi-agent-core runLoop 内层循环每轮迭代在 prepareNextTurn 之后 emit 一次 turn_start（原生 auto-compaction 运行在 prepareNextTurn 内、先于锚点——TTFT 窗口不含原生压缩；工具执行发生在上一轮 turn_end 之后——亦不含，工具后下一轮 turn_start 重新起算）；首个请求的 turn_start 由 runAgentLoop / runAgentLoopContinue 入口（agent_start 后、runLoop 调用前）emit；锚点后、streamAssistantResponse 前的 steering 注入段计入窗口（通常毫秒级，设计接受）。taiji 依赖范围：event-adapter handleTurnStart 翻译 llm-request-start → LlmWindowSampler.onRequestStart 重锚（清 ttftMs/firstOutputAt 重锚清除不变量）。pi 升级后若此前提漂移：TTFT 系统性偏大（锚点早于压缩）/ 偏小（晚于首输出）/ 恒 null（不再逐请求 emit）",
     "piAnchor": [
       {
         "pkg": "pi-agent-core",
@@ -993,7 +993,7 @@
   },
   {
     "id": "PS-47",
-    "claim": "pi-ai 全族流式实现凡产 text/thinking/toolcall delta 必先产对应 *_start（composer-genstats-ttft 首输出结算前提，设计 §3.2「单点收无 interpreter 兜底」+ 否决表 E 的依据）：六个具体实现分三族——① lazy 工厂族（openai-completions 的 ensure*Block：blocks.push 唯三处全在 ensure 内且 120 字符内紧跟对应 *_start 推送；openai-responses-shared 的 createSlot+getSlot：三创建分支各播报 *_start，getSlot 类型不匹配返回 undefined，delta 站点经 if (!slot) continue 检查）；② wire 事件映射族（anthropic-messages：content_block_start 分支建块即播报三种 *_start，content_block_delta 分支按 index 查块 + block 类型检查，无块不产 delta；bedrock-converse-stream：toolUse 块唯一创建点 handleContentBlockStart 播报 toolcall_start，delta 处理器 text/thinking 无块先建块播报、toolcall 前置既有 toolCall 块检查）；③ 检查分支紧邻族（google-generative-ai / mistral-conversations：if (!currentBlock) 建块分支播报 *_start 与 delta push 同迭代紧邻）。openai-responses / openai-codex-responses / azure-openai-responses 均委托 openai-responses-shared.processResponsesStream（无独立流式实现，探针钉住委托关系防新增独立实现漏探）。taiji 依赖面：adapter 仅对 text_start / thinking_start / toolcall_start 三子类型产 llm-first-output——pi 若出现产 delta 不先产 *_start 的 provider，该模型 TTFT 恒 null 静默降级（前端显 —），本探针在 pi bump 门禁先红",
+    "claim": "pi-ai 全族流式实现凡产 text/thinking/toolcall delta 必先产对应 *_start（composer-genstats-ttft 首输出结算前提，设计 §3.2「单点收无 interpreter 兜底」+ 否决表 E 的依据）：六个具体实现分三族——① lazy 工厂族（openai-completions 的 ensure*Block：blocks.push 唯三处全在 ensure 内且 120 字符内紧跟对应 *_start 推送；openai-responses-shared 的 createSlot+getSlot：三创建分支各播报 *_start，getSlot 类型不匹配返回 undefined，delta 站点经 if (!slot) continue 检查）；② wire 事件映射族（anthropic-messages：content_block_start 分支建块即播报三种 *_start，content_block_delta 分支按 index 查块 + block 类型检查，无块不产 delta；bedrock-converse-stream：toolUse 块唯一创建点 handleContentBlockStart 播报 toolcall_start，delta 处理器 text/thinking 无块先建块播报、toolcall 前置既有 toolCall 块检查）；③ 检查分支紧邻族（google-generative-ai / mistral-conversations：if (!currentBlock) 建块分支播报 *_start 与 delta push 同迭代紧邻）。openai-responses / openai-codex-responses / azure-openai-responses 均委托 openai-responses-shared.processResponsesStream（无独立流式实现，探针钉住委托关系防新增独立实现漏探）。taiji 依赖范围：adapter 仅对 text_start / thinking_start / toolcall_start 三子类型产 llm-first-output——pi 若出现产 delta 不先产 *_start 的 provider，该模型 TTFT 恒 null 静默降级（前端显 —），本探针在 pi bump 门禁先红",
     "piAnchor": [
       {
         "pkg": "pi-ai",
@@ -1109,7 +1109,7 @@
   },
   {
     "id": "PS-51",
-    "claim": "forkFrom 写序：先 writeFileSync(新 header, flag:'wx') 建文件，后同步 appendFileSync 循环逐条复制全部非 header entry——文件可见先于内容写完；复制循环为同步 Node 调用，信号不打断 → 进程退出即写入侧封闭。btw fork bootstrap「await exited 后读到的必是完整静止文件」保证（btw-fork-exec.ts forkViaCliPi 成功分支）以此为承重前提：pi 若改异步/流式落盘即漂移失效，宿主须改为等待可观测写入完成信号。检查面：源空/无 header → throw（CLI 语境 exit 1 'Cannot fork: source session file is empty or invalid'）；header-only 源不 throw，产出仅 header 快照（宿主 inspectSourceState 前置判 empty 更严一档）",
+    "claim": "forkFrom 写序：先 writeFileSync(新 header, flag:'wx') 建文件，后同步 appendFileSync 循环逐条复制全部非 header entry——文件可见先于内容写完；复制循环为同步 Node 调用，信号不打断 → 进程退出即写入侧封闭。btw fork bootstrap「await exited 后读到的必是完整静止文件」保证（btw-fork-exec.ts forkViaCliPi 成功分支）以此为承重前提：pi 若改异步/流式落盘即漂移失效，宿主须改为等待可观测写入完成信号。检查逻辑：源空/无 header → throw（CLI 语境 exit 1 'Cannot fork: source session file is empty or invalid'）；header-only 源不 throw，产出仅 header 快照（宿主 inspectSourceState 前置判 empty 更严一档）",
     "piAnchor": [
       {
         "pkg": "pi-coding-agent",
@@ -1379,7 +1379,7 @@
   },
   {
     "id": "PS-62",
-    "claim": "compaction_start/end 的 reason 词表恒三值：manual 路径（AgentSession.compact）start 恒字面量 'manual'（全 dist 唯一 emit 点），end 成功/aborted 两处均 'manual'；auto 路径 _runAutoCompaction(reason, willRetry) 变量透传，reason 仅 'threshold'（阈值命中，2 调用点）与 'overflow'（溢出/截断恢复，2 调用点）两值。auto 路径收尾有 hasQueuedMessages→continue 补投（设计 F6：不丢消息、不掐 turn，无需续跑），与 manual 路径无补投（PS-61）互为对照——runtime 续跑判定以 reason==='manual' 识别「掐 turn 的压缩」；pi 引入第四 reason 值或改 manual 判定名时判定面须复审（漏判 = 不续跑；误判 = 多一条被投递内核吸收的投递）。pi 1.0.0 附带变化：threshold 字面量调用点 2→3（新增 _checkCompaction post-run 复查段超限即压缩路径），词表仍恒三值、auto 路径仍变量透传",
+    "claim": "compaction_start/end 的 reason 词表恒三值：manual 路径（AgentSession.compact）start 恒字面量 'manual'（全 dist 唯一 emit 点），end 成功/aborted 两处均 'manual'；auto 路径 _runAutoCompaction(reason, willRetry) 变量透传，reason 仅 'threshold'（阈值命中，2 调用点）与 'overflow'（溢出/截断恢复，2 调用点）两值。auto 路径收尾有 hasQueuedMessages→continue 补投（设计 F6：不丢消息、不掐 turn，无需续跑），与 manual 路径无补投（PS-61）互为对照——runtime 续跑判定以 reason==='manual' 识别「掐 turn 的压缩」；pi 引入第四 reason 值或改 manual 判定名时判定侧须复审（漏判 = 不续跑；误判 = 多一条被投递内核吸收的投递）。pi 1.0.0 附带变化：threshold 字面量调用点 2→3（新增 _checkCompaction post-run 复查段超限即压缩路径），词表仍恒三值、auto 路径仍变量透传",
     "piAnchor": [
       {
         "pkg": "pi-coding-agent",
@@ -1528,7 +1528,7 @@
   },
   {
     "id": "PS-72",
-    "claim": "pi mcp.json 校验器语义（taiji PiMcpStore 保存校验面的复刻基准）：SERVER_NAME = /^[A-Za-z0-9_-]+$/；validateMcpServerConfig 的 type 分支条件 = url 分支（type undefined|\"http\"|\"streamable-http\"）/ command 分支（type undefined|\"stdio\"）/ \"sse\" 显式拒绝；type 与传输字段错配（如 type:\"http\"+command 无 url）落到兜底文案 needs either \"command\" (stdio) or \"url\" (streamable HTTP)——报错文案与真实病因错位（PiMcpStore 保存当场拦 type 错配的依据）；混填（command+url 同填）不报错、url 分支先命中胜出且 config 原样返回（含 command）；无 type 条目按传输字段归类两分支均放行（D7 type 无条件剥离的行为等价性依据）；-/_ 归并同名先入者胜。taiji 有意收紧三处（互斥拦截 / sse 拒绝 / type 词表闭集 stdio|http|streamable-http）是 PiMcpStore 侧策略非 pi 语义",
+    "claim": "pi mcp.json 校验器语义（taiji PiMcpStore 保存时的校验逻辑的复刻基准）：SERVER_NAME = /^[A-Za-z0-9_-]+$/；validateMcpServerConfig 的 type 分支条件 = url 分支（type undefined|\"http\"|\"streamable-http\"）/ command 分支（type undefined|\"stdio\"）/ \"sse\" 显式拒绝；type 与传输字段错配（如 type:\"http\"+command 无 url）落到兜底文案 needs either \"command\" (stdio) or \"url\" (streamable HTTP)——报错文案与真实病因错位（PiMcpStore 保存当场拦 type 错配的依据）；混填（command+url 同填）不报错、url 分支先命中胜出且 config 原样返回（含 command）；无 type 条目按传输字段归类两分支均放行（D7 type 无条件剥离的行为等价性依据）；-/_ 归并同名先入者胜。taiji 有意收紧三处（互斥拦截 / sse 拒绝 / type 词表闭集 stdio|http|streamable-http）是 PiMcpStore 侧策略非 pi 语义",
     "piAnchor": [
       {
         "pkg": "pi-coding-agent",
@@ -1591,7 +1591,7 @@
     ],
     "guard": {
       "type": "observe",
-      "note": "消费方：packages/runtime/src/services/session/session-lifecycle.ts applyRestoreAbortConvergence docblock 与 packages/runtime/src/services/session/event-interpreter.ts UserStoppedGate 头注（两处符号名 + 行号锚回指本条）。无独立单测探针——no-op 断言的承重面是真实 pi 子进程的 RPC 语义（e2e 面），单测层直调需真实 AgentSession 实例、探 mock 不探实装收益低（同 PS-69 先例），靠锚点符号名复审。pi 升级时重验：abort() 是否仍纯可选链掐点组合、waitForIdle 是否仍 isIdle 早退、是否新增有状态副作用（置位标志/记录/通知）"
+      "note": "消费方：packages/runtime/src/services/session/session-lifecycle.ts applyRestoreAbortConvergence docblock 与 packages/runtime/src/services/session/event-interpreter.ts UserStoppedGate 头注（两处符号名 + 行号锚回指本条）。无独立单测探针——no-op 断言的关键部分是真实 pi 子进程的 RPC 语义（e2e 面），单测层直调需真实 AgentSession 实例、探 mock 不探实装收益低（同 PS-69 先例），靠锚点符号名复审。pi 升级时重验：abort() 是否仍纯可选链掐点组合、waitForIdle 是否仍 isIdle 早退、是否新增有状态副作用（置位标志/记录/通知）"
     },
     "verifiedWith": "1.0.0"
   },
@@ -1654,7 +1654,7 @@
   },
   {
     "id": "PS-78",
-    "claim": "tool_search 激活通道语义（tool-declaration-slimming D4 承重）：内置 tool-search 扩展把 tool_search 注册为 defaultActive:false——注册不激活，激活三通道 = --tools allowlist / settings.json defaultTools / setActiveTools（扩展源注释自述）。defaultTools 只能激活已注册工具：configuredDefaultToolNames（getDefaultTools 解析产物）经 sdk.js 变为 initialActiveToolNames 传入 AgentSession → _buildRuntime activeToolNames → _refreshToolRegistry，最终声明面 _applyToolLoadout 只遍历 _toolRegistry 已注册名——未注册名（如 -ne 下未装载 builtin:tool-search 时的 +tool_search 条目）在 registry 查不到即静默跳过，条目无消费方、无报错（探针结论①「未知名静默忽略」：tool_search 未注册时 +tool_search 条目不产生任何工具声明；承重面 = taiji 主 agent spawn 恒带 --extension builtin:tool-search 使迁移条目有消费方，孙进程模板不装载 → 条目在孙进程无效果，ADR-0136 终态零波及）。taiji 启动迁移写入侧（幂等追加 +tool_search、负条目视为已含即用户永久关闭）与 pi 解析侧的闭环 = 落盘值经 resolveDefaultToolSet 解析后必含 tool_search",
+    "claim": "tool_search 激活通道语义（tool-declaration-slimming D4 承重）：内置 tool-search 扩展把 tool_search 注册为 defaultActive:false——注册不激活，激活三通道 = --tools allowlist / settings.json defaultTools / setActiveTools（扩展源注释自述）。defaultTools 只能激活已注册工具：configuredDefaultToolNames（getDefaultTools 解析产物）经 sdk.js 变为 initialActiveToolNames 传入 AgentSession → _buildRuntime activeToolNames → _refreshToolRegistry，最终声明侧 _applyToolLoadout 只遍历 _toolRegistry 已注册名——未注册名（如 -ne 下未装载 builtin:tool-search 时的 +tool_search 条目）在 registry 查不到即静默跳过，条目无消费方、无报错（探针结论①「未知名静默忽略」：tool_search 未注册时 +tool_search 条目不产生任何工具声明；关键部分 = taiji 主 agent spawn 恒带 --extension builtin:tool-search 使迁移条目有消费方，孙进程模板不装载 → 条目在孙进程无效果，ADR-0136 终态零波及）。taiji 启动迁移写入侧（幂等追加 +tool_search、负条目视为已含即用户永久关闭）与 pi 解析侧的闭环 = 落盘值经 resolveDefaultToolSet 解析后必含 tool_search",
     "piAnchor": [
       {
         "pkg": "pi-coding-agent",
@@ -1671,7 +1671,7 @@
       {
         "pkg": "pi-coding-agent",
         "distPath": "dist/core/agent-session.js",
-        "symbol": "_buildRuntime / _refreshToolRegistry（activeToolNames → 声明面）",
+        "symbol": "_buildRuntime / _refreshToolRegistry（activeToolNames → 声明侧）",
         "note": ":196-210 构造路径 _buildRuntime({activeToolNames: _initialActiveToolNames})；_refreshToolRegistry :2820 nextActiveToolNames 取 options.activeToolNames——registry 未含的名单最终在 _applyToolLoadout 被静默跳过（见 PS-79 锚）【行号锚基于 pi@1.0.0 实装实测】"
       }
     ],

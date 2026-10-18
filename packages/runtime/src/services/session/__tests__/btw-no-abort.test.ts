@@ -1,6 +1,6 @@
 /**
- * P-no-abort 的结构面（M1-b）：btw 建线路径与主会话进程零耦合——
- *  - 依赖面构造性无主进程句柄（deps 里不存在任何「主 client」通道，createLine 照常完成
+ * P-no-abort 的结构侧（M1-b）：btw 建线路径与主会话进程零耦合——
+ *  - 依赖范围构造性无主进程句柄（deps 里不存在任何「主 client」通道，createLine 照常完成
  *    ⇒ 主 turn 不可能被本路径打断）；
  *  - 主会话文件字节级不变（宿主只读交源给 pi fork 链路，零直写）；
  *  - 进程键从不使用主会话 id（不碰主进程的 ProcessManager 条目）。
@@ -37,7 +37,7 @@ afterEach(() => {
   vi.restoreAllMocks()
 })
 
-describe('P-no-abort 结构面：建线路径与主会话零耦合', () => {
+describe('P-no-abort 结构侧：建线路径与主会话零耦合', () => {
   it('deps 无主进程通道时 createLine 照常完成 + 主会话文件字节级不变', async () => {
     // 主会话 fixture（模拟主 turn 落盘中：含分支 + 悬空 tool-call）
     const mainFile = writeSessionFile(join(fx, 'main'), 'main.jsonl', {

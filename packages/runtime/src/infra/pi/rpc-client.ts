@@ -726,7 +726,7 @@ export class RpcClient implements IPiEngine {
         '',
       ].filter(Boolean).join('\n')
       writePiCrashLog(this.options.sessionId, `${header}${this.stderrChunks.join('\n')}`, context)
-      // D10：崩溃关联取证——①同步机器面 pi 快照（同秒连坐的幸存者视图）+ ②异步统一日志
+      // D10：崩溃关联取证——①同步的机器检查侧 pi 快照（同秒连坐的幸存者视图）+ ②异步统一日志
       // 关联采样（±5s 窗内的 Electron 退出 / 兄弟 pi 死亡 / launchd 信号，fire-and-forget
       // 完成后补写进同一 pi-crash log，append 语义）。两者内部均以 isPiCrashLogEnabled
       // 为门（无 sink 不采样），且全捕获不向上抛——观测增强不得影响 exit 主流程。
@@ -740,7 +740,7 @@ export class RpcClient implements IPiEngine {
   /**
    * 崩溃关联取证补写（crash-forensics-and-watchdog §3.3 D10，crash-correlation.ts）。
    *
-   * ①同步：机器面 pi 快照 section（~10ms，ps 枚举 taiji 家族幸存者 + ppid 归属）；
+   * ①同步：机器检查侧 pi 快照 section（~10ms，ps 枚举 taiji 家族幸存者 + ppid 归属）；
    * ②异步：统一日志关联采样（darwin-only，±5s 窗，log show 最多 10s）完成后追加写
    * 同一 pi-crash log——写点在本方法返回后数秒，靠 writePiCrashLog 的 append 语义与
    * createPiStreamWriter 惰性打开落盘（closeLogger 退出 flush 覆盖晚到的补写）。

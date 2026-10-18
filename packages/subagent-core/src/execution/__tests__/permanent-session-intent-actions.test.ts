@@ -370,7 +370,7 @@ describe("[U5] close 顺序约束：Continuation settle 分支 route（通知送
         order.push("finalize");
       },
       // [collect 退役] 原 routeRecord（collectCoordinator.route 成功通知路由）收敛为
-      // notifyComplete 直通面；isCollectMember 失败轮分流判据随批机制删除。
+      // notifyComplete 直通路径；isCollectMember 失败轮分流判据随批机制删除。
       notifyComplete: () => {
         order.push("route");
       },

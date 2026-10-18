@@ -28,7 +28,7 @@ export const ZCODE_CLI_DEFAULT_PATH = "/Applications/ZCode.app/Contents/Resource
 /**
  * 唯一凭据源 config（桌面端登录态，zsub V2_CONFIG_PATH 同构）。
  * 为什么绝不读 ~/.zcode/cli/config.json 作为引擎侧凭据校验源：它不在 ZCode GUI
- * 管理面，可能残留历史验证配置（2026-08-25 事故：8/24 zsub 开发残留把默认模型
+ * 管理侧，可能残留历史验证配置（2026-08-25 事故：8/24 zsub 开发残留把默认模型
  * 劫持到失效 router 端点，turn 0 即 401）；桌面端登录凭据落在 v2/config.json，
  * 是 zsub 生产验证过的凭据源。共享宿主 HOME 后引擎侧只读它做模型解析校验；
  * app-server 进程侧 CLI 只认 ~/.zcode/cli/config.json（GUI 从不写该文件），由

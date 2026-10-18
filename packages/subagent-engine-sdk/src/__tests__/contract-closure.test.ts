@@ -48,7 +48,7 @@ type _SelfAgentOutcome = AssertMutuallyAssignable<AgentOutcome, AgentOutcome>;
 type _SelfUiRequest = AssertMutuallyAssignable<UiRequest, UiRequest>;
 type _SelfUiResponse = AssertMutuallyAssignable<UiResponse, UiResponse>;
 type _SelfUiHandler = AssertMutuallyAssignable<UiRequestHandler, UiRequestHandler>;
-// AgentCallOpts 的引擎面子集 ↔ run.params.task（协议消费方向一致）
+// AgentCallOpts 的引擎侧子集 ↔ run.params.task（协议消费方向一致）
 type _SelfAgentCallOpts = AssertMutuallyAssignable<AgentCallOpts, RunParams["task"]>;
 
 // ── 3. 协议演进宪法机器锁（C3/C4/C2；权威源 docs/architecture/subagent-engine-protocolization.md
@@ -117,7 +117,7 @@ describe("类型闭包样板", () => {
     expect(probe).toBe(true);
   });
 
-  it("run.params.task 与 AgentCallOpts 同一类型范围（协议 task 载荷 = 引擎面子集）", () => {
+  it("run.params.task 与 AgentCallOpts 同一类型范围（协议 task 载荷 = 引擎侧子集）", () => {
     const same: _SelfAgentCallOpts = true;
     expect(same).toBe(true);
   });
@@ -137,7 +137,7 @@ describe("类型闭包样板", () => {
 // 不会在此爆红（带全字段的字面量对可选/必填两种声明都能编译），仅反向
 // optional→required（构造处缺字段）才红。可选项漂移的真正防线 = core 侧
 // AssertMutuallyAssignable 双向断言（可选性参与可赋值性判定，见 contract-types.ts
-// 断言助手注释）。本组测试的实际职责 = 构造面冒烟：必填缺失 / 多余字段在字面量
+// 断言助手注释）。本组测试的实际职责 = 构造侧冒烟：必填缺失 / 多余字段在字面量
 // 构造处编译爆红 + 关键必填值的运行时确认。
 describe("契约类型运行时形状冒烟（必填缺失/多余字段在构造处爆红；可选项漂移防线 = core 侧双向断言）", () => {
   it("EngineCapabilities 11 个能力位必填（gate 四类判据的类型范围）", () => {
@@ -191,7 +191,7 @@ describe("契约类型运行时形状冒烟（必填缺失/多余字段在构造
     expect(handle.sessionRef).toEqual({ sessionId: "s1", dbPath: "/tmp/db.sqlite" });
   });
 
-  it("AgentEvent 事件按词表全集可构造（构造面与 AGENT_EVENT_TYPE_NAMES 同源，漏构造/多余键编译期爆红）", () => {
+  it("AgentEvent 事件按词表全集可构造（构造侧与 AGENT_EVENT_TYPE_NAMES 同源，漏构造/多余键编译期爆红）", () => {
     const events: Record<AgentEventTypeName, AgentEvent> = {
       tool_start: { type: "tool_start", toolName: "bash", args: { cmd: "ls" } },
       tool_end: { type: "tool_end", toolName: "bash", result: { content: [] }, isError: false },

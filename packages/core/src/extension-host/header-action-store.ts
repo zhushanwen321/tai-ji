@@ -28,7 +28,7 @@ export interface HeaderActionEntry {
   updatedAt: number
 }
 
-/** set 的输入形状（plugin:headerActionUpdate payload 的运行时字段面，缺 headerActionId/sessionId 定位键）。 */
+/** set 的输入形状（plugin:headerActionUpdate payload 的运行时字段侧，缺 headerActionId/sessionId 定位键）。 */
 export interface HeaderActionSetInput {
   pluginId: string
   badge?: string

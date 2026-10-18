@@ -194,7 +194,7 @@ describe('ExtensionActions 启用开关乐观更新协议（MF-1-3）', () => {
 
 // ── 自动升级开关乐观更新（ExtensionDetail · runOptimisticUpdate 协议）──────────────
 //
-// 行为不变量（手写 try/catch 迁入协议后的同一编排面）：
+// 行为不变量（手写 try/catch 迁入协议后的同一编排侧）：
 //  A1 apply 乐观写：点开关 → store 对应项 autoUpgrade 立即翻转（setExtensionAutoUpgrade 返回旧值）
 //  A2 commit 持久化：transport.setExtensionAutoUpgrade(name, enabled) 被调
 //  A3 失败回滚 + 就近显错：commit reject → store 回滚旧值 + error ref 显示 e.message

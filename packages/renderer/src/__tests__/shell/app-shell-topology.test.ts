@@ -14,8 +14,8 @@
  *    （零变化面）+ 不渲染条带（mac 拖拽由系统提供）
  *
  * Mock 策略（沿用 sidebar-layout / session-status-icons 既有模式，避免全局副作用）：
- *  - useSettingsShell 置空（AppShell 壳副作用，非拓扑被测面）
- *  - SettingsModal / Workspace / Sidebar stub（重组件依赖树，非拓扑被测面）
+ *  - useSettingsShell 置空（AppShell 壳副作用，非拓扑被测对象）
+ *  - SettingsModal / Workspace / Sidebar stub（重组件依赖树，非拓扑被测对象）
  *  - useSidebar stub（AppShell 仅消费 syncSessionToPanel）
  *  - 其余（AsideRegion / AppNavControls / TrafficLight / MainPanel + stores）走真实实现
  *

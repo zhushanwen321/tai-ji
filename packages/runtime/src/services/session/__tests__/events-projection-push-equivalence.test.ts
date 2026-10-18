@@ -229,7 +229,7 @@ describe('断连收敛（pi 进程死亡 → 重开 session → 冷读收敛）'
       const recovered = reopened.workflows.get('wf-1')
       reopened.dispose()
 
-      // 收敛终态 = 纯冷读终态（journal 是事实源；推送丢失面被恢复读覆盖）
+      // 收敛终态 = 纯冷读终态（journal 是事实源；推送丢失风险被恢复读覆盖）
       const cold = makeProjection(world)
       cold.applyEntryBatch([workflowRegisteredEntry])
       cold.attach()

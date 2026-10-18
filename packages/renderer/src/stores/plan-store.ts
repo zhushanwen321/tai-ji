@@ -131,7 +131,7 @@ export function derivePlanStage(view: PlanStateView | null): PlanStage | null {
  * - `revising ⇔ state=revising`（无挂起、无压制）
  * - `degraded ⇔ state=reviewing ∧ 无挂起 ∧ 组合评估放行`（帧到达即时评估——[ADR-0112]
  *   2s 稳定窗已删，双源派生视图时延差的假阳性闪现显式接受，不用时间平抑）
- * - state=dispatching/approved 不进审批条（执行方式表单是其唯一交互面）；其余不渲染
+ * - state=dispatching/approved 不进审批条（执行方式表单是其唯一交互入口）；其余不渲染
  */
 export interface PlanReviewBarModeInput {
   isActive: boolean
@@ -239,7 +239,7 @@ function clearDraftsOnPlanEnter(p: PlanPartition, next: PlanStateView | null): v
 }
 
 /**
- * D8 重新提交审批的检测窗相位机 action 组（模块级工厂，控 store setup 行数；依赖面收窄为
+ * D8 重新提交审批的检测窗相位机 action 组（模块级工厂，控 store setup 行数；依赖范围收窄为
  * updateFor 单方法的结构形态——D8 全部 action 只写「事件所属 sid」分区，不读焦点实时值，
  * AGENTS.md 规则 8）。相位机 PlanReviewNudgePhase（idle → armed → watching → idle）：
  * 开窗时机挂在 nudge 轮自身的 message_start，而非 send resolve——session 忙时 busy 预检

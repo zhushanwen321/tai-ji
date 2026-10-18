@@ -3,7 +3,7 @@
  *
  * 该库是 docs/testing/render-sampling.md 登记的复用管道资产（禁现场重写），
  * 判定逻辑出错形态全部是静默产物污染（发送通道判定漂移 / 假稳定误判 /
- * 窄窗验收尺寸算错无报错），故对判定面直接锁定：浏览器侧采集函数用 jsdom
+ * 窄窗验收尺寸算错无报错），故对判定逻辑直接锁定：浏览器侧采集函数用 jsdom
  * 直测同一函数体（page.evaluate 序列化后跑的就是它，见 decisions.mjs 头注），
  * 纯数据函数直测，lib.mjs 的通道决策与判稳轮询编排用 fake page / fake timers
  * 锁「抽取后保持接线」。
@@ -26,7 +26,7 @@ const doc = (html) => new JSDOM(`<!doctype html><html><body>${html}</body></html
 
 // ---------- probeSendButton：发送按钮 DOM 探测 ----------
 
-describe('probeSendButton 命中面', () => {
+describe('probeSendButton 命中路径', () => {
   it('data-testid 命中 send：返回 sig 并真实 click 按钮', () => {
     const d = doc(`
       <div class="composer-wrap">
@@ -77,7 +77,7 @@ describe('probeSendButton 命中面', () => {
   })
 })
 
-describe('probeSendButton 不命中面（lib fallback Enter）', () => {
+describe('probeSendButton 不命中路径（lib fallback Enter）', () => {
   it('全部按钮 disabled：跳过禁用项返回 null', () => {
     const d = doc(`
       <div><div class="composer-input" contenteditable="true"></div>

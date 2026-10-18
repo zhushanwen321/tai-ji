@@ -3,7 +3,7 @@
 // [u-svc / T2] 服务侧回收上界与 kill 收敛：
 //   - T2④/LC-2：closeChatIdle / cancelBackground 终止路径收敛到
 //     killRecordChildWithEscalation（spy 断言调用点与参数）；
-//   - T2⑥/PS-1：disposeAllRecords 补回收面（controller.abort + kill + disarm idle timer）；
+//   - T2⑥/PS-1：disposeAllRecords 补回收侧（controller.abort + kill + disarm idle timer）；
 //
 // [W3 改写 → H1 U6] 替身 = 协议 seam（registerFakePiEngine）。[H1 U6] interact 断言
 //（cancel/close 终止意图受理）随 interact 面退役删除：真实杀链 = 轮级 abort signal →
@@ -164,13 +164,13 @@ describe("T2④ service-side kill convergence", () => {
     const count = service.disposeAllRecords("parent-new");
 
     expect(count).toBe(2);
-    // 回收面 i：controller.abort
+    // 回收侧 i：controller.abort
     expect(running.controller?.signal.aborted).toBe(true);
     expect(idle.controller?.signal.aborted).toBe(true);
-    // 回收面 ii：kill 收敛到 escalation 入口
+    // 回收侧 ii：kill 收敛到 escalation 入口
     expect(killChildSpy).toHaveBeenCalledWith(running.id, "disposeAllRecords (parent-new)");
     expect(killChildSpy).toHaveBeenCalledWith(idle.id, "disposeAllRecords (parent-new)");
-    // 回收面 iii：idle timer disarm
+    // 回收侧 iii：idle timer disarm
     expect(hasIdleTimer(idle.id)).toBe(false);
     // [U5] 编排性关闭：settle idle + interrupted-by-parent + 收尾写入 journal 记录（不终态化
     // ——closedReason 恒 undefined，stopReason 承载展示位）；在途轮置放弃轮标记。

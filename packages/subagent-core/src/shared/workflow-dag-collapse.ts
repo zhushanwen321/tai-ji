@@ -17,7 +17,7 @@
  */
 import type { WorkflowDag, WorkflowDagEdge, WorkflowDagNode } from "./workflow-dag-parser.ts";
 
-/** 分组/去重键分隔符（节点 id 与模板名不含 \u0000，无碰撞面）。 */
+/** 分组/去重键分隔符（节点 id 与模板名不含 \u0000，无碰撞风险）。 */
 const KEY_SEP = "\u0000";
 
 /** 前向边同 (from,to) 收敛优先级（dataflow 最信息密集，与解析器 dedupeEdges 同词表同值——loop-back 键仅为词表完整性，不参与收敛）。 */

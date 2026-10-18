@@ -207,13 +207,13 @@ describe('CLI 集成（检查脚本 × tmp mirror）', () => {
     }
   })
 
-  it('漂移红（净化层缺 ALLOW_ARIA_ATTR=false → 任意 aria-* 越过声明面）→ exit 1（属性面完备性锚点）', () => {
+  it('漂移红（净化层缺 ALLOW_ARIA_ATTR=false → 任意 aria-* 越过声明范围）→ exit 1（属性完备性锚点）', () => {
     const fx = makeMirror({ allowAria: false })
     try {
       const r = fx.run()
       expect(r.status).toBe(1)
       expect(r.stderr).toContain('未显式 ALLOW_ARIA_ATTR: false')
-      expect(r.stderr).toContain('声明清单 ≠ 有效放行面')
+      expect(r.stderr).toContain('声明清单 ≠ 有效放行范围')
     } finally {
       fx.cleanup()
     }

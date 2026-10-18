@@ -46,7 +46,7 @@ export interface SettingsHandlerContext extends MessageHandlerContext {
   configService: IConfigService
   sessionService: ISessionService
   /**
-   * modelService（IModelService）。测试连接的 per-model 编排面（M3a：
+   * modelService（IModelService）。测试连接的 per-model 编排侧（M3a：
    * ProviderConnectionTestService.testProviderConnections）是可选交集——组合根注入的
    * ModelService 实现类具备该方法，测试替身可缺省（handler 走 test_unavailable 防御分支）。
    */

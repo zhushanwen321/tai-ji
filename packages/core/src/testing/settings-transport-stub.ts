@@ -31,7 +31,7 @@ function makeUnsubscribeStub() {
   return vi.fn((): () => void => () => {})
 }
 
-/** SettingsTransport 的订阅方法面（键集漂移由下方 Pick 标注报错——改名/删键即编译红）。 */
+/** SettingsTransport 的订阅方法侧（键集漂移由下方 Pick 标注报错——改名/删键即编译红）。 */
 export type SettingsSubscriptionStubs = Pick<
   SettingsTransport,
   | 'onProviders' | 'onModels' | 'onSkills' | 'onAgents' | 'onExtensions'
@@ -41,7 +41,7 @@ export type SettingsSubscriptionStubs = Pick<
 >
 
 /**
- * 订阅段全量桩（单源导出）：SettingsTransport 订阅方法面一键取齐，每次调用产出全新
+ * 订阅段全量桩（单源导出）：SettingsTransport 订阅方法侧一键取齐，每次调用产出全新
  * vi.fn 实例（无跨用例状态残留）。
  *
  * renderer/ui 侧 mock 需要同形状订阅段时 spread 本函数返回值

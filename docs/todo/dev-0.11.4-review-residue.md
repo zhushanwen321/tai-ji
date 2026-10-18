@@ -22,7 +22,7 @@ fix-tool-group-style 分支（drawer subagent 二级 tab / dispatch model-source
 | S-9 | `shared/src/subagent.ts:756` 注释 | 注释称与 subagent-core 本地类型副本「逐字段等值」但未给副本路径，双侧同步无机器检查 | 补双侧字面量对拍单测 + 副本路径 |
 | S-11 | 注释漂移族：`core/transport/api/domains/file.ts:18` + `runtime/services/file-service.ts:92`（showIgnored 已退役）/ `TurnSummary.test.ts:166` / `fork-entry-behavior.test.ts` | 注释与现行事实不符（共 4 处） | 按现行事实改写 |
 | S-12 | Panel.vue composer band / Block.vue actions 行 / TruncatedHistoryBar pill | 几何变更落在 e2e-visual 像素基线射程内（提醒，非缺陷） | CI PR 期 L1 固定环节自动跑 e2e-visual；红则按基线重录流程处置 |
-| N-1 | `useSubagentDrawerTabs.ts` + `core/domain/drawer/selection/subagent.ts` | clearSubagentSelection 清 current 分区而其余读写以 focusedSid 为键，依赖「current == focused」隐式不变量，接口面未声明 | 加可选 sid 参数走 updateFor(sid)，或注释声明前提 |
+| N-1 | `useSubagentDrawerTabs.ts` + `core/domain/drawer/selection/subagent.ts` | clearSubagentSelection 清 current 分区而其余读写以 focusedSid 为键，依赖「current == focused」隐式不变量，接口侧未声明 | 加可选 sid 参数走 updateFor(sid)，或注释声明前提 |
 
 ## 已修复（终态存档）
 

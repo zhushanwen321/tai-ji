@@ -119,7 +119,7 @@ describe("canonical JSON 工具 — schema 哈希稳定（场景 13）", () => {
 
   it("schema 模式调用形态的往返稳定（prompt + schema 组合的哈希一致）", () => {
     // 同一脚本重跑：schema 对象字面量构造序一致；经 IPC 往返后的键序漂移被
-    // canonical 形态消除——场景 13 的「零误报 mismatch」机制面
+    // canonical 形态消除——场景 13 的「零误报 mismatch」机制部分
     const callA = { prompt: "extract", schema: { properties: { title: { type: "string" } }, type: "object" } };
     const callB = { prompt: "extract", schema: { type: "object", properties: { title: { type: "string" } } } };
     expect(canonicalJsonHash(callA)).toBe(canonicalJsonHash(callB));
@@ -220,7 +220,7 @@ describe("pump replay 校验增强 — cached 命中的输入一致性", () => {
   });
 
   it("rebuild 恢复 opts 形态（agent-started input 载荷 parse 往返）→ 比对可比：一致命中回话、漂移检出", async () => {
-    // [U13] 机制面：dispatchAgentStarted 落 canonical 序列化入参全文（resolved
+    // [U13] 机制部分：dispatchAgentStarted 落 canonical 序列化入参全文（resolved
     // 形态——schema 已注入 appendSystemPrompt），rebuild 经 JSON.parse 恢复 opts
     // ——与本次消息 opts 走同一 resolveAgentOpts + canonical 哈希比对，形态对称
     // 成立（一致 → 回话；漂移 → mismatch 终局，不再结构性跳过）。

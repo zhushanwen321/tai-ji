@@ -125,7 +125,7 @@ export default [
       'packages/runtime/src/infra/pi/event-adapter.ts',
       'packages/runtime/src/services/extension-service.ts',
       // [HISTORICAL] core chat 域编排聚合点（createUseChat factory + 全部 stream 回调
-      // 分支 helper——message.* 处理序的唯一编排面，2026-09-07 簇 A1 defer flush 重投
+      // 分支 helper——message.* 处理序的唯一编排处，2026-09-07 簇 A1 defer flush 重投
       // 机制入列时统计行越过 500）。职责内聚，拆分 = stream 回调按帧族重组，属独立
       // 重构任务。短期 max-lines override 避免阻塞，长期应拆分。
       'packages/core/src/domain/chat/useChat.ts',
@@ -312,7 +312,7 @@ export default [
   // 边界登记：manifest 写点是 ManifestStore 实例方法（writeManifest）——import 层
   // 拦不住（装配点构造合法），该面由 grep 门 R1 兜底；writeRecordBinding /
   // updateRecordBinding（UF-1 绑定 sidecar）不在 record 终态写点收敛范围，不拦。
-  // barrel（packages/subagent-core/src/index.ts）零导出本组写函数，公开面不外泄。
+  // barrel（packages/subagent-core/src/index.ts）零导出本组写函数，对外公开的符号不外泄。
   {
     files: ['packages/subagent-core/src/**/*.ts'],
     ignores: [
@@ -554,7 +554,7 @@ export default [
   // [vitest 红线机器化，review-pipeline-redesign 决策 4] 全仓（core src 除外）node:test
   // import 拦截。与上方 core 块同规则 ID 但生效域不相交（ignores 让位），flat config 覆盖
   // 语义下互不拆除。本块对 *.test.*/*.spec.*/__tests__ 测试文件不可达（全局 ignores 硬排除），
-  // 测试文件面由 pre-commit grep 段承载（设计 v10）。tsx --test 是 CLI 形态
+  // 测试文件范围由 pre-commit grep 段承载（设计 v10）。tsx --test 是 CLI 形态
   // 无 import specifier，不进 lint 拦截范围（由 docs/TEST-STRATEGY.md vitest 红线承载）。
   // [no-unsafe-cast 扩展评估（决策 4 as 断言范围）2026-09-26] renderer/runtime 不扩展该规则——
   // 实测存量命中 143 处/75 文件，且前端 ESLint 为 --max-warnings=0 口径（warn 级也阻断），
@@ -604,7 +604,7 @@ export default [
     },
   },
   // [HISTORICAL] subagent-core 源码禁裸 console（恢复迁移前 extensions/**/src 的等价
-  // 约束面）：@zhushanwen/subagent-core 由 extensions/universal/subagent-workflow 的
+  // 约束）：@zhushanwen/subagent-core 由 extensions/universal/subagent-workflow 的
   // core 切面抽离（u1-move），迁移前该源码受上方 extensions no-console:error 块约束，
   // 抽离后 extensions glob 不再命中——本块恢复同强度约束，防裸 console 渗入跨宿主
   // 共享层。范围同样限 src 源码：__tests__/ 与 *.test.ts 属测试基建（spyOn /
@@ -696,7 +696,7 @@ export default [
     },
   },
   // [H4 record 持久化收敛] record-store 三轴拆分（2026-09-13 落地）：store 保留容器 +
-  // 意图原语立面 + 有状态扫描（原 1450 提额过渡废止，现折算 677 → max 800 余量）；
+  // 意图原语的对外接口 + 有状态扫描（原 1450 提额过渡废止，现折算 677 → max 800 余量）；
   // 终态原语轴（record-store-terminal.ts，折算 275）与轮次簿记轴
   // （record-store-rounds.ts，折算 101）在 500 基线内不设 override；重建与派生视图轴
   // （record-store-rebuild.ts，折算 539）超 500 基线——纯派生视图/重建规则聚合（buildRecord
@@ -928,7 +928,7 @@ export default [
   },
 
   // [2026-09-27 W2 L0] worker-message-pump：run 终局 coda 单写点 + worker 消息路由 +
-  // 事件状态机接线的聚合点（finalizeRun 五步序的唯一编排面），1244 > 1240 微超
+  // 事件状态机接线的聚合点（finalizeRun 五步序的唯一编排处），1244 > 1240 微超
   // （先例：pi-provider-store「微超即提额，保留软上限告警」同型；8 个模块级常量已
   // 提取至 worker-message-pump-constants.ts，再拆属独立重构）。
   // [2026-09-27 W2/V1 D1] 终局统一落地复测：终局记录原语 settleRunAccounting +

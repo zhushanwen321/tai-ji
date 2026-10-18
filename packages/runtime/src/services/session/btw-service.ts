@@ -154,7 +154,7 @@ export interface BtwCreateResult {
 }
 
 /**
- * 线进程 spawn options 的最小结构面（runtime-layering C-comm-02 / check_pi_type_leak：
+ * 线进程 spawn options 的最小结构侧（runtime-layering C-comm-02 / check_pi_type_leak：
  * PiXxx 类型只许 infra/pi 内部——本服务只消费以下三键，故本地定义、不 import
  * ports 面 PiXxx 类型）。组合根 buildLineSpawnOptions 返回的 ports 面完整类型
  * 结构性满足本接口（多余字段协变放行），消费出口 = deps.processes.createSession
@@ -296,7 +296,7 @@ export class BtwService {
     return this.registry.get(vid)
   }
 
-  /** 线列表枚举（btw.list{mainSid} 后端；BtwPanel 消费，不属于禁止的关联展示面——D4）。 */
+  /** 线列表枚举（btw.list{mainSid} 后端；BtwPanel 消费，不属于禁止的关联展示侧——D4）。 */
   listLines(mainSid: string): BtwLineRecord[] {
     const out: BtwLineRecord[] = []
     for (const rec of this.registry.values()) {
@@ -417,7 +417,7 @@ export class BtwService {
    * 创建 btw 线：源检查 →（分支①）pi 原生 fork 或（分支②）回落无 fork 新建 →
    * 惰性 spawn 线进程 → 附着/读回 → registerSession(hidden:true) → 注册表登记。
    *
-   * 全程零触碰主会话进程与主会话文件（P-no-abort 结构面：主 turn 不可能被本路径
+   * 全程零触碰主会话进程与主会话文件（P-no-abort 结构侧：主 turn 不可能被本路径
    * 打断——真机断言归 S7 真实进程轨）；零直写线会话文件（fork 文件由 pi 写、
    * 回落文件由 pi 首 flush 自建）。
    *
@@ -596,7 +596,7 @@ export class BtwService {
    * delete 对 btw vid 直删、主删级联 closeAllForMain 逐线转调，均落本方法）：
    * 杀进程（派生 subagent/workflow 任务随 pi 进程亡——abort 幂等由 pm.destroySession
    * 「Map 无条目静默跳过」保证）+ 注册表移除 +（可选）删线会话文件（路径限定 btw 根内，
-   * 防误删面）。未知线/并发双删返 false（调用方映射 line_not_found，幂等语义：
+   * 防误删风险）。未知线/并发双删返 false（调用方映射 line_not_found，幂等语义：
    * 线已不在即视为删成）。**失效路径（闲置回收/进程亡）不走本方法**——不清注册表、
    * 不删文件、不清派生键（线可重开，D9④）。
    */

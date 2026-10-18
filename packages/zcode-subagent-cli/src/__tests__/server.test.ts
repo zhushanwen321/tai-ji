@@ -116,7 +116,7 @@ function makeEngine(overrides: Partial<EnginePort> = {}): EnginePort {
   return { ...base, ...overrides };
 }
 
-/** 组合一个 server（缺省 clock 记录面 + 内存 sink），返回全部观测点。 */
+/** 组合一个 server（缺省 clock 记录侧 + 内存 sink），返回全部观测点。 */
 function makeServer(engine = makeEngine(), reverseTimeoutMs?: number) {
   const sink = makeSink();
   const clockCalls: Array<{ op: string; id: string }> = [];
@@ -260,7 +260,7 @@ describe("methodHandlers 表驱动路由（逐方法 → EnginePort 成员）", 
     expect(resp.error?.code).toBe("engine_protocol_not_initialized");
   });
 
-  it("listModels：引擎有枚举面 → {models}；未实现 → {models:null}", async () => {
+  it("listModels：引擎有枚举 → {models}；未实现 → {models:null}", async () => {
     const engine = makeEngine();
     const { server, sink } = makeServer(engine);
     const r1 = await request(server, sink, 1, "listModels", {});

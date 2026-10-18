@@ -138,7 +138,7 @@ export function createConnectionProfilePort(
       }
       // 皆无：不带凭据发起（E2 通路——runtime fail-closed 拒绝 → onAuthRejected →
       // handleAuthFailure → onTokenInputRequired）。不在此直接切视图：凭据缺失与其他验身
-      // 失败同出口，连接发起面保持无异常路径。
+      // 失败同出口，连接发起侧保持无异常路径。
       return { url: wsUrlFromHost(deps.host, deps.protocol) }
     },
 

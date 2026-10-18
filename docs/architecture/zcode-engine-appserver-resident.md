@@ -18,7 +18,7 @@
 > D7（常驻 HOME）章节随之**作废**。已接受代价：GUI 会话列表可见 headless 会话（**已由 2026-09
 > 会话库隔离撤销**——写侧改落独立库后不再可见，见下方修订块）；登录态
 > 轮换后常驻连接需引擎进程重启才用新凭据（凭据内容 hash 刷新机制删除）；zcode 升级
-> schema migration 竞争无契约担保。新漂移面：zcode 升级若改变配置读取路径/方式，失败信号
+> schema migration 竞争无契约担保。新漂移风险：zcode 升级若改变配置读取路径/方式，失败信号
 > 为 missing baseURL / Model config is missing 明确报错（不静默坏）。收益：HOME 依赖副作用
 > （pnpm store 随 HOME 翻转等）根治；锁/pidfile/孤儿回收/派生目录整章复杂度删除。journal
 > 固定落 `engines/zcode/shared/`（[池抽象降级 2026-09-13] poolKey 协议范围已整体退役——原
@@ -210,7 +210,7 @@ task ─┘                    │ ① session/create {workspace, mode, model, .
 - 常驻进程**不进** `spawnedChildren: Map<recordId, ChildProcess>`（避免 per-record 重复注册/重复 SIGTERM/单任务 abort 误杀全局）；其生命周期完全归引擎 dispose。`onChildSpawned` 对常驻连接不调用（port.ts:88-90 已明文允许「引擎内部不 spawn 进程时不调用」——常驻进程归引擎所有，同理不逐任务注册；契约文案随实施补充一句）。
 - 不采用：EnginePort 加必选 dispose（breaking，pi 引擎等所有实现被迫补方法——用可选方法保持向后兼容）；常驻进程注册进 per-record Map（盘点已证语义冲突）。
 - 证据：盘点 §2.3 硬缺口；zsw 壳现役 shutdown 链（runner-core.js → markAllSpawnedChildrenDead）零改动验证（A7 场景）。
-- **子决策①（签名与等待策略）**：dispose 双面——同步范围：`markAllSpawnedChildrenDead` 在返回前**先 fire 全部 `session/close` 帧、后同步发出 SIGTERM**（`child.kill()` 为同步系统调用，顺序规定避免 SIGTERM 先发致 close 帧必丢；close 帧不等待应答），保证「调用返回时终止信号已发出」；异步面：`dispose?(): Promise<void>` 走完整序列（close → SIGTERM → grace → SIGKILL）。**异步面的现役消费方为空**——pi 壳 `SubagentService.dispose(): void` 同步（subagent-service.ts:525），zsw `CoreRunner.shutdown()` 虽 async 但不 await markAllSpawnedChildrenDead（runner-core.js:383-388），且两者均受 G4 禁改；grace→SIGKILL 兜底仅在宿主进程存活时生效（zsw daemon shutdown 后若进程继续存活数秒则 grace 链生效，否则仅同步 SIGTERM 面）——此边界如实声明，异步面供未来宿主/测试消费（A7 判据按此口径）。
+- **子决策①（签名与等待策略）**：dispose 双面——同步范围：`markAllSpawnedChildrenDead` 在返回前**先 fire 全部 `session/close` 帧、后同步发出 SIGTERM**（`child.kill()` 为同步系统调用，顺序规定避免 SIGTERM 先发致 close 帧必丢；close 帧不等待应答），保证「调用返回时终止信号已发出」；异步侧：`dispose?(): Promise<void>` 走完整序列（close → SIGTERM → grace → SIGKILL）。**异步侧的现役消费方为空**——pi 壳 `SubagentService.dispose(): void` 同步（subagent-service.ts:525），zsw `CoreRunner.shutdown()` 虽 async 但不 await markAllSpawnedChildrenDead（runner-core.js:383-388），且两者均受 G4 禁改；grace→SIGKILL 兜底仅在宿主进程存活时生效（zsw daemon shutdown 后若进程继续存活数秒则 grace 链生效，否则仅同步 SIGTERM 面）——此边界如实声明，异步侧供未来宿主/测试消费（A7 判据按此口径）。
 - **子决策②（dispose 触发粒度与 pi 壳收益边界）**：pi 壳的 dispose 挂在 session_shutdown（每 session 关闭触发，subagent-service.ts:521-536）——即常驻进程随 session 结束回收。接受该边界：**G1 在 taiji 侧的收益面 = session 生命周期内多任务零冷启动**（每 session 一次进程冷启动，摊薄到 session 内任务数）；zsw daemon 生命周期长，收益完整。不采用：跨 session idle 保活常驻进程——违背 dispose = 防泄漏语义，且 pi 壳在 G4 约束下无法感知进程归属，保活即泄漏面。
 - **子决策③（孤儿自愈）——已作废（2026-09 breaking）**：pidfile / HOME 目录锁机制随 D7 HOME 池化删除（appserver-home.ts 整文件删除），HOME 共享后无池目录派生与孤儿回收问题。原文 git 可追溯。
 
@@ -259,11 +259,11 @@ task ─┘                    │ ① session/create {workspace, mode, model, .
 |---|------|------|---------|------|
 | A1 | zsw 多任务零冷启动 | 真机 `zsw run` 一个 map-reduce（主任务 + 3 subagent），对比改造前同 workflow | 第 2-4 个 subagent 任务无进程启动段（record 耗时显著低于首任务；`ps` 全程只见 1 个 app-server 进程，**探针窗口的独立短命连接除外**）；结果与改造前等价 | G1 |
 | A2 | stream 事件流出 + 快照一致性 | ①zsw 真机跑 workflow，观察终端 live 输出实时刷新；②taiji dev 起 zcode 引擎 subagent，任务运行中打开详情页、任务中途重开 session | ①workflow live 输出随任务运行实时出现（非终态一次性）；②详情页打开可见当时进度快照，重开后渲染与 live 一致（①级 sqlite / ②级 journal 无论哪级命中，内容一致） | G2 |
-| A3 | per-session model | 同进程上并发两任务：任务 A 与任务 B 各指定不同模型（如 `model: <model-a>` / `model: <model-b>`） | 两任务各自成功、响应面无串线（sessionId/usage 各归各）；record 各自留痕正确 model | G3 |
+| A3 | per-session model | 同进程上并发两任务：任务 A 与任务 B 各指定不同模型（如 `model: <model-a>` / `model: <model-b>`） | 两任务各自成功、响应侧无串线（sessionId/usage 各归各）；record 各自留痕正确 model | G3 |
 | A4 | abort 不连坐 | 两任务并发在途，取消其一 | 被取消任务终态 exitCode=null；另一任务正常完成不受影响（session/stop 只作用于目标会话） | G1/G3 |
 | A5 | 漂移降级 + 重探重建——**已作废**（2026-09 breaking：降级链与探针随 spawn 通道删除，协议漂移直接报错） | — | — | — |
 | A6 | 崩溃重建 | 任务运行中 `kill -9` 常驻进程 | 在途任务失败（错误含 stderr 尾）；紧接的下一任务自动重建进程并成功 | G1 |
-| A7 | 无孤儿进程（三种退出形态） | ①zsw daemon 正常退出（现役 shutdown 链零改动——异步面现役消费方为空，实际生效的是同步 SIGTERM 面，见 D6①）；②宿主 SIGKILL 后重启宿主，**跑一个 zcode 任务（或触发 probe）后再 ps**（引擎惰性实例化，回收挂在引擎初始化而非宿主启动，见 D6③）；③pi 壳 session 关闭触发同步 dispose | ①②每次之后 `ps` 无残留 `app-server` 进程——②的判据为**重启并触发引擎初始化后完成 stale 回收**（pidfile 机制）；③SIGTERM 已随 dispose 同步发出、session 内无泄漏（grace→SIGKILL 兜底边界见 D6 子决策①） | G4 |
+| A7 | 无孤儿进程（三种退出形态） | ①zsw daemon 正常退出（现役 shutdown 链零改动——异步侧现役消费方为空，实际生效的是同步 SIGTERM 面，见 D6①）；②宿主 SIGKILL 后重启宿主，**跑一个 zcode 任务（或触发 probe）后再 ps**（引擎惰性实例化，回收挂在引擎初始化而非宿主启动，见 D6③）；③pi 壳 session 关闭触发同步 dispose | ①②每次之后 `ps` 无残留 `app-server` 进程——②的判据为**重启并触发引擎初始化后完成 stale 回收**（pidfile 机制）；③SIGTERM 已随 dispose 同步发出、session 内无泄漏（grace→SIGKILL 兜底边界见 D6 子决策①） | G4 |
 | A8 | conformance 全绿 | 跑 engine conformance 套件（真机 gate）+ zcode 单测族迁移后全量 | C1-C8 适配后全绿；golden 帧序列语料 diff 通过；pi 引擎测试零改动零回归 | G4/G5 |
 | A9 | 宿主零改动验证 | zsw 仓与 pi 壳**自有代码**不改（vendor 刷新除外——zsw 经 vendored 副本消费 core，`lib/vendor/subagent-core/` 刷新属依赖升级载体不算改动；pi 壳 workspace 引用同理走 core 版本 bump），重跑 A1 | zsw 壳 runner-core.js 等自有源码 diff 为空、vendor 目录刷新除外，功能全部成立；待 npm 自包含 bundle 通道就绪后以真依赖升级复验一次 | G4 |
 
@@ -287,9 +287,9 @@ A1/A2/A3/A4/A6/A7 为必过门（真机）；A5 的 ①为回归门、②③为�
 3. zsw 仓决策记录：状态从「待实施」更新为实施进度（跨仓 PR 同步）。
 4. `.taiji-harness/subagent-engine-abstraction/decisions.md` D-010：追加 revisit 行（终态决策时间与出处），不改写原决策记录。
 
-**版本与排序**：core 当前待发 0.3.0（host-surface，changeset 已备）。本设计落 **core 0.4.0**（capabilities 声明变化 = 消费方可见语义变化，minor）。与 convergence 设计（原计划 0.4.0，W1-W9）的先后排序是**用户决策点**：本设计与 convergence 正交（决策记录 §5 已论证），推荐本设计先行（用户当前优先级），convergence 顺延 0.5.0；两设计无文件级冲突面（convergence 不动引擎）。
+**版本与排序**：core 当前待发 0.3.0（host-surface，changeset 已备）。本设计落 **core 0.4.0**（capabilities 声明变化 = 消费方可见语义变化，minor）。与 convergence 设计（原计划 0.4.0，W1-W9）的先后排序是**用户决策点**：本设计与 convergence 正交（决策记录 §5 已论证），推荐本设计先行（用户当前优先级），convergence 顺延 0.5.0；两设计无文件级冲突风险（convergence 不动引擎）。
 
-**待验证检查点（实施期，R1-R6 落地后 2026-08-31 回填）**：①`--surface` / `--stdio` 矩阵（D10）——**已定案基线不带 flag**（connection.ts 落地，旧 runner 不带实测可用的依据），三态矩阵留待跨仓真机段补验；②stream.chunk 帧是否偶发携带文本字段——实现已做宽容双形态兜底（session-channel 推送泵对带文本的 stream.chunk 一并消费），真机实录待跨仓段替换合成语料；③`-32022` 当前版本错误码——未确认，实现按「连接 onClose + 全部在途 reject」形态处理（与错误码无关），真机待验；④`session/read` 的 `step-finish` tokens 结构——实现按宽容解析（usage 权威取收尾帧，read step-finish 仅兜底，字段缺席不抛）；⑤**GUI ①级锚定**——实现面已落（poolKey 静态常量 + 派生目录记实际名 + read 侧 resolvePoolDir 重定位；live 用例已写入 zcode-engine.live.test），真机验证（RA2-②）属跨仓验收段。
+**待验证检查点（实施期，R1-R6 落地后 2026-08-31 回填）**：①`--surface` / `--stdio` 矩阵（D10）——**已定案基线不带 flag**（connection.ts 落地，旧 runner 不带实测可用的依据），三态矩阵留待跨仓真机段补验；②stream.chunk 帧是否偶发携带文本字段——实现已做宽容双形态兜底（session-channel 推送泵对带文本的 stream.chunk 一并消费），真机实录待跨仓段替换合成语料；③`-32022` 当前版本错误码——未确认，实现按「连接 onClose + 全部在途 reject」形态处理（与错误码无关），真机待验；④`session/read` 的 `step-finish` tokens 结构——实现按宽容解析（usage 权威取收尾帧，read step-finish 仅兜底，字段缺席不抛）；⑤**GUI ①级锚定**——实现侧已落（poolKey 静态常量 + 派生目录记实际名 + read 侧 resolvePoolDir 重定位；live 用例已写入 zcode-engine.live.test），真机验证（RA2-②）属跨仓验收段。
 
 ---
 

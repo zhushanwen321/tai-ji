@@ -311,7 +311,7 @@ import { createLazyChunkRetry } from '@/components/ui/lazy-chunk-retry'
 // （xterm 移出首屏初始请求集合）；WorkflowTab（抽屉 workflow 回落内容）同为懒加载挂载点
 // ——它同时是浮层装载失败的回落目标（display-containers §5.3），回落目标自身的 chunk 也
 // 可能失败（file:// chunk 404），必须挂同一 AsyncErrorFallback 占位链才有「回落目标失败 →
-// 占位」的呈现面。其余条件挂载面板（GitPanel/CommandDocPanel/SubagentTab）不拆：
+// 占位」的呈现侧。其余条件挂载面板（GitPanel/CommandDocPanel/SubagentTab）不拆：
 // 均无重第三方依赖（重依赖判据不满足），拆分只引入 async 边界无字节收益。
 // 错误兜底（§3.5 · D6 2026-10-03 用户裁决改版）：界面无重试按钮——装载失败由内部有界自动
 // 重试承接（createLazyChunkRetry：3 次 × 300ms 递增退避，失败 URL 提取 + ?t=N cache-busting

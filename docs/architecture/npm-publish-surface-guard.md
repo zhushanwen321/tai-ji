@@ -17,7 +17,7 @@
 
 **npm files 语义最小例子**：包 A 的 `package.json` 声明 `files: ["src/", "dist/"]`。执行 `npm pack` / `npm publish` 时只有匹配白名单的文件进 tarball。关键静默面：若磁盘上 `dist/` 目录不存在（没跑构建），npm **不报错、不警告**，直接打包一个没有 dist 的 tarball——发布者以为承诺了什么和 tarball 里实际有什么，中间隔着一层零反馈的静默。
 
-**发布范围全景**（终态发布范围 32 包 = pnpm workspace 内非 private 且未被 changeset ignore 的 31 包——u4/D6 将 deprecated 的 pi-unified-hooks 加入 changeset ignore 落地后的口径（此前 29 + statusline = 30；2026-09 ext-simplify-01 删包后 ignore 条目已移除；该包删前被 ignore 排除、删后不在磁盘，31 包计数不变）+ statusline 特例 + W5/W7 引擎三包（subagent-engine-sdk / pi-subagent-cli / zcode-subagent-cli，MF-4 批次接入检查面），按产物形态分三类）：
+**发布范围全景**（终态发布范围 32 包 = pnpm workspace 内非 private 且未被 changeset ignore 的 31 包——u4/D6 将 deprecated 的 pi-unified-hooks 加入 changeset ignore 落地后的口径（此前 29 + statusline = 30；2026-09 ext-simplify-01 删包后 ignore 条目已移除；该包删前被 ignore 排除、删后不在磁盘，31 包计数不变）+ statusline 特例 + W5/W7 引擎三包（subagent-engine-sdk / pi-subagent-cli / zcode-subagent-cli，MF-4 批次接入检查范围），按产物形态分三类）：
 
 | 类别 | 包 | files 声明的产物 | 构建方式 |
 |---|---|---|---|
@@ -48,7 +48,7 @@ TS 源直发类不存在本缺口（声明的都是 git 里就有的文件）；
 
 | 项 | 不做的原因 | 去向 |
 |---|---|---|
-| 产物契约 manifest（每包声明期望产物清单，tarball 内容双向比对） | 终态方向，当前 6 个 dist 包 + 2 类风险面下无事故支撑，先落地即过度设计 | 登记触发条件（§3.3 D8），满足再立项 |
+| 产物契约 manifest（每包声明期望产物清单，tarball 内容双向比对） | 终态方向，当前 6 个 dist 包 + 2 类风险下无事故支撑，先落地即过度设计 | 登记触发条件（§3.3 D8），满足再立项 |
 | subagent-core 0.5.2 发布编排 | 走 merge / prerelease skill 既有流程，不是本设计的实施单元 | 仅在 §4 定义发布后验收场景 |
 | extensions 方向检查改造 | `check-extension-files.mjs` 已覆盖漏声明方向（挂 pre-commit + preflight），现状健康 | 不动 |
 | zsw 侧 vendor 通道回归 | 外部仓（zcode-plugin-workspace）事务 | 上游 0.5.2 发布后由对方回归，本设计提供验收敛径 |
@@ -148,12 +148,12 @@ session-delivery 缺口尚未炸的原因只是它从未走过 dev 线（npm 版
 | 做法 | smoke-core-dist.mjs 扩为两档构建 + 内嵌 dist.bundle 探针；dev 线补 session-delivery build | 新独立检查 check-publish-surface.mjs（幽灵条目 + 自包含探针 + 产物目录反向覆盖，双向）挂发布门 + CI；workflow 显式构建全部档；dev 线补齐；statusline private + unified-hooks ignore；C-proc-11 登记 | 每包声明期望产物清单（manifest），npm pack --dry-run 双向比对 tarball 实际内容 vs 契约（多余文件也抓） |
 | 长期架构合理性 | 中——检查逻辑埋在 subagent-core 专属 smoke 里，extension-protocol / session-delivery 的幽灵条目仍无检查；构建入口依旧隐式（smoke 副作用），事故结构诱因（职责纠缠）未除 | 高——「files↔产出」契约机器化，覆盖全部 dist 包与未来新档；构建入口显式，职责矩阵清晰 | 最高——声明即契约，双向校验 |
 | 短期实现成本 | 最低（单文件改动） | 中（新脚本约 150 行 + 3 处 CI 接线 + 登记） | 高（契约格式设计 + 29 包发布范围接入 + 维护负担） |
-| 风险 | 下一个包或新增产物档重演同型事故；smoke 越长越难审计 | CI PR 段新增构建（秒级）；检查 fail-closed 取向，误报需有明确修复口径 | 过度设计——「多余文件」方向无事故支撑；契约文件本身成为新的漂移面 |
+| 风险 | 下一个包或新增产物档重演同型事故；smoke 越长越难审计 | CI PR 段新增构建（秒级）；检查 fail-closed 取向，误报需有明确修复口径 | 过度设计——「多余文件」方向无事故支撑；契约文件本身成为新的漂移风险 |
 
 **推荐 B**。不采用方案反演（§2.2 的例子在 A / C 下会怎样）：
 
 - **A 下**：本次事故能修（subagent-core 两档会构建），但 §2.1 的 session-delivery dev 线缺口只补了一半（build 步骤补了，幽灵条目检查仍无）——未来 session-delivery 的 files 加新档忘构建，同样零报警重演；且「构建入口 = smoke 副作用」的结构诱因原样保留，只是把纠缠的脚本从一档扩成两档。
-- **C 下**：问题家族两面都能双向抓，但引入第三个人工维护的声明面（manifest）——它自身与 files 字段、与构建脚本都构成新的对齐债；当前 3 个 dist 包的规模撑不起这个架构成本。B 已覆盖两个已出事故的方向。C 的精神（声明契约）由 B 复用 files 字段承载——files 本身就是声明，B 让声明可被执行。
+- **C 下**：问题家族两面都能双向抓，但引入第三个人工维护的声明侧（manifest）——它自身与 files 字段、与构建脚本都构成新的对齐债；当前 3 个 dist 包的规模撑不起这个架构成本。B 已覆盖两个已出事故的方向。C 的精神（声明契约）由 B 复用 files 字段承载——files 本身就是声明，B 让声明可被执行。
 
 ### 3.3 关键决策与权衡
 
@@ -191,7 +191,7 @@ session-delivery 缺口尚未炸的原因只是它从未走过 dev 线（npm 版
 
 **D5 检查覆盖范围 = files 含 `dist` 前缀目录条目的全部发布包，检查双向**
 
-- 选择：检查动态发现覆盖对象（扫 packages/ 下非 private 包，files 含 `dist*` 目录条目即纳入），非硬编码 3 包名单。未来新 dist 包自动进检查面（隐含边界：扫描范围限 packages/，resources/ 等目录下未来若出现 dist 包不在面内——与当前发布范围一致）。
+- 选择：检查动态发现覆盖对象（扫 packages/ 下非 private 包，files 含 `dist*` 目录条目即纳入），非硬编码 3 包名单。未来新 dist 包自动进检查范围（隐含边界：扫描范围限 packages/，resources/ 等目录下未来若出现 dist 包不在面内——与当前发布范围一致）。
 - **检查项 1 幽灵条目（幽灵声明方向）**：files 每个条目磁盘存在且非空——**判定信号以磁盘 stat 为准而非字符串尾斜杠**（条目在磁盘是目录即按目录形态处理：须至少含 1 文件；是文件即按文件形态：须存在。extension-protocol / session-delivery 的 files 条目是 `"dist"` 无尾斜杠，字符串形态判定会错走精确文件分支漏掉非空断言——tsup 漂移产出空 dist 目录时将检查绿，而 npm pack 对空目录同样静默跳过）。glob 条目须至少命中 1 文件。语义与 check-extension-files.mjs 检查项 3 对齐。
 - **检查项 2 自包含探针（仅有自包含档的包）**：自包含档的识别约定 = 目录名 `dist.bundle`（tsup.config.ts 注释已确立该语义，「自包含 vendoring 产物」）。未来新增自包含档遵循同命名约定，探针自动覆盖。**不**对常规 `dist/` 档做自包含要求——常规档刻意保留外部依赖（宿主有 node_modules 解析范围），这是双档设计的本意。
 - **检查项 3 产物目录反向覆盖（漏声明方向）**：包目录下磁盘存在的顶层 `dist*` 目录，必须被 files 白名单至少一个条目覆盖（目录条目或同名的精确条目）——新增产物档（如 `dist.worker/`）构建了但忘加 files 时，tarball 同样静默缺货零报警（与 0.4.0 事故严格对偶的形态），此检查项在构建后拦截。配套命名约定（写入 C-proc-11）：`dist` 前缀目录 = 发布产物意图，非发布用途的构建目录不得用 `dist` 前缀（否则反向检查误红——fail-closed 取向，改名即可）。
@@ -249,7 +249,7 @@ dev 线（release-npm-dev.yml）为条件化结构（与正式线不对称，刻
 | S6b | 发布范围尾部风险清偿（u4 简化验收） | `node -p "require('./resources/plugins/statusline/package.json').private"` 输出 true；`.changeset/config.json` ignore 数组含 `@zhushanwen/pi-unified-hooks` | 两个断言成立（单行改动，简化验收） | G3 |
 | S7 | 发布后终验（0.5.2） | 走 merge / prerelease skill 既有编排发布 → registry 下载 tarball → zsw 仓跑 vendor `--npm` 通道；干净目录 `npm install @zhushanwen/subagent-core@0.5.2` → require 主入口 + 4 条子入口（smoke 同口径） | tarball 实测含 `dist.bundle/index.cjs` 且 vendor 副本 `selfContainedIndex=true`；常规消费者升级路径不回归（require 全通） | G1–G3 闭环 |
 
-S7 是外部消费方（zsw）真实回归，作为发布后场景登记——发布编排本身不在本设计拆分内。S1–S4 本地可完整执行，S5 需真实 CI run，S6 的 workflow 生效面在下次 dev 预发布（如近期无 dev 发布计划，以本地等价命令 + diff 审查为验收形态，如实登记）。
+S7 是外部消费方（zsw）真实回归，作为发布后场景登记——发布编排本身不在本设计拆分内。S1–S4 本地可完整执行，S5 需真实 CI run，S6 的 workflow 生效侧在下次 dev 预发布（如近期无 dev 发布计划，以本地等价命令 + diff 审查为验收形态，如实登记）。
 
 ## 5. 下一层拆分
 
@@ -284,4 +284,4 @@ S7 是外部消费方（zsw）真实回归，作为发布后场景登记——�
 | 2026-09-16 | v8 | D7 重审执行（触发：subagent-core 0.10.1 首发，检查体积 warning files 求和 9.07MB 超 5MB）：`files` 移除 `src/`——D4 双形态语义对齐（npm 消费方经 publishConfig 全指 dist，TS 源仅服务 workspace；src 5.7MB 中 3.2MB 为测试，tarball 零消费），tarball 收敛至解包 4.3MB、warning 消除；登记 npm main 隐含打包残留（src/index.ts 约 34KB，exports 面不可达，纯噪声）；检查复跑全绿 |
 | 2026-09-16 | v9 | D7 重审裁决同型适用：subagent-engine-sdk `files` 同步移除 `src/`（含 `!src/__tests__` 排除项一并失效）——该包与 subagent-core 同型双形态（$comment 明写「双形态同 subagent-core 先例 D4」），src 进 files 是同一处偏离的两处落点；量级差异仅 252KB（低于 5MB 阈值，检查从不 warning 故无人审视——偏离靠一致性巡检暴露而非体积报警）。tarball 收敛至解包 1.2MB；dist 无 sourcemap/URL 引用，移除零断链；npm main 隐含打包残留同 subagent-core（src/index.ts 3.2KB）。至此 7 个 dist 发布包 files 口径统一（extension-protocol / session-delivery / subagent-core / subagent-engine-sdk / pi-rpc / pi-subagent-cli / zcode-subagent-cli = 只发 dist，bin/workflows/agents 资产条目除外）|
 | 2026-09-11 | v8 | ext-simplify-01 删包移除 ignore 条目，发布范围计数不变（`.changeset/config.json` ignore 数组删除 `@zhushanwen/pi-unified-hooks` 末项——unified-hooks 整包删除后不在磁盘，删前被 ignore 排除、删后不在磁盘，31 包计数不变；§1.1 S / §1.2 全景句 / §1.2 分类表三处现行口径句同批补注记） |
-| 2026-09-14 | v9 | 检查项 4 workspace 依赖发布闭包（依赖可解析性，PR review 双维度发现 pi-subagent-cli → pi-rpc 首发缺口 M1/MUST_FIX）：dependencies / peerDependencies 指向 workspace 内包的依赖 X，「registry 可解析」静态信号 = X/CHANGELOG.md 存在（changesets changelog 每次 version bump 写入）∨ X 有 pending changeset，两信号皆无 → 红（publish 替换 workspace:* 为 ^<version> 后 E404、tarball 装不上——npm install 面，晚于检查项 1-3 的 files ↔ 产物域）；private 依赖无条件红；外部依赖零网络不可验不纳入。同批：pi-rpc 由 TS 源直发改双形态 dist 发布（对齐 subagent-engine-sdk，Node 拒载 node_modules 内 .ts），三处构建段（release-npm.yml / release-npm-dev.yml / ci.yml）补 pi-rpc build，检查动态发现面 6→7 包 |
+| 2026-09-14 | v9 | 检查项 4 workspace 依赖发布闭包（依赖可解析性，PR review 双维度发现 pi-subagent-cli → pi-rpc 首发缺口 M1/MUST_FIX）：dependencies / peerDependencies 指向 workspace 内包的依赖 X，「registry 可解析」静态信号 = X/CHANGELOG.md 存在（changesets changelog 每次 version bump 写入）∨ X 有 pending changeset，两信号皆无 → 红（publish 替换 workspace:* 为 ^<version> 后 E404、tarball 装不上——npm install 面，晚于检查项 1-3 的 files ↔ 产物域）；private 依赖无条件红；外部依赖零网络不可验不纳入。同批：pi-rpc 由 TS 源直发改双形态 dist 发布（对齐 subagent-engine-sdk，Node 拒载 node_modules 内 .ts），三处构建段（release-npm.yml / release-npm-dev.yml / ci.yml）补 pi-rpc build，检查动态发现范围 6→7 包 |

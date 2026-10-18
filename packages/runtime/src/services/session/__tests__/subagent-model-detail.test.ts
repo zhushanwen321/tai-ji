@@ -1,8 +1,8 @@
 /**
- * subagent / workflow run 详情载荷模型字段面测试（subagent-model-switch §7.1 入口层，
- * U1 详情载荷透传验收面）。
+ * subagent / workflow run 详情载荷模型字段侧测试（subagent-model-switch §7.1 入口层，
+ * U1 详情载荷透传验收侧）。
  *
- * 覆盖（字段面单测四项 + 出口接线）：
+ * 覆盖（字段侧单测四项 + 出口接线）：
  * - 覆盖状态（modelOverride）：查询端口在场且有覆盖 → 载荷携带；无覆盖 / 端口缺席 →
  *   不造键；workflow origin 成员跳过 chat 域查询（覆盖作用域归 run 级）；
  * - 最近生效值（recentEffectiveModel）：pi 成员且有 model_change 尾条目 → 携带尾条目
@@ -182,9 +182,9 @@ describe('readPiSessionLatestModelChange — model_change 尾条目派生', () =
   })
 })
 
-// ── getSubagents / live 帧两出口的字段面 ─────────────────────────
+// ── getSubagents / live 帧两出口的字段侧 ─────────────────────────
 
-describe('详情载荷字段面 — getSubagents 出口', () => {
+describe('详情载荷字段侧 — getSubagents 出口', () => {
   it('覆盖状态 + 最近生效值在场：载荷携带（chat 域成员）', async () => {
     const subFile = join(tmpDir, 'sub.jsonl')
     writeFileSync(subFile, modelChangeLine('p-new', 'm-new') + '\n')
@@ -343,7 +343,7 @@ describe('详情载荷字段面 — getSubagents 出口', () => {
   })
 })
 
-describe('详情载荷字段面 — publishRecordChanges live 帧出口', () => {
+describe('详情载荷字段侧 — publishRecordChanges live 帧出口', () => {
   it('live 全量帧同样增强（整帧替换语义下两出口必须一致）', async () => {
     vi.useFakeTimers()
     try {

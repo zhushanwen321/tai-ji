@@ -24,21 +24,21 @@
 > - v3（2026-09-08，R2 修复）：①A9 检查改为**经公共 API + 真实隔离库路径**（原测模块私有 `deletePoolNativeState` → 空断言）；
 >   ②D4 量级按同一锚重算（原 30–50MB/日 与「数十 GB/年」不自洽）+ 恢复路径代价 + 阈值时间预期；
 >   ③§2.4.1 阈值口径固定（累计口径下**已触发**）+ 增量/累计分列 + log 通道边界；④§2.4.2 补量级（今日占比 94%）+ 判定拆「工程侧 / 产品口径」；
->   ⑤§2.4.3 zsw 写实为 re-vendor 继承 + 交付物 W5b + 误删面口径纠正；⑥D7 补四件套安全网 + schema 实装校正
+>   ⑤§2.4.3 zsw 写实为 re-vendor 继承 + 交付物 W5b + 误删风险口径纠正；⑥D7 补四件套安全网 + schema 实装校正
 >   （11 表/12 FK 列 + `input_history` 显式删 + `PRAGMA foreign_keys=ON` + SET NULL 越行登记 + 索引库全枚举）+ 代价量化；
 >   ⑦D1 父目录事实纠正（引擎自建）；⑧`:401`→`:407`；⑨W1 落点 `db-path.ts`、W4 补权威源文档回写、W5b、A12 diff 根扩到 `~/.zcode/`、counts.sql 落成可执行 SQL。
 > - v4（2026-09-08，R3 修复）：①§2.4.2 量级纠正（原「我们历史累计 13.70B」实为**全库 interactive 类目**，含 GUI；
 >   我们真实累计 92.1M/838 行）+ 判定改为**默认不可接受**（owner/期限/知情落点）；
 >   ②D4 量级锚改为**我们自己的会话** 0.3–0.4MB/条（原用全库均值 1.8MB，差 4.9×）→ 日增量 ≈45MB/日、阈值 ≈45 天，W6 改「先就绪再触发」；
 >   ③§2.4.1 判定链完整（新上界 + owner/期限/跟踪 + 有期限债务）；④D7 四件套可执行化（哨兵与删除集构造性互斥 /
->   索引删除对象 vs 冲突面分离 / 目录红灯按本仓分布重定 / 解析路径固定）+ A11 双口径；
+>   索引删除对象 vs 冲突风险分离 / 目录红灯按本仓分布重定 / 解析路径固定）+ A11 双口径；
 >   ⑤A9 加枚举断言与 mkdir 入参修正；⑥D7 代价单位/停机分段/可用空间前置；⑦W5b 改仓内 handoff；
 >   ⑧W4 第六面（protocolization 文档）；⑨F6/F11 行号与快照口径。
-> - v5（2026-09-08，R4 修复）：①**哨兵重设**——不再追求与删除集互斥（那导致恒真/恒中止两种失效），改为「重叠即真警报」的独立面
+> - v5（2026-09-08，R4 修复）：①**哨兵重设**——不再追求与删除集互斥（那导致恒真/恒中止两种失效），改为「重叠即真警报」的独立判据
 >   （`parent_id ∈ 删除集` / `title_source='custom'` / 目录外）+ A11 反向 fixture；
->   ②**索引面单向化**（对齐邻仓）：`task_group_members` 命中 = 冲突 → 整体剔除，删除范围只 `tasks` + 姊妹表；
+>   ②**索引侧单向化**（对齐邻仓）：`task_group_members` 命中 = 冲突 → 整体剔除，删除范围只 `tasks` + 姊妹表；
 >   ③**目录红灯输入定义**（`git worktree list --porcelain`；目录已不存在降为报告项；删「已知 zsw 目录」项）；
->   ④**A11 索引面前置**（先在 GUI 打开目录使 `tasks` 命中 N≥1，再断言 N→0；否则显式标不可证伪）+ 双口径改独立参照 SQL；
+>   ④**A11 索引侧前置**（先在 GUI 打开目录使 `tasks` 命中 N≥1，再断言 N→0；否则显式标不可证伪）+ 双口径改独立参照 SQL；
 >   ⑤§2.4.2 恢复路径拆 A/B 分支（候选① 若选则成 W 单元 + 宿主库新表写侧分析）+ 重审补绝对缺失量；
 >   ⑥§2.4.1 跟踪落点落成 W4 子项 companion-surface-governance 文档 + 余量基准改写；⑦**派生行（4 条）纳入删除集**；
 >   ⑧隔离库非会话状态（`local_setting` 189 行）枚举 + 判定；⑨W5 备份量级/安全网名同步；⑩counts.sql 口径修正 + 补 dbstat 法。
@@ -48,7 +48,7 @@
 >   ①**I2 改为跨源交叉验证硬中止**（r5 实测：用户 `interactive`+`generated` 与我们行**字段不可区分**，字段式判据拦不住 → 用 record 自带目录/时间戳 vs 宿主行互证）；
 >   ②**I3 作用域固定为「直接删除集」+ 新增 I3b 派生集不变量**（否则「任一行非 interactive 即中止」会被自己的派生行触发 → 通道永不可执行）；
 >   ③**I2 执行形态固定**（交互式输入删除集总数 / 非 TTY 拒绝且无 `--yes` 旁路 / 报告置顶异常汇总 / 确认凭证落盘）；
->   ④**索引侧预检恢复**（r5 实测索引库零 FK 到 `tasks` → 「FK 失败即中止」在索引面是死断言；「不预计算」限定为**宿主库**）；
+>   ④**索引侧预检恢复**（r5 实测索引库零 FK 到 `tasks` → 「FK 失败即中止」在索引侧是死断言；「不预计算」限定为**宿主库**）；
 >   ⑤快照漂移标注（白名单/删除集/派生行数字均标快照 + 复测值）；§2.4.2 补「用户沉默」默认走向与分支 B 写侧分析落点。
 > - v8（2026-09-08，R6 修复——5 must-fix + 4 suggestion）：
 >   ①**I2 改时间戳维度**（r6 实测 record **无目录字段**，`SubagentRecordEntryData` 只有 `startedAt`；目录维度不可作硬判据）——容差 ≤60s（**史实值**；v9 已统一为 ≤10s，见下行）；
@@ -56,7 +56,7 @@
 >   ③**非 TTY 改受控旁路 `--confirm-count <N>`**（本仓现实：运维/AI agent 跑 bash 天然非 TTY；精确匹配删除集总数，不是笼统 `--force`）；
 >   ④**索引预检与 I1 对齐**（命中 → 两侧同时剔除；参照 SQL 含同一预检条件，否则 I1 必失败）；⑤§2.4.2 沉默 ≠ 永久接受（补重审出口）。
 > - v9（2026-09-08，R7 修复——4 must-fix + 4 suggestion）：
->   ①**I2 容差三处口径统一为 ≤10s**（修订记录/D7/A11；依据 = r7 实测 max Δ≈4.0s → 2.5× 余量，且不取 60s 以免碰撞面扩大一个量级）；
+>   ①**I2 容差三处口径统一为 ≤10s**（修订记录/D7/A11；依据 = r7 实测 max Δ≈4.0s → 2.5× 余量，且不取 60s 以免碰撞风险扩大一个量级）；
 >   ②**跨库删除顺序写死**（每 id 先宿主后索引 → 中间态只可能是「宿主已删、索引残留」可恢复方向）+ A11 补索引删除失败 fixture；
 >   ③**I2 残余风险按真实前置重写**（record 白名单被污染/伪造）+ P0-20 四要素齐备（量级 ≈3/1642、恢复=备份回滚、重审触发）；
 >   ④**参照 SQL 落盘单一文本**（`counts.sql` W5 查询 + Δ 分布查询）；⑤`--confirm-count` 威胁模型边界显式声明；⑥§2.4.2 措辞去恒真。
@@ -87,7 +87,7 @@
 - **Q（问题）**：怎么让 taiji 派发的 zcode subagent 会话**不再污染用户侧边栏**，
   同时不把 2026-09 刻意删掉的 HOME 池化 / 锁 / pidfile / 派生目录复杂度重新背回来？
 - **A（答案）**：不隔离 HOME，**只隔离会话库**——app-server 支持 `ZCODE_SESSION_DB_PATH`
-  （配置面 `storage.sessionDbPath` 的 env 通道），把它指向
+  （配置侧 `storage.sessionDbPath` 的 env 通道），把它指向
   `<engineDataDir>/engines/zcode/session-db/db.sqlite`。真机探针已验证：会话完整落在隔离库、
   宿主库零行、create→send→终态→read→close 全链正常（§2.3 F1）。
 
@@ -150,7 +150,7 @@ zcode.cjs app-server（常驻进程，每 ZcodeEngine 实例一条连接）
    │    靠 GUI 重订阅 / 索引按需重建补上（延迟数十秒~数十分钟）
    ▼
 GUI 私有索引库 ~/.zcode/v2/tasks-index.sqlite（tasks 表）
-   │ ④ 展示面：queryTaskList({workspaceScopes, kind})
+   │ ④ 展示侧：queryTaskList({workspaceScopes, kind})
    │    WHERE 基线只有 `deleted = 0`（+ pinned/archived 分类）
    ▼
 ZCode GUI 左侧边栏会话列表 ← 用户看到「凭空多出来的会话」
@@ -162,9 +162,9 @@ ZCode GUI 左侧边栏会话列表 ← 用户看到「凭空多出来的会话�
 |----|------|------|
 | **写侧** | 引擎 app-server 用真实 HOME → 写 GUI 的引擎库 | 会话物理上进入 GUI 数据源 |
 | **识别面** | RPC `session/create` 无 `taskType` 参数（strict schema 拒收）→ `task_type` 恒 `interactive`、`parent_id` 为空 | 库里无任何字段能把我们与用户会话区分开 |
-| **展示面** | GUI 列表查询不按 `task_type` / `parent_id` 过滤 | 索引里有的行就会显示 |
+| **展示侧** | GUI 列表查询不按 `task_type` / `parent_id` 过滤 | 索引里有的行就会显示 |
 
-结论：**只要写侧还落在宿主库，就必然污染**；识别面与展示面我们无法参与（改不了 GUI）。
+结论：**只要写侧还落在宿主库，就必然污染**；识别面与展示侧我们无法参与（改不了 GUI）。
 
 ### 2.3 事实基准（2026-09-08 真机探针 + 存量统计；**数值为成文时快照，参照查询见 §3.2 D7 权威 SQL 正文**）
 
@@ -273,9 +273,9 @@ ZCode GUI 左侧边栏会话列表 ← 用户看到「凭空多出来的会话�
   → 避免「跨仓承诺不可验证」。
 
 **显式判定**：可接受（迁移期）。依据：① 隔离库体量按 §2.4.4 量级可控；② 清理归属与登记已写实（上条）；
-③ **误删面口径纠正**：zsw `clean-identify.js` 的三类识别集（`task_type='subagent_child'` 按龄 /
+③ **误删风险口径纠正**：zsw `clean-identify.js` 的三类识别集（`task_type='subagent_child'` 按龄 /
 自身 records 白名单 / 特征目录闭集）**从未能识别我们的行**（我们是 `interactive` + 普通 worktree 路径），
-改造前后命中概率同为 0——本设计**不改变该事实**，因此不主张「隔离也隔离了误删面」。
+改造前后命中概率同为 0——本设计**不改变该事实**，因此不主张「隔离也隔离了误删风险」。
 **重审触发条件**：**zsw 已完成 re-vendor** 且其隔离库 > 1GB，或 zsw 用户报告磁盘异常；
 **补一条**：下次 zsw re-vendor 时校验「其隔离库路径 == `zcodeSessionDbPath` 推导值」与「清理工具已覆盖新库」（否则缺口静默存在）。
 
@@ -390,7 +390,7 @@ pi 扩展进程（taiji）/ zsw CLI 进程
   **前提**：该 env 必达；任一 spawn 点剥掉它，写侧落 `<piAgentDir>/engines/zcode/session-db/db.sqlite`
   而读侧按 runtime dataDir 构造白名单 → ①级**静默**降②级（A3 在正常配置下测不到）。
   兜底：单元断言「taiji spawn 配置下两站点 dataDir 相等」+ D3 单列该形态。
-- **安全边界不变**：record/handle 来自 append-only JSONL（不可信面），**只放行集合内精确绝对路径**，
+- **安全边界不变**：record/handle 来自 append-only JSONL（不可信数据侧），**只放行集合内精确绝对路径**，
   其余绝对路径继续拒绝①级、降 journal——防任意文件读。
 - **`hostZcodeDbPath()` 定位变更**：降级为「存量兼容锚点」，仅出现在集合构造与兼容测试里（注释改写）。
 
@@ -467,13 +467,13 @@ pi 扩展进程（taiji）/ zsw CLI 进程
 **四条设计级不变量**（为什么是这个形状）：
 
 1. **白名单只能来自我们自己的 record**（`engineHandle.sessionRef.sessionId`）——我们**知道自己的 id**（区别于邻仓 zsw
-   `doctor clean` 的「库里不可识别」）；record 是 append-only JSONL（**不可信面**），故必须**只解析结构化 entry**，
+   `doctor clean` 的「库里不可识别」）；record 是 append-only JSONL（**不可信数据侧**），故必须**只解析结构化 entry**，
    禁止文本/正则提取。
-2. **误删面必须可证明为零，且判据不能用「字段长相」**：实测证明用户会话与我们自己的行在 `task_type`/`title_source`
+2. **误删风险必须可证明为零，且判据不能用「字段长相」**：实测证明用户会话与我们自己的行在 `task_type`/`title_source`
    上**完全同分布**（用户 interactive 会话 885 行里 generated 656 / first_input 135；我们的直接删除集同样是 interactive+generated）
    → 只能靠**跨源交叉验证**（record 的 `startedAt` 与宿主行 `time_created` 互证；record **没有目录字段**，故目录维度不可作硬判据）。
 3. **删除必须可回滚**：整库快照 + 整库还原（无单行回滚）；窗口内所有写者必须停用（含第二宿主与 GUI）。
-4. **双库一致性由工具保证**：宿主库有 FK 兜底，**索引库零 FK 到 `tasks`** → 索引侧冲突面必须显式预检；
+4. **双库一致性由工具保证**：宿主库有 FK 兜底，**索引库零 FK 到 `tasks`** → 索引侧冲突风险必须显式预检；
    跨库顺序固定为「先宿主后索引」，使中间态只可能是可恢复方向，且残留必须落清单、可补删。
 
 **否决记录**：字段式哨兵（两次失效：恒非空 → 恒真）→ 四件套安全网（层间交互互相击穿）→
@@ -612,14 +612,14 @@ SELECT (SELECT SUM(length(data)) FROM part  WHERE session_id IN ('<id>' /* … *
 --   `.mode json` + `.import` 实测跑不通，JSONL 整行落一列致 startedAt 恒 NULL、Δ/碰撞假阴）；
 --   ① 宿主库会话内执行（直接集）；② 索引库会话内 ATTACH 白名单库后执行（索引预检，
 --   R9-2 修复——白名单库必须 ATTACH 在**执行会话**上，原注释形态报 no such table: wl.wl）；
---   ③ 宿主库会话内执行（派生集）；④⑤ 宿主库会话内执行（Δ 分布 / 碰撞面）。
+--   ③ 宿主库会话内执行（派生集）；④⑤ 宿主库会话内执行（Δ 分布 / 碰撞风险）。
 -- 工具侧同一口径的机器实现 = scripts/zcode-session-db-cleanup.mjs 的
 --   referenceDeletionSetImpl（I1 断言用），两处任一改动须同步另一处。
 -- ============================================================
 
 -- 第 0 步：从 record JSONL 导出 (sessionId, startedAt) CSV → /tmp/w5_whitelist.csv
 --   （只解析 type='custom' && customType='subagent-record' 的结构化 entry；
---    startedAt 缺失的行照常装载为 NULL——④ 的 over_10s/碰撞面统计在 NULL 上为 0，
+--    startedAt 缺失的行照常装载为 NULL——④ 的 over_10s/碰撞风险统计在 NULL 上为 0，
 --    工具侧 I2 对 NULL 硬中止，口径差异属预期）
 --   node -e '
 --     const fs=require("fs"),os=require("os"),path=require("path");
@@ -673,7 +673,7 @@ SELECT COUNT(*) AS rows_,
        SUM(CASE WHEN ABS(w.startedAt - s.time_created) > 10000 THEN 1 ELSE 0 END) AS over_10s
 FROM session s JOIN wl.wl w ON w.sessionId = s.id;
 
--- ⑤ 碰撞面：用户 interactive 会话落入我们任一 record ±10s 窗的计数
+-- ⑤ 碰撞风险：用户 interactive 会话落入我们任一 record ±10s 窗的计数
 --    （10000 = I2 权威常量同款同步要求，见 ④ 注释）
 SELECT COUNT(*) AS collisions_10s FROM session u
 WHERE u.task_type='interactive'
@@ -717,7 +717,7 @@ WHERE u.task_type='interactive'
 | A8 | 失败路径 | ①隔离库父目录 `chmod 000`；②运行期 unlink `db.sqlite*`（主文件 + `-wal`/`-shm`，按 E3 事实核验） | ①任务显式失败且错误含路径与恢复指引，**宿主库零新增**；②在途会话数据落已 unlink inode、重启后自动重建新库、旧 record 降②级 journal 仍可读 | D6 |
 | A9 | 池 GC 检查（反向不变量，**经公共 API + 枚举断言**）[池抽象降级 2026-09-13 修订：`acquirePool`/`releasePoolRef`/refs 机制已删，现行形态 = core `pool-manager.test.ts` 的 `cleanupExpiredJournals` 超龄 db.sqlite 不删断言 + 引擎包 `zcode-session-db-pool-gc.test.ts` 结构检查（隔离库与任意分组目录双向前缀分离 / db 文件名族与 journal 名族不相交）] | 原规格（历史）：`dataDir=mkdtempSync()` 下写入隔离库三件套后经 `acquirePool`+`releasePoolRef`+`cleanupExpiredPoolRefs` 断言不删；现行等价断言经 `cleanupExpiredJournals(dataDir, 0)` 触达 | ①隔离库三件套**字节不变**；②目录级分离结构断言；③journal 分组目录内可清理条目清空后目录回收、`db.sqlite*` 目录保留 | 不变量 6 |
 | A10 | 存量零迁移（反向不变量） | 改造前后对比宿主库行数 / 既有 record 文件 | 宿主库行数与 record 内容**逐字节不变**（除新会话）；无任何自动删除 | 不变量 4 |
-| A11 | 存量行清理通道（W5） | 用 D7 规格对自身 record 白名单做 dry-run → **先在 ZCode GUI 打开含我们会话的 worktree**（让索引侧有可观测行）→ 停机窗口执行 | **四数报告 + 删除集 == 参照 SQL 结果**（白名单总数 / 白名单∩宿主库 / 派生删除集 / 删除集总数）；**I2 时间戳交叉验证全部通过**（无一条中止）；**I3/I3b 无命中**；**反向 fixture 两条**（混入用户 `fork` id → 中止；混入普通用户 interactive+generated 且时间戳差数小时 id → 必须中止）；**无确认参数且非 TTY → 拒绝**；`--confirm-count` 错值 → 拒绝；**确认凭证落盘且与删除集总数匹配**；**索引面归零** + 预检命中项两侧同时剔除并报告 + 索引删除失败时残留清单落盘、补删后归空；执行后宿主库 11 表 + `input_history` + 派生行零残留；SET NULL 修改行数与 FK 失败中止记录（若发生）已报告。**实现级步骤与 fixture 由代码承载（原 impl-plan §2.5/§7.2 已删除，git 可追溯；入口 = `scripts/zcode-session-db-cleanup.mjs` 及其测试）** | G5 |
+| A11 | 存量行清理通道（W5） | 用 D7 规格对自身 record 白名单做 dry-run → **先在 ZCode GUI 打开含我们会话的 worktree**（让索引侧有可观测行）→ 停机窗口执行 | **四数报告 + 删除集 == 参照 SQL 结果**（白名单总数 / 白名单∩宿主库 / 派生删除集 / 删除集总数）；**I2 时间戳交叉验证全部通过**（无一条中止）；**I3/I3b 无命中**；**反向 fixture 两条**（混入用户 `fork` id → 中止；混入普通用户 interactive+generated 且时间戳差数小时 id → 必须中止）；**无确认参数且非 TTY → 拒绝**；`--confirm-count` 错值 → 拒绝；**确认凭证落盘且与删除集总数匹配**；**索引侧归零** + 预检命中项两侧同时剔除并报告 + 索引删除失败时残留清单落盘、补删后归空；执行后宿主库 11 表 + `input_history` + 派生行零残留；SET NULL 修改行数与 FK 失败中止记录（若发生）已报告。**实现级步骤与 fixture 由代码承载（原 impl-plan §2.5/§7.2 已删除，git 可追溯；入口 = `scripts/zcode-session-db-cleanup.mjs` 及其测试）** | G5 |
 | A12 | 伴生写侧登记准确性（反向不变量） | A1–A6 后 diff `~/.zcode/` 增量（排除已知 GUI 面 `v2/tasks-index.sqlite`、`v2/telemetry-state.json` 与第二宿主 `zsw/`） | 增量面与 §2.4.1 表列出的面一致（无未登记的新写侧）；若出现未登记项 → 回写登记表并重审判定 | 已接受代价登记 |
 
 **探针挂钩**（随代码落地）：

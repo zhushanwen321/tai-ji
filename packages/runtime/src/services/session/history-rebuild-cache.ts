@@ -579,7 +579,7 @@ export class SessionHistoryReader {
    * 已知边界：turn 计数/字节预算在 collect 阶段按原始行计算（含旧分支行）→ 分支
    * session 的窗口可能欠填、totalTurnsEstimate 偏大（设计 D3 允许的降级面，内容正确性优先）。
    *
-   * [btw-question 重载链修复] btw vid 分支先于通用链：线目录在 G4 隔离面
+   * [btw-question 重载链修复] btw vid 分支先于通用链：线目录在 G4 隔离边界侧
    *（`agent/btw/<encodeCwd>/<mainSid>/`，构造性不在 sessions/ 扫描范围），通用链的
    * scanSessions 对 btw vid 必 miss → 静默空（重启后线视图空态的根因）。分支收窄在
    * isBtwVirtualId 判定内，非 btw 路径逐字节原行为；cursor 翻页离线路径同走本方法，

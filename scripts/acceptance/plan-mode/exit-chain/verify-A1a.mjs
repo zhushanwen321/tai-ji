@@ -412,7 +412,7 @@ async function scene5(log) {
     assert(inactiveEnd.length === 1, `abort tool result carried inactive correction text, got ${inactiveEnd.map(toolResultText)}`);
     const tools = lastRequestTools(llm);
     assert(tools.includes('edit') && tools.includes('write') && tools.includes('plan'), `tool set untouched (full), got ${tools.join(',')}`);
-    log('PASS ⑤ completed 终局后再调 abort：completed entry 免覆写无新落盘、tool result 纠偏指令反馈（tool 路派生视图）、状态面已退出态幂等、无副作用');
+    log('PASS ⑤ completed 终局后再调 abort：completed entry 免覆写无新落盘、tool result 纠偏指令反馈（tool 路派生视图）、状态侧已退出态幂等、无副作用');
   } finally {
     await stopPi(api);
     llm.server.close();

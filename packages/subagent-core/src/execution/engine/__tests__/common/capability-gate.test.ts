@@ -154,7 +154,7 @@ describe("capability-gate（D3-④ 拦截矩阵）", () => {
     }
   });
 
-  it("zcode 放行面：无能力参数的任务全放行；maxTurns undefined（未传）不拦", () => {
+  it("zcode 放行范围：无能力参数的任务全放行；maxTurns undefined（未传）不拦", () => {
     expect(() => gate(ZCODE_CAPS, {})).not.toThrow();
     expect(() => gate(ZCODE_CAPS, { maxTurns: undefined, fork: false, worktree: false })).not.toThrow();
   });

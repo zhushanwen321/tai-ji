@@ -2,7 +2,7 @@
  * workflow 断连恢复语义 E2E（A2，设计 reload-closeout-reliability §4 A2）。
  *
  * faux LLM 轨（L2.5，零 token）。场景：WS 断开期间 run 完成 → 重连 → 收敛。
- * 验证对象 = 传输兜底面回归（G2 覆盖矩阵「publish 之后的传输跳」分治）：断连下 publish
+ * 验证对象 = 传输兜底路径回归（G2 覆盖矩阵「publish 之后的传输跳」分治）：断连下 publish
  * 正常完成并推进水位、重连后 diff 空——水位结构性不触发，恢复只能来自既有传输兜底
  * （stateSnapshot 回放 / 主动拉取）。水位的直接证明在 A3 单测轨 + A1 e2e 轨（S1b/S2 的
  * ≤30s 帧到达断言），不在本用例。

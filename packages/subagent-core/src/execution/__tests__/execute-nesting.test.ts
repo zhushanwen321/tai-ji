@@ -77,7 +77,7 @@ function setup(): SetupResult {
   return { service };
 }
 
-/** [W3] 协议替身注册 + 受控 settle（原 driveChildToCompletion 的等价驱动面）：
+/** [W3] 协议替身注册 + 受控 settle（原 driveChildToCompletion 的等价驱动侧）：
  *  execute 发起的 engine.run 由测试显式应答（轮终语义对齐 driveChild 的 close(0)）。 */
 function setupWithFakeEngine(): SetupResult & { fake: FakePiEnginePort } {
   const base = setup();

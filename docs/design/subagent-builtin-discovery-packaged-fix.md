@@ -192,12 +192,12 @@ Workflows currently available:
 **回退到 bundle 同目录的父目录**（= staged 根 `apps/electron/resources/extensions/@zhushanwen`）作为
 `npm` 槽根，同时给 staged 扩展包补一份 `agents/` 拷贝。审查员实测该根的子项正是 `pi-*` 包目录，
 天然满足"子项=包目录"语义；且当前没有任何 staged 包含 `agents/`（`workflows/` 只有 subagent-workflow 有）
-→ 不会引入意外发现面。
+→ 不会引入意外发现范围。
 
 - **B′ 的优点**：不需要假 node_modules、不需要派生 package.json、无 F2 滤镜陷阱；顶层 `workflows/` 原位不动
   → **worker scriptPath 不变 → resume 断链（F4）不存在**；TC8/V1-④ 原样保留 → **F1 不存在**。
 - **B′ 的代价**：把"staged 布局探测"写进运行时热路径（仅在 resolve 失败时的回退分支，与 pi-host 既有的
-  `isTaijiHostInjected` 分支风格一致）；发现面从"本包依赖安装位"扩到"整个 staged 根"（语义略宽，
+  `isTaijiHostInjected` 分支风格一致）；发现范围从"本包依赖安装位"扩到"整个 staged 根"（语义略宽，
   未来新增包若带 `agents/` 会被扫到——与 npm 形态的约定目录语义实际一致）。
 - **原文档对 B 的否决理由（"回退根不满足 npm 槽语义"）已被证伪**，本节按 B′ 重述。
 - **A vs B′ 取舍**：A 让既有契约自然成立、无运行时改动、且可走向"删顶层拷贝"的单一事实源终态；
@@ -207,7 +207,7 @@ Workflows currently available:
 ### 2.3 方案 C（否决）：env 注入发现根
 
 经 `TAIJI_EXTENSION_PATHS` 注入 staged 目录。否决理由：该 env 是 dev-link 专用通道
-（resource-discovery 注释明确认定"非 agent 自救面"）；staged 包无 `pi.workflows` manifest，
+（resource-discovery 注释明确认定"非 agent 自救侧"）；staged 包无 `pi.workflows` manifest，
 约定扫描只能捞到 workflows 捞不到 agents；语义滥用。
 
 ### 2.4 明确不做
@@ -228,7 +228,7 @@ Workflows currently available:
 | CA2 注入快照 | 无影响——快照族为 fixture 输入驱动（location 用字面量），不消费运行时路径（审查员已核） |
 | 单测/门禁同步（**修正** [F6/F7]） | 五处字面引用（`pi-host.test.ts:116/144`、`prompt-quality.test.ts:32`、`tool-prompt-contract.test.ts:235`、`agent-registry.test.ts:220`）**换锚后都不会红**（均取 `dirname(锚)`，且跑在 dev 形态）——按 C-proc-10 顺手对齐即可，勿按"必须改"处理；**唯一会红的是 `builtin-ext-bundle.test.mjs` TC8，且仅在选择删除顶层拷贝时**（本设计分批：本批保留 → TC8 不动） |
 | **resume 断链（新登记）** [rev-mechanism F4] | 升级前中断的 run 持久化的是旧 scriptPath（顶层拷贝路径）；**删除顶层拷贝后**跨升级 resume 在 worker 启动期抛 `core_module_load_failed`（响亮失败，非静默）。对策：本批保留顶层拷贝（断链不发生）；后续删除批次须在 release notes 说明该一次性影响 |
-| 双宿主（**修正** [A-AUD-1/8]） | 原表述"zcode 不走此发现链，无回归影响"不准确：`d8-compat.corePackageDir()` 正是走同类 `import.meta.url` 上溯并在打包态失败（今日 13 条 warn），只是被 `TAIJI_AGENT_ENGINE_ROOTS` 兜住。zcode 引擎进程**结构上不需要** core 发现面（只依赖 `subagent-engine-sdk`，SDK 明令禁止 import core；agent/systemPrompt/tools 由宿主在 pi 进程解析后经 wire task 下发），故本修复对 zcode 无回归，但 d8-compat 应另行立项 |
+| 双宿主（**修正** [A-AUD-1/8]） | 原表述"zcode 不走此发现链，无回归影响"不准确：`d8-compat.corePackageDir()` 正是走同类 `import.meta.url` 上溯并在打包态失败（今日 13 条 warn），只是被 `TAIJI_AGENT_ENGINE_ROOTS` 兜住。zcode 引擎进程**结构上不需要** core 发现范围（只依赖 `subagent-engine-sdk`，SDK 明令禁止 import core；agent/systemPrompt/tools 由宿主在 pi 进程解析后经 wire task 下发），故本修复对 zcode 无回归，但 d8-compat 应另行立项 |
 | 缓存 | `getWorkflow` 60s TTL 按 workspaceRoot 分桶，产物路径变化在重启后自然生效，无跨形态污染 |
 | 骨架 symlink 化风险 | verify 断言 `startsWith(STAGED)` 拦截（F11） |
 
@@ -273,7 +273,7 @@ a. `<available_workflows>` 注入含内置 6 项；
 b. `subagents` 批量调用成功（2 个极小任务）；
 c. `workflow run <location>` 按 path 跑 fan-out 成功；
 d. `<available_subagents>` 注入含内置 10 角色；
-e. `pi-host-*.log` 无"注入根解析失败"新条目（d8-compat 的 warn 属 §5 另一立项，不在本验收面）。
+e. `pi-host-*.log` 无"注入根解析失败"新条目（d8-compat 的 warn 属 §5 另一立项，不在本验收侧）。
 
 ### 4.3 e2e 影响面评估（项目 MANDATORY，原缺 [F7]）
 
@@ -324,7 +324,7 @@ dev（`pnpm dev`）与 npm 安装形态各跑一次 §4.2 a–d 抽样。
   peer 解析只是独立 pi 形态回退源。即便回退为空集，schema 任务也由 engine 侧
   `assertSchemaEnforcementArmed` 断言② fail-fast，不会静默完成。（原文档"失败回退空集属设计内"
   描述的是未发生的事件，证据链不成立——已修正）；
-- **zcode 存疑项已判定** [A-AUD-8]：zcode 引擎进程**结构上不需要** core 发现面（`zcode-subagent-cli`
+- **zcode 存疑项已判定** [A-AUD-8]：zcode 引擎进程**结构上不需要** core 发现范围（`zcode-subagent-cli`
   只依赖 `subagent-engine-sdk`，SDK 契约禁止 import core；emulated schema 引擎无孙进程扩展依赖），
   agent/systemPrompt/tools 由宿主在 pi 进程解析后经 wire task 下发。原"存疑待验"问错了对象——
   真正要跟踪的是 d8-compat（上条）。[UNVERIFIED：建议补一次打包态 `engine: zcode` + 显式内置角色
@@ -415,12 +415,12 @@ npm 槽扫描命中 agents 10 / workflows 6、invalids 0；换锚 `fan-out.js` �
 | A-AUD-5 | §1.5"默认单派发被连带"结论错误：省略 agent 时**不加载** agentConfig，与发现链无关；显式点名失败是 loud throw | ✅ 代码三处（run-orchestration/record-access/agent-registry） | §1.5（已改写） |
 | A-AUD-6 | §4 验证计划对"滤镜剪枝"结构性失明：resolve 冒烟须区分 **pre/post-package**；附 4 条命令级断言 | ✅ /tmp 复刻（pre 绿 / post 红） | §4.1（新增 4 条断言） |
 | A-AUD-7 | "verify 在 CI 生效"措辞不准（CI 经 builtin-ext-bundle 间接跑 dev staged） | ✅ 已核 | §4.1 |
-| A-AUD-8 | zcode 存疑项**问错对象**：zcode 结构上不需要 core 发现面；要跟踪的是 d8-compat | 采纳（附 [UNVERIFIED] 实验建议） | §5 末两项 |
+| A-AUD-8 | zcode 存疑项**问错对象**：zcode 结构上不需要 core 发现范围；要跟踪的是 d8-compat | 采纳（附 [UNVERIFIED] 实验建议） | §5 末两项 |
 | A-AUD-9 | §5 首条"复用 templates 机制"不成立（骨架在 node_modules 下，不在 PACKAGE_ASSET_DIRS 语义内） | 采纳 | §5 首条 |
 | A-AUD-10 | 同类面全景清单（每处资产解析的打包态裁决）+ 非 index.js 资产逐个裁决 | 采纳 | §5 末条 |
 
 **根因表述修正（A-AUD-10/Q5）**：三锁**不是等价三把**——条件乙（锚点被剪枝）是**必要条件不可省**
-（只修甲后产物仍坏，已实证）；条件甲是解析范围；"孤儿资产"不是独立锁，是条件甲在发现面的具体表现。
+（只修甲后产物仍坏，已实证）；条件甲是解析范围；"孤儿资产"不是独立锁，是条件甲在发现范围的具体表现。
 最小充分条件 = "锚点在打包产物内可解析"。§1.6 已按此重写并显式登记同类残留（d8-compat /
 hostPackageNodeModulesRoot），说明本类问题是**系统性机理**而非单点写错。
 

@@ -5,7 +5,7 @@
 // subagent-permanent-session-model.md §3.2.7 统计行与 round 基线行；impl-plan §2 U7
 // 行验收条款「revive 前轮统计保留 + 跨重启恢复」）。
 //
-// 四组验收面：
+// 四组验收侧：
 //   ① revive 前轮统计保留：事件流收条播种 → 新 store 实例 light 重建水合
 //      （turns/tokens/round）→ markResurrected 基线水合 → 新轮增量在基线上累加
 //      （跨轮连续；设计原文的 roundBaseTurnIndex 字段已随 H1 U6 / D7 ③ 退役，

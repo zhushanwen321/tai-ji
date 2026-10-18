@@ -327,7 +327,7 @@ export function useComposerBarDensity(sessionId: Ref<string | null>): UseCompose
     passCount = 0
   })
 
-  // 托盘条目范围 / 插件贡献 / headerAction 声明面变化会改左簇占宽（散图标 ↔ 聚合 ↔ 缺席），重新判一次
+  // 托盘条目范围 / 插件贡献 / headerAction 声明侧变化会改左簇占宽（散图标 ↔ 聚合 ↔ 缺席），重新判一次
   watch(hasTrayItems, () => scheduleFitPass())
   watch(pluginToolbarContributionCount, () => scheduleFitPass())
   watch(hasHeaderActionEntries, () => scheduleFitPass())

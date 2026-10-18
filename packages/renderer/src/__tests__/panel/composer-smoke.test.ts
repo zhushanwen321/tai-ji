@@ -81,7 +81,7 @@ const depsMock = vi.hoisted(() => ({
 }))
 vi.mock('@/composables/features/new-task/useNewTaskDeps', () => ({
   // deps.flow 的 currentCwd 同样真 ref（Landing `flow.currentCwd.value` 直读）；与
-  // useNewTaskFlow 工厂各持独立实例——冒烟零跨面写入，语义等价
+  // useNewTaskFlow 工厂各持独立实例——冒烟零跨实例写入，语义等价
   useNewTaskDeps: () => ({ flow: { ...flowMock, currentCwd: ref<string | null>(null) }, ...depsMock }),
 }))
 
@@ -131,7 +131,7 @@ vi.mock('@/stores/session', () => ({
   useSessionStore: () => ({ active: undefined, list: [], applySnapshot: vi.fn(), revive: vi.fn() }),
 }))
 
-// ── ComposerInput mock（共用面收敛 helpers/composer-mount；data-testid 供冒烟断言）──
+// ── ComposerInput mock（共用部分收敛 helpers/composer-mount；data-testid 供冒烟断言）──
 const { lastInputText, lastSetText, ComposerInputMock } = makeComposerInputMock()
 
 const SIMPLE = defineComponent({ name: 'SimpleStub', template: '<div />' })

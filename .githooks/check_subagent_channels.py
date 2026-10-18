@@ -19,7 +19,7 @@ custom 消息注入点唯一性检查（C-ext-19，pi-boundary-reliability §3.3
   g4-allow 注释）。
   规则 2（--model）："--model" 字面量不得出现在模型引用白名单外（扫描范围保持
   subagent-workflow 域——全 extensions 的模型引用漂移由 MODELREF 检查
-  E2E-MODELREF-01 单独看护，不在本检查重复扩面）：扩展域内字符串→模型身份只允许经
+  E2E-MODELREF-01 单独看护，不在本检查重复扩大范围）：扩展域内字符串→模型身份只允许经
   shared/model-ref.ts（assertCanonicalModelRef，切片 1 U1），禁裸串拼
   （事故 A F1：影子精确匹配 vs pi pattern 引擎互不知晓 → 静默换模 429）。
 

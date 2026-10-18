@@ -30,7 +30,7 @@ const CGNAT_SECOND_OCTET_MAX = 127
  * 入参来自 os.networkInterfaces 的 IPv4 address（点分四段，形态可信）；
  * 第二段非数字时比较结果为 false（NaN 不落在边界内），天然拒非法形态。
  * 已知误报源：Cloudflare WARP 等少数 VPN 同用 CGNAT 段——误报后果仅是候选
- * 标注偏差（用户试连不可达），无安全面，可接受。
+ * 标注偏差（用户试连不可达），无安全风险，可接受。
  */
 function isTailscaleAddress(address: string): boolean {
   const octets = address.split('.')

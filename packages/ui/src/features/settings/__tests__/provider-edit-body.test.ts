@@ -10,7 +10,7 @@
  * ④ 混合模型列表（catalog）：builtin 条目只读 + Built-in 徽章；override 条目可编辑/可删 +
  *    Custom 徽章；手动添加入口开放
  * ⑤ save payload：models 只含 override 条目（builtin id 不回传）+ authMethod 字段
- * ⑥ 添加模型表单 reasoning 思考开关（D4「GLM 思考等级被钳 off」事故修复面）：
+ * ⑥ 添加模型表单 reasoning 思考开关（D4「GLM 思考等级被钳 off」事故修复范围）：
  *    aria-label 可定位 + aria-checked 随点击翻转 + 翻转结果透传进 save payload
  *
  * 与 renderer 端 provider-edit-body-phase-b.test.ts 的差异（mock 层全部换 injection stub）：
@@ -169,7 +169,7 @@ const setProviderSpy = vi.fn(async (_id: string, _data: SetProviderData) => ({})
 /** 显式标注返回类型：M4 场景 ⑨ 需按用例注入 results / error（类型推断会把返回值收窄成 models: never[]） */
 const discoverModelsSpy = vi.fn(async (): Promise<DiscoverModelsResponse> => ({ success: true, models: [] }))
 
-/** [C3] 共享 seam 桩工厂（@taiji/core/testing，全方法面中性默认）+ 本文件两个 spy。 */
+/** [C3] 共享 seam 桩工厂（@taiji/core/testing，全方法侧中性默认）+ 本文件两个 spy。 */
 function makeTransport(): SettingsTransport {
   return makeSettingsTransportStub({
     setProvider: setProviderSpy,
@@ -554,7 +554,7 @@ describe('编排链路：dirty 上抛与测试连接', () => {
   })
 })
 
-// ══ 场景 ⑥：添加模型表单 reasoning 思考开关（D4 事故修复面）══════════════════
+// ══ 场景 ⑥：添加模型表单 reasoning 思考开关（D4 事故修复范围）══════════════════
 
 /**
  * ModelListSection 真实渲染（非 stub）中的 reasoning Switch（reka SwitchRoot →

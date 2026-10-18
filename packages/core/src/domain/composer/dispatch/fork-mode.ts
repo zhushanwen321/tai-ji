@@ -12,7 +12,7 @@
  *
  * [D8 泛化] fork 与 handoff 曾约 75% 逐字镜像（enter/exit/signal watch 检查/handleEsc/
  * handleSend 骨架，设计 §2 例 5）。行为骨架已收敛到 createStagingMode
- * （./staging-mode），本模块 = fork 配置对象 + 薄包装：公开 API（返回面 8 项）与
+ * （./staging-mode），本模块 = fork 配置对象 + 薄包装：公开 API（返回结构 8 项）与
  * ForkDeps 注入契约保持不变，消费方零改动。fork 差异全部经配置表达（P2 清单见
  * staging-mode.ts 头注）：send 目标 = forkSessionAsk（空 content 检查在 features 层
  * 退化为纯 fork → allowsEmptySend=true）；无 enter 检查 / 互斥退出 / 发送兜底检查 /

@@ -99,7 +99,7 @@ function readSpawnMarkers(): string[] {
   return JSON.parse(readFileSync(getSpawnMarkersPath(argvDataDir), 'utf-8')) as string[]
 }
 
-describe('A · RpcClient.start：argv 无 --session-dir + 清单落盘（集成面）', () => {
+describe('A · RpcClient.start：argv 无 --session-dir + 清单落盘（集成测试侧）', () => {
   beforeAll(() => {
     argvDataDir = mkdtempSync(join(tmpdir(), 'rpc-spawn-markers-'))
   })

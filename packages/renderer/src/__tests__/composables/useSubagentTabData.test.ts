@@ -10,7 +10,7 @@
  *
  * mock 模式对齐 __tests__/panel/subagent-tab.test.ts（@/api 门面 session 重定向 + transport/api
  * events mock）；chat store 用真 store（pinia）——虚拟分区即 MessageStream 渲染源，
- * getMessages(virtualId) 断言即用户可见内容面（三视角之观察者形态）。
+ * getMessages(virtualId) 断言即用户可见内容部分（三视角之观察者形态）。
  *
  * 运行：cd packages/renderer && npx vitest run src/__tests__/composables/useSubagentTabData.test.ts
  */

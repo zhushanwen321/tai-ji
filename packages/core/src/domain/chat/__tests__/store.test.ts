@@ -2,7 +2,7 @@
  * createChatStore factory 行为单测（core chat/domain store，P3 w4 迁移锁定）。
  *
  * 测试 factory 产物不经 pinia defineStore 的纯行为（在 effectScope 内直接调 createChatStore），
- * 锁定 chat 域 store 层核心迁移面：
+ * 锁定 chat 域 store 层核心迁移范围：
  * - messages 分区（hydrate 检查 / setMessages 覆盖 / appendUser）
  * - isGenerating 派生（streamingSessionIds scan + applyMessageEvent 端到端）
  * - finalizeSession reason→终态映射（normal/error + toolCall 级联）

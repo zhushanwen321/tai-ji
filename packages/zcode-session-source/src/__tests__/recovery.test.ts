@@ -101,7 +101,7 @@ describe('W1 恢复路径配对断言（静息态库：-wal 缺失）', () => {
         expectProbeOutcomeAccounting(probe, 'readonlyDirectOpen', resolveRestDbExpectation(), TOTAL_ROWS)
       } else {
         // node 侧不对称半边（F24）：直开成功且创建 -shm/-wal（close 后残留）——
-        // 这是恢复阶梯要消除的宿主目录副作用面
+        // 这是恢复阶梯要消除的宿主目录副作用范围
         const ro = driver.open(dbPath, { readOnly: true })
         ro.prepare('SELECT COUNT(*) AS c FROM session').get()
         ro.close()

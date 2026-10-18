@@ -105,7 +105,7 @@ vi.mock('vue-i18n', () => ({
   useI18n: () => ({ t: vi.fn((key: string) => key) }),
 }))
 
-// ModelSelectPopover / ModelPickerPanel / Popover 原语：不 mock——被测面本体
+// ModelSelectPopover / ModelPickerPanel / Popover 原语：不 mock——被测对象本体
 import SubagentTab from '../SubagentTab.vue'
 
 const MODELS = [

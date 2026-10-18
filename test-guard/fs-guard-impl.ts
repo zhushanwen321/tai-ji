@@ -26,7 +26,7 @@ export const REAL_DATA_DIR = resolve(join(homedir(), '.taiji'))
  * （symlink 真身，目标存在时）。双形式必要性（macOS 实测）：os.tmpdir() 返回
  * /var/folders/...，而测试路径经 realpathSync 后是 /private/var/folders/...——
  * 单形式前缀匹配会把合法 tmp fixture 误拦。realpath 形式同时是 symlink 别名的
- * 权威判定面（/tmp/link → ~/.taiji 的真身必须被拒）。
+ * 权威判定逻辑（/tmp/link → ~/.taiji 的真身必须被拒）。
  */
 function pathVariants(p: string): string[] {
   const variants = [resolve(p)]

@@ -9,7 +9,7 @@
 //   ③ event 通知（text_delta 流 + 终态 message_end/turn_end，seq 单调）；
 //   ④ run 终态应答：outcome.content 与 handle.sessionRef（隔离库 dbPath）正确；
 //   ⑤ dispose 幂等应答 + 进程随 stdin 关闭退出（自灭检查主判据的隐式验证）。
-// 驱动面自持（不走 core EngineClient——对端语义互证靠帧形状与 SDK 判别检查对齐）。
+// 驱动侧自持（不走 core EngineClient——对端语义互证靠帧形状与 SDK 判别检查对齐）。
 
 import { spawn, type ChildProcess } from "node:child_process";
 import { mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
@@ -116,7 +116,7 @@ class EngineProc {
         HOME: fakeHome,
         TAIJI_ZCODE_CLI: FAKE_CLI,
         FAKE_SESSION_SCENARIO: scenarioPath,
-        // 剥可能干扰的宿主继承面（CI/本地环境差异面收敛）
+        // 剥可能干扰的宿主继承面（CI/本地环境差异点收敛）
         ZCODE_SESSION_DB_PATH: "",
         ZCODE_SESSION_DB: "",
         ...extraEnv,
@@ -524,7 +524,7 @@ describe("bin e2e：final-frame 先落定 + 权威 turn.terminal 迟到的 stder
     }
   });
 
-  it("迟到 failed：stderr 保留 warn（假成功识破防御面），文案含原样 status", { timeout: 60_000 }, async () => {
+  it("迟到 failed：stderr 保留 warn（假成功识破防御机制），文案含原样 status", { timeout: 60_000 }, async () => {
     const { engine, runResp } = await runOnce(writeLateTerminalScenario("failed"));
     try {
       // 权威 status=failed 经 lastTerminalStatus 分流为 run-failed（P-Z2 门修正）

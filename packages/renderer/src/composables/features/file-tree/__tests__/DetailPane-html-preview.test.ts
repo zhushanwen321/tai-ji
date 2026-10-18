@@ -3,7 +3,7 @@
  *
  * 观察者视角（用户可见 DOM）：.html 在抽屉走 code 类 shiki 源码高亮（与实施前行为一致）；
  * 渲染态的 DOM 足迹全部消失——「预览 | 源码」切换、sandbox iframe、刷新按钮、渲染态
- * 内容区容器均不存在（预览面收敛到消息流内联容器 HtmlPreviewInline，§6.3 D3）。
+ * 内容区容器均不存在（预览区域收敛到消息流内联容器 HtmlPreviewInline，§6.3 D3）。
  *
  * mock 策略：vi.mock('@/composables/features/file-tree/useDetailPane') 控制 state
  * （.html 命中 code 类后 useDetailPane 与普通文件无差别）；子渲染器 stub 掉。

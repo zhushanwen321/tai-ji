@@ -37,7 +37,7 @@
  * - L3 真实 LLM（impl-plan A7 方式列）：faux 统一队列无法表达「主长 turn × btw 三短问」的进程间
  *   异构节奏（两进程独立 shift 同一序列、turn 边界结构性对齐），model-keyed 分道被 btw spawn 的
  *   inheritSessionModel（model: undefined，argv 无 --model）挡死——不翻 L2.5，理由登记 e2e-map note。
- * - 凭证播种：拷本机真实 provider 配置（models.json/auth.json）+ settings 最小面（defaultProvider/
+ * - 凭证播种：拷本机真实 provider 配置（models.json/auth.json）+ settings 最小子集（defaultProvider/
  *   defaultModel/retry）进临时 dataDir——刻意剥 packages/skills，防用户扩展/skill 清单漂移进 e2e
  *   （pi-fixture「不拷 settings 全量」同款理由）。只读源目录，不触碰真实数据目录（写删全在 tmp）。
  *
@@ -117,7 +117,7 @@ function realCredentialSkipReason(): string | null {
 }
 
 /**
- * 播种临时 dataDir 的 agent 子树：拷 models.json/auth.json（存在才拷）+ 写 settings 最小面
+ * 播种临时 dataDir 的 agent 子树：拷 models.json/auth.json（存在才拷）+ 写 settings 最小子集
  * （defaultProvider/defaultModel——过 runtime getDefaultModel 门禁；retry 关闭保预算确定性）。
  * 刻意剥 packages/skills：用户扩展/skill 清单不进 e2e（pi-fixture 同款防漂移理由）。
  */
@@ -351,7 +351,7 @@ test('S7 (btw real): 主 turn 进行中 btw 连发 3 条 → 主 turn 无 abort 
     mainListen = undefined
     vidListen = undefined
 
-    // ── 断言 ②③（持久面）：pi session JSONL 全文滚动检查 ──
+    // ── 断言 ②③（持久化侧）：pi session JSONL 全文滚动检查 ──
     const agentDir = path.join(dataDir, 'agent')
     // 会话文件落 sessions/<encodeCwd>/<sid>.jsonl 子目录（与 btw/<encodeCwd>/ 同构布局），
     // 递归扫描——首版扁平 readdir 假设是该 spec 首次真执行（阶段 5 A7）暴露的资产 bug。
@@ -377,7 +377,7 @@ test('S7 (btw real): 主 turn 进行中 btw 连发 3 条 → 主 turn 无 abort 
     expect(mainFile, '含 MAIN 哨兵的主会话 JSONL 应可定位（零直写约束下由 pi 自己落盘）').toBeDefined()
 
     const mainText = fs.readFileSync(mainFile!, 'utf8')
-    // ② steer/重复投递面：MAIN 哨兵恰 1 次 + 全文无 aborted
+    // ② steer/重复投递检查：MAIN 哨兵恰 1 次 + 全文无 aborted
     expect(
       countOccurrences(mainText, MAIN_MARKER),
       '主会话 JSONL 中 MAIN 哨兵应恰 1 次（>1 = 主 prompt 被重复投递/steer 注入痕迹）',

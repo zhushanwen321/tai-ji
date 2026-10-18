@@ -1,6 +1,6 @@
 // src/execution/registry-reconcile/sweep-binding.ts
 //
-// SubagentService 与注册表对账 sweep（reconcile-sweep.ts）的装配绑定面。
+// SubagentService 与注册表对账 sweep（reconcile-sweep.ts）的装配绑定侧。
 //
 // 从 subagent-service.ts 抽出的纯绑定代码（max-lines 纪律）：sweep 的 store 读侧
 // 判据闭包内聚本文件（workflow 判据经共享判定核 findRunSettlementEvidence，
@@ -38,7 +38,7 @@ export function settlementEvidenceToRunState(state: RunSettlementEvidence): Supe
   return "active";
 }
 
-/** 绑定面（SubagentService 供给；全部惰性——见文件头注）。 */
+/** 绑定侧（SubagentService 供给；全部惰性——见文件头注）。 */
 export interface ReconcileSweepBinding { // oe-exempt:20260928:framework:sweep 依赖注入范围 ports 契约先立——生产实现经 SubagentService 单点装配，测试 fake 为第二变体
   getStore(): RecordStore;
   getPi(): PiLike | null;
@@ -98,7 +98,7 @@ export function runPendingReconcileSweepForService(binding: ReconcileSweepBindin
       },
       // [F2] type=workflow 及畸形条目的收尾判据（设计 D2 sweep 判据补全——
       // 「终态集 ∪ 已离场/不存在」对 workflow run 同样成立）。
-      // [W2/V1 D6 判据源改接] 判据源 = journal run-settled 帧 ∨ manifest 终局面
+      // [W2/V1 D6 判据源改接] 判据源 = journal run-settled 帧 ∨ manifest 终局条目
       //（经 [U1] 共享判定核 findRunSettlementEvidence）——两态机持久化快照字段
       // 退役（活体写点删除后 v2 run 的 state 快照永停 running，旧判据对全部 v2
       // run 永判 active = sweep 结构性静默失效）。判定矩阵保守侧（非终态/坏链/

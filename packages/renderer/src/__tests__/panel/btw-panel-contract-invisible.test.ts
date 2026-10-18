@@ -1,5 +1,5 @@
 /**
- * BtwPanel 契约反向断言（btw-question D9⑤，UI 不可见面检查）。
+ * BtwPanel 契约反向断言（btw-question D9⑤，UI 不可见性检查）。
  *
  * D9⑤：BTW_BEHAVIOR_CONTRACT 是 model-only 单条注入（spawn `--append-system-prompt`），
  * 明确「不进对话流渲染」。本测试从契约源文件正则提取字面量为常量 A，渲染含普通消息 /

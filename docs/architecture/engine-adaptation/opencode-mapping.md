@@ -181,7 +181,7 @@ opencode 两层 message/part（user message → N 个 assistant message，各含
 
 - `method: "select"`：title=header，message=question，options=labels；应答 `POST /question/{requestID}/reply {answers: string[][]}` → `{value: <label>}`；`POST /question/{requestID}/reject` → `{cancelled: true}`（工具侧收 Question.RejectedError，processor.ts:200）。
 
-**UiRequest 9 method 对齐度**：select←question.v2；confirm←permission.asked；**input/editor/notify/setStatus/setWidget/setTitle/set_editor_text 无对应**——opencode 无文本输入/展示写入类交互面，一律 `{unsupported:true}` 或适配器本地降级（记日志丢弃）。
+**UiRequest 9 method 对齐度**：select←question.v2；confirm←permission.asked；**input/editor/notify/setStatus/setWidget/setTitle/set_editor_text 无对应**——opencode 无文本输入/展示写入类交互侧，一律 `{unsupported:true}` 或适配器本地降级（记日志丢弃）。
 
 ## 8. 能力位 11 位表
 

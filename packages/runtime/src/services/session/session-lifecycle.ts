@@ -594,7 +594,7 @@ export class SessionLifecycle implements ISessionRegistry {
       // append 只有模式一段（全局追加归 pi-system-prompt 扩展）。
       systemPrompt: resolveEffectiveSystemPrompt(resolution, this.svc.getReplaceSystemPrompt()),
       appendSystemPrompt: resolveAppendSystemPrompt(resolution),
-      // F1b（设计 §7.5 E4 trace 披露面）：模式回落事实现随 spawn 出站 env 到达 pi 子进程。
+      // F1b（设计 §7.5 E4 trace 披露部分）：模式回落事实现随 spawn 出站 env 到达 pi 子进程。
       env: buildPresetFallbackEnv(resolution),
       ...presetClientOptions,
     })
@@ -1019,10 +1019,10 @@ export class SessionLifecycle implements ISessionRegistry {
     // 发生、被 fireLineTerminated 捕获（删除不整体失败但销毁回调被跳过）——两形态标滞留
     // 同为单条 bounded，净风险不变。
     fireDeathDisposition(sessionId, 'delete', { hasDestroySink: session !== undefined })
-    // [M4-a / btw-question D4+D9④] btw 线直删分支（下一段）：deleteByCwd 收集面「故意含 hidden」的
+    // [M4-a / btw-question D4+D9④] btw 线直删分支（下一段）：deleteByCwd 收集侧「故意含 hidden」的
     // 既有不变量保留（活跃线 vid 进批内 cwdSessions），本分支让直删与级联/btw.remove
     // **三路收敛单入口 closeLine**——杀进程 + 注册表移除 + 线文件删除（路径限定 btw 根内）
-    // 全在 btw 侧完成，不落主会话 trash/sidecar 清理面；线已不在（并发双删 / 主删级联先行 /
+    // 全在 btw 侧完成，不落主会话 trash/sidecar 清理侧；线已不在（并发双删 / 主删级联先行 /
     // 重复调用）= 幂等 no-op 不抛——deleteByCwd 批内不得因重复处置记 failed。
     // 未注入 ops（存量测试装配）→ fall through 既有两分支，行为零变更。
     if (isBtwLine) {
@@ -1330,7 +1330,7 @@ export class SessionLifecycle implements ISessionRegistry {
       // 模式提示词两通道（设计 §7.2）——restore 用本次 resolve 的 resolution。
       systemPrompt: resolveEffectiveSystemPrompt(resolution, this.svc.getReplaceSystemPrompt()),
       appendSystemPrompt: resolveAppendSystemPrompt(resolution),
-      // F1b（设计 §7.5 E4 trace 披露面）：回落事实现随 spawn 出站 env 到达 pi 子进程。
+      // F1b（设计 §7.5 E4 trace 披露部分）：回落事实现随 spawn 出站 env 到达 pi 子进程。
       env: buildPresetFallbackEnv(resolution),
       ...presetClientOptions,
       // P1（pi-assumption final gate V1⑤）：pi CLI --model 恒优先于 session entry 恢复
@@ -1544,7 +1544,7 @@ export class SessionLifecycle implements ISessionRegistry {
       // 模式提示词两通道（设计 §7.2）——fork 继承源 session 的 preset，用 forkResolution。
       systemPrompt: resolveEffectiveSystemPrompt(forkResolution, this.svc.getReplaceSystemPrompt()),
       appendSystemPrompt: resolveAppendSystemPrompt(forkResolution),
-      // F1b（设计 §7.5 E4 trace 披露面）：fork 继承的 preset 若已悬空，回落事实现随 env 出站。
+      // F1b（设计 §7.5 E4 trace 披露部分）：fork 继承的 preset 若已悬空，回落事实现随 env 出站。
       env: buildPresetFallbackEnv(forkResolution),
       ...presetClientOptions,
     })

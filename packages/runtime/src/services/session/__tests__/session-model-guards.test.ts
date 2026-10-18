@@ -24,7 +24,7 @@ interface ProviderStub {
 
 /**
  * 最小 configService stub——只实装被测函数消费的 listProviders()。
- * IConfigService 是大型接口，测试只注入单一依赖面（与消费方测试的注入风格一致）。
+ * IConfigService 是大型接口，测试只注入单一依赖范围（与消费方测试的注入风格一致）。
  */
 function makeConfigService(
   providers: ProviderStub[],

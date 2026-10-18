@@ -13,7 +13,7 @@
  * 该块及其后内容整体留 tail 段——段内裸标签「吸进」语义与整串渲染一致，live ≡ reload
  * 构造性成立。
  *
- * 对 markdown.ts 的依赖面只有其公开导出（renderMarkdownSegments），协议类型
+ * 对 markdown.ts 的依赖范围只有其公开导出（renderMarkdownSegments），协议类型
  * （MarkdownSegment / MarkdownEnv / IncrementalMarkdownCache / IncrementalMarkdownResult）
  * SSOT 在 ./markdown-types；依赖严格单向（incremental → markdown → markdown-types，无循环）。
  * 曾由 markdown.ts 反向 re-export 本模块符号维持旧导入路径，因构成 ESM 循环依赖
@@ -34,7 +34,7 @@ import type { IncrementalMarkdownCache, IncrementalMarkdownResult, MarkdownEnv, 
 import { renderMarkdownSegments } from './markdown'
 // HTML 块判定常量（D7 同源复刻）：名单与标签正则 import 自 markdown-it 实装
 //（package exports "./*" 深路径可达，@types/markdown-it 同路径有 .d.mts 声明）——
-// 扫描器与 md.parse 用同一套判定源，版本一致性由 workspace 锁定，无漂移面
+// 扫描器与 md.parse 用同一套判定源，版本一致性由 workspace 锁定，无漂移
 import htmlBlockNames from 'markdown-it/lib/common/html_blocks.mjs'
 import { HTML_TAG_RE, HTML_OPEN_CLOSE_TAG_RE } from 'markdown-it/lib/common/html_re.mjs'
 

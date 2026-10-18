@@ -11,7 +11,7 @@
  *
  * 与 ProcessManager 的关系（设计 §4.4）：relay 子进程的发起方是 extension（经代理转交），
  * runtime 只是受托执行人——不进 RpcClient 体系（无 RPC 会话语义、无 attach 需求），
- * 两套进程表并列。复用面仅 findPiExecutable。
+ * 两套进程表并列。复用范围仅 findPiExecutable。
  */
 import { spawn, execFile, type ChildProcess } from 'node:child_process'
 import { createInterface } from 'node:readline'

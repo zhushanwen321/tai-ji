@@ -136,7 +136,7 @@ describe('模板运行时状态过滤', () => {
     expect(isRuntimeStateEntry(join('agent', 'skills'))).toBe(false)
   })
 
-  it('TEMPLATE_DIR_EXCLUDES 覆盖会话/记录/调度/日志面', () => {
+  it('TEMPLATE_DIR_EXCLUDES 覆盖会话/记录/调度/日志目录', () => {
     for (const d of ['subagents', 'records', 'scheduler', 'workflow-state', 'logs', 'sessions']) {
       expect(TEMPLATE_DIR_EXCLUDES).toContain(d)
     }

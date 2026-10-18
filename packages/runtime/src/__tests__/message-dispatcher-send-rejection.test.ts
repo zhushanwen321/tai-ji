@@ -281,7 +281,7 @@ describe('transport → dispatcher 端到端 clientUuid 透传（message.send ca
     expect(cap.sendArgs[0]).toEqual(['s1', 'hello', undefined, undefined])
   })
 
-  it('handler 侧 rejected ack 分支保留（协议兼容面；u5 随协议条目退役清理）', async () => {
+  it('handler 侧 rejected ack 分支保留（协议兼容范围；u5 随协议条目退役清理）', async () => {
     const { cap, handler } = makeSendHandler({ blocked: true, rejected: true })
 
     await handler.handleSessionMessage(sendMsg({ sessionId: 's1', content: 'hello' }), {} as never)

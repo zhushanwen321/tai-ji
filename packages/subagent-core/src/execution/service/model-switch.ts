@@ -122,7 +122,7 @@ readonly markModelOverride: (record: ExecutionRecord, override: ModelOverride) =
   readonly resolveEnginePort: (record: Pick<ExecutionRecord, "engine" | "engineHandle" | "id">) => EnginePort;
   /**
    * 引擎 setModel 转发通道（签名 = SDK SetModelParams→SetModelResult）。生产实装 =
-   * EnginePort.setModel 协议转发（U3 实装的可选面——manifest capabilities.setModel
+   * EnginePort.setModel 协议转发（U3 实装的可选能力部分——manifest capabilities.setModel
    * = 'native' 条件挂方法）；capability 非 'native' 的引擎在步骤②预检即被拦截，
    * 本通道只承接 native 引擎。
    */
@@ -147,7 +147,7 @@ readonly markModelOverride: (record: ExecutionRecord, override: ModelOverride) =
    * 异步校验仍在全部写入前完成（步骤①语义不变），终局抛错走 catch 转 error 应答。
    */
   readonly assertRunNotTerminal: (runId: string) => void | Promise<void>;
-  /** run 级已受理成员 runId 全量清单（全切转发面，§7.4——不做宿主侧存活预判）。 */
+  /** run 级已受理成员 runId 全量清单（全量切走的转发，§7.4——不做宿主侧存活预判）。 */
   readonly listAcceptedMemberRunIds: (runId: string) => string[];
   /**
    * run 级覆盖意图持久化（U4a journal 覆盖事件——run 事件流是唯一合法持久化写入
@@ -193,7 +193,7 @@ const RACE_EXIT_NOTICE = "子进程在切换期间已退出，已记录，下次
  * 除 credential_missing 特判外的写侧分型登记）。词表外引擎错误码 / 无码错误走同一
  * 写侧兜底（「命令已送达、意图已表达」的保守归属，catch 实装按 credential_missing
  * 特判组织——特判 = SDK 词表全集减本词表）；shared 的 SUBAGENT_SET_MODEL_ACCOUNTED_
- * ERROR_CODES 是本词表的前端显示面映射（badge 亮灯依据，词表外码不亮 badge）。
+ * ERROR_CODES 是本词表的前端显示侧映射（badge 亮灯依据，词表外码不亮 badge）。
  * **对账锚**：packages/runtime/src/infra/subagent-model-gateway.test.ts
  * 「core ↔ shared setModel 对账」——本词表扩位漏同步 shared 时该测试红。
  */

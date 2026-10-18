@@ -412,7 +412,7 @@ describe("reader registry 分发", () => {
     expect(messages[1]).toMatchObject({ role: "assistant", content: "kimi says" });
   });
 
-  it("同 id 覆盖注册（幂等，测试注入 fake 的机制面）", async () => {
+  it("同 id 覆盖注册（幂等，测试注入 fake 的机制部分）", async () => {
     const view: SessionView = {
       engineId: "zcode",
       turns: [{ text: "overridden", thinking: "", toolCalls: [], closed: true }],

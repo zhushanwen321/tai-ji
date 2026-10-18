@@ -38,7 +38,7 @@ function makeRecordingTransport() {
     unsubs.push(unsub)
     return unsub
   })
-  // [C3] 请求/动作默认值由共享工厂提供（seam 方法面全覆盖）；on* 用 register 包装记录 handler
+  // [C3] 请求/动作默认值由共享工厂提供（seam 方法侧全覆盖）；on* 用 register 包装记录 handler
   const transport = makeFakeTransport({
     onProviders: register('providers'),
     onModels: register('models'),

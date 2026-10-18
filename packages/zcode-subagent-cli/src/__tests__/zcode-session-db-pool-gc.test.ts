@@ -7,7 +7,7 @@
 //   ① 隔离库与池目录的分隔是**目录级**的——session-db/ 与任何 poolKey 池目录
 //      （engines/zcode/<poolKey>/，journal 落点）互不为前缀；
 //   ② journal 命名（journal-<taskId>.jsonl）与 db 文件（db.sqlite*）不同名族——
-//      removeOrphanJournals 的 journal-* 匹配面对 db 文件恒不命中。
+//      removeOrphanJournals 的 journal-* 匹配规则对 db 文件恒不命中。
 // 两条件任一破坏（未来改路径契约）时 core 侧行为检查会先红——本文件提供引擎包内
 // 的早期信号，不需要 core 依赖。
 
@@ -40,7 +40,7 @@ describe("池 GC 结构检查（A9 前提：隔离库与池目录目录级分离
     );
   });
 
-  it("db 文件名族与 journal 名族不相交（journal-*.jsonl 匹配面对 db.sqlite* 恒不命中）", () => {
+  it("db 文件名族与 journal 名族不相交（journal-*.jsonl 匹配规则对 db.sqlite* 恒不命中）", () => {
     const sessionDb = zcodeSessionDbPath(path.join(path.sep, "data-root"));
     const dbNames = [path.basename(sessionDb), `${path.basename(sessionDb)}-wal`, `${path.basename(sessionDb)}-shm`];
     for (const name of dbNames) {

@@ -56,7 +56,7 @@ export const OUTPUT_TAIL_MAX_REQUEST_BYTES = 1_048_576
 /** Interface for server methods needed by this handler */
 export interface SessionHandlerContext extends MessageHandlerContext {
   /**
-   * session 服务门面。交叉可选成员 = SessionService 上不在 ISessionService 接口面的
+   * session 服务门面。交叉可选成员 = SessionService 上不在 ISessionService 接口侧的
    * 消费端口（可选属性使组合根 server.ts setServices 的 ctx 对象字面量（静态类型
    * ISessionService）经结构兼容零改动通过类型检查——运行时实例恒有该成员；缺省仅出
    * 现在测试最小 mock 中，调用侧判空走防御分支）：
@@ -75,10 +75,10 @@ export interface SessionHandlerContext extends MessageHandlerContext {
    *   可选链防御与 markSessionViewed 同款——激活投递是旁路信号，最小 mock 缺该成员不应
    *   让 switch 请求失败。
    * - revokeMessage（message-revoke 设计 §3.3 D2，U4）：session.revokeMessage 七步编排
-   *   （RevokeOrchestrator）的转发面。可选成员形态对齐 getPlanState 先例——缺省仅出现
+   *   （RevokeOrchestrator）的转发侧。可选成员形态对齐 getPlanState 先例——缺省仅出现
    *   在测试最小 mock 中，case 内判空走 revoke_unsupported 防御分支。
    * - getWorkflowRunEvents / getWorkflowDag（workflow-visualization U3，设计 §3.1-4/§3.1-5）：
-   *   事件流拉取与 DAG 解析两 RPC 的转发面。可选成员形态对齐 revokeMessage 先例——
+   *   事件流拉取与 DAG 解析两 RPC 的转发侧。可选成员形态对齐 revokeMessage 先例——
    *   缺省仅出现在测试最小 mock 中，case 内判空走 *_unsupported 防御分支。
    */
   sessionService: ISessionService & {
@@ -91,7 +91,7 @@ export interface SessionHandlerContext extends MessageHandlerContext {
     getWorkflowDag?(sessionId: string, runId: string): Promise<WorkflowDagReply>
     /**
      * 会话消息条数（悬停详情卡消息计数）：SessionRecords
-     * 路径解析 + session-message-count 流式计数的转发面。可选成员形态对齐 getPlanState
+     * 路径解析 + session-message-count 流式计数的转发侧。可选成员形态对齐 getPlanState
      * 先例——缺省仅出现在测试最小 mock 中，case 内判空走 *_unsupported 防御分支。
      */
     getMessageCount?(sessionId: string): Promise<number>
@@ -824,7 +824,7 @@ export class SessionMessageHandler {
     }
     // delivery 域装配（D5/D7；msg-pipeline-debloat D4-4 后唯一装配入口）：subscribe
     // **之前**发一帧 session.delivery 全量快照——本次 subscribe 的 stateSnapshot 即含该帧，
-    // renderer 队列区在切 session/重连后零竞态恢复（G2/V5「断连重连队列区自动恢复」的装配面，
+    // renderer 队列区在切 session/重连后零竞态恢复（G2/V5「断连重连队列区自动恢复」的装配侧，
     // [HISTORICAL] 约束 7 的主动拉取机制，非冗余）。零抛错（sync 内部 warn 降级）：
     // 帧装配失败不得拖垮订阅主链。已有内核运行时才发帧（无运行时 = 无队列事实可派生视图）。
     this.deliveryTopic.sync(sessionId)
@@ -1007,7 +1007,7 @@ export class SessionMessageHandler {
     }
     // wire 帧 dbPath 白名单（MF-3-1 加固）：dbPath 在 wire 上是任意 WS 客户端可写字段，
     // 仅放行 zcodeImportDbAllowlist(dataDir) 封闭集合（隔离库/宿主库）；缺省 undefined =
-    // source 侧动态推导，放行。校验在 transport 边界执行（不可信面收尾），与源无关——
+    // source 侧动态推导，放行。校验在 transport 边界执行（不可信数据侧收尾），与源无关——
     // pi 源不消费 dbPath，带值即异常请求同拦。测试 fixture 库注入走 source deps 进程内
     // 通道（构造注入 getHostDbPath），不经 wire，不受本校验影响。
     const wireDbPath = msg.payload.dbPath
@@ -1186,7 +1186,7 @@ export class SessionMessageHandler {
     // queued/failed 本地移除；in-flight 走 clear_queue 收回-重投（D3 复用对账路径）。
     // 不可撤（已 delivered / 收回失败）→ cancelled:false + reason（§3.4），条目由对账器兜底。
     const outcome = await registry.cancel(sessionId, clientUuid)
-    // content 剥除出站裸标记（草稿恢复是用户面文本，投递元数据不进输入框；u3c restoreDraft 直取）
+    // content 剥除出站裸标记（草稿恢复是用户侧文本，投递元数据不进输入框；u3c restoreDraft 直取）
     const content = outcome.cancelled && outcome.content !== undefined ? stripDeliveryMarkers(outcome.content) : undefined
     // segments 快照（MF-1-2）：提交时经 attachSegments 持有的原始 segments，撤销成功才返回
     // （渲染侧按 ADR-0043 Segment[] 整段恢复 chips；无快照的条目不带键 → 纯文本恢复链）
@@ -1276,7 +1276,7 @@ export class SessionMessageHandler {
       // compact 失败：dispatcher.compact 已广播 session.compacted(error)（流式通知），此处补请求级 error envelope。
       // 分类码（msg-pipeline-debloat D4-2）：busy 预检拒绝的错误携带 code='compact_busy'
       //（dispatcher 抛出，对话流内联呈现已由 stream_warn 编排）；其余（pi 层失败——interpreter
-      // 对话流呈现 / ensureActive 恢复失败——session 状态面呈现）归 'compact_failed'。
+      // 对话流呈现 / ensureActive 恢复失败——session 状态侧呈现）归 'compact_failed'。
       // renderer 据分类码路由 toast 抑制（CompactErrorCode SSOT，未知码保守回退 toast）。
       const code = (e as { code?: string }).code === 'compact_busy' ? 'compact_busy' : 'compact_failed'
       return this.ctx.sendError(ws, code, toErrorMessage(e), msg.id, { sessionId: compactId })

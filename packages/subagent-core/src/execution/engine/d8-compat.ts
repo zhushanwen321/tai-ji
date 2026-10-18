@@ -281,7 +281,7 @@ function resolveManifestInfo(located: LocatedEnginePkg | undefined): ManifestInf
   };
 }
 
-/** RemoteEngine manifest 快照：capabilities 恒有；modelCatalog 三态语义（无枚举面不注入）。 */
+/** RemoteEngine manifest 快照：capabilities 恒有；modelCatalog 三态语义（无枚举情形不注入）。 */
 function buildManifestSnapshot(manifestInfo: ManifestInfo): RemoteEngineManifestSnapshot {
   return {
     capabilities: manifestInfo.capabilities,

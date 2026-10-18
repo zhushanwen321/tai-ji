@@ -61,7 +61,7 @@ async function piAssemblyOracle(
     if (!resource.available) continue;
     const content = getCachedFileContent(resource.path);
     if (content === null) continue; // pi: catch → logger.error → skip
-    // pi 壳 frontmatter 解析的派生视图面（parseResourceMeta 严格层）
+    // pi 壳 frontmatter 解析的派生视图侧（parseResourceMeta 严格层）
     const meta = parseResourceMeta(content, "agent");
     if (meta && meta.kind === "agent") {
       agentMap.set(meta.name, {

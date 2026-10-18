@@ -11,7 +11,7 @@
 //   销毁语义排除 —— 编排未调 triggerSessionCleanups：注册表 canary 不被触发
 //
 // mock 策略：请求注入经 __testing.mobileExtensionBus.emit（mobile-companion-band.spec /
-// mobile-form.spec 同款先例——生产订阅面 = dialog/form 通道 bus 订阅）；挂载真实 App
+// mobile-form.spec 同款先例——生产订阅侧 = dialog/form 通道 bus 订阅）；挂载真实 App
 // （provide 链 + CompanionBand 句柄登记走生产通路，exit 出口的 dialog 侧可观测性由此成立）。
 // form 通道分区与 queue 句柄为模块级单例，beforeEach/afterEach 经 __testing 重置。
 //
@@ -69,7 +69,7 @@ function emitDialogRequest(sessionId: string, requestId: string): void {
   })
 }
 
-/** 发一条 form 类 ui-request（C4 放行面，form 帧；mobile-form.spec 同款） */
+/** 发一条 form 类 ui-request（C4 放行范围，form 帧；mobile-form.spec 同款） */
 function emitFormRequest(sessionId: string, requestId: string): void {
   __testing.mobileExtensionBus.emit({
     kind: 'ui-request',

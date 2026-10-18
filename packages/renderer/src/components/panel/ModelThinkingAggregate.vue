@@ -120,7 +120,7 @@ const props = defineProps<{
 const { t } = useI18n()
 const open = ref(false)
 
-// ── 模型面（与 ModelSelectPopover 同源数据范围；聚合页不限定 provider）──
+// ── 模型侧（与 ModelSelectPopover 同源数据范围；聚合页不限定 provider）──
 const { pickerGroups, hasAnyModel, defaultModel, resolveProviderId } = useModelPickerData()
 
 /** 当前选中裸 id（hover 去重与高亮同用此值，复合串先拆段） */

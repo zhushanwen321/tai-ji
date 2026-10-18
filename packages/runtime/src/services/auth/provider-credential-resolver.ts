@@ -16,7 +16,7 @@
  * - 故本模块按降级路径自行展开 `$ENV_VAR` / `${ENV_VAR}`，与 pi 实装
  *   dist/core/resolve-config-value.js:123-129 resolveConfigValue 的模板分支同语义
  *   （pi auth-storage.js:213-216 读 auth.json 时经该函数解析）。
- * - command 配置值（`!` 前缀）不支持：**不执行 shell**（执行任意命令是副作用面），
+ * - command 配置值（`!` 前缀）不支持：**不执行 shell**（执行任意命令是副作用侧），
  *   连同「env 引用未定义」一起返回 { unsupported } 判别结构（RT-7#4）——消费方据此
  *   报「该凭据形态暂不支持」且禁止把形态标记当 key 下发外部请求（原样返回串作
  *   Bearer 是以畸形凭据打外部 API）。命中即不降级低优先源（显式配置错误不掩盖）。

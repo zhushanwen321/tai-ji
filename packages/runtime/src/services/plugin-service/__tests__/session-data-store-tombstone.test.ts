@@ -110,7 +110,7 @@ describe('B5 迟到写检查：set/delete 丢弃 + 不复活文件 + 不重建�
     expect(warned).toBe(true)
     // 检查先于 getPartition：写路径不重建分区
     expect(store.hasPartition('sid-b')).toBe(false)
-    // keys 只读不守（设计裁决：get/keys 不在检查面）——lazy 读已删文件得空集
+    // keys 只读不守（设计裁决：get/keys 不在检查侧）——lazy 读已删文件得空集
     expect(store.keys('sid-b')).toEqual([])
 
     store.flushAll() // 即便强制 flush，也无 dirty 可写

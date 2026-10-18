@@ -53,7 +53,7 @@ export interface FileHandleLike {
   close(): Promise<void>;
 }
 
-/** writer 的文件系统依赖面（结构接口：测试注入 fake，免 vi.mock 整个 fs 模块）。 */
+/** writer 的文件系统依赖范围（结构接口：测试注入 fake，免 vi.mock 整个 fs 模块）。 */
 export interface JournalFsDeps {
   mkdir(path: string, opts: { recursive: boolean }): Promise<unknown>;
   appendFile(path: string, data: string): Promise<void>;

@@ -149,7 +149,7 @@ function makeRunningRecord(id: string): ExecutionRecord {
   return record;
 }
 
-/** ChatRounds 直构（stdout-wedge 单测同款；本测试触达面补齐 store/pool/通知面）。
+/** ChatRounds 直构（stdout-wedge 单测同款；本测试触达面补齐 store/pool/通知侧）。
  *  overrides = 逐成员覆盖注入点（[§1.4 (a)] 等待排序用例消费）。 */
 function makeChatRounds(record: ExecutionRecord, overrides: Partial<ChatRoundsDeps> = {}): ChatRounds {
   const store = {

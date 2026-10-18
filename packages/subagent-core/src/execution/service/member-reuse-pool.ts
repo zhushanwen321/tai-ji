@@ -1,7 +1,7 @@
 // src/execution/service/member-reuse-pool.ts
 //
 // [D1 拆边 Class C 第 4 步] 自 `orchestration/member-reuse-pool.ts` 整体下沉（同一批
-// 消除 `service/workflow-dispatch` → 编排层的值反向边）。依赖面核查结论 = 可下沉：
+// 消除 `service/workflow-dispatch` → 编排层的值反向边）。依赖范围核查结论 = 可下沉：
 // 值依赖只有 `core/logger`（叶子），类型依赖只有 run-events 的 `WorkflowRunEvent`
 // （事件载荷接口按 Class B 先例留原位作类型导入——B1 已裁决「值不能反向依赖编排层」，
 // 类型边编译期擦除）；模块本体是 record 流的 fold + runId 分区内存表，零编排状态机
@@ -33,7 +33,7 @@
 // record 读通道经 MemberReusePoolIo 注入（生产装配 = terminal-actions 的
 // scanRunEvents——journal 单写者纪律：读侧不自建 journal 实例绕过 no-op 测试防线）。
 // 本模块不 import worker-message-pump / terminal-actions（消费方反向 import 本模块
-// 做收尾清空接线，双向直依赖会成环；编排侧导入面直连本模块）。
+// 做收尾清空接线，双向直依赖会成环；编排侧导入侧直连本模块）。
 //
 // 层归属：Engine。除 io 注入的 record 读外零 IO / 零时钟依赖（fold 纯函数可独立
 // 测试）。
@@ -61,7 +61,7 @@ export interface MemberReusePoolIo { // oe-exempt:20260927:framework:复用绑�
  * （其余事件类型跳过——fold 与 run 状态机派生视图 foldRunEventFrames 各取所需，互不
  * 干扰）。绑定语义 = 首派建绑（同 run 同名首个携带 recordId 的 agent-started 帧
  * 生效，后续同名续写帧的重复携带不换绑——zcode 语义下 run 内名唯一，重复携带是
- * 并行同名派发的防御面，首个为准与原 register 语义一致）。重放幂等：同一事件序列
+ * 并行同名派发的防御机制侧，首个为准与原 register 语义一致）。重放幂等：同一事件序列
  * 重复 fold 产出一致。
  */
 export function foldMemberBindings(events: readonly WorkflowRunEvent[]): Map<string, string> {

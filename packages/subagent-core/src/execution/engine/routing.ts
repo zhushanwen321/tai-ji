@@ -339,7 +339,7 @@ export function routeEngineForHost(opts: HostRouteOptions): EngineRouteResult | 
 // - 表生命周期随 run：窗口内首次解析引擎时 get-or-create（懒建，lifecycle 不感知）；
 //   finalizeRun 五步序列末尾统一 dispose（worker-message-pump coda 内调用
 //   disposeWorkflowWindowEngineState——编排侧唯一消费点）。
-// - 取用复用面：probe 与实际 run 必须拿到同一实例（probeCache 在实例上；两通道
+// - 取用复用范围：probe 与实际 run 必须拿到同一实例（probeCache 在实例上；两通道
 //   分叉 = probe 探的是窗口实例、run 却走 registry 单例——窗口实例收尾 dispose 后
 //   registry 单例反而常驻，G1 静默回归）。消费方（workflow-dispatch 的 probe +
 //   getEngineFn 注入、run-orchestration 的 probe）经 resolveWorkflowWindowEnginePort
@@ -352,7 +352,7 @@ export function routeEngineForHost(opts: HostRouteOptions): EngineRouteResult | 
 /**
  * 单个 workflow run 窗口的引擎实例状态。两份结构同生共死：
  * - instances：U1 窗口实例表（dispose 记账与收尾释放的唯一权威，幂等 disposeAll）；
- * - ports：本窗口已创建的引擎协议本体（engineId → EnginePort，取用复用面）。
+ * - ports：本窗口已创建的引擎协议本体（engineId → EnginePort，取用复用范围）。
  * 表登记与端口写入只在 resolveWorkflowWindowEnginePort 的创建分支成对发生，不存在
  * 单边漂移写点。
  */

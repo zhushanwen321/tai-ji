@@ -202,7 +202,7 @@ describe("[D4-③] coldLookupForAction 冷查/复活链", () => {
     expect(vi.mocked(deps.reportRecordTransition)).toHaveBeenCalledTimes(1);
     expect(vi.mocked(deps.reportRecordTransition)).toHaveBeenCalledWith(record);
     // 现状登记：resurrectColdRecord 的重建回填域不含 stopReason（候选的轮终停因展示位
-    // 不跨重启水合）——重建水合缺口归 U5/U6 重建面批次，本批不扩 readopt 行为。
+    // 不跨重启水合）——重建水合缺口归 U5/U6 重建侧批次，本批不扩 readopt 行为。
     expect(record.round).toBe(1);
   });
 
@@ -583,7 +583,7 @@ describe("[U6] transcriptAnchorOf / isAnchorResolvable 引擎分派", () => {
     expect(isAnchorResolvable({})).toBe(false);
   });
 
-  it("[U6] 冷查重建水合：zcode 候选（engineHandle.sessionRef）→ record.transcriptRef 落位（markResurrected 注入桩——zcode 无 sessionFile 锚，真实 store 写权声明面的 zcode 接线属后续单元）", () => {
+  it("[U6] 冷查重建水合：zcode 候选（engineHandle.sessionRef）→ record.transcriptRef 落位（markResurrected 注入桩——zcode 无 sessionFile 锚，真实 store 写权声明侧的 zcode 接线属后续单元）", () => {
     const deps: ColdLookupDeps = {
       findLightById: vi.fn(() =>
         makeFound({

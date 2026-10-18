@@ -6,7 +6,7 @@
  * - enterForkMode 记录 { srcSessionId, fromMessageId } 来源并透传给 forkSessionAsk
  * - handleForkSend 空文本也发送（allowsEmptySend=true，空 content 退化为纯 fork）
  * - fork 无 isInProgress/abort（B 阶段缺省），signal 命中本 session 触发 enter
- * - 公开返回面 8 项形状（forkMode/enter/exit/boxClass/placeholder/esc/send/asStagingAction）
+ * - 公开返回结构 8 项形状（forkMode/enter/exit/boxClass/placeholder/esc/send/asStagingAction）
  *
  * 范式参照 handoff-mode.test.ts：直接 import composable（不 mount），全 deps mock，
  * effectScope 包裹（watch 需 active scope）。
@@ -53,7 +53,7 @@ beforeEach(() => {
   vi.clearAllMocks()
 })
 
-describe('useComposerForkMode 公开返回面', () => {
+describe('useComposerForkMode 公开返回结构', () => {
   it('enterForkMode：mode 置 true + 记录来源 + 进入暂存态 + 聚焦', () => {
     const { deps, api } = setup()
     const focusSpy = vi.fn()

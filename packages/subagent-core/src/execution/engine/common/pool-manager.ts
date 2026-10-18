@@ -46,7 +46,7 @@ interface DirEntryLike {
   isDirectory(): boolean;
 }
 
-/** 清理的文件系统依赖面（结构接口：测试注入 fake，免 vi.mock 整个 fs 模块）。 */
+/** 清理的文件系统依赖范围（结构接口：测试注入 fake，免 vi.mock 整个 fs 模块）。 */
 export interface PoolFsDeps {
   readdirSync(path: string): DirEntryLike[];
   statSync(path: string): { mtimeMs: number };

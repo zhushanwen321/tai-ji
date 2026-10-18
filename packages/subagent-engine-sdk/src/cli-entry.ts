@@ -10,7 +10,7 @@
 // NDJSON 行循环 → close 留痕。
 //
 // stdout/stdin 用 process 全局（与 spawn.ts 同款先例——入口函数只在进程入口调用）。
-// 进程退出面：宿主 stdin EOF → 自灭检查（薄层 arm）杀进程组；正常 dispose 不退进程。
+// 进程退出处置：宿主 stdin EOF → 自灭检查（薄层 arm）杀进程组；正常 dispose 不退进程。
 
 import * as readline from "node:readline";
 
@@ -50,7 +50,7 @@ export function runEngineCliEntry(opts: RunEngineCliEntryOptions): void {
   configureLoggerSink({
     log(level, component, message, data) {
       // stderr 兜底先落（反向通道未就绪/失败时日志不丢）；host/log 为数据范围反向请求
-      // （10s 应答分类），失败吞掉——日志面不能拖垮主链路。
+      // （10s 应答分类），失败吞掉——日志侧不能拖垮主链路。
       // debug 不写 stderr：对齐 logger.ts CONSOLE_SINK 的「debug no-op」语义——
       // 引擎 stderr 落宿主 [rpc:stderr] 全量 ERROR 级链路，debug 刷屏会淹没真异常
       // （常态路径的分级降噪依赖此跳过）；host/log 反向请求仍全级别透传。

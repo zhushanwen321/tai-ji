@@ -178,7 +178,7 @@ export function toContributionInfos(
 /** E13 命令可用性三态（HeaderActionsHost 灰置状态机的判定输入）。 */
 export type HeaderActionCommandAvailability = 'registered' | 'unregistered' | 'unknown'
 
-/** HeaderActionsHost 数据源（声明镜像 + per-session 运行时镜像 + E13/E3 执行面）。 */
+/** HeaderActionsHost 数据源（声明镜像 + per-session 运行时镜像 + E13/E3 执行侧）。 */
 export interface HeaderActionsSource {
   /** headerAction 型声明（panel.header 挂载点）。响应式镜像：注册同步 / E2 清理与重放后刷新。 */
   getDeclarations(): ContributionRecord[]
@@ -248,7 +248,7 @@ export function resolveHeaderActionAvailability(
  *   void 后（生产调用方 main.ts 恒丢弃返回值），测试 afterEach dispose 与注册注入用例
  *   （contributions）取内部实例的唯一通道。dispose 回收本次装配（重复 init 前置调用 /
  *   测试 afterEach，幂等）：stop 两个 connected 重放器 watcher + dispose bridge（防 bus
- *   事件翻倍，项目规则#2；bus 上其余 controller 订阅随 app 生命周期存活，不在回收面）。
+ *   事件翻倍，项目规则#2；bus 上其余 controller 订阅随 app 生命周期存活，不在回收逻辑）。
  */
 export const __testing = {
   lastInitHandles: null as null | {

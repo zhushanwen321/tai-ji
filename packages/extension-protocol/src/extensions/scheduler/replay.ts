@@ -2,7 +2,7 @@
 // 与扩展同源单实现——pi 扩展（session_start 重放）与 taiji plugin（readEntries 镜像折叠）
 // 共用本函数，杜绝双实现漂移。
 //
-// 依赖面收敛（P7）：本文件零包外依赖——原实现的扩展侧错误消息检查（toErrorMessage）
+// 依赖范围收敛（P7）：本文件零包外依赖——原实现的扩展侧错误消息检查（toErrorMessage）
 // 与扩展共享 logger 以注入参数替代（ReplayFoldOptions.warn），
 // 错误降级语义（返回空 Map / 跳过损坏条目）在包内自足成立；扩展侧经薄 wrapper 注入
 // logger.warn 保持日志行为不变。

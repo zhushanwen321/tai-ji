@@ -96,7 +96,7 @@ const REAPER_LOCK_DIRNAME = 'reaper.lock'
 /**
  * registry.json 目录布局（契约 SSOT）：<agentDir>/base-tool-enhance/<sessionId>/registry.json。
  * [u-runtime-svc 提炼导出] BackgroundTaskService（services/background-task/）与收殓器共用
- * 同一布局推导，禁止两处各写路径拼接（漂移面）。
+ * 同一布局推导，禁止两处各写路径拼接（漂移风险）。
  */
 export function getSessionRegistryPath(agentDir: string, sessionId: string): string {
   return join(agentDir, BASE_TOOL_ENHANCE_DIRNAME, sessionId, BACKGROUND_TASK_REGISTRY_FILENAME)

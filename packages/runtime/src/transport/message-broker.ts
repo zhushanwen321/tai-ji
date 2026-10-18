@@ -44,7 +44,7 @@ export interface ClientPool {
 /**
  * config.providers 下发前的 supportedLevels 标注（U5 接线，字段语义见 shared/provider.ts）。
  *
- * IModelService 已声明 attachSupportedLevels（U5 接口扩面），直接调接口方法；
+ * IModelService 已声明 attachSupportedLevels（U5 扩大接口范围），直接调接口方法；
  * 标注失败只 warn 不抛——registry 内部已有 mtime 读取等降级，这里兜底保证 provider 列表
  * 下发永不被能力标注阻断；抛错时返回原 providers（supportedLevels 缺省 = renderer
  * normalizeSupportedLevels(undefined) 归一默认五档语义，U6 后前端无本地推导可回退）。

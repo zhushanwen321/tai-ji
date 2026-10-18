@@ -15,7 +15,7 @@
  *   ③ workflow-record v2 settled 条目 outcome === journal outcome（journal 唯一事实源
  *      的终态派生视图）；
  *   ④ 无孤儿：abort 收尾后成员任务保活进程（sleep）无残留（R0/C1 孤儿进程修复的
- *      端到端验收面——abort 先杀 run 拓扑 spawned children 再收尾），且引擎宿主
+ *      端到端验收范围——abort 先杀 run 拓扑 spawned children 再收尾），且引擎宿主
  *      （pi-subagent-cli 薄壳）一并退出（pi-workflow-run-resource-model per-window
  *      形态：薄壳随派发窗口生灭，run 收尾 finalizeRun 遍历窗口实例 dispose 杀薄壳）。
  *
@@ -405,7 +405,7 @@ async function assertS4SettledEntryAndOrphanFree(
   // ① 成员保活 sleep 进程（run 拓扑 spawned children）：abort 的 kill 分级先杀
   //    run 拓扑再收尾，杀干净后应立即回落基线。
   // ② 引擎宿主 pi-subagent-cli 薄壳：per-window 形态下随派发窗口生灭（run 收尾
-  //    finalizeRun 遍历窗口实例 dispose），收尾后同样回落基线（头注断言 ④ 升级面；
+  //    finalizeRun 遍历窗口实例 dispose），收尾后同样回落基线（头注断言 ④ 的升级；
   //    计数复用 count-engine-shell-processes.mjs，基线差分吸收环境噪声）。
   // diag 带 etime/ppid 供残留时定位 kill 链路。
   const orphanFree = await waitUntil(() => countMemberSleeperProcesses().count <= baseline.count, ORPHAN_GRACE_MS, 1000)
@@ -555,7 +555,7 @@ test('S4 (batch real): 派发后 abort → run-settled(cancelled) + 通知照达
     await assertS4SettledEntryAndOrphanFree(sessionFile, runId, baseline, readJournalFrames(journalFile))
 
     // 断言 A4b：引擎宿主薄壳回落基线（per-window 收尾 dispose——abort 收尾杀薄壳，
-    // 头注断言 ④ 升级面；同窗等待吸收成员任务收尾与薄壳退出的时序差）
+    // 头注断言 ④ 的升级；同窗等待吸收成员任务收尾与薄壳退出的时序差）
     const shellOrphanFree = await waitUntil(() => countEngineShellProcesses().count <= shellBaseline.count, ORPHAN_GRACE_MS, 1000)
     if (!shellOrphanFree) {
       writeDiag('batch-s4-engine-shell-orphans.json', {

@@ -306,7 +306,7 @@ describe("[subagent 派生视图丢失修复] tool_execution_end result content 
       if (row.details !== undefined) {
         expect(toolEnd?.result?.details).toEqual(row.details);
       }
-      // record（journal 重放面）同样保留 image 块——GUI reload 路径的提取源
+      // record（journal 重放路径）同样保留 image 块——GUI reload 路径的提取源
       const rec = h.record.turns[0]?.toolCalls[0];
       expect(rec?.result?.content).toEqual(row.content);
     });

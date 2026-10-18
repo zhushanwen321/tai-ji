@@ -36,7 +36,7 @@ vi.mock("../persistence/sessions-index.ts", async (importOriginal) => {
 });
 
 import { writeAliveMarker } from "../persistence/alive-store.ts";
-// [W1 / U2a] record 事件文件观察点（u0 契约层 scan/路径原语——被测面独立性）。
+// [W1 / U2a] record 事件文件观察点（u0 契约层 scan/路径原语——被测对象独立性）。
 import { createRecordEventStream, recordEventsPath } from "../persistence/record-events.ts";
 import type { RecordEvent } from "../persistence/record-events.ts";
 import { completeLegacyClosed, createRecord, projectOutcome, trySettleLegacyClosed } from "../persistence/execution-record.ts";
@@ -835,7 +835,7 @@ describe("RecordStore", () => {
       expect(entry?.data.status).toBe("idle");
       expect(entry?.data.stopReason).toBe("interrupted-by-restart");
       expect(entry?.data.error).toBeUndefined();
-      // 不写 .state 防重锚（writeFinalizedState(file,"gc") 写点已删——磁盘重建面已收敛 idle）
+      // 不写 .state 防重锚（writeFinalizedState(file,"gc") 写点已删——磁盘重建侧已收敛 idle）
       expect(fs.existsSync(`${sessionFile}.state`)).toBe(false);
       // 幂等：收编追加 record-settled 帧后 fold 已 settled，二次调用自然不再命中
       const again = [...appended];
@@ -985,7 +985,7 @@ describe("RecordStore", () => {
       store.recoverEntryOnlyOrphans(mainFile, "sess-orphan");
 
       const entry = appended.find((c) => c.data.id === "sa-entryonly-1");
-      // 保持 idle 可见（无锚判据的续聊拒绝文案归 U4 准入判据，不在恢复面直断）
+      // 保持 idle 可见（无锚判据的续聊拒绝文案归 U4 准入判据，不在恢复侧直断）
       expect(entry?.data.status).toBe("idle");
       expect(entry?.data.stopReason).toBe("interrupted-by-restart");
       expect(entry?.data.error).toBeUndefined();

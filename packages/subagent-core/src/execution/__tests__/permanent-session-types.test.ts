@@ -2,7 +2,7 @@
 //
 // [u-foundation / 永久会话模型] 新领域词汇的最小单测（设计
 // subagent-permanent-session-model.md §3.2.1-§3.2.7；类型与骨架先行，填肉归
-// U2-U7）。锁定面：
+// U2-U7）。锁定侧：
 //   ① TranscriptRef 判别联合收窄检查（isPi/isZcodeTranscriptRef 运行时判别 +
 //      类型穷尽——else 分支不可达构造性验证）；
 //   ② StopReason 枚举完整性（旧 7 值 + 4 新展示值 = 11 无重复；outcome 词
@@ -266,7 +266,7 @@ describe("ExecutionRecord 新字段可选性（构造零破坏）", () => {
 });
 
 // ── ⑤ store 新收尾原语（U2 已实装，冒烟）────────────────────────────────────
-// 详细行为矩阵（CAS 语义 / 原语副作用面 / epoch 递增）见
+// 详细行为矩阵（CAS 语义 / 原语副作用侧 / epoch 递增）见
 // permanent-session-state-machine.test.ts；此处仅锁定「骨架已填肉、可调用」。
 
 describe("store 新收尾原语（U2 实装冒烟）", () => {

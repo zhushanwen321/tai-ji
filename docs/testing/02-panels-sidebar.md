@@ -915,7 +915,7 @@ Panel 层：进入 subagent 视图时 PanelHeader 显示返回入口 + subagent 
 
 ## §3 data-testid 清单（**已退役，2026-09-16 —— 所属组件已删除，仅作历史对照**）
 
-testid 以组件 template 内 data-testid 属性为准。下列 testid 随 Agents/Flows tab 与列表组件退役全部消失；现行 subagent 观察面 testid = 托盘组件的 `tray-*` 族（`tray-native-panel` / `tray-panel-tab-*` / `tray-subagent-row` / `tray-subagent-cancel[-confirm]` 等，以下表所属现行组件为准：`packages/renderer/src/components/panel/tray/TrayNativePanel.vue`）。
+testid 以组件 template 内 data-testid 属性为准。下列 testid 随 Agents/Flows tab 与列表组件退役全部消失；现行 subagent 观察入口 testid = 托盘组件的 `tray-*` 族（`tray-native-panel` / `tray-panel-tab-*` / `tray-subagent-row` / `tray-subagent-cancel[-confirm]` 等，以下表所属现行组件为准：`packages/renderer/src/components/panel/tray/TrayNativePanel.vue`）。
 
 | testid | 原所在组件 | 原触发/可见条件 |
 |--------|---------|--------------|
@@ -1057,7 +1057,7 @@ mock 轨的 Playwright E2E（`e2e/*.spec.ts`）无法覆盖本功能——mock �
 
 > 覆盖：drawer bashTask tab（BackgroundTaskDetailPanel：元信息 / 输出跟随 / 终止）——**现行**；plugin 区「后台命令」L2 列表视图（BackgroundTaskListView：三桶筛选 + 两行式 item + 行内两段式终止）**已于 2026-09-16 随任务观察入口唯一化退役**，其列表形态迁 composer 任务托盘的 bash 面板（本节下方相关 testid 表已标退役，现行列表侧 testid 以托盘组件为准）。
 >
-> 设计：[background-task-sidebar-view.md](../architecture/background-task-sidebar-view.md)（§3.1 终态 / D4-D7 / D10；含视图面退役说明）+ [composer-task-tray.md](../design/composer-task-tray.md)。先读 [00 总览](00-overview.md)。
+> 设计：[background-task-sidebar-view.md](../architecture/background-task-sidebar-view.md)（§3.1 终态 / D4-D7 / D10；含视图侧退役说明）+ [composer-task-tray.md](../design/composer-task-tray.md)。先读 [00 总览](00-overview.md)。
 
 ## §1 功能概述
 
@@ -1124,9 +1124,9 @@ testid 以组件 template 内 data-testid 属性为准（drawer 表已核实有�
 
 ## §4 相关文档
 
-- 设计文档：[background-task-sidebar-view.md](../architecture/background-task-sidebar-view.md)（终态 §3.1 / 筛选 D10 / kill 矩阵 D6 / 输出跟随 D7；含 2026-09-16 视图面退役说明）+ [composer-task-tray.md](../design/composer-task-tray.md)（现行列表/计数入口）
+- 设计文档：[background-task-sidebar-view.md](../architecture/background-task-sidebar-view.md)（终态 §3.1 / 筛选 D10 / kill 矩阵 D6 / 输出跟随 D7；含 2026-09-16 视图侧退役说明）+ [composer-task-tray.md](../design/composer-task-tray.md)（现行列表/计数入口）
 - SideDrawer 宿主：bashTask tab 为第 8 tab（drawer 4 点接线见 background-task-sidebar-view.md D5）
-- 列表面范式：composer 任务托盘 bash 面板（分桶槽/两行式 item/行内两段式终止；原 Agents tab 同构先例已随侧栏任务 tab 退役）
+- 列表侧范式：composer 任务托盘 bash 面板（分桶槽/两行式 item/行内两段式终止；原 Agents tab 同构先例已随侧栏任务 tab 退役）
 - 组件测试：`packages/renderer/src/__tests__/components/background-task-detail-panel.test.ts`（16 用例）；列表/计数侧 = `packages/renderer/src/__tests__/panel/tray/`（原 background-task-list-view.test.ts 已随视图退役删除）
 
 ---

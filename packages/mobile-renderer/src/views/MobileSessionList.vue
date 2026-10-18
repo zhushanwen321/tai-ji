@@ -9,7 +9,7 @@
 // 分区读口）+ metaStatus（条目 status）；hasBlockingOverlay 缺省 false（移动壳无 extensionUI
 // store，D9② 白名单）。全表 computed：computed 体内读 chat 分区/subagent 分区建立响应式
 // 依赖，任一变化整表重算——列表 N 小（<50，桌面 W3 同款论证），单条判定只取分区末位，
-// 流式期高频重算成本可忽略；不用 per-session computed 缓存（免失效管理面）。
+// 流式期高频重算成本可忽略；不用 per-session computed 缓存（免去失效管理）。
 // 点击条目 → dead 分流（A3：dead 弹「重新打开」引导菜单，走恢复三步编排）或 core
 // selectSession（12 步切入链 headless 形态）→ 上抛 open-chat 切到聊天视图。
 // 长按条目 → 动作菜单（A4：重命名/删除——删除走 core deleteSession 销毁唯一编排点，

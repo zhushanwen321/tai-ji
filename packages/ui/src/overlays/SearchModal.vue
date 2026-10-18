@@ -191,7 +191,7 @@ const { t } = useI18n()
 
 // 模态表面聚合注册（§6.7 modal-dialog 族，经 renderer 注册桥——层级方向见
 // modal-surface-registrar.ts 文件头）：开合态绑 props.open 状态本体；旗标组由登记表按
-// id 读取（全屏阻塞面双键均让位 + shieldsView unconditional）。未装配桥（ui 单测 /
+// id 读取（全屏阻塞遮罩双键均让位 + shieldsView unconditional）。未装配桥（ui 单测 /
 // 非 taiji 宿主）静默跳过。
 const disposeSurfaceRegistration = registerUiModalSurface({
   surface: 'search-modal',

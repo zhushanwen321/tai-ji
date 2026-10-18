@@ -167,7 +167,7 @@ export function handleInboundFrame(frame: unknown, ctx: FrameLoopContext): Inbou
 
 // ── [§2.11 第三批] 反向请求客户端 / 运行事件通知 / 初始化握手（两引擎逐字同文部分） ──
 //
-// 留在各引擎的部分：应答侧 `settleReverse`（pi 的两阶段 ack + askUI 应答面检查 vs zcode
+// 留在各引擎的部分：应答侧 `settleReverse`（pi 的两阶段 ack + askUI 应答侧检查 vs zcode
 // ack 即结算，**语义不同不得合并**）、正向方法表本体、`run` 前门。这里只抽发送侧与握手。
 
 /**
@@ -186,7 +186,7 @@ export interface ReverseRequestSendContext { // oe-exempt:20260930:framework:SDK
   clock?: ReverseRequestClock;
   /** 请求 id 分配（各引擎可带自己的前缀与计数器）。 */
   nextId(): string;
-  /** 实现特有的 pending 附加字段（pi 记 `method` 供应答面检查用；zcode 不记）。 */
+  /** 实现特有的 pending 附加字段（pi 记 `method` 供应答侧检查用；zcode 不记）。 */
   pendingExtras?(method: string): Partial<ReversePending>;
 }
 

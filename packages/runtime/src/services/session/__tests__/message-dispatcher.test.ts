@@ -8,7 +8,7 @@
  * - **断言强度保持**：hook 审核原文 / hook 改写的 transform 语义 / blocked 面 / 注入恰好一次
  *   且先于 prompt / notices 逐条发布（clientUuid 从裸标记提取）/ 投递失败不发 notice
  *   ——逐条迁移，非删除。
- * - **退役面显式断言**（原测试的否定面转正）：busy 预检与 send.rejected 退役后，busy 维度
+ * - **退役路径显式断言**（原测试的否定用例转正）：busy 预检与 send.rejected 退役后，busy 维度
  *   不再产生拒绝广播、不再拦提交（排队取代拒绝，D5），消息由内核在册持有。
  *
  * 本文件是「busy 退役断言」与 dispatcher 投递错误路径的唯一归宿（原 message-dispatcher-precheck.test.ts
@@ -319,7 +319,7 @@ describe('MessageDispatcher × 内核出站交接（u2）', () => {
 })
 
 /**
- * busy 维度退役（u2 显式断言）：预检与 send.rejected 的**否定面**——busy 各维度不再拒绝、
+ * busy 维度退役（u2 显式断言）：预检与 send.rejected 的**否定用例**——busy 各维度不再拒绝、
  * 不再广播 send.rejected、prompt 不立即调用（内核持有等时机）。原「拒绝转 send.rejected」测试族
  * 的断言强度平移到「排队承接」面（消息不丢 = 内核条目在册）。
  */

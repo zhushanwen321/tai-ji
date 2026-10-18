@@ -341,7 +341,7 @@ describe('SessionMessageHandler session.import', () => {
     expect(errSpy).not.toHaveBeenCalled()
   })
 
-  it('dbPath 非 string 形态（wire 不可信面）→ sendError import_db_path_forbidden（MF-3-1）', async () => {
+  it('dbPath 非 string 形态（wire 不可信数据侧）→ sendError import_db_path_forbidden（MF-3-1）', async () => {
     const svc = mockImportService()
     const ctx = mockContext({ importService: svc as unknown as ImportService })
     const handler = new SessionMessageHandler(ctx)

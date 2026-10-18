@@ -143,7 +143,7 @@ const resolvedPreset = createLaunchConfigView(() => ({
 
 /**
  * chip 显示的 preset id。resolve 输出 presetId=undefined 有两义，均映射到显示语义：
- * - 出厂等价 builtin:full（D3 不透传，但生效面 = 全工具 = builtin:full）→ 显示 full 本体
+ * - 出厂等价 builtin:full（D3 不透传，但生效范围 = 全工具 = builtin:full）→ 显示 full 本体
  * - presets 未加载/加载失败（列表空，解析不到任何档）→ ''（selectedPresetName 走
  *   loadingPresets / 错误态文案，与现状区分逻辑一致）
  */

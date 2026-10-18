@@ -243,7 +243,7 @@ describe("describeMissingParsedOutput", () => {
 
 describe("MF-1: 三态可重试性矩阵（确定性失败标记）", () => {
   // 矩阵（SSOT 注释在本模块 DETERMINISTIC_SCHEMA_FAILURE_PREFIX 与
-  // describeMissingParsedOutput JSDoc，本 describe 是执行面锁定）：
+  // describeMissingParsedOutput JSDoc，本 describe 是执行侧锁定）：
   //   态① 从未调用 SO            → 带标记 → 不可重试（环境确定性，C1 安装盲区）
   //   态② SO isError（gate 终止/不可满足 schema）→ 带标记 → 不可重试（同 schema 重试必同结果）
   //   态③ 调用过但无 details       → 无标记 → 可重试（可能瞬态，保留既有重试语义）
@@ -299,7 +299,7 @@ describe("MF-1: 三态可重试性矩阵（确定性失败标记）", () => {
 // ============================================================
 
 describe("collectOutcome — F-1 schemaExpected 失败标注", () => {
-  /** 最小 ReplayRecordView stub（collectOutcome 只读 turns/toolCalls 派生面）。 */
+  /** 最小 ReplayRecordView stub（collectOutcome 只读 turns/toolCalls 派生字段）。 */
   function makeRecordWithCalls(calls: ToolCall[]): ReplayRecordView {
     return {
       id: "rec-1",
@@ -404,7 +404,7 @@ describe("classifyFailureKind（词表 → 结构化标签）", () => {
 });
 
 describe("collectOutcome — D5-③ failureKind 产出", () => {
-  /** 最小 ReplayRecordView stub（collectOutcome 只读 turns/toolCalls 派生面）。 */
+  /** 最小 ReplayRecordView stub（collectOutcome 只读 turns/toolCalls 派生字段）。 */
   function makeRecordWithCalls(calls: ToolCall[]): ReplayRecordView {
     return {
       id: "rec-fk",

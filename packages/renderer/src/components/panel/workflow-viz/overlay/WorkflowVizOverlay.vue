@@ -169,7 +169,7 @@
             </span>
           </div>
           <!-- 未匹配实例分组（D2⑥：零命中/歧义实例不静默丢弃——画布下方按 phase
-               分组的指定展示面；正常 run 无未匹配实例时零渲染，画布不受影响） -->
+               分组的指定展示侧；正常 run 无未匹配实例时零渲染，画布不受影响） -->
           <div
             v-if="unmatchedGroups.length > 0"
             class="flex max-h-[35%] flex-none flex-col gap-1 overflow-y-auto border-t border-hairline px-3 py-2"
@@ -225,7 +225,7 @@
             >
               {{ t('panel.workflowViz.dagRetryParse') }}
             </Button>
-            <!-- 降级列表：按 phase 分组的调用点只读形态（等价 WorkflowTab 内容的最小面） -->
+            <!-- 降级列表：按 phase 分组的调用点只读形态（等价 WorkflowTab 内容的最小形态） -->
             <div
               v-for="group in fallbackGroups"
               :key="group.phase"
@@ -442,7 +442,7 @@ const hasExplicitPhases = computed(() =>
   fallbackGroups.value.some((g) => g.phase !== ''),
 )
 
-// ── 未匹配实例分组（D2⑥ 展示面：零命中/歧义实例按 phase 分组，不静默丢弃）──
+// ── 未匹配实例分组（D2⑥ 展示侧：零命中/歧义实例按 phase 分组，不静默丢弃）──
 
 interface UnmatchedGroup {
   phase: string

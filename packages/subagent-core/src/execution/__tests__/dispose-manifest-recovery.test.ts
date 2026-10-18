@@ -431,7 +431,7 @@ describe("[M1/M2 Gate B] 编排性终态化 manifest 反查索引 + 重启冷查
   // {status:"idle", stopReason: interrupted-by-parent/restart}）+ 收尾写入 journal 记录
   //（markSettledOut：worktreeHandle 清句 + `.alive` release）+ 放弃轮标记。万物可续
   // 下任何 dispose 后 record 均可 message 寻回续聊（U4 锚判据），「可重连集」枚举
-  // gate 消亡——矩阵断言改为 .state 磁盘产物 + 收尾资源面 + 放弃标记（gate ②判据）。
+  // gate 消亡——矩阵断言改为 .state 磁盘产物 + 收尾资源侧 + 放弃标记（gate ②判据）。
   describe("[U5] disposeAllRecords 编排性关闭——语义矩阵", () => {
     /** 构造带真实 sessionFile + .alive marker 的活跃 record 并注册进 service store。 */
     function registerActiveRecord(opts: {

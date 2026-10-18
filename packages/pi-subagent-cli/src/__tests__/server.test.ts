@@ -110,7 +110,7 @@ function makeSink() {
   };
 }
 
-/** EnginePort 内存 fake（含 pi 专有 bindAskUser 绑定面）：
+/** EnginePort 内存 fake（含 pi 专有 bindAskUser 绑定侧）：
  * 逐成员 vi.fn，overrides 直替换（undefined = 未实现分支）。 */
 type FakeEngine = EnginePort & {
   bindAskUser(handler: ((req: UiRequest) => Promise<UiResponse>) | undefined): void;
@@ -133,7 +133,7 @@ function makeEngine(overrides: Partial<FakeEngine> = {}): FakeEngine {
   return { ...base, ...overrides };
 }
 
-/** 组合一个 server（缺省 clock 记录面 + 内存 sink），返回全部观测点。
+/** 组合一个 server（缺省 clock 记录侧 + 内存 sink），返回全部观测点。
  * piAgentDir 缺省注入一个不存在的 tmp 路径——查询范围（listModels/validateModel，
  * 路由 engine-query）读不到任何数据文件 → null/结构化错误，测试既不触碰真实
  * 系统 pi 目录，也无需 fixture 文件（本文件保持零 fs 写删）。 */
@@ -558,7 +558,7 @@ describe("run：协议载荷 → 本地 AgentCallOpts/RunContext", () => {
   });
 });
 
-// ── pi 专有：askUser 绑定面 + run.resume 帧校验 ──
+// ── pi 专有：askUser 绑定侧 + run.resume 帧校验 ──
 
 describe("bindAskUser 两阶段绑定体（pi 专有）", () => {
   it("非 chat run：run 前绑定 askUser 等待体（host/askUser 载荷 {runId, request}），run 结束解绑", async () => {
@@ -711,7 +711,7 @@ describe("reverseRequest 客户端", () => {
     await expect(p2).resolves.toEqual({ ok: true });
   });
 
-  it("ack 两阶段（R9-2）：{ack:true} 只 ack 计时面不终结等待，最终帧才 settle", async () => {
+  it("ack 两阶段（R9-2）：{ack:true} 只 ack 计时侧不终结等待，最终帧才 settle", async () => {
     const { server, sink, clockCalls } = makeServer();
     const p = server.reverseRequest("host/askUser", { runId: "r", request: { method: "select", id: "1" } });
     await sink.waitFor((f) => f.id === "rev-1", "rev-1");

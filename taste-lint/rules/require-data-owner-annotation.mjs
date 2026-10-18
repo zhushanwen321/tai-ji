@@ -15,7 +15,7 @@
  * `packages/mobile-renderer/src/**` + `packages/ui/src/**`（branch-review round 1 dmg-r1-2：
  * mobile-renderer 模块级缓存族零机器拦截、豁免标记无登记对应行也逃过豁免闭环——扫描范围
  * 必须随 GUI 数据消费包拓扑同步，登记表 §5 维护规约 6 承接后续新包）。runtime/ 主进程与
- * extensions/ 不在 GUI 数据层，不扫（runtime 侧声明经检查面 5 反向锁定，见登记表表头 6）。
+ * extensions/ 不在 GUI 数据层，不扫（runtime 侧声明经检查 5 反向锁定，见登记表表头 6）。
  *
  * 载体（2026-10-04，branch-review round 3 dmg-r3-1）：.ts + .vue 双载体。.vue 下仅普通
  * <script> 块内的 Program 顶层声明是模块级——vue-eslint-parser 把两个 script 块的顶层

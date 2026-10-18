@@ -185,7 +185,7 @@ export interface ExecutionRecord { // oe-exempt:20260930:framework:领域聚合�
   /**
    * 来源身份（H2 W1，D1）。缺省（undefined）语义 = "tool"（存量 record 零迁移）；
    * "workflow" = workflow 脚本 agent() 派发（生产写入方 W2 接线）。过滤在派生视图/查询
-   * 消费方（list 默认滤 workflow origin），store 治理面（孤儿恢复/revive）全量可见。
+   * 消费方（list 默认滤 workflow origin），store 治理侧（孤儿恢复/revive）全量可见。
    * 持久化经 subagent-record entry。
    */
   readonly origin?: RecordOrigin;
@@ -247,10 +247,10 @@ export interface ExecutionRecord { // oe-exempt:20260930:framework:领域聚合�
    */
   outcome?: ExecutionOutcome;
   /**
-   * 离开批的终局标记（存量 entry 读侧兼容面——[collect 退役] 起**只读不写**）。
+   * 离开批的终局标记（存量 entry 读侧兼容范围——[collect 退役] 起**只读不写**）。
    * 历史写点（批收尾 flush 落标 / E9 dispose 落标）已随 sync 批机制退役删除；磁盘上
    * 存量 record 的 batchFinalized entry 必须容忍解析（旧 session 文件可读），标记保留
-   * 为批域审计/孤儿 merge 透传面。undefined = 未离开批 / 退役后新记录。
+   * 为批域审计/孤儿 merge 透传侧。undefined = 未离开批 / 退役后新记录。
    */
   batchFinalized?: boolean;
 

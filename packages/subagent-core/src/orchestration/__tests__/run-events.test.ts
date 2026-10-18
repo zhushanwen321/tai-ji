@@ -155,7 +155,7 @@ const runSettledFailed: WorkflowRunEvent = {
   artifactsDir: "/record-fixture/wf-1758-a1",
 };
 
-/** [ADR-0094] 诊断帧样本（不进状态机；重建面 errorLogsFromEvents 消费）。 */
+/** [ADR-0094] 诊断帧样本（不进状态机；重建侧 errorLogsFromEvents 消费）。 */
 const workerLogSample: WorkflowRunEvent = {
   type: "worker-log",
   seq: 12,

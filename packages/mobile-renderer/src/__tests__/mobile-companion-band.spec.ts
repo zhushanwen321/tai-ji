@@ -7,7 +7,7 @@
 //   假按钮 —— minimize/restore 经 OVERLAY_LIFECYCLE provide 获得真实状态机（inject 缺失时
 //            按钮在场但点击 no-op = 假行为；provide 后 transition→getState 闭环生效）
 //
-// mock 策略：请求注入经 __testing.mobileExtensionBus.emit（生产订阅面 = dialog 通道
+// mock 策略：请求注入经 __testing.mobileExtensionBus.emit（生产订阅侧 = dialog 通道
 // bus 订阅，mobile-form.spec.ts 同款先例）；不点 confirm/select 作答按钮（会走真实
 // sendExtensionUIResponse WS 回传，非本单元断言范围）；minimize/restore 纯组件内状态迁移
 // 不触回传。CompanionBand 每次 mount 新建 queue（useSessionScopedState 每调用独立分区），

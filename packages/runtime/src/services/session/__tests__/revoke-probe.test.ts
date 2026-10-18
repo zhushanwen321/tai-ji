@@ -12,7 +12,7 @@
  * 探针保真度关键（A6 的牙齿）：prompt mock 按 pi 语义分派——注册命令串
  * （`/__taiji_nav__` 前缀）同步执行树回退副作用、不落 message entry（P2 前提：
  * command 不进模型、无 turn）；其余 prompt 一律按普通用户消息落 user message
- * entry（pi 开新回合的 transcript 行为）。信令若回归「走用户消息面」形态，A6 的
+ * entry（pi 开新回合的 transcript 行为）。信令若回归「走用户消息侧」形态，A6 的
  * transcript 对比断言即红。
  *
  * A9 的 workflow 派生视图：测试内构造 records.getWorkflows 派生视图数据源，推导式与组合根
@@ -134,7 +134,7 @@ function makeProbeHarness(opts: ProbeHarnessOptions = {}) {
         if (opts.rewind) applyRewind(tree, opts.rewind.target, opts.rewind.parent)
       } else {
         // 其余 prompt = pi 开新回合：user message entry 落 transcript（A6 探针的对照面——
-        // 信令若走用户消息面，这里长出的 message entry 会被撤回前后对比抓红）
+        // 信令若走用户消息侧，这里长出的 message entry 会被撤回前后对比抓红）
         const id = `m-${tree.entries.length + 1}`
         tree.entries = [...tree.entries, msgEntry(id, tree.leafId, 'user', text)]
         tree.leafId = id
@@ -254,7 +254,7 @@ describe('A6 信令不污染（探针：transcript 撤回前后对比 + 命令�
 
     expect(reply.revoked).toBe(true)
     // 撤回成功前提下的污染断言：唯一新增条目是 navigateTree 的 label 锚——
-    // 若信令走用户消息面（prompt mock 会落 user message entry），此处即红（P2 探针）
+    // 若信令走用户消息侧（prompt mock 会落 user message entry），此处即红（P2 探针）
     expect(after.entries.length).toBe(before.entries.length + 1)
     const added = after.entries.slice(before.entries.length)
     expect(added).toHaveLength(1)

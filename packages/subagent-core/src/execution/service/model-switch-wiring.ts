@@ -6,8 +6,8 @@
 //
 //   - assertRunNotTerminalForSwitch：run 非终局判定（§7.2 步骤①附加校验）——run
 //     registry fold 终局唯一权威；
-//   - listAcceptedMemberRunIdsForSwitch：已受理成员清单（§7.4 全切转发面）；
-//   - resolveMemberEnginePortForSwitch：成员引擎转发面（U5 ResolveMemberEnginePort
+//   - listAcceptedMemberRunIdsForSwitch：已受理成员清单（§7.4 全量切走的转发）；
+//   - resolveMemberEnginePortForSwitch：成员到引擎的转发（U5 ResolveMemberEnginePort
 //     生产实装）——与派发链同一裁决单点与窗口实例解析。
 
 import type { RecordStore } from "../persistence/record-store.ts";
@@ -44,7 +44,7 @@ export async function assertRunNotTerminalForSwitch(runId: string): Promise<void
 }
 
 /**
- * run 级已受理成员 runId 全量清单（§7.4 全切转发面）：collectRecordsByParentRunId
+ * run 级已受理成员 runId 全量清单（§7.4 全量切走的转发）：collectRecordsByParentRunId
  * 四源合并（内存 ∪ 磁盘重建 ∪ entry ∪ manifest）——全状态不过滤，「已受理」判据 =
  * 成员 record 已创建（P9 异步窗口内的调用已有 record）；**不做宿主侧存活预判**（进程
  * 存活事实的权威在引擎侧，宿主 record 状态只是派生视图——已退出成员由引擎 not-active
@@ -62,7 +62,7 @@ export function listAcceptedMemberRunIdsForSwitch(
 }
 
 /**
- * 成员引擎转发面（U5 ResolveMemberEnginePort 生产实装）：成员 record 引擎留痕 →
+ * 成员到引擎的转发（U5 ResolveMemberEnginePort 生产实装）：成员 record 引擎留痕 →
  * 与派发链同一裁决单点（resolveEngineRouteId）+ 同一窗口实例解析——pi 成员窗口键
  * = parentRunId（与 routeWorkflowEngine 的 piEngine 注入同源，run-orchestration
  * resolveChatEnginePort 窗口感知形态）；非 pi 成员走 resolveWorkflowWindowEnginePort
@@ -78,7 +78,7 @@ export function listAcceptedMemberRunIdsForSwitch(
  * **不在此拦**——聚合层预检先于引擎调用（§8 场景 7 步骤④），unsupported 引擎成员
  * 必须到达预检落 not-applicable（拦在这里会错位进失败名单）；仅对「native 位 +
  * setModel 方法缺席」的装配损坏 fail-fast（native 位与方法同源条件实装，该组合
- * 只能是集成 bug，归失败名单）。返回断言的安全面即本检查：非 native 引擎的
+ * 只能是集成 bug，归失败名单）。返回断言的安全侧即本检查：非 native 引擎的
  * setModel 永不被聚合调用（预检分支先行）。
  */
 export function resolveMemberEnginePortForSwitch(

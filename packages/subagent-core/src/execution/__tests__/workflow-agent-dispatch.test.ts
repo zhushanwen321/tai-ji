@@ -204,7 +204,7 @@ describe("executeWorkflowAgent 注册范围", () => {
     const pending = service.executeWorkflowAgent(baseOpts(), "run-win-key");
     await flush();
 
-    // 装配面契约：routeWorkflowEngine 的 piEngine 注入 = resolveChatEnginePort(parentRunId)
+    // 装配侧契约：routeWorkflowEngine 的 piEngine 注入 = resolveChatEnginePort(parentRunId)
     //（per-window 引擎经窗口实例解析单点取用，probe 与 run 同实例；shared-service 透传保形）。
     expect(portSpy).toHaveBeenCalledWith("run-win-key");
     // 缺省网关下（保守 shared-service 透传）run 仍须可达 fake pi port——键传递不改变既有派发行为

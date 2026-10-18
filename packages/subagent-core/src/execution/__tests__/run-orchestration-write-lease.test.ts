@@ -16,7 +16,7 @@
 //      点）：sessionFile 回填后 `.alive` 存在且 pid=本进程；
 //   5. [U2b 修复轮/D2] adoptEngineDeath 收敛（adoptResumableAfterEngineDeath 三写
 //      error/result/stopReason 语义等价，真实 store 链）。轮始 markRoundStarted 接线
-//      的真实链用例在 conversation-continuation.test.ts 集成面（续聊派发即清
+//      的真实链用例在 conversation-continuation.test.ts 集成测试侧（续聊派发即清
 //      result 清除 + round 累加链不断）。
 //
 // 测试纪律：registerFakePiEngine 协议替身（conversation-continuation.test.ts 同源

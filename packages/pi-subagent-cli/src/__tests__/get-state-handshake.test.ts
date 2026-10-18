@@ -86,7 +86,7 @@ describe("performGetStateHandshake（FR-4 单次握手）", () => {
   it("response 只带 sessionId（无 sessionFile）→ 视同未应答：单次超时 settle 已收集字段（非悬挂）", async () => {
     // [S2 契约修复，方案 A] 不完整应答不提前停表——等单次 2s 超时 settle collected
     // （带已收集的 sessionId），调用方走兜底反查。（真实 RPC 层 get_state 应答恒带
-    // sessionFile，此形态为纯契约构造的防御面，生产未观测。）
+    // sessionFile，此形态为纯契约构造的防御机制，生产未观测。）
     vi.useFakeTimers();
     try {
       const { child, writes } = makeFakeStdin();

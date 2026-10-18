@@ -82,7 +82,7 @@ export interface PluginSessionEntries {
 /**
  * AP-4 读侧的 runtime 侧依赖（单一注入点）。由 runtime 装配（plugin-rpc-setup 的
  * registerSessionRpcHandlers 实参）提供；缺失时读方法抛 SESSION_READ_NOT_WIRED。
- * [u5b 接线] pm 收窄为 getClient 窄结构面——PluginService 不持 IProcessManager，
+ * [u5b 接线] pm 收窄为 getClient 窄结构侧——PluginService 不持 IProcessManager，
  * 装配经 sessionService.getRpcClient（= pm.getClient 同源）适配。
  */
 export interface SessionReadDeps {
@@ -276,9 +276,9 @@ export class ActiveSessionResolver {
 }
 
 /**
- * 插件面 sendMessage 回执（AP-4/D6；reason = shared SendPromptReason 单点词表
- * （D4-6 收敛，与 ISessionService.sendMessage 同源）——插件运行面分支只看 accepted，
- * reason 是诊断/文案面，不得依赖精确值做行为分支）。
+ * 插件侧 sendMessage 回执（AP-4/D6；reason = shared SendPromptReason 单点词表
+ * （D4-6 收敛，与 ISessionService.sendMessage 同源）——插件运行侧分支只看 accepted，
+ * reason 是诊断/文案侧，不得依赖精确值做行为分支）。
  */
 export interface PluginSendReceipt {
   accepted: boolean
@@ -428,7 +428,7 @@ export function registerSessionRpcHandlers(
     // 错误详情进宿主日志（前端已由 dispatcher 的 message.error 广播看到错误气泡）。
     try {
       const receipt = await deps.sendMessage(sessionId, role, content, requireCommand)
-      // 回执映射（AP-4 两步之②）：dispatcher 的 {blocked, rejected?, reason?} → 插件面
+      // 回执映射（AP-4 两步之②）：dispatcher 的 {blocked, rejected?, reason?} → 插件侧
       // {accepted, reason?}；command-missing 由 requireCommand 校验在 dispatcher 内产生。
       if (receipt.blocked) {
         return { accepted: false, ...(receipt.reason !== undefined ? { reason: receipt.reason } : {}) }
@@ -477,7 +477,7 @@ export function registerSessionRpcHandlers(
   })
 
   // 纯查询直连 client.getCommands：不经 sessionService.getCommands——那条路径带
-  // markDirty 语义（查询即失效 → commands 快照防抖重新拉取），插件面状态查询不应触发
+  // markDirty 语义（查询即失效 → commands 快照防抖重新拉取），插件侧状态查询不应触发
   // 宿主缓存失效（设计 §3.4「getCommands 降级为状态查询」的纯查询落点）。
   rpcServer.registerMethod(SESSION_READ_METHODS.getCommands, async (params) => {
     const sessionId = asSafeKey(params.sessionId, 'sessionId')

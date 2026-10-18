@@ -146,8 +146,8 @@ export function finalRunErrorCodeOf(run: WorkflowRun, doneReason: DoneReason): R
  * 的取值纪律同一取舍；单 agent 失败即主流终局场景精确）。
  *
  * 优先级：① 引擎协议码——AgentResult.error 文本的 `<code>: <detail>` 前缀格式是
- * SDK 跨面契约（EngineSdkError message 恒为该形态，AgentOutcome.error 与协议
- * error 帧共用），前缀命中 SDK 固定词表（engine_crashed 等）或 engine_ 透传面
+ * SDK 跨包契约（EngineSdkError message 恒为该形态，AgentOutcome.error 与协议
+ * error 帧共用），前缀命中 SDK 固定词表（engine_crashed 等）或 engine_ 透传侧
  * 才落码（guard 收窄防普通错误文案误判）；② failureKind（ask 级分诊标签）；
  * ③ "unknown"（保守可诊断成员，诊断全文仍在 reason/trace 面）。
  */
@@ -496,7 +496,7 @@ export interface WorkflowModelOverride {
  * `model-override`——workflow run 级模型覆盖记账事件（subagent-model-switch §6.6
  * 决策六①：run 的事件流追加覆盖记录，事件流是追加式单源、唯一合法持久化形态）。
  *
- * **不参与生命周期状态机**（worker-log 同款——记账面与状态面正交）：fold 显式
+ * **不参与生命周期状态机**（worker-log 同款——记账侧与状态侧正交）：fold 显式
  * 跳过（foldRunEventCheckpoint），不占 RUN_TRANSITIONS 表行，水位照常推进。
  * 硬约束（调研 S3）：覆盖记录只做记账持久化与 resume 生效值缺省，不进 worker
  * 的 `$MODEL`、不改重建 spec 的 run 级模型、不碰回放一致性比对——覆盖走宿主
@@ -519,7 +519,7 @@ export interface ModelOverrideEvent extends EventEnvelope, WorkflowModelOverride
 /**
  * worker 诊断日志帧（[§2.1 errorLogs 持久化] ADR-0093）。
  *
- * **不参与生命周期状态机**：诊断范围与状态面正交——fold 显式跳过本类事件（见
+ * **不参与生命周期状态机**：诊断范围与状态侧正交——fold 显式跳过本类事件（见
  * foldRunEventCheckpoint），故不占 RUN_TRANSITIONS 表行，也不受终态吸收约束（run
  * 终局后迟到的诊断日志不会把 fold 判成坏帧）。唯一消费方 = `errorLogsFromEvents`
  * 重建（与活体写入同语义：按序追加 + 尾部上限裁剪）。
@@ -1297,7 +1297,7 @@ export function foldRunEventCheckpoint(
     if (typeof seq === "number" && seq <= checkpoint.lastSeq) {
       continue;
     }
-    // 诊断事件（worker-log）不进状态机：诊断范围与状态面正交，且终态是吸收态——若让
+    // 诊断事件（worker-log）不进状态机：诊断范围与状态侧正交，且终态是吸收态——若让
     // 它走 transition，run 终局后迟到的诊断日志会把 fold 判成坏帧。水位仍推进，避免
     // tail 消费方每轮重读同一批诊断行。
     // 记账事件（model-override）同款跳过（subagent-model-switch §6.6①）：宿主覆盖
@@ -1364,7 +1364,7 @@ export function foldRunEventFrames(
  *
  * 语义与活体写入单点同构（worker-message-pump 的 appendErrorLogs）：按事件序追加 +
  * 尾部上限裁剪（`MAX_ERROR_LOGS`）。重启后折叠 record 流即可恢复诊断日志——此前
- * errorLogs 无任何持久面，重启即空。
+ * errorLogs 无任何持久化侧，重启即空。
  */
 export function errorLogsFromEvents(events: readonly WorkflowRunEvent[]): WorkerLogEntry[] {
   const logs: WorkerLogEntry[] = [];

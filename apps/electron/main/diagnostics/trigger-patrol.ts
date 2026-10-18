@@ -2,7 +2,7 @@
  * 触发条件每日巡检——评估器的 main 侧出口①（crash-forensics-and-watchdog §3.3 D2）。
  *
  * 分层：trigger-evaluator.ts 是纯函数（无 electron / fs / 定时器）；本模块持有
- * electron 环境的副作用面——登记清单文件读取、main-logger WARN、crash-journal writer、
+ * electron 环境的副作用——登记清单文件读取、main-logger WARN、crash-journal writer、
  * 每日定时器。main.ts 在 whenReady 链调用 startTriggerPatrol()（1 行）。
  *
  * 行为（D2 出口①，最小闭环）：每日一次低频评估两本登记清单；任一条件 tripped →

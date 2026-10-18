@@ -27,7 +27,7 @@ export interface ChatApiPort {
    *
    * [u5a 保留裁决] 成员**保留**，不随本单元删除：协议条目 `message.send` 是设计显式保留项
    * （runtime 侧适配器承接 plugin-service 等存量调用方，A6 测试锁），本成员是它在 chat 端口
-   * 的镜像面。core 编排侧当前零调用（grep `deps.chatApi.send` 仅注释命中——send/steer/
+   * 的镜像侧。core 编排侧当前零调用（grep `deps.chatApi.send` 仅注释命中——send/steer/
    * followUp/editAndResend 四通路均已收敛 submitDelivery），壳侧 wiring 保留以维持端口与
    * 协议条目同构；协议条目删除时本成员同批删。
    *

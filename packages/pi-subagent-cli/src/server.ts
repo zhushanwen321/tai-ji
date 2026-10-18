@@ -10,7 +10,7 @@
 // `event` 通知（runId + 单调 seq）外发，onHandleReady/onChildSpawned/stream 经
 // host/* 反向请求上抛（[池抽象降级] host/poolResolved 通道已随 poolKey 协议范围退役删除）。
 // 查询范围两方法（listModels/validateModel）不映射 EnginePort——PiEngine 未实装该
-// 可选面，分发位直接路由 engine-query（读 pi 数据目录 json，pi-workflow-run-resource-model
+// 可选能力，分发位直接路由 engine-query（读 pi 数据目录 json，pi-workflow-run-resource-model
 // §3.3 决策 11 方案 B）。
 //
 // pi 专有通道（本单元实装客户端）：
@@ -80,7 +80,7 @@ export interface EngineProtocolServerOptions {
   engine?: EnginePort & {
     bindAskUser?(handler: ((req: UiRequest) => Promise<UiResponse>) | undefined): void;
   };
-  /** 反向请求计时面（armEngineSelfDestruct 产物；缺省不计时——测试用）。 */
+  /** 反向请求计时侧（armEngineSelfDestruct 产物；缺省不计时——测试用）。 */
   reverseClock?: ReverseRequestClock;
   /** 应答等待缺省超时（反向请求两阶段等待上限兜底；默认 REVERSE_TIMEOUT_DEFAULT_MS）。 */
   reverseTimeoutMs?: number;
@@ -101,7 +101,7 @@ export function createDefaultPiEngine(): PiEngine {
 }
 
 /**
- * 引擎协议服务器。生命周期 = 进程生命周期（单引擎实例，无重建面——崩溃重建归
+ * 引擎协议服务器。生命周期 = 进程生命周期（单引擎实例，无重建逻辑——崩溃重建归
  * core EngineClient：杀进程再 spawn）。dispose 方法释放引擎常驻资源但进程不退出。
  */
 export class EngineProtocolServer {
@@ -149,7 +149,7 @@ export class EngineProtocolServer {
       cancel: (params) => this.cancel(params as { runId: string; reason: string }),
       read: (params) => this.read(params as ReadParams),
       // 查询范围两方法路由 engine-query（pi-workflow-run-resource-model §3.3 决策 11
-      // 方案 B：读 pi 数据目录 json，不经 engine 实例——PiEngine 本就未实装该可选面）
+      // 方案 B：读 pi 数据目录 json，不经 engine 实例——PiEngine 本就未实装该可选能力）
       listModels: () => ({ models: listPiModels(this.queryAgentDir) }),
       validateModel: (params) => this.validateModel(params as { modelRef?: string }),
       // [subagent-model-switch §7.3] 第 10 个正向方法：能力位防御后路由引擎实装
@@ -351,7 +351,7 @@ export class EngineProtocolServer {
     };
   }
 
-  /** 反向请求发送（公开面：main.ts 的 host/log 桥接消费；内部 run 通道同路）。 */
+  /** 反向请求发送（对外公开：main.ts 的 host/log 桥接消费；内部 run 通道同路）。 */
   reverseRequest(method: string, params: unknown): Promise<unknown> {
     return this.reverseRequestInternal(method, params);
   }
@@ -374,7 +374,7 @@ export class EngineProtocolServer {
   /** 反向请求应答落位。
    *
    * ack 两阶段（R9-2）：人机交互通道（host/askUser）宿主先回
-   * `{ack:true}`——只 ack 计时面（移出 in-flight 自灭计时），**不终结等待**；最终
+   * `{ack:true}`——只 ack 计时侧（移出 in-flight 自灭计时），**不终结等待**；最终
    * 结果帧才 settle。数据范围通道宿主直接回终态（{ok:true} 等），ack 即 settle。 */
   private settleReverse(id: number | string, frame: { result?: unknown; error?: unknown }): void {
     const pending = this.reversePending.get(String(id));
@@ -399,7 +399,7 @@ export class EngineProtocolServer {
       pending.reject(new Error(`reverse request ${String(id)} rejected: ${toErrorMessage(frame.error)}`));
       return;
     }
-    // [S7] askUser 应答面检查（A6 方向防御同族——宿主→引擎方向已有 assertResumeRunFrame
+    // [S7] askUser 应答侧检查（A6 方向防御同族——宿主→引擎方向已有 assertResumeRunFrame
     // 先例）：畸形 UiResponse 不落 resolve（否则静默流入 ui-request-queue），复用
     // engine_protocol_bad_frame 语义走 reject。
     if (pending.method === "host/askUser" && !isUiResponse(frame.result)) {

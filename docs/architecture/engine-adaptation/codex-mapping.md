@@ -39,11 +39,11 @@ run.params.task（AgentCallOpts）/ ctx / resume → app-server `thread/start`�
 | resume.recordId | 适配器自持关联键 | — | 用于 host/handleReady、host/childStateChanged 回填 |
 | resume.resume.sessionRef | `thread/resume`：`thread_id`（首选）或 `path`（rollout 路径，[UNSTABLE]） | common.rs:511-516；v2/thread.rs:318-352 | sessionRef 构成建议见 §6 |
 
-模型面（靶面 H）补充：
+模型侧（目标类型 H）补充：
 
 | taiji 面 | 源对应 | 证据（file:line） | 备注 |
 |---|---|---|---|
-| listModels → ModelCatalogEntry{id,aliases?,canonicalRef?} | `model/list` → `ModelListResponse{data:Vec\<Model\>}`；`Model{id, model, displayName, …}` | common.rs:1020-1024；v2/model.rs:53-63, :92-121, :147-152 | 映射：ModelCatalogEntry.id←Model.id；canonicalRef←Model.model（真实模型 ref）；aliases 无对应（缺省）。无枚举面时返回 null 的协议语义不受影响（方法恒可调） |
+| listModels → ModelCatalogEntry{id,aliases?,canonicalRef?} | `model/list` → `ModelListResponse{data:Vec\<Model\>}`；`Model{id, model, displayName, …}` | common.rs:1020-1024；v2/model.rs:53-63, :92-121, :147-152 | 映射：ModelCatalogEntry.id←Model.id；canonicalRef←Model.model（真实模型 ref）；aliases 无对应（缺省）。无枚举形态时返回 null 的协议语义不受影响（方法恒可调） |
 | validateModel → canonicalRef | 无独立校验方法 | — | 合成：以 model/list 全集匹配；不命中时 thread/start 实际验证（ModelRerouted 通知为替换信号，v2/model.rs:157-163） |
 
 ## 3. 事件映射表
@@ -57,9 +57,9 @@ run.params.task（AgentCallOpts）/ ctx / resume → app-server `thread/start`�
 | error | error | 直接 | v2 ErrorNotification |
 | thread/started | — | 丢弃 | 生命周期通知 |
 | thread/status/changed | activity | 合成 | ThreadStatus 变化时刷新判活（可选降级为丢弃） |
-| thread/archived / deleted / unarchived / closed / reverted | — | 丢弃 | 管理面 |
-| thread/name/updated / goal/updated / goal/cleared / queue/changed | — | 丢弃 | 管理面 |
-| thread/project/updated / settings/updated / environment/connected / disconnected | — | 丢弃 | 管理面 |
+| thread/archived / deleted / unarchived / closed / reverted | — | 丢弃 | 管理侧 |
+| thread/name/updated / goal/updated / goal/cleared / queue/changed | — | 丢弃 | 管理侧 |
+| thread/project/updated / settings/updated / environment/connected / disconnected | — | 丢弃 | 管理侧 |
 | skills/changed / project/changed | — | 丢弃 | 全局面 |
 | turn/started | — | 合成开界 | 适配器开新 turn（不开 taiji 事件） |
 | turn/completed | turn_end | 直接 | Turn{id,items,status,error,…}（v2/thread_data.rs:353-373）；turn 级 usage 不在此载荷，经 tokenUsage/updated |
@@ -74,7 +74,7 @@ run.params.task（AgentCallOpts）/ ctx / resume → app-server `thread/start`�
 | item/plan/delta | — | 丢弃 | plan item 流 |
 | command/exec/outputDelta、process/outputDelta、process/exited | — | 丢弃 | 独立 exec/process 面（非 thread turn） |
 | item/commandExecution/outputDelta | activity | 合成 | 长命令输出流，作活性信号；也可累积进 tool_end result |
-| item/commandExecution/terminalInteraction | — | 丢弃 | PTY stdin 交互面 |
+| item/commandExecution/terminalInteraction | — | 丢弃 | PTY stdin 交互侧 |
 | item/fileChange/outputDelta | — | 丢弃 | 已废弃，服务端不再发（v2/item.rs:1425-1427） |
 | item/fileChange/patchUpdated | — | 丢弃（或累积） | FileUpdateChange 增量，tool_end 时以 item/completed 全量为准 |
 | item/reasoning/summaryTextDelta | thinking_delta | 直接 | {…,delta,summaryIndex}（v2/item.rs:1372-1379） |
@@ -83,12 +83,12 @@ run.params.task（AgentCallOpts）/ ctx / resume → app-server `thread/start`�
 | thread/compacted | compaction | 直接 | [Deprecated] 改用 ContextCompaction item（common.rs:1894-1895） |
 | serverRequest/resolved | — | 丢弃 | 反向请求生命周期 |
 | item/mcpToolCall/progress | activity | 合成 | MCP 执行中活性 |
-| mcpServer/oauthLogin/completed、startupStatus/updated、event/stream/notification | — | 丢弃 | MCP 管理面 |
+| mcpServer/oauthLogin/completed、startupStatus/updated、event/stream/notification | — | 丢弃 | MCP 管理侧 |
 | account/*（updated / rateLimits / login/completed） | — | 丢弃 | 账户面 |
 | app/list/updated、remoteControl/status/changed、externalAgentConfig/import/* | — | 丢弃 | 外围面 |
 | fs/changed | — | 丢弃 | fs watch 面 |
 | model/rerouted | error（warn 级） | 合成 | 模型被替换，宿主须感知（v2/model.rs:157-163） |
-| model/verification、model/safetyBuffering/updated、turn/moderationMetadata | — | 丢弃 | 平台安全面 |
+| model/verification、model/safetyBuffering/updated、turn/moderationMetadata | — | 丢弃 | 平台安全侧 |
 | warning / guardianWarning / deprecationNotice / configWarning | error（或 host/log） | 合成 | 非致命告知；taiji 9 事件无 warn 槽，映射为 error 或降 host/log |
 | fuzzyFileSearch/sessionUpdated / sessionCompleted | — | 丢弃 | 搜索面 |
 | thread/realtime/*（9 个） | — | 丢弃 | 语音实时面 |
@@ -198,11 +198,11 @@ UiRequest 9 method 对齐度：select（← requestUserInput）✅、confirm（�
 
 ### 9.1 源有靶无（codex 有、taiji 协议无槽——适配器丢弃，不阻塞接入）
 
-- thread 管理面：archive/delete/unarchive/name/goal/queue/section/project/settings/rollback/revert/inject_items/search（common.rs:523-802）。
+- thread 管理侧：archive/delete/unarchive/name/goal/queue/section/project/settings/rollback/revert/inject_items/search（common.rs:523-802）。
 - collab agents（codex 内建多 agent 子线程：CollabAgentToolCall item、thread/realtime 语音面）——taiji subagent 编排归宿主，引擎内多 agent 不映射。
-- command/exec、process/* 独立进程面与 fs/* 远程文件面（common.rs:899-945, :1247-1299）。
+- command/exec、process/* 独立进程面与 fs/* 远程文件侧（common.rs:899-945, :1247-1299）。
 - dynamic tools 注册（thread/start.dynamicTools，v2/thread.rs:135-141）与 DynamicToolCall 宿主反呼（item/tool/call）——taiji 反向面无「宿主执行引擎工具」通道，此能力不可用（除非扩展协议）。
-- hooks / plugins / marketplace / skills 管理面（common.rs:803-878）。
+- hooks / plugins / marketplace / skills 管理侧（common.rs:803-878）。
 - guardian 自动审批（item/autoApprovalReview/*）与 attestation/remoteControl/environment 面。
 - turn/plan/updated、turn/diff/updated（plan 工具与 turn 级聚合 diff）。
 

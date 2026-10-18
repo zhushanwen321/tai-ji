@@ -7,7 +7,7 @@
 //
 // 9 正向方法逐个映射到 EnginePort（本地 port-types 镜像）成员；run 期间事件经
 // `event` 通知（runId + 单调 seq）外发，onHandleReady/stream 经 host/* 反向请求上抛
-//（[池抽象降级] host/poolResolved 通道已随 poolKey 协议范围退役删除）。run.params.task 是 SDK AgentCallOpts 引擎面子集——model/
+//（[池抽象降级] host/poolResolved 通道已随 poolKey 协议范围退役删除）。run.params.task 是 SDK AgentCallOpts 引擎侧子集——model/
 // cwd/model 从 run.params.ctx 还原进本地 AgentCallOpts/RunContext
 // （与 core RemoteEngine.toSdkTaskSubset 的映射互为镜像）。
 //
@@ -64,7 +64,7 @@ export interface EngineProtocolServerOptions {
   write: FrameWriter;
   /** 引擎实例（缺省 createDefaultZcodeEngine——测试注入 fake/DI 实例）。 */
   engine?: EnginePort;
-  /** 反向请求计时面（armEngineSelfDestruct 产物；缺省不计时——测试用）。 */
+  /** 反向请求计时侧（armEngineSelfDestruct 产物；缺省不计时——测试用）。 */
   reverseClock?: ReverseRequestClock;
   /** 应答等待缺省超时（反向请求两阶段等待上限兜底；默认 REVERSE_TIMEOUT_DEFAULT_MS）。 */
   reverseTimeoutMs?: number;
@@ -74,7 +74,7 @@ export interface EngineProtocolServerOptions {
 // SDK `./server` 子入口的声明单源。
 
 /**
- * 引擎协议服务器。生命周期 = 进程生命周期（单引擎实例，无重建面——崩溃重建归
+ * 引擎协议服务器。生命周期 = 进程生命周期（单引擎实例，无重建逻辑——崩溃重建归
  * core EngineClient：杀进程再 spawn）。dispose 方法释放引擎常驻资源但进程不退出
  * （后续请求仍可服务——引擎进程退出归宿主 / 自灭检查）。
  */
@@ -221,7 +221,7 @@ export class EngineProtocolServer {
   }
 
   /**
-   * 发反向请求并等应答（帧④必须应答）。计时面登记：发出 → clock.started；收到
+   * 发反向请求并等应答（帧④必须应答）。计时侧登记：发出 → clock.started；收到
    * ack 形态应答 → clock.acked（两阶段第一段，等待不计超时）；终结 → clock.settled。
    * 应答超时兜底 reject——数据范围通道（host/log 等）core 10s 应答，reject 由调用方
    * 吞掉留痕（数据范围丢失不拖死主链路）。
@@ -240,7 +240,7 @@ export class EngineProtocolServer {
     };
   }
 
-  /** 反向请求发送（公开面：main.ts 的 host/log 桥接消费；内部 run 通道同路）。 */
+  /** 反向请求发送（对外公开：main.ts 的 host/log 桥接消费；内部 run 通道同路）。 */
   reverseRequest(method: string, params: unknown): Promise<unknown> {
     return this.reverseRequestInternal(method, params);
   }
@@ -259,7 +259,7 @@ export class EngineProtocolServer {
     );
   }
 
-  /** 反向请求应答落位（ack 两阶段：{ack:true}/{unsupported:true}/{ok:true} 均先 ack 计时面）。 */
+  /** 反向请求应答落位（ack 两阶段：{ack:true}/{unsupported:true}/{ok:true} 均先 ack 计时侧）。 */
   private settleReverse(id: number | string, frame: { result?: unknown; error?: unknown }): void {
     const pending = this.reversePending.get(String(id));
     if (pending === undefined) return;

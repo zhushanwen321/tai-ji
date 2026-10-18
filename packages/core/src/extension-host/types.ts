@@ -96,7 +96,7 @@ export interface NotificationPayload {
 /** plugin headerAction 帧协议类型（AP-1）re-export——SSOT = @taiji/shared
  *  protocol（shared 不依赖 core，core→shared 为既有合法依赖边）。re-export 维持
  *  `@taiji/core` / `@taiji/core/extension-host` 出口面（index.ts `export * from './types'`）
- *  与既有消费方（message-bus-bridge）引用面不变。 */
+ *  与既有消费方（message-bus-bridge）引用范围不变。 */
 export type { HeaderActionUpdatePayload }
 
 /** core 内部事件 union（IF2）。消费端 on(kind, handler) 编译期类型安全。 */

@@ -13,7 +13,7 @@
  *   （介质归位）+ D7 终态双维度语义：
  *   ① S3a partial：fan-out 脚本返回 status=partial（脚本层失败），但 run 自身正常完成——
  *      journal run-settled outcome=completed（「脚本层失败 = outcome:completed + 脚本返回失败
- *      结论」与「run 自身怎么死的 = outcome:failed」在通知面可区分）；
+ *      结论」与「run 自身怎么死的 = outcome:failed」在通知侧可区分）；
  *   ② v2 条目每实体两条（registered/settled）且 settled 数 === registered 数
  *      （每注册实体必有终态——W1 D4 恢复语义的静息面）；
  *   ③ S3c fail-fast：journal run-created 后紧跟 run-settled(failed) 且零 ask 帧

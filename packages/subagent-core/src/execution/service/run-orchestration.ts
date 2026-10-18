@@ -141,7 +141,7 @@ export interface RunOrchestrationDeps {
   readonly getCwd: () => string;
   /** WorktreeManager（worktree 创建/清理 + FinalizeDeps）。 */
   readonly getWorktreeManager: () => WorktreeManager;
-  /** NotifyHost（pending emit + FinalizeDeps 注销面）。 */
+  /** NotifyHost（pending emit + FinalizeDeps 注销侧）。 */
   readonly getNotifyHost: () => NotifyHost;
   /** ConcurrencyPool（DefaultConcurrencyPool 共享池——execute/executeAndAwait/
    *  chat 轮次/引擎任务的并发槽）。 */
@@ -429,7 +429,7 @@ export class RunOrchestration {
    * 单一收尾点——锚点确立即 acquireWriteLease 声明跨进程写权（fresh spawn 全程
    * 声明，缺口 1 补全；「宿主开始往 session 文件写即声明写权」）。acquire 失败
    * 原样上抛（双写风险敞口必须响亮，D3c——禁止 best-effort 吞错续跑），由各回填
-   * 站点所在的 run 收敛 catch 按 run 失败收尾；绑定写维持 best-effort（记账面）。
+   * 站点所在的 run 收敛 catch 按 run 失败收尾；绑定写维持 best-effort（记账侧）。
    * sessionFile 未回填（undefined）时静默跳过（绑定无从谈起、亦无写权可声明）。
    */
   writeBindingForRecord(record: ExecutionRecord): void {
@@ -438,7 +438,7 @@ export class RunOrchestration {
     this.deps.getStore().acquireWriteLease(sessionFile, record.id);
     // 身份域载荷经单源构造器（identityBindingPayload，登记 §3.1.5）——本处不再逐字段
     // 手写：新增身份字段只改构造器一处，settle/reopen 全载荷路径自动同步。
-    // [H2 S3] 来源身份随绑定落盘：引擎子文件身份面（binding sidecar）是磁盘重建
+    // [H2 S3] 来源身份随绑定落盘：引擎子文件身份侧（binding sidecar）是磁盘重建
     // origin 的唯一现行载体，漏写则收尾/重启后 workflow record 逃过 D1 派生视图过滤。
     // [W0 / D1] stepIndex 同族随绑定落盘——漏写则 identityFromBinding 重建路径
     // 恢复不出步骤索引（run 视图关联键静默缺失）。
@@ -550,7 +550,7 @@ export class RunOrchestration {
    * 缺席 → undefined，create 帧省略 model 键，引擎自解析）。偏好层排在 frontmatter 之后
    * （作者显式声明不被全局偏好压掉——既有层序保持）；偏好补缺值经 stampEngineOnRecordOpts
    * 写入 record.opts.model 后与显式指定同形（record 消费方只关心「用了哪个模型」）。
-   * [engine-ref-translation D2] 四层产物再经引擎翻译面（EnginePort.translateModelRef）
+   * [engine-ref-translation D2] 四层产物再经引擎翻译侧（EnginePort.translateModelRef）
    * 改写为引擎原生 ref（zai-coding-cn ↔ account:bigmodel-individual-coding-plan，
    * 2026-10-14 用户裁决）；显式层翻译失败抛错、偏好层翻译后不在引擎清单则跳过——
    * 见方法内注释。
@@ -563,7 +563,7 @@ export class RunOrchestration {
     const isPiRoute = route.engineId === DEFAULT_ENGINE_ID;
     // pi 路由恒 undefined（pi 链自有三层解析，taiji 级偏好无意义——D6 不采用段）；
     // ?? 链惰性求值：前两层任一在场时不触盘（直读仅服务偏好补缺场景）。
-    // [engine-ref-translation D2] 四层产物经引擎翻译面改写为引擎原生 ref（共享 helper
+    // [engine-ref-translation D2] 四层产物经引擎翻译侧改写为引擎原生 ref（共享 helper
     // resolveEngineModelWithTranslation——与 workflow 域同语义；两层失败语义分立见模块头）。
     // [subagent-detail-model-info] 来源标注与解析同点判定：pi 路由 = task 显式 ?
     // explicit : default（frontmatter/偏好层不适用——pi 链自解析）。

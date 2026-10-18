@@ -50,7 +50,7 @@ import type { EngineCapabilities } from "../types.ts";
 
 /**
  * 预检输入的任务形状子集——ExecuteOptions（chat 域）与 AgentCallOpts（D6 合流后的
- * 单一任务形状，workflow 域 SAR 直传）共有的能力相关字段面。结构子集而非具体类型：
+ * 单一任务形状，workflow 域 SAR 直传）共有的能力相关字段侧。结构子集而非具体类型：
  * 两域的 opts 类型都能直接传入。
  */
 export interface TaskShapeForGate {
@@ -69,7 +69,7 @@ const MANIFEST_RECOVERY_TAIL = "修 manifest capabilities / 升级引擎包（�
  * 含 capabilities 依据与恢复指引（修 manifest / 升级引擎包 / 调整任务参数）。
  *
  * fork 判据说明（借位裁定）：fork 依赖父 session 上下文继承（父会话文件作为分叉源），
- * 引擎具备该语义的能力面信号 = 会话分叉/交互通道族（steer 或 conversation 任一非
+ * 引擎具备该语义的能力侧信号 = 会话分叉/交互通道族（steer 或 conversation 任一非
  * 'unsupported'，**OR 语义任一可用即放行**）。pi conversation='native'（轮终 idle
  * 复用）→ 放行；zcode conversation='cold'（续聊 = 冷查重建 + 新 run + resume 锚点，
  * 协议线 run.params.chat 承载）→ 同样放行。拒绝例证（假设值）：steer 与 conversation

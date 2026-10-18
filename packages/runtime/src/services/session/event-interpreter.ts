@@ -17,14 +17,14 @@
  *   - writeContents（本 turn write 工具写入的 content，untracked 行数回退用）
  *   - diffChain / turnGen / turnFinalizing（W18 帧序三件套）
  *
- * [T4 协作对象拆分] 五个特性域中状态面独立、与主循环无时序耦合的四域抽为同目录协作对象
+ * [T4 协作对象拆分] 五个特性域中状态侧独立、与主循环无时序耦合的四域抽为同目录协作对象
  *（本类构造时装配、方法委托；协作对象不持本类引用，只收窄接口回调）：
  *   - event-interpreter-gen-stats.ts：LlmWindowSampler——composer-gen-stats LLM 请求窗口
  *     状态机（turnStartedAt / llmWindowDurationMs 配对消费，登记方向 ①）
  *   - event-interpreter-settled-delay.ts：AgentSettledDelayer——agent_settled V7 延迟注入
  *     + disposed 销毁短路（登记方向 ②）
  *   - event-interpreter-ping.ts：PingProbe——ADR-0047 进程健康探测循环（登记五域之外，
- *     同为独立状态面、挂点仅 turn-start/turn-end/dispose 三处）
+ *     同为独立状态侧、挂点仅 turn-start/turn-end/dispose 三处）
  *   - event-interpreter-compaction.ts：CompactionNotifier——compaction 双事件到 WS 帧 +
  *     副作用回调的纯同步编排（无内部状态，不牵动主循环时序，评估为低风险）
  * 保留在本类：file_changes 帧序三件套（diffChain/turnGen/turnFinalizing 与 turn-start/end、
@@ -565,7 +565,7 @@ export class EventInterpreter {
   private readonly llmWindows: LlmWindowSampler
   /** agent_settled V7 延迟注入 + disposed 销毁短路（登记方向 ②，缺陷 2 短路随迁）。 */
   private readonly settledDelayer: AgentSettledDelayer
-  /** pi 进程健康探测循环（ADR-0047，登记五域外独立状态面）。 */
+  /** pi 进程健康探测循环（ADR-0047，登记五域外独立状态侧）。 */
   private readonly pingProbe: PingProbe
   /** compaction 双事件编排（M4，纯同步无内部状态，评估低风险）。 */
   private readonly compaction: CompactionNotifier

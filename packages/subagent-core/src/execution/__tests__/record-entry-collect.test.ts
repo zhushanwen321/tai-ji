@@ -1,7 +1,7 @@
 // src/execution/__tests__/record-entry-collect.test.ts
 //
 // subagent-record entry 契约（v2-only）：customType / 版本常量 / kind 词表 +
-// 注册·终态条目载荷形态 + classifySubagentRecordEntryData 分类面。
+// 注册·终态条目载荷形态 + classifySubagentRecordEntryData 分类侧。
 //
 // 历史沿革：本文件原覆盖「v1 全量快照序列化白名单 + v1/v2 双版本分类」；v1 兼容层
 // 下线后（project 未发布、无 v1 数据），写点契约只剩 v2「注册 + 终态两条小条目」，
@@ -225,7 +225,7 @@ describe("v2 播种辅助：SubagentRecord → 现行主 session 条目族", () 
   });
 });
 
-// ── v2-only 分类面 ───────────────────────────────────────────────────────
+// ── v2-only 分类侧 ───────────────────────────────────────────────────────
 
 describe("classifySubagentRecordEntryData（v2-only）", () => {
   it("合法注册条目 → { ok:true, entry }，kind = 'registered'", () => {
@@ -245,7 +245,7 @@ describe("classifySubagentRecordEntryData（v2-only）", () => {
     }
   });
 
-  it("播种条目经 JSON round-trip 后仍判 ok（落盘形态 = 分类面输入）", () => {
+  it("播种条目经 JSON round-trip 后仍判 ok（落盘形态 = 分类侧输入）", () => {
     const seeded = v2Entries(makeRecord({ status: "idle", stopReason: "completed", endedAt: 2000 }));
     expect(seeded).toHaveLength(2);
     for (const entry of seeded) {

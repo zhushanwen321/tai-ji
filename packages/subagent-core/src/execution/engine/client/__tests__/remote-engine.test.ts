@@ -160,7 +160,7 @@ describe("RemoteEngine 同步成员形态映射（必写死）", () => {
     void cleanup;
   });
 
-  it("listModels() 四态：省略 modelCatalog → null；dynamic:true+[] → null（无静态枚举面，B1）；dynamic:false+[] → []（显式空清单）；静态非空 → 原样", async () => {
+  it("listModels() 四态：省略 modelCatalog → null；dynamic:true+[] → null（无静态枚举情形，B1）；dynamic:false+[] → []（显式空清单）；静态非空 → 原样", async () => {
     const omitted = makeEngine({ modelCatalog: undefined });
     expect(omitted.engine.listModels()).toBeNull();
     const nullForm = makeEngine({ modelCatalog: null });
@@ -571,7 +571,7 @@ describe("read / probe / dispose 门面（[H1 U6] interact 断言随 interact �
         JSON.stringify([{ op: "askUser", request: { method: "confirm", id: "q-facade" } }]),
       ],
     });
-    // [D3] 构造后经槽登记（reverse-router 消费时现读，构造期无固化面）
+    // [D3] 构造后经槽登记（reverse-router 消费时现读，构造期不固化值的情形）
     setHostUiRequestEndpoint(async (req) => {
       seenRequests.push(req);
       return { confirmed: true };

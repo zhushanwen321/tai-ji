@@ -1,6 +1,6 @@
 // src/execution/registry-reconcile/sweep-binding.test.ts
 //
-// sweep-binding 绑定面直测：runPendingReconcileSweepForService 的 lookupRecordState
+// sweep-binding 绑定侧直测：runPendingReconcileSweepForService 的 lookupRecordState
 // 闭包 subagent 判据（workflow 判据回归钉在 workflow-state-root.test.ts，此处补
 // subagent 两方向：活跃 record 不被 sweep 注销 + 终态/missing 差集补发注销）。
 //

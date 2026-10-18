@@ -56,7 +56,7 @@ export default taijiTestConfig({
       {
         test: {
           name: 'legacy',
-          // update/__tests__/ 是存量 update 模块测试（原 include 第二个 glob 的匹配面），
+          // update/__tests__/ 是存量 update 模块测试（原 include 第二个 glob 的匹配范围），
           // 与 guarded 的 logs/__tests__ 前缀精确互斥，防同文件跨池重复收集。
           // ../scripts/__tests__：dev-instance-lib 纯函数层（MF-8，C-build-08 装配器可测层），
           // 同样无 electron 运行时依赖，随 main 纯函数测试一起跑（dev-0.9.19 合并并入）。

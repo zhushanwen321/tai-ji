@@ -47,7 +47,7 @@ export function zcodeIsolatedDbPath(dataDir: string): string {
 /**
  * zcode 会话库白名单集合（封闭集合）：`[隔离库（现役）, 宿主库（仅存量兼容）]`。
  * 与引擎侧 zcodeDbPathAllowlist 同构——wire 帧 / session 数据里的 dbPath 来自
- * 不可信面，仅放行集合内精确绝对路径。集合形态（而非 `||` 列表）使未来第三个
+ * 不可信来源，仅放行集合内精确绝对路径。集合形态（而非 `||` 列表）使未来第三个
  * 合法路径只需改本函数。
  * @param dataDir taiji 数据根（getDataDir() 产物，由调用方传入）
  */

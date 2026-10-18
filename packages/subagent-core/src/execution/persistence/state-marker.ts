@@ -87,12 +87,12 @@ export interface RecordBinding {
    */
   model: string | undefined;
   thinkingLevel?: string;
-  /** 创建时启用 worktree 隔离（重建面 hadWorktree 恢复源）。 */
+  /** 创建时启用 worktree 隔离（重建侧 hadWorktree 恢复源）。 */
   worktree: boolean;
   /**
-   * 来源身份（H2 S3 修复：引擎子文件身份面 origin 透传）。undefined（存量 binding）
+   * 来源身份（H2 S3 修复：引擎子文件身份侧 origin 透传）。undefined（存量 binding）
    * = "tool" 语义，消费方零迁移——engine-CLI 化后子 session 文件无 identity entry，
-   * 本 sidecar 是磁盘重建面 origin 过滤（subagents list / TUI overlay）的唯一承载，
+   * 本 sidecar 是磁盘重建侧 origin 过滤（subagents list / TUI overlay）的唯一承载，
    * 漏本字段则收尾/重启后 workflow record 逃过派生视图过滤（Gate B S3 FAIL 根因）。
    */
   origin?: RecordOrigin;
@@ -110,8 +110,8 @@ export interface RecordBinding {
   stepIndex?: number;
   /**
    * 终态 usage 快照（[H2 A3]，终态写点 Step3a 随 .state 同步更新 binding）：
-   * totalTokens/turns/endedAt 三字段的 record 终值。light 列表面据此恢复 usage
-   * （子文件无 identity entry，全量重建面不可用；round 补派生同款先例）。
+   * totalTokens/turns/endedAt 三字段的 record 终值。light 列表侧据此恢复 usage
+   * （子文件无 identity entry，全量重建侧不可用；round 补派生同款先例）。
    * undefined（存量 binding / 非终态写点）= 不派生（读侧检查归一）。
    */
   totalTokens?: number;
@@ -158,7 +158,7 @@ export function zcodeAnchorBasePath(ref: { sessionId: string; dbPath: string }):
 /**
  * 写 record 绑定 sidecar（原子写：独占创建 tmp → rename 覆盖目标）。
  *
- * 大多数调用点（spawn 回填点 / settle 快照）是 best-effort 记账面：I/O 失败只 warn
+ * 大多数调用点（spawn 回填点 / settle 快照）是 best-effort 记账侧：I/O 失败只 warn
  * 不抛——绑定缺失只影响跨重启恢复能力，不得影响当前进程的派发推进。失败经返回值
  * 上报调用方自行分派处置（markReopened 是硬要求例外——epoch 随 binding 持久化，
  * 写失败必须拒绝重开，见 record-store-terminal.markReopenedImpl）。

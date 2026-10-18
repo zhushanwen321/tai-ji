@@ -82,7 +82,7 @@ describe("sendReverseRequest（发送侧语义）", () => {
     expect(settled).toEqual(["rev-1"]);
   });
 
-  it("pendingExtras 合并进 pending 条目（pi 记 method 供应答面检查用）", () => {
+  it("pendingExtras 合并进 pending 条目（pi 记 method 供应答侧检查用）", () => {
     const { ctx, pending } = makeSendCtx({ pendingExtras: (method) => ({ method }) });
     void sendReverseRequest(ctx, "host/askUser", {});
     expect(pending.get("rev-1")?.method).toBe("host/askUser");
@@ -146,7 +146,7 @@ describe("initializeEngine（版本协商 + 模型应答）", () => {
     expect(result.models).toEqual([{ id: "m1" }]);
   });
 
-  it("无模型面（listModels → null）→ 应答不带 models 字段", () => {
+  it("无模型侧（listModels → null）→ 应答不带 models 字段", () => {
     const result = initializeEngine({ protocolVersion: ENGINE_PROTOCOL_VERSION } as never, {
       ...base,
       listModels: () => null,

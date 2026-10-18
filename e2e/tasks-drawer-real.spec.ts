@@ -75,16 +75,16 @@ const R3_FAUX_SCRIPT = [
 
 // ── R2/R3 共享 helper：tool_call_end 轮询 / 诊断落盘 / 帧结构收窄 / 收尾清理 ──
 
-/** tool result details 最小面（R2 消费 todos，R3 消费 slug） */
+/** tool result details 最小子集（R2 消费 todos，R3 消费 slug） */
 type ToolResultDetails = {
   todos?: Array<{ id?: string; text?: string; status?: string }>
   slug?: string
 }
 
-/** W21 entry 化协议下 tool_call_end.payload.entry 上的 result message 最小面 */
+/** W21 entry 化协议下 tool_call_end.payload.entry 上的 result message 最小子集 */
 type ToolResultEntry = { message?: { details?: ToolResultDetails } }
 
-/** extension:widgetGui 推送载荷最小面（托盘 widget 区数据源，断言消费字段） */
+/** extension:widgetGui 推送载荷最小子集（托盘 widget 区数据源，断言消费字段） */
 type WidgetGuiPayload = {
   gui?: unknown
   meta?: { title?: string; status?: string; icon?: unknown; badge?: string; progress?: { current: number; total: number } }

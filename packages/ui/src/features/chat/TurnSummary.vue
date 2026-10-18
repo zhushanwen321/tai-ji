@@ -39,7 +39,7 @@
     <!-- 朗读：状态机（ai-voice-tts §5.1）idle Volume2 → loading Loader2 旋转（可点，点击=取消）
          → playing Square（点击=停止）→ idle；生成中置灰（disabled + title=回复生成中）。
          对 subagent session 同样可见（朗读是只读消费，与复制同类，不受 fork/handoff 隐藏规则约束）。
-         deps 两字段（onSpeak/speakStateOf）未 provide 时按钮不渲染（宿主未接语音能力则无此交互面）；
+         deps 两字段（onSpeak/speakStateOf）未 provide 时按钮不渲染（宿主未接语音能力则无此交互入口）；
          点击动作分流（idle=朗读 / 非 idle=取消或停止）在壳层装配侧，ui 只调 onSpeak。 -->
     <Button
       v-if="speakState"

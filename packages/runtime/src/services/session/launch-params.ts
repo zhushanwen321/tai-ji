@@ -192,7 +192,7 @@ export async function resolveLaunchPresetOptions(
 
 /**
  * 模式回落事实 → pi 子进程出站 env（F1b，设计 `mode-system-composer-density`
- * §7.5 E4 的 trace 披露面）。
+ * §7.5 E4 的 trace 披露部分）。
  *
  * `resolveLaunchPresetOptions` 检测到悬空 presetId 时在 resolution 上附
  * `fellBackFromPresetId`，本 helper 把它翻译成 pi 子进程 env：回落时 FROM=原悬空 id /

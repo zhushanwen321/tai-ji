@@ -13,7 +13,7 @@
 //
 // companion 区挂 ui CompanionBand（简单 dialog 渲染）——D3 根级常驻：不随页签/视图分支
 // 卸载（订阅随组件卸载退订，页签分支内挂载会静默丢请求），任意页签直接可见可作答；
-// form/planReview 类请求（C4 门排除面）由 MobileFormCard 承接（D7 form 行恢复）；
+// form/planReview 类请求（C4 门排除情形）由 MobileFormCard 承接（D7 form 行恢复）；
 // source/transport/OverlayLifecycle 经 App provide（回传走 core 既有通路，D7 ask-user 行）。
 // 权限审批弹窗（D7「手机可批」行）全局挂根：bus 'plugin-permission-request' →
 // companion-bridge 弹窗状态 → PermissionRequestDialog；回传经 provide 的
@@ -85,7 +85,7 @@ provide(
 // 权限审批弹窗状态（companion-bridge bus 订阅驱动，全局单例 session 无关）
 const permission = useMobilePermissionRequest()
 
-// form/planReview 类请求（C4 门排除出 CompanionBand 的富交互面，D7 form 行恢复）：
+// form/planReview 类请求（C4 门排除出 CompanionBand 的富交互入口，D7 form 行恢复）：
 // 队首请求派生 + 快照对账（companion-bridge form 通道）；作答经 respond 回传
 // extension.ui_response 既有通路。form 请求呈现时替换 composer（桌面 FormOverlay 与
 // composer 互斥同构——输入禁止）；planReview 卡与 composer 并存（桌面 PlanReviewBar 同式）。
@@ -227,7 +227,7 @@ watch(isConnected, (connected) => {
             <MobileMessageStream :session-id="activeSessionId" />
           </main>
 
-          <!-- form/planReview 类请求卡（D7 form 行恢复）：C4 门排除的富交互面；
+          <!-- form/planReview 类请求卡（D7 form 行恢复）：C4 门排除的富交互入口；
                form 请求在场时 composer 隐藏（桌面 overlay 与 composer 互斥同构） -->
           <MobileFormCard
             :request="pendingFormRequest"

@@ -1,7 +1,7 @@
 // @vitest-environment happy-dom
 
 /**
- * useSubagentModel 单测（subagent-model-switch §7.1 入口层，U1 验收面——renderer 半边）。
+ * useSubagentModel 单测（subagent-model-switch §7.1 入口层，U1 验收范围——renderer 半边）。
  *
  * 覆盖（mock 宿主应答回执范式 + 标签读取规则四分支 + thinking 槽取值）：
  * - **禁乐观写**：api promise 未 resolve 前显示态零写入（应答到达才写状态）；

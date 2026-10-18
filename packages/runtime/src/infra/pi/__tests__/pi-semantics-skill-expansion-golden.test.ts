@@ -184,12 +184,12 @@ describe.skipIf(!FAUX_PI_READY)(
         const marker = buildSkillMarker(SKILL_NAME)
         const result = await injector.inject(client, marker)
 
-        // ── 4. 映射失效定向断言（与格式漂移区分，失败信息指向修复面）──
+        // ── 4. 映射失效定向断言（与格式漂移区分，失败信息指向修复侧）──
         const missing = result.notices.find((n) => n.reason === 'skill_missing')
         expect(
           missing,
           `注入器报 skill_missing：映射源未提供 name="${SKILL_NAME}"（裸名）条目。` +
-            `修复面：skill-injector 的 registry 映射构建（buildSkillsByNameFromRegistry，key 用 SkillInfo.name 裸名）或本探针映射源构造`,
+            `修复侧：skill-injector 的 registry 映射构建（buildSkillsByNameFromRegistry，key 用 SkillInfo.name 裸名）或本探针映射源构造`,
         ).toBeUndefined()
 
         // ── 5. 终断言：整条消息形态（R4 D11「标记保留 + 末尾包裹块」）+ golden diff

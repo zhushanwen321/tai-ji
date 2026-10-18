@@ -6,7 +6,7 @@
  * 跨消费者共享 2 方法（removeSessionEntry 为 lifecycle+dispatcher 共用，
  * getActiveSummaries 为 lifecycle+scanner 共用）按消费者在多个窄接口**重复声明、
  * 单一实现**——SessionService implements 三窄接口即编译期防签名漂移检查
- * （真 ISP：每个消费者可见面 = 实际消费方）。
+ * （真 ISP：每个消费者可见部分 = 实际消费方）。
  *
  * 原宽接口 21 方法中 4 个不进任何窄接口：applyContextUpdate（声明于 ISessionService，
  * 组合根以具体类接线）、handleTurnUsageSideEffects / handleTurnEndSideEffects

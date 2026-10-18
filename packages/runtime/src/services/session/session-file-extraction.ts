@@ -40,7 +40,7 @@ export interface SessionFileExtraction<T> {
   oversize: boolean
 }
 
-/** 各 extractor 注入的差异面：日志标签、降级文案的被提取对象名、entry 扫描器。 */
+/** 各 extractor 注入的差异点：日志标签、降级文案的被提取对象名、entry 扫描器。 */
 export interface SessionFileExtractionReader<T> {
   /** warn 留痕的日志前缀（如 'subagent-extractor'） */
   warnTag: string

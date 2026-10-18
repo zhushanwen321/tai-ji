@@ -560,7 +560,7 @@ export class PluginHost implements PluginHostContract {
       try {
         process.stderr.write(chunk)
       } catch (e) {
-        // EPIPE 极端路径：转发失败不连坐采集与主链路（取证面 best-effort），debug 留痕
+        // EPIPE 极端路径：转发失败不连坐采集与主链路（取证侧 best-effort），debug 留痕
         console.debug('[plugin-host] worker stderr forward failed:', e)
       }
     })

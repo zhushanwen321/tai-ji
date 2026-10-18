@@ -246,7 +246,7 @@ describe("[OR-7] signal abort listener run 终态移除", () => {
     expect(emitSpy).not.toHaveBeenCalled();
   });
 
-  it("消息面终态（worker return → onRunDone）→ removeEventListener（不再泄漏）", async () => {
+  it("消息侧终态（worker return → onRunDone）→ removeEventListener（不再泄漏）", async () => {
     const deps = makeDeps();
     const { controller, added, removed } = makeSignal();
 
@@ -376,7 +376,7 @@ describe("[D3] makeHandlers deps 视图保持 volatile 成员现读（reload 后
   it("run 启动后替换底层 bus/append 面 → register 路由新 bus、unregister 直落新 append 面（旧面零收到 unregister）", async () => {
     // 复现生产形态（workflow-events makeDeps）：deps.eventBus 是 getter（每次属性
     // 访问现读槽位上的 currentPi.events），deps.appendEntry 是函数成员（函数体内
-    // 现读 resolveCurrentPi().appendEntry——reload-closeout D4 直落权威面）。pi
+    // 现读 resolveCurrentPi().appendEntry——reload-closeout D4 直写权威存储的部分）。pi
     // reload 重跑 factory 覆盖槽位——run 启动于 reload 前、完成于 reload 后时，
     // per-run deps 视图若把 volatile 成员快照成静态值，写路径会打到旧 pi：
     // register 的 emit 被旧 bus 静默丢、unregister 直落撞旧 pi assertActive 抛错

@@ -86,7 +86,7 @@ function makeFakePort() {
   };
 }
 
-/** mock host：捕获所有 sendMessage（直发兜底观察面）+ 控制 hasRunningBackground。 */
+/** mock host：捕获所有 sendMessage（直发兜底观察侧）+ 控制 hasRunningBackground。 */
 function makeMockHost(): NotifierHost & {
 	sendMessageCalls: { message: unknown; options: unknown }[];
 	hasRunningBackground: ReturnType<typeof vi.fn>;
@@ -397,7 +397,7 @@ describe("BgNotifier — port 缺席直发降级留痕（warn 限流：首次 + 
   });
 });
 
-// ─── buildLlmContent 文案面（与投递路径解耦的纯函数面——经直发兜底观察） ─────
+// ─── buildLlmContent 文案侧（与投递路径解耦的纯函数部分——经直发兜底观察） ─────
 
 describe("BgNotifier buildLlmContent 指针行（wave2：chatMode sessionFile 透传）", () => {
   let host: ReturnType<typeof makeMockHost>;

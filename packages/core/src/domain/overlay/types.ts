@@ -58,8 +58,8 @@ export interface OverlayControlState { // oe-exempt:20261003:framework:类型契
 // 命名注记：§6.7 原记 'yields⌘W'——⌘（U+2318）非 JS 标识符合法字符，字段名 ASCII 化 yieldsCmdW。
 
 /** shieldsView 判定分档（§6.7 [MANDATORY] 分档）：
- * - 'unconditional'：全屏阻塞面（遮罩盖满视口）= 无条件隐藏 view；
- * - 'intersecting'：非全屏面（横幅/弹出层，锚定局部）= 与 view 显示矩形几何相交才隐藏；
+ * - 'unconditional'：全屏阻塞遮罩（遮罩盖满视口）= 无条件隐藏 view；
+ * - 'intersecting'：非全屏遮罩（横幅/弹出层，锚定局部）= 与 view 显示矩形几何相交才隐藏；
  * - 'none'：不参与 view 遮蔽。 */
 export type ShieldsViewMode = 'none' | 'unconditional' | 'intersecting'
 

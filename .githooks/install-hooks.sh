@@ -170,7 +170,7 @@ STAGED_FILES=$(git diff --cached --name-only --diff-filter=ACMR)
 # ui/mobile 的**测试文件**：renderer 默认 tsconfig 排除测试（typecheck-test 变体只含 renderer
 # 自己的测试），ui src 虽经 renderer include 传递覆盖，但 ui 测试文件（如 UserBubble.test 的
 # EditComposerProps 契约漂移 9 错存量）无任何编译期信号，mobile 全包同理。ESLint 与 vue-tsc
-# 两段同源本变量，随之扩面。
+# 两段同源本变量，随之扩大范围。
 FRONTEND_FILES=$(echo "$STAGED_FILES" | grep -E "^packages/(renderer|ui|mobile-renderer)/src/" || true)
 EXTENSION_FILES=$(echo "$STAGED_FILES" | grep -E "^extensions/.*\.ts$" | grep -vE "__tests__|\.test\.|/workflows/|/examples/|\.d\.ts$" || true)
 
@@ -1165,7 +1165,7 @@ fi
 #   node scripts/check-structure-wiring.mjs：管辖区（packages/ extensions/
 #   resources/plugins/）含 package.json 但不在 pnpm-workspace.yaml globs 内的包
 #   必须在 docs/structure-wiring.json 登记各管线接线点（CI typecheck / 测试装配 /
-#   发布线 / coverage 测量面），登记锚点在目标文件中真实存在——新顶层结构
+#   发布线 / coverage 测量范围），登记锚点在目标文件中真实存在——新顶层结构
 #   第一笔 commit 只做接线与登记（ed6735b47 一 commit 三坑形态不允许再发生）。
 #   触发范围：pnpm-workspace.yaml / docs/structure-wiring.json / 管辖区新增 package.json。
 #   注：不设独立跳过开关，仅受 SKIP_ALL_CHECKS 总开关管辖。
@@ -1694,7 +1694,7 @@ ${STAGED_DELETED}"
     fi
 
     # thinking 档位词表检查（ext-simplify-17 §3.2 D5 机器检查补强 + ext-simplify-18 §3.4
-    # D6 扩面，按路径触发）：
+    # D6 扩大范围，按路径触发）：
     # pi-ai ModelThinkingLevel 联合 ↔ 本地词表副本（llm-shared Set / pi-rpc 数组 /
     # subagent-core THINKING_ORDER 有序数组）双向比对。
     # 钉值单测只锚副本自身字面量，pi 升级改联合成员时副本静默过期（P1-a 漏 xhigh 实证），
@@ -1997,7 +1997,7 @@ fi
 #   TEST-STRATEGY.md / docs/testing/，加任意源码文件（.ts/.tsx/.mts/.cts/.mjs/
 #   .cjs/.js/.vue，第三检查的扫描对象）与任意 .md（含 staged 删除——文档删除
 #   提交触发第三检查全仓扫描）：
-#   scripts/check-doc-symbol-drift.mjs 三检查面：
+#   scripts/check-doc-symbol-drift.mjs 三项检查：
 #   ① 符号漂移：TypeScript AST 提取源码符号表 × 设计文档反引号符号候选，
 #     文档引用已删除/改名符号即拦截（[HISTORICAL] 2026-08-31 update 路径常量
 #     函数化后 3 处旧常量引用悬空，靠对抗审查才抓出）；
@@ -2035,7 +2035,7 @@ if echo "$DOC_SYMBOL_STAGED" | grep -qE "^docs/design/|^apps/electron/main/updat
         echo -e "${GREEN}[OK] doc-symbol-drift 检查单测通过${NC}"
     fi
 else
-    echo -e "${GREEN}[OK] 无设计文档/源码注释检查面变更，跳过文档符号漂移检查${NC}"
+    echo -e "${GREEN}[OK] 无设计文档/源码注释检查范围变更，跳过文档符号漂移检查${NC}"
 fi
 
 # ============================================================================
@@ -2317,7 +2317,7 @@ fi
 #   两包各跑 tsc --noEmit。
 #   SDK 侧锁：D11 的 C3 事件词表双向锁 / C4 task/ctx 双写禁令锁 / C2 能力位必填锁，
 #   全部是 SDK 包内编译期断言（contract-types.ts + contract-closure.test.ts）。
-#   core 侧锁：C-proc-23 四张词表锁的镜像面——SDK SSOT ↔ core 镜像类型双向可赋值 +
+#   core 侧锁：C-proc-23 四张词表锁的镜像副本——SDK SSOT ↔ core 镜像类型双向可赋值 +
 #   engine-manifest 两表键集互等，断言在 packages/subagent-core/src/execution/engine/
 #   client/__tests__/protocol-closure.test.ts，只在 core 包 typecheck 下生效（SDK 类型
 #   改动只编译 SDK 恒绿，core 锚点不在其 include 内；缺 core 侧执行点则镜像锁为纸面）。
@@ -2374,12 +2374,12 @@ fi
 # ============================================================================
 # vitest 红线：测试文件 node:test import 拦截（review-pipeline-redesign 决策 4）
 #   docs/TEST-STRATEGY.md vitest 红线（禁 node:test）的机器承接分两半：
-#   非测试文件面 = eslint.config.mjs 的 no-restricted-syntax 两块（core 域 selector 追加 +
-#   全仓独立块）；测试文件面 = 本段 grep——taste-lint/base.mjs 的全局 ignores 把
+#   非测试文件范围 = eslint.config.mjs 的 no-restricted-syntax 两块（core 域 selector 追加 +
+#   全仓独立块）；测试文件范围 = 本段 grep——taste-lint/base.mjs 的全局 ignores 把
 #   **/*.test.ts / **/*.spec.ts / **/__tests__/**/*.ts 三模式整体排除出 eslint 管线
-#   （global-ignores 硬语义，配置块无法复活），故测试文件面由 pre-commit 承载
+#   （global-ignores 硬语义，配置块无法复活），故测试文件范围由 pre-commit 承载
 #   （「不在 eslint 管线的面用 pre-commit 承载」惯例，与「tsx --test 归红线文档不进 lint」
-#   同构）。本段文件面与该 ignores 三模式对齐：*.test.* / *.spec.* 后缀 case +
+#   同构）。本段的文件范围与该 ignores 三模式对齐：*.test.* / *.spec.* 后缀 case +
 #   __tests__/ 目录 case（ignores 的目录口径限 .ts，case 对齐该面；后缀 case 比 ignores
 #   后缀模式宽出的 .tsx/.mts/... 属无害超集——违规 import 无论如何该拦）。无豁免类目。
 #   注：不设独立 SKIP_* 开关（R1 后惯例，总开关 SKIP_ALL_CHECKS 兜底）。

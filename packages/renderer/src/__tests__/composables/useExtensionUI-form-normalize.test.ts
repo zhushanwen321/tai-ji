@@ -6,7 +6,7 @@
  *
  * 锁定：
  * - formFilter 判定矩阵：只认 form 键（全部表单族帧由 runtime event-adapter marker 分支
- *   统一产出 form:true；裸 askUser / scheduleCreate / 无标记均不命中——判定面收敛 G2）
+ *   统一产出 form:true；裸 askUser / scheduleCreate / 无标记均不命中——判定侧收敛 G2）
  * - C4 契约（归一上移 runtime 后）：本层只消费 view-ready 帧——裸 legacy 键帧（假设性
  *   旧 runtime 产物）不放行入 store
  * - 双路径消费（原 D7 挂点①②位置，归一已删只留入队）：
@@ -141,7 +141,7 @@ beforeEach(() => {
 
 // ── formFilter 判定矩阵（G2 收敛终态：只认 form 键）──────────────────────
 
-describe('formFilter 判定矩阵（判定面收敛：只认 form 键）', () => {
+describe('formFilter 判定矩阵（判定侧收敛：只认 form 键）', () => {
   it('form:true → 放行；裸 legacy 键 / 无标记 → 不命中', () => {
     expect(formFilter(mkFormReq('r1') as never as ExtensionUIRequest)).toBe(true)
     expect(formFilter(mkAskUserReq('r2') as never as ExtensionUIRequest)).toBe(true)

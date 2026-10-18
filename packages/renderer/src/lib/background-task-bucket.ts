@@ -3,7 +3,7 @@
  *（docs/architecture/background-task-sidebar-view.md §3.3 D10①，u-renderer-store）。
  *
  * 纯函数模块，零 Vue / 零 DOM 依赖。四方同源消费点（禁两处各写判定，D10① 纪律）：
- * - 列表过滤（composer 任务托盘 TrayNativePanel 的 bash 面板，2026-09-16 起为唯一列表面）
+ * - 列表过滤（composer 任务托盘 TrayNativePanel 的 bash 面板，2026-09-16 起为唯一列表）
  * - 分桶视图计数（同上；托盘计数恒由行集长度派生）
  * - 条目状态 icon 色档（backgroundTaskStatusIcon，D10⑤，托盘面板 / drawer bashTask）
  * - 桶归属判定（backgroundTaskBucket，托盘行状态派生）

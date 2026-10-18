@@ -169,7 +169,7 @@ export function useMessageStreamFollowTriggers(deps: MessageStreamFollowTriggerD
   // - steer / followUp（pushPending 不进流，投递时 drainN → appendUser 尾插）
   // - defer 入队 flush 重放（flush → send → appendUser）
   // - 编辑重发（editAndResend → truncateFrom + appendUser）
-  // 排除面（结构性不触发）：load-more 前插（尾部身份不变，新增在头部）；assistant 流式 /
+  // 排除情形（结构性不触发）：load-more 前插（尾部身份不变，新增在头部）；assistant 流式 /
   // system notice / bashExecution 追加（role ≠ user，仍走 followIfStuck 矩阵）；末条 user
   // 消息同 id 对象替换（segments 回填等，快照不变）。
   watch(

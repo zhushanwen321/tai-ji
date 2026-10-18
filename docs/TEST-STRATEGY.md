@@ -162,7 +162,7 @@ it('首屏渲染：<页面> DOM 含关键交互元素', () => {
 | **插件系统非 mock 端到端** | 隔离 runtime（tsx 源码形态）+ 真实插件文件 + 真实 WS：sandbox 激活 / toggle 往返 / built-in statusline 发现 / onBeforeSendMessage hook 真实执行。破坏=插件真实加载路径回归（mock 层不可见的 F1-F4 类 bug） | `2026-08 插件系统 F1-F4`（测试金字塔底部全 mock、真实加载路径零覆盖） | `scripts/verify-plugin-e2e.sh`（挂 `validate-runtime-bundle.sh` 第 7 步，pre-commit 于 runtime src 变更触发）+ `packages/runtime/test/plugin-registry.test.ts` TC-1-09/10/11（built-in 扫描两形态）；手册 [docs/testing/03-runtime-extensions.md](docs/testing/03-runtime-extensions.md) §3（插件系统非 mock E2E） |
 | **流式 block 双轴尾部追踪 + 折叠头截短** | thinking 折叠预览/tool 折叠头在 streaming/running 中渲染尾部行窗口且 scrollLeft 钉右（`scrollLeft >= scrollWidth - clientWidth - 1`）、完成态回落静态摘要；折叠头路径 `…/末两段` 截短但展开态/copy 全量；preview 行高恒定（virtua 高度断言依赖）。破坏=流式预览死在开头/折叠头丢命令可见性/虚拟列表行高抖动 | `cw-2026-08-25-chat-visual-font-optimize`（实测发现：pi bash 部分输出无流式增量广播，tool 接入点按预案降级静态 argPath，thinking 链路钉尾 3/3）`[from: chat-visual-font-optimize (cw-2026-08-25) §D4]` | `packages/ui/src/features/chat/composables/__tests__/useTailScroll.test.ts`（9 用例：钉右/translateY/降级/未挂载）+ `packages/ui/src/features/chat/__tests__/Block.test.ts`（双态 DOM 断言）+ `format-utils.test.ts`（shortenForHeader/tailLines 规则） |
 | **等价性测试双轨** | live ≡ reload / broadcast ≡ get_state / 混沌注入收敛等不变量断言。CI 与 PR/merge 门禁只跑凭证无关子集（mock RPC / fixture 重放，`TAIJI_SKIP_REAL_PI=1` 双侧显式声明），真实 LLM turn 用例在开发阶段按改动范围跑（详见下方「等价性测试双轨」小节） | `2026-08-19 data-source-governance P1-P4` goal-audit 问题 1（CI 无 pi 凭证，push 后 test-runtime 预期红） | `packages/runtime/src/__tests__/equivalence/` 13 文件（skip 机制 SSOT = `real-pi-gate.ts` `REAL_PI_READY`，按需 import） |
-| **pi 语义检查探针族** | 静态直读 pi dist 断言私有语义契约（pattern 引擎匹配规则 / reasoning 两级门控 / RPC 响应面 / steer drain 窗 / settled 复位序 / entry→context 映射），pi 升级语义漂移即红；配套 `check-pi-semantics.mjs` 版本门禁（四包一致 + verifiedWith 比对）与 `diff-probe-thinking.mjs` 档位对账。破坏=pi bump 后语义假设批量过期无人知（登记≠防御：8-20 登记观察项 8-27 照样出事的实证） | `2026-08-27 事故对`（subagent 派发 429/gc + 思考等级自动变关）`[from: pi-boundary-reliability U7]` | `packages/runtime/src/infra/pi/__tests__/pi-semantics-*.test.ts`（6 文件，凭证无关 CI 可跑）+ `scripts/check-pi-semantics.mjs`（pre-commit + CI）+ `scripts/diff-probe-thinking.mjs` |
+| **pi 语义检查探针族** | 静态直读 pi dist 断言私有语义契约（pattern 引擎匹配规则 / reasoning 两级门控 / RPC 响应侧 / steer drain 窗 / settled 复位序 / entry→context 映射），pi 升级语义漂移即红；配套 `check-pi-semantics.mjs` 版本门禁（四包一致 + verifiedWith 比对）与 `diff-probe-thinking.mjs` 档位对账。破坏=pi bump 后语义假设批量过期无人知（登记≠防御：8-20 登记观察项 8-27 照样出事的实证） | `2026-08-27 事故对`（subagent 派发 429/gc + 思考等级自动变关）`[from: pi-boundary-reliability U7]` | `packages/runtime/src/infra/pi/__tests__/pi-semantics-*.test.ts`（6 文件，凭证无关 CI 可跑）+ `scripts/check-pi-semantics.mjs`（pre-commit + CI）+ `scripts/diff-probe-thinking.mjs` |
 | **run/record 介质归位写侧** | journal 唯一事实源 + 主 session 每实体注册/终态两条 v2 小条目：v1 全量快照写点（已删，回潮即红）、eventLog/displayItems 死字节载荷、事件文件（`.events`）白名单外直写、两族 entry 白名单外直写，任一出现即检查红；旧读者（runtime 两 extractor / 壳 loadAll / core rebuild / session-reader 锚链 / event-interpreter）对 v2 条目行为 = 版本门跳过或正确解析，零幻影零崩溃 | W1 介质归位（[ADR-0094](adr/decisions.md)；写侧检查断言随写点收敛更新） | `scripts/check-record-write-surface.mjs`（R1-R7，L1 pre-commit + CI invariants）+ `scripts/__tests__/check-record-write-surface.test.mjs`（检查规则回归）+ 版本门/条目契约测试族（`record-entry-collect.test.ts`、`record-store-rebuild-v-gate.test.ts`、`workflow-record-entry.test.ts`、session-reader 锚链测试、runtime `events-projection*.test.ts`） |
 | **sync-collect 探针（已退役，R3 归档）** | sync 批机制已随 collect 退役整体删除（2026-09-16）——探针的被测写点（flushBatch 时序、appendBatchFinalizedEntry、finalizeOrphanRecord merge、E1 判定）已不存在，v2/v3 不再可跑，e2e-map 登记已摘除。`scripts/probes/subagent-sync-collect/` 目录（18 文件，含 RESULTS.md 与 v1/v2/v3）已删除（2026-09-16 随 collect 退役清理，git 可追溯）；此处记录退役原因（禁止只删不记）。 | `collect 退役`（u8 文档同步）`[from: subagents-batch-tool-fanout P2.4]` | 探针目录已删除（git 可追溯） |
 
@@ -197,12 +197,12 @@ it('首屏渲染：<页面> DOM 含关键交互元素', () => {
 - **happy-dom 对 contenteditable/Selection/Range 支持有限**：测 contenteditable 组件用 textContent + querySelector + dispatch input event，不要依赖真实光标操作
 - **DOMPurify 与 happy-dom 不兼容（nodeName 在元素子类而非 Node.prototype）**：DOMPurify 在 happy-dom 下全标签误拒（净化整体失真，且失真环境下既有断言可能假阴性通过）——markdown 渲染管线测试族（`markdown-sanitize.test.ts` 等触及 renderMarkdown/DOMPurify 的文件）已钉 `// @vitest-environment jsdom`（2026-09-19 markdown-html-sanitize-render U1 探针实证）；新增触及 DOMPurify 的测试文件照此办理
 
-### mock 保真度登记（类型锚定 + override 生效面，2026-09-17 G4）
+### mock 保真度登记（类型锚定 + override 生效侧，2026-09-17 G4）
 
 门面三元（renderer `api/index.ts` 的 `isMock ? mockApi.x : realX`）两侧同构的保证方式：mock 域对象显式标注 real 域导出类型（`XDomain = typeof real 域模块`，定义与断言基建在 `packages/core/src/transport/mock/index.ts` 头部「[G4 类型锚定]」注释块），配 `AssertExact<DomainParamsExact<XDomain, typeof xImpl>>` 逐方法比较 `Parameters` 元组全等——real 域加参/删参/改参型时 mock 侧少参/多参/错型直接 tsc 编译失败（注解的可赋值性抓不到「少可选参」，元组 identity 断言补齐这一层）。
 
 - **已类型锚定（12 域）**：session / chat / config / model / plugin / composer / workspace / quota / project / preset / btw / usage（btw-question M2-a 残留接线点②，M4-b 收尾同步；usage 随 [C3] settings transport 并入新增，`packages/core/src/transport/mock/index.ts` 注释已同为 12 域口径）。锚定顺带修复并补齐的漂移：session.create 补 presetId/projectId/modelOverride/thinkingOverride、session.fork 补 modelOverride/thinkingOverride、session.handoff 补 options、session 补缺失成员 getSubagentEngineConfig / setSubagentDefaultEngine / getAgentCallFilePath；config 补 retry 配置三成员（getRetryConfig / setRetryConfig / onRetryConfig）、scanSkills/scanAgents 补返回类型、discoverModels req 补 mode 字段、onAuth 系列 payload 改引 real 域类型别名；chat.compact 补 customInstructions 形参；plugin 补 approvePermissions/revokePermissions；composer.getMentionCandidates 对齐 real 已废弃语义（恒 `[]`）、getFileCandidates 补 sessionId 形参、补 getFileCandidatesByCwd stub。
-- **override 生效面（mock 可断言的最小派生视图，不追求全仿真）**：session.create/fork 的 presetId → `SessionSummary.launchPresetId`、projectId → `projectId`、modelOverride → `modelId`、thinkingOverride → `thinkingLevel`，落返回值与 `session.list()` 快照；fork 另落血缘键 `parentSession`（恒源 sessionId，FR-20 fallback 键形态）+ `forkEntryId`，projectId 继承父归属（与 real fork 同语义）。行为契约测试：`packages/core/src/transport/mock/__tests__/mock-domains.test.ts`（create/fork override 生效面用例）。
+- **override 生效侧（mock 可断言的最小派生视图，不追求全仿真）**：session.create/fork 的 presetId → `SessionSummary.launchPresetId`、projectId → `projectId`、modelOverride → `modelId`、thinkingOverride → `thinkingLevel`，落返回值与 `session.list()` 快照；fork 另落血缘键 `parentSession`（恒源 sessionId，FR-20 fallback 键形态）+ `forkEntryId`，projectId 继承父归属（与 real fork 同语义）。行为契约测试：`packages/core/src/transport/mock/__tests__/mock-domains.test.ts`（create/fork override 生效侧用例）。
 - **mock 不支持项（显式登记，非静默丢弃）**：session.handoff 的 options（modelOverride/thinkingOverride）——无 runtime HandoffService / handoff turn 可跑，stub resolve；chat.compact 的 customInstructions——无 pi 会话可挂指令；config retry 配置——get 恒 `configured:false`、不持久化、不广播；session.getSubagentEngineConfig 恒空清单（无 engines.json 基建）。
 - **未锚定域及理由**：settings（[C3] 字段读写已补齐为内存态 fixture 全域——worktree / 自动重命名 / 智能上下文 21 个 get/set 回显 mock；因转发 extension.onExtensions 的宽类型偏差暂不能锚定，W08 收敛时一并锚定）／extension（onExtensions 宽类型为登记过的有意偏差，W08 收敛时一并锚定）／search（real 侧无单源 domain，编排归 useSearchModalDeps）／git、file（独立 mock 文件，待后续同法锚定）。
 
@@ -275,7 +275,7 @@ taste/no-silent-catch 处理：纯 console.warn 仍报（要求传播/重抛）�
 |------|------|--------------------------|
 | `v6-shell-baseline.spec.ts` | R1（3 条：TC-SHELL-LAYOUT / TC-SESSION-SWITCH / TC-MSGSTREAM-TURN）+ R2（TC-SIDEBAR-COLLAPSE） | R2 触发：改 `AppShell` / 侧栏折叠 chrome（AppNavControls / PanelHeader 折叠按钮）时跑 |
 | `state-tearing.spec.ts` | R1（2 条：ST-1 / ST-5）+ R2（harness smoke / ST-2 / ST-3 / ST-6） | R2 触发：改 `useChat` / `derive-status`（isActive 状态机）/ steer 队列 / mock `run-send-stream.ts` 时跑 |
-| `markdown-table-layout.spec.ts` | R1（1 条：对话流 markdown 表格列宽地板，@p0-smoke） | 布局断言（列宽 / 行数）jsdom 无 layout 引擎测不了，故落 L1 行为轨；数据源 = mock 哨兵词 'md-table'（`run-send-stream.ts` TABLE_REPLY 复刻宽表）。改 `MarkdownRenderer.vue` / `UpdateButton.vue` 表格 CSS（4em 地板 / GitHub 四条滚动声明）或 mock `run-send-stream.ts` 时本用例即检查面；列间配比（code 列占比）与 fixed+colgroup 升级为声明过的范围外项，不属本用例断言 |
+| `markdown-table-layout.spec.ts` | R1（1 条：对话流 markdown 表格列宽地板，@p0-smoke） | 布局断言（列宽 / 行数）jsdom 无 layout 引擎测不了，故落 L1 行为轨；数据源 = mock 哨兵词 'md-table'（`run-send-stream.ts` TABLE_REPLY 复刻宽表）。改 `MarkdownRenderer.vue` / `UpdateButton.vue` 表格 CSS（4em 地板 / GitHub 四条滚动声明）或 mock `run-send-stream.ts` 时本用例即检查范围；列间配比（code 列占比）与 fixed+colgroup 升级为声明过的范围外项，不属本用例断言 |
 | `composer.spec.ts` | R2（harness smoke / CF-1 / CF-4 / CF-5） | 触发：改 `Composer.vue` / `useCommandPopoverTrigger` / CommandPopover 时跑。CF-2 / CF-3 / CF-6 已退役 R3（2026-09-15 清理）：composer 符号体系已改为 **# session / $ file**（`ComposerInput.vue` onFileTrigger→session-trigger / onDollarFileTrigger→file-trigger），敲 `#auth` 期望文件候选的断言永挂；git 可追溯 |
 | `search-modal.spec.ts` | R1（1 条：SM-E2E-7）+ R2（harness smoke / SM-E2E-1~5 / SM-E2E-8~10）+ **R2 fixme 待修**（SM-E2E-6） | R2 触发：改 SearchModal / `useSearch` / `commandStore`（pendingSlash 一次性通道）时跑。SM-E2E-6（2026-09-15 查证定性：**真回归**，fixme 保留）：confirm 文件项后浮层未关闭（`search-modal-root` 仍可见）——UI 意图明确是关闭（AC-6.7），根因 = `useSearchModalDeps.ts:62` fileRead 直连 core real file 域绕过 `@/api` 门面 isMock 切换，mock 轨下 `file.read` RPC 挂 65s backstop；修复方向 = fileRead 改走 `@/api` 门面 |
 | `file-tree.spec.ts` | R1（1 条：E2E-1）+ R2（其余 9 条） | R2 触发：改 `FileView` / `FileTreeRow` / `useFileTree` / fileTreeStore / mock `file.tree` 时跑。E2E-3b 已退役 R3（2026-09-15 清理）：diff 视图已从 raw diff 文本（`diff --git` 头）改为结构化 hunk 渲染（`@@ … @@`），断言过期；git 可追溯 |
@@ -346,22 +346,22 @@ pi 边界可靠性设计的测试范围落地（2026-08-27 事故对 → 四支�
 
 ## 修复后验证纪律 [from: structured-output-redesign R3-R6 审计]
 
-> 记录在案来源：structured-output 重设计实施后的四轮对抗式审计（R3-R6，commits `f69766b44`→`9438940c0`→`1dfd93b1a`→`3f934637c`）。R4 与 R5 各发现一次「上轮修复自身引入回归」且均非单测可抓——回归只在资源面暴露，结果面（error 文案）完全正确。语义总览见原设计文档 structured-output-redesign.md §6.3/§7 补记（已删除，git 历史可追溯）。
+> 记录在案来源：structured-output 重设计实施后的四轮对抗式审计（R3-R6，commits `f69766b44`→`9438940c0`→`1dfd93b1a`→`3f934637c`）。R4 与 R5 各发现一次「上轮修复自身引入回归」且均非单测可抓——回归只在资源侧暴露，结果侧（error 文案）完全正确。语义总览见原设计文档 structured-output-redesign.md §6.3/§7 补记（已删除，git 历史可追溯）。
 
 修复 ≠ 局部补丁。任何声称「修复完成」的变更必须同时交出两件验证产物，缺一即验收不完整：
 
 **规则 1：修复必须附交互矩阵（修复点 × 既有 retry / rebuild / budget / 计数机制）**。修复改变的是行为的某个分支，但被改分支的**输出**（error 文本、事件、退出码）往往是其他机制（重试分诊、预算消耗、门禁计数、状态重建）的**输入**——修复前必须列出这些消费者并逐个回答「新输出会被它如何处置」。不做这一步，修复点本身就是新回归的引入点（案例 B：三态归因产出的新 error 文本恰好落入 retryable 分支）。
 
-**规则 2：修复后必须重跑修复前的对照场景并比较资源面（时长 / 子进程数 / attempt 次数 / token），只看结果面（error 文案对不对）不够**。修复往往让「错误更可见/更正确」，结果面验证会假绿——错误确实可见了，但可见的错误可能触发新的放大循环。资源面对照是唯一暴露手段：同场景修复前后各跑一次，对比墙钟时长、spawn 的子进程数、重试 attempt 数、token 消耗。
+**规则 2：修复后必须重跑修复前的对照场景并比较资源侧（时长 / 子进程数 / attempt 次数 / token），只看结果侧（error 文案对不对）不够**。修复往往让「错误更可见/更正确」，结果侧验证会假绿——错误确实可见了，但可见的错误可能触发新的放大循环。资源侧对照是唯一暴露手段：同场景修复前后各跑一次，对比墙钟时长、spawn 的子进程数、重试 attempt 数、token 消耗。
 
 **两个案例锚（均实测复现，非推理）**：
 
-| 案例 | 回归形态 | 为什么结果面看不到 | 资源面暴露形态 |
+| 案例 | 回归形态 | 为什么结果侧看不到 | 资源侧暴露形态 |
 |---|---|---|---|
 | **AP 并集恒定（R4 发现）** | R3 修复（echo keys 并入签名）便 required 渐进修复场景「缺失列表∪keys」恒定——模型每轮修好 1 个字段的真实进展被判为同签名无进展，3 次 terminal 误杀 | 门禁行为完全符合自身契约（同签名 3 次 → 终止），error 文案正确 | 探针：6 required 字段每轮修 1 个，三轮签名恒 `fields(6)`——签名序列断言（进展必须产生新签名）才暴露 |
 | **F-1 retry 放大 3×（R5 发现）** | R3 失败表面化修复让 gate 终止的 run 从「静默 completed+{}」变为「failed+error」——新 error 恰好落入 `executeAgentCall` 的 retryable 分支，不可满足 schema 重试 3 轮（每轮含 ~25s gate teardown 窗口） | error 文案完全正确（归因清晰、可读、可恢复）；run 最终也确实失败 | 实测 attempts=3、4 个子进程 journal、235s vs 修复前同场景 67s（3× 放大）——时长/子进程数对照片刻暴露 |
 
-**落地形态**：修复 PR/commit 的验证记录应含 ①交互矩阵（哪怕三行：修复点 × 消费机制 × 处置结论）②修复前后同场景资源面对照表。单测锁不住这两面（R4/R5 的回归均在单测全绿下存活）——交互矩阵是设计期检查，资源面对照是实跑检查。
+**落地形态**：修复 PR/commit 的验证记录应含 ①交互矩阵（哪怕三行：修复点 × 消费机制 × 处置结论）②修复前后同场景资源侧对照表。单测锁不住这两面（R4/R5 的回归均在单测全绿下存活）——交互矩阵是设计期检查，资源侧对照是实跑检查。
 
 ## 测试自身引入的 flake 防规范 [from: subagent-sync-collect 满载 flake 模式族排查]
 

@@ -313,9 +313,9 @@ describe("runRetentionMaintenanceRound — run + record 两域同轮（W1 D5）"
 // 不截断）；本段锁运行时导出范围零复活。
 
 describe("cap 退役结构断言（W1 / D5）", () => {
-  it("run-state-evidence 导出范围零 cap 族符号（键面不含数量截断通道命名形态）", async () => {
+  it("run-state-evidence 导出范围零 cap 族符号（键侧不含数量截断通道命名形态）", async () => {
     // 拦截形态而非全名清单：cap 族三符号均含「数量上限 / MaxRuns」命名段——
-    // 键面排除该段即零复活（词表级全名清扫由引擎 grep 验收承担，此处锁运行时面）
+    // 键侧排除该段即零复活（词表级全名清扫由引擎 grep 验收承担，此处锁运行时侧）
     const mod = await import("../../execution/persistence/run-state-evidence.ts");
     const exported = Object.keys(mod);
     expect(exported.filter((k) => k.includes("MAX_RUNS") || k.includes("MaxRuns"))).toEqual([]);

@@ -157,7 +157,7 @@ describe('preset sidecar IO', () => {
     const filePath = join(tmpDir, 'unflushed-family.jsonl')
     expect(realFs.existsSync(filePath)).toBe(false)
 
-    // create 放行面：project / agent 与 preset 同写点同根因
+    // create 放行范围：project / agent 与 preset 同写点同根因
     persistProjectBinding(filePath, 'proj-9', { skipJsonlExistsGuard: true })
     expect(JSON.parse(realFs.readFileSync(filePath + '.project.json', 'utf-8'))).toEqual({ projectId: 'proj-9', version: 1 })
     persistAgentBinding(filePath, 'agent', 'pa-9', { skipJsonlExistsGuard: true })

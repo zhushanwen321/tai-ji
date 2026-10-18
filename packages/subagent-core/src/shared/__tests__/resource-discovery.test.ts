@@ -647,7 +647,7 @@ describe("manifestCache（async readPackageManifest）", () => {
 
   // ── 失败/边缘路径（原 resource-discovery-manifest-cache.test.ts 迁编，impl-plan
   //    偏差 #9：缺则将对应用例改写为 async 形态并入，不丢缓存行为覆盖）。原版直接
-  //    断言 readPackageManifestSync 返回值；async 形态观察面 = readFile 计数 +
+  //    断言 readPackageManifestSync 返回值；async 形态观察侧 = readFile 计数 +
   //    user-extension-paths 结果（manifest undefined → processPackage 约定目录
   //    fallback，pkgDir 无 {kind}/ 目录 → 零资源即 undefined 的行为范围）。 ──
 
@@ -816,7 +816,7 @@ describe("conventionRootDirs", () => {
         includeTmp: true,
       });
       expect(found.map((r) => r.path)).toEqual(expect.arrayContaining(expected));
-      // 反向：发现面没有约定根之外的 project/user 级来源混入（hostRoots 空 +
+      // 反向：发现侧没有约定根之外的 project/user 级来源混入（hostRoots 空 +
       // ext-paths 清空后，4 文件即全部发现）
       expect(found).toHaveLength(roots.length);
     } finally {

@@ -24,7 +24,7 @@
 // NULL），workflow_run / workflow_activity 父键置 NULL，input_history 删，session
 // 最后删。每库单事务，收尾 wal_checkpoint(PASSIVE)（不截断 -wal）。
 //
-// 失败语义（分级即错误处理契约）：sweep 是辅助资源面——任何失败（db 缺失 /
+// 失败语义（分级即错误处理契约）：sweep 是辅助资源侧——任何失败（db 缺失 /
 // node:sqlite 不可用 / 锁超时 / schema 漂移抛错）warn 留痕后返回 {swept:0}，绝不
 // 拖垮 run 主链路。条目被清 = 锚失效 → 宿主侧自动走 reopen 降级（§3.2.6 ③），
 // 无需人工恢复。
@@ -82,7 +82,7 @@ export interface ZcodeSessionSweepResult {
  * 同步加载 node:sqlite 的 DatabaseSync（进程内多实例复用）。
  * [HISTORICAL] 动态 import 必须经变量间接（esbuild CJS 前缀剥离陷阱，见 reader.ts
  * 同款注释）——本函数用 process.getBuiltinModule（Node ≥22.3 同步取 builtin，无
- * 异步面，适合同步 sweep；不可用时返回 undefined 走跳过分支）。
+ * 异步侧，适合同步 sweep；不可用时返回 undefined 走跳过分支）。
  */
 function loadDatabaseSyncCtor(): (new (path: string, opts?: { readOnly?: boolean }) => SweepSqliteDb) | undefined {
   const getBuiltin = (process as { getBuiltinModule?: (id: string) => unknown }).getBuiltinModule;
@@ -263,7 +263,7 @@ export function sweepExpiredZcodeSessions(
     return { swept, keptActive };
   } catch (err) {
     logger.warn(
-      `[zcode-ttl] sweep 失败（辅助资源面，不影响 run 主链路；下个节流窗重试）: ${
+      `[zcode-ttl] sweep 失败（辅助资源侧，不影响 run 主链路；下个节流窗重试）: ${
         err instanceof Error ? err.message : String(err)
       }`,
       { dbPath },

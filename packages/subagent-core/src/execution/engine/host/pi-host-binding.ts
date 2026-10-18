@@ -76,7 +76,7 @@ export function resolveHostPiEnginePort(_getService?: () => unknown, windowKey?:
   return piUnavailableEnginePort();
 }
 
-/** pi 不可用 stub（D4）：一切执行面抛 engine_not_found；capabilities 全放行（拒绝点唯一化在 run）。 */
+/** pi 不可用 stub（D4）：一切执行侧抛 engine_not_found；capabilities 全放行（拒绝点唯一化在 run）。 */
 function piUnavailableEnginePort(): EnginePort {
   const fail = (): never => {
     throw new EngineNotFoundError("pi", listEngines());

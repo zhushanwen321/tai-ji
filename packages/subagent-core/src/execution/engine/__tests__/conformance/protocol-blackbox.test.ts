@@ -56,7 +56,7 @@ if (fixture.schemaVersion !== 1) {
   throw new Error(`unsupported fixture schemaVersion ${String(fixture.schemaVersion)}`);
 }
 
-/** AgentEvent 字段白名单（结构等价比对的逐字段面；text_delta.delta 内容显式排除）。 */
+/** AgentEvent 字段白名单（结构等价比对的逐字段侧；text_delta.delta 内容显式排除）。 */
 const FIELD_WHITELIST: Record<string, readonly string[]> = {
   text_delta: ["type", "delta"],
   message_end: ["type", "usage"],
@@ -231,7 +231,7 @@ describe("协议黑盒：6 反向通道 core 侧到达", () => {
       expect(typeof entries[0]?.pid).toBe("number");
       expect(entries[0]?.recordId).toBe(fixture.run.params.runId);
       expect(entries[0]?.state).toBe("exited");
-      // host/askUser（交互面 ack 两阶段）
+      // host/askUser（交互侧 ack 两阶段）
       expect(h.askUserRequests).toHaveLength(1);
     } finally {
       await h.client.dispose();

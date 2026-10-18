@@ -604,7 +604,7 @@ function firstContentText(result: { content: Array<{ type: string; text?: string
 > - `session_start` handler 确实传 ctx（`runner.js:531`），且在 `bindExtensions` 后触发
 > - 但 shim 的唯一潜在价值（透明覆盖第三方 extension 的原生 setWidget）不成立——第三方传 string[] 不触发 GuiComponent 分支
 >
-> 结论：砍掉 shim extension，消除 monkey-patch 风险面、session_start 时序依赖、加载顺序讨论三个复杂度来源。widget 传输改为 helper 直编码（§4.3）。
+> 结论：砍掉 shim extension，消除 monkey-patch 风险、session_start 时序依赖、加载顺序讨论三个复杂度来源。widget 传输改为 helper 直编码（§4.3）。
 
 ---
 

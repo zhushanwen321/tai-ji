@@ -356,7 +356,7 @@ describe('captureSignalForensics', () => {
       },
     )
 
-    // 记录面
+    // 记录侧
     expect(result.record.signalGuess).toBe('SIGTERM')
     expect(result.record.exitCode).toBe(143)
     expect(result.record.uptimeMs).toBe(137_110)

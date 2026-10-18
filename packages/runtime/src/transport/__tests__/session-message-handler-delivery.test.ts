@@ -15,7 +15,7 @@
  *   帧」验收（S3 场景④）的单测等价
  * - state topic last-value（真实 MessageBus）：同 session 多帧 stateSnapshot 只留最新 +
  *   不入 ring + topicOf('session.delivery') === 'state'（登记表锁）
- * - session.subscribe reply 的 stateSnapshot 含 delivery 帧（切 session/重连恢复装配面，V5）
+ * - session.subscribe reply 的 stateSnapshot 含 delivery 帧（切 session/重连恢复装配侧，V5）
  * - cancel：queued 可撤（cancelled:true + 全文回草稿、剥标记）+ 不可撤分支（cancelled:false
  *   + reason，不谎报，§3.4）
  * - drain：发送序全量取回 + 帧空条目集形态（entries: []）
@@ -208,7 +208,7 @@ function msg(type: string, payload: Record<string, unknown>, id = 'req-1'): Clie
 const WS = {} as never
 
 /**
- * 经真实入口装配该 session 的订阅（renderer 时序，msg-pipeline-debloat D4-4 后唯一装配面）：
+ * 经真实入口装配该 session 的订阅（renderer 时序，msg-pipeline-debloat D4-4 后唯一装配侧）：
  * session.subscribe 触发 handleSessionSubscribe → sync（onChange 装配 + 首配快照帧入
  * reply 的 stateSnapshot，不走广播）→ bus.subscribe（后续 onChange 帧广播到 harness.sent）。
  * handler 体无 await 点，同步完成。
@@ -444,7 +444,7 @@ describe('帧数据源 = 内核派生视图（D9②：cancelled 不映射 / tomb
     registry.disposeAll()
   })
 
-  it('变更驱动而非轮询：无内核变更时推进 60s 零新帧（onChange 订阅面）', async () => {
+  it('变更驱动而非轮询：无内核变更时推进 60s 零新帧（onChange 订阅侧）', async () => {
     const bus = new MessageBus()
     const sent: ServerMessage[] = []
     const client = { readyState: 1, send: (raw: string) => sent.push(JSON.parse(raw) as ServerMessage) } as BusClient
@@ -514,7 +514,7 @@ describe('session.delivery state topic（D5：last-value / 不入 ring / 重连�
     expect(snapshot.snapshot.some((m) => m.type === 'session.delivery')).toBe(false)
   })
 
-  it('session.subscribe reply 的 stateSnapshot 含 delivery 帧（切 session/重连队列区恢复装配面，V5）', async () => {
+  it('session.subscribe reply 的 stateSnapshot 含 delivery 帧（切 session/重连队列区恢复装配侧，V5）', async () => {
     const h = makeHarness({ session: { isCompacting: true, occupancy: { turn: 'idle', compacting: true, bash: false } } })
 
     await h.handler.handleSessionMessage(msg('delivery.submit', { sessionId: SID, content: 'A', clientUuid: UUID_A }), WS)
@@ -760,7 +760,7 @@ describe('delivery 域防御路径', () => {
   })
 })
 
-// ── 纯函数面（帧 DTO 装配） ───────────────────────────────────────
+// ── 纯函数部分（帧 DTO 装配） ───────────────────────────────────────
 
 describe('帧 DTO 装配纯函数', () => {
   it('stripDeliveryMarkers 剥标记 + 紧邻连接换行（shared 唯一实现再导出，草稿恢复/预览共用）', () => {

@@ -65,7 +65,7 @@ class CoreSpawnedChildrenMirror {
     return this.entries.get(recordId);
   }
 
-  /** 句柄存活谓词（镜像面；判据与引擎侧 `!child.killed` 同构）。 */
+  /** 句柄存活谓词（镜像侧；判据与引擎侧 `!child.killed` 同构）。 */
   hasLiveProcessHandle(recordId: string): boolean {
     const entry = this.entries.get(recordId);
     return entry !== undefined && !entry.killed;
@@ -110,7 +110,7 @@ export function registerSpawnedChildForRecord(recordId: string, child: ChildProc
 
 /**
  * 单 record 终止记账（镜像置死位）：实际终止在引擎进程内（协议 interact cancel /
- * close 或 run 域 cancel 帧承载）；宿主侧调用点是终止意图的记账面，宿主进程组级
+ * close 或 run 域 cancel 帧承载）；宿主侧调用点是终止意图的记账侧，宿主进程组级
  * 收割兜底 = EngineClient killAll（EnginePort.dispose / abort 杀链，见 remote-engine）。
  */
 export function killRecordChildWithEscalation(recordId: string, _source: string): void {

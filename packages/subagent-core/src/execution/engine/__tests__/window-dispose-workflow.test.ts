@@ -281,7 +281,7 @@ describe("workflow 窗口实例收尾接线（U2）", () => {
     expect((routed as EngineRouteResult).engine).toBe(port);
     expect(registrySpy).not.toHaveBeenCalled();
 
-    // probe 创建的实例归窗口表所有：run 收尾即 dispose（G1 回落判定的机制面）
+    // probe 创建的实例归窗口表所有：run 收尾即 dispose（G1 回落判定的机制部分）
     // [W2/V1 适配] run-created 正点首帧（同验收①）。
     const run = makeRealRun(runId);
     await dispatchRunCreated(run);
@@ -290,7 +290,7 @@ describe("workflow 窗口实例收尾接线（U2）", () => {
   });
 
   it("验收⑤：pi 同步短路位 piEngine 注入携带窗口键——pi 请求取窗口实例（probe/run 同实例，收尾 dispose）", async () => {
-    // 2026-09-27 batch-s4 真机首跑实锤的机制面：pi 请求经 routeEngineForHost 同步
+    // 2026-09-27 batch-s4 真机首跑实锤的机制部分：pi 请求经 routeEngineForHost 同步
     // 短路返回注入的 piEngine（routing.ts 短路位），它是成员任务 engine.run 的实际
     // 执行体——注入值必须来自窗口解析单点（workflow-dispatch 装配形态：
     // resolveChatEnginePort(parentRunId) = resolveWorkflowWindowEnginePort(parentRunId,
@@ -309,7 +309,7 @@ describe("workflow 窗口实例收尾接线（U2）", () => {
     expect(r.engine).toBe(piPort);
 
     // probe 注入与 piEngine 注入同窗口键 → 同实例（probe 探的与 run 用的同一窗口
-    // 实例）→ run 收尾 dispose 覆盖（G1 回落判定的机制面）
+    // 实例）→ run 收尾 dispose 覆盖（G1 回落判定的机制部分）
     // [W2/V1 适配] run-created 正点首帧（同验收①）。
     const run = makeRealRun(runId);
     await dispatchRunCreated(run);

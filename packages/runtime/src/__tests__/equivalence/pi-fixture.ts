@@ -126,7 +126,7 @@ export interface PiFixtureOptions {
   /**
    * 写入临时 agentDir 全局 settings.json 的 defaultTools 字段（pi settings 语义：
    * `+name` 增量条目 = 默认工具集之上追加激活）。驱动 exposure=deferred 的 extension
-   * 工具时必需——deferred 工具不进模型声明面，脚本化 toolCall 会被 pi 判
+   * 工具时必需——deferred 工具不进模型声明侧，脚本化 toolCall 会被 pi 判
    * "Tool not found"（extension_ui_request 不发出，全链路断流）；预激活与生产 spawn
    * 经 settings 激活工具（pi-codemode-settings）同一通道。省略 = 不写 settings.json
    * （既有 agentDir 隔离语义不变）。

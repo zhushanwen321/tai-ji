@@ -5,7 +5,7 @@
  * 覆盖（impl-plan u-plan-bar 验收条款 + u-review-source-ui 增量）：
  * - 承接清单① 常驻订阅：isActive=false 时组件常驻（无 DOM），planReview 请求仍入
  *   extensionUIStore（PlanModeBar setup 自持 useExtensionUI(planReviewFilter) 实例——
- *   右区 PlanReviewBar 此时未创建，本实例是唯一订阅面）；isActive 翻转 true 后右区
+ *   右区 PlanReviewBar 此时未创建，本实例是唯一订阅侧）；isActive 翻转 true 后右区
  *   ready 分支可达（先有 isActive 帧后有消费者的鸡蛋困境由常驻订阅消除）
  * - 承接清单② focusedSid 注入：mount 后 planStore.focusedSid 非空（syncFocus 义务随
  *   组件自 PanelContainer 横幅/审批条迁移到 PlanModeBar）

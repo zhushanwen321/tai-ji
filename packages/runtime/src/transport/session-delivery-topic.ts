@@ -15,7 +15,7 @@
  * last-value 快照 + 不入 ring（断连重连 / 切回 session 经 subscribe 的 stateSnapshot 回放恢复，
  * V5/G2 的「队列区自动恢复」即此语义）。本文件是运行侧装配点，登记表只认类型不认装配位置。
  *
- * 零抛错（对齐 outbound-frame-guard 哲学）：帧派生视图是展示面辅助通路——装配失败不得拖垮
+ * 零抛错（对齐 outbound-frame-guard 哲学）：帧派生视图是展示侧辅助通路——装配失败不得拖垮
  * delivery.* RPC 的受理回执与 session.subscribe 主链（降级 = 本帧不发 + warn 留痕，
  * 下一变更/下一次装配入口自动重试）。
  *
@@ -36,7 +36,7 @@ import type { IMessageBus } from '../services/message-bus/message-bus.js'
 import type { SessionDeliveryRegistry } from '../services/session/session-delivery-registry.js'
 
 /**
- * 剥除投递标记（展示/草稿恢复面）= @taiji/shared 唯一实现（msg-pipeline-debloat D5-2
+ * 剥除投递标记（展示/草稿恢复侧）= @taiji/shared 唯一实现（msg-pipeline-debloat D5-2
  * 统一：shared revoke-restore 的宽松剥除——剥标记本体 + 紧邻单个前导换行，不 trimEnd，
  * 用户尾换行保留）。本模块再导出维持既有 import 路径（session-message-handler 与
  * transport 测试），本地无第二份剥除正则。宽松形态依据 = ADR-0077（判定严格 /
@@ -149,7 +149,7 @@ export class SessionDeliveryTopic {
       }
       this.publish(sessionId, handle)
     } catch (e) {
-      // best-effort 降级：帧是展示面辅助通路，装配失败只跳过本帧（不改投递语义、不谎报 RPC 结果），
+      // best-effort 降级：帧是展示侧辅助通路，装配失败只跳过本帧（不改投递语义、不谎报 RPC 结果），
       // 下一变更 / 下一次装配入口自动重试；warn 留痕（见文件头「零抛错」）。
       console.warn('[session-delivery-topic] sync failed (frame skipped; retried on next change/entry)', sessionId, e)
     }

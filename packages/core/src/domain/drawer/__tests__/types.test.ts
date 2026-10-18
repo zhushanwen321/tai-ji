@@ -30,7 +30,7 @@ import { useBtwSelection, setBtwView, _resetBtwSelectionForTest } from '../selec
 // 'bashTask' 可赋给 RightDrawerTab（成员缺失即 vue-tsc 红）
 const bashTaskTab: RightDrawerTab = 'bashTask'
 
-// 控制态最小面（display-containers §6.6①/③ 后仅两字段）：若控制态被回填寄生字段，
+// 控制态最小形态（display-containers §6.6①/③ 后仅两字段）：若控制态被回填寄生字段，
 // 本对象字面量不受影响，但下方「五字段不在 DrawerControlState」负向锚会红
 const minimalControlState: DrawerControlState = {
   isOpen: false,

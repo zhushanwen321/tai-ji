@@ -21,7 +21,7 @@ const DEFAULT_INSTRUCTION_MAX_CHARS = 200
 
 const SAMPLE_RATES: number[] = [8000, 16_000, 22_050, 24_000, 48_000]
 
-/** 护栏⑤：协议行为参数 taiji 内部固定（不进配置面，设计 §5.2/§7.3）——passthrough 出现即剥离。 */
+/** 护栏⑤：协议行为参数 taiji 内部固定（不进配置范围，设计 §5.2/§7.3）——passthrough 出现即剥离。 */
 const PROTOCOL_FIXED_KEYS = ['timestamp', 'return_url', 'stream_format', 'markdown_filter'] as const
 
 const PASSTHROUGH_POLICY: PassthroughPolicy = {

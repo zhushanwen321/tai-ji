@@ -135,7 +135,7 @@ async function pullStatus(): Promise<void> {
     applyStatus(status)
   } catch (e: unknown) {
     // best-effort 降级：transport 不可用（send false 即 reject）或超时——保持现状不传播。
-    // 恢复路径 = 下一事件到达或下次 connected 转变再拉；持续告警无动作面，仅 debug 留痕。
+    // 恢复路径 = 下一事件到达或下次 connected 转变再拉；持续告警无对应动作，仅 debug 留痕。
     console.debug('[useRollingRestartStatus] status pull failed (kept current phase):', e)
   } finally {
     pullInFlight = false

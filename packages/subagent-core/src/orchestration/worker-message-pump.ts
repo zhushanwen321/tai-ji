@@ -31,7 +31,7 @@ import { executeAgentCall } from "./execute-agent-call.ts";
 import { AgentCall } from "./models/agent-call.ts";
 import type { AgentRunner, LifecycleDeps, WorkerHandlers } from "./models/ports.ts";
 // [D15] 投递域与终态编排自 terminal-actions 消费（单向依赖——pump 不再承载
-// journal 单写者链与 finalizeRun，消息面终态路径全部经彼处 coda）。
+// journal 单写者链与 finalizeRun，消息侧终态路径全部经彼处 coda）。
 import {
   dispatchAgentSettled,
   dispatchAgentSettledFailed,
@@ -118,7 +118,7 @@ type WorkerMsg = AgentCallMsg | ReturnMsg | ErrorMsg | LogMsg | PhaseMsg;
  * 故实例不等 ⟺ 本 completion 属于被替换的旧代际（S7-second 竞态：旧失败结果经
  * postAgentResult 投给新 worker 的同 callId pending，劫持重跑调用为假失败/空串
  * 假成功）。[HISTORICAL] 原另一写点 discardInFlightCalls 的 delete 随重试矩阵删除
- * （ADR-0122），谓词保留为接管形态的防御面。
+ * （ADR-0122），谓词保留为接管形态的防御机制侧。
  *
  * 运行期 calls Map 写点为 dispatchAgentCall 的 set（jsonl-run-store 的 set 在离线
  * 重新加载路径，无在途 promise），正常（非孤儿）路径下实例恒等，无误判。
@@ -247,7 +247,7 @@ export async function handleWorkerMessage(
  * errorLogs 追加 + 诊断写入 journal 记录（[§2.1 errorLogs 持久化] ADR-0093）。
  *
  * 活体写入与写入 journal 记录的唯一单点：追加语义 + 尾部上限裁剪（`MAX_ERROR_LOGS`）与
- * `errorLogsFromEvents` 重建面同构；写入经 terminal-actions 的
+ * `errorLogsFromEvents` 重建侧同构；写入经 terminal-actions 的
  * `appendRunDiagnosticEvent`（journal 单写者纪律）。
  */
 function appendErrorLogs(run: WorkflowRun, entries: readonly WorkerLogEntry[]): void {

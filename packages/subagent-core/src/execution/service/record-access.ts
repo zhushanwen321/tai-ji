@@ -1,10 +1,10 @@
 // [H3/R3] RecordAccess 聚合（域 #3/#8/#10/#13：孤儿/manifest 恢复 + 查询范围 + action
 // 网关 + 身份解析/record 创建）——自 SubagentService 上帝类 strangler 抽取的第三个
-// 聚合的**读建面**（设计 docs/architecture/subagent-service-decomposition.md §2.1 / §3.3 D5；
+// 聚合的**读建两侧**（设计 docs/architecture/subagent-service-decomposition.md §2.1 / §3.3 D5；
 // 成员归属以 r0-inventory.md 清单① + 域分区为准）。
 //
 // [计划变更 D-R3-1] G1「每聚合 ≤700 行」与 R0 八域体量（分区实测 833 物理行）冲突，
-// 拆两文件（dev agent 停线报告、主 agent 核验追认）：本文件（读建面 #3/#8/#10/#13）
+// 拆两文件（dev agent 停线报告、主 agent 核验追认）：本文件（读建两侧 #3/#8/#10/#13）
 // + record-lifecycle.ts（终态迁移
 // 写侧 #4/#11/#17/#18，D5/H4 落点）。两文件组间零互调（已验证），各自独立 deps，
 // 壳分别装配——聚合间零 import（G2 / R1 打样模式 3）。
@@ -20,7 +20,7 @@
 //    断言/调用时经壳 getter 现读；叶子模块实例（store/manifestStore/modelService）为
 //    #1 留壳共享依赖，getter 现读同一实例（晚绑定形态统一）——深绑测试的 store 读
 //    路径（ServiceInternals）保持生效，断言零改写。
-// 2. 转发壳写法：壳保留同名方法（含原可见性）单行转发；本聚合公共部分 = 壳转发面，
+// 2. 转发壳写法：壳保留同名方法（含原可见性）单行转发；本聚合公共部分 = 壳层的转发逻辑，
 //    聚合内部互调（recoverOrphanRecords /
 //    coldLookupDeps 消费）保持 private。原 private 方法因壳转发需要可见性放宽为
 //    public（strangler 必然，非行为变化）。
@@ -76,7 +76,7 @@ export interface ResolvedIdentity {
  * [R1 打样模式 1] 聚合协作 deps——**全部晚绑定闭包，构造期零求值**。
  *
  * 窄结构类型只声明聚合真实消费的通道（不整实例注入）。本聚合无跨域编排回调：
- * 读建面自足（查询/创建/恢复只依赖 #1 留壳叶子 + #2 基线字段现读）；跨域边只有
+ * 读建两侧自足（查询/创建/恢复只依赖 #1 留壳叶子 + #2 基线字段现读）；跨域边只有
  * baselines deps.recoverOrphans 回调（R1 打样时预留）经壳转发指向本聚合的
  * recoverOrphansIfRootProcess（壳装配零改动）。
  */
@@ -101,7 +101,7 @@ export interface RecordAccessDeps {
 }
 
 /**
- * 域 #3/#8/#10/#13 聚合：record 读建面（R3 自 SubagentService 抽取）。
+ * 域 #3/#8/#10/#13 聚合：record 读建两侧（R3 自 SubagentService 抽取）。
  *
  * 字段所有权（r0-inventory 清单①）：#30 coldLookupDeps（唯一消费方 getRecordForAction
  * 冷查分支）。壳零感知其余内部态。

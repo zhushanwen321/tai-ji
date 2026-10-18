@@ -19,7 +19,7 @@ import type { SubagentModelSource } from "../domain/record-model.ts";
 /** 自描述 record entry 的 customType。写点字面量与本常量的等值由
  *  __tests__/record-store.test.ts 断言钉住（消费方引用本常量，勿用裸字符串）。
  *
- * @experimental execution 运行时面（U10① D6）：一个 minor 周期内允许签名微调。 */
+ * @experimental execution 运行时侧（U10① D6）：一个 minor 周期内允许签名微调。 */
 export const SUBAGENT_RECORD_CUSTOM_TYPE = "subagent-record";
 
 // ── v2 条目契约（W1 / D1：注册 + 终态两条小条目）──────────────
@@ -57,7 +57,7 @@ export interface SubagentRecordRegisteredEntryData {
   parentRunId?: string;
   /** origin="workflow" 时在 run 内的步骤索引（tool 来源缺省）。 */
   stepIndex?: number;
-  /** 派发期模型来源（engine-ref 时代的运行态展示面；缺席 = 存量/未知）。 */
+  /** 派发期模型来源（engine-ref 时代的运行态展示侧；缺席 = 存量/未知）。 */
   modelSource?: SubagentModelSource;
   /** 根 session id（session 隔离过滤用）。 */
   rootSessionId: string;

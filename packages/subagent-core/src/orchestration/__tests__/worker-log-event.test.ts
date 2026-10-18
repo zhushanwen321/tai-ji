@@ -3,7 +3,7 @@
 // [§2.1 errorLogs 持久化 / ADR-0094] 诊断帧（worker-log）的两条契约：
 //   ① 不进生命周期状态机——fold 跳过它并推进 seq 水位；夹在转移之间或落在终局之后
 //      都不改变状态、也不判成坏帧（若走 transition，终局吸收态会让它 fail-fast）。
-//   ② 重建面 errorLogsFromEvents 与活体写入同语义：按事件序 + 尾部上限裁剪。
+//   ② 重建侧 errorLogsFromEvents 与活体写入同语义：按事件序 + 尾部上限裁剪。
 import { describe, expect, it, vi } from "vitest";
 
 import {
@@ -63,7 +63,7 @@ describe("worker-log 不进生命周期状态机（ADR-0094）", () => {
   });
 });
 
-describe("errorLogsFromEvents（重建面）", () => {
+describe("errorLogsFromEvents（重建侧）", () => {
   it("按事件序收集，非诊断帧被忽略", () => {
     const logs = errorLogsFromEvents([runCreated, workerLog("first", 2), workerLog("second", 3, "warn"), runSettled]);
     expect(logs).toEqual([

@@ -2,7 +2,7 @@
 //
 // spawnEngineChild 形态断言（R9-4②：子进程 stdin 恒为自有 pipe，绝不继承引擎
 // stdin fd）+ armEngineSelfDestruct 判据矩阵（主判据 stdio EOF / 辅助判据未 ack
-// 计时超时 / 排除面 = 已 ack 与已终结请求）。自灭执行一律注入 killSelf fake，
+// 计时超时 / 排除情形 = 已 ack 与已终结请求）。自灭执行一律注入 killSelf fake，
 // 绝不触达缺省的 process.kill（测试红线）。
 
 import type { ChildProcess } from "node:child_process";
@@ -162,7 +162,7 @@ describe("armEngineSelfDestruct", () => {
     expect(kill).toHaveBeenCalledTimes(1);
   });
 
-  it("排除面：已 ack 的 host/askUser / executeAndAwait 不计时（R9-2）", () => {
+  it("排除情形：已 ack 的 host/askUser / executeAndAwait 不计时（R9-2）", () => {
     const stdin = fakeStdin();
     const kill = vi.fn();
     const clock = armEngineSelfDestruct({ stdin, killSelf: kill, timeoutEnv: {} });
@@ -172,7 +172,7 @@ describe("armEngineSelfDestruct", () => {
     expect(kill).not.toHaveBeenCalled();
   });
 
-  it("排除面：已终结（settled）请求不计时", () => {
+  it("排除情形：已终结（settled）请求不计时", () => {
     const stdin = fakeStdin();
     const kill = vi.fn();
     const clock = armEngineSelfDestruct({ stdin, killSelf: kill, timeoutEnv: {} });
@@ -232,7 +232,7 @@ describe("armEngineSelfDestruct", () => {
     clock.dispose();
   });
 
-  it("自灭后 started 不再进入计时面", () => {
+  it("自灭后 started 不再进入计时侧", () => {
     const stdin = fakeStdin();
     const kill = vi.fn();
     const clock = armEngineSelfDestruct({ stdin, killSelf: kill, timeoutEnv: {} });

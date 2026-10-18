@@ -5,7 +5,7 @@
  *   2. resolution 回落：skillPaths/extensionPaths 取 resolution 值，缺失回落全局解析；
  *   3. 模型终态：model: undefined + inheritSessionModel: true（不拼 --model，P1 final
  *      gate V1⑤——pi CLI --model 恒优先 entry 恢复）。
- * 全部依赖 fake 注入（BtwLineSpawnOptionsDeps 窄面），零磁盘零进程。
+ * 全部依赖 fake 注入（BtwLineSpawnOptionsDeps 窄接口），零磁盘零进程。
  */
 import { describe, it, expect, vi } from 'vitest'
 import { BUILTIN_PRESET_IDS } from '@taiji/shared'

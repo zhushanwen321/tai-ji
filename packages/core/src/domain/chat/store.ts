@@ -1273,7 +1273,7 @@ export type ChatStoreReaders = Pick<
 
 
 /**
- * [D6②/u6.1] chat store facet：ops 面——编排/composable 专用动作面（写操作 + LRU + 订阅类 + 测试逃生舱）。
+ * [D6②/u6.1] chat store facet：ops 面——编排/composable 专用动作侧（写操作 + LRU + 订阅类 + 测试逃生舱）。
  *
  * 消费方边界：composables/stores/effects/tests 不受限；组件（src/components/** 的 .vue）
  * 禁访问——编排动作在组件内联是 facet 约束要拦的形态（下沉 composable 后经 props/事件对接）。

@@ -1,5 +1,5 @@
 // MobileComposer 测试（remote-use U1.4c：中断键/发送键——发送正路 segments 形状 +
-// 空输入检查；图片粘贴降级链以真实 paste 事件驱动，断言落 DOM 观察面）。
+// 空输入检查；图片粘贴降级链以真实 paste 事件驱动，断言落 DOM 观察点）。
 //
 // app-runtime 模块级 mock：隔离 core WS 依赖（测试禁触网络），直接断言组件层对
 // useChat.abort / useChat.send 的调用接线。MobileMessageStream 的 provide 链测试
@@ -93,8 +93,8 @@ describe('MobileComposer 中断键（remote-use-mobile D7（移动壳 v1 功能�
 // pasteImage（remote-use-mobile D7 图片粘贴行降级：返回文本占位）经 ComposerInput inject 转发进 dom-core
 // useContenteditableInput.onPaste → pickClipboardImageItem 取剪贴板图片 File（入参 File 的
 // 判据：占位 badge 只在 getAsFile() 产出 File 后插入，纯文本粘贴不触发）→ await pasteImage →
-// kind:'text' 移除占位 + insertText 降级。断言落最近可观察面：占位 badge 生命周期 +
-// insertText 降级文案（happy-dom 无 document.execCommand，stub spy 兼作观察面）。
+// kind:'text' 移除占位 + insertText 降级。断言落最近可观察点：占位 badge 生命周期 +
+// insertText 降级文案（happy-dom 无 document.execCommand，stub spy 兼作观察点）。
 // 环境说明：happy-dom 已支持 DataTransfer/ClipboardEvent/DataTransferItem.getAsFile（探针实测），
 // 粘贴链所需事件范围齐备，无需 per-file 切 jsdom。
 describe('图片粘贴降级链（真实 paste 事件驱动）', () => {
@@ -134,7 +134,7 @@ describe('图片粘贴降级链（真实 paste 事件驱动）', () => {
 
     await flushPromises()
 
-    // 降级完成（用户可见面）：占位 badge 移除，pasteImage 的文本占位经 insertText 进输入通路
+    // 降级完成（用户可见部分）：占位 badge 移除，pasteImage 的文本占位经 insertText 进输入通路
     expect(wrapper.find('.image-chip').exists()).toBe(false)
     expect(execSpy).toHaveBeenCalledWith('insertText', false, expectedFallbackText())
     wrapper.unmount()

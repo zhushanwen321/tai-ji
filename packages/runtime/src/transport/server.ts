@@ -80,7 +80,7 @@ import { warnOnce } from '../utils/warn-once.js'
 
 /**
  * setServices 的全部可选依赖（PR #189 review：签名从 18 个位置参数收敛为聚合对象，
- * 成员可省略语义与原可选参数一致——漏传不再是「错位静默」，装配面一目了然）。
+ * 成员可省略语义与原可选参数一致——漏传不再是「错位静默」，装配侧一目了然）。
  */
 export interface RuntimeServerOptionalServices {
   extension?: IExtensionService
@@ -121,7 +121,7 @@ export interface RuntimeServerOptionalServices {
   delivery?: SessionDeliveryRegistry
   /**
    * notify-once 通知债权状态机（组合根 index.ts 构造后注入）。缺席时 SessionManagerHandler
-   * 按停用象限运行（不 arm / willNotify:false / watch fail-closed——测试与退化装配面）。
+   * 按停用象限运行（不 arm / willNotify:false / watch fail-closed——测试与退化装配侧）。
    */
   claims?: ClaimLedger
   /** 导入 pi 会话服务（import-session D5/U2）：session.importCandidates / session.import 路由依赖。可选：未注入时该 case 报 unsupported。 */
@@ -135,7 +135,7 @@ export interface RuntimeServerOptionalServices {
    */
   replyGuardResolver?: (sessionId: string) => string | null | undefined
   /**
-   * btw 线三帧路由（btw-question M2-b，B1 授权）：BtwService 窄面 + 主会话解析。
+   * btw 线三帧路由（btw-question M2-b，B1 授权）：BtwService 窄接口 + 主会话解析。
    * 组合根（index.ts）构造 BtwService 后注入，assembleOptionalHandlers 据此构造
    * BtwMessageHandler 并在 buildRoutes 展开 handles（缺省 = 不装配，btw.* 落 unknown_type——
    * 生产组合根恒注入，缺省语义服务存量测试装配）。
@@ -687,7 +687,7 @@ export class RuntimeServer implements IMessageBroker {
       }
     } catch (e) {
       // S-1（b22）：服务端留痕——error envelope 只达当前 ws（关闭/刷新即丢），runtime
-      // 落盘日志是唯一持久取证面；一行覆盖全部裸跑 handler 异常族（对照同文件
+      // 落盘日志是唯一持久取证侧；一行覆盖全部裸跑 handler 异常族（对照同文件
       // steer/follow_up 局部 console.error 先例）。
       console.error(`[server] handler error: type=${msg.type} id=${msg.id}:`, e)
       const message = toErrorMessage(e)

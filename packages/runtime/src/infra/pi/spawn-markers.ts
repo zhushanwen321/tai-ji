@@ -198,7 +198,7 @@ export function writeSpawnMarkersFile(
   }
 }
 
-/** recordSpawnMarkers 的入参形状（结构化最小面，避免与 rpc-client 循环 import）。 */
+/** recordSpawnMarkers 的入参形状（结构化最小子集，避免与 rpc-client 循环 import）。 */
 export interface SpawnMarkerOptions {
   skillPaths?: string[]
   extensionPaths?: string[]

@@ -12,7 +12,7 @@
  * 4. 文件损坏容错：损坏行（坏 JSON）跳过，不炸内核播种与重放。
  *
  * 磁盘写目标 = mkdtempSync 自建自删（测试禁触真实数据目录红线）；装配 = 真 SessionDeliveryRegistry
- * + 真磁盘 store + MockPiClient（IPiEngine 窄面替身）。等待用短轮询 until（事件同步链无
+ * + 真磁盘 store + MockPiClient（IPiEngine 窄接口替身）。等待用短轮询 until（事件同步链无
  * timer 逻辑断言，真 timers；与 equivalence 族 STEP_TIMEOUT 同款形态）。
  */
 import { afterEach, describe, expect, it } from 'vitest'
@@ -57,7 +57,7 @@ const TEXT_A = 'undelivered crash msg'
 const TEXT_B = 'already delivered msg'
 const TEXT_C = 'revoke after restart msg'
 
-/** MockPiClient：registry 消费的 IPiEngine 窄面替身（prompt / onEvent / getEntries / getCommands / clearQueue）。 */
+/** MockPiClient：registry 消费的 IPiEngine 窄接口替身（prompt / onEvent / getEntries / getCommands / clearQueue）。 */
 class MockPiClient {
   eventListener: ((event: unknown) => void) | undefined
   transcriptEntries: unknown[] = []

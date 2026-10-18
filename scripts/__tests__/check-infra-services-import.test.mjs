@@ -10,7 +10,7 @@
  *   R1 白名单 value import + type-only services import → exit 0
  *   R2 白名单外 value import → exit 2 + 汇总头 + 文件/模块定位 + 修复方向
  *   R3 export re-export from services → exit 2 + 定位（VALUE_FROM_RE 的 export 分支）
- *   R4 排除面：违规仅出现在 *.test.ts 与 __tests__/ → exit 0
+ *   R4 排除范围：违规仅出现在 *.test.ts 与 __tests__/ → exit 0
  */
 import { describe, it, expect } from 'vitest'
 import { spawnSync } from 'node:child_process'
@@ -95,7 +95,7 @@ export const limit = EXTRACT_LIMIT
     }
   })
 
-  it('R4 排除面：违规仅出现在 *.test.ts 与 __tests__/ → exit 0', () => {
+  it('R4 排除范围：违规仅出现在 *.test.ts 与 __tests__/ → exit 0', () => {
     const violating = `import { EXTRACT_LIMIT } from '../services/plan-state-extractor.js'
 export const limit = EXTRACT_LIMIT
 `

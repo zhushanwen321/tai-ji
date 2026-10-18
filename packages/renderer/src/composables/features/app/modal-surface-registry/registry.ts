@@ -56,7 +56,7 @@ export interface ModalSurfaceRegistration { // oe-exempt:20261003:framework:类�
   isOpen: () => boolean
   /** 开态几何读点（view 遮蔽族 'intersecting' 成员上报用，§5.1 规则 6②）：读点直读 DOM
    *  实测（getBoundingClientRect）；缺省/返回 null = 不带 rect 上报（main 侧保守按相交处理）。
-   *  全屏阻塞面（unconditional）无需提供——fullscreen 上报不带 rect。 */
+   *  全屏阻塞遮罩（unconditional）无需提供——fullscreen 上报不带 rect。 */
   rect?: () => ModalSurfaceRect | null
 }
 

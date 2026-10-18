@@ -9,7 +9,7 @@
 // import core，core 与本包的逐字等价副本单源落 SDK——原头注「引擎包进程内无
 // core 故自持解析」的自持理由随 SDK 落点消解，改为登记 SDK 单源）。JournalLine
 // v1 行格式（{v,ts,taskId,engineId,seq,event}）、seq 排序、坏行跳过语义不变，
-// 格式漂移面由 W10 golden 往返测试覆盖。
+// 格式漂移风险由 W10 golden 往返测试覆盖。
 
 export { replayJournal } from "@zhushanwen/subagent-engine-sdk";
 

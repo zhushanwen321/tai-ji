@@ -14,7 +14,7 @@
 //     getInFlightSnapshot 即含该 record 贡献的绝对计数（无参签名，发送时刻求值）。
 //   ②构建者——推送携带的是双谓词过滤后的真实计数：活句柄 + 无 armed idle timer
 //     才计在途；镜像置死后计数即刻回落（EngineClient 镜像桥接派生视图）。
-//   ③观察者——EngineClient 镜像 → core 镜像的单向派生视图可从镜像面观察（core 镜像
+//   ③观察者——EngineClient 镜像 → core 镜像的单向派生视图可从镜像侧观察（core 镜像
 //     条目随反向通道事件出现/置死），壳层监听者异常不反噬主链（既有出口测试覆盖，
 //     此处不重复）。
 //
@@ -148,7 +148,7 @@ describe("u7a 生产迁移点 → 在途推送（wiring）", () => {
     fs.writeFileSync(record.sessionFile, "{}\n", "utf-8");
     store.register(record);
     registerSpawnedChildForRecord(record.id, makeFakeChild());
-    armIdleTimer(record.id, () => {}); // 预置保活态（上轮已 settle 的形态）——disarm 挂点的真实生效面
+    armIdleTimer(record.id, () => {}); // 预置保活态（上轮已 settle 的形态）——disarm 挂点的真实生效侧
 
     seen.length = 0;
     await service.chatActions.deliverChatMessage(record, "next round msg");
@@ -180,7 +180,7 @@ describe("u7a 数据范围桥接：EngineClient 反向通道镜像 → core 镜�
 
   beforeEach(() => {
     dataDir = fs.mkdtempSync(path.join(os.tmpdir(), "inflight-bridge-"));
-    // 不 connect（构造即被测面：镜像变更经 onChange 同步广播）——零子进程零 fs 写
+    // 不 connect（构造即被测对象：镜像变更经 onChange 同步广播）——零子进程零 fs 写
     client = new EngineClient({
       engineId: "fake",
       command: process.execPath,

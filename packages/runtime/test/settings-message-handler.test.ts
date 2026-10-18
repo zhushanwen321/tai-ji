@@ -75,7 +75,7 @@ function makeHandler(overrides: { setProvider?: ReturnType<typeof vi.fn>; delete
     switchModel: vi.fn().mockResolvedValue('p1/m1'),
     setThinkingLevel: vi.fn().mockResolvedValue(undefined),
     discoverModelsFromApi: overrides.discover ?? vi.fn().mockResolvedValue([{ id: 'm1' }]),
-    // M3a test 模式编排面（可选交集）：缺省不装配——未注入时 handler 走 test_unavailable 防御分支
+    // M3a test 模式编排侧（可选交集）：缺省不装配——未注入时 handler 走 test_unavailable 防御分支
     ...(overrides.testProviderConnections ? { testProviderConnections: overrides.testProviderConnections } : {}),
   }
   const skillRegistry = {
@@ -401,7 +401,7 @@ describe('SettingsMessageHandler', () => {
       expect(replies[0].payload).toMatchObject({ success: false, error: 'test_unavailable' })
     })
 
-    it('以 ctx.modelService 为 this 调用编排面（真实实现方法体依赖 this.configService）', async () => {
+    it('以 ctx.modelService 为 this 调用编排侧（真实实现方法体依赖 this.configService）', async () => {
       let seenThis: unknown
       const testProviderConnections = vi.fn(function (this: unknown) {
         seenThis = this

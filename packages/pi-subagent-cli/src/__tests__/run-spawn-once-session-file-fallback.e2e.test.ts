@@ -135,7 +135,7 @@ describe("close 时 sessionFile 缺失的响亮 warn（runSpawnOnce + fake pi �
     // run 正常终态：resolveExit 必达（await 不挂死）+ agent_settled resolve 的 exit 0 口径
     expect(result.success).toBe(true);
     expect(result.error).toBeUndefined();
-    // 全 miss 形态：身份面无锚点（不自动认领）
+    // 全 miss 形态：身份信息无锚点（不自动认领）
     expect(result.sessionFile).toBeUndefined();
     expect(result.sessionId).toBeUndefined();
     expect(h.handleReady).toHaveLength(0);

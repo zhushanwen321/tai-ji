@@ -42,7 +42,7 @@ describe("静态断言：引擎包任务子进程必经 spawnEngineChild", () =>
     const root = mkdtempSync(join(tmpdir(), "spawn-guard-neg-"));
     tmpRoots.push(root);
     mkdirSync(join(root, "__tests__"), { recursive: true });
-    // __tests__ 排除面（测试文件可用 child_process mock）——放一个不触发的样本
+    // __tests__ 排除侧（测试文件可用 child_process mock）——放一个不触发的样本
     writeFileSync(join(root, "__tests__", "mock.test.ts"), 'import { spawn } from "node:child_process";\n');
     // src 直陈违规：直接 spawn（未走 SDK spawnEngineChild）
     mkdirSync(join(root, "engine"), { recursive: true });

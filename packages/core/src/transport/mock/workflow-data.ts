@@ -244,7 +244,7 @@ const at = (iso: string): number => Date.parse(iso)
 /** 相对偏移便捷（秒；行内 ts = 基准 + offset 秒 × 1000，避免散落四则运算）。 */
 const plus = (base: number, seconds: number): number => base + seconds * 1000
 
-/** wf-mock-001 事件行集（10 行骨架帧，无大字段截断——截断展示面由组件测试覆盖）。 */
+/** wf-mock-001 事件行集（10 行骨架帧，无大字段截断——截断展示侧由组件测试覆盖）。 */
 const wfMock001Events: WorkflowRunEventEntry[] = [
   { type: 'run-created', ts: at('2026-07-10T10:00:00Z'), seq: 1, runId: 'wf-mock-001', workflowName: 'deploy-flow', argsSummary: '{"task":"demo"}' },
   { type: 'phase-started', ts: plus(at('2026-07-10T10:00:00Z'), 1), seq: 2, phase: 'Dev' },

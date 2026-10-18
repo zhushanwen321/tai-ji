@@ -627,7 +627,7 @@ export class SessionManagerHandler {
 
   /**
    * status 分支：从 getSummary 组装。目标不存在**或存在但不归属发起方**一律
-   * `{status:'not_found'}`——「不可见 = 不存在」（PR #189 review 探测面折叠：
+   * `{status:'not_found'}`——「不可见 = 不存在」（PR #189 review 探测侧折叠：
    * 对不归属目标 throw error 会向非属主泄露该 sessionId 的存在性，与 list 的
    * 过滤语义（不可见 = 不出现在结果里）不对称，非属主可借此探测任意 sessionId）。
    */

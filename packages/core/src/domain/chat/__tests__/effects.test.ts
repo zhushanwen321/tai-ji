@@ -340,7 +340,7 @@ describe('message.queue_update handler 退役（投递所有权内核 u3b / D7�
 
     expect(ctx.appendUser).not.toHaveBeenCalled()
     // 前身断言「incrementInflight 不被调用」已随 ctx 成员删除一并退役：增量入口收敛到
-    // store 方法面后，effect 结构上无法触碰该操作（缺成员 = 结构性保证，同上 RET-2 注）。
+    // store 方法侧后，effect 结构上无法触碰该操作（缺成员 = 结构性保证，同上 RET-2 注）。
   })
   // [u5a 退役] 前身 RET-2「queueStates 快照不再被写入/删除」已删：快照分区本尊随 u5a 删除
   // （ctx 无该字段、store 无该分区），「无生产写方」由缺字段结构性保证，用例主体消失。
@@ -952,7 +952,7 @@ describe('dispatchMessageEvent 坏帧静默丢弃（A5 设计裁决锁定：异�
     expect(ctx.applyEntryFrame).not.toHaveBeenCalled()
     expect(getMsgs(ctx)).toHaveLength(0)
     // 路径 2（user 投递确认）在形态检查处短路：确认计数只减不增（increment 入口已在
-    // ctx 方法面删除，结构性不可触——原负向断言随之退役）
+    // ctx 方法侧删除，结构性不可触——原负向断言随之退役）
     expect(ctx.decrementInflight).not.toHaveBeenCalled()
   })
 })

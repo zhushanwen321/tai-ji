@@ -38,7 +38,7 @@
 import type { DeliveryEntryState } from '@zhushanwen/session-delivery'
 
 /**
- * 观察面事件子集（结构匹配 infra 翻译结果 PiTranslatedEvent，只取本判定需要的字段）。
+ * 观察侧事件子集（结构匹配 infra 翻译结果 PiTranslatedEvent，只取本判定需要的字段）。
  * 刻意不 import 完整联合：services 层禁 Pi* 类型名（C-comm-02，check_pi_type_leak），
  * 结构子集让本模块对翻译层新增事件类型免疫。
  */

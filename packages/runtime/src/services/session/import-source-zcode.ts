@@ -146,7 +146,7 @@ export class ZcodeImportSource implements SessionImportSource {
     const importedIds = new Set(scanPiSessions().map((s) => s.id))
     /**
      * 单行打标降级：id 归一化后置条件不满足（形态超出已验证域）时按未导入处理 + warn
-     * 留痕，不让单行坏 id 让整表不可用——列表是展示面，幂等真校验在编排层互斥区内
+     * 留痕，不让单行坏 id 让整表不可用——列表是展示侧，幂等真校验在编排层互斥区内
      * force 双检；同条件的 fail-fast 语义保留在 prepareImport 的 T1 校验（导入路径）不动。
      */
     const isAlreadyImported = (row: ZcodeSessionRow): boolean => {

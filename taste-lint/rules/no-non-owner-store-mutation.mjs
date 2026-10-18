@@ -3,7 +3,7 @@
  *
  * W24 起从「拦直呼形态」升级为「文件内调用图分析」：受管 mutation 的调用许可来自
  * 数据源登记表（docs/architecture/data-source-registry.md，父文档 §3.6 R2：许可表
- * 来自登记表，登记表条目驱动逐步收紧）。检测面 = import 边 + 函数级转发（一层起步）：
+ * 来自登记表，登记表条目驱动逐步收紧）。检测范围 = import 边 + 函数级转发（一层起步）：
  *
  * 1. 直呼（W4 保留）：`store.applySnapshot(...)` / `useSessionStore().applySnapshot(...)`；
  * 2. 形参转发（一层）：`f(store)` 实参是 store 实例/工厂调用 → 被调函数对应形参成为

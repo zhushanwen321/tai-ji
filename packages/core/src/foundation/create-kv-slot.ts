@@ -52,7 +52,7 @@ export interface KVSlotOptions<V> {
 
 /**
  * KV 单键槽位实例（loadOnce/record/onLoaded 与两既有模块签名对齐；__reset 供模块 reset 组合）。
- * 泛型 V 只进配置钩子（KVSlotOptions<V>）——槽位方法面与 V 无关（write 闭包已捕获容器）。
+ * 泛型 V 只进配置钩子（KVSlotOptions<V>）——槽位方法侧与 V 无关（write 闭包已捕获容器）。
  */
 export interface KVSlot {
   /** 触发惰性预载（fire-and-forget，幂等）。加载完成前内存值保持初始态。 */

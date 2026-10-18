@@ -152,7 +152,7 @@ export interface RecordEntriesCache {
    * id 集；引用共享安全——scan 每轮产新对象，旧引用不可变，equals 走字段级比对）。
    */
   publishedSubagents: Map<string, SubagentRecord>
-  /** [reload-closeout D2] 送达水位：已发布 workflow run-state 派生视图（runId → 信号面三字段 + 步骤数）。 */
+  /** [reload-closeout D2] 送达水位：已发布 workflow run-state 派生视图（runId → 信号侧三字段 + 步骤数）。 */
   publishedWorkflows: Map<string, PublishedWorkflowRunState>
   /** [reload-closeout D2] 送达水位：已发布 planState view（null = 从未发布过）。 */
   publishedPlanState: PlanStateView | null
@@ -173,14 +173,14 @@ export interface RecordEntriesCache {
 }
 
 /**
- * [reload-closeout D2] workflow run-state 水位派生视图：workflowUpdate 信号面（runId/status/
+ * [reload-closeout D2] workflow run-state 水位派生视图：workflowUpdate 信号侧（runId/status/
  * reason）+ 步骤数（GUI 步骤实时可见的 diff 维度，[步骤可见性修复 2026-09-14]——running
  * 中 trace 逐步落盘，若只比 status/reason（恒 running），GUI 详情的 agentCalls 整个 run
  * 期间收不到任何 reload 触发）。
  *
  * [W1 / D6] W0 的 settledSteps 终态计数维度退役，换步骤状态全序列：事件派生视图变更
  * （record 转态 / run 事件边沿）驱动信号后，「steps 不变但步骤行 running↔终态翻转」
- * 由 stepStatuses 序列差异承载（状态向量覆盖原终态计数的全部检测面且更精确——计数
+ * 由 stepStatuses 序列差异承载（状态向量覆盖原终态计数的全部检测侧且更精确——计数
  * 对同 run 两步骤互换状态盲，状态序列不盲）。结构补全（phase/agent 补齐、状态不变）
  * 不独立发信号（分组 header 到达搭下一次终态信号或 drawer 重开拉取，设计已知取舍 2）。
  */
@@ -309,7 +309,7 @@ export interface SessionRecordsDeps {
    * （model-override-query.ts，SessionService 装配点注入——磁盘派生视图查询，sessionId
    * 是定位锚首参：recordsDir/journal 按 session cwd 分片，无全局 id 索引）。
    * 缺省 undefined = 载荷不带覆盖状态字段（字段缺席 = 无覆盖语义，测试窄 mock 可省）。
-   * 窄接口面 = gateway 的查询两方法（结构同形，gateway 实装天然满足）。
+   * 窄接口侧 = gateway 的查询两方法（结构同形，gateway 实装天然满足）。
    */
   modelOverrideQuery?: {
     getRecordOverride(sessionId: string, recordId: string, resolved?: SessionMetaRef): SubagentModelOverrideStatus | undefined
@@ -1567,7 +1567,7 @@ function subagentsDifferFromPublished(current: Map<string, SubagentRecord>, publ
  * phasesFingerprint 任一变化一条——事件派生视图驱动的转态在 steps 不变时由
  * stepStatuses 序列承载信号；纯脚本 phase 转态与重试边沿由 phasesFingerprint /
  * stepStatuses 的 attempts 段承载）。run 消失（fullRebuild 后全集不再含该 run）不构造信号
- * ——信号面无删除形态，硬造旧状态帧只会发 stale 信息；消费端由下次真实变化或主动拉取收敛。
+ * ——信号侧无删除形态，硬造旧状态帧只会发 stale 信息；消费端由下次真实变化或主动拉取收敛。
  */
 function workflowSignalsAgainstPublished(current: Map<string, WorkflowRunRecord>, published: Map<string, PublishedWorkflowRunState>): WorkflowUpdateSignal[] {
   const updates: WorkflowUpdateSignal[] = []
@@ -1612,7 +1612,7 @@ function phasesFingerprint(record: WorkflowRunRecord): string {
   return record.phases.map((p) => `${p.phase}:${p.startedAt}-${p.settledAt ?? ''}`).join('|')
 }
 
-/** workflow 水位派生视图（推进时镜像当前派生 run-state：信号面三字段 + 步骤数 + 步骤状态序列 + phases 折叠序列 diff 维度）。 */
+/** workflow 水位派生视图（推进时镜像当前派生 run-state：信号侧三字段 + 步骤数 + 步骤状态序列 + phases 折叠序列 diff 维度）。 */
 function projectPublishedWorkflowStates(workflows: Map<string, WorkflowRunRecord>): Map<string, PublishedWorkflowRunState> {
   const projected = new Map<string, PublishedWorkflowRunState>()
   for (const [runId, record] of workflows) {

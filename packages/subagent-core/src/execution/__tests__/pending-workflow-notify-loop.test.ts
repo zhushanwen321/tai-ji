@@ -44,7 +44,7 @@ function makeSpec(): RunSpec {
   } as RunSpec;
 }
 
-/** runWorkflow 用 deps mock（eventBus.emit 可观察 = register 发射面）。 */
+/** runWorkflow 用 deps mock（eventBus.emit 可观察 = register 发射侧）。 */
 function makeLauncherDeps(): LifecycleDeps & {
   runs: Map<string, WorkflowRun>;
   eventBus: { emit: ReturnType<typeof vi.fn> };

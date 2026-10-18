@@ -33,7 +33,7 @@
  *   wf-mock-mismatched-calls
  * - getWorkflows(非 s3) = [] → 该类无记录 → 托盘条目整体不渲染
  * - 计数>0 分支（徽标 + 呼吸点）自 D8 演员入列起可达（running=4）；「归零不虚亮」的
- *   否定面断言保留在 T2（切无数据 session → 条目整体摘除）与托盘组件测试三态用例
+ *   否定用例断言保留在 T2（切无数据 session → 条目整体摘除）与托盘组件测试三态用例
  *
  * 运行：npx playwright test --project=electron e2e/workflow-sidebar-sync.spec.ts
  */

@@ -1,5 +1,5 @@
 /**
- * MCP 域 —— 设置页 MCP 分区对 pi 用户级 mcp.json 的管理面（pi-mcp-management 设计）。
+ * MCP 域 —— 设置页 MCP 分区对 pi 用户级 mcp.json 的管理侧（pi-mcp-management 设计）。
  *
  * 七命令：list（清单 + 损坏错误态，打开分区拉取一次，§3.1）/ add / update（编辑写回契约
  * D7 归 runtime store：表单外键原样保留、清空即删键、`type` 键剥离、切换传输类型键级清理）/

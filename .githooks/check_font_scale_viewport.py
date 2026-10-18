@@ -32,7 +32,7 @@ GREEN = '\033[0;32m'
 YELLOW = '\033[1;33m'
 NC = '\033[0m'
 
-# (路径, 是否做 @media 块级检查)；md 文件只查字面量（派生视图漂移面）
+# (路径, 是否做 @media 块级检查)；md 文件只查字面量（派生视图的漂移风险）
 GUARDED_FILES = [
     ('packages/renderer/src/style.css', True),
     ('packages/mobile-renderer/src/styles/tokens.css', True),

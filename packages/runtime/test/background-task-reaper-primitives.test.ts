@@ -10,7 +10,7 @@
  *
  * pid 探测/处置原语（isPidAlive / killProcessTree / getProcessStartTimeSec /
  * pidStartMatchesRegistered）自 ext-simplify-13 起下沉 protocol 子出口
- * `background-task`（本仓单一实现），其直接实现面测试由 protocol 包
+ * `background-task`（本仓单一实现），其直接实现侧测试由 protocol 包
  * background-task-process.test.ts 同构覆盖，此处不再保留副本；registry 文件原语
  * （readRegistry / atomicWriteRegistry）下沉 protocol background-task-registry-file.ts
  * 后，本文件的错误注入断言经 vi.mock('node:fs') 对 protocol 模块同样生效（模块级 mock），
@@ -101,7 +101,7 @@ function errnoLike(code: string, message: string): NodeJS.ErrnoException {
   return Object.assign(new Error(message), { code })
 }
 
-// ── fixture helper（与 test/background-task-reaper.test.ts 同形，此处独立维护最小面）──
+// ── fixture helper（与 test/background-task-reaper.test.ts 同形，此处独立维护最小子集）──
 
 interface DepsFixture {
   alivePids: Set<number>

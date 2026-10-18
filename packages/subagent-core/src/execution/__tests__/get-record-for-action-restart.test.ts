@@ -206,7 +206,7 @@ describe("[M10] getRecordForAction 跨重启磁盘重建（S3 回归场景）", 
     expect(store.getMutable("sa-fin")).toBe(record); // 重建注册
   });
 
-  it("[a3rv 归因] workflow-origin record 归档后、索引未预热（无 list 前置）→ 冷查仍能定位（origin 过滤只属展示面，D7 检查可达）", () => {
+  it("[a3rv 归因] workflow-origin record 归档后、索引未预热（无 list 前置）→ 冷查仍能定位（origin 过滤只属展示侧，D7 检查可达）", () => {
     // 复现 a3rv 重验：批成员收尾（idle+gc）归档出内存后直接 message（无 action:'list'
     // 预热 idToFile 索引）。修复前冷查兜底全扫吃 [H2 W1] origin 展示过滤 → 同树
     // workflow record 被滤 → 候选 undefined → 「not found or not owned」上转，

@@ -352,7 +352,7 @@ describe("finalizeRun 的 run-settled errorCode 构造（DoneReason → RunError
   it("failed + 失败 call 带 engine_crashed 协议码前缀 → errorCode=engine_crashed（S2 引擎崩溃族）", async () => {
     const run = makeRealRun("wf-ev-ec");
     await dispatchRunCreated(run);
-    // 错误文本 `<code>: <detail>` 前缀 = SDK EngineSdkError 的跨面契约形态
+    // 错误文本 `<code>: <detail>` 前缀 = SDK EngineSdkError 的跨包契约形态
     // （AgentOutcome.error 与协议 error 帧共用；engine crash 族经此存活进 run 域）。
     run.state.calls.set(0, makeSettledCall(0, {
       content: "",

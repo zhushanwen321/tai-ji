@@ -270,7 +270,7 @@ describe("事件流与回调时点（缺省 appserver 路径）", () => {
   it("[PR3] 工具执行期活性接线：turn 中途 tool.updated progress 帧 → ctx.onEvent 收到 {type:'activity'}（零载荷严格相等）", async () => {
     // 真机探针实证（/tmp/zcode-activity-probe.log，2026-09-10）：工具执行期
     // session/event 每隔 ~1.0s 推 {type:"tool.updated", payload:{kind:"progress",…}}
-    // ——既非 final-frame 也非 delta。宿主刷新面只有 delta 事件，该帧族必须经
+    // ——既非 final-frame 也非 delta。宿主刷新逻辑只有 delta 事件，该帧族必须经
     // activity 变体透出，否则「仅工具执行、零正文」形态下宿主 30min 中段无进展
     // 守护饿死误杀。引擎接线 = channel onActivity → ctx.onEvent({type:"activity"})。
     const toolUpdatedProgress = JSON.stringify({
@@ -303,7 +303,7 @@ describe("事件流与回调时点（缺省 appserver 路径）", () => {
       makeCtx({ onEvent: (e) => events.push(e) }),
     );
     expect(outcome.error).toBeUndefined();
-    // activity 事件恰一次（一帧一事件）、零载荷字段面严格相等（无多余键）
+    // activity 事件恰一次（一帧一事件）、零载荷字段侧严格相等（无多余键）
     const activities = events.filter((e) => e.type === "activity");
     expect(activities).toHaveLength(1);
     expect(activities[0]).toStrictEqual({ type: "activity" });

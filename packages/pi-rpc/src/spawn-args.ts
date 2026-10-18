@@ -146,7 +146,7 @@ function toInlinePromptValue(value: string): string {
  * - --extension builtin:mcp（恒带，pi-mcp-management P11 配套）：内置 MCP 扩展激活时
  *   自行读取 mcp.json 并连接全部启用的服务器（loadMcpConfig 在 rpc 模式零引用，扩展
  *   激活路径是 MCP 加载的唯一通路）——不装载则 mcp.json 无消费方，taiji 界面保存的
- *   配置零生效。仅主 agent 模板装载（subagent 模板不加，设计 §5 U1 辐射面裁决：
+ *   配置零生效。仅主 agent 模板装载（subagent 模板不加，设计 §5 U1 波及范围裁决：
  *   N 个并行 subagent × M 个启用服务器的连接放大 + mcp_servers 提示词节 + direct 档
  *   首 prompt 延迟，且 subagent 消费 MCP 工具为零证据场景，不预付；重评登记 docs/todo/）。
  *   无启用服务器的会话零成本（pi 实装保证）。

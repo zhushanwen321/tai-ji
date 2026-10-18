@@ -497,9 +497,9 @@ describe("D5-③: failureKind 分诊字段透传", () => {
     expect(findByStep(trace, 0)?.status).toBe("failed");
   });
 
-  it("词表漂移失效模式：未知错误文案 → classifyFailureKind=unknown → 仍单次终态（分类降级不影响执行面）", async () => {
+  it("词表漂移失效模式：未知错误文案 → classifyFailureKind=unknown → 仍单次终态（分类降级不影响执行侧）", async () => {
     // pi 升级改写 stale 文案后，旧词表对新文案零命中——分诊降级 unknown 只影响
-    // 分类展示，执行面恒为单次终态（ADR-0122）
+    // 分类展示，执行侧恒为单次终态（ADR-0122）
     const futurePiError = "extension runtime was superseded by a newer orchestration epoch";
     expect(classifyFailureKind(futurePiError)).toBe("unknown");
 

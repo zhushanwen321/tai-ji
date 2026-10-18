@@ -8,7 +8,7 @@
 //   - 快答数据范围（host/log / host/streamDelta / host/handleReady /
 //     host/childSpawned / host/childStateChanged）：分发 + 回 {ok:true}，10s 应答检查
 //     ——10s 未答 = 引擎故障 → 杀进程 + 在途 run 失败（REVERSE_REQUEST_TIMEOUT_MS）；
-//   - 人机交互面（host/askUser）：ack 两阶段——收即回 {ack:true}，
+//   - 人机交互通道（host/askUser）：ack 两阶段——收即回 {ack:true}，
 //     handler 结果异步补帧②，**不计时**（R9-2：已 ack 的等待不参与任何 in-flight
 //     超时，ADR-0047 静默 ≠ 卡死）；未注入 handler → {unsupported:true}；
 //   - 未知 host/* 通道 → {unsupported:true}（引擎自行降级，不重试）。
@@ -34,7 +34,7 @@ import { getHostUiRequestEndpoint } from "../host/host-ui-endpoint.ts";
 
 const logger = getLogger("subagents");
 
-/** 路由器依赖面（EngineClient 注入；全部单向引用，无回环持有）。 */
+/** 路由器依赖范围（EngineClient 注入；全部单向引用，无回环持有）。 */
 export interface ReverseRouterDeps {
   engineId: string;
   /** run 作用域通知路由表（EngineClient 持有，EngineClient 生命周期内同一引用）。 */
@@ -70,7 +70,7 @@ export function routeReverseRequest(deps: ReverseRouterDeps, frame: { id: string
 }
 
 /**
- * 人机交互面 ack 两阶段（R9-2）：先回 {ack:true}，handler 结果异步补帧②。
+ * 人机交互通道 ack 两阶段（R9-2）：先回 {ack:true}，handler 结果异步补帧②。
  * **不计时**——已 ack 的等待属人机交互异步等待，不参与任何 in-flight 超时；
  * handler 永不 resolve（用户不答）也不判引擎故障。handler 抛错兜底
  * {cancelled:true}（dialog-queue 应答链同款语义）。

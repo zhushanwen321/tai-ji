@@ -220,7 +220,7 @@ describe('pi1-disposition-chat-flow U2：孤儿对账双分支与反向（U2② 
     const bubbleId = f.chatStore.getMessages('s1').find((m) => m.role === 'user')!.id
     f.emit('s1', deliveryFrame('s1', [{ clientUuid: bubbleId, state: 'in-flight', lane: 'direct' }]))
     f.emit('s1', deliveryFrame('s1', [{ clientUuid: bubbleId, state: 'delivered', lane: 'direct' }]))
-    // 快照先于 message_end 回执到达的窗口下，普通条目气泡被清 = 文本丢失面——对账不碰
+    // 快照先于 message_end 回执到达的窗口下，普通条目气泡被清 = 文本丢失风险——对账不碰
     expect(f.chatStore.getMessages('s1').some((m) => m.id === bubbleId)).toBe(true)
     f.dispose()
   })

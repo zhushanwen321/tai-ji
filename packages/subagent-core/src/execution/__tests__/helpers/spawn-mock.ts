@@ -247,7 +247,7 @@ export function makeOpts(overrides: Partial<RunOptionsLike> = {}): RunOptionsLik
   };
 }
 
-/** SessionRunnerContext 的结构化最小形态（core 侧消费字段面）。 */
+/** SessionRunnerContext 的结构化最小形态（core 侧消费字段侧）。 */
 export interface SessionRunnerContextLike {
   cwd: string;
   agentDir: string;

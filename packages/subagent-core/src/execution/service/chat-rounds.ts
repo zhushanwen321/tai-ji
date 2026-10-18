@@ -146,7 +146,7 @@ export interface ChatRoundsDeps {
   readonly getCwd: () => string;
   /** WorktreeManager（Continuation worktree 重建 + finalizeRoundToIdle 的 FinalizeDeps）。 */
   readonly getWorktreeManager: () => WorktreeManager;
-  /** NotifyHost（Continuation 通知面 + FinalizeDeps 注销面）。 */
+  /** NotifyHost（Continuation 通知侧 + FinalizeDeps 注销侧）。 */
   readonly getNotifyHost: () => NotifyHost;
   /** ConcurrencyPool（chat 轮次的并发槽）。 */
   readonly getPool: () => ConcurrencyPool;
@@ -443,7 +443,7 @@ export class ChatRounds {
         // transcriptAnchorOf 的 transcriptRef 优先分支再次触发 reopen，U1b 专防）；
         // 先清再派生，锚回落刚覆写的 engineHandle.sessionRef 派生键。
         // ② 补写新锚 binding（persistSettleSnapshot merge-or-create，best-effort
-        // 同 pi 链 writeBindingForRecord 记账面）——消 D1b 边界③双引擎不对称：
+        // 同 pi 链 writeBindingForRecord 记账侧）——消 D1b 边界③双引擎不对称：
         // 此前本回填点只落 entry 不写 binding，重开窗口内崩溃重启后新锚下
         // epoch/统计基线从零开始（违反「epoch 随 binding 持久化是硬要求」）。
         record.transcriptRef = undefined;
@@ -574,7 +574,7 @@ export class ChatRounds {
   }
 
   /**
-   * [subagent-model-switch §7.2 步骤②] 会话级操作的引擎解析转发（setModel 转发面
+   * [subagent-model-switch §7.2 步骤②] 会话级操作的引擎解析转发（setModel 转发侧
    * 消费——与轮次派发同一路由裁决单点 {@link resolveRoundEnginePort}：per-window
    * 引擎复用轮窗口登记实例、shared-service 透传 registry，切换命中的进程与派发
    * 进程同源）。public 转发 = 跨聚合消费方（model-switch deps 装配闭包指本方法；
@@ -613,7 +613,7 @@ export class ChatRounds {
       killStaleChild: (id) => this.killStaleChildBeforeDispatch(id),
       engineSupportsConversation: (rec) => this.engineSupportsConversation(rec),
       reviveClosedRecord: (rec) => {
-        // D4 revive 宿主面：register（跨重启重建后不在内存的形态）+ 迁移上报
+        // D4 revive 宿主侧：register（跨重启重建后不在内存的形态）+ 迁移上报
         //（W16 类外状态写点同构——entry 落盘，live/reload 视图同步）。
         this.deps.getStore().register(rec);
         this.deps.getStore().reportRecordTransition(rec);
@@ -774,7 +774,7 @@ export class ChatRounds {
    * fail-closed 拒绝。消费双写点：①messageHandler 入口（subagent-actions-core）
    * ②Continuation revive 翻边格。
    *
-   * 入参型面 = Pick<engine> + 可选 engineHandle/id：壳侧与 Continuation 的声明面只
+   * 入参型面 = Pick<engine> + 可选 engineHandle/id：壳侧与 Continuation 的声明侧只
    * 保证 engine 字段，运行期传入的是完整 record；锚判据与错误定位需读 engineHandle/id
    * （领地外签名不因此改动）。
    *
@@ -797,7 +797,7 @@ export class ChatRounds {
 
   /**
    * record 终态化路径的宿主侧收尾汇聚点（[H1 U2] Continuation 实例清理——终态后
-   * 容器不再接收 message，实例滞留即泄漏；[H1 U6] 路由注销面已随 interact 面退役）。
+   * 容器不再接收 message，实例滞留即泄漏；[H1 U6] 路由注销侧已随 interact 面退役）。
    *
    * [U3 pi-workflow-run-resource-model] 终态补释：不经过轮 idle 收尾（finalizeRoundToIdle）
    * 就消亡的窗口实例在此兜底释放——收尾轮归档（closeAfterRound → archiveRecord）虽

@@ -2,7 +2,7 @@
 //
 // runSpawnOnce 真实子进程集成测试：spawn 一个 fake pi 脚本（node 子进程，stdin
 // JSONL 驱动 / stdout JSONL 事件流），驱动 spawn-runner → spawn-run-pump →
-// spawn-event-translator 全链（不含真实 pi 二进制）。覆盖验收面：
+// spawn-event-translator 全链（不含真实 pi 二进制）。覆盖率达标时的验收：
 //   - rpc 模式成功流：get_state 握手身份回填、事件翻译（tool/text/thinking/turn/
 //     message_end usage）、agent_settled resolve 的 exit 0 口径、stderr tee 落盘、
 //     invalid 行 / extension_ui_request 管道不中断；
@@ -232,7 +232,7 @@ describe("runSpawnOnce 集成（fake pi 子进程）", () => {
       expect(result.error).toBeUndefined();
       expect(result.content).toBe("hello world");
       // 成功 run 轮数 = resolve 时刻快照（本流 1 条 turn_end → 真实轮数 1）——
-      // agent_settled 消费方的按轮清零（SP-9）不得腐化收集面
+      // agent_settled 消费方的按轮清零（SP-9）不得腐化收集侧
       expect(result.turns).toBe(1);
       expect(result.sessionId).toBe("fake-sess-1");
       expect(result.sessionFile).toBe(
@@ -675,7 +675,7 @@ describe("runSpawnOnce 集成（fake pi 子进程）", () => {
 
       expect(result.success).toBe(true); // resolveChatRun(0)，与 close 信号无关
       expect(result.content).toBe("hello world");
-      // 成功 run 轮数 = resolve 时刻快照（真实轮数），按轮清零不得泄漏进收集面
+      // 成功 run 轮数 = resolve 时刻快照（真实轮数），按轮清零不得泄漏进收集侧
       expect(result.turns).toBe(1);
 
       // [H1 U3] agent_settled resolve 后杀链收割（每轮一进程——续聊 = 新 run +

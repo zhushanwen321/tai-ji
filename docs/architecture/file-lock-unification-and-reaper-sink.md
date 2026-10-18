@@ -133,7 +133,7 @@ A 的关键约束（不是自由设计）：
 | B 全量直接建包接入，不做批次 1 内联 | 同 A 终态 | 高（止血被拉长） | 崩溃多暴露一个发版周期 |
 | C 各 extension 各自内联不建包 | 防线分散，准则漂移 | 低 | 下一个 extension 作者无从知晓 |
 
-**检查粒度（Round 1 修正）**：flag/oncePerProcess 只包**跨 session 副作用的操作**（reapOrphanedTasks——进程级全局维护，正确频率就是每进程至多一次）。**reconcilePendingEntries 是 session 级操作**（读当前 session 的 pi entries + 当前 session 的 registry，appendEntry 幂等），按判定准则属豁免类，**保持每 session_start 执行、不挂 flag**——桌面端每次激活是 startup+resume 双 session_start，若整体挂进程级 flag，startup 消费 flag 后目标 session 的对账将永远被跳过（M3 对账在主链路被禁用）。reconcile 全同步、不持锁、无 jiti 风险面。需要「每 session 一次」语义的 handler 属另一设计，本设计不提供（避免 clever 机制，出现真实需求再设计）。
+**检查粒度（Round 1 修正）**：flag/oncePerProcess 只包**跨 session 副作用的操作**（reapOrphanedTasks——进程级全局维护，正确频率就是每进程至多一次）。**reconcilePendingEntries 是 session 级操作**（读当前 session 的 pi entries + 当前 session 的 registry，appendEntry 幂等），按判定准则属豁免类，**保持每 session_start 执行、不挂 flag**——桌面端每次激活是 startup+resume 双 session_start，若整体挂进程级 flag，startup 消费 flag 后目标 session 的对账将永远被跳过（M3 对账在主链路被禁用）。reconcile 全同步、不持锁、无 jiti 风险。需要「每 session 一次」语义的 handler 属另一设计，本设计不提供（避免 clever 机制，出现真实需求再设计）。
 
 判定准则（批次 3 排查用）：handler 体内存在**任一**跨 session 副作用即必须接入——写非本 session 的文件、注册定时器/watcher、扫描目录、进程操作；纯内存初始化（如 permission 的 footer renderer 注册，registry.register 同 id 覆盖）天然幂等可豁免，豁免结论须在排查清单中逐条留痕。
 

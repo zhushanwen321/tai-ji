@@ -58,7 +58,7 @@ export type ModalSurfaceFamily =
  * （u-foundation 裁决，类型契约在 @taiji/core/domain/overlay）。
  */
 export const MODAL_SURFACE_FAMILY_FLAGS: Record<ModalSurfaceFamily, ModalSurfaceFlags> = {
-  // 全屏阻塞面（遮罩盖满视口）：双键均让位（有未提交输入/阻塞交互）、无条件遮蔽 view
+  // 全屏阻塞遮罩（遮罩盖满视口）：双键均让位（有未提交输入/阻塞交互）、无条件遮蔽 view
   'modal-token-z': { yieldsEsc: true, yieldsCmdW: true, shieldsView: 'unconditional' },
   'modal-dialog': { yieldsEsc: true, yieldsCmdW: true, shieldsView: 'unconditional' },
   'companion-band': { yieldsEsc: true, yieldsCmdW: true, shieldsView: 'unconditional' },
@@ -112,7 +112,7 @@ export const MODAL_SURFACE_MANIFEST = [
     zAnchors: [
       { file: 'packages/renderer/src/components/settings/SettingsModal.vue', form: 'class-token', literal: 'var(--z-modal)', count: 1 },
     ],
-    basis: '§6.7 表：全屏阻塞面；既有 window 级 Esc 兜底（defaultPrevented 先检后 preventDefault）',
+    basis: '§6.7 表：全屏阻塞遮罩；既有 window 级 Esc 兜底（defaultPrevented 先检后 preventDefault）',
   },
   {
     id: 'async-error-fallback-overlay',
@@ -130,7 +130,7 @@ export const MODAL_SURFACE_MANIFEST = [
     zAnchors: [
       { file: 'packages/ui/src/overlays/SearchModal.vue', form: 'class-token', literal: 'var(--z-modal)', count: 1 },
     ],
-    basis: '§6.7 表：SearchModal（遮罩+面板全屏阻塞面；z 已令牌化 --z-modal）',
+    basis: '§6.7 表：SearchModal（遮罩+面板全屏阻塞遮罩；z 已令牌化 --z-modal）',
   },
   {
     id: 'dialog-confirm',

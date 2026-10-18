@@ -146,12 +146,12 @@ describe('A2-MF-C：deliverText 挂 skill 注入', () => {
     expect(h.client.prompt).toHaveBeenCalledWith('<<injected:排队的消息>>', undefined, 'steer')
   })
 
-  it('prompt 失败：notice 不发布（发送成功后时机契约的否定面）', async () => {
+  it('prompt 失败：notice 不发布（发送成功后时机契约的否定用例）', async () => {
     const h = makeHarness({ notices: [{ reason: 'skill_missing', skills: ['ghost'] }] })
     ;(h.client.prompt as ReturnType<typeof vi.fn>).mockRejectedValue(new Error('pi reject'))
     await expect(h.registry.sendDirect('s1', 'x')).rejects.toThrow('pi reject')
-    // skillNotice 零发布（notice 时机契约否定面不变）；[RT-4#10] occupancy 帧例外——
-    // 前移置位 + 失败收尾会产生 dispatching/idle 两帧（合法派生视图，不属于 notice 否定面）
+    // skillNotice 零发布（notice 时机契约否定用例不变）；[RT-4#10] occupancy 帧例外——
+    // 前移置位 + 失败收尾会产生 dispatching/idle 两帧（合法派生视图，不属于 notice 否定用例）
     expect(h.publish.mock.calls.filter(([, m]) => (m as { type: string }).type === 'session.skillNotice')).toHaveLength(0)
   })
 
@@ -159,7 +159,7 @@ describe('A2-MF-C：deliverText 挂 skill 注入', () => {
     const h = makeHarness()
     await h.registry.sendDirect('s1', '纯文本')
     // skillNotice 零发布；occupancy 帧是 D2 挂点迁移后的合法派生视图输出（'dispatching'），
-    // 不在本断言否定面内（顺序契约用例已单独锁定）
+    // 不在本断言否定用例内（顺序契约用例已单独锁定）
     expect(h.publish.mock.calls.filter(([, m]) => (m as { type: string }).type === 'session.skillNotice')).toHaveLength(0)
     // 真 SkillInjector：无标记在 parseSkillMarkers 短路，不触达映射源与任何 RPC
     //（映射源若被读取即翻红——stub 计数断言在下方）

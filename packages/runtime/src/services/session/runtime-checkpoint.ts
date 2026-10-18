@@ -75,7 +75,7 @@ import { logger } from '../../infra/logger.js'
 
 // 文件名/前缀/保留份数 SSOT = @taiji/shared/paths RUN_* 常量族（【oe-audit C8】：
 // 原三处手抄字面量收敛——main.ts 残留隔离与诊断导出与本 writer 共享同一单点定义，
-// 漏改即静默失配的漂移面构造性消失）。
+// 漏改即静默失配的漂移风险构造性消失）。
 
 /** 文件格式版本（消费方按需迁移；当前 1 = 设计 D3 字段集）。 */
 export const CHECKPOINT_VERSION = 1

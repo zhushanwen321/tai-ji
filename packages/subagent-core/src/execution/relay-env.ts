@@ -8,7 +8,7 @@
 // d8-compat）与 pi-subagent-cli 已直连 SDK，pi 包的 relay-env shim 已删除。保留本
 // 文件的唯一理由 = package.json exports 的 ./relay-env 子入口（semver 面：runtime 与
 // subagent-workflow 经它消费，两包当前不依赖 SDK——删本文件须同时给两包加 SDK 依赖
-// 并改 import specifier，属独立的依赖面变更，未随 L5 执行）。
+// 并改 import specifier，属独立的依赖范围变更，未随 L5 执行）。
 // 代理脚本 relay.mjs 仍为内嵌镜像（零依赖脚本不能 import workspace 包），
 // 镜像一致性由 conformance relay 变体断言锁定。
 

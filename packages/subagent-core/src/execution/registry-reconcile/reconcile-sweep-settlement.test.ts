@@ -3,7 +3,7 @@
 // [W2/V4 D6] sweep 判据源改接后的补注销行为与幂等验证。
 //
 // V1 把 reconcile-sweep 的 workflow 分支判据源从两态机持久化快照（findStateByIdSync
-// 的 state.status 字段）改接 journal run-settled 帧 ∨ manifest 终局面
+// 的 state.status 字段）改接 journal run-settled 帧 ∨ manifest 终局条目
 //（findRunSettlementEvidence 判定核）——活体写点删除后 v2 run 的 state 快照
 // 永停 running，旧判据对全部 v2 run 永判 active = sweep 结构性静默失效。本文件
 // 验证改接后 sweep 对 v2 run 的补注销行为与幂等，并对 D6 判定矩阵的保守侧形态
@@ -215,10 +215,10 @@ describe("[W2/V4 D6] sweep 判据源改接后的 v2 run 补注销（真实判定
     expect(unregisterAppends[0]).toMatchObject({ id: "wf-v4-gone", reason: "expired" });
   });
 
-  it("manifest 终局面（journal 无帧但 manifest 在盘）→ 补注销；interrupted → 'failed' 诊断兜底折叠（reason 面不变量）", async () => {
+  it("manifest 终局条目（journal 无帧但 manifest 在盘）→ 补注销；interrupted → 'failed' 诊断兜底折叠（reason 面不变量）", async () => {
     writeRegisterEntry("wf-v4-manifest");
     fs.mkdirSync(stateDirOf(), { recursive: true });
-    // 活体物化后 journal 被裁的组合：manifest 终局面是第二证据通道
+    // 活体物化后 journal 被裁的组合：manifest 终局条目是第二证据通道
     fs.writeFileSync(
       path.join(stateDirOf(), "wf-v4-manifest.json"),
       JSON.stringify({ outcome: "interrupted", errorCode: "idle-evicted" }),

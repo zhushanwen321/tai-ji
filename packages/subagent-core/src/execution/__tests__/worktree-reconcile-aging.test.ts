@@ -1,7 +1,7 @@
 // worktree-reconcile-aging.test.ts —— 对账「歧义跳过」老化升级（PS-12 措施⑤）。
 //
 // 环境模式对齐 worktree-reconcile.integration.test.ts：真实 git repo + TMPDIR
-// 重定向到测试私有目录（物理面扫描根 os.tmpdir()/pi-subagents 跟随 TMPDIR）；
+// 重定向到测试私有目录（磁盘侧扫描根 os.tmpdir()/pi-subagents 跟随 TMPDIR）；
 // 本文件额外 mock core logger 以断言升级 warn（消息含磁盘路径与人工清理指引）。
 //
 // 语义锁定：

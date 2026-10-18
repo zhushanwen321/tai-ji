@@ -34,7 +34,7 @@
 import { ref } from 'vue'
 import { MAX_SPEAK_CHARS, cleanTextForSpeech } from '@taiji/shared'
 // 直连 core 域（useQuotaQuery 同先例：features 层 composable 直 import transport 域，不经 @/api 门面）。
-// mock 轨差异（VITE_MOCK）由消费方装配面承担——TtsPage 配置读写经 @/api tts 门面（u4 聚合）。
+// mock 轨差异（VITE_MOCK）由消费方装配侧承担——TtsPage 配置读写经 @/api tts 门面（u4 聚合）。
 import * as ttsApi from '@taiji/core/transport/api/domains/tts'
 import i18n from '@/i18n'
 import { useToast } from '@/composables/useToast'

@@ -92,7 +92,7 @@ const HEADER_ACTION_ICONS: Record<string, Component> = {
 /** E13 生效三态 = 判定三态 | 上次值兜底（unknown 且无上次值 = undefined → 首次缺省可点） */
 type EffectiveAvailability = 'registered' | 'unregistered' | undefined
 
-/** 按钮渲染视图（buttons computed 的元素形状；非声明本体——归一后的呈现面） */
+/** 按钮渲染视图（buttons computed 的元素形状；非声明本体——归一后的呈现侧） */
 interface HeaderActionButtonView {
   key: string
   testid: string

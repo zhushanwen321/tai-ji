@@ -115,7 +115,7 @@ export interface QuotaDraftInput {
   workspace: string
 }
 
-/** 展示派生面（只读；全部由 module 派生，UI 只做 i18n 映射与布局） */
+/** 展示派生逻辑（只读；全部由 module 派生，UI 只做 i18n 映射与布局） */
 export interface QuotaSectionView {
   /** 类型选择区（D5/D8） */
   type: {
@@ -155,7 +155,7 @@ export interface QuotaSectionView {
   help: { url: string; text: string } | null
 }
 
-/** 测试结果面（只读） */
+/** 测试结果侧（只读） */
 export interface QuotaTestView {
   status: QuotaTestStatus
   /** 额度数据（成功行；失败态下旧缓存保留在此，经「查看上次成功数据」展开） */
@@ -204,9 +204,9 @@ export type QuotaConfigureFactory = (inputs: QuotaConfigureFactoryInputs) => Quo
 export interface QuotaConfigureModule {
   /** 输入草稿（v-model 直绑） */
   readonly draft: Ref<QuotaDraftInput>
-  /** 展示派生面 */
+  /** 展示派生逻辑 */
   readonly view: Ref<QuotaSectionView>
-  /** 测试结果面 */
+  /** 测试结果侧 */
   readonly test: Ref<QuotaTestView>
   /**
    * 写入类型草稿（D5 检查落在值上）：非字符串检查（reka Select 的宽联合 payload）、

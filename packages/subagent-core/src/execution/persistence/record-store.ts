@@ -1,10 +1,10 @@
 // src/execution/persistence/record-store.ts
 //
-// Record 的统一容器 + 意图原语立面。内存只留 running record；磁盘 record 从
+// Record 的统一容器 + 意图原语的对外接口。内存只留 running record；磁盘 record 从
 // session.jsonl + `.state` 按 §3.2.4 重建单规则重建（一律 idle + stopReason 单源）。
 //
 // [H4 三轴拆分（2026-09-13）] 本文件保留容器职责（构造/字段/依赖注入/生命周期）+
-// 意图原语立面（public 签名不变，实现转发）+ 有状态扫描编排（fileCache/dirStamp/
+// 意图原语的对外接口（public 签名不变，实现转发）+ 有状态扫描编排（fileCache/dirStamp/
 // 索引/孤儿恢复）；三轴实现拆至同级文件（D7 写侧约束：`.state`/`.alive`/manifest
 // 写函数的调用与 import 只留在本文件，轴文件经 ctx 注入，检查零改动）：
 //   - record-store-terminal.ts —— 终态原语轴（终态/settle/意愿动作原语实现）
@@ -20,7 +20,7 @@
 //   - 提供 snapshot() 只读视图给 TUI（永不返回可变引用）
 //
 // ════════════════════════════════════════════════════════════════════
-// [U1 / record 持久化收敛 §3.1] 意图级操作 API 立面（store 唯一写入口）
+// [U1 / record 持久化收敛 §3.1] 意图级操作 API 对外接口（store 唯一写入口）
 // ════════════════════════════════════════════════════════════════════
 // 调用方说「发生了什么」，不说「写哪个文件」——文件布局知识收在本类内部。
 // 迁移已完成：全部写点经本 API，旧直写路径已删除（检查见 D7）。
@@ -234,7 +234,7 @@ export type RecordStorePi = {
  * record 状态查询范围（U10① D6）：按状态枚举 listRunning/collectRecords(statusFilter)、
  * 按 id 查询 getMutable/findLightById/getFullRecord——方法签名即导出形态，本类零改动。
  *
- * @experimental execution 运行时面（设计 docs/design/subagent-core-sink-design.md（已删，git 可追溯） §3.3 D6）：
+ * @experimental execution 运行时侧（设计 docs/design/subagent-core-sink-design.md（已删，git 可追溯） §3.3 D6）：
  * 一个 minor 周期内允许签名微调，稳定后转常规 semver 承诺。
  */
 export class RecordStore {
@@ -253,7 +253,7 @@ export class RecordStore {
   /** record id → sessionFile 索引（getFullRecord 按 id 定位文件）。随 fileCache 同步维护。 */
   private readonly idToFile = new Map<string, string>();
   /**
-   * [身份换源第一步] 事件文件面「sessionFile → record id」反查索引（fold 身份路径的
+   * [身份换源第一步] 事件文件侧「sessionFile → record id」反查索引（fold 身份路径的
    * id 入口——折叠需要 record id，而子文件无 identity entry 时 id 不能从身份来）。
    *
    * 结构性入口 = 事件目录本身：文件名主名即 id，文件内 `record-bound` 帧携带
@@ -513,7 +513,7 @@ export class RecordStore {
   }
 
   // ════════════════════════════════════════════════════════════
-  // [U1 / §3.1] 意图级操作 API 立面（store 唯一写入口；映射表见模块头）
+  // [U1 / §3.1] 意图级操作 API 对外接口（store 唯一写入口；映射表见模块头）
   // ════════════════════════════════════════════════════════════
 
   /**
@@ -652,7 +652,7 @@ export class RecordStore {
    * 物理对象 = 会话库条目（dbPath 单库共享，双宿主开同一 dataDir 时互斥语义与 pi
    * 同构），声明键 = transcriptRef 派生锚基底（zcodeAnchorBasePath）。zcode 无
    * `.state`/legacy 终态位（settle 不写——无文件锚），wasClosed 删位动作只对 pi 路径。
-   * zcode 的异进程占用探针收编到 acquire 点（cold-lookup 探针面只覆盖 sessionFile
+   * zcode 的异进程占用探针收编到 acquire 点（cold-lookup 探针侧只覆盖 sessionFile
    * 形态——findColdLookupCandidate 对无 sessionFile 候选不探）。
    *
    * [U7 / §3.2.7] revive 统计基线水合先于 acquire/register：冷复活链的 createRecord
@@ -776,7 +776,7 @@ export class RecordStore {
     // [顺带发现 4 / D3 缺陷五] manifest 派生视图随覆盖写点同步刷新（写序 = 事件帧先、
     // manifest 后——水位构造性新鲜）：磁盘快照在该写点不再停留陈旧值；zcode 成员的
     // manifest 兜底载体对 run 级查询（parentRunId 反查）保持新鲜可见（缺陷六可见性
-    // 窗口的收窄面）。与轮终 writeDerivedManifest 同款写侧（D7：manifest 写函数调用
+    // 窗口收窄后的范围）。与轮终 writeDerivedManifest 同款写侧（D7：manifest 写函数调用
     // 字面只留本文件）。
     this.writeManifestPersisted(record.id, derivedManifestRecord(recordToSubagent(record)));
     this.notifyChange();
@@ -1114,7 +1114,7 @@ export class RecordStore {
    *  自 mergedRecords 原样提取，判据与派生视图零变化。 */
   private mergeEntrySourceRecords(byId: Map<string, SubagentRecord>, rootSessionFilter: string | undefined): void {
     // 主 session entry 源：补「磁盘扫描缺员」的 **zcode record**（无子 session 文件
-    // 不在扫描集，重启后唯一 store 侧可见面）。锚恢复 = entry 的
+    // 不在扫描集，重启后唯一 store 侧可见部分）。锚恢复 = entry 的
     // engineHandle.sessionRef（zcode 锚单源，冷查链 resurrectColdRecord 经
     // transcriptAnchorOf 派生消费）；统计/round 随 entry 派生视图（best-effort 过程面，
     // settle 权威值在 binding——markResurrected 水合覆盖）。刻意收窄到
@@ -1288,7 +1288,7 @@ export class RecordStore {
       if (rootSessionFilter !== undefined && st.rootSessionId !== rootSessionFilter) continue;
       if (this.records.has(id)) continue; // 内存活 record：在途，不得误杀
       // 活体保护：pi 锚在且异宿主在持（与 v1 段 findForeignLiveInstance 同判）——
-      // zcode 锚（sessionFile 空串形态）零探查（cold-lookup 探针面只覆盖 sessionFile
+      // zcode 锚（sessionFile 空串形态）零探查（cold-lookup 探针侧只覆盖 sessionFile
       // 形态，对齐 markResurrected 的 zcode 分支语义）。
       const bound = this.eventStreamFace.foldOf(id).bound;
       if (
@@ -1834,7 +1834,7 @@ export class RecordStore {
         this.indexDirty = true; // 失败恢复 dirty，下轮过窗重试
         // [PS-14/T7③] 升 warn：索引反复写失败（权限/磁盘满）曾仅 debug 级，排障时
         // 无线索。失败会跨轮重试（dirty 恢复），warn 每次过窗写失败都会出现——
-        // 正是「反复写失败需要可见」的信号面。
+        // 正是「反复写失败需要可见」的信号侧。
         logger.warn("[subagents] sessions-index write failed", {
           detail: { dir: encDir, error: err instanceof Error ? err.message : String(err) },
         });
@@ -1979,7 +1979,7 @@ export class RecordStore {
   /**
    * [D3 缺陷五] manifest 兜底的单 id 读取（getMutable / findLightById 双 miss 后的
    * 第三源）：zcode 成员无子 session 文件（不在文件扫描集）、settle 后出内存——
-   * bound 物化的 manifest 是其磁盘唯一载体，run 级全切的成员引擎转发面对它不可达
+   * bound 物化的 manifest 是其磁盘唯一载体，run 级全切的成员到引擎的转发对它不可达
    * = 无码 plain Error 误入聚合失败名单（分型 readback 失败）。只服务引擎路由解析：
    * 消费的 identity 域字段（origin/parentRunId/engine/engineHandle）在创建/绑定后
    * 不变，陈旧 manifest 的身份域仍可信——不做水位校验（状态域消费方禁用本方法，

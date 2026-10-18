@@ -208,7 +208,7 @@ function handleAbort(cmd) {
   })();
 }
 
-// ── get_state 快照（create/attach 链恒经的恒定状态面）─────────────────
+// ── get_state 快照（create/attach 链恒经的恒定状态侧）─────────────────
 // 字段集对齐 pi 实装 0.84.4 dist/modes/rpc/rpc-mode.js:347-362（12 字段）。runtime 消费：
 // - sessionId：readBackCreateState（session-lifecycle.ts），缺失 = create 链 fatal；
 // - sessionFile：attach 断言 I1 / 崩溃取证（rpc-client getState）——switch_session 绑定后

@@ -3,7 +3,7 @@
 // 超时杀链与 abort 两级中断（引擎侧原语，自 core execution/engine/common/kill-chain.ts
 // 迁入 @zhushanwen/subagent-engine-sdk，实现体逐字等价）。迁移处置（impl-plan §2.1
 // kill-chain 行，逐项落地）：
-//   - 契约类型随 SDK 下沉：AgentCallOpts（引擎面子集）/ AgentOutcome 改自
+//   - 契约类型随 SDK 下沉：AgentCallOpts（引擎侧子集）/ AgentOutcome 改自
 //     src/protocol/contract-types.ts（结构等价，零 core import）；
 //   - DEFAULT_ENGINE_ID 改参数注入：synthesizeTimeoutOutcome 的 engineId 必填，
 //     不再携带 core registry 缺省值（调用方显式传自己的引擎 id）；

@@ -121,7 +121,7 @@ beforeEach(() => {
   vi.clearAllMocks()
   apiMocks.getSubagents.mockResolvedValue({ subagents: [], oversize: false })
   apiMocks.getWorkflows.mockResolvedValue({ workflows: [], oversize: false })
-  // reactive 容器：bash 分区面的字段变更需驱动下游 computed 重算（mock 契约同真实分区）
+  // reactive 容器：bash 分区的字段变更需驱动下游 computed 重算（mock 契约同真实分区）
   partitionState = reactive({ tasks: [], loaded: true, corrupted: false, fetchFailed: false })
   tray = undefined
   vi.useFakeTimers({ now: FIXED_NOW })
@@ -403,7 +403,7 @@ describe('useTrayCounts 错误态与加载态暴露面（面板 retry 判据）'
   })
 })
 
-describe('P-invisible·任务托盘面：D9③ 派生视图抑制（btw 线不映射 subagent/workflow）', () => {
+describe('P-invisible·任务托盘：D9③ 派生视图抑制（btw 线不映射 subagent/workflow）', () => {
   it('btw vid 挂托盘：线 owner 分区有派生记录仍构造性归零 + 不发首次拉取 RPC；bash（线自身任务）照常', async () => {
     const vid = 'btw:line-tray-1'
     // 线 owner 分区真实灌入派生记录（生产 = loadSubagents(vid) / 广播路径落分区）

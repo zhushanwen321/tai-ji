@@ -193,7 +193,7 @@ describe("[collect 退役] v2 条目 / 存量 manifest 读侧容忍——旧 ses
     );
 
     // 模拟重启重建：走真实 SubagentService.initSession 组合路径。manifest 存在 →
-    // manifest 源兜底派生视图（无子文件锚时的可见面），容忍既有 entry 并存不炸、
+    // manifest 源兜底派生视图（无子文件锚时的可见部分），容忍既有 entry 并存不炸、
     // identity 不丢。
     const svc = makeCompatService();
     // queries 面无 rootFilter 参数——rootSessionId 由 initSession 供给的 sessionRootId

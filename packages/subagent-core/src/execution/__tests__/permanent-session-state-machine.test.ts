@@ -179,7 +179,7 @@ describe("两态状态机 CAS 语义", () => {
 // ── ② markSettled 副作用矩阵（.state / binding / manifest / .alive）──────────
 
 describe("markSettled 副作用矩阵（轮收尾 = 不终态化）", () => {
-  it("内存面：status=idle + stopReason 写入；closedReason 不写（非终态）；record 留内存", () => {
+  it("内存侧：status=idle + stopReason 写入；closedReason 不写（非终态）；record 留内存", () => {
     const store = newStore();
     const rec = runningRecord();
     rec.round = 2;
@@ -270,7 +270,7 @@ describe("markSettled 副作用矩阵（轮收尾 = 不终态化）", () => {
     expect(fs.existsSync(`${rec.sessionFile}.alive`)).toBe(true);
   });
 
-  it("无 sessionFile 锚：内存面照常收尾，.state/binding 面跳过（warn 不抛）", () => {
+  it("无 sessionFile 锚：内存侧照常收尾，.state/binding 面跳过（warn 不抛）", () => {
     const store = newStore();
     const rec = runningRecord();
     (rec as { sessionFile?: string }).sessionFile = undefined;
@@ -283,7 +283,7 @@ describe("markSettled 副作用矩阵（轮收尾 = 不终态化）", () => {
 // ── ③ markReopened 副作用矩阵（reopen 降级 + epoch 防撞）─────────────────────
 
 describe("markReopened 副作用矩阵（带历史重开）", () => {
-  it("内存面：新 transcriptRef + round 归零 + epoch+1 + stopReason=reopened；残留 lastAbandonedRound 不迁移", () => {
+  it("内存侧：新 transcriptRef + round 归零 + epoch+1 + stopReason=reopened；残留 lastAbandonedRound 不迁移", () => {
     const store = newStore();
     const rec = runningRecord();
     rec.round = 5;
@@ -314,7 +314,7 @@ describe("markReopened 副作用矩阵（带历史重开）", () => {
     expect(binding?.recordId).toBe("bg-1");
   });
 
-  it("zcode 锚：内存面照常重开，binding 随锚键基底落盘（U6 会话库锚承接）", () => {
+  it("zcode 锚：内存侧照常重开，binding 随锚键基底落盘（U6 会话库锚承接）", () => {
     const store = newStore();
     const rec = runningRecord();
     rec.status = "idle";
@@ -332,7 +332,7 @@ describe("markReopened 副作用矩阵（带历史重开）", () => {
     expect(readRecordBinding(`${dbPath}.sess-abc`)?.epoch).toBe(1);
   });
 
-  it("binding 写失败（新锚目录不存在）：拒绝重开 + 内存面回滚（epoch 随 binding 持久化是硬要求，防二次 reopen 击穿）", () => {
+  it("binding 写失败（新锚目录不存在）：拒绝重开 + 内存侧回滚（epoch 随 binding 持久化是硬要求，防二次 reopen 击穿）", () => {
     const store = newStore();
     const rec = runningRecord();
     rec.round = 3;
@@ -346,7 +346,7 @@ describe("markReopened 副作用矩阵（带历史重开）", () => {
       sessionFile: path.join(sessionsDir, "no-such-dir", "reopened.jsonl"),
     };
     expect(store.markReopened(rec, badRef)).toBe(false);
-    // 内存面逐字段还原（record 保持重开前 idle 形态——拒绝情形不留半重开状态）
+    // 内存侧逐字段还原（record 保持重开前 idle 形态——拒绝情形不留半重开状态）
     expect(rec.transcriptRef).toBeUndefined();
     expect(rec.round).toBe(3);
     expect(rec.epoch).toBeUndefined();

@@ -214,7 +214,7 @@ describe('PresetChip 三档退化 + 信任标记跨档不丢（设计 §7.4 / §
 })
 
 describe('PresetChip 只读 popover（设计 D5 第 4 点）', () => {
-  it('popover 含锁定说明 + 新建会话出口 + 工具/扩展/提示词面', () => {
+  it('popover 含锁定说明 + 新建会话出口 + 工具/扩展/提示词', () => {
     const wrapper = mountChip({ presetId: 'custom:dispatch' })
     const popover = wrapper.find('[data-testid="preset-chip-popover"]')
     expect(popover.exists()).toBe(true)

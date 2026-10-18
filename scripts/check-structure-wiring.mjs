@@ -3,7 +3,7 @@
  * check-structure-wiring.mjs —— 非 workspace 结构接线对账检查（S1，PR #20 组 D 检查化）。
  *
  * 背景：PR #20 的组 D 全部 5 条问题同一形态——新顶层结构（新包/新目录）落线时，
- * 机器管线接线（CI typecheck / coverage 测量面 / 发布线 / 测试装配）漏接，等 PR 期
+ * 机器管线接线（CI typecheck / coverage 测量范围 / 发布线 / 测试装配）漏接，等 PR 期
  * 8 维 review 才发现（ed6735b47 一个 commit 三坑）。本脚本把「新结构必须先登记再
  * 开发」变成机器拦截：管辖区内含 package.json、但不在 pnpm-workspace.yaml globs
  * 内的包，必须在 docs/structure-wiring.json 有接线登记条目，且登记的锚点在目标
@@ -156,7 +156,7 @@ for (const [rel, entry] of Object.entries(registered)) {
   if (entry.coverage === true) {
     const prefixHit = PKG_PREFIXES.filter((p) => rel.startsWith(p)).some((p) => coverageGateText.includes(`"${p}"`))
     if (!prefixHit) {
-      fail(`${rel} coverage=true 但 coverage-gate.py PKG_PREFIXES 不含其前缀——该包不在增量覆盖率测量面`)
+      fail(`${rel} coverage=true 但 coverage-gate.py PKG_PREFIXES 不含其前缀——该包不在增量覆盖率测量范围`)
     }
   }
 }

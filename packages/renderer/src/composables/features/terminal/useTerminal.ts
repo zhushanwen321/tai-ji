@@ -723,7 +723,7 @@ export function useTerminal(sessionIdRef: Ref<string | null>) {
     *   （toast「关闭失败，实例仍在运行」，C-proc-21）：closeInstance 路径此前已同步释放界面侧
    *   资源，这里按「实例仍活」重建镜像条目（establishInstance 幂等），使 UI 与 runtime 实况
    *   立即一致，不等下次 `terminal.list` 对账才「复活」；
-   * - `write` / `attach` / `resize` 走普通错误通道留痕即可——write 的输入丢失面由 runtime
+   * - `write` / `attach` / `resize` 走普通错误通道留痕即可——write 的输入丢失风险由 runtime
    *   `terminal.writeFailed` 帧覆盖，resize/attach 无用户动作成败语义。
    */
   function handleRoutingError(terminalId: string, e: unknown, trigger: 'write' | 'kill' | 'attach' | 'resize'): void {

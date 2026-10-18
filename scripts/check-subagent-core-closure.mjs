@@ -20,7 +20,7 @@
  *    require 说明符不含禁用依赖。扫描范围为可达闭包的超集（全量已发布源码；
  *    传递闭包经相对 import 的真实展开由检查项 3 的 worker 子图承载）。
  *    非测试源码中类型 import 同样违规——dist d.ts 会引用 pi 类型，npm 消费者
- *    （zsw 纯 CJS 无 TS loader）的 TS 编译面被拖入 pi SDK。
+ *    （zsw 纯 CJS 无 TS loader）的 TS 编译侧被拖入 pi SDK。
  *    __tests__/ 豁免：测试 type-only import 在编译期擦除、不进 dist、vitest 由
  *    workspace devDeps 解析，不构成发布物运行时闭包（mocks/ + vitest.config.ts
  *    alias 同理）。

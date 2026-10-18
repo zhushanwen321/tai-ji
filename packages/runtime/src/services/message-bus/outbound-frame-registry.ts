@@ -171,7 +171,7 @@ export function formatTruncationNote(originalBytes: number, sessionId: string, o
  * 占位 entry id 自增序号（进程内唯一）：同 session 两次截断帧各得独立 id，防 reducer 按
  * entry.id 把两条不同消息折叠成一条；'truncated-' 前缀与真实 pi entry id（uuidv7）及
  * reducer 派生 id（'e<N>'）命名空间均无碰撞。counter 不跨进程持久——ring/reducer 状态
- * 同为进程内存态，重启后各自重建，无跨重启同 id 折叠面。
+ * 同为进程内存态，重启后各自重建，无跨重启同 id 折叠侧。
  */
 let placeholderEntrySeq = 0
 function nextPlaceholderEntryId(): string {

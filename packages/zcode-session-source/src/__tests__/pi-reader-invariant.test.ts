@@ -127,7 +127,7 @@ function convertedCancelledTurn(): string {
     },
   ]
   const session = convertZcodeTranscript(msgs, SESSION_INPUT)
-  // 序列化装配面（converter 不产 header 行——首行在此拼装，导入薄包装同款形态）
+  // 序列化装配逻辑（converter 不产 header 行——首行在此拼装，导入薄包装同款形态）
   return `${JSON.stringify({ type: 'session', version: 3, ...session.header })}\n${serializeSession(session.entries)}`
 }
 

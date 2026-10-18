@@ -64,7 +64,7 @@ if (tasks.some((t) => typeof t !== "string" || t.trim() === "")) {
 // 必须用 workerData.scriptPath 锚定脚本目录（parallel/review-fix-loop 同模式）；
 // scriptPath 注入是 worker 契约的显式前提（D1 加固），缺席或为空串即 fail-fast
 // （空串 = record 流为 scriptPath 载荷落地前的旧格式，resume 重建无锚可恢复），
-// 不回退 cwd——消除从用户目录误加载/被植入同名 _shared/agent-refs.cjs 的代码加载面。
+// 不回退 cwd——消除从用户目录误加载/被植入同名 _shared/agent-refs.cjs 的代码加载路径侧。
 if (typeof workerData === "undefined" || !workerData || typeof workerData.scriptPath !== "string" || workerData.scriptPath === "") {
   if (workerData && typeof workerData.scriptPath === "string") {
     throw new Error("fan-out: core_module_load_failed: workerData.scriptPath is an empty string (record stream predates the scriptPath field); cannot locate workflows/_shared/agent-refs.cjs. " +
@@ -187,12 +187,12 @@ const aggregateFailed = aggregateOut !== undefined &&
 
 // ── 通知体积：results 序列化前保序截断（D5）─────────────────────
 // 壳侧 MAX_RESULT_LENGTH 机制在 helpers.ts（通知序列化预算）；模板侧只做保序截断：
-// taskIndex/status/fullReportPath/error（归因与恢复面）恒完整，summary（体积大头）
+// taskIndex/status/fullReportPath/error（归因与恢复侧）恒完整，summary（体积大头）
 // 先让出、task 文本次之；截断发生置 outcome 顶层 truncated: true
 const RESULTS_BUDGET_CHARS = 8000;
 
 /** 单条映射：keepTask=false 丢 task 文本、keepSummary=false 丢 summary；
- *  taskIndex/status/fullReportPath/error（归因与恢复面，D9）恒完整。
+ *  taskIndex/status/fullReportPath/error（归因与恢复侧，D9）恒完整。
  *  task 用 delete 而非不写 key，保持与最小条目形态相同的 key 插入顺序。 */
 function projectEntry(r, keepTask, keepSummary) {
   const entry = { task: r.task, taskIndex: r.taskIndex, status: r.status };

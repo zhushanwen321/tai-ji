@@ -46,7 +46,7 @@ function lineRec(vid: string, mainSid: string): BtwLineRecord {
 }
 
 /**
- * 组装 ctx：messaging 三方法 vi.fn + BtwService 四原语 fake（BtwServiceFace 结构化窄面，
+ * 组装 ctx：messaging 三方法 vi.fn + BtwService 四原语 fake（BtwServiceFace 结构化窄接口，
  * 无 cast）+ messageBus 全接口 fake（publish 计数单独外提便于断言）。
  */
 function mockCtx(overrides?: Partial<BtwHandlerContext>) {

@@ -38,7 +38,7 @@ vi.mock('../pi-provider-store.js', async () =>
 vi.mock('../../logger.js', async () => {
   const m = await import('../../../../test/helpers/rpc-client-mock.js')
   // 补 writePiCrashLog：本套件不触发 crash 路径，缺导出时 import 为 undefined 也不炸，
-  // 与 bash-timeout 内联骨架保持同面以防后续用例误触
+  // 与 bash-timeout 内联骨架保持同一处以防后续用例误触
   return { ...m.loggerModule(), writePiCrashLog: vi.fn() }
 })
 

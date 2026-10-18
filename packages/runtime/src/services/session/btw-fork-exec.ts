@@ -107,7 +107,7 @@ interface DanglingCheckMessage {
   content?: unknown
 }
 
-/** entry 形状检查：非 message entry / message 非对象 → undefined（判定面外，跳过）。 */
+/** entry 形状检查：非 message entry / message 非对象 → undefined（判定侧外，跳过）。 */
 function asPiMessageEntry(raw: unknown): DanglingCheckMessage | undefined {
   if (typeof raw !== 'object' || raw === null) return undefined
   const entry = raw as { type?: string; message?: DanglingCheckMessage | null }
@@ -221,7 +221,7 @@ export async function forkViaCliPi(req: ForkViaCliRequest): Promise<string> {
   try {
     child = spawn(req.piCommand, args, { cwd: req.cwd, env, stdio: ['ignore', 'pipe', 'pipe'] })
   } catch (e) {
-    // spawn 同步抛（参数面异常）：包成 fork_failed，调用方回落分支②。
+    // spawn 同步抛（参数侧异常）：包成 fork_failed，调用方回落分支②。
     throw new BtwError('fork_failed', `[btw] pi fork bootstrap spawn failed: ${toErrorMessage(e)}`)
   }
   child.stdout.on('data', () => {}) // bootstrap 进程 stdout 不消费（fork 后即收）

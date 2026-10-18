@@ -1,25 +1,25 @@
-// [H3/R3] RecordLifecycle 聚合（域 #4/#11/#17/#18：回收面 + close 三路 + cancel +
+// [H3/R3] RecordLifecycle 聚合（域 #4/#11/#17/#18：回收侧 + close 三路 + cancel +
 // finalize 簇）——自 SubagentService 上帝类 strangler 抽取的第三个聚合的**终态迁移
 // 写侧**（设计 docs/architecture/subagent-service-decomposition.md §2.1 / §3.3 D5；成员归属
 // 以 r0-inventory.md 清单① + 域分区为准）。
 //
 // [计划变更 D-R3-1] G1「每聚合 ≤700 行」与 R0 八域体量（分区实测 833 物理行）冲突，
 // 拆两文件（dev agent 停线报告、主 agent 核验追认）：本文件（终态写侧 #4/#11/#17/#18）
-// + record-access.ts（读建面
+// + record-access.ts（读建两侧
 // #3/#8/#10/#13）。两文件组间零互调（已验证——终态组方法只消费 deps + 组内互调），
 // 各自独立 deps，壳分别装配——聚合间零 import（G2 / R1 打样模式 3）。
 //
 // 单一职责：record 的**终态迁移**——dispose 批量回收（含否决记录 #3 的 onParentFork/
 // onParentNew 编排性关闭 + GC timer）、close action 三路分流、cancel CAS 抢锁终态、
 // finalize 簇（doFinalizeRecord 委托）。**本聚合 = store 与终态迁移入口的唯一宿主
-// （D5，H4「意图级写操作」落点）**：H4 后续在本聚合接口面上收敛持久化。
+// （D5，H4「意图级写操作」落点）**：H4 后续在本聚合接口侧上收敛持久化。
 //
 // [R1 打样模式——R3 落地]（模式权威定义见 session-baselines.ts 文件头）
 // 1. 依赖注入形态：deps 全晚绑定闭包（构造期零求值）。pi/会话基线运行时可变
 //   （initSession 注入 / 复活翻转），断言/调用时经壳 getter 现读；叶子模块实例（store/
 //   manifestStore/worktreeManager/modelService/notifyHost）为 #1 留壳共享依赖，getter
 //   现读同一实例——深绑测试的 FR 替换语义保持。
-// 2. 转发壳写法：壳保留同名方法（含原可见性）单行转发（D3 壳终态保留面：disposeAllRecords/
+// 2. 转发壳写法：壳保留同名方法（含原可见性）单行转发（D3 壳终态保留范围：disposeAllRecords/
 //   onParentFork/onParentNew/cancel/recoverManifestTmpFiles）；聚合内部
 //   互调（cancelBackground/close 收起 markSettledOut——旧 closeChatIdle 已改优雅收尾
 //   归档/finalizeRecord/promoteSessionFileFromEngineHandle）保持 private，不经壳。
@@ -118,7 +118,7 @@ export class RecordLifecycle {
     this.deps = deps;
   }
 
-  // ── 域 #4 回收面 ──
+  // ── 域 #4 回收侧 ──
 
   /**
    * SP-4: 关闭所有活跃 record——[U5 / §3.2.5 编排性关闭] 改**自动收起**（设计事件表
@@ -134,7 +134,7 @@ export class RecordLifecycle {
    *   - intent=archived（自动收起：旧 session 树内仍可 message 寻回——终态化会剥夺
    *     寻回，K10 不采用理由）；
    *   - worktree 按收起同款回收（patch 前移归档点 + cleanup，fire-and-forget——本
-   *     函数同步签名保持，dispose 停机窗不 await；竞态丢失面与旧实现一致，由 boot
+   *     函数同步签名保持，dispose 停机窗不 await；竞态丢失风险与旧实现一致，由 boot
    *     后 worktree 重建链承接）；
    *   - 归档点补发注销（承接原 emitUnregister 语义，发射点①挂载归档原语）。
    *
@@ -163,11 +163,11 @@ export class RecordLifecycle {
             `the parent must await nested results within the same round; otherwise check subagents action:'list' and re-dispatch.`,
         );
       }
-      // 回收面 i：abort 在途 controller（排队的 acquire / 在途 signal listener 立即
+      // 回收侧 i：abort 在途 controller（排队的 acquire / 在途 signal listener 立即
       // 感知打断）。幂等：已 aborted 的 controller.abort() 是 no-op。
       record.controller?.abort();
-      // 回收面 ii：杀链记账（SIGTERM + 30s SIGKILL 升级，收敛 T2④同款）。
-      // 回收面 iii：disarm idle timer（进程回收后 timer 只会误触发）。
+      // 回收侧 ii：杀链记账（SIGTERM + 30s SIGKILL 升级，收敛 T2④同款）。
+      // 回收侧 iii：disarm idle timer（进程回收后 timer 只会误触发）。
       killRecordChildWithEscalation(record.id, `disposeAllRecords (${reason})`);
       disarmIdleTimer(record.id);
       // 在途轮打断 + 队列清空（Continuation 打断编排的 dispose 侧触发——立即打断

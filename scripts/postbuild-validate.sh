@@ -126,7 +126,7 @@ check_wasm_chunks() {
     return 0
 }
 
-# 内置 pi 扩展资产存活 + 发现面完整性（2026-10-03 B′ 事故护栏，三平台共用）
+# 内置 pi 扩展资产存活 + 发现范围完整性（2026-10-03 B′ 事故护栏，三平台共用）
 #
 # 背景：打包态扩展是 esbuild 自包含 bundle（@zhushanwen/subagent-core 被 inline），
 # staged 布局无 node_modules ⇒ `require.resolve` 锚点必败。修复路径 = 回退到 staged
@@ -161,7 +161,7 @@ check_builtin_ext_assets() {
     ag_src=$(find "$core_src/agents" -maxdepth 1 -name '*.md' 2>/dev/null | wc -l | tr -d ' ')
     ag_pkg=$(find "$sw/agents" -maxdepth 1 -name '*.md' 2>/dev/null | wc -l | tr -d ' ')
 
-    # ① + ② 发现面资产存在且与源同量（口径：workflows 只算 .js 且排除 `_` 前缀；agents 算 .md）
+    # ① + ② 发现范围内的资产存在且与源同量（口径：workflows 只算 .js 且排除 `_` 前缀；agents 算 .md）
     if [ "$wf_src" -gt 0 ] && [ "$wf_pkg" = "$wf_src" ]; then
         echo -e "  ${GREEN}✓${NC} 内置 workflow 资产齐备（$wf_pkg 个，与源同量）"
     else
@@ -183,7 +183,7 @@ check_builtin_ext_assets() {
     (cd "$packaged_root" && find . -type f) | sort > "$tmp_post"
     # 白名单（精确模式）：包根文档仅 `./<pkg>/README.md|ARCHITECTURE.md` 一级（传入根已为
     # scope 目录；**非递归**，不得写成 `**/`）+ sourcemap / 类型声明 / 测试基建 /
-    # tree-sitter 源码与 debug wasm（与 electron-builder.yml 排除面一致）
+    # tree-sitter 源码与 debug wasm（与 electron-builder.yml 排除项一致）
     local allowed='^\./[^/]+/(README|ARCHITECTURE)\.md$|\.map$|\.d\.ts$|/__tests__/|\.test\.|/tree-sitter-bash/src/|/tree-sitter-bash/grammar\.js$|/web-tree-sitter/debug/'
     deleted=$(comm -23 "$tmp_pre" "$tmp_post" | grep -vE "$allowed" || true)
     rm -f "$tmp_pre" "$tmp_post"
@@ -412,7 +412,7 @@ if [ -d "$OUTPUT_DIR/mac-arm64" ]; then
         if ! check_staged_engines "$APP_PATH/Contents/Resources/engines"; then
             FAILED=1
         fi
-        # 内置 pi 扩展资产存活 + 发现面完整性（B′ 事故护栏）
+        # 内置 pi 扩展资产存活 + 发现范围完整性（B′ 事故护栏）
         if ! check_builtin_ext_assets "apps/electron/resources/extensions/@zhushanwen" "$BUILTIN_EXT_DIR"; then
             FAILED=1
         fi
@@ -506,7 +506,7 @@ if [ -d "$OUTPUT_DIR/win-unpacked" ]; then
     if ! check_staged_engines "$WIN_RESOURCES/engines"; then
         FAILED=1
     fi
-    # 内置 pi 扩展资产存活 + 发现面完整性（B′ 事故护栏）
+    # 内置 pi 扩展资产存活 + 发现范围完整性（B′ 事故护栏）
     if ! check_builtin_ext_assets "apps/electron/resources/extensions/@zhushanwen" "$WIN_BUILTIN"; then
         FAILED=1
     fi
@@ -604,7 +604,7 @@ if [ -d "$OUTPUT_DIR/linux-unpacked" ]; then
     if ! check_staged_engines "$LINUX_RESOURCES/engines"; then
         FAILED=1
     fi
-    # 内置 pi 扩展资产存活 + 发现面完整性（B′ 事故护栏）
+    # 内置 pi 扩展资产存活 + 发现范围完整性（B′ 事故护栏）
     if ! check_builtin_ext_assets "apps/electron/resources/extensions/@zhushanwen" "${LINUX_BUILTIN}"; then
         FAILED=1
     fi

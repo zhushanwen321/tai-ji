@@ -23,7 +23,7 @@
  * （直接 getAgentCallHistory + setMessages + registerAgentCall），不经 store overlay 状态机。
  * [HISTORICAL] 2026-09-16 侧栏任务 tab 退役：sidebar 视图 2 用例（选中 runId / 读取当前
  * workflow / 返回列表三支）随 Agents/Flows tab 删除——同批删除的还有 store 的 per-panel
- * 选中状态与该三支读写函数（生产消费方全在退役面内）。
+ * 选中状态与该三支读写函数（生产消费方全在退役范围内）。
  *
  * 运行：cd packages/renderer && npx vitest run src/__tests__/stores/workflow.test.ts
  */

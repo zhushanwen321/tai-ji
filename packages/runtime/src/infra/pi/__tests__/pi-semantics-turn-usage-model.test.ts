@@ -123,7 +123,7 @@ describe.skipIf(SKIP_REASON !== '')(
       ).toBe(true)
       // 扩展事件形态（pi 1.0.0：_emitExtensionEvent 的 turn_end 分支改经 _dispatchTurnEndBoundary
       // → emitBoundary 下发，message 原样简写引用 + 新增 messageEntryId/toolResultEntryIds/outcome；
-      // listener 面 _emit 透传不变，此为扩展订阅面形态）
+      // listener 面 _emit 透传不变，此为扩展订阅侧形态）
       const ext = /const boundary = await this\._extensionRunner\.emitBoundary\(\{\s*\n\s*type: "turn_end",\s*\n\s*turnIndex: this\._turnIndex,\s*\n\s*message,\s*\n\s*toolResults,\s*\n\s*messageEntryId,\s*\n\s*toolResultEntryIds,\s*\n\s*outcome: this\._lastActivityOutcome,/.exec(agentSession)
       expect(ext, 'PS-25 漂移：turn_end 扩展 boundary（emitBoundary）不再原样引用 message——扩展字段字段被重写/裁剪').not.toBeNull()
     })

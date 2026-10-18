@@ -172,7 +172,7 @@ function makeLightRecord(over: Partial<SubagentRecord> & { id: string }): Subage
   };
 }
 
-describe("listAcceptedMemberRunIdsForSwitch（§7.4 全切转发面：三参透传 + id 映射）", () => {
+describe("listAcceptedMemberRunIdsForSwitch（§7.4 全量切走的转发：三参透传 + id 映射）", () => {
   it("collectRecordsByParentRunId 收到 (runId, MODEL_SWITCH_MEMBER_LIST_LIMIT, rootSessionFilter)，产物映射为 id 清单", () => {
     const members = [
       makeLightRecord({ id: "bg-1", parentRunId: "run-1" }),
@@ -231,7 +231,7 @@ function capsWith(setModel: EngineCapabilities["setModel"]): EngineCapabilities 
   };
 }
 
-/** setModel 转发通道替身（接口面窄化为 wiring 触达的 capabilities/setModel）。 */
+/** setModel 转发通道替身（接口侧窄化为 wiring 触达的 capabilities/setModel）。 */
 function fakeSwitchPort(
   setModel: EngineCapabilities["setModel"],
 ): SetModelCapableEnginePort {

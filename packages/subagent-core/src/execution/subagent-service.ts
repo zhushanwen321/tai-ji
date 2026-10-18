@@ -19,14 +19,14 @@ import { type ConcurrencyPool, DefaultConcurrencyPool } from "./assembly/concurr
 // service/run-orchestration.ts——壳内零消费。
 // [R4] ConversationContinuation 装配（continuations 队列 + continuationFor）已随
 // Continuation 协作范围迁 service/chat-rounds.ts（2026-09-13 design-code-sync 接线）——
-// 壳内零消费（装配面 = ChatRounds deps）。
+// 壳内零消费（装配侧 = ChatRounds deps）。
 // [R1] 转发 getter 返回类型标注（值构造已迁聚合，仅 type 引用）。
 import type { ExecutionNestingContext } from "./engine/common/nesting-guard.ts";
 // [R4] mergeRunSignals / executeOptionsToEngineTaskSpec / SLUG_MAX_LENGTH / journal 接线 /
 // capability 预检等消费已随 R4 域迁 service/run-orchestration.ts +
 // service/workflow-dispatch.ts——壳内零消费（机制注释随消费主体迁移）。
 import { setHostUiRequestEndpoint } from "./engine/host/host-ui-endpoint.ts";
-// [W6 宿主面下沉 → W3 纯镜像] killAll / killRecord / register 三函数经
+// [W6 宿主侧下沉 → W3 纯镜像] killAll / killRecord / register 三函数经
 // spawnedChildren 状态镜像公共部分（engine/host/spawned-children.ts）——子进程活在
 // 引擎进程内，本模块只做镜像记账（终止意图位），实际终止经协议 interact cancel/close。
 // [R4] killRecordChildWithEscalation / registerSpawnedChildForRecord 消费已随 run 域迁
@@ -45,7 +45,7 @@ export { notifyGateAllowsDelivery } from "./notify/notifier.ts";
 import { getSubagentRecordsDir, getSubagentSessionDir } from "./assembly/path-encoding.ts";
 import type { StatusFilter } from "./persistence/record-store.ts";
 import { RecordStore } from "./persistence/record-store.ts";
-// 注册表对账 sweep（initSession 挂点；绑定面在 registry-reconcile/sweep-binding.ts
+// 注册表对账 sweep（initSession 挂点；绑定侧在 registry-reconcile/sweep-binding.ts
 // ——变化原因独立）。
 import { runPendingReconcileSweepForService } from "./registry-reconcile/sweep-binding.ts";
 // [§1.4 修复批顺手修] SubagentStream 未使用导入删除（HEAD 既有 lint error，本文件
@@ -62,7 +62,7 @@ import { SET_MODEL_NOT_ACTIVE_CODE } from "@zhushanwen/subagent-engine-sdk";
 import { setModel } from "./service/model-switch.ts";
 import type { ModelSwitchTarget, SetModelReply } from "./service/model-switch.ts";
 // [subagent-model-switch §7.4 生产接线] run 级全切聚合（runAggregate 通道本体）+ 三
-// 通道生产实现（run 非终局判定 / 已受理成员清单 / 成员引擎转发面——本体在
+// 通道生产实现（run 非终局判定 / 已受理成员清单 / 成员到引擎的转发——本体在
 // model-switch-wiring.ts，壳装配段单行委托）。
 import { runModelSwitchAggregate } from "./service/run-model-switch-aggregate.ts";
 import {
@@ -93,9 +93,9 @@ import {
   SessionBaselines,
   type SubagentServiceSessionInit,
 } from "./service/session-baselines.ts";
-// [H3/R3] 域 #3/#4/#8/#10/#11/#13/#17/#18 聚合（record 读建面 + 终态迁移写侧）——壳经
+// [H3/R3] 域 #3/#4/#8/#10/#11/#13/#17/#18 聚合（record 读建两侧 + 终态迁移写侧）——壳经
 // 转发方法透传，对外签名零变化。[计划变更 D-R3-1] G1 ≤700 与八域体量（833 物理行）
-// 冲突，拆两文件（dev agent 停线报告、主 agent 核验追认）：record-access.ts（#3/#8/#10/#13 读建面）+ record-lifecycle.ts
+// 冲突，拆两文件（dev agent 停线报告、主 agent 核验追认）：record-access.ts（#3/#8/#10/#13 读建两侧）+ record-lifecycle.ts
 //（#4/#11/#17/#18 终态写侧，D5/H4 落点）；两聚合组间零互调零 import，壳分别装配。
 // [R4] ResolvedIdentity 的壳内消费（R3 过渡转发签名）已删——type import 随删转发清零。
 import { RecordAccess } from "./service/record-access.ts";
@@ -146,7 +146,7 @@ export type { PiLike } from "./notify/notify-host.ts";
 
 /** session_start 注入参数（session 级）。
  *  [R1] 接口本体已迁 service/session-baselines.ts（唯一消费者 SessionBaselines.initSession）；
- *  此处类型别名 re-export 保持既有导出符号面（外部 `from "./subagent-service.ts"` 消费零改动）。 */
+ *  此处类型别名 re-export 保持既有导出符号名侧（外部 `from "./subagent-service.ts"` 消费零改动）。 */
 export type { SubagentServiceSessionInit };
 
 
@@ -156,7 +156,7 @@ export type { SubagentServiceSessionInit };
 // 常量叶子文件——壳经顶部 import 消费（reconcile sweep 装配闭包的判据）。
 // [collect 退役] 原 SETTLED_RESCAN_LIMIT 常量（域 #5 sync 批 settled 有界重扫——
 // 唯一消费主体 armSettledRescan）已随批机制整体删除。
-// [R3] ResolvedIdentity 接口本体（resolveIdentity 产物）已随读建面迁
+// [R3] ResolvedIdentity 接口本体（resolveIdentity 产物）已随读建两侧迁
 // service/record-access.ts——壳经顶部 type import 消费（R4 领地 execute/executeAndAwait/
 // workflow 派发链的局部类型标注不变）。
 
@@ -175,7 +175,7 @@ export type { SubagentServiceSessionInit };
  * 第三宿主不经 session_start 流程时改用 `new SubagentService(init)` 参数注入直构
  * （原 createSubagentService 薄包装工厂已随 2026-09-13 barrel 收窄删除，全仓零消费）。
  *
- * @experimental execution 运行时面（设计 docs/design/subagent-core-sink-design.md（已删，git 可追溯） §3.3 D6）：
+ * @experimental execution 运行时侧（设计 docs/design/subagent-core-sink-design.md（已删，git 可追溯） §3.3 D6）：
  * 一个 minor 周期内允许签名微调，稳定后转常规 semver 承诺。
  */
 
@@ -295,7 +295,7 @@ export class SubagentService {
     // 空手而归）后才由 rebuildRunOverride 走 journal 折叠，闭包被调用、只是对 runId
     // 恒 miss 不产生错值。
     this.modelService.setOverrideRebuild((key) => this.store.getFullRecord(key)?.modelOverride);
-    // [R3] 域 #3/#8/#10/#13 聚合（record 读建面：孤儿恢复/查询派生视图/action 网关/身份解析
+    // [R3] 域 #3/#8/#10/#13 聚合（record 读建两侧：孤儿恢复/查询派生视图/action 网关/身份解析
     // 与 record 创建）。deps 全晚绑定闭包（构造期零求值——store/manifestStore/modelService
     // 为 #1 留壳共享依赖经 getter 现读同一实例；sessionRootId/sessionId/mainSessionFile/
     // execNesting 为 #2 基线字段运行时可变态现读壳 getter）；assertReady 经壳转发方法
@@ -494,7 +494,7 @@ export class SubagentService {
   };
 
   /** [D4 对话 action 面聚合] chat 域 message/close 消费方（壳 subagent-actions 经此访问；
-   *  纯委托同上。引擎不经此——引擎边界走协议 converse，不回调宿主编排面）。 */
+   *  纯委托同上。引擎不经此——引擎边界走协议 converse，不回调宿主编排侧）。 */
   readonly chatActions: SubagentChatActions = {
     getRecordForAction: (id, opts) => this.getRecordForAction(id, opts),
     closeSubagent: (record, force) => this.closeSubagent(record, force),
@@ -541,13 +541,13 @@ export class SubagentService {
   /**
    * [F6] 当前根 session id 的只读访问——引擎接线方（SAR 等）构造 RunContext 注入
    * `ctx.sessionRootId`（pi 引擎 relay 归属键 SESSION_ID 权威源）。initSession 后有值
-   * （根进程 = 本 session id；嵌套 = env 贯穿的真 ROOT）。[D3+] 壳终态保留面。
+   * （根进程 = 本 session id；嵌套 = env 贯穿的真 ROOT）。[D3+] 壳终态保留范围。
    */
   getSessionRootId(): string | null {
     return this.baselines.getSessionRootId();
   }
 
-  /** UI streaming sink 只读访问（workflow 域消费）。[D3+] 壳终态保留面。 */
+  /** UI streaming sink 只读访问（workflow 域消费）。[D3+] 壳终态保留范围。 */
   getStreamSink(): StreamSink | null { return this.baselines.getStreamSink(); }
 
   /** [D4 下沉] 就绪断言本体已迁聚合（late-bound getter 现读 pi/disposed，错误文案不变）；
@@ -557,19 +557,19 @@ export class SubagentService {
   }
 
   // [collect 退役] 原域 #5 SyncCollectDomain 聚合（sync 批缓冲/E9 dispose 转账/
-  // collectSync 配置读取/collectCoordinator 转发面，含 recoverSyncCollectBatch 与
+  // collectSync 配置读取/collectCoordinator 转发侧，含 recoverSyncCollectBatch 与
   // pendingSyncMemberCount/getCollectSyncDefault）已整体删除——批机制不再存在，
   // start 派发统一走 async 逐条通知路径。
 
   // ── 域 #3/#4/#8/#10/#11/#13/#17/#18 RecordAccess + RecordLifecycle 聚合转发（R3 抽取；
   // 本体 execution/service/record-access.ts + record-lifecycle.ts）──
 
-  /** [R3] 读建面聚合实例（域 #3 孤儿恢复 / #8 查询范围 / #10 action 网关 / #13 身份解析与
+  /** [R3] 读建两侧聚合实例（域 #3 孤儿恢复 / #8 查询范围 / #10 action 网关 / #13 身份解析与
    *  record 创建的唯一宿主）。deps 全晚绑定闭包（装配见构造器），壳经下方同名方法
    *  透传，对外签名零变化。[D-R3-1] 与 RecordLifecycle 拆分的计划变更见聚合文件头。 */
   private readonly recordAccess: RecordAccess;
 
-  /** [R3] 终态迁移写侧聚合实例（域 #4 回收面 / #11 close 三路 / #17 cancel / #18
+  /** [R3] 终态迁移写侧聚合实例（域 #4 回收侧 / #11 close 三路 / #17 cancel / #18
    *  finalize 簇的唯一宿主——D5「store 与终态迁移入口的唯一宿主」，H4 落点）。
    *  deps 全晚绑定闭包（装配见构造器；C-5 跨域汇聚经回调），壳经下方同名方法透传，
    *  对外签名零变化。 */
@@ -578,7 +578,7 @@ export class SubagentService {
   // ── 域 #3 孤儿/manifest 恢复 聚合转发（R3 抽取；本体 execution/service/record-access.ts）──
 
   /** [R3] 孤儿终态恢复编排入口（baselines deps.recoverOrphans 回调消费点——initSession
-   *  复活后编排，时序逐行等价随迁读建面）；壳纯转发，签名不变。 */
+   *  复活后编排，时序逐行等价随迁读建两侧）；壳纯转发，签名不变。 */
   private recoverOrphansIfRootProcess(): void {
     this.recordAccess.recoverOrphansIfRootProcess();
   }
@@ -602,7 +602,7 @@ export class SubagentService {
     return this.store.rebuildIndexes();
   }
 
-  // ── 域 #4 回收面 聚合转发（R3 抽取；本体 execution/service/record-lifecycle.ts）──
+  // ── 域 #4 回收侧 聚合转发（R3 抽取；本体 execution/service/record-lifecycle.ts）──
   // [不采用其余方案的理由 #3] 回收清单显式归 RecordLifecycle——disposeAllRecords/onParentFork/
   // onParentNew 编排性关闭随终态写侧迁移；壳只保留时序编排（检查点③：
   // dispose 调用顺序与现状逐行等价，E9 先于批量 archive）。promoteSessionFileFromEngine
@@ -610,7 +610,7 @@ export class SubagentService {
   // 消费 → 零转发（R2 打样模式 2）。
 
   /** SP-4: 关闭所有活跃 record（dispose 编排 parent-shutdown 路径 + D3 对外面）。
-   *  本体已迁 RecordLifecycle（三回收面 + manifest 补写 + 锚点提升时序逐行等价随迁）；
+   *  本体已迁 RecordLifecycle（三条回收路径 + manifest 补写 + 锚点提升时序逐行等价随迁）；
    *  壳纯转发，对外签名不变。 */
   disposeAllRecords(reason: ClosedReason): number {
     return this.recordLifecycle.disposeAllRecords(reason);
@@ -710,7 +710,7 @@ export class SubagentService {
   // ── 域 #17 取消 聚合转发（R3 抽取；本体 execution/service/record-lifecycle.ts）──
 
   /** 取消 background record（[U5] cancel = 中断当前轮 settle，语义见 RecordLifecycle）。
-   *  本体已迁 RecordLifecycle；壳纯转发，对外签名不变（D3 壳终态保留面）。 */
+   *  本体已迁 RecordLifecycle；壳纯转发，对外签名不变（D3 壳终态保留范围）。 */
   cancel(id: string): boolean {
     return this.recordLifecycle.cancel(id);
   }
@@ -966,9 +966,9 @@ export class SubagentService {
   // finalizeClosed 委托）随轮次活性监督器清退删除——sweep 实装只消费
   // getStore/getPi/getMainSessionFile 三通道，壳侧零剩余消费。
 
-  /** [D4 聚合连带] 原引擎服务面适配器（piEngineServiceAdapter + asEngineService getter）
+  /** [D4 聚合连带] 原引擎服务侧适配器（piEngineServiceAdapter + asEngineService getter）
    *  已删除：SAR 构造 resolveHostPiEnginePort 的 getService 兼容位消费随 W8 收尾消失，
-   *  全仓零调用（2026-09 死代码清扫）。引擎经协议 converse，不再回调宿主编排面。 */
+   *  全仓零调用（2026-09 死代码清扫）。引擎经协议 converse，不再回调宿主编排侧。 */
 
   // ── 壳生命周期编排与断言（dispose 时序留壳 = R3 检查点③；D4 断言范围）（R0 重排）──
 
@@ -999,7 +999,7 @@ export class SubagentService {
     // abortRunningControllers 需要在 disposeAllRecords archive 之前执行（archive 后 store 找不到 record）。
     this.store.abortRunningControllers();
     markAllSpawnedChildrenDead();
-    // [H1 U2/U6] Continuation 实例全量清理（路由注销面已随 interact 面退役）——
+    // [H1 U2/U6] Continuation 实例全量清理（路由注销侧已随 interact 面退役）——
     // dispose 后容器不应再收 message。
     // [R4 / C-4 兑现 / 2026-09-13 接线] 原直调 this.continuations.clear() 的跨聚合写边
     // 收敛为聚合显式接口（字段所有权随 Continuation 协作范围迁 ChatRounds）。

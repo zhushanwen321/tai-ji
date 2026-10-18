@@ -80,7 +80,7 @@ describe('SessionRecords workflowUpdate 发射链路 — 信号发出时数据�
     rmSync(tempDir, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 })
   })
 
-  /** v2 workflow 注册条目（events-projection scanWorkflowV2Entry 的键检查最小面 + 常用字段）。 */
+  /** v2 workflow 注册条目（events-projection scanWorkflowV2Entry 的键检查最小子集 + 常用字段）。 */
   function workflowRegisteredEntry(runId: string): Record<string, unknown> {
     return {
       type: 'custom',

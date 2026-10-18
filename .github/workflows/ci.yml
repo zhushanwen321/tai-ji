@@ -119,7 +119,7 @@ jobs:
 
   # SDK 类型同步 job 已删除（D28 方向反转，2026-09-05）：plugin-sdk/src/types.ts
   # 现为契约 SSOT，runtime 经 plugin-types 薄壳 re-export 消费——不存在「两份
-  # 文件需保持同步」的漂移面，sync-types.sh 生成方向已不存在。
+  # 文件需保持同步」的漂移风险，sync-types.sh 生成方向已不存在。
 
   # Test 拆分为 4 个并行 job（原串行 214s → 关键路径 ~120s，省 ~95s）。
   # runner 分钟数总量不变（ubuntu 充足），build gate 语义保持（任一失败不启动 build）。
@@ -331,7 +331,7 @@ jobs:
       # 产物污染，抽取自 scripts/render-sampling/decisions.mjs，jsdom 直测浏览器侧
       # 同一函数体，不依赖 staged 产物）。
       # 领域类型路径单源检查测试同批追加（D2：检查本体已接线 pre-commit 与上方 CI step
-      # 而自测漏登记则 CI 零执行面，tmpdir 自建树 × --root 注入直测检查本体，
+      # 而自测漏登记则 CI 零执行覆盖，tmpdir 自建树 × --root 注入直测检查本体，
       # 不依赖 staged 产物）。
       # chat-html-support u1/u-artifacts 两条对拍检查测试同批追加（R1 一致性审查：检查本体 +
       # pre-commit 触发段已交付而检查自身无回归测试、--self-test 无自动化挂载点——比较逻辑

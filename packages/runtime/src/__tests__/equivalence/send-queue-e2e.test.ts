@@ -135,7 +135,7 @@ describe.skipIf(!FAUX_PI_READY)(`send queue e2e faux pi${FAUX_PI_READY ? '' : `�
       const view = makeView(targetSessionId!, targetFx.sessionDir, 'sd1-target')
 
       // settled 多播 + 事件泵（组合根 agentSettledListeners 的事件泵形态）：pi 事件流 →
-      // ①settled 边沿（对账触发点 + 持有等待者多源唤醒）②client.onEvent 订阅者转发面
+      // ①settled 边沿（对账触发点 + 持有等待者多源唤醒）②client.onEvent 订阅者转发侧
       // （送达回执 message_end(user) / queue_update 快照 → registry watchClient）。
       // 50ms 轮询与 fixture waitForEvent 的 EVENT_POLL_INTERVAL_MS 同构（事件边沿驱动）。
       const settledCbs: Array<(sid: string) => void> = []
@@ -155,7 +155,7 @@ describe.skipIf(!FAUX_PI_READY)(`send queue e2e faux pi${FAUX_PI_READY ? '' : `�
 
       // registry：真实实现（v3 受理即出站装配）；ensureActive 返回目标 pi 的最小 client
       // adapter（prompt → pi stdin JSONL，streamingBehavior 透传——pi preflight 受理即回；
-      // onEvent → 事件泵转发面，激活 message_end 回执与 queue_update 快照消费）
+      // onEvent → 事件泵转发侧，激活 message_end 回执与 queue_update 快照消费）
       const registry = createSessionDeliveryRegistry({
         getSession: (sid) => (sid === targetSessionId ? view : undefined),
         ensureActive: async (sid: string) => {

@@ -183,7 +183,7 @@ describe('useCompletionNotify', () => {
   })
 })
 
-describe('[M4-a] P-invisible·通知面：btw 线完成不进全局通知（D9③ 派生视图收窄）', () => {
+describe('[M4-a] P-invisible·通知侧：btw 线完成不进全局通知（D9③ 派生视图收窄）', () => {
   it('btw vid 完成 → 无提示音 + 不落 sidebar 未读标记；主会话同输入对照照常', () => {
     handleCompletion('btw:line-notify-1', 'stop', 'other-sid')
     expect(sound.playSuccess).not.toHaveBeenCalled()

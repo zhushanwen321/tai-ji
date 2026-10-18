@@ -4,7 +4,7 @@
 //
 // 契约（impl-plan §2.4）：
 //   `engines: {"<id>": {command, args, config, cwd, enabled}}`
-//   - 无 `env` 键（v6 已删 extras 层——引擎 env 放行面归 manifest envPrefixes，L3 不重开）；
+//   - 无 `env` 键（v6 已删 extras 层——引擎 env 放行范围归 manifest envPrefixes，L3 不重开）；
 //   - `config` 经 initialize.engineConfig 透传（引擎不实现消费即死键，不校验内容）；
 //   - `enabled: false` → 该引擎不装载（A12⑤：不进清单 + 派发报错含恢复指引）。
 //

@@ -596,7 +596,7 @@ describe('HandoffService', () => {
       // handoff 现状不传 presetId：不新增 preset 继承档（否则首次继承源 preset 的
       // tools/noSkills 全套限制——夹带行为变更）。静态检查见 binding-registry-hydrate Part 2。
       expect(opts).not.toHaveProperty('presetId')
-      // 防顺手继承漂移（CREATE_DERIVED_CALLERS 承诺）运行时面
+      // 防顺手继承漂移（CREATE_DERIVED_CALLERS 承诺）运行时侧
       expect(opts).not.toHaveProperty('spawnSource')
       expect(opts).not.toHaveProperty('parentAgentSessionId')
     })

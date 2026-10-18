@@ -241,7 +241,7 @@ describe('equivalence: relay live ≡ reload（tee entry 帧 × getSubagentHisto
     ])
     for (const f of chunkFrames) {
       expect(f.msg.payload.recordId).toBe(RECORD_ID)
-      // payload.sessionId = 虚拟分区 id（chunk 归属面）；publish 路由 key = 主 sid（bus 分区面）
+      // payload.sessionId = 虚拟分区 id（chunk 归属面）；publish 路由 key = 主 sid（bus 分区侧）
       expect(f.msg.payload.sessionId).toBe(VIRTUAL_ID)
       expect(f.sessionId).toBe(MAIN_SID)
     }

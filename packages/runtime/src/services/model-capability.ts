@@ -63,7 +63,7 @@ export function computeSupportedLevels(model: ModelCapabilityInput): string[] {
 }
 
 /**
- * ProviderInfo.models 标注器（挂入 ModelService，U5 服务面）。
+ * ProviderInfo.models 标注器（挂入 ModelService，U5 服务侧）。
  * 无状态直调：逐模型现调 computeSupportedLevels（微秒级纯函数，见文件头说明）。
  */
 // @data-owner #20（data-source-registry.md）：supportedLevels 唯一写入口 = 本纯函数
@@ -136,7 +136,7 @@ export function detectCapabilityDrift(
 }
 
 /**
- * 引擎能力探测：IPiEngine port 尚未声明 getAvailableModels（port 扩面归后续单元），
+ * 引擎能力探测：IPiEngine port 尚未声明 getAvailableModels（port 扩大范围归后续单元），
  * 运行时结构探测——旧引擎 / mock 不带该方法时对账降级跳过而非崩溃。
  */
 type ModelsSource = { getAvailableModels(): Promise<AvailableModelSnapshot[]> }

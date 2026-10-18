@@ -226,7 +226,7 @@ const props = defineProps<{
   shellInputRef?: Readonly<Ref<ShellInputInstance | null>>
 }>()
 
-/** select / select-and-send 共用 payload 字段面（五路归一；字段语义见 useCommandPopoverTrigger 的 CommandSelectPayload） */
+/** select / select-and-send 共用 payload 字段侧（五路归一；字段语义见 useCommandPopoverTrigger 的 CommandSelectPayload） */
 interface CommandSelectEmit {
   type: CmdType
   name: string

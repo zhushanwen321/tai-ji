@@ -157,7 +157,7 @@ export class ExternalFileImportSource implements SessionImportSource {
 
     // 2. 文件名标记校验（r2-S1）：导入落地后会被自家扫描过滤器挡成 limbo，前置拒绝。
     //    RT-3#10：走 isTmpResidueFileName 精确后缀形态判定（与扫描过滤/清扫同一谓词，
-    //    双副本漂移面消灭）——旧 includes 子串判定会误拒 session id 中段含标记串的真实文件。
+    //    双副本漂移风险消灭）——旧 includes 子串判定会误拒 session id 中段含标记串的真实文件。
     if (isTmpResidueFileName(sourceName)) {
       throw new ImportServiceError('import_marker_filename', `文件名为临时残留形态（.tmp-migrate-/.tmp-import- 后缀）：${sourceName}`)
     }

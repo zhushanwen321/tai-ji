@@ -126,7 +126,7 @@ function makeRun(overrides: Partial<WorkflowRunRecord> = {}): WorkflowRunRecord 
   }
 }
 
-/** 事件流样本（含 truncatedFields 标注行——D4 截断协议的展示面验证数据；beta = 纯脚本 phase） */
+/** 事件流样本（含 truncatedFields 标注行——D4 截断协议的展示侧验证数据；beta = 纯脚本 phase） */
 function eventsReply(): {
   runId: string
   events: Array<Record<string, unknown> & { type: string; ts: number }>
@@ -264,7 +264,7 @@ describe('WorkflowLivePanel · workflow tab 三子页（使用者黑盒 + 观察
     expect(wrapper.findAll('[data-testid="l2-tab-agent\\:3"]')).toHaveLength(0) // 无 agent tab
   })
 
-  it('事件流子页：行渲染 + ✂ truncatedFields 标注（D4 截断协议展示面，含 worker-log entryMessage 行）', async () => {
+  it('事件流子页：行渲染 + ✂ truncatedFields 标注（D4 截断协议展示侧，含 worker-log entryMessage 行）', async () => {
     const wrapper = await mountPanel()
     await wrapper.find('[data-testid="wf-viz-subpage-events"]').trigger('click')
     await flushPromises()

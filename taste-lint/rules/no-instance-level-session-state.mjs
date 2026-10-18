@@ -7,7 +7,7 @@
  * 生命周期，切 session 组件不卸载必然跨 session 污染——结构上无法自证安全（设计文档
  * context-consistency-lint-rule §1），本规则把该形态从盲区变成 pre-commit 红灯。
  *
- * 触发 = 三信号 AND（缺一不报，压误报面到最小，见设计文档 §2）：
+ * 触发 = 三信号 AND（缺一不报，压误报风险到最小，见设计文档 §2）：
  * - S1 defineProps 类型/对象字面量含 sessionId（组件按 session 定向）；
  * - S2 <script setup> 顶层调用 useSessionEvents（按名匹配，不追 import 源——防 alias
  *   绕过的成本高于收益）；
@@ -34,7 +34,7 @@ const REF_INIT_FNS = new Set(['ref', 'shallowRef'])
 const FN_TYPES = new Set(['ArrowFunctionExpression', 'FunctionExpression'])
 
 /** 「最近包含函数」的边界集合——命名 helper（FunctionDeclaration）算独立函数边界：其体内
- * 的赋值不在 handler 字面函数体内，保守放行（helper 传递形态留给后续收紧，不扩误报面） */
+ * 的赋值不在 handler 字面函数体内，保守放行（helper 传递形态留给后续收紧，不扩大误报风险） */
 const FN_BOUNDARY_TYPES = new Set([...FN_TYPES, 'FunctionDeclaration'])
 
 /**

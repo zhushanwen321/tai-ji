@@ -1,8 +1,8 @@
 // src/execution/worktree/worktree-reconcile.ts
 //
-// worktree 物理面 ↔ 注册表双向对账（D5b）——自 worktree-manager.ts 按变化原因拆出
+// worktree 物理（磁盘）侧 ↔ 注册表双向对账（D5b）——自 worktree-manager.ts 按变化原因拆出
 //（[U5] worktree-manager 收纳重建链后超 max-lines 限；对账是独立子系统：注册表与
-// tmpdir checkout / 分支物理面的周期性收敛，与创建/清理/重建的生命周期动作正交）。
+// tmpdir checkout / 分支物理（磁盘）侧的周期性收敛，与创建/清理/重建的生命周期动作正交）。
 //
 // 对账方向：
 //   方向一（注册有 → 物理无）：条目的分支与 checkout 都不存在 → 移除幻影条目；
@@ -10,7 +10,7 @@
 //   跳过（PS-12 老化升级）。
 //
 // 判活信号 = <agentDir>/subagents/<enc>/sessions/*.alive 中存活 pid（session-runner
-// first header 写入，崩溃残留不删）——「死活判据」的物理面来源。
+// first header 写入，崩溃残留不删）——「死活判据」的物理（磁盘）侧来源。
 //
 // 失败语义：对账失败仅日志不抛（旁路维护路径不阻断 session_start / scan）。
 
@@ -41,7 +41,7 @@ const BRANCH_PREFIX = "pi-sub-";
 export const RECONCILE_SKIP_ESCALATION_CYCLES = 4;
 
 /**
- * 物理面发现的 worktree（tmpdir checkout 目录存在，无论注册表是否登记）。
+ * 物理（磁盘）侧发现的 worktree（tmpdir checkout 目录存在，无论注册表是否登记）。
  * repo 从 checkout/.git 指针文件推导（普通 repo 与 bare+worktree 均覆盖）；
  * 推导失败（.git 文件缺失/损坏）时 undefined——checkout 视为无主残留。
  */
@@ -83,7 +83,7 @@ export class WorktreeReconciler {
 
   /** 双向对账单轮（manager.scan 周期调用）。全流程幂等、失败仅日志不抛。 */
   async scanOnce(): Promise<void> {
-    // 物理面发现失败（tmpdir 不可读等）→ 放弃本轮对账（失败仅日志，不阻断）
+    // 物理（磁盘）侧发现失败（tmpdir 不可读等）→ 放弃本轮对账（失败仅日志，不阻断）
     const physical = await this.discoverPhysicalWorktrees();
     const registered = this.deps.registry.load();
     const registeredBranches = new Set(registered.map((e) => e.branch));
@@ -246,7 +246,7 @@ export class WorktreeReconciler {
   }
 
   /**
-   * 物理面发现：扫描 <tmpdir>/pi-subagents/<enc>/<pi-sub-*> checkout 目录。
+   * 物理（磁盘）侧发现：扫描 <tmpdir>/pi-subagents/<enc>/<pi-sub-*> checkout 目录。
    * repo 从 checkout/.git 指针文件推导（`gitdir: <repo>/.git/worktrees/<branch>`，
    * 普通 repo 与 bare+worktree（.bare/worktrees/...）统一取 worktrees 段上两级）；
    * 推导失败（残缺 checkout）repo=undefined，由调用方按无主残留处置。
@@ -259,7 +259,7 @@ export class WorktreeReconciler {
         .filter((d) => d.isDirectory())
         .map((d) => d.name);
     } catch {
-      return []; // tmpdir 根不存在（从未创建过 worktree）→ 空物理面
+      return []; // tmpdir 根不存在（从未创建过 worktree）→ 物理（磁盘）侧为空
     }
 
     const result: PhysicalWorktree[] = [];
@@ -312,7 +312,7 @@ export class WorktreeReconciler {
   /**
    * 收集 enc 段的活 pid：<agentDir>/subagents/<enc>/sessions/*.alive 中
    * readAliveMarker 解析成功且 isProcessAlive 的 pid（去重）。
-   * 崩溃残留的 .alive（pid 已死）天然过滤掉——这正是「死活判据」的物理面来源。
+   * 崩溃残留的 .alive（pid 已死）天然过滤掉——这正是「死活判据」的物理（磁盘）侧来源。
    */
   private collectAlivePids(enc: string): number[] {
     const sessionsDir = path.join(this.deps.agentDir, "subagents", enc, "sessions");

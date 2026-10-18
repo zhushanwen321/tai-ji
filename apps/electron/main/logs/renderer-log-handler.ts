@@ -69,7 +69,7 @@ let registered = false
 // ── 注册 ───────────────────────────────────────────────────────────
 
 /**
- * handler 依赖的 invoke event 结构最小面（sender.id + senderFrame.url）。
+ * handler 依赖的 invoke event 结构最小子集（sender.id + senderFrame.url）。
  * 不直接用 IpcMainInvokeEvent 签名：handler 对 event 只消费这两个字段，收窄结构让
  * 测试桩无需伪造 frameId/processId 等无关字段（结构类型，IpcMainInvokeEvent 可赋）。
  */
@@ -196,7 +196,7 @@ function sweepIdleEntries(now: number): void {
 // ── payload 运行时校验（不可信输入）────────────────────────────────
 
 /**
- * 合法捕获面（RendererErrorSource 联合）：三件套（D2-①）+
+ * 合法捕获范围（RendererErrorSource 联合）：三件套（D2-①）+
  * 'inbound-frame-dropped' 结构化标记（crash-forensics D8 入站超界帧丢弃上报）+
  * 'runtime-start-failed'（RD-3#2：runtime 启动失败真因，连接屏显示 + 登记清单留痕）。
  */

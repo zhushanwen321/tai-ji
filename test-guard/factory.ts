@@ -26,7 +26,7 @@
  * 保留终端输出。此前靠 44 份 config 逐字手抄落地，现由本工厂单点注入（CLI 显式传
  * --reporter 时仍会覆盖本默认值，临时诊断用法不受影响）。
  * `include` **不做**默认：vitest 自带默认 glob 比 `src/__tests__/**` 宽，给默认会静默
- * 缩小未声明 include 的包的扫描范围，各包必须显式声明自己的收集面。
+ * 缩小未声明 include 的包的扫描范围，各包必须显式声明自己的收集范围。
  */
 import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'

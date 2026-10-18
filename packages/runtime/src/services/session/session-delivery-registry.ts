@@ -79,7 +79,7 @@ export interface SessionDeliveryDeps {
   /** MessageBus 当前值（skillNotice 广播 + 投递失败 message.error 用） */
   getMessageBus(): IMessageBus | null
   /**
-   * 磁盘 outbox store 装配（§3.8 波 4，每 session 一个实例）：返回 undefined = 无耐久面
+   * 磁盘 outbox store 装配（§3.8 波 4，每 session 一个实例）：返回 undefined = 无持久化存储的一侧
    * （v2 行为，既有测试装配缺省零变化）。生产 = 组合根传 createDiskDeliveryStoreForSession；
    * 测试可注入内存替身或 undefined。
    */
@@ -467,7 +467,7 @@ interface RuntimeState {
    */
   piQueueTexts?: string[]
   /**
-   * 磁盘 outbox store（§3.8 波 4；undefined = 无耐久面，v2 行为）：内核 config.store 与
+   * 磁盘 outbox store（§3.8 波 4；undefined = 无持久化存储的一侧，v2 行为）：内核 config.store 与
    * 重放/补记共用同一实例（registry 是构造方，持引用合法——内核不暴露 store 读取口）。
    */
   store?: DeliveryStore
@@ -529,7 +529,7 @@ export function createSessionDeliveryRegistry(
     return deps.getSession(sessionId)
   }
 
-  /** pi 队列级原语（PS-65；IPiEngine 端口未收编 —— 见交付说明 deviations，按结构化窄面 + guard 承接）。 */
+  /** pi 队列级原语（PS-65；IPiEngine 端口未收编 —— 见交付说明 deviations，按结构化窄接口 + guard 承接）。 */
   function queuePrimitive(client: IPiEngine): { clearQueue(): Promise<{ steering: string[]; followUp: string[] }> } | null {
     const candidate = client as Partial<{ clearQueue(): Promise<{ steering: string[]; followUp: string[] }> }>
     return typeof candidate.clearQueue === 'function'
@@ -578,7 +578,7 @@ export function createSessionDeliveryRegistry(
     return SKILL_MARKER_OPEN_RE.test(content)
   }
 
-  // ── 出站交接（port.send 的实现面） ────────────────────────────────────────
+  // ── 出站交接（port.send 的实现侧） ────────────────────────────────────────
 
   /** 合批拆分产物单段：段全文（含裸标记，若有）+ 命中的内核条目 id（agent 通路段无 id）。 */
   interface ComposedPart {
@@ -690,7 +690,7 @@ export function createSessionDeliveryRegistry(
   /**
    * 三副作用置位（prompt 受理成功后，D-18 契约——内核状态机防回退，迟到写无害；§3.4+ 表，V8 验收锁定，禁止遗漏第三项）。
    * occupancy = false（D1② handled 终局专用）：命令接管后输入已被消费、无回合要跑——
-   * 记账面（lastActiveAt / workspace）照常，occupancy 不再置 dispatching（回落后的 idle
+   * 记账侧（lastActiveAt / workspace）照常，occupancy 不再置 dispatching（回落后的 idle
    * 是终态事实，不得打回）。
    */
   function markSessionActive(sessionId: string, occupancy = true): void {
@@ -982,7 +982,7 @@ export function createSessionDeliveryRegistry(
       void refreshCommandList(sessionId, state)
     }
     if (typeof client.onEvent !== 'function') {
-      // 装配面缺失（部分测试替身）：无事件流 → 送达回执退化为对账器 transcript 扫描，
+      // 装配侧缺失（部分测试替身）：无事件流 → 送达回执退化为对账器 transcript 扫描，
       // 投递本身照常（不因此失败）
       warn('client event stream unavailable — receipts degrade to reconcile-only, sid=', sessionId)
       return
@@ -1429,7 +1429,7 @@ export function createSessionDeliveryRegistry(
     return full.tombstones.some((t) => t.id === id && t.state === 'cancelled')
   }
 
-  /** 投递终态失败（受理失败 / 重试耗尽）：日志 + 用户可见面（老协议无帧消费时的兜底通道）。 */
+  /** 投递终态失败（受理失败 / 重试耗尽）：日志 + 用户可见部分（老协议无帧消费时的兜底通道）。 */
   function onDeliveryFailure(sessionId: string, rt: SessionRuntime, id: string, e: unknown): void {
     const message = e instanceof Error ? e.message : String(e)
     if (isUserReclaimRejection(rt, id, e)) {
@@ -1460,7 +1460,7 @@ export function createSessionDeliveryRegistry(
   // ── 运行时装配 ──────────────────────────────────────────────────────────
 
   /**
-   * store 的 segments 补记扩展收窄（结构化窄面 + guard，同 queuePrimitive 形态）：
+   * store 的 segments 补记扩展收窄（结构化窄接口 + guard，同 queuePrimitive 形态）：
    * DiskDeliveryStore.attachSegments 是实现侧扩展（非 DeliveryStore 端口成员），内核不
    * 感知；registry 经本收窄探测，无扩展的 store（内存替身）返回 undefined = 零补记。
    */
@@ -1527,7 +1527,7 @@ export function createSessionDeliveryRegistry(
   }
 
   function buildRuntime(sessionId: string): SessionRuntime {
-    // 磁盘 outbox store（§3.8 波 4）：deps 缺席 = undefined = 无耐久面（v2 行为，既有测试
+    // 磁盘 outbox store（§3.8 波 4）：deps 缺席 = undefined = 无持久化存储的一侧（v2 行为，既有测试
     // 装配零变化）；生产 = 组合根传 createDiskDeliveryStoreForSession。内核构造期经
     // store.loadTerminalIds 播种判重索引（磁盘终局行跨重启判重）。
     const store = deps.createDeliveryStore?.(sessionId)
@@ -1554,7 +1554,7 @@ export function createSessionDeliveryRegistry(
       intent: 'interrupt-at-turn-boundary',
       // v3 受理即出站（§3.6 / §3.5.6）：忙闲门禁与合批窗口旁路——pi 唯一队列忙时入队
       // 不拒（agent-session.js:1515-1524），受理即 prompt(streamingBehavior) 出站；
-      // compaction 持有在 port.send 实现面（promptAwaitingCompaction）保留。
+      // compaction 持有在 port.send 实现侧（promptAwaitingCompaction）保留。
       dispatchMode: 'on-accept',
       // 磁盘 outbox（§3.8 波 4）：内核行为契约 = 受理前 persist / 终局 ack / forget 失败
       // discard；store 缺席时字段不带（v2 逐字节等价）。

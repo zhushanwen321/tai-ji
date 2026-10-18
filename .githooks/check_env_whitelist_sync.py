@@ -217,7 +217,7 @@ def check_env_literal_mirrors() -> list[str]:
     else:
         errors.append('[ERROR] SSOT 未定义 ENGINE_ENV NODE 键，规则 3 A3 无法锚定')
 
-    # A6 引擎 roots 发现 env 镜像（subagent-core 依赖面无 shared，裸字面量镜像
+    # A6 引擎 roots 发现 env 镜像（subagent-core 依赖范围无 shared，裸字面量镜像
     # SSOT ENGINE_LAUNCH_ENV_KEYS.ROOTS——单侧改名静默致打包态引擎不可见）
     m_roots = re.search(r"ROOTS:\s*'([^']+)'", re.sub(r'//[^\n]*', '', ssot_text))
     if m_roots:
@@ -246,7 +246,7 @@ def check_env_literal_mirrors() -> list[str]:
 
     # A8 模式回落 env 名 extension 镜像（shared PRESET_FALLBACK_ENV_KEYS 为权威；
     # system-prompt-trace 独立发布体系不依赖 @taiji/shared，types.ts 字面量镜像——
-    # 单侧改名即 runtime 注入 ↔ extension 读取静默断链，presetFallback 披露面消失；
+    # 单侧改名即 runtime 注入 ↔ extension 读取静默断链，presetFallback 的披露消失；
     # deny 面同步断言：ENGINE_ENV_DENY_LIST 两成员不回退，引擎出站剥除失效同害）
     m_preset = re.search(
         r"PRESET_FALLBACK_ENV_KEYS\s*=\s*\{(.*?)\}",

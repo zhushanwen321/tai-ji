@@ -275,7 +275,7 @@ describe("[U4 / §3.2.3] 万物可续矩阵：closedReason × message + 唯一�
     expect(r.response.sourceSessionFile).toBe(file);
     await vi.waitFor(() => expect(fake.runs.length).toBe(1));
     // 锚不可解析 → 引导 message reopen 的检查 5 文案，已在
-    // subagent-actions-core.test.ts 单元面锁定（集成面无独立构造价值：jsonl 删除后
+    // subagent-actions-core.test.ts 单元面锁定（集成测试侧无独立构造价值：jsonl 删除后
     // record 随磁盘源消失，检查 2 先于检查 5 命中）。
   });
 });

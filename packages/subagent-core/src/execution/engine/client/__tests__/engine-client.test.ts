@@ -2,7 +2,7 @@
 //
 // 覆盖（impl-plan §2.2 / 验收 A6①⑦ / A8①④ / §7.2 R9-2/R9-2b/R9-3）：
 //   帧往返 / initialize 握手与 pidfile 写入 / 反向通知路由（含镜像落项）/
-//   host/askUser ack 两阶段 / 超时域二分（数据范围 10s 判死 vs 交互面不计时，fake timers）/
+//   host/askUser ack 两阶段 / 超时域二分（数据范围 10s 判死 vs 交互侧不计时，fake timers）/
 //   崩溃重建 3 次退避 + 不可用 / 版本协商 mismatch / killAll 按进程组终止（POSIX 真进程）/ dispose。
 // stdin fd 不外泄（R9-4②）由 SDK spawn 单测兜底，core 侧不重测。
 
@@ -326,7 +326,7 @@ describe("host/askUser ack 两阶段（R9-2）", () => {
       ],
     });
     // [D3] 构造后经槽登记（生产 = SubagentService init/initSession 写点）——reverse-router
-    // 消费时现读，构造期无固化面
+    // 消费时现读，构造期不固化值的情形
     setHostUiRequestEndpoint(async (req) => {
       expect(req.method).toBe("select");
       return { value: "answer-A" };
@@ -421,7 +421,7 @@ describe("超时域二分（fake timers，R9-2 / R9-2b）", () => {
     await cleanup();
   }, 20_000);
 
-  it("人机交互面 ack 后永不计时：handler 挂 60s 不判引擎故障（R9-2 负向 + ADR-0047）", async () => {
+  it("人机交互通道 ack 后永不计时：handler 挂 60s 不判引擎故障（R9-2 负向 + ADR-0047）", async () => {
     vi.useFakeTimers();
     const { client, cleanup } = makeClient({
       args: [

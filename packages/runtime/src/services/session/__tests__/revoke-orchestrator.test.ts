@@ -583,7 +583,7 @@ describe('派生态失效时序（⑥ 树回退校验通过后触发——信令
 
     // pi 真实时序模拟（harness 的 prompt 副作用按 navigateTree 语义切树，getEntries 返回值
     // 随之切换）：逐次记录 getEntries 返回的 leafId——信令前（③⑤ 定位/校验读）= 撤回前
-    // leaf，信令后（⑥ 校验读）= 撤回后 leaf，钉住「无参 getEntries 的取数时序」缺陷核心面。
+    // leaf，信令后（⑥ 校验读）= 撤回后 leaf，钉住「无参 getEntries 的取数时序」缺陷核心部分。
     const getEntriesLeafIds: Array<string | null> = []
     const baseGetEntries = h.client.getEntries.getMockImplementation()!
     h.client.getEntries.mockImplementation(async () => {

@@ -11,7 +11,7 @@
 // 数据范围），失败按辅助功能降级纪律处置（读侧 warn 降级不抛断链；裁决面返回结构化
 // 错误 EngineSdkError）。
 //
-// 数据范围边界（设计内知情取舍，决策 11）：清单 = pi 数据目录配置面可见的模型
+// 数据范围边界（设计内知情取舍，决策 11）：清单 = pi 数据目录配置侧可见的模型
 // （models.json 静态声明 ∪ models-store.json 远程 catalog 缓存），不含 pi 内置
 // provider 的编译期模型定义（那需要 import pi 包本体，被方案 B 明文排除）。
 //
@@ -130,8 +130,8 @@ function parseProviderModels(source: string, providerId: string, provider: unkno
  * 「models with configured credentials」与 zcode listModels 语义）。
  *
  * 返回三态（消费方 model-prompt 的 null/[] 语义分野）：
- *   null = 无枚举面（models.json 与 models-store.json 都不存在）；
- *   []   = 有配置面但无凭据模型（buildEmptyModelsHint 的「无凭据模型」语义）；
+ *   null = 无枚举情形（models.json 与 models-store.json 都不存在）；
+ *   []   = 有配置侧但无凭据模型（buildEmptyModelsHint 的「无凭据模型」语义）；
  *   非空  = 清单。文件损坏/形态坏按源降级（warn 留痕，辅助功能不抛断链）。
  */
 export function listPiModels(agentDir: string): PiModelEntry[] | null {
@@ -185,7 +185,7 @@ export function listPiModels(agentDir: string): PiModelEntry[] | null {
  *   defaultModel 拼全 ref（pi /model 选择持久化的宿主级缺省）；均未配置 =
  *   engine_model_unknown（pi 无编译期缺省模型语义——运行期「继承主 agent」，无
  *   静态 canonical 形态可答）。
- * - 有值 ref = 清单 id 全等匹配（命中 → canonicalRef = 全 ref）；清单无枚举面或
+ * - 有值 ref = 清单 id 全等匹配（命中 → canonicalRef = 全 ref）；清单无枚举情形或
  *   未命中 → engine_model_unknown（诊断范围如实裁决，不做模糊匹配——对齐 RemoteEngine
  *   matchCatalogEntry 的零宽容口径）。
  */

@@ -138,7 +138,7 @@ describe.skipIf(!FAUX_PI_READY)(`delivery compaction window e2e faux pi${FAUX_PI
       const view = makeView(targetSessionId!, targetFx.sessionDir, 'cw-target')
 
       // 事件泵：pi 事件流 → ①settled 边沿（内核 flush 触发点）②client.onEvent 订阅者
-      // （送达回执 message_end(user) 的转发面——pi-fixture 是拉取式，故轮询转发）。
+      // （送达回执 message_end(user) 的转发侧——pi-fixture 是拉取式，故轮询转发）。
       // 50ms 轮询与 fixture waitForEvent 的 EVENT_POLL_INTERVAL_MS 同构（事件边沿驱动）。
       const settledCbs: Array<(sid: string) => void> = []
       const clientEventSubs = new Set<(event: unknown) => void>()

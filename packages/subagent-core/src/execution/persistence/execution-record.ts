@@ -507,7 +507,7 @@ export function getEventLog(record: ExecutionRecord): AgentEventLogEntry[] {
 /**
  * eventLog 派生本体（单源）——活态路径（getEventLog）与磁盘重建路径
  * （session-reconstructor 的 ReconstructedRecord）共用同一实现，此前两处各持
- * 副本、靠注释互指「镜像」（漂移面已删）。
+ * 副本、靠注释互指「镜像」（漂移风险已删）。
  *
  * 形参取最小结构（turns + lastError + startedAt）而非 ExecutionRecord：重建路径
  * 产出的不是 ExecutionRecord，放宽形参即可直接复用（与 getDisplayItems 同款手法）。
@@ -691,7 +691,7 @@ export function getTotalUsage(record: ExecutionRecord): AgentUsageTotal | undefi
 }
 
 // ============================================================
-// 意图原语（record 两态机内存面：CAS 收尾 / 冻结 / 回边）
+// 意图原语（record 两态机内存侧：CAS 收尾 / 冻结 / 回边）
 // ============================================================
 
 /**
@@ -727,7 +727,7 @@ export function trySettleLegacyClosed(
  * status 状态机的 CAS 互斥锁（wake 方向：idle → running，U2 新增）。仅当
  * `record.status === "idle"` 时翻回 running 并返回 true；running（一轮已在途）/
  * 其他形态一律拒绝。与 trySettleLegacyClosed（settle 方向）共同构成两态状态机的
- * running↔idle 迁移面，非法迁移（对 running 重复 settle / 对 running 重复 wake）
+ * running↔idle 迁移侧，非法迁移（对 running 重复 settle / 对 running 重复 wake）
  * 由 CAS 前置判据拒绝。
  *
  * 用途：message 链对 idle record 的接管（U4 准入单点接线）；不清收尾位——
@@ -823,7 +823,7 @@ export interface WorkflowRecordSettleExec { // oe-exempt:20260929:framework:reco
  * finalizeRecord。CAS 拒绝（cancel/dispose 抢先 settle）静默跳过——既有语义逐字保持。
  *
  * [D1 拆边 Class C] 原定义在 `orchestration/terminal-actions.ts`，2026-09-30 下沉本模块：
- * 函数体只读 record 两态状态位 + 委托注入点——不读 run 生命周期 / 转移表 / 通知面，
+ * 函数体只读 record 两态状态位 + 委托注入点——不读 run 生命周期 / 转移表 / 通知侧，
  * 是记录级持久化原语（编排语义零耦合），故归 persistence，编排侧不再被 execution
  * 反向 import。
  */

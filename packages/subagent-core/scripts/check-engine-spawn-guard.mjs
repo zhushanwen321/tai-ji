@@ -99,7 +99,7 @@ for (const root of roots) {
           `${rel}: value-imports { ${unallowed.join(", ")} } from child_process — `
           + (allow === undefined
             ? "不在 allowlist（任务子进程必须经 SDK spawnEngineChild；探测/收割类调用须登记 allowlist 带理由）"
-            : `超出 allowlist 符号面（已登记：${allow.symbols.join(", ")}；理由：${allow.reason}）`),
+            : `超出 allowlist 符号名侧（已登记：${allow.symbols.join(", ")}；理由：${allow.reason}）`),
         );
       }
     }

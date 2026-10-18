@@ -13,7 +13,7 @@
  *
  * mock 策略（TEST-STRATEGY §5）：vi.mock('@/api') 局部替换 btw 域（门面其余域走 actual）；
  * MessageStream / Composer stub 为透传 attrs 的占位 div——渲染树装配断言经 DOM 属性
- * （session-id / variant / show-btw）落使用者可见面，对话流渲染本身归 MessageStream 既有测试族。
+ * （session-id / variant / show-btw）落使用者可见部分，对话流渲染本身归 MessageStream 既有测试族。
  * i18n 由 vitest-i18n-setup 全局 mock（t 从 zh-CN 取真实文案，断言中文文案无需另行 mock）。
  *
  * 运行：cd packages/renderer && npx vitest run src/__tests__/panel/btw-panel.test.ts
@@ -42,7 +42,7 @@ vi.mock('@/api', (importActual) => composerApiModuleActualWithBtw(importActual))
 // 断言锚点：btw 域 spy 单例（helper 持有，播种/断言经别名）
 const apiMock = composerBtwApiMock
 
-// ── MessageStream / Composer 占位 stub（attrs 全透传 → DOM 属性断言装配面）──
+// ── MessageStream / Composer 占位 stub（attrs 全透传 → DOM 属性断言装配侧）──
 vi.mock('@/components/panel/MessageStream.vue', async () => {
   const { defineComponent: dc, h: hs } = await import('vue')
   return {
@@ -107,7 +107,7 @@ describe('BtwPanel 首屏冒烟与线列表（观察者 + 使用者）', () => {
     expect(wrapper.find('[data-testid="btw-thread-list"]').exists()).toBe(false) // 无线不渲染列表
   })
 
-  it('线列表渲染 chip + 右簇新建钮恒在可视区 + 自动选中最新线 + MessageStream/Composer 装配面（D7②）', async () => {
+  it('线列表渲染 chip + 右簇新建钮恒在可视区 + 自动选中最新线 + MessageStream/Composer 装配侧（D7②）', async () => {
     apiMock.list.mockResolvedValue([{ vid: 'btw:pi-1' }, { vid: 'btw:pi-2' }])
     const wrapper = mountPanel(MAIN_A)
     await settle(wrapper)
@@ -303,7 +303,7 @@ describe('BtwPanel 内联确认条表单降档（M3-c 行为范围，useBtwInter
     // 自动选中唯一线（latest = pi-1）→ 交互区挂载到该 vid
     expect(wrapper.find('[data-testid="btw-stream"]').attributes('session-id')).toBe('btw:pi-1')
 
-    // 驱动面 = 生产 bus 订阅的等价写入（store 是 pending SSOT，addRequest 与
+    // 驱动侧 = 生产 bus 订阅的等价写入（store 是 pending SSOT，addRequest 与
     // useExtensionUI 订阅路径写入同一分区）；归一化纯函数群直测见
     // src/__tests__/composables/panel/use-btw-interaction.test.ts
     const store = useExtensionUIStore()

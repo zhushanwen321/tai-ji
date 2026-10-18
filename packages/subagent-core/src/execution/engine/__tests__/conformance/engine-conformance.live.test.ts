@@ -9,7 +9,7 @@
 // （EngineClient spawn pi-subagent-cli 进程入口 + RemoteEngine 适配）——即 A2 真机
 // 形态本身。断言口径 = 不变量与关键终态（C2 outcome / C3 stream 事件不变量），
 // 不做逐字段 diff（设计 §4 基线三层③）。zcode 部分与 zcode-subagent-cli 的
-// zcode-engine.live.test.ts 互补（后者覆盖 schema 全链，此处只跑 conformance 最小面）。
+// zcode-engine.live.test.ts 互补（后者覆盖 schema 全链，此处只跑 conformance 最小子集）。
 //
 // 措辞口径（R9-1）：「子进程零残留」= 一代子进程 + 组内后代；引擎自身 detached
 // 后代不判 fail（设计 §3.9 已接受代价）。POSIX 组探测（childSpawned pid 非组长）
@@ -113,7 +113,7 @@ describe.skipIf(!LIVE)("conformance run 层（协议客户端 × 引擎包 CLI�
     }
   }, 120_000);
 
-  it("pi：setModel 控制范围最小面（capabilities 位声明核对 + 已退出 run 的结构化 not-active 错误帧）", async (testCtx) => {
+  it("pi：setModel 控制范围最小子集（capabilities 位声明核对 + 已退出 run 的结构化 not-active 错误帧）", async (testCtx) => {
     const model = process.env["PI_LIVE_MODEL"];
     if (model === undefined || model === "") {
       testCtx.skip("PI_LIVE_MODEL 未设置（需真实 provider/model 凭据）——setModel conformance 面跳过");
@@ -149,7 +149,7 @@ describe.skipIf(!LIVE)("conformance run 层（协议客户端 × 引擎包 CLI�
       expect(typeof engine.setModel).toBe("function");
       // ② 短任务跑完 → pi 孙进程退出（per-run 生命周期）→ setModel 对已退出 run
       //    经协议 error 帧应答结构化 not-active 错误码（§7.4「定位不到」承接态；
-      //    热切成功路径的结构化应答面由 pi-subagent-cli model-switch-control 单测
+      //    热切成功路径的结构化应答侧由 pi-subagent-cli model-switch-control 单测
       //    承担，此处钉住协议 wire 面的请求-错误帧闭环）。
       const task = { prompt: "Reply with the single word: ok", description: "live-setmodel", model, cwd: os.tmpdir() };
       const ctx: RunContext = { taskId: "sa-live-pi-setmodel", onEvent: () => {} };

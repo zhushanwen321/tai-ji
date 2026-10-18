@@ -83,7 +83,7 @@ describe('P-contract-inject：线会话建立时注入一次', () => {
     expect(h.spawned[1].options.appendSystemPrompt).toBe(BTW_BEHAVIOR_CONTRACT)
   })
 
-  it('契约不进注册表字段 / 不经 registerSession 参数（model-only，UI 面不可见的结构面）', async () => {
+  it('契约不进注册表字段 / 不经 registerSession 参数（model-only，UI 面不可见的结构侧）', async () => {
     const { vid } = await createLine()
     const rec = svc.getLine(vid)!
     // 摘除 client（fake 自引用循环）后序列化——断言注册表数据字段不含契约文本

@@ -24,7 +24,7 @@
  * crossSession 分发路径；修复前 widgetGui 消费端的端到端断言落在 **real 轨**
  * `e2e/tasks-drawer-real.spec.ts` R2（真 runtime + 真 WS 帧 + 真 route-inbound：断言
  * 托盘 widget icon/badge 出现 + 面板 tab-bar 双段渲染）。
- * 保留面：对话流内联 `__gui__`（tool call 记录，设计明文不退役）——下方路径 B 用例不变。
+ * 保留范围：对话流内联 `__gui__`（tool call 记录，设计明文不退役）——下方路径 B 用例不变。
  *
  * mock 轨数据流：VITE_MOCK=true → chat.send → run-send-stream 自动推送
  * tool_call_end(含 __gui__) + extension:widgetGui × 2（后者当前不可达托盘，见上）。

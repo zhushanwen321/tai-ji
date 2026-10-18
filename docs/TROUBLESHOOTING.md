@@ -198,7 +198,7 @@ CI=true ELECTRON_SKIP_BINARY_DOWNLOAD=1 pnpm install   # 约 7s 重建，然后�
 
 ### 12. subagent 完成后不回收 / 回收慢：sessionFile 获取链与 workflow 域守护特征串（2026-09-10 重放移植重写；2026-09-11 H1 续聊链修订）
 
-> 机制与串语义权威：[architecture/subagent-chat-run-unification.md](architecture/subagent-chat-run-unification.md) + `packages/pi-subagent-cli/src` 代码注释；原设计文档 design/subagent-agent-end-recovery-replay.md 已删（2026-09-13，git 可追溯），本节只留排障入口。**防误判**：2026-09-10 前的旧特征串（`backfilled via late get_state response` / `located via sessionDir scan` / `unobtainable after 15s recovery window` / `no-descendant fast path` 等）与 chat 域热路径日志面（roundLifecycle 相位帧 / `interact` / ChatSessionRegistry / `chat-round-first-round-watchdog`）在现树均已不存在——按旧串 grep 恒零命中是预期，不是日志丢失。
+> 机制与串语义权威：[architecture/subagent-chat-run-unification.md](architecture/subagent-chat-run-unification.md) + `packages/pi-subagent-cli/src` 代码注释；原设计文档 design/subagent-agent-end-recovery-replay.md 已删（2026-09-13，git 可追溯），本节只留排障入口。**防误判**：2026-09-10 前的旧特征串（`backfilled via late get_state response` / `located via sessionDir scan` / `unobtainable after 15s recovery window` / `no-descendant fast path` 等）与 chat 域热路径日志侧（roundLifecycle 相位帧 / `interact` / ChatSessionRegistry / `chat-round-first-round-watchdog`）在现树均已不存在——按旧串 grep 恒零命中是预期，不是日志丢失。
 
 排障入口（三条现行 warn 特征串；①③ 来自 `pi-subagent-cli`，② 来自 `subagent-core`；日志统一落 `<dataDir>/agent/logs/subagents-<date>.log`，裸 pi CLI 需 `TAIJI_AGENT_EXT_LOG=1` 或 `TAIJI_AGENT_DEBUG=1` 才落盘）：
 
@@ -303,7 +303,7 @@ VITE_E2E=true VITE_MOCK=true pnpm run build:e2e
 
 **现象**：命令路径弹窗（如 `/permission rule`、`/permission model`）**提交**后状态条显示进行中约 30s 后自行恢复；console 同期出现 `[chat] finalizeSession sid=... reason=timeout` warning（attach 调试可见，含 sid——timeout 分支已无 dev 门，生产 attach 同样可见；生产落 `renderer-console-<date>.log`（`<dataDir>/logs/`），无需 attach）。
 
-**判定**：该形态的常态命中面已全部清零——scheduler 表单走 `expectTurn: false` 声明即时收尾（ADR-0073），plain dialog 提交面已由通路级即时收尾解决（`sendPiResponse` 应答终局无条件清 pendingSend，生产者穷尽论证与落地 commit 见 ADR-0072 收敛条目）。**任何提交源命中 30s timeout 均属真异常形态**（pi 僵死 / 协议漂移 / 极端延迟 / 新扩展源未按通道选型实现——选型指引见 development-guide §5.1）。
+**判定**：该形态的常态命中侧已全部清零——scheduler 表单走 `expectTurn: false` 声明即时收尾（ADR-0073），plain dialog 提交侧已由通路级即时收尾解决（`sendPiResponse` 应答终局无条件清 pendingSend，生产者穷尽论证与落地 commit 见 ADR-0072 收敛条目）。**任何提交源命中 30s timeout 均属真异常形态**（pi 僵死 / 协议漂移 / 极端延迟 / 新扩展源未按通道选型实现——选型指引见 development-guide §5.1）。
 
 **排障**：确认提交源类型——plain dialog 命令（band 弹窗）或已声明 `expectTurn: false` 的表单提交后仍命中 30s = turn 信号链断裂（先取 `renderer-console-<date>.log` 确认 warn 落盘形态（含 sid），再按 pi tee 日志 + ping 信号归因）；ask-user/plan 表单提交出现该 warn 说明 turn 未续接（真异常，同上归因）；新 form 扩展源提交命中 = 未声明 `expectTurn: false`（缺省 true 走桥接，发现即补声明）；新命令扩展源需要「提交后开 turn」的应改用 `uiFormInteract` 并声明 expectTurn（裸 select 通路按无 turn 收尾，恒清不桥接）。
 

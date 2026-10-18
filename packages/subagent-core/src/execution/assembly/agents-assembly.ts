@@ -28,7 +28,7 @@ const logger = getLogger("agents-assembly");
  * 按 frontmatter name 去重（高优先级靠后覆盖，Map 后写胜）→ name 码点序输出
  * （KV-cache 契约：顺序与 readdir 枚举序解耦，重建结果逐字节一致）。
  *
- * 抛错面（如实声明）：单文件读失败仅记日志跳过；目录不存在返回空列表；但底层
+ * 抛错路径（如实声明）：单文件读失败仅记日志跳过；目录不存在返回空列表；但底层
  * discoverResources 的不可恢复扫描错误会原样向上传播（readdir 遇权限拒绝、
  * EMFILE 竞态等——resource-discovery 自述 "Throws on unrecoverable scan errors"，
  * Promise.all 首个 reject 即整体拒绝），调用方需自行兜底。

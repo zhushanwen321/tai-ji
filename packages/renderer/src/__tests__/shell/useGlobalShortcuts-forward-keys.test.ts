@@ -130,7 +130,7 @@ describe('键矩阵：renderer 判定与主进程同判定（§7.4 配对契约�
       const rendererHit = matchKeymapEntry(toShortcutInput(row.input), entry, {})
       if (row.input.alt) {
         // 已知不对称（F1-18 登记）：renderer 不拒绝未声明修饰键、主进程严格拒绝——
-        // 方向安全断言：renderer 判定 ⊇ 主进程（主进程不转发 ⇒ renderer 侧不产生误转发面）
+        // 方向安全断言：renderer 判定 ⊇ 主进程（主进程不转发 ⇒ renderer 侧不产生误转发）
         expect(row.expected).toBe(false)
         expect(rendererHit).toBe(true)
       } else {

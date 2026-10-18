@@ -1,5 +1,5 @@
 /**
- * 崩溃时刻机器面关联取证（crash-forensics-and-watchdog §3.3 D10，crash-correlation）。
+ * 崩溃时刻的机器检查侧关联取证（crash-forensics-and-watchdog §3.3 D10，crash-correlation）。
  *
  * 背景（2026-09-20 连坐崩溃实证，session 01a0b9ff 四次 SIGTERM 死亡归因）：pi 以 exit
  * code 143 死亡时，runtime 侧只见「自己的子进程退了」，而真凶是机器上另一个进程按模式
@@ -11,7 +11,7 @@
  * 重放取证。
  *
  * 两个采集器（调用点 rpc-client.writeCrashLogIfNeeded / session-service pi-crash journal 行）：
- * ① 同步机器面 pi 快照（`ps -axo pid=,ppid=,command=` 过滤 pi-darwin-arm64 行，~10ms）——
+ * ① 同步的机器检查侧 pi 快照（`ps -axo pid=,ppid=,command=` 过滤 pi-darwin-arm64 行，~10ms）——
  *    回答「我死的时候机器上还有哪些同族 pi 活着、各自 ppid 归属谁」；
  * ② 异步统一日志关联采样（`log show` 崩溃时刻 ±5s 窗口，darwin-only，fire-and-forget）——
  *    提取同秒死亡的兄弟 pi、同窗退出的 Electron 进程、launchd signaled service 行。
@@ -30,7 +30,7 @@
 import { execFile, execFileSync } from 'node:child_process'
 import { isPiCrashLogEnabled } from './logger.js'
 
-// ── ① 机器面 pi 快照 ─────────────────────────────────────────────────────────
+// ── ① 机器检查侧 pi 快照 ─────────────────────────────────────────────────────────
 
 /** taiji 形态 pi 的二进制名（打包版 /Applications/TaiJi.app/.../pi/ 与 dev
  *  apps/electron/resources/pi/ 下同名；用户 npm 安装的裸 `pi` 不匹配——本模块只关心
@@ -92,7 +92,7 @@ function truncateMiddle(text: string, max: number): string {
 }
 
 /**
- * 渲染机器面 pi 快照 section（纯函数，多行，每行 `[machine-pi-snapshot]` 前缀——
+ * 渲染机器检查侧 pi 快照 section（纯函数，多行，每行 `[machine-pi-snapshot]` 前缀——
  * 与 `[runtime-context]` 同款 grep 可提取形态）。rows 为空也显式落 `aliveCount=0`
  * （「死时机器上没有同族 pi 存活」本身是连坐归因的关键证据）。
  */
@@ -147,7 +147,7 @@ function listMachinePiRows(runPs: RunPs): MachinePiRow[] {
 }
 
 /**
- * 崩溃 log 用的机器面 pi 快照 section（同步，~10ms）。
+ * 崩溃 log 用的机器检查侧 pi 快照 section（同步，~10ms）。
  *
  * 采样门：crash log sink 未启用（isPiCrashLogEnabled false）时返回 ''——无落点不采样。
  * ps 失败时返回显式 unavailable 行（不静默空串——区分「没采」与「采到空」）。

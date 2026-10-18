@@ -7,9 +7,9 @@
  * [投递所有权内核 u2] 用户消息路径（sendMessage）**内核化**：投递所有权移交
  * SessionDeliveryRegistry（D1 单一所有者）——本类保留「BeforeSend hook 拦截 + 入口 touch +
  * 错误范围编排」，投递交由 `registry.submit()`（lane 判定 + 裸标记 + 内核 FIFO + 两阶段回执
- * 全在注册表/内核侧）。退役面：busy 预检（rejectBusyPrecheck）、send.rejected 广播（budy
+ * 全在注册表/内核侧）。退役路径：busy 预检（rejectBusyPrecheck）、send.rejected 广播（budy
  * 类拒绝转译）、markSessionActive 三副作用（迁至注册表 deliverOne 的出站交接点，§3.4+ 表）、
- * skill 注入（迁至同一交接点——注入器所有权随出站交接点走）。保留面：BeforeSend hook
+ * skill 注入（迁至同一交接点——注入器所有权随出站交接点走）。保留范围：BeforeSend hook
  * （提交前）、入口 touchActivity（idle-pi-reclamation D6-1）。pi busy 类拒绝识别函数
  * classifyPromptRejection 定义与消费均在注册表（session-delivery-registry.ts）。
  * [occupancy D2 拒绝转译] 错误分类迁移后由注册表的出站交接 catch 面消费（D6）。
@@ -55,7 +55,7 @@ export type AbortSource = 'user' | 'convergence'
 
 // sendMessage 回执 reason 词表 SSOT = shared SendPromptReason（msg-pipeline-debloat
 // D4-6 单点收敛，原 5 处手写词表归一；busy/compacting/bash 退役值收窄裁决与值语义见
-// shared 定义处）。运行面分支只看 blocked——插件/调用方不得依赖 reason 精确值做行为
+// shared 定义处）。运行侧分支只看 blocked——插件/调用方不得依赖 reason 精确值做行为
 // 分支。本类型经 @taiji/shared 出口供 interfaces / session-api / session-service /
 // plugin-sdk 同源消费。
 
@@ -600,7 +600,7 @@ export class MessageDispatcher {
           : 'agent generating'
       const errMsg = `Cannot compact while ${reason}`
       console.warn(`[message-dispatcher] compact preemptive reject (busy), sid=${sessionId}, reason=${reason}`)
-      // 对话流内联呈现（msg-pipeline-debloat D4-2）：busy 拒绝的可见面从 renderer toast
+      // 对话流内联呈现（msg-pipeline-debloat D4-2）：busy 拒绝的可见部分从 renderer toast
       // 改为对话流 system 提示条目——走 message.stream_warn（非终结性提示通道：仅追加
       // system 消息、不调 finalizeSession，正在流式的 turn 不受影响；runtime 自产提示、
       // pi 无 entry 的正确入流形态）。不能用 message.error——其终态 effect 会把生成中的

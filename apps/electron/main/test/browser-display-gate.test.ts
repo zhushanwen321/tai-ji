@@ -7,7 +7,7 @@
  * 2. BrowserViewManager 组装（S9/S10 主进程侧断言）：
  *    - S9：Toast 类 shieldsView rect 在缓冲带内往返 → view 无显隐翻转（from shown 半边）；
  *      相交隐藏后 rect 退到带内 → view 保持隐藏（from hidden 半边——区分单阈值退化的唯一判别态）；
- *      全屏阻塞面无条件隐藏 / 全关恢复（keep-alive 不丢状态）；
+ *      全屏阻塞遮罩无条件隐藏 / 全关恢复（keep-alive 不丢状态）；
  *    - S10：关浮层 → 切走 → 切回 → 无 view 复显（focus 收敛，防残影）；
  *      浮层开着切 session → 换显豁免（浮层随行，视口不空白）；
  *    - 错误态联动隐藏 + 重试成功恢复（did-fail-load / render-process-gone 两类占位区分）；
@@ -75,7 +75,7 @@ describe('display-gate 纯策略', () => {
     expect(nextShieldHidden(true, [OVERLAP_FACE], VIEW_RECT)).toBe(true)
     // 明确分离（外扩矩形仍不相交）→ 恢复
     expect(nextShieldHidden(true, [FAR_FACE], VIEW_RECT)).toBe(false)
-    // 全部遮蔽面消失 → 恢复
+    // 全部遮蔽视图消失 → 恢复
     expect(nextShieldHidden(true, [], VIEW_RECT)).toBe(false)
   })
 
@@ -88,7 +88,7 @@ describe('display-gate 纯策略', () => {
     }
   })
 
-  it('fullscreen 面无条件隐藏；rect 缺失的非全屏面保守按相交处理（fail-safe）', () => {
+  it('fullscreen 面无条件隐藏；rect 缺失的非全屏遮罩保守按相交处理（fail-safe）', () => {
     expect(nextShieldHidden(false, [{ id: 'modal', fullscreen: true }], VIEW_RECT)).toBe(true)
     expect(nextShieldHidden(true, [{ id: 'modal', fullscreen: true }], VIEW_RECT)).toBe(true)
     expect(nextShieldHidden(false, [{ id: 'broken', fullscreen: false }], VIEW_RECT)).toBe(true)
@@ -279,7 +279,7 @@ describe('BrowserViewManager × 层级共存检查（S9/S10 主进程侧断言�
       expect(lastBounds(view)).toEqual(VIEW_RECT)
     })
 
-    it('全屏阻塞面无条件隐藏；全关恢复（§5.1 规则 6② 两档）', () => {
+    it('全屏阻塞遮罩无条件隐藏；全关恢复（§5.1 规则 6② 两档）', () => {
       const { mgr, view } = setupVisibleA()
 
       // 全屏面与 view 矩形不相交也无条件隐藏

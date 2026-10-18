@@ -155,7 +155,7 @@ export interface LruEvictDeps {
    * [B9 agentcall LRU 联动] 查询主 session 名下应联动释放的 agentcall 虚拟分区 id。
    *
    * 纯查询契约（返回待驱逐列表，豁免已由实现侧应用——renderer 装配为 workflow store 映射
-   * ∖ viewedVids panel 枚举豁免集）；驱逐执行面留本模块（deleteMessageKey + 时序记录清理），
+   * ∖ viewedVids panel 枚举豁免集）；驱逐执行侧留本模块（deleteMessageKey + 时序记录清理），
    * 与 subagent 前缀联动同构，且免装配侧自引用 chat store（stores 间 import 禁令 +
    * defineStore 装配环）。未装配时（core 单测 / 无 renderer 装配环境）默认空数组 = 不联动。
    *
@@ -166,7 +166,7 @@ export interface LruEvictDeps {
    * [btw-question D9③/M2-c] 形参按**被驱逐 sid 原形态**透传：主会话 = mainSid；btw 分区
    * 被驱逐时 = 线 vid（`btw:<piSessionId>`）——workflow 映射按线 vid 挂名（D9「btw 线名下
    * 挂 btw vid」），装配侧同一回调零改动即可服务两形态（即设计「B9 同构回调：线派生枚举
-   * ∖ viewedVids」的执行面）。当前无生产方按线 vid 挂名（D9③ no-opener），该形态为
+   * ∖ viewedVids」的执行侧）。当前无生产方按线 vid 挂名（D9③ no-opener），该形态为
    * 防御性预留。
    */
   agentCallEvictionsOf: (mainSid: string) => string[]
@@ -269,7 +269,7 @@ export function evictSessionWithVirtual(sessionId: string, deps: LruEvictDeps): 
  * （btw 键不进 isVirtualKey，但其派生键仍按 owner 段联动，防孤儿泄漏）。
  * agentcall 半边走 B9 回调 agentCallEvictionsOf（sid 原形态透传）：主会话按 mainSid、
  * btw 线按线 vid 查 workflow 映射（D9「btw 线名下挂 btw vid」），豁免 ∖ viewedVids 已在
- * 装配侧应用——即设计「B9 同构回调：线派生枚举 ∖ viewedVids」的执行面。当前无生产方按
+ * 装配侧应用——即设计「B9 同构回调：线派生枚举 ∖ viewedVids」的执行侧。当前无生产方按
  * 线 vid 挂名（D9③ no-opener），该半边为防御性预留。
  *
  * 反向不变量（D5「主驱逐不联动清 btw 分区」）：主会话驱逐时 btw 键不命中

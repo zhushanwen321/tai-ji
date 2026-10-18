@@ -157,7 +157,7 @@ describe('mock session domain', () => {
     expect(r.deleted).toContain(forked.id)
   })
 
-  it('create/fork override 生效面（G4 锚定后 mock 补齐）：override 落 summary 可断言 + fork 血缘/继承', async () => {
+  it('create/fork override 生效范围（G4 锚定后 mock 补齐）：override 落 summary 可断言 + fork 血缘/继承', async () => {
     // create 四参 override：presetId→launchPresetId / projectId / modelOverride→modelId / thinkingOverride→thinkingLevel
     const created = await session.create('/tmp/ov', 'ov-src', 'preset-x', 'proj-x', 'test/model-x', 'high')
     expect(created.launchPresetId).toBe('preset-x')

@@ -425,7 +425,7 @@ describe('SkillInjector.inject × encodeDirectiveText（A2 定向链路）', () 
     const injector = new SkillInjector(globalOnlySource([registrySkill('skill-a', skillAPath)]))
     const { client } = makeClient({ stats: { contextUsage: { tokens: 1, contextWindow: 100000, percent: 1 } } })
     const result = await injector.inject(client, text)
-    // 注入形态与主链逐字一致（同一 injector，无第二实现面）
+    // 注入形态与主链逐字一致（同一 injector，无第二实现侧）
     const block = expectedBlock('skill-a', skillAPath, skillADir, SKILL_A_BODY)
     expect(result.text).toBe(`${text}\n\n${expectedDataBlock(block)}`)
     // encode 后单行：注入产物含真实换行（正文换行 + 块行结构），命令单行性由 encode 兜底

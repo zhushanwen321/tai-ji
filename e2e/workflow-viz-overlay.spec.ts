@@ -293,7 +293,7 @@ test.describe('Workflow 可视化 overlay E2E', () => {
     await overlay.getByTestId('wf-viz-trace-row-1').click()
     await expect(overlay.getByTestId('l2-tab-agent:1')).toHaveAttribute('data-active', 'true')
 
-    // 关闭激活 tab（agent:1）→ 激活左侧相邻 agent:0（内容面随激活键切换）
+    // 关闭激活 tab（agent:1）→ 激活左侧相邻 agent:0（内容侧随激活键切换）
     await overlay.getByTestId('l2-tab-close-agent:1').click()
     await expect(overlay.getByTestId('l2-tab-agent:0')).toHaveAttribute('data-active', 'true')
     await expect(overlay.getByTestId('wf-viz-agent-tab')).toBeVisible()

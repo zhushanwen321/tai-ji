@@ -1,7 +1,7 @@
 // src/__tests__/subagent-service.test.ts
 //
 // SubagentService 生命周期 + 公共 API 边界测试（[H3/R5 测试归位] 本文件为壳级测试：
-// 装配 / dispose 编排 / 转发面 / 跨域 emit 记账。run 域 execute 入口用例已迁
+// 装配 / dispose 编排 / 转发侧 / 跨域 emit 记账。run 域 execute 入口用例已迁
 // run-orchestration.test.ts；ModelConfigService ctxModel 缓存已迁
 // model-config-service.test.ts）。
 //
@@ -659,7 +659,7 @@ describe("SubagentService", () => {
 // 同时覆盖 session-runner.run() —— event-bridge 合并进 run() 后的事件处理回归。
 
 // ============================================================
-// [§1.4 (a)] pi 绑定作废（invalidatePiBinding）：壳转发面 + dispose 收尾作废
+// [§1.4 (a)] pi 绑定作废（invalidatePiBinding）：壳层的转发逻辑 + dispose 收尾作废
 // ============================================================
 
 describe("[§1.4 (a)] pi 绑定作废（dispose 收尾 + 显式作废转发）", () => {

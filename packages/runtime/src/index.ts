@@ -13,7 +13,7 @@ import { SessionService } from './services/session/session-service.js'
 import { REVOKED_SIGNAL_CUSTOM_TYPE } from './services/session/revoke-orchestrator.js'
 // BtwService 组合根接线（btw-question M2-b，B2 授权）：依赖六项按其 docstring 归位本文件。
 import { BtwService } from './services/session/btw-service.js'
-// 线 spawn options 工厂（buildLineSpawnOptions 决策面的可测提取，见该文件 docstring）。
+// 线 spawn options 工厂（buildLineSpawnOptions 决策侧的可测提取，见该文件 docstring）。
 import { createBtwLineSpawnOptionsFactory } from './services/session/btw-line-spawn-options.js'
 import { buildBtwThreadListPayload } from './transport/btw-message-handler.js'
 import { scanDegradedFlag } from './infra/pi/session-file-utils.js'
@@ -175,7 +175,7 @@ import { initRelayServer, deinitRelayServer, getActiveRelayRegistry } from './in
 import { toErrorMessage } from './utils/errors.js'
 import { spawnDataDirContractViolation } from './utils/runtime-env.js'
 // W8 宿主接线：runtime 协议客户端的自持引擎实例 dispose 钩子（idle 5min 复用的
-// 回收面之外，进程退出的兜底回收——设计 §3.6 退出钩子落点）。
+// 回收路径之外，进程退出的兜底回收——设计 §3.6 退出钩子落点）。
 import { disposeRuntimeEngineClients } from './services/session/subagent-engine-history.js'
 
 // 组合根 argv 解析（remote-access D9）：解析逻辑与单测在 utils/runtime-args.ts（本文件
@@ -629,7 +629,7 @@ async function main(): Promise<void> {
   // 与 recent-workspaces 同模式；前端 localStorage 仅首启迁移源）。
   const projectStore = new ProjectStore(configDir)
   // ImportService：导入编排层（session-import-unified 设计 §3.3）。projects 仅用于
-  // importSession 的 projectId 存在性校验（D5 import_project_invalid），结构化最小依赖面。
+  // importSession 的 projectId 存在性校验（D5 import_project_invalid），结构化最小依赖范围。
   // source 注册表（G2 可扩展）：pi 项的 rootDir 缺省 = pi 全局 sessions 经
   // getPiGlobalAgentDir 动态推导（组合根合法 import infra 装配——services 层禁止 value
   // import pi-maintenance，C-comm-03）；zcode 项的默认库 = 宿主库路径动态推导（注入模式
@@ -1018,9 +1018,9 @@ async function main(): Promise<void> {
         // 引用恒就绪）。
         //
         // observe / settle 各自 try/catch + warn 隔离（fanOutSettled 同款范式）：两路径是
-        // interpret 批次的旁路观察面，单路径异常不得炸掉 interpret 批次（事件流主链优先），
+        // interpret 批次的旁路观察侧，单路径异常不得炸掉 interpret 批次（事件流主链优先），
         // 也不得互相传染——observe 抛错后 interpret 照常执行、settle 照常收尾。
-        // interpret 刻意保持裸抛：其失败走 adapter 侧既有 logInterpretFailure 隔离面
+        // interpret 刻意保持裸抛：其失败走 adapter 侧既有 logInterpretFailure 隔离边界侧
         // （[EventAdapter] interpret error 日志），此处不再包一层双重复制。
         try {
           resumeDecision.observe(sessionId, events)
@@ -1405,8 +1405,8 @@ async function main(): Promise<void> {
   }
   const btwService = new BtwService({
     processes: pm,
-    // 线 launch 快照组装（preset 回落链 / skillPaths 回落 / 模型终态语义的决策面
-    // 在 btw-line-spawn-options.ts，直测见其同名单测；此处仅窄面接线）。
+    // 线 launch 快照组装（preset 回落链 / skillPaths 回落 / 模型终态语义的决策侧
+    // 在 btw-line-spawn-options.ts，直测见其同名单测；此处仅窄接口接线）。
     buildLineSpawnOptions: createBtwLineSpawnOptionsFactory({
       migrationGate: getMigrationGate,
       findScannedSession: (sid) => sessionService.findScannedSession(sid),
@@ -1515,7 +1515,7 @@ async function main(): Promise<void> {
     // u8（reply 通路对称接线）：reply 超限错误 envelope 的恢复指引携带 session 文件实路径，
     // 与上方 MessageBus（push 通路）共用同一 resolveSessionFilePath resolver 实例。
     replyGuardResolver: resolveSessionFilePath,
-    // btw 线三帧路由（btw-question M2-b，B1/B2 授权接线）：BtwService 窄面 + 主会话解析
+    // btw 线三帧路由（btw-question M2-b，B1/B2 授权接线）：BtwService 窄接口 + 主会话解析
     // 注入 BtwMessageHandler（assembleOptionalHandlers 装配 → buildRoutes 展开 handles）。
     btw: { service: btwService, resolveMain: resolveBtwMain },
     // [subagent-model-switch U6] subagent.setModel 路由依赖（§7.1.1 通道生产适配器，

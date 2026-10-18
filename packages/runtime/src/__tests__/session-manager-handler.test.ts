@@ -328,7 +328,7 @@ describe('SessionManagerHandler', () => {
         expect(getHistory).not.toHaveBeenCalled()
       })
 
-      it('status 目标存在但不归属 → not_found（探测面折叠：不泄露存在性，与 list「不可见=不存在」对齐）', async () => {
+      it('status 目标存在但不归属 → not_found（探测侧折叠：不泄露存在性，与 list「不可见=不存在」对齐）', async () => {
         const userSummary = makeSessionSummary({ id: 'user-s1', spawnSource: 'user' })
         const opts = makeMockOptions({
           sessionService: makeMockSessionService({ getSummary: makeOwnedFactory(userSummary) }),
@@ -832,7 +832,7 @@ describe('SessionManagerHandler', () => {
     const VALID_NID = 'sm-12345678-1234-4234-8234-123456789012'
     const VALID_NID2 = 'sm-12345678-1234-4234-8234-123456789013'
 
-    /** create 带 prompt+notifyId 的 shortcut（应答面取首个 respond 调用）。 */
+    /** create 带 prompt+notifyId 的 shortcut（应答侧取首个 respond 调用）。 */
     async function createAndRespond(opts: SessionManagerHandlerOptions, handler: SessionManagerHandler): Promise<Record<string, unknown>> {
       await handler.handle('req-1', 'sid-parent', 'create', { cwd: '/t', prompt: 'init', notifyId: VALID_NID })
       return respondAt(opts)

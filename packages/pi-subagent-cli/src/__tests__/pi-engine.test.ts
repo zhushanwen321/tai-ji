@@ -2,7 +2,7 @@
 //
 // PiEngine（协议化引擎适配器）单元测试。fake spawnRunner + fake ChildProcess——
 // 不 spawn 真实子进程（真实 spawn 链路见 run-spawn-once.integration.test.ts）。
-// 覆盖验收面：
+// 覆盖率达标时的验收：
 //   - capabilities 与 package.json manifest 快照逐位一致（同源锚点）；
 //   - probe：invocation 可解析 + 版本探测（fake / default execFile）+ 缓存与 force；
 //     不可解析（PATH 无 pi）→ checks 反映 + engine_probe_failed recovery；
@@ -78,7 +78,7 @@ class FakeChild extends EventEmitter {
   }
 }
 
-/** fake spawnRunner 捕获面。 */
+/** fake spawnRunner 捕获点。 */
 interface Captured {
   params: SpawnRunParams;
   callbacks: SpawnRunCallbacks;
@@ -560,7 +560,7 @@ describe("PiEngine.run（会话形态轮 run 派发形态）", () => {
 });
 
 // [H1 U5] PiEngine.interact 三分派用例族（message 投递 / close / cancel / 冷路径 /
-// EPIPE 兜底 / chat 轮 run 域分支过渡兼容面）已随 interact 方法退役删除：
+// EPIPE 兜底 / chat 轮 run 域分支过渡兼容范围）已随 interact 方法退役删除：
 //   - 续聊投递的 run 通道形态覆盖 = 上方「PiEngine.run（chat 轮 run 派发形态）」
 //     （resume 锚点透传 + recordId 锚定 handle；[modeless 波2] 轮终形态为引擎内建）；
 //   - EPIPE 兜底语义由 stdin-writer.test（writeStdinLine EPIPE 检测）单元直测；

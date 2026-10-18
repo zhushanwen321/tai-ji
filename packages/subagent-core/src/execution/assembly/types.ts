@@ -589,7 +589,7 @@ export interface SubagentRecord {
    * 用户覆盖记账（[subagent-model-switch §6.2]，与 {@link ExecutionRecord.modelOverride}
    * 同源派生视图：内存源 recordToSubagent / 事件流折叠 scanFile 补充派生视图）。additive：
    * undefined（存量 / 从未覆盖）零迁移。持久化权威 = record-model-override 事件帧
-   * （写点 = store.markModelOverride），本字段是读模型可见面（冷复活水合 + 覆盖
+   * （写点 = store.markModelOverride），本字段是读模型可见部分（冷复活水合 + 覆盖
    * 状态查询通道）。
    */
   modelOverride?: ModelOverride;
@@ -635,7 +635,7 @@ export interface SubagentRecord {
   // 存量 entry 残留键零迁移）。
   /**
    * 离开批终局标记（与 ExecutionRecord.batchFinalized 同源派生视图/重建——存量 entry
-   * 读侧兼容面，[collect 退役] 起只读不写：旧 session 文件反查派生视图仍携带）。
+   * 读侧兼容范围，[collect 退役] 起只读不写：旧 session 文件反查派生视图仍携带）。
    * 缺省 = 未离开批 / 退役后新记录。
    */
   batchFinalized?: boolean;

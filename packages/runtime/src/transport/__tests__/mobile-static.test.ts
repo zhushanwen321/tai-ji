@@ -184,7 +184,7 @@ describe('mobile-static module (S3)', () => {
       expect(res.headers['content-type']).toContain('application/octet-stream')
     })
 
-    // 穿越防护矩阵归属集成面（connection-manager-mobile-static.test.ts 的 E4 it.each，
+    // 穿越防护矩阵归属集成测试侧（connection-manager-mobile-static.test.ts 的 E4 it.each，
     // 端到端 400 + 拒绝日志纪律是更强剩余证明），裸 handler 面不重复。
   })
 })

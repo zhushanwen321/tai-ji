@@ -5,7 +5,7 @@
  * 缺口背景：PS-24（taiji 注入器展开 ≡ pi 落盘展开的逐字 golden diff）是动态探针，
  * 需真实 pi 进程 + 模型凭证，CI 设 TAIJI_SKIP_REAL_PI=1 恒 skip——pi 升级改展开
  * 格式时漂移静默通过。本探针对 node_modules 实装 dist 的展开模板 / 剥离函数做
- * 静态逐字断言（凭证无关，CI 可跑），覆盖 pi 改模板 / 剥离行为两类漂移面
+ * 静态逐字断言（凭证无关，CI 可跑），覆盖 pi 改模板 / 剥离行为两类漂移风险
  * （设计量级判定 ~90%）；全量行为等价仍由 PS-24 动态探针在本地 REAL_PI 环境检查。
  *
  * 登记条目（docs/pi-semantics.json PS-27，verifiedWith 0.84.4）：

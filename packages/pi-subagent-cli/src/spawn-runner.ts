@@ -309,7 +309,7 @@ const SCHEMA_ENFORCEMENT_EXTENSION_SEGS: readonly (readonly string[])[] = [
   ["universal", "structured-output"],
 ];
 
-/** 武装断言的判定输入（纯函数面，测试直构）。 */
+/** 武装断言的判定输入（纯函数部分，测试直构）。 */
 export interface SchemaArmingInput {
   /** 引擎能力位（协议 EngineCapabilities 词表，D3 分流唯一判据）。 */
   schemaEnforcement: EngineCapabilities["schemaEnforcement"];
@@ -335,7 +335,7 @@ export interface SchemaArmingInput {
  * （get_commands = slash 命令、get_state = RpcSessionState，均不暴露工具/扩展范围）；
  * 且扩展加载失败时 pi 在非交互模式（含 rpc）启动诊断 gate 直接 `process.exit(1)`
  * （main.js：runtime diagnostics 含 "Failed to load extension" → exit 1），到不了
- * RPC 服务面。③不可作为主动查询断言，按设计预留路径退化为 ①+②；扩展加载破坏的
+ * RPC 服务侧。③不可作为主动查询断言，按设计预留路径退化为 ①+②；扩展加载破坏的
  * 秒级可见性由 pi 自身 exit(1) + 引擎既有 exitCode≠0 失败通路 + stderr tee
  * （诊断留痕）承接。
  */
@@ -400,7 +400,7 @@ function hasSchemaEnforcementExtension(spawnArgs: readonly string[]): boolean {
 /**
  * stderr tee（W11）：实例维度路径 + 懒打开 + 尺寸轮转（超 TAIJI_LOG_MAX_BYTES rename
  * 副本重开）+ 三判据过期清理（同前缀 + pid 已死 + mtime 过期）。失败情形全部静默
- * 降级（取证面不拖垮任务主通道——调用方对无 tee 形态 resume 排空防背压）。
+ * 降级（取证侧不拖垮任务主通道——调用方对无 tee 形态 resume 排空防背压）。
  *
  * 返回 path（[D5 诊断引用写入 journal 记录] 失败时随终态应答上报宿主的取证文件指针）——路径在
  * tee 创建时即确定（stderrLogPathFor 纯派生），与懒打开时机无关：零字节 tee（子进程
@@ -419,7 +419,7 @@ function createStderrTee(child: ChildProcess): { path: string; close(): void } |
   const logPath = stderrLogPathFor(dataDir, pid);
   let stream: fs.WriteStream | null = null;
   let failed = false;
-  // tee 失败统一留痕（一次性）：tee 是诊断取证面，失败不拖垮任务主通道，但
+  // tee 失败统一留痕（一次性）：tee 是诊断取证侧，失败不拖垮任务主通道，但
   // 「诊断引用可能不可用」必须出声——失败 run 上报的 stderrTeePath 将是空文件/
   // 缺 tail 的文件，宿主与人工排查需知道取证不可信。
   const warnTeeFailed = (where: string, err: unknown): void => {
@@ -568,7 +568,7 @@ export async function runSpawnOnce(
 
   // prepare 期校验前置（model 缺失 fail-fast 先于临时文件创建）：writeAppendPromptFile
   // 会落盘 append-system-prompt 临时文件，校验在后会让 prepare 期失败的 run 泄漏
-  // 临时文件（finally 清理面在 try 内——校验抛错时 tempFile 尚无清理路径）。
+  // 临时文件（finally 清理路径在 try 内——校验抛错时 tempFile 尚无清理路径）。
   if (modelRef === undefined) {
     throw new Error(
       `[pi-subagent-cli] run requires a canonical model ref ("provider/id") in ctx.model, got: ${JSON.stringify(params.model)}. ` +
@@ -723,7 +723,7 @@ export async function runSpawnOnce(
 // pump 应答分发（spawn-run-pump.ts response 分支）。
 
 // 活跃子进程记账（自本文件提取至 active-children.ts，行为等价）：
-// re-export 保持既有导入面（index.ts / pi-engine.ts / __tests__）。
+// re-export 保持既有导入范围（index.ts / pi-engine.ts / __tests__）。
 export {
   getActiveChild,
   killAllActiveChildren,

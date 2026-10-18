@@ -10,10 +10,10 @@
 //     （同设计 §3.4 不变量 3：sessionRef 在 create 应答后经本回调送达编排层）。
 //     [池抽象降级 2026-09-13] 原 RunContext.poolKey 字段与 onPoolResolved 回调已删
 //     （两引擎无池化实现，journal 固定落 engines/<id>/shared/，历史头部叙述见 git）。
-//   - [u-h2 已实施 2026-09-05] EnginePort.validateModel?()——派发同步期 model 校验面
+//   - [u-h2 已实施 2026-09-05] EnginePort.validateModel?()——派发同步期 model 校验侧
 //     （设计定案 D2-2）。
 //   - [u7a 已删除 2026-09-13 oe-audit] EnginePort.inFlightSnapshot?()——引擎在途只读
-//     快照面自交付起 runtime 进程内零接线（引擎池活在 pi 进程），四段零调用链连同
+//     快照侧自交付起 runtime 进程内零接线（引擎池活在 pi 进程），四段零调用链连同
 //     zcode 实现一并删除；引擎宿主迁入 runtime 侧时按 git 历史恢复。原设计权威源：
 //     docs/architecture/crash-forensics-and-watchdog.md §3.3 D5（zcode 侧注记）。
 //   - [已删除 2026-09-23 oe-audit] RunContext.onChildSpawned?——ChildProcess 全句柄注册
@@ -21,10 +21,10 @@
 //     引擎侧唯一数据消费者只读 pid/killed 窄载荷），三处宿主侧死注册一并删除。生命周期
 //     谓词自 W6 起读协议镜像（childSpawned/childStateChanged，EngineClient）。
 //   - [subagent-model-switch 已实施 2026-10-06] EnginePort.setModel?——执行中模型热切换
-//     可选面（设计 §7.3；manifest capabilities.setModel = 'native' 条件实现，成员摘除
+//     可选能力部分（设计 §7.3；manifest capabilities.setModel = 'native' 条件实现，成员摘除
 //     形态同 validateModel）。错误分型值域 = SDK setModel 域词表（三型失败 + 无活进程码）。
 //
-// 三个能力面（D1；[H1 U6] interact 面已随 chat 域退役删除——续聊统一为新 run + resume）：
+// 三个能力侧（D1；[H1 U6] interact 面已随 chat 域退役删除——续聊统一为新 run + resume）：
 //   run        —— 主语义：一次性 fire-to-completion 任务执行（会话形态续聊轮同走 run，
 //                 resume 锚点经 RunContext.resume 携带）；
 //   read       —— session 历史读取（D6 三级降级链）；
@@ -186,9 +186,9 @@ export interface EnginePort {
   read(handle: EngineHandle): Promise<SessionView>;
 
   /**
-   * [U7] 可选面：模型可发现性——引擎自带 provider/model 体系时（如 zcode 的 v2 桌面
+   * [U7] 可选能力部分：模型可发现性——引擎自带 provider/model 体系时（如 zcode 的 v2 桌面
    * 登录态），列出当前环境实际可用的模型清单（带凭据校验），供 system prompt 引擎段
-   * 与 GUI 引擎选择器消费。返回 null = 无静态枚举面（省略成员，或清单运行期动态
+   * 与 GUI 引擎选择器消费。返回 null = 无静态枚举情形（省略成员，或清单运行期动态
    * 发现的引擎在静态目录为空时——modelCatalog dynamic:true 且 models:[] 的 RemoteEngine
    * 映射，system prompt 落「与主 agent 模型体系一致」声明段）。
    * engine-neutral：未来引擎（AcpEngine 等）实现本方法即自动获得注入与展示，宿主
@@ -197,7 +197,7 @@ export interface EnginePort {
   listModels?(): Array<{ id: string; name?: string }> | null;
 
   /**
-   * [u-h2 D2-2] 可选面：派发同步期 model 校验（引擎 registry 单源裁决）。实现引擎复用其
+   * [u-h2 D2-2] 可选能力部分：派发同步期 model 校验（引擎 registry 单源裁决）。实现引擎复用其
    * prepare 期同一校验函数（zcode: resolveZcodeModelRef——同一函数两处消费，canonicalRef
    * 归一化与短名缺省 provider 决策不产生双实现漂移）；校验失败同步 throw（编排层包装为
    * 「引擎与模型不配套」错误，见 engine/model-validation.ts）。
@@ -221,7 +221,7 @@ export interface EnginePort {
    *      丢掉 alias 裁决语义；裁决正是本成员的职责，产物侧才结构体化（裁决产物经
    *      model-validation.ts validateModelForEngine 收敛为 SplitModelRef 三元组，
    *      core 内部不再以裸串穿层）。
-   *   ② 跨包镜像面：SDK `@zhushanwen/subagent-engine-sdk` port-contract 的 EnginePort
+   *   ② 跨包镜像侧：SDK `@zhushanwen/subagent-engine-sdk` port-contract 的 EnginePort
    *      同签名镜像 + 协议 validateModel 帧（{modelRef?: string}）同形，签名变更会
    *      波及引擎包实现（清单外）。
    * 输入词形统一用 EngineModelSelectorInput 别名表达（契约派生，禁裸 string 重写）。
@@ -229,7 +229,7 @@ export interface EnginePort {
   validateModel?(modelRef: EngineModelSelectorInput): { canonicalRef: string };
 
   /**
-   * [engine-ref-translation D1] 可选面：派发期模型 ref 翻译（2026-10-14 用户裁决）。
+   * [engine-ref-translation D1] 可选能力部分：派发期模型 ref 翻译（2026-10-14 用户裁决）。
    *
    * pi 词汇 ref → 引擎原生 ref（zcode 实装：`zai-coding-cn/*` →
    * `account:bigmodel-individual-coding-plan/*`，模型段大小写归一——同一「智谱 GLM
@@ -240,12 +240,12 @@ export interface EnginePort {
    * 错误语义：翻译不可达（目标通道缺失 / 模型无等价）同步 throw = 显式失败
    * （首败即停，错误自带恢复指引），禁静默回落、禁伪造兑底。消费点：
    * resolveIdentityForRoute 四层解析后、validateModel 与 record stamp 前——record/
-   * 上报面呈现实际发给引擎的 ref（UI 跟随事实）。
+   * 上报侧呈现实际发给引擎的 ref（UI 跟随事实）。
    */
   translateModelRef?(modelRef: string): string;
 
   /**
-   * [subagent-model-switch §7.3] 可选面：执行中模型热切换（协议 setModel 正向方法的
+   * [subagent-model-switch §7.3] 可选能力部分：执行中模型热切换（协议 setModel 正向方法的
    * 宿主侧承载，经 EngineClient 协议帧转发引擎）。实现 = cli 形态引擎的 RemoteEngine
    * 按 manifest `capabilities.setModel === "native"` 条件实现（非 native 引擎成员
    * 摘除——validateModel 构造器摘除同款形态，消费方以
@@ -267,7 +267,7 @@ export interface EnginePort {
    * 现状 spawn 单轮）不必实现。等待策略（D6①「触发不等待」）：宿主收割入口
    * （registry disposeEngines → markAllSpawnedChildrenDead）只同步调用拿 Promise 不
    * await，引擎实现须自行保证同步部分（立即 fire close 帧 + 同步 SIGTERM）在返回
-   * Promise 前完成；grace→SIGKILL 升级序列属异步面（promise 段）。
+   * Promise 前完成；grace→SIGKILL 升级序列属异步侧（promise 段）。
    */
   dispose?(): Promise<void>;
 }
@@ -276,7 +276,7 @@ export interface EnginePort {
  * [⑦ 模型引用三元组化] 跨引擎边界的模型**词形**（未裁决用户串）：EnginePort.validateModel
  * 的输入域。本别名是该域的唯一权威定义——内部新代码禁再手写裸 `string | undefined`
  * 表达同一域（穿层是否越界由类型名可检索：结构体传导见 model-validation.ts
- * validateModelForEngine；跨包镜像面见 EnginePort.validateModel 注释的边界裁决）。
+ * validateModelForEngine；跨包镜像侧见 EnginePort.validateModel 注释的边界裁决）。
  */
 export type EngineModelSelectorInput = string | undefined;
 

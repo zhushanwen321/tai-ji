@@ -911,7 +911,7 @@ describe('subagentAction：skill 注入挂载（A2 MF-B）', () => {
     expect(client.prompt).toHaveBeenCalledWith(`/subagents start worker ${encodeDirectiveText('<<injected:干点活>>')}`)
   })
 
-  it('prompt 失败：notice 不发布（发送成功后时机契约的否定面）', async () => {
+  it('prompt 失败：notice 不发布（发送成功后时机契约的否定用例）', async () => {
     const { injector } = makeSpyInjector({ notices: [{ reason: 'skill_missing', skills: ['ghost'] }] })
     const { records, publish, client } = makeRecords({}, injector)
     ;(client.prompt as ReturnType<typeof vi.fn>).mockRejectedValue(new Error('pi reject'))

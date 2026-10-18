@@ -379,7 +379,7 @@ describe('ZcodeImportSource.listCandidates', () => {
     const drifted = reply.items.find((i) => i.sessionId === 'sess_-badid-0001')!
     expect(drifted.alreadyImported).toBe(false)
     expect(reply.items.find((i) => i.sessionId === 'sess_goodid-0002')!.alreadyImported).toBe(false)
-    // 导入侧同条件保持 fail-fast（降级只在列表展示面，幂等防线不放松）
+    // 导入侧同条件保持 fail-fast（降级只在列表展示侧，幂等防线不放松）
     await expect(catchCode(() => makeSource(dbPath3).prepareImport({ sourcePath: '', projectId: 'p', source: 'zcode', sessionId: 'sess_-badid-0001', dbPath: dbPath3 })))
       .resolves.toBe('import_invalid_session')
   })

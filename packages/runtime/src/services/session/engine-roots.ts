@@ -70,7 +70,7 @@ export function getEngineRootsSpawnEnv(projectRoot: string): Record<string, stri
 }
 
 /**
- * runtime 自身发现面的 env 补齐（幂等）：staged 引擎根存在且 env 未设时写入
+ * runtime 自身发现逻辑的 env 补齐（幂等）：staged 引擎根存在且 env 未设时写入
  * process.env——core 侧 discoverAndRegisterEngines 缺省读 process.env 的 L1 通道，
  * 打包态无 node_modules（L2 空），不补齐则 runtime ①级读引擎零命中。
  * 已有显式值永不覆盖（用户/上游显式配置优先）。

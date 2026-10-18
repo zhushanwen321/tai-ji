@@ -374,7 +374,7 @@ describe('点击入口与退化序登记（D7 + use-composer-bar-density 序 0�
     const w = mountComposer()
     await settle()
     const btn = w.find('[data-testid="composer-btw-button"]')
-    expect(btn.exists()).toBe(true) // 使用者可见面
+    expect(btn.exists()).toBe(true) // 使用者可见部分
 
     await btn.trigger('click')
     const drawer = getDrawerControlState()

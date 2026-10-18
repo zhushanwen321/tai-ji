@@ -1,7 +1,7 @@
 // scheduler 时间格式化器（下沉自 extensions/universal/scheduler/src/format.ts，U2 折叠器下沉）：
-// formatSchedule / formatRelativeTime 与 composer widget、taiji plugin 管理面共用同一份输出——
+// formatSchedule / formatRelativeTime 与 composer widget、taiji plugin 管理侧共用同一份输出——
 // 插件与扩展各持一份必然漂移（设计 D5 / §3.1.1）。只带纯函数：MS_PER_* 与 formatDuration
-// 随迁自带（原实现来自扩展 parsing.ts），cron 解析属 parsing 域留在扩展、不进本包（P7 依赖面）。
+// 随迁自带（原实现来自扩展 parsing.ts），cron 解析属 parsing 域留在扩展、不进本包（P7 依赖范围）。
 
 import type { ScheduleSpec, TaskKind } from './types.js'
 

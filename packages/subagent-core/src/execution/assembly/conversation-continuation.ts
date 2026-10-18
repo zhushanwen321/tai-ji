@@ -19,7 +19,7 @@
 //
 // 编排能力经 ContinuationHost 注入（service 闭包）——本模块可独立编译与单测；
 // 通知门（notifyGateAllowsDelivery）双闸消费：成功分支 route 前 + 失败分支独立
-// 载荷发出前（B#19 投递门照迁移），与 onRunSettled 的 status 终态面正交双闸。
+// 载荷发出前（B#19 投递门照迁移），与 onRunSettled 的 status 终态侧正交双闸。
 
 import type { AgentOutcome, ResumeAnchor } from "@zhushanwen/subagent-engine-sdk";
 
@@ -169,7 +169,7 @@ export interface ContinuationHost {
   finalizeRoundOutcome(record: ExecutionRecord, outcome: RoundSettlementOutcomeAlias): Promise<void>;
   /** 成功完成通知（toNotifyRecord 检查映射 + notify——正文权威 = record.result）。
    *  [collect 退役] 原 collectCoordinator.route（async 直通/sync 批缓冲双路）收敛为
-   *  单一 async 直通面。 */
+   *  单一 async 直通路径。 */
   notifyComplete(record: ExecutionRecord): void;
   /** 失败通知直投（独立构造载荷——不经 toNotifyRecord 检查映射，正文不读 record.result）。 */
   notifyRecord(record: BgNotifyRecord): void;
@@ -178,7 +178,7 @@ export interface ContinuationHost {
   /** [modeless 波1] message 资格的引擎能力轴判据（conversation 位；unsupported /
    *  未注册 = false）——与 record 形态无关（万物可续，无升级概念）。 */
   engineSupportsConversation(record: ExecutionRecord): boolean;
-  /** D4 revive 格的宿主面：revive 后的 record register + 迁移上报（entry 落盘）。 */
+  /** D4 revive 格的宿主侧：revive 后的 record register + 迁移上报（entry 落盘）。 */
   reviveClosedRecord(record: ExecutionRecord): void;
   /** [U4 / §3.2.3] reopen 降级原语接线（store.markReopened）：锚失效降级路径的同 id
    *  带历史重开——round 归零 + epoch+1 + stopReason=reopened + 新锚 binding 落盘。
@@ -340,7 +340,7 @@ export class ConversationContinuation {
    * 【终态检查 = 整体 early-return，先于一切分支】record 已终态化（close/cancel
    * 抢先）→ 直接返回：不 roundIdle（否则 close 终态化被 doFinalizeRoundToIdle 的
    * 「覆盖 closed 回滚为 running」机制回滚）、不通知、不 drain——S7 精确语义。
-   * notifyGate 门与此正交并存（门判 closedReason 编排面、检查判 status 终态面，
+   * notifyGate 门与此正交并存（门判 closedReason 编排侧、检查判 status 终态侧，
    * 两闸判据不同源不互替）。
    *
    * 【迟到检查（S1 P1 修复）】status 检查对「cancel settle → message revive 翻回
@@ -381,7 +381,7 @@ export class ConversationContinuation {
    * 同步检查段 + 占位（构造性单飞）：检查 throw 直达调用方（tool 错误范围——
    * async 函数内的 throw 会变 rejected promise，`void` 调用丢传导，故检查必须
    * 在同步段完成）；activeRunId 同步占位，dispatchRoundAsync 的 await 窗内
-   * 重入被拒（单写者构造性保证的实现面）。
+   * 重入被拒（单写者构造性保证的实现侧）。
    *
    * [U4 / §3.2.3 锚判据] 续轮锚检查从「无锚即拒」切换为锚可解析性分流：
    *   - pendingReopenSummary 非空（reviveOrThrow 翻边前已 markReopened 的 idle-message
@@ -795,7 +795,7 @@ export class ConversationContinuation {
       // revive 迁移上报），不再静默丢弃。桥接期轮终保持 running 时本分支不可达；
       // 翻边后 settle 尾部 drain 必经（dispatchRoundGuarded 的 running 检查由此满足）。
       // revive 同步拒绝（升级 gate / CAS 竞态——当前形态不可达，防御保留）走下方
-      // 既有丢弃通知面（[A2] 错误就地转面语义不变）。
+      // 既有丢弃通知侧（[A2] 错误就地转面语义不变）。
       if (this.record.status !== "running") {
         this.reviveOrThrow();
       }
@@ -922,7 +922,7 @@ export class ConversationContinuation {
         // [W1/R1 D1a] pi 与 zcode 同构两分支（原 zcode 无世代推进静默降级分支随
         // 宿主闭包 transcriptAnchorOf 单点分派接线删除——分支的存在前提「闭包对
         // zcode 恒 false」已消失）。false = CAS 拒绝（竞态翻位）或 binding 持久化
-        // 失败（epoch 硬要求，markReopened 已回滚内存面）——两者 record 都保持
+        // 失败（epoch 硬要求，markReopened 已回滚内存侧）——两者 record 都保持
         // idle 可重试，响亮上抛（Recovery 指引同款：重试 message 即可，写失败详情
         // 见 markReopened warn）。
         throw new Error(
@@ -956,7 +956,7 @@ export class ConversationContinuation {
     record.closedReason = undefined;
     record.endedAt = undefined;
     record.stopReason = undefined;
-    // revive 宿主面：register（跨重启重建后不在内存的形态）+ 迁移上报（entry 落盘，
+    // revive 宿主侧：register（跨重启重建后不在内存的形态）+ 迁移上报（entry 落盘，
     // live/reload 视图同步）。
     this.host.reviveClosedRecord(record);
     // [U5] 寻回挂点在 onMessage 入口（独立于 revive 格——轮间 running 的 archived

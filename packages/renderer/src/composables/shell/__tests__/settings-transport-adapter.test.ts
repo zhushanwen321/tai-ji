@@ -5,7 +5,7 @@
  *
  * 1. 八元转发矩阵（装配不变量，u17 验收）：adapter import 源 = @/api 门面八元
  *    （config/model/extension/settings/quota/preset/usage/session，VITE_MOCK 感知），
- *    SettingsTransport 接口面逐方法转发门面对应导出。矩阵键 satisfies
+ *    SettingsTransport 接口清单逐方法转发门面对应导出。矩阵键 satisfies
  *    Record<keyof SettingsTransport, ...> 与接口同宽——接口新增/改名方法不进矩阵
  *    = 编译错，防回退 core/transport 直连、防新转发方法漏断言。逐方法断言三透传：
  *    转发目标（域.成员）、探针参数、返回值（请求 resolve 哨兵 / 订阅取消函数）。
@@ -118,7 +118,7 @@ describe('settings-transport-adapter · @/api 门面八元全量转发矩阵（u
   }
 
   /**
-   * 转发矩阵 = SettingsTransport 接口面的镜像文档。每条：transport.<方法> →
+   * 转发矩阵 = SettingsTransport 接口清单的镜像文档。每条：transport.<方法> →
    * [门面域, 门面成员, 探针参数]，与 settings-transport-adapter.ts 逐行一一对应；
    * satisfies 键集与接口 keyof 同宽，adapter 新增转发而矩阵缺行 = 编译错。
    */
@@ -281,7 +281,7 @@ describe('settings-transport-adapter · @/api 门面八元全量转发矩阵（u
     onAuthError: fwd('config', 'onAuthError', [probeHandler], (t, h) => t.onAuthError(h)),
   } satisfies Record<keyof SettingsTransport, ForwardEntry>
 
-  it('SettingsTransport 接口面全量方法逐条转发：目标 = @/api 门面对应导出，参数与返回值原样透传（防回退 core/transport 直连）', async () => {
+  it('SettingsTransport 接口清单全量方法逐条转发：目标 = @/api 门面对应导出，参数与返回值原样透传（防回退 core/transport 直连）', async () => {
     // 每域一个 Proxy：任意成员访问都返回（并登记）同一个 spy——转发目标域.成员由此可观测。
     // 若矩阵行登记的 facade 与 adapter 实际访问的成员不符，登记的 spy 收不到调用 → 该行红；
     // 反向断言（registry 总数 = 矩阵条目数）再兜住「adapter 访问了矩阵之外的门面成员」。
@@ -341,7 +341,7 @@ describe('settings-transport-adapter · @/api 门面八元全量转发矩阵（u
     // 反向断言：adapter 没有矩阵之外的任何门面成员访问（registry 恰好登记矩阵条目数个 spy）
     expect(registry.size).toBe(Object.keys(FORWARD_MATRIX).length)
 
-    // 同宽断言（运行期防线）：矩阵键集必须与 transport 实际转发面一致——adapter 新增转发
+    // 同宽断言（运行期防线）：矩阵键集必须与 transport 实际转发范围一致——adapter 新增转发
     // 方法而矩阵缺行 = 此处红。本测试文件未入 renderer typecheck-test 白名单，上方 satisfies
     // 编译期同宽暂不生效，以此断言兜底（typecheck 接入后两者互为冗余防线）。
     expect(Object.keys(FORWARD_MATRIX).sort()).toEqual(Object.keys(transport).sort())

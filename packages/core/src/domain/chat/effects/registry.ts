@@ -166,9 +166,9 @@ function isLastAssistantStreaming(
  * 副作用顺序说明：6 处调用点中 5 处（text_delta / thinking_start / thinking_delta /
  * tool_call_start / tool_call_update）的 payload 读取与派生构造（含 randomUuid 兜底 id、
  * Date.now 生成）整体前移到 guard 之前，与原内联顺序（guard → 定位 → 读 payload → 更新）
- * 相比是顺序前移而非一致——纯读取、无观察面调用，故与基线行为等价；留在 update 闭包内
+ * 相比是顺序前移而非一致——纯读取、无观察点调用，故与基线行为等价；留在 update 闭包内
  * 的读取仅 tool_call_update 的 readDetail（thinking_end 无 payload 读取）。约束：前移段
- * 不得加入有观察面的调用（console/log/事件 emit），否则破坏与基线的顺序等价。
+ * 不得加入有观察点的调用（console/log/事件 emit），否则破坏与基线的顺序等价。
  */
 function updateStreamingAssistant(
   ctx: Pick<MessageEffectContext, 'messages'>,

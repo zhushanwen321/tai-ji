@@ -22,7 +22,7 @@
 //
 // 边界：壳入口（tool action / 命令 verb）与 D14 args 校验归 U3；本文件是 core
 // 编排原语，Deps 复用 LifecycleDeps。record 事件流 → 复活聚合的纯派生视图重建轴在
-// ./resume-run-rebuild.ts（本文件编排面只消费 rebuildRunFromRecord 单点）。
+// ./resume-run-rebuild.ts（本文件编排侧只消费 rebuildRunFromRecord 单点）。
 // canonical JSON 工具在 ./canonical-json.ts
 // （独立模块：消费方含 pump 的回放比对与 terminal-actions 的 agent-started 入参
 // 写入 journal 记录，两侧间已有 pump → terminal-actions 依赖边，工具留在任一侧都会成环）。

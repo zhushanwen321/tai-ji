@@ -42,7 +42,7 @@
 
 ### ④ engine-manifest modelCatalog 三态
 
-`packages/subagent-core/src/execution/engine/engine-manifest.ts:192-225`（`parseModelCatalog`）：缺省 → `undefined`（不注入——「无模型清单」形态可达，源码注释原词「无枚举面」）；`null` → `null`（合法等价省略）；对象 → `{ dynamic: 缺省 true, models: [{ id, aliases?, canonicalRef? }] }`。现状：pi 与 zcode 两引擎 manifest 均声明 `{ dynamic: true, models: [] }`（各自 package.json `taiji.subagentEngine`）——动态清单、无静态条目。
+`packages/subagent-core/src/execution/engine/engine-manifest.ts:192-225`（`parseModelCatalog`）：缺省 → `undefined`（不注入——「无模型清单」形态可达，即「无枚举形态」）；`null` → `null`（合法等价省略）；对象 → `{ dynamic: 缺省 true, models: [{ id, aliases?, canonicalRef? }] }`。现状：pi 与 zcode 两引擎 manifest 均声明 `{ dynamic: true, models: [] }`（各自 package.json `taiji.subagentEngine`）——动态清单、无静态条目。
 
 ### settings / 派发消费链现状
 
@@ -117,7 +117,7 @@ api 取值链：provider 级 `api` → 首模型 `api` → catalog 声明。
 
 - 校验链与凭据注入链两个消费方**零逻辑改动**即同时看到 pi 映射条目（wrapper 的补注入段天然把 providerRules 里带 apiKey+baseUrl 的条目合成为 app-server 注册表条目）；
 - 不新增 env 键、不加第二注入通道——单数据源；
-- 备选否决记录：**(a) 直写 `~/.zcode/v2/provider_config.json` 真同步**——taiji 写外部应用管理面文件，与 ZCode GUI 互为多写方（last-write-wins 互踩、回滚语义缺失），违数据目录隔离纪律；**(b) 新增独立 env 键把 pi providers 直传 wrapper 特殊处理**——wrapper 与引擎校验链各加一套第二源合并逻辑，双源双写。两者都不取。
+- 备选否决记录：**(a) 直写 `~/.zcode/v2/provider_config.json` 真同步**——taiji 写外部应用管理侧文件，与 ZCode GUI 互为多写方（last-write-wins 互踩、回滚语义缺失），违数据目录隔离纪律；**(b) 新增独立 env 键把 pi providers 直传 wrapper 特殊处理**——wrapper 与引擎校验链各加一套第二源合并逻辑，双源双写。两者都不取。
 
 ### 二、settings 页 per-engine 默认模型与消费链
 
@@ -167,14 +167,14 @@ engineModel = isPiRoute ? undefined : (opts.model ?? agentConfig?.model ?? engin
 
 ### 四、风险与边界登记
 
-- **zcode 侧 schema 漂移**：zcode 升级若改 `provider_config.json` 结构，映射产物失效。失败信号显式（引擎校验 `model_not_available` / 注册表缺条目报错，不静默坏）——与既有漂移面①（`appserver-launcher.ts:21-23`）同级姿态，登记为 wrapper 漂移面③。
+- **zcode 侧 schema 漂移**：zcode 升级若改 `provider_config.json` 结构，映射产物失效。失败信号显式（引擎校验 `model_not_available` / 注册表缺条目报错，不静默坏）——与既有漂移风险①（`appserver-launcher.ts:21-23`）同级姿态，登记为 wrapper 漂移风险③。
 - **api 协议值域是推断**：zcode `api.type` 完整值域未从官方 schema 核实（现状②推断标注）；若 zcode 实际支持更多协议，映射表可扩，不影响结构。
 - **OAuth 形态 provider**：pi 的 OAuth 凭据（auth.json type 非 api-key 形态）不可映射为 zcode api-key 条目——映射期按「凭据形态不可转」跳过 + warn。
 - **多写方**：合并副本唯一写方 = runtime 同步模块；`subagents/config.json` 既有跨进程锁形态沿用（`engineDefaults` 进同一锁域）。
 
 ## 新发现登记（2026-10-11 核实，待裁决）
 
-**pi 引擎的 provider 配置目录与 taiji 主会话不同源**。env 链核实：`ENV_WHITELIST_PREFIXES` 不含 `PI_` 前缀（`packages/shared/src/constants.ts:74-85`），Electron 主进程 spawn runtime 不注入 `PI_CODING_AGENT_DIR`（`apps/electron/main/supervisor/process-control.ts:423-430`、`safe-env.ts`）；runtime 派发 pi 引擎时 EngineClient 构造不带 `baseEnv/identityEnv`（`engine-inspect-package.ts:197-210`，基座 = `{...process.env}`）→ pi 引擎 CLI 及其孙 pi 进程按 `resolvePiAgentDir` 缺省回落 **`~/.pi/agent`**（`engine-query.ts:50-54`），而 taiji 主会话 provider 配置在 `<dataDir>/agent/`（`pi-paths.ts:63-69`）。两者不是同一份配置（本机实测内容亦不同）。影响：用户在 taiji settings 配的 provider 对 pi 引擎派发不生效，pi 引擎用的是独立 pi 的配置。本期方案不处理（zcode 同步源取 taiji 数据目录侧，与 taiji 管理面一致）；完整收敛「provider 来源统一」需后续裁决是否给 pi 引擎注入 `PI_CODING_AGENT_DIR=<dataDir>/agent`（pi 会话内 extension 派发形态本就携带该 env，两形态当前行为不一致）。另注：pi 引擎内部对 env 的注释假设（`engine-query.ts:45-48`「taiji 托管形态下宿主注入的托管目录」）在 runtime 派发形态下不成立。
+**pi 引擎的 provider 配置目录与 taiji 主会话不同源**。env 链核实：`ENV_WHITELIST_PREFIXES` 不含 `PI_` 前缀（`packages/shared/src/constants.ts:74-85`），Electron 主进程 spawn runtime 不注入 `PI_CODING_AGENT_DIR`（`apps/electron/main/supervisor/process-control.ts:423-430`、`safe-env.ts`）；runtime 派发 pi 引擎时 EngineClient 构造不带 `baseEnv/identityEnv`（`engine-inspect-package.ts:197-210`，基座 = `{...process.env}`）→ pi 引擎 CLI 及其孙 pi 进程按 `resolvePiAgentDir` 缺省回落 **`~/.pi/agent`**（`engine-query.ts:50-54`），而 taiji 主会话 provider 配置在 `<dataDir>/agent/`（`pi-paths.ts:63-69`）。两者不是同一份配置（本机实测内容亦不同）。影响：用户在 taiji settings 配的 provider 对 pi 引擎派发不生效，pi 引擎用的是独立 pi 的配置。本期方案不处理（zcode 同步源取 taiji 数据目录侧，与 taiji 管理侧一致）；完整收敛「provider 来源统一」需后续裁决是否给 pi 引擎注入 `PI_CODING_AGENT_DIR=<dataDir>/agent`（pi 会话内 extension 派发形态本就携带该 env，两形态当前行为不一致）。另注：pi 引擎内部对 env 的注释假设（`engine-query.ts:45-48`「taiji 托管形态下宿主注入的托管目录」）在 runtime 派发形态下不成立。
 
 ## 实现要点（届时从这起步）
 

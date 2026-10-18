@@ -336,7 +336,7 @@ describe('B11 登记清单治理（内存泄漏审计中危#9：seenIds 增量�
     pushAppend(SID_A, [chainEntry('e4999', 'e4998')], 'e4999')
     expect(partitionOf(SID_A).truncated).toBe(false)
 
-    // 第 5001 条：停止追加 + truncated 置位；leafId 仍滚动（单字符串非内存面，保 core 边界计算输入最新）
+    // 第 5001 条：停止追加 + truncated 置位；leafId 仍滚动（单字符串不占内存，保 core 边界计算输入最新）
     pushAppend(SID_A, [chainEntry('e5000', 'e4999')], 'e5000')
     expect(partitionOf(SID_A).entries).toHaveLength(5000)
     expect(partitionOf(SID_A).truncated).toBe(true)

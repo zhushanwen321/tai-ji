@@ -65,7 +65,7 @@ import { getPiAgentDir } from '../../infra/pi/pi-paths.js'
 
 // ── WorkflowDag 族双侧等值编译锁（core ↔ shared 双向机器锁）──────────────────
 //
-// core（定义源）与 shared（u2 协议冻结面）的 WorkflowDag 族逐字段等值跟随、双侧
+// core（定义源）与 shared（u2 协议冻结部分）的 WorkflowDag 族逐字段等值跟随、双侧
 // 同 commit 同步（同步义务原文见 workflow-dag-parser.ts 头注释「类型跟随锚」段）——
 // core 包不依赖 @taiji/shared，物理单源不允许。既有锁定只覆盖「shared 扩必选字段」
 // 方向（本文件 reply 组装赋值点 typecheck 红）；core 侧扩**可选**字段时互赋值两
@@ -186,12 +186,12 @@ function eventEnvelope(event: WorkflowRunEvent): Pick<WorkflowRunEventEntry, 'ts
   }
 }
 
-/** phase-started 条目：phase 透传（无截断面）。 */
+/** phase-started 条目：phase 透传（无截断情形）。 */
 function projectPhaseStarted(event: Extract<WorkflowRunEvent, { type: 'phase-started' }>): WorkflowRunEventEntry {
   return { type: 'phase-started', ...eventEnvelope(event), phase: event.phase }
 }
 
-/** agent-retrying 条目：重试定位与退避字段透传（无截断面）。 */
+/** agent-retrying 条目：重试定位与退避字段透传（无截断情形）。 */
 function projectAgentRetrying(event: Extract<WorkflowRunEvent, { type: 'agent-retrying' }>): WorkflowRunEventEntry {
   return {
     type: 'agent-retrying',
@@ -203,7 +203,7 @@ function projectAgentRetrying(event: Extract<WorkflowRunEvent, { type: 'agent-re
   }
 }
 
-/** phase-settled 条目：phase 透传（无截断面）。 */
+/** phase-settled 条目：phase 透传（无截断情形）。 */
 function projectPhaseSettled(event: Extract<WorkflowRunEvent, { type: 'phase-settled' }>): WorkflowRunEventEntry {
   return { type: 'phase-settled', ...eventEnvelope(event), phase: event.phase }
 }
@@ -290,7 +290,7 @@ function projectRunCreated(event: Extract<WorkflowRunEvent, { type: 'run-created
     runId: event.runId,
     workflowName: event.workflowName,
     // 读侧回退：早于 argsSummary 写侧字段的存量 run-created 行以 undefined 放行
-    // （parseWorkflowRunEventFileLine 检查面不含该字段）——回退空串对齐 shared 必填
+    // （parseWorkflowRunEventFileLine 检查侧不含该字段）——回退空串对齐 shared 必填
     // 契约，防 reply JSON 序列化丢键后 renderer 渲染字面 undefined。
     argsSummary: event.argsSummary ?? '',
     ...(args !== undefined ? { args } : {}),
@@ -351,7 +351,7 @@ function projectRunResumed(event: Extract<WorkflowRunEvent, { type: 'run-resumed
   }
 }
 
-/** model-override 条目：覆盖记账载荷透传（小载荷无截断面）。 */
+/** model-override 条目：覆盖记账载荷透传（小载荷无截断情形）。 */
 function projectModelOverride(event: Extract<WorkflowRunEvent, { type: 'model-override' }>): WorkflowRunEventEntry {
   return {
     type: 'model-override',

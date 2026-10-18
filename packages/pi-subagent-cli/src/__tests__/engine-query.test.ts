@@ -101,7 +101,7 @@ describe("resolvePiAgentDir", () => {
 // ── listPiModels ──
 
 describe("listPiModels", () => {
-  it("两数据文件都缺 → null（无枚举面语义，RemoteEngine 消费契约对偶）", () => {
+  it("两数据文件都缺 → null（无枚举情形语义，RemoteEngine 消费契约对偶）", () => {
     expect(listPiModels(fixtureDirOrAbsent())).toBeNull();
   });
 
@@ -114,7 +114,7 @@ describe("listPiModels", () => {
     ]);
   });
 
-  it("无凭据 provider 被过滤；全部无凭据 → []（有配置面无凭据模型语义）", () => {
+  it("无凭据 provider 被过滤；全部无凭据 → []（有配置侧无凭据模型语义）", () => {
     writeFixture("models.json", MODELS_JSON);
     writeFixture("auth.json", {});
     expect(listPiModels(fixtureDir!)).toEqual([]);
@@ -243,7 +243,7 @@ describe("EngineProtocolServer 查询范围接线（分发位路由 engine-query
     expect(resp.error?.code).toBe("engine_model_unknown");
   });
 
-  it("两数据文件都缺的 agentDir → listModels 应答 {models: null}（无枚举面）", async () => {
+  it("两数据文件都缺的 agentDir → listModels 应答 {models: null}（无枚举情形）", async () => {
     const resp = await queryServer("listModels");
     expect(resp.result).toEqual({ models: null });
   });

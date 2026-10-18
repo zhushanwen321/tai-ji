@@ -494,7 +494,7 @@ test('T2: 关闭隔离——关第二实例后其进程消失、条目回 1、�
     await runInTerminal(h.page, T2_MARK.cmd)
     await expectTerminalOutput(h.page, T2_MARK.out)
 
-    // 关闭沿滞留命令提示 / 三路径资源释放细节由 u2 单测承载（impl-plan §4.4 A2）；本轨锚用户可见面
+    // 关闭沿滞留命令提示 / 三路径资源释放细节由 u2 单测承载（impl-plan §4.4 A2）；本轨锚用户可见部分
     // + 真机进程级（上）与 activeElement（上）两处 L3 判据
   } finally {
     await teardownHarness(h)

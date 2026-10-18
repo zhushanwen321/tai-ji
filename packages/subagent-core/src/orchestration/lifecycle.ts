@@ -23,9 +23,9 @@
  * - onExit(code, handle) → handleWorkerExit(run, code, handle, deps, handlers)
  * （G-025：handle.isCurrent 检查内化在 handleWorkerExit 内）
  *
- * **[D15] 发起面接线**：abortRun / terminateRunningRuns / recoverCrashedRuns 三路
+ * **[D15] 发起侧接线**：abortRun / terminateRunningRuns / recoverCrashedRuns 三路
  * 发起全部改经 terminal-actions 终局编排入口（第四路 startupSweep 在 u1b 接线、
- * 第五路正常终局链在 pump 消息面）——「谁在什么条件下把 run 推向哪个终局/中断」
+ * 第五路正常终局链在 pump 消息侧）——「谁在什么条件下把 run 推向哪个终局/中断」
  * 可在一处审计。
  *
  * **G3-001**（run 一次性生命周期）：AbortController 一次性无法复用，runtime 释放后
@@ -166,7 +166,7 @@ export function makeHandlers(run: WorkflowRun, deps: LifecycleDeps): WorkerHandl
   // [OR-7] per-run deps 视图：包装 onRunDone，把「run 终态」转译为「移除 signal abort
   // listener」。worker-message-pump 全部终态路径（handleReturn / handleWorkerError /
   // handleScriptError / handleWorkerExit / 预算终止 / time_limited / [OR-2] rebuild
-  // 失败收敛——均经 finalizeRun）都经 handlers 调用链消费本视图——消息面终态在此
+  // 失败收敛——均经 finalizeRun）都经 handlers 调用链消费本视图——消息侧终态在此
   // 统一收尾；abortRun / terminateRunningRuns 两个 lifecycle 自有终态路径另行显式 dispose。
   //
   // 视图必须经 Object.create 原型链承载、禁止 object spread：Interface 层注入的
@@ -422,7 +422,7 @@ export async function runWorkflow(
   // （表外转移 fail-fast 不补投）冲突。await 留在 store.save 之后原位，保持
     // 「runWorkflow 返回 ⟹ 派生视图可查」语义不变。
   // 取舍登记：workerHost.start 抛错路径上 created 帧可能已落 journal（孤儿首帧，
-  // runId 不复用、无 fold 消费方，可接受）；失败 = journal IO 错误，取证面降级
+  // runId 不复用、无 fold 消费方，可接受）；失败 = journal IO 错误，取证侧降级
   // 不阻断创建主链（对齐 SW-DATA-3：error 留痕后继续——此时该 run 的后续事件因
   // fold 停在 created 而表外转移 fail-fast，事件丢失可归因到本条 error 日志）。
   // 宿主会话锚现读（dmg-r2-5：run-created 帧 rootSessionId 的载荷源——同 cwd 多
@@ -678,7 +678,7 @@ export interface RecoverCrashedRunsHooks {
 }
 
 /**
- * recoverCrashedRuns 的计数结果（宿主启动日志/健康面用）。
+ * recoverCrashedRuns 的计数结果（宿主启动日志/健康检查侧用）。
  *
  * `recovered` 只计 running 遗留被中断收编的条数；`loaded` 是 loadAll
  * 重新加载的全量数（含 done 历史）——两者分开口径，避免宿主把「重新加载 N 条」
@@ -702,7 +702,7 @@ export interface RecoverCrashedRunsResult {
  * 1. **loadAll**：从 store 全量重新加载运行状态快照（[D1] record 流 fold 重建）。失败向上抛
  *    ——fail-fast 策略（pi 的 storeHealthy=false 停初始化）是宿主职责，调用方
  *    catch 后自行决定；
- * 2. **中断收编**（[D15] 发起面第三路，经 terminal-actions.interruptRun 入口）：
+ * 2. **中断收编**（[D15] 发起侧第三路，经 terminal-actions.interruptRun 入口）：
  *    残留 running run（进程被杀，worker 必死）逐个落 run-interrupted 转移事件
  *    （[D2] running → interrupted 暂停态——崩溃 ≠ 失败，可 resume）+ 中断条目
  *    补写 + 宿主事件（hooks）。**v1 兼容尾段已删除**（[D15] 豁免条款删除：原

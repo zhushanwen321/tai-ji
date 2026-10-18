@@ -1,9 +1,9 @@
 /**
- * useShieldsViewSync —— shieldsView 遮蔽面全量上报 → `browser:shields`
+ * useShieldsViewSync —— shieldsView 遮蔽视图全量上报 → `browser:shields`
  * （display-containers §5.1 规则 6② / §6.7 view 遮蔽族 / §7.4 谓词重算触发范围）。
  *
  * 背景：主进程 display-gate 的 show 统一谓词含「无相交 shieldsView 面」一项，faces 事实
- * （哪些遮蔽面开着、按哪一档、几何在哪）由 renderer 上报——模态表面聚合（§6.7）只有查询
+ * （哪些遮蔽视图开着、按哪一档、几何在哪）由 renderer 上报——模态表面聚合（§6.7）只有查询
  * 接口（openShieldingSurfaces），本 composable 是它的生产消费端：把聚合报告映射为
  * `{ faces }` payload 经 IPC 通道上报，S9「权限确认被原生 view 盖住」的解除链路。
  *
@@ -35,7 +35,7 @@ import type { ShieldsFacesPayload } from '@taiji/shared'
 import { openShieldingSurfaces } from '@/composables/features/app/modal-surface-registry'
 import { browserSetShields } from '@/lib/ipc'
 
-/** 收集当前遮蔽面全集（§7.4 payload 形状：fullscreen 面不带 rect；非全屏面带实测 rect；
+/** 收集当前遮蔽视图全集（§7.4 payload 形状：fullscreen 遮罩不带 rect；非全屏遮罩带实测 rect；
  *  rect 缺失（成员未提供几何读点）按缺省省略——主进程保守按相交处理） */
 function collectFaces(isOpen: () => boolean, current: () => unknown): ShieldsFacesPayload {
   // overlay 开合/内容切换触发范围（§7.4 谓词重算触发范围同源）：读 SSOT 纳入响应式依赖

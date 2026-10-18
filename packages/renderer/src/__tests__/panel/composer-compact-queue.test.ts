@@ -72,7 +72,7 @@ vi.mock('@/stores/session', () => composerSessionStoreModule())
 
 // ── ComposerInput mock：emit input 设 draft + emit keydown Enter 触发 onSend ──
 // ComposerInput mock 单源 helper 基型（expose 面含 getText）；QueueBubble 不 stub：
-// 队列区 DOM 断言走真组件（单源化后行渲染是 u3c 验收面）——从 helper stubs 排除
+// 队列区 DOM 断言走真组件（单源化后行渲染是 u3c 验收范围）——从 helper stubs 排除
 const { lastInputText, ComposerInputMock } = makeComposerInputMock()
 const { QueueBubble: _queueReal, ...childStubsNoQueue } = composerChildStubs
 const otherStubs = {

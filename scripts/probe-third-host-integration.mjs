@@ -211,7 +211,7 @@ async function partA() {
     String(core.normalizeRef("/x/../etc/passwd.md", ".md")),
   );
   check(
-    "S1③ normalizeRef('/x/../y.js', '.js') 拒绝（workflow 同面）",
+    "S1③ normalizeRef('/x/../y.js', '.js') 拒绝（workflow 同一侧）",
     core.normalizeRef("/x/../y.js", ".js") === null,
     String(core.normalizeRef("/x/../y.js", ".js")),
   );

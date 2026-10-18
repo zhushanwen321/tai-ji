@@ -75,7 +75,7 @@ node scripts/acceptance/plan-mode/mock-pi/restore-mock-pi.mjs
 | `repro-dismiss-no-persist` | F1/F3 复现（现版 cancelled 分支不落盘） |
 | `repro-exec-form-pending` | F5 复现（approve 后先清 reviewState 再挂执行方式表单三档） |
 
-**能力面**：命令应答族（ok / **error envelope** / get_messages）· select 登记延迟参数化（config/`TAIJI_MOCK_PI_SELECT_REGISTER_DELAY_MS` 双通道）· 杀进程/崩溃注入（`onPrompt.crash` / `abortMode: crash` / `onAbort.exit`）· `extension_ui_response` 消费链（respond → 落盘改态 → 第二 select）· marker 字面量与 extension-protocol 的漂移自检（selftest `marker-literal-drift`）。
+**能力清单**：命令应答族（ok / **error envelope** / get_messages）· select 登记延迟参数化（config/`TAIJI_MOCK_PI_SELECT_REGISTER_DELAY_MS` 双通道）· 杀进程/崩溃注入（`onPrompt.crash` / `abortMode: crash` / `onAbort.exit`）· `extension_ui_response` 消费链（respond → 落盘改态 → 第二 select）· marker 字面量与 extension-protocol 的漂移自检（selftest `marker-literal-drift`）。
 
 ### S12 恢复纪律（验收结束恢复三证，缺一不算恢复）
 
@@ -142,7 +142,7 @@ node scripts/acceptance/plan-mode/cdp/assert-window.mjs --kind suppress --dry-ru
 
 产物 = `.tmp/dev-flow/mock-pi-repro-baseline.md`（生成命令见上「自测入口④」，可重复生成）。
 层级声明：F1-F5 各条 = 协议/持久/派生层**实跑**（mock pi 剧本 + `derive-probe.mts` 直接调用现版
-`scanPlanStateEntries` / `derivePlanStage`，零镜像面）+ **GUI 层构造法**（真机复现步骤，归 U6 执行）；
+`scanPlanStateEntries` / `derivePlanStage`，零镜像）+ **GUI 层构造法**（真机复现步骤，归 U6 执行）；
 偏离点与原因在基线文档「deviations 说明」节。
 
 ## 边界与纪律

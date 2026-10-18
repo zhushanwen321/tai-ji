@@ -9,7 +9,7 @@
 //     契约，协议漂移不再降级保底，直接报可操作错误（提示核对版本 / 重启 / 改用 engine: pi）。
 //   - **删除 HOME 池化，共享宿主 HOME**：spawn env 不覆写 HOME，app-server 共享
 //     宿主 ~/.zcode/（凭据经 appserver-launcher fs 拦截注入——cli config 读取重定向
-//     为「真实文件 + v2 provider」合并，同 id 时 v2 优先，机制与漂移面见该文件头注；
+//     为「真实文件 + v2 provider」合并，同 id 时 v2 优先，机制与漂移风险见该文件头注；
 //     登录态轮换后常驻连接需引擎进程重启才用新凭据）。HOME 依赖副作用（如 pnpm
 //     store 路径随 HOME 翻转）随之消失。
 //   - **会话库隔离（2026-09，设计 zcode-session-db-isolation.md）**：会话不再与 GUI
@@ -480,7 +480,7 @@ export class ZcodeEngine implements EnginePort {
       // 等，真机探针实证每 ~1s 一帧）→ activity 事件（零载荷纯活性信号——宿主无进展
       // 守护对任何事件类型刷新；reducer no-op、不落 journal）。zcode 引擎声明
       // conversation:"cold"（续聊 = session-store 冷恢复重建 + 新 run + resume 锚点，
-      // 无热 steering/chat 域接线），run 域是唯一发射面。
+      // 无热 steering/chat 域接线），run 域是唯一发射点。
       onActivity: () => ctx.onEvent?.({ type: "activity" }),
       onSessionCreated: (sessionId) => {
         currentSessionId = sessionId;
@@ -529,7 +529,7 @@ export class ZcodeEngine implements EnginePort {
    * [attemptAppServerTurn 拆分] 失败分流（catch 半边）：
    * - signal 已 aborted → 中止终态收尾；
    * - [P0-1 U4] 连接崩溃收割形态（failAllTurns 的错误，D6 可重试形态）判据：
-   *   非 RPC error（服务端无明确应答——有应答即精确错误归类，非瞬时崩溃面）且
+   *   非 RPC error（服务端无明确应答——有应答即精确错误归类，非瞬时崩溃）且
    *   conn 不存活。时序可靠性：catch 时刻紧随 onClose 收割，连接重建仅由
    *   conn.request 惰性触发——本链路中 runTurn finally 的 closeSession 对死连接
    *   短路（channel 侧 !alive 检查）、stop 只属 abort 链（已被 signal.aborted
@@ -644,7 +644,7 @@ export class ZcodeEngine implements EnginePort {
    * workspace.workspacePath 按任务传递——D10 基线不预设任务级进程 cwd）。
    * spawn 经 fs 拦截 wrapper（appserver-launcher：cli config 读取重定向为
    * 「真实文件 + v2 provider 注入」——CLI 形态 app-server 在共享宿主 HOME 下的
-   * 唯一凭据供数通路，机制与漂移面见该文件头注）。
+   * 唯一凭据供数通路，机制与漂移风险见该文件头注）。
    */
   private ensureAppServerRuntime(): AppServerRuntime {
     if (this.appserverRuntime !== undefined) return this.appserverRuntime;
@@ -735,7 +735,7 @@ export class ZcodeEngine implements EnginePort {
    * [R1 D6 主体] 引擎停机路径：①fire 全部在途会话的 session/close 帧（不等待
    * 应答——D6① 顺序规定：close 帧必须先于 SIGTERM，否则对面来不及处理即被杀）→
    * ②同步 SIGTERM（conn.shutdown 调用内 killChain 前缀同步执行——同步部分在返回
-   * Promise 前完成）→ ③grace → SIGKILL（异步面，Promise resolve 于进程退出）。
+   * Promise 前完成）→ ③grace → SIGKILL（异步侧，Promise resolve 于进程退出）。
    * 幂等：运行时字段取走即置空，二次调用零副作用；dispose 后首个 run 经
    * ensureAppServerRuntime 自动重建（与崩溃重建同一代码路径，不变量 4）。
    */
@@ -758,7 +758,7 @@ export class ZcodeEngine implements EnginePort {
       }
     }
     // ②③ 同步 SIGTERM（killChain 前缀在 shutdown 调用内同步执行）→ grace → SIGKILL
-    //（异步面，resolve 于进程退出）。channel 退订放在崩溃收割之后（exit→close 窗口
+    //（异步侧，resolve 于进程退出）。channel 退订放在崩溃收割之后（exit→close 窗口
     //竞态的修复体，见 shutdownRuntimeAndDisposeChannel——先退订会让在途 turn 失去
     //崩溃收割终局）
     await this.shutdownRuntimeAndDisposeChannel(rt);
@@ -880,7 +880,7 @@ export class ZcodeEngine implements EnginePort {
    * [engine-ref-translation D1] 派发期模型 ref 翻译（EnginePort 可选成员实装）：
    * pi 词汇 ref → zcode 原生 ref（zai-coding-cn/* → account:bigmodel-individual-*
    * 大小写归一，2026-10-14 用户裁决），其余透传。编排层在 record stamp 前调用——
-   * record/上报面呈现实际发给引擎的 ref；翻译失败抛错 = 显式失败（不静默回落）。
+   * record/上报侧呈现实际发给引擎的 ref；翻译失败抛错 = 显式失败（不静默回落）。
    * 幂等：翻译产物（account:/个人 id）再入恒等，引擎内 resolveZcodeModelRef 的
    * 同名翻译分支零冲突。
    */
@@ -958,7 +958,7 @@ export class ZcodeEngine implements EnginePort {
     if (typeof sessionId === "string" && typeof dbPathRaw === "string") {
       // 绝对路径 tier1 白名单（判定内聚本引擎包——runtime 侧经 registerNativeSessionReader
       // 协议 read 复用本方法同一判定结果，W11 后唯①级放行点）：handle/
-      // record 来自 append-only JSONL（不可信面），仅放行 zcodeDbPathAllowlist
+      // record 来自 append-only JSONL（不可信来源），仅放行 zcodeDbPathAllowlist
       // 集合内精确匹配（隔离库现役 + 宿主库存量兼容；dataDir 与写侧 handle 回填
       // 同源 deps.engineDataDir），其余绝对路径拒绝 ①级 sqlite 读取、降 journal
       // 重放——防任意文件读
@@ -973,7 +973,7 @@ export class ZcodeEngine implements EnginePort {
         }
       } else {
         // 相对路径（池时代旧 record）分支：dbPathRaw 同样来自 append-only JSONL
-        // （不可信面），含 `..` 段可经 join 归一化逃逸池目录、绕过绝对路径分支的
+        // （不可信来源），含 `..` 段可经 join 归一化逃逸池目录、绕过绝对路径分支的
         // 封闭白名单——join 后 resolve 归一化并做池目录前缀包含性校验，越界按非
         // 白名单同款 warn + 拒绝 ①级、降 journal（防任意文件读的检查缺口补齐）。
         const poolDir = path.resolve(
@@ -1107,7 +1107,7 @@ export class ZcodeEngine implements EnginePort {
  * 返回 undefined 走无前缀路径。
  *
  * dbPath 检查与 read() ①级同字段同构：锚 sessionRef 与 handle/record 同源
- * append-only JSONL（不可信面），仅放行 zcodeDbPathAllowlist 封闭集合内精确匹配
+ * append-only JSONL（不可信来源），仅放行 zcodeDbPathAllowlist 封闭集合内精确匹配
  * （隔离库现役 + 宿主库「共享 HOME 时代」存量兼容锚点）。非集合内路径（含池时代
  * 相对路径——resume 锚场景读通道本就该走白名单库）→ 非法 zcode 锚，undefined 走
  * 无前缀路径（与读通道失败的降级语义同族，不炸轮）。

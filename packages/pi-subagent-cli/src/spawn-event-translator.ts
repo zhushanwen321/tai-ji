@@ -25,7 +25,7 @@ const TOOL_ACTIVITY_MIN_INTERVAL_MS = 1_000;
  * [U-A6] 工具执行期活性信号载体（`tool_execution_update` → onEvent 通道，不产数据）。
  *
  * 第一类 `activity` 变体已落地（F2 登记项标记完成）：协议封闭联合的专用纯活性信号——双侧
- * reducer no-op、core event-journal-wiring 豁免 append（不进持久/重放面），语义见 SDK
+ * reducer no-op、core event-journal-wiring 豁免 append（不进持久/重放路径），语义见 SDK
  * contract-types AgentEvent 注释。历史借用形态（usage/error 双缺省的零写入
  * message_end）见 git 历史。
  */
@@ -72,7 +72,7 @@ export interface SdkTranslatorOpts {
   onAgentEnd?: () => void;
   /**
    * agent_settled（真空闲）到达：run resolve 点 + 轮收割边界。入参 = resolve 时刻
-   * 的真实轮数快照——收集面（collectOutcome）在 resolve 后的微任务延续中读轮数，
+   * 的真实轮数快照——收集侧（collectOutcome）在 resolve 后的微任务延续中读轮数，
    * 快照先行传出，防止下方「按轮清零」把成功 run 的 outcome.turns 腐化成 0。
    */
   onAgentSettled?: (turnsAtSettle: number) => void;
@@ -181,7 +181,7 @@ function handleAgentSettled(
   // _runAgentPrompt finally 块）= run 的 resolve 与收割点：turn 计数与 limiter
   // 标志按轮重置（SP-9 对齐：续聊轮独立预算，maxTurns 不跨轮累计）。
   // 轮数快照必须先于清零传出（opts.onAgentSettled 内部 settle exitPromise），
-  // 否则收集面读到的成功 run 轮数恒为 0。
+  // 否则收集侧读到的成功 run 轮数恒为 0。
   if (opts.onAgentSettled !== undefined) {
     opts.onAgentSettled(record.turnCount);
     record.turnCount = 0;

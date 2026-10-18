@@ -702,7 +702,7 @@ describe("m4 W1-W5: meta 质量 lint", () => {
     );
     expect(errors(bad.findings).some((f) => f.message.includes("targetType"))).toBe(true);
 
-    // note:/a=b 非参数 → 不误报（评审探针实测形态匹配误报面）
+    // note:/a=b 非参数 → 不误报（评审探针实测形态匹配误报风险）
     const good = lintScript(
       wf(
         'name: w\ndescription: "note: fix agent 与 batchN 互斥，见 a=b 说明"\nphases: [a]\nparameters:\n  type: object\n  properties:\n    targetType: { type: string }\n  required: [targetType]',

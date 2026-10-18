@@ -10,7 +10,7 @@
  *     在上一轮 turn_end 之后 → 亦不含，工具后下一轮 turn_start 重新起算）；
  *   - turn_start 后的 steering 注入段（pendingMessages for 循环）在 streamAssistantResponse
  *     之前 → 计入窗口（设计接受，通常毫秒级）。
- * taiji 依赖面：event-adapter handleTurnStart 翻译 llm-request-start → LlmWindowSampler
+ * taiji 依赖范围：event-adapter handleTurnStart 翻译 llm-request-start → LlmWindowSampler
  * .onRequestStart 重锚。pi 升级后红 = 锚点前提漂移（TTFT 系统性偏大/偏小或恒 null），
  * 按断言消息复核 agent-loop.js 后更新登记。
  *
@@ -25,7 +25,7 @@
  *      push *_start，delta 分支按 index 查块 + 类型检查，块只在 start 分支创建；
  *   ③ 检查分支紧邻（google / mistral）：`if (!currentBlock)` 建块分支 push *_start 与
  *      delta push 同迭代紧邻。
- * taiji 依赖面：adapter 仅对 text_start / thinking_start / toolcall_start 产 llm-first-output
+ * taiji 依赖范围：adapter 仅对 text_start / thinking_start / toolcall_start 产 llm-first-output
  * （单点收）——pi 若出现「产 delta 不先产 *_start」的 provider，该模型 TTFT 恒 null 静默
  * 降级（显 —），本探针在 pi bump 门禁先红。
  *

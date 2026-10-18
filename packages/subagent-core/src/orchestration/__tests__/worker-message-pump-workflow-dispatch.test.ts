@@ -9,7 +9,7 @@
 //
 // 锁四组面：
 //   1. record 进 store：dispatch 在途时 record 带 origin:"workflow" +
-//      parentRunId=run.runId（真实 record 经 store 治理面可见——进度源切换的
+//      parentRunId=run.runId（真实 record 经 store 治理侧可见——进度源切换的
 //      数据前提）；record 级 pending:register 照旧发射。
 //   2. worker 协议回包不变：引擎应答 → executeAgentCall finalize →
 //      postMessage({type:"agent-result", callId, result})（cached:false）；
@@ -184,7 +184,7 @@ describe("pump → executeWorkflowAgent 端到端", () => {
     expect(record.parentRunId).toBe("wf-pump-e2e-1");
     // 引擎收到 run（taskId = record.id——守护/journal 键，W2 已锁定）
     expect(h.fake.runs).toHaveLength(1);
-    // record 级 pending:register 照旧（D5：record 域发射面不动）
+    // record 级 pending:register 照旧（D5：record 域发射侧不动）
     const registered = h.pi.events.emit.mock.calls.find((c) => c[0] === "pending:register");
     expect(registered?.[1]).toMatchObject({ id: record.id, type: "subagent" });
 
@@ -213,7 +213,7 @@ describe("pump → executeWorkflowAgent 端到端", () => {
     expect(h.run.state.calls.get(1)?.status).toBe("done");
 
     // 3. D7 联动：成功即终态化（closed/gc + archive 出内存）+ record 级 unregister。
-    //    （archive 后从磁盘重建面回查终态的「run 视图不丢行」行为由 W1 record-store
+    //    （archive 后从磁盘重建侧回查终态的「run 视图不丢行」行为由 W1 record-store
     //    的 mergedRecords 测试锁定——本 harness 的 pi mock 不落盘，不在此重复。）
     expect(h.store.listRunning()).toHaveLength(0);
     const unregistered = h.pi.events.emit.mock.calls.find((c) => c[0] === "pending:unregister");

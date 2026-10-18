@@ -57,7 +57,7 @@ import { SubagentService } from "../subagent-service.ts";
 // 波 2 改写对位：原「投递内核等价桩」（dedupe / busy gate / 合批窗口）随内核队列
 // 持有退役——port 形态下受理即入 pi 原生队列（忙时不拒），合批窗口在端口侧。
 // 本文件断言范围只需三片：幂等键判重（同 id:round 吞）、merge 判定透传（hasRunning-
-// Background 的 M3 判据回归锚）、非 merge 条目受理即注入（观察面 = pi.sendMessage）。
+// Background 的 M3 判据回归锚）、非 merge 条目受理即注入（观察侧 = pi.sendMessage）。
 
 type FakePortRecord = { id: string; merge: boolean };
 
@@ -282,7 +282,7 @@ describe("首轮闭环独有断言范围（迁自壳 first-round-closure-service
     // 首条通知入参 = 完成通知的 record（轮终翻边 idle，round 已随簿记 +1 透传，
     // result 从应答 content 写入——BgNotifyRecord 派生视图 status="running" 由
     // notify-host 的映射用例承保）。[collect 退役] 原「settle 内 notify 与 run 续体
-    // collectCoordinator 回注」双调用点收敛为成功轮单通道——用户可见面
+    // collectCoordinator 回注」双调用点收敛为成功轮单通道——用户可见部分
     //（pi.sendMessage）恒 1 条（末尾断言）。
     expect(spy.mock.calls[0]?.[0]).toMatchObject({ id: record!.id, round: 1, result: "first-round-done" });
     // record 留 store（首轮完成不终态化——原 early-return 的正语义）

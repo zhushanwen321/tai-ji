@@ -64,7 +64,7 @@ describe("wireEventJournal（D3-③ host helper 唯一实现）", () => {
     expect(fs.existsSync(wiring.path)).toBe(true);
   });
 
-  it("activity 豁免 journal.append：journal 文件无对应行，forwardEvents 仍收到（纯活性信号不进持久面）", async () => {
+  it("activity 豁免 journal.append：journal 文件无对应行，forwardEvents 仍收到（纯活性信号不进持久化侧）", async () => {
     const forwarded: AgentEvent[] = [];
     const wiring = wireEventJournal({ engineId: "zcode", taskId: "sa-6", forwardEvents: (e) => forwarded.push(e) });
     wiring.onEvent({ type: "activity" });

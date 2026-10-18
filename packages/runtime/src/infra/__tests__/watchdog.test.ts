@@ -256,7 +256,7 @@ describe('renderer 广播通知（WatchdogMemoryPressurePayload 契约）', () =
     h.handle.stop()
   })
 
-  it('Gate W off（armed=false）：高位多拍零广播零 relief，判定面照算（观测先行）', () => {
+  it('Gate W off（armed=false）：高位多拍零广播零 relief，判定侧照算（观测先行）', () => {
     const h = startHarness({ armed: false, usage: usageAtPercent(90) })
     advanceTicks(WATCHDOG_SUSTAIN_TICKS + 2)
     expect(h.broadcast).not.toHaveBeenCalled()

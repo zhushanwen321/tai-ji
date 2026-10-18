@@ -54,7 +54,7 @@ type MirrorListener = (event: MirrorChangeEvent) => void;
  * spawnedChildren 状态镜像（per EngineClient 一份）。
  *
  * 镜像只是状态派生视图：本类不发信号、不杀进程（收割 = 引擎进程组级，见 EngineClient）；
- * 「整体置死」是对状态面的批量标记 + 广播，使宿主侧桥接映射/通知/GC 立即回落安全态。
+ * 「整体置死」是对状态侧的批量标记 + 广播，使宿主侧桥接映射/通知/GC 立即回落安全态。
  */
 export class SpawnedChildrenMirror {
   private readonly entries = new Map<number, MirrorEntry>();

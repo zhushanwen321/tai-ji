@@ -306,7 +306,7 @@ describe('MessageDispatcher occupancy 挂点', () => {
     const frames = occupancyFrames(publish)
     expect(frames).toEqual([{ sessionId: 's1', turn: 'dispatching', compacting: false, bash: false }])
     // 帧序（[RT-4#10] 合并收尾）：occupancy 置位先于 prompt——RPC 往返窗内对预检/回收豁免
-    // 不再呈 idle；lastActiveAt/record 记账面（D-18「成功才显示 working」）仍在 prompt
+    // 不再呈 idle；lastActiveAt/record 记账侧（D-18「成功才显示 working」）仍在 prompt
     // 受理成功后（markSessionActive 尾置，occupancy 同值转移去重不二播）
     expect(seq.indexOf('prompt')).toBeGreaterThanOrEqual(0)
     expect(seq.indexOf('frame:session.occupancy')).toBeLessThan(seq.indexOf('prompt'))
@@ -318,9 +318,9 @@ describe('MessageDispatcher occupancy 挂点', () => {
     })
     await dispatcher.sendMessage('s1', 'hello')
     await flushDelivery()
-    // 退役面：原「预检拒绝（busy）不写 dispatching + 广播 send.rejected」——排队取代拒绝（D5）
+    // 退役路径：原「预检拒绝（busy）不写 dispatching + 广播 send.rejected」——排队取代拒绝（D5）
     expect(frameTypes(publish)).not.toContain('send.rejected')
-    // 迁移面：内核按 lane=steer 即时投递（turn 边界注入 pi 队列），条目不丢
+    // 迁移侧：内核按 lane=steer 即时投递（turn 边界注入 pi 队列），条目不丢
     expect(promptFn).toHaveBeenCalledTimes(1)
     expect((promptFn.mock.calls[0] as unknown[])[2]).toBe('steer')
     expect(registry.entries('s1')?.active[0]).toMatchObject({ lane: 'steer' })
@@ -337,10 +337,10 @@ describe('MessageDispatcher occupancy 挂点', () => {
     const result = await dispatcher.sendMessage('s1', 'hello')
     await flushDelivery()
     expect(result.blocked).toBe(false)
-    // 退役面：send.rejected 广播（排队取代拒绝，D5）
+    // 退役路径：send.rejected 广播（排队取代拒绝，D5）
     expect(frameTypes(publish)).not.toContain('send.rejected')
     expect(frameTypes(publish)).not.toContain('message.error') // busy 类拒绝不进错误气泡
-    // 迁移面（§3.4 错误规格表「压缩中 direct 投递撞 Cannot submit...」行）：条目回 queued，
+    // 迁移侧（§3.4 错误规格表「压缩中 direct 投递撞 Cannot submit...」行）：条目回 queued，
     // compaction_end 后再投——持有而非失败/丢弃（D6 适配器 catch 面处置）
     expect(registry.entries('s1')?.active[0]).toMatchObject({ state: 'queued' })
     // 帧序（[RT-4#10] 合并收尾）：投递路径起始写 dispatching → busy 类拒绝在 registry

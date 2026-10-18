@@ -52,7 +52,7 @@ export interface FinalizeDeps {
    * idle 可恢复不终态化），不经本钩子。旧「全部 closed 终态必经路径」口径已失效：tool-origin 轮终走
    * settle/markRoundIdle 不终态化（万物可续 G1），close = 收尾落定（consumePendingArchive）、
    * dispose = settle + 自动收尾，均不经本钩子。收尾面现 = Continuation 实例清理
-   *（onRecordFinalizedCleanup 汇聚点；[H1 U6] 旧 chat 轮路由注销面已随 interact 面退役）。
+   *（onRecordFinalizedCleanup 汇聚点；[H1 U6] 旧 chat 轮路由注销侧已随 interact 面退役）。
    * finalizeRoundToIdle 不经本钩子（回 idle 非终态，续聊仍需容器）。
    */
   onFinalized?: (recordId: string) => void;
@@ -195,7 +195,7 @@ export async function doFinalizeRecord(
   }
   if (!persisted) {
     // [§3.4 / U1 偏差 6 接线] 终态原语意外抛错（B9 吞错路径）响亮 entry 上报——GUI
-    // 通知面路径；日志 error 级路径已由 store 层完成。record 留 running 形态（未
+    // 通知侧路径；日志 error 级路径已由 store 层完成。record 留 running 形态（未
     // archive），下次 boot 孤儿恢复终态化承接。
     const reasonDesc = closedReason ?? record.closedReason ?? "gc";
     logger.error(

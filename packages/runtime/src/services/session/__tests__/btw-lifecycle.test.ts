@@ -128,7 +128,7 @@ describe('关线原语（btw.remove；级联归 M4-a）', () => {
     expect(await svc.closeLine(res.vid)).toBe(false) // 幂等
   })
 
-  it('closeLine 不删 btw 根外文件（防误删面）', async () => {
+  it('closeLine 不删 btw 根外文件（防误删风险）', async () => {
     const outside = writeSessionFile(join(fx, 'elsewhere'), 'out.jsonl', {
       type: 'session', version: 3, id: 'sid-out', timestamp: 't', cwd: CWD,
     }, [])

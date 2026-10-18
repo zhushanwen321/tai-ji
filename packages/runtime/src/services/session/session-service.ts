@@ -26,7 +26,7 @@
  * dispose → bus.clearSession 全序列）已行为保持抽取至 session-entry-removal.ts——
  * **removeSessionEntry 顺序约束 SSOT（步骤序列 + 与 lifecycle.delete B5 段「didDestroy
  * 先行 → tombstone → dropPartition → trash」的跨文件顺序 + B5 禁止挂回本汇聚链）在该
- * 文件头**;本文件保留公开 wrapper（调用点与测试锁定面不变）。
+ * 文件头**;本文件保留公开 wrapper（调用点与测试锁定侧不变）。
  */
 import { existsSync } from 'node:fs'
 import { isBtwVirtualId } from '@taiji/shared'
@@ -89,7 +89,7 @@ import { RevokeOrchestrator } from './revoke-orchestrator.js'
 // type-only（本文件对 btw-service 零 value 依赖，无环——btw-service 不反向 import 本文件）。
 import type { BtwService } from './btw-service.js'
 // [T8 有限拆分 2026-09] removeSessionEntry 销毁收敛链编排（顺序约束 SSOT，含文件头收敛
-// 说明）——行为保持抽取，本 Facade 保留公开 wrapper（测试 spyOn 锁定面）。
+// 说明）——行为保持抽取，本 Facade 保留公开 wrapper（测试 spyOn 锁定侧）。
 import { SessionEntryRemovalOrchestrator, runDestroyStepIsolated } from './session-entry-removal.js'
 // 空闲回收占座原语与等待观测超时（idle-pi-reclamation D6-2，u2）。type-only import：
 // Seat 实例由 u3 组合根创建后 setter 注入，本模块不持有创建权（不引入运行时依赖环）。
@@ -320,7 +320,7 @@ export class SessionService implements ISessionService, ILifecycleSessionOps, ID
   /**
    * 后台任务数据域（background-task-sidebar，u-runtime-rpc 组装；实现在 u-runtime-svc）。
    *
-   * 公有成员（非 ISessionService 接口面）：SessionMessageHandler 经 ctx 的结构化可选属性
+   * 公有成员（非 ISessionService 接口侧）：SessionMessageHandler 经 ctx 的结构化可选属性
    * （SessionHandlerContext.sessionService 交叉类型）读取 3 RPC 消费端口——组合根 server.ts
    * 的 ctx 字面量静态类型是 ISessionService，可选属性结构兼容使其零改动通过类型检查。
    *
@@ -365,7 +365,7 @@ export class SessionService implements ISessionService, ILifecycleSessionOps, ID
    * 编排段（D1 journal 登记 → checkpoint/mirror 摘除 → … → bus.clearSession 全序列 + 跨文件 B5
    * 顺序约束说明）。顺序约束 SSOT 与 deps 接口（= 销毁扇出合作方清单）见
    * session-entry-removal.ts 文件头；本 Facade 只保留公开 wrapper（四路删除路径的调用点
-   * 与测试 spyOn 锁定面不变）。构造器尾部组装（deps 闭包全部惰性动态读，组装位置仅求
+   * 与测试 spyOn 锁定侧不变）。构造器尾部组装（deps 闭包全部惰性动态读，组装位置仅求
    * 阅读顺序自然）。
    */
   private entryRemoval!: SessionEntryRemovalOrchestrator
@@ -648,9 +648,9 @@ export class SessionService implements ISessionService, ILifecycleSessionOps, ID
           sessionId,
           exitCode: code,
           detailDigest: buildCrashDetailDigest(code, stderr),
-          // D10（crash-correlation）：崩溃时刻机器面 taiji 家族 pi 幸存者摘要——跨实例
+          // D10（crash-correlation）：崩溃时刻的机器检查侧 taiji 家族 pi 幸存者摘要——跨实例
           // 连坐归因的 ledger 视图（2026-09-20 连坐崩溃实证：本 session 四次 SIGTERM 死亡
-          // 均为机器级扫杀连坐，runtime 侧 exit code 143 无从归因，机器面快照是关键证据）。
+          // 均为机器级扫杀连坐，runtime 侧 exit code 143 无从归因，机器检查侧快照是关键证据）。
           // best-effort：ps 失败返回空串（字段全可空语义），不阻塞死亡清理链。
           machinePiDigest: captureMachinePiDigest(),
         })
@@ -753,7 +753,7 @@ export class SessionService implements ISessionService, ILifecycleSessionOps, ID
 
   /**
    * 注入 BtwService（组合根在 BtwService 构造后、server.start 前调用，M2-b/B2 授权接线）。
-   * ensureActive 的 btw 分支依赖——窄面只取 ensureProcess（alive → markActivity 直返；
+   * ensureActive 的 btw 分支依赖——窄接口只取 ensureProcess（alive → markActivity 直返；
    * 回收/死亡 → spawn→switch→附着断言 reattach）。
    */
   setBtwService(btwService: Pick<BtwService, 'ensureProcess'> & Partial<Pick<BtwService, 'getLine'>>): void {
@@ -1435,7 +1435,7 @@ export class SessionService implements ISessionService, ILifecycleSessionOps, ID
    * 进程退出 / forceQuit / restore 清场）。[T8 有限拆分 2026-09] 编排段（步骤序列 + 全部
    * 旁路设施挂点 + 销毁扇出）已整体迁入 session-entry-removal.ts——**顺序约束 SSOT 与
    * 收敛说明（含与 lifecycle.delete B5 段的跨文件顺序、B5 禁止挂回）在该文件头**。
-   * 本 wrapper 只保留公开签名：四路调用点与测试 vi.spyOn 锁定面在此，行为 = 一行委托。
+   * 本 wrapper 只保留公开签名：四路调用点与测试 vi.spyOn 锁定侧在此，行为 = 一行委托。
    */
   removeSessionEntry(sessionId: string): void {
     this.entryRemoval.remove(sessionId)

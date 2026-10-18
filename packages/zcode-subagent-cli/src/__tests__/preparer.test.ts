@@ -222,7 +222,7 @@ describe("resolvePersonalProviderConfigPath（默认解析链：显式 sources >
     process.env[DATA_DIR_ENV_KEY] = dataDir;
     const copyPath = writeCopy(dataDir);
     expect(resolvePersonalProviderConfigPath()).toBe(copyPath);
-    // 副本独有条目可见（merge 追加面）。用全名 ref：短名按合并序首位（真实侧
+    // 副本独有条目可见（merge 追加逻辑）。用全名 ref：短名按合并序首位（真实侧
     // PROVIDER_A）解析，不再落副本——「副本遮蔽真实」的旧短名语义已随 merge 退役
     expect(resolveZcodeModelRef(`${COPY_PROVIDER}/copy-model-x`)).toBe(`${COPY_PROVIDER}/copy-model-x`);
     // 真实文件条目同样可见——D3 换轨核心：校验链与 Registry 读同一 merge 视图，

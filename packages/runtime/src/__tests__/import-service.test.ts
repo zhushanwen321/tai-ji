@@ -7,7 +7,7 @@
  *   conversion_degraded + degradationSummary（stub source 注入，D4 结构化降级）；
  *   warning 优先序 sidecar_failed > conversion_unclassified > conversion_degraded +
  *   degradations 日志留痕
- * - listCandidates（pi source 语义，零回归）：字段面 / lastModified 降序 / total（过滤前）/
+ * - listCandidates（pi source 语义，零回归）：字段侧 / lastModified 降序 / total（过滤前）/
  *   dirs 聚合 / cwdExists 标注 / alreadyImported 打标（导入后立即翻转）/ query 匹配语义
  *   （name∪sessionId∪短ID∪sourcePath∪dirLabel，case-insensitive）/ rootDir 缺省 =
  *   getPiGlobalAgentDir()/sessions 动态推导
@@ -108,7 +108,7 @@ afterAll(() => {
 })
 
 describe('ImportService.listCandidates', () => {
-  it('字段面 / lastModified 降序 / total / dirs 聚合 / cwdExists / dirLabel', async () => {
+  it('字段侧 / lastModified 降序 / total / dirs 聚合 / cwdExists / dirLabel', async () => {
     const root = join(fixturesRoot, 'cand-root')
     const sub = join(root, 'proj-alpha')
     mkdirSync(sub, { recursive: true })
@@ -211,7 +211,7 @@ describe('ImportService.listCandidates', () => {
     // targetPath = getSessionsDir()/encodeCwd(resolve(cwd))/原文件名
     expect(imported.targetPath).toBe(join(getSessionsDir(), encodeCwd('/tmp/mark-cwd'), 'm1.jsonl'))
     expect(existsSync(imported.targetPath)).toBe(true)
-    expect(existsSync(src)).toBe(true) // 复制语义：源文件不动（P-isolation 结构面）
+    expect(existsSync(src)).toBe(true) // 复制语义：源文件不动（P-isolation 结构侧）
 
     const after = await svc.listCandidates({ rootDir: root })
     expect(after.items[0].alreadyImported).toBe(true)

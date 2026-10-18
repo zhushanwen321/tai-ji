@@ -80,9 +80,9 @@ import { projectV2Workflow } from "./workflow-record-projection.js"
 
 /**
  * run 事件 type 词表集合（词表 SSOT = core run-events RUN_EVENT_TYPES，经 barrel
- * 消费——判定面与 core isWorkflowRunEventLine 同词表单源）。编译期穷尽检查双向：
+ * 消费——判定侧与 core isWorkflowRunEventLine 同词表单源）。编译期穷尽检查双向：
  * Set 构造泛型校验「词表 ⊆ WorkflowRunEvent['type'] 判别联合」，下方编译锁校验
- * 反向「union 成员 ⊆ 词表」——core 词表增删成员时漂移在编译期显形，运行时零漂移面。
+ * 反向「union 成员 ⊆ 词表」——core 词表增删成员时漂移在编译期显形，运行时零漂移风险。
  * 词表外历史行（ask-executing / member-pool 等删值成员）经词表外判定返回
  * undefined，由 tailer 跳过计日志。
  */
@@ -99,7 +99,7 @@ const _assertRunEventTypeWordlist: Exclude<
 /**
  * run journal 文件行解析器（event-tail parseLine 注入点，run 域）。
  *
- * 检查对齐 core run-events isWorkflowRunEventLine 的最宽共同判定面：JSON 对象 +
+ * 检查对齐 core run-events isWorkflowRunEventLine 的最宽共同判定逻辑：JSON 对象 +
  * type 落词表 + ts 有限数值 + seq（携带时）正安全整数 + outcome（agent-settled /
  * run-settled 携带时）落词表。seq 缺失放行——W1 前存量 事件行无该字段（D7
  * 惰性兼容读，旧行为不变）。坏行返回 undefined 交 tailer 计数（宽容跳过，不卡游标）。
@@ -289,9 +289,9 @@ function resolveSubagentError(
 
 /**
  * [projectV2Subagent 拆分] result 供源（W1 轮终粒度裁决：record-round-idle 携带
- * result 摘要锚，承接 v1 U8b 轮终 result 显示信号）：轮终收条晚于终局面（settled
+ * result 摘要锚，承接 v1 U8b 轮终 result 显示信号）：轮终收条晚于终局条目（settled
  * 已被 reopened / round-started 清除，或 roundIdle.seq 更新）时轮终摘要胜出——
- * 否则终局面优先（v2 终态条目全文是 D1 唯一全文落点，摘要锚兜底）。
+ * 否则终局条目优先（v2 终态条目全文是 D1 唯一全文落点，摘要锚兜底）。
  */
 function resolveSubagentResult(
   settled: RecordEventFoldState['settled'],
@@ -614,7 +614,7 @@ export class SessionEventProjection {
     this.coldReadDomain('run')
   }
 
-  /** 事件源是否已接线（任一目录非 undefined）——降级派生视图升级路径的判定面。 */
+  /** 事件源是否已接线（任一目录非 undefined）——降级派生视图升级路径的判定侧。 */
   hasEventSources(): boolean {
     return this.recordsDir !== undefined || this.runJournalDir !== undefined
   }
@@ -638,7 +638,7 @@ export class SessionEventProjection {
   /**
    * 推送喂入入口（event-push-channel 实时路径）：journal 写入方经 marker 通道推
    * 报告 → 本方法。流程（设计 §3.3）：
-   * 1. 报告事件经域行解析器校验（与文件冷读同一解析器——喂入源换轨后判定面单源，
+   * 1. 报告事件经域行解析器校验（与文件冷读同一解析器——喂入源换轨后判定侧单源，
    *    坏事件跳过不炸派生视图）；
    * 2. 缺口判定：报告内最小带 seq 事件 > 已折叠最大 seq + 1 → 本地补读（从字节
    *    偏移 readEventTail 到文件尾——补读覆盖报告事件本体，fold seq 检查去重）；
@@ -653,7 +653,7 @@ export class SessionEventProjection {
     const id = report.fileKey
     if ((domain === 'record' ? this.recordsDir : this.runJournalDir) === undefined) return false
     const events = this.validateReportEvents<RecordEvent | WorkflowRunEvent>(report, domain === 'record' ? parseRecordEventFileLine : parseWorkflowRunEventFileLine)
-    if (events.length === 0) return true // 坏事件帧：消费但零应用（写侧已获 ack，无丢失面）
+    if (events.length === 0) return true // 坏事件帧：消费但零应用（写侧已获 ack，无丢失风险）
     // 缺口判定（无 seq 事件不参与——报告全为无 seq 存量行时直接 fold，状态机幂等）
     const seqs = events.map((e) => (e as { seq?: unknown }).seq).filter((s): s is number => typeof s === 'number')
     const watermark = domain === 'record' ? (this.sources.recordFolds.get(id)?.lastSeq ?? 0) : (this.sources.runFolds.get(id)?.lastSeq ?? 0)
@@ -667,7 +667,7 @@ export class SessionEventProjection {
     return true
   }
 
-  /** 报告事件逐条过域行解析器（JSON.stringify 后与文件行走同一解析——判定面单源）。 */
+  /** 报告事件逐条过域行解析器（JSON.stringify 后与文件行走同一解析——判定侧单源）。 */
   private validateReportEvents<T>(
     report: SubagentJournalReport,
     parseLine: (line: string) => T | undefined,

@@ -74,7 +74,7 @@ export const LEAK_ENV_KEYS = [
   'TAIJI_SUBAGENT_RELAY_STDERR',
 ]
 
-// ── 模板配置面（白名单制：只复制这些顶层条目，其余一律不进模板/实例）──────────
+// ── 模板配置部分（白名单制：只复制这些顶层条目，其余一律不进模板/实例）──────────
 // agent/（pi agent 目录，PI_CODING_AGENT_DIR = <dataDir>/agent，v2 方案 B 布局）是
 // 「配置+运行时状态」混合体，整目录复制但排除运行时子目录（TEMPLATE_DIR_EXCLUDES）。
 export const TEMPLATE_TOP_FILES = [

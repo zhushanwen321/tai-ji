@@ -79,7 +79,7 @@ import type { ModelInfo, ModelRegistryLike } from "../assembly/model-resolver.ts
 // toSettledEntryData 同形）。
 import { v2SettledEntry } from "./helpers/v2-record-entry.ts";
 // W10（§2.10 ②）：子进程句柄断言改读 core 侧状态镜像（host/spawned-children——
-// 协议化后 spawnedChildren 持有方在引擎进程，core 消费镜像面；判据 pid 同构）。
+// 协议化后 spawnedChildren 持有方在引擎进程，core 消费镜像侧；判据 pid 同构）。
 import {
   _resetCoreSpawnedChildrenMirrorForTest,
 } from "../engine/host/spawned-children.ts";
@@ -356,7 +356,7 @@ describe("chat 工具域引擎路由分叉（U0：D4/D5/D10）", () => {
     const rec = service.queries.collectRecords(10, "running").find((r) => r.id === handle.subagentId);
     expect(rec).toBeDefined();
     expect(rec?.engine).toBeUndefined();
-    // [v1 兼容层删除] engine 域的持久面 = v2 终态条目（engine/engineHandle 只落此处）；
+    // [v1 兼容层删除] engine 域的持久化侧 = v2 终态条目（engine/engineHandle 只落此处）；
     // pi 缺省不盖章 → 终态派生视图序列化产物不含 engine 键。
     expect(JSON.stringify(v2SettledEntry(rec!))).not.toContain("engine");
   });
@@ -543,7 +543,7 @@ describe("chat 工具域引擎路由分叉（U0：D4/D5/D10）", () => {
 
       // workflow 域 sync 派发（runAndFinalize 的 runCtx 构造点；其引擎解析恒走
       // registry 'pi'——resolveChatEnginePort，不消费 opts.engine）。fire-and-forget：
-      // 本 harness 无 idle-notify 驱动面，收尾链（finalizeRoundToIdle）不收敛——
+      // 本 harness 无 idle-notify 驱动侧，收尾链（finalizeRoundToIdle）不收敛——
       // 只断言构造点（runs 捕获在收尾之前），与既有用例的挂起 record 同等形态。
       let awaitErr: unknown;
       void service
@@ -852,7 +852,7 @@ describe("chat 引擎分支 U2：probe 失败 / journal / engineHandle", () => {
     return calls.length > 0 ? (calls[calls.length - 1][1] as Record<string, unknown>) : undefined;
   }
 
-  /** [W1/D3] 读 record 事件文件全部事件行（观察面独立于被测 store）。 */
+  /** [W1/D3] 读 record 事件文件全部事件行（观察侧独立于被测 store）。 */
   function scanRecordEventsFor(agentDir: string, id: string): Array<Record<string, unknown>> {
     const recordsDir = getSubagentRecordsDir(agentDir, agentDir);
     try {

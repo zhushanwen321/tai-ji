@@ -25,7 +25,7 @@ import { zcodeAnchorBasePath } from "./state-marker.ts";
 import { persistSettleSnapshot } from "./record-store-terminal.ts";
 import { summarizeResultForJournal } from "./record-entry-write.ts";
 import { zcodeRefOf } from "./record-store-rebuild.ts";
-// [W1 / U2a] 事件文件写侧接线层（fold 缓存 + 写点幂等判定 + 物化编排）的依赖面：
+// [W1 / U2a] 事件文件写侧接线层（fold 缓存 + 写点幂等判定 + 物化编排）的依赖范围：
 // u0 契约层原语（词表/fold/seq 单源）+ terminal 轴载荷构造 + manifest 物化写侧。
 import * as fs from "node:fs";
 
@@ -245,7 +245,7 @@ function settleRoundResult(rec: ExecutionRecord, outcome: RoundSettlementOutcome
  * markSettled 写法——pi 路径 sessionFile 快照 / zcode 路径 transcriptRef 派生锚键 /
  * 无锚 warn 留痕。正常轮终后宿主崩溃 → markResurrected 的 revive 水合需 binding
  * 快照在场（turns/tokens 不归零，U7 目标在最常见形态成立）。`.state` 收条 = 轮收尾
- * idle 形态（U4 翻边后内存面与磁盘侧同词——重建单规则「一律 idle」不再有桥接例外）。
+ * idle 形态（U4 翻边后内存侧与磁盘侧同词——重建单规则「一律 idle」不再有桥接例外）。
  * best-effort 语义同 markSettled（失败 warn 留痕不抛——内存态已收尾，磁盘侧滞后由
  * 下次收尾/接管补写）。
  */
@@ -363,7 +363,7 @@ export function markRoundIdleImpl(id: string, outcome: RoundSettlementOutcome, c
 /**
  * 意图原语：引擎死亡收养（字段⑩——error/result/stopReason 三写，[U5/D4] 新态
  * entry = running + error + stopReason=failed + result=∅——status 保持 running，core
- * 机器语义不变，展示面靠 stopReason 子句排除（U6 终态判据
+ * 机器语义不变，展示侧靠 stopReason 子句排除（U6 终态判据
  * isOccupied 消费）；禁 completed 谎报 / closed 直接终局）。统一调用点已随 adopt
  * 派发链退役：one-shot engine-run 编排不再经本原语收尾（原归属调用点随 U2b 修复轮
  * 移除），现仅测试直调可达（run-orchestration-write-lease.test.ts 用例 2/5 为退役

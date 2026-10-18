@@ -20,7 +20,7 @@ import type { DrawerControlState } from '../types'
 import { getBtwSelectionState, readBtwSelectionFor } from './btw'
 import { readSubagentSelectionFor } from './subagent'
 
-/** 控制态三分量的两个分量（isOpen/activeTab）——复合谓词入参收窄面 */
+/** 控制态三分量的两个分量（isOpen/activeTab）——复合谓词入参收窄范围 */
 type ControlGate = Pick<DrawerControlState, 'isOpen' | 'activeTab'>
 
 /** btw 复合谓词唯一拼装：视口内返回选中线 vid，否则 null */

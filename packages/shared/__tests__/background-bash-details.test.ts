@@ -154,7 +154,7 @@ describe('parseBackgroundBashDetails 防御矩阵：exitCode 类型异常 → �
 /** D1 契约字段序列（生产端产出序 = 宿主解析产出序）。 */
 const MIRROR_FIELD_SEQUENCE = ['taskId', 'command', 'durationMs', 'endReason', 'exitCode'] as const
 
-/** 生产端入参（BackgroundTask）夹具：本镜像面只用到的字段，其余补足必填占位。 */
+/** 生产端入参（BackgroundTask）夹具：本镜像侧只用到的字段，其余补足必填占位。 */
 function buildTask(overrides: Partial<BackgroundTask> = {}): BackgroundTask {
   return {
     taskId: 'bt-3',

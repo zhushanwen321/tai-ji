@@ -10,7 +10,7 @@
 
 ## 0. 实施状态（2026-09-13，dev-flow 全单元落毕）
 
-本设计已按实施计划 `.tmp/dev-flow/subagent-permanent-session-model.impl-plan.md` 全单元交付（U1-U9 + u-foundation + U6b/U8a/U8b 拆分），实施后事实以代码为准；与本文的全部偏差逐条登记在 **impl-plan §5 偏差登记表**（62 条，含每条的裁决依据；其中 26 行系 2026-09-13 design-code-sync 补登——§6 散文点名的六单元偏差回填），本文不重复。约束面已回写：C-data-20（原语清单刷新）/ C-data-22（zcode 会话库 TTL 引擎侧 sweep）/ C-proc-13（u7a 挂点注记）；母设计 [subagent-record-persistence-consolidation.md](subagent-record-persistence-consolidation.md) D5/D8 已加演进注记。
+本设计已按实施计划 `.tmp/dev-flow/subagent-permanent-session-model.impl-plan.md` 全单元交付（U1-U9 + u-foundation + U6b/U8a/U8b 拆分），实施后事实以代码为准；与本文的全部偏差逐条登记在 **impl-plan §5 偏差登记表**（62 条，含每条的裁决依据；其中 26 行系 2026-09-13 design-code-sync 补登——§6 散文点名的六单元偏差回填），本文不重复。约束侧已回写：C-data-20（原语清单刷新）/ C-data-22（zcode 会话库 TTL 引擎侧 sweep）/ C-proc-13（u7a 挂点注记）；母设计 [subagent-record-persistence-consolidation.md](subagent-record-persistence-consolidation.md) D5/D8 已加演进注记。
 
 > **【2026-09-16 用户裁决修订：「已收起」第三状态全链路清除】** intent 意愿维度全链路删除——Intent 类型与 ExecutionRecord.intent / SubagentRecord.intent 字段删除；markArchived 原语删除，close 的资源收尾职责由 **`markSettledOut`** 承接（close 终态写点：幂等、worktreeHandle 清句、`.alive` release、manifest 派生视图，不写任何意愿字段）；markReactivated 删除（message 续聊无翻位发生）；通知 gate ①（archived 静默检查）删除，close 注销 reason 词 `archived` → `completed`；renderer 用户可见状态两桶化——进行中 / 已结束（判据 = `isRunningProjection` 及其取反），「已收起」不以第三状态呈现。本文涉及 intent 机制的叙述（§1.2/§3.1 场景 3/§3.2.1/§3.2.2/§3.2.4/§3.2.5/§3.2.7/§3.2.8/§3.2.9/§3.5 K 表/§4 验收/§5 单元表）已按删除后现状改写。裁决记录见 [decisions.md ADR-0067](../adr/decisions.md)。
 
@@ -260,7 +260,7 @@ RECONNECTABLE_FINAL_REASONS = ["disconnected","parent-shutdown"]   (types.ts:99)
                                            （[U3 修订 2026-09-19] reopen 降级仅 pi 锚；zcode 锚失效 = 带锚派发 +
                                             resume 失败时引擎注入锚失效声明段，零世代推进——见 §3.2.6 ③）
   running--settle(成功/失败)-->    idle      （stopReason=completed/failed；进程按 idle timer 回收）
-      [实施形态 A-lite，阶段 3 裁决]：内存面轮终保持 running-resumable + stopReason 展示位
+      [实施形态 A-lite，阶段 3 裁决]：内存侧轮终保持 running-resumable + stopReason 展示位
       （completed/failed），状态机翻边不发生——派生视图桥接（isDoneProjection）与续聊判定等价，
       统计承诺经轮终写侧兑现（binding 快照 + record-round-idle 收条帧随每轮终写入 journal 记录，markRoundIdle 簿记⑩⑪）。
       事件表行保留为领域语义（「轮终=会话回到可续聊」），中断族（abort/engine death/host
@@ -361,7 +361,7 @@ RECONNECTABLE_FINAL_REASONS = ["disconnected","parent-shutdown"]   (types.ts:99)
 
 **结算概念大幅缩水**（无终态化 → 无终态结算）：
 
-| 副作用面 | 现状 | 新模型 |
+| 副作用侧 | 现状 | 新模型 |
 |---|---|---|
 | 归档状态翻回 | 复活 closed record 需翻内存/entry/磁盘收条/.alive 等多面——旧 resurrectClosed 三件套只覆盖 `.alive` acquire + 删磁盘收条文件 + 内存翻回，worktree/patchFile/pending-register/manifest 面不补偿（旧 cold-lookup 实现可证） | 无翻回——从未终态化；原「intent 位翻转」已随 2026-09-16 裁决删除，message 直接续聊、无任何翻位发生 |
 | 通知 | notifyId=id:round 按轮次（notifier.ts:510）+ 终态通知 key 回退裸 id（notify-host.ts:186-198）+ 迟到回注 gate 三分支（notifyGateAllowsDelivery，notifier.ts:49-55：closed 终态放行 / cancelled 阻断防双发 / parent-new+parent-fork 阻断防僵尸回执——v4 A-6 事故防御） | 轮次通知不变（notifyId 扩 `id:epoch:round`，epoch=0 保持旧格式，见 §3.2.3）；**终态通知消亡**（close 收敛注销 reason=`completed`——原归档时「已收起」提示词已随 2026-09-16 裁决废弃）；迟到回注 gate 判据从 closedReason 集合改为放弃轮标记判据，**阻断分支逐一承接**：**放弃轮标记命中**（迟到回注的 per-round 判据）→ 阻断（承接原 cancelled 阻断防双发）；原三元组分支 ①`intent=archived` 静默已随 2026-09-16 裁决删除（intent 字段消亡，静默检查无判据源）。**机制**：record 持有放弃轮标记 `lastAbandonedRound: {epoch, round} | null`（单槽，随 binding 持久化）——abort（用户 cancel / 编排性关闭打断）时置为进行中轮 `{epoch, round}`；reopen（epoch+1）时标记不迁移、自然失效（reopen 只由 idle record 的 message 触发，reopen 前最后一轮必然已 settle 且通知已同步入账，其晚到回注必为重复帧——跨 epoch 丢弃是去重语义的正确执行而非误吞）。迟到回注（settle 流程之外到达的引擎帧/监督器回注，携带轮身份）判定序列**显式两步**（比较基准 = record 当前 epoch，非标记槽 epoch——reopen 后标记残留旧 epoch，若按标记槽比较会把新世代全部正常轮通知吞掉）：**第一步**回注 epoch ≠ record 当前 epoch → 丢弃；**第二步**（同 epoch）标记非空且回注轮 ≤ 标记轮 → 丢弃；否则放行。**为何单槽够**：早于标记轮的回注必然是过期轮（其正常通知在各自 settle 流程内已同步发过、不走本 gate，迟到的是重复帧，notifyId 去重兜底——晚到回注与 settle 通知须构造同一 dedupKey 走同一账本，ledger 的 record() 对同 key 在账/已逐条处理完毕均拒绝、账本跨重启 replay 幂等）。**[阶段 5 验收补充，commit `d01f0f225`] 上述「settle 流程内已同步发过」的前提不覆盖第二类迟到到达**：被放弃轮自身的 run 应答经正常 settle 回调路径迟到（abort 后引擎收敛实测可达 15s，期间 message revive 已把 status 翻回 running，status 检查失守）——该类不走本 gate，由**轮身份检查**承接（cancel 时 abortAndClearQueue 废弃 activeRunId + run 应答回调闭包按派发序号全等校验，丢弃迟到 outcome），与本 gate 正交的第二个拦断面；两闸合堵 round 多跳/双通知/stopReason 串轮（S1 主路径 8/8 复现齐全实证，剧本全量 22/22 两跑）。**为何不能只比轮号不记放弃**：正常轮 N settle 后用户立即续聊轮 N+1，轮 N 的异步回注排队晚到时轮号已落后——但它是正常通知路径，不该吞；只有「被显式放弃的轮」才进标记。stopReason 单值会被新轮覆盖，无法承载 per-round 终局——标记是 gate ②的最小持久化载体（r3 影响面审查反例：K10 打断轮 3 → 寻回 → 轮 4 settle 覆盖 stopReason → 轮 3 回注三支全漏 → 本机制堵死）；③**收尾轮豁免**：close 挂起等待的最后一轮（closeAfterRound 消费）通知正常送达——用户专门等的那轮不是打扰，gate 阻断只作用于收尾轮**之后**新产生的回注 |
@@ -388,9 +388,9 @@ RECONNECTABLE_FINAL_REASONS = ["disconnected","parent-shutdown"]   (types.ts:99)
 |---|---|---|---|
 | `closedReason` 字段（ExecutionRecord） | 仅 workflow-origin D7 例外族写点（markFinalized/markCancelled）+ 旧格式 record 读取 + runtime diff 基线（session-records.ts） | ①写点归零：D7 例外族终态化改用 `stopReason` 表达（grep 两原语生产调用零命中；原 `intent=archived` 承载已随 2026-09-16 裁决删除）；②存量消化：旧格式 record 经 30 天 TTL / 磁盘重建自然消化（抽查全量重建后无 closedReason 读需求） | 删字段 + runtime diff 基线同步收缩（session-records.ts subagentRecordEquals）+ StopReason 收窄同批 |
 | `RECONNECTABLE_FINAL_REASONS` / `isReconnectableFinalReason` | 唯一存活消费点 = record-access.ts `rematerializeReconnectableEntryManifests`（boot 自愈可见性 gate，注释已标注桥接残留） | 重物化 gate 改物理判据（entry 自描述完整 + 归属本 session 树，与 §3.2.3 复活资格判据同源）落地并全绿 | 删集合与判定函数；注释口径随改 |
-| `StopReason` 超集值空间 | 与 ClosedReason 的历史并集（types.ts），13 值中部分无展示面消费 | 逐值 grep GUI/TUI/文案消费方：零消费值清单确认后一个批次收窄（收窄属 types 面破坏性改动，须与 closedReason 字段删除同批走） | 值空间收窄至实际消费集 |
+| `StopReason` 超集值空间 | 与 ClosedReason 的历史并集（types.ts），13 值中部分无展示侧消费 | 逐值 grep GUI/TUI/文案消费方：零消费值清单确认后一个批次收窄（收窄属 types 面破坏性改动，须与 closedReason 字段删除同批走） | 值空间收窄至实际消费集 |
 | manifest 旧三态 + executionStatus 双写 | manifest-store.ts:26-40「永久双写」——仓外已发布 session-reader 包的兼容契约 + 无版本磁盘 schema | session-reader 发布 next-major（README/CHANGELOG 声明新两态词汇）**且**全量存量用户数据经一次重建后无旧 status 读需求——两条件同时满足才评审下线；只满足前者不得动磁盘 schema | 双写降级为「派生视图函数保留、字段退役」评审（届时按 session-reader 实际安装面数据裁决，不预设结论） |
-| **内存面轮终保持 running-resumable（A-lite 桥接，S3-R1）**（2026-09-14 补登记，登记依据 = [subagent-two-state-convergence.md](design/subagent-two-state-convergence.md)——本模型 §3.2.2「[实施形态 A-lite，阶段 3 裁决]」预告的 impl-plan §5 载体已悬空，按元规则补入本表） | record-store-rounds.ts markRoundIdleImpl 簿记①「status 保持 running」+ ⑤ resumable=true——「轮已收敛」被编码为 `running + result + resumable + chatMode` 四字段组合，写侧/协议范围/读侧各自重组；已发生事故 = sidebar badge 对 chat 轮终误判占用（session 01a09f83 实测 8 幽灵，止血批读侧谓词已对齐严格口径） | 两态收敛设计 Phase 2（U4 写侧翻边）落地后，markRoundIdle 生产路径零「status 保持 running」注释（grep 生产写点 + 同源注释归零；resumable 随 U5 退役） | markRoundIdleImpl 改写 idle + resumable 停写；renderer 判据（isRunningProjection / isDoneProjection）随翻边合并为 status 直读（U6 SSOT 谓词终态化） |
+| **内存侧轮终保持 running-resumable（A-lite 桥接，S3-R1）**（2026-09-14 补登记，登记依据 = [subagent-two-state-convergence.md](design/subagent-two-state-convergence.md)——本模型 §3.2.2「[实施形态 A-lite，阶段 3 裁决]」预告的 impl-plan §5 载体已悬空，按元规则补入本表） | record-store-rounds.ts markRoundIdleImpl 簿记①「status 保持 running」+ ⑤ resumable=true——「轮已收敛」被编码为 `running + result + resumable + chatMode` 四字段组合，写侧/协议范围/读侧各自重组；已发生事故 = sidebar badge 对 chat 轮终误判占用（session 01a09f83 实测 8 幽灵，止血批读侧谓词已对齐严格口径） | 两态收敛设计 Phase 2（U4 写侧翻边）落地后，markRoundIdle 生产路径零「status 保持 running」注释（grep 生产写点 + 同源注释归零；resumable 随 U5 退役） | markRoundIdleImpl 改写 idle + resumable 停写；renderer 判据（isRunningProjection / isDoneProjection）随翻边合并为 status 直读（U6 SSOT 谓词终态化） |
 
 > 登记维护规则：本表为桥接词汇唯一登记（SSOT）；每轮 design-code-sync 审查须核对本表条目的判据是否已触发，触发未执行 = must-fix。
 
@@ -500,7 +500,7 @@ RECONNECTABLE_FINAL_REASONS = ["disconnected","parent-shutdown"]   (types.ts:99)
 |---|---|---|---|---|
 | S1 | 取消后续聊 | 真机派 subagent 调研任务 → 跑步中点 cancel → 列表「空闲（已中断）」→ 发 message「只看导出接口」 | 同 id 继续（GUI 点开详情可见完整历史含被中断轮）；无新 record 出现；token 统计连续累加 | G1/G2/G4 |
 | S2 | 重启后追问（pi） | 完成一个 one-shot → 完全退出宿主 → 重启 → 对该 record 发 message | 直接续聊（不出现 closed/failed，不出现 start fresh 指引）；重启重建得 idle+stopReason（收条读自 record 事件流折叠） | G1 |
-| S3 | 重启后追问（zcode） | 用 zcode 引擎跑完 subagent → 重启宿主 → 发 message | zcode 从自身会话库恢复历史续聊；列表不出现「entry-born ... start a fresh subagent」错误；**zcode 库 TTL 通道存在性**：fake clock 推进超窗 → 库条目被清 → message 走 reopen 降级（§3.2.6 风险登记的验收面） | G1/G3（K6） |
+| S3 | 重启后追问（zcode） | 用 zcode 引擎跑完 subagent → 重启宿主 → 发 message | zcode 从自身会话库恢复历史续聊；列表不出现「entry-born ... start a fresh subagent」错误；**zcode 库 TTL 通道存在性**：fake clock 推进超窗 → 库条目被清 → message 走 reopen 降级（§3.2.6 风险登记的验收侧） | G1/G3（K6） |
 | S4 | 带历史重开 | idle record 超过 transcript TTL（fake clock 推进 + 手动触发 GC）→ 发 message | 同 id 收到响应且第一轮回答能引用原任务与结论（摘要注入生效）；round 归零、stopReason=reopened 展示 | G1/G3（K3） |
 | S5 | close 收敛后续聊 + worktree 重建 | 带 worktree 的 subagent → close 收尾（确认 worktree 已回收、patch 落盘、注销 reason=completed）→ 在托盘菜单「已结束」分桶对其发 message | worktree 自动重建 + patch 恢复；续聊写同一 transcript；不回落主 repo；续聊期间 record 归「进行中」桶（isRunningProjection） | G3/G4 |
 | S6 | 双宿主占用拒绝 | 两个宿主进程开同一 dataDir → A 持有 record 进行中 → B 对同一 record 发 message | B 收到含 pid 的占用错误（含等待/关闭指引），A 不受影响 | G3（单写权不变） |

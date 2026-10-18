@@ -48,7 +48,7 @@ export const REVERSE_CHANNELS = [
 ] as const satisfies readonly ReverseChannel[];
 
 /**
- * 超时二分归属（10s 数据范围 / 不设统一超时的人机交互面）。实现归 W2 EngineClient；
+ * 超时二分归属（10s 数据范围 / 不设统一超时的人机交互通道）。实现归 W2 EngineClient；
  * 引擎侧自灭计时（W12）复用同表——已 ack 的 askUser 等待不计入 in-flight（R9-2）。
  */
 export const REVERSE_CHANNEL_TIMEOUT_CLASS: Record<ReverseChannel, ReverseRequestTimeoutClass> = {
@@ -114,7 +114,7 @@ export interface HostChildSpawnedParams {
 }
 
 /**
- * host/childStateChanged：childSpawned 的状态面（core 侧镜像数据源，
+ * host/childStateChanged：childSpawned 的状态侧（core 侧镜像数据源，
  * hasLiveProcessHandle/isResumable 同步读镜像，不跨进程查询）。
  * **killed 必含**（判据 `child !== undefined && !child.killed`）——类型层 required。
  */

@@ -21,7 +21,7 @@ import type { SessionManagerWatchRespondPayload, SessionManagerWatchReason } fro
 const VALID_NOTIFY_ID = 'sm-123e4567-e89b-12d3-a456-426614174000'
 
 describe('watch action 入站集合', () => {
-  it('SESSION_MANAGER_ACTIONS 含 watch（event-adapter 收窄面——缺席即折叠 __malformed__）', () => {
+  it('SESSION_MANAGER_ACTIONS 含 watch（event-adapter 收窄范围——缺席即折叠 __malformed__）', () => {
     expect(SESSION_MANAGER_ACTIONS).toContain('watch')
     expect(SESSION_MANAGER_ACTIONS).toHaveLength(7)
   })

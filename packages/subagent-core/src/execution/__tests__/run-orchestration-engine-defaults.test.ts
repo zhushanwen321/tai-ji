@@ -6,7 +6,7 @@
 // 两个消费点同层序核对：
 //   - chat 域：run-orchestration.resolveIdentityForRoute（service.execute）；
 //   - workflow 域：workflow-dispatch.resolveWorkflowIdentity（service.executeWorkflowAgent）。
-// 防御面：pi 路由恒不插层（pi 链自有三层解析，taiji 级偏好无意义——D6 不采用段）；
+// 防御机制侧：pi 路由恒不插层（pi 链自有三层解析，taiji 级偏好无意义——D6 不采用段）；
 // 直读侧：config 在 service 构造后写入 → 派发仍读到（不经构造期 globalConfig 缓存，
 // 「settings 保存 → 活跃 session 派发」场景 S2 的自然操作序列）。
 //
@@ -119,7 +119,7 @@ const NON_PI_ENGINE_ID = "zcode-like";
 /** pi 三层解析（ctxModel 兜底）产物的 join 词形——pi 路由防回归断言的判别值。 */
 const PI_CTX_MODEL_REF = "p/m";
 
-/** 非 pi 引擎可选面钩子（translateModelRef / listModels 条件挂载）。 */
+/** 非 pi 引擎可选能力部分钩子（translateModelRef / listModels 条件挂载）。 */
 interface NonPiHooks { // oe-exempt:20261012:test:测试钩子形态
   translateModelRef?: (modelRef: string) => string;
   listModels?: () => Array<{ id: string; name?: string }> | null;

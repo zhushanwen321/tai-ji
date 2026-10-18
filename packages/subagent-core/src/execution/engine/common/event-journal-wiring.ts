@@ -68,11 +68,11 @@ export function wireEventJournal(opts: JournalWiringOptions): JournalWiring {
     // 先落盘再转发（原 onEvent 未传时也恒传包装版——下游 onEvent 通道是事件生成后的
     // 纯转发，无行为分支，仅多一次入队）。
     //
-    // activity 豁免 append：纯活性信号不进持久/重放面——双侧 reducer（SDK
+    // activity 豁免 append：纯活性信号不进持久/重放侧——双侧 reducer（SDK
     // journal-replay / core execution-record）对其 no-op，豁免不破坏 live≡reload
     // 重放等价性；seq 由 append 铸造、过滤在 append 前故无 seq 空洞；
     // forwardEvents 照发（workflow liveRecord reducer no-op，chat/守护刷新面在
-    // observedEvent 上游不受影响）；取证面由 pi stdout/stderr tee 覆盖。
+    // observedEvent 上游不受影响）；取证侧由 pi stdout/stderr tee 覆盖。
     onEvent: (event) => {
       if (event.type !== "activity") journal.append(event);
       opts.forwardEvents?.(event);

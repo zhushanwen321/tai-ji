@@ -172,7 +172,7 @@ export interface AppServerConnectionOptions {
   /**
    * stderr tee 落盘路径（append；引擎数据目录由 R4 注入，测试用 tmp 目录）。
    * 懒打开：首条 stderr 才建文件，无 stderr 的短命连接零文件；写失败静默降级
-   * （取证面不能拖垮主通道）。
+   * （取证侧不能拖垮主通道）。
    */
   stderrLogPath: string;
   /**
@@ -256,7 +256,7 @@ export class AppServerConnection {
   private killChainPromise: Promise<"terminated" | "killed"> | undefined;
   private generation = 0;
   private readonly pushHandlers = new Map<string, Set<(params: unknown) => void>>();
-  /** [R4] 连接级崩溃通知面（onClose 订阅者集合；与 pushHandlers 同构的 refCount 形态）。 */
+  /** [R4] 连接级崩溃通知侧（onClose 订阅者集合；与 pushHandlers 同构的 refCount 形态）。 */
   private readonly closeHandlers = new Set<(reason: string) => void>();
   private capturedProtocolInfo: Readonly<Record<string, unknown>> | null = null;
 
@@ -607,7 +607,7 @@ export class AppServerConnection {
     }
   }
 
-  /** stderr 实时 append 落盘（懒打开 + 尺寸轮转 + 过期清理；失败静默——取证面不
+  /** stderr 实时 append 落盘（懒打开 + 尺寸轮转 + 过期清理；失败静默——取证侧不
    * 能拖垮主通道）。 */
   private appendStderrLog(chunk: string): void {
     if (this.stderrStreamFailed) return;

@@ -90,7 +90,7 @@ function judgeBgNotifyRecord(record: BgNotifyRecord): NotifyOutcome {
 
 /**
  * managed-session-notify details 防御解析（notify-once D9 提取口径）：key = details.notifyId
- * （批已在 extension 攒批窗重建身份，单条即一批，无 items 展开面）；outcome = reason/status
+ * （批已在 extension 攒批窗重建身份，单条即一批，无 items 展开逻辑）；outcome = reason/status
  * 映射 completed→success / failed→failed / 其余（stopped/cancelled 等）→neutral。
  * notifyId 缺失/空串、reason 与 status 双缺席 → null（消费侧降级 unparsed，不崩溃）。
  */

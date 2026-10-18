@@ -417,7 +417,7 @@ describe('②③ badge 待处理态 + 终态机四行（D8 SSOT 表）', () => {
     emitUIRequest(VID, formFrame('r-gone', '问题？'))
     await settle(w)
     // 模拟已终结（失效链已移除 store 记录）后迟到的提交：active 已随 store 清空 →
-    // 确认条不在 DOM、无按钮可点——改直调 useExtensionUI 的 respond 语义面
+    // 确认条不在 DOM、无按钮可点——改直调 useExtensionUI 的 respond 语义侧
     // （同 useBtwInteraction 挂载形态：vid ref + 全放行 filter）
     useExtensionUIStore().removeRequest(VID, 'r-gone')
     await settle(w)
@@ -497,7 +497,7 @@ describe('⑤ 状态区退役（2026-10-15 用户裁决）：extension GUI 状�
     expect(w.find('[data-testid="btw-widget-line"]').exists()).toBe(false)
     expect(w.text()).not.toContain('构建中 3/5')
     expect(w.text()).not.toContain('todo: 2 done')
-    // 面板本身健康（装配面不因退役受损）
+    // 面板本身健康（装配侧不因退役受损）
     expect(w.find('[data-testid="drawer-btw-tab"]').exists()).toBe(true)
   })
 })

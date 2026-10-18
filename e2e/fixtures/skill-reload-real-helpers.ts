@@ -367,7 +367,7 @@ export const DONE_TIMING_OBSERVE_SLACK_MS = OBSERVE_SLACK_MULTIPLIER * DONE_TIMI
 
 // ── 进程面（孤儿检查 / 引擎 pid 稳定性） ──────────────────────────────
 
-/** ps 单行最小面 */
+/** ps 单行最小字段集 */
 interface PsEntry {
   pid: number
   command: string

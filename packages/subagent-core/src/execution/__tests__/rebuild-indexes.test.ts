@@ -137,7 +137,7 @@ describe("[U4c/G1] rebuildIndexes 双通道 + S5 缓存可丢锚点", () => {
     const fileB = path.join(sessionsDir, "20260912T000001_b.jsonl");
     writeSessionJsonl(fileA, { id: "sa-closed", task: "closed task", startedAt: 1000, rootSessionId: "root-session" });
     writeSessionJsonl(fileB, { id: "sa-running", task: "running task", startedAt: 2000, rootSessionId: "root-session" });
-    // 损坏/异构文件（无 identity 无绑定）：不在扫描集，重建面必须静默跳过
+    // 损坏/异构文件（无 identity 无绑定）：不在扫描集，重建侧必须静默跳过
     fs.writeFileSync(path.join(sessionsDir, "junk.jsonl"), "not a session at all\n", "utf-8");
     // 「缓存曾存在」的现场：manifest + sessions-index 各留一份后人为删除（S5 场景步骤）
     fs.writeFileSync(path.join(recordsDir, "sa-closed.json"), "{}", "utf-8");

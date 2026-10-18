@@ -1,7 +1,7 @@
 // src/execution/__tests__/record-origin.test.ts
 //
 // record 来源身份 origin/parentRunId（H2 W1，设计 subagent-workflow-record-unification
-// §3.3 D1）持久化链 + 查询范围 + 治理面负向规格。
+// §3.3 D1）持久化链 + 查询范围 + 治理侧负向规格。
 //
 // v2 单形态（W1 [D1]）：主 session 条目 = 注册（身份域）+ 终态（终局域）两条小条目，
 // 身份域 origin/parentRunId/stepIndex 只落在注册条目；v1 全量快照写点与读侧已随兼容层
@@ -17,7 +17,7 @@
 //   3. 查询范围：collectRecords 缺省过滤 origin==="workflow"（includeWorkflow 缺省
 //      false）、includeWorkflow:true 放行；collectRecordsByParentRunId 按 run id
 //      精确列 record（内存 ∪ 磁盘重建口径，不过滤 origin）。
-//   4. 治理面负向保证（D1⑥）：recoverEntryOnlyOrphans / 重建派生视图不因 origin 过滤——
+//   4. 治理侧负向保证（D1⑥）：recoverEntryOnlyOrphans / 重建派生视图不因 origin 过滤——
 //      workflow 来源的 entry-only 孤儿（注册条目已在主 session、无事件文件、无子文件锚）
 //      照样被终态化收敛；身份域留在注册条目，纠偏只追加终态条目。
 
@@ -283,7 +283,7 @@ describe("collectRecords includeWorkflow 查询范围（H2 W1）", () => {
   });
 });
 
-describe("治理面负向规格（D1⑥：恢复链对 workflow origin 全量可见，禁止过滤）", () => {
+describe("治理侧负向规格（D1⑥：恢复链对 workflow origin 全量可见，禁止过滤）", () => {
   let rootDir: string;
   let tmpDir: string;
 
@@ -312,7 +312,7 @@ describe("治理面负向规格（D1⑥：恢复链对 workflow origin 全量可
     store2.setPi(makeCapturePi(recovered));
     store2.recoverEntryOnlyOrphans(mainFile, "sess-origin");
 
-    // 治理面不过滤：workflow origin 孤儿照样被终态化收敛（一律 idle + interrupted-by-restart，
+    // 治理侧不过滤：workflow origin 孤儿照样被终态化收敛（一律 idle + interrupted-by-restart，
     // 不直断 closed+gc）
     expect(recovered).toHaveLength(1);
     const finalized = recovered[0]?.kind === "settled" ? recovered[0] : undefined;

@@ -50,7 +50,7 @@ grep -rln 'createReadStream' packages/runtime/src --include='*.ts' | grep -v '\.
 # P3 · plugin 族读者（经 runtime session-api readEntries 通道，不经 extensions/ 的 getEntries 锚——2026-09-25 A14 验收补锚）
 grep -rln 'readEntries' resources/plugins --include='*.ts' | grep -v '\.test\.' | grep -v __tests__
 
-# R4 · runtime 侧 getEntries RPC 通道读者（2026-10-01 分支审查补锚：N13/N14 补登暴露的通道盲区——E1 只扫 extensions/、R1/R2/R3 只扫 runtime fs 通道，runtime 侧经 RpcClient.getEntries 读 session 的读者此前不可检索；命中面 session-api / session-records / history-rebuild-cache / trace-sync / revoke-orchestrator / session-delivery-registry 六文件均已登记）
+# R4 · runtime 侧 getEntries RPC 通道读者（2026-10-01 分支审查补锚：N13/N14 补登暴露的通道盲区——E1 只扫 extensions/、R1/R2/R3 只扫 runtime fs 通道，runtime 侧经 RpcClient.getEntries 读 session 的读者此前不可检索；命中侧 session-api / session-records / history-rebuild-cache / trace-sync / revoke-orchestrator / session-delivery-registry 六文件均已登记）
 grep -rn 'client\.getEntries(' packages/runtime/src --include='*.ts' | grep -v '\.test\.' | grep -v __tests__
 ```
 
@@ -92,7 +92,7 @@ grep -rn 'client\.getEntries(' packages/runtime/src --include='*.ts' | grep -v '
 | `services/session/history-rebuild-cache.ts` | 全量重建缓存 | 随树 | 缓存基线语义 = 活跃路径派生视图（非全文件）；撤回编排显式清缓存强制全量重建 | U6a |
 | `services/plugin-service/api/session-api.ts` | `readEntries` handler（plugin 族读侧的 runtime 派生视图生成点：pi get_entries → `filterEntriesToActivePath` 活跃路径过滤 → 五字段派生视图，parentId 不出 runtime） | 随树 | 插件镜像的折叠输入 = 本派生视图回包——过滤在派生视图生成前使被撤子树 op 构造性不达任何插件（scheduler-manager 面板残留缺陷的 runtime 数据范围落点，U7）；防御语义与 extensions 裁剪同构但有意异源：leafId 缺失/悬空 → **不过滤**（增量批不丢数据优先，extensions 侧按文件尾回退是全量语义），环状 parentId `!activeIds.has` 防环 | U7（撤回信号广播同批） |
 
-> **§4.1 防御语义异源登记（R2 审查采纳，防后续审查误报）**：extensions 侧的活跃路径防御已收编为单一共享实现 `extensions/shared/session-path`（todo/plan/goal/scheduler 四包原同构副本收编——收编前四包回退取值口径已分叉：plan/todo 取数组尾条目 vs goal/scheduler 取最后一条带 string id 条目，统一为后者；真实 pi SessionEntry 恒有 id，生产行为不变），与 pi `buildSessionPath` 同构——leafId 缺失/失效**回退文件尾**（全量语义，宁全勿漏）；runtime 重建链（entry-tree-builder 族）同构同源、不经共享库（extension 不能 import runtime 包，跨面异源为有意设计）。与两者有意异源的是 §4.1 末行 plugin 派生视图生成点（leafId 悬空**不过滤**——增量批部分数据，不丢数据优先）与 runtime 侧「降级 warn + 原样返回」的 SSOT 形态（对话流宁多显 vs 注入范围宁裁勿漏——G2 二分准则在各面的落地形态差异，均为有意设计非漂移）。
+> **§4.1 防御语义异源登记（R2 审查采纳，防后续审查误报）**：extensions 侧的活跃路径防御已收编为单一共享实现 `extensions/shared/session-path`（todo/plan/goal/scheduler 四包原同构副本收编——收编前四包回退取值口径已分叉：plan/todo 取数组尾条目 vs goal/scheduler 取最后一条带 string id 条目，统一为后者；真实 pi SessionEntry 恒有 id，生产行为不变），与 pi `buildSessionPath` 同构——leafId 缺失/失效**回退文件尾**（全量语义，宁全勿漏）；runtime 重建链（entry-tree-builder 族）同构同源、不经共享库（extension 不能 import runtime 包，跨包异源为有意设计）。与两者有意异源的是 §4.1 末行 plugin 派生视图生成点（leafId 悬空**不过滤**——增量批部分数据，不丢数据优先）与 runtime 侧「降级 warn + 原样返回」的 SSOT 形态（对话流宁多显 vs 注入范围宁裁勿漏——G2 二分准则在各面的落地形态差异，均为有意设计非漂移）。
 
 ### 4.2 派生提取器族（随树）
 
@@ -147,7 +147,7 @@ grep -rn 'client\.getEntries(' packages/runtime/src --include='*.ts' | grep -v '
 
 ## 6. 设计判定清单之外的新发现读者（已裁决）
 
-以下读者由机器锚点命中、不在 message-revoke 设计 §5 U6 的逐项判定清单内。裁决（2026-09-24 流水线主 agent，依据 = G2 二分准则「未来状态随树 / 已发生事实照实」+ 注入范围判定）：**N1-N12 全部维持照实 / 非派生视图归类，零追加单元**——run / 通知 / bash 执行 / 压缩计数 / trace / fork / btw / 导入均为已发生事实（重建即伪造事实），无一注入模型上下文。附核实项：smart-context 压缩组装的文件重注入（compact-handler `readFileForReinject`）读的是项目源码文件而非 session 数据、且输入 branchEntries 来自活跃路径——撤回后新压缩输入天然不含被撤内容，与撤回零冲突。N13/N14 为分支审查补登（2026-10-01，理由见行内）：两者读取走 getEntries RPC 通道，不在 runtime 侧锚点命令族（E1/R1/R2/R3 重跑均不命中）——登记缺口不被机器锚点拦截，按 C-proc-28 登记义务归类；§2 已补 R4 检索锚（runtime 侧 client.getEntries 通道），该通道后续读者可被检索、不再漏网。N15 为分支审查补登（2026-10-04，理由见行内）：R2 锚点命中面内的存量漏登（非当次 diff 引入），按 C-proc-28 登记义务归类。N16 为分支审查补登（2026-10-07，理由见行内）：当次 diff 引入的新读者（subagent 成员详情的 model_change 尾条目派生），按 C-proc-28 登记义务归类。2026-10-12 分支审查另补登两读者（当次 diff 引入，不占 N 编号、登记落 §4.4 表）：`session-message-count`（R3 锚命中）与 `session-content-cascade`（readFileSync 直读不被既有锚点覆盖，R2 已增补 `cascadeDeleteSessionContent` 检索锚），均归类照实，判定理由见 §4.4 行内——依据同 N1-N12 口径（已发生事实，无模型注入通道）。
+以下读者由机器锚点命中、不在 message-revoke 设计 §5 U6 的逐项判定清单内。裁决（2026-09-24 流水线主 agent，依据 = G2 二分准则「未来状态随树 / 已发生事实照实」+ 注入范围判定）：**N1-N12 全部维持照实 / 非派生视图归类，零追加单元**——run / 通知 / bash 执行 / 压缩计数 / trace / fork / btw / 导入均为已发生事实（重建即伪造事实），无一注入模型上下文。附核实项：smart-context 压缩组装的文件重注入（compact-handler `readFileForReinject`）读的是项目源码文件而非 session 数据、且输入 branchEntries 来自活跃路径——撤回后新压缩输入天然不含被撤内容，与撤回零冲突。N13/N14 为分支审查补登（2026-10-01，理由见行内）：两者读取走 getEntries RPC 通道，不在 runtime 侧锚点命令族（E1/R1/R2/R3 重跑均不命中）——登记缺口不被机器锚点拦截，按 C-proc-28 登记义务归类；§2 已补 R4 检索锚（runtime 侧 client.getEntries 通道），该通道后续读者可被检索、不再漏网。N15 为分支审查补登（2026-10-04，理由见行内）：R2 锚点命中侧内的存量漏登（非当次 diff 引入），按 C-proc-28 登记义务归类。N16 为分支审查补登（2026-10-07，理由见行内）：当次 diff 引入的新读者（subagent 成员详情的 model_change 尾条目派生），按 C-proc-28 登记义务归类。2026-10-12 分支审查另补登两读者（当次 diff 引入，不占 N 编号、登记落 §4.4 表）：`session-message-count`（R3 锚命中）与 `session-content-cascade`（readFileSync 直读不被既有锚点覆盖，R2 已增补 `cascadeDeleteSessionContent` 检索锚），均归类照实，判定理由见 §4.4 行内——依据同 N1-N12 口径（已发生事实，无模型注入通道）。
 
 | # | 读者 | 归类（已裁决） | 判定理由 |
 |---|------|----------|------|

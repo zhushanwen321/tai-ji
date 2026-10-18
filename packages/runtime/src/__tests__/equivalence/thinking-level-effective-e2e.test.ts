@@ -49,7 +49,7 @@ const CLAMP_ACTOR = { provider: 'faux', id: 'faux-1' } as const
 /** 正常档位用例演员：reasoning:true 且无 thinkingLevelMap → 档位含 high，set high 生效 */
 const NORMAL_ACTOR = { provider: 'faux', id: 'faux-1-reasoning' } as const
 
-/** 把 fixture 的原始 JSONL RPC 适配成 SessionService 消费的 IPiEngine 语义面（唯一适配点）。 */
+/** 把 fixture 的原始 JSONL RPC 适配成 SessionService 消费的 IPiEngine 语义侧（唯一适配点）。 */
 function makeEngine(fx: PiFixture): IPiEngine {
   return {
     getCommands: async () => [],

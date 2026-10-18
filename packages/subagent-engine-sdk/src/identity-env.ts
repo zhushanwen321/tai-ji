@@ -28,7 +28,7 @@
 //   - depth：执行嵌套深度（子进程 = 父进程 + 1）
 //   - forkDepth：fork 链深度（root 侧一次设定，链上不变）
 //   - parentRecordId：父 record id（嵌套时 = 父进程自身的 selfRecordId）
-//   - agent / task / mode / slug / startedAt / worktree：record 身份面；引擎侧只能填
+//   - agent / task / mode / slug / startedAt / worktree：record 身份信息；引擎侧只能填
 //     它确实知道的（agent/task 来自 run 参数；mode 继承父进程判定、顶层缺省 background），
 //     其余缺席由壳读者回落（slug/parentRecordId 可选；startedAt 缺席回落 Date.now()）。
 export const SUBAGENT_IDENTITY_ENV = {

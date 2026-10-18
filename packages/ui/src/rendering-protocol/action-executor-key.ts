@@ -14,7 +14,7 @@ import type { InjectionKey } from 'vue'
 /** 操作参数——与 GuiComponentProps['action-bar'] items[].args 同形（只许标量，防注入结构化 payload） */
 export type ActionArgs = Record<string, string | number | boolean>
 
-/** 最小结构接口：壳层命令执行器的兼容面（core commandRegistry.execute 结构兼容此形状） */
+/** 最小结构接口：壳层命令执行器的兼容范围（core commandRegistry.execute 结构兼容此形状） */
 export interface ActionExecutor {
   execute(id: string, args?: ActionArgs): void
 }

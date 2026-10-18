@@ -3,7 +3,7 @@
  * D7 上三角「新 taiji + 旧 npm scheduler」兼容路径）。
  *
  * legacy scheduleCreate 帧（SCHEDULE_CREATE_MARKER 广播）经 useExtensionUI 归一附加 form 键
- * 后命中统一判定面，Panel 按挂载源键分流 FormOverlay 的 draft props（应答 = 扁平
+ * 后命中统一判定侧，Panel 按挂载源键分流 FormOverlay 的 draft props（应答 = 扁平
  * ScheduleFormResult JSON，今日 Panel onScheduleCreateSubmit 路径等价）。锁定：
  * - legacy scheduler 帧 → FormOverlay（draft 直挂）挂载，Composer 互斥不挂
  * - form 帧与 legacy scheduler 帧互斥分流（questions / draft 两源）

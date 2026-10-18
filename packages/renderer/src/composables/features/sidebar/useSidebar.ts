@@ -429,7 +429,7 @@ export function useSidebar() {
       // 复位 appBootstrapped 保留显式重试通道：重调 initApp（如启动失败重试入口）可重新编排；
       // 生产常规路径首连失败后走 onConnected 重连刷新支，不会自动回到 initApp。
       appBootstrapped = false
-      // 失败必须用户可见：无提示时用户面对空 landing 无法区分「加载中」与「失败」。
+      // 失败必须用户可见：无提示时用户看到空 landing 无法区分「加载中」与「失败」。
       // 恢复动作 = 刷新页面重试（无运行时内自动重试，符合任务级默认无超时/无自动重试约定）。
       const msg = e instanceof Error ? e.message : String(e)
       toastError(t('app.bootstrapFailed', { msg }))

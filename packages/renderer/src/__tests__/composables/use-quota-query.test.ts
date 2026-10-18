@@ -34,7 +34,7 @@ const terminalConfigReply = () => ({
 
 // '@/api' 门面 mock：导入静默底盘（真实门面拉起 WS 连接，node env 不可用）。project 域与
 // config 域 on* 订阅族复用 settings-modal-api-mock 的公共段；terminal config / settings
-// system 两差异面保持本文件内联。
+// system 两差异点保持本文件内联。
 vi.mock('@/api', () => ({
   project: apiProjectMock(),
   config: {

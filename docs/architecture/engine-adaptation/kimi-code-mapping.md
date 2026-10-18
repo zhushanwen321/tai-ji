@@ -11,7 +11,7 @@
 
 模型凭据注入：`KIMI_MODEL_NAME`（合成 env provider，别名 `__kimi_env_model__`）+ `KIMI_MODEL_TEMPERATURE` / `TOP_P` / `THINKING_KEEP` / `MAX_COMPLETION_TOKENS`（或 `MAX_TOKENS`）/ `MAX_CONTEXT_SIZE` 等 env overlay（packages/agent-core-v2/src/app/kosongConfig/envOverlay.ts:75-120），spawn 时经 env 传入即可，无需写 config.toml。
 
-CLI `-p` 降级路径：`kimi -p "<prompt>" --output-format stream-json`（apps/kimi-code/src/cli/commands.ts:59-70）。headless 启动强制 permission `'auto'`、结束后恢复（apps/kimi-code/src/cli/v2/run-v2-print.ts:337-342）；轮数上限走 config `task.printMaxTurns`（run-v2-print.ts:482）。局限：coarse 输出、无 ACP 反向交互面（approval/question 无 client 可达），仅作 ACP server 不可用时的回退。
+CLI `-p` 降级路径：`kimi -p "<prompt>" --output-format stream-json`（apps/kimi-code/src/cli/commands.ts:59-70）。headless 启动强制 permission `'auto'`、结束后恢复（apps/kimi-code/src/cli/v2/run-v2-print.ts:337-342）；轮数上限走 config `task.printMaxTurns`（run-v2-print.ts:482）。局限：coarse 输出、无 ACP 反向交互侧（approval/question 无 client 可达），仅作 ACP server 不可用时的回退。
 
 适配层角色：taiji 引擎适配器 = ACP client 侧。正向方法（host→引擎）映射到 ACP agent methods；引擎→host 的 `session/update` 通知与 `session/request_permission` / `elicitation/create` 反向请求映射到协议 event 通知与 host/* 反向通道。引擎方法路由全集见 packages/acp-server/src/server.ts:694-715（`createAcpAgentApp`）。
 
@@ -107,7 +107,7 @@ ACP `tool_call` / `tool_call_update` 共享同一字段集 `{toolCallId, title, 
 - result.content[] ← `content` 数组映射：`{type:'content'}` 内嵌 text 块逐个入列；`{type:'diff'}`（path/oldText/newText，convert.ts:279-302）与 `{type:'terminal'}`（session.ts:833-843）为非文本形态，适配层序列化为描述性文本或丢入 details。
 - result.details ← `rawOutput`（tool.result 的 output 原值，events-map.ts:385）。
 - isError ← `status:'failed'`（isError = status==='failed'；ToolCallStatus 全集 = pending/in_progress/completed/failed）。
-- kind（ToolKind 10 值 read/edit/delete/move/search/execute/think/fetch/switch_mode/other）与 locations（绝对路径文件位置，events-map.ts:174-188）为 ACP 展示增强，taiji 靶面无对应，丢弃。
+- kind（ToolKind 10 值 read/edit/delete/move/search/execute/think/fetch/switch_mode/other）与 locations（绝对路径文件位置，events-map.ts:174-188）为 ACP 展示增强，taiji 目标类型无对应，丢弃。
 
 tool_call 状态机与 tool_start/tool_end 时序：kimi 引擎先流式吐 args（tool.call.delta），后派发（tool.call.started）——acp-server 对 delta lazy-create `tool_call`(status=pending)（session.ts:789-809）、对 started 视有无先至 delta 发 CREATE 或 upgrade update（status→in_progress，session.ts:747-787）。适配层时序规则：**首个 tool_call/tool_call_update(status∈{pending,in_progress}) → tool_start；tool_call_update(status∈{completed,failed}) → tool_end**；期间仅改标题/内容的中间 update 合成 activity 或丢弃。HideOutputMarker 数组输出被 acp-server 抑制为空 content（convert.ts:333-341，marker.ts），适配层收到空 content 的 completed 终态属正常形态。
 
@@ -177,7 +177,7 @@ session/cancel 与 ping 对应物：`session/cancel` 通知（server.ts:430-445�
 | resume | cold | session/resume/load + 进程重启后 klient.restore 可续（server.ts:533-547）；journal 持久于 KIMI_CODE_HOME 树 |
 | interrupt | native | session/cancel → agent.cancel({turnId}) 优雅中断（session.ts:980-1010），turn.ended reason=cancelled 收敛；非 kill-only |
 | permissionMode | native | session/set_mode 四档 default/plan/auto/yolo，manual/auto/yolo 与 taiji 中立词表直映（modes.ts:72-87）；注意 headless CLI 路径固定 auto（run-v2-print.ts:337-342），常驻 ACP 路径不受此限 |
-| maxTurns | false | ACP 常驻面无 per-run 轮数参数；引擎 step 预算不可经 ACP 配置（§2 maxTurns 行） |
+| maxTurns | false | ACP 常驻部分无 per-run 轮数参数；引擎 step 预算不可经 ACP 配置（§2 maxTurns 行） |
 
 ## 9. gap 清单
 

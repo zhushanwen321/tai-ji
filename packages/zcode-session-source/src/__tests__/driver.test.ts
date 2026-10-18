@@ -87,7 +87,7 @@ describe('驱动公共子集（open/prepare/all/get/close）', () => {
     }
   })
 
-  it('readonly 语义：写拒绝（G4 严格只读的驱动面保证）', async () => {
+  it('readonly 语义：写拒绝（G4 严格只读的驱动侧保证）', async () => {
     const fx = makeFixtureDir('zss-driver-ro-')
     try {
       const fixture = await buildFixtureDb(fx.root, defaultTranscriptSeeds())

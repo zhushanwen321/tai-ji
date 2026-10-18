@@ -15,7 +15,7 @@
 
   安全不变量：容器 DOM 由本 Vue 模板产出，样式走 Tailwind 工具类与既有设计 token，
   **不经过** v-html / DOMPurify / 信任槽——用户 HTML 的白名单契约（class/style/data-*
-  构造性全剥）不受影响；段载荷本身只是路径字符串。iframe sandbox 权限面 = `allow-scripts`
+  构造性全剥）不受影响；段载荷本身只是路径字符串。iframe sandbox 权限项 = `allow-scripts`
   单权限（opaque origin，不给 allow-same-origin / allow-top-navigation / allow-popups /
   allow-forms，平移自原抽屉渲染态 §6.4）。
 

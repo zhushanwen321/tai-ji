@@ -25,7 +25,7 @@ import { GLOBAL_SLOT_KEYS } from "../../shared/global-slots.ts";
 
 /** [D4 查询范围聚合] 读模型轴（record 快照读取 + store 订阅）——Service 上的
  *  `service.queries` 消费方。变化原因：改查询派生视图 / 过滤 / 订阅语义，只动 queries 组；
- *  Service 本体保留编排核（execute/executeAndAwait/cancel）与生命周期面。 */
+ *  Service 本体保留编排核（execute/executeAndAwait/cancel）与生命周期侧。 */
 export interface SubagentQueries {
   /** 按 id 查内存 running record 的只读快照（G3-002 修复）。不存在返回 undefined。 */
   findRecord(id: string): RecordSnapshot | undefined;
@@ -61,7 +61,7 @@ export interface SubagentChatActions {
 /**
  * Service 构造参数（进程级）。
  *
- * @experimental execution 运行时面（设计 docs/design/subagent-core-sink-design.md（已删，git 可追溯） §3.3 D6）：
+ * @experimental execution 运行时侧（设计 docs/design/subagent-core-sink-design.md（已删，git 可追溯） §3.3 D6）：
  * 一个 minor 周期内允许签名微调，稳定后转常规 semver 承诺。
  */
 export interface SubagentServiceInit {

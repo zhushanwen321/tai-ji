@@ -325,7 +325,7 @@ describe("枚举读错分通道：EACCES 上抛 / ENOENT 仍空集", () => {
 //
 // 旧双源文件（.events.jsonl 旧 journal + .jsonl 旧快照）形态：不进候选
 //（候选 = .record.jsonl 文件族，构造性跳过——[D1] 历史数据不读不写不主动删）、
-// 不抛错、每目录聚合一条 warn（core logger 通道——模块无注入日志面，与判定核
+// 不抛错、每目录聚合一条 warn（core logger 通道——模块无注入日志侧，与判定核
 // 读错 warn 同通道）。历史 run 随裁决点 7 对账清理消亡，不在本枚举射程。
 
 describe("v1 旧形态目录：构造性跳过 + warn 留痕（[D16⑥]）", () => {

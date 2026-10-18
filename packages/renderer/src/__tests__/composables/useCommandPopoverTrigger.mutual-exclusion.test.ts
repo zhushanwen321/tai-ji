@@ -169,7 +169,7 @@ describe('useCommandPopoverTrigger SM 互斥（D1 单向状态互斥）', () => 
     expect(ctx.result.cmdOpen.value).toBe(false)
   })
 
-  it('互斥不动触发域标记（active/query 保留——冻结检查与 D2b 责任面的锚）', () => {
+  it('互斥不动触发域标记（active/query 保留——冻结检查与 D2b 职责范围的锚）', () => {
     ctx = setupRealComposer('/compact')
     ctx.result.onSlashTrigger({ query: 'compact' })
     useSearchModal().open()
@@ -213,7 +213,7 @@ describe('useCommandPopoverTrigger D2b 注入前清理（pendingSlash 消费链�
 
   it('② 失活边界：`/rev $f`（$ 域活跃、/rev 失活）confirm 后 `$f` 被清、`/rev` 保留', async () => {
     ctx = setupRealComposer('/rev $f')
-    // slash 域开过又关（空格后触发终止）——失活历史 token 出 D2b 责任面
+    // slash 域开过又关（空格后触发终止）——失活历史 token 出 D2b 职责范围
     ctx.result.onSlashTrigger({ query: 'rev' })
     ctx.result.onSlashTrigger(null)
     ctx.result.onFileTrigger({ query: 'f' }) // $ 域活跃

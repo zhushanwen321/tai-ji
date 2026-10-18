@@ -46,7 +46,7 @@ import { assertModelInCatalog } from "../../shared/model-catalog.ts";
 // 曾保留同名 re-export 过渡，收尾已删并改直连持久化层）。
 import { scanRunEvents } from "../persistence/run-event-journal.ts";
 // [U4] 成员复用池（决策 4/9/10 的机制本体）。[D1 拆边 Class C 第 4 步] 池本体自
-// orchestration 整体下沉 execution/service（依赖面核查 = 可下沉：值依赖只有
+// orchestration 整体下沉 execution/service（依赖范围核查 = 可下沉：值依赖只有
 // core/logger，类型依赖只有 run-events 的 WorkflowRunEvent；无编排状态机语义）——
 // 本 import 即 D1 拆边 Class C 消掉的第四条 execution → orchestration 值边；编排侧
 // 消费方直连本模块（过渡期同名 re-export façade 收尾已删）。
@@ -126,7 +126,7 @@ export type MemberReviveOutcome =
  * [R1 打样模式 1] 聚合协作 deps——**全部晚绑定闭包，构造期零求值**。
  *
  * 窄结构类型只声明聚合真实消费的通道（不整实例注入）。四类成员：
- * - 断言/校验面（assertReady / assertIdleTimeoutMsSafe）：入口就绪门与 idleTimeoutMs
+ * - 断言/校验侧（assertReady / assertIdleTimeoutMsSafe）：入口就绪门与 idleTimeoutMs
  *   合法域校验（本体在 SessionBaselines / RunOrchestration）。
  * - 会话基线 getter（getExecNesting / getStreamSink / getUiObservability /
  *   getSessionRootId / getPi 通道外的 NotifyHost 派生视图）：initSession 注入的运行时可变
@@ -145,7 +145,7 @@ export interface WorkflowDispatchDeps {
   readonly assertIdleTimeoutMsSafe: (opts: ExecuteOptions) => void;
   /** 嵌套身份基线（BC-12 嵌套护栏深度检查；SessionBaselines 现读）。 */
   readonly getExecNesting: () => ExecutionNestingContext;
-  /** ModelConfigService（agentConfig 宽松面读取 + 引擎路由全局缺省）。 */
+  /** ModelConfigService（agentConfig 宽松读取侧读取 + 引擎路由全局缺省）。 */
   readonly getModelService: () => ModelConfigService;
   /** pi 引擎 port 解析（RunOrchestration 组内方法，经壳编排回调）。windowKey =
    *  派发窗口键（workflow 域 = parentRunId）——per-window 引擎经窗口实例解析单点
@@ -169,7 +169,7 @@ export interface WorkflowDispatchDeps {
     mode: ExecutionMode,
     originFields?: { origin: "workflow"; parentRunId: string; stepIndex?: number },
   ) => ExecutionRecord;
-  /** NotifyHost（record 级 pending:register 注销面）。 */
+  /** NotifyHost（record 级 pending:register 注销侧）。 */
   readonly getNotifyHost: () => NotifyHost;
   /** UI streaming sink（内构 background stream 的 widget 通道；SessionBaselines 现读）。 */
   readonly getStreamSink: () => StreamSink | null;
@@ -283,7 +283,7 @@ export class WorkflowDispatch {
     assertNestingDepthWithinLimit(this.deps.getExecNesting().current());
 
     // ── 八步迁移 ①②③：路由 → 预检 → identity（含非 pi 引擎 model 校验）──
-    // 全部先于 record 创建与池 acquire（D3 失败零池占用）。agentConfig 取宽松面
+    // 全部先于 record 创建与池 acquire（D3 失败零池占用）。agentConfig 取宽松读取侧
     //（getAgentConfig——路由输入只要 frontmatter engine；显式 ref 解析失败的报错归
     // identity 阶段的 getRequiredAgentConfig，不在路由层重复）。
     const agentConfig = opts.agent ? this.deps.getModelService().getAgentConfig(opts.agent) : undefined;

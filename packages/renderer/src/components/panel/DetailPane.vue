@@ -7,7 +7,7 @@
     （display-containers §6.3：detail 多文件 tab，keep-alive 多实例）。
 
     HTML 形态（chat-html-support v16 形态变更，§6.4 D4）：.html/.htm 走 code 类 shiki
-    源码高亮（抽屉渲染态退役，预览面收敛到消息流内联容器 HtmlPreviewInline）。
+    源码高亮（抽屉渲染态退役，预览区域收敛到消息流内联容器 HtmlPreviewInline）。
 
     [NFR-AC-S4] 禁 v-html：内容用 <pre> + {{ }} 文本插值渲染，XSS 安全（T6.10）。
     data-testid 标注供 E2E 选择器。

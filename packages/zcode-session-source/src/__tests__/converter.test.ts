@@ -7,7 +7,7 @@
  * 1. 纯函数直测：内存行集（不建真库）→ 产物 entry 逐条断言（映射表即验收标准）。
  *    产物经 serializeSession（基座字节契约，P-serializer 锚）转 JSONL 行后断言，
  *    与「stringify 产物逐行断言」形态对齐，同时覆盖「键序不重排、接口外字段不丢失」
- *    的序列化兼容面。
+ *    的序列化兼容范围。
  * 2. 重放锚：产物经最小重放器（pi applyEntry 消费语义的测试内同构派生视图，跨包
  *    import runtime 会成环——手段自证已在 deviations 登记）断言 Entry 树 parentId
  *    链完整 + 消息序列/角色/toolCall 配对/usage 聚合——「合法 pi session」的可证伪
@@ -207,7 +207,7 @@ interface ParsedEntry {
 /**
  * 产物 → JSONL 行（serializeSession = 基座序列化原语，P-serializer 字节契约：
  * JSON.stringify(entry) 不重排键、不丢接口外字段——导入薄包装即用此函数落盘）。
- * converter 产物是 entry 对象，序列化步显式走基座单点，同时覆盖序列化兼容面。
+ * converter 产物是 entry 对象，序列化步显式走基座单点，同时覆盖序列化兼容范围。
  */
 function toLines(session: NormalizedSession): ParsedEntry[] {
   return serializeSession(session.entries)
@@ -314,7 +314,7 @@ describe('T1/T6 header、session_info 与 entry id 链', () => {
 
   it('header：归一化 id + timestamp 取 session 创建时间；cwd 缺省留空不伪造', () => {
     // 迁移适配：旧断言「首行 header version=3 + 三字段」——header 行由导入薄包装/reader
-    // 序列化装配面拼装（D1），converter 产 SessionHeader 对象；cwd 键不存在 = 缺省留空
+    // 序列化装配逻辑拼装（D1），converter 产 SessionHeader 对象；cwd 键不存在 = 缺省留空
     expect(session.header).toEqual({ id: NORMALIZED_ID, timestamp: NORMALIZED_TIMESTAMP })
     expect(session.header).not.toHaveProperty('cwd')
   })
@@ -1135,7 +1135,7 @@ describe('端到端：fixture 库 → readZcodeSession → NormalizedSession', (
     writer.close()
 
     // 迁移适配：旧断言经 ZcodeImportSource.write 相位（rejects '读取 zcode 会话库失败'）——
-    // 错误映射属 runtime 编排面；本包语义 = 原始 Error 原样上抛交消费侧映射
+    // 错误映射属 runtime 编排侧；本包语义 = 原始 Error 原样上抛交消费侧映射
     await expect(readZcodeSession(dbPath, 'sess_0198e2e0-0000-0000-0000-00000000000d')).rejects.toThrow(/不是合法 JSON/)
   })
 })

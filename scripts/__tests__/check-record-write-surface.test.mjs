@@ -8,7 +8,7 @@
  *   - R1 命中：store 外 import writeFinalizedState 直调 / 类方法形态直写
  *   - R1 豁免：载体定义文件的 export function / async function 定义行、注释行
  *   - R2 命中：appendEntry + customType "subagent-record" 同行写形态（store 外）
- *   - R2 豁免：record-entry.ts 常量定义面
+ *   - R2 豁免：record-entry.ts 常量定义所在文件
  *   - R3 命中：白名单外 workflow-record entry 写（字面量 + 常量双形态）
  *   - R4 命中：白名单外 toSubagentRecordEntry 调用（v1 快照派生视图构造器）
  *   - R5 命中：workflow-record 写点窗口内 v:1 / snapshot 载荷形态；

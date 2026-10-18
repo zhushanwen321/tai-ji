@@ -14,7 +14,7 @@
 
   契约：props = { sessionId: string; modelId?: string }，无 emits。
   quota 的 hover-enter 查询挂在 HoverCardTrigger 上——查询触发属「hover 指标入口」这一
-  交互面；store 全局共享，与卡内展示实例同源。
+  交互侧；store 全局共享，与卡内展示实例同源。
 -->
 <template>
   <HoverCard>

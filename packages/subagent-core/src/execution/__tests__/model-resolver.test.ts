@@ -220,7 +220,7 @@ describe("resolveModel — thinkingLevel resolution", () => {
         ctxModel,
       ),
     ).toThrow(/thinkingLevel "high" is not available for model "cross-model"/);
-    // 可用档位时按调用方显式档位生效（同一条组合链的放行面）
+    // 可用档位时按调用方显式档位生效（同一条组合链的放行范围）
     const ok = resolveModel(
       { name: "worker", systemPrompt: "", model: "xp/cross-model" },
       reg,

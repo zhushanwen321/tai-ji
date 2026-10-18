@@ -150,7 +150,7 @@ export function useGlobalShortcuts(options: UseGlobalShortcutsOptions): void {
   const forwardList = deriveForwardAccelerators(keymap, commandStore.shortcutOverrides.value)
   void browserSetForwardKeys(forwardList)
   // ② settings 重录（overrides 运行时可变）→ 注册/注销增量重报（注销旧 accelerator + 注册新；
-  //    主进程 registry 幂等可乱序补报，丢失面由下次全量重报收敛——AGENTS 拉推分工的 push 臂）。
+  //    主进程 registry 幂等可乱序补报，丢失风险由下次全量重报收敛——AGENTS 拉推分工的 push 臂）。
   let prevForwardList = forwardList
   const stopOverridesWatch = watch(
     () => deriveForwardAccelerators(keymap, commandStore.shortcutOverrides.value),

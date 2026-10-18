@@ -8,7 +8,7 @@
 
 ## 透传链现状（消费方清点）
 
-内核 msg.meta 的机制面（零读取零加工，per-message 原样流转）：
+内核 msg.meta 的机制部分（零读取零加工，per-message 原样流转）：
 
 - `DeliveryMessage.meta`（packages/session-delivery/src/types.ts，additive meta 定义）；
 - per-message 终态回调 onSettled 原样回传该条消息（合批逐条回调）；

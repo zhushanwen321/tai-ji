@@ -146,7 +146,7 @@ describe('SubagentTab E-4 接入（entry 帧 + 恒订阅）', () => {
     // 绑 focusedSessionId，测试直连 core 域同款手法——panel-container-drawer-mode.test.ts 先例）
     bindDrawerSessionId(ref(MAIN_SID))
     // [subagent-detail-tabs] drawer 二级 tab 分区键 = focusedSessionId（SubagentTab 消费）——
-    // 与 drawer 选中态分区同 sid 对齐（panel store loadSession 即真实 app 的 useSideDrawer 绑定面）
+    // 与 drawer 选中态分区同 sid 对齐（panel store loadSession 即真实 app 的 useSideDrawer 绑定侧）
     usePanelStore().loadSession(ROOT_PANEL_ID, MAIN_SID)
     vi.stubGlobal('ResizeObserver', NoopResizeObserver)
     HTMLElement.prototype.scrollTo = vi.fn()

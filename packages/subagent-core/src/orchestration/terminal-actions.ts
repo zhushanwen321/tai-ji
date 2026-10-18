@@ -54,7 +54,7 @@ import {
 // 持久化层 `execution/persistence/run-event-journal.ts`——目录解析是持久化策略，留在
 // 编排层会迫使 execution 侧消费者反向值导入编排层。本文件（编排侧唯一写者 + 终局
 // 编排入口）反向 import 复用同源解析，并对既有消费点保留同名 re-export（全仓既有
-// 导入面零改动）；execution 侧消费者（service/workflow-dispatch）改直连持久化层。
+// 导入侧零改动）；execution 侧消费者（service/workflow-dispatch）改直连持久化层。
 import {
   resolveRunEventJournal,
   runEventJournalPathOf,
@@ -218,7 +218,7 @@ export function foldRunEventsToLifecycleState(
  * 纪律的物理边界不被撑破。
  *
  * 语义：**best-effort**——诊断侧不得影响 run 生命周期，写入 journal 记录失败只 warn 留痕（活体
- * errorLogs 已在内存里，重启重建面少这几条不改变终局语义）。append 实装内同步完成
+ * errorLogs 已在内存里，重启重建侧少这几条不改变终局语义）。append 实装内同步完成
  * （appendFileSync），seq 由 journal 分配。
  *
  * 目录：缺省模块锚（pi 壳内 pump 与 terminal-actions 同进程，推导一致）；runtime
@@ -514,7 +514,7 @@ async function dispatchRunTriggerInner(
 }
 
 /** 投递失败的分类留痕：Illegal = 并发终局/中断后的预期迟到事件（M12 同语义，debug）；
- *  其余（IO 等）= error 响亮（record 流是取证面，静默丢失 = 事故不可诊断）。 */
+ *  其余（IO 等）= error 响亮（record 流是取证侧，静默丢失 = 事故不可诊断）。 */
 function reportDispatchFailure(runId: string, err: unknown): void {
   if (err instanceof IllegalTransitionError) {
     runEventLogger.debug(
@@ -906,8 +906,8 @@ export interface FinalizeRunOptions { // oe-exempt:20260929:framework:finalize o
  * closeOutInFlightCalls → save（best-effort）→ pending:unregister 直落 appendEntry
  * → onRunDone → 窗口实例 dispose。
  *
- * 五路发起面：abortRun（lifecycle）/ terminateRunningRuns（lifecycle，D11 分叉归
- * U2）/ 正常终局链（handleReturn 等消息面终态路径）/ recoverCrashedRuns 与
+ * 五路发起侧：abortRun（lifecycle）/ terminateRunningRuns（lifecycle，D11 分叉归
+ * U2）/ 正常终局链（handleReturn 等消息侧终态路径）/ recoverCrashedRuns 与
  * startupSweep 的终局分支（本入口的 interruptRun 承载中断目标态）。
  *
  * 让位语义（原 M12 两态机让位门的六态机承接形态）：并发 abort/terminate 抢先
@@ -981,7 +981,7 @@ export async function finalizeRun(
     reason: runSettledOutcomeToDoneReason(settlement.outcome, settlement.errorCode),
     context: options.context,
   });
-  // [reload-closeout D4] pending:unregister 直落权威面：直接 appendEntry 落盘
+  // [reload-closeout D4] pending:unregister 直写权威存储的部分：直接 appendEntry 落盘
   // （session JSONL 唯一权威）。[OR-4] 独立围栏（不共用 try——直落抛错不得跳过
   // onRunDone）。
   const unregisterReason = runSettledOutcomeToDoneReason(settlement.outcome, settlement.errorCode);
@@ -1020,7 +1020,7 @@ export async function finalizeRun(
  * 通知、不落 pending:unregister 终态注销（中断可 resume，注销语义归宿主恢复链
  * 的 hooks 通道）。
  *
- * 五路发起面中的中断路（recoverCrashedRuns 崩溃收编 / startupSweep 启动扫描
+ * 五路发起侧中的中断路（recoverCrashedRuns 崩溃收编 / startupSweep 启动扫描
  * [U1B] / U2 的 terminate 对 resume 来源 run 分叉）全部经本入口——「谁在什么条件
  * 下把 run 推向中断」可在一处审计。
  *

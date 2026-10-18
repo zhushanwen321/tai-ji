@@ -328,7 +328,7 @@ describe('chip 感知行首收编：有 chip 时行首/换行后行首 / 也归 
     cursorAt(c.el.childNodes[3] as Text, 4)
     c.clearSkillQueryText()
     // 断言 token 文本节点本身被清（getText 是序列化视图：chip 段提首 + 补边界空格，
-    // 不反映「明文是否清掉」；明文清理的观察面 = 该 text node）
+    // 不反映「明文是否清掉」；明文清理的观察点 = 该 text node）
     expect((c.el.childNodes[3] as Text).textContent).toBe('')
     expect(c.callbacks.onInput).toHaveBeenCalledTimes(1)
     cleanup = c.cleanup

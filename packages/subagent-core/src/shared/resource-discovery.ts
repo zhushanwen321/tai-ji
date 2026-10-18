@@ -539,7 +539,7 @@ function readExtensionPaths(): string[] {
 // 消费方禁止复刻 join 字面（壳 resource-list-injector 曾有 4 join 复刻 +
 // 「须与彼处同步改」注释，收敛于此）。宿主注入根（discoveryRoots 槽）与
 // TAIJI_EXTENSION_PATHS 不属于约定根：前者归宿主槽位决策，后者是 taiji
-// 内部 dev-link 通道、非 agent 自救面（壳提示清单刻意不列）。
+// 内部 dev-link 通道、非 agent 自救侧（壳提示清单刻意不列）。
 
 /** user 级约定根 ~/.agents/{kind}/（homedir 推导）。 */
 function userAgentsConventionRoot(kind: ResourceKind): string {

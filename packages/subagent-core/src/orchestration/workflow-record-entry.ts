@@ -37,9 +37,9 @@ export const WORKFLOW_RECORD_CUSTOM_TYPE = "workflow-record";
 
 /**
  * legacy workflow 指针条目（`workflow-state-link`）的 customType。W17 前写侧
- * 产物，写侧已停写——现役消费全在读侧兼容面：runtime workflow-extractor /
+ * 产物，写侧已停写——现役消费全在读侧兼容范围：runtime workflow-extractor /
  * session-file-extraction、壳 session-lifecycle 引用集三代解析（均经 barrel
- * import 本常量）。session-reader 生产依赖面不引 core（包架构裁决），侧持本地
+ * import 本常量）。session-reader 生产依赖范围不引 core（包架构裁决），侧持本地
  * 字面量镜像、值等价由其 workflow.test.ts 常量等值断言锚定。命名对齐
  * {@link WORKFLOW_RECORD_CUSTOM_TYPE}。
  */
@@ -136,7 +136,7 @@ export type WorkflowRecordEntryV2 =
  *
  * ok = v1 且带 snapshot（snapshot 未经形状校验——truthy 即放行，解码归消费方，
  * 与收敛前壳 `!data.snapshot` / runtime `typeof snapshot !== 'object'` 双实现的
- * 最宽共同判定面一致）。
+ * 最宽共同判定逻辑一致）。
  *
  * reason:"v2" = v2 合法形态（载荷已过 kind 判定，形状校验归消费方解码层）——
  * **归入 ok:false 是刻意裁决**：ok 的语义是「v1 快照契约可消费」（runtime
@@ -154,7 +154,7 @@ export type WorkflowRecordEntryClassification =
 /**
  * entry data → v1/v2 分类（纯函数，无 IO 无日志）。
  *
- * 分支语义（v1 分支与收敛前壳/runtime 双实现的判定面逐分支对齐；v2 分支为
+ * 分支语义（v1 分支与收敛前壳/runtime 双实现的判定侧逐分支对齐；v2 分支为
  * W1 新增）：
  * - wrong-type：data 非对象（截断/半写连对象都不是）；
  * - missing-v：对象但 v 缺失（写点恒定写 v，缺失即形态损坏）；

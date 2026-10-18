@@ -371,7 +371,7 @@ export interface SessionTurnCallbacks {
    * turn.started / hook 事件等引擎可见但宿主不可见的进展）。真机探针实证
    * （/tmp/zcode-activity-probe.log，2026-09-10）：工具执行期服务端每 ~1.0s 推一帧
    * {type:"tool.updated", payload:{kind:"progress", toolCallId, toolName, elapsedMs,
-   * stdoutBytes, stdoutTail, pid}}——既非 final-frame 也非 delta，宿主刷新面只有
+   * stdoutBytes, stdoutTail, pid}}——既非 final-frame 也非 delta，宿主刷新逻辑只有
    * delta 回调，「仅工具执行、零正文」形态下宿主侧 30min 中段无进展守护会饿死
    * 误杀，本回调补 tool 执行期活性（引擎映射 AgentEvent {type:"activity"}——
    * 零载荷纯活性信号）。cadence ~1s，不加节流：服务端天然限频（探针实证），无放大面。
@@ -736,7 +736,7 @@ export class SessionChannel {
     if (payload === undefined) return;
     if (this.applyFinalFrame(turn, payload)) return;
     // [PR3] 非 final-frame 且非 delta 的帧 = 引擎可见但宿主不可见的进展
-    //（tool.updated progress / turn.started / hook 事件）：宿主刷新面只有 delta
+    //（tool.updated progress / turn.started / hook 事件）：宿主刷新逻辑只有 delta
     // 回调，「仅工具执行、零正文」形态下宿主侧零活性信号——onActivity 补该缺口。
     // 已落定 turn 不发（settle 后 run 已收尾，迟到帧只是收尾窗口噪声）。
     // 不加节流：服务端 tool.updated 天然 ~1s cadence（探针实证）。v4/telemetry 路径
@@ -849,7 +849,7 @@ export class SessionChannel {
    *   - "interrupted"：用户中断形态，debug（stderr 兜底对 debug no-op——对齐
    *     SDK logger CONSOLE_SINK 语义，host/log 反向请求侧仍可观测）；
    *   - 失败类（isFailedTerminalStatus，与引擎失败分流同口径）与 unknown/未识别
-   *     status：保守 warn（原样 status 已写入文案）——假成功识破的防御面，理论
+   *     status：保守 warn（原样 status 已写入文案）——假成功识破的防御机制，理论
    *     不可达但保留，宁可误报不静默。
    */
   private logLateTerminal(turn: ActiveTurn, status: string): void {

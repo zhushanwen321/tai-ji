@@ -497,7 +497,7 @@ describe('useComposerSend.onSend', () => {
     expect(spies.focus).not.toHaveBeenCalled()
     expect(spies.toastError).not.toHaveBeenCalled()
     // 可发现性 info toast（F12）走 flow 后台分支的 ToastPort.info 通道——
-    // 「info toast 出现」断言见 flow.test TC-6f（同一 background 分支语义面）
+    // 「info toast 出现」断言见 flow.test TC-6f（同一 background 分支语义侧）
   })
 
   it('⑭b [幽灵草稿修复] 首发失败（stash）→ 重发成功（handed-over）→ 槽清空，下次 landing 不复活', async () => {

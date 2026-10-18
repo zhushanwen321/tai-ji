@@ -67,7 +67,7 @@ const browserContent = computed(() => {
 // 显示收尾事实源上报（常驻：关态/换内容同样上报）
 useBrowserOverlayStateSync()
 
-// shieldsView 遮蔽面全量上报（常驻：聚合开合/overlay/resize 触发范围收敛后重报，
+// shieldsView 遮蔽视图全量上报（常驻：聚合开合/overlay/resize 触发范围收敛后重报，
 // §5.1 规则 6② view 遮蔽联动 renderer 半边——触发范围与卸载复位语义见 composable 文件头）
 useShieldsViewSync()
 </script>

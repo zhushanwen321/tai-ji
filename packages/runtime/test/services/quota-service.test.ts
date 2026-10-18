@@ -839,7 +839,7 @@ describe('QuotaService — fetcher 抛异常时防御兜底 [A2-1 契约不 thro
 // 背景：U2-t1 只更新了既有 36 用例的断言方向，零新增；本文件所属设计清单要求的新行为
 // （no-credential / cookie 空串清除与失败语义 / 按 credentialSource 解析凭证 /
 // lastFailure 清理 / credentialSource 落盘继承链 / 在途 fetch 写回检查 / 失败路径节流不断）
-// 全部由本节补齐。每条用例的断言都落在调用方可见面（返回 data/reason、getCached、
+// 全部由本节补齐。每条用例的断言都落在调用方可见部分（返回 data/reason、getCached、
 // providers.json 落盘结果、secrets 文件系统状态），而非内部私有字段。
 // ══════════════════════════════════════════════════════════════════════════
 

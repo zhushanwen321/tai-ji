@@ -1,12 +1,12 @@
 // src/execution/__tests__/conversation-continuation.test.ts
 //
 // [H1 U2] ConversationContinuation 单测族（§5 U2 验收清单逐项对应用例）+ SubagentService
-// 集成面（one-shot 四分支回归 / closeAfterRound 优雅收尾消费（U5：在途轮不打断，挂起 →
-// 轮终通知送达后归档）/ 引擎死亡单发通知 / stale-child 兜底 / 收割链之外的 chat 编排面）。
+// 集成测试侧（one-shot 四分支回归 / closeAfterRound 优雅收尾消费（U5：在途轮不打断，挂起 →
+// 轮终通知送达后归档）/ 引擎死亡单发通知 / stale-child 兜底 / 收割链之外的 chat 编排侧）。
 //
 // 设计权威源：docs/architecture/subagent-chat-run-unification.md §3.4（伪码即实现契约）/
 // §3.3 D4 状态迁移表 / D5 双写点 gate / D7 轮末分流。Continuation 单测 = mock host
-//（编排能力全注入，次序断言用 order 账本）；集成面 = registerFakePiEngine 协议替身
+//（编排能力全注入，次序断言用 order 账本）；集成测试侧 = registerFakePiEngine 协议替身
 //（与 delivery-methods.test.ts 同源 setup 形态）。
 
 import * as fs from "node:fs";
@@ -49,7 +49,7 @@ import { makePi, type PiMock } from "./helpers/pi-mock.ts";
 
 
 /** [W1/D3] 读 record 事件文件全部事件行（journal 落点 = getSubagentRecordsDir——
- *  观察面独立于被测 store；usage-feed 集成块消费）。 */
+ *  观察侧独立于被测 store；usage-feed 集成块消费）。 */
 function scanRecordEventsFor(agentDir: string, id: string): Array<Record<string, unknown>> {
   const recordsDir = getSubagentRecordsDir(agentDir, agentDir);
   try {
@@ -173,7 +173,7 @@ function makeHost(record: ExecutionRecord, overrides: Partial<HostCalls> = {}): 
       record.round = (record.round ?? 0) + 1;
     },
     // [collect 退役] 原 routeRecord（collectCoordinator.route 成功通知路由）收敛为
-    // notifyComplete 直通面；isCollectMember 失败轮分流判据随批机制删除。
+    // notifyComplete 直通路径；isCollectMember 失败轮分流判据随批机制删除。
     notifyComplete: (rec) => {
       calls.order.push(`route:${rec.id}`);
       calls.routed.push(rec.id);
@@ -207,7 +207,7 @@ function makeHost(record: ExecutionRecord, overrides: Partial<HostCalls> = {}): 
     },
     markRoundStarted: (rec) => {
       // [U2b 修复轮/D2] mock host 记委托达点；record 实际清除语义由真实 store 链
-      // 在集成面验证（下方「轮始 markRoundStarted 接线」用例）。
+      // 在集成测试侧验证（下方「轮始 markRoundStarted 接线」用例）。
       calls.order.push(`roundStart:${rec.id}`);
       calls.roundStarts.push(rec.id);
     },
@@ -548,7 +548,7 @@ describe("ConversationContinuation — [S1 P1] cancel 废弃轮身份 + 迟到�
   });
 });
 
-describe("ConversationContinuation — 轮末分流（D7）与通知面", () => {
+describe("ConversationContinuation — 轮末分流（D7）与通知侧", () => {
   it("成功轮：doFinalizeRoundToIdle(success) → notifyGate 门 → route（route 晚于簿记——order 断言）", async () => {
     const record = makeRecord({});
     const { host, calls } = makeHost(record);
@@ -680,7 +680,7 @@ describe("ConversationContinuation — 轮末分流（D7）与通知面", () => 
     await vi.waitFor(() => expect(calls.dispatched.length).toBe(1));
     // 轮始簿记经 host.markRoundStarted 委托 store 原语（status=running + result
     // 清除 + 迁移上报一体——原三行现场写消灭）；record 实际清除语义由
-    // 真实 store 链在集成面验证。委托先于 dispatch（spinner 恢复时序锚点）。
+    // 真实 store 链在集成测试侧验证。委托先于 dispatch（spinner 恢复时序锚点）。
     expect(calls.roundStarts).toEqual([record.id]);
     expect(calls.order.indexOf(`roundStart:${record.id}`)).toBeLessThan(
       calls.order.indexOf(`dispatch:${record.id}`),
@@ -697,7 +697,7 @@ describe("ConversationContinuation — 轮末分流（D7）与通知面", () => 
     const record = makeRecord({ id: "sa-drain-guard", sessionFile: undefined });
     const { host, calls } = makeHost(record);
 
-    // 通知面接真实 notifier + 投递端口（unified-delivery 波 2 生产装配形态：
+    // 通知侧接真实 notifier + 投递端口（unified-delivery 波 2 生产装配形态：
     // ContinuationHost.notifyRecord → notifyHost.notify → createNotifier().notify →
     // port.deliver 主投）。纯 push mock 不过真实判重——修复前丢弃通知与同轮失败单发
     // 同 key（`id:round`）会被投递日志幂等吞（delivered 恒 1 条），本用例的 2 条断言
@@ -799,7 +799,7 @@ describe("ConversationContinuation — 轮末分流（D7）与通知面", () => 
 });
 
 // ============================================================
-// SubagentService 集成面（fake engine 协议替身）
+// SubagentService 集成测试侧（fake engine 协议替身）
 // ============================================================
 
 interface ServiceInternals {
@@ -876,7 +876,7 @@ describe("集成：chat 轮末分流（D7）——成功轮 / 失败轮 / 空正
     store.register(record);
     const routeOrder: string[] = [];
     // [collect 退役] 原 collectCoordinator.route 观察点收敛为 notifyHost.notifyComplete
-    //（成功轮完成通知直通面）。
+    //（成功轮完成通知直通路径）。
     const host = (service as unknown as {
       notifyHost: { notifyComplete(r: ExecutionRecord): void };
     }).notifyHost;

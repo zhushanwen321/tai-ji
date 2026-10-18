@@ -833,7 +833,7 @@ describe("WorktreeManager", () => {
     });
 
     it("pid 活的条目不删（绝不删活进程）", async () => {
-      // 物理面也 mock 存在（branch --list 返回该分支 + checkout 目录在）——
+      // 物理（磁盘）侧也 mock 存在（branch --list 返回该分支 + checkout 目录在）——
       // D5b 对账的两个方向（清孤儿 / 清幻影条目）都必须不动活条目。
       setupExecFile((args: readonly string[]) => {
         if (args[0] === "branch" && args[1] === "--list") return { stdout: "pi-sub-alive\n" };

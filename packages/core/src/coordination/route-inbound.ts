@@ -33,7 +33,7 @@
  *
  * core 零 import renderer（D3 降级后形态）：pending/events/subscribe 三件套已下沉
  * core/transport/api，生产路径由 configureRouteInbound 缺省直连真实模块（defaultPorts）；
- * TransportPorts 仅作 core 内部测试 seam（测试注入 fake，不出现在壳装配面）。
+ * TransportPorts 仅作 core 内部测试 seam（测试注入 fake，不出现在壳装配侧）。
  * effect 兜底经 InboundEffects 注入（undefined 跳过）。
  */
 import type { PiEntry, PiToolCallEntryForm, ServerMessage, ServerMessageMap, SubagentRecord } from '@taiji/shared'
@@ -48,7 +48,7 @@ import * as eventsApi from '../transport/api/events'
 // ── 端口契约（IF1） ────────────────────────────────────────────────
 
 /**
- * 入站分发依赖的 WS 能力面（IF1）——D3 后为 **core 内部测试 seam**。
+ * 入站分发依赖的 WS 能力范围（IF1）——D3 后为 **core 内部测试 seam**。
  *
  * 生产路径不经本接口：configureRouteInbound 缺省用 defaultPorts（真实模块直连）：
  * - pending → transport/api/pending 的 resolve/reject/rejectAll/has/resolveEnvelope

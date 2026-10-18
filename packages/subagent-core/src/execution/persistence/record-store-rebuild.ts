@@ -58,7 +58,7 @@ const logger = getLogger("subagents");
 /**
  * [R4/D6-③ 空串归一] 水合读侧的 model 空串 → 缺席归一（禁空串哨兵纪律覆盖持久化
  * 读写两侧）：写侧（R4 起）record.model 缺席恒为 undefined，但存量磁盘数据与新链
- * 的防御面可能残留 ""（旧写侧「仅满足非可选类型」的 `?? ""` 产物）——空串若复活进
+ * 的防御机制侧可能残留 ""（旧写侧「仅满足非可选类型」的 `?? ""` 产物）——空串若复活进
  * record，taskSpecWithModel 对 `""` 仍带键，引擎侧「压掉 defaultModelSelection」
  * 会经空串路径静默回归。四处水合点（entry 派生视图 / manifest 派生视图 / 孤儿合并 / binding
  * 检查）统一归一。
@@ -482,7 +482,7 @@ export function detectIdentity(file: string, size: number): IdentityHeaderRecon 
  * round-started）若仍按上一条 round-idle 映射，会把上一轮的停因当成当前停因写进
  * 运行中的记录——与 journal 派生视图侧「轮始清残留死因」同一条语义（`lastEvent` 判定）。
  *
- * 纯函数：不做旧格式上行映射（那是 sidecar 存量兼容面，随 sidecar 一起退场）。
+ * 纯函数：不做旧格式上行映射（那是 sidecar 存量兼容范围，随 sidecar 一起退场）。
  */
 export function stateMarkerFromFold(fold: RecordEventFoldState | undefined): StateMarker | undefined {
   if (fold === undefined) return undefined;
@@ -808,7 +808,7 @@ export function buildRecord(
     // 收尾 reason（值域 StopReason；非法/缺失 → interrupted-by-restart——「死因不可考
     // = 被打断」同族兜底）。closedReason 不写（settle 产出的 idle 无旧终态遗留位，
     // live ≡ reload 与内存 markSettled 形态构造性一致）；endedAt 不派生（内存 settle
-    // 非终态不写 endedAt——收条时间留给 binding 快照面，U7 统计口径消费）。
+    // 非终态不写 endedAt——收条时间留给 binding 快照侧，U7 统计口径消费）。
     // 旧 sidecar 收条的上行映射（cancelled/finalized → interrupted/disconnected）已随
     // `.state` 读侧退场删除：m.state 唯一来源 = stateMarkerFromFold，不产旧格式 status。
     const reason = m.state.reason?.trim();
@@ -1037,7 +1037,7 @@ export function recordToSubagent(r: ExecutionRecord): SubagentRecord {
     origin: r.origin,
     parentRunId: r.parentRunId,
     stepIndex: r.stepIndex,
-    // [subagent-model-switch §6.2] 用户覆盖记账随内存源派生视图（读模型可见面——冷复活
+    // [subagent-model-switch §6.2] 用户覆盖记账随内存源派生视图（读模型可见部分——冷复活
     // 水合的候选数据源 + 覆盖状态查询通道）。持久化权威 = record-model-override 事件
     // 帧（写点 = store.markModelOverride），本派生视图只透传内存值；undefined 自然缺省。
     modelOverride: r.modelOverride,

@@ -200,7 +200,7 @@ export function formatAgentList(
 }
 
 /** workflow 段渲染选项：通用条目段选项 + invalid 具名上报（P5 D4-3，workflow 域职责——
- *  agents 段装配链无 invalid 产出面，不引入死参数）。 */
+ *  agents 段装配链无 invalid 产出侧，不引入死参数）。 */
 export interface WorkflowListFormatOptions extends ListFormatOptions {
 	/**
 	 * 损坏 workflow 具名上报：非空时在条目行后、结束标签前渲染 invalid 元素行

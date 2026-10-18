@@ -528,7 +528,7 @@ describe('core ↔ shared setModel 聚合应答形状对账（协议契约不变
   it('SET_MODEL_ERROR_CODES ≡ shared SUBAGENT_SET_MODEL_FAILURE_REASON_CODES（reason 已知字面词表值级对账——SDK 扩位 shared 漏跟即红）', () => {
     // reason 已知字面子集的机器锚（shared protocol.ts / core assembly/types.ts 注释同指
     // 本处）：开放联合放行透传码后，两侧「已知三型」的同步靠本值级断言——SDK 词表
-    // 扩位而 shared 已知子集漏跟时（自动补全/文档面漂移），此处红（ACCOUNTED 词表
+    // 扩位而 shared 已知子集漏跟时（自动补全/文档侧漂移），此处红（ACCOUNTED 词表
     // 对账同款形态）。
     expect([...SET_MODEL_ERROR_CODES]).toEqual([...SUBAGENT_SET_MODEL_FAILURE_REASON_CODES])
     expect(SET_MODEL_ERROR_CODES).toHaveLength(SUBAGENT_SET_MODEL_FAILURE_REASON_CODES.length)

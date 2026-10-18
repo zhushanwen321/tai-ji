@@ -10,7 +10,7 @@
 //
 // id 形态：正向请求 id = number（core 单调计数）；反向请求 id = string（引擎侧命名，
 // 如 "rev-1"）；应答 id = 请求或反向请求 id 原样回传（number | string）。
-// 实现面（行解析、请求关联、反向路由）归 W2 EngineClient；本文件只定帧型与判别。
+// 实现侧（行解析、请求关联、反向路由）归 W2 EngineClient；本文件只定帧型与判别。
 
 import type { AgentEvent } from "./contract-types.ts";
 

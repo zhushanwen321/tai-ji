@@ -68,7 +68,7 @@ export function replayJournalToSessionView(handle: EngineHandle, engineId: strin
 /**
  * AgentEvent 运行时 guard（type 字段白名单收窄）。
  *
- * activity 刻意不在白名单：纯活性信号不进任何持久/重放面（core event-journal-wiring 豁免
+ * activity 刻意不在白名单：纯活性信号不进任何持久/重放路径（core event-journal-wiring 豁免
  * append，正常 journal 不含 activity 行）——即使旧宿主落盘的 journal 混入借用期
  * message_end 形态外的 activity 行，被过滤 = no-op 安全（reducer 对其本就 no-op）。
  */

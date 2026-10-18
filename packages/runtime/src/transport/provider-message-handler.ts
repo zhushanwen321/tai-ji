@@ -10,7 +10,7 @@
  * handle() 是纯路由器（查表 type → 私有方法，case 体逐一原样迁入 handleXxx 私有
  * 方法，行为保持）——metrics-gate 复杂度治理：派发器零分支链（cyclomatic 2），
  * 各 case 体的分支复杂度留在各自方法内；路由表在构造器内绑定 this，键与
- * Extract 断言逐行对应（无跨行漂移面）。
+ * Extract 断言逐行对应（无跨行漂移风险）。
  */
 import type { WebSocket as WsType } from 'ws'
 import type { ClientMessage, DefaultModelSource, ProviderSource, ProviderId } from '@taiji/shared'

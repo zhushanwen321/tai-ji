@@ -8,7 +8,7 @@
  * 覆盖：
  * 1. 三家编辑态 → buildConfig → tts.configure → tts.getConfig → formStateFromConfig 深比较一致
  * 2. vendor 子树形状（设计 §7.2 请求体同名原路径：MiniMax voice_setting.* / StepFun 顶层 / MiMo 空）
- * 3. 控件存在性规则的提交面：置灰字段（MiMo speed/volume/pitch）不进 config；MiniMax
+ * 3. 控件存在性规则的提交侧：置灰字段（MiMo speed/volume/pitch）不进 config；MiniMax
  *    supportsInstructions=false 时 instructions 即使有值也不提交（D1 不降级映射）
  * 4. 脱敏：getConfig 载荷每家无 Key 本体字段（D4「明文不出 runtime」）
  *
@@ -36,7 +36,7 @@ function formOf(pid: TtsProviderId) {
 }
 
 /** 以派生视图出厂骨架为基，按家填满全部支持控件（模拟用户逐项编辑；不渲染的控件不填——
- *  控件存在性规则的提交面：MiniMax 无指令、MiMo 无词典，填了也不提交）。 */
+ *  控件存在性规则的提交侧：MiniMax 无指令、MiMo 无词典，填了也不提交）。 */
 function editedState(pid: TtsProviderId): TtsProviderFormState {
   const form = formOf(pid)
   const state = emptyFormState(form)
@@ -141,7 +141,7 @@ describe('vendor 子树形状（厂商 API 原名原路径，设计 §7.2）', (
   })
 })
 
-describe('控件存在性规则的提交面（置灰/不渲染字段不进 config）', () => {
+describe('控件存在性规则的提交侧（置灰/不渲染字段不进 config）', () => {
   it('MiMo：speedRange null → 无 speed 键（语速置灰不提交）', () => {
     const config = buildConfig('mimo', formOf('mimo'), editedState('mimo'))
     expect(config.speed).toBeUndefined()

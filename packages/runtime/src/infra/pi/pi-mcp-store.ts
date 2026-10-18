@@ -17,7 +17,7 @@
  *   设计文档 D2「已接受代价（外部并发窗口）」。
  *
  * 校验边界（D4，写死）：
- *   - 保存校验面 = §2.4 三不变量（名称字符集与全局唯一 / command、url 至少其一 /
+ *   - 保存时的校验逻辑 = §2.4 三不变量（名称字符集与全局唯一 / command、url 至少其一 /
  *     文件整体 JSON 合法）+ 两条有意收紧：command 与 url 同填拦截（pi 实装是 url
  *     优先静默忽略，taiji 拦截报互斥错）、重名添加拦截不替换（pi CLI add 是静默
  *     替换，表单语境下误覆盖不可接受）+ type 例外条款（三值闭集 "stdio"/"http"/
@@ -249,7 +249,7 @@ function validateTransportCombo(config: Record<string, unknown>): void {
 }
 
 /**
- * 保存校验面（写前，D4）：三不变量 + 互斥有意收紧 + type 例外条款。
+ * 保存时的校验逻辑（写前，D4）：三不变量 + 互斥有意收紧 + type 例外条款。
  * 校验输入恒为写回产物（剥离/清理之后，D4 管线顺序）——表单路径产物无 type 键，
  * type 三项校验在该路径空转。校验不过抛 McpStoreError，不落盘（fail-fast）。
  */

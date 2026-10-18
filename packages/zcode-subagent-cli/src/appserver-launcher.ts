@@ -18,7 +18,7 @@
 // ——上游 provider bootstrap 以 argv[1] 为入口锚，不改写则启动即退，见下方漂移
 // 面登记）。HOME 保持真实值（共享语义不变：db/plugins/MCP 全继承宿主 HOME）。
 //
-// 漂移面如实登记：
+// 漂移风险如实登记：
 // ① 配置读取路径/方式：zcode 升级若改变，失败信号 = missing baseURL / Model config
 //    is missing 明确报错（不静默坏）——与协议漂移直接报错的既有姿态同级。
 // ② argv[1] 入口锚：上游 provider bootstrap 以 argv[1] 为入口锚定位 CLI 内建
@@ -80,7 +80,7 @@ const CONFIG_PATH = path.join(os.homedir(), '.zcode', 'cli', 'config.json');
 
 // 合并形态：真实 cli config 原样（model/plugins/mcp/subagents 等 worker 继承面不变）
 // + v2 的 provider 字典注入，同 id 时 v2 条目整条优先——GUI 直传 modelConfig 时
-// v2 即权威源（进程外等价复刻）；cli config 不在 GUI 管理面、可能残留历史验证
+// v2 即权威源（进程外等价复刻）；cli config 不在 GUI 管理侧、可能残留历史验证
 // 配置（2026-08-25 事故：残留旧 key 压过新凭据致 turn 0 401），故不取 real 优先。
 // model.main 缺失时只从 v2 透传（v2 也没有则不伪造——CLI 缺省解析自会落到注册表
 // 可用模型；plan 家族 id 已不可用，不再兜底伪造）。
@@ -321,7 +321,7 @@ function patchedCliSource(path) {
   return result;
 }
 
-// 内建 provider 配置定位（漂移面②）：3.12.x 起配置文件挪位 + CLI 依赖宿主注入
+// 内建 provider 配置定位（漂移风险②）：3.12.x 起配置文件挪位 + CLI 依赖宿主注入
 // ZCODE_BUILTIN_PROVIDER_CONFIG_FILE 直接定位；ZCode 桌面 spawn 链自带该键，
 // 本 wrapper 链需自给。显式传入优先 → v2 runtime 目录下平台目录（精确
 // <plat>-<arch> 优先，Rust arch 变体如 darwin-aarch64 字典序跟后）× 版本目录

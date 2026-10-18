@@ -14,7 +14,7 @@
  *
  * [D8 泛化] fork 与 handoff 曾约 75% 逐字镜像（设计 §2 例 5）。行为骨架已收敛到
  * createStagingMode（./staging-mode），本模块 = handoff 配置对象 + 薄包装：公开 API
- * （返回面 8 项）与 HandoffDeps 注入契约保持不变，消费方零改动。handoff 差异全部经
+ * （返回结构 8 项）与 HandoffDeps 注入契约保持不变，消费方零改动。handoff 差异全部经
  * 配置表达（P2 清单见 staging-mode.ts 头注）：
  * - enterGuard：isSessionActive 入口拦截（源 session streaming 中 handoff 必然失败，toast 而非英文 RPC 错）
  * - beforeEnter：互斥退出 fork 模式（forkSource 残留指向错误 session）

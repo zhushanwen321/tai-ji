@@ -8,7 +8,7 @@
   - `title` / `confirmTitle` 按确认态切换。
   - 视觉（demo .bash-kill 形态）：24px 方形热区（N4 库内下限）+ rounded-xs（4px）；
     常态 dim + hover 红（danger 软底 12% ≈ --danger-soft）；确认态 danger 实心。
-    差异面以 props 表达（bash/subagent 有 rounded、workflow 无；bash 确认态补 opacity-100）
+    差异点以 props 表达（bash/subagent 有 rounded、workflow 无；bash 确认态补 opacity-100）
     ——逐字保持各处既有类串语义。
   - 图标经 `icon` / `confirmIcon` slot 注入（默认 X / Check）；`v-if` 渲染条件与 `@click`
     处理器仍由调用方持有（行级条件差异）。

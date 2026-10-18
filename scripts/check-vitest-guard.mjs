@@ -8,7 +8,7 @@
  * 背景事故：2026-09-16 从 packages/shared cwd 误跑 workspace 全仓 vitest，runtime 包
  * 防线配置未加载，测试删除了用户真实 ~/.taiji 数据目录。
  *
- * 检查面：
+ * 检查项：
  *   1. packages/ extensions/ apps/ 下 *.test.ts / *.test.mjs（排除 node_modules、
  *      dist、test-results 目录段）→ 向上最近含 package.json 或 vitest.config.ts 的
  *      目录 = 包根（去重）；

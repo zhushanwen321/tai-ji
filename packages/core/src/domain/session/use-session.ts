@@ -243,7 +243,7 @@ export function resetSessionListSubForTest(): void {
 export function createUseSession(deps: UseSessionDeps) {
   const { store, api, panel, navigation, chat, hooks } = deps
 
-  // ── sessionEntry 端口解析（D3）：成员级可选 → 显式 no-op 默认，链内零 undefined 崩溃面 ──
+  // ── sessionEntry 端口解析（D3）：成员级可选 → 显式 no-op 默认，链内零 undefined 崩溃路径 ──
   const noop = (): void => {}
   const entry: Required<SessionEntryPort> = {
     cancelActiveFlow: deps.sessionEntry?.cancelActiveFlow ?? noop,

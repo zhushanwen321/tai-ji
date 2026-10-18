@@ -76,7 +76,7 @@ export function observeDeliverDropped(sessionId: string, messageType: string, su
   window.suppressed += 1
 }
 
-/** 订阅建立观测：stateSnapshot 键集是「重连恢复面」的直接证据（6c3 排障第一问）。 */
+/** 订阅建立观测：stateSnapshot 键集是「重连恢复侧」的直接证据（6c3 排障第一问）。 */
 export function observeSubscribe(sessionId: string, info: { stateKeys: string[]; ringSize: number; lastSeq: number; subscribers: number }): void {
   logger.info('[bus-observe] subscribe', { sessionId, ...info })
 }

@@ -23,8 +23,8 @@
  * 只拼白名单子命令字面量 on|off|rm|run + 折叠快照中存在的 8 位 hex id（快照无该 id →
  * TASK_NOT_FOUND 行内提示、不发命令，E5——防 /schedule 参数路由落空进创建分支，
  * §2.4 坑 3），经 sendMessage({requireCommand: 'schedule'}) 原子校验后发 /schedule 命令；
- * 回执 {accepted, reason?} 驱动行内 notice（E7/E14；运行面分支只看 accepted，reason 仅
- * 文案面）。不乐观更新——快照与游标由失效订阅驱动刷新（C-pi-13 不撒谎）。
+ * 回执 {accepted, reason?} 驱动行内 notice（E7/E14；运行态分支只看 accepted，reason 仅
+ * 文案）。不乐观更新——快照与游标由失效订阅驱动刷新（C-pi-13 不撒谎）。
  *
  * 按钮灰置（E13，插件侧判定）：getCommands(sessionId) 查 'schedule' 命令名（纯查询）
  * → 未注册 = disabled + tooltip（宿主渲染端按 availability 三态合成 i18n tooltip，
@@ -621,7 +621,7 @@ async function handleWrite(
       )
       return
     }
-    // 回执失败：reason 是诊断/文案面，行为分支只看 accepted（E7 词表纪律）。
+    // 回执失败：reason 是诊断/文案，行为分支只看 accepted（E7 词表纪律）。
     // busy/compacting/bash 退役值已随 SendPromptReason 词表收窄删除（「排队取代拒绝」
     // 后投递内核对暂不可收时态只排队不回拒）——除 command-missing 外的失败统一走
     // 通用重试文案。

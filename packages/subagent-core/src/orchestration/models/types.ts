@@ -8,7 +8,7 @@
  * - DoneReason（completed/failed/aborted/budget_limited/time_limited）
  *   （run 生命周期两态机词表已随 [D6(a)] 退役——生命周期判定唯一走
  *   六态机 dispatchRunTrigger 链与终局记录注册表，聚合不持状态机词表）
- * - AgentCallOpts / AgentResult（单次 agent 调用的输入/输出，宿主面 SSOT 留守本地）
+ * - AgentCallOpts / AgentResult（单次 agent 调用的输入/输出，宿主侧 SSOT 留守本地）
  * + AgentUsage / ToolCallEntry / AgentFailureKind（自 SDK re-export，S4 簇 3 收编）
  * - ExecutionTraceNode / TracePatch / ToolCallEntry / WorkerLogEntry（trace 数据）
  *
@@ -187,7 +187,7 @@ export interface AgentCallOpts {
    * fork-from 显式分叉源 session 文件（fork-from 断联恢复通道的唯一 lossless 载体）。
    * 来源 = ExecuteOptions.forkFromSessionFile（host-task-spec 映射时的唯一改名点——
    * 本形状起与 SDK 协议字段、引擎侧 SpawnRunParams.forkSource 三层同名，降低跨层
-   * 双名漂移面）。区别于 fork:true（主 session 作分叉源）：本字段点名任意已有
+   * 双名漂移风险）。区别于 fork:true（主 session 作分叉源）：本字段点名任意已有
    * session 文件。chat 域唯一写入方 = fork-from action。
    */
   forkSource?: string;
@@ -223,7 +223,7 @@ export interface AgentCallOpts {
 //     字段型，FR-7 跨 turn 累积）；
 //   - ToolCallEntry（单次 tool 调用记录，FR-7 从 agent JSONL 流采）；
 //   - AgentFailureKind（失败分诊结构化标签，D5-③）。
-// AgentCallOpts / AgentResult 留守本地（宿主面 SSOT——SDK 版 AgentCallOpts 是引擎面
+// AgentCallOpts / AgentResult 留守本地（宿主侧 SSOT——SDK 版 AgentCallOpts 是引擎侧
 // 子集，字段裁决见 SDK contract-types 注释）。
 //
 // AgentFailureKind 语义守恒（最高优先约束，core 侧权威说明——SDK 侧为简版）：

@@ -2,7 +2,7 @@
 //
 // D5b 对账双向 diff 集成测试：真实 git repo + 真实 tmpdir（不 mock fs/execFile）。
 //
-// 隔离手段：TMPDIR env 重定向到测试私有目录——WorktreeManager 的物理面扫描
+// 隔离手段：TMPDIR env 重定向到测试私有目录——WorktreeManager 的物理（磁盘）侧扫描
 // 根 = os.tmpdir()/pi-subagents（跟随 TMPDIR），避免扫到本机其他进程的真实残留。
 //
 // 覆盖四个收敛方向（判据见 worktree-manager.ts reconcileWithPhysical）：
@@ -33,7 +33,7 @@ function git(repo: string, ...args: string[]): string {
 // [HISTORICAL] 2026-08-20 PR #185：真实 git 子进程 + 注册表文件锁集成用例显式超时——
 // 每用例多次 git init/worktree add/branch -D 真实子进程调用，整包满并行 + 系统余载下
 // 超 vitest 默认 5s testTimeout（对齐本包 worktree-registry D5a / process-shutdown-hook 口径）。
-describe("WorktreeManager.scan 物理面对账（D5b）", { timeout: 30_000 }, () => {
+describe("WorktreeManager.scan 物理（磁盘）侧对账（D5b）", { timeout: 30_000 }, () => {
 	let baseDir: string;
 	let agentDir: string;
 	let repo: string;
@@ -45,7 +45,7 @@ describe("WorktreeManager.scan 物理面对账（D5b）", { timeout: 30_000 }, (
 
 	beforeEach(() => {
 		outerDir = fs.mkdtempSync(path.join(ORIG_TMPDIR, "wt-reconcile-it-"));
-		// 物理面扫描根重定向：os.tmpdir() 跟随 TMPDIR env（darwin/linux 均如此）
+		// 磁盘侧扫描根重定向：os.tmpdir() 跟随 TMPDIR env（darwin/linux 均如此）
 		process.env.TMPDIR = outerDir;
 		baseDir = outerDir;
 

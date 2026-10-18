@@ -20,7 +20,7 @@
 // - childSpawned 的 pid = 真 spawn 一个同组长眠 node 子进程（供 POSIX kill(-pid,0)
 //   组探测断言与 killAll 收割断言——范围口径 R9-1：一代子进程 + 组内后代）。
 //
-// [W6 conformance 增量] 追加面（全部 env 开关驱动，缺省关闭——既有回放行为不变）：
+// [W6 conformance 增量] 追加侧（全部 env 开关驱动，缺省关闭——既有回放行为不变）：
 // - FAKE_PID_FILE：启动时写自身 pid（SIGTERM 用例的 kill 定位锚——core 侧 pidfile
 //   归 EngineClient 所有，fake 侧不触碰，路径自建自删归测试）；
 // - FAKE_CAPABILITIES_CONVERSATION：覆写 initialize 应答的
@@ -162,7 +162,7 @@ const KNOWN_METHODS = new Set([
   "listModels", "validateModel", "dispose", "ping",
 ]);
 
-const askUserResults = new Map(); // 反向请求 id → 最终结果帧②（交互面两阶段）
+const askUserResults = new Map(); // 反向请求 id → 最终结果帧②（交互侧两阶段）
 const hangingRuns = new Map(); // runId → settle()——cancel 收敛用（hang 动作挂起时登记）
 const cancelledRuns = new Set(); // cancel 已收敛的 runId——后续脚本动作全部跳过
 

@@ -2,7 +2,7 @@
 //
 // [U2]（workflow-run-resume-revision）resume 恢复链的重建轴：record 事件流 →
 // 复活聚合 WorkflowRun 的纯派生视图重建（消费方 = resume-run.ts adoptResumedRun，
-// 编排面与重建面按轴分层——同 record-store 三轴拆分先例）。
+// 编排侧与重建侧按轴分层——同 record-store 三轴拆分先例）。
 
 import { getLogger } from "../core/logger.ts";
 
@@ -60,7 +60,7 @@ function applySettledFrameToDraft(
 ): void {
   const existing = drafts.get(event.taskIndex);
   if (existing === undefined) {
-    // [D12 宽松面留痕] settled 无 started 的残形态按 fold 自愈占位行处理
+    // [D12 宽松读取侧留痕] settled 无 started 的残形态按 fold 自愈占位行处理
     // （不拒绝——对齐 run-events fold 兜底语义；严格拒绝情形限坏行/seq 断档/
     // settled 缺 result 三项）。warn 出声：行级合法但配对异常 = 流被外部
     // 篡改或写入器 bug 的观测线索，静默会让该形态不可诊断。
@@ -135,7 +135,7 @@ export function rebuildRunFromRecord(
     scriptSource: created.scriptSource ?? "",
     args: created.args ?? parseArgsSummary(created.argsSummary),
     scriptName: created.workflowName,
-    // 锚定恢复：scriptPath 与 scriptSource/args 同为 run-created 帧恢复面（worker
+    // 锚定恢复：scriptPath 与 scriptSource/args 同为 run-created 帧恢复侧（worker
     // 沙箱 eval 模式无 __dirname，模板脚本靠它定位 _shared 族共享件）；旧格式帧
     // 缺失回落空串，由模板脚本内建 fail-fast 拒绝（壳侧 foldRecordStreamToRun
     // 同款恢复，两侧行为等价由测试锁定）

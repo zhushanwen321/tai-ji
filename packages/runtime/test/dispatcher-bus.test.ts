@@ -154,7 +154,7 @@ describe('message-dispatcher bus integration', () => {
     const { dispatcher, messageBus } = makeMocks({ isGenerating: true })
     await dispatcher.sendMessage('s1', 'hello')
     await flushDelivery(30)
-    // 退役面显式断言（原 send.rejected 广播）：bus 上不再出现拒绝帧
+    // 退役路径显式断言（原 send.rejected 广播）：bus 上不再出现拒绝帧
     const types = messageBus.publish.mock.calls.map((c: unknown[]) => (c[1] as ServerMessage).type)
     expect(types).not.toContain('send.rejected')
   })
