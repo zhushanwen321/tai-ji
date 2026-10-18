@@ -15,6 +15,20 @@
 //     边界纯函数面（truncateTaskForEnv）+ applyIdentityEnvToChildEnv 装配单测同文件。
 //
 // fake pi 脚本落 mkdtemp 自建目录（tmpdir 白名单，不触碰真实数据目录）。
+//
+// [确定性] 正向用例（S7b/S8b）的零输出窗口用测试时钟冻结：prompt 在 spawn 同一
+// 同步段内写入（生产顺序固定，测试不可提前写入），窗口起点必然包含「子进程启动 →
+// node 引导 → 管道就绪」的真实耗时——负载下可达数百 ms，固定窗内完成是时序假设。
+// 测试时钟把这段真实启动耗时移出窗口（窗口只在 pi 就绪后起算）：用例先等 onHandleReady
+// （get_state 应答经 pump 回填 = pi 已就绪），再推进窗口——若活性未取消计时器，
+// 推进即刻触发 not_delivered（负向对照仍然有效）；断言与 300ms 预算不变。
+// S7（零输出）保持真实时钟：它验证的就是窗口本身必须到期。
+//
+// 就绪信号取既有 get_state 应答（onHandleReady），不引入额外 stdout 标记：prompt 在
+// spawn 同一同步段写入，任何标记都晚于窗口武装，且与 response 同受启动/调度延迟
+// （负载下同样可能晚于窗口）；S8b 的 getStateAnswered=true 断言还要求 prompt 写入后
+// 首条活性就是 get_state 应答——启动标记会把它变成 false。get_state 应答即既有
+// 「pi 已就绪」事实，窗口在它之后起算才消除真实启动耗时的时序假设。
 
 import type { ChildProcess } from "node:child_process";
 import * as fs from "node:fs";
@@ -28,12 +42,15 @@ import {
   type LogLevel,
   type AgentEvent,
 } from "@zhushanwen/subagent-engine-sdk";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { killAllActiveChildren, runSpawnOnce, applyIdentityEnvToChildEnv, truncateTaskForEnv, type SpawnRunCallbacks, type SpawnRunParams, type SpawnRunResult } from "../spawn-runner.ts";
 import { PROMPT_ACK_TIMEOUT_ENV } from "../prompt-ack.ts";
 
-/** 注入窗（真机 30s 不可等；fake timers 管不了真实子进程 IO，用短真窗）。 */
+/**
+ * 注入窗（真机 30s 不可等）。S7 用真实时钟验证窗口必须到期；S7b/S8b 的窗口由测试
+ * 时钟冻结到 pi 就绪后（见文件头 [确定性]）——窗口值不变，变的是起算点。
+ */
 const ACK_WINDOW_MS = 300;
 
 /** fake pi 脚本：stdin JSONL 命令 → stdout JSONL（M2 故障注入形态）。 */
@@ -86,6 +103,9 @@ type Harness = {
   deltas: string[];
   stateChanges: Array<{ pid: number; state: string; killed: boolean; exitCode?: number; signal?: string }>;
   argv1Saved: string;
+  /** pi 就绪信号：首个 get_state 应答经 pump 回填身份（onHandleReady）时 resolve。 */
+  ready: Promise<void>;
+  notifyReady: () => void;
 }
 
 function makeHarness(mode: string): Harness {
@@ -96,7 +116,11 @@ function makeHarness(mode: string): Harness {
   process.env.FAKE_PI_MODE = mode;
   const argv1Saved = process.argv[1] ?? "";
   process.argv[1] = join(rootDir, "fake-pi.mjs"); // getPiInvocation 分支 1：node <script>
-  return { rootDir, sessionDir, events: [], deltas: [], stateChanges: [], argv1Saved };
+  let notifyReady!: () => void;
+  const ready = new Promise<void>((resolve) => {
+    notifyReady = resolve;
+  });
+  return { rootDir, sessionDir, events: [], deltas: [], stateChanges: [], argv1Saved, ready, notifyReady };
 }
 
 function restoreHarness(h: Harness): void {
@@ -110,6 +134,8 @@ function callbacksOf(h: Harness): SpawnRunCallbacks {
     onEvent: (e) => h.events.push(e),
     onDelta: (d) => h.deltas.push(d),
     onChildStateChanged: (p) => h.stateChanges.push(p),
+    // pi 就绪 = get_state 应答回填 sessionFile（ready 只在正向用例被 await）。
+    onHandleReady: () => h.notifyReady(),
   };
 }
 
@@ -133,6 +159,11 @@ function injectAckWindow(): () => void {
   };
 }
 
+/** 让出一轮 libuv 事件循环（真实 setImmediate——不受 vi 测试时钟接管）。 */
+function nextImmediate(): Promise<void> {
+  return new Promise((resolve) => setImmediate(resolve));
+}
+
 /** 等待谓词成立（kill 链/收尾异步面）。 */
 async function waitFor(pred: () => boolean, timeoutMs = 4000): Promise<void> {
   const start = Date.now();
@@ -143,6 +174,8 @@ async function waitFor(pred: () => boolean, timeoutMs = 4000): Promise<void> {
 }
 
 afterEach(() => {
+  // 防御：正向用例的测试时钟异常退出时不得泄漏到后续用例（S7 用真实时钟验证窗口到期）。
+  vi.useRealTimers();
   killAllActiveChildren();
 });
 
@@ -190,8 +223,16 @@ describe("S7b pi 拒绝 prompt → 立即 engine_prompt_rejected（不等窗口�
   it("success:false response → 立即失败，错误含 pi error 文本，分型独立", async () => {
     const h = makeHarness("reject-prompt");
     const restoreWindow = injectAckWindow();
+    // 零输出窗口走测试时钟：子进程启动耗时移出窗口（见文件头 [确定性]）。
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
     try {
-      const result: SpawnRunResult = await runSpawnOnce(baseParams(h), callbacksOf(h));
+      const run = runSpawnOnce(baseParams(h), callbacksOf(h));
+      await h.ready; // pi 已就绪（get_state 应答落位）——窗口自此起算
+      await nextImmediate(); // 该应答行的 onChannelActivity（取消计时器）已同步完成
+      // 窗口逻辑时间耗尽：活性已取消零输出计时器 → 不误判 not_delivered。
+      // 若取消接线缺失，此处推进即触发 timeout → 下方 rejected 断言失败（负向对照）。
+      vi.advanceTimersByTime(ACK_WINDOW_MS * 2);
+      const result: SpawnRunResult = await run;
 
       expect(result.success).toBe(false);
       expect(result.error).toMatch(/^engine_prompt_rejected:/);
@@ -201,6 +242,7 @@ describe("S7b pi 拒绝 prompt → 立即 engine_prompt_rejected（不等窗口�
       const errorEvents = h.events.filter((e) => e.type === "error");
       expect(errorEvents).toHaveLength(1);
     } finally {
+      vi.useRealTimers();
       restoreWindow();
       restoreHarness(h);
     }
@@ -213,8 +255,15 @@ describe("S8b get_state 有应答但 prompt response 延迟 → 不杀不判失�
     const restoreWindow = injectAckWindow();
     const logs: Array<{ level: LogLevel; message: string }> = [];
     configureLoggerSink({ log: (level, _component, message) => logs.push({ level, message }) });
+    // 零输出窗口走测试时钟：子进程启动耗时移出窗口（见文件头 [确定性]）。
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
     try {
-      const result: SpawnRunResult = await runSpawnOnce(baseParams(h), callbacksOf(h));
+      const run = runSpawnOnce(baseParams(h), callbacksOf(h));
+      await h.ready; // pi 已就绪（get_state 应答落位）——窗口自此起算
+      await nextImmediate(); // 该应答行的 onChannelActivity（取消计时器）已同步完成
+      // 窗口逻辑时间耗尽：若活性未取消计时器，此处即误杀（负向对照）。
+      vi.advanceTimersByTime(ACK_WINDOW_MS * 2);
+      const result: SpawnRunResult = await run;
 
       // run 正常完成（response 延迟 600ms > 窗 300ms——若误杀此处即失败）
       expect(result.success).toBe(true);
@@ -227,6 +276,7 @@ describe("S8b get_state 有应答但 prompt response 延迟 → 不杀不判失�
       // 无误报：无 not_delivered 失败日志
       expect(logs.some((l) => l.message.includes("prompt not delivered"))).toBe(false);
     } finally {
+      vi.useRealTimers();
       resetLoggerSinkForTests();
       restoreWindow();
       restoreHarness(h);
