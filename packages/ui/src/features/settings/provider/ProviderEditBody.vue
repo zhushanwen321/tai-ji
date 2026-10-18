@@ -119,9 +119,10 @@
             v-if="form.apiKey !== '' || apiKeyRevealable"
             variant="ghost"
             class="size-8 shrink-0 rounded-sm p-0 text-neutral-dim hover:bg-surface-hover hover:text-neutral-fg"
-            :aria-label="showKey ? t('settings.providerEdit.hideKey') : t('settings.providerEdit.showKey')"
+            :aria-label="form.apiKey === '' ? t('settings.providerEdit.readStoredKey') : (showKey ? t('settings.providerEdit.hideKey') : t('settings.providerEdit.showKey'))"
             data-testid="provider-reveal-apikey"
             :disabled="revealingApiKey"
+            :aria-busy="revealingApiKey"
             @click="onToggleKey"
           >
             <EyeOff v-if="showKey" class="size-4" />
@@ -348,7 +349,11 @@ import { useSettingsToast as useToast } from '../injection-keys'
 
 const props = defineProps<{
   provider: ProviderInfo | null
-  /** auth.json 已有该 provider 的 OAuth 凭据（父组件 useProviderOAuth.oauthPresent，展开时刷新） */
+  /**
+   * auth.json 已有该 provider 的 OAuth 凭据。**三态（MF-1-2）**：undefined = 尚未查询/查询失败
+   * （未知），true = 有 OAuth 凭据，false = 已查询且无 OAuth 凭据（父组件 useProviderOAuth
+   * 展开时刷新，按 oauthPresenceStatus 取显式三态）。
+   */
   oauthPresent?: boolean
   /** 该 provider 支持 OAuth 登录（父组件按 builtinProviders 模板 oauthSupported 判定） */
   oauthSupported?: boolean
@@ -437,17 +442,21 @@ const { apiText: catalogApiText, endpointDraft, endpointHint, onEndpointInput, s
 const isOauthForm = computed(() => form.authMethod === 'oauth')
 
 /**
- * 可回显的已存 apiKey（SG-7）：apiKeySet 为真且不是 OAuth 形态，且 auth.json 无 OAuth 凭据。
+ * 可回显的已存 apiKey（SG-7）：apiKeySet 为真且不是 OAuth 形态，且 presence **显式为 false**
+ * （已查询确认 auth.json 无 OAuth 凭据）。
  * runtime 回显通道对 auth.json 的 OAuth 凭据固定 notRevealable（OAuth token 永不出协议面），
  * 此时渲染眼睛只会得到必然失败的 available:false 提示；「改用 API Key」尚未保存时 props 仍是
  * oauth，同样没有可回显的 api_key 凭据。**旧数据无 authMethod 标注**时（auth.json 已有 oauth
- * 凭据、models.json 无 apiKey ⇒ authMethod=undefined 而 apiKeySet=true）靠 oauthPresent 兜底
- * 判为不可回显。用户已输入的草稿仍可点眼睛做显隐（v-if 另一分支）。
+ * 凭据、models.json 无 apiKey ⇒ authMethod=undefined 而 apiKeySet=true）靠 presence 兜底
+ * 判为不可回显。
+ * MF-1-2：presence 未知（undefined = 尚未查询/查询失败）一律不渲染眼睛——异步刷新期间与
+ * 查询失败分支都不得出现「点了必失败」的可点按钮；不能把「未查询」当作「无凭据」。
+ * 用户已输入的草稿仍可点眼睛做显隐（v-if 另一分支）。
  */
 const apiKeyRevealable = computed(() => (
   props.provider?.apiKeySet === true
   && props.provider?.authMethod !== 'oauth'
-  && props.oauthPresent !== true
+  && props.oauthPresent === false
 ))
 
 /** 形态切换目标（非 null = 确认弹窗打开） */

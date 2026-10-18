@@ -2,8 +2,9 @@
  * provider-edit-form —— Provider 编辑「表单草稿 + dirty/快照」module（[C4] 拆分自
  * use-provider-edit.ts）。
  *
- * 承载：凭据/名称/端点表单草稿（form，含 D7 headers/authHeader + B-1 authMethod）+ headers
- * 行编辑 CRUD + isDirty 快照对比（D13）+ save 持久化（D15b 校验 → 防线① catalog/custom 分体系
+ * 承载：凭据/名称/端点表单草稿（form，含 D7 headers/authHeader + B-1 authMethod）+ 凭据回显
+ * （眼睛按钮按需 RPC，回显值不构成 dirty/不回写）+ headers 行编辑 CRUD + isDirty 快照对比（D13）
+ * + save 持久化（D15b 校验 → 防线① catalog/custom 分体系
  * → transport.setProvider）+ **D8 广播并发对齐的调用点**（规则纯核 = provider-edit-reconcile.ts，
  * deep watch 退化为 reconcileBroadcast 的一个调用点）。
  *
@@ -383,6 +384,9 @@ export function createProviderEditForm(input: ProviderEditFormInputs): ProviderE
 
   function clearApiKey(): void {
     draft.apiKey = API_KEY_CLEAR_SENTINEL
+    // 哨兵不得以明文形态展示（SG-4）：回显后 showKey 为 true 时点清除会把 '__CLEAR__'
+    // 直接渲染成 text，落回密码态遮罩。
+    showKey.value = false
   }
 
   /**
@@ -413,6 +417,9 @@ export function createProviderEditForm(input: ProviderEditFormInputs): ProviderE
       // 写回草稿（并成为非 dirty 基线）。
       if (epoch !== revealEpoch) return { ok: true }
       if (providerRef.value?.id !== requestedId || draft.apiKey !== '') return { ok: true }
+      // 凭据已被删除（MF-1-1）：即使世代号尚未推进，也不得把已不存在的明文写回草稿。
+      // 只挡 api_key 被移除的情形；$ENV / !cmd 引用的 apiKeySet 仍为 true，不受影响。
+      if (providerRef.value?.apiKeySet === false) return { ok: true }
       if (res.available && res.apiKey) {
         draft.apiKey = res.apiKey
         revealedApiKey.value = res.apiKey
@@ -463,10 +470,17 @@ export function createProviderEditForm(input: ProviderEditFormInputs): ProviderE
    */
   function applyReconcile(fresh: ProviderInfo): void {
     const decision = reconcileBroadcast(fresh, draft, isDirty.value, snapshot.value)
-    if (decision.action === 'ignore') return
     // 生效凭据不再是 api_key（广播清除凭据 / 换成 OAuth，SS-3）：回显态同批作废——OAuth token
     // 不走回显通道，继续留着旧 api_key 明文会在用户切回 api_key 形态时以 text 形态展示已被替换的值。
+    // 该判定必须早于 ignore 分支的提前返回（MF-1-1）：dirty 表单同样可能在外部清空/替换凭据，
+    // 否则已删除的明文继续可见，在途回显也不会被作废（迟到响应写回已失效的明文）。
     const credentialReplaced = !fresh.apiKeySet || fresh.authMethod === 'oauth'
+    if (decision.action === 'ignore') {
+      // dirty 分支只作废回显态，其他字段一律不动（用户改动优先）；dropRevealed 仅在草稿
+      // 仍是回显值时才清空，真实用户输入保留。
+      if (credentialReplaced) dropRevealed()
+      return
+    }
     if (decision.action === 'align-auth-method') {
       draft.authMethod = decision.authMethod
       // 手改快照：单独重拍快照的 authMethod 位（保持其余快照位不动，isDirty 语义不被扰动）

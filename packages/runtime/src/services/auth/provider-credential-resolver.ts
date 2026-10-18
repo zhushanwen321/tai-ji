@@ -1,13 +1,13 @@
 /**
  * Provider 凭据解析唯一通道（D3 收口）——接口见 services/ports/provider-credential-resolver.ts。
  *
- * 源优先级单点声明（三形态共享，见本文件 ProviderCredentialResolver 构造器里的 sources 数组，
+ * 源优先级单点声明（四种读取形态共享，见本文件 ProviderCredentialResolver 构造器里的 sources 数组，
  * 数组顺序即优先级）：
  *   1. auth.json（经 AuthService / AuthStorage 通道，catalog 凭据所在）
  *   2. models.json providers[id].apiKey（custom 凭据所在）
  *
  * 构造无 IO：全部读取懒发生（hasProviderCredential / listCredentialBackedProviderIds /
- * resolveProviderCredential / resolveProviderBaseUrl 被调用时才读盘）——这是组合根装配时序的前提：
+ * resolveProviderCredential / resolveProviderApiKeyRaw / resolveProviderBaseUrl 被调用时才读盘）——这是组合根装配时序的前提：
  * init 注入先于任何 findValidDefaultModel 调用时，装配期触发读取不会有「文件尚未就绪」的时序风险。
  *
  * $ENV_VAR / command 配置值形态（探针 P-cred，设计 §3.6）：
@@ -31,8 +31,8 @@ import builtinData from '../../generated/builtin-providers.json'
 type CredentialSourceId = 'auth.json' | 'models.json'
 
 /**
- * 单个凭据源的三种读取形态。
- * 三形态集中在同一对象上，使「源优先级」只需在 sources 数组里声明一次顺序。
+ * 单个凭据源的四种读取形态。
+ * 四种读取形态集中在同一对象上，使「源优先级」只需在 sources 数组里声明一次顺序。
  */
 interface CredentialSource {
   readonly id: CredentialSourceId
@@ -239,7 +239,7 @@ function createModelsJsonSource(deps: ProviderCredentialResolverDeps): Credentia
 
 export class ProviderCredentialResolver implements IProviderCredentialResolver {
   /**
-   * 源优先级单点声明：数组顺序即解析优先级，async 明文 / sync 布尔 / 批量三形态共用本数组。
+   * 源优先级单点声明：数组顺序即解析优先级，async 明文 / sync 布尔 / 批量 / 回显原值四种读取形态共用本数组。
    * 禁止在别处再写一遍链（这是读路径收口的全部意义）。
    */
   private readonly sources: readonly CredentialSource[]

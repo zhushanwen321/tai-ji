@@ -15,7 +15,8 @@
  *    等于快照位）而广播携带新形态（编辑体内发起 OAuth 授权 → 父组件 setProvider authMethod='oauth'
  *    回推）→ 只对齐该字段并单独重拍快照的 authMethod 位，否则后续 save 会用本地旧形态覆写刚写入
  *    的 oauth 标注（apiKey 有值还会覆写凭证）。其余字段保持用户未保存编辑。
- * ③ dirty 且无例外 → 不动（用户改动优先）。
+ * ③ dirty 且无例外 → 表单字段/快照不动（用户改动优先）；回显态作废不属于本裁决，由调用点
+ *    （provider-edit-form.ts applyReconcile）在凭据被清空/替换时独立执行。
  *
  * 纯度约定：本函数不触碰任何 ref/reactive——decision 携带全部待应用值，快照 authMethod 位的
  * 「手改快照」动作由调用点执行（decision.authMethod 即写入值）。
@@ -59,7 +60,7 @@ export function formPatchFromProvider(p: ProviderInfo | null): ProviderFormPatch
 
 /** reconcile 裁决（调用点按 action 机械执行；repaint 携带完整待应用值） */
 export type BroadcastReconcileDecision =
-  /** 分支③：dirty 且无 authMethod 例外——用户改动优先，什么都不动 */
+  /** 分支③：dirty 且无 authMethod 例外——表单字段与快照不动（回显态作废由调用点独立处理） */
   | { action: 'ignore' }
   /** 分支②：dirty 单字段例外——只对齐 authMethod（form 与快照 authMethod 位同值重拍） */
   | { action: 'align-auth-method'; authMethod: ProviderInfo['authMethod'] }

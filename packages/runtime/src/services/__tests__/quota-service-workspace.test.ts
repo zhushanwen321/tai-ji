@@ -13,7 +13,7 @@
  * 运行：cd packages/runtime && npx vitest run src/services/__tests__/quota-service-workspace.test.ts
  */
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
-import { mkdtempSync, mkdirSync, rmSync } from 'node:fs'
+import { existsSync, mkdtempSync, mkdirSync, readFileSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import type { ProviderQuotaFetcher, QuotaFetcherConfig, QuotaFetchOutcome } from '@taiji/shared'
@@ -136,12 +136,41 @@ describe('QuotaService.configure · workspace 三态（D1-1/P1-1）', () => {
   })
 })
 
+describe('QuotaService.configure · cookie 入站归一化（SG-10，wire 不信任）', () => {
+  const cookiePath = (): string => join(dir, 'secrets', 'p1-cookie.txt')
+
+  it('合法输入归一化后落盘（空白伪影 / Cookie: 头名被剥）', async () => {
+    const svc = makeService()
+    const result = await svc.configure({ providerId: 'p1', enabled: true, cookie: 'Cookie:  a = 1 ;  b = 2 ' })
+
+    expect(result).toEqual({ ok: true })
+    expect(readFileSync(cookiePath(), 'utf-8')).toBe('a=1; b=2')
+  })
+
+  it('非空输入归一化后为空 → fail-fast（不落盘、不误报成功）', async () => {
+    const svc = makeService()
+    const result = await svc.configure({ providerId: 'p1', enabled: true, cookie: '\tName\tValue\tauth\txyz' })
+
+    expect(result.ok).toBe(false)
+    expect(result.error).toContain('格式无效')
+    expect(existsSync(cookiePath())).toBe(false)
+  })
+
+  it('空串 = 清除（合法态，不误判格式错误）', async () => {
+    const svc = makeService()
+    await svc.configure({ providerId: 'p1', enabled: true, cookie: 'a=1' })
+
+    expect(await svc.configure({ providerId: 'p1', enabled: true, cookie: '' })).toEqual({ ok: true })
+    expect(existsSync(cookiePath())).toBe(false)
+  })
+})
+
 describe('QuotaService.doFetch · workspace 注入与 not_configured 透传（D1-2/D1-3）', () => {
   it('providers.json 读出的 workspace 经 config.workspaceUrl 注入 fetcher', async () => {
     const svc = makeService()
     await svc.configure({ providerId: 'p1', enabled: true, fetcher: 'fake-cookie-fetcher', workspace: 'wrk_inject1' })
     // 写 cookie 凭证（cookie 文件）保证 resolveCredential 命中
-    await svc.configure({ providerId: 'p1', enabled: true, cookie: 'cookie-value' })
+    await svc.configure({ providerId: 'p1', enabled: true, cookie: 'session=abc123' })
 
     nextOutcome = { ok: true, data: { label: 'L', wins: [{ pct: 1, resetSec: null }, { pct: null, resetSec: null }, { pct: null, resetSec: null }] } }
     const result = await svc.refresh('p1')
@@ -152,7 +181,7 @@ describe('QuotaService.doFetch · workspace 注入与 not_configured 透传（D1
 
   it('未配置 workspace → 注入 undefined，fetcher 报 not_configured 原样透传（D1-3）', async () => {
     const svc = makeService()
-    await svc.configure({ providerId: 'p1', enabled: true, cookie: 'cookie-value', fetcher: 'fake-cookie-fetcher' })
+    await svc.configure({ providerId: 'p1', enabled: true, cookie: 'session=abc123', fetcher: 'fake-cookie-fetcher' })
 
     const result = await svc.refresh('p1')
 
@@ -163,7 +192,7 @@ describe('QuotaService.doFetch · workspace 注入与 not_configured 透传（D1
 
   it('fetcher 报 not_configured 不写缓存（getCached 携带 reason 供 UI 失败态）', async () => {
     const svc = makeService()
-    await svc.configure({ providerId: 'p1', enabled: true, cookie: 'cookie-value', fetcher: 'fake-cookie-fetcher' })
+    await svc.configure({ providerId: 'p1', enabled: true, cookie: 'session=abc123', fetcher: 'fake-cookie-fetcher' })
     await svc.refresh('p1')
 
     const cached = svc.getCached('p1')

@@ -398,6 +398,7 @@ export default {
     apiKeyPlaceholderEmpty: 'sk-...',
     showKey: 'Show key',
     hideKey: 'Hide key',
+    readStoredKey: 'Read and show saved key',
     clearKey: 'Clear key',
     apiKeyNoteKeep: 'Leave blank to keep unchanged',
     apiKeyNoteClear: '; click the trash icon to clear the configured key',

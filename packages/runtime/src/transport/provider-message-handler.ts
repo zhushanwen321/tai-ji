@@ -1,6 +1,6 @@
 /**
  * Provider 域 config.* message handler（provider CRUD/启停/按体系移除 + 远程目录刷新 +
- * 环境变量检查 + 内置模板与跨 agent 导入迁移 + 源检测，12 条 case）。
+ * 环境变量检查 + 内置模板与跨 agent 导入迁移 + 源检测 + 凭据回显，12 条 case）。
  *
  * Extracted from settings-message-handler.ts to reduce file size（该文件同类先例：
  * config-preferences-message-handler.ts 同款 class + handle() switch 形态；case 体自

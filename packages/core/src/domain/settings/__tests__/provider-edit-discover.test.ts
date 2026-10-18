@@ -225,7 +225,7 @@ describe('runDiscover discover 分支（自动发现 + 合并）', () => {
     expect(req.apiKey).toBeUndefined()
   })
 
-  it('D18 清除哨兵经 pendingApiKey 保留清除语义（哨兵 → apiKey 空串）', async () => {
+  it('D18 清除哨兵 → pendingApiKey 返回空串（wire = 不带 key，runtime 走 resolver；discover 不删凭据）', async () => {
     const { transport } = await runDiscoverCase('discover', {
       mount: { draft: makeDraft({ apiKey: API_KEY_CLEAR_SENTINEL }) },
     })

@@ -456,7 +456,7 @@ describe('QuotaService — W4 + apiKey 清除路径', () => {
     }))
     const svc = new QuotaService({ providerCredentialResolver: makeResolver(), dataDir: tmpDir, providerExtrasStore: extrasStore})
 
-    await svc.configure({ providerId: 'glm-id', enabled: true, cookie: 'cookie-val' })
+    await svc.configure({ providerId: 'glm-id', enabled: true, cookie: 'session=val' })
 
     const cookiePath = join(tmpDir, 'secrets', 'glm-id-cookie.txt')
     const mode = statSync(cookiePath).mode & 0o777
@@ -991,7 +991,7 @@ describe('QuotaService — U2②: cookie 空串 = 清除（§7.5 清单 / 改动
     mkdirSync(cookiePath, { recursive: true })
 
     // ④ 换类型（zhipu → mimo）并传 cookie → secrets 段写入失败，configure 整体失败
-    const result = await svc.configure({ providerId: 'p', enabled: true, fetcher: 'mimo', cookie: 'x' })
+    const result = await svc.configure({ providerId: 'p', enabled: true, fetcher: 'mimo', cookie: 'x=1' })
 
     expect(result.ok).toBe(false)
     expect(typeof result.error).toBe('string')

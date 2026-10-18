@@ -10,7 +10,7 @@
  * - 来源路由（MF-1）：**只有 edit 来源** auth.success 后发 setProvider({authMethod:'oauth'})
  *  （防线⑤：不随行 name/type/baseUrl 快照 artifact）；quicksetup 来源不发（保存时才落）
  * - presence（MF-3）：refreshOAuthPresence has ? add : delete；clearOAuthPresence 清双集合
- *  （删除 provider 后防假已授权态）；展开刷新只对 oauth 相关 provider
+ *  （删除 provider 后防假已授权态）；展开刷新对每个 provider 都查（MF-1-2 三态：未查询 ≠ 无凭据）
  * - 派生：oauthDialogProvider / oauthDialogInfo（模板优先、编辑体兜底）/ quickSetupOauthAuthorized
  * - onEditOauthLogout（B-1 场景 C）三分支 + checkEnv 三分支
  *
@@ -447,9 +447,27 @@ describe('presence（MF-3 has ? add : delete）与展开刷新', () => {
     configMock.hasOAuth.mockRejectedValueOnce(new Error('runtime 断连'))
     await page.refreshOAuthPresence('kimi-coding')
     expect(page.oauthPresent.value.has('kimi-coding')).toBe(false)
+    // MF-1-2 三态：查询失败 = 未知（undefined），不得当成「已确认无 OAuth 凭据」渲染回显入口
+    expect(page.oauthPresenceStatus('kimi-coding')).toBeUndefined()
   })
 
-  it('展开 oauth 相关 provider → 自动刷新 presence；非 oauth 相关不查询；newId 不查询', async () => {
+  it('oauthPresenceStatus 三态：未查询 → undefined；查询 true/false → true/false；hasOauthPresence 仅 true 命中', async () => {
+    const page = mountOauth()
+    expect(page.oauthPresenceStatus('kimi-coding')).toBeUndefined()
+    expect(page.hasOauthPresence('kimi-coding')).toBe(false)
+
+    configMock.hasOAuth.mockResolvedValueOnce(false)
+    await page.refreshOAuthPresence('kimi-coding')
+    expect(page.oauthPresenceStatus('kimi-coding')).toBe(false)
+    expect(page.hasOauthPresence('kimi-coding')).toBe(false)
+
+    configMock.hasOAuth.mockResolvedValueOnce(true)
+    await page.refreshOAuthPresence('kimi-coding')
+    expect(page.oauthPresenceStatus('kimi-coding')).toBe(true)
+    expect(page.hasOauthPresence('kimi-coding')).toBe(true)
+  })
+
+  it('展开 provider → 自动刷新 presence（每个 provider 都查，含 authMethod 缺省的遗留行）；newId 不查询', async () => {
     mountOauth()
     if (!harnessRefs) throw new Error('harness refs 未捕获')
     harnessRefs.providers.value = [
@@ -462,10 +480,13 @@ describe('presence（MF-3 has ? add : delete）与展开刷新', () => {
     expect(configMock.hasOAuth).toHaveBeenCalledWith('kimi-coding')
 
     configMock.hasOAuth.mockClear()
+    // MF-1-2：旧门控（authMethod=oauth / 模板 oauthSupported）会让遗留行永不查询——
+    // presence 恒「未知当无凭据」→ 假眼睛按钮，故展开即查（hasOAuth 只回布尔、单次 RPC）
     harnessRefs.expandedId.value = 'my-custom'
     await flushPromises()
-    expect(configMock.hasOAuth).not.toHaveBeenCalled()
+    expect(configMock.hasOAuth).toHaveBeenCalledWith('my-custom')
 
+    configMock.hasOAuth.mockClear()
     harnessRefs.expandedId.value = '__new__'
     await flushPromises()
     expect(configMock.hasOAuth).not.toHaveBeenCalled()

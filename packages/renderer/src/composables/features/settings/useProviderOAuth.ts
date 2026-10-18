@@ -90,8 +90,14 @@ export interface ProviderOauthModule {
   readonly quickSetupOauthAuthorized: ComputedRef<boolean>
   /** provider 是否支持 OAuth 登录（builtinProviders 模板 oauthSupported 判定；custom 恒 false） */
   isOauthSupported(providerId: ProviderId): boolean
-  /** 该 provider 的 OAuth presence（auth.json 已有凭据；编辑体凭证区「已登录」态数据源） */
+  /** 该 provider 的 OAuth presence（仅「已查询且有凭据」= true；未知/无凭据均 false，三态见 oauthPresenceStatus） */
   hasOauthPresence(providerId: ProviderId): boolean
+  /**
+   * presence 三态（MF-1-2）：undefined = 尚未查询 / 查询失败（未知），true = 已有 OAuth 凭据，
+   * false = 已查询且无 OAuth 凭据。编辑体「眼睛按钮可回显性」必须用本函数取**显式 false**，
+   * 不能把未查询当「无凭据」（异步刷新期间/查询失败会渲染出必然失败的可点按钮）。
+   */
+  oauthPresenceStatus(providerId: ProviderId): boolean | undefined
   /** 编辑体凭证区「登录/重新登录」（B-1）→ 状态机启动 flow（auth.success 走 edit 收尾） */
   onEditOauthLogin(p: ProviderInfo): void
   /** 编辑体凭证区「退出登录」（B-1 场景 C）→ config.oauthLogout 移除凭证 + presence 刷新 */
@@ -140,6 +146,8 @@ export function useProviderOAuth(options: ProviderOauthInputs): ProviderOauthMod
   })
   const authorized = ref<Set<string>>(new Set())
   const oauthPresent = ref<Set<string>>(new Set())
+  /** 已成功查询过 presence 的 provider 集合（三态判据：不在集合 = 未知，见 oauthPresenceStatus） */
+  const oauthPresenceKnown = ref<Set<string>>(new Set())
   const envCheck = ref<Record<string, boolean> | undefined>(undefined)
 
   let activeProviderId = ''
@@ -279,8 +287,13 @@ export function useProviderOAuth(options: ProviderOauthInputs): ProviderOauthMod
     return builtinProviders.value.some((b) => b.id === providerId && b.oauthSupported)
   }
 
-  function hasOauthPresence(providerId: ProviderId): boolean {
+  function oauthPresenceStatus(providerId: ProviderId): boolean | undefined {
+    if (!oauthPresenceKnown.value.has(providerId)) return undefined
     return oauthPresent.value.has(providerId)
+  }
+
+  function hasOauthPresence(providerId: ProviderId): boolean {
+    return oauthPresenceStatus(providerId) === true
   }
 
   // ── 来源路由入口 ──
@@ -311,6 +324,13 @@ export function useProviderOAuth(options: ProviderOauthInputs): ProviderOauthMod
         return
       }
       toast.info(t('settings.providerEdit.credentialOauthLoggedOut', { name: p.name }))
+      // 退出成功的回执即事实（凭证已移除）：先落 presence=false（已知），再刷新确认——
+      // 刷新失败也不得让「已登录」态滞留（S-1：旧实现只依赖 refresh，hasOAuth 失败时
+      // oauthPresent 保持 true → 凭证区与 existingAuthMethod 都继续认为「已登录」）。
+      const nextPresence = new Set(oauthPresent.value)
+      nextPresence.delete(p.id)
+      oauthPresent.value = nextPresence
+      oauthPresenceKnown.value = new Set(oauthPresenceKnown.value).add(p.id)
     } catch (e) {
       // transport reject（断连/超时）：错误上屏（错误必须可见，不静默吞）
       toast.error(toErrorMessage(e))
@@ -321,23 +341,31 @@ export function useProviderOAuth(options: ProviderOauthInputs): ProviderOauthMod
 
   // ── presence / env ──
 
-  /** 刷新单 provider 的 OAuth presence（has ? add : delete，MF-3） */
+  /**
+   * 刷新单 provider 的 OAuth presence（has ? add : delete，MF-3）。
+   * 成功才落「已查询」标记（三态）：失败保持上次已知值/未知，调用方回退 stored authMethod；
+   * 编辑体据此不渲染「未知即可回显」的假按钮（MF-1-2）。
+   */
   async function refreshOAuthPresence(providerId: string): Promise<void> {
-    let present = false
     try {
-      present = await getSettingsTransport().hasOAuth(providerId)
+      const present = await getSettingsTransport().hasOAuth(providerId)
+      const nextPresence = new Set(oauthPresent.value)
+      if (present) nextPresence.add(providerId)
+      else nextPresence.delete(providerId)
+      oauthPresent.value = nextPresence
+      oauthPresenceKnown.value = new Set(oauthPresenceKnown.value).add(providerId)
     } catch {
       // 查询失败不阻断：调用方回退 stored authMethod / 默认 env（existingAuthMethod 逻辑）
       console.warn(`[provider-oauth] config.hasOAuth query failed for ${providerId}`)
     }
-    oauthPresent.value = new Set(oauthPresent.value)
-    if (present) oauthPresent.value.add(providerId)
-    else oauthPresent.value.delete(providerId)
   }
 
   function clearOAuthPresence(providerId: string): void {
     oauthPresent.value = new Set(oauthPresent.value)
     oauthPresent.value.delete(providerId)
+    // 已删除 provider 的查询结论同批作废：重建立同名 provider 时不得沿用「已知无凭据」
+    oauthPresenceKnown.value = new Set(oauthPresenceKnown.value)
+    oauthPresenceKnown.value.delete(providerId)
     authorized.value = new Set(authorized.value)
     authorized.value.delete(providerId)
   }
@@ -356,13 +384,13 @@ export function useProviderOAuth(options: ProviderOauthInputs): ProviderOauthMod
   }
 
   // B-1：展开 provider 时刷新 OAuth presence（凭证区「已登录」态与额度区 oauthReady 的数据源）。
-  // 仅 oauth 相关 provider（authMethod=oauth 或模板 oauthSupported）拉取，其余不查询。
+  // MF-1-2：**每个展开的 provider 都查**（config.hasOAuth 只回布尔、单次 RPC，无轮询）——
+  // 旧门控依赖 authMethod/模板 oauthSupported，而 builtinProviders 拉取失败时模板恒空，
+  // 遗留 OAuth 行（authMethod=undefined）永远不查询 → presence 恒「未知当无凭据」→ 假眼睛按钮。
   watch(expandedId, (id) => {
     if (!id || id === newId) return
     const p = providers.value.find((x) => x.id === id)
-    if (p && (p.authMethod === 'oauth' || isOauthSupported(p.id))) {
-      void refreshOAuthPresence(id)
-    }
+    if (p) void refreshOAuthPresence(id)
   })
 
   return {
@@ -375,6 +403,7 @@ export function useProviderOAuth(options: ProviderOauthInputs): ProviderOauthMod
     quickSetupOauthAuthorized,
     isOauthSupported,
     hasOauthPresence,
+    oauthPresenceStatus,
     onEditOauthLogin,
     onEditOauthLogout,
     onQuickSetupOauthLogin,

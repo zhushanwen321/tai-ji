@@ -778,6 +778,8 @@ WorkflowTab 步骤列表的数据源绑定从「workflow-record 全量快照（6
 
 **重审触发**：引入「受限远程客户端」（非完全控制级 token / 通道级 capability）时本条必须重审——届时应改为 spawn-token-only 或独立 capability 门控，并同批补 auth-channel 簿记与测试。
 
-**残余风险（不掩饰）**：ADR-0118 §3c 曾以「renderer 被注入后可直读凭据文件」为由把 localFile 读通道收窄到会话产物子树；本通道是同一威胁模型下的**有意有界例外**——renderer XSS 仍可调用本 RPC 取回明文 Key。边界依据：单 provider、只读、无写入/删除能力、OAuth 不可达、无广播、非持久化，暴露面限于「攻击者已能执行 renderer 任意脚本」的既有完全沦陷场景；对应收益 = 用户无需离开设置页即可确认/复制已存 Key（原先须手翻 auth.json）。纵深防线沿用既有 CSP + markdown 分通道净化，不在本通道内新增。**carve-out 不外溢**：本裁决仅适用 provider api_key；其他凭据家族（TTS Key 等）维持「永不回 WS 协议面」原红线（registry #49）。
+**残余风险（不掩饰）**：ADR-0118 §3c 曾以「renderer 被注入后可直读凭据文件」为由把 localFile 读通道收窄到会话产物子树；本通道是同一威胁模型下的**有意有界例外**——renderer XSS 仍可调用本 RPC 取回明文 Key。边界依据：单 provider、只读、无写入/删除能力、OAuth 不可达、无广播、非持久化，暴露面限于「攻击者已能执行 renderer 任意脚本」的既有完全沦陷场景；对应收益 = 用户无需离开设置页即可确认/复制已存 Key（原先须手翻 auth.json）。纵深防线沿用既有 CSP + markdown 分通道净化，不在本通道内新增。**carve-out 不外溢**：本裁决仅适用 provider api_key；其他凭据家族（TTS Key 等）维持「不回传出站」原红线（入站 configure 由用户显式粘贴承载，registry #49）。
+
+**已接受的显示态残留**：外部轮换 api_key 而 `apiKeySet` 保持 true、`authMethod` 不变时，广播只携带布尔（`ProviderInfo` 无凭据指纹），编辑体无法察觉回显基线已过期——继续把旧值当作「所存值」展示；保存永不回写（`resolveApiKeyChange()` 对回显基线返回 undefined），恢复动作 = 关闭重开编辑体（重新回显按需读盘）。结构性消除需给 `ProviderInfo` 增凭据指纹（如 `apiKeyVersion` / `credentialUpdatedAt`）并在指纹变化时作废回显，禁止用时间推测代替。
 
 **登记**：数据源 = [data-source-registry.md](../architecture/data-source-registry.md) #65（provider 凭据与明文回显读通道）；约束 = 复用 C-proc-14（单点读取机器检查）与 C-data-01（单写 owner），**未新增约束族**；行为红线由 `packages/runtime/src/services/auth/__tests__/provider-credential-resolver.test.ts`「回显原值」组（oauth 不回落 / `$ENV` 原值 / custom 源）与 `packages/runtime/src/transport/settings-message-handler-reveal-apikey.test.ts`（reply 形状 + 单 reply）锁定。

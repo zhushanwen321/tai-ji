@@ -398,6 +398,7 @@ export default {
     apiKeyPlaceholderEmpty: 'sk-...',
     showKey: '显示密钥',
     hideKey: '隐藏密钥',
+    readStoredKey: '读取并显示已保存的密钥',
     clearKey: '清除密钥',
     apiKeyNoteKeep: '留空保存则保持不变',
     apiKeyNoteClear: '；点垃圾桶清除已配置的 key',

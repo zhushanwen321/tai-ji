@@ -176,6 +176,24 @@ describe('ProviderCredentialResolver 回显原值（resolveProviderApiKeyRaw）'
       source: 'models.json',
     })
   })
+
+  it('`!cmd` 形态：回显返回原串（不执行 shell），常规解析返回 unsupported=command（SG-9）', async () => {
+    writeAuthFile({ cmd: { type: 'api_key', key: '!printf sk-auth' } })
+    writeModelsFile({ 'cmd-models': { apiKey: '!echo sk-models' } })
+    const resolver = new ProviderCredentialResolver(makeDeps())
+
+    // 回显面 = 用户所存配置串，原样展示；常规解析面拒绝执行并报形态不支持
+    expect(await resolver.resolveProviderApiKeyRaw('cmd')).toEqual({
+      apiKey: '!printf sk-auth',
+      source: 'auth.json',
+    })
+    expect(await resolver.resolveProviderCredential('cmd')).toEqual({ unsupported: 'command' })
+    expect(await resolver.resolveProviderApiKeyRaw('cmd-models')).toEqual({
+      apiKey: '!echo sk-models',
+      source: 'models.json',
+    })
+    expect(await resolver.resolveProviderCredential('cmd-models')).toEqual({ unsupported: 'command' })
+  })
 })
 
 describe('ProviderCredentialResolver 批量 sync 形态', () => {

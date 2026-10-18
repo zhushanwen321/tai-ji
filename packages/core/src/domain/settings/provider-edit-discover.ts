@@ -62,7 +62,8 @@ export interface ProviderEditDiscoverInputs {
   /**
    * discover 请求的 apiKey 取值器（MF-1-1）：「真实未保存草稿」投影——回显值（= 所存值）
    * 不算待保存，返回 undefined 让 runtime 走 resolver；清除哨兵经 resolveApiKeyForSave
-   * 转成 ''（清空语义）。装配方注入 form 的同源判据，避免 discover 自建第二套谓词。
+   * 转成 ''（wire 语义 = 不带 key，runtime 走 resolver——discover 不承担凭据删除，删除由 save
+   * 承担）。装配方注入 form 的同源判据，避免 discover 自建第二套谓词。
    */
   pendingApiKey: () => string | undefined
   /**
