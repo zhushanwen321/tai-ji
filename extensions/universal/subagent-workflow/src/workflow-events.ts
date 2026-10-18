@@ -214,9 +214,11 @@ export interface RunSettledEffectsEnv {
  * 恒可淘汰候选，且其终局时序 = 全局最新，恒在保留端，不被自身触发的裁剪淘汰）。
  *
  * 失败语义（直测锁定，workflow-events.test.ts）：管线内部无围栏
- * ——notifyDone 抛错（port.deliver rejected / 降级直发非 stale 失败）时后续 track/evict
+ *——notifyDone 抛错（唯一来源 = 降级直发非 stale 失败）时后续 track/evict
  * 不执行、异常原样上抛，由调用方 finalizeRun 的 onRunDone 独立 try 围栏接住
  * （core worker-message-pump，OR-4/B-4：真实副作用失败 error 留痕不崩宿主）。
+ * port.deliver rejected（persist-failed 等）不抛错：notifyDone error 留痕后正常
+ * 返回，track/evict 照常执行（该通知属已知丢失，可见性 = notifyDone 内 error 留痕）。
  * notifyDone 幂等早退（notifiedRunIds 已含 runId）不是错误：后两步照常执行。
  *
  * [D7] notifyDone 注入产物目录指针（<sessionDir>/workflow-state——

@@ -396,10 +396,11 @@ export function notifyDone(
  *   才会重新直发，runId 全局唯一，旧 id 重现概率为零，该边界由 W3TC12 单测
  *   在降级形态下固定）。
  *
- * 调用点：notifyDone 内部（port 受理/rejected 后 + 降级直发受理后）+ workflow-events
- * onRunDone 回调（notifyDone 之后，幂等二次添加）。notifyDone 抛出（reload 窗口
- * record 抛 / 非 stale 发送失败等）时内外都不标记——进程内的重复收尾回调不被去重
- * 阻断（防御形态；port.deliver rejected 的已知丢失情形登记见 notifyDone 注释）。
+ * 调用点：notifyDone 内部（port 受理后 + 降级直发受理/stale 后）+ workflow-events
+ * onRunDone 回调（notifyDone 之后，幂等二次添加）。port.deliver rejected 不抛错也
+ * 不标记（notifyDone 内 error 留痕后直接返回）。notifyDone 抛出（非 stale 发送失败等）
+ * 时内外都不标记——进程内的重复收尾回调不被去重阻断（防御形态；port.deliver
+ * rejected 的已知丢失情形登记见 notifyDone 注释）。
  *
  * @param notifiedRunIds 去重 Set（调用方持有，scope 到 factory 实例）
  * @param runId run 标识
