@@ -506,14 +506,14 @@ export interface WorkflowModelOverride {
  * 决策六①：run 的事件流追加覆盖记录，事件流是追加式单源、唯一合法持久化形态）。
  *
  * **不参与生命周期状态机**（worker-log 同款——记账面与状态面正交）：fold 显式
- * 跳过（foldRunEventCheckpoint），不占 RUN_TRANSITIONS 表行，水位照常推进。
+ * 跳过（foldRunEventCheckpoint），不占 RUN_MACHINE 表行，水位照常推进。
  * 硬约束（调研 S3）：覆盖记录只做记账持久化与 resume 生效值缺省，不进 worker
  * 的 `$MODEL`、不改重建 spec 的 run 级模型、不碰回放一致性比对——覆盖走宿主
  * 派发侧覆写（决策六②），三者在场时回放哈希不受扰动。
  *
  * 写入面 = 宿主切换编排（U4b）经 journal append 单点直写（seq 由 journal 实装
  * 分配，W1 seq 契约：新写行信封必填正整数 seq）；不经 dispatchRunTrigger——
- * model-override 是非转移记账事件（不占 RUN_TRANSITIONS 表行），
+ * model-override 是非转移记账事件（不占 RUN_MACHINE 表行），
  * appendTransition 首行 transition() 对无转移表行事件必抛 IllegalTransitionError，
  * 结构上进不了转移裁决链（RunDispatchSource = { runId, journalDir? } 对
  * interrupted 态 run 本可达，见 §8 验收场景 3 中断后补切；不可达的是转移通道而非
@@ -529,7 +529,7 @@ export interface ModelOverrideEvent extends EventEnvelope, WorkflowModelOverride
  * worker 诊断日志帧（[§2.1 errorLogs 持久化] ADR-0093）。
  *
  * **不参与生命周期状态机**：诊断面与状态面正交——fold 显式跳过本类事件（见
- * foldRunEventCheckpoint），故不占 RUN_TRANSITIONS 表行，也不受终态吸收约束（run
+ * foldRunEventCheckpoint），故不占 RUN_MACHINE 表行，也不受终态吸收约束（run
  * 终局后迟到的诊断日志不会把 fold 判成坏帧）。唯一消费面 = `errorLogsFromEvents`
  * 重建（与活体写入同语义：按序追加 + 尾部上限裁剪）。
  */
@@ -616,7 +616,7 @@ export interface RunEventJournal {
  * model-override 记账直写（resume-run.ts appendResumeModelOverride，第三合法写点
  * ——F1-26 后续项「补切 + 无参 resume 合一步」的统一记账通道）。直写登记理由：
  * model-override 是非转移
-   * 记账事件（不占 RUN_TRANSITIONS 表行），appendTransition 首行 transition()
+   * 记账事件（不占 RUN_MACHINE 表行），appendTransition 首行 transition()
    * 对无转移表行事件必抛 IllegalTransitionError——结构上进不了转移裁决链
    * （RunDispatchSource = { runId, journalDir? } 对 interrupted 态 run 本可达，
    * 不可达的是转移通道而非 run 本身）；同款直写先例 = appendRunDiagnosticEvent

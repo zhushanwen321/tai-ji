@@ -276,7 +276,7 @@ function journalEventOf(trigger: TransitionTrigger, journalDir?: string): Workfl
   }
   throw new Error(
     `控制事件 ${trigger.type} 的转移输出含 journal-append 但无合成规则` +
-      "（当前唯一合法控制终局 = cancel-requested）——修 RUN_TRANSITIONS 该行或 journalEventOf。",
+      "（当前唯一合法控制终局 = cancel-requested）——修 RUN_MACHINE 该行或 journalEventOf。",
   );
 }
 
@@ -389,7 +389,7 @@ async function persistTerminalProjection(
     // transition 构造性保证 terminal ⟹ outcome（run-events.ts）；缺省 = 编程错误，
     // 防御性留痕后跳过（不写半截派生视图）。
     runEventLogger.error(
-      `manifest-write output on non-terminal state (runId=${run.runId}) — skipping projection (check RUN_TRANSITIONS terminal rows)`,
+      `manifest-write output on non-terminal state (runId=${run.runId}) — skipping projection (check RUN_MACHINE terminal rows)`,
     );
     return;
   }
