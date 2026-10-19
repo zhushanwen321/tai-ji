@@ -25,6 +25,12 @@
 // 调用方说「发生了什么」，不说「写哪个文件」——文件布局知识收在本类内部。
 // 迁移已完成：全部写点经本 API，旧直写路径已删除（守卫见 D7）。
 //
+// [state-machine-infrastructure M2] running/idle 翻边判定权威 =
+// execution/domain/record-status-machine.ts（permanentSessionStatusMachine，
+// errorPolicy:'result'——表外拒绝经 Impl 转 return false 保形）。本立面转发的
+// 全部翻边写点 Impl 已改走机器判定；机器管辖外原语（不写 status 的持久化收尾/
+// 重建直写/endedAt 冻结门/出生构造）的排除登记见该声明文件头注释。
+//
 // | 意图原语 | 语义 | 内部写面 |
 // |---------|------|---------|
 // | register(record) | 创建入册（既有方法，意图语义补齐） | entry（best-effort）+ 缓存一致性（stat 戳自校验承接） |

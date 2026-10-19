@@ -990,7 +990,7 @@ importers:
         version: 5.9.3
       vitest:
         specifier: ^4.1.6
-        version: 4.1.9(patch_hash=fe7cce4fff2978dddfe16f381cf855cb47c7faf27eebe71e1d3cc327d3e13d6e)(@opentelemetry/api@1.9.0)(@types/node@24.13.2)(@vitest/coverage-v8@4.1.9)(happy-dom@20.10.6)(jsdom@29.1.1(@noble/hashes@2.2.0))(vite@8.1.3(@types/node@24.13.2)(esbuild@0.28.2)(jiti@2.7.0)(tsx@4.23.0)(yaml@2.9.0))
+        version: 4.1.9(patch_hash=fe7cce4fff2978dddfe16f381cf855cb47c7faf27eebe71e1d3cc327d3e13d6e)(@opentelemetry/api@1.9.0)(@types/node@24.13.2)(@vitest/coverage-v8@4.1.9)(happy-dom@20.10.6)(jsdom@29.1.1(@noble/hashes@2.2.0))(vite@8.1.3(@types/node@24.13.2)(esbuild@0.27.7)(jiti@2.7.0)(tsx@4.23.0)(yaml@2.9.0))
 
   packages/mobile-renderer:
     dependencies:
@@ -1072,7 +1072,7 @@ importers:
         version: 5.9.3
       vitest:
         specifier: ^4.1.8
-        version: 4.1.9(patch_hash=fe7cce4fff2978dddfe16f381cf855cb47c7faf27eebe71e1d3cc327d3e13d6e)(@opentelemetry/api@1.9.0)(@types/node@24.13.2)(@vitest/coverage-v8@4.1.9)(happy-dom@20.10.6)(jsdom@29.1.1(@noble/hashes@2.2.0))(vite@8.1.3(@types/node@24.13.2)(esbuild@0.27.7)(jiti@2.7.0)(tsx@4.23.0)(yaml@2.9.0))
+        version: 4.1.9(patch_hash=fe7cce4fff2978dddfe16f381cf855cb47c7faf27eebe71e1d3cc327d3e13d6e)(@opentelemetry/api@1.9.0)(@types/node@24.13.2)(@vitest/coverage-v8@4.1.9)(happy-dom@20.10.6)(jsdom@29.1.1(@noble/hashes@2.2.0))(vite@8.1.3(@types/node@24.13.2)(esbuild@0.28.2)(jiti@2.7.0)(tsx@4.23.0)(yaml@2.9.0))
 
   packages/pi-subagent-cli:
     dependencies:
@@ -1389,6 +1389,9 @@ importers:
       '@zhushanwen/extension-protocol':
         specifier: workspace:*
         version: link:../extension-protocol
+      '@zhushanwen/state-machine':
+        specifier: workspace:*
+        version: link:../state-machine
       '@zhushanwen/subagent-engine-sdk':
         specifier: workspace:*
         version: link:../subagent-engine-sdk

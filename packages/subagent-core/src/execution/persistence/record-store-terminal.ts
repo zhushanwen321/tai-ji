@@ -29,6 +29,7 @@ import { derivedManifestRecord, hydrateReviveBaseline, recordToSubagent, zcodeRe
 import { findForeignLiveInstance } from "./alive-store.ts";
 import type { RecordEventInput, RecordEventFoldState } from "./record-events.ts";
 import { ResurrectDeniedError } from "../domain/record-types.ts";
+import { permanentSessionStatusMachine } from "../domain/record-status-machine.ts";
 import { isPiTranscriptRef } from "../domain/record-model.ts";
 import type { ClosedReason, StopReason, TranscriptRef } from "../domain/record-types.ts";
 import type { ExecutionRecord } from "../domain/record-model.ts";
@@ -114,6 +115,10 @@ function legacyTerminalWrite(
  * 接线退役（正常收尾归 markSettled、close 终态写点归 markSettledOut、编排性关闭归新编排）；
  * 磁盘终态读侧 = 事件流折叠单规则（重建一律 idle，stopReason 取折叠收条）。
  *
+ * [state-machine-infrastructure M2 机器管辖外登记] 本原语纯持久化收尾、无 status
+ * 写点（内存翻边由调用方 trySettleLegacyClosed 先行完成，机器事件
+ * settle-legacy-closed 承载）——显式排除，D6-M2 边界声明。
+ *
  * @returns true = 持久化写侧完成（收条 sidecar 退场后本编排无前置失败路径）。
  * @deprecated U5 退役（归 markSettled / markSettledOut / 编排性关闭新编排承接）。
  */
@@ -127,6 +132,9 @@ export function markFinalizedImpl(record: ExecutionRecord, _closedReason: Closed
  * 意图原语：取消终态（tombstone）。写序与失败语义同 markFinalized（D8 v7）；差异
  * 仅 warn 标签与语义定位（收条 sidecar 退场后两者持久化编排完全同形）。
  * 统一写点：cancelBackground 终态写侧（record-lifecycle，U2a 迁移）。
+ *
+ * [state-machine-infrastructure M2 机器管辖外登记] 同 markFinalized——纯持久化
+ * 收尾、无 status 写点（内存翻边归调用方 trySettleLegacyClosed），显式排除。
  *
  * [U2 桥接期] 新模型下 cancel = 中断当前轮回 idle（不终态化，stopReason=interrupted）
  * ——U5 意愿动作接线后本原语退役为 markSettled("interrupted") 路径。
@@ -287,7 +295,9 @@ export function releaseWriteLeaseImpl(record: ExecutionRecord, ctx: TerminalCtx)
  * @returns true = 收尾完成；false = CAS 拒绝（record 非 running）。
  */
 export function markSettledImpl(record: ExecutionRecord, stopReason: StopReason, ctx: TerminalCtx): boolean {
-  if (record.status !== "running") {
+  // [state-machine-infrastructure M2 迁移] CAS 前置判定走机器（settle：仅 running 源
+  // 合法）——表外拒绝经 result 策略转 warn + return false 保形。
+  if (!permanentSessionStatusMachine.transition(record.status, "settle").ok) {
     logger.warn("[subagents] markSettled: CAS rejected (record not running)", {
       detail: { id: record.id, status: record.status, stopReason },
     });
@@ -354,7 +364,11 @@ export function markSettledImpl(record: ExecutionRecord, stopReason: StopReason,
  *          失败（内存侧已回滚，record 保持重开前形态）。
  */
 export function markReopenedImpl(record: ExecutionRecord, transcriptRef: TranscriptRef, ctx: TerminalCtx): boolean {
-  if (record.status !== "idle") {
+  // [state-machine-infrastructure M2 迁移] 准入判定走机器自环行（reopened：仅 idle
+  // 源合法——不翻边，成功后 record 仍 idle，翻边归调用链紧随的 tryEnterRunning；
+  // 不发翻边事件、与翻边判定同词表同构，留域内 CAS 即双轨）。binding 写盘失败 →
+  // 逐字段回滚 + return false 契约留域内（D2 事务语义裁决：M2 维持域内实现）。
+  if (!permanentSessionStatusMachine.transition(record.status, "reopened").ok) {
     logger.warn("[subagents] markReopened: CAS rejected (record not idle)", {
       detail: { id: record.id, status: record.status, engine: transcriptRef.engine },
     });
@@ -535,6 +549,9 @@ export function persistSettleSnapshot(basePath: string, record: ExecutionRecord,
  * executionStatus="idle"（两态权威词）双写。对外契约只有 running/ended 两态，
  * 旧版 session-reader 视其为活跃成员（行为变化登记：原「归入已完成分区」的
  * archived→closed 下行随 intent 概念删除而退役，§3.4 方案 A 裁决）。
+ *
+ * [state-machine-infrastructure M2 机器管辖外登记] close 收尾写入 journal 记录
+ * 清句（写权 release + worktreeHandle 清句），无 status 写点——显式排除。
  *
  * @returns true = 终态写点完成（幂等，恒 true）。
  */

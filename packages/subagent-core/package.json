@@ -112,6 +112,7 @@
   },
   "dependencies": {
     "@zhushanwen/extension-protocol": "workspace:*",
+    "@zhushanwen/state-machine": "workspace:*",
     "@zhushanwen/subagent-engine-sdk": "workspace:*",
     "acorn": "^8.17.0",
     "ajv": "^8.20.0",

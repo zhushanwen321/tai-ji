@@ -16,6 +16,7 @@ import * as os from "node:os";
 import * as path from "node:path";
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { generateTableTests } from "@zhushanwen/state-machine/testing";
 
 import {
   completeLegacyClosed,
@@ -24,6 +25,7 @@ import {
   tryEnterRunning,
   trySettleLegacyClosed,
 } from "../persistence/execution-record.ts";
+import { permanentSessionStatusMachine } from "../domain/record-status-machine.ts";
 import { RecordStore } from "../persistence/record-store.ts";
 import { readRecordBinding, writeRecordBinding } from "../persistence/state-marker.ts";
 import type { TranscriptRef } from "../domain/record-types.ts";
@@ -91,6 +93,20 @@ function seedBinding(sessionFile: string): void {
 function newStore(): RecordStore {
   return new RecordStore(() => sessionsDir, undefined, undefined, () => manifestDir);
 }
+
+// ── ⓪ 机器表穷举（state-machine-infrastructure M2）──────────────────────────
+// [M2 迁移] 表级组合（全状态 × 全事件）一行生成；行为级断言（下方 ①-⑤ 的 CAS
+// 语义 / 副作用矩阵 / epoch / 回滚契约）保留域内（D5 保留口径）。
+const tableCases = generateTableTests(permanentSessionStatusMachine);
+it("generateTableTests 组合覆盖数与期望分布（2 态 × 7 事件 = 14 用例，拒绝组合在列）", () => {
+  expect(tableCases).toHaveLength(14);
+  const transitions = tableCases.filter((c) => c.expectation === "transition");
+  const rejected = tableCases.filter((c) => c.expectation === "rejected");
+  // 表 8 行（round-started 两态各一行）+ 词表内无 guard 分支 → 8 合法 / 6 拒绝
+  expect(transitions).toHaveLength(8);
+  expect(rejected).toHaveLength(6);
+  expect(tableCases.every((c) => c.expectation !== "invariant-broken")).toBe(true);
+});
 
 // ── ① CAS 语义：running↔idle 迁移 + 非法迁移拒绝 ────────────────────────────
 
