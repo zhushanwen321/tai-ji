@@ -192,7 +192,7 @@ describe('能力表与表单投影（§7.3）', () => {
     expect(minimaxFormModel.baseUrlOptions.map((o) => o.url)).toContain('https://api.minimaxi.com/v1')
   })
 
-  it('投影 id 形态：toggles 与 voiceModify tiers 均为 vendor 子键名裸键（D5 F1-8/F1-11 回归——renderer 按裸键查落盘路径/直写子树，路径前缀形态静默丢值或双前缀错位）', () => {
+  it('投影 id 形态：toggles 与 voiceModify tiers 均为 vendor 子键名裸键（renderer 按裸键查落盘路径/直写子树，路径前缀形态静默丢值或双前缀错位）', () => {
     expect(minimaxFormModel.toggles).toEqual(['text_normalization', 'latex_read', 'aigc_watermark'])
     expect(minimaxFormModel.voiceModify?.tiers.map((t) => t.id)).toEqual(['pitch', 'intensity', 'timbre'])
     expect(minimaxFormModel.voiceModify?.effects.map((e) => e.id)).toEqual(['spacious_echo', 'auditorium_echo', 'lofi_telephone', 'robotic'])

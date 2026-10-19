@@ -117,7 +117,7 @@ export const stepfunFormModel: TtsFormModel = {
   emotions: [],
   languages: [],
   // text_normalization(standard/enhanced) M0 表单化（设计 §5.2 参数全集 + §4.2 增量裁决④；
-  // renderer 两档开关已就绪，空清单曾使真机控件不渲染——D5 F1-1/F1-13 修复）
+  // renderer 两档开关已就绪，空清单曾使真机控件不渲染）
   toggles: ['text_normalization'],
   voiceModify: null,
   maxTimbreVoices: 0,
