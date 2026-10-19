@@ -130,7 +130,7 @@ const MUTATION_RPC_REGISTRY: readonly MutationRegistryEntry[] = [
     effectiveFields: ['engineId'],
   },
   {
-    // engine-provider-unification D5：per-engine 默认模型偏好写入（config.json
+    // per-engine 默认模型偏好写入（config.json
     // engineDefaults 键）。原样存储（写入校验只拒绝非法 ref，不变换合法值）；
     // reply 回显 engineId/modelRef——setSubagentDefaultEngine 同款先例。
     type: 'session.setSubagentEngineDefaultModel',
@@ -153,7 +153,7 @@ const MUTATION_RPC_REGISTRY: readonly MutationRegistryEntry[] = [
   {
     // llm-network-proxy：set 校验失败走错误信封不落盘；成功写入 RMW——写侧 dedupeHostList
     // 归一化去重是确定性变换（请求值 ≠ 落盘终态），归分支一；reply/broadcast 读回落盘终态
-    // （getNetworkProxyConfig()），config 即生效值（消费侧禁乐观写请求值，D5 F1-16 裁决）。
+    // （getNetworkProxyConfig()），config 即生效值（消费侧禁乐观写请求值）。
     type: 'config.setNetworkProxy',
     branch: 'transformable',
     contract: 'effective-value',

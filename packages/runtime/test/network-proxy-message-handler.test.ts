@@ -75,7 +75,7 @@ describe('network-proxy 五条路由（经 SettingsMessageHandler 全链路）',
     ])
   })
 
-  it('config.setNetworkProxy 成功 → reply + broadcast config.networkProxy = 落盘终态（读回生效值，D5 F1-16）', async () => {
+  it('config.setNetworkProxy 成功 → reply + broadcast config.networkProxy = 落盘终态（读回生效值）', async () => {
     const { handler, replies, broadcasts, configService } = makeHandler()
     const handled = await handler.handleSettingsMessage(msg('config.setNetworkProxy', { config }), {} as never)
     expect(handled).toBe(true)

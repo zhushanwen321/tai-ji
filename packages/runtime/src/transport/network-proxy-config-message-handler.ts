@@ -25,7 +25,7 @@ export class NetworkProxyConfigMessageHandler {
         // 写整份配置。校验失败（shared validateNetworkProxyConfig 逐项错误清单）按 D10 错误
         // 信封回复，不落盘不广播；成功 reply + 广播 config.networkProxy（多窗口同步，retry 范式）。
         // reply/broadcast = 落盘终态（getNetworkProxyConfig() 读回）：写侧 dedupeHostList 是
-        // 确定性变换（D5 终态同步 F1-16 裁决，归 ADR-0065 分支一生效值语义）——请求含重复/
+        // 确定性变换（ADR-0065 分支一生效值语义）——请求含重复/
         // 变体条目时请求值 ≠ 生效值，消费侧必须拿服务端终态校准而非乐观写请求值。
         const { config } = msg.payload
         const result = this.ctx.configService.setNetworkProxyConfig(config)
