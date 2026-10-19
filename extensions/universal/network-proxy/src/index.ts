@@ -56,8 +56,9 @@ function refreshFromConfig(): void {
 			onError: (message) => logger.error(`${message} ${recoveryHint()}`),
 		});
 	} catch (error) {
-		// 状态机异常（无已发生证据的防御——setGlobalDispatcher 抛错等）：不阻断 pi，
-		// 保持未安装态，错误归因到本扩展日志。
+		// 辅助功能降级契约（本扩展为 P2 辅助功能，故障不得拖垮 pi 主流程）：状态机推进的
+		// 意外异常不外抛——外抛会升为 pi 用户可见 extension error 且每 turn 重复出现；
+		// 此处保持未安装态（全部直连），错误归因到本扩展日志。
 		logger.error(`network-proxy installer failed: ${toErrorMessage(error)} ${recoveryHint()}`);
 		installed = null;
 	}
