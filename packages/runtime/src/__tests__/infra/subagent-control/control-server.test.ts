@@ -15,6 +15,7 @@ import {
   SUBAGENT_CONTROL_CLOSED_REASONS,
 } from '@zhushanwen/subagent-engine-sdk'
 import { isPidAlive } from '../../../utils/protocol-background-task.js'
+import { logger } from '../../../infra/logger.js'
 import {
   getControlEnginesDir,
   getControlRunDir,
@@ -471,8 +472,8 @@ describe('subagent-control server（真 socket 环回 + fixture 引擎）', () =
   })
 
   it('engine_close 窗内正常退出 → 不打「exited unexpectedly」warn（intentional 路径日志口径）', { timeout: 20_000 }, async () => {
-    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {})
-    const logSpy = vi.spyOn(console, 'log').mockImplementation(() => {})
+    const warnSpy = vi.spyOn(logger, 'warn').mockImplementation(() => {})
+    const logSpy = vi.spyOn(logger, 'info').mockImplementation(() => {})
     const { server } = await setupServer({ closeGraceMs: 2_000 })
     const agent = new TestAgent(server.listeningSocketPath)
     await agent.opened
@@ -503,8 +504,8 @@ describe('subagent-control server（真 socket 环回 + fixture 引擎）', () =
     // 回归 R2-B-U-2：intentionalClose 曾同时抑制 exit 后的 killEngineGroup，
     // engine_close 窗内引擎自行退出时残留子进程失去孤儿兜底。现在两判据解耦：
     // 日志按 intentional 口径（不报意外），组杀按「exit 且未 killRequested」照常执行。
-    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {})
-    const logSpy = vi.spyOn(console, 'log').mockImplementation(() => {})
+    const warnSpy = vi.spyOn(logger, 'warn').mockImplementation(() => {})
+    const logSpy = vi.spyOn(logger, 'info').mockImplementation(() => {})
     const { server } = await setupServer({ closeGraceMs: 2_000 })
     const agent = new TestAgent(server.listeningSocketPath)
     await agent.opened

@@ -24,7 +24,8 @@
  */
 import type { ServerMessage } from '@taiji/shared'
 
-import { createPiSubagentLog } from '../logger.js'
+import { createPiSubagentLog, logger } from '../logger.js'
+import { toErrorMessage } from '../../utils/errors.js'
 import { SubagentTee, type SubagentTeeStreamState } from './subagent-tee.js'
 
 /** 帧发布端口（组合根注入 messageBus.publish 的定向包装）。 */
@@ -48,7 +49,7 @@ export type SubagentMirrorHubOptions = {
   publish?: MirrorPublish
   /** 磁盘镜像工厂（缺省 createPiSubagentLog；测试注入）。 */
   createLog?: (recordId: string) => MirrorLogSink
-  /** 降级/畸形帧告警出口（缺省 console.warn；测试注入）。 */
+  /** 降级/畸形帧告警出口（缺省 logger.warn；测试注入）。 */
   warn?: (message: string) => void
 }
 
@@ -151,7 +152,7 @@ export class SubagentMirrorHub {
   constructor(opts: SubagentMirrorHubOptions = {}) {
     this.publish = opts.publish ?? (() => {})
     this.createLog = opts.createLog ?? ((recordId) => createPiSubagentLog(recordId))
-    this.warn = opts.warn ?? ((message) => console.warn(message))
+    this.warn = opts.warn ?? ((message) => logger.warn(message))
   }
 
   /** 打开通道行泵（engine spawn 成功、wiring 挂载时；重复调用幂等）。 */
@@ -280,7 +281,7 @@ export class SubagentMirrorHub {
       rec.log.end()
     } catch (e) {
       // 磁盘镜像关闭 best-effort：失败只 debug 留痕，不阻塞通道清理
-      console.debug('[subagent-mirror] disk mirror close failed:', e)
+      logger.debug(`[subagent-mirror] disk mirror close failed: ${toErrorMessage(e)}`)
     }
     this.records.delete(key)
   }

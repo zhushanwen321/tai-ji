@@ -23,6 +23,8 @@ import {
   getProcessStartTimeSec,
   pidStartMatchesRegistered,
 } from '../../utils/protocol-background-task.js'
+import { logger } from '../logger.js'
+import { toErrorMessage } from '../../utils/errors.js'
 import { getControlEnginesDir, getControlRunDir } from './paths.js'
 
 /** socket 探活窗口（控制面单请求秒级量级；超时按死文件处置）。 */
@@ -46,15 +48,15 @@ export async function sweepStaleControlSockets(dataDir: string, skipPath: string
     if (socketPath === skipPath) continue
     const alive = await probeSocketAlive(socketPath)
     if (alive) {
-      console.warn(`[subagent-control] stale socket ${socketPath} is held by a live runtime instance, keeping it`)
+      logger.warn(`[subagent-control] stale socket ${socketPath} is held by a live runtime instance, keeping it`)
       continue
     }
     try {
       if (existsSync(socketPath)) unlinkSync(socketPath)
-      console.log(`[subagent-control] removed stale control socket ${socketPath}`)
+      logger.info(`[subagent-control] removed stale control socket ${socketPath}`)
     } catch (e) {
       // best-effort 降级：单项清理失败不阻塞启动（残留文件下次启动再扫）
-      console.warn(`[subagent-control] failed to remove stale socket ${socketPath}:`, e)
+      logger.warn(`[subagent-control] failed to remove stale socket ${socketPath}: ${toErrorMessage(e)}`)
     }
   }
 }
@@ -155,7 +157,7 @@ function readEnginePidRecord(pidFile: string): EnginePidFileRecord | null {
   try {
     return JSON.parse(readFileSync(pidFile, 'utf-8')) as EnginePidFileRecord
   } catch (e) {
-    console.warn(`[subagent-control] unreadable pid file kept (cannot attribute engine pid) ${pidFile}:`, e)
+    logger.warn(`[subagent-control] unreadable pid file kept (cannot attribute engine pid) ${pidFile}: ${toErrorMessage(e)}`)
     return null
   }
 }
@@ -179,7 +181,7 @@ function ownerRuntimeAlive(
   if (runtimePid === null || !alive(runtimePid)) return false
   const instanceId = typeof record.instanceId === 'string' ? record.instanceId : null
   if (instanceId !== null && instanceId !== String(runtimePid)) {
-    console.warn(
+    logger.warn(
       `[subagent-control] pid file ${basename(pidFile)} instanceId=${instanceId} does not match `
       + `runtimePid=${String(runtimePid)}; owner identity unverifiable, keeping the record and skipping`,
     )
@@ -201,7 +203,7 @@ function identityVerified(
 ): boolean {
   const spawnedAt = numericField(record.spawnedAt)
   if (spawnedAt === null) {
-    console.warn(
+    logger.warn(
       `[subagent-control] pid file ${basename(pidFile)} has no spawnedAt; cannot verify pid `
       + `${String(enginePid)} identity, keeping the record and skipping kill (conservative)`,
     )
@@ -209,14 +211,14 @@ function identityVerified(
   }
   const startSec = rt.readStartTime(enginePid)
   if (startSec === undefined) {
-    console.warn(
+    logger.warn(
       `[subagent-control] cannot verify pid ${String(enginePid)} start time (ps unavailable); `
       + `keeping ${basename(pidFile)} and skipping kill (conservative)`,
     )
     return false
   }
   if (!pidStartMatchesRegistered(startSec, undefined, spawnedAt)) {
-    console.warn(`[subagent-control] pid ${String(enginePid)} reused (started after registration), not killing — ${basename(pidFile)}`)
+    logger.warn(`[subagent-control] pid ${String(enginePid)} reused (started after registration), not killing — ${basename(pidFile)}`)
     removeQuietly(pidFile)
     return false
   }
@@ -226,14 +228,14 @@ function identityVerified(
 /** 组杀已核实身份的孤儿引擎 + 有界存活复核：确认已死才删档；杀链失败（权限/系统错误）
  * 保留记录下次再扫。 */
 async function reapVerifiedOrphan(pidFile: string, enginePid: number, rt: OrphanSweepRuntime): Promise<void> {
-  console.warn(`[subagent-control] reaping orphan engine group pid=${String(enginePid)} (${basename(pidFile)}; owner runtime dead)`)
+  logger.warn(`[subagent-control] reaping orphan engine group pid=${String(enginePid)} (${basename(pidFile)}; owner runtime dead)`)
   rt.kill(enginePid, (step, err) => {
-    console.debug(`[subagent-control] orphan kill fallback (${step}) pid=${String(enginePid)}:`, err)
+    logger.debug(`[subagent-control] orphan kill fallback (${step}) pid=${String(enginePid)}: ${toErrorMessage(err)}`)
   })
   if (await waitForProcessDeath(enginePid, rt.confirmTimeoutMs, rt.alive)) {
     removeQuietly(pidFile)
   } else {
-    console.warn(
+    logger.warn(
       `[subagent-control] orphan engine pid=${String(enginePid)} still alive after kill; `
       + `keeping ${basename(pidFile)} for the next sweep`,
     )
@@ -259,6 +261,6 @@ function removeQuietly(pidFile: string): void {
     if (existsSync(pidFile)) unlinkSync(pidFile)
   } catch (e) {
     // best-effort 降级：pid 文件删除失败不升级（记录残留不影响判活语义）
-    console.warn(`[subagent-control] pid file remove failed ${pidFile}:`, e)
+    logger.warn(`[subagent-control] pid file remove failed ${pidFile}: ${toErrorMessage(e)}`)
   }
 }

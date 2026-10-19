@@ -10,11 +10,13 @@
  * 组长负 pid 仍有效（组内幸存成员被收割），这正是 unexpected-exit 后孤儿 pi 的回收路径。
  */
 import { killProcessTree } from '../../utils/protocol-background-task.js'
+import { logger } from '../logger.js'
+import { toErrorMessage } from '../../utils/errors.js'
 
 /** 杀组（best-effort；失败仅留 debug 诊断，失败残留的 pid 文件交启动 sweep 收割）。 */
 export function killEngineGroup(pid: number | null | undefined, context: string): void {
   if (pid === null || pid === undefined || !Number.isInteger(pid) || pid <= 0) return
   killProcessTree(pid, (step, err) => {
-    console.debug(`[subagent-control] group kill fallback (${step}) ${context} pid=${String(pid)}:`, err)
+    logger.debug(`[subagent-control] group kill fallback (${step}) ${context} pid=${String(pid)}: ${toErrorMessage(err)}`)
   })
 }

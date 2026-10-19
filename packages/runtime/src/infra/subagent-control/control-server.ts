@@ -70,6 +70,7 @@ import { ensurePrivateControlDir, writeEnginePidFileAtomically } from './pid-fil
 import type { SubagentTeeStreamState } from './subagent-tee.js'
 import { killEngineGroup } from './process-kill.js'
 import { sweepOrphanEnginePids, sweepStaleControlSockets } from './sweep.js'
+import { logger } from '../logger.js'
 import { findPiExecutable } from '../pi/find-pi-executable.js'
 import { isPidAlive } from '../../utils/protocol-background-task.js'
 import { toErrorMessage } from '../../utils/errors.js'
@@ -404,15 +405,15 @@ export class SubagentControlServer {
         chmodSync(this.socketPath, 0o600)
       } catch (e) {
         // best-effort 降级：chmod 失败只降级告警（socket 仍可用；权限面由目录 0700 兜底）
-        console.warn('[subagent-control] socket chmod 0600 failed:', e)
+        logger.warn(`[subagent-control] socket chmod 0600 failed: ${toErrorMessage(e)}`)
       }
     }
-    console.log(`[subagent-control] server listening at ${this.socketPath}`)
+    logger.info(`[subagent-control] server listening at ${this.socketPath}`)
 
     // 孤儿引擎收割（owner runtime 死 → 立即组杀；后台兜底不阻塞启动）
     if (this.opts.sweep !== false) {
       void sweepOrphanEnginePids(this.dataDir).catch((e) => {
-        console.warn('[subagent-control] orphan engine sweep failed (non-fatal):', e)
+        logger.warn('[subagent-control] orphan engine sweep failed (non-fatal):', e)
       })
     }
   }
@@ -448,10 +449,10 @@ export class SubagentControlServer {
         if (existsSync(this.socketPath)) unlinkSync(this.socketPath)
       } catch (e) {
         // best-effort 降级：残留 socket 文件由下次启动 sweep 清理，不阻断关停
-        console.warn(`[subagent-control] failed to remove socket file ${this.socketPath}:`, e)
+        logger.warn(`[subagent-control] failed to remove socket file ${this.socketPath}: ${toErrorMessage(e)}`)
       }
     }
-    console.log('[subagent-control] server deinitialized')
+    logger.info('[subagent-control] server deinitialized')
   }
 
   // ── 连接层 ──────────────────────────────────────────────────────────────────
@@ -469,7 +470,7 @@ export class SubagentControlServer {
       discardingUntilNewline: false,
       helloTimer: setTimeout(() => {
         // hello 等待窗（D8 三窗之一）：连上不说 hello 的连接没有存在价值
-        console.warn(`[subagent-control] hello timeout, destroying connection ${conn.id}`)
+        logger.warn(`[subagent-control] hello timeout, destroying connection ${conn.id}`)
         this.destroyConnection(conn, 'hello_timeout')
       }, this.helloTimeoutMs),
       pendingOpens: new Map(),
@@ -483,7 +484,7 @@ export class SubagentControlServer {
     // 连接级 error 兜底（对端 RST → ECONNRESET）：socket 'error' 无 listener 直接 throw
     // 成 uncaughtException（2026-09-04 事故同族）。destroy 后由 close 走 fan-out。
     socket.on('error', (err) => {
-      console.warn(`[subagent-control] connection error, destroying ${conn.id}:`, err.message)
+      logger.warn(`[subagent-control] connection error, destroying ${conn.id}: ${err.message}`)
       socket.destroy()
     })
     socket.on('data', (chunk: Buffer) => {
@@ -553,7 +554,7 @@ export class SubagentControlServer {
     if (frame === null) {
       // hello 后畸形帧：丢弃（连接保持——数据阶段同语义；超长/背压才有
       // 归因通道，见 handleOversize / writeErrorAndKill）
-      console.warn(`[subagent-control] malformed frame dropped on ${conn.id} len=${line.length}`)
+      logger.warn(`[subagent-control] malformed frame dropped on ${conn.id} len=${line.length}`)
       return
     }
     switch (frame.kind) {
@@ -597,7 +598,7 @@ export class SubagentControlServer {
           recovery: 'Upgrade the taiji app (runtime and extension ship together).',
           supported: [SUBAGENT_CONTROL_PROTOCOL_VERSION],
         })
-        console.warn(`[subagent-control] hello rejected (version) on ${conn.id}`)
+        logger.warn(`[subagent-control] hello rejected (version) on ${conn.id}`)
         endConnQuietly(conn)
         return
       }
@@ -622,7 +623,7 @@ export class SubagentControlServer {
       recovery: 'Send hello {v, id, hostPid, hostKind} immediately after connect.',
       supported: [SUBAGENT_CONTROL_PROTOCOL_VERSION],
     })
-    console.warn(`[subagent-control] non-hello first frame on ${conn.id}, rejecting`)
+    logger.warn(`[subagent-control] non-hello first frame on ${conn.id}, rejecting`)
     endConnQuietly(conn)
   }
 
@@ -633,7 +634,7 @@ export class SubagentControlServer {
    */
   private handleOversize(conn: ConnState, line: string): void {
     const head = extractOversizeFrameHead(line)
-    console.warn(
+    logger.warn(
       `[subagent-control] oversized frame (${byteLengthOf(line)} bytes) on ${conn.id} `
       + `kind=${String(head.kind)} channelId=${String(head.channelId)}`,
     )
@@ -839,7 +840,7 @@ export class SubagentControlServer {
       channelId,
       pid: child.pid ?? null,
     })
-    console.log(
+    logger.info(
       `[subagent-control] engine opened channelId=${channelId} engineId=${spec.engineId} `
       + `pid=${String(child.pid)} rootSessionId=${spec.rootSessionId} `
       + `parentRecordId=${spec.parentRecordId ?? '-'} depth=${String(spec.depth ?? '-')}`,
@@ -897,7 +898,7 @@ export class SubagentControlServer {
       })
     } catch (e) {
       // pid 文件是重启 sweep 依据，写失败不阻塞（当前 runtime 在管，退出走清理）
-      console.warn(`[subagent-control] pid file write failed ${pidFile}:`, e)
+      logger.warn(`[subagent-control] pid file write failed ${pidFile}: ${toErrorMessage(e)}`)
     }
   }
 
@@ -945,7 +946,7 @@ export class SubagentControlServer {
       message,
       recovery,
     })
-    console.warn(`[subagent-control] engine_open failed code=${code} on ${conn.id}: ${message}`)
+    logger.warn(`[subagent-control] engine_open failed code=${code} on ${conn.id}: ${message}`)
   }
 
   // ── engine_frame / engine_close ─────────────────────────────────────────────
@@ -986,7 +987,7 @@ export class SubagentControlServer {
     ctx.intentionalClose = true // D7：intentional close 路径（exit 日志不走「意外退出」口径）
     ctx.closeTimer = setTimeout(() => {
       ctx.closeTimer = null
-      console.warn(`[subagent-control] engine_close grace (${String(this.closeGraceMs)}ms) elapsed, killing group channelId=${frame.channelId}`)
+      logger.warn(`[subagent-control] engine_close grace (${String(this.closeGraceMs)}ms) elapsed, killing group channelId=${frame.channelId}`)
       this.terminateChannel(ctx, SUBAGENT_CONTROL_CLOSED_REASONS.killedByControl, 'engine_close_grace_elapsed')
     }, this.closeGraceMs)
     // exit 事件在窗口内到达 → finalizeClosed 走真实 code/signal（engine_exit/engine_signal），
@@ -1002,7 +1003,7 @@ export class SubagentControlServer {
     const channelId = rec.channelId
 
     child.stdin?.on('error', (err: Error) => {
-      console.debug(`[subagent-control] engine stdin error channelId=${channelId}:`, err.message)
+      logger.debug(`[subagent-control] engine stdin error channelId=${channelId}: ${err.message}`)
     })
 
     // stdout → engine_frame（行切分；引擎帧是不透明字符串载荷）。流式解码（m-rt-1）
@@ -1040,7 +1041,7 @@ export class SubagentControlServer {
       }
     })
     child.stdout?.on('error', (err: Error) => {
-      console.warn(`[subagent-control] engine stdout stream error channelId=${channelId}:`, err.message)
+      logger.warn(`[subagent-control] engine stdout stream error channelId=${channelId}: ${err.message}`)
     })
 
     // stderr → 有界尾部环（engine_closed.stderrTail，排障用）。流式解码同 stdout。
@@ -1049,7 +1050,7 @@ export class SubagentControlServer {
       ctx.stderrTail = (ctx.stderrTail + stderrDecoder.write(chunk)).slice(-STDERR_TAIL_CHARS)
     })
     child.stderr?.on('error', (err: Error) => {
-      console.debug(`[subagent-control] engine stderr stream error channelId=${channelId}:`, err.message)
+      logger.debug(`[subagent-control] engine stderr stream error channelId=${channelId}: ${err.message}`)
     })
 
     // fd3 = raw mirror 通道（TAIJI_ENGINE_RAW_MIRROR=1 宣告；stdio[3] 在 spawn 时开启）。
@@ -1064,17 +1065,17 @@ export class SubagentControlServer {
         this.mirror.ingestBytes(channelId, chunk)
       })
       readable.on('error', (err: Error) => {
-        console.warn(`[subagent-control] engine mirror stream error channelId=${channelId}:`, err.message)
+        logger.warn(`[subagent-control] engine mirror stream error channelId=${channelId}: ${err.message}`)
       })
     } else {
       // 无 fd3（spawn 形态退化/测试注入）：镜像通道缺席 = 无 live 派生视图，
       // reload 腿不受影响（显式 warn 一次）。
-      console.warn(`[subagent-control] fd3 mirror stream unavailable channelId=${channelId}; live subagent stream disabled`)
+      logger.warn(`[subagent-control] fd3 mirror stream unavailable channelId=${channelId}; live subagent stream disabled`)
     }
 
     child.once('error', (err: Error) => {
       // spawn 异步失败（ENOENT 族）：表现为引擎非零退出（127，command not found 惯例）
-      console.error(`[subagent-control] engine process error channelId=${channelId}:`, err)
+      logger.error(`[subagent-control] engine process error channelId=${channelId}: ${toErrorMessage(err)}`)
       ctx.exitSeen = true
       this.finalizeClosed(ctx, SPAWN_FAILURE_EXIT_CODE, null, SUBAGENT_CONTROL_CLOSED_REASONS.engineExit)
     })
@@ -1097,9 +1098,9 @@ export class SubagentControlServer {
         ?? (signal !== null ? SUBAGENT_CONTROL_CLOSED_REASONS.engineSignal : SUBAGENT_CONTROL_CLOSED_REASONS.engineExit)
       this.finalizeClosed(ctx, code, signal, reason)
       if (unexpectedForLog) {
-        console.warn(`[subagent-control] engine exited unexpectedly channelId=${channelId} code=${String(code)} signal=${String(signal)}; killing group`)
+        logger.warn(`[subagent-control] engine exited unexpectedly channelId=${channelId} code=${String(code)} signal=${String(signal)}; killing group`)
       } else {
-        console.log(`[subagent-control] engine closed channelId=${channelId} code=${String(code)} signal=${String(signal)} reason=${reason}`)
+        logger.info(`[subagent-control] engine closed channelId=${channelId} code=${String(code)} signal=${String(signal)} reason=${reason}`)
       }
       if (shouldKillGroup) {
         this.killChannelGroup(ctx, `${unexpectedForLog ? 'unexpected-exit' : 'intentional-close-exit'} channelId=${channelId}`)
@@ -1186,7 +1187,7 @@ export class SubagentControlServer {
   private overflowConnection(conn: ConnState, reason: string): void {
     if (conn.out.hasOverflowed) return
     conn.out.markOverflowed()
-    console.warn(`[subagent-control] ${reason} on ${conn.id}; killing all channels under the connection`)
+    logger.warn(`[subagent-control] ${reason} on ${conn.id}; killing all channels under the connection`)
     const recovery = `${ENGINE_TRANSPORT_ERROR_RECOVERY.engine_backpressure_overflow} `
       + 'Connection-level overflow: all engine channels on this connection were terminated.'
     for (const rec of this.registry.listByConnection(conn.id)) {
@@ -1220,7 +1221,7 @@ export class SubagentControlServer {
       clearTimeout(ctx.closeTimer)
       ctx.closeTimer = null
     }
-    console.warn(`[subagent-control] kill decision action=terminate_channel channelId=${ctx.rec.channelId} `
+    logger.warn(`[subagent-control] kill decision action=terminate_channel channelId=${ctx.rec.channelId} `
       + `engineId=${ctx.rec.engineId} pid=${String(ctx.rec.pid)} rootSessionId=${ctx.rec.rootSessionId} `
       + `parentRecordId=${ctx.rec.parentRecordId ?? '-'} reason=${why}`)
     this.killChannelGroup(ctx, `terminate channelId=${ctx.rec.channelId} (${why})`)
@@ -1258,7 +1259,7 @@ export class SubagentControlServer {
         if (existsSync(rec.pidFile)) unlinkSync(rec.pidFile)
       } catch (e) {
         // best-effort 降级：pid 文件残留由启动 sweep 的 owner 判活清理，不阻断通道释放
-        console.warn(`[subagent-control] pid file cleanup failed ${rec.pidFile}:`, e)
+        logger.warn(`[subagent-control] pid file cleanup failed ${rec.pidFile}: ${toErrorMessage(e)}`)
       }
     }
     if (!ctx.closedNotified && !ctx.conn.destroyed) {

@@ -8,6 +8,8 @@
  * 只登记 drain 等待、不入队重写；只有背压期到达的帧才真正入队。
  */
 import { byteLengthOf } from './frames.js'
+import { logger } from '../logger.js'
+import { toErrorMessage } from '../../utils/errors.js'
 
 /** 引擎 stdin 的最小结构契约（生产 = ChildProcess.stdin；测试可注入 fake）。 */
 export type DownStdin = {
@@ -41,7 +43,7 @@ export class ChannelDownQueue {
   push(line: string): void {
     const stdin = this.deps.getStdin()
     if (stdin === undefined || stdin === null || stdin.destroyed) {
-      console.debug(`[subagent-control] stdin unavailable, dropping frame channelId=${this.deps.channelId}`)
+      logger.debug(`[subagent-control] stdin unavailable, dropping frame channelId=${this.deps.channelId}`)
       return
     }
     const bytes = byteLengthOf(line) + 1
@@ -54,7 +56,7 @@ export class ChannelDownQueue {
       ok = stdin.write(`${line}\n`)
     } catch (e) {
       // 引擎已死（EPIPE 族）：exit 帧链路接管，丢帧降级
-      console.debug(`[subagent-control] stdin write threw channelId=${this.deps.channelId}:`, e)
+      logger.debug(`[subagent-control] stdin write threw channelId=${this.deps.channelId}: ${toErrorMessage(e)}`)
       return
     }
     // write false = 本帧已被 Node 受理并在 drain 前写出：只登记等待，绝不入队重写。

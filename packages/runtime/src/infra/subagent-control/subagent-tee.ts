@@ -44,6 +44,8 @@
 import type { ServerMessage, ServerMessageMap } from '@taiji/shared'
 import { subagentVirtualId, isBtwVirtualId, extractBtwPiSessionId } from '@taiji/shared'
 import type { PiEntry, PiMessageEntry, PiToolCallEntryForm } from '@taiji/shared'
+import { logger } from '../logger.js'
+import { toErrorMessage } from '../../utils/errors.js'
 import { translate } from '../pi/event-adapter.js'
 import type { PiEvent } from '../pi/pi-protocol.js'
 import type { PiTranslatedEvent } from '../../services/session/types.js'
@@ -233,13 +235,12 @@ export class SubagentTee {
       this.consecutiveFailures += 1
       // 字节 tail：截原文而不是序列化异常对象，保留现场
       const tail = line.length > TEE_LOG_TAIL_BYTES ? `${line.slice(0, TEE_LOG_TAIL_BYTES)}…` : line
-      console.warn(
-        `[subagent-tee] event dropped (isolated) recordId=${this.opts.recordId} consecutive=${this.consecutiveFailures} tail=${tail}`,
-        err instanceof Error ? err.message : err,
+      logger.warn(
+        `[subagent-tee] event dropped (isolated) recordId=${this.opts.recordId} consecutive=${this.consecutiveFailures} tail=${tail} ${toErrorMessage(err)}`,
       )
       if (this.consecutiveFailures >= TEE_MAX_CONSECUTIVE_FAILURES) {
         this._abandoned = true
-        console.warn(
+        logger.warn(
           `[subagent-tee] abandoned after ${this.consecutiveFailures} consecutive failures recordId=${this.opts.recordId} — drawer degrades to snapshot/reload`,
         )
         this.dispose()

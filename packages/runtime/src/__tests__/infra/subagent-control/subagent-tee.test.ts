@@ -6,7 +6,7 @@
  * msgSeq）、状态查询入口 getStreamState（拉取数据源三元组）、单事件隔离（坏字节丢弃不
  * 连坐）、连续 50 失败放弃、大 payload tool result 全量透传。
  */
-import { describe, it, expect, vi, beforeEach } from 'vitest'
+import { describe, it, expect, vi } from 'vitest'
 import { SubagentTee, TEE_MAX_CONSECUTIVE_FAILURES } from '../../../infra/subagent-control/subagent-tee.js'
 import type { ServerMessage } from '@taiji/shared'
 import { subagentVirtualId, isSubagentVirtualId, extractMainSessionId } from '@taiji/shared'
@@ -147,7 +147,6 @@ describe('SubagentTee stream_chunk 增量契约（B2 subagent-stream-chunk §4.2
   })
 
   it('text_delta chunk publish 抛错：单事件隔离丢弃，textAccumulated 与 deltaSeq 保持配对（拉取回放无孤儿 delta）', () => {
-    vi.spyOn(console, 'warn').mockImplementation(() => {})
     const { tee, publish, published } = createTee()
     feedLines(tee, [
       { type: 'message_start' },
@@ -239,10 +238,6 @@ describe('SubagentTee 状态查询入口 getStreamState（B2 §4.2，session.get
 })
 
 describe('SubagentTee 隔离与放弃', () => {
-  beforeEach(() => {
-    vi.spyOn(console, 'warn').mockImplementation(() => {})
-  })
-
   it('单事件坏字节丢弃不连坐：后续好事件照常产出', () => {
     const { tee, published } = createTee()
     tee.feed(Buffer.from('this is not json\n', 'utf-8'))
