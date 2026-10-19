@@ -6,9 +6,9 @@ LLM 网络代理分流：包装 pi 进程的 `globalThis.fetch`，按主机名�
 
 - **拦截点**：`globalThis.fetch`。pi-ai 的 OpenAI 兼容请求在每次构造 client 时经 `Shims.getDefaultFetch()` 动态取当前全局 fetch，包装它不依赖 pi 与扩展共享 undici 模块实例
 - **安装/卸载**：extension 加载时读配置，`enabled` 且校验通过 → 包装并构造代理 dispatcher；`enabled` false → 恢复原 fetch；校验/构造失败 → extension error（含配置文件恢复指引），不包装不阻断 pi（全部直连）
-- **热生效**：turn 粒度——每 turn 开始重读配置（mtime+size 读时刷新），指纹变化才重建；pi 在设置变更时重跑 `configureHttpDispatcher` 会用原实现整体替换 `globalThis.fetch`，下一 turn 开始自动以覆盖者为新 original 重新包装
+- **热生效**：turn 粒度——每 turn 开始重读配置（mtime+size 读时刷新），指纹变化才重建；pi 的 `configureHttpDispatcher` 带 shouldInstallGlobals 守卫（检测到 `globalThis.fetch` 已被第三方覆盖即保留不重装），本扩展的包装在同进程内持续生效；槽位被其他第三方覆盖时下一 turn 自动以覆盖者为新 original 重新包装（防御路径）
 - **匹配语义**：主机名归一化（小写、去末尾点）后 suffix 匹配（等于或以 `.条目` 结尾，点边界对齐）；noProxy 优先于 rules
-- **覆盖面**：经 `globalThis.fetch` 发出的请求（pi LLM 调用与 OAuth/目录请求均走 fetch）；直接使用 `undici.request` / `Client` 的调用不经过本包装
+- **覆盖面**：经 `globalThis.fetch` 发出的请求（pi LLM 调用与 OAuth/目录请求均走 fetch）；直接使用 `undici.request` / `Client` 的调用与 WebSocket 升级请求不经过本包装
 - **计数**：请求发起时 +1（内存按主机名聚合），turn 结束 / 进程退出把增量追加写入 `<agentDir>/network-proxy-stats.jsonl`（每行完整 JSON `{ts, host, proxied, direct}`，单次 write 单行——多进程并发追加不交错）；写失败 log 不阻断
 - **降级契约**：socks5 构造失败（undici 实验性 API）→ 记错误、恢复原 fetch、全部直连，切回 http 协议恢复；同指纹不重试构造，配置修正（指纹变化）后自然重试
 

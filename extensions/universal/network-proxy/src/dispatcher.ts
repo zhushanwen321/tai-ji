@@ -23,7 +23,7 @@ import { EventEmitter } from "node:events";
 import { buildConnector, ProxyAgent, Socks5ProxyAgent } from "undici";
 import type { Dispatcher as IDispatcher } from "undici";
 
-import type { NetworkProxyConfig, NetworkProxyServer } from "./config.ts";
+import type { NetworkProxyConfig, NetworkProxyServer } from "./config.js";
 
 /** 到代理服务器连接的 autoSelectFamilyAttemptTimeout（对齐 pi 原生调优同值）。 */
 export const PROXY_CONNECT_ATTEMPT_TIMEOUT_MS = 2000;
