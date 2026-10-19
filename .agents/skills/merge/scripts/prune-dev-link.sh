@@ -16,12 +16,17 @@
 # 退出码：0 = 成功（无论是否清理到东西）；2 = 定位/参数错误
 set -euo pipefail
 
+# ── 共享库（颜色常量 / workspace 定位，_lib 于 skill 根）──
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)"
+source "$SCRIPT_DIR/../_lib/output.sh"
+source "$SCRIPT_DIR/../_lib/workspace.sh"
+
 ENV_FILE_NAME=".env.dev-extensions"
 ENV_VAR="TAIJI_EXTENSION_PATHS"
 
-# ── 颜色输出 ────────────────────────────────────────────
-red()    { printf "\033[31m%s\033[0m\n" "$*"; }
-green()  { printf "\033[32m%s\033[0m\n" "$*"; }
+# ── 颜色输出（基于 _lib/output.sh 共享常量；cyan 无共享对应，保留本地）──
+red()    { printf "${RED}%s${NC}\n" "$*"; }
+green()  { printf "${GREEN}%s${NC}\n" "$*"; }
 cyan()   { printf "\033[36m%s\033[0m\n" "$*"; }
 
 # ── 参数与 workspace root 定位 ──────────────────────────

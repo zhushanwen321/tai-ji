@@ -9,24 +9,18 @@
 
 set -euo pipefail
 
-RED='\033[0;31m'
-GREEN='\033[0;32m'
-YELLOW='\033[1;33m'
-BOLD='\033[1m'
-NC='\033[0m'
+# 颜色 / 仓库标识 / workspace 定位收敛到 _lib 共享库（source 范式与 remove-worktree.sh 一致）
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)"
+source "$SCRIPT_DIR/../_lib/output.sh"
+source "$SCRIPT_DIR/../_lib/repo.sh"
+source "$SCRIPT_DIR/../_lib/workspace.sh"
 
 WORKTREE_DIR_NAME="${1:?Usage: init.sh <worktree-dir-name>}"
 
-# 项目常量
-GH_REPO="zhushanwen321/tai-ji"
-
 # workspace 检测（向上查找含 .bare/ 的目录——.agents 实体在 workspace 根，
 # worktree 内是 symlink，pwd -P 已解析到实体物理路径；固定层数推导会随布局漂移失效）
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)"
-WS_ROOT="$SCRIPT_DIR"
-while [[ "$WS_ROOT" != "/" && ! -d "$WS_ROOT/.bare" ]]; do
-    WS_ROOT="$(dirname "$WS_ROOT")"
-done
+# 未命中时回退 WS_ROOT="/"，与旧内联循环的失败终态一致（走下方 .bare 存在性检查报错退出）
+WS_ROOT="$(find_workspace_root "$SCRIPT_DIR" || echo "/")"
 
 if [[ ! -d "$WS_ROOT/.bare" ]]; then
     echo -e "${RED}Error: 未找到 workspace root（向上查找 .bare/ 失败）${NC}"
