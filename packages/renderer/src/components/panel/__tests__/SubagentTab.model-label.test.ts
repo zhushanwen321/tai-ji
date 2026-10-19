@@ -28,11 +28,19 @@ const drawerState = {
   selectedSubagentId: ref<string>('subagent:main-1:sa-1'),
   enteredFrom: ref<'chat' | 'workflow' | null>('chat'),
 }
-vi.mock('@taiji/core/domain/drawer', () => ({
-  useDrawerControl: () => drawerState,
-  useSubagentSelection: () => drawerState,
-  openWorkflowInDrawer: vi.fn(),
-}))
+// drawer 域 importOriginal 部分 mock（挂载树模块图的顶层装配面持续增长——手写桩
+// 逐导出补齐必漏）：真模块承接 barrel 全导出与顶层绑定（bindDrawerSessionId /
+// bindWorkflowOverlayOpener / bindWorkflowRunLookup，core headless 零副作用），
+// 只覆写组件消费的读侧/写侧桩。
+vi.mock('@taiji/core/domain/drawer', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@taiji/core/domain/drawer')>()
+  return {
+    ...actual,
+    useDrawerControl: () => drawerState,
+    useSubagentSelection: () => drawerState,
+    openWorkflowInDrawer: vi.fn(),
+  }
+})
 
 // ── panel store（focusedSessionId 消费）───────────────────────────────────
 vi.mock('@/stores/panel', () => ({
@@ -121,6 +129,15 @@ vi.mock('../ModelSelectPopover.vue', async () => {
 
 vi.mock('vue-i18n', () => ({
   useI18n: () => ({ t: vi.fn((key: string) => key) }),
+  // @/i18n 模块实例（ui-response-feedback 等 shell 叶子经 import 链拉入）加载期调用：
+  // 最小实例桩——本文件文案断言走 useI18n 桩的 t，不经 global 通道
+  createI18n: vi.fn(() => ({
+    global: {
+      t: (key: string) => key,
+      locale: ref('zh-CN'),
+      setLocaleMessage: vi.fn(),
+    },
+  })),
 }))
 
 import SubagentTab from '../SubagentTab.vue'

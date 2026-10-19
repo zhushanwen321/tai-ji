@@ -39,6 +39,7 @@ import type { IProcessManager, IPiEngine, PiEventListener } from '../src/service
 import type { SessionSummary, SessionGroup, Message, ServerMessage, ProviderId, SegmentsMetadataEntry, SegmentsMetadataFile } from '@taiji/shared'
 import { HISTORY_BUDGET, decodeNewlineEscapes } from '@taiji/shared'
 import { getAttachmentsDir } from '@taiji/shared/paths'
+import { getSubagentMessageResultsDir } from '@zhushanwen/subagent-core'
 import { flushDelivery } from './helpers/flush-delivery.js'
 
 // ── vi.hoisted：在 vi.mock 工厂执行前就绪的 mock 句柄 ───────────────
@@ -97,11 +98,15 @@ vi.mock('../src/infra/pi/pi-provider-store.js', async (importOriginal) => {
     readSettings: () => ({}),
   }
 })
+/** 结果回执通道（subagent-composer 2026-10-18）读侧的 getPiAgentDir 重定向目标
+ * （hoisted：vi.mock 工厂内引用；缺省维持原静态值，回执用例临时切 tmpdir 代理目录）。 */
+const piAgentDirRef = vi.hoisted(() => ({ dir: '/mock/taiji/agent' }))
+
 vi.mock('../src/infra/pi/pi-paths.js', async (importOriginal) => {
   const actual = await importOriginal<typeof import('../src/infra/pi/pi-paths.js')>()
   return {
     ...actual,
-    getPiAgentDir: () => '/mock/taiji/agent',
+    getPiAgentDir: () => piAgentDirRef.dir,
   }
 })
 
@@ -1635,6 +1640,32 @@ describe('SessionService · Facade', () => {
     })
   })
 
+  /** 结果回执通道装置（subagent-composer 2026-10-18 契约）：cancel/message 转发带
+   * --req=<uuid>，runtime 在 prompt resolve 后读请求作用域回执文件（缺失 = 通道失败
+   * throw）。装置：① getPiAgentDir 临时切到 tmpdir 下 agentDir（读侧目录推导生产同源）；
+   * ② prompt mock 解析命令内 --req=<id>，按 service 同源 cwd 写 {"scope":"ok"} 回执
+   * （extension 写侧时序：handler 落盘先于 prompt resolve）。返回恢复函数（finally 调）。 */
+  const armSubagentReceiptChannel = (
+    prompt: MockInstance<(content: string) => Promise<unknown>>,
+    getCwd: () => string | undefined,
+  ): (() => void) => {
+    const agentDir = mkdtempSync(join(tmpdir(), 'session-service-receipt-'))
+    piAgentDirRef.dir = agentDir
+    prompt.mockImplementation(async (text: string) => {
+      const req = /--req=([\w-]+)/.exec(text)?.[1]
+      const cwd = getCwd()
+      if (req !== undefined && cwd !== undefined) {
+        const dir = getSubagentMessageResultsDir(agentDir, cwd)
+        mkdirSync(dir, { recursive: true })
+        writeFileSync(join(dir, `${req}.json`), JSON.stringify({ scope: 'ok' }))
+      }
+    })
+    return () => {
+      piAgentDirRef.dir = '/mock/taiji/agent'
+      rmSync(agentDir, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 })
+    }
+  }
+
   describe('workflowAction + subagentAction（扩展 slash command 转发）', () => {
     it('workflowAction 转发 /workflows <action> <runId> 到 pi prompt', async () => {
       const { id, client } = await setup.seedSession()
@@ -1647,22 +1678,40 @@ describe('SessionService · Facade', () => {
       await expect(setup.service.workflowAction('ghost', 'abort', 'wf-x')).rejects.toThrow('not active')
     })
 
-    it('subagentAction cancel 转发 /subagents cancel <subagentId> 到 pi prompt', async () => {
+    it('subagentAction cancel 转发 /subagents cancel <subagentId> --req=<uuid> 到 pi prompt', async () => {
       const { id, client } = await setup.seedSession()
       vi.mocked(client.prompt).mockClear()
-      await setup.service.subagentAction(id, 'cancel', { subagentId: 'bg-abc-1-123' })
-      expect(client.prompt).toHaveBeenCalledWith('/subagents cancel bg-abc-1-123')
+      const restore = armSubagentReceiptChannel(client.prompt, () => setup.service.getSessionCwd(id))
+      try {
+        await setup.service.subagentAction(id, 'cancel', { subagentId: 'bg-abc-1-123' })
+        // [结果回执契约 2026-10-18] 请求作用域 --req=<uuid>（uuid 段锚形态不锚值）
+        expect(client.prompt).toHaveBeenCalledWith(
+          expect.stringMatching(/^\/subagents cancel bg-abc-1-123 --req=[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/),
+        )
+      } finally {
+        restore()
+      }
     })
 
     it('subagentAction session 不活跃 → throw', async () => {
       await expect(setup.service.subagentAction('ghost', 'cancel', { subagentId: 'bg-x' })).rejects.toThrow('not active')
     })
 
-    it('subagentAction message 转发 /subagents message <subagentId> <text>', async () => {
+    it('subagentAction message 转发 /subagents message <subagentId> --req=<uuid> <text>', async () => {
       const { id, client } = await setup.seedSession()
       vi.mocked(client.prompt).mockClear()
-      await setup.service.subagentAction(id, 'message', { subagentId: 'sa-1', text: '汇报当前进度' })
-      expect(client.prompt).toHaveBeenCalledWith('/subagents message sa-1 汇报当前进度')
+      const restore = armSubagentReceiptChannel(client.prompt, () => setup.service.getSessionCwd(id))
+      try {
+        await setup.service.subagentAction(id, 'message', { subagentId: 'sa-1', text: '汇报当前进度' })
+        const sent = (client.prompt.mock.calls[0] as unknown as [string])[0]
+        const parsed = /^\/subagents message sa-1 --req=([\w-]+) (.*)$/.exec(sent)
+        // --req=<uuid> 夹在 recordId 与 text 之间；uuid 锚形态，无标记文本原文通过
+        expect(parsed).not.toBeNull()
+        expect(parsed![1]).toMatch(/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/)
+        expect(parsed![2]).toBe('汇报当前进度')
+      } finally {
+        restore()
+      }
     })
 
     it('subagentAction start 转发 /subagents start <slug> <task>', async () => {
@@ -1678,17 +1727,34 @@ describe('SessionService · Facade', () => {
 
     it('message text 含真实换行 → 编码为字面 \\n（命令保持单行）', async () => {
       const { id, client } = await setup.seedSession()
-      await setup.service.subagentAction(id, 'message', { subagentId: 'sa-1', text: '第一行\n第二行' })
-      // 期望串是字面反斜杠+n（源码里写 \\n）
-      expect(client.prompt).toHaveBeenCalledWith('/subagents message sa-1 第一行\\n第二行')
+      const restore = armSubagentReceiptChannel(client.prompt, () => setup.service.getSessionCwd(id))
+      try {
+        await setup.service.subagentAction(id, 'message', { subagentId: 'sa-1', text: '第一行\n第二行' })
+        // 期望串是字面反斜杠+n（源码里写 \\n）；--req=<uuid> 之后的 text 为 encode 产物
+        const sent = (client.prompt.mock.calls[0] as unknown as [string])[0]
+        const parsed = /^\/subagents message sa-1 --req=[\w-]+ (.*)$/.exec(sent)
+        expect(parsed).not.toBeNull()
+        expect(parsed![1]).toBe('第一行\\n第二行')
+        expect(sent.includes('\n')).toBe(false)
+      } finally {
+        restore()
+      }
     })
 
     it('message text 含字面反斜杠+n（如路径 C:\\new）→ 反斜杠转义，不与换行歧义', async () => {
       const { id, client } = await setup.seedSession()
       // 源码 'C:\\new' = 字面反斜杠 + n
-      await setup.service.subagentAction(id, 'message', { subagentId: 'sa-1', text: '路径 C:\\new 的说明' })
-      // 期望：反斜杠翻倍为 \\，n 保持字面
-      expect(client.prompt).toHaveBeenCalledWith('/subagents message sa-1 路径 C:\\\\new 的说明')
+      const restore = armSubagentReceiptChannel(client.prompt, () => setup.service.getSessionCwd(id))
+      try {
+        await setup.service.subagentAction(id, 'message', { subagentId: 'sa-1', text: '路径 C:\\new 的说明' })
+        // 期望：反斜杠翻倍为 \\，n 保持字面
+        const sent = (client.prompt.mock.calls[0] as unknown as [string])[0]
+        const parsed = /^\/subagents message sa-1 --req=[\w-]+ (.*)$/.exec(sent)
+        expect(parsed).not.toBeNull()
+        expect(parsed![1]).toBe('路径 C:\\\\new 的说明')
+      } finally {
+        restore()
+      }
     })
 
     it('start task 同样走换行编码', async () => {

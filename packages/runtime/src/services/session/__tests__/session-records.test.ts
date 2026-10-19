@@ -11,10 +11,10 @@
  *   importOriginal 保留），withFileLockSync/atomicWrite 真实执行。
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
-import { mkdtempSync, writeFileSync, mkdirSync, readFileSync, rmSync, truncateSync } from 'node:fs'
+import { mkdtempSync, writeFileSync, mkdirSync, readFileSync, readdirSync, rmSync, truncateSync } from 'node:fs'
 import { logger } from '../../../infra/logger.js'
 import { tmpdir } from 'node:os'
-import { join } from 'node:path'
+import { join, dirname } from 'node:path'
 import type { IMessageBus } from '../../message-bus/message-bus.js'
 import type { IProcessManager, IPiEngine } from '../../ports/pi-engine.js'
 import type { ISessionStore } from '../../ports/session.js'
@@ -27,6 +27,7 @@ import type { SkillInjector, SkillInjectionResult } from '../skill-injector.js'
 import { extractSubagentsFromSessionFile } from '../subagent-extractor.js'
 import { extractWorkflowsFromSessionFile } from '../workflow-extractor.js'
 import { encodeCwd } from '../../../infra/pi/pi-paths.js'
+import { getSubagentMessageResultsDir } from '@zhushanwen/subagent-core'
 
 const extractSubagentsMock = vi.mocked(extractSubagentsFromSessionFile)
 const extractWorkflowsMock = vi.mocked(extractWorkflowsFromSessionFile)
@@ -229,6 +230,38 @@ function registerSession(records: SessionRecords): (sessionId: string) => void {
 /** 推进防抖并等待在途拉取落定。 */
 async function flushDebounce(): Promise<void> {
   await vi.advanceTimersByTimeAsync(SCALAR_STATE_DEBOUNCE_MS)
+}
+
+// ── subagent-composer 结果回执通道装置（2026-10-18 契约）────────────────
+//
+// cancel/message 转发带 --req=<uuid>，runtime 在 prompt resolve 后读请求作用域回执
+// 文件（getSubagentMessageResultsDir(agentDir, cwd)/<reqId>.json，读后即删；缺失 =
+// 通道失败 throw）。装置 = ① 临时 agentDir 挂 piAgentDirRef（getPiAgentDir 已 mock
+// 指向该 ref）+ 会话 cwd 经 deps.getSessionCwd 注入；② prompt mock 按命令内
+// --req=<id> 同步写 {"scope":"ok"} 回执（extension 写侧时序：handler 落盘先于
+// prompt resolve）。
+
+/** 从命令文本解析 --req=<id> 并写成功回执（目录经生产同源单源函数推导）。 */
+function writeOkReceiptFromCommand(agentDir: string, cwd: string, text: string): void {
+  const req = /--req=([\w-]+)/.exec(text)?.[1]
+  if (req === undefined) return
+  const resultsFile = join(getSubagentMessageResultsDir(agentDir, cwd), `${req}.json`)
+  mkdirSync(dirname(resultsFile), { recursive: true })
+  writeFileSync(resultsFile, JSON.stringify({ scope: 'ok' }))
+}
+
+/** 回执通道装置：cwd 注入 deps.getSessionCwd，测试 finally 调 dispose 清理。 */
+function armReceiptChannel(): { agentDir: string; cwd: string; dispose: () => void } {
+  const agentDir = mkdtempSync(join(tmpdir(), 'session-records-receipt-'))
+  piAgentDirRef.dir = agentDir
+  return {
+    agentDir,
+    cwd: join(agentDir, 'proj'),
+    dispose: () => {
+      piAgentDirRef.dir = ''
+      rmSync(agentDir, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 })
+    },
+  }
 }
 
 describe('订阅与缓存注册', () => {
@@ -764,18 +797,43 @@ describe('workflowAction / subagentAction：命令转发', () => {
     await expect(records.workflowAction('s1', 'abort', 'run-1')).rejects.toThrow('Session s1 not active')
   })
 
-  it('subagentAction cancel 转发 /subagents cancel <subagentId>', async () => {
-    const { records, client } = makeRecords()
-    await records.subagentAction('s1', 'cancel', { subagentId: 'sa-1' })
-    expect(client.prompt).toHaveBeenCalledWith('/subagents cancel sa-1')
+  it('subagentAction cancel 转发 /subagents cancel <subagentId> --req=<uuid> 并消费回执（结果回执契约 2026-10-18）', async () => {
+    const channel = armReceiptChannel()
+    const { records, client } = makeRecords({ getSessionCwd: () => channel.cwd })
+    ;(client.prompt as ReturnType<typeof vi.fn>).mockImplementation(async (text: string) => {
+      writeOkReceiptFromCommand(channel.agentDir, channel.cwd, text)
+    })
+    try {
+      await records.subagentAction('s1', 'cancel', { subagentId: 'sa-1' })
+      // --req=<uuid> 请求作用域参数（uuid 段锚形态不锚值，randomUUID 运行期生成）
+      expect(client.prompt).toHaveBeenCalledWith(
+        expect.stringMatching(/^\/subagents cancel sa-1 --req=[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/),
+      )
+      // 读后即删（请求作用域生命周期）：回执消费后目录不残留
+      expect(readdirSync(getSubagentMessageResultsDir(channel.agentDir, channel.cwd))).toEqual([])
+    } finally {
+      channel.dispose()
+    }
   })
 
-  it('subagentAction message：换行经 encodeDirectiveText 编码保持命令单行', async () => {
-    const { records, client } = makeRecords()
-    await records.subagentAction('s1', 'message', { subagentId: 'sa-1', text: 'line1\nline2\\end' })
-    expect(client.prompt).toHaveBeenCalledWith(`/subagents message sa-1 ${encodeDirectiveText('line1\nline2\\end')}`)
-    const sent = (client.prompt as unknown as { mock: { calls: string[][] } }).mock.calls[0][0] as string
-    expect(sent.includes('\n')).toBe(false)
+  it('subagentAction message：--req=<uuid> 之后 text 经 encodeDirectiveText 编码保持命令单行', async () => {
+    const channel = armReceiptChannel()
+    const { records, client } = makeRecords({ getSessionCwd: () => channel.cwd })
+    ;(client.prompt as ReturnType<typeof vi.fn>).mockImplementation(async (text: string) => {
+      writeOkReceiptFromCommand(channel.agentDir, channel.cwd, text)
+    })
+    try {
+      await records.subagentAction('s1', 'message', { subagentId: 'sa-1', text: 'line1\nline2\\end' })
+      const sent = (client.prompt as unknown as { mock: { calls: string[][] } }).mock.calls[0][0] as string
+      const parsed = /^\/subagents message sa-1 --req=([\w-]+) (.*)$/.exec(sent)
+      // --req=<uuid> 夹在 recordId 与 text 之间；uuid 锚形态，text 锚 encode 产物
+      expect(parsed).not.toBeNull()
+      expect(parsed![1]).toMatch(/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/)
+      expect(parsed![2]).toBe(encodeDirectiveText('line1\nline2\\end'))
+      expect(sent.includes('\n')).toBe(false)
+    } finally {
+      channel.dispose()
+    }
   })
 
   it('subagentAction start 转发 /subagents start <slug> <task>', async () => {
@@ -874,32 +932,41 @@ describe('subagentAction：skill 注入挂载（A2 MF-B）', () => {
   it('message：encode 之前注入原始 text，prompt 收到 encode(注入产物)，notice 在 prompt 之后', async () => {
     const notices = [{ reason: 'skill_missing' as const, skills: ['ghost'] }]
     const { injector, inject } = makeSpyInjector({ notices })
-    const { records, publish, client } = makeRecords({}, injector)
+    const channel = armReceiptChannel()
+    const { records, publish, client } = makeRecords({ getSessionCwd: () => channel.cwd }, injector)
     const calls: string[] = []
     ;(client.prompt as ReturnType<typeof vi.fn>).mockImplementation(async (text: string) => {
       calls.push(`prompt:${text}`)
+      writeOkReceiptFromCommand(channel.agentDir, channel.cwd, text)
     })
     publish.mockImplementation((sid: string, msg: { type: string }) => {
       calls.push(`publish:${msg.type}`)
     })
 
-    await records.subagentAction('s1', 'message', { subagentId: 'sa-1', text: '原始文本' })
+    try {
+      await records.subagentAction('s1', 'message', { subagentId: 'sa-1', text: '原始文本' })
 
-    // ① 注入收到原始 text（encode 之前）
-    expect(inject).toHaveBeenCalledTimes(1)
-    expect(inject.mock.calls[0][1]).toBe('原始文本')
-    // ② prompt 收到 encode(注入产物)
-    expect(client.prompt).toHaveBeenCalledWith(`/subagents message sa-1 ${encodeDirectiveText('<<injected:原始文本>>')}`)
-    // ③ 顺序：prompt 先于 notice（发送成功后才发布）
-    expect(calls).toEqual([
-      `prompt:/subagents message sa-1 ${encodeDirectiveText('<<injected:原始文本>>')}`,
-      'publish:session.skillNotice',
-    ])
-    const noticeMsg = publish.mock.calls.find(([, msg]) => (msg as { type: string }).type === 'session.skillNotice')
-    expect(noticeMsg).toBeDefined()
-    expect(noticeMsg![0]).toBe('s1')
-    expect((noticeMsg![1] as { payload: { reason: string; skills: string[] } }).payload)
-      .toEqual({ sessionId: 's1', reason: 'skill_missing', skills: ['ghost'] })
+      // ① 注入收到原始 text（encode 之前）
+      expect(inject).toHaveBeenCalledTimes(1)
+      expect(inject.mock.calls[0][1]).toBe('原始文本')
+      // ② prompt 收到 encode(注入产物)；--req=<uuid> 请求作用域参数（结果回执契约 2026-10-18）
+      const promptText = calls[0]!.slice('prompt:'.length)
+      const parsed = /^\/subagents message sa-1 --req=([\w-]+) (.*)$/.exec(promptText)
+      expect(parsed).not.toBeNull()
+      expect(parsed![1]).toMatch(/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/)
+      expect(parsed![2]).toBe(encodeDirectiveText('<<injected:原始文本>>'))
+      // ③ 顺序：prompt 先于 notice（发送成功后才发布）
+      expect(calls).toHaveLength(2)
+      expect(calls[0]).toBe(`prompt:/subagents message sa-1 --req=${parsed![1]} ${encodeDirectiveText('<<injected:原始文本>>')}`)
+      expect(calls[1]).toBe('publish:session.skillNotice')
+      const noticeMsg = publish.mock.calls.find(([, msg]) => (msg as { type: string }).type === 'session.skillNotice')
+      expect(noticeMsg).toBeDefined()
+      expect(noticeMsg![0]).toBe('s1')
+      expect((noticeMsg![1] as { payload: { reason: string; skills: string[] } }).payload)
+        .toEqual({ sessionId: 's1', reason: 'skill_missing', skills: ['ghost'] })
+    } finally {
+      channel.dispose()
+    }
   })
 
   it('start：task 同款注入（encode 之前）+ notice', async () => {
@@ -921,25 +988,52 @@ describe('subagentAction：skill 注入挂载（A2 MF-B）', () => {
 
   it('notices 为空：不发布任何 bus 消息（no-op 零噪音）', async () => {
     const { injector } = makeSpyInjector()
-    const { records, publish } = makeRecords({}, injector)
-    await records.subagentAction('s1', 'message', { subagentId: 'sa-1', text: 't' })
-    expect(publish).not.toHaveBeenCalled()
+    const channel = armReceiptChannel()
+    const { records, publish, client } = makeRecords({ getSessionCwd: () => channel.cwd }, injector)
+    ;(client.prompt as ReturnType<typeof vi.fn>).mockImplementation(async (text: string) => {
+      writeOkReceiptFromCommand(channel.agentDir, channel.cwd, text)
+    })
+    try {
+      await records.subagentAction('s1', 'message', { subagentId: 'sa-1', text: 't' })
+      expect(publish).not.toHaveBeenCalled()
+    } finally {
+      channel.dispose()
+    }
   })
 
   it('cancel 与 workflows：不经注入器（内部命令显式跳过）', async () => {
     const { injector, inject } = makeSpyInjector()
-    const { records } = makeRecords({}, injector)
-    await records.subagentAction('s1', 'cancel', { subagentId: 'sa-1' })
-    await records.workflowAction('s1', 'abort', 'run-1')
-    expect(inject).not.toHaveBeenCalled()
+    const channel = armReceiptChannel()
+    const { records, client } = makeRecords({ getSessionCwd: () => channel.cwd }, injector)
+    ;(client.prompt as ReturnType<typeof vi.fn>).mockImplementation(async (text: string) => {
+      writeOkReceiptFromCommand(channel.agentDir, channel.cwd, text)
+    })
+    try {
+      await records.subagentAction('s1', 'cancel', { subagentId: 'sa-1' })
+      await records.workflowAction('s1', 'abort', 'run-1')
+      expect(inject).not.toHaveBeenCalled()
+    } finally {
+      channel.dispose()
+    }
   })
 
   it('真注入器 + 纯文本：no-op 原文通过（mock client 无 getCommands 也不发起 RPC）', async () => {
     // 无标记文本在 parseSkillMarkers 短路返回前不触碰任何 client 方法——
     // mock client 只有 getEntries/prompt 两方法，注入若发起 RPC 即 TypeError 翻红
-    const { records, client } = makeRecords()
-    await records.subagentAction('s1', 'message', { subagentId: 'sa-1', text: '纯文本' })
-    expect(client.prompt).toHaveBeenCalledWith('/subagents message sa-1 纯文本')
+    const channel = armReceiptChannel()
+    const { records, client } = makeRecords({ getSessionCwd: () => channel.cwd })
+    ;(client.prompt as ReturnType<typeof vi.fn>).mockImplementation(async (text: string) => {
+      writeOkReceiptFromCommand(channel.agentDir, channel.cwd, text)
+    })
+    try {
+      await records.subagentAction('s1', 'message', { subagentId: 'sa-1', text: '纯文本' })
+      // --req=<uuid> 之后的 text 为原文（no-op 注入不改写）
+      expect(client.prompt).toHaveBeenCalledWith(
+        expect.stringMatching(/^\/subagents message sa-1 --req=[\w-]+ 纯文本$/),
+      )
+    } finally {
+      channel.dispose()
+    }
   })
 })
 
