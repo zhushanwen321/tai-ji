@@ -11,7 +11,12 @@
  * `api.anthropic.com`（无点前缀拼接），`api-anthropic.com.evil.com` 不命中（恶意后缀）。
  */
 
-/** 主机名归一化：转小写、去末尾点（FQDN 根点形态与裸主机名同义）。 */
+/**
+ * 主机名归一化：转小写、去末尾点（FQDN 根点形态与裸主机名同义）。
+ * 刻意不 trim 首尾空白（语义镜像 shared normalizeHostname）：带空白的条目由校验层
+ * 显式拒绝（config.ts collectHostEntryErrors，失败显式上报优于静默容忍），
+ * 匹配层保持严格、带空白 pattern 恒不命中。
+ */
 export function normalizeHostname(host: string): string {
 	return host.toLowerCase().replace(/\.+$/, "");
 }

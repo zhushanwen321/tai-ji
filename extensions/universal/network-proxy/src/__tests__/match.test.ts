@@ -26,6 +26,11 @@ describe("normalizeHostname（归一化）", () => {
 		expect(normalizeHostname("localhost")).toBe("localhost");
 		expect(normalizeHostname("LocalHost")).toBe("localhost");
 	});
+
+	it("不 trim 首尾空白（带空白条目由校验层显式拒绝，匹配层保持严格）", () => {
+		expect(normalizeHostname(" api.anthropic.com")).toBe(" api.anthropic.com");
+		expect(normalizeHostname("api.anthropic.com ")).toBe("api.anthropic.com ");
+	});
 });
 
 describe("matchesHostPattern 真值表（suffix 点边界）", () => {
@@ -65,6 +70,12 @@ describe("matchesHostPattern 真值表（suffix 点边界）", () => {
 		expect(matchesHostPattern("", pattern)).toBe(false);
 		expect(matchesHostPattern("api.anthropic.com", "")).toBe(false);
 		expect(matchesHostPattern("", "")).toBe(false);
+	});
+
+	it("首尾空白不参与匹配（host/pattern 任一侧带空白恒不命中——空白条目由校验层显式拒绝，匹配层不静默 trim 容忍）", () => {
+		expect(matchesHostPattern("api.anthropic.com", " api.anthropic.com")).toBe(false);
+		expect(matchesHostPattern("api.anthropic.com", "api.anthropic.com ")).toBe(false);
+		expect(matchesHostPattern(" api.anthropic.com", pattern)).toBe(false);
 	});
 
 	it("noProxy 条目语义：localhost 同时覆盖 localhost 与 *.localhost", () => {
