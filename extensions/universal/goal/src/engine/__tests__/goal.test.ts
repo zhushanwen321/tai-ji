@@ -4,6 +4,8 @@
  * transitionStatus 完备性两层：fast-check 抽样（不 throw ⟺ (from,to) ∈ 期望合法边表）
  * + (from,target) 6×6 穷举基线（M3 迁移对账矩阵，36 组合全跑）。期望边表硬编码自
  * 领域语义、独立于实现（不 import 实现侧转移表——M3 迁移前后同一期望表对账）。
+ * 机器表级另设 generateTableTests 穷举生成组（D5/D6 每步判据第二款）——直测
+ * GOAL_MACHINE 全状态×全事件，与包装层基线互为独立防线。
  */
 import { describe, expect } from "vitest";
 import { it, fc } from "@fast-check/vitest";
@@ -11,7 +13,8 @@ import { readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 
-import { createGoalState, isActiveStatus, isTerminalStatus, transitionStatus } from "../goal";
+import { generateTableTests } from "@zhushanwen/state-machine/testing";
+import { GOAL_MACHINE, createGoalState, isActiveStatus, isTerminalStatus, transitionStatus } from "../goal";
 import type { GoalStatus } from "../types";
 
 const STATUS_VALUES: GoalStatus[] = ["active", "paused", "blocked", "complete", "budget_limited", "cancelled"];
@@ -81,6 +84,23 @@ describe("transitionStatus (from,target) 6×6 穷举基线（V7 对账矩阵）"
 			});
 		}
 	}
+});
+
+// ── 机器级穷举生成组（D5/D6 每步判据第二款）：全状态 × 全事件 ──────────
+// generateTableTests(GOAL_MACHINE) 直测机器表（词表/表行误改、terminal
+// 拒绝语义），与上方包装层 6×6（transitionStatus 行为对账）互为独立防线。
+// 必须在收集阶段（模块顶层）调用——describe/it 不能在测试回调内注册。
+const generatedCases = generateTableTests(GOAL_MACHINE);
+
+describe("GOAL_MACHINE 穷举覆盖对账", () => {
+	it("全组合 36（6 态 × 6 事件）= 合法 9 + 表外 27 + 不变量破坏 0", () => {
+		// 合法 9 ⟺ 上方 EXPECTED_LEGAL_EDGES 的 9 条 (from,to) 边（本表
+		// from×event→to 单射，两维度同源对账）；覆盖数对账防生成器静默漏覆盖。
+		expect(generatedCases).toHaveLength(36);
+		expect(generatedCases.filter((c) => c.expectation === "transition")).toHaveLength(9);
+		expect(generatedCases.filter((c) => c.expectation === "rejected")).toHaveLength(27);
+		expect(generatedCases.filter((c) => c.expectation === "invariant-broken")).toHaveLength(0);
+	});
 });
 
 describe("createGoalState", () => {

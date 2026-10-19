@@ -16,8 +16,10 @@ import { DEFAULT_BUDGET, TERMINAL_GOAL_STATUSES } from "./types";
 //   goal_control complete、/goal clear）；
 // - cancel 与 resume 各覆盖多源态（clear/resume 对 paused、blocked 对称）。
 // 终态标志与 TERMINAL_GOAL_STATUSES（types.ts，域查询用）是同一事实的两处
-// 声明，行为由 (from,target) 6×6 穷举基线锁定（__tests__/goal.test.ts）。
-// 新增状态或转移时必须同步更新此表与穷举基线（forcing function）。
+// 声明。表行为由两层穷举锁定（__tests__/goal.test.ts）：机器级
+// generateTableTests 全状态×全事件生成组（D5/D6）+ 包装层 (from,target)
+// 6×6 基线（V7 对账矩阵）。新增状态或转移时必须同步更新此表与两层基线
+// （forcing function）。
 
 /** Goal 机器事件词表（类型层与下方 events 声明键集互为对账）。 */
 type GoalEvent =
@@ -28,7 +30,7 @@ type GoalEvent =
 	| "cancel"
 	| "resume";
 
-const GOAL_MACHINE = defineStateMachine<GoalStatus, GoalEvent>({
+export const GOAL_MACHINE = defineStateMachine<GoalStatus, GoalEvent>({
 	name: "goal",
 	states: {
 		active: {},
