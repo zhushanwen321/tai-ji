@@ -13,10 +13,14 @@ vi.mock('../../../infra/logger.js', () => ({
 
 import type { ProviderQuotaFetcher, QuotaAuthKind } from '../types.js'
 import { normalizeCookieHeader } from '../types.js'
-import { kimiFetcher } from '../kimi.js'
-import { mimoFetcher } from '../mimo.js'
-import { minimaxFetcher } from '../minimax.js'
-import { zhipuFetcher } from '../zhipu.js'
+// W3 迁移：被测对象从硬编码 TS fetcher 换为「基线配置 ⊕ 声明式引擎」——同一批 wire
+// fixture 断言不变 = 等价证明（迁移红线）。id 为持久化契约（providers.json extras）。
+import { getQuotaFetcher } from '../index.js'
+
+const kimiFetcher = getQuotaFetcher('kimi-coding')!
+const mimoFetcher = getQuotaFetcher('mimo')!
+const minimaxFetcher = getQuotaFetcher('minimax')!
+const zhipuFetcher = getQuotaFetcher('zhipu')!
 
 const NOW_ISO = '2026-08-23T10:00:00.000Z'
 const NOW_MS = new Date(NOW_ISO).getTime()

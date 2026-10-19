@@ -1,0 +1,277 @@
+{
+  "version": 1,
+  "fetchers": {
+    "zhipu": {
+      "label": "Z.ai-{{data.level}}",
+      "auth": [
+        "api-key"
+      ],
+      "credential": "raw",
+      "requests": [
+        {
+          "name": "main",
+          "url": "https://bigmodel.cn/api/monitor/usage/quota/limit"
+        }
+      ],
+      "bodyCode": {
+        "path": "success",
+        "success": true,
+        "else": "no-subscription"
+      },
+      "requires": [
+        "data"
+      ],
+      "windows": [
+        {
+          "slot": "fiveHour",
+          "pct": {
+            "path": "data.limits[type=TOKENS_LIMIT].percentage",
+            "via": "direct"
+          },
+          "resetSec": {
+            "path": "data.limits[type=TOKENS_LIMIT].nextResetTime",
+            "mode": "epochMsElseRelativeLabel"
+          }
+        }
+      ],
+      "strictNumbers": true
+    },
+    "kimi-coding": {
+      "label": "Kimi Coding",
+      "auth": [
+        "api-key",
+        "oauth"
+      ],
+      "credential": "bearer",
+      "requests": [
+        {
+          "name": "main",
+          "url": "https://api.kimi.com/coding/v1/usages"
+        }
+      ],
+      "requires": [
+        "limits",
+        "usage"
+      ],
+      "windows": [
+        {
+          "slot": "fiveHour",
+          "pct": {
+            "via": "usedOverLimit"
+          },
+          "resetSec": {
+            "path": "limits[0].detail.resetTime",
+            "mode": "iso"
+          },
+          "usedLimit": {
+            "used": "limits[0].detail.used",
+            "limit": "limits[0].detail.limit",
+            "remaining": "limits[0].detail.remaining",
+            "unit": "requests"
+          }
+        },
+        {
+          "slot": "week",
+          "pct": {
+            "via": "usedOverLimit"
+          },
+          "resetSec": {
+            "path": "usage.resetTime",
+            "mode": "iso"
+          },
+          "usedLimit": {
+            "used": "usage.used",
+            "limit": "usage.limit",
+            "remaining": "usage.remaining",
+            "unit": "requests"
+          }
+        }
+      ]
+    },
+    "minimax": {
+      "label": "MiniMax Coding",
+      "auth": [
+        "api-key"
+      ],
+      "credential": "bearer",
+      "requests": [
+        {
+          "name": "main",
+          "url": "https://api.minimaxi.com/v1/api/openplatform/coding_plan/remains"
+        }
+      ],
+      "bodyCode": {
+        "path": "base_resp.status_code",
+        "success": 0,
+        "else": "no-subscription"
+      },
+      "windows": [
+        {
+          "slot": "fiveHour",
+          "gate": {
+            "path": "model_remains[model_name=general]",
+            "missing": "query-fail"
+          },
+          "gateValue": {
+            "path": "model_remains[model_name=general].current_interval_status",
+            "equals": 1
+          },
+          "pct": {
+            "path": "model_remains[model_name=general].current_interval_remaining_percent",
+            "via": "remainingToUsed"
+          },
+          "resetSec": {
+            "path": "model_remains[model_name=general].remains_time",
+            "mode": "relativeMs"
+          }
+        },
+        {
+          "slot": "week",
+          "gateValue": {
+            "path": "model_remains[model_name=general].current_weekly_status",
+            "equals": 1
+          },
+          "pct": {
+            "path": "model_remains[model_name=general].current_weekly_remaining_percent",
+            "via": "remainingToUsed"
+          },
+          "resetSec": {
+            "path": "model_remains[model_name=general].weekly_remains_time",
+            "mode": "relativeMs"
+          }
+        }
+      ],
+      "strictNumbers": true
+    },
+    "mimo": {
+      "label": "MiMo Coding",
+      "auth": [
+        "cookie"
+      ],
+      "credential": "cookie",
+      "extraHeaders": {
+        "x-timezone": "UTC",
+        "user-agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/148.0.0.0 Safari/537.36"
+      },
+      "requests": [
+        {
+          "name": "usage",
+          "url": "https://platform.xiaomimimo.com/api/v1/tokenPlan/usage"
+        },
+        {
+          "name": "detail",
+          "url": "https://platform.xiaomimimo.com/api/v1/tokenPlan/detail",
+          "role": "auxiliary"
+        }
+      ],
+      "bodyCode": {
+        "path": "code",
+        "success": 0,
+        "map": {
+          "401": "unauthorized",
+          "403": "unauthorized"
+        },
+        "else": "no-subscription",
+        "successRequires": "data"
+      },
+      "windows": [
+        {
+          "slot": "month",
+          "fromRequest": "usage",
+          "pct": {
+            "path": "data.monthUsage.percent",
+            "via": "percent01to100"
+          },
+          "resetSec": {
+            "path": "data.currentPeriodEnd",
+            "mode": "zonelessUtcWallClock",
+            "fromRequest": "detail"
+          },
+          "usedLimit": {
+            "used": "data.monthUsage.items[0].used",
+            "limit": "data.monthUsage.items[0].limit",
+            "unit": "tokens"
+          }
+        }
+      ],
+      "strictNumbers": true
+    },
+    "opencode-go": {
+      "label": "opencode.go",
+      "auth": [
+        "cookie"
+      ],
+      "credential": "cookie",
+      "precondition": {
+        "from": "workspaceUrl",
+        "extractor": "quotaWorkspaceId",
+        "header": "x-org-id",
+        "failReason": "not_configured"
+      },
+      "requests": [
+        {
+          "name": "main",
+          "url": "https://opencode.ai/console/api/go/status"
+        }
+      ],
+      "statusMap": {
+        "404": "no-subscription"
+      },
+      "requires": [
+        "access.meters.fiveHour",
+        "access.meters.week",
+        "access.meters.month"
+      ],
+      "windows": [
+        {
+          "slot": "fiveHour",
+          "pct": {
+            "via": "usedOverLimit"
+          },
+          "resetSec": {
+            "path": "access.meters.fiveHour.resetsAt",
+            "mode": "iso"
+          },
+          "usedLimit": {
+            "used": "access.meters.fiveHour.usedMicroCents",
+            "limit": "access.meters.fiveHour.limitMicroCents",
+            "unit": "credits",
+            "output": false
+          }
+        },
+        {
+          "slot": "week",
+          "pct": {
+            "via": "usedOverLimit"
+          },
+          "resetSec": {
+            "path": "access.meters.week.resetsAt",
+            "mode": "iso"
+          },
+          "usedLimit": {
+            "used": "access.meters.week.usedMicroCents",
+            "limit": "access.meters.week.limitMicroCents",
+            "unit": "credits",
+            "output": false
+          }
+        },
+        {
+          "slot": "month",
+          "pct": {
+            "via": "usedOverLimit"
+          },
+          "resetSec": {
+            "path": "access.meters.month.resetsAt",
+            "mode": "iso"
+          },
+          "usedLimit": {
+            "used": "access.meters.month.usedMicroCents",
+            "limit": "access.meters.month.limitMicroCents",
+            "unit": "credits",
+            "output": false
+          }
+        }
+      ]
+    }
+  }
+}

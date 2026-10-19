@@ -431,7 +431,7 @@ P3 可以与 P2 并行（数据通路打通后，UI 两处独立）。
 | 3 | 查询时机与缓存 | **hover 触发查询 + 持久缓存不删除 + 失败用缓存 + log** | hover 进入容量 chip 时主动调 `quota.fetch(providerId)` 查询（非后台轮询）。成功 → 更新缓存；失败 → 展示旧缓存（**缓存永不删除**）+ runtime logger 落盘 log。并发保护：同一 provider pending 期间复用 Promise 不重复发起。最小间隔保护：10s 内不重复发同一 provider 请求 |
 | 4 | Composer 浮层挂载点 | **合并到 ContextCapacity popover，不挂 model chip** | Coding-plan 信息合并到「上下文容量」hover 浮层下半区。Model chip 回归纯模型切换。理由：容量与额度都是「用量」类信息，聚合一个浮层比分散两个 chip 更合理。详见 demo 第 2 部分 |
 | 5 | 共享包依赖 | **不依赖共享包，runtime 自研 5 个 provider fetcher** | 推翻原方案 A「集成 @zhushanwen/pi-quota-providers 共享包」。改为：runtime 新增 `quota-providers/` 目录，5 个 provider 各自实现 fetcher（zhipu/kimi/minimax/mimo/opencode），只参考 statusline 的 endpoint/认证/解析思路，代码用 taiji 自己的风格重写。statusline 的实现仅作技术参考，不引入代码依赖 |
-| 6 | fetcher 架构 | **可插拔 ProviderQuotaFetcher 接口 + 注册表** | 抽象 `ProviderQuotaFetcher` 接口（`fetchQuota(credential) → NormalizedQuotaRow`）+ 注册表（`QUOTA_FETCHERS: Map<fetcherId, ProviderQuotaFetcher>`）。5 个 provider 各自实现并注册。为后续 plugin 化铺路：Phase 2 每个 fetcher 可独立迁移成 plugin |
+| 6 | fetcher 架构 | **可插拔 ProviderQuotaFetcher 接口 + 声明式引擎 + 基线⊕远程配置** | 抽象 `ProviderQuotaFetcher` 接口 + 声明式执行引擎（`declarative-engine.ts`，受限原语集）按配置运行。5 家逻辑抽成基线配置 `baseline-fetchers.json`（随发版更新），远程配置 `configs/remote/quota-fetchers.json` 同 fetcherId 整体覆盖基线（remote-config 域 2，免发版热更新）；注册表 = 基线 ⊕ 远程合并视图（`getQuotaFetcher`）。fetcher id 是持久化契约（providers.json extras），只增不改名 |
 
 ---
 

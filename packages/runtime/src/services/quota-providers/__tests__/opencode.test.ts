@@ -19,7 +19,10 @@ vi.mock('../../../infra/logger.js', () => ({
   logger: { debug: vi.fn(), info: vi.fn(), warn: vi.fn(), error: vi.fn() },
 }))
 
-import { opencodeFetcher } from '../opencode.js'
+// W3 迁移：被测对象换为「基线配置 ⊕ 声明式引擎」，fixture 断言不变 = 等价证明。
+import { getQuotaFetcher } from '../index.js'
+
+const opencodeFetcher = getQuotaFetcher('opencode-go')!
 
 const WORKSPACE_URL = 'https://opencode.ai/workspace/wrk_user01abc/go'
 const STATUS_URL = 'https://opencode.ai/console/api/go/status'
@@ -110,7 +113,10 @@ describe('opencodeFetcher · workspace 配置注入（D1-1/D1-3）', () => {
     expect(fetchMock).toHaveBeenCalledTimes(1)
     const [url, init] = fetchMock.mock.calls[0] as [string, RequestInit]
     expect(url).toBe(STATUS_URL)
+    // W3 迁移：引擎统一带 accept 头（跨家一致的 JSON 协商头，无害增量）——本用例锁点
+    // 是「URL 无 id、org id 经 header 注入」（D1-4），accept 为引擎统一行为非本域语义。
     expect(init.headers).toEqual({
+      accept: 'application/json, text/plain, */*',
       cookie: '__Host-console_session=st_x; __stripe_mid=y',
       'x-org-id': 'wrk_user01abc',
     })

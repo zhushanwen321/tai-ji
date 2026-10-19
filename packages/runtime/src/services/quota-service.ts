@@ -17,7 +17,7 @@ import { existsSync, readFileSync, mkdirSync, writeFileSync, unlinkSync, chmodSy
 import { join } from 'node:path'
 import type { NormalizedQuotaRow, ProviderQuotaFetcher, QuotaAuthKind, QuotaCredentialSource, QuotaConfigurePayload, QuotaFetchFailureReason, QuotaFetcherConfig } from '@taiji/shared'
 import { matchQuotaPreset, normalizeQuotaWorkspaceUrl, resolveQuotaCredentialSource, supportsExclusiveCredential } from '@taiji/shared'
-import { QUOTA_FETCHERS } from './quota-providers/index.js'
+import { getQuotaFetcher, listQuotaPresets } from './quota-providers/index.js'
 import { QuotaCache } from './quota-cache.js'
 import { getProviderConfig } from '../infra/pi/pi-provider-store.js'
 import { logger } from '../infra/logger.js'
@@ -687,20 +687,21 @@ export class QuotaService {
     // 优先级 1：用户手动指定的 fetcher id（不再依赖 baseUrl/name 自动匹配，
     // 适配自建反代、非标准 baseUrl 等自动匹配失败/猜错的场景）
     if (info?.quota?.fetcher) {
-      const manual = QUOTA_FETCHERS.get(info.quota.fetcher)
+      const manual = getQuotaFetcher(info.quota.fetcher)
       if (manual) return manual
     }
 
-    // 优先级 2：经 baseUrl/name 匹配 preset
+    // 优先级 2：经 baseUrl/name 匹配 preset（presets = 基线 ⊕ 远程合并视图，
+    // 远程更新匹配规则后 runtime 匹配链同步生效——与前端同源，无 UI/执行背离）
     if (info) {
-      const preset = matchQuotaPreset({ baseUrl: info.baseUrl, name: info.name })
+      const preset = matchQuotaPreset({ baseUrl: info.baseUrl, name: info.name }, listQuotaPresets())
       if (preset) {
-        return QUOTA_FETCHERS.get(preset.fetcher) ?? null
+        return getQuotaFetcher(preset.fetcher)
       }
     }
 
     // 优先级 3：直接按 providerId 查 fetchers（仅命中 provider id 恰好等于 fetcher id 的场景）
-    return QUOTA_FETCHERS.get(providerId) ?? null
+    return getQuotaFetcher(providerId)
   }
 
   /**

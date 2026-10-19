@@ -38,7 +38,12 @@ export interface QuotaPreset {
   requiresWorkspace?: boolean
 }
 
-/** 内置 5 个 provider 预设（SSOT）。 */
+/**
+ * 内置 5 个 provider 预设（基线数据源——remote-config 域 2 上线后，运行时权威 =
+ * runtime「基线 ⊕ 远程 configs/remote/quota-fetchers.json presets 整体替换」合并视图
+ * （quota-providers/index.ts listQuotaPresets）；本常量仅作拉取失败/无远程覆盖时的
+ * 编译期兜底与类型形状定义，不再直接作为运行时匹配数据源。
+ */
 export const QUOTA_PRESETS: QuotaPreset[] = [
   {
     fetcher: 'zhipu',
@@ -105,19 +110,25 @@ export const QUOTA_PRESETS: QuotaPreset[] = [
  * 根据 provider 的 baseUrl 和 name 匹配内置预设。
  *
  * @param provider - 提供 baseUrl 和/或 name 的对象（来自 ProviderInfo）。
+ * @param presets - 候选预设集（remote-config 上线后调用方必须显式传「基线 ⊕ 远程」合并
+ *   视图——runtime 侧 listQuotaPresets() / 前侧 RPC config.listQuotaPresets 下发数组）；
+ *   缺省回落编译期基线（兼容既有调用与测试）。
  * @returns 匹配到的 QuotaPreset，或 undefined（无匹配）。
  */
-export function matchQuotaPreset(provider: {
-  baseUrl?: string
-  name?: string
-}): QuotaPreset | undefined {
+export function matchQuotaPreset(
+  provider: {
+    baseUrl?: string
+    name?: string
+  },
+  presets: readonly QuotaPreset[] = QUOTA_PRESETS,
+): QuotaPreset | undefined {
   const { baseUrl, name } = provider
   if (!baseUrl && !name) return undefined
 
   const normalizedBaseUrl = baseUrl?.toLowerCase() ?? ''
   const normalizedName = name?.toLowerCase() ?? ''
 
-  for (const preset of QUOTA_PRESETS) {
+  for (const preset of presets) {
     const { baseUrlPattern, namePattern } = preset.match
 
     // baseUrl 匹配：归一化大小写后判断包含（pattern 自身也归一化，避免 'BigModel.CN' 漏配）

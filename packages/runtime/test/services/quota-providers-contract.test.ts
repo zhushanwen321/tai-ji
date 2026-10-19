@@ -11,13 +11,15 @@
  */
 import { describe, it, expect, beforeEach, afterEach, beforeAll, afterAll, vi } from 'vitest'
 import type { QuotaFetchOutcome } from '@taiji/shared'
-import { QUOTA_PRESETS } from '@taiji/shared'
-import { QUOTA_FETCHERS } from '../../src/services/quota-providers/index.js'
-import { zhipuFetcher } from '../../src/services/quota-providers/zhipu.js'
-import { kimiFetcher } from '../../src/services/quota-providers/kimi.js'
-import { minimaxFetcher } from '../../src/services/quota-providers/minimax.js'
-import { mimoFetcher } from '../../src/services/quota-providers/mimo.js'
-import { opencodeFetcher } from '../../src/services/quota-providers/opencode.js'
+// W3 迁移：被测对象从硬编码 TS fetcher 换为「基线配置 ⊕ 声明式引擎」注册表——
+// 同一批契约断言不变 = 等价证明（A2-1 错误通道 + A2-3 绝对量输出语义保持）。
+import { getQuotaFetcher, listQuotaPresets } from '../../src/services/quota-providers/index.js'
+
+const zhipuFetcher = getQuotaFetcher('zhipu')!
+const kimiFetcher = getQuotaFetcher('kimi-coding')!
+const minimaxFetcher = getQuotaFetcher('minimax')!
+const mimoFetcher = getQuotaFetcher('mimo')!
+const opencodeFetcher = getQuotaFetcher('opencode-go')!
 
 const mockFetch = vi.fn()
 
@@ -398,7 +400,13 @@ describe('opencodeFetcher — A2-1 错误通道', () => {
     expect(mockFetch).toHaveBeenCalledTimes(1)
     const [url, init] = mockFetch.mock.calls[0] as [string, RequestInit]
     expect(url).toBe('https://opencode.ai/console/api/go/status')
-    expect(init.headers).toEqual({ cookie: 'session=abc', 'x-org-id': 'wrk_test' })
+    // W3 迁移：引擎统一带 accept 头（跨家一致的 JSON 协商头，无害增量）；本断言锁点
+    // 仍是「URL 不含 id、org id 经 header 注入」（D1-4）。
+    expect(init.headers).toEqual({
+      accept: 'application/json, text/plain, */*',
+      cookie: 'session=abc',
+      'x-org-id': 'wrk_test',
+    })
     expect(outcome.ok).toBe(true)
     if (!outcome.ok) return
     expect(outcome.data.wins).toEqual([
@@ -415,17 +423,17 @@ describe('opencodeFetcher — A2-1 错误通道', () => {
 
 // ── SSOT 一致性：preset.auth 与注册表 fetcher.auth 对齐 ──
 
-describe('QUOTA_PRESETS.auth 与 fetcher.auth 对齐（A2-1 数组化）', () => {
+describe('QUOTA_PRESETS.auth 与 fetcher.auth 对齐（A2-1 数组化；presets = 基线 ⊕ 远程合并视图）', () => {
   it('每个 preset 的 auth 声明与对应 fetcher 完全一致（含数组序）', () => {
-    for (const preset of QUOTA_PRESETS) {
-      const fetcher = QUOTA_FETCHERS.get(preset.fetcher)
+    for (const preset of listQuotaPresets()) {
+      const fetcher = getQuotaFetcher(preset.fetcher)
       expect(fetcher, `fetcher ${preset.fetcher} 未注册`).toBeDefined()
       expect(fetcher?.auth, `preset ${preset.fetcher} auth 与 fetcher 声明不一致`).toEqual(preset.auth)
     }
   })
 
   it('kimi-coding 声明双形态、zhipu/minimax 仅 api-key、mimo/opencode-go 仅 cookie', () => {
-    const byId = new Map(QUOTA_PRESETS.map(p => [p.fetcher, p.auth]))
+    const byId = new Map(listQuotaPresets().map(p => [p.fetcher, p.auth]))
     expect(byId.get('kimi-coding')).toEqual(['api-key', 'oauth'])
     expect(byId.get('zhipu')).toEqual(['api-key'])
     expect(byId.get('minimax')).toEqual(['api-key'])

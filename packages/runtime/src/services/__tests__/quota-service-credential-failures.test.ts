@@ -23,7 +23,16 @@ import type { ProviderQuotaFetcher, QuotaFetchOutcome } from '@taiji/shared'
 import type { IProviderCredentialResolver, ResolvedProviderCredential } from '../ports/provider-credential-resolver.js'
 import { QuotaService } from '../quota-service.js'
 import { TaijiProviderStore } from '../provider-extras-store.js'
-import { QUOTA_FETCHERS } from '../quota-providers/index.js'
+// W3 迁移：QUOTA_FETCHERS 可变注册表退役（基线 ⊕ 远程合并视图只读）——fake fetcher
+// 注入改走模块 mock（getQuotaFetcher 按注册表返回，测试用例动态 put/delete）
+import { getQuotaFetcher } from '../quota-providers/index.js'
+
+vi.mock('../quota-providers/index.js', () => ({
+  getQuotaFetcher: vi.fn((id: string) => fakeFetchers.get(id) ?? null),
+  listQuotaPresets: vi.fn(() => []),
+}))
+
+const fakeFetchers = new Map<string, ProviderQuotaFetcher>()
 import { logger } from '../../infra/logger.js'
 
 vi.mock('../../infra/pi/pi-provider-store.js', () => ({
@@ -69,13 +78,13 @@ function makeService(): QuotaService {
 beforeEach(() => {
   dir = mkdtempSync(join(tmpdir(), 'quota-service-cred-fail-'))
   extrasStore = new TaijiProviderStore(join(dir, 'config', 'providers.json'))
-  QUOTA_FETCHERS.set(fakeApiKeyFetcher.id, fakeApiKeyFetcher)
+  fakeFetchers.set(fakeApiKeyFetcher.id, fakeApiKeyFetcher)
   fetchCalls = 0
   nextResolved = Promise.resolve(undefined)
 })
 
 afterEach(() => {
-  QUOTA_FETCHERS.delete(fakeApiKeyFetcher.id)
+  fakeFetchers.delete(fakeApiKeyFetcher.id)
   vi.clearAllMocks()
   rmSync(dir, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 })
 })
@@ -128,7 +137,7 @@ describe('RT-7#7：io 失败与无凭据分流', () => {
         return { ok: false, reason: 'network' }
       },
     }
-    QUOTA_FETCHERS.set(cookieFetcher.id, cookieFetcher)
+    fakeFetchers.set(cookieFetcher.id, cookieFetcher)
     try {
       const svc = new QuotaService({
         dataDir: dir,
@@ -149,7 +158,7 @@ describe('RT-7#7：io 失败与无凭据分流', () => {
         expect.objectContaining({ filePath: join(dir, 'secrets', 'p1-cookie.txt') }),
       )
     } finally {
-      QUOTA_FETCHERS.delete(cookieFetcher.id)
+      fakeFetchers.delete(cookieFetcher.id)
     }
   })
 
