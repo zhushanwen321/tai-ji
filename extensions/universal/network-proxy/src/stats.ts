@@ -19,6 +19,7 @@ import { dirname, join } from "node:path";
 import { getAgentDir } from "@earendil-works/pi-coding-agent";
 import { toErrorMessage } from "@zhushanwen/pi-ext-guards";
 import { getLogger } from "@zhushanwen/pi-extension-logger";
+import { withFileLockSync } from "@zhushanwen/pi-file-lock";
 
 const logger = getLogger("network-proxy");
 
@@ -82,30 +83,42 @@ export function ensureExitFlush(): void {
 /**
  * 把内存增量逐行追加写入 stats 文件；写成功的条目从内存清零，失败条目保留待下次重试。
  * 增量为空时零 IO 直接返回（turn_end 空转不碰磁盘）。
+ * 持与 runtime 截断/重置同一把 <stats> 跨进程文件锁（设计 §3.1「截断不丢在途增量」）：
+ * runtime 保尾截断临界区内并发追加的行会被 rename 整文件替换吞掉，无锁单侧互斥不成立。
+ * ts = epoch ms（Date.now()，与 runtime 读侧 parseStatsLine number 契约、reset 水位行
+ * 及读侧时间范围过滤一致——D5 终态同步裁决，ISO 字符串形态产生的行会被读侧判坏行丢弃）。
  */
 export function flushStats(): void {
 	if (counters.size === 0) return;
-	const ts = new Date().toISOString();
+	const ts = Date.now();
 	const filePath = statsFilePath();
 	try {
-		mkdirSync(dirname(filePath), { recursive: true });
+		withFileLockSync(filePath, () => {
+			try {
+				mkdirSync(dirname(filePath), { recursive: true });
+			} catch (error) {
+				logger.warn("stats mkdir failed, keeping counters for retry", {
+					detail: { err: toErrorMessage(error) },
+				});
+				return;
+			}
+			for (const [host, counter] of counters) {
+				// 单次 appendFileSync 调用写一行完整 JSON——并发原子性前提，禁止分片 write
+				const line = `${JSON.stringify({ ts, host, proxied: counter.proxied, direct: counter.direct })}\n`;
+				try {
+					appendFileSync(filePath, line);
+					counters.delete(host);
+				} catch (error) {
+					logger.warn("stats flush failed, keeping counters for retry", {
+						detail: { err: toErrorMessage(error), path: filePath },
+					});
+					return;
+				}
+			}
+		}, {});
 	} catch (error) {
-		logger.warn("stats mkdir failed, keeping counters for retry", {
-			detail: { err: toErrorMessage(error) },
+		logger.warn("stats flush lock failed, keeping counters for retry", {
+			detail: { err: toErrorMessage(error), path: filePath },
 		});
-		return;
-	}
-	for (const [host, counter] of counters) {
-		// 单次 appendFileSync 调用写一行完整 JSON——并发原子性前提，禁止分片 write
-		const line = `${JSON.stringify({ ts, host, proxied: counter.proxied, direct: counter.direct })}\n`;
-		try {
-			appendFileSync(filePath, line);
-			counters.delete(host);
-		} catch (error) {
-			logger.warn("stats flush failed, keeping counters for retry", {
-				detail: { err: toErrorMessage(error), path: filePath },
-			});
-			return;
-		}
 	}
 }

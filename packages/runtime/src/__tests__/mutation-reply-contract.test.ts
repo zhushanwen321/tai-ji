@@ -151,12 +151,12 @@ const MUTATION_RPC_REGISTRY: readonly MutationRegistryEntry[] = [
     effectiveFields: ['config'],
   },
   {
-    // llm-network-proxy：set 校验失败走错误信封不落盘；成功原样写入 RMW（保存侧不去重，
-    // 匹配幂等）+ reply 读回落盘终态（getNetworkProxyConfig()）+ config.networkProxy 广播
-    // 多窗口同步（config-preferences 范式）。reply config 即生效值（echo 权威覆盖）。
+    // llm-network-proxy：set 校验失败走错误信封不落盘；成功写入 RMW——写侧 dedupeHostList
+    // 归一化去重是确定性变换（请求值 ≠ 落盘终态），归分支一；reply/broadcast 读回落盘终态
+    // （getNetworkProxyConfig()），config 即生效值（消费侧禁乐观写请求值，D5 F1-16 裁决）。
     type: 'config.setNetworkProxy',
-    branch: 'verbatim',
-    contract: 'echo-value',
+    branch: 'transformable',
+    contract: 'effective-value',
     replyKey: 'config.networkProxy',
     effectiveFields: ['config'],
   },

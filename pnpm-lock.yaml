@@ -469,6 +469,9 @@ importers:
       '@zhushanwen/pi-extension-logger':
         specifier: workspace:*
         version: link:../../shared/extension-logger
+      '@zhushanwen/pi-file-lock':
+        specifier: workspace:*
+        version: link:../../shared/file-lock
       '@zhushanwen/pi-llm-shared':
         specifier: workspace:*
         version: link:../../shared/llm-shared

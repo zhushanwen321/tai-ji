@@ -578,6 +578,11 @@
           "package": "@zhushanwen/pi-extension-logger",
           "type": "package",
           "reason": "代码层静态 import getLogger/setPiHandle（src/stats.ts、src/index.ts top-level import），缺失时模块加载即抛 Cannot find module，是强依赖"
+        },
+        {
+          "package": "@zhushanwen/pi-file-lock",
+          "type": "package",
+          "reason": "代码层静态 import withFileLockSync（src/stats.ts flushStats 与 runtime 截断/重置同一把跨进程锁，top-level import），缺失时模块加载即抛 Cannot find module，是强依赖"
         }
       ]
     }

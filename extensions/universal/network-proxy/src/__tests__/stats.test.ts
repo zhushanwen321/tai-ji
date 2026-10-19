@@ -61,7 +61,8 @@ afterEach(() => {
 });
 
 describe("stats 增量行格式", () => {
-	it("flush 后每行完整 JSON：字段 {ts, host, proxied, direct}，ts 为 flush 时刻 ISO 串", () => {
+	it("flush 后每行完整 JSON：字段 {ts, host, proxied, direct}，ts 为 flush 时刻 epoch ms（runtime 读侧 number 契约）", () => {
+		const before = Date.now();
 		recordDispatch("api.anthropic.com", true);
 		recordDispatch("open.bigmodel.cn", false);
 		flushStats();
@@ -70,19 +71,22 @@ describe("stats 增量行格式", () => {
 		expect(lines).toHaveLength(2);
 		const rows = lines.map((l) => JSON.parse(l) as Record<string, unknown>);
 		expect(rows).toContainEqual({
-			ts: expect.any(String),
+			ts: expect.any(Number),
 			host: "api.anthropic.com",
 			proxied: 1,
 			direct: 0,
 		});
 		expect(rows).toContainEqual({
-			ts: expect.any(String),
+			ts: expect.any(Number),
 			host: "open.bigmodel.cn",
 			proxied: 0,
 			direct: 1,
 		});
 		for (const row of rows) {
-			expect(() => new Date(row.ts as string).toISOString()).not.toThrow();
+			// epoch ms 合理区间（≥ before 且 ≤ now + 1s 时钟偏移容差）——与 runtime
+			// parseStatsLine typeof ts === 'number' 契约互证（D5 终态同步 F1-9 裁决）
+			expect(row.ts as number).toBeGreaterThanOrEqual(before);
+			expect(row.ts as number).toBeLessThanOrEqual(Date.now() + 1000);
 		}
 	});
 
@@ -108,7 +112,7 @@ describe("stats 增量行格式", () => {
 			.split("\n")
 			.map((l) => JSON.parse(l));
 		expect(rows).toEqual([
-			{ ts: expect.any(String), host: "api.anthropic.com", proxied: 2, direct: 1 },
+			{ ts: expect.any(Number), host: "api.anthropic.com", proxied: 2, direct: 1 },
 		]);
 	});
 

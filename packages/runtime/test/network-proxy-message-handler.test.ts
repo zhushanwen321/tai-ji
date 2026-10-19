@@ -75,14 +75,18 @@ describe('network-proxy 五条路由（经 SettingsMessageHandler 全链路）',
     ])
   })
 
-  it('config.setNetworkProxy 成功 → reply + broadcast config.networkProxy（多窗口同步）', async () => {
+  it('config.setNetworkProxy 成功 → reply + broadcast config.networkProxy = 落盘终态（读回生效值，D5 F1-16）', async () => {
     const { handler, replies, broadcasts, configService } = makeHandler()
     const handled = await handler.handleSettingsMessage(msg('config.setNetworkProxy', { config }), {} as never)
     expect(handled).toBe(true)
     expect(configService.setNetworkProxyConfig).toHaveBeenCalledWith(config)
-    expect(replies).toEqual([{ id: 'm1', type: 'config.networkProxy', payload: { config } }])
+    // 写侧 dedupeHostList 是确定性变换（请求值 ≠ 生效值）：reply/broadcast 读回落盘终态，
+    // 消费侧（ADR-0065 分支一）以服务端终态校准，禁乐观写请求值
+    expect(configService.getNetworkProxyConfig).toHaveBeenCalledOnce()
+    const effective = { enabled: false, proxy: {}, noProxy: [], rules: [] }
+    expect(replies).toEqual([{ id: 'm1', type: 'config.networkProxy', payload: { config: effective } }])
     expect(broadcasts).toEqual([
-      { type: 'config.networkProxy', id: 'push-1', payload: { config } },
+      { type: 'config.networkProxy', id: 'push-1', payload: { config: effective } },
     ])
   })
 

@@ -41,6 +41,7 @@
   "dependencies": {
     "@zhushanwen/pi-ext-guards": "workspace:*",
     "@zhushanwen/pi-extension-logger": "workspace:*",
+    "@zhushanwen/pi-file-lock": "workspace:*",
     "@zhushanwen/pi-llm-shared": "workspace:*",
     "undici": "^7.28.0"
   },
