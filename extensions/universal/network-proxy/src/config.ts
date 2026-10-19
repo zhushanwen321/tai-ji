@@ -60,7 +60,7 @@ const PORT_MAX = 65535;
 /** 校验结果信封：ok 或面向用户的错误清单（每条含修复动作，逐项收集不短路）。 */
 export type NetworkProxyValidationResult = { ok: true } | { ok: false; errors: string[] };
 
-/** noProxy/rules 条目校验：数组 + 每条为非空且首尾无空白的主机名字符串；重复条目不报错（匹配天然幂等）。 */
+/** noProxy/rules 条目校验：数组 + 每条为非空且不含空白字符的主机名字符串；重复条目不报错（匹配天然幂等）。 */
 function collectHostEntryErrors(entries: unknown, label: string): string[] {
 	if (!Array.isArray(entries)) {
 		return [`${label} 必须是主机名列表（当前不是列表），请恢复为每行一个主机名的形式`];
@@ -70,9 +70,9 @@ function collectHostEntryErrors(entries: unknown, label: string): string[] {
 		const entry = entries[i];
 		if (typeof entry !== "string" || entry.trim() === "") {
 			errors.push(`${label} 第 ${i + 1} 条为空，请填写主机名或删除该条`);
-		} else if (entry !== entry.trim()) {
-			// 归一化不 trim，带首尾空白的条目恒不匹配（静默不生效）——校验层显式拒绝并给出修复动作
-			errors.push(`${label} 第 ${i + 1} 条首尾含空白字符，请删除空白后保存`);
+		} else if (/\s/.test(entry)) {
+			// 归一化不 trim，含空白字符的条目（首尾或内部）对真实主机名恒不匹配（静默不生效）——校验层显式拒绝并给出修复动作
+			errors.push(`${label} 第 ${i + 1} 条含空白字符，请删除空白后保存`);
 		}
 	}
 	return errors;
@@ -104,7 +104,7 @@ function collectProxyServerErrors(proxy: unknown): string[] {
 
 /**
  * 网络代理配置校验（语义复制自 shared validateNetworkProxyConfig）：
- * 协议白名单、端口 1-65535 整数、凭据成对、noProxy/rules 条目非空主机名且首尾无空白
+ * 协议白名单、端口 1-65535 整数、凭据成对、noProxy/rules 条目非空主机名且不含空白字符
  * （归一化不 trim，带空白恒不匹配故显式拒绝）。
  * 错误逐项收集（errors 复数，不短路），文案面向用户且含修复动作。
  * 对象性守卫：null/数组解构会抛 TypeError 或静默得 undefined，读取路径须以错误信封逃逸。

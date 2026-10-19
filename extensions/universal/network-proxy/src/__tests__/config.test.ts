@@ -120,18 +120,24 @@ describe("validateNetworkProxyConfig（语义镜像）", () => {
 		expect(notArray.ok).toBe(false);
 	});
 
-	it("noProxy/rules 条目首尾空白拒绝（归一化不 trim，带空白恒不匹配故校验显式拒绝，文案与 shared 一致）", () => {
+	it("noProxy/rules 条目空白字符拒绝（首尾与内部同等拒绝——归一化不 trim，带空白恒不匹配故校验显式拒绝，文案与 shared 一致）", () => {
 		const leading = validateNetworkProxyConfig(validConfig({ rules: [" api.anthropic.com"] }));
 		expect(leading.ok).toBe(false);
 		if (!leading.ok) {
-			expect(leading.errors[0]).toContain("第 1 条首尾含空白字符");
+			expect(leading.errors[0]).toContain("第 1 条含空白字符");
 		}
 		const trailingTab = validateNetworkProxyConfig(validConfig({ noProxy: ["localhost\t"] }));
 		expect(trailingTab.ok).toBe(false);
 		if (!trailingTab.ok) {
-			expect(trailingTab.errors[0]).toContain("首尾含空白字符，请删除空白后保存");
+			expect(trailingTab.errors[0]).toContain("含空白字符，请删除空白后保存");
 		}
-		// 纯空白条目仍走「为空」分支，不误报为「首尾含空白」
+		// 内部空白（如「api. anthropic.com」）同样拒绝：对真实主机名恒不匹配，静默不生效
+		const inner = validateNetworkProxyConfig(validConfig({ rules: ["api. anthropic.com"] }));
+		expect(inner.ok).toBe(false);
+		if (!inner.ok) {
+			expect(inner.errors[0]).toContain("含空白字符，请删除空白后保存");
+		}
+		// 纯空白条目仍走「为空」分支，不误报为「含空白」
 		const blankOnly = validateNetworkProxyConfig(validConfig({ rules: [" "] }));
 		expect(blankOnly.ok).toBe(false);
 		if (!blankOnly.ok) {
@@ -208,13 +214,13 @@ describe("loadNetworkProxyConfig（llm-shared 读时刷新热重载）", () => {
 		expect(warnings[0]).toContain("1-65535");
 	});
 
-	it("手编文件带首尾空白条目回落 defaults 并经 onWarning 报错（不再静默不生效）", () => {
+	it("手编文件带空白字符条目（内部空白形态）回落 defaults 并经 onWarning 报错（不再静默不生效）", () => {
 		const warnings: string[] = [];
-		writeConfigFile(validConfig({ noProxy: [" api.anthropic.com"] }));
+		writeConfigFile(validConfig({ noProxy: ["api. anthropic.com"] }));
 		const config = loadNetworkProxyConfig((msg) => warnings.push(msg));
 		expect(config).toEqual(DEFAULT_NETWORK_PROXY_CONFIG);
 		expect(warnings).toHaveLength(1);
-		expect(warnings[0]).toContain("首尾含空白字符，请删除空白后保存");
+		expect(warnings[0]).toContain("含空白字符，请删除空白后保存");
 	});
 
 	it("坏 JSON 回落 defaults 并经 onWarning 报错", () => {

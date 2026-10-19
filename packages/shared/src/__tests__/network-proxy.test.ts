@@ -83,6 +83,14 @@ describe('validateNetworkProxyConfig', () => {
     if (!notArray.ok) expect(notArray.errors.join('\n')).toContain('noProxy')
   })
 
+  it('主机名条目含空白字符拒绝（首尾与内部同等拒绝——内部空白对真实主机名恒不匹配，静默不生效）', () => {
+    for (const bad of ['api. anthropic.com', 'api.anthropic .com', ' localhost']) {
+      const r = validateNetworkProxyConfig({ ...valid(), rules: [bad] })
+      expect(r.ok).toBe(false)
+      if (!r.ok) expect(r.errors.join('\n')).toContain('含空白字符')
+    }
+  })
+
   it('代理地址 host 为空拒绝', () => {
     const r = validateNetworkProxyConfig({ ...valid(), proxy: { ...valid().proxy, host: '  ' } })
     expect(r.ok).toBe(false)
