@@ -22,7 +22,7 @@
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { flushPromises, mount, type VueWrapper } from '@vue/test-utils'
-import { computed, nextTick, reactive, ref } from 'vue'
+import { computed, defineComponent, nextTick, reactive, ref } from 'vue'
 import type { Ref } from 'vue'
 import { createPinia, setActivePinia } from 'pinia'
 import type { Message } from '@taiji/shared'
@@ -83,9 +83,19 @@ vi.mock('@/api', () => composerApiModuleWithChatAndBtw())
 const { ComposerInputMock } = makeComposerInputMock()
 // 从共享 stub 剔除 AddMenuPopover（保持真实），其余兄弟子组件转发 composerChildStubs
 const { AddMenuPopover: _addMenuPopoverReal, ...childStubs } = composerChildStubs
+// ComposerMetricsAggregate 空 stub（共享骨架未覆盖的本文件特例）：fit ≥ 1 时挂真实聚合组件，
+// 其内 ContextUsageRing 的 useContextUsage 恢复路径要打 getContext RPC——本文件 api mock 不含
+// 该方法，未处理异常会打断挂载 flush 使 fit 回路的 DOM 更新停摆（data-fit 恒 0 假象）。聚合
+// 组件行为归 composer-metrics-aggregate.test.ts 组件级测试，此处与 ContextCapacityPopover
+// stub 同理挡在 Composer mount 族之外。
+const MetricsAggregateStub = defineComponent({
+  name: 'ComposerMetricsAggregate',
+  template: '<div data-testid="composer-metrics-aggregate" />',
+})
 const stubs = {
   ComposerInput: ComposerInputMock,
   ...childStubs,
+  ComposerMetricsAggregate: MetricsAggregateStub,
 }
 
 const SID = 's-btw-btn'
