@@ -1,6 +1,6 @@
 {
   "name": "@zhushanwen/pi-network-proxy",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "description": "LLM network proxy: rule-based per-hostname traffic splitting via a globalThis.fetch wrapper (http/https/socks5 proxy), with request counters.",
   "type": "module",
   "main": "index.ts",

@@ -1,5 +1,11 @@
 # @zhushanwen/pi-network-proxy
 
+## 0.2.1
+
+### Patch Changes
+
+- 253284de6: Fix LLM traffic bypassing the configured proxy in packaged builds. Request interception now wraps `globalThis.fetch` instead of installing a second undici global dispatcher — bundled apps resolve their own undici copy, so the dispatcher install was never observed by the fetch path.
+
 ## 0.2.0
 
 ### Minor Changes
