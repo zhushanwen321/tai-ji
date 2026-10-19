@@ -17,6 +17,8 @@
  * new Map(/new Set(。含可变状态的交集 module = FAIL；纯常量/函数 = PASS（警告列出
  * ——重叠即双份分发，纯度靠启发式背书，新增顶层 let 时会被本门拦下）。
  * 语义边界（如实登记）：「对象字面量被内部函数写入」形态文本不可判，不在硬信号内；
+ * 顶层类型注解为 ReadonlySet/ReadonlyMap（含 Readonly<Set/Map>）的声明按「纯常量」
+ * 豁免（类型级只读契约，无状态分裂面；容器值只读而容器本身可变的嵌套形态不豁免）。
  * ESM 侧子入口经 chunk 共享（运行时同实例，无分裂），但 chunk 拆分形态由 tsup
  * splitting 决定，重叠监测对 ESM 同样保留（配置漂移翻回物理重复时仍被覆盖）。
  *
@@ -61,6 +63,7 @@ export {
   extractCjsModuleExportsKeys,
   extractDctsRuntimeExportNames,
   gateWorkflowsDeclarationPairs,
+  findModuleLevelMutableState,
 }
 
 let failures = 0
@@ -171,6 +174,16 @@ function collectBundleClosure(entryAbs) {
 }
 
 /**
+ * 门① 只读容器豁免：顶层类型注解锚定为 ReadonlySet/ReadonlyMap（或
+ * Readonly<Set/Map>）的声明 = 类型级只读契约（无变更方法；顶层 let/var 已被上一分支
+ * 捕获，本分支实际只及 const——绑定不可重赋值），双 bundle 各持副本无状态分裂面，
+ * 按「纯常量」语义放行（警告列出）。注解必须锚定在声明符顶层——
+ * Record<string, ReadonlySet<..>> 这类容器值只读、容器本身可变的形态不在豁免内。
+ */
+const READONLY_CONTAINER_DECL_RE =
+  /^(?:export\s+)?(?:const|let|var)\s+[A-Za-z_$][\w$]*\s*:\s*(?:Readonly(?:Set|Map)|Readonly\s*<\s*(?:Set|Map)\s*)</
+
+/**
  * 模块级可变状态文本启发式（门① 硬信号）。列 0 锚定 = 模块顶层（函数/循环体内
  * 声明必然缩进；for 行以 for 开头不命中 let/var 规则）。
  */
@@ -184,7 +197,8 @@ function findModuleLevelMutableState(srcAbs) {
       signals.push({ lineNo: i + 1, code: line.trim(), signal: '模块顶层 let/var 声明（可变绑定）' })
     } else if (
       /^(?:export\s+)?(?:const|let|var)\s+[A-Za-z_$][\w$]*[^;=]*=/.test(line) &&
-      /new\s+(?:Map|Set)\s*[<(]/.test(line)
+      /new\s+(?:Map|Set)\s*[<(]/.test(line) &&
+      !READONLY_CONTAINER_DECL_RE.test(line)
     ) {
       signals.push({ lineNo: i + 1, code: line.trim(), signal: '模块级 new Map/Set（可变容器）' })
     }
@@ -226,7 +240,10 @@ function addExportPart(rawPart, names, problems, where) {
 
 function parseExportBlocks(text, problems, where) {
   const names = new Set()
-  for (const m of text.matchAll(/^export\s*\{/gm)) {
+  // `export type { ... }`（TS 4.5+ 显式类型重导出块）与普通 `export { ... }` 同为
+  // 符号清单块——漏解析会造成 src 侧假性缺符号（门② 假阳性：dist 如实重导出而 src
+  // 解析不到）。
+  for (const m of text.matchAll(/^export\s*(?:type\s+)?\{/gm)) {
     const open = text.indexOf('{', m.index)
     const close = findBlockClose(text, open)
     if (close < 0) {

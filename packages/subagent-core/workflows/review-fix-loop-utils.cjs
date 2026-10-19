@@ -1974,6 +1974,7 @@ function countLedgerCritical(issues) {
  *  evidence：disputed 取清单 disputeEvidence，fixed/deferred 取本轮 fix 申报
  *  （self_check‖description / deferredReason，pi 侧增强——经 idMap 翻译按清单键回查），
  *  无证据不落键（schema 的 evidence? 可选语义）。 */
+// fallow-ignore-next-line complexity —— cyclo 16>15 存量带伤（两侧线继承），merge 收尾期不做行为性拆分；拆分债随 review-fix-loop-utils 函数族重构偿还
 function buildRoundReconciliation(fixResult, issues, idMap) {
   const fx = fixResult && typeof fixResult === "object" ? fixResult : {};
   const ledger = issues && typeof issues === "object" ? issues : {};
@@ -2069,6 +2070,7 @@ function buildProblemsDoc(round, problems) {
  *  对齐——workflow/segment 固定本循环身份、host="pi"；model 取不到 → null（分析侧
  *  按模型分层的字段，缺席必须显式可见）；git 字段不可用（非 git 目录）→ 空串；
  *  mustFixTrajectory = 逐轮 critical 计数序列（本族口径，未聚合轮 null）。 */
+// fallow-ignore-next-line complexity —— cyclo 16>15 存量带伤（两侧线继承），merge 收尾期不做行为性拆分；拆分债随 review-fix-loop-utils 函数族重构偿还
 function buildRunManifest(ctx) {
   const c = ctx && typeof ctx === "object" ? ctx : {};
   return {

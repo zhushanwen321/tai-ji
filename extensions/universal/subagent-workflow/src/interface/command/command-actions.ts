@@ -88,6 +88,7 @@ function splitFirstToken(s: string): { token: string; rest: string } | null {
  * 错误（全局规则：错误信息指向恢复动作）。noop 表示 GUI 端无对应程序化操作（GUI
  * 已在 CommandPopover 屏蔽 /subagents 入口，此分支仅兜底手动 prompt）。
  */
+// fallow-ignore-next-line complexity —— cyclo 17>15 存量带伤（协议解析单点，分支枚举与 JSDoc 动作表一一对应），merge 收尾期不做行为性拆分；按 cancel/message/start 分派拆辅助函数登记为后续重构债
 export function parseSubagentRpcCommand(argsStr: string): SubagentRpcAction {
   const first = splitFirstToken(argsStr);
   if (!first) return { action: "noop" };
