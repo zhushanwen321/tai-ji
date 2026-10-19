@@ -589,8 +589,9 @@ export function migratePiSessionLogTree(oldSessionId: string, newSessionId: stri
   try {
     const rest = readdirSync(from)
     if (rest.length === 0) rmSync(from, { recursive: true, force: true })
-  } catch {
-    // 清理失败不抛（半空目录无害）
+  } catch (e) {
+    // 清理失败不抛（半空目录无害）；留痕满足 no-silent-catch
+    writeLogEntry('warn', '[logger] log tree cleanup ignored (best-effort)', { from, error: String(e) })
   }
 }
 

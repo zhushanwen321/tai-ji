@@ -21,7 +21,7 @@ import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
 
-import { getSessionStoreDir, isPiSessionId } from "@taiji/shared/paths";
+import { isPiSessionId } from "@taiji/shared/paths";
 
 import { bestEffort } from "../assembly/best-effort.ts";
 import { getLogger } from "../../core/logger.ts";

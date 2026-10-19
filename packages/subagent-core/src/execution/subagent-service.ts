@@ -46,9 +46,6 @@ import { RecordStore } from "./persistence/record-store.ts";
 // 注册表对账 sweep（initSession 挂点；绑定侧在 registry-reconcile/sweep-binding.ts
 // ——变化原因独立）。
 import { runPendingReconcileSweepForService } from "./registry-reconcile/sweep-binding.ts";
-// [session-store-layout-inversion D2/D3] workflow 域 run 状态目录的进程级锚绑定点
-//（分区键 = rootSessionId，与 record 域 store 目录同一时点、同一取值）。
-import { setPiWorkflowRootSessionId } from "./assembly/workflow-state-root.ts";
 // [§1.4 修复批顺手修] SubagentStream 未使用导入删除（HEAD 既有 lint error，本文件
 // 入暂存清单时 pre-commit 会拦）；StreamSink 仍被 streamSink getter 消费保留。
 import type { StreamSink } from "./assembly/stream-sink.ts";

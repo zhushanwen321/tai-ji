@@ -147,7 +147,7 @@ function toOverrideStatus(model: { provider: string; modelId: string }, thinking
  */
 export function createModelOverrideQuery(deps: ModelOverrideQueryDeps): ModelOverrideQuery {
   return {
-    getRecordOverride(sessionId, recordId, resolved) {
+    getRecordOverride(sessionId, recordId, _resolved) {
       let filePath: string
       try {
         // core recordEventsPath 单源（含 record id 白名单防穿越校验——非法 id 上抛，
