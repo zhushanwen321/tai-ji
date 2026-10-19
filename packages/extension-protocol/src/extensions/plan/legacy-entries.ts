@@ -16,7 +16,7 @@
  * 纯数据 + 纯函数，零依赖（仅同包 state-machine 值域），与 state-machine.ts（纯契约模块）
  * 刻意分文件——legacy 读取规则有自己的退役时钟，不混入长期契约范围。
  */
-import { PLAN_LIFECYCLE_STATES } from './state-machine'
+import { PLAN_MACHINE } from './state-machine'
 import type { PlanLifecycleState } from './state-machine'
 
 /**
@@ -30,8 +30,8 @@ export const PLAN_STATE_CUSTOM_TYPE = 'plan-state'
 /**
  * 生命周期状态读取（D2 读方①②共用映射，原扩展 state.ts / runtime extractor 内联拷贝的
  * 单源归并）：
- * ① 新字段直读（值域检查：PLAN_LIFECYCLE_STATES 之外的垃圾值按缺失处理，落映射——
- *    不信任外部写入）；
+ * ① 新字段直读（值域检查 = 机器 coerceState 归化，词表外/原型链键垃圾值按缺失处理，
+ *    落映射——不信任外部写入；M4 白名单口径统一）；
  * ② 旧 entry 无 state（或垃圾 state）时映射 reviewState（awaiting→reviewing /
  *    revising→revising / 其余值→planning|idle 按 isActive）。
  */
@@ -39,10 +39,8 @@ export function readLifecycleState(
   data: { state?: unknown; reviewState?: unknown },
   isActive: boolean,
 ): PlanLifecycleState {
-  const raw = data.state
-  if (typeof raw === 'string' && (PLAN_LIFECYCLE_STATES as readonly string[]).includes(raw)) {
-    return raw as PlanLifecycleState
-  }
+  const coerced = PLAN_MACHINE.coerceState(data.state)
+  if (coerced !== null) return coerced
   if (data.reviewState === 'awaiting') return 'reviewing'
   if (data.reviewState === 'revising') return 'revising'
   return isActive ? 'planning' : 'idle'
