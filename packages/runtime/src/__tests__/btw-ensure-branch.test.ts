@@ -78,6 +78,9 @@ describe('SessionService.ensureActive · btw 分支（B3 裁决，M2-b）', () =
     const ensureProcess = vi.fn()
     const { svc, getClient } = makeEnv(() => live)
     svc.setBtwService({ ensureProcess })
+    // 快路径前提 = 完整注册态 [switch-race-window]：活 client + Map 缺条目 = 恢复窗口
+    // 半成品，会走恢复内核而非快路径——initializeManagedSession 播种注册态
+    await svc.initializeManagedSession('plain-session', live, '/test/cwd', 'label')
 
     const got = await svc.ensureActive('plain-session')
 
@@ -89,6 +92,8 @@ describe('SessionService.ensureActive · btw 分支（B3 裁决，M2-b）', () =
   it('btw vid + 未注入 BtwService → fall through 既有链（存量构造零变更）', async () => {
     const live = makeClient(false)
     const { svc, getClient } = makeEnv(() => live)
+    // 快路径前提 = 完整注册态 [switch-race-window]（同上）
+    await svc.initializeManagedSession(VID, live, '/test/cwd', 'label')
 
     const got = await svc.ensureActive(VID)
 

@@ -6,8 +6,9 @@
  * RESPAWN_MAX_CONSECUTIVE_FAILURES / attemptRespawn 重试链）已整体删除——崩溃处置改为
  * 显式上报（RespawnFate 'terminal' → 死亡发声），恢复决策归用户（手动重试 / 惰性恢复）。
  * 本模块保留的结构组件（非防御，删除会断裂恢复链）：
- * - ensureRestored：in-flight 恢复注册表 + join 语义（u8 D7-③ 从 SessionService.ensureActive
- *   迁入的恢复执行单源——自动与惰性恢复曾共享，现仅惰性/手动恢复消费）；
+ * - ensureRestored：in-flight 恢复注册表 + join 语义（恢复执行单源——全部恢复入口
+ *   （惰性 ensureActive / 手动 session.restore RPC / startup-reattach）经 SessionService
+ *   facade.restoreSession（join 包装）收敛于此，恢复窗口内并发调用 join 等待不双跑）；
  * - onRestoreSuccess：恢复成功出口（session.restored 发布判别 + crashed 登记核销）；
  * - cancel / cancelAll：session 删除 / shutdown 的登记清理。
  *
@@ -26,8 +27,9 @@ export interface RespawnDeps {
    *  可选调用语义由组装方保证（port 缺失按 false 继续，守卫不得成为崩溃链新故障源）。 */
   isActive: (sessionId: string) => boolean
   /**
-   * 恢复动作内核（复用惰性恢复内核 facade.restoreSession——附着自动走 u4c 预算化路径）。
-   * 仅 ensureRestored 消费。
+   * 恢复执行内核（lifecycle.restoreSession 全流程 + onRestoreSuccess 成功出口——恢复全程
+   * 的唯一执行点，每次真实执行恰运行一次）。仅 ensureRestored 消费；join 方等待同一
+   * Promise，不经此内核、不重复发布。
    */
   restore: (sessionId: string) => Promise<unknown>
   /** session 级消息发布（sessionId 必带，规则 7；bus 未注入时由组装方 no-op）。 */
@@ -128,7 +130,7 @@ export class RespawnOrchestrator {
   }
 
   /**
-   * 惰性恢复内核（u8 D7-③ join，原 SessionService.ensureActive 的 restore 腿接管）：
+   * 恢复执行内核（全部恢复入口的唯一执行通道）：
    * 无 in-flight → 登记并执行 restore；已有 in-flight → join（返回并等待同一 Promise，
    * 不报错不双跑——恢复进行中用户发消息，等恢复完成后继续）；原恢复失败则 join 方得到
    * 同一失败（不吞错）。
