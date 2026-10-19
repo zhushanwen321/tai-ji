@@ -864,3 +864,30 @@ WorkflowTab 步骤列表的数据源绑定从「workflow-record 全量快照（6
 **依据**：phase 1 附录 C 自述「collect 设计时复评以上四点」预期内的复评结论——meta 无名透传与「端口层读取消费」的冲突是结构性证据；三候选方案（A 端口挂起区 + 提交选项 / B 工具轮询 + 抑制渲染 / C 复活旧中枢）中 B 被 append-only 契约与时间平抑红线双击穿、C 与 phase 1 收敛方向对冲（方案对比否决记录见设计档案）。
 
 **登记**：实装 = `extensions/shared/delivery-port/src/types.ts`（collectKey 选项 + handle collect 面 API 类型 + meta 删除，commit e2e4d7f04）+ `delivery-port.ts`/`journal.ts`（挂起分流/四态快照/collected 终局/键集落盘，commit abc9168ea）+ `extensions/universal/pending-notifications/src/index.ts`（collect_results 工具，commit 9b5277e78）+ 四生产方申报链（commit d29c93a81）；设计档案 `.tmp/tech-design/result-collect.md`（不入库），本条即该四项决策的现行登记处；docs/FEATURE-PRIORITIES.md 通知系统条目同步。
+### ADR-0147 LLM 出站代理注入点：pi extension 安装 undici 全局分流分发器，按主机名规则匹配（2026-10-18 设计裁决，llm-network-proxy）
+
+**决策**：LLM 出站代理（境外服务商经 HTTP/SOCKS5 代理出站、境内直连，按服务商配置分流）的注入点 = pi extension 在 pi 进程内构造自定义 undici 分发器并 `setGlobalDispatcher` 安装，按「请求目标主机名」后缀匹配规则决定走代理或直连，分流点同步计数。外部 undici 包写入的全局分发器槽与 Node 内置 `globalThis.fetch` 读取的槽一致（`Symbol.for` 注册表跨实例共享，Node 24.11.1 + undici 7.28.0 实测；归档探针 = `scripts/network-proxy-drift-probe.mjs`，pi 升级复跑）。
+
+**不采用**：① spawn 注入 `HTTPS_PROXY` 环境变量——路由语义受 env 变量表达力限制（无结构化规则、无快速添加数据源）、请求量观测无实现位（env 路由在 pi 进程内完成，taiji 侧无统一计数点）、且需放宽 `ENV_WHITELIST_PREFIXES` env 传播边界（安全边界改动）、依赖 pi 自装分发器的未承诺行为；② extension 自建本地中转网关 + 改服务商 baseURL 指向网关——把网络层代理上移成应用层网关，需自建转发服务器全套（鉴权头桥接 / 流式透传 / 错误归因），与用户已有自建网关用法重复，且 pi `registerProvider` 覆盖语义与 taiji provider 管理冲突。
+
+**登记**：实装 = `extensions/universal/network-proxy/`（分流分发器 + 配置热重载 + 计数落盘）+ `packages/shared/src/network-proxy.ts`（配置 schema 与校验）；验收工具 = `scripts/network-proxy-mocks/`（mock 代理 / 最小 SOCKS5 服务，自签证书 mock LLM 端点）；漂移探针 = `scripts/network-proxy-drift-probe.mjs`。设计过程产物 `.tmp/tech-design/llm-network-proxy.md`（不入库，git 不可追溯），本条即该裁决的现行登记处。
+
+### ADR-0148 代理凭据与 pi API key 同安全模型：明文 + 文件 0600，不引入跨进程加密（2026-10-18 设计裁决，llm-network-proxy）
+
+**决策**：LLM 网络代理的代理服务器凭据（用户名/密码）明文存 ext-config 文件，文件创建时显式 `mode 0o600`（目录维持 0755）——与 pi 自身 `auth.json` 存 API key 的文件级安全模型一致（实测 pi 与 taiji 两侧 `auth.json` 均为 0600、所在目录均为 0755，pi 的保护在文件级不在目录级）。不引入加密：Electron safeStorage 是 main 进程 API，runtime（Node 子进程）不可用，为非服务端凭据引入跨进程加密通道复杂度不成比例。runtime 侧写入路径须携带 mode：`packages/runtime/src/utils/fs-utils.ts` 的 `atomicWrite` 基建以 umask 默认产 0644，为该配置落盘增加 mode 透传（或写后 chmod），此文件固定 0600；锁文件独立于配置文件，mode 差异不影响锁语义。
+
+**登记**：实装落点 = `packages/runtime/src/services/network-proxy-config.ts`（写侧，mode 0600）+ `packages/runtime/src/utils/fs-utils.ts`（atomicWrite mode 透传）+ `extensions/universal/network-proxy/`（读侧，`llm-shared` 的 `saveConfig` 已带 0o600——`loadConfig` 为读侧函数，不涉及 mode）。设计过程产物同 ADR-0147（不入库），本条即该裁决的现行登记处。
+
+### ADR-0149 请求统计 = 追加式 JSONL + 读侧聚合，截断保尾 5MB/1MB（2026-10-18 设计裁决，llm-network-proxy）
+
+**决策**：「经代理 / 直连」请求量统计的落盘形态 = 追加式 JSONL（`<piAgentDir>/network-proxy-stats.jsonl`，每行一个 `{ ts, host, proxied, direct }` 增量片段，pi 进程每 turn 结束 flush）+ runtime 读侧按时间范围与重置水位聚合（多 pi 进程并发写安全的前提 = 单行 O_APPEND 单次 write 原子性，由并发追加写单测锁定——实现改分片 write 或非追加通道即红灯）。重置 = runtime 追加一行 `{ type: "reset", ts }` 水位标记，读侧只累计最后一个标记之后的增量行。物理清理 = 文件超 5MB 触发截断、保尾最近 1MB（约最近一万条增量记录），由 runtime 读聚合入口持文件锁原子重写，extension 写侧保持纯追加不做截断（避免多进程重写竞争）；「累计」视图语义因此 = 截断保尾窗口内的累计，统计卡对超窗历史收缩显式标注。坏行（无法解析的行）读侧跳过并记 warn，不因损坏行失败。
+
+**不采用**：单一 JSON 累加重写（主会话与 subagent 多 pi 进程并存，重写互相覆盖）；经 select 通道推送（低频聚合数据套高频事件流机制，复杂度不匹配）。
+
+**登记**：实装落点 = `extensions/universal/network-proxy/`（写侧 flush）+ `packages/runtime/src/services/network-proxy-config.ts`（读聚合 + 截断）。设计过程产物同 ADR-0147（不入库），本条即该裁决的现行登记处。
+
+### ADR-0150 分流器未命中流量委托 pi 原生分发器，不自建默认 Agent（2026-10-18 设计裁决，llm-network-proxy）
+
+**决策**：LLM 网络代理分流分发器的未命中分支（规则与 noProxy 均不命中的流量）委托**安装前捕获的原分发器引用** `dispatch`——即 pi 启动时自装的 `EnvHttpProxyAgent`。未命中流量因此保持 pi 未装本扩展时的确切行为：独立 pi 用户的 env 代理路由（`HTTPS_PROXY` / pi settings `httpProxy`）、连接调优（`connect.autoSelectFamilyAttemptTimeout: 2000`）与防崩溃 error listener 全部不丢失。**不自建默认 `Agent` 兜底**：undici 全局分发器槽在模块加载时即初始化为默认 `Agent`，pi 启动即自装 `EnvHttpProxyAgent`，「捕获引用为空」无已发生证据——为它保留自建 Agent 分支是不可达路径的实现与测试义务；若该前提被未来 pi 版本打破，委托调用直接 TypeError 暴露（fail-fast），不静默降级为「看起来正常的直连」。
+
+**登记**：实装落点 = `extensions/universal/network-proxy/`（分流分发器）；未命中委托语义的回归断言 = 验收场景 13（双 mock 代理对照：规则外流量经 env 代理、规则内流量经扩展代理，两代理记录目标集合无交叉）。设计过程产物同 ADR-0147（不入库），本条即该裁决的现行登记处。

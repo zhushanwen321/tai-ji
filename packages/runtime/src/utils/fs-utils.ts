@@ -31,8 +31,9 @@ function tmpPathOf(filePath: string, uniqueSuffix?: string): string {
 
 /**
  * @param uniqueSuffix 可选的 tmp 文件名区分符（语义同下方 atomicWriteAsync）。
- * @param mode 可选文件权限（如带明文凭据的落盘方传 0o600）。仅在 tmp 新建时经
- *   writeFileSync 生效，rename 后即目标文件权限；缺省不传 = 沿用既有默认
+ * @param mode 可选文件权限（如带明文凭据的落盘方传 0o600）。经 writeFileSync 的 mode 参数在
+ *   创建 tmp 时一次性生效（无「先 0644 落盘再补 chmod」的权限竞态窗口），rename 后目标文件
+ *   继承该权限——rename 在 POSIX/NTFS 上保留 tmp 的 inode 与权限位；不传时沿用既有默认
  *   （0o666 & umask），既有调用方零行为变化。
  */
 export function atomicWrite(filePath: string, data: string, uniqueSuffix?: string, mode?: number): void {

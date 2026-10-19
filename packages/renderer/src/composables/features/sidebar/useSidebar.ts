@@ -372,7 +372,7 @@ export function useSidebar() {
     await core.deleteSession(id)
   }
   // [ai-voice-tts D11] 删除整个文件夹同理：内含正在播放的 session 时音频会失去可见停止入口
-  //（D5 终态同步 F1-21 补齐）——stop 无参全局单例语义，播谁停谁，无需逐 session 枚举。
+  // stop 无参全局单例语义，播谁停谁，无需逐 session 枚举。
   const deleteFolder = async (id: string): Promise<BatchDeleteResult> => {
     useTtsPlayer().stop()
     return core.deleteFolder(id)

@@ -33,6 +33,10 @@ import type {
   WorkflowDagReply,
   TerminalConfig,
   BatchDeleteResult,
+  NetworkProxyConfig,
+  NetworkProxyStats,
+  NetworkProxyStatsRange,
+  NetworkProxyTestResult,
   ProviderSource, ProviderImportPreview, ProviderImportResult, ProviderImportedItem,
   SkillCacheInvalidatedPayload,
   ProviderId,
@@ -1256,6 +1260,9 @@ function defaultTerminalConfig(): TerminalConfig {
 // 终端配置订阅（模拟 config.terminalConfig 广播；初始推默认配置，corrupted=false）。
 const terminalSub = makeMockSubscription(() => ({ config: defaultTerminalConfig(), corrupted: false }))
 
+// 网络代理配置订阅（llm-network-proxy U4：模拟 config.networkProxy 广播；初始推内存态）。
+const networkProxySub = makeMockSubscription(() => ({ config: cloneMockNetworkProxyConfig() }))
+
 const configImpl = {
   // 请求型：直接返 fixture 深拷贝（不依赖 sub）。
   // scoped-model D7：与真实门面同形返回 { providers, scopedModels }，scopedModels 与
@@ -1570,10 +1577,67 @@ const configImpl = {
     return { config: mockRetryConfig, configured: true }
   },
   onRetryConfig: (_h: (payload: { config: LlmRetryConfig; configured: boolean }) => void) => () => {},
+  // ── 网络代理（llm-network-proxy U4：mock 内存态 stub，与 real domains/config 同构；
+  //    G4 参数全等断言强制五方法 + 订阅签名对齐）──
+  // get 回内存态、set 深拷贝后广播 config.networkProxy；test 恒成功（message/耗时为演示值）；
+  // stats 固定演示行、reset 清空（真实聚合归 runtime，mock 无 jsonl 语义）。
+  async getNetworkProxyConfig(): Promise<{ config: NetworkProxyConfig }> {
+    await sleep(TIMING.ack)
+    return { config: cloneMockNetworkProxyConfig() }
+  },
+  async setNetworkProxyConfig(config: NetworkProxyConfig): Promise<{ config: NetworkProxyConfig }> {
+    await sleep(TIMING.ack)
+    mockNetworkProxyConfig = cloneNetworkProxyConfig(config)
+    const next = { config: cloneMockNetworkProxyConfig() }
+    networkProxySub.broadcast(next)
+    return next
+  },
+  async testNetworkProxy(_config: NetworkProxyConfig): Promise<NetworkProxyTestResult> {
+    await sleep(TIMING.ack)
+    return { ok: true, stage: 'done', message: '代理连接成功', elapsedMs: 42 }
+  },
+  async getNetworkProxyStats(_range: NetworkProxyStatsRange): Promise<{ stats: NetworkProxyStats[] }> {
+    await sleep(TIMING.ack)
+    return { stats: mockNetworkProxyStats.map((s) => ({ ...s })) }
+  },
+  async resetNetworkProxyStats(): Promise<{ stats: NetworkProxyStats[] }> {
+    await sleep(TIMING.ack)
+    mockNetworkProxyStats = []
+    return { stats: [] }
+  },
+  onNetworkProxyConfig: (h: (config: NetworkProxyConfig) => void) => networkProxySub.subscribe((p) => h(p.config)),
 }
 
 // retry 配置内存态（pi 默认值兜底；声明在 configImpl 之后同 mockScopedModels 模式——方法运行期才读）
 let mockRetryConfig: LlmRetryConfig = { enabled: true, maxRetries: 3, baseDelayMs: 2000 }
+
+// 网络代理内存态（默认禁用态 + 常见本地代理地址占位，与 shared DEFAULT_NETWORK_PROXY_CONFIG 同构；
+// 声明在 configImpl 之后同 mockRetryConfig 模式——方法运行期才读）
+let mockNetworkProxyConfig: NetworkProxyConfig = {
+  enabled: false,
+  proxy: { protocol: 'http', host: '127.0.0.1', port: 7890, username: '', password: '' },
+  noProxy: ['localhost', '127.0.0.1'],
+  rules: [],
+}
+// 统计演示行（非零双通道示例，mock 轨统计卡可演示计数条；reset 清空）
+let mockNetworkProxyStats: NetworkProxyStats[] = [
+  { host: 'api.anthropic.com', proxied: 12, direct: 0 },
+  { host: 'openrouter.ai', proxied: 4, direct: 8 },
+  { host: 'api.z.ai', proxied: 0, direct: 34 },
+]
+
+/** 网络代理配置深拷贝（嵌套 proxy 对象 + 数组条目独立副本，防 fixture 被调用方原地改写）。 */
+function cloneNetworkProxyConfig(config: NetworkProxyConfig): NetworkProxyConfig {
+  return {
+    enabled: config.enabled,
+    proxy: { ...config.proxy },
+    noProxy: [...config.noProxy],
+    rules: [...config.rules],
+  }
+}
+function cloneMockNetworkProxyConfig(): NetworkProxyConfig {
+  return cloneNetworkProxyConfig(mockNetworkProxyConfig)
+}
 
 // [G4] 参数全等断言：mock config 任一方法少参/多参/错型/返回漂移在此行编译失败
 export type ConfigDomainParamsExact = AssertExact<DomainParamsExact<ConfigDomain, typeof configImpl>>

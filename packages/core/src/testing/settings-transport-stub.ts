@@ -37,6 +37,7 @@ export type SettingsSubscriptionStubs = Pick<
   | 'onProviders' | 'onModels' | 'onSkills' | 'onAgents' | 'onExtensions'
   | 'onSkillDirs' | 'onAgentDirs' | 'onExtensionDirs' | 'onDefaults' | 'onDefaultsWithSource'
   | 'onSkillCacheInvalidated' | 'onSystemPrompt' | 'onTerminalConfig' | 'onRetryConfig'
+  | 'onNetworkProxyConfig'
   | 'onAuthDeviceCode' | 'onAuthAuthUrl' | 'onAuthSuccess' | 'onAuthError'
 >
 
@@ -64,6 +65,7 @@ export function makeSettingsSubscriptionStubs(): SettingsSubscriptionStubs {
     onSystemPrompt: makeUnsubscribeStub(),
     onTerminalConfig: makeUnsubscribeStub(),
     onRetryConfig: makeUnsubscribeStub(),
+    onNetworkProxyConfig: makeUnsubscribeStub(),
     onAuthDeviceCode: makeUnsubscribeStub(),
     onAuthAuthUrl: makeUnsubscribeStub(),
     onAuthSuccess: makeUnsubscribeStub(),
@@ -110,6 +112,15 @@ export function makeSettingsTransportStub(overrides: SettingsTransportStubOverri
       config: { enabled: true, maxRetries: 3, baseDelayMs: 2000 },
       configured: false,
     })),
+    getNetworkProxyConfig: vi.fn(async () => ({
+      config: {
+        enabled: false,
+        proxy: { protocol: 'http' as const, host: '127.0.0.1', port: 7890, username: '', password: '' },
+        noProxy: ['localhost', '127.0.0.1'],
+        rules: [],
+      },
+    })),
+    getNetworkProxyStats: vi.fn(async () => ({ stats: [] })),
     getWorktreeRootDir: vi.fn(async () => ({ dir: '' })),
     getSetupScript: vi.fn(async () => ({ script: '' })),
     getBareSetupScript: vi.fn(async () => ({ script: '' })),
@@ -148,6 +159,9 @@ export function makeSettingsTransportStub(overrides: SettingsTransportStubOverri
     setSystemPrompt: vi.fn(async (config) => ({ config, corrupted: false })),
     setTerminalConfig: vi.fn(async (config) => ({ config, corrupted: false })),
     setRetryConfig: vi.fn(async (config) => ({ config, configured: true })),
+    setNetworkProxyConfig: vi.fn(async (config) => ({ config })),
+    testNetworkProxy: vi.fn(async () => ({ ok: true, stage: 'done' as const, message: '', elapsedMs: 0 })),
+    resetNetworkProxyStats: vi.fn(async () => ({ stats: [] })),
     setWorktreeRootDir: vi.fn(async (dir) => ({ dir })),
     setSetupScript: vi.fn(async (script) => ({ script })),
     setBareSetupScript: vi.fn(async (script) => ({ script })),

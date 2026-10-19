@@ -1,0 +1,69 @@
+{
+  "name": "@zhushanwen/pi-network-proxy",
+  "version": "0.1.0",
+  "description": "LLM network proxy: rule-based per-hostname traffic splitting via an undici global dispatcher (proxied vs direct), with request counters.",
+  "type": "module",
+  "main": "index.ts",
+  "taiji": {
+    "role": "universal",
+    "startupConfig": [
+      {
+        "path": "config/network-proxy-ext-config.json",
+        "content": {
+          "enabled": false,
+          "proxy": {
+            "protocol": "http",
+            "host": "127.0.0.1",
+            "port": 7890,
+            "username": "",
+            "password": ""
+          },
+          "noProxy": [
+            "localhost",
+            "127.0.0.1"
+          ],
+          "rules": []
+        }
+      }
+    ]
+  },
+  "pi": {
+    "extensions": [
+      "./index.ts"
+    ],
+    "skills": [
+      "./skills"
+    ]
+  },
+  "keywords": [
+    "pi-package"
+  ],
+  "scripts": {
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@zhushanwen/pi-ext-guards": "workspace:*",
+    "@zhushanwen/pi-extension-logger": "workspace:*",
+    "@zhushanwen/pi-file-lock": "workspace:*",
+    "@zhushanwen/pi-llm-shared": "workspace:*",
+    "undici": "^7.28.0"
+  },
+  "devDependencies": {
+    "@vitest/coverage-v8": "^4.1.9",
+    "vitest": "^4.1.8"
+  },
+  "files": [
+    "index.ts",
+    "src/**/*.ts",
+    "skills/",
+    "vitest.config.ts"
+  ],
+  "peerDependencies": {
+    "@earendil-works/pi-coding-agent": "^1.0.0"
+  },
+  "peerDependenciesMeta": {
+    "@earendil-works/pi-coding-agent": {
+      "optional": true
+    }
+  }
+}

@@ -130,7 +130,7 @@ const MUTATION_RPC_REGISTRY: readonly MutationRegistryEntry[] = [
     effectiveFields: ['engineId'],
   },
   {
-    // engine-provider-unification D5：per-engine 默认模型偏好写入（config.json
+    // per-engine 默认模型偏好写入（config.json
     // engineDefaults 键）。原样存储（写入校验只拒绝非法 ref，不变换合法值）；
     // reply 回显 engineId/modelRef——setSubagentDefaultEngine 同款先例。
     type: 'session.setSubagentEngineDefaultModel',
@@ -149,6 +149,25 @@ const MUTATION_RPC_REGISTRY: readonly MutationRegistryEntry[] = [
     contract: 'echo-value',
     replyKey: 'config.terminalConfig',
     effectiveFields: ['config'],
+  },
+  {
+    // llm-network-proxy：set 校验失败走错误信封不落盘；成功写入 RMW——写侧 dedupeHostList
+    // 归一化去重是确定性变换（请求值 ≠ 落盘终态），归分支一；reply/broadcast 读回落盘终态
+    // （getNetworkProxyConfig()），config 即生效值（消费侧禁乐观写请求值）。
+    type: 'config.setNetworkProxy',
+    branch: 'transformable',
+    contract: 'effective-value',
+    replyKey: 'config.networkProxy',
+    effectiveFields: ['config'],
+  },
+  {
+    // llm-network-proxy：reset 追加重置水位行后 reply 清零后统计（读聚合 all 档），
+    // 消费侧直接刷新视图——stats 非配置副本而是读侧投影，echo 即清零生效值。
+    type: 'config.resetNetworkProxyStats',
+    branch: 'verbatim',
+    contract: 'echo-value',
+    replyKey: 'config.networkProxyStats',
+    effectiveFields: ['stats'],
   },
   {
     type: 'config.setRetryConfig',

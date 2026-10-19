@@ -40,6 +40,9 @@ import type {
   CodemodeEnabledResult,
   CodemodeSetEnabledResult,
   LlmRetryConfig,
+  NetworkProxyConfig,
+  NetworkProxyStatsRange,
+  NetworkProxyTestResult,
   BuiltinProviderTemplate,
   ScannedSkillInfo,
   ScannedAgentInfo,
@@ -176,6 +179,10 @@ export interface SettingsTransport {
   getTerminalConfig(): Promise<{ config: TerminalConfig; corrupted: boolean }>
   /** 读取 LLM 重试配置（configured=false：无显式 retry 配置，config 为合并 pi 默认后的值） */
   getRetryConfig(): Promise<{ config: LlmRetryConfig; configured: boolean }>
+  /** 读取网络代理配置（llm-network-proxy §5 U1 协议，reply = config.networkProxy 同形） */
+  getNetworkProxyConfig(): Promise<ServerMessageMap['config.networkProxy']>
+  /** 请求统计读聚合（range 时间范围过滤；truncatedNote = 「累计」档截断窗口标注，缺省无截断语义） */
+  getNetworkProxyStats(range: NetworkProxyStatsRange): Promise<ServerMessageMap['config.networkProxyStats']>
 
   // ── system 设置项（worktree / 自动重命名 / 智能上下文，reply 为协议 envelope 原样）──
   getWorktreeRootDir(): Promise<ServerMessageMap['config.worktreeRootDir']>
@@ -250,6 +257,12 @@ export interface SettingsTransport {
   setTerminalConfig(config: TerminalConfig): Promise<{ config: TerminalConfig; corrupted: boolean }>
   /** 保存 LLM 重试配置（整体保存；越界 reject） */
   setRetryConfig(config: LlmRetryConfig): Promise<{ config: LlmRetryConfig; configured: boolean }>
+  /** 全量保存网络代理配置（单页单保存语义：一次整页草稿写 ext-config；校验失败 reject） */
+  setNetworkProxyConfig(config: NetworkProxyConfig): Promise<ServerMessageMap['config.networkProxy']>
+  /** 测试连接（runtime 两段探测：代理可达性 + 经代理出站；归因文案与耗时由 runtime 产出） */
+  testNetworkProxy(config: NetworkProxyConfig): Promise<NetworkProxyTestResult>
+  /** 重置请求统计（runtime 追加 reset 水位标记；reply = 清零后统计，消费侧直接刷新视图） */
+  resetNetworkProxyStats(): Promise<ServerMessageMap['config.networkProxyStats']>
 
   // ── system 设置项（worktree / 自动重命名 / 智能上下文）──
   setWorktreeRootDir(dir: string): Promise<ServerMessageMap['config.worktreeRootDir']>
@@ -351,6 +364,8 @@ export interface SettingsTransport {
   onTerminalConfig(h: (cfg: TerminalConfig, corrupted: boolean) => void): () => void
   /** LLM 重试配置广播（多窗口同步） */
   onRetryConfig(h: (payload: { config: LlmRetryConfig; configured: boolean }) => void): () => void
+  /** 网络代理配置广播（保存成功后推回，多窗口同步） */
+  onNetworkProxyConfig(h: (config: NetworkProxyConfig) => void): () => void
 
   // ── OAuth 事件 ──
   /** device flow 中间态（验证码 + 验证链接 + 倒计时） */
