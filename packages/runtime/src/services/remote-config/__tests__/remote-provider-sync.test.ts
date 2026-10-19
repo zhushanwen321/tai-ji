@@ -10,6 +10,8 @@ import { mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import type { IConfigStore } from '../../ports/config.js'
+import type { ProviderExtras } from '../../provider-extras-store.js'
+import type { ProviderExtrasAccessors, ProviderExtrasServiceDeps } from '../../provider-config-helper.js'
 
 let dataDir: string
 
@@ -45,7 +47,7 @@ function mockFetch200(body: unknown): void {
 
 /** 轻量 fake：只实现 sync 链路消费的 IConfigStore 面（getProviderConfig/upsertProvider/
  * getEnabledModels——更新分支不触 ensureProviderInWhitelist 的写侧）。 */
-function makeConfigStore(initial: Record<string, { models?: Array<{ id: string; [k: string]: unknown }> }>) {
+function makeConfigStore(initial: Record<string, Record<string, unknown>>) {
   const providers = new Map(Object.entries(initial))
   const upserts: Array<{ id: string; entry: Record<string, unknown> }> = []
   const store = {
@@ -62,15 +64,16 @@ function makeConfigStore(initial: Record<string, { models?: Array<{ id: string; 
   return { store: store as unknown as IConfigStore, upserts, providers }
 }
 
-function makeExtrasStore(markers: Record<string, { remoteSource?: string; modelStates?: Record<string, { enabled: boolean }> }>) {
-  const providers: Record<string, Record<string, unknown>> = { ...markers }
+function makeExtrasStore(markers: Record<string, { remoteSource?: string; modelStates?: Record<string, { enabled: boolean }> }>): ProviderExtrasAccessors & Pick<ProviderExtrasServiceDeps, 'readAllSync'> {
+  const providers: Record<string, ProviderExtras> = { ...markers }
   return {
     readAllSync: () => providers,
     getExtrasSync: (id: string) => providers[id],
-    modify: async (id: string, fn: (cur: Record<string, unknown>) => Record<string, unknown>) => {
-      providers[id] = fn(providers[id] ?? {})
+    modify: async (id: string, fn: (cur: ProviderExtras | undefined) => ProviderExtras) => {
+      providers[id] = fn(providers[id])
       return providers[id]
     },
+    cleanScopedModelsResidue: async () => {},
   }
 }
 
@@ -130,7 +133,7 @@ describe('syncRemoteProviderModels 合并写盘', () => {
     })
     expect(result.updatedProviders).toEqual(['taiji-relay'])
     expect(upserts).toHaveLength(1)
-    const models = upserts[0].entry.models as Array<{ id: string; name?: string }>
+    const models = upserts[0].entry.models as Array<{ id: string; name?: string; contextWindow?: number }>
     const byId = Object.fromEntries(models.map((m) => [m.id, m]))
     // 同 id 覆盖（远程权威）
     expect(byId['m1'].name).toBe('M1 v2')

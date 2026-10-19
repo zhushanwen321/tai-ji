@@ -42,10 +42,10 @@ function mockFetch(status: number, body?: unknown, headers: Record<string, strin
     status,
     json: async () => body,
     body: null,
-    headers: { get: (k: string) => headers[k.toLowerCase()] ?? null },
+    headers: { get: (k: string): string | null => headers[k.toLowerCase()] ?? null },
   }))
   vi.stubGlobal('fetch', fn)
-  return fn
+  return fn as unknown as ReturnType<typeof vi.fn>
 }
 
 function cachePath(): string {

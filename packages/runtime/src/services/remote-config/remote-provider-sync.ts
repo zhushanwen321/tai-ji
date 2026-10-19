@@ -12,20 +12,19 @@
  */
 import type { BuiltinProviderTemplate } from '@taiji/shared'
 import type { IConfigStore } from '../ports/config.js'
-import type { AuthStorage, CredentialWriter } from '../auth/auth-storage.js'
-import type { ProviderExtrasServiceDeps, SetProviderInput } from '../provider-config-helper.js'
+import type { CredentialWriter } from '../auth/auth-storage.js'
+import type {
+  AuthStorageAccessors,
+  ProviderExtrasAccessors,
+  ProviderExtrasServiceDeps,
+  SetProviderInput,
+} from '../provider-config-helper.js'
 import { setProvider as setProviderImpl } from '../provider-config-helper.js'
 import { isRecord, isOptionalField } from '../quota-providers/types.js'
 import { loadRemoteConfig, refreshRemoteConfig } from './remote-config-fetch.js'
 
 /** BuiltinModelSummary 同形（shared 未从 index 导出该名，沿用 provider-config-helper 惯用法）。 */
 type BuiltinModelSummary = BuiltinProviderTemplate['models'][number]
-
-/** auth.json 存储能力（与 provider-config-helper 的 AuthStorageAccessors 同一 Pick，防漂移）。 */
-type SyncAuthStorageAccessors = Pick<
-  AuthStorage,
-  'remove' | 'hasOAuth' | 'hasOAuthSync' | 'hasCredentialSync' | 'listCredentialIds'
->
 
 /** 远程清单域缓存名（<getDataDir()>/remote-config/builtin-providers.json）。 */
 const DOMAIN = 'builtin-providers' as const
@@ -136,9 +135,10 @@ function remoteModelToDefinition(m: RemoteProviderModel): NonNullable<SetProvide
 
 export interface RemoteProviderSyncDeps { // oe-exempt:20261019:framework:taiji 远程配置域内形状/依赖注入面——接口先立单实现常态（本仓架构偏好），W3 quota-fetchers 域将复用同族形状
   configStore: IConfigStore
-  /** 生产形态 = ConfigService 持有的全量 extras 能力（readAllSync 读标记集）。 */
-  extrasStore?: ProviderExtrasServiceDeps
-  authStorage?: SyncAuthStorageAccessors
+  /** sync 实际消费面（生产形态 = ConfigService 持有的全量 extras 能力的子集；setProvider
+   * 形参位要求 ProviderExtrasAccessors 全集，故含 cleanScopedModelsResidue no-op 能力）。 */
+  extrasStore?: ProviderExtrasAccessors & Pick<ProviderExtrasServiceDeps, 'readAllSync'>
+  authStorage?: AuthStorageAccessors
   credentialWriter?: CredentialWriter
 }
 

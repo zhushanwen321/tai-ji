@@ -24,8 +24,10 @@ import type { IProviderCredentialResolver } from './ports/provider-credential-re
 import { listRemoteProviderTemplates } from './remote-config/remote-provider-sync.js'
 
 /** auth.json 存储能力（ConfigService 注入，与 ConfigService 构造函数 authStorage 同构）。
- * 不含 'set'——写入唯一经 credentialWriter（A1-4 收口，AuthService.saveCredential）。 */
-type AuthStorageAccessors = Pick<AuthStorage, 'remove' | 'hasOAuth' | 'hasOAuthSync' | 'hasCredentialSync' | 'listCredentialIds'>
+ * 不含 'set'——写入唯一经 credentialWriter（A1-4 收口，AuthService.saveCredential）。
+ * export：remote-provider-sync 的 deps 面复用同一形状（防漂移）。
+ */
+export type AuthStorageAccessors = Pick<AuthStorage, 'remove' | 'hasOAuth' | 'hasOAuthSync' | 'hasCredentialSync' | 'listCredentialIds'>
 
 /**
  * providers.json 存储能力（ConfigService 注入，A1-5 写侧切换）。
