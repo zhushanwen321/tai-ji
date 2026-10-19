@@ -22,7 +22,7 @@ import {
   getControlRunDir,
 } from '../../../infra/subagent-control/paths.js'
 import { sweepOrphanEnginePids, sweepStaleControlSockets } from '../../../infra/subagent-control/sweep.js'
-import type { SubagentControlServer } from '../../../infra/subagent-control/control-server.js'
+import type { ControlServerOptions, SubagentControlServer } from '../../../infra/subagent-control/control-server.js'
 import {
   expectOpened,
   makeServer,
@@ -36,7 +36,7 @@ import {
 const tmpDirs: string[] = []
 const servers: SubagentControlServer[] = []
 
-async function setup(overrides: ConstructorParameters<typeof makeServer>[1] = {}): Promise<{
+async function setup(overrides: ControlServerOptions = {}): Promise<{
   server: SubagentControlServer
   dataDir: string
 }> {
@@ -160,6 +160,7 @@ describe('control-server 降级分支', () => {
         command: '/nonexistent/pi-runner-for-test',
         args: ['--flag'],
         env: { PATH: process.env.PATH ?? '' },
+        electronRunAsNode: false,
       }),
     })
     const agent = new TestAgent(server.listeningSocketPath)
