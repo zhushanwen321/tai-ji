@@ -146,7 +146,9 @@ cd $WS_ROOT/main && bash .agents/skills/merge/scripts/prune-dev-link.sh "$WS_ROO
 cd $WS_ROOT/main && bash .agents/skills/merge/scripts/pr-merge.sh <pr-number>
 ```
 
-检查 PR CI 状态并通过 PR 合并（`gh pr merge --merge --delete-branch`，使用 merge commit 绝不 squash）。
+检查 PR CI 状态并通过 PR 合并（`gh pr merge --merge --delete-branch --match-head-commit`，merge commit 绝不 squash；match-head-commit 保证判定时的 head 与合并时的 head 一致——判定通过后 PR 又被推新提交时 gh 拒绝合并，脚本会提示直接重跑（幂等），封住检查-合并竞态窗口）。
+
+> 实现位置：判定与流程逻辑在仓库 `scripts/merge/pr-merge.mjs`（skill 内本脚本是薄壳，经 main worktree 调起恒取 main 最新版）；CI 判定口径 = 结构性 null 比对（未完成检查的 conclusion 为 null → 等待），不再做字符串词表匹配。
 
 **空 checks 防误判**：PR 的 `statusCheckRollup` 为空（CI checks 尚未注册）时，脚本不判「CI 通过」，而是每 15s 重查、最多 4 次；仍为空则 exit 1 并输出排查指引（确认 PR head commit 是否触发 CI / 人工核实），不会在 CI 完全未运行时开始合并。
 
@@ -161,7 +163,7 @@ MAIN_SHA=$(git rev-parse github/main)
 bash .agents/skills/merge/scripts/wait-for-ci.sh "$MAIN_SHA"
 ```
 
-等待 main 分支 CI 通过。wait-for-ci.sh 在项目 skill 目录内（CI 轮询），需传入 commit SHA。
+等待 main 分支 CI 通过。wait-for-ci.sh 是薄壳（实现在仓库 `scripts/merge/wait-for-ci.mjs`，经 main worktree 恒取 main 最新版）。需传入 commit SHA；**省略 SHA 时自动读取 merge 状态文件**（`<workspace 根>/.merge-state/current.json`，pr-merge 阶段写入的 headSha）——阶段 2 正常跑过后可直接 `bash .agents/skills/merge/scripts/wait-for-ci.sh` 不带参数。
 
 > ⏱ **超时语义**：默认 600s 超时（15s 一轮轮询），超时时 exit 2 并提示仍有几个 workflow 在运行——此时询问用户处理，或用 `--timeout 1200` 拉长重跑：`bash .agents/skills/merge/scripts/wait-for-ci.sh "$MAIN_SHA" --timeout 1200`。
 
