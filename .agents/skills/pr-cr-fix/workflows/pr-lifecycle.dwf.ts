@@ -146,6 +146,15 @@ const MAX_COMMIT_REPAIRS = 2;
 const WRITE_FILE =
   "require('fs').mkdirSync(require('path').dirname(process.argv[1]),{recursive:true});require('fs').writeFileSync(process.argv[1],process.argv[2])";
 const READ_FILE_QUIET = "try{process.stdout.write(require('fs').readFileSync(process.argv[1],'utf8'))}catch{}";
+// gate 产物 JSON 投影读取（大 diff 下 coverage.files 全文件级节 / metrics.warn 机器报告档
+// 可达 200KB+，全文过 world.run stdout 超 256KB 引擎上限——实测 284940 bytes 在
+// gate-suite 成功路径炸 readCoverageJson）。消费方均不使用大节：coverage 只读
+// verdict/packages/file_gate；metrics 修复义务输入是 fail（全量保留），warn 属 Gate-1.5
+// 放行档（不做逐条核查），超量截断留样并以 warn_truncated 披露总数。
+const READ_COVERAGE_SLIM =
+  "const fs=require('fs'),a=process.argv;let j;try{j=JSON.parse(fs.readFileSync(a[1],'utf8'))}catch{};if(j){delete j.files;process.stdout.write(JSON.stringify(j))}";
+const READ_METRICS_SLIM =
+  "const fs=require('fs'),a=process.argv;let j;try{j=JSON.parse(fs.readFileSync(a[1],'utf8'))}catch{};if(j){delete j.covered;delete j.targets;delete j.stats;if(Array.isArray(j.warn)&&j.warn.length>40){j.warn_truncated=j.warn.length;j.warn=j.warn.slice(0,40);}process.stdout.write(JSON.stringify(j))}";
 const EXISTS = "process.exit(require('fs').existsSync(process.argv[1])?0:1)";
 // skillDataDir 探针常量（impl-spec §2.1；与 review-fix-loop saved 版镜像逐字一致）：
 // slug 探针输出 basename-realhash8（realpath + sha256 前 8 位）
@@ -262,8 +271,10 @@ async function writeViaNode(path: string, body: string): Promise<void> {
   }
 }
 
-async function readJsonViaNode<T>(path: string): Promise<T | null> {
-  const r = await runNode(["-e", READ_FILE_QUIET, path]);
+// gate 产物 JSON 一律经 slim 脚本投影读取（调用点按消费字段选 READ_COVERAGE_SLIM /
+// READ_METRICS_SLIM）；全文读取通道不再提供——大节过 stdout 的 cap 风险由调用点显式排除
+async function readJsonViaNode<T>(path: string, slimScript: string): Promise<T | null> {
+  const r = await runNode(["-e", slimScript, path]);
   if (r.exitCode !== 0 || r.stdout.trim() === "") return null;
   try {
     return JSON.parse(r.stdout) as T;
@@ -1786,7 +1797,7 @@ interface CoverageJson {
   }>;
 }
 async function readCoverageJson(): Promise<CoverageJson | null> {
-  return readJsonViaNode<CoverageJson>(`${prReviewDir}/coverage.json`);
+  return readJsonViaNode<CoverageJson>(`${prReviewDir}/coverage.json`, READ_COVERAGE_SLIM);
 }
 async function sharedSrcArgs(): Promise<string[]> {
   const names = await world.run("git", ["diff", `${baseHash}..HEAD`, "--name-only"]);
@@ -1849,15 +1860,21 @@ interface MetricsJson {
   verdict?: string;
   fail?: { type?: string; path?: string; files?: string[]; name?: string; reason?: string }[];
   warn?: { type?: string; path?: string; files?: string[]; name?: string; reason?: string }[];
+  /** READ_METRICS_SLIM 截断 warn 样本时写入的总条数（机器报告档，非修复义务） */
+  warn_truncated?: number;
 }
 async function metricsFixContext(metPassed: boolean): Promise<string> {
   if (metPassed) return "metrics-gate 本道已通过（无失败明细，本轮失败在另一道 gate）。";
-  const m = await readJsonViaNode<MetricsJson>(`${prReviewDir}/metrics.json`);
+  const m = await readJsonViaNode<MetricsJson>(`${prReviewDir}/metrics.json`, READ_METRICS_SLIM);
   const fails = m?.fail ?? [];
   const warns = m?.warn ?? [];
   if (fails.length === 0 && warns.length === 0) return "metrics.json 不可读或无明细：以失败输出定位。";
+  const warnNote =
+    m?.warn_truncated !== undefined
+      ? `（warn 为样本 ${warns.length}/${m.warn_truncated} 条——warn 属 Gate-1.5 放行档非修复义务，全量见 pr-review 段 metrics.json）`
+      : "";
   return [
-    "metrics.json 明细（pr-review 段 metrics.json，全量无截断——逐条修复全部条目）：",
+    `metrics.json 明细（pr-review 段 metrics.json；fail 为修复义务全量${warnNote}——逐条修复全部 fail 条目）：`,
     ...fails.map((f) => `- FAIL [${f.type}] ${f.path || (f.files ?? []).join(",")} ${f.name || ""} — ${f.reason || ""}`),
     ...warns.map((f) => `- WARN [${f.type}] ${f.path || (f.files ?? []).join(",")} ${f.name || ""} — ${f.reason || ""}`),
     "要求：按明细修复（降复杂度/解除循环依赖/清理 unresolved import/重复块提取共享 helper）；不放松 .fallowrc.json 阈值。",
@@ -1881,7 +1898,7 @@ await step("gate-suite", async () => {
       const covJson = await readCoverageJson();
       const pct = coveragePctOf(covJson);
       gates.coverage = covJson?.verdict ?? "pass"; // fallback：final-gates 被 skip 时终态披露仍有初跑读数（final-gates onPass 会覆盖）
-      gates.metrics = (await readJsonViaNode<MetricsJson>(`${prReviewDir}/metrics.json`))?.verdict ?? "pass";
+      gates.metrics = (await readJsonViaNode<MetricsJson>(`${prReviewDir}/metrics.json`, READ_METRICS_SLIM))?.verdict ?? "pass";
       log(`[gate-suite] coverage=${gates.coverage}${pct !== null ? `(${pct}%)` : ""} metrics=${gates.metrics}${round > 1 ? `（第 ${round} 轮收敛）` : "（首轮全绿）"}`);
       // PR 规模披露（非门禁）：dev 线累积 diff 的体量让用户知情，供 push 授权决策参考
       const stat = await world.run("git", ["diff", "--stat", `${baseHash}...HEAD`]);
@@ -2104,7 +2121,7 @@ await step("final-gates", async () => {
     },
     async () => {
       const cov = (lastCovJson ??= await readCoverageJson());
-      const met = await readJsonViaNode<MetricsJson>(`${prReviewDir}/metrics.json`);
+      const met = await readJsonViaNode<MetricsJson>(`${prReviewDir}/metrics.json`, READ_METRICS_SLIM);
       const marker = await readPremergeMarker();
       gates.coverage = cov?.verdict ?? "pass";
       gates.metrics = met?.verdict ?? "pass";
