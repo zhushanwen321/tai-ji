@@ -161,11 +161,13 @@ async function makeHarness(mode: string): Promise<Harness> {
   const rootDir = fs.mkdtempSync(join(tmpdir(), "pi-cli-test-spawn-"));
   const sessionDir = join(rootDir, "sessions");
   fs.mkdirSync(sessionDir, { recursive: true });
-  const scriptPath = join(rootDir, "fake-pi.mjs");
+  // 文件名取 pi npm 入口词形 cli.js：getPiInvocation 分支 1 资格 = pi 入口白名单
+  // （basename 精确匹配；staged 引擎入口不得复现的防回归用例见 pi-invocation.test.ts）
+  const scriptPath = join(rootDir, "cli.js");
   fs.writeFileSync(scriptPath, FAKE_PI_SCRIPT);
   process.env.FAKE_PI_MODE = mode;
   const argv1Saved = process.argv[1];
-  process.argv[1] = scriptPath; // getPiInvocation 分支 1：node <script> <args>
+  process.argv[1] = scriptPath; // getPiInvocation 分支 1：node <pi 入口> <args>
   return {
     rootDir,
     sessionDir,

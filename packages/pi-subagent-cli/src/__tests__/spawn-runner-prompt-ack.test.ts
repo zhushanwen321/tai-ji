@@ -122,10 +122,10 @@ function makeHarness(mode: string): Harness {
   const rootDir = fs.mkdtempSync(join(tmpdir(), "pi-cli-ack-test-"));
   const sessionDir = join(rootDir, "sessions");
   fs.mkdirSync(sessionDir, { recursive: true });
-  fs.writeFileSync(join(rootDir, "fake-pi.mjs"), FAKE_PI_SCRIPT);
+  fs.writeFileSync(join(rootDir, "cli.js"), FAKE_PI_SCRIPT); // pi 入口白名单词形（分支 1 资格）
   process.env.FAKE_PI_MODE = mode;
   const argv1Saved = process.argv[1] ?? "";
-  process.argv[1] = join(rootDir, "fake-pi.mjs"); // getPiInvocation 分支 1：node <script>
+  process.argv[1] = join(rootDir, "cli.js"); // getPiInvocation 分支 1：node <pi 入口>
   let notifyReady!: () => void;
   const ready = new Promise<void>((resolve) => {
     notifyReady = resolve;

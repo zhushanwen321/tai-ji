@@ -85,10 +85,10 @@ function makeHarness(): Harness {
   rootDir = fs.mkdtempSync(join(tmpdir(), "pi-cli-test-sfwarn-"));
   sessionDir = join(rootDir, "sessions");
   fs.mkdirSync(sessionDir, { recursive: true });
-  scriptPath = join(rootDir, "fake-pi.mjs");
+  scriptPath = join(rootDir, "cli.js"); // pi 入口白名单词形（getPiInvocation 分支 1 资格）
   fs.writeFileSync(scriptPath, FAKE_PI_SCRIPT);
   argv1Saved = process.argv[1];
-  process.argv[1] = scriptPath; // getPiInvocation 分支 1：node <script> <args>
+  process.argv[1] = scriptPath; // getPiInvocation 分支 1：node <pi 入口> <args>
   logs = [];
   configureLoggerSink({
     log: (level, component, message) => {
