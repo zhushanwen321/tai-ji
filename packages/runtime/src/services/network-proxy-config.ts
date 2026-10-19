@@ -106,14 +106,17 @@ function normalizeProxyServer(raw: unknown): NetworkProxyServer {
     ? (r['protocol'] as NetworkProxyProtocol)
     : fallback.protocol
   const host = typeof r['host'] === 'string' && r['host'].trim() !== '' ? r['host'] : fallback.host
-  const port = typeof r['port'] === 'number' && Number.isInteger(r['port']) && r['port'] >= 1 && r['port'] <= 65535 // eslint-disable-line no-magic-numbers -- TCP 端口合法域上界（与 shared validateNetworkProxyConfig 同一白名单语义）
-    ? r['port']
-    : fallback.port
+  const port = isLegalPort(r['port']) ? (r['port'] as number) : fallback.port
   const username = typeof r['username'] === 'string' ? r['username'] : ''
   const password = typeof r['password'] === 'string' ? r['password'] : ''
   // 凭据成对归一：单边（校验错误形态，手改文件可能出现）双清——成对才有效
   const paired = (username !== '') === (password !== '')
   return { protocol, host, port, username: paired ? username : '', password: paired ? password : '' }
+}
+
+/** 端口白名单判定（与 shared validateNetworkProxyConfig 同一合法域：1-65535 整数）。 */
+function isLegalPort(raw: unknown): boolean {
+  return typeof raw === 'number' && Number.isInteger(raw) && raw >= 1 && raw <= 65535 // eslint-disable-line no-magic-numbers -- TCP 端口合法域上界（与 shared validateNetworkProxyConfig 同一白名单语义）
 }
 
 /** 主机名条目列表归一（读侧防御：过滤非字符串与空白条目；条目原样保留，匹配函数自行归一化）。 */
@@ -199,6 +202,23 @@ interface StatsResetLine { // oe-exempt:20261019:framework:stats JSONL 行判别
 
 type ParsedStatsLine = StatsDataLine | StatsResetLine
 
+/** 数据行字段白名单判定（parseStatsLine 的子步骤）：ts/host 有限值 + 计数字段非负有限数。 */
+function parseStatsDataLine(r: Record<string, unknown>): StatsDataLine | null {
+  const ts = r['ts']
+  const host = r['host']
+  const proxied = r['proxied']
+  const direct = r['direct']
+  if (
+    typeof ts !== 'number' || !Number.isFinite(ts) ||
+    typeof host !== 'string' || host === '' ||
+    typeof proxied !== 'number' || !Number.isFinite(proxied) || proxied < 0 ||
+    typeof direct !== 'number' || !Number.isFinite(direct) || direct < 0
+  ) {
+    return null
+  }
+  return { kind: 'data', ts, host, proxied, direct }
+}
+
 /**
  * 解析单个 stats 行。数据行 = { ts, host, proxied, direct }；重置水位行 = { type:'reset', ts }。
  * 解析失败 / 字段形态非法返回 null（坏行，调用方跳过）；空行静默跳过（不 warn）。
@@ -210,19 +230,7 @@ function parseStatsLine(line: string): ParsedStatsLine | null {
     if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) return badStatsLine(line)
     const r = parsed as Record<string, unknown>
     if (r['type'] === 'reset') return { kind: 'reset' }
-    const ts = r['ts']
-    const host = r['host']
-    const proxied = r['proxied']
-    const direct = r['direct']
-    if (
-      typeof ts !== 'number' || !Number.isFinite(ts) ||
-      typeof host !== 'string' || host === '' ||
-      typeof proxied !== 'number' || !Number.isFinite(proxied) || proxied < 0 ||
-      typeof direct !== 'number' || !Number.isFinite(direct) || direct < 0
-    ) {
-      return badStatsLine(line)
-    }
-    return { kind: 'data', ts, host, proxied, direct }
+    return parseStatsDataLine(r) ?? badStatsLine(line)
   } catch {
     return badStatsLine(line)
   }

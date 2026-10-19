@@ -70,6 +70,52 @@ export function detachResidualDispatcher(
 }
 
 /**
+ * 禁用态收口（转移表首行）：恢复仅限槽位仍归本扩展时执行——槽位已被外部覆盖（pi 启动重装，
+ * 见下）时槽上已是 pi 原生分发器，回写 state.originalDispatcher 会把它挤掉（无害但多余），
+ * 语义上禁用 = 摘除自己的安装，不是改写别人的。
+ */
+function restoreOriginalIfOwned(
+	state: InstalledState | null,
+	deps: Pick<InstallerDeps, "getGlobalDispatcher" | "setGlobalDispatcher">,
+): void {
+	if (state?.current && deps.getGlobalDispatcher() === state.current) {
+		deps.setGlobalDispatcher(state.originalDispatcher);
+	}
+}
+
+/**
+ * 槽位归属核查（pi 启动时序缺陷的根因修复）：pi 1.0.0 启动序列在 extension 安装之后
+ * 仍会重跑 configureHttpDispatcher() 整槽覆盖（dist main.js:707 实证）——指纹未变但槽上
+ * 已非本扩展分发器时按「撤旧装新」重装。original 统一取槽上现持有者：覆盖场景下
+ * state.originalDispatcher 是上一代 pi 原生分发器，fallback 必须指向当前覆盖者才是
+ * 「未命中委托 = 未安装本扩展时 pi 的确切行为」。
+ */
+function resolveOriginal(state: InstalledState | null, slotNow: IDispatcher): IDispatcher {
+	return state && state.current !== null && slotNow === state.current
+		? state.originalDispatcher
+		: slotNow;
+}
+
+/** 构造失败收口（转移表末行）：error 上报 + 撤旧（全部直连），返回记指纹的锁定态。 */
+function lockOnBuildFailure(
+	config: NetworkProxyConfig,
+	state: InstalledState | null,
+	original: IDispatcher,
+	fingerprint: string,
+	deps: InstallerDeps,
+	error: unknown,
+): InstalledState {
+	deps.onError(
+		`网络代理分流器构造失败（协议 ${config.proxy.protocol}），已保持全部直连，不影响 pi 运行；` +
+			`可核对代理配置后保存重试，或关闭网络代理开关。构造错误: ${error instanceof Error ? error.message : String(error)}`,
+	);
+	if (state?.current) {
+		deps.setGlobalDispatcher(original);
+	}
+	return { originalDispatcher: original, fingerprint, current: null };
+}
+
+/**
  * 按新配置推进安装状态机（见模块头转移表）。config 契约 = loadNetworkProxyConfig 产物
  * （normalize 已校验合法——非法配置在读取层回落 defaults+error，构造性到达本函数恒合法）。
  */
@@ -79,12 +125,7 @@ export function applyNetworkProxyConfig(
 	deps: InstallerDeps,
 ): InstalledState | null {
 	if (!config.enabled) {
-		// 恢复仅限槽位仍归本扩展时执行：槽位已被外部覆盖（pi 启动重装，见下）时槽上已是
-		// pi 原生分发器，回写 state.originalDispatcher 会把它挤掉（无害但多余），语义上
-		// 禁用 = 摘除自己的安装，不是改写别人的。
-		if (state?.current && deps.getGlobalDispatcher() === state.current) {
-			deps.setGlobalDispatcher(state.originalDispatcher);
-		}
+		restoreOriginalIfOwned(state, deps);
 		return null;
 	}
 
@@ -96,28 +137,13 @@ export function applyNetworkProxyConfig(
 	if (state && state.fingerprint === fingerprint && slotNow === state.current) {
 		return state; // 同指纹且槽位仍归本扩展：无动作（不重建不重复安装）
 	}
-	// 槽位归属核查（pi 启动时序缺陷的根因修复）：pi 1.0.0 启动序列在 extension 安装之后
-	// 仍会重跑 configureHttpDispatcher() 整槽覆盖（dist main.js:707 实证）——指纹未变但槽上
-	// 已非本扩展分发器时按「撤旧装新」重装。original 统一取槽上现持有者：覆盖场景下
-	// state.originalDispatcher 是上一代 pi 原生分发器，fallback 必须指向当前覆盖者才是
-	// 「未命中委托 = 未安装本扩展时 pi 的确切行为」。
-	const original =
-		state && state.current !== null && slotNow === state.current
-			? state.originalDispatcher
-			: slotNow;
+	const original = resolveOriginal(state, slotNow);
 
 	let proxy: IDispatcher;
 	try {
 		proxy = deps.buildProxy(config);
 	} catch (error) {
-		deps.onError(
-			`网络代理分流器构造失败（协议 ${config.proxy.protocol}），已保持全部直连，不影响 pi 运行；` +
-				`可核对代理配置后保存重试，或关闭网络代理开关。构造错误: ${error instanceof Error ? error.message : String(error)}`,
-		);
-		if (state?.current) {
-			deps.setGlobalDispatcher(original);
-		}
-		return { originalDispatcher: original, fingerprint, current: null };
+		return lockOnBuildFailure(config, state, original, fingerprint, deps, error);
 	}
 
 	const dispatcher = new RuleDispatchDispatcher({

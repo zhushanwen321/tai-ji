@@ -146,63 +146,73 @@ export function startSocks5Server(opts = {}) {
     handleConnection(socket).catch(() => socket.destroy());
   });
 
+  /** RFC 1928 方法协商；auth 非空时按需转 RFC 1929 子协商。false = 协商失败（已 destroy）。 */
+  async function negotiateMethod(reader, socket) {
+    const greeting = await reader.read(2);
+    if (greeting[0] !== 0x05) return false;
+    const methodCount = greeting[1];
+    const methods = await reader.read(methodCount);
+    let chosen = 0xff;
+    if (opts.auth) {
+      if (methods.includes(0x02)) chosen = 0x02;
+    } else if (methods.includes(0x00)) {
+      chosen = 0x00;
+    }
+    socket.write(Buffer.from([0x05, chosen]));
+    if (chosen === 0xff) return false;
+    if (chosen === 0x02) return authSubnegotiate(reader, socket);
+    return true;
+  }
+
+  /** RFC 1929 用户名密码子协商。false = 认证失败（已 destroy）。 */
+  async function authSubnegotiate(reader, socket) {
+    const head = await reader.read(2); // VER ULEN
+    if (head[0] !== 0x01) return false;
+    const uname = (await reader.read(head[1])).toString("utf8");
+    const plen = (await reader.read(1))[0];
+    const passwd = (await reader.read(plen)).toString("utf8");
+    const ok = uname === opts.auth.username && passwd === opts.auth.password;
+    socket.write(Buffer.from([0x01, ok ? 0x00 : 0x01]));
+    return ok;
+  }
+
+  /** 读 CONNECT 请求目标地址（IPv4 / 域名 / IPv6）。不支持 ATYP 回 REP=8 返回 null。 */
+  async function readRequestTarget(reader, socket) {
+    const req = await reader.read(4); // VER CMD RSV ATYP
+    if (req[0] !== 0x05) return null;
+    const atyp = req[3];
+    let host;
+    if (atyp === 0x01) {
+      host = [...(await reader.read(4))].join(".");
+    } else if (atyp === 0x03) {
+      const len = (await reader.read(1))[0];
+      host = (await reader.read(len)).toString("ascii");
+    } else if (atyp === 0x04) {
+      host = bytesToIpv6(await reader.read(16));
+    } else {
+      socket.write(socksReply(0x08)); // address type not supported
+      return null;
+    }
+    const portBuf = await reader.read(2);
+    return { cmd: req[1], host, port: portBuf.readUInt16BE(0) };
+  }
+
   async function handleConnection(socket) {
     const reader = makeHandshakeReader(socket);
     try {
-      // RFC 1928 greeting
-      const greeting = await reader.read(2);
-      if (greeting[0] !== 0x05) return socket.destroy();
-      const methodCount = greeting[1];
-      const methods = await reader.read(methodCount);
-      let chosen = 0xff;
-      if (opts.auth) {
-        if (methods.includes(0x02)) chosen = 0x02;
-      } else if (methods.includes(0x00)) {
-        chosen = 0x00;
-      }
-      socket.write(Buffer.from([0x05, chosen]));
-      if (chosen === 0xff) return socket.destroy();
+      if (!(await negotiateMethod(reader, socket))) return socket.destroy();
 
-      // RFC 1929 子协商
-      if (chosen === 0x02) {
-        const head = await reader.read(2); // VER ULEN
-        if (head[0] !== 0x01) return socket.destroy();
-        const uname = (await reader.read(head[1])).toString("utf8");
-        const plen = (await reader.read(1))[0];
-        const passwd = (await reader.read(plen)).toString("utf8");
-        const ok = uname === opts.auth.username && passwd === opts.auth.password;
-        socket.write(Buffer.from([0x01, ok ? 0x00 : 0x01]));
-        if (!ok) return socket.destroy();
-      }
-
-      // RFC 1928 request
-      const req = await reader.read(4); // VER CMD RSV ATYP
-      if (req[0] !== 0x05) return socket.destroy();
-      const cmd = req[1];
-      const atyp = req[3];
-      let host;
-      if (atyp === 0x01) {
-        host = [...(await reader.read(4))].join(".");
-      } else if (atyp === 0x03) {
-        const len = (await reader.read(1))[0];
-        host = (await reader.read(len)).toString("ascii");
-      } else if (atyp === 0x04) {
-        host = bytesToIpv6(await reader.read(16));
-      } else {
-        socket.write(socksReply(0x08)); // address type not supported
-        return socket.destroy();
-      }
-      const portBuf = await reader.read(2);
-      const port = portBuf.readUInt16BE(0);
+      const target0 = await readRequestTarget(reader, socket);
+      if (target0 === null) return socket.destroy();
       reader.done();
-      appendRecord({ host, port, ts: new Date().toISOString() });
+      appendRecord({ host: target0.host, port: target0.port, ts: new Date().toISOString() });
 
-      if (cmd !== 0x01) {
+      if (target0.cmd !== 0x01) {
         socket.write(socksReply(0x07)); // command not supported
         return socket.destroy();
       }
 
-      const target = endpoint ? { host: "127.0.0.1", port: endpoint.port } : { host, port };
+      const target = endpoint ? { host: "127.0.0.1", port: endpoint.port } : { host: target0.host, port: target0.port };
       const upstream = net.connect(target.port, target.host);
       upstream.on("error", () => {
         try {
@@ -296,7 +306,8 @@ function decodeGzipJson(raw) {
   return JSON.parse(zlib.gunzipSync(raw).toString("utf8"));
 }
 
-async function selftest() {
+/** 自测断言器（check + failures 收集，场景函数共用）。 */
+function makeChecker() {
   const failures = [];
   const check = (name, cond, detail = "") => {
     if (cond) {
@@ -306,48 +317,114 @@ async function selftest() {
       console.error(`  FAIL: ${name}${detail ? ` — ${detail}` : ""}`);
     }
   };
+  return { failures, check };
+}
+
+/** 场景 A：无需认证形态 + mock 端点桥接（socks5h：curl 发域名 ATYP）。 */
+async function selftestSceneA(check, a) {
+  const url = "https://api.anthropic.com/v1/messages";
+  const body = JSON.stringify(SELFTEST_BODY);
+  check("A: SOCKS5 + 端点就绪（caFile 已产出）", typeof a.port === "number" && typeof a.caFile === "string");
+  const rawA = await curlRun([
+    "--max-time", "10", "-sS",
+    "--proxy", `socks5h://127.0.0.1:${a.port}`,
+    "--cacert", a.caFile,
+    "-X", "POST", "-H", "content-type: application/json", "-d", body,
+    url,
+  ]);
+  let parsedA = null;
+  try {
+    parsedA = decodeGzipJson(rawA.stdout);
+  } catch {
+    // 留给断言报失败
+  }
+  check(
+    "A: 无需认证握手 + CONNECT 桥接 mock 端点（回显一致）",
+    parsedA?.type === "message" && parsedA?.content?.[0]?.text?.includes(SELFTEST_ECHO),
+    parsedA ? `text=${parsedA?.content?.[0]?.text}` : `raw ${rawA.stdout.length}B ${rawA.stderr.slice(-120)}`,
+  );
+  const recA = JSON.parse(fs.readFileSync(a.recordFile, "utf8"));
+  check(
+    "A: 连接记录含域名目标 api.anthropic.com:443（ATYP=domain）",
+    Array.isArray(recA.targets) && recA.targets.some((t) => t.host === "api.anthropic.com" && t.port === 443),
+    JSON.stringify(recA).slice(0, 200),
+  );
+}
+
+/** 场景 B：RFC 1929 认证形态（正确凭据通 / 错误凭据拒）。 */
+async function selftestSceneB(check, b) {
+  const url = "https://api.anthropic.com/v1/messages";
+  const body = JSON.stringify(SELFTEST_BODY);
+  const rawB = await curlRun([
+    "--max-time", "10", "-sS",
+    "--proxy", `socks5h://mockuser:mockpass@127.0.0.1:${b.port}`,
+    "--cacert", b.caFile,
+    "-X", "POST", "-H", "content-type: application/json", "-d", body,
+    url,
+  ]);
+  let parsedB = null;
+  try {
+    parsedB = decodeGzipJson(rawB.stdout);
+  } catch {
+    // 留给断言报失败
+  }
+  check("B: RFC 1929 正确凭据认证通过 + 全链路回显", parsedB?.content?.[0]?.text?.includes(SELFTEST_ECHO), parsedB ? `text=${parsedB?.content?.[0]?.text}` : `raw ${rawB.stdout.length}B ${rawB.stderr.slice(-120)}`);
+  const bAuthRun = await curlRun([
+    "--max-time", "10", "-sS",
+    "--proxy", `socks5h://mockuser:WRONGPASS@127.0.0.1:${b.port}`,
+    "--cacert", b.caFile,
+    "-X", "POST", "-H", "content-type: application/json", "-d", body,
+    url,
+  ]);
+  check("B: RFC 1929 错误凭据被拒（curl 非零退出，CONNECT 未记录）", !bAuthRun.ok, bAuthRun.stderr.slice(-120));
+  const recB = JSON.parse(fs.readFileSync(b.recordFile, "utf8"));
+  check(
+    "B: 认证失败的连接不进连接记录（记录仅含认证通过那 1 条）",
+    Array.isArray(recB.targets) && recB.targets.length === 1,
+    JSON.stringify(recB).slice(0, 200),
+  );
+}
+
+/** 场景 C：IP 目标（ATYP=IPv4）+ 默认分支桥接真实目标（桥到 A 的端点，全程不触外网）。 */
+async function selftestSceneC(check, c, a) {
+  const body = JSON.stringify(SELFTEST_BODY);
+  const rawC = await curlRun([
+    "--max-time", "10", "-sS",
+    "--proxy", `socks5h://127.0.0.1:${c.port}`,
+    "--cacert", a.caFile,
+    "-X", "POST", "-H", "content-type: application/json", "-d", body,
+    `https://127.0.0.1:${a.endpointPort}/v1/messages`,
+  ]);
+  let parsedC = null;
+  try {
+    parsedC = decodeGzipJson(rawC.stdout);
+  } catch {
+    // 留给断言报失败
+  }
+  check("C: ATYP=IPv4 目标桥接（回显一致）", parsedC?.content?.[0]?.text?.includes(SELFTEST_ECHO), parsedC ? `text=${parsedC?.content?.[0]?.text}` : `raw ${rawC.stdout.length}B ${rawC.stderr.slice(-120)}`);
+  const recC = JSON.parse(fs.readFileSync(c.recordFile, "utf8"));
+  check(
+    "C: 连接记录含 IP 目标 127.0.0.1（ATYP=IPv4）",
+    Array.isArray(recC.targets) && recC.targets.some((t) => t.host === "127.0.0.1" && typeof t.ts === "string"),
+    JSON.stringify(recC).slice(0, 200),
+  );
+}
+
+async function selftest() {
+  const { failures, check } = makeChecker();
   const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "socks5-selftest-"));
   let a = null;
   let b = null;
   let c = null;
   try {
-    const url = "https://api.anthropic.com/v1/messages";
-    const body = JSON.stringify(SELFTEST_BODY);
-
-    // A) 无需认证形态 + mock 端点桥接（socks5h：curl 发域名 ATYP）
     a = await startSocks5Server({
       withMockEndpoint: true,
       record: path.join(tmp, "a-record.json"),
       certDir: path.join(tmp, "certs-a"),
     });
     await a.start();
-    check("A: SOCKS5 + 端点就绪（caFile 已产出）", typeof a.port === "number" && typeof a.caFile === "string");
-    const rawA = await curlRun([
-      "--max-time", "10", "-sS",
-      "--proxy", `socks5h://127.0.0.1:${a.port}`,
-      "--cacert", a.caFile,
-      "-X", "POST", "-H", "content-type: application/json", "-d", body,
-      url,
-    ]);
-    let parsedA = null;
-    try {
-      parsedA = decodeGzipJson(rawA.stdout);
-    } catch {
-      // 留给断言报失败
-    }
-    check(
-      "A: 无需认证握手 + CONNECT 桥接 mock 端点（回显一致）",
-      parsedA?.type === "message" && parsedA?.content?.[0]?.text?.includes(SELFTEST_ECHO),
-      parsedA ? `text=${parsedA?.content?.[0]?.text}` : `raw ${rawA.stdout.length}B ${rawA.stderr.slice(-120)}`,
-    );
-    const recA = JSON.parse(fs.readFileSync(a.recordFile, "utf8"));
-    check(
-      "A: 连接记录含域名目标 api.anthropic.com:443（ATYP=domain）",
-      Array.isArray(recA.targets) && recA.targets.some((t) => t.host === "api.anthropic.com" && t.port === 443),
-      JSON.stringify(recA).slice(0, 200),
-    );
+    await selftestSceneA(check, a);
 
-    // B) RFC 1929 认证形态：正确凭据通、错误凭据拒
     b = await startSocks5Server({
       auth: { username: "mockuser", password: "mockpass" },
       withMockEndpoint: true,
@@ -355,58 +432,11 @@ async function selftest() {
       certDir: path.join(tmp, "certs-b"),
     });
     await b.start();
-    const rawB = await curlRun([
-      "--max-time", "10", "-sS",
-      "--proxy", `socks5h://mockuser:mockpass@127.0.0.1:${b.port}`,
-      "--cacert", b.caFile,
-      "-X", "POST", "-H", "content-type: application/json", "-d", body,
-      url,
-    ]);
-    let parsedB = null;
-    try {
-      parsedB = decodeGzipJson(rawB.stdout);
-    } catch {
-      // 留给断言报失败
-    }
-    check("B: RFC 1929 正确凭据认证通过 + 全链路回显", parsedB?.content?.[0]?.text?.includes(SELFTEST_ECHO), parsedB ? `text=${parsedB?.content?.[0]?.text}` : `raw ${rawB.stdout.length}B ${rawB.stderr.slice(-120)}`);
-    const bAuthRun = await curlRun([
-      "--max-time", "10", "-sS",
-      "--proxy", `socks5h://mockuser:WRONGPASS@127.0.0.1:${b.port}`,
-      "--cacert", b.caFile,
-      "-X", "POST", "-H", "content-type: application/json", "-d", body,
-      url,
-    ]);
-    check("B: RFC 1929 错误凭据被拒（curl 非零退出，CONNECT 未记录）", !bAuthRun.ok, bAuthRun.stderr.slice(-120));
-    const recB = JSON.parse(fs.readFileSync(b.recordFile, "utf8"));
-    check(
-      "B: 认证失败的连接不进连接记录（记录仅含认证通过那 1 条）",
-      Array.isArray(recB.targets) && recB.targets.length === 1,
-      JSON.stringify(recB).slice(0, 200),
-    );
+    await selftestSceneB(check, b);
 
-    // C) IP 目标（ATYP=IPv4）+ 默认分支桥接真实目标（桥到 A 的端点，全程不触外网）
     c = await startSocks5Server({ record: path.join(tmp, "c-record.json") });
     await c.start();
-    const rawC = await curlRun([
-      "--max-time", "10", "-sS",
-      "--proxy", `socks5h://127.0.0.1:${c.port}`,
-      "--cacert", a.caFile,
-      "-X", "POST", "-H", "content-type: application/json", "-d", body,
-      `https://127.0.0.1:${a.endpointPort}/v1/messages`,
-    ]);
-    let parsedC = null;
-    try {
-      parsedC = decodeGzipJson(rawC.stdout);
-    } catch {
-      // 留给断言报失败
-    }
-    check("C: ATYP=IPv4 目标桥接（回显一致）", parsedC?.content?.[0]?.text?.includes(SELFTEST_ECHO), parsedC ? `text=${parsedC?.content?.[0]?.text}` : `raw ${rawC.stdout.length}B ${rawC.stderr.slice(-120)}`);
-    const recC = JSON.parse(fs.readFileSync(c.recordFile, "utf8"));
-    check(
-      "C: 连接记录含 IP 目标 127.0.0.1（ATYP=IPv4）",
-      Array.isArray(recC.targets) && recC.targets.some((t) => t.host === "127.0.0.1" && typeof t.ts === "string"),
-      JSON.stringify(recC).slice(0, 200),
-    );
+    await selftestSceneC(check, c, a);
 
     console.log(failures.length === 0 ? "[socks5-server] SELFTEST PASS" : `[socks5-server] SELFTEST FAIL（${failures.length} 项）`);
     process.exitCode = failures.length === 0 ? 0 : 1;

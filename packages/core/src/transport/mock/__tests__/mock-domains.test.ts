@@ -521,6 +521,38 @@ describe('mock config domain', () => {
     expect(rc.configured).toBe(false)
     expect(typeof config.onRetryConfig(() => {})).toBe('function')
   })
+
+  it('网络代理 stub（llm-network-proxy U4）：get 内存态 / set 深拷贝广播 / test 恒成功 / stats 演示行 + reset 清空', async () => {
+    // get 初始 = 禁用态默认（mock 模块级内存态，此前用例未触碰）
+    const np0 = await config.getNetworkProxyConfig()
+    expect(np0.config.enabled).toBe(false)
+    // set 深拷贝后广播 + 回执同形；调用方原地改写不影响 mock 内存态
+    const next = {
+      enabled: true,
+      proxy: { protocol: 'http' as const, host: '127.0.0.1', port: 7891, username: '', password: '' },
+      noProxy: ['localhost'],
+      rules: ['api.anthropic.com'],
+    }
+    const npSeen: unknown[] = []
+    const unNp = config.onNetworkProxyConfig((c) => npSeen.push(c))
+    const npSet = await config.setNetworkProxyConfig(next)
+    expect(npSet.config.enabled).toBe(true)
+    await waitFor(() => npSeen.some((c) => (c as { enabled?: boolean }).enabled === true))
+    // 订阅注册即触发初始推送（mock 订阅型惯例）——set 后广播的是最后一条
+    expect(npSeen[npSeen.length - 1]).toEqual(next)
+    next.proxy.port = 9999
+    const np1 = await config.getNetworkProxyConfig()
+    expect(np1.config.proxy.port).toBe(7891)
+    // test 恒成功（演示值）；stats 非空演示行、reset 清空
+    const testReply = await config.testNetworkProxy(np1.config)
+    expect(testReply.ok).toBe(true)
+    expect(testReply.stage).toBe('done')
+    const stats = await config.getNetworkProxyStats('24h')
+    expect(stats.stats.length).toBeGreaterThan(0)
+    const afterReset = await config.resetNetworkProxyStats()
+    expect(afterReset.stats).toEqual([])
+    unNp()
+  })
 })
 
 describe('mock model / extension / plugin / composer / search domain', () => {

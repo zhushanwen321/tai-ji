@@ -75,6 +75,30 @@ function collectHostEntryErrors(entries: unknown, label: string): string[] {
 	return errors;
 }
 
+/** proxy 对象字段校验（validateNetworkProxyConfig 的子步骤，语义镜像 shared collectProxyServerErrors）。 */
+function collectProxyServerErrors(proxy: unknown): string[] {
+	if (proxy === null || typeof proxy !== "object" || Array.isArray(proxy)) {
+		return ["代理服务器配置必须是对象（协议 + 地址 + 端口），请重新填写代理服务器信息"];
+	}
+	const errors: string[] = [];
+	const { protocol, host, port, username, password } = proxy as Record<string, unknown>;
+	if (typeof protocol !== "string" || !PROTOCOLS.includes(protocol)) {
+		errors.push(`代理协议必须是 http / https / socks5 之一: ${String(protocol)}，请重新选择协议`);
+	}
+	if (typeof host !== "string" || host.trim() === "") {
+		errors.push("代理服务器地址不能为空，请填写代理地址（如 127.0.0.1）");
+	}
+	if (typeof port !== "number" || !Number.isInteger(port) || port < PORT_MIN || port > PORT_MAX) {
+		errors.push(`代理端口必须是 ${PORT_MIN}-${PORT_MAX} 的整数: ${String(port)}，请填写正确的端口`);
+	}
+	if (typeof username !== "string" || typeof password !== "string") {
+		errors.push("认证用户名与密码必须是文本，请检查认证输入框内容");
+	} else if ((username !== "") !== (password !== "")) {
+		errors.push("认证用户名与密码必须同时填写或同时留空（代理认证要求两者成对），请补全另一项或清空两项");
+	}
+	return errors;
+}
+
 /**
  * 网络代理配置校验（语义复制自 shared validateNetworkProxyConfig）：
  * 协议白名单、端口 1-65535 整数、凭据成对、noProxy/rules 条目非空主机名。
@@ -92,25 +116,7 @@ export function validateNetworkProxyConfig(config: unknown): NetworkProxyValidat
 			`网络代理开关必须是开或关: ${JSON.stringify(enabled) ?? String(enabled)}，请重新切换一次开关后保存`,
 		);
 	}
-	if (proxy === null || typeof proxy !== "object" || Array.isArray(proxy)) {
-		errors.push("代理服务器配置必须是对象（协议 + 地址 + 端口），请重新填写代理服务器信息");
-	} else {
-		const { protocol, host, port, username, password } = proxy as Record<string, unknown>;
-		if (typeof protocol !== "string" || !PROTOCOLS.includes(protocol)) {
-			errors.push(`代理协议必须是 http / https / socks5 之一: ${String(protocol)}，请重新选择协议`);
-		}
-		if (typeof host !== "string" || host.trim() === "") {
-			errors.push("代理服务器地址不能为空，请填写代理地址（如 127.0.0.1）");
-		}
-		if (typeof port !== "number" || !Number.isInteger(port) || port < PORT_MIN || port > PORT_MAX) {
-			errors.push(`代理端口必须是 ${PORT_MIN}-${PORT_MAX} 的整数: ${String(port)}，请填写正确的端口`);
-		}
-		if (typeof username !== "string" || typeof password !== "string") {
-			errors.push("认证用户名与密码必须是文本，请检查认证输入框内容");
-		} else if ((username !== "") !== (password !== "")) {
-			errors.push("认证用户名与密码必须同时填写或同时留空（代理认证要求两者成对），请补全另一项或清空两项");
-		}
-	}
+	errors.push(...collectProxyServerErrors(proxy));
 	errors.push(...collectHostEntryErrors(noProxy, "直连排除清单（noProxy）"));
 	errors.push(...collectHostEntryErrors(rules, "代理规则（rules）"));
 	return errors.length > 0 ? { ok: false, errors } : { ok: true };

@@ -254,7 +254,8 @@ function wsEchoViaProxy(proxyPort, caFile, host = "api.anthropic.com", text = "w
   });
 }
 
-async function selftest() {
+/** 自测断言器（check + failures 收集，场景函数共用）。 */
+function makeChecker() {
   const failures = [];
   const check = (name, cond, detail = "") => {
     if (cond) {
@@ -264,6 +265,103 @@ async function selftest() {
       console.error(`  FAIL: ${name}${detail ? ` — ${detail}` : ""}`);
     }
   };
+  return { failures, check };
+}
+
+/** 场景 A1：CONNECT 隧道 + 非 stream 传输层 gzip 形态全链路（curl 未带 --compressed 时输出原始字节）。 */
+async function selftestSceneA1(check, base, url) {
+  const raw = await curlRun([...base, "-X", "POST", "-H", "content-type: application/json", "-d", JSON.stringify(SELFTEST_BODY), url]);
+  check("A: CONNECT 隧道 + 自签信任链打通（curl exit 0）", raw.ok && raw.stdout.length > 0, raw.stderr.slice(-200));
+  check("A: 响应体在传输层为 gzip（魔数 1f 8b）", raw.stdout[0] === 0x1f && raw.stdout[1] === 0x8b, `首字节 ${raw.stdout[0]} ${raw.stdout[1]}`);
+  let parsed = null;
+  try {
+    parsed = JSON.parse(zlib.gunzipSync(raw.stdout).toString("utf8"));
+  } catch {
+    // 留给下一断言报失败
+  }
+  check(
+    "A: anthropic /v1/messages 响应形态 + 回显（type=message，content[0].text 含请求文本）",
+    parsed?.type === "message" && parsed?.content?.[0]?.text?.includes(SELFTEST_ECHO),
+    parsed ? `text=${parsed?.content?.[0]?.text}` : "解包失败",
+  );
+}
+
+/** 场景 A2：stream=true 的 SSE 事件流（整流 gzip 包裹）。 */
+async function selftestSceneA2(check, base, url) {
+  const sseRaw = await curlRun([...base, "-N", "-X", "POST", "-H", "content-type: application/json", "-d", JSON.stringify({ ...SELFTEST_BODY, stream: true }), url]);
+  let sse = "";
+  try {
+    sse = zlib.gunzipSync(sseRaw.stdout).toString("utf8");
+  } catch {
+    sse = "";
+  }
+  check(
+    "A: SSE 流式形态（message_start…message_stop + text_delta 回显）",
+    sse.includes("event: message_start") && sse.includes("event: content_block_delta") && sse.includes("event: message_stop") && sse.includes(SELFTEST_ECHO),
+    sse ? sse.slice(0, 120) : "解包失败",
+  );
+}
+
+/** 场景 A3：CONNECT 记录形态断言。 */
+function selftestSceneA3(check, a) {
+  const recA = JSON.parse(fs.readFileSync(a.recordFile, "utf8"));
+  check(
+    "A: CONNECT 记录 {targets:[{host,port,ts}]} 含 api.anthropic.com:443",
+    Array.isArray(recA.targets) && recA.targets.some((t) => t.host === "api.anthropic.com" && t.port === 443 && typeof t.ts === "string"),
+    JSON.stringify(recA).slice(0, 200),
+  );
+}
+
+/** 场景 B：无 mock 端点的普通代理，默认分支 = 桥接 CONNECT 声明的真实目标（桥到 A 的 mock
+ *  端点 127.0.0.1:<endpointPort>，证书 SAN 含 127.0.0.1，全程不触外网）。 */
+async function selftestSceneB(check, b, a) {
+  const rawB = await curlRun([
+    "--max-time", "10", "-sS",
+    "--proxy", `http://127.0.0.1:${b.port}`,
+    "--cacert", a.caFile,
+    "-X", "POST", "-H", "content-type: application/json", "-d", JSON.stringify(SELFTEST_BODY),
+    `https://127.0.0.1:${a.endpointPort}/v1/messages`,
+  ]);
+  let parsedB = null;
+  try {
+    parsedB = JSON.parse(zlib.gunzipSync(rawB.stdout).toString("utf8"));
+  } catch {
+    // 留给断言报失败
+  }
+  check(
+    "B: 默认分支桥接真实目标（经两级隧道到 A 的端点，回显一致）",
+    parsedB?.content?.[0]?.text?.includes(SELFTEST_ECHO),
+    parsedB ? `text=${parsedB?.content?.[0]?.text}` : `raw ${rawB.stdout.length}B ${rawB.stderr.slice(-120)}`,
+  );
+}
+
+/** 场景 C：block-upstream（接受 CONNECT 回 200 但不桥接）→ 客户端出站失败。 */
+async function selftestSceneC(check, c, a, url) {
+  const cRun = await curlRun([
+    "--max-time", "10", "-sS",
+    "--proxy", `http://127.0.0.1:${c.port}`,
+    "--cacert", a.caFile,
+    "-X", "POST", "-H", "content-type: application/json", "-d", JSON.stringify(SELFTEST_BODY),
+    url,
+  ]);
+  check("C: block-upstream 客户端出站失败（curl 非零退出）", !cRun.ok, cRun.stderr.slice(-200));
+  const recC = JSON.parse(fs.readFileSync(c.recordFile, "utf8"));
+  check("C: block-upstream 仍记录 CONNECT", Array.isArray(recC.targets) && recC.targets.length >= 1, JSON.stringify(recC).slice(0, 200));
+}
+
+/** 场景 D：场景 8 构造——WS upgrade 经代理 CONNECT 隧道（101 交换 + text 帧 echo 全链路）；
+ *  端点侧 = mock-endpoint 的 WS upgrade 分支；客户端侧 = 手写最小 WS 交换（零依赖）。 */
+async function selftestSceneD(check, a) {
+  const wsEcho = await wsEchoViaProxy(a.port, a.caFile).catch((err) => `ERR: ${err?.message ?? err}`);
+  check(
+    "D: WS upgrade 经 CONNECT 隧道（101 + mock-ws-echo 回显）",
+    wsEcho === "mock-ws-echo: ws-probe-42",
+    String(wsEcho).slice(0, 160),
+  );
+}
+
+async function selftest() {
+  const { failures, check } = makeChecker();
   const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "mock-proxy-selftest-"));
   let a = null;
   let b = null;
@@ -280,86 +378,17 @@ async function selftest() {
     const base = ["--max-time", "10", "-sS", "--proxy", `http://127.0.0.1:${a.port}`, "--cacert", a.caFile];
     const url = "https://api.anthropic.com/v1/messages";
 
-    // 非 stream：传输层显式 gzip（curl 未带 --compressed 时输出原始字节）
-    const raw = await curlRun([...base, "-X", "POST", "-H", "content-type: application/json", "-d", JSON.stringify(SELFTEST_BODY), url]);
-    check("A: CONNECT 隧道 + 自签信任链打通（curl exit 0）", raw.ok && raw.stdout.length > 0, raw.stderr.slice(-200));
-    check("A: 响应体在传输层为 gzip（魔数 1f 8b）", raw.stdout[0] === 0x1f && raw.stdout[1] === 0x8b, `首字节 ${raw.stdout[0]} ${raw.stdout[1]}`);
-    let parsed = null;
-    try {
-      parsed = JSON.parse(zlib.gunzipSync(raw.stdout).toString("utf8"));
-    } catch {
-      // 留给下一断言报失败
-    }
-    check(
-      "A: anthropic /v1/messages 响应形态 + 回显（type=message，content[0].text 含请求文本）",
-      parsed?.type === "message" && parsed?.content?.[0]?.text?.includes(SELFTEST_ECHO),
-      parsed ? `text=${parsed?.content?.[0]?.text}` : "解包失败",
-    );
+    await selftestSceneA1(check, base, url);
+    await selftestSceneA2(check, base, url);
+    selftestSceneA3(check, a);
 
-    // stream=true：SSE 事件流（整流 gzip 包裹）
-    const sseRaw = await curlRun([...base, "-N", "-X", "POST", "-H", "content-type: application/json", "-d", JSON.stringify({ ...SELFTEST_BODY, stream: true }), url]);
-    let sse = "";
-    try {
-      sse = zlib.gunzipSync(sseRaw.stdout).toString("utf8");
-    } catch {
-      sse = "";
-    }
-    check(
-      "A: SSE 流式形态（message_start…message_stop + text_delta 回显）",
-      sse.includes("event: message_start") && sse.includes("event: content_block_delta") && sse.includes("event: message_stop") && sse.includes(SELFTEST_ECHO),
-      sse ? sse.slice(0, 120) : "解包失败",
-    );
-
-    const recA = JSON.parse(fs.readFileSync(a.recordFile, "utf8"));
-    check(
-      "A: CONNECT 记录 {targets:[{host,port,ts}]} 含 api.anthropic.com:443",
-      Array.isArray(recA.targets) && recA.targets.some((t) => t.host === "api.anthropic.com" && t.port === 443 && typeof t.ts === "string"),
-      JSON.stringify(recA).slice(0, 200),
-    );
-
-    // B) 无 mock 端点的普通代理：默认分支 = 桥接 CONNECT 声明的真实目标
-    //    （桥到 A 的 mock 端点 127.0.0.1:<endpointPort>，证书 SAN 含 127.0.0.1，全程不触外网）
     b = await startMockProxy({ port: 0 });
-    const rawB = await curlRun([
-      "--max-time", "10", "-sS",
-      "--proxy", `http://127.0.0.1:${b.port}`,
-      "--cacert", a.caFile,
-      "-X", "POST", "-H", "content-type: application/json", "-d", JSON.stringify(SELFTEST_BODY),
-      `https://127.0.0.1:${a.endpointPort}/v1/messages`,
-    ]);
-    let parsedB = null;
-    try {
-      parsedB = JSON.parse(zlib.gunzipSync(rawB.stdout).toString("utf8"));
-    } catch {
-      // 留给断言报失败
-    }
-    check(
-      "B: 默认分支桥接真实目标（经两级隧道到 A 的端点，回显一致）",
-      parsedB?.content?.[0]?.text?.includes(SELFTEST_ECHO),
-      parsedB ? `text=${parsedB?.content?.[0]?.text}` : `raw ${rawB.stdout.length}B ${rawB.stderr.slice(-120)}`,
-    );
+    await selftestSceneB(check, b, a);
 
-    // C) block-upstream：接受 CONNECT（回 200）但不桥接 → 客户端出站失败
     c = await startMockProxy({ port: 0, blockUpstream: true, record: path.join(tmp, "c-record.json") });
-    const cRun = await curlRun([
-      "--max-time", "10", "-sS",
-      "--proxy", `http://127.0.0.1:${c.port}`,
-      "--cacert", a.caFile,
-      "-X", "POST", "-H", "content-type: application/json", "-d", JSON.stringify(SELFTEST_BODY),
-      url,
-    ]);
-    check("C: block-upstream 客户端出站失败（curl 非零退出）", !cRun.ok, cRun.stderr.slice(-200));
-    const recC = JSON.parse(fs.readFileSync(c.recordFile, "utf8"));
-    check("C: block-upstream 仍记录 CONNECT", Array.isArray(recC.targets) && recC.targets.length >= 1, JSON.stringify(recC).slice(0, 200));
+    await selftestSceneC(check, c, a, url);
 
-    // D) 场景 8 构造：WS upgrade 经代理 CONNECT 隧道（101 交换 + text 帧 echo 全链路）
-    //    端点侧 = mock-endpoint 的 WS upgrade 分支；客户端侧 = 手写最小 WS 交换（零依赖）
-    const wsEcho = await wsEchoViaProxy(a.port, a.caFile).catch((err) => `ERR: ${err?.message ?? err}`);
-    check(
-      "D: WS upgrade 经 CONNECT 隧道（101 + mock-ws-echo 回显）",
-      wsEcho === "mock-ws-echo: ws-probe-42",
-      String(wsEcho).slice(0, 160),
-    );
+    await selftestSceneD(check, a);
 
     console.log(failures.length === 0 ? "[mock-proxy] SELFTEST PASS" : `[mock-proxy] SELFTEST FAIL（${failures.length} 项）`);
     process.exitCode = failures.length === 0 ? 0 : 1;
