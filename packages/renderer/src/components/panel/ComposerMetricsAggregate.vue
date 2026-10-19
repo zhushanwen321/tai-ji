@@ -3,8 +3,9 @@
   累计退化；容量 + TTFT + 速度 + 缓存 四项指标收为单图标按钮）。
 
   形态硬约束（S1–S7）：
-  - 聚合按钮**单一图标**（Gauge），禁多 icon 重叠；几何对齐 demo .cbtn（30×30 / r-sm /
-    dim → hover surface-hover 底 + fg 提字，workbench.css composer 段）；
+  - 聚合按钮**单一图标**（ContextUsageRing 上下文容量环形进度，2026-10-19 用户裁决——
+    原 Gauge 拱形图标被误读为「被裁切的不完整圆」），禁多 icon 重叠；几何对齐 demo .cbtn
+    （30×30 / r-sm / dim → hover surface-hover 底 + fg 提字，workbench.css composer 段）；
   - 指标聚合 = **hover** 弹指标聚合页（HoverCard）——与模型聚合的 click 语义区分；
     容器对齐 demo .stats-pop（右下锚 10px 间距 / r-lg / border-strong / shadow-2）；
   - 内容 = 四张纯内容卡纵向拼装（ContextCapacityCard + GenStatsTtftCard + GenStatsSpeedCard
@@ -28,7 +29,9 @@
         :title="t('panel.context.metricsAggregateTitle')"
         @mouseenter="quota.onHoverEnter"
       >
-        <Gauge class="size-[16px] shrink-0" :stroke-width="1.6" />
+        <!-- 图标 = 上下文容量环形进度（2026-10-19 用户裁决：Gauge 拱形易误读为裁切圆；
+             环形即容量即时可视化，hover 聚合页行为不变） -->
+        <ContextUsageRing :session-id="props.sessionId" class="size-[16px] shrink-0" />
       </Button>
     </HoverCardTrigger>
     <!-- 容器对齐 demo .stats-pop：右下锚 + 10px 间距 + r-lg 圆角；宽 300 保留 real
@@ -48,10 +51,10 @@
 <script setup lang="ts">
 import { toRef } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { Gauge } from '@lucide/vue'
 import { Button } from '@/components/ui/button'
 import { HoverCard, HoverCardContent, HoverCardTrigger } from '@/components/ui/hover-card'
 import { useQuotaDisplay } from '@/composables/features/model/useQuotaDisplay'
+import ContextUsageRing from './ContextUsageRing.vue'
 import ContextCapacityCard from './ContextCapacityCard.vue'
 import GenStatsTtftCard from './GenStatsTtftCard.vue'
 import GenStatsSpeedCard from './GenStatsSpeedCard.vue'
