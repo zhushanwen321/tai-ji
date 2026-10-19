@@ -940,6 +940,56 @@ describe('createChatStore factory', () => {
   // 随 D7 退役（队列区数据源 = session.delivery 状态帧），u5a 结清分区与 API 本身——
   // getQueueState / clearQueueState 已从 store 删除，无方法可测。
 
+  describe('retryStates 生命周期（auto_retry_start 写 / message_start 提前清 / auto_retry_end 清）', () => {
+    it('message.message_start 到达即清 retry 态（重试横幅提前终结：新流开始 = 重试成功）', () => {
+      const sid = 's1'
+      sut.store.applyMessageEvent(sid, msg(sid, 'message.auto_retry_start', { attempt: 1, maxAttempts: 3, errorMessage: 'timeout' }))
+      expect(sut.store.getRetryState(sid)).toBeDefined()
+
+      sut.store.applyMessageEvent(sid, msg(sid, 'message.message_start', { messageId: 'a1' }))
+
+      expect(sut.store.getRetryState(sid)).toBeUndefined()
+    })
+
+    it('提前清后 pi 真正的 auto_retry_end 到达幂等 no-op（不复活、不报错）', () => {
+      const sid = 's1'
+      sut.store.applyMessageEvent(sid, msg(sid, 'message.auto_retry_start', { attempt: 1 }))
+      sut.store.applyMessageEvent(sid, msg(sid, 'message.message_start', { messageId: 'a1' }))
+      expect(sut.store.getRetryState(sid)).toBeUndefined()
+
+      sut.store.applyMessageEvent(sid, msg(sid, 'message.auto_retry_end', { success: true, attempt: 1 }))
+
+      expect(sut.store.getRetryState(sid)).toBeUndefined()
+    })
+
+    it('重试后新流中途再失败 → auto_retry_start（attempt+1）横幅按新 attempt 重现', () => {
+      const sid = 's1'
+      sut.store.applyMessageEvent(sid, msg(sid, 'message.auto_retry_start', { attempt: 1 }))
+      sut.store.applyMessageEvent(sid, msg(sid, 'message.message_start', { messageId: 'a1' }))
+      expect(sut.store.getRetryState(sid)).toBeUndefined()
+
+      sut.store.applyMessageEvent(sid, msg(sid, 'message.auto_retry_start', { attempt: 2, maxAttempts: 3, errorMessage: 'rate limit' }))
+
+      expect(sut.store.getRetryState(sid)?.attempt).toBe(2)
+    })
+
+    it('session 隔离：s1 的 message_start 只清 s1 的 retry 态', () => {
+      sut.store.applyMessageEvent('s1', msg('s1', 'message.auto_retry_start', { attempt: 1 }))
+      sut.store.applyMessageEvent('s2', msg('s2', 'message.auto_retry_start', { attempt: 2 }))
+
+      sut.store.applyMessageEvent('s1', msg('s1', 'message.message_start', { messageId: 'a1' }))
+
+      expect(sut.store.getRetryState('s1')).toBeUndefined()
+      expect(sut.store.getRetryState('s2')).toBeDefined()
+    })
+
+    it('无 retry 态时 message.message_start 到达 no-op（常规流零副作用）', () => {
+      const sid = 's1'
+      sut.store.applyMessageEvent(sid, msg(sid, 'message.message_start', { messageId: 'a1' }))
+      expect(sut.store.getRetryState(sid)).toBeUndefined()
+    })
+  })
+
   describe('appendSystemNotice（追加 system 提示行）', () => {
     it('追加 role=system 消息到会话消息流（sys- 前缀 id + complete 状态）', () => {
       const sid = 's1'

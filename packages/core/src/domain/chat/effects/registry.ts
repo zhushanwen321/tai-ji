@@ -353,7 +353,7 @@ function markStreamingAssistantTextFinalized(ctx: Pick<MessageEffectContext, 'me
 const messageEffects: Partial<Record<ServerMessageType, MessageEffectHandler>> = {
   // ── 主流式生命周期（chunk 创建/收尾 + isGenerating 派生）──
   'message.message_start': (ctx, sid, payload) => {
-    const { messages, clearPendingSend } = ctx
+    const { messages, clearPendingSend, retryStates } = ctx
     // [合并收尾] premature-timeout 打标作废路径与 armStreamingTimer 随上游「streaming idle
     // timeout 移除」一并退役（main 侧已整体摘除，git 可追溯）。
     // [HISTORICAL] QueueBubble 快照条件清/僵尸清理（G-023）已随 queue_update 计数路径退役：
@@ -385,6 +385,17 @@ const messageEffects: Partial<Record<ServerMessageType, MessageEffectHandler>> =
     }
     // 空窗结束：clearPendingSend（接管 dispatching 语义）
     clearPendingSend(sid)
+    // 重试指示提前终结：pi 的 auto_retry_end(success) 在 assistant message_end 才发
+    // （agent-session.js message_end 分支），若只等它，重试横幅会挂满整个新流的输出期。
+    // 「重试后的新 assistant 流已开始产出」是重试请求成功的确定性事实，此处即清
+    // retryStates（Composer 注释声明的「message_start 到达时 store 自动清」落地点）。
+    // 后续 pi 真正的 auto_retry_end 到达时 delete 幂等 no-op；若新流中途再失败，pi 会
+    // 再发 auto_retry_start（attempt+1），横幅按新 attempt 重现——两清零点不冲突。
+    if (retryStates.value.has(sid)) {
+      const nextMap = new Map(retryStates.value)
+      nextMap.delete(sid)
+      retryStates.value = nextMap
+    }
   },
 
   'message.complete': (ctx, sid, payload) => {
