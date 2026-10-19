@@ -2852,6 +2852,22 @@
         {
           "kind": "spec",
           "ref": "scripts/__tests__/merge-wait-for-ci.test.mjs"
+        },
+        {
+          "kind": "script",
+          "ref": "scripts/merge/release.mjs"
+        },
+        {
+          "kind": "script",
+          "ref": "scripts/merge/verify-ci-release.mjs"
+        },
+        {
+          "kind": "spec",
+          "ref": "scripts/__tests__/merge-release.test.mjs"
+        },
+        {
+          "kind": "spec",
+          "ref": "scripts/__tests__/merge-verify-ci-release.test.mjs"
         }
       ],
       "trigger": "on-diff",
@@ -2859,7 +2875,7 @@
       "run": "pnpm exec vitest run scripts/__tests__/merge-gate.test.mjs scripts/__tests__/merge-state.test.mjs scripts/__tests__/merge-wait-for-ci.test.mjs",
       "owner": "scripts/",
       "authority": "docs/TEST-STRATEGY.md#e2e-资产归宿纪律三态-r1r2r3",
-      "note": "merge skill 判定承载脚本（pr-merge/wait-for-ci 的 Node 实装 + lib）迁入仓库后的登记：真实运行形态 = merge skill 薄壳经 main worktree 调起（.agents/skills/merge/scripts 同名 .sh），本表 run = 零 token fixture 回归（41 用例）；CI 固定环节 = ci.yml「Test - scripts guards」步骤同批文件"
+      "note": "merge skill 判定承载脚本（pr-merge/wait-for-ci 的 Node 实装 + lib）迁入仓库后的登记：真实运行形态 = merge skill 薄壳经 main worktree 调起（.agents/skills/merge/scripts 同名 .sh），本表 run = 零 token fixture 回归（79 用例）；CI 固定环节 = ci.yml「Test - scripts guards」步骤同批文件"
     }
   ]
 }

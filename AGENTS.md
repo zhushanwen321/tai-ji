@@ -175,7 +175,7 @@ agent.md / workflow.js 归位：与 extension 强相关（tools 受限某 extens
 
 ## 发布与 CI 验证 [HISTORICAL]
 
-merge skill 判定承载脚本的实现在仓库 `scripts/merge/`（Node，判定收敛 + 回归测试在 `scripts/__tests__/merge-*.test.mjs`，CI「Test - scripts guards」步骤跑）：`pr-merge.mjs`（阶段 2：PR CI 门禁 + 合并 + sync main）与 `wait-for-ci.mjs`（阶段 3：post-merge CI 等待）；skill 目录内同名 .sh 是薄壳，经 main worktree 调起恒取 main 最新版。CI 判定口径 = conclusion 结构性比对（null = 未完成 → 等待；failure/timed_out/cancelled → 拒绝；大小写归一化），禁止回退字符串词表 grep。管线状态文件 = `<workspace 根>/.merge-state/current.json`（pr-merge 写入 headSha 等，wait-for-ci 缺省 sha 时读取）。
+merge skill 判定承载脚本的实现在仓库 `scripts/merge/`（Node，判定收敛 + 回归测试在 `scripts/__tests__/merge-*.test.mjs`，CI「Test - scripts guards」步骤跑）：`pr-merge.mjs`（阶段 2：PR CI 门禁 + 合并 + sync main）、`wait-for-ci.mjs`（阶段 3：post-merge CI 等待）、`release.mjs`（阶段 5：notes 草稿 + Release 创建/更新）与 `verify-ci-release.mjs`（阶段 4/6：tag CI 构建与产物验证，`scripts/verify-ci-release.sh` 同为 shim）；skill 目录内同名 .sh 均是薄壳，经 main worktree 调起恒取 main 最新版。CI 判定口径 = conclusion 结构性比对（null = 未完成 → 等待；failure/timed_out/cancelled → 拒绝；大小写归一化），禁止回退字符串词表 grep。管线状态文件 = `<workspace 根>/.merge-state/current.json`（pr-merge 写入 headSha 等，wait-for-ci 缺省 sha 时读取；release 落 stage=released）。
 
 两条独立管线：Electron 打包（`v*` tag → release.yml → `verify-ci-release.sh` 验证）与 npm 发布（`npm-*` tag → release-npm.yml）。npm 两条机制：main 稳定发布（人工定 type + `check-version-changes.sh` + `apply-version.sh`，merge skill 阶段 4N 封装，**禁止本地 `changeset publish`**，曾因 registry 最终一致性 E403）与 dev-npm 预发布（changeset pre，`scripts/npm-prerelease.sh`）。补强（npm-publish-surface-guard D2，C-proc-11）：npm 发布实为三条路径（正式 `release-npm.yml` / dev 线推 `dev-npm-*` 分支触发 `release-npm-dev.yml` / 本地 `npm-prerelease.sh`），publish 前均挂 `scripts/check-publish-surface.mjs` 硬拦截（幽灵 files 条目 / 产物目录反向覆盖 / 自包含探针）——「push tag 后验证 CI」流程中检查红灯是合法失败形态。
 
