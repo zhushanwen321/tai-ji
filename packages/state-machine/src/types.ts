@@ -5,7 +5,7 @@
  * - 词表（states / events）是 SSOT：类型层经泛型 `S extends string` / `E extends string`
  *   约束 from / to / on 字面量在词表内；运行时自检兜底（`as` 断言可绕过类型层）。
  * - 转移表是行式数组：一行 = `{ from, on, to, guard?, outputs?, terminalOutcome? }`，
- *   表达力对齐仓内最强形态（run 域 RUN_TRANSITIONS 直译）。
+ *   表达力对齐仓内最强形态（run 域既有行式转移表（现 RUN_MACHINE）直译）。
  */
 
 /** 状态声明值形态。`terminal: true` 是终态声明的 SSOT——不由出边派生（D3：

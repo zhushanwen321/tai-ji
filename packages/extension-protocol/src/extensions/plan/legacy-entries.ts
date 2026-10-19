@@ -13,7 +13,7 @@
  * 范围注记：本模块只承载 lifecycle/resumeHint 两个跨包映射；templateProvidedPath 等其余旧
  * 字段映射仍留扩展读侧（extension 域私有，无第二消费方，无跨包单源诉求）。
  *
- * 纯数据 + 纯函数，零依赖（仅同包 state-machine 值域），与 state-machine.ts（纯契约模块）
+ * 纯数据 + 纯函数，零外部依赖（仅同包 state-machine 契约——词表与 coerceState 判定），与 state-machine.ts（纯契约模块）
  * 刻意分文件——legacy 读取规则有自己的退役时钟，不混入长期契约范围。
  */
 import { PLAN_MACHINE } from './state-machine'
