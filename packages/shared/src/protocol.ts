@@ -1241,6 +1241,7 @@ export type ServerMessageType =
   | 'config.providers' | 'config.providerUpdated' | 'config.discoveredModels' | 'config.defaults'
   | 'config.toolPermissionsSaved'
   | 'config.providerCatalogsRefreshed'
+  | 'config.quotaPresets'
   | 'config.scopedModels'
   | 'config.scannedSkills' | 'config.skillUpdated' | 'config.skillDeleted'
   | 'config.sessionSkills'
