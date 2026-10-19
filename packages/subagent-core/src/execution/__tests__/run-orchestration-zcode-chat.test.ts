@@ -4,11 +4,11 @@
 // 设计 subagent-permanent-session-model.md §3.2.6 要点 3/4）：
 //   - B-firstround：executeViaEngine 非 pi 分支（zcode conversation:'cold'）走
 //     Continuation.startFirstRound
-//     ——轮末 markRoundIdle 收尾（status 翻 idle [two-state-convergence U4/D3] + round+1 +
+//     ——轮末 markRoundIdle 收口（status 翻 idle [two-state-convergence U4/D3] + round+1 +
 //     closedReason 清除），不走 kickOffEngineRun（已删）one-shot 编排（finalizeEngineOutcome（已删）
 //     legacy close CAS：status='idle' + closedReason='gc' 且 round 不推进）；
 //   - B-routing：会话轮引擎按 record.engine 经 registry 解析——zcode chatMode 轮
-//     （首轮与续轮）派发到 zcode port，不再固定为 pi；续轮 resume 锚携带
+//     （首轮与续轮）派发到 zcode port，不再钉死 pi；续轮 resume 锚携带
 //     engineHandle.sessionRef 的 zcode cold 形态（引擎侧 resume 读 + 新 session 注入）；
 //   - onHandleReady 回填：非 pi 会话轮 RunContext 挂运行中句柄回填通道（覆写语义
 //     ——cold 续聊每轮换新 session，旧 sessionId 必须被替换，否则锚停在旧 session）；
@@ -158,7 +158,7 @@ describe("U6b：zcode chatMode 的 Continuation 接线（B-firstround + B-routin
     zcodeDir = fs.mkdtempSync(path.join(os.tmpdir(), "u6b-zcode-db-"));
     zcodeDb = path.join(zcodeDir, "db.sqlite");
     prevDataDirEnv = process.env["TAIJI_AGENT_DATA_DIR"];
-    // 测试红线：store/引擎数据范围不触真实数据目录
+    // 测试红线：store/引擎数据面不触真实数据目录
     process.env.TAIJI_AGENT_DATA_DIR = path.join(agentDir, "engine-data");
     clearEngines();
     zcode = new ZcodeColdEngine();
@@ -177,9 +177,11 @@ describe("U6b：zcode chatMode 的 Continuation 接线（B-firstround + B-routin
   });
 
   /** [W1/D3] 读 record 事件文件全部事件行（journal 落点 = getSubagentRecordsDir，
-   *  与 manifest 同目录——观察侧独立于被测 store）。 */
+   *  与 manifest 同目录——观察面独立于被测 store）。
+   *  [session-store-layout-inversion] 观察点与生产写侧同源：分区键 = initSession sid，
+   *  dataDir = 被测 env 注入值（= 生产 store 目录解析的同一取值）。 */
   function scanRecordEvents(id: string): Array<Record<string, unknown>> {
-    const recordsDir = getSubagentRecordsDir(agentDir, agentDir);
+    const recordsDir = getSubagentRecordsDir("root-session", process.env["TAIJI_AGENT_DATA_DIR"]);
     const file = path.join(recordsDir, `${id}.events`);
     const content = fs.readFileSync(file, "utf8");
     return content
@@ -227,7 +229,7 @@ describe("U6b：zcode chatMode 的 Continuation 接线（B-firstround + B-routin
   // 派发参数已删——一切 start 等价，形态由 resume 键承载）
   // ============================================================
 
-  it("[B-firstround] zcode 首轮经 startFirstRound：派发 zcode port、resume={recordId} 无锚、settle 后 markRoundIdle 收尾（running-resumable + round+1），非 one-shot 终态化（idle+closedReason='gc'）", async () => {
+  it("[B-firstround] zcode 首轮经 startFirstRound：派发 zcode port、resume={recordId} 无锚、settle 后 markRoundIdle 收口（running-resumable + round+1），非 one-shot 终态化（idle+closedReason='gc'）", async () => {
     const handle = await service.execute({
       task: "zcode cold chat",
       slug: "u6b-first",
@@ -306,7 +308,7 @@ describe("U6b：zcode chatMode 的 Continuation 接线（B-firstround + B-routin
       sessionRef: { sessionId: "sess_cold_2", dbPath: zcodeDb },
     });
     // 回填经 store.reportRecordTransition 感知落 record-bound 帧（[W1/D2 停写写点]
-    // 改写侧：engineHandle 过程派生视图不再落 v1 快照 entry——事件文件是新承载，
+    // 改写面：engineHandle 过程投影不再落 v1 快照 entry——事件文件是新承载，
     // zcode 运行窗口锚定经 bound manifest 物化（D2 决策 9）对 GUI 可见）。
     const boundEvents = scanRecordEvents(record.id);
     expect(boundEvents.at(-1)).toMatchObject({

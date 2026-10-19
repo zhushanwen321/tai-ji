@@ -42,10 +42,13 @@ export interface SchedulerOverlayPayload { // oe-exempt:20261006:framework:类�
 }
 
 /** canvas 浮层载荷（问题解决画布整合进 workflow 浮层成一级 tab，problem-solve-canvas
- * §3.1(3)）：canvasId = 画布 id（画布跨 session 共享——设计 D4/D7，无会话归属，
- * 故载荷不持 sessionId；会话删除级联对 canvas 内容不适用）。 */
+ * §3.1(3)）：canvasId = 画布 id；sessionId = 画布归属会话（session-store-layout-inversion
+ * D4——画布归属创建它的 session，1:N；对齐 workflow/scheduler 载荷带 sessionId 先例），
+ * 会话删除级联判定锚（删除归属会话时关闭 canvas 内容浮层）。 */
 export interface CanvasOverlayPayload { // oe-exempt:20261014:framework:类型契约先行——容器契约层声明，overlay 一级 tab UI 即为消费面
   canvasId: string
+  /** 画布归属会话 id（创建会话；级联判定 + 消费侧 per-session 数据分区的键）。 */
+  sessionId: string
 }
 
 /** 浮层当前内容（判别联合，kind/payload 换内容） */

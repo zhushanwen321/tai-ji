@@ -38,6 +38,7 @@ import createExtension, {
   CAPABILITY_INLINE_TAG_FAMILIES,
   CAPABILITY_PRESENTATION_ATTRS,
   SESSION_ARTIFACTS_DIR_SEGMENT,
+  SESSION_STORE_DIR_SEGMENT,
   resolveSessionArtifactsDir,
 } from '../index'
 import type { ExtensionAPI, BeforeAgentStartEvent } from '@earendil-works/pi-coding-agent'
@@ -529,17 +530,20 @@ describe('capability 段 ①② 渲染锁定（文案 = 常量渲染产物，手
   })
 })
 
-describe('产物目录镜像常量与推导 helper（设计 D1/D7，供 u-artifacts 公式对拍消费）', () => {
-  it('段名字面量为 artifacts', () => {
+describe('产物目录镜像常量与推导 helper（session 存储树布局，公式对拍机检消费）', () => {
+  it('段名字面量：树根段 ext-sessions + 域段 artifacts（与 shared SESSION_STORE_DIR_SEGMENT / getSessionArtifactsDir 对拍）', () => {
+    expect(SESSION_STORE_DIR_SEGMENT).toBe('ext-sessions')
     expect(SESSION_ARTIFACTS_DIR_SEGMENT).toBe('artifacts')
   })
 
-  it('合法 pi sid → <dataDir>/artifacts/<sessionId>', () => {
+  it('合法 pi sid → <dataDir>/ext-sessions/<sessionId>/artifacts', () => {
     expect(resolveSessionArtifactsDir('0198ab12-cdef-7000-8000-1234567890ab')).toBe(
-      path.join(DATA_DIR, 'artifacts', '0198ab12-cdef-7000-8000-1234567890ab'),
+      path.join(DATA_DIR, 'ext-sessions', '0198ab12-cdef-7000-8000-1234567890ab', 'artifacts'),
     )
     // 允许 `.` 与 `_`（与 isPiSessionId 同域）
-    expect(resolveSessionArtifactsDir('a.b-c_d')).toBe(path.join(DATA_DIR, 'artifacts', 'a.b-c_d'))
+    expect(resolveSessionArtifactsDir('a.b-c_d')).toBe(
+      path.join(DATA_DIR, 'ext-sessions', 'a.b-c_d', 'artifacts'),
+    )
   })
 
   it('非法 sessionId（含冒号 / 空串 / 首尾非字母数字）→ throw（防路径穿越）', () => {
@@ -551,7 +555,9 @@ describe('产物目录镜像常量与推导 helper（设计 D1/D7，供 u-artifa
   it('resolveDataDir 回退（无 TAIJI_AGENT_DATA_DIR 时取 PI_CODING_AGENT_DIR 上级）', () => {
     delete process.env.TAIJI_AGENT_DATA_DIR
     process.env.PI_CODING_AGENT_DIR = path.join('/tmp/fallback-data', 'agent')
-    expect(resolveSessionArtifactsDir('abc')).toBe(path.join('/tmp/fallback-data', 'artifacts', 'abc'))
+    expect(resolveSessionArtifactsDir('abc')).toBe(
+      path.join('/tmp/fallback-data', 'ext-sessions', 'abc', 'artifacts'),
+    )
   })
 })
 
@@ -576,9 +582,9 @@ describe('capability 段 ③④（HTML 交付约定 + 预览约束）与产物�
 
   it('ctx 会话 id 在 → ③ 段含产物目录绝对路径（与会话 id 匹配）', () => {
     const text = capabilityTextWithCtx(ctxWithSessionId(() => SID))
-    // 路径 = <dataDir>/artifacts/<sid>（与 shared getSessionArtifactsDir 同公式）
+    // 路径 = <dataDir>/ext-sessions/<sid>/artifacts（与 shared getSessionArtifactsDir 同公式）
     expect(text).toContain(resolveSessionArtifactsDir(SID))
-    expect(text).toContain(path.join(DATA_DIR, 'artifacts', SID))
+    expect(text).toContain(path.join(DATA_DIR, 'ext-sessions', SID, 'artifacts'))
     // ③ 段交付约定与 ④ 段预览约束齐备
     expect(text).toContain('info string is html-preview')
     expect(text).toContain("that file's absolute path")
@@ -605,7 +611,7 @@ describe('capability 段 ③④（HTML 交付约定 + 预览约束）与产物�
       expect(text).toContain('blocked by the browser CORS policy')
       expect(text).toContain('CDN links will not load')
       // 不出现半截/伪造路径
-      expect(text).not.toContain(path.join(DATA_DIR, 'artifacts'))
+      expect(text).not.toContain(path.join(DATA_DIR, 'ext-sessions'))
     }
   })
 
@@ -616,7 +622,7 @@ describe('capability 段 ③④（HTML 交付约定 + 预览约束）与产物�
       const text = capabilityTextWithCtx(ctx)
       expect(text).toContain('(unavailable this turn)')
       expect(text).toContain('info string is html-preview')
-      expect(text).not.toContain(path.join(DATA_DIR, 'artifacts'))
+      expect(text).not.toContain(path.join(DATA_DIR, 'ext-sessions'))
     }
   })
 

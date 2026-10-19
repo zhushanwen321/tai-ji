@@ -10,10 +10,11 @@
 //      ——record 主数据（主 session 文件里的 subagent-record entry）由引擎侧管理，
 //      其删除对 core 无触发点：done record 的 journal 没有精确回收锚，workflow 域
 //      （taskId 占位无 record 生命周期锚）同样无锚，只能按 mtime 兜底回收。子代理
-//      会话文件（<agentDir>/subagents 树：*.jsonl / sidecar / records manifest /
-//      *.events）不再有 TTL 清理——归属级联删除（主会话删 → 族删），外部删除主文件
-//      场景接受残留。
-//   2. worktree .patch 备份（<agentDir>/subagents/<enc>/sessions/<branch>.patch，
+//      会话文件（<root>/<rootSessionId>/subagents/ 树：*.jsonl / sidecar / records
+//      manifest / *.events；<root> = 会话存储树根 getSessionStoreDir()，布局推导
+//      权威 = assembly/path-encoding.ts）不再有 TTL 清理——归属级联删除（主会话删
+//      → 族删），外部删除主文件场景接受残留。
+//   2. worktree .patch 备份（<root>/<rootSessionId>/subagents/sessions/<branch>.patch，
 //      落盘源 = worktree/worktree-patch-collection.ts）。按 branch 命名、与 .jsonl
 //      basename 无关联，v2 条目契约不承载 patchFile/branch（record-store-rebuild
 //      缺省纪律，权威源在 manifest 与子 session 文件）——级联的引用并集（record id
@@ -26,11 +27,13 @@
 //
 // 触发确定性：进程内首次接线即扫一次 + 每 24h 定时复扫（startEngineJournalGcTimer，
 // 对齐 main 侧 log-retention 形态），best-effort（失败不影响启动）；
-// 调用方以 oncePerProcess 检查防重复接线。接线方传 agentDir 时 .patch 清扫同批生效
-// （pi extension 接线点持有 agentDir；不传 = 仅引擎 journal，缺省行为不变）。
+// 调用方以 oncePerProcess 守卫防重复接线。.patch 清扫根经 getSessionStoreDir 缺省
+// 推导（session 存储树，与写侧同源）；引擎 journal 段独立于此参数恒生效。
 
 import * as fs from "node:fs";
 import * as path from "node:path";
+
+import { getSessionStoreDir, isPiSessionId } from "@taiji/shared/paths";
 
 import { getEngineDataDir } from "../engine/common/data-dir.ts";
 import { cleanupExpiredJournals } from "../engine/common/pool-manager.ts";
@@ -52,12 +55,14 @@ const GC_RESWEEP_INTERVAL_MS = HOURS_PER_DAY * MINUTES_PER_HOUR * SECONDS_PER_MI
 /**
  * 回收引擎 journal + worktree .patch 孤儿（确定性触发，由调用方决定时机）。
  * best-effort——任何异常不外抛。dataDir 解析失败 = 未配置宿主服务，同样吞掉。
- * agentDir 传入时同批清扫 subagents 各 enc 段 sessions 目录内的 .patch（文件头范围 2）。
+ * .patch 清扫无条件执行：清扫根 = getSessionStoreDir(dataDir)（dataDir 缺省时
+ * 走 getDataDir() 缺省推导，与写侧同源同值——生产接线 startEngineJournalGcTimer
+ * 恒无参，条件化会使设计声明的 mtime 兜底通道在生产失效）。
  */
-export function cleanupExpiredEngineJournals(agentDir?: string): void {
+export function cleanupExpiredEngineJournals(dataDir?: string): void {
   try {
     cleanupExpiredJournals(getEngineDataDir(), TTL_MS);
-    if (agentDir !== undefined) cleanupOrphanWorktreePatches(agentDir, TTL_MS);
+    cleanupOrphanWorktreePatches(getSessionStoreDir(dataDir), TTL_MS);
   } catch (_e) {
     // best-effort：异常不外抛
     void _e;
@@ -65,29 +70,32 @@ export function cleanupExpiredEngineJournals(agentDir?: string): void {
 }
 
 /**
- * worktree .patch 孤儿清扫：`<agentDir>/subagents/<enc>/sessions/` 两层枚举，仅
- * `*.patch` 按 mtime TTL unlink（布局 = worktree-patch-collection 落盘点
- * getSubagentSessionDir 的 `subagents/<encodeCwd>/sessions/`）。逐文件逐目录
- * best-effort（单文件失败静默——文件可能已被删除；subagents 根不存在 = 从未有过
- * 子代理，合法空态）。不递归 walk、不触碰非 .patch 文件——级联领地（.jsonl /
+ * worktree .patch 孤儿清扫：`<storeRoot>/<sessionId>/subagents/sessions/` 三段枚举，
+ * 仅 `*.patch` 按 mtime TTL unlink（布局 = worktree-patch-collection 落盘点
+ * getSubagentSessionDir 的 `<root>/<rootSessionId>/subagents/sessions/`，
+ * session-store-layout-inversion D2/D3 换根——.patch 属 subagent 文件族随会话树走；
+ * 引擎 journal 段不迁移，见文件头豁免登记）。一级目录名须是合法 sessionId 形态
+ * （isPiSessionId 同域判定——非会话目录跳过，防手放目录被误扫）。逐文件逐目录
+ * best-effort（单文件失败静默——文件可能已被删除；存储树根不存在 = 从未有过
+ * 会话，合法空态）。不递归 walk、不触碰非 .patch 文件——级联领地（.jsonl /
  * sidecar / manifest / .events）的回收权威在 runtime session-content-cascade。
  */
-function cleanupOrphanWorktreePatches(agentDir: string, ttlMs: number): void {
-  let encDirs: fs.Dirent[];
+function cleanupOrphanWorktreePatches(storeRoot: string, ttlMs: number): void {
+  let sessionDirs: fs.Dirent[];
   try {
-    encDirs = fs.readdirSync(path.join(agentDir, "subagents"), { withFileTypes: true });
+    sessionDirs = fs.readdirSync(storeRoot, { withFileTypes: true });
   } catch (_e) {
-    void _e; // 根不存在（从未有过子代理）或不可读：无可清理，静默
+    void _e; // 根不存在（从未有过会话）或不可读：无可清理，静默
     return;
   }
-  for (const ent of encDirs) {
-    if (!ent.isDirectory()) continue;
-    const sessionsDir = path.join(agentDir, "subagents", ent.name, "sessions");
+  for (const ent of sessionDirs) {
+    if (!ent.isDirectory() || !isPiSessionId(ent.name)) continue;
+    const sessionsDir = path.join(storeRoot, ent.name, "subagents", "sessions");
     let names: string[];
     try {
       names = fs.readdirSync(sessionsDir);
     } catch (_e) {
-      void _e; // enc 段无 sessions 子目录：合法空态
+      void _e; // 该会话树无 subagents/sessions 子目录：合法空态
       continue;
     }
     for (const name of names) {
@@ -105,12 +113,13 @@ function cleanupOrphanWorktreePatches(agentDir: string, ttlMs: number): void {
 /**
  * 确定性触发接线：立即扫一次 + 每 24h 定时复扫（unref 不 hold 进程退出），
  * 返回 stop 函数（测试清理用）。形态对齐 main 侧 log-retention 的 startLogRetentionTimer；
- * 调用方以 oncePerProcess 检查防重复接线。agentDir 语义同 cleanupExpiredEngineJournals。
+ * 调用方以 oncePerProcess 守卫防重复接线。无参——.patch 清扫根经 getSessionStoreDir
+ * 缺省推导（与写侧同源同值；单测注入走 cleanupExpiredEngineJournals(dataDir)）。
  */
-export function startEngineJournalGcTimer(agentDir?: string): () => void {
-  cleanupExpiredEngineJournals(agentDir);
+export function startEngineJournalGcTimer(): () => void {
+  cleanupExpiredEngineJournals();
   const timer = setInterval(() => {
-    cleanupExpiredEngineJournals(agentDir);
+    cleanupExpiredEngineJournals();
   }, GC_RESWEEP_INTERVAL_MS);
   timer.unref?.();
   return () => clearInterval(timer);

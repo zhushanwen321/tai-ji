@@ -19,18 +19,26 @@ import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { ExtensionCommandContext } from "@earendil-works/pi-coding-agent";
 
+import { getSubagentModelSwitchResultsDir } from "@zhushanwen/subagent-core";
+
 import { registerSubagentModelCommand, runSubagentModelRpc } from "../subagent-model.ts";
 import type { SubagentModelCommandDeps } from "../subagent-model.ts";
 
 // ── fixture ──────────────────────────────────────────────────
 
 let root: string;
+/** 信箱分区键（根会话 id fixture——非真实 pi sid 形态，纯目录名）。 */
+const ROOT_SID = "sid-model-switch";
 
 beforeEach(() => {
   root = mkdtempSync(join(tmpdir(), "subagent-model-cmd-"));
+  // handler 经 shared getDataDir() 推导信箱目录（无显式 dataDir 入参）——数据根经 env
+  // 注入，与生产链（ENV_WHITELIST_PREFIXES 注入 pi 进程）同形态。
+  vi.stubEnv("TAIJI_AGENT_DATA_DIR", root);
 });
 
 afterEach(() => {
+  vi.unstubAllEnvs();
   rmSync(root, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 });
 });
 
@@ -52,13 +60,14 @@ function stubService(): StubService {
 }
 
 function deps(service: StubService | null): { deps: SubagentModelCommandDeps; resultsDir: string } {
-  const resultsDir = join(root, "results");
+  // [session-store-layout-inversion D2/D3] 分区键 = 根会话 id；resultsDir 即信箱新布局
+  //（<root>/<rootSid>/subagents/model-switch 的 tmp 等价物——公式由 core 单源，
+  // handler 用 deps.resolveRootSessionId 推导，测试经同一 env 数据根断言同一目录）。
+  const resultsDir = getSubagentModelSwitchResultsDir(ROOT_SID, root);
   return {
     deps: {
       getService: () => service as never,
-      resolveAgentDir: () => join(root, "agent"),
-      // rootCwd 作为 enc 编码键——结果目录 = <agentDir>/subagents/<enc(cwd)>/model-switch
-      resolveRootCwd: () => join(root, "proj"),
+      resolveRootSessionId: () => ROOT_SID,
     },
     resultsDir,
   };
@@ -83,9 +92,10 @@ const VALID_ARGS = JSON.stringify({
 });
 
 function resultFile(requestId: string): string {
-  // enc 段镜像 core encodeCwd（布局单源在 path-encoding.ts，测试只按同式派生锚）。
-  const enc = "--" + join(root, "proj").replace(/^[/\\]/, "").replace(/[/\\:]/g, "-") + "--";
-  return join(root, "agent", "subagents", enc, "model-switch", `${requestId}.json`);
+  // [session-store-layout-inversion D2/D3] 分区键 = 根会话 id（不再有 enc 段）——布局
+  // 单源在 core path-encoding（getSubagentModelSwitchResultsDir），测试按同一 env 数据
+  // 根派生锚，与 handler 落点同源。
+  return join(getSubagentModelSwitchResultsDir(ROOT_SID, root), `${requestId}.json`);
 }
 
 // ── 成功路 ───────────────────────────────────────────────────

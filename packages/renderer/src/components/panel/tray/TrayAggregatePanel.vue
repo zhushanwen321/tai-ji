@@ -29,7 +29,7 @@
       <!-- 段间 hairline 分隔（demo .tray-seg + .tray-seg { border-top: 1px solid var(--hairline) }） -->
       <div class="flex flex-col divide-y divide-hairline">
         <!-- built-in 各类别段（顺序 = 外壳 built-in 固定序 bash → subagent → workflow → session →
-             canvas；canvas 段恒在——外壳对 canvas 件豁免「全无不渲染」，创建入口恒可达） -->
+             canvas；段集 = 外壳 builtinItems——D4 隔离后 canvas 段同三态，零画布不出段） -->
         <section
           v-for="section in sections"
           :key="section.kind"
@@ -58,7 +58,7 @@
               :pinned="pinned"
             />
             <TraySessionPanel v-else-if="section.kind === 'session'" :session-id="sessionId" :pinned="pinned" />
-            <TrayCanvasPanel v-else :pinned="pinned" />
+            <TrayCanvasPanel v-else :session-id="sessionId" :pinned="pinned" />
           </div>
         </section>
 

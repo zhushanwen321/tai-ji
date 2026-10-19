@@ -20,16 +20,15 @@
  * registerDeps(注册装配依赖)。
  */
 import { basename } from 'node:path'
-import { existsSync, rmSync, unlinkSync } from 'node:fs'
+import { existsSync, unlinkSync } from 'node:fs'
 import { unlink } from 'node:fs/promises'
 import { homedir } from 'node:os'
 import type { SessionSummary, BatchDeleteResult, ServerMessage } from '@taiji/shared'
 import { BUILTIN_PRESET_IDS, isBtwVirtualId } from '@taiji/shared'
 // 缺省 clientUuid 生成走 core 唯一入口（禁直调 crypto.randomUUID，secure context/Node 版本防御）
 import { randomUuid } from '@taiji/core/utils/random-uuid'
-// [D6-⑨ u7] 图片缓存目录推导（shared SSOT，含 sessionId 穿越校验——cache 级联删除用）
-// 附件目录推导（shared SSOT，同含穿越校验——attachments 级联删除用）
-import { getAttachmentsDir, getImageCacheDir, getSessionArtifactsDir } from '@taiji/shared/paths'
+// session 存储树根（`<dataDir>/ext-sessions`，D5 整树软删的目标树父目录）
+import { getSessionStoreDir } from '@taiji/shared/paths'
 import type { IProcessManager, IPiEngine } from '../ports/pi-engine.js'
 import type { ILifecycleSessionOps, ISessionRegistry, ISessionRegisterDeps, IManagedSessionRecord, ManagedSession } from './session-internal.js'
 import type { IManagedSessionView, ScannedSession } from './types.js'
@@ -64,8 +63,8 @@ import { normalizeInactiveSessionFileIfNeeded, readEffectiveModelFromState, seed
 
 // ─── notify-once D5 死亡处置登记（组合根 index.ts 订阅消费）──────────────
 // 汇聚点先于杀进程立 latch（设计检查点①：delete 在 pm.destroySession 之前），
-// 防 delete→exit 双事件响应序竞态（exit 路径抢先 respond 则 'deleted' 不保证胜出）。
-// - 'delete'：终局删除——组合根收到即 onSessionDeath('delete')+clearSession 发声关闭，
+// 防 delete→exit 双事件响应序竞态（exit 腿抢先 respond 则 'deleted' 不保证胜出）。
+// - 'delete'：终局删除——组合根收到即 onSessionDeath('delete')+clearSession 发声销账，
 //   随后 removeSessionEntry 的销毁回调查无记录自然静默（幂等空转）。
 // - 'suppress'：非终局杀（restore 清场——同 id 随即重开）——组合根标记静默，
 //   销毁回调据此跳过，不产生伪造死亡通知（respawn/restore 链静默同族）。
@@ -106,19 +105,19 @@ function fireDeathDisposition(sessionId: string, disposition: SessionDeathDispos
   }
 }
 
-// [arch 技术债登记，R3 ports 依赖倒置待收敛] 下方四个 infra/pi 值 import（getSessionsDir /
+// [arch 技术债登记，R3 ports 依赖倒置待收口] 下方四个 infra/pi 值 import（getSessionsDir /
 // cleanupMigrateResidues / hydrateBindingMeta / assertPiSessionFile）
 // 违反「services 禁止 import infra」三层规则（见 docs/architecture/runtime-layering.md 阶段 R3）。
 // 同属本登记的衍生直引面：services/session/restore-seeding.ts（本文件拆出，直引
 // session-file-utils 的 cleanupMigrateResidues / normalizeSessionFileInPlace——S2 追加登记，
-// 随 R3 同批收敛，中期经 services/ports 暴露）。
+// 随 R3 同批收口，中期经 services/ports 暴露）。
 // 未在本轮直接 port 化的原因：restore/fork 归一化管线是 W1 高危区（tmp+rename 原子覆盖 +
 // 附着断言），包一层 port 接口属于行为敏感重构，应随 R3 阶段统一落地（ISessionStore 等
 // port 扩展 + 专项测试），不在 review 修复批混入。hydrateBindingMeta 是注册表 SSOT 的
-// 统一回填入口（sidecar-binding-sync 设计文档拍板接线在此），同样随 R3 收敛。新写
+// 统一回填入口（sidecar-binding-sync 设计文档拍板接线在此），同样随 R3 收口。新写
 // services 代码不得再效仿此处直引 infra。
 import { getPiAgentDir, getSessionsDir } from '../../infra/pi/pi-paths.js'
-// B5 触发点收窄（memory-leak-remediation §3.1 + §3.2-B5，2026-09-15）：真删除路径的
+// B5 触发面收窄（memory-leak-remediation §3.1 + §3.2-B5，2026-09-15）：真删除路径的
 // plugin sessionData 清理分发（tombstone + 分区摘除 + trash 软删除）。挂点从 removeSessionEntry
 // 汇聚点收窄到本模块 delete——汇聚点四路收殓中三路（pi 崩溃 exit / forceQuit / restore 清场）
 // session 存活，无条件清理会把存活 session 的插件数据 tombstone+trash。跨服务模块级分发
@@ -135,10 +134,10 @@ import { cleanupMigrateResidues } from '../../infra/pi/session-file-utils.js'
 // 绑定字段注册表模块（BINDING_FIELDS / hydrateBindingMeta / CREATE_DERIVED_CALLERS SSOT）
 import { hydrateBindingMeta } from '../../infra/pi/session-binding-fields.js'
 import { assertPiSessionFile } from '../../infra/pi/session-attach-assert.js'
-// 删主会话的下挂内容事务性级联（2026-10-12 裁决）：子代理文件族（引用并集防护）+
-// session-view 导出物 + 后台任务 registry 目录 + 主文件 trash 的单一清单入口。
+// 删主会话的下挂内容级联（2026-10-12 裁决；D5 收敛后 = 收殓 + 引用并集/fork 回退 +
+// 整树软删 + pi 树内本体清理的单一清单入口——旧逐域段随整树软删退役）。
 import { cascadeDeleteSessionContent } from './session-content-cascade.js'
-// A23 级联前置收殓（幂等双跑收尾在途收殓；removeSessionEntry 汇聚点的 fire-and-forget
+// A23 级联前置收殓（幂等双跑收口在途收殓；removeSessionEntry 汇聚点的 fire-and-forget
 // 挂点不动——本 import 只是级联内的 await 形态复用同一原语）。
 import { reapSessionBackgroundTasks } from './background-task-reaper.js'
 
@@ -229,27 +228,35 @@ function resolveCreateCwd(cwd: string | undefined): string {
 }
 
 /**
- * [D6-⑨ u7] session 文件路径 → sessionId。真实文件名形态 `<ISO时间戳>_<uuid>.jsonl`
- *（sidecar `<同前缀>.jsonl.<suffix>`；形态实测锚点 `2026-09-02T14-40-39-107Z_01a06290-
- * 9ac3-7d46-90f6-39a86248025e.jsonl`），sessionId = 末段 `_` 后的 uuid 段（=== 首行
- * header id，与 scanSessionMeta / external-scan 按内容解析的 sessionId 同值；renderer
- * 写 cache 目录用的正是该纯 uuid）。与 main 侧 image-cache.ts 的 sessionIdFromSessionFilePath
- * 同语义——runtime 进程无法跨包 import main 模块，内联副本（cache 级联删除的目录名派生
- * 用）。曾按「剥 `.jsonl` 后全名」派生出 `<ts>_<uuid>`，与 cache 目录名（纯 uuid）永不
- * 相等致级联删除 rmSync no-op（U3 修正）。
- */
-function sessionIdFromSessionFilePath(filePath: string): string {
-  const main = basename(filePath).replace(/\.jsonl.*$/, '')
-  const underscore = main.lastIndexOf('_')
-  return underscore === -1 ? main : main.slice(underscore + 1)
-}
-
-/**
  * 空串/非 string 归一 undefined（D6 源生效值读取用）：restore 播种在源不可知时写 '' 占位，
  * '' 属 nullish 检查不拦截的 falsy 值——直传 `override ?? preset` 链会以 '' 短路吞掉后续档。
  */
 function nonEmptyStr(v: string | undefined): string | undefined {
   return typeof v === 'string' && v !== '' ? v : undefined
+}
+
+/**
+ * D5② tombstone 前置登记（删链第二段，delete 两分支 cascade 调用之前各一次）。
+ *
+ * 为什么前置：域 4 插件 KV 文件已随换根落 session 存储树（`<root>/<sid>/plugin-data.json`），
+ * 整树软删把它一并带走——tombstone 若仍登记在树删之后（原尾段），插件 worker 在树删后
+ * 到达的迟到 set 会重建树内文件成孤儿分区。故删除编排把登记前移到收殓之后、整树软删之前。
+ *
+ * 尾段的 clearRemovedSessionData 仍保留（文件级 trash 的后置收敛：树删失败时补上，
+ * 树删成功时 existsSync 守卫自然 no-op）——两次调用对 tombstone（Set add）与缓存摘除
+ * 均幂等。
+ *
+ * best-effort：同步抛出只 warn 不阻断删除主链（B5 清理是软增强非删除前置条件；异步腿
+ * 的 rejection 在 session-data-store 分发器内部逐实例 catch+warn）。
+ */
+function clearRemovedSessionDataForDelete(sessionId: string): void {
+  try {
+    clearRemovedSessionData(sessionId)
+  } catch (e: unknown) {
+    // best-effort 降级（非吞错）：tombstone 登记失败仅留痕，不阻断删除主链——树删照常
+    // 进行，代价是该会话的插件迟到写守卫缺席（分区文件仍随整树回收，无数据错乱）。
+    console.warn(`[session-lifecycle] plugin sessionData tombstone failed before tree soft-delete (sessionId=${sessionId}):`, e)
+  }
 }
 
 /**
@@ -273,7 +280,7 @@ function resolveCreateEffectiveThinkingLevel(
 }
 
 /**
- * [M4-a / btw-question D4 消费方① + D9④] btw 级联操作注入点（组合根在 BtwService 构造后
+ * [M4-a / btw-question D4 消费面① + D9④] btw 级联操作注入面（组合根在 BtwService 构造后
  * 经 setBtwCascadeOps 注入；结构化窄依赖 = BtwService 的 closeLine / closeAllForMain 两原语
  * 结构性满足，测试注入 fake / 置 null 复位）。
  *
@@ -329,7 +336,7 @@ export class SessionLifecycle implements ISessionRegistry {
     private readonly userStoppedOps?: { forceQuitFallback: (sessionId: string) => Promise<void> },
   ) {}
 
-  // ── ISessionRegistry：sessions Map 只读查询范围（Facade 残余域读点的统一通道）──
+  // ── ISessionRegistry：sessions Map 只读查询面（Facade 残余域读点的统一通道）──
 
   get(sessionId: string): IManagedSessionRecord | undefined { return this.sessions.get(sessionId) }
   has(sessionId: string): boolean { return this.sessions.has(sessionId) }
@@ -387,7 +394,7 @@ export class SessionLifecycle implements ISessionRegistry {
     const send = (msg: ServerMessage) => {
       // wave:perf-w09（02 文档 D1-2）：session 级消息单通道——payload 带 sessionId 的消息
       // 只走 bus.publish（per-session 单调 seq + ring/snapshot + 定向推给订阅该 sid 的 ws），
-      // 盲广播路径已删除。broker.broadcast 退化为纯全局通道：只承接无 sessionId 的消息
+      // 盲广播腿已删除。broker.broadcast 退化为纯全局通道：只承接无 sessionId 的消息
       // （理论上 pi 事件流转发的消息恒带 sid，此分支是防御兜底，丢了比静默好）。
       // R8 验证结论（W09）：subagent.stream_delta 的 payload.sessionId 实为主 session id
       // （EventAdapter 以主 session 绑定翻译，extension setWidget 从主进程上报），
@@ -396,8 +403,8 @@ export class SessionLifecycle implements ISessionRegistry {
       // 经 registerDeps getter 每次调用动态读（与原闭包捕获 this 动态查找等价）。
       const sid = (msg.payload as { sessionId?: string } | null)?.sessionId
       // PR #185 MF2：queue_update 帧不再对 queue 实例 markDirty（实例已撤销——.get() 生产
-      // 零消费，防抖重新拉取 get_state 属无效 RPC）。深度真值 = 帧内 pendingMessageCount
-      //（pi 队列深度的推送派生视图，与 get_state 快照同公式同源），renderer 对账直读帧值。
+      // 零消费，防抖重拉 get_state 属无效 RPC）。深度真值 = 帧内 pendingMessageCount
+      //（pi 队列深度的推送投影，与 get_state 快照同公式同源），renderer 对账直读帧值。
       if (sid) {
         this.registerDeps.getMessageBus()?.publish(sid, msg)
       } else {
@@ -436,8 +443,8 @@ export class SessionLifecycle implements ISessionRegistry {
     this.sessions.set(id, session)
     // occupancy idle 宣告帧（session-dead-structural-fixes D2：收编为转移原语 announce-idle
     // 行，Gate B V6b 反例修复）：原语对该行合并/派生均为 no-op、跳过全等去重强制广播当前
-    // 派生视图（对象初值即 idle，「转移」的全等去重会短路广播，而本帧职责恰恰是「宣告」），
-    // 广播走原语既有 state-topic 通路（实时广播 + 快照写入/重订阅回放双路径随通路保留，
+    // 投影（对象初值即 idle，「转移」的全等去重会短路广播，而本帧职责恰恰是「宣告」），
+    // 广播走原语既有 state-topic 通路（实时广播 + 快照写入/重订阅回放双腿随通路保留，
     // 不绕过 state topic 裸 publish）：
     // 1. 写 bus state 快照：restore（respawn）后 renderer 重订阅时 stateSnapshot 回放必含
     //    idle 帧。旧假设「重订阅无帧 = idle 缺省」被帧丢失击穿——占用中 pi 死亡时 renderer
@@ -445,13 +452,13 @@ export class SessionLifecycle implements ISessionRegistry {
     //    随后到达的转移 #10 idle 帧被丢弃，occupancy 分区残留 stale compacting=true；dead
     //    占位吞掉消息流使其暂不可见，重新打开（restore）后 stale 显形且永无帧修正，flush
     //   （触发条件 = 收到全 idle 帧）永不触发，defer 队列滞留至 runtime 重启。
-    // 2. 广播路径：create/fork 场景此刻订阅集合为空（renderer 收到 summary 后才订阅），
-    //    restore 场景旧订阅集合已随 onSessionExit 的 bus.clearSession 清除——两路径实际都只
+    // 2. 广播腿：create/fork 场景此刻订阅集合为空（renderer 收到 summary 后才订阅），
+    //    restore 场景旧订阅集合已随 onSessionExit 的 bus.clearSession 清除——两腿实际都只
     //    落快照，由重订阅回放消费，时序上 subscribe 必然晚于本 publish（postLoadSession 在
     //    restore RPC resolve 之后），无竞态。
     // [合并修正 2026-09] 删除此处我方 crash-resilience 的裸 publish 残留——对方
     // session-dead-structural-fixes D2 已将其收编为下方 applySessionOccupancyTransition
-    // ('announce-idle') 原语行（state-topic 通路双路径：实时广播 + 快照回放），两份并存
+    // ('announce-idle') 原语行（state-topic 通路双腿：实时广播 + 快照回放），两份并存
     // 会双发同一宣告帧（occupancy-runtime registerSession 用例的 publish 次数哨兵拦截）。
     // D5 ① injected 接线（crash-forensics §3.3 D5）：injected = 该 session 装有会上报
     // in-flight 的 extension（subagent-workflow），errsShape 的 absent-report 形态以此
@@ -477,13 +484,13 @@ export class SessionLifecycle implements ISessionRegistry {
     //      等价形态——upsert 在上方 emit 内同步发生，随后 removeSession 即达「从未建档」的
     //      post-condition（单线程同步序；崩溃恰落两调用之间的最坏后果 = 维持豁免前行为：
     //      重启 reattach 白跑一趟）。撤销后无回写路径：reaper 搭车 refreshSessions 只更
-    //      **已存在**条目、不新增。不豁免的后果：btw 线目录不在 sessions/ 扫描范围，
+    //      **已存在**条目、不新增。不豁免的后果：btw 线目录不在 sessions/ 扫描面，
     //      reattach 编排按 checkpoint 对 vid 走 restore → resolveRestoreTarget 构造性
-    //      SESSION_NOT_FOUND → journal 噪音 + 无效恢复尝试。
-    //      从根源修复应在 session-service 订阅体内按 isBtwVirtualId 早退——该文件不入本单元领地，
+    //      SESSION_NOT_FOUND → 台账噪音 + 无效恢复尝试。
+    //      根修应在 session-service 订阅体内按 isBtwVirtualId 早退——该文件不入本单元领地，
     //      写-撤销为行为等价落点（登记于 impl-plan §5 偏差表）。
     //   ② projection / records / capability-reconciler / inflight-mirror.presetZero → **保留**
-    //      （D6：btw 线是一等会话，消息通路与状态派生视图白得；mirror 的 injected 写点在 emit
+    //      （D6：btw 线是一等会话，消息通路与状态投影白得；mirror 的 injected 写点在 emit
     //      之前已内联执行）。
     //   ③ spawn marker（pi-spawn-markers.json）→ **不豁免**（非本点订阅者，结论一并登记）：
     //      reap 判据③按「任一 --extension/--skill 与清单精确相等」匹配，btw spawn 与主
@@ -516,7 +523,7 @@ export class SessionLifecycle implements ISessionRegistry {
     this.sessions.clear()
   }
 
-  /** Detach adapter（按 id 查 Map;Map 所有者自查）。pi 事件订阅经 EventAdapter 唯一持有,detach 即收尾。 */
+  /** Detach adapter（按 id 查 Map;Map 所有者自查）。pi 事件订阅经 EventAdapter 唯一持有,detach 即收口。 */
   detachSession(sessionId: string): void {
     this.sessions.get(sessionId)?.adapter.detach()
   }
@@ -541,9 +548,9 @@ export class SessionLifecycle implements ISessionRegistry {
    *
    * 派生 label **不调 RPC**——display-only：含 basename(cwd) 与前端 prompt 预览名
    *（createSessionFlow 派生的首条 prompt 前 10 码点，2026-08-24 前曾被误当显式名持久化，
-   * 踩死 pi-rename-session 防覆盖检查 getSessionName() 非空即 skip → auto-rename 全量
+   * 踩死 pi-rename-session 防覆盖守卫 getSessionName() 非空即 skip → auto-rename 全量
    * 失效，v0.9.3 起）。显示由内存 session.label + 既有 scanner fallback（extractSessionName
-   * 返回 null → basename(cwd)）承担；pi 内存 sessionName 保持空，auto-rename 检查照常通过。
+   * 返回 null → basename(cwd)）承担；pi 内存 sessionName 保持空，auto-rename 守卫照常通过。
    * 代价：auto-rename 未跑（禁用/失败）时重启，侧边栏从预览名回退 basename（窗口极小）。
    *
    * RPC 失败**不阻断** create/fork：label 留内存显示 + console.error 上报，
@@ -572,7 +579,7 @@ export class SessionLifecycle implements ISessionRegistry {
    * 同一 Promise，返回已建 session，不重复 spawn/建号。
    *
    * 缺省 clientUuid（fork/handoff/agent-managed 等内部入口）→ 直走 createNew，逐次独立
-   * 创建（与旧版行为一致）。登记清单回收（TTL/失败即清/容量上限）见 CreateIdempotencyRegistry。
+   * 创建（与旧版行为一致）。登记面回收（TTL/失败即清/容量上限）见 CreateIdempotencyRegistry。
    */
   async create(cwd?: string, label?: string, options?: CreateOptions): Promise<SessionSummary> {
     const clientUuid = options?.clientUuid
@@ -582,7 +589,7 @@ export class SessionLifecycle implements ISessionRegistry {
     return this.createIdempotency.run(clientUuid, () => this.createNew(cwd, label, options))
   }
 
-  /** create 的单次创建体（原 create 全体，行为保持；幂等登记在 create 入口收尾）。 */
+  /** create 的单次创建体（原 create 全体，行为保持；幂等登记在 create 入口收口）。 */
   private async createNew(cwd?: string, label?: string, options?: CreateOptions): Promise<SessionSummary> {
     const tempId = randomUuid()
     const sessionCwd = resolveCreateCwd(cwd)
@@ -603,7 +610,7 @@ export class SessionLifecycle implements ISessionRegistry {
       // append 只有模式一段（全局追加归 pi-system-prompt 扩展）。
       systemPrompt: resolveEffectiveSystemPrompt(resolution, this.svc.getReplaceSystemPrompt()),
       appendSystemPrompt: resolveAppendSystemPrompt(resolution),
-      // F1b（设计 §7.5 E4 trace 披露部分）：模式回落事实现随 spawn 出站 env 到达 pi 子进程。
+      // F1b（设计 §7.5 E4 trace 披露面）：模式回落事实现随 spawn 出站 env 到达 pi 子进程。
       env: buildPresetFallbackEnv(resolution),
       ...presetClientOptions,
     })
@@ -626,7 +633,7 @@ export class SessionLifecycle implements ISessionRegistry {
     )
 
     // W1 → A'：仅语义性命名（options.persistLabel=true：handoff/agent-managed）持久化；
-    // 前端派生 prompt 预览名 display-only（防覆盖检查恢复，详见 persistExplicitLabel docstring）
+    // 前端派生 prompt 预览名 display-only（防覆盖守卫恢复，详见 persistExplicitLabel docstring）
     if (options?.persistLabel) {
       await this.persistExplicitLabel(client, id, label, 'create')
     }
@@ -697,7 +704,7 @@ export class SessionLifecycle implements ISessionRegistry {
    * agent-managed create 共用本段，比对逻辑统一无入口区分。不设断言不抛错（pi 钳制/
    * 静默换模是合法行为，漂移只做可观测）。
    *
-   * 两条失败分支都在本段收尾（与提取前同序）：getState 抛错 → safeDestroy(tempId) +
+   * 两条失败分支都在本段收口（与提取前同序）：getState 抛错 → safeDestroy(tempId) +
    * 「Failed to get session state from pi」；pi 无 session id → safeDestroy(tempId) +
    * 「pi did not return a session ID」。
    */
@@ -772,7 +779,7 @@ export class SessionLifecycle implements ISessionRegistry {
    *
    * 文件操作时序与提取前一致：只写 sidecar（*.preset.json / *.project.json / *.agent.json），
    * 不创建/触碰 pi session 文件本体。preset/project/agent 三绑定经
-   * skipJsonlExistsGuard 放行 existsSync 检查（V9-④ 从根源修复，理由见 persistCreateSidecars
+   * skipJsonlExistsGuard 放行 existsSync 守卫（V9-④ 根修，理由见 persistCreateSidecars
    * docstring）。[缓存治理 U8 W4/W6] model 写点已整体退役（create 写点 + turn-end 补偿
    * 均删除）：模型信息的持久层 = pi JSONL（assistant entry / model_change）+ 扫描反向读，
    * 本段只负责 hydrate 内存播种。
@@ -812,25 +819,25 @@ export class SessionLifecycle implements ISessionRegistry {
     }, 'create')
     this.persistCreateSidecars(session, presetId, options)
     // [缓存治理 U8a W4] D1 写点③（model sidecar 落盘）已退役：create 瞬间 pi 尚未首
-    // flush、该写点本就被内部 existsSync 检查跳过；初始模型信息由 pi 对话落 JSONL
+    // flush、该写点本就被内部 existsSync 守卫跳过；初始模型信息由 pi 对话落 JSONL
     //（assistant entry / model_change）+ 扫描反向读提供，此处不再写持久层。
   }
 
   /**
    * create 的 sidecar 落盘（preset / project / agent 三绑定，创建语义）。
    *
-   * [V9-④ 从根源修复，2026-09-09] 三个 persist* 调用传 skipJsonlExistsGuard 放行 existsSync
-   * 检查：create 路径 session 必然真实（getState 成功 + registerSession 成功后才到达
+   * [V9-④ 根修，2026-09-09] 三个 persist* 调用传 skipJsonlExistsGuard 放行 existsSync
+   * 守卫：create 路径 session 必然真实（getState 成功 + registerSession 成功后才到达
    * 本段），.jsonl 未 flush 只是 pi 延迟写入窗口（pi 实装（1.0.0 已核对）：SessionManager
    * 构造即确定性生成 sessionFile 路径，get_state 透传——路径有值、文件不存在；首次落盘
    * 条件 = 存在 user 或 assistant 消息，即用户首条消息发出即建文件），不再以文件
    * 存在性当 session 有效性判据。规则 #6 禁止的是创建/触碰 pi session .jsonl 本体
    *（openSync('wx') EEXIST 卡死），sidecar 是 taiji 自有文件经 atomicWrite 落盘、不触碰
-   * .jsonl，放行不违反规则 #6。此前检查恒跳过且无补偿写点（model 面经 turn-end 补偿，
+   * .jsonl，放行不违反规则 #6。此前守卫恒跳过且无补偿写点（model 面经 turn-end 补偿，
    * 该写点族已于缓存治理批 3 U8 整体退役）→ landing 新建 session 重启后
    * preset 绑定永久回退 builtin:full / 项目归属丢失 / agent badge 丢失。fork 路径
-   * （:persistForkBindings）不传 flag——forkedFilePath 是已写出的新文件，检查自然通过。
-   * session.sessionFilePath 第一层检查保留：路径 undefined（pi 异常未返回）无法定位
+   * （:persistForkBindings）不传 flag——forkedFilePath 是已写出的新文件，守卫自然通过。
+   * session.sessionFilePath 第一层守卫保留：路径 undefined（pi 异常未返回）无法定位
    * sidecar 落点。空 projectId（默认项目创建）不写 sidecar——等价于未归类。
    */
   private persistCreateSidecars(
@@ -906,7 +913,7 @@ export class SessionLifecycle implements ISessionRegistry {
       }
       // 扫描 stale（文件已消失）时跳过预读归一化——「文件不存在」的报错分工归
       // withEphemeralPi 内 switchSession（pi 报错，见其 docstring 的 @param 语义），
-      // 预读 ENOENT 会短路该分工。restoreSession 无此检查（既有行为保持，不动）。
+      // 预读 ENOENT 会短路该分工。restoreSession 无此守卫（既有行为保持，不动）。
       if (existsSync(target.filePath)) {
         normalizeInactiveSessionFileIfNeeded(target.filePath, cwdFellBack, this.sessionStore)
       }
@@ -923,14 +930,19 @@ export class SessionLifecycle implements ISessionRegistry {
   /**
    * 删除路径的下挂内容级联 + 主文件清理（2026-10-12 裁决扩展，delete 两分支共用）。
    *
-   * 清单与执行顺序的权威在 session-content-cascade.ts（单一清单入口）：引用并集
-   * 判定（fork 共享防护）→ 子代理文件族 → session-view 导出物 → 后台任务 registry
-   * 目录 → trash 主文件 → 主 sidecars。skipIfMainFileMissing 承载两分支的既有语义
-   * 差异：active 分支 true = 主文件不存在（外部已删）时**整体零动作**（原
-   * purgeActiveSessionFile 检查）；scanned 分支 false = 仍清孤儿 sidecar + A21/A23
-   * （session-view 与后台任务目录不依赖主文件内容）。trash rejection 原样上抛
-   *（G4/P4-1：trash 失败必须经 session-lifecycle 传播——此时下挂已清、本体还在
-   * = 可恢复形态，重试删除即达终态）。
+   * 清单与执行顺序的权威在 session-content-cascade.ts（单一清单入口）。D5 删除链
+   * 四段在本方法与其调用方 delete 之间的分工：
+   *   ① 收殓（cascade 内 await reapBackgroundTasks）→
+   *   ② tombstone 登记（delete 编排侧 clearRemovedSessionData，先于③——域 4 插件 KV
+   *      已入树，迟到写必须在树删前被守卫丢弃，否则软删后重建树内文件成孤儿）→
+   *   ③ 整树 trash（cascade 内 trashSessionTree = infra trashDirectory，`<root>/<sid>/`
+   *      目录级软删；fork 回退暂存/回迁也在 cascade 内收口）→
+   *   ④ pi sidecar 清理（cascade 内 purgeMainSidecars 回调回本类 purgeSessionSidecars）。
+   * skipIfMainFileMissing 承载两分支的既有语义差异：active 分支 true = 主文件不存在
+   * （外部已删）时**整体零动作**（原 purgeActiveSessionFile 守卫）；scanned 分支 false =
+   * 仍收殓 + 整树软删 + 清孤儿 sidecar（树与 sidecar 不依赖主文件内容）。
+   * trash / trashSessionTree 的 rejection 原样上抛（G4/P4-1：trash 失败必须经
+   * session-lifecycle 传播——此时树与本体都还在 = 可恢复形态，重试删除即达终态）。
    */
   private async cascadeDeletedSessionContent(sessionId: string, filePath: string, skipIfMainFileMissing: boolean): Promise<void> {
     await cascadeDeleteSessionContent(
@@ -939,10 +951,12 @@ export class SessionLifecycle implements ISessionRegistry {
         sessionFilePath: filePath,
         agentDir: getPiAgentDir(),
         sessionsRoot: getSessionsDir(),
+        sessionStoreRoot: getSessionStoreDir(),
         skipIfMainFileMissing,
       },
       {
         trash: (path) => this.sessionStore.trash(path),
+        trashSessionTree: (dirPath) => this.sessionStore.trashDirectory(dirPath),
         purgeMainSidecars: (path) => { this.purgeSessionSidecars(path) },
         reapBackgroundTasks: reapSessionBackgroundTasks,
         warn: (message) => console.warn(message),
@@ -951,7 +965,13 @@ export class SessionLifecycle implements ISessionRegistry {
   }
 
   /**
-   * 清理 session 主文件的全部关联产物（delete 是唯一清理点）。
+   * 清理 session 主文件的 pi 树内 sidecar（delete 是唯一清理点）。
+   *
+   * [session-store-layout-inversion D5] 职责收窄到 pi 宿主树内 6 段：原三段衍生
+   * 数据 rm（toolResult 图片缓存 / 会话产物 / 粘贴附件）随**整树软删**退役——三域
+   * 换根后落在 `<root>/<sid>/{image-cache,artifacts,attachments}/`（shared paths
+   * 公式），由 session-content-cascade 的 trashSessionTree 一并进废纸篓，此处再删
+   * 即双删且会把树内数据排除在可恢复的整树快照之外。旧布局残留不回收 = D6 显式取舍。
    *
    * active / scanned 两分支共用：原先两处各内联一份完全相同的清理序列，
    * 是 delete 圈复杂度超阈的主要来源。
@@ -972,36 +992,23 @@ export class SessionLifecycle implements ISessionRegistry {
     try { unlinkSync(filePath + '.model.json') } catch { void 0 }
     // 清理归一化残留 .tmp-migrate-*.jsonl（差距复审 suggestion 6，与 sidecar 同点 best-effort）
     cleanupMigrateResidues(filePath)
-    // [D6-⑨ u7-memory-governance] toolResult 图片缓存级联（cache/images 是 session 文件
-    // 之外的第四类关联产物，delete 是唯一清理点补齐——纯缓存语义下删除级联是三条清理
-    // 通道之一；main 侧生命周期 SSOT 在 apps/electron/main/images/image-cache.ts 的
-    // deleteSessionImageCache，runtime 进程无法跨包 import，此处按同语义内联最小接线：
-    // 同一 shared paths 推导（getImageCacheDir 含 sessionId 穿越校验）+ force 幂等删）。
-    try { rmSync(getImageCacheDir(sessionIdFromSessionFilePath(filePath)), { recursive: true, force: true }) } catch { void 0 }
-    // [chat-html-support §6.7 D7 回收①] 会话产物目录级联（`<dataDir>/artifacts/<sessionId>`，
-    // 公式单点 = shared getSessionArtifactsDir，含与 isPiSessionId 同域的 sessionId 穿越
-    // 校验）。与上行 cache/images 级联同一落点、同一幂等形态（recursive + force），
-    // best-effort 不阻断删除主链——残留由删会话级联承接（session-content-cascade）；
-    // 外部删除主文件场景接受残留（2026-10-12 裁决：下挂内容回收统一归级联，无保留期扫描兜底）。
-    // 目录的创建由 write 工具落盘时承担：真装版 pi write 工具在写入前
-    // `mkdir(dir, {recursive:true})`（工具 description 亦声明）——持久源码锚点
-    // @earendil-works/pi-coding-agent@0.84.4 dist/core/tools/write.js:22（
-    // defaultWriteOperations.mkdir recursive 实装）/ :141（description
-    // 「Automatically creates parent directories」声明）/ :160（execute 写前调用），
-    // 与 pi-semantics 探针族同口径可重验；P-2 探针（⛔ u-artifacts 门禁）同结论，
-    // 探针产物在 .tmp 不入库，仓内可复现证据以 dist 锚点为准。
-    // 故不实现 runtime 会话激活预建降级。
-    try { rmSync(getSessionArtifactsDir(sessionIdFromSessionFilePath(filePath)), { recursive: true, force: true }) } catch { void 0 }
-    // 粘贴图片附件目录级联（`<dataDir>/attachments/<sessionId>`，
-    // shared getAttachmentsDir 含 sessionId 穿越校验）。与上行 cache/images / artifacts
-    // 级联同一落点、同一幂等形态（recursive + force），best-effort 不阻断删除主链
-    // ——delete 是唯一清理点，防孤儿附件目录无上界累积。
-    try { rmSync(getAttachmentsDir(sessionIdFromSessionFilePath(filePath)), { recursive: true, force: true }) } catch { void 0 }
     // W-Runtime4：清理 session 文件头解析缓存（infra session-file-utils 的 filePath 键
     // 派生缓存，非已删的 label 影子缓存）中的 stale 条目（避免无界增长）
     this.sessionStore.invalidateMetaCache(filePath)
   }
 
+  /**
+   * 删除会话（D5 删除链四段，2026-10-17 收敛）：
+   *   ① 收殓——cascade 内 await reapBackgroundTasks（杀在途后台进程 + 写 orphaned
+   *      终态），先于一切删除动作；
+   *   ② tombstone 登记——本方法两分支内 clearRemovedSessionDataForDelete（插件 KV
+   *      迟到写守卫），先于③（域 4 文件已入树）；
+   *   ③ 整树 trash——cascade 内 trashSessionTree（`<root>/<sid>/` 目录级软删，全部
+   *      session 维度衍生数据随树进废纸篓）；
+   *   ④ pi sidecar 清理——cascade 内 purgeMainSidecars 回调 purgeSessionSidecars
+   *      （pi 宿主树内 6 段硬删；主 jsonl 走文件级 trash）。
+   * 段间顺序与失败语义的权威在 session-content-cascade.ts 文件头。
+   */
   async delete(sessionId: string): Promise<void> {
     // D4 清理路径：delete = 彻底删除，userStopped 标记随 session 一起清理（收敛环定时器
     // 一并停——active 分支的 removeSessionEntry 只停环不清标记，本调用补齐标记清理）。
@@ -1010,7 +1017,7 @@ export class SessionLifecycle implements ISessionRegistry {
     // 在册先行只读判定（hasDestroySink 判据，见 fireDeathDisposition 处登记）：抑制标只能
     // 立在随后必经 removeSessionEntry 销毁回调的处置上——判据 = session 是否在册：scanned /
     // 未找到 throw 不在册无消费点，无差别立标 = stale id 无界滞留（审查 unreasonable#3；
-    //「delete 失败提前 throw」同型滞留由本判定收尾：not-found throw 天然不立标）；btw 活线
+    //「delete 失败提前 throw」同型滞留由本判定收口：not-found throw 天然不立标）；btw 活线
     // 在册（onLineTerminated → removeSessionEntry 同样消费标）、冷线不在册且终结扇出早退，
     // 均按在册判据如实取值。
     // btwOps 本地 const 捕获：供 isBtwLine 别名判定在 if 处收窄（模块级 let 不走别名收窄）。
@@ -1018,7 +1025,7 @@ export class SessionLifecycle implements ISessionRegistry {
     const isBtwLine = isBtwVirtualId(sessionId) && btwOps !== null
     const session = this.get(sessionId)
     // [notify-once D5] 死亡汇聚点立 latch（先于任何杀进程/文件处置，覆盖 active 与
-    // scanned 两分支——检查点①：pm.destroySession 之前）：'delete' 发声关闭 + clearSession，
+    // scanned 两分支——检查点①：pm.destroySession 之前）：'delete' 发声销账 + clearSession，
     // 随后 active 分支的 pm.destroySession 即便漏出 exit 事件也查无记录（'deleted' 必胜出）。
     // 发声两分支恒执行（检查点①语义不动）；抑制标仅在册立——主会话在册分支 destroySession
     //（内部全 catch）与 removeSessionEntry（步隔离扇出）均不抛，btw 活线分支的销毁回调
@@ -1028,10 +1035,10 @@ export class SessionLifecycle implements ISessionRegistry {
     // 发生、被 fireLineTerminated 捕获（删除不整体失败但销毁回调被跳过）——两形态标滞留
     // 同为单条 bounded，净风险不变。
     fireDeathDisposition(sessionId, 'delete', { hasDestroySink: session !== undefined })
-    // [M4-a / btw-question D4+D9④] btw 线直删分支（下一段）：deleteByCwd 收集侧「故意含 hidden」的
+    // [M4-a / btw-question D4+D9④] btw 线直删分支（下一段）：deleteByCwd 收集面「故意含 hidden」的
     // 既有不变量保留（活跃线 vid 进批内 cwdSessions），本分支让直删与级联/btw.remove
     // **三路收敛单入口 closeLine**——杀进程 + 注册表移除 + 线文件删除（路径限定 btw 根内）
-    // 全在 btw 侧完成，不落主会话 trash/sidecar 清理侧；线已不在（并发双删 / 主删级联先行 /
+    // 全在 btw 侧完成，不落主会话 trash/sidecar 清理面；线已不在（并发双删 / 主删级联先行 /
     // 重复调用）= 幂等 no-op 不抛——deleteByCwd 批内不得因重复处置记 failed。
     // 未注入 ops（存量测试装配）→ fall through 既有两分支，行为零变更。
     if (isBtwLine) {
@@ -1042,8 +1049,8 @@ export class SessionLifecycle implements ISessionRegistry {
       unbindCanvasOnSessionDeleted(sessionId)
       return
     }
-    // [M4-a] 级联 cwd 解析（两分支各取真值；分支抛出则级联随之跳过——主已删形态由
-    // 启动孤儿补账兜底清理线目录）。
+    // [M4-a] 级联 cwd 解析（两分支各取真值；分支抛出则级联随之跳过——btw 线目录由
+    // closeAllForMain 同步软删线树（主树内 btw/ 域随整树回收），无外部补账兜底）。
     let cascadeCwd: string | undefined
     if (session) {
       cascadeCwd = session.cwd
@@ -1053,6 +1060,12 @@ export class SessionLifecycle implements ISessionRegistry {
       this.detachSession(sessionId)
       await this.pm.destroySession(sessionId)
       this.svc.removeSessionEntry(sessionId)
+      // B5/D5② tombstone 登记（删链第二段，先于整树软删）：插件 KV 文件域 4 已入
+      // session 存储树（`<root>/<sid>/plugin-data.json`），迟到写必须在树删前被守卫
+      // 丢弃——树删后（mac 目录已移出原位置）插件 worker 的迟到 set 会重建树内文件
+      // 成孤儿分区。顺序约束（设计 §3.2-B5）保持：在 removeSessionEntry 之后——
+      // didDestroy 投递（fire-and-forget）先行，迟到的 set/delete 由 tombstone 丢弃。
+      clearRemovedSessionDataForDelete(sessionId)
       if (session.sessionFilePath) {
         await this.cascadeDeletedSessionContent(sessionId, session.sessionFilePath, true)
       }
@@ -1061,17 +1074,21 @@ export class SessionLifecycle implements ISessionRegistry {
       if (!target) throw new Error(`Session ${sessionId} not found`)
       cascadeCwd = target.cwd
       // 与 active 分支的行为差异（既有语义，保持）：主文件不存在（扫描 stale）时仅跳过
-      // trash，孤儿 sidecar / A21 导出物 / A23 后台任务目录仍无条件清理——两分支差异
+      // 主文件 trash，收殓 + 整树软删 + 孤儿 sidecar 清理仍无条件执行——两分支差异
       // 经 cascadeDeletedSessionContent 的 skipIfMainFileMissing 显式承载（false =
       // scanned 语义），清单与顺序仍在 cascade 模块单点。
+      clearRemovedSessionDataForDelete(sessionId)
       await this.cascadeDeletedSessionContent(sessionId, target.filePath, false)
     }
-    // [M4-a / btw-question D4 消费方① + D9④ 线终结] deleteSession 级联支线：删主 →
+    // [M4-a / btw-question D4 消费面① + D9④ 线终结] deleteSession 级联支线：删主 →
     // 杀名下全部 btw 线进程 + 删 `btw/<encodeCwd>/<mainSid>/` 线目录（前端虚拟分区清理经
-    // cleanupSessionState 的 evictVirtualKeys 路径——m7/agentcall 先例同构，本处只管 runtime
+    // cleanupSessionState 的 evictVirtualKeys 腿——m7/agentcall 先例同构，本处只管 runtime
     // 半边）。单入口收敛：closeAllForMain 内部逐线转调 closeLine（与 btw.remove / 批内直删
     // 同一原语），三路并发处置幂等不重复；abort 幂等 = pm.destroySession 无条目静默跳过。
-    // best-effort：级联失败只 warn 不阻断主删除（P2 降级隔离；漏删残留由启动孤儿补账兜底）。
+    // best-effort：级联失败只 warn 不阻断主删除（P2 降级隔离）。线树回收 = closeLine
+    // 内 trashDirectory 软删 `<root>/<线sid>/` 整树（u-btw 交付），主树内 `btw/` 域随
+    // 主会话整树回收；删除失败已 warn 出声，残留与域 9 同口径接受（启动孤儿补账随
+    // 布局反转退役，无外部兜底扫描）。
     if (btwCascadeOps && cascadeCwd !== undefined) {
       try {
         const closedLines = await btwCascadeOps.closeAllForMain(sessionId, cascadeCwd)
@@ -1084,24 +1101,26 @@ export class SessionLifecycle implements ISessionRegistry {
         }
       } catch (e: unknown) {
         // best-effort 降级（非吞错）：走到本级联时主 session 本体已 trash/purge 完成，
-        // closeAllForMain 是删后辅助路径——上抛只会让已成功的 delete 报成失败返回，还连带跳过
-        // 后续 sessionData 清理与扫描缓存失效（侧栏残留更久），故错误不传播。可观测性：
-        // console.warn 级留痕（sessionId + 原始错误串，runtime 日志落盘可查）。后续路径：
-        // 本处不重试，漏删的线目录由启动孤儿补账 reconcileOrphanThreadDirs 兜底清理
-        // （启动时先于 WS listen 执行）——与本 try 前注释的 P2 降级隔离裁决一致。
+        // closeAllForMain 是删后辅助腿——上抛只会让已成功的 delete 报成失败返回，还连带跳过
+        // 后续扫描缓存失效（侧栏残留更久），故错误不传播。可观测性：console.warn 级留痕
+        // （sessionId + 原始错误串，runtime 日志落盘可查）。本处不重试——漏删的线树
+        // 残留按域 9 同口径接受（设计 D3 附注：应用内删除总是整树回收，补账原服务场景
+        // 只剩「外部删除 / 删除失败残留」）。
         console.warn(`[session-lifecycle] btw cascade failed (sessionId=${sessionId}):`, toErrorMessage(e))
       }
     }
-    // B5 触发点收窄（memory-leak-remediation §3.1 + §3.2-B5）：plugin sessionData（内存分区
+    // B5 触发面收窄（memory-leak-remediation §3.1 + §3.2-B5）：plugin sessionData（内存分区
     // + 磁盘文件）与 session 本体一同进废纸篓——trash 绑定**真删除**，active / scanned 两
     // 分支共用本点（用户删除非活跃 session 的插件数据同样随本体清理）。三条 session 存活
     // 路径刻意**不清**：pi 崩溃（session-service onSessionExit）/ forceQuit（dispatcher
     // 强杀，restore 重开历史完整）/ restore 清场（clearExistingSessionForRestore，同链随后
     // notifySessionCreated 摘碑复活）——它们随后 respawn / restore 复活同 id，插件数据必须
-    // 原样存活供继续读写（tombstone 也不能打：迟到写检查只属真删除）。顺序约束（设计
-    // §3.2-B5）：在 removeSessionEntry 之后——didDestroy 投递（fire-and-forget）先行，插件
-    // worker 迟到的 set/delete 由 SessionDataStore tombstone 丢弃。best-effort：清理失败
-    // 只 warn，不阻断删除主流程（异步路径 rejection 在分发器内部逐实例 catch+warn）。
+    // 原样存活供继续读写（tombstone 也不能打：迟到写守卫只属真删除）。
+    // [D5 ②] tombstone 登记已前移至两分支的 cascade 调用之前（域 4 文件入树后必须先
+    // 登记再整树软删）；此处是**文件 trash 的后置收敛**——树删先行的形态下
+    // `<root>/<sid>/plugin-data.json` 多数已被整树带走，clearSession 的 existsSync
+    // 守卫自然 no-op（树删失败时本段补上文件级 trash，双通道不冲突）。best-effort：
+    // 清理失败只 warn，不阻断删除主流程（异步腿 rejection 在分发器内部逐实例 catch+warn）。
     try {
       clearRemovedSessionData(sessionId)
     } catch (e: unknown) {
@@ -1197,11 +1216,11 @@ export class SessionLifecycle implements ISessionRegistry {
     // hydrateBindingMeta restore='none' 不覆写播种值（D1 裁决），所以兜底链在此完成不经过 hydrate。
     const restoreMetaOverride = await seedRestoreMetaOverride(client, sessionId, target)
 
-    // M3: registerSession 失败时清理 pi 进程（与 create 同模式，收尾在 registerRestoredSession）
+    // M3: registerSession 失败时清理 pi 进程（与 create 同模式，收口在 registerRestoredSession）
     const session = await this.registerRestoredSession(sessionId, client, sessionCwd, target, restoreMetaOverride, allExtPaths)
     // 恢复后兜底广播一次上下文用量（pi 从历史估算 contextUsage）。
     // 注意：此广播可能早于前端订阅新 sessionId 通道（时序竞争，见架构约定 #7），
-    // 前端 useContextUsage composable 的恢复路径（每次切入视图拉 session.getContext）保证到达。
+    // 前端 useContextUsage composable 的恢复腿（每次切入视图拉 session.getContext）保证到达。
     // fire-and-forget：拉取失败不阻塞 session 恢复。
     void this.svc.fetchAndBroadcastContext(sessionId)
     // sidecar-binding-sync：restore 全量回填（矩阵 restore 列）——修复缺陷 A-1：原来只回填
@@ -1291,7 +1310,7 @@ export class SessionLifecycle implements ISessionRegistry {
     if (!existing) return
     // [notify-once D5] 非终局杀立 'suppress' latch（先于 kill）：同 id 随即重开（restore
     // 清场），销毁回调据此静默——不产生伪造死亡通知（respawn/restore 链静默同族）。
-    // hasDestroySink 恒 true：本方法仅从 active 在册发起（上方 existing 检查），随后
+    // hasDestroySink 恒 true：本方法仅从 active 在册发起（上方 existing 守卫），随后
     // detach → safeDestroy（内部 catch）→ removeSessionEntry 必经，标必被销毁回调消费
     //——除 adapter.detach 抛错致清场整体失败外（此时标滞留为单条 bounded，与父提交同暴露面）。
     fireDeathDisposition(sessionId, 'suppress', { hasDestroySink: true })
@@ -1353,7 +1372,7 @@ export class SessionLifecycle implements ISessionRegistry {
       // 模式提示词两通道（设计 §7.2）——restore 用本次 resolve 的 resolution。
       systemPrompt: resolveEffectiveSystemPrompt(resolution, this.svc.getReplaceSystemPrompt()),
       appendSystemPrompt: resolveAppendSystemPrompt(resolution),
-      // F1b（设计 §7.5 E4 trace 披露部分）：回落事实现随 spawn 出站 env 到达 pi 子进程。
+      // F1b（设计 §7.5 E4 trace 披露面）：回落事实现随 spawn 出站 env 到达 pi 子进程。
       env: buildPresetFallbackEnv(resolution),
       ...presetClientOptions,
       // P1（pi-assumption final gate V1⑤）：pi CLI --model 恒优先于 session entry 恢复
@@ -1438,8 +1457,7 @@ export class SessionLifecycle implements ISessionRegistry {
    *
    * 标记不在此清（ADR-0122 事件顺序契约）：标记存活期 = 旁路 turn 拦截存续期，清除只由
    * 显式意图事件驱动（显式投递 / 会话删除 / shutdown）。restore-abort 掐掉的 replay turn
-   * 的 settled 边沿正是文本车道对账器的重投触发点（custom 通知旁路源 = port
-   * session_start 差集重放）——此处清标记会被同边沿重投击穿（R1 审查
+   * 的 settled 边沿正是 notify-ledger 补投触发点——此处清标记会被同边沿补投击穿（R1 审查
    * 反例）；标记存续期间 interpreter 的 agent_start 挂点持续拦截旁路 turn（挂点与契约见
    * event-interpreter.ts UserStoppedGate）。显式投递（sendPrompt 等）在 dispatcher 投递前
    * 清标记放行。
@@ -1451,7 +1469,7 @@ export class SessionLifecycle implements ISessionRegistry {
     try {
       await client.abort()
     } catch (abortErr) {
-      // 既有 abort 失败链收尾（错误规格 §3.4）：超时/断链 → forceQuit 强杀收敛（幂等：
+      // 既有 abort 失败链收口（错误规格 §3.4）：超时/断链 → forceQuit 强杀收敛（幂等：
       // 进程已死时成功返回）。经注入的 dispatcher.forceQuit（构造注入，避免双倍 abort
       // RPC 超时等待直达强杀）。强杀失败（极端）→ 标记保留，用户再点
       // 「强制退出」即达终态（设计恢复指引）。
@@ -1567,7 +1585,7 @@ export class SessionLifecycle implements ISessionRegistry {
       // 模式提示词两通道（设计 §7.2）——fork 继承源 session 的 preset，用 forkResolution。
       systemPrompt: resolveEffectiveSystemPrompt(forkResolution, this.svc.getReplaceSystemPrompt()),
       appendSystemPrompt: resolveAppendSystemPrompt(forkResolution),
-      // F1b（设计 §7.5 E4 trace 披露部分）：fork 继承的 preset 若已悬空，回落事实现随 env 出站。
+      // F1b（设计 §7.5 E4 trace 披露面）：fork 继承的 preset 若已悬空，回落事实现随 env 出站。
       env: buildPresetFallbackEnv(forkResolution),
       ...presetClientOptions,
     })
@@ -1752,7 +1770,7 @@ export class SessionLifecycle implements ISessionRegistry {
       // fork 不继承 agent binding（binding 是创建时语义）——防御性清理同名残留 sidecar
       try { unlinkSync(forkedFilePath + '.agent.json') } catch { void 0 }
       // 写 preset 绑定到 forkedFilePath 的 sidecar（设计文档 §4.5）。
-      // fork 继承源 preset，forkedFilePath 是新文件（已写出），existsSync 检查会通过。
+      // fork 继承源 preset，forkedFilePath 是新文件（已写出），existsSync 守卫会通过。
       this.sessionStore.persistPresetBinding(forkedFilePath, forkPresetId)
       // 写归属 project 到 forkedFilePath 的 sidecar（D14 语义修正）：fork 继承源归属。
       if (forkProjectId) {

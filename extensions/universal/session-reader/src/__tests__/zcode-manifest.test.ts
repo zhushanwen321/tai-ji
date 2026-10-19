@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest'
 import { tmpdir } from 'node:os'
 import { mkdtempSync, writeFileSync, mkdirSync, rmSync } from 'node:fs'
-import { join } from 'node:path'
+import { join, dirname } from 'node:path'
 
 import { readZcodeManifest, listZcodeManifests } from '../discovery/zcode-manifest.js'
 import { findZcodeEntryAnchor } from '../discovery/entry-anchor.js'
@@ -21,9 +21,13 @@ const DB_PATH = '/data/agent/engines/zcode/session-db/db.sqlite'
 
 let agentDir: string
 
-/** 在 <agentDir>/subagents/<slug>/records/ 下写一个 manifest 文件（手写 JSON 字符串，忠实控制键） */
-function writeManifest(slug: string, name: string, content: string): string {
-  const recordsDir = join(agentDir, 'subagents', slug, 'records')
+/**
+ * 在存储树分区 <root>/<sid>/subagents/records/ 下写一个 manifest 文件（手写 JSON 字符串，
+ * 忠实控制键）。[session-store-layout-inversion D6/单新根] 新布局无 cwd-slug 层，
+ * slug 参数消亡（保留签名兼容既有调用点，弃用改名 _slug）；分区名固定合法 sid。
+ */
+function writeManifest(_slug: string, name: string, content: string): string {
+  const recordsDir = join(dirname(agentDir), 'ext-sessions', 'root-session-test', 'subagents', 'records')
   mkdirSync(recordsDir, { recursive: true })
   const file = join(recordsDir, name)
   writeFileSync(file, content, 'utf8')
@@ -73,7 +77,10 @@ function recordLine(saId: string, sessionRef: Record<string, string>): string {
 }
 
 beforeEach(() => {
-  agentDir = mkdtempSync(join(tmpdir(), 'zcode-manifest-test-'))
+  // agentDir 两层化（<mkdtemp>/agent）：存储树推导 = dirname(agentDir)/ext-sessions，
+  // 单层直接当 agentDir 会把扫描根泄到 tmpdir 公共层（跨测试污染——先例 reaper/family-zcode 同修）
+  agentDir = join(mkdtempSync(join(tmpdir(), 'zcode-manifest-test-')), 'agent')
+  mkdirSync(agentDir, { recursive: true })
 })
 afterEach(() => {
   rmSync(agentDir, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 })
@@ -353,12 +360,13 @@ describe('listZcodeManifests 枚举（family 节点列表来源）', () => {
     expect(manifests.find((m) => m.id === 'sa-s2')?.slug).toBe('worker') // agentName 兜底
   })
 
-  it('subagents 根不存在 → 空数组（不报错；单节点不可达不炸整屏）', async () => {
-    const bareDir = mkdtempSync(join(tmpdir(), 'zcode-manifest-bare-'))
+  it('存储树根不存在 → 空数组（不报错；单节点不可达不炸整屏）', async () => {
+    // agentDir 两层化：扫描根 = dirname(agentDir)/ext-sessions（mkdtemp 私有层内，防公共层污染）
+    const bareDir = join(mkdtempSync(join(tmpdir(), 'zcode-manifest-bare-')), 'agent')
     try {
       expect(await listZcodeManifests(bareDir)).toEqual([])
     } finally {
-      rmSync(bareDir, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 })
+      rmSync(dirname(bareDir), { recursive: true, force: true, maxRetries: 5, retryDelay: 20 })
     }
   })
 })

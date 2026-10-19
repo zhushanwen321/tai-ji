@@ -19,6 +19,7 @@ import {
   openSchedulerOverlay,
   openOverlay,
   closeBrowserOverlayForSession,
+  closeCanvasOverlayForSession,
   closeOverlay,
   _resetOverlayForTest,
 } from '../coordination'
@@ -85,34 +86,35 @@ describe('openSchedulerOverlay（scheduler 整合浮层一级 tab，2026-10-06�
   })
 })
 
-describe('openCanvasOverlay（canvas 画布 tab，problem-solve-canvas §3.1(3)：scheduler 双入口先例平移）', () => {
-  it('kind 直达打开：isOpen=true + current=canvas 载荷（canvasId，无会话归属）', () => {
-    openCanvasOverlay('cvs-1')
+describe('openCanvasOverlay（canvas 画布 tab，problem-solve-canvas §3.1(3)：scheduler 双入口先例平移；D4 归属会话隔离）', () => {
+  it('kind 直达打开：isOpen=true + current=canvas 载荷（canvasId + 归属 sessionId）', () => {
+    openCanvasOverlay('cvs-1', 'sess-a')
     const state = getOverlayControlState()
     expect(state.isOpen).toBe(true)
-    expect(state.current).toEqual({ kind: 'canvas', payload: { canvasId: 'cvs-1' } })
+    expect(state.current).toEqual({ kind: 'canvas', payload: { canvasId: 'cvs-1', sessionId: 'sess-a' } })
   })
 
   it('已开态（scheduler 内容）再开 = 单例换内容（isOpen 保持开、载荷替换为 canvas）', () => {
     openSchedulerOverlay('sess-a')
-    openCanvasOverlay('cvs-1')
+    openCanvasOverlay('cvs-1', 'sess-a')
     const state = getOverlayControlState()
     expect(state.isOpen).toBe(true)
-    expect(state.current).toEqual({ kind: 'canvas', payload: { canvasId: 'cvs-1' } })
+    expect(state.current).toEqual({ kind: 'canvas', payload: { canvasId: 'cvs-1', sessionId: 'sess-a' } })
   })
 
-  it('canvasId 空白 → no-op（原态保持；无效内容不进浮层）', () => {
-    openCanvasOverlay('cvs-1')
-    openCanvasOverlay('   ')
-    expect(getOverlayControlState().current).toEqual({ kind: 'canvas', payload: { canvasId: 'cvs-1' } })
+  it('canvasId / sessionId 空白 → no-op（原态保持；无效内容不进浮层）', () => {
+    openCanvasOverlay('cvs-1', 'sess-a')
+    openCanvasOverlay('   ', 'sess-a')
+    openCanvasOverlay('cvs-1', '')
+    expect(getOverlayControlState().current).toEqual({ kind: 'canvas', payload: { canvasId: 'cvs-1', sessionId: 'sess-a' } })
   })
 
-  it('画布跨 session 无会话归属：会话删除级联不关 canvas 内容（反向断言），closeOverlay 正常复位', () => {
-    openCanvasOverlay('cvs-1')
-    closeBrowserOverlayForSession('sess-a')
+  it('会话删除级联（D4）：删归属会话 → 关 canvas 内容浮层；删其他会话不关', () => {
+    openCanvasOverlay('cvs-1', 'sess-a')
+    closeCanvasOverlayForSession('sess-b')
     expect(getOverlayControlState().isOpen).toBe(true)
     expect(getOverlayControlState().current?.kind).toBe('canvas')
-    closeOverlay()
+    closeCanvasOverlayForSession('sess-a')
     expect(getOverlayControlState().isOpen).toBe(false)
     expect(getOverlayControlState().current).toBeNull()
   })

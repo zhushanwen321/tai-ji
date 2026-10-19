@@ -91,7 +91,7 @@ interface DepOverrides {
  *  spy 同一入口）。sessionsDir 经 beforeEach 刷新（describe 作用域变量模块级桥接）。 */
 let currentSessionsDir = "";
 function makeDeps(o: DepOverrides = {}): ColdLookupDeps {
-  const store = new RecordStore(currentSessionsDir);
+  const store = new RecordStore(() => currentSessionsDir);
   const registerSpy = vi.spyOn(store, "register");
   return {
     findLightById: vi.fn(() => o.direct),

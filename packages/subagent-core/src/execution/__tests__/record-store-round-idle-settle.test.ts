@@ -57,7 +57,7 @@ function makeRecord(id: string, over: Partial<ExecutionRecord> = {}): ExecutionR
 function makeStore(sessionsDir: string, manifestDir: string): RecordStore {
   fs.mkdirSync(sessionsDir, { recursive: true });
   fs.mkdirSync(manifestDir, { recursive: true });
-  return new RecordStore(sessionsDir, undefined, { appendEntry: vi.fn() }, manifestDir);
+  return new RecordStore(() => sessionsDir, undefined, { appendEntry: vi.fn() }, () => manifestDir);
 }
 
 describe("markRoundIdle 正常轮终磁盘侧（A-lite 簿记⑩⑪）", () => {

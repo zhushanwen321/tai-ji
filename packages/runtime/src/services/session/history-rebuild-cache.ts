@@ -748,7 +748,8 @@ export class SessionHistoryReader {
  * 读 segments.json sidecar（runtime 直接读文件，不经 IPC）。
  *
  * IPC 的 writeSegmentsMetadata / readSegmentsMetadata 是 renderer→main 通道，runtime 是独立 Node 进程
- * （不持 electron app 句柄），不能走 IPC。runtime 直接读 <dataDir>/attachments/<sessionId>/segments.json。
+ * （不持 electron app 句柄），不能走 IPC。runtime 直接读 getAttachmentsDir(sessionId)
+ * （session 存储树域 1，<root>/<sessionId>/attachments/）下的 segments.json。
  *
  * 文件缺失/损坏（JSON parse 失败 / entries 非数组）→ 返回 null（rebuildHistoryFromEntries 据此
  * 全降级为占位文本，非硬错误）。异步读：与周围 getEntries RPC / readFile 一致，sidecar 是小文件

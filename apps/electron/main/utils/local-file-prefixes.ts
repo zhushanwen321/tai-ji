@@ -5,10 +5,9 @@
  *   - appPath（app.getAppPath()）：app 资源目录（dev 装配下 = apps/electron 子目录，
  *     非项目根——见 projectRoot 条目）
  *   - dataDir（getDataDir()）：taiji 数据目录（动态推导，dev=~/.taiji-dev，
- *     符合架构约定 #2）+ <dataDir>/attachments：会话级图片附件目录（runtime
- *     session-service 持久化路径，按 sessionId 分区。放行整个 attachments 目录——
- *     全是用户自粘图片非敏感，安全粒度等同 tmpdir；protocol handler 无状态拿不到
- *     session 上下文，无法按 session 推导）
+ *     符合架构约定 #2）。+ <dataDir>/attachments：旧布局遗留放行成员（域 1/3
+ *     落盘已换根 `<root>/<sid>/{attachments,image-cache}/`，被 dataDir 整前缀涵盖，
+ *     去留 deferred——见 computeLocalFilePrefixes 成员声明处注释）
  *   - 会话项目 `.tmp/` 子树（动态派生成员，2026-10-15 ADR-0118 决策②代价修订 3d）：
  *     应用全部会话的项目根（session cwd）下的 `.tmp/` 子树。派生不经 renderer
  *     （决策②否决的 session cwd 动态注册不回归）：main 自有 sessions 目录
@@ -45,7 +44,7 @@ import path from 'node:path'
 import { readFileSync as fsReadFileSync, readdirSync as fsReaddirSync, statSync as fsStatSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { pathToFileURL } from 'node:url'
-import { encodeCwd } from '@taiji/shared/paths'
+import { encodeCwd, getSessionStoreDir, isPiSessionId } from '@taiji/shared/paths'
 import { expandLocalFilePath } from './path.js'
 import type {
   LocalFileReadReason,
@@ -103,10 +102,11 @@ export function computeLocalFilePrefixes(opts: LocalFilePrefixOptions): string[]
   const userContentSubdirs = ['Documents', 'Desktop', 'Downloads'].map(d => path.join(home, d))
   const prefixes: string[] = [
     ...(opts.appPath ? [opts.appPath] : []),
-    // attachments：会话粘贴图片（runtime 持久化）；cache/images：toolResult 图片缓存
-    // （D6-⑨，main 经 IPC 落盘后 renderer 以 local-file:// 引用渲染）。
-    // 两者均为用户自产图片目录，安全粒度等同 tmpdir，整前缀放行（protocol handler
-    // 无状态拿不到 session 上下文，无法按 session 推导）。
+    // attachments / cache/images：旧布局遗留放行成员（域 1/3 落盘已换根
+    // `<root>/<sid>/{attachments,image-cache}/`，新树路径由下方 dataDir 整前缀涵盖，
+    // 移除本两成员无行为差异——成员去留随下一批代码改动裁决）。用户自产图片目录，
+    // 安全粒度等同 tmpdir，整前缀放行（protocol handler 无状态拿不到 session 上下文，
+    // 无法按 session 推导）。
     ...(opts.dataDir
       ? [opts.dataDir, path.join(opts.dataDir, 'attachments'), path.join(opts.dataDir, 'cache', 'images')]
       : []),
@@ -220,17 +220,39 @@ export function isPathUnderSessionTmp(resolvedPath: string, encodeCwdDirs: Reado
 /**
  * localFile:servable / localFile:read 两条 IPC 通道的准入前缀（读/预检通道单独收窄）。
  *
- * 两条 IPC 的消费域 = 会话产物子树 `<dataDir>/artifacts/`（HtmlPreviewInline 挂载前
- * size 预检 + 源码态读取、useDetailPane 抽屉产物源码读取——全部调用链只消费产物路径）。
- * 与渲染范围协议 handler 的全量白名单（computeLocalFilePrefixes）分离：通道入参含模型消息
- * 文本承载的路径载荷（html-preview fence），全量白名单含 `<dataDir>` 整前缀（含 pi agent
- * 目录的 auth.json 等凭据文件），读通道复用全量白名单 = 渲染进程可直读数据目录内任意
- * 文件文本。cwd 外非产物路径返回 `out_of_whitelist`，由调用方回落既有通道（useDetailPane
- * 的 cwd 通道 / 容器降级占位），不构成功能回退。
+ * 两条 IPC 的消费域 = session 存储树内产物子树 `<dataDir>/ext-sessions/<sessionId>/artifacts/`
+ * （HtmlPreviewInline 挂载前 size 预检 + 源码态读取、useDetailPane 抽屉产物源码读取——全部
+ * 调用链只消费产物路径）。与渲染范围协议 handler 的全量白名单（computeLocalFilePrefixes）分离：
+ * 通道入参含模型消息文本承载的路径载荷（html-preview fence），全量白名单含 `<dataDir>` 整前缀
+ * （含 pi agent 目录的 auth.json 等凭据文件），读通道复用全量白名单 = 渲染进程可直读数据目录
+ * 内任意文件文本。存储树内非产物路径返回 `out_of_whitelist`，由调用方回落既有通道
+ * （useDetailPane 的 cwd 通道 / 容器降级占位），不构成功能回退。
+ *
+ * **按现存会话枚举（session-store-layout-inversion 布局反转，定档候选 ①）**：产物子树以
+ * sessionId 分区（`<root>/<sid>/artifacts/`），静态单前缀不再存在——每次准入现算 readdir
+ * 存储树一级目录（先例 = ADR-0118 3d 的 encodeCwd 目录集，本地 fs µs 级），只对合法
+ * sessionId 形态的一级目录产出其 artifacts 前缀（D7 树内遍历规约：非 sid 形态跳过）。
+ * 枚举失败（缺目录 / 权限）→ 空集（准入从紧，不构成放行）：ENOENT 静默（存储树未建 = 无
+ * 产物，常态），其余异常经 onError 旁路出声（与 collectSessionTmpEncodeCwdDirs 同一约定）。
  */
-export function computeLocalFileReadPrefixes(dataDir: string): string[] {
-  const artifactsPrefix = path.join(dataDir, 'artifacts')
-  return [artifactsPrefix.endsWith(path.sep) ? artifactsPrefix : artifactsPrefix + path.sep]
+export function computeLocalFileReadPrefixes(
+  dataDir: string,
+  fs: SessionTmpDirFs = {},
+  onError?: (err: unknown, dir: string) => void,
+): string[] {
+  const storeDir = getSessionStoreDir(dataDir)
+  let entries: string[]
+  try {
+    entries = (fs.readdirSync ?? defaultReaddir)(storeDir)
+  } catch (err) {
+    if ((err as NodeJS.ErrnoException)?.code !== 'ENOENT') onError?.(err, storeDir)
+    return []
+  }
+  const sep = path.sep
+  return entries
+    .filter(e => isPiSessionId(e))
+    .map(sid => path.join(storeDir, sid, 'artifacts'))
+    .map(p => (p.endsWith(sep) ? p : p + sep))
 }
 
 // ── local-file servable 预检谓词（chat-html-support §6.4 D4 子决策 / §6.9 D9）──────
@@ -371,7 +393,7 @@ export function probeLocalFileUrlPathname(
 }
 
 // ── local-file 源码内容读取（chat-html-support §8.2 S3「切换『源码』看到 shiki 高亮」）──
-// 产物目录 `<dataDir>/artifacts/<sessionId>` 在 session cwd 外（设计 §6.7 D7 自述「产物在
+// 产物目录 `<root>/<sessionId>/artifacts/` 在 session cwd 外（设计 §6.7 D7 自述「产物在
 // cwd 外、在白名单内」），runtime `file.read` 的 cwd 守门（file-service.ts 越界抛
 // `out_of_cwd`）对主要产物路径不可达——源码态需要一条与 servable 预检**同一谓词函数**的
 // 读取通道。准入判定复用 probeLocalFileServable（白名单先行短路 → 存在性 → 目录性）；

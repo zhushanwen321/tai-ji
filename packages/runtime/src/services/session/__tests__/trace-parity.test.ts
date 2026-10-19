@@ -55,6 +55,8 @@ const store: ISessionStore = {
   readSessionEndMeta: (p: string) => readSessionEndMeta(p),
   persistHandoffSidecar: () => {},
   trash: () => Promise.resolve(),
+  // [session-store-layout-inversion D5] 目录级整树软删 port（本测试不触删除路径）
+  trashDirectory: () => Promise.resolve(),
 }
 
 /** 逐条 diff 结果：完全一致返回空数组，否则返回差异描述（index + 双方摘要）。 */

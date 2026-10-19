@@ -197,7 +197,7 @@ interface RunSummary {
   startedAt?: string;
   completedAt?: string;
   error?: string;
-  /** run 唯一持久件（record 事件流 <sessionDir>/workflow-state/<runId>.record.jsonl）的绝对路径。 */
+  /** run 唯一持久件（record 事件流 <root>/<rootSid>/workflow/runs/<runId>.record.jsonl）的绝对路径。 */
   stateFile?: string;
 }
 

@@ -57,15 +57,29 @@ async function loadLogger(env: Record<string, string> = {}): Promise<LoggerModul
   return import('../logger.js')
 }
 
-/** logs 目录下文件名含 marker 的全部条目。 */
-function filesWithMarker(marker: string): string[] {
-  return readdirSync(logsDirPath).filter((f) => f.includes(marker)).sort()
+/**
+ * 收集目标目录下文件名含 marker 的全部条目（绝对路径）。
+ *
+ * 布局反转（session-store-layout-inversion 域 11）：pi tee/crash 落树内
+ * `<root>/<sid>/logs/`（文件名去 sid，marker 不再能按文件名命中 sid）——断言按
+ * sid 定位树内目录；全局 logs 仍兜底扫描（nosid/relay 形态）。
+ */
+function filesWithMarker(marker: string, sid?: string): string[] {
+  const dirs = [logsDirPath]
+  if (sid !== undefined) dirs.push(join(dataDir, 'ext-sessions', sid, 'logs'))
+  return dirs.flatMap((dir) => {
+    try {
+      return readdirSync(dir).filter((f) => f.includes(marker)).map((f) => join(dir, f))
+    } catch {
+      return [] // 目录未建（无写入）= 无匹配文件
+    }
+  }).sort()
 }
 
 /** 读 marker 相关全部文件内容（.gz 解压 + 主档拼接；摘除断言只做包含性检查）。 */
-function contentWithMarker(marker: string): string {
-  return filesWithMarker(marker)
-    .map((f) => (f.endsWith('.gz') ? gunzipSync(readFileSync(join(logsDirPath, f))).toString('utf8') : readFileSync(join(logsDirPath, f), 'utf8')))
+function contentWithMarker(marker: string, sid?: string): string {
+  return filesWithMarker(marker, sid)
+    .map((full) => (full.endsWith('.gz') ? gunzipSync(readFileSync(full)).toString('utf8') : readFileSync(full, 'utf8')))
     .join('\n')
 }
 
@@ -111,7 +125,7 @@ describe('openPiStreams 注册表摘除（G2 活性治理）', () => {
     await waitFor('pi stream retired after close', () => logger!._openPiStreamCountForTest() === 0)
 
     // 「已 close 流无在途数据」的可观察证据：摘除成立时（未调 closeLogger）数据已在盘上
-    expect(contentWithMarker('retire-sid-1')).toContain('"line":"retire-1"')
+    expect(contentWithMarker('pi-', 'retire-sid-1')).toContain('"line":"retire-1"')
     // closeLogger 幂等收尾不因摘除受影响（已摘条目本就无可等待者）
     await logger.closeLogger()
     expect(logger._openPiStreamCountForTest()).toBe(0)
@@ -134,7 +148,7 @@ describe('openPiStreams 注册表摘除（G2 活性治理）', () => {
 
     // closeLogger 兜底契约：flush 活跃流缓冲后关闭（b2 尾行不丢）
     await logger.closeLogger()
-    expect(contentWithMarker('retire-b')).toContain('"w":"b2"')
+    expect(contentWithMarker('pi-', 'retire-b')).toContain('"w":"b2"')
     expect(logger._openPiStreamCountForTest()).toBe(0)
   })
 
@@ -155,7 +169,7 @@ describe('openPiStreams 注册表摘除（G2 活性治理）', () => {
     await logger.closeLogger()
 
     // 轮转 + 摘除路径下写入不丢：末行必在幸存段（单代 .1.gz 或主档）
-    expect(contentWithMarker('retire-rot')).toContain('"i":39')
+    expect(contentWithMarker('pi-', 'retire-rot')).toContain('"i":39')
   })
 
   it('writePiCrashLog（写后即 end 的短命 writer）同样摘除', async () => {
@@ -164,6 +178,6 @@ describe('openPiStreams 注册表摘除（G2 活性治理）', () => {
     logger.writePiCrashLog('retire-crash', 'crash-stderr-boom\n')
     await waitFor('crash writer retired after close', () => logger!._openPiStreamCountForTest() === 0)
     // 崩溃取证语义不受摘除影响：stderr 内容已随 close 落盘
-    expect(contentWithMarker('pi-crash-')).toContain('crash-stderr-boom')
+    expect(contentWithMarker('pi-crash-', 'retire-crash')).toContain('crash-stderr-boom')
   })
 })

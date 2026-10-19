@@ -127,7 +127,7 @@ describe("首行头行形态（写侧契约：文件创建时恰一行）", () =
   });
 
   it("首写自动落头行 + 首事件（文件创建点）；续写不重复头行", async () => {
-    const journal = createRecordEventStream(recordsDir);
+    const journal = createRecordEventStream(() => recordsDir);
     await journal.append("sa-1", createdInput());
     await journal.append("sa-1", settledInput());
     const content = fs.readFileSync(recordEventsPath(recordsDir, "sa-1"), "utf8");
@@ -141,7 +141,7 @@ describe("首行头行形态（写侧契约：文件创建时恰一行）", () =
 
 describe("journal 读写原语（seq 单调分配 / scan 宽容解析）", () => {
   it("append 分配行级单调 seq（1 起严格递增）并返回完整事件", async () => {
-    const journal = createRecordEventStream(recordsDir);
+    const journal = createRecordEventStream(() => recordsDir);
     const first = await journal.append("sa-1", createdInput());
     const second = await journal.append("sa-1", {
       type: "record-round-started",
@@ -155,25 +155,25 @@ describe("journal 读写原语（seq 单调分配 / scan 宽容解析）", () =>
   });
 
   it("跨 journal 实例续写：seq 从文件末水位 +1（重启后续写不回退）", async () => {
-    await createRecordEventStream(recordsDir).append("sa-1", createdInput());
-    const second = await createRecordEventStream(recordsDir).append("sa-1", settledInput());
+    await createRecordEventStream(() => recordsDir).append("sa-1", createdInput());
+    const second = await createRecordEventStream(() => recordsDir).append("sa-1", settledInput());
     expect(second.seq).toBe(2);
   });
 
   it("scan 返回写入序事件（头行不在其中）", async () => {
-    const journal = createRecordEventStream(recordsDir);
+    const journal = createRecordEventStream(() => recordsDir);
     await journal.append("sa-1", createdInput());
     await journal.append("sa-1", settledInput());
     const events = await journal.scan("sa-1");
     expect(events.map((e) => e.type)).toEqual(["record-created", "record-settled"]);
   });
 
-  it("scan 对不存在文件返回空流（record 未写入 journal 记录 / 已清理）", async () => {
-    expect(await createRecordEventStream(recordsDir).scan("sa-none")).toEqual([]);
+  it("scan 对不存在文件返回空流（record 未落账 / 已清理）", async () => {
+    expect(await createRecordEventStream(() => recordsDir).scan("sa-none")).toEqual([]);
   });
 
   it("scan 中部坏行宽容跳过（不完整 JSON 行）——事件流不因坏行截断", async () => {
-    const journal = createRecordEventStream(recordsDir);
+    const journal = createRecordEventStream(() => recordsDir);
     await journal.append("sa-1", createdInput());
     await journal.append("sa-1", settledInput());
     // 手工注入坏行于两事件之间（模拟磁盘半写/外部编辑）
@@ -275,7 +275,7 @@ describe("fold 纯函数族（全量 / 增量 / 幂等）", () => {
       INITIAL_RECORD_EVENT_FOLD_STATE,
       (event, why) => skipped.push({ seq: event.seq, why }),
     );
-    // 重放段全部被 seq 检查拦下，状态与单遍 fold 等价
+    // 重放段全部被 seq 守卫拦下，状态与单遍 fold 等价
     expect(state).toEqual(foldRecordEvents(events));
     expect(skipped).toHaveLength(events.length);
     expect(skipped.every((s) => s.why === "seq-regression")).toBe(true);
@@ -312,7 +312,7 @@ describe("fold 纯函数族（全量 / 增量 / 幂等）", () => {
 
 describe("journal 写读闭环（append → scan → fold）", () => {
   it("落盘事件经 scan 回读后 fold，与内存构造的事件 fold 等价", async () => {
-    const journal = createRecordEventStream(recordsDir);
+    const journal = createRecordEventStream(() => recordsDir);
     const appended: RecordEvent[] = [];
     appended.push(await journal.append("sa-1", createdInput()));
     appended.push(
@@ -336,7 +336,7 @@ describe("journal 写读闭环（append → scan → fold）", () => {
       `${JSON.stringify({ ...createdInput({ id: "sa-2" }), seq: 1 })}\n`,
       "utf8",
     );
-    const events = await createRecordEventStream(recordsDir).scan("sa-2");
+    const events = await createRecordEventStream(() => recordsDir).scan("sa-2");
     expect(events.map((e) => e.type)).toEqual(["record-created"]);
     expect(events[0]?.seq).toBe(1);
   });

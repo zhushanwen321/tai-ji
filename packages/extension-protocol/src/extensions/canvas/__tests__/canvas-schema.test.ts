@@ -27,6 +27,7 @@ describe('U1 schema 往返：CanvasState 全量快照', () => {
   /** 全字段实例（覆盖每个 per-type 可选字段——schema 完备性锚）。 */
   const fullState: CanvasState = {
     canvasId: 'cv-01',
+    ownerSessionId: 'sid-owner',
     name: '多引擎支持怎么落地',
     root: {
       nodeId: 'n-root',
@@ -152,6 +153,7 @@ describe('U1 schema 往返：CanvasState 全量快照', () => {
   it('U1 canvas.list 条目（阶段徽标派生输入三字段齐备）且 JSON 往返无损', () => {
     const entry: CanvasListEntry = {
       canvasId: 'cv-01',
+      ownerSessionId: 'sid-owner',
       name: '多引擎支持',
       statement: '怎么落地',
       converged: false,

@@ -21,7 +21,7 @@ import * as path from "node:path";
 
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
-import { encodeCwd } from "../assembly/path-encoding.ts";
+import { encodeCwd } from "@taiji/shared/paths";
 import { WorktreeRegistry } from "../worktree/worktree-registry.ts";
 import { WorktreeManager } from "../worktree/worktree-manager.ts";
 

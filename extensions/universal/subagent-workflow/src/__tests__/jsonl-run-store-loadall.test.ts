@@ -99,7 +99,7 @@ function settledLine(): string {
 }
 
 function recordPathOf(tmpDir: string, runId: string): string {
-  return path.join(tmpDir, "workflow-state", `${runId}.record.jsonl`);
+  return path.join(tmpDir, `${runId}.record.jsonl`);
 }
 
 // ── 用例 ─────────────────────────────────────────────────────────────────────
@@ -119,7 +119,7 @@ describe("loadAll 发现域（v2-only）：历史形态 entry 不再被发现", 
 
   it("存量旧会话（v1 快照 entry + workflow-state-link 指针在盘）→ loadAll 返回空 + 零 warn（静默忽略不抛）", async () => {
     // v1 形态快照：v 字段 + snapshot 信封 + v2 版本头（历史形态的合法内容）
-    const statePath = path.join(tmpDir, "workflow-state", "run-legacy.jsonl");
+    const statePath = path.join(tmpDir, "run-legacy.jsonl");
     fs.mkdirSync(path.dirname(statePath), { recursive: true });
     fs.writeFileSync(
       statePath,
@@ -131,7 +131,7 @@ describe("loadAll 发现域（v2-only）：历史形态 entry 不再被发现", 
       legacyV1RecordEntryRaw("run-legacy", { v: "wf-run-v2", runId: "run-legacy", state: { status: "running" }, meta: {} }),
       legacyLinkEntry("run-legacy", statePath),
     ];
-    const store = new JsonlRunStore({ sessionDir: tmpDir, ctx: mkCtx(entries) });
+    const store = new JsonlRunStore({ runsDir: tmpDir, ctx: mkCtx(entries) });
 
     // 历史形态不参与发现：空结果、不抛、零 warn（静默语义）
     await expect(store.loadAll()).resolves.toEqual([]);
@@ -145,7 +145,7 @@ describe("loadAll 发现域（v2-only）：历史形态 entry 不再被发现", 
     fs.writeFileSync(recordPath, `${settledLine()}\n`, "utf8");
 
     // 历史形态同批在盘：v1 快照 entry + link 指针（指向 state 文件）
-    const legacyStatePath = path.join(tmpDir, "workflow-state", "run-old.jsonl");
+    const legacyStatePath = path.join(tmpDir, "run-old.jsonl");
     fs.writeFileSync(
       legacyStatePath,
       `${JSON.stringify({ v: "wf-run-v2", runId: "run-old", state: { status: "running" }, meta: {} })}\n`,
@@ -157,7 +157,7 @@ describe("loadAll 发现域（v2-only）：历史形态 entry 不再被发现", 
       legacyLinkEntry("run-old", legacyStatePath),
     ];
 
-    const store = new JsonlRunStore({ sessionDir: tmpDir, ctx: mkCtx(entries) });
+    const store = new JsonlRunStore({ runsDir: tmpDir, ctx: mkCtx(entries) });
     const loaded = await store.loadAll();
 
     // 只有 v2 实体重建（终局 ⟸ journal run-settled）；历史形态零发现
@@ -217,7 +217,7 @@ describe("loadAll 发现域（v2-only）：历史形态 entry 不再被发现", 
       "utf8",
     );
 
-    const store = new JsonlRunStore({ sessionDir: tmpDir, ctx: mkCtx([v2RegisteredEntry("run-pre-dispatch-fail", recordPath)]) });
+    const store = new JsonlRunStore({ runsDir: tmpDir, ctx: mkCtx([v2RegisteredEntry("run-pre-dispatch-fail", recordPath)]) });
     const loaded = await store.loadAll();
 
     expect(loaded.map((r) => r.runId)).toEqual(["run-pre-dispatch-fail"]);
@@ -259,7 +259,7 @@ describe("[D6(a) 第 1 步] 重新加载进内存的 run 的终局判定源 = �
     fs.mkdirSync(path.dirname(recordPath), { recursive: true });
     fs.writeFileSync(recordPath, `${lines.join("\n")}\n`, "utf8");
     const store = new JsonlRunStore({
-      sessionDir: tmpDir,
+      runsDir: tmpDir,
       ctx: mkCtx([v2RegisteredEntry(runId, recordPath)]),
     });
     const loaded = await store.loadAll();
@@ -331,7 +331,7 @@ describe("fold 覆盖事件消费（model-override → meta.modelOverride 派生
     fs.mkdirSync(path.dirname(recordPath), { recursive: true });
     fs.writeFileSync(recordPath, `${lines.join("\n")}\n`, "utf8");
     const store = new JsonlRunStore({
-      sessionDir: tmpDir,
+      runsDir: tmpDir,
       ctx: mkCtx([v2RegisteredEntry(runId, recordPath)]),
     });
     const loaded = await store.loadAll();

@@ -108,6 +108,8 @@ function makeBinding(overrides: {
     getStore: () => storeHarness.store,
     getPi: () => pi,
     getMainSessionFile: () => overrides.sessionFile,
+    // [session-store-layout-inversion D2/D3] run 域 state 目录分区键（rootSessionId）
+    getRootSessionId: () => "sid-sweep-binding",
   };
   return { binding, store: storeHarness, pi };
 }

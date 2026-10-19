@@ -1,6 +1,6 @@
 /**
  * 后台任务收殓器测试（u-runtime-reaper，设计 docs/architecture/file-lock-unification-
- * and-reaper-sink.md §2.3/§3.2/§3.3 + §4 S4a/S4b 触发点语义）。
+ * and-reaper-sink.md §2.3/§3.2/§3.3 + §4 S4a/S4b 触发面语义）。
  *
  * 覆盖：
  * - 三分支判定（①属主活跳过 / ③属主死+任务死转终态 / ②属主死+任务活 kill+orphaned）
@@ -8,15 +8,14 @@
  * - registry 损坏 .corrupt 隔离 + 空表重建语义 / 版本不匹配 / 单条脏数据不报废全表
  * - 单条目处置异常 warn 跳过（幂等）
  * - 终态 LRU 裁剪（写侧 writeRegistryEntry RMW 语义对齐）
- * - 触发点 A：入口 setImmediate 延后（fire-and-forget 不占当前拍）+ session-service
+ * - 触发面 A：入口 setImmediate 延后（fire-and-forget 不占当前拍）+ session-service
  *   removeSessionEntry 挂接（真 SessionService 实例：不 await 销毁链、异常 catch warn）
- * - 触发点 B：startup-background-init 硬序（孤儿 pi 收殓完成后才扫描）+ pi 收殓
+ * - 触发面 B：startup-background-init 硬序（孤儿 pi 收殓完成后才扫描）+ pi 收殓
  *   失败仍扫描 + 不阻塞启动序列本身
- * - stale reaper.lock 残留清理（stale 移除 / fresh 保留）
  *
  * Mock 边界：pid 探测/处置原语全依赖注入（对齐 test/reap-orphan-pi.test.ts 惯例，
  * 零真实进程）；registry 落真实 tmp 文件系统（统一锁/原子写/corrupt 隔离走真实实现）；
- * 触发点 A/B 的挂接测试用 vi.fn 包装真实入口（默认实现透传真实行为，可按需覆写）。
+ * 触发面 A/B 的挂接测试用 vi.fn 包装真实入口（默认实现透传真实行为，可按需覆写）。
  *
  * 运行：cd packages/runtime && npx vitest run test/background-task-reaper.test.ts
  */
@@ -28,6 +27,7 @@ import { dirname, join } from 'node:path'
 
 import type { BackgroundTaskRegistryEntry } from '@zhushanwen/extension-protocol'
 import {
+  getSessionRegistryPath,
   reapSessionBackgroundTasks,
   reapAllSessionsBackgroundTasks,
   type BackgroundTaskReapDeps,
@@ -38,8 +38,9 @@ import { runStartupBackgroundInit } from '../src/services/startup-background-ini
 import { getPiAgentDir } from '../src/infra/pi/pi-paths.js'
 import { reapOrphanPiProcesses } from '../src/services/reap-orphan-pi.js'
 import type { StartupBackgroundDeps } from '../src/services/startup-background-init.js'
+import { getSessionStoreDir } from '@taiji/shared/paths'
 
-// ── 触发点 A/B 挂接观测：包装真实入口为 vi.fn（默认实现 = 真实行为透传；挂接方
+// ── 触发面 A/B 挂接观测：包装真实入口为 vi.fn（默认实现 = 真实行为透传；挂接方
 // （session-service / startup-background-init）与本测试拿到的是同一 mock 实例）──
 vi.mock('../src/services/session/background-task-reaper.js', async (importOriginal) => {
   const actual = await importOriginal<typeof import('../src/services/session/background-task-reaper.js')>()
@@ -73,13 +74,18 @@ vi.mock('../src/services/reap-orphan-pi.js', async (importOriginal) => {
 
 /** 本次测试创建的 tmp 目录（afterEach 统一清理）。 */
 const tmpAgentDirs: string[] = []
-/** 触发点 A 集成用例在真实 pi agentDir 下创建的 session 目录（用后即清，防污染）。 */
+/** 触发面 A 集成用例在真实 pi agentDir 下创建的 session 目录（用后即清，防污染）。 */
 const realAgentDirSessionDirs: string[] = []
 
 function makeAgentDir(): string {
-  const dir = mkdtempSync(join(tmpdir(), 'bg-task-reaper-'))
-  tmpAgentDirs.push(dir)
-  return dir
+  // 两层布局对齐生产形态（agentDir = <dataDir>/agent）：reaper 以 dirname(agentDir)
+  // 为 dataDir 推导 ext-sessions 存储树——单层时 dataDir 会落到 tmpdir 公共层，
+  // ext-sessions 泄漏到公共目录造成跨用例污染
+  const dataDir = mkdtempSync(join(tmpdir(), 'bg-task-reaper-'))
+  tmpAgentDirs.push(dataDir)
+  const agentDir = join(dataDir, 'agent')
+  mkdirSync(agentDir, { recursive: true })
+  return agentDir
 }
 
 beforeEach(() => {
@@ -136,7 +142,8 @@ function makeEntry(overrides: Partial<BackgroundTaskRegistryEntry> = {}): Backgr
 }
 
 function registryPathOf(agentDir: string, sessionId: string): string {
-  return join(agentDir, 'base-tool-enhance', sessionId, 'registry.json')
+  // 与生产同源（session-store-layout-inversion 域 5 换根后 registry 落 ext-sessions 树）
+  return getSessionRegistryPath(agentDir, sessionId)
 }
 
 function writeRegistryFile(agentDir: string, sessionId: string, entries: unknown[], version = 1): string {
@@ -157,7 +164,7 @@ function findEntry(agentDir: string, sessionId: string, taskId: string): Backgro
 }
 
 function zeroResult(): BackgroundTaskReapResult {
-  return { scannedDirs: 0, ownerAliveSkipped: 0, killedOrphans: 0, finalizedOrphans: 0, conservativelySkipped: 0, staleLocksRemoved: 0 }
+  return { scannedDirs: 0, ownerAliveSkipped: 0, killedOrphans: 0, finalizedOrphans: 0, conservativelySkipped: 0 }
 }
 
 /** 取一个确定已死亡的 pid（短命子进程退出即死；测试内即刻使用，pid 复用窗口趋零）。 */
@@ -372,7 +379,7 @@ describe('错误容忍', () => {
     }
   })
 
-  it('触发点 A：session 目录不存在（从未跑过后台任务）→ 静默 no-op 不抛', async () => {
+  it('触发面 A：session 目录不存在（从未跑过后台任务）→ 静默 no-op 不抛', async () => {
     const agentDir = makeAgentDir()
     const { deps } = makeDeps()
     const result = await reapSessionBackgroundTasks(agentDir, 'never-existed', deps)
@@ -380,9 +387,9 @@ describe('错误容忍', () => {
   })
 })
 
-// ── 触发点 A 入口语义（fire-and-forget 安全性） ─────────────────────────────────────────────
+// ── 触发面 A 入口语义（fire-and-forget 安全性） ─────────────────────────────────────────────
 
-describe('触发点 A 入口：setImmediate 延后同步核心', () => {
+describe('触发面 A 入口：setImmediate 延后同步核心', () => {
   it('调用后当前拍不执行（void 返回不 await 安全），延后一拍才处置', async () => {
     const agentDir = makeAgentDir()
     const { alivePids, startTimes, startSecReads, deps } = makeDeps()
@@ -402,9 +409,9 @@ describe('触发点 A 入口：setImmediate 延后同步核心', () => {
   })
 })
 
-// ── 触发点 B 全量扫描 + stale reaper.lock ─────────────────────────────────────────────
+// ── 触发面 B 全量扫描 ─────────────────────────────────────────────
 
-describe('触发点 B：reapAllSessionsBackgroundTasks 全量扫描', () => {
+describe('触发面 B：reapAllSessionsBackgroundTasks 全量扫描', () => {
   it('扫全部 session 目录并聚合结果；无 registry 的目录计入 scannedDirs', async () => {
     const agentDir = makeAgentDir()
     const { alivePids, startTimes, killCalls, deps } = makeDeps()
@@ -412,7 +419,7 @@ describe('触发点 B：reapAllSessionsBackgroundTasks 全量扫描', () => {
     startTimes.set(1111, 123_456)
     writeRegistryFile(agentDir, 's1', [makeEntry({ pidStartTime: 123_456 })]) // ② kill
     writeRegistryFile(agentDir, 's2', [makeEntry({ taskId: 'bt-alive-owner', ownerPiPid: 3333 })]) // ① 跳过
-    mkdirSync(join(agentDir, 'base-tool-enhance', 's3')) // 空 session 目录（无 registry）
+    mkdirSync(join(getSessionStoreDir(dirname(agentDir)), 's3'), { recursive: true }) // 空 session 目录（无 registry）
     alivePids.add(3333)
 
     const result = await reapAllSessionsBackgroundTasks(agentDir, deps)
@@ -421,39 +428,11 @@ describe('触发点 B：reapAllSessionsBackgroundTasks 全量扫描', () => {
     expect(killCalls).toEqual([1111])
   })
 
-  it('baseDir 不存在（从未有过后台任务）→ 全零结果不抛', async () => {
+  it('session 存储树不存在（从未有过后台任务）→ 全零结果不抛', async () => {
     const agentDir = makeAgentDir()
     const { deps } = makeDeps()
     const result = await reapAllSessionsBackgroundTasks(agentDir, deps)
     expect(result).toEqual(zeroResult())
-  })
-
-  it('stale 的 reaper.lock 残留目录（mtime 超 30s）被 rmdir，且不计入扫描', async () => {
-    const agentDir = makeAgentDir()
-    const { deps } = makeDeps()
-    const baseDir = join(agentDir, 'base-tool-enhance')
-    const lockDir = join(baseDir, 'reaper.lock')
-    mkdirSync(lockDir, { recursive: true })
-    const stale = new Date(Date.now() - 60_000)
-    utimesSync(lockDir, stale, stale)
-    writeRegistryFile(agentDir, 's1', [makeEntry()])
-
-    const result = await reapAllSessionsBackgroundTasks(agentDir, deps)
-
-    expect(result).toEqual({ ...zeroResult(), scannedDirs: 1, finalizedOrphans: 1, staleLocksRemoved: 1 })
-    expect(existsSync(lockDir)).toBe(false)
-  })
-
-  it('fresh 的 reaper.lock（≤30s，可能是共存旧包在途临界区）保留不动', async () => {
-    const agentDir = makeAgentDir()
-    const { deps } = makeDeps()
-    const lockDir = join(agentDir, 'base-tool-enhance', 'reaper.lock')
-    mkdirSync(lockDir, { recursive: true })
-
-    const result = await reapAllSessionsBackgroundTasks(agentDir, deps)
-
-    expect(result.staleLocksRemoved).toBe(0)
-    expect(existsSync(lockDir)).toBe(true)
   })
 })
 
@@ -479,7 +458,7 @@ describe('终态 LRU 裁剪（MAX_TERMINAL_REGISTRY_ENTRIES）', () => {
   })
 })
 
-// ── 触发点 A 挂接：session-service removeSessionEntry 汇聚点 ─────────────────────────────────────────────
+// ── 触发面 A 挂接：session-service removeSessionEntry 汇聚点 ─────────────────────────────────────────────
 
 /** 最小依赖构造 SessionService：仅 removeSessionEntry 路径（构造器只存引用 + 注册 onSessionExit）。 */
 function makeSessionService(): SessionService {
@@ -497,12 +476,13 @@ function makeSessionService(): SessionService {
   )
 }
 
-describe('触发点 A 挂接（session-service.removeSessionDestroyed 汇聚点）', () => {
+describe('触发面 A 挂接（session-service.removeSessionDestroyed 汇聚点）', () => {
   it('removeSessionEntry 触发收殓：参数 (getPiAgentDir(), sessionId)，且不 await 销毁链（延后拍完成处置）', async () => {
     const service = makeSessionService()
     // 真实 registry + 真实 pid 探测：owner/task 均为确定已死 pid → 走③终态收尾
     const sid = `trigger-a-${process.pid}`
-    const sessionDir = join(getPiAgentDir(), 'base-tool-enhance', sid)
+    // 布局与生产 registry 同源（ext-sessions 树内 background-tasks 域）
+    const sessionDir = dirname(getSessionRegistryPath(getPiAgentDir(), sid))
     realAgentDirSessionDirs.push(sessionDir)
     mkdirSync(sessionDir, { recursive: true })
     writeFileSync(
@@ -536,7 +516,7 @@ describe('触发点 A 挂接（session-service.removeSessionDestroyed 汇聚点�
   })
 })
 
-// ── 触发点 B 挂接：startup-background-init 硬序 ─────────────────────────────────────────────
+// ── 触发面 B 挂接：startup-background-init 硬序 ─────────────────────────────────────────────
 
 function makeStartupDeps(): StartupBackgroundDeps {
   return {
@@ -558,7 +538,7 @@ function makeStartupDeps(): StartupBackgroundDeps {
   }
 }
 
-describe('触发点 B 挂接（startup-background-init 硬序）', () => {
+describe('触发面 B 挂接（startup-background-init 硬序）', () => {
   it('孤儿 pi 收殓失败（reject 兜底后）仍执行 B 扫描——硬序只约束先后，不传递成败', async () => {
     vi.useFakeTimers()
     try {

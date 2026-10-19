@@ -89,7 +89,7 @@ function seedBinding(sessionFile: string): void {
 }
 
 function newStore(): RecordStore {
-  return new RecordStore(sessionsDir, undefined, undefined, manifestDir);
+  return new RecordStore(() => sessionsDir, undefined, undefined, () => manifestDir);
 }
 
 // ── ① CAS 语义：running↔idle 迁移 + 非法迁移拒绝 ────────────────────────────

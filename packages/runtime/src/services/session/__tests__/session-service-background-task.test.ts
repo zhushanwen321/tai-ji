@@ -21,7 +21,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { mkdirSync, mkdtempSync, rmSync, utimesSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
-import { join } from 'node:path'
+import { dirname, join } from 'node:path'
 
 // pi-paths 动态指向 tmp（hoisted 容器承载 beforeEach 生成的新目录；BackgroundTaskService
 // 与 session-service 的 reapSessionBackgroundTasks 共享同一 mock 模块实例）。
@@ -58,10 +58,14 @@ const BASE_MTIME = 1_700_000_100_000
 /** mtime 计数器：显式 utimesSync 递增，规避同毫秒重写 mtime 不变导致变更检测漏拍。 */
 let mtimeTick = 0
 
+let dataDir: string
 let agentDir: string
 
+// [session-store-layout-inversion 域 5] registry 布局 = <dataDir>/ext-sessions/<sid>/
+// background-tasks/registry.json；agentDir（pi agentDir，mock getPiAgentDir 返回值）=
+// <dataDir>/agent——service 经 getSessionRegistryPath 剥一层得 dataDir，与 fixture 同源。
 function registryPath(sessionId: string): string {
-  return join(agentDir, 'base-tool-enhance', sessionId, 'registry.json')
+  return join(dataDir, 'ext-sessions', sessionId, 'background-tasks', 'registry.json')
 }
 
 function makeEntry(sessionId: string, overrides: Partial<BackgroundTaskRegistryEntry> = {}): BackgroundTaskRegistryEntry {
@@ -69,7 +73,7 @@ function makeEntry(sessionId: string, overrides: Partial<BackgroundTaskRegistryE
     taskId: TASK_ID,
     pid: TASK_PID,
     command: `pnpm test (${sessionId})`,
-    outputFile: join(agentDir, 'base-tool-enhance', sessionId, `${TASK_ID}.log`),
+    outputFile: join(dataDir, 'ext-sessions', sessionId, 'background-tasks', `${TASK_ID}.log`),
     startedAt: STARTED_AT,
     state: 'running',
     ownerPiPid: OWNER_PID,
@@ -80,14 +84,14 @@ function makeEntry(sessionId: string, overrides: Partial<BackgroundTaskRegistryE
 
 /** 按契约形状写 registry 并强制递增 mtime（tmp 自建自删）。 */
 function writeRegistry(entries: BackgroundTaskRegistryEntry[], sessionId: string): void {
-  mkdirSync(join(agentDir, 'base-tool-enhance', sessionId), { recursive: true })
+  mkdirSync(dirname(registryPath(sessionId)), { recursive: true })
   writeFileSync(registryPath(sessionId), `${JSON.stringify({ version: 1, entries }, null, 2)}\n`, 'utf8')
   utimesSync(registryPath(sessionId), new Date(BASE_MTIME + ++mtimeTick * 1_000), new Date(BASE_MTIME + mtimeTick * 1_000))
 }
 
 /** 写非法 JSON registry（模拟损坏）并强制递增 mtime（触发 last-seen 变更判定）。 */
 function writeBrokenRegistry(sessionId: string): void {
-  mkdirSync(join(agentDir, 'base-tool-enhance', sessionId), { recursive: true })
+  mkdirSync(dirname(registryPath(sessionId)), { recursive: true })
   writeFileSync(registryPath(sessionId), '{ broken json', 'utf8')
   utimesSync(registryPath(sessionId), new Date(BASE_MTIME + ++mtimeTick * 1_000), new Date(BASE_MTIME + mtimeTick * 1_000))
 }
@@ -129,7 +133,8 @@ function createSetup(withBus: boolean = true): Setup {
 }
 
 beforeEach(() => {
-  agentDir = mkdtempSync(join(tmpdir(), 'bg-task-wiring-'))
+  dataDir = mkdtempSync(join(tmpdir(), 'bg-task-wiring-'))
+  agentDir = join(dataDir, 'agent')
   paths.agentDir = agentDir
   mtimeTick = 0
 })
@@ -137,7 +142,7 @@ beforeEach(() => {
 afterEach(() => {
   vi.useRealTimers()
   vi.restoreAllMocks()
-  rmSync(agentDir, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 })
+  rmSync(dataDir, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 })
 })
 
 // ── 组装 ─────────────────────────────────────────────────────────

@@ -50,9 +50,15 @@ describe("SubagentService", () => {
   beforeEach(() => {
     agentDir = makeTmpAgentDir();
     modelService = makeModelService(agentDir);
+    // [session-store-layout-inversion] 生产 store 目录经
+    // getSubagentSessionDir(resolveStoreRootSessionId())（env dataDir 兜底）解析——
+    // stubEnv 把写删目标收进本 mkdtemp 目录并保证用例间零残留（本文件用例绑同一
+    // initSession sid "s1"，不注入则 records 树跨用例共享、重建互染，空目录断言漂移）。
+    vi.stubEnv("TAIJI_AGENT_DATA_DIR", agentDir);
   });
 
   afterEach(() => {
+    vi.unstubAllEnvs();
     fs.rmSync(agentDir, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 });
   });
 
@@ -669,9 +675,15 @@ describe("[§1.4 (a)] pi 绑定作废（dispose 收尾 + 显式作废转发）",
   beforeEach(() => {
     agentDir = makeTmpAgentDir();
     modelService = makeModelService(agentDir);
+    // [session-store-layout-inversion] 生产 store 目录经
+    // getSubagentSessionDir(resolveStoreRootSessionId())（env dataDir 兜底）解析——
+    // stubEnv 把写删目标收进本 mkdtemp 目录并保证用例间零残留（本文件用例绑同一
+    // initSession sid "s1"，不注入则 records 树跨用例共享、重建互染，空目录断言漂移）。
+    vi.stubEnv("TAIJI_AGENT_DATA_DIR", agentDir);
   });
 
   afterEach(() => {
+    vi.unstubAllEnvs();
     fs.rmSync(agentDir, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 });
   });
 

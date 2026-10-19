@@ -116,30 +116,42 @@ interface MemberSeed {
 }
 
 describe('跨包集成：subagent-core 重建 manifest → session-reader result 反查（W4）', () => {
+  let dataDir: string
   let agentDir: string
   let mainFile: string
   let services: SubagentService[]
 
   beforeEach(() => {
     for (const k of ENV_KEYS_TO_STRIP) delete process.env[k]
-    agentDir = fs.mkdtempSync(path.join(os.tmpdir(), 'cross-pkg-subagent-core-'))
-    fs.mkdirSync(getSubagentSessionDir(agentDir, agentDir), { recursive: true })
+    // 生产拓扑复刻（[session-store-layout-inversion 域 9]）：agentDir = <dataDir>/agent
+    //（session-reader 的 agentDir 语义），subagent-core 写侧经新公式落存储树
+    // <dataDir>/ext-sessions/<rootSid>/subagents/——listRecordManifests 双根扫描的新根
+    //（dirname(agentDir)/ext-sessions）与写侧落点相遇
+    dataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'cross-pkg-subagent-core-'))
+    agentDir = path.join(dataDir, 'agent')
+    fs.mkdirSync(agentDir, { recursive: true })
+    fs.mkdirSync(getSubagentSessionDir(ROOT_SESSION, dataDir), { recursive: true })
+    // 恢复 service 的内部 store 经 getSubagentRecordsDir(resolveStoreRootSessionId())
+    //（env dataDir 兜底）解析——钉 env 把写删目标收进本 mkdtemp 树（自建自删红线，
+    // subagent-core 同族测试先例 subagent-service-model-switch.test.ts）
+    process.env['TAIJI_AGENT_DATA_DIR'] = dataDir
     mainFile = path.join(agentDir, 'main-session.jsonl')
     services = []
   })
 
   afterEach(() => {
     for (const s of services) s.dispose()
-    fs.rmSync(agentDir, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 })
+    delete process.env['TAIJI_AGENT_DATA_DIR']
+    fs.rmSync(dataDir, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 })
   })
 
   /** 真实 RecordStore（写文件 pi：种子经真实 register 通路 + v2 条目构造器
    *  （toRegisteredEntryData，[v1 兼容层删除] v1 快照写点 toSubagentRecordEntry 已删）
-   *  落主文件）。 */
+   *  落主文件）。[u-subagent dir 晚绑定] store/manifest 构造 = 目录取值函数。 */
   function makeSeedStore(): RecordStore {
     return new RecordStore(
-      getSubagentSessionDir(agentDir, agentDir),
-      new ManifestStore(getSubagentRecordsDir(agentDir, agentDir)),
+      () => getSubagentSessionDir(ROOT_SESSION, dataDir),
+      new ManifestStore(() => getSubagentRecordsDir(ROOT_SESSION, dataDir)),
       makeWritingPi(mainFile),
     )
   }
@@ -169,7 +181,7 @@ describe('跨包集成：subagent-core 重建 manifest → session-reader result
    *  形态同 subagent-core W1 用例）——**不写**三 sidecar，保证恢复走
    *  finalizeOrphanRecord 真实路径。 */
   function writeChildSessionFile(m: MemberSeed): string {
-    const childFile = path.join(getSubagentSessionDir(agentDir, agentDir), `${m.id}.jsonl`)
+    const childFile = path.join(getSubagentSessionDir(ROOT_SESSION, dataDir), `${m.id}.jsonl`)
     const ts = new Date(1000).toISOString()
     const lines: string[] = [
       JSON.stringify({ type: 'session', version: 3, id: `sess-${m.id}`, timestamp: ts, cwd: agentDir }),
@@ -260,7 +272,7 @@ describe('跨包集成：subagent-core 重建 manifest → session-reader result
     // 代码路径的产物，非手工预写）。
     for (const m of members) {
       expect(
-        fs.existsSync(path.join(getSubagentRecordsDir(agentDir, agentDir), `${m.id}.json`)),
+        fs.existsSync(path.join(getSubagentRecordsDir(ROOT_SESSION, dataDir), `${m.id}.json`)),
         `manifest of ${m.id}`,
       ).toBe(true)
     }
@@ -282,7 +294,7 @@ describe('跨包集成：subagent-core 重建 manifest → session-reader result
     // 处于 idle（重建单规则）、无旧终态遗留位 → legacy status 如实派生 "running"
     //（legacyManifestStatusFields 单点派生，session-reader 视角的活跃成员）。
     const manifest = JSON.parse(
-      fs.readFileSync(path.join(getSubagentRecordsDir(agentDir, agentDir), 'sa-cross-1.json'), 'utf-8'),
+      fs.readFileSync(path.join(getSubagentRecordsDir(ROOT_SESSION, dataDir), 'sa-cross-1.json'), 'utf-8'),
     ) as Record<string, unknown>
     expect(manifest).toMatchObject({
       id: 'sa-cross-1',

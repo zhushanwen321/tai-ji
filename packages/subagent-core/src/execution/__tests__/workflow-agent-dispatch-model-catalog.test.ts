@@ -154,6 +154,9 @@ describe("D8 派发期对称校验（isPiRoute 分流点）", () => {
   it("agent frontmatter model（agentConfig 分支）同点被校验", async () => {
     const { service, fake } = makeHarness();
     const agentPath = path.join(openHarnesses[0]!.tmpRoot, "agent", "drift-agent.md");
+    // [session-store-layout-inversion] store 树已迁 engine-data——agentDir 不再被
+    // store 写点隐式创建，agent fixture 目录显式自建
+    fs.mkdirSync(path.dirname(agentPath), { recursive: true });
     fs.writeFileSync(
       agentPath,
       "---\nname: drift-agent\ndescription: d8 fixture\nkind: agent\nmodel: prov1/typo\n---\nBody",

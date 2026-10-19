@@ -474,6 +474,18 @@ describe('configureRouteInbound — crossSession 通道（ADR-0060）', () => {
     )
   })
 
+  it('⑩c2 canvas.updated（带归属 sid 的失效广播）命中 crossSession 声明条目 → dispatchCrossSession', () => {
+    // session-store-layout-inversion D4：payload 带归属 sessionId，按形状进 session 通道；
+    // 消费方 use-canvas-sync 模块级单订阅在 crossSession 通道（广播腿修复，L4 inspect 暴露）
+    const ports = makePorts()
+    const dispatcher = configureRouteInbound(ports)
+    dispatcher(sessionMsg('canvas.updated', { canvasId: 'cvs-x', sessionId: 's1', evType: 'CanvasCreated', eventId: '1', summary: '' }))
+    expect(ports.events.dispatchSession).toHaveBeenCalledTimes(1)
+    expect(ports.events.dispatchCrossSession).toHaveBeenCalledWith(
+      expect.objectContaining({ type: 'canvas.updated' }),
+    )
+  })
+
   it('⑩d seq gap drop 的 crossSession 声明条目消息 → dispatchSession / dispatchCrossSession 均不调', async () => {
     const ports = makePorts()
     const dispatcher = configureRouteInbound(ports)

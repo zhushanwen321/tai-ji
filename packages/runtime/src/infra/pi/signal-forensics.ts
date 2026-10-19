@@ -5,7 +5,7 @@
  * session 01a132f0 的 pi 在**同一毫秒**收到外部 SIGTERM，pi 的 rpc-mode 信号处理器
  * （pi-coding-agent@1.0.0 dist/modes/rpc/rpc-mode.js:283：`shutdown(signal === "SIGHUP"
  * ? 129 : 143, signal)`，语义登记 PS-80 @ docs/pi-semantics.json，探针
- * pi-semantics-signal-exit-codes.test.ts 守漂移）以 exit 143 优雅退出。D10 的机器检查侧快照只回答「死状 + 同秒连坐」，
+ * pi-semantics-signal-exit-codes.test.ts 守漂移）以 exit 143 优雅退出。D10 的机器面快照只回答「死状 + 同秒连坐」，
  * 「谁发的信号」缺归因面——且三条确定性路线全部被封：
  *   ① macOS 不为普通 kill(2) 记系统日志（崩溃处理器 log show 关联只捞到 mDNS STOP）；
  *   ② EndpointSecurity 的 AUE_kill 审计需 Apple 特批 entitlement（第三方不可得）；
@@ -24,9 +24,11 @@
  *      --mode rpc / 交互 shell）——常驻发送方（终端里手敲 kill）。
  *    对头部候选补采 `ps -p <pid> -o lstart=`（进程启动时刻）：启动时刻贴近死亡
  *    时刻 = 强信号（先起进程再下手）。
- * ③ 落盘双写：crash journal `signal-forensics` 事件（schema 扩展值，含 ≤2KB digest +
- *    detailPath）+ 全量记录 JSONL 追加到 `<dataDir>/logs/signal-forensics-<date>-
- *    <sid>.jsonl`（logger.ts cleanExpiredLogs 同前缀白名单覆盖，保留期清理自动接管）。
+ * ③ 落盘双写：crash 台账 `signal-forensics` 事件（schema 扩展值，含 ≤2KB digest +
+ *    detailPath）+ 全量记录 JSONL 追加到 session 存储树
+ *    `<root>/<sid>/logs/signal-forensics-<date>.jsonl`（logger.ts cleanExpiredLogs
+ *    同前缀白名单覆盖，树内保留期清理自动接管；非法 sid 回落全局 logs——见
+ *    writeForensicsDetailFile）。
  *
  * 原理性极限（显式声明，不伪装确定性）：环间隔内生灭 <1.5s 的短命发送方可能两次
  * 采样都不在场而漏采；候选集是给人/评估器复核的线索而非定罪证据。fail-safe 方向
@@ -39,9 +41,10 @@
 import { appendFileSync, mkdirSync } from 'node:fs'
 import { join } from 'node:path'
 import type { CrashJournalEvent, CrashJournalWriter } from '@taiji/shared'
-import { getDataDir } from '@taiji/shared/paths'
+import { SESSION_STORE_DIR_SEGMENT, getDataDir, getSessionLogsDir } from '@taiji/shared/paths'
 import { getCrashJournal } from '../crash-journal.js'
 import { isPiCrashLogEnabled } from '../logger.js'
+import { isPiSessionId } from './pi-paths.js'
 // 采样原语（ps 解析 + 滚动环）独立文件：signal-forensics 只消费环，不含 OS 枚举细节
 import { listAllProcesses, parseProcessTable, ProcessTableRing, readProcessStartTime, type ProcessRow, type RingSample } from './process-table-ring.js'
 
@@ -67,10 +70,10 @@ const RECORD_COMMAND_MAX_CHARS = 300
 const DIGEST_TOP_N = 3
 /** digest 降级形态的命令行截断长度。 */
 const DIGEST_COMPACT_CMD_MAX_CHARS = 60
-/** 毫秒 → 秒换算（uptimeSec 持久化）。 */
+/** 毫秒 → 秒换算（uptimeSec 落库）。 */
 const MS_PER_SECOND = 1_000
-/** sessionId 文件名安全化最大长度（对齐 logger.ts createPiSessionLog 同规则）。 */
-const SESSION_ID_MAX_LENGTH = 64
+/** sessionId 文件名安全化最大长度（与 logger.ts:88 同源同值：UUID v7 长度上限，非法 sid 清洗名截断）。 */
+const SESSION_ID_MAX_LENGTH = 36
 /** ISO 日期前缀长度（'2026-10-13'）。 */
 const ISO_DATE_LENGTH = 10
 /** init/launchd 的 pid（候选排除项：信号发送方不可能是它）。 */
@@ -140,7 +143,7 @@ export function commandTier(command: string): SuspicionTier {
 }
 
 /** 候选发送方记录（ring 观测 + fresh 快照 diff + lstart 补采的三源合并）。 */
-export interface SenderCandidate { // oe-exempt:20261014:framework:候选发送方数据模型（crash journal digest 与测试共用的单一数据契约，非投机抽象）
+export interface SenderCandidate { // oe-exempt:20261014:framework:候选发送方数据模型（crash 台账 digest 与测试共用的单一数据契约，非投机抽象）
   pid: number
   ppid: number
   command: string
@@ -379,8 +382,8 @@ export function classifySenders(input: ClassifyInput): ClassifyResult {
 // 记录组装与落盘
 // ─────────────────────────────────────────────────────────────────────────────
 
-/** 一次死亡信号取证的全量记录（JSONL 一行；schema journal 事件是它的 ≤2KB 摘要）。 */
-export interface SignalForensicsRecord { // oe-exempt:20261014:framework:取证记录数据模型（journal 事件 + JSONL 双写共用的单一数据契约）
+/** 一次死亡信号取证的全量记录（JSONL 一行；schema 台账事件是它的 ≤2KB 摘要）。 */
+export interface SignalForensicsRecord { // oe-exempt:20261014:framework:取证记录数据模型（台账事件 + JSONL 双写共用的单一数据契约）
   /** 记录时刻（ISO 8601 UTC）。 */
   ts: string
   sessionId: string
@@ -454,7 +457,7 @@ function truncateCandidates(candidates: SenderCandidate[]): SenderCandidate[] {
 }
 
 /**
- * journal digest（≤2KB 硬上限，schema 契约）。三级降级保可解析性优先：
+ * 台账 digest（≤2KB 硬上限，schema 契约）。三级降级保可解析性优先：
  * 全量 → 压 cmd 长度 → 只留计数；任一级仍超限再硬截断（极少触发）。
  */
 export function buildDigest(record: SignalForensicsRecord): string {
@@ -509,18 +512,32 @@ export function buildDigest(record: SignalForensicsRecord): string {
 /**
  * 全量记录落盘（append JSONL，每行一次死亡事件）。
  *
- * 文件：`<dataDir>/logs/signal-forensics-<date>-<sid>.jsonl`——signal-forensics- 前缀
- * 已登记进 logger.ts cleanExpiredLogs 白名单（D6-⑦：有写入就有清理），保留期清理自动
- * 接管，无需自建轮转。best-effort：任何失败（磁盘满/权限）返回 null，不向调用链抛错。
+ * 布局反转（session-store-layout-inversion 域 11）：合法 sessionId 落 session 存储树
+ * `<root>/<sid>/logs/signal-forensics-<date>.jsonl`（sid 已在路径，文件名去 sid）——
+ * 前缀已登记进 logger.ts cleanExpiredLogs 白名单（D6-⑦：有写入就有清理），树内保留期
+ * 清理自动接管，无需自建轮转。非法 sessionId（极端形态防御）回落全局
+ * `<dataDir>/logs/signal-forensics-<date>-<清洗sid>.jsonl`（D7 豁免②无归属日志留全局）。
+ * best-effort：任何失败（磁盘满/权限）返回 null，不向调用链抛错。
  *
- * @returns detailPath（相对 dataDir，供 journal detailPath 字段）；失败返回 null。
+ * @returns detailPath（相对 dataDir，供台账 detailPath 字段；树内形态
+ *          `ext-sessions/<sid>/logs/<file>`）；失败返回 null。
  */
 export function writeForensicsDetailFile(record: SignalForensicsRecord): string | null {
   try {
-    const logsDir = join(getDataDir(), 'logs')
-    mkdirSync(logsDir, { recursive: true })
+    const dataDir = getDataDir()
     const date = record.ts.slice(0, ISO_DATE_LENGTH)
-    // 文件名安全化与 logger.ts createPiSessionLog 同规则；空清洗结果回落 'nosid'
+    if (isPiSessionId(record.sessionId)) {
+      // 合法 sid 入树：目录按需创建；detailPath 相对 dataDir（诊断包收集按 join(dataDir, detail) 解析）
+      const dir = getSessionLogsDir(record.sessionId, dataDir)
+      mkdirSync(dir, { recursive: true })
+      const fileName = `signal-forensics-${date}.jsonl`
+      appendFileSync(join(dir, fileName), `${JSON.stringify(record)}\n`)
+      return [SESSION_STORE_DIR_SEGMENT, record.sessionId, 'logs', fileName].join('/')
+    }
+    // 非法 sid（极端防御）：全局 logs 平铺，文件名安全化（与 logger.ts createPiSessionLog
+    // 回落分支同规则）；空清洗结果回落 'nosid'
+    const logsDir = join(dataDir, 'logs')
+    mkdirSync(logsDir, { recursive: true })
     const safeSid = record.sessionId.replace(/[^a-zA-Z0-9-]/g, '').slice(0, SESSION_ID_MAX_LENGTH) || 'nosid'
     const fileName = `signal-forensics-${date}-${safeSid}.jsonl`
     appendFileSync(join(logsDir, fileName), `${JSON.stringify(record)}\n`)
@@ -543,7 +560,7 @@ export interface CaptureInput {
   managedPids?: readonly number[]
 }
 
-export interface CaptureDeps { // oe-exempt:20261014:framework:采集依赖注入范围（环 + pid 注入，测试替身用，单实现常态）
+export interface CaptureDeps { // oe-exempt:20261014:framework:采集依赖注入面（环 + pid 注入，测试替身用，单实现常态）
   ring: ProcessTableRing
   /** runtime 自身 pid。 */
   ownPid: number
@@ -551,7 +568,7 @@ export interface CaptureDeps { // oe-exempt:20261014:framework:采集依赖注�
   listProcesses: () => Promise<string>
   /** lstart 补采（可选；不注入则 startedAt 恒 null）。 */
   readProcessStartTime?: (pid: number) => Promise<number | null>
-  /** journal writer（可选；不注入则只写 detail 文件）。 */
+  /** 台账 writer（可选；不注入则只写 detail 文件）。 */
   journal?: CrashJournalWriter
   /** detail 文件写入（可选；不注入则不落全量记录）。 */
   writeDetailFile?: (record: SignalForensicsRecord) => string | null
@@ -567,7 +584,7 @@ export interface CaptureResult { // oe-exempt:20261014:framework:采集结果数
 
 /**
  * 一次死亡信号取证编排：取环历史（同步）→ 新快照（异步 best-effort）→ 分类 →
- * lstart 补采 → 组记录 → journal 事件 + detail 文件双写。
+ * lstart 补采 → 组记录 → 台账事件 + detail 文件双写。
  *
  * 本函数自身可抛（调用方 orchestration 错误）；生产入口 reportPiExitSignalForensics
  * 全路径捕获。新快照失败不抛（降级为 freshSnapshotAvailable=false 的记录）。
@@ -631,7 +648,7 @@ export async function captureSignalForensics(
       layer: 'pi',
       event: 'signal-forensics',
       sessionId: input.sessionId,
-      // 扩展字段登记清单（schema CrashJournalEvent）：pid/ppid/exitCode/uptimeSec/detailPath
+      // 扩展字段登记面（schema CrashJournalEvent）：pid/ppid/exitCode/uptimeSec/detailPath
       pid: input.deadPid,
       ppid: deps.ownPid,
       exitCode: input.exitCode,

@@ -1,11 +1,11 @@
 import { readFile, readdir, open, stat } from 'node:fs/promises'
 import type { FileHandle } from 'node:fs/promises'
-import { join, basename } from 'node:path'
+import { join } from 'node:path'
 import type { Entry } from '@zhushanwen/session-core'
 import type { Family, SessionRef } from '../core/family.js'
 import { buildFamilyIndex, resolveFamily } from '../core/family.js'
 import { listZcodeManifests } from './zcode-manifest.js'
-import { resolveSessionRoots, type SessionFileMeta } from './roots.js'
+import { resolveSessionRoots, resolveSessionStoreRoot, resolveStoreSubagentRecordsDir, listSessionStorePartitions, type SessionFileMeta } from './roots.js'
 import { parseSessionHeader, readSessionHeaderFirstLine } from './session-header.js'
 import { resolveWorkflows } from './workflows.js'
 
@@ -186,7 +186,8 @@ async function collectSubagentIdentities(
   // U4 数据流：manifest 命中透全字段；未命中 P-fallback 读尾行 identity 取 task/slug/agent
   //（model/status 不可回退，留 undefined）；无 manifest 无 identity（运行中/异常）跳过。
   // A3（ext-simplify-04）：直调 resolveSessionRoots（原 listSubagentSessions 薄包装已删除）
-  //——agentDir 信号包下 [subagent] 根 = <agentDir>/subagents（常量推导，恒唯一）
+  //——[subagent] 根 = session 存储树（[session-store-layout-inversion] 单新根，常量
+  // 推导，恒唯一；扫描定向探各 sid 分区的 subagents/sessions/）。
   const subMetas =
     (await resolveSessionRoots({ agentDir })).find((r) => r.kind === 'subagent')?.files ?? []
   for (const meta of subMetas) {
@@ -418,31 +419,37 @@ async function tryReadManifest(path: string): Promise<RecordManifest | undefined
 }
 
 /**
- * 扫描 subagents/<cwdSlug>/records/*.json —— subagent 注册清单。
- * 每个 manifest 由终态 finalize 或 sync 批落标出口写入（创建时不写），持久存在即使
+ * 扫描 records/*.json —— subagent 注册清单（读侧单新根，[session-store-layout-inversion]
+ * D6 裁决：旧布局存量原位保留、不再读写——旧 record 从 agent 面 result/find 消失是该
+ * 裁决取舍清单明示项，不做旧根兼容扫描）。
+ * 每个 manifest 由终态 finalize 或 rebuildIndexes 投影写入（创建时不写），持久存在即使
  * .jsonl 被 GC。坏 manifest（缺必填字段/JSON 损坏）跳过，不中断扫描。
+ *
+ * 单新根：`<dataDir>/ext-sessions`（dataDir = dirname(agentDir)，布局 B agentDir =
+ * `<dataDir>/agent`；树根段镜像 shared SESSION_STORE_DIR_SEGMENT，对拍机检锚点 =
+ * scripts/check-artifact-dir-formula-sync.mjs 域 9）。新布局 records 在
+ * `<root>/<sid>/subagents/records/`（分区键 = rootSessionId，嵌套派发全层同值——
+ * 嵌套 subagent 的 manifest 同落根会话分区，固定位置扫描完整覆盖）。扫描剪枝：
+ * `<root>/` 一级只进 isPiSessionId 形态目录（不进 logs/attachments 等大目录），每个
+ * sid 分区内只探 subagents/records/ 固定位置，不整树递归。根不存在时静默空读。
  */
 export async function listRecordManifests(agentDir: string): Promise<RecordManifest[]> {
-  const root = join(agentDir, 'subagents')
+  const storeRoot = resolveSessionStoreRoot(agentDir)
   const out: RecordManifest[] = []
-  async function walk(dir: string): Promise<void> {
+  for (const sid of await listSessionStorePartitions(storeRoot)) {
+    const recordsDir = resolveStoreSubagentRecordsDir(agentDir, sid)
     let entries
     try {
-      entries = await readdir(dir, { withFileTypes: true })
+      entries = await readdir(recordsDir, { withFileTypes: true })
     } catch {
-      return // 目录不存在/无权限 → 静默返回
+      continue // 该分区无 records/（无 subagent 的会话）→ 静默跳过
     }
     for (const e of entries) {
-      const full = join(dir, e.name)
-      if (e.isDirectory()) {
-        await walk(full)
-      } else if (e.isFile() && e.name.endsWith('.json') && basename(dir) === 'records') {
-        const m = await tryReadManifest(full)
-        if (m) out.push(m)
-      }
+      if (!e.isFile() || !e.name.endsWith('.json')) continue
+      const m = await tryReadManifest(join(recordsDir, e.name))
+      if (m) out.push(m)
     }
   }
-  await walk(root)
   return out
 }
 

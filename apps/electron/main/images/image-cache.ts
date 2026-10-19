@@ -1,22 +1,25 @@
 /**
  * toolResult 图片缓存生命周期（D6-⑨ / u7-memory-governance，main 侧）。
  *
- * 目录形态：`<dataDir>/cache/images/<sessionId>/<sha256(data)>.<ext>`（路径推导 SSOT =
- * shared paths.ts getImageCacheDir / getImageCacheRoot，穿越校验同款）。
+ * 目录形态：`<dataDir>/ext-sessions/<sessionId>/image-cache/<sha256(data)>.<ext>`
+ * （session 存储树域 3，路径推导 SSOT = shared paths.ts getImageCacheDir / getSessionStoreDir，
+ * 穿越校验同款）。
  *
  * **纯缓存语义**：可随时丢弃、可幂等重建——
  * - 幂等写：文件名 = 内容 sha256，hash 命中（existsSync）跳过写直接返回 cached；
  * - LRU 驱逐（renderer 内存分区）永不调用本模块的删除 API——驱逐只释放内存，重进
  *   hydrate 重新编排时 hash 命中或从 base64 重建，磁盘层无感知；
  * - 三条文件系统级清理通道（判据全部在文件系统层，不依赖跨进程内存态）：
- *   ① session 删除级联（deleteSessionImageCache；runtime 侧因包边界无法跨包 import，
- *      按同语义内联接线 session-lifecycle.ts purgeSessionSidecars——其注释指认本文件为
- *      SSOT；本导出为 main 侧形态保留 + 测试锚定）；
- *   ② 启动孤儿扫描（scanOrphanImageCaches：目录 mtime 超 30 天且路径内 sessionId 在 pi
- *      sessions 目录无对应 session 文件 → 判死删目录；文件级判据天然覆盖 subagent 虚拟
- *      分区——subagent 历史同存于 sessions 目录）；
- *   ③ 全局软上限（enforceImageCacheGlobalCap：总 size 超 512MB 时**只清孤儿判死目录**，
- *      mtime 老→新——不做「未在场分区引用」判定，跨窗口在场集不可见问题构造性消失，
+ *   ① session 删除：域 3 随 session 存储树整树软删（session-content-cascade
+ *      trashSessionTree），本模块无删除级联调用（runtime 侧删除级联接线已随整树软删
+ *      退役）；deleteSessionImageCache 为 main 侧保留形态、仅测试锚定；
+ *   ② 启动孤儿扫描（scanOrphanImageCaches：遍历 session 存储树一级目录反解 sid，本域
+ *      cache 子目录 mtime 超 30 天且 sessionId 在 pi sessions 目录无对应 session 文件 →
+ *      判死删该域子目录——只删 image-cache/ 域目录，不触树内其他域；非合法 sessionId
+ *      形态的一级目录一律跳过（D7 树内遍历规约，isPiSessionId 结构性拦截）；文件级判据
+ *      天然覆盖 subagent 虚拟分区——subagent 历史同存于 sessions 目录）；
+ *   ③ 全局软上限（enforceImageCacheGlobalCap：树内本域总 size 超 512MB 时**只清孤儿判死
+ *      目录**，mtime 老→新——不做「未在场分区引用」判定，跨窗口在场集不可见问题构造性消失，
  *      活 session 文件永不命中清理）。
  *
  * **单 session size 帽（64MB）**：超帽停止为该 session 落盘新图（writeImagesNewestFirst
@@ -30,7 +33,7 @@
 import { existsSync, mkdirSync, readdirSync, rmSync, statSync, writeFileSync } from 'node:fs'
 import { createHash } from 'node:crypto'
 import { join, basename, dirname } from 'node:path'
-import { getPiSessionsDir, getImageCacheDir, getImageCacheRoot } from '@taiji/shared/paths'
+import { getPiSessionsDir, getImageCacheDir, getSessionStoreDir, isPiSessionId } from '@taiji/shared/paths'
 import type { ImageCacheWriteImage, ImageCacheWriteImageResult, ImageCacheWriteResult } from '@taiji/shared'
 
 /** 字节/时间换算常量（帽值语义单位为 MB、孤儿龄语义单位为天，字面量收敛在此）。 */
@@ -167,7 +170,10 @@ export function writeImagesNewestFirst(
   return { results, quotaFull }
 }
 
-/** session 删除级联：删该 session 的 cache 子目录（best-effort，不存在 = 幂等 no-op）。 */
+/**
+ * main 侧删除 API（保留形态，仅测试锚定）：删该 session 的 cache 子目录（幂等，
+ * 不存在 = no-op）。生产删除链该段已退役——域 3 随整树软删（见文件头清理通道①）。
+ */
 export function deleteSessionImageCache(sessionId: string, dirs: ImageCacheDirs = {}): void {
   rmSync(getImageCacheDir(sessionId, dirs.dataDir), { recursive: true, force: true })
 }
@@ -276,33 +282,39 @@ function isOrphanSessionDir(sessionDirName: string, dirs: ImageCacheDirs): boole
   return true
 }
 
-/** 孤儿扫描结果（A9③ 实证记录用）。 */
+/** 孤儿扫描结果（A9③ 实证记录用；removed = 被清目录的 sessionId）。 */
 export interface OrphanScanResult {
   scanned: number
   removed: string[]
 }
 
 /**
- * 启动孤儿扫描：目录 mtime 超 30 天且孤儿判死 → rm 目录。mtime 阈值在前（廉价 stat），
- * sessions 目录列举在后（每判死目录一次 readdir）——活 session 目录零 sessions 扫描成本。
+ * 启动孤儿扫描：遍历 session 存储树一级目录（`<root>/<sessionId>/`）反解 sid——非合法
+ * sessionId 形态的一级目录一律跳过（D7 树内遍历规约，isPiSessionId 结构性拦截，防未来
+ * 手放的非会话目录被误清）；对本域 cache 子目录 mtime 超 30 天且孤儿判死的 sid，rm 其
+ * `<root>/<sid>/image-cache/` **域子目录**（树内其他域与 sid 分区壳不触——整树回收归
+ * session 删除编排）。mtime 阈值在前（廉价 stat），sessions 目录列举在后（每判死目录
+ * 一次 readdir）——活 session 目录零 sessions 扫描成本。
  */
 export function scanOrphanImageCaches(dirs: ImageCacheDirs = {}, now: number = Date.now()): OrphanScanResult {
-  const root = getImageCacheRoot(dirs.dataDir)
+  const storeDir = getSessionStoreDir(dirs.dataDir)
   const result: OrphanScanResult = { scanned: 0, removed: [] }
-  if (!existsSync(root)) return result
-  for (const name of readdirSync(root)) {
-    const dir = join(root, name)
+  if (!existsSync(storeDir)) return result
+  for (const name of readdirSync(storeDir)) {
+    if (!isPiSessionId(name)) continue // D7 树内遍历规约：非 sid 形态目录不属任何会话分区
+    const cacheDir = getImageCacheDir(name, dirs.dataDir)
+    if (!existsSync(cacheDir)) continue // 该会话无图片缓存分区：无清理对象
     result.scanned++
     let mtime: number
     try {
-      mtime = statSync(dir).mtimeMs
+      mtime = statSync(cacheDir).mtimeMs
     } catch {
       continue
     }
     if (now - mtime < IMAGE_CACHE_ORPHAN_AGE_MS) continue
     if (!isOrphanSessionDir(name, dirs)) continue
     try {
-      rmSync(dir, { recursive: true, force: true })
+      rmSync(cacheDir, { recursive: true, force: true })
       result.removed.push(name)
     } catch { void 0 } // best-effort：单目录删除失败不中断扫描（下轮启动重试）
   }
@@ -317,31 +329,33 @@ export interface SoftCapResult {
 }
 
 /**
- * 全局软上限（512MB）：超限时**只清孤儿判死目录**，mtime 老→新，直到回落帽下。
- * 活 session 目录永不命中清理（孤儿判据豁免）——设计 v5 裁决：任何进程级「在场集」
- * 都有跨窗口不可见问题，收敛到 session 级判死后判据全在文件系统层。
+ * 全局软上限（512MB）：遍历 session 存储树一级合法 sid 分区，统计树内本域
+ * （各 `<root>/<sid>/image-cache/`）总 size；超限时**只清孤儿判死目录**，mtime 老→新，
+ * 直到回落帽下。活 session 目录永不命中清理（孤儿判据豁免）——设计 v5 裁决：任何进程级
+ * 「在场集」都有跨窗口不可见问题，收敛到 session 级判死后判据全在文件系统层。
  */
 export function enforceImageCacheGlobalCap(
   dirs: ImageCacheDirs = {},
   softCapBytes: number = IMAGE_CACHE_GLOBAL_SOFT_CAP_BYTES,
 ): SoftCapResult {
-  const root = getImageCacheRoot(dirs.dataDir)
+  const storeDir = getSessionStoreDir(dirs.dataDir)
   const result: SoftCapResult = { totalBytes: 0, overCap: false, removed: [] }
-  if (!existsSync(root)) return result
+  if (!existsSync(storeDir)) return result
 
   interface Entry { name: string; bytes: number; mtime: number }
   const entries: Entry[] = []
   let total = 0
-  for (const name of readdirSync(root)) {
-    const dir = join(root, name)
+  for (const name of readdirSync(storeDir)) {
+    if (!isPiSessionId(name)) continue // D7 树内遍历规约：非 sid 形态目录不属任何会话分区
+    const cacheDir = getImageCacheDir(name, dirs.dataDir)
     try {
-      const st = statSync(dir)
+      const st = statSync(cacheDir)
       if (!st.isDirectory()) continue
-      const bytes = dirBytes(dir)
+      const bytes = dirBytes(cacheDir)
       entries.push({ name, bytes, mtime: st.mtimeMs })
       total += bytes
     } catch {
-      continue
+      continue // 该会话无本域分区（ENOENT）或探测失败：不计入
     }
   }
   result.totalBytes = total
@@ -356,7 +370,7 @@ export function enforceImageCacheGlobalCap(
   for (const e of orphans) {
     if (cur <= softCapBytes) break
     try {
-      rmSync(join(root, e.name), { recursive: true, force: true })
+      rmSync(getImageCacheDir(e.name, dirs.dataDir), { recursive: true, force: true })
       cur -= e.bytes
       result.removed.push(e.name)
     } catch { void 0 } // best-effort 同上
@@ -376,7 +390,8 @@ export function runImageCacheStartupSweep(dirs: ImageCacheDirs = {}): void {
 }
 
 /**
- * 从 session 文件路径派生 sessionId（runtime 删除链接线用）。
+ * 从 session 文件路径派生 sessionId（main 侧保留形态，仅测试锚定——原 runtime
+ * 删除链接线随整树软删退役；测试经它锁定派生形态）。
  *
  * 真实文件名形态 `<ISO时间戳>_<uuid>.jsonl`（sidecar `<同前缀>.jsonl.<suffix>`），
  * sessionId = 末段 `_` 后的 uuid 段（=== 首行 header id，即 renderer 写 cache 目录所用

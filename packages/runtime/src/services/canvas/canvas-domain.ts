@@ -22,11 +22,12 @@
  * 应用，任一条 fail-fast 抛 CanvasDomainError，副本丢弃，prev 状态不变（无部分写入）。
  */
 import { ACTION_EVENT_MAP } from '@zhushanwen/extension-protocol'
-import type { CanvasActor, CanvasEventType, CanvasState } from '@zhushanwen/extension-protocol'
+import type { CanvasActor, CanvasEventType } from '@zhushanwen/extension-protocol'
 import { applyByAction } from './canvas-actions.js'
 import {
   fail,
   type AppliedMutation,
+  type CanvasDomainState,
   type CanvasEventBody,
   type CanvasTransformRequest,
   type IdGenerator,
@@ -50,6 +51,7 @@ export {
   eventOf,
   eventData,
   type AppliedMutation,
+  type CanvasDomainState,
   type CreateIds,
   nodeOf,
   edgeOf,
@@ -81,7 +83,7 @@ export {
  * prev 不变。actor 权限矩阵校验归服务入口统一做（本函数不查矩阵——重放路径无矩阵问题）。
  */
 export function applyMutation(
-  prev: CanvasState,
+  prev: CanvasDomainState,
   req: CanvasTransformRequest,
   actor: CanvasActor,
   at: string,

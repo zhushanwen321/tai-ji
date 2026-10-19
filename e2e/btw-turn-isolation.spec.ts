@@ -371,7 +371,7 @@ test('S7 (btw real): 主 turn 进行中 btw 连发 3 条 → 主 turn 无 abort 
     if (!mainFile) {
       writeDiag('s7-main-file-missing.json', {
         sessionsDir: listJsonlUnder(path.join(agentDir, 'sessions')),
-        btwDir: listJsonlUnder(path.join(agentDir, 'btw')),
+        btwTree: listJsonlUnder(path.join(dataDir, 'ext-sessions', mainSid, 'btw')),
       })
     }
     expect(mainFile, '含 MAIN 哨兵的主会话 JSONL 应可定位（零直写约束下由 pi 自己落盘）').toBeDefined()
@@ -388,12 +388,15 @@ test('S7 (btw real): 主 turn 进行中 btw 连发 3 条 → 主 turn 无 abort 
     if (leaked.length > 0) writeDiag('s7-leak.json', { leaked, mainFile })
     expect(leaked, '主会话 JSONL 全文不应含任何 btw 问哨兵（= 主流历史不含 btw 内容）').toEqual([])
 
-    // 正面对照：三问确实落进 btw 线会话文件（缺席主流才有意义）
-    const btwFile = findJsonlWithMarker(path.join(agentDir, 'btw'), BTW_MARKERS[0])
+    // 正面对照：三问确实落进 btw 线会话文件（缺席主流才有意义）。
+    // btw 线会话文件自布局反转起落新存储树 <dataDir>/ext-sessions/<mainSid>/btw/
+    // （旧布局 <agentDir>/btw/<encodeCwd>/<mainSid>/ 不再读写）。
+    const btwTree = path.join(dataDir, 'ext-sessions', mainSid, 'btw')
+    const btwFile = findJsonlWithMarker(btwTree, BTW_MARKERS[0])
     if (!btwFile) {
-      writeDiag('s7-btw-file-missing.json', { btwDir: listJsonlUnder(path.join(agentDir, 'btw')) })
+      writeDiag('s7-btw-file-missing.json', { btwDir: listJsonlUnder(btwTree) })
     }
-    expect(btwFile, 'btw 线会话文件（<agentDir>/btw/<encodeCwd>/<mainSid>/）应含三问哨兵').toBeDefined()
+    expect(btwFile, 'btw 线会话文件（<dataDir>/ext-sessions/<mainSid>/btw/）应含三问哨兵').toBeDefined()
     const btwText = fs.readFileSync(btwFile!, 'utf8')
     for (const m of BTW_MARKERS) {
       expect(btwText.includes(m), `btw 线文件应含哨兵 ${m}（正面对照）`).toBe(true)

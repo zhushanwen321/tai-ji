@@ -34,15 +34,22 @@ function makeLog(): SweepLogChannel {
   return { info: vi.fn(), warn: vi.fn(), error: vi.fn() };
 }
 
-/** 构造一个 pi 壳布局的 session 目录（slug 树 + workflow-state + 假 session
- *  文件——假 session 文件是反向断言「session 文件零新增」的锚点）。 */
-function makeSlugStateDirIn(root: string, slug: string): string {
-  const slugDir = join(root, "sessions", slug);
-  const stateDir = join(slugDir, "workflow-state");
-  mkdirSync(stateDir, { recursive: true });
-  writeFileSync(join(slugDir, "20260928_000000_fixture-session.jsonl"), '{"fixture":true}\n');
-  return stateDir;
+/** [session-store-layout-inversion] 构造 session 存储树的 workflow runs 目录
+ *  （`<dataRoot>/ext-sessions/<sid>/workflow/runs/` + 假 session 文件锚点——
+ *  旧「slug 树 + workflow-state」布局退役，枚举源 = 树内 sid 一级目录）。 */
+function makeSessionRunsDirIn(root: string, sid: string): string {
+  const sidRoot = join(root, "ext-sessions", sid);
+  const runsDir = join(sidRoot, "workflow", "runs");
+  mkdirSync(runsDir, { recursive: true });
+  const sessionsDir = join(sidRoot, "subagents", "sessions");
+  mkdirSync(sessionsDir, { recursive: true });
+  // 假 session 文件是反向断言「session 文件零新增」的锚点
+  writeFileSync(join(sessionsDir, "20260928_000000_fixture-session.jsonl"), '{"fixture":true}\n');
+  return runsDir;
 }
+
+/** 本文件共享 sid fixture（树内一级目录名，须过 shared isPiSessionId）。 */
+const SWEEP_SID = "sid-sweep-fixture";
 
 /** 最小合法快照行（v2 状态文件形态——budget 六字段缺一会被读侧形状校验拒绝；
  *  与 pi-host-run-store.test.ts 同源 fixture）。 */
@@ -95,9 +102,9 @@ describe("startupSweep（机制退役设计 §4.1 假树直调）", () => {
     rmSync(agentRoot, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 });
   });
 
-  /** 构造一个 pi 壳布局的 session 目录（文件级 helper 的本 describe 便捷形态）。 */
-  function makeSlugStateDir(slug: string): string {
-    return makeSlugStateDirIn(agentRoot, slug);
+  /** 构造 session 存储树 runs 目录（文件级 helper 的本 describe 便捷形态）。 */
+  function makeSessionRunsDir(): string {
+    return makeSessionRunsDirIn(agentRoot, SWEEP_SID);
   }
 
   /** 落 running 形态假树：state 快照 + journal 事件流（末帧时间戳 = 传入值）。 */
@@ -112,7 +119,7 @@ describe("startupSweep（机制退役设计 §4.1 假树直调）", () => {
   }
 
   it("场景 1：僵尸 run 收编中断帧直落 + 反向断言无条目/manifest 写入 + info 结果行落位", async () => {
-    const stateDir = makeSlugStateDir("--fixture-slug--");
+    const stateDir = makeSessionRunsDir();
     const runId = "wf-sweep-a";
     await seedRunningRun(stateDir, runId, Date.now() - 3 * 60 * 60 * 1000);
     const before = walkFiles(agentRoot);
@@ -140,7 +147,7 @@ describe("startupSweep（机制退役设计 §4.1 假树直调）", () => {
     const added = [...after.keys()].filter((k) => !before.has(k));
     expect(added).toEqual([]);
     const changed = [...after.keys()].filter((k) => before.has(k) && before.get(k) !== after.get(k));
-    expect(changed).toEqual([join("sessions", "--fixture-slug--", "workflow-state", `${runId}${RUN_EVENTS_SUFFIX}`)]);
+    expect(changed).toEqual([join("ext-sessions", SWEEP_SID, "workflow", "runs", `${runId}${RUN_EVENTS_SUFFIX}`)]);
     // 结果行按方法名落位：info 恰一次（三类计数），warn/error 零调用
     expect(log.info).toHaveBeenCalledTimes(1);
     expect(log.info).toHaveBeenCalledWith(
@@ -151,7 +158,7 @@ describe("startupSweep（机制退役设计 §4.1 假树直调）", () => {
   });
 
   it("场景 2：同假树二次调用幂等——journal 零新增帧 + adopted 0", async () => {
-    const stateDir = makeSlugStateDir("--fixture-slug--");
+    const stateDir = makeSessionRunsDir();
     const runId = "wf-sweep-idem";
     await seedRunningRun(stateDir, runId, Date.now() - 3 * 60 * 60 * 1000);
 
@@ -176,11 +183,11 @@ describe("startupSweep（机制退役设计 §4.1 假树直调）", () => {
     // chmod 探针：root 进程不受权限位约束，场景构造不出来（环境限制非语义缺口；
     // pi-host-run-store.test.ts 同款惯用法）
     if (process.platform === "win32" || process.getuid?.() === 0) return;
-    const sessionsRoot = join(agentRoot, "sessions");
-    mkdirSync(join(sessionsRoot, "--fixture-slug--"), { recursive: true });
-    const stateDir = makeSlugStateDir("--fixture-slug--");
+    const storeRoot = join(agentRoot, "ext-sessions");
+    mkdirSync(storeRoot, { recursive: true });
+    const stateDir = makeSessionRunsDir();
     await seedRunningRun(stateDir, "wf-sweep-eacces", Date.now() - 3 * 60 * 60 * 1000);
-    chmodSync(sessionsRoot, 0o000);
+    chmodSync(storeRoot, 0o000);
     try {
       // 不 reject：枚举整体失败折进结果对象（扫描是旁路维护，不阻断启动）
       const result = await startupSweep(() => agentRoot, log);
@@ -192,13 +199,13 @@ describe("startupSweep（机制退役设计 §4.1 假树直调）", () => {
       expect(String(vi.mocked(log.error).mock.calls[0]?.[0])).toContain("EACCES");
       expect(log.info).not.toHaveBeenCalled();
     } finally {
-      chmodSync(sessionsRoot, 0o755);
+      chmodSync(storeRoot, 0o755);
     }
   });
 
   it("场景 3b：单 run 收编失败——warn 留痕继续，其余可收编 run 不受影响", async () => {
     if (process.platform === "win32" || process.getuid?.() === 0) return;
-    const stateDir = makeSlugStateDir("--fixture-slug--");
+    const stateDir = makeSessionRunsDir();
     await seedRunningRun(stateDir, "wf-sweep-ok", Date.now() - 3 * 60 * 60 * 1000);
     await seedRunningRun(stateDir, "wf-sweep-bad", Date.now() - 3 * 60 * 60 * 1000);
     // wf-sweep-bad 的 journal 读侧破坏（EACCES）——判定核保守按 running 进收编，
@@ -249,7 +256,7 @@ describe("startupSweep（机制退役设计 §4.1 假树直调）", () => {
   });
 
   it("新鲜末帧直收（宽限窗已删）：末帧距今 10s 的 running run 照常收编，无时间窗跳过", async () => {
-    const stateDir = makeSlugStateDir("--fixture-slug--");
+    const stateDir = makeSessionRunsDir();
     const runId = "wf-sweep-fresh";
     // 末帧距今 10s（旧实现会被 60s 宽限窗跳过）——创建顺序契约下照常收编
     await seedRunningRun(stateDir, runId, Date.now() - 10_000);
@@ -285,7 +292,7 @@ describe("startupSweep 枚举换源三形态（[D16⑥] 检查点 8）", () => {
   });
 
   it("坏链：run-created 帧损坏 → fold 停在 created → skippedBrokenChain 计入 skipped、record 零写入", async () => {
-    const stateDir = makeSlugStateDirIn(agentRoot, "--fixture-slug--");
+    const stateDir = makeSessionRunsDirIn(agentRoot, SWEEP_SID);
     const recordPath = join(stateDir, "wf-bad-chain.record.jsonl");
     writeFileSync(
       recordPath,
@@ -306,7 +313,7 @@ describe("startupSweep 枚举换源三形态（[D16⑥] 检查点 8）", () => {
   });
 
   it("空 record 流：文件在但零事件 → skippedMissing 计入 skipped、零写入", async () => {
-    const stateDir = makeSlugStateDirIn(agentRoot, "--fixture-slug--");
+    const stateDir = makeSessionRunsDirIn(agentRoot, SWEEP_SID);
     const recordPath = join(stateDir, "wf-empty.record.jsonl");
     writeFileSync(recordPath, "", "utf8");
 
@@ -319,8 +326,8 @@ describe("startupSweep 枚举换源三形态（[D16⑥] 检查点 8）", () => {
     expect(log.warn).not.toHaveBeenCalled();
   });
 
-  it("v1 旧形态目录：只有旧双源文件 → 枚举空集（adopted/skipped/stateDirs 全 0，结果行照打）", async () => {
-    const stateDir = makeSlugStateDirIn(agentRoot, "--v1-slug--");
+  it("v1 旧形态文件：runs 目录内只有旧双源文件（非 record 流候选）→ 枚举空集（adopted/skipped/stateDirs 全 0，结果行照打）", async () => {
+    const stateDir = makeSessionRunsDirIn(agentRoot, SWEEP_SID);
     writeFileSync(join(stateDir, "wf-v1-only.events.jsonl"), '{"type":"run-created"}\n');
     writeFileSync(join(stateDir, "wf-v1-only.jsonl"), '{"v":"wf-run-v1"}\n');
 

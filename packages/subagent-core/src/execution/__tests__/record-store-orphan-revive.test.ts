@@ -2,8 +2,8 @@
 //
 // [PS-10/T6④] revive() 复位 orphanJudged + [U4a / D3b (a″)] 孤儿恢复活实例跳过。
 //
-// [登记 §3.3 迁移] 播种与断言全部走 v2 条目族（v1 全量快照写点及其读侧已随兼容层删除
-// ——旧 closedReason 等 v1 专属观察侧不复存在）。两个恢复入口各承一臂：
+// [登记 §3.3 迁移] 播种与断言全部走 v2 条目族（v1 全量快照写点及其读面已随兼容层删除
+// ——旧 closedReason 等 v1 专属观察面不复存在）。两个恢复入口各承一臂：
 //   - entry-only 纠偏（recoverEntryOnlyOrphans，第一段）：主 session 有 v2 注册条目、
 //     无子文件、无事件文件——orphanJudged 的次级防线语义（appendEntry 失败 → 判据
 //     不自愈，重判资格完全由缓存承载；revive() 复位）只在此入口可达；
@@ -28,7 +28,7 @@ const { loggerMock } = vi.hoisted(() => ({
 vi.mock("../../core/logger.ts", () => ({ getLogger: () => loggerMock }));
 
 import { RecordStore } from "../persistence/record-store.ts";
-// [W1 / U2a] 收编入口断言的观察侧（u0 契约层 scan/路径原语）。
+// [W1 / U2a] 收编入口断言的观察面（u0 契约层 scan/路径原语）。
 import { createRecordEventStream, recordEventsPath } from "../persistence/record-events.ts";
 import type { RecordEvent } from "../persistence/record-events.ts";
 import { createRecord } from "../persistence/execution-record.ts";
@@ -89,7 +89,7 @@ function seedRecord(over: Partial<SubagentRecord> = {}): SubagentRecord {
   };
 }
 
-/** 恢复侧 store（新实例 = 重启形态；recordsDir 接线 = 事件流在场）。注入 appendEntry
+/** 恢复侧 store（新实例 = 重启形态；recordsDir 接线 = 事件面在场）。注入 appendEntry
  *  先行调用：抛错即中止（append 未落盘 → appended 不记），透传即捕获落盘产物。 */
 function makeStore(
   sessionsDir: string,
@@ -100,12 +100,12 @@ function makeStore(
   appended: Array<{ customType: string; data: Record<string, unknown> }>;
 } {
   const appended: Array<{ customType: string; data: Record<string, unknown> }> = [];
-  const store = new RecordStore(sessionsDir, undefined, {
+  const store = new RecordStore(() => sessionsDir, undefined, {
     appendEntry: (customType: string, data: unknown) => {
       appendEntryImpl?.(customType, data);
       appended.push({ customType, data: data as Record<string, unknown> });
     },
-  } as never, recordsDir);
+  } as never, () => recordsDir);
   return { store, appended };
 }
 
@@ -160,7 +160,7 @@ describe("[PS-10] revive() 复位 orphanJudged（appendEntry 失败后重开可�
     expect(corrected?.data.kind).toBe("settled");
     expect(corrected?.data.status).toBe("idle");
     expect(corrected?.data.stopReason).toBe("interrupted-by-restart");
-    // 纠偏不建事件文件（entry-only 入口的磁盘侧零副作用）
+    // 纠偏不建事件文件（entry-only 入口的磁盘面零副作用）
     expect(fs.existsSync(recordEventsPath(recordsDir, "sa-revive-1"))).toBe(false);
   });
 
@@ -203,14 +203,14 @@ describe("[U4a / D3b (a″)] 孤儿恢复活实例跳过：现查探针（pid �
     const { sessionsDir, recordsDir, mainFile } = makeOrphanLayout();
     const captured: Array<{ customType: string; data: unknown }> = [];
     const seedStore = new RecordStore(
-      sessionsDir,
+      () => sessionsDir,
       undefined,
       {
         appendEntry: (customType: string, data: unknown) => {
           captured.push({ customType, data });
         },
       } as never,
-      recordsDir,
+      () => recordsDir,
     );
     const rec = v2MakeRecord({ id, rootSessionId: "sess-orphan" });
     seedStore.register(rec); // record-created 帧 + v2 注册条目（身份 + 锚点）
@@ -232,7 +232,7 @@ describe("[U4a / D3b (a″)] 孤儿恢复活实例跳过：现查探针（pid �
     store.recoverOrphanRecords("sess-orphan", mainFile);
 
     expect(appended).toHaveLength(0); // 跳过：不落任何收编 entry
-    // journal 零追加 + 收编 manifest 未物化（跳过是构造性的，不止条目范围）
+    // journal 零追加 + 收编 manifest 未物化（跳过是构造性的，不止条目面）
     expect(
       v2ReadEventLines(recordsDir, "sa-probe-1").some((e) => e.type === "record-settled"),
     ).toBe(false);
@@ -254,7 +254,7 @@ describe("[U4a / D3b (a″)] 孤儿恢复活实例跳过：现查探针（pid �
     expect(appended[0]?.data.kind).toBe("settled");
     expect(appended[0]?.data.status).toBe("idle");
     expect(appended[0]?.data.stopReason).toBe("interrupted-by-restart");
-    // journal 唯一事实源：收编帧写入 journal 记录（幂等语义归第三段收编入口用例）
+    // journal 唯一事实源：收编帧落账（幂等语义归第三段收编入口用例）
     expect(
       v2ReadEventLines(recordsDir, "sa-probe-2").filter((e) => e.type === "record-settled"),
     ).toHaveLength(1);
@@ -350,7 +350,7 @@ describe("收编入口（W1 D4：journal 重放 + 收编幂等）", () => {
   /** 崩溃前形态种子：v2 注册条目 + created/bound 帧、无终态（kill -9 等价）。 */
   function seedCrashedRecord(id: string): ExecutionRecord {
     const captured: unknown[] = [];
-    const store = new RecordStore(sessionsDir, undefined, v2CapturePi(captured), recordsDir);
+    const store = new RecordStore(() => sessionsDir, undefined, v2CapturePi(captured), () => recordsDir);
     const rec = v2MakeRecord({ id });
     store.register(rec);
     const sessionFile = path.join(sessionsDir, `${id}.jsonl`);
@@ -365,12 +365,12 @@ describe("收编入口（W1 D4：journal 重放 + 收编幂等）", () => {
 
   /** 收编链（等价 kill -9 重启）：新 store + 主文件 → recoverOrphanRecords。 */
   function rebootStore(captured: unknown[]): RecordStore {
-    const store = new RecordStore(sessionsDir, undefined, v2CapturePi(captured), recordsDir);
+    const store = new RecordStore(() => sessionsDir, undefined, v2CapturePi(captured), () => recordsDir);
     store.recoverOrphanRecords(undefined, mainFile);
     return store;
   }
 
-  /** 手工 v2 settled 条目行（D4 双面证据条目范围的夹具构造——stopReason 可指定）。 */
+  /** 手工 v2 settled 条目行（D4 双面证据条目面的夹具构造——stopReason 可指定）。 */
   function appendManualSettledEntry(id: string, stopReason: string): void {
     v2AppendMainSessionLine(mainFile, "subagent-record", {
       v: 2,
@@ -386,13 +386,13 @@ describe("收编入口（W1 D4：journal 重放 + 收编幂等）", () => {
     });
   }
 
-  // [W1 / D4 双面证据第二面判别] interrupted 族条目 = 「条目范围先行写、journal 帧
+  // [W1 / D4 双面证据第二面判别] interrupted 族条目 = 「条目面先行写、journal 帧
   // 缺失」不对称窗口残留（appendEvent fire-and-forget 失败），不构成跳过证据：
   // 收编放行 → 追加 settled 帧修复 journal（journal 唯一事实源承诺的自愈通道），
   // 二次重启由 fold settled 拦截不重复。
   it("夹具A journal 缺 settled 帧 + interrupted 终态条目 → 收编追加帧修复 journal，二次触发不重复", () => {
     seedCrashedRecord("sa-adopt-orphix");
-    // 崩溃前条目范围先行写了一条 interrupted settled（journal 帧因写失败缺失的形态）
+    // 崩溃前条目面先行写了一条 interrupted settled（journal 帧因写失败缺失的形态）
     appendManualSettledEntry("sa-adopt-orphix", "interrupted");
 
     const captured: unknown[] = [];
@@ -438,7 +438,7 @@ describe("收编入口（W1 D4：journal 重放 + 收编幂等）", () => {
       fs.readFileSync(path.join(recordsDir, "sa-adopt-1.json"), "utf8") as string,
     ) as { id: string; agentName: string; executionStatus: string; stopReason?: string };
     expect(manifest).toMatchObject({ id: "sa-adopt-1", agentName: "worker", executionStatus: "idle" });
-    // [W4 收敛] 收编停因上派生视图——sweep 判据第三级（findAdoptedStopReasonSync）的读取源。
+    // [W4 收敛] 收编停因上投影——sweep 判据第三级（findAdoptedStopReasonSync）的读取源。
     expect(manifest.stopReason).toBe("interrupted-by-restart");
     // 判据第三级本体：收编 manifest → 停因；非收编形态（文件缺失）→ undefined。
     expect(storeA.findAdoptedStopReasonSync("sa-adopt-1")).toBe("interrupted-by-restart");
@@ -464,7 +464,7 @@ describe("收编入口（W1 D4：journal 重放 + 收编幂等）", () => {
     // 用户复活续跑：markResurrected 翻回活态 + markRoundStarted 落轮始帧——fold
     // settled 被 round-started 清除（record-events.ts fold 转移），旧 interrupted
     // 终态条目在（stopReason=interrupted-by-restart，中断族不构成跳过证据）。
-    const liveStore = new RecordStore(sessionsDir, undefined, v2CapturePi([]), recordsDir);
+    const liveStore = new RecordStore(() => sessionsDir, undefined, v2CapturePi([]), () => recordsDir);
     liveStore.markResurrected(rec, true);
     expect(liveStore.markRoundStarted(id)).toBe(true);
     expect(
@@ -490,7 +490,7 @@ describe("收编入口（W1 D4：journal 重放 + 收编幂等）", () => {
   it("验收⑤v2 新路径：重启后 manifest 经收编物化恢复可见（rematerialize 桥接为 v1 兼容专属零依赖）", async () => {
     seedCrashedRecord("sa-adopt-2");
 
-    // 重启前 manifest 面 = bound 物化的 running 派生视图（子文件在盘）。
+    // 重启前 manifest 面 = bound 物化的 running 投影（子文件在盘）。
     const beforeManifest = JSON.parse(
       fs.readFileSync(path.join(recordsDir, "sa-adopt-2.json"), "utf8") as string,
     ) as { status: string };
@@ -511,7 +511,7 @@ describe("收编入口（W1 D4：journal 重放 + 收编幂等）", () => {
 
   it("活体保护：内存持有（在途）与异宿主在持（pi 锚探活）均不收编", async () => {
     const capturedSeed: unknown[] = [];
-    const holdingStore = new RecordStore(sessionsDir, undefined, v2CapturePi(capturedSeed), recordsDir);
+    const holdingStore = new RecordStore(() => sessionsDir, undefined, v2CapturePi(capturedSeed), () => recordsDir);
     const rec = v2MakeRecord({ id: "sa-adopt-live" });
     holdingStore.register(rec);
     const sessionFile = path.join(sessionsDir, "sa-adopt-live.jsonl");
@@ -528,14 +528,14 @@ describe("收编入口（W1 D4：journal 重放 + 收编幂等）", () => {
 
     // 新 store 无内存持有：正常收编（对照组——证明上一步跳过是活体保护所致）。
     const capturedCtrl: unknown[] = [];
-    const ctrlStore = new RecordStore(sessionsDir, undefined, v2CapturePi(capturedCtrl), recordsDir);
+    const ctrlStore = new RecordStore(() => sessionsDir, undefined, v2CapturePi(capturedCtrl), () => recordsDir);
     ctrlStore.recoverOrphanRecords(undefined, mainFile);
     expect(v2ReadEventLines(recordsDir, "sa-adopt-live").some((e) => e.type === "record-settled")).toBe(true);
   });
 
   it("空 journal / journal 未接线 / 坏链：skippedMissing / skippedNoIdentity 分类", async () => {
-    const store = new RecordStore(sessionsDir, undefined, undefined, recordsDir);
-    // 空 journal（从未写入 journal 记录）。
+    const store = new RecordStore(() => sessionsDir, undefined, undefined, () => recordsDir);
+    // 空 journal（从未落账）。
     expect(store.adoptInterruptedRecord("sa-never-existed")).toBe("skippedMissing");
 
     // 坏链：事件文件只有 bound 帧（created 帧损坏/缺失的残文件形态）。
@@ -544,7 +544,7 @@ describe("收编入口（W1 D4：journal 重放 + 收编幂等）", () => {
       `${JSON.stringify({ type: "record-journal", id: "sa-broken-chain" })}\n`,
       "utf8",
     );
-    const journal = createRecordEventStream(recordsDir);
+    const journal = createRecordEventStream(() => recordsDir);
     await journal.append("sa-broken-chain", {
       type: "record-bound",
       ts: Date.now(),
@@ -556,7 +556,7 @@ describe("收编入口（W1 D4：journal 重放 + 收编幂等）", () => {
     expect(store.adoptInterruptedRecord("sa-broken-chain")).toBe("skippedNoIdentity");
 
     // journal 未接线（纯内存形态）：恒 skippedMissing。
-    const memStore = new RecordStore(sessionsDir);
+    const memStore = new RecordStore(() => sessionsDir);
     expect(memStore.adoptInterruptedRecord("sa-any")).toBe("skippedMissing");
   });
 });

@@ -19,6 +19,9 @@
  * 隔离：configDir 全部 mkdtemp tmp（fs-guard 白名单）；trash port 注入式 mock（真实
  * 实现会 execSync 调系统废纸篓，测试禁触）；sid 每用例唯一（tombstone 模块级共享态）。
  *
+ * 布局反转（session-store-layout-inversion）：插件 KV 分区文件断言统一经
+ * getSessionPluginDataPath（与被测模块同源推导），锁定新布局 `<root>/<sid>/plugin-data.json`。
+ *
  * 运行：cd packages/runtime && npx vitest run src/services/plugin-service/__tests__/session-data-store-tombstone.test.ts
  */
 import { afterAll, afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
@@ -40,6 +43,7 @@ const mockTrashFile = async (filePath: string): Promise<void> => {
 }
 
 import { SessionDataStore, clearRemovedSessionData, clearSessionDataTombstone, isSessionDataCleared } from '../session-data-store.js'
+import { getSessionPluginDataPath } from '@taiji/shared/paths'
 
 let configDir: string
 let warnSpy: ReturnType<typeof vi.spyOn>
@@ -51,8 +55,9 @@ function newStore(): SessionDataStore {
   return s
 }
 
+/** 插件 KV 分区文件路径（session 存储树域 4，与 SessionDataStore 内部推导同源）。 */
 function dataFile(sid: string): string {
-  return join(configDir, 'session-data', `${sid}.json`)
+  return getSessionPluginDataPath(sid, configDir)
 }
 
 function readFileJson(p: string): Record<string, unknown> {

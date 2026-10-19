@@ -444,14 +444,14 @@ describe('submitFirstMessage（landing 态首发提交：延迟 create+载入+�
     expect(flow.state.value).toBe('completed')
   })
 
-  it('tmpdir 迁移成功：needsMigrate=true 的 image → migrateSessionImage 后 path 更新为 attachments/<sid>/', async () => {
+  it('tmpdir 迁移成功：needsMigrate=true 的 image → migrateSessionImage 后 path 更新为 ext-sessions/<sid>/attachments/ 树内域目录', async () => {
     setGroups([mkSession({ id: 'old', cwd: '/repo', lastActiveAt: 1 })])
     workspaceStoreMock.defaultCwd = '/repo'
     createCtrl.create.mockResolvedValue(mkSession({ id: 'mig-1', cwd: '/repo' }))
     const flow = useNewTaskFlow()
     await flow.startFlow()
 
-    migrateCtrl.migrateSessionImage.mockResolvedValue({ path: '/dataDir/attachments/mig-1/abc-image.png' })
+    migrateCtrl.migrateSessionImage.mockResolvedValue({ path: '/dataDir/ext-sessions/mig-1/attachments/abc-image.png' })
     const segments: Segment[] = [
       { type: 'text', text: '看这张图' },
       // M1：needsMigrate=true（landing 态 writeSessionImage 落 tmpdir 的图）。迁移判断用此字段，不猜路径。
@@ -472,7 +472,7 @@ describe('submitFirstMessage（landing 态首发提交：延迟 create+载入+�
     expect(sentSegments[0]).toEqual({ type: 'text', text: '看这张图' })
     expect(sentSegments[1]).toMatchObject({
       type: 'image',
-      path: '/dataDir/attachments/mig-1/abc-image.png',
+      path: '/dataDir/ext-sessions/mig-1/attachments/abc-image.png',
       fileName: 'abc-image.png',
       displayName: '照片.png',
     })
@@ -488,7 +488,7 @@ describe('submitFirstMessage（landing 态首发提交：延迟 create+载入+�
     // 第一张迁移 reject（OS 已清理 tmpdir），第二张成功
     migrateCtrl.migrateSessionImage
       .mockRejectedValueOnce(new Error('ENOENT: no such file'))
-      .mockResolvedValueOnce({ path: '/dataDir/attachments/mig-fail/img2.png' })
+      .mockResolvedValueOnce({ path: '/dataDir/ext-sessions/mig-fail/attachments/img2.png' })
 
     const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {})
     const segments: Segment[] = [
@@ -504,7 +504,7 @@ describe('submitFirstMessage（landing 态首发提交：延迟 create+载入+�
     // 第一张保留原 tmpdir path（迁移失败），第二张更新为新 path
     const sentSegments = chatMock.send.mock.calls[0][1] as Segment[]
     expect(sentSegments[0]).toMatchObject({ type: 'image', path: '/tmp/img1.png' })
-    expect(sentSegments[1]).toMatchObject({ type: 'image', path: '/dataDir/attachments/mig-fail/img2.png' })
+    expect(sentSegments[1]).toMatchObject({ type: 'image', path: '/dataDir/ext-sessions/mig-fail/attachments/img2.png' })
     // 失败项 console.warn（allSettled 硬规则不阻断）。
     // w5（C-W5-2）：创建分支的迁移下沉 core createSessionFlow，warn 前缀从 [useNewTaskFlow] 改 [createSessionFlow]。
     expect(warnSpy).toHaveBeenCalledWith(
@@ -524,7 +524,7 @@ describe('submitFirstMessage（landing 态首发提交：延迟 create+载入+�
     const segments: Segment[] = [
       { type: 'text', text: '历史图' },
       // M1：needsMigrate 不设（等同 false）。path 在 attachments 目录（normal 态 writeSessionImage 落地）
-      { type: 'image', id: 'i1', path: '/dataDir/attachments/other-sess/x.png', fileName: 'x.png', displayName: 'x.png' },
+      { type: 'image', id: 'i1', path: '/dataDir/ext-sessions/other-sess/attachments/x.png', fileName: 'x.png', displayName: 'x.png' },
     ]
     await flow.submitFirstMessage(segments)
 

@@ -129,7 +129,7 @@ describe('createLine 默认 fork 装配链（resolvePiCommand → forkViaCliPi �
       const src = join(fx, 'src.jsonl')
       writeFileSync(src, '{"type":"session","id":"main"}\n{"type":"message","id":"e1"}\n')
       h.deps.resolveMainSessionFile = vi.fn(() => src)
-      const threadDir = getBtwThreadDir(cwd, MAIN_SID)
+      const threadDir = getBtwThreadDir(MAIN_SID)
       const forkFile = join(threadDir, '2026T_cli.jsonl')
       // fake pi：双旗标启动后往线目录写带 header 的 fork 文件（id=cli），随后保活待收
       const chainBody = `

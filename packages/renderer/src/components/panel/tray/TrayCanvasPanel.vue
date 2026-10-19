@@ -1,12 +1,13 @@
 <!--
-  TrayCanvasPanel —— composer 任务托盘第 5 件「画布」面板（problem-solve-canvas §3.1(3) u-tray-entry）。
+  TrayCanvasPanel —— composer 任务托盘第 5 件「画布」面板（problem-solve-canvas §3.1(3) u-tray-entry；
+  session-store-layout-inversion D4 会话隔离化）。
 
   ── 数据面（native 直连，零新协议）──
   inject TRAY_COUNTS_KEY（外壳单例）：本面板**不自建 useTrayCounts 实例**（面板随 Popover
   开合反复挂载，自建即每次打开重发首拉）；画布清单来自 `tray.lists.canvas.entries`
-  （canvas.list 投影；订阅/首拉/`canvas.updated` 失效重拉在 use-canvas-sync 订阅链内收敛，
-  外壳挂载即活）。画布是跨 session 共享资源（设计 D4/D7）：清单无 session 过滤（全量）、
-  面板 props 无 sessionId（数据与焦点会话无关）。
+  （canvas.list 按归属会话过滤后的投影；订阅/首拉/`canvas.updated` 失效重拉在
+  use-canvas-sync 订阅链内收敛，外壳挂载即活）。清单 = 本会话画布（D4 隔离）：
+  props.sessionId 既是清单的归属上下文，也是新建画布的 owner 写面与行打开的载荷归属。
 
   ── 形态 ──
   扁平列表：每行 = 名称 + 阶段徽标 + must-fix 计数，行点击 = `openCanvasTab(canvasId)`
@@ -77,7 +78,7 @@
       </div>
     </ScrollArea>
 
-    <!-- 空态（画布件按钮恒渲染，零画布时可到达：提示 + 引导新建） -->
+    <!-- 空态（D4 隔离后零画布时外壳按钮已隐藏，本态为防御性保留：清单竞态清空时面板仍渲染不破版） -->
     <div
       v-else
       data-testid="tray-canvas-empty"
@@ -88,7 +89,7 @@
       </p>
     </div>
 
-    <!-- 「＋ 新建画布」：创建入口唯一落点（外壳对 canvas 件豁免「全无不渲染」过滤的根因） -->
+    <!-- 「＋ 新建画布」：创建入口（owner = props.sessionId；外壳三态过滤后按钮随首张画布出现） -->
     <div class="shrink-0 border-t border-hairline px-1.5 pb-1 pt-1">
       <Button
         type="button"
@@ -193,7 +194,9 @@ import { openCanvasTab } from '@/components/panel/workflow-viz/overlay/workflow-
 import { phaseOfFacts, type CanvasPhase } from '@/components/canvas/canvas-display'
 import type { CanvasListEntry } from '@zhushanwen/extension-protocol'
 
-withDefaults(defineProps<{
+const props = withDefaults(defineProps<{
+  /** 焦点 session id（D4 会话隔离：清单按归属过滤的数据上下文 + 新建画布 owner + 行打开载荷归属） */
+  sessionId: string
   /** pin 态（外壳统一透传：行内操作仅 pin 态渲染，D8 防误触——托盘段内面板的共同契约；
    * 画布无行内破坏性操作，唯一动作是打开 overlay，故本面板不消费该值） */
   pinned?: boolean
@@ -242,10 +245,11 @@ function phaseText(entry: CanvasListEntry): string {
   return t(`panel.tray.canvas.phase.${PHASE_TEXT_KEY[phaseOf(entry)]}`)
 }
 
-// ── 行动作：打开画布（renderer 直达入口，core openCanvasOverlay + tab 归位，见文件头）──
+// ── 行动作：打开画布（renderer 直达入口，core openCanvasOverlay + tab 归位，见文件头；
+//    载荷带归属 sessionId——overlay 会话删除级联 + CanvasPane per-session 分区的键）──
 
 function openCanvas(entry: CanvasListEntry): void {
-  openCanvasTab(entry.canvasId)
+  openCanvasTab(entry.canvasId, props.sessionId)
 }
 
 // ── 三要素 modal（新建画布）──
@@ -302,9 +306,10 @@ function onCreateOpenChange(open: boolean): void {
 }
 
 /**
- * 提交：缺一拒绝（modal 内就近呈现，不发 mutate）；通过 = mutate(create, actor=user)。
- * 成功只关 modal——CanvasCreated 广播驱动自动唤起（use-canvas-sync 承接）+ 清单刷新；
- * 失败 toast 结构化错误（message + recover 恢复指引），modal 保持可改。
+ * 提交：缺一拒绝（modal 内就近呈现，不发 mutate）；通过 = mutate(create, actor=user)，
+ * payload.sessionId 必填（D4 破坏性协议：归属写面——新画布 owner = 当前焦点会话）。
+ * 成功只关 modal——CanvasCreated 广播驱动自动唤起（use-canvas-sync 承接，仅归属会话
+ * 唤起）+ 清单刷新；失败 toast 结构化错误（message + recover 恢复指引），modal 保持可改。
  */
 async function onSubmitCreate(): Promise<void> {
   if (creating.value) return
@@ -313,6 +318,7 @@ async function onSubmitCreate(): Promise<void> {
   try {
     const reply = await command('canvas.mutate', {
       actor: 'user',
+      sessionId: props.sessionId,
       action: 'create',
       params: {
         statement: formStatement.value.trim(),

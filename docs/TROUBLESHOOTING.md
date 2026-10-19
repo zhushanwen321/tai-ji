@@ -1,6 +1,6 @@
 # taiji 问题排查
 
-Runtime 日志落盘到 `<数据目录>/logs/`（`runtime-YYYY-MM-DD.log`，按天轮转 + 大小滚动），pi 子进程 stdout 的 JSONL 事件流独立落盘为 `pi-<date>-<sessionId>.jsonl`（pi 卡死类问题的决定性证据）。console 输出同步 tee 到终端。以下是各层的日志获取方式。
+Runtime 日志落盘到 `<数据目录>/logs/`（`runtime-YYYY-MM-DD.log`，按天轮转 + 大小滚动），pi 子进程 stdout 的 JSONL 事件流独立落盘为会话树内 `ext-sessions/<sessionId>/logs/pi-<date>.jsonl`（pi 卡死类问题的决定性证据；文件名不带 sessionId——sessionId 在目录路径。无归属日志 relay `pi-relay-<date>-<recordId>.jsonl` 等仍留 `<数据目录>/logs/`）。console 输出同步 tee 到终端。以下是各层的日志获取方式。
 
 ## 日志获取
 
@@ -8,12 +8,45 @@ Runtime 日志落盘到 `<数据目录>/logs/`（`runtime-YYYY-MM-DD.log`，按�
 |------|---------|---------|
 | **Electron 主进程** | 终端直接看 | 终端启动 `/Applications/TaiJi.app/Contents/MacOS/TaiJi` 或 `log show --process TaiJi` |
 | **Runtime** | 终端 `[runtime:out]` / `[runtime:err]` 前缀 + `~/.taiji-dev/logs/runtime-*.log` | 同主进程转发 + `~/.taiji/logs/runtime-*.log` |
-| **pi 子进程** | 终端 pi 自身输出 + `~/.taiji-dev/logs/pi-<date>-<sessionId>.jsonl` | `~/.taiji/logs/pi-<date>-<sessionId>.jsonl` + pi 日志目录 `~/.taiji/agent/logs/` |
+| **pi 子进程** | 终端 pi 自身输出 + `~/.taiji-dev/ext-sessions/<sessionId>/logs/pi-<date>.jsonl` | `~/.taiji/ext-sessions/<sessionId>/logs/pi-<date>.jsonl` + pi 日志目录 `~/.taiji/agent/logs/` |
 | **Renderer console** | `~/.taiji-dev/logs/renderer-console-<date>.log`（renderer 进程 warn/error 泛捕流，main 侧 console-message 监听落盘） | `~/.taiji/logs/renderer-console-<date>.log`（同左） |
 | **升级子系统** | `~/.taiji-dev/update/update-error.log`（JSONL 512KB×2 轮转；失败登记含 errorCode/rawCause/engine/releaseSource，成功登记 source-selection/source-failover/download-success） | `~/.taiji/update/update-error.log`（同左） |
 | **前端 DevTools** | Cmd+Option+I 打开 | 同左 |
 
 **打包模式启动应用获取完整日志**：终端启动 `/Applications/TaiJi.app/Contents/MacOS/TaiJi`（推荐，直接看到所有 console 输出）；或 `log stream --predicate 'process == "TaiJi"' --level debug`；或 Console.app 搜索 TaiJi。
+
+## 旧布局会话数据手工清扫
+
+session 维度衍生数据的现行落点是 session 存储树 `<数据目录>/ext-sessions/<sessionId>/<域>/`，删除会话时整树进废纸篓（mac 可在访达废纸篓恢复整树）。**存储树反转前创建的会话**，其衍生数据仍留在旧布局目录原位、应用不再读写；删除这类旧会话时只回收新树半边，旧布局部分成为磁盘残留——这是显式取舍（不做迁移、不做自动清理），需要回收时按下表手工定位删除。
+
+**例外：会话日志域不做静置**——旧布局会话日志（`pi-*.jsonl(.N.gz)` / `pi-crash-*.log` / `signal-forensics-*.jsonl`）仍由全局日志保留期清理（默认 7 天，`readLogKeepDays`）按 `pi-` / `signal-forensics-` 文件名前缀继续覆盖，超龄自动删除：按本表定位旧日志大概率扑空属正常（已超龄被清），一般无需手工清扫。
+
+sessionId 的取法：侧栏会话列表 / `<数据目录>/agent/sessions/<encodeCwd>/<ts>_<sessionId>.jsonl` 文件名的末段。
+
+**一般域**（目录名或文件名直接含 sessionId，按「旧布局路径 × sessionId」匹配）：
+
+| 域 | 旧布局路径 | 定位方式 |
+|---|---|---|
+| 图片附件 | `<数据目录>/attachments/<sessionId>/` | 目录名即 sessionId |
+| 会话产物 | `<数据目录>/artifacts/<sessionId>/` | 目录名即 sessionId |
+| 图片缓存 | `<数据目录>/cache/images/<sessionId>/` | 目录名即 sessionId |
+| 插件 KV | `<数据目录>/session-data/<sessionId>.json` | 文件名即 sessionId |
+| 后台任务登记 | `<数据目录>/agent/base-tool-enhance/<sessionId>/` | 目录名即 sessionId |
+| 会话导出 | `<数据目录>/agent/tmp/session-view-<sessionId>.md` | 文件名即 sessionId |
+| btw 线会话 | `<数据目录>/agent/btw/<encodeCwd>/<mainSid>/` | 两层分区，第二层目录名 = 主会话 sessionId |
+| 会话日志 | `<数据目录>/logs/pi-<date>-<sessionId>.jsonl`（含 `.N.gz` 轮转）、`pi-crash-<date>-<sessionId>.log`、`signal-forensics-<date>-<sessionId>.jsonl` | 文件名内嵌 sessionId（`pi-relay-<date>-<recordId>.jsonl` 无 sessionId，不按本表匹配）。**本域不静置**：保留期清理（默认 7 天）按前缀继续覆盖，超龄已自动删，一般无需手工清扫 |
+| 画布 | `<数据目录>/canvases/<canvasId>/` | 旧布局无 sessionId 关联（按画布 id 分区）——只能逐目录核对内容，或整目录清理 |
+
+**例外两域**（旧布局按 encodeCwd / cwd-slug 分区、文件按 recordId / runId 命名，sessionId 只存在于记录内容字段 `rootSessionId` 内，不能按目录名匹配，须按记录字段过滤定位）：
+
+| 域 | 旧布局路径 | 定位方式 |
+|---|---|---|
+| subagent 记录 | `<数据目录>/agent/subagents/<encodeCwd>/{sessions,records,model-switch}/` | 读 `records/` 下每条 `<recordId>.json` 的 `rootSessionId` 字段，命中目标 sessionId 的记录连同同 enc 段下对应 `sessions/` 文件一起删 |
+| workflow 运行状态 | `<数据目录>/agent/sessions/<cwd-slug>/workflow-state/<runId>.record.jsonl` | 读每条 journal 首行 run 创建记录的 `rootSessionId` 字段，命中目标 sessionId 的 run 整文件删 |
+
+> encodeCwd / cwd-slug = 工作目录路径编码成的目录名（例：`/home/user/proj` → `--home-user-proj--`）。
+
+**不在清扫范围**：pi 会话 jsonl 本体 `<数据目录>/agent/sessions/<encodeCwd>/<ts>_<sessionId>.jsonl` 及其 sidecar——它是会话本体而非衍生数据，删除它等于删除会话本身（走应用内删除，删除时主文件进废纸篓）。
 
 ## 关键诊断路径
 
@@ -251,7 +284,8 @@ grep "stripped unmarked provider-level keys" ~/.taiji/logs/runtime-*.log   # dev
 
 ```bash
 ls -la ~/.taiji-dev/instances/<worktree>/agent/sessions/   # session 数据落点（per-worktree）
-ls -la ~/.taiji-dev/instances/<worktree>/logs/             # runtime-*.log / pi-<date>-<sessionId>.jsonl 落点
+ls -la ~/.taiji-dev/instances/<worktree>/logs/             # runtime-*.log 等全局日志落点
+ls -la ~/.taiji-dev/instances/<worktree>/ext-sessions/<sessionId>/logs/   # pi-<date>.jsonl 会话日志落点（树内）
 ```
 
 首启缺配置（provider / secrets / 默认模型）时装配器自动从只读模板 `~/.taiji-dev.template/` 按 `TEMPLATE_TOP_FILES` / `TEMPLATE_TOP_DIRS` 白名单复制进实例目录（白名单定义见 `apps/electron/scripts/dev-instance-lib.mjs`，`node apps/electron/scripts/dev-instance.mjs init-template --seed-from <源>` 生成模板；模板只读，勿直改）。

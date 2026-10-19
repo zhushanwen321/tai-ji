@@ -23,6 +23,7 @@ import type { ModelInfo, ModelRegistryLike } from "../assembly/model-resolver.ts
 import { createRecord } from "../persistence/execution-record.ts";
 import type { RecordStore } from "../persistence/record-store.ts";
 import { SubagentService } from "../subagent-service.ts";
+import { makePi } from "./helpers/pi-mock.ts";
 import {
   _resetCoreSpawnedChildrenMirrorForTest,
   registerSpawnedChildForRecord,
@@ -68,15 +69,22 @@ describe("SubagentService.setModel 壳接线（§7.2 目标 5）", () => {
 
   beforeEach(() => {
     dir = mkdtempSync(join(tmpdir(), "shell-model-switch-"));
+    // [session-store-layout-inversion] 生产 store 目录经
+    // getSubagentSessionDir(resolveStoreRootSessionId())（env dataDir 兜底）解析——
+    // stubEnv 把写删目标收进本 mkdtemp 目录（自建自删红线）。
+    process.env["TAIJI_AGENT_DATA_DIR"] = dir;
     const modelService = new ModelConfigService({ agentDir: join(dir, "agent"), cwd: dir });
     modelService.initModel({ modelRegistry: makeRegistry([makeModel()]), sessionId: "sess-1" });
     service = new SubagentService({ cwd: join(dir, "agent"), modelService });
+    // register/markSettled 的 store 目录解析须有分区键（sid = modelService 同一 sessionId）
+    service.initSession({ pi: makePi(), sessionId: "sess-1" });
     store = Reflect.get(service, "store") as RecordStore;
   });
 
   afterEach(() => {
     _resetCoreSpawnedChildrenMirrorForTest();
     service.dispose();
+    delete process.env["TAIJI_AGENT_DATA_DIR"];
     rmSync(dir, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 });
   });
 

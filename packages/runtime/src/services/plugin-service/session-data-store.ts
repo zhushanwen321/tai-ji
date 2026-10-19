@@ -10,7 +10,7 @@
  * size 口径统一为 Buffer.byteLength（修复原 JSON.stringify().length 的 UTF-16 偏差）。
  */
 
-import { dirname, isAbsolute, join, relative, resolve } from 'node:path'
+import { dirname } from 'node:path'
 import { readdirSync, existsSync, readFileSync, mkdirSync } from 'node:fs'
 import { atomicWrite } from '../../utils/fs-utils.js'
 import { quarantineCorruptFile, WriteBackCache } from '../../utils/json-store.js'
@@ -19,14 +19,17 @@ import { PluginRpcErrorCodes } from './plugin-types.js'
 // B5 port 化（C-comm-03）：services 层不得 value import infra/system/trash——经 ITrash
 // port 类型注入，实现（infra trash 函数）由组合根 index.ts 装配（见构造参数 trashFile）。
 import type { ITrash } from '../ports/trash.js'
+// 插件 KV 落点 = session 存储树域 4（`<root>/<sid>/plugin-data.json`，session-store-layout-
+// inversion）：路径推导 SSOT 在 shared（isPiSessionId 同域校验内置）；树内遍历（预载枚举）
+// 的 sid 形态过滤用 runtime pi-paths 的同名校验（pi 宿主侧权威源）。
+import { getSessionPluginDataPath, getSessionStoreDir } from '@taiji/shared/paths'
+import { isPiSessionId } from '../../infra/pi/pi-paths.js'
 
 // eslint-disable-next-line no-magic-numbers
 const MB = 1024 * 1024
 // eslint-disable-next-line no-magic-numbers
 const DEFAULT_MAX_SESSION_DATA_BYTES = 10 * MB
 const FLUSH_DEBOUNCE_MS = 500
-/** H1: session-data 持久化子目录名（configDir 下）。提常量消除 4 处魔法串重复。 */
-const SESSION_DATA_DIRNAME = 'session-data'
 /** [SEC-A5] 防御拒绝 message 中 sessionId 的回显截断长度（防超长输入撑爆日志） */
 const SESSION_ID_PREVIEW_CHARS = 64
 
@@ -89,13 +92,14 @@ export function clearRemovedSessionData(sessionId: string): void {
 export class SessionDataStore {
   /** write-back 缓存：分区键 = sessionId，内键 = key，值 = unknown */
   private readonly cache: WriteBackCache<string, string, unknown>
-  /** 配置根目录（session-data 持久化用），由组合根注入，不再直连 infra。 */
+  /** 数据根目录（session 存储树基座，插件 KV 分区文件落其 ext-sessions/<sid>/ 下），由组合根注入，不再直连 infra。 */
   private readonly configDir: string
   /** B5 软删除 port（结构匹配 infra/system/trash 的 trash 函数；组合根注入）。 */
   private readonly trashFile: ITrash['trashFile'] | undefined
 
   /**
-   * @param configDir taiji 配置根（~/.taiji/），session-data 持久化目录的父。
+   * @param configDir taiji 数据根目录（~/.taiji/），session 存储树（`<dataDir>/ext-sessions/`）
+   *   的基座——插件 KV 分区文件落 `<configDir>/ext-sessions/<sid>/plugin-data.json`（域 4）。
    * @param maxSizeBytes 单 session 最大字节数，默认 10MB。
    * @param storageFullCode 容量超限时抛出错误的 code（由调用方注入，避免叶子层硬编码 RPC 码）。
    * @param trashFile B5 软删除 port（ITrash.trashFile）：磁盘删除走 mac 废纸篓语义，
@@ -183,19 +187,22 @@ export class SessionDataStore {
     this.cache.flush(sessionId)
   }
 
-  /** 从磁盘恢复所有 sessionData（initialize 时调用） */
+  /** 从磁盘恢复所有 sessionData（initialize 时调用）。
+   *
+   * 布局反转后预载源 = session 存储树（`<root>/<sid>/plugin-data.json`，域 4）：枚举
+   * `<root>/` 一级目录，非合法 sessionId 形态一律跳过（D7 树内遍历规约）；旧布局
+   * `<configDir>/session-data/` 不再读（D6 存量保留不迁移，读侧换根天然不读旧位置）。
+   */
   restoreFromDisk(): void {
     try {
-      const sessionDataDir = join(this.configDir, SESSION_DATA_DIRNAME)
-      if (!existsSync(sessionDataDir)) return
-      const files = readdirSync(sessionDataDir)
-      for (const file of files) {
-        if (file.endsWith('.json')) {
-          const sessionId = file.replace('.json', '')
-          // 触发 WriteBackCache lazy load（loadPartition 会读盘）
-          const data = this.cache.keys(sessionId)
-          if (data.length === 0) continue
-        }
+      const storeDir = getSessionStoreDir(this.configDir)
+      if (!existsSync(storeDir)) return
+      for (const name of readdirSync(storeDir)) {
+        if (!isPiSessionId(name)) continue // D7 树内遍历规约：非 sid 形态目录不属任何会话分区
+        if (!existsSync(getSessionPluginDataPath(name, this.configDir))) continue
+        // 触发 WriteBackCache lazy load（loadPartition 会读盘）
+        const data = this.cache.keys(name)
+        if (data.length === 0) continue
       }
     // eslint-disable-next-line taste/no-silent-catch -- sessionData restore: directory may not exist initially
     } catch {
@@ -254,26 +261,27 @@ export class SessionDataStore {
   // ── Private（WriteBackCache backing 回调） ──────────────────
 
   /**
-   * [SEC-A5 深度防御] 解析 sessionId 对应的持久化文件绝对路径，并确保结果
-   * 仍落在 session-data 目录内。入口层（session-data-api 的 asSafeKey 白名单）
-   * 已拒绝非法标识符，这里用 path.resolve/relative 兜底拦「上游漏网」的
-   * `..` 遍历与跨盘绝对路径，保证任何调用路径都无法把读/写/删引到数据
-   * 目录之外。合法输入（白名单内的 sessionId）行为与 resolve 前完全一致。
+   * [SEC-A5 深度防御] 解析 sessionId 对应的持久化文件绝对路径（session 存储树域 4：
+   * `<root>/<sid>/plugin-data.json`，session-store-layout-inversion 换根），并保证结果
+   * 结构性落在该 sid 分区内。入口层（session-data-api 的 asSafeKey 白名单）已拒绝非法
+   * 标识符，这里两道防线拦「上游漏网」：① sessionId 过 isPiSessionId 同域校验（首尾
+   * 字母数字、中间 `[A-Za-z0-9._-]`、禁路径分隔符与 `:`——含 `..` 遍历与跨盘绝对路径
+   * 形态，抛 INVALID_SESSION_ID 维持既有错误码契约）；② getSessionPluginDataPath 内部
+   * assertPiSessionId（shared 同域正则）二次校验后才 join，推导结果不可能逃逸
+   * `<root>/<sessionId>/` 分区。合法输入（真实 pi sessionId，uuid 形态）行为与换根前
+   * 完全一致。
    */
   private resolveSessionFilePath(sessionId: string): string {
-    const dir = resolve(this.configDir, SESSION_DATA_DIRNAME)
-    const filePath = resolve(dir, `${sessionId}.json`)
-    const rel = relative(dir, filePath)
-    if (rel === '' || rel.startsWith('..') || isAbsolute(rel)) {
+    if (!isPiSessionId(sessionId)) {
       throw errorWithCode(
-        `Invalid sessionId ${JSON.stringify(sessionId.slice(0, SESSION_ID_PREVIEW_CHARS))}: resolved path escapes `
-        + `the session-data directory (${dir}). sessionId must match /^[A-Za-z0-9._-]{1,128}$/ `
-        + `(no path separators or '..'). This defense-in-depth rejection means the RPC entry `
-        + `layer validation was bypassed — report it as a bug if reached via plugin RPC.`,
+        `Invalid sessionId ${JSON.stringify(sessionId.slice(0, SESSION_ID_PREVIEW_CHARS))}: must match the pi session id domain `
+        + `(leading/trailing alphanumeric, inner [A-Za-z0-9._-], no path separators / ':' / '..'). `
+        + `This defense-in-depth rejection means the RPC entry layer validation was bypassed — `
+        + `report it as a bug if reached via plugin RPC.`,
         'INVALID_SESSION_ID',
       )
     }
-    return filePath
+    return getSessionPluginDataPath(sessionId, this.configDir)
   }
 
   private loadPartitionSync(sessionId: string): Map<string, unknown> {

@@ -33,7 +33,7 @@ describe("RecordStore per-file cache + light scan [perf]", () => {
     rootDir = fs.mkdtempSync(path.join(os.tmpdir(), "subagents-cache-"));
     sessionsDir = path.join(rootDir, "sessions");
     fs.mkdirSync(sessionsDir);
-    store = new RecordStore(sessionsDir);
+    store = new RecordStore(() => sessionsDir);
   });
 
   afterEach(() => {

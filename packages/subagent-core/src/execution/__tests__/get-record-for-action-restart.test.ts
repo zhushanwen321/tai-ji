@@ -129,8 +129,12 @@ describe("[M10] getRecordForAction 跨重启磁盘重建（S3 回归场景）", 
   beforeEach(() => {
     for (const k of IDENTITY_ENV_KEYS) delete process.env[k];
     agentDir = fs.mkdtempSync(path.join(os.tmpdir(), "restart-recon-"));
-    sessionsDir = getSubagentSessionDir(agentDir, agentDir);
-    recordsDir = getSubagentRecordsDir(agentDir, agentDir);
+    // [session-store-layout-inversion] 生产 store 目录经
+    // getSubagentSessionDir(resolveStoreRootSessionId())（env dataDir 兜底）解析——
+    // stubEnv 把写删目标收进本 mkdtemp 目录（自建自删红线）。
+    vi.stubEnv("TAIJI_AGENT_DATA_DIR", agentDir);
+    sessionsDir = getSubagentSessionDir("root-session", agentDir);
+    recordsDir = getSubagentRecordsDir("root-session", agentDir);
     fs.mkdirSync(sessionsDir, { recursive: true });
 
     const modelService = new ModelConfigService({ agentDir, cwd: agentDir });
@@ -145,6 +149,7 @@ describe("[M10] getRecordForAction 跨重启磁盘重建（S3 回归场景）", 
     // maxRetries：collectRecords 触发的 fire-and-forget sessions-index 写可能与删除
     // 并发（ENOTEMPTY 竞态，全量并行跑时机器负载高会放大窗口）
     fs.rmSync(agentDir, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 });
+    vi.unstubAllEnvs();
     for (const k of IDENTITY_ENV_KEYS) delete process.env[k];
   });
 

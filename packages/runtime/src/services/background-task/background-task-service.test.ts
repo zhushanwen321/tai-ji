@@ -32,7 +32,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, renameSync, rmSync, utimesSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
-import { join } from 'node:path'
+import { dirname, join } from 'node:path'
 
 import type { BackgroundTaskRegistryEntry } from '@zhushanwen/extension-protocol'
 import { BackgroundTaskService, type BackgroundTaskServiceDeps } from './background-task-service.js'
@@ -104,15 +104,18 @@ function makeEntry(overrides: Partial<BackgroundTaskRegistryEntry> = {}): Backgr
   }
 }
 
+let dataDir: string
 let agentDir: string
 
+// [session-store-layout-inversion 域 5] registry 布局 = <dataDir>/ext-sessions/<sid>/
+// background-tasks/registry.json；agentDir（pi agentDir，service 注入基址）= <dataDir>/agent。
 function registryPath(): string {
-  return join(agentDir, 'base-tool-enhance', SID, 'registry.json')
+  return join(dataDir, 'ext-sessions', SID, 'background-tasks', 'registry.json')
 }
 
 /** 按契约形状写 registry（JSON indent 2 + 尾部换行；tmp 自建自删）。 */
 function writeRegistry(entries: BackgroundTaskRegistryEntry[]): void {
-  mkdirSync(join(agentDir, 'base-tool-enhance', SID), { recursive: true })
+  mkdirSync(dirname(registryPath()), { recursive: true })
   writeFileSync(registryPath(), `${JSON.stringify({ version: 1, entries }, null, 2)}\n`, 'utf8')
 }
 
@@ -147,7 +150,8 @@ function failTmpWrites(): void {
 }
 
 beforeEach(() => {
-  agentDir = mkdtempSync(join(tmpdir(), 'bg-task-svc-'))
+  dataDir = mkdtempSync(join(tmpdir(), 'bg-task-svc-'))
+  agentDir = join(dataDir, 'agent')
   delegateFsToReal()
   delegateFileLockToReal()
 })
@@ -156,7 +160,7 @@ afterEach(() => {
   delegateFsToReal()
   delegateFileLockToReal()
   vi.useRealTimers()
-  rmSync(agentDir, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 })
+  rmSync(dataDir, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 })
   vi.restoreAllMocks()
   // vitest 4 的 restoreAllMocks 只恢复 vi.spyOn，模块级 vi.fn() 的调用历史须显式清，
   // 否则调用次数断言跨用例累计（⑤c 曾因此把累计 10 次误当本次调用）
@@ -168,7 +172,7 @@ afterEach(() => {
 
 describe('P1: registry 并发写×读 1000 次 parse 成功率 100%', () => {
   it('循环 rename 新文件的写者与无锁读者交错，零 corrupted', async () => {
-    mkdirSync(join(agentDir, 'base-tool-enhance', SID), { recursive: true })
+    mkdirSync(dirname(registryPath()), { recursive: true })
     writeFileSync(registryPath(), `${JSON.stringify({ version: 1, entries: [makeEntry({ taskId: 'bt-init' })] }, null, 2)}\n`, 'utf8')
     let writes = 0
     const writer = setInterval(() => {
@@ -272,7 +276,7 @@ describe('D2/D8: 变更检测共享 last-seen 单广播源 + watched 生命周�
 
 describe('D1: registry 损坏 corrupt 语义', () => {
   it('解析失败 → 空表 + corrupted 标记 + .corrupt 隔离，不 throw', () => {
-    mkdirSync(join(agentDir, 'base-tool-enhance', SID), { recursive: true })
+    mkdirSync(dirname(registryPath()), { recursive: true })
     writeFileSync(registryPath(), '{ this is not json', 'utf8')
     const service = makeService(makeDeps())
     const result = service.listTasks(SID)
@@ -283,7 +287,7 @@ describe('D1: registry 损坏 corrupt 语义', () => {
   })
 
   it('kill 在损坏空表上拒绝为 already-exited，不 throw', async () => {
-    mkdirSync(join(agentDir, 'base-tool-enhance', SID), { recursive: true })
+    mkdirSync(dirname(registryPath()), { recursive: true })
     writeFileSync(registryPath(), 'broken', 'utf8')
     const deps = makeDeps()
     const service = makeService(deps)
@@ -565,7 +569,7 @@ describe('D6: 身份验证两档', () => {
 
 describe('D7: getOutputTail', () => {
   it('按条目 outputFile 读尾部；条目/文件缺失 → undefined（lost 语义）', () => {
-    const logPath = join(agentDir, 'bt.log')
+    const logPath = join(dataDir, 'bt.log')
     writeFileSync(logPath, 'hello tail', 'utf8')
     writeRegistry([makeEntry({ outputFile: logPath })])
     const service = makeService(makeDeps())

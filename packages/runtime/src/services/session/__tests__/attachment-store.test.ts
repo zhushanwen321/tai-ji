@@ -20,7 +20,7 @@ import { tmpdir } from 'node:os'
 import { fileURLToPath } from 'node:url'
 import { join, relative } from 'node:path'
 import { AttachmentStore } from '../attachment-store.js'
-import { getAttachmentsDir } from '@taiji/shared/paths'
+import { getAttachmentsDir, SESSION_STORE_DIR_SEGMENT } from '@taiji/shared/paths'
 import { IMAGE_LIMITS } from '@taiji/shared'
 import type { SegmentsMetadataEntry, SegmentsMetadataFile } from '@taiji/shared'
 
@@ -68,7 +68,27 @@ function makeTmpFile(bytes: Buffer, label: string): string {
 }
 
 describe('AttachmentStore · writeImage', () => {
-  it('panel 态（sessionId 非空）→ 写 attachments/<sessionId>/ 返回 persisted:true，内容 round-trip', async () => {
+  it('新布局落点（session-store-layout-inversion）：持久化图落 session 存储树 <dataDir>/ext-sessions/<sid>/attachments/（sid 分区在前、域目录在后），旧布局 <dataDir>/attachments/ 不再产生写入', async () => {
+    const bytes = Buffer.from([0x89, 0x50, 0x4e, 0x47])
+    const result = await store.writeImage('att-store-layout-1', bytes.toString('base64'), 'image/png', 'shot.png')
+    writtenPaths.push(result.path)
+    const dataDir = process.env.TAIJI_AGENT_DATA_DIR ?? ''
+    expect(dataDir).not.toBe('')
+    // 新树形态三段齐全：存储树根段 / sessionId 分区 / attachments 域目录（顺序锁定）
+    const rootSegment = SESSION_STORE_DIR_SEGMENT
+    const pathSegs = result.path.split('/')
+    const rootIdx = pathSegs.indexOf(rootSegment)
+    expect(rootIdx).toBeGreaterThan(-1)
+    expect(pathSegs[rootIdx + 1]).toBe('att-store-layout-1')
+    expect(pathSegs[rootIdx + 2]).toBe('attachments')
+    expect(result.path.startsWith(join(dataDir, rootSegment, 'att-store-layout-1', 'attachments'))).toBe(true)
+    // 内容 round-trip（写读一致）
+    expect(Array.from(readFileSync(result.path))).toEqual(Array.from(bytes))
+    // 旧布局位置无写入
+    expect(existsSync(join(dataDir, 'attachments', 'att-store-layout-1'))).toBe(false)
+  })
+
+  it('panel 态（sessionId 非空）→ 写 <sid>/attachments/ 域目录（session 存储树域 1）返回 persisted:true，内容 round-trip', async () => {
     const bytes = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a])
     const result = await store.writeImage('att-store-panel-1', bytes.toString('base64'), 'image/png', 'shot.png')
     writtenPaths.push(result.path)

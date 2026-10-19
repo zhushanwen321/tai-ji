@@ -13,13 +13,12 @@
  */
 
 import type { AgentToolResult, ExtensionContext, Theme } from "@earendil-works/pi-coding-agent";
-import { getAgentDir } from "@earendil-works/pi-coding-agent";
 import { readOutputTail } from "@zhushanwen/extension-protocol/background-task";
 import { Type } from "typebox";
 
 import { truncateCommand } from "./background/command-display.ts";
 import { TAIL_MAX_BYTES, TAIL_MAX_LINES } from "./background/output-tail.ts";
-import { getRegistryPath, readRegistry } from "./background/registry.ts";
+import { getRegistryPath, readRegistry, resolveTaijiDataDir } from "./background/registry.ts";
 import { getAllTasks } from "./background/task-store.ts";
 import { isTerminalState, type BackgroundTask, type RegistryEntry } from "./background/types.ts";
 import { buildBashOutputSummary, renderBashToolResult } from "./render-result.ts";
@@ -128,7 +127,7 @@ export function createBashOutputToolDefinition() {
 			ctx: ExtensionContext,
 		): Promise<AgentToolResult<unknown>> {
 			const sessionId = ctx.sessionManager.getSessionId();
-			const registry = readRegistry(getRegistryPath(getAgentDir(), sessionId));
+			const registry = readRegistry(getRegistryPath(resolveTaijiDataDir(), sessionId));
 
 			if (args.task_id === undefined) {
 				const text = listTasksText(registry);

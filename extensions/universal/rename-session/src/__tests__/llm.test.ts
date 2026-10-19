@@ -230,8 +230,18 @@ describe("isSubagentSession", () => {
 		expect(isSubagentSession("/home/u/.pi/agent/subagents/--proj--/sessions")).toBe(true);
 	});
 
+	it("LTC4b: 新布局（session-store-layout-inversion D2/D3）subagents 树内路径返回 true", () => {
+		expect(isSubagentSession("/home/u/.taiji/ext-sessions/root-sid-1/subagents/sessions")).toBe(true);
+	});
+
 	it("LTC5: 主 session 路径返回 false", () => {
 		expect(isSubagentSession("/home/u/.pi/agent/sessions")).toBe(false);
+	});
+
+	it("LTC5b: 存储树内非 subagent 域目录不误判（btw / workflow / canvases 同树相邻域）", () => {
+		expect(isSubagentSession("/home/u/.taiji/ext-sessions/root-sid-1/btw")).toBe(false);
+		expect(isSubagentSession("/home/u/.taiji/ext-sessions/root-sid-1/workflow/runs")).toBe(false);
+		expect(isSubagentSession("/home/u/.taiji/ext-sessions/root-sid-1/canvases/c-1")).toBe(false);
 	});
 });
 

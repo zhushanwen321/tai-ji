@@ -216,7 +216,7 @@ describe("runRetentionMaintenanceRound — run + record 两域同轮（W1 D5）"
     id: string,
     frames: readonly RecordEventInput[],
   ): Promise<string> {
-    const journal = createRecordEventStream(recordsDir);
+    const journal = createRecordEventStream(() => recordsDir);
     for (const frame of frames) await journal.append(id, frame);
     return join(recordsDir, `${id}.events`);
   }
@@ -342,7 +342,7 @@ describe("record 首写触发维护轮（W1 / D5 触发点②：RecordStore.regi
     const staleEvents = join(recordsDir, "sa-trig-stale.events");
     const staleManifest = join(recordsDir, "sa-trig-stale.json");
     {
-      const j = createRecordEventStream(recordsDir);
+      const j = createRecordEventStream(() => recordsDir);
       await j.append("sa-trig-stale", {
         type: "record-created",
         ts: daysAgoMs(35),
@@ -368,7 +368,7 @@ describe("record 首写触发维护轮（W1 / D5 触发点②：RecordStore.regi
     writeFileSync(staleManifest, '{"id":"sa-trig-stale"}', "utf8");
 
     // 触发：register 新 record（事件文件首写）→ 维护轮 fire-and-forget 启动
-    const store = new RecordStore(join(dataRoot, "sessions"), undefined, undefined, recordsDir);
+    const store = new RecordStore(() => join(dataRoot, "sessions"), undefined, undefined, () => recordsDir);
     const record = createRecord("sa-trig-new", {
       agent: "coder",
       model: "m",

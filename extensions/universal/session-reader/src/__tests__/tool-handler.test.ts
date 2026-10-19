@@ -9,6 +9,11 @@ import {
   type SessionReadParams,
   type SessionReadSignals,
 } from '../tool-handler.js'
+import {
+  resolveSessionStoreRoot,
+  resolveStoreSubagentSessionsDir,
+  resolveStoreSubagentRecordsDir,
+} from '../discovery/roots.js'
 import { setPiHandle } from '@zhushanwen/pi-extension-logger'
 import { type DoctorDetails } from '../doctor.js'
 import { levenshtein } from '../no-match.js'
@@ -41,7 +46,8 @@ vi.mock('node:os', async (importOriginal) => {
  */
 
 describe('handleSessionRead', () => {
-  let dir: string
+  let dataDir: string
+  let dir: string // agentDir = <dataDir>/agent（生产拓扑复刻）
   const SLUG = '--demo-cwd--'
   // 家族 fixture 组：根 FAM → fork 子代 FORK（跨 cwd，parentSession 指 FAM 文件）
   // → 隔代 subagent SUB2（rootSessionId=FORK）。前缀互异，断言按 id 精确区分层级。
@@ -106,11 +112,12 @@ describe('handleSessionRead', () => {
   }
 
   beforeEach(async () => {
-    dir = await mkdtemp(join(tmpdir(), 'tool-handler-main-'))
+    dataDir = await mkdtemp(join(tmpdir(), 'tool-handler-main-'))
+    dir = join(dataDir, 'agent')
     await writeMainFixtures()
   })
   afterEach(async () => {
-    await rm(dir, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 })
+    await rm(dataDir, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 })
   })
 
   it('1. find by uuid fragment returns matching session', async () => {
@@ -158,21 +165,22 @@ describe('handleSessionRead', () => {
     expect(typeof d.hits[0].matchSnippet).toBe('string')
   })
 
-  it('6. export outline materializes a .md file', async () => {
-    // export 写目标 = <agentDir>/tmp/（mkdtemp 自建自删）；读侧经 liveSessionDir=[live]
-    // 根扫本 describe 的 fixture sessions 目录。
-    const exportDir = await mkdtemp(join(tmpdir(), 'tool-handler-export-'))
+  it('6. export outline materializes a .md file under the session store tree', async () => {
+    // export 写目标 = <dataDir>/ext-sessions/<sid>/session-view.md（session-store-layout-
+    // inversion 域 6）：agentDir 参数 = <dataDir>/agent（mkdtemp tmp 子目录，导出树随 tmp
+    // 整体清理）；读侧经 liveSessionDir=[live] 根扫本 describe 的 fixture sessions 目录。
+    const dataDir = await mkdtemp(join(tmpdir(), 'tool-handler-export-'))
     try {
       const r = await handleSessionRead(
         { action: 'export', session: FIX_E6, format: 'outline' },
-        { agentDir: exportDir, liveSessionDir: join(dir, 'sessions') },
+        { agentDir: join(dataDir, 'agent'), liveSessionDir: join(dir, 'sessions') },
       )
       const d = r.details as { path: string; sizeBytes: number }
-      expect(d.path).toMatch(/\.md$/)
+      expect(d.path).toBe(join(dataDir, 'ext-sessions', FIX_E6, 'session-view.md'))
       expect(existsSync(d.path)).toBe(true)
       expect(d.sizeBytes).toBeGreaterThan(0)
     } finally {
-      await rm(exportDir, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 })
+      await rm(dataDir, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 })
     }
   })
 
@@ -213,6 +221,7 @@ describe('handleSessionRead', () => {
 
 describe('extract (v2 O4)', () => {
   let dir: string
+  let dataDir: string
   const SLUG = '--demo-cwd--'
 
   /**
@@ -308,11 +317,12 @@ describe('extract (v2 O4)', () => {
   }
 
   beforeEach(async () => {
-    dir = await mkdtemp(join(tmpdir(), 'tool-handler-extract-'))
+    dataDir = await mkdtemp(join(tmpdir(), 'tool-handler-extract-'))
+    dir = join(dataDir, 'agent')
     await writeExtractFixture()
   })
   afterEach(async () => {
-    await rm(dir, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 })
+    await rm(dataDir, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 })
   })
 
   it('user-messages returns all user entries with turn + full text', async () => {
@@ -514,13 +524,15 @@ async function makeFixtureSession(
 }
 
 describe('F2 多匹配消歧（fixture，MF-9）', () => {
-  let dir: string
+  let dataDir: string
+  let dir: string // agentDir = <dataDir>/agent（生产拓扑复刻，[session-store-layout-inversion]）
 
   beforeEach(async () => {
-    dir = await mkdtemp(join(tmpdir(), 'tool-handler-f2-'))
+    dataDir = await mkdtemp(join(tmpdir(), 'tool-handler-f2-'))
+    dir = join(dataDir, 'agent')
   })
   afterEach(async () => {
-    await rm(dir, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 })
+    await rm(dataDir, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 })
   })
 
   it('共享 uuid 片段 → 不抛错，content 含两候选 + 👉，details.ambiguous=true', async () => {
@@ -564,13 +576,15 @@ describe('F2 多匹配消歧（fixture，MF-9）', () => {
 
 describe('outline skippedLines 报告（fixture，D8d 有检测必有报告）', () => {
   let dir: string
+  let dataDir: string
   const SID = '019e6c96-bbbb-cccc-dddd-00000000000b'
 
   beforeEach(async () => {
-    dir = await mkdtemp(join(tmpdir(), 'tool-handler-skipped-'))
+    dataDir = await mkdtemp(join(tmpdir(), 'tool-handler-skipped-'))
+    dir = join(dataDir, 'agent')
   })
   afterEach(async () => {
-    await rm(dir, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 })
+    await rm(dataDir, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 })
   })
 
   it('坏行计入 stats.skippedLines 且文本尾部可见（不静默跳过）', async () => {
@@ -612,6 +626,7 @@ describe('outline skippedLines 报告（fixture，D8d 有检测必有报告）',
 // ============================================================
 describe('E7 行渲染统一（outline 与 export outline 同一渲染行）', () => {
   let dir: string
+  let dataDir: string
   const SID = '019e6c96-bbbb-cccc-dddd-00000000000e'
 
   /** 写含 fork 旁支的 session：主链 R→m1(user)→m2(assistant)，b1/b2 挂 m1 下成
@@ -637,10 +652,11 @@ describe('E7 行渲染统一（outline 与 export outline 同一渲染行）', (
   }
 
   beforeEach(async () => {
-    dir = await mkdtemp(join(tmpdir(), 'tool-handler-e7-'))
+    dataDir = await mkdtemp(join(tmpdir(), 'tool-handler-e7-'))
+    dir = join(dataDir, 'agent')
   })
   afterEach(async () => {
-    await rm(dir, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 })
+    await rm(dataDir, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 })
   })
 
   it('① allBranches:true → 旁支行标记 `[旁支 N entries]`（N=forkPoint 旁支子树 entry 数）+ 尾段同改前语义', async () => {
@@ -677,14 +693,16 @@ describe('E7 行渲染统一（outline 与 export outline 同一渲染行）', (
 
 describe('search 灾难性正则降级 + abort（fixture，MF-5 回归）', () => {
   let dir: string
+  let dataDir: string
   const SID = '019e6c96-bbbb-cccc-dddd-00000000000a'
 
   beforeEach(async () => {
-    dir = await mkdtemp(join(tmpdir(), 'tool-handler-search-'))
+    dataDir = await mkdtemp(join(tmpdir(), 'tool-handler-search-'))
+    dir = join(dataDir, 'agent')
     await makeFixtureSession(dir, SID, 'aaa plugin 内容')
   })
   afterEach(async () => {
-    await rm(dir, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 })
+    await rm(dataDir, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 })
   })
 
   it('嵌套量词 pattern (a+)+ → 降级字面子串（不挂死，零命中）', async () => {
@@ -786,13 +804,15 @@ describe('search 灾难性正则降级 + abort（fixture，MF-5 回归）', () =
 
 describe('extract commits 双路径（fixture：git-cmd 主路径 + commit-context 次路径 + 去重）', () => {
   let dir: string
+  let dataDir: string
   const SID = '019e6c96-bbbb-cccc-dddd-00000000000c'
 
   beforeEach(async () => {
-    dir = await mkdtemp(join(tmpdir(), 'tool-handler-commits-'))
+    dataDir = await mkdtemp(join(tmpdir(), 'tool-handler-commits-'))
+    dir = join(dataDir, 'agent')
   })
   afterEach(async () => {
-    await rm(dir, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 })
+    await rm(dataDir, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 })
   })
 
   /** 写单个 session JSONL（commits 用例行内联传入）。 */
@@ -996,10 +1016,12 @@ async function makeFixtureSubagent(
     slug?: string
   },
 ): Promise<string> {
-  const slug = opts.slug ?? '--demo-cwd--'
-  const sessionFile = join(dir, 'subagents', slug, 'sessions', `${opts.realSessionId}.jsonl`)
+  // [session-store-layout-inversion] 新布局存储树：分区键 = rootSessionId（无 encodeCwd
+  // 目录层，opts.slug 已无布局语义，保留入参兼容旧调用点但不参与路径推导）
+  const rootSid = opts.rootSessionId ?? 'root-session-1'
+  const sessionFile = join(resolveStoreSubagentSessionsDir(dir, rootSid), `${opts.realSessionId}.jsonl`)
   if (opts.sessionFileExists !== false) {
-    await mkdir(join(dir, 'subagents', slug, 'sessions'), { recursive: true })
+    await mkdir(resolveStoreSubagentSessionsDir(dir, rootSid), { recursive: true })
     const lines = [
       JSON.stringify({ type: 'session', id: opts.realSessionId, cwd: '/demo' }),
       JSON.stringify({
@@ -1014,13 +1036,13 @@ async function makeFixtureSubagent(
     ]
     await writeFile(sessionFile, lines.join('\n') + '\n')
   }
-  const recordsDir = join(dir, 'subagents', slug, 'records')
+  const recordsDir = resolveStoreSubagentRecordsDir(dir, rootSid)
   await mkdir(recordsDir, { recursive: true })
   await writeFile(
     join(recordsDir, `${saId}.json`),
     JSON.stringify({
       id: saId,
-      rootSessionId: opts.rootSessionId ?? 'root-session-1',
+      rootSessionId: rootSid,
       agentName: opts.agentName ?? 'explorer',
       sessionFile,
     }),
@@ -1029,13 +1051,15 @@ async function makeFixtureSubagent(
 }
 
 describe('resolveSessionId ① 绝对路径形态（w2 TC2-TC6）', () => {
-  let dir: string
+  let dataDir: string
+  let dir: string // agentDir = <dataDir>/agent（生产拓扑复刻，[session-store-layout-inversion]）
 
   beforeEach(async () => {
-    dir = await mkdtemp(join(tmpdir(), 'tool-handler-path-'))
+    dataDir = await mkdtemp(join(tmpdir(), 'tool-handler-path-'))
+    dir = join(dataDir, 'agent')
   })
   afterEach(async () => {
-    await rm(dir, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 })
+    await rm(dataDir, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 })
   })
 
   it('TC2: 绝对路径 outline → sessionId=header 真实 id（非文件名）', async () => {
@@ -1138,13 +1162,15 @@ describe('resolveSessionId ① 绝对路径形态（w2 TC2-TC6）', () => {
 })
 
 describe('resolveSessionId ② sa-id 形态（w2 TC7-TC10 + CQ3）', () => {
-  let dir: string
+  let dataDir: string
+  let dir: string // agentDir = <dataDir>/agent（生产拓扑复刻，[session-store-layout-inversion]）
 
   beforeEach(async () => {
-    dir = await mkdtemp(join(tmpdir(), 'tool-handler-said-'))
+    dataDir = await mkdtemp(join(tmpdir(), 'tool-handler-said-'))
+    dir = join(dataDir, 'agent')
   })
   afterEach(async () => {
-    await rm(dir, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 })
+    await rm(dataDir, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 })
   })
 
   it('TC7: sa-id 恰 1 命中 + sessionFile 存在 → 成功，sessionId=header 真实 id（非 sa-）', async () => {
@@ -1212,24 +1238,26 @@ describe('resolveSessionId ② sa-id 形态（w2 TC7-TC10 + CQ3）', () => {
   })
 
   it('sa-id 多 manifest 命中（数据异常）→ ES2 ambiguous（C4）', async () => {
-    // 同 sa-id 的两个 manifest（不同 cwd slug 目录，模拟数据异常）
-    for (const [slug, realId] of [
-      ['--demo-cwd--', '019e6c96-dddd-eeee-ffff-0000000004a4'],
-      ['--other-cwd--', '019e6c96-dddd-eeee-ffff-0000000004a5'],
+    // 同 sa-id 的两个 manifest（不同 rootSessionId 分区，模拟数据异常——新布局分区键 =
+    // rootSessionId，同分区同名 manifest 会互覆，双 manifest 只能跨分区构造）
+    for (const [rootSid, realId] of [
+      ['0aaaaaaa-bbbb-7ccc-dddd-0000000004r1', '019e6c96-dddd-eeee-ffff-0000000004a4'],
+      ['0aaaaaaa-bbbb-7ccc-dddd-0000000004r2', '019e6c96-dddd-eeee-ffff-0000000004a5'],
     ] as const) {
-      const sessionFile = join(dir, 'subagents', slug, 'sessions', `${realId}.jsonl`)
-      await mkdir(join(dir, 'subagents', slug, 'sessions'), { recursive: true })
+      const sessionsDir = resolveStoreSubagentSessionsDir(dir, rootSid)
+      const sessionFile = join(sessionsDir, `${realId}.jsonl`)
+      await mkdir(sessionsDir, { recursive: true })
       await writeFile(
         sessionFile,
         JSON.stringify({ type: 'session', id: realId, cwd: '/demo' }) + '\n',
       )
-      const recordsDir = join(dir, 'subagents', slug, 'records')
+      const recordsDir = resolveStoreSubagentRecordsDir(dir, rootSid)
       await mkdir(recordsDir, { recursive: true })
       await writeFile(
         join(recordsDir, 'sa-dup.json'),
         JSON.stringify({
           id: 'sa-dup',
-          rootSessionId: 'r',
+          rootSessionId: rootSid,
           agentName: 'a',
           sessionFile,
         }),
@@ -1242,11 +1270,11 @@ describe('resolveSessionId ② sa-id 形态（w2 TC7-TC10 + CQ3）', () => {
 
   it('CQ3: sa-id 命中但 sessionFile header 读不出 → F6 风格（不降级 record.id 当 sessionId）', async () => {
     // sessionFile 存在但首行非 session header → readSessionHeaderIdSync 返 undefined
-    const slug = '--demo-cwd--'
-    const sessionFile = join(dir, 'subagents', slug, 'sessions', 'bad.jsonl')
-    await mkdir(join(dir, 'subagents', slug, 'sessions'), { recursive: true })
+    const rootSid = 'r' // 合法 pi sid 形态（单字符分区）
+    const sessionFile = join(resolveStoreSubagentSessionsDir(dir, rootSid), 'bad.jsonl')
+    await mkdir(dirname(sessionFile), { recursive: true })
     await writeFile(sessionFile, JSON.stringify({ type: 'custom', customType: 'x' }) + '\n')
-    const recordsDir = join(dir, 'subagents', slug, 'records')
+    const recordsDir = resolveStoreSubagentRecordsDir(dir, rootSid)
     await mkdir(recordsDir, { recursive: true })
     await writeFile(
       join(recordsDir, 'sa-bad.json'),
@@ -1390,13 +1418,15 @@ describe('sa-id entry 兜底 v2 终态条锚定（W1 D1 版本门补齐，第三
 })
 
 describe('source 透传（w2 TC12-TC13，依赖 w1 findSessions opts.source）', () => {
-  let dir: string
+  let dataDir: string
+  let dir: string // agentDir = <dataDir>/agent（生产拓扑复刻，[session-store-layout-inversion]）
 
   beforeEach(async () => {
-    dir = await mkdtemp(join(tmpdir(), 'tool-handler-src-'))
+    dataDir = await mkdtemp(join(tmpdir(), 'tool-handler-src-'))
+    dir = join(dataDir, 'agent')
   })
   afterEach(async () => {
-    await rm(dir, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 })
+    await rm(dataDir, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 })
   })
 
   it('TC12: find source 过滤——subagent 只返回 subagent 候选，main 只返回 main', async () => {
@@ -1466,7 +1496,8 @@ describe('source 透传（w2 TC12-TC13，依赖 w1 findSessions opts.source）',
 })
 
 describe('subagent sa-id（w2 TC14-TC17，fixture）', () => {
-  let dir: string
+  let dataDir: string
+  let dir: string // agentDir = <dataDir>/agent（生产拓扑复刻）
   const TC14_ID = '0aaaaaaa-0000-7000-8000-0000000014a1'
   const TC15_ID = '0aaaaaaa-0000-7000-8000-0000000015a2'
 
@@ -1478,7 +1509,8 @@ describe('subagent sa-id（w2 TC14-TC17，fixture）', () => {
    * - TC17 的 manifest sessionFile 指向不存在路径（模拟 .jsonl 被 GC）
    */
   beforeEach(async () => {
-    dir = await mkdtemp(join(tmpdir(), 'tool-handler-tc14-'))
+    dataDir = await mkdtemp(join(tmpdir(), 'tool-handler-tc14-'))
+    dir = join(dataDir, 'agent')
     await makeFixtureSubagent(dir, 'sa-tc14', {
       realSessionId: TC14_ID,
       firstUserText: 'subagent task',
@@ -1494,7 +1526,7 @@ describe('subagent sa-id（w2 TC14-TC17，fixture）', () => {
     })
   })
   afterEach(async () => {
-    await rm(dir, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 })
+    await rm(dataDir, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 })
   })
 
   it('TC14: completed subagent sa-id outline 成功（场景 1，sessionId=header 真实 id）', async () => {
@@ -1511,7 +1543,10 @@ describe('subagent sa-id（w2 TC14-TC17，fixture）', () => {
   it('TC16: 嵌套后代直接 outline（场景 1c，绝对路径形态读任意节点）', async () => {
     // 绝对路径形态直接读（M0 入口不依赖 findSessions）
     const r = await handleSessionRead(
-      { action: 'outline', session: join(dir, 'subagents', '--demo-cwd--', 'sessions', `${TC14_ID}.jsonl`) },
+      {
+        action: 'outline',
+        session: join(resolveStoreSubagentSessionsDir(dir, 'root-session-1'), `${TC14_ID}.jsonl`),
+      },
       { agentDir: dir },
     )
     expect(((r.details as { turns: unknown[] }).turns).length).toBeGreaterThan(0)
@@ -1571,13 +1606,15 @@ async function wfStateFile(
 }
 
 describe('doWorkflow（w6，fixture）', () => {
-  let dir: string
+  let dataDir: string
+  let dir: string // agentDir = <dataDir>/agent（生产拓扑复刻，[session-store-layout-inversion]）
 
   beforeEach(async () => {
-    dir = await mkdtemp(join(tmpdir(), 'tool-handler-wf-'))
+    dataDir = await mkdtemp(join(tmpdir(), 'tool-handler-wf-'))
+    dir = join(dataDir, 'agent')
   })
   afterEach(async () => {
-    await rm(dir, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 })
+    await rm(dataDir, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 })
   })
 
   // ---- [D16③] v2 record 流档概览（recordPath 锚点 = record 流路径）----
@@ -1831,7 +1868,7 @@ describe('doWorkflow（w6，fixture）', () => {
     const slug = '--wf-subagent--'
     // subagent session 放 subagents/ 下（不在 sessions/——buildFamilyFromFs 的 main byId
     // 索引外，旧实现 resolveFamily 找不到会抛「session not found in family index」）
-    const subDir = join(dir, 'subagents', slug, 'sessions')
+    const subDir = resolveStoreSubagentSessionsDir(dir, SUB_WF_ROOT)
     await mkdir(subDir, { recursive: true })
     const subPath = join(subDir, `${SUB_WF_ROOT}.jsonl`)
     await writeFile(
@@ -1873,12 +1910,14 @@ describe('doWorkflow（w6，fixture）', () => {
 // ============================================================
 
 describe('doFamily recursive（m3b U8 接入）', () => {
-  let dir: string
+  let dataDir: string
+  let dir: string // agentDir = <dataDir>/agent（生产拓扑复刻）
   const MAIN = '019e6c96-cccc-dddd-eeee-000000000001'
   const SUB = '019e6c96-cccc-dddd-eeee-000000000002'
 
   beforeEach(async () => {
-    dir = await mkdtemp(join(tmpdir(), 'tool-handler-recursive-'))
+    dataDir = await mkdtemp(join(tmpdir(), 'tool-handler-recursive-'))
+    dir = join(dataDir, 'agent')
     await makeFixtureSession(dir, MAIN, 'main session 内容')
     // 顶层 subagent（rootSessionId=MAIN，无 parentRecordId → flat 回退）
     await makeFixtureSubagent(dir, `sa-${SUB.slice(0, 8)}`, {
@@ -1889,7 +1928,7 @@ describe('doFamily recursive（m3b U8 接入）', () => {
     })
   })
   afterEach(async () => {
-    await rm(dir, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 })
+    await rm(dataDir, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 })
   })
 
   it('TC-m3b-dofamily-recursive-false：不传 recursive → flat family（m0-m2 零回归）', async () => {
@@ -1945,14 +1984,16 @@ describe('doFamily recursive（m3b U8 接入）', () => {
 describe('formatFamilyText subagents 行富字段（ext-simplify-04 U4 / E2）', () => {
   const MAIN = '0aaaaaaa-bbbb-7ccc-dddd-0000000000f1'
   const SUB = '0aaaaaaa-bbbb-7ccc-dddd-0000000000f2'
-  let dir: string
+  let dataDir: string
+  let dir: string // agentDir = <dataDir>/agent（生产拓扑复刻）
 
   beforeEach(async () => {
-    dir = await mkdtemp(join(tmpdir(), 'tool-handler-family-rich-'))
+    dataDir = await mkdtemp(join(tmpdir(), 'tool-handler-family-rich-'))
+    dir = join(dataDir, 'agent')
     await makeFixtureSession(dir, MAIN, 'main session')
   })
   afterEach(async () => {
-    await rm(dir, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 })
+    await rm(dataDir, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 })
   })
 
   /** alive subagent：session 文件（header + 可选 identity 尾行）+ 可选 manifest 富字段 */
@@ -1964,7 +2005,7 @@ describe('formatFamilyText subagents 行富字段（ext-simplify-04 U4 / E2）',
       identityAgent?: string
     } = {},
   ): Promise<void> {
-    const sessionDir = join(dir, 'subagents', '--demo-cwd--', 'sessions')
+    const sessionDir = resolveStoreSubagentSessionsDir(dir, MAIN)
     await mkdir(sessionDir, { recursive: true })
     const subPath = join(sessionDir, `${realId}.jsonl`)
     const lines = [JSON.stringify({ type: 'session', id: realId, cwd: '/demo' })]
@@ -1985,7 +2026,7 @@ describe('formatFamilyText subagents 行富字段（ext-simplify-04 U4 / E2）',
     }
     await writeFile(subPath, lines.join('\n') + '\n')
     if (opts.manifest) {
-      const recordsDir = join(dir, 'subagents', '--demo-cwd--', 'records')
+      const recordsDir = resolveStoreSubagentRecordsDir(dir, MAIN)
       await mkdir(recordsDir, { recursive: true })
       await writeFile(
         join(recordsDir, `sa-${realId}.json`),
@@ -2004,7 +2045,7 @@ describe('formatFamilyText subagents 行富字段（ext-simplify-04 U4 / E2）',
     saId: string,
     fields: { agentName?: string; task?: string; slug?: string; status?: string } = {},
   ): Promise<void> {
-    const recordsDir = join(dir, 'subagents', '--demo-cwd--', 'records')
+    const recordsDir = resolveStoreSubagentRecordsDir(dir, MAIN)
     await mkdir(recordsDir, { recursive: true })
     await writeFile(
       join(recordsDir, `${saId}.json`),
@@ -2107,7 +2148,10 @@ describe('doctor action（u8：环境判定 + 根表 + 告警 + 残留 glob）',
     await writeJsonl(join(agentDir, 'sessions', SLUG, 'a.jsonl'), 'aaaaaaaa')
     await writeJsonl(join(agentDir, 'sessions', SLUG, 'b.jsonl'), 'bbbbbbbb')
     await writeJsonl(join(dataDir, 'sessions', 'old.jsonl'), 'cccccccc') // legacy 非空
-    await writeJsonl(join(agentDir, 'subagents', SLUG, 'sessions', 's.jsonl'), 'dddddddd')
+    await writeJsonl(
+      join(resolveStoreSubagentSessionsDir(agentDir, '0aaaaaaa-bbbb-7ccc-dddd-000000000d1'), 's.jsonl'),
+      'dddddddd',
+    )
     return {
       dataDir,
       agentDir,
@@ -2286,8 +2330,9 @@ describe('u9 F1 重写 + uuid 归一化（fixture，§5.2 / §6.7 / §11.5）', 
     id: string,
     opts?: { subagent?: boolean; firstUserText?: string },
   ): Promise<void> {
+    // [session-store-layout-inversion] subagent 会话在新布局存储树（分区 sid 固定合法形态）
     const dir = opts?.subagent
-      ? join(tmp, 'agent', 'subagents', SLUG, 'sessions')
+      ? resolveStoreSubagentSessionsDir(join(tmp, 'agent'), '0aaaaaaa-bbbb-7ccc-dddd-0000000000s1')
       : join(tmp, 'agent', 'sessions', SLUG)
     await mkdir(dir, { recursive: true })
     const lines = [JSON.stringify({ type: 'session', id, cwd: '/demo' })]
@@ -2436,7 +2481,7 @@ describe('u9 F1 重写 + uuid 归一化（fixture，§5.2 / §6.7 / §11.5）', 
     )
     const text = r.content[0].text
     expect(text).toContain(`${join(agentDir, 'sessions')}：2 文件`)
-    expect(text).toContain(`${join(agentDir, 'subagents')}：1 文件`)
+    expect(text).toContain(`${resolveSessionStoreRoot(agentDir)}：1 文件`)
     expect(text).toContain('候选集非空（共 3 文件）')
 
     // 完整信号包（live 与 default 同路径）→ 去重根注记，不重复计数
@@ -2560,8 +2605,9 @@ describe('u10 find 分组输出（fixture，§6.7 子决策 2/3 + §8.2 回归�
     id: string,
     opts?: { subagent?: boolean; firstUserText?: string },
   ): Promise<void> {
+    // [session-store-layout-inversion] subagent 会话在新布局存储树（分区 sid 固定合法形态）
     const dir = opts?.subagent
-      ? join(tmp, 'agent', 'subagents', SLUG, 'sessions')
+      ? resolveStoreSubagentSessionsDir(join(tmp, 'agent'), '0aaaaaaa-bbbb-7ccc-dddd-0000000000s1')
       : join(tmp, 'agent', 'sessions', SLUG)
     await mkdir(dir, { recursive: true })
     const lines = [JSON.stringify({ type: 'session', id, cwd: '/demo' })]
@@ -2582,7 +2628,10 @@ describe('u10 find 分组输出（fixture，§6.7 子决策 2/3 + §8.2 回归�
    * 供 result action 批量调用（回归基线：批量头行 8 字符短 id 不受 u10 影响）。
    */
   async function writeSubagentWithResult(saId: string, id: string, body: string): Promise<void> {
-    const sessionFile = join(tmp, 'agent', 'subagents', SLUG, 'sessions', `${id}.jsonl`)
+    const sessionFile = join(
+      resolveStoreSubagentSessionsDir(join(tmp, 'agent'), 'root-u10'),
+      `${id}.jsonl`,
+    )
     await mkdir(dirname(sessionFile), { recursive: true })
     const lines = [
       JSON.stringify({ type: 'session', id, cwd: '/demo' }),
@@ -2598,7 +2647,7 @@ describe('u10 find 分组输出（fixture，§6.7 子决策 2/3 + §8.2 回归�
       }),
     ]
     await writeFile(sessionFile, lines.join('\n') + '\n')
-    const recordsDir = join(tmp, 'agent', 'subagents', SLUG, 'records')
+    const recordsDir = resolveStoreSubagentRecordsDir(join(tmp, 'agent'), 'root-u10')
     await mkdir(recordsDir, { recursive: true })
     await writeFile(
       join(recordsDir, `${saId}.json`),
@@ -2804,8 +2853,9 @@ describe('E1 find 单次根解析（探针 P1：resolveSessionRoots 恰 1 次）
 
   /** 写 session 文件（subagent:true 写入 subagent 根），形态同 u10 段 writeSession。 */
   async function writeSession(id: string, opts?: { subagent?: boolean }): Promise<void> {
+    // [session-store-layout-inversion] subagent 会话在新布局存储树（分区 sid 固定合法形态）
     const dir = opts?.subagent
-      ? join(tmp, 'agent', 'subagents', SLUG, 'sessions')
+      ? resolveStoreSubagentSessionsDir(join(tmp, 'agent'), '0aaaaaaa-bbbb-7ccc-dddd-0000000000s1')
       : join(tmp, 'agent', 'sessions', SLUG)
     await mkdir(dir, { recursive: true })
     await writeFile(
@@ -3038,7 +3088,7 @@ describe('u12 跨会话内容检索（fixture，V8）', () => {
     opts?: { subagent?: boolean },
   ): Promise<void> {
     const dir = opts?.subagent
-      ? join(tmp, 'agent', 'subagents', SLUG, 'sessions')
+      ? resolveStoreSubagentSessionsDir(join(tmp, 'agent'), '0aaaaaaa-bbbb-7ccc-dddd-0000000000s2')
       : join(tmp, 'agent', 'sessions')
     await mkdir(dir, { recursive: true })
     const lines = [JSON.stringify({ type: 'session', id, cwd: '/demo' })]

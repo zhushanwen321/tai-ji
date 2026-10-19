@@ -421,6 +421,9 @@ export class ProcessManager implements IProcessManager {
     this.processes.delete(oldId)
     this.processes.set(newId, entry)
     this.clientToId.set(entry.client, newId)
+    // [session-store-layout-inversion D5 补] tee 随 rekey 迁移（tempId 树 → 真实 id 树）：
+    // 只换进程表键会让 turn 输出留在 tempId 树成孤儿（删除会话只回收真实 id 树）。
+    entry.client.retargetSessionLog(newId)
   }
 
   /** Register a callback for when a session's process exits unexpectedly. Returns unsubscribe function. */

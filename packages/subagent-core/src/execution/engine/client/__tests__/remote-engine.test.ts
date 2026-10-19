@@ -71,9 +71,16 @@ let dataDir: string;
 
 beforeEach(() => {
   dataDir = mkdtempSync(join(tmpdir(), "w2-remote-engine-"));
+  // [session-store-layout-inversion] wire ctx.sessionDir 恒有值（Gate B S6 协议契约
+  // ——宿主绑定形态缺省推导 fail-fast）：harness 以「宿主进程有 session 绑定」形态
+  // 注入贯穿 env（deriveHostSubagentSessionDir 缺省推导输入）+ dataDir env 把推导
+  // 落点收进本 mkdtemp 目录（自建自删红线）。ctx 显式注入仍优先（逐用例覆盖）。
+  vi.stubEnv("PI_SUBAGENT_ROOT_SESSION_ID", "sid-w2-remote-engine");
+  vi.stubEnv("TAIJI_AGENT_DATA_DIR", dataDir);
 });
 
 afterEach(() => {
+  vi.unstubAllEnvs();
   rmSync(dataDir, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 });
   vi.useRealTimers();
   // [D3 槽现读] host/askUser 应答端经 host-ui-endpoint 槽注入——用例后清空防串扰
@@ -303,16 +310,17 @@ describe("RemoteEngine run 帧映射", () => {
   });
 
   it("[Option C] wire ctx.sessionDir = getSubagentSessionDir(env 同源推导)；ctx 显式注入优先", async () => {
-    // stub env 固定推导输入（测试进程可能已带这两键——stub 后期望值确定）
-    vi.stubEnv("PI_CODING_AGENT_DIR", join(dataDir, "agent-dir"));
-    vi.stubEnv("PI_SUBAGENT_ROOT_CWD", join(dataDir, "root-cwd"));
+    // [session-store-layout-inversion] 推导输入 = 贯穿 env PI_SUBAGENT_ROOT_SESSION_ID
+    //（分区键 rootSessionId，agentDir/cwd 编码段退役）；beforeEach 已注入缺省 sid
+    // 与 dataDir——本用例覆盖为用例专属值，期望值经同一单源公式推导。
+    vi.stubEnv("PI_SUBAGENT_ROOT_SESSION_ID", "sid-w2-derive");
     try {
       // 正向：env 同源推导值上 wire（宿主单一权威 getSubagentSessionDir，引擎不自推导）
       const derived = makeEngine();
       const { ctx, events } = makeCtx();
       await derived.engine.run({ prompt: "p" }, ctx);
       expect(extractRunParams(events).ctx.sessionDir).toBe(
-        getSubagentSessionDir(join(dataDir, "agent-dir"), join(dataDir, "root-cwd")),
+        getSubagentSessionDir("sid-w2-derive", dataDir),
       );
 
       // 宿主编排层显式注入（ctx.sessionDir）优先于 env 推导

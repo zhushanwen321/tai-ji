@@ -46,6 +46,7 @@ export const CANVAS_AVAILABLE_TOOLS: ReadonlyArray<{ name: string; description: 
     name: "canvas_enter",
     description:
       "Enter problem-solving-canvas mode: CREATE a canvas (pass statement + criterias + scope — the root problem triple) or OPEN an existing one (pass canvasId from canvas_list). " +
+      "Canvases belong to the session that created them (session-scoped isolation): opening another session's canvas is rejected with forbidden — ask the user to switch to the owning session. " +
       "Use when the user asks to plan / think through / break down a problem before execution: the canvas is a human-agent co-edited argument map the user watches and rules on in the taiji GUI. " +
       "After entering, the user's GUI decisions (selections / vetoes / comments) arrive as canvas event notifications — always canvas_read the current state before responding. " +
       "Requires the taiji desktop runtime (errors out in standalone pi).",
@@ -83,7 +84,8 @@ export const CANVAS_AVAILABLE_TOOLS: ReadonlyArray<{ name: string; description: 
   {
     name: "canvas_list",
     description:
-      "List all problem-solving canvases (id, name, statement, converged flag, open must-fix count, review status). " +
+      "List this session's problem-solving canvases (id, name, statement, converged flag, open must-fix count, review status). " +
+      "Canvases are session-scoped: only canvases created by the CURRENT session are returned. " +
       "The canvasId source for canvas_enter's open form. " +
       "Requires the taiji desktop runtime (errors out in standalone pi).",
   },

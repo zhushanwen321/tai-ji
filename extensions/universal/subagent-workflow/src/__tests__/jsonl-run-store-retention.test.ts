@@ -116,7 +116,7 @@ describe("store 侧保留维护面退役（[D1] record 单源）", () => {
 
   beforeEach(() => {
     tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "wf-retention-"));
-    stateDir = path.join(tmpDir, "workflow-state");
+    stateDir = path.join(tmpDir);
     delete process.env[STATE_TTL_MS_ENV];
     loggerMock.warn.mockClear();
     loggerMock.debug.mockClear();
@@ -129,7 +129,7 @@ describe("store 侧保留维护面退役（[D1] record 单源）", () => {
 
   it("save 零磁盘动作：旧触发点退役——窗外终态旧双源足迹不被 save 触发的维护轮裁剪", async () => {
     process.env[STATE_TTL_MS_ENV] = String(30 * 86_400_000);
-    const store = new JsonlRunStore({ sessionDir: tmpDir });
+    const store = new JsonlRunStore({ runsDir: tmpDir });
     seedLegacyTerminalRun(stateDir, runIdAt(0), 40, 35); // 窗外终态（旧触发点下会被裁——对照组）
 
     // 冷/热路径多次 save：no-op，不触发维护轮、不产生 state 快照
@@ -149,8 +149,8 @@ describe("store 侧保留维护面退役（[D1] record 单源）", () => {
     expect(core["abandonElapsedInterruptedRuns"]).toBeUndefined();
   });
 
-  it("glob 外文件与父目录 session JSONL 不被 store 任何动作触碰（零写侧推论）", async () => {
-    const store = new JsonlRunStore({ sessionDir: tmpDir });
+  it("glob 外文件与父目录 session JSONL 不被 store 任何动作触碰（零写面推论）", async () => {
+    const store = new JsonlRunStore({ runsDir: tmpDir });
     fs.mkdirSync(stateDir, { recursive: true });
     const bystanders = ["notes.txt", "keep-me.jsonl", "xwf-1719500000000-notwf.jsonl"];
     for (const name of bystanders) fs.writeFileSync(path.join(stateDir, name), "x");
@@ -174,7 +174,7 @@ describe("维护轮入口（core 单源）对 run 域目录的行为——sessio
 
   beforeEach(() => {
     tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "wf-retention-anchor-"));
-    stateDir = path.join(tmpDir, "workflow-state");
+    stateDir = path.join(tmpDir);
     delete process.env[STATE_TTL_MS_ENV];
   });
 

@@ -14,8 +14,8 @@
 
     built-in 三件任务域 → TrayNativePanel（kind / sessionId / **显式透传 pinned**——否则行内操作永不渲染）
     built-in 第 4 件 session（u7）→ TraySessionPanel（子会话扁平列表，:session-id / pinned）
-    built-in 第 5 件 canvas（u-tray-entry）→ TrayCanvasPanel（画布清单 + 新建表单，:pinned——
-      画布是跨 session 全局资源，无 :session-id）
+    built-in 第 5 件 canvas（u-tray-entry）→ TrayCanvasPanel（画布清单 + 新建表单，:session-id /
+      :pinned——D4 隔离：清单按归属会话过滤，新建 owner = 焦点会话）
     widget   → TrayWidgetPanel（viewId / meta / guiTree，meta+guiTree 取自外壳 entries 切片）
 
   ── built-in 三态（D7；验收 N2「归零不虚亮」）──
@@ -165,7 +165,7 @@
 
     <template v-if="!aggregated">
     <!-- built-in 五件（固定序 bash → subagent → workflow → session → canvas；三态判定见文件头，
-         canvas 件恒渲染——创建入口豁免，见 builtinItems 注释） -->
+         canvas 件同三态——D4 隔离后无恒渲染豁免，见 builtinItems 注释） -->
     <Popover
       v-for="item in builtinItems"
       :key="item.kind"
@@ -231,6 +231,7 @@
         />
         <TrayCanvasPanel
           v-else
+          :session-id="sessionId"
           :pinned="isPinnedOf(builtinKey(item.kind))"
         />
       </TrayPanelSurface>
@@ -397,15 +398,14 @@ provide(TRAY_COUNTS_KEY, tray)
 /**
  * built-in 条目 = 有记录的件（三态：running > 0 亮 / 有历史 dim / 全无 → 不渲染）。
  * 计数源与面板列表同源（useTrayCounts），不产生第二份口径。
- * **canvas 件豁免「全无不渲染」**：新建画布的唯一入口 = 托盘面板的「＋ 新建画布」，
- * 零画布时按钮若消失创建即死锁；且三态过滤的原始语境是 per-session 任务记录
- * （画布是跨 session 全局资源，「本 session 无记录」前提不成立）——canvas 恒渲染
- * （零画布 = dim 态），hasTrayItems 随之恒 true（聚合入口恒在，含 canvas 段）。
+ * canvas 件无豁免（session-store-layout-inversion 裁决 4）：画布按归属会话隔离后
+ * 「本 session 无画布」前提成立——零画布时按钮隐藏；新建入口随首张画布出现（agent
+ * canvas_enter create / 托盘面板在既有画布会话中新建）。
  */
 const builtinItems = computed<BuiltinItem[]>(() =>
   BUILTIN_ORDER.flatMap((kind) => {
     const { running, total } = tray.counts.value[kind]
-    if (total === 0 && kind !== 'canvas') return []
+    if (total === 0) return []
     return [{ kind, icon: BUILTIN_ICONS[kind], running, total }]
   }),
 )
@@ -436,8 +436,7 @@ const widgetItems = computed<WidgetItem[]>(() => {
 /**
  * 托盘是否有条目（built-in 任一类别有记录 或 协议 widget 有 entry）——三态之「全无」的对立面，
  * 供 ① 序 4 聚合入口是否渲染（本地）② Composer 底栏密度状态机的 `hasTrayItems`（上抛）。
- * canvas 件恒渲染（创建入口豁免，见 builtinItems 注释）→ 本标志恒 true：托盘入口恒在是
- * 该豁免的一致推论（非聚合态 canvas 按钮恒在 / 聚合态聚合钮恒在，两形态同一入口可达性）。
+ * canvas 件同样按「本会话有画布」参与三态（D4 隔离后无恒渲染豁免，见 builtinItems 注释）。
  * 声明位置在 widgetItems 之后：`immediate` 立即求值，不得落进 widgetItems 的 TDZ 窗口。
  */
 const hasTrayItems = computed(() => builtinItems.value.length > 0 || widgetItems.value.length > 0)

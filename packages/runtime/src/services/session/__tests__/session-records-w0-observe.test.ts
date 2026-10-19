@@ -29,6 +29,8 @@ import type { ISessionStore } from '../../ports/session.js'
 import type { SessionRecordsDeps } from '../session-records.js'
 import { SessionRecords } from '../session-records.js'
 import { routeJournalReport } from '../journal-report-router.js'
+import { resolvePiWorkflowRunsDir } from '@zhushanwen/subagent-core'
+import { getSessionStoreDir } from '@taiji/shared/paths'
 import type { SubagentJournalEvent, SubagentJournalReport } from '@zhushanwen/extension-protocol'
 import { SCALAR_STATE_DEBOUNCE_MS } from '../replicated-states.config.js'
 
@@ -347,9 +349,13 @@ describe('发布归因 + workflowFolds fold 证据（可观测性 2026-10-02，e
     const dir = mkdtempSync(join(tmpdir(), 'wf-observe-'))
     try {
       const sessionDir = join(dir, 'sessions', 'enc-proj')
-      const runDir = join(sessionDir, 'workflow-state')
+      // 生产同源目录（session-store-layout-inversion D1）：run journal 冷读目录 =
+      // resolvePiWorkflowRunsDir = `<root>/<sid>/workflow/runs/`；旧 fixture 写
+      // `sessions/<enc>/workflow-state/`（旧布局形态），与冷读目录对不上 → fold 恒 absent
+      const runDir = resolvePiWorkflowRunsDir('s1')
       mkdirSync(runDir, { recursive: true })
       const sessionFile = join(sessionDir, '2026-01-01T00-00-00-000Z_s1.jsonl')
+      mkdirSync(sessionDir, { recursive: true })
       writeFileSync(sessionFile, '')
       const journal = join(runDir, 'wf-1.record.jsonl')
       writeFileSync(
@@ -407,6 +413,8 @@ describe('发布归因 + workflowFolds fold 证据（可观测性 2026-10-02，e
       expect(workflowFramesOf(publish)).toHaveLength(2) // 两路径各一条 workflowUpdate
     } finally {
       rmSync(dir, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 })
+      // 树内 fixture 清理（globalSetup 钉扎的 tmp 数据目录内，fs-guard 白名单）
+      rmSync(join(getSessionStoreDir(), 's1'), { recursive: true, force: true, maxRetries: 5, retryDelay: 20 })
     }
   })
 })
@@ -418,9 +426,11 @@ describe('降级派生视图闩死修复（2026-10-02）', () => {
     const dir = mkdtempSync(join(tmpdir(), 'wf-upgrade-'))
     try {
       const sessionDir = join(dir, 'sessions', 'enc-cwd')
-      const runDir = join(sessionDir, 'workflow-state')
+      // 生产同源目录（同上：`<root>/<sid>/workflow/runs/`，升级腿 attachEventSources 冷读锚点）
+      const runDir = resolvePiWorkflowRunsDir('s1')
       mkdirSync(runDir, { recursive: true })
       const sessionFile = join(sessionDir, '2026-01-01T00-00-00-000Z_s1.jsonl')
+      mkdirSync(sessionDir, { recursive: true })
       writeFileSync(sessionFile, '')
       const journal = join(runDir, 'wf-1.record.jsonl')
       writeFileSync(
@@ -463,6 +473,8 @@ describe('降级派生视图闩死修复（2026-10-02）', () => {
       expect(framesPublishedEvents().some(([, m]) => m.trigger === 'event-projection')).toBe(true)
     } finally {
       rmSync(dir, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 })
+      // 树内 fixture 清理（globalSetup 钉扎的 tmp 数据目录内，fs-guard 白名单）
+      rmSync(join(getSessionStoreDir(), 's1'), { recursive: true, force: true, maxRetries: 5, retryDelay: 20 })
     }
   })
 })

@@ -17,6 +17,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { mkdtemp, rm, readFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
+import { getSessionPluginDataPath } from '@taiji/shared/paths'
 
 import { PluginService } from '../src/services/plugin-service/plugin-service.js'
 import type { PluginRegistry } from '../src/services/plugin-service/plugin-registry.js'
@@ -256,8 +257,10 @@ describe('PluginService.shutdown flush 时序（F5）', () => {
 
     await service.shutdown()
 
+    // [session-store-layout-inversion 域 4] 插件 KV 落点 = 存储树 `<root>/<sid>/plugin-data.json`
+    //（生产同源 getSessionPluginDataPath；原旧布局 `<configDir>/session-data/<sid>.json` 已退役）
     const flushed = JSON.parse(
-      await readFile(join(tmpConfigDir, 'session-data', 'session-1.json'), 'utf-8'),
+      await readFile(getSessionPluginDataPath('session-1', tmpConfigDir), 'utf-8'),
     ) as Record<string, unknown>
     expect(flushed['lastKey']).toBe('lastValue')
   })

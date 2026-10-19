@@ -72,10 +72,10 @@ export function parseSessionHeader(filePath: string): SessionHeader | null {
   try {
     const entry = JSON.parse(firstLine) as Record<string, unknown>
     if (!isSessionHeaderEntry(entry)) return null
-    // id/cwd/timestamp 与 parentSession/forkEntryId 同款 typeof 检查条件赋值（缺就不设，
+    // id/cwd/timestamp 与 parentSession/forkEntryId 同款 typeof 守卫条件赋值（缺就不设，
     // 运行时语义与原裸断言一致——缺失字段读出 undefined）。SessionHeader 必有字段声明是
     // 「正常 session 均有」的乐观约定（见 isSessionHeaderEntry 注释），宽收窄差在返回
-    // 类型边界单点 as 收尾（替代原先 3 处字段级裸断言）；接口放宽会级联 ScannedSessionMeta
+    // 类型边界单点 as 收口（替代原先 3 处字段级裸断言）；接口放宽会级联 ScannedSessionMeta
     // 与 port 委托，不做。
     return {
       ...(typeof entry.id === 'string' ? { id: entry.id } : {}),
@@ -89,7 +89,7 @@ export function parseSessionHeader(filePath: string): SessionHeader | null {
   }
 }
 
-/** type=session 首行的运行时检查（id/cwd/timestamp 结构字段宽松：旧 session 可缺）。 */
+/** type=session 首行的运行时守卫（id/cwd/timestamp 结构字段宽松：旧 session 可缺）。 */
 function isSessionHeaderEntry(entry: unknown): entry is Record<string, unknown> {
   return typeof entry === 'object' && entry !== null && (entry as Record<string, unknown>).type === 'session'
 }
@@ -156,7 +156,7 @@ export function readSessionEndMeta(filePath: string): SessionEndSidecarMeta | nu
  *
  * [message-revoke U6d 已知边界·照实] 会话名是已发生事实，撤回不回滚——被撤子树若含
  * rename（session_info），本提取按文件事实照实取物理尾最后一条，侧栏名可能残影
- * （census §4.3 照实豁免族 + §7 边界 ②，G2 二分的「已发生事实照实」路径）。刻意不接
+ * （census §4.3 照实豁免族 + §7 边界 ②，G2 二分的「已发生事实照实」腿）。刻意不接
  * 活跃路径裁剪。
  *
  * W2 尾读优化：先尾读（readTailEntries）找尾部最后一条 session_info。
@@ -290,7 +290,7 @@ export function persistProjectBinding(filePath: string, projectId: string, opts?
   // 空 projectId（归回默认项目）= 删除绑定 sidecar。readProjectBinding 以 sidecar 为权威（无 sidecar
   // 兜底 undefined → 展示层归入默认项目），若只 return 不删，已存在的 .project.json 会继续生效——
   // 重启后 session 归属回退到旧命名项目（review MF-2 回归）。删除不创建文件，不违反规则 #6，
-  // 因此不依赖 JSONL 存在性，放在公共写入（其 existsSync 检查）之前执行。
+  // 因此不依赖 JSONL 存在性，放在公共写入（其 existsSync 守卫）之前执行。
   if (!projectId) {
     const sidecarPath = projectSidecarPath(filePath)
     try {
@@ -326,7 +326,7 @@ export function persistProjectBinding(filePath: string, projectId: string, opts?
 // 防误用为公共 API，现有了明确的外部调用方，恢复导出）。
 export function readProjectBinding(filePath: string): string | undefined {
   return readBindingSidecar(projectSidecarPath(filePath), (binding) => {
-    // 类型检查：projectId 必须是字符串（sidecar 是文件，内容可能损坏/被篡改）
+    // 类型守卫：projectId 必须是字符串（sidecar 是文件，内容可能损坏/被篡改）
     const b = binding as Record<string, unknown> | undefined
     return b && typeof b.projectId === 'string' ? b.projectId : undefined
   })
@@ -381,7 +381,7 @@ export function persistAgentBinding(
  */
 export function readAgentBinding(filePath: string): { spawnSource: 'user' | 'agent'; parentAgentSessionId: string | undefined } | undefined {
   return readBindingSidecar(agentSidecarPath(filePath), (binding) => {
-    // 类型检查：spawnSource 必须是合法枚举值（sidecar 是文件，内容可能损坏/被篡改——
+    // 类型守卫：spawnSource 必须是合法枚举值（sidecar 是文件，内容可能损坏/被篡改——
     // 非法值降级 undefined，A4 语义）；parentAgentSessionId 可选（异常路径下 spawnSource
     // 单独成立即持久化——#15，badge 只依赖 spawnSource）
     const b = binding as Record<string, unknown> | undefined
@@ -406,7 +406,7 @@ export function readAgentBinding(filePath: string): { spawnSource: 'user' | 'age
  * pi 延迟写入窗口内 existsSync=false → 静默跳过（ES-RL-1）。active session 即使磁盘无文件
  * 也经 SessionScanner.listAll 合并内存 Map 显示，preset 绑定丢失仅影响 fork/restore 的
  * preset 继承，不阻断主流程。例外：create 路径经 opts.skipJsonlExistsGuard 放行（V9-④
- * 从根源修复——create 窗口是本写点唯一时机，错过则重启后 preset 绑定永久回退 builtin:full；
+ * 根修——create 窗口是本写点唯一时机，错过则重启后 preset 绑定永久回退 builtin:full；
  * session 由本进程刚创建必然真实，sidecar 不触碰 .jsonl 本体，见 PersistBindingSidecarOpts）。
  *
  * @param filePath session JSONL 绝对路径（sidecar = presetSidecarPath(filePath)）
@@ -428,7 +428,7 @@ export function persistPresetBinding(filePath: string, presetId: string, opts?: 
  */
 export function readPresetBinding(filePath: string): string | undefined {
   return readBindingSidecar(presetSidecarPath(filePath), (binding) => {
-    // 类型检查：presetId 必须是字符串（sidecar 是文件，内容可能损坏/被篡改）
+    // 类型守卫：presetId 必须是字符串（sidecar 是文件，内容可能损坏/被篡改）
     const b = binding as Record<string, unknown> | undefined
     return b && typeof b.presetId === 'string' ? b.presetId : undefined
   })
@@ -520,13 +520,13 @@ function forEachReversedParsedEntry(filePath: string, visit: (entry: Record<stri
 }
 
 // 导出（dmg-r1-5 同批）：尾读骨架的同目录复用口——session-model-tail-read.ts（model_change
-// 显式热切尾读提取器，拆出件）import 本函数；消费方收敛在 infra/pi 内部，不外溢 services。
+// 显式热切尾读提取器，拆出件）import 本函数；消费面收敛在 infra/pi 内部，不外溢 services。
 export function scanJsonlFromTail(
   filePath: string,
   visit: (entry: Record<string, unknown>) => boolean,
   opts?: { activePath?: boolean },
 ): void {
-  // [message-revoke U6d] activePath 路径的喂数变换（缺省恒等——照实族 findLastEntryField
+  // [message-revoke U6d] activePath 腿的喂数变换（缺省恒等——照实族 findLastEntryField
   // 零行为变化）：尾读窗口与全量读两段先裁剪再交付；oversize 分块段不裁（活跃路径需
   // 全量 parent 链，分块窗口构造不出——census §7 边界 4 登记口径）
   const scope = (raw: unknown[]): unknown[] => (opts?.activePath === true ? trimFileEntriesToActivePath(raw) : raw)
@@ -579,28 +579,28 @@ function findLastEntryField<R>(
 }
 
 /**
- * 文件源 entries → 活跃路径子集（message-revoke U6d，文件路径裁剪喂数单点）。
+ * 文件源 entries → 活跃路径子集（message-revoke U6d，文件腿裁剪喂数单点）。
  *
- * 步骤（对齐 U6a convertWindowEntries 的文件路径模式，session-history.ts 同款）：
+ * 步骤（对齐 U6a convertWindowEntries 的文件腿模式，session-history.ts 同款）：
  * 1. 剥 session header 行——pi `getEntries()` 本身排除 header（dist/core/session-manager.js
  *    `filter(e => e.type !== 'session')`，0.84.4 实锚），header 是文件级元数据非树节点（有
  *    id 无 parentId）；不剥则 header + 真 根 entry 会被 computeActivePathEntries 的单根
- *    检查判成多根病态树而降级不裁剪（被撤分支照常命中）。
+ *    守卫判成多根病态树而降级不裁剪（被撤分支照常命中）。
  * 2. 取（剥 header 后）**最后一条** entry 的 id 作 leafId——pi 树重放规则（重启后叶子 =
  *    文件最后一条 entry；PS-60 实锚 dist/core/session-manager.js:673 `_buildIndex`
  *    文件序循环置 leafId=entry.id、:616 `_setSessionFile` 加载路径）保证文件尾即活跃
  *    叶子；撤回后 label 锚落文件尾，被撤子树条目按文件序先于 label，经 parentId 回溯滤除。
  *
- * 降级契约（两检查，G2 宁多显不少显——树不可靠时物理序兜底 = 现行为，降级即 warn 留痕，
+ * 降级契约（两守卫，G2 宁多显不少显——树不可靠时物理序兜底 = 现行为，降级即 warn 留痕，
  * 措辞对齐 computeActivePathEntries 的降级口径）：
  * - 末条 entry 无 string id（畸形文件尾 / 全量无 id 的 legacy 形态）→ warn 后不裁剪；
  * - **混合缺 id**（部分 entry 无 id）：真实 pi 文件全部 entry 均带 id（append* 统一
  *   generateId，含 session_info；0.84.4 实锚），混合形态属 legacy/外部产出——树结构不可
- *   靠，warn 后不裁剪（computeActivePathEntries 的派生视图语义会静默滤掉无 id 条目，对字段
+ *   靠，warn 后不裁剪（computeActivePathEntries 的投影语义会静默滤掉无 id 条目，对字段
  *   提取 = 丢数据）。
  *
- * 消费方：extractLatestModelFromJsonl（model binding 随树路径）、plan-state-extractor
- * extractPlanStateFromSessionFile（冷启动路径）。增量/窗口切片语义（链在集合边界终止是正常
+ * 消费方：extractLatestModelFromJsonl（model binding 随树腿）、plan-state-extractor
+ * extractPlanStateFromSessionFile（冷启动腿）。增量/窗口切片语义（链在集合边界终止是正常
  * 边界）由 computeActivePathEntries 契约承载——窗口内活跃链 = 真活跃路径的后缀切片，
  * 逆扫命中语义不损失。
  */
@@ -691,7 +691,7 @@ function scanEntriesReversed(entries: unknown[], collect: (e: Record<string, unk
  * `.model.json` sidecar 切换为 JSONL 真源，U8 随 sidecar 模块退役改为本模块直调）。
  *
  * [message-revoke U6d] 取数改**活跃路径逆读**（等价 pi buildSessionPath 的活跃路径语义，
- * census §4.2 随树路径）：pi 恢复是沿当前分支正序取最后一条（后写覆盖前写）——「物理尾逆读
+ * census §4.2 随树腿）：pi 恢复是沿当前分支正序取最后一条（后写覆盖前写）——「物理尾逆读
  * 与 pi 恢复等价」的不变量**仅线性文件下成立**，分支文件下命中被撤子树的 model_change
  * 即与 pi 真实生效值漂移（被撤回合切过模型的显示残留）。故尾读窗口与 ≤阈值全量两段都先经
  * trimFileEntriesToActivePath（剥 header + 文件尾 leaf 回溯）裁剪再逆扫。
@@ -759,7 +759,7 @@ export function extractLatestModelFromJsonl(filePath: string): { modelId: string
 // 立即 appendFileSync 落盘，session-manager.ts _persist）。
 // [HISTORICAL] 规则 #6 历史包袱：更早的实现（ensureSessionFile 同期）用 openSync(wx)
 // 提前建文件，与 pi _persist 的 openSync("wx") 冲突 → EEXIST → session 永久卡死，
-// 后改为「文件不存在时跳过」检查——该检查语义已由 sidecar 家族
+// 后改为「文件不存在时跳过」守卫——该守卫语义已由 sidecar 家族
 // （persistSessionEnd/persistPresetBinding/persistProjectBinding/persistHandoffSidecar）继承。
 
 /**
@@ -773,7 +773,7 @@ export function extractLatestModelFromJsonl(filePath: string): { modelId: string
  * 活跃交接时源 pi 进程在场，taiji 与 pi 是同文件双写方（违反绝对写规则）。迁 sidecar
  * 后 handedOffTo 是 taiji 自有语义（pi 无 handoff 概念），与 `.meta.json` 家族同构。
  *
- * [规则 #6] JSONL 文件不存在时**绝不创建 sidecar**（与 persistSessionEnd 同检查）：
+ * [规则 #6] JSONL 文件不存在时**绝不创建 sidecar**（与 persistSessionEnd 同守卫）：
  * pi 延迟写入窗口内 existsSync=false → console.warn + 静默跳过。
  * 写后双层缓存失效（sessionMetaCache + scanDirCache，与 persistBindingSidecar 骨架收敛为同一
  * 纪律）：文件级缓存键只含 JSONL 的 mtime/size，sidecar 变更不变 JSONL stat → 不失效命中旧值；
@@ -824,7 +824,7 @@ export function extractHandedOff(filePath: string): string | undefined {
   try {
     const raw = readFileSync(filePath + '.handoff.json', 'utf-8')
     const marker = JSON.parse(raw)
-    // 类型检查：handedOffTo 必须是字符串（sidecar 是文件，内容可能损坏/被篡改）
+    // 类型守卫：handedOffTo 必须是字符串（sidecar 是文件，内容可能损坏/被篡改）
     if (marker && typeof marker.handedOffTo === 'string') {
       return marker.handedOffTo
     }
@@ -956,7 +956,7 @@ export interface ScannedSessionMeta extends ModelBindingFields {
   projectId?: string
   /**
    * session 来源标记（从 .agent.json sidecar 读，agent-managed-session）。
-   * 'agent' 表示由 agent spawn 创建；readAgentBinding 检查收窄枚举（非法值降级 undefined）。
+   * 'agent' 表示由 agent spawn 创建；readAgentBinding 守卫收窄枚举（非法值降级 undefined）。
    * undefined = 非 agent 管理的普通 session。
    */
   spawnSource?: 'user' | 'agent'
@@ -1004,7 +1004,7 @@ export function invalidateSessionMetaCache(filePath: string): void {
  *
  * [message-revoke U6d 已知边界·照实] 本汇总按文件事实提取（census §4.3 + §7 边界 ②）：
  * name / outcome / handedOffTo / 各 binding sidecar 均为已发生事实，撤回不回滚、残影
- * 可接受；唯一随树路径 = model binding（第七读 extractLatestModelFromJsonl，活跃路径逆读）。
+ * 可接受；唯一随树腿 = model binding（第七读 extractLatestModelFromJsonl，活跃路径逆读）。
  *
  * 三读合一（FR-three-read-merge）：原 scanPiSessions 调 parseSessionHeader（全量读首行）
  * + extractSessionName（尾读），scannedToSummary 再调 extractSessionOutcome（第 3 次全量读）。
@@ -1015,8 +1015,8 @@ export function invalidateSessionMetaCache(filePath: string): void {
  * RT-3#1：header 缺 id/cwd（非空字符串）→ fail-fast 返回 null + warn 带路径 + 计入
  * degraded.badHeader。id/cwd 是消费链硬依赖（scannedToSummary 的 basename(cwd)、按
  * cwd 分组键、restore 按 id 定位）——此前 parseSessionHeader 条件赋值不设字段、
- * `as SessionHeader` 收尾，异常发生在**消费**阶段（basename(undefined) TypeError），
- * 扫描侧 catch 拦不住，一个坏文件毒死整个侧栏。出口收尾对齐 import 侧
+ * `as SessionHeader` 收口，异常发生在**消费**阶段（basename(undefined) TypeError），
+ * 扫描侧 catch 拦不住，一个坏文件毒死整个侧栏。出口收口对齐 import 侧
  * parseHeaderFromFirstLine 的「id/cwd 均非空字符串才收录」同款清单（外部文件不修
  * 本体，删/修文件后自动恢复收录）。与「非 session 文件」同不缓存（下次仍尝试）。
  */
@@ -1115,22 +1115,26 @@ export interface ScanSessionsOptions {
 // （session-store / import-service / 测试直接消费）。
 
 /**
- * 最近一轮 sessions 磁盘扫描是否降级不可信（BU5 旗标透出，唯一消费方 = btw 孤儿补账的
- * 不可逆删除闸——deps.isSessionScanDegraded）。
+ * 最近一轮 sessions 磁盘扫描是否降级不可信（BU5 旗标透出）。
+ *
+ * [session-store-layout-inversion] 原唯一消费方 = btw 孤儿补账的不可逆删除闸
+ * （deps.isSessionScanDegraded），随启动孤儿补账模块退役而消失——
+ * 旗标本体暂留（零消费方；退出清理与登记同步归后续登记单元），置位/复位语义不变。
  *
  * 置位时机（scanPiSessionsFromDisk 轮内）：
  * - 顶层 readdir 失败（EACCES/IO）→ 显式降级 return []——与「权威空」在返回值上不可区分，
  *   无旗标时消费方会把冷主会话全部误判「主已删」；
  * - 任一收录降级计数非零（statFail/dirFail/scanFail/badHeader/noHeader）→ 列表可能缺条目
  *   （含 cwd 分组子目录列举失败=整组缺失；单文件读取失败=恰可能遮住主会话文件）。
- *   方向取舍：宁漏删不误删——任一缺条目都可能触发 rm -rf 不可逆面，降级时补账跳过、
- *   改下次启动重试（代价 = 孤儿目录暂时滞留，有 warn 留痕，可恢复）。
+ *   方向取舍：宁漏删不误删——任一缺条目都可能触发 rm -rf 不可逆面，降级时消费方跳过、
+ *   改下次启动重试（代价 = 残留目录暂时滞留，有 warn 留痕，可恢复）。
  * 复位时机：目录不存在（权威空）与全健康轮 → false。TTL 缓存轮不重算（旗标跟随最近一次
- * 真实磁盘扫描轮——启动首扫必为真实轮，补账时序命中）。
+ * 真实磁盘扫描轮——启动首扫必为真实轮）。
  */
 /**
- * 旗标读写侧（消费方：btw 孤儿补账闸，读 `.last`）：导出可变快照对象 = 零访问器行
- *（max-lines 软上限下的紧凑透出），写者唯一 = 本文件；语义/置位复位时机见上方注释。
+ * 旗标读写面（原消费方 = btw 孤儿补账闸，读 `.last`；该补账已随布局反转退役，当前零
+ * 消费方）：导出可变快照对象 = 零访问器行（max-lines 软上限下的紧凑透出），写者唯一 =
+ * 本文件；语义/置位复位时机见上方注释。
  */
 export const scanDegradedFlag = { last: false }
 
@@ -1255,7 +1259,7 @@ function scanPiSessionsFromDisk(sessionsDir: string): ScannedSessionMeta[] {
   }
 
   logScanDegradedSummary(degraded)
-  // [BU5] 轮末降级旗标：任一收录降级 = 列表可能缺条目（语义与消费方见 scanDegradedFlag；
+  // [BU5] 轮末降级旗标：任一收录降级 = 列表可能缺条目（语义与消费面见 scanDegradedFlag；
   // 目录不存在的权威空由上方复位保持 false，顶层 readdir 失败在 catch 内置 true 提前返回）。
   scanDegradedFlag.last = hasScanDegradation(degraded)
 

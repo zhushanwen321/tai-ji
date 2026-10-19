@@ -24,7 +24,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { mkdtempSync, readdirSync, readFileSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
-import { join } from 'node:path'
+import { basename, join } from 'node:path'
 import { gunzipSync } from 'node:zlib'
 
 type LoggerModule = typeof import('../logger.js')
@@ -66,9 +66,23 @@ async function waitFor(desc: string, predicate: () => boolean, deadlineMs = 5000
   }
 }
 
-/** logs 目录下文件名含 marker 的全部条目（排序；main 日志 runtime-* 不含 sid marker 天然排除）。 */
-function filesWithMarker(marker: string): string[] {
-  return readdirSync(logsDirPath).filter((f) => f.includes(marker)).sort()
+/**
+ * 收集目标目录下文件名含 marker 的全部条目（绝对路径，排序）。
+ *
+ * 布局反转（session-store-layout-inversion 域 11）：session tee 落树内
+ * `<root>/<sid>/logs/`（文件名去 sid，marker 不再能按文件名命中 sid）——断言按
+ * sid 定位树内目录；全局 logs 仍兜底扫描（relay 等无归属形态）。
+ */
+function filesWithMarker(marker: string, sid?: string): string[] {
+  const dirs = [logsDirPath]
+  if (sid !== undefined) dirs.push(join(dataDir, 'ext-sessions', sid, 'logs'))
+  return dirs.flatMap((dir) => {
+    try {
+      return readdirSync(dir).filter((f) => f.includes(marker)).map((f) => join(dir, f))
+    } catch {
+      return [] // 目录未建（无写入）= 无匹配文件
+    }
+  }).sort()
 }
 
 /** 以指定 env 重新加载 logger 模块（MAX_FILE_BYTES 等模块级常量在 import 时读 env）。 */
@@ -79,14 +93,14 @@ async function loadLogger(env: Record<string, string> = {}): Promise<LoggerModul
   return import('../logger.js')
 }
 
-/** 读主档按行拆分（trim 后过滤空行）。 */
-function readLines(name: string): string[] {
-  return readFileSync(join(logsDirPath, name), 'utf8').trim().split('\n').filter((l) => l.trim())
+/** 读主档按行拆分（入参 = filesWithMarker 返回的绝对路径；trim 后过滤空行）。 */
+function readLines(full: string): string[] {
+  return readFileSync(full, 'utf8').trim().split('\n').filter((l) => l.trim())
 }
 
 /** 解压 .1.gz 旋段并按行拆分（轮转产物必须仍是逐行可解析的诊断证据）。 */
-function gunzipLines(name: string): string[] {
-  return gunzipSync(readFileSync(join(logsDirPath, name))).toString('utf8').trim().split('\n').filter((l) => l.trim())
+function gunzipLines(full: string): string[] {
+  return gunzipSync(readFileSync(full)).toString('utf8').trim().split('\n').filter((l) => l.trim())
 }
 
 /** 按行提取 JSON 行内 "i":N 序号（行级连续性断言用）。 */
@@ -147,16 +161,17 @@ describe('pi tee size 轮转（D7，.1.gz 口径）', () => {
     sessionLog.end()
     await logger.closeLogger()
 
-    const files = filesWithMarker(sid)
+    const files = filesWithMarker('pi-', sid)
     const rolled = files.filter((f) => f.endsWith('.jsonl.1.gz'))
     const main = files.filter((f) => f.endsWith('.jsonl') && !f.endsWith('.1.gz'))
     expect(rolled).toHaveLength(1) // gzip 单代：多轮轮转后 rename 原子覆盖，不无限累积
     expect(main).toHaveLength(1)
     expect(files).toHaveLength(2)
     // pi- 前缀不变量（架构 D6③）：旋段以 pi- 开头 = cleanExpiredLogs 白名单
-    // （startsWith('pi-')）可命中，旋段不会成为无清理写侧
-    for (const f of files) expect(f.startsWith('pi-')).toBe(true)
-    expect(rolled[0]).toMatch(/^pi-.*\.jsonl\.1\.gz$/)
+    // （startsWith('pi-')）可命中，旋段不会成为无清理写入面
+    for (const f of files) expect(basename(f).startsWith('pi-')).toBe(true)
+    // gzip 命名组合（布局反转检查点 8 前半）：文件名去 sid 后旋段 = pi-<date>.jsonl.1.gz
+    expect(basename(rolled[0])).toMatch(/^pi-[0-9]{4}-[0-9]{2}-[0-9]{2}\.jsonl\.1\.gz$/)
     // 跨段行级连续：.1.gz 解压段（旧段）+ 主档（新段）拼接无缺行、单调递增、止于最后写入行
     const indices = [...gunzipLines(rolled[0]), ...readLines(main[0])].flatMap((l) => extractIndices(l))
     expect(indices.length).toBeGreaterThanOrEqual(10) // 末段 ≈20 行（余量见上方口径注释）
@@ -176,15 +191,15 @@ describe('pi tee size 轮转（D7，.1.gz 口径）', () => {
       await settleWrite()
     }
     // 等 .1.gz 旋段出现且轮转续体收敛（新流已重开、窗口行已回放）
-    await waitFor(`.jsonl.1.gz segment for ${sid}`, () => filesWithMarker(sid).some((f) => f.endsWith('.jsonl.1.gz')))
+    await waitFor(`.jsonl.1.gz segment for ${sid}`, () => filesWithMarker('pi-', sid).some((f) => f.endsWith('.jsonl.1.gz')))
     await settleWrite()
     // 轮转之后的尾部行必须写进轮转后的新流（注册表 stream 引用已更新）
     sessionLog.write('{"tail":"after-rotation-final-line"}')
     sessionLog.end()
     await logger.closeLogger()
 
-    const rolled = filesWithMarker(sid).find((f) => f.endsWith('.jsonl.1.gz'))!
-    const main = filesWithMarker(sid).find((f) => f.endsWith('.jsonl') && !f.endsWith('.1.gz'))!
+    const rolled = filesWithMarker('pi-', sid).find((f) => f.endsWith('.jsonl.1.gz'))!
+    const main = filesWithMarker('pi-', sid).find((f) => f.endsWith('.jsonl') && !f.endsWith('.1.gz'))!
     const rolledContent = gunzipLines(rolled).join('\n')
     const mainContent = readLines(main).join('\n')
     expect(rolledContent).toContain('"i":0') // 早期行在旧段
@@ -213,8 +228,8 @@ describe('pi tee size 轮转（D7，.1.gz 口径）', () => {
     expect(rolled).toHaveLength(1)
     expect(main).toHaveLength(1)
     // pi-subagent- 前缀保持（旋段仍以 pi- 开头 = 保留期清理白名单可命中）
-    for (const f of files) expect(f.startsWith('pi-subagent-')).toBe(true)
-    for (const f of rolled) expect(f.startsWith('pi-')).toBe(true)
+    for (const f of files) expect(basename(f).startsWith('pi-subagent-')).toBe(true)
+    for (const f of rolled) expect(basename(f).startsWith('pi-')).toBe(true)
     const all = [...rolled.map((f) => gunzipLines(f).join('\n')), ...main.map((f) => readLines(f).join('\n'))].join('\n')
     expect(all).toContain('"raw":"bytes-chunk"') // Uint8Array chunk 亦随轮转落盘不丢
   })

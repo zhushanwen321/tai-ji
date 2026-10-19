@@ -1,11 +1,11 @@
 // src/execution/__tests__/record-origin.test.ts
 //
 // record 来源身份 origin/parentRunId（H2 W1，设计 subagent-workflow-record-unification
-// §3.3 D1）持久化链 + 查询范围 + 治理侧负向规格。
+// §3.3 D1）持久化链 + 查询面 + 治理面负向规格。
 //
 // v2 单形态（W1 [D1]）：主 session 条目 = 注册（身份域）+ 终态（终局域）两条小条目，
-// 身份域 origin/parentRunId/stepIndex 只落在注册条目；v1 全量快照写点与读侧已随兼容层
-// 删除（登记 §3.3），本文件同步到 v2 播种形态与断言范围。
+// 身份域 origin/parentRunId/stepIndex 只落在注册条目；v1 全量快照写点与读面已随兼容层
+// 删除（登记 §3.3），本文件同步到 v2 播种形态与断言面。
 //
 // 锁四件事：
 //   1. 持久化链往返保真：register/archive 真实落盘（appendEntry 通路）→
@@ -14,10 +14,10 @@
 //      一律来自 store.register / store.archive 的真实落盘产物。
 //   2. 缺省负向：无 origin 的存量 record 落 v2 注册条目 origin="tool"（必填域归一），
 //      可选域 parentRunId/stepIndex 序列化自然缺省（零迁移）。
-//   3. 查询范围：collectRecords 缺省过滤 origin==="workflow"（includeWorkflow 缺省
+//   3. 查询面：collectRecords 缺省过滤 origin==="workflow"（includeWorkflow 缺省
 //      false）、includeWorkflow:true 放行；collectRecordsByParentRunId 按 run id
 //      精确列 record（内存 ∪ 磁盘重建口径，不过滤 origin）。
-//   4. 治理侧负向保证（D1⑥）：recoverEntryOnlyOrphans / 重建派生视图不因 origin 过滤——
+//   4. 治理面负向保证（D1⑥）：recoverEntryOnlyOrphans / 重建投影不因 origin 过滤——
 //      workflow 来源的 entry-only 孤儿（注册条目已在主 session、无事件文件、无子文件锚）
 //      照样被终态化收敛；身份域留在注册条目，纠偏只追加终态条目。
 
@@ -104,7 +104,7 @@ describe("record origin/parentRunId 持久化链（H2 W1）", () => {
   });
 
   it("[W1/D1] v2 注册条目携带 origin/parentRunId；注册 + 终态成对落盘经真实重建路径读回不丢", () => {
-    const store = new RecordStore(tmpDir);
+    const store = new RecordStore(() => tmpDir);
     const captured: SubagentRecordEntryV2[] = [];
     store.setPi(makeCapturePi(captured));
 
@@ -139,13 +139,13 @@ describe("record origin/parentRunId 持久化链（H2 W1）", () => {
   });
 
   it("[W1/D1] 缺省归一：无 origin 的 record 落 v2 注册条目 origin=\"tool\"（必填域归一，parentRunId 缺省不含键）", () => {
-    const store = new RecordStore(tmpDir);
+    const store = new RecordStore(() => tmpDir);
     const captured: SubagentRecordEntryV2[] = [];
     store.setPi(makeCapturePi(captured));
 
     store.register(makeRecord({ id: "legacy-1" }));
     expect(captured).toHaveLength(1);
-    // v2 契约 origin 必填：undefined 归一 "tool"（消费方负向判定零迁移）；可选域
+    // v2 契约 origin 必填：undefined 归一 "tool"（消费面负向判定零迁移）；可选域
     // parentRunId 经序列化自然缺省（断言序列化后形态——内存对象保留 undefined 键名）。
     const persisted = JSON.parse(JSON.stringify(captured[0])) as Record<string, unknown>;
     expect(persisted.kind).toBe("registered");
@@ -153,8 +153,8 @@ describe("record origin/parentRunId 持久化链（H2 W1）", () => {
     expect(Object.keys(persisted)).not.toContain("parentRunId");
   });
 
-  it("重建派生视图不过滤（D1⑤）：workflow 来源 record 经内存源派生视图全量返回（includeWorkflow 通道）", () => {
-    const store = new RecordStore(tmpDir);
+  it("重建投影不过滤（D1⑤）：workflow 来源 record 经内存源投影全量返回（includeWorkflow 通道）", () => {
+    const store = new RecordStore(() => tmpDir);
     store.register(makeRecord({ id: "wf-step-2", origin: "workflow", parentRunId: "wf-run-2" }));
     const all = store.collectRecords(50, "all", "sess-origin", true);
     expect(all.map((r) => r.id)).toContain("wf-step-2");
@@ -162,7 +162,7 @@ describe("record origin/parentRunId 持久化链（H2 W1）", () => {
   });
 
   it("[W0 / D1] stepIndex 往返保真：register 落盘 entry 含字段，真实重建路径读回不丢", () => {
-    const store = new RecordStore(tmpDir);
+    const store = new RecordStore(() => tmpDir);
     const captured: SubagentRecordEntryV2[] = [];
     store.setPi(makeCapturePi(captured));
 
@@ -186,7 +186,7 @@ describe("record origin/parentRunId 持久化链（H2 W1）", () => {
   });
 
   it("[W0 / D1·W1 v2] stepIndex 缺省负向：无字段 record 落 v2 条目不含键（序列化自然缺省）", () => {
-    const store = new RecordStore(tmpDir);
+    const store = new RecordStore(() => tmpDir);
     const captured: SubagentRecordEntryV2[] = [];
     store.setPi(makeCapturePi(captured));
 
@@ -197,7 +197,7 @@ describe("record origin/parentRunId 持久化链（H2 W1）", () => {
   });
 });
 
-describe("collectRecords includeWorkflow 查询范围（H2 W1）", () => {
+describe("collectRecords includeWorkflow 查询面（H2 W1）", () => {
   let rootDir: string;
   let tmpDir: string;
 
@@ -211,7 +211,7 @@ describe("collectRecords includeWorkflow 查询范围（H2 W1）", () => {
   });
 
   function makeStore(): RecordStore {
-    return new RecordStore(tmpDir);
+    return new RecordStore(() => tmpDir);
   }
 
   it("缺省过滤 origin=workflow（tool record 可见），includeWorkflow:true 放行", () => {
@@ -283,7 +283,7 @@ describe("collectRecords includeWorkflow 查询范围（H2 W1）", () => {
   });
 });
 
-describe("治理侧负向规格（D1⑥：恢复链对 workflow origin 全量可见，禁止过滤）", () => {
+describe("治理面负向规格（D1⑥：恢复链对 workflow origin 全量可见，禁止过滤）", () => {
   let rootDir: string;
   let tmpDir: string;
 
@@ -297,7 +297,7 @@ describe("治理侧负向规格（D1⑥：恢复链对 workflow origin 全量可
   });
 
   it("recoverEntryOnlyOrphans：workflow origin 的 entry-only 孤儿照样纠偏（v2 终态条目），身份域留在注册条目", () => {
-    // v2 entry-only 孤儿形态：主 session 只有注册条目（running，未收尾），无事件文件、
+    // v2 entry-only 孤儿形态：主 session 只有注册条目（running，未收口），无事件文件、
     // 无子 session 文件锚——正是 recoverEntryOnlyOrphans 的判定域。
     const orphan = makeRecord({ id: "wf-orphan", origin: "workflow", parentRunId: "run-G" });
     const registered = v2RegisteredEntry(recordToSubagent(orphan));
@@ -308,11 +308,11 @@ describe("治理侧负向规格（D1⑥：恢复链对 workflow origin 全量可
 
     // 新 store（模拟重启后内存恒空）执行恢复链
     const recovered: SubagentRecordEntryV2[] = [];
-    const store2 = new RecordStore(tmpDir);
+    const store2 = new RecordStore(() => tmpDir);
     store2.setPi(makeCapturePi(recovered));
     store2.recoverEntryOnlyOrphans(mainFile, "sess-origin");
 
-    // 治理侧不过滤：workflow origin 孤儿照样被终态化收敛（一律 idle + interrupted-by-restart，
+    // 治理面不过滤：workflow origin 孤儿照样被终态化收敛（一律 idle + interrupted-by-restart，
     // 不直断 closed+gc）
     expect(recovered).toHaveLength(1);
     const finalized = recovered[0]?.kind === "settled" ? recovered[0] : undefined;
@@ -338,7 +338,7 @@ describe("治理侧负向规格（D1⑥：恢复链对 workflow origin 全量可
   it("[v2/D1] 条目 schema 面：注册条目透传 origin/parentRunId/stepIndex，终态条目收敛终局域（写入侧单点）", () => {
     // 直连写入侧单点的补充断言（往返用例已锁全链，此处锁两族条目的字段白名单本身）。
     // 入参 = 真实 register/archive 落盘产物（不手搓 entry data 绕过写侧 schema）。
-    const store = new RecordStore(tmpDir);
+    const store = new RecordStore(() => tmpDir);
     const captured: SubagentRecordEntryV2[] = [];
     store.setPi(makeCapturePi(captured));
 

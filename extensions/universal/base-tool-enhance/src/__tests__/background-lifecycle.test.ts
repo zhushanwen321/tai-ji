@@ -11,12 +11,8 @@ import { afterAll, afterEach, beforeEach, describe, expect, it, vi } from "vites
 vi.setConfig({ testTimeout: 20000 });
 
 // getAgentDir → 测试临时数据目录（工具 execute 内部调用，不写真 ~/.pi/agent）。
-// hoisted 回调里不能引用顶层 import（初始化顺序），用可变引用在 import 完成后注入
-const { dataDirRef } = vi.hoisted(() => ({ dataDirRef: { dir: "" } }));
-vi.mock("@earendil-works/pi-coding-agent", () => ({
-	getAgentDir: () => dataDirRef.dir,
-}));
-
+// [session-store-layout-inversion 域 5] 工具的 dataDir 来源已换为 resolveTaijiDataDir()
+// （env 注入）——getAgentDir mock 随换根退役，改 beforeEach stubEnv + afterEach 还原。
 // 进程原语（ext-simplify-13 后单点在 protocol 子出口）转发真实杀 + 记录调用
 //（timeout 分支断言 killProcessTree 被调）
 const { killTreeCalls } = vi.hoisted(() => ({ killTreeCalls: [] as number[] }));
@@ -46,10 +42,14 @@ import { clearTaskStoreForTest, getActiveTasks, getTask, markKillingIntent } fro
 import { reapBackgroundTasksNow, resetProcessExitGuardForTest } from "../background/process-exit-guard.ts";
 
 const DATA_DIR = mkdtempSync(join(tmpdir(), "bte-data-"));
-dataDirRef.dir = DATA_DIR;
 
 const SESSION_ID = "sess-lifecycle";
 const REGISTRY_PATH = getRegistryPath(DATA_DIR, SESSION_ID);
+
+beforeEach(() => {
+	// 工具 execute 的 dataDir 来源 = resolveTaijiDataDir()（env，域 5 换根）
+	vi.stubEnv("TAIJI_AGENT_DATA_DIR", DATA_DIR);
+});
 
 function makeCtx(sessionId: string = SESSION_ID): { cwd: string; sessionManager: { getSessionId: () => string } } {
 	return { cwd: process.cwd(), sessionManager: { getSessionId: () => sessionId } };
@@ -124,6 +124,8 @@ beforeEach(() => {
 });
 
 afterEach(() => {
+	// env stub 逐用例还原（防同 worker 跨文件残留）
+	vi.unstubAllEnvs();
 	// 残留活跃任务先杀干净再清表（防句柄/进程泄漏影响后续测试）
 	for (const task of getActiveTasks()) {
 		try {

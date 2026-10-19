@@ -69,7 +69,7 @@ import * as os from "node:os";
 import * as path from "node:path";
 
 import { isProcessAlive } from "../persistence/alive-store.ts";
-import { encodeCwd } from "../assembly/path-encoding.ts";
+import { encodeCwd } from "@taiji/shared/paths";
 import { WorktreeManager, addWorktreeWithStaleRecovery, type WorktreeGitRunner } from "../worktree/worktree-manager.ts";
 
 // 被测链路（gitRunAsync）调用四参形态（file, args, options, callback）；vi.mocked

@@ -26,7 +26,7 @@
  */
 import { existsSync } from 'node:fs'
 import { mkdir, readFile, stat, writeFile } from 'node:fs/promises'
-import { join, isAbsolute } from 'node:path'
+import { join, dirname, isAbsolute } from 'node:path'
 import { homedir } from 'node:os'
 import { toErrorMessage } from '@zhushanwen/pi-ext-guards'
 import { getLogger } from '@zhushanwen/pi-extension-logger'
@@ -912,7 +912,7 @@ async function doSearch(
 /** export full 模式的 entry 分隔线（'=' 重复）宽度。 */
 const EXPORT_SEPARATOR_LEN = 40
 
-/** export：物化摘要到 <agentDir>/tmp/session-view-<id>.md（design §3.4 export，D-8）。 */
+/** export：物化摘要到 <dataDir>/ext-sessions/<id>/session-view.md（session-store-layout-inversion 域 6；文件名去 sid——sid 已在路径）。 */
 async function doExport(
   params: SessionReadParams,
   agentDir: string,
@@ -972,8 +972,16 @@ async function doExport(
     label = 'outline'
   }
 
-  const outDir = join(agentDir, 'tmp')
-  const outPath = join(outDir, `session-view-${resolved.sessionId}.md`)
+  // [session-store-layout-inversion 域 6] 导出落 session 存储树（<root>/<sid>/session-view.md，
+  // 文件名去 sid——sid 已在路径）：基址 = agentDir 剥一层（taiji dataDir，托管态
+  // PI_CODING_AGENT_DIR = <dataDir>/agent）。session-reader 零 shared 依赖（extension 包
+  // 边界），公式与 shared getSessionViewPath 同字面镜像；sessionId 过 isPiSessionId 同域
+  // 校验（解析器产出的 sid 正常路径恒合法，此处是路径穿越纵深防线）。
+  if (!/^[A-Za-z0-9](?:[A-Za-z0-9._-]*[A-Za-z0-9])?$/.test(resolved.sessionId)) {
+    throw err(`导出拒绝：sessionId 形态非法（${resolved.sessionId}）👉 检查 session 参数或用 find 重新定位`)
+  }
+  const outDir = join(dirname(agentDir), 'ext-sessions', resolved.sessionId)
+  const outPath = join(outDir, 'session-view.md')
   await mkdir(outDir, { recursive: true })
   await writeFile(outPath, text, 'utf8')
   const sizeBytes = Buffer.byteLength(text, 'utf8')

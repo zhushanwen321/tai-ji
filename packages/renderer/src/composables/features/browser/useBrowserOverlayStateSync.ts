@@ -31,8 +31,8 @@ export function useBrowserOverlayStateSync(): void {
         ? {
           open: true,
           content: cur.kind,
-          // canvas 内容跨 session 无会话归属（problem-solve-canvas D4/D7）——上报 null；
-          // 其余三类载荷都持发起 sessionId
+          // canvas 内容不驱动 browser view 显示谓词 → 谓词 sessionId 恒 null（u-canvas 后
+          // payload 已持归属会话，此处 null 是显示谓词面的刻意常量，非「画布无归属」）
           sessionId: cur.kind === 'canvas' ? null : cur.payload.sessionId,
         }
         : { open: false, content: null, sessionId: null },

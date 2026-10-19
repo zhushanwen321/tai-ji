@@ -1,101 +1,94 @@
 // src/core/path-encoding.ts
 //
-// cwd → 安全目录名的编码逻辑。Core 叶子原语（零依赖）。
+// subagent 文件族（sessions / records / model-switch）的目录推导。
 //
-// 被 session-runner（subagent session 持久化目录）与 runtime 删会话级联
-// （session-content-cascade 的族枚举按同一 <enc> 布局寻址）等消费方共用——
-// 编码漂移会让同一 cwd 落到两个不同目录。
+// [session-store-layout-inversion D2/D3] 分区键 = rootSessionId（ExecutionRecord 自带
+// 字段，record-model.ts；嵌套派发全层同值——子进程经 PI_SUBAGENT_ROOT_SESSION_ID env
+// 贯穿拿到真 ROOT sid）。落点 = session 存储树内 `<root>/<rootSessionId>/subagents/`
+// （<root> = shared getSessionStoreDir，即 `<dataDir>/ext-sessions/`）——目录绑定
+// session 生命周期，删除随整树回收。旧布局 `<agentDir>/subagents/<encodeCwd>/`
+// （cwd 分区）已退役，存量不迁移（设计裁决 11）。
+//
+// 公式消费 shared 新函数族（subagent-core 直接 import @taiji/shared，非镜像场景；
+// shared getDataDir 读 TAIJI_AGENT_DATA_DIR，taiji 生产链经 ENV_WHITELIST_PREFIXES
+// 注入 pi/引擎进程，裸跑落缺省 dev 树）。encodeCwd 分区键随 D3 消除，本文件不再
+// 持有编码逻辑（runtime pi-paths 的 encodeCwd re-export 源头在 shared）。
 
-import * as path from "node:path";
-
-/**
- * cwd → 安全目录名。复用 Pi SDK getDefaultSessionDir 的编码逻辑：
- * 去开头单个分隔符，全量替换剩余分隔符/冒号为 `-`，首尾补 `--`。
- * 例：`/Users/x/proj` → `--Users-x-proj--`。
- */
-export function encodeCwd(cwd: string): string {
-  return "--" + cwd.replace(/^[/\\]/, "").replace(/[/\\:]/g, "-") + "--";
-}
+import {
+  getSessionSubagentMessageDir,
+  getSessionSubagentModelSwitchDir,
+  getSessionSubagentRecordsDir,
+  getSessionSubagentSessionsDir,
+} from "@taiji/shared/paths";
 
 /**
  * 获取 subagent session 持久化目录路径。
  *
- * C-ext-21（跨包隐式契约）：本函数产出的 `subagents/<enc>/sessions` 路径形态被
+ * `<root>/<rootSessionId>/subagents/sessions/`——子代理会话 jsonl 本体（pi 经
+ * `--session-dir` 写入）与 worktree `.patch` 备份（worktree-patch-collection 落盘）
+ * 同目录。
+ *
+ * C-ext-21（跨包隐式契约）：本函数产出的 `subagents/sessions` 路径形态被
  * extensions/universal/rename-session/src/llm.ts 的 isSubagentSession 嗅探
  * （路径含 `<sep>subagents<sep>` 段 → 判为 subagent 会话并跳过重命名）——改本布局
  * （移动/改名 subagents 段）必须同步该嗅探逻辑，反之亦然；约束登记见
  * docs/constraints.json C-ext-21。
  *
- * D-004: 用主 cwd 编码——保证同一主 cwd 下所有 subagent 的 session 文件
- * 存放在同一目录（enc 段不变量：磁盘重建扫描与删会话级联枚举都依赖它）。
- * [MF-3] worktree 模式下调用方必须传树根 cwd（ROOT mainCwd，经 PI_SUBAGENT_ROOT_CWD
- * 贯穿），不能传子进程自身的 checkout 路径——否则深层 record 落盘到 enc(worktree) 段，
- * ROOT 磁盘重建扫不到（全树可见性断裂）。根进程传自身 cwd（行为不变）。
- *
- * @param agentDir agent 配置目录（如 ~/.pi/agent）
- * @param mainCwd 树根主 agent 的工作目录（非 subagent 的 effectiveCwd；worktree 模式下
- *   是 ROOT 的 cwd，不是 checkout 路径）
+ * @param rootSessionId 根会话 id（分区键；同域校验由 shared 层承担，非法 throw）
+ * @param dataDir 可选数据根目录（测试注入）；缺省读 shared getDataDir()
  * @returns session 持久化目录绝对路径
  */
-export function getSubagentSessionDir(agentDir: string, mainCwd: string): string {
-  // [MF#1] 保持既有布局 subagents/<enc>/sessions/——曾改为 subagents/sessions/<enc>/ 会让
-  // 升级用户的既有 session 文件全部落到扫描目录外（历史记录消失 + GC 扫不到，双重 orphan）。
-  // 本分支未发布，回退到既有布局即无需迁移、无数据丢失。
-  return path.join(agentDir, "subagents", encodeCwd(mainCwd), "sessions");
+export function getSubagentSessionDir(rootSessionId: string, dataDir?: string): string {
+  return getSessionSubagentSessionsDir(rootSessionId, dataDir);
 }
 
 /**
  * 获取 subagent records（manifest）持久化目录路径。
  *
- * 与 getSubagentSessionDir 同用 encodeCwd(mainCwd)，保证 records 与 sessions 在同一
- * <enc> 段下物理相邻。
- * [MF-3] 调用方必须与 getSubagentSessionDir 传同一编码键（进程内 init.cwd /
- * buildSessionRunnerContext.mainCwd / record.worktreeHandle.mainCwd 恒等；worktree 模式
- * 跨进程时统一用贯穿的 ROOT cwd）——sessions 与 records 两套目录同段，GC/重建才不会
- * 互相找不到（enc 段不变量）。
+ * 与 getSubagentSessionDir 同分区键（rootSessionId），保证 records 与 sessions 在
+ * 同一棵会话树内物理相邻（随整树同生共死）。
  *
- * D-004 同源：用主 cwd 编码做物理隔离，使删主会话级联（runtime
- * session-content-cascade）按 <enc>/records/ 子目录匹配 manifest .json 时天然限定在
- * 当前 cwd 范围内，不会越界删除其他 cwd 的 manifest。
- *
- * @param agentDir agent 配置目录（如 ~/.pi/agent）
- * @param mainCwd 树根主 agent 的工作目录（非 subagent 的 effectiveCwd；worktree 模式下
- *   是 ROOT 的 cwd，不是 checkout 路径）
+ * @param rootSessionId 根会话 id（与 getSubagentSessionDir 同一取值——record 的
+ *   rootSessionId 字段 / env 贯穿值；两目录必须同树，否则 GC/重建互相找不到）
+ * @param dataDir 可选数据根目录（测试注入）；缺省读 shared getDataDir()
  * @returns records 持久化目录绝对路径
  */
-export function getSubagentRecordsDir(agentDir: string, mainCwd: string): string {
-  return path.join(agentDir, "subagents", encodeCwd(mainCwd), "records");
+export function getSubagentRecordsDir(rootSessionId: string, dataDir?: string): string {
+  return getSessionSubagentRecordsDir(rootSessionId, dataDir);
 }
 
 /**
  * 获取 subagent 模型切换请求结果目录（subagent-model-switch §7.1.1 通道回执载体）。
  *
- * 布局 = `<subagent 数据根>/model-switch/`——数据根与 getSubagentRecordsDir 同族
- * （同 (agentDir, mainCwd) 入参、同 enc 段），extension（/subagent-model 命令写入侧）
- * 与 runtime（SubagentModelSwitchGateway 读取侧）两侧 import 本单源，路径同源性由
- * 结构保证（与 records 通道同款理由）。文件形态 = `<requestId>.json`，请求作用域
- * 生命周期（写后读、读后即删，§7.1.1 要素 4）。
+ * 布局 = `<root>/<rootSessionId>/subagents/model-switch/`——与 records/sessions 同
+ * 会话树分区。extension（/subagent-model 命令写入侧）与 runtime
+ * （SubagentModelSwitchGateway 读取侧）两侧 import 本单源，路径同源性由结构保证
+ * （与 records 通道同款理由）。文件形态 = `<requestId>.json`，请求作用域生命周期
+ * （写后读、读后即删，§7.1.1 要素 4）。
  *
- * @param agentDir agent 配置目录（如 ~/.pi/agent）
- * @param mainCwd 树根主 agent 的工作目录（与 getSubagentRecordsDir 同一编码键）
+ * @param rootSessionId 根会话 id（写侧 = 宿主进程当前 session id；读侧 = 目标会话 id）
+ * @param dataDir 可选数据根目录（测试注入）；缺省读 shared getDataDir()
  * @returns 模型切换结果目录绝对路径
  */
-export function getSubagentModelSwitchResultsDir(agentDir: string, mainCwd: string): string {
-  return path.join(agentDir, "subagents", encodeCwd(mainCwd), "model-switch");
+export function getSubagentModelSwitchResultsDir(rootSessionId: string, dataDir?: string): string {
+  return getSessionSubagentModelSwitchDir(rootSessionId, dataDir);
 }
 
 /**
  * 获取 subagent 定向消息请求结果目录（subagent-composer 2026-10-18，通道回执载体——
  * /subagent-model 结果文件同款机制：client.prompt 对命令 handler 异常不拒绝（真机实测），
- * 失败必须经请求作用域结果文件传回）。布局 = `<subagent 数据根>/message/`，数据根与
- * getSubagentRecordsDir 同族（同 (agentDir, mainCwd) 入参、同 enc 段），extension
- * （/subagents message 写入侧）与 runtime（session-records 读取侧）两侧 import 本单源。
+ * 失败必须经请求作用域结果文件传回）。
+ *
+ * 与 getSubagentRecordsDir 同分区键（rootSessionId），保证 message 回执与 records 在
+ * 同一棵会话树内物理相邻（随整树同生共死——旧 (agentDir, mainCwd) 键随 D3 消除，
+ * 回执文件落 agentDir 会成为树删后的孤儿）。extension（/subagents message 写入侧）
+ * 与 runtime（session-records 读取侧）两侧 import 本单源，路径同源性由结构保证。
  * 文件形态 = `<requestId>.json`，请求作用域生命周期（写后读、读后即删）。
  *
- * @param agentDir agent 配置目录（如 ~/.pi/agent）
- * @param mainCwd 树根主 agent 的工作目录（与 getSubagentRecordsDir 同一编码键）
+ * @param rootSessionId 根会话 id（写侧 = 宿主进程 resolveRootSessionId；读侧 = 当前会话 id）
+ * @param dataDir 可选数据根目录（测试注入）；缺省读 shared getDataDir()
  * @returns 定向消息结果目录绝对路径
  */
-export function getSubagentMessageResultsDir(agentDir: string, mainCwd: string): string {
-  return path.join(agentDir, "subagents", encodeCwd(mainCwd), "message");
+export function getSubagentMessageResultsDir(rootSessionId: string, dataDir?: string): string {
+  return getSessionSubagentMessageDir(rootSessionId, dataDir);
 }

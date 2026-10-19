@@ -13,7 +13,7 @@
 import { bestEffort } from "../assembly/best-effort.ts";
 import { isLegacyClosedSettled } from "../persistence/execution-record.ts";
 import { findRunSettlementEvidence, type RunSettlementEvidence } from "../persistence/run-state-evidence.ts";
-import { resolvePiWorkflowStateDir } from "../assembly/workflow-state-root.ts";
+import { resolvePiWorkflowRunsDir } from "../assembly/workflow-state-root.ts";
 import type { PiLike } from "../notify/notify-host.ts";
 import type { RecordStore } from "../persistence/record-store.ts";
 import { runReconcileSweep, type SupervisedRecordState } from "./reconcile-sweep.ts";
@@ -44,6 +44,8 @@ export interface ReconcileSweepBinding { // oe-exempt:20260928:framework:sweep �
   getPi(): PiLike | null;
   /** 主 session 文件（sweep 差集输入源；未 flush/未知时 undefined = 空跑）。 */
   getMainSessionFile(): string | undefined;
+  /** 当前 rootSessionId（run 域 state 目录分区键；initSession 后即有值）。 */
+  getRootSessionId(): string;
 }
 
 /**
@@ -64,10 +66,11 @@ export function runPendingReconcileSweepForService(binding: ReconcileSweepBindin
     // persistence/run-state-evidence.ts）——判定核以 stateDir 直接参数化。
     // 目录解析每轮 sweep 一次、闭包内复用。
     // [F-1 修复] stateDir 必须与 pi 壳 JsonlRunStore 的落盘布局同源
-    //（<sessionDir>/workflow-state/，推导 = resolvePiWorkflowStateDir）——与 pi
-    // 生产落盘不相交的目录会致判据两证据面恒 missing → sweep 按终态补注销活跃
-    // run（装配错位事故）。
-    const workflowStateDir = resolvePiWorkflowStateDir();
+    //（`<root>/<rootSid>/workflow/runs/`，推导 = resolvePiWorkflowRunsDir——
+    //[session-store-layout-inversion D2/D3] 分区键 rootSessionId 经 binding 注入）
+    // ——与 pi 生产落盘不相交的目录会致判据两证据面恒 missing → sweep 按终态补注销
+    // 活跃 run（装配错位事故）。
+    const workflowStateDir = resolvePiWorkflowRunsDir(binding.getRootSessionId());
     runReconcileSweep({
       sessionFile: binding.getMainSessionFile(),
       lookupRecordState: (id) => {

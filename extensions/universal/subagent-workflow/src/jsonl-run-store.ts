@@ -9,7 +9,7 @@
  * 依赖 @earendil-works/pi-coding-agent 的 ExtensionAPI/ExtensionContext（Infra 允许 Pi SDK）。
  *
  * 介质形态（[D1] record 单源存储收敛，设计 workflow-run-resume-revision §3.3 D1）：
- * - **唯一事实源 = record 事件流**（`<sessionDir>/workflow-state/<runId>.record.jsonl`，
+ * - **唯一事实源 = record 事件流**（`<root>/<rootSid>/workflow/runs/<runId>.record.jsonl`，
  *   append-only，core worker-message-pump 单写者 + 收编入口追加）：`run-created`
  *   携带 scriptSource 全文、`agent-settled` 携带 result 全文；lifecycle/终局/calls
  *   全部是 fold 内存派生视图，重启即从 record 重建。
@@ -34,7 +34,7 @@
  * - **save = 显式 no-op**：run 域状态变化的持久化 = 事件追加（core 单写者链），
  *   壳侧无派生视图可写。方法保留 = RunStore port 契约（core 调用点不改）。
  *
- * 磁盘足迹（[S3 查证结论沿用] pi 不扫描/清理 `<sessionDir>/workflow-state/`，
+ * 磁盘足迹（[S3 查证结论沿用] pi 不扫描/清理 session 存储树内的 workflow/runs/，
  * 保留策略由本包自担）：保留维护轮的触发点与判据单源在 core
  * （runRetentionMaintenanceRound，session_start 兜底触发点见 session-lifecycle.ts）。
  * 本 store 不再触发维护轮——旧触发点（state 快照首写）随快照删除而消失；
@@ -50,7 +50,6 @@ import type { CustomEntry, ExtensionAPI, ExtensionContext, SessionEntry } from "
 import {
   AgentCall,
   RUN_EVENTS_SUFFIX,
-  STATE_DIR_NAME,
   Trace,
   WORKFLOW_RECORD_CUSTOM_TYPE,
   buildWorkflowRecordSettledEntryData,
@@ -640,8 +639,10 @@ function foldRecordStreamToRun(
 const logger = getLogger("subagents");
 
 interface JsonlRunStoreOptions {
-  /** Session directory root (record streams live under <sessionDir>/workflow-state/). */
-  sessionDir: string;
+  /** run 记录目录（`<root>/<rootSid>/workflow/runs/`）——布局单源 = core barrel
+   *  resolvePiWorkflowRunsDir（分区键 rootSessionId；壳侧解析后传入，store 不持有
+   *  布局字面量）。 */
+  runsDir: string;
   /** Pi ExtensionAPI for v2 终态条目补写（loadAll 收编面；optional for testing）。 */
   pi?: ExtensionAPI;
   /** Pi ExtensionContext for sessionManager.getEntries (optional for testing). */
@@ -663,7 +664,7 @@ interface JsonlRunStoreOptions {
  *    为纯契约保留）。
  */
 export class JsonlRunStore implements RunStore {
-  private readonly sessionDir: string;
+  private readonly runsDir: string;
   /**
    * v2 终态条目补写的 appendEntry 源（loadAll 收编面）。类型收窄为该面——
    * [skill-reload D3] rebind 时换入 stale-guarded 包装，构造时为裸 pi 原引用。
@@ -674,19 +675,14 @@ export class JsonlRunStore implements RunStore {
   private disposePromise: Promise<void> | undefined;
 
   constructor(opts: JsonlRunStoreOptions) {
-    this.sessionDir = opts.sessionDir;
+    this.runsDir = opts.runsDir;
     this.pi = opts.pi;
     this.ctx = opts.ctx;
   }
 
-  /** State directory: <sessionDir>/workflow-state/（目录分量经 core barrel STATE_DIR_NAME 单源） */
-  private get stateDir(): string {
-    return path.join(this.sessionDir, STATE_DIR_NAME);
-  }
-
   /** record 流路径 for a given runId（唯一持久件）。 */
   private recordPathFor(runId: string): string {
-    return path.join(this.stateDir, `${runId}${RUN_EVENTS_SUFFIX}`);
+    return path.join(this.runsDir, `${runId}${RUN_EVENTS_SUFFIX}`);
   }
 
   /**

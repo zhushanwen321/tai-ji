@@ -125,7 +125,7 @@ interface WorkflowNotifyDetails { // oe-exempt:20260929:framework:workflow/recor
   resultSummary?: string;
   /**
    * [D7] 产物目录指针：run 持久化产物所在目录绝对路径
-   * （`<sessionDir>/workflow-state`——journal/manifest/.state 同目录；调用方经
+   * （`<root>/<rootSid>/workflow/runs/`——journal/manifest 同目录；调用方经
    * onRunDone 桥注入，旧调用缺省 undefined）。
    */
   artifactsDir?: string;
@@ -157,7 +157,7 @@ interface WorkflowNotifyDetails { // oe-exempt:20260929:framework:workflow/recor
  * @param runId run 标识
  * @param run WorkflowRun 聚合根（读 spec.scriptName + trace + scriptResult；status/reason/outcome 载荷源 = 终局记录 settlement——[W2/V1 D1 第 7 行] 换源，不读两态机字段）
  * @param notifiedRunIds 去重 Set（调用方持有，scope 到 factory 实例）
- * @param artifactsDir [D7] 产物目录指针（`<sessionDir>/workflow-state`，onRunDone
+ * @param artifactsDir [D7] 产物目录指针（`<root>/<rootSid>/workflow/runs/`，onRunDone
  *   桥注入；缺省 undefined = 旧调用兼容，载荷与文案指针段双双省略）
  */
 /**

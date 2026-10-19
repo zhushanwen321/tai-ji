@@ -8,7 +8,7 @@
  *   btw.remove 关线——单入口 closeLine、枚举先于注册表移除、abort/删除幂等（重复处置不抛、
  *   批内不记 failed）；级联失败 best-effort 不阻断主删除（P2 降级隔离）。
  * - **P-invisible·侧边栏面**：SessionScanner.listAll 的 hidden 过滤拦下隐藏线条目
- *  （active 路径防线；磁盘路径靠目录隔离——session-scanner 注释已按实装修正）。
+ *  （active 腿防线；磁盘腿靠目录隔离——session-scanner 注释已按实装修正）。
  * - **P-invisible·工作区历史面**：btw 线注册（registerSession 汇聚点）不记工作区历史。
  *
  * 装置：真 SessionService（构造期零 fs 触点，session-service-plugin-data-clear 同款）+
@@ -18,7 +18,7 @@
  * 运行：cd packages/runtime && npx vitest run src/services/session/__tests__/btw-cascade.test.ts
  */
 import { describe, it, expect, beforeAll, afterAll, beforeEach, afterEach, vi } from 'vitest'
-import { existsSync, mkdtempSync, rmSync } from 'node:fs'
+import { existsSync, mkdirSync, mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import type { SessionSummary } from '@taiji/shared'
@@ -31,6 +31,7 @@ import { clearRemovedSessionData } from '../../plugin-service/session-data-store
 import { BtwService } from '../btw-service.js'
 import { CanvasService } from '../../canvas/canvas-service.js'
 import { getBtwThreadDir } from '../../../infra/pi/pi-paths.js'
+import { getSessionStoreDir } from '@taiji/shared/paths'
 import { PiConfigStore } from '../../../infra/pi/pi-config-store.js'
 import { PiSessionStore } from '../../../infra/pi/session-store.js'
 import type { IProcessManager, IPiEngine } from '../../ports/pi-engine.js'
@@ -48,6 +49,20 @@ import {
   writeSessionFile,
   type BtwHarness,
 } from './helpers/btw-harness.js'
+import { trashDirectory as realTrashDirectory } from '../../../infra/system/trash.js'
+
+// closeLine 线树软删走 infra trashDirectory：platform 钉 linux（任何宿主机走非 mac 降级
+// rmSync 分支——落盘可断言、不触真实废纸篓）；execFileSync mock 兜底锁定零子进程（其余
+// child_process 导出保持真实——import 链上 process-probe 的 execFile 不受影响）。
+// tmpdir 保持真实（fs-guard 白名单 = os.tmpdir()）。
+vi.mock('node:child_process', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('node:child_process')>()
+  return { ...actual, execFileSync: vi.fn() }
+})
+vi.mock('node:os', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('node:os')>()
+  return { ...actual, platform: () => 'linux' }
+})
 
 const MAIN_SID = 'main-sid-cascade-1'
 const CWD = '/Users/x/proj'
@@ -98,18 +113,18 @@ function createSetup(): void {
 }
 
 /**
- * 分支② 形态建线（无 fork；线目录落真实 `getBtwThreadDir(CWD, MAIN_SID)` + 真实线文件，
- * 供目录删除断言）。返回 vid 与线目录。
+ * 分支② 形态建线（无 fork；线目录落真实 `getBtwThreadDir(MAIN_SID)`（<root>/<mainSid>/btw/）
+ * + 真实线文件，供删除面断言）。返回 vid、线目录与线树（<root>/<线sid>/）。
  */
-async function createLine(linePiSid = 'linepi-cascade-1'): Promise<{ vid: string; threadDir: string }> {
+async function createLine(linePiSid = 'linepi-cascade-1'): Promise<{ vid: string; threadDir: string; lineTree: string }> {
   h.deps.resolveMainSessionFile = vi.fn(() => undefined)
-  const threadDir = getBtwThreadDir(CWD, MAIN_SID)
+  const threadDir = getBtwThreadDir(MAIN_SID)
   const file = writeSessionFile(threadDir, `${linePiSid}.jsonl`, {
     type: 'session', version: 3, id: linePiSid, timestamp: 't', cwd: CWD,
   }, [])
   h.state = { sessionId: linePiSid, sessionFile: file }
   const res = await btwSvc.createLine({ mainSid: MAIN_SID, cwd: CWD })
-  return { vid: res.vid, threadDir }
+  return { vid: res.vid, threadDir, lineTree: join(getSessionStoreDir(), linePiSid) }
 }
 
 let cpDir: string
@@ -127,6 +142,8 @@ beforeEach(() => {
   restoreDataDir = useTmpDataDir()
   fx = makeTmpDir()
   h = makeHarness()
+  // 线树软删走真实降级通道（platform 钉 linux，断言落盘效果）；deps 注入形态（C-comm-03）
+  h.deps.trashDirectory = vi.fn((dirPath: string) => realTrashDirectory(dirPath))
   btwSvc = new BtwService(h.deps)
   createSetup()
   setBtwCascadeOps(btwSvc)
@@ -148,23 +165,25 @@ afterEach(() => {
   vi.restoreAllMocks()
 })
 
-describe('P-cascade：删主 session → 杀名下线进程 + 删线目录 + 注册表清空', () => {
-  it('active 主分支：closeAllForMain 杀线（destroySession 收尸）+ 整目录删除 + listLines 归空', async () => {
+describe('P-cascade：删主 session → 杀名下线进程 + 软删线树 + 注册表清空', () => {
+  it('active 主分支：closeAllForMain 杀线（destroySession 收尸）+ 逐线软删线树 + listLines 归空', async () => {
     await service.initializeManagedSession(MAIN_SID, {} as IPiEngine, CWD, 'main')
-    const { vid, threadDir } = await createLine()
-    expect(existsSync(threadDir)).toBe(true)
+    const { vid, lineTree } = await createLine()
+    mkdirSync(join(lineTree, 'subagents'), { recursive: true }) // 线派生数据形态
+    expect(existsSync(lineTree)).toBe(true)
 
     await service.delete(MAIN_SID)
 
     expect(h.destroyed).toContain(vid) // 线进程被杀（派生任务随 pi 进程亡）
     expect(btwSvc.listLines(MAIN_SID)).toEqual([]) // 注册表清空
-    expect(existsSync(threadDir)).toBe(false) // btw/<enc>/<mainSid>/ 目录消失
+    expect(existsSync(lineTree)).toBe(false) // 线树 <root>/<线sid>/ 整树软删（级联逐线触发）
+    // 线目录（<root>/<mainSid>/btw/）随主树回收（删除编排整树通道），btw 侧不再独立删
     expect(service.getSession(MAIN_SID)).toBeUndefined() // 主本体照常删除
     expect(pm.destroySession).toHaveBeenCalledWith(MAIN_SID)
   })
 
-  it('scanned（冷主）分支：主不在 active Map 仍级联（cwd 取扫描范围真值）', async () => {
-    const { vid, threadDir } = await createLine('linepi-cold-main')
+  it('scanned（冷主）分支：主不在 active Map 仍级联（cwd 取扫描面真值）', async () => {
+    const { vid, lineTree } = await createLine('linepi-cold-main')
     const coldFile = join(fx, 'cold-main.jsonl')
     vi.spyOn(service, 'findScannedSession').mockReturnValue({
       id: MAIN_SID, cwd: CWD, filePath: coldFile, name: 'cold', lastModified: 1, size: 1, timestamp: 't', outcome: null,
@@ -174,12 +193,12 @@ describe('P-cascade：删主 session → 杀名下线进程 + 删线目录 + 注
 
     expect(h.destroyed).toContain(vid)
     expect(btwSvc.listLines(MAIN_SID)).toEqual([])
-    expect(existsSync(threadDir)).toBe(false)
+    expect(existsSync(lineTree)).toBe(false)
     expect(service.delete).toBeDefined() // 冷主分支真跑完（trash 面：文件不存在 → 跳 trash）
     expect(vi.mocked(service.findScannedSession)).toHaveBeenCalledTimes(1)
   })
 
-  it('多线：快照枚举逐线处置（枚举先于注册表移除——D9④ 顺序约束）', async () => {
+  it('多线：快照枚举逐线处置（枚举先于注册表移除——D9④ 顺序约束；各线树各自软删）', async () => {
     await service.initializeManagedSession(MAIN_SID, {} as IPiEngine, CWD, 'main')
     const a = await createLine('linepi-multi-a')
     const b = await createLine('linepi-multi-b')
@@ -187,21 +206,23 @@ describe('P-cascade：删主 session → 杀名下线进程 + 删线目录 + 注
     await service.delete(MAIN_SID)
 
     expect(h.destroyed).toEqual(expect.arrayContaining([a.vid, b.vid]))
-    expect(existsSync(a.threadDir)).toBe(false)
-    expect(existsSync(b.threadDir)).toBe(false) // 两线共享同一线目录（cwd+mainSid 推导）
+    expect(existsSync(a.lineTree)).toBe(false)
+    expect(existsSync(b.lineTree)).toBe(false) // 两线共享同一线目录（mainSid 分区）、线树各按线 sid 软删
   })
 })
 
-describe('画布绑定解绑（F1-11：session 真删除即解绑，btw 线不豁免）', () => {
-  /** 独立 CanvasService（tmp canvasesDir；模块级分发登记——delete 的 unbind 落本实例）。 */
-  function makeCanvasService(): { svc: CanvasService; canvasId: string; dispose: () => void } {
+describe('画布解绑集成（F1-11 · D4 归属模型：owner = 创建会话，解绑 = 真删除模块分发）', () => {
+  /**
+   * 独立 CanvasService（D4 归属模型：数据落 ext-sessions 树 `<dataDir>/ext-sessions/
+   * <ownerSid>/canvases/`，测试注入 mkdtemp dataDir 自建自删；构造即挂模块级分发登记——
+   * delete 编排的 unbindCanvasOnSessionDeleted 真分发落本实例）。owner 建画布 = 绑定
+   * （归属即绑定，旧 bindSession 多对多模型已随 D4 退役）。
+   */
+  function makeCanvasService(): { svc: CanvasService; dispose: () => void } {
     const dir = mkdtempSync(join(tmpdir(), 'btw-cascade-canvas-'))
-    const svc = new CanvasService({ canvasesDir: dir })
-    const created = svc.mutate({ action: 'create', params: { statement: '画布绑定解绑探针', criterias: ['c1'], scopeExclusions: [] } }, 'agent')
-    if (!created.ok) throw new Error(`create 失败：${JSON.stringify(created.error)}`)
+    const svc = new CanvasService({ dataDir: dir })
     return {
       svc,
-      canvasId: created.canvasId as string,
       dispose: (): void => {
         svc.dispose()
         rmSync(dir, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 })
@@ -209,36 +230,50 @@ describe('画布绑定解绑（F1-11：session 真删除即解绑，btw 线不�
     }
   }
 
-  it('btw 线直删（delete(vid) 直删分支）：该线画布绑定摘除', async () => {
+  function createCanvas(svc: CanvasService, ownerSid: string): string {
+    const created = svc.mutate(
+      { action: 'create', params: { statement: '画布绑定解绑探针', criterias: ['c1'], scopeExclusions: [] } },
+      'agent',
+      ownerSid,
+    )
+    if (!created.ok) throw new Error(`create 失败：${JSON.stringify(created.error)}`)
+    return created.canvasId as string
+  }
+
+  it('主会话自身画布：delete(MAIN_SID) 后内存镜像摘除（unbindCanvasOnSessionDeleted 真分发链路）', async () => {
     await service.initializeManagedSession(MAIN_SID, {} as IPiEngine, CWD, 'main')
-    const { vid } = await createLine('linepi-unbind-direct')
-    await service.initializeManagedSession(vid, {} as IPiEngine, CWD, 'line', undefined, true)
     const canvas = makeCanvasService()
     try {
-      canvas.svc.bindSession(vid, canvas.canvasId)
-      expect(canvas.svc.getBoundSessions(canvas.canvasId)).toEqual([vid])
+      const canvasId = createCanvas(canvas.svc, MAIN_SID)
+      expect(canvas.svc.getBoundSessions(canvasId)).toEqual([MAIN_SID]) // owner 即绑定
 
-      await service.delete(vid)
+      await service.delete(MAIN_SID)
 
-      expect(canvas.svc.getBoundSessions(canvas.canvasId)).toEqual([])
+      expect(canvas.svc.getBoundSessions(canvasId)).toEqual([]) // 真删除即解绑（主删自身挂点）
     } finally {
       canvas.dispose()
     }
   })
 
-  it('主删级联（delete(MAIN_SID) → closeAllForMain）：名下 btw 线绑定随级联摘除，主会话自身绑定同摘', async () => {
+  it('btw 线不豁免：vid 不可为画布 owner（D4 归属校验拒 btw 虚拟 id）；线直删分支真实链路不波及主会话画布', async () => {
     await service.initializeManagedSession(MAIN_SID, {} as IPiEngine, CWD, 'main')
-    const { vid } = await createLine('linepi-unbind-cascade')
+    const { vid } = await createLine('linepi-unbind-direct')
+    await service.initializeManagedSession(vid, {} as IPiEngine, CWD, 'line', undefined, true)
     const canvas = makeCanvasService()
     try {
-      canvas.svc.bindSession(MAIN_SID, canvas.canvasId)
-      canvas.svc.bindSession(vid, canvas.canvasId)
-      expect(canvas.svc.getBoundSessions(canvas.canvasId).sort()).toEqual([MAIN_SID, vid].sort())
+      // D4 归属校验：btw 虚拟 id（btw:<sid> 含冒号）非合法 pi session id → invalid_params
+      const vidCreated = canvas.svc.mutate(
+        { action: 'create', params: { statement: '线归属拒绝探针', criterias: ['c1'], scopeExclusions: [] } },
+        'agent',
+        vid,
+      )
+      expect(vidCreated.ok).toBe(false)
 
-      await service.delete(MAIN_SID)
+      const mainCanvasId = createCanvas(canvas.svc, MAIN_SID)
 
-      // 级联真删除的线绑定 + 主会话自身绑定，同一「真删除即解绑」规则全部摘除
-      expect(canvas.svc.getBoundSessions(canvas.canvasId)).toEqual([])
+      await service.delete(vid) // btw 线直删分支（解绑分发按 vid 调用——vid 不在 owners，no-op）
+
+      expect(canvas.svc.getBoundSessions(mainCanvasId)).toEqual([MAIN_SID]) // 主画布不受线删除影响
     } finally {
       canvas.dispose()
     }
@@ -248,7 +283,7 @@ describe('画布绑定解绑（F1-11：session 真删除即解绑，btw 线不�
 describe('三路并发收敛（D9④）：单入口 closeLine + 幂等', () => {
   it('deleteByCwd 批内连带：主级联 + 活跃线 vid 直删同批完成，failed 为空', async () => {
     await service.initializeManagedSession(MAIN_SID, {} as IPiEngine, CWD, 'main')
-    const { vid, threadDir } = await createLine('linepi-batch-1')
+    const { vid, lineTree } = await createLine('linepi-batch-1')
     // 线在 runtime 是一等注册会话（BtwService 经真实 registerSession 汇入）——批内直删面
     await service.initializeManagedSession(vid, {} as IPiEngine, CWD, 'line', undefined, true)
 
@@ -257,7 +292,7 @@ describe('三路并发收敛（D9④）：单入口 closeLine + 幂等', () => {
     expect(result.failed).toEqual([])
     expect(result.deleted).toEqual(expect.arrayContaining([MAIN_SID, vid]))
     expect(btwSvc.listLines(MAIN_SID)).toEqual([])
-    expect(existsSync(threadDir)).toBe(false)
+    expect(existsSync(lineTree)).toBe(false) // 线树随级联软删
     expect(h.destroyed).toContain(vid)
   })
 
@@ -277,16 +312,17 @@ describe('三路并发收敛（D9④）：单入口 closeLine + 幂等', () => {
     expect(second.failed).toEqual([])
   })
 
-  it('btw.remove 先关线 → 主删级联照常（closeAllForMain 对空注册表幂等 + 目录兜底删）', async () => {
+  it('btw.remove 先关线 → 主删级联照常（closeAllForMain 对空注册表幂等零动作）', async () => {
     await service.initializeManagedSession(MAIN_SID, {} as IPiEngine, CWD, 'main')
-    const { vid, threadDir } = await createLine('linepi-remove-then-cascade')
+    const { vid, threadDir, lineTree } = await createLine('linepi-remove-then-cascade')
 
     const closed = await btwSvc.closeLine(vid, { deleteSessionFile: true }) // btw.remove 原语
     expect(closed).toBe(true)
+    expect(existsSync(join(threadDir, 'linepi-remove-then-cascade.jsonl'))).toBe(false) // 线文件已删
+    expect(existsSync(lineTree)).toBe(false) // 线树已软删
     expect(await btwSvc.closeLine(vid)).toBe(false) // 二次关线返 false（幂等信号，handler 映射 line_not_found）
 
-    await service.delete(MAIN_SID) // 级联对空注册表零动作，目录 cwd 推导仍删
-    expect(existsSync(threadDir)).toBe(false)
+    await service.delete(MAIN_SID) // 级联对空注册表零动作（线目录随主树回收，btw 侧不再独立删）
     expect(pm.destroySession).toHaveBeenCalledWith(MAIN_SID)
   })
 
@@ -307,7 +343,7 @@ describe('三路并发收敛（D9④）：单入口 closeLine + 幂等', () => {
 })
 
 describe('P-invisible：线不出侧边栏 / 不记工作区历史（runtime 面）', () => {
-  it('侧边栏面：SessionScanner 列举过滤 hidden（active 路径防线；磁盘路径靠目录隔离）', () => {
+  it('侧边栏面：SessionScanner 列举过滤 hidden（active 腿防线；磁盘腿靠目录隔离）', () => {
     const summary = (id: string, hidden?: boolean): SessionSummary => ({
       id, label: id, cwd: fx, status: 'idle', lastActiveAt: 1, modelId: 'm', tokenCount: 0, hidden,
     })

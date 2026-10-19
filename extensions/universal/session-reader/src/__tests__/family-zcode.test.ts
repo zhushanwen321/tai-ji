@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest'
 import { tmpdir } from 'node:os'
 import { mkdtempSync, writeFileSync, mkdirSync, rmSync } from 'node:fs'
-import { join } from 'node:path'
+import { join, dirname } from 'node:path'
 import { DatabaseSync } from 'node:sqlite'
 
 import { buildFamilyIndex, resolveFamily, buildZcodeSubagentsByRoot } from '../core/family.js'
@@ -47,13 +47,13 @@ function zcodeNode(opts: Partial<ZcodeFamilyNode> & { id: string }): ZcodeFamily
   }
 }
 
-/** 在 <agentDir>/subagents/<slug>/records/ 下写 zcode manifest（F21 磁盘真实形态：无 sessionFile 键） */
+/** 在存储树分区 <root>/<rootSessionId>/subagents/records/ 下写 zcode manifest（F21 磁盘真实形态：无 sessionFile 键；[session-store-layout-inversion D6/单新根] 读侧已换存储树） */
 function writeZcodeManifest(
   agentDir: string,
   saId: string,
   sessionRef: Record<string, string>,
 ): void {
-  const recordsDir = join(agentDir, 'subagents', 'proj-a', 'records')
+  const recordsDir = join(dirname(agentDir), 'ext-sessions', ROOT, 'subagents', 'records')
   mkdirSync(recordsDir, { recursive: true })
   writeFileSync(
     join(recordsDir, `${saId}.json`),
@@ -167,11 +167,15 @@ describe('core：buildZcodeSubagentsByRoot / buildFamilyIndex 的 zcode 分支�
 
 describe('集成：listZcodeManifests → buildFamilyIndex → resolveFamily（场景 2 两态 + 反向断言）', () => {
   it('库可达态（dbPath 指向真实 fixture 库）→ cleanedUp=false', async () => {
+    // agentDir 两层化（<mkdtemp>/agent）：存储树推导 = dirname(agentDir)/ext-sessions，
+    // 单层直接当 agentDir 会把扫描根泄到 tmpdir 公共层（跨测试污染——先例 reaper 同修）
+    const agentDir = join(dir, 'agent')
+    mkdirSync(agentDir, { recursive: true })
     const dbPath = join(dir, 'isolated.sqlite')
     createFixtureDb(dbPath, 'sess_live')
-    writeZcodeManifest(dir, 'sa-live', { sessionId: 'sess_live', dbPath })
+    writeZcodeManifest(agentDir, 'sa-live', { sessionId: 'sess_live', dbPath })
 
-    const nodes = await listZcodeManifests(dir)
+    const nodes = await listZcodeManifests(agentDir)
     expect(nodes).toHaveLength(1)
     expect(nodes[0]?.dbFileExists).toBe(true)
 
@@ -181,12 +185,14 @@ describe('集成：listZcodeManifests → buildFamilyIndex → resolveFamily（�
   })
 
   it('库不存在态（dbPath 指向不存在路径）→ cleanedUp=true（GC 语义，不报错）', async () => {
-    writeZcodeManifest(dir, 'sa-gone', {
+    const agentDir = join(dir, 'agent')
+    mkdirSync(agentDir, { recursive: true })
+    writeZcodeManifest(agentDir, 'sa-gone', {
       sessionId: 'sess_gone',
       dbPath: join(dir, 'subagents', 'proj-a', 'missing.sqlite'),
     })
 
-    const nodes = await listZcodeManifests(dir)
+    const nodes = await listZcodeManifests(agentDir)
     expect(nodes[0]?.dbFileExists).toBe(false)
 
     const family = resolveFamily(ROOT, buildFamilyIndex([header(ROOT)], [], new Map(), nodes))
@@ -196,9 +202,11 @@ describe('集成：listZcodeManifests → buildFamilyIndex → resolveFamily（�
   it('反向断言：库文件在但库内 session 行被删 → 仍 cleanedUp=false（列表视图不开库的分工声明）', async () => {
     // 分工（D5-1）：库内 session 已被 zcode GC 的情形由 read 路径 zcode_session_not_found
     // 权威承接；family 只 stat 文件存在性。本用例删行留文件，断言 family 不受库内容影响。
+    const agentDir = join(dir, 'agent')
+    mkdirSync(agentDir, { recursive: true })
     const dbPath = join(dir, 'gc.sqlite')
     createFixtureDb(dbPath, 'sess_victim')
-    writeZcodeManifest(dir, 'sa-gced', { sessionId: 'sess_victim', dbPath })
+    writeZcodeManifest(agentDir, 'sa-gced', { sessionId: 'sess_victim', dbPath })
 
     // 前置核实：fixture 库里确实有该 session 行（反向断言的非平凡性前提）
     {
@@ -225,7 +233,7 @@ describe('集成：listZcodeManifests → buildFamilyIndex → resolveFamily（�
       }
     }
 
-    const nodes = await listZcodeManifests(dir)
+    const nodes = await listZcodeManifests(agentDir)
     expect(nodes[0]?.dbFileExists).toBe(true) // 只 stat：文件在即 true，不看内容
 
     const family = resolveFamily(ROOT, buildFamilyIndex([header(ROOT)], [], new Map(), nodes))
@@ -235,17 +243,19 @@ describe('集成：listZcodeManifests → buildFamilyIndex → resolveFamily（�
   it('坏 manifest 与缺库节点混排 → 好节点照常输出（单节点不可达不炸整屏）', async () => {
     const dbPath = join(dir, 'ok.sqlite')
     createFixtureDb(dbPath, 'sess_ok')
-    writeZcodeManifest(dir, 'sa-ok', { sessionId: 'sess_ok', dbPath })
+    const agentDir = join(dir, 'agent')
+    mkdirSync(agentDir, { recursive: true })
+    writeZcodeManifest(agentDir, 'sa-ok', { sessionId: 'sess_ok', dbPath })
     // 缺库节点：合法 zcode 形态（dbFileExists=false，不抛错），不剔除出列表
-    writeZcodeManifest(dir, 'sa-broken-manifest', { sessionId: 'sess_x', dbPath: '/nonexistent/x.sqlite' })
+    writeZcodeManifest(agentDir, 'sa-broken-manifest', { sessionId: 'sess_x', dbPath: '/nonexistent/x.sqlite' })
     // 坏 JSON manifest：枚举跳过（不中断）
     writeFileSync(
-      join(dir, 'subagents', 'proj-a', 'records', 'sa-corrupt.json'),
+      join(dirname(agentDir), 'ext-sessions', ROOT, 'subagents', 'records', 'sa-corrupt.json'),
       '{{{broken',
       'utf8',
     )
 
-    const nodes = await listZcodeManifests(dir)
+    const nodes = await listZcodeManifests(agentDir)
     expect(nodes.map((n) => n.id).sort()).toEqual(['sa-broken-manifest', 'sa-ok'])
 
     const family = resolveFamily(ROOT, buildFamilyIndex([header(ROOT)], [], new Map(), nodes))

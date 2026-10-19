@@ -18,7 +18,8 @@ import { describe, expect, it } from 'vitest'
 import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { CanvasService } from '../canvas-service.js'
-import { createCanvas, expectOk, expectRejected, growCanvas, makeService } from './canvas-helpers.js'
+import { createCanvas, expectOk, expectRejected, growCanvas, makeService, SID, SID_B } from './canvas-helpers.js'
+import { getSessionCanvasesDir } from '@taiji/shared/paths'
 import type { CanvasState } from '@zhushanwen/extension-protocol'
 
 interface PersistedLine { // oe-exempt:20261015:framework:画布域类型契约（数据形状/端口/测试 harness，非抽象接口单实现）
@@ -32,21 +33,21 @@ interface PersistedLine { // oe-exempt:20261015:framework:画布域类型契约�
 }
 
 function readLines(dir: string, canvasId: string): PersistedLine[] {
-  return readFileSync(join(dir, canvasId, 'events.jsonl'), 'utf-8')
+  return readFileSync(join(getSessionCanvasesDir(SID, dir), canvasId, 'events.jsonl'), 'utf-8')
     .split('\n').filter((l) => l.trim() !== '').map((l) => JSON.parse(l) as PersistedLine)
 }
 
 /** 完成一轮：发起（round = 当前轮）+ 报告写回（当前轮有条目 = 轮次完成判据）。 */
 function completeRound(svc: CanvasService, canvasId: string, targetId: string): void {
-  expectOk(svc.mutate({ action: 'review-request', params: { canvasId } }, 'agent'))
-  const review = svc.readState(canvasId).review
+  expectOk(svc.mutate({ action: 'review-request', params: { canvasId } }, 'agent', SID))
+  const review = svc.readState(canvasId, SID).review
   expect(review).toBeDefined()
   if (!review) throw new Error('review 聚合缺失：review-request 未生效')
   const round = review.round
   expectOk(svc.mutate({
     action: 'review-append',
     params: { canvasId, round, entries: [{ id: `re-r${round}`, round, dimension: 'completeness', severity: 'must-fix', targetId, note: `R${round} 报告条目` }] },
-  }, 'review'))
+  }, 'review', SID))
 }
 
 /** 推进到审查轮次上限：完成 5 轮循环（发起 + 报告写回各 5 次）→ round = maxRounds = 5。 */
@@ -62,16 +63,16 @@ describe('轮次口径（一轮 = 一循环：GUI 双跳 / 重发不虚增轮次
     try {
       const c = growCanvas(h.svc, createCanvas(h.svc))
       // GUI 双跳：user 发起（WS mutate）→ 回推 → agent run 再发起（marker mutate）
-      expectOk(h.svc.mutate({ action: 'review-request', params: { canvasId: c.canvasId } }, 'user'))
+      expectOk(h.svc.mutate({ action: 'review-request', params: { canvasId: c.canvasId } }, 'user', SID))
       expect(c.state().review?.round).toBe(1)
-      expectOk(h.svc.mutate({ action: 'review-request', params: { canvasId: c.canvasId } }, 'agent'))
+      expectOk(h.svc.mutate({ action: 'review-request', params: { canvasId: c.canvasId } }, 'agent', SID))
       expect(c.state().review?.round).toBe(1)
       // R1 报告写回后，下一次发起才推进 R2
       expectOk(h.svc.mutate({
         action: 'review-append',
         params: { canvasId: c.canvasId, round: 1, entries: [{ id: 're-r1', round: 1, dimension: 'completeness', severity: 'must-fix', targetId: c.q1, note: 'R1 报告' }] },
-      }, 'review'))
-      expectOk(h.svc.mutate({ action: 'review-request', params: { canvasId: c.canvasId } }, 'agent'))
+      }, 'review', SID))
+      expectOk(h.svc.mutate({ action: 'review-request', params: { canvasId: c.canvasId } }, 'agent', SID))
       expect(c.state().review?.round).toBe(2)
     } finally {
       h.dispose()
@@ -85,18 +86,18 @@ describe('轮次口径确定性（聚合 2「当前轮已有报告条目 = 轮�
     try {
       const c = growCanvas(h.svc, createCanvas(h.svc))
       // 完成 R1（发起 + 报告写回）→ 再次发起推进到 R2（当前轮 = R2）
-      expectOk(h.svc.mutate({ action: 'review-request', params: { canvasId: c.canvasId } }, 'agent'))
+      expectOk(h.svc.mutate({ action: 'review-request', params: { canvasId: c.canvasId } }, 'agent', SID))
       expectOk(h.svc.mutate({
         action: 'review-append',
         params: { canvasId: c.canvasId, round: 1, entries: [{ id: 're-r1', round: 1, dimension: 'completeness', severity: 'must-fix', targetId: c.q1, note: 'R1 报告' }] },
-      }, 'review'))
-      expectOk(h.svc.mutate({ action: 'review-request', params: { canvasId: c.canvasId } }, 'agent'))
+      }, 'review', SID))
+      expectOk(h.svc.mutate({ action: 'review-request', params: { canvasId: c.canvasId } }, 'agent', SID))
       expect(c.state().review?.round).toBe(2)
       // R2 进行中携带 R1 轮次写回 → 拒绝（roundHasReport / maxRounds 预算的完成判定须确定性）
       const reply = h.svc.mutate({
         action: 'review-append',
         params: { canvasId: c.canvasId, round: 1, entries: [{ id: 're-late', round: 1, dimension: 'completeness', severity: 'suggestion', targetId: c.q1, note: '迟到的 R1 条目' }] },
-      }, 'review')
+      }, 'review', SID)
       expectRejected(reply, 'invalid_params')
       if (!reply.ok) expect(reply.error.message).toContain('R2')
       // 拒绝 = 无写入：R1 条目仍在、迟到条目未落
@@ -105,7 +106,7 @@ describe('轮次口径确定性（聚合 2「当前轮已有报告条目 = 轮�
       expectOk(h.svc.mutate({
         action: 'review-append',
         params: { canvasId: c.canvasId, round: 2, entries: [{ id: 're-r2', round: 2, dimension: 'completeness', severity: 'suggestion', targetId: c.q1, note: 'R2 报告' }] },
-      }, 'review'))
+      }, 'review', SID))
       expect(c.state().review?.entries.map((e) => e.id)).toEqual(['re-r1', 're-r2'])
     } finally {
       h.dispose()
@@ -121,9 +122,9 @@ describe('审查终态 max-rounds（设计 §3.1 失败路径②：置终态 + �
       exhaustRounds(h.svc, c.canvasId, c.q1)
       expect(c.state().review?.status).toBe('in-progress')
       // 用户改动造待重审（达上限分支不得消费——审查没有开始）
-      expectOk(h.svc.mutate({ action: 'patch', params: { canvasId: c.canvasId, nodeId: c.q1, content: '补丁后表述', reason: '修订' } }, 'user'))
+      expectOk(h.svc.mutate({ action: 'patch', params: { canvasId: c.canvasId, nodeId: c.q1, content: '补丁后表述', reason: '修订' } }, 'user', SID))
       expect(c.state().dirtyPaths.length).toBeGreaterThan(0)
-      const reply = h.svc.mutate({ action: 'review-request', params: { canvasId: c.canvasId } }, 'agent')
+      const reply = h.svc.mutate({ action: 'review-request', params: { canvasId: c.canvasId } }, 'agent', SID)
       expect(reply.ok).toBe(true)
       if (reply.ok) expect(reply.summary).toContain('停回')
       const review = c.state().review
@@ -144,8 +145,8 @@ describe('审查终态 max-rounds（设计 §3.1 失败路径②：置终态 + �
     try {
       const c = growCanvas(h.svc, createCanvas(h.svc))
       exhaustRounds(h.svc, c.canvasId, c.q1)
-      expectOk(h.svc.mutate({ action: 'review-request', params: { canvasId: c.canvasId } }, 'agent'))
-      const reply = h.svc.mutate({ action: 'review-request', params: { canvasId: c.canvasId } }, 'agent')
+      expectOk(h.svc.mutate({ action: 'review-request', params: { canvasId: c.canvasId } }, 'agent', SID))
+      const reply = h.svc.mutate({ action: 'review-request', params: { canvasId: c.canvasId } }, 'agent', SID)
       expectRejected(reply, 'review_max_rounds')
       if (!reply.ok) expect(reply.error.message).toContain('agent 不得自主继续')
       expect(c.state().review?.status).toBe('max-rounds')
@@ -159,9 +160,9 @@ describe('审查终态 max-rounds（设计 §3.1 失败路径②：置终态 + �
     try {
       const c = growCanvas(h.svc, createCanvas(h.svc))
       exhaustRounds(h.svc, c.canvasId, c.q1)
-      expectOk(h.svc.mutate({ action: 'review-request', params: { canvasId: c.canvasId } }, 'agent'))
+      expectOk(h.svc.mutate({ action: 'review-request', params: { canvasId: c.canvasId } }, 'agent', SID))
       expect(c.state().review?.status).toBe('max-rounds')
-      const reply = h.svc.mutate({ action: 'review-request', params: { canvasId: c.canvasId, scope: '升级裁决：聚焦换选风险' } }, 'user')
+      const reply = h.svc.mutate({ action: 'review-request', params: { canvasId: c.canvasId, scope: '升级裁决：聚焦换选风险' } }, 'user', SID)
       expect(reply.ok).toBe(true)
       const review = c.state().review
       expect(review?.status).toBe('in-progress')
@@ -173,7 +174,7 @@ describe('审查终态 max-rounds（设计 §3.1 失败路径②：置终态 + �
       expect(readLines(h.dir, c.canvasId).map((l) => l.type)).toContain('ReviewEscalated')
       // 升级轮可执行：GUI 链路回推后 agent run 的 review-request（R6 尚无报告条目 =
       // 同一轮重发）不再被 max-rounds 拦截，reviewer 可派发
-      const agentRun = h.svc.mutate({ action: 'review-request', params: { canvasId: c.canvasId } }, 'agent')
+      const agentRun = h.svc.mutate({ action: 'review-request', params: { canvasId: c.canvasId } }, 'agent', SID)
       expect(agentRun.ok).toBe(true)
       expect(c.state().review?.round).toBe(6)
       expect(c.state().review?.status).toBe('in-progress')
@@ -187,15 +188,15 @@ describe('审查终态 max-rounds（设计 §3.1 失败路径②：置终态 + �
     try {
       const c = growCanvas(h.svc, createCanvas(h.svc))
       exhaustRounds(h.svc, c.canvasId, c.q1)
-      expectOk(h.svc.mutate({ action: 'review-request', params: { canvasId: c.canvasId } }, 'agent'))
-      expectOk(h.svc.mutate({ action: 'review-request', params: { canvasId: c.canvasId } }, 'user'))
+      expectOk(h.svc.mutate({ action: 'review-request', params: { canvasId: c.canvasId } }, 'agent', SID))
+      expectOk(h.svc.mutate({ action: 'review-request', params: { canvasId: c.canvasId } }, 'user', SID))
       expect(c.state().review?.round).toBe(6)
       // R6 报告写回（轮次完成）后，再发起立即再停回
       expectOk(h.svc.mutate({
         action: 'review-append',
         params: { canvasId: c.canvasId, round: 6, entries: [{ id: 're-r6', round: 6, dimension: 'completeness', severity: 'must-fix', targetId: c.q1, note: 'R6 报告' }] },
-      }, 'review'))
-      expectOk(h.svc.mutate({ action: 'review-request', params: { canvasId: c.canvasId } }, 'user'))
+      }, 'review', SID))
+      expectOk(h.svc.mutate({ action: 'review-request', params: { canvasId: c.canvasId } }, 'user', SID))
       expect(c.state().review?.status).toBe('max-rounds')
       expect(c.state().review?.round).toBe(6)
     } finally {
@@ -208,16 +209,16 @@ describe('审查终态 max-rounds（设计 §3.1 失败路径②：置终态 + �
     try {
       const c = growCanvas(h.svc, createCanvas(h.svc))
       exhaustRounds(h.svc, c.canvasId, c.q1)
-      expectOk(h.svc.mutate({ action: 'review-request', params: { canvasId: c.canvasId } }, 'agent'))
-      expectOk(h.svc.mutate({ action: 'review-request', params: { canvasId: c.canvasId } }, 'user'))
-      expectOk(h.svc.mutate({ action: 'review-request', params: { canvasId: c.canvasId } }, 'agent'))
-      const directWrite = h.svc.readState(c.canvasId)
+      expectOk(h.svc.mutate({ action: 'review-request', params: { canvasId: c.canvasId } }, 'agent', SID))
+      expectOk(h.svc.mutate({ action: 'review-request', params: { canvasId: c.canvasId } }, 'user', SID))
+      expectOk(h.svc.mutate({ action: 'review-request', params: { canvasId: c.canvasId } }, 'agent', SID))
+      const directWrite = h.svc.readState(c.canvasId, SID)
       expect(directWrite.review?.status).toBe('in-progress')
       expect(directWrite.review?.round).toBe(6)
       expect(directWrite.review?.maxRounds).toBe(6)
-      const reborn = new CanvasService({ canvasesDir: h.dir, generateId: (): string => 'replay-unused-id' })
+      const reborn = new CanvasService({ dataDir: h.dir, generateId: (): string => 'replay-unused-id' })
       try {
-        expect(reborn.readState(c.canvasId)).toEqual(directWrite)
+        expect(reborn.readState(c.canvasId, SID)).toEqual(directWrite)
       } finally {
         reborn.dispose()
       }
@@ -234,13 +235,13 @@ describe('条目身份 = (round, id) 二元组（跨轮同 id 碰撞不覆盖历
     canvasId: string,
     targetId: string,
   ): void {
-    expectOk(h.svc.mutate({ action: 'review-request', params: { canvasId } }, 'agent'))
+    expectOk(h.svc.mutate({ action: 'review-request', params: { canvasId } }, 'agent', SID))
     expectOk(h.svc.mutate({
       action: 'review-append',
       params: { canvasId, round: 1, entries: [{ id: 'rv-1', round: 1, dimension: 'completeness', severity: 'must-fix', targetId, note: 'R1 缺口' }] },
-    }, 'review'))
-    expectOk(h.svc.mutate({ action: 'review-resolve', params: { canvasId, entryId: 'rv-1', disposition: 'accepted', note: '已修' } }, 'agent'))
-    expectOk(h.svc.mutate({ action: 'review-request', params: { canvasId } }, 'agent'))
+    }, 'review', SID))
+    expectOk(h.svc.mutate({ action: 'review-resolve', params: { canvasId, entryId: 'rv-1', disposition: 'accepted', note: '已修' } }, 'agent', SID))
+    expectOk(h.svc.mutate({ action: 'review-request', params: { canvasId } }, 'agent', SID))
   }
 
   it('R2 写回与 R1 条目同 id（reviewer rv-<序号> 惯性）→ invalid_params（错误文案指引换 id）；R1 条目内容与处置记录原样保留，无部分写入', () => {
@@ -252,7 +253,7 @@ describe('条目身份 = (round, id) 二元组（跨轮同 id 碰撞不覆盖历
       const reply = h.svc.mutate({
         action: 'review-append',
         params: { canvasId: c.canvasId, round: 2, entries: [{ id: 'rv-1', round: 2, dimension: 'support', severity: 'must-fix', targetId: c.q1, note: 'R2 新缺口' }] },
-      }, 'review')
+      }, 'review', SID)
       expectRejected(reply, 'invalid_params')
       if (!reply.ok) expect(reply.error.message).toContain('rv-1')
       // R1 条目不被覆盖：轮次 / 原文 / 分级 / 处置记录全部原样——R2 新 must-fix 不得
@@ -277,7 +278,7 @@ describe('条目身份 = (round, id) 二元组（跨轮同 id 碰撞不覆盖历
       const reply = h.svc.mutate({
         action: 'review-append',
         params: { canvasId: c.canvasId, round: 2, entries: [{ id: 'rv-1', round: 1, dimension: 'support', severity: 'must-fix', targetId: c.q1, note: '冒充 R1 改写' }] },
-      }, 'review')
+      }, 'review', SID)
       expectRejected(reply, 'invalid_params')
       const entries = c.state().review?.entries ?? []
       expect(entries).toHaveLength(1)
@@ -292,7 +293,7 @@ describe('条目身份 = (round, id) 二元组（跨轮同 id 碰撞不覆盖历
     const h = makeService()
     try {
       const c = growCanvas(h.svc, createCanvas(h.svc))
-      expectOk(h.svc.mutate({ action: 'review-request', params: { canvasId: c.canvasId } }, 'agent'))
+      expectOk(h.svc.mutate({ action: 'review-request', params: { canvasId: c.canvasId } }, 'agent', SID))
       // 同批两条同 id 条目（异 note）：last-wins upsert 会静默合并丢一条发现（可能为
       // must-fix），收敛门禁③按残缺条目集判定——必须 upfront 整批拒绝
       const reply = h.svc.mutate({
@@ -305,7 +306,7 @@ describe('条目身份 = (round, id) 二元组（跨轮同 id 碰撞不覆盖历
             { id: 'rv-1', round: 1, dimension: 'support', severity: 'suggestion', targetId: c.o1, note: '缺口 B' },
           ],
         },
-      }, 'review')
+      }, 'review', SID)
       expectRejected(reply, 'invalid_params')
       if (!reply.ok) expect(reply.error.message).toContain('rv-1')
       // 整批不落盘：两条均未落
@@ -314,7 +315,7 @@ describe('条目身份 = (round, id) 二元组（跨轮同 id 碰撞不覆盖历
       expectOk(h.svc.mutate({
         action: 'review-append',
         params: { canvasId: c.canvasId, round: 1, entries: [{ id: 'rv-1', round: 1, dimension: 'completeness', severity: 'must-fix', targetId: c.q1, note: '缺口 A 修订' }] },
-      }, 'review'))
+      }, 'review', SID))
       expect(c.state().review?.entries).toHaveLength(1)
       expect(c.state().review?.entries[0]?.note).toBe('缺口 A 修订')
     } finally {
@@ -330,12 +331,12 @@ describe('条目身份 = (round, id) 二元组（跨轮同 id 碰撞不覆盖历
       expectOk(h.svc.mutate({
         action: 'review-append',
         params: { canvasId: c.canvasId, round: 2, entries: [{ id: 'rv-r2-1', round: 2, dimension: 'support', severity: 'must-fix', targetId: c.q1, note: 'R2 新缺口' }] },
-      }, 'review'))
-      const directWrite: CanvasState = h.svc.readState(c.canvasId)
+      }, 'review', SID))
+      const directWrite: CanvasState = h.svc.readState(c.canvasId, SID)
       expect(directWrite.review?.entries.map((e) => `${e.round}:${e.id}`)).toEqual(['1:rv-1', '2:rv-r2-1'])
-      const reborn = new CanvasService({ canvasesDir: h.dir, generateId: (): string => 'replay-unused-id' })
+      const reborn = new CanvasService({ dataDir: h.dir, generateId: (): string => 'replay-unused-id' })
       try {
-        expect(reborn.readState(c.canvasId)).toEqual(directWrite)
+        expect(reborn.readState(c.canvasId, SID)).toEqual(directWrite)
       } finally {
         reborn.dispose()
       }
@@ -357,7 +358,7 @@ describe('支撑度写回（概念 §2.4：边的缺陷经支撑度表达——r
     return svc.mutate({
       action: 'review-append',
       params: { canvasId, round: 2, entries: [{ id: 're1', round: 2, dimension: 'support', severity: 'must-fix', targetId: TRUNK_EDGE, note: '悬空断言', ...entry }] },
-    }, 'review')
+    }, 'review', SID)
   }
 
   it('主干边 gap 评价（附清单）→ edge.support 落 rating/gaps/round（round 按报告轮次溯源）', () => {
@@ -396,7 +397,7 @@ describe('支撑度写回（概念 §2.4：边的缺陷经支撑度表达——r
       expectOk(h.svc.mutate({
         action: 'grow',
         params: { canvasId: c.canvasId, batch: [{ id: 'a1', type: 'argument', content: '成本主张', attachTo: c.o1, edge: 'argue', edgePolarity: 'object' }], reason: '补反论据' },
-      }, 'agent'))
+      }, 'agent', SID))
       expectRejected(appendEntry(h.svc, c.canvasId, { targetId: 'e-a1', supportRating: 'gap', supportGaps: ['g'] }), 'invalid_params')
     } finally {
       h.dispose()
@@ -458,10 +459,10 @@ describe('支撑度写回（概念 §2.4：边的缺陷经支撑度表达——r
     try {
       const c = growCanvas(h.svc, createCanvas(h.svc))
       expect(appendEntry(h.svc, c.canvasId, { supportRating: 'gap', supportGaps: ['缺论据'] }).ok).toBe(true)
-      const directWrite: CanvasState = h.svc.readState(c.canvasId)
-      const reborn = new CanvasService({ canvasesDir: h.dir, generateId: (): string => 'replay-unused-id' })
+      const directWrite: CanvasState = h.svc.readState(c.canvasId, SID)
+      const reborn = new CanvasService({ dataDir: h.dir, generateId: (): string => 'replay-unused-id' })
       try {
-        const replayed = reborn.readState(c.canvasId)
+        const replayed = reborn.readState(c.canvasId, SID)
         expect(replayed.edges.find((e) => e.id === TRUNK_EDGE)?.support).toEqual({ rating: 'gap', gaps: ['缺论据'], round: 2 })
         expect(replayed).toEqual(directWrite)
       } finally {

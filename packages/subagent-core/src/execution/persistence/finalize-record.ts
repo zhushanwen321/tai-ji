@@ -129,7 +129,6 @@ async function collectPatchIfWorktree(deps: FinalizeDeps, record: ExecutionRecor
   await collectWorktreePatch({
     record,
     getWorktreeManager: () => deps.worktreeManager,
-    getAgentDir: () => deps.modelService.getAgentDir(),
     label: "collectPatch (finalizeRecord Step0)",
   });
 }

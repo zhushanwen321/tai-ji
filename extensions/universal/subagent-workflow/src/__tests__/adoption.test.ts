@@ -22,7 +22,7 @@
 // session-lifecycle / jsonl-run-store / subagent-core）。
 //
 // 环境隔离：PI_CODING_AGENT_DIR 钉到 mkdtemp 临时目录（pi config.js getAgentDir
-// env 优先）——真 JsonlRunStore 的 sessionDir / syncEnginesFile 全落临时目录，
+// env 优先）——真 JsonlRunStore 的 runsDir / syncEnginesFile 全落临时目录，
 // 不触碰真实 ~/.pi/agent（AGENTS.md 测试红线）。
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -167,9 +167,9 @@ function recordStatuses(entries: CustomEntry[], runId: string): string[] {
     .map((s) => s?.state?.status ?? "");
 }
 
-/** 读 state 派生视图文件的 status（[W1] 持久化派生视图范围断言用）。 */
-function readStateStatus(sessionDir: string, runId: string): string {
-  const raw = fs.readFileSync(path.join(sessionDir, "workflow-state", `${runId}.jsonl`), "utf8");
+/** 读 state 投影文件的 status（[W1] 持久化投影面断言用）。 */
+function readStateStatus(runsDir: string, runId: string): string {
+  const raw = fs.readFileSync(path.join(runsDir, `${runId}.jsonl`), "utf8");
   return (JSON.parse(raw.trim()) as { state: { status: string } }).state.status;
 }
 
@@ -183,7 +183,7 @@ beforeEach(() => {
   resetSlots();
   injectLifecycleFakes();
   agentDir = fs.mkdtempSync(path.join(os.tmpdir(), "wf-adoption-agentdir-"));
-  // pi getAgentDir() env 优先（config.js:420-424）——sessionDir/syncEnginesFile 全落临时
+  // pi getAgentDir() env 优先（config.js:420-424）——runsDir/syncEnginesFile 全落临时
   process.env.PI_CODING_AGENT_DIR = agentDir;
 });
 
@@ -211,7 +211,7 @@ describe("D4 恢复门控：session_start(reason=reload) 不跑 kill-9 恢复", 
       sessionId: "sess-gate",
       store: store as never,
       runs: new Map([[run.runId, run]]),
-      sessionDir: agentDir,
+      runsDir: agentDir,
       runner: {} as never,
       ctx: ctxOld,
       storeHealthy: true,
@@ -299,7 +299,7 @@ describe("D4 接管：同引用接管 + ctx 换新", () => {
       sessionId: "sess-adopt",
       store: store as never,
       runs: new Map([[run.runId, run]]),
-      sessionDir: agentDir,
+      runsDir: agentDir,
       runner: runner as never,
       ctx: makeFakeCtx("sess-adopt"),
       storeHealthy: true,
@@ -360,7 +360,7 @@ describe("D4 接管：同引用接管 + ctx 换新", () => {
     expect(run.state.status).toBe("running");
     // [D1] state 快照范围整体删除——接管无派生视图重发（record 流是唯一持久化，接管
     // 动作收敛为 rebind；不存在 state 文件是预期形态）
-    expect(fs.existsSync(path.join(agentDir, "workflow-state", "wf-live-1.jsonl"))).toBe(false);
+    expect(fs.existsSync(path.join(first!.runsDir, "wf-live-1.jsonl"))).toBe(false);
     // [W1 / D1] 停写锚定：条目通道退役——新旧 pi 零 workflow-record entry
     expect(recordStatuses(m2.entries, "wf-live-1")).toHaveLength(0);
     expect(recordStatuses(m1.entries, "wf-live-1")).toHaveLength(0);
@@ -385,7 +385,7 @@ describe("D4 失败处置：rebind-first → terminate 中断转移 → 移除�
         dispose: vi.fn(async () => {}),
       } as never,
       runs: new Map([[run.runId, run]]),
-      sessionDir: agentDir,
+      runsDir: agentDir,
       runner: {} as never,
       ctx: makeFakeCtx("sess-fail-seam"),
       storeHealthy: true,
@@ -434,11 +434,11 @@ describe("D4 失败处置：rebind-first → terminate 中断转移 → 移除�
     await first.store.save(run);
     // [W2/V1] 六态机引导：journal 首帧（run-created）——terminate 终局裁决前置。
     // dispatch 链（fold/append）走模块 journal 单写者域，测试注入指向本 session 的
-    // workflow-state 目录（与真 store 的 tail 读同域）。注入经动态 import 取与
+    // runs 目录（与真 store 的 tail 读同域）。注入经动态 import 取与
     // workflow-events 同一 pump 模块实例（beforeEach vi.resetModules 双实例隔离）。
     const pump = await import("@zhushanwen/subagent-core/orchestration/terminal-actions.ts");
-    pump.setRunEventJournalDirForTest(path.join(first.sessionDir, "workflow-state"));
-    const journal = createRunEventJournal(path.join(first.sessionDir, "workflow-state"));
+    pump.setRunEventJournalDirForTest(path.join(first.runsDir));
+    const journal = createRunEventJournal(path.join(first.runsDir));
     await journal.append(run.runId, {
       type: "run-created",
       runId: run.runId,
@@ -461,7 +461,7 @@ describe("D4 失败处置：rebind-first → terminate 中断转移 → 移除�
     // deps.appendEntry 已指向新 pi，中断条目落新 pi 权威 JSONL
     await vi.waitFor(() => {
       // [D1] 中断信号 = record 流 run-interrupted 帧（errorCode=terminated 承载来源）
-      const raw = fs.readFileSync(path.join(agentDir, "workflow-state", "wf-fail-1.record.jsonl"), "utf8");
+      const raw = fs.readFileSync(path.join(first.runsDir, "wf-fail-1.record.jsonl"), "utf8");
       const last = JSON.parse(raw.trim().split("\n").filter((l) => l.trim()).at(-1)!) as { type?: string; errorCode?: string };
       expect(last.type).toBe("run-interrupted");
       expect(last.errorCode).toBe("terminated");

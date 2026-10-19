@@ -85,7 +85,7 @@ import { execFile } from "node:child_process";
 import * as fs from "node:fs";
 import * as os from "node:os";
 
-import { encodeCwd } from "../assembly/path-encoding.ts";
+import { encodeCwd } from "@taiji/shared/paths";
 import type { ContinuationHost } from "../assembly/conversation-continuation.ts";
 import { WorktreeManager, type WorktreeRebuildOutcome } from "../worktree/worktree-manager.ts";
 
@@ -260,6 +260,7 @@ describe("[U5 / §3.2.5] worktree 续聊重建三失败形态（WorktreeManager.
 import * as path from "node:path";
 import { RecordLifecycle, type RecordLifecycleDeps } from "../service/record-lifecycle.ts";
 import { createRecord } from "../persistence/execution-record.ts";
+import { getSubagentSessionDir } from "../assembly/path-encoding.ts";
 import type { ExecutionRecord } from "../domain/record-model.ts";
 import type { WorktreeManager as WorktreeManagerType } from "../worktree/worktree-manager.ts";
 
@@ -328,9 +329,15 @@ describe("[U5 / §3.2.5 close 行] 收尾写入 journal 记录编排：worktree 
 
     await lifecycle.archiveRecord(record, "test");
 
-    // patch 前移：patch 落 sessionsDir/<branch>.patch（written 回填 record.patchFile）
-    expect(calls.patches).toEqual([path.join("/tmp/agent-dir", "subagents", "--repo--", "sessions", "pi-sub-arch.patch")]);
-    expect(record.patchFile).toBe(path.join("/tmp/agent-dir", "subagents", "--repo--", "sessions", "pi-sub-arch.patch"));
+    // patch 前移：patch 落 sessionsDir/<branch>.patch（written 回填 record.patchFile）。
+    // [session-store-layout-inversion] 生产落点 = getSubagentSessionDir(record.rootSessionId)
+    // （env dataDir 兜底，vitest global-setup 注入 tmp）——断言用同一单源公式推导。
+    const expectedPatchFile = path.join(
+      getSubagentSessionDir("root-session", process.env.TAIJI_AGENT_DATA_DIR),
+      "pi-sub-arch.patch",
+    );
+    expect(calls.patches).toEqual([expectedPatchFile]);
+    expect(record.patchFile).toBe(expectedPatchFile);
     // worktree 立即回收
     expect(calls.cleanupHandles).toEqual(["pi-sub-arch"]);
     // 收尾写入 journal 记录委托达点（markSettledOut stub 被调——worktreeHandle 清句由真实原语承担）
@@ -443,7 +450,7 @@ describe("[U5] close 顺序约束：Continuation settle 分支 route（通知送
 describe("[U5 / §3.2.2 事件表] 已收尾会话 + message → revive 翻 running（复活路径不回归）", () => {
   it("markSettledOut 收尾后 message 到达 → status 翻 running + 新轮派发（reviveOrThrow 承接）", async () => {
     const { RecordStore } = await import("../persistence/record-store.ts");
-    const store = new RecordStore("/tmp/u5-reactivate", undefined, {});
+    const store = new RecordStore(() => "/tmp/u5-reactivate", undefined, {});
     const record = makeIntentRecord("sa-reactivate", { status: "idle" });
     store.register(record);
 
@@ -479,7 +486,7 @@ describe("[U5 / §3.2.2 事件表] 已收尾会话 + message → revive 翻 runn
 
   it("[S5] markSettledOut 清 worktreeHandle + 置 hadWorktree（重建检查第三条判据承接）+ 幂等", async () => {
     const { RecordStore } = await import("../persistence/record-store.ts");
-    const store = new RecordStore("/tmp/u5-markarch-hw", undefined, {});
+    const store = new RecordStore(() => "/tmp/u5-markarch-hw", undefined, {});
     const handle = Object.freeze({ path: "/tmp/wt-ma", branch: "pi-sub-sa-ma-hw", baseCommit: "abc", mainCwd: "/repo" });
     const record = makeIntentRecord("sa-markarch-hw", { worktreeHandle: handle });
     store.register(record);

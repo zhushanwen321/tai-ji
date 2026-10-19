@@ -84,9 +84,13 @@ export interface BrokerServices {
  * （所有连接都要收到——headerAction 状态不是 per-connection 订阅态），且为
  * transient 状态帧（不经 message-bus publish，结构性不入 ring）。清单外新增的带
  * sessionId 全局广播帧仍触发下方哨兵告警。
+ * canvas.updated（session-store-layout-inversion D4）：画布变更失效提示，sessionId =
+ * 画布归属会话（消费方按归属过滤 + 拉取收敛）；所有连接可开 overlay，失效提示保持
+ * 全局路由语义。
  */
 const GLOBAL_BROADCAST_SESSION_ID_EXEMPT = new Set<ServerMessageType>([
   'plugin:headerActionUpdate',
+  'canvas.updated',
 ])
 
 export class ServerMessageBroker implements IMessageBroker {

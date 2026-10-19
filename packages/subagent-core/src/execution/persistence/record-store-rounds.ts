@@ -417,8 +417,9 @@ export class RecordEventsWriteFace {
   private readonly foldCache = new Map<string, RecordEventFoldState>();
 
   constructor(
-    /** recordsDir（与 manifest 同目录——D3 落点，事件文件 = `<dir>/<sa-id>.events`）。 */
-    private readonly recordsDir: string,
+    /** recordsDir 晚绑定取值（与 manifest 同目录——rootSessionId 树内分区，宿主
+     *  进程 initSession 后才定位；fold/append 时点现取）。 */
+    private readonly getRecordsDir: () => string,
     /** 主 session 条目上报通道（v2 两条款经 pi appendEntry 落主 session——D1）。 */
     private readonly appendEntry: (customType: string, data: unknown) => void,
     /** bound manifest 物化写侧（D2 决策 9）——record-store.ts 构造点绑定
@@ -427,7 +428,7 @@ export class RecordEventsWriteFace {
      *  字面只留 record-store.ts（R1 豁免清单），本文件不 import 写函数。 */
     private readonly materializeBoundManifest: (record: ExecutionRecord) => void,
   ) {
-    this.journal = createRecordEventStream(recordsDir);
+    this.journal = createRecordEventStream(this.getRecordsDir);
   }
 
   // ── fold 读侧 ─────────────────────────────────────────────
@@ -438,7 +439,7 @@ export class RecordEventsWriteFace {
     if (hit !== undefined) return hit;
     let content: string;
     try {
-      content = fs.readFileSync(recordEventsPath(this.recordsDir, id), "utf8");
+      content = fs.readFileSync(recordEventsPath(this.getRecordsDir(), id), "utf8");
     } catch (err) {
       if ((err as NodeJS.ErrnoException).code !== "ENOENT") {
         faceLogger.warn("[subagents] record event journal read failed (treated as empty)", { detail: { id, error: err instanceof Error ? err.message : String(err) } });

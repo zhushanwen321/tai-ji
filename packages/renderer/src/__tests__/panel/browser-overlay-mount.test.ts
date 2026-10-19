@@ -119,9 +119,11 @@ describe('BrowserOverlay（BrowserPane 挂浮层壳，S5 渲染可点）', () =>
     wrapper.unmount()
   })
 
-  it("canvas 内容上报：openCanvasOverlay → browser:overlay-state 收 content='canvas' 且 sessionId=null（画布跨 session 无会话归属，设计 D4/D7）", async () => {
+  it("canvas 内容上报：openCanvasOverlay(canvasId, 归属会话) → browser:overlay-state 收 content='canvas' 且 sessionId=null", async () => {
+    // [u-canvas] payload 现持归属会话（core openCanvasOverlay 双参契约，画布归属创建会话）；
+    // 主进程显示谓词面 sessionId 恒报 null（canvas 内容不驱动 browser view 显示，谓词面语义不变）
     const wrapper = mount(BrowserOverlay)
-    openCanvasOverlay('cvs-1')
+    openCanvasOverlay('cvs-1', 'sess-canvas')
     await nextTick()
     await nextTick()
     expect(mockBrowserSetOverlayState).toHaveBeenCalledWith({

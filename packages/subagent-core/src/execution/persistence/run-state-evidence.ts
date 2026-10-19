@@ -9,6 +9,12 @@
 // 判定与清理的事实源，state 快照文件只作为磁盘足迹的一部分被成对清理、
 // 不参与判定。
 //
+// [session-store-layout-inversion D2/D3] 本模块全程 dir 参数化（stateDir 一律由
+// 调用方传入），不持有任何布局字面量——换根因此落在目录枚举方：孤儿对账/TTL 的
+// 触发面枚举 = session 存储树一级 sid 目录的 `<root>/<rootSid>/workflow/runs/`
+// （壳 session-lifecycle 的 stateDirs 集合 + core pi-host-run-store 的枚举）。
+// 判定与清理语义零变化（宽限窗 / 保留窗 / 终态判据全保留）。
+//
 // 依赖方向：record 事件文件族的枚举与 fold 资格判定消费同域 record-events；
 // run 事件词表与 fold 经 orchestration/run-events 单源消费（本文件只做候选
 // 枚举与成对裁剪，不定义后缀词表；fold 终态 = W1 D5 清理资格判据）；
@@ -333,7 +339,7 @@ async function pruneTerminalRecordEventFiles(
   const eventNames = names.filter((n) => n.endsWith(RECORD_EVENTS_SUFFIX));
   result.scanned = eventNames.length;
 
-  const journal = createRecordEventStream(recordsDir);
+  const journal = createRecordEventStream(() => recordsDir);
   const now = Date.now();
   const windowForCandidates = retentionMs ?? DEFAULT_STATE_TTL_MS;
   for (const name of eventNames) {

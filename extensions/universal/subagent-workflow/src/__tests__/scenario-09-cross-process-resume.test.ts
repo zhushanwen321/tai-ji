@@ -54,12 +54,13 @@ function spawnDriver(
 ): ReturnType<typeof spawn> {
   // 剥离 vitest 防线 env：driver 是真实生产形态宿主进程（core journal 的 VITEST
   // 检测会落 no-op journal——子进程不继承测试防线）。
-  // PI_CODING_AGENT_DIR 锚进本轮 tmp（生产推导 resolvePiWorkflowStateDir 的根——
-  // 不注入会落真实 ~/.pi 数据目录，测试红线；锚定后 worker 后续帧/manifest 全落
-  // 本轮 stateDir，与 journalDir 注入点同目录）。
+  // TAIJI_AGENT_DATA_DIR 锚进本轮 tmp：[session-store-layout-inversion D2/D3] 新布局
+  // 的生产推导根 = shared getDataDir()（不注入则任何意外触达生产推导的点会落真实
+  // ~/.taiji 数据目录，测试红线；journal 写读面另经 driver 内
+  // setRunEventJournalDirForTest(STATE_DIR) 显式锚定，见 driver-resume.ts）。
   const childEnv = { ...process.env };
   delete childEnv.VITEST;
-  childEnv.PI_CODING_AGENT_DIR = agentDirRoot;
+  childEnv.TAIJI_AGENT_DATA_DIR = agentDirRoot;
   return spawn(TSX, [DRIVER], {
     env: {
       ...childEnv,
@@ -118,7 +119,7 @@ describe("场景 9：跨进程双 resume（proper-lockfile 真互斥）", () => 
       });
 
       // 持锁方先起：marker 出现 = 锁已被真实持有（跨进程 mkdir 产物在盘）
-      const holder = spawnDriver("holder", env.stateDir, "holder-a", env.sessionDir);
+      const holder = spawnDriver("holder", env.stateDir, "holder-a", env.runsDir);
       const holderPromise = waitExit(holder, 60_000);
       try {
         await waitForFile(driverMarkerPath(env.stateDir, "holder-a"), 20_000);
@@ -128,7 +129,7 @@ describe("场景 9：跨进程双 resume（proper-lockfile 真互斥）", () => 
       }
 
       // 竞争方到达（锁持有段内）：必 ELOCKED → 明确拒绝退出
-      const contender = spawnDriver("contender", env.stateDir, "contender-b", env.sessionDir);
+      const contender = spawnDriver("contender", env.stateDir, "contender-b", env.runsDir);
       const contenderOutcome = await waitExit(contender, 30_000);
 
       const holderOutcome = await holderPromise;

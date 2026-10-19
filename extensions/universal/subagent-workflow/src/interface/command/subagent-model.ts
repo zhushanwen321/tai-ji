@@ -9,7 +9,7 @@
 // - 载荷 = 单行 JSON {requestId, recordId?|runId?, provider, modelId, thinkingLevel?}；
 // - 执行 = 本进程直调宿主 setModel 编排（service.setModel，§7.2 单一三步）；
 // - 回执 = 一切结果（SetModelReply 三 scope / 错误 envelope）写结果文件
-//   `<subagent 数据根>/model-switch/<requestId>.json` 后正常返回——**全程不抛**；
+//   `<root>/<rootSid>/subagents/model-switch/<requestId>.json` 后正常返回——**全程不抛**；
 //   runtime 出站点在 handler 返回后读文件一次（写后读，无轮询无监视）。
 // - 结果文件承载 core SetModelReply 形状（scope 判别）——extension 不依赖
 //   @taiji/shared，wire 三形态映射归 runtime 适配器（依赖方向的唯一合法位置）。
@@ -20,10 +20,8 @@
 import * as path from "node:path";
 
 import type { ExtensionAPI, ExtensionCommandContext } from "@earendil-works/pi-coding-agent";
-import { getAgentDir } from "@earendil-works/pi-coding-agent";
 
 import {
-  ENV_ROOT_CWD,
   getSubagentModelSwitchResultsDir,
   getSubagentService,
   writeAtomicFileSync,
@@ -52,10 +50,12 @@ interface SubagentModelEnvelope { // oe-exempt:20261006:framework:通道结果�
 export interface SubagentModelCommandDeps { // oe-exempt:20261006:framework:命令 handler 依赖注入点（注册点装配，单实现常态）
   /** 宿主 setModel 编排单例（session_start 前 null——envelope 分型承接）。 */
   getService: () => ReturnType<typeof getSubagentService>;
-  /** agentDir 锚（pi SDK 活源，与 session-lifecycle 装配同源）。 */
-  resolveAgentDir: () => string;
-  /** 树根主 cwd（session-baselines rootCwd 同式推导，见 registerSubagentModelCommand）。 */
-  resolveRootCwd: () => string;
+  /**
+   * 根会话 id（信箱分区键）：[session-store-layout-inversion D2/D3] 信箱落
+   * `<root>/<rootSid>/subagents/model-switch/`——宿主进程当前 session id
+   * （pi SDK ctx.sessionManager.getSessionId()），与 records/sessions 同树。
+   */
+  resolveRootSessionId: () => string;
 }
 
 /** 载荷解析三态（显式判别：无 requestId = 无法命名结果文件，与字段校验失败分流）。 */
@@ -169,7 +169,7 @@ export async function runSubagentModelRpc(
     }
     // requestId 在场 + 字段校验失败：envelope 落盘（invalid_payload 分型）。
     const invalidFile = path.join(
-      getSubagentModelSwitchResultsDir(deps.resolveAgentDir(), deps.resolveRootCwd()),
+      getSubagentModelSwitchResultsDir(deps.resolveRootSessionId()),
       `${parsed.requestId}.json`,
     );
     writeResultFile(
@@ -187,7 +187,7 @@ export async function runSubagentModelRpc(
   }
   const { requestId, payload } = parsed;
   const resultsFile = path.join(
-    getSubagentModelSwitchResultsDir(deps.resolveAgentDir(), deps.resolveRootCwd()),
+    getSubagentModelSwitchResultsDir(deps.resolveRootSessionId()),
     `${requestId}.json`,
   );
 
@@ -251,14 +251,13 @@ export function registerSubagentModelCommand(pi: ExtensionAPI): void {
         ctx.ui.notify("/subagent-model is an internal taiji GUI channel — switch models from the subagent panel", "warning");
         return;
       }
-      // rootCwd 与 session-baselines 构造推导同式（env PI_SUBAGENT_ROOT_CWD 贯穿 ||
-      // ctx.cwd）——保证结果目录与 records 落同一 enc 段（enc 段不变量，path-encoding
-      // 头注同族约束）。本命令只在主进程执行（子进程无 / 命令通道），env 恒缺省。
+      // 分区键 = 宿主进程当前 session id（信箱与 records/sessions 同一棵根会话树，
+      // session-store-layout-inversion D2/D3）。本命令只在主进程执行（子进程无 /
+      // 命令通道）——sessionManager.getSessionId() 即根会话 id。
       await runSubagentModelRpc(
         {
           getService: getSubagentService,
-          resolveAgentDir: getAgentDir,
-          resolveRootCwd: () => process.env[ENV_ROOT_CWD] || ctx.cwd,
+          resolveRootSessionId: () => ctx.sessionManager.getSessionId(),
         },
         argsStr,
         ctx,

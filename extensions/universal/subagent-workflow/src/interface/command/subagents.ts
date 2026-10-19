@@ -11,14 +11,13 @@
 import * as path from "node:path";
 
 import type { ExtensionAPI, ExtensionCommandContext } from "@earendil-works/pi-coding-agent";
-import { getAgentDir } from "@earendil-works/pi-coding-agent";
 
 import {
-  ENV_ROOT_CWD,
   getSubagentMessageResultsDir,
   getSubagentService,
   writeAtomicFileSync,
 } from "@zhushanwen/subagent-core";
+import { resolveRootSessionId } from "../../session-lifecycle.ts";
 import { getLogger } from "@zhushanwen/pi-extension-logger";
 
 const logger = getLogger("subagents");
@@ -87,7 +86,7 @@ async function rpcCancel(
     const ok = service.cancel(recordId);
     if (!ok) {
       // 未命中/已终局：经结果文件传回（renderer 乐观翻边需回滚），notify 照旧留横幅。
-      writeMessageResultFile(requestId, process.env[ENV_ROOT_CWD] || ctx.cwd, {
+      writeMessageResultFile(requestId, resolveRootSessionId(ctx), {
         scope: "error",
         error: { code: "subagent_cancel_not_found", message: `Subagent ${recordId} not found or already finished` },
       });
@@ -100,7 +99,7 @@ async function rpcCancel(
     // service.cancel 内部 assertReady 在 session_shutdown 并发 dispose 时会抛。
     // 失败经结果文件传回（prompt 通道不携带命令异常，真机实测）——renderer
     // cancelSubagent 依赖 rejection 回滚乐观翻边（吞错会让乐观 idle 假成功落地）。
-    writeMessageResultFile(requestId, process.env[ENV_ROOT_CWD] || ctx.cwd, {
+    writeMessageResultFile(requestId, resolveRootSessionId(ctx), {
       scope: "error",
       error: { code: "subagent_cancel_failed", message: String(err) },
     });
@@ -112,17 +111,17 @@ async function rpcCancel(
  * handler 异常**不拒绝**（真机实测——异常被 pi 转为 UI notify，prompt 照常 resolve），
  * composer 车道的失败契约（toast + restoreSegments 恢复草稿）必须经结果文件传回。
  * 载体与 /subagent-model 通道同款（getSubagentMessageResultsDir，写后读、读后即删）。
- * requestId 缺省（手动 prompt / 旧调用方）= 无回执面，跳过写入（runtime 侧读不到
+ * requestId 缺省（手动 prompt / 旧调用方）= 无回执，跳过写入（runtime 侧读不到
  * 文件按通道失败处理——仅发生在带 --req 的新调用方，旧调用方 runtime 侧同样不带
  * 读取，互不干扰）。
  */
 function writeMessageResultFile(
   requestId: string | undefined,
-  cwd: string | undefined,
+  rootSessionId: string,
   content: Record<string, unknown>,
 ): void {
-  if (requestId === undefined || !/^[\w-]{1,128}$/.test(requestId) || !cwd) return;
-  const resultsFile = path.join(getSubagentMessageResultsDir(getAgentDir(), cwd), `${requestId}.json`);
+  if (requestId === undefined || !/^[\w-]{1,128}$/.test(requestId) || !rootSessionId) return;
+  const resultsFile = path.join(getSubagentMessageResultsDir(rootSessionId), `${requestId}.json`);
   try {
     writeAtomicFileSync(resultsFile, JSON.stringify(content));
   } catch (err) {
@@ -157,7 +156,7 @@ async function rpcMessage(
       text,
       ctx.isIdle(),
     );
-    writeMessageResultFile(requestId, process.env[ENV_ROOT_CWD] || ctx.cwd, {
+    writeMessageResultFile(requestId, resolveRootSessionId(ctx), {
       scope: "ok",
       subagentId: result.subagentId,
       slug: result.slug,
@@ -167,7 +166,7 @@ async function rpcMessage(
     // 失败经结果文件传回（scope:error → runtime 抛分型错误 → WS error envelope →
     // renderer composer 车道 toast + restoreSegments 恢复草稿）。prompt 通道本身
     // 不携带命令异常（resolve 语义，真机实测），notify 只达 TUI/横幅不达回执面。
-    writeMessageResultFile(requestId, process.env[ENV_ROOT_CWD] || ctx.cwd, {
+    writeMessageResultFile(requestId, resolveRootSessionId(ctx), {
       scope: "error",
       error: { code: "subagent_message_failed", message: String(err) },
     });

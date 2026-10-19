@@ -18,15 +18,15 @@
  *   sessionsDir 时走真实层级，pi/sessions 旧布局诱饵不得误活——见「缺省 sessionsDir
  *   推导」describe 的负向诱饵用例）
  * - 全局软上限：超帽只清孤儿判死目录（活 session 目录豁免），mtime 老→新
- * - session 删除级联：目录删除幂等 + 端到端（U3：`<ts>_<uuid>.jsonl` 文件名 → 派生
- *   uuid → cache 目录消失）
+ * - main 侧删除 API 锚定：目录删除幂等 + 端到端派生（U3：`<ts>_<uuid>.jsonl` 文件名 →
+ *   派生 uuid → cache 目录消失；runtime 删除链该段已退役——域 3 随整树软删）
  * - 路径穿越防护：非法 sessionId 向上抛（IPC 壳层兜底降级，不落盘）
  */
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import { chmodSync, existsSync, mkdirSync, mkdtempSync, readdirSync, rmSync, utimesSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join, dirname } from 'node:path'
-import { getImageCacheDir, getImageCacheRoot } from '@taiji/shared/paths'
+import { getImageCacheDir, getSessionStoreDir } from '@taiji/shared/paths'
 import {
   deleteSessionImageCache,
   enforceImageCacheGlobalCap,
@@ -68,7 +68,7 @@ const ENCODED_CWD = '--Users-demo-project'
 
 let root: string
 let sessionsDir: string
-/** 软上限用例的独立 dataDir（与前序用例的 cache 目录隔离——软上限扫描全域 cache/images）。 */
+/** 软上限用例的独立 dataDir（与前序用例的 cache 目录隔离——软上限扫描存储树各 sid 分区的 image-cache 域）。 */
 let capRoot: string
 let capSessionsDir: string
 
@@ -92,8 +92,9 @@ function uniqueBase64(bytes: number, seed: number): string {
   return (`img${seed}` + 'A'.repeat(total)).slice(0, total)
 }
 
+/** session 存储树内本域 cache 分区目录（生产同构推导：`<dataDir>/ext-sessions/<sid>/image-cache`）。 */
 function cacheDirOf(sid: string): string {
-  return join(root, 'cache', 'images', sid)
+  return getImageCacheDir(sid, root)
 }
 
 beforeAll(() => {
@@ -256,6 +257,28 @@ describe('孤儿扫描（启动清扫通道②）', () => {
       chmodSync(sessionsDir, 0o755)
     }
   })
+
+  it('存储树内非 sessionId 形态的一级目录一律跳过（D7 树内遍历规约）：不扫描不清理', () => {
+    // 防未来手放的非会话目录（含 encodeCwd 形态——新树一级分区键恒为纯 sid）被孤儿判据
+    // 误清：目录名不过 isPiSessionId（含空格 / 冒号）→ 结构性跳过。夹具 mtime 放 60 天前
+    // ——若被扫描必过龄判死，「60 天后仍原样保留」即跳过的直接证明（同 describe 前序
+    // 用例的既有分区在场，removed 断言只锚定本用例夹具不被清）
+    const storeDir = getSessionStoreDir(root)
+    // 夹具全部为「形态非法」（isPiSessionId 必拒）；形态合法但非真实会话的目录不在本
+    // 规约保护范围——按孤儿判据判死是既有语义（与现状一致）
+    const junkDirs = ['not a sid', 'btw:abc', '--Users-demo-project--', '.DS_Store']
+    for (const junk of junkDirs) {
+      const dir = join(storeDir, junk, 'image-cache')
+      mkdirSync(dir, { recursive: true })
+      writeFileSync(join(dir, 'junk.png'), 'x')
+      utimesSync(dir, epochSecondsAgo(60), epochSecondsAgo(60))
+    }
+    const result = scanOrphanImageCaches({ dataDir: root, sessionsDir })
+    for (const junk of junkDirs) {
+      expect(result.removed).not.toContain(junk)
+      expect(existsSync(join(storeDir, junk, 'image-cache', 'junk.png'))).toBe(true)
+    }
+  })
 })
 
 describe('缺省 sessionsDir 推导 = <dataDir>/agent/sessions（U1，方案 B 新布局）', () => {
@@ -271,15 +294,16 @@ describe('缺省 sessionsDir 推导 = <dataDir>/agent/sessions（U1，方案 B �
       const baitDir = join(dd, 'pi', 'sessions')
       mkdirSync(baitDir, { recursive: true })
       writeFileSync(join(baitDir, ORPHAN_FILE), '{}\n')
-      // 孤儿目标：真实 sessions 无对应文件 + cache 目录 mtime 40 天
-      mkdirSync(join(dd, 'cache', 'images', ORPHAN_UUID), { recursive: true })
-      writeFileSync(join(dd, 'cache', 'images', ORPHAN_UUID, 'x.png'), 'x')
-      utimesSync(join(dd, 'cache', 'images', ORPHAN_UUID), epochSecondsAgo(40), epochSecondsAgo(40))
+      // 孤儿目标（session 存储树内本域分区）：真实 sessions 无对应文件 + cache 目录 mtime 40 天
+      const orphanCacheDir = join(dd, 'ext-sessions', ORPHAN_UUID, 'image-cache')
+      mkdirSync(orphanCacheDir, { recursive: true })
+      writeFileSync(join(orphanCacheDir, 'x.png'), 'x')
+      utimesSync(orphanCacheDir, epochSecondsAgo(40), epochSecondsAgo(40))
 
       // 只注入 dataDir，不传 sessionsDir —— 缺省推导路径被测
       const result = scanOrphanImageCaches({ dataDir: dd })
       expect(result.removed).toContain(ORPHAN_UUID)
-      expect(existsSync(join(dd, 'cache', 'images', ORPHAN_UUID))).toBe(false)
+      expect(existsSync(orphanCacheDir)).toBe(false)
     } finally {
       rmSync(dd, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 })
     }
@@ -288,7 +312,7 @@ describe('缺省 sessionsDir 推导 = <dataDir>/agent/sessions（U1，方案 B �
 
 describe('全局软上限 512MB（只清孤儿判死目录，mtime 老→新）', () => {
   function capCacheDirOf(sid: string): string {
-    return join(capRoot, 'cache', 'images', sid)
+    return getImageCacheDir(sid, capRoot)
   }
 
   it('超帽：孤儿老目录先清、孤儿新目录次之、活 session 目录豁免；回落帽下即停', () => {
@@ -317,7 +341,7 @@ describe('全局软上限 512MB（只清孤儿判死目录，mtime 老→新）'
   })
 })
 
-describe('session 删除级联（通道①）', () => {
+describe('main 侧删除 API 锚定（runtime 删除链该段已退役，域 3 随整树软删）', () => {
   it('删目录；不存在时幂等 no-op', () => {
     mkdirSync(cacheDirOf('s-cascade'), { recursive: true })
     writeFileSync(join(cacheDirOf('s-cascade'), 'd.png'), 'x')
@@ -327,7 +351,7 @@ describe('session 删除级联（通道①）', () => {
   })
 
   it('端到端（U3）：构造 <ts>_<uuid>.jsonl 文件名 → 派生 uuid → 删除后 cache 目录消失', () => {
-    // runtime 删除链同构编排：session 文件（生产同构名）→ sessionIdFromSessionFilePath
+    // main 侧删除 API 编排：session 文件（生产同构名）→ sessionIdFromSessionFilePath
     // 派生 → deleteSessionImageCache 命中 renderer 写入的 cache 目录（目录名 = 纯 uuid）
     const filePath = join(sessionsDir, ENCODED_CWD, ALIVE_FILE)
     mkdirSync(dirname(filePath), { recursive: true })
@@ -396,9 +420,9 @@ function readFileSyncBytes(p: string): Buffer {
   return readFileSync(p)
 }
 
-// getImageCacheRoot 冒烟：root 推导一致性（与 getImageCacheDir 同前缀）
+// 路径推导一致性：本域分区落 session 存储树（`<dataDir>/ext-sessions/<sid>/image-cache`）
 describe('路径推导一致性', () => {
-  it('session 目录 = root/<sessionId>', () => {
-    expect(getImageCacheDir('x', root)).toBe(join(getImageCacheRoot(root), 'x'))
+  it('session 目录 = <dataDir>/ext-sessions/<sessionId>/image-cache（存储树域 3 分区）', () => {
+    expect(getImageCacheDir('x', root)).toBe(join(getSessionStoreDir(root), 'x', 'image-cache'))
   })
 })

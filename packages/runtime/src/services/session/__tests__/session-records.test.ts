@@ -24,9 +24,10 @@ import { SessionRecords, encodeDirectiveText } from '../session-records.js'
 import { routeJournalReport } from '../journal-report-router.js'
 import { SCALAR_STATE_DEBOUNCE_MS } from '../replicated-states.config.js'
 import type { SkillInjector, SkillInjectionResult } from '../skill-injector.js'
+import { getSubagentRecordsDir, resolvePiWorkflowRunsDir } from '@zhushanwen/subagent-core'
 import { extractSubagentsFromSessionFile } from '../subagent-extractor.js'
 import { extractWorkflowsFromSessionFile } from '../workflow-extractor.js'
-import { encodeCwd } from '../../../infra/pi/pi-paths.js'
+// [subagent-composer 结果回执通道] 回执目录单源（rootSessionId 分区键，读侧与生产同式）
 import { getSubagentMessageResultsDir } from '@zhushanwen/subagent-core'
 
 const extractSubagentsMock = vi.mocked(extractSubagentsFromSessionFile)
@@ -37,7 +38,13 @@ const piAgentDirRef = vi.hoisted(() => ({ dir: '' }))
 
 vi.mock('../../../infra/pi/pi-paths.js', async (importOriginal) => {
   const actual = await importOriginal<typeof import('../../../infra/pi/pi-paths.js')>()
-  return { ...actual, getPiAgentDir: () => piAgentDirRef.dir }
+  return {
+    ...actual,
+    getPiAgentDir: () => piAgentDirRef.dir,
+    // session 存储树数据根（records 目录第二参）：与 getPiAgentDir 同 ref 重定向
+    //——[session-store-layout-inversion D2] records 目录 = getSubagentRecordsDir(sid, dataDir)
+    getConfigDir: () => piAgentDirRef.dir,
+  }
 })
 
 // [W1 / D6] 全文读路径 call-through spy（验收③「getWorkflows/getSubagents 不再调全文
@@ -235,17 +242,18 @@ async function flushDebounce(): Promise<void> {
 // ── subagent-composer 结果回执通道装置（2026-10-18 契约）────────────────
 //
 // cancel/message 转发带 --req=<uuid>，runtime 在 prompt resolve 后读请求作用域回执
-// 文件（getSubagentMessageResultsDir(agentDir, cwd)/<reqId>.json，读后即删；缺失 =
-// 通道失败 throw）。装置 = ① 临时 agentDir 挂 piAgentDirRef（getPiAgentDir 已 mock
-// 指向该 ref）+ 会话 cwd 经 deps.getSessionCwd 注入；② prompt mock 按命令内
+// 文件（getSubagentMessageResultsDir(sessionId, dataDir)/<reqId>.json，读后即删；缺失 =
+// 通道失败 throw）。装置 = ① 临时 agentDir 挂 piAgentDirRef（getPiAgentDir/getConfigDir
+// 已 mock 指向该 ref——回执 dataDir 与生产 getConfigDir 同源）+ 会话 cwd 经
+// deps.getSessionCwd 注入；② prompt mock 按命令内
 // --req=<id> 同步写 {"scope":"ok"} 回执（extension 写侧时序：handler 落盘先于
 // prompt resolve）。
 
-/** 从命令文本解析 --req=<id> 并写成功回执（目录经生产同源单源函数推导）。 */
-function writeOkReceiptFromCommand(agentDir: string, cwd: string, text: string): void {
+/** 从命令文本解析 --req=<id> 并写成功回执（目录经生产同源单源函数推导，rootSessionId 分区键）。 */
+function writeOkReceiptFromCommand(sid: string, dataDir: string, text: string): void {
   const req = /--req=([\w-]+)/.exec(text)?.[1]
   if (req === undefined) return
-  const resultsFile = join(getSubagentMessageResultsDir(agentDir, cwd), `${req}.json`)
+  const resultsFile = join(getSubagentMessageResultsDir(sid, dataDir), `${req}.json`)
   mkdirSync(dirname(resultsFile), { recursive: true })
   writeFileSync(resultsFile, JSON.stringify({ scope: 'ok' }))
 }
@@ -322,7 +330,9 @@ describe('refreshRecordEntries：拉取与发布', () => {
     // [W1 / D6] 步骤视图换源：agentCalls 骨架改由 run journal fold 供给（v2 条目不内嵌
     // trace）——本用例用真实 run journal 驱动「同 run 新增一个 agent 步骤」。
     const dir = mkdtempSync(join(tmpdir(), 'session-records-wfsteps-'))
-    const runJournalDir = join(dir, 'workflow-state')
+    // [session-store-layout-inversion D2/D3] run journal 随 workflow 域换根：
+    // <root>/<sid>/workflow/runs/（分区键 = 当前 sid，与生产 resolvePiWorkflowRunsDir 同源）
+    const runJournalDir = resolvePiWorkflowRunsDir('s1', dir)
     mkdirSync(runJournalDir, { recursive: true })
     const runJournalPath = join(runJournalDir, 'run-1.record.jsonl')
     writeFileSync(runJournalPath, `${JSON.stringify({ type: 'run-created', runId: 'run-1', workflowName: 'test-flow', argsSummary: '', ts: 1000 })}\n`)
@@ -372,10 +382,9 @@ describe('refreshRecordEntries：拉取与发布', () => {
     // ensureProjection 触发点才冷读收敛，托盘「进行中」轮内全程停留旧态）。
     const dir = mkdtempSync(join(tmpdir(), 'session-records-early-report-'))
     // 记录事件文件：record-created（round-started 前置身份帧）+ round-started（running 态事实）
-    // 目录锚 = getSubagentRecordsDir(agentDir, cwd) 推导（encodeCwd 折叠——与生产同源，
-    // mock 的 scanSessions 必须带 cwd 否则派生视图落 entry-only 降级、记录域报告无处应用）
-    const encCwd = '--' + dir.replace(/^[/\\]/, '').replace(/[/\\:]/g, '-') + '--'
-    const recordsDir = join(dir, 'subagents', encCwd, 'records')
+    // 目录锚 = getSubagentRecordsDir(sessionId)（session 存储树根会话分区——与生产
+    // 同源；分区键即会话 id s1）
+    const recordsDir = getSubagentRecordsDir('s1', dir)
     mkdirSync(recordsDir, { recursive: true })
     const eventsPath = join(recordsDir, 'sa-early.events')
     const created = { type: 'record-events', id: 'sa-early', ver: 1 }
@@ -801,7 +810,7 @@ describe('workflowAction / subagentAction：命令转发', () => {
     const channel = armReceiptChannel()
     const { records, client } = makeRecords({ getSessionCwd: () => channel.cwd })
     ;(client.prompt as ReturnType<typeof vi.fn>).mockImplementation(async (text: string) => {
-      writeOkReceiptFromCommand(channel.agentDir, channel.cwd, text)
+      writeOkReceiptFromCommand('s1', channel.agentDir, text)
     })
     try {
       await records.subagentAction('s1', 'cancel', { subagentId: 'sa-1' })
@@ -810,7 +819,7 @@ describe('workflowAction / subagentAction：命令转发', () => {
         expect.stringMatching(/^\/subagents cancel sa-1 --req=[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/),
       )
       // 读后即删（请求作用域生命周期）：回执消费后目录不残留
-      expect(readdirSync(getSubagentMessageResultsDir(channel.agentDir, channel.cwd))).toEqual([])
+      expect(readdirSync(getSubagentMessageResultsDir('s1', channel.agentDir))).toEqual([])
     } finally {
       channel.dispose()
     }
@@ -820,7 +829,7 @@ describe('workflowAction / subagentAction：命令转发', () => {
     const channel = armReceiptChannel()
     const { records, client } = makeRecords({ getSessionCwd: () => channel.cwd })
     ;(client.prompt as ReturnType<typeof vi.fn>).mockImplementation(async (text: string) => {
-      writeOkReceiptFromCommand(channel.agentDir, channel.cwd, text)
+      writeOkReceiptFromCommand('s1', channel.agentDir, text)
     })
     try {
       await records.subagentAction('s1', 'message', { subagentId: 'sa-1', text: 'line1\nline2\\end' })
@@ -937,7 +946,7 @@ describe('subagentAction：skill 注入挂载（A2 MF-B）', () => {
     const calls: string[] = []
     ;(client.prompt as ReturnType<typeof vi.fn>).mockImplementation(async (text: string) => {
       calls.push(`prompt:${text}`)
-      writeOkReceiptFromCommand(channel.agentDir, channel.cwd, text)
+      writeOkReceiptFromCommand('s1', channel.agentDir, text)
     })
     publish.mockImplementation((sid: string, msg: { type: string }) => {
       calls.push(`publish:${msg.type}`)
@@ -991,7 +1000,7 @@ describe('subagentAction：skill 注入挂载（A2 MF-B）', () => {
     const channel = armReceiptChannel()
     const { records, publish, client } = makeRecords({ getSessionCwd: () => channel.cwd }, injector)
     ;(client.prompt as ReturnType<typeof vi.fn>).mockImplementation(async (text: string) => {
-      writeOkReceiptFromCommand(channel.agentDir, channel.cwd, text)
+      writeOkReceiptFromCommand('s1', channel.agentDir, text)
     })
     try {
       await records.subagentAction('s1', 'message', { subagentId: 'sa-1', text: 't' })
@@ -1006,7 +1015,7 @@ describe('subagentAction：skill 注入挂载（A2 MF-B）', () => {
     const channel = armReceiptChannel()
     const { records, client } = makeRecords({ getSessionCwd: () => channel.cwd }, injector)
     ;(client.prompt as ReturnType<typeof vi.fn>).mockImplementation(async (text: string) => {
-      writeOkReceiptFromCommand(channel.agentDir, channel.cwd, text)
+      writeOkReceiptFromCommand('s1', channel.agentDir, text)
     })
     try {
       await records.subagentAction('s1', 'cancel', { subagentId: 'sa-1' })
@@ -1023,7 +1032,7 @@ describe('subagentAction：skill 注入挂载（A2 MF-B）', () => {
     const channel = armReceiptChannel()
     const { records, client } = makeRecords({ getSessionCwd: () => channel.cwd })
     ;(client.prompt as ReturnType<typeof vi.fn>).mockImplementation(async (text: string) => {
-      writeOkReceiptFromCommand(channel.agentDir, channel.cwd, text)
+      writeOkReceiptFromCommand('s1', channel.agentDir, text)
     })
     try {
       await records.subagentAction('s1', 'message', { subagentId: 'sa-1', text: '纯文本' })
@@ -1380,8 +1389,10 @@ function makeV2World(cwd: string): {
   const worldDir = mkdtempSync(join(tmpdir(), 'session-records-w1-'))
   const agentDir = join(worldDir, 'agent')
   const sessionFile = join(worldDir, 's1.jsonl')
-  const recordsDir = join(agentDir, 'subagents', encodeCwd(cwd), 'records')
-  const runJournalDir = join(worldDir, 'workflow-state')
+  // [session-store-layout-inversion D2] records 目录 = getSubagentRecordsDir(sessionId)
+  // （rootSessionId 树内分区，分区键即会话 id s1；dataDir = worldDir 与 mock getConfigDir 对齐）
+  const recordsDir = getSubagentRecordsDir('s1', worldDir)
+  const runJournalDir = resolvePiWorkflowRunsDir('s1', worldDir)
   mkdirSync(recordsDir, { recursive: true })
   mkdirSync(runJournalDir, { recursive: true })
   return { worldDir, agentDir, sessionFile, recordsDir, runJournalDir }
@@ -1431,10 +1442,43 @@ describe('[W1] 读侧换源：磁盘 entry-only 派生视图 / v2 读派生视�
     }
   })
 
-  it('v2 读派生视图：事件 fold 胜出条目冲突（status/stopReason），条目独有字段（model/result）照常填充', async () => {
+  it('读侧定档：面板只显示当前会话树内 record（rootSessionId 树内分区，验收③）', async () => {
+    // [session-store-layout-inversion D2] records 目录 = <root>/<sid>/subagents/records：
+    // 会话 A 的面板只冷读 A 自己的树；B 树的 record（即使 rootSessionId 错标 A）也不可见。
+    const cwd = '/tmp/w1-proj'
+    const worldA = makeV2World(cwd)
+    piAgentDirRef.dir = worldA.worldDir
+    try {
+      // A 树：sa-mine（归属 A）
+      writeFileSync(join(worldA.recordsDir, 'sa-mine.events'), [
+        JSON.stringify({ type: 'record-events', id: 'sa-mine' }),
+        JSON.stringify({ type: 'record-created', seq: 1, ts: 1000, id: 'sa-mine', agent: 'worker', task: 'mine', slug: 'm', origin: 'tool', rootSessionId: 's1', depth: 0, mode: 'bg', startedAt: 1000 }),
+      ].join('\n') + '\n')
+      // B 树：sa-other（归属 B，与 A 同 cwd——旧布局共享目录场景的对照）
+      const recordsDirB = getSubagentRecordsDir('s2', worldA.worldDir)
+      mkdirSync(recordsDirB, { recursive: true })
+      writeFileSync(join(recordsDirB, 'sa-other.events'), [
+        JSON.stringify({ type: 'record-events', id: 'sa-other' }),
+        JSON.stringify({ type: 'record-created', seq: 1, ts: 1000, id: 'sa-other', agent: 'worker', task: 'other', slug: 'o', origin: 'tool', rootSessionId: 's2', depth: 0, mode: 'bg', startedAt: 1000 }),
+      ].join('\n') + '\n')
+      writeFileSync(worldA.sessionFile, JSON.stringify({ type: 'session', id: 's1', cwd }) + '\n')
+
+      const { records } = makeRecords({
+        sessionStore: { scanSessions: vi.fn(() => [{ id: 's1', filePath: worldA.sessionFile, cwd }]) } as unknown as ISessionStore,
+      })
+      const subagents = await records.getSubagents('s1')
+      const ids = subagents.records.map((r) => r.subagentId)
+      expect(ids).toContain('sa-mine')
+      expect(ids).not.toContain('sa-other')
+    } finally {
+      rmSync(worldA.worldDir, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 })
+    }
+  })
+
+  it('v2 读投影：事件 fold 胜出条目冲突（status/stopReason），条目独有字段（model/result）照常填充', async () => {
     const cwd = '/tmp/w1-proj'
     const world = makeV2World(cwd)
-    piAgentDirRef.dir = world.agentDir
+    piAgentDirRef.dir = world.worldDir
     try {
       // 事件源：created（无 settled）→ running；条目：settled(interrupted) → 事件源胜出显示 running
       writeFileSync(join(world.recordsDir, 'sa-1.events'), [
@@ -1480,7 +1524,7 @@ describe('[W1] 读侧换源：磁盘 entry-only 派生视图 / v2 读派生视�
   it('派生视图驱动信号：事件文件追加终态事件 → journal 推送喂入 → 派生视图变更 publish（subagents 帧 + workflowUpdate 转态信号）', async () => {
     const cwd = '/tmp/w1-signal'
     const world = makeV2World(cwd)
-    piAgentDirRef.dir = world.agentDir
+    piAgentDirRef.dir = world.worldDir
     try {
       writeFileSync(join(world.recordsDir, 'sa-1.events'), [
         JSON.stringify({ type: 'record-events', id: 'sa-1' }),
@@ -1543,7 +1587,7 @@ describe('[W1] 读侧换源：磁盘 entry-only 派生视图 / v2 读派生视�
   it('[W1 双形态] v2 混沌：entry 通道整体空转 → 兜底失效触发派生视图冷启动，事件 fold 独立收敛', async () => {
     const cwd = '/tmp/w1-chaos'
     const world = makeV2World(cwd)
-    piAgentDirRef.dir = world.agentDir
+    piAgentDirRef.dir = world.worldDir
     try {
       // 事件源：created + settled(completed) 已落盘；会话文件仅注册条目（终态条目缺席）
       writeFileSync(join(world.recordsDir, 'sa-1.events'), [

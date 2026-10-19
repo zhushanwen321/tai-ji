@@ -26,7 +26,7 @@ import { copyFile, stat } from 'node:fs/promises'
 import { basename, isAbsolute, join, resolve, sep } from 'node:path'
 import type { SessionJsonlExportPayload, SessionJsonlExportResult } from '@taiji/shared'
 import { SESSION_EXPORT_JSONL } from '@taiji/shared'
-import { getPiAgentDir, PI_SESSION_TREE_SEGMENTS } from '@taiji/shared/paths'
+import { getPiAgentDir, PI_SESSION_TREE_SEGMENTS, SESSION_STORE_DIR_SEGMENT } from '@taiji/shared/paths'
 import { mainLogger } from '../logs/main-logger.js'
 import { runSaveDialogGuarded } from '../utils/save-dialog-guard.js'
 
@@ -57,7 +57,12 @@ export function isInsideSessionTrees(candidate: string, piAgentDir: string): boo
   if (!isAbsolute(candidate)) return false
   const resolvedCandidate = resolve(candidate).toLowerCase()
   const resolvedAgentDir = resolve(piAgentDir).toLowerCase()
-  return PI_SESSION_TREE_SEGMENTS.some((segment) => {
+  // 只消费 pi 宿主树段（sessions/subagents/btw，基址 piAgentDir）——数组末位 ext-sessions
+  // 基址是 <dataDir> 不是 piAgentDir（shared PI_SESSION_TREE_SEGMENTS 消费注意），逐段
+  // join 会拼出不存在的基址。当前导出入口只触达 pi 宿主树路径（主会话/subagent 记录，
+  // btw 线为 hidden 会话无导出入口），存储树判定待真实需求出现时经 getSessionStoreDir
+  // 显式加入，不预留死段。
+  return PI_SESSION_TREE_SEGMENTS.filter((segment) => segment !== SESSION_STORE_DIR_SEGMENT).some((segment) => {
     const treeRoot = join(resolvedAgentDir, segment)
     return resolvedCandidate.startsWith(treeRoot + sep)
   })

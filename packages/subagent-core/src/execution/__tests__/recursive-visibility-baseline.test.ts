@@ -204,11 +204,16 @@ describe("进程级基线兜底（ALS 断裂修复，pi 事件回调模型）", 
     await expect(service.execute({ task: "deep but allowed", slug: "test", ctxModel })).resolves.toBeDefined();
   });
 
-  it("[MF-3 回归] 有 ENV_ROOT_CWD（worktree 子进程）：sessions 与 records 两套目录统一编码在 ROOT cwd 段", () => {
-    // 模拟 B（worktree 子进程，自身 cwd=checkout 路径）经 env 拿到真 ROOT cwd。
-    // 旧实现按 init.cwd 编码 → enc(checkout) 段，ROOT 磁盘重建扫不到（MF-3）。
-    const rootCwd = "/root/project";
-    process.env[ENV_ROOT_CWD] = rootCwd;
+  it("[MF-3 回归] 有 ENV_ROOT_SESSION_ID（worktree 子进程）：sessions 与 records 两套目录统一分区在 ROOT sid 树", () => {
+    // 模拟 B（worktree 子进程，自身 cwd=checkout 路径、init.sessionId=子会话 id）经 env
+    // 贯穿拿到真 ROOT sid。旧布局按 init.cwd 编码 → enc(checkout) 段，ROOT 磁盘重建
+    // 扫不到（MF-3 事故）；[session-store-layout-inversion] 分区键 = rootSessionId
+    // （env 贯穿值），cwd 编码段退役——隔离语义等价保留：子进程写盘与 ROOT 进程
+    // 扫描同树（同 rootSessionId 同目录），自身 sessionId 子树被排除。
+    const rootSid = "sid-mf3-root";
+    process.env[ENV_ROOT_SESSION_ID] = rootSid;
+    // cwd 贯穿键残留不参与分区（enc 段已退役）——残留 env 不影响目录推导即回归点
+    process.env[ENV_ROOT_CWD] = "/root/project";
 
     const agentDir = "/tmp/baseline-it";
     const checkoutPath = "/var/folders/worktree/pi-subagents/--root-project--/branch";
@@ -224,14 +229,17 @@ describe("进程级基线兜底（ALS 断裂修复，pi 事件回调模型）", 
       modelService,
       getMainSessionFile: () => "/mock/main-session.jsonl",
     });
+    // 分区键 = sessionRootId（initSession 从 env 建立），initSession 前目录闭包不可解析
+    service.initSession({ pi: makePi(), sessionId: "sid-child-own" });
 
-    const store = Reflect.get(service, "store") as RecordStore;
-    const sessionsDir = Reflect.get(store, "sessionsDir") as string;
-    // ManifestStore 在本文件被 mock：recordsDir 从构造调用参数取（vi.fn 包裹）
-    const recordsDir = vi.mocked(ManifestStore).mock.calls.at(-1)?.[0] as string | undefined;
+    // 目录晚绑定闭包（消费点现取，构造期零求值）——调用即取值
+    const sessionsDir = (Reflect.get(service, "sessionsDir") as () => string)();
+    const recordsDir = (Reflect.get(service, "recordsDir") as () => string)();
+    const dataDir = process.env.TAIJI_AGENT_DATA_DIR;
 
-    // 两套目录都编码在 enc(ROOT cwd) 段（不是 enc(checkout)）
-    expect(sessionsDir).toBe(getSubagentSessionDir(agentDir, rootCwd));
-    expect(recordsDir).toBe(getSubagentRecordsDir(agentDir, rootCwd));
+    // 两套目录都分区在 ROOT sid 树（env 贯穿值），且不落自身 sessionId 子树
+    expect(sessionsDir).toBe(getSubagentSessionDir(rootSid, dataDir));
+    expect(recordsDir).toBe(getSubagentRecordsDir(rootSid, dataDir));
+    expect(sessionsDir).not.toBe(getSubagentSessionDir("sid-child-own", dataDir));
   });
 });

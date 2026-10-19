@@ -20,7 +20,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { _resetOncePerProcessForTest } from "@zhushanwen/pi-ext-guards";
-import { resolvePiSessionScopedDir, STATE_DIR_NAME } from "@zhushanwen/subagent-core";
+import { resolvePiWorkflowRunsDir } from "@zhushanwen/subagent-core";
 import { ORPHAN_RUN_GRACE_WINDOW_MS_ENV } from "@zhushanwen/subagent-core/execution/persistence/run-state-evidence.ts";
 
 const { mockAgentDir } = vi.hoisted(() => ({
@@ -91,6 +91,15 @@ let tmpDir: string;
 let agentDir: string;
 let stateDir: string;
 let sessionsRoot: string;
+/** 夹具 sid（stateDir 的分区键——布局反转后 runs 目录按 sid 分区）。 */
+const FIXTURE_SID = "sess-fixture";
+/** 另一 sid（多目录触发面对照组的分区键）。 */
+const OTHER_SID = "sess-other";
+
+/** runs 目录（`<root>/<sid>/workflow/runs/`；root = beforeEach 注入的数据根）。 */
+function runsDirFor(sessionId: string): string {
+  return resolvePiWorkflowRunsDir(sessionId);
+}
 
 /** 全件形态 run 足迹（record 流 + manifest + 旧双源两件 + 残锁；ts 可控 mtime）。 */
 function seedRunFootprint(runId: string, workflowName = "reap-flow"): void {
@@ -167,7 +176,7 @@ function makeCtx(sessionId: string): ExtensionContext {
   } as unknown as ExtensionContext;
 }
 
-/** 触发一轮维护轮（reset 进程级检查 + session_start 装配）。 */
+/** 触发一轮维护轮（reset 进程级守卫 + session_start 装配）。 */
 async function runMaintenanceRound(sessionId: string): Promise<void> {
   _resetOncePerProcessForTest();
   await setupSessionLifecycle(makePi(), makeCtx(sessionId), {});
@@ -177,9 +186,12 @@ const OLD = Date.now() - 30 * 86_400_000; // 老 mtime 存量组锚（「不采�
 
 beforeEach(() => {
   tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "wf-s8-reap-"));
-  agentDir = path.join(tmpDir, "agent");
-  stateDir = path.join(resolvePiSessionScopedDir({ agentDir }), STATE_DIR_NAME);
-  fs.mkdirSync(stateDir, { recursive: true });
+    // [session-store-layout-inversion D2/D3] 数据根经 env 注入（生产链同形态）——
+    // 维护轮的 stateDir 与 stateDirs 枚举都由它派生。
+    vi.stubEnv("TAIJI_AGENT_DATA_DIR", tmpDir);
+    agentDir = path.join(tmpDir, "agent");
+    stateDir = runsDirFor(FIXTURE_SID);
+    fs.mkdirSync(stateDir, { recursive: true });
   // 夹具布局与 pi 实装同构（锚定不改层级）：sessions 根 = <agentDir>/sessions
   // （pi config.js getSessionsDir = join(getAgentDir(), "sessions")），session 文件
   // 落其下 encoded-cwd 子目录（session-manager.js `--<cwd>--` 形态）——层级错位
@@ -190,6 +202,7 @@ beforeEach(() => {
 });
 
 afterEach(() => {
+  vi.unstubAllEnvs();
   mockAgentDir.current = "/home/user/.pi/agent";
   delete process.env[ORPHAN_RUN_GRACE_WINDOW_MS_ENV];
   delete process.env.TAIJI_WORKFLOW_STATE_TTL_MS;
@@ -251,18 +264,18 @@ describe("场景 8：终局化移除 + 对账清理（真装配维护轮 + 壳�
     expect(fs.readFileSync(path.join(stateDir, "wf-s8-noevents.record.jsonl"), "utf8")).toBe(before);
   });
 
-  it("多目录触发点：引用 session 已删的其他 slug 目录残留 run 同轮回收（本 session 锚定目录覆盖不回归）", async () => {
+  it("多目录触发面：引用 session 已删的其他 slug 目录残留 run 同轮回收（本 session 锚定目录覆盖不回归）", async () => {
     // docError5 接线（维护轮全目录枚举 reapOrphanRuns，对齐 core pi-host-run-store
-    // 枚举口径）：单目录触发点下「引用 session 全删的其他 slug 目录」残留 run 结构性
-    // 不可达——本用例构造两个目录各一个孤儿 run（宽限调零 + 老化 mtime），一轮维护
-    // 后两处都被回收。
+    // 枚举口径）：单目录触发面下「其他 sid 目录」的残留 run 结构性不可达——本用例
+    // 构造两个 sid 目录各一个孤儿 run（宽限调零 + 老化 mtime），一轮维护后两处都被
+    // 回收。
     process.env[ORPHAN_RUN_GRACE_WINDOW_MS_ENV] = "0";
     // 目录 A：本 session 锚定目录（夹具形态 = resolvePiSessionScopedDir 回退的
     // agentDir 根）——既有覆盖不回归
     seedRunFootprint("wf-s8-local");
     ageFootprint("wf-s8-local", OLD);
-    // 目录 B：其他 cwd 的 slug 目录 workflow-state（引用 session 已删的残留形态）
-    const otherStateDir = path.join(sessionsRoot, "--other-cwd--", STATE_DIR_NAME);
+    // 目录 B：其他 sid 的 runs 目录（引用 session 已删的残留形态）
+    const otherStateDir = runsDirFor(OTHER_SID);
     fs.mkdirSync(otherStateDir, { recursive: true });
     const suffixes = [".record.jsonl", ".json", ".jsonl", ".events.jsonl", ".resume.lock"];
     for (const suffix of suffixes) {

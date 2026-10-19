@@ -110,7 +110,7 @@ function makeHarness(opts: {
   const dir = mkdtempSync(join(tmpdir(), "u2-model-switch-"));
   const service = new ModelConfigService({ agentDir: join(dir, "agent"), cwd: dir });
   service.initModel({ modelRegistry: opts.registry, sessionId: "sess-1" });
-  const store = new RecordStore(join(dir, "sessions"), undefined, undefined, join(dir, "records"));
+  const store = new RecordStore(() => join(dir, "sessions"), undefined, undefined, () => join(dir, "records"));
   const record = makeRecord("sa-demo-1");
   store.register(record);
 
@@ -233,7 +233,7 @@ describe("model-switch — 聚合不变量（§3.4）", () => {
   it("不变量 5：切换只写意图类载体——历史事实类持久化（record-created 帧）不被改写", async () => {
     const h = makeHarness({ registry: makeRegistry([makeModel({ id: "glm-5.3-flash" })]) });
     await setModel(h.deps, { domain: "chat", record: h.record }, TARGET_MODEL);
-    const events = await createRecordEventStream(h.recordsDir).scan(h.record.id);
+    const events = await createRecordEventStream(() => h.recordsDir).scan(h.record.id);
     const created = events.find((e) => e.type === "record-created");
     const overrideFrames = events.filter((e) => e.type === "record-model-override");
     // created 帧 model 保持原盖章值；新增的只有覆盖记账帧（意图载体）。
@@ -291,7 +291,7 @@ describe("model-switch — 分型处置表（§7.2 七行）", () => {
     expect(reply).toMatchObject({ scope: "chat", reply: { kind: "error", errorCode: "engine_model_not_in_snapshot" } });
     expect(h.record.modelOverride?.ref).toEqual(TARGET_MODEL); // 已写
     // 持久化帧已落（下一轮 spawn 现取目录即可用的机制依据）。
-    const events = await createRecordEventStream(h.recordsDir).scan(h.record.id);
+    const events = await createRecordEventStream(() => h.recordsDir).scan(h.record.id);
     expect(events.filter((e) => e.type === "record-model-override")).toHaveLength(1);
   });
 
@@ -311,7 +311,7 @@ describe("model-switch — 分型处置表（§7.2 七行）", () => {
     expect(h.service.getModelOverride(ghost.id)).toBeUndefined();
     expect(ghost.modelOverride).toBeUndefined();
     // 事件帧同样未写（store 原语 false 两面都跳过）
-    const events = await createRecordEventStream(h.recordsDir).scan(ghost.id);
+    const events = await createRecordEventStream(() => h.recordsDir).scan(ghost.id);
     expect(events.filter((e) => e.type === "record-model-override")).toHaveLength(0);
   });
 

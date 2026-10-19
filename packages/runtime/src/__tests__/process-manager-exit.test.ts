@@ -106,6 +106,9 @@ vi.mock('../infra/pi/pi-provider-store.js', async (importOriginal) => {
 
 vi.mock('../infra/logger.js', () => ({
   createPiSessionLog: () => ({ write: vi.fn(), end: vi.fn() }),
+  // 7b17e240f：retargetSessionLog（rekey 迁 tee）的 import 面同步——no-op 即可，
+  // 本测试不校验迁移行为
+  migratePiSessionLogTree: () => {},
   // u5b D6-④：rpc-client 新增 import 的内存快照采集（mock 面随源码 import 面同步）
   captureMemorySnapshot: () => ({ rss: 1, heapUsed: 2, heapTotal: 3, external: 4 }),
   // signal-forensics（process-manager 退出链 import）的落点门：测试态恒 false——

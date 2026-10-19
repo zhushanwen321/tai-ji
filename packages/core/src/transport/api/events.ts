@@ -8,8 +8,9 @@
  *   （config.providers / model.list / config.skills / config.agents / config.plugins /
  *   config.extensions / config.defaults）。sendInitialState 推 7 条 + 运行时广播。
  * - crossSession 通道（onCrossSession/dispatchCrossSession）：带 sessionId 但需同时分发到
- *   全局单例消费者的消息（ADR-0060）。合法消费者仅 ExtensionHost（+ 未来远程化协同态），
- *   per-session 消费用 on(sid, handler)，不要用本通道。
+ *   全局单例消费者的消息（ADR-0060）。合法消费者 = 全局单例消费面（ExtensionHost /
+ *   MessageBusBridge / use-canvas-sync 模块级单订阅，详见下方通道注释），per-session
+ *   消费用 on(sid, handler)，不要用本通道。
  *
  * 三通道互不串扰。route-inbound（coordination/route-inbound.ts）按 payload.sessionId 有无
  * + ROUTE_TABLE 条目声明决定走哪条（有 sid → session 通道；有 sid 且条目 crossSession 字段
@@ -119,10 +120,11 @@ export function dispatchGlobal(msg: ServerMessage): void {
 }
 
 // ── crossSession 通道（带 sid 消息的全局消费者订阅，ADR-0060）──
-// 语义：允许全局单例消费者（ExtensionHost）接收带 sessionId 的消息——routeInbound 用
-// payload.sessionId 路由，有 sid 的下行（extension:widget/notify 等）走 dispatchSession 不
-// 触发 onGlobal，全局消费者经本通道才能收到。**这不是广播**：合法消费者仅 ExtensionHost
-// （+ 未来远程化协同态 busy/idle/presence），per-session 消费用 on(sid, handler)。
+// 语义：允许全局单例消费者接收带 sessionId 的消息——routeInbound 用 payload.sessionId
+// 路由，有 sid 的下行（extension:widget/notify 等）走 dispatchSession 不触发 onGlobal，
+// 全局消费者经本通道才能收到（ROUTE_TABLE 需声明 crossSession: true）。**这不是广播**：
+// 合法消费者 = 全局单例消费面（ExtensionHost / MessageBusBridge / use-canvas-sync
+// 模块级单订阅），per-session 消费用 on(sid, handler)。
 // taste:allow-no-data-owner W24-EX-A（ADR-0049 全局 sid 协调器/订阅注册基建，登记草稿）：跨 session 通道 handler 注册表，非 GUI 数据
 const crossSessionHandlers = new Set<MessageHandler>()
 

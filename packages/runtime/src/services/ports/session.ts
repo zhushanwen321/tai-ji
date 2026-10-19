@@ -232,4 +232,10 @@ export interface ISessionStore {
    * （session-lifecycle），禁止断头成 unhandledRejection（timeout-audit-hygiene-batch u-h4）。
    */
   trash(path: string): Promise<void>
+  /**
+   * [session-store-layout-inversion D5] 目录级软删：`<root>/<sid>/` 整树进废纸篓
+   * （session 删除链③段）。Promise 语义同 trash——失败保留原地并 reject，rejection
+   * 经 session-lifecycle 传播（可恢复形态，重试删除即达终态）。
+   */
+  trashDirectory(dirPath: string): Promise<void>
 }

@@ -26,7 +26,7 @@
 import { randomUUID } from 'node:crypto'
 import { existsSync, readFileSync, statSync, unlinkSync } from 'node:fs'
 import { homedir } from 'node:os'
-import { dirname, join } from 'node:path'
+import { join } from 'node:path'
 import type {
   SubagentRecord,
   SubagentModelOverrideStatus,
@@ -41,7 +41,7 @@ import {
   SUBAGENT_RECORD_CUSTOM_TYPE,
   WORKFLOW_RECORD_CUSTOM_TYPE,
   getSubagentRecordsDir,
-  STATE_DIR_NAME,
+  resolvePiWorkflowRunsDir,
   readGlobalConfig,
 } from '@zhushanwen/subagent-core'
 import { extractPlanStateFromSessionFile, scanPlanStateEntries, INACTIVE_PLAN_STATE_VIEW } from './plan-state-extractor.js'
@@ -84,7 +84,7 @@ import { setJournalReportSink } from './journal-report-router.js'
 import type { SubagentJournalReport } from '@zhushanwen/extension-protocol'
 import { WorkflowRunEventsReader } from './workflow-run-events-reader.js'
 import type { WorkflowDagReply, WorkflowRunEventsReply } from '@taiji/shared'
-import { getPiAgentDir } from '../../infra/pi/pi-paths.js'
+import { getConfigDir, getPiAgentDir } from '../../infra/pi/pi-paths.js'
 import { logger } from '../../infra/logger.js'
 import { discoverAndRegisterEngines, engineConversationCapable } from '@zhushanwen/subagent-core/engine/engine-discovery-scan'
 import { getSubagentMessageResultsDir } from '@zhushanwen/subagent-core'
@@ -617,13 +617,12 @@ export class SessionRecords {
    *    增量由 journal 推送喂入，见 applyJournalReport）。
    * 两源幂等、次序不敏感；活跃会话的 get_entries 游标通道继续增量喂 entry 源。
    *
-   * 目录派生：records = core getSubagentRecordsDir(agentDir, cwd)（单源，不再本侧
-   * 手抄同式推导）；run journal = 会话文件所在目录的
-   * `workflow-state`（pi 壳 JsonlRunStore 同源布局——sessionDir 按探测落位）。
-   * [已知限制·登记] core resolvePiSessionScopedDir 的 slug 只折叠 `/`，pi session
-   * 目录折叠 `/\:`——cwd 含 `:` 或 `\` 时写侧探测落 agentDir 根、本侧推导落 session
-   * 文件目录，run journal 源错位（与壳侧 slug 锚 process.cwd() 而非 session cwd 的
-   * 限制同族，边缘场景登记不改；根治属 core 布局单源）。
+   * 目录派生（[session-store-layout-inversion D2/D3]）：两域分区键同为当前 sid
+   * ——records = core getSubagentRecordsDir(sessionId)、run journal = core
+   * resolvePiWorkflowRunsDir(sessionId)（`<root>/<sid>/workflow/runs/`，pi 壳
+   * JsonlRunStore 同源布局）。读侧定档 = 按当前会话过滤（分区键即当前 sid）。
+   * 旧形态「run journal = 会话文件所在目录的 workflow-state」随 cwd 分区布局退役，
+   * 其 [已知限制·登记]（slug 只折叠 `/` 致 cwd 含 `:`/`\` 时源错位）一并消失。
    * 会话 meta 不可得（pi 延迟写入 / 测试窄 mock）→ 无事件源的 entry-only
    * 降级派生视图。
    */
@@ -641,11 +640,10 @@ export class SessionRecords {
     const meta = this.deps.sessionStore
       .scanSessions({ force: true })
       .find((s) => s.id === sessionId)
-    const cwd = meta?.cwd
     const projection = new SessionEventProjection({
       sessionId,
-      recordsDir: typeof cwd === 'string' ? getSubagentRecordsDir(getPiAgentDir(), cwd) : undefined,
-      runJournalDir: meta !== undefined ? join(dirname(meta.filePath), STATE_DIR_NAME) : undefined,
+      recordsDir: getSubagentRecordsDir(sessionId, getConfigDir()),
+      runJournalDir: meta !== undefined ? resolvePiWorkflowRunsDir(sessionId, getConfigDir()) : undefined,
       onProjectionChange: () => this.onEventProjectionChange(sessionId),
     })
     if (meta !== undefined) {
@@ -675,10 +673,9 @@ export class SessionRecords {
       .scanSessions({ force: true })
       .find((s) => s.id === sessionId)
     if (meta === undefined) return
-    const cwd = meta.cwd
     projection.attachEventSources({
-      recordsDir: typeof cwd === 'string' ? getSubagentRecordsDir(getPiAgentDir(), cwd) : undefined,
-      runJournalDir: join(dirname(meta.filePath), STATE_DIR_NAME),
+      recordsDir: getSubagentRecordsDir(sessionId, getConfigDir()),
+      runJournalDir: resolvePiWorkflowRunsDir(sessionId, getConfigDir()),
     })
     this.syncCacheFromProjection(cache, projection)
   }
@@ -1523,16 +1520,15 @@ export class SessionRecords {
 
   /**
    * 消费 /subagents 结果文件（subagent-composer 2026-10-18，model-switch 通道读侧同款）：
-   * 读一次 + 即删（请求作用域）。目录单源 = core getSubagentMessageResultsDir(agentDir,
-   * session cwd)——与 extension 写入侧（ENV_ROOT_CWD || ctx.cwd）同 enc 段；本侧 cwd 取
-   * deps.getSessionCwd（同一会话 cwd 投影）。缺失 = 通道级失败（handler 崩在写文件前 /
+   * 读一次 + 即删（请求作用域）。目录单源 = core getSubagentMessageResultsDir(sessionId)——
+   * 与 extension 写入侧（resolveRootSessionId）同会话树分区键（rootSessionId）。缺失 =
+   * 通道级失败（handler 崩在写文件前 /
    * 旧扩展无 --req 面）如实抛；scope:error → 抛分型错误（code 进 error envelope）。
    */
   private consumeSubagentActionResultFile(sessionId: string, requestId: string): void {
-    const cwd = this.deps.getSessionCwd?.(sessionId)
-    const resultsFile = cwd === undefined
-      ? undefined
-      : join(getSubagentMessageResultsDir(getPiAgentDir(), cwd), `${requestId}.json`)
+    // 分区键 = 当前会话 id（与 getSubagentRecordsDir 读侧同式；写侧 rootSessionId
+    // 落到同一棵会话树——env 贯穿值与主会话 sid 同键，btw 子线共享 ROOT 树）。
+    const resultsFile = join(getSubagentMessageResultsDir(sessionId, getConfigDir()), `${requestId}.json`)
     let raw: string | undefined
     try {
       if (resultsFile !== undefined && existsSync(resultsFile)) {

@@ -20,24 +20,34 @@ import type { WorktreeManager } from "./worktree-manager.ts";
  * worktree 绑定时把未提交改动快照到 sessionsDir/<branch>.patch，`written` 时回填
  * record.patchFile（防悬空路径：collectPatch 未写出则不留指针）。
  *
- * 落点在 worktree 之外（sessionsDir），避免随 cleanup 删除（[MF#3]）。
+ * 落点在 worktree 之外（sessionsDir，rootSessionId 树内分区——随会话整树回收），
+ * 避免随 cleanup 删除（[MF#3]）。
  * best-effort 语义在内部统一：任一环失败记日志不阻断调用方的收尾链（patch 失败 =
  * 续聊重建时无备份可恢复，形态①降级承接）。
  */
 export async function collectWorktreePatch(opts: {
-  /** 目标 record（读 worktreeHandle；`patch.written` 时回填 patchFile）。 */
+  /** 目标 record（读 worktreeHandle；`patch.written` 时回填 patchFile；分区键 =
+   *  record.rootSessionId——嵌套派发全层同值，.patch 与 sessions/records 同树）。 */
   record: ExecutionRecord;
   /** WorktreeManager 取值（调用时点解引用——与各聚合 deps 的晚绑定口径一致）。 */
   getWorktreeManager: () => WorktreeManager;
-  /** 引擎 agent 目录（分派 sessionsDir 的 agentDir 段）。 */
-  getAgentDir: () => string;
   /** best-effort 失败标签（调用方语境，如 "collectPatch (finalizeRecord Step0)"）。 */
   label: string;
 }): Promise<void> {
   const handle = opts.record.worktreeHandle;
   if (!handle) return;
+  const rootSessionId = opts.record.rootSessionId;
+  if (rootSessionId === undefined) {
+    // record 尚未盖章 rootSessionId（spawn 窗口异常态）——无分区键可落，best-effort
+    // 跳过（patch 缺失 = 续聊重建无备份，形态①降级承接，与 collectPatch 失败同向）。
+    bestEffort(
+      new Error("collectWorktreePatch: record.rootSessionId undefined (pre-bind window) — patch skipped"),
+      opts.label,
+    );
+    return;
+  }
   try {
-    const sessionsDir = getSubagentSessionDir(opts.getAgentDir(), handle.mainCwd);
+    const sessionsDir = getSubagentSessionDir(rootSessionId);
     fs.mkdirSync(sessionsDir, { recursive: true });
     const patchFile = path.join(sessionsDir, `${handle.branch}.patch`);
     const patch = await opts.getWorktreeManager().collectPatch(handle, patchFile);

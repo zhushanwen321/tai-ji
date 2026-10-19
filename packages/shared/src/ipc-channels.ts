@@ -34,11 +34,11 @@ export const RENDERER_LOG = 'renderer-log' as const
  * toolResult 图片落盘通道 [D6-⑨]。
  *
  * invoke 通道：renderer 无 fs，toolResult 的 base64 图片经此委托 main 异步写盘
- * `~/.taiji/cache/images/<sessionId>/<sha256(data)>.<ext>`（ext 按 mimeType
- * 映射 .png/.jpg/.webp/.gif，缺省 .png），main 回填路径引用
+ * `<dataDir>/ext-sessions/<sessionId>/image-cache/<sha256(data)>.<ext>`（session 存储
+ * 树域 3；ext 按 mimeType 映射 .png/.jpg/.webp/.gif，缺省 .png），main 回填路径引用
  * （纯缓存语义：可随时丢弃、可幂等重建）。'image-cache:*' 通道族首成员，后续
- * 同族新增通道沿用该前缀；清理/删除不设 renderer 入口（session 删除级联、孤儿
- * 扫描、软上限均为 main 侧内部生命周期）。选冒号式：对齐 'browser:*' 领域族惯例。
+ * 同族新增通道沿用该前缀；清理/删除不设 renderer 入口（session 删除随整树软删、
+ * 孤儿扫描、软上限均为 main 侧内部生命周期）。选冒号式：对齐 'browser:*' 领域族惯例。
  */
 export const IMAGE_CACHE_WRITE = 'image-cache:write' as const
 
@@ -88,8 +88,9 @@ export const SESSION_EXPORT_JSONL = 'session:export-jsonl' as const
  * 预检——v16 唯一渲染面）传绝对路径，main 侧返回 `{ servable, reason?, size? }`（reason ∈
  * `not_found` / `is_dir` / `out_of_whitelist`）——谓词与 `protocol.handle('local-file')` 复用同一规范化管线模块
  * （准入前缀成员资格先行短路 → 存在性 → 目录性；越界不触 fs，杜绝存在性探测通道）；
- * 通道准入前缀 = 会话产物子树 `<dataDir>/artifacts/**`（读/预检通道收窄面，非协议 handler
- * 全量白名单——通道入参含模型消息文本路径载荷，见 computeLocalFileReadPrefixes）。
+ * 通道准入前缀 = 会话产物子树 `<dataDir>/ext-sessions/<sid>/artifacts/**`（按现存会话
+ * 枚举——读/预检通道收窄面，非协议 handler 全量白名单——通道入参含模型消息文本路径载荷，
+ * 见 computeLocalFileReadPrefixes）。
  * 通道名 `localFile:servable` 为设计/ADR 逐字记录值（见文件头命名惯例注），不随 kebab 惯例改名。
  */
 export const LOCAL_FILE_SERVABLE = 'localFile:servable' as const
@@ -102,9 +103,9 @@ export const LOCAL_FILE_SERVABLE = 'localFile:servable' as const
  * `{ ok: true, content, truncated }` 或 `{ ok: false, reason }`（reason ∈ servable 三原因 +
  * `read_failed`）——谓词与 `LOCAL_FILE_SERVABLE` / 协议 handler 复用同一白名单模块
  * （准入前缀成员资格先行短路 → 存在性 → 目录性；越界不触 fs）；通道准入前缀 = 产物子树
- * `<dataDir>/artifacts/**`（读通道收窄面，非协议 handler 全量白名单——`<dataDir>` 整前缀
- * 含 pi agent 目录凭据，文本读取面限定在实际消费域）。
- * 为何需要独立通道：产物目录 `<dataDir>/artifacts/<sessionId>` 在 session cwd 外（§6.7 D7），
+ * `<dataDir>/ext-sessions/<sid>/artifacts/**`（按现存会话枚举——读通道收窄面，非协议
+ * handler 全量白名单——`<dataDir>` 整前缀含 pi agent 目录凭据，文本读取面限定在实际消费域）。
+ * 为何需要独立通道：产物目录 `<dataDir>/ext-sessions/<sessionId>/artifacts/` 在 session cwd 外（§6.7 D7），
  * runtime `file.read` 的 cwd 守门对主要产物路径不可达，源码态需与 servable 同源的读取面。
  * 通道名沿用 `localFile:` 族前缀（与 `LOCAL_FILE_SERVABLE` 同一族，见文件头命名惯例注）。
  */

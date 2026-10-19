@@ -29,6 +29,14 @@ export type CanvasMutationAction = Exclude<CanvasAction, 'read' | 'list'>
 /** 图变换类 action（create 之外：create 无 prev 状态，走独立 applyCreate）。 */
 export type CanvasTransformAction = Exclude<CanvasMutationAction, 'create'>
 
+/**
+ * 领域层状态形状（CanvasState 减去归属字段）：ownerSessionId 由服务层从落盘路径推导
+ * 注入（契约「服务层唯一写入点」——领域事件流不承载归属，CanvasCreated 事件 data 不含
+ * sessionId），故领域纯函数（applyCreate / applyMutation / 重放）的产出不含该字段；
+ * 服务层 withOwner 是领域态 → CanvasState 的唯一收口。
+ */
+export type CanvasDomainState = Omit<CanvasState, 'ownerSessionId'>
+
 /** 判别联合：按 action 收窄 params（与契约 CanvasMutateRequest 同构、减去 read/list/create）。 */
 export type CanvasTransformRequest = {
   [A in CanvasTransformAction]: { action: A; params: CanvasActionParams[A] }
@@ -101,7 +109,7 @@ export const replayIdGenerator: IdGenerator = {
 }
 
 export interface AppliedMutation { // oe-exempt:20261015:framework:画布域类型契约（数据形状/端口/测试 harness，非抽象接口单实现）
-  state: CanvasState
+  state: CanvasDomainState
   events: CanvasEventBody[]
   /** 主事件类型（广播 evType；主事件 = events[0]，对账 SSOT 见 ACTION_EVENT_MAP）。 */
   evType: CanvasEventType
@@ -113,13 +121,13 @@ export interface CreateIds { // oe-exempt:20261015:framework:画布域类型契�
   rootNodeId: string
 }
 
-// ── 图查询辅助（纯，作用于 CanvasState）────────────────────────
+// ── 图查询辅助（纯，作用于领域态 CanvasDomainState）────────────────
 
-export function nodeOf(state: CanvasState, id: string): CanvasNode | undefined {
+export function nodeOf(state: CanvasDomainState, id: string): CanvasNode | undefined {
   return state.nodes.find((n) => n.id === id)
 }
 
-export function edgeOf(state: CanvasState, id: string): CanvasEdge | undefined {
+export function edgeOf(state: CanvasDomainState, id: string): CanvasEdge | undefined {
   return state.edges.find((e) => e.id === id)
 }
 
@@ -129,17 +137,17 @@ export function isTrunkEdge(e: CanvasEdge): boolean {
 }
 
 /** 反向主干邻居：nodeId 作为子端（decompose.to / resolve.to）时的全部父 id。 */
-export function parentIdsOf(state: CanvasState, nodeId: string): string[] {
+export function parentIdsOf(state: CanvasDomainState, nodeId: string): string[] {
   return state.edges.filter((e) => isTrunkEdge(e) && e.to === nodeId).map((e) => e.from)
 }
 
 /** 分解出边：nodeId 作为父端（decompose.from）的子 question 集（option 就绪递归用）。 */
-export function decomposeChildrenOf(state: CanvasState, nodeId: string): string[] {
+export function decomposeChildrenOf(state: CanvasDomainState, nodeId: string): string[] {
   return state.edges.filter((e) => e.type === 'decompose' && e.from === nodeId).map((e) => e.to)
 }
 
 /** question 的选定方案（不变量 3：至多一条——由 select 写入路径保证）。 */
-export function selectedOptionOf(state: CanvasState, questionId: string): CanvasNode | undefined {
+export function selectedOptionOf(state: CanvasDomainState, questionId: string): CanvasNode | undefined {
   for (const e of state.edges) {
     if (e.type !== 'resolve' || e.from !== questionId) continue
     const option = nodeOf(state, e.to)
@@ -152,7 +160,7 @@ export function selectedOptionOf(state: CanvasState, questionId: string): Canvas
  * 待重审上溯路径（不变量 9 / D9）：从 nodeId 沿反向主干边收集到根的全部路径途经节点
  * （多父形态全路径收集，含起点与根——根判据是上溯终点）。无环由不变量 2 保证，递归必终止。
  */
-export function pathToRoot(state: CanvasState, nodeId: string): string[] {
+export function pathToRoot(state: CanvasDomainState, nodeId: string): string[] {
   const visited = new Set<string>()
   const queue = [nodeId]
   while (queue.length > 0) {
@@ -167,7 +175,7 @@ export function pathToRoot(state: CanvasState, nodeId: string): string[] {
 }
 
 /** 主干向下子树：从 rootId 沿 decompose 出边可达的节点集（含自身）——换选 D9 用。 */
-export function subtreeOf(state: CanvasState, rootId: string): Set<string> {
+export function subtreeOf(state: CanvasDomainState, rootId: string): Set<string> {
   const visited = new Set<string>([rootId])
   const queue = [rootId]
   while (queue.length > 0) {
@@ -183,14 +191,14 @@ export function subtreeOf(state: CanvasState, rootId: string): Set<string> {
 }
 
 /** 论据节点的极性（裁决点 R1：极性是论据节点字段——边不重复承载）。 */
-export function argumentPolarity(state: CanvasState, argumentNodeId: string): 'support' | 'object' | undefined {
+export function argumentPolarity(state: CanvasDomainState, argumentNodeId: string): 'support' | 'object' | undefined {
   return nodeOf(state, argumentNodeId)?.polarity
 }
 
 // ── 不变量 2：主干无环 ────────────────────────────────────────
 
 /** 主干子图（decompose + resolve）DFS 成环检测；返回环上任一节点 id（错误消息用），无环返回 null。 */
-export function findTrunkCycle(state: CanvasState): string | null {
+export function findTrunkCycle(state: CanvasDomainState): string | null {
   const WHITE = 0
   const GRAY = 1
   const BLACK = 2
@@ -247,7 +255,7 @@ export function isTransitionAllowed(from: CanvasNodeLifecycle, to: CanvasNodeLif
 // ── 就绪递归（概念 §2.3）─────────────────────────────────────
 
 /** option 就绪 = 无分解子问题，或子问题全部就绪。 */
-export function isOptionReady(state: CanvasState, optionId: string): boolean {
+export function isOptionReady(state: CanvasDomainState, optionId: string): boolean {
   const children = decomposeChildrenOf(state, optionId)
   return children.every((qid) => isQuestionReady(state, qid))
 }
@@ -261,7 +269,7 @@ export function isOptionReady(state: CanvasState, optionId: string): boolean {
  * - 两路并存时须同时成立（两条完成路径缺一不可）；
  * - 两路皆无 = 悬空问题（无完成路径），不就绪。
  */
-export function isQuestionReady(state: CanvasState, questionId: string): boolean {
+export function isQuestionReady(state: CanvasDomainState, questionId: string): boolean {
   const node = nodeOf(state, questionId)
   if (!node) return false
   if (node.lifecycle === 'rejected' || node.lifecycle === 'shelved') return true
@@ -273,7 +281,7 @@ export function isQuestionReady(state: CanvasState, questionId: string): boolean
 }
 
 /** 根就绪（收敛门禁②的就绪递归半边）。 */
-export function isRootReady(state: CanvasState): boolean {
+export function isRootReady(state: CanvasDomainState): boolean {
   return isQuestionReady(state, state.root.nodeId)
 }
 
@@ -281,7 +289,7 @@ export function isRootReady(state: CanvasState): boolean {
  * 执行叶子 = dispatchable 标记的 option（裁决点 R5：叶子是结构派生、执行叶子是显式
  * 规划决策；「叶子 = 无分解出边的 selected 方案」的结构侧由就绪递归承载）。
  */
-export function dispatchableLeaves(state: CanvasState): CanvasNode[] {
+export function dispatchableLeaves(state: CanvasDomainState): CanvasNode[] {
   return state.nodes.filter((n) => n.type === 'option' && n.dispatchable === true)
 }
 
@@ -292,7 +300,7 @@ export function dispatchableLeaves(state: CanvasState): CanvasNode[] {
  * ① 根判据确认（converge-check 点击即确认，前置 = 判据存在）；② 就绪递归 + 执行叶子全
  * passed 带判据；③ must-fix 清零 + 待重审空；另含 activeLeaves 非空断言（防空集 vacuous 通过）。
  */
-export function convergenceBlockers(state: CanvasState): string[] {
+export function convergenceBlockers(state: CanvasDomainState): string[] {
   const blockers: string[] = []
   if (state.root.criterias.length === 0) {
     blockers.push('根节点缺完成判据')
@@ -330,13 +338,13 @@ export function truncate(s: string, max = SUMMARY_TRUNCATE_MAX): string {
   return s.length > max ? `${s.slice(0, max)}…` : s
 }
 
-export function markDirty(draft: CanvasState, ids: string[]): void {
+export function markDirty(draft: CanvasDomainState, ids: string[]): void {
   for (const id of ids) {
     if (!draft.dirtyPaths.includes(id)) draft.dirtyPaths.push(id)
   }
 }
 
 /** 附属事件 DirtiedPathMarked（不在 ACTION_EVENT_MAP——非独立 action，概念 §2.6）。 */
-export function dirtyEvent(draft: CanvasState, action: CanvasMutationAction, actor: CanvasActor, at: string, path: string[]): CanvasEventBody {
+export function dirtyEvent(draft: CanvasDomainState, action: CanvasMutationAction, actor: CanvasActor, at: string, path: string[]): CanvasEventBody {
   return { type: 'DirtiedPathMarked', action, actor, at, data: { canvasId: draft.canvasId, path } }
 }

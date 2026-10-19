@@ -65,7 +65,7 @@ describe("场景 6：record 重建保真（真收编链 + D16 ③ 概览消费�
 
       // 收编不覆盖：收编后 loadAll 重建仍保全文（设计目标 1 断言范围，场景层复述）
       const store = new JsonlRunStore({
-        sessionDir: env.sessionDir,
+        runsDir: env.runsDir,
         ctx: mkCtxWith([registeredEntry(RUN_ID, env.recordPath(RUN_ID))]) as never,
       });
       const [run] = await store.loadAll();

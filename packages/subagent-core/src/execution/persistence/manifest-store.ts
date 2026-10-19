@@ -170,17 +170,36 @@ function isValidManifest(value: unknown): value is ManifestRecord {
 }
 
 export class ManifestStore {
-  private readonly dir: string;
+  /**
+   * manifest 目录晚绑定取值（rootSessionId 树内分区——目录绑定 session 生命周期，
+   * 宿主进程 initSession 后才定位；/new /resume 换 session 后 getter 现取新目录）。
+   */
+  private readonly getDir: () => string;
 
   /** [perf] per-file 缓存：file → { stamp, record }。record=null 表示「已解析但非法」（缓存
    *  负结果避免反复 parse 损坏文件）。stat 戳变化（writeManifest tmp→rename 后 mtime/size 变）
    *  自动失效；删除的文件在下次扫描时修剪。 */
   private readonly cache = new Map<string, { stamp: Stamp; record: ManifestRecord | null }>();
 
-  constructor(dir: string) {
-    this.dir = dir;
-    if (!fs.existsSync(dir)) {
-      fs.mkdirSync(dir, { recursive: true });
+  /** 已确保创建过的目录集（首写惰性 mkdir 的记忆化——目录绑定 session 树，构造期
+   *  不可知；同目录二次写不再 mkdir，外部删除后的写照常上抛，fail-fast 语义保持）。 */
+  private readonly ensuredDirs = new Set<string>();
+
+  constructor(getDir: () => string) {
+    this.getDir = getDir;
+  }
+
+  /** 当前目录（首次访问即解析——getter 求值前置到具体读写点，构造期零求值）。 */
+  private get dir(): string {
+    return this.getDir();
+  }
+
+  /** 首写前确保目录在（同目录只建一次；后续缺目录 = 外部删除异常态，writeAtomicFile
+   *  ensureDir:false 上抛——与旧构造期 mkdir 的 fail-fast 语义对齐）。 */
+  private ensureDirOnce(): void {
+    if (!this.ensuredDirs.has(this.dir)) {
+      fs.mkdirSync(this.dir, { recursive: true });
+      this.ensuredDirs.add(this.dir);
     }
   }
 
@@ -194,9 +213,10 @@ export class ManifestStore {
    * 重建降级（debug 留痕））决定降级策略——各面降级策略分化见各调用点。
    */
   async writeManifest(record: ManifestRecord): Promise<void> {
+    this.ensureDirOnce();
     const filePath = path.join(this.dir, `${record.id}.json`);
     const content = JSON.stringify(record, null, MANIFEST_INDENT_SPACES);
-    // ensureDir:false：目录由构造函数负责创建（缺目录 = 外部删除的异常态，
+    // ensureDir:false：目录由 ensureDirOnce 负责（缺目录 = 首写后被外部删除的异常态，
     // 维持旧实现的 fail-fast 上抛语义，不静默重建）
     await writeAtomicFile(filePath, content, { ensureDir: false });
   }

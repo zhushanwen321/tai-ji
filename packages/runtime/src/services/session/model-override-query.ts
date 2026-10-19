@@ -1,5 +1,5 @@
 /**
- * model-override-query — 覆盖记账的 runtime 侧磁盘派生视图查询（subagent-model-switch
+ * model-override-query — 覆盖记账的 runtime 侧磁盘投影查询（subagent-model-switch
  * §9 transport 行「详情载荷组装时经覆盖查询端口读取」的生产后端）。
  *
  * 权威源（shared SubagentModelOverrideStatus 注释锚定）：
@@ -16,18 +16,20 @@
  * 组装路径的同步尾读；live 帧发布受水位 diff 门控非高频）。pi session 侧的同款
  * 尾读已下沉 infra/pi 单点（extractLatestModelChangeFromJsonl 骨架）；本文件读
  * record 域独立文件（覆盖帧文件 / run journal，非 pi session `.jsonl`，无树结构
- * 无活跃路径需求）且定位链需 sessionStore 注入，保留 services 层手写尾读形态
+ * 无活跃路径需求）且读目标是 session 存储树内独立文件（非 pi session `.jsonl`），
+ * 保留 services 层手写尾读形态
  * （runtime-layering §3④ 基线债登记）。登记限制：覆盖帧小载荷
  * （~200B），尾部被海量 worker-log 堆积淹没且覆盖帧早于窗口起点时漏读 = 载荷按无覆盖
  * 显示（字段缺席 = 无覆盖语义，不虚报）。
  *
  * 定位链（与 SessionRecords.ensureProjection 同源约定）：
- * - chat：sessionId → scanSessions cwd → getSubagentRecordsDir(getPiAgentDir(), cwd)
+ * - chat：sessionId → getSubagentRecordsDir(sessionId)（session 存储树根会话分区）
  *   → recordEventsPath（core 单源，含 recordId 白名单防穿越）；
- * - run：sessionId → scanSessions filePath → `dirname/workflow-state`（ensureProjection
- *   runJournalDir 同式派生）→ `<runId><RUN_EVENTS_SUFFIX>`。已知限制同族：cwd 含
- *   `:`/`\` 时写侧探测落 agentDir 根、本侧推导落 session 文件目录（ensureProjection
- *   头注已登记，根治属 core 布局单源）——run 域查询同受此限。
+ * - run：sessionId → resolvePiWorkflowRunsDir(sessionId)（session 存储树内
+ *   `<root>/<sid>/workflow/runs/`，ensureProjection runJournalDir 同式派生）→
+ *   `<runId><RUN_EVENTS_SUFFIX>`。[session-store-layout-inversion D2/D3] 分区键
+ *   即当前 sid——旧形态「scanSessions filePath → dirname/workflow-state」的 cwd 含
+ *   `:`/`\` 错位限制随 cwd 分区布局退役。
  *
  * 错误形态：查询是详情载荷组装路径的内嵌步骤，IO/解析失败降级返回 undefined
  * （best-effort 语义，与同族尾读派生一致）——ENOENT = 合法缺省（覆盖从未下达 /
@@ -35,19 +37,17 @@
  * 面板列表读 RPC；undefined = 字段缺席 = 无覆盖语义，不虚构。
  */
 import { openSync, readSync, closeSync, statSync } from 'node:fs'
-import { dirname, join } from 'node:path'
+import { join } from 'node:path'
 import type { SubagentModelOverrideStatus } from '@taiji/shared'
 import {
   getSubagentRecordsDir,
   parseRecordEventFileLine,
   recordEventsPath,
   RUN_EVENTS_SUFFIX,
-  STATE_DIR_NAME,
+  resolvePiWorkflowRunsDir,
   type RecordEvent,
   type WorkflowRunEvent,
 } from '@zhushanwen/subagent-core'
-import type { ISessionStore } from '../ports/session.js'
-import { getPiAgentDir } from '../../infra/pi/pi-paths.js'
 import { toErrorMessage } from '../../utils/errors.js'
 import { parseWorkflowRunEventFileLine } from './events-projection.js'
 
@@ -59,18 +59,16 @@ const OVERRIDE_TAIL_WINDOW_BYTES = OVERRIDE_TAIL_WINDOW_KB * BYTES_PER_KB
 /**
  * run id 白名单：`[\w-]{1,128}`（与 core record id 白名单 RECORD_ID_PATTERN /
  * gateway TARGET_ID_PATTERN 同式，同式漂移由各处注释锚定）。run journal 文件名
- * = runId + RUN_EVENTS_SUFFIX 直拼（core runEventJournalPathIn 读侧刻意不夹带
+ * = runId + RUN_EVENTS_SUFFIX 直拼（core runEventJournalPathIn 读面刻意不夹带
  * 校验），防穿越校验归本查询读入口，与 getRecordOverride 经 recordEventsPath
- * 白名单防御对称；runId 生产源 = 派生视图内 core 生成 runId，字符集 ⊆ 白名单。
+ * 白名单防御对称；runId 生产源 = 投影内 core 生成 runId，字符集 ⊆ 白名单。
  */
 const RUN_ID_PATTERN = /^[\w-]{1,128}$/
 
 /**
- * session 定位锚透传形态（调用方已持有 session meta 时随查询传入——跳过查询内的
- * scanSessions({ force: true }) 全目录扫描；N 条详情载荷组装场景每帧只解析一次）。
- * 字段语义与 resolveSessionMeta 返回值同形：cwd 定位 record 域 recordsDir，
- * filePath 定位 run 域 workflow-state；字段缺席/undefined 由各查询方法按定位失败
- * 降级 undefined（与 scanSessions 无命中同判）。
+ * session 定位锚透传形态（调用方已持有 session meta 时随查询传入）。布局反转后
+ * 两域目录都由分区键（sessionId）直接派生（[session-store-layout-inversion D2/D3]），
+ * 本锚不再是查询的定位必需项——保留形参 = 调用方透传链不变（窄口契约稳定）。
  */
 export interface SessionMetaRef {
   cwd?: string
@@ -85,11 +83,13 @@ export interface ModelOverrideQuery {
   getRunOverride(sessionId: string, runId: string, resolved?: SessionMetaRef): SubagentModelOverrideStatus | undefined
 }
 
-export interface ModelOverrideQueryDeps { // oe-exempt:20261006:framework:查询工厂依赖注入范围（SessionService 装配注入，单实现常态）
-  /** session 存储端口（sessionId → cwd / session 文件路径解析，scanSessions force 语义）。 */
-  sessionStore: ISessionStore
-  /** pi agent 目录锚（记录域 subagents/ 布局根；缺省 getPiAgentDir()，测试注入 tmp）。 */
-  agentDir?: string
+export interface ModelOverrideQueryDeps { // oe-exempt:20261006:framework:查询工厂依赖注入面（SessionService 装配注入，单实现常态）
+  /**
+   * session 存储树数据根（[session-store-layout-inversion D2/D3] 记录域换根
+   * `<dataDir>/ext-sessions/<sid>/subagents/`；缺省 shared getDataDir()，测试注入
+   * tmp 数据根）。旧 agentDir 锚随布局反转退役。
+   */
+  dataDir?: string
 }
 
 /**
@@ -141,16 +141,6 @@ function toOverrideStatus(model: { provider: string; modelId: string }, thinking
   return { model: `${model.provider}/${model.modelId}`, ...(thinkingLevel !== undefined ? { thinkingLevel } : {}) }
 }
 
-/** 定位 session 的 cwd（scanSessions force——刚落盘 session 的单 session 路径解析语义，wave:perf-w26 plan M-3）。 */
-function resolveSessionMeta(
-  sessionStore: ISessionStore,
-  sessionId: string,
-): { cwd?: string; filePath?: string } {
-  const target = sessionStore.scanSessions({ force: true }).find((s) => s.id === sessionId)
-  if (!target) return {}
-  return { cwd: target.cwd, filePath: target.filePath }
-}
-
 /**
  * 覆盖查询生产实装（session 域装配点构造注入；测试经 deps.modelOverrideQuery 显式
  * 传 mock 覆盖——U1「端口缺席 = 载荷不造键」测试语义不受本实装影响）。
@@ -158,13 +148,12 @@ function resolveSessionMeta(
 export function createModelOverrideQuery(deps: ModelOverrideQueryDeps): ModelOverrideQuery {
   return {
     getRecordOverride(sessionId, recordId, resolved) {
-      const { cwd } = resolved ?? resolveSessionMeta(deps.sessionStore, sessionId)
-      if (typeof cwd !== 'string') return undefined
       let filePath: string
       try {
         // core recordEventsPath 单源（含 record id 白名单防穿越校验——非法 id 上抛，
-        // 调用方 id 源 = 派生视图注册条目，throw 即编程错误，不静默吞）。
-        filePath = recordEventsPath(getSubagentRecordsDir(deps.agentDir ?? getPiAgentDir(), cwd), recordId)
+        // 调用方 id 源 = 投影注册条目，throw 即编程错误，不静默吞）。读侧定档 D2：
+        // 按当前会话过滤 = 分区键即入参 sessionId（根会话树内 records 目录）。
+        filePath = recordEventsPath(getSubagentRecordsDir(sessionId, deps.dataDir), recordId)
       } catch (e) {
         console.warn(`[model-override-query] record id rejected (${toErrorMessage(e)}): ${recordId}`)
         return undefined
@@ -179,9 +168,11 @@ export function createModelOverrideQuery(deps: ModelOverrideQueryDeps): ModelOve
       return toOverrideStatus(frame.ref, frame.thinkingLevel)
     },
 
-    getRunOverride(sessionId, runId, resolved) {
-      const { filePath } = resolved ?? resolveSessionMeta(deps.sessionStore, sessionId)
-      if (typeof filePath !== 'string') return undefined
+    // [session-store-layout-inversion D2/D3] run journal 目录由分区键（当前 sid）直接
+    // 派生，不再经会话文件路径反推——cwd 分区布局退役后「scanSessions filePath →
+    // dirname/workflow-state」反推链整体消失，窄口第三参（resolved 定位锚）对 run 域
+    // 不再有用（保留形参 = 调用方透传链不变）。
+    getRunOverride(sessionId, runId) {
       // 非法 runId：warn 留痕后按无覆盖降级（对齐 record id rejected 先例）；
       // wire 入口侧的输入校验归 gateway TARGET_ID_PATTERN，本处为路径直拼前的
       // 读侧防穿越（同 id 三处防御对称）。
@@ -189,7 +180,7 @@ export function createModelOverrideQuery(deps: ModelOverrideQueryDeps): ModelOve
         console.warn(`[model-override-query] run id rejected: ${runId}`)
         return undefined
       }
-      const journalPath = join(dirname(filePath), STATE_DIR_NAME, `${runId}${RUN_EVENTS_SUFFIX}`)
+      const journalPath = join(resolvePiWorkflowRunsDir(sessionId, deps.dataDir), `${runId}${RUN_EVENTS_SUFFIX}`)
       const frame = readTailFrame<WorkflowRunEvent>(
         journalPath,
         parseWorkflowRunEventFileLine,

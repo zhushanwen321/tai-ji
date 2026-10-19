@@ -278,7 +278,7 @@ interface ScanResult {
 }
 
 function runColdScan(sessionsDir: string, limit: number): ScanResult {
-	const store = new RecordStore(sessionsDir);
+	const store = new RecordStore(() => sessionsDir);
 	try {
 		const t0 = performance.now();
 		const records = store.collectRecords(limit, "all");

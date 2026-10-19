@@ -281,7 +281,12 @@
         class="flex min-h-0 flex-1 flex-col"
         data-testid="wfvz-overlay-canvas-pane"
       >
-        <CanvasPane v-if="canvasPaneId" :key="canvasPaneId" :canvas-id="canvasPaneId" />
+        <CanvasPane
+          v-if="canvasPaneId"
+          :key="canvasPaneId"
+          :canvas-id="canvasPaneId"
+          :session-id="canvasPaneSessionId"
+        />
       </div>
       <!-- tab=scheduler：定时任务面板（viewId 单源常量 = 控制器 SCHEDULER_MODAL_VIEW_ID，
            树未到 = hidden 零 DOM，容器仍锚定内容区形态） -->
@@ -364,12 +369,18 @@ const emit = defineEmits<{
 
 const { t } = useI18n()
 
-// 当前 canvas 内容载荷（core 开合态单例读——本壳只在 tab==='canvas' 时消费其 canvasId）
+// 当前 canvas 内容载荷（core 开合态单例读——本壳只在 tab==='canvas' 时消费其 canvasId
+// 与归属 sessionId，D4 会话隔离：CanvasPane 按归属会话分区取数）
 const { current: overlayContent } = useOverlayControl()
 
 const canvasPaneId = computed<string>(() => {
   const cur = overlayContent.value
   return cur !== null && cur.kind === 'canvas' ? cur.payload.canvasId : ''
+})
+
+const canvasPaneSessionId = computed<string>(() => {
+  const cur = overlayContent.value
+  return cur !== null && cur.kind === 'canvas' ? cur.payload.sessionId : ''
 })
 
 // ── 一级 tab 条（scheduler 整合）：分段定义（序 = 缺省视图优先）──

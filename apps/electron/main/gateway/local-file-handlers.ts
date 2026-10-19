@@ -12,7 +12,7 @@
  *   （2026-10-15 ADR-0118 3d，getSessionTmpEncodeCwdDirs 正向对拍）——通道入参含模型
  *   消息文本承载的路径载荷（html-preview fence），全量白名单含 `<dataDir>` 整前缀（含
  *   `<dataDir>/agent/auth.json` 等凭据文件），文本读取/预检面限定在实际消费域
- *   `<dataDir>/artifacts/**` 与各会话项目 `.tmp/` 子树（后者粒度论证见 ADR 3d）
+ *   `<dataDir>/ext-sessions/<sid>/artifacts/**`（按现存会话枚举）与各会话项目 `.tmp/` 子树（后者粒度论证见 ADR 3d）
  *
  * **白名单成员集**（2026-10-15 ADR-0118 3d 修订）：静态成员集 + 一个动态派生成员——会话
  * 项目 `.tmp/` 子树（派生自 main 自有 sessions 目录的 encodeCwd 目录名集，正向对拍；输入
@@ -71,12 +71,16 @@ export function getAllowedLocalFilePrefixes(isDev: boolean): string[] {
 /**
  * localFile:servable / localFile:read 两条 IPC 通道的当次准入前缀（读/预检收窄范围）。
  *
- * 静态前缀 = 会话产物子树 `<dataDir>/artifacts/**`（computeLocalFileReadPrefixes），不复用
- * 协议 handler 的全量白名单——见文件头「准入分两面」。cwd 外非产物路径拿
- * `out_of_whitelist`，消费方回落既有通道（useDetailPane cwd 通道 / 容器降级占位）。
+ * 前缀 = session 存储树内产物子树 `<dataDir>/ext-sessions/<sid>/artifacts/**`（按现存会话
+ * 枚举，computeLocalFileReadPrefixes 布局反转候选①），不复用协议 handler 的全量白名单
+ * ——见文件头「准入分两面」。存储树内非产物路径拿 `out_of_whitelist`，消费方回落既有
+ * 通道（useDetailPane cwd 通道 / 容器降级占位）。枚举失败经 onError 旁路出声（与
+ * getSessionTmpEncodeCwdDirs 同一约定）。
  */
 function getReadChannelPrefixes(): string[] {
-  return computeLocalFileReadPrefixes(getDataDir())
+  return computeLocalFileReadPrefixes(getDataDir(), {}, (err, dir) =>
+    mainLogger.warn(`[main] local-file artifacts prefixes collect failed (${dir}): ${toErrorMessage(err)}`),
+  )
 }
 
 /**
@@ -122,7 +126,7 @@ export function registerLocalFileHandlers(): void {
 
   // localFile:read：内联容器源码态与 DetailPane 变更集/文件树产物源码读取（useDetailPane
   // loadPreviewContent；chat-html-support §8.2 S3「切换『源码』看到 shiki 高亮」）。产物目录
-  // `<dataDir>/artifacts/<sessionId>` 在 session cwd 外（§6.7 D7），runtime file.read 的
+  // `<dataDir>/ext-sessions/<sessionId>/artifacts/` 在 session cwd 外（§6.7 D7），runtime file.read 的
   // cwd 守门对主要产物路径不可达——与 servable 预检同谓词函数（probeLocalFileServable），
   // 准入前缀集 = 产物子树 + 会话项目 `.tmp/` 子树（读通道收窄，与协议 handler 全量白名单
   // 分面）；读取失败不抛错，回结构化原因。

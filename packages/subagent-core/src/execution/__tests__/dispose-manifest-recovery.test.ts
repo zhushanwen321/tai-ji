@@ -136,7 +136,7 @@ function readDisposedState(
   agentDir: string,
   id: string,
 ): { status: string; reason?: string; endedAt?: number } {
-  const file = path.join(getSubagentRecordsDir(agentDir, agentDir), `${id}.events`);
+  const file = path.join(getSubagentRecordsDir("root-session", agentDir), `${id}.events`);
   const lines = fs.readFileSync(file, "utf-8").trim().split("\n");
   const settled = lines
     .map((l) => JSON.parse(l) as { type?: string; stopReason?: string; endedAt?: number })
@@ -146,7 +146,7 @@ function readDisposedState(
 }
 
 async function seedCreatedJournalFrame(recordsDir: string, id: string): Promise<void> {
-  await createRecordEventStream(recordsDir).append(id, {
+  await createRecordEventStream(() => recordsDir).append(id, {
     type: "record-created",
     ts: 1000,
     id,
@@ -162,7 +162,7 @@ async function seedCreatedJournalFrame(recordsDir: string, id: string): Promise<
 }
 
 function manifestPath(agentDir: string, id: string): string {
-  return path.join(getSubagentRecordsDir(agentDir, agentDir), `${id}.json`);
+  return path.join(getSubagentRecordsDir("root-session", agentDir), `${id}.json`);
 }
 
 async function flushAsyncWrites(): Promise<void> {
@@ -184,6 +184,10 @@ describe("[M1/M2 Gate B] 编排性终态化 manifest 反查索引 + 重启冷查
     delete process.env.PI_SUBAGENT_ROOT_CWD;
     delete process.env.PI_SUBAGENT_ROOT_SESSION_ID;
     agentDir = makeTmpAgentDir();
+    // [session-store-layout-inversion] 生产 store 目录经
+    // getSubagentRecordsDir(resolveStoreRootSessionId())（env dataDir 兜底）解析——
+    // stubEnv 把写删目标收进本 mkdtemp 目录（自建自删红线）。
+    vi.stubEnv("TAIJI_AGENT_DATA_DIR", agentDir);
     service = makeServiceOn(agentDir);
   });
 
@@ -191,6 +195,7 @@ describe("[M1/M2 Gate B] 编排性终态化 manifest 反查索引 + 重启冷查
     await flushAsyncWrites(); // 先等 fire-and-forget 写落盘，再拆 tmp 目录（防 ENOENT 竞态噪声）
     for (const s of extraServices.splice(0)) s.dispose();
     service.dispose();
+    vi.unstubAllEnvs();
     fs.rmSync(agentDir, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 });
   });
 
@@ -294,7 +299,7 @@ describe("[M1/M2 Gate B] 编排性终态化 manifest 反查索引 + 重启冷查
     // [v1 兼容层删除] v1 全量快照的 closedReason 兼容位已无载体——自愈出口从
     // rematerializeReconnectableEntryManifests（closedReason gate，现无可达输入）转为
     // v2 收编链 adoptV2Orphans → adoptInterruptedRecord（终局帧/条目/manifest 一次补齐）。
-    const recordsDir = getSubagentRecordsDir(agentDir, agentDir);
+    const recordsDir = getSubagentRecordsDir("root-session", agentDir);
     const mainSessionFile = path.join(agentDir, "main-session.jsonl");
     fs.writeFileSync(
       mainSessionFile,
@@ -357,7 +362,7 @@ describe("[M1/M2 Gate B] 编排性终态化 manifest 反查索引 + 重启冷查
       "utf-8",
     );
     const appended: Array<{ customType: string; data: Record<string, unknown> }> = [];
-    const store = new RecordStore(sessionsDir, undefined, {
+    const store = new RecordStore(() => sessionsDir, undefined, {
       appendEntry: (customType: string, data: unknown) => {
         appended.push({ customType, data: data as Record<string, unknown> });
       },
@@ -403,6 +408,8 @@ describe("[M1/M2 Gate B] 编排性终态化 manifest 反查索引 + 重启冷查
     // 重启后 endedMessageGuard 不再误入 reconnectable/fork-from 分支（Gate B 实测错分流形态）。
     const restarted = makeServiceOn(agentDir);
     extraServices.push(restarted);
+    // 离线播种的写目标 = records 目录（本用例无 register 写点，目录尚不存在）——先建再写
+    fs.mkdirSync(path.dirname(manifestPath(agentDir, "sa-ucx")), { recursive: true });
     fs.writeFileSync(
       manifestPath(agentDir, "sa-ucx"),
       JSON.stringify({

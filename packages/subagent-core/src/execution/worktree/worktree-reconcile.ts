@@ -1,22 +1,27 @@
 // src/execution/worktree/worktree-reconcile.ts
 //
-// worktree 物理（磁盘）侧 ↔ 注册表双向对账（D5b）——自 worktree-manager.ts 按变化原因拆出
+// worktree 物理面 ↔ 注册表双向对账（D5b）——自 worktree-manager.ts 按变化轴拆出
 //（[U5] worktree-manager 收纳重建链后超 max-lines 限；对账是独立子系统：注册表与
-// tmpdir checkout / 分支物理（磁盘）侧的周期性收敛，与创建/清理/重建的生命周期动作正交）。
+// tmpdir checkout / 分支物理面的周期性收敛，与创建/清理/重建的生命周期动作正交）。
 //
 // 对账方向：
 //   方向一（注册有 → 物理无）：条目的分支与 checkout 都不存在 → 移除幻影条目；
 //   方向二（物理有 → 注册无）：无活 pid 判死清理 / 唯一对应自愈补写 / 多对应保守
 //   跳过（PS-12 老化升级）。
 //
-// 判活信号 = <agentDir>/subagents/<enc>/sessions/*.alive 中存活 pid（session-runner
-// first header 写入，崩溃残留不删）——「死活判据」的物理（磁盘）侧来源。
+// 判活信号 = session 存储树 `<storeRoot>/<sid>/subagents/sessions/*.alive` 中存活
+// pid（session-runner first header 写入，崩溃残留不删）——「死活判据」的物理面来源。
+// [session-store-layout-inversion D2/D3] 跟随 subagent 文件族换根后聚合键从 enc 段
+// （encodeCwd(mainCwd)）改为全局 pid 集——活信号判据变粗（任何会话的活 subagent
+// 都挡住残留清理），方向保守（宁延迟勿误删）；活 pid 全灭后下一周期收敛。
 //
 // 失败语义：对账失败仅日志不抛（旁路维护路径不阻断 session_start / scan）。
 
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
+
+import { getSessionStoreDir, isPiSessionId } from "@taiji/shared/paths";
 
 import { bestEffort } from "../assembly/best-effort.ts";
 import { getLogger } from "../../core/logger.ts";
@@ -41,7 +46,7 @@ const BRANCH_PREFIX = "pi-sub-";
 export const RECONCILE_SKIP_ESCALATION_CYCLES = 4;
 
 /**
- * 物理（磁盘）侧发现的 worktree（tmpdir checkout 目录存在，无论注册表是否登记）。
+ * 物理面发现的 worktree（tmpdir checkout 目录存在，无论注册表是否登记）。
  * repo 从 checkout/.git 指针文件推导（普通 repo 与 bare+worktree 均覆盖）；
  * 推导失败（.git 文件缺失/损坏）时 undefined——checkout 视为无主残留。
  */
@@ -58,14 +63,15 @@ interface PhysicalWorktree {
   readonly mtimeMs: number;
 }
 
-/** 对账器的协作范围（WorktreeManager 注入：git 执行器 + 注册表 + agentDir）。 */
+/** 对账器的协作面（WorktreeManager 注入：git 执行器 + 注册表 + agentDir）。 */
 export interface WorktreeReconcilerDeps {
   /** git 命令执行器（manager.gitRunAsync 同一实例——写命令 per-repo mutex 共享）。 */
   readonly gitRunAsync: (args: string[], opts: { cwd: string; timeout?: number }) => Promise<string>;
   /** 全局注册表（与 manager 同一实例——add/remove 直接生效）。 */
   readonly registry: WorktreeRegistry;
-  /** agentDir（<agentDir>/subagents/<enc>/sessions 下扫 .alive 活信号）。 */
-  readonly agentDir: string;
+  /** session 存储树根（`<dataDir>/ext-sessions/`——<sid>/subagents/sessions 下扫
+   *  .alive 活信号；WorktreeManager 构造点经 getSessionStoreDir 注入）。 */
+  readonly storeRoot: string;
 }
 
 /** 对账「歧义跳过」的 per-checkout 连续计数（老化判据）。
@@ -83,7 +89,7 @@ export class WorktreeReconciler {
 
   /** 双向对账单轮（manager.scan 周期调用）。全流程幂等、失败仅日志不抛。 */
   async scanOnce(): Promise<void> {
-    // 物理（磁盘）侧发现失败（tmpdir 不可读等）→ 放弃本轮对账（失败仅日志，不阻断）
+    // 物理面发现失败（tmpdir 不可读等）→ 放弃本轮对账（失败仅日志，不阻断）
     const physical = await this.discoverPhysicalWorktrees();
     const registered = this.deps.registry.load();
     const registeredBranches = new Set(registered.map((e) => e.branch));
@@ -110,7 +116,7 @@ export class WorktreeReconciler {
   }
 
   /** 对账方向一（注册有 → 物理无）：条目的分支与 checkout 目录都已不存在 → 条目指向
-   *  幻影资源 → 移除条目（纯逐条处理完毕，不删任何仍存在的资源，幂等安全）。 */
+   *  幻影资源 → 移除条目（纯清账，不删任何仍存在的资源，幂等安全）。 */
   private async removePhantomRegistryEntries(
     registered: WorktreeEntry[],
     branchesByRepo: Map<string, Set<string>>,
@@ -132,8 +138,9 @@ export class WorktreeReconciler {
     }
   }
 
-  /** 对账方向二（物理有 → 注册无）：按 enc 段（encodeCwd(mainCwd)）聚合，活信号 =
-   *  <agentDir>/subagents/<enc>/sessions/*.alive 中存活的 pid（session-runner
+  /** 对账方向二（物理有 → 注册无）：活信号按全局 pid 集聚合（换根后不再按 enc 段
+   *  ——见头注释语义变化登记），来源 = session 存储树
+   *  <storeRoot>/<sid>/subagents/sessions/*.alive 中存活的 pid（session-runner
    *  first header 时写入，崩溃残留不删）：
    *    - 无活 pid：残留判死，checkout mtime 超 SPAWN_GRACE_MS 才清（防误清另一
    *      进程 worktree add 完成到 registry.add 落盘之间的 create 窗口）；
@@ -146,27 +153,20 @@ export class WorktreeReconciler {
    *  返回本轮实际进入「歧义跳过」的 checkout 路径集（PS-12 老化计数收敛依据，
    *  见 scanOnce 尾部）。 */
   private async reconcileUnregisteredWorktrees(orphans: PhysicalWorktree[]): Promise<Set<string>> {
-    // 按 enc 段聚合处理（活信号以 enc 段为粒度——.alive 在 <enc>/sessions/ 下）
+    // 活信号全局收集（换根后 .alive 分散在各会话树 <sid>/subagents/sessions/，
+    // 不再按 enc 段聚合——见头注释语义变化登记）
+    const alivePids = this.collectAllAlivePids();
     const ambiguous = new Set<string>();
-    const orphansByEnc = new Map<string, PhysicalWorktree[]>();
-    for (const pt of orphans) {
-      const list = orphansByEnc.get(pt.enc) ?? [];
-      list.push(pt);
-      orphansByEnc.set(pt.enc, list);
-    }
-    for (const [enc, list] of orphansByEnc) {
-      await this.reconcileEncSegment(enc, list, ambiguous);
-    }
+    await this.reconcileResiduals(orphans, alivePids, ambiguous);
     return ambiguous;
   }
 
-  /** 单 enc 段的残留处置三分支：无活 pid 判死清理 / 唯一对应自愈补写 / 多对应保守跳过。 */
-  private async reconcileEncSegment(
-    enc: string,
+  /** 残留处置三分支：无活 pid 判死清理 / 唯一对应自愈补写 / 多对应保守跳过。 */
+  private async reconcileResiduals(
     list: PhysicalWorktree[],
+    alivePids: number[],
     ambiguous: Set<string>,
   ): Promise<void> {
-    const alivePids = this.collectAlivePids(enc);
     if (alivePids.length === 0) {
       await this.cleanupDeadSegment(list);
       return;
@@ -222,7 +222,6 @@ export class WorktreeReconciler {
     // 全部升级时不再发本条，避免每周期双份噪音）
     if (escalated < list.length) {
       logger.warn("[worktree] reconcile: unregistered physical worktrees present but alive-pid mapping ambiguous, skipping this cycle", {
-        enc,
         orphans: list.length - escalated,
         alivePids: alivePids.length,
       });
@@ -246,7 +245,7 @@ export class WorktreeReconciler {
   }
 
   /**
-   * 物理（磁盘）侧发现：扫描 <tmpdir>/pi-subagents/<enc>/<pi-sub-*> checkout 目录。
+   * 物理面发现：扫描 <tmpdir>/pi-subagents/<enc>/<pi-sub-*> checkout 目录。
    * repo 从 checkout/.git 指针文件推导（`gitdir: <repo>/.git/worktrees/<branch>`，
    * 普通 repo 与 bare+worktree（.bare/worktrees/...）统一取 worktrees 段上两级）；
    * 推导失败（残缺 checkout）repo=undefined，由调用方按无主残留处置。
@@ -259,7 +258,7 @@ export class WorktreeReconciler {
         .filter((d) => d.isDirectory())
         .map((d) => d.name);
     } catch {
-      return []; // tmpdir 根不存在（从未创建过 worktree）→ 物理（磁盘）侧为空
+      return []; // tmpdir 根不存在（从未创建过 worktree）→ 空物理面
     }
 
     const result: PhysicalWorktree[] = [];
@@ -310,24 +309,38 @@ export class WorktreeReconciler {
   }
 
   /**
-   * 收集 enc 段的活 pid：<agentDir>/subagents/<enc>/sessions/*.alive 中
-   * readAliveMarker 解析成功且 isProcessAlive 的 pid（去重）。
-   * 崩溃残留的 .alive（pid 已死）天然过滤掉——这正是「死活判据」的物理（磁盘）侧来源。
+   * 收集全部活 pid：session 存储树 `<storeRoot>/<sid>/subagents/sessions/*.alive`
+   * 中 readAliveMarker 解析成功且 isProcessAlive 的 pid（去重，<storeRoot> =
+   * shared getSessionStoreDir 即 `<dataDir>/ext-sessions/`；按一级目录合法
+   * sessionId 形态逐棵会话树枚举，聚合键与 enc 分区无关）。
+   * 崩溃残留的 .alive（pid 已死）天然过滤掉——这正是「死活判据」的物理面来源。
    */
-  private collectAlivePids(enc: string): number[] {
-    const sessionsDir = path.join(this.deps.agentDir, "subagents", enc, "sessions");
-    let files: string[];
+  private collectAllAlivePids(): number[] {
+    let sessionDirs: fs.Dirent[];
     try {
-      files = fs.readdirSync(sessionsDir);
+      sessionDirs = fs.readdirSync(this.deps.storeRoot, { withFileTypes: true });
     } catch {
-      return []; // enc 段无 sessions 目录（该 repo 从未跑过 subagent）→ 无活信号
+      return []; // 存储树根不存在（从未有过会话）→ 无活信号
     }
     const pids = new Set<number>();
-    for (const file of files) {
-      if (!file.endsWith(".alive")) continue;
-      const marker = readAliveMarker(path.join(sessionsDir, file.slice(0, -".alive".length)));
-      if (marker && isProcessAlive(marker.pid)) {
-        pids.add(marker.pid);
+    for (const ent of sessionDirs) {
+      if (!ent.isDirectory()) continue;
+      // 一级目录名须是合法 sessionId 形态（shared isPiSessionId 同源判定——非会话目录跳过；
+      // 不用内联正则，防 shared 收紧/放宽时此处静默漂移）
+      if (!isPiSessionId(ent.name)) continue;
+      const sessionsDir = path.join(this.deps.storeRoot, ent.name, "subagents", "sessions");
+      let files: string[];
+      try {
+        files = fs.readdirSync(sessionsDir);
+      } catch {
+        continue; // 该会话树无 subagents/sessions（合法空态）
+      }
+      for (const file of files) {
+        if (!file.endsWith(".alive")) continue;
+        const marker = readAliveMarker(path.join(sessionsDir, file.slice(0, -".alive".length)));
+        if (marker && isProcessAlive(marker.pid)) {
+          pids.add(marker.pid);
+        }
       }
     }
     return [...pids];

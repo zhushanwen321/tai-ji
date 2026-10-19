@@ -34,7 +34,7 @@ describe("ManifestStore — parentRecordId 落盘 (M3a)", () => {
 
   beforeEach(() => {
     tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "manifest-parentid-"));
-    store = new ManifestStore(tmpDir);
+    store = new ManifestStore(() => tmpDir);
   });
 
   afterEach(() => {

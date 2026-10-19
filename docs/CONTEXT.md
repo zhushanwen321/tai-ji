@@ -276,8 +276,19 @@ HTML 预览块在对话流中的渲染载体为**内联预览容器**（v16，AD
 ### 渲染态（v16 退役词条）
 DetailPane 对 HTML 文件的 iframe 预览形态（v16 前与「源码态」相对、可切换）——v16 已退役（ADR-0119）：DetailPane 对 `.html` 恢复 shiki 源码高亮，机制规格（`sandbox="allow-scripts"` iframe、无 `allow-same-origin` 落 opaque origin、servable 预检、URL 百分号编码、`?r=n` 刷新）整体平移至内联预览容器承载。现役「源码态」= 容器头部切换（iframe 卸载、内容经 `localFile:read` 读取走 shiki 高亮）与 DetailPane 源码高亮。
 
+### session 存储树（ext-sessions）
+taiji 自有全部 session 维度衍生数据的统一落点：`<dataDir>/ext-sessions/<sessionId>/<domain>/`——一个 session 一棵树，树内按 domain 分层（attachments / artifacts / image-cache / plugin-data.json / background-tasks / session-view.md / btw / canvases / logs / subagents / workflow）。会话删除 = 整树进废纸篓。树结构 SSOT = `packages/shared/src/paths.ts`（`getSessionStoreDir` + 各域具名推导函数，sessionId 过 `isPiSessionId` 同域校验）；新域接入规约与豁免清单见项目 AGENTS.md「数据目录布局」条目，决策登记 ADR-0151。
+
+**代码映射**: `packages/shared/src/paths.ts` 的 `getSessionStoreDir`（树根）与 `PI_SESSION_TREE_SEGMENTS`（pi 宿主三树段 + 存储树根段）；旧推导函数 `getAttachmentsDir` / `getImageCacheDir` / `getSessionArtifactsDir` 返回新布局。
+
+### 分区键
+目录布局中承载「这条数据属于哪个会话」的那一级目录名的取值来源。session 存储树的分区键 = sessionId（一级目录名即会话 id）；btw / subagent / workflow 三个域反转前按 encodeCwd（工作目录编码名，按项目聚合）分区、会话关联只在记录字段里——反转后分区键统一为 rootSessionId（record / run 创建记录 / 主会话 id），「同项目记录聚一起」的目录语义由字段级过滤承接（跨会话按项目盘点 = 按 rootSessionId 字段全根遍历过滤，ADR-0151）。
+
+### 整树软删
+会话删除时把该会话的整棵存储树 `<root>/<sessionId>/` 单点移入系统废纸篓的回收动作（`packages/runtime/src/infra/system/trash.ts` 的 `trashDirectory`：mac 走 trash CLI → Finder，非 mac 降级递归硬删）——误删可从废纸篓恢复整树。删除编排四段中的第三段（收殓 → tombstone 登记 → 整树软删 → pi 树内本体清理）；保留期清理（孤儿缓存 / 过期日志）仍走硬删，只有「会话删除」走软删。决策登记 ADR-0151 D5。
+
 ### 会话产物目录
-`<dataDir>/artifacts/<sessionId>/`——HTML 产物落点。它在 local-file 白名单内（`<dataDir>` 前缀成员），因此预览无需任何白名单放宽。随会话删除级联删除（唯一回收通道，ADR-0118 / ADR-0133）；外部删除主会话文件场景的残留按裁决接受。
+`<dataDir>/ext-sessions/<sessionId>/artifacts/`（session 存储树域 2）——HTML 产物落点。它在 local-file 白名单内（`<dataDir>` 前缀成员），因此预览无需任何白名单放宽。随会话删除整树软删回收（唯一回收通道，ADR-0118 / ADR-0133 / ADR-0151）；外部删除主会话文件场景的残留按裁决接受。
 
 **代码映射**: `packages/shared/src/paths.ts` 的 `getSessionArtifactsDir`（公式单点，含 sessionId 穿越校验）；system-prompt 扩展侧以镜像推导（不 import shared——包边界 + 运行时门禁）。
 
@@ -489,7 +500,7 @@ pi session 文件（JSONL）中通过 `parentId` 构建的逻辑树结构。同�
 连接发现三分支中的远程形态，形态判定收敛在 `packages/core/src/transport/use-connection.ts` 的 resolveConnectionMode() 薄谓词（init 首连 / HMR 重连 / retryRuntime 三处消费；连接目标解析留在各分支原地）：**本地 = IPC** 端口发现（electronAPI 有值）、**远程 = profile**（移动壳）、**mock = VITE_MOCK**。profile 的注入实现 = `packages/mobile-renderer/src/platform/connection-profile.ts`：凭据采纳顺序 = URL query `?token=`（显式携带的新凭据 = 用户新意图，验身成功落 storage 并 `history.replaceState` 抹地址栏）→ storage（验身过的持久凭据，跨 runtime 重启免重扫）→ 皆无（不带凭据发起连接，runtime fail-closed 拒绝 → `onAuthRejected` 信号 → token 输入视图）。auth 被拒时移动壳抑制全部自动重连触发点（退避重连 + visibility 切前台主动重连）；连接失败（非凭据失败）维持重连等待态，不落 token 视图。
 
 ### Run record 事件流（workflow 域）
-workflow run 的唯一持久化：`<sessionDir>/workflow-state/<runId>.record.jsonl`（workspace 有活跃 session 时落 `sessions/<slug>/workflow-state/`），append-only JSONL 逐行记录 run 生命周期事件（[ADR-0082](adr/decisions.md) 对齐 pi 后 9 事件：`run-created / phase-started / agent-started / agent-retrying / agent-settled / phase-settled / run-interrupted / run-resumed / run-settled`，事件行携带单调 seq；`run-created` 带 scriptSource 全文、`agent-settled` 带 result 全文与 sessionFile）。`agent-started` 载荷携带 `phase?`（call 归属快照——fold 推导无需回溯转移事件）与 `memberRecordId?`（[D6] 绑定字段——同名续写路由）；`phase-started`/`phase-settled` 是 phase 状态机转移事件（[D3]——worker 模板 `phase()` 经 postMessage 写入 record，异步丢失窗口由 fold 自愈规则承接）。run 生命周期四态 + interrupted 暂停态（`created → running → settling → terminal`；`running/settling → interrupted → resume → running`）——interrupted 非终局（run-interrupted 转移帧，可续跑）；终局 outcome 四值 `done/failed/cancelled/time_limited`。manifest（`<runId>.json`）降格为 run-settled 终局事件的派生缓存。判读 = record fold 唯一权威（注册表派生视图 / 终局诊断引用 / resume 资格全部折叠）。由显式状态机单点写入（terminal-actions.ts 的 dispatchRunTrigger 单写者链），引擎不直接写。无主 run 的磁盘清理走对账清理（裁决点 7：引用集三代解析 + 宽限窗——run 数据生命周期跟随 session 归属）。
+workflow run 的唯一持久化：`<dataDir>/ext-sessions/<rootSessionId>/workflow/runs/<runId>.record.jsonl`（分区键 = run 创建记录的 rootSessionId 字段，session 存储树域 10，ADR-0151），append-only JSONL 逐行记录 run 生命周期事件（[ADR-0082](adr/decisions.md) 对齐 pi 后 9 事件：`run-created / phase-started / agent-started / agent-retrying / agent-settled / phase-settled / run-interrupted / run-resumed / run-settled`，事件行携带单调 seq；`run-created` 带 scriptSource 全文、`agent-settled` 带 result 全文与 sessionFile）。`agent-started` 载荷携带 `phase?`（call 归属快照——fold 推导无需回溯转移事件）与 `memberRecordId?`（[D6] 绑定字段——同名续写路由）；`phase-started`/`phase-settled` 是 phase 状态机转移事件（[D3]——worker 模板 `phase()` 经 postMessage 写入 record，异步丢失窗口由 fold 自愈规则承接）。run 生命周期四态 + interrupted 暂停态（`created → running → settling → terminal`；`running/settling → interrupted → resume → running`）——interrupted 非终局（run-interrupted 转移帧，可续跑）；终局 outcome 四值 `done/failed/cancelled/time_limited`。manifest（`<runId>.json`）降格为 run-settled 终局事件的派生缓存。判读 = record fold 唯一权威（注册表派生视图 / 终局诊断引用 / resume 资格全部折叠）。由显式状态机单点写入（terminal-actions.ts 的 dispatchRunTrigger 单写者链），引擎不直接写。无主 run 的磁盘清理走对账清理（裁决点 7：引用集三代解析 + 宽限窗——run 数据生命周期跟随 session 归属）。
 
 ### run/record 状态词表（W2 收敛 + 生命周期重构，[ADR-0080](adr/decisions.md) / [ADR-0082](adr/decisions.md)）
 run 与 record 两域状态词表的单源口径，消费方按维取值、禁止跨维混用：
@@ -514,7 +525,7 @@ run 与 record 的运行态数据持久化形态（[ADR-0094](adr/decisions.md) 
 run 与 record 的状态变化唯一落盘形态：append-only 文本流，逐行一个事件，行带单调 `seq`。
 
 - record 侧 = `<recordsDir>/<sa-id>.events`（首行 `{"type":"record-events"}` 自描述；六类事件 `record-created` / `bound` / `round-started` / `round-idle` / `settled` / `reopened`）；
-- run 侧 = `<sessionDir>/workflow-state/<runId>.record.jsonl`（九类事件，见 [Run record 事件流](#run-record-事件流workflow-域)）；
+- run 侧 = `<dataDir>/ext-sessions/<rootSessionId>/workflow/runs/<runId>.record.jsonl`（九类事件，见 [Run record 事件流](#run-record-事件流workflow-域)）；
 - **单一写者**：状态变化只能追加事件，其它模块禁止直写盘上派生视图（写侧检查 `scripts/check-record-write-surface.mjs`）；
 - **崩溃安全**：只追加、不原地改，尾部损坏按 [事件流损坏形态](#事件流损坏形态半写--坏行--截断)处理，不需要跨文件事务。
 
@@ -723,9 +734,12 @@ taiji 的 assistant 回复朗读能力（ai-voice-tts 设计，P2 辅助功能�
 
 ## 画布域（Problem-Solve Canvas）
 
-tech-design-wf 之前的方向规划层：一张人机共编的分层论证图画布——agent 经结构化工具生长（growth），用户在 overlay 画布上裁决（选定 / 否决 / 评论 / 改判据）并回推 agent 响应，反向对抗式审查迭代到 must-fix（必修项）清零即规划收敛，收敛后的执行叶子经需求卡（requirement card）派发给 tech-design-wf。领域结构（两聚合 + 不变量 + 状态机）的登记 SSOT = [domain-model.md](domain-model.md)；本节承载统一语言词条。状态权威 = runtime CanvasService 唯一入口 `mutate`，跨 session 持久落盘 `<dataDir>/canvases/<canvasId>/`。
+tech-design-wf 之前的方向规划层：一张人机共编的分层论证图画布——agent 经结构化工具生长（growth），用户在 overlay 画布上裁决（选定 / 否决 / 评论 / 改判据）并回推 agent 响应，反向对抗式审查迭代到 must-fix（必修项）清零即规划收敛，收敛后的执行叶子经需求卡（requirement card）派发给 tech-design-wf。领域结构（两聚合 + 不变量 + 状态机）的登记 SSOT = [domain-model.md](domain-model.md)；本节承载统一语言词条。状态权威 = runtime CanvasService 唯一入口 `mutate`，画布按归属落盘 session 存储树域 8：`<dataDir>/ext-sessions/<ownerSessionId>/canvases/<canvasId>/`（归属定义见下「归属 session」词条）。
 
 **代码映射**: 领域核心 `packages/runtime/src/services/canvas/`（聚合根 + 不变量 + 落盘 + 重建）；契约（action 词表 / actor 权限矩阵 / marker）`packages/extension-protocol/src/extensions/canvas/`；agent 工具面 `extensions/taiji/canvas/`（6 工具全 deferred）；GUI `packages/renderer/src/stores/canvas.ts` + `packages/renderer/src/components/canvas/`；wire 登记 `packages/shared/src/protocol.ts`（`canvas.updated` 等）。
+
+### 归属 session（owner session）
+画布与 session 的归属关系：一张画布恒归属创建它的 session（`ownerSessionId` 字段），归属即路径——画布落盘在归属 session 的存储树内（`<dataDir>/ext-sessions/<ownerSessionId>/canvases/<canvasId>/`），一个 session 可有多个画布（1:N）。画布的创建与访问都校验归属：GUI 清单与 agent 工具面 canvas_list 按归属过滤，跨会话访问返回 `forbidden` 结构化拒绝；session 删除级联删除其全部画布（随整树回收）。领域规则 SSOT = [domain-model.md](domain-model.md) 画布域不变量 12，决策登记 [ADR-0151](adr/decisions.md) 条目 3。**Avoid**: 不叫「所属会话」「拥有者」。
 
 ### 画布（canvas）
 承载一个问题域完整规划的聚合根：一张图 + 配置 + 历史。**Avoid**: 不叫「白板」「文档」。

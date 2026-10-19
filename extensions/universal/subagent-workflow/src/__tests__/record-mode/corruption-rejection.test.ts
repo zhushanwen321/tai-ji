@@ -49,7 +49,7 @@ async function seedCreatedFrame(env: RecordFixtureEnv): Promise<void> {
 
 function mkStore(env: RecordFixtureEnv): JsonlRunStore {
   const entries = [registeredEntry(RUN_ID, env.recordPath(RUN_ID))];
-  return new JsonlRunStore({ sessionDir: env.sessionDir, ctx: mkCtxWith(entries) as never });
+  return new JsonlRunStore({ runsDir: env.runsDir, ctx: mkCtxWith(entries) as never });
 }
 
 describe("场景 18：record 损坏拒绝（[D1] 坏行停摆——解析失败即抛错，不静默跳过）", () => {

@@ -2,10 +2,10 @@
 //
 // Workflow run 事件词表与 journal 接口类型层（设计 workflow-architecture-redesign §3.3 D5）。
 //
-// 为什么需要它：纯快照派生视图只有终态一帧，「怎么死的」无从回答——重试轨迹
+// 为什么需要它：纯快照投影只有终态一帧，「怎么死的」无从回答——重试轨迹
 // （第一波 21 秒全灭、重试波写完报告）完全不可见，重试能掩盖事故。本模块定义
 // run 级事件的词表（判别联合）与 journal 接口形态，为事件 journal（append/scan
-// 实装、快照派生视图、注册表派生视图）提供类型地基。
+// 实装、快照投影、注册表投影）提供类型地基。
 //
 // 范围边界：词表/类型层 + 状态机（合法转移表数据 + transition 纯函数）+
 // journal 实装（createRunEventJournal：JSONL 落 <dir>/<runId>.record.jsonl
@@ -39,7 +39,7 @@
 // record 流的磁盘清理归裁决点 7 对账清理（无主 run 五件全删）——pi 壳域 run 域
 // 保留期不裁 record 流（prune 候选锚定 state 快照族，run-state-evidence [D1 后
 // 射程] 段），故「record 流被保留期裁剪、manifest 成终局事实最后落点」的形态在
-// 现行写侧无正常产生通道；findRunSettlementEvidence 的 manifest 兜底分支保留
+// 现行写入面无正常产生通道；findRunSettlementEvidence 的 manifest 兜底分支保留
 // 为残局防御（外部删除 / 清理部分失败），非设计内读序。
 //
 // interrupted 不是终局（[D2] interrupted 入 lifecycle 为暂停态）：run-interrupted
@@ -54,7 +54,7 @@ import {
   isEngineProtocolErrorCode,
 } from "@zhushanwen/subagent-engine-sdk";
 
-// [D1 Class A] run 域词汇下沉 shared；本文件 re-export 保持 orchestration 消费方与 barrel 不变
+// [D1 Class A] run 域词汇下沉 shared；本文件 re-export 保持 orchestration 消费面与 barrel 不变
 import type { RunEventType } from "../shared/run-vocabulary.ts";
 import type { RunErrorCode, RunOutcome } from "../shared/run-vocabulary.ts";
 export { ALL_RUN_OUTCOMES, RUN_EVENTS_SUFFIX, RUN_EVENT_TYPES } from "../shared/run-vocabulary.ts";
@@ -146,8 +146,8 @@ export function finalRunErrorCodeOf(run: WorkflowRun, doneReason: DoneReason): R
  * 的取值纪律同一取舍；单 agent 失败即主流终局场景精确）。
  *
  * 优先级：① 引擎协议码——AgentResult.error 文本的 `<code>: <detail>` 前缀格式是
- * SDK 跨包契约（EngineSdkError message 恒为该形态，AgentOutcome.error 与协议
- * error 帧共用），前缀命中 SDK 固定词表（engine_crashed 等）或 engine_ 透传侧
+ * SDK 跨面契约（EngineSdkError message 恒为该形态，AgentOutcome.error 与协议
+ * error 帧共用），前缀命中 SDK 固定词表（engine_crashed 等）或 engine_ 透传面
  * 才落码（guard 收窄防普通错误文案误判）；② failureKind（ask 级分诊标签）；
  * ③ "unknown"（保守可诊断成员，诊断全文仍在 reason/trace 面）。
  */
@@ -197,13 +197,13 @@ function extractFailedRunErrorCode(run: WorkflowRun): RunErrorCode {
  * RecordEventEnvelope（u0）同构——两域 tail 原语（event-tail.ts）的去重语义
  * 对称落位。
  *
- * ts：D5 载荷表未列，但快照派生视图（calls[].startedAt / lastProgressAt 派生）与
- * 注册表新鲜度判据都要求事件自带时间——派生视图只消费事件流（快照与事件流双写时
+ * ts：D5 载荷表未列，但快照投影（calls[].startedAt / lastProgressAt 派生）与
+ * 注册表新鲜度判据都要求事件自带时间——投影只消费事件流（快照与事件流双写时
  * 快照必然漂移；三通道采信顺序见本文件头部「终局证据读序」权威声明），没有
- * ts 的 journal 无法支撑派生视图，故信封层统一携带。
+ * ts 的 journal 无法支撑投影，故信封层统一携带。
  *
- * [W1 存量兼容读，D7] W1 前的 journal 行无 seq 字段——读取侧（scan 解析判定与
- * fold 检查）对「缺失 seq」放行（旧行为完全不变）；携带 seq 的行按正整数契约
+ * [W1 存量兼容读，D7] W1 前的 journal 行无 seq 字段——读取面（scan 解析判定与
+ * fold 守卫）对「缺失 seq」放行（旧行为完全不变）；携带 seq 的行按正整数契约
  * 校验，坏值 = 坏行。见 isWorkflowRunEventLine 与 foldRunEventFrames 注释。
  */
 export interface EventEnvelope {
@@ -211,7 +211,7 @@ export interface EventEnvelope {
   ts: number;
 }
 
-/** `run-created`——run 创建写入 journal 记录（journal 首帧）。 */
+/** `run-created`——run 创建落账（journal 首帧）。 */
 export interface RunCreatedEvent extends EventEnvelope { // oe-exempt:20260929:framework:workflow/record 协议契约类型——ports 类型契约先行、单实现常态（dev-0.10.5 已验收代码 merge 带入）
   type: "run-created";
   /**
@@ -220,11 +220,12 @@ export interface RunCreatedEvent extends EventEnvelope { // oe-exempt:20260929:f
    */
   runId: string;
   /**
-   * 归属会话锚（根 Pi session id，record-created.rootSessionId 同款语义）。同 cwd
-   * 多会话共享同一 sessions 目录与其下 workflow-state 目录，runtime 网关
-   * （subagent-model-gateway）runId 分支若只凭 journal 文件存在性定位宿主，会把
-   * 模型切换路由到非归属 pi 进程——本字段是精确归属判据（比对扫描会话 id，形态
-   * 对齐 recordId 侧 record-created 帧锚）。可选 = 读取侧对旧格式行放行（本字段
+   * 归属会话锚（根 Pi session id，record-created.rootSessionId 同款语义）。run
+   * journal 目录已按 rootSessionId 分区（`<root>/<sid>/workflow/runs/`，同 cwd
+   * 共享目录分区随 session-store-layout-inversion 退役），runtime 网关
+   * （subagent-model-gateway）在目录级隔离之外仍以本字段做精确归属二次校验——
+   * 防串会话：journal 文件存在性不作归属判据，路由以字段比对为准（形态
+   * 对齐 recordId 侧 record-created 帧锚）。可选 = 读取面对旧格式行放行（本字段
    * 落地前的流缺失时读侧回落既有存在性判定，存量 run 行为不劣化），写侧契约由
    * 写入方承担（写入点 = terminal-actions dispatchRunCreated，条件式可选项：
    * 宿主会话锚缺席时不落字段——与 scriptPath/model 同款条件式）。
@@ -232,13 +233,13 @@ export interface RunCreatedEvent extends EventEnvelope { // oe-exempt:20260929:f
   rootSessionId?: string;
   /** 脚本身份名（RunSpec.scriptName，meta.name 或文件名 stem）。 */
   workflowName: string;
-  /** 调用参数摘要（截断的序列化形态——展示/日志用途的行内小摘要；恢复读取路径优先
+  /** 调用参数摘要（截断的序列化形态——展示/日志用途的行内小摘要；恢复读面优先
    *  消费下方 args 全文字段，摘要仅旧格式帧回落）。 */
   argsSummary: string;
   /**
    * 调用参数全文（RunSpec.args 原文，设计 §3.1 载荷表 run-created 行「args」——
    * D14 逐字段深度比对与 resume 重放的 $ARGS 恢复依赖完整 args，摘要截断形态
-   * 使两者退化为「传 args 一律拒绝」/「$ARGS 回落空对象」）。可选 = 读取侧对
+   * 使两者退化为「传 args 一律拒绝」/「$ARGS 回落空对象」）。可选 = 读取面对
    * 旧格式行放行（载荷缺失回落 argsSummary 尽力恢复），写侧契约由写入方承担
    * （写入点 = terminal-actions dispatchRunCreated，scriptSource 同款处理）。
    */
@@ -249,7 +250,7 @@ export interface RunCreatedEvent extends EventEnvelope { // oe-exempt:20260929:f
    * 脚本源全文（RunSpec.scriptSource 原文，[D1] record 单源存储收敛——设计
    * workflow-run-resume-revision §3.1 载荷表）。record 流是唯一事实源后，脚本
    * 确定性重放（resume 的缓存回放）所需的 scriptSource 只能从本帧恢复——快照
-   * 派生视图文件已删，无第二落点。可选 = 读取侧对旧格式行放行（载荷缺失不拒绝），
+   * 投影文件已删，无第二落点。可选 = 读取面对旧格式行放行（载荷缺失不拒绝），
    * 写侧契约由写入方承担（写入点 = terminal-actions dispatchRunCreated，worker-message-pump 派发链调用）。
    */
   scriptSource?: string;
@@ -258,27 +259,27 @@ export interface RunCreatedEvent extends EventEnvelope { // oe-exempt:20260929:f
    * 无 __dirname，模板脚本靠 workerData.scriptPath 定位 _shared 族共享件）。
    * resume 重建 spec 时从本字段恢复锚定；缺失 = 旧格式行回落空串，旧 run 的模板
    * 脚本 resume 由模板脚本内建 fail-fast 拒绝（已知边界，不走兼容读）。可选 =
-   * 读取侧对旧格式行放行，写侧契约由写入方承担（写入点 = terminal-actions
+   * 读取面对旧格式行放行，写侧契约由写入方承担（写入点 = terminal-actions
    * dispatchRunCreated，与 scriptSource 同款条件式）。
    */
   scriptPath?: string;
   /**
    * run 级时间预算上界（ms，RunSpec.budgetTimeMs 原文——run 创建时的墙钟预算）。
-   * record 单源后 resume 无法从别处恢复原预算约束，本字段是唯一数据范围：resume
+   * record 单源后 resume 无法从别处恢复原预算约束，本字段是唯一数据面：resume
    * 重建 spec 时据此恢复（未显式传 time 即继承），复活 run 在错误重试重建时按
    * 「剩余活跃预算」（搁置时间不计）重排计时器；缺失 = 旧格式行（本载荷落地前的
    * 流）或创建时未设预算，两种形态一律回落不限时（旧格式行为不劣化）。可选 =
-   * 读取侧对旧格式行放行，写侧契约由写入方承担（写入点 = terminal-actions
+   * 读取面对旧格式行放行，写侧契约由写入方承担（写入点 = terminal-actions
    * dispatchRunCreated，仅 > 0 时落字段——与 scriptPath/model 同款条件式）。
    */
   budgetTimeMs?: number;
   /**
    * run 级 token 预算上界（RunSpec.budgetTokens 原文——run 创建时的 token 消耗上限，
    * Budget.isExceeded 的加权口径）。record 单源后 resume 无法从别处恢复原预算约束，
-   * 本字段是唯一数据范围：resume 重建 spec 时据此恢复（未显式传 tokens 即继承），
-   * 复活 run 的引擎侧 maxTokens 派生视图（lifecycle createRunningRun / worker-host budget
+   * 本字段是唯一数据面：resume 重建 spec 时据此恢复（未显式传 tokens 即继承），
+   * 复活 run 的引擎侧 maxTokens 投影（lifecycle createRunningRun / worker-host budget
    * 注入）与 fresh run 同形；缺失 = 旧格式行（本载荷落地前的流）或创建时未设预算，
-   * 两种形态一律回落不限制（旧格式行为不劣化）。可选 = 读取侧对旧格式行放行，
+   * 两种形态一律回落不限制（旧格式行为不劣化）。可选 = 读取面对旧格式行放行，
    * 写侧契约由写入方承担（写入点 = terminal-actions dispatchRunCreated，仅 > 0 时
    * 落字段——与 budgetTimeMs 同款条件式）。
    */
@@ -290,7 +291,7 @@ export interface RunCreatedEvent extends EventEnvelope { // oe-exempt:20260929:f
  *
  * taskIndex 对齐 AgentCall.id（= trace stepIndex，D-10 单源）——同一 call 的
  * started/retrying/settled 全链共享同一 taskIndex。D5 载荷表仅在 dispatched
- * 行列出 taskIndex，但快照派生视图按 calls[].id 关联事件与条目，settled/retrying
+ * 行列出 taskIndex，但快照投影按 calls[].id 关联事件与条目，settled/retrying
  * 缺 taskIndex 则无法定位归属 call（agentName 不唯一、attempt 单独不足），故
  * 三个 agent 事件统一携带。
  */
@@ -309,11 +310,11 @@ export interface AgentStartedEvent extends AgentIdentity, EventEnvelope { // oe-
   type: "agent-started";
   /**
    * 剧本 phase 归属（`phase()` 包裹 / `opts.phase` 显式声明——派发时刻由 worker
-   * 脚本按 `opts.phase || _currentPhase` 算出，随 agent-call 消息到达壳侧写入 journal 记录）。
+   * 脚本按 `opts.phase || _currentPhase` 算出，随 agent-call 消息到达壳侧落账）。
    * [D3] 双通道关系：本字段 = call 归属快照（fold 推导 call 归属无需回溯最近
    * 转移事件），`phase-started` 独立事件 = phase 状态机转移记录——两通道语义
    * 不同，均保留，不是同一信息双写。
-   * 可选 = 未标注剧本（无 phase 归属）——缺省即「无归属」，fold/派生视图侧保持
+   * 可选 = 未标注剧本（无 phase 归属）——缺省即「无归属」，fold/投影侧保持
    * undefined 不造键。
    */
   phase?: string;
@@ -321,7 +322,7 @@ export interface AgentStartedEvent extends AgentIdentity, EventEnvelope { // oe-
    * [D6 绑定消解] 本 call 绑定的子代理 record id（成员复用池「name→recordId」
    * 路由绑定的字段化承载——同名续写路由按绑定字段查，跨崩溃恢复从 record 折叠
    * 重建；独立 member-pool 词表成员随 [D6] 删除）。首派（新建成员）缺省；
-   * 续写（复用既有成员）携带。可选 = 读取侧对旧格式行与首派帧放行。
+   * 续写（复用既有成员）携带。可选 = 读取面对旧格式行与首派帧放行。
    */
   memberRecordId?: string;
   /**
@@ -330,7 +331,7 @@ export interface AgentStartedEvent extends AgentIdentity, EventEnvelope { // oe-
    * 重复行数」即本字段）。resume 重建回放集 call 以本字段恢复 opts，
    * detectReplayInputMismatch 的输入一致性比对由此可比（[U13]：缺本字段时重建
    * 只能落占位 opts {prompt:""}，比对结构性跳过——回放前缀的非确定性漂移零
-   * 检出）。可选 = 读取侧对旧格式行放行（旧帧重建回落占位形态，比对跳过维持）；
+   * 检出）。可选 = 读取面对旧格式行放行（旧帧重建回落占位形态，比对跳过维持）；
    * 写侧填充责任在 dispatchAgentStarted（terminal-actions 定义，worker-message-pump 派发链调用）。
    */
   input?: string;
@@ -339,7 +340,7 @@ export interface AgentStartedEvent extends AgentIdentity, EventEnvelope { // oe-
 /** `agent-retrying`——失败尝试后将退避重试（重试轨迹从脚本内部状态变为 record 事件，重试不再能掩盖事故）。 */
 export interface AgentRetryingEvent extends EventEnvelope { // oe-exempt:20260929:framework:workflow/record 协议契约类型——ports 类型契约先行、单实现常态（dev-0.10.5 已验收代码 merge 带入）
   type: "agent-retrying";
-  /** call 关联键（见 AgentIdentity——派生视图按 calls[].id 关联）。 */
+  /** call 关联键（见 AgentIdentity——投影按 calls[].id 关联）。 */
   taskIndex: number;
   /** 触发本次重试的失败尝试序号（1 起——刚失败的 attempt，退避后序号 +1 再执行）。 */
   attempt: number;
@@ -352,7 +353,7 @@ export interface AgentRetryingEvent extends EventEnvelope { // oe-exempt:2026092
 /** `agent-settled`——单次 call 终局（每次尝试各一帧，attempt 区分重试波；pi 原生同名采纳）。 */
 export interface AgentSettledEvent extends EventEnvelope { // oe-exempt:20260929:framework:workflow/record 协议契约类型——ports 类型契约先行、单实现常态（dev-0.10.5 已验收代码 merge 带入）
   type: "agent-settled";
-  /** call 关联键（见 AgentIdentity——派生视图按 calls[].id 关联）。 */
+  /** call 关联键（见 AgentIdentity——投影按 calls[].id 关联）。 */
   taskIndex: number;
   /** 终局尝试的序号（agent 粒度 attempt=1 即终局，无 agent 级重试波时恒 1）。 */
   attempt: number;
@@ -366,20 +367,20 @@ export interface AgentSettledEvent extends EventEnvelope { // oe-exempt:20260929
   durationMs: number;
   /**
    * 诊断引用（D5-3）：失败时子进程 stderr tee 文件路径（W11 已有落盘）——
-   * errorCode 与取证文件指针一起写入 journal 记录，排障不用翻全量日志。
+   * errorCode 与取证文件指针一起落账，排障不用翻全量日志。
    */
   stderrTeePath?: string;
   /**
    * 结果全文（AgentResult 完整序列化形态，[D1] record 单源存储收敛——设计
    * §3.1 载荷表）。record 流是唯一事实源后，resume 的已完成调用缓存回放（零
-   * token）所需的 result 只能从本帧恢复——快照派生视图文件已删，无第二落点。
+   * token）所需的 result 只能从本帧恢复——快照投影文件已删，无第二落点。
    * result.sessionFile 同时承载执行树家族链的 sessionFile 数据源（[D16 ③]
    * session-reader 发现链的提取面——无需载荷补字段）。
    *
- * 完整性纪律：record 流内携带本帧而 result 缺失是非法形态（= 流被外部篡改
- * 或写入器 bug）——壳侧 record store 的 loadAll 读原语对该形态拒绝（场景 18；
- * core record scan 维持宽容跳过——活体派生视图不因单帧全停，拒绝语义归恢复读取路径）。
- * 可选 = 类型层对读取侧放行（拒绝判定在消费方按载荷完整性执行），写侧填充
+   * 完整性纪律：record 流内携带本帧而 result 缺失是非法形态（= 流被外部篡改
+   * 或写入器 bug）——壳侧 record store 的 loadAll 读原语对该形态拒绝（场景 18；
+   * core record scan 维持宽容跳过——活体投影不因单帧全停，拒绝语义归恢复读面）。
+   * 可选 = 类型层对读取面放行（拒绝判定在消费方按载荷完整性执行），写侧填充
    * 责任在写入方（terminal-actions dispatchAgentSettled，worker-message-pump 完成链调用）。
    */
   result?: AgentResult;
@@ -401,7 +402,7 @@ export interface PhaseStartedEvent extends EventEnvelope { // oe-exempt:20260929
 
 /**
  * `phase-settled`——phase 内全部 call 落定的转移事件（[D3]）：壳侧在 agent-settled
- * 链内判定「该 phase 已派发的 call 全部落定」后写入 journal 记录。与展示分组（format.ts
+ * 链内判定「该 phase 已派发的 call 全部落定」后落账。与展示分组（format.ts
  * phase group）同源——「续聊时算不算完成」的唯一答案：phase 看 call，agent 会话
  * 续聊是另一层。
  */
@@ -425,7 +426,7 @@ export interface RunInterruptedEvent extends EventEnvelope { // oe-exempt:202609
    * 纪律保留不删值，无新写入方）。
    */
   errorCode?: RunErrorCode;
-  /** 中断原因摘要（自由文本诊断范围；可缺省）。 */
+  /** 中断原因摘要（自由文本诊断面；可缺省）。 */
   reason?: string;
 }
 
@@ -442,10 +443,10 @@ export interface RunResumedEvent extends EventEnvelope { // oe-exempt:20260929:f
   /**
    * 本次复活实际生效的时间预算上界（ms）——即 resume 生效预算三档回落的落定值，
    * 使「显式传入的覆盖预算」跨崩溃存续（否则下次无参 resume 会退回 run-created 的
-   * 创建预算）。读取侧三档回落：显式 options > 最近一条 run-resumed 的本字段 >
+   * 创建预算）。读取面三档回落：显式 options > 最近一条 run-resumed 的本字段 >
    * run-created 的创建预算；三处都没有 = 不限时。缺席有两种形态——本次复活不限时
    * （未设/0/负值），或旧格式帧（本载荷落地前的流，一律回落 run-created，不劣化）：
-   * 读取侧按「最近一条 run-resumed 的本字段 ?? run-created」处理，与 run-created
+   * 读取面按「最近一条 run-resumed 的本字段 ?? run-created」处理，与 run-created
    * 同款条件式（仅 > 0 落字段；写入点 = resume-run.resumeRunLocked 的 run-resumed
    * 派发）。
    */
@@ -453,10 +454,10 @@ export interface RunResumedEvent extends EventEnvelope { // oe-exempt:20260929:f
   /**
    * 本次复活实际生效的 token 预算上界——即 resume 生效预算三档回落的落定值（与
    * budgetTimeMs 同族），使「显式传入的覆盖预算」跨崩溃存续（否则下次无参 resume
-   * 会退回 run-created 的创建预算）。读取侧三档回落：显式 options > 最近一条
+   * 会退回 run-created 的创建预算）。读取面三档回落：显式 options > 最近一条
    * run-resumed 的本字段 > run-created 的创建预算；三处都没有 = 不限制。缺席有
    * 两种形态——本次复活不限制（未设/0/负值），或旧格式帧（本载荷落地前的流，
-   * 一律回落 run-created，不劣化）：读取侧按「最近一条 run-resumed 的本字段 ??
+   * 一律回落 run-created，不劣化）：读取面按「最近一条 run-resumed 的本字段 ??
    * run-created」处理，与 run-created 同款条件式（仅 > 0 落字段；写入点 =
    * resume-run.resumeRunLocked 的 run-resumed 派发）。
    */
@@ -464,9 +465,9 @@ export interface RunResumedEvent extends EventEnvelope { // oe-exempt:20260929:f
   /**
    * 本次复活实际生效的模型 canonical ref（`provider/modelId`，与 run-created.model
    * 同构；subagent-model-switch 决策七：resume 生效模型三档回落的落定值随帧落盘，
-   * 观测用途 + 跨崩溃存续）。条件式落字段（缺省/空串不落——未指定且无覆盖记账的
+   * 观测面 + 跨崩溃存续）。条件式落字段（缺省/空串不落——未指定且无覆盖记账的
    * 复活与现状同形）；写入点 = resume-run.resumeRunLocked 的 run-resumed 派发。
-   * 消费边界：以观测为主——派发侧的模型消费走宿主覆盖通道（决策六②，U4b 接线），
+   * 消费边界：观测面为主——派发侧的模型消费走宿主覆盖通道（决策六②，U4b 接线），
    * 本字段不改重建 spec 的 run 级模型（决策七不采用①：改 spec 会击穿回放比对）。
    */
   model?: string;
@@ -477,10 +478,10 @@ export interface RunResumedEvent extends EventEnvelope { // oe-exempt:20260929:f
  *
  * model 形状 = SDK ModelRef（`{ provider, modelId }`，u-foundation 定形的结构化
  * 契约——「拆装只发生在宿主编排层单点」；wire 语义：宿主组帧时拼 canonical ref
- * `provider/modelId`，读取侧按同语法拆回）。thinkingLevel 仅在用户切换时显式选择
+ * `provider/modelId`，读取面按同语法拆回）。thinkingLevel 仅在用户切换时显式选择
  * 档位才记账（§6.2：缺席时下一轮档位按现役候选链对新模型完整裁决）。
  *
- * 折叠语义（消费方单点 latestModelOverride）：生效覆盖值 = 最新一条，覆盖旧覆盖
+ * 折叠语义（消费面单点 latestModelOverride）：生效覆盖值 = 最新一条，覆盖旧覆盖
  * 值不叠加（设计不变量 2：至多一个用户覆盖值）。
  */
 export interface WorkflowModelOverride {
@@ -496,13 +497,13 @@ export interface WorkflowModelOverride {
  * `model-override`——workflow run 级模型覆盖记账事件（subagent-model-switch §6.6
  * 决策六①：run 的事件流追加覆盖记录，事件流是追加式单源、唯一合法持久化形态）。
  *
- * **不参与生命周期状态机**（worker-log 同款——记账侧与状态侧正交）：fold 显式
+ * **不参与生命周期状态机**（worker-log 同款——记账面与状态面正交）：fold 显式
  * 跳过（foldRunEventCheckpoint），不占 RUN_TRANSITIONS 表行，水位照常推进。
  * 硬约束（调研 S3）：覆盖记录只做记账持久化与 resume 生效值缺省，不进 worker
  * 的 `$MODEL`、不改重建 spec 的 run 级模型、不碰回放一致性比对——覆盖走宿主
  * 派发侧覆写（决策六②），三者在场时回放哈希不受扰动。
  *
- * 写侧 = 宿主切换编排（U4b）经 journal append 单点直写（seq 由 journal 实装
+ * 写入面 = 宿主切换编排（U4b）经 journal append 单点直写（seq 由 journal 实装
  * 分配，W1 seq 契约：新写行信封必填正整数 seq）；不经 dispatchRunTrigger——
  * model-override 是非转移记账事件（不占 RUN_TRANSITIONS 表行），
  * appendTransition 首行 transition() 对无转移表行事件必抛 IllegalTransitionError，
@@ -519,9 +520,9 @@ export interface ModelOverrideEvent extends EventEnvelope, WorkflowModelOverride
 /**
  * worker 诊断日志帧（[§2.1 errorLogs 持久化] ADR-0093）。
  *
- * **不参与生命周期状态机**：诊断范围与状态侧正交——fold 显式跳过本类事件（见
+ * **不参与生命周期状态机**：诊断面与状态面正交——fold 显式跳过本类事件（见
  * foldRunEventCheckpoint），故不占 RUN_TRANSITIONS 表行，也不受终态吸收约束（run
- * 终局后迟到的诊断日志不会把 fold 判成坏帧）。唯一消费方 = `errorLogsFromEvents`
+ * 终局后迟到的诊断日志不会把 fold 判成坏帧）。唯一消费面 = `errorLogsFromEvents`
  * 重建（与活体写入同语义：按序追加 + 尾部上限裁剪）。
  */
 export interface WorkerLogEvent extends EventEnvelope { // oe-exempt:20260930:framework:workflow/record 协议契约类型——诊断事件帧（单实现常态，与既有 run 事件族同款豁免）
@@ -562,7 +563,7 @@ export type WorkflowRunEvent =
  * record-events.ts）同构）。DistributiveOmit
  * 使联合逐成员 Omit（保持判别键窄化能力）。
  *
- * 状态机消费方（TransitionTrigger 的事件族）即本形态——seq 是 journal 存储层的
+ * 状态机消费面（TransitionTrigger 的事件族）即本形态——seq 是 journal 存储层的
  * 信封字段，不参与转移裁决；scan 产物（WorkflowRunEvent，含 seq）经结构化子类型
  * 天然兼容本形态（多余属性在非字面量赋值下合法）。
  */
@@ -578,27 +579,27 @@ type DistributiveOmit<T, K extends keyof never> = T extends unknown ? Omit<T, K>
  * 单写者约束（D5；[F1-17] 裁决后按多写点现实登记）：append 的合法写点共三处，
  * 除此之外引擎/读侧一律不写——
  *   1. terminal-actions：dispatchRunTrigger 唯一投递入口（转移事件经
- *      appendTransition 的 journal.append 写入 journal 记录）+ 同模块 appendRunDiagnosticEvent
+ *      appendTransition 的 journal.append 落账）+ 同模块 appendRunDiagnosticEvent
  *      的 worker-log 诊断直写（best-effort 非转移诊断事件）；
  *   2. execution 层 subagent-service.ts persistRunOverride 的 model-override
  *      记账直写（非转移事件进不了转移裁决链，登记理由见 append 方法级注释）；
  *   3. orchestration 层 resume-run.ts appendResumeModelOverride 的 model-override
  *      记账直写（resume 显式 model 参数的统一覆盖记账——F1-26 后续项；同款非转移
  *      直写理由，写序 = run-resumed 转移之后、接管之前，失败走接管回滚围栏）。
- * 引擎侧事件经既有 run 事件通道上报后由写点写入 journal 记录，引擎不直接写 journal。类型层
- * 无法约束调用方，该约束由实装与检查共同保证。写点登记三处保持一致：本接口
- * append 方法级注释 + run-event-journal.ts scanRunEvents 读取侧注释。
+ * 引擎侧事件经既有 run 事件通道上报后由写点落账，引擎不直接写 journal。类型层
+ * 无法约束调用方，该约束由实装与守卫共同保证。写点登记三处保持一致：本接口
+ * append 方法级注释 + run-event-journal.ts scanRunEvents 读面注释。
  */
 export interface RunEventJournal {
   /**
    * 追加一条事件（JSONL 单行），返回落盘的完整事件（含分配的 seq）——调用方据
-   * 此同步构造 v2 终态条目 / 物化派生视图（同一事件的单点载荷源；与 record 侧
+   * 此同步构造 v2 终态条目 / 物化投影（同一事件的单点载荷源；与 record 侧
    * RecordEventStream.append 契约同构）。入参是无 seq 的 input 形态（seq 分配权
    * 在 journal 实装内，构造性单调）；runId 显式传参而非从事件取——仅 run-created
    * 携带 runId，目标文件定位不依赖事件形态。
    *
  * 单写者约束（[F1-17] 裁决后形态——合法写点三处，与接口头注 / run-event-journal
- * .ts scanRunEvents 读取侧注释三处一致）：合法调用方 = terminal-actions 的
+ * .ts scanRunEvents 读面注释三处一致）：合法调用方 = terminal-actions 的
  * dispatchRunTrigger（唯一投递入口——活体链与经 interruptRun /
  * settleRunAccounting 的收编冷路径都经它；resume 的复活转移由 resume-run 在锁
  * 段内经同一入口投递）+ terminal-actions.appendTransition 的 journal.append
@@ -617,8 +618,8 @@ export interface RunEventJournal {
    */
   append(runId: string, event: WorkflowRunEventInput): Promise<WorkflowRunEvent>;
   /**
-   * 顺序扫描某 run 的全部事件（写入序）。消费方：快照派生视图（startedAt /
-   * lastProgressAt 派生）、注册表派生视图（事件流停止 = 待恢复态判读）、恢复对账。
+   * 顺序扫描某 run 的全部事件（写入序）。消费方：快照投影（startedAt /
+   * lastProgressAt 派生）、注册表投影（事件流停止 = 待恢复态判读）、恢复对账。
    * 终局后过保留期的清理（cap + TTL）不改变 scan 语义——清理后返回空流（该
    * run 的 journal 通道消失），消费方按本文件头部「终局证据读序」权威声明降级
    * 采信 state 快照 / manifest。
@@ -674,13 +675,13 @@ export const INITIAL_RUN_LIFECYCLE_STATE: RunLifecycleState = { lifecycle: "crea
 /**
  * 控制事件类型全集（[W2 D2] 死形态清退后 1 个）。
  *
- * 为什么独立于 RUN_EVENT_TYPES：控制事件源于用户/宿主/派生视图判定，不是编排层
+ * 为什么独立于 RUN_EVENT_TYPES：控制事件源于用户/宿主/投影判定，不是编排层
  * 事件流的一帧——驱动转移但不直接落 journal。类型层经 TransitionTrigger 并集
  * 区分两个词表；journal.append 的参数类型（WorkflowRunEventInput）构造性排除控制
- * 事件，控制终局路径需要写入 journal 记录时由调用侧合成 run-settled（见输出动作注释）。
+ * 事件，控制终局路径需要落账时由调用侧合成 run-settled（见输出动作注释）。
  * watchdog-fired 已随 settled-watchdog 本体删除（pi-workflow-run-resource-model
  * 决策 6-D9）；host-died / abandon-elapsed 随 [W2 D2] 死形态清退删除（均无生产
- * 投递点：事件流停止的待恢复判读归注册表派生视图相，被动终局化走 adoptInterruptedRun
+ * 投递点：事件流停止的待恢复判读归注册表投影相，被动终局化走 adoptInterruptedRun
  * → settleRunAccounting 原语，不经状态机控制触发）。
  */
 export const CONTROL_TRIGGER_TYPES = [
@@ -691,7 +692,7 @@ export type ControlTriggerType = (typeof CONTROL_TRIGGER_TYPES)[number];
 
 /**
  * 控制事件判别联合。载荷只带自由文本 reason（诊断用），不带 ts——ts 信封由
- * 调用侧在合成写入 journal 记录事件 / 终局通知时补（transition 纯函数契约，见函数注释）。
+ * 调用侧在合成落账事件 / 终局通知时补（transition 纯函数契约，见函数注释）。
  */
 export type ControlTrigger = { type: "cancel-requested"; reason?: string };
 
@@ -708,7 +709,7 @@ export type TransitionTrigger = WorkflowRunEventInput | ControlTrigger;
  * - journal-append：事件落 journal。触发事件属 journal 词表时 = 事件本身；
  *   控制事件触发的终局转移 = 调用侧合成的 run-settled 事件（cancel →
  *   outcome:cancelled；ts 信封由调用侧补）
- * - manifest-write：终局派生视图——manifest/.state 写 outcome/errorCode（D5-4）
+ * - manifest-write：终局投影——manifest/.state 写 outcome/errorCode（D5-4）
  * - notify：终局通知触发（D7；pending:unregister 随通知闭环）
  *
  * kill-run-topology 已随 D9-2 定点杀链删除（pi-workflow-run-resource-model
@@ -776,7 +777,7 @@ export interface TransitionRule { // oe-exempt:20260929:framework:workflow/recor
  * 通知语义归 resume 编排（U2））。
  */
 export const RUN_TRANSITIONS: readonly TransitionRule[] = [
-  // ── created：创建写入 journal 记录前 ──
+  // ── created：创建落账前 ──
   { from: "created", on: "run-created", next: "running", outputs: ["journal-append"] },
 
   // ── running：call 执行段（多波自环 + agent-settled 二支 + phase 子状态机自环）──
@@ -861,13 +862,13 @@ function resolveTerminalOutcome(rule: TransitionRule, trigger: TransitionTrigger
  * 状态机唯一入口（纯函数）：(当前态, 触发) → (次态, 输出动作)。
  *
  * 纯函数契约：无 IO、无 Date.now / Math.random——ts 信封由调用侧补（构造事件时
- * 打点，控制事件合成 run-settled 写入 journal 记录时打点）。P1b 接线形态：
+ * 打点，控制事件合成 run-settled 落账时打点）。P1b 接线形态：
  * 1. 活体路径：编排点在每个事件/control 触发处调 transition，按 outputs 执行
  *    动作（journal-append → append 或合成 run-settled 后 append；terminal 后
- *    单写者停止向该 run append——terminal × 任意事件 fail-fast 即该纪律的防御机制）；
+ *    单写者停止向该 run append——terminal × 任意事件 fail-fast 即该纪律的守卫）；
  * 2. fold 重放：scan(runId) 逐事件 transition（不传 ctx），终帧落 terminal 或
- *    停在 running（= 派生视图侧 interrupted 判读的输入）；
- * 3. 状态查询走派生视图（事件流 fold），禁止直写状态字段（D5-4）。
+ *    停在 running（= 投影侧 interrupted 判读的输入）；
+ * 3. 状态查询走投影（事件流 fold），禁止直写状态字段（D5-4）。
  *
  * 表外转移抛 {@link IllegalTransitionError}（含当前态 / 事件 / 该态合法事件表，
  * 错误信息可操作）。
@@ -903,13 +904,13 @@ export function transition(
   return { state: nextState, outputs: rule.outputs };
 }
 
-// ── journal fold 循环（派生视图侧共享单源）──────────────────────
+// ── journal fold 循环（投影侧共享单源）──────────────────────
 
 /**
- * 单个 agent call（步骤）的 fold 派生视图行：骨架行 + 终局。
+ * 单个 agent call（步骤）的 fold 投影行：骨架行 + 终局。
  *
  * [W2 D7] 自 runtime events-projection.ts 上收（原 RunAskStepFold）——run 域
- * fold 单源后，runtime 派生视图消费 core fold 的骨架输出，不再自建第二套 fold。
+ * fold 单源后，runtime 投影消费 core fold 的骨架输出，不再自建第二套 fold。
  * [D4] 随事件词 agent-* 更名（ask → agent）。
  */
 export interface RunAskStepFold { // oe-exempt:20260929:framework:workflow/record 协议契约类型——ports 类型契约先行、单实现常态（dev-0.10.5 已验收代码 merge 带入）
@@ -926,25 +927,25 @@ export interface RunAskStepFold { // oe-exempt:20260929:framework:workflow/recor
   /**
    * [可视化 U1，设计 §3.3-D12] 失败尝试累计（agent-retrying 帧驱动——该 call 至今
    * 的失败尝试次数，帧载荷 attempt 单调递增即累计值；无重试 undefined）。runtime
-   * 派生视图透出供 retrying 派生态与 trace attempt 列（shared WorkflowAgentCall.attempts）。
+   * 投影透出供 retrying 派生态与 trace attempt 列（shared WorkflowAgentCall.attempts）。
    */
   attempts?: number;
   /**
    * [可视化 U1，设计 §3.3-D12] 最近一次重试（agent-retrying 帧值——单值快照，只够
    * 最近一次；多轮 attempt 起止只有事件流各帧可重构，workflow-visualization 设计
-   * §3.1-2）。runtime 派生视图透出供 retrying 派生态展示（shared WorkflowAgentCall.lastRetry）。
+   * §3.1-2）。runtime 投影透出供 retrying 派生态展示（shared WorkflowAgentCall.lastRetry）。
    */
   lastRetry?: { attempt: number; backoffMs: number; reason: string };
   /**
    * [可视化 U1，设计 §3.3-D12] token 分项（agent-settled 帧 result.usage 透传——
-   * AgentUsage 分项；result 缺省/usage 缺省 undefined）。runtime 派生视图消费填充
+   * AgentUsage 分项；result 缺省/usage 缺省 undefined）。runtime 投影消费填充
    * shared WorkflowAgentCall 的 inputTokens/outputTokens/turns 三字段（不设嵌套
    * usage 字段——同一信息禁止双轨，u2 冻结裁决）。
    */
   usage?: AgentUsage;
 }
 
-/** 单个 phase 的状态机派生视图行（[D3] pending → running → settled 的 fold 半边）。 */
+/** 单个 phase 的状态机投影行（[D3] pending → running → settled 的 fold 半边）。 */
 export interface RunPhaseFold { // oe-exempt:20260929:framework:workflow/record 协议契约类型——ports 类型契约先行、单实现常态（dev-0.10.5 已验收代码 merge 带入）
   /** phase 名。 */
   phase: string;
@@ -979,7 +980,7 @@ export interface RunPhaseFold { // oe-exempt:20260929:framework:workflow/record 
  * - resume 重放（设计 D3「持久修复通道 = resume 后脚本确定性重放重新执行
  *   phase() 补落事件」）：重放落新 phase-started 重置 settledAt 后，该 phase 的
  *   call 行已在前段流全部落定（缓存回话零新帧）——phase-started 触发本推导即
- *   恢复收束派生视图，消灭「崩溃前已完成的 phase 在 resume 后永不收束」。
+ *   恢复收束投影，消灭「崩溃前已完成的 phase 在 resume 后永不收束」。
  *
  * 取舍（同名义真重入与重放在 phase-started 帧不可区分）：真重入先按已落定旧
  * call 行瞬态推导为收束，首个新 agent-started / 重试帧到达即翻回 running——
@@ -1022,11 +1023,11 @@ function derivePhaseSettlement(
 }
 
 /**
- * 单个 run record 流的派生视图骨架（fold 产物的派生视图半边：run 首帧 + call 步骤行 +
+ * 单个 run record 流的投影骨架（fold 产物的投影半边：run 首帧 + call 步骤行 +
  * phase 状态机 + 中断/复活 + run 终局）。
  *
  * [W2 D7] 自 runtime events-projection.ts 上收（原 RunJournalFold）：runtime
- * 派生视图（projectV2Workflow）读本骨架合成 WorkflowRunRecord，与状态机半边
+ * 投影（projectV2Workflow）读本骨架合成 WorkflowRunRecord，与状态机半边
  * （state/lastSeq）同源于一次 fold 循环。
  */
 export interface RunJournalFold { // oe-exempt:20260929:framework:workflow/record 协议契约类型——ports 类型契约先行、单实现常态（dev-0.10.5 已验收代码 merge 带入）
@@ -1034,33 +1035,33 @@ export interface RunJournalFold { // oe-exempt:20260929:framework:workflow/recor
    * run-created 帧（record 流首帧；undefined = 首帧未达）。argsSummary = 写侧恒写
    * 的调用参数行内小摘要（RunCreatedEvent.argsSummary 透传——overlay header args
    * 摘要消费位，设计 §3.3-D12；args 全文不进 fold，查看经事件流 RPC 截断形态）。
-   * 旧格式行载荷缺失时 undefined（写侧契约恒写，读取侧对缺失放行）。
+   * 旧格式行载荷缺失时 undefined（写侧契约恒写，读取面对缺失放行）。
    */
   created: { runId: string; workflowName: string; argsSummary?: string; ts: number } | undefined;
-  /** call 派生视图（taskIndex → 步骤行）。 */
+  /** call 投影（taskIndex → 步骤行）。 */
   asks: Map<number, RunAskStepFold>;
-  /** phase 状态机派生视图（[D3]，phase 名 → 状态行；phase-started 缺失时按 agent-started 载荷自愈重建）。 */
+  /** phase 状态机投影（[D3]，phase 名 → 状态行；phase-started 缺失时按 agent-started 载荷自愈重建）。 */
   phases: Map<string, RunPhaseFold>;
-  /** 最近一次中断（run-interrupted 帧；未中断 undefined——[D2] 暂停态派生视图）。 */
+  /** 最近一次中断（run-interrupted 帧；未中断 undefined——[D2] 暂停态投影）。 */
   interrupted?: { errorCode?: RunErrorCode; reason?: string; ts: number };
-  /** 最近一次复活（run-resumed 帧；未复活 undefined——[D2] resume 锚点派生视图，D10 预算算式的切段边界之一）。 */
+  /** 最近一次复活（run-resumed 帧；未复活 undefined——[D2] resume 锚点投影，D10 预算算式的切段边界之一）。 */
   resumed?: { reason?: string; host?: string; ts: number };
   /** run-settled 终局（未终态 undefined；terminal 吸收性保证先到帧为准）。 */
   runSettled: { outcome: RunOutcome; errorCode?: RunErrorCode; reason?: string; ts: number } | undefined;
 }
 
 /**
- * fold 检查点：状态机终帧 + seq 水位 + 派生视图骨架（RunJournalFold）。
+ * fold 检查点：状态机终帧 + seq 水位 + 投影骨架（RunJournalFold）。
  *
  * lastSeq = 已接受事件的最高 seq（增量续读 / tail 截断重建后全量重读的去重依据
  * ——W2 通知去重键与 fold 幂等共用的行身份载体，D6「重复行的去重归域 fold」的
  * run 域落点）。全量 fold 与增量 fold（以既有 checkpoint 传入）共用本入口；旧
  * 格式行（无 seq，W1 前）不推进水位（见 foldRunEventFrames 注释）。
  *
- * 骨架半边的消费方 = runtime journal 派生视图（[W2 D7] fold 单源：runtime 的
- * SessionEventProjection 以本 checkpoint 为 per-run tailer 状态，派生视图读
+ * 骨架半边的消费方 = runtime journal 投影（[W2 D7] fold 单源：runtime 的
+ * SessionEventProjection 以本 checkpoint 为 per-run tailer 状态，投影读
  * created/asks/phases/runSettled 合成 WorkflowRunRecord——「只要终帧状态」的
- * core 内消费方（run-state-evidence 清理资格 / 注册表派生视图 / pump 活体 fold）经
+ * core 内消费面（run-state-evidence 清理资格 / 注册表投影 / pump 活体 fold）经
  * foldRunEventFrames 只取 state，骨架半边零成本闲置。
  */
 export interface RunEventFoldCheckpoint extends RunJournalFold { // oe-exempt:20260929:framework:workflow/record 协议契约类型——ports 类型契约先行、单实现常态（dev-0.10.5 已验收代码 merge 带入）
@@ -1079,23 +1080,23 @@ export const INITIAL_RUN_EVENT_FOLD: RunEventFoldCheckpoint = {
 };
 
 /**
- * call 骨架行与 phase 状态机的派生视图推进（纯函数 copy-on-write：命中行克隆改写、
+ * call 骨架行与 phase 状态机的投影推进（纯函数 copy-on-write：命中行克隆改写、
  * 写时整表克隆——initial checkpoint 的 Map 不被变异，重放幂等与「以既有
  * checkpoint 为初值」的调用形态都不产生别名副作用）。非 agent/phase 事件原表透传。
  *
  * call 推进语义（runtime 自建 fold 时代的原语义，[W2 D7] 原样上收 + [D4] 改名）：
- * - agent-started：缺行建骨架行（phase 随帧写入派生视图，无 phase 帧不造键）；有行
+ * - agent-started：缺行建骨架行（phase 随帧落投影，无 phase 帧不造键）；有行
  *   只推进进度边沿（重派发不改 agentName/phase）；
  * - agent-retrying：仅推进进度边沿（缺行 no-op——重试帧不造行）；
  * - agent-settled：缺行建占位行（agentName '(unknown)'——agent-started 缺席的残
- *   形态：状态机不校验 taskIndex 归属，跨 call 错位的合法转移载荷仍可写入 journal 记录；兜底
- *   成行保派生视图不丢终局）；有行推进边沿 + 落终局（后到覆盖）。
+ *   形态：状态机不校验 taskIndex 归属，跨 call 错位的合法转移载荷仍可落账；兜底
+ *   成行保投影不丢终局）；有行推进边沿 + 落终局（后到覆盖）。
  *
  * phase 状态机推进语义（[D3]）：
  * - phase-started：登记 phase 行（startedAt；已 settled 的同名 phase 后到 started
- *   = 新一轮同名义转移——覆盖 settledAt 回到 running 派生视图；[D3 对称自愈] 随后跑
+ *   = 新一轮同名义转移——覆盖 settledAt 回到 running 投影；[D3 对称自愈] 随后跑
  *   推导（derivePhaseSettlement）：resume 重放形态下该 phase 的 call 行已全部
- *   落定 → 立即恢复收束派生视图——「崩溃前已完成的 phase 在 resume 后永不收束」
+ *   落定 → 立即恢复收束投影——「崩溃前已完成的 phase 在 resume 后永不收束」
  *   由此封闭，同名义真重入的瞬态收束见推导函数注释的取舍说明）；
  * - phase-settled：落 settledAt（settledBy "frame"——帧值不参与推导翻回；缺
  *   started 行 = 转移事件缺失窗口的迟到收束帧，按 agent-started 自愈面兜底成行）；
@@ -1124,7 +1125,7 @@ function foldAgentStartedEvent(
       : {
         taskIndex: event.taskIndex,
         agentName: event.agentName,
-        // 剧本归属随帧写入派生视图（W1 D6 / [D3] call 归属快照）；无 phase 帧不造键
+        // 剧本归属随帧落投影（W1 D6 / [D3] call 归属快照）；无 phase 帧不造键
         ...(event.phase !== undefined ? { phase: event.phase } : {}),
         startedAt: event.ts,
         lastProgressAt: event.ts,
@@ -1178,7 +1179,7 @@ function foldAgentSettledEvent(
   const existing = asks.get(event.taskIndex);
   const settled = { outcome: event.outcome, durationMs: event.durationMs, errorCode: event.errorCode, ts: event.ts };
   // [可视化 U1，设计 §3.3-D12] token 分项（result.usage 透传——AgentUsage 分项；
-  // result/usage 缺省 undefined，runtime 派生视图消费填充 shared 三字段）
+  // result/usage 缺省 undefined，runtime 投影消费填充 shared 三字段）
   const usage = event.result?.usage;
   const nextAsks = new Map(asks);
   nextAsks.set(
@@ -1193,7 +1194,7 @@ function foldAgentSettledEvent(
       : {
         taskIndex: event.taskIndex,
         // agent-settled 先于 started 的残形态：骨架行缺 agentName，用占位名
-        // 成行（状态位仍可推算）
+        // 成行（状态位仍可投影）
         agentName: "(unknown)",
         startedAt: event.ts,
         lastProgressAt: event.ts,
@@ -1219,7 +1220,7 @@ function foldPhaseStartedEvent(
   let nextPhases = new Map(phases);
   nextPhases.set(event.phase, { phase: event.phase, startedAt: event.ts });
   // [D3 对称自愈] resume 重放形态：新 phase-started 重置后，该 phase 的 call
-  // 行已在前段流全部落定（缓存回话零新帧）→ 立即恢复收束派生视图
+  // 行已在前段流全部落定（缓存回话零新帧）→ 立即恢复收束投影
   nextPhases = derivePhaseSettlement(asks, nextPhases, event.phase);
   return { asks, phases: nextPhases };
 }
@@ -1265,15 +1266,15 @@ function applyAskFoldEvent(
 /**
  * fold 检查点入口（事件流 + 既有检查点 → 新检查点）：全量 fold 与增量 fold
  * （tail 续读 / 截断重建后全量重读，以既有 checkpoint 传入）共用本函数——
- * tail 消费方（壳 stall watchdog / runtime 派生视图）的增量接续面。
+ * tail 消费方（壳 stall watchdog / runtime 投影）的增量接续面。
  *
- * 产出 = 状态半边（state/lastSeq）+ 派生视图骨架半边（created/asks/phases/
- * interrupted/resumed/runSettled，[W2 D7] fold 单源：runtime journal 派生视图消费
+ * 产出 = 状态半边（state/lastSeq）+ 投影骨架半边（created/asks/phases/
+ * interrupted/resumed/runSettled，[W2 D7] fold 单源：runtime journal 投影消费
  * 骨架，不再自建第二套 fold）。骨架写入点在状态机转移裁决之后——坏帧行整体
  * 不写，骨架与状态同停在最近一致态。纯函数：初值 checkpoint（含 asks/phases
  * Map）不被变异（applyAskFoldEvent 写时克隆）。
  *
- * seq 检查（幂等语义，与 record 侧 foldRecordEvents 同构）：
+ * seq 守卫（幂等语义，与 record 侧 foldRecordEvents 同构）：
  * - seq ≤ 既有水位的事件行按重放跳过——tail 截断/重建后的幂等全量重读（D6
  *   原语）靠它构造性去重，重读不产生重复应用；
  * - seq 跳号（gap）宽容放行——单写者 append-only 下 gap 仅在外部编辑时出现；
@@ -1282,7 +1283,7 @@ function applyAskFoldEvent(
  *   递增，去重键语义不受污染）。
  *
  * 坏帧（历史帧与当前转移表不兼容）经 onBrokenFrame 出声后保守停在最近一致态，
- * 不炸派生视图——与 scan 侧坏行容忍同一精神。warn 文案与 logger 归消费方注入。
+ * 不炸投影——与 scan 侧坏行容忍同一精神。warn 文案与 logger 归消费方注入。
  */
 export function foldRunEventCheckpoint(
   events: readonly WorkflowRunEvent[],
@@ -1291,13 +1292,13 @@ export function foldRunEventCheckpoint(
 ): RunEventFoldCheckpoint {
   let checkpoint = initial ?? INITIAL_RUN_EVENT_FOLD;
   for (const event of events) {
-    // 存量行的 seq 运行时缺失（类型必填是写入契约；读取侧对缺失放行，见
+    // 存量行的 seq 运行时缺失（类型必填是写入契约；读取面对缺失放行，见
     // isWorkflowRunEventLine 注释）——typeof 收窄后统一处理两格式。
     const seq = event.seq;
     if (typeof seq === "number" && seq <= checkpoint.lastSeq) {
       continue;
     }
-    // 诊断事件（worker-log）不进状态机：诊断范围与状态侧正交，且终态是吸收态——若让
+    // 诊断事件（worker-log）不进状态机：诊断面与状态面正交，且终态是吸收态——若让
     // 它走 transition，run 终局后迟到的诊断日志会把 fold 判成坏帧。水位仍推进，避免
     // tail 消费方每轮重读同一批诊断行。
     // 记账事件（model-override）同款跳过（subagent-model-switch §6.6①）：宿主覆盖
@@ -1316,7 +1317,7 @@ export function foldRunEventCheckpoint(
         lastSeq: typeof seq === "number" ? seq : checkpoint.lastSeq,
         // 骨架半边（[W2 D7]）：状态机转移合法才推进——坏帧行整体不写，骨架与
         // 状态同停在最近一致态。argsSummary 为写侧恒写载荷的透传（[可视化 U1，
-        // 设计 §3.3-D12]；旧格式行缺失即 undefined，读取侧放行）。
+        // 设计 §3.3-D12]；旧格式行缺失即 undefined，读取面放行）。
         created:
           event.type === "run-created"
             ? { runId: event.runId, workflowName: event.workflowName, argsSummary: event.argsSummary, ts: event.ts }
@@ -1345,10 +1346,10 @@ export function foldRunEventCheckpoint(
 }
 
 /**
- * journal fold 循环（事件流 → 终帧状态，派生视图侧共享单源）：逐事件 transition
+ * journal fold 循环（事件流 → 终帧状态，投影侧共享单源）：逐事件 transition
  * （不传 ctx——fold 契约），坏帧保守停在最近一致态。内部委托
- * foldRunEventCheckpoint（seq 检查单点），只推算 state——「只要终帧状态」的
- * 消费方（run-state-evidence 清理资格 / 注册表派生视图 / pump 活体 fold）。
+ * foldRunEventCheckpoint（seq 守卫单点），只投影 state——「只要终帧状态」的
+ * 消费面（run-state-evidence 清理资格 / 注册表投影 / pump 活体 fold）。
  *
  * 增量接续（需要水位的 tail 消费方）走 foldRunEventCheckpoint。
  */
@@ -1364,7 +1365,7 @@ export function foldRunEventFrames(
  *
  * 语义与活体写入单点同构（worker-message-pump 的 appendErrorLogs）：按事件序追加 +
  * 尾部上限裁剪（`MAX_ERROR_LOGS`）。重启后折叠 record 流即可恢复诊断日志——此前
- * errorLogs 无任何持久化侧，重启即空。
+ * errorLogs 无任何持久面，重启即空。
  */
 export function errorLogsFromEvents(events: readonly WorkflowRunEvent[]): WorkerLogEntry[] {
   const logs: WorkerLogEntry[] = [];
@@ -1378,7 +1379,7 @@ export function errorLogsFromEvents(events: readonly WorkflowRunEvent[]): Worker
  * 事件流 → 最新模型覆盖记账值（subagent-model-switch §6.2 折叠语义：生效覆盖值 =
  * 最新一条，覆盖旧覆盖值不叠加——设计不变量 2；无覆盖 undefined）。
  *
- * 单点辅助，直接调用点枚举（消费方扩大时同步本清单，锚 grep
+ * 单点辅助，直接调用面枚举（消费面扩大时同步本清单，锚 grep
  * `latestModelOverride(` 生产调用点）：① 壳侧 foldRecordStreamToRun 挂
  * WorkflowRunMeta.modelOverride（重启重建的派生视图）；② core resume-run 生效
  * 模型三档回落的中档（决策七，resume-run.ts）；③ U4b 派发侧内存表 miss 重建
@@ -1403,7 +1404,7 @@ export function latestModelOverride(
 // ── journal 实装（createRunEventJournal——本模块唯一 IO 边）────
 
 // ── [D1 Class B2] journal 落盘实现已迁 execution/persistence/run-event-journal.ts ──
-// 本模块保留 re-export（orchestration 消费方与 barrel 不变）；实现反向 import 本模块
+// 本模块保留 re-export（orchestration 消费面与 barrel 不变）；实现反向 import 本模块
 // 的类型（类型边擦除，不构成值依赖环）。
 export {
   createRunEventJournal,

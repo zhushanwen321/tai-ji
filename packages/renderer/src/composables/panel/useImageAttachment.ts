@@ -1,8 +1,9 @@
 /**
  * 图片粘贴附件处理（Cmd+V/Ctrl+V 统一通路）。
  *
- * 职责单一：把剪贴板 image blob 转成 base64，经 writeSessionImage IPC 落地到
- * <getDataDir>/attachments/<sessionId>/（持久化），返回联合结果（badge / text 降级）
+ * 职责单一：把剪贴板 image blob 转成 base64，经 writeSessionImage IPC 落地持久化
+ * （路径由 runtime SSOT 推导：<dataDir>/ext-sessions/<sessionId>/attachments/，
+ * getAttachmentsDir——shared/paths.ts），返回联合结果（badge / text 降级）
  * 由调用方（useContenteditableInput.onPaste / useComposerDragDrop.onDrop）决定如何写入 DOM
  * ——本 composable 不碰 DOM。
  *

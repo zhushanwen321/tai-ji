@@ -48,16 +48,22 @@ function identityView(m: RecordManifest) {
   }
 }
 
-describe('跨包集成：subagent-core rebuildIndexes 重建 manifest → session-reader 派生视图不降级', () => {
+describe('跨包集成：subagent-core rebuildIndexes 重建 manifest → session-reader 投影不降级', () => {
+  let dataDir: string
   let agentDir: string
   let sessionsDir: string
   let recordsDir: string
   let childFile: string
 
   beforeEach(() => {
-    agentDir = fs.mkdtempSync(path.join(os.tmpdir(), 'sr-rebuild-dualwrite-'))
-    sessionsDir = getSubagentSessionDir(agentDir, agentDir)
-    recordsDir = getSubagentRecordsDir(agentDir, agentDir)
+    // 生产拓扑复刻（[session-store-layout-inversion 域 9]）：agentDir = <dataDir>/agent
+    //（session-reader 的 agentDir 语义），subagent-core 写侧经新公式落存储树
+    // <dataDir>/ext-sessions/<rootSid>/subagents/——listRecordManifests 双根扫描的新根
+    //（dirname(agentDir)/ext-sessions）与写侧落点相遇
+    dataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'sr-rebuild-dualwrite-'))
+    agentDir = path.join(dataDir, 'agent')
+    sessionsDir = getSubagentSessionDir(ROOT_SESSION, dataDir)
+    recordsDir = getSubagentRecordsDir(ROOT_SESSION, dataDir)
     fs.mkdirSync(sessionsDir, { recursive: true })
     fs.mkdirSync(recordsDir, { recursive: true })
 
@@ -95,7 +101,7 @@ describe('跨包集成：subagent-core rebuildIndexes 重建 manifest → sessio
   })
 
   afterEach(() => {
-    fs.rmSync(agentDir, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 })
+    fs.rmSync(dataDir, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 })
   })
 
   it('S5③: manifest 删除 → rebuildIndexes 重建 → identity 派生视图字段集前后一致（双写字段在场）', async () => {
@@ -119,7 +125,8 @@ describe('跨包集成：subagent-core rebuildIndexes 重建 manifest → sessio
       closedReason: 'gc' as const,
       endedAt: 2000,
     })
-    const writer = new RecordStore(sessionsDir, undefined, undefined, recordsDir)
+    // [u-subagent dir 晚绑定] RecordStore 构造 = 目录取值函数（非目录字符串）
+    const writer = new RecordStore(() => sessionsDir, undefined, undefined, () => recordsDir)
     expect(writer.markFinalized(record, 'gc')).toBe(true)
     writer.dispose()
 
@@ -138,7 +145,7 @@ describe('跨包集成：subagent-core rebuildIndexes 重建 manifest → sessio
     for (const f of fs.readdirSync(recordsDir)) fs.rmSync(path.join(recordsDir, f))
     expect((await listRecordManifests(agentDir)).filter((m) => m.id === 'sa-dw')).toHaveLength(0)
 
-    const rebuilder = new RecordStore(sessionsDir, undefined, undefined, recordsDir)
+    const rebuilder = new RecordStore(() => sessionsDir, undefined, undefined, () => recordsDir)
     expect(rebuilder.rebuildIndexes()).toBe(1)
     rebuilder.dispose()
 
@@ -159,7 +166,7 @@ describe('跨包集成：subagent-core rebuildIndexes 重建 manifest → sessio
   it('惰性通道：查询结果（collectRecords）补建的 manifest 同样可被本包读取派生视图', async () => {
     // 不经终态写侧（无 manifest 初始形态）：磁盘 record 只有 identity + 无 sidecar
     // → 查询触发惰性补建。
-    const store = new RecordStore(sessionsDir, undefined, undefined, recordsDir)
+    const store = new RecordStore(() => sessionsDir, undefined, undefined, () => recordsDir)
     expect(store.collectRecords(10).map((r) => r.id)).toContain('sa-dw')
     store.dispose()
 

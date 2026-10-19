@@ -99,7 +99,7 @@ describe("[collect 退役] 存量 entry 读侧检查 + entry-born orphan 收编�
   beforeEach(() => {
     for (const k of ENV_KEYS_TO_STRIP) delete process.env[k];
     agentDir = fs.mkdtempSync(path.join(os.tmpdir(), "core-sync-recovery-"));
-    fs.mkdirSync(getSubagentSessionDir(agentDir, agentDir), { recursive: true });
+    fs.mkdirSync(getSubagentSessionDir(ROOT_SESSION, agentDir), { recursive: true });
     mainFile = path.join(agentDir, "main-session.jsonl");
   });
 
@@ -157,7 +157,7 @@ describe("[collect 退役] 存量 entry 读侧检查 + entry-born orphan 收编�
    *  appendModelChange 初值，session_start hook 的 identity 随后），readIdentityHeader
    *  解析 identity 前途经的 model_change 产出 light 重建的 rec.model。 */
   function writeChildSessionFile(recordId: string, task: string, headModel?: string): string {
-    const childFile = path.join(getSubagentSessionDir(agentDir, agentDir), `${recordId}.jsonl`);
+    const childFile = path.join(getSubagentSessionDir(ROOT_SESSION, agentDir), `${recordId}.jsonl`);
     const ts = new Date(1000).toISOString();
     const modelChangeLine =
       headModel === undefined
@@ -313,10 +313,10 @@ describe("[collect 退役] 存量 entry 读侧检查 + entry-born orphan 收编�
     // derivedManifestRecord 派生视图手写（批时代 barrier 的磁盘遗留形态）。
     const pmFull = memberRecord({ id: "sa-pm", sessionFile: childFile, status: "idle", stopReason: "completed", result: "p-manifest full result" });
     seedRecord(pmFull);
-    const manifestFile = path.join(getSubagentRecordsDir(agentDir, agentDir), "sa-pm.json");
+    const manifestFile = path.join(getSubagentRecordsDir(ROOT_SESSION, agentDir), "sa-pm.json");
     // records/ 目录在 v1 写点（reportSubagentRecord）删除后不再由种子隐式创建——
     // manifest 是手写磁盘遗留形态，目录显式自建。
-    fs.mkdirSync(getSubagentRecordsDir(agentDir, agentDir), { recursive: true });
+    fs.mkdirSync(getSubagentRecordsDir(ROOT_SESSION, agentDir), { recursive: true });
     fs.writeFileSync(
       manifestFile,
       JSON.stringify(derivedManifestRecord(pmFull), null, 2),
@@ -327,8 +327,8 @@ describe("[collect 退役] 存量 entry 读侧检查 + entry-born orphan 收编�
     // 模拟重启重建：全新 RecordStore + ManifestStore（内存缓存零残留），manifest 存在时
     const freshStore = () =>
       new RecordStore(
-        getSubagentSessionDir(agentDir, agentDir),
-        new ManifestStore(getSubagentRecordsDir(agentDir, agentDir)),
+        () => getSubagentSessionDir(ROOT_SESSION, agentDir),
+        new ManifestStore(() => getSubagentRecordsDir(ROOT_SESSION, agentDir)),
       );
     const withManifest = freshStore().collectRecords(100, "all", ROOT_SESSION);
     const pm = withManifest.find((r) => r.id === "sa-pm");

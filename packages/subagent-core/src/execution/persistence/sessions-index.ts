@@ -4,8 +4,9 @@
 //
 // 背景：RecordStore 冷启动首扫需逐个探测 sessions/*.jsonl 的 identity（头部 64KB →
 // 尾部 64KB → 全文 fallback）。session 数量大时该探测是冷扫描的主要成本。本模块把
-// 「本目录的探测结论」（per-file identity 或负标记）持久化到 sessionsDir 的兄弟位置
-// （<enc> 段内），下次进程/实例首扫直接用索引条目构造缓存条目（零内容读取）。
+// 「本目录的探测结论」（per-file identity 或负标记）持久化到 sessionsDir 的父目录
+// （subagent 树根段 `<root>/<rootSessionId>/subagents/`，与 sessions/ 同级），下次
+// 进程/实例首扫直接用索引条目构造缓存条目（零内容读取）。
 //
 // 语义：
 //   - 读侧（loadIndex）永不抛：文件缺失/JSON 损坏/结构不符/版本低 → 空索引（= 今天的
@@ -259,14 +260,14 @@ type ValidIndexTop = {
 /** 读索引文件文本。读失败 → null：ENOENT = 正常首跑保持静默；其余读失败（EACCES 等
  * 长期权限异常）warn——索引缺失会被当作「无缓存」全量重扫，权限类异常不会自己消失，
  * 需要可诊断信号区分「首跑无缓存」与「缓存读不到」。 */
-function readIndexFile(indexPath: string, encDir: string): string | null {
+function readIndexFile(indexPath: string, indexDir: string): string | null {
   try {
     return fs.readFileSync(indexPath, "utf-8");
   } catch (err) {
     const code = errorCodeOf(err);
     if (code !== "ENOENT") {
       logger.warn("[subagents] sessions-index read failed, fallback to empty index and rescan", {
-        detail: { path: indexPath, dir: encDir, code },
+        detail: { path: indexPath, dir: indexDir, code },
       });
     }
     return null;
@@ -337,7 +338,8 @@ function collectValidEntries(
 }
 
 /**
- * 读取指定目录（<enc> 段）的 sessions-index.json。永不抛：
+ * 读取指定目录（subagent 树根段 `<root>/<rootSessionId>/subagents/`，即 sessionsDir
+ * 的父目录）的 sessions-index.json。永不抛：
  *   - 文件不存在/读失败/JSON.parse 失败/顶层结构不符/版本低于自身
  *     → { entries: 空 Map, higherVersion: false }（空索引 = 今天的全量行为）
  *   - 版本高于自身 → { entries: 空 Map, higherVersion: true }
@@ -346,11 +348,11 @@ function collectValidEntries(
  *
  * 只读精确路径 INDEX_FILENAME：.tmp. 残留文件不匹配文件名，天然被忽略。
  */
-export function loadIndex(encDir: string): LoadedSessionsIndex {
+export function loadIndex(indexDir: string): LoadedSessionsIndex {
   const empty: LoadedSessionsIndex = { entries: new Map(), higherVersion: false };
-  const indexPath = path.join(encDir, INDEX_FILENAME);
+  const indexPath = path.join(indexDir, INDEX_FILENAME);
 
-  const raw = readIndexFile(indexPath, encDir);
+  const raw = readIndexFile(indexPath, indexDir);
   if (raw === null) return empty;
 
   const parsed = parseIndexJson(raw, indexPath);
@@ -390,8 +392,8 @@ export function loadIndex(encDir: string): LoadedSessionsIndex {
  * 失败向上抛——RecordStore 的 flushIndexAfterScan 以 fire-and-forget .catch 消费
  *（写失败不影响任何扫描结果，恢复 dirty 待下轮过窗重试）。
  */
-export async function saveIndex(encDir: string, data: SessionsIndexData): Promise<void> {
-  const filePath = path.join(encDir, INDEX_FILENAME);
+export async function saveIndex(indexDir: string, data: SessionsIndexData): Promise<void> {
+  const filePath = path.join(indexDir, INDEX_FILENAME);
   const file: SessionsIndexFile = {
     version: INDEX_VERSION,
     pid: process.pid,

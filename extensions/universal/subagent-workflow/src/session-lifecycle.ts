@@ -40,14 +40,13 @@ import {
 import { IDENTITY_CUSTOM_TYPE, type SubagentIdentityData } from "@zhushanwen/subagent-core";
 import type { ExecutionMode } from "@zhushanwen/subagent-core";
 import { startEngineJournalGcTimer } from "@zhushanwen/subagent-core";
-import { resolvePiSessionScopedDir } from "@zhushanwen/subagent-core";
-// [W1 / D5] session_start 兜底触发点的统一保留维护轮：入口 + record 域目录锚
-// （getSubagentRecordsDir 布局 + ENV_ROOT_CWD 贯穿 env 名单源）+ state 目录分量
-// 单源 STATE_DIR_NAME——全部经 barrel 消费（壳生产消费纪律）。
+// [W1 / D5] session_start 兜底触发点的统一保留维护轮：入口 + 两域目录锚——run 域 =
+// resolvePiWorkflowRunsDir（分区键 rootSessionId，布局单源在 core），record 域 =
+// getSubagentRecordsDir（同分区键）；全部经 barrel 消费（壳生产消费纪律）。
 import { reapOrphanRuns, runRetentionMaintenanceRound } from "@zhushanwen/subagent-core";
 import { getSubagentRecordsDir } from "@zhushanwen/subagent-core";
-import { ENV_ROOT_CWD } from "@zhushanwen/subagent-core";
-import { STATE_DIR_NAME } from "@zhushanwen/subagent-core";
+import { listWorkflowRunsDirs, resolvePiWorkflowRunsDir } from "@zhushanwen/subagent-core";
+import { ENV_ROOT_SESSION_ID } from "@zhushanwen/subagent-core";
 // workflow 族 customType 词表单源（workflow-record 现役 + workflow-state-link legacy
 // 指针）：引用集三代解析的判别字面量经 barrel 消费，勿手抄。
 import {
@@ -144,20 +143,34 @@ function resolveMainSessionFileById(sessionId: string): string | undefined {
 }
 
 /**
- * workflow 域 per-session state 目录探测（随迁为 module 私有，唯一消费方是随迁块）。
+ * [session-store-layout-inversion D2/D3] workflow 域 run 状态目录（session 存储树内
+ * `<root>/<rootSessionId>/workflow/runs/`）——分区键 = rootSessionId，目录绑定 session
+ * 生命周期（/new /resume 换 sid 须跟切，record 随整树回收）。
  *
- * [已知限制·登记] slug 锚 process.cwd()（进程 cwd）而非 session cwd：pi CLI 在
- * 目录 B resume cwd 为 A 的 session 时，新 run 的 record 事件流落 B 的 slug
- * 目录、旧 run 的在 A——GC/retention sweep（core 同源推导）读不到旧 run 的磁盘
- * 足迹，兜底失效。主数据不受影响（权威 entry 在 session 文件里，跨 cwd 可重建）。
- * 布局单源在 core resolvePiSessionScopedDir（workflow-state-root.ts）——修复改锚
- * 只动 core 单点，本薄消费自动跟随。taiji 桌面场景（spawn cwd 恒等于 session
- * cwd）不触发，仅裸 pi CLI 的跨目录 resume 触发，故登记不改。
+ * 旧形态（slug 探测 `<agentDir>/sessions/<cwd-slug>/workflow-state/`，已知限制 =
+ * slug 锚 process.cwd() 而非 session cwd）随布局反转退役——cwd 分区键消除后
+ * 「跨目录 resume 读写错位」的限制一并消失，登记的限制无需再保留。
+ *
+ * 分区键取值与 core SessionBaselines.initSession 同式（env 贯穿优先 → 本 session id
+ * 兜底）：子进程经 PI_SUBAGENT_ROOT_SESSION_ID 落到 ROOT 树，根进程 = 自己的 sid。
  */
-function resolveSessionDir(): string {
-  // F2：agentDir 走 pi SDK 活源注入（实例隔离）；slug + 探测布局单源在 core。
-  return resolvePiSessionScopedDir({ agentDir: getAgentDir() });
+export function resolveRootSessionId(ctx: ExtensionContext): string {
+  const envRoot = process.env[ENV_ROOT_SESSION_ID];
+  return envRoot !== undefined && envRoot !== "" ? envRoot : ctx.sessionManager.getSessionId();
 }
+
+function resolveWorkflowRunsDir(ctx: ExtensionContext): string {
+  return resolvePiWorkflowRunsDir(resolveRootSessionId(ctx));
+}
+
+/**
+ * session 存储树根的 state 目录触发点（孤儿对账 / 保留维护轮的枚举对象）。
+ *
+ * [session-store-layout-inversion D3] 旧形态枚举 `<agentDir>/sessions/<slug>/workflow-state/`
+ * 全目录 + agentDir 根回退；新形态枚举 `<root>/` 一级 sid 目录的 workflow/runs/。
+ * 枚举实装单源在 core listWorkflowRunsDirs（extension 不 import @taiji/shared——
+ * 包边界，布局公式经 core barrel 消费）。
+ */
 
 // ── [裁决点 7] 存活 session 引用集采集（壳侧注入点，core 不 import pi SDK）──────
 //
@@ -328,11 +341,11 @@ export interface SessionLifecycleDeps {
    */
   worktreeManager?: Pick<WorktreeManager, "scan">;
   /**
-   * per-session run store 工厂（随迁块 5）。默认 = new JsonlRunStore({ sessionDir, pi, ctx })
+   * per-session run store 工厂（随迁块 5）。默认 = new JsonlRunStore({ runsDir, pi, ctx })
    *  （per-session 新建为现状设计：store 生命周期与 session 等同，D-008/F-4）。
    * 测试注入 fake 以控制 loadAll 行为（kill-9 恢复分支）。
    */
-  createRunStore?: (sessionDir: string, pi: ExtensionAPI, ctx: ExtensionContext) => JsonlRunStore;
+  createRunStore?: (runsDir: string, pi: ExtensionAPI, ctx: ExtensionContext) => JsonlRunStore;
   /**
    * [skill-reload D4] adoption 失败处置回调（组合根注入）：terminate adopted running
    * runs（notifyDone: true——用户可见）+ 移除 sessionState 条目。terminate 依赖的
@@ -363,7 +376,7 @@ export interface SessionLifecycleResult {
   sessionId: string;
   store: JsonlRunStore;
   runs: Map<string, WorkflowRun>;
-  sessionDir: string;
+  runsDir: string;
   /** D-008 per-session SAR（subagentService 委托目标） */
   runner: SubprocessAgentRunner;
   /** session 上下文（notifyDone 需要 GuiContext） */
@@ -524,7 +537,7 @@ async function runProcessLevelMaintenance(
     // 子代理会话文件（*.jsonl / sidecar / manifest / *.events）不在本维护面——回收归
     // 删主会话级联（runtime session-content-cascade，2026-10-12 裁决）。
     oncePerProcess("subagent-workflow:engine-journal-gc", () =>
-      startEngineJournalGcTimer(agentDir));
+      startEngineJournalGcTimer());
   } catch (err) {
     logger.warn("[subagents] engine journal gc failed", {
       reason: toErrorMessage(err),
@@ -577,21 +590,20 @@ async function runProcessLevelMaintenance(
   }
 
   // [W1 / D5] session_start 兜底触发：统一保留维护轮（冷启动即清——进程首启
-  // 无任何新写时的清理机会，覆盖「崩溃后重开的会话」历史遗留）。run 域目录锚
-  // = resolveSessionDir 同源（与 JsonlRunStore 落盘同布局）；record 域目录锚 =
-  // getSubagentRecordsDir(agentDir, rootCwd)，rootCwd 推导与 SubagentService 构造点
-  // （SessionBaselines）同式：env 贯穿 ?? ctx.cwd 兜底，env 名单源 ENV_ROOT_CWD——
-  // enc 段不漂移（sessions 与 records 两目录同源不变量）。进程级维护幂等，
-  // oncePerProcess 检查防双跑；/resume /fork 同进程复用时跳过（record-only 会话
-  // 的持续累积由 record 首写触发点 RecordStore.register 覆盖）。
+  // 无任何新写时的清理机会，覆盖「崩溃后重开的会话」历史遗留）。两域目录锚同为
+  // rootSessionId 分区（[session-store-layout-inversion D2/D3]）：run 域 =
+  // resolveWorkflowRunsDir（`<root>/<rootSid>/workflow/runs/`），record 域 =
+  // getSubagentRecordsDir(同 rootSid)（`<root>/<rootSid>/subagents/records/`）——
+  // 两目录同树同键，否则同 run 的 journal 与 record 分落两棵树、GC 互相找不到。
+  // 进程级维护幂等，oncePerProcess 检查防双跑；/resume /fork 同进程复用时跳过
+  // （record-only 会话的持续累积由 record 首写触发点 RecordStore.register 覆盖）。
   try {
     await oncePerProcess("subagent-workflow:retention-maintenance-round", async () => {
-      const envRootCwd = process.env[ENV_ROOT_CWD];
-      const rootCwd = envRootCwd && envRootCwd !== "" ? envRootCwd : ctx.cwd;
+      const rootSessionId = resolveRootSessionId(ctx);
       await runRetentionMaintenanceRound(
         {
-          stateDir: path.join(resolveSessionDir(), STATE_DIR_NAME),
-          recordsDir: getSubagentRecordsDir(agentDir, rootCwd),
+          stateDir: resolvePiWorkflowRunsDir(rootSessionId),
+          recordsDir: getSubagentRecordsDir(rootSessionId),
         },
         {},
         {
@@ -604,32 +616,17 @@ async function runProcessLevelMaintenance(
       // 壳侧注入点（core 不 import pi SDK——全池 session 文件流式扫描，v2 注册
       // 条目 ∪ v1 快照条目 ∪ pre-W17 link 指针三代解析的并集）。同维护轮触发点、
       // 同 oncePerProcess 检查（幂等整轮）；宽限窗缺省 7 天（env 可调）。
-      // 触发范围 = 全部 state 目录（对齐 core pi-host-run-store 枚举口径：agentDir
-      // 根回退 + sessions/<slug>/workflow-state 全目录 + 本 session 锚定目录）——
-      // 「引用 session 全删的目录」的残留 run 对本 session 维护轮结构性可达，判定
-      // 与删除判据归 core reapOrphanRuns，本处只做目录枚举。引用集预采集一次复用
-      // 全部目录（同轮同快照，逐目录重复全池扫描无增益）；登记文件
-      // （orphan-run-reap.json）落各自 stateDir，多目录天然隔离。
-      const stateDirs = new Set<string>([
-        path.join(resolveSessionDir(), STATE_DIR_NAME),
-        path.join(agentDir, STATE_DIR_NAME),
-      ]);
-      try {
-        for (const ent of fs.readdirSync(path.join(agentDir, "sessions"), { withFileTypes: true })) {
-          if (ent.isDirectory()) {
-            stateDirs.add(path.join(agentDir, "sessions", ent.name, STATE_DIR_NAME));
-          }
-        }
-      } catch (err) {
-        // sessions 根不可枚举：ENOENT = 从未落盘（首次运行形态），仅保留上方两
-        // 目录锚；非 ENOENT（EACCES/EIO 等真 IO 故障）debug 留痕不放大——枚举
-        // 缺侧 = 少扫目录（宁保留方向，宽限窗兜底），对齐读错分通道纪律。
-        if (!isEnoent(err)) {
-          logger.debug(
-            `[subagent-workflow] sessions 根目录枚举失败，state 目录触发范围缺失：${toErrorMessage(err)}`,
-          );
-        }
-      }
+      // 触发范围 = session 存储树内全部 runs 目录（core listWorkflowRunsDirs 枚举，
+      // 与 core pi-host-run-store 同一单源——「引用 session 全删的目录」的残留 run
+      // 对本 session 维护轮结构性可达），判定与删除判据归 core reapOrphanRuns，本处
+      // 只做目录枚举。引用集预采集一次复用全部目录（同轮同快照，逐目录重复全池
+      // 扫描无增益）；登记文件（orphan-run-reap.json）落各自 stateDir，多目录天然
+      // 隔离。枚举读错分通道 = core listWorkflowRunsDirs 契约原样消费（树根 ENOENT
+      // 空集在函数内消化；EACCES/EIO 真故障上抛——静默折叠成空集会让持续 IO 故障
+      // 伪装成「0 个 run 待对账」，与同文件 collectAliveWorkflowRunReferences 同一口径）。
+      // 此处不接故障：真故障沿外层 catch warn 留痕并跳过本轮对账段（宁保留方向
+      // 不变；oncePerProcess 失败不落缓存，下轮触发可重试）。
+      const stateDirs = await listWorkflowRunsDirs();
       // 引用集惰性单次采集（同轮同快照，逐目录重复全池扫描无增益）：promise 在
       // core reapOrphanRuns 的 await 表达式内才创建——采集器上抛（真 IO 故障，
       // 读错分通道）时拒绝被该 await 的 try/catch 即时接住，不产生提前创建导致的
@@ -676,16 +673,16 @@ interface SessionRunState {
  * （storeHealthy=false 停初始化）是宿主职责，core 原样上抛、这里 catch 兜住。
  */
 async function createSessionRunState(
-  sessionDir: string,
+  runsDir: string,
   pi: ExtensionAPI,
   ctx: ExtensionContext,
   deps: SessionLifecycleDeps,
   opts: { skipRecovery: boolean },
 ): Promise<SessionRunState> {
   const store = deps.createRunStore
-    ? deps.createRunStore(sessionDir, pi, ctx)
+    ? deps.createRunStore(runsDir, pi, ctx)
     : new JsonlRunStore({
-        sessionDir,
+        runsDir,
         pi,
         ctx,
       });
@@ -910,8 +907,8 @@ export async function setupSessionLifecycle(
   }
 
   // ── workflow 域：per-session store + runs + kill-9 恢复（随迁块 5）──
-  const sessionDir = resolveSessionDir();
-  const { store, runs, storeHealthy } = await createSessionRunState(sessionDir, pi, ctx, deps, {
+  const runsDir = resolveWorkflowRunsDir(ctx);
+  const { store, runs, storeHealthy } = await createSessionRunState(runsDir, pi, ctx, deps, {
     skipRecovery: isReload,
   });
 
@@ -925,7 +922,7 @@ export async function setupSessionLifecycle(
     sessionId,
     store,
     runs,
-    sessionDir,
+    runsDir,
     runner,
     ctx,
     storeHealthy,
