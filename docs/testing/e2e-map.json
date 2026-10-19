@@ -2821,6 +2821,45 @@
       "owner": "extensions/universal/network-proxy",
       "authority": "docs/TEST-STRATEGY.md#e2e-资产归宿纪律三态-r1r2r3",
       "note": "与 E2E-NETPROXY-01 拆分登记同一 asset 的 on-pi-bump 触发范围（trigger 单值纪律，见 _meta.fields.trigger；E2E-EQUIV-02/03/04 先例）。pi 升级后 FAIL 的处置路径登记于 docs/TROUBLESHOOTING.md「LLM 网络代理分流失效」。"
+    },
+    {
+      "id": "E2E-MERGEPIPE-01",
+      "summary": "merge 管线门禁判定脚本轨：conclusion 结构性判定（null=未完成等待 / fail 词表大小写归一）+ 等待编排 + Dependabot 过滤 + 状态文件与 workspace 根定位——历史事故形态（PR #45 部分结论未出穿透等）fixture 锁定",
+      "scope": [
+        "scripts/merge/**",
+        "scripts/__tests__/merge-gate.test.mjs",
+        "scripts/__tests__/merge-state.test.mjs",
+        "scripts/__tests__/merge-wait-for-ci.test.mjs"
+      ],
+      "layer": "L1",
+      "assets": [
+        {
+          "kind": "script",
+          "ref": "scripts/merge/pr-merge.mjs"
+        },
+        {
+          "kind": "script",
+          "ref": "scripts/merge/wait-for-ci.mjs"
+        },
+        {
+          "kind": "spec",
+          "ref": "scripts/__tests__/merge-gate.test.mjs"
+        },
+        {
+          "kind": "spec",
+          "ref": "scripts/__tests__/merge-state.test.mjs"
+        },
+        {
+          "kind": "spec",
+          "ref": "scripts/__tests__/merge-wait-for-ci.test.mjs"
+        }
+      ],
+      "trigger": "on-diff",
+      "serial": false,
+      "run": "pnpm exec vitest run scripts/__tests__/merge-gate.test.mjs scripts/__tests__/merge-state.test.mjs scripts/__tests__/merge-wait-for-ci.test.mjs",
+      "owner": "scripts/",
+      "authority": "docs/TEST-STRATEGY.md#e2e-资产归宿纪律三态-r1r2r3",
+      "note": "merge skill 判定承载脚本（pr-merge/wait-for-ci 的 Node 实装 + lib）迁入仓库后的登记：真实运行形态 = merge skill 薄壳经 main worktree 调起（.agents/skills/merge/scripts 同名 .sh），本表 run = 零 token fixture 回归（41 用例）；CI 固定环节 = ci.yml「Test - scripts guards」步骤同批文件"
     }
   ]
 }
