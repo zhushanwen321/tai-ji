@@ -1,5 +1,5 @@
 // run-events.test.ts —— run 事件词表 / 状态机 / record 流的测试（设计 §3.3 D5 →
-// workflow-run-resume-revision [D2]/[D4] 重构后词表）。
+// workflow-run-resume-revision [D2]/[D4] 重构后词表；M6 迁移后状态机形态）。
 //
 // 覆盖：
 // - 词表断言：RUN_EVENT_TYPES 11 个（[D4] 对齐 pi：ask-* → agent-*、新增
@@ -12,8 +12,12 @@
 // - 载荷形状：样本事件逐字段断言（agent-settled / run-settled 各含成功与失败
 //   两形态；run-interrupted / run-resumed 转移事件）
 // - record 接口形态：最小内存 fake 验证 append/scan 可实现且调用形状成立
-// - 状态机：词表 / 转移表穷尽（全 lifecycle × 全 trigger 组合遍历——表是可枚举
-//   数据，不是散落 case）/ 终局与输出动作语义 / 纯函数边界（时钟随机探针）
+// - 状态机（M6 后形态）：机器表级组合穷举由 generateTableTests 承载（5 态 ×
+//   10 转移事件 × 2 ctx 采样 = 100 格）；机器声明完整性（词表对账 / guard 函数
+//   值形态 / terminalOutcome 来源 / 表规模快照）；行为级断言留域内（D5 保留
+//   口径）——错误类型保形（IllegalTransitionError + 合法事件清单）、guard 二支
+//   行为（含 undefined ctx 落 more-work-expected 支）、非转移事件词表边界、
+//   终局与输出动作语义、纯函数边界（时钟随机探针）
 // - record 实装：append→scan 往返等价 / 坏行容错 / 路径穿越拒绝（临时目录
 //   mkdtempSync 自建自删，符合测试红线）
 // - 删值后历史行兼容：旧词表（armed / member-pool / ask-*）历史行跳过计日志、
@@ -22,6 +26,7 @@ import { existsSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { generateTableTests } from "@zhushanwen/state-machine/testing";
 
 import {
   ALL_RUN_LIFECYCLES,
@@ -31,7 +36,7 @@ import {
   foldRunEventCheckpoint,
   INITIAL_RUN_LIFECYCLE_STATE,
   RUN_EVENT_TYPES,
-  RUN_TRANSITIONS,
+  RUN_MACHINE,
   TRANSITION_OUTPUT_TYPES,
   createRunEventJournal,
   transition,
@@ -44,6 +49,7 @@ import {
   type RunLifecycle,
   type RunOutcome,
   type RunLifecycleState,
+  type TransitionContext,
   type TransitionTrigger,
   type WorkflowRunEvent,
 } from "../run-events.ts";
@@ -609,121 +615,137 @@ describe("状态词表（D5-1 → [D2] 四态 + interrupted 暂停态）", () =>
   });
 });
 
-// ── 转移表完整性（表是数据，不是散落分支）────────────────────
+// ── 机器表级组合穷举（M6：generateTableTests 一行承载）─────────
+//
+// ctx 二支采样 = fold 保守支（undefined——域内 fold 调 transition 不传 ctx 的
+// 契约形态）+ adjudicate 支（{ enterSettling: true }）；5 态 × 10 机器事件 ×
+// 2 采样 = 100 格（worker-log / model-override 不在机器词表——词表边界行为
+// 用例单独覆盖）。顶层调用注册 describe/it（vitest 收集期执行）。
+const tableCases = generateTableTests(RUN_MACHINE, {
+  // 采样含 undefined（fold 保守支契约形态）——机器 transition 的 ctx 参数类型
+  // 本就是 Ctx | undefined（可选参），此处 as 对齐 ctxSamples 的数组签名
+  ctxSamples: [undefined, { enterSettling: true }] as readonly TransitionContext[],
+});
 
-describe("转移表完整性", () => {
-  it("每行的 from / on / next / outputs 全部落在词表内", () => {
-    const lifecycles = new Set<string>(ALL_RUN_LIFECYCLES);
-    const triggers = new Set<string>(ALL_TRIGGER_TYPES);
-    const outputs = new Set<string>(TRANSITION_OUTPUT_TYPES);
-    expect(RUN_TRANSITIONS.length).toBeGreaterThan(0);
-    for (const rule of RUN_TRANSITIONS) {
-      expect(lifecycles.has(rule.from)).toBe(true);
-      expect(lifecycles.has(rule.next)).toBe(true);
-      expect(triggers.has(rule.on)).toBe(true);
-      expect(rule.outputs.length).toBeGreaterThan(0);
-      for (const output of rule.outputs) {
-        expect(outputs.has(output)).toBe(true);
-      }
+// ── 机器声明完整性（M6：表从 RUN_TRANSITIONS 常量迁 RUN_MACHINE 声明）──
+
+/** 声明行展开为逐态规范边（from 数组消重复的还原形态，断言用）。 */
+function expandRows(): { from: string; on: string; to: string | null; guard: unknown; terminalOutcome: unknown; outputs: readonly string[] }[] {
+  return RUN_MACHINE.definition.transitions.flatMap((row) => {
+    const froms = Array.isArray(row.from) ? row.from : [row.from];
+    return froms.map((from) => ({
+      from,
+      on: row.on,
+      to: row.to,
+      guard: row.guard,
+      terminalOutcome: row.terminalOutcome,
+      outputs: row.outputs ?? [],
+    }));
+  });
+}
+
+describe("机器声明完整性", () => {
+  it("机器词表对账：states = 5 lifecycle（与 ALL_RUN_LIFECYCLES 双词表漂移即红）/ terminal 集 = [terminal]（吸收态显式声明）", () => {
+    expect([...RUN_MACHINE.states]).toEqual([...ALL_RUN_LIFECYCLES]);
+    expect(RUN_MACHINE.terminalStates).toEqual(["terminal"]);
+    expect(RUN_MACHINE.definition.errorPolicy).toBe("throw");
+  });
+
+  it("机器事件词表 = 既有词表 SSOT（RUN_EVENT_TYPES ∪ CONTROL_TRIGGER_TYPES）去掉两个非转移事件（worker-log 诊断 / model-override 记账——与生命周期正交，不进转移裁决链）", () => {
+    const ssot = new Set<string>([...RUN_EVENT_TYPES, ...CONTROL_TRIGGER_TYPES]);
+    for (const event of RUN_MACHINE.events) {
+      expect(ssot.has(event)).toBe(true);
     }
+    const machineEvents = new Set<string>(RUN_MACHINE.events);
+    expect([...ssot].filter((e) => !machineEvents.has(e)).sort()).toEqual(["model-override", "worker-log"]);
+    expect(RUN_MACHINE.events).toHaveLength(10);
   });
 
-  it("(from, on, guard) 键无重复（guard 互斥性由运行时兜底检查）", () => {
-    const keys = RUN_TRANSITIONS.map((r) => `${r.from}|${r.on}|${r.guard ?? ""}`);
-    expect(new Set(keys).size).toBe(keys.length);
-  });
-
-  it("guard 只出现在 running × agent-settled 条件族", () => {
-    for (const rule of RUN_TRANSITIONS) {
-      if (rule.guard !== undefined) {
-        expect(rule.from).toBe("running");
-        expect(rule.on).toBe("agent-settled");
+  it("声明行形态：guard 只出现在 running × agent-settled 二支（行内函数值，字符串标签形态已删）；终局行 terminalOutcome 恒声明（固定值或 fromEvent）；非终局行不声明", () => {
+    for (const row of RUN_MACHINE.definition.transitions) {
+      const froms = Array.isArray(row.from) ? row.from : [row.from];
+      if (row.guard !== undefined) {
+        expect(typeof row.guard).toBe("function");
+        expect(froms).toEqual(["running"]);
+        expect(row.on).toBe("agent-settled");
       }
-    }
-  });
-
-  it("终局行 outcome 可解析（固定值或 run-settled 事件行）；非终局行不声明 terminalOutcome", () => {
-    for (const rule of RUN_TRANSITIONS) {
-      if (rule.next === "terminal") {
-        expect(rule.terminalOutcome !== undefined || rule.on === "run-settled").toBe(true);
+      if (row.to === "terminal") {
+        expect(row.terminalOutcome).toBeDefined();
       } else {
-        expect(rule.terminalOutcome).toBeUndefined();
+        expect(row.terminalOutcome).toBeUndefined();
       }
     }
   });
 
-  it("表规模快照：15 行 / 14 个合法 (lifecycle × 事件) 组合 / 46 个表外组合（5 × 12 = 60 全积）——[D2] dispatched 并入 running、armed 三行随 [D5] 删、member-pool 三行随 [D6] 删、新增 run-interrupted 两行 + run-resumed 一行 + phase 三行；worker-log（[ADR-0094] 诊断帧）与 model-override（subagent-model-switch 覆盖记账帧）均不进状态机故无表行（表外组合各 +5 = 每个 lifecycle 一个）", () => {
-    expect(RUN_TRANSITIONS).toHaveLength(15);
-    const legalKeys = new Set(RUN_TRANSITIONS.map((r) => `${r.from}|${r.on}`));
-    expect(legalKeys.size).toBe(14);
-    expect(ALL_RUN_LIFECYCLES.length * ALL_TRIGGER_TYPES.length).toBe(60);
-    expect(60 - legalKeys.size).toBe(46);
+  it("终局行 terminalOutcome 来源：run-settled 行 fromEvent 取事件载荷 outcome；cancel-requested 行固定值 cancelled（各 1 声明行，from 数组承载 running/settling 双源态）", () => {
+    const rows = RUN_MACHINE.definition.transitions.filter((r) => r.to === "terminal");
+    expect(rows).toHaveLength(2);
+    const settledRow = rows.find((r) => r.on === "run-settled");
+    expect(settledRow?.terminalOutcome).toEqual({ fromEvent: "outcome" });
+    for (const cancelRow of rows.filter((r) => r.on === "cancel-requested")) {
+      expect(cancelRow?.terminalOutcome).toBe("cancelled");
+    }
+  });
+
+  it("表规模快照：12 声明行（from 数组消重复）/ 15 边 / 14 个合法 (lifecycle × 事件) 组合——[D2] 四态 + interrupted；worker-log 与 model-override 无表行（转移通道结构上关闭）", () => {
+    const rows = RUN_MACHINE.definition.transitions;
+    expect(rows).toHaveLength(12);
+    const edges = expandRows();
+    expect(edges).toHaveLength(15);
+    expect(new Set(edges.map((e) => `${e.from}|${e.on}`)).size).toBe(14);
+    // 穷举骨架对账：5 态 × 10 事件 × 2 ctx 采样 = 100 格；合法 28（14 组合 × 2
+    // 采样——guard 二支在两采样上各单命中）/ 表外 72 / 零多命中（互补 guard 恒单中）
+    expect(tableCases).toHaveLength(100);
+    expect(tableCases.filter((c) => c.expectation === "transition")).toHaveLength(28);
+    expect(tableCases.filter((c) => c.expectation === "rejected")).toHaveLength(72);
+    expect(tableCases.filter((c) => c.expectation === "invariant-broken")).toHaveLength(0);
   });
 
   it("[D2] interrupted 唯一出边 = run-resumed（暂停态无特例转移行、无 guard——终局/取消在 interrupted 态表外 fail-fast，非「终局了却没死透」）", () => {
-    const rows = RUN_TRANSITIONS.filter((r) => r.from === "interrupted");
+    const rows = expandRows().filter((r) => r.from === "interrupted");
     expect(rows).toHaveLength(1);
-    expect(rows[0]!.on).toBe("run-resumed");
-    expect(rows[0]!.next).toBe("running");
+    expect(rows[0]).toMatchObject({ on: "run-resumed", to: "running" });
     expect(rows[0]!.guard).toBeUndefined();
   });
 
-  it("[D2] 中断转移行 outputs 仅 journal-append（中断非终局——不写 manifest 派生缓存、不发终局通知）", () => {
-    for (const rule of RUN_TRANSITIONS.filter((r) => r.on === "run-interrupted")) {
-      expect(rule.next).toBe("interrupted");
-      expect(rule.outputs).toEqual(["journal-append"]);
+  it("[D2] 中断转移行 outputs 仅 journal-append（中断非终局——不写 manifest 派生缓存、不发终局通知）；run-resumed 复活行同款", () => {
+    for (const row of expandRows().filter((r) => r.on === "run-interrupted" || r.on === "run-resumed")) {
+      expect(row.to).toBe(row.on === "run-interrupted" ? "interrupted" : "running");
+      expect(row.outputs).toEqual(["journal-append"]);
     }
   });
 });
 
-// ── 转移表穷尽（全 lifecycle × 全 trigger 组合遍历）──────────
+// ── 词表边界与 guard 二支行为（穷举生成器只覆盖机器词表组合，域特有
+//    非纯表判定留域内——D5 保留口径）─────────────────────────────
 
-describe.each(ALL_RUN_LIFECYCLES)("转移表穷尽：lifecycle=%s", (lifecycle) => {
-  for (const triggerType of ALL_TRIGGER_TYPES) {
-    const rules = RUN_TRANSITIONS.filter((r) => r.from === lifecycle && r.on === triggerType);
-
-    if (rules.length === 0) {
-      it(`${triggerType} → 表外 fail-fast`, () => {
-        expectIllegalTransition(stateOf(lifecycle), triggerSamples[triggerType]);
-      });
-      continue;
+describe("非转移事件词表边界（worker-log / model-override 不进机器词表）", () => {
+  it("全 lifecycle × 两类非转移事件 → 表外 fail-fast（appendTransition 首行结构防线：非转移事件进不了转移裁决链，直写走 journal.append 合法写点）", () => {
+    for (const lifecycle of ALL_RUN_LIFECYCLES) {
+      expectIllegalTransition(stateOf(lifecycle), triggerSamples["model-override"]);
+      expectIllegalTransition(stateOf(lifecycle), triggerSamples["worker-log"]);
     }
+  });
+});
 
-    if (rules.length === 1 && rules[0].guard === undefined) {
-      const rule = rules[0];
-      it(`${triggerType} → ${rule.next}${rule.terminalOutcome ? `(${rule.terminalOutcome})` : ""}`, () => {
-        const result = transition(stateOf(lifecycle), triggerSamples[triggerType]);
-        expect(result.state.lifecycle).toBe(rule.next);
-        expect(result.outputs).toEqual(rule.outputs);
-        if (rule.next === "terminal") {
-          const expected =
-            rule.terminalOutcome ?? (triggerType === "run-settled" ? runSettledFailed.outcome : undefined);
-          expect(result.state.outcome).toBe(expected);
-        } else {
-          // 非终局行不产生 outcome（两维正交不变量）
-          expect(result.state.outcome).toBeUndefined();
-        }
-      });
-      continue;
-    }
+describe("guard 二支行为（running × agent-settled 条件族）", () => {
+  it("ctx.enterSettling=true → settling（终局判定中）", () => {
+    const result = transition(stateOf("running"), triggerSamples["agent-settled"], {
+      enterSettling: true,
+    });
+    expect(result.state.lifecycle).toBe("settling");
+    expect(result.state.outcome).toBeUndefined();
+    expect(result.outputs).toEqual(["journal-append"]);
+  });
 
-    // 条件族（当前唯一 = running × agent-settled 二支）
-    it(`${triggerType} 条件二支：ctx.enterSettling=true → settling（终局判定）`, () => {
-      const result = transition(stateOf(lifecycle), triggerSamples[triggerType], {
-        enterSettling: true,
-      });
-      expect(result.state.lifecycle).toBe("settling");
+  it("ctx 缺省 / false → running（fold 保守支——undefined ctx 落 more-work-expected 支，V3 等价判据）", () => {
+    for (const ctx of [undefined, { enterSettling: false }]) {
+      const result = transition(stateOf("running"), triggerSamples["agent-settled"], ctx);
+      expect(result.state.lifecycle).toBe("running");
       expect(result.state.outcome).toBeUndefined();
       expect(result.outputs).toEqual(["journal-append"]);
-    });
-    it(`${triggerType} 条件二支：ctx 缺省 / false → running（fold 保守支）`, () => {
-      for (const ctx of [undefined, { enterSettling: false }]) {
-        const result = transition(stateOf(lifecycle), triggerSamples[triggerType], ctx);
-        expect(result.state.lifecycle).toBe("running");
-        expect(result.outputs).toEqual(["journal-append"]);
-      }
-    });
-  }
+    }
+  });
 });
 
 // ── 终局与输出动作语义 ───────────────────────────────────────
