@@ -222,3 +222,17 @@ export function normalizeQuotaWorkspaceUrl(input: string): QuotaWorkspaceNormali
 
   return { ok: true, url: `${OPENCODE_BASE}/workspace/${id}/go` }
 }
+
+/**
+ * 从已配置的 workspace 地址提取 workspace id（读侧反提取——opencode fetcher 请求
+ * console API 时以 id 作 `x-org-id` header）。
+ *
+ * 写侧产物是规范 URL（normalizeQuotaWorkspaceUrl → `/workspace/<id>/go`）；本函数同时
+ * 容忍裸 `wrk_` id 与其他路径形态（读侧不做二次归一化，存量数据形态不保证）。提取不到
+ * 返回 null，调用方按配置不可用处理（恢复指引指向重填配置）。
+ */
+export function extractQuotaWorkspaceId(workspaceUrl: string): string | null {
+  const trimmed = workspaceUrl.trim()
+  if (WORKSPACE_ID_RE.test(trimmed)) return trimmed
+  return trimmed.match(/wrk_[A-Za-z0-9]+/)?.[0] ?? null
+}

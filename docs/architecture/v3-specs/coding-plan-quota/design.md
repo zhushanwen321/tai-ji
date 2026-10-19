@@ -95,7 +95,7 @@ taiji 作为 Electron 桌面应用，**直接以 npm 依赖形式引入该包即
 | 维度 | 评价 |
 |---|---|
 | 架构正确性 | ✅ 最佳。额度查询是「可插拔能力」而非「核心能力」——某个 provider 的 endpoint 变了、加新 provider、甚至整个额度查询功能下线，都不应该影响 runtime 核心逻辑。plugin 化让能力边界清晰 |
-| 隔离性 | ✅ Worker Thread 隔离。某个 provider 查询崩溃（如 SSR HTML 解析异常）不会影响其他 provider 或 runtime 主进程。现状 `Promise.allSettled` 只是「不 reject」，崩溃（throw）仍会冒泡 |
+| 隔离性 | ✅ Worker Thread 隔离。某个 provider 查询崩溃（如响应解析异常）不会影响其他 provider 或 runtime 主进程。现状 `Promise.allSettled` 只是「不 reject」，崩溃（throw）仍会冒泡 |
 | 可扩展性 | ✅ 第三方可开发新 provider plugin（如私有部署的 coding-plan），无需改 taiji 主仓库。符合「plugin 是唯一适配层」的架构约束 #11 |
 | 独立升级 | ✅ plugin 版本独立，provider endpoint 变化发新 plugin 版本即可，不需 taiji 发版 |
 | 复用度 | 内部仍依赖 `@zhushanwen/pi-quota-providers` 共享包做实际查询，5 个 provider 实现零成本复用 |
@@ -148,7 +148,7 @@ taiji 作为 Electron 桌面应用，**直接以 npm 依赖形式引入该包即
 | 复用度 | 零复用，5 个 provider 重新写一遍（约 800 行） |
 | 维护成本 | 共享包修了 bug，两边都要改；statusline 修了 endpoint 变化，这边不知道 |
 | 数据隔离 | 天然隔离（读自己的路径） |
-| 风险 | 复制粘贴 5 个 provider 的实现细节（normalize 反转、cookie 过期判定、SSR HTML 正则解析等）极易出错 |
+| 风险 | 复制粘贴 5 个 provider 的实现细节（normalize 反转、cookie 过期判定、响应解析等）极易出错 |
 
 **短期性**：绕过「共享包需要适配数据目录注入」的工程量，但留下双份维护债务。仅在共享包无法短期适配时作为过渡。
 

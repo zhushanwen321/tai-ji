@@ -9,7 +9,7 @@
  *
  * 测试框架：vitest。运行：cd packages/runtime && npx vitest run test/services/quota-providers-contract.test.ts
  */
-import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
+import { describe, it, expect, beforeEach, afterEach, beforeAll, afterAll, vi } from 'vitest'
 import type { QuotaFetchOutcome } from '@taiji/shared'
 import { QUOTA_PRESETS } from '@taiji/shared'
 import { QUOTA_FETCHERS } from '../../src/services/quota-providers/index.js'
@@ -319,35 +319,53 @@ describe('mimoFetcher — A2-1 错误通道', () => {
   })
 })
 
-// ── opencode：302（cookie 过期）→ unauthorized（原 isCredentialValid 语义归入）──
-// [D1-1 timeout-audit-hygiene-batch] workspace 改为用户配置注入（fetchQuota 第三参数）：
-// URL 由 config.workspaceUrl 提供，硬编码已删除；未配置 → not_configured（D1-3）。
+// ── opencode：console/api/go/status JSON API（cookie + x-org-id header）──
+// [D1-1 timeout-audit-hygiene-batch] workspace 配置注入不变（fetchQuota 第三参数）；
+// 错误通道为 JSON API 实测语义：401 → unauthorized（cookie 过期）、404 → no-subscription
+// （workspace id 不属于该账号/已删除）。
 describe('opencodeFetcher — A2-1 错误通道', () => {
   const OPENCODE_WS_URL = 'https://opencode.ai/workspace/wrk_test/go'
-  const openCodeHtml = [
-    'rollingUsage:$R[1]={status:"active",resetInSec:100,usagePercent:20}',
-    'weeklyUsage:$R[2]={status:"active",resetInSec:200,usagePercent:40}',
-    'monthlyUsage:$R[3]={status:"active",resetInSec:300,usagePercent:60}',
-  ].join('')
 
-  // [8e7d407de] 凭证拦截先于配置检查：normalizeCookieHeader 归一化为空 → 直接 unauthorized
+  // resetSec 由 resetsAt - now 推算，fake timers 定死时钟保证断言确定性（仅本 describe）。
+  beforeAll(() => {
+    vi.useFakeTimers()
+    vi.setSystemTime(new Date('2026-10-19T06:00:00.000Z'))
+  })
+  afterAll(() => {
+    vi.useRealTimers()
+  })
+
+  const goMeter = (overrides: Record<string, unknown> = {}) => ({
+    resetsAt: '2026-10-19T10:05:48.000Z',
+    limitMicroCents: '1200000000',
+    usedMicroCents: '146225762',
+    ...overrides,
+  })
+  const fullMeters = { fiveHour: goMeter(), week: goMeter(), month: goMeter() }
+
+  // [凭证拦截先于配置检查] normalizeCookieHeader 归一化为空 → 直接 unauthorized
   // （fetch 不发出），故 credential 必须用合法形态 'k=v'，否则本 describe 用例不可达。
-  // 顺序语义（凭证 vs 配置谁先）如有异议需另裁决——当前实现以凭证检查在前为准。
   it('未配置 workspace → not_configured，不发任何 HTTP 请求（D1-3）', async () => {
-    mockFetch.mockResolvedValue(new Response(openCodeHtml, { status: 200 }))
+    mockFetch.mockResolvedValue(jsonResponse({ access: { meters: fullMeters } }, 200))
     const noConfig = await opencodeFetcher.fetchQuota('session=abc', 'cookie')
     expect(noConfig).toEqual({ ok: false, reason: 'not_configured' })
     expect(mockFetch).not.toHaveBeenCalled()
   })
 
-  it('HTTP 302（cookie 过期）→ reason=unauthorized（原 isCredentialValid 语义）', async () => {
-    mockFetch.mockResolvedValue(new Response(null, { status: 302 }))
+  it('HTTP 401（cookie 过期）→ reason=unauthorized', async () => {
+    mockFetch.mockResolvedValue(jsonResponse({ _tag: 'Unauthorized' }, 401))
     const outcome = await opencodeFetcher.fetchQuota('session=abc', 'cookie', { workspaceUrl: OPENCODE_WS_URL })
     expect(outcome).toEqual({ ok: false, reason: 'unauthorized' })
   })
 
+  it('HTTP 404（workspace id 不属于该账号）→ reason=no-subscription', async () => {
+    mockFetch.mockResolvedValue(jsonResponse({ _tag: 'NotFound' }, 404))
+    const outcome = await opencodeFetcher.fetchQuota('session=abc', 'cookie', { workspaceUrl: OPENCODE_WS_URL })
+    expect(outcome).toEqual({ ok: false, reason: 'no-subscription' })
+  })
+
   it('HTTP 500 → reason=network', async () => {
-    mockFetch.mockResolvedValue(new Response(null, { status: 500 }))
+    mockFetch.mockResolvedValue(jsonResponse(null, 500))
     const outcome = await opencodeFetcher.fetchQuota('session=abc', 'cookie', { workspaceUrl: OPENCODE_WS_URL })
     expect(outcome).toEqual({ ok: false, reason: 'network' })
   })
@@ -358,24 +376,35 @@ describe('opencodeFetcher — A2-1 错误通道', () => {
     expect(outcome).toEqual({ ok: false, reason: 'network' })
   })
 
-  it('200 但 HTML 中无三窗口数据 → reason=no-subscription', async () => {
-    mockFetch.mockResolvedValue(new Response('<html>empty</html>', { status: 200 }))
+  it('200 但无三窗口数据 → reason=no-subscription', async () => {
+    mockFetch.mockResolvedValue(jsonResponse({ access: { meters: {} } }, 200))
     const outcome = await opencodeFetcher.fetchQuota('session=abc', 'cookie', { workspaceUrl: OPENCODE_WS_URL })
     expect(outcome).toEqual({ ok: false, reason: 'no-subscription' })
   })
 
-  it('成功：三窗口正则解析，请求目标 = 注入的 workspaceUrl（D1-4 URL 只来自配置）', async () => {
-    mockFetch.mockResolvedValue(new Response(openCodeHtml, { status: 200 }))
+  it('字段类型漂移 → reason=parse', async () => {
+    mockFetch.mockResolvedValue(
+      jsonResponse({ access: { meters: { fiveHour: goMeter({ usedMicroCents: 'abc' }) } } }, 200),
+    )
+    const outcome = await opencodeFetcher.fetchQuota('session=abc', 'cookie', { workspaceUrl: OPENCODE_WS_URL })
+    expect(outcome).toEqual({ ok: false, reason: 'parse' })
+  })
+
+  it('成功：三窗口解析，请求 = 固定端点 + org id 进 x-org-id header（D1-4：URL 不含 id）', async () => {
+    mockFetch.mockResolvedValue(jsonResponse({ access: { meters: fullMeters } }, 200))
 
     const outcome = await opencodeFetcher.fetchQuota('session=abc', 'cookie', { workspaceUrl: OPENCODE_WS_URL })
 
-    expect(mockFetch).toHaveBeenCalledWith(OPENCODE_WS_URL, expect.anything())
+    expect(mockFetch).toHaveBeenCalledTimes(1)
+    const [url, init] = mockFetch.mock.calls[0] as [string, RequestInit]
+    expect(url).toBe('https://opencode.ai/console/api/go/status')
+    expect(init.headers).toEqual({ cookie: 'session=abc', 'x-org-id': 'wrk_test' })
     expect(outcome.ok).toBe(true)
     if (!outcome.ok) return
     expect(outcome.data.wins).toEqual([
-      { pct: 20, resetSec: 100 },
-      { pct: 40, resetSec: 200 },
-      { pct: 60, resetSec: 300 },
+      { pct: 12, resetSec: 14748 },
+      { pct: 12, resetSec: 14748 },
+      { pct: 12, resetSec: 14748 },
     ])
   })
 

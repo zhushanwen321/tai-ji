@@ -7,11 +7,10 @@
  */
 
 import type { ProviderQuotaFetcher, QuotaAuthKind, QuotaFetchOutcome, QuotaWindow } from './types.js'
-import { INFINITE_WIN, fetchQuotaJson, isOptionalField, isOptionalNumericField, isRecord, numericField } from './types.js'
+import { INFINITE_WIN, fetchQuotaJson, isOptionalField, isOptionalNumericField, isRecord, isoResetRemaining, numericField } from './types.js'
 
 const FETCH_TIMEOUT_MS = 5000
 const PERCENT_SCALE = 100
-const MS_PER_SEC = 1000
 
 /** wire 数值字段（limit/used/remaining）：实测以字符串数值下发（`"100"`），历史形态为 number。 */
 type KimiWireNumber = number | string
@@ -69,12 +68,6 @@ function isKimiResponse(v: unknown): v is KimiApiResponse {
   }
   if (o.usage !== undefined && !isKimiUsageFields(o.usage)) return false
   return true
-}
-
-/** ISO 时间戳 → 剩余秒 */
-function isoResetRemaining(iso: string): number {
-  const ms = new Date(iso).getTime() - Date.now()
-  return Math.max(0, Math.floor(ms / MS_PER_SEC))
 }
 
 /** requests 类窗口构造（A2-3：绝对量直出，limit/remaining 已从 API 拿到；limit≤0 视为无限）。 */

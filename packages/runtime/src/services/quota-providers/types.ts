@@ -59,6 +59,14 @@ export function isRecord(v: unknown): v is Record<string, unknown> {
   return typeof v === 'object' && v !== null
 }
 
+const MS_PER_SEC = 1000
+
+/** ISO 时间戳 → 距今剩余秒（已过期 → 0）。kimi/opencode 的 resetsAt/resetTime 共用。 */
+export function isoResetRemaining(iso: string): number {
+  const ms = new Date(iso).getTime() - Date.now()
+  return Math.max(0, Math.floor(ms / MS_PER_SEC))
+}
+
 /** shape guard 共享谓词：可选字段缺失（undefined）合法放行，存在则必须匹配 kind
  * （RT-7#5 字段级 guard 语义——防 `"500"` 等字符串数值被静默接受产错数据）。
  * 仅用于 wire 形态已实测稳定的字段；数值字段用 isOptionalNumericField（见下）。 */
