@@ -1364,9 +1364,6 @@ importers:
 
   packages/subagent-core:
     dependencies:
-      '@taiji/shared':
-        specifier: workspace:*
-        version: link:../shared
       '@zhushanwen/extension-protocol':
         specifier: workspace:*
         version: link:../extension-protocol
@@ -1386,6 +1383,9 @@ importers:
         specifier: ^2.9.0
         version: 2.9.0
     devDependencies:
+      '@taiji/shared':
+        specifier: workspace:*
+        version: link:../shared
       '@types/node':
         specifier: ^24.0.0
         version: 24.13.2
