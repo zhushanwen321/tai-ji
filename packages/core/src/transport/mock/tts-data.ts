@@ -4,7 +4,7 @@
  *
  * mock 本职 = 模拟 runtime（内嵌假数据不违反「数据走 runtime 链路」纪律，设计 §7.5）：
  * 形状逐字段照 shared tts-types（协议 tts.getCapabilities reply 载荷），枚举值与 runtime 真投影同构（真值子集，
- * D5 终态同步 F1-10 对齐——mock 轨保存的枚举值在真机投影中必须存在）。「最小可用」= 能驱动
+ * mock 轨保存的枚举值在真机投影中必须存在）。「最小可用」= 能驱动
  * 表单控件存在性三分支渲染：枚举渲染 / null 置灰 / 空数组不渲染，非厂商全集。真实能力表与表单投影数据本体在 runtime driver（u2）。
  */
 import type { SanitizedTtsConfig, TtsFormModel, TtsProviderId } from '@taiji/shared'

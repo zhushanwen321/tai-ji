@@ -80,7 +80,7 @@ describe('不变量 2：主干图（decompose + resolve）无环', () => {
     try {
       const c = createCanvas(h.svc)
       // 每节点至多一条入边（边 id 确定性派生 e-<子id>，upsert 覆盖式重挂）。历史成环
-      // 通道 = 同 id 节点的边被后继 item 覆盖重挂（x→y + y→x）——F1-9 修复后该通道
+      // 通道 = 同 id 节点的边被后继 item 覆盖重挂（x→y + y→x）——该通道
       // 在边覆盖前即被分歧判定拦截（invalid_params），cycle_detected 守卫退为结构性
       // 兜底（不可达；检测逻辑见下方 findTrunkCycle 纯函数用例）。
       const reply = h.svc.mutate({

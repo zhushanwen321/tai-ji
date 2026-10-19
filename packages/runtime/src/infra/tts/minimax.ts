@@ -154,12 +154,11 @@ export const minimaxFormModel: TtsFormModel = {
   emotions: EMOTIONS.map((id) => ({ id, label: id })),
   languages: LANGUAGES,
   // toggles 成员 id = vendor 子键名裸键（renderer MINIMAX_TOGGLE_PATHS 按裸键查落盘路径 +
-  // i18n label 按 settings.tts.toggle.${id} 命中；带请求体路径前缀会使查表 miss 静默丢值，
-  // D5 终态同步 F1-8/F1-14 裁决 code-right）
+  // i18n label 按 settings.tts.toggle.${id} 命中；带请求体路径前缀会使查表 miss 静默丢值）
   toggles: ['text_normalization', 'latex_read', 'aigc_watermark'],
   voiceModify: {
     // tiers id = vendor.voice_modify 子键名（官方维度名裸键；renderer modify[tier.id] 直写，
-    // 路径前缀形态会产出 voice_modify.voice_modify.* 双前缀错位，D5 F1-11/F1-24 裁决 code-right）
+    // 路径前缀形态会产出 voice_modify.voice_modify.* 双前缀错位）
     tiers: [
       { id: 'pitch', label: '明亮度' },
       { id: 'intensity', label: '力度' },
