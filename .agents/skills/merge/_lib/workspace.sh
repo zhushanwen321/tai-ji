@@ -1,6 +1,7 @@
 #!/bin/bash
 # 共享函数库：workspace 操作相关
-# 当前唯一调用方：本 skill 的 scripts/remove-worktree.sh（source 后使用 find_workspace_root / remove_worktree）
+# 消费方（source 后使用 find_workspace_root 等）：本 skill scripts/ 下 init.sh、
+# prune-dev-link.sh、remove-worktree.sh、pr-merge.sh、release.sh、wait-for-ci.sh 薄壳
 
 # 从当前目录向上查找 workspace 根（包含 .bare/ 的目录）
 find_workspace_root() {

@@ -253,6 +253,7 @@ git push github "v${VERSION}" > /tmp/merge-push-tag.log 2>&1; echo "exit=$?"; ta
 # [MANDATORY] 等待 CI 完成并验证产物
 # 此命令会轮询 CI 直到完成，验证 dmg/exe/AppImage 全部存在
 # exit 非 0 则必须修复直到通过
+# （verify-ci-release.sh 是薄壳，实现在 scripts/merge/verify-ci-release.mjs）
 bash scripts/verify-ci-release.sh "v$(node -p "require('./package.json').version")"
 ```
 
@@ -410,7 +411,7 @@ done
 cd $WS_ROOT/main && bash .agents/skills/merge/scripts/release.sh
 ```
 
-从 conventional commits 自动生成 Release Notes 草稿（双语三节结构：feat → 新增功能、perf → 功能优化、fix → 修复缺陷、breaking → 重大变更；条目为 commit 原文，须按全局规范 `~/.agents/guide/release-notes.md` 定稿）并创建/更新 GitHub Release。也可指定 tag 和 notes 文件：`cd $WS_ROOT/main && bash .agents/skills/merge/scripts/release.sh v0.6.5 --notes ./my-notes.md`。**notes emoji 门禁**：release.sh 在每次把 notes 写入 GitHub Release（edit / create）前经 `.githooks/check_doc_emoji.py` 校验，含 emoji 直接 exit 1（fail-closed：检测脚本缺失同样拦截）；流程末尾的定稿校验段（下方代码块）对已写入的 release body 复检同一规则。
+从 conventional commits 自动生成 Release Notes 草稿（双语三节结构：feat → 新增功能、perf → 功能优化、fix → 修复缺陷、breaking → 重大变更；条目为 commit 原文，须按全局规范 `~/.agents/guide/release-notes.md` 定稿）并创建/更新 GitHub Release。也可指定 tag 和 notes 文件：`cd $WS_ROOT/main && bash .agents/skills/merge/scripts/release.sh v0.6.5 --notes ./my-notes.md`。**notes emoji 门禁**：release.sh 在每次把 notes 写入 GitHub Release（edit / create）前经 `.githooks/check_doc_emoji.py` 校验，含 emoji 直接 exit 1（fail-closed：检测脚本缺失同样拦截）；流程末尾的定稿校验段（下方代码块）对已写入的 release body 复检同一规则。实现位置：release.sh 是薄壳，实现在仓库 `scripts/merge/release.mjs`（经 main worktree 恒取 main 最新版）。
 
 > **notes 写入语义**：release.sh 仅在创建 / Draft 态重写 notes；release 已发布（非 draft）且现有 notes 已含 `<!-- LANG:` 语言标记（视为已定稿）时不会被覆盖重写——已定稿 release 需改动手动执行 `gh release edit <tag> --notes-file <双语文件>`。
 
