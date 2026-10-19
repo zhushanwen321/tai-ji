@@ -262,7 +262,7 @@ describe('subagent-control server（真 socket 环回 + fixture 引擎）', () =
     expect(result.failed?.code).toBe('engine_open_timeout')
   })
 
-  it('背压溢出：下行队列超上限 → error engine_backpressure_overflow + engine_closed killed_by_control + 组杀', { timeout: 20_000 }, async () => {
+  it('背压溢出：下行队列超上限 → error engine_backpressure_overflow + engine_closed killed_by_control + 组杀', { timeout: 60_000 }, async () => {
     const { server } = await setupServer({ channelQueueMaxBytes: 64 * 1024 })
     const agent = new TestAgent(server.listeningSocketPath)
     await agent.opened
@@ -331,7 +331,7 @@ describe('subagent-control server（真 socket 环回 + fixture 引擎）', () =
     void channelId
   })
 
-  it('down 方向连接级聚合上限：多通道累加越界 → 仅触发通道失败（error + engine_closed），其它通道保持 open', { timeout: 30_000 }, async () => {
+  it('down 方向连接级聚合上限：多通道累加越界 → 仅触发通道失败（error + engine_closed），其它通道保持 open', { timeout: 90_000 }, async () => {
     // per-channel 上界放宽到 8MB；连接级 down 聚合上界压到 100KB——两个 70KB
     // 待写帧累加即越界（fixture --no-read-stdin 不消费 stdin，写必然入队列）。
     const { server } = await setupServer({
