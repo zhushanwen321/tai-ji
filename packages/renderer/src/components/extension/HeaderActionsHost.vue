@@ -11,7 +11,11 @@
   leftCluster==='expanded' 渲染）；L2 起聚合，同一挂载点数据源改在托盘聚合面板首段渲染
   （ComposerTray）——入口随聚合走，不因宽度退化丢失。
 
-  - badge ≤4 字符宿主截断，全文进 tooltip（AP-1 徽标契约）
+  - badge ≤4 字符宿主截断，全文进 tooltip（AP-1 徽标契约）；tooltip = 主题化 Tooltip
+    浮层（2026-10-19 左簇浮层优化：原生 title 系统绘制与主题脱节，全族退役——文案合成
+    逻辑不变，承载从 title 属性换成 Tooltip 浮层；aria-label 同文案保留可读名）。
+    disabled 按钮的原生 pointer 事件不触发，Trigger 包一层 inline-flex span 承接 hover
+    （「暂不可用」提示在灰置态可达）。
   - E13 三态灰置：registered 可点 / unregistered 灰置+tooltip / unknown 保持上次值
     （首次缺省可点，E14 写路径兜底——失败不拦入口）
   - 运行时 disabled：插件 updateHeaderAction 推的 entry.disabled=true 直接灰置；
@@ -22,39 +26,57 @@
   - E3 点击 → CommandRegistry.execute：命令缺失（emit error，ERR6）后按钮本地置灰，
     禁静默 no-op；宿主重判 registered（命令重注册）后置灰让位、按钮恢复可点
   - 点击分派按声明 activation（声明驱动，无插件 id 硬编码分支）：缺省（无字段）走上述
-    命令链；'scheduler-overlay' = 点击直开 workflow-viz overlay 定时任务 tab
-    （openSchedulerTab），不触 E13 判定/E3 簿记——disabled 只剩运行时镜像单源，
-    hidden/badge/tooltip 的 entry 消费与命令链一致
+    命令链；'scheduler-overlay' = SchedulerQuickCard 快捷面板（2026-10-19 左簇浮层
+    优化：hover 160ms 出任务列表 + 行内操作（消费插件推送的 SCHEDULER_MODAL_VIEW_ID
+    树，action-bar 走既有命令链），点击 pin 面板 / 底部条直开 overlay 定时任务 tab——
+    点击直开 overlay 的原语义迁移进面板底部操作条），不触 E13 判定/E3 簿记——disabled
+    只剩运行时镜像单源，hidden/badge/tooltip 的 entry 消费与命令链一致
   - 无声明时整组件零 DOM（不挤压左簇相邻按钮，同 ViewHost empty="hidden" 语义）
 -->
 <template>
   <template v-if="buttons.length > 0">
-    <Button
-      v-for="b in buttons"
-      :key="b.key"
-      variant="ghost"
-      size="icon"
-      class="relative size-[30px] shrink-0 rounded-sm text-neutral-dim transition-colors hover:bg-surface-hover hover:text-neutral-fg disabled:opacity-40 disabled:hover:bg-transparent disabled:hover:text-neutral-mid"
-      :data-testid="b.testid"
-      :disabled="b.disabled"
-      :title="b.tooltip"
-      :aria-label="b.tooltip"
-      @click="b.onClick()"
-    >
-      <!-- 图标 16px 固定（demo .cbtn 图标规格；rem 类会随 --font-scale 视口档缩放偏离 demo 值）。
-           stroke-width 1.6 与全仓 lucide 图标统一细线口径（demo 同款）；b.icon 恒为 lucide
-           组件（HEADER_ACTION_ICONS 映射表 + Puzzle fallback），插件不投递自带上色 SVG。 -->
-      <component :is="b.icon" class="size-[16px]" :stroke-width="1.6" />
-      <!-- 角标形态 = TRAY_ITEM_COUNT_CLASS 同款（demo .cbtn .badge：-3px 外扩 / 14px 高 /
-           px 3px / 胶囊 / mono 10px / fw-mid），单点消费 tray-item-button.ts 共享常量防漂移；
-           配色走中性 quiet 档（demo workbench.css .badge-quiet：hover 底 + mid 字；spec
-           composer spec（demo） §4 / composer #8——accent 实底只给未读类需关注态（btw 未读角标），
-           headerAction 计数是一般计数不走 accent） -->
-      <span
-        v-if="b.badge"
-        :class="[TRAY_ITEM_COUNT_CLASS, 'bg-surface-hover', 'text-neutral-mid']"
-      >{{ b.badge }}</span>
-    </Button>
+    <template v-for="b in buttons" :key="b.key">
+      <SchedulerQuickCard
+        v-if="b.schedulerCard"
+        :session-id="sessionId!"
+        :badge="b.badge"
+        :disabled="b.disabled"
+        :testid="b.testid"
+        :tooltip="b.tooltip"
+      />
+      <Tooltip v-else>
+        <TooltipTrigger as-child>
+          <!-- disabled button 不触发原生 pointer 事件 → span 承接 hover（灰置态 tooltip 可达）；
+               inline-flex 保证左簇 gap 布局不变（span 尺寸 = 按钮尺寸） -->
+          <span class="inline-flex">
+            <Button
+              variant="ghost"
+              size="icon"
+              class="relative size-[30px] shrink-0 rounded-sm text-neutral-dim transition-colors hover:bg-surface-hover hover:text-neutral-fg disabled:opacity-40 disabled:hover:bg-transparent disabled:hover:text-neutral-mid"
+              :data-testid="b.testid"
+              :disabled="b.disabled"
+              :aria-label="b.tooltip"
+              @click="b.onClick()"
+            >
+              <!-- 图标 16px 固定（demo .cbtn 图标规格；rem 类会随 --font-scale 视口档缩放偏离 demo 值）。
+                   stroke-width 1.6 与全仓 lucide 图标统一细线口径（demo 同款）；b.icon 恒为 lucide
+                   组件（HEADER_ACTION_ICONS 映射表 + Puzzle fallback），插件不投递自带上色 SVG。 -->
+              <component :is="b.icon" class="size-[16px]" :stroke-width="1.6" />
+              <!-- 角标形态 = TRAY_ITEM_COUNT_CLASS 同款（demo .cbtn .badge：-3px 外扩 / 14px 高 /
+                   px 3px / 胶囊 / mono 10px / fw-mid），单点消费 tray-item-button.ts 共享常量防漂移；
+                   配色走中性 quiet 档（demo workbench.css .badge-quiet：hover 底 + mid 字；spec
+                   composer spec（demo） §4 / composer #8——accent 实底只给未读类需关注态（btw 未读角标），
+                   headerAction 计数是一般计数不走 accent） -->
+              <span
+                v-if="b.badge"
+                :class="[TRAY_ITEM_COUNT_CLASS, 'bg-surface-hover', 'text-neutral-mid']"
+              >{{ b.badge }}</span>
+            </Button>
+          </span>
+        </TooltipTrigger>
+        <TooltipContent data-testid="header-action-tooltip">{{ b.tooltip }}</TooltipContent>
+      </Tooltip>
+    </template>
   </template>
 </template>
 
@@ -63,9 +85,10 @@ import { computed, inject, ref, watch } from 'vue'
 import { Clock, Puzzle } from '@lucide/vue'
 import type { Component } from 'vue'
 import { Button } from '@/components/ui/button'
+import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
 import { useI18n } from 'vue-i18n'
-import { openSchedulerTab } from '@/components/panel/workflow-viz/overlay/workflow-viz-overlay'
 import { TRAY_ITEM_COUNT_CLASS } from '@/components/panel/tray/tray-item-button'
+import SchedulerQuickCard from './SchedulerQuickCard.vue'
 import {
   HEADER_ACTIONS_SOURCE_KEY,
   isVisibleHeaderAction,
@@ -95,7 +118,9 @@ const HEADER_ACTION_ICONS: Record<string, Component> = {
 /** E13 生效三态 = 判定三态 | 上次值兜底（unknown 且无上次值 = undefined → 首次缺省可点） */
 type EffectiveAvailability = 'registered' | 'unregistered' | undefined
 
-/** 按钮渲染视图（buttons computed 的元素形状；非声明本体——归一后的呈现面） */
+/** 按钮渲染视图（buttons computed 的元素形状；非声明本体——归一后的呈现面）。
+ *  schedulerCard = true 时该入口由 SchedulerQuickCard 渲染（hover 快捷面板 + overlay
+ *  直开移入面板底部条），badge/disabled/tooltip 的合成与命令链按钮同一套。 */
 interface HeaderActionButtonView {
   key: string
   testid: string
@@ -103,6 +128,7 @@ interface HeaderActionButtonView {
   badge: string
   disabled: boolean
   tooltip: string
+  schedulerCard: boolean
   onClick: () => void
 }
 
@@ -205,8 +231,9 @@ function toHeaderActionButton(
   if (!isVisibleHeaderAction(decl, entry)) return null
   const ha = decl.headerAction
   if (ha.activation === 'scheduler-overlay') {
-    // overlay 直开入口：灰置唯一来源 = 运行时镜像 disabled（E13/E3 是 commandId 命令链
-    // 状态机，对本入口不可达）；tooltip 走 runtime/声明兜底段（命令三态两支不参与）。
+    // scheduler-overlay 直开入口 → SchedulerQuickCard（点击/灰置/tooltip 语义见组件头注）：
+    // 灰置唯一来源 = 运行时镜像 disabled（E13/E3 是 commandId 命令链状态机，对本入口
+    // 不可达）；tooltip 走 runtime/声明兜底段（命令三态两支不参与）。
     return {
       key: `${decl.pluginId}::${decl.contributionId}`,
       testid: actionTestId(decl.pluginId, decl.contributionId),
@@ -214,7 +241,8 @@ function toHeaderActionButton(
       badge: badgeOf(entry),
       disabled: entry?.disabled === true,
       tooltip: headerActionTooltip(null, undefined, entry, ha.title),
-      onClick: () => openSchedulerTab(sid),
+      schedulerCard: true,
+      onClick: () => {},
     }
   }
   if (!ha.commandId) return null
@@ -229,6 +257,7 @@ function toHeaderActionButton(
     badge: badgeOf(entry),
     disabled: isHeaderActionDisabled(effective, missing, availability, entry),
     tooltip: headerActionTooltip(availability, effective, entry, ha.title),
+    schedulerCard: false,
     onClick: () => dispatchHeaderAction(src, sid, commandId),
   }
 }

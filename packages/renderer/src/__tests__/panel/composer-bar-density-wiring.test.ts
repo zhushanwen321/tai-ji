@@ -226,9 +226,10 @@ async function dispatchFitGeometry(
   await stubFitGeometry({ bar: barEl, left: leftEl, right: rightEl }, avail, left, widthByFit)
 }
 
-/** 底栏首/末按钮（序 0 锚点断言用） */
+/** 底栏首/末按钮（序 0 锚点断言用）：首钮 = `+`（aria-label，原生 title 已退役）；
+ *  末钮 = 发送位（不在左簇清理范围，title 保留原生） */
 function firstButtonTitle(): string | undefined {
-  return bar().findAll('button')[0]?.attributes('title')
+  return bar().findAll('button')[0]?.attributes('aria-label')
 }
 function lastButtonTitle(): string | undefined {
   const buttons = bar().findAll('button')

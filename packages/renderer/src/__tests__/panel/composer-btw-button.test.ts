@@ -3,7 +3,7 @@
  *
  * 三视角（TEST-STRATEGY §3）：
  * - 使用者（黑盒 DOM）：首屏按钮在左簇（title 文案）/ show-btw=false 与无 session 不出入口 /
- *   badge 计数 Σ（含 9+ 封顶与计数 title）/ 待处理徽点两态（pending>0 显 + 计数 title、
+ *   badge 计数 Σ（含 9+ 封顶与计数 aria-label）/ 待处理徽点两态（pending>0 显 + 计数 aria-label、
  *   双零不显、与计数角标同屏并列，U1）/ 进视口即清、视口内不计、离开再计 / 点击开 drawer
  *   btw tab / 切主会话 badge 归属各自主会话且切回恢复（D7③④，S10 单测面）
  * - 观察者（形态）：三档宽度（700/560/400）按钮常驻 + `+` 仍居左簇首位、发送位仍右锚
@@ -137,7 +137,7 @@ function pendingDot(): ReturnType<VueWrapper['find']> {
 
 function buttonTitle(): string | undefined {
   if (!wrapper) throw new Error('composer not mounted')
-  return bar().find('[data-testid="composer-btw-button"]').attributes('title')
+  return bar().find('[data-testid="composer-btw-button"]').attributes('aria-label')
 }
 
 /** 拉取 promise 链 + watch 调度 + 渲染落地 */
@@ -182,17 +182,17 @@ afterEach(() => {
 })
 
 describe('入口渲染与 show-btw 实例开关（D7 ③入口）', () => {
-  it('首屏：composer 左簇渲染 btw 按钮（title=旁路提问），`+` 仍居左簇首位', async () => {
+  it('首屏：composer 左簇渲染 btw 按钮（aria-label=旁路提问（tooltip 同文案，2026-10-19 原生 title 退役）），`+` 仍居左簇首位', async () => {
     mountComposer()
     await settle()
 
     const btn = bar().find('[data-testid="composer-btw-button"]')
     expect(btn.exists()).toBe(true)
-    expect(btn.attributes('title')).toBe('旁路提问')
+    expect(btn.attributes('aria-label')).toBe('旁路提问')
 
     const buttons = bar().findAll('button')
-    expect(buttons[0]?.attributes('title')).toBe('添加内容（附件 / 命令）')
-    expect(buttons[1]?.attributes('title')).toBe('旁路提问')
+    expect(buttons[0]?.attributes('aria-label')).toBe('添加内容（附件 / 命令）')
+    expect(buttons[1]?.attributes('aria-label')).toBe('旁路提问')
   })
 
   it('show-btw=false：不出 btw 入口（drawer 内实例防递归），左簇其余元素不受影响', async () => {
@@ -200,7 +200,7 @@ describe('入口渲染与 show-btw 实例开关（D7 ③入口）', () => {
     await settle()
 
     expect(w.find('[data-testid="composer-btw-button"]').exists()).toBe(false)
-    expect(bar().findAll('button')[0]?.attributes('title')).toBe('添加内容（附件 / 命令）')
+    expect(bar().findAll('button')[0]?.attributes('aria-label')).toBe('添加内容（附件 / 命令）')
   })
 
   it('无 session：不出 btw 入口（badge 数据面需主会话；真 landing 态不受影响）', async () => {
@@ -212,7 +212,7 @@ describe('入口渲染与 show-btw 实例开关（D7 ③入口）', () => {
 })
 
 describe('badge 两态基础：聚合 Σ unread + 清除 = 线内容进视口（§1.4 / D8 未读行）', () => {
-  it('聚合 = 当前主会话名下线的 Σ：逐线累加、title 换计数文案、>9 封顶 9+', async () => {
+  it('聚合 = 当前主会话名下线的 Σ：逐线累加、aria-label 换计数文案、>9 封顶 9+', async () => {
     composerBtwApiSpy.list.mockResolvedValue([{ vid: 'btw:t1' }, { vid: 'btw:t2' }])
     mountComposer()
     await settle()
@@ -224,14 +224,14 @@ describe('badge 两态基础：聚合 Σ unread + 清除 = 线内容进视口（
     chat.setMessages('btw:t1', [msg('a1')])
     await settle()
     expect(badge().text()).toBe('1')
-    expect(bar().find('[data-testid="composer-btw-button"]').attributes('title')).toBe('1 条未读旁路回复')
+    expect(bar().find('[data-testid="composer-btw-button"]').attributes('aria-label')).toBe('1 条未读旁路回复')
 
     // Σ per-line：t1 再来一条 + t2 一条 = 3
     chat.setMessages('btw:t1', [msg('a1'), msg('a2')])
     chat.setMessages('btw:t2', [msg('b1')])
     await settle()
     expect(badge().text()).toBe('3')
-    expect(bar().find('[data-testid="composer-btw-button"]').attributes('title')).toBe('3 条未读旁路回复')
+    expect(bar().find('[data-testid="composer-btw-button"]').attributes('aria-label')).toBe('3 条未读旁路回复')
 
     // 封顶 9+
     chat.setMessages(
@@ -297,7 +297,7 @@ describe('badge 两态基础：聚合 Σ unread + 清除 = 线内容进视口（
 })
 
 describe('badge 两态：待处理徽点与 unread 计数并列呈现（§1.4 裁决 U1 + D8 终态机）', () => {
-  it('双零（unread=0 且 pending=0）：计数角标与待处理徽点都不渲染，title 保持入口语义', async () => {
+  it('双零（unread=0 且 pending=0）：计数角标与待处理徽点都不渲染，aria-label 保持入口语义', async () => {
     composerBtwApiSpy.list.mockResolvedValue([{ vid: 'btw:t1' }])
     mountComposer()
     await settle()
@@ -308,13 +308,13 @@ describe('badge 两态：待处理徽点与 unread 计数并列呈现（§1.4 �
     expect(buttonTitle()).toBe('旁路提问')
   })
 
-  it('pending>0：待处理徽点渲染 + title 换待处理计数文案（Σ per-line 待处理线数）；清除后归零不显', async () => {
+  it('pending>0：待处理徽点渲染 + aria-label 换待处理计数文案（Σ per-line 待处理线数）；清除后归零不显', async () => {
     composerBtwApiSpy.list.mockResolvedValue([{ vid: 'btw:t1' }, { vid: 'btw:t2' }])
     mountComposer()
     await settle()
     expect(pendingDot().exists()).toBe(false)
 
-    // 置位一条线（回收提醒 setter = D8 终态机第四行数据源）→ 徽点 + 计数 title
+    // 置位一条线（回收提醒 setter = D8 终态机第四行数据源）→ 徽点 + 计数 aria-label
     setBtwReclaimReminder('btw:t1', true)
     await settle()
     expect(pendingDot().exists()).toBe(true)
@@ -333,7 +333,7 @@ describe('badge 两态：待处理徽点与 unread 计数并列呈现（§1.4 �
     expect(buttonTitle()).toBe('旁路提问')
   })
 
-  it('reclaimImminent 消费接线：拉取置位 → 徽点 + 计数 title 可见；state 帧广播翻转 false → 双双回落（用户可见 DOM）', async () => {
+  it('reclaimImminent 消费接线：拉取置位 → 徽点 + 计数 aria-label 可见；state 帧广播翻转 false → 双双回落（用户可见 DOM）', async () => {
     composerBtwApiSpy.list.mockResolvedValue([{ vid: 'btw:t1', reclaimImminent: true }])
     mountComposer()
     await settle()
@@ -392,7 +392,7 @@ describe('点击入口与退化序登记（D7 + use-composer-bar-density 序 0�
       const node = bar()
       expect(node.find('[data-testid="composer-btw-button"]').exists()).toBe(true)
       const buttons = node.findAll('button')
-      expect(buttons[0]?.attributes('title')).toBe('添加内容（附件 / 命令）')
+      expect(buttons[0]?.attributes('aria-label')).toBe('添加内容（附件 / 命令）')
       expect(buttons[buttons.length - 1]?.attributes('title')).toContain('发送')
     }
     // 密度档位本身如实驱动（证明确实经过退化，而非恒 fit=0 展开）

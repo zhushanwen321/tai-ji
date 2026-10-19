@@ -46,6 +46,9 @@ export default {
     pluginActionExtensionNotLoaded: 'Required extension not loaded in this session',
     pluginActionRestoring: 'Session restoring, availability unknown',
     pluginActionTemporarilyUnavailable: 'Temporarily unavailable',
+    // Scheduler quick card (SchedulerQuickCard, left-cluster popover pass 2026-10-19):
+    schedulerPanelTitle: 'Scheduled tasks',
+    schedulerQuickOpen: 'Open scheduled tasks panel',
   },
   composer: {
     send: 'Send',
