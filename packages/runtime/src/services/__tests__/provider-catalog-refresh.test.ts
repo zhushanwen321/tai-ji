@@ -199,3 +199,58 @@ describe('refreshProviderCatalogs 刷侧', () => {
     expect(result.failed).toEqual([])
   })
 })
+
+// ── W1 缝隙 A：models-store.json mtime 轮询（startModelsStoreMtimeWatch）──
+
+describe('startModelsStoreMtimeWatch', () => {
+  beforeEach(() => {
+    vi.useFakeTimers()
+  })
+  afterEach(() => {
+    vi.useRealTimers()
+  })
+
+  it('mtime 变化 → onChange 恰好触发一次；不变不触发', async () => {
+    writePiStore({ zai: { models: [] } })
+    const mod = await loadFresh()
+    const onChange = vi.fn()
+    const stop = mod.startModelsStoreMtimeWatch(onChange, 10)
+
+    vi.advanceTimersByTime(30)
+    expect(onChange).not.toHaveBeenCalled()
+
+    writePiStore({ zai: { models: [{ id: 'glm-new' }] } })
+    vi.advanceTimersByTime(30)
+    expect(onChange).toHaveBeenCalledTimes(1)
+
+    vi.advanceTimersByTime(60)
+    expect(onChange).toHaveBeenCalledTimes(1)
+    stop()
+  })
+
+  it('stop 后不再触发', async () => {
+    writePiStore({ zai: { models: [] } })
+    const mod = await loadFresh()
+    const onChange = vi.fn()
+    const stop = mod.startModelsStoreMtimeWatch(onChange, 10)
+    stop()
+
+    writePiStore({ zai: { models: [{ id: 'glm-new' }] } })
+    vi.advanceTimersByTime(50)
+    expect(onChange).not.toHaveBeenCalled()
+  })
+
+  it('文件不存在（mtime -1）不触发；随后落盘可触发', async () => {
+    const mod = await loadFresh()
+    const onChange = vi.fn()
+    const stop = mod.startModelsStoreMtimeWatch(onChange, 10)
+
+    vi.advanceTimersByTime(30)
+    expect(onChange).not.toHaveBeenCalled()
+
+    writePiStore({ zai: { models: [] } })
+    vi.advanceTimersByTime(30)
+    expect(onChange).toHaveBeenCalledTimes(1)
+    stop()
+  })
+})

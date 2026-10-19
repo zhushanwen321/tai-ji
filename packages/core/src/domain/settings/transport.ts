@@ -143,6 +143,8 @@ export interface SettingsTransport {
   detectSources(): Promise<SourceDetectResult[]>
   /** 进入 Settings Provider 页触发远程模型目录刷新（fail-safe；failed 非空 → 目录可能过期） */
   refreshProviderCatalogs(): Promise<ProviderCatalogsRefreshResult>
+  /** 页签可见期间 models-store.json 变化感知开关（离开页签 disable，变化经 onProviders 推回） */
+  setProviderCatalogWatch(enable: boolean): Promise<void>
   /** 按 sources 扫描 skill（加入 discovery） */
   scanSkills(sources: string[]): Promise<ScannedSkillInfo[]>
   /** 按 sources 扫描 agent */

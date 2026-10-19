@@ -1277,6 +1277,10 @@ const configImpl = {
     await sleep(TIMING.ack)
     return { refreshed: [], failed: [], corrupt: [] }
   },
+  // models-store 变化感知开关：mock 无 pi 落盘层，ack 同构（facade 三元）。
+  async setProviderCatalogWatch(_enable: boolean): Promise<void> {
+    await sleep(TIMING.ack)
+  },
   // wave-env-check：env 检测。mock 读 process.env 同构（浏览器 mock 下多为未设置）。
   async checkEnvVars(names: string[]): Promise<Record<string, boolean>> {
     await sleep(TIMING.ack)

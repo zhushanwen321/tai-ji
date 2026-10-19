@@ -80,6 +80,7 @@ export function makeSettingsTransportStub(overrides: SettingsTransportStubOverri
     listBuiltinProviders: vi.fn(async () => []),
     detectSources: vi.fn(async () => []),
     refreshProviderCatalogs: vi.fn(async () => ({ refreshed: [], failed: [], corrupt: [] })),
+    setProviderCatalogWatch: vi.fn(async () => undefined),
     scanSkills: vi.fn(async () => []),
     scanAgents: vi.fn(async () => []),
     getGlobalSkills: vi.fn(async () => []),

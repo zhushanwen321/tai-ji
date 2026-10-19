@@ -346,7 +346,12 @@ onMounted(async () => {
   // 广播推回 store 自动更新。RD-4#10 的陈旧判据（failed[] / transport reject）见
   // composables/features/settings/useProviderCatalogsStale.ts。
   await refreshCatalogs()
+  // W1 缝隙 A：页签可见期间启用 pi models-store.json 变化感知——runtime 轮询 mtime
+  // 变化即广播 config.providers 走同一条订阅链；fire-and-forget，开关失败不影响页面。
+  transport.setProviderCatalogWatch(true).catch(() => {})
 })
+
+onUnmounted(() => transport.setProviderCatalogWatch(false).catch(() => {}))
 
 /** 选中内置模板 → 打开 QuickSetup（先刷新 OAuth presence + env 检测） */
 async function onTemplateSelect(tpl: BuiltinProviderTemplate): Promise<void> {

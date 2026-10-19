@@ -17,6 +17,7 @@ import type { ClientMessage, DefaultModelSource, ProviderSource, ProviderId } fr
 import type { IConfigService } from '../interfaces.js'
 import type { SettingsHandlerContext } from './settings-message-handler.js'
 import { attachSupportedLevelsSafe } from './message-broker.js'
+import { startModelsStoreMtimeWatch } from '../services/provider-catalog-refresh.js'
 
 /**
  * provider 增删后统一维护 defaultModel（design provider-arch-hardening §3.3 D3 / Phase 3）。
@@ -51,12 +52,19 @@ type ProviderCaseHandler = (ws: WsType, msg: ClientMessage) => boolean | Promise
 
 export class ProviderMessageHandler {
   private readonly routes: ReadonlyMap<string, ProviderCaseHandler>
+  /**
+   * models-store.json 变化感知的启停状态（单布尔，最后写者赢——多窗口同时开页签时后到
+   * 的 disable 会停掉先到者的 watch，重新进页签即恢复，单用户桌面可接受）。handler 是
+   * runtime 级单例，watch 跨连接共享；stop 句柄持有态 = enabled。
+   */
+  private stopModelsStoreWatch: (() => void) | null = null
 
   /** type → case 体路由表（构造器内绑定 this；键与方法内 Extract 断言同行对应） */
   constructor(private ctx: SettingsHandlerContext) {
     this.routes = new Map<string, ProviderCaseHandler>([
       ['config.getProviders', (ws, msg) => this.handleGetProviders(ws, msg as Extract<ClientMessage, { type: 'config.getProviders' }>)],
       ['config.refreshProviderCatalogs', (ws, msg) => this.handleRefreshProviderCatalogs(ws, msg as Extract<ClientMessage, { type: 'config.refreshProviderCatalogs' }>)],
+      ['config.setProviderCatalogWatch', (ws, msg) => this.handleSetProviderCatalogWatch(ws, msg as Extract<ClientMessage, { type: 'config.setProviderCatalogWatch' }>)],
       ['config.setProvider', (ws, msg) => this.handleSetProvider(ws, msg as Extract<ClientMessage, { type: 'config.setProvider' }>)],
       ['config.deleteProvider', (ws, msg) => this.handleDeleteProvider(ws, msg as Extract<ClientMessage, { type: 'config.deleteProvider' }>)],
       ['config.toggleProviderEnabled', (ws, msg) => this.handleToggleProviderEnabled(ws, msg as Extract<ClientMessage, { type: 'config.toggleProviderEnabled' }>)],
@@ -100,6 +108,23 @@ export class ProviderMessageHandler {
     const result = await this.ctx.configService.refreshProviderCatalogs()
     this.ctx.reply(ws, msg.id, 'config.providerCatalogsRefreshed', result)
     this.ctx.broadcastProviderList()
+    return true
+  }
+
+  // W1 缝隙 A：页签可见期间轮询 pi models-store.json mtime，变化即广播新列表（读侧
+  // loadOverlay 自带 mtime 失效检测自动重读，这里只触发广播）。ack 型 reply。
+  private handleSetProviderCatalogWatch(
+    ws: WsType,
+    msg: Extract<ClientMessage, { type: 'config.setProviderCatalogWatch' }>,
+  ): boolean {
+    const { enable } = msg.payload
+    if (enable && !this.stopModelsStoreWatch) {
+      this.stopModelsStoreWatch = startModelsStoreMtimeWatch(() => this.ctx.broadcastProviderList())
+    } else if (!enable && this.stopModelsStoreWatch) {
+      this.stopModelsStoreWatch()
+      this.stopModelsStoreWatch = null
+    }
+    this.ctx.reply(ws, msg.id, 'message.status', { status: enable ? 'watch-enabled' : 'watch-disabled' })
     return true
   }
 

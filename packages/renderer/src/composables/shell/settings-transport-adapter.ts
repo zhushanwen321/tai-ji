@@ -33,6 +33,7 @@ export function createSettingsTransport(): SettingsTransport {
     listBuiltinProviders: () => config.listBuiltinProviders(),
     detectSources: () => config.detectSources(),
     refreshProviderCatalogs: () => config.refreshProviderCatalogs(),
+    setProviderCatalogWatch: (enable) => config.setProviderCatalogWatch(enable),
     scanSkills: (sources) => config.scanSkills(sources),
     scanAgents: (sources) => config.scanAgents(sources),
     getGlobalSkills: () => config.getGlobalSkills(),
