@@ -101,6 +101,13 @@ import type { IMessageBus } from '../message-bus/message-bus.js'
 import type { SessionRegisteredSource } from './session-state-projection.js'
 
 /**
+ * subagent 动作结果文件（/subagents --req 回执）单次读取上限（256 KiB）：回执是
+ * 小型 JSON，该上限防御写侧畸形超大条目拖垮同步消费路径（截断即解析失败 → 分型
+ * 错误，不静默放大读取窗口）。
+ */
+const SUBAGENT_ACTION_RESULT_MAX_BYTES = 262_144
+
+/**
  * W18：per-session record entry 派生缓存（subagent/workflow 列表的 runtime 侧 owner）。
  *
  * 三路径（父文档 §3.1 失效-重新拉取模式）：
@@ -1529,15 +1536,21 @@ export class SessionRecords {
     let raw: string | undefined
     try {
       if (resultsFile !== undefined && existsSync(resultsFile)) {
-        raw = readFileSync(resultsFile, 'utf8').slice(0, 256 * 1024)
+        raw = readFileSync(resultsFile, 'utf8').slice(0, SUBAGENT_ACTION_RESULT_MAX_BYTES)
       }
     } catch (e) {
+      // 降级策略：读失败（权限 / 竞态删改）时 raw 保持 undefined，下方统一按「回执缺失」
+      // 抛分型错误如实上抛（缺失语义与文件不存在的通道级失败同形）；此处只留痕底层 IO 原因。
       console.warn(`[session-service] subagent action result file read failed: ${toErrorMessage(e)}`)
     } finally {
       if (resultsFile !== undefined) {
         try {
           unlinkSync(resultsFile)
-        } catch { /* 读失败/并发读删竞态时 best-effort 清理，不遮蔽主错误面 */ }
+        } catch (e) {
+          // best-effort 清理（读失败 / 并发读删竞态），失败不遮蔽主错误面——warn 留痕即可，
+          // 条目残留由写侧下次 --req 覆盖，不影响幂等。
+          console.warn(`[session-service] subagent action result file cleanup failed: ${toErrorMessage(e)}`)
+        }
       }
     }
     if (raw === undefined) {
@@ -1909,6 +1922,9 @@ function ensureEngineRegistryForProjection(): void {
       dataDir: getDataDir(),
     })
   } catch (e) {
+    // 降级策略（方法头注释契约）：扫描失败按保守缺省派生（chatCapable false），
+    // 不向投影调用方传播——能力误判 true 的代价（composer 通道打开但引擎不可用）
+    // 高于误判 false 的代价（用户重开面板触发重扫），此处只留痕失败原因。
     console.warn(`[session-records] engine discovery for chatCapable projection failed: ${toErrorMessage(e)}`)
   }
 }
