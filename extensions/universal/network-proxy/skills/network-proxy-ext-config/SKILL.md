@@ -49,7 +49,7 @@ interface NetworkProxyConfig {
 - 每个 turn 开始重读配置，指纹（enabled+proxy+noProxy+rules）变化才重建包装——**运行中会话自下一轮对话起生效，无需重启**；turn 进行中（工具循环连续请求）保存的配置对该 turn 内后续请求不生效
 - `enabled` 从 true → false：立即恢复包装前的 fetch（全部直连/env 代理路由）
 - 未命中规则的流量委托包装前的 fetch——独立 pi 用户设了 `HTTPS_PROXY` 环境变量时，未命中流量仍走 env 代理，语义不丢失
-- pi 的 `configureHttpDispatcher` 带 shouldInstallGlobals 守卫：检测到 `globalThis.fetch` 已被第三方覆盖即保留不重装，本扩展的包装在同进程内持续生效；槽位被其他第三方整体覆盖时，下一 turn 开始自动以覆盖者为新 original 重新包装（防御路径）
+- pi 的 `configureHttpDispatcher` 带 shouldInstallGlobals 守卫（pi dist/core/http-dispatcher.js:88-99）：检测到 `globalThis.fetch` 已被第三方覆盖即保留不重装，本扩展的包装在同进程内持续生效；槽位被其他第三方整体覆盖时，下一 turn 开始自动以覆盖者为新 original 重新包装（防御路径）
 
 ## 统计文件
 

@@ -19,8 +19,9 @@
  * - 加载 / 每 turn 开始：重读配置推进状态（禁用 = 摘除包装恢复原 fetch）；
  * - 指纹未变且包装仍在进程槽位：零动作（不重建）；
   * - 槽位被第三方整体覆盖（其他 extension 包装 / 手动改写；pi 的 configureHttpDispatcher
-  *   有 shouldInstallGlobals 守卫——检测到 fetch 已被第三方覆盖即保留不重装，本扩展的
-  *   包装在同进程内持续生效）→ 以覆盖者为新 original 重新包装（防御路径）；
+  *   有 shouldInstallGlobals 守卫（pi dist/core/http-dispatcher.js:88-99）——检测到 fetch
+  *   已被第三方覆盖即保留不重装，本扩展的包装在同进程内持续生效）→ 以覆盖者为新 original
+  *   重新包装（防御路径）；
  * - 构造失败：onError + 恢复原 fetch（全部直连），同指纹锁定不重试（首败即停）。
  *
  * reload 残留：jiti 全量 reload 后旧模块环境的包装可能仍挂在 globalThis.fetch 上；包装函数
