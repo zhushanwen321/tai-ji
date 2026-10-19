@@ -1,5 +1,11 @@
 # @zhushanwen/session-delivery
 
+## 2.0.0
+
+### Major Changes
+
+- 58a70ebc9: Unified delivery kernel v3: durable `DeliveryStore` persistence port (with a disk outbox implementation `createDiskDeliveryStore`), three receipt anchors (`marker` / `acceptance` / `details-id` with injectable `DeliveryProofCheck`), per-payload failure policies (`forget` / `retain`), and design-level deferral reasons. Breaking: `DeliveryTombstone` is retired in favor of `DeliveryTerminalRecord`, and `SendReceipt` is now a discriminated union instead of a boolean interface.
+
 ## 1.1.0
 
 ### Minor Changes

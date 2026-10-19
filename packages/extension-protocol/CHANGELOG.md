@@ -1,5 +1,11 @@
 # @zhushanwen/extension-protocol
 
+## 0.22.0
+
+### Minor Changes
+
+- 58a70ebc9: Canvas schema entries now carry a required `ownerSessionId`; cross-session canvas access is rejected with a new `forbidden` error code. Pending-entry scans expose first-seen register types and unregister statuses (`scanPendingFields` / `MAPPED_PENDING_STATUSES`), and the background-task registry moves to the session store tree at `<dataDir>/ext-sessions/<sessionId>/background-tasks/`.
+
 ## 0.21.0
 
 ### Minor Changes

@@ -1,5 +1,11 @@
 # @zhushanwen/pi-system-prompt
 
+## 1.4.0
+
+### Minor Changes
+
+- 58a70ebc9: Prompt trace artifacts now live under the session store tree at `<dataDir>/ext-sessions/<sessionId>/session-artifacts/` instead of the shared `session-artifacts/` directory, giving every session its own isolated artifacts folder.
+
 ## 1.3.2
 
 ### Patch Changes

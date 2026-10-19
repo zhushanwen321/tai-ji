@@ -1,5 +1,11 @@
 # @zhushanwen/pi-canvas
 
+## 0.4.0
+
+### Minor Changes
+
+- 58a70ebc9: Canvases are now session-scoped: `canvas_list` only returns canvases created by the current session, and opening another session's canvas with `canvas_enter` is rejected with `forbidden` asking the user to switch to the owning session.
+
 ## 0.3.0
 
 ### Minor Changes

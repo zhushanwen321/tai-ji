@@ -1,5 +1,11 @@
 # @zhushanwen/pi-session-reader
 
+## 0.12.0
+
+### Minor Changes
+
+- 58a70ebc9: Session and subagent discovery now reads from the new `ext-sessions` store tree (per-root-session partitions with `records/` and `sessions/` subdirectories) instead of the flat `<agentDir>/subagents/` layout, and exact session-id queries are matched first before fuzzy search.
+
 ## 0.11.0
 
 ### Minor Changes

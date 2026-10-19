@@ -1,6 +1,6 @@
 {
   "name": "@zhushanwen/subagent-core",
-  "version": "1.5.3",
+  "version": "1.6.0",
   "description": "Cross-host shared subagent execution layer and workflow orchestration core (dual-form npm package: TS source for workspace, dist ESM+CJS for npm)",
   "type": "module",
   "license": "MIT",
@@ -111,7 +111,6 @@
     "test:engine-protocol": "vitest run src/execution/engine/__tests__/conformance/protocol-blackbox.test.ts src/execution/engine/__tests__/conformance/static-spawn-guard.test.ts"
   },
   "dependencies": {
-    
     "@zhushanwen/extension-protocol": "workspace:*",
     "@zhushanwen/subagent-engine-sdk": "workspace:*",
     "acorn": "^8.17.0",

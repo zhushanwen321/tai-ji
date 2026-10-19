@@ -1,6 +1,6 @@
 {
   "name": "@zhushanwen/pi-network-proxy",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "LLM network proxy: rule-based per-hostname traffic splitting via an undici global dispatcher (proxied vs direct), with request counters.",
   "type": "module",
   "main": "index.ts",
