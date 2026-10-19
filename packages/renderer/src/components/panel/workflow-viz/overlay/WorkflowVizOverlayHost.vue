@@ -43,10 +43,13 @@
       :elapsed-ms="elapsedMs"
       :unmatched="unmatchedInstances"
       :instances-by-node="matchResult?.byNode"
+      :model-display="runModelDisplay"
+      :model-switching="modelSwitching"
       @close="closeWorkflowVizOverlay"
       @select="onSelect"
       @retry-dag="retryDagParse"
       @update:tab="setOverlayTab"
+      @select-model="onSelectModel"
     >
       <WorkflowLivePanel
         v-if="panelInput"
@@ -100,6 +103,8 @@ import {
   setOverlayTab,
 } from './workflow-viz-overlay'
 import { useWorkflowStore, deriveWorkflowRunElapsedMs } from '@/stores/workflow'
+import { resolveSubagentModelDisplay, useSubagentModel } from '@/composables/features/subagent/useSubagentModel'
+import type { ProviderId } from '@taiji/shared'
 
 const panelRef = ref<InstanceType<typeof WorkflowLivePanel> | null>(null)
 const agentDrawerRef = ref<InstanceType<typeof AgentStreamDrawer> | null>(null)
@@ -227,6 +232,47 @@ const elapsedMs = computed<number | undefined>(() => {
   if (run === null) return undefined
   return deriveWorkflowRunElapsedMs(run, now.value) ?? undefined
 })
+
+// ── run 级执行模型全切（[2026-10-19] 自 drawer WorkflowTab 平移——demo 裁决归宿 = 标题栏）──
+// 展示态四分支合成与切换动作单点沿用 subagent-model-switch §7.1 既有实现（useSubagentModel）；
+// 标签显示权威 = 首个非 pending 成员（run 级覆盖分发全成员，聚合面不取单一值）。
+
+const { setSubagentModel, memberDisplayOf } = useSubagentModel()
+/** 切换中（ModelSelectPopover switching 门——触发器转圈 + 禁开合；回执写状态在 composable，禁乐观写）。 */
+const modelSwitching = ref(false)
+
+const runModelDisplay = computed<{ label?: string; overridden: boolean } | undefined>(() => {
+  const wf = runRecord.value
+  if (wf === null) return undefined
+  const authoritative = wf.agentCalls.find((c) => c.status !== 'pending') ?? wf.agentCalls[0]
+  if (authoritative === undefined) return { label: undefined, overridden: false }
+  // 成员回执态经 memberDisplayOf 按 (runId, memberRecordId) 键域读取（详情载荷 memberRecordId
+  // 透出，单源锚）；session id（pi uuidv7）与 call.id（taskIndex）都不在该键域，仅作缺省兜底
+  const memberRunId = authoritative.memberRecordId ?? authoritative.sessionId ?? String(authoritative.id)
+  return resolveSubagentModelDisplay({
+    display: memberDisplayOf(wf.runId, memberRunId),
+    stampedModel: authoritative.model,
+    modelOverride: authoritative.modelOverride?.model,
+    recentEffectiveModel: authoritative.recentEffectiveModel,
+    recordStatus: authoritative.status,
+  })
+})
+
+/** 模型全切（壳上抛选择；已终局 run 的切换由 runtime fail-fast 报「run 已终局」，错误经 toast 承载）。 */
+async function onSelectModel(payload: { modelId: string; provider: ProviderId }): Promise<void> {
+  const wf = runRecord.value
+  if (wf === null || modelSwitching.value) return
+  modelSwitching.value = true
+  try {
+    await setSubagentModel({
+      runId: wf.runId,
+      provider: payload.provider,
+      modelId: payload.modelId,
+    })
+  } finally {
+    modelSwitching.value = false
+  }
+}
 
 // ── 事件接线 ─────────────────────────────────────────────────────────────────
 

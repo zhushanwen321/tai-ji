@@ -16,7 +16,7 @@
  */
 import { describe, it, expect, beforeEach, vi } from 'vitest'
 import { mount, flushPromises } from '@vue/test-utils'
-import { h } from 'vue'
+import { defineComponent, h } from 'vue'
 import { createPinia, setActivePinia } from 'pinia'
 import {
   bindDrawerSessionId,
@@ -113,6 +113,49 @@ vi.mock('@/composables/useToast', () => ({
 vi.mock('@/components/panel/BrowserOverlay.vue', () => ({
   default: { name: 'BrowserOverlayStub', template: '<div />' },
 }))
+
+// ── mock：useSubagentModel（run 级模型全切动作边界——断言 Host 接线，不深入 RPC）──
+
+const { setSubagentModelMock } = vi.hoisted(() => ({ setSubagentModelMock: vi.fn().mockResolvedValue(undefined) }))
+vi.mock('@/composables/features/subagent/useSubagentModel', () => ({
+  useSubagentModel: () => ({
+    setSubagentModel: setSubagentModelMock,
+    memberDisplayOf: () => undefined,
+  }),
+  resolveSubagentModelDisplay: (input: { stampedModel?: string }) => ({
+    label: input.stampedModel,
+    overridden: false,
+  }),
+}))
+
+// ── mock：ModelSelectPopover + PopoverTrigger（标题栏全切入口组件边界，壳测试同款）──
+
+vi.mock('@/components/panel/ModelSelectPopover.vue', () => ({
+  default: defineComponent({
+    name: 'ModelSelectPopoverStub',
+    props: { selected: { type: String, default: '' }, switching: { type: Boolean, default: false } },
+    emits: ['select'],
+    setup(_, { emit, slots }) {
+      return () =>
+        h('div', {
+          'data-testid': 'model-select-stub',
+          onClick: () => emit('select', { modelId: 'glm-4.7', provider: 'zai-coding-cn' }),
+        }, slots.trigger?.())
+    },
+  }),
+}))
+vi.mock('@/components/ui/popover', async (importOriginal) => {
+  const actual = await importOriginal<Record<string, unknown>>()
+  return {
+    ...actual,
+    PopoverTrigger: defineComponent({
+      inheritAttrs: false,
+      setup(_, { attrs, slots }) {
+        return () => h('button', attrs, slots.default?.())
+      },
+    }),
+  }
+})
 
 // ── mock：Guard 挂载计数包装（U4 kind 门控对账观测面）─────────────────────────
 // 保留真实 Guard 回落语义（onErrorCaptured → emit fallback 原样转发），仅在 setup 计数：
@@ -410,6 +453,29 @@ describe('Host 容器（黑盒 DOM + D10 回落）', () => {
     expect(drawer.isOpen.value).toBe(false)
     wrapper.unmount()
     consoleSpy.mockRestore()
+  })
+
+  it('标题栏模型全切接线：壳 select-model → setSubagentModel（runId + provider + modelId 透传）', async () => {
+    await seedRecords([makeRun('wf-1', 's1', {
+      agentCalls: [{
+        id: 0, agent: 'worker-0', phase: 'alpha', status: 'running', startedAt: new Date().toISOString(),
+        sessionId: 'acs-0', model: 'glm-5.3',
+      } as unknown as WorkflowRunRecord['agentCalls'][number]],
+    })])
+    const wrapper = mount(WorkflowVizOverlayHost)
+    openWorkflowVizOverlay(SID, 'wf-1')
+    await flushPromises()
+
+    // 触发器在场（run 元素行内），点击选模型 → 宿主接线 setSubagentModel
+    expect(wrapper.find('[data-testid="wfvz-overlay-model-trigger"]').exists()).toBe(true)
+    await wrapper.find('[data-testid="model-select-stub"]').trigger('click')
+    await flushPromises()
+    expect(setSubagentModelMock).toHaveBeenCalledWith({
+      runId: 'wf-1',
+      provider: 'zai-coding-cn',
+      modelId: 'glm-4.7',
+    })
+    wrapper.unmount()
   })
 
   it('回落后再点击 → overlay 重试呈现（Guard epoch 重挂，failed 不卡死后续打开——D10 每次点击均重试）', async () => {

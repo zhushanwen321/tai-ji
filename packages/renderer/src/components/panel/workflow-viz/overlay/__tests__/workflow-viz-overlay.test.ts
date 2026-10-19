@@ -40,6 +40,39 @@ function run(partial: Partial<WorkflowRunRecord> = {}): WorkflowRunRecord {
   }
 }
 
+// ── mock：ModelSelectPopover（标题栏全切入口的组件边界——本测试断言壳的触发器 DOM
+// 与 select-model 事件契约，不深入 reka Popover/面板内部；trigger 渲染交 stub 承载）──
+
+vi.mock('@/components/panel/ModelSelectPopover.vue', () => ({
+  default: defineComponent({
+    name: 'ModelSelectPopoverStub',
+    props: { selected: { type: String, default: '' }, switching: { type: Boolean, default: false } },
+    emits: ['select'],
+    setup(props: { selected: string }, { emit, slots }) {
+      return () =>
+        h('div', {
+          'data-testid': 'model-select-stub',
+          'data-selected': props.selected,
+          'data-switching': String(props.switching),
+          onClick: () => emit('select', { modelId: 'glm-4.7', provider: 'zai-coding-cn' }),
+        }, slots.trigger?.())
+    },
+  }),
+}))
+// PopoverTrigger as-child 透传 mock（reka Provider 不可用环境下的触发器形态保真）
+vi.mock('@/components/ui/popover', async (importOriginal) => {
+  const actual = await importOriginal<Record<string, unknown>>()
+  return {
+    ...actual,
+    PopoverTrigger: defineComponent({
+      inheritAttrs: false,
+      setup(_, { attrs, slots }) {
+        return () => h('button', attrs, slots.default?.())
+      },
+    }),
+  }
+})
+
 const SAMPLE_DAG: WorkflowDag = {
   phases: [{ name: 'gate', order: 0 }],
   nodes: [{
@@ -110,6 +143,34 @@ describe('WorkflowVizOverlay 壳（黑盒 DOM）', () => {
     expect(pill.text()).toContain('已取消')
     expect(pill.classes()).toContain('text-neutral-mid')
     expect(pill.classes()).not.toContain('text-success')
+  })
+
+  it('标题栏模型全切入口：modelDisplay 注入时渲染触发器（模型名 + 覆盖徽章）；未注入不渲染', () => {
+    const withModel = mountOverlay({ modelDisplay: { label: 'glm-5.3', overridden: true } })
+    const trigger = withModel.find('[data-testid="wfvz-overlay-model-trigger"]')
+    expect(trigger.exists()).toBe(true)
+    expect(trigger.text()).toContain('glm-5.3')
+    expect(withModel.find('[data-testid="wfvz-overlay-model-override-badge"]').text()).toContain('用户覆盖中')
+    // 无覆盖分发：徽章不渲染
+    const plain = mountOverlay({ modelDisplay: { label: 'glm-5.3', overridden: false } })
+    expect(plain.find('[data-testid="wfvz-overlay-model-override-badge"]').exists()).toBe(false)
+    // 未注入（run 数据未就绪的宿主形态）：入口整体不渲染
+    const none = mountOverlay()
+    expect(none.find('[data-testid="wfvz-overlay-model-trigger"]').exists()).toBe(false)
+  })
+
+  it('标题栏模型全切入口：选模型 → select-model 事件上抛（payload 原样透传，切换动作用的宿主）', async () => {
+    const wrapper = mountOverlay({ modelDisplay: { label: 'glm-5.3', overridden: false } })
+    await wrapper.find('[data-testid="model-select-stub"]').trigger('click')
+    expect(wrapper.emitted('select-model')).toHaveLength(1)
+    expect(wrapper.emitted('select-model')?.[0]?.[0]).toEqual({ modelId: 'glm-4.7', provider: 'zai-coding-cn' })
+  })
+
+  it('标题栏模型全切入口随 run 元素三态进退：scheduler / canvas 态 header 让位时入口消失', () => {
+    const scheduler = mountOverlay({ tab: 'scheduler', modelDisplay: { label: 'glm-5.3', overridden: false } })
+    expect(scheduler.find('[data-testid="wfvz-overlay-model-trigger"]').exists()).toBe(false)
+    const canvas = mountOverlay({ tab: 'canvas', modelDisplay: { label: 'glm-5.3', overridden: false } })
+    expect(canvas.find('[data-testid="wfvz-overlay-model-trigger"]').exists()).toBe(false)
   })
 
   it('终局 pill：done+failed → shared 词表「失败」+ errorCode 摘要可见（D9 失败终态）', () => {
