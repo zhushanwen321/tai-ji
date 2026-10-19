@@ -906,7 +906,8 @@ async function main(): Promise<Record<string, unknown>> {
       const sm = await world.run("node", [SMOKE_SCRIPT, "--json"], { timeoutMs: 300_000 });
       let smJson: { status?: unknown; reason?: unknown; entryCount?: unknown } | null = null;
       try {
-        smJson = JSON.parse(sm.stdout) as typeof smJson;
+        // catch 分支必 throw，此处实指非空载荷；as 非 null 形态让控制流收窄生效
+        smJson = JSON.parse(sm.stdout) as { status?: unknown; reason?: unknown; entryCount?: unknown };
       } catch {
         throw new Error(`pi-extension-smoke --json 输出解析失败：\n${tailLines(`${sm.stderr}\n${sm.stdout}`, 15)}\n按输出处置后重新发起本 workflow`);
       }
@@ -2037,8 +2038,9 @@ async function main(): Promise<Record<string, unknown>> {
     log("WARN: 终态摘要 artifact 发布失败（不影响流程结果）");
   }
 
+  let terminal: Record<string, unknown>;
   if (!ok) {
-    return {
+    terminal = {
       status: "failed",
       failedStep: fail?.step ?? (brFailed ? "branch-review" : "unknown"),
       terminated: brFailed && br !== null ? br.terminated : null,
@@ -2057,21 +2059,38 @@ async function main(): Promise<Record<string, unknown>> {
         ? "按 error 中指引处置后重新发起本 workflow（CreateWorkflow path 指向 .agents/workflows/dev-merge-gates.dwf.ts）；run 被中断（非 failed）时优先 ResumeWorkflowRun。CR 门语义：不进 dev-merge 合并"
         : `branch-review 终态 ${br !== null ? br.terminated : "unknown"}——按 dev-merge SKILL 1.7 CR 门语义按失败处置（不进合并），处置 remaining/disputed 清单后重新发起本 workflow`,
     };
+  } else {
+    terminal = {
+      status: "done",
+      gates: gatesStatus,
+      changeset,
+      terminated: br !== null ? br.terminated : null,
+      rounds: br?.rounds ?? 0,
+      runDir: br?.runDir ?? null,
+      disclosures,
+      remaining: br?.remaining ?? [],
+      deferredCommits: br?.deferredCommits ?? [],
+      sweptFiles: br?.sweptFiles ?? [],
+      ledgerFile: br?.ledgerFile ?? null,
+      nextAction: "继续 dev-merge 第 1.8 步：目标集成线传播检查（check-line-propagation.mjs --target HEAD）+ cross-branch-overlap.mjs 兄弟线交集呈报，软提示呈报用户线粒度裁决后进第 2 步合并（dev-merge.sh merge <dev-branch>）",
+    };
   }
-  return {
-    status: "done",
-    gates: gatesStatus,
-    changeset,
-    terminated: br !== null ? br.terminated : null,
-    rounds: br?.rounds ?? 0,
-    runDir: br?.runDir ?? null,
-    disclosures,
-    remaining: br?.remaining ?? [],
-    deferredCommits: br?.deferredCommits ?? [],
-    sweptFiles: br?.sweptFiles ?? [],
-    ledgerFile: br?.ledgerFile ?? null,
-    nextAction: "继续 dev-merge 第 1.8 步：目标集成线传播检查（check-line-propagation.mjs --target HEAD）+ cross-branch-overlap.mjs 兄弟线交集呈报，软提示呈报用户线粒度裁决后进第 2 步合并（dev-merge.sh merge <dev-branch>）",
-  };
+  // terminal.json 落盘（终态审计原始证据自包含，不依赖发起 run 的会话存活与转述；
+  // 与 ledger.json 同层同通道，仅 branch-review 已启动时有 runDir）
+  if (br !== null && br.runDir !== null) {
+    try {
+      const tPath = `${br.runDir}/terminal.json`;
+      const w = await world.run("node", ["-e", WRITE_DOC, tPath, JSON.stringify(terminal, null, 1)]);
+      if (w.exitCode !== 0) {
+        log(`WARN: terminal.json 落盘失败（不影响流程结果，终态审计上下文缺失）：${tailLines(`${w.stderr}\n${w.stdout}`, 3)}`);
+      } else {
+        log(`terminal.json 已落盘：${tPath}`);
+      }
+    } catch (e) {
+      log(`WARN: terminal.json 落盘异常（不影响流程结果）：${e instanceof Error ? e.message : String(e)}`);
+    }
+  }
+  return terminal;
 }
 
 return main();
