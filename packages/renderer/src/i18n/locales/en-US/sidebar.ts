@@ -92,6 +92,8 @@ export default {
     header: 'Projects & sessions',
     groupEmpty: 'No sessions yet — use the group header "+" to start one here',
     newSessionInProject: 'New task in this project',
+    // DefaultProjectHead lightweight row "+": anchor the default project, then create
+    newSessionInDefault: 'New task in default project',
     newSessionInFolder: 'New session in this folder',
     deleteFolderConfirm: 'Delete all sessions in this folder?',
     // N8 A/C dual mode (ui-optimize-unified decision 9): mode names of the two-segment

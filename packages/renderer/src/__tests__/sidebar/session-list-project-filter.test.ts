@@ -162,21 +162,23 @@ describe('SessionList: 项目锚定分组（全部项目并列，按 projectId �
   })
 })
 
-describe('SessionList: 锚定切换（平铺模式 = 锚定聚焦）', () => {
-  it('点其他组头 → 锚定切换并展开（aria-expanded 同步）；原锚定组折叠；组位置不重排', async () => {
+describe('SessionList: 锚定切换（平铺模式 = 多开）', () => {
+  it('点其他组头 → 锚定切换并展开目标组；原锚定组保持展开（多开，开合按组独立记忆）；组位置不重排', async () => {
     setupProjects('proj-a', [['proj-a', 'Alpha'], ['proj-b', 'Beta']])
     const wrapper = mountList()
 
     const idsBefore = wrapper.findAll('[data-testid="project-group"]').map((g) => g.attributes('data-project-id'))
+    // 初始全展开（flatClosed 空集 = 全开）
     expect(groupOf(wrapper, 'proj-a').find('[data-testid="project-group-toggle"]').attributes('aria-expanded')).toBe('true')
-    expect(groupOf(wrapper, 'proj-b').find('[data-testid="project-group-toggle"]').attributes('aria-expanded')).toBe('false')
+    expect(groupOf(wrapper, 'proj-b').find('[data-testid="project-group-toggle"]').attributes('aria-expanded')).toBe('true')
 
     await groupOf(wrapper, 'proj-b').find('[data-testid="project-group-toggle"]').trigger('click')
     await nextTick()
 
     expect(useProjectStore().activeProjectId).toBe('proj-b')
     expect(groupOf(wrapper, 'proj-b').find('[data-testid="project-group-toggle"]').attributes('aria-expanded')).toBe('true')
-    expect(groupOf(wrapper, 'proj-a').find('[data-testid="project-group-toggle"]').attributes('aria-expanded')).toBe('false')
+    // 多开：原锚定组不再因锚定切换被收起（展开态与锚定解耦）
+    expect(groupOf(wrapper, 'proj-a').find('[data-testid="project-group-toggle"]').attributes('aria-expanded')).toBe('true')
     // 顺序稳定不置顶（用户裁决 2026-10-11）：锚定切换不重排组位置
     expect(wrapper.findAll('[data-testid="project-group"]').map((g) => g.attributes('data-project-id'))).toEqual(idsBefore)
   })

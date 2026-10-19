@@ -5,6 +5,8 @@
     操作钮浮现、计数让位（同位替换惯例，min-height 预留防行高跳动）。
     操作钮：在此项目新建任务（+，恒渲染）/ 重命名 / 删除（默认项目不渲染——nameless
     身份是未归类/孤儿 session 兜底聚合的判据，删/改会瓦解聚合，store 层同源拦截）。
+    组头整体是 session 拖拽落点（useSessionDropTarget：拖到组头 = 移动归属到本项目，
+    dropActive 高亮；折叠组同样可落，父级 drop 后强制展开）。
     展开体常驻 DOM（不用 v-if/v-show）：grid-template-rows 0fr↔1fr 真实高度动画 +
     内层 opacity 跟进淡入 + visibility 收起延迟翻转（防隐藏行进 Tab 焦点序、细线随
     展开体显隐）；reduced-motion 由全局 reduce 块归零过渡（= 即时切换）。
@@ -16,7 +18,15 @@
     「禁自定义 CSS（特殊动画除外）」口径下保持零白名单依赖。
   -->
   <div class="pg" data-testid="project-group" :data-project-id="projectId" :data-current="current ? 'true' : undefined">
-    <div class="pgh flex min-h-[31px] items-center gap-[4px] px-[6px] pt-[7px] pb-[4px] group/pgh" data-testid="project-group-head">
+    <div
+      class="pgh flex min-h-[31px] items-center gap-[4px] px-[6px] pt-[7px] pb-[4px] group/pgh transition-colors duration-[var(--duration-fast)] ease-[var(--ease-out)]"
+      :class="dropActive ? 'bg-surface-hover rounded-sm' : ''"
+      data-testid="project-group-head"
+      :data-dragover="dropActive ? 'true' : undefined"
+      @dragover="onDragOver"
+      @dragleave="onDragLeave"
+      @drop="onDrop"
+    >
       <Input
         v-if="renaming"
         ref="renameInputRef"
@@ -123,6 +133,7 @@ import { useI18n } from 'vue-i18n'
 import { Plus, Pencil, Trash2 } from '@lucide/vue'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
+import { useSessionDropTarget } from '@/composables/features/sidebar/use-session-drop-target'
 
 const { t } = useI18n()
 
@@ -150,7 +161,14 @@ const emit = defineEmits<{
   renameCommit: [name: string]
   /** 删除请求（确认弹层在父级） */
   deleteRequest: []
+  /** session 拖入组头（useSessionDropTarget）：移动归属到本项目（父级转 setProject） */
+  dropSession: [sessionId: string]
 }>()
+
+/** 组头 = session 拖拽落点（拖到项目 = 移动归属；折叠组同样可落，父级 drop 后强制展开） */
+const { dropActive, onDragOver, onDragLeave, onDrop } = useSessionDropTarget((sessionId) =>
+  emit('dropSession', sessionId),
+)
 
 // ── 行内重命名（Enter 提交 / Esc 取消 / 失焦提交；单容器单输入框，失焦即提交无歧义）──
 const renaming = ref(false)
