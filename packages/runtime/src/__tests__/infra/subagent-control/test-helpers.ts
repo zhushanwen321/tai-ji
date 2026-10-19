@@ -9,6 +9,7 @@ import { join, resolve } from 'node:path'
 import { StringDecoder } from 'node:string_decoder'
 import { SUBAGENT_CONTROL_PROTOCOL_VERSION, SUBAGENT_CONTROL_FRAME_KINDS } from '@zhushanwen/subagent-engine-sdk'
 import { SubagentControlServer, type ControlServerOptions } from '../../../infra/subagent-control/control-server.js'
+import { type DownStdin } from '../../../infra/subagent-control/down-queue.js'
 
 export const FAKE_ENGINE_CLI = resolve(process.cwd(), 'src/__tests__/fixtures/fake-engine-cli.mjs')
 
@@ -43,6 +44,15 @@ export function makeServer(dataDir: string, overrides: ControlServerOptions = {}
     },
     ...overrides,
   })
+}
+
+/** 永远背压的 fake stdin（write 恒 false、drain 永不触发）：背压用例注入，绕开平台内核缓冲差异。 */
+export function fakeBackpressuredStdin(): DownStdin {
+  return {
+    destroyed: false,
+    write: () => false,
+    once: () => undefined,
+  }
 }
 
 /** 合法 engine_open 的 launch 载荷（fixture CLI；用例按需覆盖字段）。 */

@@ -24,6 +24,7 @@ import { SubagentControlServer, type ControlServerOptions } from '../../../infra
 import {
   TestAgent,
   expectOpened,
+  fakeBackpressuredStdin,
   launchSpec,
   makeServer,
   makeTmpDir,
@@ -33,7 +34,6 @@ import {
 } from './test-helpers.js'
 
 const isWin32 = process.platform === 'win32'
-const isLinux = process.platform === 'linux'
 
 const tmpDirs: string[] = []
 const servers: SubagentControlServer[] = []
@@ -263,11 +263,13 @@ describe('subagent-control server（真 socket 环回 + fixture 引擎）', () =
     expect(result.failed?.code).toBe('engine_open_timeout')
   })
 
-  // 平台前提：溢出判定挂「大帧 write 返回 false 产生背压」的环境行为——Linux 流/内核缓冲
-// 会把 70KB 帧写穿（write true，帧不入队），溢出链黑盒不可触达（CI runner 三连复现）。
-// 恢复条件 = 实装提供 backpressure 注入缝（DownStdin 契约已可注入 fake，测试改注入式后移除 skip）。
-it.skipIf(isLinux)('背压溢出：下行队列超上限 → error engine_backpressure_overflow + engine_closed killed_by_control + 组杀', { timeout: 60_000 }, async () => {
-    const { server } = await setupServer({ channelQueueMaxBytes: 64 * 1024 })
+  it('背压溢出：下行队列超上限 → error engine_backpressure_overflow + engine_closed killed_by_control + 组杀', { timeout: 60_000 }, async () => {
+    // 注入 fake stdin（write 恒 false）制造确定性背压——不再依赖「大帧写满内核缓冲」
+    // 的平台行为（Linux 写穿曾致本用例黑盒不可触达而 skip，现移除 skip）。
+    const { server } = await setupServer({
+      channelQueueMaxBytes: 64 * 1024,
+      downStdinForTest: () => fakeBackpressuredStdin(),
+    })
     const agent = new TestAgent(server.listeningSocketPath)
     await agent.opened
     agent.hello()
@@ -335,13 +337,15 @@ it.skipIf(isLinux)('背压溢出：下行队列超上限 → error engine_backpr
     void channelId
   })
 
-  it.skipIf(isLinux)('down 方向连接级聚合上限：多通道累加越界 → 仅触发通道失败（error + engine_closed），其它通道保持 open', { timeout: 90_000 }, async () => {
+  it('down 方向连接级聚合上限：多通道累加越界 → 仅触发通道失败（error + engine_closed），其它通道保持 open', { timeout: 90_000 }, async () => {
     // per-channel 上界放宽到 8MB；连接级 down 聚合上界压到 100KB——两个 70KB
-    // 待写帧累加即越界（fixture --no-read-stdin 不消费 stdin，写必然入队列）。
+    // 待写帧累加即越界（fake stdin write 恒 false、drain 永不触发，通道确定性地
+    // 停在背压态，首帧之后到达的帧才真正入队列）。
     const { server } = await setupServer({
       channelQueueMaxBytes: 8 * 1024 * 1024,
       connectionQueueMaxBytes: 100 * 1024,
       closeGraceMs: 500,
+      downStdinForTest: () => fakeBackpressuredStdin(),
     })
     const agent = new TestAgent(server.listeningSocketPath)
     await agent.opened

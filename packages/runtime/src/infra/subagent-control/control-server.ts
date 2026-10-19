@@ -61,7 +61,7 @@ import {
   type SubagentControlClosedReason,
 } from './frames.js'
 import { ControlChannelRegistry, type EngineChannelRecord } from './channel-registry.js'
-import { ChannelDownQueue } from './down-queue.js'
+import { ChannelDownQueue, type DownStdin } from './down-queue.js'
 import { buildEngineLaunchEnv } from './engine-launch-env.js'
 import { collectWindowsTreeKillTargets, trackEngineChildPid } from './engine-child-pids.js'
 import { SubagentMirrorHub, type MirrorPublish } from './mirror.js'
@@ -123,6 +123,11 @@ export type ControlServerOptions = {
   killPlatform?: NodeJS.Platform
   /** 树杀原语注入（测试观察 Windows 分支调用；缺省 killEngineGroup）。 */
   killGroup?: (pid: number | null | undefined, context: string) => void
+  /**
+   * 引擎 stdin 注入（测试背压用例：fake write 恒 false + drain 永不触发，制造确定性
+   * 背压，绕开内核缓冲把大帧写穿的平台差异；缺省用 spawn 的真实 child.stdin）。
+   */
+  downStdinForTest?: (channelId: string) => DownStdin | null | undefined
 }
 
 /** 构造期解析出的时间窗/上限（ControlServerOptions 缺省注入的集中落点）。 */
@@ -849,7 +854,7 @@ export class SubagentControlServer {
       conn,
       down: new ChannelDownQueue({
         channelId,
-        getStdin: () => rec.child?.stdin,
+        getStdin: () => this.opts.downStdinForTest?.(channelId) ?? rec.child?.stdin,
         channelMaxBytes: this.channelQueueMaxBytes,
         channelMaxFrames: this.channelQueueMaxFrames,
         getConnectionBytes: () => conn.downQueueBytes,
