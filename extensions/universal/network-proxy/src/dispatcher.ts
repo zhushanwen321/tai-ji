@@ -16,7 +16,9 @@
  *   connector 函数形态——该构造选项只收函数，对象形态首个请求建隧道时 TypeError；
  *   `proxyTls` 是「代理连接走 TLS」开关（truthy 即按 TLS 连代理），不可当调优参数袋。
  * - 高延迟路由语义：到代理服务器的连接不回落 autoSelectFamilyAttemptTimeout 默认 250ms，
- *   对齐 pi 原生调优同值 2000（pi dist/core/http-dispatcher.js）。
+ *   对齐 pi 原生调优同值 2000（pi dist/core/http-dispatcher.js:5
+ *   DEFAULT_AUTO_SELECT_FAMILY_ATTEMPT_TIMEOUT_MS = 2_000；其 :4 注释即 250ms 默认会
+ *   终止高延迟路由有效连接尝试的动机）。
  * - 计数时点 = 请求发起时（不等待完成——统计观测「按规则尝试的出站方式」，成败由 pi 原生
  *   错误链路呈现）。
  */
@@ -53,7 +55,10 @@ export type DispatchCounter = (host: string, proxied: boolean) => void;
 
 /**
  * 跨模块环境身份标记：jiti 全量 reload 产生的新模块环境与旧环境的类对象互异（instanceof
- * 失效），而 Symbol.for 全局注册表跨模块环境共享——以它识别全局槽上本扩展旧环境残留的
+ * 失效；根因 = reload 后 extensions/loader.js:472-476 新建 jiti 实例（moduleCache: false）
+ * 重新 import 本扩展，两环境各持一份类构造函数——pi reload 链总锚点见 installer.ts
+ * detachResidualDispatcher 注释），而 Symbol.for 全局注册表是进程级注册表、跨模块环境
+ * 共享——以它识别全局槽上本扩展旧环境残留的
  * 分流器实例（残留不摘除则禁用失效 / 重装嵌套双计，见 installer.ts detachResidualDispatcher）。
  */
 const RULE_DISPATCH_MARK = Symbol.for("@zhushanwen/pi-network-proxy:rule-dispatch");

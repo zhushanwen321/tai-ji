@@ -20,7 +20,7 @@
  *
  * 状态机前置伴随入口 = detachResidualDispatcher：jiti 全量 reload 后 installed=null 但槽上
  * 仍挂着旧环境残留分流器，状态机自身无法区分「真无状态」与「reload 残留」，由它在推进前
- * 摘除（转移表各分支才从干净基线成立）。
+ * 摘除（转移表各分支才从干净基线成立；pi reload 链实装锚点见该函数注释）。
  */
 
 import type { Dispatcher as IDispatcher } from "undici";
@@ -58,6 +58,13 @@ export interface InstallerDeps { // oe-exempt:20261019:framework:安装状态机
  * 摘除 = 恢复残留分流器安装时捕获的原分发器（fallback 引用），状态机从干净基线推进。
  * installed 非 null（同环境 factory 重跑）早退：槽上就是 state.current，摘掉会与
  * 「指纹未变无动作」分支冲突（分流器被摘而状态机不重装）。
+ *
+ * pi reload 链实装锚点（@earendil-works/pi-coding-agent 1.0.0 dist，逐文件读码核实）：
+ * agent-session.js:2899 reload() → :2903 oldRunner.invalidate()（extensions/loader.js:141-149
+ * 退订旧 runtime 的全部 eventBus 订阅）→ :2908 resourceLoader.reload()（resource-loader.js:350，
+ * :353 clearExtensionCache() 清空 jiti 模块缓存并递增缓存代际）→ loader.js:456-484 缓存代际
+ * 失效后 :472-476 新建 jiti 实例（moduleCache: false）重新 import 本扩展、:505-509 重跑工厂
+ * ——新环境模块级 installed 重置为 null，旧环境分流器滞留全局槽无人恢复，即本函数的前提。
  */
 export function detachResidualDispatcher(
 	installed: InstalledState | null,

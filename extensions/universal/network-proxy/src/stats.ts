@@ -64,7 +64,10 @@ let exitFlushInstalled = false;
  * 进程退出 flush（turn 进行中被退出时 turn_end 未到，增量在此兜住）。exit handler 内只允许
  * 同步操作——appendFileSync 同步写满足；模块级 once flag 防工厂重跑（多 session）重复注册。
  * jiti 全量 reload 产生的新模块环境会再注册一个 listener，但旧环境的计数 Map 已停更，旧
- * listener flush 空增量为 no-op，无重复行。
+ * listener flush 空增量为 no-op，无重复行（新环境再注册 = extensions/loader.js:472-476 重新
+ * import 重置模块级 once flag 后重跑工厂；旧计数停更 = 旧 runtime 的 turn 订阅被 invalidate
+ * 退订（extensions/loader.js:147-149）+ 旧分流器摘除后旧 recordDispatch 不再触发；pi reload
+ * 链总锚点见 installer.ts detachResidualDispatcher 注释）。
  */
 export function ensureExitFlush(): void {
 	if (exitFlushInstalled) return;

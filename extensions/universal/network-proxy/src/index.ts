@@ -3,7 +3,9 @@
  *
  * 行为序列（设计 .tmp/tech-design/llm-network-proxy.md §3.1）：
  * - 加载时：读配置校验，enabled 且校验过 → 捕获原分发器（pi 启动已自装 EnvHttpProxyAgent，
- *   setGlobalDispatcher 是接管而非向空闲槽安装）→ 构造分流器安装；校验失败 / 构造失败 →
+ *   setGlobalDispatcher 是接管而非向空闲槽安装——pi dist/core/http-dispatcher.js:73 构造、
+ *   :85 装入全局槽，首次安装 dist/main.js:468 早于 extension 加载）→ 构造分流器安装；
+ *   校验失败 / 构造失败 →
  *   extension error（文案含恢复动作：配置文件路径），不安装不阻断 pi（全部直连）。
  * - 每 turn 开始：重读配置（llm-shared 读时刷新热重载），指纹变化才重建；enabled true→false
  *   恢复原分发器（installer.ts 状态机）。
