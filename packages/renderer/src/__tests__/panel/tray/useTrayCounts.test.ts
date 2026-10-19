@@ -20,7 +20,7 @@ import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 import { mount } from '@vue/test-utils'
 import { computed, defineComponent, h, nextTick, reactive } from 'vue'
 import { createPinia, setActivePinia } from 'pinia'
-import { dispatchGlobal } from '@taiji/core/transport/api'
+import { dispatchGlobal, dispatchCrossSession } from '@taiji/core/transport/api'
 import { useSubagentStore } from '@/stores/subagent'
 import { useWorkflowStore } from '@/stores/workflow'
 import { useSessionStore } from '@/stores/session'
@@ -469,7 +469,9 @@ function makeCanvasEntry(overrides: Partial<CanvasListEntry> & { canvasId: strin
 /** 构造 canvas.updated 全局广播帧并分发（core 全局通道真实现，use-canvas-sync.test 同款；
  * payload.sessionId = 画布归属会话——D4 隔离后消费方按归属分流） */
 function broadcastCanvasUpdated(canvasId: string, sessionId: string = SID): void {
-  dispatchGlobal({
+  // canvas.updated 消费端在 crossSession 通道（use-canvas-sync 模块级单订阅）——
+  // dispatchGlobal 不喂该通道，发帧必须走 dispatchCrossSession（对齐 use-canvas-sync.test）
+  dispatchCrossSession({
     type: 'canvas.updated',
     payload: { canvasId, sessionId, evType: 'NodeCreated', eventId: 'ev-1', summary: '' },
   } as ServerMessage<'canvas.updated'>)
