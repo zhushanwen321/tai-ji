@@ -19,11 +19,9 @@ set -euo pipefail
 WORKTREE_DIR="${1:-.}"
 cd "$WORKTREE_DIR"
 
-RED='\033[0;31m'
-GREEN='\033[0;32m'
-YELLOW='\033[1;33m'
-BOLD='\033[1m'
-NC='\033[0m'
+# 颜色常量收敛到 _lib 共享库（本脚本若复制到其它仓库单独使用，须连同 _lib/ 一并复制）
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)"
+source "$SCRIPT_DIR/../_lib/output.sh"
 
 PASS_COUNT=0
 FAIL_COUNT=0

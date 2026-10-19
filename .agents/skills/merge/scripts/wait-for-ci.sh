@@ -7,10 +7,9 @@
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)"
-WS_ROOT="$SCRIPT_DIR"
-while [[ "$WS_ROOT" != "/" && ! -d "$WS_ROOT/.bare" ]]; do
-    WS_ROOT="$(dirname "$WS_ROOT")"
-done
+source "$SCRIPT_DIR/../_lib/workspace.sh"
+# 未命中时回退 WS_ROOT="/"，与旧内联循环的失败终态一致（走下方 mjs 存在性检查报错退出）
+WS_ROOT="$(find_workspace_root "$SCRIPT_DIR" || echo "/")"
 
 if [[ ! -f "$WS_ROOT/main/scripts/merge/wait-for-ci.mjs" ]]; then
     echo "Error: main worktree 缺少 scripts/merge/wait-for-ci.mjs（实现未落到 main？）" >&2

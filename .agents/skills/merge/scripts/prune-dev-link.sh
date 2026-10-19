@@ -45,13 +45,8 @@ fi
 # 规范化为绝对路径（pwd -P 解析 symlink）
 FEATURE_WT="$(cd "$FEATURE_WT_RAW" && pwd -P)"
 
-# 向上查找 .bare 定位 workspace root
-dir="$FEATURE_WT"
-WS_ROOT=""
-while [ "$dir" != "/" ]; do
-	if [ -d "$dir/.bare" ]; then WS_ROOT="$dir"; break; fi
-	dir="$(dirname "$dir")"
-done
+# 向上查找 .bare 定位 workspace root（_lib/workspace.sh 共享实现；未命中为空，走下方报错退出）
+WS_ROOT="$(find_workspace_root "$FEATURE_WT" || true)"
 if [ -z "$WS_ROOT" ]; then
 	red "✗ 无法定位 workspace root（从 $FEATURE_WT 向上未找到 .bare/）"
 	exit 2
