@@ -264,7 +264,7 @@ function updateExistingRelease(rel, { TAG, GH_REPO, MAIN_WT, FINAL_NOTES_FILE, a
     console.log('  发布 Draft Release...')
     run('gh', ['release', 'edit', TAG, '--repo', GH_REPO, '--draft=false'])
   }
-  return `${REPO_URL}/releases/tag/${TAG}`
+  return `https://github.com/${GH_REPO}/releases/tag/${TAG}`
 }
 
 /** 等 CI 创建 Draft Release（最多 120s，5s × 24 轮）；轮询耗尽由调用方再查兜底。 */
