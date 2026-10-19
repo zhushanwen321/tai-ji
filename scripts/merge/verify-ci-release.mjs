@@ -156,47 +156,31 @@ function releaseExists(tag, repo) {
   return run('gh', ['release', 'view', tag, '--repo', repo], { stdio: 'ignore' }).ok
 }
 
-async function main() {
-  const parsed = parseArgs(process.argv.slice(2))
-  if (!parsed.ok) fatal(parsed.error)
-  const TAG = parsed.tag
-  if (TAG === '') fatal(USAGE)
-  const CI_TIMEOUT_MINS = parsed.ciTimeout
-  const REPO = DEFAULT_REPO
-
-  // ── 阶段 1: 等待 CI workflow 完成 ──
-  log('=== 阶段 1/3: 等待 Release CI ===')
-  log(`Tag: ${TAG}, 超时: ${CI_TIMEOUT_MINS} 分钟`)
-
-  const MAX_POLLS = (CI_TIMEOUT_MINS * 60) / POLL_INTERVAL_S
-  let runFound = false
+/** ── 阶段 1：轮询等 CI run 完成；success 通过，失败/超时 fatal ── */
+async function waitForRunCompleted(TAG, REPO, MAX_POLLS) {
   for (let i = 1; i <= MAX_POLLS; i++) {
     const found = findRunForTag(fetchRuns(REPO), TAG)
     if (found !== null && found.status === 'completed') {
-      runFound = true
       log(`CI workflow: https://github.com/${REPO}/actions/runs/${found.databaseId}`)
       // conclusion 大小写归一化比对（gh run list 返回小写；toLowerCase 对大小写漂移保持稳健）
       if (String(found.conclusion ?? '').toLowerCase() === 'success') {
         log('CI 构建成功')
-        break
+        return
       }
       fatal(`CI 构建失败 (conclusion: ${found.conclusion})`)
     }
     log(`等待 CI 完成... (${i}/${MAX_POLLS})`)
     await sleep(POLL_INTERVAL_S * 1000)
   }
-  if (!runFound) {
-    fatal(`CI 超时（${CI_TIMEOUT_MINS} 分钟），未找到完成的 workflow run`)
-  }
+  fatal(`CI 超时（${MAX_POLLS * POLL_INTERVAL_S / 60} 分钟），未找到完成的 workflow run`)
+}
 
-  // ── 阶段 2: 等待 Release 创建 + 产物上传 ──
-  log('=== 阶段 2/3: 等待 Release 产物 ===')
-
-  // 等待 release 出现（原 bash：循环内成功 break，循环外再终检一次，失败才 fatal）
+/** ── 阶段 2a：轮询等 Release 创建（循环内成功 break，循环外再终检一次，失败才 fatal）── */
+async function waitForReleaseCreated(TAG, REPO) {
   for (let i = 1; i <= RELEASE_WAIT_POLLS; i++) {
     if (releaseExists(TAG, REPO)) {
       log(`Release ${TAG} 已创建`)
-      break
+      return
     }
     log(`等待 Release 创建... (${i}/${RELEASE_WAIT_POLLS})`)
     await sleep(RELEASE_WAIT_INTERVAL_MS)
@@ -204,22 +188,23 @@ async function main() {
   if (!releaseExists(TAG, REPO)) {
     fatal(`Release ${TAG} 未创建，CI 可能未完成 release 步骤`)
   }
+}
 
-  // 等待 assets 上传（至少 3 个：dmg + exe + AppImage）。
-  // 轮询耗尽不报错，直接进阶段 3 由完整性校验兜底（原语义保留）。
+/** ── 阶段 2b：轮询等 assets 上传（至少 MIN_ASSETS 个；耗尽不报错，阶段 3 完整性校验兜底）── */
+async function waitForAssetsUploaded(TAG, REPO) {
   for (let i = 1; i <= RELEASE_WAIT_POLLS; i++) {
     const count = (fetchAssetNames(TAG, REPO) ?? []).length
     if (count >= MIN_ASSETS) {
       log(`产物已上传 (${count} 个)`)
-      break
+      return
     }
     log(`等待产物上传... (${i}/${RELEASE_WAIT_POLLS}, 当前 ${count} 个)`)
     await sleep(RELEASE_WAIT_INTERVAL_MS)
   }
+}
 
-  // ── 阶段 3: 验证产物完整性 ──
-  log('=== 阶段 3/3: 验证产物完整性 ===')
-
+/** ── 阶段 3：产物完整性核验（缺平台/意外产物逐项 ERROR，任何问题 fatal）── */
+function verifyAssetsOrFatal(TAG, REPO) {
   const assets = fetchAssetNames(TAG, REPO) ?? []
   if (assets.length === 0) {
     fatal(`Release ${TAG} 没有任何产物`)
@@ -243,6 +228,32 @@ async function main() {
   }
 
   log('验证通过：CI 成功，3 个平台产物完整（mac + win + linux）')
+}
+
+async function main() {
+  const parsed = parseArgs(process.argv.slice(2))
+  if (!parsed.ok) fatal(parsed.error)
+  const TAG = parsed.tag
+  if (TAG === '') fatal(USAGE)
+  const CI_TIMEOUT_MINS = parsed.ciTimeout
+  const REPO = DEFAULT_REPO
+
+  // ── 阶段 1: 等待 CI workflow 完成 ──
+  log('=== 阶段 1/3: 等待 Release CI ===')
+  log(`Tag: ${TAG}, 超时: ${CI_TIMEOUT_MINS} 分钟`)
+
+  const MAX_POLLS = (CI_TIMEOUT_MINS * 60) / POLL_INTERVAL_S
+  await waitForRunCompleted(TAG, REPO, MAX_POLLS)
+
+  // ── 阶段 2: 等待 Release 创建 + 产物上传 ──
+  log('=== 阶段 2/3: 等待 Release 产物 ===')
+  await waitForReleaseCreated(TAG, REPO)
+  await waitForAssetsUploaded(TAG, REPO)
+
+  // ── 阶段 3: 验证产物完整性 ──
+  log('=== 阶段 3/3: 验证产物完整性 ===')
+  verifyAssetsOrFatal(TAG, REPO)
+
   log(`下载链接: https://github.com/${REPO}/releases/tag/${TAG}`)
   process.exit(0)
 }

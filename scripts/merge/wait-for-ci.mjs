@@ -123,33 +123,23 @@ function fetchReleasePayload(tag, repo) {
   }
 }
 
-async function main() {
-  const parsed = parseArgs(process.argv.slice(2))
-  if (!parsed.ok) {
-    console.error(parsed.error)
+/** ── 定位 commit：显式 sha 优先；缺省读 merge 状态文件（pr-merge 阶段落盘的 headSha）── */
+function resolveRefOrFail(parsed) {
+  if (parsed.sha) return parsed.sha
+  const root = findWorkspaceRoot()
+  const headSha = root === null ? null : readMergeState(root)?.headSha ?? null
+  if (!headSha) {
+    console.error(USAGE)
+    console.error('（未提供 commit-sha，且 merge 状态文件缺失或无 headSha）')
     process.exit(1)
   }
-  const TIMEOUT = parsed.timeout
-  const WORKFLOW = parsed.workflow
-  const VERIFY_RELEASE_TAG = parsed.verifyReleaseTag
-  const GH_REPO = parsed.repo
-  const ciLog = makeCiLog(process.env.MERGE_LOG_FILE)
+  const REF = headSha
+  console.log(`  从 merge 状态读取 commit=${REF}`)
+  return REF
+}
 
-  // ── 定位 commit：显式 sha 优先；缺省读 merge 状态文件（pr-merge 阶段落盘的 headSha）──
-  let REF = parsed.sha
-  if (!REF) {
-    const root = findWorkspaceRoot()
-    const headSha = root === null ? null : readMergeState(root)?.headSha ?? null
-    if (!headSha) {
-      console.error(USAGE)
-      console.error('（未提供 commit-sha，且 merge 状态文件缺失或无 headSha）')
-      process.exit(1)
-    }
-    REF = headSha
-    console.log(`  从 merge 状态读取 commit=${REF}`)
-  }
-
-  // ── 前置检查：gh 安装/登录（原 bash 的 jq 检查随 JSON.parse 移除，见文件头）──
+/** ── 前置检查：gh 安装/登录（原 bash 的 jq 检查随 JSON.parse 移除，见文件头）── */
+function assertGhCliReady() {
   const ghProbe = run('gh', ['--version'], { stdio: 'ignore' })
   if (ghProbe.error !== null || ghProbe.code !== 0) {
     console.error('Error: gh CLI 未安装')
@@ -160,17 +150,11 @@ async function main() {
     console.error('Error: gh CLI 未登录')
     process.exit(1)
   }
+}
 
-  console.log(`${BOLD}等待 CI 完成...${NC}`)
-  ciLog(`等待 CI: commit=${REF}, workflow=${WORKFLOW || 'all'}, timeout=${TIMEOUT}s`)
-  console.log(`  Commit: ${REF}`)
-  if (WORKFLOW !== '') {
-    console.log(`  Workflow: ${WORKFLOW}`)
-  }
-  console.log(`  超时: ${TIMEOUT}s`)
-  console.log('')
-
-  const fetchRuns = async () => {
+/** gh run list 查询闭包：gh 失败按无 runs 处理（走 30s 触发宽限路径）。 */
+function makeFetchRuns({ REF, WORKFLOW, GH_REPO }) {
+  return async () => {
     const args = ['run', 'list', '--commit', REF]
     if (WORKFLOW !== '') args.push('--workflow', WORKFLOW)
     if (GH_REPO !== '') args.push('--repo', GH_REPO)
@@ -190,6 +174,141 @@ async function main() {
       return []
     }
   }
+}
+
+function printNoRunsDetected() {
+  console.log(`  ${YELLOW}⚠️  30秒后仍未检测到 CI workflow。${NC}`)
+  console.log(`  ${YELLOW}可能该 commit 没有触发 CI（如 ci.yml 只在 PR 时运行）。${NC}`)
+  console.log(`  ${YELLOW}跳过 CI 等待，继续后续流程。${NC}`)
+  process.exit(0)
+}
+
+function printCiFailure(verdict, ciLog) {
+  console.log('')
+  console.log(`${RED}${BOLD}⛔ CI 有失败的检查项！${NC}`)
+  ciLog(`CI 失败: ${verdict.failing.length} failed, ${verdict.passed} passed`)
+  console.log('')
+  console.log('失败的 workflow runs:')
+  for (const f of verdict.failing) {
+    console.log(`  ❌ ${f.name}: ${f.conclusion}`)
+  }
+  console.log('')
+  console.log('查看失败日志:')
+  for (const f of verdict.failing) {
+    console.log(`  gh run view ${f.databaseId} --log-failed`)
+  }
+  console.log('')
+  const SEP = '━'.repeat(50)
+  console.log(`${RED}${BOLD}${SEP}${NC}`)
+  console.log(`${RED}${BOLD}AI 行为约束（不可违反）:${NC}`)
+  console.log('  1. 必须查看失败日志并修复问题')
+  console.log('  2. 修复后推送到 main，重新运行本脚本')
+  console.log('  3. 不得跳过 CI 失败继续 publish')
+  console.log('  4. 如果无法在 main 上直接修复，需要 revert 合并')
+  console.log(`${RED}${BOLD}${SEP}${NC}`)
+  process.exit(1)
+}
+
+function printCiTimeout(verdict, TIMEOUT, REF, ciLog) {
+  console.log('')
+  console.log(`${YELLOW}${BOLD}⚠️  CI 等待超时（${TIMEOUT}s）${NC}`)
+  ciLog(`CI 等待超时 (${TIMEOUT}s), ${verdict.pending} pending`)
+  console.log(`  仍有 ${verdict.pending} 个 workflow 在运行中`)
+  console.log('')
+  console.log('  建议:')
+  console.log(`    1. 手动检查: gh run list --commit ${REF}`)
+  console.log(`    2. 增加超时: wait-for-ci.mjs ${REF} --timeout 1200`)
+  console.log('    3. 确认通过后继续后续流程')
+  process.exit(2) // exit 2 = timeout, AI 应询问用户
+}
+
+/**
+ * 验证 Draft Release 产物（CI 通过后的可选检查）：轮询等待 Draft Release 出现
+ * （120s 超时，10s 间隔）→ missing / tag mismatch / 无产物三分支各自 fatal。
+ */
+async function verifyDraftRelease(VERIFY_RELEASE_TAG, GH_REPO, ciLog) {
+  console.log('')
+  console.log(`${BOLD}验证 Release 产物...${NC}`)
+  console.log(`  Tag: ${VERIFY_RELEASE_TAG}`)
+
+  const VERIFY_TIMEOUT = 120
+  let verifyElapsed = 0
+  let payload = null
+  while (verifyElapsed < VERIFY_TIMEOUT) {
+    payload = fetchReleasePayload(VERIFY_RELEASE_TAG, GH_REPO)
+    if (payload !== null) break
+    console.log(`  ⏳ Release 尚未创建，等待中... (${verifyElapsed}s/${VERIFY_TIMEOUT}s)`)
+    await sleep(10_000)
+    verifyElapsed += 10
+  }
+
+  const v = verifyReleasePayload(payload, VERIFY_RELEASE_TAG)
+  if (v.status === 'missing') {
+    console.log(`  ${RED}❌ Release ${VERIFY_RELEASE_TAG} 在 ${VERIFY_TIMEOUT}s 后仍未出现${NC}`)
+    console.log('  可能原因：')
+    console.log('    1. CI 的 release job 创建了错误 tag 的 release（版本号不一致）')
+    console.log('    2. release job 被跳过或失败')
+    console.log('    3. tag 未正确推送')
+    console.log('')
+    console.log('  排查命令:')
+    // 原 bash 直接拼 $GH_REPO，未设 --repo 时会拼出 repos//releases 空段——移植时以
+    // DEFAULT_REPO 兜底，保证排查指引可直接复制执行
+    const repoForHint = GH_REPO !== '' ? GH_REPO : DEFAULT_REPO
+    console.log(`    gh api repos/${repoForHint}/releases --jq '.[] | "\\(.tag_name) draft=\\(.draft) assets=\\(.assets | length)"' | head -5`)
+    process.exit(1)
+  }
+
+  console.log(`  Tag: ${payload.tag}`)
+  console.log(`  Draft: ${payload.draft}`)
+  console.log(`  产物数量: ${payload.asset_count}`)
+  console.log(`  产物: ${payload.assets.join(', ')}`)
+
+  if (v.status === 'mismatch') {
+    console.log(`  ${RED}❌ Release tag 不匹配: 期望 ${VERIFY_RELEASE_TAG}, 实际 ${v.actualTag}${NC}`)
+    ciLog(`Release 验证失败: tag mismatch (${v.actualTag} != ${VERIFY_RELEASE_TAG})`)
+    console.log('  根因：CI 的 apps/electron/package.json 版本号与根 package.json 不一致')
+    console.log('  修复：同步版本号后重新触发 CI')
+    process.exit(1)
+  }
+
+  if (v.status === 'no-assets') {
+    console.log(`  ${YELLOW}⚠️  Release 无构建产物（只有 source code）${NC}`)
+    ciLog('Release 验证失败: 无构建产物')
+    console.log('  可能原因：build job 失败或 artifact upload 被跳过')
+    console.log('  排查：gh run list --workflow Release --limit 3')
+    process.exit(1)
+  }
+
+  console.log(`  ${GREEN}✅ Release 验证通过${NC}`)
+  ciLog(`Release 验证通过: tag=${VERIFY_RELEASE_TAG}, assets=${payload.asset_count}`)
+}
+
+async function main() {
+  const parsed = parseArgs(process.argv.slice(2))
+  if (!parsed.ok) {
+    console.error(parsed.error)
+    process.exit(1)
+  }
+  const TIMEOUT = parsed.timeout
+  const WORKFLOW = parsed.workflow
+  const VERIFY_RELEASE_TAG = parsed.verifyReleaseTag
+  const GH_REPO = parsed.repo
+  const ciLog = makeCiLog(process.env.MERGE_LOG_FILE)
+
+  const REF = resolveRefOrFail(parsed)
+
+  assertGhCliReady()
+
+  console.log(`${BOLD}等待 CI 完成...${NC}`)
+  ciLog(`等待 CI: commit=${REF}, workflow=${WORKFLOW || 'all'}, timeout=${TIMEOUT}s`)
+  console.log(`  Commit: ${REF}`)
+  if (WORKFLOW !== '') {
+    console.log(`  Workflow: ${WORKFLOW}`)
+  }
+  console.log(`  超时: ${TIMEOUT}s`)
+  console.log('')
+
+  const fetchRuns = makeFetchRuns({ REF, WORKFLOW, GH_REPO })
 
   const waitStartMs = Date.now()
   const verdict = await waitForRuns({
@@ -200,51 +319,11 @@ async function main() {
   // 耗时用于 CI 通过的日志行（原 bash 为 poll 间隔累计值，此处取墙钟差，语义等价）
   const waitElapsedS = Math.round((Date.now() - waitStartMs) / 1000)
 
-  if (verdict.status === 'no-runs') {
-    console.log(`  ${YELLOW}⚠️  30秒后仍未检测到 CI workflow。${NC}`)
-    console.log(`  ${YELLOW}可能该 commit 没有触发 CI（如 ci.yml 只在 PR 时运行）。${NC}`)
-    console.log(`  ${YELLOW}跳过 CI 等待，继续后续流程。${NC}`)
-    process.exit(0)
-  }
+  if (verdict.status === 'no-runs') printNoRunsDetected()
 
-  if (verdict.status === 'fail') {
-    console.log('')
-    console.log(`${RED}${BOLD}⛔ CI 有失败的检查项！${NC}`)
-    ciLog(`CI 失败: ${verdict.failing.length} failed, ${verdict.passed} passed`)
-    console.log('')
-    console.log('失败的 workflow runs:')
-    for (const f of verdict.failing) {
-      console.log(`  ❌ ${f.name}: ${f.conclusion}`)
-    }
-    console.log('')
-    console.log('查看失败日志:')
-    for (const f of verdict.failing) {
-      console.log(`  gh run view ${f.databaseId} --log-failed`)
-    }
-    console.log('')
-    const SEP = '━'.repeat(50)
-    console.log(`${RED}${BOLD}${SEP}${NC}`)
-    console.log(`${RED}${BOLD}AI 行为约束（不可违反）:${NC}`)
-    console.log('  1. 必须查看失败日志并修复问题')
-    console.log('  2. 修复后推送到 main，重新运行本脚本')
-    console.log('  3. 不得跳过 CI 失败继续 publish')
-    console.log('  4. 如果无法在 main 上直接修复，需要 revert 合并')
-    console.log(`${RED}${BOLD}${SEP}${NC}`)
-    process.exit(1)
-  }
+  if (verdict.status === 'fail') printCiFailure(verdict, ciLog)
 
-  if (verdict.status === 'timeout') {
-    console.log('')
-    console.log(`${YELLOW}${BOLD}⚠️  CI 等待超时（${TIMEOUT}s）${NC}`)
-    ciLog(`CI 等待超时 (${TIMEOUT}s), ${verdict.pending} pending`)
-    console.log(`  仍有 ${verdict.pending} 个 workflow 在运行中`)
-    console.log('')
-    console.log('  建议:')
-    console.log(`    1. 手动检查: gh run list --commit ${REF}`)
-    console.log(`    2. 增加超时: wait-for-ci.mjs ${REF} --timeout 1200`)
-    console.log('    3. 确认通过后继续后续流程')
-    process.exit(2) // exit 2 = timeout, AI 应询问用户
-  }
+  if (verdict.status === 'timeout') printCiTimeout(verdict, TIMEOUT, REF, ciLog)
 
   // status === 'pass'
   console.log('')
@@ -253,61 +332,7 @@ async function main() {
 
   // ── 验证 Draft Release 产物（CI 通过后，可选检查 Draft Release 是否创建成功）──
   if (VERIFY_RELEASE_TAG !== '') {
-    console.log('')
-    console.log(`${BOLD}验证 Release 产物...${NC}`)
-    console.log(`  Tag: ${VERIFY_RELEASE_TAG}`)
-
-    // 轮询等待 Draft Release 出现（CI 可能需要额外时间创建）：120s 超时，10s 间隔
-    const VERIFY_TIMEOUT = 120
-    let verifyElapsed = 0
-    let payload = null
-    while (verifyElapsed < VERIFY_TIMEOUT) {
-      payload = fetchReleasePayload(VERIFY_RELEASE_TAG, GH_REPO)
-      if (payload !== null) break
-      console.log(`  ⏳ Release 尚未创建，等待中... (${verifyElapsed}s/${VERIFY_TIMEOUT}s)`)
-      await sleep(10_000)
-      verifyElapsed += 10
-    }
-
-    const v = verifyReleasePayload(payload, VERIFY_RELEASE_TAG)
-    if (v.status === 'missing') {
-      console.log(`  ${RED}❌ Release ${VERIFY_RELEASE_TAG} 在 ${VERIFY_TIMEOUT}s 后仍未出现${NC}`)
-      console.log('  可能原因：')
-      console.log('    1. CI 的 release job 创建了错误 tag 的 release（版本号不一致）')
-      console.log('    2. release job 被跳过或失败')
-      console.log('    3. tag 未正确推送')
-      console.log('')
-      console.log('  排查命令:')
-      // 原 bash 直接拼 $GH_REPO，未设 --repo 时会拼出 repos//releases 空段——移植时以
-      // DEFAULT_REPO 兜底，保证排查指引可直接复制执行
-      const repoForHint = GH_REPO !== '' ? GH_REPO : DEFAULT_REPO
-      console.log(`    gh api repos/${repoForHint}/releases --jq '.[] | "\\(.tag_name) draft=\\(.draft) assets=\\(.assets | length)"' | head -5`)
-      process.exit(1)
-    }
-
-    console.log(`  Tag: ${payload.tag}`)
-    console.log(`  Draft: ${payload.draft}`)
-    console.log(`  产物数量: ${payload.asset_count}`)
-    console.log(`  产物: ${payload.assets.join(', ')}`)
-
-    if (v.status === 'mismatch') {
-      console.log(`  ${RED}❌ Release tag 不匹配: 期望 ${VERIFY_RELEASE_TAG}, 实际 ${v.actualTag}${NC}`)
-      ciLog(`Release 验证失败: tag mismatch (${v.actualTag} != ${VERIFY_RELEASE_TAG})`)
-      console.log('  根因：CI 的 apps/electron/package.json 版本号与根 package.json 不一致')
-      console.log('  修复：同步版本号后重新触发 CI')
-      process.exit(1)
-    }
-
-    if (v.status === 'no-assets') {
-      console.log(`  ${YELLOW}⚠️  Release 无构建产物（只有 source code）${NC}`)
-      ciLog('Release 验证失败: 无构建产物')
-      console.log('  可能原因：build job 失败或 artifact upload 被跳过')
-      console.log('  排查：gh run list --workflow Release --limit 3')
-      process.exit(1)
-    }
-
-    console.log(`  ${GREEN}✅ Release 验证通过${NC}`)
-    ciLog(`Release 验证通过: tag=${VERIFY_RELEASE_TAG}, assets=${payload.asset_count}`)
+    await verifyDraftRelease(VERIFY_RELEASE_TAG, GH_REPO, ciLog)
   }
 
   process.exit(0)
