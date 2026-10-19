@@ -79,7 +79,7 @@ import { getProviderConfig, clearProviderApiKey, initProviderCredentialResolver,
 // 包装收敛在该模块——组合根 import 即执行 main()，降级分支抽独立模块才可单测，
 // run-extras-migration 同族先例）。
 import { createZcodeProviderMirrorSync, runZcodeProviderStartupSync } from './services/zcode-provider-sync-wiring.js'
-import { getExtensionsDir, getNpmDir, getTmpDir, getProviderExtrasPath, getPiAgentDir } from './infra/pi/pi-paths.js'
+import { getExtensionsDir, getNpmDir, getTmpDir, getProviderExtrasPath } from './infra/pi/pi-paths.js'
 import { getPiGlobalAgentDir, syncBundledResources } from './infra/pi/pi-maintenance.js'
 import { runCodemodeStartupMigration } from './infra/pi/pi-codemode-settings.js'
 import { PiConfigStore } from './infra/pi/pi-config-store.js'
