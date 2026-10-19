@@ -84,7 +84,7 @@ describe("stats 增量行格式", () => {
 		});
 		for (const row of rows) {
 			// epoch ms 合理区间（≥ before 且 ≤ now + 1s 时钟偏移容差）——与 runtime
-			// parseStatsLine typeof ts === 'number' 契约互证（D5 终态同步 F1-9 裁决）
+			// parseStatsLine typeof ts === 'number' 契约互证
 			expect(row.ts as number).toBeGreaterThanOrEqual(before);
 			expect(row.ts as number).toBeLessThanOrEqual(Date.now() + 1000);
 		}

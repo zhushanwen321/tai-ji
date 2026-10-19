@@ -2469,7 +2469,7 @@
       "run": "node scripts/network-proxy-mocks/mock-proxy.mjs --selftest && node scripts/network-proxy-mocks/socks5-server.mjs --selftest && node scripts/network-proxy-drift-probe.mjs && pnpm extensions:typecheck && pnpm extensions:lint && pnpm extensions:test",
       "owner": "extensions/universal/network-proxy",
       "authority": "docs/TEST-STRATEGY.md#e2e-资产归宿纪律三态-r1r2r3",
-      "note": "来源设计 llm-network-proxy §4/§5（设计档案在 .tmp 不入库，authority 回退 TEST-STRATEGY 三态锚点，E2E-MODELREF-01 同款先例）。mock 工具 = 验收场景 1/3/9 的工具形态（CONNECT 记录 + 一律桥接 mock LLM 端点 + block-upstream + SOCKS5 RFC 1928 握手/RFC 1929 认证），自测子命令内置全链路断言（零 npm 依赖 + 零真实 LLM 调用）；漂移探针 = 场景 7 的 Node 级断言（外部 undici setGlobalDispatcher ↔ Node 内置 fetch 槽共享，前提 P2）。run 的 extensions 三连覆盖 extensions/universal/network-proxy/** 触发范围——该目录代码由 u-extension 单元落地，落地前目录不存在属预期（scope glob 只做触发圈定，无磁盘校验）；工具脚本与探针的触发范围 = scope 精确路径与 scripts/network-proxy-mocks/** 目录 glob。"
+      "note": "来源设计 llm-network-proxy §4/§5（设计档案在 .tmp 不入库，authority 回退 TEST-STRATEGY 三态锚点，E2E-MODELREF-01 同款先例）。mock 工具 = 验收场景 1/3/8/9 的工具形态（CONNECT 记录 + 一律桥接 mock LLM 端点 + block-upstream + SOCKS5 RFC 1928 握手/RFC 1929 认证 + WS upgrade 端点构造——场景 8 的 WS 建连经 CONNECT 隧道回归防线由 mock-proxy selftest D 全链路承载），自测子命令内置全链路断言（零 npm 依赖 + 零真实 LLM 调用）；漂移探针 = 场景 7 的 Node 级断言（外部 undici setGlobalDispatcher ↔ Node 内置 fetch 槽共享，前提 P2）。run 的 extensions 三连覆盖 extensions/universal/network-proxy/** 触发范围——该目录代码由 u-extension 单元落地，落地前目录不存在属预期（scope glob 只做触发圈定，无磁盘校验）；工具脚本与探针的触发范围 = scope 精确路径与 scripts/network-proxy-mocks/** 目录 glob。"
     },
     {
       "id": "E2E-NETPROXY-02",

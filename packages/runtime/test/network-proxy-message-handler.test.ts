@@ -141,7 +141,7 @@ describe('network-proxy 五条路由（经 SettingsMessageHandler 全链路）',
 })
 
 describe('set 校验失败不落盘（service 层真实 fs）', () => {
-  it('非法配置（端口越界）经 handler 后文件不被创建', async () => {
+  it('非法配置（端口越界）service 校验失败后文件不被创建', async () => {
     const { mkdtempSync, mkdirSync, rmSync, statSync } = await import('node:fs')
     const { tmpdir } = await import('node:os')
     const { join } = await import('node:path')

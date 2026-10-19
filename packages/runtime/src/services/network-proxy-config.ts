@@ -125,7 +125,7 @@ function normalizeHostList(raw: unknown): string[] {
 /**
  * 主机名条目写侧去重（设计 §3.1 文件不变量「同一主机名只存在一条规则」在保存侧的执行点）：
  * 归一化后同键保留首条（大小写/末尾点变体算同一条，与匹配语义同一归一化函数）。匹配幂等
- * 所以重复无行为差异，但文件形态按不变量收敛（D2 一致性审查 U5）。
+ * 所以重复无行为差异，但文件形态按不变量收敛。
  */
 function dedupeHostList(entries: string[]): string[] {
   const seen = new Set<string>()

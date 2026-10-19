@@ -86,7 +86,7 @@ export function ensureExitFlush(): void {
  * 持与 runtime 截断/重置同一把 <stats> 跨进程文件锁（设计 §3.1「截断不丢在途增量」）：
  * runtime 保尾截断临界区内并发追加的行会被 rename 整文件替换吞掉，无锁单侧互斥不成立。
  * ts = epoch ms（Date.now()，与 runtime 读侧 parseStatsLine number 契约、reset 水位行
- * 及读侧时间范围过滤一致——D5 终态同步裁决，ISO 字符串形态产生的行会被读侧判坏行丢弃）。
+ * 及读侧时间范围过滤一致；ISO 字符串形态产生的行会被读侧判坏行丢弃）。
  */
 export function flushStats(): void {
 	if (counters.size === 0) return;

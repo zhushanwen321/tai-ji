@@ -43,7 +43,8 @@ function recoveryHint(): string {
 function refreshFromConfig(): void {
 	const config = loadNetworkProxyConfig((warning) => {
 		// 非法配置 / 坏 JSON：loadConfig 已回落 defaults（enabled=false → 不安装，全部直连），
-		// 这里把具体错误呈现给用户（extension error，验收场景 10 的归因通道）。
+		// 这里把具体错误记录到 extension 日志通道（appendEntry 持久化 + <agentDir>/logs/
+		// network-proxy-<day>.log 文件日志；验收场景 10 以文件日志为归因口径）。
 		logger.error(`${warning} ${recoveryHint()}`);
 	});
 	try {

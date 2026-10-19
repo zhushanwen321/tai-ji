@@ -111,7 +111,7 @@
                普通 element 包装层不进缓存、实例不保留）——demo 同款机制兼容性最稳：
                v-show 保留组件实例（表单态跨分区不丢），display:none ↔ 可见切换 + 类重挂
                重触发 300ms 淡入。分区首访才挂载（visitedViews），避免开弹层即触发全部
-               15 分区的加载副作用。extension 域子视图（contributions）是独立访问键，
+               分区的加载副作用。extension 域子视图（contributions）是独立访问键，
                切回扩展管理页表单态同样保留。 -->
           <template v-for="view in visitedViews" :key="view">
             <div v-show="activeView === view" class="sec-fade" :class="{ on: activeView === view }">
@@ -264,7 +264,7 @@ const activeView = computed(() =>
     ? 'extension-contributions'
     : (activeMenu.value as string),
 )
-/** 已访问分区清单（首访挂载，此后 v-show 常挂载——demo「15 分区组件常挂载、切分区
+/** 已访问分区清单（首访挂载，此后 v-show 常挂载——demo「分区组件常挂载、切分区
  *  不丢已填表单与交互态」的 real 形态；首访才挂载是 real 侧加载副作用的收敛差异）。
  *  activeView 变化即登记，覆盖 nav 点击与 extension 子视图事件两条进入路径。 */
 const visitedViews = ref<string[]>([])
