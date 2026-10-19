@@ -1,8 +1,31 @@
 # taiji 领域模型登记
 
-> **本文件定位**：领域聚合、不变量与状态机的登记处（统一语言词条在 [CONTEXT.md](CONTEXT.md)）。当前登记域：**画布（problem-solve canvas，2026-10）**。
+> **本文件定位**：领域聚合、不变量与状态机的登记处（统一语言词条在 [CONTEXT.md](CONTEXT.md)）。当前登记域：**画布（problem-solve canvas，聚合与不变量，2026-10）**；**状态机基建与五域状态机（run / 画布节点 / plan / goal / permanent-session + 归档单元，2026-10，见下「状态机基建」节）**。
 >
 > 机制纪律：不变量与状态机转移表的实现单点在 runtime CanvasService（`packages/runtime/src/services/canvas/`）——renderer / extension 侧不复制领域规则，全部写操作经唯一入口 `mutate`（契约 = `packages/extension-protocol/src/extensions/canvas/`，agent 工具面 = `extensions/taiji/canvas/`，GUI 写通道 = WS RPC `canvas.mutate`）。
+
+## 状态机基建（@zhushanwen/state-machine）
+
+「领域状态必须显式状态机」裁决（2026-09-21）的共享实现载体（[ADR-0152](adr/decisions.md)）：`packages/state-machine`，零运行时依赖，npm 发布（`@zhushanwen` 命名空间，pi 扩展侧可依赖）。新领域立状态机 = 一份声明（状态词表含 terminal 位 + 事件词表 + 行式转移表含 guard 与动作引用 + 每实体错误策略），机器机制由基建统一提供：合法性判定（`transition` 纯函数内核——guard 按行序求值、多命中 = 转移表不变量破坏恒 throw、planned 只计划不执行）、定义期自检（词表外行 / 多行混入无 guard 行即 throw）、转移动作执行（`runTransition` 事务性编排外壳——宿主按名注入实现，全部成功次态才应用，单态 fail-fast）、穷举单测生成（`generateTableTests`）、词表外运行时输入映射（`coerceState`——枚举 includes 白名单，拒原型链键）。
+
+纪律：
+
+- 新状态机一律声明即用，不再手写转移表 + transition 函数 + 穷举单测；穷举由生成器承载，行为级/契约级断言（错误类型、错误码、降级行为）保留域内
+- 表外 fail-fast 不静默吞：throw 族错误信息含当前态合法事件清单（`errorFactory` 保形既有错误类型，消费方 instanceof 分类分支不受迁移影响）；result 族返回 `{ok:false}`，调用方义务 = 不落盘、不执行副作用
+- 事务外壳边界外域：run 与 canvas 的域内编排（「内存权威先推进 + 动作失败分级容忍」/「权威事件流先行 + 快照与广播失败容忍」）不经外壳事务化，编排上收须按已接受变更单独登记（ADR-0152）
+
+五域迁移登记（2026-10 迁入，只迁表与判定，域内编排留域内）：
+
+| 域 | 状态词表 | 机器声明（实现载体 = 本基建） | 错误策略 / 表外处置 |
+|----|---------|------------------------------|---------------------|
+| workflow run 生命周期（outcome 四值正交，仅 terminal 产生） | created / running / settling / terminal + interrupted 暂停态（resume 流回 running） | `RUN_MACHINE`（packages/subagent-core/src/orchestration/run-events.ts） | throw——`IllegalTransitionError` 保形（errorFactory 构造既有类实例，消息含合法事件清单） |
+| 画布节点生命周期 | draft / under-review / passed（terminal）/ rejected / shelved | `canvasLifecycleMachine`（packages/runtime/src/services/canvas/canvas-foundation.ts） | throw——`CanvasDomainError` 保形（`lifecycle_transition_illegal` 错误码 + recover 指引） |
+| plan 计划生命周期 | idle / planning / reviewing / revising / approved / dispatching / completed / exited（终态 + enter 重启出边并存） | `PLAN_MACHINE`（packages/extension-protocol/src/extensions/plan/state-machine.ts） | result——表外 `{ok:false}` 不炸 turn |
+| goal 目标状态 | active / paused / blocked / complete / budget_limited / cancelled（后三 terminal） | `GOAL_MACHINE`（extensions/universal/goal/src/engine/goal.ts；`transitionStatus` 保形包装对外） | throw |
+| permanent-session 两态 | running / idle（词表与 ExecutionStatus satisfies 双向锁定） | `permanentSessionStatusMachine`（packages/subagent-core/src/execution/domain/record-status-machine.ts） | result——表外拒绝经域内原语转 return false（两态 CAS 语义保形） |
+| 归档单元（session 归档子域，基建首个新消费者） | staging / archived / restoring | `archiveEntryMachine`（packages/runtime/src/services/archive/archive-entry-machine.ts） | throw——对外错误码由服务层承载 |
+
+边界登记：session / background-task 两个域尚无转移表（显式化各自独立立项，ADR-0152）；core 的 streaming-state-machine.ts 是消费顺序 factory 深模块、非转移表状态机，不属本基建范畴；归档子域的聚合与不变量登记由 session-archive 设计承接（本节只登记其状态机实现载体）。
 
 ## 画布域
 
@@ -31,7 +54,7 @@
 
 **节点状态机**（生命周期 × 派发二维正交，禁止直写状态字段）：
 
-- 生命周期维（根节点除外——根不可搁置 / 否决）：`draft（草案）→ under-review（审查中）→ passed（通过）| rejected（否决，灰显保留）`；draft/under-review 均可 `→ shelved（搁置）`；`rejected → draft`（复活须新证据或用户裁决，留理由）；`shelved → draft`。合法转移表之外的写入一律 fail-fast；每次转移记录触发者（agent 提案 / 用户裁决 / 审查结论）。
+- 生命周期维（根节点除外——根不可搁置 / 否决）：`draft（草案）→ under-review（审查中）→ passed（通过）| rejected（否决，灰显保留）`；draft/under-review 均可 `→ shelved（搁置）`；`rejected → draft`（复活须新证据或用户裁决，留理由）；`shelved → draft`。合法转移表之外的写入一律 fail-fast（判定载体 = `canvasLifecycleMachine`，@zhushanwen/state-machine 声明，见「状态机基建」节）；每次转移记录触发者（agent 提案 / 用户裁决 / 审查结论）。
 - 派发维（仅执行叶子，与生命周期正交）：`passed 的执行叶子 →（用户拍板）→ dispatched（已派发，登记下游产物指针）`。dispatched 后仍可编辑（patch 无 dispatched 门槛），编辑使该叶子进待重审、门禁红、导出锁定，复审通过后解锁重新导出。
 - 状态机不作用于边——边的缺陷经支撑度（有缺口 / 不成立）+ 关联 must-fix 表达，不另建边状态机。
 
