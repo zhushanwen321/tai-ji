@@ -510,9 +510,9 @@ function workflowPercent(record: WorkflowRunRecord): number {
   return Math.round((completedAgentCount(record) / record.agentCalls.length) * PERCENT_BASE)
 }
 
-// ── 行点击归宿矩阵（D2：subagent/bash 对齐现状；workflow 行改收口 drawer workflow tab）──
+// ── 行点击归宿矩阵（D2：subagent/bash 对齐现状；workflow 行 = 开浮层）──
 function openSubagentRow(record: SubagentRecord): void {
-  openSubagent({ virtualId: subagentVirtualId(props.sessionId, record.subagentId), enteredFrom: 'chat' })
+  openSubagent({ virtualId: subagentVirtualId(props.sessionId, record.subagentId) })
 }
 function openBashTask(entry: BackgroundTaskEntry): void {
   // 选中态落 bashTask 内容域分区（selection/bash-task.ts，§6.6①）+ 切 tab + 开 drawer

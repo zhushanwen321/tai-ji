@@ -2,11 +2,11 @@
  * workflow-viz overlay 控制器 + Host 容器测试（workflow-visualization U6——三视角）。
  *
  * - 构建者（白盒）：opener 反查全分支（runId 直开 / (scriptName, slug) 精确 / slug 缺失
- *   回落 name → 最新 / slug 碰撞取最新 / 未命中兜底 drawer）；DAG 通道两路错误归一
- *   （结构化领域回执 / RPC 通道错误 'channel'）；D10 fallback 动作序列（关 overlay +
- *   openDrawerTab('workflow') + openWorkflowInDrawer(runId)）
- * - 使用者（黑盒 DOM）：打开后 overlay 面板呈现；装载异常回落 drawer workflow tab（选中
- *   态已注入，非空态）；回落后再点击 overlay 重试呈现（Guard epoch 重挂，无失败卡死）
+ *   回落 name → 最新 / slug 碰撞取最新 / 未命中兜底 toast）；DAG 通道两路错误归一
+ *   （结构化领域回执 / RPC 通道错误 'channel'）；D10 fallback 动作序列（关 overlay——
+ *   [2026-10-19] drawer workflow tab 删除，回落载体不再存在）
+ * - 使用者（黑盒 DOM）：打开后 overlay 面板呈现；装载异常关 overlay；回落后再点击
+ *   overlay 重试呈现（Guard epoch 重挂，无失败卡死）
  * - 观察者（形态）：D11⑤ session 删除关 overlay 的会话匹配语义
  *
  * mock 策略：api/domains/session（getWorkflows/getWorkflowDag）+ @/api 门面回指 +
@@ -22,9 +22,7 @@ import {
   bindDrawerSessionId,
   bindWorkflowOverlayOpener,
   openWorkflow,
-  openWorkflowInDrawer,
   useDrawerControl,
-  useWorkflowSelection,
   _resetDrawerForTest,
 } from '@taiji/core/domain/drawer'
 import { ref } from 'vue'
@@ -100,6 +98,13 @@ vi.mock('../../panel/WorkflowLivePanel.vue', () => ({
       return () => h('div', { 'data-testid': 'wf-live-panel-stub' })
     },
   },
+}))
+
+// ── mock：useToast（反查未命中兜底 toast——[2026-10-19] drawer 空态兜底已删）────
+
+const { toastErrorMock } = vi.hoisted(() => ({ toastErrorMock: vi.fn() }))
+vi.mock('@/composables/useToast', () => ({
+  useToast: () => ({ error: toastErrorMock }),
 }))
 
 // ── mock：BrowserOverlay stub（kind 门控用例经 openBrowser 换入 browser 内容）────
@@ -245,17 +250,18 @@ describe('opener 反查（D1 调用面：托盘 runId 直开 + block (name, slug
     expect(currentRun()?.runId).toBe('wf-2')
   })
 
-  it('反查未命中 → 兜底显式 drawer 语义（workflow tab 打开 + 选中名注入，点击不丢反馈）', async () => {
+  it('反查未命中 → 兜底 toast（[2026-10-19] drawer workflow tab 已删，点击不丢反馈）', async () => {
     await seedRecords([makeRun('wf-1', 's1')])
 
     openWorkflow('gone-flow', { sessionId: SID })
     await flushPromises()
 
     expect(isOverlayOpen()).toBe(false)
+    // drawer 不被误开（workflow tab 已不存在）
     const drawer = useDrawerControl()
-    expect(drawer.isOpen.value).toBe(true)
-    expect(drawer.activeTab.value).toBe('workflow')
-    expect(useWorkflowSelection().selectedWorkflowName.value).toBe('gone-flow')
+    expect(drawer.isOpen.value).toBe(false)
+    // toast 反馈错误可操作（错误 → 重试闭环的入口提示）
+    expect(toastErrorMock).toHaveBeenCalledTimes(1)
   })
 
   it('opener 未传 sessionId 且焦点 pane 无 session → no-op', async () => {
@@ -389,7 +395,7 @@ describe('Host 容器（黑盒 DOM + D10 回落）', () => {
     wrapper.unmount()
   })
 
-  it('D10 fallback：装载异常 → 关 overlay + drawer workflow tab 打开且选中态已注入（runId）', async () => {
+  it('D10 fallback：装载异常 → 关 overlay（[2026-10-19] 回落载体 drawer workflow tab 已删，重开即重试）', async () => {
     await seedRecords([makeRun('wf-1', 's1')])
     panelThrowBox.value = true
     const consoleSpy = vi.spyOn(console, 'error').mockImplementation(() => {})
@@ -398,12 +404,10 @@ describe('Host 容器（黑盒 DOM + D10 回落）', () => {
     openWorkflowVizOverlay(SID, 'wf-1')
     await flushPromises()
 
-    // Guard 捕获 → fallback 序列执行
+    // Guard 捕获 → fallback 序列执行：仅关 overlay，drawer 不被误开
     const drawer = useDrawerControl()
     expect(isOverlayOpen()).toBe(false)
-    expect(drawer.isOpen.value).toBe(true)
-    expect(drawer.activeTab.value).toBe('workflow')
-    expect(useWorkflowSelection().selectedWorkflowName.value).toBe('wf-1')
+    expect(drawer.isOpen.value).toBe(false)
     wrapper.unmount()
     consoleSpy.mockRestore()
   })

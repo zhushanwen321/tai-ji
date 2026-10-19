@@ -32,7 +32,6 @@ import type { WorkflowDag, WorkflowRunRecord } from '@taiji/shared'
 import {
   bindWorkflowOverlayOpener,
   bindWorkflowRunLookup,
-  openWorkflowInDrawer,
 } from '@taiji/core/domain/drawer'
 import {
   closeOverlay,
@@ -42,6 +41,8 @@ import {
   openSchedulerOverlay,
 } from '@taiji/core/domain/overlay'
 import { session as sessionApi } from '@/api'
+import { useToast } from '@/composables/useToast'
+import i18n from '@/i18n'
 import { usePanelStore } from '@/stores/panel'
 import { useWorkflowStore } from '@/stores/workflow'
 import { normalizeWorkflowScriptName } from '../run-name'
@@ -213,9 +214,12 @@ bindWorkflowOverlayOpener((nameOrRunId, slug, sessionId) => {
     openWorkflowVizOverlay(sid, run.runId)
     return
   }
-  // 反查未命中的兜底归宿 = 显式 drawer 语义（现状行为：drawer workflow tab 显空态或
-  // 全部）——点击不丢反馈；不经改向后的 openWorkflow（重入本 opener 无意义且已 no-op）。
-  openWorkflowInDrawer(nameOrRunId)
+  // 反查未命中的兜底归宿 = toast（[2026-10-19] 原 drawer workflow tab 空态兜底随该
+  // tab 删除移除）——点击不丢反馈；不经 openWorkflow（重入本 opener 无意义且已 no-op）。
+  // 模块级 i18n.global.t（useConnection 同款先例——本模块非组件环境，无 setup 上下文）。
+  const { error: toastError } = useToast()
+  const t = i18n.global.t as (key: string, params?: Record<string, unknown>) => string
+  toastError(t('panel.workflowViz.workflowNotFound', { name: nameOrRunId }))
 })
 
 bindWorkflowRunLookup((sessionId, scriptName, slug) => findRun(sessionId, scriptName, slug))

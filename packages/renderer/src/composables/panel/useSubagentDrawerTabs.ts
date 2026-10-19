@@ -3,8 +3,8 @@
  * 2026-10-15；自 SubagentTab.vue 下沉——组件 script 行数上限合规 + 编排可测）。
  *
  * 状态活在 subagent store per-session 分区（组件随 drawer 类型 tab 切换卸载，状态必须
- * 组件外；deleteSession 经 store clearSession 释放）；选中态入口（sidebar / chat 块 /
- * workflow）经 selectedSubagentId 变化开 tab，tab 条点击/关闭在本编排内走 store。
+ * 组件外；deleteSession 经 store clearSession 释放）；选中态入口（sidebar / chat 块）
+ * 经 selectedSubagentId 变化开 tab，tab 条点击/关闭在本编排内走 store。
  * 内容数据在 chatStore 按虚拟 id 分区——切 tab 不丢详情。
  */
 import { computed, watch, type ComputedRef, type Ref } from 'vue'
@@ -15,8 +15,6 @@ import { usePanelStore } from '@/stores/panel'
 export interface SubagentDrawerTabsDeps { // oe-exempt:20261015:framework:tab 编排 DI 契约,单实现常态（调用方 = SubagentTab 单消费）
   /** core drawer 选中态（per-session 分区；选中变化 = 开 tab 入口）。 */
   selectedSubagentId: ComputedRef<string | null> | Ref<string | null>
-  /** 入口来源（tab 点击/关闭原样回传——workflow 返回按钮语义不受 tab 切换影响）。 */
-  enteredFrom: ComputedRef<'chat' | 'workflow' | null> | Ref<'chat' | 'workflow' | null>
   /** tab 文案（agent · slug；组件侧投影注入）。 */
   labelOf: (vid: string) => string
   /** 停流回调（切 tab 停旧订阅；关闭至空态停流——空态时编排同时清 core 选中态）。 */
@@ -50,9 +48,7 @@ export function useSubagentDrawerTabs(deps: SubagentDrawerTabsDeps): {
   /** tab 点击 = 切激活 + 同步 core 选中态（sidebar 高亮/LRU 豁免谓词同源一致）。 */
   function activate(vid: string): void {
     subagentStore.activateDrawerTab(focusedSid.value, vid)
-    if (deps.enteredFrom.value !== null) {
-      openSubagent({ virtualId: vid, enteredFrom: deps.enteredFrom.value })
-    }
+    openSubagent({ virtualId: vid })
   }
 
   /** tab 关闭；激活者关闭时 store 编排激活右邻/左邻，选中态同步（无剩余 = 停流回空态）。 */
@@ -65,9 +61,7 @@ export function useSubagentDrawerTabs(deps: SubagentDrawerTabsDeps): {
       deps.stopStream()
       return
     }
-    if (deps.enteredFrom.value !== null) {
-      openSubagent({ virtualId: next, enteredFrom: deps.enteredFrom.value })
-    }
+    openSubagent({ virtualId: next })
   }
 
   return { openTabs, activeTab, activate, close }

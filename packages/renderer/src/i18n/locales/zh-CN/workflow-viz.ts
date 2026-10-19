@@ -22,6 +22,9 @@ export default {
     overlayTabCanvas: '画布',
     runStatusRunning: '运行中',
     runStatusDone: '已完成',
+    // agent 抽屉（[2026-10-19] demo 形态：trace 行 → 右侧多 tab 抽屉）
+    agentDrawerCollapse: '收起抽屉',
+    workflowNotFound: '未找到工作流运行「{name}」（可能已被清理）',
     // DAG 画布
     dagCanvasLabel: '工作流结构图（DAG）',
     dagZoomHint: '滚轮缩放 · 拖拽平移',

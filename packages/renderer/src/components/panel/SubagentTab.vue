@@ -73,21 +73,11 @@
     </div>
 
     <template v-else>
-      <!-- 标题栏：差异化层（enteredFrom==='workflow' 显返回按钮；agent·slug + model·thinking 元信息）。
+      <!-- 标题栏：差异化层（agent·slug + model·thinking 元信息；返回按钮已随 drawer
+           workflow tab 删除移除——agent call 详情现归宿 = workflow 浮层的 agent 抽屉）。
            对齐 demo .sub-head：透明底（无 surface-2 色块），左右内缩 14px、下 6px
            （demo panel 12px + sub-head 0 2px 6px 折算）。 -->
       <div class="flex shrink-0 items-center gap-2 px-3.5 pb-1.5 pt-2">
-        <Button
-          v-if="enteredFrom === 'workflow'"
-          variant="ghost"
-          size="icon"
-          class="size-6 shrink-0 text-neutral-dim hover:text-neutral-fg"
-          :title="t('panel.sideDrawer.backToWorkflow')"
-          data-testid="drawer-subagent-back"
-          @click="onBack"
-        >
-          <ChevronLeft class="size-3.5" />
-        </Button>
         <Bot class="size-3.5 shrink-0 text-neutral-dim" />
         <span class="min-w-0 truncate font-mono text-xs font-medium text-neutral-fg">
           {{ subagentMeta?.agent ?? 'subagent' }}
@@ -215,9 +205,9 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { AlertCircle, Bot, ChevronDown, ChevronLeft, Clock, X } from '@lucide/vue'
+import { AlertCircle, Bot, ChevronDown, Clock, X } from '@lucide/vue'
 import { Button } from '@taiji/ui'
-import { useSubagentSelection, openWorkflowInDrawer } from '@taiji/core/domain/drawer'
+import { useSubagentSelection } from '@taiji/core/domain/drawer'
 import { usePanelStore } from '@/stores/panel'
 import {
   useSubagentStore,
@@ -252,7 +242,7 @@ const panelStore = usePanelStore()
 const subagentStore = useSubagentStore()
 const workflowStore = useWorkflowStore()
 
-const { selectedSubagentId, enteredFrom } = useSubagentSelection()
+const { selectedSubagentId } = useSubagentSelection()
 
 /** tab 条文案（agent · slug；record 缺失降级 'subagent'）。 */
 function tabLabel(vid: string): string {
@@ -409,7 +399,6 @@ const { loadError, loadSubagentData, stopSubagentStream, recordEngine } = useSub
 // 内容数据在 chatStore 按虚拟 id 分区——切 tab 不丢详情。
 const { openTabs, activeTab, activate: onTabActivate, close: onTabClose } = useSubagentDrawerTabs({
   selectedSubagentId,
-  enteredFrom,
   labelOf: tabLabel,
   stopStream: () => stopSubagentStream(),
 })
@@ -486,14 +475,5 @@ onBeforeUnmount(() => {
 function reload(): void {
   const vid = activeTab.value
   if (vid) void loadSubagentData(vid)
-}
-
-
-
-function onBack(): void {
-  // 返回 drawer workflow tab（workflow-visualization U6/D1：入口改向后 openWorkflow 语义
-  // 已是开 overlay，返回按钮必须直调显式 drawer 语义函数——空串 = 仅切 workflow tab，
-  // 与改向前 openWorkflow() 行为逐字节一致）
-  openWorkflowInDrawer('')
 }
 </script>

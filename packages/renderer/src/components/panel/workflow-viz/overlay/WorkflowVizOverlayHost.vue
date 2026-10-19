@@ -14,12 +14,15 @@
     投影从 workflowStore 分区按 runId 选中（recordsOf 响应式读，workflowUpdate 信号触发
     的重新拉取经 store 自动到达）；节点六态/当前 phase/已用时长在本容器单处派生后经
     props 透传（壳与面板均为已派生输入，不自行判定）。
-  - D10 回落动作序列：Guard emit fallback → 关 overlay（清瞬态）→ openDrawerTab('workflow')
-    + openWorkflowInDrawer(runId)（显式 drawer 语义函数直调，不经改向后的 openWorkflow——
-    重入 overlay 入口会成循环）。无失败标记/计数分支（每次点击入口均重试 overlay）。
+  - D10 回落动作序列（[2026-10-19] drawer workflow tab 删除，回落载体不再存在）：
+    Guard emit fallback → 关 overlay（清瞬态）。重开 overlay（入口每次点击）即重试
+    （Guard :key 重挂复位 failed）。
   - 每次点击均重试的构造性保证：Guard 的 failed 置位后本实例不再渲染 slot——重开 overlay
     时经 :key="guardEpoch" 重挂全新 Guard 实例（failed 复位），叠加 overlay 关闭态壳
     v-if 不渲染，关闭态 DOM 零痕迹。
+  - agent 钻取（[2026-10-19] demo 形态）：实例 trace 行点击（面板 open-agent 上抛）→
+    右侧 AgentStreamDrawer.openAgent（多 tab agent 对话流，抽屉挂载随 workflow 内容
+    开合 v-if 消亡，tab 集构造性清空）。
   - 已用时长（壳 header 槽，设计 §3.1-1）：D9 停走口径（terminal = completedAt、
     interrupted = health.lastProgressAt 缺省回 startedAt、running = 当前时刻），1s tick
     仅在 workflow 内容 open 态运行（内容切走/关闭即停，[U4] kind 门控）；D2 单 header
@@ -52,9 +55,20 @@
         :session-id="panelInput.sessionId"
         :run="panelInput.run"
         :gantt-component="WorkflowVizGantt"
+        @open-agent="agentDrawerRef?.openAgent($event)"
       />
     </WorkflowVizOverlay>
   </WorkflowVizOverlayGuard>
+  <!-- workflow agent 抽屉（[2026-10-19] demo 形态）：随 workflow 内容开合挂载/消亡
+       （tab 集构造性清空）；fixed 定位浮在 overlay 壳之上（z = modal+1）。置于 Guard
+       外——抽屉渲染失败不进 D10 回落链（壳装载失败才回落；抽屉失败不该连坐关 overlay）。 -->
+  <AgentStreamDrawer
+    v-if="isWorkflowOpen && panelInput"
+    ref="agentDrawerRef"
+    :key="panelInput.runId"
+    :session-id="panelInput.sessionId"
+    :run="panelInput.run"
+  />
   <!-- 浮层浏览器内容（display-containers §7.4，u-w2-browser-mount）：单例换内容——
        当前内容是 browser 时由 BrowserOverlay 的 OverlayShell 承载（workflow 壳同期门控
        只在 workflow 内容时开，两壳互斥不叠显）。Guard 只包 workflow 内容（回落语义
@@ -65,11 +79,11 @@
 <script setup lang="ts">
 import { computed, onUnmounted, ref, watch } from 'vue'
 import type { WorkflowRunRecord } from '@taiji/shared'
-import { openDrawerTab, openWorkflowInDrawer } from '@taiji/core/domain/drawer'
 import WorkflowVizOverlay from './WorkflowVizOverlay.vue'
 import WorkflowVizOverlayGuard from './WorkflowVizOverlayGuard.vue'
 import BrowserOverlay from '@/components/panel/BrowserOverlay.vue'
 import WorkflowLivePanel from '../panel/WorkflowLivePanel.vue'
+import AgentStreamDrawer from '../panel/AgentStreamDrawer.vue'
 import WorkflowVizGantt from '../gantt/WorkflowVizGantt.vue'
 import { matchInstancesToNodes } from '../blueprint-match'
 import type { WorkflowInstanceMatchResult } from '../blueprint-match'
@@ -88,6 +102,7 @@ import {
 import { useWorkflowStore, deriveWorkflowRunElapsedMs } from '@/stores/workflow'
 
 const panelRef = ref<InstanceType<typeof WorkflowLivePanel> | null>(null)
+const agentDrawerRef = ref<InstanceType<typeof AgentStreamDrawer> | null>(null)
 
 // overlay 开合态读 core SSOT（u-w1-core 迁移：workflow-viz-overlay 的 overlayOpen/overlayCurrent
 // 模块级 ref 已退役，开合态唯一权威 = core/domain/overlay）。
@@ -215,29 +230,17 @@ const elapsedMs = computed<number | undefined>(() => {
 
 // ── 事件接线 ─────────────────────────────────────────────────────────────────
 
-/** DAG 点击：phase 语义开 phase tab；agent 语义开挂接实例的钻取——实例行点击带
- *  callId 钻取该实例（多实例节点点具体行看具体 agent），节点其余区域取首个挂接实例
- *  （pending/无 sessionId 实例由 openAgentTab 内部守卫 no-op）。 */
+/** DAG 点击（[2026-10-19] agent 钻取语义删除——点击入口收归实例 trace 行）：仅剩
+ *  phase 语义（pending/skipped 节点与分区），开 phase tab。 */
 function onSelect(payload: WorkflowVizDagClickPayload): void {
   if (payload.semantic === 'phase') {
     panelRef.value?.openPhaseTab(payload.phase)
-    return
   }
-  const dag = overlayDag.value
-  const run = runRecord.value
-  if (dag === null || run === null) return
-  const calls = matchResult.value?.byNode.get(payload.nodeId)
-  const call = payload.callId !== undefined
-    ? (calls?.find((c) => c.id === payload.callId) ?? calls?.[0])
-    : calls?.[0]
-  if (call !== undefined) panelRef.value?.openAgentTab(call)
 }
 
-/** D10 回落动作序列（无失败标记/计数分支）：关 overlay → drawer workflow tab + 注入选中态。 */
+/** D10 回落动作序列（[2026-10-19] drawer workflow tab 删除，回落载体不再存在）：
+ *  关 overlay（清瞬态）；重开 overlay（入口每次点击）即重试（Guard 重挂复位）。 */
 function onFallback(): void {
-  const runId = overlayRun.value?.runId ?? ''
   closeWorkflowVizOverlay()
-  openDrawerTab('workflow')
-  openWorkflowInDrawer(runId)
 }
 </script>

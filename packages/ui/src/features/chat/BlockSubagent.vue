@@ -152,6 +152,6 @@ function openSubagentDrawer(): void {
   const mainSid = props.sessionId
   const subId = subagentId.value
   if (!mainSid || !subId) return
-  openSubagent({ virtualId: subagentVirtualId(mainSid, subId), enteredFrom: 'chat' })
+  openSubagent({ virtualId: subagentVirtualId(mainSid, subId) })
 }
 </script>

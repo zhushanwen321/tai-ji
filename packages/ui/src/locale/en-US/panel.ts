@@ -393,7 +393,6 @@ export default {
     subagentNoOutcome: '(no outcome recorded)',
     engineBadgeTitle: 'Engine: {engine}',
     subagentStopReason: 'Why the last round stopped (display only)',
-    backToWorkflow: 'Back to workflow',
     subagentLoadFailed: 'Load failed',
     subagentRetry: 'Retry',
     workflowRunning: 'Running',

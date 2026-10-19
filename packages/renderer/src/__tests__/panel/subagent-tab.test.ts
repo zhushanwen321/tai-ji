@@ -731,14 +731,14 @@ describe('SubagentTab [W0/V8] agentcall 标题 meta（findAgentCall 命中合并
       { id: 1, agent: 'reviewer-2', status: 'running', startedAt: new Date().toISOString(), sessionId: 'acs-v8-2' },
     ])
     vi.mocked(sessionApi.getAgentCallHistory).mockResolvedValue([])
-    openSubagent({ virtualId: agentCallVirtualId('acs-v8-1'), enteredFrom: 'workflow' })
+    openSubagent({ virtualId: agentCallVirtualId('acs-v8-1') })
 
     const wrapper = mountTab()
     await settle(wrapper)
     // 标题栏 agent 名来自 findAgentCall（合并投影 record-only 行携带 sessionId + agent）
     expect(wrapper.text()).toContain('reviewer-1')
-    // 从 workflow 进入：返回按钮在场（enteredFrom 语义不受影响）
-    expect(wrapper.find('[data-testid="drawer-subagent-back"]').exists()).toBe(true)
+    // 返回按钮已随 drawer workflow tab 删除移除（[2026-10-19]）
+    expect(wrapper.find('[data-testid="drawer-subagent-back"]').exists()).toBe(false)
     wrapper.unmount()
   })
 

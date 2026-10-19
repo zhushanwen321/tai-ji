@@ -384,7 +384,6 @@ export default {
     subagentNoOutcome: '（无结果记录）',
     engineBadgeTitle: '执行引擎：{engine}',
     subagentStopReason: '上一轮为什么停（停因词，仅展示）',
-    backToWorkflow: '返回工作流',
     subagentLoadFailed: '加载失败',
     subagentRetry: '重试',
     workflowRunning: '运行中',

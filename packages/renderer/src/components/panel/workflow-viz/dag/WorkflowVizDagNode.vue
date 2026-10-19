@@ -15,8 +15,8 @@
   - ≥2 实例：标题保持调用点模板名（调用点身份），主体下方每实例一行（状态点 +
     agent 名），行高 INSTANCE_ROW_H、节点高经 dagNodeHeight 增高（布局同表）；
   - 0 实例（pending/skipped——零实例无实例名可显）：标题保持模板名。
-  实例行可点击（data-wfvz-instance 锚点）：画布 routeClick 优先路由实例行，
-  上抛 callId 让宿主钻取该实例（多实例节点不再只能看第一个）。
+  实例行 data-wfvz-instance 锚点保留为测试观察锚（非交互语义）：[2026-10-19]
+  agent 钻取入口收归实例 trace 行，节点/实例行点击不再上抛 callId。
 
   守卫：node prop 违约（缺失 / id 非法）时 fail-fast throw——本组件渲染抛错由外层
   WorkflowVizDagNodeGuard（errorCaptured 节点级边界）捕获并渲染占位错误态，不挂
@@ -26,7 +26,7 @@
 <template>
   <g
     :class="[
-      node.kind === 'agent' ? 'cursor-pointer' : 'cursor-default',
+      'cursor-default',
       status === 'skipped' ? 'opacity-50' : '',
     ]"
     :data-state="status"
@@ -49,14 +49,14 @@
       {{ titleText }}
     </text>
     <text class="text-[length:var(--text-3xs)] font-mono fill-[var(--neutral-dim)]" :x="LABEL_X" :y="META_BASELINE_Y">{{ kindLabel }} · L{{ node.line }}</text>
-    <!-- 执行实例行（≥2 实例时；1 实例已并入标题，0 实例零渲染） -->
+    <!-- 执行实例行（≥2 实例时；1 实例已并入标题，0 实例零渲染；data-wfvz-instance =
+         测试观察锚，非交互语义——agent 钻取已收归 trace 行） -->
     <g
       v-for="(call, i) in extraInstances"
       :key="call.id"
       :data-testid="`wfvz-dag-instance-${call.id}`"
       :data-wfvz-instance="call.id"
       :data-state="call.status"
-      class="cursor-pointer"
     >
       <circle
         :class="['transition-[fill] duration-[var(--duration-fast)] ease-[var(--ease)]', dotTone(call.status, stopTone)]"

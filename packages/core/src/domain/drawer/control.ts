@@ -12,8 +12,9 @@
  * （drawerSessionKey）；control 不 import coordination/selection（无环）。
  *
  * [display-containers §6.6 W0 状态还债] DrawerControlState 收窄为 { isOpen, activeTab }：
- * 选中态五字段迁出至 selection/ 各内容域分区（selectedSubagentId/enteredFrom → subagent、
- * selectedWorkflowName → workflow、selectedBackgroundTaskId → bashTask、selectedBtwVid → btw），
+ * 选中态字段迁出至 selection/ 各内容域分区（selectedSubagentId → subagent、
+ * selectedBackgroundTaskId → bashTask、selectedBtwVid → btw；enteredFrom 与
+ * selectedWorkflowName 2026-10-19 随 drawer workflow tab 删除移除），
  * 瞬时参数（selectedCommandName/detailFilePath）迁 selection/transient.ts 按会话分区；
  * docked 死状态全链删除（display-containers §7.6）。复合谓词读取单一源 = selection/predicates.ts。
  *
@@ -100,7 +101,7 @@ const controlState = useSessionScopedState<DrawerControlState>(
  *
  * ⚠️ 直接调用会跳过瞬时参数写入（selectedCommandName/detailFilePath）与选中态写入
  * （selection/ 各内容域分区）——业务代码应使用 coordination 层的 openDrawerTab /
- * closeDrawer / toggleDrawer / setDrawerTab / openSubagent / openWorkflowInDrawer /
+ * closeDrawer / toggleDrawer / setDrawerTab / openSubagent / openWorkflow /
  * setBtwView / selectBackgroundTask（C2 契约）。
  *
  * drawerControl 现行职责：只写纯控制态（isOpen/activeTab）——瞬时参数与选中态不在此

@@ -94,18 +94,11 @@ describe('WorkflowVizDag 画布（黑盒 DOM）', () => {
     expect(wrapper.find('[data-testid="wfvz-dag-cluster-gate"]').attributes('data-active')).toBeUndefined()
   })
 
-  it('agent 节点点击 → select agent 语义（携带调用点身份）', async () => {
+  it('agent 节点点击 no-op（[2026-10-19] agent 钻取语义删除——节点纯展示，钻取入口 = 实例 trace 行）', async () => {
     const wrapper = mountDag(sampleDag(), { nodeStates: { 'n-biz': 'done' } })
     await wrapper.find('[data-testid="wfvz-dag-node-n-biz"]').trigger('pointerdown')
     await wrapper.find('[data-testid="wfvz-dag-node-n-biz"]').trigger('pointerup')
-    const events = wrapper.emitted('select')
-    expect(events).toHaveLength(1)
-    expect(events?.[0]?.[0]).toEqual({
-      semantic: 'agent',
-      nodeId: 'n-biz',
-      templateName: 'reviewer-biz',
-      phase: 'review',
-    })
+    expect(wrapper.emitted('select')).toBeUndefined()
   })
 
   it('pending 节点点击 = phase 语义（零实例、无对话可看）', async () => {
@@ -346,7 +339,7 @@ describe('WorkflowVizDag 执行实例行（实际 agent 画进图，2026-10 用�
     expect(node.text()).not.toContain('+1')
   })
 
-  it('实例行点击：上抛 agent 语义 + callId（宿主钻取该实例，非盲取首个）', async () => {
+  it('实例行点击 no-op（[2026-10-19] agent 钻取入口收归实例 trace 行——实例行纯展示）', async () => {
     const wrapper = mountDag(sampleDag(), {
       nodeStates: { 'n-sec': 'running' },
       instancesByNode: new Map([
@@ -355,13 +348,7 @@ describe('WorkflowVizDag 执行实例行（实际 agent 画进图，2026-10 用�
     })
     await wrapper.find('[data-testid="wfvz-dag-instance-9"]').trigger('pointerdown')
     await wrapper.find('[data-testid="wfvz-dag-instance-9"]').trigger('pointerup')
-    expect(wrapper.emitted('select')?.[0]?.[0]).toEqual({
-      semantic: 'agent',
-      nodeId: 'n-sec',
-      templateName: 'reviewer-sec',
-      phase: 'review',
-      callId: 9,
-    })
+    expect(wrapper.emitted('select')).toBeUndefined()
   })
 
   it('≥2 实例节点增高进布局（rect 高于基准高——实例行画在节点卡片内，不溢出分区）', () => {

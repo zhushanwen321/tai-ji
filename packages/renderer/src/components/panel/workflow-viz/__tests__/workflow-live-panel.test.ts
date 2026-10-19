@@ -257,13 +257,6 @@ describe('WorkflowLivePanel · workflow tab 三子页（使用者黑盒 + 观察
     expect(dashCells.length).toBe(4)
   })
 
-  it('pending / sessionId 缺失行点击不开 agent tab（对齐 WorkflowTab 现状 no-op）', async () => {
-    const wrapper = await mountPanel()
-    await wrapper.find('[data-testid="wf-viz-trace-row-3"]').trigger('click')
-    await flushPromises()
-    expect(wrapper.findAll('[data-testid="l2-tab-agent\\:3"]')).toHaveLength(0) // 无 agent tab
-  })
-
   it('事件流子页：行渲染 + ✂ truncatedFields 标注（D4 截断协议展示面，含 worker-log entryMessage 行）', async () => {
     const wrapper = await mountPanel()
     await wrapper.find('[data-testid="wf-viz-subpage-events"]').trigger('click')
@@ -376,7 +369,7 @@ describe('WorkflowLivePanel · workflow tab 三子页（使用者黑盒 + 观察
   })
 })
 
-// ── 多级 tab（phase / agent 钻取 + 关闭回落）────────────────────────────────
+// ── 多级 tab（phase 钻取 + 关闭回落；agent 钻取已收归 AgentStreamDrawer）──────
 
 describe('WorkflowLivePanel · 多级 tab（使用者黑盒）', () => {
   it('expose openPhaseTab：phase tab 头卡渲染（轮次/起止/状态）+ phase 内 trace 过滤 + phase 事件过滤', async () => {
@@ -395,61 +388,22 @@ describe('WorkflowLivePanel · 多级 tab（使用者黑盒）', () => {
     expect(events.text()).not.toContain('run-created')
   })
 
-  it('trace 行点击开 agent tab：对话流编排被调 + MessageStream 挂载 agentcall 虚拟 id', async () => {
+  it('trace 行点击 → openAgent 事件上抛（[2026-10-19] agent 详情归宿 = 宿主接 AgentStreamDrawer，面板不再内嵌 agent tab）', async () => {
     const wrapper = await mountPanel()
     await wrapper.find('[data-testid="wf-viz-trace-row-0"]').trigger('click')
     await flushPromises()
-    // agent tab 出现（agentcall:acs-0 分区）
-    const stream = wrapper.find('[data-testid="message-stream-stub"]')
-    expect(stream.exists()).toBe(true)
-    expect(stream.text()).toBe('agentcall:acs-0')
-    // mainSessionId 接线（fileSearch vid 修复）：agentcall 两段式 vid 的归属解析依赖它，
-    // 值 = 主 session id（D11⑤ 归属绑定发起 session）
-    expect(stream.attributes('data-main-sid')).toBe(SID)
-    // 快照编排接线（useSubagentTabData.loadSubagentData 复用，零新拉取链）
-    expect(loadSubagentDataMock).toHaveBeenCalledWith('agentcall:acs-0')
-    // trace 详情元信息条渲染
-    expect(wrapper.find('[data-testid="wf-viz-agent-meta"]').text()).toContain('worker-0')
+    const emitted = wrapper.emitted('openAgent')
+    expect(emitted).toHaveLength(1)
+    expect((emitted?.[0]?.[0] as WorkflowAgentCall).id).toBe(0)
+    // 面板内不再出现 agent 对话流（dock 无 agent tab）
+    expect(wrapper.find('[data-testid="message-stream-stub"]').exists()).toBe(false)
   })
 
-  it('workflowUpdate 信号（命中活跃 run）→ agent tab 快照重拉（§3.1-2/D8 信号刷新链）', async () => {
+  it('pending 行点击 no-op：不上抛 openAgent（对齐 RunTraceTable 行点击守卫现状）', async () => {
     const wrapper = await mountPanel()
-    await wrapper.find('[data-testid="wf-viz-trace-row-0"]').trigger('click')
+    await wrapper.find('[data-testid="wf-viz-trace-row-3"]').trigger('click')
     await flushPromises()
-    loadSubagentDataMock.mockClear()
-    // 面板挂载已登记活跃锚（setActiveWorkflowRun）——信号经 store 聚合触发纪元自增
-    const store = useWorkflowStore()
-    store.triggerWorkflowReload(SID)
-    await flushPromises()
-    expect(loadSubagentDataMock).toHaveBeenCalledWith('agentcall:acs-0')
-    // 非活跃 session 的信号不触发重拉（纪元不自增）
-    loadSubagentDataMock.mockClear()
-    store.triggerWorkflowReload('other-session')
-    await flushPromises()
-    expect(loadSubagentDataMock).not.toHaveBeenCalled()
-  })
-
-  it('agent tab 快照拉取失败：错误态 + 重试按钮；点重试重调快照编排（§3.1-2 同一错误态语言）', async () => {
-    const wrapper = await mountPanel()
-    await wrapper.find('[data-testid="wf-viz-trace-row-0"]').trigger('click')
-    await flushPromises()
-    // 失败形态：错误态显示错误信息 + 重试按钮（恢复动作与事件流子页错误态语言一致）
-    loadErrorRef.value = 'rpc down'
-    await flushPromises()
-    const err = wrapper.find('[data-testid="wf-viz-agent-error"]')
-    expect(err.exists()).toBe(true)
-    expect(err.text()).toContain('rpc down')
-    const retryBtn = err.find('[data-testid="wf-viz-agent-retry"]')
-    expect(retryBtn.exists()).toBe(true)
-    // 点重试 → 重调快照拉取编排（实装 loadSubagentData 开头同步置空 loadError → 错误块
-    // 分支切走按钮消失，构造性防重复点击；mock 无副作用由用例手动复位模拟该语义）
-    loadSubagentDataMock.mockClear()
-    await retryBtn.trigger('click')
-    expect(loadSubagentDataMock).toHaveBeenCalledWith('agentcall:acs-0')
-    loadErrorRef.value = null
-    await flushPromises()
-    expect(wrapper.find('[data-testid="wf-viz-agent-error"]').exists()).toBe(false)
-    expect(wrapper.find('[data-testid="message-stream-stub"]').exists()).toBe(true)
+    expect(wrapper.emitted('openAgent')).toBeUndefined()
   })
 
   it('tab 关闭激活左侧相邻；关闭首个动态 tab 回 workflow 固定 tab（L2TabBar close 事件链）', async () => {

@@ -217,13 +217,14 @@ describe('drawer-tab 注册表契约（L1 全量收敛点，display-containers �
     }
     // terminal 迁出 L1（用户可见：右抽屉不再有终端图标——入口改底抽屉 ⌃` / StatusBar 按钮）；
     // browser 迁出 L1（用户可见：右抽屉不再有浏览器图标——能力在浮层复活，点 localhost 链接进入）
-    expect(L1_DRAWER_TABS).toHaveLength(8)
+    expect(L1_DRAWER_TABS).toHaveLength(7)
     expect(wrapper.find('[data-testid="drawer-tab-terminal"]').exists()).toBe(false)
     expect(wrapper.find('[data-testid="drawer-tab-browser"]').exists()).toBe(false)
-    expect(wrapper.findAll('[data-testid^="drawer-tab-"]')).toHaveLength(8)
+    expect(wrapper.find('[data-testid="drawer-tab-workflow"]').exists()).toBe(false)
+    expect(wrapper.findAll('[data-testid^="drawer-tab-"]')).toHaveLength(7)
 
-    // 注册表形状机器锚（§8.2：右 8/底 1/浮 2——迁移源侧清空）
-    expect(RIGHT_DRAWER_REGISTRY).toHaveLength(8)
+    // 注册表形状机器锚（§8.2：右 7/底 1/浮 2——迁移源侧清空；[2026-10-19] workflow tab 删除）
+    expect(RIGHT_DRAWER_REGISTRY).toHaveLength(7)
     expect(BOTTOM_DRAWER_REGISTRY).toHaveLength(1)
     expect(OVERLAY_REGISTRY).toHaveLength(2)
     expect(CONTAINER_REGISTRY['bottom-drawer'][0]?.content).toBe('terminal')
