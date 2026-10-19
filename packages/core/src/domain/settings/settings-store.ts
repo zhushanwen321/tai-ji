@@ -19,6 +19,7 @@
  */
 import { ref } from 'vue'
 import type {
+  QuotaPreset,
   ProviderInfo,
   ModelInfo,
   SkillInfo,
@@ -45,6 +46,8 @@ export type SettingsStoreInstance = ReturnType<typeof createSettingsStore>
 export function createSettingsStore() {
   // ── State ──
   const providers = ref<ProviderInfo[]>([])
+  // quota presets 合并视图（remote-config 域 2；连接建立时拉取，聊天面板/设置页消费）
+  const quotaPresets = ref<QuotaPreset[]>([])
   /**
    * 聚合模型列表（runtime aggregateModels 产出，config.providers 解析后的扁平模型）。
    * 与 providers 同源（sendInitialState 同 step 推、broadcastProviderList 同步广播），
@@ -155,6 +158,11 @@ export function createSettingsStore() {
     if (scoped !== undefined) scopedModels.value = scoped
   }
 
+  /** 写入 quota presets 合并视图（config.listQuotaPresets 拉取推回；远程更新时整体替换）。 */
+  function setQuotaPresets(next: QuotaPreset[]): void {
+    quotaPresets.value = next
+  }
+
   /**
    * 乐观切换 model 级 enabled（D6）。
    * 立即改本地 providers 中目标 provider 下目标 model 的 enabled，组件随后调 API 持久化、失败回滚。
@@ -211,12 +219,15 @@ export function createSettingsStore() {
     systemPromptConfig,
     terminalConfig,
     scopedModels,
+    // quota presets 合并视图（remote-config 域 2）
+    quotaPresets,
     // actions（纯写入）
     setSystem,
     setSkillDirs,
     setAgentDirs,
     setExtensionDirs,
     setProviders,
+    setQuotaPresets,
     setProviderEnabled,
     setModelEnabled,
     setExtensionEnabled,

@@ -190,6 +190,7 @@
           :provider="p.id === NEW_ID ? null : p"
           :oauth-present="hasOauthPresence(p.id)"
           :oauth-supported="isOauthSupported(p.id)"
+          :quota-presets="settingsStore.quotaPresets.value"
           @dirty-change="onBodyDirtyChange"
           @saved="onEditSaved"
           @cancel="onBodyCancel"
@@ -346,9 +347,9 @@ onMounted(async () => {
   // 广播推回 store 自动更新。RD-4#10 的陈旧判据（failed[] / transport reject）见
   // composables/features/settings/useProviderCatalogsStale.ts。
   await refreshCatalogs()
-  // W1 缝隙 A：页签可见期间启用 pi models-store.json 变化感知——runtime 轮询 mtime
-  // 变化即广播 config.providers 走同一条订阅链；fire-and-forget，开关失败不影响页面。
+  // W1+W3c：页签可见期启用 models-store.json 变化感知 + 重拉 quota presets（fire-and-forget）
   transport.setProviderCatalogWatch(true).catch(() => {})
+  transport.listQuotaPresets().then((p) => settingsStore.setQuotaPresets(p)).catch(() => {})
 })
 
 onUnmounted(() => transport.setProviderCatalogWatch(false).catch(() => {}))

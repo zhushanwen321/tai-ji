@@ -26,6 +26,7 @@ import type {
   BuiltinProviderTemplate,
   ProviderImportPreview,
   ProviderImportResult,
+  QuotaPreset,
   SkillCacheInvalidatedPayload,
   ServerMessage,
   ProviderId,
@@ -62,6 +63,12 @@ export async function refreshProviderCatalogs(): Promise<{
 }> {
   const reply = await command('config.refreshProviderCatalogs', {}, RPC_BACKSTOP_TIMEOUT_MS)
   return { refreshed: reply.refreshed, failed: reply.failed, corrupt: reply.corrupt, persistFailed: reply.persistFailed }
+}
+
+/** quota presets 合并视图（runtime 基线 ⊕ 远程；remote-config 域 2 下发通道）。 */
+export async function listQuotaPresets(): Promise<QuotaPreset[]> {
+  const reply = await command('config.listQuotaPresets', {}, RPC_BACKSTOP_TIMEOUT_MS)
+  return reply.presets
 }
 
 /**

@@ -19,7 +19,9 @@ import type {
   QuotaAuthKind,
   QuotaFetchFailureReason,
 } from '@taiji/shared'
-import { QUOTA_PRESETS, normalizeQuotaWorkspaceUrl, resolveQuotaCredentialSource, supportsExclusiveCredential } from '@taiji/shared'
+import { normalizeQuotaWorkspaceUrl, resolveQuotaCredentialSource, supportsExclusiveCredential } from '@taiji/shared'
+// W3c：presets 数据源从编译期基线切到 runtime 下发的合并视图（remote-config 域 2）
+import { getSettingsStore } from '@taiji/core'
 import type {
   QuotaConfigureInputs,
   QuotaConfigureModule,
@@ -59,7 +61,7 @@ function normalizeWorkspaceDraft(
 
 /** 当前草稿 fetcher 对应的预设；未选择草稿时 fallback 到自动匹配的 preset。 */
 function findPreset(fetcherId: string | undefined, fallback: QuotaPreset | undefined): QuotaPreset | undefined {
-  if (fetcherId) return QUOTA_PRESETS.find((p) => p.fetcher === fetcherId)
+  if (fetcherId) return getSettingsStore().quotaPresets.value.find((p) => p.fetcher === fetcherId)
   return fallback
 }
 
@@ -186,8 +188,8 @@ export function useQuotaConfigure(inputs: QuotaConfigureInputs): QuotaConfigureM
   /** 最近一次查询失败原因（A2-4 reason 透传；null = 无失败）。旧缓存保留在 quotaData（「查看上次成功数据」） */
   const testFailReason = ref<QuotaFetchFailureReason | null>(null)
 
-  /** 下拉框选项：QUOTA_PRESETS 映射为 { value, label } */
-  const fetcherOptions = QUOTA_PRESETS.map((p) => ({ value: p.fetcher, label: p.label }))
+  /** 下拉框选项：presets 合并视图映射为 { value, label } */
+  const fetcherOptions = getSettingsStore().quotaPresets.value.map((p) => ({ value: p.fetcher, label: p.label }))
 
   /**
    * 类型草稿写入（§7.1：类型进草稿，由 saveAndTest 一次提交，不再即时落盘）。
@@ -223,7 +225,7 @@ export function useQuotaConfigure(inputs: QuotaConfigureInputs): QuotaConfigureM
   const isCookieAuth = computed(() => {
     const fid = fetcherIdDraft.value
     if (fid) {
-      const opt = QUOTA_PRESETS.find((p) => p.fetcher === fid)
+      const opt = getSettingsStore().quotaPresets.value.find((p) => p.fetcher === fid)
       return opt?.auth.includes('cookie') ?? false
     }
     return preset.value?.auth.includes('cookie') ?? false

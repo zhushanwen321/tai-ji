@@ -17,7 +17,7 @@ import { computed, onScopeDispose, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
 import type { Ref } from 'vue'
 import type { NormalizedQuotaRow } from '@taiji/shared'
-import { matchQuotaPreset, QUOTA_PRESETS } from '@taiji/shared'
+import { matchQuotaPreset } from '@taiji/shared'
 import { getSettingsStore } from '@taiji/core'
 import { useQuotaQuery } from './useQuotaQuery'
 
@@ -103,8 +103,8 @@ export function useQuotaDisplay(modelIdRef: Ref<string | undefined>): UseQuotaDi
     if (!providerInfo) return null
     const manualFetcher = providerInfo.quota?.fetcher
     const preset = manualFetcher
-      ? QUOTA_PRESETS.find((p) => p.fetcher === manualFetcher)
-      : matchQuotaPreset({ baseUrl: providerInfo.baseUrl, name: providerInfo.name })
+      ? getSettingsStore().quotaPresets.value.find((p) => p.fetcher === manualFetcher)
+      : matchQuotaPreset({ baseUrl: providerInfo.baseUrl, name: providerInfo.name }, getSettingsStore().quotaPresets.value)
     return preset?.label ?? null
   })
 

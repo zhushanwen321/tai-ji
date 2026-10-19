@@ -24,6 +24,7 @@
  * connected），打一次 console.warn 提示。
  */
 import type {
+  QuotaPreset,
   Message, ModelInfo, ServerMessage, ServerMessageMap, ServerMessageUnion, SessionSummary, SessionGroup, ProviderInfo, BuiltinProviderTemplate,
   BashDispatchReceipt,
   SkillInfo, AgentInfo, PluginInfo, SetProviderData,
@@ -1280,6 +1281,11 @@ const configImpl = {
   // models-store 变化感知开关：mock 无 pi 落盘层，ack 同构（facade 三元）。
   async setProviderCatalogWatch(_enable: boolean): Promise<void> {
     await sleep(TIMING.ack)
+  },
+  // quota presets 合并视图：mock 返基线形状空数组（签名同构，facade 三元）。
+  async listQuotaPresets(): Promise<QuotaPreset[]> {
+    await sleep(TIMING.ack)
+    return []
   },
   // wave-env-check：env 检测。mock 读 process.env 同构（浏览器 mock 下多为未设置）。
   async checkEnvVars(names: string[]): Promise<Record<string, boolean>> {

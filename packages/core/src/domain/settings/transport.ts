@@ -27,6 +27,7 @@
  *   平铺接口出现 install/list/create 之类无归属裸名。
  */
 import type {
+  QuotaPreset,
   ProviderInfo,
   ModelInfo,
   SkillInfo,
@@ -145,6 +146,8 @@ export interface SettingsTransport {
   refreshProviderCatalogs(): Promise<ProviderCatalogsRefreshResult>
   /** 页签可见期间 models-store.json 变化感知开关（离开页签 disable，变化经 onProviders 推回） */
   setProviderCatalogWatch(enable: boolean): Promise<void>
+  /** quota presets 合并视图拉取（基线 ⊕ 远程；连接建立即拉缓存，聊天面板 hover 依赖） */
+  listQuotaPresets(): Promise<QuotaPreset[]>
   /** 按 sources 扫描 skill（加入 discovery） */
   scanSkills(sources: string[]): Promise<ScannedSkillInfo[]>
   /** 按 sources 扫描 agent */

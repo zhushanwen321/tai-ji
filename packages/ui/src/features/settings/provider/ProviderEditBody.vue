@@ -328,7 +328,7 @@ import {
   Eye, EyeOff,
   X, Trash2,
 } from '@lucide/vue'
-import { matchQuotaPreset } from '@taiji/shared'
+import { matchQuotaPreset, type QuotaPreset } from '@taiji/shared'
 
 import type { ProviderInfo } from '@taiji/shared'
 // API_KEY_CLEAR_SENTINEL：清除哨兵常量与 core save 链同源（MF-1-9：模板判断不再手写
@@ -347,6 +347,8 @@ const props = defineProps<{
   oauthPresent?: boolean
   /** 该 provider 支持 OAuth 登录（父组件按 builtinProviders 模板 oauthSupported 判定） */
   oauthSupported?: boolean
+  /** quota presets 合并视图（remote-config 域 2，renderer 自 store 传入；缺省回落编译期基线） */
+  quotaPresets?: QuotaPreset[]
 }>()
 const emit = defineEmits<{
   /** 保存成功（wroteApiKey=本次写入非空 apiKey，父组件据此做「配置完即自动启用」；
@@ -374,7 +376,8 @@ const builtinModels = computed(() => props.provider?.models.filter((m) => m.sour
 // ── Coding Plan 额度查询：自动关联 + 配置 ──
 const matchedPreset = computed(() => {
   const p = props.provider
-  return matchQuotaPreset({ baseUrl: p?.baseUrl, name: p?.name })
+  // quotaPresets 缺省 = 编译期基线（测试/无下发场景兼容）；生产由 renderer 传合并视图
+  return matchQuotaPreset({ baseUrl: p?.baseUrl, name: p?.name }, props.quotaPresets)
 })
 
 // 业务编排全在 core 三组 module（[C4] 31 成员扁平返回面收敛为 form / discover / models 三组

@@ -18,6 +18,7 @@ import type { IConfigService } from '../interfaces.js'
 import type { SettingsHandlerContext } from './settings-message-handler.js'
 import { attachSupportedLevelsSafe } from './message-broker.js'
 import { startModelsStoreMtimeWatch } from '../services/provider-catalog-refresh.js'
+import { listQuotaPresets } from '../services/quota-providers/index.js'
 
 /**
  * provider 增删后统一维护 defaultModel（design provider-arch-hardening §3.3 D3 / Phase 3）。
@@ -72,6 +73,7 @@ export class ProviderMessageHandler {
       ['config.checkEnvVars', (ws, msg) => this.handleCheckEnvVars(ws, msg as Extract<ClientMessage, { type: 'config.checkEnvVars' }>)],
       ['config.detectSources', (ws, msg) => this.handleDetectSources(ws, msg as Extract<ClientMessage, { type: 'config.detectSources' }>)],
       ['config.listBuiltinProviders', (ws, msg) => this.handleListBuiltinProviders(ws, msg as Extract<ClientMessage, { type: 'config.listBuiltinProviders' }>)],
+      ['config.listQuotaPresets', (ws, msg) => this.handleListQuotaPresets(ws, msg as Extract<ClientMessage, { type: 'config.listQuotaPresets' }>)],
       ['config.previewImportProviders', (ws, msg) => this.handlePreviewImportProviders(ws, msg as Extract<ClientMessage, { type: 'config.previewImportProviders' }>)],
       ['config.applyImportProviders', (ws, msg) => this.handleApplyImportProviders(ws, msg as Extract<ClientMessage, { type: 'config.applyImportProviders' }>)],
     ])
@@ -112,6 +114,15 @@ export class ProviderMessageHandler {
     this.ctx.broadcastProviderList()
     const remote = await this.ctx.configService.refreshRemoteProviders()
     if (remote.updatedProviders.length > 0) this.ctx.broadcastProviderList()
+    return true
+  }
+
+  // quota presets 合并视图（基线 ⊕ 远程；前端缓存 + 聊天面板/设置页消费）
+  private handleListQuotaPresets(
+    ws: WsType,
+    msg: Extract<ClientMessage, { type: 'config.listQuotaPresets' }>,
+  ): boolean {
+    this.ctx.reply(ws, msg.id, 'config.quotaPresets', { presets: listQuotaPresets() })
     return true
   }
 

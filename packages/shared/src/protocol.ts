@@ -48,6 +48,7 @@ import type { UsageStatsResult } from './usage-stats'
 import type { GenStatsFrame } from './gen-stats'
 // quota.configure payload 形状 SSOT 引用（coding-plan-quota-config-ux §7.1 契约收敛）
 import type { QuotaConfigurePayload } from './quota-types'
+import type { QuotaPreset } from './quota-presets'
 
 // plan 生命周期状态类型（plan 状态机显式化 D2）：经包出口（@zhushanwen/extension-protocol）
 // 直接引用 PlanLifecycleState（canonical = packages/extension-protocol/src/extensions/plan/state-machine，barrel 已 re-export），
@@ -194,6 +195,7 @@ export type ClientMessageType =
   | 'message.bash' | 'message.abortBash'
   | 'config.getProviders' | 'config.setProvider' | 'config.deleteProvider' | 'config.setToolPermissions'
   | 'config.refreshProviderCatalogs' | 'config.setProviderCatalogWatch'
+  | 'config.listQuotaPresets'
   | 'config.discoverModels' | 'config.setDefaultModel'
   | 'config.scanSkills' | 'config.setSkill' | 'config.deleteSkill'
   | 'config.scanSessionSkills'
@@ -768,6 +770,8 @@ export interface ClientMessageMap {
   // 设置页 Provider 页签可见期间的 models-store.json 变化感知开关（W1 缝隙 A：pi 启动刷
   // 落盘后页签开着也能看到）。enable/disable 最后写者赢，runtime 内部幂等
   'config.setProviderCatalogWatch': { enable: boolean }
+  // quota presets 合并视图拉取（基线 ⊕ 远程 quota-fetchers.json presets；remote-config 域 2）
+  'config.listQuotaPresets': Record<string, never>
   'config.setProvider': { providerId: ProviderId } & SetProviderData
   'config.deleteProvider': { providerId: ProviderId }
   // wave4：provider 启用切换（wave3 RPC 链路在 wave4 补全）。enabled=false 时 runtime 移除白名单 pattern，
@@ -2130,6 +2134,8 @@ export interface ServerMessageMapBase {
     corrupt?: Array<'own' | 'pi'>
     persistFailed?: boolean
   }
+  // quota presets 合并视图（runtime 基线 ⊕ 远程；前端缓存 + 聊天面板/设置页消费）
+  'config.quotaPresets': { presets: QuotaPreset[] }
   'config.skills': { skills: SkillInfo[] }
   /**
    * skill 缓存失效信号（landing useGlobalSkills/useProjectSkills 失效缓存重拉）。
@@ -3342,6 +3348,7 @@ export interface ReplyPayloadMap {
   // watch 开关 ack 型（状态变更经 config.providers 广播承载，reply 无生效值；mutation
   // 契约测试登记 excluded：运行时会话内开关，无持久化与 renderer store 副本）
   'config.setProviderCatalogWatch': void
+  'config.listQuotaPresets': ServerMessageMap['config.quotaPresets']
   'config.deleteSkill': void      // reply config.skillDeleted
   'config.setAgent': void         // reply config.agentUpdated
   'config.setAgentDirs': void     // reply config.agentDirs
