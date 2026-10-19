@@ -5,7 +5,7 @@ description: "配置 @zhushanwen/pi-network-proxy（LLM 网络代理分流）时
 
 # network-proxy 配置指南
 
-> @zhushanwen/pi-network-proxy：在 pi 进程内安装按主机名规则分流的 undici 全局分发器——命中规则的 LLM 请求经代理出站，未命中的保持 pi 原生行为（直连或 env 代理），并按主机名计数（经代理 / 直连）。
+> @zhushanwen/pi-network-proxy：包装 pi 进程的 `globalThis.fetch`，按主机名规则分流——命中规则的请求经代理出站，未命中的保持 pi 原生行为（直连或 env 代理），并按主机名计数（经代理 / 直连）。打包版与独立 pi 都生效（不依赖 pi 与扩展共享 undici 模块实例）。
 
 ## 配置文件位置
 
@@ -20,7 +20,7 @@ description: "配置 @zhushanwen/pi-network-proxy（LLM 网络代理分流）时
 
 ```ts
 interface NetworkProxyConfig {
-  enabled: boolean;      // 总开关，默认 false（禁用 = 不安装分流器，全部按 pi 原生行为出站）
+  enabled: boolean;      // 总开关，默认 false（禁用 = 不包装 fetch，全部按 pi 原生行为出站）
   proxy: {
     protocol: "http" | "https" | "socks5";  // http/https 走 undici ProxyAgent，socks5 走 Socks5ProxyAgent
     host: string;        // 代理服务器地址，如 127.0.0.1
@@ -42,13 +42,14 @@ interface NetworkProxyConfig {
   - `xapi.anthropic.com` 不命中（无点前缀拼接）；`api-anthropic.com.evil.com` 不命中（恶意后缀）
 - 匹配对象 = 请求目标 URL 的主机名（服务商 baseURL 的主机名；端口不参与匹配）
 - noProxy 先于 rules 判定（先排除再匹配）；`localhost` 条目同时覆盖 `localhost` 与 `*.localhost`
-- 不支持 `*` 通配（无已发生需求）；分流覆盖 pi 进程内一切走全局分发器的出站（含 WebSocket 升级请求）
+- 不支持 `*` 通配（无已发生需求）；分流覆盖经 `globalThis.fetch` 发出的请求（pi LLM 调用与 OAuth/目录请求）；直接使用 `undici.request` / `Client` 的调用不经过本包装
 
 ## 生效时机（turn 粒度热重载）
 
-- 每个 turn 开始重读配置，指纹（enabled+proxy+noProxy+rules）变化才重建分发器——**运行中会话自下一轮对话起生效，无需重启**；turn 进行中（工具循环连续请求）保存的配置对该 turn 内后续请求不生效
-- `enabled` 从 true → false：立即恢复 pi 原生分发器（全部直连/env 代理路由）
-- 未命中规则的流量委托 pi 原生分发器——独立 pi 用户设了 `HTTPS_PROXY` 环境变量时，未命中流量仍走 env 代理，语义不丢失
+- 每个 turn 开始重读配置，指纹（enabled+proxy+noProxy+rules）变化才重建包装——**运行中会话自下一轮对话起生效，无需重启**；turn 进行中（工具循环连续请求）保存的配置对该 turn 内后续请求不生效
+- `enabled` 从 true → false：立即恢复包装前的 fetch（全部直连/env 代理路由）
+- 未命中规则的流量委托包装前的 fetch——独立 pi 用户设了 `HTTPS_PROXY` 环境变量时，未命中流量仍走 env 代理，语义不丢失
+- pi 在设置变更时会用原实现整体替换 `globalThis.fetch`；下一 turn 开始自动以覆盖者为新 original 重新包装
 
 ## 统计文件
 

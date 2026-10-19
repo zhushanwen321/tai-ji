@@ -1,14 +1,24 @@
 # @zhushanwen/pi-network-proxy
 
-LLM 网络代理分流：在 pi 进程内安装按主机名规则分流的 undici 全局分发器——命中规则的请求经代理出站（http/https/socks5），未命中的委托 pi 原生分发器（直连或 env 代理路由），并按主机名计数（经代理 / 直连）。
+LLM 网络代理分流：包装 pi 进程的 `globalThis.fetch`，按主机名规则把命中请求交给代理 dispatcher（http/https/socks5），未命中的原样委托包装前的 fetch（直连或 pi 原生 env 代理路由），并按主机名计数（经代理 / 直连）。
 
 ## 行为摘要
 
-- **安装点**：extension 加载时读配置，`enabled` 且校验通过 → 捕获 pi 已装的 `EnvHttpProxyAgent`（接管而非向空闲槽安装）→ 构造 `RuleDispatchDispatcher` 并 `setGlobalDispatcher`；校验/构造失败 → extension error（含配置文件恢复指引），不安装不阻断 pi（全部直连）
-- **热生效**：turn 粒度——每 turn 开始重读配置（mtime+size 读时刷新），指纹变化才重建；`enabled` true→false 恢复原分发器
-- **匹配语义**：主机名归一化（小写、去末尾点）后 suffix 匹配（等于或以 `.条目` 结尾，点边界对齐）；noProxy 优先于 rules；覆盖一切走全局分发器的出站（含 WebSocket 升级请求）
+- **拦截点**：`globalThis.fetch`。pi-ai 的 OpenAI 兼容请求在每次构造 client 时经 `Shims.getDefaultFetch()` 动态取当前全局 fetch，包装它不依赖 pi 与扩展共享 undici 模块实例
+- **安装/卸载**：extension 加载时读配置，`enabled` 且校验通过 → 包装并构造代理 dispatcher；`enabled` false → 恢复原 fetch；校验/构造失败 → extension error（含配置文件恢复指引），不包装不阻断 pi（全部直连）
+- **热生效**：turn 粒度——每 turn 开始重读配置（mtime+size 读时刷新），指纹变化才重建；pi 在设置变更时重跑 `configureHttpDispatcher` 会用原实现整体替换 `globalThis.fetch`，下一 turn 开始自动以覆盖者为新 original 重新包装
+- **匹配语义**：主机名归一化（小写、去末尾点）后 suffix 匹配（等于或以 `.条目` 结尾，点边界对齐）；noProxy 优先于 rules
+- **覆盖面**：经 `globalThis.fetch` 发出的请求（pi LLM 调用与 OAuth/目录请求均走 fetch）；直接使用 `undici.request` / `Client` 的调用不经过本包装
 - **计数**：请求发起时 +1（内存按主机名聚合），turn 结束 / 进程退出把增量追加写入 `<agentDir>/network-proxy-stats.jsonl`（每行完整 JSON `{ts, host, proxied, direct}`，单次 write 单行——多进程并发追加不交错）；写失败 log 不阻断
-- **降级契约**：socks5 构造失败（undici 实验性 API）→ 记错误、不安装、全部直连，切回 http 协议恢复；同指纹不重试构造，配置修正（指纹变化）后自然重试
+- **降级契约**：socks5 构造失败（undici 实验性 API）→ 记错误、恢复原 fetch、全部直连，切回 http 协议恢复；同指纹不重试构造，配置修正（指纹变化）后自然重试
+
+## 为什么包装 fetch 而不是 undici 全局 dispatcher
+
+undici 的 `setGlobalDispatcher` 槽是模块级变量，只有「pi 与扩展加载同一份 undici 模块实例」时才生效：
+
+- 独立 pi（`node_modules/.bin/pi`）与扩展源码都从 `node_modules/undici` 解析，实例相同，旧方案可用
+- 打包版 pi 是单文件二进制，HTTP 栈用内置 undici（`builtin://thirdparty/undici`）；扩展 bundle 由 esbuild 内联自己的 undici 副本。两套全局槽互不相通——扩展安装的分流器 pi 根本不会使用，LLM 请求静默直连、统计为空
+- `globalThis.fetch` 是两套实现之间稳定的接缝（pi-ai / OpenAI SDK 每次构造 client 时动态读取），因此拦截点定在这里
 
 ## 配置
 
@@ -31,4 +41,4 @@ taiji 桌面端经设置页「网络代理」读写（runtime RMW 写侧）；�
 - socks5：`Socks5ProxyAgent` 调优经 `connect: buildConnector({ autoSelectFamilyAttemptTimeout: 2000 })` 的 **connector 函数形态**（对象形态首个请求建隧道时 TypeError）；`proxyTls` 是「代理连接走 TLS」开关，不可当调优参数袋
 - 两协议 agent 均挂防崩溃 error listener（对齐 pi `withUndiciErrorListener` 形态）
 
-上述契约由 `src/__tests__/dispatcher-construction.test.ts` 构造形态冒烟测试锁定；undici 升级时该测试是第一道回归防线。
+上述契约由 `src/__tests__/dispatcher-construction.test.ts` 构造形态冒烟测试锁定；分流/计数/状态机行为由 `src/__tests__/fetch-wrapper.test.ts` 锁定。undici 升级时这两处是第一道回归防线。

@@ -66,8 +66,8 @@ let exitFlushInstalled = false;
  * jiti 全量 reload 产生的新模块环境会再注册一个 listener，但旧环境的计数 Map 已停更，旧
  * listener flush 空增量为 no-op，无重复行（新环境再注册 = extensions/loader.js:472-476 重新
  * import 重置模块级 once flag 后重跑工厂；旧计数停更 = 旧 runtime 的 turn 订阅被 invalidate
- * 退订（extensions/loader.js:147-149）+ 旧分流器摘除后旧 recordDispatch 不再触发；pi reload
- * 链总锚点见 installer.ts detachResidualDispatcher 注释）。
+ * 退订（extensions/loader.js:147-149）+ 旧 fetch 包装摘除后旧 recordDispatch 不再触发；pi reload
+ * 链总锚点见 fetch-wrapper.ts detachResidualFetchWrapper 注释）。
  */
 export function ensureExitFlush(): void {
 	if (exitFlushInstalled) return;
