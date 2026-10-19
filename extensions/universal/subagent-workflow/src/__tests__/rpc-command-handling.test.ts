@@ -123,10 +123,14 @@ function pinReceiptEnv(): { agentDir: string; cwd: string; dispose: () => void }
   };
 }
 
-/** 读 --req 结果文件回执并解析（错误语义断言用；路径与写侧同源单源函数推导）。 */
-function readReceipt(agentDir: string, cwd: string, requestId: string): unknown {
+/** mock ctx 回退腿的 rootSessionId（与两处 ctx 构造的 sessionManager.getSessionId 同值）。 */
+const TEST_ROOT_SID = "mock-root-sid";
+
+/** 读 --req 结果文件回执并解析（错误语义断言用；路径与写侧同源单源函数推导——
+ *  同 rootSessionId 分区键 + 同 env 数据根缺省）。 */
+function readReceipt(_agentDir: string, _cwd: string, requestId: string): unknown {
   return JSON.parse(
-    readFileSync(join(getSubagentMessageResultsDir(agentDir, cwd), `${requestId}.json`), "utf8"),
+    readFileSync(join(getSubagentMessageResultsDir(TEST_ROOT_SID), `${requestId}.json`), "utf8"),
   );
 }
 
@@ -435,6 +439,9 @@ describe("registerSubagentsCommand — RPC 分支 dispatch", () => {
       hasUI: true,
       ui: { notify: vi.fn() } as unknown as CtxMock["ui"],
       isIdle: vi.fn(() => true),
+      // resolveRootSessionId 的 env 缺省回退腿读 sessionManager.getSessionId（换根后
+      // message/cancel 结果文件按 rootSessionId 分区键定位）
+      sessionManager: { getSessionId: () => "mock-root-sid" },
     };
     cancelMock = vi.fn();
     // 默认注入一个带 cancel 的 service（由用例覆写 cancelMock 行为）
@@ -549,6 +556,8 @@ describe("registerSubagentsCommand — RPC message/start dispatch + 留痕", () 
       hasUI: true,
       ui: { notify: vi.fn() } as unknown as CtxMock["ui"],
       isIdle: vi.fn(() => true),
+      // resolveRootSessionId 的 env 缺省回退腿（同 TEST_ROOT_SID）
+      sessionManager: { getSessionId: () => TEST_ROOT_SID },
     };
     // 槽清理 + 非 null 兜底（message 缺 text 类用例在触 service 前走 Usage 分支，
     // 但 handler 先检查 service 就绪——空槽会提前进 "not ready" 分支）
@@ -816,6 +825,8 @@ describe("registerWorkflowsCommand — RPC 分支 dispatch", () => {
       hasUI: true,
       ui: { notify: vi.fn() } as unknown as CtxMock["ui"],
       isIdle: vi.fn(() => true),
+      // resolveRootSessionId 的 env 缺省回退腿（同 TEST_ROOT_SID）
+      sessionManager: { getSessionId: () => TEST_ROOT_SID },
     };
   });
 
