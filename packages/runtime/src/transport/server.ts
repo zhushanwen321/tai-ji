@@ -666,6 +666,8 @@ export class RuntimeServer implements IMessageBroker {
    * 供 index.ts 注入到 HandoffService（与 session-message-handler 的 create/fork/delete/rename 一致）。
    */
   broadcastSessionList(): void { this.broker.broadcastSessionList() }
+  /** remote-config 域 1（provider 模型合并写盘）变化广播，组合根启动拉取消费。 */
+  broadcastProviderList(): void { this.broker.broadcastProviderList() }
   /**
    * D8-2：暴露 broker 的 app.info 广播，供 index.ts 在 piVersion 探测完成后补发
    * （版本标签先显示应用版本，探测完成后自动更新）。

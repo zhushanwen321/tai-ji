@@ -1782,6 +1782,22 @@ async function main(): Promise<void> {
     sweepSpawnMarkerTmpResidue: () => sweepStaleSpawnMarkerTmpFiles(getDataDir()),
   })
 
+  // ── remote-config 启动拉取（延迟 30s 单次）────────────────────────
+  // taiji 远程配置（provider 清单域，checkedAt 4h 节流在 fetch 层内建）。延迟避开启动
+  // 网络竞争；有 provider 模型合并写盘时广播新列表（无变化/失败 = 零动作，fail-safe
+  // 链内建在 fetch/sync 层）。unref：不阻塞进程退出。
+  const remoteConfigStartupTimer = setTimeout(() => {
+    void configService
+      .refreshRemoteProviders()
+      .then((r) => {
+        if (r.updatedProviders.length > 0) server.broadcastProviderList()
+      })
+      .catch((e: unknown) => {
+        console.warn('[remote-config] startup refresh failed:', e instanceof Error ? e.message : String(e))
+      })
+  }, 30_000)
+  remoteConfigStartupTimer.unref?.()
+
   // ── u5（crash-forensics-and-watchdog D3）：reattach 编排 ─────────────────────
   // WS listen 后独立并行任务（D3 编排挂点：与 startup-background-init 串行链解耦，不违背
   // 「端口先就绪」原则，也不阻塞链尾 reaper 启动——收割等待经 Promise.race 有界消费）。

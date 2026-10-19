@@ -358,6 +358,12 @@ export interface SetProviderData {
    * （$开头→env_var，非空→api_key）。
    */
   authMethod?: 'api_key' | 'oauth' | 'env_var' | 'ambient'
+  /**
+   * taiji 远程清单来源标记（remote-config 域 1，与 BuiltinProviderTemplate.remoteSource
+   * 同值）：QuickSetup 从 taiji 清单模板创建时回传，runtime 写 extras remoteSource
+   * （该 provider 参与远程模型更新的唯一判据；缺省 = 普通 custom，不参与自动更新）。
+   */
+  remoteSource?: string
   baseUrl?: string
   /** 自定义请求头（provider 级，与 ProviderInfo.headers 对齐）。 */
   headers?: Record<string, string>

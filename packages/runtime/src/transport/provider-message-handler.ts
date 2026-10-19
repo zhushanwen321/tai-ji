@@ -101,6 +101,8 @@ export class ProviderMessageHandler {
 
   // settings-provider 页进入时触发：远程模型目录 ETag 协商刷新（单请求 4s 超时，
   // 全部 fail-safe），完成后广播新列表（store 常驻订阅自动更新，renderer 零状态管理）。
+  // 顺带触发 taiji 远程配置同步（remote-config 域 1，checkedAt 4h 节流在 fetch 层）：
+  // 有 provider 模型合并写盘时再广播一次（无变化不重复广播）。
   private async handleRefreshProviderCatalogs(
     ws: WsType,
     msg: Extract<ClientMessage, { type: 'config.refreshProviderCatalogs' }>,
@@ -108,6 +110,8 @@ export class ProviderMessageHandler {
     const result = await this.ctx.configService.refreshProviderCatalogs()
     this.ctx.reply(ws, msg.id, 'config.providerCatalogsRefreshed', result)
     this.ctx.broadcastProviderList()
+    const remote = await this.ctx.configService.refreshRemoteProviders()
+    if (remote.updatedProviders.length > 0) this.ctx.broadcastProviderList()
     return true
   }
 

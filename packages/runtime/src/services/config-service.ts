@@ -97,6 +97,7 @@ import {
   refreshProviderCatalogs as refreshProviderCatalogsImpl,
   type CatalogRefreshResult,
 } from './provider-catalog-refresh.js'
+import { syncRemoteProviderModels } from './remote-config/remote-provider-sync.js'
 import {
   loadSkills as loadSkillsImpl,
   saveSkills as saveSkillsImpl,
@@ -244,6 +245,22 @@ export class ConfigService implements IConfigService {
       .filter(p => p.kind === 'catalog')
       .map(p => p.id)
     return refreshProviderCatalogsImpl(catalogIds)
+  }
+
+  /**
+   * taiji 远程配置拉取 + provider 清单域同步（remote-config 域 1，checkedAt 4h 节流在
+   * fetch 层内建）。触发点：进设置 Provider 页（handleRefreshProviderCatalogs 顺带）+
+   * runtime 启动延迟（组合根）。返回实际发生模型合并写盘的 provider 列表供调用方决定
+   * 是否广播（空 = 拉取失败/无变化/无同步对象，fail-safe 链内建在 sync 层）。
+   */
+  async refreshRemoteProviders(): Promise<{ updatedProviders: string[] }> {
+    const result = await syncRemoteProviderModels({
+      configStore: this.configStore,
+      extrasStore: this.providerExtrasStore,
+      authStorage: this.authStorage,
+      credentialWriter: this.credentialWriter,
+    })
+    return { updatedProviders: result.updatedProviders }
   }
 
   listBuiltinProviders(): BuiltinProviderTemplate[] {
