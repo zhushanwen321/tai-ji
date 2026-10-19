@@ -258,7 +258,7 @@ describe('useThinkingLevelSync · armed 记忆恢复消费', () => {
     fake.setArmed({ modelId: 'p/m2', at: Date.now() - 6000 }) // 已过期 6s
     currentModelId.value = 'p/m2'
     await nextTick()
-    // 过期 token 只清不消费（陈旧 token 消费 = chip 突跳伪恢复，D3 被否②a）
+    // 过期 token 只清不消费（陈旧 token 消费 = chip 突跳伪恢复，D3 不采用②a）
     expect(fake.clearArmed).toHaveBeenCalledTimes(1)
     // 落到既有跨体系分支：onReset('high')，且全程只有这一次（非记忆值 'l'）
     expect(onReset).toHaveBeenCalledTimes(1)

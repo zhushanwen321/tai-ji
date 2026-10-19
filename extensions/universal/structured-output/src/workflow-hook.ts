@@ -6,11 +6,11 @@
  *     steer 记账段 + 硬杀计数段，先记账后计数），newlyTerminal 时触发硬杀副作用链
  *     （runTerminalTeardown：日志 → abort+shutdown 优雅终止）。
  *   - turn_end：唯一 listener——模型未成功产出 structured-output 时以 steer 方式注入
- *     重试提醒（软闸门），提示词不伪装用户气泡，对话流用户内容 100% 来自用户输入；
+ *     重试提醒（软门禁），提示词不伪装用户气泡，对话流用户内容 100% 来自用户输入；
  *     最多重试 MAX_HOOK_RETRIES 次，防止无限循环。
  *
- * 软硬闸门合一语义：terminal 是 WorkflowGate 上的单一事实——硬杀计数段置位后，
- * turn_end 守卫链第 0 条据此停 steer；两闸门间无任何回调接线（terminal 若双写于
+ * 软硬门禁合一语义：terminal 是 WorkflowGate 上的单一事实——硬杀计数段置位后，
+ * turn_end 检查链第 0 条据此停 steer；两门禁间无任何回调接线（terminal 若双写于
  * 两个状态机，就必须跨对象回调同步，漏接线即 steer 与硬杀失步——单状态机单写使
  * 失步在结构上不可能）。
  *
@@ -52,10 +52,10 @@ export const HOOK_ENTRY_TYPE = "structured-output:hook";
 export const RETRY_REMINDER_CUSTOM_TYPE = "structured-output:retry-reminder";
 
 /**
- * steer 守卫链（原 turn_end handler 内联守卫提取，判定顺序与旧实现逐条一致）。
- * 命中任一守卫即跳过 steer，且调用方不调 onTurnEnd（toolUse/error/aborted 保留
+ * steer 检查链（原 turn_end handler 内联检查提取，判定顺序与旧实现逐条一致）。
+ * 命中任一检查即跳过 steer，且调用方不调 onTurnEnd（toolUse/error/aborted 保留
  * soCallCount、超上限保留 lastSchemaError，与合一前逐点一致）：
- *   0. 闸门 terminal（D3/U2）：同签名失败已满 3 次、shutdown 已发——不再 steer，
+ *   0. 门禁 terminal（D3/U2）：同签名失败已满 3 次、shutdown 已发——不再 steer，
  *      让进程终止（防御性保留：shutdown 正常生效时进程已死，到不了这里）
  *   1. 已经成功调用过 structured-output，不再干预
  *   2. 不是合法 turn_end 事件
@@ -154,13 +154,13 @@ function writeSteerFailedLog(pi: PiAPI, hookRetryCount: number, err: unknown): v
 }
 
 /**
- * 装配 workflow 模式的双闸门（D2 唯一装配入口，仅 workflow 模式调用，见 src/index.ts）。
+ * 装配 workflow 模式的双门禁（D2 唯一装配入口，仅 workflow 模式调用，见 src/index.ts）。
  *
  * 每个事件至多一个 listener（单 listener 契约，D2）：
- *   - tool_execution_end：结构守卫 → toolName 过滤 → WorkflowGate.onToolExecEnd
+ *   - tool_execution_end：结构检查 → toolName 过滤 → WorkflowGate.onToolExecEnd
  *     （合一状态机：先 steer 记账后硬杀计数）→ newlyTerminal 时 runTerminalTeardown
  *     （terminal 时序与副作用明细见该函数注释）。
- *   - turn_end：守卫链 shouldSkipSteer → 两种失败形态都 steer：
+ *   - turn_end：检查链 shouldSkipSteer → 两种失败形态都 steer：
  *     1. 完全没调用（soCallCount === 0）→ 注入"必须调用"提示 + 正确 schema
  *     2. 调了但全是 isError（soCallCount > 0 && !soSucceededEver）→ 注入具体校验错误
  *        + 正确 schema。旧实现在此处撒手交给 Pi 自然修正，但模型遇到 "Invalid JSON Schema"
@@ -193,7 +193,7 @@ export function setupWorkflowHook(pi: PiAPI, schemaJson: string): void {
 	});
 
 	pi.on("turn_end", async (event: unknown) => {
-		// 守卫链（判定明细见 shouldSkipSteer 注释）：命中即直接 return，不调
+		// 检查链（判定明细见 shouldSkipSteer 注释）：命中即直接 return，不调
 		// onTurnEnd——预算不扣减，状态保留到下一个正常收尾的轮再判定 steer。
 		if (shouldSkipSteer(state, event)) return;
 

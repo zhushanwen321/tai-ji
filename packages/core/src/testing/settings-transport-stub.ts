@@ -9,13 +9,13 @@
  * 默认值为中性语义：请求/动作返回空值 ack、订阅返回 no-op 取消函数；用例按需 overrides
  * 注入自己的 vi.fn() 断言。
  *
- * 导出面：@taiji/core/testing（包内 __tests__ 亦可相对路径消费；renderer/ui 测试经包名）。
+ * 导出清单：@taiji/core/testing（包内 __tests__ 亦可相对路径消费；renderer/ui 测试经包名）。
  */
 import { vi } from 'vitest'
 import type { SettingsTransport } from '../domain/settings/transport'
 
 /**
- * 覆盖面签名：键集与实参表逐签名对齐（漏键/错键/实参错型即报错），返回值保持宽松——
+ * 覆盖范围签名：键集与实参表逐签名对齐（漏键/错键/实参错型即报错），返回值保持宽松——
  * 测试 vi.fn() 桩的返回形状常是宽化 mock（如 () => Promise<void> 顶替真实 reply 形状），
  * 返回强校验会把桩类型噪音当契约错误。实参表校验堵住「实参错型的假绿桩」（桩签名与
  * seam 方法对不上时编译期即红，而非测试静默通过）；契约漂移检测由下方
@@ -31,17 +31,18 @@ function makeUnsubscribeStub() {
   return vi.fn((): () => void => () => {})
 }
 
-/** SettingsTransport 的订阅方法面（键集漂移由下方 Pick 标注报错——改名/删键即编译红）。 */
+/** SettingsTransport 的订阅方法侧（键集漂移由下方 Pick 标注报错——改名/删键即编译红）。 */
 export type SettingsSubscriptionStubs = Pick<
   SettingsTransport,
   | 'onProviders' | 'onModels' | 'onSkills' | 'onAgents' | 'onExtensions'
   | 'onSkillDirs' | 'onAgentDirs' | 'onExtensionDirs' | 'onDefaults' | 'onDefaultsWithSource'
   | 'onSkillCacheInvalidated' | 'onSystemPrompt' | 'onTerminalConfig' | 'onRetryConfig'
+  | 'onNetworkProxyConfig'
   | 'onAuthDeviceCode' | 'onAuthAuthUrl' | 'onAuthSuccess' | 'onAuthError'
 >
 
 /**
- * 订阅段全量桩（单源导出）：SettingsTransport 订阅方法面一键取齐，每次调用产出全新
+ * 订阅段全量桩（单源导出）：SettingsTransport 订阅方法侧一键取齐，每次调用产出全新
  * vi.fn 实例（无跨用例状态残留）。
  *
  * renderer/ui 侧 mock 需要同形状订阅段时 spread 本函数返回值
@@ -64,6 +65,7 @@ export function makeSettingsSubscriptionStubs(): SettingsSubscriptionStubs {
     onSystemPrompt: makeUnsubscribeStub(),
     onTerminalConfig: makeUnsubscribeStub(),
     onRetryConfig: makeUnsubscribeStub(),
+    onNetworkProxyConfig: makeUnsubscribeStub(),
     onAuthDeviceCode: makeUnsubscribeStub(),
     onAuthAuthUrl: makeUnsubscribeStub(),
     onAuthSuccess: makeUnsubscribeStub(),
@@ -110,6 +112,15 @@ export function makeSettingsTransportStub(overrides: SettingsTransportStubOverri
       config: { enabled: true, maxRetries: 3, baseDelayMs: 2000 },
       configured: false,
     })),
+    getNetworkProxyConfig: vi.fn(async () => ({
+      config: {
+        enabled: false,
+        proxy: { protocol: 'http' as const, host: '127.0.0.1', port: 7890, username: '', password: '' },
+        noProxy: ['localhost', '127.0.0.1'],
+        rules: [],
+      },
+    })),
+    getNetworkProxyStats: vi.fn(async () => ({ stats: [] })),
     getWorktreeRootDir: vi.fn(async () => ({ dir: '' })),
     getSetupScript: vi.fn(async () => ({ script: '' })),
     getBareSetupScript: vi.fn(async () => ({ script: '' })),
@@ -148,6 +159,9 @@ export function makeSettingsTransportStub(overrides: SettingsTransportStubOverri
     setSystemPrompt: vi.fn(async (config) => ({ config, corrupted: false })),
     setTerminalConfig: vi.fn(async (config) => ({ config, corrupted: false })),
     setRetryConfig: vi.fn(async (config) => ({ config, configured: true })),
+    setNetworkProxyConfig: vi.fn(async (config) => ({ config })),
+    testNetworkProxy: vi.fn(async () => ({ ok: true, stage: 'done' as const, message: '', elapsedMs: 0 })),
+    resetNetworkProxyStats: vi.fn(async () => ({ stats: [] })),
     setWorktreeRootDir: vi.fn(async (dir) => ({ dir })),
     setSetupScript: vi.fn(async (script) => ({ script })),
     setBareSetupScript: vi.fn(async (script) => ({ script })),

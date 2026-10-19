@@ -5,7 +5,6 @@ import type {
 	ExtensionAPI,
 	ExtensionContext,
 	ExtensionToolContext,
-	SessionCompactEvent,
 	SessionStartEvent,
 	Theme,
 } from "@earendil-works/pi-coding-agent";
@@ -21,7 +20,6 @@ import { getLogger, setPiHandle } from "@zhushanwen/pi-extension-logger";
 import { Type, type Static, type TObject } from "typebox";
 
 import { renderSessionManagerResult } from "./render.ts";
-import { ensureLedgerBound, runLedgerCompactionCheck } from "./notify-ledger.ts";
 import { createWatchCoordinator } from "./watch-coordinator.ts";
 
 // 模块级 logger（default export 首行 setPiHandle 注入后自动走 appendEntry 持久化，
@@ -101,7 +99,7 @@ function newNotifyId(): string {
 	return `sm-${crypto.randomUUID()}`;
 }
 
-/** 运行时守卫（读侧不信任外部格式）：结果是否 JSON object——形状断言前的类型 guard。 */
+/** 运行时检查（读侧不信任外部格式）：结果是否 JSON object——形状断言前的类型 guard。 */
 function asResultRecord(v: unknown): Record<string, unknown> | undefined {
 	return typeof v === "object" && v !== null && !Array.isArray(v)
 			? (v as Record<string, unknown>)
@@ -227,25 +225,17 @@ export default function sessionManagerExtension(pi: ExtensionAPI): void {
 	setPiHandle(pi);
 
 	// watch 桥编排（notify-once U4）：工具结果 arm / watch 应答两层攒批 record /
-	// session_start 重启收口腿共用同一闭包状态（label 缓存 + 死亡新闻槽 + 攒批队列）。
+	// session_start 重启收尾路径共用同一闭包状态（label 缓存 + 死亡新闻槽 + 攒批队列）。
 	const coordinator = createWatchCoordinator({
 		pi,
 		callWatch: (ctx, notifyId) => callSessionManager(ctx, "watch", { notifyId }),
 	});
 
-	// 重启收口腿（D7③）：父 pi 死亡后永无 unregister 的活跃 type 'session' register
+	// 重启收尾路径（D7③）：父 pi 死亡后永无 unregister 的活跃 type 'session' register
 	// 逐条重开 watch（入参 = entry id 即 notifyId），应答经 watch 处理链静默注销，
 	// 活跃集回归基线；每 entry 独立 handler（禁串行 await）在 coordinator 内保证。
-	// ledger 装配纪律①②（D3）：session_start 无条件 bind + recoverFromSession 成对
-	//（唯一装配方形态，与 subagent-workflow bindLedgerHostAndRecover 同款——先装配，
-	// 收口腿/watch 应答到达时消费面已就绪）。
 	pi.on("session_start", (_event: SessionStartEvent, ctx: ExtensionContext) => {
-		ensureLedgerBound(pi, ctx);
 		coordinator.recoverStaleRegisters(ctx);
-	});
-	// compactionCheck 接线（D3 装配纪律④，P-B4 降级——subagent-workflow 同款先例）
-	pi.on("session_compact", (_event: SessionCompactEvent, _ctx: ExtensionContext) => {
-		runLedgerCompactionCheck();
 	});
 
 	registerSessionTool(pi, {
@@ -274,7 +264,10 @@ export default function sessionManagerExtension(pi: ExtensionAPI): void {
 				coordinator.armSessionNotify(ctx, notifyId, name);
 			}
 			if (typeof r.lifetimeNotifyId === "string") {
-				coordinator.armSessionNotify(ctx, r.lifetimeNotifyId, name);
+				// kind:"lifetime"（result-collect 设计 §3.4）：lifetime 死亡债权注册在
+				// emit 侧申报类别标记（collect 缺省等待集据此排除）；send 债权注册
+				// 不带 kind（缺省 = send）。
+				coordinator.armSessionNotify(ctx, r.lifetimeNotifyId, name, "lifetime");
 			}
 		},
 		toSummary: (params, result) => {

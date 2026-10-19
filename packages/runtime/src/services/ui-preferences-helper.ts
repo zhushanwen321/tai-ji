@@ -8,7 +8,7 @@
  *   { "v": 1, "locale": "zh-CN" | "en-US", "updatedAt": <epoch ms> }
  *
  * 路径经 `configService.getConfigDir()` 推导（= shared `getDataDir()`，读 `TAIJI_AGENT_DATA_DIR`，
- * 缺省 `~/.taiji-dev`——fail-safe default，C-proc-26；prod `~/.taiji` 仅打包 main 显式钉死可达），
+ * 缺省 `~/.taiji-dev`——fail-safe default，C-proc-26；prod `~/.taiji` 仅打包 main 显式固定为可达），
  * 禁硬编码（数据目录隔离 ADR-0009；dev/多实例按各自 `<dataDir>` 天然隔离）。
  *
  * 原子写：tmp + rename（`utils/fs-utils` 的 `atomicWrite`，同 `system-prompt-config-helper.ts`
@@ -18,12 +18,12 @@
  * - 文件缺失 → 静默回落默认 `en-US`（合法未写入态，不 warn）；
  * - JSON 损坏 / locale 非法 / 顶层非对象 → 回落默认 `en-US` + warn（手改或半写现场留痕）。
  *
- * 同值短路（两道分工）：第一道 = renderer `useSettingsShell.pushUiLocale` 的「上次已推送值」守卫
+ * 同值短路（两道分工）：第一道 = renderer `useSettingsShell.pushUiLocale` 的「上次已推送值」检查
  * （外观/字号变更不推送语言，避免无谓 RPC）；第二道 = 本 helper（值未变不重写）——容忍其他
  * 调用方高频推送，且避免无谓刷新 mtime 使 extension 侧 mtime+size 缓存失效（多余失效会白读盘）。
  *
  * 多窗口同 app = last-write-wins（最后切换语言的窗口权威）：写路径单点、无跨窗广播，
- * 本文件只有 runtime 写（renderer 是客户端），不构成跨进程共享写面（不进 ADR 跨进程锁表）。
+ * 本文件只有 runtime 写（renderer 是客户端），不构成跨进程共享写侧（不进 ADR 跨进程锁表）。
  */
 import { existsSync, mkdirSync, readFileSync } from 'node:fs'
 import { join } from 'node:path'
@@ -81,7 +81,7 @@ export function writeUiPreferences(
   now: number = Date.now(),
 ): { ok: boolean; code?: string; error?: string } {
   try {
-    // 同值短路：值未变不重写（renderer 侧值守卫之外的第二道，容忍其他调用方高频推送）。
+    // 同值短路：值未变不重写（renderer 侧值检查之外的第二道，容忍其他调用方高频推送）。
     if (readUiPreferences(configDir) === locale) return { ok: true }
     if (!existsSync(configDir)) mkdirSync(configDir, { recursive: true })
     const payload = { v: UI_PREFERENCES_VERSION, locale, updatedAt: now }

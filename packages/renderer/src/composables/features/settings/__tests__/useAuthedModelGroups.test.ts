@@ -1,9 +1,9 @@
 // @vitest-environment node
 
 /**
- * useAuthedModelGroups 守卫测试（design scoped-model-extension-candidates T3）。
+ * useAuthedModelGroups 检查测试（design scoped-model-extension-candidates T3）。
  *
- * 核心守卫：extension 模型配置候选来自 providers 全量派生，与 scopedModels 白名单无关
+ * 核心检查：extension 模型配置候选来自 providers 全量派生，与 scopedModels 白名单无关
  * （scoped 只控制 Composer 切换器显示，见 settings-store models ref 契约注释）。
  * 回归背景：曾错用 settingsStore.models（scoped 过滤后列表）作数据源，导致设置 scoped 后
  * rename/compact 下拉只剩白名单内模型、存量 scoped 外配置被误报「不可用」。
@@ -45,7 +45,7 @@ beforeEach(() => {
 })
 
 describe('useAuthedModelGroups', () => {
-  it('守卫：scopedModels 非空时候选仍为全量（不受白名单过滤）', () => {
+  it('检查：scopedModels 非空时候选仍为全量（不受白名单过滤）', () => {
     const store = getSettingsStore()
     store.providers.value = mockProviders()
     // 模拟旧 bug 场景：settingsStore.models 已被 scoped 过滤为仅 1 项

@@ -1,5 +1,5 @@
 /**
- * Provider 凭据解析唯一通道（D3 收口）——接口见 services/ports/provider-credential-resolver.ts。
+ * Provider 凭据解析唯一通道（D3 收敛）——接口见 services/ports/provider-credential-resolver.ts。
  *
  * 源优先级单点声明（四种读取形态共享，见本文件 ProviderCredentialResolver 构造器里的 sources 数组，
  * 数组顺序即优先级）：
@@ -16,7 +16,7 @@
  * - 故本模块按降级路径自行展开 `$ENV_VAR` / `${ENV_VAR}`，与 pi 实装
  *   dist/core/resolve-config-value.js:123-129 resolveConfigValue 的模板分支同语义
  *   （pi auth-storage.js:213-216 读 auth.json 时经该函数解析）。
- * - command 配置值（`!` 前缀）不支持：**不执行 shell**（执行任意命令是副作用面），
+ * - command 配置值（`!` 前缀）不支持：**不执行 shell**（执行任意命令是副作用侧），
  *   连同「env 引用未定义」一起返回 { unsupported } 判别结构（RT-7#4）——消费方据此
  *   报「该凭据形态暂不支持」且禁止把形态标记当 key 下发外部请求（原样返回串作
  *   Bearer 是以畸形凭据打外部 API）。命中即不降级低优先源（显式配置错误不掩盖）。
@@ -55,12 +55,12 @@ interface CredentialSource {
 }
 
 /**
- * 实现依赖：auth.json 读通道（async 经 AuthService 收口通道 + sync 经 AuthStorage 同步原语）
+ * 实现依赖：auth.json 读通道（async 经 AuthService 收敛通道 + sync 经 AuthStorage 同步原语）
  * 与 models.json 读通道（IConfigStore port，不直接碰文件）。
  * 注意：这里取的都不是「裸读文件」实例，而是既有通道——本模块存在的意义正是消灭裸读。
  */
 export interface ProviderCredentialResolverDeps {
-  /** auth.json 异步读（AuthService 收口通道，OAuth 刷新写回后能立即读到新值） */
+  /** auth.json 异步读（AuthService 收敛通道，OAuth 刷新写回后能立即读到新值） */
   authService: Pick<AuthService, 'getCredential'>
   /** auth.json 同步原语（hasCredentialSync / listCredentialIds，auth-storage.ts:166/:178） */
   authStorage: Pick<AuthStorage, 'hasCredentialSync' | 'listCredentialIds'>
@@ -247,7 +247,7 @@ function createModelsJsonSource(deps: ProviderCredentialResolverDeps): Credentia
 export class ProviderCredentialResolver implements IProviderCredentialResolver {
   /**
    * 源优先级单点声明：数组顺序即解析优先级，async 明文 / sync 布尔 / 批量 / 回显原值四种读取形态共用本数组。
-   * 禁止在别处再写一遍链（这是读路径收口的全部意义）。
+   * 禁止在别处再写一遍链（这是读路径收敛的全部意义）。
    */
   private readonly sources: readonly CredentialSource[]
 

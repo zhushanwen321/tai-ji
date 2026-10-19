@@ -39,7 +39,7 @@ vi.mock('@zhushanwen/pi-extension-logger', () => ({
 vi.mock('../importer.js', () => ({ importLegacyStore: vi.fn(() => vi.fn()) }))
 
 // u-p2b 接线断言：index.ts 的 refreshWidget 必须走结构化/双模入口 `setSchedulerWidget`
-// （取代旧 `renderSchedulerWidget` TUI 单形态）——mock 捕获调用面（任务数组直传）。
+// （取代旧 `renderSchedulerWidget` TUI 单形态）——mock 捕获调用（任务数组直传）。
 const { setSchedulerWidgetMock } = vi.hoisted(() => ({ setSchedulerWidgetMock: vi.fn() }))
 vi.mock('../widget.js', async (importOriginal) => {
   const actual = await importOriginal<typeof import('../widget.js')>()
@@ -55,7 +55,7 @@ const { isCtxStaleCaptures, runtimeInstances, stopSchedulerCalls } = vi.hoisted(
 
 // InstrumentedRuntime 继承真实实现（loadTasks/onAfterTick/startScheduler 均真实执行），
 // 仅捕获构造参（isCtxStale）并登记实例（afterEach 统一停 timer，避免真实 setInterval 残留）；
-// stopScheduler 调用按序记录（F1 验收断言面：新装配前旧实例必须被停）。
+// stopScheduler 调用按序记录（F1 验收断言范围：新装配前旧实例必须被停）。
 vi.mock('../runtime.js', async (importOriginal) => {
   const actual = await importOriginal<typeof import('../runtime.js')>()
   const RealSchedulerRuntime = actual.SchedulerRuntime
@@ -210,7 +210,7 @@ describe('G1: index.ts 代际接线（S9）', () => {
 // 下一 tick 的 refreshWidget 访问 stale ctx.ui 抛错 → unhandledRejection → pi 主进程 exit 1。
 // F1 在 session_start 开头幂等 stopScheduler，从源头消灭。
 //
-// 行为断言口径（验收 U4）：观测面 = InstrumentedRuntime 的 stopScheduler 调用序列
+// 行为断言口径（验收 U4）：观测范围 = InstrumentedRuntime 的 stopScheduler 调用序列
 // （widget 推送是 D1 指纹跳推语义——任务集静态期间零推送，不能靠推送计数区分新旧 timer；
 // stopScheduler 白盒断言直接锁定「新装配前旧实例必须被停」的 F1 语义本身）。
 describe('F1: session_start 停旧 runtime（crash-fix U4）', () => {
@@ -294,7 +294,7 @@ describe('F1: session_start 停旧 runtime（crash-fix U4）', () => {
     expect(setSchedulerWidgetMock).toHaveBeenCalledTimes(2) // runtime2 初始渲染（实例态重置，首帧必推）
     expect(runtimeInstances).toHaveLength(2)
 
-    // 行为断言（验收口径）：stopScheduler 恰被调一次且命中 runtime1；
+    // 行为断言（验收标准）：stopScheduler 恰被调一次且命中 runtime1；
     // F1 缺失时旧 timer 不被停（数组为空或不含 runtime1）
     expect(stopSchedulerCalls).toEqual([runtimeInstances[0]])
   })

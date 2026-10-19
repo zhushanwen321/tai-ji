@@ -9,6 +9,13 @@
  *
  * createSessionFlow 运行时只调 create + migrateImage，但 SessionApiPort 类型要求全方法，
  * 故全量代理（零转换透传现 api 门面 + events）。
+ *
+ * 代理一律取 rest 传播形态（`(...args: Parameters<SessionApiPort['x']>) => api.x(...args)`），
+ * 不逐参罗列：TS 对「少参 lambda 赋多参签名」静默放行，逐参罗列在端口加参后会把新参
+ * 静默吞掉（create 第 7 参 clientUuid 是幂等键，被吞即桌面新建超时重试重复建 session，
+ * 与移动壳行为分叉）；rest 传播让端口签名成为唯一参数来源，加参零改动即透传。
+ * onConfigSessions 是唯一非透传成员（改编 msg.payload.groups 给 handler），同取 rest 形态
+ * 保持全文件单一形态，args[0] 即 handler。
  */
 import { session as sessionApi } from '@/api'
 import * as events from '@taiji/core/transport/api'
@@ -20,15 +27,17 @@ import type { SessionApiPort } from '@taiji/core'
  */
 export function buildSessionApiPort(): SessionApiPort {
   return {
-    list: () => sessionApi.list(),
-    switchSession: (id) => sessionApi.switchSession(id),
-    create: (cwd, label, presetId, projectId, modelOverride, thinkingOverride) =>
-      sessionApi.create(cwd, label, presetId, projectId, modelOverride, thinkingOverride),
-    rename: (id, label) => sessionApi.rename(id, label),
-    remove: (id) => sessionApi.remove(id),
-    removeByCwd: (cwd) => sessionApi.removeByCwd(cwd),
-    migrateImage: (p) => sessionApi.migrateImage(p),
-    onConfigSessions: (handler) =>
-      events.onGlobalType('config.sessions', (msg) => handler(msg.payload.groups)),
+    list: (...args: Parameters<SessionApiPort['list']>) => sessionApi.list(...args),
+    switchSession: (...args: Parameters<SessionApiPort['switchSession']>) =>
+      sessionApi.switchSession(...args),
+    create: (...args: Parameters<SessionApiPort['create']>) => sessionApi.create(...args),
+    rename: (...args: Parameters<SessionApiPort['rename']>) => sessionApi.rename(...args),
+    remove: (...args: Parameters<SessionApiPort['remove']>) => sessionApi.remove(...args),
+    removeByCwd: (...args: Parameters<SessionApiPort['removeByCwd']>) =>
+      sessionApi.removeByCwd(...args),
+    migrateImage: (...args: Parameters<SessionApiPort['migrateImage']>) =>
+      sessionApi.migrateImage(...args),
+    onConfigSessions: (...args: Parameters<SessionApiPort['onConfigSessions']>) =>
+      events.onGlobalType('config.sessions', (msg) => args[0](msg.payload.groups)),
   }
 }

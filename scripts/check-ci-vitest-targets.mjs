@@ -1,11 +1,11 @@
 #!/usr/bin/env node
 /**
- * check-ci-vitest-targets.mjs — CI vitest 目标非空守卫（G2）。
+ * check-ci-vitest-targets.mjs — CI vitest 目标非空检查（G2）。
  *
  * 动机：ci.yml 的 vitest 步骤若目标收集为空，`vitest run <target>` 以
  * "No test files found, exiting with code 1" 空跑收场——2026-09 实发：lint job 的
  * `vitest run taste-lint` 在根 vitest.config.ts 把 taste-lint/** 收进 exclude 后恒空，
- * 每轮 CI 烧到该步骤才红。守卫把「每个 vitest run 调用的目标收集非空」变成机检：
+ * 每轮 CI 烧到该步骤才红。检查把「每个 vitest run 调用的目标收集非空」变成机检：
  * 把 run 机械重写为 `vitest list --filesOnly` 干跑（只收集不执行），以 stdout 文件行
  * 数断言非空（实测 list 空收集 exit 0 零输出，与 run 的 exit 1 行为不同，不能只看退出码）。
  *
@@ -39,7 +39,7 @@ const WORKSPACE_YAML = join(ROOT, 'pnpm-workspace.yaml')
 /** 单个干跑的超时上限（防挂死；正常 list 收集秒级，全包 glob 形态数十秒） */
 const DRY_RUN_TIMEOUT_MS = 300_000
 
-// ── 纯函数（单测面：scripts/__tests__/check-ci-vitest-targets.test.mjs） ──────
+// ── 纯函数（单测：scripts/__tests__/check-ci-vitest-targets.test.mjs） ──────
 
 /** 剥 GitHub Actions 模板字面量（${{ … }} 不嵌套，非贪婪到首个 }}） */
 export function stripGithubTemplates(text) {
@@ -119,7 +119,7 @@ export function buildPackageNameMap(root, yamlText) {
         const name = JSON.parse(readFileSync(pkgJson, 'utf-8')).name
         if (typeof name === 'string') map.set(name, join(m[1], entry))
       } catch {
-        // 包 manifest 损坏不是本守卫的职责面，跳过该目录（其构建链会报）
+        // 包 manifest 损坏不是本检查的职责面，跳过该目录（其构建链会报）
       }
     }
   }
@@ -192,7 +192,7 @@ export function buildDirectDryRun({ runner, rest }) {
  * script 展开 → 干跑信息。返回：
  *   { action: 'assert', cmd }   —— script 含 vitest run 且非递归，替换为 list 干跑
  *   { action: 'skip', reason }  —— workspace 递归形态（如 extensions:test），显式登记跳过
- *   { action: 'ignore' }        —— script 与 vitest 无关，静默放行（不在守卫范围）
+ *   { action: 'ignore' }        —— script 与 vitest 无关，静默放行（不在检查范围）
  */
 export function buildScriptDryRun(scriptText) {
   const text = stripGithubTemplates(scriptText)
@@ -224,7 +224,7 @@ function resolveDryRunTarget(classified, pkgMap, line, cmd) {
     return {
       failure: {
         message: `ci.yml:${line} 出现 vitest run 但形态不被识别，拒绝静默放行：${classified.text}`,
-        fix: '改用 pnpm exec / pnpm --filter <pkg> exec / npx 前缀，或在守卫 classifyCommand 登记该形态',
+        fix: '改用 pnpm exec / pnpm --filter <pkg> exec / npx 前缀，或在检查 classifyCommand 登记该形态',
       },
     }
   }
@@ -242,7 +242,7 @@ function resolveDryRunTarget(classified, pkgMap, line, cmd) {
       return {
         failure: {
           message: `ci.yml:${line} 引用包 ${classified.filterPkg} 但 pnpm-workspace.yaml 扫描不到该包`,
-          fix: '核对包名或更新守卫的 workspace glob 解析',
+          fix: '核对包名或更新检查的 workspace glob 解析',
         },
       }
     }
@@ -258,7 +258,7 @@ function resolveDryRunTarget(classified, pkgMap, line, cmd) {
       return {
         failure: {
           message: `ci.yml:${line} 的 script 引用带额外参数，干跑重写无法保证等价：${cmd.trim()}`,
-          fix: '拆成独立步骤，或在本守卫显式登记该形态后再放行',
+          fix: '拆成独立步骤，或在本检查显式登记该形态后再放行',
         },
       }
     }
@@ -275,7 +275,7 @@ function resolveDryRunTarget(classified, pkgMap, line, cmd) {
 /** 干跑一条已裁决命令，返回判定素材（stdout 文件行数 / 尾部输出 / 退出码裁决文案 / 展示用 cwd） */
 function runDryRun(dryCmd, cwd) {
   // pnpm run/exec 会把 workspace bin 目录注入 PATH（hoisted 布局 → 根 node_modules/.bin；
-  // 包内 bin → <pkg>/node_modules/.bin），裸 `bash -c` 只继承守卫进程的 PATH——CI runner
+  // 包内 bin → <pkg>/node_modules/.bin），裸 `bash -c` 只继承检查进程的 PATH——CI runner
   // 无全局 vitest 时 script 展开形态（如 test:main = `cd main && vitest run`）在裸 PATH 下
   // exit 127（2026-09-18 CI Invariants 实发）。干跑补齐 pnpm 同款 bin 前缀，保证与被验证
   // 命令在 CI 里的真实解析语义一致。
@@ -300,7 +300,7 @@ function report(assertions, skipped, failures) {
   for (const s of skipped) console.log(`[skip] ${s}`)
   for (const a of assertions) console.log(`[ok] ${a}`)
   if (failures.length > 0) {
-    console.error(`\n[ci-vitest-targets] 守卫拦截：${failures.length} 项违规\n`)
+    console.error(`\n[ci-vitest-targets] 检查拦截：${failures.length} 项违规\n`)
     for (const f of failures) {
       console.error(`  ✗ ${f.message}`)
       console.error(`    [FIX] ${f.fix}\n`)

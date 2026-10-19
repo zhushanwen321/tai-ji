@@ -23,7 +23,7 @@ import type { VerticalMoveResult, HandleImagePasteResult } from './types'
 /** ZWSP spacer 文本（image-chip / slash-chip 后跟的零宽空格，移除占位 badge 时一并清） */
 export const CHIP_SPACER_ZWSP = '\u200B'
 
-// ── 来自 useContenteditableInput：segments / 文本提取（提取至 ./segment-parse，保留原导出面）──
+// ── 来自 useContenteditableInput：segments / 文本提取（提取至 ./segment-parse，保留原导出清单）──
 export { getSegmentsFromEl, getTextFromEl } from './segment-parse'
 
 // ── 来自 useContenteditableInput：触发检测 ──
@@ -183,7 +183,7 @@ export function getCaretLineRect(range: Range): DOMRect | null {
   }
 }
 
-// ── moveCaretVerticalOf 的编排 helper（按光标移动流程阶段拆分，主函数只留守卫与分派）──
+// ── moveCaretVerticalOf 的编排 helper（按光标移动流程阶段拆分，主函数只留检查与分派）──
 
 /**
  * 零 rect caret 解析结果：
@@ -214,7 +214,7 @@ interface CaretTargetContext {
 }
 
 /** 取选区首 Range；无选区（sel 缺失/rangeCount 0）或光标不在 el 内返回 null（调用方统一 noop）。
- *  命中时回传已窄化的 sel——window.getSelection() 的 null 性靠此处收口，调用方不再重复判空。 */
+ *  命中时回传已窄化的 sel——window.getSelection() 的 null 性靠此处收尾，调用方不再重复判空。 */
 function getInitialSelection(
   sel: Selection | null,
   el: HTMLElement,

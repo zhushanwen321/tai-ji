@@ -196,7 +196,7 @@ export function useQuotaConfigure(inputs: QuotaConfigureInputs): QuotaConfigureM
   /**
    * 类型草稿写入（§7.1：类型进草稿，由 saveAndTest 一次提交，不再即时落盘）。
    *
-   * [D5 守卫必须落在值上] CodingPlanSection 用 reka Select 的 `:model-value` + update 事件，
+   * [D5 检查必须落在值上] CodingPlanSection 用 reka Select 的 `:model-value` + update 事件，
    * 而 reka 的 `SelectItem.handleSelect` 无条件 emit —— 用户重复点选当前类型也会触发写入。
    * 没有同值短路就会丢掉用户未提交的输入（丢的是正在输入的内容，不是磁盘数据）。
    * 类型**真变**才清凭证草稿；Workspace 草稿不清（明文回显字段，清了等于制造屏幕与磁盘背离）。
@@ -299,7 +299,7 @@ export function useQuotaConfigure(inputs: QuotaConfigureInputs): QuotaConfigureM
     return { ready: missing.length === 0, missing }
   })
 
-  /** 展示派生面（只读）：UI 分层 / 凭证区形态 / 警示分档 / 帮助链接一次派生到位 */
+  /** 展示派生逻辑（只读）：UI 分层 / 凭证区形态 / 警示分档 / 帮助链接一次派生到位 */
   const view = computed<QuotaSectionView>(() => {
     const undetermined = !fetcherIdDraft.value || readiness.value.missing.includes('type')
     const exclusiveApplicable = supportsExclusiveCredential(authKinds.value)
@@ -338,7 +338,7 @@ export function useQuotaConfigure(inputs: QuotaConfigureInputs): QuotaConfigureM
     }
   })
 
-  /** 测试结果面（只读）：成功行 / 失败归一 / 旧缓存保留 */
+  /** 测试结果侧（只读）：成功行 / 失败归一 / 旧缓存保留 */
   const test = computed<QuotaTestView>(() => ({
     status: testStatus.value,
     row: quotaData.value,
@@ -532,7 +532,7 @@ export function useQuotaConfigure(inputs: QuotaConfigureInputs): QuotaConfigureM
       // 半提交窗口对齐（runtime 改动 4：清理锚定 persist 成功而非 configure 整体成功）：
       // persist 成功 + secrets 段失败 → runtime 返回 ok:false 但 QuotaCache 已清、fetcher
       // 已换新 —— renderer 镜像失效不能只挂在 ok:true 上，typeChanged 时无条件同步失效
-      // （persist 失败多清一次 = 浮层一次后台重拉，与半提交自愈同级，无害）。
+      // （persist 失败多清一次 = 浮层一次后台重新拉取，与半提交自愈同级，无害）。
       if (typeChanged) quotaStore.clearCache(p.id)
       if (!result.ok) {
         configureError.value = result.error || t('settings.providerEdit.quotaSaveAndTestFail')

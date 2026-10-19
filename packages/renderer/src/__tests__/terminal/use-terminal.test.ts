@@ -4,8 +4,8 @@
  * 主键迁移后：三表（输出分区 / 广播订阅 / flush 监听）与写队列全部按 **terminalId**
  * `term:<sid>:<n>` 分键；spawn 走「新建形态」由 ack 回传编号建档（四件事）。
  *
- * 覆盖：实例建档 / 实例与 PTY 控制 / 帧路由（按 terminalId 过滤）/ 关闭沿三腿 /
- * `terminal.list` 对账 / 世代变更失效重置 / `unknown_terminal_id` 平行守卫 / 会话销毁扇出。
+ * 覆盖：实例建档 / 实例与 PTY 控制 / 帧路由（按 terminalId 过滤）/ 关闭沿三路径 /
+ * `terminal.list` 对账 / 世代变更失效重置 / `unknown_terminal_id` 平行检查 / 会话销毁扇出。
  *
  * 运行：cd packages/renderer && npx vitest run src/__tests__/terminal/use-terminal.test.ts
  */
@@ -223,7 +223,7 @@ describe('帧路由与实例隔离（按 terminalId 过滤）', () => {
     wrapper.unmount()
   })
 
-  it('RT-4: exit 帧 = 关闭沿三腿（分区/订阅/写队列实例态释放 + 滞留命令提示）', async () => {
+  it('RT-4: exit 帧 = 关闭沿三路径（分区/订阅/写队列实例态释放 + 滞留命令提示）', async () => {
     const { wrapper, terminal } = await seedTwo('s1')
     const store = useTerminalWriteQueueStore()
     // 造滞留命令：markExited 后入队（已建档未 alive 仍进 pendingWrites）
@@ -246,7 +246,7 @@ describe('帧路由与实例隔离（按 terminalId 过滤）', () => {
 })
 
 describe('关闭沿与焦点落位', () => {
-  it('CL-1: closeInstance → kill RPC + 三腿清理 + active 落当前实例右邻（无右取左）', async () => {
+  it('CL-1: closeInstance → kill RPC + 三路径清理 + active 落当前实例右邻（无右取左）', async () => {
     terminalApiMock.spawn.mockResolvedValueOnce({ terminalId: T1 }).mockResolvedValueOnce({ terminalId: T2 })
     const { wrapper, terminal } = host('s1')
     await terminal.spawnTerminal('/tmp', 80, 24)
@@ -278,7 +278,7 @@ describe('关闭沿与焦点落位', () => {
   })
 })
 
-describe('自动新建腿同会话互斥（dmg-r1-3）', () => {
+describe('自动新建路径同会话互斥（dmg-r1-3）', () => {
   it('MU-1: 同会话并发激活轮复用同一 spawn promise（只发一次 RPC），settle 后摘除', async () => {
     let resolveSpawn!: (v: { terminalId: string }) => void
     terminalApiMock.spawn.mockImplementationOnce(
@@ -301,7 +301,7 @@ describe('自动新建腿同会话互斥（dmg-r1-3）', () => {
     wrapper.unmount()
   })
 
-  it('MU-2: 失败 settle 摘除 → 重试腿不复用失败 promise', async () => {
+  it('MU-2: 失败 settle 摘除 → 重试路径不复用失败 promise', async () => {
     terminalApiMock.spawn.mockRejectedValueOnce(new Error('pty limit reached'))
     const { wrapper, terminal } = host('s1')
     await expect(terminal.spawnTerminalAuto('/tmp', 80, 24)).rejects.toThrow('pty limit reached')
@@ -318,8 +318,8 @@ describe('自动新建腿同会话互斥（dmg-r1-3）', () => {
       () => new Promise<{ terminalId: string }>((res) => { resolveSpawn = res }),
     )
     const { wrapper, terminal } = host('s1')
-    void terminal.spawnTerminalAuto('/tmp', 80, 24) // 自动腿在途
-    // 显式腿（createWithToast → spawnTerminal）是用户显式意图，不受互斥限制
+    void terminal.spawnTerminalAuto('/tmp', 80, 24) // 自动路径在途
+    // 显式路径（createWithToast → spawnTerminal）是用户显式意图，不受互斥限制
     terminalApiMock.spawn.mockResolvedValueOnce({ terminalId: T2 })
     await expect(terminal.spawnTerminal('/tmp', 80, 24)).resolves.toBe(T2)
     expect(terminalApiMock.spawn).toHaveBeenCalledTimes(2)
@@ -330,7 +330,7 @@ describe('自动新建腿同会话互斥（dmg-r1-3）', () => {
 })
 
 describe('terminal.list 对账', () => {
-  it('RC-1: 清单外条目按关闭沿三腿清理（含幽灵条目）', async () => {
+  it('RC-1: 清单外条目按关闭沿三路径清理（含幽灵条目）', async () => {
     terminalApiMock.spawn.mockResolvedValueOnce({ terminalId: T1 }).mockResolvedValueOnce({ terminalId: T2 })
     const { wrapper, terminal } = host('s1')
     await terminal.spawnTerminal('/tmp', 80, 24)
@@ -452,7 +452,7 @@ describe('世代变更失效重置（auth token 判据）', () => {
     expect(hasInstance(T1)).toBe(false)
     expect(terminalApiMock.list).toHaveBeenCalledWith('s1')
     // 订阅表「先退订再清空」：旧世代同形键的 handler 已摘——重置后再发同号帧无人接收、
-    // 不重建分区（若只清 Set 不退订，handler 残留会命中幂等守卫并静默 no-op 新世代）
+    // 不重建分区（若只清 Set 不退订，handler 残留会命中幂等检查并静默 no-op 新世代）
     dispatchSession('s1', frame('terminal.data', 's1', T1, { data: 'stale' }))
     expect(__terminalPartitionCountForTest()).toBe(0)
     wrapper.unmount()
@@ -503,7 +503,7 @@ describe('世代变更失效重置（auth token 判据）', () => {
   })
 })
 
-describe('unknown_terminal_id 平行守卫（提示与焦点按触发面分档）', () => {
+describe('unknown_terminal_id 平行检查（提示与焦点按触发范围分档）', () => {
   async function seedAlive(): Promise<{ wrapper: ReturnType<typeof mount>; terminal: UseTerminalReturn }> {
     terminalApiMock.spawn.mockResolvedValue({ terminalId: T1 })
     const h = host('s1')
@@ -511,7 +511,7 @@ describe('unknown_terminal_id 平行守卫（提示与焦点按触发面分档�
     return h
   }
 
-  it('UG-1: write 命中 → 三腿回收 + 「输入可能丢失」提示', async () => {
+  it('UG-1: write 命中 → 三路径回收 + 「输入可能丢失」提示', async () => {
     const { wrapper, terminal } = await seedAlive()
     terminalApiMock.write.mockRejectedValueOnce(rpcError('unknown_terminal_id'))
     terminal.writeToTerminal('lost-input')
@@ -571,11 +571,11 @@ describe('unknown_terminal_id 平行守卫（提示与焦点按触发面分档�
     wrapper.unmount()
   })
 
-  it('UG-6: 注册表条目已删但分区/订阅在场时，unknown_terminal_id 仍回收（三腿判据不早退）', async () => {
+  it('UG-6: 注册表条目已删但分区/订阅在场时，unknown_terminal_id 仍回收（三路径判据不早退）', async () => {
     const { wrapper, terminal } = await seedAlive()
-    // 模拟「关闭沿已删注册表条目、但分区与订阅仍在场」的竞态残留形态（设计 §3.3 守卫覆盖面）
+    // 模拟「关闭沿已删注册表条目、但分区与订阅仍在场」的竞态残留形态（设计 §3.3 检查覆盖范围）
     unregisterInstance(T1)
-    setActiveTerminalId('s1', T1) // active 仍指向该编号（模拟竞态残留，使 attach 腿可达）
+    setActiveTerminalId('s1', T1) // active 仍指向该编号（模拟竞态残留，使 attach 路径可达）
     expect(hasInstance(T1)).toBe(false)
     expect(__terminalPartitionCountForTest()).toBe(1)
     expect(__terminalSubscriptionCountForTest()).toBe(1)
@@ -589,7 +589,7 @@ describe('unknown_terminal_id 平行守卫（提示与焦点按触发面分档�
     wrapper.unmount()
   })
 
-  it('UG-7: kill 通道类失败（closeInstance 腿）→ toast 反馈 + 镜像条目重建（不等对账复活）', async () => {
+  it('UG-7: kill 通道类失败（closeInstance 路径）→ toast 反馈 + 镜像条目重建（不等对账复活）', async () => {
     const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {})
     terminalApiMock.spawn.mockResolvedValueOnce({ terminalId: T1 }).mockResolvedValueOnce({ terminalId: T2 })
     const { wrapper, terminal } = host('s1')
@@ -647,7 +647,7 @@ describe('会话销毁扇出（精确前缀）', () => {
     await terminal.spawnTerminal('/tmp', 80, 24)
     await terminal.spawnTerminal('/tmp', 80, 24)
 
-    // 关闭沿释放 T2（分区/订阅/条目三腿）——但 runtime 的过期 list 仍报 T2 存活：
+    // 关闭沿释放 T2（分区/订阅/条目三路径）——但 runtime 的过期 list 仍报 T2 存活：
     // 对账重建 T2 的分区与模块级订阅（键永不复用、永无后续关闭沿触达的幽灵条目）
     terminal.closeInstance(T2)
     await flushPromises()

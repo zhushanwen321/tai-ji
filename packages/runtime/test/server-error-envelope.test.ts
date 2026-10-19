@@ -8,7 +8,7 @@
  *    （违裁决 7：错误消息必须可归属 session，前端按 session 隔离规则丢弃无主信封）。
  *
  * 修复后锚定：
- * - T1：payload 缺省 + handler 抛错 → handleMessage 正常收口，error envelope 携带原异常
+ * - T1：payload 缺省 + handler 抛错 → handleMessage 正常收尾，error envelope 携带原异常
  *   message（不抛 TypeError）；
  * - T2：error envelope 发送自身失败（ws TOCTOU）→ 上抛 Error 的 cause 保留原 handler 异常；
  * - T3：ConnectionManager 兜底信封透传 payload.sessionId。

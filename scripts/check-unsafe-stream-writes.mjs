@@ -2,9 +2,9 @@
 /**
  * check-unsafe-stream-writes.mjs —— 流写逃逸静态护栏（2026-09-04 runtime 整机崩溃事故护栏）。
  *
- * 事故：relay 对端半关闭后 `conn.write` 在 child stdout 'data' 回调里同步抛 EPIPE →
+ * 事故：socket 对端半关闭后 `conn.write` 在 child stdout 'data' 回调里同步抛 EPIPE →
  * uncaughtException → 整机 graceful shutdown（全部 session 中断）。三层护栏：
- *   ① 源头修复：relay-registry writeFrame/endConn try 包裹 + conn error listener
+ *   ① 源头修复：control-server writeFrame/endConn try 包裹 + conn error listener
  *   ② 运行时分级：index.ts uncaughtException 对流级错误码 log-continue（uncaught-policy）
  *   ③ 本脚本：防新增代码引入同类裸写点（静态扫描，pre-commit / CI 拦截）
  *
@@ -34,7 +34,7 @@ import { readdirSync, readFileSync, statSync } from 'node:fs'
 import { dirname, join, relative } from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
 
-// 纯检测函数导出面（scripts/__tests__/check-unsafe-stream-writes.test.mjs 单测——
+// 纯检测函数导出清单（scripts/__tests__/check-unsafe-stream-writes.test.mjs 单测——
 // S14：误报会污染 allowlist 治理，检测核心须机器锁定）。仅 CLI 直跑时执行 main()
 export { scanFileLines, collectTsFiles, isCommentLine }
 
@@ -117,7 +117,7 @@ function scanFileLines(rel, lines, allowlistSet, hitsOut) {
       if (TRY_RE.test(lines[j])) return
     }
     found.push(
-      `${loc}：流变量 \`${m[1]}.${m[2]}\` 裸调用无 try 防护——半关闭/destroyed 流上同步抛 EPIPE/ERR_STREAM_DESTROYED，事件回调中逃逸即 uncaughtException → 整机 shutdown（2026-09-04 事故形态）。恢复动作：try-catch 包裹（参照 relay-registry writeFrame/endConn）；确属 best-effort 误报形态则编辑 scripts/check-unsafe-stream-writes.allowlist.txt 登记 \`${loc}\` 并随本次 commit 提交`,
+      `${loc}：流变量 \`${m[1]}.${m[2]}\` 裸调用无 try 防护——半关闭/destroyed 流上同步抛 EPIPE/ERR_STREAM_DESTROYED，事件回调中逃逸即 uncaughtException → 整机 shutdown（2026-09-04 事故形态）。恢复动作：try-catch 包裹（参照 control-server writeFrame/endConn）；确属 best-effort 误报形态则编辑 scripts/check-unsafe-stream-writes.allowlist.txt 登记 \`${loc}\` 并随本次 commit 提交`,
     )
   })
 
@@ -134,7 +134,7 @@ function scanFileLines(rel, lines, allowlistSet, hitsOut) {
     const hasErrorListener = fileHasErrorListener(lines, varName)
     if (!hasErrorListener) {
       found.push(
-        `${rel}：定义了 socket 接收入口但未挂 \`${varName}.on('error'\`——对端 RST（ECONNRESET）时 EventEmitter 无 listener 直接 throw → uncaughtException → 整机 shutdown。恢复动作：入口首行挂 error listener（destroy + warn，清理由 close 路径兜底，参照 relay-registry handleConnection）`,
+        `${rel}：定义了 socket 接收入口但未挂 \`${varName}.on('error'\`——对端 RST（ECONNRESET）时 EventEmitter 无 listener 直接 throw → uncaughtException → 整机 shutdown。恢复动作：入口首行挂 error listener（destroy + warn，清理由 close 路径兜底，参照 control-server handleConnection）`,
       )
     }
   }

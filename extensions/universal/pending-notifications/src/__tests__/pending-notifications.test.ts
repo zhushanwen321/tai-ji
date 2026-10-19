@@ -157,7 +157,7 @@ describe("state pure functions", () => {
 	});
 });
 
-describe("countActiveFromEntries（纯差集，供 goal / subagent-workflow / 工具投影复用）", () => {
+describe("countActiveFromEntries（纯差集，供 goal / subagent-workflow / 工具派生视图复用）", () => {
 	const mkRegister = (id: string, type: "subagent" | "workflow" = "subagent", overrides: Record<string, unknown> = {}) => ({
 		type: "custom",
 		customType: "pending:register",
@@ -201,7 +201,7 @@ describe("countActiveFromEntries（纯差集，供 goal / subagent-workflow / �
 		expect(countActiveFromEntries(entries, { types: ["subagent", "workflow"] }).count).toBe(2);
 	});
 
-	it("TTL 过期仍判活跃（刻意不校验 expiresAt，对齐 goal continuation 守卫语义）", () => {
+	it("TTL 过期仍判活跃（刻意不校验 expiresAt，对齐 goal continuation 检查语义）", () => {
 		const expired = mkRegister("bg-1", "subagent", { registeredAt: 0, expiresAt: 1 });
 		expect(countActiveFromEntries([expired]).count).toBe(1);
 	});
@@ -212,12 +212,12 @@ describe("countActiveFromEntries（纯差集，供 goal / subagent-workflow / �
 
 	it("entries 含 null/undefined 元素 → 跳过不抛 TypeError（S-10）", () => {
 		// S-10 回归：外部调用方可能传入含 null/undefined 的 entries（session 文件坏行/脏数据），
-		// 遍历时访问 raw.customType 前必须守卫，否则 TypeError 炸掉整个差集判定。
+		// 遍历时访问 raw.customType 前必须检查，否则 TypeError 炸掉整个差集判定。
 		const withNulls = [null, undefined, mkRegister("bg-1"), mkUnregister("bg-1"), null];
 		expect(countActiveFromEntries(withNulls).count).toBe(0);
 		const mixed = [undefined, null, mkRegister("bg-2")];
 		expect(countActiveFromEntries(mixed).ids).toEqual(["bg-2"]);
-		// register 循环同样守卫：unregister 遍历前的 null 不污染差集
+		// register 循环同样检查：unregister 遍历前的 null 不污染差集
 		expect(countActiveFromEntries([null, undefined]).count).toBe(0);
 	});
 
@@ -323,8 +323,8 @@ describe("pendingNotificationsExtension factory", () => {
 			expect(await getCount(setup)).toBe(0);
 		});
 
-		it("[跨 session 残留] other session 的 register → 不进投影、不补 unregister entry", async () => {
-			// fork 继承的父级注册残留不进差集（currentSessionId 过滤），且落盘收口归
+		it("[跨 session 残留] other session 的 register → 不进派生视图、不补 unregister entry", async () => {
+			// fork 继承的父级注册残留不进差集（currentSessionId 过滤），且落盘收尾归
 			// 对账通道——本包不做任何补写。
 			setup.entries.push(makeRegisterEntry("w-1", { sessionId: "sess-old" }));
 			fireSessionStart(setup, "sess-current");
@@ -478,7 +478,7 @@ describe("pendingNotificationsExtension factory", () => {
 	describe("safeAppendEntry error handling", () => {
 		it("appendEntry throwing (stale context) does not break listener; entries and query stay consistent", async () => {
 			// 单一权威源语义：落盘失败 → entries 没有该注册 → 工具同样查不到（不再出现
-			// 「内存已收、盘上没有」的工具/守卫分裂）；listener 不被异常打断，后续注册正常。
+			// 「内存已收、盘上没有」的工具/检查分裂）；listener 不被异常打断，后续注册正常。
 			fireSessionStart(setup);
 			setup.appendEntryMock.mockImplementationOnce(() => {
 				throw new Error("stale context");
@@ -516,7 +516,7 @@ describe("pendingNotificationsExtension factory", () => {
 		});
 	});
 
-	describe("写入侧落盘契约与跨 session 投影", () => {
+	describe("写入侧落盘契约与跨 session 派生视图", () => {
 		it("register 落盘契约：data 含 id/type/name/registeredAt/sessionId，无条件无 expiresAt 键（bash）", async () => {
 			fireSessionStart(setup);
 
@@ -542,10 +542,10 @@ describe("pendingNotificationsExtension factory", () => {
 			expect("expiresAt" in data).toBe(false);
 		});
 
-		it("[fork 过滤] 子 session 工具投影不见父 session 注册，父残留不被补注销", async () => {
+		it("[fork 过滤] 子 session 工具派生视图不见父 session 注册，父残留不被补注销", async () => {
 			// fork 子 session（继承父 entries）：父级注册（sessionId=sess-parent）不进
-			// 子 session 投影（currentSessionId 过滤），且本包不为残留补写任何 entry
-			//（落盘收口归 core 对账 sweep / bte 对账通道）。
+			// 子 session 派生视图（currentSessionId 过滤），且本包不为残留补写任何 entry
+			//（落盘收尾归 core 对账 sweep / bte 对账通道）。
 			setup.entries.push({
 				customType: "pending:register",
 				data: { id: "bg-parent", type: "subagent", name: "p", registeredAt: NOW, sessionId: "sess-parent" },

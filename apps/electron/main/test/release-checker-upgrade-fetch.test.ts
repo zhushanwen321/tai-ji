@@ -183,7 +183,7 @@ function githubLatestCallCount(): number {
 
 beforeEach(() => {
   upgradeFetchMock.mockReset()
-  // 次源（gitcode）默认 404 收口（服务器已响应 → 该源失败），mock 未显式设置时
+  // 次源（gitcode）默认 404 收尾（服务器已响应 → 该源失败），mock 未显式设置时
   // 保证逐源降级路径行为确定，不依赖 vi.fn() 的 undefined 返回
   upgradeFetchMock.mockResolvedValue(httpErrorResult(404))
   // 默认 disabled（与既有测试一致，防真实 proxy-config.json 干扰）
@@ -390,21 +390,21 @@ describe('u5 D8: curl 引擎 HTTP 状态交互规则', () => {
     },
   )
 
-  it('latest 路径 CurlFetchError httpStatusCode=404 → null 收口（主源不触发直连重试）、不触发退避', async () => {
+  it('latest 路径 CurlFetchError httpStatusCode=404 → null 收尾（主源不触发直连重试）、不触发退避', async () => {
     mockProxyEnabled()
     upgradeFetchMock.mockRejectedValueOnce(curlHttpStatusError(404))
 
     const checker = makeChecker()
     const result = await checker.checkForLatestRelease('0.8.14')
 
-    // 404 按 undici 引擎「非 2xx → null」语义收口 → 该源失败，逐源降级
+    // 404 按 undici 引擎「非 2xx → null」语义收尾 → 该源失败，逐源降级
     expect(result).toBeNull()
     expect(upgradeFetchMock).toHaveBeenCalledTimes(2)
     expect(githubLatestCallCount()).toBe(1)
     expect(checker.getRateLimitedUntil()).toBe(0)
   })
 
-  it('manifest 路径 CurlFetchError httpStatusCode=404 → null 收口不触发直连重试（单次 manifest 调用，GitHub 不阻塞）', async () => {
+  it('manifest 路径 CurlFetchError httpStatusCode=404 → null 收尾不触发直连重试（单次 manifest 调用，GitHub 不阻塞）', async () => {
     mockProxyEnabled()
     upgradeFetchMock
       .mockResolvedValueOnce(okResult(JSON.stringify(makeDigestMissingReleaseJson()))) // latest：代理成功

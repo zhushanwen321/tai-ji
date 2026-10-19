@@ -26,7 +26,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
 import { IMAGE_CACHE_WRITE } from '@taiji/shared'
-import { getImageCacheRoot } from '@taiji/shared/paths'
+import { getSessionStoreDir } from '@taiji/shared/paths'
 import type { ImageCacheWriteResult } from '@taiji/shared'
 
 // writeRef.current 非空时替换 writeImagesNewestFirst（quotaFull 形态注入 / throw 模拟 /
@@ -109,7 +109,7 @@ describe('image-cache-ipc', () => {
     expect(first.quotaFull).toBe(false)
     expect(first.results).toHaveLength(1)
     expect(first.results[0]!.status).toBe('written')
-    expect(first.results[0]!.path!.startsWith(getImageCacheRoot(tmpDir))).toBe(true)
+    expect(first.results[0]!.path!.startsWith(join(getSessionStoreDir(tmpDir), 'sess-ipc', 'image-cache'))).toBe(true)
     expect(existsSync(first.results[0]!.path!)).toBe(true)
     // 落盘内容 = base64 解码原值（main 是落盘执行方，解码正确性由 handler 链路端到端保证）
     expect(readFileSync(first.results[0]!.path!)).toEqual(PNG_BYTES)
@@ -142,9 +142,9 @@ describe('image-cache-ipc', () => {
         quotaFull: false,
       })
     }
-    // 无越界写入：payload 里的 ../etc 与 /etc 目标在数据目录内外均不存在
+    // 无越界写入：payload 里的 ../etc 与 /etc 目标在数据目录内外均不存在（存储树亦未建）
     expect(existsSync(join(tmpDir, 'etc'))).toBe(false)
-    expect(existsSync(getImageCacheRoot(tmpDir))).toBe(false)
+    expect(existsSync(getSessionStoreDir(tmpDir))).toBe(false)
   })
 
   it('畸形 payload 零抛错：非对象 / 缺字段 / 空数组 / 类型错位一律拒绝且不触碰落盘服务', () => {

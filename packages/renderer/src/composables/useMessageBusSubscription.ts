@@ -2,7 +2,7 @@
  * useMessageBusSubscription —— re-export shim（wave:renderer-rebuild-v2 W2）。
  *
  * SSOT 已迁入 @taiji/core（core/coordination/subscription-state.ts，w1 落地）。
- * 本文件仅作转发面：消费方（useChat.ts / useConnection.ts / 测试）import 语句零改动，
+ * 本文件仅作转发层：消费方（useChat.ts / useConnection.ts / 测试）import 语句零改动，
  * 签名与行为等价由 core 单测（packages/core/src/coordination/subscription-state.test.ts）覆盖。
  *
  * 不转发 setSubscriptionPorts：该函数是 core 内部注入点（由 configureRouteInbound 触发

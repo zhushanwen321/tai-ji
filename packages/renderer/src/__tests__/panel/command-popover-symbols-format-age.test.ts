@@ -258,7 +258,7 @@ describe('open-fetch file 路 landing cwd 通道（D2/D3）', () => {
     expect(getFileCandidatesByCwdMock).not.toHaveBeenCalled()
   })
 
-  it('1s 节流：窗口内关→开不重拉（模式对齐 slash/subagent 路）', async () => {
+  it('1s 节流：窗口内关→开不重新拉取（模式对齐 slash/subagent 路）', async () => {
     const nodes: FileNode[] = [{ path: 'a.ts', name: 'a.ts', type: 'file' }]
     getFileCandidatesByCwdMock.mockResolvedValue(nodes)
     wrapper = mount(CommandPopover, {
@@ -269,7 +269,7 @@ describe('open-fetch file 路 landing cwd 通道（D2/D3）', () => {
     await wrapper.setProps({ open: true })
     await flushPromises()
     expect(getFileCandidatesByCwdMock).toHaveBeenCalledTimes(1)
-    // 关→开（1s 窗口内）：节流命中，不重拉
+    // 关→开（1s 窗口内）：节流命中，不重新拉取
     await wrapper.setProps({ open: false })
     await wrapper.setProps({ open: true })
     await flushPromises()

@@ -1,16 +1,16 @@
 /**
- * TraceSync 模块直接测试（S4：trace 编排半截从 SessionService 迁出后的直接测试面——
+ * TraceSync 模块直接测试（S4：trace 编排半截从 SessionService 迁出后的直接测试——
  * 设计明示编排层此前零覆盖，本文件即 G2 形态：stub client 直测，不构造 Facade 全家桶，
  * import 不含 session-service）。
  *
  * 内容三块：
  * - 纯函数：buildTraceSnapshotFromFile 用例（原 session-trace.test.ts 随迁）+
  *   parseTraceHeaderLine fork 血缘透传用例（u-S4 补覆盖）。
- * - 编排层：getTraceEntries（RPC 混合路由）/ syncTraceEntries（增量腿串行链）/
+ * - 编排层：getTraceEntries（RPC 混合路由）/ syncTraceEntries（增量路径串行链）/
  *   fetchCurrentSystemPrompt（现取轮询）/ onSessionDisposed（销毁清理）——原经 Facade 的
  *   session-trace.test.ts 用例改由本文件直测模块（同一实现代码路径），并补充此前
  *   零覆盖的分支（Entry not found 基线失效、retry 全量重建等）。
- * - EventInterpreter 触发接线（A33 增量腿入口，原 session-trace.test.ts 随迁）：四类
+ * - EventInterpreter 触发接线（A33 增量路径入口，原 session-trace.test.ts 随迁）：四类
  *   触发事件 → onTraceSync 回调（interpreter 是设计 §5 判定的不动健康样本，此处只守
  *   触发接线，不测 interpreter 内部）。
  *
@@ -84,6 +84,8 @@ function makeSessionStore(metas: ScannedSessionMeta[]): ISessionStore {
     normalizeSessionFileStreaming: () => {},
     persistHandoffSidecar: () => {},
     trash: () => Promise.resolve(),
+    // [session-store-layout-inversion D5] 目录级整树软删 port（本测试不触删除路径）
+    trashDirectory: () => Promise.resolve(),
   }
 }
 
@@ -305,7 +307,7 @@ describe('getTraceEntries 编排（RPC → 文件降级 → empty 混合路由�
   })
 })
 
-// ── syncTraceEntries 编排（增量腿）──
+// ── syncTraceEntries 编排（增量路径）──
 
 describe('syncTraceEntries 编排（触发 → get_entries(since) → traceEntryAppended 广播）', () => {
   it('基线 + delta → 广播 session.traceEntryAppended（含 sessionId + delta + 新 leafId）+ 基线滚动（下次 since 用新 leaf）', async () => {
@@ -344,7 +346,7 @@ describe('syncTraceEntries 编排（触发 → get_entries(since) → traceEntry
     expect(publishSpy).toHaveBeenCalledTimes(1)
   })
 
-  it('无基线（trace 视图未打开过）→ 增量腿 no-op，不发 RPC 不广播', () => {
+  it('无基线（trace 视图未打开过）→ 增量路径 no-op，不发 RPC 不广播', () => {
     const { traceSync, publishSpy, client } = makeEnv({ metas: [metaFor('get-entries-1-mixed-kinds')], active: true })
     traceSync.syncTraceEntries(fixtureSessionId('get-entries-1-mixed-kinds'), 'message_end')
     expect(client.getEntries).not.toHaveBeenCalled()
@@ -504,7 +506,7 @@ describe('fetchCurrentSystemPrompt 编排（常驻扩展现取通道）', () => 
     await expect(traceSync.fetchCurrentSystemPrompt(SID)).rejects.toMatchObject({ code: 'session_busy' })
   })
 
-  it('成功路径：发命令 → ensurePromptBaseline 全量建基线 → 轮询 since 命中 custom entry → 返回值 + 台账增量广播 + 基线滚动', async () => {
+  it('成功路径：发命令 → ensurePromptBaseline 全量建基线 → 轮询 since 命中 custom entry → 返回值 + journal 增量广播 + 基线滚动', async () => {
     vi.useFakeTimers()
     const { traceSync, client, publishSpy } = makeEnv({ active: true })
     mockPromptFlow(client)
@@ -524,7 +526,7 @@ describe('fetchCurrentSystemPrompt 编排（常驻扩展现取通道）', () => 
       charCount: 11,
       fetchedAt: '2026-08-20T10:00:00.000Z',
     })
-    // 台账增量：traceEntryAppended 广播（含 sessionId，规则 7）带现取 entry
+    // journal 增量：traceEntryAppended 广播（含 sessionId，规则 7）带现取 entry
     const push = publishSpy.mock.calls.find(([, m]) => (m as ServerMessage).type === 'session.traceEntryAppended')
     expect(push).toBeDefined()
     const payload = (push?.[1] as { payload: { sessionId: string; entries: unknown[]; leafId: string | null } }).payload
@@ -637,7 +639,7 @@ describe('onSessionDisposed（Facade removeSessionEntry 第 ⑤ 步直调）', (
   })
 })
 
-// ── EventInterpreter 触发接线（A33 增量腿入口，原 session-trace.test.ts 随迁）──
+// ── EventInterpreter 触发接线（A33 增量路径入口，原 session-trace.test.ts 随迁）──
 
 describe('EventInterpreter 触发接线（A33：四类触发事件 → onTraceSync）', () => {
   it('EventInterpreter：message_end / agent_settled / entry_appended 三类触发事件 → onTraceSync(trigger)', () => {

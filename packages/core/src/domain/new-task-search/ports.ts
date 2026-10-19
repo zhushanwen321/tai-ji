@@ -39,7 +39,7 @@ export interface SessionFlowPort {
 
 /** chat 发送端口（壳适配 useChat().send / useChat().sendBash）。
  *
- * 返回值契约（两法同构，A 消费侧）：false = 未投递（RPC 真失败，错误面已 toast 消化）——
+ * 返回值契约（两法同构，A 消费侧）：false = 未投递（RPC 真失败，错误范围已 toast 消化）——
  * flow 的 handover / 后台投递分支据此保稿（stashOrphanedDraft）。壳层消费判真用
  * `r !== false`（兼容 void 形态，boolean 下语义等价）。
  */

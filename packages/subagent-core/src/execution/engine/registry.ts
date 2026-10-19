@@ -40,14 +40,14 @@ export type EngineFactory = () => EnginePort;
  * 成员（capabilities/listModels/validateModel）直读本快照。
  *
  * 与 client/remote-engine.ts 的 RemoteEngineManifestSnapshot 是结构闭包（后者多出
- * core 中立类型包装；漂移由 protocol-closure 同族结构互证断言守卫）。
+ * core 中立类型包装；漂移由 protocol-closure 同族结构互证断言检查）。
  */
 export interface EngineManifestSnapshot {
   /** manifest `capabilities`（同步能力位权威，注册期读，无缓存）。 */
   capabilities: EngineCapabilities;
   /**
    * manifest `modelCatalog` 三态（W4 §2.4：缺省 = 不注入保持 undefined；null 合法等价
-   * 省略；`models: []` 仅作者显式声明）。解析器不得把省略填成 `[]`——否则「无枚举面」
+   * 省略；`models: []` 仅作者显式声明）。解析器不得把省略填成 `[]`——否则「无枚举情形」
    * 语义不可达。
    */
   modelCatalog?: { dynamic: boolean; models: ModelCatalogEntry[] } | null;
@@ -170,7 +170,7 @@ export class EngineNotFoundError extends Error {
  * per-window 引擎不进 singletons——窗口实例由窗口对象持有（window-instances 表 +
  * routing/chat-rounds 的窗口状态），getEngine 对其返回**同步只读代理**（见
  * readOnlyEngineProxy）。readOnlyProxies 是代理的实现缓存（代理无进程无连接，纯
- * manifest 快照读——缓存的是快照读取面，不是活实例；descriptor 覆盖重注册时清掉）。
+ * manifest 快照读——缓存的是快照读侧，不是活实例；descriptor 覆盖重注册时清掉）。
  */
 const ENGINE_REGISTRY_SLOT_KEY = Symbol.for(GLOBAL_SLOT_KEYS.engineRegistry);
 
@@ -245,7 +245,7 @@ export class WindowScopeEngineError extends Error {
 /**
  * per-window 引擎的同步只读代理（D6）：构造同步无连接（底层 RemoteEngine 构造不
  * spawn——§3.5.3 代理形态）；同步只读成员（capabilities / listModels / validateModel）
- * 直读 manifest 注册期快照——8 处生产调用面的同步只读 3 处零改动兼容；连接级成员
+ * 直读 manifest 注册期快照——8 处生产调用点的同步只读 3 处零改动兼容；连接级成员
  * fail-fast（WindowScopeEngineError，指路窗口实例解析）。
  *
  * validateModel 的「catalog 省略 = 成员摘除」形态保形：RemoteEngine 构造器对省略
@@ -283,7 +283,7 @@ function portFactoryOf(descriptor: EngineDescriptor): EngineFactory {
 
 /**
  * [R1 D6] 触发引擎 dispose：同步调用拿 Promise 不 await（「触发不等待」，D6①——
- * dispose 的同步面〔fire close 帧 + 同步 SIGTERM〕由引擎实现保证在返回 Promise 前
+ * dispose 的同步部分〔fire close 帧 + 同步 SIGTERM〕由引擎实现保证在返回 Promise 前
  * 完成，registry 不等待异步段）。同步 throw 与异步 reject 均记日志吞掉，绝不外溢
  * 阻断调用方——重注册替换（D6②）与宿主收割（D6③）都是 best-effort 面，且 reject
  * 无人接会成为 unhandledRejection 崩宿主。两条 dispose 路径共用本函数。
@@ -347,7 +347,7 @@ function stableDescriptorKey(value: unknown): string {
  * = 除 portFactory 外的全部字段）：
  *   - kind（cli / inproc 实现形态不同 = 不同引擎）
  *   - command + args（spawn 面：bin 路径与启动参数）
- *   - capabilities（能力位——引擎包升级改能力面时标识必须变化，触发 dispose 换新
+ *   - capabilities（能力位——引擎包升级改能力侧时标识必须变化，触发 dispose 换新
  *     实例，否则与「真换引擎」场景自相矛盾）
  *   - manifest 余项（modelCatalog + modelTranslation + displayName + processModel——manifest
  *     派生版本面）
@@ -433,9 +433,9 @@ function triggerActiveWindowEngineDispose(source: string): void {
  *     单例不 dispose（descriptor 替换、singleton 不删——新 portFactory 生效于单例
  *     缺席的下次 getEngine）。这是 reload / jiti 模块重载后 factory 重跑、
  *     discoverAndRegisterEngines 对同一磁盘 manifest 重扫的常态：等价重注册 dispose
- *     一个持有在飞 run 的引擎去换一个行为等价的引擎，是零收益纯破坏（杀令 B）。
+ *     一个持有在途 run 的引擎去换一个行为等价的引擎，是零收益纯破坏（杀令 B）。
  *   - 标识不等价 → 现状 dispose + 删单例（防泄漏语义保留——旧实例可能与新
- *     descriptor 不兼容，如引擎包升级后 bin 相同但能力面变化）。
+ *     descriptor 不兼容，如引擎包升级后 bin 相同但能力侧变化）。
  */
 export function registerEngineDescriptor(id: string, descriptor: EngineDescriptor): void {
   const slot = getRegistrySlot();
@@ -483,7 +483,7 @@ export function disposeEngines(): void {
  *     chat 轮次的窗口状态，取用走窗口实例解析单点），本函数返回同步只读代理
  *     （readOnlyEngineProxy：同步成员直答 manifest 快照、连接级成员 fail-fast——
  *     防漏改调用点静默 spawn 无人收割的薄壳 = G1 静默回归）。代理按 id 缓存
- *     （纯快照读面，无进程资源；descriptor 覆盖重注册时失效重建）。
+ *     （纯快照读侧，无进程资源；descriptor 覆盖重注册时失效重建）。
  */
 export function getEngine(id: string): EnginePort {
   const slot = getRegistrySlot();

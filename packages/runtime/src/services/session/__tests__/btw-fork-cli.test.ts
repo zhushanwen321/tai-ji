@@ -83,7 +83,7 @@ describe('forkViaCliPi：一次性 fork bootstrap 机制', () => {
     ).rejects.toMatchObject({ code: 'fork_failed', message: expect.stringContaining('spawn failed') })
   })
 
-  it('超时 → BtwError fork_failed timed out（控制面秒级有界，规则 #19）', async () => {
+  it('超时 → BtwError fork_failed timed out（控制范围秒级有界，规则 #19）', async () => {
     const script = writeFakePi('hang.js', sleepCode(30000))
 
     const t0 = Date.now()
@@ -129,7 +129,7 @@ describe('createLine 默认 fork 装配链（resolvePiCommand → forkViaCliPi �
       const src = join(fx, 'src.jsonl')
       writeFileSync(src, '{"type":"session","id":"main"}\n{"type":"message","id":"e1"}\n')
       h.deps.resolveMainSessionFile = vi.fn(() => src)
-      const threadDir = getBtwThreadDir(cwd, MAIN_SID)
+      const threadDir = getBtwThreadDir(MAIN_SID)
       const forkFile = join(threadDir, '2026T_cli.jsonl')
       // fake pi：双旗标启动后往线目录写带 header 的 fork 文件（id=cli），随后保活待收
       const chainBody = `
@@ -141,7 +141,7 @@ describe('createLine 默认 fork 装配链（resolvePiCommand → forkViaCliPi �
         ${sleepCode(5000)}
       `
       h.deps.resolvePiCommand = () => writeFakePi('chain.js', chainBody)
-      // get_state 读回须与 fork header id 一致（附着一致性守卫）
+      // get_state 读回须与 fork header id 一致（附着一致性检查）
       h.state = { sessionId: 'cli', sessionFile: forkFile }
       h.deps.forkSession = undefined // 强制走默认 CLI 链
 

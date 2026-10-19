@@ -4,7 +4,7 @@
  *
  * 覆盖：
  * - handles 认领 backgroundTask.list / output / kill
- * - list：reply backgroundTask.tasks 形状（sessionId 必带 + tasks 全量投影，D3）；
+ * - list：reply backgroundTask.tasks 形状（sessionId 必带 + tasks 全量派生视图，D3）；
  *   副作用 = 加入 watched 集合（D8③ 订阅语义由 list 隐含：list 后 registry 变更触发
  *   onTasksChanged 变更检测回调）
  * - output：正常 tail 形状（text/truncated/lost:false，D7）+ 输出文件缺失 lost 降级
@@ -23,7 +23,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
-import { join } from 'node:path'
+import { dirname, join } from 'node:path'
 
 import { SessionMessageHandler, OUTPUT_TAIL_MAX_REQUEST_BYTES, type SessionHandlerContext } from '../session-message-handler.js'
 import { BackgroundTaskService, type BackgroundTaskServiceDeps } from '../../services/background-task/background-task-service.js'
@@ -40,10 +40,14 @@ const TASK_PID = 53241
 const OWNER_PID = 40001
 const STARTED_AT = 1_700_000_000_000
 
+let dataDir: string
 let agentDir: string
 
+// [session-store-layout-inversion 域 5] registry 布局 = <dataDir>/ext-sessions/<sid>/
+// background-tasks/registry.json；agentDir（pi agentDir，service 注入基址）= <dataDir>/agent
+// ——fixture 与 BackgroundTaskService 经同一 dirname 换算推导，树随 dataDir 整体清理。
 function registryPath(sessionId: string = SID): string {
-  return join(agentDir, 'base-tool-enhance', sessionId, 'registry.json')
+  return join(dataDir, 'ext-sessions', sessionId, 'background-tasks', 'registry.json')
 }
 
 function makeEntry(overrides: Partial<BackgroundTaskRegistryEntry> = {}): BackgroundTaskRegistryEntry {
@@ -51,7 +55,7 @@ function makeEntry(overrides: Partial<BackgroundTaskRegistryEntry> = {}): Backgr
     taskId: TASK_ID,
     pid: TASK_PID,
     command: 'pnpm test',
-    outputFile: join(agentDir, 'base-tool-enhance', SID, `${TASK_ID}.log`),
+    outputFile: join(dataDir, 'ext-sessions', SID, 'background-tasks', `${TASK_ID}.log`),
     startedAt: STARTED_AT,
     state: 'running',
     ownerPiPid: OWNER_PID,
@@ -62,7 +66,7 @@ function makeEntry(overrides: Partial<BackgroundTaskRegistryEntry> = {}): Backgr
 
 /** 按契约形状写 registry（JSON indent 2 + 尾部换行；tmp 自建自删）。 */
 function writeRegistry(entries: BackgroundTaskRegistryEntry[], sessionId: string = SID): void {
-  mkdirSync(join(agentDir, 'base-tool-enhance', sessionId), { recursive: true })
+  mkdirSync(dirname(registryPath(sessionId)), { recursive: true })
   writeFileSync(registryPath(sessionId), `${JSON.stringify({ version: 1, entries }, null, 2)}\n`, 'utf8')
 }
 
@@ -109,12 +113,13 @@ function msg(type: string, payload: Record<string, unknown> = {}, id = 'msg-1'):
 }
 
 beforeEach(() => {
-  agentDir = mkdtempSync(join(tmpdir(), 'bg-task-rpc-'))
+  dataDir = mkdtempSync(join(tmpdir(), 'bg-task-rpc-'))
+  agentDir = join(dataDir, 'agent')
 })
 
 afterEach(() => {
   vi.restoreAllMocks()
-  rmSync(agentDir, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 })
+  rmSync(dataDir, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 })
 })
 
 // ── handles 清单 ────────────────────────────────────────────────
@@ -152,7 +157,7 @@ describe('SessionMessageHandler backgroundTask 端口缺省', () => {
 // ── backgroundTask.list ─────────────────────────────────────────
 
 describe('SessionMessageHandler backgroundTask.list', () => {
-  it('reply backgroundTask.tasks 形状：sessionId 必带 + registry 全量投影 + corrupted:false 正常拍；markWatched 基线不广播', async () => {
+  it('reply backgroundTask.tasks 形状：sessionId 必带 + registry 全量派生视图 + corrupted:false 正常拍；markWatched 基线不广播', async () => {
     writeRegistry([makeEntry(), makeEntry({ taskId: 'bt-1789-other', state: 'exited', exitCode: 0 })])
     const onTasksChanged = vi.fn()
     const svc = makeService(onTasksChanged)
@@ -194,7 +199,7 @@ describe('SessionMessageHandler backgroundTask.list', () => {
   })
 
   it('损坏 registry（非法 JSON）→ reply corrupted=true + 空表（S7 错误条依据，.corrupt 隔离保留现场）', async () => {
-    mkdirSync(join(agentDir, 'base-tool-enhance', SID), { recursive: true })
+    mkdirSync(dirname(registryPath()), { recursive: true })
     writeFileSync(registryPath(), '{ broken json', 'utf8')
     const svc = makeService()
     const ctx = mockContext(fakeSessionService(svc))
@@ -213,7 +218,7 @@ describe('SessionMessageHandler backgroundTask.list', () => {
   })
 
   it('损坏后自愈（重新写入合法 registry）→ 后续 list 拍 corrupted=false（审查修复验收②）', async () => {
-    mkdirSync(join(agentDir, 'base-tool-enhance', SID), { recursive: true })
+    mkdirSync(dirname(registryPath()), { recursive: true })
     writeFileSync(registryPath(), '{ broken json', 'utf8')
     const svc = makeService()
     const ctx = mockContext(fakeSessionService(svc))
@@ -261,7 +266,7 @@ describe('SessionMessageHandler backgroundTask.output', () => {
   it('输出文件可读 → tail 形状 { sessionId, taskId, text, truncated:false, lost:false }', async () => {
     const entry = makeEntry()
     writeRegistry([entry])
-    mkdirSync(join(agentDir, 'base-tool-enhance', SID), { recursive: true })
+    mkdirSync(dirname(entry.outputFile), { recursive: true })
     writeFileSync(entry.outputFile, 'line-1\nline-2\nline-3\n', 'utf8')
     const svc = makeService()
     const ctx = mockContext(fakeSessionService(svc))
@@ -300,7 +305,7 @@ describe('SessionMessageHandler backgroundTask.output', () => {
   it('maxBytes 超 1MB → clamp 到 OUTPUT_TAIL_MAX_REQUEST_BYTES（D6 #1/BG-4）；缺省不传透传 undefined（service 默认 32KB）', async () => {
     const entry = makeEntry()
     writeRegistry([entry])
-    mkdirSync(join(agentDir, 'base-tool-enhance', SID), { recursive: true })
+    mkdirSync(dirname(entry.outputFile), { recursive: true })
     writeFileSync(entry.outputFile, 'x'.repeat(64), 'utf8')
     const svc = makeService()
     const tailSpy = vi.spyOn(svc, 'getOutputTail')

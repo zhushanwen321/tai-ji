@@ -240,7 +240,7 @@ describe('URI 行为（默认 ALLOWED_URI_REGEXP，D1 R8/R9）', () => {
     expect(html).toContain('%6Aavascript:alert(1)')
   })
 
-  it('tel: 存活（默认正则协议面，非剥除）', async () => {
+  it('tel: 存活（默认正则协议范围，非剥除）', async () => {
     const html = await freshRender('<a href="tel:+8613800000000">tel</a>\n')
     expect(html).toContain('href="tel:')
   })
@@ -311,7 +311,7 @@ describe('img 相对 src 重写（afterSanitizeAttributes hook，D4 U3：resourc
     expect(html).not.toContain('local-file://')
   })
 
-  it('`../` 穿越按 POSIX resolve 出 base（真收口在 local-file 白名单 403 裂图——错误规格表）', async () => {
+  it('`../` 穿越按 POSIX resolve 出 base（真收尾在 local-file 白名单 403 裂图——错误规格表）', async () => {
     const html = await freshRender('![](../outside.png)\n', { resourceBaseDir: BASE })
     expect(html).toContain(`src="local-file:///${encodeURIComponent('/home/demo/outside.png')}"`)
   })
@@ -378,7 +378,7 @@ describe('混合串：可信契约与用户 HTML 交错（R4 摘出单位验证�
       '见 src/foo.ts 说明 <b>注意</b> 公式 $x$ 后续\n\n| a | b |\n| --- | --- |\n| 1 | 2 |\n',
       { filePaths: new Set(['src/foo.ts']) },
     )
-    // filepath 链接闭合紧跟路径文本（单 token 摘出 → </a> 不吞并后续内容）
+    // filepath 链接结束紧跟路径文本（单 token 摘出 → </a> 不吞并后续内容）
     expect(html).toMatch(/<a class="md-filepath"[^>]*>src\/foo\.ts<\/a>/)
     expect(html).toContain('<b>注意</b>')
     expect(html).toContain('class="katex"')

@@ -1,7 +1,7 @@
 /**
  * btw-overlay-routing —— M3-c 探针 P-overlay 单测（D8 降级路径：drawer 内联确认条）。
  *
- * 覆盖面（设计 §3 探针 P-overlay + 验收 S9/S9b + 实施计划 M3-c 验收①-⑤）：
+ * 覆盖范围（设计 §3 探针 P-overlay + 验收 S9/S9b + 实施计划 M3-c 验收①-⑤）：
  * - vid 路由：五类请求（ask-user 富表单 / scheduler 表单 / plan 审批 / 权限审批 select /
  *   confirm 简单 dialog）按 vid 现 drawer 内联确认条；主视图 CompanionBand（主 sid 分区）
  *   零浮出（P-overlay 正向）；三模态面既有测试族回归绿 = 反向分支（见运行证据）。
@@ -12,7 +12,7 @@
  * - 状态区退役（2026-10-15 用户裁决；StatusBar 数据链随后 ADR-0141 整体退役，本文件仅余
  *   setWidget 注入可构造）：per-session 源存在也不渲染——btw 状态区恒空（原「第四面状态区」
  *   移除，扩展状态行不进旁路线面板）。
- * - 运行期错误边界：确认条子树渲染异常被 BtwPanel onErrorCaptured 收口（行内错误 + 可重试，
+ * - 运行期错误边界：确认条子树渲染异常被 BtwPanel onErrorCaptured 收尾（行内错误 + 可重试，
  *   不外溢）。
  * - 并发排序：跨通道按 receivedAt 取最早，应答后晋升下一条。
  *
@@ -191,7 +191,7 @@ describe('① vid 路由：五类请求 drawer 内联确认条 + 主视图零浮
     expect(bar.text()).toContain('问题甲？')
     expect(w.find('[data-testid="btw-form-submit"]').exists()).toBe(true)
 
-    // 主 sid 的请求不进本面板确认条（vid 分区隔离；主 sid 渲染面归 Panel/FormOverlay 族）
+    // 主 sid 的请求不进本面板确认条（vid 分区隔离；主 sid 渲染范围归 Panel/FormOverlay 族）
     emitUIRequest(MAIN, formFrame('r-main', '主会话问题？'))
     await settle(w)
     expect(bar.text()).toContain('问题甲？')
@@ -420,7 +420,7 @@ describe('②③ badge 待处理态 + 终态机四行（D8 SSOT 表）', () => {
     emitUIRequest(VID, formFrame('r-gone', '问题？'))
     await settle(w)
     // 模拟已终结（失效链已移除 store 记录）后迟到的提交：active 已随 store 清空 →
-    // 确认条不在 DOM、无按钮可点——改直调 useExtensionUI 的 respond 语义面
+    // 确认条不在 DOM、无按钮可点——改直调 useExtensionUI 的 respond 语义侧
     // （同 useBtwInteraction 挂载形态：vid ref + 全放行 filter）
     useExtensionUIStore().removeRequest(VID, 'r-gone')
     await settle(w)
@@ -473,7 +473,7 @@ describe('⑤ 状态区退役（2026-10-15 用户裁决）：extension GUI 状�
           : undefined,
       getViewIds: (sid: string) => (sid === VID ? ['w1'] : []),
     }
-    // 选中一条线：状态区退役的断言面在 composer 带（btw-interaction）内，非空态非澄清命中
+    // 选中一条线：状态区退役的断言范围在 composer 带（btw-interaction）内，非空态非澄清命中
     apiMock.list.mockResolvedValue([{ vid: VID }])
     const w = mount(BtwPanel, {
       props: { sessionId: MAIN },
@@ -493,13 +493,13 @@ describe('⑤ 状态区退役（2026-10-15 用户裁决）：extension GUI 状�
     expect(w.find('[data-testid="btw-widget-line"]').exists()).toBe(false)
     expect(w.text()).not.toContain('构建中 3/5')
     expect(w.text()).not.toContain('todo: 2 done')
-    // 面板本身健康（装配面不因退役受损）
+    // 面板本身健康（装配侧不因退役受损）
     expect(w.find('[data-testid="drawer-btw-tab"]').exists()).toBe(true)
   })
 })
 
 describe('⑤ 运行期错误边界：btw 交互异常不外溢主面板', () => {
-  it('Guard 子树渲染抛错 → BtwPanel ec 收口：行内错误条 + 重试可达，面板根不倒（状态区已退役，注入点 = Guard stub）', async () => {
+  it('Guard 子树渲染抛错 → BtwPanel ec 收尾：行内错误条 + 重试可达，面板根不倒（状态区已退役，注入点 = Guard stub）', async () => {
     const w = mount(BtwPanel, {
       props: { sessionId: MAIN },
       global: {

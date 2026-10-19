@@ -53,8 +53,8 @@ harness 必备能力（业务价值视角，2026-09-12 用户裁决）：
 | Markdown 渲染 | shiki 高亮、HTML 分通道净化（可信段摘出回填 + 用户 HTML DOMPurify 白名单）、相对资源通道（resourceBaseDir 双通道）、html-preview 块渲染（对话流内联容器 HtmlPreviewInline，sandbox iframe 原位渲染，v16/ADR-0119）、产物文件抽屉恢复源码高亮（v16 渲染态退役）、CSP 兼容、降级路径 | 对话内容呈现主体；纯文本降级已属不可读（曾 CSP 事故） |
 | 扩展装载框架 | builtin 21 包装载、分组检查（infrastructure 不可禁）、worker 隔离 | 所有进阶能力的装载底座，挂了 feature 扩展全灭 |
 | subagent/workflow 面板与派发 | composer 任务托盘的 subagent/workflow 列表与运行计数（含 built-in 第 4 件「子会话」观察入口——调度模式派发进度的主视图；含行内取消/中止——workflow 一次性生命周期 abort-only，pause/resume 已随扩展 D-2 移除）、workflow 可视化 overlay（2026-10-02：双入口改向全屏 overlay——左 DAG 蓝图 + 右多级 tab 实况面板，挂掉回落 drawer WorkflowTab 对冲）、drawer 详情 tab（回落载体）、通知链 | agent 生产力的核心形态（边界判例 #2，2026-09-12 升 P0）；2026-09-16 观察入口自侧栏 Agents/Flows tab 迁 composer 任务托盘（侧栏收敛三 tab，入口唯一化）；展示承载层 = 展示容器体系（右抽屉 8 tab / 底抽屉 / 浮层统一壳 + 键盘栈序编排器，display-containers）——容器体系挂掉 = P0 面板内容不可见，属 P0 链路一环（不另立独立条目） |
-| 设置页 | provider/API key 管理、系统提示词编辑、**模式（预设）编辑 + 模式提示词卡**、主题、settings.json 写入面（跨进程锁 + 字段域 merge + 损坏拒入——settings.json 是「设置」功能的载体，写坏影响全部会话；codemode 启动迁移/开关写入同域，写方与字段域归属见 data-source-registry §6） | provider 配置是首次使用必经路径，配不了连会话都起不了 |
-| 插件系统 | PluginService、trusted/sandbox 隔离、交互点位（headerAction 顶栏按钮区 / modal 弹层 / action-bar 交互原语 + 条目镜像数据面） | harness 可扩展能力主体（testing 13）；交互点位是管理面类需求的规范底座，modal/徽标链路挂了 = 插件无法提供任何可交互入口 |
+| 设置页 | provider/API key 管理、系统提示词编辑、**模式（预设）编辑 + 模式提示词卡**、主题、settings.json 写侧（跨进程锁 + 字段域 merge + 损坏拒入——settings.json 是「设置」功能的载体，写坏影响全部会话；codemode 启动迁移/开关写入同域，写方与字段域归属见 data-source-registry §6） | provider 配置是首次使用必经路径，配不了连会话都起不了 |
+| 插件系统 | PluginService、trusted/sandbox 隔离、statusBar、交互点位（headerAction 顶栏按钮区 / modal 弹层 / action-bar 交互原语 + 条目镜像数据范围） | harness 可扩展能力主体（testing 13）；交互点位是管理侧类需求的规范底座，modal/徽标链路挂了 = 插件无法提供任何可交互入口 |
 | 统一提问表单 FormOverlay | agent 提问浮层（ask-user/scheduler/plan 三方统一）、Other 保留、pi 恢复 turn | agent↔用户交互闭环的唯一通道（边界判例 #3，2026-09-12 升 P0） |
 
 ## 3. P1 — 核心体验（挂了 = 大体能用，体验非常差）
@@ -72,7 +72,7 @@ harness 必备能力（业务价值视角，2026-09-12 用户裁决）：
 |------|-----------|
 | 搜索 modal | ⌘K 四类搜索、recents、跳转（testing 06） |
 | 自动更新 | 更新检查、下载、安装（update-e2e） |
-| 通知系统 | 桌面通知、pending-notifications 汇聚 |
+| 通知系统 | 桌面通知、pending-notifications 汇聚、collect_results 批量收取（agent 一次收割并行后台任务结果） |
 | zcode 引擎 | app-server RPC、会话库隔离、凭据注入（边界判例 #4） |
 | session-reader | 通知链 session_read 指针解析、跨进程读（pi 与 zcode 引擎 subagent 均覆盖） |
 | smart-context | 自动压缩、双模式摘要接管、分档提醒（手动 compact 兜底） |
@@ -81,15 +81,16 @@ harness 必备能力（业务价值视角，2026-09-12 用户裁决）：
 | 快捷键与 side drawer | 全局快捷键、composer pi 对齐快捷键（shift+tab 档位循环 / ctrl+p、ctrl+shift+p 模型双向循环 / ctrl+x 复制最后回复）、文件预览/diff/git tab（testing 05）；终端展示容器（右抽屉迁底抽屉）：底抽屉全宽开关（`` ⌃` `` / 顶栏终端按钮）双入口，终端**多实例**（关键用例组：多实例并行——实例切换条新建/切换/关闭/空态与实例间输出隔离；实例级生命周期——主动关闭·自然退出·会话删除级联·runtime shutdown 级联；刷新与世代恢复——⌘R 对账重建·runtime 重启世代重置·同世代闪断不重置） |
 | 浮层浏览器（应用内网页预览） | 对话流 localhost 链接点击进浮层（OverlayShell + BrowserPane）、地址栏/复制链接/在系统浏览器打开、错误占位与重试、切 session 浮层随行。**挂掉后果 = dev server 链接退回系统浏览器打开，预览能力基本可用但上下文切换中断**（基本可用稍可忍受） |
 | session 导入 | 多源统一入口：来源选择（pi/zcode）、候选列表、导入；zcode 源真实宿主库只读转换（session-import-sources 指南；SessionImportSource SPI） |
-| 后台命令观察面（composer 任务托盘 bash 面板） | background task 展示（testing 02） |
+| 后台命令观察入口（composer 任务托盘 bash 面板） | background task 展示（testing 02） |
 | 对话流时间戳 | 行尾耗时·时刻槽、TurnMeta 首末区间、reload endTime 回填（chat-flow-timestamp；TurnMeta/Block/apply-entry-convert 单测 + live≡reload 等价性） |
 | btw 旁路提问（drawer 辅助对话流） | composer btw 按钮入口、fork 快照线（独立 pi 进程 / `btw:` 虚拟 id / `btw/<encodeCwd>/<mainSid>/` 目录隔离）、消息分区、主删级联与持久恢复、交互 drawer 路由（D8）。**挂掉后果 = 主对话链路完整可用**（btw 创建/提问/面板失效仅损失辅助提问面，不动 P0 对话主链；设计原文口径「触及最高 P 级 P2——btw 为常用辅助面，挂掉后主链路完整可用」）。错误处理按 §1「P2/P3 降级隔离不拖垮核心」契约：接入点 catch + 日志 + 功能关闭/占位兜底，禁向上传播打断 P0/P1 主流程，降级 ≠ 吞错（运行时错误码 `fork_failed / spawn_state_invalid / state_mismatch / line_not_found / thread_file_missing` 供 runtime 分流与日志归因；renderer 呈现 = 通用降级文案 + 原因透传 + 行内可重试入口，不按码分流——2026-09-22 一致性审查对账修正） |
 | 远程访问（手机浏览器经 LAN 直连） | 设置→远程访问开关与 token 轮换、移动壳同源托管、remote token 验身（关态默认纯回环零暴露） |
 | 语音朗读（TTS） | assistant 回复朗读按钮三态（idle/loading/playing，生成中置灰）、设置页「语音」菜单（三家 provider 表单：凭据/基础/音频/风格/长尾，Key 联动带入 + MiMo baseUrl 集群预填）、runtime `tts.*` 四 RPC（三家 driver + 分句合成 + WAV 缓存 + 双条件 FIFO 封顶）、错误码 toast 分流（§5.4 六码）。**挂掉后果 = 对话主链路完整可用**（朗读按钮不渲染/合成失败仅损失听觉通道，不动 P0 对话主链；ai-voice-tts 设计原文口径 P2）。错误处理按 §1 P2 降级隔离契约：u6 播放器 catch + 错误码 toast + 回 idle，runtime `tts_*` 错误码词表（`tts_not_configured / tts_auth_failed / tts_quota_exceeded / tts_vendor_error / tts_network_error / tts_text_too_long / tts_empty_text`），缓存写失败日志不阻断（磁盘治理失败下次写入收敛）。总开关关闭时 idle 朗读本地拦截不发 RPC（data-source-registry #45） |
 | Code Mode（codemode） | 模型写 JavaScript 脚本调用工具（pi 1.0 内置扩展，QuickJS 沙箱：脚本内并行调用/过滤过大结果/生成图片）：常驻默认启用（启动迁移幂等写 `+codemode`，字段已配置不碰）、设置页「系统」Code Mode 开关（`config.getCodemodeEnabled` / `config.setCodemodeEnabled`，损坏错误态）、嵌套脚本调用事件过滤（对话流单工具块，live ≡ reload）、脚本调用工具块与图片条渲染（复用既有通用工具块 + 图片条通道，零新渲染组件）。**挂掉后果 = 对话主链路完整可用**（codemode 未激活/脚本报错仅损失脚本调用能力，普通工具调用不受影响，不动 P0 对话主链；codemode 设计原文口径「功能本体 P2——codemode 故障时对话主链路完整可用，同 TTS/btw 口径」）。错误处理按 §1 P2 降级隔离契约：启动迁移失败不阻塞启动（warn 留痕 + 下次启动幂等补跑）；开关操作遇 settings.json 损坏呈错误态（Switch 禁用 + 完整路径可复制 + 修复指引，不静默重置不代偿）。**P0 关联**：写入域本身是 P0（§2 设置页行——settings.json 写坏影响全部会话），本功能对它的义务 = 只动 `defaultTools` 的 codemode 相关系目 + 写前损坏拒入，见 data-source-registry §6 tools 域行 |
-| MCP 服务器管理 | 设置页 MCP 分区：服务器清单（用户级，坏条目「配置有误」标注不阻塞）、表单/代码双模式添加与编辑（stdio 本地命令 / http 远程地址，表单外键原样保留）、启停/删除确认、连接测试（spawn `pi mcp list --json` 真实连接，逐服务器状态与失败原因）；配置由新启动的会话读取（运行中会话保持不变，页头说明该语义）。**挂掉后果 = 无法在界面管理 MCP 服务器**（分区/清单/连接测试失效仅损失管理面，手编 `<数据目录>/agent/mcp.json` 与终端 `pi mcp` 命令仍可用，不动 P0 对话主链；pi-mcp-management 设计原文口径 P2——「挂掉后果：界面无法管理 MCP，高级用户仍可手编配置文件，harness 其余功能不受影响」）。错误处理按 §1 P2 降级隔离契约：读写层 fail-fast（保存校验不过不落盘、文件损坏拒入报错不静默重置——不覆盖外部手编内容，修复指引含文件路径）；连接测试为辅助功能，失败/超时降级为状态显示（保留上次结果），不阻塞清单读写；域内错误经 reply 信封结构化返回（错误码 + 修复动作文案），不向上传播打断 P0/P1 主流程 |
+| MCP 服务器管理 | 设置页 MCP 分区：服务器清单（用户级，坏条目「配置有误」标注不阻塞）、表单/代码双模式添加与编辑（stdio 本地命令 / http 远程地址，表单外键原样保留）、启停/删除确认、连接测试（spawn `pi mcp list --json` 真实连接，逐服务器状态与失败原因）；配置由新启动的会话读取（运行中会话保持不变，页头说明该语义）。**挂掉后果 = 无法在界面管理 MCP 服务器**（分区/清单/连接测试失效仅损失管理侧，手编 `<数据目录>/agent/mcp.json` 与终端 `pi mcp` 命令仍可用，不动 P0 对话主链；pi-mcp-management 设计原文口径 P2——「挂掉后果：界面无法管理 MCP，高级用户仍可手编配置文件，harness 其余功能不受影响」）。错误处理按 §1 P2 降级隔离契约：读写层 fail-fast（保存校验不过不落盘、文件损坏拒入报错不静默重置——不覆盖外部手编内容，修复指引含文件路径）；连接测试为辅助功能，失败/超时降级为状态显示（保留上次结果），不阻塞清单读写；域内错误经 reply 信封结构化返回（错误码 + 修复动作文案），不向上传播打断 P0/P1 主流程 |
 | fast-handoff 会话交接 | 源 session 一键交接：runtime 让源 session 跑 handoff turn 生成交接文档（agent-driven）→ 新建承接 session 注入文档首条 → 广播跳转（`HandoffService`；Staging Mode 模型/思考档位继承，ADR-0056）。**挂掉后果 = 一键交接失效**（手动新建 session + 自行迁移上下文仍可用，不动 P0 对话主链）。错误处理按 §1 P2 降级隔离契约：失败经 message.error 通道广播到源 session 对话流（空文档 / pi 出错重试用尽 / timeout / abort / pi 中途退出各分支显式 reject——重试中间帧 willRetry 跳过 + 终态 error 帧拒绝，pi1-disposition-chat-flow U3② 修复的「首个 agent_end 即收尾」重试误杀），不向上传播打断 P0/P1 主流程 |
 | 工具延迟加载（exposure deferred + tool_search） | 低频工具不逐请求常驻的加载形态：低频工具（session_read、plan、goal_control、schedule 族、compact_context、rename_session、session-manager 六件套等，defer 名单见 ADR-0136）注册声明 `exposure: "deferred"`（不声明给模型），pi 内置检索工具 tool_search（BM25）经启动迁移默认启用（settings `defaultTools` 幂等追加 `+tool_search`，复用 codemode 迁移通道，ADR-0136）；模型需要时经 tool_search 检索激活，下一轮起直接调用；跨进程 fork/resume 后激活态退场、重搜一次即恢复（pi 语义边界）。**挂掉后果 = 低频工具不可被发现 → 模型用 bash 兜底，功能可用性不灭**（高频工具 bash/todo/ask_user/subagent 族/workflow 族恒 direct 在场，对话主链路完整可用；tool_search 搜索无果返回空结果，模型自然回落 bash，行为与无该工具时一致）。错误处理按 §1 P2 降级隔离契约：启动迁移失败不阻塞启动（warn 留痕 + 下次启动幂等补跑，同 codemode 通道形态），不向上传播打断 P0/P1 主流程。**P0 关联**：写入域本身是 P0（§2 设置页行——settings.json 写坏影响全部会话），本功能对它的义务 = 只动 `defaultTools` 的 tool_search 相关系目，与 codemode 条目同域不同条目 |
+| LLM 网络代理（按 provider 规则分流） | settings「网络代理」菜单页三卡（代理服务器 + 测试连接两段归因 / 规则与 noProxy + provider 快速添加 / 请求统计）、pi extension 全局分发器分流（命中规则经代理、未命中委托 pi 原生通道）、ext-config 热生效（turn 粒度指纹比对）。**挂掉后果 = 无法按规则走代理，请求直连**（直连在无墙环境本就可用；关闭开关或禁用扩展即恢复直连基线，对话主链路完整可用；llm-network-proxy 设计原文口径 P2——「默认禁用零行为变化，启用故障降级为全直连」）。错误处理按 §1 P2 降级隔离契约：坏配置不炸 pi（校验失败回落默认禁用 + error 日志含恢复动作文案，验收场景 10）、分流器构造失败不安装全直连（首败即停，配置修正自然重试）、分流器安装/卸载任何一步失败不触碰 LLM 请求链路本身；统计写失败日志不阻断（计数是观测面非请求链）；runtime RPC 错误经 reply 信封结构化返回。**P0 关联**：分流接管的是进程级全局分发器槽——接管语义经「未命中委托原分发器」保持 pi 原生 env 路由/连接调优不变（验收场景 13），该通道行为回退由 pi 上游漂移探针（场景 7 资产）+ TROUBLESHOOTING 排障条目承载 |
 
 ## 5. P3 — 特定人群/低影响
 
@@ -98,7 +99,7 @@ harness 必备能力（业务价值视角，2026-09-12 用户裁决）：
 | cache-probe | 前缀指纹采集、analyze.py 归因 | 缓存分析用户 |
 | goal | 目标管理 | goal 用户 |
 | scheduler | 定时调度 | 定时任务用户 |
-| session-manager | agent-managed session 6 工具 | 高级编排用户（**调度模式内置预设的工具面承载**；模式面不可用仅该模式降级，6 工具本身仍属高级编排，判例 #8） |
+| session-manager | agent-managed session 6 工具 | 高级编排用户（**调度模式内置预设的工具范围承载**；模式面不可用仅该模式降级，6 工具本身仍属高级编排，判例 #8） |
 | rename-session | 会话重命名 | 全体但低频、有手动路径 |
 | system-prompt-trace | taiji:system-prompt 留痕 | 观测/调试 |
 | 用量统计页 | Settings → 用量 W1-W5 | 配额敏感用户 |
@@ -124,13 +125,14 @@ harness 必备能力（业务价值视角，2026-09-12 用户裁决）：
 | permission | universal | P1 | 审批闭环（边界判例 #7） |
 | provider-live-sync | universal | **P0** | 挂了 = 运行中会话看不到新增/变更的 provider·模型·凭据，切新模型报 `Model not found` 且只能重开会话（模型控制主链路的实时性前提；与 ask-user/subagent-workflow 同族的「能力静默失效」形态，故 tier=infrastructure 不可禁） |
 | system-prompt | taiji | P1 | 挂了 agent 裸人格、所有会话质量崩 |
-| pending-notifications | universal | P2 | 通知汇聚 |
+| pending-notifications | universal | P2 | 通知汇聚 + collect_results 批量收取（一次阻塞等待批量收割并行后台任务终态）。挂掉后果：批量收取面失效，agent 失去 collect_results——后台任务结果退回逐条 push 唤醒，N 任务 = N 轮碎片 turn（result-collect phase 2 交付） |
 | plan | universal | P2 | 面板能力 + 审批闸口（修订/执行/搁置 + 降级重新提交）+ 执行方式选择（2026-09-24 状态机显式化后行为描述核对：挂掉后果不变，P 级语义不变） |
 | session-reader | universal | P2 | 通知链依赖（2026-09-21 起覆盖 zcode 引擎 subagent 回读；挂掉后果不变，zcode 引擎自身 P2 封顶） |
 | smart-context | universal | P2 | 手动 compact 兜底 |
 | structured-output | universal | P2 | workflow 模式依赖 |
 | todo | universal | P2 | 面板能力 |
 | canvas（@zhushanwen/pi-canvas） | taiji | P2 | 问题解决画布（tech-design-wf 之前的方向规划层）；挂掉 = 对话与 subagent/workflow 派发主链完整可用，用户回到无画布状态（同 btw 口径） |
+| network-proxy（@zhushanwen/pi-network-proxy） | universal | P2 | LLM 网络代理分流域（feature 组可禁）；挂掉 = 请求全部直连（无墙环境本就可用），settings 页与统计失效不动主链（§4 LLM 网络代理行） |
 | cache-probe | universal | P3 | 特定人群 |
 | goal | universal | P3 | 特定人群 |
 | rename-session | universal | P3 | 低频有手动路径 |

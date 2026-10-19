@@ -8,8 +8,8 @@
 // 分叉（plan/todo 取数组尾条目 vs goal/scheduler 取最后一条带 string id 的条目，无
 // id 尾条目上行为可分叉）。语义同构 = 假差异，收敛为单一实现；读者普查登记见
 // docs/architecture/session-readers-census.md（§3 各包行 + §4.1 防御语义异源登记）。
-// runtime 侧（entry-tree-builder 重建链 / readEntries 投影的 filterEntriesToActivePath）
-// 与 plugin 侧不经本包、保持独立——跨面异源是有意设计，非漏接。
+// runtime 侧（entry-tree-builder 重建链 / readEntries 派生视图的 filterEntriesToActivePath）
+// 与 plugin 侧不经本包、保持独立——跨包异源是有意设计，非漏接。
 
 /**
  * entry 的树结构字段视图（duck-typed 收窄，无断言）。含 type?: unknown 只为通过

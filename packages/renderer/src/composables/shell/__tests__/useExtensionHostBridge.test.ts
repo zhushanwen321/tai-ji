@@ -208,7 +208,7 @@ describe('MF-2 响应式桥（分区后建时序 + global scope）', () => {
     // sidebar L2 tab 数据源纯静态（D5：M2 动态发现废弃）——widget 推送不进 getViews
     expect(viewsSource.getViews('s1').map((v) => v.viewId)).toEqual([])
     expect(viewsSource.getViews('s1').map((v) => v.viewId)).not.toContain('goal')
-    // 对照断言：ViewHost 枚举（Composer 托盘 widget 区消费面）不受影响，仍含该 widgetKey
+    // 对照断言：ViewHost 枚举（Composer 托盘 widget 区消费方）不受影响，仍含该 widgetKey
     expect(viewHostSource.getViewIds('s1')).toEqual(['goal'])
   })
 
@@ -323,7 +323,7 @@ describe('MF-1 挂载点上报时序（mountPoints.sync 连接就绪后发送）
     expect(transportSendSpy).toHaveBeenCalledTimes(1)
 
     // 重复 init：dispose-and-rebuild 使新 watcher 绑定新 registry 实例（setExtensionRegistries
-    // 已换新）。register:false 使新实例快照为空表——若退回模块级布尔守卫（watcher 永久闭包
+    // 已换新）。register:false 使新实例快照为空表——若退回模块级布尔检查（watcher 永久闭包
     // 绑定第一次 init 的实例），此处上报的是实例 1 残留快照（5 个挂载点），空表断言即红。
     initBridge({ register: false })
     // 已 connected → 新 watcher immediate 同步补发（无需推进 timer）
@@ -358,7 +358,7 @@ describe('u4b E13 四态判定 resolveHeaderActionAvailability（纯函数直测
     return registry
   }
 
-  /** 会话命令分区读取面 stub（E13 只消费 getCommands，结构契约见 CommandPartitionReader） */
+  /** 会话命令分区读侧 stub（E13 只消费 getCommands，结构契约见 CommandPartitionReader） */
   const readerOf = (names: string[]): CommandPartitionReader => ({
     getCommands: () => names.map((name) => ({ name })),
   })
@@ -425,7 +425,7 @@ describe('isVisibleHeaderAction（可见性谓词单点：渲染过滤与聚合�
 })
 
 describe('hasVisibleHeaderActions（聚合面板「有可见按钮才出段」+ 密度 absent 判据；可见性条件单点 isVisibleHeaderAction）', () => {
-  /** 最小 source stub（只带可见性判定消费的三个读面；E13/E3 面不参与可见性） */
+  /** 最小 source stub（只带可见性判定消费的三个读侧；E13/E3 面不参与可见性） */
   function sourceOf(
     declarations: Array<{ id: string; ha: Record<string, unknown> | null }>,
     hiddenByDefault = false,

@@ -58,7 +58,7 @@ afterEach(() => {
   fs.rmSync(dir, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 });
 });
 
-/** 最小可收口 record（running 形态 + sessionFile 锚）。 */
+/** 最小可收尾 record（running 形态 + sessionFile 锚）。 */
 function runningRecord(over: Partial<ExecutionRecord> = {}): ExecutionRecord {
   const rec = createRecord("bg-1", {
     agent: "general-purpose",
@@ -89,13 +89,13 @@ function seedBinding(sessionFile: string): void {
 }
 
 function newStore(): RecordStore {
-  return new RecordStore(sessionsDir, undefined, undefined, manifestDir);
+  return new RecordStore(() => sessionsDir, undefined, undefined, () => manifestDir);
 }
 
 // ── ① CAS 语义：running↔idle 迁移 + 非法迁移拒绝 ────────────────────────────
 
 describe("两态状态机 CAS 语义", () => {
-  it("trySettleLegacyClosed（settle 方向）：running→idle 收口 + closedReason/stopReason 双写", () => {
+  it("trySettleLegacyClosed（settle 方向）：running→idle 收尾 + closedReason/stopReason 双写", () => {
     const rec = runningRecord();
     expect(trySettleLegacyClosed(rec, "gc")).toBe(true);
     expect(rec.status).toBe("idle");
@@ -103,11 +103,11 @@ describe("两态状态机 CAS 语义", () => {
     expect(rec.stopReason).toBe("gc");
   });
 
-  it("trySettleLegacyClosed：非 running（已收口）重复 settle = 非法迁移拒绝（false，无副作用）", () => {
+  it("trySettleLegacyClosed：非 running（已收尾）重复 settle = 非法迁移拒绝（false，无副作用）", () => {
     const rec = runningRecord();
     expect(trySettleLegacyClosed(rec, "gc")).toBe(true);
     expect(trySettleLegacyClosed(rec, "cancelled")).toBe(false);
-    expect(rec.closedReason).toBe("gc"); // 首次收口位不被二次收口覆盖
+    expect(rec.closedReason).toBe("gc"); // 首次收尾位不被二次收尾覆盖
   });
 
   it("tryEnterRunning（wake 方向）：idle→running 翻转；running 重复 wake 拒绝", () => {
@@ -125,12 +125,12 @@ describe("两态状态机 CAS 语义", () => {
     expect(rec.status).toBe("idle");
     expect(tryEnterRunning(rec)).toBe(true);
     expect(rec.status).toBe("running");
-    // tryEnterRunning 只翻占用位不清收口位（清位归 resurrectClosed / U4 接管编排）——
+    // tryEnterRunning 只翻占用位不清收尾位（清位归 resurrectClosed / U4 接管编排）——
     // 单向职责最小化，非法清位场景由专属原语承接。
     expect(rec.closedReason).toBe("user-close");
   });
 
-  it("markSettled CAS：非 running 拒绝收口（warn 返回 false，状态不被改写）", () => {
+  it("markSettled CAS：非 running 拒绝收尾（warn 返回 false，状态不被改写）", () => {
     const store = newStore();
     const rec = runningRecord();
     rec.status = "idle";
@@ -139,7 +139,7 @@ describe("两态状态机 CAS 语义", () => {
     expect(rec.stopReason).toBeUndefined();
   });
 
-  it("markReopened CAS：非 idle 拒绝重开（running 在飞 = 非法迁移）", () => {
+  it("markReopened CAS：非 idle 拒绝重开（running 在途 = 非法迁移）", () => {
     const store = newStore();
     const rec = runningRecord();
     const ref: TranscriptRef = { engine: "pi", sessionFile: path.join(sessionsDir, "new.jsonl") };
@@ -148,7 +148,7 @@ describe("两态状态机 CAS 语义", () => {
     expect(rec.transcriptRef).toBeUndefined();
   });
 
-  it("resurrectClosed：已收口 idle → running 接管翻回（清收口位）；running no-op", () => {
+  it("resurrectClosed：已收尾 idle → running 接管翻回（清收尾位）；running no-op", () => {
     const rec = runningRecord();
     expect(trySettleLegacyClosed(rec, "gc")).toBe(true);
     expect(resurrectClosed(rec)).toBe(true);
@@ -156,7 +156,7 @@ describe("两态状态机 CAS 语义", () => {
     expect(rec.closedReason).toBeUndefined();
     expect(rec.stopReason).toBeUndefined();
     expect(rec.endedAt).toBeUndefined();
-    // running 入态防御性 no-op：接管是已收口 record 的专属回边
+    // running 入态防御性 no-op：接管是已收尾 record 的专属回边
     expect(resurrectClosed(rec)).toBe(false);
     expect(rec.status).toBe("running");
   });
@@ -178,8 +178,8 @@ describe("两态状态机 CAS 语义", () => {
 
 // ── ② markSettled 副作用矩阵（.state / binding / manifest / .alive）──────────
 
-describe("markSettled 副作用矩阵（轮收口 = 不终态化）", () => {
-  it("内存面：status=idle + stopReason 写入；closedReason 不写（非终态）；record 留内存", () => {
+describe("markSettled 副作用矩阵（轮收尾 = 不终态化）", () => {
+  it("内存侧：status=idle + stopReason 写入；closedReason 不写（非终态）；record 留内存", () => {
     const store = newStore();
     const rec = runningRecord();
     rec.round = 2;
@@ -234,7 +234,7 @@ describe("markSettled 副作用矩阵（轮收口 = 不终态化）", () => {
     rec.round = 2;
     store.register(rec);
     store.markSettled(rec, "gc");
-    // spawn 回填点 binding 写失败（best-effort）的窗口下，settle 写点承担创建腿——
+    // spawn 回填点 binding 写失败（best-effort）的窗口下，settle 写点承担创建路径——
     // 身份域取 settle 时点内存 record（齐全非残缺，对齐 markReopened 创建先例）。
     const binding = readRecordBinding(rec.sessionFile!);
     expect(binding).toBeDefined();
@@ -245,7 +245,7 @@ describe("markSettled 副作用矩阵（轮收口 = 不终态化）", () => {
     expect(binding?.round).toBe(2);
   });
 
-  it("manifest 面：派生投影 legacy running（settle 非终态，session-reader 视角活跃成员）", () => {
+  it("manifest 面：派生视图 legacy running（settle 非终态，session-reader 视角活跃成员）", () => {
     const store = newStore();
     const rec = runningRecord();
     store.register(rec);
@@ -253,7 +253,7 @@ describe("markSettled 副作用矩阵（轮收口 = 不终态化）", () => {
     const manifest = JSON.parse(
       fs.readFileSync(path.join(manifestDir, "bg-1.json"), "utf-8"),
     ) as Record<string, unknown>;
-    expect(manifest.status).toBe("running"); // 旧三态下行投影（§3.2.8）
+    expect(manifest.status).toBe("running"); // 旧三态下行派生视图（§3.2.8）
     expect(manifest.executionStatus).toBe("idle"); // 内部两态权威词汇
   });
 
@@ -270,7 +270,7 @@ describe("markSettled 副作用矩阵（轮收口 = 不终态化）", () => {
     expect(fs.existsSync(`${rec.sessionFile}.alive`)).toBe(true);
   });
 
-  it("无 sessionFile 锚：内存面照常收口，.state/binding 面跳过（warn 不抛）", () => {
+  it("无 sessionFile 锚：内存侧照常收尾，.state/binding 面跳过（warn 不抛）", () => {
     const store = newStore();
     const rec = runningRecord();
     (rec as { sessionFile?: string }).sessionFile = undefined;
@@ -283,7 +283,7 @@ describe("markSettled 副作用矩阵（轮收口 = 不终态化）", () => {
 // ── ③ markReopened 副作用矩阵（reopen 降级 + epoch 防撞）─────────────────────
 
 describe("markReopened 副作用矩阵（带历史重开）", () => {
-  it("内存面：新 transcriptRef + round 归零 + epoch+1 + stopReason=reopened；残留 lastAbandonedRound 不迁移", () => {
+  it("内存侧：新 transcriptRef + round 归零 + epoch+1 + stopReason=reopened；残留 lastAbandonedRound 不迁移", () => {
     const store = newStore();
     const rec = runningRecord();
     rec.round = 5;
@@ -314,7 +314,7 @@ describe("markReopened 副作用矩阵（带历史重开）", () => {
     expect(binding?.recordId).toBe("bg-1");
   });
 
-  it("zcode 锚：内存面照常重开，binding 随锚键基底落盘（U6 会话库锚承接）", () => {
+  it("zcode 锚：内存侧照常重开，binding 随锚键基底落盘（U6 会话库锚承接）", () => {
     const store = newStore();
     const rec = runningRecord();
     rec.status = "idle";
@@ -332,7 +332,7 @@ describe("markReopened 副作用矩阵（带历史重开）", () => {
     expect(readRecordBinding(`${dbPath}.sess-abc`)?.epoch).toBe(1);
   });
 
-  it("binding 写失败（新锚目录不存在）：拒绝重开 + 内存面回滚（epoch 随 binding 持久化是硬要求，防二次 reopen 击穿）", () => {
+  it("binding 写失败（新锚目录不存在）：拒绝重开 + 内存侧回滚（epoch 随 binding 持久化是硬要求，防二次 reopen 击穿）", () => {
     const store = newStore();
     const rec = runningRecord();
     rec.round = 3;
@@ -346,7 +346,7 @@ describe("markReopened 副作用矩阵（带历史重开）", () => {
       sessionFile: path.join(sessionsDir, "no-such-dir", "reopened.jsonl"),
     };
     expect(store.markReopened(rec, badRef)).toBe(false);
-    // 内存面逐字段还原（record 保持重开前 idle 形态——拒绝面不留半重开状态）
+    // 内存侧逐字段还原（record 保持重开前 idle 形态——拒绝情形不留半重开状态）
     expect(rec.transcriptRef).toBeUndefined();
     expect(rec.round).toBe(3);
     expect(rec.epoch).toBeUndefined();
@@ -381,7 +381,7 @@ describe("epoch 递增（reopen 防撞）", () => {
     expect(readRecordBinding(fileB)?.epoch).toBe(2);
   });
 
-  it("从 binding 恢复的 epoch 继续递增（跨进程防撞链闭合）", () => {
+  it("从 binding 恢复的 epoch 继续递增（跨进程防撞链封住）", () => {
     const rec = runningRecord();
     rec.status = "idle";
     const store = newStore();
@@ -400,7 +400,7 @@ describe("epoch 递增（reopen 防撞）", () => {
   });
 });
 
-// ── ⑤ markSettledOut 副作用矩阵（写权声明 + 收口落账写面）──────────
+// ── ⑤ markSettledOut 副作用矩阵（写权声明 + 收尾写入 journal 记录写侧）──────────
 
 describe("markSettledOut 副作用矩阵", () => {
   it("markSettledOut：.alive release（release 出口①）+ entry 上报 + worktreeHandle 清句（占用位不动）", () => {
@@ -414,7 +414,7 @@ describe("markSettledOut 副作用矩阵", () => {
     );
     expect(store.markSettledOut(rec)).toBe(true);
     expect(fs.existsSync(`${rec.sessionFile}.alive`)).toBe(false);
-    expect(store.getMutable("bg-1")).toBe(rec); // 收口 ≠ 内存回收（占用位不动）
+    expect(store.getMutable("bg-1")).toBe(rec); // 收尾 ≠ 内存回收（占用位不动）
   });
 
   it("markSettledOut 幂等：重复 close / dispose 重复调用无害（release 静默，恒 true）", () => {

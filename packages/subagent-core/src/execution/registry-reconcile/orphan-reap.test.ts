@@ -10,7 +10,7 @@
 //
 // 被测函数 = reapOrphanRuns（persistence/run-state-evidence.ts，[D9] 移除后无主
 // run 的唯一磁盘清理通道）。引用集三代（v2 注册条目 / v1 全量快照条目 /
-// pre-W17 link 指针）的解析本体在壳侧注入面（subagent-workflow/session-lifecycle
+// pre-W17 link 指针）的解析本体在壳侧注入点（subagent-workflow/session-lifecycle
 // 的 collectAliveWorkflowRunReferences，u1a 领地）——core 层契约 = 注入并集命中
 // 即保护，本文件按该契约以注入集合模拟三代引用与接管；三代解析本体的测试覆盖
 // 已由壳侧真实解析路径承接（v1/v2 两代见 scenario-08 / scenario-19；link 指针
@@ -21,7 +21,7 @@
 // 注入（确定性）；reap 不读 record 内容（候选按文件名 / 引用按注入 / 时间按
 // mtime 与登记），fixture 手写文件即可。
 // - 登记文件损坏路径：一次性损坏自愈（空表重登记 + 轮末原子重写）、损坏读
-//   warn 出声（观测面）、ENOENT 静默（不存在 ≠ 损坏的语义区分钉）。
+//   warn 出声（观测范围）、ENOENT 静默（不存在 ≠ 损坏的语义区分钉）。
 
 import * as fs from "node:fs";
 import * as os from "node:os";
@@ -243,7 +243,7 @@ describe("场景 19：对账清理存量形态与接管保护（裁决点 7）",
   });
 });
 
-describe("登记文件损坏路径（观测面 + 一次性自愈）", () => {
+describe("登记文件损坏路径（观测范围 + 一次性自愈）", () => {
   /** 把登记文件写坏（非法 JSON——readOrphanReapRegistry 的损坏读形态）。 */
   function corruptRegistry(): void {
     fs.writeFileSync(path.join(stateDir, "orphan-run-reap.json"), "{corrupted-not-json", "utf8");
@@ -277,7 +277,7 @@ describe("登记文件损坏路径（观测面 + 一次性自愈）", () => {
     expect(readRegistry()).toEqual({ "wf-stale": now });
   });
 
-  it("损坏读 warn 出声：消息含登记文件路径与空重登记语义（观测面——损坏循环可见）", async () => {
+  it("损坏读 warn 出声：消息含登记文件路径与空重登记语义（观测范围——损坏循环可见）", async () => {
     seedRunFootprint("wf-corrupt");
     corruptRegistry();
     const { deps, warnCalls } = makeDeps(new Set<string>());

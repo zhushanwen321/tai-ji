@@ -12,7 +12,7 @@
  *   R4-3 HTML 注释登记 310 → 放行 + stderr 打 INFO（豁免不静默），文案含登记域
  *   R4-4 `//` 行注释登记 310 → 同 R4-3（script 内登记形态）
  *   R4-5 登记 501 / 520 行 → 拦截，文案含「超出豁免上限 500 行」（豁免不无限膨胀）
- *   R4-6 登记无效四形态（空语义域 / 超出前 30 行窗口 / 非注释语境 / HTML 注释未同行闭合）
+ *   R4-6 登记无效四形态（空语义域 / 超出前 30 行窗口 / 非注释语境 / HTML 注释未同行封口）
  *          均视为未登记：310 行 → 拦截
  *   R4-7 登记 299 行       → 放行（登记不改变未超行文件的判定）
  *
@@ -98,7 +98,7 @@ describe('vue_rules_checker split-justified 豁免通道', () => {
     ['空语义域', '<!-- split-justified: -->', null],
     ['超出前 30 行窗口', '<!-- split-justified: late-domain -->', 35],
     ['非注释语境', 'split-justified: bare-domain', null],
-    ['HTML 注释未同行闭合', '<!-- split-justified: unclosed-domain', null],
+    ['HTML 注释未同行封口', '<!-- split-justified: unclosed-domain', null],
   ])('R4-6 登记无效（%s）：310 行视为未登记 → 拦截', (_name, marker, offset) => {
     const r = runChecker(makeVue({ scriptLines: 310, marker, markerLineOffset: offset }))
     expect(r.code).not.toBe(0)

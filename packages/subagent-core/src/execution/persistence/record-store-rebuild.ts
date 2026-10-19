@@ -1,23 +1,23 @@
 // src/execution/persistence/record-store-rebuild.ts
 //
-// [H4 三轴拆分 / 重建与投影轴] RecordStore 的无状态重建与投影纯函数族：
+// [H4 三轴拆分 / 重建与派生视图轴] RecordStore 的无状态重建与派生视图纯函数族：
 //   - buildRecord 重建单规则（§3.2.4：identity 基底 + `.state` sidecar 矩阵 → 一律 idle
 //     + stopReason 单源）与 light/full 两分支装配（buildFileCacheEntry）；
 //   - entry 重建族（collectV2EntryPairs + v2PairToRecord ——登记 §3.3 后只剩当前版本
 //     通道：旧形态与未知版本结构性跳过，零幻影）；
-//   - 身份投影 identityFromFold（子文件无 identity entry 时的身份基底，id 入口见
-//     record-store.scanFile 的事件目录反查——事件流是唯一身份权威，binding 兜底腿
+//   - 身份派生视图 identityFromFold（子文件无 identity entry 时的身份基底，id 入口见
+//     record-store.scanFile 的事件目录反查——事件流是唯一身份权威，binding 兜底路径
 //     已随读侧换源退场，无存量数据不留兼容读）；
-//   - manifest 读投影（manifestToSubagent / mapManifestStatus）与写投影（terminal /
+//   - manifest 读派生视图（manifestToSubagent / mapManifestStatus）与写派生视图（terminal /
 //     batch / derived / legacyManifestStatusFields——session-reader 兼容契约的单点）；
-//   - 内存源投影 recordToSubagent、缓存戳类型与戳校验工具（Stamp / FileCacheEntry 族）。
+//   - 内存源派生视图 recordToSubagent、缓存戳类型与戳校验工具（Stamp / FileCacheEntry 族）。
 //
-// 变化轴 = 「磁盘/entry/manifest → SubagentRecord 的读侧重建与投影规则」：重建语义
-// 演进（单规则调整、投影字段增删、桥接词汇日落）集中在此文件，与写侧原语
+// 变化原因 = 「磁盘/entry/manifest → SubagentRecord 的读侧重建与派生视图规则」：重建语义
+// 演进（单规则调整、派生视图字段增删、桥接词汇日落）集中在此文件，与写侧原语
 // （record-store-terminal / -rounds）和容器编排（record-store.ts）解耦。
 //
-// 约束（D7 写面收敛）：本文件是纯读/纯投影——不触碰 `.state` / `.alive` / manifest
-// 写面（七名写函数零 import 零调用，check-record-write-surface R1 不适用）；
+// 约束（D7 写侧收敛）：本文件是纯读/纯派生视图——不触碰 `.state` / `.alive` / manifest
+// 写侧（七名写函数零 import 零调用，check-record-write-surface R1 不适用）；
 // 有状态扫描（fileCache/dirStamp 编排）留在 record-store.ts，本文件只收无状态部分。
 
 import * as fs from "node:fs";
@@ -58,17 +58,17 @@ const logger = getLogger("subagents");
 /**
  * [R4/D6-③ 空串归一] 水合读侧的 model 空串 → 缺席归一（禁空串哨兵纪律覆盖持久化
  * 读写两侧）：写侧（R4 起）record.model 缺席恒为 undefined，但存量磁盘数据与新链
- * 的防御面可能残留 ""（旧写侧「仅满足非可选类型」的 `?? ""` 产物）——空串若复活进
+ * 的防御机制侧可能残留 ""（旧写侧「仅满足非可选类型」的 `?? ""` 产物）——空串若复活进
  * record，taskSpecWithModel 对 `""` 仍带键，引擎侧「压掉 defaultModelSelection」
- * 会经空串路径静默回归。四处水合点（entry 投影 / manifest 投影 / 孤儿合并 / binding
- * 守卫）统一归一。
+ * 会经空串路径静默回归。四处水合点（entry 派生视图 / manifest 派生视图 / 孤儿合并 / binding
+ * 检查）统一归一。
  */
 function modelOrUndefined(v: string | undefined): string | undefined {
   return v !== undefined && v.trim() !== "" ? v : undefined;
 }
 
 // ============================================================
-// 缓存/戳类型（FileCache 族——容器 scanFile/reconstructAll 与本文件投影共享）
+// 缓存/戳类型（FileCache 族——容器 scanFile/reconstructAll 与本文件派生视图共享）
 // ============================================================
 
 /** 缓存校验戳（mtime+size 双因子——append-only jsonl 必变 size；sidecar 覆盖写必变 mtime）。 */
@@ -78,8 +78,8 @@ export interface Stamp {
 }
 
 /** sidecar 状态矩阵输入（buildLightRecord / getFullRecord 共享）。
- *  [U4a / D3b (a)] alive 维度已随 externalInstance 投影移除——非终态统一兜底 running，
- *  探活读面由 (a′)(a″) 的 findForeignLiveInstance 现查探针承担（不在重建缓存）。 */
+ *  [U4a / D3b (a)] alive 维度已随 externalInstance 派生视图移除——非终态统一兜底 running，
+ *  探活读侧由 (a′)(a″) 的 findForeignLiveInstance 现查探针承担（不在重建缓存）。 */
 export interface SidecarMatrix {
   /** 终态 sidecar（.state 优先，兼容旧 .finalized/.cancelled 归一）。undefined = 未终态化。 */
   state: StateMarker | undefined;
@@ -97,7 +97,7 @@ export interface SidecarMatrix {
  *          full === light 是哨兵（「已尝试但无详情可补」，如无 assistant message
  *          的文件），避免重复全文重读；stat 戳变化时随 light 一起重置重试。
  *
- * 校验：jsonl + 终态 sidecar + record 绑定（[UF-1]）的 stat 戳对比（终态戳为该组文件 .state/.finalized/.cancelled 的合并戳，见 state-marker.statStateStamp；[U4a / D3b (a)] alive 戳已随 externalInstance 投影移除——light 态不依赖 .alive，探活读面走现查探针）。任何写操作至少改变一个戳 →
+ * 校验：jsonl + 终态 sidecar + record 绑定（[UF-1]）的 stat 戳对比（终态戳为该组文件 .state/.finalized/.cancelled 的合并戳，见 state-marker.statStateStamp；[U4a / D3b (a)] alive 戳已随 externalInstance 派生视图移除——light 态不依赖 .alive，探活读侧走现查探针）。任何写操作至少改变一个戳 →
  * 只重建该文件，其余 N-1 个复用缓存（statSync 毫秒级，取代旧的整体失效重扫）。
  */
 export interface FileCacheEntry {
@@ -131,9 +131,9 @@ export interface NegativeFileEntry {
 /** fileCache 值类型：正常条目或负缓存条目。 */
 export type FileCacheValue = FileCacheEntry | NegativeFileEntry;
 
-/** scanFile 单文件本轮 stat 戳集合（jsonl + record 绑定写面戳；[U4a / D3b (a)] alive
+/** scanFile 单文件本轮 stat 戳集合（jsonl + record 绑定写侧戳；[U4a / D3b (a)] alive
  *  戳退役——light 态不依赖 .alive，省去每文件一次 statSync）。binding 戳在统计/身份
- *  读侧换源事件流后只剩缓存键职责（绑定写点仍在——写点退场是后续批次），写面每次
+ *  读侧换源事件流后只剩缓存键职责（绑定写点仍在——写点退场是后续批次），写侧每次
  *  覆盖写都会变 mtime，仍能正确击穿缓存。 */
 export interface FileStamps {
   jsonl: Stamp;
@@ -145,7 +145,7 @@ export interface FileStamps {
 // ============================================================
 
 /** status → 排序优先级（值小排前）：running < idle。
- *  [U2 两态] 永久会话模型：running（在飞）排前，idle（已收口/等续聊）随后；
+ *  [U2 两态] 永久会话模型：running（在途）排前，idle（已收尾/等续聊）随后；
  *  旧 closed 终态排序位随终态概念删除折入 idle（closedReason 遗留位区分死因）。 */
 const STATUS_PRIORITY: Record<ExecutionStatus, number> = {
   running: 0,
@@ -160,7 +160,7 @@ export function compareRecords(a: SubagentRecord, b: SubagentRecord): number {
 }
 
 /**
- * manifest status → ExecutionStatus 运行时守卫映射。
+ * manifest status → ExecutionStatus 运行时检查映射。
  *
  * manifest 写 running/closed/cancelled 三态（ManifestRecord.status union——
  * session-reader 兼容契约，保留），但磁盘文件可能陈旧（含历史 "completed"/"failed"/
@@ -168,7 +168,7 @@ export function compareRecords(a: SubagentRecord, b: SubagentRecord): number {
  * collectRecords 跳过损坏 record 并 console.warn，不因单个坏文件崩溃。
  *
  * [U2 两态迁移] 旧终态三值（closed/completed/failed/cancelled）统一映射 idle；
- * closedReason 兼容位由 manifestToSubagent 投影（桥接不变量：idle ∧ closedReason
+ * closedReason 兼容位由 manifestToSubagent 映射（桥接不变量：idle ∧ closedReason
  * 有值 ⟺ 旧终态形态）。
  *
  * 提取为纯函数：同时解决 PR#85 反射问题（三元 + `as ExecutionStatus` cast）。
@@ -185,7 +185,7 @@ function mapManifestStatus(s: string): ExecutionStatus | null {
 
 /**
  * [U8 / §3.2.8 双写回读] manifest → ExecutionStatus 的读侧单点：executionStatus
- * （两态权威词）在场且合法时**优先**——旧三态 status 只是 session-reader 下行投影，
+ * （两态权威词）在场且合法时**优先**——旧三态 status 只是 session-reader 下行派生视图，
  * settle 产物（legacy running + executionStatus idle）按权威词读回 idle，闭环
  * 「写侧下行映射不污染读侧占用判定」。executionStatus 缺失/越界（旧 manifest /
  * 外部写入垃圾）回落 mapManifestStatus（legacy status 越界仍返回 null 跳过——
@@ -200,7 +200,7 @@ function manifestStatusToExecution(m: ManifestRecord): ExecutionStatus | null {
 // entry 重建族（主 session「每 id 末条 subagent-record entry」→ SubagentRecord）
 // ============================================================
 
-/** unknown → subagent-record entry 的运行时守卫（taste/no-unsafe-cast：断言前收窄）。 */
+/** unknown → subagent-record entry 的运行时检查（taste/no-unsafe-cast：断言前收窄）。 */
 function asSubagentRecordEntry(o: unknown): { id: string; data: Record<string, unknown> } | null {
   if (typeof o !== "object" || o === null) return null;
   const obj = o as Record<string, unknown>;
@@ -300,7 +300,7 @@ function v2SettledOutcome(
  * 不承载 engine/sessionFile，回落组装见 v2EngineDomain）。
  *
  * 缺省纪律：v2 条目契约不承载的字段（patchFile / worktree / round / closedReason /
- * batchFinalized / 详情域）一律缺席——与 runtime 投影 projectV2Subagent 同口径，
+ * batchFinalized / 详情域）一律缺席——与 runtime 派生视图 projectV2Subagent 同口径，
  * 这些字段的权威源在 manifest 与子 session 文件。
  */
 export function v2PairToRecord(
@@ -311,7 +311,7 @@ export function v2PairToRecord(
   const registered = pair.registered;
   if (registered === undefined) return null;
   // 损坏身份域（agent / task / startedAt 缺失或类型漂移）→ 拒绝重建（零幻影）：
-  // 分类只认 v/kind（形态合法 ≠ 载荷可用），字段级守卫与旧 v1 重建路径同款——
+  // 分类只认 v/kind（形态合法 ≠ 载荷可用），字段级检查与旧 v1 重建路径同款——
   // 消费方（scanLastRecordEntries / 纠偏判定）据此跳过并 warn 留痕。
   if (
     typeof registered.agent !== "string" ||
@@ -349,7 +349,7 @@ export function v2PairToRecord(
 /**
  * [U7 / §3.2.6] record 的 zcode 锚（cold-lookup transcriptAnchorOf 派生单点的 zcode
  * 筛选形态——显式 transcriptRef 优先 / engineHandle.sessionRef 单源）。pi record 恒
- * undefined（sessionFile 载体在，锚分派的 pi 腿优先）。
+ * undefined（sessionFile 载体在，锚分派的 pi 路径优先）。
  */
 export function zcodeRefOf(record: ExecutionRecord): ZcodeTranscriptRef | undefined {
   const anchor = transcriptAnchorOf(record);
@@ -357,13 +357,13 @@ export function zcodeRefOf(record: ExecutionRecord): ZcodeTranscriptRef | undefi
 }
 
 /** 未知 JSON 的 plain-object 判定（isEngineHandleShape / isValidModelOverrideShape
- *  读侧形状守卫的公共口径——数组与 null 不算对象）。 */
+ *  读侧形状检查的公共口径——数组与 null 不算对象）。 */
 function isPlainObjectShape(v: unknown): v is Record<string, unknown> {
   return typeof v === "object" && v !== null && !Array.isArray(v);
 }
 
 /** engineHandle entry 值的运行时 guard（未知 JSON 不裸收；形状与 runtime 读侧
- *  subagent-engine-history 的 extractRecordEngineHandle 守卫语义对齐：poolKey
+ *  subagent-engine-history 的 extractRecordEngineHandle 检查语义对齐：poolKey
  *  必有非空 string + sessionRef 值全 string 才收，eventsPath 可选 string）。 */
 export function isEngineHandleShape(
   v: unknown,
@@ -403,18 +403,18 @@ export function sameStamp(a: Stamp, b: Stamp): boolean {
  * SSOT = types.ts CLOSED_REASONS 可写终态原因清单，此处仅建 Set 索引（避免第二份字面量清单漂移）。 */
 const CLOSED_REASONS: ReadonlySet<string> = new Set(CLOSED_REASON_LIST);
 
-/** 值是否为合法的 ClosedReason 字面量（disconnected 只作历史数据读面兜底，不接受写入）。 */
+/** 值是否为合法的 ClosedReason 字面量（disconnected 只作历史数据读侧兜底，不接受写入）。 */
 export function isValidClosedReason(value: string | undefined): value is ClosedReason {
   return value !== undefined && CLOSED_REASONS.has(value);
 }
 
-/** 覆盖记账 ref 字段的形状守卫（provider/modelId 全 string 才收）。 */
+/** 覆盖记账 ref 字段的形状检查（provider/modelId 全 string 才收）。 */
 function isValidModelOverrideRefShape(v: unknown): v is { provider: string; modelId: string } {
   return isPlainObjectShape(v) && typeof v.provider === "string" && typeof v.modelId === "string";
 }
 
 /**
- * manifest 覆盖记账字段的读侧形状守卫（isEngineHandleShape 同款口径——未知 JSON 不裸收，
+ * manifest 覆盖记账字段的读侧形状检查（isEngineHandleShape 同款口径——未知 JSON 不裸收，
  * 外部写入垃圾归一 undefined）。
  */
 function isValidModelOverrideShape(
@@ -429,7 +429,7 @@ function isValidModelOverrideShape(
 /**
  * ModelOverride 规范拷贝单点（record/fold/manifest 各载体间的字段级复制——thinkingLevel
  * 缺省不落键，消费方 `'thinkingLevel' in obj` 判定与序列化键集恒定）。此前 fold→light 补
- * 投影 / 终态 manifest / derived manifest / 水合四处手写同构 spread，收拢防第三处副本漂移。
+ * 派生视图 / 终态 manifest / derived manifest / 水合四处手写同构 spread，收拢防第三处副本漂移。
  */
 function copyModelOverride(o: {
   ref: { provider: string; modelId: string };
@@ -479,10 +479,10 @@ export function detectIdentity(file: string, size: number): IdentityHeaderRecon 
  *   - 其余 → undefined（无收条 = 在途中断，与 sidecar 缺席同语义）。
  *
  * 「轮终收条须是最后一条事件」不是细节而是必需：续轮记录（round-idle 之后又
- * round-started）若仍按上一条 round-idle 投影，会把上一轮的停因当成当前停因写进
- * 运行中的记录——与 journal 投影侧「轮始清残留死因」同一条语义（`lastEvent` 判定）。
+ * round-started）若仍按上一条 round-idle 映射，会把上一轮的停因当成当前停因写进
+ * 运行中的记录——与 journal 派生视图侧「轮始清残留死因」同一条语义（`lastEvent` 判定）。
  *
- * 纯函数：不做旧格式上行映射（那是 sidecar 存量兼容面，随 sidecar 一起退场）。
+ * 纯函数：不做旧格式上行映射（那是 sidecar 存量兼容范围，随 sidecar 一起退场）。
  */
 export function stateMarkerFromFold(fold: RecordEventFoldState | undefined): StateMarker | undefined {
   if (fold === undefined) return undefined;
@@ -496,10 +496,10 @@ export function stateMarkerFromFold(fold: RecordEventFoldState | undefined): Sta
 }
 
 // ============================================================
-// [② 读侧换源] fold 统计域投影（binding 统计快照的读侧接替面）
+// [② 读侧换源] fold 统计域派生视图（binding 统计快照的读侧接替面）
 // ============================================================
 
-/** fold 统计域投影（undefined = 该维无事件可投影，调用方保持缺省）。 */
+/** fold 统计域派生视图（undefined = 该维无事件可派生，调用方保持缺省）。 */
 export type FoldStatistics = {
   /** 当前轮计数（round-started / reopened 携带）。 */
   round: number | undefined;
@@ -521,12 +521,12 @@ const emptyStatsWithRound = (round: number | undefined): FoldStatistics =>
   round === undefined ? { ...EMPTY_FOLD_STATISTICS } : { ...EMPTY_FOLD_STATISTICS, round };
 
 /**
- * [② 读侧换源] 收条形统计（light 重建投影用）：`record-settled` 在场取终值
+ * [② 读侧换源] 收条形统计（light 重建派生视图用）：`record-settled` 在场取终值
  * （turns/totalTokens/endedAt 均为终局定稿）；未终局且轮终收条是**最后一条事件**
- * 时取轮终快照（endedAt 用该事件 ts）；其余（在途 / 轮中续跑）不投影。
+ * 时取轮终快照（endedAt 用该事件 ts）；其余（在途 / 轮中续跑）不派生。
  *
  * 「轮终收条须是最后一条事件」与 {@link stateMarkerFromFold} 同一条 lastEvent
- * 语义：续轮记录若按上一条 round-idle 投影，会把上一轮的统计当成当前态写进
+ * 语义：续轮记录若按上一条 round-idle 映射，会把上一轮的统计当成当前态写进
  * 运行中的记录。
  */
 export function receiptStatisticsFromFold(fold: RecordEventFoldState | undefined): FoldStatistics {
@@ -550,10 +550,10 @@ export function receiptStatisticsFromFold(fold: RecordEventFoldState | undefined
 }
 
 /**
- * [U7 / §3.2.7 统计口径单基准 + subagent-model-switch §6.2] fold → light 补投影
- * （store 扫描探测腿装配后调用）：统计域换源折叠（round/totalTokens/turns/endedAt
- * 在场即投影）+ 覆盖记账补投影（fold 有覆盖帧时 light 补带 modelOverride，冷复活
- * 水合与内存表重建据此恢复）。索引命中腿不投影——覆盖帧追加必改 events 戳（缓存键
+ * [U7 / §3.2.7 统计口径单基准 + subagent-model-switch §6.2] fold → light 补派生视图
+ * （store 扫描探测路径装配后调用）：统计域换源折叠（round/totalTokens/turns/endedAt
+ * 在场即派生）+ 覆盖记账补派生视图（fold 有覆盖帧时 light 补带 modelOverride，冷复活
+ * 水合与内存表重建据此恢复）。索引命中路径不派生——覆盖帧追加必改 events 戳（缓存键
  * 第四维）→ 索引条目过期 → 落回探测分支，构造性无丢失窗口。
  */
 export function projectFoldToLight(
@@ -572,7 +572,7 @@ export function projectFoldToLight(
 
 /**
  * [② 读侧换源] 基线形统计（revive 水合用）：settled ?? 最近轮终快照——**无**
- * last-event 守卫。对齐 binding settle 快照的原语义（settle 写点落终值，轮中崩溃
+ * last-event 检查。对齐 binding settle 快照的原语义（settle 写点落终值，轮中崩溃
  * 时上一轮快照仍是有效基线）：max 合并语义下取最近快照比取空更接近真值。
  */
 export function baselineStatisticsFromFold(fold: RecordEventFoldState | undefined): FoldStatistics {
@@ -590,13 +590,13 @@ export function baselineStatisticsFromFold(fold: RecordEventFoldState | undefine
 }
 
 // ============================================================
-// [W1 / U2b] 身份投影（fold 腿——唯一身份权威）
+// [W1 / U2b] 身份派生视图（fold 路径——唯一身份权威）
 // ============================================================
 //
 // [身份换源第二步] 旧「三级优先级（fold > binding > manifest）参考实现」随 binding
-// 兜底腿一并退场：事件流已是身份权威，项目未上线无存量数据、不留兼容读——生产扫描
+// 兜底路径一并退场：事件流已是身份权威，项目未上线无存量数据、不留兼容读——生产扫描
 // 路径的身份基底 = identity entry → {@link identityFromFold}（record-store.scanFile），
-// binding 读侧零生产读路径（state-marker.ts 只剩读写原语与写面 merge）。
+// binding 读侧零生产读路径（state-marker.ts 只剩读写原语与写侧 merge）。
 
 /** unknown → string | undefined（JSON 值安全读取；entryStr 同形，身份解析节局部）。 */
 function optStr(v: unknown): string | undefined {
@@ -608,7 +608,7 @@ function optNum(v: unknown): number | undefined {
   return typeof v === "number" ? v : undefined;
 }
 
-/** fold 身份域守卫投影（record-created 必需标量校验 + optional 域安全读取归一）。 */
+/** fold 身份域检查派生视图（record-created 必需标量校验 + optional 域安全读取归一）。 */
 interface FoldIdentityFields {
   id: string;
   agent: string;
@@ -659,7 +659,7 @@ function identityFromFoldSource(fold: RecordEventFoldState | undefined): FoldIde
 }
 
 /**
- * [身份换源] fold 身份域 → light 身份基底（IdentityHeaderRecon 同形投影）。
+ * [身份换源] fold 身份域 → light 身份基底（IdentityHeaderRecon 同形派生视图）。
  *
  * 子文件没有 identity entry 时，身份域改由事件流折叠取得（事件流是唯一事实源）：
  * 身份域 + model/thinkingLevel/worktree 全部取 fold 的 record-created 载荷（这些
@@ -667,7 +667,7 @@ function identityFromFoldSource(fold: RecordEventFoldState | undefined): FoldIde
  * 传入的子文件路径（引擎绑定域属 record-bound 帧，列表扫描的 base 必须携带本文件
  * 路径），forkDepth 头部途经信息事件载荷不承载恒 undefined。
  *
- * 形状守卫复用 identityFromFoldSource（单源，不复制第二份判据）：身份域损坏 →
+ * 形状检查复用 identityFromFoldSource（单源，不复制第二份判据）：身份域损坏 →
  * undefined，调用方按无身份处理（落负缓存）。
  */
 export function identityFromFold(
@@ -675,9 +675,9 @@ export function identityFromFold(
   file: string,
 ): IdentityHeaderRecon | undefined {
   const created = fold?.identity;
-  if (created === undefined) return undefined; // 残文件/全坏行形态（无身份可投影）
+  if (created === undefined) return undefined; // 残文件/全坏行形态（无身份可派生）
   const resolved = identityFromFoldSource(fold);
-  if (resolved === undefined) return undefined; // 身份域损坏（守卫单源，降级下一级）
+  if (resolved === undefined) return undefined; // 身份域损坏（检查单源，降级下一级）
   return {
     id: resolved.id,
     agent: resolved.agent,
@@ -705,7 +705,7 @@ export function identityFromFold(
 
 /** identity 基底 + 收条矩阵 → 缓存条目（索引命中与探测重建两分支的公共装配点）。
  *  统计域（round/turns/totalTokens/endedAt）不入本装配点——两分支各自的统计源不同
- *  （探测 = fold 统计投影，索引 = 索引自承收条），调用方装配后自行补投影到 light。 */
+ *  （探测 = fold 统计派生视图，索引 = 索引自承收条），调用方装配后自行补映射到 light。 */
 export function buildFileCacheEntry(
   base: IdentityHeaderRecon,
   file: string,
@@ -726,9 +726,9 @@ export function buildFileCacheEntry(
   };
 }
 
-/** identity 基底（头部 light 或全量 recon）+ `.state` 收口矩阵 → SubagentRecord（§3.2.4 重建单规则）。
+/** identity 基底（头部 light 或全量 recon）+ `.state` 收尾矩阵 → SubagentRecord（§3.2.4 重建单规则）。
  *  [R4/D6-③] base 直查路径同批归一（存量索引 "" 条目）：索引命中分支把 `...hit` 展开为
- *  IdentityHeaderRecon 直入本函数，R4 升级前旧写侧落盘的 `model:""` 条目（loadIndex 守卫
+ *  IdentityHeaderRecon 直入本函数，R4 升级前旧写侧落盘的 `model:""` 条目（loadIndex 检查
  *  接受 "" 合法 string）经此水合——与 entry/manifest/孤儿合并三水合点同批 modelOrUndefined。 */
 export function buildRecord(
   base: IdentityHeaderRecon | ReconstructedRecord,
@@ -747,7 +747,7 @@ export function buildRecord(
       rootSessionId: base.rootSessionId,
       parentRecordId: base.parentRecordId,
       depth: base.depth,
-      // [H2 S3] 来源域落位（identity 面已守卫归一）：缺省 undefined = "tool" 语义。
+      // [H2 S3] 来源域落位（identity 面已检查归一）：缺省 undefined = "tool" 语义。
       // [W0 / D1] stepIndex 同族落位（[W0 / D1] run 视图关联键）。
       origin: base.origin,
       parentRunId: base.parentRunId,
@@ -801,22 +801,22 @@ export function buildRecord(
   // ── [U3 / §3.2.4] 重建单规则：重建一律得 idle，stopReason 取自事件流收条
   //（fold 折出的终局/轮终帧；无收条则 interrupted-by-restart）。崩溃恢复不再区分
   //「终态不可逆 / 纳管可保留 / 直断 gc」——不存在不可逆终态；崩溃后 running 只在
-  // 轮次在飞时有意义，必然空闲。
+  // 轮次在途时有意义，必然空闲。
   markReconstructedStatus(rec, "idle");
   if (m.state !== undefined) {
-    // 收条（markSettled 写面经 stateMarkerFromFold 折出，恒 status=idle）：stopReason =
-    // 收口 reason（值域 StopReason；非法/缺失 → interrupted-by-restart——「死因不可考
+    // 收条（markSettled 写侧经 stateMarkerFromFold 折出，恒 status=idle）：stopReason =
+    // 收尾 reason（值域 StopReason；非法/缺失 → interrupted-by-restart——「死因不可考
     // = 被打断」同族兜底）。closedReason 不写（settle 产出的 idle 无旧终态遗留位，
-    // live ≡ reload 与内存 markSettled 形态构造性一致）；endedAt 不投影（内存 settle
-    // 非终态不写 endedAt——收条时间留给 binding 快照面，U7 统计口径消费）。
+    // live ≡ reload 与内存 markSettled 形态构造性一致）；endedAt 不派生（内存 settle
+    // 非终态不写 endedAt——收条时间留给 binding 快照侧，U7 统计口径消费）。
     // 旧 sidecar 收条的上行映射（cancelled/finalized → interrupted/disconnected）已随
     // `.state` 读侧退场删除：m.state 唯一来源 = stateMarkerFromFold，不产旧格式 status。
     const reason = m.state.reason?.trim();
     rec.stopReason = isValidStopReason(reason) ? reason : "interrupted-by-restart";
   } else {
-    // 无 sidecar：在途中断（崩溃）或尚未收口（§3.2.4「文件不存在」行）——
+    // 无 sidecar：在途中断（崩溃）或尚未收尾（§3.2.4「文件不存在」行）——
     // interrupted-by-restart 展示值（G2：为什么停；U6 起参与 isOccupied 判定）。
-    // closedReason 不写（无终态遗留位 → legacy 投影 running「活跃会话」）、endedAt
+    // closedReason 不写（无终态遗留位 → legacy 派生视图 running「活跃会话」）、endedAt
     // 不写（非终态）。
     rec.stopReason = "interrupted-by-restart";
   }
@@ -824,17 +824,17 @@ export function buildRecord(
 }
 
 // ============================================================
-// manifest 投影族（读侧 manifestToSubagent + 写侧 terminal/batch/derived）
+// manifest 派生视图族（读侧 manifestToSubagent + 写侧 terminal/batch/derived）
 // ============================================================
 
-/** 终态 manifest 投影（markFinalized/markCancelled 共用；对齐 writeManifestBestEffort
- *  现状投影——status 统一 closed，closedReason 随投影携带）。
- *  [U4c / G2 词汇双写] executionStatus（ExecutionStatus 两态）随终态写面双写——
- *  旧 status 三态是 session-reader 直读的投影字段（永久保留），新字段是内部权威
- *  词汇的写面过渡锚（D5 词汇全景①③并存）。[U2 两态] 内部权威词汇无 closed——
+/** 终态 manifest 派生视图（markFinalized/markCancelled 共用；对齐 writeManifestBestEffort
+ *  现状派生视图——status 统一 closed，closedReason 随派生视图携带）。
+ *  [U4c / G2 词汇双写] executionStatus（ExecutionStatus 两态）随终态写侧双写——
+ *  旧 status 三态是 session-reader 直读的派生视图字段（永久保留），新字段是内部权威
+ *  词汇的写侧过渡锚（D5 词汇全景①③并存）。[U2 两态] 内部权威词汇无 closed——
  *  终态化后的 executionStatus = idle（closedReason 遗留位区分死因）。
- *  [U8 / B-restart] engine/engineHandle 域随终态投影下行（zcode 终态 record 的
- *  manifest 兜底锚，与 derived/batch 投影同域）。 */
+ *  [U8 / B-restart] engine/engineHandle 域随终态派生视图下行（zcode 终态 record 的
+ *  manifest 兜底锚，与 derived/batch 派生视图同域）。 */
 export function terminalManifestRecord(record: ExecutionRecord): ManifestRecord {
   return {
     id: record.id,
@@ -852,7 +852,7 @@ export function terminalManifestRecord(record: ExecutionRecord): ManifestRecord 
     model: record.model,
     engine: record.engine,
     engineHandle: record.engineHandle,
-    // [H2 W1 / D3 缺陷五] 来源身份与覆盖记账随终态投影下行（与 derived 投影同域）。
+    // [H2 W1 / D3 缺陷五] 来源身份与覆盖记账随终态派生视图下行（与 derived 派生视图同域）。
     ...(record.origin === "workflow" ? { origin: "workflow" as const } : {}),
     ...(record.parentRunId !== undefined ? { parentRunId: record.parentRunId } : {}),
     ...(record.stepIndex !== undefined ? { stepIndex: record.stepIndex } : {}),
@@ -867,18 +867,18 @@ export function terminalManifestRecord(record: ExecutionRecord): ManifestRecord 
  * 判定序（先命中先出）：
  *   1. idle ∧ closedReason 有值（桥接不变量「旧 closed 终态」读形态——workflow D7
  *      例外族与监督器放弃仍产出）→ cancelled（reason='cancelled'）/ closed 二分；
- *   2. 其余（running / 轮间 idle（markSettled 无 closedReason）/ close 收口落账
+ *   2. 其余（running / 轮间 idle（markSettled 无 closedReason）/ close 收尾
  *      record）→ running
  *      （session-reader 视角的活跃成员，§3.2.8 行为变化声明：可续聊 record =
  *      活跃会话——settle/轮终后 stopReason=interrupted/completed/failed 的 record
- *      也投 running，
+ *      也映射 running，
  *      「为什么停」经 executionStatus + 下游 stopReason 通道表达，不翻旧终态：
- *      settle 的 record 仍可 message 续聊，投 closed 会让旧版把它当已完成分区成员，
+ *      settle 的 record 仍可 message 续聊，映射 closed 会让旧版把它当已完成分区成员，
  *      message 复活后再翻回 running = 状态反复横跳，比恒 running 更漂移）。
  *      [u-arch] 原收起位 → closed 第一分支随收起概念删除退役
- *      （close 收口落账 record 投 running——对外两态下旧 reader 的 closed 分区
+ *      （close 收尾 record 映射 running——对外两态下旧 reader 的 closed 分区
  *      语义不再被本仓维护为 close 专属，§3.4 方案 A 裁决）。
- * derivedManifestRecord 唯一消费（[collect 退役] batchManifestRecord 投影随批写侧删除）。
+ * derivedManifestRecord 唯一消费（[collect 退役] batchManifestRecord 派生视图随批写侧删除）。
  */
 function legacyManifestStatusFields(
   rec: SubagentRecord,
@@ -893,15 +893,15 @@ function legacyManifestStatusFields(
 }
 
 /**
- * [U4c / G1+G2] 状态派生 manifest 投影（rebuildIndexes / 反查 miss 惰性通道 /
- * markSettled 收口点 / markArchived 归档点共用）。
- * 数据源 = SubagentRecord 投影（identity entry/binding + `.state` sidecar 矩阵，
- * D1「.state 权威 + entry 尽力」）——词汇双写同终态写面。
- * [U2 两态桥接] 旧 status 三态派生收口 legacyManifestStatusFields 单点：
- * markSettled 的轮间 idle（无 closedReason）与 markSettledOut 的收口落账 record
- * 如实投影 legacy "running"（session-reader 视角的活跃成员，§3.2.8 下行映射）。
+ * [U4c / G1+G2] 状态 manifest 派生视图（rebuildIndexes / 反查 miss 惰性通道 /
+ * markSettled 收尾点 / markArchived 归档点共用）。
+ * 数据源 = SubagentRecord 派生视图（identity entry/binding + `.state` sidecar 矩阵，
+ * D1「.state 权威 + entry 尽力」）——词汇双写同终态写侧。
+ * [U2 两态桥接] 旧 status 三态派生收尾 legacyManifestStatusFields 单点：
+ * markSettled 的轮间 idle（无 closedReason）与 markSettledOut 的收尾 record
+ * 如实映射 legacy "running"（session-reader 视角的活跃成员，§3.2.8 下行映射）。
  * [U8 / B-restart] engine/engineHandle 域下行（zcode record 重启可见性兜底——
- * manifest 源投影据此恢复引擎身份与锚）。
+ * manifest 源派生视图据此恢复引擎身份与锚）。
  */
 export function derivedManifestRecord(rec: SubagentRecord): ManifestRecord {
   return {
@@ -920,7 +920,7 @@ export function derivedManifestRecord(rec: SubagentRecord): ManifestRecord {
     model: rec.model,
     engine: rec.engine,
     engineHandle: rec.engineHandle,
-    // [H2 W1 / D3 缺陷五] 来源身份与覆盖记账随投影下行（manifest 源反查 parentRunId
+    // [H2 W1 / D3 缺陷五] 来源身份与覆盖记账随派生视图下行（manifest 源反查 parentRunId
     // 是 run 级全切成员清单的可见性键；zcode 成员的 manifest 兜底载体缺它即漏成员）。
     ...(rec.origin === "workflow" ? { origin: "workflow" as const } : {}),
     ...(rec.parentRunId !== undefined ? { parentRunId: rec.parentRunId } : {}),
@@ -931,18 +931,18 @@ export function derivedManifestRecord(rec: SubagentRecord): ManifestRecord {
   };
 }
 
-/** FR-8: ManifestRecord → SubagentRecord（manifest 源投影）。
- *  task/slug 从 manifest 真实值投影（配合 writeManifest 补字段），缺失兜底空串；
+/** FR-8: ManifestRecord → SubagentRecord（manifest 源派生视图）。
+ *  task/slug 从 manifest 真实值映射（配合 writeManifest 补字段），缺失兜底空串；
  *  model 经空串归一缺席（R4/D6-③——undefined = 用户未指定，禁空串哨兵）。
  *  status 越界（mapManifestStatus 返回 null）时返回 null，由 collectRecords 跳过。
- *  [M2 Gate B] closedReason 投影（枚举守卫，同 mapManifestStatus 的越界容错口径）：
+ *  [M2 Gate B] closedReason 映射（枚举检查，同 mapManifestStatus 的越界容错口径）：
  *  旧 manifest 无此字段 / 损坏值 → undefined。缺失曾让 manifest 源快照在
  *  endedMessageGuard 丢失三分流依据（user-close/cancelled 误入 reconnectable 分支）。
  *  [U8 / §3.2.8 双写回读] executionStatus（两态权威词）在场且合法时优先——旧三态
- *  status 只是 session-reader 下行投影，settle 产物（legacy running + idle）按
+ *  status 只是 session-reader 下行派生视图，settle 产物（legacy running + idle）按
  *  权威词读回 idle；旧 manifest（无 executionStatus）回落 mapManifestStatus。
  *  [U8] engine 域回读（manifest 持久化锚的读侧半边）：zcode manifest 孤儿恢复引擎身份（engineHandle 经 isEngineHandleShape
- *  守卫，未知 JSON 不裸收）。 */
+ *  检查，未知 JSON 不裸收）。 */
 export function manifestToSubagent(m: ManifestRecord): SubagentRecord | null {
   const status = manifestStatusToExecution(m);
   if (status === null) return null;
@@ -972,7 +972,7 @@ export function manifestToSubagent(m: ManifestRecord): SubagentRecord | null {
     engine: m.engine,
     engineHandle: isEngineHandleShape(m.engineHandle) ? m.engineHandle : undefined,
     // [H2 W1 / D3 缺陷五] 来源身份回读（旧 manifest 无字段 → undefined = tool 语义，
-    // 与 entry/内存源投影同形——manifest 源反查 collectRecordsByParentRunId 不再漏成员）。
+    // 与 entry/内存源派生视图同形——manifest 源反查 collectRecordsByParentRunId 不再漏成员）。
     ...(m.origin === "workflow" ? { origin: "workflow" as const } : {}),
     ...(typeof m.parentRunId === "string" && m.parentRunId !== "" ? { parentRunId: m.parentRunId } : {}),
     ...(typeof m.stepIndex === "number" ? { stepIndex: m.stepIndex } : {}),
@@ -981,19 +981,19 @@ export function manifestToSubagent(m: ManifestRecord): SubagentRecord | null {
 }
 
 // ============================================================
-// 内存源投影与孤儿 merge
+// 内存源派生视图与孤儿 merge
 // ============================================================
 
-/** ExecutionRecord → SubagentRecord（内存源投影）。 */
+/** ExecutionRecord → SubagentRecord（内存源派生视图）。 */
 export function recordToSubagent(r: ExecutionRecord): SubagentRecord {
   return {
     id: r.id,
     agent: r.agent,
     status: r.status,
     closedReason: r.closedReason,
-    // [U2 additive] 展示维度随本投影进读面与 bound/settle manifest 物化；持久化面
+    // [U2 additive] 展示维度随本派生视图进读侧与 bound/settle manifest 物化；持久化路径
     // 已换源 = v2 条目构造器直取字段 + 事件流 fold 重建（v1 全量快照 entry 已停写，
-    // 不再经本投影）；undefined 自然缺省，旧 entry 零迁移。
+    // 不再经本派生视图）；undefined 自然缺省，旧 entry 零迁移。
     stopReason: r.stopReason,
     mode: r.mode,
     slug: r.slug,
@@ -1014,32 +1014,32 @@ export function recordToSubagent(r: ExecutionRecord): SubagentRecord {
     error: r.error,
     sessionFile: r.sessionFile,
     round: r.round,
-    // [modeless 波1] chatMode 投影随字段消亡删除（renderer isDone 判据改走
+    // [modeless 波1] chatMode 派生视图随字段消亡删除（renderer isDone 判据改走
     // idle+result 形态，GUI 链波 4 处理）：
     // 完成态 one-shot 永远显示 waiting。单测 schema 断言曾因内存对象保留 undefined
     // 键名而未拦截（真实 JSONL 丢 undefined 值），故 schema 测试改为序列化后断言。
     // [review round2] worktree 隔离标志：内存源有 handle 或跨重启重建带 hadWorktree 均为 true。
     worktree: r.worktreeHandle !== undefined || r.hadWorktree === true,
     engine: r.engine,
-    // U2：engineHandle 经 entry 持久化（register/archive 双写点均经本投影），无则 undefined 自然省略
+    // U2：engineHandle 经 entry 持久化（register/archive 双写点均经本派生视图），无则 undefined 自然省略
     engineHandle: r.engineHandle,
-    // [U5 修复 U2 披露的投影缺口] batchFinalized 随本投影持久化（register entry /
-    // archive entry 双写点均经本投影）。[modeless 波3] collectMode 投影随字段消亡删除。
+    // [U5 修复 U2 披露的派生视图缺口] batchFinalized 随本派生视图持久化（register entry /
+    // archive entry 双写点均经本派生视图）。[modeless 波3] collectMode 派生视图随字段消亡删除。
     // undefined 经 JSON.stringify 自然缺省，旧 entry 零迁移。
     batchFinalized: r.batchFinalized,
     // [H2 W1] 来源身份两字段的持久化通路 = v2 注册条目（toRegisteredEntryData 直取）
     // + binding 身份域单源（identityBindingPayload）+ 事件流 fold 重建；漏载荷则
-    // entry 无 origin，重启后重建链拿不到来源、D1 投影过滤全失效（同型先例：H1 U5
+    // entry 无 origin，重启后重建链拿不到来源、D1 派生视图过滤全失效（同型先例：H1 U5
     // 缺字段事故）。
-    // [W0 / D1] stepIndex 同族随投影持久化——漏投影则 entry 恒无 stepIndex（run 视图
+    // [W0 / D1] stepIndex 同族随派生视图持久化——漏派生则 entry 恒无 stepIndex（run 视图
     // 关联键静默缺失）。undefined 经 JSON.stringify 自然缺省，存量 record 序列化字节
     // 不变（零迁移）。
     origin: r.origin,
     parentRunId: r.parentRunId,
     stepIndex: r.stepIndex,
-    // [subagent-model-switch §6.2] 用户覆盖记账随内存源投影（读模型可见面——冷复活
+    // [subagent-model-switch §6.2] 用户覆盖记账随内存源派生视图（读模型可见部分——冷复活
     // 水合的候选数据源 + 覆盖状态查询通道）。持久化权威 = record-model-override 事件
-    // 帧（写点 = store.markModelOverride），本投影只透传内存值；undefined 自然缺省。
+    // 帧（写点 = store.markModelOverride），本派生视图只透传内存值；undefined 自然缺省。
     modelOverride: r.modelOverride,
   };
 }
@@ -1054,7 +1054,7 @@ export function recordToSubagent(r: ExecutionRecord): SubagentRecord {
  * （水合只增不减——防归零覆盖的语义本体）；epoch 同款 max（跨重启单调防撞）；
  * lastAbandonedRound / transcriptRef 仅缺省回填（非空不覆盖，调用方冷查水合值优先）。
  *
- * fold 来源 = TerminalCtx.foldOf 注入位（调用时读事件面——事件面未接线的纯内存
+ * fold 来源 = TerminalCtx.foldOf 注入位（调用时读事件流——事件流未接线的纯内存
  * 形态返回 undefined，本函数整体 no-op）。
  */
 /**

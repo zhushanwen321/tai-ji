@@ -15,7 +15,7 @@ ESLint 检查失败 exit 2 零输出，排查无从下手）。正确形态是
   窗口内先遇到其他语句则停止——不再构成「紧跟」。
 
 已知局限（零依赖静态扫描的边界，朝漏报方向可接受）：
-  - 跨行命令替换 `NAME=$(\n … \n)`（首行无闭合括号）不判；
+  - 跨行命令替换 `NAME=$(\n … \n)`（首行无结束括号）不判；
   - `$?` 在同一行内联使用（`cmd; echo $?`）不属本组合，不判。
 
 用法：
@@ -31,7 +31,7 @@ from pathlib import Path
 
 DEFAULT_TARGET = Path(__file__).resolve().parent / "install-hooks.sh"
 
-# A. 单行命令替换赋值：NAME=$(...)（行尾闭合；跨行形态见头注「已知局限」）
+# A. 单行命令替换赋值：NAME=$(...)（行尾结束；跨行形态见头注「已知局限」）
 ASSIGN_RE = re.compile(r"^\s*([A-Za-z_]\w*)=\$\(.+\)\s*$")
 # C. 退出码捕获赋值：NAME=$?
 CAPTURE_RE = re.compile(r"^\s*[A-Za-z_]\w*=\$\?\s*$")

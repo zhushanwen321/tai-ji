@@ -74,7 +74,7 @@ export interface QuotaConfigureResult {
 }
 
 /**
- * provider 已在聚合层不存在（删除链已执行）——persist 的存在性守卫异常（§7.3 改动 2）。
+ * provider 已在聚合层不存在（删除链已执行）——persist 的存在性检查异常（§7.3 改动 2）。
  * 在 extrasStore.modify 回调内抛出：modify 只在回调正常返回后才写盘，回调抛错则整个
  * 写入被跳过（读-判-写与删除链的 extrasStore.delete 在同一临界区）。
  */
@@ -121,17 +121,17 @@ export interface QuotaServiceOptions {
    */
   getProviderConfig?: (providerId: string) => ConfigProviderConfig | undefined
   /**
-   * Provider 凭据解析唯一通道（D3 收口，链 1 消费点）：api-key 形态的
+   * Provider 凭据解析唯一通道（D3 收尾，链 1 消费点）：api-key 形态的
    * auth.json / models.json 两段统一走 resolver（auth.json → models.json，源优先级单点声明）；
    * secrets 专属 key 段仍优先（Coding Plan 专属语义，不属于 provider 凭据）。
-   * 构造必需（M2fg 收口：生产组合根恒注入，降级内联链已删除）。
+   * 构造必需（M2fg 收尾：生产组合根恒注入，降级内联链已删除）。
    * resolver 构造无 IO、读取懒发生——无缓存语义变化（原实现同样每次调用即读盘）。
    */
   providerCredentialResolver: IProviderCredentialResolver
 }
 
 /**
- * 单形态凭据读取结果（RT-7#4/#7 收口）：ok=明文；missing=无凭证（→ no-credential）；
+ * 单形态凭据读取结果（RT-7#4/#7 收尾）：ok=明文；missing=无凭证（→ no-credential）；
  * io-error=读盘/锁失败（→ credential-unavailable，与「确实没有」分流，warn 已带路径）；
  * unsupported=形态不支持（command / unresolved-env，→ credential-unsupported，禁止下发 HTTP）。
  */
@@ -424,8 +424,8 @@ export class QuotaService {
 
   /**
    * configure 第一阶段：全部校验与纯计算（零物理副作用）。
-   * - workspace 归一化校验（D1-1/P1-1）：非法输入 fail-fast（不落半成品配置），错误面
-   *   返回给调用方（renderer 已本地预校验，此处是直接 RPC 调用者的防御线）；
+   * - workspace 归一化校验（D1-1/P1-1）：非法输入 fail-fast（不落半成品配置），错误范围
+   *   返回给调用方（renderer 已本地预校验，此处是直接 RPC 调用者的防线）；
    * - cookie 入站归一化（SG-10）：wire 不信任，renderer 预检仅为第一道防线；
    * - cookieSet/apiKeySet 三态：true = 本次写入，false = 本次清除，undefined = 本次不动。
    * 独立成方法压 configure 圈复杂度（metrics 门 ≤15），行为与内联版本逐字等价。
@@ -622,7 +622,7 @@ export class QuotaService {
    *    （凭证链无凭证）/ credential-unavailable（读盘/锁失败）/ credential-unsupported
    *    （command / unresolved-env 形态，发请求前拦截）；
    * ③ 成功 `cache.update`；④ `fetchFailed(reason)`；⑤ throw → `fetchFailed('network')`。
-   * ②-⑤ 全部经 finishFetch 收尾 helper（守卫 + 三件套 + lastFetchTime 单点收口）。
+   * ②-⑤ 全部经 finishFetch 收尾 helper（检查 + 三件套 + lastFetchTime 单点收尾）。
    *
    * [W5] throttle 计时只在非 force 路径更新（现迁入 finishFetch）：refresh（force=true）
    * 不应更新 lastFetchTime，否则 refresh 后 10s 内的 hover fetch 会被错误拦截。
@@ -632,7 +632,7 @@ export class QuotaService {
     // 出口 ①（!fetcher 早退）：静默降级缓存，不经 finishFetch（不写 lastFetchTime）
     if (!fetcher) return this.getCached(providerId)
 
-    // 在途写回守卫锚点：发起时的 fetcher id（下方两个 await——resolveCredential /
+    // 在途写回检查锚点：发起时的 fetcher id（下方两个 await——resolveCredential /
     // fetchQuota——期间 configure 可能换类型，落地前与当前值比对）
     const fetcherIdAtStart = fetcher.id
 
@@ -686,11 +686,11 @@ export class QuotaService {
   }
 
   /**
-   * doFetch 收尾 helper（§7.3 改动 4「结构收口，防出口漂移」）：在途写回守卫 +
-   * lastFetchTime 节流锚点单点收口——除「!fetcher 早退」外全部出口经此，新出口不经
+   * doFetch 收尾 helper（§7.3 改动 4「结构收尾，防出口漂移」）：在途写回检查 +
+   * lastFetchTime 节流锚点单点收尾——除「!fetcher 早退」外全部出口经此，新出口不经
    * helper 即不写时间戳，遗漏在代码结构里可见而非靠清单纪律。
    *
-   * - 守卫：发起时捕获的 fetcherId 与当前 getFetcherForProvider 比对（该读直读盘无缓存，
+   * - 检查：发起时捕获的 fetcherId 与当前 getFetcherForProvider 比对（该读直读盘无缓存，
    *   persist 落盘后立即可见，与 broadcast 无关）。失配 = 在途期间类型已变更 → 三件套
    *   （cache.update / lastFailure / lastFetchTime）全部不写——旧行不回写、时间戳不盖
    *   （否则新类型首个 fetch 在 10s 内被 throttle 压制，返回已清空的 getCached，
@@ -698,9 +698,9 @@ export class QuotaService {
    *   消费方按「有 reason → setError；无 reason → setCache」分流，手工 {data:null} 会被
    *   当成功数据写进 store 并清掉诊断态 error）。
    * - lastFetchTime：完成时刻写入（[W5] 写点从发起处迁到此处——发起时刻写在两个 await
-   *   之前，守卫撤不回已发生的写）。仅非 force 路径写（refresh 不污染 fetch 的 throttle
+   *   之前，检查撤不回已发生的写）。仅非 force 路径写（refresh 不污染 fetch 的 throttle
    *   判定）；在途期间由 pending 并发复用去重覆盖，窗口实际拉长一个在途时长，无害。
-   * - 被否方案（设计原文）：失配分支补 lastFetchTime.delete(pid) 的补偿写——「set 后
+   * - 不采用方案（设计原文）：失配分支补 lastFetchTime.delete(pid) 的补偿写——「set 后
    *   再按条件 delete」依赖两处写点的顺序永不改变，比单一写点脆弱。
    */
   private finishFetch(
@@ -821,7 +821,7 @@ export class QuotaService {
       }
       // source === 'provider'：完全跳过专属 Key 文件——这是 D3 消除「显示用 A、实际
       // 用 B」（§3.2 失败模式 D）的机制所在：来源切走后残留的专属 Key 永不被读。
-      // D3 链 1（凭据收口）：auth.json api_key → models.json apiKey 两段统一走 resolver。
+      // D3 链 1（凭据收尾）：auth.json api_key → models.json apiKey 两段统一走 resolver。
       // RT-7#4：unsupported（command / unresolved-env）以判别结构透传，调用方在发请求前
       // 拦截（credential-unsupported），不把形态标记串当 key 交给 fetcher。
       // RT-7#7：读盘/锁异常不再折叠成 null（原「debug + null → no-credential」误导用户

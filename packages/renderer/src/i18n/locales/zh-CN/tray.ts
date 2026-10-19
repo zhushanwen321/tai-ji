@@ -5,7 +5,7 @@
  * 命名空间形态：本模块 default export 只含 tray 子树，由 aggregator（locales/zh-CN.ts）
  * 展开并入 panel 命名空间（`panel: { ...panel, ...tray }`）——运行时 key 前缀 =
  * `panel.tray.*`（顶层键唯一性约束下不能并列两个 panel 键）。en-US/tray.ts 必须键集合
- * 完全一致（守卫 = .githooks/check_i18n_locale_sync.py + __tests__/i18n/locale-sync-check.test.ts）。
+ * 完全一致（检查 = .githooks/check_i18n_locale_sync.py + __tests__/i18n/locale-sync-check.test.ts）。
  *
  * [词表裁决] 三件共用一套桶标签，仅 bash 例外：进程域（bash）用「运行中」，任务域
  * （subagent / workflow）用「进行中」——沿用 sidebar.ts 已登记的域差异（任务域 = 占用中的

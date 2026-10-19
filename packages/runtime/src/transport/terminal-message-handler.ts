@@ -164,9 +164,9 @@ export class TerminalMessageHandler {
    *
    * 错误码取独立码 `terminal_id_required`：缺编号**不是**「注册成员资格的否定回执」（无编号可裁决），
    * 复用 `unknown_terminal_id` 会让「非成员资格拒绝」在契约上等价于成员资格否定——renderer 的
-   * 平行守卫只按 code 分档，该组合正是设计 §3.3 明令禁止的（回收只由注册成员资格的否定回执触发）。
+   * 平行检查只按 code 分档，该组合正是设计 §3.3 明令禁止的（回收只由注册成员资格的否定回执触发）。
    * 也不同于 `terminal_id_session_mismatch`（那码专属「会话段与请求会话不一致」的交叉校验拒绝）。
-   * 本码走普通错误通道，不触发 renderer 关闭沿三腿回收。
+   * 本码走普通错误通道，不触发 renderer 关闭沿三路径回收。
    */
   private rejectIfMissingTerminalId(
     ws: WsType,

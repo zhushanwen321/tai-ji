@@ -1,9 +1,9 @@
 /**
- * MessageBus 观测面测试（pull-push W0 / D7「发布/订阅侧结构化日志」）。
+ * MessageBus 观测范围测试（pull-push W0 / D7「发布/订阅侧结构化日志」）。
  *
  * 覆盖：
  * - 投递失败观测（S5「一次推送丢失在日志可检索」）：state 类零送达落 deliver-dropped
- *   （域键=type、原因=no-subscriber/undelivered、耗时=elapsedMs）；GUI 投影五族逐条；
+ *   （域键=type、原因=no-subscriber/undelivered、耗时=elapsedMs）；GUI 派生视图五族逐条；
  *   其余 state 类 (sid,type) 滑窗限频（首条 + 窗口翻落聚合行带 suppressed 计数）；
  *   stream/transient 不观测（ring 回放兜底 / 设计内可丢）。
  * - 订阅生命周期观测：subscribe（stateSnapshot 键集 = 6c3 排障第一问的直接证据）、
@@ -55,7 +55,7 @@ afterEach(() => {
 })
 
 describe('投递失败观测（deliver-dropped）', () => {
-  it('投影族空投逐条：planState 零订阅者发布 → 观测行带域键/原因/耗时', () => {
+  it('派生视图族无订阅者投递逐条：planState 零订阅者发布 → 观测行带域键/原因/耗时', () => {
     const bus = new MessageBus()
     const started = Date.now()
     bus.publish('s1', stateMessage('session.planState', { planState: { isActive: false } }))
@@ -68,7 +68,7 @@ describe('投递失败观测（deliver-dropped）', () => {
     expect(Date.now() - started).toBeGreaterThanOrEqual(elapsed) // 耗时字段与真实时钟同源
   })
 
-  it('投影族「订了但不在线」形态：readyState!==1 → reason=undelivered', () => {
+  it('派生视图族「订了但不在线」形态：readyState!==1 → reason=undelivered', () => {
     const bus = new MessageBus()
     bus.subscribe('s1', mockClient(3)) // CLOSED
     bus.publish('s1', stateMessage('session.subagents', { subagents: [] }))
@@ -77,18 +77,18 @@ describe('投递失败观测（deliver-dropped）', () => {
     expect(deliverDrops()[0]).toMatchObject({ type: 'session.subagents', reason: 'undelivered', subscribers: 1 })
   })
 
-  it('非投影族 state 空投限频：窗口内第二条不落日志；窗口翻落后聚合行带 suppressed 计数', () => {
+  it('非派生视图族 state 帧无订阅者投递限频：窗口内第二条不落日志；窗口翻落后聚合行带 suppressed 计数', () => {
     vi.useFakeTimers()
     vi.setSystemTime(new Date('2026-09-26T00:00:00Z'))
     const bus = new MessageBus()
-    // occupancy（非投影族 state）：窗口内首条落 + 第二条抑制
+    // occupancy（非派生视图族 state）：窗口内首条落 + 第二条抑制
     bus.publish('s1', stateMessage('session.occupancy'))
     vi.setSystemTime(new Date('2026-09-26T00:00:10Z'))
     bus.publish('s1', stateMessage('session.occupancy'))
     let drops = deliverDrops().filter((d) => d.type === 'session.occupancy')
     expect(drops).toHaveLength(1)
 
-    // 窗口翻落（>60s）后再空投：新窗口首条落，携带上一窗口抑制计数
+    // 窗口翻落（>60s）后再次无订阅者投递：新窗口首条落，携带上一窗口抑制计数
     vi.setSystemTime(new Date('2026-09-26T00:01:30Z'))
     bus.publish('s1', stateMessage('session.occupancy'))
     drops = deliverDrops().filter((d) => d.type === 'session.occupancy')
@@ -96,7 +96,7 @@ describe('投递失败观测（deliver-dropped）', () => {
     expect(drops[1]).toMatchObject({ type: 'session.occupancy', suppressedInLastWindow: 1 })
   })
 
-  it('stream / transient 空投不观测（ring 回放兜底 / 设计内可丢）', () => {
+  it('stream / transient 无订阅者投递不观测（ring 回放补上 / 设计内可丢）', () => {
     const bus = new MessageBus()
     bus.publish('s1', stateMessage('message.message_start')) // stream（fallback 类）
     bus.publish('s1', stateMessage('message.text_delta')) // transient
@@ -123,7 +123,7 @@ describe('投递失败观测（deliver-dropped）', () => {
 describe('订阅生命周期观测', () => {
   it('subscribe 观测携带 stateSnapshot 键集（6c3 排障第一问：快照里有没有 plan 帧）', () => {
     const bus = new MessageBus()
-    bus.publish('s1', stateMessage('session.planState', { planState: { isActive: true } })) // 空投建快照
+    bus.publish('s1', stateMessage('session.planState', { planState: { isActive: true } })) // 无订阅者发布建快照
     loggerInfo.mockClear()
     bus.subscribe('s1', mockClient())
 
@@ -156,7 +156,7 @@ describe('订阅生命周期观测', () => {
     const bus = new MessageBus()
     const ws = mockClient()
     bus.subscribe('s1', ws)
-    bus.publish('s1', stateMessage('session.occupancy')) // 建限频键（空投首条）
+    bus.publish('s1', stateMessage('session.occupancy')) // 建限频键（无订阅者首条）
     loggerInfo.mockClear()
 
     bus.unsubscribeAll(ws)
@@ -167,7 +167,7 @@ describe('订阅生命周期观测', () => {
     bus.clearSession('s1')
     expect(observeEvents().map(([m]) => m)).toContain('[bus-observe] clear-session')
 
-    // 限频窗口已清：窗口中段再空投 occupancy 视为新窗口首条（无 suppressed 字段）
+    // 限频窗口已清：窗口中段再次无订阅者投递 occupancy 视为新窗口首条（无 suppressed 字段）
     vi.setSystemTime(new Date('2026-09-26T00:00:30Z'))
     bus.publish('s1', stateMessage('session.occupancy'))
     const drops = deliverDrops()

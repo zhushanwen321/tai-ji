@@ -347,7 +347,7 @@ function collectCommitCandidates(
   return { high, low }
 }
 
-/** 收口阶段：去重，高置信优先，同 hash 保留首次。 */
+/** 收尾阶段：去重，高置信优先，同 hash 保留首次。 */
 function dedupeCommits(high: CommitItem[], low: CommitItem[]): CommitItem[] {
   const seen = new Set<string>()
   const items: CommitItem[] = []

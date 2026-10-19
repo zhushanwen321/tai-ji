@@ -6,7 +6,7 @@
  *
  * 三视角覆盖（AGENTS.md 测试规范 #5-8）：
  * - 构建者（白盒）：store.addPendingSend / setOccupancy → isActive / isCompacting（occupancy 派生）→ deriveStatus
- * - 使用者（黑盒）：mount SessionItem/Panel 断言 DOM（转菊花 / Composer 渲染 / Landing 守卫）
+ * - 使用者（黑盒）：mount SessionItem/Panel 断言 DOM（转菊花 / Composer 渲染 / Landing 检查）
  * - 观察者（形态）：spinner 含 animate-spin 动画类、composer/landing testid 存在
  *
  * 运行：cd packages/renderer && npx vitest run src/__tests__/panel/session-active-state.test.ts

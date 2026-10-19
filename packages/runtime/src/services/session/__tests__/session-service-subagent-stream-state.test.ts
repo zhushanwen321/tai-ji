@@ -2,7 +2,7 @@
  * session.getSubagentStreamState RPC handler 测试（B2 subagent-stream-chunk §4.1，
  * u-runtime-rpc）：
  *
- * - 注册面：SessionMessageHandler routes 认领 session.getSubagentStreamState
+ * - 注册点：SessionMessageHandler routes 认领 session.getSubagentStreamState
  * - found true 分支：进行中 record → reply 原样透传 tee 三元组（found/msgSeq/lastDeltaSeq/lines）
  * - record 路由：record-a / record-b 交替请求各自返回，非本 record 请求不串；
  *   跨 sessionId 请求（recordId 在管但归属不一致）→ found:false
@@ -13,8 +13,8 @@
  * 装置：真实 SessionService（桩集仿 session-service-background-task.test.ts createSetup
  * 最小集，构造期零 fs 触点）+ 真实 SessionMessageHandler 直调 handleSessionMessage
  * （mockContext 范式仿 transport/__tests__/session-message-handler-workflow-viz.test.ts）。
- * 数据源以假 source 替身注入（复刻组合根 index.ts 的闭包形态——relay registry 句柄归
- * 组合根，registry 半的 tee 存在性路由在 relay-registry 单测面，此处覆盖 service/handler
+ * 数据源以假 source 替身注入（复刻组合根 index.ts 的闭包形态——control server 句柄归
+ * 组合根，tee 存在性路由在 control server / subagent-tee 单测范围，此处覆盖 service/handler
  * 链的路由与分支语义）。
  *
  * 运行：cd packages/runtime && npx vitest run src/services/session/__tests__/session-service-subagent-stream-state.test.ts
@@ -136,7 +136,7 @@ afterEach(() => {
   rmSync(agentDir, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 })
 })
 
-// ── 注册面 ────────────────────────────────────────────────────────
+// ── 注册点 ────────────────────────────────────────────────────────
 
 describe('SessionMessageHandler.handles（subagent-stream-state 域）', () => {
   it('认领 session.getSubagentStreamState', () => {

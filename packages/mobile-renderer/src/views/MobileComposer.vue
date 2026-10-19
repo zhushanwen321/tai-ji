@@ -13,7 +13,7 @@
 // 发送失败契约（D6，对齐 core R2-A5 失败信号）：send 返回 false = RPC 失败（内部已
 // 消化——乐观气泡已回滚、transport 级 toast 已发；契约内不 throw）→ ComposerInput
 // 回填原文本（setSegments）+ 内联错误行（复用 form 通道 respondFailedId 范式）；
-// comp.clear() 只在成功分支执行——失败不丢草稿（S5 修复，V5 验收面）。
+// comp.clear() 只在成功分支执行——失败不丢草稿（S5 修复，V5 验收范围）。
 // 双通道并存口径（两类失败可见提示数不同）：传输级失败（断连/超时）= ErrorBar（core
 // toast 带原因，A7 通道）+ 本内联行（操作指引）同帧双提示；classified 否决级（hook
 // 否决）= core toast 抑制（runtime 已广播流内错误气泡），仅本内联行一条。是否收敛为
@@ -78,7 +78,7 @@ async function onSend(): Promise<void> {
     }
   } catch (e) {
     // 契约外异常防御（对齐桌面 useComposerSend catch 分支；core send 契约内不 throw）：
-    // 回填 + 错误行可见，console 记录供诊断（错误条单槽留给 core 失败面文案）
+    // 回填 + 错误行可见，console 记录供诊断（错误条单槽留给 core 失败情形文案）
     comp.setSegments(segments)
     sendFailed.value = true
     console.error('[mobile-composer] send failed:', e)
@@ -95,7 +95,7 @@ async function onStop(): Promise<void> {
   try {
     await useChatInstance.abort(sid)
   } catch (e) {
-    // 降级策略：abort RPC 失败仅记录——turn 收口由断连/runtime 事件兜底（core finalize 链）
+    // 降级策略：abort RPC 失败仅记录——turn 收尾由断连/runtime 事件兜底（core finalize 链）
     console.error('[mobile-composer] abort failed:', e)
   }
 }

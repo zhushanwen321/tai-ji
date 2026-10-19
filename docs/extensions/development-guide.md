@@ -1077,11 +1077,11 @@ function process(items: string[]): string[] {
 
 > 插件作者面对的超时 API 面与到期行为。量级裁定原则：**超时按被保护对象的粒度校准**——
 > 等插件业务代码跑完的任务级等待 = 30min 兜底 + 作者声明覆盖；等人工的弹窗/审批 = 30min
-> + 取消非替答；生命周期握手（activate）= 控制面秒级。设计权威源：
+> + 取消非替答；生命周期握手（activate）= 控制范围秒级。设计权威源：
 > `docs/design/timeout-plugin-service-granularity.md`（已删除，git 可追溯）。
 
 **onActivate 轻量契约 [规范]**：`onActivate` 的协议语义是生命周期握手（声明注册工具/hooks/
-命令清单），控制面超时 30s。`onActivate` 内**禁止**重初始化（拉配置、建连接、预热缓存等
+命令清单），控制范围超时 30s。`onActivate` 内**禁止**重初始化（拉配置、建连接、预热缓存等
 长耗时操作）——把这些移到首个工具调用或命令 handler 内懒执行。宿主装配侧有
 `ActivatorOptions.activateTimeoutMs` 覆盖参数（对重初始化类插件的逃生门），但契约优先：
 靠声明轻量化而不是靠调大超时。
@@ -1106,7 +1106,7 @@ to extend or opt out (<=0 = no limit).
 
 pi agent 自行决策重试/换路径；插件侧无感知、不被卸载。
 
-**命令执行超时（命令定义级 `timeoutMs` 声明）**：用户点击 UI（状态栏按钮/命令面板）触发的
+**命令执行超时（命令定义级 `timeoutMs` 声明）**：用户点击 UI（headerAction 按钮 / action-bar 按钮）触发的
 插件命令，执行超时取值链与工具 `registerTool` 完全同款（上表适用；校验同在注册入口，
 非 number 抛 `INVALID_TIMEOUT_MS`），缺省默认 30min，`<=0` / `Infinity` 显式 opt-out。
 命令并发执行有 busy 检查：同一命令 handler 未返回前重复触发会被拒绝，提示含已等待时长

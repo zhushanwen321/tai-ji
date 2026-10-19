@@ -6,7 +6,7 @@
 //   - get_state → 应答 sessionFile/sessionId（resume 形态 = --session 指向的原文件）；
 //   - prompt → 先读 session 文件历史（append 前），把 prompt 追写进 session 文件
 //     （模拟 pi 的 session 持久化：首轮新建 / resume 续写同文件），回复携带
-//     「读到的历史行数」（resume 形态）——同文件续写 + 历史召回的构造性断言面：
+//     「读到的历史行数」（resume 形态）——同文件续写 + 历史召回的构造性断言范围：
 //     第二个进程能看到第一个进程写入的内容，当且仅当 --session 穿透正确；
 //   - agent_end + agent_settled（引擎 resolve + 收割边界）；
 //   - SIGTERM → exit 0（pi trap 语义：先 flush 后退出）。
@@ -29,7 +29,7 @@ const resumeFile = (() => {
   const i = process.argv.indexOf("--session");
   return i >= 0 ? process.argv[i + 1] : undefined;
 })();
-// 冷续形态沿用 resume 目标文件（断言面：--session 透传后定位不变）
+// 冷续形态沿用 resume 目标文件（断言范围：--session 透传后定位不变）
 const sessionFile = resumeFile ?? path.join(sessionDir, "2026-09-09T00-00-00-000Z_fake-chat-1.jsonl");
 
 const SESSION_ID = "fake-chat-1";

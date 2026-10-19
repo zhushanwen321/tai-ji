@@ -1,12 +1,12 @@
 // src/execution/service/member-reuse-pool.ts
 //
 // [D1 拆边 Class C 第 4 步] 自 `orchestration/member-reuse-pool.ts` 整体下沉（同一批
-// 消除 `service/workflow-dispatch` → 编排层的值反向边）。依赖面核查结论 = 可下沉：
+// 消除 `service/workflow-dispatch` → 编排层的值反向边）。依赖范围核查结论 = 可下沉：
 // 值依赖只有 `core/logger`（叶子），类型依赖只有 run-events 的 `WorkflowRunEvent`
 // （事件载荷接口按 Class B 先例留原位作类型导入——B1 已裁决「值不能反向依赖编排层」，
 // 类型边编译期擦除）；模块本体是 record 流的 fold + runId 分区内存表，零编排状态机
 // 语义、除 io 注入的 record 读外零 IO / 零时钟依赖，不把状态机语义带进下层。编排侧
-// 消费面（terminal-actions / worker-message-pump / 成员复用池测试）直连本模块——
+// 消费方（terminal-actions / worker-message-pump / 成员复用池测试）直连本模块——
 // 过渡期曾保留同名 re-export façade，收尾已删。
 //
 // [U4 pi-workflow-run-resource-model → D6 绑定消解]（workflow-run-resume-revision）
@@ -18,7 +18,7 @@
 // 字段（agent-started 载荷的 memberRecordId，随帧落 record），复用路由按绑定字段查；
 // 跨崩溃恢复从 record 折叠重建（foldMemberBindings）。机制保留（同名续写、按 runId
 // 分区防串线、收尾清绑定的时序），实体取消（原 member-pool 词表事件随 [D6] 删除，
-// 写入序红线由「绑定字段与 agent-started 帧同帧落账」构造性满足——字段与帧一体，
+// 写入序红线由「绑定字段与 agent-started 帧同帧写入」构造性满足——字段与帧一体，
 // 不存在「事件落了内存没改」或反之的窄窗）。
 //
 // 职责边界（收窄后）：
@@ -33,7 +33,7 @@
 // record 读通道经 MemberReusePoolIo 注入（生产装配 = terminal-actions 的
 // scanRunEvents——journal 单写者纪律：读侧不自建 journal 实例绕过 no-op 测试防线）。
 // 本模块不 import worker-message-pump / terminal-actions（消费方反向 import 本模块
-// 做收尾清空接线，双向直依赖会成环；编排侧导入面直连本模块）。
+// 做收尾清空接线，双向直依赖会成环；编排侧导入侧直连本模块）。
 //
 // 层归属：Engine。除 io 注入的 record 读外零 IO / 零时钟依赖（fold 纯函数可独立
 // 测试）。
@@ -45,11 +45,11 @@ import type { WorkflowRunEvent } from "../../orchestration/run-events.ts";
 const logger = getLogger("member-reuse-pool");
 
 /**
- * record 读注入面（[D6] 收窄：原 appendEvent 通道随 member-pool 词表成员删除——
- * 绑定落账归 agent-started 帧，由 pump dispatchAgentCall 链承载，不经本注入面）。
+ * record 读注入点（[D6] 收窄：原 appendEvent 通道随 member-pool 词表成员删除——
+ * 绑定写入归 agent-started 帧，由 pump dispatchAgentCall 链承载，不经本注入点）。
  * 生产装配在消费方（workflow-dispatch / terminal-actions 的 scanRunEvents 组装）。
  */
-export interface MemberReusePoolIo { // oe-exempt:20260927:framework:复用绑定 ports IO 契约（record 读面）——生产实现经 terminal-actions 单源，测试 fake 为第二变体
+export interface MemberReusePoolIo { // oe-exempt:20260927:framework:复用绑定 ports IO 契约（record 读侧）——生产实现经 terminal-actions 单源，测试 fake 为第二变体
   /** 顺序扫描某 run 的全部事件（fold 重建的读通道）。 */
   readonly scanEvents: (runId: string) => Promise<readonly WorkflowRunEvent[]>;
 }
@@ -58,10 +58,10 @@ export interface MemberReusePoolIo { // oe-exempt:20260927:framework:复用绑�
 
 /**
  * 事件流 → 绑定映射（fold 重放）：只消费 agent-started 帧的 memberRecordId 字段
- * （其余事件类型跳过——fold 与 run 状态机投影 foldRunEventFrames 各取所需，互不
+ * （其余事件类型跳过——fold 与 run 状态机派生视图 foldRunEventFrames 各取所需，互不
  * 干扰）。绑定语义 = 首派建绑（同 run 同名首个携带 recordId 的 agent-started 帧
  * 生效，后续同名续写帧的重复携带不换绑——zcode 语义下 run 内名唯一，重复携带是
- * 并行同名派发的防御面，首个为准与原 register 语义一致）。重放幂等：同一事件序列
+ * 并行同名派发的防御机制侧，首个为准与原 register 语义一致）。重放幂等：同一事件序列
  * 重复 fold 产出一致。
  */
 export function foldMemberBindings(events: readonly WorkflowRunEvent[]): Map<string, string> {
@@ -175,7 +175,7 @@ export async function registerMemberRecord(
  * 后等价——原 clear 帧的 fold 清空语义由「终局后无后续 agent-started 帧」构造性
  * 承接）。
  *
- * @returns 恒 false（原「是否发出了 clear 事件」的诊断面——无事件可发，保留返回
+ * @returns 恒 false（原「是否发出了 clear 事件」的诊断范围——无事件可发，保留返回
  * 形状兼容既有测试断言）。
  */
 export async function clearMemberReusePool(runId: string, _io: MemberReusePoolIo): Promise<boolean> {

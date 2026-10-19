@@ -22,9 +22,9 @@ describe('cleanTextForSpeech 规则集（D7）', () => {
     )
   })
 
-  it('波浪线围栏代码块删除；未闭合围栏删至文末', () => {
+  it('波浪线围栏代码块删除；未结束围栏删至文末', () => {
     expectIdempotent('前文\n~~~\nraw block\n~~~\n中', '前文 中')
-    expectIdempotent('前文\n```\n未闭合内容一直到底', '前文')
+    expectIdempotent('前文\n```\n未结束内容一直到底', '前文')
   })
 
   it('行内代码整段删除（含反引号）', () => {

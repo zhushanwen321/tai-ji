@@ -297,7 +297,7 @@ describe("refreshDisplay — GUI widget 推送（setup 传真实实现）", () =
 		const [, value] = setWidget.mock.calls[0]!;
 		expect(value!.length).toBeGreaterThan(0);
 		for (const line of value!) {
-			// setWidgetDual 模式分派生效（守卫单点在 protocol helper）：TUI 行不含 GUI marker 编码
+			// setWidgetDual 模式分派生效（检查单点在 protocol helper）：TUI 行不含 GUI marker 编码
 			expect(line.startsWith(GUI_WIDGET_MARKER)).toBe(false);
 		}
 	});

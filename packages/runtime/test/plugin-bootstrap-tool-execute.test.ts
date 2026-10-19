@@ -5,7 +5,7 @@
  * handleIncomingRequest）：此前该文件复制 handleIncomingRequest + toolHandlers 骨架
  * 验证（W01 时 plugin-bootstrap 顶层副作用曾阻断 vitest import），现已实测可直接
  * import（parentPort 为 null 时顶层副作用安全跳过），改为真实函数驱动，消除
- * 复制骨架与源码的漂移面（W01 审查遗留 P-3）。
+ * 复制骨架与源码的漂移风险（W01 审查遗留 P-3）。
  *
  * post 通道经 setPostMessage 注入收集器（模块级 post 与传输解耦的设计缝）。
  * 端到端全链路（真实 PluginRpcServer + MessageChannel）见 plugin-hooks-e2e.test.ts。

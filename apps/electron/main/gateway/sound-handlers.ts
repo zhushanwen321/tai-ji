@@ -26,6 +26,8 @@ import { spawn, spawnSync } from 'node:child_process'
 import {
   DEFAULT_SUCCESS_PLATFORM,
   DEFAULT_ERROR_PLATFORM,
+  SOUND_LIST,
+  SOUND_PLAY,
   type SoundKind,
   type SoundPlatform,
 } from '@taiji/shared'
@@ -170,7 +172,7 @@ function isKnownSound(name: string, platform: SoundPlatform): boolean {
 /**
  * macOS 播放：spawn afplay（fire-and-forget，unref 不阻塞主进程退出）。
  * afplay 是用户态命令，无沙箱限制，自己管理播放时长。
- * 文件不存在时记录警告并返回空对象（统一 existsSync 守卫，避免 spawn 不存在的路径
+ * 文件不存在时记录警告并返回空对象（统一 existsSync 检查，避免 spawn 不存在的路径
  * 导致 child.on('error') 静默吞错——见 S4）。
  */
 function playMac(name: string): SoundPlayResult {
@@ -187,7 +189,7 @@ function playMac(name: string): SoundPlayResult {
 
 /**
  * Linux 播放：探测 paplay/pw-play/aplay，spawn 后 unref。
- * 无可用播放器或声音文件不存在时返回空对象（统一 existsSync 守卫——见 S4，
+ * 无可用播放器或声音文件不存在时返回空对象（统一 existsSync 检查——见 S4，
  * 避免 spawn 不存在的路径让 child.on('error') 静默吞错）。
  */
 function playLinux(name: string): SoundPlayResult {
@@ -255,14 +257,14 @@ function playByName(platform: SoundPlatform, name: string): SoundPlayResult {
 export function registerSoundHandlers(): void {
   // B1：幂等保护——重复注册时先解绑旧 handler，避免 electron 抛 second handler 错误。
   // removeHandler 对未注册的 channel 是 no-op（不抛错），故首次调用也安全。
-  ipcMain.removeHandler('sound:list')
-  ipcMain.removeHandler('sound:play')
+  ipcMain.removeHandler(SOUND_LIST)
+  ipcMain.removeHandler(SOUND_PLAY)
 
-  ipcMain.handle('sound:list', (): SoundListResult => {
+  ipcMain.handle(SOUND_LIST, (): SoundListResult => {
     return listForPlatform(process.platform)
   })
 
-  ipcMain.handle('sound:play', (_event, name: string, kind?: SoundKind): SoundPlayResult => {
+  ipcMain.handle(SOUND_PLAY, (_event, name: string, kind?: SoundKind): SoundPlayResult => {
     const platform = toSoundPlatform(process.platform)
     if (!platform) return {} // 不支持的平台（freebsd/aix 等）静默 no-op
     // 安全校验：name 必须在当前平台精选清单内（防借道 spawn/read 任意路径）

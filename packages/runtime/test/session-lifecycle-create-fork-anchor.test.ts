@@ -3,14 +3,14 @@
  *
  * 背景：create（原 cyclo 50）与 forkSession（原 cyclo 32）按处理阶段提取模块内私有
  * helper（行为保持重构）。本文件锚定重构涉及的高危分支——错误文案、safeDestroy 目标、
- * sidecar 落盘守卫（pi 延迟写入窗口零触碰 session 文件）、rekey、persistLabel、
+ * sidecar 落盘检查（pi 延迟写入窗口零触碰 session 文件）、rekey、persistLabel、
  * fork 继承优先级——保证提取前后行为逐字节一致。
  *
  * 【时序锚定】create 绝不创建/触碰 pi session 文件本体（[HISTORICAL] EEXIST 事故，
  * 见 session-lifecycle.ts persistCreateBindings 头注释）：pi 异常未返回 sessionFile
- * （undefined）时全部 sidecar persist 零调用。V9-④ 根修（2026-09-08）：pi 延迟写入
+ * （undefined）时全部 sidecar persist 零调用。V9-④ 从根源修复（2026-09-08）：pi 延迟写入
  * 窗口（路径有值、.jsonl 未 flush）preset/project/agent 三绑定以 skipJsonlExistsGuard
- * 放行守卫直接落盘（create 是 preset/agent 的唯一持久化时机）。[缓存治理 U8a W4]
+ * 放行检查直接落盘（create 是 preset/agent 的唯一持久化时机）。[缓存治理 U8a W4]
  * model sidecar 写点已退役（断言对象消失 → 对应断言删除），持久层归 pi JSONL。
  *
  * Mock 策略：fs / session-fork / session-file-utils(cleanupMigrateResidues) / pi-paths 全
@@ -202,10 +202,10 @@ describe('create 特征锚定（复杂度债务偿还 W3）', () => {
       parentAgentSessionId: 'pa-1',
     })
 
-    // 时序锚定：sessionFilePath undefined（pi 异常）→ 第一层守卫跳过所有 sidecar 写点。
-    // 注意与 pi 延迟写入窗口区分：窗口内路径有值、文件未 flush，V9-④ 根修后 preset/
+    // 时序锚定：sessionFilePath undefined（pi 异常）→ 第一层检查跳过所有 sidecar 写点。
+    // 注意与 pi 延迟写入窗口区分：窗口内路径有值、文件未 flush，V9-④ 从根源修复后 preset/
     // project/agent 照常落盘（skipJsonlExistsGuard 放行，见 A5b）；本用例是「无路径」
-    // 的异常时序，两层守卫（truthy 检查）语义保持。
+    // 的异常时序，两层检查（truthy 检查）语义保持。
     expect(sessionStore.persistPresetBinding).not.toHaveBeenCalled()
     expect(sessionStore.persistProjectBinding).not.toHaveBeenCalled()
     expect(sessionStore.persistAgentBinding).not.toHaveBeenCalled()
@@ -226,7 +226,7 @@ describe('create 特征锚定（复杂度债务偿还 W3）', () => {
     expect(sessionStore.persistAgentBinding).toHaveBeenCalledWith('/tmp/pi.jsonl', 'agent', 'pa-1', { skipJsonlExistsGuard: true })
   })
 
-  it('A5b: V9-④ 根修——create 路径（sessionFilePath 有值）三绑定 persist 携 skipJsonlExistsGuard 放行 existsSync 守卫', async () => {
+  it('A5b: V9-④ 从根源修复——create 路径（sessionFilePath 有值）三绑定 persist 携 skipJsonlExistsGuard 放行 existsSync 检查', async () => {
     const { lifecycle, sessionStore } = makeEnv()
 
     await lifecycle.create('/repo', 'label', {
@@ -237,7 +237,7 @@ describe('create 特征锚定（复杂度债务偿还 W3）', () => {
     })
 
     // pi 延迟写入窗口（.jsonl 未 flush）：create 写点是 preset/agent 的唯一持久化时机
-    //（无 turn-end 补偿），必须以 trusted create 语义放行守卫直接落盘，否则重启后
+    //（无 turn-end 补偿），必须以 trusted create 语义放行检查直接落盘，否则重启后
     // preset 绑定永久回退 builtin:full / agent badge 丢失。
     expect(sessionStore.persistPresetBinding).toHaveBeenCalledWith('/tmp/pi.jsonl', 'preset-1', { skipJsonlExistsGuard: true })
     expect(sessionStore.persistProjectBinding).toHaveBeenCalledWith('/tmp/pi.jsonl', 'proj-1', { skipJsonlExistsGuard: true })

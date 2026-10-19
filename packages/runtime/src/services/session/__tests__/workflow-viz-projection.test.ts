@@ -1,11 +1,11 @@
 /**
- * workflow 可视化 U3 runtime 投影测试（workflow-visualization 设计 §3.1-4）：
+ * workflow 可视化 U3 runtime 派生视图测试（workflow-visualization 设计 §3.1-4）：
  *
- * - ① 投影消费 fold 新字段透出（workflow-record-projection）：phases 折叠
+ * - ① 派生视图消费 fold 新字段透出（workflow-record-projection）：phases 折叠
  *   （last-wins 单行快照，settledBy 不透出）/ created.argsSummary / per-call
  *   attempts / lastRetry / usage 分项 → inputTokens/outputTokens/turns（core
  *   AgentUsage = SDK AgentOutcomeUsage 别名含 turns，有供源故填）。W2 D7 单源红线：
- *   投影只读 fold 骨架字段。
+ *   派生视图只读 fold 骨架字段。
  * - ② workflowUpdate 水位 diff 扩两维（session-records 全链）：per-ask attempt
  *   计数（重试边沿发信号——坑③盲区②）+ phases 折叠（纯脚本 phase 转态发信号——
  *   盲区①）；worker-log 不纳入 diff 维度（D4 已接受代价的回归锚）。
@@ -26,10 +26,13 @@ import { routeJournalReport } from '../journal-report-router.js'
 import type { SubagentJournalEvent } from '@zhushanwen/extension-protocol'
 import { SCALAR_STATE_DEBOUNCE_MS } from '../replicated-states.config.js'
 import { projectV2Workflow } from '../workflow-record-projection.js'
+// [session-store-layout-inversion D2/D3] run journal 生产同源目录 + 树清理
+import { resolvePiWorkflowRunsDir } from '@zhushanwen/subagent-core'
+import { getSessionStoreDir } from '@taiji/shared/paths'
 import type { RunEventFoldCheckpoint } from '@zhushanwen/subagent-core'
 import type { WorkflowRecordRegisteredEntryData } from '@zhushanwen/subagent-core'
 
-// ── ① 投影透出（纯函数直调）────────────────────────────────
+// ── ① 派生视图透出（纯函数直调）────────────────────────────────
 
 const REGISTERED: WorkflowRecordRegisteredEntryData = {
   v: 2,
@@ -42,7 +45,7 @@ const REGISTERED: WorkflowRecordRegisteredEntryData = {
   recordPath: '/tmp/agent/sessions/x/workflow-state/run-1.record.jsonl',
 }
 
-/** 构造 fold 检查点最小形态（投影只读 created/asks/phases/state.lifecycle/runSettled）。 */
+/** 构造 fold 检查点最小形态（派生视图只读 created/asks/phases/state.lifecycle/runSettled）。 */
 function makeFold(overrides: Partial<RunEventFoldCheckpoint> = {}): RunEventFoldCheckpoint {
   return {
     state: { lifecycle: 'running' },
@@ -130,19 +133,15 @@ describe('projectV2Workflow：fold 新字段透出（U3 §3.1-4）', () => {
 
 // ── ② 水位 diff 扩两维（全链：真实 run journal + journal 推送喂入）──
 
-const SID = 's1'
+// [文件级并行防互踩] 分区键不用 's1'：同包 session-records-w0-observe.test.ts 的
+// 树内 fixture 同用该 sid，vitest 多文件并行下双方 finally/afterEach 的整树清理会删掉
+// 对方正在 append 的 journal（ENOENT 偶发红）——本文件用独立 sid 分区，互不可见。
+const SID = 's-viz'
 let dir: string
 let runJournalPath: string
 
-const piAgentDirRef = vi.hoisted(() => ({ dir: '' }))
-
-vi.mock('../../../infra/pi/pi-paths.js', async (importOriginal) => {
-  const actual = await importOriginal<typeof import('../../../infra/pi/pi-paths.js')>()
-  return { ...actual, getPiAgentDir: () => piAgentDirRef.dir }
-})
-
 /** journal 追加一帧（append-only，与引擎写侧同构）+ 推送喂入（写侧落盘提交点推
- *  报告，经 journal-report-router 生产路径路由到本 session 投影）。 */
+ *  报告，经 journal-report-router 生产路径路由到本 session 派生视图）。 */
 function appendFrame(frame: Record<string, unknown>): void {
   writeFileSync(runJournalPath, `${JSON.stringify(frame)}\n`, { flag: 'a' })
   expect(routeJournalReport(SID, {
@@ -195,7 +194,7 @@ function makeRecords() {
   return { records, publish, client }
 }
 
-/** 订阅 + 首轮拉取（注册条目经 get_entries 喂投影），返回 workflowUpdate 信号读取器。 */
+/** 订阅 + 首轮拉取（注册条目经 get_entries 喂派生视图），返回 workflowUpdate 信号读取器。 */
 async function setupFirstRound(records: SessionRecords, client: ReturnType<typeof makeRecords>['client']) {
   const handlers: Array<(sessionId: string) => void> = []
   records.subscribe({ onSessionRegistered: (h) => { handlers.push(h) } })
@@ -215,16 +214,19 @@ describe('workflowUpdate 水位 diff 扩两维（U3 坑③盲区修复）', () =
   beforeEach(() => {
     vi.useFakeTimers()
     dir = mkdtempSync(join(tmpdir(), 'wf-viz-projection-'))
-    const runJournalDir = join(dir, 'workflow-state')
+    // [session-store-layout-inversion] 生产同源目录 `<root>/<sid>/workflow/runs/`：
+    // 冷读目录（ensureProjection 注入 resolvePiWorkflowRunsDir）必须与 fixture 一致，
+    // 否则 fold 无 run-created 前置、推送增量（agent-retrying/phase-*）落空不发信号
+    const runJournalDir = resolvePiWorkflowRunsDir(SID)
     mkdirSync(runJournalDir, { recursive: true })
     runJournalPath = join(runJournalDir, 'run-1.record.jsonl')
-    piAgentDirRef.dir = dir
   })
 
   afterEach(() => {
-    piAgentDirRef.dir = ''
     vi.useRealTimers()
     rmSync(dir, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 })
+    // 树内 fixture 清理（globalSetup 钉扎的 tmp 数据目录内，fs-guard 白名单）
+    rmSync(join(getSessionStoreDir(), SID), { recursive: true, force: true, maxRetries: 5, retryDelay: 20 })
   })
 
   it('重试边沿发信号：agent-retrying 落盘（status 仍 running）→ 新增一条 workflowUpdate', async () => {

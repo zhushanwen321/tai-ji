@@ -212,7 +212,7 @@ describe('useTtsPlayer — 播放态驱动（验收 5：playing 由 play() resol
     expect(ttsMocks.speak).toHaveBeenCalledWith({ sessionId: 's1', text: '结论如下： 完成' })
   })
 
-  it('非当前任务的 messageId 查询恒 idle（互斥语义的查询面）', async () => {
+  it('非当前任务的 messageId 查询恒 idle（互斥语义的查询范围）', async () => {
     speakResolves()
     player().speak('s1', 'm1', 'hello')
     await flush()

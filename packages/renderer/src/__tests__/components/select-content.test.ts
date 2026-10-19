@@ -1,12 +1,12 @@
 // @vitest-environment happy-dom
 
 /**
- * SelectContent 组件单测 —— fallthrough attrs 转发守卫（MF-1-15）。
+ * SelectContent 组件单测 —— fallthrough attrs 转发检查（MF-1-15）。
  *
  * 守护契约：本封装模板单根是 SelectPortal（Teleport），Vue 对 Teleport 根不继承
  * fallthrough attrs——组件声明 inheritAttrs=false 并把 $attrs 显式合并进内部 reka
  * SelectContent 后，消费方直挂的 data-testid 必须落到真正的浮层 DOM（PopoverContent
- * 已根修的同形契约；修复前 testid 在 Portal 边界被静默丢弃）。
+ * 已从根源修复的同形契约；修复前 testid 在 Portal 边界被静默丢弃）。
  *
  * 断言通道：浮层经 Teleport 渲染到 body（脱离组件根子树），wrapper.find 搜不到——
  * 统一走 document.querySelector + DOMWrapper（Teleport 断言的标准形态，

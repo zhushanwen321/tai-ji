@@ -243,7 +243,7 @@ describe('importLegacyStore', () => {
     expect(fs.unlinkSync).not.toHaveBeenCalled()
   })
 
-  // ── TC8b：cleanup 幂等 + unlink ENOENT 守卫（MF-2，R2 修复）──
+  // ── TC8b：cleanup 幂等 + unlink ENOENT 检查（MF-2，R2 修复）──
   it('TC8b: cleanup 幂等（已删后 no-op）+ unlink 仅静默 ENOENT，其他 fs 错误向上抛', () => {
     const taskA = makeTask({ id: 'ffff' })
     vi.mocked(fs.readFileSync).mockReturnValue(

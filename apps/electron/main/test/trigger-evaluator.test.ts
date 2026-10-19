@@ -9,7 +9,7 @@
  *   - #16 计划内（shutdown 杀链发起）关联排除断言
  *   - 趋势类 #4 coverage<50% 降权断言；#5 数据就绪标注
  *   - requires-user-report 与 #17 的 no-data 标注断言
- *   - 坏行/空台账 → no-data 非静默（skippedLineCount 可辨）
+ *   - 坏行/空登记清单 → no-data 非静默（skippedLineCount 可辨）
  *   - trigger-review 出口断言（writer 收到带条件 id 的事件）
  */
 import { describe, expect, it } from 'vitest'
@@ -24,7 +24,7 @@ const T0 = Date.UTC(2026, 8, 10, 12, 0, 0)
 const DAY = 86_400_000
 const MIN = 60_000
 
-/** 构造一行台账 JSONL（ts 转 ISO，字段按 schema 开放形态）。 */
+/** 构造一行登记清单 JSONL（ts 转 ISO，字段按 schema 开放形态）。 */
 const ev = (tsMs: number, fields: Record<string, unknown> = {}): string =>
   JSON.stringify({ ts: new Date(tsMs).toISOString(), ...fields })
 
@@ -110,15 +110,15 @@ describe('全量清单：20 条与附录 A 一一对应', () => {
     }
   })
 
-  it('空台账 → 全表 no-data 非静默（无锚定时刻、无事件标注、零越线）', () => {
+  it('空登记清单 → 全表 no-data 非静默（无锚定时刻、无事件标注、零越线）', () => {
     expect(empty.nowIso).toBeNull()
     expect(empty.trippedIds).toEqual([])
     expect(empty.parsedEventCount).toEqual({ main: 0, runtime: 0 })
     for (const row of empty.rows) {
       expect(row.status).toBe('no-data')
     }
-    expect(rowById(empty.rows, 1).note).toContain('空台账')
-    expect(rowById(empty.rows, 3).note).toContain('空台账')
+    expect(rowById(empty.rows, 1).note).toContain('空登记清单')
+    expect(rowById(empty.rows, 3).note).toContain('空登记清单')
   })
 })
 
@@ -144,7 +144,7 @@ describe('计数类两态', () => {
   })
 
   it('#2 registry-miss 出现即 tripped（全时段，不受窗口限制）+ inbound-frame-dropped 佐证', () => {
-    // runtime 台账有事件但无 registry-miss → ok（0 次）；台账全空是 no-data（数据缺失 ≠ 未发生）
+    // runtime 登记清单有事件但无 registry-miss → ok（0 次）；登记清单全空是 no-data（数据缺失 ≠ 未发生）
     const clean = evaluate([], [ev(T0 - DAY, { layer: 'runtime', event: 'watermark-daily', detailDigest: '{"heapMax":1}' })], T0)
     expect(rowById(clean.rows, 2).status).toBe('ok')
 
@@ -192,12 +192,12 @@ describe('计数类两态', () => {
     expect(rowById(evaluate([], attemptOnly, T0).rows, 7).currentValue).toContain('0 次')
   })
 
-  it('#9 renderer reload 月均：4 次 ok / 5 次 tripped（main 台账为数据源）', () => {
+  it('#9 renderer reload 月均：4 次 ok / 5 次 tripped（main 登记清单为数据源）', () => {
     const inWin = T0 - DAY
     expect(rowById(evaluate(repeatEv(4, inWin, { layer: 'renderer', event: 'reload' }), [], T0).rows, 9).status).toBe('ok')
     expect(rowById(evaluate(repeatEv(5, inWin, { layer: 'renderer', event: 'reload' }), [], T0).rows, 9).status).toBe('tripped')
-    // reload 事件按 D1 归 main.jsonl：runtime 台账里的同名事件不作为 #9 数据源
-    //（main 台账放一条无关事件使 #9 进入可判定分支，验证 runtime 侧 reload 不计数）
+    // reload 事件按 D1 归 main.jsonl：runtime 登记清单里的同名事件不作为 #9 数据源
+    //（main 登记清单放一条无关事件使 #9 进入可判定分支，验证 runtime 侧 reload 不计数）
     const mainHasOther = [ev(inWin, { layer: 'main', event: 'crash', reason: 'unclean-exit' })]
     expect(rowById(evaluate(mainHasOther, repeatEv(5, inWin, { layer: 'renderer', event: 'reload' }), T0).rows, 9).currentValue).toContain('0 次')
   })
@@ -223,7 +223,7 @@ describe('计数类两态', () => {
 
 describe('#8 滚动重启四子句', () => {
   // rolling-restart 事件族由 runtime writer 写（rolling-restart.ts 恒 layer:'runtime'）：
-  // 构造放 runtime 台账。runtime 空而 main 有事件时 #8 显式 no-data（数据源缺失非 ok）
+  // 构造放 runtime 登记清单。runtime 空而 main 有事件时 #8 显式 no-data（数据源缺失非 ok）
   const rollingRestartAt = (tsMs: number): string[] => [ev(tsMs, { layer: 'runtime', event: 'rolling-restart' })]
   const deferredAt = (tsMs: number, sessionId?: string, reason?: string): string[] => [
     ev(tsMs, { layer: 'runtime', event: 'rolling-restart-deferred', sessionId, reason }),
@@ -321,20 +321,20 @@ describe('#8 滚动重启四子句', () => {
     expect(rowById(evaluate([], outsideWindow, T0).rows, 8).status).toBe('tripped')
   })
 
-  it('#8 数据源跨两本台账（rolling-restart 在 main、deferred/forced 在 runtime）', () => {
+  it('#8 数据源跨两本登记清单（rolling-restart 在 main、deferred/forced 在 runtime）', () => {
     const tripped = evaluate(rollingRestartAt(T0 - DAY), deferredAt(T0 - DAY, 's1'), T0)
     expect(rowById(tripped.rows, 8).currentValue).toContain('1/7天')
     expect(rowById(tripped.rows, 8).currentValue).toContain('1/30天')
   })
 
-  it('main 非空 + runtime 空 → #8 显式 no-data「runtime 台账缺失」（数据源缺失非 ok）', () => {
-    // rolling-restart 事件族全由 runtime writer 写：main 有事件（有锚点）但 runtime 台账空时，
+  it('main 非空 + runtime 空 → #8 显式 no-data「runtime 登记清单缺失」（数据源缺失非 ok）', () => {
+    // rolling-restart 事件族全由 runtime writer 写：main 有事件（有锚点）但 runtime 登记清单空时，
     // 双空判据不命中——主数据源缺失必须独立呈现 no-data，不得降级为全 0 判 ok
     const mainOnly = evaluate(rollingRestartAt(T0 - DAY), [], T0)
     const row = rowById(mainOnly.rows, 8)
     expect(row.status).toBe('no-data')
-    expect(row.currentValue).toContain('runtime 台账缺失')
-    expect(row.note).toContain('runtime 台账无事件')
+    expect(row.currentValue).toContain('runtime 登记清单缺失')
+    expect(row.note).toContain('runtime 登记清单无事件')
   })
 })
 
@@ -395,7 +395,7 @@ describe('#16 E2 型连坐', () => {
     expect(rowById(evaluate([], outside, T0).rows, 16).status).toBe('tripped')
   })
 
-  it('出 30 天窗口的同秒连坐不计（复发观测面为月级）', () => {
+  it('出 30 天窗口的同秒连坐不计（复发观测范围为月级）', () => {
     const old = [piCrash(T0 - 31 * DAY, 's1'), piCrash(T0 - 31 * DAY + 100, 's2'), piCrash(T0 - 31 * DAY + 200, 's3')]
     expect(rowById(evaluate([], old, T0).rows, 16).status).toBe('ok')
   })
@@ -487,7 +487,7 @@ describe('窗口语义与锚定', () => {
     expect(rowById(future.rows, 1).currentValue).toContain('0 次')
   })
 
-  it('缺省锚定台账末事件时刻（nowIso 可辨）', () => {
+  it('缺省锚定登记清单末事件时刻（nowIso 可辨）', () => {
     const last = T0 - 3 * DAY
     const result = evaluate(
       [],
@@ -502,9 +502,9 @@ describe('窗口语义与锚定', () => {
   })
 })
 
-// ── 坏行 / 空台账非静默 ─────────────────────────────────────────────────────
+// ── 坏行 / 空登记清单非静默 ─────────────────────────────────────────────────────
 
-describe('坏行与空台账非静默', () => {
+describe('坏行与空登记清单非静默', () => {
   it('坏行跳过并计数（JSON 解析失败 / 非对象 / 缺 ts），空白行不计', () => {
     const valid = ev(T0 - DAY, { layer: 'runtime', event: 'registry-miss' })
     const result = evaluate(['{broken'], [
@@ -519,12 +519,12 @@ describe('坏行与空台账非静默', () => {
     expect(result.trippedIds).toEqual([2]) // 有效行照常参与评估
   })
 
-  it('部分台账为空 → 该源条件 no-data 显式标注（非静默空白）', () => {
+  it('部分登记清单为空 → 该源条件 no-data 显式标注（非静默空白）', () => {
     const result = evaluate([ev(T0 - DAY, { layer: 'main', event: 'reload' })], [], T0)
     expect(result.nowIso).not.toBeNull()
     const row1 = rowById(result.rows, 1)
     expect(row1.status).toBe('no-data')
-    expect(row1.note).toContain('runtime 台账无事件')
+    expect(row1.note).toContain('runtime 登记清单无事件')
     // main 有数据的条件照常判定
     expect(rowById(result.rows, 9).status).toBe('ok')
   })

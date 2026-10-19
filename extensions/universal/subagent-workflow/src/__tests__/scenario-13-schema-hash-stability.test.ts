@@ -35,7 +35,7 @@ describe("场景 13：schema 模式回放全命中（零误报 mismatch）", () 
       await resumeScenarioRun(env, sd, RUN_ID);
       const summary = await waitForScenarioSettled(sd.runs, RUN_ID);
 
-      // 零误报 mismatch：无 mismatch failed 终局、错误面无 mismatch 文案
+      // 零误报 mismatch：无 mismatch failed 终局、错误范围无 mismatch 文案
       expect(summary.reason).toBe("completed");
       expect(summary.error ?? "").not.toMatch(/mismatch/i);
 

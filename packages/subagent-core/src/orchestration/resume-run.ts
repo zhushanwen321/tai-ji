@@ -21,11 +21,11 @@
 //      cached replay）+ pending 信号
 //
 // 边界：壳入口（tool action / 命令 verb）与 D14 args 校验归 U3；本文件是 core
-// 编排原语，Deps 复用 LifecycleDeps。record 事件流 → 复活聚合的纯投影重建轴在
-// ./resume-run-rebuild.ts（本文件编排面只消费 rebuildRunFromRecord 单点）。
+// 编排原语，Deps 复用 LifecycleDeps。record 事件流 → 复活聚合的纯派生视图重建轴在
+// ./resume-run-rebuild.ts（本文件编排侧只消费 rebuildRunFromRecord 单点）。
 // canonical JSON 工具在 ./canonical-json.ts
 // （独立模块：消费方含 pump 的回放比对与 terminal-actions 的 agent-started 入参
-// 落账，两侧间已有 pump → terminal-actions 依赖边，工具留在任一侧都会成环）。
+// 写入 journal 记录，两侧间已有 pump → terminal-actions 依赖边，工具留在任一侧都会成环）。
 //
 // 层归属：Engine。IO 面：record 流严格读取（fs 直读——与 run-events.ts journal
 // 实装同款「Engine 模块唯一 IO 边」形态）+ proper-lockfile。本模块不读取子代理
@@ -86,17 +86,17 @@ export class ResumeRejectionError extends Error {
 }
 
 /**
- * record 流全量严格读取（恢复读面专用）：非法 JSON / 缺信封 / 词表外 type /
+ * record 流全量严格读取（恢复读取路径专用）：非法 JSON / 缺信封 / 词表外 type /
  * agent-settled 缺 result 全文 → 拒绝（场景 18 的 resume 侧延伸，D12）。
  *
- * 与 core journal scan 的宽容跳过（活体投影面）刻意分层：活体 fold 不能因单帧
- * 全停，恢复读面不能对损坏装瞎——静默跳过会把「record 被截断/篡改」伪装成
+ * 与 core journal scan 的宽容跳过（活体派生视图侧）刻意分层：活体 fold 不能因单帧
+ * 全停，恢复读取路径不能对损坏装瞎——静默跳过会把「record 被截断/篡改」伪装成
  * 「无此调用」让残缺流上的 resume 继续跑。
  *
  * [§3.2] 单行判据（词表/信封/outcome/agent-settled result）经 core 单源原语
  * parseRecordStreamLine（requireSeq=true）消费——与壳侧 jsonl-run-store.ts 的
  * readRecordStream 共用同一份规则，两侧只剩错误文案与「是否查 seq」两处真差异。
- * 本读面额外承担 seq 断档检测（D12 检查①）：行身份严格 +1 递增（首帧 1 起），
+ * 本读取路径额外承担 seq 断档检测（D12 检查①）：行身份严格 +1 递增（首帧 1 起），
  * 跳号 = 截断/丢失行（core scan 宽容跳过坏行后断档即暴露；末尾半截行由 JSON
  * 解析失败直接拒绝——不依赖断档推断）。
  */
@@ -138,7 +138,7 @@ function readRecordStreamStrict(recordPath: string, runId: string): WorkflowRunE
   return events;
 }
 
-/** 单行问题 → core 恢复读面的英文文案（壳侧同问题出中文文案——本函数不共享）。 */
+/** 单行问题 → core 恢复读取路径的英文文案（壳侧同问题出中文文案——本函数不共享）。 */
 function describeRunEventLineIssue(issue: RunEventLineIssue): string {
   switch (issue.kind) {
     case "invalid-json":
@@ -211,7 +211,7 @@ function summarizeResumePlan(plan: ResumePlan): string | undefined {
  *   边界帧与 run-created 自身不算——收编帧是崩溃检测时刻的记账，不是执行）；
  *   段内无执行事件计 0（复活后立即再崩的段，搁置零成本）。
  *
- * 返回累计活跃毫秒（含未闭合尾段）——resume 入口写入预算账本；剩余预算 =
+ * 返回累计活跃毫秒（含未收尾的尾段）——resume 入口写入预算账本；剩余预算 =
  * budget −（累计已耗 +（now − 复活时刻）），消费于入口预检与计时器重排。
  */
 export function computeActiveElapsedMs(events: readonly WorkflowRunEvent[]): number {
@@ -244,7 +244,7 @@ export function computeActiveElapsedMs(events: readonly WorkflowRunEvent[]): num
         lastExecutionTs = Math.max(lastExecutionTs ?? 0, event.ts);
     }
   }
-  closeSegment(); // 尾段闭合（流停在无边界帧的形态——防御，interrupted 流通常已闭合）
+  closeSegment(); // 尾段收尾（流停在无边界帧的形态——防御，interrupted 流通常已收尾）
   return activeMs;
 }
 
@@ -287,7 +287,7 @@ export interface ResumeRunOptions { // oe-exempt:20260929:framework:resumeRun pu
    * 完全同构（单点在 assertResumeEligibility）：显式提供 = 覆盖；缺省 = 继承最近一条
    * run-resumed 帧记录的生效值（跨崩溃存续）；再缺省 = 继承 run-created 帧的创建
    * 预算；三处都没有 = 不限制（Budget 缺省语义）。生效值写入重建 spec（引擎侧
-   * maxTokens 投影与 fresh run 同形）、用于 D10 token 预检（已耗加权 tokens ≥ 上限
+   * maxTokens 派生视图与 fresh run 同形）、用于 D10 token 预检（已耗加权 tokens ≥ 上限
    * 即拒绝——帧推导下界口径，下界越界 ⟹ 真实消耗必越界）、并随本次 run-resumed 帧
    * 落盘——全链单值，不在别处二次折算。
    */
@@ -299,17 +299,17 @@ export interface ResumeRunOptions { // oe-exempt:20260929:framework:resumeRun pu
    * 覆盖记账（model-override 帧折叠，latestModelOverride 单点提取——resume 不带参数
    * 也吃持久化覆盖，2026-10-05 用户裁决核心诉求）；再缺省 = run-created 帧的创建
    * 模型；三处都没有 = 继承主 agent 模型（现状语义）。生效值随本次 run-resumed 帧
-   * 落盘（观测面 + 跨崩溃存续）；派发侧消费走宿主覆盖通道（决策六②，U4b 接线），
+   * 落盘（观测用途 + 跨崩溃存续）；派发侧消费走宿主覆盖通道（决策六②，U4b 接线），
    * 不改重建 spec 的 run 级模型（决策七不采用①：改 spec 会击穿回放比对）。
    *
    * 显式参数同时落统一覆盖记账（resume-run 锁段内直写 model-override 帧，F1-26
    * 后续项裁决）：语义 = 「setModel 补切 + 无参 resume」两步的合一步构造性等价——
    * 显式参数本身就是用户覆盖意图的一次表达，经同一记账通道落盘（覆盖表唯一意图源
    * 语义保持，不新增第二意图源；不变量 2 由 fold replace-not-stack 构造性满足——
-   * resume 时刻的覆盖替换此前值，与补切时序语义一致）。落账后经
-   * onResumeModelOverrideCommitted 端口同步宿主投影（F1-18 修复：内存表写值 +
-   * 负缓存作废，与 setModel 写点的「落账 + 内存表」双写形态对齐）；派发侧消费经
-   * 既有覆盖通道（内存命中直返 → miss 才 journal 折叠回填），零新增消费面。
+   * resume 时刻的覆盖替换此前值，与补切时序语义一致）。写入 journal 记录后经
+   * onResumeModelOverrideCommitted 端口同步宿主派生视图（F1-18 修复：内存表写值 +
+   * 负缓存作废，与 setModel 写点的「写入 journal 记录 + 内存表」双写形态对齐）；派发侧消费经
+   * 既有覆盖通道（内存命中直返 → miss 才 journal 折叠回填），零新增消费方。
    */
   model?: string;
   /** 时钟注入（epoch ms）；缺省 Date.now()——run-resumed 帧 ts 与预算算式的确定性测试通道。 */
@@ -329,7 +329,7 @@ export interface ResumeRunOptions { // oe-exempt:20260929:framework:resumeRun pu
  *   - D13 嵌套词法命中（场景 20）
  *   - D10 预算预检：真实活跃段已耗尽（搁置不计，但已烧的不退——场景 16 的反面）
  *   - v2 注册条目补写失败（裁决点 7：失败干净拒绝——run-resumed 未落，状态无损）
- * @returns runId（同 runId 复活——机制文档方案 A，观测面单实体）
+ * @returns runId（同 runId 复活——机制文档方案 A，单实体观测）
  */
 export async function resumeRun(
   runId: string,
@@ -374,10 +374,10 @@ export async function resumeRun(
 }
 
 /**
- * record 流绝对路径（resume 读面与锁文件同目录锚定）。文件名策略单源 =
- * runEventJournalPathIn（`<runId><RUN_EVENTS_SUFFIX>`，与 journal 实写面同源——
- * 后缀改名时读面/锁面跟随，不再自拼字面量）。测试防线（vitest 未注入目录 →
- * runEventJournalPathOf 返回 undefined）下不可寻址 = 锁与读面都不可用，
+ * record 流绝对路径（resume 读取路径与锁文件同目录锚定）。文件名策略单源 =
+ * runEventJournalPathIn（`<runId><RUN_EVENTS_SUFFIX>`，与 journal 实写路径同源——
+ * 后缀改名时读取路径/锁路径跟随，不再自拼字面量）。测试防线（vitest 未注入目录 →
+ * runEventJournalPathOf 返回 undefined）下不可寻址 = 锁与读取路径都不可用，
  * 按「锁不可用即拒绝」保守拒绝（前提 2 降级语义）。
  */
 function resolveRecordPath(runId: string, journalDir?: string): string {
@@ -410,7 +410,7 @@ function findLatestRunResumed(
   return undefined;
 }
 
-/** resume 读面的 run-created 帧定位（assertResumeEligibility 拆出）：严格读取 +
+/** resume 读取路径的 run-created 帧定位（assertResumeEligibility 拆出）：严格读取 +
  * created 在场拒绝。缺席 = run 从未启动或流头部截断。 */
 function readResumableStream(
   runId: string,
@@ -475,7 +475,7 @@ function effectiveResumeModel(
  * runAccountingFromEvents 单源（agent-settled.result.usage 同一加权折算，下界近似
  * ——中间失败尝试不在事件流）。用下界做拒绝判据方向安全：下界 ≥ 上限 ⟹ 真实消耗
  * （活体逐尝试累计）必 ≥ 上限，不产生误拒；下界未越界时放行，复活后由重建
- * Budget.isExceeded 正常路径守卫。返回已耗活跃时长（返回值装配消费）。
+ * Budget.isExceeded 正常路径检查。返回已耗活跃时长（返回值装配消费）。
  */
 function assertBudgetNotExhausted(
   runId: string,
@@ -690,8 +690,8 @@ function resumedModelSpread(model: string | undefined): { model: string } | Reco
 
 /**
  * 段 5 run-resumed 帧载荷组装（resumeRunLocked 拆出）：各条件 spread 段——reason /
- * host 缺席不落键；本次复活实际生效的预算随帧落盘（跨崩溃存续的数据面）仅 > 0 落
- * 字段——未设/0/负值不落（与 run-created 同款条件式），读取面按「最近一条
+ * host 缺席不落键；本次复活实际生效的预算随帧落盘（跨崩溃存续的数据范围）仅 > 0 落
+ * 字段——未设/0/负值不落（与 run-created 同款条件式），读取侧按「最近一条
  * run-resumed 的字段 ?? run-created 的字段」回落。生效模型同款落盘（三档回落
  * 落定值，canonical ref；缺省不落 = 未指定且无覆盖记账的复活与现状同形）。
  */
@@ -797,9 +797,9 @@ async function resumeRunLocked(
     // 合一步：显式参数即用户覆盖意图表达，经同一 model-override 通道落盘，派发侧
     // 经既有 rebuildRunOverride 通道消费）。写序 = run-resumed 转移之后、接管之前；
     // 失败走接管失败同款回滚围栏（run 回 interrupted 可重试——覆盖未落 = 意图未
-    // 受理，带半截覆盖的 running 态才是坏状态）。落账后同步宿主投影（F1-18 修复
-    // ——内存表 + 负缓存，appendResumeModelOverride 内单点；投影回调 throw 同走
-    // 本回滚围栏：journal 帧已落但宿主投影未同步 = 重派消费面不可信，与接管失败
+    // 受理，带半截覆盖的 running 态才是坏状态）。写入 journal 记录后同步宿主派生视图（F1-18 修复
+    // ——内存表 + 负缓存，appendResumeModelOverride 内单点；派生视图回调 throw 同走
+    // 本回滚围栏：journal 帧已落但宿主派生视图未同步 = 重派消费方不可信，与接管失败
     // 同级处置）。
     if (options?.model !== undefined) {
       await appendResumeModelOverride(runId, deps, options.model, now(), options?.journalDir);
@@ -817,7 +817,7 @@ async function resumeRunLocked(
 /**
  * resume 显式 model 参数的统一覆盖记账直写（F1-26 后续项；journal append 第三合法
  * 写点——登记见 RunEventJournal.append 单写者约束）。canonical ref 在锁段内格式闸
- * 已验（resumeRunLocked 段 2b），此处只做拆装落账；`[:thinkingLevel]` 后缀随
+ * 已验（resumeRunLocked 段 2b），此处只做拆装写入 journal 记录；`[:thinkingLevel]` 后缀随
  * parseModelSelector 拆出进记账 thinkingLevel（与 setModel 编排的 ModelOverride
  * 形状同构）。失败语义 = 接管失败同款回滚围栏（调用点 try 域内）。
  */
@@ -836,9 +836,9 @@ async function appendResumeModelOverride(
     ...(parsed.thinkingLevel !== undefined ? { thinkingLevel: parsed.thinkingLevel } : {}),
     ts,
   });
-  // [F1-18 修复] 落账后同步宿主投影（端口注入，LifecycleDeps 承载——orchestration
+  // [F1-18 修复] 写入 journal 记录后同步宿主派生视图（端口注入，LifecycleDeps 承载——orchestration
   // 不 import execution，接缝与 workflowAgentDispatch 同形态）。journal 帧落盘使
-  // 宿主两个派生投影 stale：覆盖记账内存表（若该 run 曾有覆盖，内存命中旧值遮蔽
+  // 宿主两个派生视图 stale：覆盖记账内存表（若该 run 曾有覆盖，内存命中旧值遮蔽
   // 本次意图）+ workflow 域重建负缓存（「已扫无覆盖」登记为假，短路 journal 重扫）。
   // 回调 throw（如 service 缺席）走调用点回滚围栏——run 回 interrupted 可重试，
   // journal 帧已落（重试 resume 重复追加同值帧，latest-wins 幂等无害）。
@@ -867,7 +867,7 @@ function appendResumeRegisteredEntry(
     runId,
     scriptName: created.workflowName,
     // scriptPath 与 scriptName 同源取自 run-created 帧（写侧 dispatchRunCreated
-    // 条件式恒带）；旧格式帧缺载荷时回落空串（读侧与投影链按缺省处理）。不可写死
+    // 条件式恒带）；旧格式帧缺载荷时回落空串（读侧与派生视图链按缺省处理）。不可写死
     // 空串：同 id 后到的 resume 条目在 events-projection 的 last-writer-wins 下
     // 会遮蔽原始注册条目，GUI 全路径退化短名。
     scriptPath: created.scriptPath ?? "",

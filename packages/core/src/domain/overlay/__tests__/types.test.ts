@@ -22,11 +22,11 @@ import type {
 // kind 四员（browser / workflow / scheduler / canvas）
 const overlayKinds: OverlayKind[] = ['browser', 'workflow', 'scheduler', 'canvas']
 
-// 判别联合：browser 载荷 url+sessionId（发起会话，URL 注入链）/ workflow 载荷 sessionId+runId（与迁移前 overlayCurrent 同构）/ scheduler 载荷 sessionId（定时任务面板 per-session 分区键）/ canvas 载荷 canvasId（跨 session 画布，无会话归属）
+// 判别联合：browser 载荷 url+sessionId（发起会话，URL 注入链）/ workflow 载荷 sessionId+runId（与迁移前 overlayCurrent 同构）/ scheduler 载荷 sessionId（定时任务面板 per-session 分区键）/ canvas 载荷 canvasId+sessionId（画布归属会话，D4 隔离）
 const browserContent: OverlayContent = { kind: 'browser', payload: { url: 'http://127.0.0.1:5173/', sessionId: 'sess-1' } }
 const workflowContent: OverlayContent = { kind: 'workflow', payload: { sessionId: 'sess-1', runId: 'run-1' } }
 const schedulerContent: OverlayContent = { kind: 'scheduler', payload: { sessionId: 'sess-1' } }
-const canvasContent: OverlayContent = { kind: 'canvas', payload: { canvasId: 'cvs-1' } }
+const canvasContent: OverlayContent = { kind: 'canvas', payload: { canvasId: 'cvs-1', sessionId: 'sess-1' } }
 
 // 开合态：关 = current 复位 null；开 = 单例 current
 const closedState: OverlayControlState = { isOpen: false, current: null }
@@ -56,11 +56,11 @@ describe('overlay 开合态类型契约（§7.1 单例 kind/payload 换内容）
     expect(openState.current).toBe(workflowContent)
   })
 
-  it('payload 形状：browser=URL 注入链（url + 发起会话）/ workflow=与迁移前 overlayCurrent 同构（SSOT 迁移对账锚）/ scheduler=定时任务面板会话键 / canvas=画布 id（无会话归属）', () => {
+  it('payload 形状：browser=URL 注入链（url + 发起会话）/ workflow=与迁移前 overlayCurrent 同构（SSOT 迁移对账锚）/ scheduler=定时任务面板会话键 / canvas=画布 id + 归属会话（D4）', () => {
     expect(browserContent).toEqual({ kind: 'browser', payload: { url: 'http://127.0.0.1:5173/', sessionId: 'sess-1' } })
     expect(workflowContent).toEqual({ kind: 'workflow', payload: { sessionId: 'sess-1', runId: 'run-1' } })
     expect(schedulerContent).toEqual({ kind: 'scheduler', payload: { sessionId: 'sess-1' } })
-    expect(canvasContent).toEqual({ kind: 'canvas', payload: { canvasId: 'cvs-1' } })
+    expect(canvasContent).toEqual({ kind: 'canvas', payload: { canvasId: 'cvs-1', sessionId: 'sess-1' } })
   })
 })
 

@@ -6,7 +6,7 @@
  *   随 bridge 退役整段删除（断言对象 BridgeToolCache 已删）。
  * - RT-6#3（major）：HookPipeline 无 handle skip / handler 失败或超时 → 聚合 warn
  *   （含 pluginId + hookType + sessionId），每 N 次一条（禁逐条刷屏）。
- * - RT-6#4（major）：HookPipeline observe 腿在途深度上限 → 超限 drop + 聚合 warn。
+ * - RT-6#4（major）：HookPipeline observe 路径在途深度上限 → 超限 drop + 聚合 warn。
  * - RT-6#7（minor）：executeCommand 下发后触发 broadcastCommandStarted（在途反馈）。
  *
  * 运行：cd packages/runtime && npx vitest run src/services/plugin-service/__tests__/rt6-hardening.test.ts
@@ -95,7 +95,7 @@ describe('RT-6#3 HookPipeline skip/失败聚合 warn', () => {
     expect(texts).toContain('failed total=10')
   })
 
-  it('notifyObservers：无 handle 同样 warn 留痕（observe 腿不再静默 skip）', () => {
+  it('notifyObservers：无 handle 同样 warn 留痕（observe 路径不再静默 skip）', () => {
     const { pipeline } = setupPipeline('onPiEvent', [
       { pluginId: 'p-gone', handlerId: 'p-gone:h1', priority: 0 },
     ], { workerId: null })
@@ -127,7 +127,7 @@ describe('RT-6#3 HookPipeline skip/失败聚合 warn', () => {
   })
 })
 
-describe('RT-6#4 HookPipeline observe 腿在途深度上限', () => {
+describe('RT-6#4 HookPipeline observe 路径在途深度上限', () => {
   let warnSpy: ReturnType<typeof vi.spyOn>
 
   beforeEach(() => {

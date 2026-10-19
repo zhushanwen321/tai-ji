@@ -1,6 +1,6 @@
 // src/execution/registry-reconcile/sweep-binding.test.ts
 //
-// sweep-binding 绑定面直测：runPendingReconcileSweepForService 的 lookupRecordState
+// sweep-binding 绑定侧直测：runPendingReconcileSweepForService 的 lookupRecordState
 // 闭包 subagent 判据（workflow 判据回归钉在 workflow-state-root.test.ts，此处补
 // subagent 两方向：活跃 record 不被 sweep 注销 + 终态/missing 差集补发注销）。
 //
@@ -77,7 +77,7 @@ interface StoreHarness { // oe-exempt:20260928:framework:测试替身形状契�
 
 /** duck-typed RecordStore 替身（sweep-binding 消费 getMutable / findLightById /
  *  findAdoptedStopReasonSync 三个读点——真实磁盘发现需 session 文件扫描，与本文件
- *  断言面无关）。 */
+ *  断言范围无关）。 */
 function makeStore(): StoreHarness {
   const memory = new Map<string, ExecutionRecord>();
   const disk = new Map<string, SubagentRecord>();
@@ -108,11 +108,13 @@ function makeBinding(overrides: {
     getStore: () => storeHarness.store,
     getPi: () => pi,
     getMainSessionFile: () => overrides.sessionFile,
+    // [session-store-layout-inversion D2/D3] run 域 state 目录分区键（rootSessionId）
+    getRootSessionId: () => "sid-sweep-binding",
   };
   return { binding, store: storeHarness, pi };
 }
 
-/** 内存 ExecutionRecord 替身（字段访问面：id/agent/slug/status/result/
+/** 内存 ExecutionRecord 替身（字段访问范围：id/agent/slug/status/result/
  *  rootSessionId/startedAt/closedReason）。 */
 function makeRecord(overrides: Partial<ExecutionRecord> = {}): ExecutionRecord {
   return {
@@ -307,7 +309,7 @@ describe("runPendingReconcileSweepForService 的 subagent 判据（lookupRecordS
       throw new Error("store exploded");
     };
     expect(() => runPendingReconcileSweepForService(h.binding, false)).not.toThrow();
-    // 空转守卫：getStore 未被触达 = 判据链路没跑，异常根本没进 sweep 外层 catch
+    // 空转检查：getStore 未被触达 = 判据链路没跑，异常根本没进 sweep 外层 catch
     expect(storeRequested).toBeGreaterThanOrEqual(1);
   });
 });

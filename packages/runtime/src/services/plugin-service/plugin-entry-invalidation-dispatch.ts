@@ -4,7 +4,7 @@
  * Worker 侧经 plugin.sessions.registerEntryInvalidation（session-api 读段，U2）注册
  * handlerId，本表按 (sessionId, customType) 分桶记录投递目标；pi custom entry 到达
  * （event-adapter 对任意 customType 产出失效事件 → 组合根两路注入的
- * pluginService.notifyEntryInvalidation 腿）时按事件的双键命中订阅者，产出投递意图
+ * pluginService.notifyEntryInvalidation 路径）时按事件的双键命中订阅者，产出投递意图
  * （workerId + handlerId），由 PluginService 经 rpcServer.notify 定向投递到对应 Worker。
  *
  * 与 SessionEventDispatch（api/session-api.ts，S3-W2）同族先例：主线程侧注册表 +

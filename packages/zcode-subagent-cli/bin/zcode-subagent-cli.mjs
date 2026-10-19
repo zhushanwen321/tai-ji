@@ -8,7 +8,7 @@
 //      node_modules 外，node ≥23.6 原生 type-stripping 可加载 .ts。npm 安装形态
 //      realpath 在 node_modules 内，Node 拒绝对其做 type-stripping——回退必然
 //      失败，故该分支以 node_modules 路径段判据禁用，dist 缺失时输出可操作错误
-//      （发现面 canExecute 只查 X_OK 位、派发期才真正加载本文件，坏形态必须在
+//      （发现侧 canExecute 只查 X_OK 位、派发期才真正加载本文件，坏形态必须在
 //      入口显式失败，不允许静默走入注定炸的分支）。
 
 import { existsSync } from "node:fs";

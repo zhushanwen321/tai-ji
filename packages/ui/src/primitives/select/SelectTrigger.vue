@@ -15,7 +15,7 @@ import { cn } from '../../lib/utils'
  *
  * gap-2 + whitespace-nowrap：间距对齐 demo .sel-btn { gap: 8px }；
  * nowrap 防止「High / Max」这类带空格文案在窄触发器（如 w-[88px]）里折行。
- * overflow-hidden 是长值的裁剪上下文（省略号收口由 SelectValue 的 truncate 承担），
+ * overflow-hidden 是长值的裁剪上下文（省略号收尾由 SelectValue 的 truncate 承担），
  * 缺了它长文本会画出控件右边界。
  */
 const props = defineProps<SelectTriggerProps & { class?: HTMLAttributes['class'] }>()

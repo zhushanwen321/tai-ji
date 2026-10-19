@@ -1,6 +1,6 @@
 // ack 合成流 + 可用性判据测试（dev-flow u-ack-provider 单元）。
 //
-// 本单元只交付三件事的纯函数面：
+// 本单元只交付三件事的纯函数部分：
 //   1. buildAckStreamSimple —— 零 token 合成流（字段 = 会话真实模型 / usage 全 0 /
 //      aborted 走 error 终止 / onCalled 返回前同步自撤）；
 //   2. computeAckAvailability —— 预计算 + fail-closed 的可用性判据（内置含 radius）；

@@ -100,7 +100,7 @@ describe('bashResultEffect：bashExecution entry 化（reducer 唯一入流通�
     const { ctx, entryStates } = createTestCtx()
     dispatch(bashResultEffect, ctx, 's1', bashResultPayload({ excludeFromContext: true, fullOutputPath: '/tmp/out.txt' }))
 
-    // reducer state 与 ref 同步产出（applyEntryFrame 喂入 + overlay 投影同 entry）
+    // reducer state 与 ref 同步产出（applyEntryFrame 喂入 + overlay 派生视图同 entry）
     const state = entryStates.get('s1')
     expect(state).toBeDefined()
     expect(state!.messages).toHaveLength(1)

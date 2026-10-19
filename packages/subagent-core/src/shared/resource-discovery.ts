@@ -182,12 +182,12 @@ function piToManifest(pi: Record<string, unknown> | undefined, kind: ResourceKin
 
 /**
  * package.json 文本 → pi 字段对象（pi.agents / pi.workflows 的容器）。
- * [review 修复] 结构守卫：JSON.parse 对 "42" / '"str"' / "null" 等合法 JSON 产出
+ * [review 修复] 结构检查：JSON.parse 对 "42" / '"str"' / "null" 等合法 JSON 产出
  * 非对象值，旧 `as Record<string, unknown>` 盲断言下 .pi 访问是「碰巧不抛」
  * （primitive 装箱返 undefined / null 抛 TypeError 落入 catch）——显式判非对象，
  * 按「无 manifest」（undefined）处理，后果与原先一致但语义不再依赖巧合。
  * pi 字段本身非对象（如 {"pi":42}）或为数组（如 {"pi":[]}——数组不是合法 pi 容器，
- * typeof "object" 守卫会放行，Record 断言对数组是谎言）同样显式归 undefined。
+ * typeof "object" 检查会放行，Record 断言对数组是谎言）同样显式归 undefined。
  * JSON SyntaxError 向上抛，由调用方 catch 承担「坏 JSON 不缓存、下次重试」语义。
  */
 function parsePiField(content: string): Record<string, unknown> | undefined {
@@ -218,7 +218,7 @@ export function getCachedFile(filePath: string): { mtimeMs: number; content: str
     content = fsSync.readFileSync(filePath, "utf-8");
   } catch {
     // stat 与 read 之间的删除/EACCES 竞态 → 驱逐并返回 null（exec-review major-2：
-    // docstring 承诺「不可读 → null」——readFileSync 也必须入守卫）
+    // docstring 承诺「不可读 → null」——readFileSync 也必须纳入检查）
     mtimeCache.delete(filePath);
     return null;
   }
@@ -477,7 +477,7 @@ async function scanNpmDir(
 
   // [perf] 包级并行（swf-perf-impl cleanup TC2/IF2）：entries.map + Promise.all，
   // perEntry.flat() 按原 readdir 序 concat——输出序与 readdir 包序一致。
-  // 不加新增 catch：每包失败面由 processPackage 内部既有 catch 承担，未捕获异常
+  // 不加新增 catch：每包失败情形由 processPackage 内部既有 catch 承担，未捕获异常
   // 经 Promise.all 以首个 reject 整体向上抛。
   const perEntry = await Promise.all(
     entries.map(async (entry): Promise<DiscoveredResource[]> => {
@@ -539,7 +539,7 @@ function readExtensionPaths(): string[] {
 // 消费方禁止复刻 join 字面（壳 resource-list-injector 曾有 4 join 复刻 +
 // 「须与彼处同步改」注释，收敛于此）。宿主注入根（discoveryRoots 槽）与
 // TAIJI_EXTENSION_PATHS 不属于约定根：前者归宿主槽位决策，后者是 taiji
-// 内部 dev-link 通道、非 agent 自救面（壳提示清单刻意不列）。
+// 内部 dev-link 通道、非 agent 自救侧（壳提示清单刻意不列）。
 
 /** user 级约定根 ~/.agents/{kind}/（homedir 推导）。 */
 function userAgentsConventionRoot(kind: ResourceKind): string {
@@ -565,7 +565,7 @@ function projectAgentsConventionRoot(workspaceRoot: string, kind: ResourceKind):
  * 约定根路径集合（有序：user-agents → project-pi → project-pi-tmp（仅
  * includeTmp）→ project-agents，相对序与 buildScanTargets 各槽的优先级序一致）。
  *
- * 壳 resource-list-injector 的空态 roots 提示清单消费本导出做纯投影（宿主
+ * 壳 resource-list-injector 的空态 roots 提示清单消费本导出做纯派生视图（宿主
  * 注入根现取 + 本集合拼接），路径决策全在 core——壳侧不再持有任何 join 字面。
  */
 export function conventionRootDirs(

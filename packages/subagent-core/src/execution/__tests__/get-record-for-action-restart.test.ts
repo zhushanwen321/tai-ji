@@ -27,7 +27,7 @@ const { loggerMock } = vi.hoisted(() => ({
 vi.mock("../../core/logger.ts", () => ({ getLogger: () => loggerMock }));
 
 // [W3 改写 → H1 U6] deliverChatMessage 走协议 seam（registerFakePiEngine 替身）——
-// 每轮 = 新 run + resume 锚点，续聊守卫链归 Continuation（dispatchRoundGuarded）。
+// 每轮 = 新 run + resume 锚点，续聊检查链归 Continuation（dispatchRoundGuarded）。
 
 import { ResurrectDeniedError } from "../domain/record-types.ts";
 import { registerFakePiEngine } from "./helpers/fake-engine-port.ts";
@@ -129,8 +129,12 @@ describe("[M10] getRecordForAction 跨重启磁盘重建（S3 回归场景）", 
   beforeEach(() => {
     for (const k of IDENTITY_ENV_KEYS) delete process.env[k];
     agentDir = fs.mkdtempSync(path.join(os.tmpdir(), "restart-recon-"));
-    sessionsDir = getSubagentSessionDir(agentDir, agentDir);
-    recordsDir = getSubagentRecordsDir(agentDir, agentDir);
+    // [session-store-layout-inversion] 生产 store 目录经
+    // getSubagentSessionDir(resolveStoreRootSessionId())（env dataDir 兜底）解析——
+    // stubEnv 把写删目标收进本 mkdtemp 目录（自建自删红线）。
+    vi.stubEnv("TAIJI_AGENT_DATA_DIR", agentDir);
+    sessionsDir = getSubagentSessionDir("root-session", agentDir);
+    recordsDir = getSubagentRecordsDir("root-session", agentDir);
     fs.mkdirSync(sessionsDir, { recursive: true });
 
     const modelService = new ModelConfigService({ agentDir, cwd: agentDir });
@@ -145,6 +149,7 @@ describe("[M10] getRecordForAction 跨重启磁盘重建（S3 回归场景）", 
     // maxRetries：collectRecords 触发的 fire-and-forget sessions-index 写可能与删除
     // 并发（ENOTEMPTY 竞态，全量并行跑时机器负载高会放大窗口）
     fs.rmSync(agentDir, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 });
+    vi.unstubAllEnvs();
     for (const k of IDENTITY_ENV_KEYS) delete process.env[k];
   });
 
@@ -191,7 +196,7 @@ describe("[M10] getRecordForAction 跨重启磁盘重建（S3 回归场景）", 
       depth: 2,
     });
 
-    // 重建后 parentRecordId=sa-parent ≠ 主进程 baseline(undefined) → cross-layer 守卫拦截
+    // 重建后 parentRecordId=sa-parent ≠ 主进程 baseline(undefined) → cross-layer 检查拦截
     expect(() => service.chatActions.getRecordForAction("sa-grand")).toThrow(/direct parent/);
   });
 
@@ -206,11 +211,11 @@ describe("[M10] getRecordForAction 跨重启磁盘重建（S3 回归场景）", 
     expect(store.getMutable("sa-fin")).toBe(record); // 重建注册
   });
 
-  it("[a3rv 归因] workflow-origin record 归档后、索引未预热（无 list 前置）→ 冷查仍能定位（origin 过滤只属展示面，D7 守卫可达）", () => {
-    // 复现 a3rv 重验：批成员收口（idle+gc）归档出内存后直接 message（无 action:'list'
+  it("[a3rv 归因] workflow-origin record 归档后、索引未预热（无 list 前置）→ 冷查仍能定位（origin 过滤只属展示侧，D7 检查可达）", () => {
+    // 复现 a3rv 重验：批成员收尾（idle+gc）归档出内存后直接 message（无 action:'list'
     // 预热 idToFile 索引）。修复前冷查兜底全扫吃 [H2 W1] origin 展示过滤 → 同树
     // workflow record 被滤 → 候选 undefined → 「not found or not owned」上转，
-    // endedMessageGuard 误分流「different session tree」；D7 workflow-origin 守卫
+    // endedMessageGuard 误分流「different session tree」；D7 workflow-origin 检查
     // 不可达。修复后冷查口径 includeWorkflow:true（治理语义），候选定位成功，
     // origin/parentRunId 随 resurrectColdRecord 透传（1543b39c1）。
     const file = writeSessionJsonl(sessionsDir, {
@@ -219,7 +224,7 @@ describe("[M10] getRecordForAction 跨重启磁盘重建（S3 回归场景）", 
       origin: "workflow",
       parentRunId: "wf-test-run",
     });
-    seedTerminalRecordForSessionFile(file, recordsDir, { stopReason: "gc" }); // GC 收口终态 → 重建 idle（可续候选）
+    seedTerminalRecordForSessionFile(file, recordsDir, { stopReason: "gc" }); // GC 收尾终态 → 重建 idle（可续候选）
 
     // 前置：内存确无（归档形态）；且未跑过任何 collectRecords（索引未热——与 a3rv
     // 剧本一致，list 预热会走 findLightById 直查，掩盖不了本缺陷的兜底全扫口径）
@@ -227,7 +232,7 @@ describe("[M10] getRecordForAction 跨重启磁盘重建（S3 回归场景）", 
 
     const record = service.chatActions.getRecordForAction("sa-wf-member", { allowReconnect: true });
 
-    // 候选定位成功 + 身份域透传：messageHandler 的 D7 守卫读 origin==="workflow"
+    // 候选定位成功 + 身份域透传：messageHandler 的 D7 检查读 origin==="workflow"
     // 给出正确域边界拒绝（而非归属误导文案）
     expect(record.origin).toBe("workflow");
     expect(record.parentRunId).toBe("wf-test-run");
@@ -239,28 +244,28 @@ describe("[M10] getRecordForAction 跨重启磁盘重建（S3 回归场景）", 
   // [review round2] 跨重启 worktree 绑定丢失防护
   // ============================================================
   // 场景：worktree:true 的 subagent 在父进程重启后续聊。WorktreeHandle
-  // 不可序列化、重建后恒缺失，若无守卫 → 冷路径 resume 的 spawn cwd 静默回落主 repo
+  // 不可序列化、重建后恒缺失，若无检查 → 冷路径 resume 的 spawn cwd 静默回落主 repo
   //（隔离失效，正是 worktree 要防的并发写冲突场景）。
   it("[review round2] worktree record 跨重启重建 → hadWorktree 标记 + 续聊被拒（行动语言）", async () => {
     clearEngines();
     const fake = registerFakePiEngine();
     // [H1 U6] 每轮 = 新 run + resume 锚点（旧 interact 冷路径替身注入随 interact 面退役），
-    // 续聊守卫链归 Continuation（dispatchRoundGuarded）。
+    // 续聊检查链归 Continuation（dispatchRoundGuarded）。
     writeSessionJsonl(sessionsDir, {
       id: "sa-wt",
       rootSessionId: "root-session",
       worktree: true,
     });
 
-    // [U4] worktree 绑定丢失的拒绝点前移到冷查准入守卫（assertAdmissionAllowed——
-    // 重建候选统一守卫；[U5 接管] 拒绝动作将改为 worktree 自动重建 + patch 恢复）
+    // [U4] worktree 绑定丢失的拒绝点前移到冷查准入检查（assertAdmissionAllowed——
+    // 重建候选统一检查；[U5 接管] 拒绝动作将改为 worktree 自动重建 + patch 恢复）
     expect(() => service.chatActions.getRecordForAction("sa-wt")).toThrow(ResurrectDeniedError);
     await expect(async () => service.chatActions.getRecordForAction("sa-wt")).rejects.toThrow(
       /worktree isolation/,
     );
   });
 
-  it("[review round2] 非 worktree record 跨重启重建 → 续聊不受 worktree 守卫拦截（向后兼容）", async () => {
+  it("[review round2] 非 worktree record 跨重启重建 → 续聊不受 worktree 检查拦截（向后兼容）", async () => {
     clearEngines();
     const fake = registerFakePiEngine();
     // identity entry 无 worktree 字段（旧文件）→ found.worktree undefined → hadWorktree false
@@ -269,7 +274,7 @@ describe("[M10] getRecordForAction 跨重启磁盘重建（S3 回归场景）", 
     const record = service.chatActions.getRecordForAction("sa-nowt");
     expect(record.hadWorktree).toBe(false);
 
-    // 冷路径续聊不被 worktree 守卫拦截（resume 正常发起；后续 spawn 编排
+    // 冷路径续聊不被 worktree 检查拦截（resume 正常发起；后续 spawn 编排
     // 超出本用例关注点——runSpawn 在本文件是 no-op mock）
     await expect(service.chatActions.deliverChatMessage(record, "resume normal")).resolves.toBeUndefined();
   });

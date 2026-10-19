@@ -5,10 +5,10 @@
  *
  * 职责边界：存储算法 SSOT 在 gen-stats-store.ts（本文件只调用，不重实现聚合/文件名/GC）；
  * bogus 丢弃判定在本服务采样入口执行（store 只提供阈值常量 + 纯谓词，D7）；sid→modelKey
- * 反向映射生命周期 = 三写一清 + 前端帧校验兜底（D4，被否谱系⑥：单点登记被脏映射/漏登记击穿）：
+ * 反向映射生命周期 = 三写一清 + 前端帧校验兜底（D4，不采用其余方案的理由⑥：单点登记被脏映射/漏登记击穿）：
  *   - 写 1  recordSample            采样登记（该 session 当时模型的样本）+ per-session current 槽
  *   - 写 2  onModelSwitched         模型切换重登记 + 顺带推新模型帧（MF7/MF9）
- *   - 写 3  onSnapshotResolved       恢复腿降级链解析成功回填（覆盖「新 session 未采样」缺口）
+ *   - 写 3  onSnapshotResolved       恢复路径降级链解析成功回填（覆盖「新 session 未采样」缺口）
  *   - 清    registerSessionCleanup   session 销毁（removeSessionEntry 汇聚点）删该 sid 全部条目
  *                                    （映射 + per-session current 槽）
  *
@@ -19,7 +19,7 @@
  * contextRewritten（compaction 一次性标记，markContextRewritten 写、下一条样本消费即清）；
  * 归因只影响帧内注解，**不改内存槽的数值语义也不改落盘**（磁盘仍 append-only 原始样本）。
  *
- * 固定帧序（MF9，构造性闭合）：同一触发点内「先广播 state_changed → 再重登记映射 →
+ * 固定帧序（MF9，构造性保证）：同一触发点内「先广播 state_changed → 再重登记映射 →
  * 最后推帧」。本服务的 onModelSwitched 由 session-service 的 state_changed 发布挂钩
  * （组合根 tap 接线）在 bus.publish(state_changed) 同步返回后调用——单 WS 连接有序送达，
  * 发布先于挂钩即帧序成立，无需时间戳/序号仲裁。
@@ -217,7 +217,7 @@ export class GenStatsService {
    *
    * 丢弃规则（§3.5 / D7，丢弃不入聚合）：
    *   - model/provider 缺失 → 样本无法归属模型，整体跳过（防御，pi AssistantMessage 正常态必带）；
-   *   - durationMs=null（真缺闭/缺起——pi 崩溃断连致闭合帧不到达，或 runtime 中途启动/
+   *   - durationMs=null（真缺闭/缺起——pi 崩溃断连致关闭帧不到达，或 runtime 中途启动/
    *     丢 message_start 致无起算点，genstats-speed-llm-window.md D2/D3）→ 速度样本跳过，
    *     命中率样本照常；（D2 口径注，GS-5 精神延续：速度分母 durationMs = assistant message_start
    *     与 assistant message_end 两帧 RPC 传输延迟之差——单次 LLM 请求窗口，不含工具执行时间；
@@ -241,7 +241,7 @@ export class GenStatsService {
     // D4 条件回写（adversarial-review-fixes §3.4 D4）：已登记为**其他**模型 key 时只落盘
     // 不回写——turn 中切模型后迟到的 usage 事件自带旧模型名，无条件 set 会把映射回写为
     // 旧模型，该 sid 从新模型的扩展广播集合漏收帧；样本仍落盘到自带 model 名下（归属
-    // 正确），漏帧窗口交既有恢复腿（写 2 / getGenStats 降级链）自愈。未登记或同 key 才回写。
+    // 正确），漏帧窗口交既有恢复路径（写 2 / getGenStats 降级链）自愈。未登记或同 key 才回写。
     const registered = this.modelBySid.get(sid)
     if (registered === undefined || registered === modelKey) {
       this.modelBySid.set(sid, modelKey)
@@ -385,12 +385,12 @@ export class GenStatsService {
     this.deps.publish(sid, { type: 'session.stats_update', payload: this.frameFor(sid, modelKey) })
   }
 
-  // ── 写 3：恢复腿解析回填（getGenStats RPC case 经 getSnapshotForSession 间接触发）──────
+  // ── 写 3：恢复路径解析回填（getGenStats RPC case 经 getSnapshotForSession 间接触发）──────
 
   /**
-   * 恢复腿 modelKey 解析成功回填（D4 写 3）：覆盖「新 session 未采样」缺口——未采样
-   * session 本不在映射，用户切入触发恢复腿即登记，之后 live 帧可达。竞态声明（R4/S14）：
-   * 帧计算后、登记执行前存在毫秒级交错窗口，该 sid 可能漏收一帧——恢复腿 reply
+   * 恢复路径 modelKey 解析成功回填（D4 写 3）：覆盖「新 session 未采样」缺口——未采样
+   * session 本不在映射，用户切入触发恢复路径即登记，之后 live 帧可达。竞态声明（R4/S14）：
+   * 帧计算后、登记执行前存在毫秒级交错窗口，该 sid 可能漏收一帧——恢复路径 reply
    * 本身已含最新帧、下一采样自愈，有界无害。
    */
   onSnapshotResolved(sid: string, modelKey: string): void {
@@ -415,7 +415,7 @@ export class GenStatsService {
 
   /**
    * 完整帧构造（唯一出口）：模型全局聚合 + 本会话 current 合并（D6 聚合在 runtime 算好，
-   * 前端只拿结论）。三条发送路径（recordSample 广播 / onModelSwitched / 恢复腿）全经此。
+   * 前端只拿结论）。三条发送路径（recordSample 广播 / onModelSwitched / 恢复路径）全经此。
    */
   frameFor(sid: string, modelKey: string | null): GenStatsFrame {
     return this.composeFrame(sid, modelKey, this.modelAggregates(modelKey))
@@ -458,7 +458,7 @@ export class GenStatsService {
    * 场景 4⑥「无记录则—」分支不可达）；仅 modelKey 为 null（降级链④走尽）时缺省 + 全 null。
    *
    * 帧 model 字段即**结构化归属标记**（A4/S18 归属上移，plan-mode-audit-remediation）：
-   * 三条推帧路径（recordSample 扩展广播按映射过滤 / onModelSwitched 重登记后推 / 恢复腿
+   * 三条推帧路径（recordSample 扩展广播按映射过滤 / onModelSwitched 重登记后推 / 恢复路径
    * resolveModelKey 降级链解析）保证「发给某 sid 的帧，其 model = runtime 权威解析的该
    * sid 当前模型复合 key」——含 '/' 的 Model.id（openrouter 系 "vendor/model"）原样保留
    * 完整复合 key，不做尾段截取。renderer 据此纯显示（useGenStats 消费侧 model 比对兜底
@@ -505,10 +505,10 @@ export class GenStatsService {
   }
 
   /**
-   * 恢复腿（D4 降级链，async——session-message-handler 'session.getGenStats' case 调用）：
+   * 恢复路径（D4 降级链，async——session-message-handler 'session.getGenStats' case 调用）：
    * ① 实时 get_state（pi 在线一次性解析，绕开 replicated states 异步播种竞速窗口；
    *   成功即写 3 回填）；② 失败/超时 → 内存映射 sid→modelKey；③ 仍无 → replicated
-   *   states 缓存值（session.modelId 登记的永久双写缓存，与投影 fallback 同源）；
+   *   states 缓存值（session.modelId 登记的永久双写缓存，与派生视图 fallback 同源）；
    *   ④ 全部未命中 → 全 null 帧 + model 缺省。残余窗口声明（R3/S10）：重启后映射空 +
    *   get_state 失败（pi 真实离线）时全 null 持续到首 turn 自愈——pi 离线期间无法产生
    *   对话，窗口不可观测，接受。

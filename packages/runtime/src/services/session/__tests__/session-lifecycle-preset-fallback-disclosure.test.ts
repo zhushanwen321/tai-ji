@@ -7,7 +7,7 @@
  * 1. **检测层**：真实 `resolveLaunchPresetOptions` + 定义不可得的 presetId → resolution 上附
  *    `fellBackFromPresetId`（原悬空 id）；
  * 2. **携带层**：restore 全链（`resolveLaunchPresetOptions` → `spawnRestoreClient` → 内存态置位）
- *    → 内存 session 与 `buildSessionSummary`（真实投影）产出的 SessionSummary 都携带
+ *    → 内存 session 与 `buildSessionSummary`（真实派生视图）产出的 SessionSummary 都携带
  *    `launchPresetFallbackTo = builtin:full`，可从会话状态读回；模式仍可得 → 不置位（不得假陈述）。
  *
  * Mock 策略：preset 服务为内存 fake（检测逻辑真实走 launch-params），svc/pm/sessionStore 注入
@@ -56,7 +56,7 @@ function makePresetService(availableIds: readonly string[]): PresetService {
   } as unknown as PresetService
 }
 
-/** 真实 Summary 投影（git 端口 fake；replicated states 空 → tokenCount 走实例基线）。 */
+/** 真实 Summary 派生视图（git 端口 fake；replicated states 空 → tokenCount 走实例基线）。 */
 const gitInfoReader = {
   readGitInfo: () => undefined,
   pruneStaleCache: () => {},
@@ -169,7 +169,7 @@ describe('restore 回落披露（F1 / 设计 §7.5 E4）', () => {
     expect(summary.launchPresetFallbackTo).toBe('builtin:full')
     // 原悬空 id 仍保留（chip 才能同时报「模式已删除（id）」）
     expect(summary.launchPresetId).toBe(GONE_PRESET_ID)
-    // 会话状态读回（renderer reload 时 runtime 内存态重投影仍可复现，不依赖一次性广播）
+    // 会话状态读回（renderer reload 时 runtime 内存态重派生视图仍可复现，不依赖一次性广播）
     const active = env.lifecycle.get('sess-restore') as unknown as { launchPresetFallbackTo?: string }
     expect(active.launchPresetFallbackTo).toBe('builtin:full')
     expect(makeSummaryReal(active as unknown as IManagedSessionView).launchPresetFallbackTo).toBe('builtin:full')

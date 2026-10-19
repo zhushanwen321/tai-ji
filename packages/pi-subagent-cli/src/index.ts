@@ -3,7 +3,7 @@
 // @zhushanwen/pi-subagent-cli 主 barrel（W7，impl-plan §2.7）。
 // 协议服务器 + 引擎适配器 + 迁移的引擎侧原语（spawn 链 / stdin-writer /
 // ui-request-queue 等）。不变量：本包禁止 import @zhushanwen/subagent-core
-// （W9 check-engine-package-boundary 守卫目标）。
+// （W9 check-engine-package-boundary 检查目标）。
 
 export { EngineProtocolServer, createDefaultPiEngine } from "./server.ts";
 export { PiEngine, type PiEngineDeps } from "./pi-engine.ts";

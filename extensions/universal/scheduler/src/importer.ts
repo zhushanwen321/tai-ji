@@ -117,7 +117,7 @@ function importFromFile(
   // appendMessage 触发 _persist 全量落盘）与 session_shutdown 时重复调用——flush 后 sessionFile
   // 出现 → 删；仍未 flush → 静默保留 .imported 供下次 session_start 的 handleImportedResidue
   // 崩溃恢复重导入。跨 session 重导入窗口 = session_start → 首个 turn_end（秒级）：turn_end 后
-  // .imported 已删，后续 session 启动看不到残留 → 双导入窗口闭合（R-CONCURRENT-IMPORT 已更新）
+  // .imported 已删，后续 session 启动看不到残留 → 双导入窗口封住（R-CONCURRENT-IMPORT 已更新）
   logger.warn('imported legacy tasks (session not flushed; deferring removal)', {
     count: tasks.length,
     path: importedPath,

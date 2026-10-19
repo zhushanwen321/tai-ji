@@ -44,7 +44,7 @@ import {
 } from './outbound-frame-registry.js'
 import { getCrashJournal } from '../../infra/crash-journal.js'
 import { warnIfBacklogged } from '../../utils/backpressure-warn.js'
-// pull-push W0 观测面：订阅生命周期 + state 类投递失败的结构化日志（R11/6c3 零日志根修）。
+// pull-push W0 观测范围：订阅生命周期 + state 类投递失败的结构化日志（R11/6c3 零日志从根源修复）。
 import {
   clearBusObserveState,
   observeClearSession,
@@ -53,18 +53,18 @@ import {
   observeUnsubscribe,
   observeUnsubscribeAll,
 } from './bus-observe.js'
-// 组合根（index.ts）经本模块导入守卫默认值——省一条独立 import 行（index.ts max-lines 门禁），
+// 组合根（index.ts）经本模块导入出站帧检查的默认值——省一条独立 import 行（index.ts max-lines 门禁），
 // 阈值 SSOT 仍在 outbound-frame-registry（shared 常量的 registry 出口）。
 export { DEFAULT_OUTBOUND_FRAME_GUARD_OPTIONS } from './outbound-frame-registry.js'
 
 /**
- * 条件信号事件 → 崩溃台账（crash-forensics-and-watchdog §3.3 D1 写入点矩阵，u1e）。
+ * 条件信号事件 → 崩溃 journal（crash-forensics-and-watchdog §3.3 D1 写入点矩阵，u1e）。
  *
- * 出站守卫判定点与既有日志/守卫行为**同点双写**：告警档 → frame-truncated(warn-tier)、
+ * 出站帧检查判定点与既有日志/检查行为**同点双写**：告警档 → frame-truncated(warn-tier)、
  * 契约保持式截断档 → frame-truncated(trunc-tier)、注册表 miss（含替换后仍超限）→
  * registry-miss、publish 序列化失败丢帧 → frame-unserializable（与 registry-miss 同为
- * 核心链整帧丢弃，台账覆盖对称）。守卫行为本身零改动（append 是 fire-and-forget 旁路，
- * writer 未初始化时 no-op 单例、内部自吞异常——台账任何故障不反噬出站主链，D1
+ * 核心链整帧丢弃，journal 登记覆盖对称）。检查行为本身零改动（append 是 fire-and-forget 旁路，
+ * writer 未初始化时 no-op 单例、内部自吞异常——journal 登记任何故障不反噬出站主链，D1
  * best-effort 语义）。事件是评估器条件 #1/#2 的数据源（附录 A）。
  */
 function appendFrameJournal(
@@ -116,7 +116,7 @@ export type TopicKind = 'state' | 'stream' | 'transient'
  * state 需要快照键。新增消息类型忘记入表时走 stream 最安全。
  *
  * 导出（RT-1#5）：TOPIC_TABLE / STATE_TYPE_KEY_MAP / STATE_TYPE_KEY_PAYLOAD_DERIVED /
- * STATE_NO_KEY_TOPICS 供守卫测试遍历断言「state 类 ⊆ 静态映射 ∪ 派生登记 ∪ 例外清单」
+ * STATE_NO_KEY_TOPICS 供检查测试遍历断言「state 类 ⊆ 静态映射 ∪ 派生登记 ∪ 例外清单」
  * ——新增 state 类型漏登记在测试期即红，不再依赖注释自认风险。
  */
 export const TOPIC_TABLE: Readonly<Record<string, TopicKind>> = {
@@ -124,12 +124,12 @@ export const TOPIC_TABLE: Readonly<Record<string, TopicKind>> = {
   'session.commands': 'state',
   'context.update': 'state',
   'session.subagents': 'state',
-  // plan 模式状态投影（plan 模式重设计 D1⑤）：last-value 单例状态——断连重连 / 切回
+  // plan 模式状态派生视图（plan 模式重设计 D1⑤）：last-value 单例状态——断连重连 / 切回
   // session 经 stateSnapshot 'plan' key 回放恢复。**必须入 STATE_TYPE_KEY_MAP**：
   // state 类但未映射 typeKey 的消息会走「不写快照」分支（stateTypeKey 返回 null），
-  // PlanModeBar/产物面板在重连后将拿不到恢复帧（投影链六件套之一，缺则静默失效）。
+  // PlanModeBar/产物面板在重连后将拿不到恢复帧（派生视图链六件套之一，缺则静默失效）。
   'session.planState': 'state',
-  // E 方案（subagent-realtime-channel §4.3）：relay tee 产出的 subagent entry 增量帧。
+  // E 方案（subagent-realtime-channel §4.3）：SubagentTee 产出的 subagent entry 增量帧。
   // state 类但刻意不进 STATE_TYPE_KEY_MAP——增量 entry 流不是 last-value 语义（快照
   // 覆盖会丢中间 entry），也不入 ring（subagent 长任务高频帧会冲刷主对话流的可回放
   // ring，制造主流 gap）。对账路径 = reducer 按 entry id 幂等 + 重开时 fetchAndInject
@@ -142,11 +142,11 @@ export const TOPIC_TABLE: Readonly<Record<string, TopicKind>> = {
   'session.occupancy': 'state',
   // session.delivery（投递所有权内核 D5）：投递内核条目全量快照（队列区单一数据源 D7）。
   // state topic last-value——断连重连 / 切回 session 经 stateSnapshot 回放恢复（G2/V5），
-  // 不入 ring。帧体积有界（≤ deliveredWindow + 活跃条目数，D5③ 投影规则在装配侧），
+  // 不入 ring。帧体积有界（≤ deliveredWindow + 活跃条目数，D5③ 派生视图规则在装配侧），
   // 故不入 outbound-frame-registry 大字段表。装配点 = transport 侧
   // （session-message-handler.ts + session-delivery-topic.ts，u3a；本表只认类型）。
   'session.delivery': 'state',
-  // widget 两类型 state 类化（scheduler-widget-push D3）：widget 显示面是覆盖式 last-value
+  // widget 两类型 state 类化（scheduler-widget-push D3）：widget 显示侧是覆盖式 last-value
   // （消费端只关心每 (session, widgetKey) 最后一帧）——分配 seq、写 stateSnapshot（typeKey
   // 从 payload.widgetKey 派生，见 STATE_TYPE_KEY_PAYLOAD_DERIVED）、不入 ring、照常广播
   // live 订阅者。效果：widget 帧退出对话 ring（不再被对话帧冲刷，容量全部留给对话帧），
@@ -162,7 +162,7 @@ export const TOPIC_TABLE: Readonly<Record<string, TopicKind>> = {
   // stateSnapshot('btw') 恢复 drawer 线列表与 badge 聚合（不依赖广播时序；拉取兜底 =
   // btw.list RPC 同形应答，双通道同一 payload——C6「需立即消费的状态必须可拉取」）。
   // btw.create / btw.remove 是纯 RPC reply（同名 request/reply，走 reply 通道不经 publish）
-  // ——不入本表（session.subscribe 同族；守卫锚定见 __tests__/state-type-key-map-guard.test.ts）。
+  // ——不入本表（session.subscribe 同族；检查锚定见 __tests__/state-type-key-map-guard.test.ts）。
   'btw.list': 'state',
   // ── stream 类：分配 seq、入 ring（O(1) 覆盖写）──
   'message.message_start': 'stream',
@@ -215,7 +215,7 @@ export const TOPIC_TABLE: Readonly<Record<string, TopicKind>> = {
   'subagent.stream_delta': 'transient',
   // B2 subagent-stream-chunk §4.1：R 路径增量内容 chunk（delta 原样转发 + msgSeq/deltaSeq
   // 双序号）。transient 直传订阅者（不分配 seq、不入 ring、不写快照，断连即丢）——收敛
-  // 不靠 ring 回放，走失步/接入拉取（session.getSubagentStreamState，读 RelayTee 既有
+  // 不靠 ring 回放，走失步/接入拉取（session.getSubagentStreamState，读 SubagentTee 既有
   // 内存状态）+ 清除消息/entry 终态权威。
   'subagent.stream_chunk': 'transient',
   'terminal.data': 'transient',
@@ -254,20 +254,20 @@ export function topicOf(type: string): TopicKind {
  * fetchAndInject 拉全量快照（设计 subagent-realtime-channel §6.1-2「帧先于快照到达，
  * reducer 幂等去重」）。TOPIC_TABLE 该行上方注释与此同源。
  *
- * 例外清单机器可读化（RT-1#5）：STATE_NO_KEY_TOPICS 是上述例外的显式白名单——守卫测试
+ * 例外清单机器可读化（RT-1#5）：STATE_NO_KEY_TOPICS 是上述例外的显式白名单——检查测试
  * 断言「state 类 ⊆ STATE_TYPE_KEY_MAP keys ∪ STATE_NO_KEY_TOPICS」，运行时 warn 同以
- * 它豁免。新增例外必须进本清单（并在此处补登记理由），否则守卫测试即红。
+ * 它豁免。新增例外必须进本清单（并在此处补登记理由），否则检查测试即红。
  *
  * typeKey 出处第二形态（scheduler-widget-push D3）：静态查表之外，state 类 type 还可登记
- * 进 STATE_TYPE_KEY_PAYLOAD_DERIVED（type → 从 payload 派生 key 的函数表）——守卫断言
+ * 进 STATE_TYPE_KEY_PAYLOAD_DERIVED（type → 从 payload 派生 key 的函数表）——检查断言
  * 相应扩展为「静态 key 或派生登记」两形态（例外白名单仍是第三形态）。
  */
 export const STATE_TYPE_KEY_MAP: Readonly<Record<string, string>> = {
   'session.commands': 'commands',
   'context.update': 'context',
   'session.subagents': 'subagents',
-  // plan 模式状态投影（plan 模式重设计 D1⑤）：typeKey 'plan' 与 TOPIC_TABLE 的 state
-  // 登记配对——未入本表的 state 类消息永不写快照（stateTypeKey 返回 null），投影链静默失效。
+  // plan 模式状态派生视图（plan 模式重设计 D1⑤）：typeKey 'plan' 与 TOPIC_TABLE 的 state
+  // 登记配对——未入本表的 state 类消息永不写快照（stateTypeKey 返回 null），派生视图链静默失效。
   'session.planState': 'plan',
   'session.workflowUpdate': 'workflows',
   'session.state_changed': 'state_changed',
@@ -294,8 +294,8 @@ export const STATE_TYPE_KEY_MAP: Readonly<Record<string, string>> = {
  * live 行为不变（widgetKey 缺失/空串是协议异常数据——event-adapter 已把缺失翻译为
  * 空串，按 falsy 判定回落，见 :575）。
  *
- * 与 STATE_TYPE_KEY_MAP / STATE_NO_KEY_TOPICS 同为 RT-1#5 守卫断言对象：state 类 type
- * 必须三居其一（静态映射 / 派生登记 / 例外白名单），守卫测试见
+ * 与 STATE_TYPE_KEY_MAP / STATE_NO_KEY_TOPICS 同为 RT-1#5 检查断言对象：state 类 type
+ * 必须三居其一（静态映射 / 派生登记 / 例外白名单），检查测试见
  * __tests__/state-type-key-map-guard.test.ts。
  */
 export const STATE_TYPE_KEY_PAYLOAD_DERIVED: Readonly<Record<string, (payload: unknown) => string | null>> = {
@@ -319,7 +319,7 @@ function widgetTypeKeyFromPayload(prefix: string, payload: unknown): string | nu
 /**
  * state-no-key 例外白名单（RT-1#5 机器可读化）：登记为 state 类但刻意不映射 typeKey
  * 的类型全集（逐条理由见 STATE_TYPE_KEY_MAP 上方「例外登记」注释块）。
- * 守卫测试与运行时 warn 共用——例外之外任何 state 类型缺 typeKey 映射 = 漂移。
+ * 检查测试与运行时 warn 共用——例外之外任何 state 类型缺 typeKey 映射 = 漂移。
  */
 export const STATE_NO_KEY_TOPICS: ReadonlySet<string> = new Set(['session.subagentEntriesAppended'])
 
@@ -328,7 +328,7 @@ const warnedStateNoKeyTypes = new Set<string>()
 
 /**
  * B7 预算驱逐遥测的周期汇总间隔（帧数）：首次驱逐必告警，此后每累计该帧数汇总一条，
- * 防高频驱逐刷屏（观测面零行为介入）。
+ * 防高频驱逐刷屏（观测范围零行为介入）。
  */
 const EVICT_WARN_INTERVAL_FRAMES = 1000
 
@@ -344,10 +344,10 @@ const sendFailureWarned = new WeakSet<object>()
 
 /**
  * RT-1#5 运行时纵深：state 类无 typeKey 出处且不在例外白名单时 warn 一次——该形态下
- * 快照静默不写、重连投影失效，此前零日志。守卫测试已把漏登记挡在提交期，这里覆盖
+ * 快照静默不写、重连派生视图失效，此前零日志。检查测试已把漏登记挡在提交期，这里覆盖
  * 「测试期之后发生的漂移」（热载/运行期表变更等）。null 的两种成因文案区分：
  * 派生登记 type 的 key 缺失（widgetKey 缺失/空串，本帧数据异常、仅丢该帧快照）vs
- * 静态映射漂移（漏登记，该类型重连投影持续失效）。
+ * 静态映射漂移（漏登记，该类型重连派生视图持续失效）。
  */
 function warnStateNoKeyOnce(type: string): void {
   if (STATE_NO_KEY_TOPICS.has(type) || warnedStateNoKeyTypes.has(type)) return
@@ -422,7 +422,7 @@ export class MessageBus implements IMessageBus {
 
   /**
    * @param ringCapacity streamRing 容量上限，默认 1000。满时 publish 覆盖写最旧槽位（O(1)）。
-   * @param guardOptions 出站帧守卫选项（u4a：阈值参数化——生产默认 shared 常量 8MB/32MB；
+   * @param guardOptions 出站帧检查选项（u4a：阈值参数化——生产默认 shared 常量 8MB/32MB；
    *   测试注入小阈值走真实行为逻辑，A10 阈值校准法同型）。resolveSessionFilePath 组合根
    *   可选注入（占位文案填 session 文件实路径；未注入走「见 runtime 日志」占位）。
    * @param ringBudgetBytes per-session ring 字节预算（B7，默认 16MB；阈值参数化对齐
@@ -441,15 +441,15 @@ export class MessageBus implements IMessageBus {
   /**
    * 发布消息到 session：按 topicOf(type) 三分类分流（D5-1），三类都序列化一次并推给订阅者。
    *
-   * 出站帧守卫（u4a，crash-resilience D3）：超截断档（guardOptions.truncateBytes）的 push
+   * 出站帧检查（u4a，crash-resilience D3）：超截断档（guardOptions.truncateBytes）的 push
    * 帧按「契约保持式截断」替换大字段为占位载荷（消息类型不变，截断版占 seq 入 ring/写快照/
    * 直传——客户端、ring 回放、重订阅拿到**同一份截断版**，seq 连续性 / gap 检测 / live≡reload
    * 不被破坏）；注册表 miss 或截断后仍超限 → 整条丢弃 + **seq 回滚**（该消息从未占用 seq，
-   * 不触发 gap——被否方案④「占 seq 后丢弃」会触发 gap-重订阅失败死循环）。
+   * 不触发 gap——不采用的方案④「占 seq 后丢弃」会触发 gap-重订阅失败死循环）。
    *
-   * 时序实现（w09 TC-V1 契约：单条消息全程 JSON.stringify 恰好 1 次，守卫不得对小消息
-   * 额外序列化）：seq 写入 → 序列化（唯一一次）→ 守卫按 wire 字节数判定——小消息零额外
-   * 开销直接广播；超限才进入守卫决策（其内部序列化仅罕见路径发生），drop 时 seq 回滚，
+   * 时序实现（w09 TC-V1 契约：单条消息全程 JSON.stringify 恰好 1 次，检查不得对小消息
+   * 额外序列化）：seq 写入 → 序列化（唯一一次）→ 检查按 wire 字节数判定——小消息零额外
+   * 开销直接广播；超限才进入检查决策（其内部序列化仅罕见路径发生），drop 时 seq 回滚，
    * 外部可观察语义与「seq 分配前整条丢弃」等价（同步单线程内无观察窗口）。
    *
    * 分流语义：
@@ -460,8 +460,8 @@ export class MessageBus implements IMessageBus {
    *
    * 广播（三类共用）：readyState===1（OPEN）的 ws 调 send(序列化文本)；单个 ws.send 抛错
    * try/catch 兜底（ES4），不影响其它 ws 与 publish 主流程。序列化失败（循环引用等不可
-   * 序列化载荷）→ seq 回滚 + 丢弃 + error 日志 + frame-unserializable 台账（u4a 零抛错：
-   * 守卫设施不成为新崩溃源；原行为向调用方冒泡 stringify 异常，守卫语义下收紧为有痕丢弃）。
+   * 序列化载荷）→ seq 回滚 + 丢弃 + error 日志 + frame-unserializable journal 登记（u4a 零抛错：
+   * 检查设施不成为新崩溃源；原行为向调用方冒泡 stringify 异常，检查语义下收紧为有痕丢弃）。
    *
    * @param sessionId 目标 session
    * @param message 待发布消息（广播时 JSON.stringify；注意 state/stream 类会原地写入
@@ -484,8 +484,8 @@ export class MessageBus implements IMessageBus {
       payload = JSON.stringify(message)
     } catch (e) {
       this.rollbackSeq(state, message, isTransient)
-      // M3（b21 台账对称收尾）：序列化失败丢帧与 registry-miss 同为核心链整帧丢弃——
-      // error 日志之外补台账事件（评估器条件信号），append 旁路自吞不反噬本路径。
+      // M3（b21 journal 登记对称收尾）：序列化失败丢帧与 registry-miss 同为核心链整帧丢弃——
+      // error 日志之外补 journal 登记事件（评估器条件信号），append 旁路自吞不反噬本路径。
       appendFrameJournal('frame-unserializable', 'serialize-failed', sessionId, {
         frameType: message.type,
         channel: 'push',
@@ -495,12 +495,12 @@ export class MessageBus implements IMessageBus {
     }
     const bytes = Buffer.byteLength(payload, 'utf8')
     if (bytes > this.guardOptions.truncateBytes) {
-      // u4a：超截断档 → 契约保持式截断 / miss 兜底。守卫零 mutate 入参（不可变克隆替换，
+      // u4a：超截断档 → 契约保持式截断 / miss 兜底。检查零 mutate 入参（不可变克隆替换，
       // 克隆随 spread 携带已写入的 seq），ring/快照/广播统一存截断版。
       const guarded = guardOutboundPushFrame(message, sessionId, this.guardOptions)
       if (guarded.action === 'dropped') {
-        // u1e（crash-forensics D1）：注册表 miss（含替换后仍超限）→ registry-miss 台账
-        // 事件（reason 保留守卫 dropReason 原值区分两形态）。评估器条件 #2 出现即 tripped。
+        // u1e（crash-forensics D1）：注册表 miss（含替换后仍超限）→ registry-miss journal
+        // 登记事件（reason 保留检查 dropReason 原值区分两形态）。评估器条件 #2 出现即 tripped。
         appendFrameJournal('registry-miss', guarded.dropReason, sessionId, {
           frameType: message.type,
           bytes: guarded.bytes,
@@ -537,7 +537,7 @@ export class MessageBus implements IMessageBus {
     if (bytes > this.guardOptions.warnBytes) {
       // u4a 告警档（8MB 哨兵）：不截断，warn 暴露（上游自截失效时先于此档可见）。
       console.warn(`[outbound-frame-guard] large outbound push frame (warn): type=${message.type} sessionId=${sessionId} bytes=${bytes}`)
-      // u1e（crash-forensics D1）：告警档 → frame-truncated(warn-tier) 台账事件（评估器
+      // u1e（crash-forensics D1）：告警档 → frame-truncated(warn-tier) journal 登记事件（评估器
       // 条件 #1 数据源，附录 A「周均 >10 次」按此事件窗口计数）。
       appendFrameJournal('frame-truncated', 'warn-tier', sessionId, {
         frameType: message.type,

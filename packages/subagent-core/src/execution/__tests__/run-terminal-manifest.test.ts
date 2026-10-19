@@ -1,12 +1,12 @@
 // src/execution/__tests__/run-terminal-manifest.test.ts
 //
-// [P1b-2 / D5] run 级终局投影 manifest 写读单测（manifest-store.ts）。
+// [P1b-2 / D5] run 级终局派生视图 manifest 写读单测（manifest-store.ts）。
 //
 // 锁四面（D5-④ manifest-write 输出 + D5 清理规则①单源锚定）：
 // 1. 三形态写读闭环：成功=completed、失败=failed+errorCode、取消=cancelled。
 // 2. 旧读侧兼容：旧 manifest（无 outcome 字段的存量/手写形态）读回 null 不炸；
 //    旧记录缺可选字段读回 undefined 不炸（isValidManifest 不拒可选字段）。
-// 3. 损坏降级：JSON 损坏 / 形状不合法 → null（未终局语义），消费方按「无投影」。
+// 3. 损坏降级：JSON 损坏 / 形状不合法 → null（未终局语义），消费方按「无派生视图」。
 // 4. runId 防穿越：白名单外 runId 拒绝（文件名由 runId 直接拼出的路径安全线）。
 
 import * as fs from "node:fs";
@@ -43,7 +43,7 @@ function makeManifest(overrides: Partial<RunTerminalManifest> = {}): RunTerminal
 
 // ── 1. 三形态写读闭环 ────────────────────────────────────────
 
-describe("run 终局投影三形态写读（验收 a：manifest 侧）", () => {
+describe("run 终局派生视图三形态写读（验收 a：manifest 侧）", () => {
   it("成功 = completed（errorCode 缺省不落键）", async () => {
     await writeRunTerminalManifest(dir, makeManifest({ outcome: "done" }));
 

@@ -1,7 +1,7 @@
 /**
  * 工厂入口装配单测：默认导出一次性注册 event/tool/command 三通道。
  *
- * 断言面：5 个事件 handler（session_start/session_tree/agent_start/
+ * 断言范围：5 个事件 handler（session_start/session_tree/agent_start/
  * before_agent_start/agent_end）+ todo tool + todos 命令各注册一次；
  * 命令名锚定 "todos"（/todos 入口漂移 = 用户命令失效）。
  */

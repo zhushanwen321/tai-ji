@@ -13,28 +13,28 @@
  *   [PS-04]，剩余覆盖仅「不受支持的外部双写者」不构成保留理由）；空值语义 = 'required'
  *   （值域不含空、永不 guard）。
  * - modelId：fetch = get_state().model（pi Model.id 是裸 modelId、provider 在 Model.provider，
- *   投影组合为 runtime 语义的 'provider/model' 字符串——与 session.modelId /
+ *   派生组合为 runtime 语义的 'provider/model' 字符串——与 session.modelId /
  *   switchModel 口径一致，见 rpc-types.ts RpcSessionState.model / ai types.ts Model）；
  *   失效 = switchModel RPC 成功响应（RPC 响应驱动是「事件只做失效」的补充合法形态，D7）；
  *   空值语义 = 'required'（W15 磁盘扫描占位符 '' 不是权威空值，不登记空值语义）。
  *
  * W8 二条目（usage / commands，四实例齐备）：
- * - usage：fetch = get_session_stats().contextUsage（投影对齐既有 fetchContext 口径：
+ * - usage：fetch = get_session_stats().contextUsage（派生对齐既有 fetchContext 口径：
  *   inputTokens = tokens、contextLimit = contextWindow、usagePercent = Math.round(percent)，
  *   percent 无值时字段缺省——[RT-4#7] 无值纪律，不折 0）；
  *   失效 = context 相关事件 turn_end / agent_end / compaction（接线汇聚点 =
  *   session-service.applyContextUpdate——三事件路径均经 interpreter onContextUpdate 到达）；
- *   空值语义 = 无（tokens=null 是 pi compact 后无新 turn 的合法「无值」态，投影为空快照
+ *   空值语义 = 无（tokens=null 是 pi compact 后无新 turn 的合法「无值」态，派生为空快照
  *   保持旧值，对齐 fetchContext 返回 null 的不更新语义，不做覆盖也不做 guard）。
  * - commands：fetch = get_commands（数组包装为 { commands } 快照，空数组 = 合法态整字段覆盖）；
  *   失效 = getCommands 的全部调用路径（W12 起激活发布路径已删，仅剩 renderer 主动 RPC 查询
- *   ——查询即失效，重拉完成后经 fetchCommandsSnapshot 挂钩刷新 session.commands last-value）；
- *   空值语义 = 无（投影自构对象 key 恒在）。
+ *   ——查询即失效，重新拉取完成后经 fetchCommandsSnapshot 挂钩刷新 session.commands last-value）；
+ *   空值语义 = 无（派生自构对象 key 恒在）。
  *
  * [HISTORICAL] W7 label / W8 queue 深度两条配置已撤销（PR #185 data-governance review
  * MF1/MF2，2026-08-20）：两实例 .get() 生产零消费、markDirty 触发的防抖 get_state 拉取纯
  * 浪费 RPC。label 终态 = session_info_changed 事件直写 setLabelCache（登记表 #1 修订）；
- * queue 深度终态 = queue_update 帧内 pendingMessageCount 推送投影（与 get_state 快照同公式
+ * queue 深度终态 = queue_update 帧内 pendingMessageCount 推送派生视图（与 get_state 快照同公式
  * 同源，登记表 #6 修订）。
  *
  * @module replicated-states-config
@@ -57,7 +57,7 @@ export const SCALAR_STATE_DEBOUNCE_MS = 300
 /** usagePercent 上限（对齐 session-service.computeUsage 的 MAX_PERCENT 口径，clamp 防越界）。 */
 const MAX_USAGE_PERCENT = 100
 
-/** get_state 字段投影的共享形态（每实例快照是其中单字段子集）。 */
+/** get_state 字段派生的共享形态（每实例快照是其中单字段子集）。 */
 interface SessionScalarFields {
   thinkingLevel?: string
   modelId?: string
@@ -73,8 +73,8 @@ export interface ModelIdSnapshot {
   modelId?: string
 }
 
-/** get_state wire 投影：提取标量字段，非 string 值退化为「key 缺失」（与 JSON wire 序列化
- * 丢 undefined key 同构），交由 fieldsNullSemantics 归一判定语义——投影层不做语义决策。
+/** get_state wire 派生：提取标量字段，非 string 值退化为「key 缺失」（与 JSON wire 序列化
+ * 丢 undefined key 同构），交由 fieldsNullSemantics 归一判定语义——派生层不做语义决策。
  *
  * state 非对象 = 协议异常（rpc-client 归一后仍可能 undefined）→ 抛 WireSnapshotSchemaError，
  * 按快照失败处理（退避重试 + 保留旧值）。
@@ -136,9 +136,9 @@ export function createModelIdStateConfig(fetchState: FetchStateFn): ReplicatedSt
 // ── W8 二条目：usage / commands ─────────────────────────────────────────────
 
 /**
- * usage 实例快照形态（get_session_stats().contextUsage 三字段投影，对齐 fetchContext 口径）。
+ * usage 实例快照形态（get_session_stats().contextUsage 三字段派生，对齐 fetchContext 口径）。
  * 字段 optional 是 wire 归一前形态（同 W7 标量条目）：tokens=null（compact 后无新 turn）时
- * 投影为空快照 {}（无字段 = 合法「无值」态，merge 保持旧值）。
+ * 派生为空快照 {}（无字段 = 合法「无值」态，merge 保持旧值）。
  */
 export interface UsageSnapshot {
   inputTokens?: number
@@ -160,13 +160,13 @@ export type FetchCommandsFn = () => Promise<unknown>
 /**
  * usage 配置条目（登记表代码化，W8 验收锁定）。
  *
- * tokens=null（pi compact 后无新 turn）是合法「无值」态：投影为空快照 {}，ownerSnapshotMerge
- * 的 spread 语义保持旧值——与既有 fetchContext「返回 null 不更新」口径等价（退避重拉无意义，
+ * tokens=null（pi compact 后无新 turn）是合法「无值」态：派生为空快照 {}，ownerSnapshotMerge
+ * 的 spread 语义保持旧值——与既有 fetchContext「返回 null 不更新」口径等价（退避重新拉取无意义，
  * 值要等下一次 turn 产生新 assistant usage 才有）。空值语义登记 = 无（验收锁定）。
  *
  * [HISTORICAL] W10 曾配套 recomputeUsageWithWindow（switchModel/applyContextUpdate 即时广播
  * 的「快照 tokens × resolver 新窗口」本地重算口径）；W12 起两个即时广播退役为快照挂钩发布
- * （percent 直接读 pi 权威快照投影，与本地重算同公式同值），该函数无调用方已删除。
+ * （percent 直接读 pi 权威快照派生，与本地重算同公式同值），该函数无调用方已删除。
  */
 export function createUsageStateConfig(
   fetchSessionStats: FetchSessionStatsFn,
@@ -190,7 +190,7 @@ export function createUsageStateConfig(
       const tokens = record.tokens
       if (typeof tokens !== 'number') return {} // tokens=null = compact 后合法无值态，保持旧值
       const contextWindow = record.contextWindow
-      // 投影口径对齐既有 fetchContext：contextWindow=number；percent 无值不折 0
+      // 派生口径对齐既有 fetchContext：contextWindow=number；percent 无值不折 0
       //（[RT-4#7] 无值纪律——usagePercent 字段缺省 = 快照「无值」态，merge 保持旧值，
       // 发布门（publishContextFromSnapshot）对缺字段快照不发布假 0% 帧）
       const percent = typeof record.percent === 'number' ? record.percent : undefined

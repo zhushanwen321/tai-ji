@@ -79,7 +79,7 @@ async function runTuiInteraction(
 				theme as ThemeLike,
 				done,
 			);
-			// signal abort 监听（spec FR-10）：走组件 cancel() 复用 _resolved 守卫，
+			// signal abort 监听（spec FR-10）：走组件 cancel() 复用 _resolved 检查，
 			// 避免用户已 submit/cancel 后 signal 才 abort 二次调 done（FR-12 竞态）
 			if (signal) {
 				signal.addEventListener("abort", () => comp.cancel(), { once: true });

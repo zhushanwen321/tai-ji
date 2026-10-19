@@ -2,17 +2,17 @@
 // （第五轮审查 Worth 项：customType 双侧裸字面、零跨侧锚定，commit 21578c74f 手工
 // 同步在案——收 extension-protocol 单源后的防回潮锁）。
 //
-// 锁两面（参照 contract.relay.test.ts 的镜像锁形态——值无法经 import 对齐的写点
+// 锁两面（参照既有镜像锁形态——值无法经 import 对齐的写点
 // （历史 JSONL entry、消费方字面量）用「值锚定 + 源码形态断言」钉住）：
 //   1. 值锚定：三个 customType 的值是跨侧公开契约（已落盘 session JSONL 的历史 entry
 //      + shared/runtime/core 消费方逐字节依赖）——改值 = 跨侧破坏性变更，必须先红
 //      本测试（有意识动作），不允许顺手改 SSOT 值静默漂移。
-//   2. 源码形态锁：生产写点不得本地重定义/裸写字面量（回潮 = 新的裸字面量漂移面）。
-//      生产侧写点 = 壳三处（workflow-notify 收口通知 / index messageRenderer 注册 /
-//      subagents 定向留痕）。core 侧写点（notify-ledger 的 SSOT 别名 + 分诊零裸字面量）
-//      的形态锁在被测包内：packages/subagent-core
-//      src/execution/__tests__/notify-ledger.test.ts（原跨包裸路径读 core 源码的形态
-//      已迁回，避免壳测试穿越包边界）。
+//   2. 源码形态锁：生产写点不得本地重定义/裸写字面量（回潮 = 新的裸字面量漂移风险）。
+//      生产侧写点 = 壳三处（workflow-notify 收尾通知 / index messageRenderer 注册 /
+//      subagents 定向留痕）。core 侧写点（notifier 的 SSOT 别名 NOTIFY_CUSTOM_TYPE +
+//      送达分诊零裸字面量）的形态锁在被测包内：packages/subagent-core
+//      src/execution/__tests__/notifier.test.ts（unified-delivery 波 2：别名随账本
+//      退役从 notify-ledger.ts 迁入 notifier.ts——值语义不变，仍为 SSOT 别名形态）。
 
 import * as fs from "node:fs";
 import * as path from "node:path";
@@ -74,9 +74,9 @@ describe("notify customType 词表：生产写点单源形态（防裸字面量�
     const source = readSource(PRODUCER_FILES.index);
     expect(source).toMatch(/import\s*\{[^}]*SUBAGENT_BG_NOTIFY_CUSTOM_TYPE[^}]*\}\s*from\s*["@/]/);
     expect(source).toMatch(/registerMessageRenderer\(\s*SUBAGENT_BG_NOTIFY_CUSTOM_TYPE\s*,/);
-    // 裸字面量注册回潮即红（注释/文档提及不在本断言面——只锁注册调用形态）
+    // 裸字面量注册回潮即红（注释/文档提及不在本断言范围——只锁注册调用形态）
     expect(source).not.toMatch(/registerMessageRenderer\(\s*["']/);
   });
-  // 注：原 subagent-core notify-ledger.ts 形态锁（NOTIFY_CUSTOM_TYPE SSOT 别名 +
-  // 分诊零裸字面量）已迁 core 包内 src/execution/__tests__/notify-ledger.test.ts。
+  // 注：subagent-core 形态锁（NOTIFY_CUSTOM_TYPE SSOT 别名 + 分诊零裸字面量）在
+  // core 包内 src/execution/__tests__/notifier.test.ts（波 2 起载体为 notifier.ts）。
 });

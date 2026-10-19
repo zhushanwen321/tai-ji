@@ -13,7 +13,7 @@
  *   detect 家族（detectSlashTriggerFromEl / detectSkillTriggerFromEl / 三符号 detect）
  *   同源对齐，两侧修改须同步。skill 域含 `^|\n` 是刻意放宽（有 chip 时 detect 侧
  *   skillTriggerPatternFor 把行首/换行纳入 skill 域，清理侧须同宽才能覆盖该形态）；
- *   放宽不增加误删面——删除仍受「全 el 恰一处命中」唯一性门 + 右边界 `(?!\S)` 约束，
+ *   放宽不增加误删风险——删除仍受「全 el 恰一处命中」唯一性门 + 右边界 `(?!\S)` 约束，
  *   多命中/0 命中一律 no-op 跳过（安全侧）。
  * - 非唯一命中（含 0 命中）no-op 跳过：无法消歧位置时不动 DOM（误删失活历史 token
  *   = 复发垃圾参数 + 改写用户草稿，双输；跳过使低频形态退归残留代价面）。

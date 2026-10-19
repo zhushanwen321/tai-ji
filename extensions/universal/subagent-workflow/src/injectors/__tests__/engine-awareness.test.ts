@@ -11,7 +11,7 @@
 // 3. 引擎切换只变尾部（A8 前置）：provider models 段前缀不变，变化只发生在链尾
 //    engine 段——断的是「切换前后 prompt 的稳定头部逐字节不变」，复刻 index.ts
 //    装配形态（BASE + provider models 段 + engine 追加段）；注册序本身由
-//    src/__tests__/injector-chain-order.test.ts 的源码锚点守卫。
+//    src/__tests__/injector-chain-order.test.ts 的源码锚点检查。
 // 4. setupModelListInjector handler（provider models 段生产渲染路径）：注入 append /
 //    空列表不干预链 / registry 异常 fail-safe。
 // 5. formatModelList guide 全量快照：MODEL_LIST_GUIDE 是壳自有文案，core 测试用假
@@ -41,7 +41,7 @@ import {
 } from "../engine-awareness";
 import { MODEL_LIST_GUIDE, setupModelListInjector } from "../model-list-injector.ts";
 
-// ── 测试数据（engine-awareness 编排面）──────────────────
+// ── 测试数据（engine-awareness 编排侧）──────────────────
 
 /** ok 态读取结果工厂（config 形状与 sanitize 输出一致）。 */
 function okRead(defaultEngine: string | undefined): GlobalConfigReadResult {
@@ -294,7 +294,7 @@ describe("runEngineAwarenessTurn 多 session 独立 lastEngine", () => {
 // ──────────────────────────────────────────────────────────────
 // 引擎切换只变尾部（A8 前置）：复刻 index.ts 装配形态（BASE + provider models
 // 段 + engine 追加段），断言切换前后稳定头部逐字节不变、engine 段恒居尾。
-// 注册序事实由 injector-chain-order.test.ts 源码锚点守卫，本处不重复。
+// 注册序事实由 injector-chain-order.test.ts 源码锚点检查，本处不重复。
 // ──────────────────────────────────────────────────────────────
 
 /** pi registry 风格条目（provider models 段数据源；同时充当 ctx.modelRegistry 快照）。 */
@@ -486,7 +486,7 @@ describe("formatModelList guide 全量快照（MODEL_LIST_GUIDE 唯一字节锁�
 	it("guide 文案全量锚定：骨架 + 引导语 + 条目模板测试内硬编码快照（改写 MODEL_LIST_GUIDE 即红灯）", () => {
 		// 渲染算法契约（排序/caps/转义/空列表）由 core injection-render byte-exact
 		// parity 承载；本条锁壳侧 guide 文案本体（期望值不插值生产常量——文案两侧
-		// 同源插值时漂移无守卫，故硬编码）
+		// 同源插值时漂移无检查，故硬编码）
 		const out = formatModelList([
 			entry({ provider: "p", id: "m", name: "N" }),
 		], { guide: MODEL_LIST_GUIDE });

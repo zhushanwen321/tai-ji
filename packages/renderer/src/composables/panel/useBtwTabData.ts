@@ -7,7 +7,7 @@
  *   （ADR-0049 Map 分区）持有——切主会话分区保留、切回恢复（D7④）；badge 归属各自主会话
  *   （D7③：切走后线照常后台运行，其分区继续累计未读）。
  * - **主动拉取，不依赖广播**（broadcast 时序竞争规则，AGENTS 架构约定）：挂载 / 切会话
- *   立即 `btw.list { mainSid }`；抽屉开合、btw tab 切换、选中线变化也重拉（新建线入册 /
+ *   立即 `btw.list { mainSid }`；抽屉开合、btw tab 切换、选中线变化也重新拉取（新建线入册 /
  *   关线剪枝 / 新线 vid 观察挂载）。M2-a 已把 `btw.list` 登记为 state last-value 广播，
  *   线列表本体仍刻意只走拉取——与 BtwPanel 各自拉取、双通道同一 payload 各自收敛
  *   （M3-a 遗留接线点②「badge 数据自取 btw.list」）。
@@ -19,7 +19,7 @@
  *   重连/切回的 stateSnapshot('btw') 回放经 replay 按订阅 sid 走 **session 通道**
  *   （useSessionEvents 实例订阅）。两路同帧形同式收敛，幂等可重入。
  * - **异步回写一律 `updateFor(capturedSid)`**（AGENTS 规则 8）：焦点切走后迟到响应只写
- *   旧分区；同分区旧响应用 loadSeq 丢弃（乱序守卫，BtwPanel 同款）。
+ *   旧分区；同分区旧响应用 loadSeq 丢弃（乱序检查，BtwPanel 同款）。
  * - **未读计数 = 消息事件按 vid 路由 + updateFor 写分区**（D3 收敛形态）：线消息帧经
  *   `ensureStreamSubscription(vid)` 写入 chatStore 分区（renderer 侧线内容的唯一聚合点，
  *   MessageBus 会话订阅制下 events 层单独挂 vid 订阅收不到未订阅线的帧，badge 通道也不
@@ -27,10 +27,10 @@
  *   数，增长 delta 按 vid 反查归属主会话后 `updateFor(归属)` 写分区；非视口增长 Σ 计数，
  *   视口内到达不计。**清除 = 线内容进入视口**（D8 终态表「未读」行 SSOT）：drawer 开在
  *   btw tab 且选中该线、绑定 sid = 线归属主会话 ⇒ 视口命中，进入即清。
- * - **虚拟 key 清理登记 + 消费面**（文件底部）：`mainSid → [线 vid]` 映射登记结构——
- *   登记先写后读（M3-b），消费已随 M4-a 接线：deleteSession 级联腿（useSidebar
+ * - **虚拟 key 清理登记 + 消费方**（文件底部）：`mainSid → [线 vid]` 映射登记结构——
+ *   登记先写后读（M3-b），消费已随 M4-a 接线：deleteSession 级联路径（useSidebar
  *   hooks.evictVirtualKeys 枚举 getBtwVirtualIdsByMain → disposeBtwLinePartitions →
- *   clearBtwVirtualKeyMapping）+ 关线腿（本文件 reconcile 出册同拍 dispose）。
+ *   clearBtwVirtualKeyMapping）+ 关线路径（本文件 reconcile 出册同拍 dispose）。
  *
  * D8 终态机簿记（badge「待处理」态 + 挂起请求生命周期三张表）在
  * `./btw-pending-bookkeeping`（纯状态域）；本文件持有
@@ -92,14 +92,14 @@ export interface BtwTabState {
   /** 拉取失败降级留痕（badge 通道失败 = 无 badge 数据，不拖垮 composer；
    *  面板侧可见错误条归 BtwPanel 各自通道） */
   loadError: string | null
-  /** 同分区加载序号：旧响应 seq 不匹配即丢弃（乱序守卫，搜索 TC-2 loadSeq 同款） */
+  /** 同分区加载序号：旧响应 seq 不匹配即丢弃（乱序检查，搜索 TC-2 loadSeq 同款） */
   loadSeq: number
   /** vid → 未读计数（badge 两态基础的计数面）。「待处理」态与终态机簿记在模块级
    *  （D8：drawer 关着 badge 也须准确，见文件下半部「终态机簿记」），本分区不重复存。 */
   unreadByVid: Record<string, number>
 }
 
-// ── 虚拟 key 清理登记（M3-b 只建登记结构；deleteSession 级联消费面归 M4-a）──────────
+// ── 虚拟 key 清理登记（M3-b 只建登记结构；deleteSession 级联消费方归 M4-a）──────────
 // 形态对齐 workflowStore 的 registerAgentCall / getAgentCallVirtualIdsByMain /
 // clearAgentCallMapping 先例（agentcall 两段式无 mainSid 前缀、LRU 前缀清理覆盖不到，
 // 映射是该族虚拟 key 清理唯一通路；btw vid 同理是 `btw:` 两段式，清理经注册表枚举）。
@@ -107,26 +107,26 @@ export interface BtwTabState {
 // 关线/级联移除随下一次拉取自然出册）；registry 模块级存活（不随组件卸载消失），
 // 保证 deleteSession 任意时刻消费都能取到当时的全量 vid。
 // taste:allow-no-data-owner W24-EX-A（全局 sid 协调簿记，**已落定非草稿**——btw-question
-// M3-b 行内豁免，data-source-registry §4 ⑧ 已于 M4-a 收口批补登）：mainSid → btw 线 vid
+// M3-b 行内豁免，data-source-registry §4 ⑧ 已于 M4-a 收敛批补登）：mainSid → btw 线 vid
 // 反查表，deleteSession 级联清理的枚举路由簿记（非 GUI 数据本体；对照 shell-adapters
 // requestIdSessions 先例）
 const btwVirtualKeysByMain = new Map<string, Set<string>>()
 
 /**
- * [M4-a 消费面] 查询主会话名下全部 btw 线 vid（deleteSession 级联时反查，逐一 evict
+ * [M4-a 消费方] 查询主会话名下全部 btw 线 vid（deleteSession 级联时反查，逐一 evict
  * 虚拟分区 + abort）。返回后调用方负责 delete chatStore 分区。
  */
 export function getBtwVirtualIdsByMain(mainSid: string): string[] {
   return [...(btwVirtualKeysByMain.get(mainSid) ?? [])]
 }
 
-/** [M4-a 消费面] deleteSession 后清映射条目（主会话已删，映射无意义） */
+/** [M4-a 消费方] deleteSession 后清映射条目（主会话已删，映射无意义） */
 export function clearBtwVirtualKeyMapping(mainSid: string): void {
   btwVirtualKeysByMain.delete(mainSid)
 }
 
 /**
- * [M4-a 消费面] 线终结分区处置（D9③④「清派生键」单入口，幂等）：
+ * [M4-a 消费方] 线终结分区处置（D9③④「清派生键」单入口，幂等）：
  * ① 派生 subagent 键（`subagent:<owner>:*`——owner = 线 piSessionId，D9③ 键中段位约定，
  *    映射即 extract；前缀匹配与 core lru isVirtualKeyOf 同式）；
  * ② 派生 agentcall 键（两段式无 owner 命名空间，经 workflow 映射按**线 vid** 挂名枚举——
@@ -134,8 +134,8 @@ export function clearBtwVirtualKeyMapping(mainSid: string): void {
  * ③ 两 store 的线记录分区（tray/面板读源随线终结释放）；
  * ④ 线分区本体 + 时序记录（disposeLruEntry，防 sessionLastAccessed 慢增长）。
  * 删除语义**无豁免门**（与 hooks.evictVirtualKeys 的 m7/agentcall 先例同构——线已终结，
- * 不看 streaming/查看态）；重复调用幂等（evictVirtualKey 有 has 守卫、Map.delete 幂等）。
- * **失效腿（闲置回收/进程亡）不调本函数**——线可重开，分区保留待重载链回填（D9④）。
+ * 不看 streaming/查看态）；重复调用幂等（evictVirtualKey 有 has 检查、Map.delete 幂等）。
+ * **失效路径（闲置回收/进程亡）不调本函数**——线可重开，分区保留待重载链回填（D9④）。
  */
 export function disposeBtwLinePartitions(vid: string): void {
   const chat = useChatStore()
@@ -161,11 +161,11 @@ export function disposeBtwLinePartitions(vid: string): void {
 /**
  * 拉取成功后的全量 reconcile（set 替换式：权威列表即真源，多余 vid 出册）。
  *
- * [M4-a] 出册线同拍处置分区（三路收敛的前端腿之二）：
- * - `btw.remove` 关线后本通道重拉（抽屉活动触发面③）→ 出册 vid 即时清分区+派生键
- *  （与 deleteSession 级联腿同用 disposeBtwLinePartitions 单入口，幂等不重复）；
+ * [M4-a] 出册线同拍处置分区（三路收敛的前端路径之二）：
+ * - `btw.remove` 关线后本通道重新拉取（抽屉活动触发方③）→ 出册 vid 即时清分区+派生键
+ *  （与 deleteSession 级联路径同用 disposeBtwLinePartitions 单入口，幂等不重复）；
  * - 主删级联后迟到的空列表拉取 → 不留空 set 残留（被删主的映射条目直接 delete）。
- * 失效腿不受影响：闲置回收/进程亡不改线列表（registry 保留）→ 无出册 → 分区保留（D9④）。
+ * 失效路径不受影响：闲置回收/进程亡不改线列表（registry 保留）→ 无出册 → 分区保留（D9④）。
  */
 function reconcileBtwVirtualKeys(mainSid: string, vids: string[]): void {
   const prev = btwVirtualKeysByMain.get(mainSid)
@@ -189,7 +189,7 @@ export function ensureBtwPendingBookkeeping(): void {
   const bus = getExtensionBus()
   // [D1 renderer 半边] state 帧 typeKey 'btw' 的 live 广播：payload 无 sessionId 键 →
   // route-inbound 判无 sid 走 global 通道（onGlobalType 是本帧 live 面的唯一到达点）。
-  // stateSnapshot('btw') 回放腿走 session 通道，由 useBtwTabData 实例经 useSessionEvents 订阅。
+  // stateSnapshot('btw') 回放路径走 session 通道，由 useBtwTabData 实例经 useSessionEvents 订阅。
   const offThreadList = onGlobalType('btw.list', (msg) => {
     syncReclaimReminders(msg.payload.threads)
   })
@@ -253,7 +253,7 @@ export interface UseBtwTabDataReturn {
   totalUnread: ComputedRef<number>
   /** badge 待处理聚合 = 名下处于「待处理」（挂起请求 ∪ 回收提醒）的线数（D8 终态机驱动） */
   totalPending: ComputedRef<number>
-  /** 主动拉取入口（挂载/切会话/抽屉活动三触发面共用；captured 分区回写） */
+  /** 主动拉取入口（挂载/切会话/抽屉活动三触发范围共用；captured 分区回写） */
   refresh: (captured: string) => Promise<void>
 }
 
@@ -265,7 +265,7 @@ export interface UseBtwTabDataReturn {
  */
 export function useBtwTabData(sidRef: Ref<string | null>): UseBtwTabDataReturn {
   ensureBtwPendingBookkeeping() // D8 终态机簿记：首个实例挂模块级永驻订阅
-  // 回收提醒 state 帧 session 通道腿（stateSnapshot('btw') 重连/切回回放）：live 帧走
+  // 回收提醒 state 帧 session 通道路径（stateSnapshot('btw') 重连/切回回放）：live 帧走
   // global 通道（簿记订阅），回放帧走本通道——同帧形同式收敛到回收提醒集合。
   // 订阅/重订/卸载生命周期归 useSessionEvents（规则 2 防重复：本实例单条底层订阅 + type 路由）。
   const onSessionMessage = useSessionEvents(sidRef)
@@ -285,7 +285,7 @@ export function useBtwTabData(sidRef: Ref<string | null>): UseBtwTabDataReturn {
   )
   const state = computed(() => scoped.current.value)
 
-  /** badge 聚合：只 Σ 权威线列表内的未读（出册线的残留字段由拉取剪枝，聚合面天然干净） */
+  /** badge 聚合：只 Σ 权威线列表内的未读（出册线的残留字段由拉取剪枝，聚合范围天然干净） */
   const totalUnread = computed(() => {
     const s = state.value
     let total = 0
@@ -411,7 +411,7 @@ export function useBtwTabData(sidRef: Ref<string | null>): UseBtwTabDataReturn {
     })
   }
 
-  // ── 主动拉取（captured 分区回写 + loadSeq 乱序守卫）────────────────────────────
+  // ── 主动拉取（captured 分区回写 + loadSeq 乱序检查）────────────────────────────
 
   async function refresh(captured: string): Promise<void> {
     let seq = 0
@@ -425,7 +425,7 @@ export function useBtwTabData(sidRef: Ref<string | null>): UseBtwTabDataReturn {
       const threads = await btw.list(captured)
       let fresh = false
       scoped.updateFor(captured, (s) => {
-        if (s.loadSeq !== seq) return // 同分区旧响应丢弃（双触发并发乱序守卫）
+        if (s.loadSeq !== seq) return // 同分区旧响应丢弃（双触发并发乱序检查）
         fresh = true
         s.loading = false
         s.threads = threads
@@ -434,7 +434,7 @@ export function useBtwTabData(sidRef: Ref<string | null>): UseBtwTabDataReturn {
           if (!threads.some((th) => th.vid === key)) delete s.unreadByVid[key]
         }
       })
-      if (!fresh) return // 旧响应：不触碰观察面与登记面（新响应各自负责）
+      if (!fresh) return // 旧响应：不触碰观察范围与登记范围（新响应各自负责）
       syncReclaimReminders(threads)
       syncWatchedLines(captured, threads)
       reconcileBtwVirtualKeys(
@@ -444,7 +444,7 @@ export function useBtwTabData(sidRef: Ref<string | null>): UseBtwTabDataReturn {
     } catch (e) {
       // 降级可见留痕（STANDARDS §11 辅助面降级 + 静默丢弃必须登记）：console.warn 对齐
       // btw-replay 同型失败形态（带会话 key 上下文），不抛不刷屏——composer 主链路不受
-      // 影响；恢复 = 下次触发面重拉
+      // 影响；恢复 = 下次触发方重新拉取
       console.warn(`[useBtwTabData] btw.list failed for ${captured}:`, e)
       scoped.updateFor(captured, (s) => {
         if (s.loadSeq !== seq) return
@@ -454,7 +454,7 @@ export function useBtwTabData(sidRef: Ref<string | null>): UseBtwTabDataReturn {
     }
   }
 
-  // ── 触发面 ────────────────────────────────────────────────────────────────────
+  // ── 触发范围 ────────────────────────────────────────────────────────────────────
 
   // ① 挂载 / 切会话必拉（broadcast 时序竞争规则：切换后主动拉取，不依赖广播）
   watch(
@@ -480,8 +480,8 @@ export function useBtwTabData(sidRef: Ref<string | null>): UseBtwTabDataReturn {
     },
   )
 
-  // ③ 抽屉活动重拉：新建线（面板侧 btw.create）入册 / 关线剪枝（观察集随登记同步收敛，
-  //    无独立挂观察动作——新线入册即进签名源）。线列表数据只登记拉取触发面（badge 通道
+  // ③ 抽屉活动重新拉取：新建线（面板侧 btw.create）入册 / 关线剪枝（观察集随登记同步收敛，
+  //    无独立挂观察动作——新线入册即进签名源）。线列表数据只登记拉取触发方（badge 通道
   //    线列表以拉取为唯一数据源，见文件头）；回收提醒 state 帧广播的订阅独立存在
   //    （global + session 双通道，见 setup 头部）。选中线读 btw 内容域分区（§6.6① 迁出后落点）。
   const { selectedBtwVid } = useBtwSelection()
@@ -507,7 +507,7 @@ export function useBtwTabData(sidRef: Ref<string | null>): UseBtwTabDataReturn {
  * - 失效行内提示读取/关闭（终态机失效支——事件帧失效一路的提示半边，badge 清 + 撤下
  *   同源于 invalidateBtwRequests 单入口）；
  * - 运行期错误边界：onErrorCaptured 绑定调用方组件实例（BtwPanel），Guard 子组件为全部
- *   风险渲染提供子实例——异常收口为行内错误条 + 重试（key 重挂），不外溢主面板（P2 隔离）。
+ *   风险渲染提供子实例——异常收尾为行内错误条 + 重试（key 重挂），不外溢主面板（P2 隔离）。
  * - [状态区退役 2026-10-15 用户裁决] 原「第四面状态区」（setStatus/setWidget per-session
  *   源读 vid 分区渲染）整体移除——btw 线状态区恒空，扩展状态不进旁路线面板。
  */
@@ -525,7 +525,7 @@ export function useBtwPanelSurface(vidRef: Ref<string | null>) {
 
   // ── 运行期错误边界（P2 降级隔离：btw 交互异常不外溢主面板，单线失败 = 行内错误+可重试）──
   // ec 链从出错实例的 parent 起走（Vue handleError）：Guard 子树（确认条/失效提示，
-  // 全部风险渲染均在 Guard slot 内求值）出错 → 本组件 ec 收口，return false 阻止向 Panel/
+  // 全部风险渲染均在 Guard slot 内求值）出错 → 本组件 ec 收尾，return false 阻止向 Panel/
   // App 冒泡；MessageStream/Composer 不在 Guard 内，其错误行为与改造前一致。
   const interactionError = ref(false)
   const interactionKey = ref(0)

@@ -1,13 +1,13 @@
 /**
  * model picker 的模型列表（picker 用，非 classifier）。
  *
- * P3 收口后 classifier 不再自读 models.json（改走 llm-shared resolveModel +
+ * P3 收敛后 classifier 不再自读 models.json（改走 llm-shared resolveModel +
  * ctx.modelRegistry，见 classifier.ts / production.ts）。
  *
- * E2（CL-picker-scope 收口）：listAvailableModels 改走 ctx.modelRegistry.getAll() +
+ * E2（CL-picker-scope 收敛）：listAvailableModels 改走 ctx.modelRegistry.getAll() +
  * hasConfiguredAuth() 过滤——用户只经 `pi auth login` 配的内置/OAuth provider 同样可见，
  * 不再自读 models.json（loadModelsJson / flattenModels 已删除）。
- * E1：ResolvedModelEntry.apiKey 死字段已删（P3 收口后凭证走 modelRegistry，无消费者）。
+ * E1：ResolvedModelEntry.apiKey 死字段已删（P3 收敛后凭证走 modelRegistry，无消费者）。
  * E5：name/baseUrl/cost 死字段已删（picker 只读 id/api）。
  */
 

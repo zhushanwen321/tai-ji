@@ -9,10 +9,10 @@
  *   但无 --no-extensions）/ 带 --no-extensions 但值不在清单——三者都不匹配。
  * - 清单 fail-safe（V10④）：清单缺失/读不到/坏 JSON/非字符串数组 → 跳过收殓 + warn
  *   日志（宁漏不误杀）；真实读路径用 mkdtemp 自建自删（fs-guard 白名单内）。
- * - 收殓范围扩大（设计 §6.12）：孤儿 subagent/relay（引擎 CLI 直 spawn，argv 由
+ * - 收殓范围扩大（设计 §6.12）：孤儿 subagent（引擎 CLI 直 spawn，argv 由
  *   pi-subagent-cli buildSpawnArgs 构造——恒定 --no-extensions 基座 + --extension
  *   白名单集，staged 值登记进 spawn-markers 清单）ppid=1 被收；活跃 subagent
- *   ppid=父进程活值（引擎 CLI / relay 受托 runtime）不收；两轮时序 = 第一轮
+ *   ppid=父进程活值（引擎 CLI / runtime）不收；两轮时序 = 第一轮
  *   ppid≠1 不收 → reparent 后第二轮 ppid=1 收。
  * - 编排时序：SIGTERM → 宽限 → 探活（signal 0）→ 仍活才 SIGKILL；SIGTERM 即 ESRCH
  *   按「已回收」计且不等待宽限；枚举失败 / Windows 降级 unsupported 不抛。
@@ -95,7 +95,7 @@ describe('parsePsOutput（ps 三列解析）', () => {
     ])
   })
 
-  it('空行与非数字列行跳过（fail-open 只影响覆盖面不影响精确性）', () => {
+  it('空行与非数字列行跳过（fail-open 只影响覆盖范围不影响精确性）', () => {
     const out = ['', 'garbage line', '   ', '  1 2 x'].join('\n')
     expect(parsePsOutput(out)).toEqual([{ pid: 1, ppid: 2, command: 'x' }])
   })
@@ -206,7 +206,7 @@ describe('findOrphanPiRows（判据④：ppid=1 reparent 证据）', () => {
 
   it('两轮时序（V10③）：活跃 subagent（ppid=父进程活值）第一轮不收 → 父进程死后 reparent ppid=1 第二轮收', () => {
     const mainPiPid = 500
-    // 同一 subagent pid、同一 argv，仅 ppid 随 reparent 变化（现行父进程 = 引擎 CLI / relay 受托 runtime）
+    // 同一 subagent pid、同一 argv，仅 ppid 随 reparent 变化（现行父进程 = 引擎 CLI / runtime）
     const firstRound = [row(402, mainPiPid, subagentMirrorCmd(MARKERS[0]))]
     expect(findOrphanPiRows(firstRound, [...MARKERS], OWN_PID)).toEqual([])
     const secondRound = [row(402, 1, subagentMirrorCmd(MARKERS[0]))]
@@ -268,7 +268,7 @@ describe('spawn 清单读取与 fail-safe 降级（V10④：宁漏不误杀）',
     }
   })
 
-  it('清单非字符串数组（JSON 对象）→ 跳过收殓 + warn 日志（格式守卫，防类型混淆误判）', async () => {
+  it('清单非字符串数组（JSON 对象）→ 跳过收殓 + warn 日志（格式检查，防类型混淆误判）', async () => {
     const dataDir = makeMarkersDataDir()
     try {
       mkdirSync(join(dataDir, 'run'), { recursive: true })

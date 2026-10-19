@@ -177,9 +177,11 @@ describe("U6b：zcode chatMode 的 Continuation 接线（B-firstround + B-routin
   });
 
   /** [W1/D3] 读 record 事件文件全部事件行（journal 落点 = getSubagentRecordsDir，
-   *  与 manifest 同目录——观察面独立于被测 store）。 */
+   *  与 manifest 同目录——观察面独立于被测 store）。
+   *  [session-store-layout-inversion] 观察点与生产写侧同源：分区键 = initSession sid，
+   *  dataDir = 被测 env 注入值（= 生产 store 目录解析的同一取值）。 */
   function scanRecordEvents(id: string): Array<Record<string, unknown>> {
-    const recordsDir = getSubagentRecordsDir(agentDir, agentDir);
+    const recordsDir = getSubagentRecordsDir("root-session", process.env["TAIJI_AGENT_DATA_DIR"]);
     const file = path.join(recordsDir, `${id}.events`);
     const content = fs.readFileSync(file, "utf8");
     return content

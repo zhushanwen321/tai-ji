@@ -1,6 +1,6 @@
 // MobileFormCard「其他」合成选项卡（remote-use A10：allowOther 表单自由作答）。
 //
-// 修复面：组件此前只渲染 options 数组循环，无合成 Other 选项卡 → 输入框显隐条件恒假 →
+// 修复范围：组件此前只渲染 options 数组循环，无合成 Other 选项卡 → 输入框显隐条件恒假 →
 // allowOther 表单在手机不可自由作答。对齐桌面 ChoiceQuestion.vue 合成语义：
 // - 选项末尾追加 Other 卡片（allowOther !== false），toggle 交互与普通选项同构
 // - Other 选中后输入框展开（显隐绑定选中态），文本经 otherText 状态承载
@@ -30,11 +30,11 @@ function choiceRequest(overrides: Record<string, unknown> = {}): ExtensionUIRequ
         header: 'db',
         question: '用哪个数据库？',
         options: [{ label: 'pg' }, { label: 'mysql' }],
-        // overrides 值域 unknown，spread 前按 fixture 注入面收窄（缺省 undefined 合法展开）
+        // overrides 值域 unknown，spread 前按 fixture 注入点收窄（缺省 undefined 合法展开）
         ...(overrides.question as Record<string, unknown> | undefined),
       },
     ],
-    // overrides 值域 unknown，spread 前按 fixture 注入面收窄（缺省 undefined 合法展开）
+    // overrides 值域 unknown，spread 前按 fixture 注入点收窄（缺省 undefined 合法展开）
     ...(overrides.request as Record<string, unknown> | undefined),
   } as unknown as ExtensionUIRequest
 }

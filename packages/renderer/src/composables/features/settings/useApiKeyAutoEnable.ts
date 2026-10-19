@@ -46,7 +46,7 @@ export function useApiKeyAutoEnable(opts: {
     toggling.value = next
     try {
       // 乐观更新协议（回滚语义唯一 = 失败回滚 + rethrow）：apply 顺带捕获旧值供回滚。
-      // 失败在本调用方映射到既有错误面（actionError + 返回值 false），用户可见行为不变。
+      // 失败在本调用方映射到既有错误范围（actionError + 返回值 false），用户可见行为不变。
       let old = false
       await runOptimisticUpdate({
         apply: () => {

@@ -22,6 +22,21 @@ import { statSync } from 'node:fs'
 import { homedir, networkInterfaces } from 'node:os'
 import { sep } from 'node:path'
 import { getDataDir } from '@taiji/shared/paths'
+import {
+  GET_RUNTIME_PORT,
+  GET_RUNTIME_PORT_OFFSET,
+  GET_RUNTIME_TOKEN,
+  GET_RUNTIME_START_ERROR,
+  RUNTIME_RESTART,
+  GET_DATA_DIR,
+  GET_REMOTE_ACCESS_INFO,
+  ROTATE_REMOTE_ACCESS_TOKEN,
+  SET_REMOTE_ACCESS_ENABLED,
+  CREATE_WINDOW,
+  GET_WINDOWS,
+  FOCUS_WINDOW,
+  WINDOW_LIST_UPDATED,
+} from '@taiji/shared'
 import type { RemoteAccessConfig, RemoteAccessInfo } from '@taiji/shared'
 import type { IpcHandlerDeps } from '../interfaces.js'
 import { enumerateLanAddresses } from '../remote-access/lan-addresses.js'
@@ -36,21 +51,21 @@ import { isValidRemoteAccessEnabled } from './input-validators.js'
  */
 export function registerBridgeHandlers(deps: IpcHandlerDeps): void {
   // ── runtime 端口 / token（只读 supervisor 状态）───────────────────
-  ipcMain.handle('get-runtime-port', () => deps.runtime.port)
-  ipcMain.handle('get-runtime-port-offset', () => deps.runtime.portOffset)
+  ipcMain.handle(GET_RUNTIME_PORT, () => deps.runtime.port)
+  ipcMain.handle(GET_RUNTIME_PORT_OFFSET, () => deps.runtime.portOffset)
   // S1-W1（spec §3.3 D4）：WS auth token 下发通道①——renderer 经 preload
   // getRuntimeToken 读取（与 get-runtime-port 同模式），连接 open 后作首条 auth 消息发送。
   // 通道②（<dataDir>/runtime-token 文件）面向 CLI / 脚本，不经此 IPC。
-  ipcMain.handle('get-runtime-token', () => deps.runtime.token)
+  ipcMain.handle(GET_RUNTIME_TOKEN, () => deps.runtime.token)
   // RD-3#2：启动失败真因拉取（与 get-runtime-port 同模式只读 supervisor 状态）。
   // runtime-error 推送可能早于 renderer 订阅安装（boot 竞态，webContents.send 静默丢失）
   // ——renderer 连接编排 init 时主动拉取，徒劳自动重试短路 + 连接屏显示真实原因。
-  ipcMain.handle('get-runtime-start-error', () => deps.runtime.startError)
+  ipcMain.handle(GET_RUNTIME_START_ERROR, () => deps.runtime.startError)
 
   // ── 数据目录（只读，Settings 强制目录展示动态化用）─────────────────
   // 返回 ~ 缩写的展示路径（home 前缀 → ~），dev 下为 ~/.taiji-dev，prod 为 ~/.taiji。
   // 修复 SettingsResourcePage forcedDirs 硬编码 '~/.taiji/skills' 在 dev 下误导的问题。
-  ipcMain.handle('get-data-dir', () => {
+  ipcMain.handle(GET_DATA_DIR, () => {
     const dir = getDataDir()
     const home = homedir()
     // 路径分隔符边界：home 自身（/Users/alice）满足 startsWith，但 /Users/alice2 不是其子路径，
@@ -60,18 +75,18 @@ export function registerBridgeHandlers(deps: IpcHandlerDeps): void {
 
   // ── runtime 手动重启（崩溃重启用尽后，用户从状态条点重试触发）─────────
   // 委托 supervisor.restartRuntime：重置策略 + start + 广播端口/失败
-  ipcMain.handle('runtime-restart', async () => {
+  ipcMain.handle(RUNTIME_RESTART, async () => {
     await deps.runtime.restartRuntime()
   })
 
   // ── remote-access 连接信息（配置 + LAN 候选 + 轮换 + 开关切换）────────
   // remote-access D2/D6/D9：main 是 remote-access.json 唯一写方；连接 URL 候选 =
   // LAN IPv4 枚举 × 当前 runtime 端口（runtime 未启动 → 空列表，面板不产死链接）。
-  ipcMain.handle('get-remote-access-info', () => buildRemoteAccessInfo(deps))
+  ipcMain.handle(GET_REMOTE_ACCESS_INFO, () => buildRemoteAccessInfo(deps))
 
   // 轮换 token：重写文件即生效（runtime 每次握手热读，不触发重启），返回新配置。
   // 复用轮换返回值构建 payload（同步写读之间无其他写方，读回恒等于写入值，免一次文件读）。
-  ipcMain.handle('rotate-remote-access-token', () => {
+  ipcMain.handle(ROTATE_REMOTE_ACCESS_TOKEN, () => {
     return buildRemoteAccessInfo(deps, rotateRemoteAccessToken())
   })
 
@@ -79,7 +94,7 @@ export function registerBridgeHandlers(deps: IpcHandlerDeps): void {
   // argv 是启动期一次性决策）；runtime 未跑（mock/未启动）只落盘，下次启动自然生效。
   // 重启编排（stop→spawn→广播时序）整体委托 supervisor.restartForConfigChange——
   // 广播（runtime-restarting 先于 stop）归 supervisor 单点，本层零编排
-  ipcMain.handle('set-remote-access-enabled', async (_event, enabled: unknown) => {
+  ipcMain.handle(SET_REMOTE_ACCESS_ENABLED, async (_event, enabled: unknown) => {
     if (!isValidRemoteAccessEnabled(enabled)) {
       throw new Error('set-remote-access-enabled: enabled must be a boolean')
     }
@@ -94,7 +109,7 @@ export function registerBridgeHandlers(deps: IpcHandlerDeps): void {
   })
 
   // ── 窗口管理 ─────────────────────────────────────────────────────
-  ipcMain.handle('create-window', async (_event, options?: { sessionId?: string }) => {
+  ipcMain.handle(CREATE_WINDOW, async (_event, options?: { sessionId?: string }) => {
     const windowId = deps.windowManager.generateId()
     const win = await deps.createWindow({ windowId, sessionId: options?.sessionId })
     deps.windowManager.register(windowId, win)
@@ -103,11 +118,11 @@ export function registerBridgeHandlers(deps: IpcHandlerDeps): void {
     return { windowId }
   })
 
-  ipcMain.handle('get-windows', () => {
+  ipcMain.handle(GET_WINDOWS, () => {
     return deps.windowManager.getAll()
   })
 
-  ipcMain.handle('focus-window', (_event, windowId: string) => {
+  ipcMain.handle(FOCUS_WINDOW, (_event, windowId: string) => {
     deps.windowManager.focus(windowId)
   })
 
@@ -124,7 +139,7 @@ export function registerBridgeHandlers(deps: IpcHandlerDeps): void {
 export function broadcastWindowList(): void {
   for (const win of BrowserWindow.getAllWindows()) {
     if (!win.isDestroyed()) {
-      win.webContents.send('window-list-updated')
+      win.webContents.send(WINDOW_LIST_UPDATED)
     }
   }
 }
@@ -136,7 +151,7 @@ export function broadcastWindowList(): void {
  *
  * [时间点] 本探测发生在面板读取时刻，与 runtime 启动期的 E5 探测
  * （resolveMobileStaticRoot）存在窗口差——两次探测之间 dist 可能被构建/删除，
- * 本结论是可接受的近似（E5 显形的目标是「用户有提示」，静态面挂载的权威判据
+ * 本结论是可接受的近似（E5 显形的目标是「用户有提示」，静态资源挂载的权威判据
  * 仍在 runtime 启动期探测）。
  */
 function isMobileDistReady(): boolean {

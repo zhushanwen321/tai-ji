@@ -154,7 +154,7 @@ describe('SessionMessageHandler — error envelope 回归', () => {
   // ── session.deleteByCwd（自 session-message-handler-deletebycwd.test.ts 并入）────────
   // D6a（integrity-hardening §3.6）后契约：handler 不再逐个直接调 clearExtensionTimeoutsForSession
   // ——挂起 UI 请求清理已汇聚到 onSessionDestroyed 回调（见 server-destroyed-converged-cleanup.test.ts）。
-  // 本 describe 锁定路由行为（deleteByCwd 调用 / reply / broadcast / invalid_payload 守卫）。
+  // 本 describe 锁定路由行为（deleteByCwd 调用 / reply / broadcast / invalid_payload 检查）。
   describe('session.deleteByCwd', () => {
     it('W1TC4 正常 deleteByCwd + reply + broadcastSessionList（清理经 onSessionDestroyed 汇聚点，不经 handler）', async () => {
       const { cap, handler, ctx } = makeHandler({

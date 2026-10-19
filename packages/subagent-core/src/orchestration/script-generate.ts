@@ -2,7 +2,7 @@
  * Workflow 脚本创作管线（generate）——pi-sw tool-workflow-script.ts actionGenerate
  * 的校验管线下沉（convergence D-6 / W4）。
  *
- * 五道闸 + round-trip + tmp 写盘，闸序与 pi 现版一致：
+ * 五项校验 + round-trip + tmp 写盘，校验顺序与 pi 现版一致：
  * 1. ESM import 拒绝（Worker 跑 CJS）；'export const meta' 例外
  * 2. 非 meta 的 export 拒绝
  * 3. meta 声明必需（@pi-meta YAML 块注释或 legacy const meta，过渡期 m0）

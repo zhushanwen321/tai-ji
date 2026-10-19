@@ -16,7 +16,7 @@
  *   私居该模块；App.vue provide + 挂 Dialog）
  *
  * 状态机不变量（单测在同包 __tests__/permission-request-controller.test.ts 钉住）：
- * - 畸形事件守卫：pluginId 空 / permissions 非 string 数组 → warn + skip（不写坏
+ * - 畸形事件检查：pluginId 空 / permissions 非 string 数组 → warn + skip（不写坏
  *   state）；permissions 拷贝入 state（防外部数组后续变更串扰）
  * - 新请求覆盖旧弹窗（全局单例，一次一个，不做队列）：pluginId/permissions 全量
  *   重置 + error 清零（BM3 错误行只描述当前弹窗的提交结果）
@@ -29,7 +29,7 @@
  *   无挂起弹窗时 noop 幂等
  * - S5-V3 终局撤窗：bus 'plugin-permission-request-resolved'（runtime 在任一端
  *   批准/拒绝后广播 plugin:permissionRequestResolved，bridge 归一）按 requestId
- *   精确匹配撤回——同一审批的多连接端中非操作端据此撤回弹窗（操作端 RPC 收口先行
+ *   精确匹配撤回——同一审批的多连接端中非操作端据此撤回弹窗（操作端 RPC 收尾先行
  *   置 pending=false，resolved 到达 noop 幂等）；requestId 空串（bridge 对旧版广播
  *   的宽容窄化产物）回退按 pluginId 匹配，兼容链与 expired 一致
  * - deny 语义 = 拒绝本次申请不清已授权限（plugin.denyPermissions，M7 语义）
@@ -84,7 +84,7 @@ export function createPermissionRequestController(bus: InternalEventBus): Permis
     error: false,
   })
 
-  // bus 订阅：新请求覆盖旧 state（一次一个，不做队列）；守卫 + 拷贝防写坏/串改
+  // bus 订阅：新请求覆盖旧 state（一次一个，不做队列）；检查 + 拷贝防写坏/串改
   const offRequest = bus.on('plugin-permission-request', (e) => {
     const req = e.request
     if (
@@ -125,7 +125,7 @@ export function createPermissionRequestController(bus: InternalEventBus): Permis
 
   // 终局撤窗（remote-use-mobile S5-V3）：任一端批准/拒绝后 runtime 广播
   // plugin:permissionRequestResolved，bridge 归一为本 bus 事件。匹配兼容链与 expired
-  // 同构（requestId 精确 → 缺失回退 pluginId）：本端已由 RPC 收口置 pending=false
+  // 同构（requestId 精确 → 缺失回退 pluginId）：本端已由 RPC 收尾置 pending=false
   // （操作端），resolved 到达 noop 幂等；非操作端命中即撤（弹窗对应请求已终局，
   // 继续作答只会得到 runtime 迟到审批 miss——UI 先行撤回与后端终局一致）。
   const offResolved = bus.on('plugin-permission-request-resolved', (e) => {
@@ -144,7 +144,7 @@ export function createPermissionRequestController(bus: InternalEventBus): Permis
   })
 
   /**
-   * RPC 收口（BM3 假成功红线）：入口乐观清错；成功 pending=false 关窗；失败
+   * RPC 收尾（BM3 假成功红线）：入口乐观清错；成功 pending=false 关窗；失败
    * pending 保持 true（弹窗不关）+ error=true 显形错误行供重试。
    */
   function settlePending(promise: Promise<unknown>, op: string): void {

@@ -27,7 +27,7 @@ export interface DrawerOpenOptions {
   commandName?: string
 }
 
-/** 朗读按钮三态（ai-voice-tts 设计 §5.1 状态机数据面；数据源 = renderer useTtsPlayer
+/** 朗读按钮三态（ai-voice-tts 设计 §5.1 状态机数据范围；数据源 = renderer useTtsPlayer
  *  全局单例任务态，D11——同一时刻每窗口只有一条消息在朗读，状态窗口级唯一） */
 export type SpeakState = 'idle' | 'loading' | 'playing'
 
@@ -48,14 +48,14 @@ export interface ChatViewDeps {
   /** turn 是否处于「展开全部」接管态（useTurnExpansion store 派生，Turn 消费。
    *  key=turnStableId(turn)，D6/TC2 窗口级语义：takeover=true 时 computeTraceWindow 全量展开） */
   isTakeover: (turnKey: string) => boolean
-  /** session 是否有「正在提交直发」的 pendingSend 瞬时态（chat store 投影，UserBubble
+  /** session 是否有「正在提交直发」的 pendingSend 瞬时态（chat store 派生视图，UserBubble
    *  submitEdit 双发锁消费——D3：防 send 与 editAndResend 并发覆盖 pendingDirectSends） */
   isPendingSend: (sessionId: string) => boolean
   /** 取 session 的相对资源解析基准目录（session cwd，与工厂内 resourceBaseDir env 装配
    *  同源同层查询）。MarkdownRenderer ④路相对链接点击的 props 缺省 fallback——设计
    *  markdown-html-sanitize-render D4 双通道矩阵：props 覆盖优先（drawer 文件目录语义），
 
-   *  props 缺省（对话流/命令文档零模板传 props 的消费面）经此拿 session cwd。
+   *  props 缺省（对话流/命令文档零模板传 props 的消费方）经此拿 session cwd。
    *  optional，同 isTakeover：未 provide（测试 mock 壳）时 MarkdownRenderer 可选链容错
    *  （fallback undefined → ④路 preventDefault 无动作），renderer useChatViewDeps 运行时
    *  总 provide 真实实现 */
@@ -83,7 +83,7 @@ export interface ChatViewDeps {
    *  optional，同 probeArtifact：未 provide（测试 mock 壳）→「源码」按钮隐藏（容器只有
    *  预览态）；renderer useChatViewDeps 运行时总 provide 真实实现。 */
   readArtifact?: (absPath: string) => Promise<{ content: string }>
-  /** 查询某消息的朗读态（ai-voice-tts 设计 §5.1 按钮状态机数据面，TurnSummary 朗读按钮消费；
+  /** 查询某消息的朗读态（ai-voice-tts 设计 §5.1 按钮状态机数据范围，TurnSummary 朗读按钮消费；
    *  三态与 renderer useTtsPlayer 的 SpeakStatus 结构同形——ui 不 import renderer，形状各自声明）。
    *  optional，同 onSpeak：两字段成对 provide/缺席，未 provide 时朗读按钮不渲染 */
   speakStateOf?: (messageId: string) => SpeakState
@@ -103,7 +103,7 @@ export interface ChatViewDeps {
   /**
    * [U5 消息撤回 D6] 撤回消息统一入口（session.revokeMessage / delivery.cancel 两段式
    * 收回，原文回草稿）。路由判定（在途 cancel / 已送达树内回退）只在 core useChat 单点
-   * （revokeMessage 内按内核投影复核分派），UI 透传 targetId 不做路由。
+   * （revokeMessage 内按内核派生视图复核分派），UI 透传 targetId 不做路由。
    */
   onRevokeMessage: (sessionId: string, targetId: string) => void
   /** fork 并提问（useTurnActions.forkAsk） */
@@ -182,7 +182,7 @@ export interface ChatViewDeps {
  * 编辑态富编辑器组件契约（editComposerRenderer 的 props/emits 形状声明）。
  * 组件内部自行 provide ComposerInputDepsKey（与 Composer.vue / MobileComposer 同契约），
  * 挂载即 setSegments(props.segments) 真 chip 还原；提交经 emit('submit', segments)
- * 交还 UserBubble（双发锁 + editAndResend 收口链在 ui 侧单点）。
+ * 交还 UserBubble（双发锁 + editAndResend 收尾链在 ui 侧单点）。
  */
 export interface EditComposerProps {
   /** 目标会话 id（CommandPopover session 通道 + 图片持久化目录） */

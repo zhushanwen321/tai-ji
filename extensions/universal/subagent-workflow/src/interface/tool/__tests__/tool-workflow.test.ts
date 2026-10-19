@@ -4,7 +4,7 @@
  * 来源与分工：
  * - actionStatus 输出形态 + GUI attach（原 tool-workflow-status.test.ts）——
  *   status 列表行格式是 LLM 判断 run 状态与 runId 引用的唯一信息源，锁
- *   result.content 实际文本与 details.runs 投影。
+ *   result.content 实际文本与 details.runs 派生视图。
  * - W4b 错误路径 throw 语义（原 tool-workflow-throw-paths.test.ts）——pi 只对
  *   execute throw 置 isError:true（返回值里的 isError 被 agent-loop 丢弃），故
  *   错误路径必须 throw。其中 4 条 entry-guard 用例（slug 上限 / time 上限 /
@@ -12,15 +12,15 @@
  * - D8 创建期模型拒单（原 tool-workflow-model-rejection.test.ts）。
  * - D4-1 按名解析退役 + run/abort 文案全文锚定（原 tool-workflow-run-builtin-name.test.ts）。
  * - TC3i 宿主 reservedKeys 接线锚（原 detectors.test.ts——TC3a-h 的行为等值断言
- *   在 core orchestration/__tests__/args-meta.test.ts，宿主差异面只留此条）。
+ *   在 core orchestration/__tests__/args-meta.test.ts，宿主差异点只留此条）。
  * - run details.stateFile 暴露（原 workflow-state-file-exposure.test.ts 第 3 条，
  *   grep 断言改行为级等值）。
  *
  * 结构约束：
- * - fake timers 只在 actionStatus describe 内启用（done 冻结语义需钉死墙钟），
+ * - fake timers 只在 actionStatus describe 内启用（done 冻结语义需固定墙钟），
  *   不泄漏到 run/abort 路径。
  * - D8 describe 首条必须在任何 setCatalogService 调用之前执行（声明序 = 执行序）：
- *   setModelConfigService 无复位面，单例 set 后「目录缺席」防御分支不可再达。
+ *   setModelConfigService 无复位情形，单例 set 后「目录缺席」防御分支不可再达。
  *
  * mock 策略：lifecycle 深路径 stub（runWorkflow/abortRun 为 vi.fn——不起真
  * Worker，只测启动面与入口校验）。范式：captureTool 注册层黑盒。框架：vitest。
@@ -78,7 +78,7 @@ afterEach(() => {
   vi.restoreAllMocks();
 });
 
-// ── 生产源码文本（KNOWN_ARG_KEYS 退役守卫用——读源码非 import，同提示词测试模式）──
+// ── 生产源码文本（KNOWN_ARG_KEYS 退役检查用——读源码非 import，同提示词测试模式）──
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const TOOL_WORKFLOW_SRC = readFileSync(join(__dirname, "../tool-workflow.ts"), "utf-8");
@@ -144,7 +144,7 @@ interface StatusToolView extends CapturedTool { // oe-exempt:20260927:wip:test f
 }
 
 /** 注册层黑盒 capture（actionStatus/actionAbort 未导出，经 execute 唯一入口；
- *  fake pi 捕获单点见 capture-tool.ts，此处只留差异面：runs Map + 泛型 view）。 */
+ *  fake pi 捕获单点见 capture-tool.ts，此处只留差异点：runs Map + 泛型 view）。 */
 function captureRegisteredTool<T extends CapturedTool>(runs: Map<string, WorkflowRun>, toolName: string): T {
   const deps = {
     runs,
@@ -159,7 +159,7 @@ function captureRegisteredTool<T extends CapturedTool>(runs: Map<string, Workflo
   );
 }
 
-/** 真实 WorkflowRun 聚合根（reconstruct 工厂——status/abort 路径只读投影面）。 */
+/** 真实 WorkflowRun 聚合根（reconstruct 工厂——status/abort 路径只读派生视图字段集）。 */
 function makeRun(opts: {
   runId: string;
   scriptName: string;
@@ -188,7 +188,7 @@ function makeRun(opts: {
     },
     { startedAt: opts.startedAt, completedAt: opts.completedAt },
   );
-  // [D6(a) 第 1 步] 终局判定源 = 终局记录注册表：done 形态 fixture 建模「重水合
+  // [D6(a) 第 1 步] 终局判定源 = 终局记录注册表：done 形态 fixture 建模「重新加载进内存的
   // done run」时必须携带注册表条目（生产 = 壳重建点 noteRebuiltSettlement 注入
   // run-settled 帧事实；settledAt = 快照 completedAt = 帧时序）。
   if (opts.status === "done") {
@@ -201,7 +201,7 @@ function makeRun(opts: {
 }
 
 describe("actionStatus 输出形态（LLM 可见文本锁）", () => {
-  // ── 墙钟 fixture（fake timers 钉死 Date.now，elapsed 全确定性；
+  // ── 墙钟 fixture（fake timers 固定 Date.now，elapsed 全确定性；
   //    收窄进本 describe——不泄漏到 run/abort 路径）──
   const FAKE_NOW = new Date("2026-01-01T00:00:30.000Z").getTime();
 
@@ -261,7 +261,7 @@ describe("actionStatus 输出形态（LLM 可见文本锁）", () => {
           "[done] ok-wf (wf-17197) (2s)",
       },
     ]);
-    // details.runs = core runSummary 投影 + 宿主 stateFile 扩展（GUI 消费面）
+    // details.runs = core runSummary 派生视图 + 宿主 stateFile 扩展（GUI 消费方）
     expect(r.details).toMatchObject({
       action: "status",
       runs: [
@@ -310,7 +310,7 @@ describe("details 形状（execute 级无 GUI attach）", () => {
 // W4b 错误路径 throw 语义（原 tool-workflow-throw-paths.test.ts）
 // ══════════════════════════════════════════════════════════════
 
-/** throw-paths 专用 capture wrapper（差异面：deps 实参 + reentry guard 可注入占用态；
+/** throw-paths 专用 capture wrapper（差异点：deps 实参 + reentry guard 可注入占用态；
  *  D3 拆分后按 toolName 取 workflow_run / workflow_control）。 */
 function captureWorkflowTool(deps: unknown, reentryRef: ReentryGuardRef, toolName: string): CapturedTool {
   return captureTool(
@@ -485,7 +485,7 @@ describe("W4b: workflow tool 错误路径 throw 语义", () => {
 // D8 创建期模型拒单（原 tool-workflow-model-rejection.test.ts）
 // ══════════════════════════════════════════════════════════════
 
-/** D8 专用 deps：getPath 按 path 从给定 scripts 集解析（模型门之前的解析面）。 */
+/** D8 专用 deps：getPath 按 path 从给定 scripts 集解析（模型门之前的解析范围）。 */
 function depsWithScripts(scripts: Array<ReturnType<typeof makeScript>>): Record<string, unknown> {
   return makeDeps({
     get: vi.fn().mockResolvedValue(undefined),
@@ -507,7 +507,7 @@ describe("D8 创建期模型拒单", () => {
 
   it("目录缺席（单例未装配）→ warn 降级跳过，不误拒（runWorkflow 正常到达）", async () => {
     // 本用例必须先于任何 setCatalogService 调用执行（声明序 = 执行序）——
-    // setModelConfigService 无复位面，单例 set 后 null 分支不可再达。
+    // setModelConfigService 无复位情形，单例 set 后 null 分支不可再达。
     const deps = depsWithScripts([SCRIPT]);
     await actionRun(
       { name: "/abs/chain.js", args: {}, model: "prov1/typo" } as never,
@@ -598,7 +598,7 @@ describe("D4-1 按名解析退役（fake registry）", () => {
       undefined,
     ).catch((e: unknown) => e as Error);
 
-    // 退役断言：get 零调用 = 裸名不进入按名通道（P5 修复发现面后也不会复活）
+    // 退役断言：get 零调用 = 裸名不进入按名通道（P5 修复发现范围后也不会复活）
     expect(registry.get).not.toHaveBeenCalled();
     expect(registry.getPath).toHaveBeenCalledWith("chain");
     expect(vi.mocked(runWorkflow)).not.toHaveBeenCalled();
@@ -683,7 +683,7 @@ describe("D4-1 按名解析退役（真 registry：WorkflowScriptRegistryImpl + 
       npmDirs: [],
     });
     // 前置自检：fixture 布局可被扫描（隔离 config 下 hostRoots 为空、仅 project 根命中）
-    // ——名字确实在发现面内，拒单非「不可见」而是「按名通道退役」。
+    // ——名字确实在发现范围内，拒单非「不可见」而是「按名通道退役」。
     const all = await registry.loadAll();
     expect(all.filter((w) => w.available).map((w) => w.name)).toContain("chain");
 
@@ -730,7 +730,7 @@ describe("D4-1 按名解析退役（真 registry：WorkflowScriptRegistryImpl + 
 // 本节逐字锁 LLM 看到的 content[0].text（期望值从 tool-workflow.ts 实现逐字复制）。
 // abort 的终态语义（done/aborted 由 lifecycle transition 落位）归 core lifecycle
 // 测试；此处 mock abortRun 仅落位 state（actionAbort 从 run 对象读转移前后状态
-// 拼接文案的真实行为面不变）。
+// 拼接文案的真实行为范围不变）。
 // ══════════════════════════════════════════════════════════════
 
 describe("run 启动文案全文锚定（LLM 可见文本锁）", () => {
@@ -809,7 +809,7 @@ describe("abort 转移文案全文锚定（LLM 可见文本锁）", () => {
   };
 
   /** mock abortRun 落位终态（模拟 lifecycle transition 语义：status=done + 可选 reason）。
-   *  `settle: false` = abort 未产生终局记录（换源后 run 保持 running 投影）。 */
+   *  `settle: false` = abort 未产生终局记录（换源后 run 保持 running 派生视图）。 */
   function stubAbortTransition(opts: { reason?: string; settle?: boolean }): void {
     vi.mocked(abortRun).mockReset();
     vi.mocked(abortRun).mockImplementation(async (runId, deps) => {
@@ -818,7 +818,7 @@ describe("abort 转移文案全文锚定（LLM 可见文本锁）", () => {
         run.state.status = "done";
         run.state.reason = opts.reason;
         // [D6(a) 第 1 步] 终局判定源 = 终局记录注册表：stub 直改状态须同步注入终局
-        // 事实（生产 abortRun 经 dispatch 链 note）——否则 runSummary 投影回退 running。
+        // 事实（生产 abortRun 经 dispatch 链 note）——否则 runSummary 派生视图回退 running。
         noteRebuiltSettlement(runId, { outcome: "cancelled", settledAt: Date.now() });
       }
     });
@@ -839,10 +839,10 @@ describe("abort 转移文案全文锚定（LLM 可见文本锁）", () => {
     expect(r.details).toMatchObject({ action: "abort", runId: run.runId, status: "done", reason: "aborted" });
   });
 
-  it("无终局记录 → 转移段无后缀（reasonSuffix 条件拼接；[D6(a) 第 1 步] 换源后「未终局」不再投影 done/reason）", async () => {
+  it("无终局记录 → 转移段无后缀（reasonSuffix 条件拼接；[D6(a) 第 1 步] 换源后「未终局」不再派生视图 done/reason）", async () => {
     // 换源前本用例靠「聚合 done 而注册表 miss」造出 done+无 reason 形态——该形态随
     // R6 判据换源消失（done ⟺ 注册表有条目 ⟺ reason 由 (outcome,errorCode) 恒派生）。
-    // 现锁同一条拼接分支的可达形态：无终局记录 = 未终局，status 与 reason 都不投影。
+    // 现锁同一条拼接分支的可达形态：无终局记录 = 未终局，status 与 reason 都不进派生视图。
     stubAbortTransition({ settle: false });
     const run = makeRun({
       runId: "wf-1719600000000-z9y8x7",
@@ -914,12 +914,12 @@ describe("TC3i: 宿主 TOOL_TOP_LEVEL reservedKeys 接线锚（M-3 回归）", (
 // SW 包内 vitest 把 typebox alias 到 mock（丢 required），schema 对象断言在本包
 // 环境无防线价值——name 必填性走源码负锚（与 tool-subagents.test.ts tasks 负锚
 // 同款形态）：name 未经 Type.Optional 包裹，误改 Optional 即红。
-// actionRun 的 `if (!name) throw` 是运行时兜底，不替代声明面（拍平老路回归时
-// 声明面先劣化，本锚在文本层先亮）。
+// actionRun 的 `if (!name) throw` 是运行时兜底，不替代声明侧（拍平老路回归时
+// 声明侧先劣化，本锚在文本层先亮）。
 // ══════════════════════════════════════════════════════════════
 
 describe("WorkflowRunParams.name 必填性源码锚（D3 必填性真实化 run 侧锁）", () => {
-  it("name 未经 Type.Optional 包裹（schema 声明面必填性防回归）", () => {
+  it("name 未经 Type.Optional 包裹（schema 声明侧必填性防回归）", () => {
     expect(TOOL_WORKFLOW_SRC).toContain("name: Type.String(");
     expect(TOOL_WORKFLOW_SRC).not.toContain("name: Type.Optional(");
   });

@@ -9,7 +9,7 @@
  *   锚点 @earendil-works/pi-coding-agent@1.0.0 dist/core/resolve-config-value.js：
  *   parseConfigValueReference 以 `!` 前缀识别 command、parseConfigValueTemplate
  *   解析 `$VAR`/`${VAR}`、resolveConfigValue 求值。占位形态对 taiji 不可判定为
- *   即刻可用：quota 凭证链（provider-credential-resolver，D3 收口）拒执行 command
+ *   即刻可用：quota 凭证链（provider-credential-resolver，D3 收尾）拒执行 command
  *   （不执行 shell），env 引用的取值取决于运行时环境——自动开启均成立不了「查即可用」；
  *   明文 key 即刻可用
  * - matchQuotaPreset 命中（baseUrl/name 命中内置预设）
@@ -81,7 +81,7 @@ export function resolveCreateMatchIdentity(
 
 /**
  * 新建 provider 的额度显示自动开启（「新增即默认同意」单一入口，setProvider 新建分支调用）。
- * 判定顺序：凭据可用 → preset 命中 → 落盘（内部守卫：用户已有 enabled 决定不覆盖）。
+ * 判定顺序：凭据可用 → preset 命中 → 落盘（内部检查：用户已有 enabled 决定不覆盖）。
  *
  * @param credentialUsable 凭据可用（调用方判定）：明文（isPlaintextCredential，env/command
  *   占位串的真值由 pi 运行时解析，非即刻可用，锚点与语义见文件头）**且**真的有落盘路径

@@ -78,7 +78,7 @@ export const ackState: AckState = getOrCreateAckState()
 /** 通知去重（模块级；resetAckState 全清——跨会话隔离）。 */
 const notifyDedup = createAckNotifyDedup()
 
-/** 编排依赖（注入面；backend 为 per-session 实例，状态经模块级单例跨代共享）。 */
+/** 编排依赖（注入点；backend 为 per-session 实例，状态经模块级单例跨代共享）。 */
 export interface AckTurnDeps {
   backend: SchedulerBackend
   log: {

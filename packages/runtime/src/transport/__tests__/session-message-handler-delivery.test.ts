@@ -7,15 +7,15 @@
  * - submit：reply 形态（clientUuid + 帧四态之一 + lane）+ 帧发布（条目可见、preview 剥投递
  *   标记 + 截断）+ 内核状态迁移经 onChange 跟随（queued → in-flight）
  * - 持有态（compacting）：lane/state 双 queued（V9 队列态可撤的帧形态前提）
- * - 帧数据源 = 内核 entries() **投影视图**（D9②/D5③）：cancelled 不投影、delivered 投影、
- *   tombstone 元数据不泄漏；真实内核锁定「以 entries(options) 投影形态调用」（防误用全量视图）
+ * - 帧数据源 = 内核 entries() **派生视图**（D9②/D5③）：cancelled 不映射、delivered 派生视图、
+ *   tombstone 元数据不泄漏；真实内核锁定「以 entries(options) 派生视图形态调用」（防误用全量视图）
  * - 变更驱动（onChange）而非轮询：无变更推进 60s 零新帧（负断言）
  * - 帧单发收敛（msg-pipeline-debloat D4-4）：订阅首配快照恰好一帧（约束 7 主动拉取面）+
  *   同一状态变更恰好一帧（RPC 入口不重发）+ 无变更零帧——「网络面板无常态重复 delivery
  *   帧」验收（S3 场景④）的单测等价
  * - state topic last-value（真实 MessageBus）：同 session 多帧 stateSnapshot 只留最新 +
  *   不入 ring + topicOf('session.delivery') === 'state'（登记表锁）
- * - session.subscribe reply 的 stateSnapshot 含 delivery 帧（切 session/重连恢复装配面，V5）
+ * - session.subscribe reply 的 stateSnapshot 含 delivery 帧（切 session/重连恢复装配侧，V5）
  * - cancel：queued 可撤（cancelled:true + 全文回草稿、剥标记）+ 不可撤分支（cancelled:false
  *   + reason，不谎报，§3.4）
  * - drain：发送序全量取回 + 帧空条目集形态（entries: []）
@@ -134,7 +134,7 @@ function makeHarness(
 
   // sessionService.sendMessage 直通桩（must-fix ①：delivery.submit 受理入口经它走
   // 「touch + BeforeSend hook + 内核提交」组合点；hook 语义在 dispatcher 测试覆盖，
-  // 此处缺省仅复刻组合点的内核提交腿，供既有受理/帧用例沿用）
+  // 此处缺省仅复刻组合点的内核提交路径，供既有受理/帧用例沿用）
   const sendMessageSpy = vi.fn(
     opts.sendMessage ??
       (async (sid: string, content: string, images?: Array<{ data: string; mimeType: string }>, clientUuid?: string) => {
@@ -208,7 +208,7 @@ function msg(type: string, payload: Record<string, unknown>, id = 'req-1'): Clie
 const WS = {} as never
 
 /**
- * 经真实入口装配该 session 的订阅（renderer 时序，msg-pipeline-debloat D4-4 后唯一装配面）：
+ * 经真实入口装配该 session 的订阅（renderer 时序，msg-pipeline-debloat D4-4 后唯一装配侧）：
  * session.subscribe 触发 handleSessionSubscribe → sync（onChange 装配 + 首配快照帧入
  * reply 的 stateSnapshot，不走广播）→ bus.subscribe（后续 onChange 帧广播到 harness.sent）。
  * handler 体无 await 点，同步完成。
@@ -236,7 +236,7 @@ afterEach(() => {
   vi.useRealTimers()
 })
 
-// ── 协议面：RPC 认领 ──────────────────────────────────────────────
+// ── 协议范围：RPC 认领 ──────────────────────────────────────────────
 
 describe('delivery 域 RPC 认领（D5 四 RPC）', () => {
   it('handles 认领 delivery.submit / cancel / drain / resync', () => {
@@ -265,7 +265,7 @@ describe('delivery.submit 受理 + 帧装配（D1/D5/D9②）', () => {
     expect(frameEntries(h)).toEqual([{ clientUuid: UUID_A, preview: expect.any(String), state: 'queued', lane: 'direct' }])
   })
 
-  it('preview = 展示投影：剥除投递标记（双形态）+ 按 DELIVERY_PREVIEW_MAX_CHARS 截断，禁止当全文', async () => {
+  it('preview = 展示派生视图：剥除投递标记（双形态）+ 按 DELIVERY_PREVIEW_MAX_CHARS 截断，禁止当全文', async () => {
     const h = makeHarness()
     subscribeLive(h)
 
@@ -373,7 +373,7 @@ describe('delivery.submit × BeforeSend hook（hook 属受理阶段：veto 不�
   })
 })
 
-// ── 帧数据源 = 投影视图（D9②/D5③） ───────────────────────────────
+// ── 帧数据源 = 派生视图（D9②/D5③） ───────────────────────────────
 
 /** 这组用例的最小 pi client（真实内核 pump 路径：prompt/clearQueue/getEntries 桩，ensureActive 返回）。 */
 function makePiClient() {
@@ -385,8 +385,8 @@ function makePiClient() {
   }
 }
 
-describe('帧数据源 = 内核投影视图（D9②：cancelled 不投影 / tombstone 不泄漏）', () => {
-  it('活跃全量 + delivered 投影 + cancelled 不投影（真实内核三态同帧）', async () => {
+describe('帧数据源 = 内核派生视图（D9②：cancelled 不映射 / tombstone 不泄漏）', () => {
+  it('活跃全量 + delivered 映射 + cancelled 不映射（真实内核三态同帧）', async () => {
     const h = makeHarness({ session: { isCompacting: true, occupancy: { turn: 'idle', compacting: true, bash: false } } })
     subscribeLive(h)
 
@@ -398,7 +398,7 @@ describe('帧数据源 = 内核投影视图（D9②：cancelled 不投影 / tomb
     await h.handler.handleSessionMessage(msg('delivery.cancel', { sessionId: SID, clientUuid: UUID_A }), WS)
 
     const entries = frameEntries(h)
-    // 内核投影序：活跃条目（FIFO）在前、delivered 窗口在后；cancelled 结构性缺席
+    // 内核派生视图序：活跃条目（FIFO）在前、delivered 窗口在后；cancelled 结构性缺席
     expect(entries.map((e) => [e.clientUuid, e.state])).toEqual([
       [UUID_C, 'queued'],
       [UUID_B, 'delivered'],
@@ -408,7 +408,7 @@ describe('帧数据源 = 内核投影视图（D9②：cancelled 不投影 / tomb
     expect(h.registry.entries(SID)?.tombstones.map((t) => t.id).sort()).toEqual([UUID_A, UUID_B])
   })
 
-  it('装配以 entries(options) 投影形态调用（真实内核双视图分流：全量视图的 tombstone 不入帧）', async () => {
+  it('装配以 entries(options) 派生视图形态调用（真实内核双视图分流：全量视图的 tombstone 不入帧）', async () => {
     const bus = new MessageBus()
     const sent: ServerMessage[] = []
     const client = { readyState: 1, send: (raw: string) => sent.push(JSON.parse(raw) as ServerMessage) } as BusClient
@@ -425,7 +425,7 @@ describe('帧数据源 = 内核投影视图（D9②：cancelled 不投影 / tomb
       { inject: vi.fn(async (_c: IPiEngine, text: string) => ({ text, notices: [] })) } as unknown as SkillInjector,
     )
     const handle = registry.getOrCreateDelivery(SID)
-    // 真实内核制造 tombstone：queued 提交即本地撤销（full 视图留 cancelled 记录，投影不投影）
+    // 真实内核制造 tombstone：queued 提交即本地撤销（full 视图留 cancelled 记录，派生视图不映射）
     registry.submit(SID, { content: 'msg-A', clientUuid: UUID_A })
     await registry.cancel(SID, UUID_A)
 
@@ -433,18 +433,18 @@ describe('帧数据源 = 内核投影视图（D9②：cancelled 不投影 / tomb
     const topic = new SessionDeliveryTopic({ getRegistry: () => registry, getBus: () => bus, nextPushId: () => 'push-t' })
     topic.sync(SID)
 
-    // 投影形态锁定：topic 以 projection() 投影视图装配帧（[MF-1-13] 拆名后投影专用入口，
+    // 派生视图形态锁定：topic 以 projection() 派生视图装配帧（[MF-1-13] 拆名后派生视图专用入口，
     // 存在性判定走 registry.getDelivery 非创建性查询，不触达全量视图）
     expect(projectionSpy).toHaveBeenCalled()
     const frames = sent.filter((m) => m.type === 'session.delivery') as ServerMessage<'session.delivery'>[]
     expect(frames).toHaveLength(1)
-    // 双视图分流：full 视图有 cancelled tombstone，帧条目为空（cancelled 不投影、不泄漏）
+    // 双视图分流：full 视图有 cancelled tombstone，帧条目为空（cancelled 不映射、不泄漏）
     expect(registry.entries(SID)?.tombstones.map((t) => t.id)).toContain(UUID_A)
     expect(frames[0]?.payload.entries).toEqual([])
     registry.disposeAll()
   })
 
-  it('变更驱动而非轮询：无内核变更时推进 60s 零新帧（onChange 订阅面）', async () => {
+  it('变更驱动而非轮询：无内核变更时推进 60s 零新帧（onChange 订阅侧）', async () => {
     const bus = new MessageBus()
     const sent: ServerMessage[] = []
     const client = { readyState: 1, send: (raw: string) => sent.push(JSON.parse(raw) as ServerMessage) } as BusClient
@@ -514,7 +514,7 @@ describe('session.delivery state topic（D5：last-value / 不入 ring / 重连�
     expect(snapshot.snapshot.some((m) => m.type === 'session.delivery')).toBe(false)
   })
 
-  it('session.subscribe reply 的 stateSnapshot 含 delivery 帧（切 session/重连队列区恢复装配面，V5）', async () => {
+  it('session.subscribe reply 的 stateSnapshot 含 delivery 帧（切 session/重连队列区恢复装配侧，V5）', async () => {
     const h = makeHarness({ session: { isCompacting: true, occupancy: { turn: 'idle', compacting: true, bash: false } } })
 
     await h.handler.handleSessionMessage(msg('delivery.submit', { sessionId: SID, content: 'A', clientUuid: UUID_A }), WS)
@@ -609,7 +609,7 @@ describe('delivery.resync（D5：判重去重 + 单源恢复）', () => {
     subscribeLive(h)
 
     await h.handler.handleSessionMessage(msg('delivery.submit', { sessionId: SID, content: 'A', clientUuid: UUID_A }), WS)
-    expect(h.handle.confirmDelivered(UUID_A)).toBe(true) // 送达回执（真实回执链路归 u2 测试面）
+    expect(h.handle.confirmDelivered(UUID_A)).toBe(true) // 送达回执（真实回执链路归 u2 测试）
     await h.handler.handleSessionMessage(msg('delivery.resync', { sessionId: SID, clientUuids: [UUID_A, UUID_UNKNOWN] }), WS)
 
     const reply = replyOf(h, 'delivery.resync') as { sessionId: string; deduped: string[] }
@@ -617,7 +617,7 @@ describe('delivery.resync（D5：判重去重 + 单源恢复）', () => {
     expect(reply.deduped).toEqual([UUID_A])
     expect(Object.keys(reply)).toEqual(['sessionId', 'deduped']) // 条目权威在帧，reply 不复述
     // 存留条目（delivered 窗口内）经 onChange 帧可见（confirmDelivered 变更单发；
-    // resync deduped 全命中无内核变更 → 零新帧，最后一帧即权威投影，D4-4）
+    // resync deduped 全命中无内核变更 → 零新帧，最后一帧即权威派生视图，D4-4）
     expect(frameEntries(h).map((e) => [e.clientUuid, e.state])).toEqual([[UUID_A, 'delivered']])
   })
 })
@@ -634,7 +634,7 @@ describe('帧单发收敛（D4-4：首配快照一次 + 同一变更恰好一帧
     session: { isCompacting: true, occupancy: { turn: 'idle', compacting: true, bash: false } },
   }
 
-  it('订阅首配快照恰好一帧：订阅前的内核变更不丢（全量投影补齐），且订阅前零帧白发', async () => {
+  it('订阅首配快照恰好一帧：订阅前的内核变更不丢（全量派生视图补齐），且订阅前零帧白发', async () => {
     const h = makeHarness(held)
     // 订阅前提交：onChange 未装配、bus 无订阅者 → 零帧（不白发），事实由首配快照覆盖
     await h.handler.handleSessionMessage(msg('delivery.submit', { sessionId: SID, content: 'A', clientUuid: UUID_A }), WS)
@@ -746,7 +746,7 @@ describe('delivery 域防御路径', () => {
     expect(h.errors).toHaveLength(0)
     expect(h.frames().length).toBe(afterSubmit)
 
-    // session.subscribe 重装 + 首配快照发布最新投影（自愈，无需外部重新接线）
+    // session.subscribe 重装 + 首配快照发布最新派生视图（自愈，无需外部重新接线）
     await h.handler.handleSessionMessage(msg('session.subscribe', { sessionId: SID }), h.attachSubscriber() as never)
     const payload = replyOf(h, 'session.subscribe') as { stateSnapshot: ServerMessage[] } | undefined
     const frames = payload?.stateSnapshot.filter((m) => m.type === 'session.delivery') ?? []
@@ -760,7 +760,7 @@ describe('delivery 域防御路径', () => {
   })
 })
 
-// ── 纯函数面（帧 DTO 装配） ───────────────────────────────────────
+// ── 纯函数部分（帧 DTO 装配） ───────────────────────────────────────
 
 describe('帧 DTO 装配纯函数', () => {
   it('stripDeliveryMarkers 剥标记 + 紧邻连接换行（shared 唯一实现再导出，草稿恢复/预览共用）', () => {

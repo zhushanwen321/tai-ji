@@ -3,10 +3,10 @@
  *
  * 背景：pi 会钳制模型族不支持的思考档（mimo 族 max → high，clampThinkingLevel 就近
  * 回落），且钳制时不发事件不写 entry。旧实现 reply 与内存缓存都用请求值——前端 pending
- * 确认（session.thinkingLevelSet 回灌）与 summary 投影会短暂显示未生效档位。
+ * 确认（session.thinkingLevelSet 回灌）与 summary 派生视图会短暂显示未生效档位。
  *
  * 锁定：
- * - pi 生效值 ≠ 请求值 → 返回生效值 + 内存缓存（getSummary 投影源）写生效值
+ * - pi 生效值 ≠ 请求值 → 返回生效值 + 内存缓存（getSummary 派生源）写生效值
  * - get_state 异常形态（thinkingLevel 缺失/非 string）→ 请求值兜底不炸
  * - 无活跃进程 → 先 ensureActive（U2/D7）；激活失败显性化（不再请求值兜底假成功）
  *
@@ -65,7 +65,7 @@ function findStateMsg(msgs: ServerMessage[], type: string): ServerMessage | unde
 }
 
 describe('SessionService.setThinkingLevel 返回 pi 生效值（P3）', () => {
-  it('请求 max 被 pi 钳制为 high → 返回 high；pi 收到请求值 max；缓存（getSummary 投影源）为 high 非请求值', async () => {
+  it('请求 max 被 pi 钳制为 high → 返回 high；pi 收到请求值 max；缓存（getSummary 派生源）为 high 非请求值', async () => {
     const { svc, client } = makeEnv(() => 'high')
     await svc.initializeManagedSession('s1', client, '/tmp', 't')
     const returned = await svc.setThinkingLevel('s1', 'max')
@@ -99,7 +99,7 @@ describe('SessionService.setThinkingLevel 返回 pi 生效值（P3）', () => {
 })
 
 describe('SessionService.switchModel 返回 pi 生效模型（U6 回执普查）', () => {
-  it('pi pattern 换模（get_state 读回 ≠ 请求值）→ 返回生效复合串；缓存（getSummary 投影源）写生效值非请求值', async () => {
+  it('pi pattern 换模（get_state 读回 ≠ 请求值）→ 返回生效复合串；缓存（getSummary 派生源）写生效值非请求值', async () => {
     // 请求 model-a，pi pattern 引擎实际切到同族 model-b（事故 A 形态）
     const { svc, client } = makeEnv(() => 'high')
     ;(client.getState as ReturnType<typeof vi.fn>).mockResolvedValue({
@@ -137,7 +137,7 @@ describe('SessionService.switchModel 返回 pi 生效模型（U6 回执普查）
     await env.svc.initializeManagedSession('s1', env.client, '/tmp', 't')
     const returned = await env.svc.switchModel('s1', 'p' as never, 'model-a')
     expect(returned).toBe('p/model-a')
-    // 缓存（getSummary 投影源）同步兜底为请求值，不落畸形生效值
+    // 缓存（getSummary 派生源）同步兜底为请求值，不落畸形生效值
     expect(env.svc.getSummary('s1')?.modelId).toBe('p/model-a')
   })
 
@@ -172,7 +172,7 @@ describe('SessionService.switchModel 返回 pi 生效模型（U6 回执普查）
       })
       const returned = await env.svc.switchModel('s1', 'p' as never, 'model-a')
       expect(returned).toBe('p/model-b')
-      // switchModel RPC 成功响应 markDirty → 防抖重拉 → 快照挂钩发布 state_changed
+      // switchModel RPC 成功响应 markDirty → 防抖重新拉取 → 快照挂钩发布 state_changed
       await vi.advanceTimersByTimeAsync(SCALAR_STATE_DEBOUNCE_MS + 50)
 
       const late = env.bus.subscribe('s1', createMockWs())
@@ -181,7 +181,7 @@ describe('SessionService.switchModel 返回 pi 生效模型（U6 回执普查）
         sessionId: 's1',
         modelId: 'p/model-b', // 生效值，非请求值 p/model-a
       })
-      // 第三处消费点：缓存直写（session.modelId ← effectiveModelId）投影 getSummary /
+      // 第三处消费点：缓存直写（session.modelId ← effectiveModelId）派生视图 getSummary /
       // session 列表（toSummary），与 payload 的实例快照路径是两条独立数据链——都要是生效值
       expect(env.svc.getSummary('s1')?.modelId).toBe('p/model-b')
     } finally {
@@ -204,7 +204,7 @@ describe('SessionService.setModelCapabilityReconciler — 附着触发能力对�
 
     expect(reconciler).toHaveBeenCalledTimes(1)
     expect(reconciler).toHaveBeenCalledWith('s1')
-    // 附着主链路无恙：返回视图 + summary 投影正常（对账是纯旁路诊断）
+    // 附着主链路无恙：返回视图 + summary 派生视图正常（对账是纯旁路诊断）
     expect(session).toBeTruthy()
     expect(svc.getSummary('s1')).toBeTruthy()
   })

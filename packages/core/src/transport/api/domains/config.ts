@@ -21,6 +21,9 @@ import type {
   SystemPromptConfig,
   TerminalConfig,
   LlmRetryConfig,
+  NetworkProxyConfig,
+  NetworkProxyStatsRange,
+  NetworkProxyTestResult,
   SourceDetectResult,
   ProviderSource,
   BuiltinProviderTemplate,
@@ -42,7 +45,7 @@ import * as events from '../events'
 // 此处统一解包对应字段，与 session.list 解包 `.groups` 同构。mock 门面有独立实现不受影响。
 // scoped-model D7：reply 与 config.providers 广播同形（protocol.ts 'config.getProviders' 映射
 // ServerMessageMap['config.providers']），scopedModels 透传给 refreshProviders 消费（[] 与 undefined 语义不同：
-// [] = 空白名单，undefined = reply 未携带，由消费方守卫区分）。
+// [] = 空白名单，undefined = reply 未携带，由消费方检查区分）。
 export async function listProviders(): Promise<{ providers: ProviderInfo[]; scopedModels?: string[] }> {
   const reply = await command('config.getProviders', {}, RPC_BACKSTOP_TIMEOUT_MS)
   return { providers: reply.providers, scopedModels: reply.scopedModels }
@@ -194,9 +197,9 @@ export function onSkillDirs(handler: (dirs: SkillDirConfig[]) => void): () => vo
 }
 
 /**
- * 订阅 skill 缓存失效信号（landing useGlobalSkills/useProjectSkills 失效缓存重拉）。
+ * 订阅 skill 缓存失效信号（landing useGlobalSkills/useProjectSkills 失效缓存重新拉取）。
  * 与 onSkills 区分：onSkills 推全量 skill 列表给 settingsStore（settings 弹窗用）；
- * onSkillCacheInvalidated 推失效信号给 landing composable（runtime 已重扫缓存，前端重拉即拿新值）。
+ * onSkillCacheInvalidated 推失效信号给 landing composable（runtime 已重扫缓存，前端重新拉取即拿新值）。
  *
  * payload 与 shared protocol.ts 的 config.skillCacheInvalidated 一致：
  * - scope='global'：全局 skill 变动，所有 panel 刷全局缓存（cwd 缺省）
@@ -389,6 +392,42 @@ export async function setRetryConfig(config: LlmRetryConfig): Promise<{ config: 
 export function onRetryConfig(handler: (payload: { config: LlmRetryConfig; configured: boolean }) => void): () => void {
   return events.onGlobalType('config.retryConfig', (msg) => {
     handler(msg.payload)
+  })
+}
+
+// ── LLM 网络代理（llm-network-proxy §5 U1；协议登记 = shared protocol.ts config.getNetworkProxy 等
+//    五条 + config.networkProxy / config.networkProxyStats 广播。runtime handler 接线归 u-runtime，
+//    本门面只按协议发 command / 订阅全局通道）──
+
+/** 读取网络代理配置（reply 与 config.networkProxy 广播同形）。 */
+export async function getNetworkProxyConfig(): Promise<ServerMessageMap['config.networkProxy']> {
+  return command('config.getNetworkProxy', {}, RPC_BACKSTOP_TIMEOUT_MS)
+}
+
+/** 全量保存网络代理配置（单页单保存；校验失败 runtime 返回 error envelope，command 会 reject）。 */
+export async function setNetworkProxyConfig(config: NetworkProxyConfig): Promise<ServerMessageMap['config.networkProxy']> {
+  return command('config.setNetworkProxy', { config }, RPC_BACKSTOP_TIMEOUT_MS)
+}
+
+/** 测试连接（runtime 两段探测；归因文案 / 阶段 / 耗时形状 = shared NetworkProxyTestResult）。 */
+export function testNetworkProxy(config: NetworkProxyConfig): Promise<NetworkProxyTestResult> {
+  return command('config.testNetworkProxy', { config }, RPC_BACKSTOP_TIMEOUT_MS)
+}
+
+/** 请求统计读聚合（range 时间过滤；「累计」档 = 截断保尾窗口内累计，truncatedNote 携带标注）。 */
+export async function getNetworkProxyStats(range: NetworkProxyStatsRange): Promise<ServerMessageMap['config.networkProxyStats']> {
+  return command('config.getNetworkProxyStats', { range }, RPC_BACKSTOP_TIMEOUT_MS)
+}
+
+/** 重置请求统计（runtime 追加 reset 水位；reply = 清零后统计）。 */
+export async function resetNetworkProxyStats(): Promise<ServerMessageMap['config.networkProxyStats']> {
+  return command('config.resetNetworkProxyStats', {}, RPC_BACKSTOP_TIMEOUT_MS)
+}
+
+/** 订阅网络代理配置广播（保存成功后推回，多窗口同步）。 */
+export function onNetworkProxyConfig(handler: (config: NetworkProxyConfig) => void): () => void {
+  return events.onGlobalType('config.networkProxy', (msg) => {
+    handler(msg.payload.config)
   })
 }
 

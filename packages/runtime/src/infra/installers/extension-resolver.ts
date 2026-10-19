@@ -493,7 +493,7 @@ export class ExtensionResolver implements IExtensionResolver {
    *
    * 根治：去重 key 统一为 package.json.name，与 disabled key（resolveExtension 的
    * `npm:${meta.name}`）、ExtensionInfo.name 全链路一致。name 缺失/非 string 时 fallback
-   * basename(dir)，与 resolveExtension 的 typeof 守卫对齐。
+   * basename(dir)，与 resolveExtension 的 typeof 检查对齐。
    */
   private readExtName(dir: string): string {
     try {

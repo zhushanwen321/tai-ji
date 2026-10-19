@@ -61,7 +61,7 @@ function createParser(): AnsiUp {
   const ansi = new AnsiUp()
   // v6：输出 class 而非内联 rgb，由 CSS 层映射 v6 token（双主题可 CSS 变量化）
   ansi.use_classes = true
-  // 钉死 XSS 安全属性，不依赖 ansi_up 默认值（纵深防御）
+  // 固定 XSS 安全属性，不依赖 ansi_up 默认值（纵深防御）
   ansi.escape_html = true
   return ansi
 }

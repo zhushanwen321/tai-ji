@@ -153,7 +153,7 @@ describe("WT16-WT19: malformed 语法（parseError=true）", () => {
 		expect(r.clean).toBe(false);
 	});
 
-	it("WT18: unclosed \" —— 未闭合双引号", async () => {
+	it("WT18: unclosed \" —— 未结束的双引号", async () => {
 		const r = await analyzeBashStructure('echo "unclosed');
 		expect(r.parseError).toBe(true);
 		expect(r.clean).toBe(false);

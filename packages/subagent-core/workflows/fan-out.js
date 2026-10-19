@@ -1,7 +1,7 @@
 // fan-out.js — N 个已知独立任务并行派发 + 全量收集（通用 subagent 编排）
 //
 // 模式：tasks 数组逐条派 agent()（parallel() allSettled——任一成员死亡/失败不阻断
-// 其余成员、不阻断 run 收口）→ 全量收集 → 可选 aggregate（末尾追加一个 agent() 把
+// 其余成员、不阻断 run 收尾）→ 全量收集 → 可选 aggregate（末尾追加一个 agent() 把
 // 全部结果归约成一份结论）。aggregate 缺省 false = 纯收集。
 //
 // 与 parallel 的分工：parallel 是「多视角分析同一目标」（单一目标转译成视角 prompt）；
@@ -41,7 +41,7 @@ parameters:
 usage: |
   ## 使用说明
   - tasks 每个元素 = 一条完整自包含、可直接派发的任务描述；全部任务并行执行，结果一次性收齐
-  - 任一成员失败不阻断其余成员：部分失败收口 status=partial（失败条目带 error），只重派失败任务即可
+  - 任一成员失败不阻断其余成员：部分失败收尾 status=partial（失败条目带 error），只重派失败任务即可
   - agents：逗号分隔的 agent .md 绝对路径；1 个应用于全部任务，N 个与任务一一对应；数量 >1 且不等于任务数时入口 fail-fast（与 parallel 的静默 fallback 不同，防失败归因失真）
   - aggregate=true 时末尾追加一个聚合 agent，把全部结果归约成一份结论（缺省 false 纯收集）
   - 每个成员输出 summary（数百字内，通知内联展示）+ 可选 fullReportPath（完整产物落盘路径）；结果总量超预算时按序截断并置 truncated 标记（taskIndex/status/路径恒完整）
@@ -64,7 +64,7 @@ if (tasks.some((t) => typeof t !== "string" || t.trim() === "")) {
 // 必须用 workerData.scriptPath 锚定脚本目录（parallel/review-fix-loop 同模式）；
 // scriptPath 注入是 worker 契约的显式前提（D1 加固），缺席或为空串即 fail-fast
 // （空串 = record 流为 scriptPath 载荷落地前的旧格式，resume 重建无锚可恢复），
-// 不回退 cwd——消除从用户目录误加载/被植入同名 _shared/agent-refs.cjs 的代码加载面。
+// 不回退 cwd——消除从用户目录误加载/被植入同名 _shared/agent-refs.cjs 的代码加载路径侧。
 if (typeof workerData === "undefined" || !workerData || typeof workerData.scriptPath !== "string" || workerData.scriptPath === "") {
   if (workerData && typeof workerData.scriptPath === "string") {
     throw new Error("fan-out: core_module_load_failed: workerData.scriptPath is an empty string (record stream predates the scriptPath field); cannot locate workflows/_shared/agent-refs.cjs. " +
@@ -148,7 +148,7 @@ if (failedCount === tasks.length) {
 }
 log("fan-out 收集完成：ok=" + (tasks.length - failedCount) + " failed=" + failedCount);
 
-// ── 段 2：aggregate（可选归约 + 收口定稿）────────────────────────
+// ── 段 2：aggregate（可选归约 + 收尾定稿）────────────────────────
 phase("aggregate");
 
 let aggregateOut;
@@ -175,7 +175,7 @@ if ($ARGS.aggregate === true) {
       aggregateOut = { error: "aggregate agent 返回缺 conclusion 字段" };
     }
   } catch (err) {
-    // 归约成员失败不炸 run（对齐成员失败语义）：已收集的 results 照常收口
+    // 归约成员失败不炸 run（对齐成员失败语义）：已收集的 results 照常收尾
     const msg = err && err.message ? err.message : String(err);
     aggregateOut = { error: msg };
     log("fan-out aggregate 失败：" + msg);
@@ -187,12 +187,12 @@ const aggregateFailed = aggregateOut !== undefined &&
 
 // ── 通知体积：results 序列化前保序截断（D5）─────────────────────
 // 壳侧 MAX_RESULT_LENGTH 机制在 helpers.ts（通知序列化预算）；模板侧只做保序截断：
-// taskIndex/status/fullReportPath/error（归因与恢复面）恒完整，summary（体积大头）
+// taskIndex/status/fullReportPath/error（归因与恢复侧）恒完整，summary（体积大头）
 // 先让出、task 文本次之；截断发生置 outcome 顶层 truncated: true
 const RESULTS_BUDGET_CHARS = 8000;
 
-/** 单条投影：keepTask=false 丢 task 文本、keepSummary=false 丢 summary；
- *  taskIndex/status/fullReportPath/error（归因与恢复面，D9）恒完整。
+/** 单条映射：keepTask=false 丢 task 文本、keepSummary=false 丢 summary；
+ *  taskIndex/status/fullReportPath/error（归因与恢复侧，D9）恒完整。
  *  task 用 delete 而非不写 key，保持与最小条目形态相同的 key 插入顺序。 */
 function projectEntry(r, keepTask, keepSummary) {
   const entry = { task: r.task, taskIndex: r.taskIndex, status: r.status };

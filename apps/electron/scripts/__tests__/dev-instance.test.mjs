@@ -3,7 +3,7 @@
  *
  * deriveParams（fnv1a hash → 端口段）与 buildDevEnv 是纯函数、最易测，其 bug 形态
  * 正是 C-build-08 登记的事故类（端口/数据目录静默错配，验收证据绑错 worktree）。
- * 覆盖面：
+ * 覆盖范围：
  *   - 同 worktree 名端口稳定（重启不变，CDP 连接/日志可复现）
  *   - 不同名三端口段互不重叠（runtime offset 步进 10 段内不重叠）
  *   - buildDevEnv：泄漏变量剥除（workspace AGENTS.md MANDATORY 清单）+
@@ -97,12 +97,9 @@ describe('deriveParams 端口派生', () => {  it('fnv1a 稳定且 32bit 无符�
 // ── env 装配 ──────────────────────────────────────────────────────────
 
 describe('buildDevEnv 泄漏剥除与统一注入', () => {
-  it('剥除 MANDATORY 泄漏清单（ELECTRON_RUN_AS_NODE + RELAY_STD* 三名）', () => {
+  it('剥除 MANDATORY 泄漏清单（ELECTRON_RUN_AS_NODE）', () => {
     const base = {
       ELECTRON_RUN_AS_NODE: '1',
-      TAIJI_SUBAGENT_RELAY_STDIN: '3',
-      TAIJI_SUBAGENT_RELAY_STDOUT: '4',
-      TAIJI_SUBAGENT_RELAY_STDERR: '5',
       PATH: '/usr/bin',
     }
     const env = buildDevEnv(deriveParams('t', '/tmp/i'), base)
@@ -136,7 +133,7 @@ describe('模板运行时状态过滤', () => {
     expect(isRuntimeStateEntry(join('agent', 'skills'))).toBe(false)
   })
 
-  it('TEMPLATE_DIR_EXCLUDES 覆盖会话/记录/调度/日志面', () => {
+  it('TEMPLATE_DIR_EXCLUDES 覆盖会话/记录/调度/日志目录', () => {
     for (const d of ['subagents', 'records', 'scheduler', 'workflow-state', 'logs', 'sessions']) {
       expect(TEMPLATE_DIR_EXCLUDES).toContain(d)
     }

@@ -9,7 +9,7 @@
  *
  * 两级白名单 = hast-util-sanitize defaultSchema（GitHub 风格 sanitation）翻译：
  * - 标签 = defaultSchema tagNames（去 input——taiji 管线无 GFM task-list 的
- *   `<input checkbox>` 产出面）；
+ *   `<input checkbox>` 产出形态）；
  * - 属性 = defaultSchema 属性表翻译（全局 '*' 表 + 按标签项合并为 DOMPurify 平面白名单；
  *   className 值级项与 data-* 脚注属性不翻译——class/data-* 构造性全剥是 D1 裁决）；
  * - URI = DOMPurify 默认 ALLOWED_URI_REGEXP，不自定义（R8 裁决）：默认正则的
@@ -182,7 +182,7 @@ export function isRelativeResourcePath(value: string): boolean {
 
 /**
  * POSIX resolve（Node path.resolve 语义的纯函数实现，D4）：base 恒为绝对目录（resourceBaseDir
- * 契约），rel 相对。../ 穿越按 POSIX 语义出 base，越界收口按消费通道分列：
+ * 契约），rel 相对。../ 穿越按 POSIX 语义出 base，越界收尾按消费通道分列：
  * - img src（本函数在 renderer 的唯一消费方 = 上方 hook）：出 base 路径经 toLocalFileUrl
  *   走 local-file:// 协议，由 Electron main 进程（apps/electron/main/main.ts 的
  *   protocol.handle('local-file')）按 computeLocalFilePrefixes/isPathInAllowedPrefixes
@@ -214,7 +214,7 @@ export function toLocalFileUrl(absPath: string): string {
 
 /**
  * 净化 + 回填 + 完整性断言（renderMarkdown 出口调用，D2：净化点在最终输出整串——
- * mXSS 防御要求用户段整串 DOM 往返，唯一入口覆盖全部消费面）。
+ * mXSS 防御要求用户段整串 DOM 往返，唯一入口覆盖全部消费方）。
  *
  * 完整性断言（D3）：store 全部消费 + 输出无哨兵残留，违反抛错由调用方 catch 降级。
  * 覆盖「哨兵被 sanitize 连带销毁」形态：公式哨兵落进 FORBID_CONTENTS 连删元素

@@ -1,10 +1,10 @@
 /**
  * PS-45 探针：pi 扩展 UI 应答（extension_ui_response）只 resolve 扩展 Promise——不回灌对话、不开 turn
- * （设计 U7 / §4 e2e 探针检查点——form-submit-busy-convergence 前提 1 守卫）。
+ * （设计 U7 / §4 e2e 探针检查点——form-submit-busy-convergence 前提 1 检查）。
  *
  * 登记条目（docs/pi-semantics.json PS-45）：taiji 表单/对话应答回传 pi 只用于 resolve 扩展持有的
  * Promise，从不回灌对话、不开 turn——expectTurn 分型通路与 ADR-0072 桥接语义都锚在该前提上；
- * pi 升级若在此路径引入对话写入/轮次启动，前提失锚且无显式信号，故以本探针拦为红灯。
+ * pi 升级若在此路径引入对话写入/轮次启动，前提定位失败且无显式信号，故以本探针拦为红灯。
  *
  * 断言形态（设计 §5 待验证检查点：断言语义，不绑源码结构——pi 重构后形态变而语义不变不得误报）：
  * - 定位不绑行号/处理函数名：按 wire 协议串 "extension_ui_response"（与 taiji rpc-client.ts 发送的
@@ -74,7 +74,7 @@ function advancePastStrings(src: string, i: number): number {
   return c === "'" || c === '"' || c === '`' ? skipString(src, i) : i + 1
 }
 
-/** 从 start（指向 '{'）做括号配对，返回块文本（含首尾花括号）与闭合后下标。 */
+/** 从 start（指向 '{'）做括号配对，返回块文本（含首尾花括号）与封口后下标。 */
 function matchBrace(src: string, start: number): { text: string; end: number } | null {
   let depth = 0
   let i = start

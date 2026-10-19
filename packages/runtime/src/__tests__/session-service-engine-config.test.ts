@@ -1,10 +1,10 @@
 /**
  * [U7 → W4] SessionRecords 子代理引擎配置读写测试（getSubagentEngineConfig /
  * setSubagentDefaultEngine / setSubagentEngineDefaultModel）——Settings 引擎选择器
- * 与 per-engine 默认模型偏好的 runtime 数据面。
+ * 与 per-engine 默认模型偏好的 runtime 数据范围。
  *
  * 覆盖：engines.json 动态清单读取；冷启动回退源单源化（W4：engines.json 缺失/损坏
- * → runtime 自身三级发现，零命中返回空清单——静态 JSON 兜底已删，设计 §3.4 投影面
+ * → runtime 自身三级发现，零命中返回空清单——静态 JSON 兜底已删，设计 §3.4 派生视图
  * 表）；config.json defaultEngine 读取与缺省；set 的引擎校验（未知引擎 throw）、
  * 读改写保留其他字段、幂等零写。
  *
@@ -12,7 +12,7 @@
  * engineDefaults sanitize 读取）与 setSubagentEngineDefaultModel（写入校验 ref ∈
  * 清单、非法拒绝不落脏值、同锁 RMW、幂等零写、脏条目不连坐）。
  *
- * 测试面 = SessionRecords 直构（deps 窄注入，zcodeModelListPaths 隔离真实 ~/.zcode
+ * 测试对象 = SessionRecords 直构（deps 窄注入，zcodeModelListPaths 隔离真实 ~/.zcode
  * 树——缺省派生路径读宿主真实配置，断言不可控）——引擎配置方法均为 SessionRecords
  * 域方法，无需经 SessionService 组合根。
  *
@@ -125,9 +125,9 @@ describe('getSubagentEngineConfig', () => {
     })
   })
 
-  it('[W4] engines.json 缺失/损坏 → runtime 自身发现回退（deps.discoverEngines 注入面）', async () => {
+  it('[W4] engines.json 缺失/损坏 → runtime 自身发现回退（deps.discoverEngines 注入点）', async () => {
     writeJson('config.json', { version: 1, maxConcurrent: 6 })
-    // 回退源 = runtime 自身发现结果（§3.4 投影面表「冷启动回退源单源化」）
+    // 回退源 = runtime 自身发现结果（§3.4 派生视图表「冷启动回退源单源化」）
     const discovered = await makeRecords({ discoverEngines: () => ['zcode', 'foo'] }).getSubagentEngineConfig()
     expect(discovered).toEqual({ engines: ['zcode', 'foo'], defaultEngine: 'pi', engineModels: { zcode: [] }, engineDefaults: {} })
     // engines.json 损坏同走发现回退
@@ -138,7 +138,7 @@ describe('getSubagentEngineConfig', () => {
 
   it('[W4] 零命中 → 空清单（无静态 JSON 兜底）', async () => {
     // 静态声明兜底已删：零命中返回空清单（静态声明列出的 id 无 bin 可执行，
-    // 「能选不能跑」与「不可用引擎不进清单」投影规则冲突，§3.4 投影面表）
+    // 「能选不能跑」与「不可用引擎不进清单」派生视图规则冲突，§3.4 派生视图表）
     writeJson('config.json', { version: 1, maxConcurrent: 6 })
     const svc = makeRecords({ discoverEngines: () => [] })
     await expect(svc.getSubagentEngineConfig()).resolves.toEqual({

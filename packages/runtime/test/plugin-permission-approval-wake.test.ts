@@ -4,7 +4,7 @@
  * 修复前断链：PluginService.approvePermissions 只 grant 不 resolve pending，
  * 挂起在 waitForPermissionApproval 的激活（boot/handleEvent await 着）只能干等
  * 审批等待超时（PERMISSION_TIMEOUT_MS）；且等待期间 re-activate 被 ACTIVATING
- * 幂等守卫 no-op 吞掉（实测 boot 后台初始化 plugins=30007.5ms）。
+ * 幂等检查 no-op 吞掉（实测 boot 后台初始化 plugins=30007.5ms）。
  *
  * 修复后契约（本文件锁定）：
  *  a. approvePermissions 唤醒挂起中的激活 → 毫秒级完成（fake timers 下不推进

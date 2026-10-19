@@ -4,7 +4,7 @@
  * useSessionRespawnRetry —— crash 恢复唯一人工通路的单测（crash-resilience D7）。
  *
  * D7 熔断后 runtime 不再自动重连，用户侧唯一出口 = 提示条「重试」按钮，本 composable
- * 即该按钮的全部行为面，两条分支都必须锁住：
+ * 即该按钮的全部行为范围，两条分支都必须锁住：
  * - 成功链：session.restore RPC（显式重新 spawn）→ 本地 revive 复位 dead 态，无错误 toast；
  * - 失败链：RPC reject → 异常在内部吞掉（不外抛）、不 revive（dead 态保持，侧栏置灰准确）
  *   + toast 指引（respawnRetryFailed）。
@@ -12,7 +12,7 @@
  * mock 策略：@/api / @/stores/session / useToast 全 stub（与同目录 useChatViewDeps.test.ts
  * 同范式——测试目标只有编排与分支，不跑真实 store/RPC）。vue-i18n 不在此 mock：包级
  * setupFiles（vitest-i18n-setup.ts）的 t() 已从 zh-CN locale 解析，断言中文文案——key 漂移
- * 或删除会因回退返回原 key 而使断言失败，自带防漂移面。
+ * 或删除会因回退返回原 key 而使断言失败，自带防漂移机制。
  */
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 

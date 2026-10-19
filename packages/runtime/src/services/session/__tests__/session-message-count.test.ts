@@ -9,7 +9,7 @@
  *   SessionMessageEntry；core apply-entry-convert.ts:382 同口径跳过非 user/assistant）
  * - 文件不存在（pi 延迟写入窗口）→ 0 不报错
  * - 损坏行跳过不中断计数
- * - 多行大文件流式计数正确（实现面 = createReadStream + readline 恒定内存）
+ * - 多行大文件流式计数正确（实现侧 = createReadStream + readline 恒定内存）
  * - 目录路径（EISDIR）→ 上抛（读失败错误回传语义，区别于 ENOENT 归 0）
  *
  * 夹具全部落在 `mkdtempSync(tmpdir())` 自建自删（仓规测试红线：禁触碰真实数据目录）。
@@ -134,7 +134,7 @@ describe('countSessionMessagesInFile 失败语义', () => {
 })
 
 describe('countSessionMessagesInFile 大文件流式读', () => {
-  it('多行 fixture（6000 entry）流式计数正确（实现面 createReadStream+readline 恒定内存）', async () => {
+  it('多行 fixture（6000 entry）流式计数正确（实现侧 createReadStream+readline 恒定内存）', async () => {
     const file = fixturePath('large.jsonl')
     const parts: string[] = [JSON.stringify(lines.header)]
     // 2000 轮对话 = 4000 条计数消息 + 2000 条 toolResult（不计）+ header

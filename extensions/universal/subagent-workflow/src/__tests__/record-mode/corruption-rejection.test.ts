@@ -14,7 +14,7 @@
 //
 // 宿主 fail-fast 链：loadAll 抛错 → recoverCrashedRuns 上抛 → session-lifecycle
 // storeHealthy=false（workflow 域停初始化）——session-lifecycle.test.ts 的
-// 「store.loadAll 失败 → storeHealthy=false」用例承接该半边，本件只锚 store 读面。
+// 「store.loadAll 失败 → storeHealthy=false」用例承接该半边，本件只锚 store 读侧。
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -49,7 +49,7 @@ async function seedCreatedFrame(env: RecordFixtureEnv): Promise<void> {
 
 function mkStore(env: RecordFixtureEnv): JsonlRunStore {
   const entries = [registeredEntry(RUN_ID, env.recordPath(RUN_ID))];
-  return new JsonlRunStore({ sessionDir: env.sessionDir, ctx: mkCtxWith(entries) as never });
+  return new JsonlRunStore({ runsDir: env.runsDir, ctx: mkCtxWith(entries) as never });
 }
 
 describe("场景 18：record 损坏拒绝（[D1] 坏行停摆——解析失败即抛错，不静默跳过）", () => {
@@ -125,7 +125,7 @@ describe("场景 18：record 损坏拒绝（[D1] 坏行停摆——解析失败�
     expect(isRunSettled(loaded[0]!)).toBe(false);
   });
 
-  it("损坏隔离面：settlement 查询（通知链）保守 miss + warn，不抛（恢复面的拒绝语义只在 loadAll）", async () => {
+  it("损坏隔离侧：settlement 查询（通知链）保守 miss + warn，不抛（恢复侧的拒绝语义只在 loadAll）", async () => {
     await seedCreatedFrame(env);
     const { appendFileSync } = await import("node:fs");
     appendFileSync(env.recordPath(RUN_ID), "{broken\n", "utf8");

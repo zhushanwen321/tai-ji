@@ -3,12 +3,12 @@
  * TTS 表单状态机单测（ai-voice-tts 任务书 u4 验收 3：保存/读取往返一致 + 脱敏无 Key）。
  *
  * 数据通路走 core mock（@taiji/core/transport/mock 的 tts 域内存态：configure → getConfig
- * 回读一致），表单投影数据源 = mock/tts-data.ts 三家最小 TtsFormModel（u1 产出）。
+ * 回读一致），表单派生视图数据源 = mock/tts-data.ts 三家最小 TtsFormModel（u1 产出）。
  *
  * 覆盖：
  * 1. 三家编辑态 → buildConfig → tts.configure → tts.getConfig → formStateFromConfig 深比较一致
  * 2. vendor 子树形状（设计 §7.2 请求体同名原路径：MiniMax voice_setting.* / StepFun 顶层 / MiMo 空）
- * 3. 控件存在性规则的提交面：置灰字段（MiMo speed/volume/pitch）不进 config；MiniMax
+ * 3. 控件存在性规则的提交侧：置灰字段（MiMo speed/volume/pitch）不进 config；MiniMax
  *    supportsInstructions=false 时 instructions 即使有值也不提交（D1 不降级映射）
  * 4. 脱敏：getConfig 载荷每家无 Key 本体字段（D4「明文不出 runtime」）
  *
@@ -35,8 +35,8 @@ function formOf(pid: TtsProviderId) {
   return clone(MOCK_TTS_FORMS)[pid]
 }
 
-/** 以投影出厂骨架为基，按家填满全部支持控件（模拟用户逐项编辑；不渲染的控件不填——
- *  控件存在性规则的提交面：MiniMax 无指令、MiMo 无词典，填了也不提交）。 */
+/** 以派生视图出厂骨架为基，按家填满全部支持控件（模拟用户逐项编辑；不渲染的控件不填——
+ *  控件存在性规则的提交侧：MiniMax 无指令、MiMo 无词典，填了也不提交）。 */
 function editedState(pid: TtsProviderId): TtsProviderFormState {
   const form = formOf(pid)
   const state = emptyFormState(form)
@@ -124,7 +124,7 @@ describe('vendor 子树形状（厂商 API 原名原路径，设计 §7.2）', (
     })
   })
 
-  it('MiMo：M0 投影无任何 vendor 控件 → vendor 恒空对象', () => {
+  it('MiMo：M0 派生视图无任何 vendor 控件 → vendor 恒空对象', () => {
     const vendor = buildConfig('mimo', formOf('mimo'), editedState('mimo')).vendor
     expect(vendor).toEqual({})
   })
@@ -141,7 +141,7 @@ describe('vendor 子树形状（厂商 API 原名原路径，设计 §7.2）', (
   })
 })
 
-describe('控件存在性规则的提交面（置灰/不渲染字段不进 config）', () => {
+describe('控件存在性规则的提交侧（置灰/不渲染字段不进 config）', () => {
   it('MiMo：speedRange null → 无 speed 键（语速置灰不提交）', () => {
     const config = buildConfig('mimo', formOf('mimo'), editedState('mimo'))
     expect(config.speed).toBeUndefined()
@@ -208,7 +208,7 @@ describe('脱敏（D4「明文不出 runtime」；回读载荷无 Key 本体字�
     expect(entry.hasApiKey).toBe(false)
   })
 
-  it('mock 初始骨架与投影形状自洽（默认 baseUrl = isDefault 项或集群变体，voice/model 在枚举内）', () => {
+  it('mock 初始骨架与派生视图形状自洽（默认 baseUrl = isDefault 项或集群变体，voice/model 在枚举内）', () => {
     const skeleton = mockDefaultTtsConfig()
     for (const pid of ['stepfun', 'minimax', 'mimo'] as const) {
       const form = MOCK_TTS_FORMS[pid]

@@ -213,7 +213,7 @@ function encodePackageName(name: string): string {
   return name.startsWith('@') ? name.replace('/', '%2F') : name
 }
 
-// ── 包名校验（RT-8#3 路径穿越守卫）─────────────────────────────
+// ── 包名校验（RT-8#3 路径穿越检查）─────────────────────────────
 
 /**
  * npm 包名白名单校验（RT-8#3）：name 可来自外部 clone 仓库 package.json 的
@@ -270,7 +270,7 @@ function validateUnscopedNpmName(name: string): void {
 }
 
 /**
- * RT-8#3 双向守卫（第二向）：白名单通过后仍断言 join 结果受 nodeModulesDir
+ * RT-8#3 双向检查（第二向）：白名单通过后仍断言 join 结果受 nodeModulesDir
  * 约束——纵深防线，覆盖白名单遗漏的组合逃逸形态。
  */
 function guardedPackageDir(name: string, nodeModulesDir: string): string {
@@ -538,7 +538,7 @@ async function installPackageRecursive(
 
   mkdirSync(nodeModulesDir, { recursive: true })
 
-  // RT-8#3：name 经双向守卫后才进 join（后续 rmSync/renameSync 均以 pkgDir 为靶）
+  // RT-8#3：name 经双向检查后才进 join（后续 rmSync/renameSync 均以 pkgDir 为靶）
   const metadata = await fetchMetadata(name, options?.timeout)
   const version = resolveVersion(metadata, range)
   const manifest = metadata.versions[version]
@@ -602,7 +602,7 @@ export async function installPackage(
  * 从 node_modules 移除指定包。
  */
 export async function uninstallPackage(name: string, nodeModulesDir: string): Promise<void> {
-  // RT-8#3：删除靶目录先过双向守卫，`../../` 形态在 rmSync 前被拒
+  // RT-8#3：删除靶目录先过双向检查，`../../` 形态在 rmSync 前被拒
   const pkgDir = guardedPackageDir(name, nodeModulesDir)
   if (existsSync(pkgDir)) {
     rmSync(pkgDir, { recursive: true, force: true })

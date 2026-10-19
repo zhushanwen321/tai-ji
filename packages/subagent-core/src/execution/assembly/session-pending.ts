@@ -11,10 +11,10 @@
 // 判定依据：子进程的 session 文件里 pending:register entry（其进程内 appendEntry
 // 同步写盘，见 pi SessionManager._persist）减去 pending:unregister 的差集。
 // fork 继承的父级 register 残留（翻 process 档后 U4 补注销不再中性化，永久留存于
-// 子 session 文件）由读侧过滤收口 [W4 读侧过滤② / F1]：本文件读侧以「被读文件
+// 子 session 文件）由读侧过滤收尾 [W4 读侧过滤② / F1]：本文件读侧以「被读文件
 // 所属 session id」（pi session 文件首行 SessionHeader.id）为基准，经通知域端口
 // countActiveFromEntries 的第二参传入，端口实现按「entry sessionId ≠ 基准 → 跳过」
-// 过滤——差集不受污染；落盘收口归 core 注册对账 sweep（reconcile-sweep.ts）。
+// 过滤——差集不受污染；落盘收尾归 core 注册对账 sweep（reconcile-sweep.ts）。
 //
 // 纯函数 + fs，独立于执行链路，可单测。
 //
@@ -96,8 +96,8 @@ export function prunePendingCursor(sessionFile: string): void {
   cursors.delete(sessionFile);
 }
 
-/** [taste/no-unsafe-cast] pending 行的最小结构守卫：非 null object 即可（字段访问
- *  侧均做了 undefined 检查，全可选类型断言无校验意义，改守卫带运行时检查）。 */
+/** [taste/no-unsafe-cast] pending 行的最小结构检查：非 null object 即可（字段访问
+ *  侧均做了 undefined 检查，全可选类型断言无校验意义，改检查带运行时检查）。 */
 function isPendingLineLike(v: unknown): v is { customType?: string; timestamp?: string } {
   return typeof v === "object" && v !== null;
 }
@@ -274,7 +274,7 @@ function applyPendingLine(line: string, cursor: PendingReadCursor, sessionFile: 
   }
 }
 
-/** entry.data.id 的运行时守卫提取（[taste/no-unsafe-cast] 字段访问前校验）。 */
+/** entry.data.id 的运行时检查提取（[taste/no-unsafe-cast] 字段访问前校验）。 */
 function extractPendingEntryId(data: unknown): string | undefined {
   return typeof data === "object" && data !== null && typeof (data as { id?: unknown }).id === "string"
     ? (data as { id: string }).id

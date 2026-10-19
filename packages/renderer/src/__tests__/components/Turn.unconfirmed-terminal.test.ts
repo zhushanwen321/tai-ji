@@ -1,6 +1,6 @@
 /**
  * 断连未确认终局的用户可见呈现（ADR-0122 事实驱动 / defense-mechanism-cleanup 遗留 5，
- * 命令终局事件化 终局③ 的渲染面锁定）。
+ * 命令终局事件化 终局③ 的渲染范围锁定）。
  *
  * 链路分工（两段测试拼合出完整证据链，本文件锁第二段的真实 DOM 跳）：
  * - core 层（packages/core use-chat-disposition.test.ts）：message.error「执行结果未确认」
@@ -60,7 +60,7 @@ beforeEach(() => {
   setActivePinia(createPinia())
 })
 
-describe('断连未确认终局呈现（渲染面）', () => {
+describe('断连未确认终局呈现（渲染范围）', () => {
   it('error 气泡渲染「执行结果未确认」独立 danger 行（用户可见文案节点，非静默悬挂）', () => {
     const wrapper = mountTurn()
     // 用户可见 DOM 断言 ①：独立 error danger 行节点存在（Block.vue M2 追加形态 SSOT testid）

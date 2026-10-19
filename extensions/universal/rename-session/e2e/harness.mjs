@@ -318,7 +318,7 @@ export function firstAssistantStartT(timeline) {
 
 /**
  * 从交错时间轴取最后一条 stopReason==="stop" 的 assistant message_end 事件时刻
- * （A6 完成序观察 / A7 立即落库断言；A1 流序判别内嵌同名逻辑的通用化版本）。
+ * （A6 完成序观察 / A7 立即写入断言；A1 流序判别内嵌同名逻辑的通用化版本）。
  * 无匹配返回 null。
  * @param {Array<{t: number, stream: string, line: string}>} timeline
  * @returns {number | null}
@@ -675,7 +675,7 @@ export async function spawnPi(opts = {}) {
 	}
 
 	// faux 轨：响应脚本落 agentDir（pi 对该目录只读特定文件名，faux-responses.json
-	// 不在读取面），env 注入后经 spawn 继承透传给 pi 子进程
+	// 不在读侧），env 注入后经 spawn 继承透传给 pi 子进程
 	const fauxEnv = {};
 	if (opts.faux) {
 		const scriptPath = join(agentDir, "faux-responses.json");
@@ -990,8 +990,8 @@ export function runStandalone(moduleUrl, run) {
 	});
 }
 
-/** 从 `renamed to "..."` 日志行提取标题并断言与 session_info 落库一致。 */
+/** 从 `renamed to "..."` 日志行提取标题并断言与 session_info 写入一致。 */
 export function assertLogTitleMatches(renameLine, persistedName) {
 	const logTitle = renameLine.match(/renamed to "(.*)"$/)?.[1];
-	assert(logTitle === persistedName, `日志标题与落库不一致: "${logTitle}" vs "${persistedName}"`);
+	assert(logTitle === persistedName, `日志标题与写入不一致: "${logTitle}" vs "${persistedName}"`);
 }

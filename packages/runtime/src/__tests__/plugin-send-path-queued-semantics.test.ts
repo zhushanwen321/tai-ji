@@ -5,10 +5,10 @@
  * 真链路驱动（非 mock 语义断言）：`registerSessionRpcHandlers`（插件 RPC 表，真实注册函数）
  * → `plugin.sessions.sendMessage` handler → dispatcher.sendMessage → delivery registry
  * → 内核 FIFO → 出站交接。断言透明性的三条：
- * ① 目标 busy（compacting）时插件调用**不再收到拒绝**（旧 send.rejected/busy 拒绝面对
+ * ① 目标 busy（compacting）时插件调用**不再收到拒绝**（旧 send.rejected/busy 拒绝路径对
  *   插件是不可见的错误；新语义 = 排队承接，RPC resolve）；
  * ② 消息不丢：compaction 结束后由内核按 FIFO 投递（{queued} 语义的真实兑现）；
- * ③ runtime 侧零 send.rejected 帧（老协议拒绝面退役，插件调用方无需适配）。
+ * ③ runtime 侧零 send.rejected 帧（老协议拒绝路径退役，插件调用方无需适配）。
  *
  * 既有冒烟通道：本文件驱动的是插件 API 的真实注册函数与真实 dispatcher/registry
  * （verify-plugin-contract.sh 的 CT-D1/CT-D2 覆盖的是命令执行与事件通道，不覆盖发送路径）。
@@ -119,7 +119,7 @@ describe('检查点 3：plugin-service 经 dispatcher 的 {queued} 语义透明�
     const send = h.handlers.get('plugin.sessions.sendMessage')!
     expect(send, '插件 RPC 表已注册 sendMessage').toBeTruthy()
 
-    // ① 不拒绝：RPC resolve，回执契约形态 {accepted:true}（旧语义 = send.rejected 拒绝面，插件不可见地失败）
+    // ① 不拒绝：RPC resolve，回执契约形态 {accepted:true}（旧语义 = send.rejected 拒绝路径，插件不可见地失败）
     await expect(send({ sessionId: 's1', role: 'user', content: '插件消息' })).resolves.toEqual({ accepted: true })
     await h.flush()
     expect(h.promptCalls).toHaveLength(0) // 持有：pi 暂不可收

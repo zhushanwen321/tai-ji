@@ -83,7 +83,7 @@ describe('UsagePage 首屏冒烟', () => {
     vi.clearAllMocks()
   })
 
-  it('数据态：含 compaction 桶（cost=0）的 rows → 台账 + 明细区 + 切换器渲染', async () => {
+  it('数据态：含 compaction 桶（cost=0）的 rows → 登记清单 + 明细区 + 切换器渲染', async () => {
     mockedGetUsageStats.mockResolvedValue(
       makeResult(
         [
@@ -113,7 +113,7 @@ describe('UsagePage 首屏冒烟', () => {
 
     // 加载结束、无错误
     expect(wrapper.find('[data-testid="usage-error-state"]').exists()).toBe(false)
-    // 摘要台账 + 明细台账区
+    // 摘要登记清单 + 明细登记清单区
     expect(wrapper.find('[data-testid="usage-ledger"]').exists()).toBe(true)
     expect(wrapper.find('[data-testid="usage-detail-section"]').exists()).toBe(true)
     // 工具栏切换器

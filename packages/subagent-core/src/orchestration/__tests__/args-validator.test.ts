@@ -137,7 +137,7 @@ describe("validateRunArgs — 校验语义", () => {
   });
 
   it("TC6c: parameters 非 object（数组）→ ArgsValidationError「expected object」", () => {
-    // 锚定 schema 形状守卫分支：数组 parameters 在 null-scan/compile 之前 fail-fast
+    // 锚定 schema 形状检查分支：数组 parameters 在 null-scan/compile 之前 fail-fast
     const spec = makeSpec([{ target: "string" }] as unknown as Record<string, unknown>, { a: 1 });
     try {
       validateRunArgs(spec);

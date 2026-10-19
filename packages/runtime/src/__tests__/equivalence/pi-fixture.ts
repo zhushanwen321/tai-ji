@@ -40,7 +40,7 @@
  *
  * agent dir 隔离（凭证可见、扩展不可见）：spawn 时注入 PI_CODING_AGENT_DIR 指向 mkdtemp 临时
  * agent dir，只原样拷贝凭证类文件（auth.json / models.json / models-store.json，清单以 pi 0.84.1
- * 实装读取面为准，见 real-pi-gate.ts 的 copyCredentialFiles 注释）。不拷 settings.json、不放
+ * 实装读侧为准，见 real-pi-gate.ts 的 copyCredentialFiles 注释）。不拷 settings.json、不放
  * extensions/ 子目录——
  * 否则用户全局扩展集（settings.json packages/extensions 清单的 npm 扩展 + <agentDir>/extensions/
  * 自动发现）会随子进程加载，其 appendEntry 调用发射 entry_appended 事件，击穿
@@ -126,7 +126,7 @@ export interface PiFixtureOptions {
   /**
    * 写入临时 agentDir 全局 settings.json 的 defaultTools 字段（pi settings 语义：
    * `+name` 增量条目 = 默认工具集之上追加激活）。驱动 exposure=deferred 的 extension
-   * 工具时必需——deferred 工具不进模型声明面，脚本化 toolCall 会被 pi 判
+   * 工具时必需——deferred 工具不进模型声明侧，脚本化 toolCall 会被 pi 判
    * "Tool not found"（extension_ui_request 不发出，全链路断流）；预激活与生产 spawn
    * 经 settings 激活工具（pi-codemode-settings）同一通道。省略 = 不写 settings.json
    * （既有 agentDir 隔离语义不变）。
@@ -276,7 +276,7 @@ export async function spawnPiFixture(options: PiFixtureOptions = {}): Promise<Pi
       `real pi unavailable：${realGate.REAL_PI_SKIP_REASON} —— 真实 pi 用例必须以 describe.skipIf(!REAL_PI_READY) 包裹`,
     )
   }
-  // faux 轨 model 值域守卫（PiFixtureOptions.model 注释）：undefined = FAUX_MODEL；
+  // faux 轨 model 值域检查（PiFixtureOptions.model 注释）：undefined = FAUX_MODEL；
   // null = 不拼 --model（entry 恢复用例）；字符串必须 'faux/' 前缀——真实模型 id 直接
   // throw（faux 零网络、cost 恒 0 是本轨红线，误指定从静默忽略升级为显式报错）。
   if (fauxMode && typeof options.model === 'string' && !options.model.startsWith('faux/')) {
@@ -305,7 +305,7 @@ export async function spawnPiFixture(options: PiFixtureOptions = {}): Promise<Pi
   let fauxScriptEnv: { TAIJI_FAUX_SCRIPT?: string } = {}
   if (fauxMode) {
     // 脚本落 agentDir：pi 对该目录只读特定文件名（auth/models/settings），faux-responses.json
-    // 不在读取面，无扫描副作用；dispose 随 agentDir 一并清理
+    // 不在读侧，无扫描副作用；dispose 随 agentDir 一并清理
     const scriptPath = join(agentDir, 'faux-responses.json')
     writeFileSync(scriptPath, JSON.stringify(options.fauxResponses))
     fauxScriptEnv = { TAIJI_FAUX_SCRIPT: scriptPath }
@@ -408,7 +408,7 @@ export async function spawnPiFixture(options: PiFixtureOptions = {}): Promise<Pi
     }
   })
 
-  // 内层原始发送（id 配对响应）；外层守卫版 sendCommand 对 prompt 入口套 busy 护栏
+  // 内层原始发送（id 配对响应）；外层检查版 sendCommand 对 prompt 入口套 busy 护栏
   const rawSendCommand = (
     type: string,
     params: Record<string, unknown> = {},

@@ -4,10 +4,10 @@
  * 覆盖场景：
  * - PENDING-TC1：restorePendingUpdate 从 getPendingUpdate 恢复「可升级」提醒（state='available' + latestRelease + releaseNotes）
  * - PENDING-TC2：getPendingUpdate 返回 null → restorePendingUpdate 不改变 state（保持 idle）
- * - PENDING-TC3：防覆盖守卫——pending 恢复后 checkForUpdate 检测失败不回退 idle（保持 available）
- * - PENDING-TC4：防覆盖守卫——pending 恢复后 checkForUpdate 返回 null 不回退 idle
+ * - PENDING-TC3：防覆盖检查——pending 恢复后 checkForUpdate 检测失败不回退 idle（保持 available）
+ * - PENDING-TC4：防覆盖检查——pending 恢复后 checkForUpdate 返回 null 不回退 idle
  * - PENDING-TC5：pending 恢复后 checkForUpdate 确认有新版 → 正常刷新 latestRelease
- * - PENDING-TC6：无 pending 恢复时，checkForUpdate 失败正常回退 idle（守卫不影响正常流程）
+ * - PENDING-TC6：无 pending 恢复时，checkForUpdate 失败正常回退 idle（检查不影响正常流程）
  * - PENDING-TC7（I#8）：getPendingUpdate reject（IPC 异常）→ restorePendingUpdate catch 分支：state 保持 idle、不抛错
  * - PENDING-TC8（I#9）：initAutoCheck 完整启动序列——先同步触发 restorePendingUpdate，30s 后触发 checkForUpdate
  *
@@ -73,7 +73,7 @@ describe('useAppUpdate 功能1：持久化升级提醒标志', () => {
     stop()
   })
 
-  it('PENDING-TC3：防覆盖守卫——pending 恢复后 checkForUpdate 失败不回退 idle', async () => {
+  it('PENDING-TC3：防覆盖检查——pending 恢复后 checkForUpdate 失败不回退 idle', async () => {
     const { result, stop } = await restorePendingRelease(makeUpdateRelease('0.9.0'))
     expect(result.state.state).toBe('available')
 
@@ -81,13 +81,13 @@ describe('useAppUpdate 功能1：持久化升级提醒标志', () => {
     ipc.checkForUpdate.mockRejectedValue(new Error('network error'))
     await result.checkForUpdate()
 
-    // 防覆盖守卫：pendingRestored=true 时检测失败不回退 idle，保持 available
+    // 防覆盖检查：pendingRestored=true 时检测失败不回退 idle，保持 available
     expect(result.state.state).toBe('available')
     expect(result.state.latestRelease?.version).toBe('0.9.0')
     stop()
   })
 
-  it('PENDING-TC4：防覆盖守卫——pending 恢复后 checkForUpdate 返回 null 不回退 idle', async () => {
+  it('PENDING-TC4：防覆盖检查——pending 恢复后 checkForUpdate 返回 null 不回退 idle', async () => {
     const { result, stop } = await restorePendingRelease(makeUpdateRelease('0.9.0'))
     expect(result.state.state).toBe('available')
 
@@ -95,7 +95,7 @@ describe('useAppUpdate 功能1：持久化升级提醒标志', () => {
     ipc.checkForUpdate.mockResolvedValue({ info: null, rateLimited: false })
     await result.checkForUpdate()
 
-    // 防覆盖守卫：pendingRestored=true 时无新版不回退 idle（pending 标志证明曾检测到更新）
+    // 防覆盖检查：pendingRestored=true 时无新版不回退 idle（pending 标志证明曾检测到更新）
     expect(result.state.state).toBe('available')
     expect(result.state.latestRelease?.version).toBe('0.9.0')
     stop()
@@ -116,7 +116,7 @@ describe('useAppUpdate 功能1：持久化升级提醒标志', () => {
     stop()
   })
 
-  it('PENDING-TC6：无 pending 恢复时，checkForUpdate 失败正常回退 idle（守卫不影响正常流程）', async () => {
+  it('PENDING-TC6：无 pending 恢复时，checkForUpdate 失败正常回退 idle（检查不影响正常流程）', async () => {
     // 无 pending → pendingRestored 保持 false
     const { result, stop } = await restorePendingRelease(null)
     expect(result.state.state).toBe('idle')
@@ -125,7 +125,7 @@ describe('useAppUpdate 功能1：持久化升级提醒标志', () => {
     ipc.checkForUpdate.mockRejectedValue(new Error('network error'))
     await result.checkForUpdate()
 
-    // 正常流程（非 pending 恢复）：检测失败 → 回退 idle（守卫只在 pendingRestored 时生效）
+    // 正常流程（非 pending 恢复）：检测失败 → 回退 idle（检查只在 pendingRestored 时生效）
     expect(result.state.state).toBe('idle')
     stop()
   })

@@ -1,6 +1,6 @@
 /**
- * 崩溃台账接线测试共用装置（*.journal.test.ts 两处共享的克隆块提取位）：
- * mkdtemp 数据目录生命周期挂接（beforeEach 建 / afterAll 批量清）+ 活跃档台账读取。
+ * 崩溃 journal 接线测试共用装置（*.journal.test.ts 两处共享的克隆块提取位）：
+ * mkdtemp 数据目录生命周期挂接（beforeEach 建 / afterAll 批量清）+ 活跃档 journal 读取。
  *
  * 在 describe 顶层（或模块顶层）调用一次即可——vitest 允许在收集期注册钩子；
  * dataDir 经 getDataDir() 在用例内取值（beforeEach 已重建）。
@@ -23,7 +23,7 @@ function parseJsonlLines(text: string): Array<Record<string, unknown>> {
 export function setupCrashJournalHarness(tmpPrefix: string): {
   /** 当前用例的 mkdtemp 数据目录（beforeEach 重建，fs-guard 白名单内自建自删）。 */
   getDataDir(): string
-  /** 读台账活跃档全部行（不存在 = 零事件）。 */
+  /** 读 journal 活跃档全部行（不存在 = 零事件）。 */
   readJournalRecords(): Array<Record<string, unknown>>
 } {
   let dataDir = ''
@@ -43,7 +43,7 @@ export function setupCrashJournalHarness(tmpPrefix: string): {
 
   return {
     getDataDir: () => dataDir,
-    /** 读台账活跃档全部行（不存在 = 零事件）。 */
+    /** 读 journal 活跃档全部行（不存在 = 零事件）。 */
     readJournalRecords: (): Array<Record<string, unknown>> => {
       const p = join(dataDir, 'logs', 'crashes', 'runtime.jsonl')
       return existsSync(p) ? parseJsonlLines(readFileSync(p, 'utf8')) : []

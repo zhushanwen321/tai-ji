@@ -18,7 +18,7 @@
  * R2 的托盘断言来源（2026-09-16 composer-task-tray）：GUI 协议 widget 的渲染终点由对话流
  * widget pill 迁至 composer 任务托盘（设计 D3/D11），但 **mock 轨无法覆盖该链路**——mock 的
  * `pushSession` 只调 `events.dispatchSession`（session 通道），而 ViewHostStore 的消费者
- * （ExtensionHost bridge）经 `onCrossSession` 订阅，route-inbound 的 crossSession 分发腿在
+ * （ExtensionHost bridge）经 `onCrossSession` 订阅，route-inbound 的 crossSession 分发路径在
  * mock 下不存在（修复点在 packages/core/src/transport/mock/index.ts，出 u-e2e 领地）。
  * 故「extension:widgetGui → ViewHostStore → 托盘 icon/badge/面板」的端到端断言落在本 real 轨
  * （真 runtime + 真 WS 帧 + 真 route-inbound），断言值取自真实 todo extension 的推送载荷。
@@ -57,8 +57,14 @@ const R2_FAUX_SCRIPT = [
   { text: '已把三个步骤加进任务清单。' },
 ]
 
-/** R3 faux 脚本：goal_control create → stop 文本 */
+/** R3 faux 脚本：tool_search 激活 deferred 的 goal_control → create → stop 文本 */
 const R3_FAUX_SCRIPT = [
+  {
+    toolCalls: [{
+      name: 'tool_search',
+      args: { query: 'goal control create objective successCriteria' },
+    }],
+  },
   {
     toolCalls: [{
       name: 'goal_control',
@@ -75,16 +81,16 @@ const R3_FAUX_SCRIPT = [
 
 // ── R2/R3 共享 helper：tool_call_end 轮询 / 诊断落盘 / 帧结构收窄 / 收尾清理 ──
 
-/** tool result details 最小面（R2 消费 todos，R3 消费 slug） */
+/** tool result details 最小子集（R2 消费 todos，R3 消费 slug） */
 type ToolResultDetails = {
   todos?: Array<{ id?: string; text?: string; status?: string }>
   slug?: string
 }
 
-/** W21 entry 化协议下 tool_call_end.payload.entry 上的 result message 最小面 */
+/** W21 entry 化协议下 tool_call_end.payload.entry 上的 result message 最小子集 */
 type ToolResultEntry = { message?: { details?: ToolResultDetails } }
 
-/** extension:widgetGui 推送载荷最小面（托盘 widget 区数据源，断言消费字段） */
+/** extension:widgetGui 推送载荷最小子集（托盘 widget 区数据源，断言消费字段） */
 type WidgetGuiPayload = {
   gui?: unknown
   meta?: { title?: string; status?: string; icon?: unknown; badge?: string; progress?: { current: number; total: number } }
@@ -328,7 +334,7 @@ async function assertTodoTrayUi(page: Page, badge: string, todoCount: number): P
  *
  * 协议断言之后补一段 UI 断言：把该 session 在侧栏激活 → 托盘 widget 区渲染该 widget
  * （icon/badge 出现 + 面板内容渲染）。这是 widgetGui 消费端迁移（对话流 pill → 托盘）后
- * 唯一可达的端到端链路（mock 轨缺 crossSession 分发腿，见文件头「R2 的托盘断言来源」）。
+ * 唯一可达的端到端链路（mock 轨缺 crossSession 分发路径，见文件头「R2 的托盘断言来源」）。
  */
 test('R2: todo tool 调用 → 协议格式含 __gui__ tab-bar 双段 + 托盘挂载', async () => {
   test.setTimeout(180_000)

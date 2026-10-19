@@ -96,7 +96,7 @@ export function useChooseDirectory(): ChooseDirectoryFn | undefined {
 
 // ── ④ 模型清单 CRUD module（C4：原 provide('modelListDeps') 字符串 key + 非空断言的无型缝）──
 /**
- * ModelListSection 的注入面 = core 模型 CRUD module（ProviderEditModelsModule）+ providerApi
+ * ModelListSection 的注入点 = core 模型 CRUD module（ProviderEditModelsModule）+ providerApi
  * 派生（compat 字段集判定的 provider 级回退，ProviderEditBody 按当前编辑体装配）。
  * 原 11 成员逐名 provide 收编为「整 module 实例 + 1 个派生位」——与 ② QuotaConfigure seam
  * 同范式（跨 seam 直接持有 module 实例）。

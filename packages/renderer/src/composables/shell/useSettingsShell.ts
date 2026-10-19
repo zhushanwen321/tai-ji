@@ -62,7 +62,7 @@ import type { Locale } from '@/i18n'
 export function bootstrapSettingsCore(): void {
   provideSettingsTransport(createSettingsTransport())
   // RD-3#10：不 void 吞 rejection——init 失败（如 storage 配额错致主题停留默认）显式落
-  // console.error，且 settings-lifecycle.init 成功后才置 initialized（失败可重试，不再被守卫吞
+  // console.error，且 settings-lifecycle.init 成功后才置 initialized（失败可重试，不再被检查吞
   // 为 no-op）。.catch 已处理 rejection，无需再包 try/catch。
   useSettings().init().catch((e: unknown) => {
     console.error('[settings] bootstrapSettingsCore init failed; settings degraded to defaults', e)
@@ -93,7 +93,7 @@ export function useSettingsShell(): void {
   const store = getSettingsStore()
 
   // 跨进程 locale 通道（u-locale-channel）：上次已成功推送/已发起推送的语言值。
-  // 值守卫 = 只在语言真实变化时推送——applyCurrent 同时被外观/字号变更触发，无守卫会每个变更都写盘。
+  // 值检查 = 只在语言真实变化时推送——applyCurrent 同时被外观/字号变更触发，无检查会每个变更都写盘。
   let lastPushedLocale: Locale | undefined
 
   /**

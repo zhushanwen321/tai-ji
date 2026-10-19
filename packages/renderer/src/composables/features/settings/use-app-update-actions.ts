@@ -21,7 +21,7 @@ const t = i18n.global.t
 /** 升级动作轴依赖：所属 state 容器 + ipc 缝 */
 export interface ActionsAxisDeps {
   state: UpdateStateContainer
-  ipc: Pick<AppUpdateIpc, 'updateDownload' | 'updateInstall' | 'openUpdateFallbackUrl'>
+  ipc: Pick<AppUpdateIpc, 'updateDownload' | 'updateInstall' | 'openExternal'>
 }
 
 /** 两阶段升级动作轴 */
@@ -87,7 +87,7 @@ export function createActionsAxis(deps: ActionsAxisDeps): ActionsAxis {
         // D2 交错缓解：手动认领与后台预下载并发写 preloaded（最后写者胜）时，实装版本
         // 可能新于 UI 确认版本（认领 0.9.11 → 预下载 0.9.12 覆写）。以 install 响应的
         // version（实装权威）对齐 latestRelease 版本显示；其他字段保持（app 即将重启，
-        // 旧 release 的 notes/url 残留生命周期以秒计，整体替换无收益反而放大覆盖面）。
+        // 旧 release 的 notes/url 残留生命周期以秒计，整体替换无收益反而放大覆盖范围）。
         if (
           result.version &&
           state.state.latestRelease &&
@@ -118,7 +118,7 @@ export function createActionsAxis(deps: ActionsAxisDeps): ActionsAxis {
     const release = state.state.latestRelease
     if (!release) return
     try {
-      await ipc.openUpdateFallbackUrl(release.htmlUrl)
+      await ipc.openExternal(release.htmlUrl)
     } catch (e) {
       // RD-4#9：更新失败时唯一的「手动下载」出口自身不能裸崩。调用点 void openFallbackUrl()
       // 不 await，IPC reject 会变 unhandledRejection 静默失灵。此处兜住：toast 报错并把

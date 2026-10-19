@@ -4,7 +4,7 @@
 // 恒注入 + 底层白名单构建器（DI）+ pi agent 目录隔离。
 //
 // 来源（行为逐字等价提取，非重写）：runtime rpc-client.ts buildPiOutboundEnv
-// （B3 出站契约收口，docs/architecture/env-propagation-boundary.md §5-U3）。
+// （B3 出站契约收尾，docs/architecture/env-propagation-boundary.md §5-U3）。
 //
 // 底层 buildChildEnv 经依赖注入而非硬依赖：白名单过滤 + deny 兜底的 SSOT 现状
 // 是两份（@taiji/shared spawn-env-contract 供 runtime；subagent-engine-sdk
@@ -12,7 +12,7 @@
 // 传 shared 版（C-proc-09 唯一构建点的过滤/deny 语义不变）。
 //
 // pi-subagent-cli 侧不消费本函数（其子进程 env 走 SDK buildOutboundChildEnv + 引擎
-// 自 wire task.schema 就地派生注入的 PI_WORKFLOW_SCHEMA + relay 活跃时的归属键重写，
+// 自 wire task.schema 就地派生注入的 PI_WORKFLOW_SCHEMA + deny 终态后的身份 env 写回，
 // 无 pi agent 目录隔离需求——PI_CODING_AGENT_DIR 全局一份，无隔离池；现行登记
 // constraints.json C-ext-15）。
 

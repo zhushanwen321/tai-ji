@@ -1,5 +1,5 @@
 /**
- * browser IPC 契约单测（display-containers §7.4 错误通道 + 显示收口/转发键上报通道）。
+ * browser IPC 契约单测（display-containers §7.4 错误通道 + 显示收敛/转发键上报通道）。
  *
  * 覆盖：
  * 1. 'browser:create' 失败 reject（manager.create 抛出 → invoke rejection，renderer caller
@@ -8,7 +8,7 @@
  *    非法 payload reject（error envelope）+ 合法 payload 路由到 manager / registry。
  *
  * Mock 策略：vi.mock('electron') 捕获 ipcMain.handle 到 Map（update-handlers.test.ts 同款）；
- * BrowserViewManager 以桩替换（只断言转发面，不重复 manager 语义——语义在 browser-display-gate.test.ts）。
+ * BrowserViewManager 以桩替换（只断言转发行为，不重复 manager 语义——语义在 browser-display-gate.test.ts）。
  *
  * 运行：cd apps/electron/main && npx vitest run test/browser-gateway-handlers.test.ts
  */
@@ -56,7 +56,7 @@ function makeManagerStub() {
 
 type ManagerStub = ReturnType<typeof makeManagerStub>
 
-describe('browser IPC 契约（§7.4 错误通道 + 显示收口上报通道）', () => {
+describe('browser IPC 契约（§7.4 错误通道 + 显示收敛上报通道）', () => {
   let manager: ManagerStub
 
   beforeEach(() => {
@@ -66,7 +66,7 @@ describe('browser IPC 契约（§7.4 错误通道 + 显示收口上报通道）'
     forwardKeyRegistry.set([])
   })
 
-  it('注册全部 browser 通道（含显示收口 / 转发键三通道）', () => {
+  it('注册全部 browser 通道（含显示收敛 / 转发键三通道）', () => {
     for (const channel of [
       'browser:create',
       'browser:navigate',
@@ -137,7 +137,7 @@ describe('browser IPC 契约（§7.4 错误通道 + 显示收口上报通道）'
     await expect(handlers.get('browser:forward-keys')!(null, null)).rejects.toThrow(/payload must be an object/)
   })
 
-  it('browser:show / browser:focus / browser:destroy 转发 manager（语义在 manager 内收口）', async () => {
+  it('browser:show / browser:focus / browser:destroy 转发 manager（语义在 manager 内收敛）', async () => {
     await handlers.get('browser:show')!(null, 'A')
     await handlers.get('browser:focus')!(null, 'A')
     await handlers.get('browser:destroy')!(null, 'A')

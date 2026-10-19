@@ -116,7 +116,7 @@ describe("countUserMessages", () => {
 });
 
 // ────────────────────────────────────────────────────
-// cleanTitle（收口自旧 extractTitle，输入改为 string：callLLM 已 extractText+trim）
+// cleanTitle（收敛自旧 extractTitle，输入改为 string：callLLM 已 extractText+trim）
 // ────────────────────────────────────────────────────
 
 describe("cleanTitle", () => {

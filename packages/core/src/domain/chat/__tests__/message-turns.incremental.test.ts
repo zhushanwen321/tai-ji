@@ -2,14 +2,14 @@
  * message-turns 纯函数单测 —— 分组规则 v2（W3，conversation-turn-attribution §3.3 D3/D4）
  * + toRenderItemsIncremental 增量缓存（D-4，08-render-layer §3.3.1，perf W21）。
  *
- * 分组规则 v2 验收口径（plan W3）：
+ * 分组规则 v2 验收尾径（plan W3）：
  * - 5 条规则逐条覆盖：user 锚 / 隐藏完成通知边界（机制 A）/ assistant 归属 / inline notice
  *   归 turn 内（机制 C）/ 可见 system 边界（现状）
  * - 空 turn 折叠：连续边界折叠为一、边界后 user / 可见 system / 数组结束不产出空 trigger turn
  * - 隐藏通知参与边界但自身不渲染；inline notice 无当前 turn 退化为独立 static 项
  * - 纯函数等价：同一数组两次分组 deep-equal、输入不被 mutate（W6 等价性测试铺路）
  *
- * 增量缓存验收口径（plan W21）：
+ * 增量缓存验收尾径（plan W21）：
  * - ① 增量复用：同源数组引用第二次调用 cachedItems 引用恒等（零重算）
  * - ② 末位追加消息只重建末位 turn（前面 turn 对象引用 toBe 恒等）
  * - ③ forceWorking 变化只重算末位（源数组不变走快路径）
@@ -753,7 +753,7 @@ describe('groupRenderInput 分组规则 v2 —— 纯函数等价性（W6 等价
   })
 })
 
-// ── 尾单元：R2 边界聚合投影 notifySummary（D5）────────────────────────────────
+// ── 尾单元：R2 边界聚合派生视图 notifySummary（D5）────────────────────────────────
 // 覆盖五条验收（impl-plan U6）：hiddenNotifies 累积 / 缓存复用路径 / batch 展开（含 U9
 // 展平后单层）/ 「通知后无 assistant 填充」空 turn 折叠不变 / id 去重与三态判据。
 
@@ -795,7 +795,7 @@ function triggerFixture(...tail: Message[]): Message[] {
   ]
 }
 
-describe('groupRenderInput —— R2 边界聚合投影 notifySummary（D5）', () => {
+describe('groupRenderInput —— R2 边界聚合派生视图 notifySummary（D5）', () => {
   it('hiddenNotifies 累积：连续两条边界折叠复用同组，聚合覆盖两条（跨消息 record 合并）', () => {
     const items = toRenderItems(
       triggerFixture(
@@ -1077,8 +1077,8 @@ describe('groupRenderInput —— R2 边界聚合投影 notifySummary（D5）', 
             bgRecord({ id: 'b', startedAt: 2000, endedAt: 3000 }),
             // 无 endedAt（归档/提示类不物化）→ 不计入聚合集合，仍计入 count
             bgRecord({ id: 'c', status: 'closed', startedAt: 500 }),
-            // 守卫：endedAt < startedAt（时钟回拨）→ 排除。该值域刻意选在「若误纳入会把
-            // max(endedAt) 从 5000 抬到 6000」处，守卫失效即被本断言捕获
+            // 检查：endedAt < startedAt（时钟回拨）→ 排除。该值域刻意选在「若误纳入会把
+            // max(endedAt) 从 5000 抬到 6000」处，检查失效即被本断言捕获
             bgRecord({ id: 'd', startedAt: 7000, endedAt: 6000 }),
           ],
         }),

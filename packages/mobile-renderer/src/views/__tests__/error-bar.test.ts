@@ -1,6 +1,6 @@
 // 移动壳轻量错误条三链（remote-use A7/A11 / U14）。
 //
-// 锁定三个行为面（D5 去留表：错误条是 V5/V18 作答失败反馈的唯一载体）：
+// 锁定三个行为范围（D5 去留表：错误条是 V5/V18 作答失败反馈的唯一载体）：
 //   A7 onSessionError —— 复用 core markSessionError（追加流内 error 消息，持久反馈）+
 //                        错误条置顶（瞬态置顶补充；文案对齐桌面 connection.sessionRequestFailed）
 //   A7 onGlobalError  —— 无归属 server error 直显错误条（桌面 toast 的移动形态）

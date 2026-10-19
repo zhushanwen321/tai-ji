@@ -88,7 +88,7 @@ export type McpProbeServerStatus =
     }
 
 /** 单条目清单行素材（status 为 D8 pi 实测类徽标；scope/exposure/transport 以 CLI 默认值兜底）。 */
-export interface McpProbeServerReport { // oe-exempt:20261004:framework:probe→handler 投影形状（D8 徽标语义层，UI 文案由 i18n 承担）
+export interface McpProbeServerReport { // oe-exempt:20261004:framework:probe→handler 派生视图形状（D8 徽标语义层，UI 文案由 i18n 承担）
   name: string
   scope: string
   exposure: string
@@ -284,7 +284,7 @@ export function parseMcpListOutput(
 }
 
 /**
- * 单条目映射（纯函数）：pi state 枚举 → D8 pi 实测类徽标。条目形状守卫按「pi 适配层
+ * 单条目映射（纯函数）：pi state 枚举 → D8 pi 实测类徽标。条目形状检查按「pi 适配层
  * 不信任外部格式」执行：name 非字符串的条目丢弃（返回 undefined），其余字段缺失按
  * CLI 默认值兜底（cli.js:351-355 同款默认）。状态映射穷尽枚举：
  * connected → 已连接（工具数）；needs-auth → 需要登录；disabled → 已停用；

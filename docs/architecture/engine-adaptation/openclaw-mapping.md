@@ -1,13 +1,13 @@
 # openclaw → subagent 引擎协议 v1 映射
 
 > 证据基准：GitHub openclaw/openclaw @ 7a8d307（2026-06-02 快照，较旧，结论按机制存在性采信）。
-> 靶面 = 本仓 `packages/subagent-engine-sdk/src/protocol/`（协议 v1）。源侧引用一律为该仓库内相对路径（`src/`、`packages/`），不指本仓。
+> 目标类型 = 本仓 `packages/subagent-engine-sdk/src/protocol/`（协议 v1）。源侧引用一律为该仓库内相对路径（`src/`、`packages/`），不指本仓。
 
 ---
 
 ## 1. 接入形态与进程拓扑
 
-推荐 zcode 式常驻适配器：适配器常驻 openclaw gateway（`openclaw gateway` 启动，单进程多路复用 WS+HTTP，默认端口 18789，`src/gateway/server.impl.ts:541`），经 WebSocket JSON-RPC 风格帧通信（帧型 `{type:"req"|"res"|"event", ...}`，`packages/gateway-protocol/src/schema/frames.ts:139-163`；req 帧带字符串 id + method + params，res 帧带 `ok/payload/error`，event 帧带 `event/payload`）。核心方法面：`sessions.send` / `sessions.steer` / `sessions.abort` / `sessions.subscribe` / `sessions.messages.subscribe` / `sessions.usage`（`src/gateway/server-methods.ts:462-484,548-550`）、`exec.approvals.get|set|node.get|node.set`（同文件 `:342-345`）+ 运行时审批 `exec.approval.request` / `exec.approval.waitDecision`（`src/gateway/server-aux-methods.ts:4-5`）、`tools.catalog`（`:412`）、`models.list`（`:354`）。`sessions.send` 内部委托 `chat.send`（`src/gateway/server-methods/sessions.ts:916-977`），live 事件经内部 event bus（`src/infra/agent-events.ts`）→ gateway 事件处理器（`src/gateway/server-runtime-subscriptions.ts:104-106`）→ WS `agent` / `chat` 事件推送（`src/gateway/server-chat.ts:794,728`）。
+推荐 zcode 式常驻适配器：适配器常驻 openclaw gateway（`openclaw gateway` 启动，单进程多路复用 WS+HTTP，默认端口 18789，`src/gateway/server.impl.ts:541`），经 WebSocket JSON-RPC 风格帧通信（帧型 `{type:"req"|"res"|"event", ...}`，`packages/gateway-protocol/src/schema/frames.ts:139-163`；req 帧带字符串 id + method + params，res 帧带 `ok/payload/error`，event 帧带 `event/payload`）。核心方法侧：`sessions.send` / `sessions.steer` / `sessions.abort` / `sessions.subscribe` / `sessions.messages.subscribe` / `sessions.usage`（`src/gateway/server-methods.ts:462-484,548-550`）、`exec.approvals.get|set|node.get|node.set`（同文件 `:342-345`）+ 运行时审批 `exec.approval.request` / `exec.approval.waitDecision`（`src/gateway/server-aux-methods.ts:4-5`）、`tools.catalog`（`:412`）、`models.list`（`:354`）。`sessions.send` 内部委托 `chat.send`（`src/gateway/server-methods/sessions.ts:916-977`），live 事件经内部 event bus（`src/infra/agent-events.ts`）→ gateway 事件处理器（`src/gateway/server-runtime-subscriptions.ts:104-106`）→ WS `agent` / `chat` 事件推送（`src/gateway/server-chat.ts:794,728`）。
 
 CLI 单次降级路径：`openclaw agent --message "..."`（`src/agents/agent-command.ts:589` 必填校验；入口 `agentCommand()` `:2176`）同步等终态、输出最终 JSON/文本，期间事件只进内部 bus 不外推——无流式，只能喂 taiji `eventGranularity=coarse`，仅作 gateway 不可达时的降级。
 
@@ -74,8 +74,8 @@ gateway 侧请求参数权威：`SessionsSendParamsSchema`（`packages/gateway-p
 | bus `lifecycle` phase=start | 无对应 | 丢弃（可作 run 开始标记） | handlers.lifecycle.ts:32-40 |
 | bus `lifecycle` phase=end | turn_end + message_end | 合成（run 终态：taiji 每 turn=「一次 assistant 响应+工具批」，源 turn_end 事件类型层存在但 bus 不单发，需从 assistant message_end 序列合成 turn 边界） | handlers.lifecycle.ts:151-196 |
 | bus `lifecycle` phase=error | message_end{error} + error{message} | 合成（data.error→两处） | handlers.lifecycle.ts:151-168 |
-| bus `error` | error{message} | 直接（声明通道；观测面） | agent-events.ts:5-17 |
-| bus `item` / `plan` / `command_output` / `patch` | 无对应 | 丢弃（UI 呈现面；plan 可选映射 setStatus 类 UiRequest，非事件面） | agent-events.ts:254-317 |
+| bus `error` | error{message} | 直接（声明通道；观测范围） | agent-events.ts:5-17 |
+| bus `item` / `plan` / `command_output` / `patch` | 无对应 | 丢弃（UI 呈现侧；plan 可选映射 setStatus 类 UiRequest，非事件范围） | agent-events.ts:254-317 |
 | bus `approval` phase=requested/resolved | activity | 丢弃为事件；走反向通道（§7） | agent-events.ts:280-291 |
 | bus `compaction` phase=start/end | compaction{} | 直接（end 到达时发 1 次；start 丢弃） | handlers.compaction.ts:52-62,144-152 |
 | LLM `text_delta`/`thinking_delta`/`text_end`/`thinking_end` | 同上 text_delta / thinking_delta | 经 bus 后同上（bus 已消费，适配器只看 bus） | llm-core types.ts:335-340 |
@@ -134,14 +134,14 @@ gateway 侧请求参数权威：`SessionsSendParamsSchema`（`packages/gateway-p
 
 | taiji 反向通道 | 源对应物 | 映射方式 |
 |---|---|---|
-| host/log{level,component,message,data?} | 无 RPC 对应；gateway 日志面 `logs.tail` 是宿主拉取 gateway 自身日志 | 合成：适配器自身日志桥接，openclaw 内部日志不回传 |
-| host/askUser{runId,request:UiRequest} | exec 审批流：`exec.approval.request` 两相注册（`src/agents/bash-tools.exec-approval-request.ts:128-153`）+ `exec.approval.waitDecision`（`:155-170`）+ WS `exec.approval.requested/resolved` 广播（server-methods-list.ts:58-59）+ `/approve` 命令裁决；方法注册 `src/gateway/server-aux-methods.ts:4-5`、scope `operator.approvals`（`src/gateway/methods/core-descriptors.ts:59`） | **可映射部分**：confirm（approve/deny 二值 → UiResponse {confirmed}），select（含 allowlist-always 等 >2 选项时）。**降级部分**：input/editor/notify/setStatus/setWidget/setTitle/set_editor_text 无源对应（消息渠道本位系统无交互 UI 请求面）；适配器对未支持 method 回 {unsupported:true} |
+| host/log{level,component,message,data?} | 无 RPC 对应；gateway 日志侧 `logs.tail` 是宿主拉取 gateway 自身日志 | 合成：适配器自身日志桥接，openclaw 内部日志不回传 |
+| host/askUser{runId,request:UiRequest} | exec 审批流：`exec.approval.request` 两相注册（`src/agents/bash-tools.exec-approval-request.ts:128-153`）+ `exec.approval.waitDecision`（`:155-170`）+ WS `exec.approval.requested/resolved` 广播（server-methods-list.ts:58-59）+ `/approve` 命令裁决；方法注册 `src/gateway/server-aux-methods.ts:4-5`、scope `operator.approvals`（`src/gateway/methods/core-descriptors.ts:59`） | **可映射部分**：confirm（approve/deny 二值 → UiResponse {confirmed}），select（含 allowlist-always 等 >2 选项时）。**降级部分**：input/editor/notify/setStatus/setWidget/setTitle/set_editor_text 无源对应（消息渠道本位系统无交互 UI 请求侧）；适配器对未支持 method 回 {unsupported:true} |
 | host/streamDelta{runId,delta} | 无对应（源是引擎正向推 `agent`/`chat` 事件给订阅端，无引擎→宿主的流加速通道需求） | 无对应：适配器空实现 |
 | host/handleReady{runId,sessionRef} | 无显式对应；runId 在 `sessions.send` 应答即返回（chat.send payload `runId`，sessions.ts:958-966），store 行随即含 sessionId/sessionFile | 合成：适配器在 run 受理后从应答 + store 行组装 sessionRef 上报 |
 | host/childSpawned{pid,recordId} | 无对应：`sessions_spawn` 产出的是子会话（store 行 `spawnedBy/spawnDepth`，config/sessions/types.ts:220-233）不是子进程，无 pid | 无对应：能力性缺失（taiji 侧 isResumable 镜像退化） |
 | host/childStateChanged{pid,recordId,state,killed,...} | 无对应（同上；终态以 `chat` 事件 state=final/error 与 store 行 status 为准） | 无对应 |
 
-exec.approvals.*（get/set 配置面，`src/gateway/server-methods/exec-approvals.ts:126-190`，乐观锁 baseHash `:27-72`）映射 taiji permissionMode 配置读写，不属运行时审批。审批事件结构 `AgentApprovalEventData{phase,kind,status,command,host,scope,...}`（`src/infra/agent-events.ts:57-75`）→ UiRequest confirm 所需的 title/message 可由 `command+reason` 合成。
+exec.approvals.*（get/set 配置侧，`src/gateway/server-methods/exec-approvals.ts:126-190`，乐观锁 baseHash `:27-72`）映射 taiji permissionMode 配置读写，不属运行时审批。审批事件结构 `AgentApprovalEventData{phase,kind,status,command,host,scope,...}`（`src/infra/agent-events.ts:57-75`）→ UiRequest confirm 所需的 title/message 可由 `command+reason` 合成。
 
 ## 8. 能力位 11 位表
 
@@ -152,7 +152,7 @@ exec.approvals.*（get/set 配置面，`src/gateway/server-methods/exec-approval
 | conversation | native | 既有 sessionKey 原地续聊（send 到既有会话即续写，无冷重建），resume 语义 = 同 key 再 send |
 | personaInjection | file | persona 走 workspace 文件（SOUL.md persona/tone，`src/agents/system-prompt.ts:219`；AGENTS.md/TOOLS.md 引导 `:219,1016`），非 CLI flag |
 | eventGranularity | stream | assistant/thinking/tool 全流式 bus 推送（§3）；无 coarse 开关（适配器可自行降采样） |
-| sandbox | none | 无 OS sandbox；exec 执行面为宿主/gateway/node 直接执行（`src/infra/exec-approvals.ts:22` ExecHost 三值），文件隔离仅有 spawn workspace 继承 |
+| sandbox | none | 无 OS sandbox；exec 执行侧为宿主/gateway/node 直接执行（`src/infra/exec-approvals.ts:22` ExecHost 三值），文件隔离仅有 spawn workspace 继承 |
 | sessionRead | full | transcript JSONL 全量可读（9 类 entry + 工具块修复还原，§6） |
 | resume | native | 原地续（同 conversation） |
 | interrupt | native | 进程内 AbortController 协作中止：`Agent.abort()`（`packages/agent-core/src/agent.ts:343-345`，ActiveRun.abortController `:188-191`）← sessions.abort/chat.abort 链（sessions.ts:829 `abortEmbeddedAgentRun` + `:833` 清队列 + `:836` waitForEmbeddedAgentRunEnd 15s） |
@@ -161,7 +161,7 @@ exec.approvals.*（get/set 配置面，`src/gateway/server-methods/exec-approval
 
 ## 9. gap 清单
 
-**源有靶无**（引擎多出、taiji 协议面不承载——适配器丢弃或自持）：
+**源有靶无**（引擎多出、taiji 协议范围不承载——适配器丢弃或自持）：
 - bus `item/plan/command_output/patch` 四个 UI 呈现通道；`exec.approval.requested` 之外的结构化审批元数据（approvalId/allowlist 项）。
 - 多渠道路由面（channel/account/thread/replyTo，`AgentCommandOpts` :57-98）与消息渠道本位的会话拓扑（group/DM sessionKey 族）。
 - cron/heartbeat/skills/web 等平台方法族；ACP 双面。

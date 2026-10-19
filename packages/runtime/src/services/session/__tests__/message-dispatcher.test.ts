@@ -8,7 +8,7 @@
  * - **断言强度保持**：hook 审核原文 / hook 改写的 transform 语义 / blocked 面 / 注入恰好一次
  *   且先于 prompt / notices 逐条发布（clientUuid 从裸标记提取）/ 投递失败不发 notice
  *   ——逐条迁移，非删除。
- * - **退役面显式断言**（原测试的否定面转正）：busy 预检与 send.rejected 退役后，busy 维度
+ * - **退役路径显式断言**（原测试的否定用例转正）：busy 预检与 send.rejected 退役后，busy 维度
  *   不再产生拒绝广播、不再拦提交（排队取代拒绝，D5），消息由内核在册持有。
  *
  * 本文件是「busy 退役断言」与 dispatcher 投递错误路径的唯一归宿（原 message-dispatcher-precheck.test.ts
@@ -62,7 +62,7 @@ interface HarnessOptions {
   /** get_commands 清单（命令识别用例注入；缺省 [] = 空清单）。 */
   commands?: Array<{ name: string; source: string }>
   sessionByClient?: Partial<IManagedSessionView>
-  /** [CP6 移植] deps.getSession 的返回视图（收口窗回调重查/置位断言用；缺省同 session）。 */
+  /** [CP6 移植] deps.getSession 的返回视图（收尾窗回调重查/置位断言用；缺省同 session）。 */
   sessionView?: unknown
   /** workspace.record 同步抛错（best-effort 副作用的降级路径用例注入）。 */
   recordWorkspaceError?: Error
@@ -235,7 +235,7 @@ describe('MessageDispatcher × 内核出站交接（u2）', () => {
     expect(r1.blocked).toBe(true)
     expect(r2.blocked).toBe(false)
     expect(r2.receipt).toMatchObject({ lane: 'direct' })
-    // 唯一 msg-2 进入内核投递（msg-1 被否决零投递）
+    // 唯一 msg-2 进入内核投递（msg-1 不采用决零投递）
     const prompts = h.client.prompt.mock.calls.map((c) => String(c[0]))
     expect(prompts).toHaveLength(1)
     expect(prompts[0]).toContain('msg-2')
@@ -275,7 +275,7 @@ describe('MessageDispatcher × 内核出站交接（u2）', () => {
     expect('clientUuid' in (msg?.payload ?? {})).toBe(false)
   })
 
-  it('投递失败（prompt 抛错）→ message.error 广播 + isGenerating 复位 + 不发 skillNotice（提示不空投）', async () => {
+  it('投递失败（prompt 抛错）→ message.error 广播 + isGenerating 复位 + 不发 skillNotice（提示不丢弃）', async () => {
     const h = makeHarness({ promptError: new Error('rpc dead') })
     h.injectState.notices = [notice('skill_missing', ['ghost'])]
     await h.dispatcher.sendMessage('s1', '带 skill 的消息')
@@ -314,12 +314,12 @@ describe('MessageDispatcher × 内核出站交接（u2）', () => {
     expect(h.published.filter((m) => m.type !== 'session.occupancy')).toHaveLength(0)
   })
 
-  // [MF-1-8 退役] steerMessage / followUpMessage 转发腿测试已删除：消费方经 delivery.submit
+  // [MF-1-8 退役] steerMessage / followUpMessage 转发路径测试已删除：消费方经 delivery.submit
   // 统一提交（u3b 内核化保持），协议侧 message.steer / message.follow_up 条目同批退役。
 })
 
 /**
- * busy 维度退役（u2 显式断言）：预检与 send.rejected 的**否定面**——busy 各维度不再拒绝、
+ * busy 维度退役（u2 显式断言）：预检与 send.rejected 的**否定用例**——busy 各维度不再拒绝、
  * 不再广播 send.rejected、prompt 不立即调用（内核持有等时机）。原「拒绝转 send.rejected」测试族
  * 的断言强度平移到「排队承接」面（消息不丢 = 内核条目在册）。
  */
@@ -343,7 +343,7 @@ describe('MessageDispatcher busy 维度退役（排队取代拒绝，D5）', () 
     expect(h.registry.entries('s1')?.active[0]?.state).toBe('in-flight')
   })
 
-  it('turn=settling（pi post-run 窗口）：零 send.rejected + 持有（settling 非投递窗口，检查点 4）', async () => {
+  it('turn=settling（pi post-run 窗口）：零 send.rejected + 受理即出站（v3 settling 持有退役）', async () => {
     const h = makeHarness({
       sessionByClient: { occupancy: { turn: 'settling', compacting: false, bash: false } },
     })
@@ -352,8 +352,10 @@ describe('MessageDispatcher busy 维度退役（排队取代拒绝，D5）', () 
     expect(result).toMatchObject({ blocked: false })
     expect(h.published.filter((m) => m.type === 'send.rejected')).toHaveLength(0)
 
-    expect(h.client.prompt).not.toHaveBeenCalled()
-    expect(h.registry.entries('s1')?.active).toHaveLength(1) // 内核在册（消息不丢）
+    // v3 受理即出站：settling 非 hold 维度（唯一提交侧等待 = compaction）——pi post-run
+    // 窗口提交经 prompt(streamingBehavior) 直接入 pi 队列（忙时入队不拒），消息不丢
+    expect(h.client.prompt).toHaveBeenCalledTimes(1)
+    expect(h.registry.entries('s1')?.active[0]?.state).toBe('in-flight')
   })
 
   it('compacting 命中：零拒绝广播 + 持有；compaction 结束后自动投递', async () => {
@@ -376,7 +378,7 @@ describe('MessageDispatcher busy 维度退役（排队取代拒绝，D5）', () 
     expect(h.client.prompt).toHaveBeenCalledTimes(1) // 压缩结束 → 自动投递
   })
 
-  it('bash 命中：零拒绝广播 + 持有（bash 与 prompt 互斥由内核持有承接）', async () => {
+  it('bash 命中：零拒绝广播 + 受理即出站（v3 bash 持有退役——pi 队列忙时入队不拒）', async () => {
 
     const h = makeHarness({
       sessionByClient: { isBashRunning: true, occupancy: { turn: 'idle', compacting: false, bash: true } },
@@ -385,7 +387,9 @@ describe('MessageDispatcher busy 维度退役（排队取代拒绝，D5）', () 
     await h.flush()
     expect(result).toMatchObject({ blocked: false })
     expect(h.published.filter((m) => m.type === 'send.rejected')).toHaveLength(0)
-    expect(h.client.prompt).not.toHaveBeenCalled()
+    // v3 受理即出站：bash 运行中提交不再排队——prompt(steer) 直接入 pi 队列，轮边界注入
+    expect(h.client.prompt).toHaveBeenCalledTimes(1)
+    expect(h.promptArgs()[2]).toBe('steer')
 
   })
 

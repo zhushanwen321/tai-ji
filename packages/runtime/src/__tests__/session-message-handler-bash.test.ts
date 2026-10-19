@@ -166,7 +166,7 @@ describe('SessionMessageHandler —— message.abortBash 路由', () => {
     expect(cap.errors).toHaveLength(0)
   })
 
-  // T14b（P6 断言④回执真实化）：sent=false（守卫短路无 bash 可取消 / abort_bash 发送失败）
+  // T14b（P6 断言④回执真实化）：sent=false（检查短路无 bash 可取消 / abort_bash 发送失败）
   // → 不得谎报 aborted，走 error envelope（renderer useChat.abortBash catch → stopFailed 兜底）
   it('T14b: abortBash 返回 {sent:false} → sendError(abort_bash_not_sent)，不得回 message.status{aborted}', async () => {
     const { cap, handler } = makeHandler({

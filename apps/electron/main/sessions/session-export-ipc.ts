@@ -26,18 +26,18 @@ import { copyFile, stat } from 'node:fs/promises'
 import { basename, isAbsolute, join, resolve, sep } from 'node:path'
 import type { SessionJsonlExportPayload, SessionJsonlExportResult } from '@taiji/shared'
 import { SESSION_EXPORT_JSONL } from '@taiji/shared'
-import { getPiAgentDir, PI_SESSION_TREE_SEGMENTS } from '@taiji/shared/paths'
+import { getPiAgentDir, PI_SESSION_TREE_SEGMENTS, SESSION_STORE_DIR_SEGMENT } from '@taiji/shared/paths'
 import { mainLogger } from '../logs/main-logger.js'
 import { runSaveDialogGuarded } from '../utils/save-dialog-guard.js'
 
-/** 保存对话框返回形态（diagnostics-export-ipc 的 SaveDialogResult 同款测试最小投影）。 */
-export interface SessionExportSaveDialogResult { // oe-exempt:20261012:framework:deps 注入契约面——生产 dialog 返回投影 + 测试桩单消费位，接口先立防测试走真 electron 通道（对齐 diagnostics-export-ipc 先例形态）
+/** 保存对话框返回形态（diagnostics-export-ipc 的 SaveDialogResult 同款测试最小派生视图）。 */
+export interface SessionExportSaveDialogResult { // oe-exempt:20261012:framework:deps 注入契约范围——生产 dialog 返回派生视图 + 测试桩单消费位，接口先立防测试走真 electron 通道（对齐 diagnostics-export-ipc 先例形态）
   canceled: boolean
   filePath?: string
 }
 
-/** 依赖注入面：测试注入对话框桩 / 复制桩 / piAgentDir 桩，生产用 electron 与真实实现。 */
-export interface SessionExportIpcDeps { // oe-exempt:20261012:framework:deps 注入契约面——生产实现 + 测试桩双消费位，单实现常态（对齐 diagnostics-export-ipc DiagnosticsExportIpcDeps 先例形态）
+/** 依赖注入范围：测试注入对话框桩 / 复制桩 / piAgentDir 桩，生产用 electron 与真实实现。 */
+export interface SessionExportIpcDeps { // oe-exempt:20261012:framework:deps 注入契约范围——生产实现 + 测试桩双消费位，单实现常态（对齐 diagnostics-export-ipc DiagnosticsExportIpcDeps 先例形态）
   /** 保存对话框；缺省 dialog.showSaveDialog（聚焦窗口，无聚焦窗口直接 canceled） */
   showSaveDialog?: (options: { title: string; defaultPath?: string }) => Promise<SessionExportSaveDialogResult>
   /** 复制主体；缺省 fs.promises.copyFile（内核直复制，不读入内存缓冲） */
@@ -57,7 +57,12 @@ export function isInsideSessionTrees(candidate: string, piAgentDir: string): boo
   if (!isAbsolute(candidate)) return false
   const resolvedCandidate = resolve(candidate).toLowerCase()
   const resolvedAgentDir = resolve(piAgentDir).toLowerCase()
-  return PI_SESSION_TREE_SEGMENTS.some((segment) => {
+  // 只消费 pi 宿主树段（sessions/subagents/btw，基址 piAgentDir）——数组末位 ext-sessions
+  // 基址是 <dataDir> 不是 piAgentDir（shared PI_SESSION_TREE_SEGMENTS 消费注意），逐段
+  // join 会拼出不存在的基址。当前导出入口只触达 pi 宿主树路径（主会话/subagent 记录，
+  // btw 线为 hidden 会话无导出入口），存储树判定待真实需求出现时经 getSessionStoreDir
+  // 显式加入，不预留死段。
+  return PI_SESSION_TREE_SEGMENTS.filter((segment) => segment !== SESSION_STORE_DIR_SEGMENT).some((segment) => {
     const treeRoot = join(resolvedAgentDir, segment)
     return resolvedCandidate.startsWith(treeRoot + sep)
   })

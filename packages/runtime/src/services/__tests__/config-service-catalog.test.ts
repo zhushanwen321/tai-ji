@@ -8,7 +8,7 @@
  * 判定）。补 config-service.test.ts 的测试盲区（该文件 vi.mock 把 isCatalogProvider 恒置
  * false，catalog 分支从未被真实路径覆盖，setProvider 的 apiKey 双写 bug 因此漏网）。
  *
- * A1-4 收口：catalog apiKey 写入经 credentialWriter（AuthService.saveCredential 的窄
+ * A1-4 收敛：catalog apiKey 写入经 credentialWriter（AuthService.saveCredential 的窄
  * 接口），不再直接持有 authStorage.set——断言对象同步切换。
  */
 import { describe, it, expect, vi } from 'vitest'
@@ -24,7 +24,7 @@ function makeStore() {
     // 用于验证防线③「不物化**新**空壳」：apiKey 归 auth.json 后 models.json 无条目可写
     getProviderConfig: vi.fn(() => undefined),
     upsertProvider: vi.fn(() => ({})),
-    // 无既有条目 → existingConfig === undefined → setProvider 末尾走白名单守卫（新建语义）
+    // 无既有条目 → existingConfig === undefined → setProvider 末尾走白名单检查（新建语义）
     ensureProviderInWhitelist: vi.fn(),
     removeProvider: vi.fn(() => ({ removed: true })),
     cleanEnabledModelsResidue: vi.fn(),
@@ -55,7 +55,7 @@ describe('M5-01: setProvider catalog 分支（真实 isCatalogProvider，不 moc
 
     await svc.setProvider('anthropic', { apiKey: 'sk-secret' })
 
-    // catalog 凭据归 auth.json（pi-alignment 决策 1）；A1-4 收口后经 credentialWriter
+    // catalog 凭据归 auth.json（pi-alignment 决策 1）；A1-4 收敛后经 credentialWriter
     expect(writer.saveCredential).toHaveBeenCalledWith('anthropic', { type: 'api_key', key: 'sk-secret' })
     // 防线③（不物化新空壳）：models.json 无既有条目 + apiKey 归 auth.json → 不产生条目
     // （凭据只归 auth.json 0600，不写 0644 明文 models.json；G5 迁移的安全动机）

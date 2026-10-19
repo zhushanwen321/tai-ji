@@ -1,11 +1,11 @@
 /**
- * useInboundFrameGuard —— 入站超界帧守卫的 renderer 侧消费编排
- * （crash-forensics-and-watchdog §3.3 D8 终止阀的恢复触发器 + 台账上报 / u10a）。
+ * useInboundFrameGuard —— 入站超界帧检查的 renderer 侧消费编排
+ * （crash-forensics-and-watchdog §3.3 D8 终止阀的恢复触发器 + 登记清单上报 / u10a）。
  *
- * 职责（ws-client 守卫在 core 传输层，本 composable 是其 renderer 消费面）：
- * - **台账上报**：订阅 core ws-client 的 onInboundFrameDropped（每次超界帧丢弃触发），
+ * 职责（ws-client 检查在 core 传输层，本 composable 是其 renderer 消费方）：
+ * - **登记清单上报**：订阅 core ws-client 的 onInboundFrameDropped（每次超界帧丢弃触发），
  *   经既有 renderer-log IPC 通道带结构化标记（source='inbound-frame-dropped'）上报，
- *   main 侧 handler 识别后写崩溃台账 main.jsonl（不新建 IPC 通道，D1 矩阵）。
+ *   main 侧 handler 识别后写崩溃登记清单 main.jsonl（不新建 IPC 通道，D1 矩阵）。
  * - **静态提示态**：valveTripped=true（同 session 连续 3 次丢帧，终止阀生效）时把该
  *   session 记入 trippedSessionIds——InboundFrameDroppedNotice 组件按此渲染会话级
  *   静态错误提示（复用 C-proc-12 熔断静态页「响亮降级 + 恢复指引」形态）。
@@ -18,11 +18,11 @@
  *   triggerSessionCleanups(sid) 统一回收；uninstall 时整体清空（teardown 语义）。
  *
  * 状态形态：模块级单例 ref——状态源在 core
- * ws-client（模块级单例），本 composable 只是其 renderer 投影 + 编排，非 per-instance
- * 数据（ADR-0049 Map 分区范式不适用，投影集合本身按 sessionId 寻址）。
+ * ws-client（模块级单例），本 composable 只是其 renderer 派生视图 + 编排，非 per-instance
+ * 数据（ADR-0049 Map 分区范式不适用，派生视图集合本身按 sessionId 寻址）。
  *
  * 安装：installInboundFrameGuard()（幂等），App 装配层调用；自身零抛错路径全部
- * fire-and-forget——守卫消费面不得成为新崩溃源（D2 降级契约同款）。
+ * fire-and-forget——检查的消费方不得成为新崩溃源（D2 降级契约同款）。
  */
 import { ref, watch } from 'vue'
 import type { InboundFrameDroppedInfo } from '@taiji/core'
@@ -31,8 +31,8 @@ import { reportRendererLog } from '../lib/ipc'
 import { usePanelStore } from '../stores/panel'
 import { registerSessionCleanup } from '@/composables/useSessionScopedState'
 
-/** 终止阀生效中的 session 集合（只读投影；InboundFrameDroppedNotice / 面板消费）。 */
-// taste:allow-no-data-owner W24-EX-B（模块级单例 UI 瞬态，已登记）：终止阀 tripped 集合投影（状态源 = core ws-client 模块级单例；登记见 docs/architecture/data-source-registry.md §4 ⑧）
+/** 终止阀生效中的 session 集合（只读派生视图；InboundFrameDroppedNotice / 面板消费）。 */
+// taste:allow-no-data-owner W24-EX-B（模块级单例 UI 瞬态，已登记）：终止阀 tripped 集合派生视图（状态源 = core ws-client 模块级单例；登记见 docs/architecture/data-source-registry.md §4 ⑧）
 const trippedSessionIds = ref<ReadonlySet<string>>(new Set())
 
 let installed = false
@@ -41,14 +41,14 @@ let stopFocusWatch: (() => void) | null = null
 let unregisterSessionCleanup: (() => void) | null = null
 
 /**
- * 安装守卫消费编排（幂等）：丢帧上报 + 静态提示态 + 切走切回重试订阅。
+ * 安装检查消费编排（幂等）：丢帧上报 + 静态提示态 + 切走切回重试订阅。
  * App 装配层（pinia 激活后）调用一次。
  */
 export function installInboundFrameGuard(): void {
   if (installed) return
   installed = true
 
-  // 1. 每次超界帧丢弃 → 结构化标记上报（台账行）；trip 帧同时置静态提示态。
+  // 1. 每次超界帧丢弃 → 结构化标记上报（登记清单行）；trip 帧同时置静态提示态。
   unlistenFrameDropped = onInboundFrameDropped((info) => {
     reportInboundFrameDropped(info)
     if (info.valveTripped && info.sessionId !== null) {
@@ -86,7 +86,7 @@ export function uninstallInboundFrameGuard(): void {
   unlistenFrameDropped = null
   stopFocusWatch?.()
   stopFocusWatch = null
-  // [RD-1#7] 反注册 session cleanup + 清空投影集合：卸载即全量解绑，残留的 tripped 态
+  // [RD-1#7] 反注册 session cleanup + 清空派生视图集合：卸载即全量解绑，残留的 tripped 态
   // 会在重新 install 后（HMR / 测试）表现为「未丢帧却显示静态提示」的假阳性。
   unregisterSessionCleanup?.()
   unregisterSessionCleanup = null
@@ -94,7 +94,7 @@ export function uninstallInboundFrameGuard(): void {
   installed = false
 }
 
-/** 终止阀投影：指定 session 是否处于静态提示态。 */
+/** 终止阀派生视图：指定 session 是否处于静态提示态。 */
 export function isInboundSessionTripped(sessionId: string): boolean {
   return trippedSessionIds.value.has(sessionId)
 }
@@ -110,13 +110,13 @@ function reportInboundFrameDropped(info: InboundFrameDroppedInfo): void {
     const sizeUnit = info.kind === 'text' ? 'code units' : 'bytes'
     reportRendererLog({
       source: 'inbound-frame-dropped',
-      // 尺寸上下文内嵌 message（台账 detailDigest 消费；无独立 IPC 字段，通道面最小）
+      // 尺寸上下文内嵌 message（登记清单 detailDigest 消费；无独立 IPC 字段，通道面最小）
       message: `inbound frame dropped: ${info.frameSize} ${sizeUnit} exceeded size limit` +
         ` (session streak ${info.sessionDropCount}${info.valveTripped ? ', valve tripped' : ''})`,
       timestamp: Date.now(),
       ...(info.sessionId !== null ? { sessionId: info.sessionId } : {}),
     })
-  // eslint-disable-next-line taste/no-silent-catch -- 上报组装异常静默：守卫消费面不得成为新崩溃源（D2 降级契约）
+  // eslint-disable-next-line taste/no-silent-catch -- 上报组装异常静默：检查的消费方不得成为新崩溃源（D2 降级契约）
   } catch {
     // no-op
   }

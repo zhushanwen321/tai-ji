@@ -1,12 +1,12 @@
 #!/usr/bin/env node
 /**
- * useSessionScopedState 全仓调用点 census 守卫（独立脚本）。
+ * useSessionScopedState 全仓调用点 census 检查（独立脚本）。
  *
  * 扫描设施迁自 packages/core/src/foundation/use-session-scoped-state.test.ts 的
  * 「C-1 census 静态锁」describe 块（该测试后续改为薄包装消费本脚本）。锁的目标：
  * per-session 状态 composable（ADR-0049 useSessionScopedState 工厂）的调用入口边界——
  * 清单外出现新调用点（新文件，或已有文件内新增）即红，审阅其 scope 上下文
- * （守卫后无 scope 误调用零运行时信号，观测损失已登记，入口静态锁是唯一防线）。
+ * （检查上线后无 scope 误调用零运行时信号，观测损失已登记，入口静态锁是唯一防线）。
  *
  * 匹配口径（与原 C-1 测试逐字一致，改动即破坏计数兼容）：
  * - 调用点模式 = /useSessionScopedState\s*[<(]/（裸括号 + 泛型双形态，含空白变体；
@@ -66,6 +66,7 @@ export const CENSUS_SNAPSHOT = {
   'packages/renderer/src/composables/panel/useBtwTabData.ts': 1,
   'packages/renderer/src/composables/panel/useLoadMoreHistory.ts': 1,
   'packages/renderer/src/composables/panel/useSkillNoticeStream.ts': 1,
+  'packages/renderer/src/stores/canvas.ts': 1, // session-store-layout-inversion u-canvas：canvas store 迁 ADR-0049 Map 分区范式
   'packages/renderer/src/stores/plan-store.ts': 1,
   'packages/ui/src/extension-host/dialog-request-queue.ts': 1,
 }

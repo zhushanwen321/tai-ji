@@ -229,7 +229,7 @@ describe('evictLruWithUnsubscribe（LRU 驱逐连带退订，D2）', () => {
     f.evict()
     expect(f.unsubscribeRpc).toHaveBeenCalledWith('s0')
 
-    // 模拟重走 12 步切入链（步 5 ensureStreamSubscription）：不被残留守卫短路
+    // 模拟重走 12 步切入链（步 5 ensureStreamSubscription）：不被残留检查短路
     f.ensure('s0')
     expect(f.streamSubscribe).toHaveBeenCalledTimes(2)
     await flushSubscribes(f.subscribeRpc)

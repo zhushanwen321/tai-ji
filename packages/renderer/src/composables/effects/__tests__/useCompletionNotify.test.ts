@@ -106,9 +106,9 @@ describe('useCompletionNotify', () => {
     expect(sound.playSuccess).toHaveBeenCalledWith(undefined)
   })
 
-  // ── background work 守卫（CW wave completion-sound-bg-guard）──
+  // ── background work 检查（CW wave completion-sound-bg-guard）──
 
-  it('TC6: background work 仍在跑 → 跳过提示音 + 不标记未读（守卫命中）', () => {
+  it('TC6: background work 仍在跑 → 跳过提示音 + 不标记未读（检查命中）', () => {
     vi.mocked(useBackgroundWork).mockReturnValue({ hasBackgroundWork: () => true })
     handleCompletion('s1', 'stop', 'other-sid')
     expect(sound.playSuccess).not.toHaveBeenCalled()
@@ -116,14 +116,14 @@ describe('useCompletionNotify', () => {
     expect(markers.markUnread).not.toHaveBeenCalled()
   })
 
-  it('TC7: background 全 done → 正常触发提示音 + 标记未读（守卫放行）', () => {
+  it('TC7: background 全 done → 正常触发提示音 + 标记未读（检查放行）', () => {
     vi.mocked(useBackgroundWork).mockReturnValue({ hasBackgroundWork: () => false })
     handleCompletion('s1', 'stop', 'other-sid')
     expect(sound.playSuccess).toHaveBeenCalledOnce()
     expect(markers.markUnread).toHaveBeenCalledWith('s1')
   })
 
-  it('TC8: aborted + background 仍在跑 → 仍跳过（aborted 守卫先短路，与 background 守卫并列都不触发）', () => {
+  it('TC8: aborted + background 仍在跑 → 仍跳过（aborted 检查先短路，与 background 检查并列都不触发）', () => {
     vi.mocked(useBackgroundWork).mockReturnValue({ hasBackgroundWork: () => true })
     handleCompletion('s1', 'aborted', 'other-sid')
     expect(sound.playSuccess).not.toHaveBeenCalled()
@@ -131,7 +131,7 @@ describe('useCompletionNotify', () => {
     expect(markers.markUnread).not.toHaveBeenCalled()
   })
 
-  it('TC9: background error 态完成 → 守卫放行后走 error 路径（playError）', () => {
+  it('TC9: background error 态完成 → 检查放行后走 error 路径（playError）', () => {
     vi.mocked(useBackgroundWork).mockReturnValue({ hasBackgroundWork: () => false })
     handleCompletion('s1', 'error', 'other-sid')
     expect(sound.playError).toHaveBeenCalledOnce()
@@ -147,7 +147,7 @@ describe('useCompletionNotify', () => {
     expect(markers.markUnread).not.toHaveBeenCalled()
   })
 
-  it('RC2: willRetry=true 优先于后续守卫（background work 在跑时同样静音）', () => {
+  it('RC2: willRetry=true 优先于后续检查（background work 在跑时同样静音）', () => {
     vi.mocked(useBackgroundWork).mockReturnValue({ hasBackgroundWork: () => true })
     handleCompletion('s1', 'error', 'other-sid', true)
     expect(sound.playError).not.toHaveBeenCalled()
@@ -183,7 +183,7 @@ describe('useCompletionNotify', () => {
   })
 })
 
-describe('[M4-a] P-invisible·通知面：btw 线完成不进全局通知（D9③ 投影收窄）', () => {
+describe('[M4-a] P-invisible·通知侧：btw 线完成不进全局通知（D9③ 派生视图收窄）', () => {
   it('btw vid 完成 → 无提示音 + 不落 sidebar 未读标记；主会话同输入对照照常', () => {
     handleCompletion('btw:line-notify-1', 'stop', 'other-sid')
     expect(sound.playSuccess).not.toHaveBeenCalled()

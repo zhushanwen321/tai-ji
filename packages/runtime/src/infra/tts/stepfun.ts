@@ -21,7 +21,7 @@ const DEFAULT_INSTRUCTION_MAX_CHARS = 200
 
 const SAMPLE_RATES: number[] = [8000, 16_000, 22_050, 24_000, 48_000]
 
-/** 护栏⑤：协议行为参数 taiji 内部固定（不进配置面，设计 §5.2/§7.3）——passthrough 出现即剥离。 */
+/** 护栏⑤：协议行为参数 taiji 内部固定（不进配置范围，设计 §5.2/§7.3）——passthrough 出现即剥离。 */
 const PROTOCOL_FIXED_KEYS = ['timestamp', 'return_url', 'stream_format', 'markdown_filter'] as const
 
 const PASSTHROUGH_POLICY: PassthroughPolicy = {
@@ -57,7 +57,7 @@ export const stepfunCapabilities: TtsCapabilities = {
  * 音色枚举：官方清单 36 个 Voice ID 全集（2026-09-30 官方文档抓取；设计前提 10——
  * cixingnansheng 实测合成通过，`default` 非法值 400 voice_id_invalid）。
  * 注：末四个仅 stepaudio-2.5-tts / step-tts-2 支持（step-tts-mini 不支持），模型×音色
- * 组合约束不进 M0 表单投影形状，无效组合由厂商 4xx → tts_vendor_error 暴露。
+ * 组合约束不进 M0 表单派生视图形状，无效组合由厂商 4xx → tts_vendor_error 暴露。
  */
 const VOICES: ReadonlyArray<{ id: string; label: string }> = [
   { id: 'cixingnansheng', label: '磁性男声' },
@@ -117,7 +117,7 @@ export const stepfunFormModel: TtsFormModel = {
   emotions: [],
   languages: [],
   // text_normalization(standard/enhanced) M0 表单化（设计 §5.2 参数全集 + §4.2 增量裁决④；
-  // renderer 两档开关已就绪，空清单曾使真机控件不渲染——D5 F1-1/F1-13 修复）
+  // renderer 两档开关已就绪，空清单曾使真机控件不渲染）
   toggles: ['text_normalization'],
   voiceModify: null,
   maxTimbreVoices: 0,

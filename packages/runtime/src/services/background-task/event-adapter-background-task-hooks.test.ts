@@ -1,5 +1,5 @@
 /**
- * EventAdapter 后台任务事件旁路钩子单测（u-runtime-svc，D2 触发面②）。
+ * EventAdapter 后台任务事件旁路钩子单测（u-runtime-svc，D2 触发点②）。
  *
  * 覆盖：customType background-bash 消息（exit 边沿）与 bash 工具调用结束（spawn 路径）
  * 触发旁路回调；其他事件不触发；未注入回调零影响；翻译输出不受旁路影响（纯旁路，
@@ -32,7 +32,7 @@ const BASH_TOOL_END = {
   isError: false,
 }
 
-describe('EventAdapter 后台任务旁路钩子（D2 触发面②）', () => {
+describe('EventAdapter 后台任务旁路钩子（D2 触发点②）', () => {
   it('customType background-bash 消息触发旁路，翻译输出不受影响（message.customStart 照常产出）', () => {
     const activity = vi.fn()
     const { interpret, listener } = attachAdapter(activity)

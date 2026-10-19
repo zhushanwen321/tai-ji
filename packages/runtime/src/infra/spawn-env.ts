@@ -11,7 +11,8 @@
  * 1. prefixes 过滤父 env 为基座（缺省 = 入站白名单 SSOT）——R2：Node spawn env 是
  *    整体替换语义，禁从空对象起拼，否则 PATH/HOME 静默丢失；
  * 2. merge extras——undefined = 显式删除；
- * 3. apply SPAWN_ENV_OUTBOUND_DENY_LIST 兜底剥除 TAIJI_AGENT_PACKAGED / TAIJI_RUNTIME_TOKEN。
+ * 3. apply SPAWN_ENV_OUTBOUND_DENY_LIST 兜底剥除（成员 SSOT 见该清单本体；
+ *    首两键 PACKAGED/TOKEN + M3 增补 TAIJI_ENGINE_RAW_MIRROR，往后以清单为准）。
  * 纯函数、env 全 DI、不 mutate 入参（R1/R3）。
  */
 export {

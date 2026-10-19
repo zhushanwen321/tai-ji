@@ -5,7 +5,7 @@
  * removed → disposeSession。对齐派生态视野（isGenerating 由消息实体 per-session 惰性派生，D-3），
  * 消除惰性订阅盲区（非交互 session 收到终态事件 message.complete 时，因 ensureStreamSubscription 仅在
  * send/steer/fork/handoff 时惰性建立，未交互 session 无订阅者被 events.dispatchSession 静默丢弃 →
- * streaming assistant 永不收口 → 侧栏卡 running）。改为全量订阅：session 出现在 sessionStore.list
+ * streaming assistant 永不收尾 → 侧栏卡 running）。改为全量订阅：session 出现在 sessionStore.list
  * 时即建立订阅，从 list 消失时清理。
  *
  * 范式参照 bindHandoffEffect/bindForkNoticeEffect（onScopeDispose，单实例靠 App.vue setup 单次调用保证）。
@@ -76,7 +76,7 @@ export function bindSessionStreamSync(): void {
             console.warn('[session-stream-sync] ensureStreamSubscription failed for sid=' + sid, e)
           }
         }
-        // removed：逐个清理（disposeSession 幂等，双重调用安全——chat.disposeSession 不触发 triggerSessionCleanups，自身 has 守卫）
+        // removed：逐个清理（disposeSession 幂等，双重调用安全——chat.disposeSession 不触发 triggerSessionCleanups，自身 has 检查）
         for (const sid of removed) {
           try {
             disposeSession(sid)

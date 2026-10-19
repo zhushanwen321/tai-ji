@@ -17,7 +17,7 @@ import { fileURLToPath } from 'node:url'
 
 const realFs = createRequire(import.meta.url)('node:fs') as typeof import('node:fs')
 
-/** 真实用户数据目录（prod 形态钉死值 = 打包 main resolvePackagedDataDir 的 fallback，homedir 动态推导）。
+/** 真实用户数据目录（prod 形态固定值 = 打包 main resolvePackagedDataDir 的 fallback，homedir 动态推导）。
  *  导出供 global-setup 第一道 fail-fast 复用（单一来源，防第二份字面量漂移）。 */
 export const REAL_DATA_DIR = resolve(join(homedir(), '.taiji'))
 
@@ -26,7 +26,7 @@ export const REAL_DATA_DIR = resolve(join(homedir(), '.taiji'))
  * （symlink 真身，目标存在时）。双形式必要性（macOS 实测）：os.tmpdir() 返回
  * /var/folders/...，而测试路径经 realpathSync 后是 /private/var/folders/...——
  * 单形式前缀匹配会把合法 tmp fixture 误拦。realpath 形式同时是 symlink 别名的
- * 权威判定面（/tmp/link → ~/.taiji 的真身必须被拒）。
+ * 权威判定逻辑（/tmp/link → ~/.taiji 的真身必须被拒）。
  */
 function pathVariants(p: string): string[] {
   const variants = [resolve(p)]
@@ -149,14 +149,14 @@ export const FS_ASYNC_FNS = [
  * 写句柄入口函数名（fd/流写路径防线）：破坏名单只拦「直接路径」操作，fd/流形态可绕过
  * ——openSync(path,'w')+writeSync(fd)、callback 版 open(path,'w')、createWriteStream(path)。
  * 写 fd 只能经这些入口产生（Node 无「无 path 造写 fd」的暴露 API），入口校验写 flags
- * 即闭合 writeSync / ftruncate(Sync) 等全部 fd 消费点：fd 是 number，参数层无 path 可
+ * 即封住 writeSync / ftruncate(Sync) 等全部 fd 消费点：fd 是 number，参数层无 path 可
  * 校验，逐点拦只会得到恒放行的假防线；且 O_RDONLY fd 上 ftruncate/write 系统调用必败
  * EINVAL/EBADF（实测），只读句柄无绕过价值。fs/promises 无 ftruncate 导出（实测），
  * FileHandle 写句柄唯一产生点 = promises.open。
  */
 export const FS_OPEN_FNS = ['openSync', 'open', 'createWriteStream'] as const
 
-/** promises 侧写句柄入口（open 返回 FileHandle，实例方法不经模块层，入口校验即闭合）。 */
+/** promises 侧写句柄入口（open 返回 FileHandle，实例方法不经模块层，入口校验即封住）。 */
 export const FS_PROMISES_OPEN_FNS = ['open'] as const
 
 /**
@@ -208,7 +208,7 @@ function isWriteOpenArg(arg: unknown, defaultFlags: string): boolean {
 /**
  * 写句柄入口 wrapper（在 wrapModule 结果上叠加）：写 flags 时校验 path 后透传，读
  * flags 放行。createWriteStream 的打开发生在构造时（fs 层同步 open），先校验再返回
- * 原流即闭合。首参为 fd / FileHandle（number / 对象）时 pathOf 返回 null 跳过——该
+ * 原流即封住。首参为 fd / FileHandle（number / 对象）时 pathOf 返回 null 跳过——该
  * 句柄必来自已校验的入口。orig 取自 actual 而非已 wrap 的 target（避免叠加误拦）。
  */
 export function wrapOpenFns(
@@ -249,7 +249,7 @@ export function attachPromisesModule(target: Record<string, unknown>): Record<st
 }
 
 /**
- * worker 进程内跨测试文件的 TAIJI_AGENT_DATA_DIR 钉扎槽（挂 globalThis：模块注册表每
+ * worker 进程内跨测试文件的 TAIJI_AGENT_DATA_DIR 固定槽（挂 globalThis：模块注册表每
  * 个测试文件重建，模块级变量跨文件不存续；globalThis 在 worker 进程内存续——isolate=false
  * 等 worker 复用形态下正是靠它把首见值带到后续文件）。
  */
@@ -258,7 +258,7 @@ const DATA_DIR_ENV_PIN = Symbol.for('taiji.test-guard.dataDirEnvPin')
 const DATA_DIR_ENV_KEY = 'TAIJI_AGENT_DATA_DIR'
 
 /**
- * [2026-09-22 import-service 污染事故] env 钉扎漂移恢复（worker 复用形态防线）。
+ * [2026-09-22 import-service 污染事故] env 固定值漂移恢复（worker 复用形态防线）。
  *
  * globalSetup 只在 vitest 进程启动时执行一次，把 TAIJI_AGENT_DATA_DIR 钉到 tmp；worker
  * 进程 fork 时继承该值。但 isolate=false 等 worker 进程复用形态下，前序测试文件对
@@ -266,9 +266,9 @@ const DATA_DIR_ENV_KEY = 'TAIJI_AGENT_DATA_DIR'
  * 泄漏（探针实证：同 worker 后续文件读到 undefined）——后续文件的 getSessionsDir() 按
  * 缺省解析到真实 ~/.taiji，叠加文件级 vi.mock('node:fs/promises') 解除 fs-guard 时即
  * 静默污染真实数据目录。本函数由 fs-guard setupFile 在每个测试文件执行前调用：
- * 首次执行记录当前值（= globalSetup 钉扎值或合法注入值），后续执行发现漂移即恢复并
+ * 首次执行记录当前值（= globalSetup 固定值或合法注入值），后续执行发现漂移即恢复并
  * 告警（错误信息含背景与恢复动作）。默认 isolate（每文件新 fork）下槽随进程重建，
- * 首见即钉扎值，恒 no-op——零开销。
+ * 首见即固定值，恒 no-op——零开销。
  *
  * 返回是否发生了恢复（供元测试断言）。
  */
@@ -284,7 +284,7 @@ export function repinDataDirEnv(env: NodeJS.ProcessEnv = process.env): boolean {
   env[DATA_DIR_ENV_KEY] = slot.value
   console.warn(
     `[fs-guard] TAIJI_AGENT_DATA_DIR 在同 worker 前序测试文件中被改动（${current === undefined ? '被删除' : `被改为 ${current}`}），` +
-      `已恢复为本 worker 首个测试文件执行时的钉扎值 ${slot.value ?? '(未设置)'}。\n` +
+      `已恢复为本 worker 首个测试文件执行时的固定值 ${slot.value ?? '(未设置)'}。\n` +
       '  背景：isolate=false 等 worker 进程复用形态下 process.env 变更跨测试文件泄漏，' +
       '前序文件删除该 env 会让后续文件的 getSessionsDir() 缺省解析到真实 ~/.taiji（数据污染风险）。\n' +
       '  修复动作：测试内需改动 TAIJI_AGENT_DATA_DIR 时，在 afterAll/afterEach 恢复进入时原值，不要以 delete 收尾。',
@@ -292,7 +292,7 @@ export function repinDataDirEnv(env: NodeJS.ProcessEnv = process.env): boolean {
   return true
 }
 
-/** 测试专用：清空 env 钉扎槽（fs-guard.test.ts 元测试用例间隔离；生产代码禁调）。 */
+/** 测试专用：清空 env 固定槽（fs-guard.test.ts 元测试用例间隔离；生产代码禁调）。 */
 export function _resetDataDirEnvPinForTest(): void {
   const registry = globalThis as Record<symbol, { value: string | undefined } | undefined>
   delete registry[DATA_DIR_ENV_PIN]

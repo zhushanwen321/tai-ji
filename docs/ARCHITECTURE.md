@@ -34,7 +34,7 @@
 
 - **① preload 边界**：渲染进程不直接用 `ipcRenderer`，通过 `window.electronAPI`（preload 注入）调主进程的 ipc/bridge/privileged handler。主进程是渲染进程访问原生能力（窗口、文件系统、Runtime spawn）的唯一通道。
 - **② WebSocket 边界**：主进程用 `ELECTRON_RUN_AS_NODE=1` spawn Runtime 为独立 Node 进程，前端通过 WS 与之双向通信。ServerMessage 流式回推（pi 的 assistant 输出、工具调用、文件变更等）。Runtime 监听姿态：默认绑定 `127.0.0.1`（纯回环，唯一客户端 = 桌面 renderer）；远程访问开启后改绑 `0.0.0.0` 并在同一端口同源托管移动壳构建产物（手机浏览器接入，remote token 鉴权集合，开启信号 = supervisor 拼参 argv `--remote-access`）。术语与机制详见 [CONTEXT.md](CONTEXT.md)「远程访问」词条。
-- **③ subagent 引擎进程层**：subagent 执行经 engine-protocol v1（NDJSON stdio）派发到独立引擎 CLI 进程——pi 引擎两层嵌套（subagent-core → `pi-subagent-cli` 引擎 CLI → pi 任务子进程）；zcode 引擎常驻 app-server 子进程（spawn env 覆写 `ZCODE_SESSION_DB_PATH`，会话库隔离 `<engineDataDir>/engines/zcode/session-db/`，不进 ZCode GUI 侧边栏）。设计见 [zcode-engine-appserver-resident.md](architecture/zcode-engine-appserver-resident.md) / [zcode-session-db-isolation.md](architecture/zcode-session-db-isolation.md)，结构导航见 [subagents 架构](extensions/subagents/architecture.md)。
+- **③ subagent 引擎进程层**：托管态（runtime 存活）下引擎进程 spawn 权归 runtime（subagent control server），extension 经 control socket 发 `hello`/`engine_open` 并搬运 engine-protocol v1 帧；standalone（无 control env）由 extension local spawn——pi 引擎两层嵌套（subagent-core → `pi-subagent-cli` 引擎 CLI → pi 任务子进程）；zcode 引擎常驻 app-server 子进程（spawn env 覆写 `ZCODE_SESSION_DB_PATH`，会话库隔离 `<engineDataDir>/engines/zcode/session-db/`，不进 ZCode GUI 侧边栏）。设计见 [zcode-engine-appserver-resident.md](architecture/zcode-engine-appserver-resident.md) / [zcode-session-db-isolation.md](architecture/zcode-session-db-isolation.md)，结构导航见 [subagents 架构](extensions/subagents/architecture.md)。
 
 **组合根与启动时序契约**：renderer 经 API Client（`renderer/src/api/`）统一门面访问两条通道，对组件屏蔽走哪条。启动时序必须显式守护：Main createWindow（先）→ runtimeManager.start()（后）→ renderer init → IPC getRuntimePort() → connect WS → 业务就绪。Runtime 重启经 `onRuntimePort` 推新端口触发重连。
 
@@ -91,7 +91,7 @@ pi 子进程事件 → infra/pi/event-adapter(翻译) → ServerMessage(WS)
 
 **跨 store 编排在 composable 层（实例）**：⌘K 全局搜索（`useSearch`）聚合 4 源——命令内存（core `command-registry`/`command-store`）+ 文件 WS（core `file-search` 缓存，未命中调 composer domain WS + 超时 race）+ session domain（WS）+ recents（localStorage）。实现位于 core `packages/core/src/domain/new-task-search/`（`search.ts`/`search-jump.ts`/`recents.ts`），2026-09-11 由 renderer 迁入。编排归 composable 非 domain（domain 严格只调 transport+pending，编排跨 store 违反铁律），见 [ADR-0028](adr/decisions.md)。
 
-**workflow/subagent 运行态数据流（介质归位 [ADR-0094](adr/decisions.md)，record 单源 [ADR-0082](adr/decisions.md) D1）**：run 与 record 的运行态唯一事实写 = 事件流追加（run `<runId>.record.jsonl`——D1 由 `.events.jsonl` 更名、run 侧 state 快照已删，旧两件套不读不写；record `<sa-id>.events`）；主 session JSONL 每实体只写注册 + 终态两条 v2 小条目；manifest 是事件流 fold 的物化投影（可删可重建）。runtime 读请求只读内存投影——投影由「pi entry 游标 + journal tail」双增量源喂入（`packages/runtime/src/services/session/events-projection.ts`，同实体冲突 journal 胜出），旧格式会话走 v1 惰性兼容读。崩溃恢复统一「journal 重放 + 收编」（run 侧有注册无终局 → 幂等落 run-interrupted 转暂停态；record 侧有注册无终态 → 补追加终态事件）。
+**workflow/subagent 运行态数据流（介质归位 [ADR-0094](adr/decisions.md)，record 单源 [ADR-0082](adr/decisions.md) D1）**：run 与 record 的运行态唯一事实写 = 事件流追加（run `<runId>.record.jsonl`——D1 由 `.events.jsonl` 更名、run 侧 state 快照已删，旧两件套不读不写；record `<sa-id>.events`）；主 session JSONL 每实体只写注册 + 终态两条 v2 小条目；manifest 是事件流 fold 的物化派生视图（可删可重建）。runtime 读请求只读内存派生视图——派生视图由「pi entry 游标 + journal tail」双增量源喂入（`packages/runtime/src/services/session/events-projection.ts`，同实体冲突 journal 胜出），旧格式会话走 v1 惰性兼容读。崩溃恢复统一「journal 重放 + 收编」（run 侧有注册无终局 → 幂等落 run-interrupted 转暂停态；record 侧有注册无终态 → 补追加终态事件）。
 
 ## 关键状态机
 

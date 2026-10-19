@@ -39,7 +39,7 @@ export function useSubagentThinking(
   /**
    * subagent drawer 思考中判定（§6.3/§7.3 + 非 pi 可见性 D6）：forceWorking 且末位
    * turn 无 assistant 实质产出——assistants 为空，或全部为占位 assistant（content ===
-   * SUBAGENT_OUTCOME_PLACEHOLDER，仅 result/error 双缺时由③级投影产出）。非占位
+   * SUBAGENT_OUTCOME_PLACEHOLDER，仅 result/error 双缺时由③级派生视图产出）。非占位
    * content（真实 result/error 文本）= 有产出 → 思考行熄灭。
    */
   const subagentThinking = computed(() => {

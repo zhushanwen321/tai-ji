@@ -586,7 +586,7 @@ describe("factory registration (FR-1)", () => {
 		expect(tool.name).toBe("ask_user");
 		expect(tool.label).toBe("Ask User");
 		expect(tool.description).toBeTruthy();
-		// 结构锚定：parameters 须为 { type: 'object', properties: { questions } }（InputSchema 投影），
+		// 结构锚定：parameters 须为 { type: 'object', properties: { questions } }（InputSchema 派生视图），
 		// 防 parameters 被替换成任意 truthy 值仍绿的弱断言
 		expect(tool.parameters).toMatchObject({
 			type: "object",
@@ -954,7 +954,7 @@ describe("execute — RPC mode (uiFormInteract via select channel)", () => {
 
 // ── 输出等价锚（plan-mode-audit-remediation 批次 3 活路径去重）──
 // protoQuestions 副本对齐：index.ts 的 toProtoQuestions 副本已删，RPC 解码直接以
-// internal Question 调协议 helper。本组断言钉死两种视图在解码 SSOT（getAskUserAnswer /
+// internal Question 调协议 helper。本组断言固定两种视图在解码 SSOT（getAskUserAnswer /
 // getAskUserOther）下输出逐字一致——proto 视图以字面量充当被删副本的参考实现。
 describe("protoAnswersToResult 解码视图等价锚（internal Question ≡ 旧 protoQuestions 副本）", () => {
 	// internal Question（validateInput 通过后的形态）

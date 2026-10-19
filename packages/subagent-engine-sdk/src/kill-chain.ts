@@ -3,7 +3,7 @@
 // 超时杀链与 abort 两级中断（引擎侧原语，自 core execution/engine/common/kill-chain.ts
 // 迁入 @zhushanwen/subagent-engine-sdk，实现体逐字等价）。迁移处置（impl-plan §2.1
 // kill-chain 行，逐项落地）：
-//   - 契约类型随 SDK 下沉：AgentCallOpts（引擎面子集）/ AgentOutcome 改自
+//   - 契约类型随 SDK 下沉：AgentCallOpts（引擎侧子集）/ AgentOutcome 改自
 //     src/protocol/contract-types.ts（结构等价，零 core import）；
 //   - DEFAULT_ENGINE_ID 改参数注入：synthesizeTimeoutOutcome 的 engineId 必填，
 //     不再携带 core registry 缺省值（调用方显式传自己的引擎 id）；
@@ -112,7 +112,7 @@ export async function killChain(
 /**
  * 发信号兜底包裹：进程恰在退出态检查与 kill 之间自退时，ChildProcess.kill 可能抛
  * （zsub 实测经验）——幂等吞掉并 debug 留痕，不阻断杀链语义（对已退进程信号本就是
- * no-op）。收口自 zcode launcher 的内联实现（对齐点②：单一权威）。
+ * no-op）。收敛自 zcode launcher 的内联实现（对齐点②：单一权威）。
  */
 export function safeKill(child: KillableChild, signal: NodeJS.Signals): void {
   try {
@@ -125,7 +125,7 @@ export function safeKill(child: KillableChild, signal: NodeJS.Signals): void {
 }
 
 // ============================================================
-// [D9-2 杀伤半径收窄] run 级 pid 杀链（宿主侧，单 pid 非组杀）
+// [D9-2 杀伤半径收窄] run 级 pid 杀链（宿主侧，单 pid 非按进程组终止）
 // ============================================================
 
 /**
@@ -149,7 +149,7 @@ export function probePidAlive(pid: number): boolean | undefined {
 export interface PidChainOptions {
   /**
    * SIGTERM 优雅窗口（ms）。缺省 DEFAULT_KILL_GRACE_MS。回收场景的调用方通常
-   * 已先行优雅停止（cancel 帧 SIGTERM），本窗只是宿主侧升级兜底，量级沿用组杀
+   * 已先行优雅停止（cancel 帧 SIGTERM），本窗只是宿主侧升级兜底，量级沿用按进程组终止
    * 收割惯例（5s）。
    */
   graceMs?: number;
@@ -159,8 +159,8 @@ export interface PidChainOptions {
 
 /**
  * [D9-2 半径收窄原语] run 级 pid 杀链：SIGTERM → graceMs → 仍存活则 SIGKILL，
- * **只打单 pid，绝不组杀**（宿主对引擎孙进程只持镜像 pid、不持 ChildProcess——
- * 引擎以 detached:true 自成进程组，孙进程在其组内而非自任组长，负 pid 组杀不可达；
+ * **只打单 pid，绝不按进程组终止**（宿主对引擎孙进程只持镜像 pid、不持 ChildProcess——
+ * 引擎以 detached:true 自成进程组，孙进程在其组内而非自任组长，负 pid 按进程组终止不可达；
  * 本原语逐 pid 退化单杀，语义 = 「该 run 的进程拓扑」而非引擎组）。
  *
  * fire-and-forget：宿主非进程持有方，无 exit 事件可等（对齐 core reaper 的

@@ -1,10 +1,10 @@
 #!/usr/bin/env node
 /**
- * check-subagent-core-value-cycles.mjs —— subagent-core 包内**值依赖环**守卫（§2.3 配套）。
+ * check-subagent-core-value-cycles.mjs —— subagent-core 包内**值依赖环**检查（§2.3 配套）。
  *
  * 背景：packages/subagent-core 内部按领域分家（execution 记录/执行域 vs orchestration
  * 编排域），依赖方向应为单向向下。历史上两域互指（workflow 服务住在 execution/service、
- * 跨域共享词汇没有中立住所），文件级图上形成环时没有任何检查覆盖——既有三个相关守卫
+ * 跨域共享词汇没有中立住所），文件级图上形成环时没有任何检查覆盖——既有三个相关检查
  * 分别管「闭包不含 pi SDK」「六聚合 vs 壳」「record 写入口单一」，都不看包内方向。
  *
  * 判据（先只查值边）：静态 import/export-from、动态 import()、require() 构成的**值**

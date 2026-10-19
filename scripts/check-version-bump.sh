@@ -14,10 +14,10 @@ LATEST=$(gh release list --repo "$REPO" --limit 100 \
   | head -1)
 
 if [ -z "$LATEST" ]; then
-  # 仓库尚无任何正式 release（首次发布场景）：无跳版基线可比对，守卫前提不成立，显式放行。
-  # W25 对比同样依赖 v* ref 基线，一并跳过；pi 契约面由 equivalence faux 轨用例覆盖。
+  # 仓库尚无任何正式 release（首次发布场景）：无跳版基线可比对，检查前提不成立，显式放行。
+  # W25 对比同样依赖 v* ref 基线，一并跳过；pi 契约范围由 equivalence faux 轨用例覆盖。
   echo "OK: 仓库尚无任何正式 release（首次发布），无跳版基线，放行。"
-  echo "注意: W25 pi 依赖对比无 release 基线，跳过（契约面由 equivalence faux 轨覆盖）。"
+  echo "注意: W25 pi 依赖对比无 release 基线，跳过（契约范围由 equivalence faux 轨覆盖）。"
   exit 0
 fi
 
@@ -44,7 +44,7 @@ fi
 # 依赖是否变更（实际声明在 root package.json devDependencies；同时覆盖
 # packages/runtime/package.json，对齐 plan W25 对两处表述的兼容）。变更时先跑
 # packages/runtime/src/__tests__/equivalence/pi-protocol-contract.test.ts
-# （RPC 命令面 / 事件面 / entry 面三断言 + entry_appended 不发射的 D5 固化），
+# （RPC 命令范围 / 事件范围 / entry 面三断言 + entry_appended 不发射的 D5 固化），
 # 红 = 上游协议漂移，先处理漂移再 bump，防事件语义漂移静默制造新分叉。
 # 注意：契约测试 spawn 真实 pi（skip-if-no-pi 约定）——pi 缺席时 skip 放行并警告补跑。
 pi_dep_at_ref() {
@@ -69,7 +69,7 @@ if [ "$RELEASE_PI" != "$CURRENT_PI" ]; then
     echo "警告: pi 不在 PATH，契约测试将 skip（skipIf 约定）——请在有 pi 的环境补跑："
     echo "  cd packages/runtime && pnpm exec vitest run src/__tests__/equivalence/pi-protocol-contract.test.ts"
   fi
-  echo "运行 pi 协议契约测试（RPC 面 / 事件面 / entry 面 + D5 固化）..."
+  echo "运行 pi 协议契约测试（RPC 面 / 事件范围 / entry 面 + D5 固化）..."
   if ! (cd "${WS_ROOT}/packages/runtime" && pnpm exec vitest run src/__tests__/equivalence/pi-protocol-contract.test.ts); then
     echo ""
     echo "ERROR: pi 协议契约测试失败——上游协议漂移，禁止直接 bump 发布。"

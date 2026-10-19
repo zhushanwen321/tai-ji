@@ -2,7 +2,7 @@
 /**
  * cross-branch-overlap.mjs —— 当前线 diff 与未合并兄弟线 diff 的修改文件交集（决策 2）。
  *
- * 确定性计算（纯 git diff --name-only 求交集），产出供 dev-merge 1.8 传播守卫的兄弟线
+ * 确定性计算（纯 git diff --name-only 求交集），产出供 dev-merge 1.8 传播检查的兄弟线
  * 摘要呈报，由人裁决是否吸收（线粒度：吸收 / 暂缓）；无 LLM、恒不阻塞（exit 0）。
  *
  * 口径与 scripts/check-line-propagation.mjs 对齐：

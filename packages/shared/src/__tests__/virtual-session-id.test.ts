@@ -2,7 +2,7 @@
  * resolveVirtualSessionId 单测 —— 虚拟 id → 底层真实 session id 解析（跨层 SSOT）。
  *
  * 背景：runtime file.search 等服务只登记真实 pi session，vid 直传必 session_not_found
- * （fileSearch vid 修复，方案 A）。本函数是「vid 只做前端路由 key」契约的解析收口，
+ * （fileSearch vid 修复，方案 A）。本函数是「vid 只做前端路由 key」契约的解析收尾，
  * 三族虚拟 id（subagent 三段式 / agentcall 两段式 / btw 两段式）规则见函数体注释。
  */
 import { describe, it, expect } from 'vitest'

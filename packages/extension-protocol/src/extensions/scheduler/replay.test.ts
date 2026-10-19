@@ -169,7 +169,7 @@ describe('replayFoldEntries（包内折叠器）', () => {
     )
   })
 
-  it('守卫逐变体拒绝缺必填/非法字段的 entry：静默跳过，合法 entry 仍折叠（MF-2）', () => {
+  it('检查逐变体拒绝缺必填/非法字段的 entry：静默跳过，合法 entry 仍折叠（MF-2）', () => {
     const warn = vi.fn()
     const session = '/s.json'
     const entries: SchedulerEntryLike[] = [
@@ -197,11 +197,11 @@ describe('replayFoldEntries（包内折叠器）', () => {
     const result = replayFoldEntries(entries, session, { warn })
     expect(result.size).toBe(1)
     const a = result.get('A')!
-    // runCount=1 证明只有合法 advance 生效——任一损坏 op 漏过守卫都会额外改写末态
+    // runCount=1 证明只有合法 advance 生效——任一损坏 op 漏过检查都会额外改写末态
     expect(a.runCount).toBe(1)
     expect(a.nextRunAt).toBe(300)
     expect(a.enabled).toBe(true)
-    // 守卫拒绝是静默跳过，不走降级 warn
+    // 检查拒绝是静默跳过，不走降级 warn
     expect(warn).not.toHaveBeenCalled()
   })
 
@@ -237,7 +237,7 @@ describe('replayFoldEntries（包内折叠器）', () => {
   it('折叠抛出非 Error 对象（原始字符串）→ warn 上下文按 String(e) 化，其余任务保留', () => {
     const warn = vi.fn()
     const session = '/s.json'
-    // history getter 抛原始字符串：守卫只校验 task 是对象（通过），snapshotToTask 读 history 时抛
+    // history getter 抛原始字符串：检查只校验 task 是对象（通过），snapshotToTask 读 history 时抛
     const rawThrowingEntry: SchedulerEntryLike = {
       type: 'custom',
       customType: TASK_ENTRY_TYPE,

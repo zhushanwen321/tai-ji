@@ -63,7 +63,7 @@ describe("getLogger", () => {
     expect(getLogger("comp-a")).not.toBe(getLogger("comp-b"));
   });
 
-  it("level/component/message/data 四参逐字透传宿主（调用面等价替换的前提）", () => {
+  it("level/component/message/data 四参逐字透传宿主（调用范围等价替换的前提）", () => {
     const hostLog = vi.fn<HostServices["log"]>();
     configureCore({ dataRoot: () => "/host/root", log: hostLog });
 

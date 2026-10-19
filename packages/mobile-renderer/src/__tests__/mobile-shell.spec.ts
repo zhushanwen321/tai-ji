@@ -266,7 +266,7 @@ describe('BM5: 断线重连中保持 connected 布局 + 壳顶部断线条', () 
 
 // U1.6 P0 缺陷防回归：src/ 无 @tailwind 指令落点 → tailwindcss postcss 插件零生成工具类，
 // 产物 CSS 裸奔（happy-dom 组件测试不验视觉，拦不住该缺陷）。此处机械锚定样式入口与
-// content 扫描面两条前提，缺任一即红。
+// content 扫描范围两条前提，缺任一即红。
 describe('TC-8: AC5 Tailwind 样式入口（U1.6 P0 防回归）', () => {
   it('样式入口 tokens.css 含 @tailwind 三指令（base/components/utilities）', () => {
     const css = readFileSync(resolve(pkgRoot, 'src/styles/tokens.css'), 'utf-8')
@@ -285,7 +285,7 @@ describe('TC-8: AC5 Tailwind 样式入口（U1.6 P0 防回归）', () => {
     expect(mainSrc).toMatch(/import '\.\/styles\/shell\.css'/)
   })
 
-  it('tailwind.config.ts content 覆盖壳源码与 ui 组件（防扫描面缩窄致工具类缺失）', () => {
+  it('tailwind.config.ts content 覆盖壳源码与 ui 组件（防扫描范围缩窄致工具类缺失）', () => {
     const config = readFileSync(resolve(pkgRoot, 'tailwind.config.ts'), 'utf-8')
     expect(config).toContain("./src/**/*.{vue,ts,tsx}")
     expect(config).toContain("../ui/src/**/*.{vue,ts}")

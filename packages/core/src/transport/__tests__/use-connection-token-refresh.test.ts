@@ -14,7 +14,7 @@
  * - TC-T4: getRuntimeToken 返回 null → connect(url, {auth:'token', token:''})（同 T3 降级语义）
  *
  * 用例自包含：beforeEach 经 teardown() 复位 use-connection 的模块级单例装配（监听 /
- * initialised 幂等守卫 / 连接簿记），每条用例经 initConnection() 自己走首连装配路径——
+ * initialised 幂等检查 / 连接簿记），每条用例经 initConnection() 自己走首连装配路径——
  * onRuntimePort 监听（portCb）由本用例的 init 安装，不依赖其他用例的执行残留；任意
  * 单条筛选（vitest -t）/重排都能独立运行。init 装配自身的调用（首连 token/connect）
  * 不计入分支断言：装配后 mockClear，断言基准 = 本用例驱动的行为。
@@ -96,7 +96,7 @@ beforeEach(() => {
   useConnection().teardown()
   vi.clearAllMocks()
   getRuntimeToken.mockReset()
-  // onRuntimePort 重连守卫要求 state !== 'disconnected'（runtime 存活期间常态为 connected）
+  // onRuntimePort 重连检查要求 state !== 'disconnected'（runtime 存活期间常态为 connected）
   mockStateRef.value = 'connected'
 })
 

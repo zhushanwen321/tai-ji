@@ -1,5 +1,5 @@
 /**
- * u-diagnostics 验收测试：error-log 诊断面扩展（多源改造 S1-S3 观测面）。
+ * u-diagnostics 验收测试：error-log 诊断范围扩展（多源改造 S1-S3 观测范围）。
  *
  * 覆盖：三类成功登记（source-selection / source-failover / download-success）
  * 各落一条 JSONL 且字段齐 / releaseSource 字段透传 / source-selection 降频
@@ -142,7 +142,7 @@ describe('source-selection 登记', () => {
     logSourceSelection(selectionInput({ winner: 'gitcode', order: ['gitcode', 'github'] }))
     expect(readLogLines()).toHaveLength(1)
 
-    // tags 变化：写（F5 观测面依赖维度）
+    // tags 变化：写（F5 观测范围依赖维度）
     logSourceSelection(
       selectionInput({
         winner: 'gitcode',

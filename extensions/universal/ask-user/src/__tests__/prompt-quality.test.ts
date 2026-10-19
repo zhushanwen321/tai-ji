@@ -38,7 +38,7 @@ const __dirname = dirname(fileURLToPath(import.meta.url));
 const INDEX_SRC = readFileSync(join(__dirname, "../index.ts"), "utf-8");
 const VALIDATE_SRC = readFileSync(join(__dirname, "../validate.ts"), "utf-8");
 
-/** 提取 description: `...` 模板字符串的原始内容（模板内无反引号，匹配到闭合 `,）。 */
+/** 提取 description: `...` 模板字符串的原始内容（模板内无反引号，匹配到结束 `,）。 */
 function extractDescription(src: string): string {
 	const m = src.match(/description:\s*`([\s\S]*?)`,/);
 	if (!m) throw new Error("description template literal not found in index.ts");
@@ -92,7 +92,7 @@ describe("ask_user description — 调用信号保留（不要破坏亮点）", 
 
 	it("保留 'mutually exclusive' 提问纪律（Q8：一问题一决策、选项互斥）", () => {
 		// 问题级纪律没有 runtime 校验可拦（validate 只查结构），弱模型把多个决策
-		// 塞进一个 question、或选项互斥性存疑时只有这条声明面约束。
+		// 塞进一个 question、或选项互斥性存疑时只有这条声明侧约束。
 		expect(DESCRIPTION).toContain("mutually exclusive");
 		expect(DESCRIPTION).toContain("one decision");
 	});

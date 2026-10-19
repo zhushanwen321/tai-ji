@@ -1,6 +1,6 @@
 /**
  * createSubagentsView factory 驱动测试（与 list-component.test.ts 的组件/键位直测互补：
- * 本文件只覆盖 factory 编排面——G-017 防叠加、directId 分流、onChange 防抖订阅、
+ * 本文件只覆盖 factory 编排侧——G-017 防叠加、directId 分流、onChange 防抖订阅、
  * animTimer 动画循环、wrappedDone 收尾顺序）。
  *
  * 驱动方式：fake ctx.ui.custom 同步调 factory 捕获 Component；service 为最小 stub

@@ -7,7 +7,7 @@
  * - fileCount：焦点 session 文件树根层条目数（目录计入，不递归）；无焦点 session → 0。
  *
  * [HISTORICAL] 2026-09-16 五 tab 收敛为三 tab：原 subagent/workflow 计数段与 badge 口径用例
- * （D8 / U8b 两态化重述、runtime extractor 真实投影产物联动）随 Agents/Flows tab 退役删除
+ * （D8 / U8b 两态化重述、runtime extractor 真实派生视图产物联动）随 Agents/Flows tab 退役删除
  * ——同口径断言现行承载 = `__tests__/panel/tray/useTrayCounts.test.ts`（P2 阶段复制迁入的托盘计数）。
  *
  * 运行：cd packages/renderer && pnpm test src/__tests__/composables/useSidebarCounts.test.ts

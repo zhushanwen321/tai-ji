@@ -214,7 +214,18 @@ function resolveDataDir(): string {
 }
 
 /**
- * 会话产物目录镜像常量（设计 D1/D7）：`<dataDir>/artifacts/<sessionId>/`。
+ * session 存储树根段镜像常量（session-store-layout-inversion D1）：
+ * `<dataDir>/ext-sessions/<sessionId>/...` 树根段。
+ *
+ * shared 侧单点声明 = `packages/shared/src/paths.ts` 的 `SESSION_STORE_DIR_SEGMENT` /
+ * `getSessionStoreDir`；本包不 import `@taiji/shared`（包边界 + C-proc-26/C-proc-09
+ * 门禁组合，见下方产物目录镜像说明），以同名字面量镜像，一致性由
+ * `scripts/check-artifact-dir-formula-sync.mjs` 对拍机检守护。
+ */
+export const SESSION_STORE_DIR_SEGMENT = 'ext-sessions'
+
+/**
+ * 会话产物目录镜像常量（session 存储树域 2）：`<dataDir>/ext-sessions/<sessionId>/artifacts/`。
  *
  * shared 侧单点声明 = `packages/shared/src/paths.ts` 的 `getSessionArtifactsDir`；本包
  * 不 import `@taiji/shared`（① 包边界——extensions 包全体不依赖 @taiji/shared；② 运行时
@@ -226,22 +237,22 @@ function resolveDataDir(): string {
 export const SESSION_ARTIFACTS_DIR_SEGMENT = 'artifacts'
 
 /**
- * 会话产物目录绝对路径（镜像 shared `getSessionArtifactsDir` 公式）。
+ * 会话产物目录绝对路径（镜像 shared `getSessionArtifactsDir` 公式：
+ * `<dataDir>/ext-sessions/<sessionId>/artifacts`）。
  *
  * sessionId 校验与 pi `assertValidSessionId` / runtime `isPiSessionId` 同域：首尾字母
- * 数字，中间允许 `[A-Za-z0-9._-]`（允许 `.` / `_`，禁 `:`）——不用 `getImageCacheDir`
- * 的窄集 `/^[A-Za-z0-9_-]+$/`（合法含 `.` 的 pi sid 会被窄集误拒）。非法 sessionId
+ * 数字，中间允许 `[A-Za-z0-9._-]`（允许 `.` / `_`，禁 `:`）。非法 sessionId
  * 直接 throw（防路径穿越）。
  *
  * @param sessionId 会话 id（子目录分区，须与 `isPiSessionId` 同域）
  * @throws Error 当 sessionId 含路径分隔符、冒号、空串或首尾非字母数字
  */
 export function resolveSessionArtifactsDir(sessionId: string): string {
-  // 校验与 pi-paths.ts 的 isPiSessionId 同域（字面量与 shared getSessionArtifactsDir 一致）
+  // 校验与 pi-paths.ts 的 isPiSessionId 同域（字面量与 shared PI_SESSION_ID_PATTERN 一致）
   if (!/^[A-Za-z0-9](?:[A-Za-z0-9._-]*[A-Za-z0-9])?$/.test(sessionId)) {
     throw new Error(`invalid sessionId (path traversal blocked): ${sessionId}`)
   }
-  return path.join(resolveDataDir(), SESSION_ARTIFACTS_DIR_SEGMENT, sessionId)
+  return path.join(resolveDataDir(), SESSION_STORE_DIR_SEGMENT, sessionId, SESSION_ARTIFACTS_DIR_SEGMENT)
 }
 
 /**
@@ -392,8 +403,7 @@ function readSection(raw: unknown): { enabled: boolean; prompt: string } {
 /**
  * pi 是否以 --no-context-files / -nc 启动。用户显式退出 AGENTS.md
  * 自动发现时，全局文件不得从这条通路溜回来。pi CLI 把 -nc 视为 --no-context-files
- * 的等价短形式（cli/args.ts），两种形式都必须命中守卫——与镜像侧
- * （argv-mirror.ts 同样解析两种形式）保持一致。
+ * 的等价短形式（cli/args.ts），本守卫单侧同时覆盖两种 argv 形态。
  */
 function contextFilesDisabled(): boolean {
   return process.argv.includes('--no-context-files') || process.argv.includes('-nc')

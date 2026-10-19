@@ -51,7 +51,7 @@ const RATE_LIMIT_ENTRY_IDLE_MS = RATE_LIMIT_ENTRY_IDLE_MINUTES * MS_PER_MINUTE
 const MAX_URL_LENGTH = 512
 /** ISO 日期 YYYY-MM-DD 的字符长度（对齐 main-logger 同名常量）。 */
 const ISO_DATE_LENGTH = 10
-/** 台账 detailDigest 长度帽（schema D1：≤2KB 内嵌摘要）。 */
+/** 登记清单 detailDigest 长度帽（schema D1：≤2KB 内嵌摘要）。 */
 const DETAIL_DIGEST_MAX_LENGTH = 2048
 
 // ── 限流状态（模块级单例；测试经 vi.resetModules 取全新实例）──────────
@@ -69,7 +69,7 @@ let registered = false
 // ── 注册 ───────────────────────────────────────────────────────────
 
 /**
- * handler 依赖的 invoke event 结构最小面（sender.id + senderFrame.url）。
+ * handler 依赖的 invoke event 结构最小子集（sender.id + senderFrame.url）。
  * 不直接用 IpcMainInvokeEvent 签名：handler 对 event 只消费这两个字段，收窄结构让
  * 测试桩无需伪造 frameId/processId 等无关字段（结构类型，IpcMainInvokeEvent 可赋）。
  */
@@ -124,8 +124,8 @@ export function handleRendererLogReport(event: RendererLogEventLike | undefined,
       ...(readSenderUrl(event) !== undefined ? { url: readSenderUrl(event) } : {}),
     })
     // 结构化标记（crash-forensics §3.3 D8 / D1 写入点矩阵）：入站超界帧丢弃上报 →
-    // 崩溃台账行（main.jsonl `layer=renderer, event=inbound-frame-dropped`）。已过限流门
-    // （与 renderer-error 行共享同一窗口配额，风暴防护对台账同样生效）；写失败在 writer
+    // 崩溃登记清单行（main.jsonl `layer=renderer, event=inbound-frame-dropped`）。已过限流门
+    // （与 renderer-error 行共享同一窗口配额，风暴防护对登记清单同样生效）；写失败在 writer
     // 内 best-effort 吞没，不影响 renderer-error 落盘主路径。
     if (payload.source === 'inbound-frame-dropped') {
       crashJournal.append({
@@ -196,9 +196,9 @@ function sweepIdleEntries(now: number): void {
 // ── payload 运行时校验（不可信输入）────────────────────────────────
 
 /**
- * 合法捕获面（RendererErrorSource 联合）：三件套（D2-①）+
+ * 合法捕获范围（RendererErrorSource 联合）：三件套（D2-①）+
  * 'inbound-frame-dropped' 结构化标记（crash-forensics D8 入站超界帧丢弃上报）+
- * 'runtime-start-failed'（RD-3#2：runtime 启动失败真因，连接屏显示 + 台账留痕）。
+ * 'runtime-start-failed'（RD-3#2：runtime 启动失败真因，连接屏显示 + 登记清单留痕）。
  */
 const VALID_SOURCES: ReadonlySet<string> = new Set([
   'vue-error-handler',

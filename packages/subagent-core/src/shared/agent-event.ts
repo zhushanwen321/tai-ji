@@ -1,6 +1,6 @@
 // src/shared/agent-event.ts
 //
-// AgentEvent 类型唯一出口（两包合并后 import 收口）。
+// AgentEvent 类型唯一出口（两包合并后 import 收敛）。
 //
 // 合并前 AgentEvent 分别定义在 execution/types.ts（subagents 侧）和
 // orchestration/live/types.ts（workflow 侧）——两份定义完全一致但独立维护。

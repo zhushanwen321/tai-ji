@@ -32,7 +32,7 @@ import { normalizeSessionFileStreamingInPlace } from './session-file-streaming.j
 import { refreshAll } from './pi-provider-store.js'
 import { convertPiHistory } from './message-converter.js'
 import { rebuildHistoryFromEntries } from './entry-tree-builder.js'
-import { trash } from '../system/trash.js'
+import { trash, trashDirectory } from '../system/trash.js'
 
 export class PiSessionStore implements ISessionStore {
   scanSessions(opts?: ScanSessionsOptions): ScannedSessionMeta[] {
@@ -114,7 +114,7 @@ export class PiSessionStore implements ISessionStore {
   }
 
   normalizeSessionFileStreaming(filePath: string, transformLine: SessionJsonlLineTransform, chunkBytes?: number): void {
-    // D5⑤ 变换腿的 IO 骨架委托（infra 同层；transformLine 是 services 层注入的纯回调，
+    // D5⑤ 变换路径的 IO 骨架委托（infra 同层；transformLine 是 services 层注入的纯回调，
     // IO 全在本实现内——C-comm-03 分层通道）
     normalizeSessionFileStreamingInPlace(filePath, transformLine, chunkBytes)
   }
@@ -128,9 +128,16 @@ export class PiSessionStore implements ISessionStore {
   }
 
   // await 传播 infra trash() 的 rejection（G4/P4-1：trash 失败必须经 session-lifecycle
-  // 上抛到 server.ts 外层收口 → renderer；此前 void 签名丢弃 Promise 断头成
+  // 上抛到 server.ts 外层收尾 → renderer；此前 void 签名丢弃 Promise 断头成
   // unhandledRejection，renderer 误收删除成功 reply——timeout-audit-hygiene-batch u-h4 修复轮）
   async trash(path: string): Promise<void> {
     await trash(path)
+  }
+
+  // [session-store-layout-inversion D5] 目录级软删（ISessionStore.trashDirectory）：
+  // services 层（session-lifecycle 删除链③段 / btw-service closeLine 线树）经本方法
+  // 消费，C-comm-03「services 层 IO 一律经 port」——infra 同层直调合法，rejection 原样传播。
+  async trashDirectory(dirPath: string): Promise<void> {
+    await trashDirectory(dirPath)
   }
 }

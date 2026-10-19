@@ -52,8 +52,8 @@ import {
   statusDotStr,
   type ThemeLike,
 } from "../../format/format.ts";
-// [W2/V1 D1 分流表第 9 行] CLI 视图显示换源：投影二值 status（混合判源收拢在
-// displayStatusOf 单点——判源 = core runSummary 投影）。
+// [W2/V1 D1 分流表第 9 行] CLI 视图显示换源：派生视图二值 status（混合判源收拢在
+// displayStatusOf 单点——判源 = core runSummary 派生视图）。
 import { displayStatusOf } from "../../tool/tool-workflow.ts";
 import {
   b,
@@ -70,7 +70,7 @@ import {
 } from "./view-constants.ts";
 
 // L2 详情内容构建 + 滚动按键（纯函数）抽到 detail-content.ts（view 与其测试直接 import）。
-// [H2 W3] live 进度数据源 = store record 投影（LiveProgressView，替代 node.live）。
+// [H2 W3] live 进度数据源 = store record 派生视图（LiveProgressView，替代 node.live）。
 import {
   buildDetailContent,
   detailContentLength,
@@ -127,12 +127,12 @@ export interface ViewActions {
 // ── [H2 W3] live 数据源：store record 配对（设计 D2 进度源切换）─────────
 
 /**
- * 查询 + 配对：本 run 的 store records → running trace node 的 live 进度投影。
+ * 查询 + 配对：本 run 的 store records → running trace node 的 live 进度派生视图。
  *
  * **record ↔ trace node 对应关系（opts 标签映射 + 时间最近邻）**：
  *   - 候选 = 查询结果中 status==="running" 的 record（执行期 record 恒在内存源；
  *     archive 后的终态 record 从磁盘 light 重建，无 eventLog——但终态节点的渲染走
- *     node.result 终态摘要路径，不消费 record 投影）；
+ *     node.result 终态摘要路径，不消费 record 派生视图）；
  *   - 标签匹配 = `record.task === node.task`（record.task = opts.prompt，与
  *     node.task 同源——workflowCallToExecuteOptions 的 task 映射单点）；
  *   - 多候选（parallel 同 prompt）时取 startedAt 与 node.startedAt 差绝对值最小者
@@ -189,11 +189,11 @@ export function collectNodeLiveProgress(
  *
  * **字段核对表**（每字段 ↔ 渲染消费点 file:line，完备性唯一证据——测试只能证
  * 「已入字段变 → 签名变」，不能证无漏字段）。live 七字段经 collectNodeLiveProgress
- * 的 store record 投影（[H2 W3] 数据源从 node.live 切换，字段口径不变）：
+ * 的 store record 派生视图（[H2 W3] 数据源从 node.live 切换，字段口径不变）：
  *
  * | 签名字段 | 消费点 |
  * |---|---|
- * | displayStatusOf(run) 投影二值（[W2/V1 D1 第 6 行] 混合判源单点——v2 fold/注册表投影 ∨ v1 聚合读面）| WorkflowsView.ts renderHeader（statusDotStr+statusLabel 同串源）/ detail-content.ts statusLabel（statusDotStr 调用处）/ renderFooter |
+ * | displayStatusOf(run) 派生二值（[W2/V1 D1 第 6 行] 混合判源单点——v2 fold/注册表派生视图 ∨ v1 聚合读侧）| WorkflowsView.ts renderHeader（statusDotStr+statusLabel 同串源）/ detail-content.ts statusLabel（statusDotStr 调用处）/ renderFooter |
  * | 秒桶 Math.floor(now/1000) | renderHeader formatElapsed（现算 elapsed）+ detail-content.ts（now 参与未完成节点 elapsed）|
  * | completed/total（节点 status 推导）| renderHeader |
  * | budget 量化值（tokens round-k + cost toFixed(4)=BUDGET_COST_DECIMALS，与 renderHeader budgetStr 同精度——第 3-4 位小数变化是可见变化）| renderHeader / saveTraceToFile |
@@ -202,7 +202,7 @@ export function collectNodeLiveProgress(
  * | 节点 sessionFile | detail-content.ts（renderSessionSection）|
  * | 节点 status | 节点行 statusDotStr / detail statusLabel |
  * | live.totalTokens | 节点行（level1AgentCells）/ detail（buildDetailContent 用量行）|
- * | live.toolCallCount（store 投影：eventLog tool_start 计数，与 getAllToolCalls(record).length 恒等——LiveProgressView 无别的计数字段，不得另引）| 节点行 / detail（用量行 + Activity 标签）|
+ * | live.toolCallCount（store 派生视图：eventLog tool_start 计数，与 getAllToolCalls(record).length 恒等——LiveProgressView 无别的计数字段，不得另引）| 节点行 / detail（用量行 + Activity 标签）|
  * | live.elapsedSeconds | 节点行 / detail（用量行 + Outcome Running 行）|
  * | live.turns | detail（Activity 标签 + Outcome Running 行）|
  * | live.eventLog.length（append-only，长度变化即尾部窗口右移出新事件）| detail（Activity 区 filter turn_end + 最近 N 条）|
@@ -288,7 +288,7 @@ function createInitialState(): ViewState {
 /**
  * 创建 workflow fullscreen view。
  *
- * @param run WorkflowRun 聚合根（读 displayStatusOf 投影二值/spec/trace/meta）
+ * @param run WorkflowRun 聚合根（读 displayStatusOf 派生视图二值/spec/trace/meta）
  * @param theme ThemeLike（避免直接 import Pi runtime）
  * @param ctx ExtensionContext（调 ui.custom 渲染 + ui.notify 错误反馈）
  * @param actions lifecycle 操作（abort），由调用方注入
@@ -297,8 +297,8 @@ function createInitialState(): ViewState {
  *   经 SubagentService.queries.collectRecordsByParentRunId 查询（内存 ∪ 磁盘重建 ∪
  *   manifest，LIST_LIMIT 口径），view 在 200ms tick 与 render 时重查并按
  *   collectNodeLiveProgress 配对到 running trace node。未注入（无 service 的测试
- *   环境）时 live 投影恒空，渲染走终态 result 路径。终态 record archive 出内存后
- *   由下次重查从磁盘重建面取终态快照——无需带 payload 的新事件类型（D2 实现锚点）。
+ *   环境）时 live 派生视图恒空，渲染走终态 result 路径。终态 record archive 出内存后
+ *   由下次重查从磁盘重建侧取终态快照——无需带 payload 的新事件类型（D2 实现锚点）。
  */
 export function createWorkflowsView(
   run: WorkflowRun,
@@ -312,7 +312,7 @@ export function createWorkflowsView(
     const state = createInitialState();
     const tui = _tui as TuiLike;
 
-    /** 查询 + 配对：本 run running 节点的 live 进度投影（liveRecords 未注入时恒空）。 */
+    /** 查询 + 配对：本 run running 节点的 live 进度派生视图（liveRecords 未注入时恒空）。 */
     function collectLive(): Map<number, LiveProgressView> {
       return liveRecords === undefined ? new Map() : collectNodeLiveProgress(run, liveRecords());
     }
@@ -335,7 +335,7 @@ export function createWorkflowsView(
     const requestRender = () => tui.requestRender();
 
  // ── 轮询 tick：engine 无事件推送，view 自轮询 trace + store record 变化 ──
- // 每 200ms 条件失效（IF11/TC7）：先查 store（parentRunId 查询域）配对 live 投影，
+ // 每 200ms 条件失效（IF11/TC7）：先查 store（parentRunId 查询域）配对 live 派生视图，
  // 再算渲染签名（computeRenderSignature，覆盖 header/节点行/L2 detail 全部动态
  // 字段），与上次相同 → 该帧内容无可见变化，直接 return（不清 cache、不
  // requestRender——纯等待场景零重建零重绘）；不同 → 现状路径（清缓存 +
@@ -850,7 +850,7 @@ function renderLevel0(
 
 /** L1 左列：sidebar title + phase list（固定高度 viewport + 滚动，只构建可见行）。
  *  与 renderLevel0 左列同构——本 helper 只供 renderLevel1（renderLevel0 不在本单元目标内，不并轨，
- *  避免扩大行为面；后续如消重可让 L0 复用）。 */
+ *  避免扩大行为范围；后续如消重可让 L0 复用）。 */
 function buildLevelSidebar(
   phases: ReturnType<typeof buildPhaseGroups>,
   state: ViewState,
@@ -891,7 +891,7 @@ function pushLevel1Header(
   }
 }
 
-/** L1 agent 行统计三元组：live 路径优先（运行中从 store record 投影读实时 token/tool + elapsed），
+/** L1 agent 行统计三元组：live 路径优先（运行中从 store record 派生视图读实时 token/tool + elapsed），
  *  终态回退 result 统计。 */
 function level1AgentCells(
   node: ExecutionTraceNode,

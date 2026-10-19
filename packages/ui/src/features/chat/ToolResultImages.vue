@@ -73,9 +73,9 @@ const { t } = useI18n()
 /**
  * 落盘目录键归一：虚拟 session id（subagent:main:sub / btw:piSid）→ owner 的 pi session id。
  *
- * main 侧 getImageCacheDir 的路径穿越守卫只放行 `^[A-Za-z0-9_-]+$`（shared paths.ts），
- * 虚拟 id 含冒号恒被拒 → IPC reject → 组件恒 fallback（subagent 会话图片不可见的收口点，
- * [subagent 投影丢失修复]）。图片缓存归 owner 会话目录（随主会话清理/孤儿扫描生命周期），
+ * main 侧 getImageCacheDir 的路径穿越检查只放行 `^[A-Za-z0-9_-]+$`（shared paths.ts），
+ * 虚拟 id 含冒号恒被拒 → IPC reject → 组件恒 fallback（subagent 会话图片不可见的收尾点，
+ * [subagent 派生视图丢失修复]）。图片缓存归 owner 会话目录（随主会话清理/孤儿扫描生命周期），
  * 记账键（帽满标记 / 路径记账）同步用归一后的 sid——与 disposeImageCacheForSession 的
  * owner 侧调用同键。
  */

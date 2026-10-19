@@ -1,6 +1,6 @@
 /**
  * 访问层测试（迁入改造面）：行集查询（session → message → part 三级表）、schema
- * 已知集闸门、库路径投影。fixture 自建自删（os.tmpdir()），不触真实数据目录。
+ * 已知集门禁、库路径派生视图。fixture 自建自删（os.tmpdir()），不触真实数据目录。
  */
 
 import { describe, expect, it } from 'vitest'
@@ -31,8 +31,8 @@ const FIXTURE_DIR = 'zss-access-'
 
 async function makeReadyFixture(dir: string, schemaVersion?: string): Promise<FixtureDb> {
   // quiesce: true——bun:sqlite close 不删附属（TRUNCATE 后 0 字节 wal 残留在盘），
-  // 不清则 existsSync(-wal) 为 true、bun 腿 L1 直开对 wal 在场库成功，双端「真静息」
-  // 构造失配（node close 自动清理所以 node 腿测不出该差异）
+  // 不清则 existsSync(-wal) 为 true、bun 路径 L1 直开对 wal 在场库成功，双端「真静息」
+  // 构造失配（node close 自动清理所以 node 路径测不出该差异）
   return buildFixtureDb(dir, defaultTranscriptSeeds(), {
     quiesce: true,
     ...(schemaVersion ? { schemaVersion } : {}),
@@ -189,7 +189,7 @@ describe('候选行 / 单行 / 字节聚合', () => {
   })
 })
 
-describe('schema 版本已知集闸门', () => {
+describe('schema 版本已知集门禁', () => {
   it('已知版本（0.16.5）通过：openZcodeSessionDb 正常返回', async () => {
     const fx = makeFixtureDir(FIXTURE_DIR)
     try {
@@ -299,7 +299,7 @@ describe('openZcodeSessionDb 编排入口', () => {
   })
 })
 
-describe('库路径投影（SDK 常量同源）', () => {
+describe('库路径派生视图（SDK 常量同源）', () => {
   it('隔离库 = dataDir + ZCODE_ISOLATED_DB_SEGMENTS', () => {
     expect(zcodeIsolatedDbPath('/data-root')).toBe(join('/data-root', 'engines', 'zcode', 'session-db', 'db.sqlite'))
   })

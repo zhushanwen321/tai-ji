@@ -1,16 +1,16 @@
 // @vitest-environment node
 
 /**
- * [W28/D-7.2] projectVisibleRows 投影单测（09 文档 §3.3.2 + §5 D-7.2 验收）。
+ * [W28/D-7.2] projectVisibleRows 派生视图单测（09 文档 §3.3.2 + §5 D-7.2 验收）。
  *
  * 覆盖：
- * - 等价性：展开/折叠/过滤/nodeStates 组合下，投影产出的 VisibleRow 列表
+ * - 等价性：展开/折叠/过滤/nodeStates 组合下，派生视图产出的 VisibleRow 列表
  *   （顺序 + 缩进深度 + 行类型）与旧递归渲染（FileView.visibleNodes + FileTreeRow 递归）
  *   的节点集合完全一致——reference 实现逐行复刻旧代码语义（ignored 全量显示语义已同步）
- * - 字段映射：childCount（可见子项数）/gitStatus/lineStats/expanded/ignored 正确投影
+ * - 字段映射：childCount（可见子项数）/gitStatus/lineStats/expanded/ignored 正确派生视图
  * - hint 行：loading/error/empty 三类占位行（旧递归的 nodeStates 子区渲染）
- * - 纯函数幂等：同树同过滤同展开 → 同输出（plan 验收「投影纯函数单测」）
- * - 性能量级：万级节点单次投影产出全部可见行；getNodeState 只按需调用（展开目录数），
+ * - 纯函数幂等：同树同过滤同展开 → 同输出（plan 验收「派生视图纯函数单测」）
+ * - 性能量级：万级节点单次派生视图产出全部可见行；getNodeState 只按需调用（展开目录数），
  *   不做 per-row 派生（替代旧实现每行 12 computed）
  *
  * 运行：npx vitest run src/__tests__/stores/fileTree-projection.test.ts
@@ -125,7 +125,7 @@ function projectArgs(store: ReturnType<typeof useFileTreeStore>, sid: string, ge
   ] as const
 }
 
-/** 用 store 状态驱动投影（与 FileView computed 相同的调用形态：per-session getter 传参） */
+/** 用 store 状态驱动派生视图（与 FileView computed 相同的调用形态：per-session getter 传参） */
 function project(store: ReturnType<typeof useFileTreeStore>, sid = 's1'): VisibleRow[] {
   return projectVisibleRows(...projectArgs(store, sid))
 }
@@ -182,10 +182,10 @@ describe('projectVisibleRows 等价性（旧递归渲染节点集合，顺序 + 
   }
 })
 
-describe('projectVisibleRows 字段映射（徽章/角标/行数从分桶投影）', () => {
+describe('projectVisibleRows 字段映射（徽章/角标/行数从分桶派生视图）', () => {
   it('childCount = 目录可见直接子项数（ignored 全量计入），文件行恒 0', () => {
     const store = useFileTreeStore()
-    setupTree(store, ['src']) // 展开 src → src/empty 行进入投影
+    setupTree(store, ['src']) // 展开 src → src/empty 行进入派生视图
 
     const rows = project(store)
     const src = rows.find((r) => r.path === 'src')!
@@ -194,7 +194,7 @@ describe('projectVisibleRows 字段映射（徽章/角标/行数从分桶投影�
     // src 直接子项 a.ts/utils/empty/ignored-dir 全量计入（ignored 不过滤）→ 4
     expect(src.childCount).toBe(4)
     expect(empty.childCount).toBe(0) // 空目录 = 0（demo .fbadge：是目录即恒渲染，0 也显）
-    expect(readme.childCount).toBe(0) // 文件行不投影子项数
+    expect(readme.childCount).toBe(0) // 文件行不映射子项数
   })
 
   it('未加载 children 的目录 childCount 恒 0（懒加载诚实值）', () => {
@@ -226,7 +226,7 @@ describe('projectVisibleRows 字段映射（徽章/角标/行数从分桶投影�
     expect(clean.lineStats).toBeUndefined()
   })
 
-  it('expanded/ignored/type/depth 投影正确（含 hint 行 depth = 目录 depth+1）', () => {
+  it('expanded/ignored/type/depth 派生视图正确（含 hint 行 depth = 目录 depth+1）', () => {
     const store = useFileTreeStore()
     setupTree(store, ['src', 'src/utils'])
     const rows = project(store)
@@ -293,7 +293,7 @@ describe('projectVisibleRows 纯函数幂等（同树同过滤同展开 → 同�
     const a = project(store)
     const b = project(store)
     expect(a).toEqual(b)
-    // 输出为独立数组（非共享引用——调用方改行不影响下次投影）
+    // 输出为独立数组（非共享引用——调用方改行不影响下次派生视图）
     expect(a).not.toBe(b)
     expect(a[0]).not.toBe(b[0])
   })
@@ -336,7 +336,7 @@ describe('projectVisibleRows 性能量级（万级节点，替代旧 per-row 12 
     }
   }
 
-  it('万级可见行单次投影全量产出（10002 行），overlay.get/getNodeState 调用次数线性上界（替代墙钟）', () => {
+  it('万级可见行单次派生视图全量产出（10002 行），overlay.get/getNodeState 调用次数线性上界（替代墙钟）', () => {
     const store = useFileTreeStore()
     store.setTree('s1', buildBigTree(10000))
     store.setNodeState('s1', 'big', { status: 'loaded' })
@@ -348,7 +348,7 @@ describe('projectVisibleRows 性能量级（万级节点，替代旧 per-row 12 
 
     // 操作计数（不做墙钟断言——CI 慢机墙钟不可靠）：
     // - getNodeState 只按已展开目录数调用（loading/error hint 判定），非 per-row
-    // - overlay.get 每行至多 2 次（gitStatus 投影 + lineStats），总次数 ≤ 2×行数（线性上界）
+    // - overlay.get 每行至多 2 次（gitStatus 派生视图 + lineStats），总次数 ≤ 2×行数（线性上界）
     const countingOverlay = new CountingGetMap(store.getGitOverlay('s1'))
     const nodeStateSpy = vi.fn((s: string, p: string) => store.getNodeState(s, p))
     const rows = projectVisibleRows(
@@ -367,7 +367,7 @@ describe('projectVisibleRows 性能量级（万级节点，替代旧 per-row 12 
     expect(countingOverlay.getCalls).toBeLessThanOrEqual(rows.length * 2)
   })
 
-  it('getNodeState 只按需调用（展开目录数），不做 per-row 派生（替代旧每行 12 computed 的调用面）', () => {
+  it('getNodeState 只按需调用（展开目录数），不做 per-row 派生（替代旧每行 12 computed 的调用方式）', () => {
     const store = useFileTreeStore()
     store.setTree('s1', buildBigTree(10000))
     store.setNodeState('s1', 'big', { status: 'loaded' })
@@ -382,7 +382,7 @@ describe('projectVisibleRows 性能量级（万级节点，替代旧 per-row 12 
     expect(spy).toHaveBeenCalledTimes(2)
   })
 
-  it('过滤态投影：匹配判定一次 O(节点数)，投影只含命中祖先链（旧递归语义）', () => {
+  it('过滤态派生视图：匹配判定一次 O(节点数)，派生视图只含命中祖先链（旧递归语义）', () => {
     const store = useFileTreeStore()
     store.setTree('s1', buildBigTree(10000))
     store.setNodeState('s1', 'big', { status: 'loaded' })
@@ -401,14 +401,14 @@ describe('projectVisibleRows 性能量级（万级节点，替代旧 per-row 12 
     const rows2 = project(store)
     expect(rows2).toHaveLength(20002) // 1 + 10000 + 1 + 10000
 
-    // 无匹配 → 空投影
+    // 无匹配 → 空派生视图
     store.setFilter('zzz_no_match')
     expect(project(store)).toHaveLength(0)
   })
 })
 
 describe('visibleRowKey 稳定性', () => {
-  it('节点行 key = path；hint 行 key 带类型前缀（跨投影稳定）', () => {
+  it('节点行 key = path；hint 行 key 带类型前缀（跨派生视图稳定）', () => {
     expect(visibleRowKey({ path: 'a.ts', type: 'file', depth: 0 } as VisibleRow)).toBe('a.ts')
     expect(
       visibleRowKey({ path: 'src', type: 'dir', depth: 1, hint: 'loading' } as VisibleRow),
@@ -455,7 +455,7 @@ describe('projectVisibleRows 与 store 组合行为（懒加载/目录协议不�
     ])
   })
 
-  it('clearSession 后投影空（分桶清理）', () => {
+  it('clearSession 后派生视图空（分桶清理）', () => {
     const store = useFileTreeStore()
     setupTree(store, ['src'])
     expect(project(store)).not.toHaveLength(0)
@@ -464,8 +464,8 @@ describe('projectVisibleRows 与 store 组合行为（懒加载/目录协议不�
   })
 })
 
-describe('[W28 审查 Fix-2] E7-a 细粒度 getter 分桶（异 sid 更新不触发本 sid 投影重算）', () => {
-  it('异 sid overlay 更新不重算本 sid 投影；同 sid 更新重算（split mode 多面板隔离）', () => {
+describe('[W28 审查 Fix-2] E7-a 细粒度 getter 分桶（异 sid 更新不触发本 sid 派生视图重算）', () => {
+  it('异 sid overlay 更新不重算本 sid 派生视图；同 sid 更新重算（split mode 多面板隔离）', () => {
     const store = useFileTreeStore()
     setupTree(store, ['src'])
     store.setGitOverlay('s1', [
@@ -473,7 +473,7 @@ describe('[W28 审查 Fix-2] E7-a 细粒度 getter 分桶（异 sid 更新不触
       { path: 'src/utils/b.ts', xyCode: 'A ', status: 'added' },
     ])
 
-    // 模拟 FileView 的投影 computed（getter 传参形态）
+    // 模拟 FileView 的派生视图 computed（getter 传参形态）
     let recomputes = 0
     const rows = computed(() => {
       recomputes += 1
@@ -482,7 +482,7 @@ describe('[W28 审查 Fix-2] E7-a 细粒度 getter 分桶（异 sid 更新不触
     void rows.value // 首次求值
     expect(recomputes).toBe(1)
 
-    // 异 sid overlay 回写（split mode 另一面板的 git.status）→ 本 sid 投影缓存命中不重算
+    // 异 sid overlay 回写（split mode 另一面板的 git.status）→ 本 sid 派生视图缓存命中不重算
     store.setGitOverlay('s2', [{ path: 'other.ts', xyCode: ' M', status: 'modified' }])
     expect(rows.value).toBe(rows.value) // 同一数组引用（未 dirty）
     expect(recomputes).toBe(1)

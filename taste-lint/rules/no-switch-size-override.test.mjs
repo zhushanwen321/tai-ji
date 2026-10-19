@@ -1,10 +1,10 @@
 /**
  * no-switch-size-override 规则用例（trace toolbar Switch 圆点溢出事故回归防线，修前红/修后绿）。
  *
- * 覆盖面：报错主路径（rem 类 h-3.5 w-6 / 绝对 px h-[20px] / w-full / size-4 / 事故原始
+ * 覆盖范围：报错主路径（rem 类 h-3.5 w-6 / 绝对 px h-[20px] / w-full / size-4 / 事故原始
  * 形态 `h-3.5 w-6 scale-90` 每个 token 各报一条）、合法形态放行（等比 scale-90、
  * shrink-0 / mt-0.5 / 定位类、无 class、min-w-* / max-h-* 负向后行不误报、跨行标签、
- * 自闭合标签、:class 字面量内 token 同样捕获）、范围守卫（components/ui 豁免、
+ * 自闭合标签、:class 字面量内 token 同样捕获）、范围检查（components/ui 豁免、
  * 非 .vue 文件不扫、<SwitchRoot> 等 PascalCase 后缀不误命中、模板外 script 不扫）、
  * 同 token 去重（多处 h-3.5 只报一次避免刷屏）。
  * vitest + eslint Linter 直挂规则（no-unbounded-while-true.test.mjs 同款跑法），
@@ -128,7 +128,7 @@ test('同 token 多处只报一次（去重防刷屏）', () => {
   expect(messages).toHaveLength(1);
 });
 
-// —— 范围守卫 ——
+// —— 范围检查 ——
 // 豁免按路径子串模式判定，断言用模式化路径即可（不指涉具体实现文件的存在）。
 
 test('原语内部实现豁免（components/ui/ 与 ui 包 primitives/ 模式）', () => {

@@ -78,14 +78,14 @@ const BACKOFF_MULTIPLIER = 2;
  * message.toolCalls 顶层字段从未存在）。这里只数块个数——调用方以「相邻两次
  * agent_end 的差分」判定本 turn 是否有真实工具活动，不需要 name/arguments。
  *
- * duck-typed 逐层守卫（对齐 pending-notifications state.ts 的 EntryLike 风格），
+ * duck-typed 逐层检查（对齐 pending-notifications state.ts 的 EntryLike 风格），
  * 不依赖 SDK 具体类型；畸形 entry 跳过不计。
  */
 export function countToolCallBlocks(entries: unknown[]): number {
 	let count = 0;
 	for (const raw of entries) {
 		if (!raw || typeof raw !== "object") continue;
-		// 断言目标带必填 unknown 字段（typeof object 已守卫），非全可选形状
+		// 断言目标带必填 unknown 字段（typeof object 已检查），非全可选形状
 		const entry = raw as { type: unknown; message: unknown };
 		if (entry.type !== "message") continue;
 		if (!entry.message || typeof entry.message !== "object") continue;

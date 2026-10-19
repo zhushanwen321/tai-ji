@@ -200,17 +200,17 @@ describe('Agent RPC Handlers — real implementation', () => {
 })
 
 /**
- * U6 回执普查降级守卫（C-pi-13 消费方契约）：setModel / setThinkingLevel 的 reply
+ * U6 回执普查降级检查（C-pi-13 消费方契约）：setModel / setThinkingLevel 的 reply
  * 是 pi 生效值（pi pattern 换模 / 钳制时 ≠ 请求值），消费端必须处理空串降级、
- * 禁乐观写请求值。守卫分支零覆盖即契约无锁定。
+ * 禁乐观写请求值。检查分支零覆盖即契约无锁定。
  */
-describe('Agent RPC Handlers — U6 降级守卫返回空串', () => {
+describe('Agent RPC Handlers — U6 降级检查返回空串', () => {
   beforeEach(() => {
     vi.clearAllMocks()
     clearActiveSessionCache()
   })
 
-  it('setModel：无 sessionService → 返回空串（守卫分支 1）', async () => {
+  it('setModel：无 sessionService → 返回空串（检查分支 1）', async () => {
     const broker = createMockBroker()
     const registry = new PluginRegistry('/tmp/fake-project', '/tmp/fake-project')
     const service = new PluginService(registry, broker)
@@ -219,7 +219,7 @@ describe('Agent RPC Handlers — U6 降级守卫返回空串', () => {
     expect(result).toBe('')
   })
 
-  it('setModel：无活跃 session → 返回空串且不触达 switchModel（守卫分支 2）', async () => {
+  it('setModel：无活跃 session → 返回空串且不触达 switchModel（检查分支 2）', async () => {
     const sessionService = createMockSessionService([])
     const service = createService(sessionService)
 
@@ -228,7 +228,7 @@ describe('Agent RPC Handlers — U6 降级守卫返回空串', () => {
     expect(sessionService.switchModel).not.toHaveBeenCalled()
   })
 
-  it('setModel：复合串无 "/"（parts < MIN_MODEL_PARTS）→ 返回空串且不触达 switchModel（守卫分支 3）', async () => {
+  it('setModel：复合串无 "/"（parts < MIN_MODEL_PARTS）→ 返回空串且不触达 switchModel（检查分支 3）', async () => {
     const session: SessionSummary = {
       id: 's1', label: 'S1', cwd: '/work', status: 'active',
       lastActiveAt: Date.now(), modelId: 'provider/old', tokenCount: 0,
@@ -254,7 +254,7 @@ describe('Agent RPC Handlers — U6 降级守卫返回空串', () => {
     expect(result).toBe('provider/model-b')
   })
 
-  it('setThinkingLevel：无 sessionService → 返回空串（守卫分支 1）', async () => {
+  it('setThinkingLevel：无 sessionService → 返回空串（检查分支 1）', async () => {
     const broker = createMockBroker()
     const registry = new PluginRegistry('/tmp/fake-project', '/tmp/fake-project')
     const service = new PluginService(registry, broker)
@@ -263,7 +263,7 @@ describe('Agent RPC Handlers — U6 降级守卫返回空串', () => {
     expect(result).toBe('')
   })
 
-  it('setThinkingLevel：无活跃 session → 返回空串（守卫分支 2）', async () => {
+  it('setThinkingLevel：无活跃 session → 返回空串（检查分支 2）', async () => {
     const sessionService = createMockSessionService([])
     const service = createService(sessionService)
 

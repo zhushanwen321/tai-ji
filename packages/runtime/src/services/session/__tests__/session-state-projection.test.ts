@@ -1,15 +1,15 @@
 /**
- * SessionStateProjection 模块直接测试（S5：replicated states 快照投影族 + context/usage
- * 副作用域从 SessionService 迁出后的直接测试面——G2 形态：stub pm/client + 真实
+ * SessionStateProjection 模块直接测试（S5：replicated states 快照派生视图族 + context/usage
+ * 副作用域从 SessionService 迁出后的直接测试——G2 形态：stub pm/client + 真实
  * MessageBus，不构造 Facade 全家桶，import 不含 session-service）。
  *
- * 覆盖四块（对应实现迁移面）：
+ * 覆盖四块（对应实现迁移侧）：
  * - 订阅播种：subscribe 注册的 handler 触发 registerReplicatedStates（四实例 + refetch
  *   立即拉取）；幂等注册 dispose 旧实例。
- * - 快照投影核心路径：fetch 成功后 setTimeout 0 宏任务发布 context.update /
+ * - 快照派生视图核心路径：fetch 成功后 setTimeout 0 宏任务发布 context.update /
  *   session.commands / session.state_changed（payload 全字段来自实例快照）+ 无值占位帧
- *   （tokens=null）+ diff 抑制 + fallback 双写缓存 + 销毁守卫（hasSession false 不 publish）。
- * - 副作用域：applyContextUpdate（事件只失效 + 防抖 300ms 重拉）/ handleTurnUsageSideEffects
+ *   （tokens=null）+ diff 抑制 + fallback 双写缓存 + 销毁检查（hasSession false 不 publish）。
+ * - 副作用域：applyContextUpdate（事件只失效 + 防抖 300ms 重新拉取）/ handleTurnUsageSideEffects
  *   （project sidecar 兜底）/ handleTurnEndSideEffects（isGenerating 复位 + outcome 映射）/
  *   fetchAndBroadcastContext（fetchContext 吞错兜底）。
  * - onSessionDisposed：实例组 dispose（此后 markDirty/refetch 不再拉取）+ Map 清理 +
@@ -168,10 +168,10 @@ describe('subscribe：onSessionRegistered 播种接线', () => {
   })
 })
 
-// ── 快照投影核心路径 ──
+// ── 快照派生视图核心路径 ──
 
-describe('快照投影：fetch 成功后挂钩发布（「投影一次」）', () => {
-  it('usage 快照落定 → context.update（payload 全字段来自快照）+ state_changed 组合投影', async () => {
+describe('快照派生视图：fetch 成功后挂钩发布（「派生视图生成一次」）', () => {
+  it('usage 快照落定 → context.update（payload 全字段来自快照）+ state_changed 组合派生视图', async () => {
     const env = makeEnv()
     await settle(env.projection)
 
@@ -180,7 +180,7 @@ describe('快照投影：fetch 成功后挂钩发布（「投影一次」）', (
     expect(ctx[0].payload).toEqual({ sessionId: 's1', inputTokens: 100, contextLimit: 128000, usagePercent: 25 })
     const stateChanged = messagesOf(publishedCalls(env.publishSpy), 'session.state_changed')
     expect(stateChanged).toHaveLength(1)
-    // modelId 组合 'provider/id'（get_state 投影口径），thinkingLevel 直读
+    // modelId 组合 'provider/id'（get_state 派生视图口径），thinkingLevel 直读
     expect(stateChanged[0].payload).toEqual({ sessionId: 's1', modelId: 'xiaomi/mimo', thinkingLevel: 'high' })
   })
 
@@ -204,7 +204,7 @@ describe('快照投影：fetch 成功后挂钩发布（「投影一次」）', (
     const env = makeEnv()
     await settle(env.projection)
     expect(messagesOf(publishedCalls(env.publishSpy), 'session.state_changed')).toHaveLength(1)
-    // 同值失效重拉（防抖到点 → get_state 同值快照 → 挂钩再发布 → diff 抑制）
+    // 同值失效重新拉取（防抖到点 → get_state 同值快照 → 挂钩再发布 → diff 抑制）
     env.projection.getReplicatedStates('s1')!.modelId.markDirty()
     await vi.advanceTimersByTimeAsync(SCALAR_STATE_DEBOUNCE_MS)
     expect((env.client.getState as ReturnType<typeof vi.fn>).mock.calls.length).toBeGreaterThanOrEqual(2)
@@ -221,7 +221,7 @@ describe('快照投影：fetch 成功后挂钩发布（「投影一次」）', (
     expect(stateChanged[0].payload).toEqual({ sessionId: 's1', modelId: 'fallback/model', thinkingLevel: 'low' })
   })
 
-  it('销毁守卫：session 已从 Map 删除时 fetch 落定不 publish（防 bus 重建已 clearSession 的 entry）', async () => {
+  it('销毁检查：session 已从 Map 删除时 fetch 落定不 publish（防 bus 重建已 clearSession 的 entry）', async () => {
     const env = makeEnv()
     env.projection.registerReplicatedStates('s1')
     env.sessions.delete('s1') // 播种 fetch 在途期间 session 被销毁
@@ -245,7 +245,7 @@ describe('快照投影：fetch 成功后挂钩发布（「投影一次」）', (
 // ── 副作用域（markDirty / 防抖 / sidecar 兜底 / 终态映射）──
 
 describe('副作用域：applyContextUpdate / handleTurn* / fetchAndBroadcastContext', () => {
-  it('applyContextUpdate：事件只失效——防抖窗口内不重拉，到点后重拉 get_session_stats', async () => {
+  it('applyContextUpdate：事件只失效——防抖窗口内不重新拉取，到点后重新拉取 get_session_stats', async () => {
     const env = makeEnv()
     await settle(env.projection)
     const before = (env.client.getSessionStats as ReturnType<typeof vi.fn>).mock.calls.length

@@ -1,6 +1,6 @@
 /**
- * 事件投影直测（W1 [D6] runtime 读侧换源）：双源单点合并仲裁（事件源胜出 /
- * 窗外条目兜底 / v1 冻结定界）+ 会话文件流式扫描（冷启动 entry 源）+ 有状态投影
+ * 事件派生视图直测（W1 [D6] runtime 读侧换源）：双源单点合并仲裁（事件源胜出 /
+ * 窗外条目兜底 / v1 冻结定界）+ 会话文件流式扫描（冷启动 entry 源）+ 有状态派生视图
  * （tail 目录 watcher 冷启动/增量/dispose）。
  *
  * fixture 全部落 mkdtemp 临时目录（mkdtempSync 自建自删，rmSync 全参数）；
@@ -84,7 +84,7 @@ function runEvent(over: Record<string, unknown>): WorkflowRunEvent {
   return { ts: 1000, ...(over as object) } as unknown as WorkflowRunEvent
 }
 
-/** 带 seq 信封的事件（W1 起新格式 事件行形态——seq 守卫/重放去重用例的载体）。 */
+/** 带 seq 信封的事件（W1 起新格式 事件行形态——seq 检查/重放去重用例的载体）。 */
 function runSeqEvent(seq: number, over: Record<string, unknown>): WorkflowRunEvent {
   return { ts: 1000 + seq * 100, seq, ...(over as object) } as unknown as WorkflowRunEvent
 }
@@ -201,8 +201,8 @@ describe('parseWorkflowRunEventFileLine（run 域 tail 行解析器）', () => {
   })
 
   it('[W2 D2] 删值成员 ask-executing 的历史 事件行 → undefined（tailer 跳过计日志链路的 parse 面）；保留成员 armed 照常放行', () => {
-    // 词表缩窄前落账的历史行（完整载荷形态）——解析层返回 undefined 交 tailer
-    // 计数 warn，不卡游标、不炸投影
+    // 词表缩窄前写入的历史行（完整载荷形态）——解析层返回 undefined 交 tailer
+    // 计数 warn，不卡游标、不炸派生视图
     expect(
       parseWorkflowRunEventFileLine(
         JSON.stringify({ type: 'ask-executing', ts: 1, taskIndex: 0, agentName: 'w', attempt: 1 }),
@@ -243,7 +243,7 @@ describe('parseWorkflowRunEventFileLine（run 域 tail 行解析器）', () => {
   })
 })
 
-describe('run 域 journal fold（[W2 D7] 单源 core foldRunEventCheckpoint——runtime 投影消费骨架半边）', () => {
+describe('run 域 journal fold（[W2 D7] 单源 core foldRunEventCheckpoint——runtime 派生视图消费骨架半边）', () => {
   const noop = (): void => {}
 
   /** 合法序列（写入序）：created → 两 ask 派发 → ask-0 终局 → run 终局。 */
@@ -255,7 +255,7 @@ describe('run 域 journal fold（[W2 D7] 单源 core foldRunEventCheckpoint—�
     runSeqEvent(5, { type: 'run-settled', outcome: 'done', artifactsDir: '/tmp/a' }),
   ]
 
-  it('骨架投影：created 定首帧、dispatched 成骨架行、settled 定步骤终局、run-settled 定 run 终局', () => {
+  it('骨架派生视图：created 定首帧、dispatched 成骨架行、settled 定步骤终局、run-settled 定 run 终局', () => {
     const fold = foldRunEventCheckpoint(legalEvents, noop)
     // created 载荷含 argsSummary（[可视化 U1] 扩 fold 骨架字段——写侧恒写的行内小摘要透传）
     expect(fold.created).toEqual({ runId: 'wf-1', workflowName: 'flow', argsSummary: '', ts: 1100 })
@@ -294,7 +294,7 @@ describe('run 域 journal fold（[W2 D7] 单源 core foldRunEventCheckpoint—�
     )
     expect(stopped.created).toMatchObject({ runId: 'wf-mp' })
     expect(stopped.lastSeq).toBe(1) // member-pool 帧未应用（水位停在 run-created）
-    // [D3] phase 状态机骨架：phase-started/phase-settled 落投影半边
+    // [D3] phase 状态机骨架：phase-started/phase-settled 落派生视图半边
     const folded = foldRunEventCheckpoint(
       [
         runSeqEvent(1, { type: 'run-created', runId: 'wf-ph', workflowName: 'flow', argsSummary: '' }),
@@ -310,7 +310,7 @@ describe('run 域 journal fold（[W2 D7] 单源 core foldRunEventCheckpoint—�
     expect(folded.runSettled).toMatchObject({ outcome: 'done' })
   })
 
-  it('被动终局帧透传：收编/回收路径 run-settled（interrupted + errorCode 细分）落骨架与投影', () => {
+  it('被动终局帧透传：收编/回收路径 run-settled（interrupted + errorCode 细分）落骨架与派生视图', () => {
     // 历史回收帧（场景 3 事件帧口径）：outcome=interrupted + errorCode=idle-evicted
     // ——历史写入方 = 已退役的 30 天内存回收机制（见 ADR），词表成员为存量帧解析保留
     const evicted = foldRunEventCheckpoint(
@@ -323,7 +323,7 @@ describe('run 域 journal fold（[W2 D7] 单源 core foldRunEventCheckpoint—�
     expect(evicted.runSettled).toMatchObject({ outcome: 'interrupted', errorCode: 'idle-evicted' })
     expect(evicted.state).toEqual({ lifecycle: 'terminal', outcome: 'interrupted' })
 
-    // 投影合成：注册条目在场 + 事件收编帧 → WorkflowRunRecord 透传 outcome/errorCode
+    // 派生视图合成：注册条目在场 + 事件收编帧 → WorkflowRunRecord 透传 outcome/errorCode
     const registered = {
       v: 2 as const,
       kind: 'registered' as const,
@@ -456,7 +456,7 @@ describe('projectV2Subagent（事件源胜出 / 窗外兜底）', () => {
     expect(record.engineHandle?.poolKey).toBe('shared')
   })
 
-  it('事件 fold 缺席（窗外终态实体）：终态条目兜底成投影', () => {
+  it('事件 fold 缺席（窗外终态实体）：终态条目兜底成派生视图', () => {
     const record = projectV2Subagent(registered, settledEntry, undefined)!
     expect(record.status).toBe('idle')
     expect(record.stopReason).toBe('interrupted')
@@ -464,7 +464,7 @@ describe('projectV2Subagent（事件源胜出 / 窗外兜底）', () => {
     expect(record.sessionFile).toBeNull()
   })
 
-  it('仅有注册条目：running 投影（身份域齐备）', () => {
+  it('仅有注册条目：running 派生视图（身份域齐备）', () => {
     const record = projectV2Subagent(registered, undefined, undefined)!
     expect(record.status).toBe('running')
     expect(record.agent).toBe('worker')
@@ -476,9 +476,9 @@ describe('projectV2Subagent（事件源胜出 / 窗外兜底）', () => {
     expect(projectV2Subagent(undefined, undefined, undefined)).toBeNull()
   })
 
-  // ── [subagent-detail-model-info] modelSource 投影 + running 期模型（created 帧回落）──
+  // ── [subagent-detail-model-info] modelSource 派生视图 + running 期模型（created 帧回落）──
 
-  it('running 期模型回落 created 帧留痕（settled 条目缺席）+ modelSource 随身份域投影', () => {
+  it('running 期模型回落 created 帧留痕（settled 条目缺席）+ modelSource 随身份域映射', () => {
     const fold = {
       identity: createdEvent('sa-1', 1, { model: 'zai-coding-plan/GLM-5.3', modelSource: 'explicit' }),
       bound: undefined,
@@ -537,7 +537,7 @@ describe('projectV2Subagent（事件源胜出 / 窗外兜底）', () => {
     )!
     expect(foldWins.modelSource).toBe('frontmatter')
 
-    // fold 缺席（窗外）→ registered 条目兑底
+    // fold 缺席（窗外）→ registered 条目兜底
     const registeredWins = projectV2Subagent(
       { ...registered, modelSource: 'preference' },
       undefined,
@@ -551,7 +551,7 @@ describe('projectV2Subagent（事件源胜出 / 窗外兜底）', () => {
   })
 
   // [F1-38 轮终形态] v1 语义：轮终翻边写 idle（写侧 markRoundIdle 落 idle + v1
-  // 权威词同源）——v2 投影须延续（轮终等待续聊的 record 不得显示 running，否则
+  // 权威词同源）——v2 派生视图须延续（轮终等待续聊的 record 不得显示 running，否则
   // running + stopReason 矛盾组合且可能被用户误 cancel）。
   it('轮终形态：round-idle 在场、settled 缺席 → idle + roundIdle 统计透传', () => {
     const fold = {
@@ -618,8 +618,8 @@ describe('projectV2Subagent（事件源胜出 / 窗外兜底）', () => {
     expect(record.stopReason).toBeUndefined()
   })
 
-  it('在飞 + 旧 v2 终态条目在场：stopReason 不透传条目停因（事件源胜出——窗外兜底仅限无 fold）', () => {
-    // 场景：已终态（v2 终态条目已写）→ reopened → round-started——在飞期 roundIdle
+  it('在途 + 旧 v2 终态条目在场：stopReason 不透传条目停因（事件源胜出——窗外兜底仅限无 fold）', () => {
+    // 场景：已终态（v2 终态条目已写）→ reopened → round-started——在途期 roundIdle
     // 与条目停因都不得泄漏（v1 轮始清点后 stopReason=undefined）
     const fold = {
       identity: createdEvent('sa-1'),
@@ -669,14 +669,14 @@ describe('projectV2Subagent（事件源胜出 / 窗外兜底）', () => {
     }
     const record = projectV2Subagent(registered, undefined, fold)!
     expect(record.status).toBe('idle')
-    // [F2-1] v1 markReopenedImpl 写 stopReason='reopened'——投影同词映射，
+    // [F2-1] v1 markReopenedImpl 写 stopReason='reopened'——派生视图同词映射，
     // 不透传更旧轮的轮终停因
     expect(record.stopReason).toBe('reopened')
   })
 
   // [W1 / F1-46 轮终 result] record-round-idle 携带 result 摘要锚（D3 词表裁决①）：
   // 轮终粒度的 result 断供修复——承接 v1 U8b 轮终 result 显示信号（「轮终等待续聊」
-  // 的展示面），终局全文仍只在 v2 终态条目一次性写（D1）。
+  // 的展示侧），终局全文仍只在 v2 终态条目一次性写（D1）。
   it('轮终摘要透传：round-idle.resultSummary 在场（无终态条目）→ result 取轮终摘要', () => {
     const roundIdle = {
       type: 'record-round-idle' as const,
@@ -731,7 +731,7 @@ describe('projectV2Subagent（事件源胜出 / 窗外兜底）', () => {
     expect(record.result).toBe('new round summary')
   })
 
-  it('终局面优先：settled 在场（晚于 round-idle）→ 条目全文 / 终局摘要锚', () => {
+  it('终局条目优先：settled 在场（晚于 round-idle）→ 条目全文 / 终局摘要锚', () => {
     const fold = {
       identity: createdEvent('sa-1'),
       bound: undefined,
@@ -760,7 +760,7 @@ describe('projectV2Subagent（事件源胜出 / 窗外兜底）', () => {
   })
 
   // [W1 / F2-2 轮终 error] record-round-idle.error 失败原因原文供源（词表裁决）：
-  // 供源分流与 stopReason 同构——settled 终局优先 → 最新轮终失败收条 → 条目面兜底；
+  // 供源分流与 stopReason 同构——settled 终局优先 → 最新轮终失败收条 → 条目范围兜底；
   // round-started 后旧失败原文随轮始清点语义不透传（对齐 v1 markRoundStartedImpl
   // 清残留死因，F2-1 同族红线）。
   it('轮终失败：round-idle.error 在场（无终局）→ error 取失败原因原文', () => {
@@ -790,7 +790,7 @@ describe('projectV2Subagent（事件源胜出 / 窗外兜底）', () => {
     expect(projectV2Subagent(registered, undefined, fold)!.error).toBe('engine crashed')
   })
 
-  it('第二轮在飞：round-started 在 round-idle 后 → 上轮失败原文不透传（轮始清点语义）', () => {
+  it('第二轮在途：round-started 在 round-idle 后 → 上轮失败原文不透传（轮始清点语义）', () => {
     const roundIdle = {
       type: 'record-round-idle' as const,
       round: 2,
@@ -863,7 +863,7 @@ describe('projectV2Workflow（run 域定界 + 事件 fold 骨架）', () => {
     }
   }
 
-  /** created + settled 两事件 fold（scriptPath 透传用例的最小事件面）。 */
+  /** created + settled 两事件 fold（scriptPath 透传用例的最小事件范围）。 */
   function createdSettledFold(runId: string) {
     return foldRunEventCheckpoint(
       [
@@ -929,7 +929,7 @@ describe('projectV2Workflow（run 域定界 + 事件 fold 骨架）', () => {
     expect(record.outcome).toBe('done')
   })
 
-  it('agent-started 带 phase → fold 骨架与投影 call.phase 透传；无 phase 行 undefined（W1 D6 分组供源）', () => {
+  it('agent-started 带 phase → fold 骨架与派生视图 call.phase 透传；无 phase 行 undefined（W1 D6 分组供源）', () => {
     const fold = foldRunEventCheckpoint(
       [
         runEvent({ type: 'run-created', runId: 'wf-phase', workflowName: 'flow', argsSummary: '', ts: 1000 }),
@@ -958,7 +958,7 @@ describe('projectV2Workflow（run 域定界 + 事件 fold 骨架）', () => {
     expect(record.agentCalls[1]!.phase).toBeUndefined()
   })
 
-  it('中断形态条目（status=interrupted）在 fold 缺席兜底层 → interrupted（entry-only 降级投影不回落 running）', () => {
+  it('中断形态条目（status=interrupted）在 fold 缺席兜底层 → interrupted（entry-only 降级派生视图不回落 running）', () => {
     const registered = {
       v: 2 as const,
       kind: 'registered' as const,
@@ -979,7 +979,7 @@ describe('projectV2Workflow（run 域定界 + 事件 fold 骨架）', () => {
       callCount: 1,
       usedTokens: 0,
     }
-    // fold 缺席（runJournalDir 缺席的 entry-only 降级投影 / record 流被外部清理）
+    // fold 缺席（runJournalDir 缺席的 entry-only 降级派生视图 / record 流被外部清理）
     const record = projectV2Workflow(registered, interruptedEntry, undefined)!
     expect(record.status).toBe('interrupted')
     // 主链路不受影响：record 流在场时 fold 判据仍权威
@@ -1010,7 +1010,7 @@ describe('projectV2Workflow（run 域定界 + 事件 fold 骨架）', () => {
 })
 
 describe('mergeEventProjection（单点合并）', () => {
-  it('[§3.3 仲裁反转] 事件 fold 是实体唯一来源：注册条目缺席时按 fold 投影（无 v1 遮蔽通道）', () => {
+  it('[§3.3 仲裁反转] 事件 fold 是实体唯一来源：注册条目缺席时按 fold 推算（无 v1 遮蔽通道）', () => {
     const sources = initialEventProjectionSources()
     const fold = {
       identity: createdEvent('sa-1'),
@@ -1019,7 +1019,7 @@ describe('mergeEventProjection（单点合并）', () => {
     }
     sources.recordFolds.set('sa-1', fold)
     const merged = mergeEventProjection(sources, 's1')
-    // fold 的 record-created 身份（agent=worker）直接进投影——v1 冻结层删除后不存在
+    // fold 的 record-created 身份（agent=worker）直接进派生视图——v1 冻结层删除后不存在
     // 「同 id 快照遮蔽事件流」的方向性缺陷。
     expect(merged.subagents.get('sa-1')?.agent).toBe('worker')
   })
@@ -1036,7 +1036,7 @@ describe('mergeEventProjection（单点合并）', () => {
     expect(merged.subagents.has('sa-foreign')).toBe(false)
   })
 
-  it('步骤视图合并（W0 输入换源）：record 投影按 (parentRunId, stepIndex) 覆盖 run 骨架行状态', () => {
+  it('步骤视图合并（W0 输入换源）：record 派生视图按 (parentRunId, stepIndex) 覆盖 run 骨架行状态', () => {
     const sources = initialEventProjectionSources()
     const registered = {
       v: 2 as const, kind: 'registered' as const, runId: 'wf-1', workflowName: 'f',
@@ -1109,9 +1109,9 @@ describe('scanRecordFamilyEntriesFromSessionFile（冷启动流式 entry 源）'
   })
 })
 
-// ── 有状态投影（推送喂入 + 冷读集成）─────────────────────────
+// ── 有状态派生视图（推送喂入 + 冷读集成）─────────────────────────
 
-/** journal 推送报告构造（event-push-channel 契约形态；emittedAt 诊断面固定值）。 */
+/** journal 推送报告构造（event-push-channel 契约形态；emittedAt 诊断范围固定值）。 */
 function journalReport(
   domain: 'run' | 'record',
   fileKey: string,
@@ -1162,7 +1162,7 @@ describe('SessionEventProjection（冷启动 + 推送增量 + dispose）', () =>
     }
   })
 
-  it('run journal 推送增量：applyJournalReport 喂入追加帧 → [W2 D7] 单源 fold 推进 → run 投影到终局', async () => {
+  it('run journal 推送增量：applyJournalReport 喂入追加帧 → [W2 D7] 单源 fold 推进 → run 派生视图到终局', async () => {
     writeFileSync(
       join(runDir, 'wf-1.record.jsonl'),
       [
@@ -1199,7 +1199,7 @@ describe('SessionEventProjection（冷启动 + 推送增量 + dispose）', () =>
     }
   })
 
-  it('推送增量：applyJournalReport 喂入追加事件 → fold 推进 → onChange 驱动（投影变更即信号源）', async () => {
+  it('推送增量：applyJournalReport 喂入追加事件 → fold 推进 → onChange 驱动（派生视图变更即信号源）', async () => {
     writeFileSync(join(recordsDir, 'sa-1.events'), recordJournalLines('sa-1', [createdEvent('sa-1')]).join('\n') + '\n')
     const onChange = vi.fn()
     const projection = new SessionEventProjection({
@@ -1225,7 +1225,7 @@ describe('SessionEventProjection（冷启动 + 推送增量 + dispose）', () =>
     }
   })
 
-  it('坏行宽容 + v2 事件重放幂等（seq 守卫）', async () => {
+  it('坏行宽容 + v2 事件重放幂等（seq 检查）', async () => {
     writeFileSync(
       join(recordsDir, 'sa-1.events'),
       [...recordJournalLines('sa-1', [createdEvent('sa-1')]), '{broken-line', ''].join('\n') + '\n',
@@ -1238,7 +1238,7 @@ describe('SessionEventProjection（冷启动 + 推送增量 + dispose）', () =>
     })
     try {
       projection.attach()
-      expect(projection.subagents.get('sa-1')).toBeDefined() // 坏行跳过不炸投影
+      expect(projection.subagents.get('sa-1')).toBeDefined() // 坏行跳过不炸派生视图
       // 重放同 seq 事件（重复投递形态）：状态不回退
       appendFileSync(join(recordsDir, 'sa-1.events'), `${recordEventLine(createdEvent('sa-1'))}\n`)
       expect(projection.applyJournalReport(journalReport('record', 'sa-1', [createdEvent('sa-1')]))).toBe(true)
@@ -1250,7 +1250,7 @@ describe('SessionEventProjection（冷启动 + 推送增量 + dispose）', () =>
     }
   })
 
-  it('dispose 后停增量（推送喂入不复活投影）', async () => {
+  it('dispose 后停增量（推送喂入不复活派生视图）', async () => {
     writeFileSync(join(recordsDir, 'sa-1.events'), recordJournalLines('sa-1', [createdEvent('sa-1')]).join('\n') + '\n')
     const projection = new SessionEventProjection({
       sessionId: 's1',

@@ -34,10 +34,10 @@
  * 行为不变；fauxProvider() 换 createFauxCore + createProvider 等价组合（fauxProvider
  * 内部即此组合，见 pi-ai dist/providers/faux.js）。
  *
- * reload 防重播种（进程级 once，见 factory 内 setResponses 守卫）：pi reload 重跑 factory 时
+ * reload 防重播种（进程级 once，见 factory 内 setResponses 检查）：pi reload 重跑 factory 时
  * 跳过播种——响应队列跨 reload 不回卷，reload 后的后续 turn 命中 faux 耗尽 error 是预期形态。
  * 依赖「reload 后队列重置」的消费者不存在（2026-09-19 排查：全部消费者中仅 skill-reload 三
- * spec 触发 reload，其余 e2e/runtime 单测均为单次加载，once 守卫对其零行为差异）。
+ * spec 触发 reload，其余 e2e/runtime 单测均为单次加载，once 检查对其零行为差异）。
  */
 import { readFileSync } from 'node:fs'
 import {
@@ -53,7 +53,7 @@ import {
 import { registerApiProvider } from '@earendil-works/pi-ai/compat'
 
 /**
- * pi ExtensionAPI 的最小消费面。本文件被 pi 子进程 jiti 加载，且 runtime 不依赖
+ * pi ExtensionAPI 的最小消费子集。本文件被 pi 子进程 jiti 加载，且 runtime 不依赖
  * pi-coding-agent 包（无法 import 完整 ExtensionAPI 类型）——结构化最小类型 +
  * 运行时收窄（asPiApi），不使用 any。
  */
@@ -134,7 +134,7 @@ function toAssistantMessage(step: ScriptedStep): AssistantMessage {
   })
 }
 
-/** 防重播种的进程级单例槽（Symbol.for 同 key 即同一 symbol，跨 jiti 模块实例共享——理由见 factory 内守卫注释） */
+/** 防重播种的进程级单例槽（Symbol.for 同 key 即同一 symbol，跨 jiti 模块实例共享——理由见 factory 内检查注释） */
 const SEEDED_KEY = Symbol.for('@taiji/faux-llm-ext.seeded')
 
 export default function fauxLlmExtension(pi: unknown, _context: unknown): void {
@@ -190,8 +190,8 @@ export default function fauxLlmExtension(pi: unknown, _context: unknown): void {
   // clearExtensionCache（缓存清空 + generation++），loadExtensionsCached 未命中后经 jiti
   // （moduleCache:false）重新求值本模块文件，模块级 flag 随新模块实例重置而无效，必须用
   // Symbol.for 进程级单例槽跨 jiti 实例存活（pi-subagents workflow-domain-state 同族防线）。
-  // 无守卫时 reload 把响应队列重置回队首 → 完成通知 triggerTurn 后主 agent 重放 toolCall 步 →
-  // 幽灵 round-2 run（skill-reload e2e 托盘收口断言假红的根因）。跳过播种后新 core 队列为空，
+  // 无检查时 reload 把响应队列重置回队首 → 完成通知 triggerTurn 后主 agent 重放 toolCall 步 →
+  // 幽灵 round-2 run（skill-reload e2e 托盘收尾断言假红的根因）。跳过播种后新 core 队列为空，
   // reload 后的后续 turn 命中 faux 耗尽语义（pi-ai "No more faux responses queued" error），
   // 与真实 LLM「回文本、不重跑工具」在「不再派发工具」上等价。
   // 退出通道（TAIJI_FAUX_RESEED_ON_RELOAD=1）：恢复「每次 factory 都播种」的旧语义。

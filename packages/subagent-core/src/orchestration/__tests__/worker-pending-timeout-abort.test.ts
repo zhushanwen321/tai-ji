@@ -18,7 +18,7 @@ import { afterEach, describe, expect, it } from "vitest";
 
 import { buildWorkerScript } from "../worker-script-builder.ts";
 
-// ── 判别联合（对齐 worker-script-builder-runtime.test.ts 的守卫形态） ──
+// ── 判别联合（对齐 worker-script-builder-runtime.test.ts 的检查形态） ──
 
 interface ReturnMsg {
   type: "return";
@@ -268,7 +268,7 @@ describe("[OR-3] abort 广播接收（P-T3：交错不产 unhandledRejection）"
     `;
     const res = await runWorker(script, { timeoutMs: 600 });
 
-    // 超时以 resolve 收口（容错策略）——即使无人消费该 promise 也不产 rejection
+    // 超时以 resolve 收尾（容错策略）——即使无人消费该 promise 也不产 rejection
     expect(res.returnValue).toBe("returned before timeout");
     expect(res.workerError).toBeUndefined();
   });

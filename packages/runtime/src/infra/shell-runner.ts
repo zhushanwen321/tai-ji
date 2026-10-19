@@ -64,7 +64,7 @@ function signalExitCode(signal: string): number {
 /**
  * stdout/stderr 累积字节帽（G3 峰值治理，memory-leak-remediation §3.4）：对齐
  * git-executor 的 GIT_MAX_BUFFER_BYTES（10MB）——失控脚本（如死循环 echo）的输出累积
- * 不得无界钉死 runtime 堆。超限截断保留头尾：头部保留脚本输出起点（错误上下文），
+ * 不得无界固定为 runtime 堆。超限截断保留头尾：头部保留脚本输出起点（错误上下文），
  * 尾部保留最终结论（错误摘要通常在末尾），中段丢弃并留截断标记（丢弃字节数可观测）。
  *
  * 仅帽「累积结果串」（resolve 返回的 stdout/stderr）——onOutput 逐行流式回调是消费即

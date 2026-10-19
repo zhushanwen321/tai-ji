@@ -14,7 +14,7 @@
  *            → MessageStream 响应式渲染 + useVirtuaFollow.followIfStuck
  *
  * hydrate：历史注入的生产通路 = session 域 reconcile（use-session 三处点击切入统一入口，
- * store.hydrate 消费，含图片落盘编排）。messages 为 applyEntry reducer 重放投影（W20 D5）。
+ * store.hydrate 消费，含图片落盘编排）。messages 为 applyEntry reducer 重放派生视图（W20 D5）。
  *
  * abort：调 api.chat.abort（方法存在，中断流转 DEFERRED G-025）。
  */
@@ -107,7 +107,7 @@ const streamSubscriptions = new Map<string, () => void>()
  * shared protocol.ts）= 错误的
  * 用户可见呈现已由 runtime 侧编排——compact_busy → 对话流 system 提示（dispatcher
  * stream_warn）；compact_failed → interpreter 对话流（compaction 级失败）或 session
- * 状态面（ensureActive 失败）；message_blocked → 错误气泡（dispatcher 广播——BeforeSend
+ * 状态侧（ensureActive 失败）；message_blocked → 错误气泡（dispatcher 广播——BeforeSend
  * hook 否决，message.send / message.bash / delivery.submit 三 handler 统一落此码）。
  * 此时再弹全局错误 toast 属双提示，抑制。
  *
@@ -143,7 +143,7 @@ const BLOCKED_CLASSIFIED_CODE: MessageBlockedCode = MESSAGE_BLOCKED_CODE
  *
  * 用途（**仅作 toast 抑制提示，不参与投递判定**）：sendBash 据
  * 「本次调用窗口内终态帧是否到达」决定是否抑制失败 toast——终态已渲染时气泡终态是权威
- * 呈现面，再弹「失败」措辞 toast 冗余且误导（如超时后命令仍在跑）。投递判定（是否恢复
+ * 呈现侧，再弹「失败」措辞 toast 冗余且误导（如超时后命令仍在跑）。投递判定（是否恢复
  * `!command` 草稿）只看 RPC 回执状态（BashDispatchReceipt）：帧是可丢弃的推送信号，帧
  * 丢失不得导致「未执行」误判（误判会触发草稿恢复 → 用户重发 → 命令双执行）。
  * 计数在 streamSubscribe 回调内**同步**递增（先于 coalescer dispatch，不受合帧节拍影响）。
@@ -156,17 +156,17 @@ const bashTerminalFrameCounts = new Map<string, number>()
 
 /**
  * [pi1-disposition-chat-flow U2①② / D1③⑤] 本地提交的命令条目登记表（sid → clientUuid →
- * 投影在场标记）。登记点 = submitNewMessage 收到受理回执 `isCommand === true`（内核 D2 识别
+ * 派生视图在场标记）。登记点 = submitNewMessage 收到受理回执 `isCommand === true`（内核 D2 识别
  * 结果随回执返回，U1⑨）。登记成员 = 唯一「永无 message_end 标记回执」的条目族（命令条目
  * D2② 不注标出站），其气泡终局只可能来自两路：
  * - 终局通知 session.deliveryHandled（D1③，主路径）→ handleSessionDeliveryHandled 静默清除；
  * - 通知丢失（断线窗口）/ runtime 重启（tombstone 内存态丢失 D14①）→ 孤儿对账兜底（D1⑤，
- *   判据 =「曾经在场」+ 终态双分支「不在投影 ∨ delivered 终态在场」）。
+ *   判据 =「曾经在场」+ 终态双分支「不在派生视图 ∨ delivered 终态在场」）。
  *
  * 操作域刻意收窄为登记在册的命令条目：普通消息条目终局必有 transcript 痕迹，气泡去留由
  * 回执链管（direct 原位保留 / morph 段重建入流）——孤儿对账若操作普通条目，会在「快照帧
  * 先于 message_end 回执到达」窗口把已送达的气泡清掉且降级入流被 direct 车道豁免，构成
- * 文本丢失面。命令条目撤销后清除恒正确（cancel 成功 → 内核删条目 → 下一帧「不在投影」
+ * 文本丢失。命令条目撤销后清除恒正确（cancel 成功 → 内核删条目 → 下一帧「不在派生视图」
  * 分支清气泡，原文已回填草稿；cancel 竞态落败 → delivered 在场 → 命令已执行，清气泡同样
  * 正确），故无需单独的「本端取消中」豁免集合。
  *
@@ -174,7 +174,7 @@ const bashTerminalFrameCounts = new Map<string, number>()
  * 生命周期上界 = 命令条目终局即摘除，无长会话膨胀形态。
  */
 // taste:allow-no-data-owner W24-EX-C（进程内流程状态——命令条目终局登记，无 GUI 直接消费方；
-// 登记于登记表 §4 ⑧ W24-EX-C 条目，队列条目本体归主表 #6 投影/内核）
+// 登记于登记表 §4 ⑧ W24-EX-C 条目，队列条目本体归主表 #6 派生视图/内核）
 const handledDeliveryTargets = new Map<string, Map<string, { seenInProjection: boolean }>>()
 
 /** 登记一个本地提交的命令条目（submitNewMessage 受理回执 isCommand 时调）。 */
@@ -184,7 +184,7 @@ function registerHandledDeliveryTarget(sid: string, clientUuid: string): void {
     partition = new Map()
     handledDeliveryTargets.set(sid, partition)
   }
-  // 受理回执晚于首帧快照到达的时序差形态（广播路径快于 RPC reply）：投影已有该条目时直接
+  // 受理回执晚于首帧快照到达的时序差形态（广播路径快于 RPC reply）：派生视图已有该条目时直接
   // 补记「曾经在场」，防首帧证据丢失使孤儿判定保守悬挂一轮。
   partition.set(clientUuid, { seenInProjection: findDeliveryEntry(sid, clientUuid) !== undefined })
 }
@@ -211,7 +211,7 @@ const extensionCommandErrorLastShownAt = new Map<string, number>()
  * [RD-1#9 / R1-B12 双轨收敛] 未列 session.* 帧类型的一次性 dev warn（观测补齐，非行为变更）。
  *
  * streamSubscribe 回调的 session.* switch default 对「有意 no-op」的帧（exited/restored/
- * commands/stats_update 等，消费方在 renderer 侧 message bus 或另一订阅面）与「协议漂移」
+ * commands/stats_update 等，消费方在 renderer 侧 message bus 或另一订阅侧）与「协议漂移」
  * （runtime 新增而前端漏接）不可区分——去重后一次/类型，dev 下留痕、生产零开销。
  * 「dev 门 + Set 去重 + warn」三段式收敛到 registry.createDevOnceFrameWarn 工厂（与
  * registry 未注册 message.* 帧观测同一实现）；session.* 前缀过滤是本调用点的语义差异，
@@ -261,8 +261,8 @@ export function resetChatModuleStateForTest(): void {
   handledDeliveryTargets.clear()
   extensionCommandErrorLastShownAt.clear()
   // [u4d] 截断窗口状态随 chat store per-instance，无需模块级 reset
-  // [投递所有权内核 u3b] 清内核投影 + morph 段（测试间不 reset 会把上一用例的
-  // session.delivery 投影带进下一用例的回执/morph 断言）
+  // [投递所有权内核 u3b] 清内核派生视图 + morph 段（测试间不 reset 会把上一用例的
+  // session.delivery 派生视图带进下一用例的回执/morph 断言）
   resetDeliveryProjectionForTest()
   // wave:renderer-subscribe：重置 MessageBus 订阅状态（subscriptionStates 模块级 Map）。
   // 与 streamSubscriptions 同理——测试间不 reset 会泄漏到下一用例
@@ -288,18 +288,18 @@ export function resetChatModuleStateForTest(): void {
  */
 /**
  * streamSubscribe 回调各分支的独立处理体（按处理阶段提取，主回调只留分发编排）。
- * 各 helper 接收窄化后的具体 ServerMessage（case 守卫窄化随值传递），行为与原内联分支逐字一致。
+ * 各 helper 接收窄化后的具体 ServerMessage（case 检查窄化随值传递），行为与原内联分支逐字一致。
  */
 
 /**
  * [pi1-disposition-chat-flow U2② / D1⑤] 孤儿对账——handled 终局通知丢失后的静默清除兜底。
  *
- * 触发面：session.delivery 快照帧到达（含断线重连 stateSnapshot 回放，同一 handler 路径）。
+ * 触发范围：session.delivery 快照帧到达（含断线重连 stateSnapshot 回放，同一 handler 路径）。
  * 判据（三条同时成立才清除，操作域 = handledDeliveryTargets 登记在册的命令条目）：
- * ①「曾经在场」正向证据（seenInProjection——曾出现在此前任一帧投影；受理窗口内快照不含
- *   新条目属正常态，无此条件的「不在投影即清除」会在连发场景误清未受理气泡，设计 V8 反向）；
- * ② 终态判据双分支：已不在当前投影（runtime 重启 tombstone 内存态丢失 D14①），或在当前
- *   投影中呈 delivered 终态（tombstone 仍在 50 条 delivered 窗口内——通知丢失 + runtime
+ * ①「曾经在场」正向证据（seenInProjection——曾出现在此前任一帧派生视图；受理窗口内快照不含
+ *   新条目属正常态，无此条件的「不在派生视图即清除」会在连发场景误清未受理气泡，设计 V8 反向）；
+ * ② 终态判据双分支：已不在当前派生视图（runtime 重启 tombstone 内存态丢失 D14①），或在当前
+ *   派生视图中呈 delivered 终态（tombstone 仍在 50 条 delivered 窗口内——通知丢失 + runtime
  *   存活的重连形态 D14①b）；
  * ③ 操作域已在登记点收窄为命令条目（见 handledDeliveryTargets 注——普通条目由回执链管，
  *   不进本判据）。
@@ -324,16 +324,16 @@ function reconcileHandledOrphans(
       const state = entries.find((e) => e.clientUuid === clientUuid)?.state
       if (state !== 'delivered') continue
     }
-    // 双分支命中：不在投影（分支 A）∨ delivered 终态在场（分支 B）
+    // 双分支命中：不在派生视图（分支 A）∨ delivered 终态在场（分支 B）
     partition.delete(clientUuid)
     if (partition.size === 0) handledDeliveryTargets.delete(sid)
     finalizeHandledEntry(sid, clientUuid, chat)
   }
 }
 
-/** [D1⑤] 「曾经在场」证据标记（投影替换点记录）：本帧 entries 命中的登记成员置位，
+/** [D1⑤] 「曾经在场」证据标记（派生视图替换点记录）：本帧 entries 命中的登记成员置位，
  * 供后续帧孤儿判定。本帧不计入本帧判定（reconcileHandledOrphans 先于本函数执行）——
- * 「曾出现在此前任一帧投影」的严格语义，首见即 delivered 的帧保守不清（悬挂至下一帧，
+ * 「曾出现在此前任一帧派生视图」的严格语义，首见即 delivered 的帧保守不清（悬挂至下一帧，
  * 误清零风险优先，D1⑤ 保守方向）。 */
 function markHandledTargetsSeenInProjection(sid: string, entries: DeliveryFrameEntry[]): void {
   const partition = handledDeliveryTargets.get(sid)
@@ -351,7 +351,7 @@ function markHandledTargetsSeenInProjection(sid: string, entries: DeliveryFrameE
  * 在途计数），**无错误提示**（handled =
  * 命令已执行，非失败形态；执行结果经 pi 回合事件正常入流）。
  * 只对登记在册成员动作：外来命令条目（plugin send_to_session / 收养等无本地乐观面的提交）
- * 无气泡可移除、无挂账可回收，误动 clearPendingSend/decrementInflight 会误伤同 session
+ * 无气泡可移除、无记账可回收，误动 clearPendingSend/decrementInflight 会误伤同 session
  * 其他在途提交。
  * [ADR-0049] per-session 隔离：payload.sessionId 校验（对齐 handleSubagentDirective 防御层）。
  */
@@ -388,7 +388,7 @@ function finalizeHandledEntry(sid: string, clientUuid: string, chat: ChatStoreIn
  * 归 D14④ 独立立项）。同 key（extensionName + error 文本）去重 + 限频窗见
  * EXTENSION_COMMAND_ERROR_RATE_LIMIT_MS。
  * [ADR-0049] per-session 隔离：payload.sessionId 校验。payload 在 shared 为
- * Record<string, unknown> 占位（ServerMessageMapBase 未收录），字段经守卫收窄（禁 any）。
+ * Record<string, unknown> 占位（ServerMessageMapBase 未收录），字段经检查收窄（禁 any）。
  */
 function handleExtensionErrorFrame(
   sid: string,
@@ -422,14 +422,14 @@ function handleExtensionErrorFrame(
 
 /**
  * [投递所有权内核 u3b / D7] session.delivery 帧消费（state topic 全量快照，last-value）：
- * ① 投影整体替换（effects/user-delivery 模块级 ref，队列区/气泡 morph 的单一数据源，
+ * ① 派生视图整体替换（effects/user-delivery 模块级 ref，队列区/气泡 morph 的单一数据源，
  * u3c QueueBubble 单源化消费）；② 乐观气泡 morph 编排——非 direct 车道（steer/queued）的
  * 活跃条目（queued/in-flight/failed）命中有乐观气泡时：气泡移出对话流（truncateFrom）+
  * 原始 segments 捕获（送达回执时按原段按序入流，不降级纯文本）+ dispatching 占位回收。
  * direct 车道气泡保持待确认（送达回执经 message_end ① 标记匹配抵消占位，D7「既有
  * inflightCounts 抵消机制保留服务 direct」）；delivered 条目无 morph 面（其 transcript
  * 权威由 reducer 喂入，回执/快照两侧幂等）。
- * [pi1-disposition-chat-flow U2②] 投影替换后插入孤儿对账相邻分支 + 「曾经在场」证据标记
+ * [pi1-disposition-chat-flow U2②] 派生视图替换后插入孤儿对账相邻分支 + 「曾经在场」证据标记
  * （见 reconcileHandledOrphans / markHandledTargetsSeenInProjection）。
  *
  * 倒序 morph：多条连发气泡在流内连续尾排，truncateFrom(inclusive) 会截掉其后内容——
@@ -441,8 +441,8 @@ function handleSessionDelivery(
   chat: ChatStoreInstance,
   msg: ServerMessage<'session.delivery'>,
 ): void {
-  // 形态守卫（对齐 registry A5 形态门控）：entries 非数组 = 坏帧，整体丢弃——先投影替换
-  // 后 morph 的两段消费在坏帧上会产生「投影已换、morph 未做」的半更新，守卫前置于两段之前。
+  // 形态检查（对齐 registry A5 形态门控）：entries 非数组 = 坏帧，整体丢弃——先派生视图替换
+  // 后 morph 的两段消费在坏帧上会产生「派生视图已换、morph 未做」的半更新，检查前置于两段之前。
   const rawEntries: unknown = msg.payload.entries
   if (!Array.isArray(rawEntries)) return
   const entries = rawEntries as DeliveryFrameEntry[]
@@ -479,13 +479,13 @@ function handleSessionDelivery(
  * [U5 消息撤回 D6] 统一撤回编排（模块级编排体，handleSessionDelivery 同款形态）：
  * 在途 / 已送达双态路由 + reply 消费。
  *
- * 路由判定（内核投影 state 未 delivered = 在途，判定形态与 useQueueRows 队列气泡的
+ * 路由判定（内核派生视图 state 未 delivered = 在途，判定形态与 useQueueRows 队列气泡的
  * deliveryQueueEntries 同源——state !== 'delivered'）：
  * - 在途（未注入层）→ 既有 delivery.cancel 两段式收回（内核删除 + clear_queue 分拣），
  *   与队列气泡 × 撤销共用同一 runtime 管道；
  * - 已送达（S8 已消费层）→ session.revokeMessage（runtime 七步编排，树内回退）。
  *
- * 已送达 reply 消费：revoked:true → 重拉 history（reply 即刷新信号——session_tree 不经
+ * 已送达 reply 消费：revoked:true → 重新拉取 history（reply 即刷新信号——session_tree 不经
  * RPC 流，无事件可订阅，主动拉是主路径，D3）+ content 经 restoreRevokedDraft（D7 两层
  * 切条，shared SSOT）回填草稿；revoked:false → 按 D8 错误码 toast（映射 SSOT 在
  * REVOKE_ERROR_TOAST_KEYS）。
@@ -496,8 +496,8 @@ async function handleRevokeMessage(
   chat: ChatStoreInstance,
   deps: UseChatDeps,
 ): Promise<void> {
-  // D6 路由：内核投影中该条目仍活跃（未 delivered）→ 在途分支（[MF-1-4] 判定谓词与
-  // UserBubble 共享 findDeliveryEntry 单一实现——投影宿主同源，禁两处内联 find 漂移）
+  // D6 路由：内核派生视图中该条目仍活跃（未 delivered）→ 在途分支（[MF-1-4] 判定谓词与
+  // UserBubble 共享 findDeliveryEntry 单一实现——派生视图宿主同源，禁两处内联 find 漂移）
   const pendingEntry = findDeliveryEntry(sid, targetId)
   if (pendingEntry && pendingEntry.state !== 'delivered') {
     await handleCancelPendingDelivery(sid, targetId, deps)
@@ -515,12 +515,12 @@ async function handleRevokeMessage(
     deps.toast.error(deps.t(REVOKE_ERROR_TOAST_KEYS[reply.error]))
     return
   }
-  // 成功：重拉 history 替换对话流（树回退后 live ≡ reload，reconcileHistory 是汇合点）。
+  // 成功：重新拉取 history 替换对话流（树回退后 live ≡ reload，reconcileHistory 是汇合点）。
   try {
     const history = await deps.chatApi.getHistory(sid)
     chat.reconcileHistory(sid, history.messages, historyWindowFromReply(history))
   } catch (e) {
-    // best-effort 降级：撤回已生效（runtime ⑥校验过才 reply），重拉失败只 stale 不失真——
+    // best-effort 降级：撤回已生效（runtime ⑥校验过才 reply），重新拉取失败只 stale 不失真——
     // warn 留痕，对话流由下次切入/刷新的既有主动拉收敛；重抛会破坏 fire-and-forget 契约。
     console.warn(`[useChat] post-revoke history refresh failed for ${sid}:`, e)
   }
@@ -530,14 +530,14 @@ async function handleRevokeMessage(
   try {
     deps.restoreDraft?.(sid, { text: draft })
   } catch (e) {
-    // best-effort 降级：回填是撤回的增强不是前提（重拉已做，原文在旧分支文件可审计）；
+    // best-effort 降级：回填是撤回的增强不是前提（重新拉取已做，原文在旧分支文件可审计）；
     // 壳层 DOM 故障不重抛——fire-and-forget 契约 + warn 留痕。
     console.warn(`[useChat] post-revoke draft restore failed for ${sid}:`, e)
   }
 }
 
 /**
- * [U5 消息撤回 D6] 在途撤回腿：delivery.cancel + reply 消费（cancel reply 的 content
+ * [U5 消息撤回 D6] 在途撤回路径：delivery.cancel + reply 消费（cancel reply 的 content
  * 已由 runtime 剥标记——WS handler 链统一剥除，回填直用不经 restoreRevokedDraft）。
  * 竞态落败（cancelled=false = 点击瞬间已注入）→ 指引转已送达层撤回，不静默。
  */
@@ -576,7 +576,7 @@ async function handleCancelPendingDelivery(sid: string, clientUuid: string, deps
  * live 链路）。runtime event-adapter 在 extension 留痕 custom_message entry 落盘后
  * 广播（message_end 锚定）；同 entry 的 message.customStart 前置帧走 generic 通路
  * （display:false 不可见，U2c 契约），可见气泡由本分支插入——与 reload 侧
- * mapSessionEntries 覆写 display:true 后投影的 Message 逐字段同形态（store.
+ * mapSessionEntries 覆写 display:true 后映射的 Message 逐字段同形态（store.
  * appendSubagentDirective 注释），live ≡ reload（关键规则 9）。
  * [ADR-0049] per-session 隔离：校验 payload.sessionId === 订阅 sid，不匹配丢弃
  * （架构约定 7——消息带 sessionId，非本 session 忽略；per-sid 通道路由下恒等，
@@ -619,28 +619,28 @@ function handleSessionCompacted(sid: string, chat: ChatStoreInstance): void {
   chat.setCompactingReason(sid, undefined)
 }
 
-/** [u5b / D1+D3 → u3b/D7 简化] occupancy 投影消费（state topic：live 广播 + subscribeSession 的
+/** [u5b / D1+D3 → u3b/D7 简化] occupancy 派生视图消费（state topic：live 广播 + subscribeSession 的
  * stateSnapshot 回放同路径到达——WS 重连 resubscribeAll / 切回 session 时快照恢复，G4）。
- * 写入 chat store 投影分区（sessionPhase 单一数据源；send-route 的 UI 预测消费）。
+ * 写入 chat store 派生视图分区（sessionPhase 单一数据源；send-route 的 UI 预测消费）。
  * [HISTORICAL → u3b 退役] defer 队列 flush 触发（「全 idle 且队列非空」→ 投递）已随 defer
  * 队列整体退役：投递时机由 runtime 内核驱动（occupancy 边沿是内核 lane 再判定的触发源，
- * renderer 只渲染投影）。本 handler 只保留投影写入。 */
+ * renderer 只渲染派生视图）。本 handler 只保留派生视图写入。 */
 function handleSessionOccupancy(
   sid: string,
   chat: ChatStoreInstance,
   msg: ServerMessage<'session.occupancy'>,
 ): void {
   chat.setOccupancy(sid, { turn: msg.payload.turn, compacting: msg.payload.compacting, bash: msg.payload.bash })
-  // [u5a 收口扩展 / #12 对称腿] 权威帧兜底乐观态：三维全 idle 的权威投影到达 = runtime
+  // [u5a 收尾扩展 / #12 对称路径] 权威帧兜底乐观态：三维全 idle 的权威派生视图到达 = runtime
   // 确认无 turn 在途 —— 此时本地 pendingSend 乐观置位（send 前置，正常由 message_start
   // 清）若仍在，说明该次发送走了「无 turn 回流」通路（pi 扩展命令同步执行：手敲
   // `/schedule …` 等），message_start 永远不会来。权威帧在此清 optimistic pendingSend，
   // 否则 isActive（isGenerating ∨ pendingSend 并集）永久 true → steer placeholder + abort
-  // 按钮卡死（与 runtime occupancy 卡 dispatching 同源的镜像缺陷，runtime 侧收口由
-  // message-dispatcher willExecuteAsExtensionCommand 补齐，本处补齐前端乐观腿）。
+  // 按钮卡死（与 runtime occupancy 卡 dispatching 同源的镜像缺陷，runtime 侧收尾由
+  // message-dispatcher willExecuteAsExtensionCommand 补齐，本处补齐前端乐观路径）。
   // 与 idle 判据同形（三维全 idle）防误清 bash/compacting 窗口；正常 turn 路径的 idle 帧
   // 到达时 pendingSend 已被 message_start 清（幂等无副作用）。
-  // （main 侧 u5a 原含的 defer flush 腿已随 defer 队列退役不合并——投递时机由 runtime
+  // （main 侧 u5a 原含的 defer flush 路径已随 defer 队列退役不合并——投递时机由 runtime
   // 内核驱动，见文件头 [HISTORICAL → u3b 退役] 注。）
   if (
     msg.payload.turn === 'idle'
@@ -696,27 +696,27 @@ function handleSessionThinkingLevelSet(
 }
 
 /**
- * [crash-resilience T4 回流修复] 恢复窗口过渡态的「新回合开始」收口 gate。
+ * [crash-resilience T4 回流修复] 恢复窗口过渡态的「新回合开始」收尾 gate。
  *
  * 本 gate 的覆盖子态（msg-pipeline-debloat D3 后）：惰性恢复跨 D7 自动恢复 timer fire
  * 完成——attemptRespawn fire 时复查 isRestoring 让位裸 return（early return 不置
  * attemptInFlight），timer 已被 fire 回调删除、失败计数 0 → facade 尾部三信号门控皆
- * miss，restored 帧不发（D7-41 登记的判据残余洞）→ 本 gate 是该子态唯一收口。
+ * miss，restored 帧不发（D7-41 登记的判据残余洞）→ 本 gate 是该子态唯一收尾。
  *
  * 有帧子态（三信号任一命中）无需本 gate：restored 帧恒先于 message_start（facade 尾部
- * 同步发布，早于新 pi 处理用户消息），收口已由 useMessageEffects.handleSessionRestored
- * 完成；帧已收口后 message_start 再到达时，本 gate 的 isRespawnPending 守卫使二次收口
- * no-op（handleSessionRestored 自身无该守卫，不插双条靠的是「帧恒先于 message_start」
- * 时序 + 本守卫）。
+ * 同步发布，早于新 pi 处理用户消息），收尾已由 useMessageEffects.handleSessionRestored
+ * 完成；帧已收尾后 message_start 再到达时，本 gate 的 isRespawnPending 检查使二次收尾
+ * no-op（handleSessionRestored 自身无该检查，不插双条靠的是「帧恒先于 message_start」
+ * 时序 + 本检查）。
  *
  * 缺陷史（Gate B A7 真机，防御对象）：恢复窗口（respawnPending）内用户发消息 → 惰性
  * 恢复（ensureRestored join）先于 D7 timer 完成 → timer fire 让位 → 无 restored 帧 →
- * 前端过渡态只等 restored/restoreFailed/30s 超时收口 → 超时后回落 dead 终态页，而
+ * 前端过渡态只等 restored/restoreFailed/30s 超时收尾 → 超时后回落 dead 终态页，而
  * session 实际已恢复、消息已获回复——用户被迫手动「重新打开」。
  *
- * 收口信号 = 恢复窗口内该 session 的 message.message_start 到达：新 pi 已在处理用户
+ * 收尾信号 = 恢复窗口内该 session 的 message.message_start 到达：新 pi 已在处理用户
  * 消息，「恢复完成」事实成立（恢复窗口订阅自 exited 时建立，恢复后的帧必经本 handler）。
- * 执行与 useMessageEffects.handleSessionRestored 同构的收口：清过渡态 + T4 恢复提示条
+ * 执行与 useMessageEffects.handleSessionRestored 同构的收尾：清过渡态 + T4 恢复提示条
  * （复用 respawnRestored 文案）+ dead 复位。30s 超时 timer 到期时分区已清 → no-op
  * 自清，无需跨模块取消。
  */
@@ -732,7 +732,7 @@ function consumeRespawnWindowOnTurnStart(
   sessionStore.revive(sid)
 }
 
-/** session.* → 跨 store 协调（sessionStore.applySnapshot / occupancy 投影），保留在 useChat
+/** session.* → 跨 store 协调（sessionStore.applySnapshot / occupancy 派生视图），保留在 useChat
  *（stores 间禁止互相 import）。case 体提取为上方同名 handle* helper；未列 session.* 类型
  * 的 no-op 观测（RD-1#9）走 warnUnhandledSessionFrame。（原 streamSubscribe 回调内联 switch
  * 逐字迁移。） */
@@ -789,7 +789,7 @@ function handleSessionFrame(
     default: {
       // [RD-1#9] 未列 session.* 类型的 no-op 观测（dev，一次/类型）：本分支对
       // session.exited / restored / restoreFailed / commands / stats_update 等帧是
-      // 「有意的 no-op」（消费方在 renderer 侧 message bus 或另一订阅面），但旧实现
+      // 「有意的 no-op」（消费方在 renderer 侧 message bus 或另一订阅侧），但旧实现
       // 零痕迹——协议漂移（runtime 新增 session.* 而前端漏接）在 dev 下不可见。
       // Set 去重防刷屏；非 session.* 前缀（app.info / config.* / plugin:* 等全局帧
       // 经同一 streamSubscribe 到达，本就由其他域消费）不 warn，避免误报噪音。
@@ -827,7 +827,7 @@ export function ensureStreamSubscription(
     }
     // message.* → 单一入口（F2 重构：消除 double-dispatch）。
     // applyMessageEvent 内部经 effect 注册表执行该 type 的全部副作用（chunk 状态更新
-    // + finalizeSession 收口），useChat 不再自己 switch message.*。message.* 处理完即 return，
+    // + finalizeSession 收尾），useChat 不再自己 switch message.*。message.* 处理完即 return，
     // 下方 session.* 分支仅处理跨 store 事件（compacting/renamed 等）。
     // message.* 帧直推 store（原 D-2/W12 coalescer 合帧层已删：P6 门真机 242 delta
     // enqueue=commit、批大小恒 1，合帧窗口结构性零命中——合帧不产生行为差异，纯空转）。
@@ -840,7 +840,7 @@ export function ensureStreamSubscription(
       if (msg.type === 'message.bashResult') {
         bashTerminalFrameCounts.set(sid, (bashTerminalFrameCounts.get(sid) ?? 0) + 1)
       }
-      // [crash-resilience T4 回流修复] 恢复窗口收口 gate（dispatch 前——同步于流式帧处理
+      // [crash-resilience T4 回流修复] 恢复窗口收尾 gate（dispatch 前——同步于流式帧处理
       // 之前插 T4 提示条，保证条目在 assistant 气泡之前；非 message_start 帧 no-op）
       if (msg.type === 'message.message_start') {
         consumeRespawnWindowOnTurnStart(sid, chat, sessionStore, deps)
@@ -863,7 +863,7 @@ export function ensureStreamSubscription(
 
 /**
  * [HISTORICAL → 投递所有权内核 u3b 退役] submitQueuedEntry（defer 队列 flush 的逐条提交
- * 入口，u4b/D5.1）已删除：defer 队列状态机整体退役（设计 §3.1 删除面），用户消息统一经
+ * 入口，u4b/D5.1）已删除：defer 队列状态机整体退役（设计 §3.1 删除范围），用户消息统一经
  * delivery.submit 提交（下方 submitNewMessage 编排），lane 判定与逐条投递由 runtime 内核
  * 承担（D1）。出站裸标记附加（簇 A2）随消息出站统一由内核出站侧负责，renderer 不再拼标记。
  * renderer 唯一消费方 useCompactQueue.doFlush 随 u3c 退役。git 可追溯。
@@ -914,7 +914,7 @@ export function createUseChat(deps: UseChatDeps) {
    *                            pi userEntryId 映射，extension input hook 剥标记后写 custom
    *                            entry）+ delivery.submit 条目 id（回执/morph/resync 判重锚）
    * @param precomputedPromptText 调用方已算过的 segmentsToPrompt(segments)（非空白——调用方
-   *                            !text.trim() 守卫保证）。必传：唯一调用点 submitNewMessage
+   *                            !text.trim() 检查保证）。必传：唯一调用点 submitNewMessage
    *                            恒传；原「缺省时内部兜底重算」的分支无运行时命中且会掩盖
    *                            调用方契约违反（S4 修复目的即消除重复计算），已删。
    * @returns 受理回执 DeliverySubmitReply（[pi1-disposition-chat-flow U2⑤] 调用方消费
@@ -997,10 +997,10 @@ export function createUseChat(deps: UseChatDeps) {
     ensureStreamSubscription(sid, chat, session, subDeps)
     // S4：复用调用方算过的 promptText，避免 submitSegments 内部再调一次 segmentsToPrompt。
     const reply = await submitSegments(sid, segments, clientUuid, promptText)
-    // 受理确认到达 → 气泡上屏 + 占位挂账（此后送达回执 message_end(user) ① 标记匹配抵消，
-    // D7 direct 车道抵消机制保留）。极端时序守卫：message_end 送达回执先于 submit reply
-    // 到达（reply 与事件帧异通道无顺序契约）时投影已 delivered——气泡照常上屏（事实成立），
-    // 跳过 inflight 挂账（回执已消费，挂账永无抵消配额——泄漏面）。判定谓词复用
+    // 受理确认到达 → 气泡上屏 + 占位记账（此后送达回执 message_end(user) ① 标记匹配抵消，
+    // D7 direct 车道抵消机制保留）。极端时序检查：message_end 送达回执先于 submit reply
+    // 到达（reply 与事件帧异通道无顺序契约）时派生视图已 delivered——气泡照常上屏（事实成立），
+    // 跳过 inflight 记账（回执已消费，记账永无抵消配额——泄漏）。判定谓词复用
     // findDeliveryEntry 单一实现（[MF-1-4] 禁内联 find 漂移）。
     chat.appendUser(sid, segments, clientUuid)
     if (findDeliveryEntry(sid, clientUuid)?.state !== 'delivered') {
@@ -1009,13 +1009,13 @@ export function createUseChat(deps: UseChatDeps) {
     // dispatching 空窗占位（填 isGenerating 空窗，让停止按钮/输入可用性立即翻转）：
     // message_start 到达自动清；非 direct 车道由 session.delivery 帧的 morph 编排回收；
     // 命令挂起（handled disposition 交互挂起等）由 session.deliveryHandled 终局清
-    //（U2①）——事件驱动收口，无墙钟兜底（ADR-0122）。
+    //（U2①）——事件驱动收尾，无墙钟兜底（ADR-0122）。
     chat.addPendingSend(sid)
     // [pi1-disposition-chat-flow U2⑤] 命令条目登记（受理回执 isCommand，内核 D2 识别结果）：
     // handled 通知/孤儿对账的操作域（命令条目 = 永无 message_end 回执的唯一条目族，见
     // handledDeliveryTargets 注）；收尾凭据 = session.deliveryHandled 终局通知（U2①）或
     // 命令失败 toast（U2③）。isCommand 缺省（旧 runtime）= 普通消息，链路零变化。
-    // （原 U2⑤ 30s 空窗计时器豁免随计时器整体退役——ADR-0122 时间平抑红线，收口全事件驱动。）
+    // （原 U2⑤ 30s 空窗计时器豁免随计时器整体退役——ADR-0122 时间平抑红线，收尾全事件驱动。）
     if (reply.isCommand === true) {
       registerHandledDeliveryTarget(sid, clientUuid)
     }
@@ -1026,7 +1026,7 @@ export function createUseChat(deps: UseChatDeps) {
    * 发送消息：统一 submit（乐观气泡 + delivery.submit）。
    *
    * [R2-A5 失败信号] 返回值（Promise<boolean>）：true = 提交成功或无事
-   * 发生（空输入/空白 prompt 早退——无投递动作、无丢失面，调用方无需恢复）；false =
+   * 发生（空输入/空白 prompt 早退——无投递动作、无丢失风险，调用方无需恢复）；false =
    * RPC 失败（内部已消化——transport 级 toast、hook 否决级经 runtime 错误气泡抑制
    * toast；乐观副作用已回滚）——调用方（dispatch send）据
    * `=== false`（严格比较——false = RPC 失败需恢复草稿）restoreSegments
@@ -1116,7 +1116,7 @@ export function createUseChat(deps: UseChatDeps) {
     // 其余段序列化：file → path(:L 范围)、session → #sessionId、image → 裸路径。
     const text = segmentsToPrompt(segments)
     // 空文本挡：纯 chip（或仅空白文本）时 text 为空白串，extension 无从处理——
-    // 可读错误 + 不发 RPC（防御：上游 canSend 守卫通常已拦，此处兜底保证不静默）。
+    // 可读错误 + 不发 RPC（防御：上游 canSend 检查通常已拦，此处兜底保证不静默）。
     // trim 判断必须显式：segmentsToPrompt 已去 trim 保真（Gate B 观测①修复），
     // 纯空白文本若不在此拦会直发 RPC。
     if (!text.trim()) {
@@ -1154,7 +1154,7 @@ export function createUseChat(deps: UseChatDeps) {
    * 非执行中按普通发送处理（避免 Alt+⏎ 死键）。
    *
    * [R2-A5 失败信号] 返回值（Promise<boolean>）：true = 提交成功或无事
-   * 发生（空输入/空白 prompt 早退无丢失面）；false = RPC 失败（内部已消化 + 回滚乐观
+   * 发生（空输入/空白 prompt 早退无丢失风险）；false = RPC 失败（内部已消化 + 回滚乐观
    * 副作用，不 throw——transport 级 toast、hook 否决级经 runtime 错误气泡抑制 toast）
    * ——调用方（composer submit.onFollowUp）据 `=== false`
    * restoreSegments 恢复草稿，否则 clearInput 已清空的输入静默丢失。
@@ -1191,7 +1191,7 @@ export function createUseChat(deps: UseChatDeps) {
   /**
    * 中断当前回合（G-025 流转 DEFERRED：方法存在，实际中断留联调）。
    * [W3/W4] abort 乐观清 dispatching——abort 语义就是「结束当前活跃态」，即便 pi 没真正停也无害。
-   * 正常成功路径由 MessageDispatcher.abort 广播的 message.complete 驱动 finalizeSession 收口；
+   * 正常成功路径由 MessageDispatcher.abort 广播的 message.complete 驱动 finalizeSession 收尾；
    * 失败路径（pi 死/getClientOrThrow 抛 handler_error → abort reject）若无此 catch，dispatching 永挂。
    *
    * 显式接收 sessionId：per-panel 隔离，不读全局 activeId。
@@ -1204,7 +1204,7 @@ export function createUseChat(deps: UseChatDeps) {
       await deps.chatApi.abort(sid)
     } catch (e) {
       // abort 失败不重抛——用户已表达「停止」意图，UI 不应因 abort RPC 失败而卡住。
-      // pendingSend 已清（乐观），实体收口靠 runtime 广播 message.complete{aborted} 兜底。
+      // pendingSend 已清（乐观），实体收尾靠 runtime 广播 message.complete{aborted} 兜底。
       const msg = toErrorMessage(e)
       deps.toast.error(deps.t('composable.stopFailed', { msg }))
     }
@@ -1259,7 +1259,7 @@ export function createUseChat(deps: UseChatDeps) {
         return false
       }
       // 'started' | 'settled'：已执行 → true（恢复 !command 会双执行）。失败原因可见提示；
-      // 终态帧已渲染时抑制（气泡终态是权威呈现面——超时三步指引或错误输出，再弹「失败」
+      // 终态帧已渲染时抑制（气泡终态是权威呈现侧——超时三步指引或错误输出，再弹「失败」
       // 措辞 toast 冗余且误导），①b 抑制极性不变。
       if (receipt.error && !terminalFrameRendered()) {
         deps.toast.error(deps.t('composable.bashFailed', { msg: receipt.error }))
@@ -1308,12 +1308,12 @@ export function createUseChat(deps: UseChatDeps) {
    *   - compact_busy（dispatcher busy 预检拒绝）：对话流 system 提示已由 runtime stream_warn
    *     编排 → 抑制 toast。
    *   - compact_failed（pi 层失败 / ensureActive 恢复失败）：interpreter 对话流（compaction
-   *     级，含 aborted 取消语义）或 session 状态面已呈现 → 抑制 toast。
+   *     级，含 aborted 取消语义）或 session 状态侧已呈现 → 抑制 toast。
    *   - 其余（未知分类码 / pending 机械码 timeout·overflow·unknown / 无码断连）：runtime
    *     侧呈现未发生，保守 toast 兜底（AGENTS.md 规则 #3 错误必须可见）。
    * 不 throw（consumer fire-and-forget）。compacting 态由 session.compacted 复位（interpreter 发，必达）。
    * [R2-A5 失败信号] 返回值（Promise<boolean>）：true = RPC 受理成功；false = RPC reject
-   * （分类码级 / transport 级均算——错误面已按上述路由消化）——调用方（dispatch send
+   * （分类码级 / transport 级均算——错误范围已按上述路由消化）——调用方（dispatch send
    * 的 /compact 分支）据 `=== false` restoreSegments 恢复草稿。
    *
    * 显式接收 sessionId：per-panel 隔离，不读全局 activeId。
@@ -1327,7 +1327,7 @@ export function createUseChat(deps: UseChatDeps) {
     } catch (e) {
       if (isTransportLevelFailure(e, COMPACT_CLASSIFIED_CODES)) {
         // transport 级失败：runtime 侧无分类码呈现，toast 兜底。分类码级失败由 runtime
-        // 编排的呈现面（对话流 / session 状态）承担，不在此 toast。
+        // 编排的呈现侧（对话流 / session 状态）承担，不在此 toast。
         const msg = toErrorMessage(e)
         deps.toast.error(deps.t('composable.compactFailed', { msg }))
         console.warn(`[useChat] compact RPC failed (transport-level, toast fallback)`, e)
@@ -1343,7 +1343,7 @@ export function createUseChat(deps: UseChatDeps) {
    * 截断该 user 消息（含）及其后所有 → appendUser 新 segments → 走 submitSegments 流式。
    *
    * 与 fork 的区别：fork 复制到新 session 保留原 session；editAndResend 在当前 session
-   * 原地替换（删旧 user + 其后 assistant，重新发送）。UI 层用 canEdit 守卫仅最后一条 user 可编辑，
+   * 原地替换（删旧 user + 其后 assistant，重新发送）。UI 层用 canEdit 检查仅最后一条 user 可编辑，
    * 避免删除中间 user 导致其后对话丢失。
    *
    * 签名变更（阶段 3a）：从 `(sessionId, userMessageId, text: string)` 改为
@@ -1353,7 +1353,7 @@ export function createUseChat(deps: UseChatDeps) {
    * 委托 submitSegments：与 send 同通路（segmentsToPrompt + delivery.submit），image 段
    * 经 segmentsToText 产出裸路径进 prompt 文本（不丢）。
    * [R2-A5 失败信号] 返回值（Promise<boolean>）：true = 提交成功或无事发生（空白 prompt/
-   * active session 早退无丢失面）；false = RPC 失败（内部已消化——transport 级 toast、
+   * active session 早退无丢失风险）；false = RPC 失败（内部已消化——transport 级 toast、
    * hook 否决级经 runtime 错误气泡抑制 toast）。
    *
    * 显式接收 sessionId：编辑可发生在非 active 的 standby panel，不能依赖全局 activeId。
@@ -1473,7 +1473,7 @@ export function createUseChat(deps: UseChatDeps) {
       streamSubscriptions.delete(sessionId)
     }
     // [u4d] 截断窗口状态由下方 chat.disposeSession 内统一清理（store 分区），无需单独清
-    // [投递所有权内核 u3b] 清内核投影 + morph 段（session 已销毁，帧/回执不再有意义）
+    // [投递所有权内核 u3b] 清内核派生视图 + morph 段（session 已销毁，帧/回执不再有意义）
     clearDeliveryProjection(sessionId)
     // [消息投递可靠性 A-bash] 帧观测计数随 session 销毁回收（防 Map 永久增长 + 跨 session 误判）
     bashTerminalFrameCounts.delete(sessionId)
@@ -1504,8 +1504,8 @@ export function createUseChat(deps: UseChatDeps) {
     sendBash,
     abortBash,
     // [u5a 退役] 前身 clearQueueState 转发（forceQuit 清 pi queue_update 快照）已删：
-    // queueStates 分区及其读写面随本单元退役，pi 槽位回收由 delivery.drain 承担（u3c）。
-    // 队列区数据源 = session.delivery 投影（disposeSession → clearDeliveryProjection 清理）。
+    // queueStates 分区及其读侧与写侧随本单元退役，pi 槽位回收由 delivery.drain 承担（u3c）。
+    // 队列区数据源 = session.delivery 派生视图（disposeSession → clearDeliveryProjection 清理）。
   }
 }
 
@@ -1517,7 +1517,7 @@ export function createUseChat(deps: UseChatDeps) {
  * ensureStreamSubscription 被短路，链路断裂：
  * - streamSubscriptions 条目不清 → events 层 handler 不重挂 + 残留旧 handler（若只删
  *   标记不 unsub，重挂后同 sid 双 handler 双 dispatch）；
- * - subscriptionStates 条目不清（clearSubscription）→ subscribeSession 幂等守卫
+ * - subscriptionStates 条目不清（clearSubscription）→ subscribeSession 幂等检查
  *   （subscribed=true）短路，不重发 subscribe RPC → 新 pi 的 message.* 定向推送无订阅者，
  *   UI 卡「进行中…」而回复实际已生成。
  *

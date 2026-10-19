@@ -1,5 +1,5 @@
 /**
- * model-picker-data —— 模型选择列表的数据面（ModelSelectPopover 与 ModelThinkingAggregate 共用）。
+ * model-picker-data —— 模型选择列表的数据范围（ModelSelectPopover 与 ModelThinkingAggregate 共用）。
  *
  * W3a 从 ModelSelectPopover 提取（深模块纪律：禁止两处复制）：裸 id 拆分 / provider 分组 +
  * enabled 过滤 / ModelPickerPanel 分组形状 / 选中反查 providerId 四件逻辑收敛于此。
@@ -88,7 +88,7 @@ export function resolveProviderIdFromGroups(
 }
 
 /**
- * 数据面 composable：settingsStore.models 常驻订阅读取（init 在 AppShell 根注册，
+ * 数据范围 composable：settingsStore.models 常驻订阅读取（init 在 AppShell 根注册，
  * 不随组件卸载断开——旧实现组件内 onMounted 订阅会错过 sendInitialState 一次性推送，
  * 2026-07-01 竞态修复的现形态）。
  *

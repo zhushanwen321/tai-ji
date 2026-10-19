@@ -13,7 +13,7 @@ import { describe, expect, it } from "vitest";
 
 import { buildGui, type Todo } from "../model";
 
-/** tab-bar props（根形状断言收口在此：非 tab-bar 根直接失败，段结构断言才有意义） */
+/** tab-bar props（根形状断言收尾在此：非 tab-bar 根直接失败，段结构断言才有意义） */
 function tabBarProps(gui: ReturnType<typeof buildGui>): GuiComponentProps["tab-bar"] {
 	if (gui.component.type !== "tab-bar") {
 		throw new Error(`内容根应为 tab-bar，实际 ${gui.component.type}`);

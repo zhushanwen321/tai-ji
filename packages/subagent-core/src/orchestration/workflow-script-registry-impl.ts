@@ -29,17 +29,17 @@ import {
   type WorkflowScanConfig,
 } from "./config-loader.ts";
 
-// ── barrel 导出面（sink 设计 U1：WorkflowScript 实体 + 按路径加载工厂）──
+// ── barrel 导出范围（sink 设计 U1：WorkflowScript 实体 + 按路径加载工厂）──
 
 // WorkflowScript 类（实体：sourceCode/validate/toExecutable 收敛）导出给 barrel
-// re-export——第三宿主仅凭导出面即可消费实体（G3），不再鸭子复刻整类（§2.2 A2）。
+// re-export——第三宿主仅凭导出范围即可消费实体（G3），不再鸭子复刻整类（§2.2 A2）。
 export { WorkflowScript };
 
 /**
  * 按绝对路径加载单个 workflow 脚本的自由函数工厂（U1）。
  *
  * 与 `new WorkflowScriptRegistryImpl().getPath(path)` 等价的无状态形态：barrel
- * 消费面（zsw vendor / 第三宿主）不暴露 registry 实例时的一次性加载入口。底层走
+ * 消费方（zsw vendor / 第三宿主）不暴露 registry 实例时的一次性加载入口。底层走
  * getWorkflowByPath 的 60s TTL 缓存与 m5 mtime 缓存层，重复调用不重复读盘。
  *
  * 返回 undefined：引用非法（相对路径 / 非 .js / 含 `..` 段——normalizeRef 拒绝）。
@@ -144,10 +144,10 @@ export class WorkflowScriptRegistryImpl implements WorkflowScriptRegistry {
       source: m.source,
       path: m.path,
       sourceCode,
-      // meta: m 整对象透传（m2 决策）：故意不做显式投影——投影会重引入
+      // meta: m 整对象透传（m2 决策）：故意不做显式映射——映射会重引入
       // {name,description,phases} 解构重映射反模式（m2 消灭的丢字段 bug）。
       // CachedWorkflowMeta 多带的 path/available/source 是良性泄漏（无消费者
-      // 序列化 script.meta）；若未来有消费者，改为组合式 { meta, path, ... } 而非投影。
+      // 序列化 script.meta）；若未来有消费者，改为组合式 { meta, path, ... } 而非做映射。
       meta: m,
       available,
     });

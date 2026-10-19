@@ -3,12 +3,15 @@
  *
  * 迁移口径：
  * - `classifyPromptRejection` 双字符串映射：**逐字保留**（消费方 = 内核适配器
- *   session-delivery-registry.promptWithBusyRetry；dispatcher 侧 re-export 已随过度设计
+ *   session-delivery-registry 的 promptAwaitingCompaction catch 面——classifyBusyRejection
+ *   分型消费〔时为 promptWithBusyRetry，随 u5a 退役〕；dispatcher 侧 re-export 已随过度设计
  *   审计候选 1 删除；pi1-disposition-chat-flow U3① 再下沉 infra/pi/pi-rejection.js——文案
  *   infra/pi 单点驻留，本文件改从定义方 import）。registry 侧行为
  *   断言见 src/__tests__/session-delivery-registry.test.ts「u2 错误分类迁移（D6）」。
- * - pi busy 类拒绝的处置迁移（compacting → 持有等 compaction_end；processing → occupancy
- *   反转 generating；非 busy → message.error）在本文件锁定。
+ * - pi busy 类拒绝的处置（compacting → 持有等 compaction_end；processing → 按真失败
+ *   首败即停 message.error〔v3 busy 分型重试随 u5a 退役，registry 不再反转 occupancy〕；
+ *   非 busy → message.error）在本文件锁定（断言对象 = 分类原语 + dispatcher 链处置，
+ *   registry 侧 catch 面由 occupancy-runtime.test.ts #8a/#8b 帧序锁定）。
  * - busy 维度「零 send.rejected + 排队/即时投递」退役断言的唯一归宿 =
  *   src/services/session/__tests__/message-dispatcher.test.ts（同构用例已收拢，本文件不再重复）。
 
@@ -32,7 +35,7 @@ import type { ClientMessage, ServerMessage } from '@taiji/shared'
 import type { WorkspaceService } from '../services/workspace/workspace-service.js'
 import type { SkillInjector, SkillInjectionResult } from '../services/session/skill-injector.js'
 
-/** pi 0.84.4 agent-session.js prompt() 双拒绝分支原文（PS-22 / PS-23 探针锁守卫）。 */
+/** pi 0.84.4 agent-session.js prompt() 双拒绝分支原文（PS-22 / PS-23 探针锁检查）。 */
 const PI_COMPACTING_MSG = 'Cannot submit a prompt while compaction is in progress. Wait for compaction to finish and retry.'
 const PI_PROCESSING_MSG = "Agent is already processing. Specify streamingBehavior ('steer' or 'followUp') to queue the message."
 
@@ -128,7 +131,7 @@ function findError(broadcasts: ServerMessage[]) {
   return broadcasts.find((m) => m.type === 'message.error')
 }
 
-/** session.occupancy 帧的 turn 序列（前端占用投影唯一输入——用户可见状态级证据）。 */
+/** session.occupancy 帧的 turn 序列（前端占用派生视图唯一输入——用户可见状态级证据）。 */
 function occupancyTurns(broadcasts: ServerMessage[]): string[] {
   return broadcasts
     .filter((m) => m.type === 'session.occupancy')
@@ -156,7 +159,7 @@ describe('classifyPromptRejection —— pi 拒绝原文映射（D6 识别函数
     expect(classifyPromptRejection(`${PI_COMPACTING_MSG} (session s1)`)).toBe('compacting')
   })
 
-  it('非 busy 的 pi 错误（auth / 无模型等）→ null（走普通错误面）', () => {
+  it('非 busy 的 pi 错误（auth / 无模型等）→ null（走普通错误范围）', () => {
     expect(classifyPromptRejection('No model configured')).toBeNull()
     expect(classifyPromptRejection('Authentication failed: 401')).toBeNull()
     expect(classifyPromptRejection('')).toBeNull()
@@ -178,17 +181,19 @@ describe('pi busy 类拒绝的处置迁移（D6：适配器 catch 面）', () =>
     expect(h.registry.entries('s1')?.active[0]?.state).toBe('queued') // 持有（非 failed）
   })
 
-  it('auto 压缩 / post-run 原文 → occupancy 反转 generating（防幽灵空闲），零 send.rejected', async () => {
+  it('auto 压缩 / post-run 原文（processing）→ 首败即停 message.error（v3 busy 分型重试退役）', async () => {
     const h = makeMocks({ promptError: new Error(PI_PROCESSING_MSG) })
     await h.dispatcher.sendMessage('s1', 'hello')
     await h.flush()
     expect(findRejected(h.broadcasts)).toBeUndefined()
-    expect(h.session.isGenerating).toBe(true)
-    expect(h.session.occupancy?.turn).toBe('generating')
-    // 用户可见断言：occupancy 帧是前端 sessionPhase / 占用短路的唯一输入，末帧必为 generating
-    const turns = occupancyTurns(h.broadcasts)
-    expect(turns.length).toBeGreaterThan(0)
-    expect(turns[turns.length - 1]).toBe('generating')
+    // v3：受理即出站下全部投递恒带 streamingBehavior，pi 忙时入队不拒——processing 拒绝
+    // 按真失败首败即停：occupancy 不伪造 busy（turn 收敛回 idle），错误进 message.error
+    // 广播链路（错因可见，用户裁决重发）
+    expect(h.session.isGenerating).toBe(false)
+    expect(h.session.occupancy?.turn).toBe('idle')
+    const err = findError(h.broadcasts)
+    expect(err).toBeDefined()
+    expect((err!.payload as { message: string }).message).toContain('Agent is already processing')
   })
 
   it('非 busy pi 错误（No model configured）→ message.error 广播（错因可见）+ 零 send.rejected', async () => {
@@ -276,7 +281,7 @@ describe('transport → dispatcher 端到端 clientUuid 透传（message.send ca
     expect(cap.sendArgs[0]).toEqual(['s1', 'hello', undefined, undefined])
   })
 
-  it('handler 侧 rejected ack 分支保留（协议兼容面；u5 随协议条目退役清理）', async () => {
+  it('handler 侧 rejected ack 分支保留（协议兼容范围；u5 随协议条目退役清理）', async () => {
     const { cap, handler } = makeSendHandler({ blocked: true, rejected: true })
 
     await handler.handleSessionMessage(sendMsg({ sessionId: 's1', content: 'hello' }), {} as never)

@@ -32,7 +32,7 @@
  *
  * 误报豁免走行内登记注释 taste:allow-outbound-without-session-id（与
  * taste:allow-instance-level-session-state 同机制——通用静默豁免注释已被仓内
- * 禁用注释守卫拦截，登记注释要求注明为什么该帧可以不带 sessionId）。
+ * 禁用注释检查拦截，登记注释要求注明为什么该帧可以不带 sessionId）。
  */
 const INLINE_ALLOW_RE = /taste:allow-outbound-without-session-id/;
 

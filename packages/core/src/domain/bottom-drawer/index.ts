@@ -1,7 +1,7 @@
 /**
  * bottom-drawer 域 barrel —— u-w1-core 实装（control/coordination/layout）落地。
  *
- * 消费面（u-w1-layout）装配义务：
+ * 消费方（u-w1-layout）装配义务：
  * - `bindBottomDrawerSessionId(computed(() => usePanelStore().focusedSessionId))`
  *   （bindDrawerSessionId 同款时机——renderer 装配模块顶层）；
  * - 开合：openBottomDrawer / closeBottomDrawer / toggleBottomDrawer + useBottomDrawerControl；

@@ -19,7 +19,7 @@
  *
  * [HISTORICAL] 不变量：
  * - 单 payload 对象规则：invoke payload 恒为单对象，禁止多 arg
- * - install/download 内 onProgress 转发为 'update:progress' 事件（win.isDestroyed 守卫）
+ * - install/download 内 onProgress 转发为 'update:progress' 事件（win.isDestroyed 检查）
  * - 错误转发为 'update:error' 事件（区分 UpdateError.stage / UpdateUnsupportedError.errorCode）
  * - orchestrator 是纯逻辑（不调 app.quit）；quit 由本 handler 在 triggerRestart=true 后调
  * - quit 用 setImmediate（ADR-0122：不猜「响应送达」时间窗——原 500ms 延迟已删；
@@ -33,6 +33,22 @@
 import { mkdirSync } from 'node:fs'
 import { app, ipcMain, shell } from 'electron'
 import type { LatestReleaseInfo, IProxyConfig, UpdateSettings, UpdateCheckResult, ProxyTestResult, UpdateInstallResult } from '@taiji/shared'
+import {
+  UPDATE_CHECK,
+  UPDATE_DOWNLOAD,
+  UPDATE_INSTALL,
+  UPDATE_GET_PRELOADED,
+  UPDATE_GET_PROXY_CONFIG,
+  UPDATE_SET_PROXY_CONFIG,
+  UPDATE_TEST_PROXY,
+  UPDATE_GET_PENDING,
+  UPDATE_GET_SETTINGS,
+  UPDATE_GET_LAUNCH_RESULT,
+  UPDATE_SET_SETTINGS,
+  UPDATE_OPEN_MANUAL_DIR,
+  UPDATE_PROGRESS,
+  UPDATE_ERROR,
+} from '@taiji/shared'
 import type { IpcHandlerDeps } from '../interfaces.js'
 import { UpdateError } from '../update/types.js'
 import type { UpdateErrorInfo } from '../update/types.js'
@@ -362,7 +378,7 @@ function reportUpdateDownloadError(deps: IpcHandlerDeps, err: unknown): never {
     })
   }
   if (win && !win.isDestroyed()) {
-    win.webContents.send('update:error', errorPayload)
+    win.webContents.send(UPDATE_ERROR, errorPayload)
   }
   throw { message: errorPayload.message, stage: errorPayload.stage, errorCode: errorPayload.errorCode, suggestion: errorPayload.suggestion }
 }
@@ -419,7 +435,7 @@ async function handleUpdateDownload(
     const { filePath } = await deps.updateOrchestrator.downloadUpdate(release, (percent) => {
       const win = deps.getMainWindow()
       if (win && !win.isDestroyed()) {
-        win.webContents.send('update:progress', { stage: 'downloading', percent })
+        win.webContents.send(UPDATE_PROGRESS, { stage: 'downloading', percent })
       }
     })
 
@@ -443,7 +459,7 @@ export function registerUpdateHandlers(deps: IpcHandlerDeps): void {
   // ── update:check（w2：检测最新版）──────────────────────────────
   // 返回 UpdateCheckResult（RM2.3 信号透传）：info=null 时经 rateLimited 区分
   // 「确认无新版」与「限额退避中」——renderer 据此显示非侵入提示而非假阴性。
-  ipcMain.handle('update:check', async (_event, payload?: { force?: boolean }): Promise<UpdateCheckResult> => {
+  ipcMain.handle(UPDATE_CHECK, async (_event, payload?: { force?: boolean }): Promise<UpdateCheckResult> => {
     if (!deps.releaseChecker) return { info: null, rateLimited: false }
     // [A-X4] force 节流：窗口内的重复 force 请求降级为非 force 语义（走 checker 缓存），
     // 不拒绝（用户体验无损）。只约束 force=true——force=false 本就命中缓存无害，透传行为
@@ -495,7 +511,7 @@ export function registerUpdateHandlers(deps: IpcHandlerDeps): void {
   // 复刻原一键路径的 inFlight-await（避免与后台预下载争抢 downloading 锁）+
   // 快路径（已有有效预下载产物 → 跳过重复下载）+ 错误转 update:error 事件。
   // 主体在 handleUpdateDownload（行内箭头提取为具名函数，复杂度门禁）。
-  ipcMain.handle('update:download', async (_event, payload: { version: string }) =>
+  ipcMain.handle(UPDATE_DOWNLOAD, async (_event, payload: { version: string }) =>
     handleUpdateDownload(deps, payload),
   )
 
@@ -503,7 +519,7 @@ export function registerUpdateHandlers(deps: IpcHandlerDeps): void {
   // install 权威源是 preloaded-update.json（不是前端传入）：从 readPreloadedUpdateRaw 读取
   // release + filePath，堵「装错版本」漏洞（前端可能传旧/错 release）。
   // install 失败清 preloaded（防死循环：重试不再命中同一坏产物，强制完整重下 + 重新校验）。
-  ipcMain.handle('update:install', async () => {
+  ipcMain.handle(UPDATE_INSTALL, async () => {
     if (!deps.updateOrchestrator) {
       throw new Error('updateOrchestrator not configured')
     }
@@ -516,7 +532,7 @@ export function registerUpdateHandlers(deps: IpcHandlerDeps): void {
       const { release, filePath } = preloaded
 
       // [SECURITY · m11] 防御纵深：install 权威源虽是 preloaded（不信任前端传入），
-      // 但 preloaded 文件本身是磁盘写入面，可能被篡改——污染的 version 会拼进下载
+      // 但 preloaded 文件本身是磁盘写入侧，可能被篡改——污染的 version 会拼进下载
       // 路径与 bash 脚本单引号上下文，未校验可触发任意代码执行。与 download 路径
       // 同源白名单校验，堵「绕过 download 直改 preloaded 文件」的旁路。
       validateRelease(release)
@@ -525,7 +541,7 @@ export function registerUpdateHandlers(deps: IpcHandlerDeps): void {
       const onProgress: UpdateProgressCallback = (stage, percent) => {
         const win = deps.getMainWindow()
         if (win && !win.isDestroyed()) {
-          win.webContents.send('update:progress', { stage, percent })
+          win.webContents.send(UPDATE_PROGRESS, { stage, percent })
         }
       }
       const result = await deps.updateOrchestrator.installUpdate(release, filePath, onProgress)
@@ -573,7 +589,7 @@ export function registerUpdateHandlers(deps: IpcHandlerDeps): void {
         })
       }
       if (win && !win.isDestroyed()) {
-        win.webContents.send('update:error', errorPayload)
+        win.webContents.send(UPDATE_ERROR, errorPayload)
       }
       throw { message: errorPayload.message, stage: errorPayload.stage, errorCode: errorPayload.errorCode, suggestion: errorPayload.suggestion }
     }
@@ -581,7 +597,7 @@ export function registerUpdateHandlers(deps: IpcHandlerDeps): void {
 
   // ── update:getPreloaded（读取预下载产物）──────────────────────
   // 供前端判断是否已下载完成（决定显示「下载中」还是「安装」按钮）。
-  ipcMain.handle('update:getPreloaded', async () => {
+  ipcMain.handle(UPDATE_GET_PRELOADED, async () => {
     const preloaded = await readPreloadedUpdateRaw(app.getVersion())
     if (preloaded) {
       return preloaded
@@ -602,12 +618,12 @@ export function registerUpdateHandlers(deps: IpcHandlerDeps): void {
   })
 
   // ── update:getProxyConfig（读取代理配置）──────────────────────
-  ipcMain.handle('update:getProxyConfig', async () => {
+  ipcMain.handle(UPDATE_GET_PROXY_CONFIG, async () => {
     return readProxyConfig()
   })
 
   // ── update:setProxyConfig（保存代理配置）──────────────────────
-  ipcMain.handle('update:setProxyConfig', async (_event, config: IProxyConfig) => {
+  ipcMain.handle(UPDATE_SET_PROXY_CONFIG, async (_event, config: IProxyConfig) => {
     // 基本校验
     if (!['system', 'manual', 'disabled'].includes(config.mode)) {
       throw new Error('Invalid proxy mode')
@@ -629,31 +645,31 @@ export function registerUpdateHandlers(deps: IpcHandlerDeps): void {
   })
 
   // ── update:testProxy（测试代理连接）────────────────────────────
-  ipcMain.handle('update:testProxy', async (_event, config: IProxyConfig) => {
+  ipcMain.handle(UPDATE_TEST_PROXY, async (_event, config: IProxyConfig) => {
     return testProxyConnection(config)
   })
 
   // ── update:getPending（读取升级提醒持久化标志）──────────────────
   // 功能 1：启动时 renderer 调此 handler 恢复「可升级」提醒（离线也能常驻）。
   // readPendingUpdate 内部做版本比较：currentVersion >= pending.version → 清除 + 返回 null。
-  ipcMain.handle('update:getPending', async () => {
+  ipcMain.handle(UPDATE_GET_PENDING, async () => {
     return readPendingUpdate(app.getVersion())
   })
 
   // ── update:getSettings（读取升级设置）──────────────────────────
-  ipcMain.handle('update:getSettings', async () => {
+  ipcMain.handle(UPDATE_GET_SETTINGS, async () => {
     return getUpdateSettings()
   })
 
   // ── update:getLaunchResult（读取启动结果，consumed 一次性）──────
   // renderer 启动时调用一次，读取 cleanupCompletedUpdate 的返回值（done/failed/rolled-back），
   // 用于显示升级成功/失败/回滚 toast。main.ts 侧缓存 + consumed 标志保证一次性语义。
-  ipcMain.handle('update:getLaunchResult', async () => {
+  ipcMain.handle(UPDATE_GET_LAUNCH_RESULT, async () => {
     return deps.getLaunchResult?.() ?? null
   })
 
   // ── update:setSettings（保存升级设置，局部更新：只传要修改的字段）──
-  ipcMain.handle('update:setSettings', async (_event, settings: Partial<UpdateSettings>) => {
+  ipcMain.handle(UPDATE_SET_SETTINGS, async (_event, settings: Partial<UpdateSettings>) => {
     // 逐字段类型校验：传了的字段必须是 boolean（缺失 = 不更新该字段）
     if (settings.preDownload !== undefined && typeof settings.preDownload !== 'boolean') {
       throw new Error('Invalid settings: preDownload must be boolean')
@@ -664,7 +680,7 @@ export function registerUpdateHandlers(deps: IpcHandlerDeps): void {
     // updateSource 归一 + 枚举校验（多源 D3）：传了（非 undefined）先归一——三值原样、
     // 旧落盘值经 normalizeUpdateSourcePref 映射新标识符（v0.10.0 旧落盘值兼容），非法值抛错
     // ——handler 边界 fail-fast（对齐上方 boolean 校验先例），存储读取侧另有
-    // normalizeUpdateSourcePref 逐字段兜底（非法值回退默认 'auto'），两处共用同一守卫
+    // normalizeUpdateSourcePref 逐字段兜底（非法值回退默认 'auto'），两处共用同一检查
     if (settings.updateSource !== undefined) {
       const normalizedSource = normalizeUpdateSourcePref(settings.updateSource)
       if (normalizedSource === undefined) {
@@ -680,7 +696,7 @@ export function registerUpdateHandlers(deps: IpcHandlerDeps): void {
   // 首次点击先幂等建目录（recursive：已存在不报错），再 shell.openPath 在系统文件
   // 管理器打开——用户不必先手动建目录。openPath 失败时返回非空错误字符串（成功为 ''），
   // 抛 Error 携带该字符串对齐本文件既有 handler 错误风格（错误信息可操作）。
-  ipcMain.handle('update:openManualDir', async () => {
+  ipcMain.handle(UPDATE_OPEN_MANUAL_DIR, async () => {
     mkdirSync(getManualAssetDir(), { recursive: true })
     const openError = await shell.openPath(getManualAssetDir())
     if (openError) {

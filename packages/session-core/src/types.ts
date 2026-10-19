@@ -16,17 +16,17 @@
  */
 
 /**
- * pi message entry 的 role 域（窄联合：解析时值守卫收窄，非法 role 计坏行）。
+ * pi message entry 的 role 域（窄联合：解析时值检查收窄，非法 role 计坏行）。
  *
  * 四值闭集与 pi 1.0 AgentMessage 的 role 全集对齐（pi-ai dist/types.d.ts SystemMessage/
  * UserMessage/AssistantMessage/ToolResultMessage）。1.0 起 system 消息落盘
- * （工具集变更高频追加），三值时代 role=system 的行在守卫处丢弃 message 字段
+ * （工具集变更高频追加），三值时代 role=system 的行在检查处丢弃 message 字段
  * （内容静默丢失）；四值放行后 expand/详情可读。
  */
 export type SessionMessageRole = 'user' | 'assistant' | 'toolResult' | 'system'
 
 /**
- * role 词表运行时值清单（isMessageRole 守卫取数源）+ 编译期穷尽断言（两层）：
+ * role 词表运行时值清单（isMessageRole 检查取数源）+ 编译期穷尽断言（两层）：
  * - satisfies 层：清单出现词表外的值即编译红；
  * - Exclude 层：SessionMessageRole 扩展新成员而清单未同步时，Exclude 产出非 never
  *   联合，`_ROLE_EXHAUSTIVE` 的条件类型落 `[_RoleExhaustive]` 不可赋 `true`——编译红，

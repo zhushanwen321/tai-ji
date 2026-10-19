@@ -22,7 +22,7 @@
  * 以运行为准。
  */
 
-/** 最小结构类型（vitest TestModule / TestCollection / TestCase 的消费面切片）。 */
+/** 最小结构类型（vitest TestModule / TestCollection / TestCase 的消费方用到的切片）。 */
 interface MinimalTestCase {
   readonly fullName: string
   ok(): boolean

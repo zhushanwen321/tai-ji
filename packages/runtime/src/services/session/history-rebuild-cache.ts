@@ -97,9 +97,9 @@ function estimateMessagesBytes(messages: Message[]): number {
  * 下次重进走全量重建，等价于「缓存从未存在」，行为退化为现状。
  *
  * 字节帽（B8，memory-leak-remediation §3.3-B8 候选 A）：条目写入前量全量 Message[]
- * 序列化字节，超 32MB 不入缓存。缓存基线**始终存完整活跃路径投影**（message-revoke
+ * 序列化字节，超 32MB 不入缓存。缓存基线**始终存完整活跃路径派生视图**（message-revoke
  * U6a 起全量重建经 leafId 裁剪后落缓存——基线是「未切预算窗的完整活跃路径」，非全文件，
- * 被撤分支不进基线；增量合并正确性依赖——被否候选 B「缓存也切预算窗」的否决理由：
+ * 被撤分支不进基线；增量合并正确性依赖——不采用候选 B「缓存也切预算窗」的否决理由：
  * 增量基线错位 = 会话内容错乱），故字节维度只能整条目取舍，不做窗口化。
  */
 export class HistoryRebuildCache {
@@ -264,12 +264,12 @@ function selectTurnWindowStart(
  * - **单 turn 内 entry 不切分**（entry 原子性——切 entry 会破坏 reducer 幂等与
  *   parentId 链）：窗口内消息按整 turn 进出；
  * - **最近一个 turn 自身超预算仍完整放行**（保证对话可见性连续），字节超出经
- *   warn 日志如实暴露（响应本身无字节字段；极端 turn 由 D3 帧守卫与 U7 截断兜底）。
+ *   warn 日志如实暴露（响应本身无字节字段；极端 turn 由 D3 帧检查与 U7 截断兜底）。
  *
  * truncated 判定 = 窗口起点之前仍有消息（有更早历史未返回）。预算内（全部 turn
  * 入窗且字节未超）→ truncated=false，行为与预算化前一致（A6 回归基线）。
  *
- * 缓存关系：缓存基线始终存**完整活跃路径投影**（全量重建经 leafId 裁剪后的未切窗结果，
+   * 缓存关系：缓存基线始终存**完整活跃路径派生视图**（全量重建经 leafId 裁剪后的未切窗结果，
  * message-revoke U6a；增量合并的正确性依赖），本函数只作用于返回值——三分支（空增量/
  * 增量合并/全量重建）统一在返回前调用。
  *
@@ -349,7 +349,7 @@ export interface SessionHistoryReaderDeps {
   sessionStore: ISessionStore
   /**
    * [btw-question 重载链修复] btw vid → 线会话文件绝对路径（组合根接 BtwService 注册表读
-   * ——rebuildFromDisk 启动重建的内存投影，late-bound 闭包）。缺省/返回 undefined =
+   * ——rebuildFromDisk 启动重建的内存派生视图，late-bound 闭包）。缺省/返回 undefined =
    * 注册表无此线（离线尾读按异常态 warn 后返回空页，见 tailReadBtwOffline）。
    * 缺省注入（未接线构造）= btw vid 尾读恒空 + warn，主会话路径零影响。
    */
@@ -405,8 +405,8 @@ export class SessionHistoryReader {
    * 并发（W20 review Fix-5）：per-session inflight 复用，同 session 并发调用共享同一 promise。
    *
    * 错误处理（D6-4）：
-   * - 增量报 "Entry not found"（pi 实测文案，E 大写 not 小写）→ 丢缓存 → 全量重拉。
-   *   触发面：缓存跨 pi 进程存活且 session 文件被外部改写（D6-1 的 removeSessionEntry
+   * - 增量报 "Entry not found"（pi 实测文案，E 大写 not 小写）→ 丢缓存 → 全量重新拉取。
+   *   触发点：缓存跨 pi 进程存活且 session 文件被外部改写（D6-1 的 removeSessionEntry
    *   清理已结构性消除常态触发，此为防御兜底）。
    * - 其他错误（超时/pi 内部错误）→ 与现状同链降级（尾读），缓存不动（下次重试仍走 since）。
    *
@@ -415,7 +415,7 @@ export class SessionHistoryReader {
    * 视图不一致的文件尾部（最多 20 turn），两次 getHistory 结果闪变。
    *
    * 返回 HistoryWindowResult（u4b 起双预算窗口：truncated / loadedTurns /
-   * totalTurnsEstimate）——缓存基线始终存完整活跃路径投影（message-revoke U6a：全量
+   * totalTurnsEstimate）——缓存基线始终存完整活跃路径派生视图（message-revoke U6a：全量
    * 重建经 leafId 裁剪后的未切窗结果），**预算窗口只作用于返回值**
    *（D4：最近 20 turns 且总字节 ≤ 640KB，单 turn 超预算完整放行，entry 原子性），
    * 三分支在返回前统一经 applyHistoryBudgetWindow 切窗。
@@ -561,8 +561,8 @@ export class SessionHistoryReader {
     const segmentsMetadata = await readSegmentsMetadataFile(sessionId)
     const rebuilt = this.deps.sessionStore.rebuildHistoryFromEntries(scopedEntries, segmentsMetadata)
     // leafId 是 session 当前叶子 entry id，记录为下次增量拉取的 since 基准（D6-1）——
-    // 存 pi 真实 leafId（非裁剪投影尾），增量 delta 首条 parent 与之配对（W20 Fix-2 不变量）。
-    // 缓存基线 = 完整活跃路径投影（全量重建裁剪后落缓存——「全量」指未切预算窗的完整
+    // 存 pi 真实 leafId（非裁剪派生尾），增量 delta 首条 parent 与之配对（W20 Fix-2 不变量）。
+    // 缓存基线 = 完整活跃路径派生视图（全量重建裁剪后落缓存——「全量」指未切预算窗的完整
     // 活跃路径，非全文件；增量合并正确性依赖基线为完整活跃路径）；返回值按双预算切窗（D4）。
     this.historyCache.set(sessionId, { leafId, messages: rebuilt.messages, truncated: false })
     return rebuilt.messages
@@ -574,15 +574,15 @@ export class SessionHistoryReader {
    * 大 turn 的超限 reply）；query.cursor 存在时随行透传（离线游标翻页走 cursorId 定位，
    * 缺省路径 cursor 恒 undefined，读侧 query?.cursor 与缺键等价）。
    *
-   * [message-revoke U6a] 离线腿的活跃路径裁剪在本链末端统一接入（convertWindowEntries
+   * [message-revoke U6a] 离线路径的活跃路径裁剪在本链末端统一接入（convertWindowEntries
    * 以窗口末条 entry 为 leafId——见该函数注释），被撤分支条目不进返回的 messages；
    * 已知边界：turn 计数/字节预算在 collect 阶段按原始行计算（含旧分支行）→ 分支
    * session 的窗口可能欠填、totalTurnsEstimate 偏大（设计 D3 允许的降级面，内容正确性优先）。
    *
-   * [btw-question 重载链修复] btw vid 分支先于通用链：线目录在 G4 隔离面
-   *（`agent/btw/<encodeCwd>/<mainSid>/`，构造性不在 sessions/ 扫描面），通用链的
+   * [btw-question 重载链修复] btw vid 分支先于通用链：线目录在 G4 隔离边界侧
+   *（`agent/btw/<encodeCwd>/<mainSid>/`，构造性不在 sessions/ 扫描范围），通用链的
    * scanSessions 对 btw vid 必 miss → 静默空（重启后线视图空态的根因）。分支收窄在
-   * isBtwVirtualId 判定内，非 btw 路径逐字节原行为；cursor 翻页离线腿同走本方法，
+   * isBtwVirtualId 判定内，非 btw 路径逐字节原行为；cursor 翻页离线路径同走本方法，
    * btw 线「加载更早」一并生效。
    */
   private async tailReadOffline(sessionId: string, query?: HistoryWindowQuery): Promise<HistoryWindowResult> {
@@ -598,7 +598,7 @@ export class SessionHistoryReader {
   }
 
   /**
-   * btw 线离线尾读（btw 面解析腿）：线文件路径查注册表（resolveBtwThreadFile，组合根接
+   * btw 线离线尾读（btw 面解析路径）：线文件路径查注册表（resolveBtwThreadFile，组合根接
    * BtwService 注册表）→ 命中且文件在场 → 与通用链同一 tailReadHistory（同一预算窗口 /
    * cursor 定位 / entry 转换链）；文件缺失 / 注册表 miss → warn + 空页。
    *
@@ -644,7 +644,7 @@ export class SessionHistoryReader {
     cached: HistoryRebuildCacheEntry,
     windowOpts?: { limitTurns?: number; maxBytes?: number },
   ): Promise<HistoryWindowResult | undefined> {
-    // leafId null 收敛（r1-S18）：调用方已保证非 null，此处守卫消 as 断言——防御性
+    // leafId null 收敛（r1-S18）：调用方已保证非 null，此处检查消 as 断言——防御性
     // undefined 使外层 fall-through 全量重建，行为等价
     if (cached.leafId === null) return undefined
     try {
@@ -678,7 +678,7 @@ export class SessionHistoryReader {
       // Fix-2 不变量保证首条 parent = 缓存 leafId = 活跃 tip，delta 条目构造性全在活跃
       // 路径上；而活跃路径裁剪是「leafId 回溯到根」的全树语义，在 since 窗口切片上执行
       // 会把窗口边界误当树边界（切片首条之前无根可回溯），属语义误用。缓存基线已是
-      // 活跃路径投影（rebuildFullHistoryAndCache 裁剪后落缓存），merge 结果保持投影语义。
+      // 活跃路径派生视图（rebuildFullHistoryAndCache 裁剪后落缓存），merge 结果保持派生语义。
       const rebuilt = this.deps.sessionStore.rebuildHistoryFromEntries(incEntries, segmentsMetadata)
       const merged = mergeIncrementalMessages(cached.messages, rebuilt.messages)
       // W20 review Fix-1：增量窗口以 toolResult 开头（缓存 leafId 切在 assistant(toolCalls)
@@ -695,7 +695,7 @@ export class SessionHistoryReader {
       return applyHistoryBudgetWindow(merged, windowOpts)
     } catch (e) {
       if (isEntryNotFoundError(e)) {
-        // D6-4 fallback：since 失效（缓存基线不在 pi 当前 entry 集合）→ 丢缓存 → 全量重拉
+        // D6-4 fallback：since 失效（缓存基线不在 pi 当前 entry 集合）→ 丢缓存 → 全量重新拉取
         console.warn(`[session-service] getHistory incremental Entry-not-found for ${sessionId}, dropping cache and full rebuild`)
         this.historyCache.delete(sessionId)
         return undefined
@@ -737,7 +737,7 @@ export class SessionHistoryReader {
 
   /**
    * 清空全部历史重建缓存（u7c：memory-relief 可回收物 ① 的 reader 出口——组合根
-   * watchdog onRelief 接线经 SessionService 透传至此）。返回清除条目数（观测面）。
+   * watchdog onRelief 接线经 SessionService 透传至此）。返回清除条目数（观测范围）。
    */
   clearHistoryCache(): number {
     return this.historyCache.clearAll()
@@ -748,7 +748,8 @@ export class SessionHistoryReader {
  * 读 segments.json sidecar（runtime 直接读文件，不经 IPC）。
  *
  * IPC 的 writeSegmentsMetadata / readSegmentsMetadata 是 renderer→main 通道，runtime 是独立 Node 进程
- * （不持 electron app 句柄），不能走 IPC。runtime 直接读 <dataDir>/attachments/<sessionId>/segments.json。
+ * （不持 electron app 句柄），不能走 IPC。runtime 直接读 getAttachmentsDir(sessionId)
+ * （session 存储树域 1，<root>/<sessionId>/attachments/）下的 segments.json。
  *
  * 文件缺失/损坏（JSON parse 失败 / entries 非数组）→ 返回 null（rebuildHistoryFromEntries 据此
  * 全降级为占位文本，非硬错误）。异步读：与周围 getEntries RPC / readFile 一致，sidecar 是小文件

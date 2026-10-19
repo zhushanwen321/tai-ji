@@ -1,7 +1,7 @@
 // @vitest-environment node
 
 /**
- * isGenerating 派生 scan + finalizeAllStreaming 多 session 收口单测。
+ * isGenerating 派生 scan + finalizeAllStreaming 多 session 收尾单测。
  *
  * 覆盖：
  * - isGenerating：空 session / 有 streaming / 无 streaming / per-session 隔离
@@ -10,7 +10,7 @@
  *    缓存（store.ts:536），「scan 性能」叙事失效，墙钟断言对缓存派生无回归捕捉力且受
  *    CI 抖动影响；其 timer 用例由 core timers.test.ts 与 chat-streaming-timeout.test.ts 承担）
  * - isActive：isGenerating ∨ pendingSend
- * - finalizeAllStreaming：多 session 同时 streaming → 全部收口（F1 修正）
+ * - finalizeAllStreaming：多 session 同时 streaming → 全部收尾（F1 修正）
  * - finalizeAllStreaming：非 streaming session 不受影响
  *
  * 运行：npx vitest run src/__tests__/stores/chat-isgenerating-scan.test.ts
@@ -183,10 +183,10 @@ describe('isActive（isGenerating ∨ pendingSend）', () => {
   })
 })
 
-describe('finalizeAllStreaming（F1 修正：多 session 收口）', () => {
+describe('finalizeAllStreaming（F1 修正：多 session 收尾）', () => {
   beforeEach(() => setActivePinia(createPinia()))
 
-  it('2 个 session 同时 streaming → 全部收口', () => {
+  it('2 个 session 同时 streaming → 全部收尾', () => {
     const store = useChatStore()
     const sidA = 'sA'
     const sidB = 'sB'
@@ -201,7 +201,7 @@ describe('finalizeAllStreaming（F1 修正：多 session 收口）', () => {
     })
     expect(store.isGenerating(sidA)).toBe(true)
     expect(store.isGenerating(sidB)).toBe(true)
-    // runtime 重启 → 全部收口
+    // runtime 重启 → 全部收尾
     store.finalizeAllStreaming('restart')
     expect(store.isGenerating(sidA)).toBe(false)
     expect(store.isGenerating(sidB)).toBe(false)
@@ -222,13 +222,13 @@ describe('finalizeAllStreaming（F1 修正：多 session 收口）', () => {
       { id: 'done', role: 'assistant', content: 'ok', status: 'complete', timestamp: 1 },
     ])
     store.finalizeAllStreaming('disconnect')
-    // active 收口
+    // active 收尾
     expect(store.isGenerating(sidActive)).toBe(false)
     // idle 不受影响
     expect(store.getMessages(sidIdle)[0].status).toBe('complete')
   })
 
-  it('3+ session 同时 streaming → 全部收口', () => {
+  it('3+ session 同时 streaming → 全部收尾', () => {
     const store = useChatStore()
     const sids = ['m1', 'm2', 'm3']
     for (const sid of sids) {

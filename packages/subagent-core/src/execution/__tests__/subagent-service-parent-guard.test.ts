@@ -26,7 +26,7 @@ const { loggerMock } = vi.hoisted(() => ({
 vi.mock("../../core/logger.ts", () => ({ getLogger: () => loggerMock }));
 
 // [W3 改写] 原 vi.mock(inproc pi 引擎目录/session-runner) 随删件消亡——本文件只测
-// getRecordForAction 守卫（纯内存判定，不触引擎链路），现存 import 无需再 mock 引擎替身。
+// getRecordForAction 检查（纯内存判定，不触引擎链路），现存 import 无需再 mock 引擎替身。
 
 import { createRecord } from "../persistence/execution-record.ts";
 import { ModelConfigService } from "../assembly/model-config-service.ts";
@@ -45,7 +45,7 @@ function makeTmpAgentDir(): string {
 }
 
 /** 暴露私有字段供测试注入身份。[D3-⑤] 基线住进 execNesting（公共层
- *  ExecutionNestingContext），注入经 setBaseline 测试面。
+ *  ExecutionNestingContext），注入经 setBaseline 测试入口。
  *  [R1 深绑改写·清单③ SI 形态] sessionRootId/execNesting 随域 #2 聚合迁入
  *  SessionBaselines——ServiceInternals 重定义为壳 baselines 聚合路径（store 仍为壳
  *  #1 留壳字段，路径不变）；断言对象与强度不变，路径对齐终态结构。 */
@@ -89,7 +89,7 @@ describe("[v4 A-5 / P7] getRecordForAction 直接父校验", () => {
     service = new SubagentService({ cwd: agentDir, modelService });
     // initSession 建立 sessionRootId=sessionId（本 session 树的根）。execCtxBaseline 的
     // 真实值由 initSession 从 env 读取（见 recursive-visibility-baseline.test.ts），但本测试
-    // 聚焦守卫逻辑，故每例直接注入身份（mock），不依赖进程 env（测试进程可能继承 subagent env）。
+    // 聚焦检查逻辑，故每例直接注入身份（mock），不依赖进程 env（测试进程可能继承 subagent env）。
     service.initSession({ pi: makePi(), sessionId: "root-session" });
     internals = service as unknown as ServiceInternals;
     store = internals.store;
@@ -163,7 +163,7 @@ describe("[v4 A-5 / P7] getRecordForAction 直接父校验", () => {
     expect(fn).toThrow(/baseline=\(root\)/);
   });
 
-  it("rootSessionId 不匹配仍优先拒绝（直接父校验在 rootSessionId 校验之后，不绕过归属守卫）", () => {
+  it("rootSessionId 不匹配仍优先拒绝（直接父校验在 rootSessionId 校验之后，不绕过归属检查）", () => {
     // 跨 session 树的 record：rootSessionId 不匹配 → 走首个 throw（not found or not owned）
     const foreignRecord = makeRecord("sa-foreign", "other-session", { parentRecordId: "sa-A", depth: 2, status: "running" });
     store.register(foreignRecord);

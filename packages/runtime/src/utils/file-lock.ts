@@ -10,7 +10,7 @@
  * `@zhushanwen/pi-file-lock/core` 引入零依赖自实现 mkdir 锁单次原语
  * （acquireLock / acquireLockSync；磁盘协议逐字段照抄 proper-lockfile@4.1.2——
  * 与 pi 内嵌 proper-lockfile 互斥同一把锁的兼容性权威源，协议细节见该包
- * lock-core.ts 头注释）。本文件职责收敛为：本地签名适配层（导出面与旧版逐项
+ * lock-core.ts 头注释）。本文件职责收敛为：本地签名适配层（导出清单与旧版逐项
  * 一致，调用方零改动）+ 重试编排（重试属消费方，core 只做单次原语）。
  * extension 侧 @zhushanwen/pi-file-lock 与本模块同源 lock-core——不再是「孪生
  * 双实现靠参数对齐」，两侧协议一致由构造保证；本地默认常量导出保留供

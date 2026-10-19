@@ -232,7 +232,7 @@ export const useProjectStore = defineStore('project', () => {
    * 重命名 project（组头行内输入框提交）。空名 / 未知 id 不动作。
    * 默认项目（nameless）禁改名：默认项目的身份就是 nameless（isDefaultProjectOf 口径，
    * 未归类/孤儿 session 的兜底聚合判据），改名会把它变成命名项目，孤儿从此无聚合可归。
-   * 与 removeProject 的默认项守卫同源（组件侧对默认组头不渲染重命名钮，双保险）。
+   * 与 removeProject 的默认项检查同源（组件侧对默认组头不渲染重命名钮，双保险）。
    */
   function renameProject(id: string, name: string): void {
     const trimmed = name.trim()

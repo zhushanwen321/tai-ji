@@ -1,6 +1,6 @@
 // entry 契约与折叠器单源于 @zhushanwen/extension-protocol（U2 折叠器下沉：扩展与 taiji plugin
 // 同源消费，杜绝双实现漂移）。本文件保持既有 import 路径不变（re-export），仅保留
-// 扩展侧写面私有物（toTaskSnapshot / 旧 store 形状 / 工具参数 / ack 机制类型）。
+// 扩展侧写侧私有物（toTaskSnapshot / 旧 store 形状 / 工具参数 / ack 机制类型）。
 
 // ack 覆写 config 类型同源自 pi（文件尾 SchedulerCurrentModel / SchedulerProviderOverride 消费）
 import type { ProviderConfig } from '@earendil-works/pi-coding-agent'
@@ -21,7 +21,7 @@ export type {
   TaskStatus,
 } from '@zhushanwen/extension-protocol'
 
-// 本地保留面（写侧 helper / 旧 store 形状 / 工具参数）签名引用的类型——re-export 不引入作用域，需显式 import
+// 本地保留范围（写侧 helper / 旧 store 形状 / 工具参数）签名引用的类型——re-export 不引入作用域，需显式 import
 import type { ScheduledTask, TaskKind, TaskSnapshot } from '@zhushanwen/extension-protocol'
 
 /**
@@ -44,7 +44,7 @@ export function toTaskSnapshot(task: ScheduledTask): TaskSnapshot {
 export interface SchedulerStore {
   /**
    * 形状忠实保留（ext-simplify-08 L8）：旧 store 文件（npm 0.1.1 store.ts）顶层携带
-   * version:1，importer 只读 tasks、version 零读点——字段是磁盘格式的文档而非消费面，
+   * version:1，importer 只读 tasks、version 零读点——字段是磁盘格式的文档而非消费方，
    * 删除会让类型与迁移源文件的真实形状静默漂移。
    */
   version: 1
@@ -102,7 +102,7 @@ export type AckUnavailableReason = 'no-base' | 'toggle-disabled' | 'check-failed
  *
  * 其余形态（e1-register / e2-not-hit / e4-provider-error / e5-interrupted /
  * e6-unregister / e8b-hybrid）**不发用户通知**——它们都意味着真实轮已应答或与落盘无关，
- * 发「未写入」即反向撒谎；可观测性由日志面承担（字符串标签，不实体化为类型成员）。
+ * 发「未写入」即反向撒谎；可观测性由日志侧承担（字符串标签，不实体化为类型成员）。
  * 把「可通知」收窄成类型本身，反向撒谎禁令就成了编译期约束：调用点无法传入不通知的形态。
  * 错误语义的完整 SSOT = 设计 scheduler-command-path-persistence §3.4。
  */
@@ -121,7 +121,7 @@ export interface AckState {
   window: { providerId: string } | null
   /** ack 轮是否已启动（session 边界写盘判定的判据之一：文件不存在且未启动才补发告警） */
   ackTurnStarted: boolean
-  /** 本次 ack 触发的任务 id（session 边界通知拼去重键用）；null = 未发起过 ack。注意：状态为模块级单例，session_start 时它可能是上一会话的残留——故所有读点都必须先过 taskId !== null 且由边界清理收口 */
+  /** 本次 ack 触发的任务 id（session 边界通知拼去重键用）；null = 未发起过 ack。注意：状态为模块级单例，session_start 时它可能是上一会话的残留——故所有读点都必须先过 taskId !== null 且由边界清理收尾 */
   taskId: string | null
   /** 本次 ack 触发的任务名（如实通知文案插值；taskId 为兜底） */
   taskName: string
@@ -144,7 +144,7 @@ export interface AckState {
 }
 
 /**
- * 会话当前模型的最小投影（`SchedulerBackend.getCurrentModel()` 返回值）。
+ * 会话当前模型的最小派生视图（`SchedulerBackend.getCurrentModel()` 返回值）。
  *
  * 只取 ack 合成轮所需三字段：`api`（registerProvider 覆写 config.api）、`provider`
  * （覆写目标 provider id）、`id`（合成 assistant 行的 model 字段）。`api` 用
@@ -158,7 +158,7 @@ export interface SchedulerCurrentModel {
 }
 
 /**
- * `registerProvider` 的覆写 config 最小面：ack 合成轮只带 `api` + `streamSimple`，不带
+ * `registerProvider` 的覆写 config 最小子集：ack 合成轮只带 `api` + `streamSimple`，不带
  * `models`（覆写不得改变 provider 的模型清单）。
  *
  * 不重定义字段——直接 Pick 自 pi 的 `ProviderConfig`，与 `pi.registerProvider` 的实参类型

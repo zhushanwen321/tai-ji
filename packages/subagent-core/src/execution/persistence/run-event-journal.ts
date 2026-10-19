@@ -16,7 +16,7 @@
 // （`setRunEventJournalDirForTest` / `resolveRunEventJournal` / `runEventJournalPathOf`
 // / `runEventJournalDirOf` / `scanRunEvents`）——自 `orchestration/terminal-actions.ts`
 // 迁入，连同其 no-op 测试防线。为什么搬：目录解析是持久化策略（生产推导
-// `resolvePiWorkflowStateDir` + 测试注入 + vitest 防线），execution 侧读面
+// `resolvePiWorkflowRunsDir` + 测试注入 + vitest 防线），execution 侧读面
 // （`service/workflow-dispatch`）由此直连本模块，不再反向依赖编排层的值。编排侧
 // 写者（terminal-actions）反向 import 本节，并对既有消费点保留同名 re-export。
 import { join } from "node:path";
@@ -27,7 +27,9 @@ import { ALL_RUN_OUTCOMES, RUN_EVENTS_SUFFIX, RUN_EVENT_TYPES } from "../../shar
 import type { RunEventJournal, WorkflowRunEvent, WorkflowRunEventInput } from "../../orchestration/run-events.ts";
 // 【D1 拆边 Class C 第 3 步】默认 journal 目录的模块锚推导（原 terminal-actions 依赖，
 // 随目录解析集群一并迁入；assembly 叶子方向，persistence → assembly 既有先例）。
-import { resolvePiWorkflowStateDir } from "../assembly/workflow-state-root.ts";
+// [session-store-layout-inversion D2/D3] 模块锚 = 进程级当前 rootSessionId 绑定的
+// session 存储树 runs 目录（`<root>/<rootSid>/workflow/runs/`）。
+import { resolvePiWorkflowRunsDir } from "../assembly/workflow-state-root.ts";
 
 const journalLogger = getLogger("run-event-journal");
 /** 目录解析面日志通道：与搬迁前 terminal-actions 同源（"run-event-dispatch"），
@@ -227,11 +229,11 @@ export function runEventJournalPathIn(dir: string, runId: string): string {
  * 行校验器（存量无 seq 行容忍）、warn 标签。无首行头行契约（run 侧文件自带后缀，
  * 无需自描述行）。
  *
- * @param dir journal 目录（布局决策归调用方：taiji 布局传 run store 旁的
- *        workflow-state 目录，测试传 mkdtemp 临时目录）。
+ * @param dir journal 目录（布局决策归调用方：taiji 布局传 session 存储树内的
+ *        `<root>/<rootSid>/workflow/runs/`，测试传 mkdtemp 临时目录）。
  */
 export function createRunEventJournal(dir: string): RunEventJournal {
-  return new JsonlEventStream<WorkflowRunEventInput, WorkflowRunEvent>(dir, {
+  return new JsonlEventStream<WorkflowRunEventInput, WorkflowRunEvent>({
     pathFor: (runId) => {
       assertValidRunId(runId);
       return runEventJournalPathIn(dir, runId);
@@ -255,8 +257,8 @@ export function createRunEventJournal(dir: string): RunEventJournal {
 // 状态，本模块不反向依赖编排层）。
 // ══════════════════════════════════════════════════════════════
 
-/** journal 实例缓存（按目录 keyed）与测试注入点（生产目录 = run store 旁
- *  workflow-state，惰性解析）。keyed 缓存（ADR-0081）：per-call
+/** journal 实例缓存（按目录 keyed）与测试注入点（生产目录 = 进程级当前
+ *  rootSessionId 绑定的 runs 目录，惰性解析）。keyed 缓存（ADR-0081）：per-call
  *  目录参数化后同进程可并存多个目录的 journal 实例（runtime 启动扫描收编 ≠ pi 壳
  *  模块锚目录），单值缓存会让两目录互相踢缓存——Map 按目录各持一份，单写者纪律
  *  不受影响（同一 run 恒同目录）。 */
@@ -327,18 +329,18 @@ export function resolveRunEventJournal(journalDir?: string): { dir: string; jour
       noopJournalWarned = true;
       runEventDispatchLogger.warn(
         "run-event journal disabled: vitest env without setRunEventJournalDirForTest(dir) — " +
-          "no-op journal active (prevents writes to the real workflow-state dir)",
+          "no-op journal active (prevents writes to the real workflow runs dir)",
       );
     }
     return { dir: "", journal: new NoopRunEventJournal() };
   }
-  const dir = resolvePiWorkflowStateDir();
+  const dir = resolvePiWorkflowRunsDir();
   return { dir, journal: journalForDir(dir) };
 }
 
 /**
  * run record 事件流文件绝对路径（record/manifest 同一解析源：生产推导
- * resolvePiWorkflowStateDir，测试经 setRunEventJournalDirForTest 注入）。
+ * resolvePiWorkflowRunsDir，测试经 setRunEventJournalDirForTest 注入）。
  *
  * [W1 / D1] v2 注册条目的 recordPath 锚点字段经本函数寻址（lifecycle.runWorkflow
  * 写注册条目时消费）——锚点与 record 实写面同源，防条目指向漂移。vitest 无注入

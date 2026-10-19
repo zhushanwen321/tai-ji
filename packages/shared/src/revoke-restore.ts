@@ -29,7 +29,7 @@ const DRAFT_JOINER = '\n\n'
 /**
  * 标记 + 紧邻单个前导换行的全局正则（每次调用新建：/g 形态有 lastIndex 状态，
  * 模块级单例跨消费方共享不安全）。标记体 = 宽松 `[^>]*`（剥除面授权形态，ADR-0077），
- * 本仓剥除正则的唯一手写体（PS-26 探针登记豁免面之外的身份判定正则均由
+ * 本仓剥除正则的唯一手写体（PS-26 探针登记豁免范围之外的身份判定正则均由
  * message.ts MSG_ID_UUID_SEGMENT 构造，与此处无关）。
  */
 function markerWithLeadingNewlineRe(): RegExp {

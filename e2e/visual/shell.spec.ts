@@ -18,7 +18,7 @@ import { test, expect, fontsReady } from './fixtures/visual-server'
 test.describe('visual baseline: shell', () => {
   test('shell-default: AppShell Landing 态整页', async ({ page, visualBaseURL }) => {
     await page.goto(visualBaseURL, { waitUntil: 'domcontentloaded' })
-    // 等 AppShell 渲染（mock connection connecting→connected ~200ms 后 App.vue 守卫放行）
+    // 等 AppShell 渲染（mock connection connecting→connected ~200ms 后 App.vue 检查放行）
     await page.waitForSelector('.app-shell', { state: 'visible', timeout: 30_000 })
     // settle：等动画/loading 平息 + bundled 字体就绪（fontsReady），保证 baseline 跨次稳定（R1 缓解）
     await page.waitForTimeout(1500)

@@ -5,8 +5,8 @@
  * 缺口背景：PS-24（taiji 注入器展开 ≡ pi 落盘展开的逐字 golden diff）是动态探针，
  * 需真实 pi 进程 + 模型凭证，CI 设 TAIJI_SKIP_REAL_PI=1 恒 skip——pi 升级改展开
  * 格式时漂移静默通过。本探针对 node_modules 实装 dist 的展开模板 / 剥离函数做
- * 静态逐字断言（凭证无关，CI 可跑），覆盖 pi 改模板 / 剥离行为两类漂移面
- * （设计量级判定 ~90%）；全量行为等价仍由 PS-24 动态探针在本地 REAL_PI 环境守卫。
+ * 静态逐字断言（凭证无关，CI 可跑），覆盖 pi 改模板 / 剥离行为两类漂移风险
+ * （设计量级判定 ~90%）；全量行为等价仍由 PS-24 动态探针在本地 REAL_PI 环境检查。
  *
  * 登记条目（docs/pi-semantics.json PS-27，verifiedWith 0.84.4）：
  * - 展开模板（agent-session.js _expandSkillCommand :983-1008，模板 :995）：
@@ -78,7 +78,7 @@ describe.skipIf(!PI_DIST)(
       ).toBe(true)
     })
 
-    it('核心锚：skill block 模板字符串逐字（tag 结构 / References 行 / 空行分隔 / 闭合）', () => {
+    it('核心锚：skill block 模板字符串逐字（tag 结构 / References 行 / 空行分隔 / 结束标签）', () => {
       const win = methodWindow(SESSION_SRC, '_expandSkillCommand(text) {')
       // dist 源码中模板字符串的换行是字面 `\n` 转义（单行模板），断言用源码文本形态。
       // taiji 注入器 skill-injector.ts 的镜像模板必须与此逐字同构（仅变量名不同）。
@@ -86,7 +86,7 @@ describe.skipIf(!PI_DIST)(
         win.includes(
           'const skillBlock = `<skill name="${skill.name}" location="${skill.filePath}">\\nReferences are relative to ${skill.baseDir}.\\n\\n${body}\\n</skill>`;',
         ),
-        'PS-27 漂移：skill block 模板字符串变化（tag 属性 / References 行 / 分隔空行 / 闭合标签任一改形）——taiji 镜像 skill-injector 的展开将与 pi 原生不一致，复核 PS-24/PS-27 与 skill-injector.ts 的镜像模板',
+        'PS-27 漂移：skill block 模板字符串变化（tag 属性 / References 行 / 分隔空行 / 结束标签任一改形）——taiji 镜像 skill-injector 的展开将与 pi 原生不一致，复核 PS-24/PS-27 与 skill-injector.ts 的镜像模板',
       ).toBe(true)
       expect(
         win.includes('return args ? `${skillBlock}\\n\\n${args}` : skillBlock;'),
@@ -176,7 +176,7 @@ describe.skipIf(!PI_DIST)(
 describe.skipIf(!PI_DIST || !INJECTOR_SRC)(
   `PS-27 交叉锚：taiji skill-injector 镜像模板与 pi dist 同骨架${!PI_DIST && !INJECTOR_SRC ? '｜skip：dist 与镜像源码均不可达' : !PI_DIST ? `｜skip：${SKIP_REASON}` : !INJECTOR_SRC ? '｜skip：skill-injector.ts 不可达' : ''}`,
   () => {
-    it('taiji block 模板行与 pi 模板同骨架（tag / References 行 / 分隔 / 闭合逐子串一致）', () => {
+    it('taiji block 模板行与 pi 模板同骨架（tag / References 行 / 分隔 / 结束标签逐子串一致）', () => {
       // taiji 镜像（skill-injector.ts resolveSingleMarker）的模板变量名与 pi 不同
       //（cmd.name/path/baseDir/body vs skill.name/skill.filePath/skill.baseDir/body——
       // D7 切源后映射条目 name 已是裸名，前缀剥除局部变量随 legacy 路径删除），

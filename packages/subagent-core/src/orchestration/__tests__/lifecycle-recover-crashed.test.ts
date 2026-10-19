@@ -1,16 +1,16 @@
 // lifecycle-recover-crashed.test.ts —— recoverCrashedRuns 崩溃恢复装配测试（U7/D8/B1
 // → workflow-run-resume-revision [D2]/[D15]/[D1] 后形态）。
 //
-// 三步序列 = loadAll → 中断收编 → evict（[D15] 发起面第三路，经
+// 三步序列 = loadAll → 中断收编 → evict（[D15] 发起侧第三路，经
 // terminal-actions.interruptRun 入口；v1 兼容尾段已删除——收编只追加
 // run-interrupted 转移事件，不覆盖任何文件）。本文件用真实 WorkflowRun +
 // mock RunStore（可观察调用序列）。
 //
 // 覆盖：
 // - running 残留 → run-interrupted 转移事件落 record（[D2] interrupted 暂停态，
-//   非 done,failed——崩溃 ≠ 失败，可 resume）+ in-flight call 内存观测面收口 +
+//   非 done,failed——崩溃 ≠ 失败，可 resume）+ in-flight call 内存观测侧收尾 +
 //   runs Map 注册
-// - 内存观测面不变量：收编后 run 仍非终局（isRunSettled=false——中断非终局，
+// - 内存观测侧不变量：收编后 run 仍非终局（isRunSettled=false——中断非终局，
 //   终局判据归终局记录注册表；「进程内持有未终局聚合」与新语义一致）
 // - hooks 每 running run 恰好一次、参数 {id, reason:"interrupted"}；无 hooks 不炸
 // - onRunRecovered 同步 throw 被围栏捕获（warn 留痕），不中断其余 run 恢复
@@ -53,7 +53,7 @@ function makeSpec(name = "test-wf"): RunSpec {
 }
 
 /**
- * 重水合形态构造（对齐 store.loadAll 真实产物：running 快照无 runtime——
+ * 重新加载形态构造（对齐 store.loadAll 真实产物：running 快照无 runtime——
  * reconstruct 不恢复 worker）。
  */
 function makeRun(
@@ -83,10 +83,10 @@ function makeRun(
     ...(opts.completedAt !== undefined ? { completedAt: opts.completedAt } : {}),
   };
   const run = WorkflowRun.reconstruct(runId, makeSpec(opts.scriptName), state, meta);
-  // [D6(a) 第 1 步] 终局判定源 = 终局记录注册表：done 形态 fixture 建模「重水合
+  // [D6(a) 第 1 步] 终局判定源 = 终局记录注册表：done 形态 fixture 建模「重新加载
   // done run」时必须携带注册表条目（生产 = 壳重建点 noteRebuiltSettlement 注入
-  // run-settled 帧事实）；settledAt 缺省取快照 completedAt（重水合 run 的条目 =
-  // 帧时序），否则 0（最旧——仅用于防御排序，非本文件断言面）。
+  // run-settled 帧事实）；settledAt 缺省取快照 completedAt（重新加载 run 的条目 =
+  // 帧时序），否则 0（最旧——仅用于防御排序，非本文件断言范围）。
   if (status === "done") {
     noteRebuiltSettlement(runId, {
       outcome: "done",
@@ -109,7 +109,7 @@ function makeStore(loaded: WorkflowRun[]) {
   return { store, saves, saveSpy: store.save as ReturnType<typeof vi.fn> };
 }
 
-/** 预置 kill-9 形态 record 流基线（run-created + agent-started 落账后进程死亡）。 */
+/** 预置 kill-9 形态 record 流基线（run-created + agent-started 写入 journal 记录后进程死亡）。 */
 async function seedCrashedRecord(journalDir: string, runId: string, scriptName = "test-wf"): Promise<void> {
   const journal = createRunEventJournal(journalDir);
   await journal.append(runId, {
@@ -138,7 +138,7 @@ function useJournalDir(prefix: string): string {
 // ── 三步序列：中断收编 + 注册 ─────────────────────────────────
 
 describe("recoverCrashedRuns — 三步序列（loadAll→中断收编→evict，[D2]/[D15]）", () => {
-  it("running 残留：run-interrupted 转移事件落 record（errorCode=crashed）+ runs Map 注册 + 内存观测面 in-flight 收口", async () => {
+  it("running 残留：run-interrupted 转移事件落 record（errorCode=crashed）+ runs Map 注册 + 内存观测侧 in-flight 收尾", async () => {
     const journalDir = useJournalDir("wf-recover-basic-");
     try {
       await seedCrashedRecord(journalDir, "wf-1");
@@ -164,8 +164,8 @@ describe("recoverCrashedRuns — 三步序列（loadAll→中断收编→evict�
       expect(interrupted.reason).toBe("Process killed (kill-9 or crash recovery)");
       // [D2] 中断非终局：不写 manifest 派生缓存
       expect(fs.existsSync(path.join(journalDir, "wf-1.json"))).toBe(false);
-      // 内存观测面：state.error 记录 reason、status 维持 running（活体写点停更——
-      // 终局判据归 record fold，重水合聚合保持「未终局」观感）
+      // 内存观测侧：state.error 记录 reason、status 维持 running（活体写点停更——
+      // 终局判据归 record fold，重新加载的聚合保持「未终局」观感）
       expect(running.state.error).toBe("Process killed (kill-9 or crash recovery)");
       expect(isRunSettled(running)).toBe(false);
       // done run 原样（不进收编判定）
@@ -413,7 +413,7 @@ describe("recoverCrashedRuns — 中断收编接驳（[D15]）", () => {
   it("双重启幂等：二次恢复时 run 已 done（loadAll 产物终态）→ 不再 dispatch，record 帧数不增长", async () => {
     const journalDir = useJournalDir("wf-recover-twice-");
     try {
-      // 第一次 kill-9：预置静止 record 后收编（run-interrupted 落账恰一帧）
+      // 第一次 kill-9：预置静止 record 后收编（run-interrupted 写入 journal 记录恰一帧）
       await seedCrashedRecord(journalDir, "wf-adopt-2");
       const run = makeRun("wf-adopt-2", { status: "running" });
       const firstStore = makeStore([run]);
@@ -424,7 +424,7 @@ describe("recoverCrashedRuns — 中断收编接驳（[D15]）", () => {
         ),
       ).toHaveLength(1);
 
-      // 「重启」：重水合产物已 done,failed——恢复循环不进 running 分支，record 无新增
+      // 「重启」：重新加载产物已 done,failed——恢复循环不进 running 分支，record 无新增
       const reloaded = makeRun("wf-adopt-2", {
         status: "done",
         reason: "failed",

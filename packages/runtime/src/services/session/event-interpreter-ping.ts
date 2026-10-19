@@ -1,7 +1,7 @@
 /**
  * PingProbe — pi 进程健康探测循环（ADR-0047，替代事件静默检测）。
  *
- * [协作对象，T4 拆分] 从 event-interpreter.ts 按变化轴抽出：ping 定时器、连续失败计数、
+ * [协作对象，T4 拆分] 从 event-interpreter.ts 按变化原因抽出：ping 定时器、连续失败计数、
  * stream_warn 去重标志三个可变态及 tick 状态机自成封闭单元，与 interpreter 主编排无共享
  * 状态（解释见 event-interpreter.ts 头注「协作对象」节）。interpreter 经三个挂点委托：
  * turn-start → start()、turn-end → stop()、dispose → stop()。本对象不持有 interpreter
@@ -22,10 +22,10 @@ export const PING_FAIL_THRESHOLD = 3
 /** [AC-8] 连续 2 次失败（120s）→ 广播 message.stream_warn 一次（提示性，不中断）。export 供测试（SR6）。 */
 export const PING_WARN_FAIL_COUNT = 2
 
-/** PingProbe 窄依赖（EventInterpreterOptions 的结构化投影，test mock 友好）。 */
+/** PingProbe 窄依赖（EventInterpreterOptions 的结构化视图，test mock 友好）。 */
 export interface PingProbeDeps {
   sessionId: string
-  /** WS 帧发送（stream_warn 广播腿）。 */
+  /** WS 帧发送（stream_warn 广播路径）。 */
   send: (msg: ServerMessage) => void
   /**
    * [ADR-0047] ping get_state 探测回调（组合根注入）。

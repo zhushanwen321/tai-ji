@@ -433,6 +433,14 @@ async function matchCandidates(
   }
   // 第一级 uuid 片段匹配（sessionId 或文件路径含 query）——cheap，已有 header。
   // 零命中才进入第二级（互斥回退，非合并排序，§6.7 子决策 1）。
+  // [session-store-layout-inversion] 完整 id 精确等值短路：存储树分区目录名 =
+  // rootSessionId（`<root>/<rootSessionId>/subagents/sessions/<sid>.jsonl`），根会话 id
+  // 会出现在其全部 subagent 候选的路径里——不短路则完整 id 直查根会话被伪 multi 消歧。
+  // 等值命中是 includes 命中的子集，短路只消伪 multi 不减真召回。
+  const exactIdHits = candidates.filter((c) => c.ref.sessionId === query)
+  if (exactIdHits.length > 0) {
+    return exactIdHits.map((c) => ({ ...c }))
+  }
   const exactHits = candidates.filter(
     (c) => c.ref.sessionId.includes(query) || c.meta.path.includes(query),
   )
@@ -626,7 +634,7 @@ export interface SessionFileRef {
  *
  * id 取自首行 header（复用 collectCandidates 的首行扫描——与 find 候选、resolveSessionId
  * 同一 id 语义，agent 从 find 输出复制的完整 id 恒能命中；不按文件名反推，避免「文件改名
- * 后与 header id 失配」的误报面）。workflow-state 跳过、坏 header 跳过、被去重根不产候选
+ * 后与 header id 失配」的误报风险）。workflow-state 跳过、坏 header 跳过、被去重根不产候选
  * 均随 collectCandidates 继承。同 id 多根出现（[live] 与 [default] 不去重，V2 语义）时取
  * mtime 新者（与 loadTitleIndex 合并语义一致）。
  *

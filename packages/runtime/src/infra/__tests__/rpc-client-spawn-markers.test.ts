@@ -99,7 +99,7 @@ function readSpawnMarkers(): string[] {
   return JSON.parse(readFileSync(getSpawnMarkersPath(argvDataDir), 'utf-8')) as string[]
 }
 
-describe('A · RpcClient.start：argv 无 --session-dir + 清单落盘（集成面）', () => {
+describe('A · RpcClient.start：argv 无 --session-dir + 清单落盘（集成测试侧）', () => {
   beforeAll(() => {
     argvDataDir = mkdtempSync(join(tmpdir(), 'rpc-spawn-markers-'))
   })
@@ -381,7 +381,7 @@ describe('D · readSpawnMarkerList 读侧（u17 reap 判据③数据源）', () 
     }
   })
 
-  it('D4 非字符串数组（对象 / 混入非字符串元素）→ null + warn（格式守卫）', () => {
+  it('D4 非字符串数组（对象 / 混入非字符串元素）→ null + warn（格式检查）', () => {
     const dir = mkdtempSync(join(tmpdir(), 'pi-spawn-markers-read-'))
     try {
       mkdirSync(join(dir, 'run'), { recursive: true })

@@ -10,7 +10,7 @@
  *
  * 配置存储使用 PluginStateStorage（与 plugin.storage.* 共享同一持久层）。
  * 为区分配置与通用存储，key 加入 'config:' 前缀——该前缀约定（toConfigKey /
- * fromConfigKey / isConfigKey）在此导出，作为 config 域单一真相源（P7 收口）。
+ * fromConfigKey / isConfigKey）在此导出，作为 config 域单一真相源（P7 收尾）。
  */
 
 import type { PluginRpcServer } from '../plugin-rpc-server.js'
@@ -18,11 +18,11 @@ import type { PluginRpcClient } from '../plugin-rpc-client.js'
 import { asSafeKey } from '../validation.js'
 
 /**
- * 配置 key 前缀约定（P7 收口）。
+ * 配置 key 前缀约定（P7 收尾）。
  *
  * 配置与通用存储共享同一持久层（PluginStorage），为区分二者，配置 key 统一加
  * 'config:' 前缀。此前该约定在 plugin-service.ts 与 plugin-rpc-setup.ts 各自重复
- * 实现，现收口到 config-api（配置域的天然归属），两侧均委托此处。
+ * 实现，现收尾到 config-api（配置域的天然归属），两侧均委托此处。
  */
 const CONFIG_KEY_PREFIX = 'config:'
 

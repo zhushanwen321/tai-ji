@@ -37,7 +37,7 @@ import { connectPage, sampleDomShape } from '../../../scripts/render-sampling/li
 | 资产 | 覆盖环节 | 说明 | 最近验证 |
 |------|---------|------|---------|
 | `scripts/render-sampling/lib.mjs` | ①-⑥ 全部 + 窗口 resize | 共享函数库 + 关键选择器/信号常量 + `resizeViewport`/`restoreViewport` + `selectTextInElement`（划选注入）；判定逻辑在 decisions.mjs | 2026-09-24 划选注入（plan 模式验收预编译） |
-| `scripts/render-sampling/session-jsonl.mjs` | ④⑤（等待信号 + 断言读取面） | session JSONL 读取/深度搜索/计数/等待（`readSessionFile`/`deepFind`/`countMatches`/`waitForMatch`）；只读 + `~/.taiji` 真实数据目录 fail-safe 拒读 + 坏行容错；场景谓词由验收脚本自带 | 2026-09-24 建立（plan 模式验收预编译，dry-run 对 mock-pi fixtures 跑通） |
+| `scripts/render-sampling/session-jsonl.mjs` | ④⑤（等待信号 + 断言读侧） | session JSONL 读取/深度搜索/计数/等待（`readSessionFile`/`deepFind`/`countMatches`/`waitForMatch`）；只读 + `~/.taiji` 真实数据目录 fail-safe 拒读 + 坏行容错；场景谓词由验收脚本自带 | 2026-09-24 建立（plan 模式验收预编译，dry-run 对 mock-pi fixtures 跑通） |
 | `scripts/render-sampling/decisions.mjs` | 判定层 | 发送按钮探测 / 渲染判稳 / CDP 边框余量算术 / CLI 参数解析；浏览器侧函数自包含（page.evaluate 序列化无闭包），单测 `scripts/__tests__/render-sampling-decisions.test.mjs`（CI scripts guards 轨） | 2026-09-23 建立（31 例全绿） |
 | `scripts/render-sampling/cli.mjs` | 端到端 | 冒烟入口（连接→注入→采样→落盘） | 2026-09-19 建立 |
 

@@ -35,7 +35,7 @@ function sameTurnRefSequence(a: readonly MessageTurn[], b: readonly MessageTurn[
   return a.length === b.length && a.every((turn, i) => turn === b[i])
 }
 
-/** rail 可见投影签名逐字段比对（railMemoFor 四字段 = TurnRail 渲染消费的全部 turn 派生字段）。 */
+/** rail 可见派生视图签名逐字段比对（railMemoFor 四字段 = TurnRail 渲染消费的全部 turn 派生字段）。 */
 function railMemoEquals(
   a: ReturnType<typeof railMemoFor>,
   b: ReturnType<typeof railMemoFor>,
@@ -86,8 +86,8 @@ export function useMessageStreamRail(deps: UseMessageStreamRailDeps): {
    * 任一 turn 引用变化（消息增删 / 消息内容替换）→ 照常产出新数组，行为不变。
    * lastRailTurns 用 per-instance 闭包持有（split mode 多实例各自 railTurns，禁模块级共享）。
    *
-   * 投影恒等放宽（streaming perf 二段）：仅末位 turn 引用不同（streaming 末位 turn 每
-   * delta 重建）、其余逐项引用相同，且末位 turn 的 rail 可见投影签名（railMemoFor 四字段
+   * 派生视图恒等放宽（streaming perf 二段）：仅末位 turn 引用不同（streaming 末位 turn 每
+   * delta 重建）、其余逐项引用相同，且末位 turn 的 rail 可见派生视图签名（railMemoFor 四字段
    * userSummary/agentSummary/failed/iconClass——TurnRail 渲染消费的全部 turn 派生字段）
    * 与上次相同 → 返回旧数组引用。此时 TurnRail render 输出逐字节不变（摘要串相同 ⇒ 渲染
    * 相同），props 引用不变 → 常驻面板零 vnode diff、expandedTurns 依赖不失效。签名经
@@ -105,8 +105,8 @@ export function useMessageStreamRail(deps: UseMessageStreamRailDeps): {
   let railIndexByTurn = new WeakMap<MessageTurn, number>()
 
   /**
-   * 投影恒等放宽判定：仅末位 turn 引用不同（streaming 末位 turn 每 delta 重建）、其余
-   * 逐项引用相同，且末位 turn 的 rail 可见投影签名（railMemoFor 四字段——TurnRail 渲染
+   * 派生视图恒等放宽判定：仅末位 turn 引用不同（streaming 末位 turn 每 delta 重建）、其余
+   * 逐项引用相同，且末位 turn 的 rail 可见派生视图签名（railMemoFor 四字段——TurnRail 渲染
    * 消费的全部 turn 派生字段）与上次相同 → 补末位下标映射并返回 true（复用旧数组）。
    * 此时 TurnRail render 输出逐字节不变（摘要串相同 ⇒ 渲染相同），props 引用不变 →
    * 常驻面板零 vnode diff、expandedTurns 依赖不失效。签名经共享 railMemoFor（@taiji/ui，
@@ -128,8 +128,8 @@ export function useMessageStreamRail(deps: UseMessageStreamRailDeps): {
       return false
     }
     if (!railMemoEquals(railMemoFor(prevLast), railMemoFor(nextLast))) return false
-    // rail 投影恒等 → 复用旧数组。补末位下标映射保持索引与当前 renderItems 同步
-    // （同位同投影）：updateActiveTurnIndex 对末位新引用仍 O(1) 命中，不退化 findIndex。
+    // rail 派生视图恒等 → 复用旧数组。补末位下标映射保持索引与当前 renderItems 同步
+    // （同位同派生）：updateActiveTurnIndex 对末位新引用仍 O(1) 命中，不退化 findIndex。
     railIndexByTurn.set(nextLast, lastIdx)
     return true
   }
@@ -149,7 +149,7 @@ export function useMessageStreamRail(deps: UseMessageStreamRailDeps): {
 
   const railTurns = computed<MessageTurn[]>(() => {
     const next = renderItems.value.filter((item) => item.kind === 'turn').map((item) => item.turn)
-    // 快判 → 投影恒等放宽 → 全量重建，三级判定语义见上方 railTurns 机制注释
+    // 快判 → 派生视图恒等放宽 → 全量重建，三级判定语义见上方 railTurns 机制注释
     if (sameTurnRefSequence(lastRailTurns, next)) return lastRailTurns
     if (lastTurnProjectionUnchanged(next)) return lastRailTurns
     return rebuildRailTurns(next)
@@ -159,7 +159,7 @@ export function useMessageStreamRail(deps: UseMessageStreamRailDeps): {
    * renderItems 空间下标 → rail 下标（截至该下标共有几个 turn 项，0-based）。
    * railTurns 恒为 renderItems 的 turn 子序列（同帧派生、同序同长），该序号即 turn 在
    * railTurns 中的下标——索引 get miss 且按引用 findIndex 也 miss 时的结构正确兜底：
-   * 投影恒等放宽期间 railTurns 末位持旧引用，新引用不在旧数组，按序号定位仍指向
+   * 派生视图恒等放宽期间 railTurns 末位持旧引用，新引用不在旧数组，按序号定位仍指向
    * 当前最新同位 turn（旧实现此路径返回 -1，indicator 会错位）。
    */
   function railOrdinalAt(renderIdx: number): number {
@@ -241,7 +241,7 @@ export function useMessageStreamRail(deps: UseMessageStreamRailDeps): {
     if (item?.kind === 'turn') {
       // railTurns.value 读在前：正常时序（onVirtuaScroll）下 virtua 已渲染 ⇒ 模板已读过
       // railTurns ⇒ 索引必已建；此读兜底任何未求值路径——惰性求值顺带同步重建索引
-      // （投影恒等放宽帧也会在此补末位映射）。
+      // （派生视图恒等放宽帧也会在此补末位映射）。
       const turns = railTurns.value
       // miss 兜底两级：索引命中 O(1)；miss 先按引用 findIndex（行为与旧实现一致），
       // 再 miss（-1，放宽期间末位新引用不在旧数组）落 railOrdinalAt 结构定位，
@@ -270,7 +270,7 @@ export function useMessageStreamRail(deps: UseMessageStreamRailDeps): {
       (item) => item.kind === 'turn' && item.turn === targetTurn,
     )
     if (renderIdx < 0) {
-      // 投影恒等放宽期间 railTurns 末位持旧引用（rail 显示未变不更新数组），按引用
+      // 派生视图恒等放宽期间 railTurns 末位持旧引用（rail 显示未变不更新数组），按引用
       // 查找 miss——按「第 idx 个 turn 项」结构定位兜底，跳转语义不变（跳到当前
       // 最新同位 turn）。旧行为此处直接 return（不滚动），该 miss 在旧形态不可达。
       renderIdx = nthTurnRenderIndex(idx)

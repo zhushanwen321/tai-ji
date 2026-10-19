@@ -1,16 +1,16 @@
 /**
- * check-record-write-surface.mjs 单测（review MF-7：守卫脚本零测试盲区）。
+ * check-record-write-surface.mjs 单测（review MF-7：检查脚本零测试盲区）。
  *
- * C-data-20「store 外零直写」grep 兜底层的规则回归锚点——规则失真则守卫静默失效
- * 或全仓提交被误拦。覆盖面：
+ * C-data-20「store 外零直写」grep 兜底层的规则回归锚点——规则失真则检查静默失效
+ * 或全仓提交被误拦。覆盖范围：
  *   - collectTsFiles：目录遍历边界（排除 __tests__ / test / node_modules / dist，
  *     排除 *.test.ts / *.d.ts，收集 .ts）
  *   - R1 命中：store 外 import writeFinalizedState 直调 / 类方法形态直写
  *   - R1 豁免：载体定义文件的 export function / async function 定义行、注释行
  *   - R2 命中：appendEntry + customType "subagent-record" 同行写形态（store 外）
- *   - R2 豁免：record-entry.ts 常量定义面
+ *   - R2 豁免：record-entry.ts 常量定义所在文件
  *   - R3 命中：白名单外 workflow-record entry 写（字面量 + 常量双形态）
- *   - R4 命中：白名单外 toSubagentRecordEntry 调用（v1 快照投影构造器）
+ *   - R4 命中：白名单外 toSubagentRecordEntry 调用（v1 快照派生视图构造器）
  *   - R5 命中：workflow-record 写点窗口内 v:1 / snapshot 载荷形态；
  *     豁免：窗口内注释行提及触发词
  *   - R6 命中：entry 载荷 eventLog:/displayItems: 死字节字段写形态；
@@ -75,7 +75,7 @@ describe('collectTsFiles 遍历边界', () => {
 // ── 正则/判定原语 ──────────────────────────────────────────────────────
 
 describe('规则原语', () => {
-  it('WRITE_FN_RE 命中八名真实导出（含 .alive 写/删两名 + U2 轮收口写面 + bound 物化写面）', () => {
+  it('WRITE_FN_RE 命中八名真实导出（含 .alive 写/删两名 + U2 轮收尾写点 + bound 物化写点）', () => {
     for (const name of ['writeFinalizedState', 'writeCancelledState', 'writeSettledState', 'writeManifest', 'materializeBoundRecordManifest', 'saveIndex', 'writeAliveMarker', 'removeAliveMarker']) {
       expect(WRITE_FN_RE.test(`${name}(f)`)).toBe(true)
     }
@@ -83,7 +83,7 @@ describe('规则原语', () => {
     expect(WRITE_FN_RE.test('materializeManifest(f)')).toBe(false) // 近名不命中：名单须精确到真实导出名
   })
 
-  it('RECORD_ENTRY_WRITE_RE 双向同行形态命中，读面不命中', () => {
+  it('RECORD_ENTRY_WRITE_RE 双向同行形态命中，读侧不命中', () => {
     expect(RECORD_ENTRY_WRITE_RE.test('pi.appendEntry({ customType: "subagent-record", data })')).toBe(true)
     expect(RECORD_ENTRY_WRITE_RE.test(`data.customType === 'subagent-record' && onAppendEntry()`)).toBe(false)
   })
@@ -127,7 +127,7 @@ describe('scanRecordWriteSurface R1', () => {
       // 相对 PROJECT_ROOT 的载体定义路径前缀无法在 tmpdir 复现（白名单按仓根相对路径），
       // 但 scanRecordWriteSurface 按 file 的绝对路径与白名单比对——tmpdir 下的同相对路径
       // 路径串不含 packages/subagent-core 前缀，故构造「非白名单文件的定义形态」验证
-      // 定义豁免只对白名单文件生效、其余文件定义形态同样命中（防豁免面意外扩大）。
+      // 定义豁免只对白名单文件生效、其余文件定义形态同样命中（防豁免范围意外扩大）。
       'pkg/src/execution/state-marker-like.ts': [
         'export function writeFinalizedState(f: string): boolean { return true; }',
         'async function writeManifest(f: string) {}',
@@ -170,7 +170,7 @@ describe('scanRecordWriteSurface R2', () => {
   })
 })
 
-// ── R3：workflow-record entry 写面白名单（三写点宿主外违规）──────────
+// ── R3：workflow-record entry 写点白名单（三写点宿主外违规）──────────
 
 describe('scanRecordWriteSurface R3', () => {
   it('白名单外宿主 appendEntry + customType "workflow-record" → 违规', () => {
@@ -199,7 +199,7 @@ describe('scanRecordWriteSurface R3', () => {
   })
 })
 
-// ── R4：v1 快照投影构造器白名单（定义 + v1 兼容层外违规）────────────
+// ── R4：v1 快照派生视图构造器白名单（定义 + v1 兼容层外违规）────────────
 
 describe('scanRecordWriteSurface R4', () => {
   it('白名单外 toSubagentRecordEntry 调用 → 违规（import 行无括号不命中）', () => {

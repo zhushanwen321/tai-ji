@@ -2,10 +2,10 @@
   <!--
     审批条（plan 模式状态机显式化 D3/D4/D8/D9）。
     显示驱动公式（D4 单源，derivePlanReviewBarMode 承载）：ready ⇔ 挂起 planReview 请求
-    （runtime 注册表投影，唯一交互权威；presence 语义——ready 恒优先渲染）；revising ⇔
+    （runtime 注册表派生视图，唯一交互权威；presence 语义——ready 恒优先渲染）；revising ⇔
     state=revising；degraded ⇔ state=reviewing ∧ 无挂起 ∧ 稳定窗放行（组合持续 ≥2s 或
-    冷拉真值豁免）；「已应答抑制窗」标记压制 degraded/revising；state=dispatching/approved
-    不进审批条（执行方式表单是其唯一交互面）；其余不渲染。
+    冷读路径拉取真值豁免）；「已应答抑制窗」标记压制 degraded/revising；state=dispatching/approved
+    不进审批条（执行方式表单是其唯一交互范围）；其余不渲染。
     isActive=false 整体不渲染——退出后挂起请求缓存残留（abort 不发撤回帧，已接受代价；
     runtime 失效链 P2-2 起在非 respond 终结点广播失效帧做主清理）由 isActive 门兜住不外显。
     挂载位 = PlanModeBar 行内右区（hairline 由宿主行 border-t 承担，本组件只做行内内容布局）。
@@ -77,7 +77,7 @@
         </PopoverContent>
       </Popover>
       <span class="flex-1" aria-hidden="true" />
-      <!-- 0 评论守卫（§3.5）：无草稿时禁用 + tooltip 说明（禁用态天然不可点，不设二次确认） -->
+      <!-- 0 评论检查（§3.5）：无草稿时禁用 + tooltip 说明（禁用态天然不可点，不设二次确认） -->
       <Button
         variant="secondary"
         size="sm"
@@ -104,7 +104,7 @@
       </Button>
       <!-- 搁置（D3 协议级 dismiss 决策，取代「忽略 = 杀 turn」）：非破坏动作——不杀 turn、
            不丢状态，计划进度与评论草稿保留（暂存待办），经 respond 同通道回传
-           {decision:'dismiss'}；无需确认（守卫配重不对称 F16 随之消解），不作危险色 -->
+           {decision:'dismiss'}；无需确认（检查配重不对称 F16 随之消解），不作危险色 -->
       <Button
         variant="ghost"
         size="sm"
@@ -126,7 +126,7 @@
       {{ t('plan.reviewBar.revising') }}
     </div>
     <!-- 分支③ 降级态（D8 可行动化：一句成因说明 + [重新提交审批] 按钮）：state=reviewing 而
-         进程已换（E3 重启/挂起已消亡）——按钮经消息发送通道注入固定文案 user 消息（D8 写入面
+         进程已换（E3 重启/挂起已消亡）——按钮经消息发送通道注入固定文案 user 消息（D8 写侧
          已穷举登记），agent 在提示词纪律下重调 submit-review；文案分源（resumeHint）。
          退出入口收敛到左区常驻退出按钮；耗时显示不做（设计裁决） -->
     <div
@@ -164,7 +164,7 @@
  * 根 v-if 不渲染 DOM，本组件随之未创建）；isActive=false 期间的订阅存活由 PlanModeBar setup
  * 自持的 useExtensionUI 实例兜底，请求恒入 extensionUIStore（模块级 refCount 订阅 + store
  * requestId dedup，双实例幂等）。isActive=true 后本组件创建，自持实例承担 getPendingRequests
- * 快照补拉（晚订阅窗口）。挂起可枚举语义不依赖审批条当前是否可见。
+ * 快照补充拉取（晚订阅窗口）。挂起可枚举语义不依赖审批条当前是否可见。
  *
  * 回传 payload = PlanReviewResponse（@zhushanwen/extension-protocol 直接 import——D2/D3④
  * regime，本地同形副本已删除迁移）序列化 JSON 字符串，extension 侧 JSON.parse 消费
@@ -273,7 +273,7 @@ function submit(decision: 'approve' | 'revise' | 'dismiss'): void {
 /**
  * 重新提交审批（D8 降级态可行动化）：经 renderer 既有消息发送通道（message.send，与用户
  * 在 composer 直发同链）注入一条固定文案的 user 可见消息（「请重新提交计划审批」——D8
- * 写入面穷举已登记：rename-session / smart-context / session-reader / fork / 回放审计等
+ * 写侧穷举已登记：rename-session / smart-context / session-reader / fork / 回放审计等
  * 消费方同真实用户消息语义），agent 在 plan 模式提示词纪律下重调 submit-review。
  * 失败双分支（设计 D8 明文「发送失败/agent 未响应」）就近错误行 + 左区退出常驻兜底：
  * ① 发送失败 = message.send 抛错（WS/超时）；② agent 未响应 = 发送成功但预期重挂未发生
@@ -281,7 +281,7 @@ function submit(decision: 'approve' | 'revise' | 'dismiss'): void {
  */
 const resubmitting = ref(false)
 /**
- * 就近错误行（D8 失败双分支的呈现面）：分区级状态（plan-store reviewNudgeError）——
+ * 就近错误行（D8 失败双分支的呈现侧）：分区级状态（plan-store reviewNudgeError）——
  * turn 事件 handler 经 store action 写「消息所属 sid」分区（updateFor(capturedSid) 语义），
  * 无实例级 session 状态（ADR-0049；焦点切换后错误随分区保留/隔离）。
  */
@@ -297,7 +297,7 @@ const resubmitError = computed(() => planStore.planReviewNudgeError)
  *   在 plan-store（idle → armed → watching → idle），本组件只接线事件：
  *   armed（send resolve）相位的 message.complete / message.error 属于前置在途 turn，
  *   store 侧 no-op 不判定；message_start 到达才开窗（watching）；
- * - 成功收口 = 新 planReview 挂起登记到达（重挂发生）→ 内含于 plan-store
+ * - 成功收尾 = 新 planReview 挂起登记到达（重挂发生）→ 内含于 plan-store
  *   setPlanReviewPending(true)（关检测窗 + 清旧错误，同轮先重挂后收尾不误报）；
  * - 失败判定 = watching 相位下 turn 结束（message.complete / message.error）而重挂未至；
  *   send.rejected（预检拒绝未进轮 / defer 重投再拒）不受起点标记门——nudge 在途
@@ -306,8 +306,8 @@ const resubmitError = computed(() => planStore.planReviewNudgeError)
  *   未结束，runtime event-adapter 透传）不在此列——不关窗不落错误，pi 续跑后的终态帧
  *   再判（判据与 useCompletionNotify 的 willRetry 静音同型，防「中间失败帧落错误 →
  *   重挂成功清错误」的误报闪现）；payload 缺省（旧 runtime / 非重试终态）按终态处理；
- *   未点重提（idle）/ 已收口的 turn 信号由 action no-op；
- * - WS 断连无信号的形态不判死（fail-safe 不误导，与评论/批准同风险面 R1）；
+ *   未点重提（idle）/ 已收尾的 turn 信号由 action no-op；
+ * - WS 断连无信号的形态不判死（fail-safe 不误导，与评论/批准同风险范围 R1）；
  * - 切 session 无串台：检测窗在 per-session 分区（非实例 ref），事件按 capturedSid 写旧
  *   分区，新焦点分区天然是干净基线（ADR-0049 Map 分区，免 watch(sessionId) 手动清空）。
  */

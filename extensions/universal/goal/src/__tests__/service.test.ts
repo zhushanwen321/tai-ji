@@ -123,7 +123,7 @@ describe("finalizeGoal — history 写入矩阵", () => {
 		const ports = makeFakePorts();
 		const state = makeState();
 		state.status = "complete";
-		// transitionStatus 查表：终态不可转，调用方须先 isTerminalStatus 守卫
+		// transitionStatus 查表：终态不可转，调用方须先 isTerminalStatus 检查
 		expect(() => finalizeGoal(state, "cancelled", ports)).toThrow();
 		expect(state.status).toBe("complete");
 	});
@@ -175,7 +175,7 @@ describe("applyEvent — 简单事件", () => {
 				usage: { input: 100, output: 50, cacheRead: 20 },
 			},
 		});
-		// 回归修复：blocked 状态不累加 token（原 bug：缺 isActiveStatus 守卫）
+		// 回归修复：blocked 状态不累加 token（原 bug：缺 isActiveStatus 检查）
 		expect(session.state.tokensUsed).toBe(before);
 	});
 

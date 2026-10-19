@@ -24,7 +24,7 @@ const hoverCardStubs = {
 }
 
 /** 帧工厂：合法全量帧为基线（ttft current=820 →「820ms」；ttft 为 GenStatsFrame 必填字段，
- *  缺省即类型漂移——typecheck:test 白名单收口后由编译期拦截），用例按需覆写 */
+ *  缺省即类型漂移——typecheck:test 白名单收尾后由编译期拦截），用例按需覆写 */
 export function genStatsFrame(sessionId: string, overrides: Partial<GenStatsFrame> = {}): GenStatsFrame {
   return {
     sessionId,

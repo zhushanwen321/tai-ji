@@ -9,21 +9,21 @@
  * 探测，总预算耗尽 fail-closed）。
  *
  * 锁定：
- * - 校验顺序：hook → getCommands →（命中后）内核投递腿 prompt（mock 调用序断言；
+ * - 校验顺序：hook → getCommands →（命中后）内核投递路径 prompt（mock 调用序断言；
  *   校验直连 client.getCommands()，不走 sessionService.getCommands 的 markDirty 查询语义）
  * - 未命中：500ms × 6 次重试（P9 定案）耗尽后拒发，回执 reason:'command-missing'，
  *   prompt 未调用（E14 结构性防线：命令串永不漏进模型）；不广播 send.rejected /
  *   message.error（回执机制是唯一反馈面——send.rejected 会触发前端队列重投，
  *   插件写命令绝不能入用户队列）
- * - 命中（首次 / 重试窗口内恢复）：内核受理（receipt 非空）+ 投递腿 prompt 到达
+ * - 命中（首次 / 重试窗口内恢复）：内核受理（receipt 非空）+ 投递路径 prompt 到达
  * - 无 requireCommand：无校验介入（无 1+6 次探测特征），内核受理（既有路径回归；
  *   client.getCommands 的 registry 命令清单缓存消费 [pi1-disposition-chat-flow D2①]
  *   与本机制正交，见该用例内注释）
  * - reason 分类：hook 拦截 → 'hook-blocked'
- * - 手敲 `/` 扩展命令的 occupancy 收口（u5a #12）曾随投递腿迁入 registry 的 CP6 短窗；
+ * - 手敲 `/` 扩展命令的 occupancy 收尾（u5a #12）曾随投递路径迁入 registry 的 CP6 短窗；
  *   [pi1-disposition-chat-flow D3③] CP6 回落窗已整体退役，occupancy 回落改由 pi 权威
  *   事实驱动（handled 响应即回落；回合事件照常推进；进程死亡由 onSessionExit full-reset
- *   收口，ADR-0122）——行为锚定见 session-delivery-commands.test.ts 与
+ *   收尾，ADR-0122）——行为锚定见 session-delivery-commands.test.ts 与
  *   message-dispatcher.test.ts 的 handled 用例。
  *
  * 运行：cd packages/runtime && npx vitest run src/__tests__/message-dispatcher-require-command.test.ts
@@ -125,7 +125,7 @@ describe('requireCommand 原子校验（D6/u5a：hook 后、内核提交前）',
     vi.useRealTimers()
   })
 
-  it('命中：内核受理（receipt 非空 + lane 投影）且投递腿 prompt 到达', async () => {
+  it('命中：内核受理（receipt 非空 + lane 派生视图）且投递路径 prompt 到达', async () => {
     const { dispatcher, calls, client, flush } = makeHarness({ commandQueue: [[{ name: 'schedule', source: 'extension' }]] })
     const result = await dispatcher.sendMessage('s1', '/schedule off abc', undefined, undefined, 'schedule')
     await flush()

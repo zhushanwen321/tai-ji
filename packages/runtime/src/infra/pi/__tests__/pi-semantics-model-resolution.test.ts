@@ -1,5 +1,5 @@
 /**
- * PS-01 探针：--model pattern 匹配语义（pi 语义依赖机器守卫，pi-boundary-reliability D6 探针层）。
+ * PS-01 探针：--model pattern 匹配语义（pi 语义依赖机器检查，pi-boundary-reliability D6 探针层）。
  *
  * 登记条目：docs/pi-semantics.json PS-01——「--model 是 pattern 非精确 ID：
  * findExactModelReferenceMatch 的 id 匹配为 toLowerCase 相等（canonical 双命中判歧义作废）；
@@ -66,7 +66,7 @@ describe.skipIf(!PI_DIST)(
       ).toBe(true)
       expect(
         resolver.includes('idMatches.length === 1 ? idMatches[0] : undefined'),
-        'PS-01 漂移：canonical 双命中不再判歧义作废——孪生条目将静默命中其一，复核 PS-01 与切片 1 孪生守卫',
+        'PS-01 漂移：canonical 双命中不再判歧义作废——孪生条目将静默命中其一，复核 PS-01 与切片 1 孪生检查',
       ).toBe(true)
     })
 

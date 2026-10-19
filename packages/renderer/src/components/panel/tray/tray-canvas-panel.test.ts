@@ -33,7 +33,7 @@ import zhTray from '@/i18n/locales/zh-CN/tray'
 import type { CanvasListEntry } from '@zhushanwen/extension-protocol'
 
 // ── mock：overlay 直达入口（行点击链；真实模块 import 链重，替身即可）──
-const openCanvasTabMock = vi.hoisted(() => vi.fn<(canvasId: string) => void>())
+const openCanvasTabMock = vi.hoisted(() => vi.fn<(canvasId: string, sessionId: string) => void>())
 vi.mock('@/components/panel/workflow-viz/overlay/workflow-viz-overlay', () => ({
   openCanvasTab: openCanvasTabMock,
 }))
@@ -76,6 +76,7 @@ const trayFixture: UseTrayCountsReturn = {
 
 function makeCanvas(overrides: Partial<CanvasListEntry> & { canvasId: string }): CanvasListEntry {
   return {
+    ownerSessionId: SID,
     name: `画布 ${overrides.canvasId}`,
     statement: '示例问题陈述',
     converged: false,
@@ -182,7 +183,7 @@ describe('TrayCanvasPanel 列表渲染与阶段徽标（使用者黑盒 / 观察
     expect(rows[1].text()).toContain(zhTray.tray.canvas.phase.growing)
   })
 
-  it('无画布 → 空态提示；「＋ 新建画布」按钮恒在场（创建入口可达性）', async () => {
+  it('无画布 → 空态提示；「＋ 新建画布」按钮在场（防御性空态不破版）', async () => {
     const panel = mountPanel()
     await flushPromises()
 
@@ -200,7 +201,8 @@ describe('TrayCanvasPanel 行点击打开 overlay（构建者白盒）', () => {
 
     await panel.find('[data-testid="tray-canvas-row"]').trigger('click')
     expect(openCanvasTabMock).toHaveBeenCalledTimes(1)
-    expect(openCanvasTabMock).toHaveBeenCalledWith('cvs-open-me')
+    // 载荷带归属 sessionId（D4：overlay 级联判定 + CanvasPane per-session 分区的键）
+    expect(openCanvasTabMock).toHaveBeenCalledWith('cvs-open-me', SID)
   })
 })
 
@@ -300,6 +302,7 @@ describe('TrayCanvasPanel 三要素 modal（缺一拒绝 = 不变量 1 前置校
     expect(commandMock).toHaveBeenCalledTimes(1)
     expect(commandMock).toHaveBeenCalledWith('canvas.mutate', {
       actor: 'user',
+      sessionId: SID,
       action: 'create',
       params: {
         statement: '多引擎支持怎么落地',

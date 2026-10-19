@@ -1,6 +1,6 @@
 // src/execution/assembly/subagent-actions-core.ts
 //
-// subagent tool 六 handler 的领域内核（校验 / 守卫链 / 归属判定 / 终态映射）。
+// subagent tool 六 handler 的领域内核（校验 / 检查链 / 归属判定 / 终态映射）。
 //
 // 来源：pi-sw `src/interface/subagent-actions.ts` 的零 pi-API 部分原样下沉
 //（sink 设计 docs/design/subagent-core-sink-design.md（已删，git 可追溯） §3.3 D6② / U10②；
@@ -16,7 +16,7 @@
 
 import { findForeignLiveInstance } from "../persistence/alive-store.ts";
 // [U4 / §3.2.3] 锚可解析性判据（三件套判据一单点，cold-lookup 导出）——fork-from
-// 守卫 5 的「锚不可解析 → 引导 reopen」分流消费。
+// 检查 5 的「锚不可解析 → 引导 reopen」分流消费。
 import { isAnchorResolvable } from "./cold-lookup.ts";
 import { computeElapsedSeconds, projectOutcome } from "../persistence/execution-record.ts";
 import { SLUG_MAX_LENGTH } from "../../shared/run-vocabulary.ts";
@@ -45,7 +45,7 @@ export const MAX_LIST_LIMIT = 100;
 /** background 启动提示文案（完成通知经自动注入消息投递，agent 不应轮询）。 */
 export const BG_MESSAGE = "detached, will notify on completion (auto-injected message, do not poll)";
 
-/** 通知投递契约回显恒值（契约声明；值语义由 execution/notify-ledger.ts 兑现）。 */
+/** 通知投递契约回显恒值（契约声明；值语义由统一投递服务 port 半区兑现——投递日志 + notifyId 幂等 + 差集重放，unified-delivery 波 2）。 */
 export const NOTIFY_CONTRACT = "ledger+at-least-once" as const;
 
 /**
@@ -211,7 +211,7 @@ export function foreignLiveInstanceMessage(id: string, pid: number, sessionFile:
  * [U4] 形态枚举分流消亡：旧七种文案（deliberately closed / reconnectable+fork-from
  * 指引 / 异树 fork-from 指引）随「万物可续」删除——任何 idle record（无论旧终态
  * 遗留位 closedReason 为何值）都可同 id 续聊；锚失效不拒绝，走 markReopened 自动
- * 带历史重开（reopen 降级，§3.2.3——无需用户操作）。剩余可达拒绝面收敛为：
+ * 带历史重开（reopen 降级，§3.2.3——无需用户操作）。剩余可达拒绝情形收敛为：
  *   1. ResurrectDeniedError（worktree 绑定丢失 / 异进程活实例）→ 原样透传（自带
  *      pid/恢复指引——占用拒绝即唯一真实拒绝形态）；
  *   2. 记录不存在（id 打错）→ 原样透传 not found；
@@ -220,7 +220,7 @@ export function foreignLiveInstanceMessage(id: string, pid: number, sessionFile:
  * 锚失效场景的文案自解释。
  */
 export function endedMessageGuard(service: SubagentService, id: string, original: unknown): Error {
-  // 透明重生守卫拒绝（worktree/异进程占用）原样透传——错误自带完整行动语言。
+  // 透明重生检查拒绝（worktree/异进程占用）原样透传——错误自带完整行动语言。
   if (original instanceof ResurrectDeniedError) return original;
   let snap: SubagentRecord | undefined;
   try {
@@ -267,7 +267,7 @@ function describeSessionTreeContext(r: SubagentRecord): string {
 }
 
 // ============================================================
-// 终态映射 / list 投影
+// 终态映射 / list 派生视图
 // ============================================================
 
 /** exhaustiveness 兜底：default 分支把 status 收敛为 never，ExecutionStatus 加态时 tsc 报错。 */
@@ -279,7 +279,7 @@ function assertNever(value: never): string {
  * 内部 ExecutionStatus → 对外 state 映射（永久会话模型两态，U2 迁移）。
  * 真实映射只有两条：
  *   running → active / idle → idle（永久会话无 ended 形态——空闲即可续聊；旧
- *   closed→ended 映射随终态概念删除，「上一轮为什么停」经 stopReason 披露，U8 投影面）。
+ *   closed→ended 映射随终态概念删除，「上一轮为什么停」经 stopReason 披露，U8 派生视图侧）。
  * ExternalState 即两态联合。
  * 未来内部加态必须扩展此处，漏加会在 default 分支编译报错（而非静默返回 undefined
  * 让 state 字段以无主值进入 listResponse JSON）。
@@ -289,7 +289,7 @@ export function mapExternalState(status: ExecutionStatus): ExternalState {
     case "running":
       return "active";
     case "idle":
-      // 已收口/等续聊。对外映射为 idle（可续聊语义，替代旧 ended）。
+      // 已收尾/等续聊。对外映射为 idle（可续聊语义，替代旧 ended）。
       return "idle";
     default:
       throw new Error(`mapExternalState: unhandled ExecutionStatus ${assertNever(status)}`);
@@ -297,10 +297,10 @@ export function mapExternalState(status: ExecutionStatus): ExternalState {
 }
 
 /** SubagentRecord → SubagentListItem（state 两态主字段 + status 调试字段，duration 实时计算）。
- *  parent 从 record.parentRecordId 派生（配合直接父守卫）；[U5/D4] resumable 字段已
+ *  parent 从 record.parentRecordId 派生（配合直接父检查）；[U5/D4] resumable 字段已
  *  退役（idle 即可续聊，state 主字段已并存表达）；outcome 一等终态语义（projectOutcome
  *  唯一出口），closedReason 退出对外 JSON（保留为 record 内部诊断字段），对外成败判读
- *  收口到 outcome。
+ *  收尾到 outcome。
  *  agent 是 GUI/TUI list 共用的显示名——取 basename 短名（displayAgentName），
  *  完整路径保留在 record.agent（数据层）。 */
 export function recordToListItem(r: SubagentRecord): SubagentListItem {
@@ -459,9 +459,9 @@ export async function cancelHandler(
   if (rec.mode !== "background") {
     throw new Error(`Cannot cancel subagent ${id} (unsupported mode: ${rec.mode})`);
   }
-  // [modeless 波1] cancel 语义统一：cancel = 打断在飞轮 + settle interrupted（record
-  // 留 idle 可续聊，不收口——旧 chatMode record 的 close(force:true) 别名分支随
-  // chatMode 消亡删除：cancel 不是收口动作，收口落账归 close action）。
+  // [modeless 波1] cancel 语义统一：cancel = 打断在途轮 + settle interrupted（record
+  // 留 idle 可续聊，不收尾——旧 chatMode record 的 close(force:true) 别名分支随
+  // chatMode 消亡删除：cancel 不是收尾动作，收尾写入 journal 记录归 close action）。
   // step 3: service.cancel boolean（list-view 契约不变）；false = 已终态（CAS 抢锁失败）。
   // 注意：不嵌入 rec.status——findRecord 快照可能已过期（TOCTOU：cancel 期间 detached
   // 路径 CAS 到 done/failed）。重新查当前状态，避免「status: running」与「already finished」矛盾。
@@ -488,13 +488,13 @@ export async function cancelHandler(
  *
  * [U4 / §3.2.3 万物可续] 状态分流面收敛：任何非 workflow-origin record 的 message
  * 都放行——idle → Continuation 派发新轮（锚失效自动 markReopened 降级，同 id 带
- * 历史重开）；在途轮存在 → D2 打断（abort + 入队）。真实拒绝面（三类）：异进程占用
+ * 历史重开）；在途轮存在 → D2 打断（abort + 入队）。真实拒绝情形（三类）：异进程占用
  *（ResurrectDeniedError 含 pid）/ 归属不匹配 / workflow 域边界（results are collected
  * by the workflow run——一次性成员不可续聊，重派走 `subagents` tool）。interrupt 输入字段
- * 保留（[A4] 工具 schema 兼容面——extensions subagent-tool-schema 仍声明该字段）但
+ * 保留（[A4] 工具 schema 兼容范围——extensions subagent-tool-schema 仍声明该字段）但
  * 不参与分派（D2 统一打断语义）。
  *
- * 归属守卫：getRecordForAction 内部校验 rootSessionId + 直接父。
+ * 归属检查：getRecordForAction 内部校验 rootSessionId + 直接父。
  *
  * @throws Error subagentId/text 缺失 / 不存在或非本 session 所有 / workflow 域边界
  * @throws ResurrectDeniedError 异进程占用（唯一占用拒绝形态，文案含 pid）
@@ -511,7 +511,7 @@ export async function messageHandler(
     'Correct: {"action":"message","messageParam":{"subagentId":"sa-...","text":"your follow-up"}}',
   );
 
-  // 归属守卫：getRecordForAction 内部校验 rootSessionId + 准入三件套（[U4 / §3.2.3]
+  // 归属检查：getRecordForAction 内部校验 rootSessionId + 准入三件套（[U4 / §3.2.3]
   // 万物可续——任何 idle record 均可续聊，形态枚举 gate 消亡）。
   // 拒绝时经 endedMessageGuard 分流：找不到 → 原错误；异进程占用 → 含 pid 占用拒绝；
   // 跨 session 树 → 归属判据 + fork-from 指引。
@@ -524,7 +524,7 @@ export async function messageHandler(
 
   // [U4 / §1.4 D7 域边界] workflow-origin record 不进 message 通道：workflow agent
   // 结果由脚本返回值承载、无 message 对端（run-orchestration settleOneShotOutcome
-  // D7 例外注释的四面连带——「被误升级为对话容器」正是本守卫承接的面）。origin 是
+  // D7 例外注释的四面连带——「被误升级为对话容器」正是本检查承接的面）。origin 是
   // 记录的真实身份维度（非「以什么方式结束」的形态枚举），此拒绝不属万物可续的
   // 形态 gate 残留。
   if (record.origin === "workflow") {
@@ -559,18 +559,18 @@ export async function messageHandler(
 // ============================================================
 
 /**
- * close action handler：结束 subagent（[U5 / §3.2.5] close = 收口落账——
+ * close action handler：结束 subagent（[U5 / §3.2.5] close = 收尾写入 journal 记录——
  * 会话落 ended 侧，不终态化；对话模式为主，one-shot 同样支持）。
  *
  * force 语义（设计决策 5/10 × [U5] 意愿动作重定义）：
- *   force:false（默认）= 优雅收口——
- *     无在跑轮（timer armed / 无活进程）→ 立即收口落账（回收保活进程 + markSettledOut）
- *     有活进程在跑轮 → 置 closeAfterRound 挂起，收口轮 settle → 轮次通知送达 → 收口落账
+ *   force:false（默认）= 优雅收尾——
+ *     无在跑轮（timer armed / 无活进程）→ 立即收尾写入 journal 记录（回收保活进程 + markSettledOut）
+ *     有活进程在跑轮 → 置 closeAfterRound 挂起，收尾轮 settle → 轮次通知送达 → 收尾写入 journal 记录
  *     （顺序约束 [写死]）——返回 {closed:true} 即承诺轮结束后资源已释放
  *   force:true = 立即终止——cancel 语义（abort 轮 + settle interrupted + 放弃轮
- *     标记）+ 随即收口落账
+ *     标记）+ 随即收尾写入 journal 记录
  *
- * 行为分流委托 chatActions.closeSubagent（归属守卫由 chatActions.getRecordForAction 把关）。
+ * 行为分流委托 chatActions.closeSubagent（归属检查由 chatActions.getRecordForAction 把关）。
  */
 export async function closeHandler(
   service: SubagentService,
@@ -580,7 +580,7 @@ export async function closeHandler(
   if (!id) throw new Error("closeParam.subagentId is required for action:'close'");
   const force = input?.force === true;
 
-  // 归属守卫（决策 3）+ 行为分流（chatActions.closeSubagent）
+  // 归属检查（决策 3）+ 行为分流（chatActions.closeSubagent）
   const record = service.chatActions.getRecordForAction(id);
   await service.chatActions.closeSubagent(record, force);
 
@@ -599,11 +599,11 @@ export async function closeHandler(
  * 旧记录本身不动——trySettleLegacyClosed 语义均不触碰。
  *
  * [U4 / §3.2.3 万物可续] 语义分野写死：fork-from = **历史在**分叉新 id；reopen
- * （markReopened，经 message 触发）= 历史亡同 id 重启。守卫链按 transcript 锚
+ * （markReopened，经 message 触发）= 历史亡同 id 重启。检查链按 transcript 锚
  * 可解析性分流——锚不可解析（transcript 被回收）时 fork-from 语义空洞，引导
- * message（reopen 语义）而非拒绝（zcode 例外：守卫 3 按引擎恒拒，见下）。
+ * message（reopen 语义）而非拒绝（zcode 例外：检查 3 按引擎恒拒，见下）。
  *
- * 守卫链（拒绝原因与行动语言对齐，见 assertAndLookupForkFromSource）：
+ * 检查链（拒绝原因与行动语言对齐，见 assertAndLookupForkFromSource）：
  *   1. 本进程内存 running → 还活着，应走 message（防双写同一子 session 文件）
  *   2. 不存在            → 引导 list 确认
  *   3. zcode 引擎        → fork-from 通道未接入，恒拒 + 准确理由（zcode 历史在隔离
@@ -612,10 +612,10 @@ export async function closeHandler(
  *   5. worktree 记录     → checkout 不可复用，fork 子进程 cwd 会回落主仓破坏隔离
  *   6. 锚不可解析         → 无历史可分叉（从未开跑 / transcript 被回收）——引导
  *      message（同 id reopen，历史摘要自动注入）或 start fresh
- *  （[U4] 原守卫 4「cancelled/user-close 拒绝」随万物可续删除——fork-from 对任何
+ *  （[U4] 原检查 4「cancelled/user-close 拒绝」随万物可续删除——fork-from 对任何
  *   idle record 放行，主动告别不再是 fork 例外。）
  *
- * @throws Error 各守卫命中 / service.execute 失败（引擎不支持等）
+ * @throws Error 各检查命中 / service.execute 失败（引擎不支持等）
  */
 export async function forkFromHandler(
   service: SubagentService,
@@ -644,11 +644,11 @@ export async function forkFromHandler(
   };
 }
 
-/** forkFromHandler 的守卫链（fork-from handler doc 的守卫 1–6 原样提取）：按序校验
+/** forkFromHandler 的检查链（fork-from handler doc 的检查 1–6 原样提取）：按序校验
  *  源记录可接续，命中即抛带行动语言的 Error；全部通过则返回源 SubagentRecord
- *  （守卫 6 已保证锚可解析、sessionFile 非空，返回类型随之收窄）。 */
+ *  （检查 6 已保证锚可解析、sessionFile 非空，返回类型随之收窄）。 */
 function assertAndLookupForkFromSource(service: SubagentService, id: string): SubagentRecord & { sessionFile: string } {
-  // 守卫 1：本进程内存 running —— 直接 message 即可，fork-from 会双写其 session 文件。
+  // 检查 1：本进程内存 running —— 直接 message 即可，fork-from 会双写其 session 文件。
   if (service.queries.findRecord(id)) {
     throw new Error(
       `subagent ${id} is still active in this process — use action:'message' to continue it directly. ` +
@@ -656,7 +656,7 @@ function assertAndLookupForkFromSource(service: SubagentService, id: string): Su
     );
   }
 
-  // 守卫 2：全态查找（内存 idle + 磁盘重建）。
+  // 检查 2：全态查找（内存 idle + 磁盘重建）。
   const source = service.queries.lookupRecordAnyState(id);
   if (!source) {
     throw new Error(
@@ -665,11 +665,11 @@ function assertAndLookupForkFromSource(service: SubagentService, id: string): Su
     );
   }
 
-  // 守卫 3（[R5] zcode 早分流）：fork-from 通道未对 zcode 接入，先于异进程探针 /
+  // 检查 3（[R5] zcode 早分流）：fork-from 通道未对 zcode 接入，先于异进程探针 /
   // worktree / 锚判据按引擎恒拒并给出准确理由——zcode 会话历史在隔离 sqlite 会话库、
-  // 不随 pi retention 回收，守卫 6 的「never started / transcript collected after
-  // retention expired」与守卫 5 的「read its session file」行动语言对 zcode 均失实；
-  // 守卫 4 探针判据基于 pi sessionFile（zcode 恒 undefined）天然跳过，无信息增量。
+  // 不随 pi retention 回收，检查 6 的「never started / transcript collected after
+  // retention expired」与检查 5 的「read its session file」行动语言对 zcode 均失实；
+  // 检查 4 探针判据基于 pi sessionFile（zcode 恒 undefined）天然跳过，无信息增量。
   if (source.engine === "zcode") {
     throw new Error(
       `subagent ${id} runs on the zcode engine, whose fork-from channel is not wired up yet — ` +
@@ -680,12 +680,12 @@ function assertAndLookupForkFromSource(service: SubagentService, id: string): Su
     );
   }
 
-  // 守卫 4：异进程活跃（.alive 侧车指向另一进程的活 pid）。
+  // 检查 4：异进程活跃（.alive 侧车指向另一进程的活 pid）。
   // 双写防护：fork 虽 copy-on-write（历史 jsonl 只读），但源仍在异进程运行时接续容易
   // 读到半截历史，等它结束再接更安全。判据 = findForeignLiveInstance 直接探针（同
   // cold-lookup 准入判据；[U4b / D3b (a′)] 原读 rec.externalInstance 重建缓存换现查
   // 探针——语义等价且比重建时点缓存更新鲜）。sessionFile 缺失（entry-born 孤儿）时
-  // 无从探活，天然无 foreign 声明，落守卫 6 处置。
+  // 无从探活，天然无 foreign 声明，落检查 6 处置。
   if (source.sessionFile !== undefined && findForeignLiveInstance(source.sessionFile) !== undefined) {
     throw new Error(
       `subagent ${id} is still running in another process (alive pid marker present). ` +
@@ -693,9 +693,9 @@ function assertAndLookupForkFromSource(service: SubagentService, id: string): Su
     );
   }
 
-  // 守卫 5：worktree 记录 —— WorktreeHandle 不可序列化，checkout 已被 reaper/cleanup
+  // 检查 5：worktree 记录 —— WorktreeHandle 不可序列化，checkout 已被 reaper/cleanup
   // 回收；fork 子进程若复用旧路径会回落主 repo（破坏文件隔离）。与续聊链的
-  // hadWorktree 守卫同一判据同一理由。
+  // hadWorktree 检查同一判据同一理由。
   if (source.worktree === true) {
     throw new Error(
       `subagent ${id} was created with worktree isolation; that binding was lost when its parent process ended. ` +
@@ -705,7 +705,7 @@ function assertAndLookupForkFromSource(service: SubagentService, id: string): Su
     );
   }
 
-  // 守卫 6（[U4] 锚判据化；[R5] zcode 形态已在守卫 3 早分流，到达此处必为 pi
+  // 检查 6（[U4] 锚判据化；[R5] zcode 形态已在检查 3 早分流，到达此处必为 pi
   // record）：锚不可解析（字段缺失 = entry-born 从未开跑；
   // 文件不在 = transcript 被回收）→ fork-from「继承历史」语义空洞。不硬拒 start
   // fresh，引导 message 的 reopen 语义（同 id 重开 + 历史摘要自动注入）。

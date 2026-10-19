@@ -4,7 +4,7 @@
  * 覆盖（plan.md W20 验收）：
  * 1. 增量路径——第二次 getHistory 带 since 且返回增量条目 < 全量
  * 2. 空 entries 短路（R-12：不走尾读 fallback，直接返回缓存/空列表）
- * 3. "Entry not found" fallback 全量重拉（D6-4）+ 其他错误走尾读且缓存不动
+ * 3. "Entry not found" fallback 全量重新拉取（D6-4）+ 其他错误走尾读且缓存不动
  * 4. lastLeafId 随成功 getHistory 更新、removeSessionEntry（pi 退出汇聚点）清除
  * 5. HistoryRebuildCache LRU 容量帽 + mergeIncrementalMessages piEntryId 去重
  * 6. B8（memory-leak-remediation §3.3-B8）：单条目字节帽（超限不入缓存——「缓存从未
@@ -260,20 +260,20 @@ describe('SessionService.getHistory —— D6 历史增量', () => {
     expect(getHistoryTailFromFile).not.toHaveBeenCalled()
   })
 
-  it('③ D6-4：增量 "Entry not found" → 丢缓存 → 全量重拉并覆盖缓存', async () => {
+  it('③ D6-4：增量 "Entry not found" → 丢缓存 → 全量重新拉取并覆盖缓存', async () => {
     const { svc, calls } = makeService([
       { data: { entries: [entry('e1')], leafId: 'leaf-1' } },
       new Error('Entry not found: leaf-1'), // since 失效（防御场景：缓存跨 pi 进程存活）
-      { data: { entries: [entry('e1'), entry('e2'), entry('e3')], leafId: 'leaf-3' } }, // 全量重拉
+      { data: { entries: [entry('e1'), entry('e2'), entry('e3')], leafId: 'leaf-3' } }, // 全量重新拉取
       { data: { entries: [entry('e4', 'leaf-3')], leafId: 'leaf-4' } }, // 验证缓存已被全量结果覆盖（新基线 leaf-3）
     ])
 
     await svc.getHistory('s4') // 全量 → 缓存 {leaf-1, [e1]}
-    const afterFallback = await svc.getHistory('s4') // Entry not found → 全量重拉 → {leaf-3, [e1,e2,e3]}
+    const afterFallback = await svc.getHistory('s4') // Entry not found → 全量重新拉取 → {leaf-3, [e1,e2,e3]}
     expect(afterFallback.messages.map((m) => m.piEntryId)).toEqual(['e1', 'e2', 'e3'])
     expect(calls[1]?.since).toBe('leaf-1')
     expect(calls[2]?.since).toBeUndefined() // fallback 是全量（无 since）
-    expect(getHistoryTailFromFile).not.toHaveBeenCalled() // fallback 是全量重拉，不是尾读
+    expect(getHistoryTailFromFile).not.toHaveBeenCalled() // fallback 是全量重新拉取，不是尾读
 
     // 缓存基线已更新为 leaf-3：下次走 since=leaf-3 增量
     const third = await svc.getHistory('s4')
@@ -331,21 +331,21 @@ describe('SessionService.getHistory —— D6 历史增量', () => {
     expect(result).toEqual({ messages: [], truncated: true, loadedTurns: 0, totalTurnsEstimate: 0 })
   })
 
-  it('Fix-2：delta 首条 parentId ≠ 缓存 leafId（branch）→ 丢缓存全量重拉，不合出混合历史', async () => {
+  it('Fix-2：delta 首条 parentId ≠ 缓存 leafId（branch）→ 丢缓存全量重新拉取，不合出混合历史', async () => {
     // pi append-only + branch（extension navigateTree）后：since=旧 leaf 不报 "Entry not found"，
     // 但新分支首条 entry 的 parentId 是 branch 点（e0）而非旧 leaf（e2）→ 不变量检测 → 全量
     const { svc, calls } = makeService([
       { data: { entries: [entry('e1'), entry('e2')], leafId: 'e2' } }, // 全量，缓存 {e2, [e1,e2]}
       { data: { entries: [entry('b1', 'e0'), entry('b2', 'b1')], leafId: 'b2' } }, // 增量：head parentId=e0 ≠ e2
-      { data: { entries: [entry('e1'), entry('e2'), entry('b1'), entry('b2')], leafId: 'b2' } }, // 全量重拉（新分支完整历史）
+      { data: { entries: [entry('e1'), entry('e2'), entry('b1'), entry('b2')], leafId: 'b2' } }, // 全量重新拉取（新分支完整历史）
     ])
 
     await svc.getHistory('s-branch')
     const second = await svc.getHistory('s-branch')
 
     expect(calls[1]?.since).toBe('e2') // 第二拍确实走了增量（since 传递正确）
-    expect(calls[2]?.since).toBeUndefined() // 不变量 violation → 丢缓存 → 全量重拉
-    // 返回的是全量重拉结果（新分支权威视图），不是「缓存老分支尾 + 新分支」的拼接
+    expect(calls[2]?.since).toBeUndefined() // 不变量 violation → 丢缓存 → 全量重新拉取
+    // 返回的是全量重新拉取结果（新分支权威视图），不是「缓存老分支尾 + 新分支」的拼接
     expect(second.messages.map((m) => m.piEntryId)).toEqual(['e1', 'e2', 'b1', 'b2'])
     expect(getHistoryTailFromFile).not.toHaveBeenCalled()
 

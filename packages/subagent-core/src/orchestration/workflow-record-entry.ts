@@ -2,13 +2,13 @@
  * workflow-record 自描述 entry 的 schema 契约单源（W17 [D4]；词表/guard 收敛
  * 二轮复审候选 2；W1 [D1] v 升格 2）。
  *
- * 消费格局（core 写点 / 壳 loadAll v2 定界 / runtime 投影扫描）各自需要
+ * 消费格局（core 写点 / 壳 loadAll v2 定界 / runtime 派生视图扫描）各自需要
  * customType 字面量与版本判定，独立演化即静默漂移——本模块收敛两件事：
  * 1. customType 与 entry schema 版本常量（版本 bump 单点，写点与读判定同源）；
  * 2. 纯判定函数 classifyWorkflowRecordEntryData——entry data 的 v1/v2 分类。
  *
  * 版本谱系：
- * - v1（W17 起）：全量快照形态 `{v:1, snapshot, updatedAt}`——兼容读面保留
+ * - v1（W17 起）：全量快照形态 `{v:1, snapshot, updatedAt}`——兼容读侧保留
  *   （D7 惰性兼容读，旧会话行为完全不变；写侧停写归 U1）；
  * - v2（W1 起，当前版本）：注册 + 终态两条小条目（kind 判别）——运行态数据
  *   移出主 session JSONL，事实源 = run journal（run-events.ts）。
@@ -18,9 +18,9 @@
  * runtime warnOnce 去重是两消费方各自的可观测性选择，收敛判定不收敛日志。
  *
  * 不在本模块的：
- * - v1 条目内 snapshot 的内部格式——v1 已冻结为兼容读面（D7）不再演化，无
+ * - v1 条目内 snapshot 的内部格式——v1 已冻结为兼容读侧（D7）不再演化，无
  *   独立格式版本常量需要单源（entry 层 v 只管 entry schema 自身的演化）；
- * - runtime 投影的 runId 存在性守卫——投影键需求（record 需要 runId 做 Map 键），
+ * - runtime 派生视图的 runId 存在性检查——派生视图键需求（record 需要 runId 做 Map 键），
  *   非 entry schema 面，runtime 解码链自有等价校验。
  */
 
@@ -37,9 +37,9 @@ export const WORKFLOW_RECORD_CUSTOM_TYPE = "workflow-record";
 
 /**
  * legacy workflow 指针条目（`workflow-state-link`）的 customType。W17 前写侧
- * 产物，写侧已停写——现役消费全在读侧兼容面：runtime workflow-extractor /
+ * 产物，写侧已停写——现役消费全在读侧兼容范围：runtime workflow-extractor /
  * session-file-extraction、壳 session-lifecycle 引用集三代解析（均经 barrel
- * import 本常量）。session-reader 生产依赖面不引 core（包架构裁决），侧持本地
+ * import 本常量）。session-reader 生产依赖范围不引 core（包架构裁决），侧持本地
  * 字面量镜像、值等价由其 workflow.test.ts 常量等值断言锚定。命名对齐
  * {@link WORKFLOW_RECORD_CUSTOM_TYPE}。
  */
@@ -47,7 +47,7 @@ export const WORKFLOW_STATE_LINK_CUSTOM_TYPE = "workflow-state-link";
 
 /**
  * `workflow-record` entry 的 data schema 版本（W1 起 v2）。消费方按 v 判别
- * 解析，不认识的版本跳过而非猜测。v1 全量快照形态随版本门保留为兼容读面
+ * 解析，不认识的版本跳过而非猜测。v1 全量快照形态随版本门保留为兼容读侧
  * （D7，冻结不演化）。
  *
  * （const 声明 + 字面量初始化使类型收窄为字面量 2，无需 `as const`。）
@@ -63,7 +63,7 @@ export type WorkflowRecordEntryKind = (typeof WORKFLOW_RECORD_ENTRY_KINDS)[numbe
  * v2 注册条目 data（设计 D1 条目契约表 workflow-record 行·注册列）。
  *
  * run 创建时写一条：身份 + journal 锚点。recordPath 是 session-reader workflow
- * 发现链的主源数据基础（v2 注册条目是 run 步骤级详情读面的唯一发现锚点）。
+ * 发现链的主源数据基础（v2 注册条目是 run 步骤级详情读侧的唯一发现锚点）。
  */
 export interface WorkflowRecordRegisteredEntryData { // oe-exempt:20260929:framework:workflow/record 协议契约类型——ports 类型契约先行、单实现常态（dev-0.10.5 已验收代码 merge 带入）
   v: typeof WORKFLOW_RECORD_ENTRY_VERSION;
@@ -77,14 +77,14 @@ export interface WorkflowRecordRegisteredEntryData { // oe-exempt:20260929:frame
   slug: string;
   /**
    * workflow 脚本绝对路径（RunSpec.scriptPath——GUI 详情层展示全路径的唯一
-   * 投影源）。可缺省：旧注册条目无该字段，读侧兜底空串；新写侧恒带。
+   * 派生视图来源）。可缺省：旧注册条目无该字段，读侧兜底空串；新写侧恒带。
    */
   scriptPath?: string;
   startedAt: number;
   /**
    * record 事件流绝对路径锚点（`<sessionDir>/workflow-state/<runId>.record.jsonl`
    * ——后缀经 core RUN_EVENTS_SUFFIX 单源常量，[D1] record 单源流命名；
-   * 写侧锚点与实写面同源见 terminal-actions.runEventJournalPathOf）——v2 条目
+   * 写侧锚点与实写侧同源见 terminal-actions.runEventJournalPathOf）——v2 条目
    * 的 recordPath 锚点字段（任务书 U0 职责 1）；保留窗口内 record 流在盘即可
    * 按锚点读步骤级家族链，窗口外回落 manifest 摘要级（session-reader 发现链
    * 三档，[D16③] 适配）。
@@ -95,19 +95,19 @@ export interface WorkflowRecordRegisteredEntryData { // oe-exempt:20260929:frame
 /**
  * v2 终态条目 data（设计 D1 条目契约表 workflow-record 行·终态列）。
  *
- * run 终局时写一条（[D2] 宿主投影裁决②：settled 终态条目仅 terminal 时写——
+ * run 终局时写一条（[D2] 宿主派生视图裁决②：settled 终态条目仅 terminal 时写——
  * 现状收编补写 settled 条目的行为随 D2 终止）：终局 + 摘要。字段与
- * run-settled record 帧同源（条目是 record 的投影锚，不是第二事实源）。
+ * run-settled record 帧同源（条目是 record 的派生视图锚点，不是第二事实源）。
  */
 export interface WorkflowRecordSettledEntryData { // oe-exempt:20260929:framework:workflow/record 协议契约类型——ports 类型契约先行、单实现常态（dev-0.10.5 已验收代码 merge 带入）
   v: typeof WORKFLOW_RECORD_ENTRY_VERSION;
   kind: "settled";
   runId: string;
   /**
-   * 收敛词（[D2] 宿主投影裁决②——schema 契约单源在本字段）：terminal 终局 =
+   * 收敛词（[D2] 宿主派生视图裁决②——schema 契约单源在本字段）：terminal 终局 =
    * 'done'（reason/outcome 必带）；interrupted 暂停态 = 'interrupted'（中断非终局
    * ——reason/outcome 缺省，细分语境由 errorCode 承载中断来源标记，可 resume，
-   * runtime 读侧三态投影的消费面）。
+   * runtime 读侧三态派生视图的消费方）。
    */
   status: "done" | "interrupted";
   /** 终态原因（= DoneReason，run.state.reason 同源；interrupted 形态缺省）。 */
@@ -136,12 +136,12 @@ export type WorkflowRecordEntryV2 =
  *
  * ok = v1 且带 snapshot（snapshot 未经形状校验——truthy 即放行，解码归消费方，
  * 与收敛前壳 `!data.snapshot` / runtime `typeof snapshot !== 'object'` 双实现的
- * 最宽共同判定面一致）。
+ * 最宽共同判定逻辑一致）。
  *
  * reason:"v2" = v2 合法形态（载荷已过 kind 判定，形状校验归消费方解码层）——
  * **归入 ok:false 是刻意裁决**：ok 的语义是「v1 快照契约可消费」（runtime
  * parseSelfDescribedWorkflowSnapshot 的 `!ok → 跳过` 分支即 v2 的版本门）；
- * v2 消费方（壳 loadAll 定界 / runtime 投影扫描）按 reason === "v2" 取载荷。
+ * v2 消费方（壳 loadAll 定界 / runtime 派生视图扫描）按 reason === "v2" 取载荷。
  */
 export type WorkflowRecordEntryClassification =
   | { ok: true; snapshot: unknown }
@@ -154,7 +154,7 @@ export type WorkflowRecordEntryClassification =
 /**
  * entry data → v1/v2 分类（纯函数，无 IO 无日志）。
  *
- * 分支语义（v1 分支与收敛前壳/runtime 双实现的判定面逐分支对齐；v2 分支为
+ * 分支语义（v1 分支与收敛前壳/runtime 双实现的判定侧逐分支对齐；v2 分支为
  * W1 新增）：
  * - wrong-type：data 非对象（截断/半写连对象都不是）；
  * - missing-v：对象但 v 缺失（写点恒定写 v，缺失即形态损坏）；

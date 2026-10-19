@@ -6,7 +6,7 @@
 //
 // 验收⑤锚：fixture（含中部坏行、不完整尾行）上「分多次续读拼接」与「一次全量
 // 读 + fold」等价（run/record 两域共用的域无关原语——本套件用 record 域解析器
-// 作真实注入面，另以裸行解析器覆盖域无关分支）。
+// 作真实注入点，另以裸行解析器覆盖域无关分支）。
 //
 // fixture 一律 mkdtempSync 自建自删（tmpdir），不触碰真实数据目录。
 
@@ -77,7 +77,7 @@ describe("splitCompleteLines（纯函数：完整行边界）", () => {
 
 describe("readEventTail（offset 续读原语）", () => {
   it("首次全量读：头行 + 事件行（域解析器注入）", async () => {
-    const journal = createRecordEventStream(workDir);
+    const journal = createRecordEventStream(() => workDir);
     await journal.append("sa-1", {
       type: "record-created",
       ts: 1,
@@ -165,7 +165,7 @@ describe("验收⑤：续读拼接 ≡ 全量 fold（fixture 含中部坏行 + �
   it("分三段续读（中途注入坏行/部分行）的事件并集，与一次全量读 + fold 等价", async () => {
     const recordsDir = path.join(workDir, "records");
     fs.mkdirSync(recordsDir);
-    const journal = createRecordEventStream(recordsDir);
+    const journal = createRecordEventStream(() => recordsDir);
     const appended: RecordEvent[] = [];
     appended.push(
       await journal.append("sa-1", {

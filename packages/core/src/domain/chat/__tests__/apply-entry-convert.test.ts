@@ -130,7 +130,7 @@ describe('reload 路径 toolCall.endTime 回填（chat-flow-timestamp U1 验收�
     expect(tc2.output).toBe('done')
   })
 
-  it('去重命中但第二帧无 timestamp → endTime 保持首条值（守卫不误清）', () => {
+  it('去重命中但第二帧无 timestamp → endTime 保持首条值（检查不误清）', () => {
     const first = applyEntry(
       replayEntries([assistantWithToolCall('e-asst', 'tc-x', 1000)]),
       toolResultEntry('e-tr-1', 'tc-x', 5432),
@@ -233,7 +233,7 @@ describe('computeToolCallFill：diffStat 派生', () => {
   })
 })
 
-describe('reload 路径 toolCall.diffStat 回填（reducer 腿，与 live overlay 同口径）', () => {
+describe('reload 路径 toolCall.diffStat 回填（reducer 路径，与 live overlay 同口径）', () => {
   it('replayEntries：edit toolResult entry details.diff → toolCall.diffStat 有值', () => {
     const state = replayEntries([
       msgEntry('e-asst', {

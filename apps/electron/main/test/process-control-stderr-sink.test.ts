@@ -38,7 +38,7 @@ const electronMock = vi.hoisted(() => ({
 }))
 
 // existsSync 可控桩：runtimeDist 判存在（spawn 打包分支要求），
-// sink 日志文件判不存在（跳过 getStderrSink 的 stat 超帽轮转分支，不属本测试面）
+// sink 日志文件判不存在（跳过 getStderrSink 的 stat 超帽轮转分支，不属本测试）
 const existsSyncMock = vi.hoisted(() =>
   vi.fn((path: string) => !String(path).endsWith('electron-runtime-stderr.log')),
 )

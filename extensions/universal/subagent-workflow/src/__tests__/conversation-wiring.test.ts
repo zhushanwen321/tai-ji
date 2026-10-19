@@ -5,7 +5,7 @@
 // 演化：M9 原断言 conversation:true → record.chatMode === true；[modeless 波1]
 // chatMode 字段消亡、参数转 accepted-no-op 弃用窗；[modeless 波5 收尾] 弃用窗到期，
 // 参数从 ExecuteOptions/StartHandlerInput/AgentCallOpts 全链删除。本文件迁移为
-// 「当前真实接线面」的等价断言（回归保护不缩水）：
+// 「当前真实接线点」的等价断言（回归保护不缩水）：
 //   1. createRecordForMode 现存形态判据：idleTimeoutMs 归属 record（全 record 生效的
 //      idle GC 节奏，不再限定「对话模式」）+ record 无 chatMode 键（模式标志不得复活）
 //   2. idle 续聊语义：续聊资格 = 引擎能力轴 service.engineSupportsConversation(record)

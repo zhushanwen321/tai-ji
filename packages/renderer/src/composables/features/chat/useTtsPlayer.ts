@@ -34,7 +34,7 @@
 import { ref } from 'vue'
 import { MAX_SPEAK_CHARS, cleanTextForSpeech } from '@taiji/shared'
 // 直连 core 域（useQuotaQuery 同先例：features 层 composable 直 import transport 域，不经 @/api 门面）。
-// mock 轨差异（VITE_MOCK）由消费方装配面承担——TtsPage 配置读写经 @/api tts 门面（u4 聚合）。
+// mock 轨差异（VITE_MOCK）由消费方装配侧承担——TtsPage 配置读写经 @/api tts 门面（u4 聚合）。
 import * as ttsApi from '@taiji/core/transport/api/domains/tts'
 import i18n from '@/i18n'
 import { useToast } from '@/composables/useToast'
@@ -44,7 +44,7 @@ const t = i18n.global.t as (key: string, params?: Record<string, unknown>) => st
 
 const { error: toastError } = useToast()
 
-/** 朗读任务三态（§5.1 按钮状态机数据面；查询接口 speakStateOf 的返回值）。 */
+/** 朗读任务三态（§5.1 按钮状态机数据范围；查询接口 speakStateOf 的返回值）。 */
 type SpeakStatus = 'idle' | 'loading' | 'playing'
 
 /** 设置页「保存并测试」固定伪 messageId（§7.5 要点 4：与对话朗读共享全局互斥，消费方 u4）。 */

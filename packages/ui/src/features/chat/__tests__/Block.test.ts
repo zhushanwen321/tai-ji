@@ -190,7 +190,7 @@ describe('error-visibility M1: failed tool header danger + 终态展开（TC1-3�
     wrapper.unmount()
   })
 
-  it('[tool-detail-rich] 壳未注入（默认 mock deps）→ read 展开维持纯文本兑底（回归保护）', async () => {
+  it('[tool-detail-rich] 壳未注入（默认 mock deps）→ read 展开维持纯文本兜底（回归保护）', async () => {
     const wrapper = mountToolBlock(makeToolCall({ toolName: 'read', output: 'const a = 1' }))
     await wrapper.find('[data-testid="tool-block-header"]').trigger('click')
     expect(wrapper.find('.tool-result').exists()).toBe(true)
@@ -582,7 +582,7 @@ describe('W4 tail-scroll: thinking 双态（U8）', () => {
     expect(thinkHeaderAfter.exists()).toBe(true)
   })
 
-  it('working 态尾行视口锁单行高度 + 横向钉右结构（2026-08 抖动修复形态守卫）', async () => {
+  it('working 态尾行视口锁单行高度 + 横向钉右结构（2026-08 抖动修复形态检查）', async () => {
     const wrapper = mountThinkingWithContent({ working: true })
     await nextTick()
     // h-[1lh]：视口高度 = 1 行行高（CSS lh 单位），缺失即回归「多行内容撑高视口」抖动
@@ -699,10 +699,10 @@ describe('W4 tail-scroll: 无输出 tool（U10）', () => {
   })
 })
 
-/* ── bash-running-stream-output（U3）：bash 展开恒渲染容器 + 输出区内容守卫 ──
+/* ── bash-running-stream-output（U3）：bash 展开恒渲染容器 + 输出区内容检查 ──
  * D2: bash 展开容器恒渲染（含命令块），空输出不再「header 摘要消失 + 内容空白」假展开
  *（原 D3 尾行取数回退随 2026-10-17 方案 A 移除：bash running 不再进尾行视口） */
-describe('bash-running-stream-output: bash 展开容器与输出守卫（U3）', () => {
+describe('bash-running-stream-output: bash 展开容器与输出检查（U3）', () => {
   async function expand(wrapper: ReturnType<typeof mountToolBlock>) {
     await wrapper.find('[data-testid="tool-block-header"]').trigger('click')
   }
@@ -732,7 +732,7 @@ describe('bash-running-stream-output: bash 展开容器与输出守卫（U3）',
     await expand(wrapper)
     // 命令块存在（header 摘要 invisible 但命令在下方显示）
     expect(wrapper.find('.bg-bg-input').text()).toContain('sleep 20')
-    // 输出文本区不渲染（内容守卫生效）
+    // 输出文本区不渲染（内容检查生效）
     expect(wrapper.find('.tool-result').exists()).toBe(false)
   })
 
@@ -748,7 +748,7 @@ describe('bash-running-stream-output: bash 展开容器与输出守卫（U3）',
     expect(wrapper.find('.tool-result').exists()).toBe(false)
   })
 
-  it('completed + output undefined：展开同样仅命令块（缺省 output 同守卫）', async () => {
+  it('completed + output undefined：展开同样仅命令块（缺省 output 同检查）', async () => {
     const wrapper = mountToolBlock(makeToolCall({
       toolName: 'bash',
       input: { command: 'pwd' },
@@ -970,11 +970,11 @@ describe('ui-optimize-unified U14: thinking 行时长（N6）', () => {
   it('endTime 缺失（working 中 / 持久化重载链路）→ 不渲染（缺值维持现状展示）', () => {
     const wrapper = mountThinkingDurationBlock({ thinkingStart: 1000 })
     expect(wrapper.find('[data-testid="thinking-duration"]').exists()).toBe(false)
-    // 时刻槽不受影响（两槽守卫独立）
+    // 时刻槽不受影响（两槽检查独立）
     expect(wrapper.find('[data-testid="thinking-time-slot"]').exists()).toBe(true)
   })
 
-  it('startTime 缺失 / end<=start → 不渲染（守卫与 useLiveToolDuration 终态分支同构）', () => {
+  it('startTime 缺失 / end<=start → 不渲染（检查与 useLiveToolDuration 终态分支同构）', () => {
     const noStart = mountThinkingDurationBlock({ thinkingEnd: 3000 })
     expect(noStart.find('[data-testid="thinking-duration"]').exists()).toBe(false)
     const inverted = mountThinkingDurationBlock({ thinkingStart: 3000, thinkingEnd: 1000 })

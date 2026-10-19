@@ -3,7 +3,7 @@
  *
  * plan 模式的状态散落在 pi 扩展 entry / runtime 挂起注册表 / renderer 派生公式三处时，
  * 任意两者漂移即产「僵尸/谎言」UI（F1-F5）。本模块是全链路共享的单一状态契约：
- * 8 值状态集 + 9 事件边表 + `transition` 纯函数（守卫集中一处）+ `derivePhase` 呈现映射。
+ * 8 值状态集 + 9 事件边表 + `transition` 纯函数（检查集中一处）+ `derivePhase` 呈现映射。
  *
  * 语义要点（设计 D1 逐条锚定）：
  * - 非法转移返回 `{ ok: false }`，由调用方降级（**不 throw 炸 turn**）；副作用不进返回值
@@ -20,7 +20,7 @@
  * - `approved --approve--> dispatching`：批准后 agent 再调 `complete` 重新选择执行方式
  *   （D1「approved 上 agent 再调 complete → dispatching」）。事件命名裁决：9 事件表无
  *   `complete` 员，本边取「执行确认」语义族最近员 `approve`（用户点确认执行与批准后重选
- *   执行方式同为「确认执行、进入执行方式选择」的决策事件）——消费面接线见 consumers.md。
+ *   执行方式同为「确认执行、进入执行方式选择」的决策事件）——消费方接线见 consumers.md。
  * - `approved` 其余转移仅 `exit`；活跃族非终态 `--exit--> exited`；idle 从未进入，
  *   exit 非法（防从未进 plan 的会话落噪音 exited entry）；终态 `--enter--> planning`
  *   （新一轮）；`revising` 保留独立态（E3 恢复文案分叉依赖，前提 P-7）。
@@ -83,7 +83,7 @@ export const PLAN_LIFECYCLE_EVENTS = [
   'exit',
 ] as const satisfies readonly PlanLifecycleEvent[]
 
-// ── 转移函数（守卫集中一处，D1）──
+// ── 转移函数（检查集中一处，D1）──
 
 export type PlanTransitionResult =
   | { ok: true; next: PlanLifecycleState }
@@ -131,13 +131,13 @@ const TRANSITION_TABLE: Record<PlanLifecycleState, Partial<Record<PlanLifecycleE
  *
  * 非法转移（含运行时垃圾 state/event 值——跨版本帧、坏反序列化）返回 `{ ok: false }`
  * 且**不携带 next 键**，由调用方降级（不 throw 炸 turn）。调用方义务：`ok:false` 时
- * 不落盘、不执行副作用（终态上 `ok:false` 不落盘即 D3 归口点的兜底保险）。
+ * 不落盘、不执行副作用（终态上 `ok:false` 不落盘即 D3 归属划分点的兜底保险）。
  *
- * 入口白名单守卫（与 derivePhase 同一机制）：普通对象字面量查表会沿原型链命中继承键——
+ * 入口白名单检查（与 derivePhase 同一机制）：普通对象字面量查表会沿原型链命中继承键——
  * `transition('reviewing', '__proto__')` 取出 Object.prototype、`('__proto__', 'valueOf')`
  * 取出函数，均被误判为合法 next（违背本契约）。故垃圾键必须先挡在查表前。
  * **选「枚举 includes 白名单」而非 null-prototype 表 / Object.hasOwn**：① transition 与
- * derivePhase 共用同一守卫形态（单一机制，不并存两种写法）；② PLAN_LIFECYCLE_STATES /
+ * derivePhase 共用同一检查形态（单一机制，不并存两种写法）；② PLAN_LIFECYCLE_STATES /
  * PLAN_LIFECYCLE_EVENTS 就是值域 SSOT（测试穷举同源），includes 判定与之同源，
  * 原型键天然不在白名单内。
  */
@@ -177,7 +177,7 @@ const PHASE_OF_STATE: Record<PlanLifecycleState, PlanPhase> = {
  * 8 存储态 → 5 呈现相位的单点映射（renderer 阶段指示/状态带共用，禁止消费方各自 if 拼）。
  * 运行时垃圾 state（混装格坏帧）降级 'idle'（无 plan 缺省，fail-safe 不误示进行中）。
  *
- * 入口白名单守卫（理由同 transition，见彼处）：裸查表对继承键 'constructor' / 'toString'
+ * 入口白名单检查（理由同 transition，见彼处）：裸查表对继承键 'constructor' / 'toString'
  * 会取出 Object 构造函数等并经 `?? 'idle'` 流出（非 nullish 不落兜底）——垃圾 state
  * 必须精确落 'idle'，函数/对象不得作为相位流入 renderer。
  */

@@ -11,7 +11,7 @@
  * - isDetached=false（贴底 / session 切换的 scrollTop clamp 回声）不触发——否则切 session 白拉一页；
  * - offset 未触顶不触发；
  * - 无更早历史（showLoadMore=false）不触发；
- * - 加载中不重入（单一守卫源在 handleLoadMore）。
+ * - 加载中不重入（单一检查源在 handleLoadMore）。
  */
 import { beforeEach, afterEach, describe, expect, it, vi } from 'vitest'
 import { nextTick, ref } from 'vue'
@@ -79,7 +79,7 @@ describe('onScrollOffset（触顶自动续载）', () => {
     expect(loadMoreHistoryMock).not.toHaveBeenCalled()
   })
 
-  it('加载中不重入（同一守卫源），完成后可再次触发', async () => {
+  it('加载中不重入（同一检查源），完成后可再次触发', async () => {
     const d = deferred()
     loadMoreHistoryMock.mockReturnValueOnce(d.promise)
     const loadMore = setup()
@@ -157,7 +157,7 @@ describe('slowLine（慢网兜底细线，OpenDesign spec §2.2）', () => {
     vi.advanceTimersByTime(SLOW_LINE_DELAY_MS + 1)
     expect(loadMore.slowLine.value).toBe(true)
 
-    // 切 sid：消费面 computed 读新分区（全新态）——s1 的在途加载与细线对 s2 不可见
+    // 切 sid：消费方 computed 读新分区（全新态）——s1 的在途加载与细线对 s2 不可见
     sessionId.value = 's2'
     await nextTick()
     expect(loadMore.slowLine.value).toBe(false)

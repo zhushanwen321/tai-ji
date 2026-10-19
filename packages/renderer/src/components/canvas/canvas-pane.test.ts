@@ -12,7 +12,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { flushPromises, mount, type VueWrapper } from '@vue/test-utils'
 import { createPinia, setActivePinia } from 'pinia'
-import { nextTick } from 'vue'
+import { computed, nextTick } from 'vue'
 import type { CanvasState } from '@zhushanwen/extension-protocol'
 import CanvasPane from './CanvasPane.vue'
 import CanvasBindingBadge from './CanvasBindingBadge.vue'
@@ -24,6 +24,9 @@ vi.mock('@taiji/core/transport/api', async (importOriginal) => {
 
 const commandMock = vi.mocked(await import('@taiji/core/transport/api').then((m) => m.command))
 
+/** 画布归属会话 id（D4：CanvasPane 以 props.sessionId 为分区键与 RPC 归属字段）。 */
+const SID = 'sid-pane'
+
 /** 当前 canvas.get 应答（用例内可换——模拟广播失效重拉收敛）。 */
 let currentState: CanvasState
 
@@ -31,6 +34,7 @@ let currentState: CanvasState
 function makeState(overrides: Partial<CanvasState> = {}): CanvasState {
   return {
     canvasId: 'cvs-1',
+    ownerSessionId: SID,
     name: '画布规划',
     root: { nodeId: 'root', statement: '根问题', criterias: ['判据一'], scopeExclusions: ['不做多画布'] },
     direction: null,
@@ -73,7 +77,7 @@ function stubCommand(): void {
 const mounted: VueWrapper[] = []
 
 async function mountPane(canvasId = 'cvs-1'): Promise<VueWrapper> {
-  const wrapper = mount(CanvasPane, { props: { canvasId } })
+  const wrapper = mount(CanvasPane, { props: { canvasId, sessionId: SID } })
   mounted.push(wrapper)
   await flushPromises()
   return wrapper
@@ -189,6 +193,7 @@ describe('CanvasPane 选定交互走 mutate（无乐观回显）', () => {
       'canvas.mutate',
       {
         actor: 'user',
+        sessionId: SID,
         action: 'select',
         params: { canvasId: 'cvs-1', questionId: 'q2', optionId: 'o1', reason: '成本与可控性更优' },
       },
@@ -202,7 +207,7 @@ describe('CanvasPane 选定交互走 mutate（无乐观回显）', () => {
     currentState = makeState({
       nodes: makeState().nodes.map((n) => (n.id === 'o1' ? { ...n, selected: true, selectionReason: '成本与可控性更优' } : n)),
     })
-    const store = (await import('@/stores/canvas')).useCanvasStore()
+    const store = (await import('@/stores/canvas')).useCanvasStore(computed(() => SID))
     await store.loadCanvas('cvs-1')
     await flushPromises()
     expect(cardEl(wrapper, 'o1')?.getAttribute('data-selected')).toBe('true')

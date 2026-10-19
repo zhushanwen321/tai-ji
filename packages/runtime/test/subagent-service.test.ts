@@ -11,7 +11,7 @@ import type { ScannedSessionMeta } from '../src/infra/pi/session-file-utils.js'
 /**
  * W3 测试：SessionService.getSubagents + getSubagentHistory
  *
- * [W1 / D6 读侧换源] subagent 列表数据源 = journal 投影的 entry 源（v2
+ * [W1 / D6 读侧换源] subagent 列表数据源 = journal 派生视图的 entry 源（v2
  * subagent-record 注册 + 终态条目对），不再是 legacy toolCall/toolResult 配对。
  *
  * 用真实临时文件验证端到端链路：
@@ -59,6 +59,8 @@ function createMockSessionStore(mainSessionFile: string, mainSessionId: string, 
     persistHandoffSidecar: () => {},
     // G4/u-h4：port trash 签名改 Promise<void>（失败保留文件并 reject），本测试不触删除路径
     trash: () => Promise.resolve(),
+    // [session-store-layout-inversion D5] 目录级整树软删 port（本测试不触删除路径）
+    trashDirectory: () => Promise.resolve(),
   }
 }
 

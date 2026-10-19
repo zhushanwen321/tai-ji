@@ -117,7 +117,7 @@ describe('activate 订阅族（主线程 handler + SessionEventDispatch 六点�
     expect(resp.result).toEqual({ unregistered: true })
   })
 
-  it('handlerId 畸形 → INVALID_HANDLER_ID（防毒化投递目标，与 create/destroy 同守卫）', async () => {
+  it('handlerId 畸形 → INVALID_HANDLER_ID（防毒化投递目标，与 create/destroy 同检查）', async () => {
     const resp = await dispatch(rpc, port, 1, SESSION_ACTIVATE_METHODS.register, { pluginId: 'p1', handlerId: '../poison' })
     expect(resp.error?.code).toBe('INVALID_HANDLER_ID')
     expect(dispatchTable.size).toBe(0)

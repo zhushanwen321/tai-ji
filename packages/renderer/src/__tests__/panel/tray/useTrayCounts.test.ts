@@ -1,17 +1,17 @@
 /**
- * useTrayCounts 数据面测试（u-tray-native，设计 docs/design/composer-task-tray.md §3.3 D2/D13，已删除 git 可追溯）。
+ * useTrayCounts 数据范围测试（u-tray-native，设计 docs/design/composer-task-tray.md §3.3 D2/D13，已删除 git 可追溯）。
  *
  * 三视角（TEST-STRATEGY §3）：
  * - 构建者（白盒）：三件计数口径与谓词边界——running+stopReason（死亡纳管态）不落进行中、
  *   archived 归已结束（[两视图裁决 2026-09-16]）、workflow running 计入进行中、bash 两视图由
- *   background-task-bucket SSOT 谓词派生；D13 首拉触发与 retry 调用序；错误态/加载态暴露面
+ *   background-task-bucket SSOT 谓词派生；D13 首次拉取触发与 retry 调用序；错误态/加载态暴露面
  * - 使用者（黑盒）：本文件是纯逻辑面（无 DOM）；用户可见断言在 tray-native-panel.test.ts
  * - 观察者（形态）：同上（面板渲染形态由组件测试承载）
  *
  * mock 策略：
  * - `@/composables/features/sidebar/useBackgroundTasks` mock：bash 分区直接 mutate
  *   （状态根自身行为另有专项测试，本文件只验托盘消费口径）
- * - `@/api` mock：首拉 RPC（getSubagents/getWorkflows）结果可控；load* 写 store 分区的路径真实
+ * - `@/api` mock：首次拉取 RPC（getSubagents/getWorkflows）结果可控；load* 写 store 分区的路径真实
  * - 真实 pinia + 真实 store：计数跑真实 recordsOf 分区（不 mock store 派生链）
  *
  * 运行：cd packages/renderer && npx vitest run src/__tests__/panel/tray/useTrayCounts.test.ts
@@ -20,7 +20,7 @@ import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 import { mount } from '@vue/test-utils'
 import { computed, defineComponent, h, nextTick, reactive } from 'vue'
 import { createPinia, setActivePinia } from 'pinia'
-import { dispatchGlobal } from '@taiji/core/transport/api'
+import { dispatchGlobal, dispatchCrossSession } from '@taiji/core/transport/api'
 import { useSubagentStore } from '@/stores/subagent'
 import { useWorkflowStore } from '@/stores/workflow'
 import { useSessionStore } from '@/stores/session'
@@ -41,14 +41,14 @@ vi.mock('@/composables/features/sidebar/useBackgroundTasks', () => ({
 }))
 
 // ── mock：canvas.list RPC（第 5 件 canvas 的数据链真实经过 useCanvasSync 订阅 → canvas store；
-//    替身 reply 可控，广播腿用 core dispatchGlobal 真实现喂——链路行为级验证）──
+//    替身 reply 可控，广播路径用 core dispatchGlobal 真实现喂——链路行为级验证）──
 const commandMock = vi.hoisted(() => vi.fn())
 vi.mock('@taiji/core/transport/api', async (importOriginal) => {
   const actual = await importOriginal<typeof import('@taiji/core/transport/api')>()
   return { ...actual, command: commandMock }
 })
 
-// ── mock：首拉 RPC（subagent/workflow 列表）──
+// ── mock：首次拉取 RPC（subagent/workflow 列表）──
 const apiMocks = vi.hoisted(() => ({
   // RT-4#8 起 API 返结构化形状 { subagents, oversize }（store 按此解构）
   getSubagents: vi.fn<(sessionId: string) => Promise<{ subagents: SubagentRecord[]; oversize?: boolean }>>(),
@@ -124,7 +124,7 @@ function mountHarness(sessionId = SID) {
   return harnessWrapper
 }
 
-/** 当前数据面（防守：宿主 setup 必已赋值） */
+/** 当前数据范围（防守：宿主 setup 必已赋值） */
 function data(): UseTrayCountsReturn {
   if (!tray) throw new Error('useTrayCounts 未挂载')
   return tray
@@ -138,7 +138,7 @@ beforeEach(() => {
   // canvas.list 替身：缺省空清单（canvas 用例按需覆写返回值）
   commandMock.mockReset()
   commandMock.mockResolvedValue({ canvases: [] })
-  // reactive 容器：bash 分区面的字段变更需驱动下游 computed 重算（mock 契约同真实分区）
+  // reactive 容器：bash 分区的字段变更需驱动下游 computed 重算（mock 契约同真实分区）
   partitionState = reactive({ tasks: [], loaded: true, corrupted: false, fetchFailed: false })
   tray = undefined
   vi.useFakeTimers({ now: FIXED_NOW })
@@ -221,7 +221,7 @@ describe('useTrayCounts 计数口径与谓词边界（D2）', () => {
   })
 
   it('计数随 session 分区切换（各 session 独立，不串台）', async () => {
-    // 首拉 RPC 按 sid 返回不同列表：切 session 后计数跟随新分区（真实 load* 写分区路径）
+    // 首次拉取 RPC 按 sid 返回不同列表：切 session 后计数跟随新分区（真实 load* 写分区路径）
     apiMocks.getSubagents.mockImplementation(async (sid: string) => ({
       subagents:
         sid === SID2
@@ -299,7 +299,7 @@ describe('useTrayCounts session kind（第 4 件子会话，u7 / 设计 mode-sys
     expect(data().counts.value.session).toEqual({ running: 0, ended: 3, total: 3 })
   })
 
-  it('行集按 lastActiveAt 倒序（最近在前；面板行序 = 数据面行序）', () => {
+  it('行集按 lastActiveAt 倒序（最近在前；面板行序 = 数据范围行序）', () => {
     useSessionStore().applySnapshot({
       groups: [
         {
@@ -325,7 +325,7 @@ describe('useTrayCounts session kind（第 4 件子会话，u7 / 设计 mode-sys
   })
 })
 
-describe('useTrayCounts D13 首拉触发与 retry', () => {
+describe('useTrayCounts D13 首次拉取触发与 retry', () => {
   it('挂载即拉：loadSubagents / loadWorkflows 各以当前 sessionId 调一次', async () => {
     const subagentStore = useSubagentStore()
     const workflowStore = useWorkflowStore()
@@ -339,12 +339,12 @@ describe('useTrayCounts D13 首拉触发与 retry', () => {
     })
     expect(loadSubSpy).toHaveBeenCalledWith(SID)
     expect(loadWfSpy).toHaveBeenCalledWith(SID)
-    // 拉取腿真正落到 RPC（store 内部未短路）
+    // 拉取路径真正落到 RPC（store 内部未短路）
     expect(apiMocks.getSubagents).toHaveBeenCalledWith(SID)
     expect(apiMocks.getWorkflows).toHaveBeenCalledWith(SID)
   })
 
-  it('sessionId 变化 → 按新 sid 重拉（历史桶依赖此腿）', async () => {
+  it('sessionId 变化 → 按新 sid 重新拉取（历史桶依赖此路径）', async () => {
     const subagentStore = useSubagentStore()
     const workflowStore = useWorkflowStore()
     const loadSubSpy = vi.spyOn(subagentStore, 'loadSubagents')
@@ -361,7 +361,7 @@ describe('useTrayCounts D13 首拉触发与 retry', () => {
     expect(apiMocks.getWorkflows).toHaveBeenLastCalledWith(SID2)
   })
 
-  it('retry(kind) 按类重拉：subagent / workflow → load*；bash → refresh', async () => {
+  it('retry(kind) 按类重新拉取：subagent / workflow → load*；bash → refresh', async () => {
     mountHarness()
     await vi.waitFor(() => expect(apiMocks.getWorkflows).toHaveBeenCalledTimes(1))
     vi.clearAllMocks()
@@ -422,10 +422,10 @@ describe('useTrayCounts 错误态与加载态暴露面（面板 retry 判据）'
   })
 })
 
-describe('P-invisible·任务托盘面：D9③ 派生投影抑制（btw 线不投影 subagent/workflow）', () => {
-  it('btw vid 挂托盘：线 owner 分区有派生记录仍构造性归零 + 不发首拉 RPC；bash（线自身任务）照常', async () => {
+describe('P-invisible·任务托盘：D9③ 派生视图抑制（btw 线不映射 subagent/workflow）', () => {
+  it('btw vid 挂托盘：线 owner 分区有派生记录仍构造性归零 + 不发首次拉取 RPC；bash（线自身任务）照常', async () => {
     const vid = 'btw:line-tray-1'
-    // 线 owner 分区真实灌入派生记录（生产 = loadSubagents(vid) / 广播腿落分区）
+    // 线 owner 分区真实灌入派生记录（生产 = loadSubagents(vid) / 广播路径落分区）
     useSubagentStore().applyRecords(vid, [makeSubagent({ subagentId: 'a-line', status: 'running' })])
     // 种数据（applyRecords 已私有化，直写分区 ref）
     const workflowStore = useWorkflowStore()
@@ -445,7 +445,7 @@ describe('P-invisible·任务托盘面：D9③ 派生投影抑制（btw 线不�
     expect(data().lists.subagent.running.value).toHaveLength(0)
     expect(data().lists.workflow.running.value).toHaveLength(0)
     expect(data().counts.value.bash.total).toBe(1) // 边界：bash 不在派生抑制面
-    // 首拉被抑制（对线 vid 的 getSubagents/getWorkflows 零消费方 → 不发无效 RPC）
+    // 首次拉取被抑制（对线 vid 的 getSubagents/getWorkflows 零消费方 → 不发无效 RPC）
     expect(apiMocks.getSubagents).not.toHaveBeenCalledWith(vid)
     expect(apiMocks.getWorkflows).not.toHaveBeenCalledWith(vid)
   })
@@ -453,9 +453,10 @@ describe('P-invisible·任务托盘面：D9③ 派生投影抑制（btw 线不�
 
 // ── 第 5 件 canvas（u-tray-entry，problem-solve-canvas §3.1(3)）──
 
-/** canvas.list 条目 fixture（形状 = canvas.list 投影，含阶段徽标派生输入） */
+/** canvas.list 条目 fixture（形状 = canvas.list 投影，含阶段徽标派生输入；ownerSessionId = D4 归属字段） */
 function makeCanvasEntry(overrides: Partial<CanvasListEntry> & { canvasId: string }): CanvasListEntry {
   return {
+    ownerSessionId: SID,
     name: `画布 ${overrides.canvasId}`,
     statement: '示例陈述',
     converged: false,
@@ -465,11 +466,14 @@ function makeCanvasEntry(overrides: Partial<CanvasListEntry> & { canvasId: strin
   }
 }
 
-/** 构造 canvas.updated 全局广播帧并分发（core 全局通道真实现，use-canvas-sync.test 同款） */
-function broadcastCanvasUpdated(canvasId: string): void {
-  dispatchGlobal({
+/** 构造 canvas.updated 全局广播帧并分发（core 全局通道真实现，use-canvas-sync.test 同款；
+ * payload.sessionId = 画布归属会话——D4 隔离后消费方按归属分流） */
+function broadcastCanvasUpdated(canvasId: string, sessionId: string = SID): void {
+  // canvas.updated 消费端在 crossSession 通道（use-canvas-sync 模块级单订阅）——
+  // dispatchGlobal 不喂该通道，发帧必须走 dispatchCrossSession（对齐 use-canvas-sync.test）
+  dispatchCrossSession({
     type: 'canvas.updated',
-    payload: { canvasId, evType: 'NodeCreated', eventId: 'ev-1', summary: '' },
+    payload: { canvasId, sessionId, evType: 'NodeCreated', eventId: 'ev-1', summary: '' },
   } as ServerMessage<'canvas.updated'>)
 }
 
@@ -519,13 +523,43 @@ describe('useTrayCounts canvas kind（第 5 件画布，u-tray-entry）', () => 
     expect(data().counts.value.canvas).toEqual({ running: 1, ended: 1, total: 2 })
   })
 
-  it('画布是跨 session 全局资源：空 sid 下 canvas 照常拉取计数（session 件归零、canvas 不归零）', async () => {
+  it('画布按归属会话隔离：空 sid 下 canvas 计数归零（per-session 分区——无会话即无画布）', async () => {
     commandMock.mockResolvedValue({
       canvases: [makeCanvasEntry({ canvasId: 'cvs-global' })],
     })
     const wrapper = mountHarness('')
-    await vi.waitFor(() => expect(data().counts.value.canvas.total).toBe(1))
-    expect(data().counts.value.session).toEqual({ running: 0, ended: 0, total: 0 })
+    await vi.waitFor(() => expect(data().counts.value.session.total).toBe(0))
+    // 空 sid → 归一 null → 不发 canvas.list RPC、计数恒零（与 session 件同款归零语义）
+    expect(commandMock).not.toHaveBeenCalledWith('canvas.list', expect.anything(), expect.anything())
+    expect(data().counts.value.canvas).toEqual({ running: 0, ended: 0, total: 0 })
     wrapper.unmount()
+  })
+
+  it('跨会话广播不刷新本会话计数：B 会话画布的 canvas.updated 只重拉 B 分区（A 计数不变）', async () => {
+    commandMock.mockImplementation(async (type: string) => {
+      if (type === 'canvas.list') return { canvases: [makeCanvasEntry({ canvasId: 'cvs-a' })] }
+      return null
+    })
+    mountHarness()
+    await vi.waitFor(() => expect(data().counts.value.canvas.total).toBe(1))
+
+    // B 会话的画布变更广播（payload.sessionId = SID2）→ 只重拉 B 分区清单，
+    // A 的计数与清单不变（D4 隔离：托盘计数 = 本会话画布）
+    commandMock.mockImplementation(async (type: string) => {
+      if (type === 'canvas.list') {
+        return {
+          canvases: [
+            makeCanvasEntry({ canvasId: 'cvs-a' }),
+            makeCanvasEntry({ canvasId: 'cvs-b', ownerSessionId: SID2 }),
+          ],
+        }
+      }
+      return null
+    })
+    broadcastCanvasUpdated('cvs-b', SID2)
+    await vi.waitFor(() => expect(commandMock).toHaveBeenCalledWith('canvas.list', { sessionId: SID2 }, expect.anything()))
+    // A 的清单未被动过（B 的广播只写 B 分区）
+    expect(data().lists.canvas.entries.value.map((c) => c.canvasId)).toEqual(['cvs-a'])
+    expect(data().counts.value.canvas.total).toBe(1)
   })
 })

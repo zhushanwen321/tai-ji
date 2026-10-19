@@ -3,15 +3,15 @@
  *
  * 背景（designs/design §3.3 D13，本设计第二处有意行为变化）：branchSummary 实时侧曾
  * 直插 system 消息（fallback 文案 'Branched'），与重开 apply-entry branch_summary case
- * （`rawSummary ?? ''`）两份投影，live 显示与关闭重开不一致。entry 化后实时路径 =
+ * （`rawSummary ?? ''`）两份派生视图，live 显示与关闭重开不一致。entry 化后实时路径 =
  * branchSummary effect 构造 branch_summary entry → ctx.applyEntryFrame 喂与文件重放
- * （get_entries → replayEntries）同一个 applyEntry + overlay 投影，本文件锁定：
+ * （get_entries → replayEntries）同一个 applyEntry + overlay 派生视图，本文件锁定：
  *
- * 1. branch 后 live 投影（reducer state + ref 消息）与经 entry 重放的投影逐字段一致
+ * 1. branch 后 live 派生视图（reducer state + ref 消息）与经 entry 重放的派生视图逐字段一致
  *    （异源 id/timestamp 归一——branchSummary 帧携带 timestamp 时两侧同值直断）
  * 2. summary 缺失：两侧同产空串行（live 'Branched' 占位消灭——D13 行为变化锁定）
  * 3. 空串 summary：两侧同保留空行（readBranchSummary 空串门，compaction E4c 同族）
- * 4. ref 消息与 reducer state 消息同源同 id（overlay 投影消费同一份派生）
+ * 4. ref 消息与 reducer state 消息同源同 id（overlay 派生视图消费同一份派生）
  * 5. 混合序列（user → branch → 后续消息）两路全量 state 一致 + 分组语义
  *   （branchSummary 作 boundary systemNotice，message-turns 规则 5）
  *
@@ -88,7 +88,7 @@ function branchSummaryMsg(sid: string, payload: Record<string, unknown>): Server
 describe('branchSummary live ≡ reload（D13 entry 化守护网）', () => {
   beforeEach(() => setActivePinia(createPinia()))
 
-  it('branch 后 live 投影 ≡ 经 entry 重放的投影：reducer state 归一 deep-equal + ref 消息逐字段一致', () => {
+  it('branch 后 live 派生视图 ≡ 经 entry 重放的派生视图：reducer state 归一 deep-equal + ref 消息逐字段一致', () => {
     const s = makeStore()
     const sid = 's-branch-eq'
     const entry = persistedBranchEntry()
@@ -110,7 +110,7 @@ describe('branchSummary live ≡ reload（D13 entry 化守护网）', () => {
     // 帧 timestamp 经 entry ISO → toMs 精确往返：两侧消息 timestamp 数值同值直断
     expect(liveState!.messages[0].timestamp).toBe(new Date(entry.timestamp).getTime())
     expect(reloadState.messages[0].timestamp).toBe(new Date(entry.timestamp).getTime())
-    // ref 消息（overlay 投影）与 reducer state 消息同源同 id（含 br- 前缀）
+    // ref 消息（overlay 派生视图）与 reducer state 消息同源同 id（含 br- 前缀）
     const refMsgs = s.store.getMessages(sid)
     expect(refMsgs).toHaveLength(1)
     expect(refMsgs[0]).toEqual(liveState!.messages[0])
@@ -118,7 +118,7 @@ describe('branchSummary live ≡ reload（D13 entry 化守护网）', () => {
     s.dispose()
   })
 
-  it('summary 缺失：live 投影 content 空串（原 Branched 占位消灭）且与重开逐字段一致', () => {
+  it('summary 缺失：live 派生视图 content 空串（原 Branched 占位消灭）且与重开逐字段一致', () => {
     const s = makeStore()
     const sid = 's-branch-missing'
     // 实时帧缺 summary（readBranchSummary 不设字段 → entry 无 summary）
@@ -161,7 +161,7 @@ describe('branchSummary live ≡ reload（D13 entry 化守护网）', () => {
     s.store.appendUser(sid, [{ type: 'text', text: '问题' }])
     s.store.applyMessageEvent(sid, branchSummaryMsg(sid, { summary: '分支', fromId: 'n-1', timestamp: 600 }))
     // live reducer state 只含 branch（user 乐观插入不喂 reducer——user 类型的 live≡reload
-    // 经 message_end 权威帧成立，非本文件靶子）
+    // 经 message_end 权威帧成立，非本文件检查目标）
     const liveState = s.store.testInternals._entryStatesForTest.get(sid)!.state
     expect(liveState.messages).toHaveLength(1)
     expect(liveState.messages[0].branchSummary).toBeDefined()

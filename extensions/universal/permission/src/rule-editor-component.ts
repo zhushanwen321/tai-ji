@@ -75,7 +75,7 @@ type FillKind =
  * TUI overlay 组件：规则 CRUD 编辑器。
  *
  * Container override handleInput（W7 模式）：按 stage 委托给当前子组件。
- * settle 用 _resolved 守卫防二次 done。
+ * settle 用 _resolved 检查防二次 done。
  */
 export class RuleEditorComponent extends Container {
 	private stage: Stage = "list";
@@ -244,7 +244,7 @@ export class RuleEditorComponent extends Container {
 		this.settle();
 	}
 
-	/** settle：_resolved 守卫 + done(this.ops)。 */
+	/** settle：_resolved 检查 + done(this.ops)。 */
 	private settle(): void {
 		if (this._resolved) return;
 		this._resolved = true;

@@ -1,7 +1,7 @@
 /**
  * event-handlers 行为测试 — agent_end / before_agent_start 核心逻辑
  *
- * 覆盖 agent_end 的 continuation + ESC 守卫（FR-6.7）+
+ * 覆盖 agent_end 的 continuation + ESC 检查（FR-6.7）+
  * before_agent_start 的 AUTO_CLEAR/context wrap-up。
  *
  * 全解耦后不再测 allTasksDone followUp（原依赖 pi.__todoGetList，已删）。
@@ -100,9 +100,9 @@ function makeRunningState(overrides?: Partial<GoalRuntimeState>): GoalRuntimeSta
 	};
 }
 
-// ── handleAgentEnd：ESC 守卫 ──────────────────────────
+// ── handleAgentEnd：ESC 检查 ──────────────────────────
 
-describe("handleAgentEnd — FR-6.7 ESC 守卫", () => {
+describe("handleAgentEnd — FR-6.7 ESC 检查", () => {
 	it("aborted=true：不发 continuation、不做 budget 检查、goal 保持 active", async () => {
 		const { pi, calls: piCalls, states } = makeFakePi();
 		const { ctx, calls: ctxCalls } = makeFakeCtx({ aborted: true });
@@ -174,9 +174,9 @@ describe("handleAgentEnd — continuation", () => {
 		expect(sendContext[0]!.content).toContain("[GOAL]");
 	});
 
-	// ── pending 守卫：background subagent/workflow 运行时不死循环 ──
+	// ── pending 检查：background subagent/workflow 运行时不死循环 ──
 
-	it("有活跃 pending → 不发 continuation（pending 守卫生效）", async () => {
+	it("有活跃 pending → 不发 continuation（pending 检查生效）", async () => {
 		const { pi, calls: piCalls } = makeFakePi();
 		const { ctx, calls: ctxCalls } = makeFakeCtx({
 			entries: [
@@ -258,7 +258,7 @@ describe("handleAgentEnd — continuation", () => {
 		expect(data?.ids).toEqual(["bg-1", "bg-2"]); // ids 透出
 	});
 
-	it("重复 register 同 id → 去重计为 1（seen.has 守卫）", async () => {
+	it("重复 register 同 id → 去重计为 1（seen.has 检查）", async () => {
 		const { pi, calls: piCalls, states } = makeFakePi();
 		const { ctx, calls: ctxCalls } = makeFakeCtx({
 			entries: [
@@ -272,7 +272,7 @@ describe("handleAgentEnd — continuation", () => {
 		await handleAgentEnd(pi, session, ctx);
 		const all = allCalls(piCalls, ctxCalls);
 
-		// 守卫触发：count>0 不发 continuation
+		// 检查触发：count>0 不发 continuation
 		const followUp = all.filter(
 			(c) => c.kind === "sendContext" && (c.payload as { deliverAs?: string } | undefined)?.deliverAs === "followUp",
 		);
@@ -298,7 +298,7 @@ describe("handleAgentEnd — continuation", () => {
 		await handleAgentEnd(pi, session, ctx);
 		const all = allCalls(piCalls, ctxCalls);
 
-		// count=0，守卫不触发，走正常 continuation
+		// count=0，检查不触发，走正常 continuation
 		const followUp = all.filter(
 			(c) => c.kind === "sendContext" && (c.payload as { deliverAs?: string } | undefined)?.deliverAs === "followUp",
 		);

@@ -8,7 +8,7 @@
  *
  * 覆盖边界（如实声明，ADR-0063 I3）：本测试族直接驱动 switchSession + attach 断言，
  * 不经过生产 restoreSession/forkSession 全管线——生产管线整段回退 tmp 附着时本测试族
- * 不红；该形态的运行时守卫是 I1 断言（接线在生产管线内，tmp 附着瞬间 mismatch 即
+ * 不红；该形态的运行时检查是 I1 断言（接线在生产管线内，tmp 附着瞬间 mismatch 即
  * throw）+ 第三用例（mismatch-throw 行为锁定）。
  *
  * 三用例：
@@ -75,7 +75,7 @@ interface SessionFileEntry {
   [key: string]: unknown
 }
 
-/** 等价读取（验收口径：loadEntriesFromFile 或等价读取）——pi 侧为逐行 parseSessionEntryLine */
+/** 等价读取（验收判据：loadEntriesFromFile 或等价读取）——pi 侧为逐行 parseSessionEntryLine */
 function readSessionEntries(filePath: string): SessionFileEntry[] {
   return readFileSync(filePath, 'utf-8')
     .split('\n')

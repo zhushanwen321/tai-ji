@@ -24,7 +24,7 @@
  * - 重试场景（currentSession 已存在）→跳过 create 直接 send
  * - create reject→错误向上抛、不留僵尸 session
  * - 非法态（非 landing）提交→抛错
- * - 双击并发→in-flight 守卫 create 只调一次
+ * - 双击并发→in-flight 检查 create 只调一次
  *
  * 新设计下 landing 态 gitInfo 恒 null（无 session）→ branch 链路不可达，
  * 原 selectBranch/confirmDirtySwitch/submitCreateBranch 集成测试已删（组件层单测见 create-branch-modal.test.ts）。
@@ -221,7 +221,7 @@ describe('worktree 创建回灌（adoptWorktreeCwd，fix-new-worktree-not-switch
     expect(flow.currentCwd.value).toBe('/ws/new-wt')
   })
 
-  it('T-WT.2 守卫：非 worktree-modal 态 noop；同值 noop（不重复 record）', async () => {
+  it('T-WT.2 检查：非 worktree-modal 态 noop；同值 noop（不重复 record）', async () => {
     setGroups([mkSession({ id: 'old', cwd: '/ws', lastActiveAt: 1 })])
     const flow = useNewTaskFlow()
     await flow.startFlow()
@@ -247,8 +247,10 @@ describe('worktree 创建回灌（adoptWorktreeCwd，fix-new-worktree-not-switch
 
     await flow.submitFirstMessage(textToSegments('go'))
 
-    // create 用 adopted pendingCwd（/ws/new-wt），而非 defaultCwd（/ws）
-    expect(createCtrl.create).toHaveBeenCalledWith('/ws/new-wt', 'go', undefined, undefined, undefined, 'high')
+    // create 用 adopted pendingCwd（/ws/new-wt），而非 defaultCwd（/ws）。
+    // 第 7 参 = clientUuid（create 幂等键，core new-task-search/flow.ts 黏滞槽生成）：
+    // 桌面适配器 rest 透传不吞参，uuid 原样到达 api 实现（具体值由黏滞槽决定，核 core flow.test）。
+    expect(createCtrl.create).toHaveBeenCalledWith('/ws/new-wt', 'go', undefined, undefined, undefined, 'high', expect.any(String))
   })
 })
 
@@ -317,7 +319,7 @@ describe('submitFirstMessage（landing 态首发提交：延迟 create+载入+�
     await flow.submitFirstMessage(textToSegments('hello world'))
 
     // create 用 workspaceStore.defaultCwd（最近工作区 cwd=/repo）；label=提示词前10字（'hello world' 11 字符 → 截断+省略号）
-    expect(createCtrl.create).toHaveBeenCalledWith('/repo', 'hello worl…', undefined, undefined, undefined, 'high')
+    expect(createCtrl.create).toHaveBeenCalledWith('/repo', 'hello worl…', undefined, undefined, undefined, 'high', expect.any(String))
     expect(session.activeId).toBe('new-1') // activeId 绑定
     expect(session.list.map((s) => s.id)).toContain('new-1') // appendSession 入组
     // panel 载入 active panel
@@ -343,7 +345,7 @@ describe('submitFirstMessage（landing 态首发提交：延迟 create+载入+�
     await flow.submitFirstMessage(textToSegments('go'))
 
     // create 用 pendingCwd（/picked），而非 workspaceStore.defaultCwd（/last-repo）；label='go'（≤10 原文）
-    expect(createCtrl.create).toHaveBeenCalledWith('/picked', 'go', undefined, undefined, undefined, 'high')
+    expect(createCtrl.create).toHaveBeenCalledWith('/picked', 'go', undefined, undefined, undefined, 'high', expect.any(String))
   })
 
   it('cwd 来源：无 pendingCwd 时用 workspaceStore.defaultCwd', async () => {
@@ -357,7 +359,7 @@ describe('submitFirstMessage（landing 态首发提交：延迟 create+载入+�
     await flow.submitFirstMessage(textToSegments('go'))
 
     // create 用 workspaceStore.defaultCwd（最近活跃 cwd=/last-repo）；label='go'（≤10 原文）
-    expect(createCtrl.create).toHaveBeenCalledWith('/last-repo', 'go', undefined, undefined, undefined, 'high')
+    expect(createCtrl.create).toHaveBeenCalledWith('/last-repo', 'go', undefined, undefined, undefined, 'high', expect.any(String))
   })
 
   it('重试场景（currentSession 已存在）→跳过 create 直接 send', async () => {
@@ -376,12 +378,12 @@ describe('submitFirstMessage（landing 态首发提交：延迟 create+载入+�
     expect(flow.state.value).toBe('completed')
 
     // 新语义推论：send 失败后 flow 已终结（completed），再次 submitFirstMessage 撞
-    // 「非 landing」守卫抛错——重发走对话视图 composer（session 错误通道），不再经
+    // 「非 landing」检查抛错——重发走对话视图 composer（session 错误通道），不再经
     // new-task flow。「跳过 create 直接 send」的 retry 分支覆盖由 core flow.test.ts
     // TC-7（bindSession 构造 landing+currentSession）承接，本文件此路径已不可达。
     await expect(flow.submitFirstMessage(textToSegments('first'))).rejects.toThrow('非 landing')
     expect(createCtrl.create).toHaveBeenCalledTimes(1) // 未重复 create
-    expect(chatMock.send).toHaveBeenCalledTimes(1) // 守卫先于 send，未重发
+    expect(chatMock.send).toHaveBeenCalledTimes(1) // 检查先于 send，未重发
   })
 
   it('E2/E3 create reject→错误向上抛，不留僵尸 session（state 留 landing，currentSession=null）', async () => {
@@ -405,7 +407,7 @@ describe('submitFirstMessage（landing 态首发提交：延迟 create+载入+�
     expect(createCtrl.create).not.toHaveBeenCalled()
   })
 
-  it('双击并发→in-flight 守卫，create 只调一次', async () => {
+  it('双击并发→in-flight 检查，create 只调一次', async () => {
     setGroups([mkSession({ id: 'old', cwd: '/repo', lastActiveAt: 1 })])
     let resolveCreate!: (s: SessionSummary) => void
     createCtrl.create.mockReturnValueOnce(
@@ -416,7 +418,7 @@ describe('submitFirstMessage（landing 态首发提交：延迟 create+载入+�
     const flow = useNewTaskFlow()
     await flow.startFlow()
     const p1 = flow.submitFirstMessage(textToSegments('one'))
-    const p2 = flow.submitFirstMessage(textToSegments('two')) // in-flight 守卫→直接 return
+    const p2 = flow.submitFirstMessage(textToSegments('two')) // in-flight 检查→直接 return
     resolveCreate(mkSession({ id: 'solo', cwd: '/repo' }))
     await p1
     await p2
@@ -437,19 +439,19 @@ describe('submitFirstMessage（landing 态首发提交：延迟 create+载入+�
     await flow.submitFirstMessage(imageSegments)
 
     // 纯图无 text：label 走 deriveSessionLabel('') 兜底为「无提示词」
-    expect(createCtrl.create).toHaveBeenCalledWith('/repo', '无提示词', undefined, undefined, undefined, 'high')
+    expect(createCtrl.create).toHaveBeenCalledWith('/repo', '无提示词', undefined, undefined, undefined, 'high', expect.any(String))
     expect(chatMock.send).toHaveBeenCalledWith('img-only', imageSegments)
     expect(flow.state.value).toBe('completed')
   })
 
-  it('tmpdir 迁移成功：needsMigrate=true 的 image → migrateSessionImage 后 path 更新为 attachments/<sid>/', async () => {
+  it('tmpdir 迁移成功：needsMigrate=true 的 image → migrateSessionImage 后 path 更新为 ext-sessions/<sid>/attachments/ 树内域目录', async () => {
     setGroups([mkSession({ id: 'old', cwd: '/repo', lastActiveAt: 1 })])
     workspaceStoreMock.defaultCwd = '/repo'
     createCtrl.create.mockResolvedValue(mkSession({ id: 'mig-1', cwd: '/repo' }))
     const flow = useNewTaskFlow()
     await flow.startFlow()
 
-    migrateCtrl.migrateSessionImage.mockResolvedValue({ path: '/dataDir/attachments/mig-1/abc-image.png' })
+    migrateCtrl.migrateSessionImage.mockResolvedValue({ path: '/dataDir/ext-sessions/mig-1/attachments/abc-image.png' })
     const segments: Segment[] = [
       { type: 'text', text: '看这张图' },
       // M1：needsMigrate=true（landing 态 writeSessionImage 落 tmpdir 的图）。迁移判断用此字段，不猜路径。
@@ -470,7 +472,7 @@ describe('submitFirstMessage（landing 态首发提交：延迟 create+载入+�
     expect(sentSegments[0]).toEqual({ type: 'text', text: '看这张图' })
     expect(sentSegments[1]).toMatchObject({
       type: 'image',
-      path: '/dataDir/attachments/mig-1/abc-image.png',
+      path: '/dataDir/ext-sessions/mig-1/attachments/abc-image.png',
       fileName: 'abc-image.png',
       displayName: '照片.png',
     })
@@ -486,7 +488,7 @@ describe('submitFirstMessage（landing 态首发提交：延迟 create+载入+�
     // 第一张迁移 reject（OS 已清理 tmpdir），第二张成功
     migrateCtrl.migrateSessionImage
       .mockRejectedValueOnce(new Error('ENOENT: no such file'))
-      .mockResolvedValueOnce({ path: '/dataDir/attachments/mig-fail/img2.png' })
+      .mockResolvedValueOnce({ path: '/dataDir/ext-sessions/mig-fail/attachments/img2.png' })
 
     const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {})
     const segments: Segment[] = [
@@ -502,7 +504,7 @@ describe('submitFirstMessage（landing 态首发提交：延迟 create+载入+�
     // 第一张保留原 tmpdir path（迁移失败），第二张更新为新 path
     const sentSegments = chatMock.send.mock.calls[0][1] as Segment[]
     expect(sentSegments[0]).toMatchObject({ type: 'image', path: '/tmp/img1.png' })
-    expect(sentSegments[1]).toMatchObject({ type: 'image', path: '/dataDir/attachments/mig-fail/img2.png' })
+    expect(sentSegments[1]).toMatchObject({ type: 'image', path: '/dataDir/ext-sessions/mig-fail/attachments/img2.png' })
     // 失败项 console.warn（allSettled 硬规则不阻断）。
     // w5（C-W5-2）：创建分支的迁移下沉 core createSessionFlow，warn 前缀从 [useNewTaskFlow] 改 [createSessionFlow]。
     expect(warnSpy).toHaveBeenCalledWith(
@@ -522,7 +524,7 @@ describe('submitFirstMessage（landing 态首发提交：延迟 create+载入+�
     const segments: Segment[] = [
       { type: 'text', text: '历史图' },
       // M1：needsMigrate 不设（等同 false）。path 在 attachments 目录（normal 态 writeSessionImage 落地）
-      { type: 'image', id: 'i1', path: '/dataDir/attachments/other-sess/x.png', fileName: 'x.png', displayName: 'x.png' },
+      { type: 'image', id: 'i1', path: '/dataDir/ext-sessions/other-sess/attachments/x.png', fileName: 'x.png', displayName: 'x.png' },
     ]
     await flow.submitFirstMessage(segments)
 

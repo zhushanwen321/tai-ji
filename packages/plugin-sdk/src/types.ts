@@ -8,13 +8,13 @@
  * D4 单源化说明）与 @taiji/shared（SendPromptReason 回执词表，msg-pipeline-debloat
  * D4-6）。
  *
- * 消费方（runtime 侧薄壳，保持其既有导入面不变）：
+ * 消费方（runtime 侧薄壳，保持其既有导入范围不变）：
  *   packages/runtime/src/services/plugin-service/plugin-types.ts          （主域 + Bridge/AgentAPI/Tool 等）
  *   packages/runtime/src/services/plugin-service/plugin-types/hook-types.ts（Hook 域）
  *   descriptor / rpc 子域亦经本文件（SDK）re-export 消费，无本地副本。
  *
  * 修改契约：直接编辑本文件（类型名/结构零变化承诺——runtime 薄壳 re-export 依赖
- * 导入面稳定）。
+ * 导入范围稳定）。
  *
  * 历史：2026-09-05 前本文件由 packages/plugin-sdk/scripts/sync-types.sh 从
  * runtime 的 plugin-types 自动生成（runtime 为真相源的镜像方向）；D28 审计
@@ -39,9 +39,9 @@ import type { SendPromptReason } from '@taiji/shared'
  *
  * 收敛说明（2026-09-17 ext-simplify-16 D4 同款）：本段曾是与
  * extension-protocol/src/core/types.ts 逐字手工镜像的 167 行副本（另有一套文本探针
- * 守卫测试）；依赖方向本就允许 plugin-sdk → extension-protocol（Bridge* 回包形状
- * 已如此），故改单行 re-export，镜像副本与守卫测试一并删除。导出名与类型面零变化
- * （SDK 类型面零变化承诺不变）。
+ * 检查测试）；依赖方向本就允许 plugin-sdk → extension-protocol（Bridge* 回包形状
+ * 已如此），故改单行 re-export，镜像副本与检查测试一并删除。导出名与类型范围零变化
+ * （SDK 类型范围零变化承诺不变）。
  *
  * @see docs/architecture/extension-gui-protocol.md
  */
@@ -62,7 +62,7 @@ export type {
 export { PROTOCOL_VERSION } from '@zhushanwen/extension-protocol'
 
 /**
- * 插件描述域类型（manifest/descriptor 契约面）
+ * 插件描述域类型（manifest/descriptor 契约范围）
  *
  * 分层标注（IF2）：
  * - @stable — manifest/descriptor 解析契约（TaijiManifest/PluginDescriptor/PluginContributes）
@@ -103,7 +103,7 @@ export interface TaijiPackageJson {
 // ── Descriptor（扫描后产出的完整描述）──────────────────────────
 
 /**
- * @stable — 完整插件描述（扫描后产出，registry 对外契约面）。
+ * @stable — 完整插件描述（扫描后产出，registry 对外契约范围）。
  */
 export interface PluginDescriptor {
   pluginId: string
@@ -252,7 +252,7 @@ export type RpcMessage = RpcRequest | RpcResponse | RpcNotification
 // ── Error Codes ──────────────────────────────────────────────────
 
 /**
- * @stable — RPC 错误码常量，SDK 契约面。
+ * @stable — RPC 错误码常量，SDK 契约范围。
  *
  * 经 Object.freeze 冻结：插件与 runtime 均不可在运行时修改错误码，
  * 保证错误判定（code 比较）的确定性。
@@ -274,7 +274,7 @@ export type PluginRpcErrorCode = (typeof PluginRpcErrorCodes)[keyof typeof Plugi
  * Hook 类型（插件拦截/观察机制）
  *
  * 分层标注（IF2）：
- * - @proposed — Hook 机制整体为 Phase 2 扩展面（API 表面仍在演进）
+ * - @proposed — Hook 机制整体为 Phase 2 扩展范围（API 表面仍在演进）
  * - @internal — runtime 内部执行细节（HookResult 等主线程塑形）
  */
 
@@ -295,7 +295,7 @@ export type InterceptorHookType =
  * 插件在 handler 内自行按事件名过滤。
  *
  * [HISTORICAL] Fix-6：曾含 'onMessage' | 'onSessionCreate' | 'onSessionDestroy' 三个
- * 字面量——无注册面（createHookApi 不暴露对应方法）、无调用面（event-interpreter /
+ * 字面量——无注册点（createHookApi 不暴露对应方法）、无调用点（event-interpreter /
  * bridge-interop 不以此 key 调 executeHooks），属死类型，已删除（2026-08-15 W02 审查）。
  */
 export type ObserverHookType = 'onPiEvent'
@@ -376,11 +376,11 @@ export interface HookResult {
  * 不出现在前端↔runtime 的共享协议中。
  *
  * 分层标注（IF2）：
- * - @stable — 稳定契约面（Phase1AgentAPI 核心面 storage/notify/sessions、
+ * - @stable — 稳定契约范围（Phase1AgentAPI 核心部分 storage/notify/sessions、
  *   PermissionConstants、PluginRpcErrorCodes、Disposable、SessionInfo、PluginStateStorage）
  * - @experimental — 已显式降级的 API（events 插件间事件总线：未实现，调用即抛
  *   NOT_IMPLEMENTED；已移出稳定面）
- * - @proposed — 演进中 API（Phase2AgentAPI 扩展面 tools/hooks/config/sessionData/
+ * - @proposed — 演进中 API（Phase2AgentAPI 扩展范围 tools/hooks/config/sessionData/
  *   ui/agent/workspace、ToolRegistration、HookEntry 等）
  * - @internal — runtime 内部塑形对象（WorkerHandle、PluginContext、Bridge* 等；
  *   BridgeSyncPayload 定义源在 @zhushanwen/extension-protocol，IPluginServiceDeps
@@ -427,7 +427,7 @@ export interface ActivationEvent {
 
 // ── Plugin Context（传递给插件 activate 函数的上下文）──────────
 
-/** @internal — runtime 内部：插件 activate 上下文（不进 SDK 插件作者契约面） */
+/** @internal — runtime 内部：插件 activate 上下文（不进 SDK 插件作者契约范围） */
 export interface PluginContext {
   readonly pluginId: string
   readonly pluginPath: string
@@ -452,9 +452,9 @@ export interface PluginModule {
 // 待 tool/hook 域各自稳定、API 表面收敛后再独立。
 
 /**
- * @stable — Phase 1 最小集 AgentAPI 核心面（storage/notify/sessions）。
+ * @stable — Phase 1 最小集 AgentAPI 核心部分（storage/notify/sessions）。
  *
- * 此核心面是插件可依赖的稳定契约：storage（全局/工作区存储）、notify（通知）、
+ * 此核心部分是插件可依赖的稳定契约：storage（全局/工作区存储）、notify（通知）、
  * sessions（会话查询、消息发送与生命周期事件订阅）。events 面已降级为
  * @experimental（见下方 events 字段注释）。
  */
@@ -478,8 +478,8 @@ export interface Phase1AgentAPI {
      * （restore 后校验，未命中拒发 reason:'command-missing'——命令串永不漏进模型）；
      * present 但空串/全空白在 runtime 入口拒绝（INVALID_REQUIRE_COMMAND）。
      * 回执 reason 词表 = @taiji/shared 的 SendPromptReason 单点（D4-6）：busy/compacting/bash
-     * 退役值已删（「排队取代拒绝」，运行面只产 command-missing/hook-blocked/error）；分支
-     * 只看 accepted，reason 是诊断/文案面。
+     * 退役值已删（「排队取代拒绝」，运行期只产 command-missing/hook-blocked/error）；分支
+     * 只看 accepted，reason 是诊断/文案侧。
      */
     sendMessage(params: {
       sessionId: string
@@ -492,13 +492,13 @@ export interface Phase1AgentAPI {
      * customType 服务端精确过滤，sinceEntryId 游标增量。
      */
     readEntries(sessionId: string, opts: { customType: string; sinceEntryId?: string }): Promise<PluginSessionEntries>
-    /** [AP-4/u2d] 状态查询（投影 {name, description?, source}）；会话未激活抛 SESSION_NOT_ACTIVE。 */
+    /** [AP-4/u2d] 状态查询（派生视图 {name, description?, source}）；会话未激活抛 SESSION_NOT_ACTIVE。 */
     getCommands(sessionId: string): Promise<Array<{ name: string; description?: string; source: string }>>
     onDidCreateSession(handler: (session: SessionInfo) => void): Disposable
     onDidDestroySession(handler: (session: SessionInfo) => void): Disposable
-    /** [AP-4/u5b] 会话激活订阅：session.switch 成功（含 auto-restore）时投递（徽标/列表补拉触发源）。 */
+    /** [AP-4/u5b] 会话激活订阅：session.switch 成功（含 auto-restore）时投递（徽标/列表补充拉取触发源）。 */
     onDidActivateSession(handler: (session: SessionInfo) => void): Disposable
-    /** [AP-4/u2d] entry 失效订阅：只发失效信号无 payload，收信号后 readEntries(sinceEntryId) 重拉。 */
+    /** [AP-4/u2d] entry 失效订阅：只发失效信号无 payload，收信号后 readEntries(sinceEntryId) 重新拉取。 */
     onEntriesInvalidated(
       sessionId: string,
       customType: string,
@@ -533,8 +533,8 @@ export interface SessionInfo {
 // ── Storage 类型 ─────────────────────────────────────────────────
 
 /**
- * @stable — [AP-4/u2d] 条目镜像投影：含 type/customType（共享折叠器 replayFoldEntries
- * 的首道守卫依赖这两个字段）；data 原样透传（域语义插件解）；pi 树结构噪声不出 runtime。
+ * @stable — [AP-4/u2d] 条目镜像派生视图：含 type/customType（共享折叠器 replayFoldEntries
+ * 的首道检查依赖这两个字段）；data 原样透传（域语义插件解）；pi 树结构噪声不出 runtime。
  */
 export interface PluginSessionEntry {
   id: string
@@ -586,7 +586,7 @@ export type WorkerToHostMessage =
 // ── 通用类型 ─────────────────────────────────────────────────────
 
 // Disposable 在本文件定义（SDK 为 SSOT，runtime 经 taiji-plugin-sdk re-export 消费）。
-// @taiji/shared 无同名定义；本文件是插件契约面（除 Bridge* 回包形状经
+// @taiji/shared 无同名定义；本文件是插件契约范围（除 Bridge* 回包形状经
 // @zhushanwen/extension-protocol 外无依赖），无需跨包提升。
 /**
  * @stable — 可释放资源契约（Disposable 是插件生命周期的基础设施）。
@@ -606,7 +606,7 @@ export type PluginState = 'UNLOADED' | 'LOADING' | 'ACTIVATING' | 'ACTIVE' | 'DE
 /**
  * 插件权限常量，用于 PermissionChecker 的权限校验。
  *
- * @stable — 权限字符串是 SDK 契约面：插件声明 permissions 依赖这些字面量，
+ * @stable — 权限字符串是 SDK 契约范围：插件声明 permissions 依赖这些字面量，
  * runtime 权限校验（PermissionChecker）依赖其确定性。经 Object.freeze 冻结，
  * 运行时修改会抛错（strict 模式）。
  */
@@ -627,7 +627,7 @@ export const PermissionConstants = Object.freeze({
 
 // [pi1-disposition-chat-flow D7①] Bridge 类型段（BridgeToolExecuteRequest / 跨进程回包
 // 形状 re-export）随 plugin-bridge 整体退役删除——工具执行跨进程通路消失，Worker 侧本地
-// 注册面（ToolExecuteHandler）保留供插件 API 兼容，回包形状本地最小声明。
+// 注册点（ToolExecuteHandler）保留供插件 API 兼容，回包形状本地最小声明。
 
 /** Worker 侧 tool 执行结果的本地最小形状（原跨进程回包形状的消费方已随 bridge 退役删除） */
 export interface ToolExecuteResult {
@@ -645,7 +645,7 @@ export type ToolExecuteHandler = (params: {
 // ── Phase 2: Tool 类型 ──────────────────────────────────────────────
 
 /**
- * @proposed — 工具注册请求（Phase 2 扩展面，API 表面仍在演进）。
+ * @proposed — 工具注册请求（Phase 2 扩展范围，API 表面仍在演进）。
  */
 export interface ToolRegistration {
   name: string
@@ -702,8 +702,8 @@ export interface HookEntry {
 // ── Phase 2 AgentAPI（在 Phase 1 基础上增加 tools 和 hooks）─────────
 
 /**
- * @proposed — Phase 2 AgentAPI 扩展面（tools/hooks/config/sessionData/ui/agent/
- * workspace/commands/views），在 Phase 1 核心面上叠加，API 表面仍在演进。
+ * @proposed — Phase 2 AgentAPI 扩展范围（tools/hooks/config/sessionData/ui/agent/
+ * workspace/commands/views），在 Phase 1 核心部分上叠加，API 表面仍在演进。
  */
 export interface Phase2AgentAPI extends Phase1AgentAPI {
   readonly tools: {

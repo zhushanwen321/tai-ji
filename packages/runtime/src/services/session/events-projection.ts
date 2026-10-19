@@ -7,8 +7,9 @@
  *   活跃会话经既有 get_entries 游标通道喂入（applyEntryBatch），冷会话经
  *   scanRecordFamilyEntriesFromSessionFile 流式扫描喂入（同一入口）；
  * - 事件源：record 事件文件（`<recordsDir>/<sa-id>.events`）与 run journal
- *   （`<sessionDir>/workflow-state/<runId>.record.jsonl`，后缀常量
- *   RUN_EVENTS_SUFFIX 单源）——两条喂入路径：
+ *   （`<root>/<sid>/workflow/runs/<runId>.record.jsonl`，[session-store-layout-
+ *   inversion D2/D3] 分区键 = 当前 sid，后缀常量 RUN_EVENTS_SUFFIX 单源）
+ *   ——两条喂入路径：
  *   ① 推送（实时路径）：journal 写入方（subagent-core，pi 扩展进程内）在落盘
  *      提交点经 select marker 通道推报告（SubagentJournalReport），经 event-adapter
  *      旁路 → journal-report-router → applyJournalReport 喂入。per 文件持两个水位
@@ -436,8 +437,9 @@ export function initialEventProjectionSources(): EventProjectionSources {
  * 双源单点合并（纯函数）：sources → 合并快照。
  *
  * - v2 subagent：事件 fold 的 record-created.rootSessionId === sessionId 才进
- *   投影（records 目录按 cwd 共享跨会话，rootSessionId 是 record 域 session 归属
- *   权威）；v2 注册条目在 applyEntryBatch 摄入侧按 rootSessionId 过滤；终态条目
+ *   投影（records 目录按 rootSessionId 分区——布局反转后每会话独立子目录，
+ *   rootSessionId 是 record 域 session 归属权威）；v2 注册条目在 applyEntryBatch
+ *   摄入侧按 rootSessionId 过滤（目录级隔离之外的防串会话双保险，保留）；终态条目
  *   与 事件 fold 的会话归属分别信任 append-only 文件同源性（注册先行）与
  *   record-created.rootSessionId 合并侧过滤（终态条目不携 rootSessionId）；
  * - v2 workflow：注册/终态条目在场（run 域定界）即投影，事件 fold 按同 runId
@@ -522,9 +524,9 @@ function runIdOfFilename(filename: string): string {
 export interface SessionEventProjectionOptions { // oe-exempt:20260929:framework:workflow/record 协议契约类型——ports 类型契约先行、单实现常态（dev-0.10.5 已验收代码 merge 带入）
   /** 本会话 id（record 域 rootSessionId 过滤的归属键）。 */
   sessionId: string
-  /** record 事件文件目录（`<agentDir>/subagents/<enc(cwd)>/records`）；undefined = 无 事件源（entry-only 降级形态）。 */
+  /** record 事件文件目录（`<root>/<sessionId>/subagents/records/`，推导源 = getSubagentRecordsDir / shared getSessionSubagentRecordsDir，rootSessionId 分区）；undefined = 无 事件源（entry-only 降级形态）。 */
   recordsDir: string | undefined
-  /** run journal 目录（`<sessionDir>/workflow-state`）；undefined = 无 事件源。 */
+  /** run journal 目录（`<root>/<sessionId>/workflow/runs/`，推导源 = resolvePiWorkflowRunsDir / shared getSessionWorkflowRunsDir）；undefined = 无 事件源。 */
   runJournalDir: string | undefined
   /** 投影变更回调（事件源驱动的发布腿；entry 批路径由调用方统一发布，本回调被抑制）。 */
   onProjectionChange: () => void
@@ -576,8 +578,9 @@ export class SessionEventProjection {
    * entry 批应用（v2 条目分类 → 源持有态；fullRebuild = 游标全量重拉，entry 源
    * 整体重置为新基线，事件源不动——事件流 是事实源，不随 entry 游标自愈重置）。
    *
-   * v2 注册条目按 rootSessionId 定界摄入（records 目录按 cwd 共享，注册条目是
-   * 本会话实体登记簿）；终态条目/快照不携 rootSessionId，信任 append-only 文件
+   * v2 注册条目按 rootSessionId 定界摄入（records 目录按 rootSessionId 分区——
+   * 布局反转后每会话独立子目录，注册条目是本会话实体登记簿；摄入过滤保留为
+   * 防串会话双保险）；终态条目/快照不携 rootSessionId，信任 append-only 文件
    * 归属（同文件内注册先行）。
    */
   applyEntryBatch(entries: readonly unknown[], opts?: { fullRebuild?: boolean }): void {
@@ -614,9 +617,13 @@ export class SessionEventProjection {
     this.coldReadDomain('run')
   }
 
-  /** 事件源是否已接线（任一目录非 undefined）——降级投影升级腿的判定面。 */
+  /** 事件源是否已完整接线（两域目录均非 undefined）——降级投影升级腿的判定面。
+   *  [session-store-layout-inversion 回归修复] recordsDir 换根后不依赖 meta（无条件
+   *  注入），降级投影唯一缺席域 = runJournalDir（meta 缺席窗口）；原「任一目录非
+   *  undefined」判据在此形态下恒真 → 升级腿恒早退，run 域 fold 通道终身死亡（即
+   *  降级闩死修复要防的形态）。判据收紧为两域齐备，缺席域由升级腿补接线。 */
   hasEventSources(): boolean {
-    return this.recordsDir !== undefined || this.runJournalDir !== undefined
+    return this.recordsDir !== undefined && this.runJournalDir !== undefined
   }
 
   /**

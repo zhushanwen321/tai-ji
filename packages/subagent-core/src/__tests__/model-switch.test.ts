@@ -10,7 +10,7 @@
 //
 // 编排 deps 全桩注入（engineSetModel / runAggregate 等 U3/U5 接线通道按契约形状
 // 打桩）；模型校验链用真实 ModelConfigService + mock registry（校验语义真实）；
-// chat 域落账用真实 RecordStore（内存 + 事件文件 tmpdir 形态——落账原语行为真实）。
+// chat 域写入 journal 记录用真实 RecordStore（内存 + 事件文件 tmpdir 形态——写入行为真实）。
 
 import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -110,7 +110,7 @@ function makeHarness(opts: {
   const dir = mkdtempSync(join(tmpdir(), "u2-model-switch-"));
   const service = new ModelConfigService({ agentDir: join(dir, "agent"), cwd: dir });
   service.initModel({ modelRegistry: opts.registry, sessionId: "sess-1" });
-  const store = new RecordStore(join(dir, "sessions"), undefined, undefined, join(dir, "records"));
+  const store = new RecordStore(() => join(dir, "sessions"), undefined, undefined, () => join(dir, "records"));
   const record = makeRecord("sa-demo-1");
   store.register(record);
 
@@ -233,7 +233,7 @@ describe("model-switch — 聚合不变量（§3.4）", () => {
   it("不变量 5：切换只写意图类载体——历史事实类持久化（record-created 帧）不被改写", async () => {
     const h = makeHarness({ registry: makeRegistry([makeModel({ id: "glm-5.3-flash" })]) });
     await setModel(h.deps, { domain: "chat", record: h.record }, TARGET_MODEL);
-    const events = await createRecordEventStream(h.recordsDir).scan(h.record.id);
+    const events = await createRecordEventStream(() => h.recordsDir).scan(h.record.id);
     const created = events.find((e) => e.type === "record-created");
     const overrideFrames = events.filter((e) => e.type === "record-model-override");
     // created 帧 model 保持原盖章值；新增的只有覆盖记账帧（意图载体）。
@@ -291,11 +291,11 @@ describe("model-switch — 分型处置表（§7.2 七行）", () => {
     expect(reply).toMatchObject({ scope: "chat", reply: { kind: "error", errorCode: "engine_model_not_in_snapshot" } });
     expect(h.record.modelOverride?.ref).toEqual(TARGET_MODEL); // 已写
     // 持久化帧已落（下一轮 spawn 现取目录即可用的机制依据）。
-    const events = await createRecordEventStream(h.recordsDir).scan(h.record.id);
+    const events = await createRecordEventStream(() => h.recordsDir).scan(h.record.id);
     expect(events.filter((e) => e.type === "record-model-override")).toHaveLength(1);
   });
 
-  it("落账返回值门（dmg-r1-10）：record 非内存实例（落账 false）→ 内存记账表同步跳过（无双介质劈叉），应答形态不变", async () => {
+  it("写入返回值门（dmg-r1-10）：record 非内存实例（写入 false）→ 内存记账表同步跳过（无双介质劈叉），应答形态不变", async () => {
     const h = makeHarness({
       registry: makeRegistry([makeModel({ id: "glm-5.3-flash" })]),
       capabilitiesSetModel: "native",
@@ -305,13 +305,13 @@ describe("model-switch — 分型处置表（§7.2 七行）", () => {
     // 同 id 重建对象（gateway manifest 兜底链可能产出的形态——store.getMutable 同 id 但非同实例）
     const ghost: typeof h.record = { ...h.record };
     const reply = await setModel(h.deps, { domain: "chat", record: ghost }, TARGET_MODEL);
-    // 应答形态不变（错误应答照常——生效状态未知如实报，不因落账跳过虚构校验失败）
+    // 应答形态不变（错误应答照常——生效状态未知如实报，不因写入跳过虚构校验失败）
     expect(reply).toMatchObject({ scope: "chat", reply: { kind: "error", errorCode: "engine_state_readback_failed" } });
     // 双介质劈叉消除：内存记账表未写（持久化两面 store 原语内跳过——重建对象 record 字段本就不落内存表）
     expect(h.service.getModelOverride(ghost.id)).toBeUndefined();
     expect(ghost.modelOverride).toBeUndefined();
     // 事件帧同样未写（store 原语 false 两面都跳过）
-    const events = await createRecordEventStream(h.recordsDir).scan(ghost.id);
+    const events = await createRecordEventStream(() => h.recordsDir).scan(ghost.id);
     expect(events.filter((e) => e.type === "record-model-override")).toHaveLength(0);
   });
 
@@ -345,7 +345,7 @@ describe("model-switch — 分型处置表（§7.2 七行）", () => {
     const h = makeHarness({
       registry: makeRegistry([makeModel({ id: "glm-5.3-flash" })]),
       capabilitiesSetModel: "native",
-      engineSetModel: () => Promise.reject(new Error("child exited during relay")),
+      engineSetModel: () => Promise.reject(new Error("child exited during run")),
       isEngineNotActive: () => true,
     });
     live.value = true;
@@ -435,7 +435,7 @@ describe("model-switch — 应答两型 / run 非终局 fail-fast / 档位预检
     const unauthed = makeRegistry([makeModel({ id: "glm-5.3-flash" })], []);
     const h = makeHarness({ registry: unauthed });
     const reply = await setModel(h.deps, { domain: "chat", record: h.record }, TARGET_MODEL, "high");
-    // 无活进程路径直接走记账分支，但凭据预检已在前置校验段拦截——未到记账写面。
+    // 无活进程路径直接走记账分支，但凭据预检已在前置校验段拦截——未到记账写侧。
     expect(reply).toMatchObject({ scope: "error" });
     expect(h.record.modelOverride).toBeUndefined();
   });

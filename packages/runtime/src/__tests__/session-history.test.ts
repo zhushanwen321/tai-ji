@@ -77,7 +77,7 @@ afterEach(() => {
 function writeJsonl(entries: PiSessionEntry[], headerLine?: string): string {
   const filePath = join(tmpDir, 'test.jsonl')
   // header 以 raw 行前置（真实 pi 文件形态：首行恒为 session header，有 id 无 parentId——
-  // 不剥会与真根 entry 一起把 computeActivePathEntries 单根守卫顶成多根降级，U6d 发现的
+  // 不剥会与真根 entry 一起把 computeActivePathEntries 单根检查顶成多根降级，U6d 发现的
   // U6a 缺陷）。header 形态不在 PiSessionEntry 联合内，故走 raw 行不进类型化数组。
   const lines = headerLine ? [headerLine, ...entries.map((e) => JSON.stringify(e))] : entries.map((e) => JSON.stringify(e))
   writeFileSync(filePath, lines.join('\n'), 'utf-8')
@@ -285,12 +285,12 @@ describe('边界用例', () => {
 })
 
 // ════════════════════════════════════════════════════════════════════
-// 活跃路径裁剪（message-revoke U6a）：文件源腿（全量文件读 / 离线尾读）
+// 活跃路径裁剪（message-revoke U6a）：文件源路径（全量文件读 / 离线尾读）
 // ════════════════════════════════════════════════════════════════════
-// 文件腿无 RPC leafId，convertWindowEntries 以窗口/文件末条 entry 为 leafId（pi 树重放
+// 文件路径无 RPC leafId，convertWindowEntries 以窗口/文件末条 entry 为 leafId（pi 树重放
 // 规则：文件尾 = 活跃叶子）；被撤子树按文件序先于 label 锚，经 parentId 回溯滤除。
 
-describe('活跃路径裁剪（message-revoke U6a 文件源腿）', () => {
+describe('活跃路径裁剪（message-revoke U6a 文件源路径）', () => {
   /** 有分支链式 fixture（真实撤回形态）：root → a1 → [m(被撤) → am] / [label(锚) → n]。 */
   function branchedFile(opts: { withHeader?: boolean } = {}): string {
     const label = {
@@ -324,7 +324,7 @@ describe('活跃路径裁剪（message-revoke U6a 文件源腿）', () => {
     expect(messages.some((m) => m.piEntryId === 'm' || m.piEntryId === 'am')).toBe(false)
   })
 
-  it('真实文件形态（首行 session header）→ 两条腿裁剪仍生效（header 不顶翻单根守卫）', async () => {
+  it('真实文件形态（首行 session header）→ 两条路径裁剪仍生效（header 不顶翻单根检查）', async () => {
     const filePath = branchedFile({ withHeader: true })
     const full = await getHistoryFromFilePath(filePath, realStore)
     expect(full.messages.map((m) => m.piEntryId)).toEqual(['q', 'a1', 'n'])

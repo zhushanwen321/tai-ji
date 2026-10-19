@@ -12,7 +12,7 @@
 #
 # 回传提交入库流程：workflow 跑完 → Run 页面下载 visual-baselines artifact → 解包覆盖
 # 本地 e2e/visual-baselines/ → git commit（message 注明触发原因：字体族/版本变更 /
-# macOS 升级 / 断言面新增等）→ 随分支走常规 PR review（不直接 push main）。
+# macOS 升级 / 断言范围新增等）→ 随分支走常规 PR review（不直接 push main）。
 name: Visual Baseline Recapture
 
 on:

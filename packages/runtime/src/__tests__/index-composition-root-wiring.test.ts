@@ -1,15 +1,15 @@
 /**
- * runtime 组合根 watchdog / rolling-restart / idle-reaper / 水位定时器接线守卫
+ * runtime 组合根 watchdog / rolling-restart / idle-reaper / 水位定时器接线检查
  * （review S-11：组合根接线增量 0/81 覆盖）。
  *
  * 为什么是源码级断言：startWatchdog / startRollingRestart 的 armed 门（Gate W，
- * TAIJI_RUNTIME_WATCHDOG_ARMED 默认 off）在 off 时编排零动作——接线丢失只表现为观测面
+ * TAIJI_RUNTIME_WATCHDOG_ARMED 默认 off）在 off 时编排零动作——接线丢失只表现为观测范围
  * 静默消失（采样环不跑、status RPC 无数据源、水位数据缺口），进程不报错、行为断言
- * 无通路。守卫沿用源码级先例（crash-journal-composition-root-wiring.test.ts 第 1 层、
+ * 无通路。检查沿用源码级先例（crash-journal-composition-root-wiring.test.ts 第 1 层、
  * crash-forensics-logger.test.ts「源码硬保证」段）：index.ts import 即执行 main()，
  * 无法直测，对源文件文本断言符号存在性。
  *
- * 守卫面（crash-forensics-and-watchdog D3-D6 组合根装配）：
+ * 检查侧（crash-forensics-and-watchdog D3-D6 组合根装配）：
  * - startWatchdog：内存看门狗启动（off 时纯观测——采样环必须照跑补全 Gate W 前置水位数据）
  * - watchdog:memoryPressure broadcast：renderer 通知出口 + 同拍喂滚动重启编排（D5 决策输入）
  * - setRollingRestartStatusProvider：rollingRestart.status 只读 RPC 数据源（「broadcast
@@ -23,7 +23,7 @@ import { readFileSync } from 'node:fs'
 
 const source = readFileSync(new URL('../index.ts', import.meta.url), 'utf8')
 
-describe('组合根 watchdog / rolling-restart 接线（源码级守卫）', () => {
+describe('组合根 watchdog / rolling-restart 接线（源码级检查）', () => {
   it('看门狗：import startWatchdog 且 main() 内启动；broadcast 出口双投递（renderer + 滚动重启编排）', () => {
     expect(source).toMatch(/import\s*\{[^}]*startWatchdog[^}]*\}\s*from\s*'\.\/infra\/watchdog\.js'/)
     expect(source).toContain('watchdogHandle = startWatchdog({')

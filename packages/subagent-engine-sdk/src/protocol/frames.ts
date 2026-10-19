@@ -10,7 +10,7 @@
 //
 // id 形态：正向请求 id = number（core 单调计数）；反向请求 id = string（引擎侧命名，
 // 如 "rev-1"）；应答 id = 请求或反向请求 id 原样回传（number | string）。
-// 实现面（行解析、请求关联、反向路由）归 W2 EngineClient；本文件只定帧型与判别。
+// 实现侧（行解析、请求关联、反向路由）归 W2 EngineClient；本文件只定帧型与判别。
 
 import type { AgentEvent } from "./contract-types.ts";
 
@@ -80,7 +80,7 @@ export interface ReverseRequestFrame {
 
 /** 反向请求的应答（core → 引擎，沿 ResponseFrame 通道回传；id = 反向请求 id 原样）。 */
 export type ReverseResponseResult =
-  /** 数据面类：处理确认。 */
+  /** 数据范围类：处理确认。 */
   | { ok: true }
   /** 人机交互类（askUser）两阶段第一阶段：已受理，结果异步到达（R9-2）。 */
   | { ack: true }
@@ -88,7 +88,7 @@ export type ReverseResponseResult =
   | { unsupported: true };
 
 // ============================================================
-// 判别守卫（W2 行解析器消费；结构判定，不抛错）
+// 判别检查（W2 行解析器消费；结构判定，不抛错）
 // ============================================================
 
 function isRecord(v: unknown): v is Record<string, unknown> {

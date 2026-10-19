@@ -2,7 +2,7 @@
 
 > **一句话结论**：2026-08-27 同日的两起事故（subagent 派发 429/gc、思考等级自动变关）不是两个独立 bug，而是同一个架构空缺的两次显形——**taiji 与 pi 之间缺少一层「语义吸收层」**：对 pi 私有语义的本地推断散布在扩展/core/renderer 多处且互不知晓，跨边界承诺（派发、改状态、发通知）一律没有受理确认，对 pi 语义的依赖只有人读登记没有机器检查。本设计从终态倒推四支柱（能力注册表 / 生效回执 / 确认式送达 / 漂移检查）+ 一套硬校验护栏与治理更新，把「同类问题」从靠人肉排查变成 CI/pre-commit 红灯。落地分两个切片：切片 1（subagent 派发域）已有独立技术方案并通过一轮对抗式审查；切片 2（思考等级/模型能力域）决策在本文 D2-D4。
 
-- **层声明**：架构程序层 → 下一层产物为各切片技术方案。切片 1 技术方案已实施交付（原独立文档已收编本文附录 D）；切片 2 规模小（runtime 一个服务面 + renderer 三处接线 + 表单一个字段），本文 D2-D4 已设计到可实施深度，不再单独出文档；护栏与治理（D6-D8）本身就是实施清单。
+- **层声明**：架构程序层 → 下一层产物为各切片技术方案。切片 1 技术方案已实施交付（原独立文档已收编本文附录 D）；切片 2 规模小（runtime 一个服务侧 + renderer 三处接线 + 表单一个字段），本文 D2-D4 已设计到可实施深度，不再单独出文档；护栏与治理（D6-D8）本身就是实施清单。
 - **证据基线**：本文全部现状事实取自 2026-08-27 两次排查的实证记录与三轮独立代码核查（pi 实装 `@earendil-works/pi-coding-agent@0.84.1` / `pi-ai@0.84.1` / `pi-agent-core@0.84.1` dist 直读，均已 `npm ls` 核对版本；taiji 侧文件:行号经 subagent 实读核对）。事故 A 基线 session：`~/.taiji/pi/sessions/2026-08-27T10-58-34-533Z_01a042df-21a5-783d-890d-61e075514b9d.jsonl`。
 - **切片关系**：切片 1 = 附录 D 决策索引（原独立设计文档 subagent-dispatch-reliability.md 已于 2026-09-13 收编删除，全文 git 可追溯）。本文不重述其细节，只引用结论。
 - **审查记录**：本文经一轮对抗式审查（审查报告 pi-boundary-reliability.review.md 已删除，git 可追溯；3 must-fix + 8 suggestions；49 处事实抽查 47 命中 2 偏离），must-fix 已全部落盘修订，suggestions 全部吸收（含判据适用边界、事故 B 数据流图、多包版本门禁、verifiedWith 防线分层、缓存键补维、锚点修正）。
@@ -25,7 +25,7 @@
 
 1. **影子推断**：taiji 域内代码对 pi 私有语义做本地重新实现/推断（两条规则互不知晓，语义可能相反）。
 2. **无受理确认**：跨边界承诺（校验通过、RPC 返回、send 成功）与「实际生效」之间没有可验证路径。
-3. **写入时坍缩**：状态/语义在写入点坍缩或缺失（占位符、字段 undefined），下游多处各自推导补全。
+3. **写入时信息丢失**：状态/语义在写入点被合并或缺失（占位符、字段 undefined），下游多处各自推导补全。
 4. **漂移无检查**：行为随时间变化（pi 升级、models-store 刷新）而域内假设无人重验，用户成为报警器。
 
 **适用边界（防 scope 扩大化）**：判据前置条件是「涉及 pi 私有语义或 taiji↔pi 跨边界承诺」；纯 taiji 域内 bug、与 pi 语义无关的 UI 缺陷不属本问题类。判定新事故是否同类时，须能指认具体的 pi 语义假设点——四条判据不是万能筐。
@@ -34,12 +34,12 @@
 
 - **G1-G3（切片 1，subagent 派发域）**：派发即确定（模型零宽容）、通知必达（at-least-once + 幂等）、终态一眼可判（outcome 一等字段）。定义与验收见切片 1 文档，本文不重述。
 - **G4 语义单一权威**：pi 的能力事实（模型全等 id、reasoning 能力、实际支持档位）只在一个点（runtime 能力注册表）进入 taiji 域内；renderer/扩展禁止各自推断。「这个模型支持什么」有且只有一个答案来源。
-- **G5 失效可检测**：任何对 pi 语义的依赖登记在机器可读清单并配检查；pi 升级或依赖面变更时，失败发生在 CI/pre-commit，报错文案自带恢复动作——不再以用户事故的形式被发现。
+- **G5 失效可检测**：任何对 pi 语义的依赖登记在机器可读清单并配检查；pi 升级或依赖范围变更时，失败发生在 CI/pre-commit，报错文案自带恢复动作——不再以用户事故的形式被发现。
 
 ### Scope
 
 - **In-scope**：`packages/runtime`（能力注册表、回执链路、rpc-client 补齐）；`packages/shared`（协议类型）；`packages/core` / `packages/ui` / `packages/renderer`（档位可用集消费方切换、表单）；`docs/` 治理资产（constraints.json、TROUBLESHOOTING.md、extension-conventions.md、TEST-STRATEGY.md、ADR）；`.githooks/` + `scripts/` + `.github/workflows/ci.yml`（护栏挂载）；切片 1 两个包按切片 1 文档。
-- **Out-of-scope**：pi 上游（MANDATORY 不改）；renderer 模型清单数据源重构（当前用户配置聚合保持，注册表只做能力标注与对账，不重做清单来源）；~~20+ 处既有轮询定时器的全面整改~~（2026-08-28 增补：已由 D9 处置完毕——12 处逐项处置见附录 C，其中 5 项当日落地、1 项随 U6 删除，不再列 Out-of-scope）；GUI 模型管理面之外的 pi 能力面（bash/compact 等）的注册表化。
+- **Out-of-scope**：pi 上游（MANDATORY 不改）；renderer 模型清单数据源重构（当前用户配置聚合保持，注册表只做能力标注与对账，不重做清单来源）；~~20+ 处既有轮询定时器的全面整改~~（2026-08-28 增补：已由 D9 处置完毕——12 处逐项处置见附录 C，其中 5 项当日落地、1 项随 U6 删除，不再列 Out-of-scope）；GUI 模型管理侧之外的 pi 能力侧（bash/compact 等）的注册表化。
 
 ---
 
@@ -53,7 +53,7 @@
 
 - **F1 模型标识没有单一权威形态**（判据 1+4）：扩展层精确匹配校验 vs pi CLI pattern 模糊引擎（canonical 双命中判歧义 → contains 模糊 → `localeCompare` 取最大），两套规则互不知晓；「通过校验」不代表「子进程按此名执行」。models-store.json 周期刷新引入小写条目家族后，昨日可用的串今日掉进 `glm-5.3-highspeed` → 429 空转。
 - **F2 通知 at-most-once 且无回执**（判据 2）：steer 落点是内存队列（pi-agent-core 全文仅 2 个 drain 点），nextTurn 队列唯一消费点是用户主动 `prompt()`；投递内核重试的是「send 函数调用」而非「消息进入主会话」这一事实。基线 session 十余次完成仅 1 次送达。
-- **F3 终态语义写入时坍缩**（判据 3）：done/failed/crashed 统一坍缩为 `closed + closedReason:"gc"`，下游三处同构 switch 各自重新推导成败。
+- **F3 终态语义写入时信息丢失**（判据 3）：done/failed/crashed 统一合并为 `closed + closedReason:"gc"`，下游三处同构 switch 各自重新推导成败。
 
 ### 2.2 事故 B：思考等级自动变关（2026-08-27）
 
@@ -91,7 +91,7 @@
 
 **本次摸底的两个决定性新事实**（改变修复形态）：
 
-- **pi RPC 有能力面**：`get_available_models`（`rpc-mode.js:380-382`）返回 `{ models: Model[] }`，Model 含 `reasoning: boolean`（pi-ai `types.d.ts:667`）与 `thinkingLevelMap`（:672）；`get_available_thinking_levels`（:398-400）返回当前模型档位集。taiji runtime 的 rpc-client 从未封装调用（零命中）。renderer 的模型清单与档位可用集完全来自用户配置聚合（`provider-config-helper.ts:268-373` 聚合 models.json ∪ builtin-providers.json ∪ extras；runtime 无任何读 pi 合并清单的代码；档位由 `model-thinking.ts:144-152` 读 config 值 → `ThinkingLevelPopover.vue:122-124` 本地推算），**全程不经 pi**。
+- **pi RPC 有能力侧**：`get_available_models`（`rpc-mode.js:380-382`）返回 `{ models: Model[] }`，Model 含 `reasoning: boolean`（pi-ai `types.d.ts:667`）与 `thinkingLevelMap`（:672）；`get_available_thinking_levels`（:398-400）返回当前模型档位集。taiji runtime 的 rpc-client 从未封装调用（零命中）。renderer 的模型清单与档位可用集完全来自用户配置聚合（`provider-config-helper.ts:268-373` 聚合 models.json ∪ builtin-providers.json ∪ extras；runtime 无任何读 pi 合并清单的代码；档位由 `model-thinking.ts:144-152` 读 config 值 → `ThinkingLevelPopover.vue:122-124` 本地推算），**全程不经 pi**。
 - **差分探针已有雏形**：`scripts/diff-probe-thinking.mjs` 直接 import pi-ai 的 `getSupportedThinkingLevels` 与 taiji 的 `resolveAvailableLevels` 逐模型比对——证明 runtime 侧可以零复制地复用 pi-ai 同源函数；但该脚本无任何自动调用方（不在 package.json scripts、CI、hook）。
 
 ### 2.3 同构性论证：四条判据逐条命中
@@ -100,7 +100,7 @@
 |---|---|---|
 | 1 影子推断 | 扩展 model-resolver 精确 find vs pi pattern 引擎（选择规则互不知晓） | `resolveAvailableLevels`（undefined=支持）vs pi 两级门控（undefined=off），语义恰好相反 |
 | 2 无受理确认 | 校验通过 ≠ 按此名执行；send 成功 ≠ 消息存在 | RPC 返回 ≠ 生效（effective off 被 void 丢弃）；表单保存 ≠ 字段存在（reasoning 静默缺失） |
-| 3 写入时坍缩 | `closedReason:"gc"` 占位，三处同构推导 | reasoning 字段不写即 undefined，两侧按相反语义补全 |
+| 3 写入时信息丢失 | `closedReason:"gc"` 占位，三处同构推导 | reasoning 字段不写即 undefined，两侧按相反语义补全 |
 | 4 漂移无检查 | models-store 19:20 刷新 → 昨日成功今日 429 | thinking 钳制 2026-08-20 已登记观察项 #4，无接线，8-27 照样出事 |
 
 ### 2.4 根因：缺「pi 语义吸收层」，登记≠防御
@@ -152,7 +152,7 @@ models-store 远端目录刷新引入大小写孪生条目
 
 | 方案 | 长期架构 | 短期成本 | 风险 |
 |---|---|---|---|
-| **P-absorb 语义吸收层四支柱 + 护栏（选）** | 不确定性在边界一次性吸收，域内只剩确定性；消的是问题类而非病例；与既有治理设施（constraints.json / pre-commit / CI invariants / 观察项）同构对接，是「升级执行面」不是另起炉灶 | 两个切片 + 护栏基建，约 1-1.5 周量级，可分单元交付 | 能力注册表引入 runtime→pi-ai 直接依赖（打包纪律已有 C-build-01 + validate-runtime-bundle 兜底）；护栏误报面需按 §3.3 D7 逐条设计收敛 |
+| **P-absorb 语义吸收层四支柱 + 护栏（选）** | 不确定性在边界一次性吸收，域内只剩确定性；消的是问题类而非病例；与既有治理设施（constraints.json / pre-commit / CI invariants / 观察项）同构对接，是「升级执行侧」不是另起炉灶 | 两个切片 + 护栏基建，约 1-1.5 周量级，可分单元交付 | 能力注册表引入 runtime→pi-ai 直接依赖（打包纪律已有 C-build-01 + validate-runtime-bundle 兜底）；护栏误报风险需按 §3.3 D7 逐条设计收敛 |
 | P-patch 逐事故补丁 | 无结构变化 | 每起事故最小 diff | 问题类原样保留：下一处影子推断/无回执通道继续繁殖；排查成本每次都由用户和人肉支付（8-20 登记观察项、8-27 照样出事即为实证） |
 | P-fix-pi 改 pi / fork | 上游修了才是最「根本」 | — | 违反 [MANDATORY] 纪律；fork 维护成本与升级脱节，已否决（切片 1 D3 同款结论） |
 
@@ -160,7 +160,7 @@ models-store 远端目录刷新引入大小写孪生条目
 
 | 方案 | 长期架构 | 短期成本 | 风险 |
 |---|---|---|---|
-| **CR-hybrid 同源函数离线计算 + pi RPC 在线对账（选）**：runtime 引入 `@earendil-works/pi-ai` 依赖，用 pi 自己的 `getSupportedThinkingLevels(model)` 对配置模型算档位（离线可用、与 pi 逐字节同语义——diff-probe-thinking.mjs 已实证可 import 可用）；session 附着后经 `get_available_models` RPC 取 pi 合并清单对账（覆盖 models-store 刷新引入的漂移）；结果以 view-ready 字段随模型信息推 renderer（符合 C-data-03「投影只发生一次」），`resolveAvailableLevels` 退役 | pi 语义只有一个实现副本（pi-ai 自身），taiji 侧零影子逻辑；pi 升级时语义自动跟随（限单包同步 bump 场景；多包版本一致性由 D6 门禁机器保证——防 runtime 内嵌 pi-ai 与 pi 子进程静默分裂），配 D6 版本门禁双保险 | runtime 加依赖 + tsup noExternal + 打包验证（既有纪律流程）；modelService 加一个服务面；renderer 三处接线 | ⛔ pi-ai 在 runtime CJS bundle 下的可用性须实测（diff-probe 仅在 node ESM 下验证过）——实施期门，降级路径 = 退化为纯在线 RPC 对账 + 设置页仅在任一 session 存活时可编辑档位（可用性妥协，语义保真不变） |
+| **CR-hybrid 同源函数离线计算 + pi RPC 在线对账（选）**：runtime 引入 `@earendil-works/pi-ai` 依赖，用 pi 自己的 `getSupportedThinkingLevels(model)` 对配置模型算档位（离线可用、与 pi 逐字节同语义——diff-probe-thinking.mjs 已实证可 import 可用）；session 附着后经 `get_available_models` RPC 取 pi 合并清单对账（覆盖 models-store 刷新引入的漂移）；结果以 view-ready 字段随模型信息推 renderer（符合 C-data-03「派生只发生一次」），`resolveAvailableLevels` 退役 | pi 语义只有一个实现副本（pi-ai 自身），taiji 侧零影子逻辑；pi 升级时语义自动跟随（限单包同步 bump 场景；多包版本一致性由 D6 门禁机器保证——防 runtime 内嵌 pi-ai 与 pi 子进程静默分裂），配 D6 版本门禁双保险 | runtime 加依赖 + tsup noExternal + 打包验证（既有纪律流程）；modelService 加一个服务侧；renderer 三处接线 | ⛔ pi-ai 在 runtime CJS bundle 下的可用性须实测（diff-probe 仅在 node ESM 下验证过）——实施期门，降级路径 = 退化为纯在线 RPC 对账 + 设置页仅在任一 session 存活时可编辑档位（可用性妥协，语义保真不变） |
 | CR-align 前端语义对齐修补（把 resolveAvailableLevels 的 undefined 分支改得跟 pi 一致） | 影子实现原样保留：pi 哪天改门控顺序/加第三级，前端同步漂移；恰恰复刻判据 1+4 | 几行 diff | 长期架构最差——今天修的就是这个模式本身 |
 | CR-rpc-only 纯在线（只靠 get_available_models，不引入 pi-ai） | 无新依赖 | 设置页/无存活 session 时无 pi 进程可查（短命进程方案有 C-pi-10 withEphemeralPi 先例但每次起进程成本高）；models-store 未刷新时与配置编辑场景错位 | 可用性缺口真实存在；对账仍是单源，配置态与运行态谁权威要再发明规则 |
 
@@ -179,19 +179,19 @@ models-store 远端目录刷新引入大小写孪生条目
 |---|---|---|---|
 | 能力注册表 | pi 能力事实（模型全等 id/reasoning/支持档位）单点进入域内，离线同源计算 + 在线 RPC 对账 | runtime modelService | U5（切片 2）；切片 1 U1 的全等裁决消费同一注册表语义 |
 | 生效回执 | 改状态 RPC 一律回 pi 实际生效值，消费方禁乐观写请求值 | shared 协议 + runtime + renderer | U6（切片 2）；切片 1 的 start 全等回显是同原则实例 |
-| 确认式送达 | 异步结果一律「持久账本 + at-least-once + 幂等键」，禁新建依赖 pi 内存队列的 at-most-once 通道 | session-delivery + 扩展 | 切片 1 U2 为第一实例；通用化约束登记 C-ext-19 |
+| 确认式送达 | 异步结果一律「持久投递日志 + at-least-once + 幂等键」，禁新建依赖 pi 内存队列的 at-most-once 通道 | session-delivery 内核 + delivery-port（custom 车道）/ 磁盘 outbox（文本车道） | 通用化约束登记 C-ext-19；G4 检查按方案 B 扫 extensions 全域（port 为唯一合法 custom 注入点） |
 | 漂移检查 | pi 语义依赖机器登记 + 探针测试族 + 版本变更门禁 | docs/pi-semantics.json + scripts + runtime 测试 | U7 |
 
 - **不采用**：四支柱各自的最小替代品均已在上表域级对比中否决（影子对齐/乐观写/at-most-once 分流/人读登记）。
 - **证据**：§2 两起事故四条判据命中表；四支柱分别对应判据 1/2/3-4 的结构性消除。
 - **效果**：G4/G5 的载体；切片 1 的三项改造是同一原则在 subagent 域的先行实例化。
 
-**D2：能力注册表 = runtime 单点服务面，离线同源 + 在线对账（选定）**
+**D2：能力注册表 = runtime 单点服务形态，离线同源 + 在线对账（选定）**
 
-- **采用**：runtime modelService 新增能力面（实现形态：新模块 `packages/runtime/src/services/model-capability.ts` 挂入 modelService）。①**离线计算**：引入 `@earendil-works/pi-ai` 依赖（版本与 pi-coding-agent 锁同 0.84.1），对配置聚合清单的每个模型调 pi 同源 `getSupportedThinkingLevels({reasoning, thinkingLevelMap, ...})` 算出支持档位——reasoning 缺失的模型得到 `["off"]`，与 pi 行为逐字节一致；②**在线对账**：session 附着后调 `get_available_models`（rpc-client 需新增封装）取 pi 合并清单，与配置聚合比对（配置有而 pi 无 / reasoning 不一致 / 大小写孪生检出），drift 项记 runtime 日志 + 事件上报；③**下发**：`ProviderInfo.models[]` 增加 view-ready 字段 `supportedLevels`（runtime 算好，renderer 零推导），composer 档位选择器与 ThinkingLevelPopover 改读它。缓存键 = pi 版本 + models.json mtime + builtin-providers.json mtime（发版更新内置目录而用户配置不变时，档位不得陈旧）；在线对账结果不缓存落盘（每附着一次对一次）。**格局声明**：pi 系包此前刻意保持「根 package.json 声明、runtime 不可 import」（pi-paths-config-dir-contract.test.ts 头注自述）——本决策是该格局的首次反转，runtime 由此出现 pi 系包运行时依赖；`packages/runtime/package.json` 的 pi-ai pin 与根 pin 的双副本一致性不能靠 pnpm（多版本共存合法、frozen-lockfile 不报错），由 D6 版本门禁的多包一致性校验兜底。
+- **采用**：runtime modelService 新增能力侧（实现形态：新模块 `packages/runtime/src/services/model-capability.ts` 挂入 modelService）。①**离线计算**：引入 `@earendil-works/pi-ai` 依赖（版本与 pi-coding-agent 锁同 0.84.1），对配置聚合清单的每个模型调 pi 同源 `getSupportedThinkingLevels({reasoning, thinkingLevelMap, ...})` 算出支持档位——reasoning 缺失的模型得到 `["off"]`，与 pi 行为逐字节一致；②**在线对账**：session 附着后调 `get_available_models`（rpc-client 需新增封装）取 pi 合并清单，与配置聚合比对（配置有而 pi 无 / reasoning 不一致 / 大小写孪生检出），drift 项记 runtime 日志 + 事件上报；③**下发**：`ProviderInfo.models[]` 增加 view-ready 字段 `supportedLevels`（runtime 算好，renderer 零推导），composer 档位选择器与 ThinkingLevelPopover 改读它。缓存键 = pi 版本 + models.json mtime + builtin-providers.json mtime（发版更新内置目录而用户配置不变时，档位不得陈旧）；在线对账结果不缓存落盘（每附着一次对一次）。**格局声明**：pi 系包此前刻意保持「根 package.json 声明、runtime 不可 import」（pi-paths-config-dir-contract.test.ts 头注自述）——本决策是该格局的首次反转，runtime 由此出现 pi 系包运行时依赖；`packages/runtime/package.json` 的 pi-ai pin 与根 pin 的双副本一致性不能靠 pnpm（多版本共存合法、frozen-lockfile 不报错），由 D6 版本门禁的多包一致性校验兜底。
 - **不采用**：CR-align / CR-rpc-only（见 §3.2）；❌ renderer 继续读 config 字段自算——影子推断正是判据 1 本体。
-- **证据**：✅ pi-ai `getSupportedThinkingLevels` 可 import 且行为权威（diff-probe-thinking.mjs:16-18 实证）；✅ `get_available_models` 存在且属性面含 reasoning（rpc-mode.js:380-382，pi-ai types.d.ts:667/672）；✅ renderer 当前纯配置推算链路（model-thinking.ts:144-152 → ThinkingLevelPopover.vue:101-104）；✅ 内置目录 1220 个模型 100% 自带 reasoning+thinkingLevelMap（审查期实测）——「D2 上线致 builtin 模型批量变仅关」的攻击面不存在，用户手加模型缺 reasoning 显示「仅关」是 P-S5 覆盖的预期行为；⛔ **实施期门 P-C1**：pi-ai 打入 runtime CJS bundle 后行为等价（§5 检查点含体积阈值与版本一致性断言；失败降级见 §3.2 CR-hybrid 风险栏）。
-- **效果**：G4；同时消灭判据 1（同源函数无影子）与判据 4 的模型能力面（对账 + D6 版本门禁）。
+- **证据**：✅ pi-ai `getSupportedThinkingLevels` 可 import 且行为权威（diff-probe-thinking.mjs:16-18 实证）；✅ `get_available_models` 存在且属性侧含 reasoning（rpc-mode.js:380-382，pi-ai types.d.ts:667/672）；✅ renderer 当前纯配置推算链路（model-thinking.ts:144-152 → ThinkingLevelPopover.vue:101-104）；✅ 内置目录 1220 个模型 100% 自带 reasoning+thinkingLevelMap（审查期实测）——「D2 上线致 builtin 模型批量变仅关」的攻击面不存在，用户手加模型缺 reasoning 显示「仅关」是 P-S5 覆盖的预期行为；⛔ **实施期门 P-C1**：pi-ai 打入 runtime CJS bundle 后行为等价（§5 检查点含体积阈值与版本一致性断言；失败降级见 §3.2 CR-hybrid 风险栏）。
+- **效果**：G4；同时消灭判据 1（同源函数无影子）与判据 4 的模型能力侧（对账 + D6 版本门禁）。
 
 **D3：生效回执接通并上升为协议约束（选定）**
 
@@ -202,14 +202,14 @@ models-store 远端目录刷新引入大小写孪生条目
 
 **D4：addModel reasoning 显式化（选定）**
 
-- **采用**：① ModelListSection.vue 表单加 reasoning 开关，默认按思考策略自动推导（选非 all-levels 策略 → 自动置 true，用户可显式关）；② provider-edit-models.ts addModel 构造字段加 reasoning（显式 boolean，不再允许 undefined 出厂）；③ save/写盘白名单已支持 reasoning（`provider-config-helper.ts:584-589` `!== undefined` 判定），无需改 runtime 写侧；④ 存量数据不修（用户手工补 models.json 的临时方案已由排查给出），但 D2 注册表上线后，reasoning 缺失模型的档位 UI 会正确显示「仅关」，误导面被构造性消除。
+- **采用**：① ModelListSection.vue 表单加 reasoning 开关，默认按思考策略自动推导（选非 all-levels 策略 → 自动置 true，用户可显式关）；② provider-edit-models.ts addModel 构造字段加 reasoning（显式 boolean，不再允许 undefined 出厂）；③ save/写盘白名单已支持 reasoning（`provider-config-helper.ts:584-589` `!== undefined` 判定），无需改 runtime 写侧；④ 存量数据不修（用户手工补 models.json 的临时方案已由排查给出），但 D2 注册表上线后，reasoning 缺失模型的档位 UI 会正确显示「仅关」，误导风险被构造性消除。
 - **不采用**：表单不加字段、只在文档里提醒用户手工补——把系统缺陷转嫁给用户纪律，判据 3 原样保留；❌ 强制扫存量 models.json 自动补写——静默改用户配置，违反零宽容同族原则。
 - **证据**：✅ addModel 五字段（provider-edit-models.ts addModel）、表单无 reasoning（ModelListSection.vue 全文件）、写盘白名单已含 reasoning（provider-config-helper.ts:584-589，「GUI 再保存会抹掉手工字段」的担忧不成立——白名单回传，不抹）。
 - **效果**：新添加模型不再携带「无主的隐式语义」出厂；与 D2 合起来，判据 3 在模型能力域补全。
 
 **D5：确认式送达通用化——at-most-once 内存通道禁止用于结果语义（选定）**
 
-- **采用**：切片 1 的 B-ledger（账本 + settled 边沿 courier + notifyId 幂等）是确认式送达的第一实例；本决策把原则通用化并登记约束 C-ext-19：**任何「终态/结果」语义的跨边界通知（subagent 完成、scheduler 触发、未来 webhook）必须走持久账本 + 幂等键通道（session-delivery），禁止新建依赖 pi 内存队列（steer/nextTurn/followUp）的 at-most-once 通道**。event handler 的即时消息注入（sendUserMessage steer/followUp，extension-conventions :130-152 的合法交互手段）不在禁令内——禁令对象是「结果语义的一次性通知」，不是交互式 steer。**存量口径（按审查修正）**：scheduler 的触发注入现状底层即 `deliverAs:'steer'/'followUp'`（extensions/universal/scheduler/src/index.ts:97-99——虽已用 session-delivery 投递内核，但无账本、无幂等键），按本口径属违规存量。C-ext-19 生效口径为「**新代码即禁、存量列迁移切片**」：scheduler 账本化迁移登记为附录 B 待办（后续切片，复用切片 1 U2 的账本设施）；迁移合入前 G4 禁则不扫 scheduler 目录（避免无承载红灯），迁移单元合入时同步扩面。**改判（2026-09-15，约束处置登记，上段 scheduler 存量口径据此取代）**：[scheduler-steer-direct-dispatch.md](scheduler-steer-direct-dispatch.md) 用户裁决（2026-09-14）重构 scheduler 投递模型——到期触发改判「**提醒语义，非结果语义**」（提醒的价值在到达速度而非礼貌，steer 打断是期望行为），投递改 `pi.sendMessage({deliverAs:'steer', triggerTurn:true})` 直投 + 受理即记账，session-delivery 投递内核自 scheduler 拆除；at-least-once 降级为「受理后 at-most-once」（abort 丢轮窗口）为设计已接受代价（该设计 §5 代价 b 四要素登记）。据此：附录 B 的 scheduler 账本化迁移待办**逐条处理完毕**；G4 扫描面维持 `extensions/universal/subagent-workflow/src/` 唯一、对 scheduler 不扩面（check_subagent_channels.py 现行行为即如此，文档与脚本一致），仅当 scheduler 未来承载结果语义通知时重新评估。本 D5 禁令对结果语义域不变（subagent 完成 / 未来 webhook 仍须走账本通道）。
+- **采用**：切片 1 的 B-ledger（账本 + settled 边沿 courier + notifyId 幂等）是确认式送达的第一实例；本决策把原则通用化并登记约束 C-ext-19：**任何「终态/结果」语义的跨边界通知（subagent 完成、scheduler 触发、未来 webhook）必须走持久账本 + 幂等键通道（session-delivery），禁止新建依赖 pi 内存队列（steer/nextTurn/followUp）的 at-most-once 通道**。event handler 的即时消息注入（sendUserMessage steer/followUp，extension-conventions :130-152 的合法交互手段）不在禁令内——禁令对象是「结果语义的一次性通知」，不是交互式 steer。**存量口径（按审查修正）**：scheduler 的触发注入现状底层即 `deliverAs:'steer'/'followUp'`（extensions/universal/scheduler/src/index.ts:97-99——虽已用 session-delivery 投递内核，但无账本、无幂等键），按本口径属违规存量。C-ext-19 生效口径为「**新代码即禁、存量列迁移切片**」：scheduler 账本化迁移登记为附录 B 待办（后续切片，复用切片 1 U2 的账本设施）；迁移合入前 G4 禁则不扫 scheduler 目录（避免无承载红灯），迁移单元合入时同步扩大范围。**改判（2026-09-15，约束处置登记，上段 scheduler 存量口径据此取代）**：[scheduler-steer-direct-dispatch.md](scheduler-steer-direct-dispatch.md) 用户裁决（2026-09-14）重构 scheduler 投递模型——到期触发改判「**提醒语义，非结果语义**」（提醒的价值在到达速度而非礼貌，steer 打断是期望行为），投递改 `pi.sendMessage({deliverAs:'steer', triggerTurn:true})` 直投 + 受理即记账，session-delivery 投递内核自 scheduler 拆除；at-least-once 降级为「受理后 at-most-once」（abort 丢轮窗口）为设计已接受代价（该设计 §5 代价 b 四要素登记）。据此：附录 B 的 scheduler 账本化迁移待办**逐条处理完毕**；scheduler 无 g4-allow 义务（改判提醒语义后无结果语义注入），仅当 scheduler 未来承载结果语义通知时重新评估。本 D5 禁令对结果语义域不变（subagent 完成 / 未来 webhook 仍须走确认式送达——现行载体 = `extensions/shared/delivery-port` 的 port.deliver：投递日志 + 幂等键 + details-id 凭据）。
 - **不采用**：通用化到「所有消息都走账本」——交互式 steer 的语义就是「尽量插入当前思考流」，账本化反而制造重复注入；禁令必须精确对准结果语义。
 - **证据**：切片 1 §2.2 F2 三条丢失路径全实证；extension-conventions 既有 deliverAs 条文（:141-148）。
 - **效果**：判据 2 在异步通知域的规则化；未来新扩展不会再凭直觉踩进 steer 窄窗。
@@ -232,13 +232,13 @@ models-store 远端目录刷新引入大小写孪生条目
 | G1 | `check-pi-semantics.mjs`（D6 检查层） | machine | pre-commit 总开关（install-hooks.sh heredoc，i18n 段后插入，**不设独立 SKIP_\*** 遵循 R1 后惯例）+ CI `invariants` job 等价一步 | 新增 scripts/ 脚本 + docs/pi-semantics.json；constraints.json 登记 C-proc-08 |
 | G2 | pi 语义探针测试族 `pi-semantics-*.test.ts` | machine | `packages/runtime` vitest 主池（不进 REAL_PI_TESTS）；CI `test-runtime` 自动覆盖（凭证无关） | 仿 pi-paths-config-dir-contract.test.ts；初始覆盖附录 A 全部 probe 条目 |
 | G3 | `diff-probe-thinking.mjs` 接线 | machine | pre-commit：staged 含 `thinking-levels.ts` / `provider-edit-models.ts` / `builtin-providers.json` / `model-capability.ts` 时触发；CI invariants 同步 | U6 删除 resolveAvailableLevels 后，探针比对对象改为「registry 计算路径 vs pi-ai 同源函数」（防 registry 自身漂移），脚本改目标不退役 |
-| G4 | subagent-workflow 通道禁则 | machine | pre-commit（staged 为 `extensions/universal/subagent-workflow/**` 时）：禁 `deliverAs:\s*["'](steer\|nextTurn)["']` 出现在 courier 模块白名单（U2 落地后 = `execution/notify/notify-ledger.ts` 单文件）之外；禁 `"--model"` 字面量出现在 `shared/model-ref.ts` / `session-runner.ts` 白名单之外；测试文件中的模拟串按白名单注释豁免（实施细节） | 实现为新的 `.githooks/check_subagent_channels.py`（exit 0/2 范式）；切片 1 U1/U2 合入后启用，避免过渡期红；**扫描面对 scheduler 的口径（2026-09-15 声明，随 D5 改判）**：脚本扫描面 = `extensions/universal/subagent-workflow/src/` 唯一，scheduler 目录不在扫描面、无 g4-allow 义务——原「账本化迁移单元合入时同步扩面到 scheduler」随该迁移待办逐条处理完毕而取消（scheduler 已改判提醒语义，见 D5 改判段），仅当 scheduler 未来承载结果语义通知时重新评估扩面 |
+| G4 | custom 注入点唯一性检查（C-ext-19） | machine | pre-commit（staged 为 `extensions/universal/subagent-workflow/**` 时触发，检查器内部按方案 B 扫 extensions/ 全部 .ts——port 为唯一合法 custom 注入点）：禁 `deliverAs:"steer"/"followUp"/"nextTurn"` 字面量出现在 delivery-port 白名单（11 条逐文件定性）之外；deliverAs 变量传参形态不在检查射程（goal/plan 等经参数传递的注入由端口迁移波次收敛）；禁 `"--model"` 字面量出现在模型引用白名单外（扫描范围 subagent-workflow 域，白名单空集——权威源锚 `packages/subagent-core/src/shared/model-ref.ts`，域内唯一生产出现面 = argv 解析词表行级豁免）；测试文件（`__tests__/` / `*.test.ts`）排除 | 实现为 `.githooks/check_subagent_channels.py`（exit 0/2 范式）；scheduler 已改判提醒语义（D5 改判段），结果语义义务仅当其未来承载结果语义通知时重新评估 |
 | G5 | real-pi 对账用例 `thinking-level-effective-e2e.test.ts` | machine | REAL_PI_TESTS 池（须登记进 `packages/runtime/vitest.config.ts:22-34`，检查测试强制）；开发机跑（凭证门控 REAL_PI_READY） | 真实 pi：reasoning:false 模型 set high → 断言回执=get_state=off；正常模型 → 回执=请求值。这是「config ≡ pi effective」的端到端保险丝 |
 | G6 | 改状态 RPC reply=void 拦截 | review | constraints.json 登记 C-pi-13，dimensions: business-logic（review-business-logic agent 消费）；protocol.ts 改状态区段加注释指约束 | 机器化（静态判定「改状态」语义）不可靠，诚实停在 review 级 |
 | G7 | constraints.json 四条新登记 | governance | C-pi-12（能力注册表单点，authority=本文 §3.3 D2 + 未来 ADR-0064）、C-pi-13（生效回执，authority=本文 D3）、C-ext-19（确认式送达，authority=本文 D5 + extension-conventions 新增节）、C-proc-08（漂移检查，authority=本文 D6） | enforcement 的 machine hook 必须真实存在才可通过 render-constraints 校验——**登记与对应护栏同 commit 或护栏先行** |
 
 - **护栏设计通则**：全部机器护栏遵循既有范式（python 检查器 `.githooks/check_*.py` exit 0/2；node 检查器 `scripts/check-*.mjs` exit 0/1 + ✗ file:line 明细 + 报错自带恢复动作）；新增检查一律不设独立 SKIP_* 开关（R1 后惯例，总开关 SKIP_ALL_CHECKS 兜底）；CI 侧挂 `invariants` job 作为「本地 hook 被绕过时的等价拦截点」（ci.yml:312-425 既有模式）。注意 ci.yml:3-17 paths-ignore 含 `docs/**`——pi-semantics.json 变更单独不触发 CI，靠 pre-commit 与「pi 版本/探针文件变更触发 CI」覆盖，登记为已知边界。
-- **不采用**：给每条新护栏配独立 SKIP_*——逃生口繁殖正是既有纪律要收敛的（install-hooks.sh:649-650 注释）；❌ 把 G4/G6 做成全仓 grep 一刀切——交互式 steer 与合法 --model 拼装存在，误报面必须靠白名单收敛。
+- **不采用**：给每条新护栏配独立 SKIP_*——逃生口繁殖正是既有纪律要收敛的（install-hooks.sh:649-650 注释）；❌ 把 G4/G6 做成全仓 grep 一刀切——交互式 steer 与合法 --model 拼装存在，误报风险必须靠白名单收敛。
 
 **D8：治理与文档更新清单（选定）**
 
@@ -339,7 +339,7 @@ docs/extensions/logging-conventions.md / AGENTS.md       [U8]
 **待验证检查点（诚实标注）**：
 - ⛔ P-C1 pi-ai 打入 runtime CJS bundle 的行为等价 + 体积阈值 + 版本一致性（D2）：三阶段打包验证 + validate-runtime-bundle.sh 之外，断言 bundle 增量 < 100KB（pi-ai dist 全量 5.7MB 含全部 provider 实现，主入口 import 在 CJS 输出下 tree-shake 效果未验；超标则评估子路径 import `@earendil-works/pi-ai/dist/models.js`）；并断言四包版本一致（D6 门禁同款校验的打包期形态）。降级 = 纯在线对账 + 设置页可用性妥协。
 - ⛔ P-D1 附录 A 各 probe 条目的断言可行性（D6；个别条目允许降级为锚点+代码形态断言）。
-- ⛔ P-D2 在线对账的触发面（每附着一次 vs 设置页打开时 withEphemeralPi 短命进程，C-pi-10 先例；以性能实测定）。
+- ⛔ P-D2 在线对账的触发范围（每附着一次 vs 设置页打开时 withEphemeralPi 短命进程，C-pi-10 先例；以性能实测定）。
 - ~~轮询降频检查点~~ 已由 D9 定案为删除（U6 内，见上表）。
 
 ---
@@ -369,12 +369,12 @@ docs/extensions/logging-conventions.md / AGENTS.md       [U8]
 
 ## 附录 B：与既有治理资产的关系
 
-- **C-pi-02（pi 语义断言权威源）**：本设计不改动其表述，给它补上机器执行面（D6 登记 + 探针 + 版本门禁）——从「review 时人工核对」升级为「版本不符即红」。
+- **C-pi-02（pi 语义断言权威源）**：本设计不改动其表述，给它补上机器执行侧（D6 登记 + 探针 + 版本门禁）——从「review 时人工核对」升级为「版本不符即红」。
 - **C-data-03 / C-data-04**：能力注册表的 view-ready 下发与「事件只做失效不直写」完全同构，是既有数据治理原则在模型能力域的实例，不发明新模式。
-- **C-comm-04（EventAdapter 唯一适配点）**：本设计把它从「传输格式适配」扩到「语义适配」——能力注册表是语义面的唯一入口，两者并列登记（C-pi-12 authority 会互相引用）。
+- **C-comm-04（EventAdapter 唯一适配点）**：本设计把它从「传输格式适配」扩到「语义适配」——能力注册表是语义侧的唯一入口，两者并列登记（C-pi-12 authority 会互相引用）。
 - **TROUBLESHOOTING.md 观察项**：人读层保留并加 PS 互链；机器层（pi-semantics.json）是唯一检查源，两边机制描述不双写。
 - **切片 1 文档**：D1-D6 技术决策不变；其中 D1（全等裁决）与 D4/D5（账本/ courier）分别是本设计支柱一/三的 subagent 域先行实例。
-- **已登记待办（不进本设计交付，防丢）**：**已逐条处理完毕（2026-09-15，scheduler-steer-direct-dispatch 用户裁决改判）**——scheduler 触发注入的账本化迁移：投递模型重构为 `pi.sendMessage(steer)` 直投 + 受理即记账、session-delivery 投递内核自 scheduler 拆除，scheduler 触发改判「提醒语义非结果语义」（at-most-once 丢失窗口为设计已接受代价，见该设计 §5 代价 b），迁移对象已不存在；G4 扫描面维持 subagent-workflow 唯一、不扩面（原条目「迁移合入时同步扩到 scheduler 目录」一并作废，详见 D5 改判段）。**subagent-workflow 内 workflow 完成通知的账本化迁移**（interface/helpers.ts notifyDone 存量 steer、结果语义，2026-08-28 审查补登记；复用 U2 账本设施，迁移合入时移除 g4-allow 豁免）**——已逐条处理完毕（2026-09-16，subagents-batch-tool-fanout Phase 3 / commit 12f783120：notifyDone 接 NotifyLedger 四步生命周期，幂等键 `wf-done:<runId>`，送达 customType 保持 workflow-result；g4-allow 豁免已清零；S7 断连重放真机验收 PASS——dev 环境 relay 瞬断注入下 ledger/ack/送达各恰一条，见 impl-plan v9）**；renderer subagent pane 消费 outcome 字段的 UI 升级（切片 1 已保证向后兼容输出；附带：packages/shared/src/subagent.ts 的「三处同构」注释已随 U3 失效，GUI 升级切片须同步更新）；pingPi 60s 升级式触发改造（事件静默超时再探，替代无条件周期，D9 ②）；Electron 30s /health 周期探测按需化（WS watchdog 触发探测 → 重启决策，D9 ②，对齐 ZCode/DSH「请求超时 + 便宜重建」范式）；重试路径普查补三件套（尝试预算上限 / 稳定窗清零 / 尊重 retry-after，D9 对照 DSH MCP 监督）。**已随 2026-08-28 落地**：plugin-host 30s 空转删除、handoff 2s 事件化、5s flushAll×2 删除、更新检查 20min→60min、skill watch polling 降级化（明细见附录 C）。**核查后无需改**：WS 断线重连已是有界指数退避（packages/core/src/transport/ws-client.ts:43-50，1s 起步 ×2 退避、30s 封顶、60s 总预算后进 failed 态），与 opencode 同档，从待办移除。
+- **已登记待办（不进本设计交付，防丢）**：**已逐条处理完毕（2026-09-15，scheduler-steer-direct-dispatch 用户裁决改判）**——scheduler 触发注入的账本化迁移：投递模型重构为 `pi.sendMessage(steer)` 直投 + 受理即记账、session-delivery 投递内核自 scheduler 拆除，scheduler 触发改判「提醒语义非结果语义」（at-most-once 丢失窗口为设计已接受代价，见该设计 §5 代价 b），迁移对象已不存在；G4 扫描范围已按统一投递方案 B 扩至 extensions 全域（port 为唯一合法 custom 注入点；原「扩到 scheduler 目录」的扩大范围议题随该改判作废，详见 D5 改判段）。**subagent-workflow 内 workflow 完成通知的账本化迁移**（interface/helpers.ts notifyDone 存量 steer、结果语义，2026-08-28 审查补登记；复用 U2 账本设施，迁移合入时移除 g4-allow 豁免）**——已逐条处理完毕（2026-09-16，subagents-batch-tool-fanout Phase 3 / commit 12f783120：notifyDone 接 NotifyLedger 四步生命周期，幂等键 `wf-done:<runId>`，送达 customType 保持 workflow-result；g4-allow 豁免已清零；S7 断连重放真机验收 PASS——dev 环境投递链路瞬断注入（原 relay 通道，已随 M3 退役）下 ledger/ack/送达各恰一条，见 impl-plan v9）**；renderer subagent pane 消费 outcome 字段的 UI 升级（切片 1 已保证向后兼容输出；附带：packages/shared/src/subagent.ts 的「三处同构」注释已随 U3 失效，GUI 升级切片须同步更新）；pingPi 60s 升级式触发改造（事件静默超时再探，替代无条件周期，D9 ②）；Electron 30s /health 周期探测按需化（WS watchdog 触发探测 → 重启决策，D9 ②，对齐 ZCode/DSH「请求超时 + 便宜重建」范式）；重试路径普查补三件套（尝试预算上限 / 稳定窗清零 / 尊重 retry-after，D9 对照 DSH MCP 监督）。**已随 2026-08-28 落地**：plugin-host 30s 空转删除、handoff 2s 事件化、5s flushAll×2 删除、更新检查 20min→60min、skill watch polling 降级化（明细见附录 C）。**核查后无需改**：WS 断线重连已是有界指数退避（packages/core/src/transport/ws-client.ts:43-50，1s 起步 ×2 退避、30s 封顶、60s 总预算后进 failed 态），与 opencode 同档，从待办移除。
 
 ## 附录 C：轮询/定时器处置全清单（2026-08-28，D9 执行登记）
 
@@ -387,7 +387,7 @@ docs/extensions/logging-conventions.md / AGENTS.md       [U8]
 | pingPi 60s 探活 | `packages/runtime/src/services/session/event-interpreter.ts:37`（PING_INTERVAL_MS），pingTick :770 | 活性探测 | **保留**；待改造为升级式触发（事件静默超时再探，替代无条件周期）——已登记附录 B 待办 | 死掉的 pi 无法主动 push 自己的死亡，探测结构性不可替代；ZCode 同域无周期 ping（30s 请求超时 + dispose + 惰性重建），证明「无条件周期」可降为「触发式」 |
 | WS 15s ping + 45s watchdog | renderer 侧 `packages/core/src/transport/ws-client.ts:42`（HEARTBEAT_INTERVAL_MS，keepalive only）；runtime 侧 `packages/runtime/src/transport/connection-manager.ts:30`（HEARTBEAT_TIMEOUT_MS，静默即 close） | 活性探测 | **保留**（现状已达标，无改造项） | 断线重连已是有界指数退避（ws-client.ts:43-50）；与 opencode SSE 心跳 10s/15s + 客户端 1s→30s 退避同档 |
 | Electron 30s /health 探针 | `apps/electron/main/supervisor/liveness-probe.ts:31`（LIVENESS_INTERVAL_MS） | 活性探测 | **保留**；待改造为按需化（WS watchdog 触发探测 → 重启决策）——已登记附录 B 待办 | 同上：runtime 卡死无法自报；ZCode 无 /health 轮询（wakaru-test/host/entry.js:5158，靠请求超时兜底），证明周期可降触发式 |
-| pi 启动有界等待 | `packages/runtime/src/infra/pi/process-manager.ts:26`（EPHEMERAL_READY_TIMEOUT_MS=5s）、`packages/runtime/src/infra/relay/relay-registry.ts:39`（HANDSHAKE_TIMEOUT_MS=10s） | 一次性握手 | **保留** | 一次性有界等待 ≠ 周期轮询；ZCode 反例：启动握手无超时上限是其弱点，有界等待方向正确 |
+| pi 启动有界等待 | `packages/runtime/src/infra/pi/process-manager.ts:26`（EPHEMERAL_READY_TIMEOUT_MS=5s）、`packages/runtime/src/infra/subagent-control/frames.ts:48`（CONTROL_HELLO_TIMEOUT_MS=10s） | 一次性握手 | **保留** | 一次性有界等待 ≠ 周期轮询；ZCode 反例：启动握手无超时上限是其弱点，有界等待方向正确 |
 | 快照重新拉取退避 1/5/15s | `packages/runtime/src/services/session/replicated-states.config.ts:63`（SCALAR_STATE_BACKOFF_SCHEDULE） | 协议补偿 | **保留**；重试三件套（预算上限/稳定窗清零/retry-after）普查待做——已登记附录 B 待办 | 补偿 pi session 延迟首写（PS-14）与快照暂不可读；失败驱动 + 有界退避 + 成功归零，形态已合规 |
 | OAuth 设备码轮询 | `packages/runtime/src/services/auth/device-code-flow.ts` | 协议规定 pull | **保留**（核查后未改，已合规） | RFC 8628 §3.5 规定客户端轮询；实现已尊重服务端 intervalSeconds 与 slow_down +5s；opencode 实现同档 |
 
@@ -422,7 +422,7 @@ docs/extensions/logging-conventions.md / AGENTS.md       [U8]
 
 ## 附录 D：切片 1（subagent 派发域）技术方案决策索引（2026-09-13 收编）
 
-> 原独立设计文档 `subagent-dispatch-reliability.md`（D1-D6 / U1-U4 / S1-S5，四轮对抗审查收敛，已全部实施交付）收编为决策索引；全文与审查轨迹 git 可追溯。现行机制锚点：模型裁决 `packages/subagent-core/src/shared/model-ref.ts`、通知账本 `packages/subagent-core/src/execution/notify/notify-ledger.ts`、投递内核 `packages/session-delivery/src/delivery.ts`。
+> 原独立设计文档 `subagent-dispatch-reliability.md`（D1-D6 / U1-U4 / S1-S5，四轮对抗审查收敛，已全部实施交付）收编为决策索引；全文与审查轨迹 git 可追溯。现行机制锚点：模型裁决 `packages/subagent-core/src/shared/model-ref.ts`、通知投递端口 `extensions/shared/delivery-port`、投递内核 `packages/session-delivery/src/delivery.ts`。
 
 | # | 决策 | 不采用方案（要点） |
 |---|------|----------------|
@@ -437,9 +437,9 @@ docs/extensions/logging-conventions.md / AGENTS.md       [U8]
 
 ## 附录 E：投递所有权内核——交互式投递域的确认式送达实例（2026-09-16）
 
-投递所有权内核（内存状态机 `packages/session-delivery` + runtime 适配与对账 `packages/runtime/src/services/session/session-delivery-registry.ts`，决策见 [ADR-0074](../adr/decisions.md)）是四支柱在**交互式投递域**（composer 用户消息 / agent 间 send / completion-backflow 回流）的实例化，本设计的域边界由此补齐：
+投递所有权内核（`packages/session-delivery` 状态机 + DeliveryStore 双介质耐久——runtime 半区磁盘 outbox（`<getDataDir>/delivery-outbox/`，受理前 persist / 终局 ack）+ port 半区 session entry 投递日志；runtime 适配与对账 `packages/runtime/src/services/session/session-delivery-registry.ts`，决策见 [ADR-0074](../adr/decisions.md)）是四支柱在**交互式投递域**（composer 用户消息 / agent 间 send / completion-backflow 回流）的实例化，本设计的域边界由此补齐：
 
-- **与 D5「确认式送达」的关系（域面两分，非替代）**：D5 的禁令对准**结果语义通知**（subagent 完成、未来 webhook——持久账本 + 幂等键 + at-least-once）；本内核覆盖**交互式消息**，解决的问题是 pi 契约假定的「消息进 transcript 之前所有权归前端」这一层在 taiji 长期缺失（§2.1 事故 A 的同类结构性空缺，只是发生在用户消息域）。内核按 pi 既有原语（steer/followUp 交接槽位、`queue_update` 受理回执、`message_end(user)` 送达事实、`clear_queue` 回收原语）实现**两阶段回执**：受理（prompt 受理 / 文本入槽位）≠ 送达（`message_end(user)` 命中裸标记 = 已进 transcript）；只拿受理的条目停留 in-flight 并由对账器（五触发点 ×  reclaim/rebuild/adopt 三分处置）兜底。C-ext-19 的禁令在本域的落实形态 = **交互式发送不再由多处各自判定车道**：lane（direct/steer/queued）判定单一源收归 runtime 内核，renderer/extension 侧的车道判定与本地时序防御（defer 队列状态机、S1 拒绝检测、重投 timer）整体退役——登记 C-data-25，条目数据源登记 C-data-08。
+- **与 D5「确认式送达」的关系（域面两分，非替代）**：D5 的禁令对准**结果语义通知**（subagent 完成、未来 webhook——持久账本 + 幂等键 + at-least-once）；本内核覆盖**交互式消息**，解决的问题是 pi 契约假定的「消息进 transcript 之前所有权归前端」这一层在 taiji 长期缺失（§2.1 事故 A 的同类结构性空缺，只是发生在用户消息域）。内核按 pi 既有原语（steer/followUp 交接槽位、`queue_update` 受理回执、`message_end(user)` 送达事实、`clear_queue` 回收原语）实现**两阶段回执**：受理（prompt 受理 / 文本入槽位）≠ 送达（`message_end(user)` 命中裸标记 = 已进 transcript）；只拿受理的条目停留 in-flight 并由对账器（四触发点 ×  reclaim/rebuild/adopt 三分处置兜底；watchdog 定时触发点已随 ADR-0122 防御机制清查退役，全事件驱动）兜底。C-ext-19 的禁令在本域的落实形态 = **交互式发送不再由多处各自判定车道**：lane（direct/steer/queued）判定单一源收归 runtime 内核，renderer/extension 侧的车道判定与本地时序防御（defer 队列状态机、S1 拒绝检测、重投 timer）整体退役——登记 C-data-25，条目数据源登记 C-data-08。
 - **封闭清单外的登记豁免（canvas 回推，失效提示直投，2026-10-16 登记）**：C-data-25 发送方清单外唯一豁免 = 画布域的裁决回推——runtime transport 层 `packages/runtime/src/transport/canvas-message-handler.ts` 的 `pushToBoundSessions`（WS mutate actor=user 成功腿对活跃绑定 session 逐个 `client.prompt(text, undefined, 'followUp')`，不经投递所有权内核提交）。定性对齐 scheduler-steer 直投改判的登记形态：**失效提示语义，非交互投递**——通知文本只是绑定 agent 重新 `canvas_read` 的触发器（`canvasNotifyText` 明文要求「响应前先 canvas_read 取画布当前态」），画布状态权威在 events.jsonl，回推丢失不损状态，最坏面 = agent 不知道有新裁决可拉；不经内核提交的理由 = 回推不是「进 transcript 的用户消息」本体，无需两阶段回执与对账兜底，也不占内核队列深度；at-most-once 丢失窗为设计已接受代价（prompt fire-and-forget、失败 warn 不重试——ADR-0122 首败显式上报 + 手动恢复口径）；丢失恢复路径 = 用户重试裁决 / agent 重新 canvas_enter（重入即重新拉取全量态）；followUp 显式排队（缺省该参数在 pi 占线时直接 throw「Agent is already processing」，连续裁决逐条排队不打断进行中 turn）见该函数 docstring。重新评估条件 = 通知开始承载离开画布即不可恢复的结果语义（届时按 C-ext-19 账本通道迁移）。
-- **结果语义的域内改判注记（C-ext-19 挂账关系重申）**：smart-context 四类通知（含压缩结果 onComplete/onError——**结果语义**）由 `sendUserMessage(deliverAs:'steer' | 'followUp')` 改判为 `pi.sendMessage(deliverAs:'nextTurn', triggerTurn:false)`（`sendMessage` 为 ExtensionAPI 实装名，见 `node_modules/@earendil-works/pi-coding-agent` 的 `ExtensionAPI` 类型）：必达性由 at-most-once 提升为**常驻至被消费**（PS-06：`_pendingNextTurnMessages` 唯一消费点 = 用户驱动 `prompt()`），且不再自起 run。这是**存量通路的域内改判**（字面不违「禁止新建 at-most-once 通道」），**不是** C-ext-19 正向要求的满足——账本化迁移按附录 B「已登记待办」同款挂账口径处理（该清单已补入 smart-context 通知条目）：pi 进程死亡致 nextTurn 通知丢失的面与改判前相同，随账本化迁移一并解决。
-- **另三柱不涉本内核**：无模型能力面（能力注册表）、无改状态 RPC 回执（生效回执）。pi 语义依赖全部登记进 `pi-semantics.json` PS 条目（guard=probe 形态 vitest——静态直读实装 dist 断言，受 C-proc-08 版本门禁与探针重验约束，pi 升级时自动重跑）：`clear_queue` 返回值与队列收回原语 = PS-64/65（`pi-semantics-reclaim-primitives.test.ts`）、`get_entries` 标记可读 = PS-26（user 消息落盘与事件同源、文本原样携带裸标记，get_entries 读到的即该落盘源）、`nextTurn` 注入形态 = PS-06（`pi-semantics-agent-session.test.ts`）、`compaction_start/end` 的 reason 字段与 manual 掐断序 = PS-61/62（`pi-semantics-compaction-resume.test.ts`）。行为序类判据（agent_end 先于 compaction_start 的实测到达序、reason 实测值、stopReason='aborted'）另由 `packages/runtime/src/__tests__/probes/` 实机探针手动补验（真 pi + faux LLM 零 token，不在版本门禁自动重跑范围）。
+- **结果语义的域内改判注记（C-ext-19 未决登记关系重申）**：smart-context 四类通知（含压缩结果 onComplete/onError——**结果语义**）由 `sendUserMessage(deliverAs:'steer' | 'followUp')` 改判为 `pi.sendMessage(deliverAs:'nextTurn', triggerTurn:false)`（`sendMessage` 为 ExtensionAPI 实装名，见 `node_modules/@earendil-works/pi-coding-agent` 的 `ExtensionAPI` 类型）：必达性由 at-most-once 提升为**常驻至被消费**（PS-06：`_pendingNextTurnMessages` 唯一消费点 = 用户驱动 `prompt()`），且不再自起 run。这是**存量通路的域内改判**（字面不违「禁止新建 at-most-once 通道」），**不是** C-ext-19 正向要求的满足——迁移处置按统一投递设计（`.tmp/tech-design/unified-delivery.md` §3.7）u6 豁免类评估登记（波 5 可选，默认不迁，登记于 `docs/todo/`）：pi 进程死亡致 nextTurn 通知丢失的面与改判前相同，是否经 delivery-port 迁移由 u6 评估裁决。
+- **另三柱不涉本内核**：无模型能力侧（能力注册表）、无改状态 RPC 回执（生效回执）。pi 语义依赖全部登记进 `pi-semantics.json` PS 条目（guard=probe 形态 vitest——静态直读实装 dist 断言，受 C-proc-08 版本门禁与探针重验约束，pi 升级时自动重跑）：`clear_queue` 返回值与队列收回原语 = PS-64/65（`pi-semantics-reclaim-primitives.test.ts`）、`get_entries` 标记可读 = PS-26（user 消息落盘与事件同源、文本原样携带裸标记，get_entries 读到的即该落盘源）、`nextTurn` 注入形态 = PS-06（`pi-semantics-agent-session.test.ts`）、`compaction_start/end` 的 reason 字段与 manual 掐断序 = PS-61/62（`pi-semantics-compaction-resume.test.ts`）。行为序类判据（agent_end 先于 compaction_start 的实测到达序、reason 实测值、stopReason='aborted'）另由 `packages/runtime/src/__tests__/probes/` 实机探针手动补验（真 pi + faux LLM 零 token，不在版本门禁自动重跑范围）。

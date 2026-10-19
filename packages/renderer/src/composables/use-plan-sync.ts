@@ -1,9 +1,9 @@
 /**
  * usePlanState —— plan 模式状态的组件消费接口（u1-store：分区状态源在 plan-store，
- * 本 composable 负责「焦点同步 + 首拉触发 + WS 订阅 + 活动补拉转发」的编排）。
+ * 本 composable 负责「焦点同步 + 首次拉取触发 + WS 订阅 + 活动补充拉取转发」的编排）。
  *
- * 四条链路（范式对齐 useGenStats 五件套与 useListSync 首拉形态）：
- * 1. 焦点同步 + 首拉（同一个 watch immediate 承载——挂载与切换合一时点，useListSync 先例）：
+ * 四条链路（范式对齐 useGenStats 五件套与 useListSync 首次拉取形态）：
+ * 1. 焦点同步 + 首次拉取（同一个 watch immediate 承载——挂载与切换合一时点，useListSync 先例）：
  *    sessionIdRef → planStore.syncFocus（分区 current 与草稿操作对齐焦点）→
  *    planStore.loadPlanState（session.getPlanState RPC 冷路径，D1⑥；reply success 检查
  *    失败走分区 loadError 错误通路——AGENTS.md 规则 5；响应空/无 planState 置空分区）。
@@ -12,13 +12,13 @@
  *    本层不持裸分区写入口（AGENTS.md 规则 8：WS handler 禁裸 update，切 sid 竞态结构性消除）。
  * 3. 视图透出：view / stage / drafts / loadError 经 storeToRefs 透出（保响应性），草稿操作
  *    转发 store action（只作用焦点分区）。
- * 4. 活动补拉转发（2026-09-25 真机缺陷修复）：message.complete（assistant 消息完成）→
- *    store.reconcileOnAssistantMessage——新 session 首拉窗口「首拉早于 entry 落盘 + 帧
+ * 4. 活动补充拉取转发（2026-09-25 真机缺陷修复）：message.complete（assistant 消息完成）→
+ *    store.reconcileOnAssistantMessage——新 session 首次拉取窗口「首次拉取早于 entry 落盘 + 帧
  *    不可靠」双断后的再拉触发点，限频门内聚在 store。
- * 5. 崩溃恢复对账（F-W3-2）：session.restored 边沿 → store.loadPlanState 冷拉——恢复即
+ * 5. 崩溃恢复对账（F-W3-2）：session.restored 边沿 → store.loadPlanState 冷读路径拉取——恢复即
  *    对账时点，不切焦点也有重确认触发点。
  *
- * 必须在组件 setup 同步调用（内部 useSessionEvents 有 getCurrentInstance 守卫）。
+ * 必须在组件 setup 同步调用（内部 useSessionEvents 有 getCurrentInstance 检查）。
  * 消费方（plan-mode-ux-refactor u-plan-bar 起：PlanModeBar 常驻宿主 + 其右区 PlanReviewBar、
  * u1-docs-panel 的 PlanDocsPanel）：传 panel store 的 focusedSessionId（plan 面只服务焦点
  * session 的显示语义，D1）。focusedSid 注入义务原在横幅/审批条（已删/改挂），现由
@@ -39,7 +39,7 @@ export interface UsePlanStateReturn {
   stage: ComputedRef<PlanStage | null>
   /** 焦点 session 的评论草稿（per-session 隔离；操作走 addDraft/removeDraft/clearDrafts） */
   drafts: ComputedRef<PlanReviewComment[]>
-  /** 首拉失败错误（null = 无错误；非空时组件呈现错误态） */
+  /** 首次拉取失败错误（null = 无错误；非空时组件呈现错误态） */
   loadError: ComputedRef<string | null>
   /** 加一条评论草稿（焦点分区） */
   addDraft: (comment: PlanReviewComment) => void
@@ -55,8 +55,8 @@ export function usePlanState(sessionIdRef: Ref<string | null | undefined>): UseP
   const normalizedSid = computed(() => sessionIdRef.value ?? null)
 
   /**
-   * 焦点同步 + 首拉触发（immediate：挂载与切换合一时点；null sid 只同步焦点不拉——
-   * 首拉 RPC 的 sessionId 白名单由 store.loadPlanState 内守卫兜底）。
+   * 焦点同步 + 首次拉取触发（immediate：挂载与切换合一时点；null sid 只同步焦点不拉——
+   * 首次拉取 RPC 的 sessionId 白名单由 store.loadPlanState 内检查兜底）。
    */
   watch(
     normalizedSid,
@@ -73,18 +73,18 @@ export function usePlanState(sessionIdRef: Ref<string | null | undefined>): UseP
   onMessage('session.planState', (msg, sid) => {
     store.applyFrame(sid, msg.payload.planState)
   })
-  // 链路 4（活动信号补拉，2026-09-25 真机缺陷「新 session 发 /plan 状态带不渲染」）：
+  // 链路 4（活动信号补充拉取，2026-09-25 真机缺陷「新 session 发 /plan 状态带不渲染」）：
   // assistant 消息活动（message_start = turn 内最早稳定信号，message.complete 兜底长
   // turn 多消息场景）= 该 session 有 agent 活动、plan 状态可能已刷新的边沿——转发
   // store.reconcileOnAssistantMessage（非活跃门 + 冷却门内聚在 store，见其头注释）。
-  // 补的是「首拉早于 plan-state entry 落盘 + session.planState 帧在创建窗口不可靠
-  // （早于订阅送达 / 未发布）」两条腿全断后的再拉触发点（范式对齐 useCommandSync
-  // 补拉闭环：消费侧动作边沿主动拉取，不依赖 broadcast）。plan entry 落盘（/plan 处
+  // 补的是「首次拉取早于 plan-state entry 落盘 + session.planState 帧在创建窗口不可靠
+  // （早于订阅送达 / 未发布）」两条路径全断后的再拉触发点（范式对齐 useCommandSync
+  // 补充拉取闭环：消费侧动作边沿主动拉取，不依赖 broadcast）。plan entry 落盘（/plan 处
   // 理前置动作）必然早于 assistant 消息开始，故活动信号到达时磁盘必已就绪。
   onMessage(['message.message_start', 'message.complete'], (_msg, sid) => {
     store.reconcileOnAssistantMessage(sid)
   })
-  // 链路 5（崩溃恢复对账，F-W3-2）：session.restored 边沿 → 直接冷拉（不走 reconcile
+  // 链路 5（崩溃恢复对账，F-W3-2）：session.restored 边沿 → 直接冷读路径拉取（不走 reconcile
   // 的冷却/帧进展门——恢复即对账，语义无频次顾虑）。恢复 = 磁盘真值已重写的确定性时点
   //（pi respawn 重放 entry 落盘），不切焦点也有重确认触发点；restored 帧到达即拉，
   // 直读磁盘语义必得真值。

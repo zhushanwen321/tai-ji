@@ -1,15 +1,15 @@
 /**
- * check-capability-allowlist-sync.mjs 单测（R1 一致性审查：守卫本体 + pre-commit 触发段已交付，
- * 但守卫自身无回归测试、--self-test 无自动化挂载点——比较逻辑（setDiff 被改成子集、第 ② 步被删）
+ * check-capability-allowlist-sync.mjs 单测（R1 一致性审查：检查本体 + pre-commit 触发段已交付，
+ * 但检查自身无回归测试、--self-test 无自动化挂载点——比较逻辑（setDiff 被改成子集、第 ② 步被删）
  * 自身退化时无任何红灯。设计 §10 u1 点名「形态照搬 check-thinking-levels.mjs 双清单对拍先例」，
- * 先例正是为「守卫自身假绿」补的测试，故本守卫的回归保护形态随行补上。）
+ * 先例正是为「检查自身假绿」补的测试，故本检查的回归保护形态随行补上。）
  *
  * 组织方式照同辈 check-thinking-levels.test.mjs 惯例：纯函数直测 + tmpdir fixture，CLI 集成用例
- * 把守卫脚本复制到 tmp mirror 运行（守卫 ROOT 由 import.meta.url 推导，副本位置使 ROOT 落在
- * mirror 内——篡改 fixture 才真正改到守卫读的文件，「篡改即红、还原即绿」的差分才成立）。
+ * 把检查脚本复制到 tmp mirror 运行（检查 ROOT 由 import.meta.url 推导，副本位置使 ROOT 落在
+ * mirror 内——篡改 fixture 才真正改到检查读的文件，「篡改即红、还原即绿」的差分才成立）。
  *
  * 比对面成员集从真实仓库源文件动态提取（pi 无关、随真实交付面走）：绿 = fixture 与真实仓库一致；
- * 各漂移用例篡改任一侧 → exit 1，证明守卫非恒绿。另含真实仓库直跑用例（守卫对实际交付面绿）。
+ * 各漂移用例篡改任一侧 → exit 1，证明检查非恒绿。另含真实仓库直跑用例（检查对实际交付面绿）。
  *
  * 运行：cd <repo-root> && pnpm exec vitest run scripts/__tests__/check-capability-allowlist-sync.test.mjs
  * （ci.yml「Test - scripts guards」逐文件列举同款口径。）
@@ -98,9 +98,9 @@ const sanitizeSrc = ({ tags, attrs, allowData = true, allowAria = true }) => {
 }
 
 /**
- * tmp mirror 工厂：目录布局对齐守卫的 ROOT 相对路径（extensions/taiji/system-prompt/src、
+ * tmp mirror 工厂：目录布局对齐检查的 ROOT 相对路径（extensions/taiji/system-prompt/src、
  * packages/ui/src/features/chat）。overrides 覆盖任一侧成员集或净化配置锚点（漂移
- * 注入点），missing 指定不落盘的文件。root/落盘/清理/守卫副本装置见 guard-mirror.mjs。
+ * 注入点），missing 指定不落盘的文件。root/落盘/清理/检查副本装置见 guard-mirror.mjs。
  */
 function makeMirror({
   capTags = REAL_CAP_TAGS,
@@ -132,13 +132,13 @@ function makeMirror({
   return { root, run, cleanup }
 }
 
-describe('CLI 集成（守卫脚本 × tmp mirror）', () => {
+describe('CLI 集成（检查脚本 × tmp mirror）', () => {
   it('两侧一致 → exit 0，三条正面/负面清单逐一报一致 + aria/data 锚点绿', () => {
     const fx = makeMirror()
     try {
       const r = fx.run()
       expect(r.status).toBe(0)
-      expect(r.stdout).toContain('✓ capability 清单对拍守卫通过')
+      expect(r.stdout).toContain('✓ capability 清单对拍检查通过')
       expect(r.stdout).toContain(`正面标签清单与 ALLOWED_TAGS 一致（${REAL_CAP_TAGS.length} 项`)
       expect(r.stdout).toContain(`正面属性清单与 ALLOWED_ATTR 一致（${REAL_CAP_ATTRS.length} 项）`)
       expect(r.stdout).toContain('data-* 通配以 ALLOW_DATA_ATTR=false')
@@ -207,13 +207,13 @@ describe('CLI 集成（守卫脚本 × tmp mirror）', () => {
     }
   })
 
-  it('漂移红（净化层缺 ALLOW_ARIA_ATTR=false → 任意 aria-* 越过声明面）→ exit 1（属性面完备性锚点）', () => {
+  it('漂移红（净化层缺 ALLOW_ARIA_ATTR=false → 任意 aria-* 越过声明范围）→ exit 1（属性完备性锚点）', () => {
     const fx = makeMirror({ allowAria: false })
     try {
       const r = fx.run()
       expect(r.status).toBe(1)
       expect(r.stderr).toContain('未显式 ALLOW_ARIA_ATTR: false')
-      expect(r.stderr).toContain('声明清单 ≠ 有效放行面')
+      expect(r.stderr).toContain('声明清单 ≠ 有效放行范围')
     } finally {
       fx.cleanup()
     }
@@ -231,8 +231,8 @@ describe('CLI 集成（守卫脚本 × tmp mirror）', () => {
   })
 })
 
-describe('真实仓库源文件（守卫对实际交付面非恒绿的反面：当前两侧一致）', () => {
-  it('直跑真实守卫 → exit 0', () => {
-    expectGuardDirectRunPasses(SCRIPT, '✓ capability 清单对拍守卫通过')
+describe('真实仓库源文件（检查对实际交付面非恒绿的反面：当前两侧一致）', () => {
+  it('直跑真实检查 → exit 0', () => {
+    expectGuardDirectRunPasses(SCRIPT, '✓ capability 清单对拍检查通过')
   })
 })

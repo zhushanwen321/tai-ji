@@ -147,7 +147,7 @@ function resumeCtx(): RunContext {
   };
 }
 
-/** 指定 dbPath 的锚（白名单守卫用例：非集合内路径 → 非法 zcode 锚）。 */
+/** 指定 dbPath 的锚（白名单检查用例：非集合内路径 → 非法 zcode 锚）。 */
 function resumeCtxWithDbPath(dbPath: string): RunContext {
   return {
     taskId: "sa-resume",
@@ -260,7 +260,7 @@ describe("interact(resume)：resume 读 → 新 session 注入（P-1 选型行�
     expect(sentFrames(stateFile, "session/resume")).toHaveLength(0);
   });
 
-  it("锚 dbPath 非白名单集合（read() ①级同构守卫）→ 非法 zcode 锚：不发 session/resume、无前缀降级、run 仍成功", async () => {
+  it("锚 dbPath 非白名单集合（read() ①级同构检查）→ 非法 zcode 锚：不发 session/resume、无前缀降级、run 仍成功", async () => {
     const { engine, stateFile } = makeEngine();
     const { outcome } = await engine.run(makeTask(), resumeCtxWithDbPath("/tmp/attacker-chosen/db.sqlite"));
     expect(outcome.error).toBeUndefined();

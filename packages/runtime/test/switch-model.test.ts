@@ -11,14 +11,14 @@
  * - client 不存在 → 跳过缓存写和广播，return sessionId（不假装成功）。
  *
  * 写点单测追加（composer-model-session-isolation 设计 §5 U8 承诺的 model-control 写点覆盖；
- * impl-plan 台账中写点接入属 U1，本组用例是 Gate B 端到端之外的最小单测防线）：
+ * impl-plan 条目清单中写点接入属 U1，本组用例是 Gate B 端到端之外的最小单测防线）：
  * switchModel / setThinkingLevel 成功后读回值 == get_state 读回的生效值（生效值胜请求值）。
  *
- * [缓存治理批 3 U7 适配 → U8a/U8b 收口] 读侧 = extractLatestModelFromJsonl 反向读 JSONL
+ * [缓存治理批 3 U7 适配 → U8a/U8b 收尾] 读侧 = extractLatestModelFromJsonl 反向读 JSONL
  * 真源，pi mock 在 setModel / setThinkingLevel 成功后 append 对应 JSONL entry（真实 pi
  * 行为：model_change / thinking_level_change 落盘），断言语义 = 「反向读 JSONL 可见」。
  * U8 写点退役（W1/W2/W6）：persistModelBinding 的 sidecar 落盘断言（persistBindingCalls
- * 记录 + 空值守卫负例）与原 readModelBinding 包装随写点删除一并移除——taiji 不再写任何
+ * 记录 + 空值检查负例）与原 readModelBinding 包装随写点删除一并移除——taiji 不再写任何
  * model 持久层，持久层唯一写方 = pi JSONL。
  *
  * 运行：cd packages/runtime && npx vitest run test/switch-model.test.ts
@@ -184,7 +184,7 @@ describe('W1/L7: switchModel fail-fast & 无 client 不假装成功', () => {
   })
 
   it('U2: session 已注册但 pi 进程已退出（死 client）→ 先 ensureActive 拉活再切（不再「返回 sessionId」假成功）', async () => {
-    // U2/D5 + 守卫：`getClient` 不过滤已死进程的旧形态被结构性消除——激活路径负责
+    // U2/D5 + 检查：`getClient` 不过滤已死进程的旧形态被结构性消除——激活路径负责
     // 「回收态/死 client → 拉起」，所以「无 client 就静默返回请求值」这一假成功分支已删。
     const { service, pm, broker, clientMap } = createService()
     // 1. 建立一个 session（会进 sessions Map 且挂 client）

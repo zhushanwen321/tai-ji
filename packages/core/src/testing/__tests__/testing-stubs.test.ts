@@ -1,7 +1,7 @@
 /**
  * testing 桩工厂单测 —— settings-transport-stub / quota-module-stub 的行为契约。
  *
- * 桩自身是「测试基建」，但有独立可回归的行为面（下游 core/renderer/ui 三包测试
+ * 桩自身是「测试基建」，但有独立可回归的行为范围（下游 core/renderer/ui 三包测试
  * 都建立在这些语义上，改坏会让用例假绿而非显式红）：
  * - 默认值中性形状：读方法返回空值结构、写方法返回 ack——形状错时消费用例拿到
  *   undefined 字段静默通过；
@@ -38,7 +38,7 @@ describe('makeSettingsTransportStub', () => {
       }
       called.push(name)
     }
-    // 契约面完整性：SettingsTransport 全部成员都在桩上（编译期类型 + 运行时遍历双保险）
+    // 契约范围完整性：SettingsTransport 全部成员都在桩上（编译期类型 + 运行时遍历双保险）
     expect(called.length).toBe(Object.keys(stub).length)
     expect(called.length).toBeGreaterThan(60)
   })

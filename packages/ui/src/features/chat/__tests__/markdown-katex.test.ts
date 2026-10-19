@@ -10,7 +10,7 @@
  * katex 与 markdown-it-katex 用真实实现（纯 JS 渲染，无 WASM）。
  *
  * [D10 渲染链下沉] katex CSS（katex/dist/katex.min.css）已随渲染模块下沉（模块内 import，
- * 双壳构造性获得，renderer main.ts 全局引入行已移除）。K10 静态守卫锁定该引入不被误删——
+ * 双壳构造性获得，renderer main.ts 全局引入行已移除）。K10 静态检查锁定该引入不被误删——
  * CSS import 在 vitest 中是空模块（不报错但也不生效），一旦被删，双壳公式节点将裸排破相
  * 且无运行时断言可抓（S2/S7 流程不含公式消息），故用源码结构断言兜底。
  *
@@ -106,7 +106,7 @@ describe('markdown KaTeX 公式渲染（13-①）', () => {
     expect(html).toContain('后文')
   })
 
-  it('K10: katex CSS 随渲染模块下沉（模块内 import，源码结构守卫）', async () => {
+  it('K10: katex CSS 随渲染模块下沉（模块内 import，源码结构检查）', async () => {
     // CSS import 在 vitest 中是空模块，运行时断言抓不到「CSS 被删」——用源码结构断言
     // 锁定 `import 'katex/dist/katex.min.css'` 留在渲染模块内（AC-9 静态结构断言先例）。
     const source = readFileSync(resolve(__dirname, '../markdown.ts'), 'utf-8')

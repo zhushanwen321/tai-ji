@@ -4,7 +4,7 @@
  * 吸收 model-thinking-memory / last-used-model 两模块逐字节镜像的持久化生命周期骨架：
  * - 惰性 loadOnce（idle → loading → loaded 三态，幂等——重复调用不重复读 KV）
  * - loadedCallbacks 队列（加载完成后清空，之后注册立即同步触发）
- * - **加载窗口守卫**：KV 未加载完成前 record 只写内存 + 挂起写穿（deferredPersist），
+ * - **加载窗口检查**：KV 未加载完成前 record 只写内存 + 挂起写穿（deferredPersist），
  *   加载完成后补一次完整写收敛——防止拿局部内存快照覆写 KV 整键未知数据
  * - **persistChain 写串行链**：写穿排队执行，前一次 set 未完成时后一次不交错
  *   （内存快照在链上实际执行时读取，链序保证最终落盘为最新全量）
@@ -13,7 +13,7 @@
  * 职责边界：本工厂只管「KV 持久化生命周期」，**不拥有内存容器**——响应式容器
  * （ref / reactive Map 等）与容器形态（单值 / 整表 Map）由调用侧持有，经钩子接入：
  * - parseSnapshot：加载侧形状门（JSON.parse 产物 → 领域快照；形状不符返回 undefined = 按空启动）
- * - mergeSnapshot：快照并入内存。**实现必须内建窗口守卫**（不覆写加载窗口内已 record 的内存新值）
+ * - mergeSnapshot：快照并入内存。**实现必须内建窗口检查**（不覆写加载窗口内已 record 的内存新值）
  * - serialize：写侧快照（链执行时调用，读调用侧容器当前态）
  * - validate（可选）：record 值域钩子（E6 形态枚举校验）；缺省全收
  *
@@ -37,7 +37,7 @@ export interface KVSlotOptions<V> {
   parseSnapshot: (parsed: unknown) => V | undefined
   /**
    * 快照并入内存（仅在 parseSnapshot 返回非 undefined 时调用一次）。
-   * 实现必须内建加载窗口守卫：不覆写加载窗口内已 record 的内存新值
+   * 实现必须内建加载窗口检查：不覆写加载窗口内已 record 的内存新值
    * （在途 KV 旧快照晚到，覆写后 deferred 补写会把旧值落盘——双丢）。
    */
   mergeSnapshot: (value: V) => void
@@ -52,7 +52,7 @@ export interface KVSlotOptions<V> {
 
 /**
  * KV 单键槽位实例（loadOnce/record/onLoaded 与两既有模块签名对齐；__reset 供模块 reset 组合）。
- * 泛型 V 只进配置钩子（KVSlotOptions<V>）——槽位方法面与 V 无关（write 闭包已捕获容器）。
+ * 泛型 V 只进配置钩子（KVSlotOptions<V>）——槽位方法侧与 V 无关（write 闭包已捕获容器）。
  */
 export interface KVSlot {
   /** 触发惰性预载（fire-and-forget，幂等）。加载完成前内存值保持初始态。 */

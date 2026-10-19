@@ -54,7 +54,7 @@ const i18n = createI18n<[DefaultLocaleMessageSchema], string, false>({
   },
 })
 
-/** 已注册 messages 的 locale（幂等守卫：避免重复动态 import / setLocaleMessage） */
+/** 已注册 messages 的 locale（幂等检查：避免重复动态 import / setLocaleMessage） */
 // taste:allow-no-data-owner W24-EX-C（非 GUI 数据技术结构，登记草稿）：已加载 locale 标记集合（i18n 基建，非 GUI 数据）——运行时经 add() 变异（i18n/index.ts:73），字面量初始化后仍运行时写的形态归 S1 语义层兜底，显式例外登记（verifier W24 minor 3）
 const loadedLocales = new Set<Locale>(['zh-CN'])
 
@@ -96,7 +96,7 @@ if (initialLocale === 'en-US') {
 /**
  * fallbackLocale 'en-US' 懒加载的兜底恢复：zh-CN 用户缺 key 时 vue-i18n 回退 en-US，
  * 若 en-US 未注册则显示裸 key。启动后空闲时后台预载（不阻塞首屏），loadedLocales
- * 幂等守卫使已加载场景零开销。requestIdleCallback 不可用的环境回落 setTimeout。
+ * 幂等检查使已加载场景零开销。requestIdleCallback 不可用的环境回落 setTimeout。
  */
 function scheduleFallbackPreload(): void {
   const idle = typeof window !== 'undefined' ? window.requestIdleCallback : undefined

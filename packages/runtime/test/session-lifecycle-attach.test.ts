@@ -95,7 +95,7 @@ function makeEnv(opts: {
     removeSessionEntry: vi.fn(),
     fetchAndBroadcastContext: vi.fn(async () => undefined),
     notifySessionCreated: vi.fn(),
-    // S2 ISP 化：结构性满足 lifecycle 窄接口（10 方法 = 实际消费面），无强转
+    // S2 ISP 化：结构性满足 lifecycle 窄接口（10 方法 = 消费方实际用到的全部），无强转
     getActiveSummaries: vi.fn(() => []),
   }
   const pm = {

@@ -108,7 +108,7 @@ describe('null sid no-op 语义', () => {
 })
 
 describe('B9 getViewedVids：agentcall LRU 联动豁免查询源（panel 枚举）', () => {
-  // [B9] 豁免查询源钉死 panel 枚举：逐 panel → focusedSessionId → drawer 分区 → 当前选中
+  // [B9] 豁免查询源固定为 panel 枚举：逐 panel → focusedSessionId → drawer 分区 → 当前选中
   // vid（isOpen + activeTab==='subagent' + selectedSubagentId 三分量同时满足）。禁止 drawer
   // 分区全枚举（曾开过 drawer 的 session 焦点切走后分区保留，全枚举会永久过度豁免）。
   /** panel 枚举源（每用例新建 + 重绑定，模拟 renderer 装配层注册） */
@@ -178,7 +178,7 @@ describe('B9 getViewedVids：agentcall LRU 联动豁免查询源（panel 枚举�
 
 describe('D5 getViewedVids：btw 线查看豁免（btw-question，M3-a）', () => {
   // 组合链与 subagent 同构（三分量：isOpen + activeTab==='btw' + selectedBtwVid）；
-  // 查询源同样钉死 panel 枚举，禁止 drawer 分区全枚举。
+  // 查询源同样固定为 panel 枚举，禁止 drawer 分区全枚举。
   let panels: Ref<Array<string | null>>
 
   beforeEach(() => {

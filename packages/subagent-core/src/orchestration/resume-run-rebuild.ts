@@ -1,8 +1,8 @@
 // src/orchestration/resume-run-rebuild.ts
 //
 // [U2]（workflow-run-resume-revision）resume 恢复链的重建轴：record 事件流 →
-// 复活聚合 WorkflowRun 的纯投影重建（消费方 = resume-run.ts adoptResumedRun，
-// 编排面与重建面按轴分层——同 record-store 三轴拆分先例）。
+// 复活聚合 WorkflowRun 的纯派生视图重建（消费方 = resume-run.ts adoptResumedRun，
+// 编排侧与重建侧按轴分层——同 record-store 三轴拆分先例）。
 
 import { getLogger } from "../core/logger.ts";
 
@@ -25,7 +25,7 @@ const logger = getLogger("subagents");
  * 重派集（有 started 无 settled）不建条目：worker 重跑脚本到断点处重新发
  * agent-call(callId=N) → dispatchAgentCall miss → 真实派发（D8 档 2/3 经成员
  * 复用通道续写/新建）。budget 双轴按生效值恢复（时间预算挂计时器重排、token
- * 预算挂引擎 maxTokens 投影）；args 从 run-created 帧的 args 全文恢复（设计 §3.1
+ * 预算挂引擎 maxTokens 派生视图）；args 从 run-created 帧的 args 全文恢复（设计 §3.1
  * 载荷表，旧格式帧回落 argsSummary 尽力恢复——见 parseArgsSummary）。
  */
 /** call 重建中间形态（Trace 先建——traceNode 回链 D-10 引用共享；重派集成员不建 node——dispatchAgentCall 重派时 trace.append 自然落位，重建悬空节点只会与重派 append 重复）。 */
@@ -60,8 +60,8 @@ function applySettledFrameToDraft(
 ): void {
   const existing = drafts.get(event.taskIndex);
   if (existing === undefined) {
-    // [D12 宽松面留痕] settled 无 started 的残形态按 fold 自愈占位行处理
-    // （不拒绝——对齐 run-events fold 兜底语义；严格拒绝面限坏行/seq 断档/
+    // [D12 宽松读取侧留痕] settled 无 started 的残形态按 fold 自愈占位行处理
+    // （不拒绝——对齐 run-events fold 兜底语义；严格拒绝情形限坏行/seq 断档/
     // settled 缺 result 三项）。warn 出声：行级合法但配对异常 = 流被外部
     // 篡改或写入器 bug 的观测线索，静默会让该形态不可诊断。
     logger.warn(
@@ -105,14 +105,14 @@ function draftsToReplayCalls(
     // 重派集成员（result 缺省）不建条目：worker 重放脚本到断点处重新发
     // agent-call(callId=N) → dispatchAgentCall miss → 真实派发（D8 档 2/3 经
     // 成员复用通道续写/新建）。回放集直接构造 done 终态（bypass markRunning/
-    // markDone 状态机守卫——重建已知良好持久态的既定先例）。
+    // markDone 状态机检查——重建已知良好持久态的既定先例）。
     if (d.result === undefined) continue;
     const linked = sharedNodes.get(taskIndex) ?? nodes.find((n) => n.stepIndex === taskIndex)!;
     // opts 恢复（[U13]）：agent-started 帧的入参全文（canonical 序列化，写点 =
     // dispatchAgentStarted）parse 回对象——detectReplayInputMismatch 的比对由此
     // 可比（worker 重放脚本重发同 callId 消息时，cached.opts 与本次 opts 走同一
     // canonical 哈希比对，非确定性漂移可检出）。旧格式帧无 input 载荷 → 落占位
-    // {prompt:""}（比对跳过维持——结构性无可比数据面）。
+    // {prompt:""}（比对跳过维持——结构性无可比数据范围）。
     const call = new AgentCall(taskIndex, d.opts ?? { prompt: "" }, linked);
     call.attempts = d.attempts;
     call.status = "done";
@@ -135,7 +135,7 @@ export function rebuildRunFromRecord(
     scriptSource: created.scriptSource ?? "",
     args: created.args ?? parseArgsSummary(created.argsSummary),
     scriptName: created.workflowName,
-    // 锚定恢复：scriptPath 与 scriptSource/args 同为 run-created 帧恢复面（worker
+    // 锚定恢复：scriptPath 与 scriptSource/args 同为 run-created 帧恢复侧（worker
     // 沙箱 eval 模式无 __dirname，模板脚本靠它定位 _shared 族共享件）；旧格式帧
     // 缺失回落空串，由模板脚本内建 fail-fast 拒绝（壳侧 foldRecordStreamToRun
     // 同款恢复，两侧行为等价由测试锁定）
@@ -143,10 +143,10 @@ export function rebuildRunFromRecord(
     // 时间预算单源：调用方传入的「生效预算」（resume 显式覆盖，或继承 run-created
     // 帧的创建预算——assertResumeEligibility 单一折算点）。spec 带预算后 pump 的
     // 复活预算账本分支可达：错误重试重建按剩余活跃预算重排计时器（搁置不计），
-    // 引擎侧 run.state.budget.maxTimeMs 投影与 fresh run 同形。undefined/<=0 不落
+    // 引擎侧 run.state.budget.maxTimeMs 派生视图与 fresh run 同形。undefined/<=0 不落
     // 字段 = 不限时（旧格式帧无该字段且未显式传 time 时与现状一致，不劣化）
     ...(budgetTimeMs !== undefined && budgetTimeMs > 0 ? { budgetTimeMs } : {}),
-    // token 预算单源（与时间轴同构）：生效值随 spec 落定，引擎侧 maxTokens 投影
+    // token 预算单源（与时间轴同构）：生效值随 spec 落定，引擎侧 maxTokens 派生视图
     // （createRunningRun / worker-host budget 注入读 spec.budgetTokens）与 fresh
     // run 同形。undefined/<=0 不落字段 = 不限制
     ...(budgetTokens !== undefined && budgetTokens > 0 ? { budgetTokens } : {}),
@@ -162,7 +162,7 @@ export function rebuildRunFromRecord(
     spec,
     {
       // fresh run 的 Budget 同源（lifecycle.createRunningRun：maxTokens=spec.budgetTokens、
-      // maxTimeMs=spec.budgetTimeMs）——复活聚合形状与新建一致，避免展示/消费面按
+      // maxTimeMs=spec.budgetTimeMs）——复活聚合形状与新建一致，避免展示/消费方按
       // maxTimeMs/maxTokens 判定时双形态。
       // [§2.1b] 计数不再归零：帧推导（agent-settled.result.usage 同一加权口径）重建
       // 已耗 tokens/cost/callCount——下界近似（中间失败尝试不在事件流，见
@@ -198,7 +198,7 @@ function parseAgentInput(input: string): AgentCallOpts | undefined {
 }
 
 /**
- * argsSummary → args 尽力恢复（旧格式帧回落通道）：现行写入面 run-created 帧
+ * argsSummary → args 尽力恢复（旧格式帧回落通道）：现行写侧 run-created 帧
  * 携带 args 全文（rebuildRunFromRecord 优先消费）；本函数只服务旧格式帧（无
  * args 字段——设计 §3.1 载荷表落地前落盘的流）。未截断摘要可完整恢复；截断/
  * 不可解析回落空对象 + warn（旧格式流的 $ARGS 语义限制，留痕可诊断）。

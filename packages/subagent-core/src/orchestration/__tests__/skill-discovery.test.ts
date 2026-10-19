@@ -165,11 +165,11 @@ describe("resolveSkillPath — 结果缓存（IF8/DM3）", () => {
   });
 });
 
-describe("resolveSkillPath — `..` 穿越守卫（三通道对称修复：skill 名是名字不是路径）", () => {
+describe("resolveSkillPath — `..` 穿越检查（三通道对称修复：skill 名是名字不是路径）", () => {
   it("project 源：含 .. 逃逸 skills 根的名字 → not found（即使逃逸目标真实存在）", () => {
     vi.spyOn(process, "cwd").mockReturnValue(projRoot);
     // 逃逸目标真实存在：projRoot/.agents/skills/../../escape-target = projRoot/escape-target。
-    // 旧实现 path.resolve 吸收 .. 后 existsSync 命中 → 返回树外目录；守卫后必须 undefined。
+    // 旧实现 path.resolve 吸收 .. 后 existsSync 命中 → 返回树外目录；检查后必须 undefined。
     mkdirp(join(projRoot, "escape-target"));
 
     expect(resolveSkillPath("../../escape-target")).toBeUndefined();
@@ -196,7 +196,7 @@ describe("resolveSkillPath — `..` 穿越守卫（三通道对称修复：skill
     const real = join(projRoot, ".agents/skills", "real");
     mkdirp(real);
 
-    // 守卫只拒逃逸，不拒归一化：root/sub/../real = root/real（根内）→ 命中。
+    // 检查只拒逃逸，不拒归一化：root/sub/../real = root/real（根内）→ 命中。
     expect(resolveSkillPath("sub/../real")).toBe(real);
   });
 

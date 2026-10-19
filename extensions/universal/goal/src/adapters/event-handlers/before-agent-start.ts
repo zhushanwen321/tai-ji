@@ -8,7 +8,7 @@
  * 2. ADR-002：Context 使用率 > 85% → 保持 active + 注入 wrap-up 指令
  * 3. 正常：注入 contextInjectionPrompt
  *
- * 无 ESC 守卫（before_agent_start 是 agent 开始前的信号，此时无 aborted 可能）。
+ * 无 ESC 检查（before_agent_start 是 agent 开始前的信号，此时无 aborted 可能）。
  *
  * 全解耦：不再做 staleness 检测（原依赖 pi.__todoGetList，跨 ext 失效），
  * 不再探测 plan extension（原 typeof pi.__planStart，跨 ext 失效）。

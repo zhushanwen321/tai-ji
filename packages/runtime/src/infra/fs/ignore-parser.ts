@@ -97,7 +97,7 @@ const REGEX_META_CHARS = new Set(['.', '+', '^', '$', '{', '}', '(', ')', '|', '
  * @param pattern 已去除取反前缀/目录后缀/锚定前导斜杠的 pattern
  * @param anchored 是否锚定到根（true → 从根开始匹配；false → 匹配任意路径段开始）
  *
- * 转义规则（伪代码，注意勿在块注释中出现斜杠星号闭合序列）：
+ * 转义规则（伪代码，注意勿在块注释中出现块注释的结束序列）：
  * - 双星号加斜杠 → (.*  斜杠)?（零或多层目录前缀）
  * - 斜杠加双星号 → ( 斜杠 .*)?$（末尾多层）
  * - 双星号 → .*（跨目录）
@@ -169,7 +169,7 @@ export function matchPath(matcher: IgnoreMatcher, path: string): boolean {
   const normalized = normalizePath(path)
   // 短路径直通（D7-2）：无 '/' 的路径只有自身一个前缀（allPrefixes('x') ≡ ['x']），
   // 跳过 split/构建数组，直接以 [path] 测试——文件树顶层 entry 全是短路径，省 split 开销。
-  // 空串守卫（W24 审查 A-2）：''/根路径（'/' 归一化后为 ''）必须保持旧 allPrefixes 语义
+  // 空串检查（W24 审查 A-2）：''/根路径（'/' 归一化后为 ''）必须保持旧 allPrefixes 语义
   // （返回 [] → 恒 false），不能落入直通分支——否则 `*` 规则下 [''] 前缀命中 regex 且
   // isSelf(''==='') 成立，被错误判为 ignored（探针证实旧版 false / 新版 true 的漂移）。
   const prefixes = normalized !== '' && !normalized.includes('/') ? [normalized] : allPrefixes(normalized)

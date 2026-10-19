@@ -73,7 +73,7 @@ export function stripComments(src: string): string {
   return scanCode(src, true)
 }
 
-/** 从 start（指向 '{'）做花括号配对，返回块文本与闭合后下标；字符串已剥离故无字面量干扰。 */
+/** 从 start（指向 '{'）做花括号配对，返回块文本与封口后下标；字符串已剥离故无字面量干扰。 */
 function matchBrace(src: string, start: number): { text: string; end: number } | null {
   let depth = 0
   for (let i = start; i < src.length; i++) {

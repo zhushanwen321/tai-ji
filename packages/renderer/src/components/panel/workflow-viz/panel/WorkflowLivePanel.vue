@@ -69,7 +69,7 @@ import type { WorkflowAgentCall, WorkflowRunRecord } from '@taiji/shared'
 const props = defineProps<{
   /** 主 session id（事件流拉取与 agentcall 编排的归属 session）。 */
   sessionId: string
-  /** 当前 run 投影（overlay 容器从 workflowStore.recordsOf 分区选中后传入）。 */
+  /** 当前 run 派生视图（overlay 容器从 workflowStore.recordsOf 分区选中后传入）。 */
   run: WorkflowRunRecord
   /** u4 Gantt 展示组件（overlay 容器装配时注入；缺省 = 分段统计降级形态）。 */
   ganttComponent?: Component
@@ -77,7 +77,7 @@ const props = defineProps<{
 
 const store = useWorkflowStore()
 
-// ── D11 挂载编排：活跃 run 登记 + 事件流首拉（缓存命中即复用——重开秒显）────────
+// ── D11 挂载编排：活跃 run 登记 + 事件流首次拉取（缓存命中即复用——重开秒显）────────
 onMounted(() => {
   store.setActiveWorkflowRun(props.sessionId, props.run.runId)
   void store.loadWorkflowRunEvents(props.sessionId, props.run.runId)
@@ -113,7 +113,7 @@ const activeTab = computed<WorkflowLiveTab | undefined>(() =>
 )
 
 /** agent tab 归属 call 反查（activeTab.callId → run.agentCalls；run 更新后 trace 行对象
- *  换引用，详情面按 id 重查保持最新投影）。 */
+ *  换引用，详情侧按 id 重查保持最新派生视图）。 */
 const activeCall = computed<WorkflowAgentCall | undefined>(() => {
   const tab = activeTab.value
   if (tab?.kind !== 'agent' || tab.callId === undefined) return undefined

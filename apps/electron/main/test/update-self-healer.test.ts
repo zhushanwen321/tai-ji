@@ -411,11 +411,12 @@ describe('cleanupCompletedUpdate', () => {
     expect(existsSync(linuxUpdaterLog)).toBe(true)
   })
 
-  it('[A-G2] 原子写孤儿 tmp（update-result.json.tmp / resume-state.json.tmp）→ 终态清理一并删除', async () => {
+  it('[A-G2] 原子写孤儿 tmp（update-result / resume-state 的 pid+seq tmp）→ 终态清理一并删除', async () => {
     seedArtifacts()
-    // 实际原子写实现的两类孤儿 tmp（写崩残留，半截 JSON）+ 一个通用 .tmp（模式覆盖未来新原子写点）
-    const resultTmp = path.join(updateDir, 'update-result.json.tmp')
-    const resumeTmp = path.join(updateDir, 'resume-state.json.tmp')
+    // 实际原子写实现（atomicWriteJsonFile）的两类孤儿 tmp（写崩残留，半截 JSON，
+    // tmp 名含 pid+序号）+ 一个通用 .tmp（模式覆盖固定名与未来新原子写点）
+    const resultTmp = path.join(updateDir, `update-result.json.${process.pid}-1.tmp`)
+    const resumeTmp = path.join(updateDir, `resume-state.json.${process.pid}-2.tmp`)
     const genericTmp = path.join(updateDir, 'download-chunk.tmp')
     writeFileSync(resultTmp, '{"status":"repl')
     writeFileSync(resumeTmp, '{"downloadedBytes":')
@@ -602,7 +603,7 @@ describe('批次 5: updater.pid 互斥（§3.7.1 检查方）', () => {
   })
 
   it('mac 阳性：真实 bash updater.sh 进程 → 识别为 in-flight（defer），pid 文件保留', async () => {
-    // 回归守卫：加固用 ps -o command=（argv），不能退化为 comm=——脚本进程的 comm
+    // 回归检查：加固用 ps -o command=（argv），不能退化为 comm=——脚本进程的 comm
     // 恒为 "bash"（解释器映像），comm= 会把真实存活的脚本 100% 误判为 PID 复用，
     // 互斥 fail-open（2026-08 一致性审查实证）。本用例用真实 bash 脚本进程 + 真实 ps。
     Object.defineProperty(process, 'platform', { value: 'darwin', configurable: true })

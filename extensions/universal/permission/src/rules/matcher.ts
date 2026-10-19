@@ -149,8 +149,8 @@ export function matchRulesForArgv(argv: string[], rules: readonly Rule[]): RuleM
  *  - 遍历 rules（last-match-wins），对每条用 resolvePattern(rule).test(command)
  *  - 无匹配 → ask（G1）
  *
- * E11：toolName 参数与 `toolName !== 'bash'` 守卫已删——生产调用点（pipeline.runLayer2）
- * 恒在 bash 分支内调用，非 bash 由 matchNonBashTool 承接，守卫是不可达的投机分支。
+ * E11：toolName 参数与 `toolName !== 'bash'` 检查已删——生产调用点（pipeline.runLayer2）
+ * 恒在 bash 分支内调用，非 bash 由 matchNonBashTool 承接，检查是不可达的投机分支。
  *
  * 不调 isKnownSafeCommand（不查白名单）：command 字符串无法可靠提取 argv
  * （含引号/转义/管道），argv 级白名单判断由 matchRulesForArgv 在 happy path 负责。

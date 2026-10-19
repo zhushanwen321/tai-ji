@@ -1,7 +1,7 @@
 // use-connection auth 拒绝信号消费测试（remote-use D8 / U1.3）。
 //
 // 真实 ws-client（不 mock，区别于 mode-dispatch 测试的模块 mock）+ fake 平台 WebSocket，
-// 锁定 use-connection 形态分支的信号消费面：
+// 锁定 use-connection 形态分支的信号消费方：
 // 1. 远程 profile 形态：connectRemoteProfile 注册 ws-client onAuthRejected → 转发
 //    ports.onAuthRejected + 抑制位置位；visibility 切前台触发点被抑制（不重连）；reset +
 //    visibility 再触发 → 重连恢复（显式复用 lastConnectedUrl 与 lastCredentials，S4）

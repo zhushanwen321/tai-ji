@@ -3,7 +3,7 @@
 //
 // W10 协议黑盒化：断言对象从内建 ZcodeEngine × fake app-server（inproc，W11 删除）
 // 改为 RemoteEngine × fake 引擎 CLI——abort 走协议 cancel 帧 + 引擎收敛应答
-// （杀链升级面 = W2 EngineClient 套件 3s 收敛窗口用例）。zcode app-server 的
+// （杀链升级路径 = W2 EngineClient 套件 3s 收敛窗口用例）。zcode app-server 的
 // stop 优雅链随 W5 归 zcode-subagent-cli 引擎内测试。
 
 import { mkdtempSync, rmSync } from "node:fs";
@@ -32,9 +32,14 @@ let dataDir: string;
 
 beforeEach(() => {
   dataDir = mkdtempSync(join(tmpdir(), "w10-c4-abort-"));
+  // [session-store-layout-inversion] 协议 run 的 wire sessionDir 经
+  // getSubagentSessionDir(ctx.sessionRootId)（env dataDir 兜底）推导——stubEnv 把
+  // 推导落点收进本 mkdtemp 目录（自建自删红线）。
+  process.env["TAIJI_AGENT_DATA_DIR"] = dataDir;
 });
 
 afterEach(() => {
+  delete process.env["TAIJI_AGENT_DATA_DIR"];
   rmSync(dataDir, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 });
 });
 
@@ -67,6 +72,10 @@ describe("conformance C4：abort 行为（协议黑盒：cancel 帧 + 引擎收�
       const events: AgentEvent[] = [];
       const ctx: RunContext = {
         taskId: "w10-c4-abort",
+        // [session-store-layout-inversion] 派发器在 active session 内注入
+        // sessionRootId（wire sessionDir 分区键的编排层权威源）——conformance 黑盒
+        // 同契约注入；缺席时 buildRunParams fail-fast（host 无 env 绑定形态）。
+        sessionRootId: "sid-c4-abort",
         signal: controller.signal,
         onEvent: (e) => events.push(e),
       };

@@ -97,7 +97,7 @@ export interface IRuntimeSupervisor {
  * 对应 spec §4.2 M3「Window Manager」：窗口注册表 + 跨窗口 session 查询。
  *
  * [HISTORICAL] 不变量：
- * - 单 panel 投影（v2 移除 split 后简化），window-manager 内部构造初始 state
+ * - 单 panel 派生视图（v2 移除 split 后简化），window-manager 内部构造初始 state
  * - 不直接创建 BrowserWindow（创建由 window-factory 负责）
  */
 export interface IWindowManager {

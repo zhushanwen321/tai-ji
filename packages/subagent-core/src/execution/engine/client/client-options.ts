@@ -8,7 +8,6 @@ import { basename } from "node:path";
 import {
   getLogger,
   type EngineCapabilities,
-  type EngineRelayEnv,
   type InitializeResult,
   type ModelCatalogEntry,
 } from "@zhushanwen/subagent-engine-sdk";
@@ -32,7 +31,6 @@ export interface EngineClientOptions {
   // ── buildEngineChildEnv 的 L0/L2 余项（透传）──
   engineNode?: string;
   electronRunAsNode?: boolean;
-  relay?: EngineRelayEnv;
   identityEnv?: Record<string, string | undefined>;
   envPrefixes?: readonly string[];
   processEnv?: Record<string, string | undefined>;

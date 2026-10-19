@@ -40,21 +40,25 @@ function okRunPython() {
   return () => ({ status: 0, stdout: 'Gate ok', stderr: '' })
 }
 
-/** 组装全绿 deps（可逐项覆盖）；readJson 返回最小 coverage/metrics 产物形态 */
+/** 组装全绿 deps（可逐项覆盖）；readJson / readReviewJson 返回最小 coverage/metrics 产物形态。
+ *  reviewDir=null = 新产物目录不可用，readReviewJson 与 readJson 同走旧 `.review/` 回退语义。 */
 function makeDeps(overrides = {}) {
+  const jsonStub = (rel) =>
+    rel.endsWith('coverage.json')
+      ? { verdict: 'pass', packages: {} }
+      : rel.endsWith('metrics.json')
+        ? { verdict: 'pass', warn: [], targets: { high_crap: [] } }
+        : null
   return {
     root: '/fake-root',
+    reviewDir: null,
     git: fakeGit({ 'merge-base github/main HEAD': 'abc123def\n', 'merge-base main HEAD': 'abc123def\n' }),
     exec: okExec(),
     runPython: okRunPython(),
     exists: () => true,
     readHead: () => null,
-    readJson: (rel) =>
-      rel.endsWith('coverage.json')
-        ? { verdict: 'pass', packages: {} }
-        : rel.endsWith('metrics.json')
-          ? { verdict: 'pass', warn: [], targets: { high_crap: [] } }
-          : null,
+    readJson: jsonStub,
+    readReviewJson: jsonStub,
     ...overrides,
   }
 }
@@ -106,7 +110,7 @@ describe('resolveBase：base 口径两侧差异（有意保留，参数化承载
   })
 })
 
-describe('子进程命令构建（py 参数面锚点）', () => {
+describe('子进程命令构建（py 参数侧锚点）', () => {
   it('coverage-gate 命令透传 --base', () => {
     expect(buildCoverageCommand('.agents/skills/pr-cr-fix/scripts/coverage-gate.py', 'main')).toEqual([
       'python3',
@@ -115,7 +119,7 @@ describe('子进程命令构建（py 参数面锚点）', () => {
       'main',
     ])
   })
-  it('metrics-gate 命令透传 --base（dev-merge 侧 hash 与 pr-cr-fix 侧 main 走同构参数面）', () => {
+  it('metrics-gate 命令透传 --base（dev-merge 侧 hash 与 pr-cr-fix 侧 main 走同构的参数侧）', () => {
     expect(buildMetricsCommand('.agents/skills/pr-cr-fix/scripts/metrics-gate.py', 'c0ffee0')).toEqual([
       'python3',
       '.agents/skills/pr-cr-fix/scripts/metrics-gate.py',
@@ -261,11 +265,11 @@ describe('judgeNoLcov：机器盲区判定（决策 4 判定边界）', () => {
     const { violations } = judgeNoLcov(report(Object.keys(files)), (f) => files[f])
     expect(violations.map((v) => v.file)).toEqual(['packages/foo/src/polyfill.ts'])
   })
-  it('.vue 文件保守不排除（template 渲染行为面）', () => {
+  it('.vue 文件保守不排除（template 渲染行为范围）', () => {
     const files = { 'packages/foo/src/Panel.vue': '<template>\n  <div>hi</div>\n</template>\n' }
     expect(judgeNoLcov(report(Object.keys(files)), (f) => files[f]).violations).toHaveLength(1)
   })
-  it('非 OK 包（SKIP/FAIL）不进盲区判定面', () => {
+  it('非 OK 包（SKIP/FAIL）不进盲区判定范围', () => {
     const reportSkip = { packages: { 'packages/foo': { status: 'SKIP', files_without_lcov: ['packages/foo/src/x.ts'] } } }
     expect(judgeNoLcov(reportSkip, () => 'export const a = 1;\n').violations).toHaveLength(0)
   })

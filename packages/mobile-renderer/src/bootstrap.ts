@@ -42,7 +42,7 @@ import {
 const t = i18n.global.t as (key: string, params?: Record<string, unknown>) => string
 
 /**
- * 断连/重启用尽的对话流收口（对齐桌面 useMessageEffects.handleRuntimeUnavailable）：
+ * 断连/重启用尽的对话流收尾（对齐桌面 useMessageEffects.handleRuntimeUnavailable）：
  * 断连宽限（10s）到期或重连放弃（failed）时，①把在途 streaming 消息落终态、错误作为
  * assistant 消息插入对话流（项目规则#3：错误必须重置状态）；②清空 form/planReview 挂起
  * 分区（clearAllFormRequests，对齐桌面 extensionUI clearAllPending——runtime 重启后是全新
@@ -148,11 +148,11 @@ export async function bootstrap(): Promise<void> {
     // reject 流入用户可见 UI（列表 loadError role=alert）。透传 key 会把裸 key 直出给用户。
     // i18n.global.t 的复杂重载收窄为 (key, params?) => string（对齐 app-runtime 同款收窄）。
     t: i18n.global.t as (key: string, params?: Record<string, unknown>) => string,
-    // 断连/重启用尽的对话流收口（对齐桌面 useMessageEffects.handleRuntimeUnavailable 双收口
-    // 形态——finalizeAllStreaming + form/planReview 分区清空 clearAllFormRequests，对应桌面
-    // extensionUI clearAllPending；dialog 通道 queue 两壳一致不清）：断连宽限（10s）到期或
-    // 重连放弃（failed）时，把在途 streaming 消息落终态、错误作为 assistant 消息插入对话流
-    // （项目规则#3：错误必须重置状态），并清空 form 挂起分区——runtime 重启后挂起 Promise
+    // 断连/重启用尽的对话流收尾（对齐桌面 useMessageEffects.handleRuntimeUnavailable 双路
+    // 收尾形态——finalizeAllStreaming + form/planReview 分区清空 clearAllFormRequests，对应
+    // 桌面 extensionUI clearAllPending；dialog 通道 queue 两壳一致不清）：断连宽限（10s）到
+    // 期或重连放弃（failed）时，把在途 streaming 消息落终态、错误作为 assistant 消息插入对话
+    // 流（项目规则#3：错误必须重置状态），并清空 form 挂起分区——runtime 重启后挂起 Promise
     // 不会被 resolve，僵尸 form 卡在 WS 重连窗口内提交即假成功。不接线 = 断连后 composer
     // 永久卡「生成中」。
     onRuntimeUnavailable: handleRuntimeUnavailable,

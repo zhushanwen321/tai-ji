@@ -1,5 +1,5 @@
 /**
- * shutdown 链 dispose-terminal-ptys 步骤本体（孤儿 shell 加固③，runtime 退出链显式收口）。
+ * shutdown 链 dispose-terminal-ptys 步骤本体（孤儿 shell 加固③，runtime 退出链显式收尾）。
  *
  * 提取成可 import 的单步函数：index.ts 组合根 import 即执行 main() 不可直测（index.ts
  * 内多处同款注释），单步语义（先打点再 destroyAllPties）经本模块单测锁定。

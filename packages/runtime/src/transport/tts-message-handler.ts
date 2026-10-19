@@ -2,10 +2,10 @@
  * TTS message handler —— 语音合成朗读四 RPC（ai-voice-tts 设计 §7.1）。
  *
  * 处理 4 个 RPC（与 handles / switch 分支一一对应，照 quota-message-handler 最小参照）：
- * - tts.getConfig：设置页首屏拉脱敏配置投影
+ * - tts.getConfig：设置页首屏拉脱敏配置派生视图
  * - tts.configure：保存单家表单值 + apiKeys 三态（写入/清除/供应商联动带入）
  * - tts.speak：朗读合成（reply 只回 filePath；fromCache/chars/chunks 只进 runtime 日志）
- * - tts.getCapabilities：三家表单投影（设置页表单渲染唯一数据源）
+ * - tts.getCapabilities：三家表单派生视图（设置页表单渲染唯一数据源）
  *
  * 错误契约（D8/§7.1）：结构非法 payload → invalid_payload error envelope（quota handler
  * 先例）；领域失败（未配置/空文本/超长/厂商错误等）由 TtsServiceError 携带 §7.1 错误码

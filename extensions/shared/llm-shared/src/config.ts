@@ -126,7 +126,7 @@ export function loadConfig<T>(
 /**
  * 生成并发唯一的 tmp 文件名（D1e 附带风险修复：双侧 tmp 中间文件同名 `<path>.tmp`
  * 并发可碰撞——runtime 侧 atomicWrite 未传 uniqueSuffix 也是固定名，扩展侧唯一化
- * 后两侧名字空间不相交，碰撞面消除）。
+ * 后两侧名字空间不相交，碰撞风险消除）。
  *
  * 后缀 = pid + 36 进制随机段：同进程多写方（多 session）与跨进程写方均不重名。
  */

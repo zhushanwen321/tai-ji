@@ -24,6 +24,7 @@ import {
   extractCjsModuleExportsKeys,
   extractDctsRuntimeExportNames,
   gateWorkflowsDeclarationPairs,
+  findModuleLevelMutableState,
 } from '../check-core-dist-gate.mjs'
 
 /** tmpdir fixture 目录工厂：files 为 rel 路径 → 内容 映射，调用方 finally rmSync 清理 */
@@ -64,13 +65,13 @@ describe('stripComments', () => {
   it('转义引号不结束字符串状态', () => {
     expect(stripComments(`const s = "a\\"//b"; // c`)).toBe(`const s = "a\\"//b"; `)
   })
-  it('未闭合块注释越过后安全结束（fail-closed 倾向，不抛）', () => {
+  it('未封口块注释越过后安全结束（fail-closed 倾向，不抛）', () => {
     expect(stripComments('a /* never closed')).toBe('a ')
   })
   it('空输入返回空串', () => {
     expect(stripComments('')).toBe('')
   })
-  it('未闭合字符串保留到 EOF（其中 // 不当注释剥离）', () => {
+  it('未封口字符串保留到 EOF（其中 // 不当注释剥离）', () => {
     expect(stripComments('const s = "a // x')).toBe('const s = "a // x')
   })
   it('字符串末尾孤立转义不抛且原样保留', () => {
@@ -98,12 +99,12 @@ describe('parseExportBlocks', () => {
     expect([...names].sort()).toEqual(['Bar', 'def', 'foo', 'qux'])
     expect(problems).toEqual([])
   })
-  it('未闭合花括号 fail-closed 记 problems', () => {
+  it('未封口花括号 fail-closed 记 problems', () => {
     const problems = []
     const names = parseExportBlocks('export { a, b', problems, 't')
     expect([...names]).toEqual([])
     expect(problems.length).toBe(1)
-    expect(problems[0]).toContain('花括号未闭合')
+    expect(problems[0]).toContain('花括号未封口')
   })
   it('无法解析的导出项记 problems（不静默漏符号）', () => {
     const problems = []
@@ -138,6 +139,12 @@ describe('parseExportBlocks', () => {
     const problems = []
     const names = parseExportBlocks('export { a }\nconst x = 1\nexport { b, c }', problems, 't')
     expect([...names].sort()).toEqual(['a', 'b', 'c'])
+    expect(problems).toEqual([])
+  })
+  it('export type { ... } 块形态与普通块同等解析（显式类型重导出）', () => {
+    const problems = []
+    const names = parseExportBlocks('export type { A, B as C } from "./x"', problems, 't')
+    expect([...names].sort()).toEqual(['A', 'C'])
     expect(problems).toEqual([])
   })
   it('fail-closed 消息带 where 定位前缀', () => {
@@ -250,9 +257,57 @@ describe('extractSrcExportNames', () => {
     expect([...names].sort()).toEqual(['A', 'B', 'D', 'I', 'NS', 'T', 'default'])
     expect(problems).toEqual([])
   })
-  it('裸 export * from 记 problems（重导出面无法文本枚举）', () => {
+  it('export type { ... } from 显式类型重导出块入集（engine-discovery-scan 实际形态，防门②假阳性复发）', () => {
+    const { names, problems } = extractSrcExportNames(
+      'export type { DiscoveredEngine, PackageInspection } from "./engine-inspect-package.ts"\nexport const A = 1\n',
+      't',
+    )
+    expect([...names].sort()).toEqual(['A', 'DiscoveredEngine', 'PackageInspection'])
+    expect(problems).toEqual([])
+  })
+  it('裸 export * from 记 problems（重导出清单无法文本枚举）', () => {
     const { problems } = extractSrcExportNames('export * from "./x"', 't')
     expect(problems.some((p) => p.includes('export * from'))).toBe(true)
+  })
+})
+
+describe('findModuleLevelMutableState（门① 启发式 + 只读容器豁免）', () => {
+  const runOn = (content) => {
+    const dir = makeFixture({ 'mod.ts': content })
+    try {
+      return findModuleLevelMutableState(join(dir, 'mod.ts'))
+    } finally {
+      rmSync(dir, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 })
+    }
+  }
+
+  it('顶层 let 与 const new Map/Set 均命中可变信号', () => {
+    const signals = runOn(['let warned = false;', 'const cache = new Map<string, string>();'].join('\n'))
+    expect(signals.map((s) => s.signal)).toEqual([
+      '模块顶层 let/var 声明（可变绑定）',
+      '模块级 new Map/Set（可变容器）',
+    ])
+  })
+
+  it('顶层类型注解 ReadonlySet/ReadonlyMap/Readonly<Set> 豁免（类型级只读契约）', () => {
+    const signals = runOn(
+      [
+        'export const A: ReadonlySet<string> = new Set(["x"]);',
+        'const B: ReadonlyMap<string, number> = new Map([["k", 1]]);',
+        'const C: Readonly<Set<string>> = new Set(["y"]);',
+      ].join('\n'),
+    )
+    expect(signals).toEqual([])
+  })
+
+  it('容器值只读而容器本身可变（Record 值为 ReadonlySet）不豁免', () => {
+    const signals = runOn('const byKind: Record<string, ReadonlySet<string>> = new Map();\n')
+    expect(signals).toHaveLength(1)
+    expect(signals[0].signal).toBe('模块级 new Map/Set（可变容器）')
+  })
+
+  it('函数体内声明（缩进）不命中（列 0 锚定）', () => {
+    expect(runOn('function f() {\n  const local = new Set([1]);\n}\n')).toEqual([])
   })
 })
 
@@ -360,7 +415,7 @@ describe('gateTwo', () => {
       rmSync(dir, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 })
     }
   })
-  it('.d.ts 产物缺失 → fail（import 条件消费面断裂）', () => {
+  it('.d.ts 产物缺失 → fail（import 条件消费方断裂）', () => {
     const dir = makeFixture({ 'src/sub.ts': SRC, 'dist/sub.d.cts': DCTS_FULL })
     try {
       const { errors } = withCapturedConsole(() => gateTwo(PKG, [SUB], dir))
@@ -369,7 +424,7 @@ describe('gateTwo', () => {
       rmSync(dir, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 })
     }
   })
-  it('导出面漂移 → fail 差集（串联 reportExportDrift）', () => {
+  it('导出清单漂移 → fail 差集（串联 reportExportDrift）', () => {
     const dir = makeFixture({ 'src/sub.ts': SRC, 'dist/sub.d.cts': 'export { A }\n', 'dist/sub.d.ts': DCTS_FULL })
     try {
       const { errors } = withCapturedConsole(() => gateTwo(PKG, [SUB], dir))

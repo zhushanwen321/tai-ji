@@ -1,7 +1,7 @@
 /**
  * resolve.test.ts —— resolveComponent 纯函数四分支全覆盖（IF1/DM1/ES1-3，AC2）。
  *
- * 契约面（IF1 contract）：
+ * 契约范围（IF1 contract）：
  * ① 6 builtin 类型（card/columns/list-tree/progress-bar/stats-line/tab-bar）合法 props
  *    → { type: 原type, props: 原props }（原样透传）
  * ② ansi-text 正常（lines 数组）→ { type: 'ansi-text', props: { content: lines.join('\n') } }

@@ -75,7 +75,7 @@ import {
 } from './gen-stats-display'
 
 const props = defineProps<{
-  /** session 分区键 + 恢复腿触发源（同原触发器受控范式） */
+  /** session 分区键 + 恢复路径触发源（同原触发器受控范式） */
   sessionId?: string
   /** 当前复合 modelId，供 composable 做帧 model 校验兜底（D4 前端防线） */
   modelId?: string
@@ -83,7 +83,7 @@ const props = defineProps<{
 
 const { t } = useI18n()
 
-// 订阅（session.stats_update）/ 恢复腿 / model 校验全在 composable 内（与触发器共享分区）
+// 订阅（session.stats_update）/ 恢复路径 / model 校验全在 composable 内（与触发器共享分区）
 const { current: frame } = useGenStats(toRef(props, 'sessionId'), toRef(props, 'modelId'))
 
 /** 空闲时长格式化基数（毫秒/分钟、分钟/小时；模块级常量，避免 no-magic-numbers） */

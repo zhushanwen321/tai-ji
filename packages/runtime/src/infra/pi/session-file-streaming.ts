@@ -20,7 +20,7 @@ import { join, dirname, basename } from 'node:path'
 import { DEFAULT_REVERSE_CHUNK_BYTES } from '../../utils/history-reverse-read.js'
 
 /**
- * 分块流式归一化并原子替换原文件（D5⑤ 变换腿的落盘骨架）。
+ * 分块流式归一化并原子替换原文件（D5⑤ 变换路径的落盘骨架）。
  *
  * 变换产物不经全文件字符串构造——分块正序读原文件、按行交给 transformLine 回调做纯
  * 行变换（返回 null = 剔除该行），变换结果直接写入临时文件后 rename-over 原子替换，

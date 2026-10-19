@@ -82,13 +82,13 @@ describe("sendReverseRequest（发送侧语义）", () => {
     expect(settled).toEqual(["rev-1"]);
   });
 
-  it("pendingExtras 合并进 pending 条目（pi 记 method 供应答面检查用）", () => {
+  it("pendingExtras 合并进 pending 条目（pi 记 method 供应答侧检查用）", () => {
     const { ctx, pending } = makeSendCtx({ pendingExtras: (method) => ({ method }) });
     void sendReverseRequest(ctx, "host/askUser", {});
     expect(pending.get("rev-1")?.method).toBe("host/askUser");
   });
 
-  it("无 clock 时不报错（测试注入面可缺席）", () => {
+  it("无 clock 时不报错（测试注入点可缺席）", () => {
     const { ctx, written } = makeSendCtx({ clock: undefined });
     expect(() => void sendReverseRequest(ctx, "host/y", {})).not.toThrow();
     expect(written).toHaveLength(1);
@@ -146,7 +146,7 @@ describe("initializeEngine（版本协商 + 模型应答）", () => {
     expect(result.models).toEqual([{ id: "m1" }]);
   });
 
-  it("无模型面（listModels → null）→ 应答不带 models 字段", () => {
+  it("无模型侧（listModels → null）→ 应答不带 models 字段", () => {
     const result = initializeEngine({ protocolVersion: ENGINE_PROTOCOL_VERSION } as never, {
       ...base,
       listModels: () => null,

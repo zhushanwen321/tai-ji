@@ -150,14 +150,14 @@
 
 | testid | 触发/可见条件 |
 |--------|---------------|
-| `tray-canvas-panel` | 面板根（画布是跨 session 共享资源：清单无 session 过滤） |
+| `tray-canvas-panel` | 面板根（画布按归属会话隔离 D4：清单 = 本会话画布，props.sessionId 即归属上下文） |
 | `tray-canvas-header` | 段头摘要（总数 + 进行中数；entries>0 才渲染） |
-| `tray-canvas-row` | 画布清单行（点击 = openCanvasTab 直达画布 tab） |
+| `tray-canvas-row` | 画布清单行（点击 = openCanvasTab(canvasId, sessionId) 直达画布 tab，载荷带归属会话） |
 | `tray-canvas-dot` | 行阶段点（生长中 accent / 审查中 warn / 已收敛 success；派生值非可写状态） |
 | `tray-canvas-mustfix` | 行 must-fix 计数（>0 才渲染——归零不虚亮） |
 | `tray-canvas-meta` | 行 meta（阶段文案 + 问题陈述截断） |
-| `tray-canvas-empty` | 空态（零画布；提示 + 引导新建） |
-| `tray-canvas-create` | 「＋ 新建画布」按钮（创建入口唯一落点，恒渲染） |
+| `tray-canvas-empty` | 空态（零画布；D4 隔离后外壳按钮已隐藏，本态为防御性保留——清单竞态清空时面板仍渲染不破版） |
+| `tray-canvas-create` | 「＋ 新建画布」按钮（创建入口；owner = props.sessionId——D4 隔离后随首张画布出现，零画布时外壳按钮隐藏） |
 | `tray-canvas-form` | 三要素表单 modal（问题陈述 / 完成判据 / 范围与排除项） |
 | `tray-canvas-statement` | 问题陈述输入 |
 | `tray-canvas-criterias` | 完成判据输入（每行一条） |

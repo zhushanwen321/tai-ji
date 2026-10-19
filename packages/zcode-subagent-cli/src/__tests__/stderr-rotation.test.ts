@@ -1,4 +1,4 @@
-// stderr-rotation.test.ts —— W11 引擎侧 stderr 轮转模块守护（设计 §3.9 写入面表
+// stderr-rotation.test.ts —— W11 引擎侧 stderr 轮转模块守护（设计 §3.9 写侧表
 // 「宿主侧引擎 stderr」行 + impl-plan §2.11 规格）。
 //
 // 三视角：①构建者——路径/参数/轮转原语逐分支；②使用者——tee 落盘经实例维度

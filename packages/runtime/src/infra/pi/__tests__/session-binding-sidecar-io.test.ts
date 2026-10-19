@@ -5,7 +5,7 @@
  * - ENOENT（sidecar 不存在）→ undefined 且零日志（「从未绑定」正常态保持安静）；
  * - JSON parse 拒绝（损坏）→ undefined + warn（路径+原因）+ quarantineCorruptFile 隔离
  *  （原文件被 rename 为 .corrupt-<ts> 取证副本）；
- * - 守卫不过（合法 JSON 字段形状不符）→ undefined + warn 一次，不隔离；
+ * - 检查不过（合法 JSON 字段形状不符）→ undefined + warn 一次，不隔离；
  * - 读失败（非 ENOENT，chmod 000）→ undefined + warn；
  * - warn-once：同路径第二次降级不再重复出声。
  *
@@ -60,13 +60,13 @@ describe('readBindingSidecar · RT-3#3 读侧分流', () => {
     expect(readBindingSidecar(p, decode)).toBeUndefined()
   })
 
-  it('守卫不过（presetId 非字符串）→ undefined + warn 一次，不隔离', () => {
+  it('检查不过（presetId 非字符串）→ undefined + warn 一次，不隔离', () => {
     const p = join(dir, 's2.jsonl.preset.json')
     writeFileSync(p, JSON.stringify({ presetId: 123 }), 'utf-8')
 
     expect(readBindingSidecar(p, decode)).toBeUndefined()
     expect(warnSpy.mock.calls.filter(c => String(c[0]).includes('shape rejected')).length).toBe(1)
-    // 守卫不过不隔离：原文件保留（旧形态可被未来版本解读）
+    // 检查不过不隔离：原文件保留（旧形态可被未来版本解读）
     expect(existsSync(p)).toBe(true)
 
     // warn-once：第二次读同一路径不再重复出声

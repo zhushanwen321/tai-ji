@@ -14,7 +14,7 @@
  *
  * 依赖经构造注入（窄接口）：投递内核注册表经 deps.registry（getter 形态——组合根装配序
  * 下注册表晚于编排构造，对齐 SessionDeliveryDeps.getMessageBus 同款晚期读取）；
- * 撤回信号广播腿经 deps.notifyEntryInvalidation（MessageDispatcher.submitToKernel
+ * 撤回信号广播路径经 deps.notifyEntryInvalidation（MessageDispatcher.submitToKernel
  * 构造注入收编同款，[MF-1-7] 原进程内活动槽 activeRevocationSignalNotifier 已删除）。
  */
 import { BARE_UUID_RE, MSG_ID_TAG_RE, TAIJI_NAV_COMMAND } from '@taiji/shared'
@@ -43,15 +43,15 @@ const CLIENT_MSG_ID_TYPE = 'taiji.client-msg-id'
  */
 export const REVOKED_SIGNAL_CUSTOM_TYPE = 'taiji:revoked'
 
-// 裸 uuid 形态判别（[消息撤回 U8] 保号子形态的分派锚）= @taiji/shared BARE_UUID_RE
+// 裸 uuid 形态判别（[消息撤回 U8] 保留原 id 子形态的分派锚）= @taiji/shared BARE_UUID_RE
 // （msg-pipeline-debloat D5-1 收敛：uuid 结构与 MSG_ID_TAG_RE 同源单点构造，原手写体
 // 双侧同步纪律随之消灭）。与 pi entryId 的 8 位 hex 形态构造性区分（无连字符不匹配）。
 
 /** 编排依赖（窄注入，测试可 mock；组合根在 session-service 装配）。 */
 export interface RevokeOrchestratorDeps {
-  /** occupancy 空闲检查数据源（①——三维 turn/compacting/bash 的权威投影）。 */
+  /** occupancy 空闲检查数据源（①——三维 turn/compacting/bash 的权威派生视图）。 */
   getSession(sessionId: string): IManagedSessionView | undefined
-  /** pi 拉活（⑤ 数据面 + ⑥ 信令前置交接共用；失败回 pi-reclaimed——D1/A10 无感拉活）。 */
+  /** pi 拉活（⑤ 数据范围 + ⑥ 信令前置交接共用；失败回 pi-reclaimed——D1/A10 无感拉活）。 */
   ensureActive(sessionId: string): Promise<IPiEngine>
   /**
    * workflow running 检查（①——D2 待验证② 落点核实结论：subagent-workflow 内存态在
@@ -72,7 +72,7 @@ export interface RevokeOrchestratorDeps {
    */
   invalidateDerivedState(sessionId: string): void
   /**
-   * 撤回信号广播腿（[MF-1-7] 窄注入，取代原 activeRevocationSignalNotifier 活动槽）：
+   * 撤回信号广播路径（[MF-1-7] 窄注入，取代原 activeRevocationSignalNotifier 活动槽）：
    * 树回退确认后转 pluginService.notifyEntryInvalidation(sid, REVOKED_SIGNAL_CUSTOM_TYPE)。
    * 未接线（存量测试构造 / 无插件子系统的装配）时由注入方自降级 no-op。
    */
@@ -91,7 +91,7 @@ export interface RevokeOrchestratorDeps {
   ): Promise<SystemCommandOutcome>
 }
 
-/** get_entries entry 的域内宽形态（wire 是 unknown——逐字段守卫后使用，与 registry 的 readTranscriptUserTexts 同款防御口径）。 */
+/** get_entries entry 的域内宽形态（wire 是 unknown——逐字段检查后使用，与 registry 的 readTranscriptUserTexts 同款防御口径）。 */
 interface RawTreeEntry {
   type?: unknown
   id: string
@@ -107,9 +107,9 @@ interface TreeSnapshot {
   leafId: string | null
 }
 
-/** leafId 沿 parentId 回溯的活跃链（⑥ 校验谓词的数据面）。 */
+/** leafId 沿 parentId 回溯的活跃链（⑥ 校验谓词的数据范围）。 */
 interface ActiveChain {
-  /** 回溯链上的 entry.id 集合（活跃路径投影——谓词按此集合判定，非字符串包含）。 */
+  /** 回溯链上的 entry.id 集合（活跃路径派生——谓词按此集合判定，非字符串包含）。 */
   ids: Set<string>
   /** false = parentId 指向缺失 entry / 环（数据断链）——校验不可信，按 nav-failed 处理。 */
   complete: boolean
@@ -119,7 +119,7 @@ function warn(...args: unknown[]): void {
   console.warn('[revoke-orchestrator]', ...args)
 }
 
-/** get_entries → 快照（守卫式解析；失败/形状不符返回 null——调用方按 nav-failed 处理）。 */
+/** get_entries → 快照（防御式解析；失败/形状不符返回 null——调用方按 nav-failed 处理）。 */
 async function readTreeSnapshot(client: IPiEngine): Promise<TreeSnapshot | null> {
   try {
     const msg = (await client.getEntries()) as { data?: { entries?: unknown; leafId?: unknown } } | null
@@ -179,7 +179,7 @@ function endsWithMarkerFor(text: string, bareId: string): boolean {
   return false
 }
 
-/** ③ 通道 a：msg-id-mapper custom entry 映射（customType 过滤 + data 形状守卫——entry-tree-builder 同款防御）。miss（含映射指向 entry 不在文件的数据断链形态）返回 null，调用方落通道 b 继续。 */
+/** ③ 通道 a：msg-id-mapper custom entry 映射（customType 过滤 + data 形状检查——entry-tree-builder 同款防御）。miss（含映射指向 entry 不在文件的数据断链形态）返回 null，调用方落通道 b 继续。 */
 function locateViaClientUuidMap(
   snapshot: TreeSnapshot,
   targetId: string,
@@ -211,14 +211,14 @@ function locateViaBareMarker(
 
 /**
  * ③ 定位目标 entryId（targetId 双形态分派）。原前提「renderer 消息 id 两空间互斥使分派
- * 构造性可靠」被 U8 保号削弱：外来条目 clientUuid 可为裸 uuid 形态（chat store appendUser
+ * 构造性可靠」被 U8 保留原 id 削弱：外来条目 clientUuid 可为裸 uuid 形态（chat store appendUser
  * 无前缀校验），其投递裸标记恰以裸 uuid 落在 transcript——uuid 形态目标统一进分派收编，
  * 仅 pi entryId（8 位 hex）保持直用：
  * - `u-` 前缀形态（live 态 clientUuid）→ 双通道：a) msg-id-mapper custom entry 映射
  *   （富消息；mapper 只写 u- 形态 clientUuid）；b) miss 时 user entry 文本裸标记末尾锚 +
  *   uuid === bareMarkerId(targetId) 校验（纯文本消息无映射 entry 的主导形态）。
  *   双通道均 miss → null（调用方回 no-mapping）。
- * - 裸 uuid 子形态（U8 保号）→ 仅通道 b：mapper 只写 u- 形态，custom entry 映射对裸
+ * - 裸 uuid 子形态（U8 保留原 id）→ 仅通道 b：mapper 只写 u- 形态，custom entry 映射对裸
  *   uuid 恒 miss（审计候选 1 删除该恒 miss 兜底——通道 b 的末尾锚经 bareMarkerId 恒等
  *   归一同样命中，行为不变）。
  * - 其余形态（基线/重开态 pi entryId，8 位 hex）→ 直接用作 entryId（⑤ 活跃路径校验兜底
@@ -240,7 +240,7 @@ function locateTarget(
 }
 
 /**
- * ① 空闲判定（D8 busy 触发面：turn 活跃 / compacting / settling / bash）。
+ * ① 空闲判定（D8 busy 触发点：turn 活跃 / compacting / settling / bash）。
  * [审计候选 13] 收敛为 occupancy 三维公式：isGenerating/isCompacting/isBashRunning 三布尔
  * 与 occupancy 同源同点写入（applySessionOccupancyTransition 转移表每行 flags+patch 原子派生，
  * C-data-19 禁绕开直写），四路 OR 与三维公式等价——留一份判定式，不留第二份镜像。
@@ -280,7 +280,7 @@ export class RevokeOrchestrator {
       // ── ② 内核 active 条目全量 cancel（D4：等价 exclude=全部，走既有 cancel 管道）────
       await this.cancelAllActiveEntries(registry, sessionId)
 
-      // ── 数据面拉活 + ③ 定位 + ④ 缓存清除 + ⑤ 信令前校验（含全部前置终态分支）──────
+      // ── 数据范围拉活 + ③ 定位 + ④ 缓存清除 + ⑤ 信令前校验（含全部前置终态分支）──────
       const prelude = await this.acquireTargetContext(sessionId, targetId)
       if (!('client' in prelude)) return prelude // 前置终态（busy 码族 / no-mapping / 幂等 revoked）
       const { client, located, expectedParentId } = prelude
@@ -324,7 +324,7 @@ export class RevokeOrchestrator {
   }
 
   /**
-   * ② 后数据面前置段：拉活 + 一次 get_entries（③⑤ 共用——设计 D2 ③「同一次
+   * ② 后数据范围前置段：拉活 + 一次 get_entries（③⑤ 共用——设计 D2 ③「同一次
    * get_entries」）+ ③ 定位 + ④ 缓存清除 + ⑤ 信令前校验。返回上下文（含 ⑤ 校验取出的
    * expectedParentId）或前置终态 reply（拉活失败 pi-reclaimed / 读失败 nav-failed /
    * 定位失败与不在活跃链 no-mapping / 幂等已撤 revoked:true）——调用方按 `'client' in`
@@ -362,7 +362,7 @@ export class RevokeOrchestrator {
     // 同步触发 fire-and-forget 全量重算，重算消费的是调用时点的树快照——信令前调用时
     // 树尚未回退，无参 getEntries 先于信令到达 pi（同一 client 顺序处理），返回撤回前
     // 快照 → 全量重建派生被撤残影 + cursor 回写撤回前 leafId，信令生效后增量批
-    // 「保持基线」→ 残影永续。信令前失效 = 无效失效（时序错位缺陷的根修落点）。
+    // 「保持基线」→ 残影永续。信令前失效 = 无效失效（时序错位缺陷的从根源修复落点）。
     this.deps.evictHistoryRebuildCache(sessionId)
 
     // ── ⑤ 信令前校验（用 nav 前数据——放⑥则恒假/恒真皆失效）──────────────────────
@@ -430,13 +430,13 @@ export class RevokeOrchestrator {
   }
 
   /**
-   * 派生态失效 + 撤回信号广播（恒配对入口——全部失效点唯一走此处，结构性杜绝单腿）：
-   * SessionRecords 全量重算腿（invalidateDerivedState）与插件镜像重建腿（经
+ * 派生态失效 + 撤回信号广播（恒配对入口——全部失效点唯一走此处，结构性杜绝单路径）：
+ * SessionRecords 全量重算路径（invalidateDerivedState）与插件镜像重建路径（经
    * deps.notifyEntryInvalidation 注入回调广播 REVOKED_SIGNAL_CUSTOM_TYPE）消费同一
-   * 「活跃路径已变更」事实，只失效 records 腿会
+   * 「活跃路径已变更」事实，只失效 records 路径会
    * 复现 scheduler-manager 面板残留缺陷（插件镜像折叠输入含被撤子树 op）。调用点 =
    * ⑤ 幂等分支 + ⑥ post-signal 三防御分支 + ⑥′ 确认点——均为树回退已确认或防御性
-   * 不确定态，广播的镜像重建幂等（重拉经 readEntries 活跃路径过滤，树未回退时收敛到
+   * 不确定态，广播的镜像重建幂等（重新拉取经 readEntries 活跃路径过滤，树未回退时收敛到
    * 同态）。「目标仍在活跃链」分支刻意双双不调用（树确证未回退，无残影产生）。
    */
   private invalidateDerived(sessionId: string): void {

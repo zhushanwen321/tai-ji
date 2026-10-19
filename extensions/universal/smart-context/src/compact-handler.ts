@@ -83,7 +83,7 @@ interface SessionManagerSessionFileLike {
 }
 
 /**
- * sessionManager 会话文件访问形状的运行时守卫（D13-4）：
+ * sessionManager 会话文件访问形状的运行时检查（D13-4）：
  * 只收窄到对象（字段存在性/类型由消费侧可选链 + ?? 兜底，与原语义一致）。
  */
 function isSessionManagerSessionFileLike(sm: unknown): sm is SessionManagerSessionFileLike {
@@ -95,7 +95,7 @@ function isSessionManagerSessionFileLike(sm: unknown): sm is SessionManagerSessi
  * getSessionFile 若不可得则返回空串（指针省略，不失败）。
  */
 function getSessionFilePath(ctx: ExtensionContext): string {
-	// 经 unknown 再守卫：sessionFile 是 sessionManager 的类型未暴露字段（宽于其声明）
+	// 经 unknown 再检查：sessionFile 是 sessionManager 的类型未暴露字段（宽于其声明）
 	const sm: unknown = ctx.sessionManager;
 	const accessor = isSessionManagerSessionFileLike(sm) ? sm : undefined;
 	try {

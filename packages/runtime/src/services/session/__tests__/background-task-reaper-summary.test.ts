@@ -22,7 +22,6 @@ function result(partial: Partial<BackgroundTaskReapResult>): BackgroundTaskReapR
     killedOrphans: 0,
     finalizedOrphans: 0,
     conservativelySkipped: 0,
-    staleLocksRemoved: 0,
     ...partial,
   }
 }

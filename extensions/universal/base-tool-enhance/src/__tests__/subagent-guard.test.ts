@@ -7,7 +7,7 @@
 // [HISTORICAL] 对照（D4 重锚前的旧行为）：旧判据查 PI_SUBAGENT_* 身份键族两枚、
 // 任一存在即命中——该键族已无写入方，旧判据实际恒 false（降级从未生效）。旧键
 // 不命中的钉值在 ext-guards predicates 测试（谓词实现方领地），此处只钉 bte
-// 消费面的现行语义。
+// 消费方的现行语义。
 
 import { describe, expect, it } from "vitest";
 

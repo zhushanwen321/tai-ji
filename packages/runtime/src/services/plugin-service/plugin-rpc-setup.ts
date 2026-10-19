@@ -58,7 +58,7 @@ export async function findFiles(pattern: string, cwd: string): Promise<string[]>
 /**
  * 向后兼容的 test helper（P6 后为 no-op）。
  *
- * 活跃 session 缓存已从模块级全局状态收口为 `ActiveSessionResolver` 实例（每个
+ * 活跃 session 缓存已从模块级全局状态收尾为 `ActiveSessionResolver` 实例（每个
  * PluginService 持有自己的 resolver，缓存随实例生灭）。测试每个 beforeEach 创建
  * 新 service，resolver 天然干净，故此 helper 不再需要真正清理——保留导出仅为不破坏
  * 既有测试 import（plugin-agent-real.test.ts）。
@@ -133,7 +133,7 @@ export function registerAllRpcMethods(ctx: RpcSetupContext): void {
   wireRuntimeUiExits({
     // broadcast 回传是否真正发出（false = broadcastFn 缺失 warn 丢弃）——
     // ui-api 据此拒绝「假成功」回执（B-F2：updateHeaderAction 回 {updated:false}），
-    // 装配缺陷不再被包装成插件面的成功。
+    // 装配缺陷不再被包装成插件侧的成功。
     broadcastHeaderActionUpdate: (payload) => {
       if (deps.broadcastFn) {
         deps.broadcastFn('plugin:headerActionUpdate', payload)
@@ -155,10 +155,10 @@ export function registerAllRpcMethods(ctx: RpcSetupContext): void {
     getDescriptor: ctx.getDescriptor,
   })
 
-  // Storage RPC handlers — P6 收口到 api/storage-api.ts（与其它域一致）
+  // Storage RPC handlers — P6 收尾到 api/storage-api.ts（与其它域一致）
   registerStorageRpcHandlers(rpcServer, storageHandlersFrom(storage))
 
-  // Notify RPC handler — P6 收口到 api/notify-api.ts（fire-and-forget via broadcastFn）
+  // Notify RPC handler — P6 收尾到 api/notify-api.ts（fire-and-forget via broadcastFn）
   registerNotifyRpcHandler(rpcServer, { ...notifyHandlersFrom(deps.broadcastFn), limiter: notifyLimiter })
 
   // ── Sessions RPC handlers ────────────────────────────────
@@ -180,7 +180,7 @@ export function registerAllRpcMethods(ctx: RpcSetupContext): void {
     // [D6/u5b] 插件写路径透传（替换既有静默 no-op）：sessionId 必填校验在 session-api
     // handler 层（asSafeKey → INVALID_SESSION_ID）；requireCommand 透传给 dispatcher 的
     // 原子校验（restore 后、busy 预检前，E14 防漏进模型）。回执 {blocked, reason?} 由
-    // handler 层映射为 {accepted, reason}。role 在插件契约面保留（AP-4），runtime 管道
+    // handler 层映射为 {accepted, reason}。role 在插件契约范围保留（AP-4），runtime 管道
     // 仅支持 user prompt 语义（既有行为——旧实现同样丢弃 role）。
     sendMessage: async (sessionId: string, _role: string, content: string, requireCommand?: string) => {
       if (!deps.sessionService) {
@@ -197,7 +197,7 @@ export function registerAllRpcMethods(ctx: RpcSetupContext): void {
     },
     // S3-W2：session 生命周期事件注册表（registerCreate/registerDestroy 方法在此注册）
     sessionEvents: ctx.sessionEvents,
-    // [u2d 移交 / u5b 接线] AP-4 读面依赖：live client 经 sessionService.getRpcClient
+    // [u2d 移交 / u5b 接线] AP-4 读侧依赖：live client 经 sessionService.getRpcClient
     // （= pm.getClient 同源），sessionFile 经 getSummary，失效订阅表与
     // PluginService.notifyEntryInvalidation 派发共享同一实例——SESSION_READ_NOT_WIRED 装配缺口消除。
     sessionRead: {
@@ -208,7 +208,7 @@ export function registerAllRpcMethods(ctx: RpcSetupContext): void {
   })
 
   // ── Config RPC handlers ──────────────────────────────────
-  // key 前缀约定委托 config-api（P7 收口），与 plugin-service.ts 共用单一真相源。
+  // key 前缀约定委托 config-api（P7 收尾），与 plugin-service.ts 共用单一真相源。
   registerConfigRpcHandlers(rpcServer, {
     get: async (pluginId: string, key: string) => {
       return storage.get(pluginId, toConfigKey(key))
@@ -325,7 +325,7 @@ export function registerAllRpcMethods(ctx: RpcSetupContext): void {
   // ── Views RPC handlers ───────────────────────────────────
   // views.update → handleViewUpdate（[D1/u5b] payload.sessionId 显式归属投递——旧
   // ActiveSessionResolver 盖戳猜测路径已删除：空闲会话是 modal 推树的常态而非边缘，
-  // "第一个 active 会话"猜测会把推送丢弃或落错分区（D1 被否④））。
+  // "第一个 active 会话"猜测会把推送丢弃或落错分区（D1 不采用④））。
   // listMountPoints → 读挂载点集合副本（AC10：sync 注入→查询一致）。
   // wave:perf-w08（02 文档 D1-1，R-06）：广播出口为 ctx.publishViewUpdate——
   // bus 已装配时按 sessionId 定向 publish（plugin:viewUpdate 归 transient 类，

@@ -1,11 +1,11 @@
 <!--
   TTS 选中服务商全量表单（ai-voice-tts 设计 §5.2 第 4 点；TtsPage 子组件）。
 
-  控件存在性规则（§7.3 注，全部由表单投影 TtsFormModel 静态依赖数据驱动）：
+  控件存在性规则（§7.3 注，全部由表单派生视图 TtsFormModel 静态依赖数据驱动）：
   - 枚举类空数组 = 不渲染（emotions/languages/channels/长尾整区）
   - 数值类 null = 置灰（speedRange/volumeRange/pitchRange → disabled 下拉）
   - 开关/结构类不在清单 / 为 0 = 不渲染（toggles 清单 / maxTimbreVoices / voiceModify / 词典）
-  全部内置选项不手填（§5.2 开篇）：数值档位由投影 range 生成下拉，无自由数字输入。
+  全部内置选项不手填（§5.2 开篇）：数值档位由派生视图 range 生成下拉，无自由数字输入。
 
   Key 展示态归父级状态机（keyDisplay v-model）：无 Key 键入明文、已存 Key 展示 ***
   脱敏串、带入填充串/清除清空都只是页面填充——落盘统一走保存（armed 动作消费）。
@@ -265,7 +265,7 @@
       </div>
     </GroupCard>
 
-    <!-- ── 进阶（长尾四区：混合音色/效果器/词典/长尾区开关；全空整卡不渲染；demo mock 投影为空无对应形态，
+    <!-- ── 进阶（长尾四区：混合音色/效果器/词典/长尾区开关；全空整卡不渲染；demo mock 派生视图为空无对应形态，
          字段行跟随 SettingRow 范式、分节标题 = W1 PiPresets 分节档）── -->
     <GroupCard v-if="hasLongtailSection">
       <template #head>
@@ -445,13 +445,13 @@ const voiceModifyEffectModel = nullableModel(
   (v) => { state.value.voiceModifyEffect = v },
 )
 
-// per-model 联动（投影静态依赖数据驱动）
+// per-model 联动（派生视图静态依赖数据驱动）
 const perModel = computed(() => perModelOf(props.form, state.value.model))
 const instructionMaxChars = computed(() => perModel.value.instructionMaxChars)
 const showVoiceLabel = computed(() => hasVoiceLabelControl(props.form))
 const voiceLabelSupported = computed(() => perModel.value.voiceLabelSupported)
 
-// 分区开关（布局分区由投影组合判定，无厂商 id 分支）
+// 分区开关（布局分区由派生视图组合判定，无厂商 id 分支）
 const styleToggles = computed(() => props.form.toggles.filter((id) => !isLongtailToggle(id)))
 const longtailToggles = computed(() => props.form.toggles.filter((id) => isLongtailToggle(id)))
 const hasAudioSection = computed(() => sampleRateOpts.value.length > 0 || props.form.channels.length > 0)

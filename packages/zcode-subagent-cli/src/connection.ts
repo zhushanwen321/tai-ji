@@ -172,7 +172,7 @@ export interface AppServerConnectionOptions {
   /**
    * stderr tee 落盘路径（append；引擎数据目录由 R4 注入，测试用 tmp 目录）。
    * 懒打开：首条 stderr 才建文件，无 stderr 的短命连接零文件；写失败静默降级
-   * （取证面不能拖垮主通道）。
+   * （取证侧不能拖垮主通道）。
    */
   stderrLogPath: string;
   /**
@@ -184,13 +184,13 @@ export interface AppServerConnectionOptions {
   stderrLogPathResolver?: (pid: number | undefined) => string;
   /** node 二进制（缺省 'node' 走 PATH）。 */
   nodeBin?: string;
-  /** 控制面请求默认超时（缺省 ZCODE_APPSERVER_REQUEST_TIMEOUT_MS）。 */
+  /** 控制范围请求默认超时（缺省 ZCODE_APPSERVER_REQUEST_TIMEOUT_MS）。 */
   requestTimeoutMs?: number;
   /** 反向请求 handler 表（缺省 D9 常量表；测试注入故障 handler 用）。 */
   reverseHandlers?: Readonly<Record<string, (params: unknown) => unknown>>;
   /**
    * [R4] 每代进程 spawn 成功后的同步回调。pidfile 机制删除后引擎侧不再传——现为
-   * 测试专有的代级观测面（采集 spawn 时序 / 子进程句柄）。与 RunContext.onChildSpawned
+   * 测试专有的代级观测范围（采集 spawn 时序 / 子进程句柄）。与 RunContext.onChildSpawned
    * 无关：常驻进程不进宿主 spawnedChildren（D6——其生命周期归引擎 dispose）。
    * 不抛保证：回调异常吞掉记 warn，不影响帧泵。
    */
@@ -256,7 +256,7 @@ export class AppServerConnection {
   private killChainPromise: Promise<"terminated" | "killed"> | undefined;
   private generation = 0;
   private readonly pushHandlers = new Map<string, Set<(params: unknown) => void>>();
-  /** [R4] 连接级崩溃通知面（onClose 订阅者集合；与 pushHandlers 同构的 refCount 形态）。 */
+  /** [R4] 连接级崩溃通知侧（onClose 订阅者集合；与 pushHandlers 同构的 refCount 形态）。 */
   private readonly closeHandlers = new Set<(reason: string) => void>();
   private capturedProtocolInfo: Readonly<Record<string, unknown>> | null = null;
 
@@ -279,7 +279,7 @@ export class AppServerConnection {
     return this.child?.pid;
   }
 
-  /** 当前代是否有活进程（关闭原语与重建测试的观测面）。 */
+  /** 当前代是否有活进程（关闭原语与重建测试的观测范围）。 */
   get alive(): boolean {
     return this.child !== null;
   }
@@ -440,7 +440,7 @@ export class AppServerConnection {
 
     let finalized = false;
     // 收割当前代：关闭 tee 流、child 置空（触发下次重建）、全部 pending reject。
-    // 双守卫：finalized 防同代 close/error 双触发；generation 比对防迟到的上一代
+    // 双检查：finalized 防同代 close/error 双触发；generation 比对防迟到的上一代
     // 事件误杀新代（正常时序不可达，防御性保留）。
     const finalize = (reason: string): void => {
       if (finalized || this.generation !== gen) return;
@@ -607,7 +607,7 @@ export class AppServerConnection {
     }
   }
 
-  /** stderr 实时 append 落盘（懒打开 + 尺寸轮转 + 过期清理；失败静默——取证面不
+  /** stderr 实时 append 落盘（懒打开 + 尺寸轮转 + 过期清理；失败静默——取证侧不
    * 能拖垮主通道）。 */
   private appendStderrLog(chunk: string): void {
     if (this.stderrStreamFailed) return;

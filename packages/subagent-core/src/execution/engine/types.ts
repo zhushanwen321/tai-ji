@@ -6,17 +6,17 @@
 // [S4 簇 3 收编] 契约类型单源化（type-only）：AgentOutcome / EngineHandleData /
 // ReplayedTurn / SessionView / EngineCapabilities / ProbeReport 的本地定义已删除，
 // 自 @zhushanwen/subagent-engine-sdk re-export（SDK protocol/contract-types.ts 是
-// 类型闭包 SSOT，core 反向 re-export 保上层消费面——import 方路径零改动；结构等价
-// 由 protocol-closure.test.ts 断言族守卫）。[H1 U5/U6] InteractAction / InteractResult
+// 类型闭包 SSOT，core 反向 re-export 保上层消费方——import 方路径零改动；结构等价
+// 由 protocol-closure.test.ts 断言族检查）。[H1 U5/U6] InteractAction / InteractResult
 // 已随 chat 域 interact 面退役删除。
-// EngineHandle 留守本地：SDK 无此类型（协议面用裸 data 载荷），宿主侧句柄包装接口
+// EngineHandle 留守本地：SDK 无此类型（协议范围用裸 data 载荷），宿主侧句柄包装接口
 // 是 core 域概念。
 //
 // AgentResult 消歧（设计 §2.1/§3.3.5）：仓内有两个同名 AgentResult——
 //   ① orchestration 层 workflow 消费的那份（orchestration/models/types.ts，主字段
 //      content/parsedOutput/usage/error）——SDK AgentOutcome 锚定这份；
 //   ② execution 层的同名类型（execution/types.ts，主字段 text/turns/sessionId/toolCalls）
-//      ——record 内部投影，保持原名不动。
+//      ——record 内部派生视图，保持原名不动。
 // 引擎层终态命名 AgentOutcome，与两者不同名，消除「同名不同义」。
 
 import type { EngineHandleData } from "@zhushanwen/subagent-engine-sdk";

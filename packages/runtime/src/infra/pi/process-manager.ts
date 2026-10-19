@@ -12,16 +12,18 @@ import { SETTINGS_CORRUPTED, errorWithCode, toErrorMessage } from '../../utils/e
 import { isPackaged } from '../../utils/runtime-env.js'
 import { buildOutboundChildEnv } from '../spawn-env.js'
 // E-2（subagent-realtime-channel §4.2/§4.4）：findPiExecutable 抽出为共享函数
-// （relay-registry 受托 spawn 真实 pi 复用同一决策链），原调用点行为零变化。
+// （引擎受托 spawn 真实 pi 复用同一决策链），原调用点行为零变化。
 import { findPiExecutable } from './find-pi-executable.js'
-import { getRelaySpawnEnv } from '../relay/relay-env.js'
+// M3（relay-spawn-transport §3.3 D4）：control env 注入（socket + root session 初值）
+// ——server 未激活时返回空对象（extension 侧 isControlEnvActive 判缺失回落 local transport）。
+import { getControlSpawnEnv } from '../subagent-control/control-server.js'
 import { getCrashJournal } from '../crash-journal.js'
 // 信号取证（signal-forensics）：受管 pi 意外退出（exit_converge）时的发送方归因。
 // 环先于 spawn 起、随受管 pi 清零停——采样成本只发生在「有 pi 在跑」的窗口。
 import { ProcessTableRing } from './process-table-ring.js'
 import { reportPiExitSignalForensics } from './signal-forensics.js'
 // W9（设计 §3.7 Electron 打包态）：staged 引擎根推导 + pi 子进程注入（ROOTS +
-// 打包态执行器两键）；构造期补齐 runtime 自身发现面的 L1 env（打包态无 node_modules）
+// 打包态执行器两键）；构造期补齐 runtime 自身发现逻辑的 L1 env（打包态无 node_modules）
 import {
   ensureRuntimeEngineRootsEnv,
   getEngineRootsSpawnEnv,
@@ -68,7 +70,7 @@ export class ProcessManager implements IProcessManager {
   constructor(private readonly projectRoot: string) {
     // 懒初始化：不在构造函数中执行同步 I/O，避免阻塞事件循环
     // piPath 在首次 createSession 时才解析
-    // W9：runtime 自身发现面 env 补齐（幂等；staged 引擎根存在才写）——打包态无
+    // W9：runtime 自身发现逻辑 env 补齐（幂等；staged 引擎根存在才写）——打包态无
     // node_modules（L2 空），不补齐则 runtime ①级读引擎零命中。唯一的构造期 I/O =
     // existsSync 一次 stat（engine-roots 推导），量级远低于「懒初始化」要规避的
     // pi 路径扫描，且必须早于任何引擎发现调用点。
@@ -207,11 +209,10 @@ export class ProcessManager implements IProcessManager {
     // 进程 env 没有该变量（shared getDataDir 缺省时不写 env），透传链断——故此处
     // 用 getConfigDir()（读同一 env + 同一缺省）显式补齐。放 spread 首位，
     // options?.env 仍可覆盖。
-    // E-2 relay env（subagent-realtime-channel §2.2）：注入 SOCKET/NODE/SCRIPT 三个
-    // 基础设施 env，extension 侧 isRelayActive 判定齐备后经代理转交 spawn。降级语义：
-    // relay server 未激活 / staged 脚本缺失 / 执行器探针失败 → 空对象（spread 无副作用，
-    // 行为与现状逐字节一致）；首次调用含探针 spawn（之后 Promise 缓存，无重复开销）。
-    const relayEnv = await getRelaySpawnEnv(this.projectRoot)
+    // M3 control env（设计 §3.3 D4 env × spawn 点矩阵 main pi 行）：SOCKET（transport
+    // 选择键）+ ROOT_SESSION_ID 初值（create 路径为 temp id，连接归属权威 = 第一个
+    // engine_open 帧，本键无权威消费方——矩阵完备性注入，见 getControlSpawnEnv 注释）。
+    const controlEnv = getControlSpawnEnv(sessionId)
     // W9 引擎 env（设计 §3.7 路径传递）：staged 引擎根绝对路径显式注入（不 cwd 探测）
     // + 打包态执行器 TAIJI_AGENT_ENGINE_NODE/ELECTRON_RUN_AS_NODE（pi 扩展宿主的
     // process.execPath 是 pi binary，矩阵① 必须用注入执行器）。键序在 DATA_DIR 之后、
@@ -220,12 +221,12 @@ export class ProcessManager implements IProcessManager {
     // B3 出站注入组（docs/architecture/env-propagation-boundary.md §5-U3）：本对象经
     // RpcClientOptions.env 传入，由 rpc-client start() 的 buildOutboundChildEnv 作为
     // extras 在过滤基座之上整体覆盖；下方 spread 键序即覆盖优先级
-    // （DATA_DIR < PATH 补齐 < relay 三件套 < 调用方 options.env），与组装迁入构建器前
+    // （DATA_DIR < PATH 补齐 < control 两键 < 调用方 options.env），与组装迁入构建器前
     // 逐键一致。PI_CODING_AGENT_DIR 由 rpc-client 在构建器输出之上追加（同迁移前）。
     const injectionEnv: Record<string, string> = {
       TAIJI_AGENT_DATA_DIR: getConfigDir(),
       ...pathEnv,
-      ...relayEnv,
+      ...controlEnv,
       ...engineRootsEnv,
     }
     const client = new RpcClient({ cwd, sessionId, ...options, env: { ...injectionEnv, ...options?.env }, piCommand: piPath !== 'pi' ? piPath : undefined })
@@ -253,16 +254,16 @@ export class ProcessManager implements IProcessManager {
 
     // Listen for unexpected exits to notify upper layer.
     // onExit 返回的 unsubscribe 刻意不持有：client 生命周期与 Map 条目一致，
-    // intentional destroy 由下方 clientToId 无条目守卫覆盖，无需显式解绑。
+    // intentional destroy 由下方 clientToId 无条目检查覆盖，无需显式解绑。
     client.onExit((code, stderr) => {
       // 反查当前 id：闭包捕获的 sessionId 在 rekey 后过期（create 路径 tempId → piSessionId），
-      // 用 has(capturedId) 守卫会在 rekey 后误判「已被清理」→ 死亡通知整条丢失（僵尸 session 根因）。
+      // 用 has(capturedId) 检查会在 rekey 后误判「已被清理」→ 死亡通知整条丢失（僵尸 session 根因）。
       // clientToId 与 processes 由 createSession/destroySession/rekey 成对维护，执行时反查天然同步。
       const currentId = this.clientToId.get(client)
       // clientToId 无条目 = 已被 destroySession 清理（intentional destroy），跳过通知
       if (currentId === undefined) return
       // D5①（session-dead-structural-fixes）：kill 路径全量日志 K8——异常退出收敛的观测点：
-      // 走到此处 = pi 进程自发退出（intentional destroy 已被上方 clientToId 无条目守卫拦截），
+      // 走到此处 = pi 进程自发退出（intentional destroy 已被上方 clientToId 无条目检查拦截），
       // 记录退出码与收敛链，供事后从 exit 143 类死亡回溯发起方。
       console.warn(`[process-manager] session ${currentId} process exited unexpectedly (code: ${code}) (kill_source=exit_converge | who: pi exited on its own (crash / external kill), not an intentional destroy | chain: exit event -> exitCallbacks -> upper onSessionExit convergence (persist stopped + occupancy reset + session.exited))`)
       // 信号取证（signal-forensics）：exit_converge = 非 intentional destroy 的意外
@@ -339,7 +340,7 @@ export class ProcessManager implements IProcessManager {
       await client.switchSession(sessionFile)
       // W2（restore-fork-attach-fix F4）：附着必断言（I1）。withEphemeralPi 附着本就是
       // 真实文件、天然通过；接线它使「附着必断言」成为无例外结构（设计文档 D4），
-      // 新附着调用点照抄即得守卫。
+      // 新附着调用点照抄即得检查。
       await assertPiSessionFile(client, sessionFile, `withEphemeralPi(${sessionFile})`)
       return await fn(client)
     } finally {
@@ -353,11 +354,11 @@ export class ProcessManager implements IProcessManager {
   async destroySession(sessionId: string): Promise<void> {
     const proc = this.processes.get(sessionId)
     if (!proc) return
-    // D1 台账（crash-forensics §3.3 D1 写入点矩阵 shutdown 行）：pi 计划内终止在杀链发起处
+    // D1 journal（crash-forensics §3.3 D1 写入点矩阵 shutdown 行）：pi 计划内终止在杀链发起处
     // 与杀链动作同点双写（reason=planned——附录 A #16 以这些 kill 发起事件的时间窗排除
     // 计划内 SIGTERM）。不能挂 exit handler：本方法已先行删 processes/clientToId，exit 回调
     // 反查无条目静默返回（抑制语义），挂错点事件永不产生（与 deleted 行同机理）。
-    // `!proc` 守卫天然幂等去重：重复调用/无条目不产生事件。destroyAll 逐 session 经本方法
+    // `!proc` 检查天然幂等去重：重复调用/无条目不产生事件。destroyAll 逐 session 经本方法
     // 到达同一挂点，无需单独双写。append 为 fire-and-forget，不阻塞杀链。
     getCrashJournal().append({ layer: 'pi', event: 'shutdown', reason: 'planned', sessionId })
     // Remove from maps first to prevent exitCallback from triggering,
@@ -420,6 +421,9 @@ export class ProcessManager implements IProcessManager {
     this.processes.delete(oldId)
     this.processes.set(newId, entry)
     this.clientToId.set(entry.client, newId)
+    // [session-store-layout-inversion D5 补] tee 随 rekey 迁移（tempId 树 → 真实 id 树）：
+    // 只换进程表键会让 turn 输出留在 tempId 树成孤儿（删除会话只回收真实 id 树）。
+    entry.client.retargetSessionLog(newId)
   }
 
   /** Register a callback for when a session's process exits unexpectedly. Returns unsubscribe function. */

@@ -76,8 +76,6 @@ import { GLOBAL_SLOT_KEYS } from "@zhushanwen/subagent-core";
 const WORKFLOW_DOMAIN_SLOT_KEY = Symbol.for(GLOBAL_SLOT_KEYS.workflowDomainState);
 const DIALOG_QUEUE_KEY = Symbol.for(GLOBAL_SLOT_KEYS.dialogQueue);
 const SERVICE_SLOT_KEY = Symbol.for(GLOBAL_SLOT_KEYS.service);
-// notify ledger 槽（notify-ledger.ts NOTIFY_LEDGER_SLOT_KEY）：清空保证降级直发路径
-const NOTIFY_LEDGER_SLOT_KEY = Symbol.for(GLOBAL_SLOT_KEYS.notifyLedger);
 
 // ── fake 组件（合并去重：makePi/makeCtx/makeReporter/resetSlots/mount 各一处定义） ──
 
@@ -151,7 +149,7 @@ function makeRun(shape: FakeRunShape): WorkflowRun {
 }
 
 /** mode 是 GuiContext 面的唯一判定维度（isGuiCapable = mode==='rpc'）——
- *  tui 门控在飞上报等 rpc-only 行为（组合根接线测试用 tui 防重试 timer 悬挂）。 */
+ *  tui 门控在途上报等 rpc-only 行为（组合根接线测试用 tui 防重试 timer 悬挂）。 */
 function makeCtx(sessionId: string, mode: "rpc" | "tui" = "rpc"): ExtensionContext {
   return {
     cwd: "/home/user/project",
@@ -184,7 +182,7 @@ function makeLifecycleResult(
       settledRecordOf: () => ({ outcome: "completed", settledAt: 0 }),
     } as never,
     runs,
-    sessionDir: "/tmp/subagent-workflow-test",
+    runsDir: "/tmp/subagent-workflow-test",
     runner: {} as never,
     ctx,
     storeHealthy: true,
@@ -230,7 +228,7 @@ function mount(): { handle: WorkflowDomainHandle; handlers: HandlerMap } {
   return { handle, handlers };
 }
 
-/** 挂载 + session_start 装配受控条目（deps 守卫要求条目 + storeHealthy）。 */
+/** 挂载 + session_start 装配受控条目（deps 检查要求条目 + storeHealthy）。 */
 async function mountWithSession(
   sessionId: string,
   opts: { mode?: "rpc" | "tui"; runs?: WorkflowRun[] } = {},
@@ -247,7 +245,7 @@ async function mountWithSession(
   mockSetupSessionLifecycle.mockResolvedValue(result);
   const handle = setupWorkflowDomain(pi, { inflightReporter: makeReporter() });
   await handlers.get("session_start")!({ type: "session_start" }, ctx);
-  // deps = lazyDeps 本体（getter 形态）：属性访问触发守卫 + makeDeps 现读——
+  // deps = lazyDeps 本体（getter 形态）：属性访问触发检查 + makeDeps 现读——
   // D3 volatile 现读语义（pi 切换后旧 deps 解析新 pi）依赖 getter 不被展开求值。
   const deps: LauncherDeps = handle.lazyDeps;
   return { pi, handle, handlers, deps, ctx, runs };
@@ -256,7 +254,7 @@ async function mountWithSession(
 // ── 槽隔离（提权后槽是进程级共享态，防跨用例 / 跨测试文件串扰） ────────────────
 
 function resetSlots(): void {
-  for (const key of [WORKFLOW_DOMAIN_SLOT_KEY, DIALOG_QUEUE_KEY, NOTIFY_LEDGER_SLOT_KEY]) {
+  for (const key of [WORKFLOW_DOMAIN_SLOT_KEY, DIALOG_QUEUE_KEY]) {
     Reflect.deleteProperty(globalThis, key);
   };
   const serviceSlot = Reflect.get(globalThis, SERVICE_SLOT_KEY) as { current: unknown } | undefined;
@@ -355,10 +353,10 @@ describe("D3 currentPi 登记点：factory 重跑覆盖槽上 volatile 绑定", 
 
 // ── ① lazyDeps 语义不回归 ─────────────────────────────────────────────────────
 
-describe("lazyDeps 语义不回归：属性访问经 deps 守卫 → makeDeps 现读链路", () => {
+describe("lazyDeps 语义不回归：属性访问经 deps 检查 → makeDeps 现读链路", () => {
   it("pi 切换后经 lazyDeps 的 eventBus/log/onRunDone 属性访问同样解析新 pi", async () => {
     const { pi: pi1, handle } = await mountWithSession("sess-lazy");
-    expect(handle.lazyDeps.eventBus).toBe(pi1.events); // 守卫 + 转发语义不变（切换前）
+    expect(handle.lazyDeps.eventBus).toBe(pi1.events); // 检查 + 转发语义不变（切换前）
 
     const { pi: pi2 } = makePi();
     setupWorkflowDomain(pi2, { inflightReporter: makeReporter() });
@@ -375,15 +373,15 @@ describe("lazyDeps 语义不回归：属性访问经 deps 守卫 → makeDeps �
 // 生产缺口实证（真机 wf-1790034646281-w7tp4f，R2 裁决）：lazyDeps 漏本成员时
 // workflow tool 的 run action 以 lazyDeps 启动 run → pump dispatchAgentCall 读到
 // undefined 静默回退 deps.runner（SAR.run 占位 runId）→ record.parentRunId =
-// "sar-unattached" → armed 回执落账键错 → fold 出 created → IllegalTransitionError
-// 让位，run journal 恒缺 armed 帧。守卫同源与转发契约锁定（真实回归豁免面）。
+// "sar-unattached" → armed 回执写入 journal 记录键错 → fold 出 created → IllegalTransitionError
+// 让位，run journal 恒缺 armed 帧。检查同源与转发契约锁定（真实回归豁免范围）。
 
 describe("lazyDeps.workflowAgentDispatch 转发成员（[A1 R3] 缺失 = pump 回退 SAR 占位 runId）", () => {
   afterEach(() => {
     Reflect.deleteProperty(globalThis, SERVICE_SLOT_KEY);
   });
 
-  it("守卫同源：session 未初始化时属性访问 throw 'Session not initialized'（与 store 等成员同消息）", async () => {
+  it("检查同源：session 未初始化时属性访问 throw 'Session not initialized'（与 store 等成员同消息）", async () => {
     const { pi } = makePi();
     const handle = setupWorkflowDomain(pi, { inflightReporter: makeReporter() }); // 无 session_start
     expect(() => handle.lazyDeps.workflowAgentDispatch).toThrowError("Session not initialized");
@@ -393,7 +391,7 @@ describe("lazyDeps.workflowAgentDispatch 转发成员（[A1 R3] 缺失 = pump �
     const { handle } = await mountWithSession("sess-dispatch-forward");
     const executeWorkflowAgent = vi.fn(async () => ({ content: "ok" }));
     // service 进程单例槽（service-bootstrap.ts Symbol.for 槽，{ current } 形态）注入
-    // fake——生产 session_start 后真实单例在位，此处只验证闭包转发面。
+    // fake——生产 session_start 后真实单例在位，此处只验证闭包转发侧。
     Reflect.set(globalThis, SERVICE_SLOT_KEY, {
       current: { executeWorkflowAgent, dispose: vi.fn() },
     });
@@ -413,7 +411,7 @@ describe("lazyDeps.workflowAgentDispatch 转发成员（[A1 R3] 缺失 = pump �
 
 // ── ①b [dmg-r2-5] lazyDeps.getSessionRootId 转发成员 ──────────────────────────
 //
-// 守卫同源与转发契约锁定（workflowAgentDispatch 同款先例）：lazyDeps 漏本成员时
+// 检查同源与转发契约锁定（workflowAgentDispatch 同款先例）：lazyDeps 漏本成员时
 // workflow/subagents tool 的 run action 以 lazyDeps 启动 run → run-created 帧
 // 不落 rootSessionId（可选成员静默放行）——同 cwd 多会话下 runtime 网关 runId
 // 路由恒回落目录存在性弱锚，精确归属形同虚设。
@@ -423,7 +421,7 @@ describe("lazyDeps.getSessionRootId 转发成员（[dmg-r2-5] 缺失 = run-creat
     Reflect.deleteProperty(globalThis, SERVICE_SLOT_KEY);
   });
 
-  it("守卫同源：session 未初始化时属性访问 throw 'Session not initialized'（与 store 等成员同消息）", async () => {
+  it("检查同源：session 未初始化时属性访问 throw 'Session not initialized'（与 store 等成员同消息）", async () => {
     const { pi } = makePi();
     const handle = setupWorkflowDomain(pi, { inflightReporter: makeReporter() }); // 无 session_start
     expect(() => handle.lazyDeps.getSessionRootId).toThrowError("Session not initialized");
@@ -448,18 +446,18 @@ describe("lazyDeps.getSessionRootId 转发成员（[dmg-r2-5] 缺失 = run-creat
 // ── ①c [dmg-r1-1] lazyDeps.onResumeModelOverrideCommitted 转发成员 ─────────────
 //
 // 同族第三例（workflowAgentDispatch [A1 R3] / getSessionRootId [dmg-r2-5] 先例）：
-// lazyDeps 漏本成员时，resume with model 的落账点（resume-run appendResumeModelOverride）
+// lazyDeps 漏本成员时，resume with model 的写入点（resume-run appendResumeModelOverride）
 // 落完 journal B 帧后调 deps.onResumeModelOverrideCommitted 可选链静默短路——宿主
-// 两个派生投影（覆盖内存表 + workflow 域负缓存）stale 不失效，重派被旧投影遮蔽
+// 两个派生视图（覆盖内存表 + workflow 域负缓存）stale 不失效，重派被旧派生视图遮蔽
 // （旧 model 命中或覆盖丢失按 run-created.model 解析），pi 仍 notify「resuming with
-// model B」成功文案（假成功）。守卫同源与转发契约锁定（同款先例）。
+// model B」成功文案（假成功）。检查同源与转发契约锁定（同款先例）。
 
-describe("lazyDeps.onResumeModelOverrideCommitted 转发成员（[dmg-r1-1] 缺失 = resume model 宿主投影同步恒不触发）", () => {
+describe("lazyDeps.onResumeModelOverrideCommitted 转发成员（[dmg-r1-1] 缺失 = resume model 宿主派生视图同步恒不触发）", () => {
   afterEach(() => {
     Reflect.deleteProperty(globalThis, SERVICE_SLOT_KEY);
   });
 
-  it("守卫同源：session 未初始化时属性访问 throw 'Session not initialized'（与 store 等成员同消息）", async () => {
+  it("检查同源：session 未初始化时属性访问 throw 'Session not initialized'（与 store 等成员同消息）", async () => {
     const { pi } = makePi();
     const handle = setupWorkflowDomain(pi, { inflightReporter: makeReporter() }); // 无 session_start
     expect(() => handle.lazyDeps.onResumeModelOverrideCommitted).toThrowError("Session not initialized");
@@ -469,7 +467,7 @@ describe("lazyDeps.onResumeModelOverrideCommitted 转发成员（[dmg-r1-1] 缺�
     const { handle } = await mountWithSession("sess-override-forward");
     const applyRunOverrideProjection = vi.fn();
     // service 进程单例槽（service-bootstrap.ts Symbol.for 槽，{ current } 形态）注入
-    // fake——生产 session_start 后真实单例在位，此处只验证闭包转发面。
+    // fake——生产 session_start 后真实单例在位，此处只验证闭包转发侧。
     Reflect.set(globalThis, SERVICE_SLOT_KEY, {
       current: { applyRunOverrideProjection, dispose: vi.fn() },
     });
@@ -551,7 +549,7 @@ describe("D1 session_shutdown reason=reload：破坏性动作全跳过，adoptio
 
     await handlers.get("session_shutdown")!({ type: "session_shutdown", reason: "reload" }, ctx);
 
-    // a：SubagentService 不 dispose（dispose 会经 abort 链杀引擎/relay/子进程）
+    // a：SubagentService 不 dispose（dispose 会经 abort 链杀引擎/子进程）
     expect(serviceDisposeSpy).not.toHaveBeenCalled();
     // c：workflow 域内存不终态化
     expect(mockTerminateRunningRuns).not.toHaveBeenCalled();
@@ -560,7 +558,7 @@ describe("D1 session_shutdown reason=reload：破坏性动作全跳过，adoptio
     // e：sessionState 条目保留（adoption 接管前提——同 run 对象仍在 Map 内）
     expect(handle.state.sessionState.size).toBe(1);
     expect(handle.state.sessionState.get("sess-reload")?.runs.get("run-sess-reload")).toBe(run);
-    // f：pending dialog 不被全量拒绝（在飞 ask-user 属于在飞工作）
+    // f：pending dialog 不被全量拒绝（在途 ask-user 属于在途工作）
     expect(queueRejectAllSpy).not.toHaveBeenCalled();
     // b：reporter detach 仍执行（detach 不是破坏，防旧 reporter 持 stale ctx 重试）
     expect(reporterDetachSpy).toHaveBeenCalledTimes(1);
@@ -570,7 +568,7 @@ describe("D1 session_shutdown reason=reload：破坏性动作全跳过，adoptio
     );
   });
 
-  it("reload：空 sessionState（无在飞工作）时 preserved 计数为 0，日志仍发出", async () => {
+  it("reload：空 sessionState（无在途工作）时 preserved 计数为 0，日志仍发出", async () => {
     const { handlers } = mount();
     await handlers.get("session_shutdown")!({ type: "session_shutdown", reason: "reload" }, makeCtx("sess-empty"));
     expect(loggerFns.debug).toHaveBeenCalledWith(
@@ -579,7 +577,7 @@ describe("D1 session_shutdown reason=reload：破坏性动作全跳过，adoptio
     expect(reporterDetachSpy).toHaveBeenCalledTimes(1);
   });
 
-  // [§1.4 (a)] reload 分支显式作废句柄：只作废 core 读面的句柄可用性判定（PS-30 窗口
+  // [§1.4 (a)] reload 分支显式作废句柄：只作废 core 读侧的句柄可用性判定（PS-30 窗口
   // 消除），不动在途 run 纳管（上两例的「不 dispose / 条目保留」即纳管面证据）。
   it("[§1.4 (a)] reload：core service 的 invalidatePiBinding 被调（reason 含 reload），dispose 不被调", async () => {
     const { handlers, ctx } = await mountWithSession("sess-reload-invalidate");
@@ -744,10 +742,10 @@ describe("session_start 围栏：装配链异常不逃逸", () => {
 
 // ── ④ runSettledEffects：三步固定顺序直测 ─────────────────────────────────────
 //
-// 管线原是 makeDeps 闭包内嵌策略（顺序固化无独立测试面），提级具名导出后在此
+// 管线原是 makeDeps 闭包内嵌策略（顺序固化无独立测试），提级具名导出后在此
 // 直测：不挂 fake pi 全装配、不挂 index.ts、不 mock 兄弟功能模块（notifyDone /
 // trackNotifiedRunId / evictDoneRunsBeyondCap 均真实实现）——只注入 fake env
-//（最小发送面 pi / 真 Set / 真 runs Map）。
+//（最小发送侧 pi / 真 Set / 真 runs Map）。
 //
 // 三步顺序的可观测钉法：
 // - step1（notifyDone 的 sendMessage）经步进哨兵数组记录；
@@ -755,9 +753,9 @@ describe("session_start 围栏：装配链异常不逃逸", () => {
 //   ——证明 2/3 排在 1 之后；
 // - 成功分支断言 step2（notifiedRunIds 纳入）与 step3（runs 淘汰）均已执行。
 //
-// notifyDone 走降级直发路径（ledger 槽未 bind → getBoundNotifyLedger() 为
-// undefined）；stale 判定依据 ext-guards STALE_CTX_MARKER 文案子串，测试注入的
-// 失败错误消息不含该串 → guardStaleCtx 判非 stale 原样上抛（真实语义）。
+// notifyDone 走降级直发路径（port 槽未装配 → getDeliveryPort() 为 undefined——
+// 装配异常窗口的缺席降级）；stale 判定依据 ext-guards STALE_CTX_MARKER 文案子串，
+// 测试注入的失败错误消息不含该串 → guardStaleCtx 判非 stale 原样上抛（真实语义）。
 
 type EnvHarness = {
   env: RunSettledEffectsEnv;
@@ -780,7 +778,7 @@ function makeEnv(): EnvHarness {
   const env: RunSettledEffectsEnv = {
     resolvePi: () => pi,
     notifiedRunIds,
-    state: { sessionDir: "/tmp/run-settled-test-session", runs },
+    state: { runsDir: "/tmp/run-settled-test-session", runs },
     // [W2/V1 D1 第 7 行] 终局记录查询注入（生产 = JsonlRunStore.settledRecordOf；
     // 直测按 makeRun 的 completed 形态给帧同源记录）
     settledRecordOf: () => ({ outcome: "completed", settledAt: 0 }),
@@ -842,7 +840,7 @@ describe("runSettledEffects：三步固定顺序", () => {
       keep: MAX_RETAINED_DONE_RUNS,
       sessionId: "sess-run-settled",
     });
-    // 通知发送面参数：customType workflow-result + notifyId 幂等键前缀（真实 notifyDone 语义）
+    // 通知发送侧参数：customType workflow-result + notifyId 幂等键前缀（真实 notifyDone 语义）
     expect(h.sendMessage).toHaveBeenCalledTimes(1);
     const [message] = h.sendMessage.mock.calls[0] as [
       { customType: string; details: { runId: string; notifyId: string } },
@@ -857,10 +855,10 @@ describe("runSettledEffects：三步固定顺序", () => {
     const run = makeRun({ runId: "wf-boom", status: "done", completedAt: new Date(10_000).toISOString() });
     seedRunsWithCapOverflow(h, run);
     const runsSizeBefore = h.runs.size;
-    h.failSend(new Error("relay send boom"));
+    h.failSend(new Error("send boom"));
 
     // 管线不吞错：上抛交由调用方 finalizeRun 的 onRunDone 独立 try 围栏（OR-4/B-4）
-    expect(() => runSettledEffects(h.env, run)).toThrowError("relay send boom");
+    expect(() => runSettledEffects(h.env, run)).toThrowError("send boom");
 
     // step1 到达且失败
     expect(h.seq).toEqual(["1:notifyDone(sendMessage)"]);
@@ -875,13 +873,13 @@ describe("runSettledEffects：三步固定顺序", () => {
     const h = makeEnv();
     const run = makeRun({ runId: "wf-dup", status: "done", completedAt: new Date(10_000).toISOString() });
     seedRunsWithCapOverflow(h, run);
-    h.notifiedRunIds.add("wf-dup"); // 预置：模拟重复收口
+    h.notifiedRunIds.add("wf-dup"); // 预置：模拟重复收尾
 
     runSettledEffects(h.env, run);
 
-    // notifyDone 首行去重早退 → 发送面零调用
+    // notifyDone 首行去重早退 → 发送侧零调用
     expect(h.sendMessage).not.toHaveBeenCalled();
-    // step2（幂等）/ step3 照常执行（seq 恒空——发送面零调用）
+    // step2（幂等）/ step3 照常执行（seq 恒空——发送侧零调用）
     expect(h.seq).toEqual([]);
     expect(h.notifiedRunIds.has("wf-dup")).toBe(true);
     expect(h.runs.size).toBe(MAX_RETAINED_DONE_RUNS);
@@ -898,7 +896,7 @@ describe("runSettledEffects：三步固定顺序", () => {
     // 缺席不是抛错路径：不回退两态机字段兜底（I2 失效窗口下兜底 = 恒 completed 假成功）
     expect(() => runSettledEffects(h.env, run)).not.toThrow();
 
-    // 通知跳过：发送面零调用 + error 留痕（含恢复动作指向 journal 错误日志）
+    // 通知跳过：发送侧零调用 + error 留痕（含恢复动作指向 journal 错误日志）
     expect(h.sendMessage).not.toHaveBeenCalled();
     expect(loggerFns.error).toHaveBeenCalledWith(
       "[workflow] done notify skipped: settlement record unavailable (runId=wf-nosettlement) — " +
@@ -906,7 +904,7 @@ describe("runSettledEffects：三步固定顺序", () => {
     );
     // track 不标：未发通知不占去重窗口（允许后续语义修正重试）
     expect(h.notifiedRunIds.has("wf-nosettlement")).toBe(false);
-    // evict 照常：内存有界性独立于通知（seq 恒空——发送面零调用）
+    // evict 照常：内存有界性独立于通知（seq 恒空——发送侧零调用）
     expect(h.seq).toEqual([]);
     expect(h.runs.size).toBe(MAX_RETAINED_DONE_RUNS);
     expect(h.runs.has("seed-0")).toBe(false);
@@ -916,15 +914,16 @@ describe("runSettledEffects：三步固定顺序", () => {
 
 // ── ⑤ setupWorkflowDomain 的 pi.on 注册顺序锁（逐位不变契约） ──────────────────
 //
-// index.ts 头注与 setupWorkflowDomain JSDoc 声明「7 个 pi.on handler 的注册相对
-// 顺序原样保留」。跨域 handler 迁出（session_compact / model_select / 父级联
-// before 事件归各自域模块的 setup* 注册）后，本用例是顺序逐位不变的机器证据：
-// fake pi 捕获 on() 调用序列（Map 保持插入序），与锁定的 7 事件序列逐位比对。
+// index.ts 头注与 setupWorkflowDomain JSDoc 声明「pi.on handler 的注册相对顺序
+// 原样保留」。跨域 handler 迁出（model_select / 父级联 before 事件归各自域模块的
+// setup* 注册）后，本用例是顺序逐位不变的机器证据：fake pi 捕获 on() 调用序列
+//（Map 保持插入序），与锁定的事件序列逐位比对。[波 2] session_compact 注册
+//（notify ledger compaction 补写检查）随账本退役删除——pi session append-only
+// 契约排除 entry 被清事件（unified-delivery §3.7②），序列 7 → 6。
 
-/** 锁定的注册顺序（index.ts 头注声明的 7 事件序列，逐位不变契约）。 */
+/** 锁定的注册顺序（波 2 后的 6 事件序列，逐位不变契约）。 */
 const EXPECTED_REGISTRATION_ORDER = [
   "session_start",
-  "session_compact",
   "model_select",
   "session_tree",
   "session_before_fork",
@@ -933,7 +932,7 @@ const EXPECTED_REGISTRATION_ORDER = [
 ] as const;
 
 describe("setupWorkflowDomain pi.on 注册顺序", () => {
-  it("7 个事件按锁定序列逐位注册（跨域 setup* 调用原位、不改变序列）", () => {
+  it("6 个事件按锁定序列逐位注册（跨域 setup* 调用原位、不改变序列）", () => {
     const { pi, handlers } = makePi();
     setupWorkflowDomain(pi, { inflightReporter: makeReporter() });
 
@@ -943,11 +942,11 @@ describe("setupWorkflowDomain pi.on 注册顺序", () => {
 
 // ── ⑥ 组合根薄接线：registerWorkflowsCommand 第三参 lazyDeps.onRunDone ─────────
 //
-// 替代原 index-session-start 的 W3TC8 完整行为重放：行为面权威在 runSettledEffects
+// 替代原 index-session-start 的 W3TC8 完整行为重放：行为范围权威在 runSettledEffects
 // 直测（④）与 core lifecycle evict 用例；此处只锁「组合根把 lazyDeps 转交给
 // workflows command」这一根接线——捕获第三参，调 onRunDone，断言真实管线执行且
 // evict 写的是 session_start 装配的 sessionState 条目 runs Map（同一对象引用）。
-// ctx 用 tui（环境门控：非 rpc 不启动在飞上报，零重试 timer 悬挂）。
+// ctx 用 tui（环境门控：非 rpc 不启动在途上报，零重试 timer 悬挂）。
 
 describe("组合根接线：registerWorkflowsCommand 第三参 lazyDeps.onRunDone", () => {
   it("捕获的 onRunDone 转发到真实 runSettledEffects 管线：workflow-result 通知发出 + evict 操作真实 sessionState runs Map", async () => {

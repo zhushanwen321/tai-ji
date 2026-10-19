@@ -118,10 +118,10 @@ describe('U1-A2 各 action 请求 params 类型结构（嵌套契约）', () => 
     expect(req.sessionId).toBe('abc')
   })
 
-  it('U1-A2 SessionManagerWatchParams：封闭单键 notifyId（parentSid 协议面不定义）', () => {
+  it('U1-A2 SessionManagerWatchParams：封闭单键 notifyId（parentSid 协议范围不定义）', () => {
     const req: SessionManagerWatchParams = { notifyId: 'sm-123e4567-e89b-12d3-a456-426614174000' }
     expect(req.notifyId).toContain('sm-')
-    // 单键寻址：类型面无任何第二字段可声明（parentSid 由 runtime 取连接身份）
+    // 单键寻址：类型范围无任何第二字段可声明（parentSid 由 runtime 取连接身份）
     const keys = Object.keys(req)
     expect(keys).toEqual(['notifyId'])
   })

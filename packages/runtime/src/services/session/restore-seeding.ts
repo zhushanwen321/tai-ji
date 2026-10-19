@@ -11,7 +11,7 @@
  *
  * [infra 直引豁免] 本模块 import infra/pi（session-file-utils）与 session-lifecycle.ts
  * 的既有四处同属 R3 ports 依赖倒挂豁免（见 session-lifecycle.ts 头注释登记），R3
- * 阶段随 ISessionStore port 扩展一并收口。
+ * 阶段随 ISessionStore port 扩展一并收敛。
  */
 import { readFileSync, statSync } from 'node:fs'
 import { homedir } from 'node:os'
@@ -164,7 +164,7 @@ export function normalizeInactiveSessionFileIfNeeded(filePath: string, cwdFellBa
     size = statSync(filePath).size
   } catch (e) {
     // ENOENT 等：与原实现 readFileSync 的抛错同语义——restoreSession 的 try/catch
-    //（safeDestroy + rethrow）承接；renameSession 调用点有 existsSync 前置守卫不经过此。
+    //（safeDestroy + rethrow）承接；renameSession 调用点有 existsSync 前置检查不经过此。
     throw e
   }
   if (size > READ_PRECHECK_MAX_BYTES) {
@@ -241,7 +241,7 @@ function findTailSessionEnd(filePath: string): boolean {
 }
 
 /**
- * D5⑤ 变换腿：组装 strip + cwd fallback 的行级纯变换（SessionJsonlLineTransform），
+ * D5⑤ 变换路径：组装 strip + cwd fallback 的行级纯变换（SessionJsonlLineTransform），
  * 经注入的 StreamingNormalizer（ISessionStore port 切片）完成分块流式落盘——IO 全在
  * infra 实现内（C-comm-03 分层通道），transformLine 是纯字符串变换不触 IO，不进 port。
  *
@@ -276,7 +276,7 @@ export function streamNormalizeSessionFile(filePath: string, cwdFellBack: boolea
  * （modelId）。provider+id 齐全时拼 'provider/modelId'，仅 id 时用裸 id。
  * 字段缺失 → 对应键 undefined（调用方各自决定兜底链）。
  *
- * @param stateData client.getState() 回执（结构未建模，运行时守卫收窄）
+ * @param stateData client.getState() 回执（结构未建模，运行时检查收窄）
  */
 export function readEffectiveModelFromState(stateData: unknown): { modelId?: string; thinkingLevel?: string } {
   const stateObj = stateData as Record<string, unknown> | null | undefined
@@ -331,7 +331,7 @@ export async function seedRestoreMetaOverride(
   } catch (e) {
     // E2: get_state 读回失败 → 每字段回落扫描 meta 值（target 来自 findScannedSession，
     // 反向读 JSONL 真值），仍缺则 '' 占位。与读回成功路径同构：双无值也播种 ''/''，
-    // 不保持 undefined 走 registerSession 全局默认（D2 被否谱系：全局默认播种让 restore
+    // 不保持 undefined 走 registerSession 全局默认（D2 不采用其余方案的理由：全局默认播种让 restore
     // 窗口显示他 session 的假值，违 G4「不知道显示占位」）。
     console.warn(`[session-lifecycle] restoreSession(${sessionId}): get_state readback failed, falling back to scanned meta values`, e)
     return {

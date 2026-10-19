@@ -11,10 +11,10 @@
  * - 四路清理接线：crash 路（registerWorkerCallbacks + host.onCrash 触发）与
  *   session-destroyed 路（setOnSessionDestroyed 注册的回调触发，追加式语义不挤占
  *   didDestroy）行为级；disable / uninstall 路（togglePlugin(false) /
- *   uninstallPlugin 内部调用点）源码级守卫——两路编排依赖 activator/host 全套，
+ *   uninstallPlugin 内部调用点）源码级检查——两路编排依赖 activator/host 全套，
  *   行为由注册表 clearForPlugin 单测覆盖，接线存在性由源码断言锁定
- * - 组合根两路注入：onRecordEntriesInvalidated 的 invalidateRecordEntries 腿保留 +
- *   pluginService.notifyEntryInvalidation 腿存在（源码级守卫，同
+ * - 组合根两路注入：onRecordEntriesInvalidated 的 invalidateRecordEntries 路径保留 +
+ *   pluginService.notifyEntryInvalidation 路径存在（源码级检查，同
  *   index-composition-root-wiring.test.ts 范式）
  *
  * 运行：cd packages/runtime && npx vitest run test/plugin-entry-invalidation-dispatch.test.ts
@@ -184,7 +184,7 @@ describe('PluginService.notifyEntryInvalidation 定向投递', () => {
       getDescriptor: vi.fn(() => ({ pluginId: 'pA', pluginPath: '/tmp/pA' })),
       getAllDescriptors: () => [],
     }
-    // 会话存在性谓词走真实注入面（listPersistedSessions 扁平 id 集）——s1/s2 可注册
+    // 会话存在性谓词走真实注入点（listPersistedSessions 扁平 id 集）——s1/s2 可注册
     const sessionServiceMock = {
       listPersistedSessions: () => [{ sessions: [{ id: 's1' }, { id: 's2' }] }],
     }
@@ -283,7 +283,7 @@ describe('Entry 失效订阅四路清理接线', () => {
       setSendMessageHook: vi.fn(),
       setOnSessionCreated: vi.fn(),
       setOnSessionDestroyed,
-      // u5a relay ③：registerSendMessageHook 现亦注册激活回调（追加式列表）——mock 跟进接口面
+      // u5a relay ③：registerSendMessageHook 现亦注册激活回调（追加式列表）——mock 跟进接口侧
       onSessionActivated: vi.fn(),
       listPersistedSessions: () => [{ sessions: [{ id: 's1' }, { id: 's2' }] }],
     }
@@ -308,7 +308,7 @@ describe('Entry 失效订阅四路清理接线', () => {
     expect(table.dispatch('s2', 'task')).toEqual([{ workerId: 'w2', handlerId: 'h2' }])
   })
 
-  it('disable / uninstall 路：togglePlugin(false) 与 uninstallPlugin 各接一处 clearForPlugin（源码级守卫）', () => {
+  it('disable / uninstall 路：togglePlugin(false) 与 uninstallPlugin 各接一处 clearForPlugin（源码级检查）', () => {
     const source = readFileSync(new URL('../src/services/plugin-service/plugin-service.ts', import.meta.url), 'utf8')
 
     // crash / disable / uninstall 三路各恰好一处接线（crash 路另有行为级用例交叉验证）
@@ -323,17 +323,17 @@ describe('Entry 失效订阅四路清理接线', () => {
 })
 
 // ══════════════════════════════════════════════════════════════════
-// 组合根两路注入（源码级守卫，index-composition-root-wiring 同范式）
+// 组合根两路注入（源码级检查，index-composition-root-wiring 同范式）
 // ══════════════════════════════════════════════════════════════════
 
 describe('组合根 onRecordEntriesInvalidated 两路注入', () => {
   const source = readFileSync(new URL('../src/index.ts', import.meta.url), 'utf8')
 
-  it('session 腿保留：invalidateRecordEntries 仍在注入体内（record 三族行为不受扰）', () => {
+  it('session 路径保留：invalidateRecordEntries 仍在注入体内（record 三族行为不受扰）', () => {
     expect(source).toContain('sessionService.invalidateRecordEntries(sid, customType)')
   })
 
-  it('plugin 腿接入：notifyEntryInvalidation 在同一回调体内（两路都收到回调）', () => {
+  it('plugin 路径接入：notifyEntryInvalidation 在同一回调体内（两路都收到回调）', () => {
     expect(source).toMatch(/onRecordEntriesInvalidated: \(sid, customType\) => \{\s+sessionService\.invalidateRecordEntries\(sid, customType\)\s+[\s\S]*?pluginService\.notifyEntryInvalidation\(sid, customType\)/s)
   })
 })

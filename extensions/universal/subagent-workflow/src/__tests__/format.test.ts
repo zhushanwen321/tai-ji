@@ -349,7 +349,7 @@ describe("truncLine", () => {
 /**
  * 旧实现参照：改造前的 per-char 版本，逐字取自 git 历史（093e28fe3~1 的
  * format.ts truncLine）。现行实现（indexOf("\\x1b") 段跳过）必须与其逐字节
- * 等价——本函数即对拍 oracle，与 helpers-bounded-serialize.test.ts 的
+ * 等价——本函数即对拍的最终裁决角色，与 helpers-bounded-serialize.test.ts 的
  * legacySerialize 同形态（参照物随测试落盘，防「验证只存在于改造当时」）。
  */
 const legacySegmenter = new Intl.Segmenter(undefined, { granularity: "grapheme" });
@@ -640,7 +640,7 @@ describe("formatToolCall", () => {
 });
 
 // ============================================================
-// phase 分组消费折叠投影（[D3] phase 状态机与展示分组同源——workflow-run-resume-revision U3）
+// phase 分组消费折叠派生视图（[D3] phase 状态机与展示分组同源——workflow-run-resume-revision U3）
 // ============================================================
 
 /** fresh fold 初值：Map 半边逐用例独立实例（INITIAL_RUN_EVENT_FOLD 的 phases 是
@@ -674,7 +674,7 @@ function traceNode(
   };
 }
 
-describe("buildPhaseGroups × fold 投影同源（D3/检查点 6 展示侧）", () => {
+describe("buildPhaseGroups × fold 派生视图同源（D3/检查点 6 展示侧）", () => {
   /** 基准流：p1 两 call 全落定（含 phase-settled）、p2 一 call 在途、崩溃收编。 */
   const baseEvents = seqEvents([
     { type: "run-created", ts: 1, runId: "wf-1", workflowName: "demo", argsSummary: "{}" },
@@ -694,7 +694,7 @@ describe("buildPhaseGroups × fold 投影同源（D3/检查点 6 展示侧）", 
     traceNode(3, "gamma", "p2", false),
   ];
 
-  it("分组归属同源：组名集 ≡ fold phases 投影键集（数据源 = agent-started 的 phase 载荷）", () => {
+  it("分组归属同源：组名集 ≡ fold phases 派生视图键集（数据源 = agent-started 的 phase 载荷）", () => {
     const fold = foldRunEventCheckpoint(baseEvents, () => {}, freshFold());
     const groups = buildPhaseGroups(baseNodes, fold.phases);
     expect(new Set(groups.map((g) => g.name))).toEqual(new Set([...fold.phases.keys()]));
@@ -714,7 +714,7 @@ describe("buildPhaseGroups × fold 投影同源（D3/检查点 6 展示侧）", 
     expect(p2.doneCount).toBe(0);
   });
 
-  it("完整事件流上，未注入投影的节点计数推导 ≡ fold 投影判定（活体既有调用形态的同源性）", () => {
+  it("完整事件流上，未注入派生视图的节点计数推导 ≡ fold 派生视图判定（活体既有调用形态的同源性）", () => {
     const fold = foldRunEventCheckpoint(baseEvents, () => {}, freshFold());
     const withProjection = buildPhaseGroups(baseNodes, fold.phases);
     const derived = buildPhaseGroups(baseNodes);
@@ -732,7 +732,7 @@ describe("buildPhaseGroups × fold 投影同源（D3/检查点 6 展示侧）", 
     expect(groups.map((g) => g.name).sort()).toEqual(["p1", "p2"]);
   });
 
-  it("无 phase 归属节点 → (default) 匿名组；fold 投影无该行 → 计数推导兜底", () => {
+  it("无 phase 归属节点 → (default) 匿名组；fold 派生视图无该行 → 计数推导兜底", () => {
     const nodes = [traceNode(1, "alpha", undefined, true), traceNode(2, "beta", undefined, false)];
     const fold = foldRunEventCheckpoint(seqEvents([
       { type: "run-created", ts: 1, runId: "wf-2", workflowName: "d", argsSummary: "{}" },

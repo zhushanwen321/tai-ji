@@ -10,7 +10,7 @@ import * as path from "node:path";
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-// 三态用例需断言 read-failure warn 日志（设计 D5 第 3 态的验收面），
+// 三态用例需断言 read-failure warn 日志（设计 D5 第 3 态的验收侧），
 // 用包内测试既有 vi.mock 模式拦 logger（见 epipe-fallback.test.ts 同款）。
 const { loggerMock } = vi.hoisted(() => ({
   loggerMock: { debug: vi.fn(), warn: vi.fn(), error: vi.fn() },
@@ -171,7 +171,7 @@ describe("readGlobalConfig 三态（设计 D5）", () => {
     expect(result.status).toBe("failed");
     if (result.status !== "failed") return;
     expect(result.reason).not.toBe("");
-    // read-failure warn 日志是 D5 第 3 态的验收面（现状 loadGlobalConfig catch 静默）
+    // read-failure warn 日志是 D5 第 3 态的验收侧（现状 loadGlobalConfig catch 静默）
     expect(loggerMock.warn).toHaveBeenCalledTimes(1);
     const warnMsg = String(loggerMock.warn.mock.calls[0]?.[0]);
     expect(warnMsg).toContain(getGlobalConfigPath(tmpDir));
@@ -359,7 +359,7 @@ describe("sanitizeEngineDefaults（设计 D5）", () => {
 // ============================================================
 
 
-/** seed + 直读断言单源（D6 直读语义的装载腿：写盘后立即可读得同值）。 */
+/** seed + 直读断言单源（D6 直读语义的装载路径：写盘后立即可读得同值）。 */
 function seedEngineDefaults(tmpDir: string, engineDefaults: Record<string, string>): void {
   writeConfig(tmpDir, JSON.stringify({ version: 1, engineDefaults }));
   expect(readEngineDefaults(tmpDir)).toEqual(engineDefaults);

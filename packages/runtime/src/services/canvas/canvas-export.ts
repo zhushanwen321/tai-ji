@@ -9,8 +9,8 @@
  * 落盘（exports/ 目录）在 canvas-service.ts 编排；本文件零 IO。调用前置：收敛门禁
  * 已在 mutate 校验段通过（export 内部同校验不变量 10，未收敛不会到达渲染）。
  */
-import type { CanvasEdge, CanvasNode, CanvasState } from '@zhushanwen/extension-protocol'
-import { nodeOf } from './canvas-foundation.js'
+import type { CanvasEdge, CanvasNode } from '@zhushanwen/extension-protocol'
+import { nodeOf, type CanvasDomainState } from './canvas-foundation.js'
 
 const EXPORT_TRUNCATE_MAX = 80
 
@@ -19,7 +19,7 @@ function truncate(s: string, max = EXPORT_TRUNCATE_MAX): string {
 }
 
 /** 反向主干上溯：nodeId → 根的路径（子→根序）。 */
-function pathFromNodeToRoot(state: CanvasState, nodeId: string): string[] {
+function pathFromNodeToRoot(state: CanvasDomainState, nodeId: string): string[] {
   const path: string[] = []
   const visited = new Set<string>([nodeId])
   const queue = [nodeId]
@@ -36,14 +36,14 @@ function pathFromNodeToRoot(state: CanvasState, nodeId: string): string[] {
   return path
 }
 
-function nodeLabel(state: CanvasState, id: string): string {
+function nodeLabel(state: CanvasDomainState, id: string): string {
   const n = nodeOf(state, id)
   return n ? `「${truncate(n.content)}」(${n.id})` : `(${id})`
 }
 
 // ── 方向规划文档 ──────────────────────────────────────────────
 
-export function renderPlanningDoc(state: CanvasState, generatedAt: string): string {
+export function renderPlanningDoc(state: CanvasDomainState, generatedAt: string): string {
   const lines: string[] = []
   lines.push(`# 方向规划文档：${state.name}`)
   lines.push('')
@@ -84,7 +84,7 @@ export function renderPlanningDoc(state: CanvasState, generatedAt: string): stri
 
 /** §3 方案选择与否决记录：每个 resolve 父问题一段（选定 / 已否决 / 未选定三态行）；
  * 无解边时输出占位行（段落占位由调用方标题承担，这里只产出行内容）。 */
-function renderSelectionSection(state: CanvasState, lines: string[]): void {
+function renderSelectionSection(state: CanvasDomainState, lines: string[]): void {
   // 先按 from 去重出唯一父问题集再逐问题成段：同一父问题挂 ≥2 条 resolve 边（多候选
   // 比较）时只产出一个段落，候选行各一条——不与注释「每个 resolve 父问题一段」相悖。
   const parentIds = new Set<string>()
@@ -104,7 +104,7 @@ function renderSelectionSection(state: CanvasState, lines: string[]): void {
 }
 
 /** 单个候选方案行：selected（附对比理由）/ rejected（附否决与复活条件）/ 其余（生命周期）。 */
-function renderSelectionCandidate(state: CanvasState, optionId: string, lines: string[]): void {
+function renderSelectionCandidate(state: CanvasDomainState, optionId: string, lines: string[]): void {
   const option = nodeOf(state, optionId)
   if (!option) return
   if (option.selected) {
@@ -117,7 +117,7 @@ function renderSelectionCandidate(state: CanvasState, optionId: string, lines: s
 }
 
 /** §4 执行清单：dispatchable option 逐条（已派发指针 / 待派发）。 */
-function renderExecutionSection(state: CanvasState, lines: string[]): void {
+function renderExecutionSection(state: CanvasDomainState, lines: string[]): void {
   const leaves = state.nodes.filter((n) => n.type === 'option' && n.dispatchable === true)
   if (leaves.length === 0) {
     lines.push('（无执行叶子）')
@@ -129,7 +129,7 @@ function renderExecutionSection(state: CanvasState, lines: string[]): void {
   }
 }
 
-function renderTree(state: CanvasState, nodeId: string, indent: string, lines: string[]): void {
+function renderTree(state: CanvasDomainState, nodeId: string, indent: string, lines: string[]): void {
   const node = nodeOf(state, nodeId)
   if (!node) return
   const marks: string[] = [node.type]
@@ -146,7 +146,7 @@ function renderTree(state: CanvasState, nodeId: string, indent: string, lines: s
 
 // ── 叶子需求卡（五要素，对接 tech-design-wf T1 Step 0 的防腐层）──
 
-export function renderRequirementCard(state: CanvasState, leafId: string, generatedAt: string): string {
+export function renderRequirementCard(state: CanvasDomainState, leafId: string, generatedAt: string): string {
   const lines: string[] = []
   const leaf = nodeOf(state, leafId)
   lines.push(`# 需求卡：${leaf ? truncate(leaf.content) : leafId}`)
@@ -190,7 +190,7 @@ export function renderRequirementCard(state: CanvasState, leafId: string, genera
 
 /** 要素 1 正文：父问题陈述 + 选定理由 + 完成判据（各字段存在才出对应行）。 */
 function renderCardGoal(
-  state: CanvasState,
+  state: CanvasDomainState,
   leafId: string,
   leaf: CanvasNode | undefined,
   resolveEdge: CanvasEdge | undefined,
@@ -208,7 +208,7 @@ function renderCardGoal(
 
 /** 要素 3 正文：同一父问题下的 rejected 候选（否决理由 + 复活条件）；无则占位行。 */
 function renderCardRejected(
-  state: CanvasState,
+  state: CanvasDomainState,
   leafId: string,
   resolveEdge: CanvasEdge | undefined,
   lines: string[],
@@ -227,7 +227,7 @@ function renderCardRejected(
 }
 
 /** 要素 4 正文：argue 支撑该叶子的 fact 论据（核实状态）；无则占位行。 */
-function renderCardFacts(state: CanvasState, leafId: string, lines: string[]): void {
+function renderCardFacts(state: CanvasDomainState, leafId: string, lines: string[]): void {
   const supporting = state.edges.filter((e) => {
     if (e.type !== 'argue' || e.to !== leafId) return false
     const arg = nodeOf(state, e.from)

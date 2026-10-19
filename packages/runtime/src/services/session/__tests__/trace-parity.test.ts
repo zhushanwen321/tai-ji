@@ -55,6 +55,8 @@ const store: ISessionStore = {
   readSessionEndMeta: (p: string) => readSessionEndMeta(p),
   persistHandoffSidecar: () => {},
   trash: () => Promise.resolve(),
+  // [session-store-layout-inversion D5] 目录级整树软删 port（本测试不触删除路径）
+  trashDirectory: () => Promise.resolve(),
 }
 
 /** 逐条 diff 结果：完全一致返回空数组，否则返回差异描述（index + 双方摘要）。 */
@@ -101,7 +103,7 @@ describe('A24 探针 P1：RPC 录制产物 vs 文件直读产物 SessionEntry �
     expect(raw.response.data.leafId).toBe(lastWithId?.id)
   })
 
-  it('覆盖面：三个 session 合计 entry 数 ≥ 100（防 fixture 退化为玩具样本）', () => {
+  it('覆盖范围：三个 session 合计 entry 数 ≥ 100（防 fixture 退化为玩具样本）', () => {
     let total = 0
     for (const { name } of RECORDED_SESSIONS) {
       const raw = JSON.parse(readFileSync(join(FIXTURES, `${name}.json`), 'utf-8')) as {

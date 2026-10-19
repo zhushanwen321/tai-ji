@@ -1,9 +1,9 @@
 /**
  * useCommandSync —— slash 命令投递闭环（拉 + 推两路；修复 composer skill 消失缺陷）。
  *
- * 根因：session.commands 帧是「一次性投递、零补拉」——session 激活时 runtime
+ * 根因：session.commands 帧是「一次性投递、零补充拉取」——session 激活时 runtime
  * 播种拉取并广播一帧，渲染端消费组件异步就位，帧到达早于订阅建立即永久丢失。
- * 本 composable 在消费侧接上「挂载 / 切 session / 打开浮层时主动拉取」的补拉闭环，
+ * 本 composable 在消费侧接上「挂载 / 切 session / 打开浮层时主动拉取」的补充拉取闭环，
  * 复用既有 session.getCommands RPC（runtime 侧查询即失效语义顺带刷新快照）。
  *
  * 触发点（D1）：
@@ -14,7 +14,7 @@
  *    ref 实时值变化），消除切 sid 时序竞态导致的跨分区污染。
  *
  * 浮层 open 边沿拉取由 command-popover-open-fetch 承接（带 1s 节流），不经本处——
- * 双路并存会重复 RPC（dev-0.9.9 补拉闭环 × dev-0.9.8 符号系统 open-fetch 合并产物）；
+ * 双路并存会重复 RPC（dev-0.9.9 补充拉取闭环 × dev-0.9.8 符号系统 open-fetch 合并产物）；
  * 原/onOpenPull 出口随批次 3 C1 删除（零组件调用方的死出口）。
  *
  * 数据模式（D5）：打开即拉（权威透传 pi）+ SWR 旧值先行。拉取应答 ms 级回写覆盖。
@@ -30,7 +30,7 @@ import { useCommandStore } from '@/composables/features/command/useCommandStore'
 import { useSessionEvents } from '@/composables/features/chat/useSessionEvents'
 import type { RawCommand } from '@taiji/core'
 
-/** getCommands RPC 应答形状（D2 分区写入的消费面）。 */
+/** getCommands RPC 应答形状（D2 分区写入的消费方）。 */
 type CommandsReply = {
   sessionId: string
   commands: Array<{ name: string; description?: string; source: string }>
@@ -41,7 +41,7 @@ type CommandsReply = {
  *
  * 为什么模块级而非实例级：split panel 双实例同时 watch 同 sid 时，
  * 模块级可共享同一 Promise，避免重复 RPC。「同 key 复用 / settle 即清下次触发重新拉取
- * （无条件恢复腿，不依赖 store 缓存时效）/ 引用比对防误删」生命周期收编于
+ * （无条件恢复路径，不依赖 store 缓存时效）/ 引用比对防误删」生命周期收编于
  * createInflightDedup（D9 共享原语，state-truth-sync §3.3）。
  */
 // taste:allow-no-data-owner（非 GUI 数据的技术结构，同 core/coordination/subscription-state.ts
@@ -54,7 +54,7 @@ export function __clearInFlightCommandsFetchForTest(): void {
 }
 
 /**
- * slash 命令补拉 composable（副作用型：拉取/订阅均在 setup 内自挂，无返回出口）。
+ * slash 命令补充拉取 composable（副作用型：拉取/订阅均在 setup 内自挂，无返回出口）。
  *
  * @param sessionIdRef sessionId 的 ref（string | null | undefined）。
  *   变化时自动拉取（null/undefined 不拉）。ref 可来自 props（组件 setup 内 toRef(props,'sessionId')）。
@@ -67,11 +67,11 @@ export function useCommandSync(sessionIdRef: Ref<string | null | undefined>): vo
    *
    * 复用 inflight 去重：同 sid 并发触发时复用同一 Promise，避免重复 RPC。
    * 写入 reply.sessionId 分区（非调用方实时 sid），从结构上消除 ADR-0049 M1 竞态。
-   * settle 即清（下次同 sid 触发重新拉取，无条件恢复腿）与引用比对防误删由 factory 内建。
+   * settle 即清（下次同 sid 触发重新拉取，无条件恢复路径）与引用比对防误删由 factory 内建。
    *
-   * 链路时效（ADR-0050 修订后）：本拉取的有效消费面是 slash 命令段——skill 候选已切
+   * 链路时效（ADR-0050 修订后）：本拉取的有效消费方是 slash 命令段——skill 候选已切
    * taiji SkillRegistry 广播链（config.skillCacheInvalidated → useGlobalSkills/
-   * useProjectSkills 重拉，即时），panel slash 段的 skill: 项也在展示层被过滤，二者均
+   * useProjectSkills 重新拉取，即时），panel slash 段的 skill: 项也在展示层被过滤，二者均
    * 不依赖本链路的新鲜度。拉到的内容相对磁盘仍有秒级滞后（pi 内存快照须经 watcher →
    * reload 重扫才更新），只影响 pi 侧状态（/skill: 注册表 + system prompt 段），
    * 是降级不是 bug，勿当缺陷修。

@@ -26,14 +26,14 @@ export interface UsageRow extends UsageMetrics {
    * 桶内 model 归属来源 = smart-context 生成侧权威落盘的 details.model
    * （`${provider}/${id}`，scanner ③ 读取，非 string/空串诚实回退 'compaction'；
    * 落盘透传可靠性锚 docs/pi-semantics.json PS-28）。
-   * rename-session 为 taiji 自有 ④ 分类虚拟桶（rename-session custom entry 落账 →
+   * rename-session 为 taiji 自有 ④ 分类虚拟桶（rename-session custom entry 写入 journal 记录 →
    * scanner ④；落盘形态锚 PS-29，非 pi 三分类口径）。
    */
   provider: string
   /**
    * 主桶 = `responseModel ?? model`（D10，裸 id）；compaction 桶 = details.model
    * （`${provider}/${id}` 复合串）权威优先、缺失诚实回退 'compaction'；rename-session
-   * 桶 = custom entry data.model（复合串）守卫回退 'rename-session'。归属组
+   * 桶 = custom entry data.model（复合串）检查回退 'rename-session'。归属组
    * （compaction/rename）的 model 为复合串属归属语境刻意——与主桶组裸 id 形态并存
    * 是预期，展示层用 provider/model 分量渲染（usage-page-fixes §3.3 ⑤）。
    */

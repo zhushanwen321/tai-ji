@@ -6,7 +6,7 @@
  * 覆盖（impl-plan U4b 验收条款⑥ + 既有 C4 过滤器面）：
  * - planReview 标记请求入 store（C4 放行），挂起状态按 requestId 可枚举（currentPlanReviewRequests）
  * - planReviewFilter 实例与 formFilter 实例互斥（一请求只归一面；表单类行为无回归）
- * - respond 按 requestId 精确回传 + 出队（planReview 请求面）
+ * - respond 按 requestId 精确回传 + 出队（planReview 请求侧）
  * - pickPlanFields 白名单 selfReview 双入店路径契约（D9③）：热帧（bus→toExtensionUIRequest
  *   白名单搬运）与冷补（getPendingRequests 快照全量解包）两路都携带 selfReview——防
  *   「切回 session 有自审行、实时挂起无」半残形态；respond 后置已应答标记（D4 抑制窗①）
@@ -117,7 +117,7 @@ describe('planReview 分流：C4 放行入 store + 挂起可枚举', () => {
   })
 
   it('表单请求不进 planReview 枚举（表单类行为无回归）', () => {
-    // 两个消费面实例各持各的 filter：planReviewFilter 实例只枚举 planReview；
+    // 两个消费方实例各持各的 filter：planReviewFilter 实例只枚举 planReview；
     // 表单入队回归由 formFilter 实例承载（互斥过滤是设计语义，不是丢失）
     const review = runInExtensionUIScope(() => useExtensionUI(ref('sess-A'), planReviewFilter))
     const form = runInExtensionUIScope(() => useExtensionUI(ref('sess-A'), formFilter))
@@ -186,7 +186,7 @@ describe('pickPlanFields 白名单 selfReview 双入店路径契约（D9③）',
     dispose()
   })
 
-  it('热帧路径负向：非 string selfReview 不入店（守卫即透传闸）', () => {
+  it('热帧路径负向：非 string selfReview 不入店（检查即透传闸）', () => {
     const { result, dispose } = runInExtensionUIScope(() =>
       useExtensionUI(ref('sess-A'), planReviewFilter),
     )

@@ -2,7 +2,7 @@
 //
 // scheduler widget 推送（D1 指纹跳推）集成单测：
 // 走 index.ts 真实装配链（session_start → runtime.onAfterTick → refreshWidget），
-// 观测面 = ctx.ui.setWidget 调用序列（每个实际推送恰一次调用——跳推判定在
+// 观测范围 = ctx.ui.setWidget 调用序列（每个实际推送恰一次调用——跳推判定在
 // setSchedulerWidget 之前，setWidgetDual 的 TUI 分支与清屏分支都落 setWidget）。
 //
 // 行为契约（scheduler widget 推送修正设计 D1-b）：
@@ -79,7 +79,7 @@ function createMockPi(): { pi: ExtensionAPI; events: Map<string, (...args: unkno
   return { pi, events }
 }
 
-/** fake ctx：entries 注入任务（owner = sessionFile）；setWidget 独立导出作观测面。 */
+/** fake ctx：entries 注入任务（owner = sessionFile）；setWidget 独立导出作观测范围。 */
 function createFakeCtx(sessionFile: string, entries: unknown[] = []): {
   ctx: ExtensionContext
   setWidget: ReturnType<typeof vi.fn>
@@ -153,7 +153,7 @@ describe('widget 推送判定（D1 指纹跳推）', () => {
     stringifySpy.mockRestore()
 
     expect(setWidget).toHaveBeenCalledTimes(2) // fail-open：宁可多推不可漏显
-    // 用户可见面：fail-open 推出的帧内容正确（静态行完整，非空帧/异常串）
+    // 用户可见部分：fail-open 推出的帧内容正确（静态行完整，非空帧/异常串）
     const frame = String((setWidget.mock.calls[1]![1] as string[])[0] ?? '')
     expect(frame).toContain('keepalive probe')
     const warnText = loggerMock.warn.mock.calls.map(c => String(c[0])).join('\n')

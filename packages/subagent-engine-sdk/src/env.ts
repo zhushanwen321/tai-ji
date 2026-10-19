@@ -2,7 +2,7 @@
 //
 // 引擎子进程 env 契约（W12，impl-plan §2.12 / 设计 §3.5.1 D7）。
 //
-// F9：buildOutboundChildEnv 在 @taiji/shared，而 SDK 的消费面（zsw 宿主、引擎
+// F9：buildOutboundChildEnv 在 @taiji/shared，而 SDK 的消费方（zsw 宿主、引擎
 // CLI 包）不可依赖 shared——SDK 是跨宿主 SSOT，故本文件自持全部常量与构建器，
 // 不 import @taiji/shared。
 //
@@ -23,16 +23,11 @@ export const ENGINE_ENV_PREFIXES: readonly string[] = [
   'TAIJI_', 'TAIJI_AGENT_', 'TAIJI_SUBAGENT_',
 ];
 
-/** L1 deny + 显式剥除键集（镜像 shared SSOT，勿单独改动）。
- *  互引（场景域分化，勿互混）：dev 装配器（apps/electron/scripts/dev-instance-lib.mjs
- *  `LEAK_ENV_KEYS`）仍剥 RELAY_STD* 三键——dev 宿主进程环境防泄漏口径独立于引擎
- *  spawn 面；本清单（引擎侧）已退役同名三键，写入方已清零。 */
+/** L1 deny + 显式剥除键集（镜像 shared SSOT，勿单独改动）。 */
 export const ENGINE_ENV_DENY_LIST: readonly string[] = [
   'TAIJI_AGENT_PACKAGED',
   'TAIJI_RUNTIME_TOKEN',
   'TAIJI_AGENT_API_KEY',
-  'TAIJI_SUBAGENT_RELAY_SESSION_ID',
-  'TAIJI_SUBAGENT_RELAY_RECORD_ID',
   // 预设回落事实（env 名 SSOT = shared PRESET_FALLBACK_ENV_KEYS）：「本进程本次运行」
   // 事实只对 runtime 直接 spawn 的 pi 成立，引擎一跳继承会造成子 agent pi 假披露
   'TAIJI_PRESET_FALLBACK_FROM',
@@ -43,23 +38,18 @@ export const ENGINE_ENV_DENY_LIST: readonly string[] = [
 // L0 基础设施键（core 过滤之后显式注入，不受放行/剥除约束）
 // ─────────────────────────────────────────────────────────────────────────────
 
-/** L0 注入的全部基础设施键（守卫断言：与 ENGINE_ENV_DENY_LIST 交集 = ∅）。 */
+/** L0 注入的全部基础设施键（检查断言：与 ENGINE_ENV_DENY_LIST 交集 = ∅）。 */
 export const ENGINE_ENV_L0_INFRA_KEYS: readonly string[] = [
   'TAIJI_AGENT_DATA_DIR',
   'TAIJI_AGENT_ENGINE_NODE',
   'ELECTRON_RUN_AS_NODE',
   'TAIJI_AGENT_SUBAGENT',
-  'TAIJI_SUBAGENT_RELAY_SOCKET',
-  'TAIJI_SUBAGENT_RELAY_NODE',
-  'TAIJI_SUBAGENT_RELAY_SCRIPT',
+  // [M3] control 两键（键名 SSOT = src/control-env.ts）：runtime 注入主 pi 与引擎的
+  // L0 基础设施键，嵌套 task pi 经引擎出站 env 继承同值。刻意不进 ENGINE_ENV_DENY_LIST：
+  // 引擎/嵌套 extension 是合法读者（transport 选择谓词 + engine_open 归属键）。
+  'TAIJI_SUBAGENT_CONTROL_SOCKET',
+  'TAIJI_SUBAGENT_CONTROL_ROOT_SESSION_ID',
 ];
-
-/** relay 三键形态（宿主 relay 激活时三值同时非空，全有或全无）。 */
-export interface EngineRelayEnv {
-  socket: string;
-  node: string;
-  script: string;
-}
 
 /** buildEngineChildEnv 入参。 */
 export interface EngineChildEnvOptions {
@@ -69,8 +59,6 @@ export interface EngineChildEnvOptions {
   engineNode?: string;
   /** L0：执行器为 Electron 二进制 → 注入 ELECTRON_RUN_AS_NODE=1 */
   electronRunAsNode?: boolean;
-  /** L0：relay 三键（宿主 relay 激活时传；三键必经 L0——L1 拒绝 TAIJI_SUBAGENT_ 前缀、L2 是 manifest 面，两层都到不了） */
-  relay?: EngineRelayEnv;
   /**
    * L0：引擎宿主（engine-host）进程的 env 透传通道。**注意它不是子代理身份通道**：
    * 引擎宿主是长驻进程（每窗口一个），而子代理身份（recordId / depth 等）是 per-run 的
@@ -156,7 +144,7 @@ function applyManifestAllowlist(
 
 /**
  * L0 基础设施键显式注入（最后写入 = 最高优先级）：dataDir 恒注入 / engineNode、
- * ELECTRON_RUN_AS_NODE（条件）/ TAIJI_AGENT_SUBAGENT=1 / relay 三键 / identityEnv。
+ * ELECTRON_RUN_AS_NODE（条件）/ TAIJI_AGENT_SUBAGENT=1 / identityEnv。
  */
 function injectL0InfraKeys(
   env: Record<string, string>,
@@ -166,11 +154,6 @@ function injectL0InfraKeys(
   if (opts.engineNode !== undefined) env.TAIJI_AGENT_ENGINE_NODE = opts.engineNode;
   if (opts.electronRunAsNode === true) env.ELECTRON_RUN_AS_NODE = "1";
   env.TAIJI_AGENT_SUBAGENT = "1";
-  if (opts.relay !== undefined) {
-    env.TAIJI_SUBAGENT_RELAY_SOCKET = opts.relay.socket;
-    env.TAIJI_SUBAGENT_RELAY_NODE = opts.relay.node;
-    env.TAIJI_SUBAGENT_RELAY_SCRIPT = opts.relay.script;
-  }
   if (opts.identityEnv !== undefined) {
     for (const [key, value] of Object.entries(opts.identityEnv)) {
       if (value !== undefined) env[key] = value;
@@ -187,9 +170,9 @@ function injectL0InfraKeys(
  *
  * 层规格（impl-plan §2.12 三层表）：
  * - L0 基础设施键：TAIJI_AGENT_DATA_DIR / TAIJI_AGENT_ENGINE_NODE / ELECTRON_RUN_AS_NODE
- *   （条件）/ TAIJI_AGENT_SUBAGENT=1 / relay 三键 / identityEnv（injectL0InfraKeys）；
+ *   （条件）/ TAIJI_AGENT_SUBAGENT=1 / identityEnv（injectL0InfraKeys）；
  * - L1 deny + 显式剥除（恒高于 manifest 放行）：ENGINE_ENV_DENY_LIST
- *   （deny 两键 + 凭证键 + 父身份键 + 防御性剥除三死名）；
+ *   （deny 两键 + 凭证键 + 预设回落两键）；
  * - L2 manifest 放行：envPrefixes 声明前缀的 processEnv 键（保留前缀拒绝、
  *   形态校验、未声明前缀不放行 + warn）（applyManifestAllowlist）。
  *
@@ -212,7 +195,7 @@ export function buildEngineChildEnv(
   applyManifestAllowlist(env, opts);
 
   // L1 兜底复检：deny/剥除恒高于 manifest 放行——宽前缀（如声明 TAIJI_ 形态的
-  // 宽松清单）也不允许经 L2 把 deny 键带回来。L0 未注入，此轮只清 L2 写入面。
+  // 宽松清单）也不允许经 L2 把 deny 键带回来。L0 未注入，此轮只清 L2 写侧。
   deleteEnvKeysCaseInsensitive(env, ENGINE_ENV_DENY_LIST);
 
   // L0：基础设施键显式注入（最后写入 = 最高优先级）
@@ -241,7 +224,7 @@ export interface BuildOutboundChildEnvOptions {
  * 消费生命周期标志 / WS 令牌。
  *
  * 与 @taiji/shared 版 buildOutboundChildEnv 的刻意差异：**缺省不做白名单过滤**
- * （prefixes 省略 = 全量继承父 env + deny 剥除）。理由：SDK 消费面（zsw 宿主 /
+ * （prefixes 省略 = 全量继承父 env + deny 剥除）。理由：SDK 消费方（zsw 宿主 /
  * 引擎 CLI）不可 import shared 的 ENV_WHITELIST_PREFIXES；引擎 spawn 的基座由
  * 调用方先经 buildEngineChildEnv 组装（其 baseEnv 已是 core 过滤后的），而
  * ambient 场景（git 需要 GIT_* / proxy / ssh 等）必须保留继承面——deny-by-default

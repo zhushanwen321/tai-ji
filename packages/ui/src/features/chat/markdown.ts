@@ -20,7 +20,7 @@
  *  避免与 highlight 回调的 `<pre` 跳过机制双重逻辑）。
  *
  * XSS 安全（html:true + 分通道净化，设计 markdown-html-sanitize-render D1-D3）：
- * 用户 HTML 经出口 DOMPurify 两级白名单净化（markdown-sanitize.ts——GitHub 风格标签/属性面，
+ * 用户 HTML 经出口 DOMPurify 两级白名单净化（markdown-sanitize.ts——GitHub 风格标签/属性清单，
  * class/style/data-* 构造性全剥）；可信 renderer 输出（fence/math_inline/math_block/
  * code_inline/md_trusted_inline 五个摘出点）经 nonce 哨兵摘出-回填绕过净化，逐字节保留。
  * shiki codeToHtml 转义所有非 token 文本（只发 scoped <span>），linkify 识别的 <a> 加
@@ -81,9 +81,9 @@ import { resetTrustSlot, sanitizeAndRestore, stashTrusted } from './markdown-san
 /**
  * 代码块高亮覆盖的语言清单（按 wave review 要点：ts/vue/json/bash/md + 常见派生）。
  * fine-grained 后不再作为 createHighlighter 入参（grammar 改静态 import，见 getHighlighter），
- * 语义 = 高亮覆盖面 SSOT：highlightShikiSync 的 fallback 判定走 getLoadedLanguages()
+ * 语义 = 高亮覆盖范围 SSOT：highlightShikiSync 的 fallback 判定走 getLoadedLanguages()
  * （其返回值天然含 bash/shell 等 alias 键——shellscript grammar aliases 自动注册），
- * 本清单导出供单测驱动「13 语言逐个高亮」断言，防清单与注册面漂移。
+ * 本清单导出供单测驱动「13 语言逐个高亮」断言，防清单与注册清单漂移。
  */
 export const SHIKI_LANGS = ['typescript', 'javascript', 'vue', 'json', 'bash', 'shell', 'markdown', 'css', 'html', 'yaml', 'python', 'go', 'rust']
 
@@ -278,7 +278,7 @@ async function getMarkdown(): Promise<MarkdownIt> {
   // 控制displayMode 与错误降级（插件默认的 <p> 包裹 + console.log 错误不适用本项目）。
   md.use(markdownItKatex)
   // 摘出点 2/5、3/5（设计 D3）：KaTeX 输出整段（MathML 树/57 class/布局 style 契约）
-  // 存信任槽返回哨兵——白名单枚举路线不可维护（D3 被否谱系），按来源分通道绕过
+  // 存信任槽返回哨兵——白名单枚举路线不可维护（D3 不采用其余方案的理由），按来源分通道绕过
   md.renderer.rules.math_inline = (tokens, idx, _options, env): string =>
     stashTrusted(env, renderKatex(tokens[idx].content, false))
   md.renderer.rules.math_block = (tokens, idx, _options, env): string =>
@@ -301,7 +301,7 @@ async function getMarkdown(): Promise<MarkdownIt> {
   // 列对齐转写：markdown-it 对 |:---:| 语法输出 style="text-align:*"，style 不在用户
   // 白名单会被剥除 → 列对齐回归。转写为 align 呈现属性（在 GitHub 白名单全局属性集内，
   // HTML4 属性现代浏览器对 th/td 仍渲染）；值域三枚举由 markdown 源的 :--- 语法决定。
-  // 配套：两宿主 th/td 规则的 text-align 移入 :not([align]) 守卫（转写不同批改宿主 CSS
+  // 配套：两宿主 th/td 规则的 text-align 移入 :not([align]) 检查（转写不同批改宿主 CSS
   // 则列对齐回归依旧——align 呈现属性优先级低于任何作者规则，设计 D3 R5/R6）
   const ALIGN_STYLE_RE = /^text-align:(left|center|right)$/
   const transcribeAlign: RenderRule = (tokens, idx, options, _env, self) => {
@@ -474,7 +474,7 @@ function makeTextToken(TokenCtor: TokenCtor, content: string): Token {
  * [HISTORICAL] 2026-09 前是三 token（link_open/text/link_close），html:false 时代直出
  * 即安全。html:true 后链接整件需经摘出绕过净化层（class/data-path 契约属性不在用户
  * 白名单），而「拆分开/闭标签摘出」不可行（孤立闭标签在 DOM parse 阶段被丢弃 → 回填后
- * a 闭合漂移、链接吞并后续同级内容——设计 D3 摘出单位原则：摘出单位 ≥ 完整配对元素），
+ * a 结束漂移、链接吞并后续同级内容——设计 D3 摘出单位原则：摘出单位 ≥ 完整配对元素），
  * 故合并为单 token，renderer 期整件摘出。
  */
 function makeFilepathLink(TokenCtor: TokenCtor, path: string): Token[] {
@@ -616,7 +616,7 @@ function linkifyFilePathsHtml(content: string, filePaths?: Set<string>, localFil
  * 首次调用 await shiki 加载（异步）；之后 markdown-it 实例缓存，后续渲染同步。
  *
  * 净化点在本函数出口（D2：md.render 返回整串 → DOMPurify 两级白名单 → 哨兵回填 +
- * 完整性断言 → trimEnd）——唯一解析入口 + 净化先于任何 v-html，覆盖全部消费面
+ * 完整性断言 → trimEnd）——唯一解析入口 + 净化先于任何 v-html，覆盖全部消费方
  * （对话流/drawer/命令文档/UpdateButton 自建 v-html）。sanitize/回填异常 → catch 降级
  * 转义纯文本 + console.error 出声（渲染不中断；md.render 自身的异常保持原有向上
  * 抛出语义，由 useMarkdownStreaming 的降级路径接住并作废增量缓存）。

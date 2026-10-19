@@ -1,6 +1,6 @@
 // zcode-engine-degrade.test.ts —— appserver 错误分类回归门（降级链已删，仅存本主题）。
 // 2026-09 单一 app-server 形态重构删除了整条降级机制：CLI spawn 降级重跑、probe 冒烟
-// 门控、模式钉扎 env 三态均不复存在——协议漂移类错误直接上报可操作错误，不再换通道
+// 门控、模式固定 env 三态均不复存在——协议漂移类错误直接上报可操作错误，不再换通道
 // 保底。原「首败漂移降级」「probe 冒烟」「env 三态」describe 随机制删除，本文件仅存
 // 错误规格表回归门：
 //   - -32603 "Model config is missing" → engine_credential_missing（共享宿主 HOME——

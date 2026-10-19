@@ -105,7 +105,7 @@ export function removeBtwDialogReq(vid: string, requestId: string): void {
 /**
  * 失效支单入口（事件帧失效路唯一写入点，`expiredNoticeByVid` 单状态）：bus
  * 'requests-invalidated' 订阅壳薄委托至此——撤下 dialog 渲染载荷 + 行内提示置位。
- * `stale` 守卫：requestIds 与本线 FIFO 载荷无交集时零副作用（重复帧 / 无关线失效帧均
+ * `stale` 检查：requestIds 与本线 FIFO 载荷无交集时零副作用（重复帧 / 无关线失效帧均
  * no-op，防噪声提示）。store 族挂起（form/planReview）不在本簿记——其失效出账在
  * extensionUIStore（useExtensionUI invalidated 订阅），见文件头「已接受形态」。
  */

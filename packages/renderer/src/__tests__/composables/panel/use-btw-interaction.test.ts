@@ -6,7 +6,7 @@
  * 六个纯函数（toScheduleDraft / toBarQuestionKind / toBarQuestionBase / toBarOptions /
  * toBarQuestion / questionsOf）经模块 __testing 后门直测——非法项剔除策略与 runtime 侧
  * isFormQuestion 逐项过滤同策略（对齐声明见源文件 :111 注释），此前双侧均无 renderer
- * 侧回归防线。行为面（formQuestions 请求 → BtwPanel 降档 DOM）归
+ * 侧回归防线。行为范围（formQuestions 请求 → BtwPanel 降档 DOM）归
  * src/__tests__/panel/btw-panel.test.ts 的内联确认条用例。
  *
  * 运行：cd packages/renderer && npx vitest run src/__tests__/composables/panel/use-btw-interaction.test.ts
@@ -22,7 +22,7 @@ function formReq(overrides: Partial<ExtensionUIRequest>): ExtensionUIRequest {
   return { sessionId: 'btw:pi-1', requestId: 'r1', dialogKind: 'select', ...overrides }
 }
 
-describe('toScheduleDraft（schedule 草稿形状守卫）', () => {
+describe('toScheduleDraft（schedule 草稿形状检查）', () => {
   it('合法 once 草稿：必填三字段透传，可选字段缺省即省略（无 undefined 键）', () => {
     expect(toScheduleDraft({ kind: 'once', schedule: '2026-09-24T09:00', prompt: '跑巡检' }))
       .toEqual({ kind: 'once', schedule: '2026-09-24T09:00', prompt: '跑巡检' })
@@ -81,7 +81,7 @@ describe('toBarQuestionKind（choice/text/schedule 闭集收窄）', () => {
   })
 })
 
-describe('toBarQuestionBase（header/question 双守卫基底）', () => {
+describe('toBarQuestionBase（header/question 双检查基底）', () => {
   it('双有 → 透传；仅 question → header 省略；仅 header → question 落空串', () => {
     expect(toBarQuestionBase({ header: 'H', question: 'Q' }, 'text'))
       .toEqual({ type: 'text', header: 'H', question: 'Q' })

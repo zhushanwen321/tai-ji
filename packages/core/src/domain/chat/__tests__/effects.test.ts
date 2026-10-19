@@ -15,7 +15,7 @@
  * - stream_warn：system 提示行 + liveOnly 标记（W2，pi 无 entry 的 live-only 消息）
  * - compactionSummary：构造 compaction entry 喂 applyEntryFrame（W6 entry 化，最后一条
  *   直插双路径消灭——live 与重开共用 reducer compaction case）
- * - message_end(user) 腿 2 确认制（steer-bubble u1 / D2：inflight 抵消 / includes 兜底
+ * - message_end(user) 路径 2 确认制（steer-bubble u1 / D2：inflight 抵消 / includes 兜底
  *   消费 + 剔快照 / 未命中·无快照跳过 / 暂存空纯文本降级）
  * - branchSummary：构造 branch_summary entry 喂 applyEntryFrame（D13 renderer-deepening
  *   entry 化，fallback 与 reducer 收敛一致——live 与重开共用 reducer branch_summary case）
@@ -222,8 +222,8 @@ describe('dispatchMessageEvent 流式 contentBlocks 填充', () => {
     expect(tc.output).toBe('ok done\n')
   })
 
-  // ── [diff-stat-chip] edit 工具 diff 统计：live overlay 腿（与 reducer computeToolCallFill 同口径）──
-  it('tool_call_end：edit details.diff → tc.diffStat 写入（live 腿与 reload 同口径）', () => {
+  // ── [diff-stat-chip] edit 工具 diff 统计：live overlay 路径（与 reducer computeToolCallFill 同口径）──
+  it('tool_call_end：edit details.diff → tc.diffStat 写入（live 路径与 reload 同口径）', () => {
     const ctx = makeCtx()
     dispatchMessageEvent(ctx, SID, msg('message.message_start', { messageId: 'a1' }))
     dispatchMessageEvent(ctx, SID, msg('message.tool_call_start', { entry: toolCallEntry({ toolCallId: 'tc1', toolName: 'edit', arguments: { path: '/a.ts' } }) }))
@@ -247,7 +247,7 @@ describe('dispatchMessageEvent 流式 contentBlocks 填充', () => {
     expect('diffStat' in tc).toBe(false)
   })
 
-  it('sealed guard：finalizeSession 收口后 text_delta 幂等丢弃（D-010）', () => {
+  it('sealed 检查：finalizeSession 收尾后 text_delta 幂等丢弃（D-010）', () => {
     const ctx = makeCtx()
     dispatchMessageEvent(ctx, SID, msg('message.message_start', { messageId: 'a1' }))
     dispatchMessageEvent(ctx, SID, msg('message.text_delta', { delta: 'before' }))
@@ -255,7 +255,7 @@ describe('dispatchMessageEvent 流式 contentBlocks 填充', () => {
     const list = getMsgs(ctx)
     ctx.messages.value.get(SID)!.value = list.map(m => m.role === 'assistant' ? { ...m, status: 'complete' as const } : m)
     dispatchMessageEvent(ctx, SID, msg('message.text_delta', { delta: 'AFTER' }))
-    // 收口后 delta 被丢弃，content 不变
+    // 收尾后 delta 被丢弃，content 不变
     expect(lastAssistant(ctx).content).toBe('before')
   })
 
@@ -328,7 +328,7 @@ describe('message.queue_update handler 退役（投递所有权内核 u3b / D7�
   beforeEach(() => setActivePinia(createPinia()))
 
   // queue_update 帧降级为内核内部回执（runtime 侧消费），不再直驱 renderer UI：
-  // 前身计数腿（countDrained 差集 → drainN 计数 FIFO → appendUser + inflight +m）与
+  // 前身计数路径（countDrained 差集 → drainN 计数 FIFO → appendUser + inflight +m）与
   // queueStates 快照写入整体退役；队列区数据源 = session.delivery 状态帧（内核 state
   // topic 快照，useChat.handleSessionDelivery 消费）。未注册 type 经 dispatchMessageEvent
   // 直接 no-op——本 describe 锁定「零消费」的退役终态。
@@ -339,8 +339,8 @@ describe('message.queue_update handler 退役（投递所有权内核 u3b / D7�
     dispatchMessageEvent(ctx, SID, msg('message.queue_update', { steering: [] }))
 
     expect(ctx.appendUser).not.toHaveBeenCalled()
-    // 前身断言「incrementInflight 不被调用」已随 ctx 成员删除一并退役：增量入口收口到
-    // store 方法面后，effect 结构上无法触碰该操作（缺成员 = 结构性保证，同上 RET-2 注）。
+    // 前身断言「incrementInflight 不被调用」已随 ctx 成员删除一并退役：增量入口收敛到
+    // store 方法侧后，effect 结构上无法触碰该操作（缺成员 = 结构性保证，同上 RET-2 注）。
   })
   // [u5a 退役] 前身 RET-2「queueStates 快照不再被写入/删除」已删：快照分区本尊随 u5a 删除
   // （ctx 无该字段、store 无该分区），「无生产写方」由缺字段结构性保证，用例主体消失。
@@ -462,12 +462,12 @@ describe('dispatchMessageEvent message.stream_warn（W2 liveOnly 标记）', () 
     expect(list[0].liveOnly).toBe(true)
   })
 
-  it('[MF-1-13] streaming 期到达 → 不 finalizeSession，assistant 保持 streaming，turn 可被后续 complete 正常收口', () => {
+  it('[MF-1-13] streaming 期到达 → 不 finalizeSession，assistant 保持 streaming，turn 可被后续 complete 正常收尾', () => {
     const ctx = makeCtx()
     dispatchMessageEvent(ctx, SID, msg('message.message_start', { messageId: 'a1' }))
     dispatchMessageEvent(ctx, SID, msg('message.text_delta', { delta: 'partial' }))
 
-    // 单帧翻译失败经 adapter 显形为 stream_warn（MF-1-13）：非终结——不得收口 session
+    // 单帧翻译失败经 adapter 显形为 stream_warn（MF-1-13）：非终结——不得收尾 session
     dispatchMessageEvent(ctx, SID, msg('message.stream_warn', { content: '事件翻译失败，本帧已跳过：x' }))
     expect(ctx.finalizeSession).not.toHaveBeenCalled()
     expect(lastAssistant(ctx).status).toBe('streaming')
@@ -500,7 +500,7 @@ describe('dispatchMessageEvent message.compactionSummary（W6 entry 化——消
     expect(entry.tokensBefore).toBe(12345)
     // 帧 timestamp（ms）→ entry ISO（reducer compaction case toMs 往返）
     expect(entry.timestamp).toBe(new Date(8000).toISOString())
-    // overlay 投影：system 压缩行（用户可见行为——live 与重开同款，live≡reload 归一
+    // overlay 派生视图：system 压缩行（用户可见行为——live 与重开同款，live≡reload 归一
     // deep-equal 由 apply-entry-equivalence E4 锁定）
     const list = getMsgs(ctx)
     expect(list).toHaveLength(1)
@@ -548,7 +548,7 @@ describe('dispatchMessageEvent message.branchSummary（D13 renderer-deepening en
     expect(entry.fromId).toBe('msg-9')
     // 帧 timestamp（ms）→ entry ISO（reducer branch_summary case toMs 往返）
     expect(entry.timestamp).toBe(new Date(6000).toISOString())
-    // overlay 投影：system 分支行（用户可见行为——live 与重开同款，live≡reload 归一
+    // overlay 派生视图：system 分支行（用户可见行为——live 与重开同款，live≡reload 归一
     // deep-equal 由 branch-summary-equivalence.test.ts 全量锁定）
     const list = getMsgs(ctx)
     expect(list).toHaveLength(1)
@@ -589,7 +589,7 @@ describe('dispatchMessageEvent message.branchSummary（D13 renderer-deepening en
 describe('message.complete error 路径的 errorMessage 可见性（模型 400 秒败回归）', () => {
   beforeEach(() => setActivePinia(createPinia()))
 
-  it('streaming 气泡收口：errorMessage 写入最后一条 assistant 的 error 字段（追加形态）', () => {
+  it('streaming 气泡收尾：errorMessage 写入最后一条 assistant 的 error 字段（追加形态）', () => {
     const ctx = makeCtx()
     dispatchMessageEvent(ctx, SID, msg('message.message_start', { messageId: 'a1' }))
     dispatchMessageEvent(ctx, SID, msg('message.text_delta', { delta: '部分正文' }))
@@ -621,7 +621,7 @@ describe('message.complete error 路径的 errorMessage 可见性（模型 400 �
   // [M2 不变量·terminalMessagePatch 出口] pi error stop 但 errorMessage 缺失
   // （extras.errorMessage 可 undefined）：error 字段走兜底——缺失会让崩溃前正文
   // 被 Block.vue 误判纯 error 整条染红。
-  it('streaming 气泡收口且 errorMessage 缺失：error 字段写 reason 兜底文案（不变量）', () => {
+  it('streaming 气泡收尾且 errorMessage 缺失：error 字段写 reason 兜底文案（不变量）', () => {
     const ctx = makeCtx()
     dispatchMessageEvent(ctx, SID, msg('message.message_start', { messageId: 'a1' }))
     dispatchMessageEvent(ctx, SID, msg('message.text_delta', { delta: '崩溃前正文' }))
@@ -665,17 +665,17 @@ describe('message.complete error 路径的 errorMessage 可见性（模型 400 �
   })
 })
 
-// ── message.complete 收口矩阵（registry next 回调靶子：多气泡收口 / usage·content 末条定位）──
+// ── message.complete 收尾矩阵（registry next 回调检查目标：多气泡收尾 / usage·content 末条定位）──
 //
 // [HISTORICAL] 一个 turn 可产出多个 streaming assistant 气泡（工具调用气泡 + 文字总结气泡）：
-// handler 的 map 回调必须收口**所有** status==='streaming' 的 assistant，而 usage / 权威
+// handler 的 map 回调必须收尾**所有** status==='streaming' 的 assistant，而 usage / 权威
 // content / errorMessage 只回填最后一条（turn 级聚合）。只收最后一条的历史形态会让前面的
 // toolCall 气泡永远 streaming；把 usage 回填到非末 assistant 则语义错位。
 
-describe('message.complete 收口矩阵：多 streaming 气泡全收口 + turn 级聚合字段只落末条', () => {
+describe('message.complete 收尾矩阵：多 streaming 气泡全收尾 + turn 级聚合字段只落末条', () => {
   beforeEach(() => setActivePinia(createPinia()))
 
-  it('多 streaming 气泡（toolCall 气泡 + 文字气泡）全部收口；usage 只回填最后一条 assistant', () => {
+  it('多 streaming 气泡（toolCall 气泡 + 文字气泡）全部收尾；usage 只回填最后一条 assistant', () => {
     const ctx = makeCtx()
     // 气泡 1：含 running toolCall 的 assistant（工具调用气泡）
     dispatchMessageEvent(ctx, SID, msg('message.message_start', { messageId: 'a1' }))
@@ -691,7 +691,7 @@ describe('message.complete 收口矩阵：多 streaming 气泡全收口 + turn �
 
     const list = getMsgs(ctx)
     expect(list).toHaveLength(2)
-    // 两个气泡都收口（历史 bug：只收最后一条 → toolCall 气泡永远 streaming）
+    // 两个气泡都收尾（历史 bug：只收最后一条 → toolCall 气泡永远 streaming）
     expect(list[0].status).toBe('complete')
     expect(list[1].status).toBe('complete')
     // usage 是 turn 级聚合：只回填最后一条 assistant（回填到非末条语义错位）
@@ -707,20 +707,20 @@ describe('message.complete 收口矩阵：多 streaming 气泡全收口 + turn �
   it('权威 content 覆盖最后一条 assistant（末 delta 异步渲染竞态防线）；非末气泡 content 不动', () => {
     const ctx = makeCtx()
     dispatchMessageEvent(ctx, SID, msg('message.message_start', { messageId: 'a1' }))
-    dispatchMessageEvent(ctx, SID, msg('message.text_delta', { delta: '部分正文未闭合' }))
+    dispatchMessageEvent(ctx, SID, msg('message.text_delta', { delta: '部分正文未封口' }))
     dispatchMessageEvent(ctx, SID, msg('message.message_start', { messageId: 'a2' }))
     dispatchMessageEvent(ctx, SID, msg('message.text_delta', { delta: '流式累积' }))
 
     dispatchMessageEvent(ctx, SID, msg('message.complete', {
       stopReason: 'stop',
-      content: '权威完整正文 **已闭合**',
+      content: '权威完整正文 **已封口**',
     }))
 
     const list = getMsgs(ctx)
     // 末条被权威源覆盖（强制 MarkdownRenderer watch 重新渲染）
-    expect(list[1].content).toBe('权威完整正文 **已闭合**')
+    expect(list[1].content).toBe('权威完整正文 **已封口**')
     // 非末条不在覆盖范围（finalContent 只定位 lastAssistantIdx）
-    expect(list[0].content).toBe('部分正文未闭合')
+    expect(list[0].content).toBe('部分正文未封口')
   })
 
   it('abort 路径 payload 无 content → 保留客户端流式累积值（空串不覆盖）', () => {
@@ -735,9 +735,9 @@ describe('message.complete 收口矩阵：多 streaming 气泡全收口 + turn �
   })
 })
 
-// ── tool_call_end 降级与错误形态（registry message.tool_call_end 靶子）──
+// ── tool_call_end 降级与错误形态（registry message.tool_call_end 检查目标）──
 
-describe('dispatchMessageEvent tool_call_end 异常帧降级与错误收口', () => {
+describe('dispatchMessageEvent tool_call_end 异常帧降级与错误收尾', () => {
   beforeEach(() => setActivePinia(createPinia()))
 
   it('entry 缺失 / type 非 message → 整帧降级丢弃（reducer 不喂、消息流不动）', () => {
@@ -789,7 +789,7 @@ describe('dispatchMessageEvent tool_call_end 异常帧降级与错误收口', ()
     dispatchMessageEvent(ctx, SID, msg('message.tool_call_end', { entry: noContentEntry }))
 
     const tc = lastAssistant(ctx).toolCalls![0]
-    // content undefined（mock/异常帧）→ 不覆盖已有 output，但 status 照常收口
+    // content undefined（mock/异常帧）→ 不覆盖已有 output，但 status 照常收尾
     expect(tc.status).toBe('completed')
     expect(tc.output).toBe('progress-1')
   })
@@ -808,7 +808,7 @@ describe('dispatchMessageEvent tool_call_end 异常帧降级与错误收口', ()
     }
     dispatchMessageEvent(ctx, SID, msg('message.tool_call_end', { entry: noCallIdEntry }))
 
-    // toolCall 气泡本身收口为 complete（callId 匹配分支不命中则 status 不变——
+    // toolCall 气泡本身收尾为 complete（callId 匹配分支不命中则 status 不变——
     // 降级路径只保证不崩、reducer 照常喂入；此处锚定「不抛 + 帧被消费」的用户可见行为）
     expect(ctx.applyEntryFrame).toHaveBeenCalledTimes(1)
     expect(getMsgs(ctx)).toHaveLength(1)
@@ -816,9 +816,9 @@ describe('dispatchMessageEvent tool_call_end 异常帧降级与错误收口', ()
 })
 
 // ── [投递所有权内核 u3b] message_end(user) 投递确认收敛（原三分支 → 两分支）──
-// ① 内核送达回执（标记 id 匹配投影条目）→ ② 纯计数兜底。① 的正测在
-// effects-delivery-receipt.test.ts（含投影/morph 段/inflight 回收/幂等），此处锁定
-// ② 计数兜底与「③ includes 兜底已退役」的零消费终态（[B1] 其消费面计数腿已删除）。
+// ① 内核送达回执（标记 id 匹配派生视图条目）→ ② 纯计数兜底。① 的正测在
+// effects-delivery-receipt.test.ts（含派生视图/morph 段/inflight 回收/幂等），此处锁定
+// ② 计数兜底与「③ includes 兜底已退役」的零消费终态（[B1] 其消费方计数路径已删除）。
 
 describe('dispatchMessageEvent message_end(user) 投递确认收敛（u3b：①回执 + ②计数兜底）', () => {
   beforeEach(() => setActivePinia(createPinia()))
@@ -852,20 +852,20 @@ describe('dispatchMessageEvent message_end(user) 投递确认收敛（u3b：①�
 
     dispatchMessageEvent(ctx, SID, msg('message.message_end', { entry: userEndEntry('T') }))
 
-    // 前身：includes 命中 → drainN(1) + appendUser + 剔快照——整体退役（计数腿 D7 + [B1]
-    // 计数腿删除；[u5a] 快照分区删除后不在 ctx 上），断言面收敛为 appendUser 零调用。
+    // 前身：includes 命中 → drainN(1) + appendUser + 剔快照——整体退役（计数路径 D7 + [B1]
+    // 计数路径删除；[u5a] 快照分区删除后不在 ctx 上），断言范围收敛为 appendUser 零调用。
     expect(ctx.appendUser).not.toHaveBeenCalled()
   })
 })
 
 // ── [投递所有权内核 u3b 退役] message_start 的 G-023 条件清 + 僵尸清理 ──
-// queueStates 快照与 pendingBuffer 计数腿已随内核退役（队列区数据源 = session.delivery
+// queueStates 快照与 pendingBuffer 计数路径已随内核退役（队列区数据源 = session.delivery
 // 状态帧）；message_start 只保留 streaming assistant 建立 + clearPendingSend（streaming timer 已随上游移除）。
 
-describe('dispatchMessageEvent message_start（u3b：快照/僵尸清理腿退役，streaming 链路不变）', () => {
+describe('dispatchMessageEvent message_start（u3b：快照/僵尸清理路径退役，streaming 链路不变）', () => {
   beforeEach(() => setActivePinia(createPinia()))
 
-  // [u5a 退役] 前身 RET「不再调 reconcilePending」已删：僵尸清理腿本尊随 u5b 删除
+  // [u5a 退役] 前身 RET「不再调 reconcilePending」已删：僵尸清理路径本尊随 u5b 删除
   // （ctx 无该字段），「无调用方」由缺字段结构性保证，用例主体消失。
 
   it('streaming assistant 照常建立（contentBlocks:[]）', () => {
@@ -886,15 +886,15 @@ describe('dispatchMessageEvent message.complete abort 清理（u3b：确认基�
     dispatchMessageEvent(ctx, SID, msg('message.complete', { stopReason: 'aborted' }))
 
     // D4 修订（Gate B 实测 2026-08-30）：pi abort() 不清队列，残余在下一 prompt 投递——
-    // buffer 与快照是 pi 存活队列的前端镜像，保留供两腿消费；只清确认计数（已显示未
+    // buffer 与快照是 pi 存活队列的前端镜像，保留供两路径消费；只清确认计数（已显示未
     // 确认条目不会再有 message_end，残留会吞掉后续确认配额）。
     expect(ctx.clearInflight).toHaveBeenCalledWith(SID)
     // [u5a] 前身「快照原样保留」哨兵随 queueStates 分区删除而移除
-    // 通用收口照常（清理在 finalizeSession 之外显式做，不替代收口）
+    // 通用收尾照常（清理在 finalizeSession 之外显式做，不替代收尾）
     expect(ctx.finalizeSession).toHaveBeenCalledWith(SID, 'aborted')
   })
 
-  it('aborted 幂等：重复收口无额外副作用', () => {
+  it('aborted 幂等：重复收尾无额外副作用', () => {
     const ctx = makeCtx()
 
     dispatchMessageEvent(ctx, SID, msg('message.complete', { stopReason: 'aborted' }))
@@ -902,7 +902,7 @@ describe('dispatchMessageEvent message.complete abort 清理（u3b：确认基�
     expect(ctx.clearInflight).toHaveBeenCalledWith(SID)
   })
 
-  it('normal（stopReason=stop）不触发清理（finalizeSession 是通用收口，normal/error 不清）', () => {
+  it('normal（stopReason=stop）不触发清理（finalizeSession 是通用收尾，normal/error 不清）', () => {
     const ctx = makeCtx()
 
     dispatchMessageEvent(ctx, SID, msg('message.complete', { stopReason: 'stop' }))
@@ -920,10 +920,10 @@ describe('dispatchMessageEvent message.complete abort 清理（u3b：确认基�
 })
 
 describe('dispatchMessageEvent 坏帧静默丢弃（A5 设计裁决锁定：异常帧不断流）', () => {
-  // [设计裁决登记（registry.ts 三处守卫，2026-09-17 错误处理审查 A5）] 正常流经
-  // event-adapter 构造的帧不会产生 undefined/形态不符 entry；守卫静默 return 是
-  // 有意取舍（单帧异常不中断主对话流、不加 warn）。本组用例锁定该行为面：坏帧
-  // 喂入 → 不抛错、零副作用（reducer 喂入 / overlay / 确认腿均不触发）。
+  // [设计裁决登记（registry.ts 三处检查，2026-09-17 错误处理审查 A5）] 正常流经
+  // event-adapter 构造的帧不会产生 undefined/形态不符 entry；检查静默 return 是
+  // 有意取舍（单帧异常不中断主对话流、不加 warn）。本组用例锁定该行为范围：坏帧
+  // 喂入 → 不抛错、零副作用（reducer 喂入 / overlay / 确认路径均不触发）。
   beforeEach(() => setActivePinia(createPinia()))
 
   it('tool_call_start 缺 entry → 不抛错、streaming assistant 无 toolCall/contentBlocks 增量', () => {
@@ -945,14 +945,14 @@ describe('dispatchMessageEvent 坏帧静默丢弃（A5 设计裁决锁定：异�
     expect(lastAssistant(ctx).toolCalls ?? []).toHaveLength(0)
   })
 
-  it('message_end 缺 entry / entry 非 message 形态 → 不抛错、reducer 喂入与腿 2 确认双零副作用', () => {
+  it('message_end 缺 entry / entry 非 message 形态 → 不抛错、reducer 喂入与路径 2 确认双零副作用', () => {
     const ctx = makeCtx()
     expect(() => dispatchMessageEvent(ctx, SID, msg('message.message_end', {}))).not.toThrow()
     expect(() => dispatchMessageEvent(ctx, SID, msg('message.message_end', { entry: { type: 'compaction' } }))).not.toThrow()
     expect(ctx.applyEntryFrame).not.toHaveBeenCalled()
     expect(getMsgs(ctx)).toHaveLength(0)
-    // 腿 2（user 投递确认）在形态守卫处短路：确认计数只减不增（increment 入口已在
-    // ctx 方法面删除，结构性不可触——原负向断言随之退役）
+    // 路径 2（user 投递确认）在形态检查处短路：确认计数只减不增（increment 入口已在
+    // ctx 方法侧删除，结构性不可触——原负向断言随之退役）
     expect(ctx.decrementInflight).not.toHaveBeenCalled()
   })
 })
@@ -978,7 +978,7 @@ describe('dispatchMessageEvent — 单帧异常隔离与终态安全网（RD-1#5
     expect(lastAssistant(ctx).content).toBe('a')
   })
 
-  it('终态帧（message.error）异常截断收口：安全网按帧语义补 finalizeSession（error + 原始错误文本）', () => {
+  it('终态帧（message.error）异常截断收尾：安全网按帧语义补 finalizeSession（error + 原始错误文本）', () => {
     vi.spyOn(console, 'error').mockImplementation(() => {})
     const ctx = makeCtx()
     const finalize = vi.mocked(ctx.finalizeSession)
@@ -998,11 +998,11 @@ describe('dispatchMessageEvent — 单帧异常隔离与终态安全网（RD-1#5
     expect(finalize).toHaveBeenLastCalledWith(SID, 'aborted', undefined)
   })
 
-  it('非终态帧不触发安全网（delta 帧异常不收口进行中的流）', () => {
+  it('非终态帧不触发安全网（delta 帧异常不收尾进行中的流）', () => {
     vi.spyOn(console, 'error').mockImplementation(() => {})
     const initial: Message[] = [{ id: 'a1', role: 'assistant', content: '', status: 'streaming', timestamp: 0 }]
     const ctx = makeCtx(initial)
-    // text_delta handler 经 updateStreamingAssistant 守卫不会自然抛错——用 ctx.messages 只读
+    // text_delta handler 经 updateStreamingAssistant 检查不会自然抛错——用 ctx.messages 只读
     // 视角注入异常帧：构造 handler 必经的抛错点（queueStates 代理）成本高，改用 message_start
     // 同款注入：clearPendingSend 抛错 + 断言 finalizeSession 全程零调用
     vi.mocked(ctx.clearPendingSend).mockImplementation(() => { throw new Error('effect boom') })
@@ -1035,7 +1035,7 @@ describe('dispatchMessageEvent 未注册 message.* 类型的 dev 观测（RD-1#9
     expect(warn).toHaveBeenCalledTimes(1)
     expect(String(warn.mock.calls[0]?.[0])).toContain('unhandled frame type message.future_frame')
 
-    // no-op 语义不变：无消息副作用、不收口
+    // no-op 语义不变：无消息副作用、不收尾
     expect(getMsgs(ctx)).toHaveLength(0)
     expect(ctx.finalizeSession).not.toHaveBeenCalled()
 

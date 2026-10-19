@@ -17,7 +17,7 @@
  *  - index.js + index.js.map（所有 JS value dep inline）
  *  - package.json（pi.extensions 改指 ./index.js；源码 package.json 不动）
  *  - permission 额外含 tree-sitter-bash.wasm + web-tree-sitter.wasm（手动拷贝，与 index.js 同目录）
- *  - subagent-workflow 额外含 relay/（独立执行零依赖脚本）+ workflows/ + agents/
+ *  - subagent-workflow 额外含 workflows/ + agents/
  *    （内置 workflow 脚本与内置 10 角色资产，u1-staged 起源在 packages/subagent-core/，
  *    见下方 WORKFLOW_DIR_PACKAGES / AGENTS_DIR_PACKAGES 常量注释）
  *  - plan 额外含 templates/（内置计划模板 .md，<available-plans> 清单注入与
@@ -113,26 +113,15 @@ const PERMISSION_WASM = [
 ];
 
 /**
- * subagent-workflow 的 relay/ 目录（E-1 代理 CLI relay.mjs）：不参与 esbuild bundle——
- * 它是被 TAIJI_SUBAGENT_RELAY_NODE（打包版 = Electron 内嵌 node + ELECTRON_RUN_AS_NODE，
- * dev = node）独立执行的零依赖脚本，必须保持源文件形态（禁 import 非 node-builtin，
- * esbuild bundle 无意义且引入 workspace 解析依赖）。整目录拷贝到 staged，运行时经
- * TAIJI_SUBAGENT_RELAY_SCRIPT env 指向 staged 副本。
- * 分发链：bundle staged（此处）→ electron-builder extraResources
- * （resources/extensions → extensions，已有规则整目录携带，无需改 yml）。
- */
-const RELAY_DIR_PACKAGES = new Set(["subagent-workflow"]);
-
-/**
  * subagent-workflow 的内置 workflow 脚本资产（u1-staged，设计 D1）：随 subagent-core
  * 包抽离（u1-move）物理迁至 packages/subagent-core/workflows/（内置四件 chain/
  * parallel/map-reduce/scatter-gather + review-fix-loop 双件 + _shared/），E 包源码目录
  * 不再持有 workflows/。源路径因此改指 C 包——pi manifest 的 workflows 字段从不参与
  * 本拷贝（E 的 pi 字段迁移前后均只有 extensions/skills/agents，MANIFEST_RESOURCE_FIELDS
- * 循环对 workflows 不触发；也不给 E 补该声明：E 的 npm 发布面已不含 workflows/，加了
+ * 循环对 workflows 不触发；也不给 E 补该声明：E 的 npm 发布范围已不含 workflows/，加了
  * 会让 standalone pi 用户经 resource-discovery manifest 模式命中「声明路径不存在 →
  * 整包失败占位」，npm 安装形态的 workflow 发现已由 C 作为 E 的传递依赖 + C 包约定
- * 目录成立）。staged 布局无 node_modules 解析面，整目录复制后 worker 的
+ * 目录成立）。staged 布局无 node_modules 解析范围，整目录复制后 worker 的
  * workerData.scriptPath 目录锚定（require(dirname(scriptPath) + "/...-utils.cjs")，
  * 不经 node_modules）即成立——D1 既验证模式。
  *
@@ -214,18 +203,6 @@ async function copyPermissionWasm(outDir, extraAssets) {
 	}
 }
 
-// relay 代理 CLI（E-1）：零依赖脚本保持源形态整目录拷贝（不 bundle，见常量注释）
-async function copyRelayDir(srcDir, outDir, extraAssets) {
-	const src = join(srcDir, "relay");
-	if (!existsSync(src)) {
-		throw new Error(
-			`relay dir missing: ${src}（E-1 资产已登记但源码目录缺失 = 打包配置回归）`,
-		);
-	}
-	await cp(src, join(outDir, "relay"), { recursive: true });
-	extraAssets.push("relay/");
-}
-
 // 内置 workflow 脚本资产（u1-staged / 设计 D1）：源在 packages/subagent-core/workflows/
 //（u1-move 后 E 包不再持有），整目录拷到 E staged 目录。拷贝动机与 manifest 字段的
 // 关系、scriptPath 锚定原理、V1-④ 双形态探针命令见 WORKFLOW_DIR_PACKAGES 常量注释。
@@ -253,12 +230,11 @@ async function copyTemplatesDir(srcDir, outDir, extraAssets) {
 	extraAssets.push("templates/");
 }
 
-// 按包名 short 分发的特殊资产拷贝（顺序敏感：permission → relay → workflows →
+// 按包名 short 分发的特殊资产拷贝（顺序敏感：permission → workflows → agents →
 // templates，与 extraAssets 汇总顺序及 fail-fast 先后一致）。templates 条目是否拷贝
 // 由共享登记表驱动（PACKAGE_ASSET_DIRS[short] 含 "templates" 即拷，MF-1-17）
 async function copySpecialAssets(short, srcDir, outDir, extraAssets) {
 	if (short === "permission") await copyPermissionWasm(outDir, extraAssets);
-	if (RELAY_DIR_PACKAGES.has(short)) await copyRelayDir(srcDir, outDir, extraAssets);
 	if (WORKFLOW_DIR_PACKAGES.has(short)) await copyWorkflowDir(outDir, extraAssets);
 	if (AGENTS_DIR_PACKAGES.has(short)) await copyAgentsDir(outDir, extraAssets);
 	if ((PACKAGE_ASSET_DIRS[short] ?? []).includes("templates")) {

@@ -19,7 +19,7 @@ import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vites
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 
 // [W3 改写] mock 目标随符号迁移更换：原 inproc session-runner（engines/pi/）随 W3
-// 删件消亡，markAllSpawnedChildrenDead 收敛到 engine/host/spawned-children.ts 公共面
+// 删件消亡，markAllSpawnedChildrenDead 收敛到 engine/host/spawned-children.ts 公共部分
 //（宿主收割入口 = 镜像整体置死），index.ts 经 core barrel re-export 消费。mock 该深
 // 路径模块（spread actual 保其余导出，镜像其他消费方不受影响），barrel re-export
 // 命中同一物理模块 → factory 引用点被替换。
@@ -78,7 +78,7 @@ describe("[V2 决策 7 防线 i] process 级 shutdown hook", () => {
 
   beforeEach(() => {
     markAllSpawnedChildrenDeadMock.mockReset();
-    // spy 调用记录每用例清零（不清 implementation：spy 拦截面必须跨用例持续在位）
+    // spy 调用记录每用例清零（不清 implementation：spy 拦截点必须跨用例持续在位）
     killSpy.mockClear();
     removeListenerSpy.mockClear();
     _resetProcessShutdownGuardForTest();

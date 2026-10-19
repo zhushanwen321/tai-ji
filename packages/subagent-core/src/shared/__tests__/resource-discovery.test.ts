@@ -647,9 +647,9 @@ describe("manifestCache（async readPackageManifest）", () => {
 
   // ── 失败/边缘路径（原 resource-discovery-manifest-cache.test.ts 迁编，impl-plan
   //    偏差 #9：缺则将对应用例改写为 async 形态并入，不丢缓存行为覆盖）。原版直接
-  //    断言 readPackageManifestSync 返回值；async 形态观察面 = readFile 计数 +
+  //    断言 readPackageManifestSync 返回值；async 形态观察侧 = readFile 计数 +
   //    user-extension-paths 结果（manifest undefined → processPackage 约定目录
-  //    fallback，pkgDir 无 {kind}/ 目录 → 零资源即 undefined 的行为面）。 ──
+  //    fallback，pkgDir 无 {kind}/ 目录 → 零资源即 undefined 的行为范围）。 ──
 
   it("坏 JSON → undefined 且不缓存：mtime 未变二次 discover 仍重读（计数递增）", async () => {
     // 起点即坏 JSON（无缓存条目）——若坏结果被缓存，二次调用不会重新 readFile。
@@ -735,8 +735,8 @@ describe("manifestCache（async readPackageManifest）", () => {
     expect(asyncReadCount()).toBe(first); // 合法解析 + 无 manifest → undefined 条目入缓存
   });
 
-  // [review 修复] 非对象 JSON 结构守卫：JSON.parse 对 "42" / '"str"' / "null" 等
-  // 合法 JSON 产出非对象值，parsePiField 显式守卫归 undefined（「无 manifest」语义），
+  // [review 修复] 非对象 JSON 结构检查：JSON.parse 对 "42" / '"str"' / "null" 等
+  // 合法 JSON 产出非对象值，parsePiField 显式检查归 undefined（「无 manifest」语义），
   // 不依赖 primitive 装箱 / null 抛 TypeError 落 catch 的巧合。
   it("非对象 JSON（42 / null / string / pi 字段非对象或数组）→ undefined 不抛，按合法解析结果缓存", async () => {
     const cases: Array<{ raw: string; label: string }> = [
@@ -744,7 +744,7 @@ describe("manifestCache（async readPackageManifest）", () => {
       { raw: "null", label: "null" },
       { raw: '"just-a-string"', label: "string" },
       { raw: '{"name":"p","pi":42}', label: "pi-field-not-object" },
-      // 数组能骗过 typeof "object" 守卫（装箱对象）——非合法 pi 容器，显式归 undefined
+      // 数组能骗过 typeof "object" 检查（装箱对象）——非合法 pi 容器，显式归 undefined
       { raw: '{"name":"p","pi":[]}', label: "pi-field-array" },
     ];
     // 每 case 独立子目录（缓存 key = package.json 绝对路径），互不命中；
@@ -774,7 +774,7 @@ describe("manifestCache（async readPackageManifest）", () => {
 });
 
 // ============================================================
-// conventionRootDirs（约定根推导导出面）
+// conventionRootDirs（约定根推导导出范围）
 // ============================================================
 
 describe("conventionRootDirs", () => {
@@ -798,7 +798,7 @@ describe("conventionRootDirs", () => {
   });
 
   it("与发现链同源：文件放在 conventionRootDirs 推导的根下会被 discoverResources 扫到", async () => {
-    // 守护导出面与 buildScanTargets 硬编码槽的单源性：若两者推导漂移
+    // 守护导出范围与 buildScanTargets 硬编码槽的单源性：若两者推导漂移
     // （导出改了、扫描槽没改），放在「导出说有」的根下的文件将扫不到
     const ws = tmpWorkspace();
     const prevExtPaths = process.env.TAIJI_EXTENSION_PATHS;
@@ -816,7 +816,7 @@ describe("conventionRootDirs", () => {
         includeTmp: true,
       });
       expect(found.map((r) => r.path)).toEqual(expect.arrayContaining(expected));
-      // 反向：发现面没有约定根之外的 project/user 级来源混入（hostRoots 空 +
+      // 反向：发现侧没有约定根之外的 project/user 级来源混入（hostRoots 空 +
       // ext-paths 清空后，4 文件即全部发现）
       expect(found).toHaveLength(roots.length);
     } finally {

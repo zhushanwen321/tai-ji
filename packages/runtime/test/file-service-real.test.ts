@@ -53,7 +53,7 @@ describe('FileService.readFile real fs', () => {
     }
   })
 
-  it('E3: cwd 外绝对路径抛出的是 FileError 实例（类型守卫）', async () => {
+  it('E3: cwd 外绝对路径抛出的是 FileError 实例（类型检查）', async () => {
     const outsideDir = mkdtempSync(join(tmpdir(), 'file-service-outside-'))
     const outsideFile = join(outsideDir, 'outside.md')
     writeFileSync(outsideFile, 'outside content')

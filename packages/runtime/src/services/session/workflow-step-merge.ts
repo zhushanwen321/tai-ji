@@ -1,28 +1,28 @@
 /**
- * workflow 步骤视图合并投影（W0 / 设计 workflow-step-visibility-data-source D2；
- * W1 换源后输入改喂 事件投影，纯函数本体保留）。
+ * workflow 步骤视图合并派生（W0 / 设计 workflow-step-visibility-data-source D2；
+ * W1 换源后输入改喂 事件派生视图，纯函数本体保留）。
  *
- * 职责：以 workflow 投影的 trace 节点为骨架（stepIndex/phase/agent/task），subagent
- * 投影按 (parentRunId, stepIndex) 圈定候选集后合并——「① 供编排结构，② 供运行时
+ * 职责：以 workflow 派生视图的 trace 节点为骨架（stepIndex/phase/agent/task），subagent
+ * 派生视图按 (parentRunId, stepIndex) 圈定候选集后合并——「① 供编排结构，② 供运行时
  * 状态」。phase 供源两代（W1 D6）：v1 快照 trace 节点自带 phase（停写，兼容读）；
  * v2 = 事件流 agent-started 载荷 phase（现役——events-projection fold 恢复 +
  * projectV2Workflow 透传）。
  *
  * 三条规则（设计 D2）：
  * - R1 状态映射：record 两态（running|idle）× stopReason → 步骤四态
- *   （pending|running|completed|failed），词表显式转换禁止直拷（两态进四态消费面，
+ *   （pending|running|completed|failed），词表显式转换禁止直拷（两态进四态消费方，
  *   renderer 聚合 switch 落 default 的确定性事故）。13 值域逐行见 mapStepStatusFromRecord。
  * - R2 一键多 record 收敛：候选集有 running 取之（多条 running 取 startedAt 最新——
  *   rebuildRuntime 瞬态窗口 tiebreak）；全终态取 startedAt 最新（终态取最后 attempt）。
- * - R3 record-only 成行与守卫：候选有而 trace 无（① 节流窗口 + P4 竞态）→ record 自身
+ * - R3 record-only 成行与检查：候选有而 trace 无（① 节流窗口 + P4 竞态）→ record 自身
  *   字段成行（phase 保持 undefined，不出「Other」分组头）；record 无 stepIndex（旧
  *   session entry / 版本 skew）→ 不成行（否则已完成旧 run 产出重复行，V5 回落矛盾）；
  *   trace 有而候选无（派发前置失败早退，无 record）→ 维持 ① 原样。
  *
  * 纯函数模块：冷启动（extractWorkflowsFromSessionFile 组合扫描）与实时增量
  * （events-projection.recompute → mergeEventProjection 内单点跑本函数的
- * mergeWorkflowStepRecords，W1 D6 换源——session-records 缓存是投影合并快照的镜像）
- * 共用本函数（D5 冷热同代码）；合并消费内存中的已解析投影数组，不触碰文件系统
+ * mergeWorkflowStepRecords，W1 D6 换源——session-records 缓存是派生视图合并快照的镜像）
+ * 共用本函数（D5 冷热同代码）；合并消费内存中的已解析派生视图数组，不触碰文件系统
  * （D5 禁双读盘约束）。
  */
 
@@ -85,7 +85,7 @@ function genericStopText(stopReason: string | undefined): string {
  *
  * 中断族必须可见不可静默隐形（run 进行中宿主崩溃/重启是 ① 的设计目标场景）；error 非空时
  * record.error 恒优先（真实错误文本），填充仅兜 error 空。
- * 注意：消费的是提取器投影后的形态（legacy closedReason 已由 derivedStopReason 归一层
+ * 注意：消费的是提取器映射后的形态（legacy closedReason 已由 derivedStopReason 归一层
  * 先行折叠），矩阵仍按全集兜底。
  */
 export function mapStepStatusFromRecord(record: Pick<SubagentRecord, 'status' | 'stopReason' | 'error'>): {
@@ -150,7 +150,7 @@ function toIsoTimestamp(ms: number): string {
 
 /**
  * [R1/R2] 权威 record 覆盖 trace 骨架行：状态/时间/错误/sessionId 取 record（运行状态
- * 权威），编排结构（phase/agent/id）与 ① 独有投影（model/lastProgressAt/token 拆分——
+ * 权威），编排结构（phase/agent/id）与 ① 独有派生（model/lastProgressAt/token 拆分——
  * record 只有 totalTokens 总量，无法无损映射 input/output 二元组，保留 trace 值）维持
  * trace。sessionId = record.subagentId（trace.sessionId 语义即 record id，
  * getAgentCallHistory 按它查找——record-only 行与覆盖行都必带，否则步骤点击 no-op）。
@@ -195,7 +195,7 @@ function recordOnlyCall(record: SubagentRecord): WorkflowAgentCall {
 
 /**
  * 候选集圈定与分桶：runId → stepIndex → 该键全部 record（多 attempt）。
- * [R3 守卫] parentRunId / stepIndex 任一缺失（存量 entry / tool 来源）不进候选——
+ * [R3 检查] parentRunId / stepIndex 任一缺失（存量 entry / tool 来源）不进候选——
  * 无 stepIndex 的 record 不成行，旧 session 回落 trace-only 视图（V5）。
  */
 function bucketWorkflowCandidates(
@@ -219,7 +219,7 @@ function bucketWorkflowCandidates(
 }
 
 /**
- * 合并投影主入口（纯函数）：workflow 投影（trace 骨架）× subagent 投影（候选集）→
+ * 合并派生主入口（纯函数）：workflow 派生视图（trace 骨架）× subagent 派生视图（候选集）→
  * 合并后 WorkflowRunRecord[]。冷启动与实时增量共用（D5）。
  *
  * 幂等性：对已合并过的 record 重跑同一函数结果不变（trace 位覆盖合并读候选重算；

@@ -2,7 +2,7 @@
  * 托盘条目按钮的共享视觉外壳（built-in 三件按钮与 widget 条目按钮共用）。
  *
  * 两处按钮的类串 / 呼吸点 / 计数角标逐字同款——调色 / 尺寸单点在此，避免两分支人工对齐
- * 漂移；差异面（icon fallback 链 / badge truncate / tone 档 / testid 字面量）仍留在各自组件。
+ * 漂移；差异点（icon fallback 链 / badge truncate / tone 档 / testid 字面量）仍留在各自组件。
  *
  * 形态权威 = demo composer 左簇 .cbtn（workbench.css）：30×30 方钮 / r-sm / dim 字 /
  * hover surface-hover 底 + fg 提亮；计数走 demo .cbtn .badge 角标形态（绝对定位按钮右上角，

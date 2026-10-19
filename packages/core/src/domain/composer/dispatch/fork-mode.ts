@@ -10,12 +10,12 @@
  * - handleForkEsc：Esc 退出（清空输入 + exitForkMode），返回是否已消费
  * - handleForkSend：fork 模式发送（调 forkSessionAsk + 退出），返回是否已消费
  *
- * [D8 泛化] fork 与 handoff 曾约 75% 逐字镜像（enter/exit/signal watch 守卫/handleEsc/
+ * [D8 泛化] fork 与 handoff 曾约 75% 逐字镜像（enter/exit/signal watch 检查/handleEsc/
  * handleSend 骨架，设计 §2 例 5）。行为骨架已收敛到 createStagingMode
- * （./staging-mode），本模块 = fork 配置对象 + 薄包装：公开 API（返回面 8 项）与
+ * （./staging-mode），本模块 = fork 配置对象 + 薄包装：公开 API（返回结构 8 项）与
  * ForkDeps 注入契约保持不变，消费方零改动。fork 差异全部经配置表达（P2 清单见
- * staging-mode.ts 头注）：send 目标 = forkSessionAsk（空 content 守卫在 features 层
- * 退化为纯 fork → allowsEmptySend=true）；无 enter 守卫 / 互斥退出 / 发送兜底守卫 /
+ * staging-mode.ts 头注）：send 目标 = forkSessionAsk（空 content 检查在 features 层
+ * 退化为纯 fork → allowsEmptySend=true）；无 enter 检查 / 互斥退出 / 发送兜底检查 /
  * B 阶段（isInProgress 恒 false、abort 无）。
  *
  * 发送/清空输入等副作用通过 deps 注入（Composer 持有 draft/isSending/clearInput/restoreInput 真源），
@@ -79,7 +79,7 @@ export interface ForkDeps {
 }
 
 /**
- * @param sessionId 当前 session id（null = landing 态，signal 守卫用）
+ * @param sessionId 当前 session id（null = landing 态，signal 检查用）
  * @param deps 发送副作用依赖 + 跨域能力
  */
 export function useComposerForkMode(
@@ -123,7 +123,7 @@ export function useComposerForkMode(
       deps.forkSessionAsk(source.srcSessionId, source.fromMessageId, text, staging),
     sendFailedKey: 'panel.panel.sendFailed',
     // fork 允许空提交：点 fork 按钮进 composer 模式后可不输入直接提交（≈ 原后台 fork）。
-    // forkSessionAsk 的空 content 守卫会退化为纯 fork（不发送首条 user）。
+    // forkSessionAsk 的空 content 检查会退化为纯 fork（不发送首条 user）。
     allowsEmptySend: true,
     // fork-ask 是前端编排的 fork+send，无独立 inflight 可取消 → isInProgress/abort 缺省
     // [HISTORICAL] activeBoxClass 的整框 accent 染色串已随 staging banner 形态退役（demo 裁决：

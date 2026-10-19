@@ -110,7 +110,7 @@ describe('错误码翻译表（§7.2 注④）', () => {
   })
 })
 
-describe('能力表与表单投影（§7.3）', () => {
+describe('能力表与表单派生视图（§7.3）', () => {
   it('能力表：借壳端点 / api-key 头 / maxInputChars 1000 / 无语速 / 固定 24kHz', () => {
     expect(mimoCapabilities.endpointPath).toBe('/chat/completions')
     expect(mimoCapabilities.authHeader).toBe('api-key')
@@ -120,7 +120,7 @@ describe('能力表与表单投影（§7.3）', () => {
     expect(mimoCapabilities.supportsInstructions).toBe(true)
   })
 
-  it('表单投影：音色 ×9 全集 / 境内外集群 baseUrl / 音量音调置灰 / 无效果器', () => {
+  it('表单派生视图：音色 ×9 全集 / 境内外集群 baseUrl / 音量音调置灰 / 无效果器', () => {
     expect(mimoFormModel.voices.map((v) => v.id)).toEqual([
       'mimo_default',
       '冰糖',

@@ -17,7 +17,7 @@
  * （等值清 watch）/ 动作 reject / sessionId 变化 / 进入 staging（watch [sessionId, isStaging]）。
  * 仅已建态设立与续步——staging/landing 分支是同步写（无 RTT 窗口），不设意图。
  *
- * 守卫矩阵（§3.4 全行）：浮层 open 整体跳过（强模态上下文）→ IME 组合不触发（分发链 IME 段
+ * 检查矩阵（§3.4 全行）：浮层 open 整体跳过（强模态上下文）→ IME 组合不触发（分发链 IME 段
  * 先行放行，本表不复判——over-engineering-audit 20260916 裁决：处理器只经分发链调用）→
  * auto-repeat：三个切换键忽略（按住只走一步，防 RPC 风暴）、ctrl+x 不忽略（幂等无 RPC，决策 8 例外）→
  * composer 内有选区时 ctrl+x 放行原生剪切 → 档位可用集仅 off / 模型列表 ≤1 时 no-op
@@ -40,7 +40,7 @@ export interface ComposerShortcutToast {
 
 /** useComposerShortcutActions 依赖（全部只读注入，设计 §5 U1 deps 11 项；不新增持久状态） */
 export interface ComposerShortcutActionDeps {
-  /** 命令浮层 open 态：open 时动作表整体跳过（§3.4 首行守卫——分支入口先判，不逐键放行） */
+  /** 命令浮层 open 态：open 时动作表整体跳过（§3.4 首行检查——分支入口先判，不逐键放行） */
   cmdOpen: Readonly<Ref<boolean>>
   /** 当前 session id（null = landing 态）：意图目标清除源之一 + 复制消息流定位 */
   sessionId: Readonly<Ref<string | null>>
@@ -237,7 +237,7 @@ export function useComposerShortcutActions(
   }
 
   return (e: KeyboardEvent): boolean => {
-    // §3.4 首行守卫：浮层 open → 动作表整体跳过（返回 false 不吞键，浮层段语义不受影响）
+    // §3.4 首行检查：浮层 open → 动作表整体跳过（返回 false 不吞键，浮层段语义不受影响）
     if (deps.cmdOpen.value) return false
     const action = matchShortcutAction(e)
     if (!action) return false // 未命中 → 原样放行（不拦截、不阻断冒泡，既有段行为不变）

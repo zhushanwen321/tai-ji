@@ -39,7 +39,7 @@ export interface UiFormInteractOptions {
    * （undefined 为缺省态：存量扩展与未声明者，桥接 = 现状，方向安全）；
    * `false` = 无 turn 预期——命令 handler 内 select（提交后结构性无 turn），respond 侧
    * 提交即收尾，消除 30s 假忙。消费方判定必须是 `=== false` 显式式：truthy 简化
-   * （`!expectTurn`）会把 undefined 也当无 turn、误清桥接（D2 被否谱系）。
+   * （`!expectTurn`）会把 undefined 也当无 turn、误清桥接（D2 不采用其余方案的理由）。
    *
    * 缺省（undefined）经 stripUndefined 剥键——未声明者的 wire payload 逐字节不变，
    * 旧 runtime 读不到即忽略（JSON.parse 容忍未知键）。
@@ -55,7 +55,7 @@ const RESPONSE_PREVIEW_LENGTH = 200
 /** echo 检测命中时的升级指引（D3）：用户可操作的恢复动作 = 升级 taiji 或钉住 extension 版本 */
 const ECHO_UPGRADE_HINT = 'taiji host too old for form protocol — upgrade taiji or pin extension version'
 
-/** 发送侧守卫（D2 失败策略）：不合法项 = 调用方编码 bug，fail-fast 抛错而非发出坏帧 */
+/** 发送侧检查（D2 失败策略）：不合法项 = 调用方编码 bug，fail-fast 抛错而非发出坏帧 */
 function assertFormQuestionsValid(form: FormQuestion[]): void {
   const invalidIndex = form.findIndex((q) => !isFormQuestion(q))
   if (invalidIndex >= 0) {
@@ -80,7 +80,7 @@ function assertRpcModeAvailable(ctx: GuiContext): void {
 }
 
 /**
- * 回包解析：echo 检测（先于 JSON.parse 的逐字节判定）→ parse → FormAnswers 形状守卫。
+ * 回包解析：echo 检测（先于 JSON.parse 的逐字节判定）→ parse → FormAnswers 形状检查。
  * 四态判别返回而非抛错（channel-error / non-json 两态在此产生）。
  */
 function parseFormAnswersResponse(

@@ -67,7 +67,7 @@ import type { ProjectStore } from '../services/project/project-store.js'
 import type { IWorktreeService } from '../services/ports/worktree-service.js'
 import type { HandoffService } from '../services/handoff-service.js'
 import type { ImportService } from '../services/session/import-service.js'
-// GenStatsService（composer-gen-stats u3）：session.getGenStats 恢复腿 RPC 路由依赖。
+// GenStatsService（composer-gen-stats u3）：session.getGenStats 恢复路径 RPC 路由依赖。
 import type { GenStatsService } from '../services/session/gen-stats-service.js'
 import type { ITerminalService } from '../services/ports/terminal-service.js'
 import type { QuotaService } from '../services/quota-service.js'
@@ -83,7 +83,7 @@ import { warnOnce } from '../utils/warn-once.js'
 
 /**
  * setServices 的全部可选依赖（PR #189 review：签名从 18 个位置参数收敛为聚合对象，
- * 成员可省略语义与原可选参数一致——漏传不再是「错位静默」，装配面一目了然）。
+ * 成员可省略语义与原可选参数一致——漏传不再是「错位静默」，装配侧一目了然）。
  */
 export interface RuntimeServerOptionalServices {
   extension?: IExtensionService
@@ -109,7 +109,7 @@ export interface RuntimeServerOptionalServices {
   preset?: PresetService
   auth?: IAuthService
   /**
-   * Provider 凭据解析唯一通道（D3 收口，链 2 消费点）。
+   * Provider 凭据解析唯一通道（D3 收尾，链 2 消费点）。
    * 组合根（index.ts）经本 optional 对象注入，assembleCoreHandlers 透传给
    * SettingsMessageHandler ctx（M2fg 删降级后 ctx 必需——生产恒注入，ctx 装配处断言非空）。
    */
@@ -131,21 +131,21 @@ export interface RuntimeServerOptionalServices {
   delivery?: SessionDeliveryRegistry
   /**
    * notify-once 通知债权状态机（组合根 index.ts 构造后注入）。缺席时 SessionManagerHandler
-   * 按停用象限运行（不 arm / willNotify:false / watch fail-closed——测试与退化装配面）。
+   * 按停用象限运行（不 arm / willNotify:false / watch fail-closed——测试与退化装配侧）。
    */
   claims?: ClaimLedger
   /** 导入 pi 会话服务（import-session D5/U2）：session.importCandidates / session.import 路由依赖。可选：未注入时该 case 报 unsupported。 */
   importService?: ImportService
-  /** 生成指标服务（composer-gen-stats D4）：session.getGenStats 恢复腿路由依赖。可选：未注入时该 case 报 unsupported。 */
+  /** 生成指标服务（composer-gen-stats D4）：session.getGenStats 恢复路径路由依赖。可选：未注入时该 case 报 unsupported。 */
   genStats?: GenStatsService
   /**
-   * reply 通路出站守卫的 session 文件路径解析器（u8 与 push 通路对称接线：push 经
+   * reply 通路出站检查的 session 文件路径解析器（u8 与 push 通路对称接线：push 经
    * MessageBus 构造注入，reply 经 broker 构造注入，组合根两处共用同一 resolver 实例）。
    * 可选：未注入时 reply 超限占位文案退化为「（见 runtime 日志）」，阈值仍用默认常量。
    */
   replyGuardResolver?: (sessionId: string) => string | null | undefined
   /**
-   * btw 线三帧路由（btw-question M2-b，B1 授权）：BtwService 窄面 + 主会话解析。
+   * btw 线三帧路由（btw-question M2-b，B1 授权）：BtwService 窄接口 + 主会话解析。
    * 组合根（index.ts）构造 BtwService 后注入，assembleOptionalHandlers 据此构造
    * BtwMessageHandler 并在 buildRoutes 展开 handles（缺省 = 不装配，btw.* 落 unknown_type——
    * 生产组合根恒注入，缺省语义服务存量测试装配）。
@@ -281,7 +281,7 @@ export class RuntimeServer implements IMessageBroker {
   /**
    * setServices 主编排（复杂度债清偿 U07）：按「装配服务字段 → 构造 broker → 组装
    * handlers → 建分发表」四阶段提私有 helper，本函数只留阶段顺序。各阶段内部与原
-   * 实现逐行等价——赋值顺序、条件守卫、context 字面量、事件注册时序均未动。
+   * 实现逐行等价——赋值顺序、条件检查、context 字面量、事件注册时序均未动。
    */
   setServices(session: ISessionService, config: IConfigService, model: IModelService, optional: RuntimeServerOptionalServices = {}): void {
     this.assignServices(session, config, model, optional)
@@ -301,7 +301,7 @@ export class RuntimeServer implements IMessageBroker {
 
   /** 阶段 1：核心 service 字段装配（含 D6a onSessionDestroyed 汇聚清理注册）。 */
   private assignServices(session: ISessionService, config: IConfigService, model: IModelService, optional: RuntimeServerOptionalServices): void {
-    // genStats（composer-gen-stats D4）：恢复腿 RPC 路由依赖（sessionHandler ctx 读
+    // genStats（composer-gen-stats D4）：恢复路径 RPC 路由依赖（sessionHandler ctx 读
     // this.genStatsService）；其余可选服务由 assembleOptionalHandlers 按域自行解构。
     const { extension, plugin, git, file, skillRegistry, handoff, importService, genStats, zcodeProviderMirrorSync } = optional
     this.zcodeProviderMirrorSync = zcodeProviderMirrorSync
@@ -412,7 +412,7 @@ export class RuntimeServer implements IMessageBroker {
       // 条件装配跳过 mcp 域子 handler，mcp.* 落 unknown_type（非空断言同上两行先例）。
       mcpServersService: mcpServersService!,
       // W4：skillRegistry 必须注入（settings-handler 的 config.getGlobalSkills/getProjectSkills 依赖）。
-      // 组合根 index.ts 保证传入；此处断言非空（setServices 编排保证）。若未来 skillRegistry 可选，handler 需守卫。
+      // 组合根 index.ts 保证传入；此处断言非空（setServices 编排保证）。若未来 skillRegistry 可选，handler 需检查。
       skillRegistry: this.skillRegistry!,
       projectRoot: this.projectRoot,
       nextPushId: () => this.broker.nextPushId(),
@@ -434,7 +434,7 @@ export class RuntimeServer implements IMessageBroker {
       handoffService: this.handoffService,
       // 导入 pi 会话（import-session D5/U2）：session.importCandidates / session.import 路由依赖。
       importService: this.importService,
-      // composer-gen-stats（u3）：session.getGenStats 恢复腿 RPC 路由依赖。
+      // composer-gen-stats（u3）：session.getGenStats 恢复路径 RPC 路由依赖。
       genStatsService: this.genStatsService,
       // 投递所有权内核（u3a）：delivery.* 四 RPC + session.delivery state topic 装配。
       // 与 SessionManagerHandler 同一注册表实例（sessionId 单例约束，见 assembleSessionManagerHandler）。
@@ -469,7 +469,7 @@ export class RuntimeServer implements IMessageBroker {
 
   /**
    * 可选 handler 批：git / file / workspace / project / worktree / terminal / quota /
-   * usage / preset——按对应 service 是否注入条件装配，守卫条件与原实现一致。
+   * usage / preset——按对应 service 是否注入条件装配，检查条件与原实现一致。
    */
   private assembleOptionalHandlers(messaging: MessageHandlerContext, optional: RuntimeServerOptionalServices): void {
     const { workspace, project, worktree, terminal, quota, preset, btw, tts } = optional
@@ -480,7 +480,7 @@ export class RuntimeServer implements IMessageBroker {
         gitService: this.gitService,
         broadcastChangeSetInvalidated: (sessionId, reason) => {
           // wave:perf-w09（R-08 审计发现的清单外 session 级 push 型消息）：原走
-          // broker.broadcast 盲广播，收口为 bus.publish 定向发布（message.changeSetInvalidated
+          // broker.broadcast 盲广播，收尾为 bus.publish 定向发布（message.changeSetInvalidated
           // 归 stream 类：分配 seq + 入 ring，已订阅该 sid 的连接照常收到，未订阅连接不再被打扰）。
           this.messageBus?.publish(sessionId, {
             type: 'message.changeSetInvalidated',
@@ -685,7 +685,7 @@ export class RuntimeServer implements IMessageBroker {
   broadcastAppInfo(): void { this.broker.broadcastAppInfo() }
   /**
    * W2：暴露 broker 的 skill 缓存失效广播，供 index.ts 的 skillRegistry.onChange 回调调用
-   * （skill 变动 → 广播 config.skillCacheInvalidated 让 landing composable 失效缓存重拉）。
+   * （skill 变动 → 广播 config.skillCacheInvalidated 让 landing composable 失效缓存重新拉取）。
    * partial 透传（RT-1#9 降级补发标注）。
    */
   broadcastSkillCacheInvalidated(scope: SkillCacheScope, cwd?: string, partial?: boolean): void { this.broker.broadcastSkillCacheInvalidated(scope, cwd, partial) }
@@ -715,7 +715,7 @@ export class RuntimeServer implements IMessageBroker {
       }
     } catch (e) {
       // S-1（b22）：服务端留痕——error envelope 只达当前 ws（关闭/刷新即丢），runtime
-      // 落盘日志是唯一持久取证面；一行覆盖全部裸跑 handler 异常族（对照同文件
+      // 落盘日志是唯一持久取证侧；一行覆盖全部裸跑 handler 异常族（对照同文件
       // steer/follow_up 局部 console.error 先例）。
       console.error(`[server] handler error: type=${msg.type} id=${msg.id}:`, e)
       const message = toErrorMessage(e)
@@ -767,7 +767,7 @@ export class RuntimeServer implements IMessageBroker {
     const invalidated = this.extensionTimeoutMgr.invalidatePendingForSession(sessionId)
     if (invalidated.length > 0) {
       if (this.messageBus) {
-        // wave:perf-w09 纪律收口（changeSetInvalidated R-08 同族先例）：payload 带 sessionId
+        // wave:perf-w09 纪律收尾（changeSetInvalidated R-08 同族先例）：payload 带 sessionId
         // 的 session 级 push 型消息必须走 bus.publish——broker.broadcast 会触发哨兵误报
         //（message-broker broadcast 的 session-scoped warn）且不占 seq 不入 ring，断连重连/
         // 切回 session 无法回放。TOPIC_TABLE 登记 stream 档：分配 seq + 入 ring（一次性失效
@@ -805,6 +805,7 @@ export class RuntimeServer implements IMessageBroker {
   }
 
   /**
+  /**
    * session-manager 请求处理入口。由 EventInterpreter.onSessionManagerRequest fire-and-forget 调用。
    * 委托给 SessionManagerHandler.handle() 异步处理。
    */
@@ -829,7 +830,7 @@ export class RuntimeServer implements IMessageBroker {
   async stop(): Promise<void> {
     // A9（b26-F1）：三段清理逐段隔离——单段失败不跳过其余段（pluginService.shutdown 抛错
     // 不得跳过 pi 进程收割与 WS 优雅关闭），逐段留痕后聚合上抛（组合根 shutdown 大 catch
-    // 接住，后续 closeCrashJournal/closeLogger 收口链照走）。
+    // 接住，后续 closeCrashJournal/closeLogger 收尾链照走）。
     const failures: unknown[] = []
     if (this.pluginService) {
       try {

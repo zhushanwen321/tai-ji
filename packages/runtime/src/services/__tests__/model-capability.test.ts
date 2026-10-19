@@ -5,7 +5,7 @@
  * - 离线计算：reasoning 缺失/false → ['off']（pi 两级门控第一关）；正常模型与
  *   pi-ai getSupportedThinkingLevels 同源值一致（builtin-providers.json fixture
  *   全量直调比对——对 passthrough 实现是恒真基线，computeSupportedLevels 一旦被
- *   塞入 taiji 侧改写逻辑即红，同源契约守卫）；档位过滤语义锚点。
+ *   塞入 taiji 侧改写逻辑即红，同源契约检查）；档位过滤语义锚点。
  * - 对账：config_only / reasoning_mismatch / case_twin 三类 drift 纯比对 +
  *   编排路径（runtime 日志 + 事件上报出口 + 降级路径）。
  * - 下发标注：attachSupportedLevels 输出含 supportedLevels、不改入参。
@@ -81,7 +81,7 @@ describe('离线计算（pi-ai 同源）', () => {
         expect(computeSupportedLevels(input), `${p.id}/${m.id}`).toEqual(piDirect(input))
       }
     }
-    expect(total).toBeGreaterThan(1000) // fixture 覆盖面不缩水（当前 1220）
+    expect(total).toBeGreaterThan(1000) // fixture 覆盖范围不缩水（当前 1220）
   })
 
   it('档位过滤语义锚点：off=null 剔除、xhigh/max 仅显式映射才含、未映射档默认含', () => {
@@ -235,7 +235,7 @@ describe('对账编排（日志 + 事件上报路径）', () => {
   })
 })
 
-describe('ModelService 服务面挂载', () => {
+describe('ModelService 服务侧挂载', () => {
   function makeService(engine: unknown, providers: ProviderInfo[]): ModelService {
     const svc = new ModelService({ discoverFromApi: vi.fn() } as unknown as IModelSource)
     svc.setServices(
@@ -261,7 +261,7 @@ describe('ModelService 服务面挂载', () => {
     warnSpy.mockRestore()
   })
 
-  it('attachSupportedLevels 透传能力面：下发模型信息含 supportedLevels 字段', () => {
+  it('attachSupportedLevels 透传能力侧：下发模型信息含 supportedLevels 字段', () => {
     const svc = makeService(undefined, [])
     const decorated = svc.attachSupportedLevels([provider('p', [model('m')])])
     expect(decorated[0].models[0].supportedLevels).toEqual(['off'])

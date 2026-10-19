@@ -106,7 +106,7 @@ export function renderSubagentCall(
   // 本函数只服务 subagent_start（manage/message 两工具用各自的轻量 actionToolRenderCall）。
   const agent = displayAgentName(extractAgentName(args));
   // slug：从顶层 args 提取（必填字段），非空时在 agent 后用 · 分隔展示。
-  // 断言目标含必填 slug 字段（in 守卫已确认存在），对齐 format.ts extractAgentName 先例。
+  // 断言目标含必填 slug 字段（in 检查已确认存在），对齐 format.ts extractAgentName 先例。
   const slug = typeof args === "object" && args !== null && "slug" in args
     ? (args as { slug: unknown }).slug
     : undefined;
@@ -269,7 +269,7 @@ function isDetailsStructurallyComplete(d: SubagentToolResult): boolean {
     case "fork-from":
       // [v8.5 B] 新 action 直接纳入 guard：缺内层分组才 fallback。
       // message/close 维持历史现状（不落此 switch 显式分支，走 extractResultError
-      // 回显 content 首行）不变，避免触碰现有渲染回归面——review MF-13 曾引入
+      // 回显 content 首行）不变，避免触碰现有渲染回归测试——review MF-13 曾引入
       // message/close 显式分支后回退：无对应渲染分支却判「结构完整」会改走
       // generic 无响应渲染，属静默行为变更。
       return "forkFromResponse" in d;

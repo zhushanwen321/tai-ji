@@ -7,7 +7,7 @@ import { describe, expect, it } from "vitest";
 
 import { filterActivePath, type ActivePathSessionView } from "../index";
 
-interface BranchEntry { // oe-exempt:20261001:test:测试 fixture 形状契约（分支树 entry 最小形状，断言面消费）
+interface BranchEntry { // oe-exempt:20261001:test:测试 fixture 形状契约（分支树 entry 最小形状，断言范围消费）
 	type: string;
 	id: string;
 	parentId: string | null;

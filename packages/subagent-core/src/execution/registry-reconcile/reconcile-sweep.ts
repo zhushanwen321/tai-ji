@@ -3,24 +3,24 @@
 // 注册对账 sweep——Plane E pending entry 死亡窗口对账 + ①段直落失败的窄竞态
 // 窗兜底（reload-closeout D5 正名：触发点/对账逻辑零改动，职责声明按真实章程）。
 //
-// 设计锚点：D2「注册对账 sweep」（R2 增补、R3 钉死判据与写法）+ reload-closeout
+// 设计锚点：D2「注册对账 sweep」（R2 增补、R3 固定判据与写法）+ reload-closeout
 // D4/D5（兜底归位：finalizeRun 直落承担注销主路径后，sweep 从「静默丢唯一兜底」
 // 降回死亡窗口兜底）。
 //
 // 兜底的两类窗口：
 // 1. 进程死亡（kill-9）：finalizeRun 未跑、无直落，注销 entry 永久缺位；
 // 2. 直落失败窄竞态：finalizeRun 的 appendEntry 撞 reload 转换窗 assertActive
-//    抛错（OR-4 围栏留痕后放行），差集残留到本 sweep 收口。
+//    抛错（OR-4 围栏留痕后放行），差集残留到本 sweep 收尾。
 //
 // 补发机制：对「本 session 的 register entry × 对应 record 状态 ∈ 终态集 ∪ record
 // 已离场/不存在」的差集补发 unregister。**已离场**（archive 从内存移除、磁盘有
 // finalized sidecar → 读侧重建 closed）与**不存在**（畸形条目对不上任何 record）
-// 同视同终态——「查不到即补注销」判据兜底链才闭合。与 finalizeRun 直落互斥幂等：
-// 直落后 id 不再 active，本 sweep 差集为空；直落失败时差集仍在，本 sweep 收口。
+// 同视同终态——「查不到即补注销」判据兜底链才补全。与 finalizeRun 直落互斥幂等：
+// 直落后 id 不再 active，本 sweep 差集为空；直落失败时差集仍在，本 sweep 收尾。
 //
-// 写法钉死（照 base-tool-enhance/src/background/pending-reconcile.ts 终态写法
+// 写法固定（照 base-tool-enhance/src/background/pending-reconcile.ts 终态写法
 // 先例）：**appendEntry 即唯一权威路径，不经 emit**——appendEntry 同步入账且不
-// 依赖 listener 存活，差集消费方（goal 守卫 / pending_notifications 工具）全部从
+// 依赖 listener 存活，差集消费方（goal 检查 / pending_notifications 工具）全部从
 // 持久化 entries 现算，appendEntry 对其直接生效。历史上并存过「尽力 emit 同步
 // listener 内存视图」的第二写路径，随 listener 侧内存 registry 机制删除（对 entries
 // 现算 isPendingActive 后，emit 到达时该 id 必已注销 = 恒 no-op 死路径）一并删除
@@ -28,24 +28,24 @@
 //
 // 触发时机：session reattach / session_start（由 subagent-service 在 initSession 链内
 // 调用）。与 session_start 的 registry rebuild 先后时序不作保证，
-// 残余窗口由下次 session_start 收口（设计明示容忍）。
+// 残余窗口由下次 session_start 收尾（设计明示容忍）。
 //
-// 判据保守性（[F2] 按类型分流收口）：
+// 判据保守性（[F2] 按类型分流收尾）：
 //  - type=subagent → record 差集对账（lookupRecordState）；
 //  - type=workflow 及缺失/未知的畸形条目（normalizePendingType 归 workflow 的偏好）
 //    → workflow run 判据（lookupWorkflowRunState，生产装配查 WorkflowRun store 的
 //    run state 文件）：终态 ∪ 文件不存在 → 补注销；running → 跳过；全部行损坏
-//    （读不出 ≠ 不存在）由判据侧保守按 running 处理（宁挂账不失明——误注销活跃
+//    （读不出 ≠ 不存在）由判据侧保守按 running 处理（宁挂着不处理不失明——误注销活跃
 //    workflow run 是事故方向）。deps 未注入该判据时维持旧保守跳过（向后兼容）。
 //  - type=bash → 无 record/store 可查（bash 注册随进程退出注销，进程死亡窗口的
-//    丢失无补发通道）→ 保守跳过，显式偏差登记（impl-plan §5 #5）：挂账方向代价 =
-//    每孤儿 bash 注册 1 条静态虚报，无空转驱动源（goal 守卫读侧过滤已使子 session
+//    丢失无补发通道）→ 保守跳过，显式偏差登记（impl-plan §5 #5）：挂着不处理的方向代价 =
+//    每孤儿 bash 注册 1 条静态虚报，无空转驱动源（goal 检查读侧过滤已使子 session
 //    不受污染，本 session 虚报 defer 由熔断限损）。
 //  - type=session → **显式 skip**（notify-once D7③）：managed session 完成通知债权的
-//    register（id = notifyId `sm-` 前缀），收口通道 = watch 应答 unregister + extension
-//    session_start 重启收口腿，**不入 workflow run-state 判据**——notifyId 对
+//    register（id = notifyId `sm-` 前缀），收尾通道 = watch 应答 unregister + extension
+//    session_start 重启收尾路径，**不入 workflow run-state 判据**——notifyId 对
 //    FileRunStore 查无 state 文件 → 「不存在 → 补注销」判据会把活跃 claim 误销
-//    （G2 查询面破坏），故在分流前拦下，不调任何判据。
+//    （G2 查询范围破坏），故在分流前拦下，不调任何判据。
 
 import * as fs from "node:fs";
 
@@ -74,27 +74,27 @@ export interface ReconcileSweepDeps {
   /** record 状态判据（见 SupervisedRecordState）。 */
   lookupRecordState: (id: string) => SupervisedRecordState;
   /**
-   * [F2] workflow run 状态判据（type=workflow 及畸形条目的收口依据）。生产装配查
+   * [F2] workflow run 状态判据（type=workflow 及畸形条目的收尾依据）。生产装配查
    * 共享判定核（service-binding → persistence/run-state-evidence 的
    * findRunSettlementEvidence）。
-   * 缺省（未注入）= workflow/畸形条目无收口通道，保守跳过（skippedNonSubagent）。
+   * 缺省（未注入）= workflow/畸形条目无收尾通道，保守跳过（skippedNonSubagent）。
    */
   lookupWorkflowRunState?: (runId: string) => SupervisedRecordState;
   /** 权威写（pi.appendEntry）。缺失（dispose 后）= 本轮只判不写。 */
   appendEntry?: (customType: string, data: unknown) => void;
 }
 
-/** sweep 结果（日志 + 测试断言面）。 */
+/** sweep 结果（日志 + 测试断言范围）。 */
 export interface ReconcileSweepResult {
   /** 补发 unregister 的注册 id。 */
   reconciled: string[];
   /** 差集内但判据为活跃（record/run running）而保守跳过的注册 id。 */
   skippedActive: string[];
-  /** 差集内无收口通道而保守跳过的注册 id（bash；或 deps 未注入 workflow 判据时
+  /** 差集内无收尾通道而保守跳过的注册 id（bash；或 deps 未注入 workflow 判据时
    *  的 workflow/未知类型——显式偏差面，见文件头注 bash 段）。 */
   skippedNonSubagent: string[];
-  /** type=session 显式 skip 的注册 id（notify-once D7③：收口归 extension watch 应答
-   *  与重启收口腿，不入 workflow run-state 判据——防误销活跃 claim，见文件头注）。 */
+  /** type=session 显式 skip 的注册 id（notify-once D7③：收尾归 extension watch 应答
+   *  与重启收尾路径，不入 workflow run-state 判据——防误销活跃 claim，见文件头注）。 */
   skippedSession: string[];
 }
 
@@ -116,8 +116,8 @@ export function runReconcileSweep(deps: ReconcileSweepDeps): ReconcileSweepResul
     sweepSingleRegister(deps, entry, result);
   }
   if (result.reconciled.length > 0) {
-    // WARN 收口日志 = ①②④发射点残差/直落失败的观测通道（reload-closeout D4 覆盖
-    // 判定：频次即残差兑现频率，日收口条数持续 > 个位数 → 按 D4 同款直落扩展）。
+    // WARN 收尾日志 = ①②④发射点残差/直落失败的观测通道（reload-closeout D4 覆盖
+    // 判定：频次即残差兑现频率，日收尾条数持续 > 个位数 → 按 D4 同款直落扩展）。
     logger.warn(
       `[subagents] reconcile sweep reconciled ${result.reconciled.length} unregister(s) for terminal/missing records: ${result.reconciled.join(",")}`,
     );
@@ -126,7 +126,7 @@ export function runReconcileSweep(deps: ReconcileSweepDeps): ReconcileSweepResul
 }
 
 /**
- * 差集单条对账（保守性分流 [F2]）：按注册类型选收口判据——subagent 走 record 差集；
+ * 差集单条对账（保守性分流 [F2]）：按注册类型选收尾判据——subagent 走 record 差集；
  * workflow/畸形（normalizePendingType 归 workflow 偏好）走 workflow run 判据；bash 无
  * record/store 可查，保守跳过（显式偏差，头注 bash 段）。
  */
@@ -141,9 +141,9 @@ function sweepSingleRegister(
     return;
   }
   if (entry.type === "session") {
-    // notify-once D7③：session 债权 register 不归 sweep 收口——必须在 workflow run-state
+    // notify-once D7③：session 债权 register 不归 sweep 收尾——必须在 workflow run-state
     // 判据之前拦下（notifyId 查 FileRunStore 必 missing → 「查不到即补注销」会误销
-    // 活跃 claim）。收口通道 = watch 应答 unregister + extension 重启收口腿。
+    // 活跃 claim）。收尾通道 = watch 应答 unregister + extension 重启收尾路径。
     result.skippedSession.push(id);
     return;
   }
@@ -151,7 +151,7 @@ function sweepSingleRegister(
     ? deps.lookupRecordState(id)
     : deps.lookupWorkflowRunState?.(id);
   if (state === undefined) {
-    // deps 未注入 workflow 判据：无收口通道，保守跳过（向后兼容——判据注入面
+    // deps 未注入 workflow 判据：无收尾通道，保守跳过（向后兼容——判据注入点
     // 缺席 ≠ 条目可注销）。
     result.skippedNonSubagent.push(id);
     return;

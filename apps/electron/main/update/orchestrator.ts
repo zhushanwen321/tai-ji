@@ -28,10 +28,11 @@
  *   + error-log + ../release-checker（降级 by-tag 查询的默认实现，经 IReleaseChecker
  *   接口消费）+ @taiji/shared
  */
-import { mkdirSync, renameSync, writeFileSync } from 'node:fs'
+import { mkdirSync } from 'node:fs'
 import { URL } from 'node:url'
 import type { LatestReleaseInfo, ReleaseAsset, UpdateSource, UpdateStage } from '@taiji/shared'
 import { UPDATE_STALE_RELEASE } from '@taiji/shared'
+import { atomicWriteJsonFile } from '../utils/atomic-write-json.js'
 import { downloadAsset } from './download-asset.js'
 import { createPlatformUpdater } from './platform-updater.js'
 import { pickPlatformAsset } from './pick-platform-asset.js'
@@ -224,7 +225,7 @@ export async function downloadUpdate(
       if (!failedOver) throw err
       outcome = failedOver
     }
-    // 下载成功登记（download-success，S1 多段生效断言观测面）：multiPart = 本次
+    // 下载成功登记（download-success，S1 多段生效断言观测点）：multiPart = 本次
     // 实际执行路径、engine = 实际完成下载的引擎，均取自 downloadAsset 返回值
     // （降级续传成功时为对侧续传那次调用的真实观测值）。
     logDownloadSuccess({
@@ -264,7 +265,7 @@ function oppositeSource(source: UpdateSource): UpdateSource {
  * 不消费缓存 / 退避 / 源顺序状态，独立实例无状态副作用。
  *
  * 惰性构造的理由：避免模块加载期副作用；且 u-checker（fetchReleaseByTag 实现）落地前
- * release.source 恒为 undefined（检查链尚未多源化），降级链在 source 守卫处即被拦截，
+ * release.source 恒为 undefined（检查链尚未多源化），降级链在 source 检查处即被拦截，
  * 默认实例不会被真正调用——中间态安全。
  */
 let defaultFailoverChecker: IReleaseChecker | undefined
@@ -308,7 +309,7 @@ function isAllowedDownloadUrl(url: string): boolean {
   }
 }
 
-/** 跨源降级入参（downloadUpdate 内聚装配，收口成对象避免参数列膨胀）。 */
+/** 跨源降级入参（downloadUpdate 内聚装配，收敛成对象避免参数列膨胀）。 */
 interface ICrossSourceResumeInput {
   /** 本源胜出 asset（完整性基准 sha256/size 与 temp 键控 name 的来源） */
   asset: ReleaseAsset
@@ -335,7 +336,7 @@ interface ICrossSourceResumeInput {
  * 降级续传仅替换 downloadUrl，完整性基准（sha256/size）保持原胜出源 asset——tag 重发
  * 发散窗口下对侧内容将因 sha256 不符 fail-fast（与 D8 语义一致）。temp 按 asset.name
  * 键控 + resume-state 按 temp 路径匹配（download-asset 既有机制），跨源续传天然命中
- * 同一断点；totalBytes 不符由既有守卫自动转全量（§11.4 三组合）。
+ * 同一断点；totalBytes 不符由既有检查自动转全量（§11.4 三组合）。
  *
  * 降级发生点（对侧确认可用、实际转向续传前）登记 logSourceFailover(segment='download')；
  * by-tag null（404 发布时间窗）与 200 但目标 asset 缺失（部分同步失败窗口）同语义：
@@ -446,7 +447,7 @@ export async function resolveByVersion(
     )
   }
 
-  // ③ 版本格式非法 → 直接拒绝。typeof 守卫先行：IPC payload 不受 TS 类型约束，
+  // ③ 版本格式非法 → 直接拒绝。typeof 检查先行：IPC payload 不受 TS 类型约束，
   //    数字等非 string 值会被正则隐式串化绕过（123 → '123' 合法），必须显式拒绝
   if (typeof version !== 'string' || !REQUESTED_VERSION_RE.test(version)) {
     lastResolveRejectedAt = Date.now()
@@ -593,14 +594,9 @@ function handleScriptRef(ref: UpdateScriptRef): { triggerRestart: boolean } {
  */
 function writeUpdateResult(status: string, version: string, error?: string): void {
   const data = { status, version, at: new Date().toISOString(), error }
-  const resultFile = getUpdateResultFile()
-  // 原子写（批次 5 m12 / §3.7.2）：先写 .tmp 再 renameSync，读方（self-healer）不会
-  // 读到半截 JSON——半截 replacing 会被 corrupt-json 分支误判触发回滚。
-  const tmpPath = `${resultFile}.tmp`
-  // eslint-disable-next-line no-magic-numbers -- 2 = JSON 缩进空格数（人类可读）
-  writeFileSync(tmpPath, JSON.stringify(data, null, 2))
-  // 同目录 rename：同卷原子替换（目标已存在时覆盖）
-  renameSync(tmpPath, resultFile)
+  // 原子写（批次 5 m12 / §3.7.2，已收敛至单一助手 atomicWriteJsonFile）：读方
+  // （self-healer）不会读到半截 JSON——半截 replacing 会被 corrupt-json 分支误判触发回滚
+  atomicWriteJsonFile(getUpdateResultFile(), data)
 }
 
 /**

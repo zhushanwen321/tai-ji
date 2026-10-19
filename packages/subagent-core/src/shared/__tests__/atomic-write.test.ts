@@ -1,7 +1,7 @@
 /**
  * atomic-write 原语测试（sink 设计 U6a / B6，验收 §4 S6 的确定性子集）。
  *
- * 断言面：
+ * 断言范围：
  * - 正常写（sync/async、string/Uint8Array、encoding、父目录自动创建）
  * - 半截目标文件恢复语义：torn 目标被整体替换，读者只见旧版或完整新版
  * - 失败路径残留 tmp 清理语义：原错误上抛 + 自身 tmp 清除

@@ -33,7 +33,7 @@
  * - parentPid：默认 '9999999'（超过 macOS/linux pid_max，kill -0 立即失败 =
  *   模拟「app 已退出」）；超时用例用真实存活进程模拟「app 未退出」。
  *
- * 与 updater-script.test.ts 的边界：那边字符串视角（守卫片段在不在），本文件
+ * 与 updater-script.test.ts 的边界：那边字符串视角（检查片段在不在），本文件
  * 执行视角（bash 跑不跑得通、分支真不真触发、终态对不对）。
  *
  * 运行：cd apps/electron/main && npx vitest run test/updater-script-integration.test.ts
@@ -118,7 +118,7 @@ function sha256OfFile(filePath: string): string {
  *
  * - dmg 根含 .app（hdiutil create -srcfolder <buildRoot>：镜像根 = 源目录内容），
  *   与脚本 S1 的 `ls -d "$MOUNT_DIR"/*.app` 定位链一致。
- * - 主二进制 chmod 755：脚本对解包产物做 `-x` 可执行检查（RI1 守卫），
+ * - 主二进制 chmod 755：脚本对解包产物做 `-x` 可执行检查（RI1 检查），
  *   hdiutil 镜像保留 POSIX 权限位。writeFileSync 默认 0644，必须显式 chmod。
  */
 function buildMinimalAppDmg(opts: {
@@ -238,7 +238,7 @@ async function waitFor(desc: string, cond: () => boolean, timeoutMs = 30_000): P
  * 在生成脚本的 [stage] 标记行后注入「flag 文件暂停循环」（测试夹具变换）：
  *   while [ -e "<flagPath>" ]; do sleep 0.05; done
  * 测试轮询到目标状态后：删 flag = 放行继续执行；kill 进程组 = 模拟中断。
- * 脚本决策逻辑（守卫/mv 顺序/回滚）零改动。
+ * 脚本决策逻辑（检查/mv 顺序/回滚）零改动。
  */
 function pauseAfterStage(script: string, stage: string, flagPath: string): string {
   const anchor = `[stage] ${stage} begin"`
@@ -818,7 +818,7 @@ describe.skipIf(!IS_MAC || !HAS_HDIUTIL || !HAS_DITTO || !HAS_SHASUM)('updater-s
 })
 
 // ════════════════════════════════════════════════════════════════
-// LINUX 脚本：mv 备份/回滚决策树 + 守卫（不真 spawn AppImage）
+// LINUX 脚本：mv 备份/回滚决策树 + 检查（不真 spawn AppImage）
 // ════════════════════════════════════════════════════════════════
 describe('updater-script integration: linux mv 备份/回滚', () => {
   function makeLinuxVars(opts: { appImagePath?: string; newFilePath?: string } = {}): LinuxUpdaterScriptVars {

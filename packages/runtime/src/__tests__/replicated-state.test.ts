@@ -9,8 +9,8 @@
  * - 用例 4 wire 归一（key 缺失按登记语义处理）→ describe「D1b 合并规则」it 2 / it 3
  * - 用例 5 pollIntervalMs 周期兜底（配置启动、未配置不启动定时器）
  *   → describe「周期兜底」it 1 / it 2
- * - 用例 7 refetch 全量重拉语义 → describe「refetch / dispose」it 1
- * - 补充：在途失效不丢（epoch 守卫）、防抖聚合、dispose 生命周期
+ * - 用例 7 refetch 全量重新拉取语义 → describe「refetch / dispose」it 1
+ * - 补充：在途失效不丢（epoch 检查）、防抖聚合、dispose 生命周期
  *
  * 项目规范：fake timers（vi.useFakeTimers + advanceTimersByTimeAsync），禁真实 sleep。
  */
@@ -23,7 +23,7 @@ import {
   type FieldsNullSemantics,
 } from '../services/session/replicated-state.js'
 
-/** 测试用标量 session 状态形态（label / thinkingLevel / modelId 三类目标实例的最小投影）。 */
+/** 测试用标量 session 状态形态（label / thinkingLevel / modelId 三类目标实例的最小派生视图）。 */
 interface SessionState {
   sessionName?: string
   thinkingLevel?: string
@@ -147,7 +147,7 @@ describe('ReplicatedState', () => {
   })
 
   describe('周期兜底', () => {
-    it('pollIntervalMs 配置后：周期定时器启动，到点无条件重拉（无失效也拉）', async () => {
+    it('pollIntervalMs 配置后：周期定时器启动，到点无条件重新拉取（无失效也拉）', async () => {
       const { rs, fetch } = createState({ pollIntervalMs: 30_000 })
       expect(vi.getTimerCount()).toBe(1) // 周期定时器已启动
 
@@ -176,7 +176,7 @@ describe('ReplicatedState', () => {
   })
 
   describe('refetch / dispose', () => {
-    it('refetch 全量重拉：绕过防抖立即发起，应用完整快照', async () => {
+    it('refetch 全量重新拉取：绕过防抖立即发起，应用完整快照', async () => {
       const { rs, fetch } = createState()
       await seedSnapshot(rs, fetch, { sessionName: 'A', modelId: 'm-1' })
       fetch.mockResolvedValue({ sessionName: 'B', modelId: 'm-2' })
@@ -235,8 +235,8 @@ describe('ReplicatedState', () => {
     })
   })
 
-  describe('在途失效不丢（epoch 守卫）', () => {
-    it('fetch 在途期间 markDirty：本次成功快照不清 dirty，防抖定时器仍触发补拉', async () => {
+  describe('在途失效不丢（epoch 检查）', () => {
+    it('fetch 在途期间 markDirty：本次成功快照不清 dirty，防抖定时器仍触发补充拉取', async () => {
       const { rs, fetch } = createState()
       let resolveFetch!: (value: SessionState) => void
       fetch.mockImplementationOnce(
@@ -252,7 +252,7 @@ describe('ReplicatedState', () => {
       await vi.advanceTimersByTimeAsync(1)
 
       expect(rs.get()).toEqual({ sessionName: 'stale' }) // 在途快照仍应用（优于无快照）
-      expect(rs.isDirty()).toBe(true) // 但 dirty 不被吞：在途失效仍待补拉
+      expect(rs.isDirty()).toBe(true) // 但 dirty 不被吞：在途失效仍待补充拉取
 
       fetch.mockResolvedValue({ sessionName: 'fresh' })
       await vi.advanceTimersByTimeAsync(DEBOUNCE_MS) // markDirty 挂的防抖定时器未被撤销

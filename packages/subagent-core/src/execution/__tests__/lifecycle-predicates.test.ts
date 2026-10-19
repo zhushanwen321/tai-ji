@@ -99,11 +99,11 @@ describe("lifecycle-predicates (v4 B-1)", () => {
   // [two-state-convergence U5/D4] isResumable 判据改 idle 派生（idle 即 resumable）——
   // 旧「running && 无活进程」判据依赖的轮终桥接形态已随 U4 翻边消亡。
   describe("isResumable (= status === 'idle'，[U5/D4] idle 派生)", () => {
-    it("idle → true (轮终收口即可续聊——含 one-shot 完成 / chat 等续聊 / 中断族)", () => {
+    it("idle → true (轮终收尾即可续聊——含 one-shot 完成 / chat 等续聊 / 中断族)", () => {
       expect(isResumable(makeRecord({ status: "idle" }))).toBe(true);
     });
 
-    it("running（无论有无活进程镜像）→ false (在飞轮不可冷路径 resume)", () => {
+    it("running（无论有无活进程镜像）→ false (在途轮不可冷路径 resume)", () => {
       expect(isResumable(makeRecord({ status: "running" }))).toBe(false);
       const rec = makeRecord({ status: "running" });
       coreSpawnedChildrenMirror().register(rec.id, { pid: 1, killed: false });

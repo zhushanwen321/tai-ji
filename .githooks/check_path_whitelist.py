@@ -88,7 +88,7 @@ def check_file(filepath: Path) -> list[str]:
         # 注意: ~/.pi/agent 是系统 pi 的固定路径，不属于 taiji 实例隔离范围，不检查
     ]
 
-    # 查找白名单数组的上下文（从变量声明到闭合方括号）
+    # 查找白名单数组的上下文（从变量声明到结束方括号）
     for var_pattern in ALLOWED_VAR_PATTERNS:
         array_match = re.search(
             rf"(?:const|let|var)\s+{var_pattern}\s*=\s*\[([^\]]*)\]", text, re.DOTALL

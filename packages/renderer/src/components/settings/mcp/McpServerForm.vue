@@ -1,4 +1,4 @@
-<!-- split-justified: MCP 表单单一语义域（多传输类型 schema 校验 + 错误三件套 + 滚动定位——校验面围绕同一表单状态机） -->
+<!-- split-justified: MCP 表单单一语义域（多传输类型 schema 校验 + 错误三件套 + 滚动定位——校验逻辑围绕同一表单状态机） -->
 <template>
   <Dialog :open="open" @update:open="emit('update:open', $event)">
     <!-- 宽/高 = demo .cpop-lg（min(520px, 100vw-48px) / max-height 82vh 内滚动——保存被拦

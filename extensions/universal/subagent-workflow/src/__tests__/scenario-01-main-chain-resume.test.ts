@@ -36,7 +36,7 @@ describe("场景 1：主链路——三调用串行 run 崩溃后续跑", () => 
 
       const sd = makeScenarioDeps(env, makeFauxRunner());
       const returnedId = await resumeScenarioRun(env, sd, RUN_ID);
-      expect(returnedId).toBe(RUN_ID); // 同 runId 复活（机制文档方案 A——观测面单实体）
+      expect(returnedId).toBe(RUN_ID); // 同 runId 复活（机制文档方案 A——观测范围单实体）
 
       const summary = await waitForScenarioSettled(sd.runs, RUN_ID);
       expect(summary.status).toBe("done");

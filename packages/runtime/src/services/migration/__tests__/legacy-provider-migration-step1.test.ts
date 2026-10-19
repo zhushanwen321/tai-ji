@@ -20,8 +20,8 @@ import { AuthStorage, type CredentialWriter } from '../../auth/auth-storage.js'
 
 /**
  * 轻量 credentialWriter adapter：与生产等价（AuthService.saveCredential 内部就是
- * authStorage.set，A1-4 收口只收调用点不改锁语义）。测试文件内直调 authStorage.set
- * 不违反收口 grep（验收排除测试文件）。
+ * authStorage.set，A1-4 收敛只收调用点不改锁语义）。测试文件内直调 authStorage.set
+ * 不违反收敛 grep（验收排除测试文件）。
  */
 function makeCredentialWriter(authStorage: AuthStorage): CredentialWriter {
   return { saveCredential: (id, cred) => authStorage.set(id, cred) }

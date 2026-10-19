@@ -1,7 +1,7 @@
 /**
  * subagent-extractor legacy 路径畸形输入测试（R2-TC S4）。
  *
- * 锁定 legacy 兜底解析（extractSubagentsFromEntriesLegacy）对不可信输入的逐层 shape 守卫：
+ * 锁定 legacy 兜底解析（extractSubagentsFromEntriesLegacy）对不可信输入的逐层 shape 检查：
  * 1. toolCall block action!=='start'（如 list）→ projectSubagentStartArgs 返回 null，块跳过
  * 2. toolResult content[0].text 非 JSON（如错误消息纯文本）→ parse 失败 null，条目跳过
  * 3. assistant content / 顶层 entries 含非 object 元素 → parseLegacyToolCallBlock null，不抛错
@@ -44,8 +44,8 @@ describe('scanSubagentEntries · legacy 路径畸形输入（R2-TC S4）', () =>
     const records = scanSubagentEntries([
       assistantEntry([
         // action: 'list' 的 subagent toolCall——非 start，须被 projectSubagentStartArgs 丢弃。
-        // 故意带合法 startParam + bgResponse toolResult：若 action 守卫缺失，该块会通过
-        // startParam 形状检查（重叠防护穿透）凭空产出 ghost record——此构造使 action 守卫独立可观测。
+        // 故意带合法 startParam + bgResponse toolResult：若 action 检查缺失，该块会通过
+        // startParam 形状检查（重叠防护穿透）凭空产出 ghost record——此构造使 action 检查独立可观测。
         {
           type: 'toolCall',
           name: 'subagent',

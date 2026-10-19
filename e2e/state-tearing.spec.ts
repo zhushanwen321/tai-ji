@@ -6,11 +6,11 @@
  * - E2E-ST-2: busy 时停止按钮可见 + 可点击（abort 后回 idle）
  * - E2E-ST-3: busy 时 Enter → steer（B 策略，不打断当前回合）
  * - E2E-ST-4: 停止按钮在 busy 全程始终可见（不闪烁消失）
- * - E2E-ST-5: panel-per-session generating 隔离（A 流式期间切到空 session B，B 的 Landing 不被守卫误挡）
+ * - E2E-ST-5: panel-per-session generating 隔离（A 流式期间切到空 session B，B 的 Landing 不被检查误挡）
  * - E2E-ST-6: A complete 后 B 仍正常（A 收 message.complete 进 complete 态，B 仍渲染 Landing）
  *
  * 核心事故场景（ST-5/ST-6 锁定）：原 isGenerating 用全局 chat.isStreaming flag，
- * A session 流式期间切到 B（空 session），B 的 Landing 被 !isGenerating 守卫误挡 →
+ * A session 流式期间切到 B（空 session），B 的 Landing 被 !isGenerating 检查误挡 →
  * 落兜底空态（「选择左侧会话开始」），new-task 渲染撕裂。修复后 isGenerating 改为
  * per-session 派生（chat.isGenerating(sessionId)），空 session 的 Landing 不再被跨 session 误伤。
  *
@@ -63,7 +63,7 @@ async function newTaskSession(page: import('@playwright/test').Page): Promise<vo
 
 /**
  * 切回 s3 session（侧栏点会话项）。
- * landing 态点历史会话触发 cancelFlow + selectSession（useSidebar.selectSession 守卫）。
+ * landing 态点历史会话触发 cancelFlow + selectSession（useSidebar.selectSession 检查）。
  */
 async function switchBackToS3(page: import('@playwright/test').Page): Promise<void> {
   // activeTab 恒为 sessions（newTaskSession 不切 tab），session list 直点（见 activateSession 注释：
@@ -144,7 +144,7 @@ test.describe('状态撕裂修复 E2E（fix-state-tearing）', () => {
     await expect(page.locator('.stop-btn')).toHaveCount(0, { timeout: 30_000 })
   })
 
-  test('E2E-ST-5: panel-per-session generating 隔离（A 流式期间切到空 session B，B 的 Landing 不被守卫误挡） @p0-smoke', async ({ page }) => {
+  test('E2E-ST-5: panel-per-session generating 隔离（A 流式期间切到空 session B，B 的 Landing 不被检查误挡） @p0-smoke', async ({ page }) => {
     // ── 步骤 1：s3 发消息进入 generating（busy）态 ──
     // s3「API 性能优化」是空 session，发送后进入流式（message_start → isGenerating(s3)=true）
     await sendAndWaitBusy(page)
@@ -158,7 +158,7 @@ test.describe('状态撕裂修复 E2E（fix-state-tearing）', () => {
     await expect(page.getByTestId('new-task-landing')).toBeVisible()
     // [MANDATORY] composer 输入区可见（composer-box，landing variant 同 testid）
     await expect(page.getByTestId('composer-box')).toBeVisible()
-    // [MANDATORY] composer 输入区可输入（不被守卫挡成 disabled / 兜底空态）
+    // [MANDATORY] composer 输入区可输入（不被检查挡成 disabled / 兜底空态）
     const landingInput = page.getByRole('textbox')
     await landingInput.click()
     await landingInput.pressSequentially('B 侧输入')

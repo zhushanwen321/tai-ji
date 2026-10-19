@@ -37,7 +37,7 @@ describe('normalizeWorkflowScriptName（三形态互通）', () => {
     expect(normalizeWorkflowScriptName('my.flow-a.js')).toBe('my.flow-a')
   })
 
-  it('空串与裸扩展名不炸（入口侧空值守卫在前，此处仅形态确定）', () => {
+  it('空串与裸扩展名不炸（入口侧空值检查在前，此处仅形态确定）', () => {
     expect(normalizeWorkflowScriptName('')).toBe('')
     expect(normalizeWorkflowScriptName('.js')).toBe('')
   })

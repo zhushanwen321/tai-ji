@@ -10,7 +10,7 @@
  * 的 isConnected，失效的跳过——Highlight 注册失效 range 会被 Chromium 忽略，但显式
  * 过滤保证「画上去的一定还在文档里」的语义可测。
  *
- * API 缺席守卫：Highlight / CSS.highlights 类型由 lib.dom 提供，但运行时环境不保证
+ * API 缺席检查：Highlight / CSS.highlights 类型由 lib.dom 提供，但运行时环境不保证
  * 存在（happy-dom 测试环境均无）——绘制前 typeof/存在性检查，缺席静默 no-op。
  */
 

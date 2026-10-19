@@ -87,7 +87,7 @@ describe('pending 容量上限 + 共享 sweep timer（Q1-5）', () => {
     await expect(victimPromise).rejects.toMatchObject({ code: 'overflow' })
 
     // 迟到的 error envelope 到达（runtime 慢回错误）：resolveEnvelope 的 pendingMap.has
-    // 前置守卫对 error 分支同样生效——已驱逐 id 不进 reject 展开，no-op
+    // 前置检查对 error 分支同样生效——已驱逐 id 不进 reject 展开，no-op
     expect(() =>
       pending.resolveEnvelope(
         envelopeMsg('error', victim, { code: 'permission_denied', message: 'denied' }),

@@ -228,7 +228,7 @@ describe('resolveFamily - 错误', () => {
 // ============================================================
 // U4: SubagentRef 富字段（manifest 主 / P-fallback identity 回退）
 // 验证 buildFamilyIndex 从 identity entry.data 读 task/agent/model/status/sessionFile
-// 填 SubagentRef，异名映射（data.agent → agentName），守卫放宽（只校验 rootSessionId+slug）。
+// 填 SubagentRef，异名映射（data.agent → agentName），检查放宽（只校验 rootSessionId+slug）。
 // ============================================================
 
 describe('U4: SubagentRef 富字段（buildFamilyIndex 透传）', () => {
@@ -276,7 +276,7 @@ describe('U4: SubagentRef 富字段（buildFamilyIndex 透传）', () => {
     expect(sub?.status).toBeUndefined()
   })
 
-  it('TC-u4-pfallback-no-identity: data 缺 rootSessionId → 守卫拒掉，不入 subagentsByRoot，不抛错', () => {
+  it('TC-u4-pfallback-no-identity: data 缺 rootSessionId → 检查拒掉，不入 subagentsByRoot，不抛错', () => {
     // 模拟无 identity（运行中/异常，尾行是 message 非 identity）：data 只有 slug 无 rootSessionId
     const noRoot: Entry = {
       type: 'custom',
@@ -287,7 +287,7 @@ describe('U4: SubagentRef 富字段（buildFamilyIndex 透传）', () => {
     }
     const index = buildFamilyIndex([header(ROOT)], [noRoot], makeStats([ROOT]))
 
-    // 守卫拒掉 → 不入 subagentsByRoot
+    // 检查拒掉 → 不入 subagentsByRoot
     expect(index.subagentsByRoot.size).toBe(0)
     // resolveFamily 不抛错，subagents 空
     const family = resolveFamily(ROOT, index)
@@ -331,7 +331,7 @@ describe('U4: SubagentRef 富字段（buildFamilyIndex 透传）', () => {
     expect(sub?.sessionFile).toBeUndefined()
   })
 
-  it('isSubagentIdentityData 守卫放宽：富字段部分缺失/全缺都通过（只校验 rootSessionId+slug）', () => {
+  it('isSubagentIdentityData 检查放宽：富字段部分缺失/全缺都通过（只校验 rootSessionId+slug）', () => {
     const identities = [
       subagentIdentityRich(SUB, ROOT, 's1', { task: 'only-task' }), // 部分富字段
       subagentIdentity(SUB2, ROOT, 's2'), // 完全无富字段（旧 manifest 形态）

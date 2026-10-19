@@ -48,8 +48,8 @@ export class RunRuntime {
  * 重试退避窗口内（error 消息已收到、run 仍 running、旧 worker exit(0)）必须 no-op 等
  * rebuild；若挂 meta 则 rebuild 后新 worker 再静默退出时会被旧标记误放行，重新悬挂。
  *
- * 写点：① handleWorkerMessage 的 return/error 分支（WorkerHandle.isCurrent 守卫保证
- * 消息必来自当前代际）；② handleWorkerError 进入处理前（[R4-F1] 同代际幂等守卫——
+ * 写点：① handleWorkerMessage 的 return/error 分支（WorkerHandle.isCurrent 检查保证
+ * 消息必来自当前代际）；② handleWorkerError 进入处理前（[R4-F1] 同代际幂等检查——
  * worker 崩溃时 error + exit(1) 双事件各派发一次 handleWorkerError，第一个事件标记
  * 本代际已处理，第二个事件命中标志跳过，消除单次崩溃计数 +2 / 双 rebuild 交错）。
  * rebuildRuntime 构造新 RunRuntime 自然重置。
@@ -71,7 +71,7 @@ export class RunRuntime {
   /**
  * 释放所有资源：terminate worker + abort controller。
  *
- * 幂等——重复调用安全（第二次起 no-op，released flag 守卫）。
+ * 幂等——重复调用安全（第二次起 no-op，released flag 检查）。
  * 调用后此 RunRuntime 应被调用方丢弃（WorkflowRun.runtime = undefined），
  * [HISTORICAL] 原由 replaceRuntime 在崩溃重试时注入新实例（G3-001）——该链路已删（ADR-0122）。
  *
@@ -90,7 +90,7 @@ export class RunRuntime {
     // worker.terminate 异步但幂等——不 await（release 是同步签名，调用方
     // 不应被底层线程关闭阻塞；worker 收到 terminate 后自行清理）。
     void this.worker.terminate();
-    // controller.abort 触发 listener（kill agent subprocess、中止在飞调用）。
+    // controller.abort 触发 listener（kill agent subprocess、中止在途调用）。
     // 一次性语义——已 aborted 的 controller 重复 abort 无副作用。
     this.controller.abort();
   }

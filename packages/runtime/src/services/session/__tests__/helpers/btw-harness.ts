@@ -164,6 +164,9 @@ export function makeHarness(overrides?: Partial<BtwServiceDeps>): BtwHarness {
       return {}
     }),
     resolveMainSessionFile: vi.fn(() => undefined),
+    // D5 线树软删缺省 no-op（大多数用例不触及；btw-lifecycle 线树软删组覆盖为
+    // spy 包装真实实现——非 mac 降级真跑断言落盘效果）。
+    trashDirectory: vi.fn(async () => {}),
     resolvePiCommand: () => 'pi-not-used-in-fake',
     forkSession: vi.fn(async () => { throw new Error('forkSession not stubbed by test') }),
     traceContractInjection: vi.fn((t: BtwContractInjectionTrace) => { h.traces.push(t) }),

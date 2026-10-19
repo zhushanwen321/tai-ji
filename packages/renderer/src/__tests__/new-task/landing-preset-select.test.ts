@@ -3,7 +3,7 @@
  *
  * [HISTORICAL] 「landing 选模式后不生效」缺陷：用户在 landing 点 chip 展开模式列表
  * （`flow.state` 进 `preset-popover`），再点选项时 core `setPendingPreset` 的
- * `state !== 'landing'` 守卫把这次真实选择静默丢弃——pendingPreset 恒 null →
+ * `state !== 'landing'` 检查把这次真实选择静默丢弃——pendingPreset 恒 null →
  * ① chip 文案不回显（Landing 的 `modeName` 源自 `flow.pendingPreset`）、
  * ② 建出的 session `launchPresetId=undefined`。
  *
@@ -11,16 +11,16 @@
  * - ui `preset-select-chip.test.ts` 用假 flow，只断言 `emit('select')`，并**手动**模拟
  *   `pendingPreset.value = '...'`（把被测链路的关键一跳假设为真）。
  * - renderer `landing.test.ts` / `landing-smoke.test.ts` 把整个 flow mock 成 vi.fn，
- *   没有真实 `setPendingPreset` 守卫。
+ *   没有真实 `setPendingPreset` 检查。
  * - core `flow.test.ts` 只在 `landing` 态调 `setPendingPreset`，从未覆盖点击发生时的
  *   真实态 `preset-popover`。
  *
- * 本用例补上缺口：真实 Landing + 真实 core flow（真守卫）+ 真实 ui PresetSelectChip，
+ * 本用例补上缺口：真实 Landing + 真实 core flow（真检查）+ 真实 ui PresetSelectChip，
  * 点真实选项 DOM，断言「flow.pendingPreset 被写 + chip 展示名随之变化」。
  *
  * [U-A 方案 B] 同一真实链路上补模式 chip 底色接线断言：`accent` prop 由 Landing 的
  * isNonDefaultPreset 算好传入（displayPreset.id !== (defaultPresetId **||** builtin:full)），
- * 默认模式中性底 / 非默认模式 accent 底——含 `defaultPresetId === ''`（store 未加载）不得误判非默认的守卫。
+ * 默认模式中性底 / 非默认模式 accent 底——含 `defaultPresetId === ''`（store 未加载）不得误判非默认的检查。
  *
  * 运行：cd packages/renderer && npx vitest run src/__tests__/new-task/landing-preset-select.test.ts
  */
@@ -147,7 +147,7 @@ describe('Landing 模式选择端到端（点击 → chip 回显 → flow 透传
     option!.click()
     await flushPromises()
 
-    // ① 透传真源被写（修复前恒 null——旧守卫丢弃 preset-popover 态下的写入）
+    // ① 透传真源被写（修复前恒 null——旧检查丢弃 preset-popover 态下的写入）
     expect(flow.pendingPreset.value).toBe('builtin:session-dispatch')
     // ② chip 展示名随之切换（修复前仍为「全工具」——Landing 的 modeName 源自 pendingPreset）
     expect(chip.text()).toContain('调度')
@@ -160,7 +160,7 @@ describe('Landing 模式选择端到端（点击 → chip 回显 → flow 透传
   })
 
   /**
-   * `||` 而非 `??` 守卫（设计 §5.1 判据已踩过的坑）：store 未加载时 defaultPresetId 为 `''`
+   * `||` 而非 `??` 检查（设计 §5.1 判据已踩过的坑）：store 未加载时 defaultPresetId 为 `''`
    * 而非 null，`'' ?? builtin:full` 仍是 `''` → 会把 builtin:full 默认档误判成非默认（恒亮 accent）。
    * 此处默认档解析链完全走 `''` 输入（presets 已加载，无显式选择），断言 chip 仍为中性底。
    */

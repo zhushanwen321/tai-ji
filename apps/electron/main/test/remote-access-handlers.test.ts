@@ -5,7 +5,7 @@
  * - get-remote-access-info：配置 + LAN 候选（端口来自 supervisor 既有端口发现；null → 空列表）
  * - rotate-remote-access-token：轮换重写文件，返回新 token
  * - set-remote-access-enabled：重启链纯委托 supervisor.restartForConfigChange
- *   （stop→spawn→广播时序归 supervisor 单点，本层断言只验证委托调用与前置守卫）
+ *   （stop→spawn→广播时序归 supervisor 单点，本层断言只验证委托调用与前置检查）
  *   - 开关状态变化且 runtime 在跑 → 委托重启（restarted=true）
  *   - 开关状态不变 → 不重启（幂等）
  *   - runtime 未跑（port=null，mock 模式）→ 只落盘不重启，下次启动自然生效

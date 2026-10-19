@@ -72,7 +72,7 @@ export async function playByName(name: string, kind?: 'success' | 'error'): Prom
       const audio = getOrCreateAudio(name, uri)
       // 从头重播：暂停态续播会从中断处继续，重置到起点。
       // readyState >= 1（HAVE_METADATA）才赋值 currentTime：HAVE_NOTHING 时赋值是设置
-      // default playback start position（不重置、也不抛），语义不是「回到起点」——守卫
+      // default playback start position（不重置、也不抛），语义不是「回到起点」——检查
       // 替代原 try/catch best-effort（无异常可捕获，赋值时机本身就是判据）。
       if (audio.readyState >= 1) {
         audio.currentTime = 0

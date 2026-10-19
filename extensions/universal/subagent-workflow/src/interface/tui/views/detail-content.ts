@@ -42,10 +42,10 @@ import {
 /** 探测宽度：足够大避免截断折行影响行数统计（对齐 subagents DETAIL_LEN_PROBE_WIDTH）。 */
 const DETAIL_LEN_PROBE_WIDTH = 9999;
 
-// ── [H2 W3] store record 的 live 进度投影（设计 D2：进度源从 node.live 切 store）──
+// ── [H2 W3] store record 的 live 进度派生视图（设计 D2：进度源从 node.live 切 store）──
 
 /**
- * running record 的实时进度投影（totalTokens / 工具计数 / elapsedSeconds / turns /
+ * running record 的实时进度派生视图（totalTokens / 工具计数 / elapsedSeconds / turns /
  * eventLog / currentActivity / lastError）。
  */
 export interface LiveProgressView {
@@ -59,7 +59,7 @@ export interface LiveProgressView {
 }
 
 /**
- * SubagentRecord（store 查询投影）→ LiveProgressView。字段口径（S1 等价表）：
+ * SubagentRecord（store 查询派生视图）→ LiveProgressView。字段口径（S1 等价表）：
  *   - totalTokens / turns：recordToSubagent 直读 record.totalTokens / turnCount，同源；
  *   - toolCallCount：eventLog 里 tool_start 计数——getEventLog 对每个 toolCall 恰产
  *     一条 tool_start，与 getAllToolCalls(record).length 恒等；
@@ -104,7 +104,7 @@ export function statusLabel(status: ExecutionTraceNode["status"], theme: ThemeLi
  * 构建 L2 右侧详情的完整内容行。
  *
  * 纯函数：无 Pi runtime、无副作用，可单测。入参 promptExpanded 用结构化类型，
- * 不依赖完整 ViewState（便于测试构造）。liveView = 该节点配对的 running record 投影
+ * 不依赖完整 ViewState（便于测试构造）。liveView = 该节点配对的 running record 派生视图
  * （[H2 W3] 从 trace.live 切 store 订阅，经 WorkflowsView.collectNodeLiveProgress
  * 配对注入；缺省走终态 result 路径）。
  */
@@ -125,7 +125,7 @@ export function buildDetailContent(
   rightLines.push(theme.fg("muted", "Detail"));
   rightLines.push("─".repeat(mainWidth));
   rightLines.push(`${statusDotStr(node.status, theme)} ${statusLabel(node.status, theme)} · ${node.model}`);
-  // Live 路径优先：运行中用 store record 投影的实时 usage/toolCalls/elapsed；否则用终态 result。
+  // Live 路径优先：运行中用 store record 派生视图的实时 usage/toolCalls/elapsed；否则用终态 result。
   if (liveView) {
     const tokK = liveView.totalTokens > 0 ? `${Math.round(liveView.totalTokens / BUDGET_TOKENS_DIVISOR)}k tok` : "0 tok";
     rightLines.push(theme.fg("dim", `${tokK} · ${liveView.toolCallCount} tool calls · ${formatElapsedSeconds(liveView.elapsedSeconds)}`));
@@ -267,7 +267,7 @@ function renderActivitySection(
   mainWidth: number,
   theme: ThemeLike,
 ): void {
-  // Live 路径：agent 运行中，从 store record 投影派生实时 eventLog + currentActivity。
+  // Live 路径：agent 运行中，从 store record 派生视图派生实时 eventLog + currentActivity。
   // 与 subagents TUI 一致：当前活动行 + 最近 N 条离散事件（tool/turn_end/error）。
   if (liveView) {
     const eventLog = liveView.eventLog.filter((e) => e.type !== "turn_end");

@@ -1,5 +1,5 @@
 /**
- * 编排器单测族 · isComposing 守卫（display-containers §6.7「isComposing 守卫统一前置——
+ * 编排器单测族 · isComposing 检查（display-containers §6.7「isComposing 检查统一前置——
  * IME 组合态三键一律不动作」/ §8.2「isComposing」；真机 IME 组合态不可稳定自动化，由本族
  * 构造 isComposing=true 事件对账）。
  *
@@ -8,7 +8,7 @@
  * - IPC 键路（⌃` / ⌘W 经 before-input-event 转发）：compositionstart/compositionend 事件序
  *   维护的组合态布尔（ime-composition 模块）。
  *
- * 每条守卫用例配同键路的非组合态基线（证明「不动作」是守卫所致而非键路本身死键）。
+ * 每条检查用例配同键路的非组合态基线（证明「不动作」是检查所致而非键路本身死键）。
  *
  * 测试框架：vitest（happy-dom）；真实 KeyboardEvent / Composition 事件 + 真实 core 状态。
  * 运行：cd packages/renderer && npx vitest run src/__tests__/composables/key-orchestrator/
@@ -50,7 +50,7 @@ afterEach(() => {
   document.body.innerHTML = ''
 })
 
-describe('IME 组合态三键一律不动作（isComposing 守卫统一前置）', () => {
+describe('IME 组合态三键一律不动作（isComposing 检查统一前置）', () => {
   it('Esc：组合态不剥层（取消候选归输入语义）；非组合态同键照常剥层（基线对照）', () => {
     openBottom()
     openRight()

@@ -1,6 +1,6 @@
 <!--
-  UsageLedger · 摘要台账行。
-  一行内联数字，1px 竖分隔（demo 台账行：flex baseline / gap 20px / padding 4px 0 14px，
+  UsageLedger · 摘要登记清单行。
+  一行内联数字，1px 竖分隔（demo 登记清单行：flex baseline / gap 20px / padding 4px 0 14px，
   数字在上、srow-desc 标签在下）。从 demo ledger 移植。
   数字行字号为 demo ledger 展示级字面大字号（总 Token lead 24px，其余格 21px）：
   超出 --text-* 字号档上限（15px，style.css 字号 scale），刻意跳过归档、维持 demo

@@ -4,7 +4,7 @@
  * 覆盖 C-data-18 收编原语的全部内建不变量：
  * - 同 key 并发 run 共享同一 entry（fn 仅发起一次）
  * - 不同 key 并行互不干扰
- * - settle 即清（成功 / 失败两条腿）
+ * - settle 即清（成功 / 失败两条路径）
  * - 引用比对防误删（慢请求后到 settle 不误删后发起的新 entry）
  * - 失败传播给调用方 + 清理 + 不产生 unhandled rejection
  * - 单键退化形态（固定 key 的单 Promise 变量形态）
@@ -92,7 +92,7 @@ describe('U7a createInflightDedup: 去重不变量', () => {
     await flushMicrotasks()
     expect(dedup.has('k')).toBe(false)
 
-    // settle 后再 run：重新发起（无条件恢复腿，不依赖缓存时效）
+    // settle 后再 run：重新发起（无条件恢复路径，不依赖缓存时效）
     const d2 = deferred<number>()
     fn.mockReturnValue(d2.promise)
     const second = dedup.run('k', fn)
@@ -183,7 +183,7 @@ describe('U7a createInflightDedup: 失败传播与清理', () => {
     expect(await retryEntry.promise).toBe(7)
   })
 
-  it('失败腿同样受引用比对保护（reject 的旧 promise 不误删新 entry）', async () => {
+  it('失败路径同样受引用比对保护（reject 的旧 promise 不误删新 entry）', async () => {
     const dedup = createInflightDedup<number>()
     const doomed = deferred<number>()
     const fn = vi.fn(() => doomed.promise)

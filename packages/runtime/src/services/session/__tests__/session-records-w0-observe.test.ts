@@ -1,18 +1,18 @@
 /**
- * SessionRecords W0 观测面 + R11/6c3 根修回归（pull-push-architecture W0 / D7）。
+ * SessionRecords W0 观测范围 + R11/6c3 从根源修复回归（pull-push-architecture W0 / D7）。
  *
  * 覆盖：
- * - 6c3 根修回归：纯 plan session 首拉失败（pi client 不可得 / RPC 错误）后，修复前
- *   planState 恒 null 不在对账域、agent_settled 腿永久跳过 → 「全程零发布」持续态；
- *   修复后 awaitingFirstPull 纳入对账域，对账腿持续重试直至首轮拉取成功并补发 planState。
- * - 首拉未决解除语义：成功一轮（含空增量轮）清 awaitingFirstPull——纯聊天 session
+ * - 6c3 从根源修复回归：纯 plan session 首次拉取失败（pi client 不可得 / RPC 错误）后，修复前
+ *   planState 恒 null 不在对账域、agent_settled 路径永久跳过 → 「全程零发布」持续态；
+ *   修复后 awaitingFirstPull 纳入对账域，对账路径持续重试直至首轮拉取成功并补发 planState。
+ * - 首次拉取未决解除语义：成功一轮（含空增量轮）清 awaitingFirstPull——纯聊天 session
  *   （缓存全空）回归既有域外语义（reconcile.test.ts 扫描域门用例的对偶面）。
- * - P-1 探针（cursor 管线与 WS 推送独立腿）：真实 MessageBus 无订阅者空投形态 / bus
- *   未注入形态下，cursor 照常推进（后续失效走增量 RPC）、派生缓存照常正确——推送腿
- *   完全缺席不伤缓存腿（pull-push §2 前提 P-1 的行为证据，W1 缓存优先的前置确认）。
+ * - P-1 探针（cursor 管线与 WS 推送独立路径）：真实 MessageBus 无订阅者丢弃形态 / bus
+ *   未注入形态下，cursor 照常推进（后续失效走增量 RPC）、派生缓存照常正确——推送路径
+ *   完全缺席不伤缓存路径（pull-push §2 前提 P-1 的行为证据，W1 缓存优先的前置确认）。
  * - 断点显形 warn：失效无缓存（未注册/已销毁）、pi client 不可得、bus 未注入三处此前
  *   静默断点（R11「发布/订阅侧零日志」的排障盲点）落结构化 warn。
- * - 发布观测：水位门后有帧落 info（域键 frames + 触发腿 trigger + 耗时 elapsedMs）；
+ * - 发布观测：水位门后有帧落 info（域键 frames + 触发路径 trigger + 耗时 elapsedMs）；
  *   稳态零帧零日志（S5「无噪声」锚）。
  *
  * 分层：mock 层 = deps（与 session-records.test.ts 同形态）+ vi.mock logger；fixture
@@ -29,6 +29,8 @@ import type { ISessionStore } from '../../ports/session.js'
 import type { SessionRecordsDeps } from '../session-records.js'
 import { SessionRecords } from '../session-records.js'
 import { routeJournalReport } from '../journal-report-router.js'
+import { resolvePiWorkflowRunsDir } from '@zhushanwen/subagent-core'
+import { getSessionStoreDir } from '@taiji/shared/paths'
 import type { SubagentJournalEvent, SubagentJournalReport } from '@zhushanwen/extension-protocol'
 import { SCALAR_STATE_DEBOUNCE_MS } from '../replicated-states.config.js'
 
@@ -94,7 +96,7 @@ async function flushDebounce(): Promise<void> {
   await vi.advanceTimersByTimeAsync(SCALAR_STATE_DEBOUNCE_MS)
 }
 
-/** 冲刷微任务（对账腿的 fire-and-forget 拉取落定）。 */
+/** 冲刷微任务（对账路径的 fire-and-forget 拉取落定）。 */
 async function flushMicrotasks(): Promise<void> {
   await Promise.resolve()
   await Promise.resolve()
@@ -148,8 +150,8 @@ afterEach(() => {
   vi.useRealTimers()
 })
 
-describe('R11/6c3 根修：首拉未决纳入对账域（awaitingFirstPull）', () => {
-  it('首拉失败（pi client 不可得）→ 对账腿重试 → planState 补发（根修回归主锚）', async () => {
+describe('R11/6c3 从根源修复：首次拉取未决纳入对账域（awaitingFirstPull）', () => {
+  it('首次拉取失败（pi client 不可得）→ 对账路径重试 → planState 补发（从根源修复回归主锚）', async () => {
     let piUp = false
     const { records, publish, client } = makeRecords({
       pm: { getClient: vi.fn(() => (piUp ? (client as unknown as IPiEngine) : null)) } as unknown as IProcessManager,
@@ -163,7 +165,7 @@ describe('R11/6c3 根修：首拉未决纳入对账域（awaitingFirstPull）', 
     expect(publish).not.toHaveBeenCalled()
     expect(warnsOf('[session-records] refresh skipped: pi client unavailable')).toHaveLength(1)
 
-    // pi 就绪，无任何新失效信号——agent_settled 对账腿触发（修复前：域外 no-op）
+    // pi 就绪，无任何新失效信号——agent_settled 对账路径触发（修复前：域外 no-op）
     piUp = true
     client.getEntries.mockResolvedValue({
       data: { entries: [planStateEntry(fullPlanData('awaiting'), 'e1')], leafId: 'e1' },
@@ -171,9 +173,9 @@ describe('R11/6c3 根修：首拉未决纳入对账域（awaitingFirstPull）', 
     records.reconcileRecordEntries('s1')
     await flushMicrotasks()
 
-    expect(client.getEntries).toHaveBeenCalledWith() // 全量首拉发生
+    expect(client.getEntries).toHaveBeenCalledWith() // 全量首次拉取发生
     expect(planFramesOf(publish)).toHaveLength(1) // planState 补发（零发布持续态被打破）
-    // 首拉成功后 awaitingFirstPull 清除：planState 已派生非 null → session 回归内容域
+    // 首次拉取成功后 awaitingFirstPull 清除：planState 已派生非 null → session 回归内容域
     // （对账照常触发走增量），但水位 diff 空 → 零新帧（未决重试语义不残留）
     client.getEntries.mockClear()
     client.getEntries.mockResolvedValue({ data: { entries: [], leafId: 'e1' } })
@@ -185,7 +187,7 @@ describe('R11/6c3 根修：首拉未决纳入对账域（awaitingFirstPull）', 
     expect(publish.mock.calls.length).toBe(framesBefore) // 水位 diff 空：零新帧
   })
 
-  it('首拉失败（RPC 错误）→ 对账腿重试 → planState 补发', async () => {
+  it('首次拉取失败（RPC 错误）→ 对账路径重试 → planState 补发', async () => {
     const { records, publish, client } = makeRecords()
     const fire = registerSession(records)
     fire('s1')
@@ -212,7 +214,7 @@ describe('R11/6c3 根修：首拉未决纳入对账域（awaitingFirstPull）', 
     await flushDebounce()
     expect(client.getEntries).toHaveBeenCalledTimes(1)
 
-    // 未决已清 + 缓存全空 → 对账域外：定时腿 sweep 亦不触发 RPC
+    // 未决已清 + 缓存全空 → 对账域外：定时路径 sweep 亦不触发 RPC
     client.getEntries.mockClear()
     records.reconcileRecordEntries('s1')
     await flushMicrotasks()
@@ -222,21 +224,21 @@ describe('R11/6c3 根修：首拉未决纳入对账域（awaitingFirstPull）', 
   })
 })
 
-describe('P-1 探针：cursor 管线与 WS 推送独立腿（pull-push §2 前提 P-1）', () => {
-  it('空投形态（真实 MessageBus 无订阅者）：推送腿缺席，cursor 照常推进、派生照常发生', async () => {
-    const realBus = new MessageBus() // 无订阅者：publish 即空投（6c3 类形态）
+describe('P-1 探针：cursor 管线与 WS 推送独立路径（pull-push §2 前提 P-1）', () => {
+  it('丢弃形态（真实 MessageBus 无订阅者）：推送路径缺席，cursor 照常推进、派生照常发生', async () => {
+    const realBus = new MessageBus() // 无订阅者：publish 即丢弃（6c3 类形态）
     const { records, client } = makeRecords({ getMessageBus: () => realBus })
     const fire = registerSession(records)
     fire('s1')
 
-    // 轮 1：全量首拉（空投发生——不抛错、不阻断）
+    // 轮 1：全量首次拉取（丢弃发生——不抛错、不阻断）
     client.getEntries.mockResolvedValue({
       data: { entries: [planStateEntry(fullPlanData('awaiting'), 'e1')], leafId: 'e1' },
     })
     records.invalidateRecordEntries('s1', 'plan-state')
     await flushDebounce()
 
-    // 轮 2：cursor 已推进 → 失效走增量 RPC（since='e1'）——缓存腿健康的行为证据
+    // 轮 2：cursor 已推进 → 失效走增量 RPC（since='e1'）——缓存路径健康的行为证据
     client.getEntries.mockClear()
     client.getEntries.mockResolvedValue({ data: { entries: [], leafId: 'e1' } })
     records.invalidateRecordEntries('s1', 'plan-state')
@@ -250,7 +252,7 @@ describe('P-1 探针：cursor 管线与 WS 推送独立腿（pull-push §2 前�
     expect(client.getEntries).toHaveBeenCalledWith('e1')
   })
 
-  it('bus 未注入形态：cursor 管线照常推进（推送腿完全缺失不伤缓存腿）', async () => {
+  it('bus 未注入形态：cursor 管线照常推进（推送路径完全缺失不伤缓存路径）', async () => {
     const { records, client } = makeRecords({ getMessageBus: () => null })
     const fire = registerSession(records)
     fire('s1')
@@ -269,7 +271,7 @@ describe('P-1 探针：cursor 管线与 WS 推送独立腿（pull-push §2 前�
   })
 })
 
-describe('断点显形 warn + 发布观测（W0 观测面）', () => {
+describe('断点显形 warn + 发布观测（W0 观测范围）', () => {
   it('失效无缓存（未注册 session）落结构化 warn（此前静默 no-op 零日志）', () => {
     const { records } = makeRecords()
     records.invalidateRecordEntries('s-unknown', 'plan-state')
@@ -278,7 +280,7 @@ describe('断点显形 warn + 发布观测（W0 观测面）', () => {
     expect(hits[0]![1]).toMatchObject({ sessionId: 's-unknown', customType: 'plan-state' })
   })
 
-  it('bus 未注入 publish 短路落结构化 warn；水位门后有帧落发布观测（域键+触发腿+耗时）', async () => {
+  it('bus 未注入 publish 短路落结构化 warn；水位门后有帧落发布观测（域键+触发路径+耗时）', async () => {
     let bus: IMessageBus | null = null
     const { records, client } = makeRecords({ getMessageBus: () => bus })
     const fire = registerSession(records)
@@ -292,7 +294,7 @@ describe('断点显形 warn + 发布观测（W0 观测面）', () => {
     await flushDebounce()
     expect(warnsOf('[session-records] publish skipped: message bus not injected')).toHaveLength(1)
 
-    // 轮 2：bus 注入 + 对账腿 → 补发帧 + 发布观测 info（trigger=reconcile-settled）
+    // 轮 2：bus 注入 + 对账路径 → 补发帧 + 发布观测 info（trigger=reconcile-settled）
     bus = { publish: vi.fn() } as unknown as IMessageBus
     client.getEntries.mockResolvedValue({ data: { entries: [], leafId: 'e1' } })
     records.reconcileRecordEntries('s1')
@@ -323,7 +325,7 @@ describe('断点显形 warn + 发布观测（W0 观测面）', () => {
     expect(pubEvents).toHaveLength(0)
   })
 
-  it('失效腿发布观测：trigger=invalidate', async () => {
+  it('失效路径发布观测：trigger=invalidate', async () => {
     const { records, client } = makeRecords()
     const fire = registerSession(records)
     fire('s1')
@@ -339,17 +341,21 @@ describe('断点显形 warn + 发布观测（W0 观测面）', () => {
 })
 
 describe('发布归因 + workflowFolds fold 证据（可观测性 2026-10-02，event-push-channel 重演）', () => {
-  // 事故场景重放（workflow 详情空窗）：run journal 先落 run-created，entry 腿送注册条目
-  // 后写侧追加 agent-started 并经 marker 通道推送——两腿发布在观测面上必须可归因、fold
-  // 证据可分形。（原「tailer 腿」随 event-tail watch 退役换轨为推送喂入；读活动事实 =
+  // 事故场景重放（workflow 详情空窗）：run journal 先落 run-created，entry 路径送注册条目
+  // 后写侧追加 agent-started 并经 marker 通道推送——两路径发布在观测范围上必须可归因、fold
+  // 证据可分形。（原「tailer 路径」随 event-tail watch 退役换轨为推送喂入；读活动事实 =
   // routeJournalReport 送达并应用，不再有 tailer 观测行。）
-  it('推送腿发布落 trigger=event-projection + fold 证据推进；entry 腿对称', async () => {
+  it('推送路径发布落 trigger=event-projection + fold 证据推进；entry 路径对称', async () => {
     const dir = mkdtempSync(join(tmpdir(), 'wf-observe-'))
     try {
       const sessionDir = join(dir, 'sessions', 'enc-proj')
-      const runDir = join(sessionDir, 'workflow-state')
+      // 生产同源目录（session-store-layout-inversion D1）：run journal 冷读目录 =
+      // resolvePiWorkflowRunsDir = `<root>/<sid>/workflow/runs/`；旧 fixture 写
+      // `sessions/<enc>/workflow-state/`（旧布局形态），与冷读目录对不上 → fold 恒 absent
+      const runDir = resolvePiWorkflowRunsDir('s1')
       mkdirSync(runDir, { recursive: true })
       const sessionFile = join(sessionDir, '2026-01-01T00-00-00-000Z_s1.jsonl')
+      mkdirSync(sessionDir, { recursive: true })
       writeFileSync(sessionFile, '')
       const journal = join(runDir, 'wf-1.record.jsonl')
       writeFileSync(
@@ -367,7 +373,7 @@ describe('发布归因 + workflowFolds fold 证据（可观测性 2026-10-02，e
         data: { entries: [workflowRegisteredEntry('wf-1', journal)], leafId: 'e1' },
       })
 
-      // 轮 1（entry 腿送注册条目；attach 冷读抢跑 fold，asks=0）
+      // 轮 1（entry 路径送注册条目；attach 冷读抢跑 fold，asks=0）
       records.invalidateRecordEntries('s1', 'workflow-record')
       await flushDebounce()
       await flushMicrotasks()
@@ -381,7 +387,7 @@ describe('发布归因 + workflowFolds fold 证据（可观测性 2026-10-02，e
         workflowFolds: { 'wf-1': { fold: 'present', asks: 0 } },
       })
 
-      // 轮 2（journal 追加 agent-started：写侧落盘后经 marker 通道推送 → 投影 fold
+      // 轮 2（journal 追加 agent-started：写侧落盘后经 marker 通道推送 → 派生视图 fold
       // 推进 → 归因发布；event-tail watch 已随 event-push-channel 退役，读活动事实
       // = routeJournalReport 送达并应用，不再有 tailer 观测行）
       const agentStarted: SubagentJournalEvent = {
@@ -394,7 +400,7 @@ describe('发布归因 + workflowFolds fold 证据（可观测性 2026-10-02，e
       }
       expect(routeJournalReport('s1', report)).toBe(true)
 
-      // 发布归因行：trigger=event-projection + fold 证据推进 + 无 elapsedMs（推送腿无轮概念）
+      // 发布归因行：trigger=event-projection + fold 证据推进 + 无 elapsedMs（推送路径无轮概念）
       const round2 = framesPublishedEvents()
       expect(round2).toHaveLength(1)
       expect(round2[0]![1]).toMatchObject({
@@ -404,23 +410,27 @@ describe('发布归因 + workflowFolds fold 证据（可观测性 2026-10-02，e
         workflowFolds: { 'wf-1': { fold: 'present', asks: 1, lifecycle: 'running', lastSeq: 2 } },
       })
       expect('elapsedMs' in round2[0]![1]).toBe(false)
-      expect(workflowFramesOf(publish)).toHaveLength(2) // 两腿各一条 workflowUpdate
+      expect(workflowFramesOf(publish)).toHaveLength(2) // 两路径各一条 workflowUpdate
     } finally {
       rmSync(dir, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 })
+      // 树内 fixture 清理（globalSetup 钉扎的 tmp 数据目录内，fs-guard 白名单）
+      rmSync(join(getSessionStoreDir(), 's1'), { recursive: true, force: true, maxRetries: 5, retryDelay: 20 })
     }
   })
 })
 
-describe('降级投影闩死修复（2026-10-02）', () => {
-  // 事故形态同源：meta 缺席窗口（pi flush 前）创建的 entry-only 投影此前被 ensureProjection
+describe('降级派生视图闩死修复（2026-10-02）', () => {
+  // 事故形态同源：meta 缺席窗口（pi flush 前）创建的 entry-only 派生视图此前被 ensureProjection
   // 早退永久复用——fold 通道终身死亡。修复后 meta 可得即升级（读写触点驱动，零定时器）。
   it('meta 缺席时降级（agentCalls 空）；meta 可得后 getWorkflows 触发升级——fold 冷读补齐 + event-projection 发布归因', async () => {
     const dir = mkdtempSync(join(tmpdir(), 'wf-upgrade-'))
     try {
       const sessionDir = join(dir, 'sessions', 'enc-cwd')
-      const runDir = join(sessionDir, 'workflow-state')
+      // 生产同源目录（同上：`<root>/<sid>/workflow/runs/`，升级腿 attachEventSources 冷读锚点）
+      const runDir = resolvePiWorkflowRunsDir('s1')
       mkdirSync(runDir, { recursive: true })
       const sessionFile = join(sessionDir, '2026-01-01T00-00-00-000Z_s1.jsonl')
+      mkdirSync(sessionDir, { recursive: true })
       writeFileSync(sessionFile, '')
       const journal = join(runDir, 'wf-1.record.jsonl')
       writeFileSync(
@@ -442,7 +452,7 @@ describe('降级投影闩死修复（2026-10-02）', () => {
         data: { entries: [workflowRegisteredEntry('wf-1', journal)], leafId: 'e1' },
       })
 
-      // 阶段 1：meta 不可得 → 降级投影（无 tailer）→ entry 腿仍发布 run 信号（icon 形态），
+      // 阶段 1：meta 不可得 → 降级派生视图（无 tailer）→ entry 路径仍发布 run 信号（icon 形态），
       // fold 证据 = absent（事故签名：有 icon 无 agent 的构造性成因可观测分形）
       records.invalidateRecordEntries('s1', 'workflow-record')
       await flushDebounce()
@@ -455,14 +465,16 @@ describe('降级投影闩死修复（2026-10-02）', () => {
         workflowFolds: { 'wf-1': { fold: 'absent' } },
       })
 
-      // 阶段 2：meta 可得（pi 已 flush）→ ensureProjection 升级腿 → tailer 冷读 fold
+      // 阶段 2：meta 可得（pi 已 flush）→ ensureProjection 升级路径 → tailer 冷读 fold
       metaVisible = true
       const upgraded = await records.getWorkflows('s1')
       expect(upgraded.records.find((r) => r.runId === 'wf-1')?.agentCalls).toHaveLength(1)
-      // 升级的 rescan 经 fireChange → 发布腿：归因 event-projection（旧代码此处永远静默）
+      // 升级的 rescan 经 fireChange → 发布路径：归因 event-projection（旧代码此处永远静默）
       expect(framesPublishedEvents().some(([, m]) => m.trigger === 'event-projection')).toBe(true)
     } finally {
       rmSync(dir, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 })
+      // 树内 fixture 清理（globalSetup 钉扎的 tmp 数据目录内，fs-guard 白名单）
+      rmSync(join(getSessionStoreDir(), 's1'), { recursive: true, force: true, maxRetries: 5, retryDelay: 20 })
     }
   })
 })

@@ -1,13 +1,18 @@
 // src/__tests__/path-encoding.test.ts
 //
-// 锁定 encodeCwd 契约：session-runner 与 runtime 删会话级联等消费方共用此编码，
-// 漂移会导致同一 cwd 落到两个不同目录（见 path-encoding.ts 顶部注释）。
+// 锁定 subagent 文件族目录公式契约（[session-store-layout-inversion D2/D3]）：
+// 分区键 = rootSessionId，落点 = session 存储树 `<root>/<rootSessionId>/subagents/`。
+// sessions / records / model-switch 三目录同树（同一 rootSessionId 分区），随会话删除
+// 整树回收；漂移会导致同一 record 的三族文件分落两棵树（GC/重建互相找不到）。
 import * as path from "node:path";
 
 import { describe, expect, it } from "vitest";
 
-import { encodeCwd, getSubagentModelSwitchResultsDir, getSubagentRecordsDir, getSubagentSessionDir } from "../assembly/path-encoding.ts";
+import { getSubagentModelSwitchResultsDir, getSubagentRecordsDir, getSubagentSessionDir } from "../assembly/path-encoding.ts";
+import { encodeCwd, getSessionStoreDir } from "@taiji/shared/paths";
 
+// encodeCwd 编码契约（shared 单源；runtime pi-paths re-export 同源）——编码逻辑本身
+// 仍是 pi 主会话树（sessions/<encodeCwd>/）的布局规则，subagent 族不再消费它。
 describe("encodeCwd", () => {
   it("encodes a normal unix absolute path", () => {
     expect(encodeCwd("/Users/x/proj")).toBe("--Users-x-proj--");
@@ -44,80 +49,68 @@ describe("encodeCwd", () => {
   });
 });
 
+const SID = "root-sid-abc123";
+const DATA_DIR = "/tmp/fake-data";
+
 describe("getSubagentSessionDir", () => {
-  it("returns agentDir/subagents/<encodedCwd>/sessions", () => {
-    // [MF#1] 既有布局：subagents/<enc>/sessions/（不改，避免升级用户既有数据 orphan）
-    const result = getSubagentSessionDir("/home/user/.pi/agent", "/home/user/project");
-    expect(result).toBe(
-      path.join("/home/user/.pi/agent", "subagents", "--home-user-project--", "sessions")
-    );
+  it("returns <root>/<rootSessionId>/subagents/sessions", () => {
+    // 新布局：rootSessionId 树内分区（随会话整树回收）
+    const result = getSubagentSessionDir(SID, DATA_DIR);
+    expect(result).toBe(path.join(getSessionStoreDir(DATA_DIR), SID, "subagents", "sessions"));
   });
 
-  it("uses mainCwd encoding (not effectiveCwd)", () => {
-    // D-004: 用主 cwd 编码，保证同一主 cwd 下所有 subagent 存同一目录
-    const mainCwd = "/Users/dev/Code/my-project";
-    const result = getSubagentSessionDir("~/.pi/agent", mainCwd);
-    const encoded = encodeCwd(mainCwd);
-    expect(result).toBe(path.join("~/.pi/agent", "subagents", encoded, "sessions"));
+  it("partitions by rootSessionId (same sid for whole nested tree)", () => {
+    // 分区键 = rootSessionId：同一根会话的所有 subagent（嵌套全层）落同一棵会话树
+    const result = getSubagentSessionDir(SID, DATA_DIR);
+    expect(result).toBe(getSubagentSessionDir(SID, DATA_DIR));
+    const other = getSubagentSessionDir("root-sid-other999", DATA_DIR);
+    expect(result).not.toBe(other);
   });
 
-  it("produces consistent path for same inputs", () => {
-    const a = getSubagentSessionDir("/agent", "/cwd");
-    const b = getSubagentSessionDir("/agent", "/cwd");
-    expect(a).toBe(b);
-  });
-
-  it("produces different path for different mainCwd", () => {
-    const a = getSubagentSessionDir("/agent", "/cwd1");
-    const b = getSubagentSessionDir("/agent", "/cwd2");
-    expect(a).not.toBe(b);
+  it("rejects invalid sessionId (path traversal blocked)", () => {
+    // 同域校验（shared assertPiSessionId）：路径分隔符 / 冒号（btw vid）/ .. 一律拒绝
+    expect(() => getSubagentSessionDir("../escape", DATA_DIR)).toThrow();
+    expect(() => getSubagentSessionDir("btw:sid", DATA_DIR)).toThrow();
+    expect(() => getSubagentSessionDir("", DATA_DIR)).toThrow();
   });
 });
 
 describe("getSubagentRecordsDir", () => {
-  it("returns agentDir/subagents/<encodedCwd>/records", () => {
-    const result = getSubagentRecordsDir("/home/user/.pi/agent", "/Users/x/proj");
-    expect(result).toBe(
-      path.join("/home/user/.pi/agent", "subagents", "--Users-x-proj--", "records")
-    );
+  it("returns <root>/<rootSessionId>/subagents/records", () => {
+    const result = getSubagentRecordsDir(SID, DATA_DIR);
+    expect(result).toBe(path.join(getSessionStoreDir(DATA_DIR), SID, "subagents", "records"));
   });
 
-  it("shares the same <enc> segment with getSubagentSessionDir for same cwd", () => {
-    // F1：records 与 sessions 在同一 <enc> 段下，仅尾段不同（records vs sessions）。
-    // worktree 场景三者恒等的前提就靠这个共享 enc。
-    const agentDir = "/home/user/.pi/agent";
-    const cwd = "/Users/x/proj";
-    const sessions = getSubagentSessionDir(agentDir, cwd);
-    const records = getSubagentRecordsDir(agentDir, cwd);
-    // 共享 enc：去掉尾段后剩同一路径前缀
+  it("shares the same session tree with getSubagentSessionDir for same sid", () => {
+    // records 与 sessions 在同一棵根会话树内，仅尾段不同（records vs sessions）。
+    // worktree 场景三者恒等的前提就靠这个共享分区。
+    const sessions = getSubagentSessionDir(SID, DATA_DIR);
+    const records = getSubagentRecordsDir(SID, DATA_DIR);
+    // 共享 subagents 段：去掉尾段后剩同一路径前缀
     expect(path.dirname(sessions)).toBe(path.dirname(records));
     // 尾段不同
     expect(path.basename(sessions)).toBe("sessions");
     expect(path.basename(records)).toBe("records");
   });
 
-  it("produces different path for different mainCwd", () => {
-    const a = getSubagentRecordsDir("/agent", "/cwd1");
-    const b = getSubagentRecordsDir("/agent", "/cwd2");
+  it("produces different path for different rootSessionId", () => {
+    const a = getSubagentRecordsDir("root-sid-aaa111", DATA_DIR);
+    const b = getSubagentRecordsDir("root-sid-bbb222", DATA_DIR);
     expect(a).not.toBe(b);
   });
 });
 
 describe("getSubagentModelSwitchResultsDir", () => {
-  it("returns agentDir/subagents/<encodedCwd>/model-switch（与 records 同 enc 段，§7.1.1 同源同族）", () => {
-    const result = getSubagentModelSwitchResultsDir("/home/user/.pi/agent", "/Users/x/proj");
-    expect(result).toBe(
-      path.join("/home/user/.pi/agent", "subagents", "--Users-x-proj--", "model-switch")
-    );
+  it("returns <root>/<rootSessionId>/subagents/model-switch（与 records 同树，§7.1.1 同源同族）", () => {
+    const result = getSubagentModelSwitchResultsDir(SID, DATA_DIR);
+    expect(result).toBe(path.join(getSessionStoreDir(DATA_DIR), SID, "subagents", "model-switch"));
   });
 
-  it("shares the same <enc> segment with getSubagentRecordsDir for same cwd", () => {
-    // §7.1.1 要素 3：结果目录与 records 目录同段——extension 写入侧与 runtime 读取侧
+  it("shares the same session tree with getSubagentRecordsDir for same sid", () => {
+    // §7.1.1 要素 3：结果目录与 records 目录同树——extension 写入侧与 runtime 读取侧
     // 共用本 helper，同源性由结构保证（两侧不同源 = 通道回执永不命中）。
-    const agentDir = "/home/user/.pi/agent";
-    const cwd = "/Users/x/proj";
-    expect(path.dirname(getSubagentModelSwitchResultsDir(agentDir, cwd))).toBe(
-      path.dirname(getSubagentRecordsDir(agentDir, cwd))
+    expect(path.dirname(getSubagentModelSwitchResultsDir(SID, DATA_DIR))).toBe(
+      path.dirname(getSubagentRecordsDir(SID, DATA_DIR))
     );
   });
 });

@@ -12,7 +12,7 @@
  *  - 多地址切换跟随：下拉选中另一候选后，链接文本 / QR 生成入参 / 复制内容跟随新地址
  *
  * Mock 策略：
- *  - vi.mock('@/lib/ipc') 提供三方法 stub（组件唯一 IPC 消费面）
+ *  - vi.mock('@/lib/ipc') 提供三方法 stub（组件唯一 IPC 消费方）
  *  - vi.mock('qrcode') 固定 toDataURL 返回（二维码生成是外部纯函数，断言 img src 转发）
  *  - useToast 用真实单例（toasts.value 断言，与 settings-modal-smoke 同形态）
  *
@@ -277,8 +277,8 @@ describe('RemoteAccessPage 轮换流', () => {
   })
 
   // code-harden 观测项：fullUrl 快速切换（轮换 token）时 QR 多代生成并发在途，
-  // 旧一代慢返回不得覆盖新一代（ConnectionEntrySection 序列号守卫防回归）
-  it('QR 竞态守卫：旧一代生成慢返回不覆盖新一代二维码', async () => {
+  // 旧一代慢返回不得覆盖新一代（ConnectionEntrySection 序列号检查防回归）
+  it('QR 竞态检查：旧一代生成慢返回不覆盖新一代二维码', async () => {
     // 第一代（旧 token URL）挂起、第二代（新 token URL）即刻返回——复现乱序返回时序
     let resolveStale!: (value: string) => void
     const staleGeneration = new Promise<string>((resolve) => {
@@ -297,7 +297,7 @@ describe('RemoteAccessPage 轮换流', () => {
     await flushPromises()
     expect(wrapper.find('[data-testid="remote-access-qr"]').attributes('src')).toBe('data:image/png;base64,QR-NEW')
 
-    // 旧一代此刻才返回：序列号守卫拦截，不得覆盖
+    // 旧一代此刻才返回：序列号检查拦截，不得覆盖
     resolveStale('data:image/png;base64,QR-STALE')
     await flushPromises()
     expect(wrapper.find('[data-testid="remote-access-qr"]').attributes('src')).toBe('data:image/png;base64,QR-NEW')

@@ -234,7 +234,7 @@ describe('Turn working 态 · 完成复位 + elapsed live', () => {
 
   // U15:[u6a / D7 展示统一] dispatching 空窗期占位已迁出——空 turn（user 已发、assistants 未到）
   // + session 进行中不再渲染 TurnMeta 占位（v-if 收窄回 assistants.length > 0），「思考中」指示
-  // 由对话流尾部 ActivityStrip thinking 行承担（sessionPhase occupancy 投影驱动，
+  // 由对话流尾部 ActivityStrip thinking 行承担（sessionPhase occupancy 派生视图驱动，
   // 组件级断言见 message-stream/__tests__/ActivityStrip.test.ts）。
   it('U15: dispatching 占位迁出——空 turn + sessionActive 不再渲染 TurnMeta（旧占位清理）', () => {
     const wrapper = mountTurn({
@@ -782,7 +782,7 @@ describe('Turn · subagent 轮终 running-resumable → isWorkingTurn false（re
     const sub = useSubagentStore()
 
     // [R2-1] one-shot 空文本成功轮：轮终写点补的占位「(empty)」（extensions finalize-record
-    // 第四分支）经 extractor 投影为 SubagentRecord.result——判据只看非 undefined，占位形态
+    // 第四分支）经 extractor 派生视图为 SubagentRecord.result——判据只看非 undefined，占位形态
     // 同样排除 working。写点若保持 undefined（修复前），此 record 会让末位 turn 永久「工作中」
     sub.applyRecords('s-oneshot-empty', [makeSubagentRecord({ status: 'idle', result: '(empty)', stopReason: 'completed' })])
     expect(sessionActive.value).toBe(false)

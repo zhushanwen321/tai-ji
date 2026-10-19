@@ -1,5 +1,5 @@
 /**
- * features/composer 模块入口 —— ui 包 composer 展示组件公共面（W4 composer-shell-integration）。
+ * features/composer 模块入口 —— ui 包 composer 展示组件公共范围（W4 composer-shell-integration）。
  *
  * 定位：p3-strangler-domains::composer W4 产物。ComposerInput 从 renderer components/panel
  * 迁移到 ui 包（props/emits/expose 契约不变，C1 契约），经 @taiji/ui/features/composer

@@ -3,7 +3,7 @@
  * `join(getAgentsDir(), name)` 的 name 取用户可编辑的 agent.name||id（链路
  * resources-message-handler → config-service → agent-crud），未做单段校验时
  * `../` 可越界写/删 agents 目录之外的任意 *.md。修复 = 写/删前单段断言
- * （basename 自等 + 非 .. + 无分隔符）+ 读/删侧静默失败收口（ENOENT 安静、
+ * （basename 自等 + 非 .. + 无分隔符）+ 读/删侧静默失败收尾（ENOENT 安静、
  * 非 ENOENT warn 含路径与原因）。
  *
  * 隔离：TAIJI_AGENT_DATA_DIR 指向 mkdtempSync 临时目录（getDataDir 每次调用
@@ -67,7 +67,7 @@ describe('RT-3#11: writeAgentFile 单段校验（越界名抛错且不产生越�
     expect(readdirSync(agentsDir())).toHaveLength(0)
   })
 
-  it('合法名正常写入 agents 目录（守卫不误伤正常路径）', () => {
+  it('合法名正常写入 agents 目录（检查不误伤正常路径）', () => {
     writeAgentFile('my-agent', '---\ndescription: x\n---\nbody')
     expect(existsSync(join(agentsDir(), 'my-agent.md'))).toBe(true)
     // 带后缀名也照常（fileName 不重复拼接）
@@ -76,7 +76,7 @@ describe('RT-3#11: writeAgentFile 单段校验（越界名抛错且不产生越�
   })
 })
 
-describe('RT-3#11: deleteAgentFile 单段校验（删除向量对称守卫）', () => {
+describe('RT-3#11: deleteAgentFile 单段校验（删除向量对称检查）', () => {
   it.each([
     ['../evil', '相对上跳'],
     ['sub/evil', '子目录形态'],
@@ -123,7 +123,7 @@ describe('RT-3#11: deleteAgentFile 单段校验（删除向量对称守卫）', 
   })
 })
 
-describe('RT-3#11: listAgentFiles 读侧静默失败收口', () => {
+describe('RT-3#11: listAgentFiles 读侧静默失败收尾', () => {
   it('readdir 非 ENOENT 失败：warn 含目录路径与原因，返回空列表不抛', async () => {
     const warnSpy = vi.spyOn(logger, 'warn').mockImplementation(() => {})
     const fs = await import('node:fs')

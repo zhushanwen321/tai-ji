@@ -145,7 +145,7 @@ const MAX_PROJECT_WATCHERS = 8
  * （熔断后该 scope 冻结到重启）；② macOS fs.watch 静默丢事件前科（2026-07-27 实测 ~40%
  * 触发率，见 WATCH_POLL_INTERVAL_MS 注释）；③ project watcher LRU 驱逐窗口失明。
  * 兜底语义：固定周期无条件重扫 globalCache + 全部活跃 projectCache cwd 使缓存重新收敛，
- * 一个机制闭合全部三种发散（cache-governance 设计 §3.1 项 1-4，G5「失效机制故障可自愈」：
+ * 一个机制覆盖全部三种发散（cache-governance 设计 §3.1 项 1-4，G5「失效机制故障可自愈」：
  * 不允许任何形态的永久发散到重启）。watcher 正常时成本 = 每 5min 一次 readdir 级扫描，
  * 量级与 chokidar 初始扫描相同，可忽略。
  */
@@ -183,7 +183,7 @@ export class SkillRegistry {
   private readonly projectWatcherLru: string[] = []
   /**
    * 进行中的 getProjectSkills Promise，按 cwd 去重（防 TOCTOU 竞态导致重复挂 watcher）。
-   * 背景：缓存守卫在 await 之前，并发同 cwd 请求会各自走 scanFn + watch()，第二个 set 覆盖丢掉
+   * 背景：缓存检查在 await 之前，并发同 cwd 请求会各自走 scanFn + watch()，第二个 set 覆盖丢掉
    * 第一个 watcher（永不 close → fd 泄漏，正是本 PR 要消除的故障类别）。in-flight Promise 让并发
    * 调用共享同一次 scan + watch。
    */
@@ -269,7 +269,7 @@ export class SkillRegistry {
 
   /**
    * 重扫全局缓存：值有变化才刷新广播。广播链下游 = reloadOrchestrator（global 通知 =
-   * 全部活跃 idle session 的 pi reload）+ renderer 失效重拉，无差别周期广播违背设计
+   * 全部活跃 idle session 的 pi reload）+ renderer 失效重新拉取，无差别周期广播违背设计
    * 「watcher 正常时兜底成本可忽略」的成本口径——值比对即收敛判定：相等 = 缓存与磁盘
    * 已一致，无信息需要传播。scanFn 失败保留旧值（与 rebuildGlobal 同款容错），下周期重试。
    */
@@ -284,8 +284,8 @@ export class SkillRegistry {
   }
 
   /**
-   * 兜底重扫单 scope 的共用收敛骨架（global / project 两腿同款，收敛口径单点）：scanFn
-   * 失败保留该 scope 旧值；读取时分区已不存在（project 腿被 invalidateAllProjects 清掉
+   * 兜底重扫单 scope 的共用收敛骨架（global / project 两路径同款，收敛口径单点）：scanFn
+   * 失败保留该 scope 旧值；读取时分区已不存在（project 路径被 invalidateAllProjects 清掉
    * → read() 返回 undefined）则不复活已清分区；值变化才落缓存 + 广播（相等 = 缓存与磁盘
    * 已一致，无信息需传播）。
    */
@@ -505,7 +505,7 @@ export class SkillRegistry {
     this.projectCache.clear()
     // 清 in-flight：避免在途 getProjectSkills Promise resolve 后把旧扫描结果写回已清空的缓存。
     // 竞态：invalidate 后 in-flight 完成会 projectCache.set 旧值 + setupProjectWatcher(新 dirs)，
-    // 导致缓存（旧扫描）与 watcher（新目录）发散。清 Map 后 getProjectSkills 的 finally 守卫
+    // 导致缓存（旧扫描）与 watcher（新目录）发散。清 Map 后 getProjectSkills 的 finally 检查
     // 检测到 key 已不存在，跳过写回（in-flight 完成时 finally delete 不存在的 key 无副作用）。
     this.projectInFlight.clear()
     // 清 project 级 debounce timer：避免 pending 重扫在 dispose 后写回陈旧缓存。
@@ -634,9 +634,9 @@ export class SkillRegistry {
    * 关闭所有 watcher + 清兜底定时器 + 清缓存与 in-flight 状态（全局 + 项目级）。shutdown / 测试清理时调。
    *
    * W-dispose：必须清 projectInFlight——竞态场景下 getProjectSkills 进入 in-flight await scanFn →
-   * 期间调 dispose → scanFn resolve → 守卫 projectInFlight.has(cwd) 仍 true → 走 projectCache.set +
+   * 期间调 dispose → scanFn resolve → 检查 projectInFlight.has(cwd) 仍 true → 走 projectCache.set +
    * setupProjectWatcher → 新建 watcher 加入已清空的 projectWatchers，无人 close（泄漏）。清 Map 后
-   * in-flight 的 finally 守卫检测到 key 已不存在，跳过写回（与 invalidateAllProjects 对称）。
+   * in-flight 的 finally 检查检测到 key 已不存在，跳过写回（与 invalidateAllProjects 对称）。
    * 同时清 changeHandlers（防 stale 引用回调）、projectCache/globalCache（释放内存），并置 disposed
    * 标志——后续 getProjectSkills/rebuildGlobal 入口直接 return，杜绝 dispose 后 in-flight 写回。
    */

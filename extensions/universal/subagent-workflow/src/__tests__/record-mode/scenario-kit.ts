@@ -107,7 +107,7 @@ export function makeFauxRunner(
       dispatches.push({ seq, opts });
       const step: FauxStep = steps[seq - 1] ?? { kind: "ok" };
       if (step.kind === "error") {
-        // 调用级失败注入面：result.error 在场 = executeAgentCall 单次 finalizeCall
+        // 调用级失败注入点：result.error 在场 = executeAgentCall 单次 finalizeCall
         // failed 显式上报（[ADR-0122] 无自动重试；throw 会走 worker 错误矩阵，
         // 一次即 run failed——与调用级失败是两条不同路径）
         return { content: "", error: step.message, durationMs: 1 };
@@ -143,7 +143,7 @@ export function mkScenarioEnv(label: string): ScenarioEnv {
     rebindJournalAnchor: () => setRunEventJournalDirForTest(env.stateDir),
     cleanup: () => {
       setRunEventJournalDirForTest(undefined);
-      fs.rmSync(env.sessionDir, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 });
+      fs.rmSync(env.runsDir, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 });
     },
   };
 }
@@ -162,14 +162,14 @@ export interface SeedRunSpec { // oe-exempt:20260929:test:seed run shape (test f
   scriptSource: string;
   workflowName?: string;
   /**
-   * run-created 帧的 scriptPath 锚定载荷（生产写面 dispatchRunCreated 随帧落——
+   * run-created 帧的 scriptPath 锚定载荷（生产写侧 dispatchRunCreated 随帧落——
    * 内置模板场景必填：worker 沙箱 require _shared 族靠它定位；缺省 = 旧格式帧，
-   * 模板脚本 resume 由收紧后的守卫拒绝——A4 场景的构造面）。
+   * 模板脚本 resume 由收紧后的检查拒绝——A4 场景的构造范围）。
    */
   scriptPath?: string;
   ts?: number;
   /**
-   * run-created 帧的 args 全文（设计 §3.1 载荷表——生产写面 dispatchRunCreated
+   * run-created 帧的 args 全文（设计 §3.1 载荷表——生产写侧 dispatchRunCreated
    * 随帧落；D14 逐字段深度比对优先消费，任意体积可比对）。
    */
   args?: Record<string, unknown>;
@@ -232,17 +232,17 @@ export async function seedCrashedRun(env: RecordFixtureEnv, runId: string, spec:
   await appendEvents(env, runId, events);
 }
 
-// ── resume 侧 deps 装配（真 WorkerHost + 真 store + faux runner + 捕获面）────
+// ── resume 侧 deps 装配（真 WorkerHost + 真 store + faux runner + 捕获侧）────
 
 export interface ScenarioDeps { // oe-exempt:20260929:test:scenario deps bundle shape (test fixture infra)
   deps: LifecycleDeps;
   runs: Map<string, WorkflowRun>;
   faux: FauxRunnerHandle;
-  /** deps.scheduleTimeBudget 捕获（D10 预算折算断言面）。 */
+  /** deps.scheduleTimeBudget 捕获（D10 预算折算断言范围）。 */
   budgetSchedules: Array<{ runId: string; ms: number }>;
-  /** deps.appendEntry 捕获（裁决点 7 v2 注册条目断言面）。 */
+  /** deps.appendEntry 捕获（裁决点 7 v2 注册条目断言范围）。 */
   appendedEntries: Array<{ type: string; data: unknown }>;
-  /** deps.eventBus.emit 捕获（pending:register 断言面）。 */
+  /** deps.eventBus.emit 捕获（pending:register 断言范围）。 */
   emitted: Array<{ event: string; payload: unknown }>;
 }
 
@@ -252,7 +252,7 @@ export function makeScenarioDeps(env: RecordFixtureEnv, faux: FauxRunnerHandle):
   const appendedEntries: Array<{ type: string; data: unknown }> = [];
   const emitted: Array<{ event: string; payload: unknown }> = [];
   const deps: LifecycleDeps = {
-    store: new JsonlRunStore({ sessionDir: env.sessionDir }),
+    store: new JsonlRunStore({ runsDir: env.runsDir }),
     workerHost: new WorkerHostImpl(),
     runner: faux.runner,
     runs,
@@ -294,19 +294,19 @@ export async function adoptCrashedRun(
 ): Promise<{ recovered: number; runs: Map<string, WorkflowRun> }> {
   const runs = new Map<string, WorkflowRun>();
   const store = new JsonlRunStore({
-    sessionDir: env.sessionDir,
+    runsDir: env.runsDir,
     ctx: mkCtxWith([registeredEntry(runId, env.recordPath(runId))]) as never,
   });
   const result = await recoverCrashedRuns(store, runs, "Process killed (scenario fixture)");
   return { recovered: result.recovered, runs };
 }
 
-/** 读 record 流全部帧（断言面）。 */
+/** 读 record 流全部帧（断言范围）。 */
 export async function scanScenarioEvents(env: RecordFixtureEnv, runId: string): Promise<readonly WorkflowRunEvent[]> {
   return createRunEventJournal(env.stateDir).scan(runId);
 }
 
-/** 轮询至终局（runSummary 投影——活体终局源 = 终局记录注册表）。 */
+/** 轮询至终局（runSummary 派生视图——活体终局源 = 终局记录注册表）。 */
 export async function waitForScenarioSettled(
   runs: Map<string, WorkflowRun>,
   runId: string,

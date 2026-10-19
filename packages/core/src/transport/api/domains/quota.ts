@@ -23,7 +23,7 @@ export interface QuotaResult {
   reason?: QuotaFetchFailureReason
 }
 
-/** reply → QuotaResult 纯投影（三个查询 RPC 的统一返回形状）。 */
+/** reply → QuotaResult 纯派生视图（三个查询 RPC 的统一返回形状）。 */
 function toQuotaResult(reply: { data: NormalizedQuotaRow | null, lastFetchAt: number | null, reason?: QuotaFetchFailureReason }): QuotaResult {
   return { data: reply.data, lastFetchAt: reply.lastFetchAt, reason: reply.reason }
 }

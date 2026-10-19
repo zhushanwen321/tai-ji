@@ -4,7 +4,7 @@
  *   oversize 分流（v1 巨文件时代会话，>32MB）——32MB 预检与 oversize 语义退役至
  *   此专属。行为冻结：预检/降级/错误分级语义保持改造前逐字不变；
  * - 新路径冷启动流式扫描 scanRecordFamilyEntriesFromSessionFile：按块读 + 行预过滤
- *   + 仅 record 族 entry 进结果（不整串物化、不解析全部对话行），journal 投影的
+ *   + 仅 record 族 entry 进结果（不整串物化、不解析全部对话行），journal 派生视图的
  *   entry 源冷启动专用（events-projection.ts 消费）。
  *
  * subagent-extractor 与 workflow-extractor 的文件读取骨架此前逐字复制（statSync 预检 →
@@ -12,7 +12,7 @@
  * 本骨架把读取/预检/降级语义收单点，两个 extractor 只提供各自的日志标签、降级文案
  * 与 entry 扫描器。
  *
- * 错误分级契约（renderer 侧栏 stale 守卫的前提，两 extractor 原样保留）：
+ * 错误分级契约（renderer 侧栏 stale 检查的前提，两 extractor 原样保留）：
  * - ENOENT → 空列表 + oversize:false（pi session 文件延迟写入的合法窗口）
  * - 其他读错误 → 原样上抛（RPC 报错，renderer catch 保留旧分区 + 重试态，不与「真实删空」混淆）
  * - 预检 stat 失败（含 ENOENT）→ 走原读路径，错误分级由 readFileSync 承担，预检不引入新抛错
@@ -40,7 +40,7 @@ export interface SessionFileExtraction<T> {
   oversize: boolean
 }
 
-/** 各 extractor 注入的差异面：日志标签、降级文案的被提取对象名、entry 扫描器。 */
+/** 各 extractor 注入的差异点：日志标签、降级文案的被提取对象名、entry 扫描器。 */
 export interface SessionFileExtractionReader<T> {
   /** warn 留痕的日志前缀（如 'subagent-extractor'） */
   warnTag: string
@@ -110,7 +110,7 @@ const RECORD_FAMILY_LINE_HINTS: readonly string[] = [
 const STREAM_CHUNK_BYTES = 262_144
 
 /**
- * 主 session 文件的 record 族条目流式扫描（新路径冷启动专用，journal 投影的
+ * 主 session 文件的 record 族条目流式扫描（新路径冷启动专用，journal 派生视图的
  * entry 源喂入面）。
  *
  * 与上方全文兼容路径的区别：按块读 + 行预过滤 + 仅 record 族 entry 进结果，

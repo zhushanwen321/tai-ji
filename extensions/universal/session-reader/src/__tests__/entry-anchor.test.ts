@@ -370,13 +370,13 @@ describe('候选文件列表：顺序回退 + 命中即止（越界语义由调�
   })
 })
 
-describe('协议字面量漂移守卫（跨包契约）', () => {
+describe('协议字面量漂移检查（跨包契约）', () => {
   it('entry-anchor 本地 customType 字面量 === subagent-core 写侧单源', () => {
-    // 源码本地持有磁盘协议字符串（生产依赖面不引 subagent-core），此处锚定两侧同值
+    // 源码本地持有磁盘协议字符串（生产依赖范围不引 subagent-core），此处锚定两侧同值
     expect(SUBAGENT_RECORD_CUSTOM_TYPE).toBe('subagent-record')
   })
 
-  it('entry-anchor 本地 v2 认识版本 === subagent-core 写侧单源（写侧再升版本本守卫先红）', () => {
+  it('entry-anchor 本地 v2 认识版本 === subagent-core 写侧单源（写侧再升版本本检查先红）', () => {
     expect(SUBAGENT_RECORD_ENTRY_VERSION).toBe(2)
   })
 })

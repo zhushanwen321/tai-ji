@@ -69,7 +69,7 @@ import * as os from "node:os";
 import * as path from "node:path";
 
 import { isProcessAlive } from "../persistence/alive-store.ts";
-import { encodeCwd } from "../assembly/path-encoding.ts";
+import { encodeCwd } from "@taiji/shared/paths";
 import { WorktreeManager, addWorktreeWithStaleRecovery, type WorktreeGitRunner } from "../worktree/worktree-manager.ts";
 
 // 被测链路（gitRunAsync）调用四参形态（file, args, options, callback）；vi.mocked
@@ -461,7 +461,7 @@ describe("WorktreeManager", () => {
   // ============================================================
   // gitRunAsync 包装与 per-repo mutex（Phase 1 异步化新增）
   // ============================================================
-  describe("gitRunAsync（经 collectPatch/cleanup 公共面触达）", () => {
+  describe("gitRunAsync（经 collectPatch/cleanup 公共部分触达）", () => {
     it("非零退出：message 同构 + exitCode/stderr 属性（P-errshape：stderr 在 callback 第三参）", async () => {
       setupExecFile((args) => {
         if (args[0] === "diff") {
@@ -833,7 +833,7 @@ describe("WorktreeManager", () => {
     });
 
     it("pid 活的条目不删（绝不删活进程）", async () => {
-      // 物理面也 mock 存在（branch --list 返回该分支 + checkout 目录在）——
+      // 物理（磁盘）侧也 mock 存在（branch --list 返回该分支 + checkout 目录在）——
       // D5b 对账的两个方向（清孤儿 / 清幻影条目）都必须不动活条目。
       setupExecFile((args: readonly string[]) => {
         if (args[0] === "branch" && args[1] === "--list") return { stdout: "pi-sub-alive\n" };

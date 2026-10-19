@@ -43,6 +43,8 @@ export default {
     usageDesc: '查看 Token 用量与会话统计',
     remoteAccess: '远程访问',
     remoteAccessDesc: '从手机浏览器访问 taiji（局域网 / Tailscale）',
+    networkProxy: '网络代理',
+    networkProxyDesc: '配置 LLM 出站代理服务器与分流规则',
   },
   // ── Appearance 页（AppearancePage）──
   appearance: {
@@ -246,7 +248,7 @@ export default {
       credentialMissing: '需手填',
       credentialOauth: 'OAuth·Phase2',
       credentialCommand: '!命令',
-      credentialCommandHint: 'apiKey 以 ! 开头，pi 运行时执行 shell 命令取值（命令注入面）',
+      credentialCommandHint: 'apiKey 以 ! 开头，pi 运行时执行 shell 命令取值（命令注入风险）',
       warnings: '警告',
       // B2/W7：源配置解析期致命错误横幅（preview?.parseError 触发，不阻断已解析 providers 导入）
       parseError: '源配置解析出错（部分 provider 可能仍可导入）：{message}',
@@ -769,7 +771,7 @@ export default {
     //    DIAGNOSTIC_EXPORT_PRIVACY_NOTICE，有意不走 i18n——两端共用防文案分叉）──
     diagnosticsTitle: '诊断',
     diagnosticsExportLabel: '导出诊断包',
-    diagnosticsExportDesc: '打包崩溃台账与日志尾部为 zip（含本机路径与会话标识），保存位置由你选择，仅用于问题排查',
+    diagnosticsExportDesc: '打包崩溃条目清单与日志尾部为 zip（含本机路径与会话标识），保存位置由你选择，仅用于问题排查',
     diagnosticsExportBtn: '导出诊断包',
     diagnosticsConfirmTitle: '导出诊断包',
     diagnosticsConfirmExport: '导出',
@@ -1094,7 +1096,7 @@ export default {
     loading: '加载用量数据…',
     retry: '重试',
     scannedAt: '数据截至',
-    // ── 摘要台账行 ──
+    // ── 摘要条目清单行 ──
     totalTokens: '总 Token',
     recentDays: '近 {n} 天',
     cost: '费用（估算）',
@@ -1157,14 +1159,14 @@ export default {
     // ── 缓存构成 ──
     sectionCache: '缓存构成',
     sectionCacheMeta: '命中 = cacheRead ÷ (cacheRead + input)',
-    // ── 明细台账 ──
-    sectionDetail: '明细台账',
+    // ── 明细节条目清单 ──
+    sectionDetail: '明细清单',
     sectionDetailMeta: '按 provider 分组 · {groups} 组 · {range}',
     sectionDetailMetaRangeDays: '近 {n} 天',
     sectionDetailMetaRangeAll: '全部',
     // ── 空态 ──
     emptyTitle: '还没有会话记录',
-    emptyDesc: '开始一次对话后，这里会出现你的用量台账。',
+    emptyDesc: '开始一次对话后，这里会出现你的用量清单。',
     emptyScanned: '已扫描 {count} 个会话文件',
     // ── 脚注 ──
     footnote: '统计口径：assistant 消息 usage 逐条累加，含 compaction / summary 用量；费用为 pi models.json 费率估算值，订阅制 provider 记为 0（显示为 —）。',
@@ -1204,8 +1206,8 @@ export default {
     distMissingProd: '安装包缺少移动壳产物，手机端页面不可用，请重新安装最新版本',
   },
   // ── TTS 页（TtsPage，ai-voice-tts 设计 §5.2）──
-  // 开关类控件 label 按投影 toggles 清单 id 拼 key（settings.tts.toggle.<id>）；
-  // 投影出现未登记 id 时 vue-i18n 回退显示 id 本身，不阻断渲染。
+  // 开关类控件 label 按派生视图 toggles 清单 id 拼 key（settings.tts.toggle.<id>）；
+  // 派生视图出现未登记 id 时 vue-i18n 回退显示 id 本身，不阻断渲染。
   tts: {
     providerName: {
       stepfun: 'StepFun（阶跃星辰）',
@@ -1390,5 +1392,52 @@ export default {
     errCodeWrapperValue: '包装形态的值必须是对象：{\'{\'} "名称": {\'{\'} ... {\'}\'} {\'}\'}',
     errCodeBareNeedsWrapper: '添加时请使用包装形态提供服务器名：{\'{\'} "名称": {\'{\'} ... {\'}\'} {\'}\'}，名称自动取键名',
     errCodeRenameLocked: '编辑态名称锁定，改名 = 删除后重建；请把键名改回「{name}」',
+  },
+  // ── 网络代理页（llm-network-proxy U4：三卡 = 代理服务器 / 代理规则 / 请求统计）──
+  network: {
+    serverCard: '代理服务器',
+    serverCardDesc: 'LLM 出站请求的代理通道：开启后命中规则的请求经代理转发，其余保持直连',
+    enabled: '启用网络代理',
+    protocol: '协议',
+    host: '服务器地址',
+    port: '端口',
+    username: '认证用户名',
+    password: '认证密码',
+    usernamePlaceholder: '留空表示无需认证',
+    authPairHint: '用户名与密码须成对填写，或同时留空',
+    noProxy: '不走代理的地址（noProxy）',
+    noProxyHint: '逗号分隔；命中的请求保持直连，优先级高于下方规则',
+    testConnection: '测试连接',
+    testing: '测试中…',
+    testElapsed: '耗时 {ms} ms',
+    testFailed: '测试连接失败，请检查配置后重试',
+    save: '保存',
+    savedToast: '已保存，自下一轮对话起生效',
+    saveFailed: '保存失败，请重试',
+    rulesCard: '代理规则',
+    rulesCardDesc: '按服务商请求地址（baseURL 的主机名）匹配：命中规则的请求走代理，其余直连',
+    quickAdd: '从服务商快速添加',
+    noBaseUrl: '未配置 baseURL',
+    ruleHostLabel: '匹配主机名',
+    ruleRemove: '删除规则',
+    rulePlaceholder: '主机名',
+    addCustomRule: '添加自定义规则',
+    rulesEmpty: '暂无规则：所有请求保持直连。从上方选择服务商快速添加',
+    statsCard: '请求统计',
+    statsCardDesc: '按服务商统计请求出站方式；重开会话与子代理请求均计入',
+    range24h: '最近 24 小时',
+    range7d: '最近 7 天',
+    rangeAll: '累计',
+    refresh: '刷新',
+    reset: '重置',
+    cancel: '取消',
+    resetConfirmTitle: '重置请求统计？',
+    resetConfirmDesc: '将写入重置水位标记，此后只统计新产生的请求。该操作不可撤销',
+    resetDoneToast: '统计已重置',
+    legendProxied: '经代理',
+    legendDirect: '直连',
+    statsEmpty: '所选范围内暂无请求数据',
+    statsLoadFailed: '统计数据加载失败，请重试',
+    truncatedNote: '累计数据基于保留的历史窗口，更早的记录已清理',
   },
 }

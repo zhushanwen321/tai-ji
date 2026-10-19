@@ -1,23 +1,23 @@
 /**
- * U7 探针沉淀（message-revoke 设计 §4 验收表 A6/A9 的 CI 可跑单测形态）。
+ * U7 探针单测化（message-revoke 设计 §4 验收表 A6/A9 的 CI 可跑单测形态）。
  *
- * 与 revoke-orchestrator.test.ts（U4 编排逻辑族①-⑧）的分界：本文件只沉淀两条
+ * 与 revoke-orchestrator.test.ts（U4 编排逻辑族①-⑧）的分界：本文件只固化两条
  * 「机制成立性」探针——A6 信令不污染（transcript 撤回前后对比 + `__taiji_nav__`
  * 命令串零残留）与 A9 workflow-running 拦截回执。材料范式对齐该文件：真实编排 +
- * 真实投递内核注册表（revoking hold / cancel / 投影视图是真实现）+ 真实
+ * 真实投递内核注册表（revoking hold / cancel / 派生视图是真实现）+ 真实
  * MessageDispatcher.sendSystemCommand（信令旁路本身是探针对象）；mock 仅 pi 边界
  * （prompt / getEntries / getCommands / clear_queue）与数据源（session view /
- * workflow 投影）。
+ * workflow 派生视图）。
  *
  * 探针保真度关键（A6 的牙齿）：prompt mock 按 pi 语义分派——注册命令串
  * （`/__taiji_nav__` 前缀）同步执行树回退副作用、不落 message entry（P2 前提：
  * command 不进模型、无 turn）；其余 prompt 一律按普通用户消息落 user message
- * entry（pi 开新回合的 transcript 行为）。信令若回归「走用户消息面」形态，A6 的
+ * entry（pi 开新回合的 transcript 行为）。信令若回归「走用户消息侧」形态，A6 的
  * transcript 对比断言即红。
  *
- * A9 的 workflow 投影：测试内构造 records.getWorkflows 投影数据源，推导式与组合根
+ * A9 的 workflow 派生视图：测试内构造 records.getWorkflows 派生视图数据源，推导式与组合根
  * session-service 的 hasRunningWorkflow 接线逐字一致（`.records.some(r =>
- * r.status === 'running')`）——拦截锚是投影里的 running 状态本身，非硬编码布尔；
+ * r.status === 'running')`）——拦截锚是派生视图里的 running 状态本身，非硬编码布尔；
  * 不 import session-records（U6d 领地，避免在途改动耦合）。
  *
  * 运行：pnpm --filter @taiji/runtime exec vitest run src/services/session/__tests__/revoke-probe.test.ts
@@ -81,13 +81,13 @@ function applyRewind(tree: MutableTree, targetEntryId: string, expectedParentId:
   tree.leafId = label.id
 }
 
-/** workflow run 投影的最小形态（组合根 hasRunningWorkflow 推导只读 .records[].status）。 */
+/** workflow run 派生视图的最小形态（组合根 hasRunningWorkflow 推导只读 .records[].status）。 */
 interface WorkflowRunProjection {
   id: string
   status: string
 }
 
-/** mock records 投影（A9 数据源——形态对齐组合根消费面，不 import session-records）。 */
+/** mock records 派生视图（A9 数据源——形态对齐组合根消费方，不 import session-records）。 */
 interface WorkflowRecordsProjection {
   getWorkflows(sessionId: string): Promise<{ records: WorkflowRunProjection[] }>
 }
@@ -100,7 +100,7 @@ function makeWorkflowRecords(runs: readonly WorkflowRunProjection[]): WorkflowRe
   }
 }
 
-/** 投影条目 payload 文本（守卫式读取——kind text 的 content 字段）。 */
+/** 派生视图条目 payload 文本（检查式读取——kind text 的 content 字段）。 */
 function payloadContentOf(entry: unknown): string {
   const payload = (entry as { payload?: { content?: unknown } }).payload
   return typeof payload?.content === 'string' ? payload.content : ''
@@ -108,7 +108,7 @@ function payloadContentOf(entry: unknown): string {
 
 interface ProbeHarnessOptions {
   view?: Partial<IManagedSessionView>
-  /** workflow run 投影（A9 数据源；缺省空 = 无在跑 run）。 */
+  /** workflow run 派生视图（A9 数据源；缺省空 = 无在跑 run）。 */
   workflowRuns?: ReadonlyArray<WorkflowRunProjection>
   /** navigateTree 成功语义模拟（label 锚挂 parent、叶子切换）；缺省 = 命令无效果形态。 */
   rewind?: { target: string; parent: string | null }
@@ -120,7 +120,7 @@ function makeProbeHarness(opts: ProbeHarnessOptions = {}) {
   const promptCalls: string[] = []
   const evictSpy = vi.fn()
   const invalidateSpy = vi.fn()
-  // 撤回信号广播腿 spy（[MF-1-7] deps.notifyEntryInvalidation 注入——生产 = pluginService notify 闭包）
+  // 撤回信号广播路径 spy（[MF-1-7] deps.notifyEntryInvalidation 注入——生产 = pluginService notify 闭包）
   const signalSpy = vi.fn()
   const workflowRecords = makeWorkflowRecords(opts.workflowRuns ?? [])
 
@@ -134,7 +134,7 @@ function makeProbeHarness(opts: ProbeHarnessOptions = {}) {
         if (opts.rewind) applyRewind(tree, opts.rewind.target, opts.rewind.parent)
       } else {
         // 其余 prompt = pi 开新回合：user message entry 落 transcript（A6 探针的对照面——
-        // 信令若走用户消息面，这里长出的 message entry 会被撤回前后对比抓红）
+        // 信令若走用户消息侧，这里长出的 message entry 会被撤回前后对比抓红）
         const id = `m-${tree.entries.length + 1}`
         tree.entries = [...tree.entries, msgEntry(id, tree.leafId, 'user', text)]
         tree.leafId = id
@@ -185,7 +185,7 @@ function makeProbeHarness(opts: ProbeHarnessOptions = {}) {
   const orchestrator = new RevokeOrchestrator({
     getSession: (sid: string) => (sid === SID ? view : undefined),
     ensureActive: async () => client as unknown as IPiEngine,
-    // 组合根同款推导（session-service 接线逐字一致）——拦截锚是投影 running 状态
+    // 组合根同款推导（session-service 接线逐字一致）——拦截锚是派生视图 running 状态
     hasRunningWorkflow: async (sid) =>
       (await workflowRecords.getWorkflows(sid)).records.some((r) => r.status === 'running'),
     evictHistoryRebuildCache: evictSpy,
@@ -208,7 +208,7 @@ function makeProbeHarness(opts: ProbeHarnessOptions = {}) {
       tree.entries = entries
       tree.leafId = leafId
     },
-    /** mock transcript 快照（撤回前后对比的数据面——经 get_entries 同一观察通道取）。 */
+    /** mock transcript 快照（撤回前后对比的数据范围——经 get_entries 同一观察通道取）。 */
     snapshotTranscript: async (): Promise<{ entries: unknown[]; leafId: string | null }> => {
       const msg = (await client.getEntries()) as { data?: { entries?: unknown; leafId?: unknown } }
       const entries = msg.data?.entries
@@ -254,7 +254,7 @@ describe('A6 信令不污染（探针：transcript 撤回前后对比 + 命令�
 
     expect(reply.revoked).toBe(true)
     // 撤回成功前提下的污染断言：唯一新增条目是 navigateTree 的 label 锚——
-    // 若信令走用户消息面（prompt mock 会落 user message entry），此处即红（P2 探针）
+    // 若信令走用户消息侧（prompt mock 会落 user message entry），此处即红（P2 探针）
     expect(after.entries.length).toBe(before.entries.length + 1)
     const added = after.entries.slice(before.entries.length)
     expect(added).toHaveLength(1)
@@ -264,14 +264,14 @@ describe('A6 信令不污染（探针：transcript 撤回前后对比 + 命令�
     expect(messagesOf(after.entries)).toStrictEqual(messagesOf(before.entries))
   })
 
-  it('__taiji_nav__ 命令串零残留：任何 message entry 不含，session.delivery 投影（帧数据源 = 内核投影视图）不含——对照锚：已送达用户消息文本确在投影中（断言非空）', async () => {
+  it('__taiji_nav__ 命令串零残留：任何 message entry 不含，session.delivery 派生视图（帧数据源 = 内核派生视图）不含——对照锚：已送达用户消息文本确在派生视图中（断言非空）', async () => {
     const h = makeProbeHarness({ rewind: { target: 'e2', parent: 'e1' } })
     const t = standardTree()
     h.setTree(t.entries, t.leafId)
 
     // 预置一条已送达的内核条目（真实链路：submit → 投出 → message_end(user) 裸标记回执
-    // → delivered），使 session.delivery 投影非空——delivered 条目按 D4 惰性残留口径留存
-    // 投影（cancelled tombstone 是轻量元数据不进投影，故对照锚必须用 delivered 条目）
+    // → delivered），使 session.delivery 派生视图非空——delivered 条目按 D4 惰性残留口径留存
+    // 派生视图（cancelled tombstone 是轻量元数据不进派生视图，故对照锚必须用 delivered 条目）
     const seededText = `早期已送达的用户消息\n<!--taiji:msg:${UUID_B}-->`
     h.registry.submit(SID, { content: '早期已送达的用户消息', clientUuid: `u-${UUID_B}` })
     await h.flush()
@@ -279,7 +279,7 @@ describe('A6 信令不污染（探针：transcript 撤回前后对比 + 命令�
     expect(h.promptCalls[0]).toBe(seededText) // 出站文本 = 原文 + 裸标记（内核 withDeliveryMarker）
     h.emitPiEvent({ type: 'message_end', message: { role: 'user', content: seededText } })
     await h.flush()
-    // 投递收口副作用复位（markSessionActive 置 dispatching + 派生 isGenerating=true；
+    // 投递收尾副作用复位（markSessionActive 置 dispatching + 派生 isGenerating=true；
     // 真实回落 = pi 事件驱动（[D3③] handled 响应 / sweepInFlight 收尾，CP6 时间窗已退役），
     // fake 环境无事件流——按 event-interpreter 'idle' 行语义手动复位，撤回前置 = 空闲。
     // isGenerating 是只读派生属性，经 spyOn getter 复位——与 revoke-orchestrator.test.ts
@@ -302,14 +302,14 @@ describe('A6 信令不污染（探针：transcript 撤回前后对比 + 命令�
     }
     expect(after.entries.length).toBe(before.entries.length + 1)
 
-    // ② session.delivery 投影（session-delivery-topic 的帧数据源 = handle.projection() 投影视图）：
+    // ② session.delivery 派生视图（session-delivery-topic 的帧数据源 = handle.projection() 派生视图）：
     // 命令串零残留。若信令回归走内核 submit 面，命令条目将滞留 active（command 无
     // message_end 回执、永不 delivered）→ 此断言即红（D1 否决记录的「僵尸条目」形态）
     const projectionEntries = h.registry.getOrCreateDelivery(SID).projection().entries
     for (const entry of projectionEntries) {
       expect(JSON.stringify(entry)).not.toContain(TAIJI_NAV_COMMAND)
     }
-    // 对照锚（防空投影假绿）：已送达条目确在投影中，payload 含用户文本
+    // 对照锚（防空派生视图假绿）：已送达条目确在派生视图中，payload 含用户文本
     expect(projectionEntries.some((e) => payloadContentOf(e).includes('早期已送达的用户消息'))).toBe(true)
     // ③ 内核全量视图（active + tombstone）序列化同样零残留，且撤回后无在册条目
     expect(JSON.stringify(h.registry.entries(SID))).not.toContain(TAIJI_NAV_COMMAND)
@@ -317,8 +317,8 @@ describe('A6 信令不污染（探针：transcript 撤回前后对比 + 命令�
   })
 })
 
-describe('A9 workflow-running 拦截回执（探针：mock workflow 投影）', () => {
-  it('投影含 running run → {revoked:false, error:"workflow-running"}，零信令、树逐字不变、数据面零拉取', async () => {
+describe('A9 workflow-running 拦截回执（探针：mock workflow 派生视图）', () => {
+  it('派生视图含 running run → {revoked:false, error:"workflow-running"}，零信令、树逐字不变、数据范围零拉取', async () => {
     const h = makeProbeHarness({
       workflowRuns: [{ id: 'wf-1', status: 'running' }],
       rewind: { target: 'e2', parent: 'e1' }, // 信令若被错误发出，树会变——反向断言锚
@@ -337,14 +337,14 @@ describe('A9 workflow-running 拦截回执（探针：mock workflow 投影）', 
     // 树逐字不变（entries + leafId 均未动）
     const after = await h.snapshotTranscript()
     expect(after).toEqual(before)
-    // 拦截先于数据面：编排零 get_entries 拉取（此后仅 +1 = after 快照自身的对照读）
+    // 拦截先于数据范围：编排零 get_entries 拉取（此后仅 +1 = after 快照自身的对照读）
     expect(h.client.getEntries.mock.calls.length).toBe(getEntriesBeforeRevoke + 1)
     // ④ history 缓存清理与 ⑥′ 派生态失效均未触达（撤回未发生，拦截先于缓存步骤）
     expect(h.evictSpy).not.toHaveBeenCalled()
     expect(h.invalidateSpy).not.toHaveBeenCalled()
   })
 
-  it('对照：同投影 run 已完成（completed）→ 拦截不触发，撤回正常完成——拦截锚是 running 状态本身', async () => {
+  it('对照：同派生视图 run 已完成（completed）→ 拦截不触发，撤回正常完成——拦截锚是 running 状态本身', async () => {
     const h = makeProbeHarness({
       workflowRuns: [{ id: 'wf-1', status: 'completed' }],
       rewind: { target: 'e2', parent: 'e1' },

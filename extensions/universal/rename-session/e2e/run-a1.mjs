@@ -5,10 +5,10 @@
  * [L2.5 faux 翻轨，2026-09-15] LLM 演员改 faux 脚本（凭证无关、零 token）：
  * 队列 = bash toolCall（列 ts 文件，触发多 iteration）→ 最终 stop 文本（结论文案，
  * 刻意不含 .ts 原始行形态——④ 负向断言的特征行前提）→ rename 标题文本。
- * 断言面全在扩展捕获的请求日志/时序构造（非模型智能），全部保留不动。
+ * 断言范围全在扩展捕获的请求日志/时序构造（非模型智能），全部保留不动。
  *
  * 流程：真实 pi + faux 演员，在有 ts 文件的 fixture 目录发「列出当前目录的 ts 文件并统计行数」
- * （触发多 iteration 工具调用），round 完成后等 rename 落库，然后五重断言：
+ * （触发多 iteration 工具调用），round 完成后等 rename 写入，然后五重断言：
  *   ① 流序判别（主）：session JSONL 中 LLM request 日志 entry 时刻之后，stdout 时间轴上无
  *      turn_start/message_start/message_end 事件（中途触发的特征是其时刻之后仍有后续 turn
  *      事件）；时刻辅助 t(LLM request) ≥ t(最终 message_end) − 1s；round 中间 iteration 的
@@ -110,7 +110,7 @@ async function driveRound(pi, prompt) {
 	// 等 rename 最终结果（显式等 renamed to 终态标记——宽松匹配 skip 日志会命中
 	// 中间 iteration 的 skip: stopReason=toolUse 提前返回，那不是最终结果）
 	const renameRes = await pi.rpc.waitForSessionLog('renamed to "', { timeoutMs: 45_000 });
-	// 轮询等 session_info 落盘再读全量行（pi append→flush 有延迟，日志先于落库）
+	// 轮询等 session_info 落盘再读全量行（pi append→flush 有延迟，日志先于写入）
 	await pi.waitSessionInfoEntry(10_000);
 	return renameRes;
 }
@@ -247,7 +247,7 @@ function assertSessionInfoOrder(entries, renameRes, log) {
 		if (entry?.type === "session_info") infoIdx.push(i);
 		if (entry?.type === "message") lastMsgIdx = i;
 	});
-	assert(infoIdx.length >= 1, "session JSONL 无 session_info entry（rename 未落库）");
+	assert(infoIdx.length >= 1, "session JSONL 无 session_info entry（rename 未写入）");
 	assert(
 		infoIdx.every((i) => i > lastMsgIdx),
 		`session_info 行序异常: info=[${infoIdx}] 最后 message idx=${lastMsgIdx}`,

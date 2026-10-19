@@ -1,16 +1,26 @@
 // src/interface/command/subagents.ts
 //
 // /subagents 命令。薄壳——打开 list overlay（等同原 /subagents list [<id>]）。
-// 同名 tool（批量派发入口，模型调用面）见 interface/tool/tool-subagents.ts——两者无共享状态、无调用关系。
+// 同名 tool（批量派发入口，模型调用点）见 interface/tool/tool-subagents.ts——两者无共享状态、无调用关系。
 //
 // 解析：args[0] 直接作可选 <id>（聚焦该 record）。
 // RPC 模式（taiji GUI）：解析 cancel/message/start action 直接执行，不打开 TUI。
 // message/start 为 GUI 定向消息通道（设计 §3.3.3）：GUI 经 client.prompt 短路
 // extension 命令（不经主 agent LLM），TUI 分支不消费这两个 verb（行为零变化）。
 
+import * as path from "node:path";
+
 import type { ExtensionAPI, ExtensionCommandContext } from "@earendil-works/pi-coding-agent";
 
-import { getSubagentService } from "@zhushanwen/subagent-core";
+import {
+  getSubagentMessageResultsDir,
+  getSubagentService,
+  writeAtomicFileSync,
+} from "@zhushanwen/subagent-core";
+import { resolveRootSessionId } from "../../session-lifecycle.ts";
+import { getLogger } from "@zhushanwen/pi-extension-logger";
+
+const logger = getLogger("subagents");
 import type { SubagentService } from "@zhushanwen/subagent-core";
 import { displayAgentName } from "@zhushanwen/subagent-core";
 import { messageHandler, startHandler } from "@zhushanwen/subagent-core";
@@ -19,7 +29,6 @@ import { parseSubagentRpcCommand } from "./command-actions.ts";
 import type { SubagentRpcAction } from "./command-actions.ts";
 import { LIST_LIMIT } from "../tui/list-shared.ts";
 import { createSubagentsView } from "../tui/list-view.ts";
-import { toErrorMessage } from "@zhushanwen/pi-ext-guards";
 
 // subagent-directive customType 经 extension-protocol 单源（与 shared/runtime 消费侧
 // 同源；等值锁 = src/__tests__/contract.notify-custom-types.test.ts）。定向消息留痕
@@ -71,17 +80,54 @@ async function rpcCancel(
   service: SubagentService,
   recordId: string,
   ctx: ExtensionCommandContext,
+  requestId?: string,
 ): Promise<void> {
   try {
     const ok = service.cancel(recordId);
+    if (!ok) {
+      // 未命中/已终局：经结果文件传回（renderer 乐观翻边需回滚），notify 照旧留横幅。
+      writeMessageResultFile(requestId, resolveRootSessionId(ctx), {
+        scope: "error",
+        error: { code: "subagent_cancel_not_found", message: `Subagent ${recordId} not found or already finished` },
+      });
+    }
     ctx.ui.notify(
       ok ? `Cancelled subagent ${recordId}` : `Subagent ${recordId} not found or already finished`,
       ok ? "info" : "warning",
     );
   } catch (err) {
-    // service.cancel 内部 assertReady 在 session_shutdown 并发 dispose 时会抛
-    const msg = toErrorMessage(err);
-    ctx.ui.notify(`Failed to cancel subagent ${recordId}: ${msg}`, "warning");
+    // service.cancel 内部 assertReady 在 session_shutdown 并发 dispose 时会抛。
+    // 失败经结果文件传回（prompt 通道不携带命令异常，真机实测）——renderer
+    // cancelSubagent 依赖 rejection 回滚乐观翻边（吞错会让乐观 idle 假成功落地）。
+    writeMessageResultFile(requestId, resolveRootSessionId(ctx), {
+      scope: "error",
+      error: { code: "subagent_cancel_failed", message: String(err) },
+    });
+  }
+}
+
+/**
+ * 请求作用域结果文件写入（subagent-composer 2026-10-18）：client.prompt 对命令
+ * handler 异常**不拒绝**（真机实测——异常被 pi 转为 UI notify，prompt 照常 resolve），
+ * composer 车道的失败契约（toast + restoreSegments 恢复草稿）必须经结果文件传回。
+ * 载体与 /subagent-model 通道同款（getSubagentMessageResultsDir，写后读、读后即删）。
+ * requestId 缺省（手动 prompt / 旧调用方）= 无回执，跳过写入（runtime 侧读不到
+ * 文件按通道失败处理——仅发生在带 --req 的新调用方，旧调用方 runtime 侧同样不带
+ * 读取，互不干扰）。
+ */
+function writeMessageResultFile(
+  requestId: string | undefined,
+  rootSessionId: string,
+  content: Record<string, unknown>,
+): void {
+  if (requestId === undefined || !/^[\w-]{1,128}$/.test(requestId) || !rootSessionId) return;
+  const resultsFile = path.join(getSubagentMessageResultsDir(rootSessionId), `${requestId}.json`);
+  try {
+    writeAtomicFileSync(resultsFile, JSON.stringify(content));
+  } catch (err) {
+    logger.warn(`[subagents] result file write failed (runtime will report channel failure): ${String(err)}`, {
+      resultsFile,
+    });
   }
 }
 
@@ -92,6 +138,7 @@ async function rpcMessage(
   recordId: string,
   text: string,
   ctx: ExtensionCommandContext,
+  requestId?: string,
 ): Promise<void> {
   // GUI 定向消息（设计 §3.3.3）：不经主 agent LLM 直达 subagent。
   // one-shot 首条 message 自动升级 chatMode 的机制在 messageHandler 内（勿在此重复）。
@@ -109,10 +156,20 @@ async function rpcMessage(
       text,
       ctx.isIdle(),
     );
+    writeMessageResultFile(requestId, resolveRootSessionId(ctx), {
+      scope: "ok",
+      subagentId: result.subagentId,
+      slug: result.slug,
+    });
     ctx.ui.notify(`Message delivered to subagent ${result.slug} (${result.subagentId})`, "info");
   } catch (err) {
-    const msg = toErrorMessage(err);
-    ctx.ui.notify(`Failed to message subagent ${recordId}: ${msg}`, "warning");
+    // 失败经结果文件传回（scope:error → runtime 抛分型错误 → WS error envelope →
+    // renderer composer 车道 toast + restoreSegments 恢复草稿）。prompt 通道本身
+    // 不携带命令异常（resolve 语义，真机实测），notify 只达 TUI/横幅不达回执面。
+    writeMessageResultFile(requestId, resolveRootSessionId(ctx), {
+      scope: "error",
+      error: { code: "subagent_message_failed", message: String(err) },
+    });
   }
 }
 
@@ -145,8 +202,8 @@ async function rpcStart(
     );
     ctx.ui.notify(`Started subagent ${result.slug} (${result.subagentId})`, "info");
   } catch (err) {
-    const msg = toErrorMessage(err);
-    ctx.ui.notify(`Failed to start subagent ${slug}: ${msg}`, "warning");
+    // 同 rpcMessage：失败沿 prompt 通道抛回，GUI 依赖 rejection 呈现失败。
+    throw err;
   }
 }
 
@@ -164,13 +221,13 @@ async function executeRpcAction(
 ): Promise<void> {
   switch (parsed.action) {
     case "cancel":
-      await rpcCancel(service, parsed.recordId, ctx);
+      await rpcCancel(service, parsed.recordId, ctx, parsed.requestId);
       return;
     case "cancel-missing-id":
       ctx.ui.notify("Usage: /subagents cancel <id>", "warning");
       return;
     case "message":
-      await rpcMessage(pi, service, parsed.recordId, parsed.text, ctx);
+      await rpcMessage(pi, service, parsed.recordId, parsed.text, ctx, parsed.requestId);
       return;
     case "message-missing-args":
       // 错误可操作：指明缺什么 + 完整 usage（全局规则 16）

@@ -2,8 +2,8 @@
  * export-diagnostic-bundle 单测（crash-forensics-and-watchdog §3.3 D6，验收 A1/A2）。
  *
  * 覆盖：
- * - A1 收集清单：条目与来源路径逐项断言（双台账/各层日志尾部/水位摘录/summary.md）；
- *   缺文件（台账尚无 runtime.jsonl、logs 空、run 目录缺）清单降级进 missing 不抛错
+ * - A1 收集清单：条目与来源路径逐项断言（双登记清单/各层日志尾部/水位摘录/summary.md）；
+ *   缺文件（登记清单尚无 runtime.jsonl、logs 空、run 目录缺）清单降级进 missing 不抛错
  * - A2 zip 结构：listZipEntries（实现反向验证面）列条目与清单一致；失败路径返回具体
  *   errno（ENOSPC 类盘错误无法稳定注入，以 ENOENT 目录不存在为锚）
  * - 评估器状态表进 summary.md（构造越线 fixture → WARN 行 + tripped 状态出现）
@@ -40,7 +40,7 @@ function touch(file: string, content: string, ageHours = 0): void {
   utimesSync(file, mtime, mtime)
 }
 
-/** 台账行（D1 schema 最小字段集；piVersion 供提取断言）。 */
+/** 登记清单行（D1 schema 最小字段集；piVersion 供提取断言）。 */
 function journalLine(event: string, extra: Record<string, unknown> = {}): string {
   return JSON.stringify({ ts: new Date(NOW).toISOString(), layer: 'runtime', event, ...extra })
 }
@@ -67,7 +67,7 @@ describe('export-diagnostic-bundle（crash-forensics D6 u3a）', () => {
     const runDir = join(tmpDir, 'run')
     mkdirSync(crashesDir, { recursive: true })
     mkdirSync(runDir, { recursive: true })
-    // 双台账现档：main 带 registry-miss 佐证与 piVersion，runtime 带 watermark-daily 与 detailPath 引用
+    // 双登记清单现档：main 带 registry-miss 佐证与 piVersion，runtime 带 watermark-daily 与 detailPath 引用
     writeFileSync(join(crashesDir, 'main.jsonl'), `${journalLine('registry-miss')}\n`)
     writeFileSync(
       join(crashesDir, 'runtime.jsonl'),
@@ -93,12 +93,12 @@ describe('export-diagnostic-bundle（crash-forensics D6 u3a）', () => {
   // ── A1 收集清单 ─────────────────────────────────────────────────────────────
 
   describe('A1 buildDiagnosticEntries 收集清单', () => {
-    it('清单条目与来源路径逐项齐整（台账/日志尾部/水位/detailPath/summary）', () => {
+    it('清单条目与来源路径逐项齐整（登记清单/日志尾部/水位/detailPath/summary）', () => {
       writeFixture()
       const result = buildDiagnosticEntries({ appVersion: '0.9.16', now: NOW })
 
       const byPath = new Map(result.entries.map((e) => [e.archivePath, e]))
-      // 双台账现档
+      // 双登记清单现档
       expect(byPath.get('crashes/main.jsonl')?.sourcePath).toBe(join(tmpDir, 'logs', 'crashes', 'main.jsonl'))
       expect(byPath.get('crashes/runtime.jsonl')?.tailBytes).toBeUndefined()
       // 各层日志尾部：每家族 mtime 最新一份，tailBytes = 256KB
@@ -108,14 +108,14 @@ describe('export-diagnostic-bundle（crash-forensics D6 u3a）', () => {
       expect(byPath.get('logs/renderer-error-2026-09-10.log')?.sourcePath).toBeDefined()
       expect(byPath.get('logs/renderer-console-2026-09-10.log')?.sourcePath).toBeDefined()
       expect(byPath.get('logs/pi-2026-09-10-sid-1.jsonl')?.sourcePath).toBeDefined()
-      // 台账 detailPath 引用的深查文件
+      // 登记清单 detailPath 引用的深查文件
       expect(byPath.get('logs/pi-crash-20260910.log')?.sourcePath).toBe(join(tmpDir, 'logs', 'pi-crash-20260910.log'))
       // 水位摘录（生成条目）+ summary.md
       const watermark = byPath.get('watermark-recent-24h.log')
       expect(watermark?.content).toContain('[watermark] rss=1.0MB')
       const summary = byPath.get('summary.md')
       expect(summary?.content).toContain('# TaiJi 诊断包')
-      // 全量清单（1 水位 + 1 summary + 2 台账 + 5 日志家族 + 1 detailPath = 10 条）
+      // 全量清单（1 水位 + 1 summary + 2 登记清单 + 5 日志家族 + 1 detailPath = 10 条）
       expect(result.entries).toHaveLength(10)
       // 环境信息
       expect(result.environment.appVersion).toBe('0.9.16')
@@ -126,8 +126,8 @@ describe('export-diagnostic-bundle（crash-forensics D6 u3a）', () => {
       expect(result.missing).toEqual([])
     })
 
-    it('缺文件降级不抛错：台账缺 runtime.jsonl、logs 空、run 目录缺失逐项进 missing', () => {
-      // 只建 main 台账，无 logs 目录、无 run 目录
+    it('缺文件降级不抛错：登记清单缺 runtime.jsonl、logs 空、run 目录缺失逐项进 missing', () => {
+      // 只建 main 登记清单，无 logs 目录、无 run 目录
       mkdirSync(join(tmpDir, 'logs', 'crashes'), { recursive: true })
       writeFileSync(join(tmpDir, 'logs', 'crashes', 'main.jsonl'), `${journalLine('reload')}\n`)
 
@@ -139,7 +139,7 @@ describe('export-diagnostic-bundle（crash-forensics D6 u3a）', () => {
       expect(missingPaths).toContain('watermark-recent-24h.log')
       expect(result.entries.map((e) => e.archivePath)).toContain('crashes/main.jsonl')
       expect(result.entries.map((e) => e.archivePath)).toContain('summary.md')
-      // 评估器照常出表：缺 runtime 台账 → 相关行 no-data 显式（非静默空白）
+      // 评估器照常出表：缺 runtime 登记清单 → 相关行 no-data 显式（非静默空白）
       expect(result.evaluated.rows).toHaveLength(20)
       expect(() => JSON.stringify(result)).not.toThrow()
     })
@@ -323,7 +323,7 @@ describe('export-diagnostic-bundle（crash-forensics D6 u3a）', () => {
       expect(zipNames).toContain('crashes/runtime.jsonl')
       expect(zipNames).toContain('watermark-recent-24h.log')
       // summary.md 内容断言（版本/触发表/DiagnosticReports 指引/知情文案）——
-      // 从收集面断言（zip 内字节与收集面同源，同参数下 buildDiagnosticEntries 确定性输出）
+      // 从收集侧断言（zip 内字节与收集侧同源，同参数下 buildDiagnosticEntries 确定性输出）
       const collected = buildDiagnosticEntries({ appVersion: '0.9.16', now: NOW })
       const summary = collected.entries.find((e) => e.archivePath === 'summary.md')?.content ?? ''
       expect(summary).toContain('app 版本：0.9.16')

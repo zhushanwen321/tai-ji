@@ -7,7 +7,7 @@
  *  - list stage [+ Add] → add stage
  *  - add stage 选模板 → fill stage
  *  - [Done] → settle ops
- *  - _resolved 守卫
+ *  - _resolved 检查
  *  - currentListRules 实时反映 ops（G2）
  *  - WR1 handleInput 锁定（Container override 委托）
  *  - Tab 焦点路由（WR8）
@@ -134,9 +134,9 @@ describe("REC4: fill stage 命令选择 + commitFill", () => {
 	});
 });
 
-// ──────────────────────── _resolved 守卫 ────────────────────────
+// ──────────────────────── _resolved 检查 ────────────────────────
 
-describe("REC5: _resolved 守卫", () => {
+describe("REC5: _resolved 检查", () => {
 	it("settle 后再 handleInput no-op（done 只调一次）", () => {
 		const { comp, done } = createComp();
 		// 选 [Done]
@@ -226,7 +226,7 @@ describe("REC9: cancel", () => {
 		expect(done).toHaveBeenCalledOnce();
 	});
 
-	it("cancel 后 _resolved 守卫生效", () => {
+	it("cancel 后 _resolved 检查生效", () => {
 		const { comp, done } = createComp();
 		comp.cancel();
 		comp.cancel();

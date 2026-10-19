@@ -8,7 +8,7 @@
  *
  * W1（数据源治理）改写：label 持久化不再经 turn_end/agent_end 兜底直写（机制已删），
  * 活跃 label 唯一写入口 = renameSession / create / forkSession 的 set_session_name RPC。
- * 本文件保留「turn/agent 结束不再直写 session_info」回归守卫。
+ * 本文件保留「turn/agent 结束不再直写 session_info」回归检查。
  *
  * U7：副作用经中间事件链路保留（不走 attachUsageListener）
  *   - onTurnFinalize→handleTurnEndSideEffects：isGenerating=false
@@ -95,9 +95,9 @@ interface MockClient {
   clear: MockInstance<() => Promise<unknown>>
   getHistory: MockInstance<() => Promise<unknown>>
   sendCommand: MockInstance<SendCommandFn>
-  /** 切换 pi session 文件（W2 收口：替代 sendCommand('switch_session')）。 */
+  /** 切换 pi session 文件（W2 收尾：替代 sendCommand('switch_session')）。 */
   switchSession: MockInstance<(sessionPath: string) => Promise<void>>
-  /** 查询 pi get_state（W2 收口：替代 readPiState/sendCommand('get_state')）。 */
+  /** 查询 pi get_state（W2 收尾：替代 readPiState/sendCommand('get_state')）。 */
   getState: MockInstance<() => Promise<Record<string, unknown> | undefined>>
   getCommands: MockInstance<() => Promise<unknown>>
   getSessionStats: MockInstance<() => Promise<unknown>>
@@ -153,7 +153,7 @@ function createSetup() {
     createSession: vi.fn(async () => {
       const piSid = `pi-auto-${++autoId}`
       const client = makeMockClient({
-        // W2 收口后 create 用 client.getState()（返回归一后的 state 对象）
+        // W2 收尾后 create 用 client.getState()（返回归一后的 state 对象）
         getState: vi.fn<() => Promise<Record<string, unknown> | undefined>>().mockResolvedValue({
           sessionId: piSid, sessionFile: `/fake/${piSid}.jsonl`,
         }),
@@ -216,7 +216,7 @@ function createSetup() {
   const seedSession = async (opts: { label?: string; sessionFile?: string } = {}) => {
     const piSid = `pi-seed-${++autoId}`
     const client = makeMockClient({
-      // W2 收口后 create 用 client.getState()（返回归一后的 state 对象）
+      // W2 收尾后 create 用 client.getState()（返回归一后的 state 对象）
       getState: vi.fn<() => Promise<Record<string, unknown> | undefined>>().mockResolvedValue({
         sessionId: piSid, sessionFile: opts.sessionFile ?? `/fake/${piSid}.jsonl`,
       }),
@@ -266,7 +266,7 @@ describe('SessionService · W3 副作用迁移（U7）', () => {
   // ── handleTurnUsageSideEffects（turn_end：label 兜底直写已随 W1 机制删除）──
   describe('handleTurnUsageSideEffects（turn_end → label 不再直写）', () => {
     it('session 文件已存在时也不直写 session_info（W1：label 持久化唯一路径 = set_session_name RPC）', async () => {
-      // 用真实临时文件让 existsSync 返回 true——即便文件存在也不再写（回归守卫：
+      // 用真实临时文件让 existsSync 返回 true——即便文件存在也不再写（回归检查：
       // 直写与 pi rename-session 扩展构成 last-write-wins，会覆盖用户手动命名）
       const dir = mkdtempSync(join(tmpdir(), 'w3-tu-'))
       try {
@@ -353,7 +353,7 @@ describe('SessionService · W3 副作用迁移（U7）', () => {
       setup.service.getScalarReplicatedStates(id)?.usage.refetch()
       await new Promise<void>(r => setTimeout(r, 0))
       setup.service.applyContextUpdate(id, 0, 0)
-      // inputTokens=0 守卫早退；tokenCount/inputTokens 保持快照派生值
+      // inputTokens=0 检查早退；tokenCount/inputTokens 保持快照派生值
       expect(setup.service.getSummary(id)?.tokenCount).toBe(18000)
       expect(setup.service.getInputTokens(id)).toBe(18000)
     })
@@ -385,7 +385,7 @@ describe('SessionService · W3 E2：完整 pi 事件流集成', () => {
       createSession: vi.fn(async () => {
         const piSid = `pi-e2-${++autoId}`
         const client = makeMockClient({
-          // W2 收口后 create 用 client.getState()
+          // W2 收尾后 create 用 client.getState()
           getState: vi.fn<() => Promise<Record<string, unknown> | undefined>>().mockResolvedValue({
             sessionId: piSid, sessionFile: `/fake/${piSid}.jsonl`,
           }),
@@ -454,7 +454,7 @@ describe('SessionService · W3 E2：完整 pi 事件流集成', () => {
     const piSid = `pi-e2-final-${++autoId}`
     const eventListeners: PiEventListener[] = []
     const client = makeMockClient({
-      // W2 收口后 create 用 client.getState()
+      // W2 收尾后 create 用 client.getState()
       getState: vi.fn<() => Promise<Record<string, unknown> | undefined>>().mockResolvedValue({
         sessionId: piSid, sessionFile: `/fake/${piSid}.jsonl`,
       }),
@@ -518,7 +518,7 @@ describe('SessionService · W3 E2：完整 pi 事件流集成', () => {
     expect(finalSummary).toBeDefined()
     // 1. isGenerating 复位（agent_end onTurnFinalize → handleTurnEndSideEffects）
     expect(finalSummary!.status).toBe('idle')
-    // 2. tokenCount 派生（>0，usage 实例快照 inputTokens 投影，W10 事件直写已删）
+    // 2. tokenCount 派生（>0，usage 实例快照 inputTokens 派生视图，W10 事件直写已删）
     expect(finalSummary!.tokenCount).toBeGreaterThan(0)
     // 3. inputTokens 派生（>0，usage 实例快照读点）
     expect(service2.getInputTokens(piSid)).toBeGreaterThan(0)

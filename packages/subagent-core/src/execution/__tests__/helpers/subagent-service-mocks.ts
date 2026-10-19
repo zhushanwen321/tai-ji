@@ -52,7 +52,7 @@ export function childProcessModule() {
 export function fsSyncModule(
   actual: typeof import("node:fs"),
 ): {
-  /** 真实 fs + 同步 mock 的合并视图（vi.mock 工厂消费面宽松） */
+  /** 真实 fs + 同步 mock 的合并视图（vi.mock 工厂消费方宽松） */
   default: unknown;
   promises: typeof import("node:fs")["promises"];
   mkdirSync: ReturnType<typeof vi.fn>;

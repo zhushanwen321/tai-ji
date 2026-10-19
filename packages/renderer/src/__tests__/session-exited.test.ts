@@ -175,7 +175,7 @@ describe('session.exited 事件端到端反馈链路', () => {
       payload: { sessionId: 's-exit', code: 1, reason: 'crashed' },
     })
 
-    // 关键：isGenerating 复位（规则 #3，markSessionError → finalizeSession 收口 streaming entity）
+    // 关键：isGenerating 复位（规则 #3，markSessionError → finalizeSession 收尾 streaming entity）
     expect(chatStore.isGenerating('s-exit')).toBe(false)
   })
 
@@ -244,8 +244,8 @@ describe('session.exited 事件端到端反馈链路', () => {
     await nextTick()
     expect(chatStore.isGenerating('s-exit')).toBe(false)
 
-    // respawn 后再次 ensure：不被 streamSubscriptions 幂等守卫短路，重挂 handler +
-    // 重发 subscribe（第 3 次；subscriptionStates 幂等守卫对 subscribed=false 不拦截）
+    // respawn 后再次 ensure：不被 streamSubscriptions 幂等检查短路，重挂 handler +
+    // 重发 subscribe（第 3 次；subscriptionStates 幂等检查对 subscribed=false 不拦截）
     chatMod.ensureStreamSubscription('s-exit', chatStore, sessionStore)
     await flushAsync()
     expect(subscribeCalls()).toBe(3)

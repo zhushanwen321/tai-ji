@@ -39,7 +39,7 @@ function isCountableMessageLine(line: string): boolean {
  * - 文件不存在（pi 延迟写入窗口——pi 1.0 首条 user 消息才建文件）→ 返回 0，不报错；
  * - 其它读失败（EACCES / EISDIR 等）→ 上抛，由 RPC 层转 error envelope（renderer 占位）。
  *
- * 实现面 = createReadStream + readline（恒定内存，不随文件大小增长）；正在被 pi append 的
+ * 实现侧 = createReadStream + readline（恒定内存，不随文件大小增长）；正在被 pi append 的
  * 活跃会话读到当前 EOF 即止，半写尾行 parse 失败按损坏行跳过。
  */
 export async function countSessionMessagesInFile(filePath: string): Promise<number> {

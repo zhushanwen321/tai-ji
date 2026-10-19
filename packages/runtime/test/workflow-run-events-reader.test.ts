@@ -1,8 +1,8 @@
 // test/workflow-run-events-reader.test.ts
 //
-// WorkflowRunEventsReader.readRunEvents 读侧投影（workflow-visualization U3）的
-// 单元级断言——record 文件逐行解析 → core 事件 → shared 条目的逐型投影契约：
-//   1. 全词表闭集投影：11 种 core 事件类型逐型落条目，载荷字段透传形态逐字段
+// WorkflowRunEventsReader.readRunEvents 读侧派生视图（workflow-visualization U3）的
+// 单元级断言——record 文件逐行解析 → core 事件 → shared 条目的逐型映射契约：
+//   1. 全词表闭集派生视图：11 种 core 事件类型逐型落条目，载荷字段透传形态逐字段
 //      断言（agent-retrying / phase-settled / run-interrupted / run-settled /
 //      model-override 五型此前无任何测试到达——本测试是它们的首个回归锚）；
 //   2. 坏行宽容：非 JSON 行与空行跳过不计事件（对齐活体 tailer 的 skipped 语义）；
@@ -117,8 +117,8 @@ const FULL_STREAM_LINES = [
   },
 ] as const
 
-describe('WorkflowRunEventsReader.readRunEvents 读侧投影', () => {
-  it('全词表闭集：11 种事件逐型投影，载荷字段透传 + 信封 ts/seq 保留；坏行与空行跳过不计', () => {
+describe('WorkflowRunEventsReader.readRunEvents 读侧派生视图', () => {
+  it('全词表闭集：11 种事件逐型映射，载荷字段透传 + 信封 ts/seq 保留；坏行与空行跳过不计', () => {
     const body = FULL_STREAM_LINES.map((e) => JSON.stringify(e)).join('\n')
     writeFileSync(recordPath, `${body}\nnot-json\n\n`, 'utf-8')
 
@@ -133,7 +133,7 @@ describe('WorkflowRunEventsReader.readRunEvents 读侧投影', () => {
 
     const byType = (t: string) => reply.events.find((e) => e.type === t)
 
-    // 以下五型此前无测试到达（投影函数体零覆盖）——逐字段钉住载荷透传形态。
+    // 以下五型此前无测试到达（映射函数体零覆盖）——逐字段钉住载荷透传形态。
     const retrying = byType('agent-retrying')
     expect(retrying).toMatchObject({ taskIndex: 0, attempt: 1, backoffMs: 500, reason: 'stale_context' })
 

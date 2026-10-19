@@ -9,7 +9,7 @@
  *
  * 对 transport 行为有断言的测试在自己的 beforeEach 再 provideSettingsTransport
  * （setup 的 beforeEach 先于测试文件注册执行，测试文件后注册者覆盖本缺省桩）；
- * 生产装配序的 fail-fast 语义由 core 端测试守卫（settings-lifecycle「transport 未注入
+ * 生产装配序的 fail-fast 语义由 core 端测试检查（settings-lifecycle「transport 未注入
  * fail-fast」用例），不在此放松。
  */
 import { beforeEach } from 'vitest'

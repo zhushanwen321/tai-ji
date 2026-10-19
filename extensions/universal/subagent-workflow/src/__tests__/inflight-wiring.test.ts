@@ -1,10 +1,10 @@
 // inflight-wiring.test.ts —— 组合根接线：session_start 即发初始上报（u7a，设计 §3.3 D5
-// 「触发时点钉死 = extension 加载完成」验收面）。
+// 「触发时点固定 = extension 加载完成」验收侧）。
 //
 // 验证点：
 //   ① 初始上报在 session_start handler 内、setupSessionLifecycle await 链之外发起
 //     （handler 未 await 完成时帧已在途——fire-and-forget，不阻塞装配链）；
-//   ② 帧形状过契约守卫（isSubagentInFlightReport）：count=当下真实快照（真实
+//   ② 帧形状过契约检查（isSubagentInFlightReport）：count=当下真实快照（真实
 //     core barrel，空态=0——无任何 subagent 调用的 session 也必上报）；
 //   ③ ack 后通道静默：session_shutdown 摘除后无残余调用；
 //   ④ 环境门控（2026-09-13 oe-audit + 裸 TUI 闪框事故）：非 rpc 模式不启动上报。
@@ -13,7 +13,7 @@
 // 其余走真实装配（service 单例槽注入 fake，与该文件同一模式）。
 //
 // 装载成本分层 [组 5a 瘦身 2026-09-27]：模块图静态加载一次，beforeEach 显式重置
-// oncePerProcess 守卫 Map + 通知账本 + Service 单例槽（与 resetModules 重建等价）；
+// oncePerProcess 检查 Map + 通知账本 + Service 单例槽（与 resetModules 重建等价）；
 // subagentsExtension（index.ts 全图）不再每用例动态 import 重求值。reporter 重试
 // 用例被测对象是 createInFlightReporter 单模块（静态图内缓存命中）。重试语义用
 // fake timers 确定性驱动（重试 timer 走 setTimeout；select 为 stub 立即返回，无真实
@@ -64,8 +64,7 @@ import {
   isSubagentInFlightReport,
 } from "@zhushanwen/extension-protocol";
 import { GLOBAL_SLOT_KEYS, setModelConfigService, setSubagentService } from "@zhushanwen/subagent-core";
-// 通知账本重置导出（beforeEach 显式清空；session_start 装配链按 ctx entries 重水合）
-import { _resetNotifyLedgerForTest } from "@zhushanwen/subagent-core/execution/notify/notify-ledger.ts";
+// 通知账本重置导出（beforeEach 显式清空；session_start 装配链按 ctx entries 重新加载进内存）
 import subagentsExtension from "../index.ts";
 
 process.setMaxListeners(50);
@@ -122,7 +121,6 @@ beforeEach(() => {
   mockStoreLoadAll.mockResolvedValue([]);
   resetLifecycleSlots();
   _resetOncePerProcessForTest();
-  _resetNotifyLedgerForTest();
   injectFakeServices();
 });
 
@@ -162,7 +160,7 @@ describe("组合根接线：初始上报时点（u7a 验收）", () => {
     const [title, options] = selectCalls[0] as [string, string[]];
     expect(title).toBe(SUBAGENT_INFLIGHT_MARKER);
     const frame: unknown = JSON.parse(options[0] ?? "{}");
-    // 帧过契约守卫（u7b event-adapter 的同一信任边界）；kind 字段已删
+    // 帧过契约检查（u7b event-adapter 的同一信任边界）；kind 字段已删
     //（2026-09-13 oe-audit：消费端不读，死字段）
     expect(isSubagentInFlightReport(frame)).toBe(true);
     expect(frame).not.toHaveProperty("kind");

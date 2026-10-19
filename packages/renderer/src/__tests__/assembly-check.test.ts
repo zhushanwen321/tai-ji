@@ -6,7 +6,7 @@
 // 装配缺口是静默的，重构删注入无报错，测试期机器报红是唯一防线）。
 //
 // 断言入口：
-// - useSidebar.__testing.sessionEntry —— sessionEntry 端口束原始注入面（composable 内构造，
+// - useSidebar.__testing.sessionEntry —— sessionEntry 端口束原始注入点（composable 内构造，
 //   useSidebar() 调用时填充；测试后门命名空间生产代码禁止消费，对齐 useExtensionHostBridge
 //   __testing 先例——导出测试专用符号不扩大 API 面常驻语义）
 // - createInboundEffects() —— effects 回调集工厂（useMessageEffects 公开导出，useConnection

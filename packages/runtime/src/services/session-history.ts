@@ -81,7 +81,7 @@ function makeMalformedLineWatcher(filePath: string): { opts: JsonlParseOptions; 
 }
 
 /**
- * [u6] 离线历史窗口查询参数（session.history 协议参数的文件读路径投影）。
+ * [u6] 离线历史窗口查询参数（session.history 协议参数的文件读路径派生视图）。
  * cursor/limitTurns/maxBytes 语义与活跃路径共用（D4：活跃/离线两路径同一参数语义）。
  */
 export interface HistoryWindowQuery {
@@ -426,8 +426,8 @@ function collectRecentTurnEntriesFromTail(
  * `_buildIndex` 文件序循环置 leafId=entry.id、:616 `_setSessionFile` 加载路径）保证文件尾即
  * 活跃叶子；撤回后 label
  * entry 落文件尾，被撤子树条目按文件序先于 label，经 computeActivePathEntries 沿 parentId
- * 回溯滤除（离线尾读 / oversize 窗口 / 全量文件读 / 游标窗口四条腿共用本单点，被撤分支
- * 在文件源腿同样不渲染）。已知边界（设计 D3 允许的降级面）：turn 计数与字节预算在
+ * 回溯滤除（离线尾读 / oversize 窗口 / 全量文件读 / 游标窗口四条路径共用本单点，被撤分支
+ * 在文件源路径同样不渲染）。已知边界（设计 D3 允许的降级面）：turn 计数与字节预算在
  * collect 阶段按原始行计算（含旧分支行）→ 分支 session 的窗口可能欠填（可见 turns 少于
  * 预算）、totalTurnsEstimate 偏大——内容正确性优先，truncated=true 时「加载更多」可继续
  * 翻页补全。末条 entry 无 string id（畸形文件尾）→ leafId undefined → 不裁剪（现行为降级）。
@@ -437,16 +437,16 @@ function collectRecentTurnEntriesFromTail(
  * 依赖它，且该数据只在持久化 entry 上有（live 链路走自己的时钟，见 shared Message.endedAt 注释）。
  */
 function convertWindowEntries(entries: PiSessionEntry[], sessionStore: ISessionStore): Message[] {
-  // 文件腿喂入前剥 session header 行：pi getEntries() RPC 已滤除（dist/core/
+  // 文件路径喂入前剥 session header 行：pi getEntries() RPC 已滤除（dist/core/
   // session-manager.js getEntries 的 `e.type !== "session"`，0.84.4 实锚），而 parseJsonl
   // 文件直读原样含 header——header 有 id 无 parentId，会与真根 entry 一起把
-  // computeActivePathEntries 的单根守卫顶成多根降级（warn + 原样返回），活跃路径裁剪
-  // 静默失效、被撤分支从文件源腿渲染。header 本就不进映射产物，剥除零行为差异，仅恢复
-  // 裁剪生效（喂数语义与 RPC 腿对齐；session-file-utils.trimFileEntriesToActivePath 同款
-  // 剥除——文件腿喂数变换的两个消费点各自单点持有）。
+  // computeActivePathEntries 的单根检查顶成多根降级（warn + 原样返回），活跃路径裁剪
+  // 静默失效、被撤分支从文件源路径渲染。header 本就不进映射产物，剥除零行为差异，仅恢复
+  // 裁剪生效（喂数语义与 RPC 路径对齐；session-file-utils.trimFileEntriesToActivePath 同款
+  // 剥除——文件路径喂数变换的两个消费点各自单点持有）。
   // 类型注记：header 形态不在 PiSessionEntry 联合内（pi 类型层的已知盲区——它只在文件
   // raw 首行存在，历史调用点把 parseJsonl 输出直接断言成 PiSessionEntry[]），故谓词经
-  // unknown 中转比较；此 filter 即运行时守卫本体。
+  // unknown 中转比较；此 filter 即运行时检查本体。
   const scoped = entries.filter((e) => (e as { type?: unknown }).type !== 'session')
   const last = scoped[scoped.length - 1]
   const leafId = last !== undefined && typeof last.id === 'string' ? last.id : undefined

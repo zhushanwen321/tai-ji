@@ -17,7 +17,7 @@
 // WorktreeRegistry（<agentDir>/subagents/worktrees.json）。判据从终态 marker
 // 状态机降为 pid 死活一条——进程崩溃无人写终态时也能正确回收。
 //
-// [D5b 对账] scan 末尾追加双向 diff（reconcileWithPhysical）：物理面（tmpdir
+// [D5b 对账] scan 末尾追加双向 diff（reconcileWithPhysical）：物理（磁盘）侧（tmpdir
 // checkout 目录 + git branch --list）与注册表互相对账——注册表条目丢失（锁前
 // last-write-wins 遗留 / 锁降级窗口）或物理资源被外部清掉时收敛，注册表注释
 // 声称的「tmpdir + 分支对账兜底」由此成为代码。
@@ -29,7 +29,7 @@ import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
 
-import { encodeCwd } from "../assembly/path-encoding.ts";
+import { encodeCwd, getSessionStoreDir } from "@taiji/shared/paths";
 import type { PatchResult,WorktreeHandle } from "../assembly/types.ts";
 import { DirtyWorktreeError } from "../assembly/types.ts";
 import { bestEffort } from "../assembly/best-effort.ts";
@@ -87,14 +87,14 @@ function isWriteCommand(args: string[]): boolean {
 }
 
 /**
- * [U5 / §3.2.5 worktree 续聊重建] 重建结果三分（设计三失败形态的返回面；形态③
- * IO 错不走本联合——直接响亮 throw，调用方按工具错误面重试）。
+ * [U5 / §3.2.5 worktree 续聊重建] 重建结果三分（设计三失败形态的返回侧；形态③
+ * IO 错不走本联合——直接响亮 throw，调用方按工具错误范围重试）。
  */
 export type WorktreeRebuildOutcome =
   /** 重建成功（patch 已恢复或无 patch 可恢复）——handle 回填 record.worktreeHandle。 */
   | { kind: "rebuilt"; handle: WorktreeHandle }
   /**
-   * 形态②：patch apply 冲突（收口后分支已有新提交）——worktree 已重建为干净
+   * 形态②：patch apply 冲突（收尾后分支已有新提交）——worktree 已重建为干净
    * 基线 + 原地续聊（transcript 仍有效，续聊资格判据不受工作区影响，不降级
    * reopen）；patchFile 留存供用户手动恢复（提示文案由调用方注入）。
    */
@@ -189,14 +189,14 @@ export async function addWorktreeWithStaleRecovery(
       }
     }
   }
-  // 重试一次：仍失败照原样抛错（GitRunError——失败形态③ 响亮上抛，调用方按工具错误面重试）
+  // 重试一次：仍失败照原样抛错（GitRunError——失败形态③ 响亮上抛，调用方按工具错误范围重试）
   await gitRun(["worktree", "add", ...addArgs], { cwd: repo });
 }
 
 export class WorktreeManager {
   // 全局注册表：跨 repo 记录所有活 worktree，reaper 遍历此表判孤儿。
   private readonly registry: WorktreeRegistry;
-  // agentDir（<agentDir>/subagents/<enc>/sessions 下扫 .alive 活信号，D5b 对账用）
+  // agentDir（引擎级 worktrees.json 注册表锚点，豁免清单⑤——不入 session 树）
   private readonly agentDir: string;
   // per-repo 写命令串行队列：value = 队尾（已吞 rejection 的）Promise。
   // 入队形态 prev.catch(()=>{}).then(run)——后继只关心「自己已排队」，
@@ -210,10 +210,13 @@ export class WorktreeManager {
   constructor(agentDir: string) {
     this.agentDir = agentDir;
     this.registry = new WorktreeRegistry(agentDir);
+    // [session-store-layout-inversion D2/D3] 对账活信号换根：.alive 随 subagent
+    // 文件族落 session 存储树（引擎级 worktrees.json 注册表仍锚 agentDir，豁免
+    // 清单⑤——两者基址分离）。
     this.reconciler = new WorktreeReconciler({
       gitRunAsync: (args, opts) => this.gitRunAsync(args, opts),
       registry: this.registry,
-      agentDir,
+      storeRoot: getSessionStoreDir(),
     });
   }
 
@@ -330,23 +333,23 @@ export class WorktreeManager {
   }
 
   /**
-   * [U5 / §3.2.5 worktree 续聊重建] 收口续聊时 worktree 已按保留期回收 → 自动重建：
+   * [U5 / §3.2.5 worktree 续聊重建] 收尾续聊时 worktree 已按保留期回收 → 自动重建：
    * worktree add（checkout 记录的分支，分支名可由 recordId 推导 `pi-sub-<id>`）+
-   * apply patch（恢复收口时落盘的未提交改动）→ 原地续聊（transcript 还在）。
+   * apply patch（恢复收尾时落盘的未提交改动）→ 原地续聊（transcript 还在）。
    *
    * 三失败形态处置（设计写死）：
    *   ① patch 丢失（备份文件不在）或分支不存在 → 返回 degrade-reopen，调用方降级
    *      带历史重开（同 §3.2.3）；
-   *   ② patch apply 冲突（收口后分支有新提交）→ worktree 重建为干净基线 + 原地
+   *   ② patch apply 冲突（收尾后分支有新提交）→ worktree 重建为干净基线 + 原地
    *      续聊（transcript 仍有效，续聊资格判据不受工作区影响）+ 返回 conflict 供
    *      调用方发用户可见提示（含 patch 备份路径）——不降级 reopen；
    *   ③ 重建自身 IO 错（git 命令失败、磁盘满等）→ GitRunError/DirtyWorktreeError
-   *      响亮上抛（不静默回落，调用方按工具错误面重试）。
+   *      响亮上抛（不静默回落，调用方按工具错误范围重试）。
    *
    * repo 定位 [S5 修复：不依赖注册表]：repoPath 由调用方传入（run-orchestration
    * 传进程 cwd——与 create() 的 mainCwd 同源：record/session/binding 全按
    * encodeCwd(cwd) 物理分区存储，能扫到该 record 的进程其 cwd 必与创建时一致）。
-   * 旧实现按注册表 branch 反查——收口 cleanup 已删注册表条目 → 反查恒落空 →
+   * 旧实现按注册表 branch 反查——收尾 cleanup 已删注册表条目 → 反查恒落空 →
    * 恒 degrade-reopen（U5-D8 偏差根因，随本修复失效）。branchName / checkout
    * 路径按 create() 同款命名约定派生（`pi-sub-<recordId>` + tmpdir/pi-subagents/
    * <enc(repoPath)>/<branch>）；分支存在性经 `rev-parse --verify` 实测（形态①：
@@ -358,7 +361,7 @@ export class WorktreeManager {
    *
    * @param repoPath 主仓库根目录（create 时的 mainCwd 同源值）
    * @param recordId record id（分支名推导键，必须匹配 `^[\w-]+$`）
-   * @param patchFile 收口时落盘的 patch 备份路径（record.patchFile；undefined = 无
+   * @param patchFile 收尾时落盘的 patch 备份路径（record.patchFile；undefined = 无
    *        备份——干净基线重建）
    */
   async reconstruct(repoPath: string, recordId: string, patchFile?: string): Promise<WorktreeRebuildOutcome> {
@@ -376,7 +379,7 @@ export class WorktreeManager {
     } catch {
       return { kind: "degrade-reopen", reason: `branch ${branch} no longer exists in ${repo}` };
     }
-    // checkout 路径按 create() 同款约定派生（不读注册表——收口 cleanup 后注册表
+    // checkout 路径按 create() 同款约定派生（不读注册表——收尾 cleanup 后注册表
     // 条目已删，重建依据 = 命名约定 + 入参 repoPath）。
     const worktreePath = path.join(os.tmpdir(), "pi-subagents", encodeCwd(repo), branch);
     // [1.2] patch 备份存在性判定前置：该判定只依赖入参路径，必须排在一切副作用
@@ -452,16 +455,16 @@ export class WorktreeManager {
    * 各步独立 try/catch——任一步失败不阻断其余（如 remove 失败仍尝试 branch -D + 注册表移除），
    * 避免单步失败导致后续资源泄漏。
    *
-   * [S5 修复] opts.keepBranch：close 收口回收传 true——回收 checkout（释放并发写隔离语义）
+   * [S5 修复] opts.keepBranch：close 收尾回收传 true——回收 checkout（释放并发写隔离语义）
    * 但保留分支（reconstruct 的重建依据：branchName 按 `pi-sub-<recordId>` 命名约定
    * 派生 + rev-parse --verify 验证存在性；删了分支 = 重建依据消亡 → 续聊恒降级
-   * reopen）。默认 false = 删分支（终态化 / reaper / create 竞态守卫等无续聊重建
+   * reopen）。默认 false = 删分支（终态化 / reaper / create 竞态检查等无续聊重建
    * 需求的调用方，行为零变化）。保留的分支无注册表条目，对账器方向二只扫 tmpdir
    * 物理 checkout 目录、不触碰无 checkout 的存活分支（worktree-reconcile.ts
    * discoverPhysicalWorktrees），不会误回收。
    *
    * @param handle 要清理的 worktree handle（含 mainCwd，不靠路径反推）
-   * @param opts.keepBranch true = 保留分支（close 收口回收——重建依据）
+   * @param opts.keepBranch true = 保留分支（close 收尾回收——重建依据）
    */
   async cleanup(handle: WorktreeHandle, opts: { keepBranch?: boolean } = {}): Promise<void> {
     try {
@@ -526,7 +529,7 @@ export class WorktreeManager {
   }
 
   /**
-   * 扫描并清理 pi-sub-* 孤儿 worktree + 物理面对账（D5b）。
+   * 扫描并清理 pi-sub-* 孤儿 worktree + 物理（磁盘）侧对账（D5b）。
    *
    * 阶段一（既有）：遍历全局注册表（<agentDir>/subagents/worktrees.json），
    * 按 pid 死活判孤儿。不依赖当前 cwd 是否 git repo——注册表里记了 repo 路径，
@@ -539,7 +542,7 @@ export class WorktreeManager {
    *                                       add 恒写宿主 pid，不再产生 pid=0）
    *   pid == 0 且未超宽限               → 跳过（宽限防误清）
    *
-   * 阶段二（D5b）：物理面（tmpdir checkout + 分支）与注册表双向 diff 收敛——
+   * 阶段二（D5b）：物理（磁盘）侧（tmpdir checkout + 分支）与注册表双向 diff 收敛——
    * 兑现 worktree-registry.ts 头注释声称的「tmpdir + 分支对账兜底」。全流程
    * 幂等、失败仅日志（对账失败不阻断 session_start）。
    */

@@ -8,8 +8,8 @@
 //   1. call 级（executeAgentCall 真函数 + fake runner）：失败单次终态化——finalizeCall
 //      恰好一次（终局化单次，trace 单节点单次 update）。
 //   2. journal 级（dispatchAgentSettled 的 result gate）：call 未 markDone 时
-//      dispatchAgentSettled 静默返回——agent-settled / run-settled 帧只在终局后落账
-//      （守卫为防御面，现网调用点在 markDone 之后）。
+//      dispatchAgentSettled 静默返回——agent-settled / run-settled 帧只在终局后写入 journal 记录
+//      （该检查为防御性质，现网调用点在 markDone 之后）。
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -158,7 +158,7 @@ describe("agent 失败重试期零通知（D7 反向面）", () => {
 
     const journal = createRunEventJournal(journalDir);
     // 零 agent-settled / run-settled 帧——终局 journal 帧（终局通知的单点判定源）
-    // 只在 markDone 后落账，重试期结构性静默。
+    // 只在 markDone 后写入 journal 记录，重试期结构性静默。
     await expect(journal.scan(run.runId)).resolves.toHaveLength(0);
   });
 });

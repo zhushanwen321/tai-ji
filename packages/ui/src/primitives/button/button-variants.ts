@@ -3,7 +3,7 @@ import { cva } from 'class-variance-authority'
 
 // variants 定义独立成文件（R2 S-1）：Button.vue 与本目录 barrel 都从此处导入，
 // 避免 Button.vue ↔ index.ts 目录 barrel 自引用环（barrel 再导出 Button.vue，
-// Button.vue 又 from '.' 取 variants 会闭合环）。原导出位置经 index.ts
+// Button.vue 又 from '.' 取 variants 会封住环）。原导出位置经 index.ts
 // `export *` 保持不变，外部消费方 import 路径零变化。
 export const buttonVariants = cva(
   // 焦点双环阴影 = DESIGN.md §.btn 明文刻意值（内环 2px accent、外环 4px black/0.4

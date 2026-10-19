@@ -115,7 +115,7 @@ async function seedInterruptedRecord(
     ts: T0 + 7_000,
   });
   // 覆盖记账帧（subagent-model-switch §6.6①：宿主切换编排经单写者入口落盘；
-  // 记账面不进状态机，journal 直写是测试面对单写者原语的直接消费）
+  // 记账侧不进状态机，journal 直写是测试层对单写者原语的直接消费）
   for (const [i, override] of (opts.overrides ?? []).entries()) {
     await journal.append(runId, {
       type: "model-override",
@@ -147,7 +147,7 @@ function makeDeps(): {
   const emit = vi.fn();
   const workerStarts: number[] = [];
   const budgetSchedules: Array<{ runId: string; ms: number }> = [];
-  // [F1-18 修复] resume 显式 model 落账后的宿主投影回调捕获面
+  // [F1-18 修复] resume 显式 model 写入 journal 记录后的宿主派生视图回调捕获范围
   const overrideProjection = vi.fn();
   const deps: LifecycleDeps = {
     store: { save: vi.fn(async () => {}), loadAll: vi.fn(async () => []), stateFilePath: vi.fn(() => "") },
@@ -166,7 +166,7 @@ function makeDeps(): {
     eventBus: { emit },
     onRunDone: vi.fn(),
     log: vi.fn(),
-    // 预算重排捕获面（D10：首次挂表 + 重试重建重排共用同一 deps 注入点）
+    // 预算重排捕获侧（D10：首次挂表 + 重试重建重排共用同一 deps 注入点）
     scheduleTimeBudget: vi.fn((runId: string, ms: number) => {
       budgetSchedules.push({ runId, ms });
       return undefined;
@@ -225,7 +225,7 @@ describe("resumeRun — 复活主链（方案 A 同 runId 复活）", () => {
     expect(entry.kind).toBe("registered");
     expect(entry.runId).toBe("wf-main");
     // scriptPath 真值回归：注册条目携带 run-created 帧的 scriptPath 原文（同源
-    // scriptName）——last-writer-wins 投影下 resume 条目遮蔽原始条目时不丢全路径
+    // scriptName）——last-writer-wins 派生视图下 resume 条目遮蔽原始条目时不丢全路径
     expect(entry.scriptPath).toBe("/abs/workflows/fan-out.js");
     // pending 信号（复活 = 对当前 session 重新可见）
     expect(emit).toHaveBeenCalledWith("pending:register", expect.objectContaining({ id: "wf-main" }));
@@ -493,7 +493,7 @@ describe("resume 预算单源（run-created 载荷继承/覆盖）", () => {
 // ── token 预算单源（budgetTokens 与时间轴同构）─────────────────
 //
 // 与上方时间预算同族缺口（已归档设计档案 §1.1 遗留项）：
-// resume 重建 spec 曾结构性不含 budgetTokens——复活 run 的引擎侧 maxTokens 投影
+// resume 重建 spec 曾结构性不含 budgetTokens——复活 run 的引擎侧 maxTokens 派生视图
 // （lifecycle.createRunningRun / worker-host budget 注入读 spec.budgetTokens）静默
 // 失效。修复后 token 轴与时间轴完全同构：run-created 载预算 + 三档回落 + 生效值
 // 随 run-resumed 落盘 + spec 重建 + D10 token 预检（帧推导下界口径）。
@@ -552,7 +552,7 @@ describe("resume token 预算单源（budgetTokens 与时间轴同构）", () =>
     });
   }
 
-  it("未传 tokens → 继承 run-created 预算：spec 与 Budget 投影同源生效，已耗计数不归零", async () => {
+  it("未传 tokens → 继承 run-created 预算：spec 与 Budget 派生视图同源生效，已耗计数不归零", async () => {
     await seedWithTokenBudget("wf-token-inherit", { budgetTokens: 10_000, usedTokens: 1_000 });
     const { deps, runs } = makeDeps();
 
@@ -561,7 +561,7 @@ describe("resume token 预算单源（budgetTokens 与时间轴同构）", () =>
     const run = runs.get("wf-token-inherit")!;
     // spec 单源恢复（worker-host budget 注入与错误重试重建读同源——修复前恒 undefined）
     expect(run.spec.budgetTokens).toBe(10_000);
-    // Budget 投影与 fresh run 同形（rebuildBudget maxTokens 条件式）
+    // Budget 派生视图与 fresh run 同形（rebuildBudget maxTokens 条件式）
     expect(run.state.budget.maxTokens).toBe(10_000);
     // 已耗恢复（[§2.1b] 帧推导）：加权口径 input*1
     expect(run.state.budget.usedTokens).toBe(1_000);
@@ -715,7 +715,7 @@ describe("场景 15 — 同进程双 resume：恰一次生效，第二次明确�
   });
 });
 
-// ── 场景 9：跨进程双 resume（脚本层——锁互斥行为面）────────────
+// ── 场景 9：跨进程双 resume（脚本层——锁互斥行为范围）────────────
 
 describe("场景 9 — 跨进程双 resume：锁被占 → 明确拒绝（恰一成功）", () => {
   it("锁目录预置在场（另一进程持有）：ELOCKED 拒绝，文案指明另一进程 + 恢复指引", async () => {
@@ -911,7 +911,7 @@ describe("resumeRun — 段 6 接管失败补偿（僵尸 run 防线）", () => 
   it("adoptResumedRun 失败：回滚落 run-interrupted(crashed)、无僵尸注册、再次 resume 不被「actively running」误拒", async () => {
     await seedInterruptedRecord("wf-adoptfail");
     const { deps, runs } = makeDeps();
-    // worker 接管失败（段 6 可失败面：run-resumed 帧已落盘之后的重建/接管抛错）
+    // worker 接管失败（段 6 可失败情形：run-resumed 帧已落盘之后的重建/接管抛错）
     vi.mocked(deps.workerHost.start).mockImplementation(() => {
       throw new Error("engine spawn failed");
     });
@@ -973,12 +973,12 @@ describe("resumeRun — 段 6 接管失败补偿（僵尸 run 防线）", () => 
 // ════════════════════════════════════════════════════════════════════════════
 // [subagent-model-switch 决策七] resume 生效模型三档回落：
 //   resume 显式参数 > journal 覆盖记账（model-override 折叠）> run-created.model；
-//   生效值随 run-resumed 帧落盘（观测面 + 跨崩溃存续）；重建 spec.model 不改写
+//   生效值随 run-resumed 帧落盘（观测用途 + 跨崩溃存续）；重建 spec.model 不改写
 //   （决策七不采用①边界——改 spec 会击穿回放比对，消费点归派发侧 U4b）。
 // ════════════════════════════════════════════════════════════════════════════
 
 describe("resume 生效模型三档回落（决策七，与预算双轴同构）", () => {
-  /** resume 后取最近一条 run-resumed 帧（生效值落盘断言面）。 */
+  /** resume 后取最近一条 run-resumed 帧（生效值落盘断言范围）。 */
   async function lastResumedEvent(runId: string): Promise<Extract<WorkflowRunEvent, { type: "run-resumed" }>> {
     const events = await scanEvents(runId);
     const resumed = events.filter((e): e is Extract<WorkflowRunEvent, { type: "run-resumed" }> => e.type === "run-resumed");
@@ -1100,9 +1100,9 @@ describe("resumeRun 显式 model 参数 — 统一覆盖记账（补切 + 无参
     expect(events.some((e) => e.type === "model-override")).toBe(false);
   });
 
-  // ── [F1-18 修复] 落账后同步宿主投影（onResumeModelOverrideCommitted 端口）──
+  // ── [F1-18 修复] 写入 journal 记录后同步宿主派生视图（onResumeModelOverrideCommitted 端口）──
 
-  it("落账后同步宿主投影：回调收到 parse 拆装结果（provider/modelId/thinkingLevel/ts 与 journal 帧一致）", async () => {
+  it("写入 journal 记录后同步宿主派生视图：回调收到 parse 拆装结果（provider/modelId/thinkingLevel/ts 与 journal 帧一致）", async () => {
     await seedInterruptedRecord("wf-resume-model-proj", { createdModel: "origin/o1" });
     const { deps, overrideProjection } = makeDeps();
 
@@ -1111,7 +1111,7 @@ describe("resumeRun 显式 model 参数 — 统一覆盖记账（补切 + 无参
       now: () => T0 + 100_000,
     });
 
-    // journal 帧已落（拆装同源：帧与投影载荷出自同一次 parseModelSelector）
+    // journal 帧已落（拆装同源：帧与派生视图载荷出自同一次 parseModelSelector）
     const events = await scanEvents("wf-resume-model-proj");
     const override = events.find((e): e is Extract<WorkflowRunEvent, { type: "model-override" }> => e.type === "model-override");
     expect(override).toBeDefined();
@@ -1126,7 +1126,7 @@ describe("resumeRun 显式 model 参数 — 统一覆盖记账（补切 + 无参
     });
   });
 
-  it("无参 resume 不触发宿主投影回调（无覆盖写点 = 无投影同步义务）", async () => {
+  it("无参 resume 不触发宿主派生视图回调（无覆盖写点 = 无派生视图同步义务）", async () => {
     await seedInterruptedRecord("wf-resume-model-noproj", { createdModel: "origin/o1" });
     const { deps, overrideProjection } = makeDeps();
 
@@ -1135,7 +1135,7 @@ describe("resumeRun 显式 model 参数 — 统一覆盖记账（补切 + 无参
     expect(overrideProjection).not.toHaveBeenCalled();
   });
 
-  it("malformed ref 干净拒绝不触发投影（拒绝先于一切写动作，journal append 未发生即无投影）", async () => {
+  it("malformed ref 干净拒绝不触发派生视图（拒绝先于一切写动作，journal append 未发生即无派生视图）", async () => {
     await seedInterruptedRecord("wf-resume-model-badproj");
     const { deps, overrideProjection } = makeDeps();
 

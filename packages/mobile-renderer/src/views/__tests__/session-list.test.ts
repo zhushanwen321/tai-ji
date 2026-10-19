@@ -67,7 +67,7 @@ function makeSummary(overrides: Partial<SessionSummary> & Pick<SessionSummary, '
   }
 }
 
-/** 经 store 唯一写入口 applySnapshot 注入列表（数据源顺序 = runtime 组序投影） */
+/** 经 store 唯一写入口 applySnapshot 注入列表（数据源顺序 = runtime 组序派生视图） */
 function seedList(sessions: SessionSummary[]): void {
   const groups: SessionGroup[] = [{ cwd: '/tmp/project', sessions }]
   sessionStore.applySnapshot({ groups })
@@ -247,7 +247,7 @@ describe('A3 dead 分流与恢复三步编排', () => {
     wrapper.unmount()
   })
 
-  it('点「重新打开」执行恢复三步编排：restore RPC → 切入链 → revive 收口', async () => {
+  it('点「重新打开」执行恢复三步编排：restore RPC → 切入链 → revive 收尾', async () => {
     const sid = 'd2'
     seedList([makeSummary({ id: sid, status: 'dead', lastActiveAt: 1000 })])
     const wrapper = mountList()
@@ -265,7 +265,7 @@ describe('A3 dead 分流与恢复三步编排', () => {
     expect(mocks.restoreSession.mock.invocationCallOrder[0]).toBeLessThan(
       mocks.switchSession.mock.invocationCallOrder[0],
     )
-    // 步 3：revive 收口——列表条目 dead → idle（dead 态清除）
+    // 步 3：revive 收尾——列表条目 dead → idle（dead 态清除）
     expect(sessionStore.getList().find((s) => s.id === sid)?.status).toBe('idle')
     wrapper.unmount()
   })
@@ -313,7 +313,7 @@ describe('A15 turnExpansionMap 已注册（删除路径可清）', () => {
   })
 })
 
-describe('app-runtime 编排出口接线（A3/A4 壳层编排面）', () => {
+describe('app-runtime 编排出口接线（A3/A4 壳层编排侧）', () => {
   it('deleteSession 出口 = core 销毁唯一编排点（api.remove → triggerSessionCleanups）', async () => {
     const cleanupSpy = vi.fn()
     trackCleanup(cleanupSpy)

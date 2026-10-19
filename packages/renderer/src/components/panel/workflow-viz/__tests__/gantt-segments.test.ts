@@ -388,7 +388,7 @@ describe('gantt-segments：phase 级色带（手工 fixture——空段判据/�
       frame('run-created', { runId: 'wf-t', workflowName: 't', argsSummary: '{}', ts: 1000 }),
       frame('phase-started', { phase: 'fix', ts: 1010 }),
       frame('agent-started', { taskIndex: 0, agentName: 'a', attempt: 1, phase: 'fix', ts: 1015 }),
-      // agent 在飞时中断——本轮 phase 无 settled 帧（resume 样本不含的形态）
+      // agent 在途时中断——本轮 phase 无 settled 帧（resume 样本不含的形态）
       frame('run-interrupted', { errorCode: 'user', reason: 'stop', ts: 1100 }),
       frame('run-resumed', { reason: 'resume plan', host: 'h', ts: 1200 }),
       frame('phase-started', { phase: 'fix', ts: 1210 }),
@@ -436,7 +436,7 @@ describe('gantt-segments：phase 级色带（手工 fixture——空段判据/�
 // ── §3.3-D9：渲染层状态派生（trace 表与 DAG 共用）────────────────────────────
 
 describe('gantt-segments：D9 call 级派生（deriveCallView）', () => {
-  it('retrying = attempts 有值（fold 仅由 agent-retrying 帧写入）且投影 running；首败重试窗口（attempts=1）覆盖；无 attempts running 不判 retrying；终局态优先', () => {
+  it('retrying = attempts 有值（fold 仅由 agent-retrying 帧写入）且派生视图 running；首败重试窗口（attempts=1）覆盖；无 attempts running 不判 retrying；终局态优先', () => {
     expect(deriveCallView({ status: 'running', attempts: 2 }, 'running').status).toBe('retrying')
     // 首败重试窗口（S2 构造场景：mock 首败后成，retrying 帧已落 settled 未落）——attempts 峰值 = 1
     expect(deriveCallView({ status: 'running', attempts: 1 }, 'running').status).toBe('retrying')
@@ -445,7 +445,7 @@ describe('gantt-segments：D9 call 级派生（deriveCallView）', () => {
     expect(deriveCallView({ status: 'failed', attempts: 3 }, 'done').status).toBe('failed')
   })
 
-  it('stoppedInFlight = run 已停止 ∧ call 在途（投影 running）；pending 不属在途', () => {
+  it('stoppedInFlight = run 已停止 ∧ call 在途（派生视图 running）；pending 不属在途', () => {
     expect(deriveCallView({ status: 'running' }, 'interrupted').stoppedInFlight).toBe(true)
     expect(deriveCallView({ status: 'running', attempts: 2 }, 'interrupted').stoppedInFlight).toBe(true)
     expect(deriveCallView({ status: 'running' }, 'done').stoppedInFlight).toBe(true) // terminal 终局同判据

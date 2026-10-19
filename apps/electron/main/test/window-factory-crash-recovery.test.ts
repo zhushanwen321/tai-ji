@@ -5,9 +5,9 @@
  * 已删（ADR-0122：自动重试属无效防御）。现行语义：一次崩溃即加载静态错误页，
  * 手动重试是唯一恢复通道。
  *
- * 覆盖（验收：详情落盘 + 崩溃台账 + 一次崩溃即静态错误页 + 手动重试日志）：
+ * 覆盖（验收：详情落盘 + 崩溃登记清单 + 一次崩溃即静态错误页 + 手动重试日志）：
  * - 详情落盘：main-logger（mock）收到含 windowId/reason/exitCode/detectedAt 的结构化 meta
- * - 显式失败：首次崩溃即 data:text/html 静态错误页（文案 + logsDir 注入断言）+ 台账行
+ * - 显式失败：首次崩溃即 data:text/html 静态错误页（文案 + logsDir 注入断言）+ 登记清单行
  * - 重试导航回应用源记日志；destroyed 窗口只落盘不加载；clean-exit 不进错误页
  *
  * electron mock 捕获 BrowserWindow 实例（logs/__tests__/renderer-log-handler.test.ts 与
@@ -71,7 +71,7 @@ class FakeBrowserWindow {
   static instances: FakeBrowserWindow[] = []
   webContents = new FakeWebContents()
   listeners = new Map<string, FakeListener[]>()
-  // loadURL/loadFile 是 BrowserWindow 方法（非 webContents），与 window-factory 调用面一致
+  // loadURL/loadFile 是 BrowserWindow 方法（非 webContents），与 window-factory 调用范围一致
   loadURL = vi.fn((_url: string) => Promise.resolve())
   loadFile = vi.fn(() => Promise.resolve())
   isDestroyed = vi.fn(() => false)
@@ -128,7 +128,7 @@ const mainLoggerStubs = {
 
 vi.mock('../logs/main-logger.js', () => ({ mainLogger: mainLoggerStubs }))
 
-// 台账断言面：捕获 append 调用；未 init 的真实单例 append 本就是 no-op，
+// 登记清单断言范围：捕获 append 调用；未 init 的真实单例 append 本就是 no-op，
 // mock 形态与 window-factory-crash-journal.test.ts 同款，不改变既有用例行为
 const crashJournalAppend = vi.hoisted(() => vi.fn())
 vi.mock('../logs/crash-journal.js', () => ({
@@ -162,7 +162,7 @@ async function createProdWindow(factory: FactoryModule, windowId: string): Promi
   return win
 }
 
-/** 驱动一次渲染进程崩溃（details 形态对齐 Electron RenderProcessGoneDetails 最小面）。 */
+/** 驱动一次渲染进程崩溃（details 形态对齐 Electron RenderProcessGoneDetails 最小子集）。 */
 function crash(win: FakeBrowserWindow, reason = 'oom', exitCode = -1): void {
   win.webContents.emit('render-process-gone', {}, { reason, exitCode })
 }
@@ -223,7 +223,7 @@ describe('window-factory render-process-gone：一次崩溃即显式失败（ADR
     delete process.env.TAIJI_E2E
   })
 
-  it('首崩即加载静态错误页（无自动 reload）+ 台账 crash 行 + warn 显式上报', async () => {
+  it('首崩即加载静态错误页（无自动 reload）+ 登记清单 crash 行 + warn 显式上报', async () => {
     const factory = (await loadFactory()) as unknown as FactoryModule
     const win = await createProdWindow(factory, 'win-fail')
     crash(win, 'oom')
@@ -235,7 +235,7 @@ describe('window-factory render-process-gone：一次崩溃即显式失败（ADR
     expect(pages[0]).toContain('诊断日志位于')
     expect(pages[0]).toContain(`${FAKE_DATA_DIR}/logs`)
     expect(pages[0]).toContain('重试')
-    // 台账：crash 事件 + reason 透传（无 reload 事件、无 circuit-breaker 合成 reason）
+    // 登记清单：crash 事件 + reason 透传（无 reload 事件、无 circuit-breaker 合成 reason）
     expect(crashJournalAppend).toHaveBeenCalledTimes(1)
     expect(crashJournalAppend).toHaveBeenCalledWith({ layer: 'renderer', event: 'crash', reason: 'oom' })
     // 显式上报 warn（取证：静态错误页出现的原因）
@@ -251,11 +251,11 @@ describe('window-factory render-process-gone：一次崩溃即显式失败（ADR
     expect(crashJournalAppend).toHaveBeenCalledTimes(2)
   })
 
-  it("clean-exit（正常退出路径）：不写台账、不进错误页", async () => {
+  it("clean-exit（正常退出路径）：不写登记清单、不进错误页", async () => {
     const factory = (await loadFactory()) as unknown as FactoryModule
     const win = await createProdWindow(factory, 'win-clean')
     crash(win, 'clean-exit', 0)
-    // 早退：无详情落盘、无台账行、无错误页（prod 形态全程无 loadURL）
+    // 早退：无详情落盘、无登记清单行、无错误页（prod 形态全程无 loadURL）
     expect(mainLoggerStubs.error).not.toHaveBeenCalled()
     expect(crashJournalAppend).not.toHaveBeenCalled()
     expect(win.loadURL).not.toHaveBeenCalled()

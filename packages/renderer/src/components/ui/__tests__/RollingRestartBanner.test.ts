@@ -11,7 +11,7 @@
  * - #27（reattach-deferred）：高压延迟轻态文案 + 恢复指引
  * - idle：不渲染；关闭按钮 → 条消失
  *
- * mock 策略：组件是纯投影消费方（状态源 = useRollingRestartStatus），mock 状态源聚焦
+ * mock 策略：组件是纯派生视图消费方（状态源 = useRollingRestartStatus），mock 状态源聚焦
  * 渲染契约；相位机/拉取恢复/终态分叉由 composables/__tests__/useRollingRestartStatus.test.ts
  * 覆盖。
  *

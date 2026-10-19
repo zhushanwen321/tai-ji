@@ -16,6 +16,7 @@
  *   - retry-config-message-handler.ts            LLM retry 配置
  *   - rename-config-message-handler.ts           会话自动重命名配置
  *   - smart-context-config-message-handler.ts    smart context 配置
+ *   - network-proxy-config-message-handler.ts    LLM 网络代理配置（get/set/test/stats/reset）
  *   - codemode-message-handler.ts                codemode 开关（settings.json defaultTools 域）
  *   - mcp-message-handler.ts                     MCP 服务器管理（pi 用户级 mcp.json 七命令，pi-mcp-management）
  */
@@ -34,6 +35,7 @@ import { SystemPromptTerminalMessageHandler } from './system-prompt-terminal-mes
 import { RetryConfigMessageHandler } from './retry-config-message-handler.js'
 import { RenameConfigMessageHandler } from './rename-config-message-handler.js'
 import { SmartContextConfigMessageHandler } from './smart-context-config-message-handler.js'
+import { NetworkProxyConfigMessageHandler } from './network-proxy-config-message-handler.js'
 import { CodemodeMessageHandler } from './codemode-message-handler.js'
 import { McpMessageHandler } from './mcp-message-handler.js'
 import type { McpServersService } from '../services/mcp-servers-service.js'
@@ -46,7 +48,7 @@ export interface SettingsHandlerContext extends MessageHandlerContext {
   configService: IConfigService
   sessionService: ISessionService
   /**
-   * modelService（IModelService）。测试连接的 per-model 编排面（M3a：
+   * modelService（IModelService）。测试连接的 per-model 编排侧（M3a：
    * ProviderConnectionTestService.testProviderConnections）是可选交集——组合根注入的
    * ModelService 实现类具备该方法，测试替身可缺省（handler 走 test_unavailable 防御分支）。
    */
@@ -54,8 +56,8 @@ export interface SettingsHandlerContext extends MessageHandlerContext {
   /** OAuth Login（路径 B）：config.oauthLogin/oauthCancel RPC 路由 + auth.* 事件由 AuthService 推 broadcast */
   authService: IAuthService
   /**
-   * Provider 凭据解析唯一通道（D3 收口，链 2 消费点）。
-   * 构造必需（M2fg 收口）：组合根装配注入（M2c），models.json 直查回退已删除。
+   * Provider 凭据解析唯一通道（D3 收尾，链 2 消费点）。
+   * 构造必需（M2fg 收尾）：组合根装配注入（M2c），models.json 直查回退已删除。
    */
   providerCredentialResolver: IProviderCredentialResolver
   /**
@@ -116,6 +118,7 @@ export class SettingsMessageHandler {
   private retryConfigHandler: RetryConfigMessageHandler
   private renameConfigHandler: RenameConfigMessageHandler
   private smartContextConfigHandler: SmartContextConfigMessageHandler
+  private networkProxyConfigHandler: NetworkProxyConfigMessageHandler
   private codemodeHandler: CodemodeMessageHandler
   /** mcp 域子 handler：mcpServersService 缺省（退化测试装配）时不构造，mcp.* 落 unknown_type。 */
   private mcpHandler: McpMessageHandler | null
@@ -131,6 +134,7 @@ export class SettingsMessageHandler {
     this.retryConfigHandler = new RetryConfigMessageHandler(ctx)
     this.renameConfigHandler = new RenameConfigMessageHandler(ctx)
     this.smartContextConfigHandler = new SmartContextConfigMessageHandler(ctx)
+    this.networkProxyConfigHandler = new NetworkProxyConfigMessageHandler(ctx)
     this.codemodeHandler = new CodemodeMessageHandler(ctx)
     const { mcpServersService } = ctx
     this.mcpHandler = mcpServersService
@@ -210,6 +214,12 @@ export class SettingsMessageHandler {
     'config.setSmartContextCompactModel': (msg, ws) => this.smartContextConfigHandler.handle(msg, ws),
     'config.setSmartContextThresholds': (msg, ws) => this.smartContextConfigHandler.handle(msg, ws),
     'config.setSmartContextExcludedModels': (msg, ws) => this.smartContextConfigHandler.handle(msg, ws),
+    // ── 网络代理域（network-proxy-config-message-handler.ts，llm-network-proxy）──
+    'config.getNetworkProxy': (msg, ws) => this.networkProxyConfigHandler.handle(msg, ws),
+    'config.setNetworkProxy': (msg, ws) => this.networkProxyConfigHandler.handle(msg, ws),
+    'config.testNetworkProxy': (msg, ws) => this.networkProxyConfigHandler.handle(msg, ws),
+    'config.getNetworkProxyStats': (msg, ws) => this.networkProxyConfigHandler.handle(msg, ws),
+    'config.resetNetworkProxyStats': (msg, ws) => this.networkProxyConfigHandler.handle(msg, ws),
     // ── codemode 开关域（codemode-message-handler.ts）──
     'config.getCodemodeEnabled': (msg, ws) => this.codemodeHandler.handle(msg, ws),
     'config.setCodemodeEnabled': (msg, ws) => this.codemodeHandler.handle(msg, ws),
@@ -238,7 +248,7 @@ export class SettingsMessageHandler {
     if (!handler) return false
     // 路由表 key 与 msg.type 字面量同源（上方 routes 逐 key 登记），查表命中即类型匹配；
     // TS 无法静态关联索引访问与 key（correlated types，microsoft/TypeScript#30581），
-    // `as never` 是该不变式下的类型层收口，运行时分发行为与原 switch 完全一致
+    // `as never` 是该不变式下的类型层收尾，运行时分发行为与原 switch 完全一致
     //（未知 type 落空 → return false，同原 default 分支）。
     return handler(msg as never, ws)
   }

@@ -2,7 +2,7 @@
 //
 // [§2.5 D14 下沉] resume args 一致性判定单源（原壳层 tool-workflow.ts 实现下沉）。
 //
-// 覆盖面：
+// 覆盖范围：
 // - diffResumeArgs 纯逻辑（差异三形态 + 嵌套 + 数组 + `_runId` 双侧排除）；
 // - historicalArgsOf 数据源形态（args 全文 / 缺席 / 旧格式截断摘要 / 篡改两形态）；
 // - assertResumeArgsMatch 判定与文案（不一致列差异字段 / 一致通过 / 截断保守拒绝 /

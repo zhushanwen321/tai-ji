@@ -7,13 +7,13 @@
 //
 // 启动序（样板已收编 SDK runEngineCliEntry，S4 簇 2；本薄层保留 arm 与 server
 // 构造——server 构造需要 arm 产出的 ReverseRequestClock）：
-//   1. armEngineSelfDestruct（SDK）：宿主死亡自灭守卫（主判据 stdin EOF；辅助判据
-//      in-flight 反向请求计时——ack 排除面见 SDK spawn.ts，R9-2/R9-2b）；
+//   1. armEngineSelfDestruct（SDK）：宿主死亡自灭检查（主判据 stdin EOF；辅助判据
+//      in-flight 反向请求计时——ack 排除情形见 SDK spawn.ts，R9-2/R9-2b）；
 //   2. 构造 EngineProtocolServer（stdout 独占协议通道，一行一帧）；
 //   3. runEngineCliEntry（SDK）：configureLoggerSink（stderr 兜底 + host/log
 //      反向请求）+ stdin 行解析（NDJSON）→ server.handleFrame + close 留痕。
 //
-// 进程退出面：宿主 stdin EOF → 自灭守卫杀进程组（任务子进程同组连带收割——
+// 进程退出处置：宿主 stdin EOF → 自灭检查杀进程组（任务子进程同组连带收割——
 // spawnEngineChild 硬编码 detached:false）；正常 dispose 不退进程。
 
 import {

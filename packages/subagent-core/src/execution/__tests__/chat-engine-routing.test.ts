@@ -258,12 +258,18 @@ describe("chat 工具域引擎路由分叉（U0：D4/D5/D10）", () => {
     configureCore({ dataRoot: () => "/fake-routing-data-root", log: () => {} });
     agentDir = makeTmpAgentDir();
     writeGlobalConfig(agentDir);
+    // [session-store-layout-inversion] 生产 store 目录经
+    // getSubagentSessionDir(resolveStoreRootSessionId())（env dataDir 兜底）解析——
+    // stubEnv 把写删目标收进本 mkdtemp 目录并保证用例间零残留（自建自删红线；
+    // 不注入则 records 落共享数据目录、跨用例重建互染，collectRecords 计数漂移）。
+    vi.stubEnv("TAIJI_AGENT_DATA_DIR", agentDir);
   });
 
   afterEach(() => {
     // registry 是 globalThis 进程单例——必须清空，防假引擎泄漏进其他测试文件
     clearEngines();
     resetCoreForTests();
+    vi.unstubAllEnvs();
     fs.rmSync(agentDir, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 });
     vi.clearAllMocks();
   });
@@ -852,9 +858,11 @@ describe("chat 引擎分支 U2：probe 失败 / journal / engineHandle", () => {
     return calls.length > 0 ? (calls[calls.length - 1][1] as Record<string, unknown>) : undefined;
   }
 
-  /** [W1/D3] 读 record 事件文件全部事件行（观察面独立于被测 store）。 */
+  /** [W1/D3] 读 record 事件文件全部事件行（观察面独立于被测 store）。
+   *  [session-store-layout-inversion] 观察点与生产写侧同源：分区键 = initSession sid
+   *  （"test-session"），dataDir = U2 各用例注入的 TAIJI_AGENT_DATA_DIR（agentDir）。 */
   function scanRecordEventsFor(agentDir: string, id: string): Array<Record<string, unknown>> {
-    const recordsDir = getSubagentRecordsDir(agentDir, agentDir);
+    const recordsDir = getSubagentRecordsDir("test-session", agentDir);
     try {
       const content = fs.readFileSync(path.join(recordsDir, `${id}.events`), "utf8");
       return content

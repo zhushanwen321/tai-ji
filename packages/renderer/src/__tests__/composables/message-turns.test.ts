@@ -33,7 +33,7 @@ function makeMsg(over: Partial<Message> = {}): Message {
 }
 
 // [W3·D3 演进] display 过滤已内化到分组输出层：隐藏完成通知消化为 trigger turn 边界、
-// 隐藏非通知消息在 groupRenderInput 透明跳过——独立的 filterDisplayableMessages 死导出
+// 隐藏非通知消息在 groupRenderInput 透明跳过——独立的 filterDisplayableMessages 无调用点的导出
 // 随过度设计审计候选 1 删除，其行为由「分组规则 v2」用例（core message-turns.incremental）
 // 经 toRenderItems 输出侧锁定。
 

@@ -88,7 +88,7 @@
       "core": false,
       "runner": "vitest",
       "scenario": "mock '@/lib/ipc' 的 getLaunchResult 返回 {status:'done', version:'0.9.9'}。setupUseAppUpdate() 触发首个消费者 setup → useAppUpdate 内部调 getLaunchResult（C5 封装）→ status='done' → 触发 info toast（i18n key 含 'launchResult.done' 或等价文案，version='0.9.9'）。断言：spy toast/info 被调用一次且参数含 version。toast 不触发则挂（区分力：无 getLaunchResult 调用 → 无 toast）。toast mock 面：新增 toast mock（vi.mock('@/composables/useToast') 或 spy toast store）。用例名（describe/it）须含验收 id 全文 'A4-done-toast-vitest'（cw nameMatch 词边界契约）。",
-      "mockFidelityNote": "vi.mock('@/lib/ipc') factory 增加 getLaunchResult stub（与现有 8 个 update 方法同模式：hoisted 内声明 + factory 导出）。vi.stubGlobal('__APP_VERSION__', '0.0.0') 保持现有版本守卫。useAppUpdate 经 lib/ipc.getLaunchResult()（C5 封装）获取，不直读 window.electronAPI。"
+      "mockFidelityNote": "vi.mock('@/lib/ipc') factory 增加 getLaunchResult stub（与现有 8 个 update 方法同模式：hoisted 内声明 + factory 导出）。vi.stubGlobal('__APP_VERSION__', '0.0.0') 保持现有版本检查。useAppUpdate 经 lib/ipc.getLaunchResult()（C5 封装）获取，不直读 window.electronAPI。"
     },
     {
       "id": "A6-rolledback-toast-vitest",

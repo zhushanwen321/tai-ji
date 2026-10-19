@@ -1,26 +1,26 @@
 // src/port-contract.ts
 //
-// 引擎进程内契约面七符号 + parseCtxModel 单源（S4 簇 1 收编：pi/zcode 两包
+// 引擎进程内契约范围七符号 + parseCtxModel 单源（S4 簇 1 收编：pi/zcode 两包
 // port-types.ts 的逐字等价本地镜像收编——两包原地改 re-export shim，18 个 import
 // 点零改写；server.ts 的 parseCtxModel 模块级纯函数同批收编，实现以 pi 版为基线
 // 逐字迁移）。
 //
-// 为什么现在能收（W5/W7 双轨沉淀后的收编，不翻「SDK 类型闭包只收跨进程协议面」
+// 为什么现在能收（W5/W7 双轨合并后的收编，不翻「SDK 类型闭包只收跨进程协议范围」
 // 的原始裁决）：两包过渡期镜像经 W10 conformance 套件验证字段逐字等价、双轨已
 // 稳定，收编即消除克隆而非改变边界语义。RunContext 含 AbortSignal/回调/EngineStream
-// 等非序列化成员，跨进程面经各包 server.ts 帧映射——故收主 barrel，不进 protocol/
-// 子入口（protocol/ 是 semver 收窄的跨进程可序列化面）。
+// 等非序列化成员，跨进程侧经各包 server.ts 帧映射——故收主 barrel，不进 protocol/
+// 子入口（protocol/ 是 semver 收窄的跨进程可序列化部分）。
 //
 // 命名：全量任务声明在 SDK 侧名 EngineAgentCallOpts（主 barrel 已有 protocol 的
-// AgentCallOpts 引擎面子集——16 字段协议 run.params.task 形态，两者是子集/全量
-// 关系，不可同名共存；两包 shim 转名 re-export 保本包消费面 AgentCallOpts 不变）。
+// AgentCallOpts 引擎侧子集——16 字段协议 run.params.task 形态，两者是子集/全量
+// 关系，不可同名共存；两包 shim 转名 re-export 保本包消费方 AgentCallOpts 不变）。
 //
 // onChildSpawned 统一采窄载荷形态（host/childSpawned 载荷形态；ChildProcess 句柄
-// 不跨协议面）——zcode 侧生产零调用（D6），形态统一无行为影响。
+// 不跨协议范围）——zcode 侧生产零调用（D6），形态统一无行为影响。
 //
 // 第三份镜像登记：core execution/engine/port.ts 的 RunContext 是宿主侧独立契约
-// （onChildSpawned 全 ChildProcess 句柄，概念域 = 宿主进程内），不收编、不 import
-// 本模块；漂移面由 W10 conformance 套件继续覆盖。
+// （onChildSpawned 全 ChildProcess 句柄，业务含义 = 宿主进程内），不收编、不 import
+// 本模块；漂移风险由 W10 conformance 套件继续覆盖。
 
 import type {
   AgentCallOpts as SdkAgentCallOpts,
@@ -35,7 +35,7 @@ import type {
 import type { SetModelParams, SetModelResult } from "./protocol/methods.ts";
 
 /**
- * 引擎进程内全量任务声明 = SDK AgentCallOpts 引擎面子集 + 协议 ctx 还原字段（model/
+ * 引擎进程内全量任务声明 = SDK AgentCallOpts 引擎侧子集 + 协议 ctx 还原字段（model/
  * cwd——SDK 契约把它们从 task 移到 run.params.ctx，进程内接口合回单对象；
  * server.ts 做 ctx→task 还原，与 core RemoteEngine.toSdkTaskSubset 镜像）。
  */
@@ -46,7 +46,7 @@ export type EngineAgentCallOpts = SdkAgentCallOpts & {
 
 /**
  * 引擎进程内的 ctxModel 形态（core ModelInfo 的结构等价镜像——仅 id/provider 被引擎
- * 消费，name/reasoning 等字段透传保留防测试/未来消费面漂移）。
+ * 消费，name/reasoning 等字段透传保留防测试/未来消费方漂移）。
  */
 export interface EngineCtxModel {
   id: string;
@@ -66,11 +66,11 @@ export interface EngineStream {
  * journal 固定分组 key（值锚定，**只承载、不透传**）：journal 落盘路径
  * `<dataDir>/engines/<engineId>/<本值>/journal-<taskId>.jsonl` 的第二段，两引擎恒
  * 本值（pi / zcode 均无池化实现——pi = PI_CODING_AGENT_DIR 全局一份，zcode = 共享
- * 宿主 HOME）。[池抽象降级 2026-09-13] poolKey 协议面（RunContext/run.params.ctx/
+ * 宿主 HOME）。[池抽象降级 2026-09-13] poolKey 协议范围（RunContext/run.params.ctx/
  * host/poolResolved 通道/EngineHandleData）已整体退役，本常量不再跨进程透传，仅
  * 三类消费：① journal 落盘路径构造（core event-journal-wiring）；② 存量 record 兼容
  * （zcode read 旧相对 dbPath 的锚定分支 + 持久化 engineHandle.poolKey 字段——
- * record-store 读侧守卫要求非空，值恒本常量）；③ 引擎数据目录布局 SSOT paths.ts
+ * record-store 读侧检查要求非空，值恒本常量）；③ 引擎数据目录布局 SSOT paths.ts
  * 的签名参数。**值逐字不变**（存量 journal 落盘路径与记录含该值分段，改名不改值）。
  */
 export const SHARED_POOL_KEY = "shared";
@@ -84,7 +84,7 @@ export interface RunContext {
   stream?: EngineStream;
   /**
    * [F6] 根 session id（协议 run.params.ctx.sessionRootId 的进程内还原）——pi 引擎
-   * relay 归属键 SESSION_ID 的权威来源。additive 可选：宿主缺省不传。
+   * engine_open 归属键的权威来源。additive 可选：宿主缺省不传。
    */
   sessionRootId?: string;
   /**
@@ -112,7 +112,7 @@ export interface RunContext {
     mode?: string;
   };
   onHandleReady?: (partial: Pick<EngineHandleData, "sessionRef">) => void;
-  /** 一次性子进程 pid 上报（host/childSpawned 载荷形态；ChildProcess 句柄不跨协议面）。 */
+  /** 一次性子进程 pid 上报（host/childSpawned 载荷形态；ChildProcess 句柄不跨协议范围）。 */
   onChildSpawned?: (child: { pid: number | undefined; killed: boolean }) => void;
   /**
    * 子进程退出态上报（host/childStateChanged 载荷形态；SR-4 接线：宿主镜像据此取消
@@ -154,7 +154,7 @@ export interface EnginePort {
   listModels?(): Array<{ id: string; name?: string }> | null;
   validateModel?(modelRef: string | undefined): { canonicalRef: string };
   /**
-   * [subagent-model-switch §7.3] 可选面：执行中模型热切换（协议 setModel 正向方法的
+   * [subagent-model-switch §7.3] 可选能力：执行中模型热切换（协议 setModel 正向方法的
    * 进程内承载）。实现引擎须 capabilities.setModel = 'native' 同批声明（位与方法
    * 成对进出——capabilities 注释的消费点登记）；server 分发行在位非 native 时回
    * engineSetModelUnsupportedError 结构化错误（契约行为 = 明确错误而非崩）。

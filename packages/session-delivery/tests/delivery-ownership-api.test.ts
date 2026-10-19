@@ -5,7 +5,7 @@
  * - confirmDelivered：正规路径 / rebuild 直确认 / 幂等 / tombstone 产生
  * - requeue：多条保相对序至队首（D3 own 处置）/ queued 幂等 / 终态拒绝
  * - cancel：queued 全文快照（D-3 草稿恢复）/ in-flight 收回失败事实优先 delivered /
- *   checked 挂账 reject
+ *   checked 挂起 reject
  * - drain：全量取回 + 全记 cancelled tombstone + 后续不投递 + 迟到回执安全
  * - tombstone 判重（D5②）：resync 重报已 delivered/cancelled 的 id 不重投；
  *   tombstone 全量保留不设窗口；未显式传 id 的消息不参与幂等（v1 兼容）
@@ -206,7 +206,7 @@ describe('u1-api cancel', () => {
     handle.dispose()
   })
 
-  it('checked 条目 cancel：挂账 promise reject（不留悬挂）', async () => {
+  it('checked 条目 cancel：挂起 promise reject（不留悬挂）', async () => {
     let sendResolve: (() => void) | undefined
     const port = makeMockPort({
       send: () => new Promise<void>((resolve) => { sendResolve = resolve }),
@@ -226,7 +226,7 @@ describe('u1-api cancel', () => {
     handle.dispose()
   })
 
-  it('出站批次中 cancel 后，迟到受理回执不转移（在册守卫）', async () => {
+  it('出站批次中 cancel 后，迟到受理回执不转移（在册检查）', async () => {
     const resolvers: (() => void)[] = []
     const port = makeMockPort({
       send: () => new Promise<void>((resolve) => { resolvers.push(resolve) }),
@@ -253,8 +253,8 @@ describe('u1-api cancel', () => {
 
   // [已不可达用例删除登记] 原「出站批次错误重试窗口内 cancel：backoff 到期重试不重发
   // 已取消条目（dmg-r1-1）」与「出站批次重试窗口内 cancel 唯一条目：backoff 到期按空
-  // 收口」两用例随 backoff 重试链退役而不可达（无重试窗口；dmg-r1-1 的终态同步摘批
-  // 防线由「出站批次中 cancel 后，迟到受理回执不转移（在册守卫）」用例继续锁定），
+  // 收尾」两用例随 backoff 重试链退役而不可达（无重试窗口；dmg-r1-1 的终态同步摘批
+  // 防线由「出站批次中 cancel 后，迟到受理回执不转移（在册检查）」用例继续锁定），
   // 2026-10-05 投递域清理批次删除。
 })
 
@@ -485,7 +485,7 @@ describe('u1-api tombstone 判重（D5②）', () => {
     handle.dispose()
   })
 
-  it('tombstone 全量保留不设窗口：>50 条 delivered 后判重锚不丢（D5② 正确性不依赖投影窗口）', () => {
+  it('tombstone 全量保留不设窗口：>50 条 delivered 后判重锚不丢（D5② 正确性不依赖派生视图窗口）', () => {
     const port = makeMockPort()
     const handle = createDelivery(port)
 
@@ -494,7 +494,7 @@ describe('u1-api tombstone 判重（D5②）', () => {
       handle.confirmDelivered(`u-${i}`)
     }
 
-    // 判重表 60 条全量（含最早 10 条——投影窗口只留 50 条完整条目）
+    // 判重表 60 条全量（含最早 10 条——派生视图窗口只留 50 条完整条目）
     expect(handle.entriesFull().tombstones).toHaveLength(60)
     handle.send(textMsg('m0'), { id: 'u-0' }) // 最早的 id 重报仍被吞
     expect(port.sendCalls).toHaveLength(60)

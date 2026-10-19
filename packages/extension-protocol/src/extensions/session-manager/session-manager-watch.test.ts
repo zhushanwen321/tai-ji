@@ -12,16 +12,16 @@ import type { SessionManagerWatchRespondPayload, SessionManagerWatchReason } fro
 
 /**
  * notify-once U1 协议契约：watch action（单键寻址 + notifyId 形态入站自检）、
- * send/create optional-notifyId 守卫、watch respond payload、error envelope。
+ * send/create optional-notifyId 检查、watch respond payload、error envelope。
  *
  * boundary 帧全覆盖（任务红线）：空载荷 / 非法 notifyId 形态 / 缺字段 / 超限——
- * 全部在协议层守卫上钉死，不只测 happy-path。
+ * 全部在协议层检查上固定，不只测 happy-path。
  */
 
 const VALID_NOTIFY_ID = 'sm-123e4567-e89b-12d3-a456-426614174000'
 
 describe('watch action 入站集合', () => {
-  it('SESSION_MANAGER_ACTIONS 含 watch（event-adapter 收窄面——缺席即折叠 __malformed__）', () => {
+  it('SESSION_MANAGER_ACTIONS 含 watch（event-adapter 收窄范围——缺席即折叠 __malformed__）', () => {
     expect(SESSION_MANAGER_ACTIONS).toContain('watch')
     expect(SESSION_MANAGER_ACTIONS).toHaveLength(7)
   })
@@ -51,7 +51,7 @@ describe('isSessionManagerNotifyId 形态入站自检（lifetimeNotifyId 同一�
     expect(isSessionManagerNotifyId('sm-123e4567e89b12d3a456426614174000')).toBe(false) // 缺分段
   })
 
-  it('boundary：超限（10KB 注入帧）拒绝——形状构造性钉死 39 字符，无独立长度条款也不漏', () => {
+  it('boundary：超限（10KB 注入帧）拒绝——形状构造性固定 39 字符，无独立长度条款也不漏', () => {
     const oversized = `sm-${'a'.repeat(10_000)}`
     expect(oversized.length).toBeGreaterThan(39)
     expect(isSessionManagerNotifyId(oversized)).toBe(false)
@@ -82,20 +82,20 @@ describe('isSessionManagerWatchParams（封闭单键 + 形态自检）', () => {
     expect(isSessionManagerWatchParams({ notifyId: `sm-${'a'.repeat(500)}` })).toBe(false)
   })
 
-  it('单键寻址：夹带 parentSid/sessionId 等额外字段拒绝（parentSid 归 runtime 连接身份，协议面不定义）', () => {
+  it('单键寻址：夹带 parentSid/sessionId 等额外字段拒绝（parentSid 归 runtime 连接身份，协议范围不定义）', () => {
     expect(isSessionManagerWatchParams({ notifyId: VALID_NOTIFY_ID, parentSid: 'sid-parent' })).toBe(false)
     expect(isSessionManagerWatchParams({ notifyId: VALID_NOTIFY_ID, sessionId: 'child' })).toBe(false)
   })
 
-  it('lifetime 同形态：runtime 生成的 lifetimeNotifyId 过同一守卫（防 kind=lifetime watch 被自检拒掉）', () => {
+  it('lifetime 同形态：runtime 生成的 lifetimeNotifyId 过同一检查（防 kind=lifetime watch 被自检拒掉）', () => {
     const lifetimeNotifyId = 'sm-9f2c4a10-11aa-4bbb-8ccc-426614174999'
     expect(isSessionManagerNotifyId(lifetimeNotifyId)).toBe(true)
     expect(isSessionManagerWatchParams({ notifyId: lifetimeNotifyId })).toBe(true)
   })
 })
 
-describe('send/create optional-notifyId 守卫（缺省放行 + 类型面，形态归 arm 判据）', () => {
-  it('send：notifyId 缺省 → 守卫通过（缺省不 arm，不构成 params 错误）', () => {
+describe('send/create optional-notifyId 检查（缺省放行 + 类型范围，形态归 arm 判据）', () => {
+  it('send：notifyId 缺省 → 检查通过（缺省不 arm，不构成 params 错误）', () => {
     expect(isSessionManagerSendParams({ sessionId: 's', prompt: 'p' })).toBe(true)
   })
 
@@ -105,7 +105,7 @@ describe('send/create optional-notifyId 守卫（缺省放行 + 类型面，形�
     ).toBe(true)
   })
 
-  it('send：notifyId 形态畸形（字符串）→ params 守卫仍通过（畸形 → 不 arm + willNotify:false，动作照常）', () => {
+  it('send：notifyId 形态畸形（字符串）→ params 检查仍通过（畸形 → 不 arm + willNotify:false，动作照常）', () => {
     expect(isSessionManagerSendParams({ sessionId: 's', prompt: 'p', notifyId: 'garbage' })).toBe(true)
     // arm 判据（runtime 受理点消费同一函数）对畸形串返回 false —— 两层职责分工
     expect(isSessionManagerNotifyId('garbage')).toBe(false)
@@ -159,7 +159,7 @@ describe('watch respond payload（sessionId 回带 + meta 可选字段）', () =
     expect(isSessionManagerWatchRespondPayload({ reason: 'orphaned', sessionId: 's' })).toBe(true)
   })
 
-  it('类型面：sessionFilePath 携/不携两形态均合法（additive optional，D9 Full transcript 指针行数据源）', () => {
+  it('类型范围：sessionFilePath 携/不携两形态均合法（additive optional，D9 Full transcript 指针行数据源）', () => {
     const withPath: SessionManagerWatchRespondPayload = {
       reason: 'exited',
       sessionId: 'child-a1b2',
@@ -174,7 +174,7 @@ describe('watch respond payload（sessionId 回带 + meta 可选字段）', () =
     expect(JSON.parse(JSON.stringify(withPath))).toEqual(withPath)
   })
 
-  it('守卫：sessionFilePath 缺席放行、string 放行、类型不符拒绝', () => {
+  it('检查：sessionFilePath 缺席放行、string 放行、类型不符拒绝', () => {
     expect(isSessionManagerWatchRespondPayload({ reason: 'completed', sessionId: 's' })).toBe(true)
     expect(
       isSessionManagerWatchRespondPayload({
@@ -221,7 +221,7 @@ describe('watch respond payload（sessionId 回带 + meta 可选字段）', () =
   })
 })
 
-describe('error envelope（watch 守卫拒绝时 handler 错误闭环的回包形状）', () => {
+describe('error envelope（watch 检查拒绝时 handler 错误闭环的回包形状）', () => {
   it('watch 非法 params 的 error envelope：{error} 可被 isChannelErrorResult 检测并格式化', () => {
     // handler dispatch 对 isParams false 抛错 → handle respond({error}) 走同一 select value 通道
     const envelope = { error: "invalid params for session-manager action 'watch'" }
@@ -229,7 +229,7 @@ describe('error envelope（watch 守卫拒绝时 handler 错误闭环的回包�
     expect(formatChannelErrorText(envelope)).toContain("'watch'")
   })
 
-  it('带 hint/sessionId 的扩展 envelope（create 已成功分支）仍被同一守卫捕获', () => {
+  it('带 hint/sessionId 的扩展 envelope（create 已成功分支）仍被同一检查捕获', () => {
     const envelope = {
       error: 'prompt failed',
       hint: 'use send_to_session to retry',

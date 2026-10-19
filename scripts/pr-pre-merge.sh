@@ -23,7 +23,7 @@
 # 退出码:
 #   0 = 全部通过
 #   1 = 任意一步失败（输出失败步骤的 stderr 末 30 行；含 --test-result 注入 FAIL）
-#   2 = 用法/环境错误（未知参数、--test-result 下 coverage.json 缺失或 base 不一致）
+#   2 = 用法/环境错误（未知参数、--test-result 下 coverage.json 缺失或 base/headCommit 不一致）
 #
 # 环境变量:
 #   PR_PRE_MERGE_SKIP_BUILD=1   跳过 build 步骤（Electron build 耗时较长）
@@ -42,7 +42,7 @@ usage() {
                                                         # 其余测试线以注入值计入 result
 通用参数: --quiet（只输出最终结果，等价 PR_PRE_MERGE_QUIET=1）
           --base <ref>（注入值产物的 base 口径，默认 main；stacked PR（base≠main）必须传与
-          coverage-gate.py 相同的 --base，否则 --test-result 校验 base 不一致 exit 2）
+          coverage-gate.py 相同的 --base，否则 --test-result 校验 base/headCommit 不一致 exit 2）
 USAGE
 }
 
@@ -114,27 +114,54 @@ NODE_BIN_REAL="$(readlink -f "$NODE_BIN" 2>/dev/null || echo "$NODE_BIN")"
 export PATH="$(dirname "$NODE_BIN_REAL"):$GIT_ROOT/node_modules/.bin:$PATH"
 
 # ── --test-result 前置校验（防注入值与 coverage 产物竞态）：
-#    注入值来源是 coverage-gate 的测试判定，产物必须存在且针对同一 base，
+#    注入值来源是 coverage-gate 的测试判定，产物必须存在且针对同一 base + 当前 HEAD，
 #    否则注入的是过期读数。不一致 → exit 2（工具错误），错误信息指向恢复动作。
 if [[ "$MODE" == "test-result" ]]; then
     EXPECTED_BASE="$BASE"  # --base 可选参数（默认 main）；须与 coverage-gate.py 的 --base 同值
-    if [[ ! -f .review/coverage.json ]]; then
-        echo "ERROR: --test-result 需要 .review/coverage.json（未找到，注入值缺少来源产物）。" >&2
+    # 产物目录解析（impl-spec §2.2）：新 pr-review 目录优先，缺产物时回退旧 .review/
+    #（迁移过渡期 design.md §7 风险 2——coverage-gate 写方降级或在途分支只写旧目录）
+    REVIEW_NEW="$(node "$GIT_ROOT/scripts/skill-data-dir.mjs" pr-review "$GIT_ROOT" 2>/dev/null || true)"
+    COV_FILE=""
+    if [[ -n "$REVIEW_NEW" && -f "$REVIEW_NEW/coverage.json" ]]; then
+        COV_FILE="$REVIEW_NEW/coverage.json"
+    elif [[ -f "$GIT_ROOT/.review/coverage.json" ]]; then
+        COV_FILE="$GIT_ROOT/.review/coverage.json"
+    fi
+    if [[ -z "$COV_FILE" ]]; then
+        echo "ERROR: --test-result 需要 coverage.json（新 pr-review 目录与 .review/ 均未找到，注入值缺少来源产物）。" >&2
         echo "恢复：先运行 python3 .agents/skills/pr-cr-fix/scripts/coverage-gate.py --base ${EXPECTED_BASE}，" >&2
         echo "再执行 bash scripts/pr-pre-merge.sh --test-result PASS|FAIL" >&2
         exit 2
     fi
-    COV_BASE="$(node -e 'try{const c=require("./.review/coverage.json");process.stdout.write(typeof c.base==="string"?c.base:"")}catch(e){}' 2>/dev/null || true)"
+    # base + headCommit 双锚一次读取
+    COV_BASE="" COV_HEAD=""
+    read -r COV_BASE COV_HEAD <<< "$(node -e '
+const c = JSON.parse(require("fs").readFileSync(process.argv[1], "utf8"));
+process.stdout.write([typeof c.base === "string" ? c.base : "", typeof c.headCommit === "string" ? c.headCommit : ""].join(" "));
+' "$COV_FILE" 2>/dev/null || true)"
     if [[ -z "$COV_BASE" ]]; then
-        echo "ERROR: .review/coverage.json 缺少 base 字段（或 JSON 无效）——无法确认产物针对的 base，注入判定不可信。" >&2
+        echo "ERROR: coverage.json（${COV_FILE}）缺少 base 字段（或 JSON 无效）——无法确认产物针对的 base，注入判定不可信。" >&2
         echo "恢复：先运行 python3 .agents/skills/pr-cr-fix/scripts/coverage-gate.py --base ${EXPECTED_BASE}，" >&2
         echo "再执行 bash scripts/pr-pre-merge.sh --test-result PASS|FAIL" >&2
         exit 2
     fi
     if [[ "$COV_BASE" != "$EXPECTED_BASE" ]]; then
-        echo "ERROR: .review/coverage.json 的 base=\"$COV_BASE\" 与本次 base=\"$EXPECTED_BASE\" 不一致——产物过期（来自其他 base），注入判定不可信。" >&2
+        echo "ERROR: coverage.json（${COV_FILE}）的 base=\"$COV_BASE\" 与本次 base=\"$EXPECTED_BASE\" 不一致——产物过期（来自其他 base），注入判定不可信。" >&2
         echo "恢复二选一：① 产物过期 → 先运行 python3 .agents/skills/pr-cr-fix/scripts/coverage-gate.py --base ${EXPECTED_BASE}，再执行 bash scripts/pr-pre-merge.sh --test-result PASS|FAIL；" >&2
         echo "          ② \"$COV_BASE\" 才是本次正确口径（stacked PR）→ 改用 bash scripts/pr-pre-merge.sh --test-result PASS|FAIL --base ${COV_BASE} 重跑" >&2
+        exit 2
+    fi
+    # head 锚（design.md §7 风险 3）：worktree 删除重建复用同一 project-slug，base 相同
+    # ≠ 产物新鲜（同分支重开场景 base 不变）；headCommit 缺失（旧版脚本产出）视为不匹配
+    EXPECTED_HEAD="$(git rev-parse HEAD)"
+    if [[ -z "$COV_HEAD" ]]; then
+        echo "ERROR: coverage.json（${COV_FILE}）缺少 headCommit 字段——产物由旧版脚本产出，无法确认针对的 HEAD（base 相同 ≠ 内容新鲜），注入判定不可信。" >&2
+        echo "恢复：重跑 python3 .agents/skills/pr-cr-fix/scripts/coverage-gate.py --base ${EXPECTED_BASE}，再执行 bash scripts/pr-pre-merge.sh --test-result PASS|FAIL" >&2
+        exit 2
+    fi
+    if [[ "$COV_HEAD" != "$EXPECTED_HEAD" ]]; then
+        echo "ERROR: coverage.json（${COV_FILE}）的 headCommit=\"$COV_HEAD\" 与当前 HEAD=\"$EXPECTED_HEAD\" 不一致——产物过期（HEAD 已前移），注入判定不可信。" >&2
+        echo "恢复：重跑 python3 .agents/skills/pr-cr-fix/scripts/coverage-gate.py --base ${EXPECTED_BASE}，再执行 bash scripts/pr-pre-merge.sh --test-result PASS|FAIL" >&2
         exit 2
     fi
 fi
@@ -182,16 +209,32 @@ run_step() {
     fi
 }
 
-# 写入 stage gate marker（供 pr-status.sh 读取）
+# 写入 stage gate marker（供 pr-status.sh 与 pr-lifecycle workflow 读取）。
+# 双写（迁移过渡期 design.md §7 风险 2）：新 pr-review 目录为主 + 旧 .review/ 同步——
+# pr-lifecycle（共享实体）仍读旧路径且只 match result= 行；headCommit 行供 pr-status.sh
+# 防「worktree 重建后陈旧 marker 判 ready」（design.md §7 风险 3）。
 write_result_marker() {
     local result="$1"
+    local review_new
+    review_new="$(node "$GIT_ROOT/scripts/skill-data-dir.mjs" pr-review "$GIT_ROOT" 2>/dev/null || true)"
     mkdir -p .review
-    local ts
+    [[ -n "$review_new" ]] && mkdir -p "$review_new"
+    local ts head
     ts="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
-    cat > .review/premerge-result <<MARKER
+    head="$(git rev-parse HEAD 2>/dev/null || true)"
+    local marker
+    marker=$(cat <<MARKER
 timestamp="$ts"
 result="$result"
+headCommit="$head"
 MARKER
+)
+    printf '%s\n' "$marker" > .review/premerge-result
+    if [[ -n "$review_new" ]]; then
+        printf '%s\n' "$marker" > "$review_new/premerge-result"
+    else
+        echo "WARN: 新产物目录解析失败，marker 只写旧目录 .review/（pr-status.sh 切新目录后将读不到本 run 结果）" >&2
+    fi
 }
 
 # ── Step 1: typecheck（extensions 独立 tsconfig + 项目层）
@@ -215,7 +258,7 @@ run_step "lint" pnpm run lint
 
 # ── Step 3: test（extensions + runtime + renderer 三条线；按模式取舍）
 # [e2e 执行准则] PR/merge 门禁不跑 e2e：test:runtime 以 TAIJI_SKIP_REAL_PI=1 跑 unit 轨
-#（与 CI test-runtime job 同口径）；真实 pi 等价性用例只在开发阶段按改动面跑
+#（与 CI test-runtime job 同口径）；真实 pi 等价性用例只在开发阶段按改动范围跑
 #（清单由 tech-design e2e 影响面评估 + dev-flow 验收计划表圈定，SSOT = AGENTS.md「测试」节）
 if [[ "$MODE" == "default" ]]; then
     # extensions 测试（pnpm -r --filter @zhushanwen/pi-* test = vitest run）
@@ -229,7 +272,7 @@ if [[ "$MODE" == "default" ]]; then
 elif [[ "$MODE" == "test-result" ]]; then
     # extensions / renderer 线由 coverage-gate 承接（插桩口径），此处不重复执行，
     # 判定以注入值计入最终 result；runtime 线实跑——无插桩，TAIJI_SKIP_REAL_PI=1 跑
-    # unit 轨（e2e 执行准则：real-pi 不在 PR/merge 承接，开发阶段按改动面跑）
+    # unit 轨（e2e 执行准则：real-pi 不在 PR/merge 承接，开发阶段按改动范围跑）
     log "  ↷ test:extensions skipped（--test-result 注入: ${TEST_RESULT_INJECT}）"
     RESULTS+=("SKIP test:extensions 0s (injected=${TEST_RESULT_INJECT})")
     run_step "test:runtime" bash -c 'cd packages/runtime && TAIJI_SKIP_REAL_PI=1 npx vitest run'
@@ -333,7 +376,7 @@ if [[ "$FINAL_RESULT" == "PASS" ]]; then
     echo "[pr-pre-merge] all checks passed ✓"
 else
     echo "[pr-pre-merge] FAILED ✗ —— 注入测试判定为 FAIL（test:extensions / test:renderer 未实跑，" >&2
-    echo "判定继承自 coverage-gate；失败明细见 .review/coverage.json 的 packages[].reason）" >&2
+    echo "判定继承自 coverage-gate；失败明细见 coverage.json 的 packages[].reason）" >&2
 fi
 
 write_result_marker "$FINAL_RESULT"

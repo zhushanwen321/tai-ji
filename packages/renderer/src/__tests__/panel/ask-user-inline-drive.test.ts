@@ -43,7 +43,7 @@ vi.mock('@/composables/useExtensionUI', async () => {
       cancel: mockState.cancel,
     }),
     formFilter: (req: { form?: boolean }) => req.form === true,
-    // PanelModeBar（Panel composer 上方常驻挂载）setup 消费 planReviewFilter——窄 mock 需补齐该导出面
+    // PanelModeBar（Panel composer 上方常驻挂载）setup 消费 planReviewFilter——窄 mock 需补齐该导出清单
     planReviewFilter: (req: { planReview?: boolean }) => req.planReview === true,
   }
 })
@@ -91,7 +91,7 @@ describe('Panel 统一表单挂载判据（questions 源）', () => {
 
     expect(wrapper.find('[data-testid="form-overlay"]').exists()).toBe(true)
     expect(wrapper.find('[data-testid="composer-box"]').exists()).toBe(false)
-    // 未作答：提交按钮禁用（allAnswered 守卫的用户可见形态）
+    // 未作答：提交按钮禁用（allAnswered 检查的用户可见形态）
     expect(wrapper.find('[data-testid="form-submit"]').attributes('disabled')).toBeDefined()
   })
 

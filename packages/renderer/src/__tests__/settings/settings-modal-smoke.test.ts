@@ -217,7 +217,7 @@ describe('SettingsModal 路径保存失败回弹（RD-4#1：失败强制回弹 U
   /**
    * 权威值源说明：dirs 域无 getter RPC（协议仅 set + 成功后广播），store 的 *Dirs 镜像只被
    * runtime 成功落盘后的广播写入，故镜像恒为「最近落盘值」。失败回弹 = LoadPaths 从该镜像
-   * 重拉（saveError 通道驱动），行为级断言即「勾选态回弹 + 常驻红字」。
+   * 重新拉取（saveError 通道驱动），行为级断言即「勾选态回弹 + 常驻红字」。
    */
   function mountModalWithFailingSkillDirs(): ReturnType<typeof mount> {
     provideMockPlatform()

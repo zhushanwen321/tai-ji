@@ -14,8 +14,8 @@
  *    （零变化面）+ 不渲染条带（mac 拖拽由系统提供）
  *
  * Mock 策略（沿用 sidebar-layout / session-status-icons 既有模式，避免全局副作用）：
- *  - useSettingsShell 置空（AppShell 壳副作用，非拓扑被测面）
- *  - SettingsModal / Workspace / Sidebar stub（重组件依赖树，非拓扑被测面）
+ *  - useSettingsShell 置空（AppShell 壳副作用，非拓扑被测对象）
+ *  - SettingsModal / Workspace / Sidebar stub（重组件依赖树，非拓扑被测对象）
  *  - useSidebar stub（AppShell 仅消费 syncSessionToPanel）
  *  - 其余（AsideRegion / AppNavControls / TrafficLight / MainPanel + stores）走真实实现
  *
@@ -152,7 +152,7 @@ describe('AppShell 平台两态成对（跨平台窗口外壳 u-shell-chrome）'
 
     const shell = wrapper.find('[data-testid="app-shell"]')
     expect(shell.classes()).toContain('rounded-[10px]')
-    // mac 顶部拖拽由系统提供，条带 v-if 不渲染（A6 mac 回归剧本断言面）
+    // mac 顶部拖拽由系统提供，条带 v-if 不渲染（A6 mac 回归剧本断言范围）
     expect(wrapper.find('[data-testid="aside-drag-strip"]').exists()).toBe(false)
   })
 })

@@ -7,7 +7,7 @@
 
 ## 1. 接入形态与进程拓扑
 
-推荐 zcode 式常驻接入：spawn `hermes acp`（acp_adapter/entry.py:7-13 用法；hermes_cli/main.py:11559 `_AGENT_COMMANDS = {None, "chat", "acp", "rl"}`）→ `HermesACPAgent` + `asyncio.run(acp.run_agent(agent, use_unstable_protocol=True))`（acp_adapter/entry.py:255-257），ACP stdio JSON-RPC：stdout 独占协议帧，日志全部走 stderr（entry.py:75-88）；AIAgent 的人类可读输出也被重定向到 stderr（acp_adapter/session.py:112-120, :627）。一个常驻进程承载多个 ACP session（每 session 一个 AIAgent，跑在共享 ThreadPoolExecutor worker 线程，`max_workers=4`，acp_adapter/server.py:85, :1502）。ACP 方法面两层：标准方法 initialize / authenticate / new_session / load_session / prompt / cancel / set_session_mode / set_config_option + unstable 扩展 resume_session / fork_session / list_sessions / set_session_model（server.py:821-1953 各实现；`use_unstable_protocol=True` 开启）。session 持久化到 SessionDB SQLite（`<HERMES_HOME>/state.db`），进程重启后可恢复（acp_adapter/session.py:1-7, :417）。
+推荐 zcode 式常驻接入：spawn `hermes acp`（acp_adapter/entry.py:7-13 用法；hermes_cli/main.py:11559 `_AGENT_COMMANDS = {None, "chat", "acp", "rl"}`）→ `HermesACPAgent` + `asyncio.run(acp.run_agent(agent, use_unstable_protocol=True))`（acp_adapter/entry.py:255-257），ACP stdio JSON-RPC：stdout 独占协议帧，日志全部走 stderr（entry.py:75-88）；AIAgent 的人类可读输出也被重定向到 stderr（acp_adapter/session.py:112-120, :627）。一个常驻进程承载多个 ACP session（每 session 一个 AIAgent，跑在共享 ThreadPoolExecutor worker 线程，`max_workers=4`，acp_adapter/server.py:85, :1502）。ACP 方法侧两层：标准方法 initialize / authenticate / new_session / load_session / prompt / cancel / set_session_mode / set_config_option + unstable 扩展 resume_session / fork_session / list_sessions / set_session_model（server.py:821-1953 各实现；`use_unstable_protocol=True` 开启）。session 持久化到 SessionDB SQLite（`<HERMES_HOME>/state.db`），进程重启后可恢复（acp_adapter/session.py:1-7, :417）。
 
 env 与凭据：`HERMES_HOME` 环境变量覆写数据根（默认 `~/.hermes`，hermes_constants.py:43-47 `get_hermes_home()`）——taiji 适配器 spawn 时设独立 HERMES_HOME 即完成数据隔离；启动时自动加载 `<HERMES_HOME>/.env`（entry.py:96-108）。模型凭据无 CLI flag 直注通道，经 `resolve_runtime_provider()` 从配置/env 解析（acp_adapter/session.py:609-619；acp_adapter/auth.py:11-33）——适配器可预写 HERMES_HOME 内配置或注入 env；`base_url`/`api_key`/`provider` 是 AIAgent 构造参数（run_agent.py:319-321），适配器若自建 agent 可直传。
 
@@ -79,7 +79,7 @@ run.params.task（AgentCallOpts）/ ctx / resume → ACP `new_session`（server.
 | user_message_chunk（UserMessageChunk） | —（重放用户历史/队列回显，宿主已知） | 丢弃 | server.py:936-940, :1558-1561 |
 | tool_call（ToolCallStart） | tool_start | 直接 | server.py:1041；acp_adapter/tools.py:1017-1242 |
 | tool_call_update（ToolCallProgress，status completed/failed） | tool_end | 直接 | events.py:244-251；tools.py:1249-1274 |
-| plan（AgentPlanUpdate，todo 工具结果投影） | —（taiji 9 事件无 plan 槽） | 丢弃（或宿主 GUI 自行消费） | events.py:39-84, :252-255 |
+| plan（AgentPlanUpdate，todo 工具结果派生视图） | —（taiji 9 事件无 plan 槽） | 丢弃（或宿主 GUI 自行消费） | events.py:39-84, :252-255 |
 | available_commands_update（9 个 slash 命令） | — | 丢弃 | server.py:448-500, :1584-1627 |
 | session_info_update（自动标题） | — | 丢弃 | server.py:712-741 |
 | usage_update（上下文水位 size/used，非 token 用量） | —（或作 activity） | 丢弃（合成 activity 可选） | server.py:660-710 |
@@ -168,7 +168,7 @@ ResumeAnchor.sessionRef 构成建议：`{sessionId: <uuid>, hermesHome: <get_her
 **源有靶无**（hermes 有、taiji 协议无槽，丢弃或宿主自行消费）：
 - ACP plan 更新（todo 工具 → AgentPlanUpdate，events.py:39-84）；available_commands（9 个 slash 命令，server.py:448-500）；session_info_update 自动标题（server.py:712-741）；usage_update 上下文水位（server.py:660-710）
 - 多模态输入（image/resource blocks → OpenAI content parts，server.py:378-442）；MCP server 动态注册（NewSession.mcp_servers，server.py:750-817）
-- 工具面：delegate_task 子 agent、execute_code、browser_* 11 工具、send_message/kanban/cron 等平台工具、memory/session_search 跨会话记忆（toolsets.py:347-364 hermes-acp 29 工具）
+- 工具范围：delegate_task 子 agent、execute_code、browser_* 11 工具、send_message/kanban/cron 等平台工具、memory/session_search 跨会话记忆（toolsets.py:347-364 hermes-acp 29 工具）
 - SOUL.md 身份 / AGENTS.md/.cursorrules 项目上下文自动装载（system_prompt.py:61-90）；skills 三工具；checkpoint 体系；六种执行环境；interim_assistant 中途评论；clarify 工具（hermes-acp 不装）
 
 **靶有源无**（taiji 需要、hermes 无原生）：

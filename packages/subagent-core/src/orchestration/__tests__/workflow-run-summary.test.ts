@@ -1,7 +1,7 @@
-// workflow-run-summary.test.ts —— runSummary 投影测试（U7/B5/D8）。
+// workflow-run-summary.test.ts —— runSummary 派生视图测试（U7/B5/D8）。
 //
 // 覆盖（验收条款③）：
-// - runSummary：字段投影全断言（running / done 两形态；slug/error/completedAt 缺省透传）
+// - runSummary：字段派生视图全断言（running / done 两形态；slug/error/completedAt 缺省透传）
 import { describe, expect, it } from "vitest";
 
 import { runSummary } from "../workflow-run-summary.ts";
@@ -25,7 +25,7 @@ function makeSpec(scriptName: string, slug?: string): RunSpec {
 function makeRun(
   runId: string,
   opts: {
-    /** fixture 建模选择器：done = 重水合终局 run（同步注入注册表条目 + reason）。 */
+    /** fixture 建模选择器：done = 重新加载的终局 run（同步注入注册表条目 + reason）。 */
     status?: "running" | "done";
     scriptName?: string;
     slug?: string;
@@ -54,9 +54,9 @@ function makeRun(
       ...(opts.interruptedAt !== undefined ? { interruptedAt: opts.interruptedAt } : {}),
     },
   );
-  // [D6(a) 第 1 步] 终局判定源 = 终局记录注册表：done 形态 fixture 建模「重水合
+  // [D6(a) 第 1 步] 终局判定源 = 终局记录注册表：done 形态 fixture 建模「重新加载的
   // done run」时必须携带注册表条目（生产 = 壳重建点 noteRebuiltSettlement 注入），
-  // settledAt = 快照 completedAt（重水合 run 的条目 = run-settled 帧时序）。
+  // settledAt = 快照 completedAt（重新加载 run 的条目 = run-settled 帧时序）。
   if (status === "done") {
     noteRebuiltSettlement(runId, {
       outcome: doneReasonToRunOutcome(opts.reason ?? "completed"),
@@ -66,8 +66,8 @@ function makeRun(
   return run;
 }
 
-describe("runSummary — 字段投影（字段以 core WorkflowRun 为准）", () => {
-  it("running run：name=scriptName、slug、status、startedAt 投影；completedAt/reason 为 undefined", () => {
+describe("runSummary — 字段派生视图（字段以 core WorkflowRun 为准）", () => {
+  it("running run：name=scriptName、slug、status、startedAt 派生视图；completedAt/reason 为 undefined", () => {
     const run = makeRun("wf-r1", { status: "running", scriptName: "deploy-site", slug: "deploy" });
 
     expect(runSummary(run)).toEqual({
@@ -82,7 +82,7 @@ describe("runSummary — 字段投影（字段以 core WorkflowRun 为准）", (
     });
   });
 
-  it("done run：reason/completedAt/error 投影（对齐 pi toRunSummary 字段集）", () => {
+  it("done run：reason/completedAt/error 派生视图（对齐 pi toRunSummary 字段集）", () => {
     const run = makeRun("wf-d1", {
       status: "done",
       reason: "failed",
@@ -103,11 +103,11 @@ describe("runSummary — 字段投影（字段以 core WorkflowRun 为准）", (
     });
   });
 
-  it("interrupted run（meta.interruptedAt 置位）：status 投影 'interrupted'——中断态经 meta 在投影面表达", () => {
-    // [U10 回归] 重水合中断 run（loadAll fold / 收编链写 meta.interruptedAt）在
-    // CLI/TUI 展示投影三态：不再显示僵尸「运行中」（与 shared WorkflowRunStatus
+  it("interrupted run（meta.interruptedAt 置位）：status 派生视图 'interrupted'——中断态经 meta 在派生视图侧表达", () => {
+    // [U10 回归] 重新加载的中断 run（loadAll fold / 收编链写 meta.interruptedAt）在
+    // CLI/TUI 展示派生视图三态：不再显示僵尸「运行中」（与 shared WorkflowRunStatus
     // 三态、场景 25 中断显示语义同词）。resume 资格判据在 core fold lifecycle，
-    // 不受本投影影响。
+    // 不受本派生视图影响。
     const run = makeRun("wf-i1", { status: "running", interruptedAt: "2026-08-30T05:00:00.000Z" });
 
     expect(runSummary(run).status).toBe("interrupted");

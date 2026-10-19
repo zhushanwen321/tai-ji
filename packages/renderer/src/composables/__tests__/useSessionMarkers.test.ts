@@ -243,14 +243,14 @@ describe('useSessionMarkers', () => {
     warnSpy.mockRestore()
   })
 
-  // ── 形状守卫（合法 JSON 但结构漂移不进 cache）──
+  // ── 形状检查（合法 JSON 但结构漂移不进 cache）──
 
-  it('[形状守卫] 顶层非对象 JSON（数组等形状漂移）与解析失败同走 corrupt 通道', () => {
+  it('[形状检查] 顶层非对象 JSON（数组等形状漂移）与解析失败同走 corrupt 通道', () => {
     const arrayRaw = '[{"s1":{"unread":true}}]'
     localStorage.setItem(STORAGE_KEY, arrayRaw)
     const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {})
 
-    markUnread('s2') // hydrate → 顶层形状守卫失败 → corrupt → 拒写
+    markUnread('s2') // hydrate → 顶层形状检查失败 → corrupt → 拒写
     expect(warnSpy).toHaveBeenCalled()
     expect(localStorage.getItem(STORAGE_KEY)).toBe(arrayRaw) // 原值保留不覆写
     expect(isUnread('s1')).toBe(false) // 错误形状未进 cache
@@ -264,7 +264,7 @@ describe('useSessionMarkers', () => {
     warnSpy.mockRestore()
   })
 
-  it('[形状守卫] 条目形状漂移被丢弃并 warn-once，合法条目与合法字段照常加载', () => {
+  it('[形状检查] 条目形状漂移被丢弃并 warn-once，合法条目与合法字段照常加载', () => {
     const raw = JSON.stringify({
       s1: { unread: true }, // 合法
       s2: 'junk', // 非对象 → 丢弃

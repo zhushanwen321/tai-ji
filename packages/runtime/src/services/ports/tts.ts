@@ -7,7 +7,7 @@
  * 差异判断读能力表不写 if (vendor === ...)）与厂商错误形态 → 统一错误码的翻译（§7.3 分层，
  * 统一层只见 TtsErrorCode）。
  *
- * 能力表与表单投影的本体（三家各一份）随 driver 实装定义在 infra/tts/，形状 SSOT 在
+ * 能力表与表单派生视图的本体（三家各一份）随 driver 实装定义在 infra/tts/，形状 SSOT 在
  * shared tts-types（协议 reply tts.getCapabilities 引用同一形状，两处漂移编译期红）。
  */
 import type { InternalSpeechRequest, TtsCapabilities, TtsErrorCode, TtsFormModel, TtsProviderId } from '@taiji/shared'
@@ -37,7 +37,7 @@ export interface TtsDriver {
   readonly id: TtsProviderId
   /** 合成能力表：driver 钳制/丢弃的唯一数据源（设计 D3）。 */
   readonly capabilities: TtsCapabilities
-  /** 表单投影：设置页表单渲染唯一数据源（经 tts.getCapabilities 提供，内嵌能力表保同源）。 */
+  /** 表单派生视图：设置页表单渲染唯一数据源（经 tts.getCapabilities 提供，内嵌能力表保同源）。 */
   readonly formModel: TtsFormModel
   /**
    * 单段合成：输入已按 capabilities.maxInputChars 切好的文本段，返回 PCM 裸流 + 实际采样率 + 声道数。

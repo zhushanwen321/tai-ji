@@ -1,5 +1,5 @@
 /**
- * F2/F5：uninstallPlugin 四缺收口 + shutdown flush 先于停 timer。
+ * F2/F5：uninstallPlugin 四缺处置 + shutdown flush 先于停 timer。
  *
  * F2 四缺（uninstall 装配层缺口，逐缺断言）：
  *  ① stopWatching（停 fs.watch 热重载监听）
@@ -17,6 +17,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { mkdtemp, rm, readFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
+import { getSessionPluginDataPath } from '@taiji/shared/paths'
 
 import { PluginService } from '../src/services/plugin-service/plugin-service.js'
 import type { PluginRegistry } from '../src/services/plugin-service/plugin-registry.js'
@@ -87,7 +88,7 @@ function createService(opts: {
   return { service, reg: internals(service), registryMock }
 }
 
-describe('uninstallPlugin 四缺收口（F2）', () => {
+describe('uninstallPlugin 四缺处置（F2）', () => {
   it('F2-①: uninstall 停止该插件的 fs.watch 热重载监听', async () => {
     const installer: IPluginInstaller = {
       install: vi.fn(),
@@ -115,7 +116,7 @@ describe('uninstallPlugin 四缺收口（F2）', () => {
     expect(installer.uninstall).toHaveBeenCalledWith('uninstall-plugin', '/tmp/plugins/uninstall-plugin/index.js')
   })
 
-  it('F2-②守卫: builtin 插件（source=built-in）不删磁盘（防破坏随应用分发的资源）', async () => {
+  it('F2-②检查: builtin 插件（source=built-in）不删磁盘（防破坏随应用分发的资源）', async () => {
     const installer: IPluginInstaller = {
       install: vi.fn(),
       uninstall: vi.fn().mockResolvedValue(undefined),
@@ -130,7 +131,7 @@ describe('uninstallPlugin 四缺收口（F2）', () => {
     expect(registryMock.removeDescriptor).toHaveBeenCalledWith('uninstall-plugin')
   })
 
-  it('F2-②容错: installer.uninstall 抛错不中断内存清理（registry/activator 拆除仍完成），收口抛错（RT-6#6）', async () => {
+  it('F2-②容错: installer.uninstall 抛错不中断内存清理（registry/activator 拆除仍完成），收尾抛错（RT-6#6）', async () => {
     const consoleError = vi.spyOn(console, 'error').mockImplementation(() => {})
     const installer: IPluginInstaller = {
       install: vi.fn(),
@@ -177,7 +178,7 @@ describe('uninstallPlugin 四缺收口（F2）', () => {
     expect(terminateWorker).toHaveBeenCalledWith('sandbox-uninstall-plugin')
   })
 
-  it('F2-③守卫: trusted 共享 Worker 不 terminate（防误杀同线程其他插件）；无句柄时 no-op', async () => {
+  it('F2-③检查: trusted 共享 Worker 不 terminate（防误杀同线程其他插件）；无句柄时 no-op', async () => {
     const installer: IPluginInstaller = { install: vi.fn(), uninstall: vi.fn().mockResolvedValue(undefined) }
 
     // trusted 场景
@@ -256,8 +257,10 @@ describe('PluginService.shutdown flush 时序（F5）', () => {
 
     await service.shutdown()
 
+    // [session-store-layout-inversion 域 4] 插件 KV 落点 = 存储树 `<root>/<sid>/plugin-data.json`
+    //（生产同源 getSessionPluginDataPath；原旧布局 `<configDir>/session-data/<sid>.json` 已退役）
     const flushed = JSON.parse(
-      await readFile(join(tmpConfigDir, 'session-data', 'session-1.json'), 'utf-8'),
+      await readFile(getSessionPluginDataPath('session-1', tmpConfigDir), 'utf-8'),
     ) as Record<string, unknown>
     expect(flushed['lastKey']).toBe('lastValue')
   })

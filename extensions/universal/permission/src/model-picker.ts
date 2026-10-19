@@ -16,7 +16,7 @@
  *  - ProviderModelSelectorComponent extends Container：Container 无 handleInput，必须 override
  *    委托给当前 stage 的 SelectList（WC9/WC15 critical）。
  *  - stage 切换用 clear() + addChild 重建（两态状态机）。
- *  - _resolved 守卫防二次 done（switchToModelStage 等异步路径可能重复触发）。
+ *  - _resolved 检查防二次 done（switchToModelStage 等异步路径可能重复触发）。
  */
 
 import { type Component, Container, type SelectItem, SelectList, type SelectListTheme, truncateToWidth } from "@earendil-works/pi-tui";
@@ -79,7 +79,7 @@ class TextLines implements Component {
  * 测试 WR1：直接调 comp.handleInput('\r') 验证 SelectList.onSelect 被触发（锁定键盘委托通路）。
  *
  * done 桥接：comp 构造时传入 done（由 ctx.ui.custom 的 factory 提供），内部 onSelect/onCancel
- * 最终调 done（参考 ApprovalComponent）。_resolved 守卫防二次 done。
+ * 最终调 done（参考 ApprovalComponent）。_resolved 检查防二次 done。
  */
 export class ProviderModelSelectorComponent extends Container {
 	private stage: "provider" | "model" = "provider";

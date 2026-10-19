@@ -12,7 +12,7 @@
  * - 使用者：折叠态 chrome 按钮可点（toggle collapsed）
  * - 观察者：DOM 含 testid / 无 R11 移除项残留
  *
- * 覆盖（review MF-6 保留面）：折叠态 chrome 迁入（collapsed → sidebar-collapse-toggle +
+ * 覆盖（review MF-6 保留范围）：折叠态 chrome 迁入（collapsed → sidebar-collapse-toggle +
  * pl-[88px] 让位；全屏态回退 pl-3.5）+ ExtensionHost panel.header 挂载点（sessionId →
  * ViewHost 挂载且 viewId/sessionId/empty 正确；不传不渲染）。
  *

@@ -1,16 +1,16 @@
 /**
  * CompactionNotifier — compaction 生命周期事件编排（M4 事件驱动：interpreter 唯一源）。
  *
- * [协作对象，T4 拆分] 从 event-interpreter.ts 按变化轴抽出：compaction_start/end 到 WS 帧
+ * [协作对象，T4 拆分] 从 event-interpreter.ts 按变化原因抽出：compaction_start/end 到 WS 帧
  * 广播（session.compacting / session.compacted / message.compactionSummary / message.error）
- * 与副作用回调（isCompacting 置复位 / occupancy 转移 / context 用量刷新 / trace 补拉）的
+ * 与副作用回调（isCompacting 置复位 / occupancy 转移 / context 用量刷新 / trace 补充拉取）的
  * 纯同步编排自成一体，无内部状态、与 interpreter 主循环无时序耦合（case 直调、无 await）。
  * 本对象不持有 interpreter 主引用（send 与四个回调经窄依赖注入）。
  */
 import type { ServerMessage } from '@taiji/shared'
 import type { SessionOccupancyTransition } from './types.js'
 
-/** CompactionNotifier 窄依赖（EventInterpreterOptions 的结构化投影）。 */
+/** CompactionNotifier 窄依赖（EventInterpreterOptions 的结构化视图）。 */
 export interface CompactionNotifierDeps {
   sessionId: string
   /** WS 帧发送。 */
@@ -21,7 +21,7 @@ export interface CompactionNotifierDeps {
   onOccupancyTransition?: (transition: SessionOccupancyTransition) => void
   /** context 事件失效（成功 compaction 后以 estimatedTokensAfter 刷新用量）。 */
   onContextUpdate?: (sessionId: string, data: { inputTokens: number; totalTokens: number }) => void
-  /** session-trace 增量腿补拉回调（compaction_end 触发信号的第四类挂点）。 */
+  /** session-trace 增量路径补充拉取回调（compaction_end 触发信号的第四类挂点）。 */
   onTraceSync?: (sessionId: string, trigger: string) => void
   /**
    * **成功** compaction 后的上下文重写通知（归因降噪 2026-09-19）：命中率归因链路用
@@ -32,7 +32,7 @@ export interface CompactionNotifierDeps {
   onContextRewritten?: () => void
 }
 
-/** compaction_end 事件参与编排的字段子集（infra/pi 翻译后事件 compaction-end 分支的结构化投影）。 */
+/** compaction_end 事件参与编排的字段子集（infra/pi 翻译后事件 compaction-end 分支的结构化视图）。 */
 export interface CompactionEndFields {
   result?: unknown
   aborted: boolean
@@ -131,8 +131,8 @@ export class CompactionNotifier {
     // occupancy #6（D2 迁移）：compaction_end（成功/失败/aborted 三路均复位）→ 'compacting-end'。
     // 原语派生 isCompacting=false + 合并 compacting=false；上方通道同原语行，幂等去重。
     this.deps.onOccupancyTransition?.('compacting-end')
-    // session-trace 增量腿（A33）：compaction entry 的 append 先于 compaction_end emit
-    //（时序已核实，design D4），成功/aborted 路径都补拉（aborted 无新 entry 时 sync 内部
+    // session-trace 增量路径（A33）：compaction entry 的 append 先于 compaction_end emit
+    //（时序已核实，design D4），成功/aborted 路径都补充拉取（aborted 无新 entry 时 sync 内部
     // 空 delta 不广播）；failed 路径也补——追赶式拉取以 pi 侧实际状态为准。
     this.deps.onTraceSync?.(sessionId, 'compaction_end')
   }

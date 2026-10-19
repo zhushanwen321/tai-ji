@@ -1,13 +1,13 @@
 #!/usr/bin/env python3
 """
-CSS token SSOT 一致性检查（DESIGN.md frontmatter 投影 ↔ style.css 值真值）
+CSS token SSOT 一致性检查（DESIGN.md frontmatter 派生视图 ↔ style.css 值真值）
 
 规则：docs/DESIGN.md frontmatter（colors.* / rounded.*）声明的值，
 必须与 packages/renderer/src/style.css :root 中对应 CSS 变量的值逐字相等。
 
 [2026-09-13] 页面设计目录（docs/page-design/）退役后的新形态：
 值真值 = style.css（运行时唯一源）；DESIGN.md = 视觉权威文档，其 frontmatter
-是面向 AI/impeccable 消费的关键值投影。本检查保证投影不漂移——此前
+是面向 AI/impeccable 消费的关键值派生视图。本检查保证派生视图不漂移——此前
 v6-tokens.css 时代的名称集合校验只能防「漏登记」，防不了「值漂移」，本版
 升级为值相等比对。
 
@@ -116,10 +116,10 @@ def main() -> int:
             mismatches.append((key, fm_tokens[key], css_values[var]))
 
     if not mismatches:
-        print(f"{GREEN}[OK] DESIGN.md frontmatter {len(FRONTMATTER_TOKEN_MAP)} 个投影值与 style.css 逐字一致{NC}")
+        print(f"{GREEN}[OK] DESIGN.md frontmatter {len(FRONTMATTER_TOKEN_MAP)} 个派生视图值与 style.css 逐字一致{NC}")
         return 0
 
-    print(f"{RED}[ERROR] DESIGN.md 投影值与 style.css 不一致（{len(mismatches)} 处）：{NC}")
+    print(f"{RED}[ERROR] DESIGN.md 派生视图值与 style.css 不一致（{len(mismatches)} 处）：{NC}")
     print()
     for key, fm_val, css_val in mismatches:
         print(f"  {RED}{key}{NC}: DESIGN.md = {fm_val}  |  style.css = {css_val}")

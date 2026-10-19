@@ -1,7 +1,7 @@
 // worktree-reconcile-aging.test.ts —— 对账「歧义跳过」老化升级（PS-12 措施⑤）。
 //
 // 环境模式对齐 worktree-reconcile.integration.test.ts：真实 git repo + TMPDIR
-// 重定向到测试私有目录（物理面扫描根 os.tmpdir()/pi-subagents 跟随 TMPDIR）；
+// 重定向到测试私有目录（磁盘侧扫描根 os.tmpdir()/pi-subagents 跟随 TMPDIR）；
 // 本文件额外 mock core logger 以断言升级 warn（消息含磁盘路径与人工清理指引）。
 //
 // 语义锁定：
@@ -27,7 +27,7 @@ const { loggerMock } = vi.hoisted(() => ({
 }));
 vi.mock("../../core/logger.ts", () => ({ getLogger: () => loggerMock }));
 
-import { encodeCwd } from "../assembly/path-encoding.ts";
+import { encodeCwd, getSessionSubagentSessionsDir } from "@taiji/shared/paths";
 import { WorktreeRegistry } from "../worktree/worktree-registry.ts";
 import { RECONCILE_SKIP_ESCALATION_CYCLES, WorktreeManager } from "../worktree/worktree-manager.ts";
 
@@ -57,6 +57,10 @@ describe("WorktreeManager 对账歧义跳过老化（PS-12 措施⑤）", { time
   beforeEach(() => {
     outerDir = fs.mkdtempSync(path.join(ORIG_TMPDIR, "wt-reconcile-aging-"));
     process.env.TMPDIR = outerDir;
+    // [session-store-layout-inversion] 对账活信号根 = session 存储树
+    // getSessionStoreDir()（env dataDir）——重定向进 outerDir 内（rmSync 外层一并清），
+    // 构造 WorktreeManager 前置（reconciler 构造期解析 storeRoot）
+    process.env.TAIJI_AGENT_DATA_DIR = path.join(outerDir, "engine-data");
 
     agentDir = path.join(outerDir, "agent");
     repo = path.join(outerDir, "repo");
@@ -76,6 +80,7 @@ describe("WorktreeManager 对账歧义跳过老化（PS-12 措施⑤）", { time
 
   afterEach(() => {
     process.env.TMPDIR = ORIG_TMPDIR;
+    delete process.env.TAIJI_AGENT_DATA_DIR;
     fs.rmSync(outerDir, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 });
   });
 
@@ -86,9 +91,10 @@ describe("WorktreeManager 对账歧义跳过老化（PS-12 措施⑤）", { time
     return checkout;
   }
 
-  /** 在 <agentDir>/subagents/<enc>/sessions/ 下写一个 .alive marker。 */
+  /** 在 <storeRoot>/<sid>/subagents/sessions/ 下写一个 .alive marker
+   *  （[session-store-layout-inversion] 活信号随 subagent 文族落 session 存储树）。 */
   function writeAliveMarker(sessionId: string, pid: number): void {
-    const sessions = path.join(agentDir, "subagents", enc, "sessions");
+    const sessions = getSessionSubagentSessionsDir(sessionId);
     fs.mkdirSync(sessions, { recursive: true });
     fs.writeFileSync(
       path.join(sessions, `${sessionId}.jsonl.alive`),

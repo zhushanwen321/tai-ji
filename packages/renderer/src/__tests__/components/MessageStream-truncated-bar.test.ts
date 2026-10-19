@@ -4,7 +4,7 @@
 // 所有元素判为不允许标签（P1 探针实证）——markdown 管线测试族统一跑 jsdom。
 /**
  * [u4d-truncated-ui] MessageStream 历史预算截断顶部条接线测试（D4 /
- * 场景 T3 / 验收 A5/A6 的单测回归面）。
+ * 场景 T3 / 验收 A5/A6 的单测回归测试）。
  *
  * 必测断言（三视角 DOM，挂载真实 MessageStream + 真实 TruncatedHistoryBar）：
  * ① truncated=true → 顶部条渲染「已加载最近 N 轮」+「加载更早」按钮可见

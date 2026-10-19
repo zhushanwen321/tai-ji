@@ -1,8 +1,8 @@
 // src/shared/zcode-model-ref.ts
 //
-// zcode 模型引用切分原语（U1 契约面批件）——[W11/H2] 随 engines/zcode 内建目录删除
+// zcode 模型引用切分原语（U1 契约范围批件）——[W11/H2] 随 engines/zcode 内建目录删除
 // 从 engines/zcode/{preparer,constants}.ts 迁出的宿主侧原语。引擎侧等价物在
-// @zhushanwen/zcode-subagent-cli（两处单源各自演进，协议面不共享常量——宿主只做
+// @zhushanwen/zcode-subagent-cli（两处单源各自演进，协议范围不共享常量——宿主只做
 // 引用切分，不做凭据校验）。
 //
 // 2026-09-29 account 体系迁移同步：原 DEFAULT_PROVIDER_ID / ZCODE_FALLBACK_

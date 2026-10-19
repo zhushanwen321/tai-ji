@@ -8,8 +8,8 @@
  * 安全校验语义（原样搬自 main privileged-handlers，TC3 零削弱）随方法体迁移：
  * 20MB 上限 / mimeType image/* / name sanitize 防目录穿越 / fromPath 白名单 /
  * segments.json 原子写 + 损坏隔离。回归保护在 test/session-service.test.ts
- * 「业务持久化写安全守卫」（经 Facade 委托，行为等价 = P3）与
- * src/services/session/__tests__/attachment-store.test.ts（模块直接测试面）。
+ * 「业务持久化写安全检查」（经 Facade 委托，行为等价 = P3）与
+ * src/services/session/__tests__/attachment-store.test.ts（模块直接测试入口）。
  *
  * 日志前缀保留 `[session-service]`（G3 行为等价：错误诊断流也是可观察行为，
  * 迁出不改写日志归属——与 quarantineCorruptFile 的 tag 同理）。
@@ -31,7 +31,8 @@ export class AttachmentStore {
   /**
    * 写入粘贴截图（base64 → attachments 文件）。
    *
-   * sessionId 非空 → <dataDir>/attachments/<sessionId>/（持久化，persisted=true）；
+   * sessionId 非空 → <root>/<sessionId>/attachments/（session 存储树域 1，ADR-0141，
+   * 经 getAttachmentsDir SSOT 推导；持久化，persisted=true）；
    * 空 → OS tmpdir（landing 降级，session 创建后需 migrateImage，persisted=false）。
    *
    * 安全校验（原样搬自 main privileged-handlers，TC3 零削弱）：

@@ -8,17 +8,17 @@
 // 细节单源，避免各测试散落 fs.writeFileSync 手写帧）。三种形态：
 //   - 终局收条：created → [bound →] settled（缺省）；
 //   - 轮终收条：created → [bound →] round-started → round-idle（idleRound 入参）；
-//   - 在途无收条：created → [bound]（inFlight 入参——统计/收条不投影的负向用例）。
+//   - 在途无收条：created → [bound]（inFlight 入参——统计/收条不派生的负向用例）。
 //
 // 关键约束（踩过的坑）：
 //   - 头行 type 是 `record-events`（不是 `record-journal`）；
 //   - `stopReason` 取 StopReason 值域（`completed` / `interrupted` / `disconnected`
-//     等）——写 ClosedReason 与 StopReason 重名的值虽然类型上合法，但语义上「已收口
+//     等）——写 ClosedReason 与 StopReason 重名的值虽然类型上合法，但语义上「已收尾
 //     的停因」应取展示值域的显式成员，别把 legacy 死因词当停因用；
 //   - 无 `record-settled` / 轮终收条帧 = 记录仍在途（running），别只写 created 帧
 //     就断言终态；
 //   - 无 identity entry 的引擎子文件要被扫描重建，必须带 `boundSessionFile` 帧
-//     （磁盘身份反查腿 identityFromFoldByFile 依赖 bound.sessionFile）。
+//     （磁盘身份反查路径 identityFromFoldByFile 依赖 bound.sessionFile）。
 
 import * as fs from "node:fs";
 
@@ -57,9 +57,9 @@ type SeedTerminalRecordInput = {
   turns?: number;
   totalTokens?: number;
   /**
-   * 追加 `record-bound` 帧（磁盘身份反查腿 `identityFromFoldByFile` 依赖
+   * 追加 `record-bound` 帧（磁盘身份反查路径 `identityFromFoldByFile` 依赖
    * bound.sessionFile）：无 identity entry 的引擎子文件必须带本帧才能被扫描重建
-   * （created 身份域 + bound 反查键）。engine 恒 "pi"（fold 身份腿不消费 engine 域）。
+   * （created 身份域 + bound 反查键）。engine 恒 "pi"（fold 身份路径不消费 engine 域）。
    */
   boundSessionFile?: string;
   /**
@@ -80,8 +80,8 @@ type SeedTerminalRecordInput = {
     lastAbandonedRound?: AbandonedRoundMark | null;
   };
   /**
-   * 在途形态（无收条帧）：帧序 = created → [bound]，记录停在轮中/未收口——
-   * 「无收条 → 统计不投影」负向用例的播种形态。与 idleRound 互斥（idleRound 优先）。
+   * 在途形态（无收条帧）：帧序 = created → [bound]，记录停在轮中/未收尾——
+   * 「无收条 → 统计不派生」负向用例的播种形态。与 idleRound 互斥（idleRound 优先）。
    */
   inFlight?: boolean;
   /** bound / round-started 帧携带的写权世代（缺省 0）。 */
@@ -142,7 +142,7 @@ function buildSeedFrames(input: SeedTerminalRecordInput): RecordEventInput[] {
       {
         type: "record-round-started",
         ts: input.startedAt,
-        // 轮始轮数 = 轮终累计 - 1（markRoundStarted 写「已收口轮数」的生产行为对齐）。
+        // 轮始轮数 = 轮终累计 - 1（markRoundStarted 写「已收尾轮数」的生产行为对齐）。
         round: Math.max(input.idleRound.round - 1, 0),
         epoch,
       },

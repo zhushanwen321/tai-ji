@@ -28,9 +28,9 @@ ignored 节点（node_modules 等）恒显（2026-10-15 全量显示裁决）：
 
 ## 2. 组件结构概述
 
-`Sidebar.vue` 的 SegmentedTab「文件」页签渲染 `FileView.vue`（`data-testid="file-view-root"`）。头部行（session 标签 + 分支 + `file-show-ignored-toggle` 开关）与 `file-filter-input` 过滤框固定在滚动区外；滚动区内是加载/错误/空态（`file-loading` / `file-error`+`file-retry` / `file-empty`），树体由 virtua Virtualizer 挂载扁平可见行（`projectVisibleRows` 投影），每行是纯行组件 `FileTreeRow.vue`（`file-tree-dir-{path}` / `file-tree-file-{path}`，文件行含 A/M/D/U git 角标）。无活跃 session 时显示 `file-view-no-session` 空态。
+`Sidebar.vue` 的 SegmentedTab「文件」页签渲染 `FileView.vue`（`data-testid="file-view-root"`）。头部行（session 标签 + 分支 + `file-show-ignored-toggle` 开关）与 `file-filter-input` 过滤框固定在滚动区外；滚动区内是加载/错误/空态（`file-loading` / `file-error`+`file-retry` / `file-empty`），树体由 virtua Virtualizer 挂载扁平可见行（`projectVisibleRows` 派生视图），每行是纯行组件 `FileTreeRow.vue`（`file-tree-dir-{path}` / `file-tree-file-{path}`，文件行含 A/M/D/U git 角标）。无活跃 session 时显示 `file-view-no-session` 空态。
 
-[W28/D-7.2] 结构要点：头部与过滤框移出滚动区是 virtua Virtualizer 的硬约束（parentElement 必须是滚动容器且前方无内容）；树形递归渲染改为「扁平可见行投影 + 虚拟滚动」，万级目录展开只挂载视口 ± 缓冲的行（DOM 行数 < 200）；depth/expanded/childCount/gitStatus/lineStats 全部由投影预计算，交互经 emit 归位 FileView 层。目录徽标（`file-tree-dir-badge-{path}`）按 demo 权威是目录即恒渲染，内容 = 可见直接子项数（childCount）。
+[W28/D-7.2] 结构要点：头部与过滤框移出滚动区是 virtua Virtualizer 的硬约束（parentElement 必须是滚动容器且前方无内容）；树形递归渲染改为「扁平可见行派生视图 + 虚拟滚动」，万级目录展开只挂载视口 ± 缓冲的行（DOM 行数 < 200）；depth/expanded/childCount/gitStatus/lineStats 全部由派生视图预计算，交互经 emit 归位 FileView 层。目录徽标（`file-tree-dir-badge-{path}`）按 demo 权威是目录即恒渲染，内容 = 可见直接子项数（childCount）。
 
 ## 3. data-testid 清单
 
@@ -95,9 +95,9 @@ FileView.onMounted → useFileTree.setupInvalidation(sessionId)
 
 ```
 file-filter-input input → store.setFilter(query)（useFileTree 200ms 防抖提交）
-  └─ [W28/D-7.2] FileView 投影 computed（projectVisibleRows）：顶层节点 nodeMatchesFilter
+  └─ [W28/D-7.2] FileView 派生视图 computed（projectVisibleRows）：顶层节点 nodeMatchesFilter
        命中判定（仅祖先链保留）+ 展开目录 DFS 展开 → 命中节点显示，不命中隐藏
-       → 全无匹配 → 投影空 → file-empty 显示
+       → 全无匹配 → 派生视图空 → file-empty 显示
 ```
 
 ## 5. mock 数据
@@ -282,7 +282,7 @@ test.describe('文件树 E2E', () => {
 | 1. gotoFileTree | （helper） | sessions tab → 点 e2e-files → files tab → file-view-root 可见 |
 | 2. 点 src | `getByTestId('file-tree-dir-src').click()` | `useFileTree.expandNode('src')` |
 | 3. 缓存检查 | （内部） | store.getTree src 节点已有子目录（首加载含一级子）→ 复用缓存，不发 expand |
-| 4. 展开渲染 | （DOM） | `file-tree-file-src/index.ts` 等（投影产出可见行，virtua 挂载）→ 可见 |
+| 4. 展开渲染 | （DOM） | `file-tree-file-src/index.ts` 等（派生视图产出可见行，virtua 挂载）→ 可见 |
 | 5. 角标渲染 | （DOM） | `file-tree-file-src/new-feature.ts` 含 'A'（fixtureGitStatus added） |
 | 6. 断言 | （验证） | 子节点 visible + 角标文本 contains 'A' |
 
@@ -915,7 +915,7 @@ Panel 层：进入 subagent 视图时 PanelHeader 显示返回入口 + subagent 
 
 ## §3 data-testid 清单（**已退役，2026-09-16 —— 所属组件已删除，仅作历史对照**）
 
-testid 以组件 template 内 data-testid 属性为准。下列 testid 随 Agents/Flows tab 与列表组件退役全部消失；现行 subagent 观察面 testid = 托盘组件的 `tray-*` 族（`tray-native-panel` / `tray-panel-tab-*` / `tray-subagent-row` / `tray-subagent-cancel[-confirm]` 等，以下表所属现行组件为准：`packages/renderer/src/components/panel/tray/TrayNativePanel.vue`）。
+testid 以组件 template 内 data-testid 属性为准。下列 testid 随 Agents/Flows tab 与列表组件退役全部消失；现行 subagent 观察入口 testid = 托盘组件的 `tray-*` 族（`tray-native-panel` / `tray-panel-tab-*` / `tray-subagent-row` / `tray-subagent-cancel[-confirm]` 等，以下表所属现行组件为准：`packages/renderer/src/components/panel/tray/TrayNativePanel.vue`）。
 
 | testid | 原所在组件 | 原触发/可见条件 |
 |--------|---------|--------------|
@@ -1057,7 +1057,7 @@ mock 轨的 Playwright E2E（`e2e/*.spec.ts`）无法覆盖本功能——mock �
 
 > 覆盖：drawer bashTask tab（BackgroundTaskDetailPanel：元信息 / 输出跟随 / 终止）——**现行**；plugin 区「后台命令」L2 列表视图（BackgroundTaskListView：三桶筛选 + 两行式 item + 行内两段式终止）**已于 2026-09-16 随任务观察入口唯一化退役**，其列表形态迁 composer 任务托盘的 bash 面板（本节下方相关 testid 表已标退役，现行列表侧 testid 以托盘组件为准）。
 >
-> 设计：[background-task-sidebar-view.md](../architecture/background-task-sidebar-view.md)（§3.1 终态 / D4-D7 / D10；含视图面退役说明）+ [composer-task-tray.md](../design/composer-task-tray.md)。先读 [00 总览](00-overview.md)。
+> 设计：[background-task-sidebar-view.md](../architecture/background-task-sidebar-view.md)（§3.1 终态 / D4-D7 / D10；含视图侧退役说明）+ [composer-task-tray.md](../design/composer-task-tray.md)。先读 [00 总览](00-overview.md)。
 
 ## §1 功能概述
 
@@ -1118,15 +1118,15 @@ testid 以组件 template 内 data-testid 属性为准（drawer 表已核实有�
 
 ### 测试注意
 
-- running 计时用 fake timers（列表 1s tick / drawer 输出跟随 2s interval；托盘面板行同款）；
+- running 计时用 fake timers（列表 1s tick / drawer 输出跟随 2s interval；托盘 bash 面板行同款）；
 - 杀进程是 mock RPC，不会真杀——行内终止断言两段式状态机（testid 切换）而非进程消失；
 - i18n key：drawer 侧见 `packages/renderer/src/i18n/locales/{zh-CN,en-US}/panel.ts`（`panel.sideDrawer.bashTask*`）；列表/计数侧见 `tray.ts`（`panel.tray.*`，聚合器展开并入 panel 命名空间）——原 `sidebar.backgroundTaskList.*` 20 键（filter 3 + 直属字符串 9 + status 6 + 横幅 2）已随 L2 视图退役删除。文案断言用 override `t(key)` 注入而非依赖 locale 文件（组件测试既有形态）。
 
 ## §4 相关文档
 
-- 设计文档：[background-task-sidebar-view.md](../architecture/background-task-sidebar-view.md)（终态 §3.1 / 筛选 D10 / kill 矩阵 D6 / 输出跟随 D7；含 2026-09-16 视图面退役说明）+ [composer-task-tray.md](../design/composer-task-tray.md)（现行列表/计数入口）
+- 设计文档：[background-task-sidebar-view.md](../architecture/background-task-sidebar-view.md)（终态 §3.1 / 筛选 D10 / kill 矩阵 D6 / 输出跟随 D7；含 2026-09-16 视图侧退役说明）+ [composer-task-tray.md](../design/composer-task-tray.md)（现行列表/计数入口）
 - SideDrawer 宿主：bashTask tab 为第 8 tab（drawer 4 点接线见 background-task-sidebar-view.md D5）
-- 列表面范式：composer 任务托盘 bash 面板（分桶槽/两行式 item/行内两段式终止；原 Agents tab 同构先例已随侧栏任务 tab 退役）
+- 列表侧范式：composer 任务托盘 bash 面板（分桶槽/两行式 item/行内两段式终止；原 Agents tab 同构先例已随侧栏任务 tab 退役）
 - 组件测试：`packages/renderer/src/__tests__/components/background-task-detail-panel.test.ts`（16 用例）；列表/计数侧 = `packages/renderer/src/__tests__/panel/tray/`（原 background-task-list-view.test.ts 已随视图退役删除）
 
 ---
@@ -1192,4 +1192,4 @@ ForkGroup（当前会话的「本会话的分支」折叠区）已整体退役�
 | 事件流 | 事件流子页（RunEventStream）含截断标注与错误二分形态 | record 原文（2KB 截断 + truncatedFields） |
 | Gantt | `wfvz-gantt`（`data-frozen` 标记停止冻结） | attempt 分段横条/phase 色带/游标 |
 
-**坑位**：① mock 轨 getWorkflowDag 恒 record_not_found 降级（T3/OV4 共用断言面，勿改成功）；② block 反查名字形态归一（路径/basename/带扩展名互通，workflow-viz-overlay.ts findRun）——主 agent 传路径是常态；③ e2e 像素轨不覆盖 overlay（交互层不进 shell/composer 基线视口，视觉验证走 L4 截图）。
+**坑位**：① mock 轨 getWorkflowDag 恒 record_not_found 降级（T3/OV4 共用断言范围，勿改成功）；② block 反查名字形态归一（路径/basename/带扩展名互通，workflow-viz-overlay.ts findRun）——主 agent 传路径是常态；③ e2e 像素轨不覆盖 overlay（交互层不进 shell/composer 基线视口，视觉验证走 L4 截图）。

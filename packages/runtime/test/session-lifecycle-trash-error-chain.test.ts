@@ -3,11 +3,11 @@
  * infra trash throw → PiSessionStore.trash 传播（port Promise 语义，不再断头成
  * unhandledRejection）→ SessionLifecycle.delete 上抛 → deleteByCwd 聚合 failed[] →
  * handler 层 session.delete 绝不 reply session.deleted 成功（sendError 归
- * server.ts handleMessage 外层统一收口，P4-1）。
+ * server.ts handleMessage 外层统一收尾，P4-1）。
  *
  * Mock 策略：唯一 mock 点 = infra trash（模拟 Finder 繁忙故障注入）；PiSessionStore /
  * SessionLifecycle 用真实实例，错误传播链不被 mock 截断。session 文件用真实 tmp 文件
- * （过 existsSync 守卫，并断言 trash 失败后文件保留在原位置——G4 核心承诺）。
+ * （过 existsSync 检查，并断言 trash 失败后文件保留在原位置——G4 核心承诺）。
  * svc/pm/configStore/workspace 按 session-lifecycle-deletebycwd.test.ts 范式 mock。
  *
  * 运行：cd packages/runtime && npx vitest run test/session-lifecycle-trash-error-chain.test.ts
@@ -90,7 +90,7 @@ describe('G4/u-h4: trash 失败错误链路端到端（throw 必达调用方，�
     expect(result.failed[0]?.error).toContain('稍后重试')
   })
 
-  it('⑤ handler 层：session.delete 遇 trash 失败 → 错误上抛、绝不 reply session.deleted（sendError 归 server.ts 外层收口）', async () => {
+  it('⑤ handler 层：session.delete 遇 trash 失败 → 错误上抛、绝不 reply session.deleted（sendError 归 server.ts 外层收尾）', async () => {
     const { lifecycle, svc } = makeSessionLifecycleFixture()
     ;(svc.findScannedSession as ReturnType<typeof vi.fn>).mockReturnValue(scannedEntry('s-trash-1', tmpFile))
     const ctx = {

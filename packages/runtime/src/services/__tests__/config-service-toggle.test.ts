@@ -1,5 +1,5 @@
 /**
- * toggleProviderEnabled + 边界守卫 + setProvider 停用 enabled 测试（wave3，provider-dual-system-r2::enabledmodels-dual-consume）。
+ * toggleProviderEnabled + 边界检查 + setProvider 停用 enabled 测试（wave3，provider-dual-system-r2::enabledmodels-dual-consume）。
  *
  * 测试框架：vitest（从 vitest 导入 describe/it/expect/vi/beforeEach，禁 node:test）。
  * 运行命令：cd packages/runtime && npx vitest run src/services/__tests__/config-service-toggle.test.ts
@@ -11,7 +11,7 @@
  *   - 边界3 持久化（CL2）：真实 pi-settings-store（临时 settings 文件），验证 clearEnabledModels
  *     后 settings.json 物理无 enabledModels key（JSON.stringify 丢弃 delete 后的 undefined）。
  *
- * 覆盖 design TC1-TC4/TC6/TC7 + CL1（toggle(true) 空白名单 no-op）+ setProvider 边界1 守卫。
+ * 覆盖 design TC1-TC4/TC6/TC7 + CL1（toggle(true) 空白名单 no-op）+ setProvider 边界1 检查。
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, rmSync, existsSync } from 'node:fs'
@@ -176,9 +176,9 @@ describe('TC2: toggleProviderEnabled(false) 移除 <id>/* 与 <id>/model pattern
   })
 })
 
-// ══ TC3: 边界3 空数组守卫——重算空时 clearEnabledModels（非写空数组）══════════════════
+// ══ TC3: 边界3 空数组检查——重算空时 clearEnabledModels（非写空数组）══════════════════
 
-describe('TC3: 边界3 空数组守卫——重算空时 clearEnabledModels（delete 字段，CL2）', () => {
+describe('TC3: 边界3 空数组检查——重算空时 clearEnabledModels（delete 字段，CL2）', () => {
   beforeEach(() => { vi.clearAllMocks() })
 
   it('移除最后一个 pattern → clearEnabledModels 调用，setEnabledModels 不调用（非写空数组）', () => {
@@ -196,9 +196,9 @@ describe('TC3: 边界3 空数组守卫——重算空时 clearEnabledModels（de
   })
 })
 
-// ══ TC4: 边界2 defaultModel 守卫——禁用承载 default 的 provider 时重选 ════════════════
+// ══ TC4: 边界2 defaultModel 检查——禁用承载 default 的 provider 时重选 ════════════════
 
-describe('TC4: 边界2 defaultModel 守卫——禁用承载 default 的 provider 时重选', () => {
+describe('TC4: 边界2 defaultModel 检查——禁用承载 default 的 provider 时重选', () => {
   beforeEach(() => { vi.clearAllMocks() })
 
   it('defaultModel=openai/gpt-4，禁用 openai → 重选为剩余 provider 的 model，返回 newDefault', () => {
@@ -300,9 +300,9 @@ describe('TC6: setProvider 停用 provider 级 enabled 写入（C5）', () => {
   })
 })
 
-// ══ setProvider 边界1 守卫——新建 provider 加白名单 ══════════════════════════════════
+// ══ setProvider 边界1 检查——新建 provider 加白名单 ══════════════════════════════════
 
-describe('setProvider 边界1守卫：新建 provider 时 ensureProviderInWhitelist（TC5 setProvider 路径）', () => {
+describe('setProvider 边界1检查：新建 provider 时 ensureProviderInWhitelist（TC5 setProvider 路径）', () => {
   beforeEach(() => { vi.clearAllMocks() })
 
   it('新建 provider（existingConfig===undefined）→ ensureProviderInWhitelist 调用', () => {

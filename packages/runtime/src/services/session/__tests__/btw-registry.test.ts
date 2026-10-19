@@ -1,13 +1,15 @@
 /**
  * 线注册表启动重建（btw-question D5：内存缓存 + 目录扫描重建 + hidden 复原）。
- * 目录布局 = `btw/<encodeCwd>/<mainSid>/*.jsonl`（数据目录经 TAIJI_AGENT_DATA_DIR
- * 测试隔离指向 tmp，写删目标全部自建自删——测试红线）。
+ * 目录布局 = session-store-layout-inversion 换根后 `<root>/<mainSid>/btw/*.jsonl`
+ *（<root> = `<dataDir>/ext-sessions/`；数据目录经 TAIJI_AGENT_DATA_DIR 测试隔离指向
+ * tmp，写删目标全部自建自删——测试红线）。
  */
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 import { existsSync, mkdirSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { BtwService } from '../btw-service.js'
-import { encodeCwd, getBtwSessionsRoot, getBtwThreadDir } from '../../../infra/pi/pi-paths.js'
+import { getBtwThreadDir } from '../../../infra/pi/pi-paths.js'
+import { getSessionBtwDir, getSessionStoreDir } from '@taiji/shared/paths'
 import {
   cleanEntries, cleanupDir, makeHarness, makeTmpDir, useTmpDataDir, writeSessionFile,
   type BtwHarness,
@@ -36,7 +38,8 @@ afterEach(() => {
 })
 
 function seedThread(mainSid: string, lineSid: string, cwd: string, entries = cleanEntries()): string {
-  const dir = join(getBtwSessionsRoot(), encodeCwd(cwd), mainSid)
+  // cwd 不再参与布局（mainSid 即分区键），仅作为 header 字段被重建读回
+  const dir = getSessionBtwDir(mainSid)
   mkdirSync(dir, { recursive: true })
   return writeSessionFile(dir, `2026-09-22T00-00-00-000Z_${lineSid}.jsonl`, {
     type: 'session', version: 3, id: lineSid, timestamp: 't', cwd,
@@ -44,7 +47,7 @@ function seedThread(mainSid: string, lineSid: string, cwd: string, entries = cle
 }
 
 describe('rebuildFromDisk：启动目录扫描重建', () => {
-  it('按 btw/<enc>/<mainSid>/*.jsonl 重建：vid/header cwd/mainSid 目录 + hidden 复原', () => {
+  it('按 <root>/<mainSid>/btw/*.jsonl 重建：vid/header cwd/mainSid 目录 + hidden 复原', () => {
     seedThread('main-a', 'line-1', PROJ_A)
     seedThread('main-b', 'line-2', PROJ_B)
 
@@ -55,7 +58,7 @@ describe('rebuildFromDisk：启动目录扫描重建', () => {
     expect(byVid.get('btw:line-1')).toMatchObject({
       piSessionId: 'line-1', mainSid: 'main-a', cwd: PROJ_A, hidden: true,
       snapshotKind: 'unknown', contractRounds: 0,
-      threadDir: getBtwThreadDir(PROJ_A, 'main-a'),
+      threadDir: getBtwThreadDir('main-a'),
     })
     expect(byVid.get('btw:line-1')!.client).toBeUndefined() // 重建不 spawn（惰性）
     expect(byVid.get('btw:line-2')).toMatchObject({ mainSid: 'main-b', cwd: PROJ_B, hidden: true })
@@ -83,16 +86,16 @@ describe('rebuildFromDisk：启动目录扫描重建', () => {
 
   it('坏文件 / 无 cwd header / 非法 sid / 非 sid 目录名 → warn 跳过（登记不静默）', () => {
     seedThread('main-a', 'line-1', PROJ_A)
-    const enc = encodeCwd(PROJ_A)
-    const root = getBtwSessionsRoot()
+    const root = getSessionStoreDir()
+    const btwDir = getSessionBtwDir('main-a')
     // 无法解析的 jsonl
-    writeFileSync(join(root, enc, 'main-a', 'broken.jsonl'), 'not-json\n')
+    writeFileSync(join(btwDir, 'broken.jsonl'), 'not-json\n')
     // header 无 cwd
-    writeSessionFile(join(root, enc, 'main-a'), 'nocwd.jsonl', { type: 'session', version: 3, id: 'line-x' }, cleanEntries())
-    // 非 sid 目录名
-    mkdirSync(join(root, enc, 'not a sid!'), { recursive: true })
+    writeSessionFile(btwDir, 'nocwd.jsonl', { type: 'session', version: 3, id: 'line-x' }, cleanEntries())
+    // 非 sid 目录名（新布局一级即 sessionId 分区；树内遍历规约：非合法形态跳过不代删）
+    mkdirSync(join(root, 'not a sid!'), { recursive: true })
     // 非法 header id（含冒号 → btwVirtualId 拒）
-    writeSessionFile(join(root, enc, 'main-a'), 'badid.jsonl', { type: 'session', version: 3, id: 'btw:evil', cwd: PROJ_A }, cleanEntries())
+    writeSessionFile(btwDir, 'badid.jsonl', { type: 'session', version: 3, id: 'btw:evil', cwd: PROJ_A }, cleanEntries())
 
     const rebuilt = svc.rebuildFromDisk()
 
@@ -103,9 +106,15 @@ describe('rebuildFromDisk：启动目录扫描重建', () => {
     expect(console.warn).toHaveBeenCalledWith(expect.stringContaining('invalid session id'))
   })
 
-  it('空根（首启无 btw 目录）→ []', () => {
+  it('空存储树（首启无树）→ []', () => {
     expect(svc.rebuildFromDisk()).toEqual([])
-    expect(existsSync(getBtwSessionsRoot())).toBe(false)
+    expect(existsSync(getSessionStoreDir())).toBe(false)
+  })
+
+  it('无 btw 域目录的会话分区跳过（常态：主会话树无线）', () => {
+    const root = getSessionStoreDir()
+    mkdirSync(join(root, 'main-plain', 'attachments'), { recursive: true }) // 只有其他域
+    expect(svc.rebuildFromDisk()).toEqual([])
   })
 
   it('重建条目 reattach 轮 hidden:true 注册（hidden 复原经既有 registerSession）', async () => {
@@ -118,7 +127,7 @@ describe('rebuildFromDisk：启动目录扫描重建', () => {
     expect(client).toBeDefined()
     expect(h.spawned[0].client.switchSession).toHaveBeenCalledWith(file)
     expect(h.registered[0]).toMatchObject({ id: 'btw:line-1', hidden: true, file, cwd: PROJ_A })
-    expect(h.spawned[0].options.env?.PI_CODING_AGENT_SESSION_DIR).toBe(getBtwThreadDir(PROJ_A, 'main-a'))
+    expect(h.spawned[0].options.env?.PI_CODING_AGENT_SESSION_DIR).toBe(getBtwThreadDir('main-a'))
     expect(svc.getLine('btw:line-1')!.contractRounds).toBe(1)
   })
 })

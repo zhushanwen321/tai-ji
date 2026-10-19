@@ -16,7 +16,7 @@ export const useWorkspaceStore = defineStore('workspace', () => {
   /**
    * RD-3#4：load 失败标记（最近工作区读失败 ≠ 无历史）。仅观测留痕——**不改** AC-4.5
    * 验收口径「RPC reject → records 置 [] 不抛、不阻断启动」，故不加错误条/重试（与该规格冲突）。
-   * 置位让「读失败」与「真无历史」在日志/观测面可分（修复此前 catch 零日志零标记）。
+   * 置位让「读失败」与「真无历史」在日志/观测范围可分（修复此前 catch 零日志零标记）。
    */
   const loadError = ref<string | null>(null)
 

@@ -19,7 +19,9 @@
  *       config/providers.json        ← taiji 扩展域（quota/authMethod/modelStates，pi 不扫描）
  *       sessions/                    ← Session jsonl 文件
  *         <encodeCwd>/               ← pi 按 cwd 自动分子目录（默认布局）
- *       subagents/<encodeCwd>/sessions/  ← subagent session 目录（相对 agentDir 派生不变）
+ *       subagents/<encodeCwd>/sessions/  ← subagent session 目录（旧布局残余读取面——
+ *           仅 subagent-extractor legacy 降级链读 W16 前旧 session 存量；新会话数据在
+ *           <dataDir>/ext-sessions/<rootSessionId>/subagents/，见 getSubagentSessionDir）
  */
 
 import {
@@ -27,6 +29,7 @@ import {
   getExtensionsDir as sharedGetExtensionsDir,
   getNpmDir as sharedGetNpmDir,
   getTmpDir as sharedGetTmpDir,
+  getSessionBtwDir as sharedGetSessionBtwDir,
   encodeCwd,
 } from '@taiji/shared/paths'
 import { join } from 'node:path'
@@ -135,25 +138,34 @@ export function getAgentsDir(): string {
 export { encodeCwd }
 
 /**
- * 获取 subagent session 目录路径。
- * <piAgentDir>/subagents/<encodeCwd(mainCwd)>/sessions/
+ * subagent session 目录（旧布局残余读取面）：`<piAgentDir>/subagents/<encodeCwd(mainCwd)>/sessions/`。
+ *
+ * [session-store-layout-inversion] 布局反转后新会话的 subagent 会话 jsonl 落
+ * `<dataDir>/ext-sessions/<rootSessionId>/subagents/sessions/`（subagent-core
+ * path-encoding.ts 的同名 getSubagentSessionDir，分区键 = rootSessionId）。与该同名函数
+ * 的语义分叉：本函数参数是 mainCwd、读旧布局；core 版参数是 rootSessionId、产新树落点。
+ *
+ * 本函数现役唯一消费方 = services/session/subagent-extractor.ts 的 legacy 降级链
+ * （W16 前创建的旧 session 的 sessionFile 回退查找；其存量 subagent jsonl 未迁移仍在
+ * 旧布局，按存量保留裁决静置，读旧布局即存量数据的正确来源，新会话数据不在此）。
+ *
+ * 本函数公式是对拍机检 check-artifact-dir-formula-sync.mjs 第四组 RUNTIME_TREE_FNS
+ * 的对位锚点（pi 宿主树段 'subagents' ↔ shared PI_SESSION_TREE_SEGMENTS[1]），
+ * 改公式须同步该机检与 shared 常量。
  */
 export function getSubagentSessionDir(mainCwd: string): string {
   return join(getPiAgentDir(), 'subagents', encodeCwd(mainCwd), 'sessions')
 }
 
 /**
- * btw 线会话根目录：`<piAgentDir>/btw/`（btw-question D2）。
+ * btw 线会话根目录（旧布局树段锚点）：`<piAgentDir>/btw/`。
  *
- * **目录即关联的持久载体**：`btw/<encodeCwd>/<mainSid>/` 三层布局编码「主会话 → btw 线」
- * 关联（无 sidecar 第二持久面）；不落 `sessions/` 扫描面 ⇒ SessionScanner 磁盘腿构造性
- * 不可见（G4 防线之一，与 active 腿 hidden:true 注册、历史腿不记工作区历史并列）。
- * 线会话文件由 pi 写入（fork 链路 / 首 flush 自建），宿主对线目录的写面 = 扫描重建
- *（只读）+ 通用 outcome sidecar（`.jsonl.meta.json`，onSessionExit/persistSessionOutput
- * 终态链对 btw 线同样生效；显式关线只删 .jsonl，sidecar 残留由主删级联 / 启动孤儿补账
- * 兜底清理）+ 删（主删级联 / 显式关线 / 启动孤儿补账——归 M4-a），零直写红线适用。
- *
- * subagent 先例同构：`pi-paths.ts` subagents/ 独立目录（`getSubagentSessionDir`）。
+ * [session-store-layout-inversion] btw 线已换根至 `<dataDir>/ext-sessions/<mainSid>/btw/`
+ * （getSessionBtwDir / getBtwThreadDir）；本函数是旧布局树段锚点——对拍机检
+ * check-artifact-dir-formula-sync.mjs RUNTIME_TREE_FNS 以本函数字面量逐位对拍、shared
+ * PI_SESSION_TREE_SEGMENTS[2] 喂 main isInsideSessionTrees 消费；无现役读取方
+ * （D6 裁决旧 btw 线不可对话），指向的旧布局目录按存量保留裁决静置，
+ * 新读写一律走新公式。
  */
 export function getBtwSessionsRoot(): string {
   return join(getPiAgentDir(), 'btw')
@@ -172,19 +184,16 @@ export function isPiSessionId(id: string): boolean {
 const PI_SESSION_ID_PATTERN = /^[A-Za-z0-9](?:[A-Za-z0-9._-]*[A-Za-z0-9])?$/
 
 /**
- * btw 线会话目录：`<piAgentDir>/btw/<encodeCwd(mainCwd)>/<mainSid>/`（btw-question D2 布局）。
+ * btw 线会话目录：`<sessionStoreRoot>/<mainSid>/btw/`（session-store-layout-inversion
+ * 布局反转后的终态；委托 shared getSessionBtwDir SSOT 公式，encodeCwd 层已消除——
+ * mainSid 即分区键，线 jsonl 挂主树内域、随主树消亡）。
  *
  * 该目录同时是：pi `--session-dir` / `PI_CODING_AGENT_SESSION_DIR` 的落点值、
- * 启动注册表扫描重建的遍历单元、主删级联的删除单元。
+ * 启动注册表扫描重建的遍历单元。
  *
- * mainSid 校验 fail-fast（路径注入防线）：必须是合法 pi 会话 id 形态——挡空串 /
- * 路径分隔符 / `..` / 冒号（vid 误传）等一切非单层目录名输入。
+ * mainSid 校验 fail-fast（路径注入防线）由 shared getSessionBtwDir 内建（同域校验，
+ * 挡空串 / 路径分隔符 / `..` / 冒号（vid 误传）等一切非单层目录名输入）。
  */
-export function getBtwThreadDir(mainCwd: string, mainSid: string): string {
-  if (!isPiSessionId(mainSid)) {
-    throw new Error(
-      `[btw] getBtwThreadDir: mainSid 非法（须为 pi 会话 id 形态，禁路径分隔符/冒号），收到 "${mainSid}"`,
-    )
-  }
-  return join(getBtwSessionsRoot(), encodeCwd(mainCwd), mainSid)
+export function getBtwThreadDir(mainSid: string): string {
+  return sharedGetSessionBtwDir(mainSid)
 }

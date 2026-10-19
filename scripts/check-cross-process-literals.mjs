@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * 跨进程契约字面量多侧对账守卫（cross-process-literals）。
+ * 跨进程契约字面量多侧对账检查（cross-process-literals）。
  *
  * 两组契约串的定义点分属互相不可 import 的包（runtime ↔ pi extension ↔ 桌面
  * plugin 各为独立进程/独立构建单元），编译期拦截不可行，多侧手抄仅靠注释纪律
@@ -17,8 +17,8 @@
  * import 保证每侧必须本地出现该串——定义点改值、改写形态、删除任一即红，
  * 注释残留旧串不构成误放行（注释不进字面量集合）。
  *
- * 退出码契约：0=全部登记侧同串；1=存在漂移（明细列出缺串文件）；2=守卫自身
- * 输入故障（登记文件缺失/不可读——守卫看不到定义点了，恢复动作指向登记表，
+ * 退出码契约：0=全部登记侧同串；1=存在漂移（明细列出缺串文件）；2=检查自身
+ * 输入故障（登记文件缺失/不可读——检查看不到定义点了，恢复动作指向登记表，
  * 与「检查不通过」可区分）。
  *
  * 用法：node scripts/check-cross-process-literals.mjs（全量对账，毫秒级，无需
@@ -38,7 +38,7 @@ const PROJECT_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), 
 
 /**
  * 跨进程契约串登记表：literal 串值必须逐字出现在每个 files 条目的代码字符串
- * 字面量中（不含注释）。串值或文件集变更 = 契约面变更，须与本表同 commit。
+ * 字面量中（不含注释）。串值或文件集变更 = 契约范围变更，须与本表同 commit。
  */
 const GROUPS = [
   {
@@ -59,7 +59,7 @@ const GROUPS = [
   },
 ]
 
-/** 读取登记文件；缺失/不可读 = 守卫自身输入故障（exit 2，≠ 漂移 exit 1） */
+/** 读取登记文件；缺失/不可读 = 检查自身输入故障（exit 2，≠ 漂移 exit 1） */
 function readSource(rel) {
   try {
     return readFileSync(path.join(PROJECT_ROOT, rel), 'utf-8')

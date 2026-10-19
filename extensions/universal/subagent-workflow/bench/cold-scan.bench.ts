@@ -11,7 +11,7 @@
 //   # 1) 基线（无索引全量探测）：每轮 rm 索引后计时——否则轮 2-5 命中上一轮落盘的
 //   #    索引走快速路径，中位数会被测成 ~0.3s（与基线自相矛盾）
 //   npx tsx bench/cold-scan.bench.ts /tmp/bench-enc/$ENC/sessions --rounds 5 --baseline
-//   #    轮 1 输出（真全量探测）持久化为 ground truth（gt 文件路径见运行输出）
+//   #    轮 1 输出（真全量探测）持久化为 原始证据文档（gt 文件路径见运行输出）
 //
 //   # 2) 冷启动（索引命中）：中位数断言 <=300ms
 //   npx tsx bench/cold-scan.bench.ts /tmp/bench-enc/$ENC/sessions --rounds 5
@@ -19,7 +19,7 @@
 //   rm -rf /tmp/bench-enc   # 跑完清理副本
 //
 // 断言（任一失败 exit 1，错误信息含下一步动作）：
-//   A1 每轮输出五元组 (id,agent,task,rootSessionId,status) 与 ground truth 完全一致。
+//   A1 每轮输出五元组 (id,agent,task,rootSessionId,status) 与 原始证据文档 完全一致。
 //      对比基准 = 无索引全量探测的输出（--baseline 轮 1 或本进程内的全探扫描），
 //      不是索引路径的自比
 //   A2 冷启动模式中位数 <= 300ms（基线模式只报告不设阈值）
@@ -27,11 +27,11 @@
 //      相对脚本启动时的快照无新增文件
 //   A4 chmod 000 零读取轮（单独成轮，不参与 A1 等价对比——无索引冷扫对不可读文件的
 //      行为是记录消失，索引命中是保留，属良性差异方向）：jsonl 全部去读权限后新实例
-//      首扫仍返回全部记录（id 集与 ground truth 一致）；退化回读则记录消失。
+//      首扫仍返回全部记录（id 集与 原始证据文档 一致）；退化回读则记录消失。
 //      win32 的 chmod 000 仅映射 read-only、root 无视 000，断言会退化为恒真——跳过
-//      （与 src/__tests__/record-store-index.test.ts 的 chmodProbeIt 同款守卫）
+//      （与 src/__tests__/record-store-index.test.ts 的 chmodProbeIt 同款检查）
 //
-// gt 文件按 sessionsDir 绝对路径哈希存 os.tmpdir()（跨两次调用共享 ground truth）；
+// gt 文件按 sessionsDir 绝对路径哈希存 os.tmpdir()（跨两次调用共享 原始证据文档）；
 // 目录内容变化后需先重跑 --baseline 刷新（gt 记录了来源 sessionsDir，不匹配即报错）。
 // 不进 vitest（vitest.config.ts include 仅 src/**/__tests__/**/*.test.ts）、不进 CI。
 
@@ -85,7 +85,7 @@ const USAGE = `用法: npx tsx bench/cold-scan.bench.ts <sessionsDir> [--rounds 
   <sessionsDir>  真实 sessions 目录的【副本】路径（如 /tmp/bench-enc/<enc>/sessions）
   --rounds N     计时轮数（默认 ${DEFAULT_ROUNDS}，中位数取中间值）
   --limit N      collectRecords limit（默认 ${DEFAULT_LIMIT}）
-  --baseline     无索引基线模式：每轮 rm 索引后计时；轮 1 输出写为 ground truth`;
+  --baseline     无索引基线模式：每轮 rm 索引后计时；轮 1 输出写为 原始证据文档`;
 
 /** 解析 --rounds/--limit 的正整数值（i 为 flag 下标，值位于其后；失败文案含收到的原值）。 */
 function parsePositiveIntFlag(
@@ -138,7 +138,7 @@ function parseArgs(argv: readonly string[]): { ok: true; value: ParsedArgs } | {
 
 const sleep = (ms: number): Promise<void> => new Promise((r) => setTimeout(r, ms));
 
-/** 五元组投影：断言 A1/A4 的比较形态（顺序敏感——排序由 RecordStore 决定，确定性输入下稳定）。 */
+/** 五元组派生视图：断言 A1/A4 的比较形态（顺序敏感——排序由 RecordStore 决定，确定性输入下稳定）。 */
 function projectRecords(records: readonly SubagentRecord[]): string[] {
 	return records.map((r) => [r.id, r.agent, r.task, r.rootSessionId ?? "", r.status].join("\u0001"));
 }
@@ -221,7 +221,7 @@ async function waitIndexSettle(encDir: string, timeoutMs: number): Promise<void>
 	throw new Error("waitIndexSettle: unreachable（deadline 已兜底）");
 }
 
-/** gt 文件（跨调用共享 ground truth）。 */
+/** gt 文件（跨调用共享 原始证据文档）。 */
 interface GtFile {
 	sessionsDir: string;
 	recordCount: number;
@@ -278,7 +278,7 @@ interface ScanResult {
 }
 
 function runColdScan(sessionsDir: string, limit: number): ScanResult {
-	const store = new RecordStore(sessionsDir);
+	const store = new RecordStore(() => sessionsDir);
 	try {
 		const t0 = performance.now();
 		const records = store.collectRecords(limit, "all");
@@ -350,7 +350,7 @@ function checkSessionsDir(
 	return { ok: true, jsonlCount };
 }
 
-/** 基线模式：每轮 rm 索引后计时，轮 1 输出 = ground truth。返回 false 表示断言失败（已写 stderr）。 */
+/** 基线模式：每轮 rm 索引后计时，轮 1 输出 = 原始证据文档。返回 false 表示断言失败（已写 stderr）。 */
 async function runBaselineMode(ctx: BenchContext): Promise<boolean> {
 	const { sessionsDir, resolvedSessionsDir, encDir, rounds, limit } = ctx;
 	const times: number[] = [];
@@ -361,11 +361,11 @@ async function runBaselineMode(ctx: BenchContext): Promise<boolean> {
 		times.push(result.ms);
 		if (i === 0) {
 			gt = result.fiveTuple;
-			// 判 0 恒真防护：空 ground truth 会让 A1 的 sameRows 与 A4 的 id 集对比都
+			// 判 0 恒真防护：空 原始证据文档 会让 A1 的 sameRows 与 A4 的 id 集对比都
 			// 退化为「空集对空集」恒真，断言失去防护意义——直接拒绝
 			if (gt.length === 0) {
 				process.stderr.write(
-					`ground truth 为空（0 条记录）：${resolvedSessionsDir} 的 jsonl 均无 subagent 记录，` +
+					`原始证据文档 为空（0 条记录）：${resolvedSessionsDir} 的 jsonl 均无 subagent 记录，` +
 					`A1/A4 判 0 恒真失去防护。请换一个含 jsonl 记录的段复制：cp -R ${realSubagentsDirPath()}/<enc> /tmp/bench-enc/\n`,
 				);
 				return false;
@@ -381,7 +381,7 @@ async function runBaselineMode(ctx: BenchContext): Promise<boolean> {
 	const med = medianOf(times);
 	process.stdout.write(`[cold-scan bench] 模式=baseline 目录=${sessionsDir}\n`);
 	process.stdout.write(`  jsonl=${ctx.jsonlCount} 轮数=${rounds} 中位数=${fmtMs(med)}（无阈值，仅报告）\n`);
-	process.stdout.write(`  ground truth 已写入: ${gtFilePath(sessionsDir)}（${gt!.length} 条五元组）\n`);
+	process.stdout.write(`  原始证据文档 已写入: ${gtFilePath(sessionsDir)}（${gt!.length} 条五元组）\n`);
 	return true;
 }
 
@@ -401,12 +401,12 @@ async function runIndexHitMode(ctx: BenchContext): Promise<boolean> {
 		gt = gen.fiveTuple;
 		writeGtFile(gtFilePath(sessionsDir), resolvedSessionsDir, gt);
 		await waitIndexSettle(encDir, SETTLE_TIMEOUT_MS); // 全探扫描 dirty → 落盘索引（即下面计时轮的命中源）
-		process.stdout.write(`  ground truth 由本次无索引全量探测生成（${fmtMs(gen.ms)}）并写入 ${gtFilePath(sessionsDir)}\n`);
+		process.stdout.write(`  原始证据文档 由本次无索引全量探测生成（${fmtMs(gen.ms)}）并写入 ${gtFilePath(sessionsDir)}\n`);
 	}
 	// 判 0 恒真防护（与 baseline 分支同款）：空 gt 让 A1/A4 恒真——直接拒绝
 	if (gt.length === 0) {
 		process.stderr.write(
-			`ground truth 为空（0 条记录）：${resolvedSessionsDir} 的 jsonl 均无 subagent 记录，` +
+			`原始证据文档 为空（0 条记录）：${resolvedSessionsDir} 的 jsonl 均无 subagent 记录，` +
 			`A1/A4 判 0 恒真失去防护。请换一个含 jsonl 记录的段复制后重跑 --baseline\n`,
 		);
 		return false;
@@ -420,7 +420,7 @@ async function runIndexHitMode(ctx: BenchContext): Promise<boolean> {
 		const result = runColdScan(sessionsDir, limit);
 		times.push(result.ms);
 		if (!sameRows(result.fiveTuple, gt)) {
-			process.stderr.write(`A1 失败（冷启动轮 ${i + 1} 与 ground truth 不一致）：${firstDiff(result.fiveTuple, gt)}\n`);
+			process.stderr.write(`A1 失败（冷启动轮 ${i + 1} 与 原始证据文档 不一致）：${firstDiff(result.fiveTuple, gt)}\n`);
 			return false;
 		}
 		process.stdout.write(`  cold 轮 ${i + 1}/${rounds}: ${fmtMs(result.ms)}（${result.fiveTuple.length} 条记录）\n`);

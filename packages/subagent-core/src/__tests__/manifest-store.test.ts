@@ -11,7 +11,7 @@ import {
   readRunTerminalManifest,
 } from "../execution/persistence/manifest-store";
 import type { ManifestRecord } from "../execution/persistence/manifest-store";
-// [W1 / U2a] bound 物化守卫断言的观察面（RecordStore 写点 → records/<id>.json 投影）。
+// [W1 / U2a] bound 物化检查断言的观察路径（RecordStore 写点 → records/<id>.json 派生视图）。
 import { createRecord } from "../execution/persistence/execution-record";
 import { createRecordEventStream, recordEventsPath } from "../execution/persistence/record-events";
 import type { RecordEvent } from "../execution/persistence/record-events";
@@ -25,7 +25,7 @@ const { renameErrorRef, dirSyncErrorPathRef, loggerMock } = vi.hoisted(() => ({
   renameErrorRef: { current: null as NodeJS.ErrnoException | null },
   // T-fsync：设置为目标 dir 路径后，open(dir, "r") 返回的 handle.sync() 会抛错
   dirSyncErrorPathRef: { current: null as string | null },
-  // 读面可诊断性断言：manifest-store 的 warn 通道（JSON 损坏留证；ENOENT 静默）。
+  // 读侧可诊断性断言：manifest-store 的 warn 通道（JSON 损坏留证；ENOENT 静默）。
   loggerMock: { debug: vi.fn(), warn: vi.fn(), error: vi.fn() },
 }));
 
@@ -69,7 +69,7 @@ describe("ManifestStore", () => {
 
   beforeEach(() => {
     tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "manifest-test-"));
-    store = new ManifestStore(tmpDir);
+    store = new ManifestStore(() => tmpDir);
   });
 
   afterEach(() => {
@@ -122,7 +122,9 @@ describe("ManifestStore", () => {
         createdAt: Date.now(),
       };
 
-      // Delete the directory to cause write failure
+      // 首写建立目录（ensureDirOnce 记忆化——构造期不再 mkdir，目录随 session 树
+      // 晚定位），随后外部删除目录 = 异常态：写不静默重建，fail-fast 上抛。
+      await store.writeManifest({ ...record, id: "test-seed" });
       fs.rmSync(tmpDir, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 });
 
       await expect(store.writeManifest(record)).rejects.toThrow();
@@ -131,7 +133,7 @@ describe("ManifestStore", () => {
 
   // [U4c / G3] tmp 恢复退役（D6）：manifest 已是可丢可重建缓存（权威 = `.state`，
   // 重建 = RecordStore.rebuildIndexes），promote 半写 tmp 的恢复语义失效——[H4/U5
-  // 更名收口] recoverTmpFiles → sweepTmpFiles（名实对齐静默删除），返回删除计数。
+  // 更名收尾] recoverTmpFiles → sweepTmpFiles（名实对齐静默删除），返回删除计数。
   describe("sweepTmpFiles", () => {
     it("should delete tmp when manifest exists", async () => {
       const id = "test-recovery-1";
@@ -239,7 +241,7 @@ describe("ManifestStore", () => {
     it("空目录：返回空数组", () => {
       const fresh = path.join(tmpDir, "empty-sub");
       fs.mkdirSync(fresh);
-      const s = new ManifestStore(fresh);
+      const s = new ManifestStore(() => fresh);
       expect(s.listAllSync()).toEqual([]);
     });
 
@@ -286,7 +288,7 @@ describe("ManifestStore", () => {
 
     it("isValidManifest 拒绝 crashed（crashed 不进 manifest）", async () => {
       // 直接写磁盘绕过 TS 类型（crashed 不在 ManifestRecord.status union）——若意外出现于磁盘,
-      // isValidManifest 守卫拒绝,listAllSync / readManifest 均不返回该 record。
+      // isValidManifest 检查拒绝,listAllSync / readManifest 均不返回该 record。
       fs.writeFileSync(path.join(tmpDir, "crashed.json"), JSON.stringify({
         id: "bad-crashed", rootSessionId: "s", agentName: "w", status: "crashed", createdAt: 1,
       }));
@@ -384,7 +386,7 @@ describe("ManifestStore", () => {
   });
 });
 
-// ── [W1 / U2a] bound 物化守卫段专属 helper（v2* 前缀防重名）────────
+// ── [W1 / U2a] bound 物化检查段专属 helper（v2* 前缀防重名）────────
 
 function v2ReadEventLines(recordsDir: string, id: string): RecordEvent[] {
   const content = fs.readFileSync(recordEventsPath(recordsDir, id), "utf8");
@@ -410,7 +412,7 @@ function v2MakeRecord(over: Partial<ExecutionRecord> = {}): ExecutionRecord {
   return { ...base, ...over };
 }
 
-describe("bound 物化守卫三断言（W1 D2 决策 9）", () => {
+describe("bound 物化检查三断言（W1 D2 决策 9）", () => {
   let rootDir: string;
   let sessionsDir: string;
   let recordsDir: string;
@@ -427,10 +429,10 @@ describe("bound 物化守卫三断言（W1 D2 决策 9）", () => {
   });
 
   function makeStore(): RecordStore {
-    return new RecordStore(sessionsDir, undefined, undefined, recordsDir);
+    return new RecordStore(() => sessionsDir, undefined, undefined, () => recordsDir);
   }
 
-  it("断言一（family 不误标）：运行中 record（bound manifest 已写）不被标已清理——manifest 在盘即 running 投影", () => {
+  it("断言一（family 不误标）：运行中 record（bound manifest 已写）不被标已清理——manifest 在盘即 running 派生视图", () => {
     const store = makeStore();
     const rec = v2MakeRecord({ id: "sa-guard-family" });
     store.register(rec);
@@ -452,13 +454,13 @@ describe("bound 物化守卫三断言（W1 D2 决策 9）", () => {
     const store = makeStore();
     const rec = v2MakeRecord({ id: "sa-guard-heal" });
     store.register(rec);
-    // spawn 回填但子 session 文件未落盘（bound 早于首笔写入的窗口）——守卫跳过。
+    // spawn 回填但子 session 文件未落盘（bound 早于首笔写入的窗口）——检查跳过。
     const sessionFile = path.join(sessionsDir, "sa-guard-heal.jsonl");
     rec.sessionFile = sessionFile; // 文件不存在
     store.reportRecordTransition(rec);
     expect(fs.existsSync(path.join(recordsDir, "sa-guard-heal.json"))).toBe(false);
 
-    // 事件文件已落 bound 帧（事实源不受守卫影响——守卫只管 manifest 投影）。
+    // 事件文件已落 bound 帧（事实源不受检查影响——检查只管 manifest 派生视图）。
     const events = v2ReadEventLines(recordsDir, "sa-guard-heal");
     expect(events.some((e) => e.type === "record-bound")).toBe(true);
 
@@ -498,13 +500,13 @@ describe("bound 物化守卫三断言（W1 D2 决策 9）", () => {
   });
 });
 
-// ── [W1 / D2] record 域 manifest 落盘写面自由函数段 ─────────────
+// ── [W1 / D2] record 域 manifest 落盘写入路径自由函数段 ─────────────
 //
-// materializeBoundRecordManifest（守卫降级档：写失败记日志跳过）。
+// materializeBoundRecordManifest（检查降级档：写失败记日志跳过）。
 // 写失败触发手法：blockedDir() 把目标路径的父段用文件占住——writeAtomicFileSync
 // 的 mkdirSync(recursive) 对「路径段中被文件占据」抛 ENOTDIR（不 mock fs）。
 
-describe("record 域 manifest 写面自由函数（W1/U2a/D2）", () => {
+describe("record 域 manifest 写入路径自由函数（W1/U2a/D2）", () => {
   let dir: string;
 
   beforeEach(() => {
@@ -526,8 +528,8 @@ describe("record 域 manifest 写面自由函数（W1/U2a/D2）", () => {
     return path.join(blocker, "sub");
   }
 
-  describe("materializeBoundRecordManifest（守卫降级档）", () => {
-    it("守卫通过但落点不可写 → false 不抛（下一物化点自愈）", () => {
+  describe("materializeBoundRecordManifest（检查降级档）", () => {
+    it("检查通过但落点不可写 → false 不抛（下一物化点自愈）", () => {
       const sessionFile = path.join(dir, "sess.jsonl");
       fs.writeFileSync(sessionFile, "{}");
       const m: ManifestRecord = { ...makeManifest("w1-bound"), sessionFile };
@@ -535,9 +537,9 @@ describe("record 域 manifest 写面自由函数（W1/U2a/D2）", () => {
     });
   });
 
-  describe("读面 IO 故障分通道（ENOENT 静默降级 / 其余留痕后降级）", () => {
+  describe("读侧 IO 故障分通道（ENOENT 静默降级 / 其余留痕后降级）", () => {
     it("readManifest：非 ENOENT 读错误（ENOTDIR——父段被文件占据）→ null 不抛", async () => {
-      const store = new ManifestStore(dir);
+      const store = new ManifestStore(() => dir);
       fs.writeFileSync(path.join(dir, "sub"), "occupied");
       await expect(store.readManifest("sub/blocked")).resolves.toBeNull();
     });
@@ -549,16 +551,16 @@ describe("record 域 manifest 写面自由函数（W1/U2a/D2）", () => {
     });
   });
 
-  describe("读面损坏 JSON 的可诊断性（损坏 warn / ENOENT 静默）", () => {
+  describe("读侧损坏 JSON 的可诊断性（损坏 warn / ENOENT 静默）", () => {
     it("readManifest：ENOENT → null 且零 warn（合法缺省静默）", async () => {
-      const store = new ManifestStore(dir);
+      const store = new ManifestStore(() => dir);
       loggerMock.warn.mockClear();
       await expect(store.readManifest("missing")).resolves.toBeNull();
       expect(loggerMock.warn).not.toHaveBeenCalled();
     });
 
     it("readManifest：JSON 损坏 → null + warn（含文件路径与「视为不存在、等待重建」）", async () => {
-      const store = new ManifestStore(dir);
+      const store = new ManifestStore(() => dir);
       const filePath = path.join(dir, "torn.json");
       fs.writeFileSync(filePath, "{ torn", "utf8");
       loggerMock.warn.mockClear();

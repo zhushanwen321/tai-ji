@@ -24,7 +24,7 @@ import { SESSION_MANAGER_MARKER, type SessionManagerAction } from '@zhushanwen/e
 import type { PiEvent } from '../infra/pi/pi-protocol.js'
 import type { ISessionService } from '../interfaces.js'
 
-/** pi stdout JSONL 行的边界解析形态（与 rpc-client 的行解析边界一致，窄化到本探针消费面） */
+/** pi stdout JSONL 行的边界解析形态（与 rpc-client 的行解析边界一致，窄化到本探针实际用到的子集） */
 interface UiResponseWireLine {
   type: string
   id: string
@@ -356,7 +356,7 @@ describe('U4-E3 malformed e2e probe', () => {
     expect(uiEvent.params).toEqual({})
   })
 
-  it('marker 翻译：action 不在 SESSION_MANAGER_ACTIONS 枚举 → 折叠 __malformed__ 哨兵（枚举守卫）', () => {
+  it('marker 翻译：action 不在 SESSION_MANAGER_ACTIONS 枚举 → 折叠 __malformed__ 哨兵（枚举检查）', () => {
     // JSON 合法但 action 是非枚举值——与上一条（JSON 解析失败）不同的 malformed 输入维度
     const events = translate(JSON.parse(buildUiRequestLine('req-enum-guard', 'evil', {})) as PiEvent, 'sid-parent')
     const uiEvent = events.find((e) => e.kind === 'session-manager-ui')

@@ -39,7 +39,7 @@
  *   均按 callId 归属校验（规则 4/5）；换绑 watch 清（规则 6，注册先于 sync watch）
  * - in-flight 按 callId 引用计数：规则 1 过期判定的豁免数据源（E10），finally 撤销晚于 flush
  * - [U2a/D2 authored-only] 记录点收窄为 onThinkingSelect（唯一）：显式选档时刻入表（三分支统一，
- *   记录不问生效）；「生效即记录」watch 及纪元/第三形态守卫整体废除（设计 D2/D9——非 authored
+ *   记录不问生效）；「生效即记录」watch 及纪元/第三形态检查整体废除（设计 D2/D9——非 authored
  *   值结构性不到达记录路径，防污染 by construction）
  * - [U2a/D1] landing 显示改线：chip 读 resolveLaunchConfig 输出（单一解析层，显示 ≡ 生效 by
  *   construction）；landing auto 值机制（follow watch + localAuthored）删除，localThinkingLevel
@@ -47,7 +47,7 @@
  *   D10-E10 声明保留）
  * - [U4r2] chip 侧 resolve 输入补 pendingPreset 通道（deps 新增可选 getter，壳层从 flow
  *   pendingPreset 只读视图接线）——D1「pending 三兄弟」在显示侧补齐，显式 preset 选择的
- *   捆绑字段进入 chip 显示（等价破口修复，守卫见 launch-config-equivalence.test.ts 全矩阵）
+ *   捆绑字段进入 chip 显示（等价破口修复，检查见 launch-config-equivalence.test.ts 全矩阵）
  * - 对外 API 不变（u4 壳层解构面零变化）；记忆模块为 core 域内单例，直接 import（非 deps 注入）
  */
 import { computed, ref, watch, type ComputedRef, type Ref } from 'vue'
@@ -215,7 +215,7 @@ export function useComposerModelThinking(
    * 切模型意图绑定发起时的 session，换绑即作废全部未消费意图。
    * 必须注册在 useThinkingLevelSync 的 sync watch 之前：同一 flush 内 watch job 按
    * 注册序执行，若消费检查先跑，换绑到恰为 armed 目标模型的 session 会在作废前被
-   * 消费（伪恢复，D3 被否①的换绑变体）。
+   * 消费（伪恢复，D3 不采用①的换绑变体）。
    *
    * [AC11 豁免登记，2026-09-20 R1] armed 是会话级单值意图 token（非 per-session
    * 分区态）：本 watch 是「换绑即整体作废」的安全侧语义，迁 useSessionScopedState
@@ -256,7 +256,7 @@ export function useComposerModelThinking(
    * 输入经 getter 闭包读响应式源：launchData getters 内读壳层 store；lookupLastUsed /
    * lookup 是模块级 reactive 源——KV 冷启动晚到时视图自动重算（P5①），无需补写回调。
    * pendingThinkingLevel = localThinkingLevel（U2a 后唯一写点 = routeThinkingLevel
-   * landing 支，只含 authored 值——D1 authored 守卫的结构前提；例外 = sync 分支 3
+   * landing 支，只含 authored 值——D1 authored 检查的结构前提；例外 = sync 分支 3
    * 安全网经同一通路写入，D10-E10 声明保留）。
    * pendingPreset = deps 显式选定 preset（U4r2 通道，D1 pending 三兄弟至此齐备）——
    * 仅 landing 态消费（已建态/staging 分支显示不感知，与 pendingThinkingLevel 同款门控）。
@@ -409,7 +409,7 @@ export function useComposerModelThinking(
       clearArmedIfOwner(callId)
     } catch (err) {
       // [u3·D3 规则 4「失败清」/ E4] RPC 失败 store 不写（U6 现状语义），armed 立即清除
-      // 自己 callId 的——失败 token 残留会被后续换绑到同模型 session 误消费（D3 被否②(a)）。
+      // 自己 callId 的——失败 token 残留会被后续换绑到同模型 session 误消费（D3 不采用②(a)）。
       // 重抛维持调用方既有失败路径不变。
       clearArmedIfOwner(callId)
       throw err
@@ -425,7 +425,7 @@ export function useComposerModelThinking(
 
   /**
    * [U2a/D2 authored-only] 记忆记录点（唯一）：用户显式选档时刻入表，不问生效。
-   * 归属模型 = 选档动作的上下文模型 currentModelId（三分支自然投影：staging = 暂存
+   * 归属模型 = 选档动作的上下文模型 currentModelId（三分支自然呈现：staging = 暂存
    * 快照模型 / landing = resolve 当时选中模型 / 已建 = session 真值模型——选档动作
    * 的上下文模型即归属模型，三分支均是用户显式选择）。
    * 带 UI key 转换（u3 D1：跨模型恢复的语义是档位名）+ 可用性校验（E5 防线，平移自
@@ -438,7 +438,7 @@ export function useComposerModelThinking(
    *
    * 「生效即记录」watch 已随本机制整体废除：非 authored 值（preset 档 / pi 归一档 /
    * 钳制值 / session 加载值 / 切模型自动对齐值）结构性不到达记录路径，防污染 by
-   * construction——纪元守卫 / 第三形态守卫失去存在理由一并删除（设计 D9 净减法）。
+   * construction——纪元检查 / 第三形态检查失去存在理由一并删除（设计 D9 净减法）。
    */
   function recordAuthoredThinking(level: string): void {
     const modelId = currentModelId.value

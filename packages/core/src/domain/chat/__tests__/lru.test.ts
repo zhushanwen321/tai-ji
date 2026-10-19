@@ -299,10 +299,10 @@ describe('makeLruEvictDeps.deleteMessageKey', () => {
     expect(messages.value).toBe(original) // 引用未变（has 检查拦截）
   })
 
-  it('deleteStreamingFlag 不受 has 守卫门控：keyless sid 同样清理（幂等，防 flag 残留慢泄漏）', () => {
+  it('deleteStreamingFlag 不受 has 检查门控：keyless sid 同样清理（幂等，防 flag 残留慢泄漏）', () => {
     // 场景：messages 无该 sid 分区，但 isGenerating(sid) 曾被查询过 → flag 已惰性创建。
-    // 若 flag 清理被 has 守卫门控，该 flag 永不清理（messages 分区不存在则 deleteMessages
-    // 路径不可达）→ 慢泄漏。flag delete（Map.delete）幂等无代价，故移出守卫无条件执行。
+    // 若 flag 清理被 has 检查门控，该 flag 永不清理（messages 分区不存在则 deleteMessages
+    // 路径不可达）→ 慢泄漏。flag delete（Map.delete）幂等无代价，故移出检查无条件执行。
     const original = new Map([['s1', {}]])
     const messages = shallowRef(original)
     const hydrated = shallowRef(new Set<string>())

@@ -1,7 +1,7 @@
 /**
  * pi session entry 的 wire 类型（data-source-governance W21 自 core/domain/chat/apply-entry.ts 下沉）。
  *
- * 下沉动机：entry 形态成为 runtime（event-adapter 实时重构）↔ core（reducer 投影）↔ shared
+ * 下沉动机：entry 形态成为 runtime（event-adapter 实时重构）↔ core（reducer 派生视图）↔ shared
  * （protocol.ts message.* payload 类型）三方共用的 wire 契约——shared 是唯一不破坏包依赖方向
  * （core→shared、runtime→shared）的归属地（plan W20「W21/W22 上收到 protocol 层时重新评估包边界」
  * 的裁决兑现）。core/apply-entry.ts 改为 re-export 本文件保持 API 兼容。
@@ -29,7 +29,7 @@ export interface PiEntryBase {
 /**
  * message entry 体（user/assistant/toolResult/bashExecution 四种 role 都在 message 字段里，
  * pi messages.ts AgentMessage 联合镜像）。字段按「消费到的」宽形态声明为 unknown，
- * 读取点全部运行时守卫收窄（禁 any，malformed 数据降级不抛错——session JSONL 可能截断）。
+ * 读取点全部运行时检查收窄（禁 any，malformed 数据降级不抛错——session JSONL 可能截断）。
  */
 export interface PiMessageBody {
   /** role 可选：wire 层 lift 无 role 的畸形记录时为 undefined——reducer 按 unknown role 降级（warn + 跳过） */

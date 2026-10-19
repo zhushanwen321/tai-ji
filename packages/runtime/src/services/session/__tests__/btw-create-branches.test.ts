@@ -68,7 +68,7 @@ describe('分支①：源已落盘 → 正常 fork（pi 原生 --fork 链路）'
     expect(h.registered[0]).toMatchObject({ id: 'btw:sid-f1', file: forkFile, hidden: true, cwd: CWD, label: 'proj' })
     expect(h.registered[0].argc).toBe(6)
     // 落点不变量（V2②③）：env session-dir 强制覆写为线目录
-    expect(h.spawned[0].options.env?.PI_CODING_AGENT_SESSION_DIR).toBe(getBtwThreadDir(CWD, MAIN_SID))
+    expect(h.spawned[0].options.env?.PI_CODING_AGENT_SESSION_DIR).toBe(getBtwThreadDir(MAIN_SID))
     // 注册表
     const rec = svc.getLine('btw:sid-f1')!
     expect(rec).toMatchObject({ mainSid: MAIN_SID, piSessionId: 'sid-f1', hidden: true, snapshotKind: 'forked', contractRounds: 1 })
@@ -95,7 +95,7 @@ describe('分支②：源不存在/为空 → 回落无 fork 新建（落点 = �
     expect(h.spawned[0].client.switchSession).not.toHaveBeenCalled()
     expect(h.registered[0]).toMatchObject({ id: 'btw:sid-b2', hidden: true, file: join(fx, 'threadB', 'x.jsonl') })
     // 回落 spawn 落点继承：env session-dir = 线目录（V2② 实测同款通道）
-    expect(h.spawned[0].options.env?.PI_CODING_AGENT_SESSION_DIR).toBe(getBtwThreadDir(CWD, MAIN_SID))
+    expect(h.spawned[0].options.env?.PI_CODING_AGENT_SESSION_DIR).toBe(getBtwThreadDir(MAIN_SID))
     expect(svc.getLine('btw:sid-b2')?.snapshotKind).toBe('no-source')
     // 不静默：warn 登记不可用原因
     expect(console.warn).toHaveBeenCalledWith(expect.stringContaining('fork source unavailable'))

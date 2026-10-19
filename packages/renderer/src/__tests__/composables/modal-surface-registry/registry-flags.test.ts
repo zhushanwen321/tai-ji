@@ -97,7 +97,7 @@ describe('双键旗标（yieldsEsc / yieldsCmdW）按家族分立', () => {
 })
 
 describe('shieldsView 分档报告（S9 view 遮蔽联动的数据源）', () => {
-  it('全屏阻塞面 = unconditional；弹出层/横幅 = intersecting；行内确认态 = none 不参报', async () => {
+  it('全屏阻塞遮罩 = unconditional；弹出层/横幅 = intersecting；行内确认态 = none 不参报', async () => {
     const modal = mountSurface('search-modal', 'sm')
     const banner = mountSurface('rolling-restart-banner', 'rb')
     const confirm = mountSurface('session-delete-confirm', 'sc')

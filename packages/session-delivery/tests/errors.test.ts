@@ -7,7 +7,7 @@
  * - 结构化字段：kind（'cancelled' | 'drained'）+ entryId（原文案契约的语义信息转字段）
  * - message 形态锁：保持历史文案（`delivery cancelled: <id>` / `delivery drained`），
  *   日志与诊断输出字节级不变
- * - end-to-end 判别链：sendChecked 挂账 → cancel/drain reject → catch instanceof 命中
+ * - end-to-end 判别链：sendChecked 挂起 → cancel/drain reject → catch instanceof 命中
  *
  * 运行：cd packages/session-delivery && npx vitest run tests/errors.test.ts
  */
@@ -15,7 +15,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { createDelivery, DeliveryReclaimError } from '../src/index.js'
 import { makeMockPort } from './helpers.js'
 
-/** port.send 永不 settle：sendChecked 挂账等待（受理口径 resolve 不触发），供 cancel/drain/dispose reject。 */
+/** port.send 永不 settle：sendChecked 挂起等待（受理口径 resolve 不触发），供 cancel/drain/dispose reject。 */
 function makePendingPort(): ReturnType<typeof makeMockPort> {
   return makeMockPort({ send: () => new Promise(() => {}) })
 }
@@ -47,7 +47,7 @@ describe('DeliveryReclaimError 结构化字段与文案形态', () => {
 })
 
 describe('waiter reject 的 instanceof 判别链（D4-1 消费契约）', () => {
-  it('cancel 终结挂账条目 → sendChecked reject 为 DeliveryReclaimError（kind/entryId/message 三证）', async () => {
+  it('cancel 终结挂起条目 → sendChecked reject 为 DeliveryReclaimError（kind/entryId/message 三证）', async () => {
     const handle = createDelivery(makePendingPort())
     const p = handle.sendChecked({ payload: { kind: 'text', content: 'hello' } }, { id: 'm-1' })
     const caught = p.then(
@@ -65,7 +65,7 @@ describe('waiter reject 的 instanceof 判别链（D4-1 消费契约）', () => 
     handle.dispose()
   })
 
-  it('drain 全量回收 → 挂账 sendChecked reject 为 DeliveryReclaimError（drained / 无 entryId）', async () => {
+  it('drain 全量回收 → 挂起 sendChecked reject 为 DeliveryReclaimError（drained / 无 entryId）', async () => {
     const handle = createDelivery(makePendingPort())
     const p = handle.sendChecked({ payload: { kind: 'text', content: 'hello' } }, { id: 'm-2' })
     const caught = p.then(

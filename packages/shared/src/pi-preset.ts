@@ -34,7 +34,7 @@ export type ExtensionMode = 'all' | 'allowlist' | 'denylist' | 'none'
  * - `node_modules/@earendil-works/pi-coding-agent/dist/cli/args.js:6`
  *   `VALID_THINKING_LEVELS = ["off","minimal","low","medium","high","xhigh","max"]`。
  *
- * 前端消费面（都从这里派生，前端侧不再有第二份集合/顺序）：
+ * 前端消费方（都从这里派生，前端侧不再有第二份集合/顺序）：
  * - @taiji/core `domain/composer/thinking-levels`（THINKING_LEVELS / 全序 / isThinkingLevel）；
  * - @taiji/core `transport/mock/composer-data`（mock fixture）。
  * 「某模型支持哪些档」不在这份词表里——那是 runtime 下发的 supportedLevels 数据驱动。
@@ -47,7 +47,7 @@ export type ExtensionMode = 'all' | 'allowlist' | 'denylist' | 'none'
  * （shared 不能反向 import runtime）。
  *
  * 维护注：升级 pi 时 diff 上面两处锚点，同步本数组（漏同步会在编译期断言/packages/shared
- * 值域钉值单测/守卫脚本上分别报错，不会静默）。
+ * 值域钉值单测/检查脚本上分别报错，不会静默）。
  */
 export const PI_THINKING_LEVELS = ['off', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max'] as const
 
@@ -277,7 +277,7 @@ export interface PresetExportPayload {
   version: number
 }
 
-// ── 运行时类型守卫 ─────────────────────────────────────────────
+// ── 运行时类型检查 ─────────────────────────────────────────────
 
 /** ToolMode 合法值集合（isPiLaunchPreset 校验用）。 */
 const TOOL_MODES: readonly ToolMode[] = ['all', 'allowlist', 'denylist', 'none']
@@ -292,8 +292,8 @@ const EXTENSION_MODES: readonly ExtensionMode[] = ['all', 'allowlist', 'denylist
  * 可选字段（description/allowedTools/deniedTools/modelOverride/thinkingLevel 等）不强制校验——
  * 消费方按需在取用时再 narrow，只保证必填字段契约。
  *
- * 消费面：runtime preset-service 的 coercePreset（磁盘读路）用它做必填 + 枚举白名单的
- * 单点守卫（枚举白名单 SSOT 在此，runtime 侧不再自持副本）。
+ * 消费方：runtime preset-service 的 coercePreset（磁盘读路）用它做必填 + 枚举白名单的
+ * 单点检查（枚举白名单 SSOT 在此，runtime 侧不再自持副本）。
  */
 export function isPiLaunchPreset(value: unknown): value is PiLaunchPreset {
   if (!value || typeof value !== 'object') return false

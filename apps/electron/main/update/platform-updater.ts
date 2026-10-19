@@ -43,7 +43,7 @@ import type { UpdateScriptRef } from './types.js'
 const UPDATER_SCRIPT_MODE = 0o755
 
 /**
- * 写 updater.pid（批次 5 互斥 §3.7.1，接线收口 #13）。
+ * 写 updater.pid（批次 5 互斥 §3.7.1，接线收尾 #13）。
  *
  * 写入语义对齐 mac/linux：脚本启动即写、退出即删。差异在写入方——
  * mac/linux 由脚本模板自写 `$$`（`trap 'rm -f "$PID_FILE"' EXIT` 负责退出清理），
@@ -92,7 +92,7 @@ export class MacUpdater implements PlatformUpdater {
     // 推导 .app bundle 路径：execPath = .../TaiJi.app/Contents/MacOS/TaiJi
     // dirname×3 = .../TaiJi.app
     const appBundle = path.dirname(path.dirname(path.dirname(process.execPath)))
-    // 布局守卫：dirname×3 假设标准 .app/Contents/MacOS/<binary> 布局。若 execPath 不符
+    // 布局检查：dirname×3 假设标准 .app/Contents/MacOS/<binary> 布局。若 execPath 不符
     // （如开发期改了 cwd、或将来改成非 .app 打包），appBundle 不以 .app 结尾，后续
     // ditto/unlink 会破坏意外路径。提前 fail-fast 比静默写错更安全。
     if (!appBundle.endsWith('.app')) {

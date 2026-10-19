@@ -287,7 +287,7 @@ describe('killProcessTree（幂等语义 + onFallback 注入；POSIX 分支）',
         killProcessTree(pid, logger)
         // 轮询组长死（等 libuv reap）
         await pollUntil(() => !isPidAlive(pid), 5000, 'group leader to die')
-        // 覆盖面说明：killProcessTree 是进程组 kill（kill -- -<pgid>），孙子与组长同组、
+        // 覆盖范围说明：killProcessTree 是进程组 kill（kill -- -<pgid>），孙子与组长同组、
         // 组长死后 reparent 不换组，故「组 kill + 组内 pid 记录」已覆盖「reparent 后孙子
         // 也能被杀」的原始意图；pid 复用概率在 5s 轮询窗口内可忽略
         await pollUntil(

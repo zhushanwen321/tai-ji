@@ -3,7 +3,7 @@
  *
  * 扫描 session JSONL 目录，按四分类聚合 Token 用量，返回 UsageRow[]：
  * ①②③ 为 pi 三分类（assistant / toolResult-with-usage / compaction-with-usage），
- * ④ 为 taiji 自有口径（rename-session custom entry，G3 rename 落账通道，
+ * ④ 为 taiji 自有口径（rename-session custom entry，G3 rename 用量记录通道，
  * usage-page-fixes §3.3 ④；落盘形态锚 docs/pi-semantics.json PS-29，非 pi 语义）。
  *
  * 为什么走「读文件」而非实时事件流聚合：runtime 事件链路只透传
@@ -231,7 +231,7 @@ export class UsageStatsService {
    * ② type==='message' && message.role==='toolResult' && message.usage → compaction 虚拟桶
    * ③ (type==='compaction' || type==='branch_summary') && entry.usage → compaction 虚拟桶
    *    model 归属：details.model（smart-context 落盘的 `${provider}/${id}`）权威优先，
-   *    非 string/空串回退 'compaction'（usage-page-fixes §3.3 ④ 守卫与回退字面量）
+   *    非 string/空串回退 'compaction'（usage-page-fixes §3.3 ④ 检查与回退字面量）
    * ④ type==='custom' && customType==='rename-session' && data.usage 为非 null 对象
    *    → rename-session 虚拟桶（G3）
    * ⑤ type==='usage'（pi 1.0.0 新 entry，cache_warm 等非对话操作的用量记录）→ 主桶
@@ -353,7 +353,7 @@ export class UsageStatsService {
   /**
    * ③ compaction / branch_summary with entry.usage → compaction 虚拟桶。
    * model 归属：details.model 权威优先（smart-context 落盘 `${provider}/${id}`），
-   * 非 string/空串诚实回退 generic 'compaction' 行（存量数据/守卫降级，不猜测归属）。
+   * 非 string/空串诚实回退 generic 'compaction' 行（存量数据/检查降级，不猜测归属）。
    * 命中但 timestamp 无效 → 'skip'（计 skippedLines）；不命中 → null。
    */
   private rowFromCompactionEntry(entry: Record<string, unknown>, cwd: string | null): ScanRowResult {
@@ -372,9 +372,9 @@ export class UsageStatsService {
   /**
    * ④ rename-session custom entry（taiji 自有口径，非 pi 三分类）→ rename-session 虚拟桶。
    * 落盘形态锚：docs/pi-semantics.json PS-29（appendCustomEntry 字面量含
-   * customType/data/timestamp）。usage 存在性守卫：data.usage 为非 null 对象才计 row
+   * customType/data/timestamp）。usage 存在性检查：data.usage 为非 null 对象才计 row
    * （同 ①②③ 范式）；字段缺失由 extractMetrics 按 0 兜底，cost 缺失 → 费用视角 $0
-   * （诚实降级）。model 守卫与 ③ 对称：data.model 非 string/空串回退 'rename-session'。
+   * （诚实降级）。model 检查与 ③ 对称：data.model 非 string/空串回退 'rename-session'。
    * 命中但 timestamp 无效 → 'skip'（计 skippedLines）；不命中 → null。
    */
   private rowFromRenameSessionEntry(entry: Record<string, unknown>, cwd: string | null): ScanRowResult {
@@ -395,7 +395,7 @@ export class UsageStatsService {
    * ⑤ pi 1.0.0 usage entry（模型产生的非对话操作用量，如缓存保活 cache_warm）→
    * 真实 provider/model 行。落盘形态锚：pi dist/core/session-manager.js appendUsage
    * 字面量（type:'usage' + kind/provider/model/usage/note）。不接入则用量页成本合计
-   * 与 pi 自身统计口径出现缺口（B1）。usage 存在性守卫：entry.usage 为非 null 对象才计
+   * 与 pi 自身统计口径出现缺口（B1）。usage 存在性检查：entry.usage 为非 null 对象才计
    * row（同 ①②③ 范式）；kind 不参与分类（provider/model 是行字段真值）。
    * 命中但 timestamp 无效 → 'skip'（计 skippedLines）；不命中 → null。
    */
@@ -413,7 +413,7 @@ export class UsageStatsService {
 
   /**
    * 构造 UsageRow，从 usage 对象提取指标。
-   * usage 存在性守卫：缺失字段按 0。
+   * usage 存在性检查：缺失字段按 0。
    */
   private makeRow(
     date: string,

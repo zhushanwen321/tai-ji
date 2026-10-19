@@ -145,7 +145,7 @@ describe('能力标志（不留死入口）', () => {
     expect(resolveComposerDensity({ pluginToolbarContributionCount: 1 }, 0).slots.leftCluster).toBe('expanded')
   })
 
-  it('headerAction 有入口 = 左簇第三内容源：托盘空 + toolbar 零贡献仍可聚合（B3 聚合面含定时任务）', () => {
+  it('headerAction 有入口 = 左簇第三内容源：托盘空 + toolbar 零贡献仍可聚合（B3 聚合范围含定时任务）', () => {
     // 三源全空才 absent；headerAction 单独在场 → L0 展开 / L2 聚合（被聚合 clock 由聚合面板段承接）
     const caps: ComposerDensityCapabilities = { hasTrayItems: false, hasHeaderActionEntries: true }
     expect(resolveComposerDensity(caps, 0).slots.leftCluster).toBe('expanded')

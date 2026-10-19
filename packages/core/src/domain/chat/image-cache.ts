@@ -2,7 +2,8 @@
  * toolResult 图片落盘编排（crash-resilience §3.3 D6-⑨ / u7-memory-governance，core 侧）。
  *
  * 职责切分：落盘**执行方**是 main 进程（fs 只存在于 main；目录
- * `<dataDir>/cache/images/<sessionId>/<sha256>.<ext>`、幂等去重、64MB size 帽、三条
+ * `<dataDir>/ext-sessions/<sessionId>/image-cache/<sha256>.<ext>`（session 存储树
+ * 域 3）、幂等去重、64MB size 帽、三条
  * 清理通道都在 apps/electron/main/images/image-cache.ts）——本模块是 renderer 侧的
  * **编排与记账层**：
  * - hydrate 批量编排：hydrate 时收集消息序（旧→新）全部 base64 图，**反转为新→旧**
@@ -50,7 +51,7 @@ interface ImageCacheGlobalState {
   imagePaths: Map<string, string>
   /** 内容 hash → in-flight 写入 Promise（同内容并发请求共享，防双写；@data-owner #35：主表 #35 图片缓存记账层，派生缓存非第二写方） */
   inflightWrites: Map<string, Promise<string | undefined>>
-  /** session 帽满标记（@data-owner #35：main 回执 quota-full 的派生投影；hydrate 重判 + disposeSession 失效，见下） */
+  /** session 帽满标记（@data-owner #35：main 回执 quota-full 的派生视图；hydrate 重判 + disposeSession 失效，见下） */
   quotaFullSessions: Set<string>
   /** sessionId → 该 session 落盘图的内容 hash 键集（dispose 按_sid 清理 imagePaths 的索引；@data-owner #35：主表 #35 图片缓存记账层，派生缓存非第二写方） */
   sessionImageKeys: Map<string, Set<string>>
@@ -196,7 +197,7 @@ export function requestImageWrite(sessionId: string, image: ImageCacheWriteImage
   if (cached !== undefined) return Promise.resolve(cached)
   const inflight = s.inflightWrites.get(key)
   if (inflight) return inflight
-  // 帽满 session 前置快速失败：不再发无效 IPC（超帽即停语义在编排层收口，
+  // 帽满 session 前置快速失败：不再发无效 IPC（超帽即停语义在编排层收尾，
   // 渲染组件无须各自自查也能拿到一致的 undefined → 占位降级）
   if (s.quotaFullSessions.has(sessionId)) return Promise.resolve(undefined)
   const port = resolvePort()

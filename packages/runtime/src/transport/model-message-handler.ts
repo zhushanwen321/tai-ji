@@ -4,7 +4,7 @@
  *
  * Extracted from settings-message-handler.ts to reduce file size（该文件同类先例：
  * config-preferences-message-handler.ts 同款 class + handle() switch 形态；case 体自
- * 原文件逐一原样迁移，行为保持）。统一变化轴：模型解析与档位控制——列表聚合、会话
+ * 原文件逐一原样迁移，行为保持）。统一变化原因：模型解析与档位控制——列表聚合、会话
  * 切换/档位（modelService）、默认值与 scoped 白名单（configService + default 同步）、
  * 模型发现与测试连接（凭据 resolver 唯一通道 + connectionTester）。
  */
@@ -182,7 +182,7 @@ export class ModelMessageHandler {
     // 唯一通道取，代表模型与端点回落链归 runtime）。缺省 / 'discover' 保持既有 GET /v1/models
     // 行为逐字节不变（CLI 与旧调用方零改动，向后兼容）。
     if (mode === 'test') return this.handleTestConnections(msg, ws, providerId)
-    // 链 2（D3 收口）：payload 未带 apiKey 时经 resolver async 版解析（auth.json → models.json），
+    // 链 2（D3 收尾）：payload 未带 apiKey 时经 resolver async 版解析（auth.json → models.json），
     // 修复「catalog 凭据只在 auth.json 时恒 miss」。
     const credentialPromise: Promise<string | undefined> = apiKey
       ? Promise.resolve(apiKey)
@@ -214,7 +214,7 @@ export class ModelMessageHandler {
       this.replyTestResult(ws, msg.id, { success: false, error: PROVIDER_CONNECTION_TEST_ERRORS.providerNotFound })
       return true
     }
-    // 交集类型的可选方法：解构后判函数（运行时守卫，替代对 IModelService 的强制断言）
+    // 交集类型的可选方法：解构后判函数（运行时检查，替代对 IModelService 的强制断言）
     const testProviderConnections = this.ctx.modelService.testProviderConnections
     if (typeof testProviderConnections !== 'function') {
       this.replyTestResult(ws, msg.id, { success: false, error: PROVIDER_CONNECTION_TEST_ERRORS.testUnavailable })

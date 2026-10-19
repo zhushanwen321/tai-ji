@@ -16,7 +16,7 @@
  * + WorkflowsView（读 WorkflowRun 聚合根）。
  *
  * 参考：
- * - domain-models.md §FR-6（command 收口仅 /workflows，打开交互式面板）
+ * - domain-models.md §FR-6（command 收尾仅 /workflows，打开交互式面板）
  * - spec.md UC-3（用户输入 /workflows，打开三级导航 TUI 面板）
  */
 
@@ -41,7 +41,7 @@ import { displayStatusOf } from "../tool/tool-workflow.ts";
 
 /** status 显示顺序：running 优先（活跃态在前），interrupted 次之（[D2] 暂停态
  *  ——无活体但可续跑，排活体后、终局前），再 startedAt 倒序。
- *  [W2/V1 D1 第 6 行] 权重表消费键 = displayStatusOf 投影三态（排序键不读
+ *  [W2/V1 D1 第 6 行] 权重表消费键 = displayStatusOf 派生视图三态（排序键不读
  *  outcome 细分——outcome 由 runSummary.reason 并列承载）。 */
 const STATUS_ORDER: Record<string, number> = {
   running: 0,
@@ -149,7 +149,7 @@ export function registerWorkflowsCommand(
  * 各 action 语义：
  * - abort → 调 lifecycle abortRun，成功/失败均 notify（不向上抛）
  * - resume → 调 core resumeRun 断点续跑（与 TUI verb、workflow tool
- *   action:"resume" 三通道同语义——D14 args 校验面在 tool action 入口，命令
+ *   action:"resume" 三通道同语义——D14 args 校验侧在 tool action 入口，命令
  *   通道不带 args，沿用历史 args），成功/失败均 notify（不向上抛）
  * - lifecycle-removed → 已移除的 verb（pause），给定制指引而非 Usage
  *   （F3 定稿——提示语义优先于 missing-id：run 一次性生命周期后不可挂起）

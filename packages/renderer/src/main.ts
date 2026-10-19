@@ -46,6 +46,7 @@ registerCanvasOverlayBridge({
       isOpen: s.isOpen,
       kind: s.current?.kind ?? null,
       canvasId: s.current?.kind === 'canvas' ? s.current.payload.canvasId : null,
+      sessionId: s.current?.kind === 'canvas' ? s.current.payload.sessionId : null,
     }
   },
 })

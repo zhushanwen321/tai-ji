@@ -74,7 +74,7 @@ export const btw = isMock ? mockApi.btw : realBtw
 export const usage = isMock ? mockApi.usage : realUsage
 
 // tts：语音合成朗读域（ai-voice-tts，M0）。mock 轨走 mockApi.tts（内存态配置 + 静态演示
-// 投影，G4 类型锚定签名全等）；real 轨走 core transport 域（runtime 接线归 u3b）。
+// 派生视图，G4 类型锚定签名全等）；real 轨走 core transport 域（runtime 接线归 u3b）。
 export const tts = isMock ? mockApi.tts : realTts
 // subagent 域（subagent-model-switch §7.1 入口层）：setModel（chat 域 / run 级全切共用）。
 export const subagent = isMock ? mockApi.subagent : realSubagent

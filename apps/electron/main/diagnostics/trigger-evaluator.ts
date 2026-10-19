@@ -1,28 +1,28 @@
 /**
- * 重审触发条件评估器——纯函数窗口统计（crash-forensics-and-watchdog §3.3 D2 暗债根修，
+ * 重审触发条件评估器——纯函数窗口统计（crash-forensics-and-watchdog §3.3 D2 暗债从根源修复，
  * 条件清单 SSOT = 附录 A 20 条）。
  *
  * 【职责】两份设计文档 + 架构文档登记的全部「数据驱动重审」触发条件在此集中计算
- * （G-B）：此前 20 条散在文档里零跟踪（§2.3 投影②），条件触发了没人知道。
+ * （G-B）：此前 20 条散在文档里零跟踪（§2.3 派生视图②），条件触发了没人知道。
  *
- * 【纯度边界】无 electron / node:fs / 定时器依赖——输入 = 两本台账的 JSONL 行数组 +
- * 当前时刻（唯一输入，不解析任何日志文本行，设计 D2 被否③），输出 = 20 条状态表。
+ * 【纯度边界】无 electron / node:fs / 定时器依赖——输入 = 两本登记清单的 JSONL 行数组 +
+ * 当前时刻（唯一输入，不解析任何日志文本行，设计 D2 不采用③），输出 = 20 条状态表。
  * main 池 vitest 直接单测（内存行数组 fixture，无文件 IO）。
  *
- * 【输入闭合性】计数类（#1/2/3/7/8/9/10/16）全部数台账事件（D1 条件信号事件化的直接
+ * 【输入封闭性】计数类（#1/2/3/7/8/9/10/16）全部数登记清单事件（D1 条件信号事件化的直接
  * 消费）；趋势类（#4/#5）消费 watermark-daily 聚合事件（coverage<50% 的日降权标注）；
- * #17 判据在 60s 采样环内存态不落台账 → 恒 no-data，标注消费方 = Gate W 人工复审；
+ * #17 判据在 60s 采样环内存态不落登记清单 → 恒 no-data，标注消费方 = Gate W 人工复审；
  * 用户反馈型（#6/11/12/13/14/15/18/19/20）requires-user-report 恒 no-data 但显式列出
  * ——「列出」本身即消费（消灭触发词散在文档里无人汇总的暗债形态）。
  *
  * 【出口】恰两个（D2，不加第三个）：
- *   ① main 每日巡检（./trigger-patrol.ts）：任一 tripped → WARN 摘要行 + 台账
+ *   ① main 每日巡检（./trigger-patrol.ts）：任一 tripped → WARN 摘要行 + 登记清单
  *      trigger-review 事件（带条件 id）；
  *   ② 诊断导出（u3a export-diagnostic-bundle）：状态表进 summary.md。
  *
  * 【窗口语义】周 = 滚动 7 天、月 = 滚动 30 天（自然滚动窗，非自然周/自然月）。锚定
- * 「现在」= 显式注入 now（epoch ms），缺省锚定两本台账末事件时刻（台账是「现在」的
- * 最新知识）；两本台账全空且未注入 now → 无锚点，全部窗口条件 no-data（非静默：
+ * 「现在」= 显式注入 now（epoch ms），缺省锚定两本登记清单末事件时刻（登记清单是「现在」的
+ * 最新知识）；两本登记清单全空且未注入 now → 无锚点，全部窗口条件 no-data（非静默：
  * rows note + skippedLineCount + parsedEventCount 可辨）。
  *
  * 【「周均/月均」口径】直接数滚动窗口内事件条数与阈值比较，不做窗口覆盖不足的外推
@@ -149,15 +149,15 @@ export interface TriggerConditionRow {
 }
 
 export interface TriggerEvaluationResult {
-  /** 实际使用的锚定时刻（ISO）；两本台账全空且未注入 now 时为 null。 */
+  /** 实际使用的锚定时刻（ISO）；两本登记清单全空且未注入 now 时为 null。 */
   nowIso: string | null
   /** 20 条状态表（id 升序，与附录 A 一一对应）。 */
   rows: TriggerConditionRow[]
   /** status=tripped 的条件 id（巡检 WARN 与 trigger-review 事件的驱动源）。 */
   trippedIds: number[]
-  /** 两本台账各自解析成功的事件数（no-data 判定的数据面证据）。 */
+  /** 两本登记清单各自解析成功的事件数（no-data 判定的数据范围证据）。 */
   parsedEventCount: { main: number; runtime: number }
-  /** 两本台账各自的坏行数（JSON 解析失败/非对象/缺 ts——非静默，见文件头【坏行】）。 */
+  /** 两本登记清单各自的坏行数（JSON 解析失败/非对象/缺 ts——非静默，见文件头【坏行】）。 */
   skippedLineCount: { main: number; runtime: number }
 }
 
@@ -166,11 +166,11 @@ export interface EvaluateTriggerConditionsInput {
   mainLines?: string[]
   /** runtime.jsonl 的行数组。 */
   runtimeLines?: string[]
-  /** 锚定「现在」（epoch ms）；缺省 = 两本台账末事件时刻。 */
+  /** 锚定「现在」（epoch ms）；缺省 = 两本登记清单末事件时刻。 */
   now?: number
 }
 
-/** 带解析时间轴的台账事件。字段经 unknown 守卫访问（台账开放枚举，畸形值不炸评估器）。 */
+/** 带解析时间轴的登记清单事件。字段经 unknown 检查访问（登记清单开放枚举，畸形值不炸评估器）。 */
 export interface DatedEvent {
   raw: Record<string, unknown>
   tsMs: number
@@ -271,7 +271,7 @@ function inWindow(tsMs: number, nowMs: number, windowMs: number): boolean {
   return tsMs > nowMs - windowMs && tsMs <= nowMs
 }
 
-/** 无锚定时刻（空台账）时窗口选择恒空集——配合 noDataReason 让行落入 no-data 分支。 */
+/** 无锚定时刻（空登记清单）时窗口选择恒空集——配合 noDataReason 让行落入 no-data 分支。 */
 function selectInWindow(
   events: readonly DatedEvent[],
   match: (raw: Record<string, unknown>) => boolean,
@@ -282,7 +282,7 @@ function selectInWindow(
   return events.filter((d) => match(d.raw) && (windowMs === null || inWindow(d.tsMs, nowMs, windowMs)))
 }
 
-// ── 事件谓词（台账事件名/层/reason 匹配口径集中登记，附录 A「评估形态」列的代码化）──
+// ── 事件谓词（登记清单事件名/层/reason 匹配口径集中登记，附录 A「评估形态」列的代码化）──
 
 const isWarnTierTruncation = (e: Record<string, unknown>): boolean =>
   str(e.event) === 'frame-truncated' && str(e.reason) === 'warn-tier'
@@ -324,7 +324,7 @@ interface CountingRowSpec {
   maxCount: number
   matches: readonly DatedEvent[]
   nowMs: number
-  /** 有值 = 该行数据源台账无事件 → no-data（显式原因，非静默）。 */
+  /** 有值 = 该行数据源登记清单无事件 → no-data（显式原因，非静默）。 */
   noDataReason?: string
   note?: string
 }
@@ -332,7 +332,7 @@ interface CountingRowSpec {
 function countingRow(spec: CountingRowSpec): TriggerConditionRow {
   const description = CONDITION_DESCRIPTIONS[spec.id]
   if (spec.noDataReason !== undefined) {
-    return { id: spec.id, description, threshold: spec.threshold, status: 'no-data', currentValue: '台账无事件', note: spec.noDataReason }
+    return { id: spec.id, description, threshold: spec.threshold, status: 'no-data', currentValue: '登记清单无事件', note: spec.noDataReason }
   }
   const count = spec.matches.length
   const status: TriggerConditionStatus = count > spec.maxCount ? 'tripped' : 'ok'
@@ -361,7 +361,7 @@ function userReportRow(id: number): TriggerConditionRow {
     status: 'no-data',
     currentValue: '待用户反馈',
     requiresUserReport: true,
-    note: 'requires-user-report：台账无机判数据源，恒 no-data 但入清单显式列出（D2）',
+    note: 'requires-user-report：登记清单无机判数据源，恒 no-data 但入清单显式列出（D2）',
   }
 }
 
@@ -420,16 +420,16 @@ function extractWatermarkSample(d: DatedEvent): WatermarkDaySample {
 // 评估器主入口
 // ─────────────────────────────────────────────────────────────────────────────
 
-/** 评估 20 条触发条件（唯一输入 = 两本台账行数组 + 当前时刻，见文件头）。 */
+/** 评估 20 条触发条件（唯一输入 = 两本登记清单行数组 + 当前时刻，见文件头）。 */
 export function evaluateTriggerConditions(input: EvaluateTriggerConditionsInput = {}): TriggerEvaluationResult {
   const main = parseJournalLines(input.mainLines)
   const runtime = parseJournalLines(input.runtimeLines)
   const nowMs = input.now ?? (main.lastTsMs ?? runtime.lastTsMs)
 
   const noAnchor = nowMs === null
-  const mainNoData = main.events.length === 0 ? 'main 台账无事件（文件缺失或空）' : undefined
-  const runtimeNoData = runtime.events.length === 0 ? 'runtime 台账无事件（文件缺失或空）' : undefined
-  const anchorNoData = (): string | undefined => (noAnchor ? '空台账无锚定时刻' : undefined)
+  const mainNoData = main.events.length === 0 ? 'main 登记清单无事件（文件缺失或空）' : undefined
+  const runtimeNoData = runtime.events.length === 0 ? 'runtime 登记清单无事件（文件缺失或空）' : undefined
+  const anchorNoData = (): string | undefined => (noAnchor ? '空登记清单无锚定时刻' : undefined)
   const at = nowMs ?? 0 // 无锚点时行落 no-data 分支，不消费该值
 
   const row1 = countingRow({
@@ -442,7 +442,7 @@ export function evaluateTriggerConditions(input: EvaluateTriggerConditionsInput 
     noDataReason: anchorNoData() ?? runtimeNoData,
   })
 
-  // #2 全时段出现即触发；inbound-frame-dropped（main 台账）作 D8 哨兵佐证
+  // #2 全时段出现即触发；inbound-frame-dropped（main 登记清单）作 D8 哨兵佐证
   const registryMisses = selectInWindow(runtime.events, isRegistryMiss, nowMs, null)
   const inboundDropped = selectInWindow(main.events, (e) => str(e.event) === 'inbound-frame-dropped', nowMs, null)
   const row2 = buildRegistryMissRow(registryMisses, inboundDropped, noAnchor, runtimeNoData)
@@ -510,7 +510,7 @@ export function evaluateTriggerConditions(input: EvaluateTriggerConditionsInput 
     description: CONDITION_DESCRIPTIONS[COND_RELIEF_REBOUND],
     threshold: '周均 >30%（人工复审判据）',
     status: 'no-data',
-    currentValue: '不可机判——判据需 memory-relief 前后水位对比（60s 采样环内存态不落台账）',
+    currentValue: '不可机判——判据需 memory-relief 前后水位对比（60s 采样环内存态不落登记清单）',
     note: '消费方 = Gate W（u8）人工复审；水位 5min 明细行在 runtime 日志供人工深查（D4 降级代价）',
   }
 
@@ -538,10 +538,10 @@ function buildWatermarkTrendRow(
     `棘轮上行：末≥首×${Math.round(T4_RATCHET_RISE_RATIO * PERCENT_SCALE)}% ` +
     `且无单日回落>${Math.round((1 - T4_NO_DROP_RATIO) * PERCENT_SCALE)}%，有效覆盖≥${T4_MIN_COVERED_DAYS} 天（Gate W 校准前工作定义）`
   if (nowMs === null) {
-    return { ...base, threshold, status: 'no-data', currentValue: '台账无事件', note: '空台账无锚定时刻' }
+    return { ...base, threshold, status: 'no-data', currentValue: '登记清单无事件', note: '空登记清单无锚定时刻' }
   }
   if (runtimeNoData !== undefined) {
-    return { ...base, threshold, status: 'no-data', currentValue: '台账无事件', note: runtimeNoData }
+    return { ...base, threshold, status: 'no-data', currentValue: '登记清单无事件', note: runtimeNoData }
   }
   const samples = wm.map(extractWatermarkSample).sort((a, b) => a.tsMs - b.tsMs)
   const covered = samples.filter((s) => s.coverageFraction === null || s.coverageFraction >= T4_COVERAGE_WEIGHT_MIN)
@@ -610,15 +610,15 @@ function buildRollingRestartRow(
     `滚动重启 >${T8_ROLLING_RESTART_WEEKLY_MAX}/周 ∨ 推迟 >${T8_DEFERRED_MONTHLY_MAX}/月 ∨ ` +
     `forced >${T8_FORCED_MONTHLY_MAX}/月 ∨ defer-limit 占 forced >${T8_DEFER_LIMIT_RATIO_MAX * PERCENT_SCALE}%（分子排除 absent-report）`
   if (nowMs === null) {
-    return { ...base, threshold, status: 'no-data', currentValue: '台账无事件', note: '空台账无锚定时刻' }
+    return { ...base, threshold, status: 'no-data', currentValue: '登记清单无事件', note: '空登记清单无锚定时刻' }
   }
   if (mainEvents.length === 0 && runtimeEvents.length === 0) {
-    return { ...base, threshold, status: 'no-data', currentValue: '台账无事件', note: joinNotes([mainNoData, runtimeNoData]) }
+    return { ...base, threshold, status: 'no-data', currentValue: '登记清单无事件', note: joinNotes([mainNoData, runtimeNoData]) }
   }
-  // rolling-restart 事件族全由 runtime writer 写：runtime 台账缺失时双空判据会漏判
+  // rolling-restart 事件族全由 runtime writer 写：runtime 登记清单缺失时双空判据会漏判
   // （main 非空 → 四子句全 0 判 ok），主数据源缺失必须独立呈现 no-data
   if (runtimeEvents.length === 0 && runtimeNoData !== undefined) {
-    return { ...base, threshold, status: 'no-data', currentValue: 'runtime 台账缺失', note: joinNotes([runtimeNoData, mainNoData]) }
+    return { ...base, threshold, status: 'no-data', currentValue: 'runtime 登记清单缺失', note: joinNotes([runtimeNoData, mainNoData]) }
   }
   const merged = [...mainEvents, ...runtimeEvents]
   const restarts = selectInWindow(merged, isRollingRestart, nowMs, WEEK_MS)
@@ -670,8 +670,8 @@ function buildRegistryMissRow(
       description: CONDITION_DESCRIPTIONS[COND_REGISTRY_MISS],
       threshold: '> 0 次（任何一次即触发）',
       status: 'no-data',
-      currentValue: '台账无事件',
-      note: noAnchor ? '空台账无锚定时刻' : runtimeNoData,
+      currentValue: '登记清单无事件',
+      note: noAnchor ? '空登记清单无锚定时刻' : runtimeNoData,
     }
   }
   return {
@@ -680,9 +680,9 @@ function buildRegistryMissRow(
     threshold: '> 0 次（任何一次即触发）',
     status: registryMisses.length > 0 ? 'tripped' : 'ok',
     currentValue:
-      `${registryMisses.length} 次（台账留存全期，出现即触发）` +
+      `${registryMisses.length} 次（登记清单留存全期，出现即触发）` +
       (inboundDropped.length > 0 ? `；inbound-frame-dropped 佐证 ${inboundDropped.length} 条` : ''),
-    note: inboundDropped.length > 0 ? '入站丢弃 = 出站守卫被绕过的哨兵信号（D8 哨兵语义）' : undefined,
+    note: inboundDropped.length > 0 ? '入站丢弃 = 出站检查被绕过的哨兵信号（D8 哨兵语义）' : undefined,
   }
 }
 
@@ -691,10 +691,10 @@ function buildE2CollateralRow(runtimeEvents: readonly DatedEvent[], nowMs: numbe
   const base = { id: COND_E2_COLLATERAL, description: CONDITION_DESCRIPTIONS[COND_E2_COLLATERAL] }
   const threshold = `≥ ${T16_SAME_SECOND_SESSIONS_MIN} 个不同 session 同秒非计划内 exit（30 天窗口）`
   if (nowMs === null) {
-    return { ...base, threshold, status: 'no-data', currentValue: '台账无事件', note: '空台账无锚定时刻' }
+    return { ...base, threshold, status: 'no-data', currentValue: '登记清单无事件', note: '空登记清单无锚定时刻' }
   }
   if (runtimeNoData !== undefined) {
-    return { ...base, threshold, status: 'no-data', currentValue: '台账无事件', note: runtimeNoData }
+    return { ...base, threshold, status: 'no-data', currentValue: '登记清单无事件', note: runtimeNoData }
   }
   const piCrashes = selectInWindow(runtimeEvents, isPiCrash, nowMs, MONTH_MS)
   const shutdowns = selectInWindow(runtimeEvents, isPlannedShutdown, nowMs, MONTH_MS)

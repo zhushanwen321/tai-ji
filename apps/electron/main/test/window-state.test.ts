@@ -234,7 +234,7 @@ describe('WindowStatePersistence 持久化语义（写路防抖/flush + load 启
     expect(readFileSync(statePath, 'utf-8')).toBe(before)
   })
 
-  it('窗口销毁后防抖 timer 触发 → 不写（destroyed 守卫，closed 后零写入）', () => {
+  it('窗口销毁后防抖 timer 触发 → 不写（destroyed 检查，closed 后零写入）', () => {
     const win = createMockWindow()
     persistence.attach(win)
     win.fire('resize')

@@ -24,11 +24,11 @@ export const SYSTEM_PROMPT_CUSTOM_TYPE = 'taiji:system-prompt'
 /** 行摘要 meta：kind 无关的标量字段包（UI 直接展示；值限标量或标量数组）。 */
 export type TraceRowMeta = Record<string, string | number | boolean | undefined>
 
-/** 台账行（§3.4：一行 = 一个 entry；损坏行/sidecar 终态行也有行）。 */
+/** 条目清单行（§3.4：一行 = 一个 entry；损坏行/sidecar 终态行也有行）。 */
 export interface TraceRow {
   /** 稳定 key：entry id；无 id 行用 `line:N`；损坏行 `malformed:N`；sidecar `sidecar:session_end`。 */
   key: string
-  /** 1-based 台账序号（含损坏行与 sidecar 行，全量连续）。 */
+  /** 1-based 条目清单序号（含损坏行与 sidecar 行，全量连续）。 */
   seq: number
   kind: TraceRowKind
   /** JSONL 行号（1-based；sidecar 行无）。 */
@@ -345,7 +345,7 @@ function summarizeRow(entry: TraceFileEntry | TraceSessionEndMeta, kind: TraceRo
 }
 
 /**
- * JSONL 逐行产物 + sidecar → 台账行数组。
+ * JSONL 逐行产物 + sidecar → 条目清单行数组。
  *
  * 行序 = 文件行序（损坏行占位在原位）；sidecar session_end 追加尾部。
  * inContext/shadowed 语义见 context-boundary；无 id 行（handoff_marker、畸形 entry）无法

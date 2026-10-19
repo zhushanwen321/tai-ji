@@ -40,7 +40,7 @@ export interface AppUpdateLifecycleOptions { // oe-exempt:20260930:test:测试 h
   fakeTimers?: boolean
   /** beforeEach 注入 ipc 七键默认 resolved 值（各用例的 mock* 覆写在其后执行即生效） */
   primeIpc?: boolean
-  /** beforeEach stubGlobal __APP_VERSION__='0.0.0'（版本守卫不拦截，保持用例意图） */
+  /** beforeEach stubGlobal __APP_VERSION__='0.0.0'（版本检查不拦截，保持用例意图） */
   stubAppVersion?: boolean
   /** renderMarkdown 默认解析 html（mockReset 后置入；不传则不触碰桩） */
   markdownHtml?: string
@@ -83,7 +83,7 @@ export function setupAppUpdateLifecycle(options: AppUpdateLifecycleOptions = {})
     }
     if (options.stubAppVersion) {
       // __APP_VERSION__ 是 vite define 注入的全局常量，vitest 下不存在，stub 之。
-      // '0.0.0' 让版本守卫不拦截（< 任何 preloaded 版本），保持用例意图
+      // '0.0.0' 让版本检查不拦截（< 任何 preloaded 版本），保持用例意图
       vi.stubGlobal('__APP_VERSION__', '0.0.0')
     }
     if (options.resetVisibility) setHidden(false)
@@ -157,7 +157,7 @@ export function makeCheckHang(): (v: UpdateCheckResult) => void {
   return (v: UpdateCheckResult) => settle(v)
 }
 
-/** mock document.hidden / visibilityState（visibility 守卫用例；happy-dom 下 spyOn getter 生效） */
+/** mock document.hidden / visibilityState（visibility 检查用例；happy-dom 下 spyOn getter 生效） */
 export function setHidden(hidden: boolean): void {
   vi.spyOn(document, 'hidden', 'get').mockReturnValue(hidden)
   vi.spyOn(document, 'visibilityState', 'get').mockReturnValue(hidden ? 'hidden' : 'visible')

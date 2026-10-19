@@ -6,8 +6,8 @@
  *   提示文案明示「切走再切回」这一唯一恢复动作
  * - 单 session 作用域：tripped 集合不含本 session（或为空）→ 不渲染（其余 session 不连坐）
  *
- * mock 策略：本组件是纯投影消费方（状态源 = core ws-client 终止阀经 useInboundFrameGuard
- * 投影），故 mock 状态源让断言聚焦「渲染契约」；投影逻辑与恢复编排由
+ * mock 策略：本组件是纯派生视图消费方（状态源 = core ws-client 终止阀经 useInboundFrameGuard
+ * 派生视图），故 mock 状态源让断言聚焦「渲染契约」；派生视图逻辑与恢复编排由
  * composables/__tests__/useInboundFrameGuard.test.ts 覆盖。
  *
  * 运行：cd packages/renderer && npx vitest run src/components/ui/__tests__/InboundFrameDroppedNotice.test.ts

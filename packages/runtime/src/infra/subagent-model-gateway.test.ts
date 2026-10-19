@@ -1,7 +1,7 @@
 /**
  * SubagentModelSwitchGateway 生产适配器测试（subagent-model-switch §7.1.1，U6）。
  *
- * 覆盖（三路主轴 + 映射 + 守卫 + handler 集成）：
+ * 覆盖（三路主轴 + 映射 + 检查 + handler 集成）：
  * - 成功：mock client.prompt 回调写 tmp 结果文件 → 应答映射（chat 两型 / run 级聚合）
  *   + 文件读后即删；
  * - 超时：fake timers 推进 + 迟到真值命中按真实结果应答；未命中 reject 通道失败
@@ -21,7 +21,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { WebSocket as WsType } from 'ws'
 import type { ClientMessage, SubagentSetModelAggregateReply, SubagentSetModelMemberFailure, SubagentSetModelMemberState, SubagentSetModelReply } from '@taiji/shared'
 import { SUBAGENT_SET_MODEL_ACCOUNTED_ERROR_CODES, SUBAGENT_SET_MODEL_FAILURE_REASON_CODES } from '@taiji/shared'
-import { ACCOUNTED_SET_MODEL_ERROR_CODES, getSubagentModelSwitchResultsDir } from '@zhushanwen/subagent-core'
+import { ACCOUNTED_SET_MODEL_ERROR_CODES, getSubagentModelSwitchResultsDir, getSubagentRecordsDir, resolvePiWorkflowRunsDir } from '@zhushanwen/subagent-core'
 import type { RunSwitchAggregateResult, RunSwitchMemberFailure, RunSwitchMemberState } from '@zhushanwen/subagent-core'
 import { SET_MODEL_ERROR_CODES } from '@zhushanwen/subagent-engine-sdk'
 
@@ -34,14 +34,12 @@ import type { SubagentHandlerContext } from '../transport/subagent-message-handl
 // ── fixture ──────────────────────────────────────────────────────────────
 
 let root: string
-let agentDir: string
 let sessionCwd: string
 
 beforeEach(() => {
   root = mkdtempSync(join(tmpdir(), 'subagent-model-gw-'))
-  agentDir = join(root, 'agent')
   sessionCwd = join(root, 'proj')
-  mkdirSync(join(agentDir, 'sessions', '--slug--'), { recursive: true })
+  mkdirSync(join(root, 'agent', 'sessions', '--slug--'), { recursive: true })
   mkdirSync(sessionCwd, { recursive: true })
   // 通道机制用例的默认锚：record 事件文件在场 = 目标可解析（解析锚用例单独覆盖缺锚形态）
   seedRecordEvent('sa-1')
@@ -58,7 +56,7 @@ const SESSION_ID = 'main-session-1'
 function scannedSession(): ScannedSessionMeta {
   return {
     id: SESSION_ID,
-    filePath: join(agentDir, 'sessions', '--slug--', `2026-01-01T00-00-00-000Z_${SESSION_ID}.jsonl`),
+    filePath: join(root, 'agent', 'sessions', '--slug--', `2026-01-01T00-00-00-000Z_${SESSION_ID}.jsonl`),
     cwd: sessionCwd,
     timestamp: '2026-01-01T00:00:00.000Z',
     name: null,
@@ -92,7 +90,7 @@ function promptStub(action: 'write-and-resolve' | 'hang' | 'resolve-only' | 'rej
 
 /** 结果文件路径与内容（requestId 由 prompt 载荷承载——与生产 extension 侧同构）。 */
 function resultsDir(): string {
-  return getSubagentModelSwitchResultsDir(agentDir, sessionCwd)
+  return getSubagentModelSwitchResultsDir(SESSION_ID, root)
 }
 
 function writeResultFileFromPayload(promptContent: string, reply: unknown): void {
@@ -110,7 +108,7 @@ function deps(overrides?: Partial<SubagentModelGatewayDeps>): SubagentModelGatew
   return {
     getClient: () => promptStub('resolve-only'),
     scanSessions: () => [scannedSession()],
-    agentDir,
+    dataDir: root,
     ...overrides,
   }
 }
@@ -135,7 +133,7 @@ function setModelParams(recordId?: string, runId?: string): {
  *  真实文件形态 = 首行 record-events 信封（无 rootSessionId）+ 第 2 行 created 帧，
  *  sa-ef73dfb7 实证——读取器按 type 过滤多行扫描，不假设行号）。 */
 function seedRecordEvent(recordId: string, ownerSessionId: string = SESSION_ID): void {
-  const recordsDir = join(agentDir, 'subagents', encodeCwdForTest(sessionCwd), 'records')
+  const recordsDir = getSubagentRecordsDir(ownerSessionId, root)
   mkdirSync(recordsDir, { recursive: true })
   const envelope = { type: 'record-events', id: recordId }
   const created = { type: 'record-created', seq: 1, ts: 1, id: recordId, rootSessionId: ownerSessionId }
@@ -147,8 +145,10 @@ function seedRecordEvent(recordId: string, ownerSessionId: string = SESSION_ID):
 /** run journal 预置（resolveSessionId 定位锚：workflow-state journal 存在性）。
  *  ownerSessionId 提供时写 run-created 首帧（dmg-r2-5 归属锚——rootSessionId 紧跟
  *  runId 的生产字段序）；缺省 = 空文件（旧格式行形态：无归属锚，读侧回落存在性）。 */
-function seedRunJournal(runId: string, ownerSessionId?: string): void {
-  const journalDir = join(dirname(scannedSession().filePath), 'workflow-state')
+function seedRunJournal(runId: string, ownerSessionId: string = SESSION_ID): void {
+  // [session-store-layout-inversion D2/D3] run journal 随 workflow 域换根：
+  // <root>/<ownerSid>/workflow/runs/（分区键 = 归属会话 id）
+  const journalDir = resolvePiWorkflowRunsDir(ownerSessionId, root)
   mkdirSync(journalDir, { recursive: true })
   const created =
     ownerSessionId === undefined
@@ -156,11 +156,6 @@ function seedRunJournal(runId: string, ownerSessionId?: string): void {
       : `${JSON.stringify({ type: 'run-created', seq: 1, ts: 1, runId, rootSessionId: ownerSessionId })}\n`
   writeFileSync(join(journalDir, `${runId}.record.jsonl`), created)
 }
-/** enc 段编码（测试侧镜像 core encodeCwd——布局单源在 path-encoding.ts，此处只造锚）。 */
-function encodeCwdForTest(cwd: string): string {
-  return '--' + cwd.replace(/^[/\\]/, '').replace(/[/\\:]/g, '-') + '--'
-}
-
 // ── 成功路：结果文件映射 + 读后即删 ──────────────────────────────────────
 
 describe('createSubagentModelSwitchGateway — 成功路（写后读 + 映射 + 删除）', () => {
@@ -307,9 +302,9 @@ describe('createSubagentModelSwitchGateway — 通道失败（§7.5 通道行）
   })
 })
 
-// ── 守卫：目标解析 / 会话激活 ────────────────────────────────────────────
+// ── 检查：目标解析 / 会话激活 ────────────────────────────────────────────
 
-describe('createSubagentModelSwitchGateway — 守卫', () => {
+describe('createSubagentModelSwitchGateway — 检查', () => {
   it('目标解析不到（无 journal / events 锚）：subagent_target_not_found', async () => {
     const gw = createSubagentModelSwitchGateway(deps())
     const err = await gw.setModel(setModelParams('sa-ghost')).catch((e: Error & { code?: string }) => e)
@@ -331,15 +326,24 @@ describe('createSubagentModelSwitchGateway — 守卫', () => {
     expect(gw.resolveSessionId({})).toBeUndefined()
   })
 
-  it('resolveSessionId：共享 cwd 多会话时按 rootSessionId 归属判定，不误路由首个会话（D3-A4 回归）', () => {
+  it('resolveSessionId：多会话扫描序下只命中 events 所在会话树（rootSessionId 锚校验；D3-A4 语义在新布局的形态）', () => {
+    // [session-store-layout-inversion D2] records 目录按会话 id 分区后，「同 cwd 多会话
+    // 共享目录」不复存在；归属判定守卫的现存职责 = 首个会话树内无该 events 时不因
+    // 扫描首序误命中 + 命中会话的 created 帧 rootSessionId 精确归属（D3-A4 回归的
+    // 新布局形态）。
     const OTHER_ID = 'main-session-2'
     const other = { ...scannedSession(), id: OTHER_ID, lastModified: 1 }
-    seedRecordEvent('sa-1', OTHER_ID)
+    // beforeEach 已种 sa-1@main-1——本用例用独立 recordId，只种 OTHER_ID 树：
+    // main-1 树内无该 events → 即便扫描首序在前也不命中；归属 = main-2。
+    seedRecordEvent('sa-owned-by-other', OTHER_ID)
     const gw = createSubagentModelSwitchGateway(
       deps({ scanSessions: () => [scannedSession(), other as ScannedSessionMeta] }),
     )
-    // events 文件在共享 recordsDir 下对两个会话都「存在」——归属必须命中 rootSessionId 所有权，非首序
-    expect(gw.resolveSessionId({ recordId: 'sa-1' })).toBe(OTHER_ID)
+    expect(gw.resolveSessionId({ recordId: 'sa-owned-by-other' })).toBe(OTHER_ID)
+    // 反向：另一 record 种在 main-1 树（created 锚帧 rootSessionId=main-1）——
+    // 目录存在性命中 main-1 且锚等 → 归属 main-1（不误路由 OTHER）。
+    seedRecordEvent('sa-owned-by-first', SESSION_ID)
+    expect(gw.resolveSessionId({ recordId: 'sa-owned-by-first' })).toBe(SESSION_ID)
   })
 
   it('resolveSessionId：runId 按 workflow-state journal 存在性命中', () => {
@@ -371,14 +375,16 @@ describe('createSubagentModelSwitchGateway — 守卫', () => {
     expect(gw.resolveSessionId({ runId: 'wf-legacy' })).toBe(SESSION_ID)
   })
 
-  it('resolveSessionId：大 scriptSource 帧（远超 4KB 读窗）行尾补读后锚可解析——弱锚放行不因截断复存（dmg-r3-1 回归）', () => {
+  it('resolveSessionId：大 scriptSource 帧（远超 4KB 读窗）行尾补读后锚可解析——精确锚命中，不因扫描首序误判（dmg-r3-1 回归的新布局形态）', () => {
     // 生产字段序 = dispatchRunCreated 字面量序（type → runId → rootSessionId → … →
-    // scriptSource 巨大载荷在锚尾部）。双会话 fixture：截断若使锚不可读，读取器
-    // 返回 undefined → runId 侧弱锚放行 scan 序首个会话（main-session-1）——断言
-    // second（rootSessionId 所有权）使「弱锚放行」与「精确锚命中」可区分。
+    // scriptSource 巨大载荷在锚尾部）。[session-store-layout-inversion D2/D3] runs
+    // 目录按会话 id 分区后，journal 落归属会话树（锚帧 rootSessionId 与所在树一致
+    // 是写入方不变量）；「弱锚放行」场景保留在下方空文件用例（旧格式行回落存在性）。
+    // 双会话 fixture：main-1 树内无该 journal → 即便扫描首序在前也不命中；截断若使
+    // 锚不可读则连 OTHER 也不命中（undefined）——与「精确锚命中 OTHER」可区分。
     const OTHER_ID = 'main-session-2'
     const other = { ...scannedSession(), id: OTHER_ID, lastModified: 1 }
-    const journalDir = join(dirname(scannedSession().filePath), 'workflow-state')
+    const journalDir = resolvePiWorkflowRunsDir(OTHER_ID, root)
     mkdirSync(journalDir, { recursive: true })
     const bigScript = 'x'.repeat(64 * 1024)
     const frame = JSON.stringify({
@@ -403,7 +409,9 @@ describe('createSubagentModelSwitchGateway — 守卫', () => {
     // 与「精确锚命中」可区分。
     const OTHER_ID = 'main-session-2'
     const other = { ...scannedSession(), id: OTHER_ID, lastModified: 1 }
-    const recordsDir = join(agentDir, 'subagents', encodeCwdForTest(sessionCwd), 'records')
+    // events 落 OTHER_ID 树（created 帧 rootSessionId=OTHER_ID——目录分区键与锚帧
+    // 归属一致，新布局 D2：record 只在归属会话的树内被找到）
+    const recordsDir = getSubagentRecordsDir(OTHER_ID, root)
     mkdirSync(recordsDir, { recursive: true })
     const bigTask = 'y'.repeat(64 * 1024)
     const envelope = { type: 'record-events', id: 'sa-big-task' }
@@ -434,7 +442,7 @@ describe('createSubagentModelSwitchGateway — 守卫', () => {
     // 文件 > 4KB 且末行无行尾 = 半写行形态：补读至 EOF 无行尾 → 无锚。runId 侧
     // 回落目录存在性放行首个会话（与旧格式行同语义），差别 = console.warn 留痕——
     // 锚失败从静默变为可诊断。
-    const journalDir = join(dirname(scannedSession().filePath), 'workflow-state')
+    const journalDir = resolvePiWorkflowRunsDir(SESSION_ID, root)
     mkdirSync(journalDir, { recursive: true })
     const head = JSON.stringify({ type: 'run-created', seq: 1, ts: 1, runId: 'wf-half-written', rootSessionId: SESSION_ID })
     const partial = `${head}${'x'.repeat(5 * 1024)}`
@@ -480,14 +488,14 @@ describe('SubagentMessageHandler ← 生产网关注入（组合根形态）', (
 // ── core ↔ shared 聚合应答形状类型级对账（[F1-21]）─────────────────────────
 //
 // 防线背景：protocol.ts「两处漂移由 U1 接线测试对账」的落点即此处——core
-// RunSwitch*（形状 SSOT）与 shared protocol SubagentSetModel*（wire 投影）是两份
+// RunSwitch*（形状 SSOT）与 shared protocol SubagentSetModel*（wire 派生视图）是两份
 // 独立声明（shared 不依赖 subagent-core，物理单源不可行），core 改形而无本对账时
 // gateway 的 unknown→as 盲 cast 零编译红、wire 载荷静默漂移（击穿设计 §7.1
 // 「聚合三组件恒保留」硬不变量）。断言形态 = 双向 extends 编译锁（字段类型漂移
 // 即红）+ keyof 双向差集锁（字段改名/删除/新增即红——含可选字段：可选属性缺席
 // 不破坏结构可赋值，双向 extends 对可选字段改名不红，缺口由差集在 keyof 层显形）
 // + 错误码词表值级对账：reason 联合为开放值域（已知三型 ∪ 词表外透传码）后，
-// 「词表 ⊆ wire reason 联合」不再具备编译级守卫力，词表同步改由
+// 「词表 ⊆ wire reason 联合」不再具备编译级检查力，词表同步改由
 // SUBAGENT_SET_MODEL_FAILURE_REASON_CODES 值级断言锚定（扩位漏跟即红）。
 // 已知逃逸面（[F3-2]）：嵌套可选字段单侧扩位 MutuallyAssignable/SameKeys 均不抓
 // （SameKeys 只比顶层键集，嵌套对象内部的可选扩位两侧互赋值仍成立），由 U1 接线
@@ -518,7 +526,7 @@ describe('core ↔ shared setModel 聚合应答形状对账（协议契约不变
   it('RunSwitchMemberFailure ≡ SubagentSetModelMemberFailure 且 SET_MODEL_ERROR_CODES ⊆ wire reason 联合', () => {
     const shape: MutuallyAssignable<RunSwitchMemberFailure, SubagentSetModelMemberFailure> = true
     expect(shape).toBe(true)
-    // reason 两侧均为开放值域（已知三型 ∪ 透传码），⊆ 方向不再具备编译级守卫力；
+    // reason 两侧均为开放值域（已知三型 ∪ 透传码），⊆ 方向不再具备编译级检查力；
     // 词表同步对账由下方 SUBAGENT_SET_MODEL_FAILURE_REASON_CODES 值级锚承接。本断言
     // 保留为「词表成员逐个可赋 reason 联合」的形态记录。
     const reasonValues: SubagentSetModelMemberFailure['reason'][] = [...SET_MODEL_ERROR_CODES]
@@ -528,7 +536,7 @@ describe('core ↔ shared setModel 聚合应答形状对账（协议契约不变
   it('SET_MODEL_ERROR_CODES ≡ shared SUBAGENT_SET_MODEL_FAILURE_REASON_CODES（reason 已知字面词表值级对账——SDK 扩位 shared 漏跟即红）', () => {
     // reason 已知字面子集的机器锚（shared protocol.ts / core assembly/types.ts 注释同指
     // 本处）：开放联合放行透传码后，两侧「已知三型」的同步靠本值级断言——SDK 词表
-    // 扩位而 shared 已知子集漏跟时（自动补全/文档面漂移），此处红（ACCOUNTED 词表
+    // 扩位而 shared 已知子集漏跟时（自动补全/文档侧漂移），此处红（ACCOUNTED 词表
     // 对账同款形态）。
     expect([...SET_MODEL_ERROR_CODES]).toEqual([...SUBAGENT_SET_MODEL_FAILURE_REASON_CODES])
     expect(SET_MODEL_ERROR_CODES).toHaveLength(SUBAGENT_SET_MODEL_FAILURE_REASON_CODES.length)
@@ -546,7 +554,7 @@ describe('core ↔ shared setModel 聚合应答形状对账（协议契约不变
 
   it('core 处置表「写记账后回错误」分型 ≡ shared SUBAGENT_SET_MODEL_ACCOUNTED_ERROR_CODES（词表值级对账——core 扩码 shared 漏跟即红）', () => {
     // 词表登记注释的机器锚（shared protocol.ts / core model-switch.ts 双侧注释同指本处）：
-    // badge 亮灯词表必须与 core 处置表写面分型逐值一致——core 新增记账型错误码而 shared
+    // badge 亮灯词表必须与 core 处置表写侧分型逐值一致——core 新增记账型错误码而 shared
     // 漏跟时，前端对新增分型静默不亮 badge（同族 SET_MODEL_ERROR_CODES ⊆ wire reason
     // 断言的姊妹锚）。
     expect([...ACCOUNTED_SET_MODEL_ERROR_CODES]).toEqual([...SUBAGENT_SET_MODEL_ACCOUNTED_ERROR_CODES])

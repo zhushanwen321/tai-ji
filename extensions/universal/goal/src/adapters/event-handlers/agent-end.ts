@@ -1,10 +1,10 @@
 /**
- * 事件 6: agent_end（FR-8.7 + ESC 守卫 + 并发保护）。
+ * 事件 6: agent_end（FR-8.7 + ESC 检查 + 并发保护）。
  *
  * 关键约定：
  * - FR-8.2 G-021 防重入：session.isProcessing 入口加锁，finally 释放
  * - FR-8.2 G-020 stale 快照：入口 makeStaleChecker snapshot goalId，每个副作用前 checkStale
- * - FR-6.7 ESC 守卫（最关键）：ctx.signal?.aborted → 不发 continuation、不做 budget 检查、
+ * - FR-6.7 ESC 检查（最关键）：ctx.signal?.aborted → 不发 continuation、不做 budget 检查、
  *   不做任何状态变更，goal 保持 active，等用户下次输入恢复
  *
  * #8 后流程：budget 预警/steering → continuation 去抖 + 轮次活性熔断（W5：
@@ -15,7 +15,7 @@
  * 全解耦：不再做 allTasksDone followUp（原依赖 pi.__todoGetList，跨 ext 失效）。
  * todo 是否全完成由 AI 自行判断（prompt 软建议）。
  *
- * ESC 路径：aborted 时直接 return（goal 保持 active）。注意 ESC 守卫在终态/非 active
+ * ESC 路径：aborted 时直接 return（goal 保持 active）。注意 ESC 检查在终态/非 active
  * 检查之后——终态 goal 仍走终态 notify（不被 ESC 影响），非 active 状态直接返回。
  */
 
@@ -63,7 +63,7 @@ export async function handleAgentEnd(
 		}
 		if (!isActiveStatus(session.state.status)) return;
 
-		// FR-6.7 ESC 守卫（最关键）：aborted 时 goal 保持 active，不做任何副作用
+		// FR-6.7 ESC 检查（最关键）：aborted 时 goal 保持 active，不做任何副作用
 		if (ctx.signal?.aborted) {
 			return;
 		}
@@ -152,7 +152,7 @@ async function handleBudgetChecks(
  * - W5 主判据：continuation 连发总次数封顶（默认 50，PI_GOAL_CONTINUATION_CAP）——
  *   封顶必停发 + notify 用户 + goal 保持 active（不擅自终态）。与「是否调工具」
  *   正交：计数只在 deliverContinuation 实发时 +1，绝不被工具调用清零
- *   （2026-09-08 事故：pending 守卫击穿后 64 分钟 ~320 turn 空转，无任何熔断）。
+ *   （2026-09-08 事故：pending 检查击穿后 64 分钟 ~320 turn 空转，无任何熔断）。
  * - W5 辅判据：连续 N 轮（默认 5）无工具调用且 tokenDelta 低于阈值 → continuation
  *   延迟 base×2^level 发出（间隔 ×2 递增）；真实进展清零退避计数（不动总次数）。
  * - W5 defer 通知去重：pending 集合不变的连续 defer 轮不重复 notify。
@@ -188,7 +188,7 @@ async function handleContinuation(
 		isProgressSignal(toolDelta, tokenDelta, cfg),
 	);
 
-	// pending 守卫：有活跃 background subagent/workflow 时不发 continuation。
+	// pending 检查：有活跃 background subagent/workflow 时不发 continuation。
 	// 靠 subagent/workflow 完成时 sendMessage({triggerTurn:true}，缺省 deliverAs 即 steer) 自然唤醒主 agent；
 	// goal 抢先催会与异步任务完成通知叠加，形成“停不下来”的死循环——continuation 排入
 	// _followUpMessages 队列 → _handlePostAgentRun 的 hasQueuedMessages() 返回 true → agent.continue()
@@ -196,8 +196,8 @@ async function handleContinuation(
 	// 刻意不校验 expiresAt：长任务 subagent（>1h TTL）完成时仍 triggerTurn 唤醒主 agent，
 	// 按 TTL 判非活跃会让死循环在长任务场景复现。
 	// [W4 读侧过滤①消费口] 传当前 session 基准：fork 继承的父级注册残留不进差集
-	// （守卫不幻 defer）；设计 D4「读侧过滤一刀」在本消费口的落地（W6 探针实测
-	// registry-fork-filter.test.ts 证不传则虚增，A9② 验收口径）。
+	// （检查不幻 defer）；设计 D4「读侧过滤一刀」在本消费口的落地（W6 探针实测
+	// registry-fork-filter.test.ts 证不传则虚增，A9② 验收标准）。
 	const pendingOps = countActiveFromEntries(entries, {
 		currentSessionId: ctx.sessionManager.getSessionId(),
 	});
@@ -239,7 +239,7 @@ async function handleContinuation(
 		// 空 turn：已 persist，不发 continuation
 		return;
 	}
-	// 终态守卫：persistAndUpdate 可能把 goal 转为 budget_limited 终态。
+	// 终态检查：persistAndUpdate 可能把 goal 转为 budget_limited 终态。
 	// 此时不应发 continuation（deliverAs:"followUp" 会触发新 turn，让已耗尽预算的 agent 再跑一轮）。
 	if (isTerminalStatus(state.status)) return;
 
@@ -319,11 +319,11 @@ async function handleContinuation(
 }
 
 /**
- * 退避 timer 到期后的发射前守卫 + 实发（延迟期间状态可能已变）：
+ * 退避 timer 到期后的发射前检查 + 实发（延迟期间状态可能已变）：
  * - goal 未被覆盖/清除（goalId 比对）、仍 active
- * - MF-6① idle 守卫：ctx.signal 为实时求值（pi-agent-core agent.js get signal 返回
+ * - MF-6① idle 检查：ctx.signal 为实时求值（pi-agent-core agent.js get signal 返回
  *   activeRun?.abortController.signal），agent idle 后恒 undefined，`signal?.aborted`
- *   恒放行、不可作守卫；改用 ctx.isIdle()（SDK types.d.ts L232）——延迟窗内有活动
+ *   恒放行、不可作检查；改用 ctx.isIdle()（SDK types.d.ts L232）——延迟窗内有活动
  *   turn 时不发，该轮 agent_end 会按最新状态重新决策
  * - 未封顶、无活跃 pending（等待期新出现的后台任务由其完成通知唤醒，goal 不抢先催）
  */

@@ -2,7 +2,8 @@
  * Workflow Extension — workflow 域通知生产
  *
  * notifyDone(pi, runId, run, notified) — run 完成时发 completion notification
- * （[u9 账本化] 经 core NotifyLedger 四步生命周期，C-ext-19；未 bind 降级直发）。
+ * （unified-delivery 波 2：经 pi 半区投递端口 port.deliver，C-ext-19 语义由 port
+ * 投递日志 + notifyId 幂等 + 差集重放承接；port 缺席降级直发）。
  *
  * [D7 载荷扩展] 终局必达通知的不变量面：成功含结果摘要与产物指针、失败含
  * errorCode 与证据指针、取消亦通知——载荷 outcome/errorCode/resultSummary/
@@ -10,30 +11,20 @@
  *
  * 层归属：workflow 域（与 workflow-events.ts 同层；唯一生产消费方 =
  * workflow-events.ts。原名 interface/helpers.ts，2026-09-24 名实归位——内容自始
- * 是通知生产而非 interface 注册面杂项）。
- *
- * 事件注册面：setupNotifyLedgerCompactionGuard（pi compaction 事件的 ledger
- * 补写守卫——notify 账本的家内事务，随跨域 handler 迁出从 workflow-events.ts
- * 装配 seam 原样搬入；注册时点仍由 setupWorkflowDomain 在原位调用）。
+ * 是通知生产而非 interface 注册点杂项）。
  */
 
 import { join } from "node:path";
 
-import type {
-  ExtensionAPI,
-  ExtensionContext,
-  SessionCompactEvent,
-} from "@earendil-works/pi-coding-agent";
+import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { guardStaleCtx, toErrorMessage } from "@zhushanwen/pi-ext-guards";
 import { getLogger } from "@zhushanwen/pi-extension-logger";
+import { getDeliveryPort } from "@zhushanwen/pi-delivery-port";
 
 // bounded JSON pretty 序列化（IF13/#19，TC5/ES5）已下沉 core shared
 // （u-core-atomic 逐字平移，输出与原本地实现字节一致；本地实现已删）。
-// getBoundNotifyLedger：core 通知账本消费入口（bindNotifyLedgerHost 在
-// session-lifecycle.ts session_start 装配；未 bind 时降级直发，见 notifyDone 注释）。
 import {
   boundedPrettySerialize,
-  getBoundNotifyLedger,
   isTerminalDoneReason,
   RUN_EVENTS_SUFFIX,
   type RunOutcome,
@@ -68,15 +59,15 @@ function runEventsJournalPath(artifactsDir: string, runId: string): string {
 }
 
 /**
- * notifyDone 账本幂等键前缀（u9 账本化，对齐 C-ext-19）。键形态
- * `wf-done:<runId>`——一个 run 的收口通知只投递一次（写账 → courier 边沿投递 →
- * 回执销账 → 断连/重启经账本重放，幂等键去重不双投递）。前缀惯例承接 collect
- * 时代 `sync-batch:` 的「通道语义前缀 + 天然唯一标识」形态；导出供测试构造
- * 回执 entry 与账本断言复用同键。
+ * notifyDone 幂等键前缀（[u9] 承袭，对齐 C-ext-19）。键形态
+ * `wf-done:<runId>`——一个 run 的收尾通知只投递一次（port.deliver 受理 →
+ * details-id 回执逐条处理完毕（关闭） → 断连/重启经投递日志 session_start 差集重放，幂等键去重
+ * 不双投递）。前缀惯例承接 collect 时代 `sync-batch:` 的「通道语义前缀 + 天然
+ * 唯一标识」形态；导出供测试构造回执 entry 与投递日志断言复用同键。
  */
 export const WORKFLOW_DONE_NOTIFY_ID_PREFIX = "wf-done:";
 
-// workflow 收口通知的送达 customType 经 extension-protocol 单源
+// workflow 收尾通知的送达 customType 经 extension-protocol 单源
 // （WORKFLOW_RESULT_CUSTOM_TYPE，与 shared/runtime/core 消费侧同源）：runtime
 // event-interpreter 按该类型识别 run 完成并驱动 W18 workflow-record 失效信号
 // （session.workflows 增量广播），taiji 完成通知 display 覆写 SSOT
@@ -111,15 +102,15 @@ interface WorkflowNotifyDetails { // oe-exempt:20260929:framework:workflow/recor
   reason: string | undefined;
   traceLength: number;
   /**
-   * [u9] 账本幂等键（`wf-done:<runId>`）——回执匹配键（ledger checkReceipts 扫
-   * 送达 custom_message entry 的 details.notifyId 判定销账）。携带在 details 不进
+   * [u9] 幂等键（`wf-done:<runId>`）——回执匹配键（port 投递日志扫
+   * 送达 custom_message entry 的 details.notifyId 判定为已关闭）。携带在 details 不进
    * 文案（G4 字节锁定不受影响）。
    */
   notifyId: string;
   /**
    * [D7] 终局 outcome 三态（completed/failed/cancelled）——脚本层失败
    * （review-failure = outcome:completed + 脚本返回失败结论）与 run 自身怎么死的
-   * （outcome:failed）在通知面可区分（D5 终态双维度语义）。
+   * （outcome:failed）在通知侧可区分（D5 终态双维度语义）。
    */
   outcome: RunOutcome;
   /**
@@ -134,13 +125,13 @@ interface WorkflowNotifyDetails { // oe-exempt:20260929:framework:workflow/recor
   resultSummary?: string;
   /**
    * [D7] 产物目录指针：run 持久化产物所在目录绝对路径
-   * （`<sessionDir>/workflow-state`——journal/manifest/.state 同目录；调用方经
+   * （`<root>/<rootSid>/workflow/runs/`——journal/manifest 同目录；调用方经
    * onRunDone 桥注入，旧调用缺省 undefined）。
    */
   artifactsDir?: string;
   /**
    * [D7] 事件 journal 指针（`<artifactsDir>/wf-<runId>.record.jsonl`）——终局
-   * 证据的入口载荷（D5-3 诊断引用落账的消费面）。
+   * 证据的入口载荷（D5-3 诊断引用写入 journal 记录的消费方）。
    */
   eventsJournalPath?: string;
 }
@@ -148,30 +139,25 @@ interface WorkflowNotifyDetails { // oe-exempt:20260929:framework:workflow/recor
 /**
  * workflow 到达 done 终态时发送完成通知。
  *
- * [u9 账本化] 结果语义通知接 core NotifyLedger 四步生命周期（C-ext-19：持久账本 +
- * notifyId 幂等，替代裸 steer fire-once——relay 瞬断不再丢通知）：
- *   ① 写账：ledger.record(`wf-done:<runId>`) 落盘（幂等键去重，同 run 跨重启
- *      不双投递）→ ② courier 边沿投递（settled 边沿 + isIdle 二次复查 + 120s
- *      看门狗，送达 customType 保持 "workflow-result"）→ ③ 回执销账 → ④ 断连/
- *      重启经 recoverFromSession at-least-once 重放（机制见 notify-ledger.ts）。
- * 账本未装配时（旧宿主 / 无 ledger 测试）降级为 fire-once 直发（at-most-once，
- * 对齐 notifier 内核降级路径；triggerTurn 单通道，deliverAs 已删——u9 偏差裁决，
- * D7 账本化配套）。
+ * [unified-delivery 波 2] 结果语义通知经 pi 半区投递端口 port.deliver（C-ext-19
+ * 语义由 port 内包：受理前落投递日志 + notifyId 幂等键 + details-id 送达凭据 +
+ * session_start 差集重放——relay 瞬断/断连重启不再丢通知；送达 customType 保持
+ * "workflow-result"，W18 workflow-record 失效信号前提）。port 缺席时（装配异常
+ * 窗口，生产不可达常态）降级为 fire-once 直发（at-most-once；triggerTurn 单通道）。
  *
  * **内存去重**：notifiedRunIds Set 由调用方（factory/extension instance）持有，
- * 同 runId 的重复收口回调拦截（跨 session_shutdown 等边界防重复）；标记在写账成功
- * （或账本幂等拒绝）后落下。**已知丢失面（如实登记）**：record 抛（reload 窗口
- * appendEntry assertActive 等）= 账本 entry 未写，而 notifyDone 的唯一调用点
- * onRunDone 每终态恰好一次、recoverFromSession 无源可重放——该终局通知**永久丢失**，
- * 仅 error 日志留痕（含 notifyId/content 摘要，供事后手工补偿）；根治需 pending-retry
- * 结构（设计变更，本轮不建，见加固审查报告）。持久层幂等由账本 notifyId 承接
- * （内存窗口挤出 / 重启后的重复仍被 record 拒绝）。
+ * 同 runId 的重复收尾回调拦截（跨 session_shutdown 等边界防重复）；标记在 port
+ * 受理（accepted/swallowed）后落下。**已知丢失情形（如实登记）**：port rejected
+ * （persist-failed 等）= 受理未发生、投递日志未落，而 notifyDone 的唯一调用点
+ * onRunDone 每终态恰好一次、port 差集重放无源可读——该终局通知**永久丢失**，仅
+ * error 日志留痕（含 notifyId/content 摘要，供事后手工补偿）。持久层幂等由
+ * notifyId 幂等键承接（内存窗口挤出 / 重启后的重复仍被 port 判重吞）。
  *
  * @param pi ExtensionAPI（仅降级路径直发用）
  * @param runId run 标识
  * @param run WorkflowRun 聚合根（读 spec.scriptName + trace + scriptResult；status/reason/outcome 载荷源 = 终局记录 settlement——[W2/V1 D1 第 7 行] 换源，不读两态机字段）
  * @param notifiedRunIds 去重 Set（调用方持有，scope 到 factory 实例）
- * @param artifactsDir [D7] 产物目录指针（`<sessionDir>/workflow-state`，onRunDone
+ * @param artifactsDir [D7] 产物目录指针（`<root>/<rootSid>/workflow/runs/`，onRunDone
  *   桥注入；缺省 undefined = 旧调用兼容，载荷与文案指针段双双省略）
  */
 /**
@@ -289,8 +275,10 @@ function buildDoneNotifyDetails(
 }
 
 /**
- * notifyDone 投递面：账本在 → 四步生命周期（写账 / courier 投递 / 销账 / 重放）；
- * 账本未装配 → fire-once 直发降级（stale ctx 静默）。见 notifyDone 主注释。
+ * notifyDone 投递侧：pi 半区投递端口 port.deliver 主投（受理前落投递日志 +
+ * details-id 送达凭据 + notifyId 幂等 + session_start 差集重放，端口侧内包；
+ * workflow-result 外部通道逐条不合批——port 批组隔离原生承载）；port 缺席（装配
+ * 异常窗口）→ fire-once 直发降级（stale ctx 静默）。见 notifyDone 主注释。
  */
 function deliverDoneNotify(
   pi: ExtensionAPI,
@@ -299,55 +287,59 @@ function deliverDoneNotify(
   content: string,
   details: WorkflowNotifyDetails,
 ): void {
-  const ledger = getBoundNotifyLedger();
-  if (ledger) {
-    // [u9 账本化] ledger 在 → ①写账（record false = 同幂等键已在账/已销账——内存
-    // 去重窗口挤出或重启恢复后的重复收口，跳过投递）→ ②attemptDeliver（courier
-    // 边沿 + isIdle 二次复查，③销账 ④重放在 ledger 内；送达通道经
-    // deliveryCustomType 保持 "workflow-result"）。
-    // 内存去重标记在写账**成功后**才落下。**已知丢失面（如实登记）**：record 抛
-    // （reload 窗口 appendEntry 命中 assertActive 等）= 账本 entry 未写——onRunDone
-    // 每终态恰好一次（无重复收口可重试）、账本无 entry 则 recoverFromSession 无源
-    // 可重放，该终局通知**永久丢失**；不提前标记只是给进程内的假想重复收口留重试
-    // 通道（防御形态，不改变丢失事实）。留痕与根治面见下方 catch 注释。
-    // stale ctx 防御由装配层 sendDelivery 内置（session-lifecycle.ts
-    // bindLedgerHostAndRecover），此处无需重复包裹。
-    let recorded: boolean;
-    try {
-      recorded = ledger.record(details.notifyId, content, details, {
-        deliveryCustomType: WORKFLOW_RESULT_CUSTOM_TYPE,
-      });
-    } catch (err) {
-      // 写账抛错 = 该终局通知丢失（账面 entry 未写，无重放源）。error 级留痕含
-      // notifyId 与 content 摘要，供事后按 run 手工补偿（从 run journal/manifest
-      // 读取终态）。根治需 pending-retry 结构（设计变更，本轮不建，见加固审查报告）；
-      // 原样上抛保持 finalizeRun 围栏的既有接住链路。
+  const port = getDeliveryPort();
+  if (port) {
+    const result = port.deliver(
+      {
+        payload: {
+          kind: "custom",
+          customType: WORKFLOW_RESULT_CUSTOM_TYPE,
+          content,
+          display: true,
+          details,
+        },
+        id: details.notifyId,
+      },
+      // collectKey 债权申报（result-collect 设计 §3.4）：workflow 域键 = runId
+      // （collect 以 runId 命中收取，§3.3 申报形态）。
+      { collectKey: [runId] },
+    );
+    if (result.kind === "rejected") {
+      // 已知丢失情形（如实登记，承原账本 record 抛错同形态）：rejected = 未受理
+      // （persist-failed 等，幂等键未登记）、notifyDone 每终态恰好一次（无重复收尾
+      // 可重试）、port 重放无源可读（账未落）——该终局通知**永久丢失**，error 级
+      // 留痕含 notifyId 与 content 摘要，供事后按 run 手工补偿（从 run
+      // journal/manifest 读取终态）。deliver 同步返回结果无抛错通道（原 record 抛错
+      // 上抛 finalizeRun 围栏的链路随账本退役消失），丢失可见性 = 本 error 留痕。
       logger.error(
-        "workflow completion notice ledger record failed — this terminal notification is LOST (no ledger entry, no replay source); compensate manually from run artifacts",
+        "workflow completion notice delivery rejected — this terminal notification is LOST (no journal record, no replay source); compensate manually from run artifacts",
         {
           runId,
           notifyId: details.notifyId,
           contentPreview: content.slice(0, RECORD_FAIL_CONTENT_PREVIEW_LENGTH),
-          reason: toErrorMessage(err),
+          reason: result.reason,
         },
       );
-      throw err;
+      // 去重不标记：进程内的重复收尾回调不被去重阻断（防御形态，不改变丢失事实）。
+      return;
     }
     trackNotifiedRunId(notifiedRunIds, runId);
-    if (recorded) ledger.attemptDeliver();
     return;
   }
 
-  // 降级：ledger 未装配（旧宿主 / 无账本测试）→ fire-once 直发（at-most-once）。
-  // triggerTurn 单通道（deliverAs 已删——u9 偏差裁决，D7 账本化配套：busy 场景的
-  // 投递时机治理本就由账本路径承担，降级路径不再依赖 pi 内存队列的 steer 形态）；stale ctx 防御
-  // （crash-resilience D1 / ext-guards 审计 §7 blockers#1 收口）：session 替换窗口
-  // 触碰 stale pi 命中 assertActive（PS-30）即无人接 rejection 崩 pi（E1 同机制）。
-  // stale 静默降级（完成通知不投递，用户可从 session 历史 / 工具结果看到 workflow
-  // 结果，判定见 stale-ctx-audit.md §4），非 stale 错误原样上抛（守卫不吞真实 bug）。
-  // 去重标记在实际发送**之后**落下：非 stale 瞬态发送失败（同步抛错上抛）后进程内
-  // 仍可重试（去重不阻断）；stale 分支由 onStale 补标记保持现语义——stale = 通知对
-  // 旧 session 已无意义，不重试。
+  // 降级：port 缺席（base-tool-enhance session_start 装配异常 / 版本混装窗口——
+  // 生产不可达常态，warn 即修复信号）→ fire-once 直发（at-most-once）。
+  // triggerTurn 单通道；stale ctx 防御（crash-resilience D1 / ext-guards 审计
+  // §7 blockers#1 收尾）：session 替换窗口触碰 stale pi 命中 assertActive（PS-30）
+  // 即无人接 rejection 崩 pi（E1 同机制）。stale 静默降级（完成通知不投递，用户可从
+  // session 历史 / 工具结果看到 workflow 结果，判定见 stale-ctx-audit.md §4），非
+  // stale 错误原样上抛（检查不吞真实 bug）。去重标记在实际发送**之后**落下：非
+  // stale 瞬态发送失败（同步抛错上抛）后进程内仍可重试（去重不阻断）；stale 分支由
+  // onStale 补标记保持现语义——stale = 通知对旧 session 已无意义，不重试。
+  logger.warn(
+    "delivery port not bound - workflow completion notice falls back to direct-send (at-most-once; check base-tool-enhance session_start bindDeliveryPort wiring)",
+    { runId, notifyId: details.notifyId },
+  );
   guardStaleCtx(
     () => {
       const sent = pi.sendMessage(
@@ -399,15 +391,16 @@ export function notifyDone(
  * - 幂等 add：Set.add 对已存在元素不改变其迭代位置（重复 track 同一 id，
  *   其「最旧」地位不变）。
  * - FIFO 有界：Set 迭代序=插入序，超 cap 时删迭代器首元素=最旧。
- *   被挤出窗口的旧 id 再经 notifyDone：内存层放行后由账本 notifyId 幂等兜底
- *   （[u9] record 同键拒绝——生产环境账本已 bind 时不会重发；无账本降级环境
+ *   被挤出窗口的旧 id 再经 notifyDone：内存层放行后由投递日志 notifyId 幂等兜底
+ *   （[u9] port 按 id 判重——生产环境 port 已装配时不会重发；port 缺席降级环境
  *   才会重新直发，runId 全局唯一，旧 id 重现概率为零，该边界由 W3TC12 单测
- *   在降级形态下钉死）。
+ *   在降级形态下固定）。
  *
- * 调用点：notifyDone 内部（写账成功/false 后 + 降级直发受理后）+ workflow-events
- * onRunDone 回调（notifyDone 之后，幂等二次添加）。notifyDone 抛出（reload 窗口
- * record 抛 / 非 stale 发送失败等）时内外都不标记——进程内的重复收口回调不被去重
- * 阻断（防御形态；账本路径抛错的已知丢失面登记见 notifyDone 注释）。
+ * 调用点：notifyDone 内部（port 受理后 + 降级直发受理/stale 后）+ workflow-events
+ * onRunDone 回调（notifyDone 之后，幂等二次添加）。port.deliver rejected 不抛错也
+ * 不标记（notifyDone 内 error 留痕后直接返回）。notifyDone 抛出（非 stale 发送失败等）
+ * 时内外都不标记——进程内的重复收尾回调不被去重阻断（防御形态；port.deliver
+ * rejected 的已知丢失情形登记见 notifyDone 注释）。
  *
  * @param notifiedRunIds 去重 Set（调用方持有，scope 到 factory 实例）
  * @param runId run 标识
@@ -424,34 +417,4 @@ export function trackNotifiedRunId(
     if (oldest === undefined) break;
     notifiedRunIds.delete(oldest);
   }
-}
-
-// ── notify 域事件注册（跨域 handler 迁入） ────────────────────────────────────
-
-/**
- * compaction 后 notify ledger 补写守卫（注册 pi 的 session compaction 事件）。
- *
- * [U2 P-B4 降级] compaction 对 custom entry 保留行为实装未验证——检测 ledger/ack
- * entry 被 compaction 清除时按内存态补写（notify-ledger compactionCheck；未清除则
- * no-op）。内存态在 compaction 后仍活着，作为补写源；重启后的权威仍是两列 entry
- * 差集（内存不承担销账职责）。
- *
- * 归 notify 域：守卫对象是 NotifyLedger 的账面完整性（getBoundNotifyLedger 的
- * 家内事务），与 workflow 域事件族装配零数据耦合。由 setupWorkflowDomain 在
- * 原注册位置调用（pi.on 注册顺序逐位不变，
- * workflow-events.test.ts 锁定）。
- */
-export function setupNotifyLedgerCompactionGuard(pi: ExtensionAPI): void {
-  pi.on("session_compact", (_event: SessionCompactEvent, _ctx: ExtensionContext) => {
-    try {
-      const rewritten = getBoundNotifyLedger()?.compactionCheck() ?? 0;
-      if (rewritten > 0) {
-        logger.warn(`[subagents] notify ledger entries lost to compaction; rewrote ${rewritten} from memory`);
-      }
-    } catch (err) {
-      logger.warn("[subagents] notify ledger compactionCheck failed", {
-        reason: toErrorMessage(err),
-      });
-    }
-  });
 }

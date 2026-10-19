@@ -109,7 +109,7 @@ export interface IConfigStore {
    */
   getEnabledModels(): string[]
 
-  // ── enabledModels 白名单写入（wave3：toggleProviderEnabled + 边界守卫）──
+  // ── enabledModels 白名单写入（wave3：toggleProviderEnabled + 边界检查）──
   /**
    * 设置 enabledModels 白名单（非空数组写回 settings.json.enabledModels）。
    * wave3 toggleProviderEnabled 在「重算后非空」分支调用（TC1/TC2）。
@@ -117,7 +117,7 @@ export interface IConfigStore {
   setEnabledModels(patterns: string[]): void
   /**
    * 删除 settings.json.enabledModels 字段（wave3 边界3 / CL2）。
-   * pi 白名单语义空=全可用，写空数组语义反转故 delete 字段（belt-and-suspenders）。
+   * pi 白名单语义空=全可用，写空数组语义反转故 delete 字段（双重保险防线）。
    */
   clearEnabledModels(): void
   /**
@@ -154,7 +154,7 @@ export interface IConfigStore {
   getSkillPaths(): string[]
   /** 读取 skill 的 v2 分 scope 结构（projectPaths / globalPaths）。 */
   getSkillPathScopes(): DirScopes
-  /** 覆盖 skill 路径（SkillDirConfig[] 带 scope，按 scope 分发写 projectPaths/globalPaths + 脏数据过滤）。写 discovery.json + 同步投影 settings.json。 */
+  /** 覆盖 skill 路径（SkillDirConfig[] 带 scope，按 scope 分发写 projectPaths/globalPaths + 脏数据过滤）。写 discovery.json + 同步映射 settings.json。 */
   setSkillPaths(dirs: SkillDirConfig[]): void
   addSkillPath(dir: string): void
   removeSkillPath(dir: string): void

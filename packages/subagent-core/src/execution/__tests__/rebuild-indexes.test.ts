@@ -145,7 +145,7 @@ describe("[U4c/G1] rebuildIndexes 双通道 + S5 缓存可丢锚点", () => {
     fs.rmSync(path.join(recordsDir, "sa-closed.json"));
     fs.rmSync(path.join(rootDir, INDEX_FILENAME));
 
-    const store = new RecordStore(sessionsDir, undefined, undefined, recordsDir);
+    const store = new RecordStore(() => sessionsDir, undefined, undefined, () => recordsDir);
     let rebuilt = -1;
     expect(() => {
       rebuilt = store.rebuildIndexes();
@@ -200,7 +200,7 @@ describe("[U4c/G1] rebuildIndexes 双通道 + S5 缓存可丢锚点", () => {
       "utf-8",
     );
 
-    const store = new RecordStore(sessionsDir, undefined, undefined, recordsDir);
+    const store = new RecordStore(() => sessionsDir, undefined, undefined, () => recordsDir);
     expect(store.rebuildIndexes()).toBe(0);
     const manifest = JSON.parse(fs.readFileSync(path.join(recordsDir, "sa-survivor.json"), "utf-8")) as Record<string, unknown>;
     expect(manifest.task).toBe("survivor task");
@@ -213,7 +213,7 @@ describe("[U4c/G1] rebuildIndexes 双通道 + S5 缓存可丢锚点", () => {
     writeSessionJsonl(fileA, { id: "sa-lazy", task: "lazy task", startedAt: 1000, rootSessionId: "root-session" });
     writeSessionJsonl(fileLive, { id: "sa-live", task: "live task", startedAt: 2000, rootSessionId: "root-session" });
 
-    const store = new RecordStore(sessionsDir, undefined, undefined, recordsDir);
+    const store = new RecordStore(() => sessionsDir, undefined, undefined, () => recordsDir);
     // 在途 record（内存持有）——终态写点会落 manifest，惰性通道不得提前建
     store.register(makeRecord("sa-live", { sessionFile: fileLive }));
 
@@ -231,7 +231,7 @@ describe("[U4c/G1] rebuildIndexes 双通道 + S5 缓存可丢锚点", () => {
     const fileA = path.join(sessionsDir, "20260912T000005_guard.jsonl");
     writeSessionJsonl(fileA, { id: "sa-guard", task: "guard task", startedAt: 1000, rootSessionId: "root-session" });
 
-    const store = new RecordStore(sessionsDir, undefined, undefined, recordsDir);
+    const store = new RecordStore(() => sessionsDir, undefined, undefined, () => recordsDir);
     store.collectRecords(100);
     expect(fs.existsSync(path.join(recordsDir, "sa-guard.json"))).toBe(true);
 
@@ -270,7 +270,7 @@ describe("[U4c/G2] manifest 词汇双写——四写面旧三态投影 + executi
   }
 
   it("markFinalized：status closed（旧三态）+ executionStatus closed + closedReason 随写", () => {
-    const store = new RecordStore(sessionsDir, undefined, undefined, recordsDir);
+    const store = new RecordStore(() => sessionsDir, undefined, undefined, () => recordsDir);
     const sessionFile = path.join(sessionsDir, "20260912T000006_fin.jsonl");
     fs.writeFileSync(sessionFile, "{}\n", "utf-8");
     const record = makeRecord("sa-fin", { sessionFile, status: "idle", closedReason: "parent-shutdown", endedAt: 2000 });
@@ -284,7 +284,7 @@ describe("[U4c/G2] manifest 词汇双写——四写面旧三态投影 + executi
   });
 
   it("markCancelled：终态投影同 markFinalized（双写字段齐）", () => {
-    const store = new RecordStore(sessionsDir, undefined, undefined, recordsDir);
+    const store = new RecordStore(() => sessionsDir, undefined, undefined, () => recordsDir);
     const sessionFile = path.join(sessionsDir, "20260912T000007_cx.jsonl");
     fs.writeFileSync(sessionFile, "{}\n", "utf-8");
     const record = makeRecord("sa-cx2", { sessionFile, endedAt: 2000 });
@@ -316,7 +316,7 @@ describe("[U4c/G2] manifest 词汇双写——四写面旧三态投影 + executi
       "utf-8",
     );
 
-    const store = new RecordStore(sessionsDir, new ManifestStore(recordsDir));
+    const store = new RecordStore(() => sessionsDir, new ManifestStore(() => recordsDir));
     const rec = store.collectRecords(10, "all").find((r) => r.id === "sa-batch-legacy");
     expect(rec).toBeDefined();
     // manifest 源投影按 executionStatus 两态权威词读回；legacy running = §3.2.8

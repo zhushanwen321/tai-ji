@@ -21,7 +21,6 @@
     "index.ts",
     "skills/",
     "scripts/",
-    "relay/",
     "src/index.ts",
     "src/jsonl-run-store.ts",
     "src/session-lifecycle.ts",
@@ -64,12 +63,11 @@
   },
   "dependencies": {
     "@zhushanwen/extension-protocol": "workspace:*",
-    "@zhushanwen/session-delivery": "workspace:*",
+    "@zhushanwen/pi-delivery-port": "workspace:*",
     "@zhushanwen/pi-ext-guards": "workspace:*",
     "@zhushanwen/pi-extension-logger": "workspace:*",
-    "@zhushanwen/pi-notify-ledger-host": "workspace:*",
-    "@zhushanwen/subagent-core": "workspace:*",
     "@zhushanwen/pi-subagent-cli": "workspace:*",
+    "@zhushanwen/subagent-core": "workspace:*",
     "@zhushanwen/zcode-subagent-cli": "workspace:*"
   },
   "peerDependencies": {
@@ -91,7 +89,6 @@
   "devDependencies": {
     "@types/node": "^24.0.0",
     "@vitest/coverage-v8": "^4.1.9",
-    "@zhushanwen/subagent-engine-sdk": "workspace:*",
     "vitest": "^4.1.8"
   }
 }

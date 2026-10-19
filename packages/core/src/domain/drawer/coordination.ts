@@ -7,11 +7,11 @@
  * PluginViewContainer 承接后无消费方（tasks tab 已从抽屉 tab 联合删除）。
  *
  * 瞬时参数（selectedCommandName/detailFilePath）：打开时的瞬时参数，按会话分区
- * （selection/transient.ts，display-containers §6.6②——消跨会话劫持），读取面在该文件。
+ * （selection/transient.ts，display-containers §6.6②——消跨会话劫持），读侧在该文件。
  *
  * 选中态写入编排（display-containers §6.6① 五字段迁出后）：选中态落 selection/<域>
- * 分区、切 tab + 开合落 control——跨两分区的编排收口在本层（control 保持纯控制态，C4）。
- * 各选中态写入面（setSubagentView / clearSubagentView / setWorkflowView / setBtwView / setBackgroundTaskView）
+ * 分区、切 tab + 开合落 control——跨两分区的编排收敛在本层（control 保持纯控制态，C4）。
+ * 各选中态写侧（setSubagentView / clearSubagentView / setWorkflowView / setBtwView / setBackgroundTaskView）
  * 状态本体在 selection/<域>，经 drawer barrel 单一出口（本文件不重复导出，防 export * 同名冲突）。
  *
  * 分层（C4）：单向依赖 control.ts（drawerControl 原语 + getBoundSessionId + getDrawerControlState）
@@ -119,7 +119,7 @@ export function bindWorkflowRunLookup(lookup: WorkflowRunLookup | null): void {
 /**
  * 打开 workflow——workflow-visualization U6/D1 改向后 = 开 overlay（全屏实况视图）。
  *
- * 形参双语义（与 D1 调用面全量一致）：托盘行传 runId（TrayNativePanel 行点击矩阵，
+ * 形参双语义（与 D1 调用范围全量一致）：托盘行传 runId（TrayNativePanel 行点击矩阵，
  * 零改动）；对话流 block 传脚本名 + opts.slug（block 以 (scriptName, slug) 经
  * workflowStore 反查 runId 的动作在 renderer opener 内单处执行——core 不感知
  * store 数据）。opts.sessionId = 发起 pane 的 session（block 场景精确传，缺省由

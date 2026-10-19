@@ -21,7 +21,7 @@ export function defaultSystemPromptConfig(): SystemPromptConfig {
   }
 }
 
-/** raw 值是普通对象则透传，否则空对象兜底（replace/append/capability 共用形状守卫）。 */
+/** raw 值是普通对象则透传，否则空对象兜底（replace/append/capability 共用形状检查）。 */
 function asRecordOrEmpty(value: unknown): Record<string, unknown> {
   return (typeof value === 'object' && value !== null && !Array.isArray(value))
     ? value as Record<string, unknown>

@@ -8,7 +8,7 @@
  *   文案与 data-testid）+ 三条发丝分隔 + 帧驱动实时值；
  * - 构建者白盒：数据注入经真实 events.dispatchSession 通道（对齐 gen-stats 系测试形态）。
  *
- * mock 边界：getGenStats / getContext 恢复腿均为受控 pending（不落地，不污染帧直驱断言）。
+ * mock 边界：getGenStats / getContext 恢复路径均为受控 pending（不落地，不污染帧直驱断言）。
  *
  * 运行：cd packages/renderer && npx vitest run src/__tests__/panel/composer-metrics-aggregate.test.ts
  */

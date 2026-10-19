@@ -3,9 +3,9 @@
  * and-reaper-sink.md §2.3 目标态数据流 / §3.2 D2 决策表 / §3.3 挂点论证）。
  *
  * 职责（G2 职责归位）：孤儿后台任务的收殓由 pi 生命周期的所有者（runtime）执行，
- * extension 不再做全局扫描/全局锁。判定逻辑移植自 extensions/universal/
- * base-tool-enhance/src/reaper.ts（三分支判定 + pid 复用防御 + registry 损坏隔离 +
- * 错误防御）；行为原语自 ext-simplify-13 起统一取 @zhushanwen/extension-protocol
+ * extension 不再做全局扫描/全局锁。判定逻辑移植自 base-tool-enhance 侧已下沉删除的
+ * reaper（u-bte-remove 单元下沉时删除，git 历史可查；三分支判定 + pid 复用防御 +
+ * registry 损坏隔离 + 错误防御）；行为原语自 ext-simplify-13 起统一取 @zhushanwen/extension-protocol
  * 子出口 `background-task`（pid 探测/处置原语 + registry 文件原语，跨端与 extension
  * 侧单一实现——此前各持一份逐字同构副本靠注释对齐，tail 签名已实际漂移），本文件
  * 只保留编排层：三分支判定、双触发面、统一锁 sync 版锁壳（utils/file-lock.ts
@@ -20,10 +20,12 @@
  *  - reapAllSessionsBackgroundTasks(agentDir)：触发面 B——挂 startup-background-init
  *    启动期全量兜底扫描（硬序在孤儿 pi 收殓 reapOrphanPiProcesses 完成后执行，时序
  *    论证见设计 §2.3：若扫描先行，扫描时遗留 pi 尚活被分支①跳过，+5s 被杀后其
- *    detached 任务才孤儿化且此后无事件触达，漏收一个 app 周期），顺带 rmdir stale
- *    的 reaper.lock 残留目录（D2 落地后该锁不再产生，不做迁移脚本，设计 §3.3）。
+ *    detached 任务才孤儿化且此后无事件触达，漏收一个 app 周期）。扫描对象 = session
+ *    存储树（`<dataDir>/ext-sessions/`，session-store-layout-inversion 域 5）一级 sid
+ *    目录，非合法 sessionId 形态目录一律跳过（isPiSessionId，D7 树内遍历规约）。
  *
- * 三分支判定（移植 reaper.ts 文件头 §3.5 原文语义）：
+ * 三分支判定（移植自原 base-tool-enhance 侧 reaper 文件头的原文语义，该文件已随
+ * u-bte-remove 下沉删除，git 历史可查）：
  *  ①属主活跳过——ownerPiPid 进程仍活 → 跳过（活进程的合法任务；宁漏杀勿误杀，
  *    桌面端并行 session 的合法任务靠此防线豁免；kill(pid,0) 判活，ESRCH=死/EPERM=活。
  *    extension 版的显式 `ownerPiPid === process.pid` 防御在本侧被 isPidAlive 蕴含
@@ -52,16 +54,17 @@
  * （既不 await 结果，也不占用销毁链所在的当前事件循环拍）。
  */
 
-import { existsSync, readdirSync, rmdirSync, statSync } from 'node:fs'
+import { existsSync, readdirSync } from 'node:fs'
 import type { Dirent } from 'node:fs'
 import { dirname, join } from 'node:path'
+import { getSessionBackgroundTasksDir, getSessionStoreDir } from '@taiji/shared/paths'
 import {
   BACKGROUND_TASK_REGISTRY_FILENAME,
-  BASE_TOOL_ENHANCE_DIRNAME,
   MAX_TERMINAL_REGISTRY_ENTRIES,
   isActiveBackgroundTaskState,
   type BackgroundTaskRegistryEntry,
 } from '@zhushanwen/extension-protocol'
+import { isPiSessionId } from '../../infra/pi/pi-paths.js'
 import {
   atomicWriteRegistry,
   getProcessStartTimeSec,
@@ -74,7 +77,8 @@ import {
   type ProcessFallbackLogger,
   type RegistryFileLogFn,
 } from '../../utils/protocol-background-task.js'
-import { DEFAULT_STALE_MS, withFileLockSync } from '../../utils/file-lock.js'
+
+import { withFileLockSync } from '../../utils/file-lock.js'
 
 const LOG_TAG = '[bg-task-reaper]'
 
@@ -87,19 +91,18 @@ const registryLog: RegistryFileLogFn = (level, event, detail) =>
   (level === 'warn' ? console.warn : console.debug)(`${LOG_TAG} ${event}`, detail)
 
 /**
- * 旧 reaper 全局锁的 lockfile 目录名（mkdir 形态，落 <baseDir>/reaper.lock）。
- * 扫描时须按名排除（否则会对锁目录做一次无谓的 registry 读取并计入 scannedDirs）；
- * 触发面 B 顺带清理其 stale 残留（见文件头「锁残留清理」）。
- */
-const REAPER_LOCK_DIRNAME = 'reaper.lock'
-
-/**
- * registry.json 目录布局（契约 SSOT）：<agentDir>/base-tool-enhance/<sessionId>/registry.json。
+ * registry.json 目录布局（契约 SSOT，session-store-layout-inversion 域 5）：
+ * `<dataDir>/ext-sessions/<sessionId>/background-tasks/registry.json`——与 extension
+ * 写侧（base-tool-enhance registry.ts 镜像公式，对拍机检 scripts/check-artifact-dir-
+ * formula-sync.mjs 守护）同一新公式。入参为 pi agentDir（`<dataDir>/agent`，全部调用方
+ * 恒传 getPiAgentDir()）：树基址 = agentDir 剥一层（taiji dataDir），推导单点在 shared
+ * getSessionBackgroundTasksDir / getSessionStoreDir（assertPiSessionId 路径穿越防线随
+ * shared 函数生效）。
  * [u-runtime-svc 提炼导出] BackgroundTaskService（services/background-task/）与收殓器共用
  * 同一布局推导，禁止两处各写路径拼接（漂移面）。
  */
 export function getSessionRegistryPath(agentDir: string, sessionId: string): string {
-  return join(agentDir, BASE_TOOL_ENHANCE_DIRNAME, sessionId, BACKGROUND_TASK_REGISTRY_FILENAME)
+  return join(getSessionBackgroundTasksDir(sessionId, dirname(agentDir)), BACKGROUND_TASK_REGISTRY_FILENAME)
 }
 
 /**
@@ -172,8 +175,6 @@ export interface BackgroundTaskReapResult {
   finalizedOrphans: number
   /** 保守跳过：start time 无法获取 / 复用嫌疑不匹配 / 条目处置异常 / 终态写失败。 */
   conservativelySkipped: number
-  /** 触发面 B 顺带清理的 stale reaper.lock 残留目录数（触发面 A 恒 0）。 */
-  staleLocksRemoved: number
 }
 
 /** 测试接缝：pid 探测/处置原语可注入（对齐 reap-orphan-pi 全依赖注入惯例，零真实进程可测）。 */
@@ -202,7 +203,7 @@ function resolveDeps(deps?: BackgroundTaskReapDeps): ResolvedReapDeps {
 }
 
 function emptyResult(): BackgroundTaskReapResult {
-  return { scannedDirs: 0, ownerAliveSkipped: 0, killedOrphans: 0, finalizedOrphans: 0, conservativelySkipped: 0, staleLocksRemoved: 0 }
+  return { scannedDirs: 0, ownerAliveSkipped: 0, killedOrphans: 0, finalizedOrphans: 0, conservativelySkipped: 0 }
 }
 
 /** 读条目 start time 字段（epoch 秒）。运行时 guard：typeof + 有限性，防脏数据混入比较。 */
@@ -280,6 +281,9 @@ function reapSessionDirSync(sessionDir: string, deps: ResolvedReapDeps, result: 
 /** 触发面 A 核心：处置指定 session 的 registry（该目录不存在 = 从未有过后台任务，常态）。 */
 function reapOneSessionSync(agentDir: string, sessionId: string, deps: ResolvedReapDeps): BackgroundTaskReapResult {
   const result = emptyResult()
+  // 非法 id（btw 虚拟 id / 路径注入形态）= 从未有合法存储树，静默 no-op（shared 推导
+  // 函数对非法 id 会 throw，先在此过滤防错误升级为收殓失败告警）
+  if (!isPiSessionId(sessionId)) return result
   const sessionDir = dirname(getSessionRegistryPath(agentDir, sessionId))
   if (!existsSync(sessionDir)) return result
   result.scannedDirs = 1
@@ -293,56 +297,34 @@ function reapOneSessionSync(agentDir: string, sessionId: string, deps: ResolvedR
   return result
 }
 
-/** 触发面 B 核心：扫全部 session 目录 + 清理 stale reaper.lock 残留。 */
+/** 触发面 B 核心：扫 session 存储树一级 sid 目录，逐树读 background-tasks/registry.json。 */
 function reapAllSessionsSync(agentDir: string, deps: ResolvedReapDeps): BackgroundTaskReapResult {
   const result = emptyResult()
-  const baseDir = join(agentDir, BASE_TOOL_ENHANCE_DIRNAME)
+  const dataDir = dirname(agentDir)
+  const rootDir = getSessionStoreDir(dataDir)
   let dirents: Dirent[]
   try {
-    dirents = readdirSync(baseDir, { withFileTypes: true })
+    dirents = readdirSync(rootDir, { withFileTypes: true })
   } catch (err) {
-    // baseDir 不存在（从未有过后台任务）是常态，不告警；读失败（权限等）warn 后放弃本轮
+    // rootDir 不存在（从未有过 session 衍生数据）是常态，不告警；读失败（权限等）warn 后放弃本轮
     if ((err as NodeJS.ErrnoException).code !== 'ENOENT') {
-      console.warn(`${LOG_TAG} base dir unreadable, skipping this scan: ${baseDir}`, err instanceof Error ? err.message : err)
+      console.warn(`${LOG_TAG} session store root unreadable, skipping this scan: ${rootDir}`, err instanceof Error ? err.message : err)
     }
     return result
   }
-  removeStaleReaperLock(baseDir, result)
   for (const dirent of dirents) {
-    // reaper.lock 目录与 .DS_Store 等非 session 目录跳过
-    if (!dirent.isDirectory() || dirent.name === REAPER_LOCK_DIRNAME) continue
+    // D7 树内遍历规约：非目录项与「目录名非合法 sessionId 形态」的一级目录一律跳过
+    //（防未来手放的非会话目录被误读；.DS_Store / 临时产物天然落入此滤网）
+    if (!dirent.isDirectory() || !isPiSessionId(dirent.name)) continue
     result.scannedDirs++
     try {
-      reapSessionDirSync(join(baseDir, dirent.name), deps, result)
+      reapSessionDirSync(getSessionBackgroundTasksDir(dirent.name, dataDir), deps, result)
     } catch (err) {
       // 错误容忍：单目录失败跳过 + warn，不中断整体扫描
       console.warn(`${LOG_TAG} session dir scan failed, skipping dir: ${dirent.name}`, err instanceof Error ? err.message : err)
     }
   }
   return result
-}
-
-/**
- * 清理 stale 的 reaper.lock 残留目录（旧 extension reaper 的全局锁实体，D2 落地后
- * 不再产生）。stale 判据沿用统一锁 DEFAULT_STALE_MS（30s）：mtime 超过即视为持锁者
- * 已死（与 withFileLockSync 的 stale 夺取同口径）；fresh 的锁目录可能是共存旧包的
- * 在途临界区，不动。rmdir 只对空目录生效——残留非锁内容（ENOTEMPTY）warn 后留给
- * 下次启动。
- */
-function removeStaleReaperLock(baseDir: string, result: BackgroundTaskReapResult): void {
-  const lockDir = join(baseDir, REAPER_LOCK_DIRNAME)
-  try {
-    const st = statSync(lockDir)
-    if (!st.isDirectory()) return
-    if (Date.now() - st.mtimeMs <= DEFAULT_STALE_MS) return
-    rmdirSync(lockDir)
-    result.staleLocksRemoved++
-    console.log(`${LOG_TAG} removed stale reaper.lock residue: ${lockDir}`)
-  } catch (err) {
-    // best-effort：ENOENT（无残留）静默；其余失败（ENOTEMPTY 残留内容/权限）留给下次启动
-    if ((err as NodeJS.ErrnoException).code === 'ENOENT') return
-    console.warn(`${LOG_TAG} stale reaper.lock removal failed, leaving it for next startup: ${lockDir}`, err instanceof Error ? err.message : err)
-  }
 }
 
 // ──────────────────────── 入口（双触发面） ────────────────────────
@@ -359,10 +341,9 @@ export function logReapSummary(scope: string, result: BackgroundTaskReapResult):
   if (
     result.killedOrphans > 0 ||
     result.finalizedOrphans > 0 ||
-    result.staleLocksRemoved > 0 ||
     result.conservativelySkipped > 0
   ) {
-    console.log(`${LOG_TAG} ${scope}: killed=${result.killedOrphans} finalized=${result.finalizedOrphans} ownerAliveSkipped=${result.ownerAliveSkipped} conservativelySkipped=${result.conservativelySkipped} staleLocksRemoved=${result.staleLocksRemoved}`)
+    console.log(`${LOG_TAG} ${scope}: killed=${result.killedOrphans} finalized=${result.finalizedOrphans} ownerAliveSkipped=${result.ownerAliveSkipped} conservativelySkipped=${result.conservativelySkipped}`)
   }
 }
 

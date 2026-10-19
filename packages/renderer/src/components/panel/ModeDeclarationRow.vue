@@ -22,7 +22,7 @@
  *    「模式已删除（id）」并**预告**「会话重启后将回落全工具」；已回落
  *    （`SessionSummary.launchPresetFallbackTo` 非空，pi 本次已以 builtin:full 启动）才声称
  *    「本次以全工具模式启动」。禁在未重启窗口内声称已用全工具（假陈述）。
- * ③ 加载失败（loadError 非空）→ **等同未加载：不渲染**（恢复通道 = 下一次 connected 自动补拉，
+ * ③ 加载失败（loadError 非空）→ **等同未加载：不渲染**（恢复通道 = 下一次 connected 自动补充拉取，
  *    见 usePiPresets.installPresetAutoLoad）。
  * 三态均不阻断会话。
  *
@@ -99,7 +99,7 @@ const label = computed(() =>
     : t('panel.modeDeclaration.deleted', { id: launchPresetId.value ?? '' }),
 )
 
-/** 工具面摘要（与 PresetChip 同口径；面摘要串 SSOT = panel.presetChip.*）。
+/** 工具范围摘要（与 PresetChip 同口径；面摘要串 SSOT = panel.presetChip.*）。
  *  [RD-2#6] allowlist/denylist 而名单未定义 = 面未知（unknownSurface 出口）——
  *  不得 ?? 0 伪装成「允许 0 项」（0=真值，D4 null=无数据）。 */
 const toolSurface = computed(() => {
@@ -124,7 +124,7 @@ const promptSegmentCount = computed(() => {
   return [p.replace, p.append].filter((s) => s?.enabled && (s.prompt ?? '').trim().length > 0).length
 })
 
-/** 两个描边 chip 的文案（工具面摘要 + 提示词段数）。 */
+/** 两个描边 chip 的文案（工具范围摘要 + 提示词段数）。 */
 const toolChip = computed(() => t('panel.modeDeclaration.toolChip', { surface: toolSurface.value }))
 const promptChip = computed(() =>
   t('panel.modeDeclaration.promptChip', { count: promptSegmentCount.value }),
@@ -167,7 +167,7 @@ const newSessionKbd = computed(() => formatKbd('n'))
         class="shrink-0 text-[length:var(--text-2xs)]"
         :class="isFellBack ? 'text-warn' : 'text-neutral-dim'"
       >{{ fallbackDisclosure }}</span>
-      <!-- 正常态：工具面摘要 + 提示词段数（两个描边 chip） -->
+      <!-- 正常态：工具范围摘要 + 提示词段数（两个描边 chip） -->
       <template v-if="!isDeleted">
         <span
           class="shrink-0 rounded-[4px] border border-border-strong px-1.5 font-mono text-[length:var(--text-3xs)] font-medium leading-[1.8] text-neutral-mid"

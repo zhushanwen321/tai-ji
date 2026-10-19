@@ -1,10 +1,10 @@
 /**
- * useCopy 行为测试：复制反馈态 + 非安全上下文守卫（移动壳 LAN http 场景）。
+ * useCopy 行为测试：复制反馈态 + 非安全上下文检查（移动壳 LAN http 场景）。
  *
  * - 正常路径：writeText resolve → copied 置 key。
  * - writeText reject：catch 静默吞错，反馈态照常置位（反馈表示已发起复制，不等待写入结果）。
  * - 非安全上下文（LAN http，如移动壳远程访问）：navigator.clipboard 为 undefined，
- *   同步访问 .writeText 即抛 TypeError（.catch 接不住）——守卫早退不抛错、不置 copied 反馈。
+ *   同步访问 .writeText 即抛 TypeError（.catch 接不住）——检查早退不抛错、不置 copied 反馈。
  */
 import { describe, it, expect, vi, afterEach } from 'vitest'
 import { useCopy } from '../composables/useCopy'
@@ -32,9 +32,9 @@ describe('useCopy', () => {
     expect(copied.value).toBe('k1')
   })
 
-  it('非安全上下文（clipboard undefined）：守卫早退不抛错、不置 copied 反馈', () => {
+  it('非安全上下文（clipboard undefined）：检查早退不抛错、不置 copied 反馈', () => {
     // LAN http 下 navigator.clipboard 为 undefined——直调 .writeText 是同步 TypeError，
-    // .catch 接不住；回归锚 = 守卫分支（早退，无 writeText 调用无反馈态）。
+    // .catch 接不住；回归锚 = 检查分支（早退，无 writeText 调用无反馈态）。
     vi.stubGlobal('navigator', {})
     const { copied, copy } = useCopy()
     expect(() => copy('hello', 'k1')).not.toThrow()

@@ -30,7 +30,7 @@ function makeSummary(id: string): SessionSummary {
 }
 
 function makeEnv() {
-  // S2 ISP 化：结构性满足 lifecycle 窄接口（10 方法 = 实际消费面），无强转
+  // S2 ISP 化：结构性满足 lifecycle 窄接口（10 方法 = 实际消费方），无强转
   const svc: ILifecycleSessionOps = {
     getExtensionPaths: vi.fn(async () => []),
     getSkillPaths: vi.fn(() => []),

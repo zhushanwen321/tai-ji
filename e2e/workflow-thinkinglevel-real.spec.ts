@@ -6,9 +6,9 @@
  * thinkingLevel 端到端真实生效。观测表面全部是 pi 自己写的文件（零 taiji
  * 代码介入，无日志钩子）：
  *
- * - TC1: 主 session JSONL 的 workflow-record v2 条目（registered/settled 投影锚，
+ * - TC1: 主 session JSONL 的 workflow-record v2 条目（registered/settled 派生视图锚，
  *        runId 关联）+ record 事件流 agent-started 帧 input（规范化 opts 的
- *        canonical JSON 全文落账）——脚本请求值的现行持久化面（[D1] record 单源，
+ *        canonical JSON 全文写入）——脚本请求值的现行持久化路径（[D1] record 单源，
  *        jsonl-run-store.ts 头注；旧 v1 全量快照条目已停写）
  * - TC2: 子进程 session JSONL 的 thinking_level_change / model_change entry ——
  *        pi 收到 --model provider/id:high 后真实落盘的状态（核心，确定性）
@@ -75,7 +75,8 @@ const PROBE_PROMPT = `请调用 workflow tool 运行 ${PROBE_SCRIPT} 脚本。`
 function buildFauxScript(probePath: string): Record<string, FauxStep[]> {
   return {
     'faux/faux-1': [
-      { toolCalls: [{ name: 'workflow', args: { action: 'run', name: probePath } }] },
+      // D3 工具拆分（tool-declaration-slimming）：legacy 名 workflow 退役 → workflow_run
+      { toolCalls: [{ name: 'workflow_run', args: { name: probePath } }] },
       { text: 'workflow 已完成。' },
     ],
     'faux/faux-1-reasoning': [
@@ -158,7 +159,7 @@ function findSubagentSessionFiles(dataDir: string): string[] {
 
 /**
  * 定位子进程 session 文件。优先用 record 流 agent-settled 帧的 result.sessionFile
- * （精确绝对路径，[D1] result 全文落账承载）；缺失时 fallback 全量扫描：排除主
+ * （精确绝对路径，[D1] result 全文写入承载）；缺失时 fallback 全量扫描：排除主
  * session 文件 + cwd 为 sample-project + mtime 最新。
  *
  * 注意：不能用 recordId（sa-<uuid> 是 subagent-workflow 扩展的 record id，
@@ -196,7 +197,7 @@ function readSessionEntries(file: string): any[] | null {
 }
 
 /**
- * 主 session JSONL 的 workflow-record v2 条目提取（[D1] record 单源后的投影锚）。
+ * 主 session JSONL 的 workflow-record v2 条目提取（[D1] record 单源后的派生视图锚）。
  *
  * pi 侧落盘形状（workflow-record-entry.ts v2 schema）：主 session 每 run 两条小
  * 条目——registered（`{v:2, kind:"registered", runId, recordPath, ...}`，含 record
@@ -252,7 +253,7 @@ function readRecordEvents(recordPath: string): any[] | null {
 
 /**
  * record 流 agent-started 帧的入参全文解析（`input` 字段 = resolveAgentOpts
- * 规范化后 opts 的 canonical JSON——terminal-actions dispatchAgentStarted 落账；
+ * 规范化后 opts 的 canonical JSON——terminal-actions dispatchAgentStarted 写入；
  * 脚本 agent() 的 model/thinkingLevel 请求值在此可观测）。无 agent-started 帧
  * 返回 null。
  */
@@ -268,7 +269,7 @@ function agentStartedInputOf(recordEvents: any[]): any | null {
 
 /**
  * record 流 agent-settled 帧的子进程 session 文件路径（`result.sessionFile`——
- * [D1] result 全文落账后兼承载执行树家族链数据源，run-events.ts AgentSettledEvent
+ * [D1] result 全文写入后兼承载执行树家族链数据源，run-events.ts AgentSettledEvent
  * 注释）。旧 v1 snapshot 的 calls[0].sessionFile 通道随快照删除退役，本字段是
  * 现行唯一精确锚。无携带帧返回 undefined（fallback 全量扫描由调用方承接）。
  */
@@ -375,7 +376,7 @@ async function runProbeWorkflow(tc: string): Promise<{
 
 // ── TC1: 脚本请求值持久化（确定性） ───────────────────────────────
 
-test('TC1: record 流 agent-started 帧 input 含 thinkingLevel/model（脚本请求值 → record 单源落账）', async () => {
+test('TC1: record 流 agent-started 帧 input 含 thinkingLevel/model（脚本请求值 → record 单源写入）', async () => {
   test.setTimeout(150_000)
   const ctx = await runProbeWorkflow('tc1')
   try {
@@ -395,7 +396,7 @@ test('TC1: record 流 agent-started 帧 input 含 thinkingLevel/model（脚本�
     expect(mainFile, '主 session JSONL 路径应存在（session.created reply）').toBeTruthy()
     expect(fs.existsSync(mainFile!), '主 session JSONL 文件应已写入').toBe(true)
 
-    // 断言 ①：主 session JSONL 含 workflow-record v2 两条小条目（[D1] 投影锚）
+    // 断言 ①：主 session JSONL 含 workflow-record v2 两条小条目（[D1] 派生视图锚）
     const rec = findWorkflowRecordV2Entries(mainFile!)
     if (!rec || !rec.registered || !rec.settled) {
       writeDiag('tc1', ctx.dataDir, ctx.events, {
@@ -412,7 +413,7 @@ test('TC1: record 流 agent-started 帧 input 含 thinkingLevel/model（脚本�
 
     // 断言 ②：record 事件流（唯一事实源）的 agent-started 帧 input 含脚本请求值。
     // input = resolveAgentOpts 规范化后 opts 的 canonical JSON（dispatchAgentStarted
-    // 全文落账）——脚本 agent({model, thinkingLevel}) 的请求值在此可观测。
+    // 全文写入）——脚本 agent({model, thinkingLevel}) 的请求值在此可观测。
     const recordEvents = readRecordEvents(rec!.registered!.recordPath)
     if (!recordEvents) {
       writeDiag('tc1', ctx.dataDir, ctx.events, { recordPath: rec!.registered!.recordPath })
@@ -466,7 +467,7 @@ test('TC2: 子进程 JSONL 含 thinking_level_change high + model_change（pi �
     const settledSessionFile = settledSessionFileOf(recordEvents!)
 
     // 定位链 3：优先 agent-settled 帧 result.sessionFile（pi 子进程 session 文件
-    // 绝对路径，[D1] result 全文落账承载）；缺失时全量扫描排除主 session 取最新
+    // 绝对路径，[D1] result 全文写入承载）；缺失时全量扫描排除主 session 取最新
     const subFile = locateSubagentSessionFile(ctx.dataDir, settledSessionFile, ctx.mainSessionFile)
     if (!subFile) {
       const candidates = findSubagentSessionFiles(ctx.dataDir)

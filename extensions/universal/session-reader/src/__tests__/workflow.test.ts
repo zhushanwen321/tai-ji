@@ -57,7 +57,7 @@ const NEW_SNAPSHOT_FIXTURE = {
 
 /**
  * v2 格式 fixture（pi-subagent-workflow 8.x 一次性生命周期写入的 wf-run-v2 快照）。
- * 读取面形状与 v1 一致（state.calls[].sessionFile/result 保留），差异仅版本字面量与
+ * 读侧形状与 v1 一致（state.calls[].sessionFile/result 保留），差异仅版本字面量与
  * status 两态（running/done）、meta 无 pausedAt——v2 不该因版本字面量被挡在读之外。
  */
 const V2_SNAPSHOT_FIXTURE = {
@@ -206,7 +206,7 @@ describe('parseRunSnapshot', () => {
 
   it('TC-w5-parse-malformed：既非 NEW 也非 OLD（缺关键字段）返回 null', () => {
     // (a) 有 v 但 v 非 v1/v2 且无 callCache（未来版本 wf-run-v3 及之后——届时须评估
-    // 新版本读取面形状再扩判定，v2 因形状兼容被接受）
+    // 新版本读侧形状再扩判定，v2 因形状兼容被接受）
     expect(parseRunSnapshot({ v: 'wf-run-v3', state: { calls: [] } }, 'r', 's')).toBeNull()
     // (b) 无 v 无 callCache 无 status（异构对象）
     expect(parseRunSnapshot({ foo: 'bar', baz: 1 }, 'r', 's')).toBeNull()
@@ -327,7 +327,7 @@ describe('readRunSnapshot', () => {
 })
 
 // ============================================================
-// resolveWorkflows 发现链（[ADR-0095] v1 读面删除后的单档形态：v2 注册条目
+// resolveWorkflows 发现链（[ADR-0095] v1 读侧删除后的单档形态：v2 注册条目
 // recordPath 主源；历史格式条目——v1 快照 / workflow-state-link 指针——静默消失）
 // ============================================================
 
@@ -549,8 +549,8 @@ describe('resolveWorkflows（v2 注册条目单档发现链）', () => {
     expect(workflows).toEqual([])
   })
 
-  it('跨包契约守卫：发现链判别的本地字面量 === subagent-core 写侧单源（[D1] record 后缀）', () => {
-    // 源码本地持有磁盘协议字符串与版本/尾段（生产依赖面不引 subagent-core），锚定两侧同值
+  it('跨包契约检查：发现链判别的本地字面量 === subagent-core 写侧单源（[D1] record 后缀）', () => {
+    // 源码本地持有磁盘协议字符串与版本/尾段（生产依赖范围不引 subagent-core），锚定两侧同值
     expect(WORKFLOW_RECORD_CUSTOM_TYPE).toBe('workflow-record')
     expect(WORKFLOW_RECORD_ENTRY_VERSION).toBe(2)
     expect(RUN_RECORD_STREAM_SUFFIX).toBe('.record.jsonl')

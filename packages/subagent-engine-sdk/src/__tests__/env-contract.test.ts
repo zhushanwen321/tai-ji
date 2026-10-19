@@ -1,7 +1,7 @@
 // src/__tests__/env-contract.test.ts
 //
 // buildEngineChildEnv 三层契约（W12，impl-plan §2.12 三层表逐行）+ buildOutboundChildEnv
-// 出站卫生 + 守卫断言「L0 基础设施键集合 ∩ L1 deny/剥除集合 = ∅」。
+// 出站卫生 + 检查断言「L0 基础设施键集合 ∩ L1 deny/剥除集合 = ∅」。
 // 三层表的每条规格在此对应至少一个断言：L0 注入项 / L1 恒高于 manifest 放行 /
 // L2 保留前缀拒绝 + 形态校验 + 非法丢弃 warn + 未声明不放行 warn。
 
@@ -41,8 +41,6 @@ describe("buildEngineChildEnv 三层契约", () => {
         TAIJI_AGENT_PACKAGED: "1",
         taiji_runtime_token: "tok",
         TAIJI_AGENT_API_KEY: "k",
-        TAIJI_SUBAGENT_RELAY_SESSION_ID: "parent",
-        TAIJI_SUBAGENT_RELAY_RECORD_ID: "r",
       },
       { dataDir: "/d" },
     );
@@ -53,21 +51,17 @@ describe("buildEngineChildEnv 三层契约", () => {
     expect(env.taiji_runtime_token).toBeUndefined();
   });
 
-  it("L0：基础设施键注入（dataDir/engineNode/ELECTRON_RUN_AS_NODE/SUBAGENT/relay/identity）", () => {
+  it("L0：基础设施键注入（dataDir/engineNode/ELECTRON_RUN_AS_NODE/SUBAGENT/identity）", () => {
     const env = buildEngineChildEnv({}, {
       dataDir: "/data-root",
       engineNode: "/exec/node",
       electronRunAsNode: true,
-      relay: { socket: "/s", node: "/n", script: "/sc" },
       identityEnv: { PI_SUBAGENT_ROOT_SESSION_ID: "sid", PI_SUBAGENT_DEPTH: undefined },
     });
     expect(env.TAIJI_AGENT_DATA_DIR).toBe("/data-root");
     expect(env.TAIJI_AGENT_ENGINE_NODE).toBe("/exec/node");
     expect(env.ELECTRON_RUN_AS_NODE).toBe("1");
     expect(env.TAIJI_AGENT_SUBAGENT).toBe("1");
-    expect(env.TAIJI_SUBAGENT_RELAY_SOCKET).toBe("/s");
-    expect(env.TAIJI_SUBAGENT_RELAY_NODE).toBe("/n");
-    expect(env.TAIJI_SUBAGENT_RELAY_SCRIPT).toBe("/sc");
     expect(env.PI_SUBAGENT_ROOT_SESSION_ID).toBe("sid");
     expect(env.PI_SUBAGENT_DEPTH).toBeUndefined();
   });
@@ -143,10 +137,17 @@ describe("buildEngineChildEnv 三层契约", () => {
     expect(proc).toEqual({ MYENGINE_A: "1" });
   });
 
-  it("守卫断言：L0 基础设施键集合 ∩ L1 deny/剥除集合 = ∅", () => {
+  it("检查断言：L0 基础设施键集合 ∩ L1 deny/剥除集合 = ∅", () => {
     const denySet = new Set(ENGINE_ENV_DENY_LIST);
     const overlap = ENGINE_ENV_L0_INFRA_KEYS.filter((k) => denySet.has(k));
     expect(overlap).toEqual([]);
+  });
+
+  it("[M3] L0 清单登记 control 两键；deny 面不含 control 两键（引擎/嵌套 extension 是合法读者）", () => {
+    expect(ENGINE_ENV_L0_INFRA_KEYS).toContain("TAIJI_SUBAGENT_CONTROL_SOCKET");
+    expect(ENGINE_ENV_L0_INFRA_KEYS).toContain("TAIJI_SUBAGENT_CONTROL_ROOT_SESSION_ID");
+    expect(ENGINE_ENV_DENY_LIST).not.toContain("TAIJI_SUBAGENT_CONTROL_SOCKET");
+    expect(ENGINE_ENV_DENY_LIST).not.toContain("TAIJI_SUBAGENT_CONTROL_ROOT_SESSION_ID");
   });
 });
 
@@ -159,7 +160,6 @@ describe("buildOutboundChildEnv（SDK 版出站卫生）", () => {
         TAIJI_AGENT_PACKAGED: "1",
         TAIJI_RUNTIME_TOKEN: "tok",
         TAIJI_AGENT_API_KEY: "k",
-        TAIJI_SUBAGENT_RELAY_SESSION_ID: "s",
       },
     });
     expect(env.PATH).toBe("/usr/bin");
@@ -167,7 +167,6 @@ describe("buildOutboundChildEnv（SDK 版出站卫生）", () => {
     expect(env.TAIJI_AGENT_PACKAGED).toBeUndefined();
     expect(env.TAIJI_RUNTIME_TOKEN).toBeUndefined();
     expect(env.TAIJI_AGENT_API_KEY).toBeUndefined();
-    expect(env.TAIJI_SUBAGENT_RELAY_SESSION_ID).toBeUndefined();
   });
 
   it("extras 注入 / undefined 删除语义", () => {
@@ -199,5 +198,9 @@ describe("常量镜像自洽", () => {
   it("deny 清单含模式回落两键（SDK 镜像与 shared SSOT 逐项相等由 check_env_whitelist_sync.py 兜底；本断言防镜像内单侧漏项）", () => {
     expect(ENGINE_ENV_DENY_LIST).toContain("TAIJI_PRESET_FALLBACK_FROM");
     expect(ENGINE_ENV_DENY_LIST).toContain("TAIJI_PRESET_FALLBACK_TO");
+  });
+
+  it("[M3] TAIJI_ENGINE_RAW_MIRROR 不进 SDK deny（设计 D6：引擎自己要读 fd 3 镜像标志，deny 即自断；task pi 剥除落 shared SPAWN_ENV_OUTBOUND_DENY_LIST）", () => {
+    expect(ENGINE_ENV_DENY_LIST).not.toContain("TAIJI_ENGINE_RAW_MIRROR");
   });
 });

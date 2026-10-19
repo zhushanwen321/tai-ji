@@ -3,7 +3,7 @@
  *
  * 设计：docs/design/session-dead-structural-fixes.md（已删除，git 可追溯）§3.3 D5① / §4 V6——所有 kill/destroy
  * 路径打 warn 级日志，含调用源（kill_source 结构化字段）与触发信号链（「谁发起、为什么」），
- * 使 exit 143 类进程死亡可从日志回溯到发起方（2026-09-10 事故第三条腿无 kill 日志的教训）。
+ * 使 exit 143 类进程死亡可从日志回溯到发起方（2026-09-10 事故第三条路径无 kill 日志的教训）。
  *
  * 七条路径（设计文档 K 清单无 K4）各一断言——触发路径时 logger.warn（项目 runtime 惯例
  * console.warn，经 infra/logger patch 后落盘 <dataDir>/logs 轮转）被调用且含对应 source：
@@ -48,9 +48,6 @@ vi.mock('../src/infra/pi/rpc-client.js', async (importOriginal) => {
 })
 vi.mock('../src/infra/pi/find-pi-executable.js', () => ({
   findPiExecutable: vi.fn(() => '/fake/path/pi'),
-}))
-vi.mock('../src/infra/relay/relay-env.js', () => ({
-  getRelaySpawnEnv: vi.fn(async () => ({})),
 }))
 
 // ── session-lifecycle 部分的模块级 mock（sessions 目录指向 tmp，不碰真实数据目录）──
@@ -271,7 +268,7 @@ describe('D5① K3/K5：session-lifecycle kill 日志（kill_source 结构化字
     expect(line).toContain('sess-kill-log')
     // 信号链要素：清场 → 重开
     expect(line).toContain('safeDestroy')
-    // 物理收口被调：旧 pi 确实被销毁
+    // 物理销毁被调：旧 pi 确实被销毁
     expect(pm.destroySession).toHaveBeenCalled()
   })
 
@@ -287,7 +284,7 @@ describe('D5① K3/K5：session-lifecycle kill 日志（kill_source 结构化字
     const line = findKillLog(warnSpy, 'delete')
     expect(line).toBeDefined()
     expect(line).toContain('sess-kill-log')
-    // 物理收口被调：活跃 pi 确实被销毁
+    // 物理销毁被调：活跃 pi 确实被销毁
     expect(pm.destroySession).toHaveBeenCalledWith('sess-kill-log')
   })
 })

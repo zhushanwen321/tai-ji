@@ -413,7 +413,7 @@ describe('u3a: resolveByVersion（版本解析四分支 + 60s 节流）', () => 
       resolveByVersion('1.2', { currentVersion: '0.8.14', releaseChecker: checker }),
     ).rejects.toThrow(/invalid requested version format/)
     vi.setSystemTime(Date.now() + 61_000)
-    // typeof 守卫：IPC 数字被正则隐式串化绕过（123 → '123'）必须被拒
+    // typeof 检查：IPC 数字被正则隐式串化绕过（123 → '123'）必须被拒
     await expect(
       resolveByVersion(123 as unknown as string, { currentVersion: '0.8.14', releaseChecker: checker }),
     ).rejects.toThrow(/invalid requested version format/)

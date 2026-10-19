@@ -109,7 +109,7 @@ describe("plan(action='enter') — agent 自助进入（plan-mode-agent-enter U1
     // 退出按它还原——不按 exposure 档位重建（tool_search 实装 model-only +
     // defaultActive:false，重建会点名激活它）
     expect(planCtx.toolSnapshots.get("test-session")).toEqual(ALL_TOOL_NAMES.filter((n) => n !== "plan"));
-    // 状态持久化 isActive=true（投影链驱动 GUI 显形的锚点）
+    // 状态持久化 isActive=true（派生视图链驱动 GUI 显形的锚点）
     expect(pi.appendEntry).toHaveBeenCalledWith("plan-state", expect.objectContaining({ isActive: true }));
     // 目录落盘（原子唯一性）：plansRoot 父目录 recursive 建立 + 候选目录非 recursive
     // mkdir 独占创建（已被占用抛 EEXIST 重探）

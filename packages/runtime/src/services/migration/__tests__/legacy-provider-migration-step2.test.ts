@@ -136,7 +136,7 @@ describe('TC2: step2 全 enabled（无禁用）→ no-op（不设白名单，保
   })
 })
 
-describe('TC3: step2 全 disabled → 删字段 + warn（ES4 空数组守卫）', () => {
+describe('TC3: step2 全 disabled → 删字段 + warn（ES4 空数组检查）', () => {
   it('迁移：clearEnabledModels（非空数组）+ fullDisabledWarn；迁移后全可用', async () => {
     writeModels({
       openai: { enabled: false, models: [{ id: 'gpt-4' }] },
@@ -204,7 +204,7 @@ describe('TC5: step2 defaultModel 重选（迁移后 default 落白名单外 →
     expect(settings?.defaultModel).toBe('gpt-4')
 
     // A8：findValidDefaultModel 主路径 + fallback（pickFirstModelProvider）均过滤 enabledModels——
-    // openai 被禁用，主路径守卫跳过，fallback 选启用的 anthropic/claude-3，wasFixed=true（重选写回）。
+    // openai 被禁用，主路径检查跳过，fallback 选启用的 anthropic/claude-3，wasFixed=true（重选写回）。
     const r = findValidDefaultModel()
     expect(r.result).not.toBeNull()
     expect(r.result!.provider).toBe('anthropic')

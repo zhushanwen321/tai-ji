@@ -93,10 +93,10 @@ describe('ContributionRegistry.registerBuiltin（DM5）', () => {
     // composer-task-tray D10：「后台命令」view 贡献随该 native 视图退役
     // scheduler-manager 为 headerAction 徽标入口 + overlay 定时任务 tab 内容树供给插件；
     // scheduler 保留 /schedule slash 声明（ADR-0050：landing 态 pi 真源为空、声明即显示，
-    // 执行由 pi extension 承担——与 manager 的 GUI 管理面职责不重叠）
+    // 执行由 pi extension 承担——与 manager 的 GUI 管理侧职责不重叠）
     expect(builtinContributions.map((b) => b.pluginId)).toEqual(['tasks', 'scheduler-manager', 'scheduler'])
     expect(builtinContributions[0].contributes.slashCommands).toHaveLength(2)
-    expect(builtinContributions[2].contributes.slashCommands).toHaveLength(1) // 发现面单条 schedule（pi 侧 scheduler/schedule 同 handler，按用户裁决单条展示）
+    expect(builtinContributions[2].contributes.slashCommands).toHaveLength(1) // 发现侧单条 schedule（pi 侧 scheduler/schedule 同 handler，按用户裁决单条展示）
     // tasks 不声明 views——todo/goal 经 extension widget 推送由 Composer 托盘 widget 区承接，
     // 不进 sidebar（D5）；该视图退役后 builtin 整体零 view 声明
     expect(builtinContributions[0].contributes.views).toBeUndefined()
@@ -104,7 +104,7 @@ describe('ContributionRegistry.registerBuiltin（DM5）', () => {
     // scheduler-manager 声明形状：headerActions 1（activation 直开声明，
     // 无 commandId）+ commands 3（overlay 树内 action-bar 写操作 toggle/run/delete——缺
     // 声明则写操作在 CommandRegistry 无注册通路成死链，id 与插件 api.commands.register 逐字一致）。
-    // 声明类型面无 modals 键（无法再产出该类声明）。
+    // 声明类型范围无 modals 键（无法再产出该类声明）。
     expect(builtinContributions[1].contributes.headerActions).toHaveLength(1)
     expect(builtinContributions[1].contributes.commands).toHaveLength(3)
     expect(builtinContributions[1].contributes.commands?.map((c) => c.command)).toEqual([

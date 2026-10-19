@@ -22,7 +22,7 @@ import type { ErrorDetails } from './message-context.js'
 import { WS_OPEN } from './connection-manager.js'
 
 /**
- * reply 通路守卫阈值（u4a：阈值参数化——生产默认 shared 常量 8MB/32MB，测试注入小阈值）。
+ * reply 通路检查阈值（u4a：阈值参数化——生产默认 shared 常量 8MB/32MB，测试注入小阈值）。
  * 告警/截断档语义与 push 通路（outbound-frame-registry.ts）共用同一标尺。
  */
 export interface ReplyGuardOptions {
@@ -44,7 +44,7 @@ export interface ClientPool {
 /**
  * config.providers 下发前的 supportedLevels 标注（U5 接线，字段语义见 shared/provider.ts）。
  *
- * IModelService 已声明 attachSupportedLevels（U5 接口扩面），直接调接口方法；
+ * IModelService 已声明 attachSupportedLevels（U5 扩大接口范围），直接调接口方法；
  * 标注失败只 warn 不抛——registry 内部已有 mtime 读取等降级，这里兜底保证 provider 列表
  * 下发永不被能力标注阻断；抛错时返回原 providers（supportedLevels 缺省 = renderer
  * normalizeSupportedLevels(undefined) 归一默认五档语义，U6 后前端无本地推导可回退）。
@@ -84,9 +84,13 @@ export interface BrokerServices {
  * （所有连接都要收到——headerAction 状态不是 per-connection 订阅态），且为
  * transient 状态帧（不经 message-bus publish，结构性不入 ring）。清单外新增的带
  * sessionId 全局广播帧仍触发下方哨兵告警。
+ * canvas.updated（session-store-layout-inversion D4）：画布变更失效提示，sessionId =
+ * 画布归属会话（消费方按归属过滤 + 拉取收敛）；所有连接可开 overlay，失效提示保持
+ * 全局路由语义。
  */
 const GLOBAL_BROADCAST_SESSION_ID_EXEMPT = new Set<ServerMessageType>([
   'plugin:headerActionUpdate',
+  'canvas.updated',
 ])
 
 export class ServerMessageBroker implements IMessageBroker {
@@ -109,8 +113,8 @@ export class ServerMessageBroker implements IMessageBroker {
     try {
       text = JSON.stringify(msg)
     // RT-1#8：send 是 sendError 的最后手段路径——序列化失败（循环引用等）若直抛，
-    // 异常沿调用方冒泡且 error envelope 无从发出（reply 同款守卫见下方 :168-174 形态）。
-    // 收口为 error envelope（新 envelope 是受控构造的纯字符串 payload，序列化不再失败，
+    // 异常沿调用方冒泡且 error envelope 无从发出（reply 同款检查见下方 :168-174 形态）。
+    // 收尾为 error envelope（新 envelope 是受控构造的纯字符串 payload，序列化不再失败，
     // 结构上不会递归）。
     } catch (e) {
       console.error(`[broker] send serialization failed (type=${msg.type}) — sending error envelope instead:`, e)
@@ -186,15 +190,15 @@ export class ServerMessageBroker implements IMessageBroker {
    * D2 reply 惯用法：发送带请求 id 的回复，消灭 46 处 `send(ws,{type,id:msg.id,payload})` 样板。
    * E1 泛型化：`type` 字面量收窄 `payload` 到 `ServerMessageMap[T]`，构造侧字段错误在编译期暴露（ADR-0016 双向保护）。
    *
-   * u4a reply 通路出站守卫（crash-resilience D3）：序列化后超截断档 → 整个 reply 替换为
+   * u4a reply 通路出站检查（crash-resilience D3）：序列化后超截断档 → 整个 reply 替换为
    * `payload_too_large` 错误 envelope——前端 pending.resolveEnvelope（core/transport/api/
    * pending.ts:186-214）对 type:'error' 且 id 命中 pending 的 reply 走 reject，Promise 正常
-   * 收口不悬挂；envelope message 含「加载更早」分页入口与 session 文件路径恢复指引。
+   * 收尾不悬挂；envelope message 含「加载更早」分页入口与 session 文件路径恢复指引。
    * 超告警档（未超截断档）写 warn 哨兵日志，不改动 reply。
    *
    * 实现注：本方法序列化一次后直接 ws.send(text)——与 send()（readyState 检查 + stringify）
-   * 行为等价，但守卫需要帧字节数，单次序列化避免大 reply 双重 stringify 开销。
-   * 序列化失败（循环引用等）→ 复用 sendError 收口为 error envelope（Promise 不悬挂），不抛错。
+   * 行为等价，但检查需要帧字节数，单次序列化避免大 reply 双重 stringify 开销。
+   * 序列化失败（循环引用等）→ 复用 sendError 收尾为 error envelope（Promise 不悬挂），不抛错。
    */
   reply<T extends ServerMessageType>(ws: WsType, id: string | undefined, type: T, payload: ServerMessageMap[T]): void {
     let text: string
@@ -311,10 +315,10 @@ export class ServerMessageBroker implements IMessageBroker {
     this.broadcast(this.buildSkillListMsg())
   }
   /**
-   * 广播 skill 缓存失效信号（让 landing useGlobalSkills/useProjectSkills 失效缓存重拉）。
+   * 广播 skill 缓存失效信号（让 landing useGlobalSkills/useProjectSkills 失效缓存重新拉取）。
    * 与 broadcastSkillList 区分：
    *   - broadcastSkillList = 全量列表推送到 settingsStore.skills（settings 弹窗用）
-   *   - broadcastSkillCacheInvalidated = 失效信号给 landing composable（runtime 已重扫缓存，前端重拉即拿新值）
+   *   - broadcastSkillCacheInvalidated = 失效信号给 landing composable（runtime 已重扫缓存，前端重新拉取即拿新值）
    * partial（RT-1#9）：降级补发形态——global 重建/通知链失败时由失败分支补发，标注
    * globalCache 可能仍是旧值（payload 字段语义见 shared SkillCacheInvalidatedPayload）。
    */

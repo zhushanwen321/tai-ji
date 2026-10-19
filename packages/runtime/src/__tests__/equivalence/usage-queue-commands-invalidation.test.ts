@@ -5,7 +5,7 @@
  * - 「事件风暴（模拟丢 context.update）后实例值收敛 get_session_stats 快照」→ describe
  *   「mock RPC 层」it 1 + describe「真实 pi 子进程」it 1（真实 get_session_stats 权威源）
  * - queue 深度实例用例已随实例撤销删除（PR #185 MF2：.get() 生产零消费；queue_update
- *   帧投影随后整链退役 u5a，队列深度展示归 session.delivery 快照帧——原帧翻译用例
+ *   该帧的派生视图随后整链退役 u5a，队列深度展示归 session.delivery 快照帧——原帧翻译用例
  *   改写为 mock it 4「NULL_EVENTS no-op」防线用例）
  * - commands 快照与失效（getCommands 全部调用路径 = 失效源）→ mock it 2 + it 3
  * - RPC 频率采样（P0.5② 终判输入）：usage/commands 实例的快照 RPC 次数与 p95 延迟 →
@@ -14,7 +14,7 @@
  *
  * skip-if-no-real-pi：真实 pi 用例已翻轨 faux LLM 轨（L2.5，2026-09-15）——「真实 pi 子进程」
  * describe 门控 FAUX_PI_READY（只判 binary，凭证无关、CI 可跑；被测语义 = 实例快照收敛
- * get_session_stats 权威投影，LLM 响应由 fauxResponses 脚本固定）；mock 层 describe 不依赖
+ * get_session_stats 权威派生视图，LLM 响应由 fauxResponses 脚本固定）；mock 层 describe 不依赖
  * 凭证，无条件执行。mock 层用例用 fake timers（项目规范，禁真实 sleep）。
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
@@ -215,7 +215,7 @@ async function waitUntil(label: string, predicate: () => boolean, timeoutMs = 5_
  */
 const TURN_TIMEOUT_MS = 300_000
 
-/** pi RpcSessionStats.contextUsage 的宽形态（真实 pi 用例的投影口径，对齐 fetchContext）。 */
+/** pi RpcSessionStats.contextUsage 的宽形态（真实 pi 用例的派生视图口径，对齐 fetchContext）。 */
 interface ContextUsageShape {
   tokens: number | null
   contextWindow: number
@@ -235,7 +235,7 @@ describe.skipIf(!FAUX_PI_READY)(
   })
 
   it('事件风暴（丢 context.update）后 usage 实例值收敛 get_session_stats 快照', { timeout: 420_000 }, async () => {
-    // faux 轨：验证对象是「实例快照 == get_session_stats 权威投影」，非模型智能——
+    // faux 轨：验证对象是「实例快照 == get_session_stats 权威派生视图」，非模型智能——
     // 一轮 turn 的响应由脚本固定；usage 数值按 faux 估算口径断言 typeof number +
     // 逐字段与权威拉取一致（禁精确值）
     const fx = await spawnPiFixture({ fauxResponses: [{ text: 'w8-usage-round-1' }] })
@@ -263,7 +263,7 @@ describe.skipIf(!FAUX_PI_READY)(
     for (let i = 0; i < EVENT_STORM_SIZE; i++) usageState.markDirty()
     await waitUntil('usage converge after storm', () => !usageState.isDirty())
 
-    // 终态等价断言：实例快照逐字段 == 此刻权威 get_session_stats.contextUsage 投影
+    // 终态等价断言：实例快照逐字段 == 此刻权威 get_session_stats.contextUsage 派生视图
     const stats = await fetchStats()
     const cu = stats.contextUsage as ContextUsageShape
     expect(typeof cu.tokens).toBe('number') // agent_end 后必有 assistant usage（环境前置断言）

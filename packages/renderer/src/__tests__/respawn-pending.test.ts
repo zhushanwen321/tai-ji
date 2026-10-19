@@ -7,10 +7,10 @@
  * - 意外退出（非强制）→ respawnPending 过渡态（panel 派生保持 conversation 形态，
  *   composer 可用——恢复窗口发消息经 runtime join 送达的 UI 半边）+ 恢复窗口订阅
  *   （立即重发 subscribe，成为恢复后新 bus entry 的订阅者 → restored live 可达）；
- * - session.restored 到达 → 过渡态收口 + dead 复位 + 对话流插 T4 恢复提示条；
- * - session.restoreFailed：willRetry=true 保持过渡态；willRetry=false（熔断）→ 收口回
+ * - session.restored 到达 → 过渡态收尾 + dead 复位 + 对话流插 T4 恢复提示条；
+ * - session.restoreFailed：willRetry=true 保持过渡态；willRetry=false（熔断）→ 收尾回
  *   终态 dead 页 + 失败提示条；
- * - 恢复超时（30s 无结果）→ 过渡态收口回终态（dead 已置，派生回 dead 占位）；
+ * - 恢复超时（30s 无结果）→ 过渡态收尾回终态（dead 已置，派生回 dead 占位）；
  * - 用户强制退出 → 直接终态（过渡态不出现，A7 反向验收）。
  *
  * mock 策略：与 session-exited.test.ts 同款（vi.hoisted 捕获 routeInbound handler 注入
@@ -149,7 +149,7 @@ describe('respawn 过渡态（T4 回流修复）', () => {
     expect(view.kind).toBe('conversation')
   })
 
-  it('② session.restored 到达 → 过渡态收口 + dead 复位 + T4 恢复提示条入流', async () => {
+  it('② session.restored 到达 → 过渡态收尾 + dead 复位 + T4 恢复提示条入流', async () => {
     await initAndConnect()
     const chatStore = useChatStore()
     const sessionStore = useSessionStore()
@@ -168,7 +168,7 @@ describe('respawn 过渡态（T4 回流修复）', () => {
     expect(notice!.content.length).toBeGreaterThan(0)
   })
 
-  it('③ restoreFailed：willRetry=true 保持过渡态；willRetry=false（熔断）收口回终态 + 失败提示条', async () => {
+  it('③ restoreFailed：willRetry=true 保持过渡态；willRetry=false（熔断）收尾回终态 + 失败提示条', async () => {
     await initAndConnect()
     const chatStore = useChatStore()
     const sessionStore = useSessionStore()
@@ -181,7 +181,7 @@ describe('respawn 过渡态（T4 回流修复）', () => {
     expect(chatStore.isRespawnPending('s-respawn')).toBe(true)
     expect(sessionStore.list.find((s) => s.id === 's-respawn')?.status).toBe('dead')
 
-    // 第二次失败：熔断（willRetry=false）→ 收口过渡态，终态 dead 页保留「重新打开」
+    // 第二次失败：熔断（willRetry=false）→ 收尾过渡态，终态 dead 页保留「重新打开」
     injectRestoreFailed('s-respawn', false)
     expect(chatStore.isRespawnPending('s-respawn')).toBe(false)
     expect(sessionStore.list.find((s) => s.id === 's-respawn')?.status).toBe('dead')
@@ -226,7 +226,7 @@ describe('respawn 过渡态（T4 回流修复）', () => {
     expect(forcedExitMarks.consumeForcedExit('s-respawn')).toBe(false)
   })
 
-  it('⑥ 恢复超时（30s 无 restored/restoreFailed）→ 过渡态收口回终态派生', async () => {
+  it('⑥ 恢复超时（30s 无 restored/restoreFailed）→ 过渡态收尾回终态派生', async () => {
     vi.useFakeTimers()
     try {
       await initAndConnect()
@@ -246,7 +246,7 @@ describe('respawn 过渡态（T4 回流修复）', () => {
     }
   })
 
-  it('⑦ 手动重开（useSidebar.restoreSession）：本地清账已删（D3），过渡态收口改由 restored 帧驱动；revive-on-RPC-reply 保留即时复位 dead', async () => {
+  it('⑦ 手动重开（useSidebar.restoreSession）：本地清零已删（D3），过渡态收尾改由 restored 帧驱动；revive-on-RPC-reply 保留即时复位 dead', async () => {
     await initAndConnect()
     const chatStore = useChatStore()
     const sessionStore = useSessionStore()
@@ -263,22 +263,22 @@ describe('respawn 过渡态（T4 回流修复）', () => {
     await expect(sidebar.restoreSession('s-respawn')).resolves.toBeUndefined()
 
     // revive-on-RPC-reply（D3 保留件）：RPC 成功即复位 dead → idle（切入失败不阻断）；
-    // runtime 重启后无 restored 帧的场景靠它收口
+    // runtime 重启后无 restored 帧的场景靠它收尾
     expect(sessionStore.list.find((s) => s.id === 's-respawn')?.status).toBe('idle')
-    // [D3] 本地 clearRespawnPending 已删：RPC 成功本身不再清过渡态（清账权归 runtime
+    // [D3] 本地 clearRespawnPending 已删：RPC 成功本身不再清过渡态（清零权归 runtime
     // facade 尾部出口的 restored 帧——手动恢复于 respawn 编排上下文命中时发布）
     expect(chatStore.isRespawnPending('s-respawn')).toBe(true)
 
-    // runtime 尾部出口发布 restored（手动路径信号③/①命中）→ 经恢复窗口订阅收口
+    // runtime 尾部出口发布 restored（手动路径信号③/①命中）→ 经恢复窗口订阅收尾
     injectRestored()
     expect(chatStore.isRespawnPending('s-respawn')).toBe(false)
   })
 
-  it('⑧ 恢复窗口发消息 → message_start 到达（join 路径无 restored 帧）→ 收口 + dead 复位 + T4 条（Gate B A7 缺陷回归）', async () => {
+  it('⑧ 恢复窗口发消息 → message_start 到达（join 路径无 restored 帧）→ 收尾 + dead 复位 + T4 条（Gate B A7 缺陷回归）', async () => {
     // 缺陷复现链：kill → 1s 内发消息 → runtime 惰性恢复 join 先于 D7 timer 完成 →
     // timer fire「already active/restoring — skip auto respawn」→ session.restored 帧永不
-    // 发布 → 过渡态无收口信号，30s 超时后回落 dead 终态页（用户被迫手动「重新打开」）。
-    // 修复：恢复窗口内 message.start（新 pi 已在处理用户消息）经 useChat 收口 gate 收口。
+    // 发布 → 过渡态无收尾信号，30s 超时后回落 dead 终态页（用户被迫手动「重新打开」）。
+    // 修复：恢复窗口内 message.start（新 pi 已在处理用户消息）经 useChat 收尾 gate 收尾。
     await initAndConnect()
     const chatStore = useChatStore()
     const sessionStore = useSessionStore()
@@ -299,7 +299,7 @@ describe('respawn 过渡态（T4 回流修复）', () => {
     })
     await nextTick()
 
-    // 过渡态收口 + dead 复位（用户不再见 dead 终态屏，无需手动「重新打开」）
+    // 过渡态收尾 + dead 复位（用户不再见 dead 终态屏，无需手动「重新打开」）
     expect(chatStore.isRespawnPending('s-respawn')).toBe(false)
     expect(sessionStore.list.find((s) => s.id === 's-respawn')?.status).toBe('idle')
     // T4 恢复提示条入流（与 restored 帧路径同文案）

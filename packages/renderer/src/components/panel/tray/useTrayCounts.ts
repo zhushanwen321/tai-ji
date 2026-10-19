@@ -1,5 +1,5 @@
 /**
- * useTrayCounts —— composer 任务托盘（Widget Tray）built-in 三件的数据面
+ * useTrayCounts —— composer 任务托盘（Widget Tray）built-in 三件的数据范围
  * （设计 docs/design/composer-task-tray.md（已删除，git 可追溯）§3.3 D2/D13 + §3.4 终态数据流）。
  *
  * 职责三件：
@@ -9,17 +9,17 @@
  *   [两视图裁决 2026-09-16] subagent 面板收窄为两视图——「已收起」机制已全链路删除
  *   （2026-09-16 裁决，intent 意愿维度自 shared 契约至执行层均不复存在），已结束桶
  *   判据 = !isRunningProjection，托盘无第三状态。
- * - **D13 首拉触发迁移**：**外壳挂载即** `watch(sessionId)` → `loadSubagents` / `loadWorkflows`
- *   ——范式 = useBackgroundTasks 的 watch(sid) 拉取腿（原侧栏任务列表的首拉腿已随该视图退役，
+ * - **D13 首次拉取触发迁移**：**外壳挂载即** `watch(sessionId)` → `loadSubagents` / `loadWorkflows`
+ *   ——范式 = useBackgroundTasks 的 watch(sid) 拉取路径（原侧栏任务列表的首次拉取路径已随该视图退役，
  *   迁入此处成为唯一实现；「外壳挂载」而非「面板打开」是 U1 的语义前提：面板每次 hover 打开
- *   都重新挂载，数据面必须活在外壳上，打开时数据已在）。
- *   历史 record（已结束桶 / dim 常驻判据）依赖首拉：广播腿只覆盖在跑任务，缺此腿切 session
- *   后托盘空/滞后。WS 重连腿仍归 useSidebar.onConnected（D13 明文不迁），本处不重复挂。
- * - **面板错误态 retry 支撑**：按类重拉（bash → useBackgroundTasks.refresh；
+ *   都重新挂载，数据范围必须活在外壳上，打开时数据已在）。
+ *   历史 record（已结束桶 / dim 常驻判据）依赖首次拉取：广播路径只覆盖在跑任务，缺此路径切 session
+ *   后托盘空/滞后。WS 重连路径仍归 useSidebar.onConnected（D13 明文不迁），本处不重复挂。
+ * - **面板错误态 retry 支撑**：按类重新拉取（bash → useBackgroundTasks.refresh；
  *   subagent / workflow → load*）。
  *
  * 数据链路（D2：native 组件直连既有 store，零新协议）：
- * - bash：useBackgroundTasks（per-session 分区，拉取 + 广播双腿）+ background-task-bucket
+ * - bash：useBackgroundTasks（per-session 分区，拉取 + 广播双路径）+ background-task-bucket
  *   SSOT 谓词分桶（运行中 = active 桶，含 killing「已发令待确认」瞬态；已结束 = exited /
  *   orphaned）——两视图由 `filterBackgroundTasks` 派生，排序同源。
  * - subagent：`subagentStore.recordsOf(sid)` 过滤 `origin !== 'workflow'`（workflow 派发的
@@ -38,14 +38,16 @@
  *   侧栏 `derivedStatus` 同源，但 agent 派发的子会话**通常未被 hydrate**（无消息分区）——
  *   `derivedStatus` 对 `status='active'` 且无消息会兜底 done，无法表达「运行中」；故托盘计数
  *   与状态点统一取进程级 `SessionSummary.status`（色语言仍复用 DOT_CLASS，见 TraySessionPanel）。
- * - canvas（第 5 件，problem-solve-canvas §3.1(3) u-tray-entry）：**native 直连 canvas store**
- *   （经 useCanvasSync 的窗口级单例订阅——首拉 + `canvas.updated` 失效重拉在订阅链内收敛，
- *   本数据面只读 store 清单投影）。画布是跨 session 共享资源（设计 D4/D7）：无 sid 分区、
- *   无 btw 抑制（非派生任务，bash/session 件同款边界）。计数口径 = 未收敛即进行中
+ * - canvas（第 5 件，problem-solve-canvas §3.1(3) u-tray-entry + session-store-layout-
+ *   inversion D4 隔离化）：**native 直连 canvas store**（经 useCanvasSync 的单条订阅——
+ *   首拉 + `canvas.updated` 失效重拉在订阅链内收敛，本数据面只读 store 清单投影）。
+ *   画布按归属会话隔离（runtime 清单只返回本会话画布）：本件计数 = 本会话画布；
+ *   btw 线（vid）托盘构造性归零（[D9③ 抑制执行点③]——画布已是会话维度资源，vid 非
+ *   合法归属分区键，线内画布经线 owner 会话托盘承载）。计数口径 = 未收敛即进行中
  *   （生长中 / 审查中都在活动），converged 终态落已结束；阶段徽标（生长中/审查中/已收敛）
  *   是面板行的派生展示值，不在数据面建第二词表。
  *
- * [迁移语义 D14「复制不抽走」] 计数口径与首拉范式自侧栏任务视图域复制迁入；该域组件 /
+ * [迁移语义 D14「复制不抽走」] 计数口径与首次拉取范式自侧栏任务视图域复制迁入；该域组件 /
  * composable 已随退役单元删除（原件不在，本文件为唯一实现）。谓词本体一律 import SSOT
  * （lib/subagent-bucket、lib/background-task-bucket），本文件不重写任何判定。
  *
@@ -145,7 +147,7 @@ export interface UseTrayCountsReturn {
   lists: TrayLists
   /** bash 分区（面板顶部损坏/断连提示条判据） */
   bashPartition: ComputedRef<TrayBashPartition>
-  /** 首拉/重拉错误（null = 无错误）；bash 的失败由 bashPartition.fetchFailed 承载 */
+  /** 首次拉取/重新拉取错误（null = 无错误）；bash 的失败由 bashPartition.fetchFailed 承载 */
   errors: {
     subagent: ComputedRef<string | null>
     workflow: ComputedRef<string | null>
@@ -164,28 +166,28 @@ export interface UseTrayCountsReturn {
     subagent: ComputedRef<boolean>
     workflow: ComputedRef<boolean>
   }
-  /** 面板错误态 retry：按类重拉（bash → refresh；subagent/workflow → load*） */
+  /** 面板错误态 retry：按类重新拉取（bash → refresh；subagent/workflow → load*） */
   retry: (kind: TrayTaskKind) => Promise<void>
 }
 
 /**
- * 数据面单例注入键：外壳（ComposerTray）在 setup 创建**唯一**实例并 provide，built-in 面板
+ * 数据范围单例注入键：外壳（ComposerTray）在 setup 创建**唯一**实例并 provide，built-in 面板
  * inject 消费。面板随 Popover 每次打开重新挂载（reka Presence 卸载/重建），若各自调
- * useTrayCounts 则每次打开重发首拉 RPC（loadSubagents + loadWorkflows，bash 另加 list）；
- * 单例把实例生命周期钉在外壳（= Composer 生命周期）上，面板卸载不销毁、不重拉。
+ * useTrayCounts 则每次打开重发首次拉取 RPC（loadSubagents + loadWorkflows，bash 另加 list）；
+ * 单例把实例生命周期固定在外壳（= Composer 生命周期）上，面板卸载不销毁、不重新拉取。
  */
 export const TRAY_COUNTS_KEY: InjectionKey<UseTrayCountsReturn> = Symbol('tray-counts')
 
 /**
- * 消费外壳提供的托盘数据面（TrayNativePanel 专用）。token 缺失即抛错：面板只能在
+ * 消费外壳提供的托盘数据范围（TrayNativePanel 专用）。token 缺失即抛错：面板只能在
  * ComposerTray 内渲染；**刻意不设「自建实例」回退**——回退即面板自持第二数据实例，正是
- * 「每次 hover 打开重发首拉 RPC」的根因（错误信息给出恢复动作）。
+ * 「每次 hover 打开重发首次拉取 RPC」的根因（错误信息给出恢复动作）。
  */
 export function useTrayCountsContext(): UseTrayCountsReturn {
   const tray = inject(TRAY_COUNTS_KEY)
   if (!tray) {
     throw new Error(
-      '[tray] 数据面注入缺失：TrayNativePanel 必须在 ComposerTray 内渲染' +
+      '[tray] 数据范围注入缺失：TrayNativePanel 必须在 ComposerTray 内渲染' +
         '（外壳需 provide(TRAY_COUNTS_KEY, useTrayCounts(sessionId))）。',
     )
   }
@@ -193,7 +195,7 @@ export function useTrayCountsContext(): UseTrayCountsReturn {
 }
 
 /**
- * 托盘 built-in 三件数据面。必须在组件 setup 同步调用（内部 watch 依赖实例 scope；
+ * 托盘 built-in 三件数据范围。必须在组件 setup 同步调用（内部 watch 依赖实例 scope；
  * useBackgroundTasks 同样要求 setup 上下文）。**整个应用只有一个调用点**——外壳
  * ComposerTray；面板走 useTrayCountsContext 消费同一实例（见 TRAY_COUNTS_KEY）。
  *
@@ -205,14 +207,14 @@ export function useTrayCounts(sessionIdRef: Ref<string | null | undefined>): Use
 
   const subagentStore = useSubagentStore()
   const workflowStore = useWorkflowStore()
-  // bash 数据面：useBackgroundTasks 自带 watch(sid) 拉取腿 + 广播增量腿 + 重连腿，
+  // bash 数据范围：useBackgroundTasks 自带 watch(sid) 拉取路径 + 广播增量路径 + 重连路径，
   // 托盘不另挂订阅（AGENTS 规则 2：物理订阅在 store/状态根层收敛）。
   const backgroundTasks = useBackgroundTasks(normalizedSid)
 
   // ── subagent：origin 过滤（workflow 派发 record 归 workflow 面板）→ 两视图分桶 ──
   // excludeOrigin 选项式（S1 判据单源化，与 hasRunning 同形态；禁止内联 filter 第二判据）
-  // [M4-a / D9③ 投影收窄·任务托盘抑制执行点①] btw 线（sessionId=vid，drawer 内 Composer
-  // 同样挂载本托盘）不投影派生任务：subagent/workflow-run 两件按线 owner 分区读，
+  // [M4-a / D9③ 派生视图收窄·任务托盘抑制执行点①] btw 线（sessionId=vid，drawer 内 Composer
+  // 同样挂载本托盘）不派生虚拟任务：subagent/workflow-run 两件按线 owner 分区读，
   // 在此构造性归零——派生过程仅在消息流工具调用中可见，托盘不为线内派生提供 opener
   //（对齐 zcode）。bash（线自身后台命令）与 session件（真实子会话）非派生虚拟键，照常。
   const derivedSuppressed = computed(() => {
@@ -267,13 +269,17 @@ export function useTrayCounts(sessionIdRef: Ref<string | null | undefined>): Use
   const bashRunning = computed(() => filterBackgroundTasks(bashTasks.value, 'active'))
   const bashEnded = computed(() => filterBackgroundTasks(bashTasks.value, 'ended'))
 
-  // ── canvas（第 5 件，u-tray-entry）：native 直连 canvas store（跨 session 全局资源）──
-  // 订阅生命周期归 useCanvasSync（窗口级单例 + refCount，见其文件头）：首拉与 canvas.updated
-  // 失效重拉在订阅链内收敛，本数据面只读清单投影、零新协议。无 sid 分区、无 btw 抑制
-  // （画布不属任何 session，也非 session 派生任务）。进行中 = 未收敛（生长中 / 审查中都在活动），
-  // 已结束 = converged 终态（回看资产）。
-  const canvasStore = useCanvasSync()
-  const canvasEntries = computed<CanvasListEntry[]>(() => canvasStore.list)
+  // ── canvas（第 5 件，u-tray-entry）：native 直连 canvas store（per-session 分区读）──
+  // 订阅生命周期归 useCanvasSync（模块级单条订阅 + per-session 分流，见其文件头）：首拉与
+  // canvas.updated 失效重拉在订阅链内收敛，本数据面只读清单投影、零新协议。[D9③ 抑制
+  // 执行点③] btw 线（vid）托盘构造性归零——画布按归属会话隔离（D4）后已是会话维度资源，
+  // vid 非合法归属分区键（线内画布经线 owner 会话托盘承载）。进行中 = 未收敛（生长中 /
+  // 审查中都在活动），已结束 = converged 终态（回看资产）。
+  const canvasStore = useCanvasSync(normalizedSid)
+  const canvasEntries = computed<CanvasListEntry[]>(() => {
+    if (derivedSuppressed.value) return []
+    return canvasStore.list.value
+  })
   const canvasActive = computed(() => canvasEntries.value.filter((c) => !c.converged))
 
   const counts = computed<TrayCounts>(() => ({
@@ -304,14 +310,14 @@ export function useTrayCounts(sessionIdRef: Ref<string | null | undefined>): Use
     },
   }))
 
-  // ── D13 首拉触发：挂载即拉 + 切 session 重拉（范式 = useBackgroundTasks 拉取腿）──
-  // immediate 覆盖首挂载；切走期间广播腿仍投递（订阅按 sid refCount 收敛在状态根），
-  // 但切回时必须无条件重拉一次——聚合快照以拉取为唯一真相入口（承自原侧栏任务列表
-  // 首拉腿的语义）。
+  // ── D13 首次拉取触发：挂载即拉 + 切 session 重新拉取（范式 = useBackgroundTasks 拉取路径）──
+  // immediate 覆盖首次挂载；切走期间广播路径仍投递（订阅按 sid refCount 收敛在状态根），
+  // 但切回时必须无条件重新拉取一次——聚合快照以拉取为唯一真相入口（承自原侧栏任务列表
+  // 首次拉取路径的语义）。
   watch(
     normalizedSid,
     (sid) => {
-      // [D9③ 抑制] btw 线不发首拉（getSubagents/getWorkflows 对线 vid 零消费方——
+      // [D9③ 抑制] btw 线不发首次拉取（getSubagents/getWorkflows 对线 vid 零消费方——
       // 行集已构造性归零，拉取只是无效 RPC）。
       if (!sid || isBtwVirtualId(sid)) return
       void subagentStore.loadSubagents(sid)
@@ -320,12 +326,12 @@ export function useTrayCounts(sessionIdRef: Ref<string | null | undefined>): Use
     { immediate: true },
   )
 
-  /** 面板错误态 retry：按类重拉（load* 内部已收口错误到 loadError，调用方无需 try-catch） */
+  /** 面板错误态 retry：按类重新拉取（load* 内部已收尾错误到 loadError，调用方无需 try-catch） */
   async function retry(kind: TrayTaskKind): Promise<void> {
     const sid = normalizedSid.value
     if (!sid) return
     if (kind === 'subagent') {
-      if (isBtwVirtualId(sid)) return // D9③ 抑制面同口径（retry 不绕过构造性归零）
+      if (isBtwVirtualId(sid)) return // D9③ 抑制范围同口径（retry 不绕过构造性归零）
       await subagentStore.loadSubagents(sid)
       return
     }

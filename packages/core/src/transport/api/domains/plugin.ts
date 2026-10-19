@@ -7,7 +7,7 @@
  * 插件列表刷新经 config.plugins 广播（approve 触发 activate 状态变化时由
  * plugin-service 广播，onPlugins 订阅消费）。
  * denyPermissions=拒绝本次申请（不回收已授权限）；revokePermissions=撤销全部已授权限
- * （基线协议面保留，审批弹窗的拒绝按钮不走它）。命令名对齐 runtime
+ * （基线协议范围保留，审批弹窗的拒绝按钮不走它）。命令名对齐 runtime
  * transport/plugin-message-handler.ts。
  *
  * 依赖方向：events（订阅）+ command（类型化请求/动作原语）。

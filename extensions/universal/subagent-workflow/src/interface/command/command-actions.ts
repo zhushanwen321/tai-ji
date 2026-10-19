@@ -11,9 +11,9 @@
 /** /subagents RPC action 判别联合。message/start 为 GUI 定向消息通道（设计 §3.3.3，
  *  仅 RPC 分支消费；missing-args 携带 missing 字段供 handler 输出指明缺什么的 usage）。 */
 export type SubagentRpcAction =
-  | { action: "cancel"; recordId: string }
+  | { action: "cancel"; recordId: string; requestId?: string }
   | { action: "cancel-missing-id" }
-  | { action: "message"; recordId: string; text: string }
+  | { action: "message"; recordId: string; text: string; requestId?: string }
   | { action: "message-missing-args"; missing: "recordId" | "text" }
   | { action: "start"; slug: string; task: string }
   | { action: "start-missing-args"; missing: "slug" | "task" }
@@ -35,7 +35,7 @@ export type WorkflowRpcAction =
  */
 const REMOVED_LIFECYCLE_VERBS: ReadonlySet<"pause"> = new Set(["pause"]);
 
-/** verb 是否为已移除的 lifecycle action（类型守卫，收窄到 "pause"）。 */
+/** verb 是否为已移除的 lifecycle action（类型保护，收窄到 "pause"）。 */
 function isRemovedLifecycleVerb(verb: string): verb is "pause" {
   return REMOVED_LIFECYCLE_VERBS.has(verb as "pause");
 }
@@ -88,6 +88,7 @@ function splitFirstToken(s: string): { token: string; rest: string } | null {
  * 错误（全局规则：错误信息指向恢复动作）。noop 表示 GUI 端无对应程序化操作（GUI
  * 已在 CommandPopover 屏蔽 /subagents 入口，此分支仅兜底手动 prompt）。
  */
+// fallow-ignore-next-line complexity —— cyclo 17>15 存量带伤（协议解析单点，分支枚举与 JSDoc 动作表一一对应），merge 收尾期不做行为性拆分；按 cancel/message/start 分派拆辅助函数登记为后续重构债
 export function parseSubagentRpcCommand(argsStr: string): SubagentRpcAction {
   const first = splitFirstToken(argsStr);
   if (!first) return { action: "noop" };
@@ -96,6 +97,12 @@ export function parseSubagentRpcCommand(argsStr: string): SubagentRpcAction {
   if (verb === "cancel") {
     const idToken = splitFirstToken(rest);
     if (!idToken) return { action: "cancel-missing-id" };
+    // --req=<requestId> 可选标记（subagent-composer 结果文件回执，runtime 生成；
+    // 手动 prompt / 旧调用方不带——缺省 = 无回执面，行为同旧）
+    const req = splitFirstToken(idToken.rest);
+    if (req && req.token.startsWith("--req=")) {
+      return { action: "cancel", recordId: idToken.token, requestId: req.token.slice("--req=".length) || undefined };
+    }
     return { action: "cancel", recordId: idToken.token };
   }
   if (verb === "message" || verb === "start") {
@@ -108,15 +115,24 @@ export function parseSubagentRpcCommand(argsStr: string): SubagentRpcAction {
         ? { action: "message-missing-args", missing: "recordId" }
         : { action: "start-missing-args", missing: "slug" };
     }
+    // --req=<requestId> 可选标记（subagent-composer 结果文件回执；在 recordId/slug
+    // 之后、text 之前——text 是剩余全量，标记必须在它前面才可剥离）。缺省 = 无回执面。
+    let requestId: string | undefined;
+    let textRest = second.rest;
+    const reqTok = splitFirstToken(textRest);
+    if (reqTok && reqTok.token.startsWith("--req=")) {
+      requestId = reqTok.token.slice("--req=".length) || undefined;
+      textRest = reqTok.rest;
+    }
     // 先还原再判空：纯字面 \n 还原后是真实换行（whitespace），应在解析层拦截为缺参
-    const payload = decodeNewlineEscapes(second.rest);
+    const payload = decodeNewlineEscapes(textRest);
     if (!payload.trim()) {
       return isMessage
         ? { action: "message-missing-args", missing: "text" }
         : { action: "start-missing-args", missing: "task" };
     }
     return isMessage
-      ? { action: "message", recordId: second.token, text: payload }
+      ? { action: "message", recordId: second.token, text: payload, requestId }
       : { action: "start", slug: second.token, task: payload };
   }
   return { action: "noop" };

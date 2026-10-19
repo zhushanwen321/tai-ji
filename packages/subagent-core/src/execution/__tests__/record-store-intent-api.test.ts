@@ -1,12 +1,12 @@
 // src/__tests__/record-store-intent-api.test.ts
 //
-// [U1 / record 持久化收敛 §3.1] RecordStore 意图级操作 API 立面专属测试。
+// [U1 / record 持久化收敛 §3.1] RecordStore 意图级操作 API 对外接口专属测试。
 //
 // 覆盖（验收条款 A1/A5/A6）：
 //   - A1 九意图原语齐备（register/appendEvent/markRoundStarted/markRoundIdle/
 //     markFinalized/markCancelled/adoptEngineDeath/markResurrected，
 //     [collect 退役] 原 markBatchFinalized 已删；[u-arch] 原 markArchived 更名
-//     markSettledOut 随意图机制退役收口）+ acquireWriteLease（A6）；
+//     markSettledOut 随意图机制退役收尾）+ acquireWriteLease（A6）；
 //   - A5 markResurrected D3c 三中间形态（(ii) acquire 后中断 / (iii) 全成 /
 //     acquire 失败）+ running 候选接管形态（跳删终态位仍 acquire）；
 //   - §3.4 失败语义：`.state` 写失败 → 零持久化副作用、record 留 running 形态。
@@ -118,12 +118,12 @@ function makeSubagentRecord(id: string, over: Partial<SubagentRecord> = {}): Sub
   };
 }
 
-describe("RecordStore 意图 API 立面（U1 A1/A2/A5/A6）", () => {
+describe("RecordStore 意图 API 对外接口（U1 A1/A2/A5/A6）", () => {
   let tmpDir: string;
   let sessionsDir: string;
   let manifestDir: string;
   let sessionFile: string;
-  /** Pi appendEntry mock（显式签名：可作 RecordStorePi 直传 + 断言面可用）。 */
+  /** Pi appendEntry mock（显式签名：可作 RecordStorePi 直传 + 断言范围可用）。 */
   let appendEntryMock: ReturnType<typeof vi.fn<(customType: string, data: unknown) => void>>;
   let store: RecordStore;
 
@@ -151,7 +151,7 @@ describe("RecordStore 意图 API 立面（U1 A1/A2/A5/A6）", () => {
     fs.mkdirSync(manifestDir, { recursive: true });
     sessionFile = path.join(sessionsDir, "2026-01-01_uuid.jsonl");
     appendEntryMock = vi.fn<(customType: string, data: unknown) => void>();
-    store = new RecordStore(sessionsDir, undefined, { appendEntry: appendEntryMock }, manifestDir);
+    store = new RecordStore(() => sessionsDir, undefined, { appendEntry: appendEntryMock }, () => manifestDir);
     order.length = 0;
     probe.manifestPath = undefined;
     probe.manifestExistedAtRelease = undefined;
@@ -170,7 +170,7 @@ describe("RecordStore 意图 API 立面（U1 A1/A2/A5/A6）", () => {
 
   const manifestPathOf = (id: string): string => path.join(manifestDir, `${id}.json`);
 
-  /** [W1/D3] 事件文件末条事件行（观察面独立于被测 store——直读 .events 文件）。 */
+  /** [W1/D3] 事件文件末条事件行（观察侧独立于被测 store——直读 .events 文件）。 */
   const lastJournalEvent = (dir: string, id: string): Record<string, unknown> | undefined => {
     try {
       const lines = fs
@@ -190,7 +190,7 @@ describe("RecordStore 意图 API 立面（U1 A1/A2/A5/A6）", () => {
   // ============================================================
   // A1 十原语齐备
   // ============================================================
-  describe("A1 意图原语立面", () => {
+  describe("A1 意图原语的对外接口", () => {
     it("九意图原语 + store 内部 acquire 动作齐备（[collect 退役] markBatchFinalized 原语已删）", () => {
       const fns = [
         "register",
@@ -225,7 +225,7 @@ describe("RecordStore 意图 API 立面（U1 A1/A2/A5/A6）", () => {
 
       expect(store.markFinalized(record, "user-close")).toBe(true);
 
-      // 写序：写权声明 → 终态落账（事件/entry/manifest）→ .alive release
+      // 写序：写权声明 → 终态写入 journal 记录（事件/entry/manifest）→ .alive release
       //（③ 后 `.state` 不再是写序中的一环）。
       expect(order).toEqual(["alive-acquire", "alive-release"]);
       // release 时点 manifest 已落盘（.state 先 → manifest 后 → .alive 删）。
@@ -233,7 +233,7 @@ describe("RecordStore 意图 API 立面（U1 A1/A2/A5/A6）", () => {
       // 写后即刻可见（同步写，无 fire-and-forget）：终态收条 = record-settled 帧。
       expect(lastSettledEvent(manifestDir, "bg-1")?.stopReason).toBe("user-close");
       expect(fs.existsSync(`${sessionFile}.alive`)).toBe(false);
-      // manifest 投影（同步落盘）。
+      // manifest 派生视图（同步落盘）。
       expect(readManifestJson("bg-1")).toMatchObject({
         id: "bg-1",
         status: "closed",
@@ -249,7 +249,7 @@ describe("RecordStore 意图 API 立面（U1 A1/A2/A5/A6）", () => {
       );
     });
 
-    it("sessionFile 缺失 → binding 快照面跳过（warn 留痕），manifest/entry 照常", () => {
+    it("sessionFile 缺失 → binding 快照侧跳过（warn 留痕），manifest/entry 照常", () => {
       const record = makeRecord("bg-3");
       store.register(record);
       trySettleLegacyClosed(record, "gc");
@@ -284,7 +284,7 @@ describe("RecordStore 意图 API 立面（U1 A1/A2/A5/A6）", () => {
 
   // [collect 退役] 原 markBatchFinalized barrier 用例（manifest 屏障写序 + 落标
   // entry 携带标记）随批机制删除；存量 batchFinalized entry 的读侧容忍由
-  // batch-finalized.test.ts / sync-collect-recovery.test.ts 读侧守卫承接。
+  // batch-finalized.test.ts / sync-collect-recovery.test.ts 读侧检查承接。
 
   // ============================================================
   // A2 markRoundStarted / markRoundIdle 簿记
@@ -304,7 +304,7 @@ describe("RecordStore 意图 API 立面（U1 A1/A2/A5/A6）", () => {
       expect(lastJournalEvent(manifestDir, "chat-1")).toMatchObject({ type: "record-round-started" });
     });
 
-    it("[U6/D4 轮始清点族扩字段] 上轮 stopReason 随轮始清除（第 2+ 轮在飞 record 不携带 stale 停因——renderer isOccupied 终态判据 `running && stopReason===undefined` 的直接守卫）", () => {
+    it("[U6/D4 轮始清点族扩字段] 上轮 stopReason 随轮始清除（第 2+ 轮在途 record 不携带 stale 停因——renderer isOccupied 终态判据 `running && stopReason===undefined` 的直接检查）", () => {
       const record = makeRecord("chat-1b");
       record.result = "prev round";
       record.stopReason = "completed"; // 上轮轮终写入的展示位（markRoundIdleImpl 簿记⑩）
@@ -341,7 +341,7 @@ describe("RecordStore 意图 API 立面（U1 A1/A2/A5/A6）", () => {
         /terminal bookkeeping already frozen/,
       );
       // 零副作用：内存态不动（status/result 保持终态冻结值）、事件文件不追加
-      //（fail-fast 先于一切簿记——轮始帧不落账）。
+      //（fail-fast 先于一切簿记——轮始帧不写入 journal 记录）。
       expect(record.status).toBe("idle");
       expect(record.result).toBe("final output");
       expect(countEventLines()).toBe(linesBefore);
@@ -372,7 +372,7 @@ describe("RecordStore 意图 API 立面（U1 A1/A2/A5/A6）", () => {
       expect(record.status).toBe("idle");
 
       expect(store.markRoundStarted("chat-rs-idle")).toBe(true);
-      expect(record.status).toBe("running"); // idle→running 翻边（续轮在飞）
+      expect(record.status).toBe("running"); // idle→running 翻边（续轮在途）
       expect(record.result).toBeUndefined(); // 上轮结果随轮始清点（isStreaming 公式）
       expect(record.stopReason).toBeUndefined();
       expect(lastJournalEvent(manifestDir, "chat-rs-idle")).toMatchObject({
@@ -402,7 +402,7 @@ describe("RecordStore 意图 API 立面（U1 A1/A2/A5/A6）", () => {
   describe("markRoundIdle（簿记全集①-⑨；簿记⑦ .alive 保留）", () => {
     it("成功轮：result=content、round+1、closedReason 清、翻 idle、注销②、entry 携带新 round", () => {
       const record = makeRecord("chat-2", { round: 1 });
-      record.closedReason = "gc"; // [S10]：前置残留不清则泄漏进 list 投影
+      record.closedReason = "gc"; // [S10]：前置残留不清则泄漏进 list 派生视图
       record.sessionFile = sessionFile;
       store.register(record);
       store.acquireWriteLease(sessionFile, "chat-2");
@@ -419,7 +419,7 @@ describe("RecordStore 意图 API 立面（U1 A1/A2/A5/A6）", () => {
       expect(record.closedReason).toBeUndefined(); // ④
       // ⑥ idleSince 已退役（30 天空闲回收判据锚，ADR-0081）——无簿记动作。
       expect(order).toEqual([]); // ⑦ `.alive` 保留——无 release 动作
-      expect(fs.existsSync(`${sessionFile}.alive`)).toBe(true); // ⑦ 落盘面仍持声明
+      expect(fs.existsSync(`${sessionFile}.alive`)).toBe(true); // ⑦ 落盘文件仍持声明
       expect(unregister).toHaveBeenCalledWith("chat-2", "running"); // ⑧ 发射点②
       // [W1/D3 表行 4] ⑨ 过程面改走事件文件——record-round-idle 帧携带轮统计快照
       //（result 全文不进事件行，轮结果留在内存/条目；stopReason=completed）。
@@ -435,7 +435,7 @@ describe("RecordStore 意图 API 立面（U1 A1/A2/A5/A6）", () => {
       store.register(record);
 
       expect(store.markRoundIdle("chat-3", { kind: "failed", reason: "engine boom" })).toBe(true);
-      expect(record.lastError).toBe("engine boom"); // ⑨ lastError 归口
+      expect(record.lastError).toBe("engine boom"); // ⑨ lastError 收敛
       expect(record.result).toBe("round did not complete: engine boom"); // ② 首轮失败无前值
     });
 

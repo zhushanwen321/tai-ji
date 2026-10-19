@@ -5,7 +5,7 @@
  * - T1.1: record 3 cwd → list 返 3 条倒序
  * - T1.2: 7 cwd → 淘汰最旧保 6（INV-2，W1 MAX_RECORDS 10→6）
  * - T1.3: 同 cwd 多次 → 不重复（INV-3）
- * - T1.4: cwd 空串静默跳过（INV-1 双层守卫）
+ * - T1.4: cwd 空串静默跳过（INV-1 双层检查）
  * - T1.5: 文件不存在首启 → list 返 [] 不抛
  * - T1.6: 文件损坏非法 JSON → list 返 []（INV-4）
  * - T1.7: debounce：record N 次 advance 500ms → atomicWrite 1 次
@@ -114,7 +114,7 @@ describe('RecentWorkspacesStore', () => {
     expect(list[1].cwd).toBe('/project/other')
   })
 
-  // ── T1.4: cwd 空串静默跳过（INV-1 双层守卫）───────────────────
+  // ── T1.4: cwd 空串静默跳过（INV-1 双层检查）───────────────────
 
   it('T1.4: empty string cwd silently skipped (INV-1)', () => {
     store.record('')

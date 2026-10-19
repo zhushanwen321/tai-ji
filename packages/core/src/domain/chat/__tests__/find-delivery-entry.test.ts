@@ -22,13 +22,13 @@ describe('findDeliveryEntry（[MF-1-4] 撤回在途判定谓词单点）', () =>
     resetDeliveryProjectionForTest()
   })
 
-  it('投影命中 → 返回条目对象（调用方按 state 细分，非布尔）', () => {
+  it('派生视图命中 → 返回条目对象（调用方按 state 细分，非布尔）', () => {
     seed('s1', [{ clientUuid: 'u-1', state: 'in-flight', lane: 'direct' }])
     const entry = findDeliveryEntry('s1', 'u-1')
     expect(entry).toMatchObject({ clientUuid: 'u-1', state: 'in-flight', lane: 'direct' })
   })
 
-  it('投影无该 session / 无该条目 → undefined（revokeMessage 据此走已送达腿）', () => {
+  it('派生视图无该 session / 无该条目 → undefined（revokeMessage 据此走已送达路径）', () => {
     seed('s1', [{ clientUuid: 'u-1', state: 'queued' }])
     expect(findDeliveryEntry('s2', 'u-1')).toBeUndefined()
     expect(findDeliveryEntry('s1', 'u-404')).toBeUndefined()

@@ -3,8 +3,8 @@
  *
  * 迁出来源 = DrawerControlState.selectedWorkflowName（workflow tab 当前展示的 workflow 名）。
  * per-session 分区（useSessionScopedState，ADR-0049），键 = drawerSessionKey。
- * 写入面 = setWorkflowView（coordination.openWorkflowInDrawer 编排调用）；
- * 读取面 = useWorkflowSelection（WorkflowTab 消费）。
+ * 写侧 = setWorkflowView（coordination.openWorkflowInDrawer 编排调用）；
+ * 读侧 = useWorkflowSelection（WorkflowTab 消费）。
  */
 import { computed, reactive } from 'vue'
 import type { ComputedRef } from 'vue'
@@ -12,7 +12,7 @@ import { useSessionScopedState } from '../../../foundation/use-session-scoped-st
 import { drawerSessionKey } from '../control'
 
 /** workflow 选中态（per-session 分区） */
-export interface WorkflowSelectionState { // oe-exempt:20261003:framework:类型契约先行——selection 分区契约，renderer 消费面即本批 D1 单元
+export interface WorkflowSelectionState { // oe-exempt:20261003:framework:类型契约先行——selection 分区契约，renderer 消费方即本批 D1 单元
   /** workflow tab 当前展示的 workflow 名；null=未选中（workflow tab 显空态） */
   selectedWorkflowName: string | null
 }

@@ -137,7 +137,7 @@ describe("callLLM", () => {
 		}
 	});
 
-	it("usage 缺失：resp.usage 不存在 → ok:true 结果无 usage 字段（跳过落账语义由调用方处理）", async () => {
+	it("usage 缺失：resp.usage 不存在 → ok:true 结果无 usage 字段（跳过记录语义由调用方处理）", async () => {
 		const ctx = makeCtx({ ok: true, apiKey: "k" });
 		mockComplete.mockResolvedValue({ stopReason: "stop", content: [{ type: "text", text: "hello" }] });
 

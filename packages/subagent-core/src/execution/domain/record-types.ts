@@ -10,7 +10,7 @@
 // TranscriptRef 族 / AliveMarker）及其配套的判定常量与 `ResurrectDeniedError`。
 //
 // 现状：`execution/assembly/types.ts` 不再 re-export 本文件——领域词汇的权威路径 =
-// execution/domain/，消费面 import 直达本文件；record 聚合（ExecutionRecord）在同
+// execution/domain/，消费方 import 直达本文件；record 聚合（ExecutionRecord）在同
 // 目录 record-model.ts。
 //
 // 依赖方向：本文件零内部依赖（只用 TS 内置与 SDK 类型），不得 import assembly 或
@@ -19,7 +19,7 @@
 /**
  * 唯一执行状态（永久会话模型两态，设计 subagent-permanent-session-model.md
  * §3.2.1/§3.2.2；U2 两态转正，终态概念删除）：
- *   running = 本轮有任务在飞；idle = 无任务在飞，随时可接下一条 message。
+ *   running = 本轮有任务在途；idle = 无任务在途，随时可接下一条 message。
  *
  * 「上一轮为什么停」由 {@link StopReason} 承载（纯展示 + 排障；U6 起 stopReason
  * 参与 isOccupied 占用判定——`running && stopReason === undefined`，W4 死亡纳管态
@@ -27,8 +27,8 @@
  *
  * [U2 桥接不变量 → U5 后现状] 旧「closed 终态」读判据 = `idle && closedReason !==
  * undefined`（读侧兼容位）：写侧只剩 workflow D7 例外族与监督器放弃继续产出
- * （out-of-scope 维持现状）；收口动作（U5）走 markSettled 只写 stopReason 不写
- * closedReason（不终态化），close 收口落账走 markSettledOut（不动占用位）——
+ * （out-of-scope 维持现状）；收尾动作（U5）走 markSettled 只写 stopReason 不写
+ * closedReason（不终态化），close 收尾写入 journal 记录走 markSettledOut（不动占用位）——
  * closedReason 不再由 cancel/close/编排性关闭产出。
  */
 export type ExecutionStatus = "running" | "idle";
@@ -38,7 +38,7 @@ export type ExecutionStatus = "running" | "idle";
  *   "tool"     — 主 agent 经 subagent 工具手动派发（现状全部 record）；
  *   "workflow" — workflow 脚本内 agent() 调用派发（生产写入方 W2 executeWorkflowAgent 接线）。
  * 缺省语义 = "tool"：存量 record / 未传字段的 entry 反序列化产物一律视为手动派发，
- * 四个投影消费面（subagents tool list / renderer 侧栏计数 / renderer 后台工作指示 /
+ * 四个派生视图消费方（subagents tool list / renderer 侧栏计数 / renderer 后台工作指示 /
  * TUI /subagents）对缺省 record 的可见性与历史行为完全一致（零迁移）。
  */
 export type RecordOrigin = "tool" | "workflow";
@@ -60,24 +60,24 @@ export type RecordOrigin = "tool" | "workflow";
  *   user-close      — 用户手动 close action（含对话模式 close）
  *   cancelled       — 用户取消（close(force:true) / cancelBackground）
  *   gc              — 通用完成/失败（一次执行自然结束、超时、错误等无专属 reason 的终态）
- *   disconnected    — 历史数据读面兜底（读 sidecar 空内容/损坏 → disconnected：正常结束
- *                     但死因不可考）。现行事件流 fold 与 binding 快照读面都不产该值
+ *   disconnected    — 历史数据读侧兜底（读 sidecar 空内容/损坏 → disconnected：正常结束
+ *                     但死因不可考）。现行事件流 fold 与 binding 快照读侧都不产该值
  *                     （「死因不可考」的现行兜底展示 = interrupted-by-restart）；值域
- *                     成员保留供磁盘/内存历史数据（sidecar 时代写入）的读面判定与
+ *                     成员保留供磁盘/内存历史数据（sidecar 时代写入）的读侧判定与
  *                     RECONNECTABLE 集合成员资格。
  */
 export type ClosedReason = 'parent-shutdown' | 'parent-fork' | 'parent-new' | 'user-close' | 'cancelled' | 'gc' | 'disconnected';
 
 /**
- * [v8.5 D] 透明重生守卫拒绝专用错误：messageHandler 的 endedMessageGuard 必须原样
+ * [v8.5 D] 透明重生检查拒绝专用错误：messageHandler 的 endedMessageGuard 必须原样
  * 透传本类错误（自带完整行动语言），不得按 A1 分流规则改写——否则 worktree/异进程
  * 占用文案会被「fork-from 指引」覆盖，误导 agent 走已被判死的通道。
  */
 export class ResurrectDeniedError extends Error {}
 
 /**
- * ClosedReason 中 6 个可写终态原因（运行时守卫用——防御性解析外部输入时校验成员资格）。
- * disconnected 是历史数据读面兜底、现行链路无写点（sidecar 读面已退场），不在本清单；
+ * ClosedReason 中 6 个可写终态原因（运行时检查用——防御性解析外部输入时校验成员资格）。
+ * disconnected 是历史数据读侧兜底、现行链路无写点（sidecar 读侧已退场），不在本清单；
  * StopReason 全枚举 = 本清单 + disconnected + NEW_STOP_REASONS + ROUND_TERMINAL_STOP_REASONS。
  */
 export const CLOSED_REASONS: readonly ClosedReason[] = [
@@ -111,8 +111,8 @@ export const CLOSED_REASONS: readonly ClosedReason[] = [
 export type ExecutionOutcome = "completed" | "failed" | "cancelled";
 
 /**
- * 对外投影的 outcome 联合：含历史 record（outcome 字段诞生前的存量数据）兼容态。
- * 投影层（projectOutcome 唯一出口）对无 outcome 字段的 closed record 按
+ * 对外派生视图的 outcome 联合：含历史 record（outcome 字段诞生前的存量数据）兼容态。
+ * 派生视图层（projectOutcome 唯一出口）对无 outcome 字段的 closed record 按
  * deriveOutcome(closedReason, error) 兜底派生；"closed-legacy" 预留给连派生输入都
  * 不足以判读的存量形态，消费方必须处理该成员（不得因未知值崩溃）。
  */
@@ -140,7 +140,7 @@ export type ExecutionMode = "background";
  * + 2 个正常轮终展示值：
  *   interrupted              — 用户 cancel 中断当前轮（§3.2.5 cancel = 暂停这一轮）
  *   interrupted-by-restart   — 宿主重启中断（§3.2.2 host shutdown 行）
- *   interrupted-by-parent    — 编排性关闭打断在飞轮（宿主 session fork/new 自动收口）
+ *   interrupted-by-parent    — 编排性关闭打断在途轮（宿主 session fork/new 自动收尾）
  *   reopened                 — 锚失效带历史重开（§3.2.3 reopen 降级，epoch+1 的首轮）
  *   completed / failed       — [A-lite] 正常轮终展示位（markRoundIdle 成功/失败轮写入；
  *                              status 翻 idle——[two-state-convergence U4/D3] 翻边后
@@ -149,7 +149,7 @@ export type ExecutionMode = "background";
  *                              与上 4 值无冲突）
  * 展示 + 排障（列表主展示用派生 outcome）+ [U6] 占用资格判定（isOccupied =
  * `running && stopReason === undefined`——W4 死亡纳管态据此排除，见下方字段注释）；
- * 复活资格判据仍是物理三件套（§3.2.3）。在飞期本字段被轮始清点族清空
+ * 复活资格判据仍是物理三件套（§3.2.3）。在途期本字段被轮始清点族清空
  *（markRoundStarted / revive 格，[U6/D4]）——「stopReason 不参与任何资格判定」的
  * 旧裁决随 two-state-convergence U6 退役。
  */
@@ -162,7 +162,7 @@ export type StopReason =
   | "completed"
   | "failed";
 
-/** StopReason 的 4 个新展示值（运行时守卫与枚举完整性测试锚；值域见类型注释）。 */
+/** StopReason 的 4 个新展示值（运行时检查与枚举完整性测试锚；值域见类型注释）。 */
 export const NEW_STOP_REASONS = [
   "interrupted",
   "interrupted-by-restart",
@@ -174,7 +174,7 @@ export const NEW_STOP_REASONS = [
 export const ROUND_TERMINAL_STOP_REASONS = ["completed", "failed"] as const satisfies readonly StopReason[];
 
 /**
- * StopReason 全枚举（运行时守卫用——防御性解析外部输入时校验成员资格）。
+ * StopReason 全枚举（运行时检查用——防御性解析外部输入时校验成员资格）。
  * = CLOSED_REASONS（6 个可写终态原因）+ disconnected（读侧兜底产出，不写入，
  * 见 CLOSED_REASONS 注释）+ NEW_STOP_REASONS（4 新展示值）+
  * ROUND_TERMINAL_STOP_REASONS（2 正常轮终展示值），共 13 值。
@@ -197,7 +197,7 @@ export type Epoch = number;
 
 /**
  * 放弃轮标记（§3.2.7 通知 gate ②判据，单槽）：abort（用户 cancel / 编排性关闭
- * 打断）时置为在飞轮 {epoch, round}；reopen（epoch+1）后残留标记自然失效（跨
+ * 打断）时置为在途轮 {epoch, round}；reopen（epoch+1）后残留标记自然失效（跨
  * epoch 丢弃是去重语义的正确执行）。迟到回注判定**显式两步**（比较基准 =
  * record 当前 epoch，非标记槽 epoch）：①回注 epoch ≠ record 当前 epoch → 丢弃；
  * ②同 epoch 且回注轮 ≤ 标记轮 → 丢弃；否则放行。
@@ -222,7 +222,7 @@ export interface ZcodeTranscriptRef { // oe-exempt:20260930:framework:领域值�
 
 /**
  * 对话记录指针（§3.2.6 引擎中立锚，判别联合以 engine 字段判别）：会话历史的物理
- * 定位。与 SDK 协议层 EngineHandleData.sessionRef 是同一概念的两层投影——传输层
+ * 定位。与 SDK 协议层 EngineHandleData.sessionRef 是同一概念的两层派生视图——传输层
  * 弱类型 Record<string,string>，领域层强类型判别联合。锚的可解析性表达资源维度
  * （在 / 被回收），无独立字段；失效时 message 走 reopen 降级（§3.2.3）。
  */

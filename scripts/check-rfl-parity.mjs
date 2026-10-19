@@ -1,15 +1,15 @@
 #!/usr/bin/env node
 /**
- * check-rfl-parity.mjs — review-fix-loop 双实现机器锁步守卫
+ * check-rfl-parity.mjs — review-fix-loop 双实现机器锁步检查
  *
- * 背景（为什么要这个守卫）：review+fix 循环有两份实现，靠注释里的「双版本镜像维护，
+ * 背景（为什么要这个检查）：review+fix 循环有两份实现，靠注释里的「双版本镜像维护，
  * 改任一侧须同步另一侧」文字约定维系同步。2026-09-20 的比对证实该约定不可靠：
  *  - 调度去重（claimed 单遍归类）曾在 pi 侧修复而 zcode 侧遗留 → 同一 reviewer 双跑；
- *  - 早退点台账守门只在 pi 侧有 → zcode 可达「converged + remaining 非空」矛盾终态。
+ *  - 早退点登记清单守门只在 pi 侧有 → zcode 可达「converged + remaining 非空」矛盾终态。
  * 两处都不是能力差异，而是「同一不变量只在一侧成立」。本脚本把文字承诺换成机器判定。
  *
  * 校验什么：
- *  1. 结构守卫：两侧必须都导出/定义镜像函数的骨架标记（函数名、池常量、阈值常量）。
+ *  1. 结构检查：两侧必须都导出/定义镜像函数的骨架标记（函数名、池常量、阈值常量）。
  *     覆盖两层：调度层（池/阈值/planReviewerOrder）+ 问题清单层两侧共有语义锚
  *     （normIssueId / titlesCompatible / TITLE_MATCH_MIN，见下方 ISSUE_LAYER_MARKERS）。
  *  2. 行为对账：用同一组输入跑两侧 `planReviewerOrder`，比较 **归一化后的调度结果**
@@ -73,7 +73,7 @@ function skip(reason) {
 if (!fs.existsSync(PI_RFL)) {
   fail("pi 侧镜像文件缺失：" + PI_RFL);
 }
-// pi 侧去重不变量：在 zcode 缺席判定**之前**检查——CI 等无 zcode 环境（守卫会 SKIP 双
+// pi 侧去重不变量：在 zcode 缺席判定**之前**检查——CI 等无 zcode 环境（检查会 SKIP 双
 // 实现对账）仍需守住 pi 侧这一条，否则本步骤在 CI 退化为空跑（2026-09-20 接线时修正）。
 // 不变量：planReviewerOrder 的 order 恒为本次输入的排列（无重复、无遗漏）。
 // 语料就地定义（不引用下方的模块级常量）——此处位于 createRequire 之前，不能依赖
@@ -83,7 +83,7 @@ if (failures.length === 0) {
   const invApi = mkReq(import.meta.url)(PI_RFL);
   const invCorpus = [
     { label: "全 8 维", keys: ["extension-api", "arch-boundary", "data-governance", "business-logic", "monorepo-impact", "electron-build", "type-safety", "test-coverage"] },
-    // 去重不变量靶子：单个 name 同时命中多个池关键词（曾致同一 reviewer 双跑）
+    // 去重不变量检查目标：单个 name 同时命中多个池关键词（曾致同一 reviewer 双跑）
     { label: "多池关键词同串", keys: ["extension-api-arch-boundary"] },
     { label: "单维", keys: ["extension-api"] },
     { label: "空输入", keys: [] },
@@ -111,14 +111,14 @@ if (!fs.existsSync(ZCODE_RFL)) {
   if (REQUIRE_ZCODE) fail("zcode 侧镜像文件缺失（RFL_REQUIRE_ZCODE=1）：" + ZCODE_RFL);
   // fail-closed：SKIP 只对「双实现对账」豁免。此前已累积的失败（pi 侧去重不变量 /
   // 结构标记 / pi 侧模块加载）必须先报告——否则无 zcode 的环境（CI）里这些检查全部
-  // 被 skip 的 exit 0 吞掉，守卫退化为永远绿（2026-09-20 实测发现并修复）。
+  // 被 skip 的 exit 0 吞掉，检查退化为永远绿（2026-09-20 实测发现并修复）。
   else if (failures.length === 0) {
     skip("zcode 原生版不在本机（" + ZCODE_RFL + "）——pi 侧去重不变量已验证，双实现对账跳过");
   }
 }
 if (failures.length > 0) report();
 
-/* ── 结构守卫：两侧必须存在的镜像标记 ── */
+/* ── 结构检查：两侧必须存在的镜像标记 ── */
 // 调度层：池/阈值常量与调度函数签名。
 const MARKERS = [
   "const REVIEWER_BATCH",
@@ -156,7 +156,7 @@ function skipLineComment(src, i) {
   return nl < 0 ? src.length : nl + 1;
 }
 
-/** 块注释跳过：返回注释结束标记（星+斜线）后的下标；未闭合则串末。 */
+/** 块注释跳过：返回注释结束标记（星+斜线）后的下标；未封口则串末。 */
 function skipBlockComment(src, i) {
   const end = src.indexOf("*/", i + 2);
   return end < 0 ? src.length : end + 2;
@@ -173,7 +173,7 @@ function skipTemplateInterpolation(src, j) {
   return j;
 }
 
-/** 字符串/模板串字面量跳过（含转义与 `${...}` 插值），返回闭合引号后下标。 */
+/** 字符串/模板串字面量跳过（含转义与 `${...}` 插值），返回结束引号后下标。 */
 function skipQuoted(src, i, quote) {
   i++;
   while (i < src.length) {
@@ -218,7 +218,7 @@ function scanBalancedBraces(src, open) {
   return -1;
 }
 
-/** 参数列表闭合括号定位：从 open（首个 `(`）起做括号配平，返回配对 `)` 下标；不配平返回 -1。 */
+/** 参数列表结束括号定位：从 open（首个 `(`）起做括号配平，返回配对 `)` 下标；不配平返回 -1。 */
 function findMatchingParen(src, open) {
   let depth = 0;
   for (let i = open; i < src.length; i++) {
@@ -233,9 +233,9 @@ function findMatchingParen(src, open) {
 }
 
 /**
- * 函数体左花括号定位（从 from = 参数闭合括号起扫）：
+ * 函数体左花括号定位（从 from = 参数结束括号起扫）：
  * 先扫过签名自带的成对花括号（返回类型标注 `): { order: T[]; ... } {` 的内联对象类型
- * 自成一对），内联类型闭合后首个 `{` 即函数体；未定位返回 -1。
+ * 自成一对），内联类型结束后首个 `{` 即函数体；未定位返回 -1。
  */
 function findFunctionBodyOpen(src, from) {
   let sigDepth = 0;
@@ -261,8 +261,8 @@ function findFunctionBodyOpen(src, from) {
 
 function extractZcodeScheduler() {
   // 抽取边界刻意与**格式/取值无关**：结束标记用函数签名（不含字段常数），否则阈值本身
-  // 漂移（3000→5000）会先把抽取搞崩，守卫就只能报「抽取失败」而报不出「常量不一致」/
-  // 「行为分歧」——那会让漂移的诊断信息丢失，也让阈值类漂移的守卫自测失效。
+  // 漂移（3000→5000）会先把抽取搞崩，检查就只能报「抽取失败」而报不出「常量不一致」/
+  // 「行为分歧」——那会让漂移的诊断信息丢失，也让阈值类漂移的检查自测失效。
   // 因此：常量区从 REVIEWER_BATCH 抓到 planReviewerOrder 签名；函数体用花括号配平截取。
   // 常量区下界 = `const SLOW_POOL`（池常量 + 阈值 + DiffStats 类型都在其之后）；
   // 上界 = planReviewerOrder 签名。刻意从 SLOW_POOL 起而不是从 REVIEWER_BATCH 起：
@@ -277,7 +277,7 @@ function extractZcodeScheduler() {
   const constBlock = zcodeSrc.slice(constStart, fnStart);
   // 函数体配平：先参数括号配平（泛型里的 `{ name: string }` 与解构参数都含花括号——
   // 直接从签名后的第一个 `{` 起算会被泛型对象类型提前配对，这是实测踩过的坑），
-  // 再从参数列表闭合括号之后定位函数体 `{`，与 review-fix-loop-script.test.ts 的
+  // 再从参数列表结束括号之后定位函数体 `{`，与 review-fix-loop-script.test.ts 的
   // extractFn 同法。
   const paramOpen = zcodeSrc.indexOf("(", fnStart);
   if (paramOpen < 0) throw new Error("抽取失败：planReviewerOrder 无参数列表");
@@ -316,7 +316,7 @@ try {
   const mod = await import("data:text/javascript;base64," + Buffer.from(js).toString("base64"));
   zApi = mod.__api;
 } catch (e) {
-  fail("zcode 侧调度片段抽取/加载失败：" + e.message + "（签名或函数体形态变化时需同步本守卫的抽取标记）");
+  fail("zcode 侧调度片段抽取/加载失败：" + e.message + "（签名或函数体形态变化时需同步本检查的抽取标记）");
 }
 
 if (!piApi || !zApi) report();

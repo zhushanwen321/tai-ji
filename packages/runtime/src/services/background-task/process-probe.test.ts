@@ -1,10 +1,10 @@
 /**
  * probeProcessStartTimeMs 单测（D6 身份验证两档「按需现测」档的输入侧——kill 安全属性
- * 「宁不杀勿误杀」的第一道守卫，background-task-service.test.ts 全走 deps 注入 mock，
+ * 「宁不杀勿误杀」的第一道检查，background-task-service.test.ts 全走 deps 注入 mock，
  * 真实实现仅由本文件加载）。
  *
  * 覆盖四个安全分支（review round1 test-coverage MUST_FIX）：
- * ① 非法 pid 守卫（0/负数/非整数）→ undefined = 分支④拒绝 kill 的输入侧
+ * ① 非法 pid 检查（0/负数/非整数）→ undefined = 分支④拒绝 kill 的输入侧
  * ② parseEpochMs 解析失败（垃圾 stdout / 空 stdout）→ undefined（核心安全分支：
  *    若返回 NaN 而非 undefined 会绕过「宁不杀勿误杀」拒绝 → 误杀无辜新进程）
  * ③ posix `ps -o lstart=` 与 win32 ISO 8601 两平台分支的合法输出 → epoch ms，
@@ -82,7 +82,7 @@ const PID = 4242
 describe('probeProcessStartTimeMs：kill 安全判定输入侧（undefined = 分支④拒绝 kill）', () => {
   it('① 非法 pid（0/负数/非整数/非有限数）→ undefined，不发起探测', async () => {
     setPlatform('darwin')
-    resolveWith('Mon Sep  7 10:00:00 2026') // 若守卫失效，此输出会返回合法 ms——用「未被调用」双保险
+    resolveWith('Mon Sep  7 10:00:00 2026') // 若检查失效，此输出会返回合法 ms——用「未被调用」双保险
     for (const pid of [0, -1, -100, 1.5, Number.NaN, Number.POSITIVE_INFINITY]) {
       await expect(probeProcessStartTimeMs(pid)).resolves.toBeUndefined()
     }
@@ -135,7 +135,7 @@ describe('probeProcessStartTimeMs：kill 安全判定输入侧（undefined = 分
     expect(opts.windowsHide).toBe(true)
   })
 
-  it('③c win32 stdout 垃圾文本 → undefined（第二平台分支的解析失败同守卫）', async () => {
+  it('③c win32 stdout 垃圾文本 → undefined（第二平台分支的解析失败同检查）', async () => {
     setPlatform('win32')
     resolveWith('Access is denied.')
     await expect(probeProcessStartTimeMs(PID)).resolves.toBeUndefined()

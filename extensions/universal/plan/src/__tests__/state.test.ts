@@ -239,7 +239,7 @@ describe("State persistence", () => {
     // state 值域外垃圾按缺失处理 → 落旧字段映射（reviewState 也坏）→ 按 isActive 推断
     expect(state.state).toBe("planning");
     expect(state.selfReview).toBeUndefined();
-    // resumeHint 值域守卫：'resubmit' 之外（含旧 'explain' 存量值）按无值处理
+    // resumeHint 值域检查：'resubmit' 之外（含旧 'explain' 存量值）按无值处理
     expect(state.resumeHint).toBeUndefined();
   });
 
@@ -347,7 +347,7 @@ describe("State persistence", () => {
     } as unknown as ExtensionContext;
     expect(reconstructPlanState(legacyCtx).resumeHint).toBeUndefined();
 
-    // 旧版 'explain' 存量值（explain 交互已删）与垃圾值一并按无值处理（值域守卫白名单只认 'resubmit'）
+    // 旧版 'explain' 存量值（explain 交互已删）与垃圾值一并按无值处理（值域检查白名单只认 'resubmit'）
     const explainCtx = {
       sessionManager: {
         getLeafId: () => null,
@@ -358,7 +358,7 @@ describe("State persistence", () => {
     } as unknown as ExtensionContext;
     expect(reconstructPlanState(explainCtx).resumeHint).toBeUndefined();
 
-    // 值域守卫：'resubmit' 之外的垃圾值按无值处理（与 readResumeHint 同风格）
+    // 值域检查：'resubmit' 之外的垃圾值按无值处理（与 readResumeHint 同风格）
     const badCtx = {
       sessionManager: {
         getLeafId: () => null,

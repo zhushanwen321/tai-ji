@@ -7,7 +7,7 @@
 // N 个 RecordStore 实例各循环 M 轮 collectRecords（同进程多实例交错，非跨进程并发：
 // 写路径 tmp(pid)+fsync+rename 与跨进程相同，交错已覆盖 rename 竞争窗口），外部随机
 // append/touch 制造文件变化（append 只追加不含 "subagent-identity" 特征串的纯日志行——
-// identity 探测结论不变，ground truth 固定；touch 只改 mtime）。写入侧为 tmp(pid+seq)+rename
+// identity 探测结论不变，原始证据文档 固定；touch 只改 mtime）。写入侧为 tmp(pid+seq)+rename
 // 原子写（无锁），本 bench 验证并发下读侧只见完整 JSON、输出不错。
 //
 // 可复现命令（先 cp 真实目录副本，不污染原目录）：
@@ -22,7 +22,7 @@
 //   D2 结束后 sessions-index.json JSON.parse 成功且 version 字段存在（rename 原子性）
 //   D3 <enc> 段内无 sessions-index.json.tmp.* 残留（写失败路径的 tmp 清理）
 //   D4 每实例每轮输出五元组 (id,agent,task,rootSessionId,status) 与单进程全量探测的
-//      ground truth 完全一致（戳校验兜住陈旧索引；id 集一致不足以捕获字段级漂移）
+//      原始证据文档 完全一致（戳校验兜住陈旧索引；id 集一致不足以捕获字段级漂移）
 //
 // 不进 vitest（vitest.config.ts include 仅 src/**/__tests__/**/*.test.ts）、不进 CI。
 
@@ -40,7 +40,7 @@ const DEFAULT_WORKERS = 3;
 const DEFAULT_ITERS = 20;
 const DEFAULT_LIMIT = 2000;
 const DEFAULT_SEED = 20260815;
-/** 单进程全量探测（ground truth）后、并发轮开始前的预变异文件数：保证每个实例的首扫
+/** 单进程全量探测（原始证据文档）后、并发轮开始前的预变异文件数：保证每个实例的首扫
  *  都有戳不匹配 → 重探测 → dirty → 各自发起落盘，制造 tmp(pid+seq) 交错与 rename 竞争。 */
 const PRE_MUTATIONS = 5;
 /** fire-and-forget 写落盘等待上限、观察窗间隔与轮询上限（deadline 之上再加一道循环保险）。 */
@@ -107,7 +107,7 @@ function parseNonNegativeIntFlag(raw: string | undefined, flag: string): { ok: t
 	return { ok: true, value: n };
 }
 
-/** 位置参数与数值 flag 解析后的收口校验（缺 sessionsDir / workers/iters/limit 正整数域检查）。 */
+/** 位置参数与数值 flag 解析后的收尾校验（缺 sessionsDir / workers/iters/limit 正整数域检查）。 */
 function finalizeParsedArgs(
 	value: ParsedArgs,
 	sessionsDir: string | undefined,
@@ -234,7 +234,7 @@ function hasNumberVersion(v: unknown): v is { version: unknown } {
 /**
  * 追加一条纯日志行：必须是合法 JSON 但不含 "subagent-identity" 特征串——探测函数
  * （readIdentityHeader/Tail/Anywhere）按该特征串预筛，追加了它会让 identity 结论漂移、
- * ground truth 失效；纯日志行只改 size/mtime（触发戳不匹配重探测），探测结论不变。
+ * 原始证据文档 失效；纯日志行只改 size/mtime（触发戳不匹配重探测），探测结论不变。
  */
 function appendPureLogLine(file: string, iter: number, workerRngTag: number): void {
 	const line = {
@@ -300,7 +300,7 @@ function checkSessionsDir(
 	return { ok: true, jsonlFiles };
 }
 
-/** ground truth：单进程无索引全量探测 + 判 0 恒真防护。返回 { ok: false } 表示已写 stderr 拒绝。 */
+/** 原始证据文档：单进程无索引全量探测 + 判 0 恒真防护。返回 { ok: false } 表示已写 stderr 拒绝。 */
 function buildGroundTruth(args: {
 	sessionsDir: string;
 	encDir: string;
@@ -308,7 +308,7 @@ function buildGroundTruth(args: {
 	resolvedSessionsDir: string;
 }): { ok: true; gt: string[]; recordCount: number } | { ok: false } {
 	rmIndexArtifacts(args.encDir);
-	const gtStore = new RecordStore(args.sessionsDir);
+	const gtStore = new RecordStore(() => args.sessionsDir);
 	let gtRecords: readonly SubagentRecord[];
 	try {
 		gtRecords = gtStore.collectRecords(args.limit, "all");
@@ -316,11 +316,11 @@ function buildGroundTruth(args: {
 		gtStore.dispose();
 	}
 	const gt = projectRecords(gtRecords);
-	// 判 0 恒真防护：空 ground truth 会让 D4 的 sameRows 退化为「空集对空集」恒真，
+	// 判 0 恒真防护：空 原始证据文档 会让 D4 的 sameRows 退化为「空集对空集」恒真，
 	// 断言失去防护意义——直接拒绝
 	if (gt.length === 0) {
 		process.stderr.write(
-			`ground truth 为空（0 条记录）：${args.resolvedSessionsDir} 的 jsonl 均无 subagent 记录，` +
+			`原始证据文档 为空（0 条记录）：${args.resolvedSessionsDir} 的 jsonl 均无 subagent 记录，` +
 			`该 enc 段无 subagent 记录，请换一个含 jsonl 记录的段复制：cp -R ${realSubagentsDirPath()}/<enc> /tmp/bench-enc/\n`,
 		);
 		return { ok: false };
@@ -373,7 +373,7 @@ async function runConcurrentPhase(args: {
 
 	// ── 并发阶段：N 实例 × M 轮，轮间随机变异，yield 让在途写与下一轮扫描交错 ──
 	const stores: RecordStore[] = [];
-	for (let w = 0; w < workers; w++) stores.push(new RecordStore(sessionsDir));
+	for (let w = 0; w < workers; w++) stores.push(new RecordStore(() => sessionsDir));
 	const mismatches: string[] = [];
 	const t0 = performance.now();
 	let indexRewrites = 0;
@@ -447,7 +447,7 @@ function verifyVerdicts(indexPath: string, encDir: string, mismatches: readonly 
 	}
 
 	if (mismatches.length > 0) {
-		process.stderr.write(`D4 失败：输出与 ground truth 不一致（前 5 条）：\n${mismatches.join("\n")}\n`);
+		process.stderr.write(`D4 失败：输出与 原始证据文档 不一致（前 5 条）：\n${mismatches.join("\n")}\n`);
 		failed = true;
 	}
 
@@ -472,12 +472,12 @@ async function main(): Promise<number> {
 	}
 	const rng = mulberry32(seed);
 
-	// ── ground truth：单进程无索引全量探测 ──
+	// ── 原始证据文档：单进程无索引全量探测 ──
 	const gtResult = buildGroundTruth({ sessionsDir, encDir, limit, resolvedSessionsDir });
 	if (!gtResult.ok) return 1;
 	await waitIndexSettle(encDir, SETTLE_TIMEOUT_MS);
 	process.stdout.write(
-		`[concurrent-scan bench] 目录=${sessionsDir}\n  ground truth: 单进程全量探测 ${gtResult.recordCount} 条（jsonl=${dirCheck.jsonlFiles.length}）\n`,
+		`[concurrent-scan bench] 目录=${sessionsDir}\n  原始证据文档: 单进程全量探测 ${gtResult.recordCount} 条（jsonl=${dirCheck.jsonlFiles.length}）\n`,
 	);
 
 	const phase = await runConcurrentPhase({

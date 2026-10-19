@@ -6,15 +6,15 @@
  *   ②双维硬升级（heap ≥ FORCE_PCT / memPressure 越限任一）跳过推迟立即执行
  *   （rolling-restart-forced reason=hard-threshold）；③30min 上限到点强制执行
  *   （reason=defer-limit，经 deferLimitMs 注入短上限验证，不靠硬阈值）。
- * - A2 Path A 保活：settled 无在途（镜像全 idle + zcode 快照 0 + relay 空）→ 不推迟
+ * - A2 Path A 保活：settled 无在途（镜像全 idle + 引擎通道 0）→ 不推迟
  *   （无 deferred 事件）直接进 countdown → 执行（!hasIdleTimer 谓词语义——保活进程
  *   在镜像计数中恒 0）。
- * - A3 deferred 台账字段语义（u7b 配方）：计数在场 = 数字；errs 形态（已注入从未上报）
+ * - A3 deferred journal 字段语义（u7b 配方）：计数在场 = 数字；errs 形态（已注入从未上报）
  *   = inflight=null + reason=absent-report。
  * - A4 planned 边不进计数状态机（main 侧测试，见 restart-policy-planned.test.ts）。
  * - A5 shutdown 步骤打点序列：SHUTDOWN_STEP_SEQUENCE SSOT 断言（首步取消推迟定时器；
  *   engine-pool-dispose 位于 server-stop 与 close-logger 之间；close-crash-journal
- *   位于 close-logger 之前——D1 台账尾部 flush 先于 logger 关闭；
+ *   位于 close-logger 之前——D1 journal 尾部 flush 先于 logger 关闭；
  *   dispose-terminal-pties [terminal-multi-instance u4] 紧随 server-stop）。
  * - B2 Gate W：armed=false 时编排零动作。
  * - 推迟循环：在途清零 → countdown（T-30s 广播）→ 执行（journal event=rolling-restart）。
@@ -67,7 +67,7 @@ interface Harness {
   broadcast: Mock
   onExecute: Mock
   setHeapPercent(pct: number): void
-  setRelayInFlight(n: number): void
+  setEngineChannelsInFlight(n: number): void
 }
 
 function startHarness(opts: {
@@ -85,12 +85,12 @@ function startHarness(opts: {
   const broadcast = vi.fn<(type: RollingRestartBroadcastType, payload: RollingRestartBroadcastPayload) => void>()
   const onExecute = vi.fn()
   let heapPct = opts.heapPercent ?? 50
-  let relayCount = 0
+  let engineChannelCount = 0
   const handle = startRollingRestart({
     armed: opts.armed ?? true,
     mirror,
     listSessionIds: () => opts.sessionIds ?? [SID],
-    relayInFlight: () => relayCount,
+    engineChannelsInFlight: () => engineChannelCount,
     heapPercent: () => heapPct,
     memPressureHigh: opts.memPressureHigh ?? (async () => false),
     onExecute,
@@ -108,7 +108,7 @@ function startHarness(opts: {
     broadcast,
     onExecute,
     setHeapPercent: (pct: number) => { heapPct = pct },
-    setRelayInFlight: (n: number) => { relayCount = n },
+    setEngineChannelsInFlight: (n: number) => { engineChannelCount = n },
   }
 }
 
@@ -154,7 +154,7 @@ describe('A1① 谓词命中推迟（D5 ①②）', () => {
     expect(status.deferDeadlineAt).toBeDefined()
   })
 
-  it('deferred 期间第二次 critical 不重复记事件（相位守卫）', async () => {
+  it('deferred 期间第二次 critical 不重复记事件（相位检查）', async () => {
     const h = startHarness()
     h.mirror.applyReport(SID, report(1))
     h.handle.onMemoryPressure(criticalPayload())
@@ -250,7 +250,7 @@ describe('A1③ 推迟上限到点强制执行 reason=defer-limit（D5 ②）', 
 })
 
 describe('A2 Path A 保活不推迟（settled 无在途）', () => {
-  it('镜像全 idle（settled 后计数 0）+ relay 空 → 无 deferred 直接 countdown → 执行', async () => {
+  it('镜像全 idle（settled 后计数 0）+ 引擎通道空 → 无 deferred 直接 countdown → 执行', async () => {
     const h = startHarness()
     // Path A 保活形态：曾上报（hasEverReported=true）且当前计数 0——活句柄但 idle timer
     // armed 的进程在镜像口径中不计（getInFlightSnapshot 双谓词），故恒 0。
@@ -284,7 +284,7 @@ describe('A2 Path A 保活不推迟（settled 无在途）', () => {
   })
 })
 
-describe('推迟循环收口：在途清零 → countdown → 执行', () => {
+describe('推迟循环收尾：在途清零 → countdown → 执行', () => {
   it('deferred 期间任务完成（计数归 0）→ countdown 广播 → T-30s 后执行', async () => {
     const h = startHarness({ deferRetryMs: 1_000, countdownMs: 30_000 })
     h.mirror.applyReport(SID, report(2))
@@ -309,7 +309,7 @@ describe('推迟循环收口：在途清零 → countdown → 执行', () => {
 
   it('countdown 相位二次 critical 且 heap 升至 FORCE_PCT → 硬升级 forced=hard-threshold（非 planned 记账）', async () => {
     const h = startHarness({ countdownMs: 30_000 })
-    // Path A：无在途 → 首拍 critical 直接进 countdown（planned 排队，无台账事件）
+    // Path A：无在途 → 首拍 critical 直接进 countdown（planned 排队，无 journal 事件）
     h.handle.onMemoryPressure(criticalPayload())
     await flushDecisions()
     expect(h.handle.getStatus().state).toBe('countdown')
@@ -317,7 +317,7 @@ describe('推迟循环收口：在途清零 → countdown → 执行', () => {
 
     // countdown 窗口内 heap 升至硬阈值 + 在途回升（与 countdown 进入时快照分异，验证 lastSummary 回退）
     h.setHeapPercent(99)
-    h.setRelayInFlight(3)
+    h.setEngineChannelsInFlight(3)
     h.handle.onMemoryPressure(criticalPayload())
     await flushDecisions()
 
@@ -352,9 +352,9 @@ describe('A3 errs 形态 status 相位（absent-report）', () => {
   })
 })
 
-describe('relay / 引擎侧在途源', () => {
-  it('relayInFlight 未注入 = 0 = 该维不贡献（组合根接线缺席语义，不读 registry）', async () => {
-    // 不走 harness（harness 恒显式注入 relayInFlight）——直接构造裸缺省形态
+describe('引擎侧在途通道源', () => {
+  it('engineChannelsInFlight 未注入 = 0 = 该维不贡献（组合根接线缺席语义）', async () => {
+    // 不走 harness（harness 恒显式注入 engineChannelsInFlight）——直接构造裸缺省形态
     const journalAppend = vi.fn()
     const handle = startRollingRestart({
       armed: true,
@@ -368,14 +368,14 @@ describe('relay / 引擎侧在途源', () => {
     handle.onMemoryPressure(criticalPayload())
     await flushDecisions()
 
-    // relay 维贡献 0 → 判定无在途 → 不推迟直接 countdown
+    // 引擎通道维贡献 0 → 判定无在途 → 不推迟直接 countdown
     expect(eventsOf(journalAppend, 'rolling-restart-deferred')).toHaveLength(0)
     expect(handle.getStatus().state).toBe('countdown')
   })
 
-  it('relay 在途子进程 >0 → 推迟（计数并入合计）', async () => {
+  it('引擎在途通道 >0 → 推迟（计数并入合计）', async () => {
     const h = startHarness()
-    h.setRelayInFlight(2)
+    h.setEngineChannelsInFlight(2)
     h.handle.onMemoryPressure(criticalPayload())
     await flushDecisions()
 
@@ -445,7 +445,7 @@ describe('A5 shutdown 步骤打点序列 SSOT（SHUTDOWN_STEP_SEQUENCE）', () =
     expect(SHUTDOWN_STEP_SEQUENCE[0]).toBe('cancel-rolling-restart')
   })
 
-  it('engine-pool-dispose 位于 server-stop 之后、close-logger 之前（D5 挂点钉死）', () => {
+  it('engine-pool-dispose 位于 server-stop 之后、close-logger 之前（D5 挂点固定）', () => {
     const seq = SHUTDOWN_STEP_SEQUENCE as readonly string[]
     const engineIdx = seq.indexOf('engine-pool-dispose')
     const serverStopIdx = seq.indexOf('server-stop')
@@ -454,7 +454,7 @@ describe('A5 shutdown 步骤打点序列 SSOT（SHUTDOWN_STEP_SEQUENCE）', () =
     expect(closeLoggerIdx).toBeGreaterThan(engineIdx)
   })
 
-  it('close-crash-journal 位于 close-logger 之前（D1 台账尾部 flush 先于 logger 关闭）', () => {
+  it('close-crash-journal 位于 close-logger 之前（D1 journal 尾部 flush 先于 logger 关闭）', () => {
     const seq = SHUTDOWN_STEP_SEQUENCE as readonly string[]
     const journalIdx = seq.indexOf('close-crash-journal')
     const closeLoggerIdx = seq.indexOf('close-logger')
@@ -485,7 +485,8 @@ describe('A5 shutdown 步骤打点序列 SSOT（SHUTDOWN_STEP_SEQUENCE）', () =
       'dispose-git-head-watcher',
       'dispose-claim-ledger',
       'dispose-terminal-ptys',
-      'deinit-relay-server',
+      // u-m3-control：control server 关停（全通道组杀 + 删 socket）
+      'deinit-control-server',
       'server-stop',
       'dispose-terminal-pties',
       'engine-pool-dispose',
@@ -494,11 +495,11 @@ describe('A5 shutdown 步骤打点序列 SSOT（SHUTDOWN_STEP_SEQUENCE）', () =
     ])
   })
 
-  it('dispose-terminal-ptys 位于传输层关停（deinit-relay-server / server-stop）之前（先收受托资源再关门）', () => {
+  it('dispose-terminal-ptys 位于传输层关停（deinit-control-server / server-stop）之前（先收受托资源再关门）', () => {
     const seq = SHUTDOWN_STEP_SEQUENCE as readonly string[]
     const terminalIdx = seq.indexOf('dispose-terminal-ptys')
     expect(terminalIdx).toBeGreaterThan(seq.indexOf('dispose-claim-ledger'))
-    expect(terminalIdx).toBeLessThan(seq.indexOf('deinit-relay-server'))
+    expect(terminalIdx).toBeLessThan(seq.indexOf('deinit-control-server'))
   })
 })
 

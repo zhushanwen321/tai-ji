@@ -1,5 +1,5 @@
 /**
- * PS-58 探针：steer 投递在 pi busy 窗口不拒绝、随 run 循环级联排空——notify-once 兑现链前提守卫。
+ * PS-58 探针：steer 投递在 pi busy 窗口不拒绝、随 run 循环级联排空——notify-once 兑现链前提检查。
  *
  * 登记条目（docs/pi-semantics.json PS-58）：prompt() 在 isStreaming 且 streamingBehavior='steer'
  * 时走 _queueSteer 入队（不 throw——第二拒绝分支仅覆盖未传 streamingBehavior，PS-23），
@@ -83,7 +83,7 @@ describe.skipIf(!CODE_DIST || !AGENT_CORE_DIST)(
         agentLoop.includes('currentContext.messages.push(message)') &&
           agentLoop.includes('emit({ type: "message_start", message })'),
         'PS-58 漂移：agent-loop.js 的 pending 消息注入块（message_start emit + currentContext push）消失——' +
-          'drain 到的 steer 消息不再进入当前 run 处理，「级联消费 → agent_settled 仍会到达」结论失锚。' +
+          'drain 到的 steer 消息不再进入当前 run 处理，「级联消费 → agent_settled 仍会到达」结论定位失败。' +
           '恢复动作：复核注入块形态后更新本探针',
       ).toBe(true)
     })

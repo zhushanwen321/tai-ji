@@ -6,7 +6,7 @@ import { nextTick, ref } from 'vue'
 import { Collapsible, CollapsibleContent } from '@/components/ui/collapsible'
 
 /**
- * CollapsibleContent 展开过渡守卫（Plan 01 续：collapsible enter transition）。
+ * CollapsibleContent 展开过渡检查（Plan 01 续：collapsible enter transition）。
  *
  * 背景：tailwindcss-animate 插件未安装，旧 data-[state]:animate-in/out + fade-*
  * 是死类（不生成任何 CSS），展开/折叠完全瞬时。改用手写 CSS 原语类
@@ -33,7 +33,7 @@ const collapsibleContentSrc = readFileSync(
   'utf-8',
 )
 
-// 死类全集（与并入的浮层守卫共享；原 collapsible 版 4 项，zoom/slide 由 overlay 版补齐）
+// 死类全集（与并入的浮层检查共享；原 collapsible 版 4 项，zoom/slide 由 overlay 版补齐）
 const DEAD_CLASSES = [
   'animate-in',
   'animate-out',
@@ -197,9 +197,9 @@ describe('CollapsibleContent 展开过渡（Plan 01 续）', () => {
   })
 })
 
-// ── 原 overlay-transitions.test.ts 并入（同族过渡原语守卫，共享 DEAD_CLASSES 全集）──
+// ── 原 overlay-transitions.test.ts 并入（同族过渡原语检查，共享 DEAD_CLASSES 全集）──
 const styleCss = readFileSync(resolve(__dirname, '../../style.css'), 'utf-8')
-// 浮层四族实现已收敛至 @taiji/ui（renderer components/ui 降级 re-export），守卫随实现走
+// 浮层四族实现已收敛至 @taiji/ui（renderer components/ui 降级 re-export），检查随实现走
 const popoverContent = readFileSync(
   resolve(__dirname, '../../../../ui/src/primitives/popover/PopoverContent.vue'),
   'utf-8',

@@ -6,7 +6,7 @@
  * interrupted agent turn"（pi-semantics PS-61）——被掐断的 turn 今天靠「压缩结果通知自起 run」兜底，
  * 而那正是故事 C 竞态的另一半。本模块把它换成 runtime 侧判定 + 经投递内核 FIFO 的门内投递。
  *
- * 判定三条件（设计 §3.1 / D4②，逐条落到事件面）：
+ * 判定三条件（设计 §3.1 / D4②，逐条落到事件范围）：
  * 1. **manual**：`compaction_end.reason === 'manual'`（pi-semantics PS-62：pi 手动路径恒
  *    'manual'；自动压缩为 'threshold' | 'overflow'——auto 路径不掐 turn，pi 内部 post-run
  *    继续运行，无需续跑）；
@@ -18,9 +18,9 @@
  *    `turn-end{stopReason:'aborted'}` 收尾（pi-agent-core runLoop 在 abort 时产出 aborted
  *    assistant message → turn_end/agent_end；pi 侧 `await abort()` 保证 agent_end 必先于
  *    compaction_start 到达），本模块记 `lastTurnCutByAbort` 并在 compaction_start 快照。
- *    不读 occupancy：abort→压缩链在 pi 内同步推进，runtime 投影到 compaction_start 时 turn
- *    相位已回落 settling/idle（实测序见探针 P-reason，语义登记 pi-semantics PS-61/PS-62），
- *    投影不是可靠判据。
+   *    不读 occupancy：abort→压缩链在 pi 内同步推进，runtime 派生视图到 compaction_start 时 turn
+   *    相位已回落 settling/idle（实测序见探针 P-reason，语义登记 pi-semantics PS-61/PS-62），
+   *    派生视图不是可靠判据。
  *
  * 投递口径（D4② 后半句）：
  * - **经内核 FIFO**：投递只经 `submitResumeDelivery`（组合根注入 = registry.submit）——
@@ -38,7 +38,7 @@
 import type { DeliveryEntryState } from '@zhushanwen/session-delivery'
 
 /**
- * 观察面事件子集（结构匹配 infra 翻译结果 PiTranslatedEvent，只取本判定需要的字段）。
+ * 观察侧事件子集（结构匹配 infra 翻译结果 PiTranslatedEvent，只取本判定需要的字段）。
  * 刻意不 import 完整联合：services 层禁 Pi* 类型名（C-comm-02，check_pi_type_leak），
  * 结构子集让本模块对翻译层新增事件类型免疫。
  */
@@ -81,7 +81,7 @@ export const RESUME_DELIVERY_TEXT =
 export interface ResumeDecision {
   /** 事件批观察（interpreter.interpret 之前调用；同一批内按到达序 fold）。 */
   observe(sessionId: string, events: readonly ObservedEvent[]): void
-  /** 解释后收口（interpreter.interpret 之后调用）：执行投递判定与投递。 */
+  /** 解释后收尾（interpreter.interpret 之后调用）：执行投递判定与投递。 */
   settle(sessionId: string): void
   /**
    * runtime 发起 compact 的标记入口（实现者 = 组合根的 sessionService.compact 装饰包装）。

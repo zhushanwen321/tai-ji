@@ -26,7 +26,7 @@ export type EngineProcessModel = "per-window" | "shared-service";
 
 /**
  * 窗口实例描述符：窗口表登记的最小引擎实例描述（engineId + 进程形态 + dispose
- * 能力），不承载协议调用面——取用仍走实例本体（如 EngineClient），本表只管
+ * 能力），不承载协议的全部调用点——取用仍走实例本体（如 EngineClient），本表只管
  * 「本窗口用过哪些引擎实例」的记账与收尾清理。
  */
 export interface WindowEngineInstance { // oe-exempt:20260927:framework:窗口实例描述符 ports 契约——本仓「类型契约先行、接口先立单实现常态」（ADR-0079 窗口实例表交付面）

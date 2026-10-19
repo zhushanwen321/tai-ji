@@ -1,9 +1,9 @@
 /**
- * replicated-states.config 快照投影定向测试（CRAP 靶子：projectSessionScalars /
+ * replicated-states.config 快照派生视图定向测试（CRAP 检查清单：projectSessionScalars /
  * fetchSnapshot(usage)）。
  *
  * 等价性测试（src/__tests__/equivalence/）覆盖实例接线与收敛链路（喂正常形态）；
- * 本文件专测 wire 投影层的畸形输入分级——协议异常（抛 WireSnapshotSchemaError →
+ * 本文件专测 wire 派生视图层的畸形输入分级——协议异常（抛 WireSnapshotSchemaError →
  * 快照失败退避）与合法无值（{} 空快照 → merge 保持旧值）两类语义不得混淆：
  * - get_state 返回非对象 → 抛（协议异常）
  * - thinkingLevel/model 字段类型畸形 → 丢 key（'required' 归一后同样走协议异常）
@@ -23,7 +23,7 @@ import {
 } from '../src/services/session/replicated-states.config.js'
 import { WireSnapshotSchemaError, normalizeWireSnapshot } from '../src/services/session/replicated-state.js'
 
-describe('projectSessionScalars（get_state wire 投影，经 thinkingLevel/modelId 条目）', () => {
+describe('projectSessionScalars（get_state wire 派生视图，经 thinkingLevel/modelId 条目）', () => {
   const cfg = (state: unknown) =>
     createThinkingLevelStateConfig(() => Promise.resolve(state as Record<string, unknown> | undefined))
 
@@ -34,7 +34,7 @@ describe('projectSessionScalars（get_state wire 投影，经 thinkingLevel/mode
   })
 
   it('thinkingLevel 非 string → 丢 key → fetchSnapshot 空快照 + required 归一层抛协议异常', async () => {
-    // fetchSnapshot 层职责：类型畸形丢 key（wire 归一前的投影，不做语义决策）
+    // fetchSnapshot 层职责：类型畸形丢 key（wire 归一前的派生视图，不做语义决策）
     await expect(cfg({ thinkingLevel: 7 }).fetchSnapshot()).resolves.toEqual({})
     await expect(cfg({}).fetchSnapshot()).resolves.toEqual({})
     // required 归一层职责：key 缺失 = 协议异常（ReplicatedState 按快照失败退避，不当字段不动）
@@ -46,7 +46,7 @@ describe('projectSessionScalars（get_state wire 投影，经 thinkingLevel/mode
   })
 })
 
-describe('projectSessionScalars：model 组合投影（modelId 条目）', () => {
+describe('projectSessionScalars：model 组合派生视图（modelId 条目）', () => {
   const cfg = (state: unknown) =>
     createModelIdStateConfig(() => Promise.resolve(state as Record<string, unknown> | undefined))
 
@@ -70,7 +70,7 @@ describe('projectSessionScalars：model 组合投影（modelId 条目）', () =>
   })
 })
 
-describe('usage fetchSnapshot（get_session_stats contextUsage 投影）', () => {
+describe('usage fetchSnapshot（get_session_stats contextUsage 派生视图）', () => {
   const cfg = (stats: unknown) =>
     createUsageStateConfig(() => Promise.resolve(stats as Record<string, unknown> | undefined))
 
@@ -85,7 +85,7 @@ describe('usage fetchSnapshot（get_session_stats contextUsage 投影）', () =>
     await expect(cfg({ contextUsage: {} }).fetchSnapshot()).resolves.toEqual({})
   })
 
-  it('正常投影：tokens / contextWindow / percent 三字段（percent 无值 = 字段缺省，不折 0）', async () => {
+  it('正常派生视图：tokens / contextWindow / percent 三字段（percent 无值 = 字段缺省，不折 0）', async () => {
     await expect(cfg({ contextUsage: { tokens: 1000, contextWindow: 10000, percent: 10 } }).fetchSnapshot())
       .resolves.toEqual({ inputTokens: 1000, contextLimit: 10000, usagePercent: 10 })
     // [R2-b23-2] 无值缺省（RT-4#7 纪律）：null 不折成合法 0% 假信号
@@ -93,7 +93,7 @@ describe('usage fetchSnapshot（get_session_stats contextUsage 投影）', () =>
       .resolves.toEqual({ inputTokens: 500, contextLimit: 8000 })
   })
 
-  it('percent 越界 clamp 100；contextWindow 非 number → 0（投影口径对齐 fetchContext）', async () => {
+  it('percent 越界 clamp 100；contextWindow 非 number → 0（派生视图口径对齐 fetchContext）', async () => {
     await expect(cfg({ contextUsage: { tokens: 100, contextWindow: 200, percent: 250 } }).fetchSnapshot())
       .resolves.toEqual({ inputTokens: 100, contextLimit: 200, usagePercent: 100 })
     await expect(cfg({ contextUsage: { tokens: 100, contextWindow: 'big', percent: 3.6 } }).fetchSnapshot())

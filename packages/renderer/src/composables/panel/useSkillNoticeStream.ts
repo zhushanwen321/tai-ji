@@ -1,7 +1,7 @@
 /**
  * useSkillNoticeStream —— session.skillNotice 广播的消费与呈现编排（composer-multi-skill-injection u5）。
  *
- * 职责（单一变化轴「skill 注入提示数据」）：
+ * 职责（单一变化原因「skill 注入提示数据」）：
  * - 订阅 session.skillNotice（payload 带 sessionId，routeInbound FALLBACK 走 session 通道，
  *   经 useSessionEvents 编排；无需改 ws-client/event-bus 注册）。
  * - 提示写入 per-session 分区（ADR-0049 useSessionScopedState 工厂；WS handler 用

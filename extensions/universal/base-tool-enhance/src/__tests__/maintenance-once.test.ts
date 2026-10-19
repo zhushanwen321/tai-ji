@@ -3,17 +3,17 @@
 // reap 类操作不再执行）：
 //  - reconcilePendingEntries 是 session 级豁免类，每 session_start 派发都执行
 //    （startup/resume/new 多派发 ×N——含 factory 二调 handler 累积的真实形态）
-//  - 触发面消失：reaper.ts 模块文件已删除（文件级断言，见首条用例）+ 维护链不再触发
+//  - 触发点消失：reaper.ts 模块文件已删除（文件级断言，见首条用例）+ 维护链不再触发
 //    全局文件锁（原 reapOrphanedTasks 的 reaper.lock 路径随模块删除一并消失）
 //  - 入口无条件 debug 日志按派发次数出现，detail 仅含 reason（reapSkipped 字段
 //    随 reap 调用移除，S6 观测通道语义更新）
 // 断言方式：reconcile / logger 间谍注入观察调用次数与参数；file-lock 为 mock
-// 缺键守卫 + withFileLockSync throw 哨兵（不计数）。
+// 缺键检查 + withFileLockSync throw 哨兵（不计数）。
 import { existsSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
-import { describe, expect, it, vi, beforeEach } from "vitest";
+import { describe, expect, it, vi, beforeEach, afterEach } from "vitest";
 
 const { reconcileMock, loggerMock, officialBashFactoryMock, dataDirRef } =
 	vi.hoisted(() => ({
@@ -25,12 +25,11 @@ const { reconcileMock, loggerMock, officialBashFactoryMock, dataDirRef } =
 
 vi.mock("@earendil-works/pi-coding-agent", () => ({
 	createBashToolDefinition: officialBashFactoryMock,
-	getAgentDir: () => dataDirRef.dir,
 }));
 vi.mock("@zhushanwen/pi-extension-logger", () => ({
 	getLogger: () => loggerMock,
 }));
-// 守卫形态 = mock 工厂缺键：包入口已删除的 async 锁导出不在工厂注册——维护链若
+// 检查形态 = mock 工厂缺键：包入口已删除的 async 锁导出不在工厂注册——维护链若
 // 误回流，对已删导出的任何访问（调用与 typeof 均计）即抛错（vitest mock 缺键语义；
 // 模块导入本身不抛）。withFileLockSync 哨兵保留：registry 写路径误入维护链即抛
 vi.mock("@zhushanwen/pi-file-lock", () => ({
@@ -47,10 +46,12 @@ import type { ExtensionAPI, SessionStartEvent } from "@earendil-works/pi-coding-
 function createMockPi() {
 	return {
 		registerTool: vi.fn(),
-		// __taiji_bg_reconcile__ 第二触发面（runtime 切回补投）注册桩——本文件只验证
-		// session_start 入口，命令注册面断言在 index.test.ts
+		// __taiji_bg_reconcile__ 第二触发点（runtime 切回补投）注册桩——本文件只验证
+		// session_start 入口，命令注册点断言在 index.test.ts
 		registerCommand: vi.fn(),
-		on: vi.fn(),
+		// pi 1.0.0 契约：on 返回退订函数（delivery-port 装配在 session_start 重绑时
+		// dispose 旧实例兑现退订，mock 需符合真契约）
+		on: vi.fn(() => () => {}),
 		appendEntry: vi.fn(),
 		events: { emit: vi.fn(), on: vi.fn() },
 		sendMessage: vi.fn(),
@@ -60,7 +61,7 @@ function createMockPi() {
 function getSessionStartHandler(pi: ReturnType<typeof createMockPi>) {
 	const handler = pi.on.mock.calls.find((call) => call[0] === "session_start")?.[1];
 	expect(handler).toBeTypeOf("function");
-	// handler 返回 promise（补投 await sendMessage 使维护链 async 化，bg-task-notify-durability）
+	// handler 返回 promise（pi runner emit await handler 消费，维护链 async 形态——unified-delivery 波 3 口径）
 	return handler as (event: SessionStartEvent, ctx: unknown) => Promise<void>;
 }
 
@@ -80,6 +81,9 @@ async function loadExtension() {
 
 beforeEach(() => {
 	reconcileMock.mockReset();
+	// 维护链 dataDir 来源 = resolveTaijiDataDir()（env，session-store-layout-inversion 域 5）：
+	// getAgentDir mock 已随换根退役，改 stub env（dataDirRef.dir 仍是断言与 stub 的同一值源）
+	vi.stubEnv("TAIJI_AGENT_DATA_DIR", dataDirRef.dir);
 	// 官方 bash 工厂返回最小工具定义（override 定义 spread initial.name）
 	officialBashFactoryMock.mockReset();
 	officialBashFactoryMock.mockReturnValue({
@@ -94,11 +98,16 @@ beforeEach(() => {
 	loggerMock.error.mockClear();
 });
 
+afterEach(() => {
+	// env stub 逐用例还原（防同 worker 跨文件残留）
+	vi.unstubAllEnvs();
+});
+
 describe("session_start maintenance chain after reap sink (u-bte-remove)", () => {
 	it("no longer ships a reaper: the module is gone from the extension (trigger surface removed)", () => {
 		// 等价改写（fallow unresolved-import）：原断言动态 import 已删除模块期待
 		// rejects——静态分析无法理解故意性。模块文件不存在 ⟹ import 必 rejects，
-		// 蕴含成立，断言价值不变（触发面消失），文件级判定更直接。路径用 join 逐段
+		// 蕴含成立，断言价值不变（触发点消失），文件级判定更直接。路径用 join 逐段
 		// 拼装：fallow 会把 ../reaper.ts 形态的相对路径字符串按 import specifier 扫描
 		const reaperModulePath = join(dirname(fileURLToPath(import.meta.url)), "..", "reaper.ts");
 		expect(existsSync(reaperModulePath)).toBe(false);
@@ -120,7 +129,7 @@ describe("session_start maintenance chain after reap sink (u-bte-remove)", () =>
 		expect(reconcileMock).toHaveBeenCalledTimes(3);
 		expect(reconcileMock).toHaveBeenNthCalledWith(1, expect.anything(), dataDirRef.dir, "sid-once", []);
 		expect(reconcileMock).toHaveBeenLastCalledWith(expect.anything(), dataDirRef.dir, "sid-once", []);
-		// 无全局扫描回流：误触发已删锁导出的任何访问会被 mock 缺键直接抛错（守卫见工厂注释），无告警
+		// 无全局扫描回流：误触发已删锁导出的任何访问会被 mock 缺键直接抛错（检查见工厂注释），无告警
 		expect(loggerMock.warn).not.toHaveBeenCalled();
 	});
 
@@ -147,7 +156,7 @@ describe("session_start maintenance chain after reap sink (u-bte-remove)", () =>
 	});
 
 	it("keeps reconcile failures non-fatal: handler promise resolves, warn logged", async () => {
-		// async 化后的非致命语义（bg-task-notify-durability U3 防假绿改写）：维护链已
+		// async 化后的非致命语义（unified-delivery 防假绿改写）：维护链已
 		// async——同步 not.toThrow() 断言恒真，改为显式断言「handler 的 promise resolve
 		//（错误在链内被 async 捕获，不向上传播成 unhandled rejection）+ warn 日志确实
 		// 记录」。两个断言缺一即红：吞掉后不打日志 = 观测丢失；打日志但 reject = fire

@@ -4,8 +4,8 @@
  * 验证目录标题行的 folder-new-session-btn：
  * - 首屏渲染：每个目录组都有 + 按钮，且位于 folder-delete-btn 之前（删除按钮左侧）
  * - click + → emit('newSessionInFolder', cwd)
- * - 守卫差异：项目过滤隐藏部分 session 时（isFolderDeleteAvailable=false，删除按钮不渲染），
- *   + 按钮仍渲染（新建非破坏性，不受过滤守卫限制）
+ * - 检查差异：项目过滤隐藏部分 session 时（isFolderDeleteAvailable=false，删除按钮不渲染），
+ *   + 按钮仍渲染（新建非破坏性，不受过滤检查限制）
  * - + 点击不 emit deleteFolder，也不影响删除确认态
  *
  * 运行：cd packages/renderer && npx vitest run src/__tests__/sidebar/session-list-folder-new-session.test.ts
@@ -79,7 +79,7 @@ describe('SessionList 目录行 + 按钮点击交互', () => {
     expect(wrapper.emitted('deleteFolder')).toBeFalsy()
   })
 
-  it('删除按钮进确认态后点 + → 确认态复位（window pointerdown 收口），不 emit deleteFolder', async () => {
+  it('删除按钮进确认态后点 + → 确认态复位（window pointerdown 收尾），不 emit deleteFolder', async () => {
     const wrapper = mountList()
     await wrapper.find('[data-testid="folder-delete-btn"]').trigger('click')
     // 确认态：title 变 deleteFolderConfirm 文案
@@ -98,7 +98,7 @@ describe('SessionList 目录行 + 按钮点击交互', () => {
   })
 })
 
-describe('SessionList 目录行 + 按钮 vs 删除按钮守卫差异', () => {
+describe('SessionList 目录行 + 按钮 vs 删除按钮检查差异', () => {
   it('项目过滤隐藏部分 session 时：删除按钮不渲染，+ 按钮仍渲染', async () => {
     // 命名 project p1 激活；同 cwd 组内 s1 归 p1（可见）、s2 归 p2（被过滤隐藏）
     const store = useProjectStore()
@@ -125,7 +125,7 @@ describe('SessionList 目录行 + 按钮 vs 删除按钮守卫差异', () => {
       },
     })
 
-    // 可见 1 < 全量 2 → 删除按钮隐藏（review MF-2 守卫），+ 按钮不受守卫
+    // 可见 1 < 全量 2 → 删除按钮隐藏（review MF-2 检查），+ 按钮不受检查
     expect(wrapper.find('[data-testid="folder-delete-btn"]').exists()).toBe(false)
     const plus = findNewSessionButton(wrapper)
     expect(plus.exists()).toBe(true)

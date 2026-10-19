@@ -34,7 +34,7 @@ import { abortRun, resumeRun, runWorkflow } from "@zhushanwen/subagent-core";
 import type { ResumeRunOptions } from "@zhushanwen/subagent-core";
 import type { RunStore } from "@zhushanwen/subagent-core";
 import type { WorkflowRun } from "@zhushanwen/subagent-core";
-// [D8 创建期拒单] 模型目录分类裁决 + 宿主注入的模型清单投影访问器（既有投影面：
+// [D8 创建期拒单] 模型目录分类裁决 + 宿主注入的模型清单派生视图访问器（既有派生视图范围：
 // session_start 把 ctx.modelRegistry 注入 ModelConfigService 单例——extension 零
 // runtime import，H2/P5 宿主注入同款先例）。
 import { assertModelInCatalog } from "@zhushanwen/subagent-core";
@@ -197,7 +197,7 @@ interface RunSummary {
   startedAt?: string;
   completedAt?: string;
   error?: string;
-  /** run 唯一持久件（record 事件流 <sessionDir>/workflow-state/<runId>.record.jsonl）的绝对路径。 */
+  /** run 唯一持久件（record 事件流 <root>/<rootSid>/workflow/runs/<runId>.record.jsonl）的绝对路径。 */
   stateFile?: string;
 }
 
@@ -226,7 +226,7 @@ type WorkflowExecuteResult = WorkflowToolResult<WorkflowToolDetails | undefined>
  * 组合根（index.ts）零改动。
  *
  * run 与 control 共用同一 reentryRef（与拆分前单工具 4 action 共用一 guard 语义
- * 一致：abort/resume 与 run 同占守卫，双 guard 语义漂移不引入）。reentryRef 是
+ * 一致：abort/resume 与 run 同占检查，双 guard 语义漂移不引入）。reentryRef 是
  * factory 级单例（index.ts 在 factory 内创建），跨 session 共享。当前 Pi 运行时
  * 单 session 串行（同一时刻只有一个 active session），跨 session 不会并发触发
  * workflow action，故共享无竞态。若未来支持多 session 并发，需改为 per-session guard。
@@ -399,7 +399,7 @@ export async function actionRun(
   // normalizeRef 既有——相对路径/裸名一律 null → not_found 拒单，既有文案列全部
   // 可用条目并附 location，失败一次即可按绝对路径自救）。原 registry.get（内置名 +
   // 用户保存名）按名解析整体退役：派发终态形态 = 全路径（用户裁决 2026-09-21），
-  // P5 修复发现面后注册表会命中内置名让裸名「复活」——反向违反终态裁决，故机制
+  // P5 修复发现范围后注册表会命中内置名让裸名「复活」——反向违反终态裁决，故机制
   // 删除而非禁用。行为变更四要素：量级 = 裸名派发调用；旧行为 = registry.get 命中
   // 即启动；新行为 = not_found 拒单（零 token 沉没）；恢复 = 按清单 location 重试。
   const script = await deps.registry.getPath(name);
@@ -410,7 +410,7 @@ export async function actionRun(
     // throw（W4）：pi 只对 execute throw 置 isError:true，返回值里的 isError 被
     // agent-loop 丢弃（agent-loop.js:453-483）——文案原样进 toolResult。
     // [全路径自救指引] 清单逐条附绝对路径 location：run 的 name 形参最贴近的
-    // 读取面就是本清单（<available_workflows> 注入面在 start 时已过时/可能不在
+    // 读侧就是本清单（<available_workflows> 注入点在 start 时已过时/可能不在
     // 上下文）——带 location 后失败一次即可按绝对路径自救。按名解析已退役
     // （D4-1），location 是唯一活路；文案单源 = core launcher.workflowNotFoundMessage。
     throw new Error(await workflowNotFoundMessage(name, deps));
@@ -447,7 +447,7 @@ export async function actionRun(
   // Type.Number 直通（无上界）——超 setTimeout 安全域的值会穿透到 lifecycle 内层
   // 防线（assertSafeTimerDelay），而入口拦截让它永不进入副作用链（判定与文案单点在
   // core shared/entry-guards；LLM 可据消息自纠：clamp 或省略走 unlimited 语义）。
-  // 负值同在入口拒绝：tokens 负值会被 Budget 的 maxTokens>0 守卫、time 负值会被
+  // 负值同在入口拒绝：tokens 负值会被 Budget 的 maxTokens>0 检查、time 负值会被
   // lifecycle 的 budgetTimeMs>0 判定静默升格 unlimited（显式预算被忽略），入口拦截
   // 替代静默升格。
   assertEntryTimeBudget(time);
@@ -457,7 +457,7 @@ export async function actionRun(
   // model 随脚本 JS 动态求值不可静态解析——由派发期 isPiRoute 对称校验覆盖，
   // 见 workflow-dispatch.resolveWorkflowIdentity）。查无 = run 创建失败（同步 throw，
   // 零 spawn 零 token），错误列可用清单 + 分类修复指引（查无 vs provider 配置漂移）。
-  // 目录经宿主注入投影访问：session_start 已把 ctx.modelRegistry 注入
+  // 目录经宿主注入派生视图访问：session_start 已把 ctx.modelRegistry 注入
   // ModelConfigService 单例；单例缺席（生产不可达——tool execute 前必有 session_start）
   // 降级跳过 + warn 留痕，派发期 identity 解析仍是权威裁决。
   if (params.model !== undefined) {
@@ -531,10 +531,10 @@ function actionStatus(deps: LauncherDeps): WorkflowExecuteResult {
 
 /**
  * [W2/V1 D1 分流表第 6 行] 单一判源函数（CLI 面显示/排序的混合判源收拢）：输出
- * 投影三态 status（running|interrupted|done——重水合中断 run 经 meta.interruptedAt
- * 投影中断态，[D2] 与 shared WorkflowRunStatus 三态同词；活体终局经进程内终局
+ * 派生视图三态 status（running|interrupted|done——重新加载进内存的中断 run 经 meta.interruptedAt
+ * 派生视图出中断态，[D2] 与 shared WorkflowRunStatus 三态同词；活体终局经进程内终局
  * 记录注册表判定、恢复路径写点 run 经聚合 status 读）。判源 = core runSummary
- * 投影，散落的等价分支形态不采用（D1 否决记录：散落分支在 grep 层不可区分，
+ * 派生视图，散落的等价分支形态不采用（D1 否决记录：散落分支在 grep 层不可区分，
  * 活体判据误用漏网）。
  *
  * 排序键契约：STATUS_ORDER 权重表只消费本函数的三态输出；outcome 细分由
@@ -567,7 +567,7 @@ async function actionAbort(
   }
   try {
     // [W2/V1 D1 分流表第 7 行] abort 读回换源：oldStatus/newStatus/reason 全部
-    // 取 runSummary 投影（活体终局经终局记录派生 DoneReason——原两态机字段读随
+    // 取 runSummary 派生视图（活体终局经终局记录派生 DoneReason——原两态机字段读随
     // 活体写点删除停更，abort 后 state.reason 恒 undefined）。
     const oldStatus = displayStatusOf(run);
     await abortRun(runId, deps, params.error);
@@ -671,10 +671,10 @@ export async function actionResume(
 
 // ── helpers ──────────────────────────────────────────────────
 
-/** WorkflowRun → 摘要（status action 用）：core runSummary 单源投影 + 宿主扩展 stateFile。
+/** WorkflowRun → 摘要（status action 用）：core runSummary 单源派生视图 + 宿主扩展 stateFile。
  *
- * 字段集不再本地维护（runSummary 双投影分叉的收口点，D8/B5）；stateFile 依赖
- * RunStore 实例，属宿主扩展——core 投影刻意不依赖具体 store。 */
+ * 字段集不再本地维护（runSummary 双派生视图分叉的收尾点，D8/B5）；stateFile 依赖
+ * RunStore 实例，属宿主扩展——core 派生视图刻意不依赖具体 store。 */
 function toRunSummary(run: WorkflowRun, store: RunStore): RunSummary {
   return { ...runSummary(run), stateFile: store.stateFilePath(run.runId) };
 }

@@ -5,7 +5,7 @@
  * 覆盖（impl-plan u-plan-bar 验收条款 + u-review-source-ui 增量）：
  * - 承接清单① 常驻订阅：isActive=false 时组件常驻（无 DOM），planReview 请求仍入
  *   extensionUIStore（PlanModeBar setup 自持 useExtensionUI(planReviewFilter) 实例——
- *   右区 PlanReviewBar 此时未创建，本实例是唯一订阅面）；isActive 翻转 true 后右区
+ *   右区 PlanReviewBar 此时未创建，本实例是唯一订阅侧）；isActive 翻转 true 后右区
  *   ready 分支可达（先有 isActive 帧后有消费者的鸡蛋困境由常驻订阅消除）
  * - 承接清单② focusedSid 注入：mount 后 planStore.focusedSid 非空（syncFocus 义务随
  *   组件自 PanelContainer 横幅/审批条迁移到 PlanModeBar）
@@ -18,7 +18,7 @@
  * - 退出命令：确认后 click → command('session.abortPlan')；失败 → E9 错误行就近呈现
  * - 右区三分支：ready 三键（修订/执行/搁置）/ revising / degraded（稳定窗放行后）/ 隐藏（仅左区）
  * - 窄窗换行策略（F-R2-2）：右区 grow+flex-wrap 反重叠契约 + 左区退出 shrink-0
- *   （jsdom 无布局，class 断言守卫策略不被改回 flex-1 收缩形态）
+ *   （jsdom 无布局，class 断言检查策略不被改回 flex-1 收缩形态）
  * - 场景 7（A7 降级 L1，DOM 存在性）：退出（isActive=false）后 PlanModeBar 不在 DOM；
  *   PanelContainer 无横幅/审批条挂载残留（findComponent 断言 PlanReviewBar 不在其树内）
  * - 挂载位：Panel 内 plan-mode-bar 行位于 .composer-band 之前（composer 正上方）
@@ -46,7 +46,7 @@ import { mount, DOMWrapper, type VueWrapper } from '@vue/test-utils'
 import { computed, defineComponent, nextTick } from 'vue'
 import type { PlanStateView } from '@taiji/shared'
 
-// ── mock ①：command（plan-store 首拉 RPC + 退出 session.abortPlan）——spread actual ──
+// ── mock ①：command（plan-store 首次拉取 RPC + 退出 session.abortPlan）——spread actual ──
 const commandMock = vi.hoisted(() => vi.fn())
 vi.mock('@taiji/core/transport/api', async (importActual) => {
   const actual = await importActual<typeof import('@taiji/core/transport/api')>()
@@ -184,8 +184,8 @@ describe('承接清单① 常驻挂载订阅（M1 硬约束）', () => {
     await flushAsync()
     expect(wrapper.find('[data-testid="plan-review-approve"]').exists()).toBe(false)
 
-    // isActive 帧到达（投影链广播）→ 整行渲染 → PlanReviewBar 创建。其 usePlanState
-    // watch immediate 会再触发一次首拉（生产语义 = 拉 runtime 最新快照，bus 内存态即
+    // isActive 帧到达（派生视图链广播）→ 整行渲染 → PlanReviewBar 创建。其 usePlanState
+    // watch immediate 会再触发一次首次拉取（生产语义 = 拉 runtime 最新快照，bus 内存态即
     // 权威源、不回退；mock 持久返回旧快照会造成假覆盖）——mock 演进到最新帧对齐生产。
     // 快照权威同步演进：PlanReviewBar 新实例 subscribe 拉取 getPendingRequests，runtime
     // 挂起表含 'pr-1'（extension-ui kind 事件与广播同源缓存）——空快照会让 retainOnly
@@ -216,7 +216,7 @@ describe('承接清单② focusedSid 注入迁移', () => {
     expect(usePlanStore().focusedSid).toBe(SID)
   })
 
-  it('首拉触发（loadPlanState RPC 随挂载发出）', async () => {
+  it('首次拉取触发（loadPlanState RPC 随挂载发出）', async () => {
     await mountBar()
     expect(commandMock.mock.calls.some((c) => c[0] === 'session.getPlanState')).toBe(true)
   })
@@ -440,7 +440,7 @@ describe('右区三分支（PlanReviewBar 情境渲染，宿主行内）', () =>
   })
 })
 
-describe('窄窗换行策略（F-R2-2 反重叠回归守卫）', () => {
+describe('窄窗换行策略（F-R2-2 反重叠回归检查）', () => {
   it('右区 = grow + flex-wrap（basis max-content）：窄窗放不下整体换行而非收缩覆盖左区', async () => {
     const wrapper = await mountBar(viewOf({ state: 'reviewing' }))
     emitPlanReviewRequest('pr-1')
@@ -539,7 +539,7 @@ describe('挂载位：Panel 内 composer 下方（.composer-band 之后）', () 
   })
 })
 
-/** locale 值递归展平（文案合规静态断言的输入面） */
+/** locale 值递归展平（文案合规静态断言的输入范围） */
 function flattenStrings(obj: unknown, out: string[] = []): string[] {
   if (typeof obj === 'string') {
     out.push(obj)

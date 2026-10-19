@@ -1,10 +1,10 @@
-// engines-declaration.test.ts —— [W4] 引擎清单投影守护（原 U7b「package.json 静态
+// engines-declaration.test.ts —— [W4] 引擎清单派生视图守护（原 U7b「package.json 静态
 // 声明双源一致」职责随协议化 H5 单源化消亡：引擎清单唯一来源 = 引擎包 manifest
 // 自注册 + 三级发现器，扩展包 package.json 的 taiji.subagentEngines 声明不再被
-// runtime 冷启动回退消费，静态声明面已废弃）。
+// runtime 冷启动回退消费，静态声明范围已废弃）。
 //
-// 现守护 = 投影合流契约（设计 §3.4 投影面表 / impl-plan §2.4）：
-//   syncEnginesFile 投影清单 = 组合根注册的引擎（inproc 过渡注册）∪ 三级发现装载的
+// 现守护 = 派生视图合流契约（设计 §3.4 派生视图范围表 / impl-plan §2.4）：
+//   syncEnginesFile 派生视图清单 = 组合根注册的引擎（inproc 过渡注册）∪ 三级发现装载的
 //   引擎包（L1 env 根 fixture 注入）；契约 {v:1, engines: string[]} 不变；发现卸载
 //   （包消失）→ 下次扫描自动从清单消失（清理通道）。
 // 新增引擎时无需改本测试（G1 零枚举）。
@@ -107,10 +107,10 @@ afterEach(() => {
   fs.rmSync(tmpRoot, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 });
 });
 
-describe("引擎清单投影合流（W4：发现器装载 ∪ 组合根注册 → engines.json）", () => {
-  it("组合根注册引擎 + 发现的引擎包合流入投影（契约 {v:1, engines} 不变）", async () => {
+describe("引擎清单派生视图合流（W4：发现器装载 ∪ 组合根注册 → engines.json）", () => {
+  it("组合根注册引擎 + 发现的引擎包合流入派生视图（契约 {v:1, engines} 不变）", async () => {
     // 组合根注册点（registerPiEngine/registerZcodeEngine 的 inproc 形态；工厂体同款
-    // registerEngine 调用——不 import 引擎内部，用 stub 等价注册面）
+    // registerEngine 调用——不 import 引擎内部，用 stub 等价注册点）
     registerEngine("pi", () => stubEngine("pi"));
     registerEngine("zcode", () => stubEngine("zcode"));
     // L1 env 根下的第三方引擎包（A4 最小形态：只装包 + manifest）
@@ -122,7 +122,7 @@ describe("引擎清单投影合流（W4：发现器装载 ∪ 组合根注册 �
     expect(file.engines.sort()).toEqual(["foo", "pi", "zcode"]);
   });
 
-  it("投影幂等零写；引擎包卸载 → 下次扫描自动从清单消失（清理通道）", async () => {
+  it("派生视图幂等零写；引擎包卸载 → 下次扫描自动从清单消失（清理通道）", async () => {
     registerEngine("pi", () => stubEngine("pi"));
     makeEnginePkg(path.join(tmpRoot, "engine-roots"), "gone-later");
 

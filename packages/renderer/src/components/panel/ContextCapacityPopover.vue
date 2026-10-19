@@ -1,12 +1,13 @@
 <template>
   <!--
     §2a 上下文容量 popover + coding-plan 额度（draft-composer-states §2a + merged-card）。
-    hover 触发，按钮文字始终显当前用量摘要（69K · 6.9%），浮层给完整容量。
-    触发器两档着色（>70% warn，其余中性；缓存命中率显示在 GenStats 卡/触发器，不在本组件）。
+    hover 触发，触发器 = 上下文容量环形进度图标（ContextUsageRing，2026-10-19 用户裁决：
+    展开态与聚合态统一形态——原「69K · 6.9%」文本摘要位由环形可视化承接，百分比进环形
+    三档语义色，绝对用量进浮层容量卡）。
 
     [HISTORICAL] `variant`（simplified/iconic）中间态已随 W3b 删除——聚合形态由
-    ComposerMetricsAggregate（单图标聚合页）承担，本组件恒为 full 文本触发器；
-    浮层内容拆为 ContextCapacityCard（原触发器与聚合页共挂，删重复渲染）。
+    ComposerMetricsAggregate（单图标聚合页）承担；浮层内容拆为 ContextCapacityCard
+    （原触发器与聚合页共挂，删重复渲染）。
     coding-plan 区逻辑在 useQuotaDisplay（卡内展示 + 本触发器 hover-enter 查询，
     store 全局共享同源收敛）。
   -->
@@ -14,22 +15,11 @@
     <HoverCardTrigger as-child>
       <Button
         variant="ghost"
-        :class="
-          cn(
-            'h-7 gap-1 rounded-[var(--radius-xs)] px-2 text-[length:var(--text-2xs)] transition-colors hover:bg-transparent',
-            isHigh ? 'text-warn' : 'text-neutral-dim',
-          )
-        "
+        class="h-7 w-7 rounded-[var(--radius-xs)] p-0 text-neutral-dim transition-colors hover:bg-transparent hover:text-neutral-fg"
         :title="t('panel.context.capacity')"
         @mouseenter="onHoverEnter"
       >
-        <span class="tabular-nums">{{ hasUsage ? usedDisplay : '—' }}</span>
-        <!-- 只留百分比（绝对用量进 title 与浮层） -->
-        <template v-if="hasPercent">
-          <!-- 分隔点降档（demo .mchip .mdot opacity .7）：装饰位不吃正文着色档 -->
-          <span aria-hidden="true" class="opacity-70">·</span>
-          <span class="tabular-nums">{{ usage.percent }}%</span>
-        </template>
+        <ContextUsageRing :session-id="props.sessionId" class="size-[16px]" />
       </Button>
     </HoverCardTrigger>
     <!-- 右下锚（demo .stats-pop：right:0 + bottom:calc(100%+10px)）——align="end" 右对齐
@@ -46,20 +36,18 @@
 </template>
 
 <script setup lang="ts">
-import { computed, toRef } from 'vue'
+import { toRef } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { Button } from '@/components/ui/button'
 import { HoverCard, HoverCardContent, HoverCardTrigger } from '@/components/ui/hover-card'
-import { cn } from '@/lib/utils'
-import { useContextUsage } from '@/composables/features/model/useContextUsage'
 import { useQuotaDisplay } from '@/composables/features/model/useQuotaDisplay'
 import ContextCapacityCard from './ContextCapacityCard.vue'
-import { formatTokens, USAGE_HIGH_THRESHOLD } from './context-usage-display'
+import ContextUsageRing from './ContextUsageRing.vue'
 
 const { t } = useI18n()
 
 const props = defineProps<{
-  /** session 分区键 + 恢复腿触发源（context-consistency D2：用量状态在 useContextUsage 分区，组件纯读） */
+  /** session 分区键（ContextUsageRing 分区纯读；恢复路径 RPC 有模块级 in-flight 去重） */
   sessionId?: string
   /**
    * 当前复合 modelId（"provider/modelId"），受控 prop，由 Composer 下发。
@@ -71,20 +59,6 @@ const props = defineProps<{
 }>()
 // [HISTORICAL] `variant` prop 已删（W3b）：对外 props 恒为 sessionId / modelId。
 
-// ── 上下文用量（context-consistency D2 终态）：per-session 分区纯读 ──
-// 订阅/恢复腿/0 帧哨兵全在 composable 内，组件只做 status → 显示映射（卡内同款实例读同一分区）。
-const { current: usage } = useContextUsage(toRef(props, 'sessionId'))
-
 // ── hover-enter 额度查询（展示逻辑在 ContextCapacityCard，查询触发留触发器）──
 const { onHoverEnter } = useQuotaDisplay(toRef(props, 'modelId'))
-
-const usedDisplay = computed(() => formatTokens(usage.value.used))
-
-/** 有真值（分区 status='ok'）；no-value/unknown → 关键数字显「—」 */
-const hasUsage = computed(() => usage.value.status === 'ok')
-/** contextWindow 已知（provider 未配 contextWindow 时 total=0：只显用量不显百分比） */
-const hasPercent = computed(() => usage.value.status === 'ok' && usage.value.total > 0)
-
-/** 触发器两档着色（>70% warn，其余中性——原 full 形态语义不变） */
-const isHigh = computed(() => usage.value.percent > USAGE_HIGH_THRESHOLD)
 </script>

@@ -42,7 +42,7 @@ export interface EnginePidfileContent {
   engineStartTime: string | null;
   engineId: string;
   hostKind: string;
-  /** 写入时刻（ISO 8601，诊断面）。 */
+  /** 写入时刻（ISO 8601，诊断范围）。 */
   writtenAt: string;
 }
 
@@ -104,7 +104,7 @@ export function removePidfile(path: string): void {
 }
 
 // ============================================================
-// EngineClient 编排面（spawn 成功写入 + 启动清扫的一次式调用）
+// EngineClient 编排侧（spawn 成功写入 + 启动清扫的一次式调用）
 // ============================================================
 
 export interface EnginePidfileRegistration {
@@ -223,7 +223,7 @@ export function readProcessStartTime(pid: number): string | undefined {
 
 /** 清扫结果（诊断/测试可观测）。 */
 export interface PidfileSweepResult {
-  /** 三条件全立被杀的引擎 pid（POSIX 组杀）。 */
+  /** 三条件全立被杀的引擎 pid（POSIX 按进程组终止）。 */
   killed: number[];
   /** 判定不成立被删除的陈旧 pidfile（含 Windows 不杀只删）。 */
   removed: Array<{ file: string; reason: string }>;
@@ -243,7 +243,7 @@ export interface SweepStalePidfilesOptions {
   matchesEngineCmdline: (cmdline: string) => boolean;
   /** 平台注入（缺省 process.platform；测试注入 win32 验证不杀只删分支）。 */
   platform?: NodeJS.Platform;
-  /** 杀执行器注入（缺省 POSIX 负 pid 组杀；测试红线：绝不真杀无关进程）。 */
+  /** 杀执行器注入（缺省 POSIX 负 pid 按进程组终止；测试红线：绝不真杀无关进程）。 */
   killEngine?: (enginePid: number) => void;
 }
 
@@ -253,7 +253,7 @@ export interface SweepStalePidfilesOptions {
  * 逐文件判定（顺序即优先级）：
  *   坏内容 → 删；自己 → 跳过；宿主 pid 存活 → 保留跳过（活实例或 pid 复用疑似）；
  *   宿主 pid 死 → win32：删（不杀）；posix：引擎 pid 死 → 删；存活 → cmdline 校验
- *   不符 → 删；engineStartTime 不匹配 → 删（pid 复用）；全过 → 组杀 + 删。
+ *   不符 → 删；engineStartTime 不匹配 → 删（pid 复用）；全过 → 按进程组终止 + 删。
  *   ps 失败 / 探测非 ESRCH 错误 → 保守跳过 + 保留。
  */
 export function sweepStalePidfiles(opts: SweepStalePidfilesOptions): PidfileSweepResult {
@@ -316,7 +316,7 @@ function sweepOnePidfile(
 /**
  * 宿主已死后的陈旧判定链（pidfile 必陈旧）：win32 不杀只删；POSIX 按引擎 pid
  * 存活 → cmdline 身份 → engineStartTime 三条件逐级校验，任一不确定保守跳过 +
- * 保留，判定不成立删文件，全过 → 组杀 + 删。
+ * 保留，判定不成立删文件，全过 → 按进程组终止 + 删。
  */
 function reapDeadHostEngine(
   path: string,
@@ -368,7 +368,7 @@ function reapDeadHostEngine(
     return;
   }
 
-  // 三条件全立：确是宿主崩溃残留的引擎实例 → 组杀 + 删文件。
+  // 三条件全立：确是宿主崩溃残留的引擎实例 → 按进程组终止 + 删文件。
   const killEngine =
     opts.killEngine ?? defaultKillEngineProcessGroup;
   killEngine(content.enginePid);
@@ -377,7 +377,7 @@ function reapDeadHostEngine(
   result.removed.push({ file, reason: "swept after kill (stale orphan)" });
 }
 
-/** 缺省杀执行器：POSIX 负 pid 组杀（引擎 CLI 由 EngineClient detached:true spawn = 组长），失败回落单杀。 */
+/** 缺省杀执行器：POSIX 负 pid 按进程组终止（引擎 CLI 由 EngineClient detached:true spawn = 组长），失败回落单杀。 */
 function defaultKillEngineProcessGroup(enginePid: number): void {
   try {
     process.kill(-enginePid, "SIGKILL");

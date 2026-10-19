@@ -4,7 +4,7 @@
 //
 // 核心契约：renderBgNotifyMessage 必须返回带紫色背景 + 圆角边框的组件——
 // Pi 的 CustomMessageComponent 对 customRenderer 返回值是「裸 addChild」，
-// 返回裸 Text 会丢失紫色背景。本测试钉死「施加 customMessageBg + 边框」这一行为。
+// 返回裸 Text 会丢失紫色背景。本测试固定「施加 customMessageBg + 边框」这一行为。
 //
 // 测试用 mock theme（bg 记录调用色 token），不依赖真实 Pi Theme。
 
@@ -290,7 +290,7 @@ describe("renderBgNotifyMessage", () => {
 
   it("[collect 退役] 多行单条（result + patch + error 分行）边框完整：所有中间行含 │", () => {
     // 原批量形态 { batch: true, items }（sync 批通知产物）随 notifyBatch 删除——
-    // 边框回归面改用单条 record 的多行渲染载荷驱动。
+    // 边框回归测试改用单条 record 的多行渲染载荷驱动。
     const { theme } = makeTheme();
     const comp = renderBgNotifyMessage(
       {
@@ -320,12 +320,12 @@ describe("renderBgNotifyMessage", () => {
   });
 });
 
-// ── 同构 switch 残留守卫（收敛删除后不得写回）——迁自 derive-closed-display-parity-interface.test.ts ──
+// ── 同构 switch 残留检查（收敛删除后不得写回）——迁自 derive-closed-display-parity-interface.test.ts ──
 //
 // 同构成败推导收敛到 core execution-record.ts 的 deriveOutcome/projectOutcome（单一权威），
-// 本守卫锚定壳侧消费方源码不得写回手写同构 switch。（原文件的 fail-loud 前置条
-// 「消费方源码可读」属 D 裁决删除项：readFileSync 失败时下方守卫自身即红，前置条冗余。）
-describe("同构 switch 残留守卫（收敛删除后不得写回）— 壳侧消费方", () => {
+// 本检查锚定壳侧消费方源码不得写回手写同构 switch。（原文件的 fail-loud 前置条
+// 「消费方源码可读」属 D 裁决删除项：readFileSync 失败时下方检查自身即红，前置条冗余。）
+describe("同构 switch 残留检查（收敛删除后不得写回）— 壳侧消费方", () => {
   it("bg-notify-render renderRecordLines 无 closedReason 成败推导特征", () => {
     const src = readFileSync(CONSUMER_SOURCE, "utf-8");
     for (const token of LEGACY_DERIVATION_TOKENS) {

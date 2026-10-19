@@ -1,21 +1,21 @@
 // src/journal-replay.ts
 //
-// journal → SessionView 的纯投影（引擎侧原语，自 core
+// journal → SessionView 的纯派生视图（引擎侧原语，自 core
 // execution/engine/common/journal-replay.ts + execution-record.ts reducer 核心 +
 // common/session-view-projection.ts 迁入 @zhushanwen/subagent-engine-sdk）。
-// 迁移处置（impl-plan §2.1 journal-replay 行）：**纯投影部分（entry → record 的
+// 迁移处置（impl-plan §2.1 journal-replay 行）：**纯派生视图部分（entry → record 的
 // reducer）下沉 SDK，journal I/O 与②级降级链留 core**——
 //   - SDK 版 = eventsToSessionView（事件流 → SessionView，live/replay 共用 reducer
 //     语义）+ reducer 本体（updateFromEvent 及其私有 handler）+ Turn → ReplayedTurn
-//     投影 / usage 聚合（原 core session-view-projection.ts 同名函数逐字等价，
-//     R6 收口后本模块为唯一实现，双活副本已删）；
+//     派生 / usage 聚合（原 core session-view-projection.ts 同名函数逐字等价，
+//     R6 收敛后本模块为唯一实现，双活副本已删）；
 //   - 留 core = replayJournal（journal 文件 I/O）+ replayJournalToSessionView（read
 //     第②级降级编排）——core 侧引用切换已完成（core 依赖 SDK 方向合法）。
 //
 // record 形态：SDK 侧 reducer 操作 ReplayRecordView（turns/turnCount/totalTokens/
 // lastError 四字段视图）——core ExecutionRecord 留 core（类型闭包表裁决），其结构
 // 满足本视图（W2 双向可赋值断言验证）。重放场景不需要 identity 字段（agent/model/
-// task 等只服务投影与持久化，reducer 不触碰），不搬 createRecord 全量 identity。
+// task 等只服务派生视图与持久化，reducer 不触碰），不搬 createRecord 全量 identity。
 //
 // 重放等价性现状（2026-09-30 核实更正）：设计目标是「重放与 live 共用同一 reducer」，
 // 实现上仍是两份逐字同形的副本（本文件与 core execution-record.ts 各一份）。生产证
@@ -89,7 +89,7 @@ function addUsage(prev: AgentUsage | undefined, next: AgentUsage): AgentUsage {
 // 创建（重放场景的 record 构造）
 // ============================================================
 
-/** 创建一个空 turn（text/thinking 空，无 toolCalls，未闭合）。 */
+/** 创建一个空 turn（text/thinking 空，无 toolCalls，未结束）。 */
 function emptyTurn(): Turn {
   return { text: "", thinking: "", toolCalls: [], usageDelta: undefined, closed: false };
 }
@@ -260,8 +260,8 @@ function applyToolEnd(
 }
 
 /**
- * turn_end：闭合当前 turn，记 closedTs（真实墙钟），turnCount++，清 lastError。
- * 正常闭合清 lastError：瞬态 error 恢复后不应误判 success=false
+ * turn_end：结束当前 turn，记 closedTs（真实墙钟），turnCount++，清 lastError。
+ * 正常结束清 lastError：瞬态 error 恢复后不应误判 success=false
  * （若 turn_end 后 message_end 报 error，会在 message_end 处理器重新写回）。
  */
 function applyTurnEnd(record: ReplayRecordView): void {
@@ -288,7 +288,7 @@ function applyMessageEnd(
   if (event.usage) {
     const turn = currentTurn(record);
     turn.usageDelta = addUsage(turn.usageDelta, event.usage);
-    // totalTokens 累加四项之和（保留旧语义，投影直接读）
+    // totalTokens 累加四项之和（保留旧语义，派生视图直接读）
     record.totalTokens +=
       (event.usage.input ?? 0) + (event.usage.output ?? 0) +
       (event.usage.cacheRead ?? 0) + (event.usage.cacheWrite ?? 0);
@@ -307,12 +307,12 @@ function applyErrorEvent(
 }
 
 /**
- * 从 AgentEvent 更新 record。所有数据收口进 record.turns[]。
+ * 从 AgentEvent 更新 record。所有数据收敛进 record.turns[]。
  *   - text/thinking：流式累积进 currentTurn()（完整内容，非切片）
  *   - tool_start/end：push 进 currentTurn().toolCalls（含完整 result）
  *     tool_end 跨 turn 扫描找 running 同名 toolCall（兜底滞后事件）
- *   - turn_end：闭合当前 turn，记 closedTs（真实墙钟，供 getEventLog）；
- *     正常闭合清 lastError（瞬态 error 恢复后不应误判 success=false）
+ *   - turn_end：结束当前 turn，记 closedTs（真实墙钟，供 getEventLog）；
+ *     正常结束清 lastError（瞬态 error 恢复后不应误判 success=false）
  *   - message_end：usage 增量存进末 turn.usageDelta（直接写末 turn，不开新 turn）；
  *     totalTokens 累加
  *   - error：存 record.lastError（getEventLog 派生 error 条目用）
@@ -336,7 +336,7 @@ export function updateFromEvent(record: ReplayRecordView, event: AgentEvent): vo
     case "tool_end":
       return applyToolEnd(record, event);
 
-    // ── turn_end：闭合当前 turn ──
+    // ── turn_end：结束当前 turn ──
     case "turn_end":
       return applyTurnEnd(record);
 
@@ -357,7 +357,7 @@ export function updateFromEvent(record: ReplayRecordView, event: AgentEvent): vo
       return;
 
     // ── armed：武装确认回执（[D3 协议版 P6]，协议语义见 contract-types）——监控
-    //    信号不进 record 投影，消费方 = 宿主等待门 + run 事件 journal（C3 第④步
+    //    信号不进 record 派生视图，消费方 = 宿主等待门 + run 事件 journal（C3 第④步
     //    双侧 reducer no-op 义务的 SDK 侧）
     case "armed":
       return;
@@ -371,9 +371,9 @@ export function updateFromEvent(record: ReplayRecordView, event: AgentEvent): vo
 }
 
 // ============================================================
-// Turn → ReplayedTurn 投影 + usage 聚合
-// （原 core session-view-projection.ts 逐字等价，R6 收口后本模块为唯一实现：
-//   投影语义唯一——strip 内部态 + closed 恒 true + usageDelta 聚合，实现也唯一）
+// Turn → ReplayedTurn 派生 + usage 聚合
+// （原 core session-view-projection.ts 逐字等价，R6 收敛后本模块为唯一实现：
+//   派生语义唯一——strip 内部态 + closed 恒 true + usageDelta 聚合，实现也唯一）
 // ============================================================
 
 /** InternalToolCall → ToolCall（导出纯净形状，不泄漏 running/done/failed 内部状态机）。 */
@@ -414,7 +414,7 @@ export function aggregateUsage(turns: readonly Turn[]): AgentUsageTotal | undefi
 }
 
 // ============================================================
-// 事件流 → SessionView（纯投影出口）
+// 事件流 → SessionView（纯派生视图出口）
 // ============================================================
 
 /**

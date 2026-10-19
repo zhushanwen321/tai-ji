@@ -8,11 +8,11 @@
  * （与 Composer.vue 共享实现，本测试同时验证该装配在组件树内可用）。
  *
  * 覆盖：
- * - R1 挂载回填：segments → 真 chip（.slash-chip / .mention-chip）+ 草稿同步（发送闸门）
- *   + selectedSkillNames 禁选数据面透传 CommandPopover
+ * - R1 挂载回填：segments → 真 chip（.slash-chip / .mention-chip）+ 草稿同步（发送门禁）
+ *   + selectedSkillNames 禁选数据范围透传 CommandPopover
  * - R2 Enter 提交：emit submit(segments)（chip 即段，无序列化标记文本）
  * - R3 ⇧⏎ 换行不提交 / Esc 取消
- * - R4 空稿 + disabled 双闸门：发送钮禁用且点击不 emit
+ * - R4 空稿 + disabled 双门禁：发送钮禁用且点击不 emit
  * - R5 五路 trigger：输入 / → CommandPopover（open/type/query）；浮层 open 时 Enter 被
  *   window capture 主入口消费（不直达提交——「浮层开着 ⏎ 绝不误发」防线）
  *
@@ -100,7 +100,7 @@ describe('UserBubbleEditComposer 挂载回填（R1）', () => {
     expect(wrapper.find('[role="textbox"]').text()).toContain('总结')
   })
 
-  it('file/skill 段 → mention/skill chip 还原 + selectedSkillNames 禁选数据面透传', async () => {
+  it('file/skill 段 → mention/skill chip 还原 + selectedSkillNames 禁选数据范围透传', async () => {
     const wrapper = mountEditor([
       { type: 'skill', name: 'cw-cli', location: '/sk.md' },
       { type: 'file', path: '/a.ts', lineRange: [10, 20] },
@@ -150,7 +150,7 @@ describe('UserBubbleEditComposer 键盘路由（R2/R3）', () => {
   })
 })
 
-describe('UserBubbleEditComposer 闸门（R4）', () => {
+describe('UserBubbleEditComposer 门禁（R4）', () => {
   it('空 segments → 发送钮禁用 + 点击不 emit submit', async () => {
     const wrapper = mountEditor([])
     await flushPromises()

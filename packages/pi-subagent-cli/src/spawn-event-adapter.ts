@@ -82,7 +82,7 @@ export type ExtensionUiRequest =
   // 未知 method fallback：保留原始字段，避免协议演进时丢信息
   | { method: string; raw: Record<string, unknown> };
 
-/** 解析后的 extension_ui_request 顶层形状（type 守卫用）。 */
+/** 解析后的 extension_ui_request 顶层形状（type 检查用）。 */
 interface ExtensionUiRequestEnvelope {
   type: "extension_ui_request";
   id: string;
@@ -90,7 +90,7 @@ interface ExtensionUiRequestEnvelope {
   [key: string]: unknown;
 }
 
-/** Pi 原生 RPC response 顶层形状（type 守卫用）。 */
+/** Pi 原生 RPC response 顶层形状（type 检查用）。 */
 interface RpcResponseEnvelope {
   type: "response";
   command: string;
@@ -208,7 +208,7 @@ function optWidgetPlacement(
 }
 
 /**
- * 从已通过守卫的 envelope 构造 ExtensionUiRequest 变体（按 method 平铺提取，
+ * 从已通过检查的 envelope 构造 ExtensionUiRequest 变体（按 method 平铺提取，
  * 与 Pi rpc-types.ts L230-265 1:1）。未知 method 走 string fallback（保留 raw）。
  */
 function buildExtensionUiRequest(env: ExtensionUiRequestEnvelope): ExtensionUiRequest {

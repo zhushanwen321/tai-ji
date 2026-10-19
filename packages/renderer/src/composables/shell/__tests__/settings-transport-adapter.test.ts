@@ -5,7 +5,7 @@
  *
  * 1. 八元转发矩阵（装配不变量，u17 验收）：adapter import 源 = @/api 门面八元
  *    （config/model/extension/settings/quota/preset/usage/session，VITE_MOCK 感知），
- *    SettingsTransport 接口面逐方法转发门面对应导出。矩阵键 satisfies
+ *    SettingsTransport 接口清单逐方法转发门面对应导出。矩阵键 satisfies
  *    Record<keyof SettingsTransport, ...> 与接口同宽——接口新增/改名方法不进矩阵
  *    = 编译错，防回退 core/transport 直连、防新转发方法漏断言。逐方法断言三透传：
  *    转发目标（域.成员）、探针参数、返回值（请求 resolve 哨兵 / 订阅取消函数）。
@@ -22,6 +22,7 @@ import { describe, it, expect, vi, afterEach } from 'vitest'
 import type { SettingsTransport, DiscoverModelsRequest } from '@taiji/core/domain/settings'
 import type {
   LlmRetryConfig,
+  NetworkProxyConfig,
   PiLaunchPreset,
   ProviderId,
   ProviderSource,
@@ -74,6 +75,12 @@ describe('settings-transport-adapter · @/api 门面八元全量转发矩阵（u
     bell: false,
   }
   const PROBE_RETRY: LlmRetryConfig = { enabled: true, maxRetries: 1, baseDelayMs: 2 }
+  const PROBE_NETWORK_PROXY: NetworkProxyConfig = {
+    enabled: true,
+    proxy: { protocol: 'http', host: '127.0.0.1', port: 7890, username: '', password: '' },
+    noProxy: ['localhost'],
+    rules: ['api.anthropic.com'],
+  }
   const PROBE_QUOTA_PAYLOAD: QuotaConfigurePayload = { providerId: 'probe-provider', enabled: true }
   const PROBE_PRESET: PiLaunchPreset = {
     id: 'probe-preset',
@@ -118,7 +125,7 @@ describe('settings-transport-adapter · @/api 门面八元全量转发矩阵（u
   }
 
   /**
-   * 转发矩阵 = SettingsTransport 接口面的镜像文档。每条：transport.<方法> →
+   * 转发矩阵 = SettingsTransport 接口清单的镜像文档。每条：transport.<方法> →
    * [门面域, 门面成员, 探针参数]，与 settings-transport-adapter.ts 逐行一一对应；
    * satisfies 键集与接口 keyof 同宽，adapter 新增转发而矩阵缺行 = 编译错。
    */
@@ -148,6 +155,8 @@ describe('settings-transport-adapter · @/api 门面八元全量转发矩阵（u
     getSystemPrompt: fwd('config', 'getSystemPrompt', [], (t) => t.getSystemPrompt()),
     getTerminalConfig: fwd('config', 'getTerminalConfig', [], (t) => t.getTerminalConfig()),
     getRetryConfig: fwd('config', 'getRetryConfig', [], (t) => t.getRetryConfig()),
+    getNetworkProxyConfig: fwd('config', 'getNetworkProxyConfig', [], (t) => t.getNetworkProxyConfig()),
+    getNetworkProxyStats: fwd('config', 'getNetworkProxyStats', ['all'], (t, range) => t.getNetworkProxyStats(range)),
     getWorktreeRootDir: fwd('settings', 'getWorktreeRootDir', [], (t) => t.getWorktreeRootDir()),
     getSetupScript: fwd('settings', 'getSetupScript', [], (t) => t.getSetupScript()),
     getBareSetupScript: fwd('settings', 'getBareSetupScript', [], (t) => t.getBareSetupScript()),
@@ -191,6 +200,11 @@ describe('settings-transport-adapter · @/api 门面八元全量转发矩阵（u
     setSystemPrompt: fwd('config', 'setSystemPrompt', [PROBE_SYSTEM_PROMPT], (t, cfg) => t.setSystemPrompt(cfg)),
     setTerminalConfig: fwd('config', 'setTerminalConfig', [PROBE_TERMINAL], (t, cfg) => t.setTerminalConfig(cfg)),
     setRetryConfig: fwd('config', 'setRetryConfig', [PROBE_RETRY], (t, cfg) => t.setRetryConfig(cfg)),
+    setNetworkProxyConfig: fwd('config', 'setNetworkProxyConfig', [PROBE_NETWORK_PROXY], (t, cfg) =>
+      t.setNetworkProxyConfig(cfg),
+    ),
+    testNetworkProxy: fwd('config', 'testNetworkProxy', [PROBE_NETWORK_PROXY], (t, cfg) => t.testNetworkProxy(cfg)),
+    resetNetworkProxyStats: fwd('config', 'resetNetworkProxyStats', [], (t) => t.resetNetworkProxyStats()),
     setWorktreeRootDir: fwd('settings', 'setWorktreeRootDir', ['probe-root'], (t, dir) => t.setWorktreeRootDir(dir)),
     setSetupScript: fwd('settings', 'setSetupScript', ['probe-script'], (t, script) => t.setSetupScript(script)),
     setBareSetupScript: fwd('settings', 'setBareSetupScript', ['probe-script'], (t, script) =>
@@ -265,6 +279,7 @@ describe('settings-transport-adapter · @/api 门面八元全量转发矩阵（u
     onSkills: fwd('config', 'onSkills', [probeHandler], (t, h) => t.onSkills(h)),
     onAgents: fwd('config', 'onAgents', [probeHandler], (t, h) => t.onAgents(h)),
     onExtensions: fwd('extension', 'onExtensions', [probeHandler], (t, h) => t.onExtensions(h)),
+    onNetworkProxyConfig: fwd('config', 'onNetworkProxyConfig', [probeHandler], (t, h) => t.onNetworkProxyConfig(h)),
     onSkillDirs: fwd('config', 'onSkillDirs', [probeHandler], (t, h) => t.onSkillDirs(h)),
     onAgentDirs: fwd('config', 'onAgentDirs', [probeHandler], (t, h) => t.onAgentDirs(h)),
     onExtensionDirs: fwd('config', 'onExtensionDirs', [probeHandler], (t, h) => t.onExtensionDirs(h)),
@@ -282,7 +297,7 @@ describe('settings-transport-adapter · @/api 门面八元全量转发矩阵（u
     onAuthError: fwd('config', 'onAuthError', [probeHandler], (t, h) => t.onAuthError(h)),
   } satisfies Record<keyof SettingsTransport, ForwardEntry>
 
-  it('SettingsTransport 接口面全量方法逐条转发：目标 = @/api 门面对应导出，参数与返回值原样透传（防回退 core/transport 直连）', async () => {
+  it('SettingsTransport 接口清单全量方法逐条转发：目标 = @/api 门面对应导出，参数与返回值原样透传（防回退 core/transport 直连）', async () => {
     // 每域一个 Proxy：任意成员访问都返回（并登记）同一个 spy——转发目标域.成员由此可观测。
     // 若矩阵行登记的 facade 与 adapter 实际访问的成员不符，登记的 spy 收不到调用 → 该行红；
     // 反向断言（registry 总数 = 矩阵条目数）再兜住「adapter 访问了矩阵之外的门面成员」。
@@ -342,7 +357,7 @@ describe('settings-transport-adapter · @/api 门面八元全量转发矩阵（u
     // 反向断言：adapter 没有矩阵之外的任何门面成员访问（registry 恰好登记矩阵条目数个 spy）
     expect(registry.size).toBe(Object.keys(FORWARD_MATRIX).length)
 
-    // 同宽断言（运行期防线）：矩阵键集必须与 transport 实际转发面一致——adapter 新增转发
+    // 同宽断言（运行期防线）：矩阵键集必须与 transport 实际转发范围一致——adapter 新增转发
     // 方法而矩阵缺行 = 此处红。本测试文件未入 renderer typecheck-test 白名单，上方 satisfies
     // 编译期同宽暂不生效，以此断言兜底（typecheck 接入后两者互为冗余防线）。
     expect(Object.keys(FORWARD_MATRIX).sort()).toEqual(Object.keys(transport).sort())

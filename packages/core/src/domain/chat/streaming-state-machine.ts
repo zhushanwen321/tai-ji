@@ -3,13 +3,13 @@
  *
  * 从 chat store 提取「messages ref 的 streaming→终态 mutate + 断连瞬态清理」内聚逻辑：
  * - applySubagentStreamDelta：subagent streaming delta 吸收（替换非追加，contentBlock 幂等）
- * - finalizeSubagentStream：subagent streaming 收口（sealed 守卫，幂等 no-op）
+ * - finalizeSubagentStream：subagent streaming 收尾（sealed 检查，幂等 no-op）
  * - [B2 subagent-stream-chunk §4.3] per (virtualId, recordId) 增量 chunk 消费状态机：
  *   applySubagentStreamChunk（chunk 优先序四步）/ applySubagentStreamState（拉取响应
  *   按序判定四分支 + 水位回放）/ requestSubagentStreamState（拉取统一入口，在途去重）/
  *   sealSubagentStream（sealedMsgSeq 单调水位）/ clearSubagentChunkState[ForSession]
  *   （分区生命周期清除；拉取执行器经 deps.subagentStreamPull 注入）
- * - finalizeMessages：finalizeSession 的 message 终态映射（bash 跳过 / toolCall 收口 / endTime 条件）
+ * - finalizeMessages：finalizeSession 的 message 终态映射（bash 跳过 / toolCall 收尾 / endTime 条件）
  * - collectFinalizeCandidates：finalizeAllStreaming 候选 session 并集（6 源 refs）
  * - clearIndependentTransient：resetTransientStates 的 session 级独立瞬态清理
  *
@@ -17,6 +17,7 @@
  * 业务参数。store.ts 仅做 ref 委托（纯转发，无逻辑），不再有模块级 *Impl 反模式
  * （原为绕 max-lines-per-function 拆分）。
  */
+import { ref } from 'vue'
 import type { ContentBlock, Message, ServerMessageMap, ToolCall } from '@taiji/shared'
 import { extractMainSessionId, isSubagentVirtualId } from '@taiji/shared'
 import {
@@ -33,7 +34,7 @@ import { randomUuid } from '../../utils/random-uuid'
 
 /**
  * finalizeMessages 的 per-message 终态映射助手（模块作用域纯函数，不依赖工厂闭包；
- * 从原 map 回调按职责拆出——bash 跳过 → toolCall 收口 → 终态实体清扫 / streaming 收口，
+ * 从原 map 回调按职责拆出——bash 跳过 → toolCall 收尾 → 终态实体清扫 / streaming 收尾，
  * 分支条件与原实现逐字节等价，行为由 streaming-state-machine.test.ts + store.test.ts 锁）。
  */
 function finalizeMessage(
@@ -47,18 +48,18 @@ function finalizeMessage(
   // 会把共存中的 streaming bash 一并翻成 error，bashResult 到达时找不到 streaming bash →
   // 真实结果被丢弃。
   if (m.bashExecution) return m
-  // toolCall 收口对终态/streaming 两分支共用，只算一次（与原实现一致）
+  // toolCall 收尾对终态/streaming 两分支共用，只算一次（与原实现一致）
   const toolCalls = finalizeToolCalls(reason, m.toolCalls)
   const isStreaming = m.status === 'streaming'
   if (!isStreaming) return sweepFinalizedMessage(m, toolCalls)
   return finalizeStreamingMessage(m, reason, errorText, toolCalls)
 }
 
-/** toolCall 统一收口（无论 message 是否还 streaming；[W4] 收敛到单一路径，避免
+/** toolCall 统一收尾（无论 message 是否还 streaming；[W4] 收敛到单一路径，避免
  * message.complete 局部 finalizeToolCalls 与此两套映射漂移）。
  * - error/stream_error → toolCall 'error'；其它非 normal/aborted → 'end_not_received'（设 endTime）；
  *   normal/aborted 不设 endTime（与原逻辑一致）。
- * - 延迟到达的真实 tool_call_end 会用真实 output 覆盖收口值（end_not_received → completed）。
+ * - 延迟到达的真实 tool_call_end 会用真实 output 覆盖收尾值（end_not_received → completed）。
  * - toolCalls 为 undefined 时保持 undefined（等价原 `?.map`）。 */
 function finalizeToolCalls(reason: FinalizeReason, toolCalls: ToolCall[] | undefined): ToolCall[] | undefined {
   if (!toolCalls) return undefined
@@ -73,7 +74,7 @@ function finalizeToolCalls(reason: FinalizeReason, toolCalls: ToolCall[] | undef
   })
 }
 
-/** message 已终态（如 message.complete handler 已改 status）时只补 toolCall 收口。
+/** message 已终态（如 message.complete handler 已改 status）时只补 toolCall 收尾。
  * 无 running toolCall 则原样返回（保持引用稳定，避免无谓 re-render）。 */
 function sweepFinalizedMessage(m: Message, toolCalls: ToolCall[] | undefined): Message {
   const needsToolCalls = m.toolCalls?.some((tc) => tc.status === 'running') ?? false
@@ -83,7 +84,7 @@ function sweepFinalizedMessage(m: Message, toolCalls: ToolCall[] | undefined): M
   return m
 }
 
-/** message 仍 streaming → 转终态 + 收口 toolCall.
+/** message 仍 streaming → 转终态 + 收尾 toolCall.
  * [M2 error-visibility] 追加形态双通道：
  * errorText 写 Message.error 字段（message.ts:269 注释明确用途对口），content 保持崩溃前正常正文不动。
  * 旧 `${content}\n\n${errorText}` 拼接把 errorText 混进 content，渲染层无法区分哪段是错误。
@@ -107,15 +108,15 @@ function finalizeStreamingMessage(
     content: m.content,
     error: finalError,
     toolCalls,
-    // 产出结束时刻（turn 聚合时间轴右端）：收口即本消息产出结束。终端 patch 已写过
-    // （message.complete 正常路径）则不动——幂等，迟到收口不覆写真实结束时刻。
+    // 产出结束时刻（turn 聚合时间轴右端）：收尾即本消息产出结束。终端 patch 已写过
+    // （message.complete 正常路径）则不动——幂等，迟到收尾不覆写真实结束时刻。
     ...(m.role === 'assistant' && m.endedAt === undefined ? { endedAt: Date.now() } : {}),
   }
 }
 
 // ── [B2 subagent-stream-chunk §4.3] subagent 增量 chunk 消费状态机 ──────────────────
 
-/** subagent.stream_chunk 消息的消费侧载荷（协议字段投影，见 shared ServerMessageMap['subagent.stream_chunk']）。 */
+/** subagent.stream_chunk 消息的消费侧载荷（协议字段派生视图，见 shared ServerMessageMap['subagent.stream_chunk']）。 */
 export interface SubagentStreamChunk {
   msgSeq: number
   deltaSeq: number
@@ -123,7 +124,7 @@ export interface SubagentStreamChunk {
 }
 
 /**
- * session.getSubagentStreamState reply 快照（shared 协议投影别名）：RelayTee 既有内存
+ * session.getSubagentStreamState reply 快照（shared 协议派生视图别名）：SubagentTee 既有内存
  * 状态的只读视图。found=false = 该 record 当前无进行中流（未开始或已定稿）。
  */
 export type SubagentStreamStateSnapshot = ServerMessageMap['session.getSubagentStreamState']
@@ -131,7 +132,7 @@ export type SubagentStreamStateSnapshot = ServerMessageMap['session.getSubagentS
 /**
  * per (virtualId, recordId) 分区状态机（设计 §4.3，禁全局槽位——record 切换互不污染）。
  * 非 Vue 响应式状态（[ADR-0049 例外]：纯流式簿记，渲染只走 messages ref overlay 路径）。
- * 仅本模块内部分区表使用（不进 domain/chat 出口，消费面 = createStreamingStateMachine 闭包）。
+ * 仅本模块内部分区表使用（不进 domain/chat 出口，消费方 = createStreamingStateMachine 闭包）。
  */
 interface SubagentChunkPartitionState {
   /** 当前流式消息序号（消费端初始 0，§4.1；随 chunk 边界推进 / 响应重置推进） */
@@ -142,11 +143,13 @@ interface SubagentChunkPartitionState {
   buffer: SubagentStreamChunk[]
   /** 已定稿最高消息序号（单调水位，从不重置；清除消息按携带 msgSeq 置位） */
   sealedMsgSeq: number
+  /** [M3 D6] live 流降级标注（reply.degraded 透传）：true = 镜像已停止发布，内容以落盘为准 */
+  degraded: boolean
 }
 
 /** 工厂依赖注入接口：全部 refs + setter + helpers 由 store 装配，本模块不直连外部状态。
- *  [u5b] compactingSessions Set / setCompacting 退役——occupancy 投影（session.occupancy
- *  帧驱动）是 compacting membership 唯一来源，clearOccupancy 承接断连收口。 */
+ *  [u5b] compactingSessions Set / setCompacting 退役——occupancy 派生视图（session.occupancy
+ *  帧驱动）是 compacting membership 唯一来源，clearOccupancy 承接断连收尾。 */
 export interface StreamingStateMachineDeps {
   messages: MessagesRef
   occupancies: { value: Map<string, SessionOccupancyState> }
@@ -217,10 +220,10 @@ export function createStreamingStateMachine(deps: StreamingStateMachineDeps) {
   }
 
   /**
-   * subagent streaming 收口纯逻辑（W4，模块作用域）：把虚拟 session 最后一条 streaming
+   * subagent streaming 收尾纯逻辑（W4，模块作用域）：把虚拟 session 最后一条 streaming
    * assistant 翻成 complete。
    *
-   * sealed 守卫对齐（D-010 parity）：实体一旦 complete 不再被后续 delta 污染。无 streaming
+   * sealed 检查对齐（D-010 parity）：实体一旦 complete 不再被后续 delta 污染。无 streaming
    * 实体时幂等 no-op。不走 finalizeSession：subagent 虚拟 session 无 pendingSend / streaming
    * timer 生命周期（由 subagent store 的 panelStreamUnsub 管理），只翻 status。
    */
@@ -249,6 +252,13 @@ export function createStreamingStateMachine(deps: StreamingStateMachineDeps) {
   const chunkPartitions = new Map<string, Map<string, SubagentChunkPartitionState>>()
 
   /**
+   * degraded 位的响应式版本号：分区表是纯流式簿记（非响应式，ADR-0049 例外），而 degraded
+   * 是 UI 可见流状态（SubagentTab 提示条，M3 D6）——位翻转时 bump 版本，读口先 track
+   * 版本再取分区真值（单一事实源 = 分区 degraded，不建第二份派生视图）。
+   */
+  const degradedVersion = ref(0)
+
+  /**
    * 同 record 在途拉取去重（C-data-18：禁止手写「同 key 并发异步去重 + settle 清理」
    * 同构实现，一律组装 createInflightDedup；key = `${virtualId}::${recordId}`）。
    * 槽独立于分区实例：分区清除/重建不弃在途拉取，其 settle（成功/失败）照常由 factory
@@ -258,7 +268,14 @@ export function createStreamingStateMachine(deps: StreamingStateMachineDeps) {
   const pullDedup = createInflightDedup<SubagentStreamStateSnapshot>()
 
   function createChunkPartition(): SubagentChunkPartitionState {
-    return { msgSeq: 0, expectedDeltaSeq: 0, buffer: [], sealedMsgSeq: 0 }
+    return { msgSeq: 0, expectedDeltaSeq: 0, buffer: [], sealedMsgSeq: 0, degraded: false }
+  }
+
+  /** 写分区 degraded 位（仅翻转时 bump 版本——读口依赖此版本建立响应式追踪）。 */
+  function setPartitionDegraded(state: SubagentChunkPartitionState, degraded: boolean): void {
+    if (state.degraded === degraded) return
+    state.degraded = degraded
+    degradedVersion.value += 1
   }
 
   function getOrCreateChunkPartition(virtualId: string, recordId: string): SubagentChunkPartitionState {
@@ -287,7 +304,7 @@ export function createStreamingStateMachine(deps: StreamingStateMachineDeps) {
 
   /**
    * 消息边界推进的「开新 streaming 消息」（§4.3 优先序第 1 步）：末位 assistant 仍在
-   * streaming 时就地收口（旧消息已随 message_end 经 entry 权威定稿，此处只做显示层
+   * streaming 时就地收尾（旧消息已随 message_end 经 entry 权威定稿，此处只做显示层
    * 对齐，终态由 entry 链覆盖——§6.2 定稿取代语义）+ push 新的空 streaming assistant，
    * 保证新消息的增量不并进旧消息实体。
    */
@@ -403,6 +420,10 @@ export function createStreamingStateMachine(deps: StreamingStateMachineDeps) {
    */
   function applySubagentStreamState(virtualId: string, recordId: string, response: SubagentStreamStateSnapshot): void {
     const state = getOrCreateChunkPartition(virtualId, recordId)
+    // 0. degraded（M3 D6）先于按序判定透传：reply 是 tee 当前状态的全量快照，非累计事件；
+    //    found=false 的降级回执（协议形态 msgSeq=0）会走分支 1 早退，故必须先采集。
+    //    非降级快照（字段缺省 = 未降级）覆盖回 false —— 查询快照即当前事实。
+    setPartitionDegraded(state, response.degraded === true)
     // 1. ≤ sealedMsgSeq → 已定稿，丢弃
     if (response.msgSeq <= state.sealedMsgSeq) return
     // 2. < 当前 msgSeq → 陈旧响应，丢弃
@@ -437,7 +458,7 @@ export function createStreamingStateMachine(deps: StreamingStateMachineDeps) {
    * 定稿标记（§4.3 sealedMsgSeq）：清除消息（subagent.stream_delta lines: undefined）
    * 按其携带的 msgSeq 置位——单调推进（取 max）、从不重置。分区不存在时创建（只置水位
    * 不动消息）——缺前缀晚接入场景下，access 拉取响应的分支 1 判定依赖该水位已在清除时
-   * 落账。W 路径清除消息不带 msgSeq、不进本状态机（§4.1，renderer 分派侧保证）。
+   * 记账。W 路径清除消息不带 msgSeq、不进本状态机（§4.1，renderer 分派侧保证）。
    */
   function sealSubagentStream(virtualId: string, recordId: string, msgSeq: number): void {
     const state = getOrCreateChunkPartition(virtualId, recordId)
@@ -453,10 +474,12 @@ export function createStreamingStateMachine(deps: StreamingStateMachineDeps) {
     if (!byRecord) return
     if (recordId === undefined) {
       chunkPartitions.delete(virtualId)
+      degradedVersion.value += 1 // 降级读口响应式刷新（分区删除也是 degraded 位变化）
       return
     }
-    byRecord.delete(recordId)
+    if (!byRecord.delete(recordId)) return
     if (byRecord.size === 0) chunkPartitions.delete(virtualId)
+    degradedVersion.value += 1
   }
 
   /**
@@ -466,11 +489,25 @@ export function createStreamingStateMachine(deps: StreamingStateMachineDeps) {
    * shared isSubagentVirtualId——非三段键不属于任何 main session 名下）。
    */
   function clearSubagentChunkStateForSession(sessionId: string): void {
+    let cleared = false
     for (const virtualId of [...chunkPartitions.keys()]) {
       if (isSubagentVirtualId(virtualId) && extractMainSessionId(virtualId) === sessionId) {
         chunkPartitions.delete(virtualId)
+        cleared = true
       }
     }
+    if (cleared) degradedVersion.value += 1 // 降级读口响应式刷新（分区删除也是 degraded 位变化）
+  }
+
+  /**
+   * subagent 流降级读口（M3 D6 前端落点，组件/composable 消费）：true = 该 record 的 live
+   * 流已降级（镜像 seq 空洞 → runtime 停止发布，内容以落盘为准；重开/刷新可见完整历史）。
+   * 响应式依赖 degradedVersion（分区表非响应式，见其注释）；分区清除后回落 false。
+   */
+  function isSubagentStreamDegraded(virtualId: string, recordId: string): boolean {
+    // 版本依赖：degraded 位翻转时触发下游 computed 重算（分区表非响应式）
+    void degradedVersion.value
+    return chunkPartitions.get(virtualId)?.get(recordId)?.degraded ?? false
   }
 
   /**
@@ -481,11 +518,11 @@ export function createStreamingStateMachine(deps: StreamingStateMachineDeps) {
    * 不能只遍历 messages.keys()——compacting / retry / pendingSend 可能独立于消息
    * 存在，仅遍历 messages 会漏掉这些 session。
    *
-   * [u5b] compacting 候选来源从 compactingSessions Set 改为 occupancy 投影过滤（membership
+   * [u5b] compacting 候选来源从 compactingSessions Set 改为 occupancy 派生视图过滤（membership
    * 单一来源）。
    *
    * [W3 / W-S3] pendingSend 并入：纯 pendingSend 态（用户已发起、message_start 空窗、无消息实体）
-   * 不在 messages.keys() 内，断连时不会立即收口，UI 卡「发送中」。
+   * 不在 messages.keys() 内，断连时不会立即收尾，UI 卡「发送中」。
    */
   function collectFinalizeCandidates(): Set<string> {
     const candidateSids = new Set<string>(messages.value.keys())
@@ -506,10 +543,10 @@ export function createStreamingStateMachine(deps: StreamingStateMachineDeps) {
    * [u5b] occupancy 分区删除（替代原 setCompacting(false)）：派生回落全 idle，重连后
    * resubscribeAll 的 stateSnapshot 回放恢复真实值（G4）。
    *
-   * [steer-bubble D4 豁免声明] 本断连收口点刻意**不**清 inflight 计数
+   * [steer-bubble D4 豁免声明] 本断连收尾点刻意**不**清 inflight 计数
    * （steer-bubble D4「刻意保留」）——与「清理信号
    * 到达即清全部瞬态」的直觉不一致是有意为之：occupancy/retry 是重建型状态（重连 ring 回放
-   * 帧即可重建）故随收口清理；inflight 确认基线是**不可重建状态**（仅存在于前端，清了即
+   * 帧即可重建）故随收尾清理；inflight 确认基线是**不可重建状态**（仅存在于前端，清了即
    * 永久丢失/漂移），断连重连后标记回执回收与 ② 纯计数兜底仍依赖它。LRU 驱逐回调
    * （store lruEvictDeps）同理豁免，见该处注释。后续维护勿顺手在本方法补清本项。
    */
@@ -527,7 +564,7 @@ export function createStreamingStateMachine(deps: StreamingStateMachineDeps) {
    * finalizeSession 的 message 终态映射纯逻辑（模块作用域）。
    *
    * 把 streaming/running 实体推到终态（reason 决定 message.status + toolCall.status 映射），
-   * 同步收口 running toolCall。幂等（sealed 后实体不变）。
+   * 同步收尾 running toolCall。幂等（sealed 后实体不变）。
    */
   function finalizeMessages(sessionId: string, reason: FinalizeReason, errorText?: string): void {
     const prev = messages.value.get(sessionId)?.value
@@ -544,6 +581,7 @@ export function createStreamingStateMachine(deps: StreamingStateMachineDeps) {
     applySubagentStreamState,
     requestSubagentStreamState,
     sealSubagentStream,
+    isSubagentStreamDegraded,
     clearSubagentChunkState,
     clearSubagentChunkStateForSession,
     finalizeMessages,

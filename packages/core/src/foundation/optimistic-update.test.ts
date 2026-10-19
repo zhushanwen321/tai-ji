@@ -98,7 +98,7 @@ describe('optimisticUpdate（值单元形态）', () => {
     expect(cell.value).toBe('old')
   })
 
-  it('vi.fn 断言面：commit 只调一次、rollback 不在成功路径调用', async () => {
+  it('vi.fn 断言范围：commit 只调一次、rollback 不在成功路径调用', async () => {
     const commit = vi.fn(async () => 'done')
     const rollback = vi.fn()
     const state = { value: 0 }

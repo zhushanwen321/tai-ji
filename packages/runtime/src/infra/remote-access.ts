@@ -10,7 +10,7 @@
  * 但触发时机不同：runtime-token 是启动期一次解析，remote token 是每次 WS auth 握手热读——
  * token 轮换 = main 重写 remote-access.json，下一次新握手即生效，无 runtime 重启（D2）。
  * 独立成模块而非内联组合根：index.ts import 即执行 main() 不可直测，
- * E10 三态（缺失/坏 JSON/坏字段）的 fail-closed 语义由本模块单测守卫。
+ * E10 三态（缺失/坏 JSON/坏字段）的 fail-closed 语义由本模块单测检查。
  */
 import * as fs from 'node:fs'
 import { join } from 'node:path'
@@ -76,7 +76,7 @@ export function parseRemoteAccessToken(raw: string): string | null {
     )
     return null
   }
-  // shape 判据单源 = shared 的 isRemoteAccessConfigShape（main 写侧守卫 import 同一
+  // shape 判据单源 = shared 的 isRemoteAccessConfigShape（main 写侧检查 import 同一
   // 谓词，判据不可能分叉）；本侧从宽策略（enabled=false 早退跳过 hex、enabled=true 才
   // 校验 hex、任何不合法形态 fail-closed 返回 null）刻意保留在本地——与 main 写侧
   // 从严恒校验的不对称是文档化的双侧策略差异，不上收、不参数化。

@@ -2,7 +2,8 @@
  * image-cache IPC handler（D6-⑨ / u7-memory-governance）。
  *
  * 接收 renderer 经 IMAGE_CACHE_WRITE 通道委托的 toolResult base64 图片，落盘
- * `~/.taiji/cache/images/<sessionId>/<sha256>.<ext>` 并回填路径引用（renderer 是
+ * `<dataDir>/ext-sessions/<sessionId>/image-cache/<sha256>.<ext>`（session 存储树域 3，
+ * 路径推导 SSOT = shared paths）并回填路径引用（renderer 是
  * 浏览器环境无 fs——落盘执行方 = main，设计显式声明）。核心生命周期（幂等写 / size 帽 /
  * 孤儿扫描 / 软上限）在 ./image-cache.ts，本文件只做 IPC 两侧职责：
  * - **payload 运行时再校验**：renderer 在崩溃/中毒状态下可能发出畸形 payload，类型不作

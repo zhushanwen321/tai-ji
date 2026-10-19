@@ -4,7 +4,7 @@
 // record 流权威重建」单通道。历史形态 entry（v1 全量快照 / 旧 workflow-state-link
 // 指针）不参与发现——旧 session JSONL 里的历史 entry 仍在盘上，loadAll 必须静默
 // 忽略（不抛、不重建、零 warn），未知 entry 容忍面不受影响。
-// v2 重建/收编读面的完整用例在 jsonl-run-store-session-file.test.ts（W17/W1 describe）与
+// v2 重建/收编读侧的完整用例在 jsonl-run-store-session-file.test.ts（W17/W1 describe）与
 // __tests__/record-mode/（[D1] record 单源语义族）。
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -99,7 +99,7 @@ function settledLine(): string {
 }
 
 function recordPathOf(tmpDir: string, runId: string): string {
-  return path.join(tmpDir, "workflow-state", `${runId}.record.jsonl`);
+  return path.join(tmpDir, `${runId}.record.jsonl`);
 }
 
 // ── 用例 ─────────────────────────────────────────────────────────────────────
@@ -119,7 +119,7 @@ describe("loadAll 发现域（v2-only）：历史形态 entry 不再被发现", 
 
   it("存量旧会话（v1 快照 entry + workflow-state-link 指针在盘）→ loadAll 返回空 + 零 warn（静默忽略不抛）", async () => {
     // v1 形态快照：v 字段 + snapshot 信封 + v2 版本头（历史形态的合法内容）
-    const statePath = path.join(tmpDir, "workflow-state", "run-legacy.jsonl");
+    const statePath = path.join(tmpDir, "run-legacy.jsonl");
     fs.mkdirSync(path.dirname(statePath), { recursive: true });
     fs.writeFileSync(
       statePath,
@@ -131,7 +131,7 @@ describe("loadAll 发现域（v2-only）：历史形态 entry 不再被发现", 
       legacyV1RecordEntryRaw("run-legacy", { v: "wf-run-v2", runId: "run-legacy", state: { status: "running" }, meta: {} }),
       legacyLinkEntry("run-legacy", statePath),
     ];
-    const store = new JsonlRunStore({ sessionDir: tmpDir, ctx: mkCtx(entries) });
+    const store = new JsonlRunStore({ runsDir: tmpDir, ctx: mkCtx(entries) });
 
     // 历史形态不参与发现：空结果、不抛、零 warn（静默语义）
     await expect(store.loadAll()).resolves.toEqual([]);
@@ -145,7 +145,7 @@ describe("loadAll 发现域（v2-only）：历史形态 entry 不再被发现", 
     fs.writeFileSync(recordPath, `${settledLine()}\n`, "utf8");
 
     // 历史形态同批在盘：v1 快照 entry + link 指针（指向 state 文件）
-    const legacyStatePath = path.join(tmpDir, "workflow-state", "run-old.jsonl");
+    const legacyStatePath = path.join(tmpDir, "run-old.jsonl");
     fs.writeFileSync(
       legacyStatePath,
       `${JSON.stringify({ v: "wf-run-v2", runId: "run-old", state: { status: "running" }, meta: {} })}\n`,
@@ -157,7 +157,7 @@ describe("loadAll 发现域（v2-only）：历史形态 entry 不再被发现", 
       legacyLinkEntry("run-old", legacyStatePath),
     ];
 
-    const store = new JsonlRunStore({ sessionDir: tmpDir, ctx: mkCtx(entries) });
+    const store = new JsonlRunStore({ runsDir: tmpDir, ctx: mkCtx(entries) });
     const loaded = await store.loadAll();
 
     // 只有 v2 实体重建（终局 ⟸ journal run-settled）；历史形态零发现
@@ -169,7 +169,7 @@ describe("loadAll 发现域（v2-only）：历史形态 entry 不再被发现", 
 
   it("[U6 回归] resolveAgentOpts 失败形态的 agent-settled 帧带 result → loadAll 正常重建（不判损坏）", async () => {
     // 派发前置失败（agent 名/skill 解析失败）是设计内合法产出：run 终局 failed、
-    // call 的 agent-settled 帧由 dispatchAgentSettledFailed 落账。写面补齐 result
+    // call 的 agent-settled 帧由 dispatchAgentSettledFailed 写入 journal 记录。写侧补齐 result
     // 后，重启 loadAll 的严格读原语（settled 帧缺 result = RecordStreamCorruptionError
     // → storeHealthy=false 停初始化）不再把该流判损坏。
     const recordPath = recordPathOf(tmpDir, "run-pre-dispatch-fail");
@@ -217,7 +217,7 @@ describe("loadAll 发现域（v2-only）：历史形态 entry 不再被发现", 
       "utf8",
     );
 
-    const store = new JsonlRunStore({ sessionDir: tmpDir, ctx: mkCtx([v2RegisteredEntry("run-pre-dispatch-fail", recordPath)]) });
+    const store = new JsonlRunStore({ runsDir: tmpDir, ctx: mkCtx([v2RegisteredEntry("run-pre-dispatch-fail", recordPath)]) });
     const loaded = await store.loadAll();
 
     expect(loaded.map((r) => r.runId)).toEqual(["run-pre-dispatch-fail"]);
@@ -230,16 +230,16 @@ describe("loadAll 发现域（v2-only）：历史形态 entry 不再被发现", 
 });
 
 // ════════════════════════════════════════════════════════════════════════════
-// [D6(a) 第 1 步] 重启后重水合 run 的终局判定换源：判据 = 重建 fold 结果
+// [D6(a) 第 1 步] 重启后重新加载进内存的 run 的终局判定换源：判据 = 重建 fold 结果
 //
 // loadAll 从 record 流 fold 出「有 run-settled 帧」这一事实后，经
-// noteRebuiltSettlement 注入 core 终局记录注册表——展示投影（runSummary）、
+// noteRebuiltSettlement 注入 core 终局记录注册表——展示派生视图（runSummary）、
 // isRunSettled、evictDoneRunsBeyondCap 白名单三处据此判定，不再读聚合 status
 // 字段。本节 = 设计 §1.7 第 1 步判据点名的三处行为断言（重启后 done run 不回退
 // running / 判终局为真 / 可被淘汰，内存有界）。
 // ════════════════════════════════════════════════════════════════════════════
 
-describe("[D6(a) 第 1 步] 重水合 run 的终局判定源 = 重建 fold 结果", () => {
+describe("[D6(a) 第 1 步] 重新加载进内存的 run 的终局判定源 = 重建 fold 结果", () => {
   let tmpDir: string;
 
   beforeEach(() => {
@@ -259,7 +259,7 @@ describe("[D6(a) 第 1 步] 重水合 run 的终局判定源 = 重建 fold 结�
     fs.mkdirSync(path.dirname(recordPath), { recursive: true });
     fs.writeFileSync(recordPath, `${lines.join("\n")}\n`, "utf8");
     const store = new JsonlRunStore({
-      sessionDir: tmpDir,
+      runsDir: tmpDir,
       ctx: mkCtx([v2RegisteredEntry(runId, recordPath)]),
     });
     const loaded = await store.loadAll();
@@ -267,7 +267,7 @@ describe("[D6(a) 第 1 步] 重水合 run 的终局判定源 = 重建 fold 结�
     return loaded[0]!;
   }
 
-  it("① 重启后 done run 的 runSummary 仍投影 done（展示不回退 running）", async () => {
+  it("① 重启后 done run 的 runSummary 仍派生视图 done（展示不回退 running）", async () => {
     const run = await rebuild("wf-rehydrated-done", [settledLine()]);
 
     const summary = runSummary(run);
@@ -276,7 +276,7 @@ describe("[D6(a) 第 1 步] 重水合 run 的终局判定源 = 重建 fold 结�
     expect(summary.completedAt).toBeDefined();
   });
 
-  it("② isRunSettled 对重水合 done run 为真；无 run-settled 帧的重水合 run 为假", async () => {
+  it("② isRunSettled 对重新加载进内存的 done run 为真；无 run-settled 帧的重新加载进内存的 run 为假", async () => {
     const done = await rebuild("wf-rehydrated-settled", [settledLine()]);
     expect(isRunSettled(done)).toBe(true);
 
@@ -295,7 +295,7 @@ describe("[D6(a) 第 1 步] 重水合 run 的终局判定源 = 重建 fold 结�
     expect(runSummary(running).status).toBe("running");
   });
 
-  it("③ 重水合 done run 进入 evictDoneRunsBeyondCap 白名单（runs Map 内存有界性）", async () => {
+  it("③ 重新加载进内存的 done run 进入 evictDoneRunsBeyondCap 白名单（runs Map 内存有界性）", async () => {
     const run = await rebuild("wf-rehydrated-evict", [settledLine()]);
     const runs = new Map<string, WorkflowRun>([[run.runId, run]]);
 
@@ -331,7 +331,7 @@ describe("fold 覆盖事件消费（model-override → meta.modelOverride 派生
     fs.mkdirSync(path.dirname(recordPath), { recursive: true });
     fs.writeFileSync(recordPath, `${lines.join("\n")}\n`, "utf8");
     const store = new JsonlRunStore({
-      sessionDir: tmpDir,
+      runsDir: tmpDir,
       ctx: mkCtx([v2RegisteredEntry(runId, recordPath)]),
     });
     const loaded = await store.loadAll();

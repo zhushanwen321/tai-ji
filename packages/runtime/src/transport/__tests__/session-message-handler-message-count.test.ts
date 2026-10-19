@@ -4,7 +4,7 @@
  * 覆盖：
  * - handles 认领 session.getMessageCount
  * - 透传契约：handler 调 sessionService.getMessageCount（SessionRecords 路径解析 + 流式计数的
- *   转发面），reply session.getMessageCount { sessionId, count } 形状（计数语义断言在
+ *   转发侧），reply session.getMessageCount { sessionId, count } 形状（计数语义断言在
  *   src/services/session/__tests__/session-message-count.test.ts）
  * - 端口缺省（SessionService 未组装转发，仅测试最小 mock 形态）→ message_count_unsupported
  *   error envelope（防御分支，对齐 getPlanState 惯例）

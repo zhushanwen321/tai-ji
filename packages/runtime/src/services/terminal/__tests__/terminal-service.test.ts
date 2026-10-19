@@ -330,7 +330,7 @@ describe('TerminalService', () => {
       const newPty = mockPtys[1]!
 
       vi.advanceTimersByTime(6000)
-      expect(newPty.kill).not.toHaveBeenCalled() // 旧 timer 的守卫（map 引用比对）挡住误杀
+      expect(newPty.kill).not.toHaveBeenCalled() // 旧 timer 的检查（map 引用比对）挡住误杀
     } finally {
       vi.useRealTimers()
     }
@@ -361,7 +361,7 @@ describe('TerminalService', () => {
     await expectUpgradeToSigkillAfterDestroy('s-k4', (svc) => svc.destroySessionPties('s-k4'))
   })
 
-  it('TS-DA1: destroyAllPties 全量 kill + 清 ptyMap（runtime shutdown 链显式收口）', async () => {
+  it('TS-DA1: destroyAllPties 全量 kill + 清 ptyMap（runtime shutdown 链显式收尾）', async () => {
     const { publish } = createPublishCollector()
     const svc = new TerminalService({ publish })
     await svc.spawn('s-da1', undefined, 80, 24)
@@ -414,7 +414,7 @@ describe('TerminalService', () => {
       // ptyMap 已清：write 按多实例路由语义 fail-fast（unknown_terminal_id），不触 pty.write
       expect(() => svc.write('s-kf', 'term:s-kf:1', 'ls\n')).toThrowError(expect.objectContaining({ code: 'unknown_terminal_id' }))
       expect(pty.write).not.toHaveBeenCalled()
-      // untracked 升级 timer 照常（SIGTERM 后未退的升级兑底不因首杀失败而缺席）：
+      // untracked 升级 timer 照常（SIGTERM 后未退的升级兜底不因首杀失败而缺席）：
       // SIGKILL 再抛错落升级 catch（console.error 第二条），不留静默断链
       vi.advanceTimersByTime(5000)
       expect(pty.kill).toHaveBeenLastCalledWith('SIGKILL')
@@ -426,7 +426,7 @@ describe('TerminalService', () => {
   })
 
   it('TS-10: spawn 失败时 console.error 收到序列化后的 plain object（含 message/stack/code），非裸 Error 实例', async () => {
-    // 回归守卫：spawn catch 块用 serializeError(e) 把 Error 转成 plain object 再传给 console.error。
+    // 回归检查：spawn catch 块用 serializeError(e) 把 Error 转成 plain object 再传给 console.error。
     // 若有人改回裸 e，Error 实例经 logger 的 JSON.stringify 会变成 {}，日志看不出真实错误。
     const { spawn } = await import('node-pty')
     // 带 code 的 Error（模拟 node 系统错误，验证 code 透出）

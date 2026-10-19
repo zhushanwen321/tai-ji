@@ -2,7 +2,7 @@
  * 后台任务 spawn（D7/D10/D12/D15，设计文档 §3.5 后台任务生命周期数据流 ③④）。
  *
  * spawn 细节：detached（自成进程组，进程树 kill 的语义基础）+ stdio 直接落
- * <dataDir>/base-tool-enhance/<sessionId>/<task_id>.log（append fd，不占内存、
+ * <dataDir>/ext-sessions/<sessionId>/background-tasks/<task_id>.log（append fd，不占内存、
  * 无 pipe backpressure）+ child.unref()（pi 不等它）。abort/interrupt 不传播到
  * 后台任务（D15）——execute 立即返回，本模块不接触 signal。
  *
@@ -89,7 +89,7 @@ export interface SpawnBackgroundOptions {
 	command: string;
 	/** execute ctx.cwd（权威 cwd） */
 	cwd: string;
-	/** pi getAgentDir() 同源 dataDir */
+	/** taiji dataDir（registry.ts resolveTaijiDataDir 推导，存储树 <dataDir>/ext-sessions 基址） */
 	dataDir: string;
 	sessionId: string;
 	/** LLM 显式 timeout（秒）；undefined 时若配置默认存在由调用侧注入（M4）。 */
@@ -119,7 +119,7 @@ export function spawnBackgroundTask(opts: SpawnBackgroundOptions): SpawnBackgrou
 	if (countActiveTasks() >= maxConcurrent) {
 		const oldest = oldestActiveTask();
 		if (oldest === undefined) {
-			// 防御缺口闭合：上限已满但找不出最老活跃任务 = maxConcurrent <= 0 且 0 活跃
+			// 防御缺口补上：上限已满但找不出最老活跃任务 = maxConcurrent <= 0 且 0 活跃
 			// ——同样拒绝，否则上限静默失效。config normalize 保证 >= 1，此处兜底
 			// 绕过配置直传非法值的调用方（错误指向配置键，可操作）
 			return {

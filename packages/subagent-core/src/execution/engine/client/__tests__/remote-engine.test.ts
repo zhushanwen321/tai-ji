@@ -25,7 +25,7 @@ import {
 import { SubagentStream } from "../../../assembly/stream-sink.ts";
 import { getSubagentSessionDir } from "../../../assembly/path-encoding.ts";
 import { probePidAliveness } from "../pid-file.ts";
-import { getLogger, type UiRequest } from "@zhushanwen/subagent-engine-sdk";
+import { EngineSdkError, getLogger, type UiRequest } from "@zhushanwen/subagent-engine-sdk";
 import { getLogger as coreGetLogger } from "../../../../core/logger.ts";
 import {
   _resetHostUiRequestEndpointForTest,
@@ -71,9 +71,16 @@ let dataDir: string;
 
 beforeEach(() => {
   dataDir = mkdtempSync(join(tmpdir(), "w2-remote-engine-"));
+  // [session-store-layout-inversion] wire ctx.sessionDir 恒有值（Gate B S6 协议契约
+  // ——宿主绑定形态缺省推导 fail-fast）：harness 以「宿主进程有 session 绑定」形态
+  // 注入贯穿 env（deriveHostSubagentSessionDir 缺省推导输入）+ dataDir env 把推导
+  // 落点收进本 mkdtemp 目录（自建自删红线）。ctx 显式注入仍优先（逐用例覆盖）。
+  vi.stubEnv("PI_SUBAGENT_ROOT_SESSION_ID", "sid-w2-remote-engine");
+  vi.stubEnv("TAIJI_AGENT_DATA_DIR", dataDir);
 });
 
 afterEach(() => {
+  vi.unstubAllEnvs();
   rmSync(dataDir, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 });
   vi.useRealTimers();
   // [D3 槽现读] host/askUser 应答端经 host-ui-endpoint 槽注入——用例后清空防串扰
@@ -160,7 +167,7 @@ describe("RemoteEngine 同步成员形态映射（必写死）", () => {
     void cleanup;
   });
 
-  it("listModels() 四态：省略 modelCatalog → null；dynamic:true+[] → null（无静态枚举面，B1）；dynamic:false+[] → []（显式空清单）；静态非空 → 原样", async () => {
+  it("listModels() 四态：省略 modelCatalog → null；dynamic:true+[] → null（无静态枚举情形，B1）；dynamic:false+[] → []（显式空清单）；静态非空 → 原样", async () => {
     const omitted = makeEngine({ modelCatalog: undefined });
     expect(omitted.engine.listModels()).toBeNull();
     const nullForm = makeEngine({ modelCatalog: null });
@@ -206,7 +213,7 @@ describe("RemoteEngine 同步成员形态映射（必写死）", () => {
 });
 
 describe("RemoteEngine run 帧映射", () => {
-  it("task 子集收窄（model/cwd 改挂 ctx）+ ctxModel 投影 provider/id", async () => {
+  it("task 子集收窄（model/cwd 改挂 ctx）+ ctxModel 映射 provider/id", async () => {
     const { engine, cleanup } = makeEngine();
     const { ctx, events } = makeCtx({
       ctxModel: { id: "glm-5.1", name: "GLM", provider: "zai", reasoning: true },
@@ -277,7 +284,7 @@ describe("RemoteEngine run 帧映射", () => {
   });
 
   it("ctx.sessionRootId → wire ctx.sessionRootId 逐字保真；缺省不传 → wire 无该键（F6 additive）", async () => {
-    // 正向：根 session id 上 wire（pi 引擎 relay 归属键 SESSION_ID 的权威来源）
+    // 正向：根 session id 上 wire（pi 引擎 engine_open 归属键的权威来源）
     const withRoot = makeEngine();
     const { ctx: ctxRoot, events: eventsRoot } = makeCtx({ sessionRootId: "root-sess-f6" });
     await withRoot.engine.run({ prompt: "p" }, ctxRoot);
@@ -293,17 +300,27 @@ describe("RemoteEngine run 帧映射", () => {
     await bare.cleanup();
   });
 
+  it("[B-U-1] ctx.sessionRootId → client.ensureConnected(根 id)（engine_open 归属键权威源贯通）", async () => {
+    const fixture = makeEngine();
+    const spy = vi.spyOn(fixture.client, "ensureConnected");
+    const { ctx } = makeCtx({ sessionRootId: "root-sess-connect" });
+    await fixture.engine.run({ prompt: "p" }, ctx);
+    expect(spy).toHaveBeenCalledWith("root-sess-connect");
+    await fixture.cleanup();
+  });
+
   it("[Option C] wire ctx.sessionDir = getSubagentSessionDir(env 同源推导)；ctx 显式注入优先", async () => {
-    // stub env 固定推导输入（测试进程可能已带这两键——stub 后期望值确定）
-    vi.stubEnv("PI_CODING_AGENT_DIR", join(dataDir, "agent-dir"));
-    vi.stubEnv("PI_SUBAGENT_ROOT_CWD", join(dataDir, "root-cwd"));
+    // [session-store-layout-inversion] 推导输入 = 贯穿 env PI_SUBAGENT_ROOT_SESSION_ID
+    //（分区键 rootSessionId，agentDir/cwd 编码段退役）；beforeEach 已注入缺省 sid
+    // 与 dataDir——本用例覆盖为用例专属值，期望值经同一单源公式推导。
+    vi.stubEnv("PI_SUBAGENT_ROOT_SESSION_ID", "sid-w2-derive");
     try {
       // 正向：env 同源推导值上 wire（宿主单一权威 getSubagentSessionDir，引擎不自推导）
       const derived = makeEngine();
       const { ctx, events } = makeCtx();
       await derived.engine.run({ prompt: "p" }, ctx);
       expect(extractRunParams(events).ctx.sessionDir).toBe(
-        getSubagentSessionDir(join(dataDir, "agent-dir"), join(dataDir, "root-cwd")),
+        getSubagentSessionDir("sid-w2-derive", dataDir),
       );
 
       // 宿主编排层显式注入（ctx.sessionDir）优先于 env 推导
@@ -381,7 +398,7 @@ describe("RemoteEngine run 帧映射", () => {
 describe("abort 分级（cancel 帧 + 收敛兜底窗）", () => {
   it("signal abort → cancel；引擎主动收敛（终态应答在兜底窗内）→ 引擎侧 abort 终态正常返回（窗满兜底不触发）", async () => {
     const controller = new AbortController();
-    const { engine, cleanup } = makeEngine(undefined, {
+    const { engine, client, cleanup } = makeEngine(undefined, {
       // run 受理后 delay 挂起（不与 --run-hang 组合——run-hang 丢弃 run 帧致
       // activeRun 恒 null，cancel-settle 永不生效，用例会退化为兜底窗路径）；
       // cancel 到达 → cancel-settle 同步回 abort 终态（引擎侧收敛，兜底窗不触发）。
@@ -393,7 +410,12 @@ describe("abort 分级（cancel 帧 + 收敛兜底窗）", () => {
     });
     const { ctx } = makeCtx({ signal: controller.signal });
     const runPromise = engine.run({ prompt: "p" }, ctx);
-    setTimeout(() => controller.abort(), 100);
+    // 先等连接就绪再 abort：本用例验证「run 受理后 cancel 收敛」，不是「连接期
+    // abort」。高负载下本地引擎 spawn + 握手可超 100ms，墙钟定时会把 cancel 抢在
+    // run 帧之前（fake engine 对无 activeRun 的 cancel 是 no-op → run 照常 60s
+    // 延迟 → 用例 15s 超时；HEAD 源码在同等负载下同样复现，属既存测试竞态）。
+    await waitForReady(client);
+    controller.abort();
     const result = await runPromise;
     expect(result.outcome.error).toContain("engine_run_failed: aborted (fake)");
     expect(result.outcome.exitCode).toBeNull(); // 被信号杀死判据
@@ -402,8 +424,8 @@ describe("abort 分级（cancel 帧 + 收敛兜底窗）", () => {
   }, 15_000);
 
   it("[S1 P1] cancel 收敛兜底窗常量 = 30s（pi 停轮收敛实测 15s 的 2× 量级——量级校准回归锚）", () => {
-    // 历史误校准：SDK CANCEL_SETTLE_GRACE_MS(3s) 是控制面单请求量级，被误用为
-    // 任务级停轮收敛窗 → 常驻引擎在 pi 正常收敛途中被组杀（S1 主路径 8/8 失败）。
+    // 历史误校准：SDK CANCEL_SETTLE_GRACE_MS(3s) 是控制范围单请求量级，被误用为
+    // 任务级停轮收敛窗 → 常驻引擎在 pi 正常收敛途中被按进程组终止（S1 主路径 8/8 失败）。
     // 本断言锚定兜底窗按被保护对象粒度（任务级）校准，防止再被「优化」回秒级。
     expect(CANCEL_SETTLE_GRACE_WINDOW_MS).toBe(30_000);
   });
@@ -487,6 +509,73 @@ describe("失败分界（运行中合成 vs prepare 期 reject）", () => {
   }, 20_000);
 });
 
+/**
+ * [m-core-2] 最小 EngineClient 替身：run 期错误注入（只实现 RemoteEngine.run 触达的
+ * 成员；真实引擎/控制通道不在本用例范围）。
+ */
+function makeStubClient(injected: {
+  connectError?: EngineSdkError;
+  requestError?: EngineSdkError;
+}): EngineClient {
+  const stub = {
+    ensureConnected: async (): Promise<void> => {
+      if (injected.connectError !== undefined) throw injected.connectError;
+    },
+    getInitializeDiagnostics: () => undefined,
+    registerRunRoute: () => () => {},
+    request: async (): Promise<unknown> => {
+      if (injected.requestError !== undefined) throw injected.requestError;
+      throw new Error("stub: no request result configured");
+    },
+    getPartialHandle: () => undefined,
+    cancelRun: async (): Promise<void> => {},
+    dispose: async (): Promise<void> => {},
+  };
+  return stub as unknown as EngineClient;
+}
+
+function makeStubEngine(client: EngineClient): RemoteEngine {
+  return new RemoteEngine({
+    engineId: "stub-engine",
+    client,
+    dataDir,
+    hostKind: "test",
+    manifest: { capabilities: { ...FAKE_MATCHED_CAPS } },
+  });
+}
+
+describe("[m-core-2] run 期 transport 失败码：合成 error outcome（不 reject）", () => {
+  const RUN_PHASE_CODES = [
+    "engine_transport_lost",
+    "engine_frame_too_large",
+    "engine_backpressure_overflow",
+    "unknown_channel",
+  ] as const;
+
+  for (const code of RUN_PHASE_CODES) {
+    it(`${code} → 正常返回 error outcome + 正常 handle`, async () => {
+      const engine = makeStubEngine(makeStubClient({
+        requestError: new EngineSdkError(code, `injected ${code}`, "inspect the transport"),
+      }));
+      const { ctx } = makeCtx();
+      const result = await engine.run({ prompt: "p" }, ctx);
+      expect(result.outcome.error).toContain(code);
+      expect(result.outcome.exitCode).toBeNull();
+      expect(result.handle.data.v).toBe(1);
+    });
+  }
+
+  it("同码在 prepare 期（ensureConnected 抛）→ 仍 reject，不产生 handle", async () => {
+    const engine = makeStubEngine(makeStubClient({
+      connectError: new EngineSdkError("engine_transport_lost", "connection lost before run", "reconnect"),
+    }));
+    const { ctx } = makeCtx();
+    await expect(engine.run({ prompt: "p" }, ctx)).rejects.toMatchObject({
+      code: "engine_transport_lost",
+    });
+  });
+});
+
 describe("gate 位多声明 run 期判定（W3 契约⑤接线：manifest vs initialize 应答）", () => {
   it("多声明（manifest maxTurns true vs 引擎应答 false）→ run reject engine_capability_mismatch，run 帧未发出（无事件回显）", async () => {
     const { engine, cleanup } = makeEngine({
@@ -519,7 +608,7 @@ describe("gate 位多声明 run 期判定（W3 契约⑤接线：manifest vs ini
     await cleanup();
   });
 
-  it("非 gate 位不一致（personaInjection manifest 'flag' vs 应答 'prompt'）→ 不阻断：run 完成 + 诊断面仅 warn 留痕", async () => {
+  it("非 gate 位不一致（personaInjection manifest 'flag' vs 应答 'prompt'）→ 不阻断：run 完成 + 诊断范围仅 warn 留痕", async () => {
     const manifestCaps = { ...FAKE_MATCHED_CAPS, personaInjection: "flag" as const };
     const { engine, cleanup } = makeEngine(
       { capabilities: manifestCaps },
@@ -571,7 +660,7 @@ describe("read / probe / dispose 门面（[H1 U6] interact 断言随 interact �
         JSON.stringify([{ op: "askUser", request: { method: "confirm", id: "q-facade" } }]),
       ],
     });
-    // [D3] 构造后经槽登记（reverse-router 消费时现读，构造期无固化面）
+    // [D3] 构造后经槽登记（reverse-router 消费时现读，构造期不固化值的情形）
     setHostUiRequestEndpoint(async (req) => {
       seenRequests.push(req);
       return { confirmed: true };
@@ -730,7 +819,7 @@ describe("armed 回执等待门（[D3 协议版 P6]）", () => {
       // ① cancel 受理失败出声（原空 catch 吞信号）
       expect(errorSpy).toHaveBeenCalledWith(expect.stringContaining("armed receipt timeout cancel failed"));
       // ② 兜底 timer 武装并在 grace（300ms）到点触发：per-window 引擎 → 本实例
-      //    dispose（dispose 请求 → 组杀兜底），引擎进程消亡（薄壳整体回收）。
+      //    dispose（dispose 请求 → 按进程组终止兜底），引擎进程消亡（薄壳整体回收）。
       await waitForTrue(() => probePidAliveness(enginePid) === false);
       await waitForTrue(() => client.currentState === "disposed");
     } finally {
@@ -754,7 +843,7 @@ describe("armed 回执等待门（[D3 协议版 P6]）", () => {
     const { ctx } = makeCtx();
     try {
       const runPromise = engine.run({ prompt: "p", schema: { type: "object" } }, ctx);
-      // 孙进程上报镜像（childSpawned 反向通道落账 = 回收目标的确定性同步点）
+      // 孙进程上报镜像（childSpawned 反向通道写入 journal 记录 = 回收目标的确定性同步点）
       await waitForTrue(() => client.mirror.snapshot().some((e) => e.recordId === "run-1" && e.state === "running"));
       const child = client.mirror.snapshot().find((e) => e.recordId === "run-1");
       expect(child).toBeDefined();

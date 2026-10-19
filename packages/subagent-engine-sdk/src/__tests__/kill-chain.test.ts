@@ -1,7 +1,7 @@
 // src/__tests__/kill-chain.test.ts
 //
 // killChain（SIGTERM → grace → SIGKILL）与 abortWithFallback（abort 两级中断编排）
-// 的行为面。child 用结构 fake——KillableChild 接口注释明示「测试可注入 fake
+// 的行为范围。child 用结构 fake——KillableChild 接口注释明示「测试可注入 fake
 // （ChildProcess 全字段构造过重）」，退出态经 emitExit 手工推进，不 spawn 真实
 // 进程、不碰引擎进程。timer 窗口（grace / nativeGrace / SIGKILL 收尸）用 fake
 // timers 推进；日志经 LoggerSink 注入捕获（同时避免缺省 console 出口刷屏）。
@@ -258,7 +258,7 @@ describe("abortWithFallback（abort 两级中断编排）", () => {
 
 import { killPidChain, probePidAlive } from "../kill-chain.ts";
 
-describe("killPidChain（run 级单 pid 杀链——SIGTERM → grace → SIGKILL，绝不组杀）", () => {
+describe("killPidChain（run 级单 pid 杀链——SIGTERM → grace → SIGKILL，绝不按进程组终止）", () => {
   beforeEach(() => {
     vi.useFakeTimers();
   });

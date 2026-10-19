@@ -126,7 +126,7 @@ describe("renderSubagentCall — 拍平形态提取（regression for wave 3 flat
 // renderSubagentResult — expanded / compact 分支等价（字节级回归锁）
 // ============================================================
 //
-// buildExpandedLines 收敛为「compact + list/fork-from 特例」后的守卫：cancel /
+// buildExpandedLines 收敛为「compact + list/fork-from 特例」后的检查：cancel /
 // start(bg) 分支的 expanded 输出必须与 compact 逐字节相同（同一 render 宽度下
 // 的完整字符串数组相等）；list / fork-from 的既有差异（session 行追加 / 源文件
 // 完整路径 vs basename）锁住不被收敛误伤。

@@ -1,5 +1,5 @@
 // engine-discovery-scan.test.ts —— [W4] 引擎发现器（impl-plan §2.4 / A4/A12）：
-// manifest schema 字段级正反例、三级搜索路径、L1 分隔符与非法条目、engines.json 投影
+// manifest schema 字段级正反例、三级搜索路径、L1 分隔符与非法条目、engines.json 派生视图
 // 合流与幂等零写、同 id 覆盖留痕、bin 不可执行标记、ensureEngineDiscovered 补扫。
 //
 // 纪律：fixture 一律 mkdtempSync(tmpdir()) 自建自删（禁真实数据目录）；L2 根在用例内
@@ -16,7 +16,7 @@ import type { SubagentEnginesFile } from "@zhushanwen/extension-protocol";
 
 import { configureCore, resetCoreForTests } from "../../../core/host-services.ts";
 import type { DiscoveryRoot } from "../../../core/host-services.ts";
-import { clearEngines, engineProcessModelOfDescriptor, getEngine, hasEngine, listEngines, registerEngine } from "../registry.ts";
+import { clearEngines, engineProcessModelOfDescriptor, getEngine, hasEngine, listEngines, registerEngine, registerEngineDescriptor } from "../registry.ts";
 import type { EnginePort } from "../port.ts";
 import { getEnginesFilePath, syncEnginesFile, type SyncEnginesFileOptions } from "../engine-discovery.ts";
 
@@ -27,11 +27,13 @@ import {
   ENGINE_ROOTS_ENV,
   deriveNodeModuleRoots,
   discoverAndRegisterEngines,
+  engineConversationCapable,
   ensureEngineDiscovered,
   parseEngineRootsEnv,
   scanEngines,
 } from "../engine-discovery-scan.ts";
 import { readExplicitEngines } from "../config.ts";
+import { CONSERVATIVE_CAPABILITIES } from "../engine-manifest.ts";
 
 // ── fixture helpers ─────────────────────────────────────────────
 
@@ -327,15 +329,15 @@ describe("manifest schema 字段级解析", () => {
     makeEnginePkg(tmpRoot, "mc-no-models", { modelCatalog: { dynamic: false }, capabilities: FULL_CAPABILITIES });
     const result = scanEngines(scanOpts({ roots: [tmpRoot] }));
     const manifestOf = (id: string) => result.discovered.find((d) => d.id === id)!.descriptor.manifest!;
-    // 缺省 = 不注入（解析器不得把省略填成 models: []——「无枚举面」语义必须可达）
+    // 缺省 = 不注入（解析器不得把省略填成 models: []——「无枚举情形」语义必须可达）
     expect("modelCatalog" in manifestOf("mc-omitted")).toBe(false);
     expect(manifestOf("mc-null").modelCatalog).toBeNull();
     expect(manifestOf("mc-explicit").modelCatalog).toEqual({ dynamic: true, models: [{ id: "m1" }] });
-    // models 缺失 = 无有效枚举面 → null（不是 []——[] 是作者显式「有面但空」声明）
+    // models 缺失 = 无有效枚举侧 → null（不是 []——[] 是作者显式「有面但空」声明）
     expect(manifestOf("mc-no-models").modelCatalog).toBeNull();
   });
 
-  it("displayName 可选（缺省不入快照，消费面回落 id）；description 仅形态校验", () => {
+  it("displayName 可选（缺省不入快照，消费方回落 id）；description 仅形态校验", () => {
     makeEnginePkg(tmpRoot, "plain", { capabilities: FULL_CAPABILITIES });
     const result = scanEngines(scanOpts({ roots: [tmpRoot] }));
     expect("displayName" in result.discovered[0].descriptor.manifest!).toBe(false);
@@ -463,7 +465,7 @@ describe("三级搜索路径", () => {
     ).toBe(true);
   });
 
-  it("L3 裸命令名经 PATH 解析；解析失败 → unusable 不进清单（投影 = 已发现且可执行）", () => {
+  it("L3 裸命令名经 PATH 解析；解析失败 → unusable 不进清单（派生视图 = 已发现且可执行）", () => {
     const binDir = path.join(tmpRoot, "pathbin");
     fs.mkdirSync(binDir);
     fs.writeFileSync(path.join(binDir, "l3-on-path"), BIN_CONTENT);
@@ -568,7 +570,7 @@ describe("冲突与失败", () => {
   });
 });
 
-// ── 装载与投影 ───────────────────────────────────────────────────
+// ── 装载与派生视图 ───────────────────────────────────────────────────
 
 describe("装载与注册表", () => {
   it("discoverAndRegisterEngines 装载 cli descriptor：hasEngine true、getEngine 返回 id 命中的 port（构造同步不 spawn）", () => {
@@ -582,10 +584,10 @@ describe("装载与注册表", () => {
     const port = getEngine("loaded");
     expect(port.id).toBe("loaded");
     // 同步成员直读 manifest 快照（W2 RemoteEngine 形态）：无 modelCatalog →
-    // listModels 返回 null（无枚举面）、validateModel 成员不实现（构造器摘除）
+    // listModels 返回 null（无枚举情形）、validateModel 成员不实现（构造器摘除）
     expect(port.listModels?.()).toBeNull();
     expect(typeof port.validateModel).toBe("undefined");
-    // 显式 modelCatalog → listModels 返回数组（有枚举面）
+    // 显式 modelCatalog → listModels 返回数组（有枚举侧）
     const portWithCatalog = getEngine("loaded-catalog");
     expect(portWithCatalog.listModels?.()).toEqual([{ id: "m1" }]);
   });
@@ -602,7 +604,7 @@ describe("装载与注册表", () => {
     expect(ensureEngineDiscovered("ghost", opts)).toBe(false);
   });
 
-  it("engines.json 投影合流：发现 cli ∪ inproc 注册；幂等零写；契约 {v:1, engines} 不变", () => {
+  it("engines.json 派生视图合流：发现 cli ∪ inproc 注册；幂等零写；契约 {v:1, engines} 不变", () => {
     makeEnginePkg(tmpRoot, "projected", { capabilities: FULL_CAPABILITIES });
     registerEngine("pi", () => stubEngine("pi"));
     // L1 env 根通道经注入 opts 覆盖（语义同生产 env 读取，密闭化防宿主环境污染——
@@ -622,7 +624,7 @@ describe("装载与注册表", () => {
       syncEnginesFile(agentDir, l1EnvOpts);
       expect(fs.statSync(filePath).mtimeMs).toBe(statAfterFirst.mtimeMs);
 
-      // 发现面变化（新增引擎包）触发重写
+      // 发现侧变化（新增引擎包）触发重写
       makeEnginePkg(tmpRoot, "second-projected", { capabilities: FULL_CAPABILITIES });
       syncEnginesFile(agentDir, l1EnvOpts);
       const updated = JSON.parse(fs.readFileSync(filePath, "utf8")) as SubagentEnginesFile;
@@ -630,7 +632,7 @@ describe("装载与注册表", () => {
     }
   });
 
-  it("syncEnginesFile fail-safe：发现异常不阻塞投影（发现根全部不存在时仍写 inproc 清单）", () => {
+  it("syncEnginesFile fail-safe：发现异常不阻塞派生视图生成（发现根全部不存在时仍写 inproc 清单）", () => {
     registerEngine("pi", () => stubEngine("pi"));
     const agentDir = path.join(tmpRoot, "agent");
     syncEnginesFile(agentDir, HERMETIC_DISCOVERY);
@@ -638,7 +640,7 @@ describe("装载与注册表", () => {
     expect(file.engines).toEqual(["pi"]);
   });
 
-  it("零发现零注册时投影空清单（W11 删 inproc 后的终态语义预演）", () => {
+  it("零发现零注册时派生视图生成空清单（W11 删 inproc 后的终态语义预演）", () => {
     const agentDir = path.join(tmpRoot, "agent");
     syncEnginesFile(agentDir, HERMETIC_DISCOVERY);
     const file = JSON.parse(fs.readFileSync(getEnginesFilePath(agentDir), "utf8")) as SubagentEnginesFile;
@@ -674,5 +676,47 @@ describe("readExplicitEngines 读失败与合法缺省分通道", () => {
     expect(
       collectedLogs.some((l) => l.level === "warn" && l.message.includes("read failed")),
     ).toBe(true);
+  });
+});
+
+// ── engineConversationCapable（subagent-composer 2026-10-18）─────────────────────
+// GUI composer 可见性的能力派生位：与宿主 message 资格门同一 conversation 能力轴
+// （manifest 声明消费，不按引擎 id 硬编码）。
+describe("engineConversationCapable", () => {
+  // registry 是模块级单例：用例内注册、afterEach 清场（本文件既有纪律）。
+  afterEach(() => {
+    clearEngines();
+  });
+
+  /** 最小 cli descriptor（能力派生只读 capabilities，portFactory 恒不触达）。capabilities
+   *  以保守缺省展开、仅按用例覆写 conversation——能力位全集演化时本测试零跟随。 */
+  function cliDescriptor(conversation: "native" | "cold" | "unsupported"): Parameters<typeof registerEngineDescriptor>[1] {
+    return {
+      kind: "cli",
+      command: "/bin/true",
+      args: [],
+      capabilities: { ...CONSERVATIVE_CAPABILITIES, conversation },
+      portFactory: () => {
+        throw new Error("not reached: capability derivation never instantiates a port");
+      },
+    };
+  }
+
+  it("conversation=native / cold → true（两形态均可续聊）", () => {
+    registerEngineDescriptor("eng-native", cliDescriptor("native"));
+    registerEngineDescriptor("eng-cold", cliDescriptor("cold"));
+    expect(engineConversationCapable("eng-native")).toBe(true);
+    expect(engineConversationCapable("eng-cold")).toBe(true);
+  });
+
+  it("conversation=unsupported → false", () => {
+    registerEngineDescriptor("eng-unsupported", cliDescriptor("unsupported"));
+    expect(engineConversationCapable("eng-unsupported")).toBe(false);
+  });
+
+  it("未注册引擎 / 空白 id → false（保守缺省不渲染输入面）", () => {
+    expect(engineConversationCapable("never-registered")).toBe(false);
+    expect(engineConversationCapable("")).toBe(false);
+    expect(engineConversationCapable(undefined)).toBe(false);
   });
 });

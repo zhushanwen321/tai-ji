@@ -2,7 +2,7 @@
 
 证据基准：v2.1.88 npm 产物反解快照（claude-code-source-code 知识库）；官方 mirror（GitHub anthropics/claude-code）无源码，只有 CHANGELOG/docs。下文所有 `file:line` 均指该反解快照仓库内路径；上游运行时语义的权威源为 node_modules 实装版。
 
-taiji 靶面类型权威：`packages/subagent-engine-sdk/src/protocol/`（contract-types.ts / methods.ts / reverse-channels.ts / frames.ts / schema.ts）与 `src/ui-types.ts`。
+taiji 目标类型类型权威：`packages/subagent-engine-sdk/src/protocol/`（contract-types.ts / methods.ts / reverse-channels.ts / frames.ts / schema.ts）与 `src/ui-types.ts`。
 
 ## 1. 接入形态与进程拓扑
 
@@ -66,10 +66,10 @@ stream_event 内层 `event.type` 全集（Anthropic 流协议，src/services/api
 
 | 源类型 | taiji 事件 | 映射方式 | 证据 |
 |---|---|---|---|
-| assistant（message.content[].type=text/thinking/tool_use 整块到达） | text_delta / thinking_delta / tool_start + tool_end | 合成：适配层按 content block 拆解，text block → text_delta（整块单发）、thinking block → thinking_delta、tool_use block → tool_start（args=input 对象）；result 帧后对未闭合 tool 补 tool_end | src/entrypoints/sdk/coreSchemas.ts:1347-1356；content block 组装 src/services/api/claude.ts:2192-2210 |
+| assistant（message.content[].type=text/thinking/tool_use 整块到达） | text_delta / thinking_delta / tool_start + tool_end | 合成：适配层按 content block 拆解，text block → text_delta（整块单发）、thinking block → thinking_delta、tool_use block → tool_start（args=input 对象）；result 帧后对未收尾 tool 补 tool_end | src/entrypoints/sdk/coreSchemas.ts:1347-1356；content block 组装 src/services/api/claude.ts:2192-2210 |
 | stream_event > content_block_delta > text_delta | text_delta | 直接（`--include-partial-messages` 开启时） | src/services/api/claude.ts:2113-2126 |
 | stream_event > content_block_delta > thinking_delta | thinking_delta | 直接 | src/services/api/claude.ts:2148-2161 |
-| stream_event > content_block_delta > signature_delta / citations_delta / connector_text_delta | （无） | 丢弃（签名/引用/连接文本非 taiji 事件面） | src/services/api/claude.ts:2084-2086, 2127-2147 |
+| stream_event > content_block_delta > signature_delta / citations_delta / connector_text_delta | （无） | 丢弃（签名/引用/连接文本非 taiji 事件范围） | src/services/api/claude.ts:2084-2086, 2127-2147 |
 | stream_event > content_block_start(tool_use) | tool_start | 直接（toolName=name, args 待 input_json_delta 累积） | src/services/api/claude.ts:1997-2001 |
 | stream_event > content_block_delta > input_json_delta | （tool_start args 累积） | 合成：partial_json 串接，content_block_stop 时 JSON.parse 得 args | src/services/api/claude.ts:2087-2112 |
 | stream_event > content_block_stop | （tool args 定稿触发点） | 合成 | src/services/api/claude.ts:2171-2211 |
@@ -84,15 +84,15 @@ stream_event 内层 `event.type` 全集（Anthropic 流协议，src/services/api
 | system subtype=api_retry | activity | 合成：重试等待期活性信号（携带 attempt/max_retries 细节丢弃） | src/QueryEngine.ts:943-955 |
 | system subtype=session_state_changed | activity | 合成：idle/running/requires_action 状态翻转作活性信号 | src/entrypoints/sdk/coreSchemas.ts:1735-1747 |
 | system subtype=task_progress | activity | 合成：后台任务进度节流帧（含 total_tokens/tool_uses/duration_ms，丢弃） | src/entrypoints/sdk/coreSchemas.ts:1750-1767 |
-| system subtype=task_started / task_notification | tool_start / tool_end（Task 型工具）或 activity | 合成：后台任务生命周期可投影为对应 tool 事件 | src/entrypoints/sdk/coreSchemas.ts:1694-1733 |
+| system subtype=task_started / task_notification | tool_start / tool_end（Task 型工具）或 activity | 合成：后台任务生命周期可映射为对应 tool 事件 | src/entrypoints/sdk/coreSchemas.ts:1694-1733 |
 | system subtype=post_turn_summary | turn_end{summary} | 合成：summary 字段入 turn_end.summary（可选增强） | src/entrypoints/sdk/coreSchemas.ts:1544-1570 |
-| system subtype=hook_started / hook_progress / hook_response / files_persisted / elicitation_complete | （无） | 丢弃（hook 生命周期/文件持久化回执非事件面） | src/entrypoints/sdk/coreSchemas.ts:1604-1692, 1779-1792 |
+| system subtype=hook_started / hook_progress / hook_response / files_persisted / elicitation_complete | （无） | 丢弃（hook 生命周期/文件持久化回执非事件范围） | src/entrypoints/sdk/coreSchemas.ts:1604-1692, 1779-1792 |
 | system subtype=local_command_output | text_delta | 合成（content 作正文增量；headless 下少见） | src/entrypoints/sdk/coreSchemas.ts:1590-1602 |
 | tool_progress（type=tool_progress） | activity | 直接语义：工具执行中周期心跳（30s 节流，src/utils/queryHelpers.ts:96-100） | src/entrypoints/sdk/coreSchemas.ts:1648-1659 |
 | tool_use_summary | activity | 合成（累计工具摘要字符串丢弃） | src/entrypoints/sdk/coreSchemas.ts:1769-1777 |
 | auth_status | activity 或 error | 合成：认证中断时 error{message=output}，其余丢弃 | src/entrypoints/sdk/coreSchemas.ts:1661-1670 |
 | rate_limit_event / prompt_suggestion / streamlined_text / streamlined_tool_use_summary | （无） | 丢弃（订阅限流状态/提示建议/精简输出模式专属） | src/entrypoints/sdk/coreSchemas.ts:1358-1397, 1795-1806 |
-| control_response / control_cancel_request / keep_alive | （无） | 消费：反向通道应答与保活帧，非事件面 | src/entrypoints/sdk/controlSchemas.ts:605-627 |
+| control_response / control_cancel_request / keep_alive | （无） | 消费：反向通道应答与保活帧，非事件范围 | src/entrypoints/sdk/controlSchemas.ts:605-627 |
 
 taiji `activity`（纯活性信号）在 claude 侧无单一原生对应，由 tool_progress / api_retry / session_state_changed / task_progress 四源合成（上表）；长工具执行期 tool_progress 是最稳的判活源。
 
@@ -101,7 +101,7 @@ taiji `activity`（纯活性信号）在 claude 侧无单一原生对应，由 t
 - **text / thinking block**：assistant 消息的 `message.content[]` 内 `{type:"text", text}` 与 `{type:"thinking", thinking, signature}`（signature 丢弃）。流式路径：`--include-partial-messages` 下 text_delta/thinking_delta 逐段转发；非流式路径：content_block_stop 时整块 yield 为独立 assistant 消息（每 block 一条，src/services/api/claude.ts:2192-2210 注释「claude.ts yields one assistant message per content block」），适配层整块合成对应 delta。
 - **tool_use block**：`{type:"tool_use", id, name, input}`。流式下 input 由 input_json_delta 的 partial_json 串接（起始为空串，src/services/api/claude.ts:1997-2001），content_block_stop 时为完整对象 → tool_start{toolName:name, args:input}。
 - **tool_result**：到达于 user 消息 `message.content[]` 内 `{type:"tool_result", tool_use_id, content, is_error?}`（src/utils/messages.ts:838-850 的 `ToolUseResultMessage` 判定：content[0].type==='tool_result'）。映射 tool_end{toolName（按 tool_use_id 反查在途 tool_use）, result:{content: Array 视 content 形态装填, details}, isError: is_error}：
-  - `ToolCallResult.content: unknown[]` ← tool_result.content。该字段是 Anthropic block 数组（text/image 块）或字符串；适配层归一为数组（字符串包一元素）。结构化旁路：同条 user 消息顶层 `toolUseResult` 字段携带工具完整结构化 Output（注释「Matches tool's `Output` type」，src/utils/messages.ts:481），取其文本/数据面并入 content，整体对象入 `details`。
+  - `ToolCallResult.content: unknown[]` ← tool_result.content。该字段是 Anthropic block 数组（text/image 块）或字符串；适配层归一为数组（字符串包一元素）。结构化旁路：同条 user 消息顶层 `toolUseResult` 字段携带工具完整结构化 Output（注释「Matches tool's `Output` type」，src/utils/messages.ts:481），取其文本/数据范围并入 content，整体对象入 `details`。
 - **redacted_thinking / server_tool_use / web_search_tool_result**：default 分支透传块（src/services/api/claude.ts:2039-2049）；redacted_thinking 无 delta，不产事件；server_tool_use（内建服务端工具）同 tool_use 处理（advisor 特判在 src/services/api/claude.ts:2008）。
 - **isError 的另一个来源**：SDKAssistantMessageError 枚举（authentication_failed/billing_error/rate_limit/invalid_request/server_error/unknown/max_output_tokens，src/entrypoints/sdk/coreSchemas.ts:1256-1266）出现在 assistant 帧顶层 `error` 字段 → 映射 error 事件。
 
@@ -121,7 +121,7 @@ result 帧携带累计 usage（`NonNullableUsage`，零值形态见 src/services
 | AgentOutcomeUsage.turns | `num_turns` | src/QueryEngine.ts:624（`messages.length - 1`）、857、987（turnCount 按 user 消息计数） |
 | AgentOutcome.durationMs | `duration_ms`（另有 API 侧 `duration_api_ms`） | src/QueryEngine.ts:622-623 |
 
-message_end 的单消息增量：流式路径下 `stream_event > message_start/message_delta` 的 usage 经 updateUsage 累积、message_stop 时并入 totalUsage（src/QueryEngine.ts:789-816）；assistant 消息块级 usage 在 `message.message.usage`。分模型明细在 `modelUsage`（record：inputTokens/outputTokens/cacheReadInputTokens/cacheCreationInputTokens/webSearchRequests/costUSD/contextWindow/maxOutputTokens），taiji 靶面无分模型维度，聚合或丢弃。
+message_end 的单消息增量：流式路径下 `stream_event > message_start/message_delta` 的 usage 经 updateUsage 累积、message_stop 时并入 totalUsage（src/QueryEngine.ts:789-816）；assistant 消息块级 usage 在 `message.message.usage`。分模型明细在 `modelUsage`（record：inputTokens/outputTokens/cacheReadInputTokens/cacheCreationInputTokens/webSearchRequests/costUSD/contextWindow/maxOutputTokens），taiji 目标类型无分模型维度，聚合或丢弃。
 
 ## 6. session 记录与 read 重建
 
@@ -133,7 +133,7 @@ Entry type 全集（grep 穷尽自 `Entry` union，src/types/logs.ts:297-317，1
 |---|---|---|
 | TranscriptMessage(user)，content 无 tool_result | 新 turn 的起点标记（用户输入不进 turn 正文） | src/types/logs.ts:221-231 |
 | TranscriptMessage(assistant) | 按内容块拆入当前 turn：text→text、thinking→thinking、tool_use→toolCalls[{toolName,args}]（args=input 对象） | 同上；内容块形态同 §4 |
-| TranscriptMessage(user) 含 tool_result | 回填最近未闭合 toolCall 的 result/isError（按 tool_use_id 配对） | src/utils/messages.ts:838-850 |
+| TranscriptMessage(user) 含 tool_result | 回填最近未收尾 toolCall 的 result/isError（按 tool_use_id 配对） | src/utils/messages.ts:838-850 |
 | TranscriptMessage(system, compact_boundary) | 压缩边界：之前 turns 归档、之后开新段（read 重建时保留边界标记或分段） | src/QueryEngine.ts:597-605 |
 | TranscriptMessage(attachment) | 丢弃（附件元数据） | src/utils/sessionStorage.ts:139-146 |
 | 其余 14 种元数据 Entry | 丢弃（标题/标签/快照/工作树状态等，非对话内容） | src/types/logs.ts:55-295 |
@@ -150,7 +150,7 @@ claude 侧反向协议 = stdout `control_request`（CLI → SDK host，src/entry
 |---|---|---|
 | host/log{level,component,message,data?} | 无原生通道；debug 日志走 stderr（`-d/--debug`、`--debug-to-stderr`，src/main.tsx:971-976） | 合成：适配层消费 stderr 诊断行转 host/log，或适配层自身日志 |
 | host/askUser{runId,request:UiRequest} | control_request `can_use_tool`（权限询问，src/cli/structuredIO.ts:586-606）+ `elicitation`（MCP 表单询问，src/cli/structuredIO.ts:694-721）+ `hook_callback`（hook 输入，src/cli/structuredIO.ts:661-689） | 直接映射（详见下表）；应答 control_response 回 `PermissionToolOutput` 形态（allow{behavior:"allow",updatedInput} / deny{behavior:"deny",message,interrupt?}，src/utils/permissions/PermissionPromptToolResultSchema.ts:47-86） |
-| host/streamDelta{runId,delta} | 无对应（claude 流式增量在 stdout 事件面，无宿主回推 UI 通道） | 适配层可将 text_delta 同时泵该通道（渲染加速面，纯合成） |
+| host/streamDelta{runId,delta} | 无对应（claude 流式增量在 stdout 事件范围，无宿主回推 UI 通道） | 适配层可将 text_delta 同时泵该通道（渲染加速面，纯合成） |
 | host/handleReady{runId,sessionRef} | system/init 帧（首帧含 session_id，src/utils/messages/systemInit.ts:53-104） | 合成：收到 init 帧即回填 handle 并发 handleReady |
 | host/childSpawned{pid,recordId} | initialize 应答的 `pid` 字段（CLI 进程自身 PID，src/entrypoints/sdk/controlSchemas.ts:86-89） | 合成：适配层 spawn 后即知 pid，主动上报一次（claude 无内嵌孙进程上报） |
 | host/childStateChanged{pid,recordId,state,killed,exitCode?,signal?} | 无对应（进程退出由适配层 wait 链感知） | 合成：进程 exit 事件驱动 |
@@ -160,7 +160,7 @@ claude 侧反向协议 = stdout `control_request`（CLI → SDK host，src/entry
 | UiRequest method | 可映射 | 说明 |
 |---|---|---|
 | confirm | 能 | can_use_tool 是「允许/拒绝」二元询问 → {confirmed:true/false} ↔ behavior allow/deny；title/display_name/description/decision_reason → title/message |
-| select | 部分 | can_use_tool 无选项列表；permission_suggestions（权限规则建议，数组）语义不同，可投影为附加选项但语义错配，建议降级 confirm |
+| select | 部分 | can_use_tool 无选项列表；permission_suggestions（权限规则建议，数组）语义不同，可映射为附加选项但语义错配，建议降级 confirm |
 | input | 无 | can_use_tool 无自由文本输入形态；elicitation 的 form 模式（requested_schema）最接近，可映射为多条 input 或降级 |
 | editor | 无 | 无对应 |
 | notify | 部分 | hook_callback / elicitation url 模式的单向提示可合成 notify；无原生 fire-and-forget UI 请求 |
@@ -187,8 +187,8 @@ deny 应答的 `interrupt:true`（src/utils/permissions/PermissionPromptToolResu
 
 ## 9. gap 清单
 
-**源有靶无**（claude 有、taiji 协议面无承载，适配层丢弃或仅诊断消费）：
-- 事件流：rate_limit_event、auth_status、prompt_suggestion、post_turn_summary（作 turn_end.summary 增强除外）、task_started/task_progress/task_notification（非 Task 投影时）、hook_started/hook_progress/hook_response、files_persisted、elicitation_complete、local_command_output、streamlined_text/streamlined_tool_use_summary（精简输出模式专属）、tool_use_summary、keep_alive、update_environment_variables
+**源有靶无**（claude 有、taiji 协议范围无承载，适配层丢弃或仅诊断消费）：
+- 事件流：rate_limit_event、auth_status、prompt_suggestion、post_turn_summary（作 turn_end.summary 增强除外）、task_started/task_progress/task_notification（非 Task 映射时）、hook_started/hook_progress/hook_response、files_persisted、elicitation_complete、local_command_output、streamlined_text/streamlined_tool_use_summary（精简输出模式专属）、tool_use_summary、keep_alive、update_environment_variables
 - result 帧字段：modelUsage（分模型明细）、permission_denials、fast_mode_state、stop_reason、duration_api_ms
 - 控制请求：rewind_files、cancel_async_message、seed_read_state、mcp_message/mcp_set_servers/mcp_reconnect/mcp_toggle/mcp_status、stop_task、apply_flag_settings/get_settings、set_model/set_max_thinking_tokens（运行时切换，taiji 无对应方法）、elicitation、hook_callback（taiji 无 hook 面）
 - flag 面：`--max-budget-usd`、`--task-budget`、`--fallback-model`、`--betas`、`--settings`、`--add-dir`、`--mcp-config`、`--plugin-dir`、`--workload`、`--no-session-persistence`、`--tools`（工具白名单，denyTools 之外的另一半）

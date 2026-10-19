@@ -50,7 +50,7 @@ import { useGenStats } from '@/composables/features/model/useGenStats'
 import { formatSpeed } from './gen-stats-display'
 
 const props = defineProps<{
-  /** session 分区键 + 恢复腿触发源（同原触发器受控范式） */
+  /** session 分区键 + 恢复路径触发源（同原触发器受控范式） */
   sessionId?: string
   /** 当前复合 modelId，供 composable 做帧 model 校验兜底（D4 前端防线） */
   modelId?: string
@@ -58,7 +58,7 @@ const props = defineProps<{
 
 const { t } = useI18n()
 
-// 订阅（session.stats_update）/ 恢复腿（session.getGenStats）/ model 校验全在 composable 内
+// 订阅（session.stats_update）/ 恢复路径（session.getGenStats）/ model 校验全在 composable 内
 const { current: frame } = useGenStats(toRef(props, 'sessionId'), toRef(props, 'modelId'))
 
 /** 速度浮层四行（label + 聚合值；null → 浮层行显「—」）。note = label 的原生

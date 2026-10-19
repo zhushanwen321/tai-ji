@@ -1,5 +1,5 @@
 /**
- * PS-59 探针：RPC select 请求无 timeout 时永不超时（长挂语义）——notify-once watch 桥前提守卫。
+ * PS-59 探针：RPC select 请求无 timeout 时永不超时（长挂语义）——notify-once watch 桥前提检查。
  *
  * 登记条目（docs/pi-semantics.json PS-59）：createDialogPromise 仅在 opts?.timeout 真值时设
  * setTimeout，timeout 缺省 promise 恒 pending 直到 extension_ui_response 到达
@@ -8,7 +8,7 @@
  * 本条登记请求路径超时语义）。
  *
  * 承重（ADR-0087）：extension 以 {action:'watch'} 长挂 select 不传 timeout fire-and-forget，
- * runtime 晚 respond（settle/death/abort/TTL 腿）依赖 promise 不被 pi 侧超时打断；pi 若引入
+ * runtime 晚 respond（settle/death/abort/TTL 路径）依赖 promise 不被 pi 侧超时打断；pi 若引入
  * 默认超时，晚达 respond 将落在已 resolve 的缺省值上、通知静默丢失。
  *
  * 断言方式：静态直读 node_modules 实装 dist（pi 语义断言权威源，见 AGENTS.md）。
@@ -73,7 +73,7 @@ describe.skipIf(!RPC_DIST)(
       expect(
         selectDef?.includes('timeout: opts?.timeout'),
         'PS-59 漂移：select 定义的 timeout 不再直传 opts?.timeout（注入了默认超时/忽略调用方值），' +
-          'watch 长挂前提失锚。恢复动作：复核 select 定义行后更新本探针',
+          'watch 长挂前提定位失败。恢复动作：复核 select 定义行后更新本探针',
       ).toBe(true)
     })
 

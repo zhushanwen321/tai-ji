@@ -2,7 +2,7 @@
 // + 错误回包形状单源化（ChannelErrorResult / 两 alias）。
 //
 // 设计权威源：docs/architecture/ext-simplify-17-shared-extraction.md §3.3 D8（v7 冻结形态）。
-// 经 barrel（../index）导入：单测同时锚定新增导出面。
+// 经 barrel（../index）导入：单测同时锚定新增导出清单。
 
 import { describe, it, expect, expectTypeOf, vi } from 'vitest'
 import {
@@ -198,7 +198,7 @@ describe('D8 错误回包形状单源化', () => {
         errorResult.hint = 'use send_to_session to retry'
       }
       expect(errorResult.error).toBe('spawn failed')
-      // 交集扩展命中共享守卫；sessionId 字段不进错误文本（session-manager 现状语义）
+      // 交集扩展命中共享检查；sessionId 字段不进错误文本（session-manager 现状语义）
       expect(isChannelErrorResult(errorResult)).toBe(true)
       expect(formatChannelErrorText(errorResult)).toBe('spawn failed')
     })

@@ -5,8 +5,8 @@
  * 覆盖（编排层断言，经真实入口 reapSessionBackgroundTasks / reapAllSessionsBackgroundTasks
  * 触发）：registry 读失败按空表继续 / corrupt 隔离 rename 失败原文件保留原位 / 终态写
  * tmp 落盘失败条目停留 running / rename 失败且 tmp 清理双诊断 / ②补杀分支终态写失败 /
- * 触发面 A 目录级异常 / 触发面 B baseDir 读失败（非 ENOENT warn）/ 单目录扫描异常跳过 /
- * stale reaper.lock 残留非空（ENOTEMPTY）。
+ * 触发面 A 目录级异常 / 触发面 B baseDir 读失败（非 ENOENT warn）/ 单目录 registry 读失败
+ * 按空表继续不中断整体。
  *
  * pid 探测/处置原语（isPidAlive / killProcessTree / getProcessStartTimeSec /
  * pidStartMatchesRegistered）自 ext-simplify-13 起下沉 protocol 子出口
@@ -29,6 +29,7 @@ import { dirname, join } from 'node:path'
 
 import type { BackgroundTaskRegistryEntry } from '@zhushanwen/extension-protocol'
 import {
+  getSessionRegistryPath,
   reapSessionBackgroundTasks,
   reapAllSessionsBackgroundTasks,
   type BackgroundTaskReapDeps,
@@ -70,9 +71,14 @@ vi.mock('node:fs', async (importOriginal) => {
 const tmpAgentDirs: string[] = []
 
 function makeAgentDir(): string {
-  const dir = mkdtempSync(join(tmpdir(), 'bg-task-reaper-primitives-'))
-  tmpAgentDirs.push(dir)
-  return dir
+  // 两层布局对齐生产形态（agentDir = <dataDir>/agent）：reaper 以 dirname(agentDir)
+  // 为 dataDir 推导 ext-sessions 存储树——单层时 dataDir 会落到 tmpdir 公共层，
+  // ext-sessions 泄漏到公共目录造成跨用例污染
+  const dataDir = mkdtempSync(join(tmpdir(), 'bg-task-reaper-primitives-'))
+  tmpAgentDirs.push(dataDir)
+  const agentDir = join(dataDir, 'agent')
+  mkdirSync(agentDir, { recursive: true })
+  return agentDir
 }
 
 /** fs mock 复位为全数委托真实实现（用例内覆写后的双保险复位）。 */
@@ -141,7 +147,8 @@ function makeEntry(overrides: Partial<BackgroundTaskRegistryEntry> = {}): Backgr
 }
 
 function registryPathOf(agentDir: string, sessionId: string): string {
-  return join(agentDir, 'base-tool-enhance', sessionId, 'registry.json')
+  // 与生产同源（session-store-layout-inversion 域 5 换根后 registry 落 ext-sessions 树）
+  return getSessionRegistryPath(agentDir, sessionId)
 }
 
 function writeRegistryFile(agentDir: string, sessionId: string, entries: unknown[], version = 1): string {
@@ -152,7 +159,7 @@ function writeRegistryFile(agentDir: string, sessionId: string, entries: unknown
 }
 
 function zeroResult(): BackgroundTaskReapResult {
-  return { scannedDirs: 0, ownerAliveSkipped: 0, killedOrphans: 0, finalizedOrphans: 0, conservativelySkipped: 0, staleLocksRemoved: 0 }
+  return { scannedDirs: 0, ownerAliveSkipped: 0, killedOrphans: 0, finalizedOrphans: 0, conservativelySkipped: 0 }
 }
 
 // ── registry / fs 错误分支（真实入口 + 条件失败注入）─────────────────────────
@@ -323,56 +330,33 @@ describe('目录级错误跳过（warn 后不中断、不外抛）', () => {
       const result = await reapAllSessionsBackgroundTasks(agentDir, deps)
 
       expect(result).toEqual(zeroResult())
-      expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining('base dir unreadable, skipping this scan'), expect.any(String))
+      expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining('session store root unreadable, skipping this scan'), expect.any(String))
     } finally {
       warnSpy.mockRestore()
     }
   })
 
-  it('触发面 B：单目录扫描异常 → warn 跳过该目录，不中断其余目录扫描', async () => {
+  it('触发面 B：单目录 registry 读失败 → readRegistry 按空表继续，不中断其余目录扫描', async () => {
     const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {})
     try {
       const agentDir = makeAgentDir()
       const { deps } = makeDeps()
       writeRegistryFile(agentDir, 's1', [makeEntry()])
       writeRegistryFile(agentDir, 's2', [makeEntry()])
-      fsMock.existsSync.mockImplementation((path: unknown) => {
-        if (String(path).endsWith('registry.json')) throw errnoLike('EACCES', 'stat denied')
-        return fsMock.actual.existsSync(path as string)
+      fsMock.readFileSync.mockImplementation((path: unknown) => {
+        if (String(path).endsWith('registry.json')) throw errnoLike('EACCES', 'read denied')
+        return fsMock.actual.readFileSync(path as string)
       })
 
       const result = await reapAllSessionsBackgroundTasks(agentDir, deps)
 
-      // 两个目录都已计入扫描且都被跳过（错误容忍：不中断整体）
+      // 两个目录都已计入扫描且都按空表继续（错误容忍：不中断整体）
       expect(result).toEqual({ ...zeroResult(), scannedDirs: 2 })
-      expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining('session dir scan failed, skipping dir: s1'), expect.any(String))
-      expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining('session dir scan failed, skipping dir: s2'), expect.any(String))
+      expect(warnSpy).toHaveBeenCalledTimes(2)
+      expect(warnSpy).toHaveBeenCalledWith('[bg-task-reaper] registry read failed, treating as empty', expect.anything())
     } finally {
       warnSpy.mockRestore()
-    }
-  })
-
-  it('stale reaper.lock 残留目录非空（ENOTEMPTY）→ warn 留给下次启动，staleLocksRemoved 不计', async () => {
-    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {})
-    try {
-      const agentDir = makeAgentDir()
-      const { deps } = makeDeps()
-      const lockDir = join(agentDir, 'base-tool-enhance', 'reaper.lock')
-      mkdirSync(lockDir, { recursive: true })
-      writeFileSync(join(lockDir, 'leftover'), 'x', 'utf8')
-      const stale = new Date(Date.now() - 60_000)
-      utimesSync(lockDir, stale, stale)
-
-      const result = await reapAllSessionsBackgroundTasks(agentDir, deps)
-
-      expect(result.staleLocksRemoved).toBe(0)
-      expect(fsMock.actual.existsSync(lockDir)).toBe(true)
-      expect(warnSpy).toHaveBeenCalledWith(
-        expect.stringContaining('stale reaper.lock removal failed, leaving it for next startup'),
-        expect.any(String),
-      )
-    } finally {
-      warnSpy.mockRestore()
+      fsMock.readFileSync.mockImplementation(fsMock.actual.readFileSync)
     }
   })
 })

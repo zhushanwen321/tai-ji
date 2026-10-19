@@ -3,7 +3,7 @@
  *  fill/stroke 用 currentColor，由父级 CSS color 控制（暗主题浅字 / 亮主题深字）。
  *  支持旋转动画（太极「周而复始」语义，默认 8s，引用全局 @keyframes taiji-spin）。
  *  几何来自 logo-square.svg（6 条 path），禁止手改 d 属性——改几何回源头 SVG。
- *  reduced-motion 守卫：用户设了「减少动态效果」时停止旋转（motion-reduce:animate-none）。 */
+ *  reduced-motion 检查：用户设了「减少动态效果」时停止旋转（motion-reduce:animate-none）。 */
 interface Props {
   size?: number
   spin?: boolean

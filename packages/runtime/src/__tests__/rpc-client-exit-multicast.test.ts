@@ -98,6 +98,10 @@ vi.mock('../infra/pi/pi-provider-store.js', async (importOriginal) => {
 
 vi.mock('../infra/logger.js', () => ({
   createPiSessionLog: () => ({ write: vi.fn(), end: vi.fn() }),
+  // 7b17e240f：retargetSessionLog（rekey 迁 tee）的 import 面同步——no-op
+  migratePiSessionLogTree: () => {},
+  // crash 落盘（writeCrashLogIfNeeded 崩溃分支）：no-op——本测试只断言 exit 通知多播
+  writePiCrashLog: () => {},
   // u5b D6-④：rpc-client 新增 import 的内存快照采集（mock 面随源码 import 面同步）
   captureMemorySnapshot: () => ({ rss: 1, heapUsed: 2, heapTotal: 3, external: 4 }),
 }))

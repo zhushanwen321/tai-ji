@@ -13,7 +13,7 @@ import { SESSION_MANAGER_MARKER } from '../session-manager/marker'
 import { ASK_USER_MARKER } from '../ask-user/marker'
 
 /**
- * marker 精确值 + NUL 前缀 + 形状守卫：形状是 SSOT 契约，
+ * marker 精确值 + NUL 前缀 + 形状检查：形状是 SSOT 契约，
  * pi 侧壳层 reporter（u7a）与 runtime event-adapter（u7b）两侧都按此
  * 序列化/识别通道帧（值漂移 = 通道静默失联，此层测试在漂移时早炸）。
  * kind 字段已删（2026-09-13 oe-audit：消费端不读，死字段）。
@@ -34,7 +34,7 @@ describe('subagent-inflight marker 精确值', () => {
   })
 })
 
-describe('isSubagentInFlightReport 形状守卫', () => {
+describe('isSubagentInFlightReport 形状检查', () => {
   const valid: SubagentInFlightReport = { inFlight: 0, emittedAt: 1_000 }
 
   it('合法帧（sessionId 缺席）放行', () => {
@@ -47,7 +47,7 @@ describe('isSubagentInFlightReport 形状守卫', () => {
     ).toBe(true)
   })
 
-  it('冗余 kind 字段容忍（历史帧兼容——守卫不因多余字段拒绝）', () => {
+  it('冗余 kind 字段容忍（历史帧兼容——检查不因多余字段拒绝）', () => {
     expect(isSubagentInFlightReport({ ...valid, kind: 'delta' } as unknown)).toBe(true)
   })
 

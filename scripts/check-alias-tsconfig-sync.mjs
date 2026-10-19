@@ -1,13 +1,13 @@
 #!/usr/bin/env node
 /**
- * vitest alias ↔ tsconfig paths 一致性守卫（2026-09-16 护栏，PR #198 事故产物）。
+ * vitest alias ↔ tsconfig paths 一致性检查（2026-09-16 护栏，PR #198 事故产物）。
  *
  * 背景：subagent-workflow 测试用 `@zhushanwen/subagent-core/<深路径>.ts` 深路径
  * import，运行时由 vitest.config.ts 的 alias（string + regex 两形态）重写到 core
  * src 物理路径——这是 u-2c 删 exports `./*` 通配后的已裁决设计（2026-09-03）。
  * 静态分析工具（fallow 等）不读 vitest alias，深路径全部判「无法解析的 import」
  * （曾一次 138 条假阳性）。解法 = extensions/tsconfig.json 的 paths 镜像同构映射。
- * 本守卫保证两侧不漂移：新增/修改 vitest alias 而忘同步 tsconfig paths（或反之）
+ * 本检查保证两侧不漂移：新增/修改 vitest alias 而忘同步 tsconfig paths（或反之）
  * 时 CI 拦截。
  *
  * 契约（当前两条，增改 alias 时同步维护 EXPECTED）：
@@ -49,7 +49,7 @@ const hasRegexAlias = vitestConfig.includes(REGEX_ALIAS_SIG);
 if (!hasRegexAlias) {
   problems.push(
     `vitest.config.ts 中未找到 subagent-core 深路径正则 alias（源码应含 "${REGEX_ALIAS_SIG}"）。` +
-      '若形态已改，请同步更新本守卫的 EXPECTED 契约与 tsconfig paths。',
+      '若形态已改，请同步更新本检查的 EXPECTED 契约与 tsconfig paths。',
   );
 }
 expectPathsKey('@zhushanwen/subagent-core/*.ts', 'packages/subagent-core/src/*.ts');
@@ -72,7 +72,7 @@ for (const key of Object.keys(paths)) {
   if (!key.startsWith('@zhushanwen/subagent-core')) continue;
   if (key !== '@zhushanwen/subagent-core/*.ts' && key !== '@zhushanwen/subagent-core/testing/*.ts') {
     problems.push(
-      `tsconfig paths 存在守卫契约外的 subagent-core 条目 "${key}"——请确认是否需同步 vitest alias 并更新本守卫 EXPECTED。`,
+      `tsconfig paths 存在检查契约外的 subagent-core 条目 "${key}"——请确认是否需同步 vitest alias 并更新本检查 EXPECTED。`,
     );
   }
 }

@@ -1,12 +1,12 @@
 /**
- * Schema 形态守卫 — 纯逻辑叶节点（零业务依赖，全导出）。
+ * Schema 形态检查 — 纯逻辑叶节点（零业务依赖，全导出）。
  *
  * 从 index.ts 拆出：swap 检测 + silent-corruption prevention 的一组纯函数。
  *
  * 核心问题：schema 和 data 参数都用 Type.Unknown()，结构无差别。弱模型常把答案
  * 塞进 schema、把形状塞进 data。因 ajv strict:false 把无 keyword 的对象编译成
  * "接受一切" 的 validator，互换后会校验通过、存垃圾、无报错（静默腐败）。
- * 这组守卫在编译前拦截两类形态：互换（schema 像数据 + data 像 schema）和
+ * 这组检查在编译前拦截两类形态：互换（schema 像数据 + data 像 schema）和
  * keyword-less schema（{} / {a:1} 这种会被 ajv 静默放行）。
  */
 
@@ -80,8 +80,8 @@ export function tryParseJson(raw: unknown): unknown {
 /**
  * 把 authoritative schema 的 unknown 收窄为合法 JSON Schema 根类型（object | boolean）。
  * draft-07 允许 boolean 根 schema（true=接受一切，false=拒绝一切）。
- * 独立守卫使后续 getOrCompileValidator(authoritative) 在类型层面也成立，
- * 避免在守卫块外直接用 unknown。非合法形态抛清晰错误。
+ * 独立检查使后续 getOrCompileValidator(authoritative) 在类型层面也成立，
+ * 避免在检查块外直接用 unknown。非合法形态抛清晰错误。
  */
 export function assertJsonSchemaRoot(value: unknown): asserts value is Record<string, unknown> | boolean {
 	if (!(isRecord(value) || typeof value === "boolean")) {
@@ -94,7 +94,7 @@ export function isTurnEndEvent(e: unknown): e is { message?: { stopReason?: stri
 	return typeof e === "object" && e !== null;
 }
 
-/** tool_execution_end event 结构守卫（替代直接 cast，配合 taste/no-unsafe-cast）。 */
+/** tool_execution_end event 结构检查（替代直接 cast，配合 taste/no-unsafe-cast）。 */
 export function isToolExecutionEndEvent(
 	e: unknown,
 ): e is { toolName: unknown; isError: unknown; result?: unknown } {

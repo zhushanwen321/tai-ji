@@ -15,7 +15,7 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { tmpdir } from 'node:os'
 
-// node:fs: existsSync 控制 create 路径守卫（fork 用 source.cwd 判断）
+// node:fs: existsSync 控制 create 路径检查（fork 用 source.cwd 判断）
 const fsMock = vi.hoisted(() => ({ existsSync: vi.fn(() => true) }))
 vi.mock('node:fs', () => ({
   existsSync: fsMock.existsSync,
@@ -119,7 +119,7 @@ function makeLifecycle(opts: MakeOpts = {}) {
       lastActiveAt: 1, tokenCount: 0, modelId: 'p/m',
     })),
     fetchAndBroadcastContext: vi.fn(async () => {}),
-    // S2 ISP 化：结构性满足 lifecycle 窄接口（10 方法 = 实际消费面），无强转
+    // S2 ISP 化：结构性满足 lifecycle 窄接口（10 方法 = 消费方实际用到的全部），无强转
     removeSessionEntry: vi.fn(),
     notifySessionCreated: vi.fn(),
     getActiveSummaries: vi.fn(() => []),

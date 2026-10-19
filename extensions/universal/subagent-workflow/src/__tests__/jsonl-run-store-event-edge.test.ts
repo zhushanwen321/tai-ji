@@ -4,14 +4,14 @@
 //
 // 旧形态（[P3/D6] + [W1] 停写锚定）的「journal 事件边沿（fs.watch）→ 防抖合并 →
 // state 快照物化」整链随快照删除而退役：store 无 watcher、无防抖 timer、无 pending
-// 批——run 状态对宿主的可见性 = record 流直读（runtime tailer 侧消费，壳侧无物化面）。
+// 批——run 状态对宿主的可见性 = record 流直读（runtime tailer 侧消费，壳侧无物化情形）。
 //
-// 本文件锁定退役后的写面纪律：
-// 1. **append-only 唯一写面**：record 流只被 core journal 单写者链追加——store
+// 本文件锁定退役后的写侧纪律：
+// 1. **append-only 唯一写侧**：record 流只被 core journal 单写者链追加——store
 //    全生命周期（save 多次 / dispose / disposed 后迟到 save）对 record 流零字节
 //    改写（内容逐字节不变）；
 // 2. **save = 显式 no-op**：零文件产生、恒 resolve（disposed 前后行为一致）；
-// 3. **dispose / flushPendingSaves 幂等 resolve**（生命周期面契约保持）；
+// 3. **dispose / flushPendingSaves 幂等 resolve**（生命周期侧契约保持）；
 // 4. **不建目录**：store 不再有任何 mkdir/writeFile 动作（旧 doFlush 的目录惰性
 //    自建随物化面删除）。
 //
@@ -55,7 +55,7 @@ function makeRun(runId: string): WorkflowRun {
 }
 
 function recordPath(runId: string): string {
-  return path.join(tmpDir, "workflow-state", `${runId}${RUN_EVENTS_SUFFIX}`);
+  return path.join(tmpDir, `${runId}${RUN_EVENTS_SUFFIX}`);
 }
 
 /** 预置 record 流（core journal 单写者链的产物形态），返回写入时快照内容。 */
@@ -82,21 +82,22 @@ afterEach(() => {
 
 describe("壳 store 写面退役（[D1] record 单源——append-only 唯一写面）", () => {
   it("save 零写面：多次 save 不产生文件、不建目录、恒 resolve", async () => {
-    const store = new JsonlRunStore({ sessionDir: tmpDir });
+    const store = new JsonlRunStore({ runsDir: tmpDir });
     const run = makeRun("wf-edge-nowrite");
 
     await store.save(run);
     await store.save(run);
     await store.save(makeRun("wf-edge-nowrite-2"));
 
-    expect(fs.existsSync(path.join(tmpDir, "workflow-state"))).toBe(false);
+    // 零写面 = runs 目录内不产生任何文件（record 流是唯一持久件，save 不写投影）
+    expect(fs.readdirSync(tmpDir)).toEqual([]);
     await store.dispose();
   });
 
-  it("record 流对 store 生命周期零改写：save/dispose 前后逐字节不变（append-only 唯一写面锚）", async () => {
+  it("record 流对 store 生命周期零改写：save/dispose 前后逐字节不变（append-only 唯一写侧锚）", async () => {
     const runId = "wf-edge-appendonly";
     const seeded = seedRecord(runId);
-    const store = new JsonlRunStore({ sessionDir: tmpDir });
+    const store = new JsonlRunStore({ runsDir: tmpDir });
 
     await store.save(makeRun(runId));
     await store.flushPendingSaves();
@@ -110,7 +111,7 @@ describe("壳 store 写面退役（[D1] record 单源——append-only 唯一写
   it("append-only 正向锚：core journal 追加后 store 只读消费（settledRecordOf），流仍只增不改", async () => {
     const runId = "wf-edge-monotonic";
     const seeded = seedRecord(runId);
-    const store = new JsonlRunStore({ sessionDir: tmpDir });
+    const store = new JsonlRunStore({ runsDir: tmpDir });
 
     // store 读路径（settledRecordOf——与 loadAll 同一读原语）消费后流不变
     expect(store.settledRecordOf(runId)).toBeUndefined();
@@ -125,7 +126,7 @@ describe("壳 store 写面退役（[D1] record 单源——append-only 唯一写
   });
 
   it("dispose / flushPendingSaves 幂等 resolve；disposed 后 save 仍 resolve（no-op 单通道）", async () => {
-    const store = new JsonlRunStore({ sessionDir: tmpDir });
+    const store = new JsonlRunStore({ runsDir: tmpDir });
     await store.flushPendingSaves();
     const d1 = store.dispose();
     const d2 = store.dispose();
@@ -133,6 +134,7 @@ describe("壳 store 写面退役（[D1] record 单源——append-only 唯一写
     await d1;
     await store.flushPendingSaves();
     await store.save(makeRun("wf-edge-after-dispose"));
-    expect(fs.existsSync(path.join(tmpDir, "workflow-state"))).toBe(false);
+    // disposed 后仍零写（同上：runs 目录内无任何文件）
+    expect(fs.readdirSync(tmpDir)).toEqual([]);
   });
 });

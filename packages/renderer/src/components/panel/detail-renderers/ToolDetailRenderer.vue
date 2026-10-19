@@ -12,7 +12,7 @@
       空 patch（untracked）→ input.content 合成全增 patch + 「新文件」；api 失败/无 sessionId
       → 合成全增 patch 无标注（不误标）。合成 patch 形态与 git 对新文件的 diff 输出同构
       （--- /dev/null +++ b/path @@ -0,0 +1,N @@），parseDiff 可解析。
-    - read → output 剥掉 pi 截断脚注（[Showing lines ...] 等移为块内底部收口行）→
+    - read → output 剥掉 pi 截断脚注（[Showing lines ...] 等移为块内底部收尾行）→
       ReadFileCode 行号代码块；起始行号 = input.offset（分段读续读行号连续）。
 
     水平滚动各分支自管理（overflow-x-auto）；限高/渐隐由宿主 ui BlockScrollBox 承担。
@@ -152,7 +152,7 @@ watch(
  * pi read 输出尾部可能带三类续读提示（读源 pi-coding-agent read.js:131/:134/:139）：
  * [Showing lines A-B of C. Use offset=N to continue.]（行数上限）/
  * [Showing lines A-B of C (50.0KB limit). Use offset=N to continue.]（字节上限变体，of N 后带括号注记）/
- * [N more lines in file. ...] / [Line N is X, exceeds Y limit. ...]——全部移为块内底部收口行，代码区只留纯内容。 */
+ * [N more lines in file. ...] / [Line N is X, exceeds Y limit. ...]——全部移为块内底部收尾行，代码区只留纯内容。 */
 const FOOTER_RES: readonly RegExp[] = [
   /\n?\[Showing lines \d+-\d+ of \d+(?: \([^)]*\))?\.[^\]]*\]\s*$/,
   /\n?\[\d+ more lines in file\.[^\]]*\]\s*$/,

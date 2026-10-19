@@ -9,7 +9,7 @@
  * → unreadByBranch 角标产生 + 反馈行追加（RV2）→ clearUnread 清除 → 再次 groups 广播已读态
  * 不回灌（切会话语义：config.sessions 全量广播重放）；非活跃分支角标跨广播保留（ADR-0049）。
  *
- * 另含 ForkNotice suppress（btw 流渲染，[M4-a / btw-question D4]，P-invisible 渲染面）：
+ * 另含 ForkNotice suppress（btw 流渲染，[M4-a / btw-question D4]，P-invisible 渲染范围）：
  * 线是 fork 产物（header.parentSession 指向源）但「关联只删不显」——fork 反馈行/分支追踪
  * 状态不进 btw 流。抑制落 useForkNoticeFeed().notices 读口单点（MessageStream 全部消费方
  * 经此读取）；主会话 feed 行为回归对照在 suppress 用例内。

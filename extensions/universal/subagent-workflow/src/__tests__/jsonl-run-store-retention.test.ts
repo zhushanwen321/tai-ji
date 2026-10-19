@@ -9,13 +9,13 @@
 //
 // 保留维护的现行形态：
 // - 判定/执行单源在 core runRetentionMaintenanceRound（维护轮入口）；
-// - 触发点收敛为 session_start 兜底（session-lifecycle.ts，oncePerProcess 守卫）
+// - 触发点收敛为 session_start 兜底（session-lifecycle.ts，oncePerProcess 检查）
 //   ——其行为断言在 session-lifecycle.test.ts；
 // - 旧格式两件套（旧 journal `.events.jsonl` + state 快照 `<runId>.jsonl`）不读、
 //   不写、**不主动删**——维护轮对窗外终态旧双源足迹的成对裁剪是既有清理通道的
 //   自然结果（D1 历史数据处置③：非新增删除动作，跟随裁决点 7 消亡）；
 // - record 流（`.record.jsonl` 新后缀）被 prune 候选枚举结构性排除（filter 用
-//   RUN_EVENTS_SUFFIX 单源）——唯一事实源不被旧快照面裁剪逻辑误删。
+//   RUN_EVENTS_SUFFIX 单源）——唯一事实源不被旧快照侧裁剪逻辑误删。
 //
 // mtime/时钟确定性：事件帧 ts 相对 Date.now 构造（天数偏移注入），不依赖写入时序。
 
@@ -116,7 +116,7 @@ describe("store 侧保留维护面退役（[D1] record 单源）", () => {
 
   beforeEach(() => {
     tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "wf-retention-"));
-    stateDir = path.join(tmpDir, "workflow-state");
+    stateDir = path.join(tmpDir);
     delete process.env[STATE_TTL_MS_ENV];
     loggerMock.warn.mockClear();
     loggerMock.debug.mockClear();
@@ -129,7 +129,7 @@ describe("store 侧保留维护面退役（[D1] record 单源）", () => {
 
   it("save 零磁盘动作：旧触发点退役——窗外终态旧双源足迹不被 save 触发的维护轮裁剪", async () => {
     process.env[STATE_TTL_MS_ENV] = String(30 * 86_400_000);
-    const store = new JsonlRunStore({ sessionDir: tmpDir });
+    const store = new JsonlRunStore({ runsDir: tmpDir });
     seedLegacyTerminalRun(stateDir, runIdAt(0), 40, 35); // 窗外终态（旧触发点下会被裁——对照组）
 
     // 冷/热路径多次 save：no-op，不触发维护轮、不产生 state 快照
@@ -139,18 +139,18 @@ describe("store 侧保留维护面退役（[D1] record 单源）", () => {
     // 窗外终态旧双源原样留置（删除通道收敛到维护轮入口 / 裁决点 7 对账清理）
     expect(fs.existsSync(stateFile(stateDir, runIdAt(0)))).toBe(true);
     expect(fs.existsSync(legacyJournalFile(stateDir, runIdAt(0)))).toBe(true);
-    // save 不再产生 state 快照（旧 `<runId>.jsonl` 投影退役锚）
+    // save 不再产生 state 快照（旧 `<runId>.jsonl` 派生视图退役锚）
     expect(fs.existsSync(stateFile(stateDir, runIdAt(1)))).toBe(false);
     await store.dispose();
   });
 
-  it("D9 store 侧接线拆除的机器锚：core barrel 不再导出 abandonElapsedInterruptedRuns（壳侧唯一消费面已拆）", async () => {
+  it("D9 store 侧接线拆除的机器锚：core barrel 不再导出 abandonElapsedInterruptedRuns（壳侧唯一消费方已拆）", async () => {
     const core = (await import("@zhushanwen/subagent-core")) as unknown as Record<string, unknown>;
     expect(core["abandonElapsedInterruptedRuns"]).toBeUndefined();
   });
 
   it("glob 外文件与父目录 session JSONL 不被 store 任何动作触碰（零写面推论）", async () => {
-    const store = new JsonlRunStore({ sessionDir: tmpDir });
+    const store = new JsonlRunStore({ runsDir: tmpDir });
     fs.mkdirSync(stateDir, { recursive: true });
     const bystanders = ["notes.txt", "keep-me.jsonl", "xwf-1719500000000-notwf.jsonl"];
     for (const name of bystanders) fs.writeFileSync(path.join(stateDir, name), "x");
@@ -168,13 +168,13 @@ describe("store 侧保留维护面退役（[D1] record 单源）", () => {
   });
 });
 
-describe("维护轮入口（core 单源）对 run 域目录的行为——session_start 兜底触发点消费面", () => {
+describe("维护轮入口（core 单源）对 run 域目录的行为——session_start 兜底触发点消费方", () => {
   let tmpDir: string;
   let stateDir: string;
 
   beforeEach(() => {
     tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "wf-retention-anchor-"));
-    stateDir = path.join(tmpDir, "workflow-state");
+    stateDir = path.join(tmpDir);
     delete process.env[STATE_TTL_MS_ENV];
   });
 
@@ -192,7 +192,7 @@ describe("维护轮入口（core 单源）对 run 域目录的行为——sessio
     seedLegacyTerminalRun(stateDir, runIdAt(0), 40, 35);
     // 新形态 record 流（窗外终态帧）：快照候选锚（<runId>.jsonl）不存在 → 不进
     // 候选枚举；即使在盘也被 journal 后缀 filter 结构性排除——唯一事实源不被旧
-    // 快照面裁剪逻辑误删（其清理资格归 u1a prune fold 判据换源后的新判据）
+    // 快照侧裁剪逻辑误删（其清理资格归 u1a prune fold 判据换源后的新判据）
     fs.mkdirSync(stateDir, { recursive: true });
     fs.writeFileSync(recordFile(stateDir, runIdAt(1)), [
       JSON.stringify({ type: "run-created", ts: daysAgoMs(40), runId: runIdAt(1), workflowName: "t", argsSummary: "{}" }),

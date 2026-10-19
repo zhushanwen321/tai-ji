@@ -15,7 +15,7 @@
  * | 触发源                                    | 贴底       | 脱离       |
  * |-------------------------------------------|------------|------------|
  * | messages.length watch（store 级）          | 跟随       | 不滚       |
- * | 末条文本长度 watch（isStreaming 守卫）      | 跟随       | 不滚       |
+ * | 末条文本长度 watch（isStreaming 检查）      | 跟随       | 不滚       |
  * | contentWrapEl RO 高度变化（tail/spacer）   | 跟随       | 不滚       |
  * | scrollEl RO（视口 resize）                 | 跟随       | 不滚       |
  * | 纯宽度变化（高度未变）                      | 显式 no-op | —          |
@@ -28,13 +28,13 @@
  *  （= followToBottom(true)，重置贴底态 + NaN 快照 + 开收敛抑制窗，force 第二合法来源）。
  *
  * 观察目标：contentWrapEl（Virtualizer + tailEl 的静态无样式 wrapper——spacer 与 tail 高度
- * 都投影到它的盒尺寸）+ scrollEl（滚动视口）。wrap RO 回调读 tailEl.offsetHeight 维护
+ * 都映射到它的盒尺寸）+ scrollEl（滚动视口）。wrap RO 回调读 tailEl.offsetHeight 维护
  * tailHeight 快照（endOffset 数据源）并以高度快照区分「纯宽度变化」（no-op）与真实高度变化。
  * 两 RO 回调均调 notifyRoActivity()（喂 useVirtuaFollow 的 D7② 收敛抑制窗静默计时，
  * 时机 = 首次 RO 回调，不因双 rAF 拖延）。
  *
  * RO 回调内的跟随一律经 followFromRo() 双 rAF 触发（设计 §4.5 P-timing 降级预案「RO 回调内
- * 改为双 rAF（再让一帧）」，U5 验收 V6 shrink 方向间歇 113px 残留根修）：外层 rAF +
+ * 改为双 rAF（再让一帧）」，U5 验收 V6 shrink 方向间歇 113px 残留从根源修复）：外层 rAF +
  * followIfStuck 内层 rAF → scrollToIndex 恒落在触发帧之后第二个帧的 rAF 阶段，晚于下一帧
  * 的 RO 投递（同帧次序 rAF → style/layout → RO 投递，设计 §3.1）——virtua 内部 RO（观察
  * 滚动容器、更新 viewportSize 测量缓存）即使被嵌套 resize 推迟一帧投递，也已先于我们的
@@ -126,7 +126,7 @@ export function useMessageStreamFollowTriggers(deps: MessageStreamFollowTriggerD
 
     if (typeof ResizeObserver === 'undefined') return // happy-dom 无 RO 时 store watch 通路仍有效
 
-    // contentWrapEl RO：spacer 与 tail 高度变化都投影到本元素盒尺寸（D3 触发矩阵 3-4 行）。
+    // contentWrapEl RO：spacer 与 tail 高度变化都映射到本元素盒尺寸（D3 触发矩阵 3-4 行）。
     // [决策 12] tail/spacer 二分与 isPrepend 前插抑制窗随标记分档退役——两类变化统一跟随
     // （tailHeight 快照照常维护：它是 endOffset 数据源，与本 RO 的触发职责解耦）。
     wrapRo = new ResizeObserver((entries) => {
@@ -169,7 +169,7 @@ export function useMessageStreamFollowTriggers(deps: MessageStreamFollowTriggerD
   // - steer / followUp（pushPending 不进流，投递时 drainN → appendUser 尾插）
   // - defer 入队 flush 重放（flush → send → appendUser）
   // - 编辑重发（editAndResend → truncateFrom + appendUser）
-  // 排除面（结构性不触发）：load-more 前插（尾部身份不变，新增在头部）；assistant 流式 /
+  // 排除情形（结构性不触发）：load-more 前插（尾部身份不变，新增在头部）；assistant 流式 /
   // system notice / bashExecution 追加（role ≠ user，仍走 followIfStuck 矩阵）；末条 user
   // 消息同 id 对象替换（segments 回填等，快照不变）。
   watch(
@@ -187,7 +187,7 @@ export function useMessageStreamFollowTriggers(deps: MessageStreamFollowTriggerD
   // streaming 中 text 追加也触发跟随（按最后一条消息归一化后的文本长度）。
   // content 是 string | Segment[]：.length 对 string 是字符数、对 Segment[] 是元素数，语义不一致；
   // 用 normalizeContent 统一取纯文本长度，类型安全且对 token 级追加仍敏感。
-  // 守卫语义与原 useMessageStreamScroll.ts:64 逐字对齐：仅在末 turn 流式中触发
+  // 检查语义与原 useMessageStreamScroll.ts:64 逐字对齐：仅在末 turn 流式中触发
   // （编辑历史消息等非流式内容变化不触发）。
   watch(
     () => {

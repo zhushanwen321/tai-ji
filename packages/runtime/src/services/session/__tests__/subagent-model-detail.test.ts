@@ -1,8 +1,8 @@
 /**
- * subagent / workflow run 详情载荷模型字段面测试（subagent-model-switch §7.1 入口层，
- * U1 详情载荷透传验收面）。
+ * subagent / workflow run 详情载荷模型字段侧测试（subagent-model-switch §7.1 入口层，
+ * U1 详情载荷透传验收侧）。
  *
- * 覆盖（字段面单测四项 + 出口接线）：
+ * 覆盖（字段侧单测四项 + 出口接线）：
  * - 覆盖状态（modelOverride）：查询端口在场且有覆盖 → 载荷携带；无覆盖 / 端口缺席 →
  *   不造键；workflow origin 成员跳过 chat 域查询（覆盖作用域归 run 级）；
  * - 最近生效值（recentEffectiveModel）：pi 成员且有 model_change 尾条目 → 携带尾条目
@@ -10,7 +10,7 @@
  * - 出口接线：getSubagents（读 RPC）与 publishRecordChanges（live 全量帧）两出口都
  *   增强（renderer store 分区整帧替换语义，单出口增强会被另一出口冲掉）；
  * - run 详情侧逐成员携带：projectSubagentModelDetailIntoRuns（run 级覆盖分发全部
- *   agentCall；成员生效值按 (parentRunId, stepIndex) 圈定透传；聚合面不取单一值）。
+ *   agentCall；成员生效值按 (parentRunId, stepIndex) 圈定透传；聚合范围不取单一值）。
  *
  * 测试框架：vitest（从子包目录运行）。
  * 运行：cd packages/runtime && npx vitest run src/services/session/__tests__/subagent-model-detail.test.ts
@@ -182,9 +182,9 @@ describe('readPiSessionLatestModelChange — model_change 尾条目派生', () =
   })
 })
 
-// ── getSubagents / live 帧两出口的字段面 ─────────────────────────
+// ── getSubagents / live 帧两出口的字段侧 ─────────────────────────
 
-describe('详情载荷字段面 — getSubagents 出口', () => {
+describe('详情载荷字段侧 — getSubagents 出口', () => {
   it('覆盖状态 + 最近生效值在场：载荷携带（chat 域成员）', async () => {
     const subFile = join(tmpDir, 'sub.jsonl')
     writeFileSync(subFile, modelChangeLine('p-new', 'm-new') + '\n')
@@ -343,7 +343,7 @@ describe('详情载荷字段面 — getSubagents 出口', () => {
   })
 })
 
-describe('详情载荷字段面 — publishRecordChanges live 帧出口', () => {
+describe('详情载荷字段侧 — publishRecordChanges live 帧出口', () => {
   it('live 全量帧同样增强（整帧替换语义下两出口必须一致）', async () => {
     vi.useFakeTimers()
     try {
@@ -364,7 +364,7 @@ describe('详情载荷字段面 — publishRecordChanges live 帧出口', () => 
         },
       })
       // get_entries 全量返回条目集（pi 内存 entries 与磁盘 JSONL 行同构；全量拉取
-      // fullRebuild 先清投影再应用——entries 空会清掉冷读产物，故必须喂条目）。
+      // fullRebuild 先清派生视图再应用——entries 空会清掉冷读产物，故必须喂条目）。
       // makeRecords 的默认 client 被 depsOverrides 前置，这里经 deps.pm 直改不可行，
       // 改为构造后替换：refreshRecordEntries 每次经 pm.getClient 取 client。
       const recordsAny = records as unknown as { deps: SessionRecordsDeps }
@@ -432,7 +432,7 @@ describe('projectSubagentModelDetailIntoRuns — run 详情逐成员携带', () 
     // 非 pi 成员：无生效值派生（成员增强产物本就不携带）
   }
 
-  it('run 级覆盖分发全部成员 + 成员生效值逐成员透传（聚合面不取单一值）', () => {
+  it('run 级覆盖分发全部成员 + 成员生效值逐成员透传（聚合范围不取单一值）', () => {
     const runs = [
       {
         ...runBase,

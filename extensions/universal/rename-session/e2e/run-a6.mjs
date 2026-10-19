@@ -14,7 +14,7 @@
  *      assistant message_start（stdout 时间轴时刻）
  *   ② 仅基于 prompt 语义（结构性证据）：LLM request messages 为 [user, user]——finalText
  *      空串走两条降级，assistant 回复不在标题输入内；user 段含 prompt 特征词
- *   ③ 最终态：标题落库（renamed to 日志与 session_info 落库名一致）
+ *   ③ 最终态：标题写入（renamed to 日志与 session_info 写入名一致）
  *   ④ 后续 round 不再改名：第二轮 prompt 后无新 LLM request / 无新 session_info /
  *      正向证据 `firstPrompt skip: userCount=1`（堵「handler 未被调用」的假通过）
  *
@@ -59,7 +59,7 @@ export async function runA6() {
 			},
 		});
 		try {
-			// ── 第一轮：触发时点 ① + 输入结构 ② + 落库 ③ ──
+			// ── 第一轮：触发时点 ① + 输入结构 ② + 写入 ③ ──
 			// waitFor 只匹配未来事件，三个等待须在 prompt 前注册
 			const settled1P = pi.rpc.waitAgentSettled(180_000);
 			const assistantStartP = pi.rpc.waitFor("message_start", {
@@ -92,15 +92,15 @@ export async function runA6() {
 			await settled1P;
 			const renameRes = await pi.rpc.waitForSessionLog('renamed to "', { timeoutMs: 45_000 });
 			const info = await pi.waitSessionInfoEntry(10_000);
-			assert(info !== null, "session_info 未落盘（rename 未落库）");
+			assert(info !== null, "session_info 未落盘（rename 未写入）");
 			assertLogTitleMatches(renameRes.message, info.name);
-			// 完成序观察记录（不 gate）：rename 落库日志 vs 最终 assistant message_end
+			// 完成序观察记录（不 gate）：rename 写入日志 vs 最终 assistant message_end
 			const stopEndT = lastStopAssistantEndT(pi.timeline.all());
 			if (stopEndT !== null) {
 				const order = renameRes.t < stopEndT ? "早于" : "晚于";
-				log(`完成序观察（不 gate）: rename 落库 ${order} assistant 完成（Δ=${Math.abs(renameRes.t - stopEndT)}ms）`);
+				log(`完成序观察（不 gate）: rename 写入 ${order} assistant 完成（Δ=${Math.abs(renameRes.t - stopEndT)}ms）`);
 			}
-			log(`③ 标题落库: ${info.name}`);
+			log(`③ 标题写入: ${info.name}`);
 
 			// ── 第二轮：后续 round 不再改名 ④ ──
 			const llmBefore = await countLlmRequestLogs(await pi.readSessionLines());

@@ -127,7 +127,7 @@ interface HandlerFixture {
 	appendEntry: ReturnType<typeof vi.fn>;
 }
 
-/** 实例化 goal 工厂并捕获事件 handler（最小 pi：注册面 vi.fn + 副作用面 vi.fn） */
+/** 实例化 goal 工厂并捕获事件 handler（最小 pi：注册点 vi.fn + 副作用侧 vi.fn） */
 function makeHandlerFixture(): HandlerFixture {
 	const handlers = new Map<string, (event: unknown, ctx: ExtensionContext) => Promise<unknown>>();
 	const pi = {
@@ -145,7 +145,7 @@ function makeHandlerFixture(): HandlerFixture {
 	return { handlers, sendMessage: pi.sendMessage, appendEntry: pi.appendEntry };
 }
 
-/** 最小 ctx：sessionManager（分支树）+ ui 记录面 + getContextUsage（before_agent_start 用） */
+/** 最小 ctx：sessionManager（分支树）+ ui 记录侧 + getContextUsage（before_agent_start 用） */
 function makeCtx(entries: SessionEntryLike[], leafId: string | null) {
 	const setWidget = vi.fn();
 	const setStatus = vi.fn();

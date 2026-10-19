@@ -44,7 +44,7 @@ function makeSpec(): RunSpec {
   } as RunSpec;
 }
 
-/** runWorkflow 用 deps mock（eventBus.emit 可观察 = register 发射面）。 */
+/** runWorkflow 用 deps mock（eventBus.emit 可观察 = register 发射侧）。 */
 function makeLauncherDeps(): LifecycleDeps & {
   runs: Map<string, WorkflowRun>;
   eventBus: { emit: ReturnType<typeof vi.fn> };
@@ -142,7 +142,7 @@ describe("run 级 pending register/unregister 闭环（D7）", () => {
 
     expect(transitioned).toBe(true);
     const unregister = appendedUnregister(finalizeDeps);
-    // 配对键：register.id === unregister.id === runId（主 agent 查询面同一注册条目的
+    // 配对键：register.id === unregister.id === runId（主 agent 查询范围同一注册条目的
     // 生命周期两端）
     expect(registerCall.id).toBe(runId);
     expect(unregister).toEqual({ id: runId, reason: "completed", status: "completed" });

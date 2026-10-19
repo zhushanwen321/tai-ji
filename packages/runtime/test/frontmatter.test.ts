@@ -2,7 +2,7 @@
  * frontmatter helpers 单测 — 覆盖 extractFrontmatter / extractDescription 注释列出的边界。
  *
  * 被 agent-scanner + skill-scanner + config-service 共用，回归影响面大。
- * 边界来自 frontmatter.ts 顶部注释：无 frontmatter、无闭合 `---`、多行 `>-`/`|`、
+ * 边界来自 frontmatter.ts 顶部注释：无 frontmatter、无结束 `---`、多行 `>-`/`|`、
  * chomping indicator（`-`/`+`）、单行 `description: > 文本`。
  *
  * 运行：pnpm --filter @taiji/runtime run test -- test/frontmatter.test.ts
@@ -28,11 +28,11 @@ describe('extractFrontmatter', () => {
     expect(parts.bodyStartLine).toBe(0)
   })
 
-  it('只有开头 --- 无闭合时，首个 --- 之后内容都算 frontmatter（容错；body 退化为全文）', () => {
+  it('只有开头 --- 无结束时，首个 --- 之后内容都算 frontmatter（容错；body 退化为全文）', () => {
     const content = ['---', 'name: x', 'description: y'].join('\n')
     const parts = extractFrontmatter(content)
     expect(parts.frontmatter).toBe('name: x\ndescription: y')
-    // 无闭合时 frontmatterEnd 保持 0，body = slice(0) = 全文（含开头 ---）
+    // 无结束时 frontmatterEnd 保持 0，body = slice(0) = 全文（含开头 ---）
     expect(parts.body).toBe(content)
     expect(parts.bodyStartLine).toBe(0)
   })

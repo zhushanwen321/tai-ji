@@ -6,11 +6,11 @@
  * 覆盖（行为不变量逐条钉住）：
  *  - TC1 正常事件 → state 弹窗（pending/error/pluginId/permissions）+ permissions
  *    拷贝防串改（emit 后外部数组变更不串入 state）
- *  - TC2 畸形事件守卫 warn+skip：空 pluginId / permissions 非数组 / 非字符串项
+ *  - TC2 畸形事件检查 warn+skip：空 pluginId / permissions 非数组 / 非字符串项
  *    均不写 state，后续合法事件照常（不毒害状态）
  *  - TC3 新请求覆盖旧弹窗：error 清零 + pluginId/permissions 全量重置
- *  - TC4 approve 成功收口 / 失败 BM3（pending 保持 true + error=true）+ 重试成功
- *  - TC5 deny 走 denyPermissions（拒绝本次申请）：成功/失败同构收口
+ *  - TC4 approve 成功收尾 / 失败 BM3（pending 保持 true + error=true）+ 重试成功
+ *  - TC5 deny 走 denyPermissions（拒绝本次申请）：成功/失败同构收尾
  *  - TC6/TC7 expired 超时撤窗（D3，取消非判拒）：命中撤回（含清 error）/
  *    pluginId 不匹配 noop（陈旧广播）/ 无挂起 noop 幂等
  *  - TC8 dispose 退订：bus 事件与 expired 广播均不再驱动 state
@@ -109,7 +109,7 @@ describe('createPermissionRequestController 状态机（双壳共享）', () => 
     expect(controller.state.permissions).toEqual(['fs.read', 'net.http'])
   })
 
-  it('TC2: 畸形事件守卫 warn+skip：空 pluginId / permissions 非数组 / 非字符串项 均不写 state，后续合法事件照常', () => {
+  it('TC2: 畸形事件检查 warn+skip：空 pluginId / permissions 非数组 / 非字符串项 均不写 state，后续合法事件照常', () => {
     const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {})
     try {
       // 空 pluginId
@@ -133,7 +133,7 @@ describe('createPermissionRequestController 状态机（双壳共享）', () => 
 
       expect(warnSpy).toHaveBeenCalledTimes(3)
 
-      // 守卫只 skip 不毒害状态：合法事件照常弹出
+      // 检查只 skip 不毒害状态：合法事件照常弹出
       emitPermissionRequest(bus, 'p2', ['fs.read'])
       expect(controller.state.pending).toBe(true)
       expect(controller.state.pluginId).toBe('p2')
@@ -158,7 +158,7 @@ describe('createPermissionRequestController 状态机（双壳共享）', () => 
     expect(controller.state.permissions).toEqual(['fs.read', 'net.http'])
   })
 
-  it('TC4: approve 成功 → pending=false + error=false；失败 → pending 保持 true + error=true（BM3），重试成功收口', async () => {
+  it('TC4: approve 成功 → pending=false + error=false；失败 → pending 保持 true + error=true（BM3），重试成功收尾', async () => {
     emitPermissionRequest(bus)
     approvePermissions.mockResolvedValue(undefined)
     controller.transport.approve('p1', ['shell'])
@@ -173,7 +173,7 @@ describe('createPermissionRequestController 状态机（双壳共享）', () => 
     await vi.waitFor(() => expect(controller.state.error).toBe(true))
     expect(controller.state.pending).toBe(true)
 
-    // 重试成功 → 正常收口
+    // 重试成功 → 正常收尾
     approvePermissions.mockResolvedValue(undefined)
     controller.transport.approve('p1', ['shell'])
     await vi.waitFor(() => expect(controller.state.pending).toBe(false))

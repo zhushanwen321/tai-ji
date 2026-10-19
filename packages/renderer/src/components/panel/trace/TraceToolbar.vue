@@ -188,7 +188,7 @@ const fetchedTime = computed<string>(() => {
   return d.toTimeString().slice(0, HH_MM_SS_END)
 })
 
-/** chip label 的 i18n 键（分组 SSOT 的 UI 侧标签，键内容收口 trace-i18n）。 */
+/** chip label 的 i18n 键（分组 SSOT 的 UI 侧标签，键内容收敛 trace-i18n）。 */
 const CHIP_LABEL_KEY: Record<TraceKindGroup, string> = {
   messages: 'panel.trace.chipMessages',
   tools: 'panel.trace.chipTools',

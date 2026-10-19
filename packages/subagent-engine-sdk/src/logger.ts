@@ -24,7 +24,7 @@ import { ENGINE_SDK_SLOT_KEYS } from "./global-slots.ts";
 /** 日志级别。对齐 core logger 的 LogLevel（三值，无 info）。 */
 export type LogLevel = "debug" | "warn" | "error";
 
-/** logger 接口。与 core CoreLogger 结构兼容——迁移调用面（方法名/参数序）逐文件等价。 */
+/** logger 接口。与 core CoreLogger 结构兼容——迁移调用范围（方法名/参数序）逐文件等价。 */
 export interface CoreLogger {
   debug(msg: string, data?: unknown): void;
   warn(msg: string, data?: unknown): void;

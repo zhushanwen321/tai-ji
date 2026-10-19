@@ -1,5 +1,5 @@
 // src/__tests__/tool-error-audit.test.ts
-// 审计 hook 等价迁移守卫：customType 与 entry 形态必须与 unified-hooks
+// 审计 hook 等价迁移检查：customType 与 entry 形态必须与 unified-hooks
 // tool-error-handler 逐字段一致（D11 落点，M1 验收点）。
 import { describe, expect, it, vi } from "vitest";
 

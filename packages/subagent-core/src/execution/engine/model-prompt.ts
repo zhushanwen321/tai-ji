@@ -103,7 +103,7 @@ function buildEmptyModelsHint(engineId: string): string {
 /**
  * 清单段「与主 agent 模型体系一致」声明行形态（U2 一致性审查修订：未实现 ≠ 无模型）。
  * port 契约（port.ts listModels JSDoc）：引擎省略 listModels 或返回 null = 引擎没有
- * 自己的 provider 枚举面，模型 id 沿用主 agent 的 <available_provider_models>——
+ * 自己的 provider 枚举侧，模型 id 沿用主 agent 的 <available_provider_models>——
  * 与「引擎有 provider 体系但无凭据模型」（buildEmptyModelsHint）是两种不同事实，
  * 文案必须区分：此处若复用「no credentialed models + ZCode desktop 指引」会让 AI
  * 误以为引擎不可派发、且 ZCode desktop 指引无处落地。
@@ -126,7 +126,7 @@ function buildCoreAlignedHint(engineId: string): string {
  *   - 引擎未注册 → 不注入（状态段 <current_subagent_engine> 已有警告行，避免双份）；
  *   - 已注册且 listModels 有清单 → 注入该引擎段（渲染不变）；
  *   - 已注册但 listModels 未实现 / 返回 null → 「与主 agent 模型体系一致」声明段
- *     （port 契约语义：引擎无自有 provider 枚举面，id 见上方核心段，见
+ *     （port 契约语义：引擎无自有 provider 枚举侧，id 见上方核心段，见
  *     buildCoreAlignedHint）；
  *   - 已注册但空清单 / listModels 抛异常 → 「无凭据模型」提示行段（引擎 provider
  *     体系存在但当前无可用模型，见 buildEmptyModelsHint；从「静默不注入」改为如实
@@ -148,7 +148,7 @@ export function buildEngineModelsPromptAppend(defaultEngine: string | undefined)
     if (models.length === 0) return buildEmptyModelsHint(engineId);
     return buildEngineSection(engineId, models);
   } catch {
-    // listModels 抛异常（如 v2 config 损坏）＝引擎枚举面存在但读取失败，与空清单
+    // listModels 抛异常（如 v2 config 损坏）＝引擎枚举侧存在但读取失败，与空清单
     // 同属「暂无可派发的显式模型」：降级为无凭据提示行而非静默
     return buildEmptyModelsHint(engineId);
   }

@@ -66,7 +66,7 @@ export const minimaxCapabilities: TtsCapabilities = {
  * 音色：官方系统音色清单的核心中文（普通话）子集（2026-09-30 官方清单抓取——全集 229+
  * 条含多语言与 beta 变体，M0 下拉内置核心八音色；male-qn-qingse 实测 200）。设置页表单
  * 是唯一参数入口（D2——vendor 子树由表单生成，用户不接触 JSON），未内置音色在 M0
- * 无配置入口；扩充即往本数组增项，由表单投影透传到下拉。
+ * 无配置入口；扩充即往本数组增项，由表单派生视图透传到下拉。
  */
 const VOICES: ReadonlyArray<{ id: string; label: string }> = [
   { id: 'male-qn-qingse', label: '青涩青年音色' },
@@ -154,12 +154,11 @@ export const minimaxFormModel: TtsFormModel = {
   emotions: EMOTIONS.map((id) => ({ id, label: id })),
   languages: LANGUAGES,
   // toggles 成员 id = vendor 子键名裸键（renderer MINIMAX_TOGGLE_PATHS 按裸键查落盘路径 +
-  // i18n label 按 settings.tts.toggle.${id} 命中；带请求体路径前缀会使查表 miss 静默丢值，
-  // D5 终态同步 F1-8/F1-14 裁决 code-right）
+  // i18n label 按 settings.tts.toggle.${id} 命中；带请求体路径前缀会使查表 miss 静默丢值）
   toggles: ['text_normalization', 'latex_read', 'aigc_watermark'],
   voiceModify: {
     // tiers id = vendor.voice_modify 子键名（官方维度名裸键；renderer modify[tier.id] 直写，
-    // 路径前缀形态会产出 voice_modify.voice_modify.* 双前缀错位，D5 F1-11/F1-24 裁决 code-right）
+    // 路径前缀形态会产出 voice_modify.voice_modify.* 双前缀错位）
     tiers: [
       { id: 'pitch', label: '明亮度' },
       { id: 'intensity', label: '力度' },

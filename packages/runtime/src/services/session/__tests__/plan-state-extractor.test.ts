@@ -7,8 +7,8 @@
  * - 派生归一（plan 状态机显式化 D2 读方②）：View 恒携带 state（新 entry 直读 / 旧 entry
  *   经 reviewState 映射 / 无 → planning|idle 按 isActive）、resumeHint 直读或由
  *   reviewStateSource:'resubmit' 同义映射、旧字段（reviewState/reviewStateSource）不透出、
- *   selfReview 不投影（D9③）；映射实现单源 = extension-protocol legacy-entries（D-B4-1
- *   下沉），契约断言面 = protocol 包内 legacy-entries.test.ts（原 shared fixture 等价对
+ *   selfReview 不映射（D9③）；映射实现单源 = extension-protocol legacy-entries（D-B4-1
+ *   下沉），契约断言范围 = protocol 包内 legacy-entries.test.ts（原 shared fixture 等价对
  *   驱动的平行断言随下沉删除，本文件保留派生管道自身行为）；
  * - 多 entry 取最后一条（单例状态，extension reconstructPlanState 逆序取首同构）；
  * - reset entry（isActive=false + skills/reviewState 清空 + docs 保留）派生保留 docs；
@@ -147,7 +147,7 @@ describe('scanPlanStateEntries：派生', () => {
     expect(view.state).toBe('revising')
   })
 
-  it('字段级守卫：非法 reviewState 归 isActive 推断 / 非 string[] skills / docs 坏元素过滤（防御式消费）', () => {
+  it('字段级检查：非法 reviewState 归 isActive 推断 / 非 string[] skills / docs 坏元素过滤（防御式消费）', () => {
     const view = scanPlanStateEntries([planStateEntry(extendedData({
       reviewState: 'approved',
       skills: ['ok', 42],
@@ -172,7 +172,7 @@ describe('scanPlanStateEntries：派生', () => {
     expect('reviewStateSource' in resubmit).toBe(false)
   })
 
-  it('resumeHint 值域守卫：非法 reviewStateSource / 非法 resumeHint 不设键（防御式消费，同 reviewState 纪律）', () => {
+  it('resumeHint 值域检查：非法 reviewStateSource / 非法 resumeHint 不设键（防御式消费，同 reviewState 纪律）', () => {
     const bogusSource = scanPlanStateEntries([planStateEntry(extendedData({ reviewStateSource: 'bogus' }), 'e1')])!
     expect('resumeHint' in bogusSource).toBe(false)
     const bogusHint = scanPlanStateEntries([planStateEntry({ ...legacyData(), state: 'reviewing', resumeHint: 'bogus' }, 'e2')])!
@@ -197,14 +197,14 @@ describe('scanPlanStateEntries：派生', () => {
     expect(inferred.state).toBe('planning')
   })
 
-  it('selfReview 不投影（D9③）：entry 携带 selfReview 不透出进 View（投影面止于审批请求帧）', () => {
-    const view = scanPlanStateEntries([planStateEntry(extendedData({ selfReview: '自审结论（不投影进 planState 帧）' }), 'e1')])!
+  it('selfReview 不映射（D9③）：entry 携带 selfReview 不透出进 View（派生视图止于审批请求帧）', () => {
+    const view = scanPlanStateEntries([planStateEntry(extendedData({ selfReview: '自审结论（不映射进 planState 帧）' }), 'e1')])!
     expect('selfReview' in view).toBe(false)
     expect(view.state).toBe('reviewing')
   })
 
   it('旧 entry（升级前落盘）无 reviewStateSource/resumeHint 键：View 无 resumeHint（缺省不占位——renderer 据此渲染通用降级文案）', () => {
-    // extendedData() 不含 reviewStateSource/resumeHint = 状态机显式化前的完整写入面
+    // extendedData() 不含 reviewStateSource/resumeHint = 状态机显式化前的完整写侧
     const view = scanPlanStateEntries([planStateEntry(extendedData(), 'e1')])!
     expect(view.state).toBe('reviewing')
     expect('resumeHint' in view).toBe(false)
@@ -286,7 +286,7 @@ describe('extractPlanStateFromSessionFile：冷路径', () => {
 })
 
 // ════════════════════════════════════════════════════════════════════
-// 活跃路径裁剪（message-revoke U6d）：G2 二分的未来状态随树腿——plan 状态 =
+// 活跃路径裁剪（message-revoke U6d）：G2 二分的未来状态随树路径——plan 状态 =
 // 当前状态，被撤子树的 plan-state entry 不进派生态
 // ════════════════════════════════════════════════════════════════════
 
@@ -321,7 +321,7 @@ describe('scanPlanStateEntries：leafId 活跃路径裁剪', () => {
     expect(view.requirement).toBe('活跃路径上的 plan')
   })
 
-  it('leafId 缺省 = 现行为回归：全文件逆序取首（物理最后一条命中——增量合并路径不裁剪的契约面）', () => {
+  it('leafId 缺省 = 现行为回归：全文件逆序取首（物理最后一条命中——增量合并路径不裁剪的契约范围）', () => {
     const view = scanPlanStateEntries(branchedTreeEntries())!
     expect(view.requirement).toBe('被撤子树的 plan')
   })
@@ -347,7 +347,7 @@ describe('scanPlanStateEntries：leafId 活跃路径裁剪', () => {
   })
 })
 
-describe('extractPlanStateFromSessionFile：文件腿活跃路径裁剪（冷启动）', () => {
+describe('extractPlanStateFromSessionFile：文件读路径的活跃路径裁剪（冷启动）', () => {
   /** 真实 pi 文件首行 header（有 id 无 parentId——pi getEntries() 排除、文件直读包含）。 */
   function sessionHeaderLine(): Record<string, unknown> {
     return { type: 'session', version: 1, id: 'sid-branched', timestamp: '2026-09-24T00:00:00Z', cwd: '/tmp' }
@@ -360,7 +360,7 @@ describe('extractPlanStateFromSessionFile：文件腿活跃路径裁剪（冷启
     expect(view.requirement).toBe('活跃路径上的 plan')
   })
 
-  it('撤回带走唯一 plan entry → 「未激活」缺省 View（活跃路径空收敛的冷腿形态）', () => {
+  it('撤回带走唯一 plan entry → 「未激活」缺省 View（活跃路径空收敛的冷路径形态）', () => {
     const filePath = makeTmpJsonl([
       sessionHeaderLine(),
       treeEntry('q', null, { type: 'message', message: { role: 'user', content: 'hi' } }),

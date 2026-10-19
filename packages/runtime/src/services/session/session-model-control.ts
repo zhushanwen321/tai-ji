@@ -1,11 +1,11 @@
 /**
  * SessionModelControl — 模型/思考等级控制域（S6 迁出，原 Facade 两方法逐字随迁）：
  * switchModel（set RPC + get_state 回执普查 + 三实例 markDirty 失效 + modelId 直写 +
- * trace 补拉）与 setThinkingLevel（set RPC + 钳制生效值读回 + thinkingLevel 直写）。
+ * trace 补充拉取）与 setThinkingLevel（set RPC + 钳制生效值读回 + thinkingLevel 直写）。
  *
  * 全部依赖经既有公有面窄注入（deps）：session 定位经 lifecycle 只读查询（Registry
  * 元素视图可变语义——session.modelId/thinkingLevel 直写是登记的永久双写形态）、
- * 标量失效经 projection 实例组、trace 补拉经 traceSync。销毁无域状态（不持 Map，
+ * 标量失效经 projection 实例组、trace 补充拉取经 traceSync。销毁无域状态（不持 Map，
  * 无 onSessionDisposed）。Facade 保留两方法一行委托（ISessionService 契约不变）。
  */
 import type { ProviderId } from '@taiji/shared'
@@ -67,7 +67,7 @@ export interface SessionModelControlDeps {
   getSession(sessionId: string): IManagedSessionView | undefined
   /** 标量实例组访问器（projection）：modelId/usage/thinkingLevel 三实例的 markDirty 失效。 */
   getReplicatedStates(sessionId: string): SessionReplicatedStates | undefined
-  /** trace 增量腿补拉（traceSync）：set_model/set_thinking_level 的 RPC 成功后补拉。 */
+  /** trace 增量路径补充拉取（traceSync）：set_model/set_thinking_level 的 RPC 成功后补充拉取。 */
   syncTraceEntries(sessionId: string, trigger: string): void
   /**
    * 会话激活（U2/D5）：停止态/回收态 → 拉起或 join 引擎，返回**存活** client。
@@ -76,7 +76,7 @@ export interface SessionModelControlDeps {
    */
   ensureActive(sessionId: string): Promise<IPiEngine>
   /**
-   * 模型是否在当前 taiji 注册表（`configService.listProviders()` 投影：catalog 合并集 +
+   * 模型是否在当前 taiji 注册表（`configService.listProviders()` 派生：catalog 合并集 +
    * models.json override）。用于 `Model not found` 三型分型：不在注册表 = 模型真已不存在。
    * 未就绪（configService 尚未注入）时 fail-open 返 true（宁落双因文案，不误报「已不存在」）。
    */
@@ -92,9 +92,9 @@ export class SessionModelControl {
   constructor(private readonly deps: SessionModelControlDeps) {}
 
   /**
-   * 激活 + 守卫（U2）：`ensureActive` 前置（停止态/回收态 / client 已死两态都能拉活），
+   * 激活 + 检查（U2）：`ensureActive` 前置（停止态/回收态 / client 已死两态都能拉活），
    * 做错误分型；返回的 client 必须**未退出**（`exited` 过滤是
-   * 「不把死 client 交给 set RPC」的守卫面）。
+   * 「不把死 client 交给 set RPC」的检查侧）。
    * [ADR-0122 退役登记] 激活等待上界（raceActivateTimeout，原 15s 墙钟）已删——激活慢时
    * 调用方 RPC 悬挂等待真实完成（ensureActive 内部 join 语义不变）。
    */
@@ -154,9 +154,9 @@ export class SessionModelControl {
    * session 级状态单一 owner：切换模型的 RPC + 缓存更新 + 失效。
    *
    * W12（data-source-governance P1.5）：广播职责归快照挂钩——markDirty modelId / usage /
-   * thinkingLevel 三实例后，各自防抖重拉，快照应用后经挂钩发布 session.state_changed
+   * thinkingLevel 三实例后，各自防抖重新拉取，快照应用后经挂钩发布 session.state_changed
    * （payload 全字段来自实例快照，见 publishStateChangedFromSnapshot）。旧 broadcastSessionState
-   * 的「get_state 直读 thinkingLevel + resolver 窗口重算 + session.modelId 直写投影」中间层
+   * 的「get_state 直读 thinkingLevel + resolver 窗口重算 + session.modelId 直写派生视图」中间层
    * 已删（plan W12 步骤 3）；UI 更新延迟 = 防抖窗口 + 快照 RPC（W7 行为级验收预算 1s 内）。
    *
    * 为什么除 config.defaults 外还要发 session.state_changed（原 model-service 注释保留）：
@@ -195,26 +195,26 @@ export class SessionModelControl {
     // get_state 失败 fallback 请求值（旧行为），不反噬切模型主链路。
     const effectiveModelId = await this.readEffectiveModelId(sessionId, client, newModelId)
     // W7：switchModel RPC 成功响应 = modelId 实例的失效源（RPC 响应驱动，「事件只做失效」的
-    // 补充合法形态，D7）。markDirty 防抖重拉 get_state，实例快照与 pi 权威值收敛（行为级
+    // 补充合法形态，D7）。markDirty 防抖重新拉取 get_state，实例快照与 pi 权威值收敛（行为级
     // 验收：模型名 1s 内更新）。失败路径（上方 throw）不失效——pi 侧未生效，实例保持旧快照。
     this.deps.getReplicatedStates(sessionId)?.modelId.markDirty()
-    // W10：switchModel 重算失效 = usage 失效源（contextWindow 随模型变化——markDirty 重拉
+    // W10：switchModel 重算失效 = usage 失效源（contextWindow 随模型变化——markDirty 重新拉取
     // get_session_stats 后快照持有 pi 侧按新模型窗口算出的权威值）。失败路径不失效（同上）。
     this.deps.getReplicatedStates(sessionId)?.usage.markDirty()
     // W12：thinkingLevel 失效——pi 切模型时若新模型 thinkingLevel 与当前相同则不 emit 事件
-    //（thinking_level_changed 覆盖不住），markDirty 重拉 get_state 刷新快照（旧实现靠
+    //（thinking_level_changed 覆盖不住），markDirty 重新拉取 get_state 刷新快照（旧实现靠
     // broadcastSessionState 内 get_state 直读，随该方法删除改经实例）。
     this.deps.getReplicatedStates(sessionId)?.thinkingLevel.markDirty()
     // PR #185 S2 裁决的永久双写形态：RPC 已成功（pi 侧生效），直写让 toSummary（session
-    // 列表）与 state_changed fallback（防抖 300ms + 重拉窗口内快照未收敛）立即读到新值；
+    // 列表）与 state_changed fallback（防抖 300ms + 重新拉取窗口内快照未收敛）立即读到新值；
     // 实例快照收敛后主路径照常读快照（与直写同值，无冲突）。U6：直写 get_state 读回的
     // 生效值（pi pattern 换模时 ≠ 请求值），缓存不再携带未生效的请求模型。
     session.modelId = effectiveModelId
     // 持久层唯一写方 = pi（model_change entry 落 JSONL，缓存治理 U8a W1 写点退役）——
-    // 会话列表经 scanSessionMeta 反向读 JSONL 在下次刷新可见，本方法只负责内存直写投影。
-    // session-trace（A33）：lifecycle RPC 成功后主动补拉——model_change 的 append 无通用事件
-    //（design D4：model_change / label 无事件，这些动作由 runtime 自身发起，RPC 成功后补拉覆盖）。
-    // fire-and-forget：补拉失败不影响切模型主流程（syncTraceEntries 内部吞错）。
+    // 会话列表经 scanSessionMeta 反向读 JSONL 在下次刷新可见，本方法只负责内存直写派生。
+    // session-trace（A33）：lifecycle RPC 成功后主动补充拉取——model_change 的 append 无通用事件
+    //（design D4：model_change / label 无事件，这些动作由 runtime 自身发起，RPC 成功后补充拉取覆盖）。
+    // fire-and-forget：补充拉取失败不影响切模型主流程（syncTraceEntries 内部吞错）。
     this.deps.syncTraceEntries(sessionId, 'set_model')
     // U6 回执普查：返回 pi 实际生效模型（get_state 读回，'provider/id' 复合串）——
     // plugin agent.setModel 经此拿生效值回执；WS 侧 settings-message-handler 的
@@ -226,7 +226,7 @@ export class SessionModelControl {
    * switchModel 的 get_state 回执普查读回（U6）：读回实际生效模型。字段缺失/非法/
    * get_state 抛错一律保持请求值 fallback（旧行为），不反噬切模型主链路。
    * thinkingLevel 不在此读回——其持久层由 pi 落 JSONL，内存快照经 thinkingLevel 实例
-   * markDirty 重拉 get_state 收敛（U8a 前 sidecar 持久化是该读回的唯一消费者）。
+   * markDirty 重新拉取 get_state 收敛（U8a 前 sidecar 持久化是该读回的唯一消费者）。
    */
   private async readEffectiveModelId(
     sessionId: string,
@@ -237,7 +237,7 @@ export class SessionModelControl {
       const state = await client.getState()
       return SessionModelControl.parseStateModelRef(state) ?? fallbackModelId
     } catch (e) {
-      // 读回失败保持请求值（下游 markDirty 防抖重拉 get_state 仍会收敛到权威值）
+      // 读回失败保持请求值（下游 markDirty 防抖重新拉取 get_state 仍会收敛到权威值）
       console.warn(`[session-service] switchModel get_state read-back failed for ${sessionId}, keeping requested model: ${toErrorMessage(e)}`)
       return fallbackModelId
     }
@@ -277,8 +277,8 @@ export class SessionModelControl {
     }
     await client.setThinkingLevel(level)
     // session-trace（A33）：thinking_level_change 的 append 虽有事件但消费点在 pi 侧
-    // extension 回调（taiji 不订阅）；与 set_model 同款，RPC 成功后主动补拉。
-    // fire-and-forget：补拉失败不影响设档主流程（syncTraceEntries 内部吞错）。
+    // extension 回调（taiji 不订阅）；与 set_model 同款，RPC 成功后主动补充拉取。
+    // fire-and-forget：补充拉取失败不影响设档主流程（syncTraceEntries 内部吞错）。
     this.deps.syncTraceEntries(sessionId, 'set_thinking_level')
     const state = await client.getState()
     const effective = typeof state?.thinkingLevel === 'string' ? state.thinkingLevel : level
@@ -291,12 +291,12 @@ export class SessionModelControl {
       clamped: effective !== level,
     })
     // PR #185 S2 裁决的永久双写形态：effective 来自 pi get_state（权威值），直写让
-    // toSummary 与 state_changed fallback 在实例防抖重拉窗口内即读准值（modelId 同理，
+    // toSummary 与 state_changed fallback 在实例防抖重新拉取窗口内即读准值（modelId 同理，
     // 见 switchModel）。值未变时 pi 不发事件、不写 entry（PS-04），此直写是唯一同步点；
     // 值变场景事件随后到达，直写保证防抖窗口内的即时性。
     session.thinkingLevel = effective
     // 持久层唯一写方 = pi（thinking_level_change entry 落 JSONL，缓存治理 U8a W2 写点退役），
-    // 本方法只负责内存直写投影。
+    // 本方法只负责内存直写派生。
     return effective
   }
 }

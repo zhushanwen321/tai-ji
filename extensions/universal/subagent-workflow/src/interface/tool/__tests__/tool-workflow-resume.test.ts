@@ -1,7 +1,7 @@
 /**
  * workflow tool resume action 契约（workflow-run-resume-revision U3 / D14）。
  *
- * 覆盖面（[§2.5] D14 判定已下沉 core，本文件只测壳的转发与接线面）：
+ * 覆盖范围（[§2.5] D14 判定已下沉 core，本文件只测壳的转发与接线点）：
  * - 转发契约：args 与 journalDir 原样下传 core（判定与拒绝文案的权威测试在 core
  *   `orchestration/__tests__/resume-args-guard.test.ts`；真链路拒绝见
  *   scenario-24-args-mismatch-rejection.test.ts）。
@@ -10,7 +10,7 @@
  * - runId 缺失与 time/tokens 负值的入口护栏（assertEntryTimeBudget / assertEntryTokenBudget 同源）。
  *
  * mock 策略：resume-run 深路径 stub（resumeRun 为 vi.fn——不起锁/IO，只测入口
- * 面与校验层）；record 流用 mkdtemp 真文件（D14 读取面读真实路径）。范式对齐
+ * 面与校验层）；record 流用 mkdtemp 真文件（D14 读侧读真实路径）。范式对齐
  * tool-workflow.test.ts（lifecycle 深路径 mock + captureTool 注册层黑盒）。
  */
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
@@ -25,7 +25,7 @@ import { resumeRun } from "@zhushanwen/subagent-core/orchestration/resume-run.ts
 
 import { actionResume } from "../tool-workflow.ts";
 
-/** 桩化 resume-run——resumeRun 为 vi.fn（不起锁/record IO，只测入口校验与接线面）。 */
+/** 桩化 resume-run——resumeRun 为 vi.fn（不起锁/record IO，只测入口校验与接线点）。 */
 vi.mock("@zhushanwen/subagent-core/orchestration/resume-run.ts", () => ({
   resumeRun: vi.fn(),
 }));
@@ -45,14 +45,14 @@ afterEach(() => {
   vi.restoreAllMocks();
 });
 
-/** 写 record 流（每行一个 JSON 对象）并返回路径——D14 读取面的真实文件。 */
+/** 写 record 流（每行一个 JSON 对象）并返回路径——D14 读侧的真实文件。 */
 function writeRecordStream(lines: unknown[]): string {
   const path = join(tmpDir, "wf-test.record.jsonl");
   writeFileSync(path, lines.map((l) => JSON.stringify(l)).join("\n") + "\n", "utf8");
   return path;
 }
 
-/** run-created 帧（args 含 _runId——对齐 lifecycle runWorkflow 注入后落账形态）。 */
+/** run-created 帧（args 含 _runId——对齐 lifecycle runWorkflow 注入后写入 journal 记录形态）。 */
 function runCreatedFrame(argsSummary: string) {
   return {
     type: "run-created",

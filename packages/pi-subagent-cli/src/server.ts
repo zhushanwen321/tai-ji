@@ -8,9 +8,9 @@
 //
 // 10 正向方法逐个映射到 EnginePort（本地 port-types 镜像）成员；run 期间事件经
 // `event` 通知（runId + 单调 seq）外发，onHandleReady/onChildSpawned/stream 经
-// host/* 反向请求上抛（[池抽象降级] host/poolResolved 通道已随 poolKey 协议面退役删除）。
-// 查询面两方法（listModels/validateModel）不映射 EnginePort——PiEngine 未实装该
-// 可选面，分发位直接路由 engine-query（读 pi 数据目录 json，pi-workflow-run-resource-model
+// host/* 反向请求上抛（[池抽象降级] host/poolResolved 通道已随 poolKey 协议范围退役删除）。
+// 查询范围两方法（listModels/validateModel）不映射 EnginePort——PiEngine 未实装该
+// 可选能力，分发位直接路由 engine-query（读 pi 数据目录 json，pi-workflow-run-resource-model
 // §3.3 决策 11 方案 B）。
 //
 // pi 专有通道（本单元实装客户端）：
@@ -74,18 +74,18 @@ const logger = getLogger("pi-engine-cli");
 
 /** 入站帧来源（readline 已拆行的请求帧 + 反向请求应答帧混流）。 */
 export interface EngineProtocolServerOptions {
-  /** stdout 写入面（每帧一行 JSON）。 */
+  /** stdout 写侧（每帧一行 JSON）。 */
   write: FrameWriter;
   /** 引擎实例（缺省 createDefaultPiEngine——测试注入 fake/DI 实例）。 */
   engine?: EnginePort & {
     bindAskUser?(handler: ((req: UiRequest) => Promise<UiResponse>) | undefined): void;
   };
-  /** 反向请求计时面（armEngineSelfDestruct 产物；缺省不计时——测试用）。 */
+  /** 反向请求计时侧（armEngineSelfDestruct 产物；缺省不计时——测试用）。 */
   reverseClock?: ReverseRequestClock;
   /** 应答等待缺省超时（反向请求两阶段等待上限兜底；默认 REVERSE_TIMEOUT_DEFAULT_MS）。 */
   reverseTimeoutMs?: number;
   /**
-   * pi agent 目录（引擎查询面 listModels/validateModel 的数据目录；缺省 =
+   * pi agent 目录（引擎查询范围 listModels/validateModel 的数据目录；缺省 =
    * resolvePiAgentDir()——env PI_CODING_AGENT_DIR 优先、缺省系统 pi 目录）。
    * 测试注入 tmp fixture 目录隔离真实数据。
    */
@@ -101,7 +101,7 @@ export function createDefaultPiEngine(): PiEngine {
 }
 
 /**
- * 引擎协议服务器。生命周期 = 进程生命周期（单引擎实例，无重建面——崩溃重建归
+ * 引擎协议服务器。生命周期 = 进程生命周期（单引擎实例，无重建逻辑——崩溃重建归
  * core EngineClient：杀进程再 spawn）。dispose 方法释放引擎常驻资源但进程不退出。
  */
 export class EngineProtocolServer {
@@ -109,7 +109,7 @@ export class EngineProtocolServer {
   private readonly engine: NonNullable<EngineProtocolServerOptions["engine"]>;
   private readonly reverseClock: ReverseRequestClock | undefined;
   private readonly reverseTimeoutMs: number;
-  /** 引擎查询面数据目录（listModels/validateModel 应答源；见 opts.piAgentDir）。 */
+  /** 引擎查询范围数据目录（listModels/validateModel 应答源；见 opts.piAgentDir）。 */
   private readonly queryAgentDir: string;
   private readonly frameLoop: FrameLoopContext;
   private readonly activeRuns = new Map<string, ActiveRun>();
@@ -148,8 +148,8 @@ export class EngineProtocolServer {
       run: (params) => this.run(params as RunParams),
       cancel: (params) => this.cancel(params as { runId: string; reason: string }),
       read: (params) => this.read(params as ReadParams),
-      // 查询面两方法路由 engine-query（pi-workflow-run-resource-model §3.3 决策 11
-      // 方案 B：读 pi 数据目录 json，不经 engine 实例——PiEngine 本就未实装该可选面）
+      // 查询范围两方法路由 engine-query（pi-workflow-run-resource-model §3.3 决策 11
+      // 方案 B：读 pi 数据目录 json，不经 engine 实例——PiEngine 本就未实装该可选能力）
       listModels: () => ({ models: listPiModels(this.queryAgentDir) }),
       validateModel: (params) => this.validateModel(params as { modelRef?: string }),
       // [subagent-model-switch §7.3] 第 10 个正向方法：能力位防御后路由引擎实装
@@ -196,8 +196,8 @@ export class EngineProtocolServer {
     // [H1 U3] chat 轮 = run 派发形态（每轮一进程，agent_settled 收敛即收割），
     // 同走 per-run 绑定；「会话跨 run 存活、askUser 固定绑定」的 chat 特判随
     // ChatSessionRegistry 退役（bindHostChannels 面已随 U5 删除）。
-    // [S7] 应答形态守卫在 settleReverse（host/askUser 通道 isUiResponse 判定，不合法
-    // 走 engine_protocol_bad_frame reject）——此处的 cast 是守卫后窄化，非无守卫裸 cast。
+    // [S7] 应答形态检查在 settleReverse（host/askUser 通道 isUiResponse 判定，不合法
+    // 走 engine_protocol_bad_frame reject）——此处的 cast 是检查后窄化，非无检查裸 cast。
     this.engine.bindAskUser?.((request: UiRequest) =>
       this.reverseRequestInternal("host/askUser", { runId, request }) as Promise<UiResponse>,
     );
@@ -257,7 +257,7 @@ export class EngineProtocolServer {
       onEvent: (event: AgentEvent) => this.emitEvent(runId, event),
       ...(ctxModel !== undefined ? { ctxModel } : {}),
       ...(stream !== undefined ? { stream } : {}),
-      // [F6] 根 session id 还原（relay 归属键 SESSION_ID 权威源；undefined 不挂键）
+      // [F6] 根 session id 还原（嵌套引擎 engine_open 归属键；undefined 不挂键）
       ...(ctx.sessionRootId !== undefined ? { sessionRootId: ctx.sessionRootId } : {}),
       // [Option C 协议化] 权威 subagent session 目录还原（宿主 getSubagentSessionDir
       // 推导值透传引擎消费——undefined 不挂键，引擎走 [LEGACY] fallback）
@@ -303,8 +303,8 @@ export class EngineProtocolServer {
     return this.engine.read({ data: params.handle });
   }
 
-  /** 查询面裁决（engine-query.validatePiModel：缺席查 settings.json 缺省模型，
-   * 未命中回 engine_model_unknown 结构化错误——诊断面如实裁决不抛断链）。 */
+  /** 查询范围裁决（engine-query.validatePiModel：缺席查 settings.json 缺省模型，
+   * 未命中回 engine_model_unknown 结构化错误——诊断范围如实裁决不抛断链）。 */
   private validateModel(params: { modelRef?: string }): { canonicalRef: string } {
     return validatePiModel(params.modelRef, this.queryAgentDir);
   }
@@ -351,7 +351,7 @@ export class EngineProtocolServer {
     };
   }
 
-  /** 反向请求发送（公开面：main.ts 的 host/log 桥接消费；内部 run 通道同路）。 */
+  /** 反向请求发送（对外公开：main.ts 的 host/log 桥接消费；内部 run 通道同路）。 */
   reverseRequest(method: string, params: unknown): Promise<unknown> {
     return this.reverseRequestInternal(method, params);
   }
@@ -374,8 +374,8 @@ export class EngineProtocolServer {
   /** 反向请求应答落位。
    *
    * ack 两阶段（R9-2）：人机交互通道（host/askUser）宿主先回
-   * `{ack:true}`——只 ack 计时面（移出 in-flight 自灭计时），**不终结等待**；最终
-   * 结果帧才 settle。数据面通道宿主直接回终态（{ok:true} 等），ack 即 settle。 */
+   * `{ack:true}`——只 ack 计时侧（移出 in-flight 自灭计时），**不终结等待**；最终
+   * 结果帧才 settle。数据范围通道宿主直接回终态（{ok:true} 等），ack 即 settle。 */
   private settleReverse(id: number | string, frame: { result?: unknown; error?: unknown }): void {
     const pending = this.reversePending.get(String(id));
     if (pending === undefined) {
@@ -399,7 +399,7 @@ export class EngineProtocolServer {
       pending.reject(new Error(`reverse request ${String(id)} rejected: ${toErrorMessage(frame.error)}`));
       return;
     }
-    // [S7] askUser 应答面守卫（A6 方向防御同族——宿主→引擎方向已有 assertResumeRunFrame
+    // [S7] askUser 应答侧检查（A6 方向防御同族——宿主→引擎方向已有 assertResumeRunFrame
     // 先例）：畸形 UiResponse 不落 resolve（否则静默流入 ui-request-queue），复用
     // engine_protocol_bad_frame 语义走 reject。
     if (pending.method === "host/askUser" && !isUiResponse(frame.result)) {

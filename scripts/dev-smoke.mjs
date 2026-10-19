@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * dev 启动期冒烟闸门（W1 dev-smoke-gate）。
+ * dev 启动期冒烟门禁（W1 dev-smoke-gate）。
  *
  * 目标：堵 MOCK 轨 E2E 盲区——dev 启动期崩溃（CSS 变量引用错 / Tailwind 类名错 /
  * import 路径错 / style.css 语法错 / Vue template compile 错）。这些崩溃在「只跑
@@ -205,7 +205,7 @@ async function assertMountsVisible(page, mountSelectors, mountTimeout, missingMo
 }
 
 /**
- * 运行 dev 冒烟闸门。
+ * 运行 dev 冒烟门禁。
  * @param {SmokeOptions} [options]
  * @returns {Promise<SmokeResult>}
  */
@@ -389,7 +389,7 @@ function parseArgs(argv) {
 }
 
 function printHelp() {
-  console.log(`dev-smoke — dev 启动期冒烟闸门
+  console.log(`dev-smoke — dev 启动期冒烟门禁
 
 用法:
   node scripts/dev-smoke.mjs [options]

@@ -206,7 +206,7 @@ describe("setModelOnActiveChild — pi 错误应答三型映射 + 成功路径",
     }
   });
 
-  it("set_model 应答未知错误消息 → readback-failed（三型词表封闭映射的残余收口：生效状态不可信）", async () => {
+  it("set_model 应答未知错误消息 → readback-failed（三型词表封闭映射的残余收尾：生效状态不可信）", async () => {
     const child = new FakeChild();
     registerActiveChild(RUN_ID, child as unknown as ChildProcess);
     try {
@@ -439,7 +439,7 @@ function makeSink() {
 describe("server setModel dispatch — 协议一致性（U3）", () => {
   it("引擎 capability 声明非 native → setModel 请求回 engine_capability_unsupported 结构化错误（明确错误而非崩）", async () => {
     const engine = new PiEngine();
-    // manifest/实装漂移模拟：声明位翻 unsupported（实装仍在——防御的是声明面）
+    // manifest/实装漂移模拟：声明位翻 unsupported（实装仍在——防御的是声明侧）
     vi.spyOn(engine, "capabilities").mockReturnValue({
       ...engine.capabilities(),
       setModel: "unsupported",

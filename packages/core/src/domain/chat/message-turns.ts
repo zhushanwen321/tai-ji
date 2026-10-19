@@ -20,7 +20,7 @@
  * 2. 隐藏完成通知（display===false 且 customType ∈ COMPLETE_NOTIFY_CUSTOM_TYPES，shared SSOT
  *    常量——与 apply-entry 覆写同一常量源，无第二份判定）→ turn 边界：关闭当前 turn，开启
  *    user:null + trigger:'bg-notify' 的新 turn，后续 assistant 归入（G3 续跑可见起点）。
- *    通知本体压入该组 hiddenNotifies 并同步派生 notifySummary（D5 边界行聚合投影，连续
+ *    通知本体压入该组 hiddenNotifies 并同步派生 notifySummary（D5 边界行聚合派生视图，连续
  *    折叠复用组时累积追加）。空 turn 折叠：边界未被 assistant 填实即遇下一边界/user/数组
  *    结束 → 不产出（连续边界折叠为一个 trigger turn，取最新）
  * 3. assistant → 归当前 turn（无则自启 user:null turn，首条 assistant 边缘保留）
@@ -50,7 +50,7 @@ import type { Message } from '@taiji/shared'
 import { deriveNotifySummary } from './notify-summary'
 import type { NotifySummary } from './notify-summary'
 
-// D5 边界聚合投影的公开类型（消费方：Turn.vue / 测试）；派生实现与判据在 ./notify-summary
+// D5 边界聚合派生视图的公开类型（消费方：Turn.vue / 测试）；派生实现与判据在 ./notify-summary
 export type { NotifyOutcome, NotifySummary } from './notify-summary'
 // 收纳完成通知明细行（specs/chat/system-notices.md §3.4）：类型与派生单点同在 ./notify-summary
 export { deriveFoldedNoticeRows } from './notify-summary'
@@ -71,7 +71,7 @@ export interface MessageTurn {
    *  任务完成）触发的续跑 turn。W4 据此渲染「后台任务完成」起点行（替代 user 气泡）。
    *  undefined = user 锚 turn 或 assistant 自启 turn（现状形态）。 */
   trigger?: 'bg-notify'
-  /** bg-notify 边界行聚合投影（D5）：仅 trigger:'bg-notify' 的 turn 有值（分组层规则 2
+  /** bg-notify 边界行聚合派生视图（D5）：仅 trigger:'bg-notify' 的 turn 有值（分组层规则 2
    *  从 hiddenNotifies 派生，两个构造点同款携带——避免只在快车道构造点派生、全量路缺字段）。
    *  纯派生值（可随时从 hiddenNotifies 重建），渲染层零解析零回扫。
    *  undefined = 非边界 turn 或无可聚合载荷。 */
@@ -137,7 +137,7 @@ export function renderKey(item: RenderItem): string {
 /**
  * turn 派生增量缓存（D-4）。复用键 = turn 成员消息的对象引用序列——直接消费 D-1 的
  * 不可变消息身份（成员引用未变 = 成员内容未变，含 status/thinking/toolCalls/error），
- * 无第二份状态、无脆弱文本 hash（被否方案见 08 §3.2 D-4 对比表）。
+ * 无第二份状态、无脆弱文本 hash（不采用方案见 08 §3.2 D-4 对比表）。
  *
  * 缓存归属：纯派生数据、可随时丢弃重建（无 drift 风险）。调用方（MessageStream）经
  * useSessionScopedState 工厂按 session 分区持有（ADR-0049——组件实例不随 session 销毁，
@@ -226,7 +226,7 @@ function isInlineNotice(msg: Message): boolean {
   return msg.bashExecution !== undefined || msg.liveOnly === true
 }
 
-// ── bg-notify 边界聚合投影（D5）─────────────────────────────────────────────
+// ── bg-notify 边界聚合派生视图（D5）─────────────────────────────────────────────
 // 判据/去重/耗时聚合的实现在 ./notify-summary（载荷解析聚合轴，与分组轴分离）；
 // 本文件只负责：规则 2 分支压入通知本体 + 旁挂派生值（分组状态机的一部分）。
 
@@ -248,7 +248,7 @@ function appendBashNotice(msg: Message, group: TurnGroup): void {
 
 /** turn 未被填实（无 user、无 assistant、无 notice）→ 折叠候选。实际只可能是未被后续
  *  assistant 填实的 trigger turn（user 锚 turn 必有 user；assistant 自启 turn 必有 assistant）。
- *  [D5 钉死] hiddenNotifies 刻意不纳入本判定：纳入会破坏「连续边界折叠复用同组」承诺
+ *  [D5 固定] hiddenNotifies 刻意不纳入本判定：纳入会破坏「连续边界折叠复用同组」承诺
  *  （第二条通知另开新组、两行各显 1），且 hidden-only 组的 turnStableId 回落空串致
  *  renderKey 重复。后果显式登记：无 assistant 填充的 hidden-only 组随空 turn 折叠、边界行
  *  不渲染——与现状零劣化（通知本体本就不渲染），正常路径由 triggerTurn 唤醒 assistant 填实。 */
@@ -258,7 +258,7 @@ function isEmptyTurn(g: TurnGroup): boolean {
 
 /** 关闭 turn：若其未被填实（空 trigger turn）从产出中移除（空 turn 折叠，D3）。
  *  current 开启期间无其他槽位压栈（notice 挂 current 不出槽位），末位槽位即 current 的
- *  turn 槽位——groups/slots 成对弹出安全，groups 末位守卫为防御性断言。
+ *  turn 槽位——groups/slots 成对弹出安全，groups 末位检查为防御性断言。
  *  starts 与 groups 同步弹出（保持与 turnObjects 对齐的起始下标不变量）。
  *  [收纳折叠边界] 被折叠空组携带的 background-bash 通知是可见消息（规则 5 收纳分支附着，
  *  宿主轮未及填实即遇下一边界）——弹出前以其落位独立 static 项（渲染过滤不丢消息，规则 9；

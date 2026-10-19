@@ -76,7 +76,7 @@ describe('W3: orchestrator (W3TC8-9)', () => {
 
   beforeEach(async () => {
     originalPlatform = Object.getOwnPropertyDescriptor(process, 'platform')
-    // darwin 用例的隐含环境是 Apple Silicon（m8 守卫 downloadUpdate 拒 Intel mac）：
+    // darwin 用例的隐含环境是 Apple Silicon（m8 检查 downloadUpdate 拒 Intel mac）：
     // CI 在 x64 runner 上跑，若不桩 arch，darwin+x64 会误命中架构门控抛
     // UpdateUnsupportedError——本地 arm64 全绿、CI 恒红的根因
     originalArch = Object.getOwnPropertyDescriptor(process, 'arch')
@@ -185,7 +185,7 @@ describe('W3: orchestrator (W3TC8-9)', () => {
   // ── W3TC9b：无 platform asset → 抛 UpdateError ─────────────────
   it('W3TC9b: 当前平台无 asset（如 unknown 平台）→ downloadUpdate 抛 UpdateError（含 release 页链接）', async () => {
     setPlatform('freebsd')
-    // performUpdate 组合函数已随批次 3 删除：无 asset 守卫在 downloadUpdate 内（pickPlatformAsset）
+    // performUpdate 组合函数已随批次 3 删除：无 asset 检查在 downloadUpdate 内（pickPlatformAsset）
     const { downloadUpdate } = await loadModule()
     // 批次 3 §3.3.3-D：断供错误信息并入 release.htmlUrl——存量 darwin 用户
     // （本版本起只发 dmg）报错时有一键手动下载出路（错误信息可操作）
@@ -325,7 +325,7 @@ describe('W3: orchestrator (W3TC8-9)', () => {
 //   - logSourceFailover(segment=download) / logDownloadSuccess 落盘断言
 //   - totalBytes 三组合（一致续传 / 不一致转全量 / state 缺失从零）走真实 download-asset
 //     链路（importActual 转发 + stub 全局 fetch + 真实临时目录），锚定「复用 temp+state、
-//     仅替换 downloadUrl」的输入契约由 download-asset 既有守卫承接
+//     仅替换 downloadUrl」的输入契约由 download-asset 既有检查承接
 // ════════════════════════════════════════════════════════════════════
 
 /** 本源（GitHub）胜出 asset（temp 键控 name + 完整性基准的锚定形态） */
@@ -364,7 +364,7 @@ function makeNetError(errorCode: UpdateErrorCode): UpdateError {
   return new UpdateError(`download network failure (${errorCode})`, 'downloading', errorCode)
 }
 
-/** 构造仅含 fetchReleaseByTag 的 mock IReleaseChecker（orchestrator 降级链唯一消费面） */
+/** 构造仅含 fetchReleaseByTag 的 mock IReleaseChecker（orchestrator 降级链唯一消费方） */
 function makeSideChecker(): { checker: IReleaseChecker; fetchReleaseByTag: ReturnType<typeof vi.fn> } {
   const fetchReleaseByTag = vi.fn()
   return { checker: { fetchReleaseByTag } as unknown as IReleaseChecker, fetchReleaseByTag }
@@ -820,17 +820,17 @@ describe('u-download-failover: totalBytes 三组合（真实 download-asset + st
     expect(success).toMatchObject({ multiPart: false, engine: 'undici', releaseSource: 'github' })
   })
 
-  it('组合 B：对侧 totalBytes 与 state 不一致（超容差）→ 既有守卫触发转全量（206→无 Range 200），全量产物正确落位', async () => {
+  it('组合 B：对侧 totalBytes 与 state 不一致（超容差）→ 既有检查触发转全量（206→无 Range 200），全量产物正确落位', async () => {
     // state 错记 total=5000，对侧真实 total=100 → 差值超 TOTAL_BYTES_TOLERANCE(1024)
     seedBreakpoint(5000)
     const { fetchMock, checker } = await arrangeRealSideDownload(FULL_SIZE)
     const { downloadUpdate } = await loadModule()
 
-    // [实施期发现，download-asset 既有行为] 既有 m5 守卫触发 stale 转全量：递归重下
+    // [实施期发现，download-asset 既有行为] 既有 m5 检查触发 stale 转全量：递归重下
     // 成功、产物正确落位 finalPath，但递归 rename 后外层校验对已不存在的 temp 抛
     // ENOENT——该非完整性错误被跨源降级链按「续传失败」吞掉，终态 = 原错误上抛
     // （用户下次重试时无断点现场，从零全量成功，sha256 兜底不变）。本用例锚定该
-    // 组合行为：守卫确实转全量 + 产物正确，失败面收敛于既有 ENOENT 而非内容损坏。
+    // 组合行为：检查确实转全量 + 产物正确，失败情形收敛于既有 ENOENT 而非内容损坏。
     await expect(
       downloadUpdate(RESUME_RELEASE, undefined, { releaseChecker: checker }),
     ).rejects.toMatchObject({ errorCode: 'UPDATE_NETWORK_FAILED' })

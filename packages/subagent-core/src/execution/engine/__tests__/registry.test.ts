@@ -62,7 +62,7 @@ function makeFakeEngine(id: string): EnginePort {
   };
 }
 
-/** 带模型清单的假引擎（引擎模型段渲染的输入面；listModels 每次返回新数组实例——渲染必须与实例无关）。 */
+/** 带模型清单的假引擎（引擎模型段渲染的输入范围；listModels 每次返回新数组实例——渲染必须与实例无关）。 */
 function makeFakeEngineWithModels(
   id: string,
   models: Array<{ id: string; name?: string }>,
@@ -236,7 +236,7 @@ describe("engine registry", () => {
       expect(neverInstantiated).not.toHaveBeenCalled();
     });
 
-    it("未实现 dispose 的引擎（可选面）跳过不抛", () => {
+    it("未实现 dispose 的引擎（可选能力部分）跳过不抛", () => {
       registerEngine("plain", () => makeFakeEngine("plain"));
       getEngine("plain");
       expect(() => disposeEngines()).not.toThrow();
@@ -385,7 +385,7 @@ describe("EngineDescriptor 双模（W3 D1）", () => {
     });
     getEngine("overwrite");
     const newPort = makeRemoteEngine("overwrite", manifest);
-    // capabilities 变化 = 稳定标识不等价（引擎包升级改能力面的最小形态）——D2b 下
+    // capabilities 变化 = 稳定标识不等价（引擎包升级改能力侧的最小形态）——D2b 下
     // 只有标识变化才走 dispose 分支，等价重注册见 D2b 专属 describe。
     registerEngineDescriptor("overwrite", {
       kind: "cli",
@@ -525,7 +525,7 @@ describe("D2b：同稳定标识重注册幂等（cli 单例跨 reload 存活）"
         dynamic: true,
         models: [
           { id: "glm-4.6", canonicalRef: "zai/glm-4.6" },
-          { id: "glm-5", canonicalRef: "zai/glm-5" }, // 引擎包升级后的新枚举面
+          { id: "glm-5", canonicalRef: "zai/glm-5" }, // 引擎包升级后的新枚举侧
         ],
       },
     };
@@ -641,7 +641,7 @@ describe("D2b：同稳定标识重注册幂等（cli 单例跨 reload 存活）"
     });
     getEngine("ver-change");
 
-    // 引擎包升级形态：bin 未变、能力面碰巧未变，只有版本号前进——旧实现
+    // 引擎包升级形态：bin 未变、能力侧碰巧未变，只有版本号前进——旧实现
     //（版本不在比较面）会误判等价保留旧单例，同进程内持续跑旧代码直到重启
     const newPort = makeRemoteEngine("ver-change", manifest);
     registerEngineDescriptor("ver-change", {

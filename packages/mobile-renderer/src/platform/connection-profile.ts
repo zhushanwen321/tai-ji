@@ -1,13 +1,13 @@
 // connection-profile —— 移动壳连接凭据派生（remote-use D4 三分支，纯逻辑可单测）。
 //
-// 职责：经 U0.2 收口点（use-connection 远程 profile 分支）注入的 ConnectionProfilePort 实现
+// 职责：经 U0.2 收尾点（use-connection 远程 profile 分支）注入的 ConnectionProfilePort 实现
 // + auth 结果的凭据处置。三分支（D4）：
 //   1. URL query ?token= 优先（显式携带的新凭据 = 用户新意图；轮换重扫恢复路径）——内存持有
 //      用于首连，auth 成功才落 storage + 抹地址栏（replaceState）；失败**不动**既有 storage
 //      （坏链接不毁好凭据），地址栏 query 刻意保留（刷新重试入口，D4 显式判定）
 //   2. storage 兜底（验身过的持久凭据，G3 免重扫）——auth 失败才清空（已失效，E11）
 //   3. 皆无 → 不携带凭据发起连接（runtime fail-closed 拒绝 → onAuthRejected → token 输入
-//      视图，E2 同一通路闭合，免 throw 协议穿 core——凭据缺失与其他验身失败同视图同出口）
+//      视图，E2 同一通路封住，免 throw 协议穿 core——凭据缺失与其他验身失败同视图同出口）
 //
 // core 零 location/storage 直读（headless 约束），宿主环境经 deps 注入；本模块是壳侧注入实现。
 
@@ -76,7 +76,7 @@ export interface ConnectionProfileDeps {
   onTokenInputRequired(): void
 }
 
-/** auth 结果处置 + 手输采纳（bootstrap 接线面；TokenInputView 提交路径用 adoptManualToken） */
+/** auth 结果处置 + 手输采纳（bootstrap 接线点；TokenInputView 提交路径用 adoptManualToken） */
 export interface ConnectionCredentialController {
   /**
    * auth 成功（ws-client connected）处置：query/manual 来源落 storage + 抹地址栏（manual
@@ -138,7 +138,7 @@ export function createConnectionProfilePort(
       }
       // 皆无：不带凭据发起（E2 通路——runtime fail-closed 拒绝 → onAuthRejected →
       // handleAuthFailure → onTokenInputRequired）。不在此直接切视图：凭据缺失与其他验身
-      // 失败同出口，连接发起面保持无异常路径。
+      // 失败同出口，连接发起侧保持无异常路径。
       return { url: wsUrlFromHost(deps.host, deps.protocol) }
     },
 

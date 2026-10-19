@@ -12,7 +12,7 @@
 //     !hasIdleTimer，只把「正在执行」计为在途，Path A 保活（idle timer armed）不计）；
 //   - 事件产生点 = 引擎域内的状态迁移点（session-runner 子进程注册/移除、idle timer
 //     arm/disarm），迁移后调 notifyInFlightChanged() 把最新快照推给壳层监听者；
-//   - core 闭包红线：本模块零 pi SDK import（只 import 本包 lifecycle 记账面），
+//   - core 闭包红线：本模块零 pi SDK import（只 import 本包 lifecycle 记账侧），
 //     壳层经包根 barrel 消费 setInFlightListener / getInFlightSnapshot（exports 面
 //     收窄后壳侧生产消费必须走 barrel，无深路径豁免）。
 //
@@ -59,9 +59,10 @@ export function setInFlightListener(next: InFlightListener | null): void {
  * 按双谓词过滤——活句柄（child 存在且未 killed）且无 armed idle timer。
  *
  * SSOT 复用：谓词取 lifecycle-predicates/lifecycle-manager 既有导出，与 notify-host
- * hasRunningBackground 完全同源，不复制判定逻辑。活句柄记账里天然覆盖 pi 引擎进程内
- * 与 relay 形态 child 两种宿主（relay spawn 经同一 runSpawn/spawnedChildren 记账——
- * D5「extension 是两形态派生的共同属主」）。
+ * hasRunningBackground 完全同源，不复制判定逻辑。活句柄记账的写方分两路，均落同一
+ * 镜像：local 形态引擎进程由本进程 spawn（镜像事件 + 反向通道上报其任务 pi 子进程）；
+ * 托管态（M3）引擎进程归 runtime 所有，extension 仅经反向通道记账引擎 spawn 的任务
+ * pi 子进程。因此本模块统计的是「本会话仍存活的任务子进程」，不表达引擎进程所有权。
  */
 export function getInFlightSnapshot(): InFlightSnapshot {
   return { inFlight: countInFlight() };

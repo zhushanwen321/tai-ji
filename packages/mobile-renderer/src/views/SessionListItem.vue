@@ -4,7 +4,7 @@
 //
 // 渲染 SessionSummary 自带字段：label + 状态点/状态文案 + 时间 + 模型/思考档只读标签
 // （A5：modelId/thinkingLevel 数据已在 SessionSummary，移动补渲染——V11 与桌面设置一致；
-// thinkingLevel 显示原始值，移动壳无 models 列表消费面，不做 id→展示名映射）。
+// thinkingLevel 显示原始值，移动壳无 models 列表消费方，不做 id→展示名映射）。
 // 状态点 = 派生态（remote-use A14/U20）：derivedStatus prop 由 MobileSessionList 经 core
 // deriveSessionStatus 按参数化输入计算（occupancy + subagent 运行态 + meta；blockingOverlay
 // 移动恒 false，D9② 白名单）——与桌面侧栏同源 9 态，替代原 SessionStatus 6 态直渲染。

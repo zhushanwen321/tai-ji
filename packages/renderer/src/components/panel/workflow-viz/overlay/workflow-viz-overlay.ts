@@ -8,7 +8,7 @@
  * （overlayDag / overlayDagError，设计 §7.1「DAG 缓存留 renderer」）。全局单例语义不变
  * （开新 run 切换内容，SearchModal 范式；split mode 下盖全屏、绑定发起 pane 的 session
  * ——D11⑤）。关闭只切 open 标志：事件流缓存归 workflowStore（D11② overlay 关闭不清）、
- * DAG 侧 runtime 按 runId 缓存（仅成功），本模块不持第二份数缓存（open 时无条件重拉，
+ * DAG 侧 runtime 按 runId 缓存（仅成功），本模块不持第二份数缓存（open 时无条件重新拉取，
  * 代价 = 一次 RPC ack 延迟）。
  * - 入口改向桥接（D1）：core coordination.openWorkflow 改向为开 overlay——core headless
  *   不感知 renderer，经 bindWorkflowOverlayOpener/bindWorkflowRunLookup 注入（本模块
@@ -35,6 +35,7 @@ import {
   openWorkflowInDrawer,
 } from '@taiji/core/domain/drawer'
 import {
+  closeCanvasOverlayForSession,
   closeOverlay,
   getOverlayControlState,
   openCanvasOverlay,
@@ -133,13 +134,14 @@ export function openSchedulerTab(sessionId: string): void {
 
 /**
  * 打开浮层问题解决画布 tab（canvas 直达入口，problem-solve-canvas §3.1(3)，对齐
- * openSchedulerTab 先例）：core 换内容 canvas kind + tab 置 canvas。画布跨 session
- * 共享，载荷只有 canvasId——消费方 = 托盘列表行点击（u-tray-entry 接线）与创建后
- * 自动唤起（u-canvas-store，边界归其领地）。
+ * openSchedulerTab 先例）：core 换内容 canvas kind + tab 置 canvas。画布按归属会话隔离
+ * （session-store-layout-inversion D4）：载荷带归属 sessionId（对齐 workflow/scheduler
+ * 载荷形态）——消费方 = 托盘列表行点击（u-tray-entry 接线）与创建后自动唤起
+ * （use-canvas-sync，仅归属会话唤起）。
  */
-export function openCanvasTab(canvasId: string): void {
-  if (!canvasId) return
-  openCanvasOverlay(canvasId)
+export function openCanvasTab(canvasId: string, sessionId: string): void {
+  if (!canvasId || !sessionId) return
+  openCanvasOverlay(canvasId, sessionId)
   overlayTab.value = 'canvas'
 }
 
@@ -154,13 +156,16 @@ export function closeWorkflowVizOverlay(): void {
 }
 
 /** session 删除编排（SessionCleanupHooks.closeWorkflowOverlay）：删除的是发起 session 时关
- *  （workflow 与 scheduler 两类内容同判据——载荷都持发起 sessionId，§7.4 级联同语义）。 */
+ *  （workflow / scheduler / canvas 三类内容同判据——载荷都持归属 sessionId，D4 隔离后
+ *  canvas 内容同样挂会话删除级联；§7.4 级联同语义）。 */
 export function closeWorkflowVizOverlayForSession(sessionId: string): void {
   const cur = getOverlayControlState().current
   if (
     (cur?.kind === 'workflow' || cur?.kind === 'scheduler')
     && cur.payload.sessionId === sessionId
   ) closeWorkflowVizOverlay()
+  // canvas 分支（core coordination 同判据）：删除的是画布归属会话 → 关浮层。
+  closeCanvasOverlayForSession(sessionId)
 }
 
 /**
@@ -193,7 +198,7 @@ function isActive(sessionId: string, runId: string): boolean {
     && cur.payload.sessionId === sessionId && cur.payload.runId === runId
 }
 
-/** parse_failed 重试（失败不缓存故可重试；重拉当前 run）。 */
+/** parse_failed 重试（失败不缓存故可重试；重新拉取当前 run）。 */
 export function retryDagParse(): void {
   const cur = getOverlayControlState().current
   if (cur === null || cur.kind !== 'workflow') return

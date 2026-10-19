@@ -3,7 +3,7 @@
  *
  * Extracted from settings-message-handler.ts to reduce file size（该文件同类先例：
  * config-preferences-message-handler.ts 同款 class + handle() switch 形态；case 体自
- * 原文件逐一原样迁移，行为保持）。本域是 authService 的唯一消息消费面：
+ * 原文件逐一原样迁移，行为保持）。本域是 authService 的唯一消息消费方：
  * config.oauthLogin/oauthCancel RPC 路由 + auth.* 事件由 AuthService 推 broadcast。
  *
  * 凭据域变更联动（MF-2）：登录成功 / 退出登录都改变 auth.json 凭据域事实 → 触发 zcode

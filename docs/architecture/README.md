@@ -30,7 +30,7 @@ docs/architecture/
 ├── env-propagation-boundary.md          # 子进程 env 出站契约（C-proc-09，deny-by-default）
 │  subagent core 域
 ├── subagent-core-package-extraction.md  # core 抽包 + 双宿主统一
-├── subagent-engine-protocolization.md   # 引擎协议化（协议面权威 = engine-sdk protocol 源码，本文载决策）
+├── subagent-engine-protocolization.md   # 引擎协议化（协议范围权威 = engine-sdk protocol 源码，本文载决策）
 ├── engine-adaptation/                   # 外部 coding-agent 引擎适配映射（六引擎 × 协议 v1 的 type 级映射，入口 README.md）
 ├── subagent-chat-run-unification.md     # H1：chat 域统一进 run 域（resume 锚点续聊）
 ├── subagent-workflow-record-unification.md  # H2：workflow agent() record 归位
@@ -42,7 +42,7 @@ docs/architecture/
 ├── background-task-sidebar-view.md      # 后台命令侧边栏视图契约（registry.json SSOT + RPC + 广播）
 ├── pi-evolution-consistency-and-project-switcher.md  # pi 版本锚点检查 + 模型目录单真相 + 项目切换器
 │  发布与锁域
-├── npm-publish-surface-guard.md         # npm 发布面一致性检查（check-publish-surface.mjs 设计依据）
+├── npm-publish-surface-guard.md         # npm 发布范围一致性检查（check-publish-surface.mjs 设计依据）
 └── file-lock-unification-and-reaper-sink.md  # 文件锁统一 SSOT + 后台任务收殓下沉 runtime
 ```
 

@@ -2,7 +2,7 @@
  * composer contenteditable 输入组合逻辑 —— packages/dom-core/src/composer/input/contenteditable.ts（W2）。
  *
  * 定位：迁自 renderer useContenteditableInput.ts（873 行）的 composable 部分。
- * 职责（单一变化轴「contenteditable 输入事件 + 文本/光标操作」）：
+ * 职责（单一变化原因「contenteditable 输入事件 + 文本/光标操作」）：
  * - getText/getSegments：TreeWalker 文本提取（委托 input-dom.ts）
  * - syncEmpty/detectHashTrigger：空态判定与 # 文件触发检测
  * - scrollCursorIntoView：Shift+Enter 后光标滚动进可见区
@@ -150,7 +150,7 @@ export function useContenteditableInput(
   }
 
   /**
-   * 空态判定唯一收口（8 个调用点：onInput / clear 族 / clear / setText + ComposerInput onMounted）。
+   * 空态判定唯一汇总入口（8 个调用点：onInput / clear 族 / clear / setText + ComposerInput onMounted）。
    * @param text 调用方已持有的全文快照（可选）——onInput 传参复用同一次 getText 遍历，
    * 避免同帧对同一棵 DOM 树二次全量解析；未传时自行读取（clear 族等「DOM 写后判定」调用点
    * 必须走读取分支，不能复用写前旧值）。
@@ -208,15 +208,15 @@ export function useContenteditableInput(
     // 单次全文遍历复用（性能 A 档）：syncEmpty 判空与 emitInput 消费同一 text 快照。
     // 两者之间原本就无 DOM 写（syncEmpty 只赋 isEmpty ref），同帧读取恒等价。
     const text = getText()
-    // 空态同步先于 IME 守卫（S-B1）：isEmpty 只做空态判定、不含触发/序列化语义，组词期
+    // 空态同步先于 IME 检查（S-B1）：isEmpty 只做空态判定、不含触发/序列化语义，组词期
     // 也必须跟随真实 DOM 内容——否则组词期 isEmpty 停留旧值，placeholder（is-empty 类
     // 驱动）与显在的组词假文本瞬态重叠（demo 用 CSS :empty 伪类原生机制无此瞬态）。
     syncEmpty(text)
     preferredCaretX = null
-    // IME 组词守卫（demo onInput 首行同款）：组词期间每次按键都会派发 input 事件，
+    // IME 组词检查（demo onInput 首行同款）：组词期间每次按键都会派发 input 事件，
     // 此时不序列化（emitInput）也不跑五路触发检测（组词中的假文本不构成触发），统一由
-    // onCompositionEnd（先复位 composing 再调本函数）收口处理。空态同步与光标锚复位
-    // 不在守卫之内——见上。接线：ComposerInput.vue `@compositionstart="composing = true"`。
+    // onCompositionEnd（先复位 composing 再调本函数）收尾处理。空态同步与光标锚复位
+    // 不在该检查之内——见上。接线：ComposerInput.vue `@compositionstart="composing = true"`。
     if (composing.value) return
     emitInput(text)
     // bash 豁免短路（设计 D6）：bash 态（!/!! 前缀）下符号全是命令语法成分，

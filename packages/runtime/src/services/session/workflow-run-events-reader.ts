@@ -62,6 +62,9 @@ import { parseWorkflowRunEventFileLine } from './events-projection.js'
 import { isEnoent } from '../../utils/errors.js'
 import { isStrictlyUnder } from '../../utils/path-utils.js'
 import { getPiAgentDir } from '../../infra/pi/pi-paths.js'
+// paths.ts 是 Node-only 模块，刻意不从 shared barrel 导出（shared/src/index.ts L32 注释），
+// Node 端从子路径 import（先例 = attachment-store.ts）
+import { getSessionStoreDir } from '@taiji/shared/paths'
 
 // ── WorkflowDag 族双侧等值编译锁（core ↔ shared 双向机器锁）──────────────────
 //
@@ -394,9 +397,19 @@ export class WorkflowRunEventsReader {
     }
   }
 
-  /** 路径白名单守卫（复用 isStrictlyUnder(getPiAgentDir()) 先例——recordPath 是 session JSONL 提取物，不可信）。 */
+  /**
+   * 路径白名单守卫（复用 isStrictlyUnder 先例——recordPath 是 session JSONL 提取物，
+   * 不可信）。双域放行 = pi 宿主树（getPiAgentDir，会话 jsonl 本体域，存量 run journal
+   * 旧布局 `<agentDir>/sessions/<slug>/workflow-state/` 在此）+ session 存储树
+   *（getSessionStoreDir，[session-store-layout-inversion] 新布局 run journal
+   * `<dataDir>/ext-sessions/<sid>/workflow/runs/` 在此）——各自数据的物理域。这是安全
+   * 边界的放行域枚举，不是数据读取的双根回退（读取本身单新根，D6 旧布局不读）。
+   */
   private isPathAllowed(recordPath: string): boolean {
-    return isStrictlyUnder(getPiAgentDir(), recordPath)
+    return (
+      isStrictlyUnder(getPiAgentDir(), recordPath) ||
+      isStrictlyUnder(getSessionStoreDir(), recordPath)
+    )
   }
 
   /**

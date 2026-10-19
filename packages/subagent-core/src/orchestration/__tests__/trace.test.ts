@@ -28,7 +28,7 @@ function makeTraceNode(stepIndex: number): ExecutionTraceNode {
   };
 }
 
-/** 按 stepIndex 查 trace 节点（Trace 公共查询面 = toArray 线性扫）。 */
+/** 按 stepIndex 查 trace 节点（Trace 公共查询范围 = toArray 线性扫）。 */
 function findByStep(trace: Trace, stepIndex: number): ExecutionTraceNode | undefined {
   return trace.toArray().find((n) => n.stepIndex === stepIndex);
 }
@@ -91,7 +91,7 @@ describe("Trace remove 后 re-append 同 stepIndex", () => {
 describe("Trace 重复 stepIndex 违规语义锚定（W1TC12）", () => {
   it("W1TC12: 重复 append 数组序保留；重复 append 后 remove 呈 desync 孤儿", () => {
     // ① 重复 append 同 stepIndex 且未 remove：nodes 数组按 append 序保留两节点
-    //    （byIndex 键 last-wins 属内部索引实现，公共查询面只见数组序）
+    //    （byIndex 键 last-wins 属内部索引实现，公共查询范围只见数组序）
     const t1 = new Trace();
     const first = makeTraceNode(0);
     const second = makeTraceNode(0);
@@ -238,7 +238,7 @@ describe("Trace update patch.result 缺省", () => {
 
 describe("Trace.fromArray 原样保留", () => {
   it("W1TC8: 超长 content 不被二次裁剪；已含标记的形态逐字节不变", () => {
-    // 旧版本未裁剪的快照重水合：20000 字符全长保留
+    // 旧版本未裁剪的快照重新加载：20000 字符全长保留
     const long = {
       ...makeTraceNode(0),
       result: makeResult("z".repeat(20000)),

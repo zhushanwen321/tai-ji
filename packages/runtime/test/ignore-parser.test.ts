@@ -171,7 +171,7 @@ describe('compileIgnoreRules / matchPath', () => {
 
   /**
    * 短路径直通（D7-2，W24）：无 '/' 的路径只有自身一个前缀（allPrefixes('x') ≡ ['x']），
-   * matchPath 跳过 allPrefixes 直接以 [path] 测试。等价性守卫：覆盖 plain/dirOnly/
+   * matchPath 跳过 allPrefixes 直接以 [path] 测试。等价性检查：覆盖 plain/dirOnly/
    * negated/anchored 四类规则在无斜杠路径上的行为，防止直通分支引入语义漂移。
    */
   describe('short-path fast path (D7-2)', () => {
@@ -203,7 +203,7 @@ describe('compileIgnoreRules / matchPath', () => {
       expect(matchPath(m, 'x')).toBe(false)
     })
 
-    it('empty path / root path: never matched even under * rule (A-2 空串守卫)', () => {
+    it('empty path / root path: never matched even under * rule (A-2 空串检查)', () => {
       // W24 审查 A-2：''（与归一化后的根路径 '/'）必须保持旧 allPrefixes 语义（恒 false）。
       // 旧版 allPrefixes('') 返回 []；直通分支若放行 ['']，`*` 规则 regex 命中空串且
       // isSelf 成立 → 错误判 true。空串/根路径出现在 matchPath 的典型来源：cwd 自身守门
@@ -267,7 +267,7 @@ describe('compileIgnoreRules / matchPath', () => {
       }
     })
 
-    it('空串经手工展开（无前缀）同样恒 false，与直通守卫一致（A-2/A-6 交叉验证）', () => {
+    it('空串经手工展开（无前缀）同样恒 false，与直通检查一致（A-2/A-6 交叉验证）', () => {
       const m = compileIgnoreRules('*')
       expect(matchViaExpansion(m, '')).toBe(false)
       expect(matchPath(m, '')).toBe(matchViaExpansion(m, ''))

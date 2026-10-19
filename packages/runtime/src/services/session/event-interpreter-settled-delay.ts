@@ -1,7 +1,7 @@
 /**
  * AgentSettledDelayer — agent_settled 延迟注入协作对象（V7 验收基建）。
  *
- * [协作对象，T4 拆分] 从 event-interpreter.ts 按变化轴抽出：settlingDelayTimer 与 disposed
+ * [协作对象，T4 拆分] 从 event-interpreter.ts 按变化原因抽出：settlingDelayTimer 与 disposed
  * 短路标志两个可变态只服务「agent_settled 何时执行三件副作用」这一个时序决策，与 interpreter
  * 主编排无共享状态（解释见 event-interpreter.ts 头注「协作对象」节）。interpreter 构造时以
  * apply 回调装配（回调内执行三件副作用），本对象不持有 interpreter 主引用。
@@ -84,7 +84,7 @@ export class AgentSettledDelayer {
     }
   }
 
-  /** 副作用执行入口（销毁短路唯一守卫点）。 */
+  /** 副作用执行入口（销毁短路唯一检查点）。 */
   private run(): void {
     // [定向复审缺陷 2] 销毁短路：interpreter 已随 adapter detach 而废弃（同 id restore 会
     // 重注册新实例），在途延迟 timer 到点的幽灵副作用（idle 行无条件写 + fanOutSettled

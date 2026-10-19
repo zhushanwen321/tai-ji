@@ -8,13 +8,13 @@
  * - 无 assistant（无 text 块）时无锚块，TurnSummary 不挂载
  *
  * mount 真实 Block + stub 其余子组件（shallowMount 的 stub 不渲染具名插槽，探不到插槽挂载的
- * TurnSummary）。fork/handoff 按钮的 data-testid / disabled 守卫单测在 TurnSummary 维度覆盖
+ * TurnSummary）。fork/handoff 按钮的 data-testid / disabled 检查单测在 TurnSummary 维度覆盖
  * （本文件 TurnSummary 以 stub 出现，断言 testid 无意义）。Turn.vue 维度只校验编排挂载了
  * 正确的子组件。
  *
  * [w6 chat-ui-and-shell T7] ui 包 Turn 经 ChatViewDeps inject 消费依赖，
  * 原 renderer store/composable vi.mock（chatStore/useChat/useSidebar/useTurnElapsed）
- * 已失效，改为 mount 时 provide mock deps（isHandingOff 守卫断言经 overrides 注入）。
+ * 已失效，改为 mount 时 provide mock deps（isHandingOff 检查断言经 overrides 注入）。
  *
  * 运行：cd packages/renderer && npx vitest run src/__tests__/components/Turn.smoke.test.ts
  */

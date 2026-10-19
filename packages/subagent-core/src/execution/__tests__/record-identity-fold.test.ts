@@ -2,7 +2,7 @@
 //
 // [身份换源] 子文件无 identity entry 时，身份域从事件流折叠取得
 // （record-store.scanFile：identity entry → **事件流折叠**；[身份换源第二步] 后
-// binding 兜底腿已退场，折叠是 identity entry 之外的唯一身份源，统计域同源）。
+// binding 兜底路径已退场，折叠是 identity entry 之外的唯一身份源，统计域同源）。
 //
 // 背景（event-sourcing 收敛）：`.state` 收条与 `.record-binding` 读侧均已退场，
 // 事件流是身份域与统计域的唯一事实源（身份域 + model/thinkingLevel/worktree 在
@@ -12,7 +12,7 @@
 // 本套件锁定的关键难点 = **折叠的 id 入口**：折叠要 record id，而子文件没有 identity
 // entry 时 id 无从由身份来。结构性入口 = 事件目录本身（文件名主名即 id，文件内
 // record-bound 帧携带 sessionFile）——本套件用「无 binding sidecar」的 fixture 证明
-// 身份确实来自折叠腿而非绑定腿（fixture 里没有 .record-binding 文件，断言其不存在）。
+// 身份确实来自折叠路径而非绑定路径（fixture 里没有 .record-binding 文件，断言其不存在）。
 //
 // fixture 一律 mkdtempSync 自建自删（tmpdir），不触碰真实数据目录。
 
@@ -33,6 +33,9 @@ import { RECORD_BINDING_SIDECAR_EXT } from "../persistence/state-marker.ts";
 
 const STARTED_AT = 1_700_000_000_000;
 const RECORD_ID = "sa-fold-1";
+/** 目录分区键 fixture（新布局 `<root>/<rootSid>/subagents/`；store 经 getter 注入
+ *  显式目录，sid 只须过 shared assertPiSessionId 合法性）。 */
+const PARTITION_SID = "sid-identity-fold";
 
 /** engine-CLI 化子 session 文件 fixture：{session, message} 条目族，**无身份 entry**。 */
 function writeIdentityLessChildSession(sessionsDir: string): string {
@@ -66,7 +69,7 @@ function writeIdentityLessChildSession(sessionsDir: string): string {
 /** 事件流身份 fixture：record-created（全身份域 + model/thinkingLevel/worktree）。
  *  经生产 journal 写入（非手写帧——seq 分配与头行契约单源）。 */
 async function seedCreatedFrame(recordsDir: string): Promise<void> {
-  const journal = createRecordEventStream(recordsDir);
+  const journal = createRecordEventStream(() => recordsDir);
   await journal.append(RECORD_ID, {
     type: "record-created",
     ts: STARTED_AT,
@@ -121,9 +124,9 @@ function seedCorruptCreatedFrame(recordsDir: string, sessionFile: string): void 
   );
 }
 
-/** record-bound 帧（折叠腿与子文件的唯一结构链接：sessionFile）。 */
+/** record-bound 帧（折叠路径与子文件的唯一结构链接：sessionFile）。 */
 async function seedBoundFrame(recordsDir: string, sessionFile: string): Promise<void> {
-  const journal = createRecordEventStream(recordsDir);
+  const journal = createRecordEventStream(() => recordsDir);
   await journal.append(RECORD_ID, {
     type: "record-bound",
     ts: STARTED_AT + 500,
@@ -136,7 +139,7 @@ async function seedBoundFrame(recordsDir: string, sessionFile: string): Promise<
 
 /** 终局帧（收条换源面：终态收条 = 折叠结果，非 .state sidecar）。 */
 async function seedSettledFrame(recordsDir: string): Promise<void> {
-  const journal = createRecordEventStream(recordsDir);
+  const journal = createRecordEventStream(() => recordsDir);
   await journal.append(RECORD_ID, {
     type: "record-settled",
     ts: STARTED_AT + 2000,
@@ -155,8 +158,8 @@ describe("[身份换源] 无 identity entry 子文件的身份域 = 事件流折
 
   beforeEach(() => {
     agentDir = fs.mkdtempSync(path.join(os.tmpdir(), "record-identity-fold-"));
-    sessionsDir = getSubagentSessionDir(agentDir, agentDir);
-    recordsDir = getSubagentRecordsDir(agentDir, agentDir);
+    sessionsDir = getSubagentSessionDir(PARTITION_SID, agentDir);
+    recordsDir = getSubagentRecordsDir(PARTITION_SID, agentDir);
     fs.mkdirSync(sessionsDir, { recursive: true });
     fs.mkdirSync(recordsDir, { recursive: true });
   });
@@ -170,10 +173,10 @@ describe("[身份换源] 无 identity entry 子文件的身份域 = 事件流折
     await seedCreatedFrame(recordsDir);
     await seedBoundFrame(recordsDir, file);
     await seedSettledFrame(recordsDir);
-    // 负前提（本用例的全部意义）：「绑定腿不存在」——identity 只可能来自折叠。
+    // 负前提（本用例的全部意义）：「绑定路径不存在」——identity 只可能来自折叠。
     expect(fs.existsSync(`${file}${RECORD_BINDING_SIDECAR_EXT}`)).toBe(false);
 
-    const store = new RecordStore(sessionsDir, undefined, undefined, recordsDir);
+    const store = new RecordStore(() => sessionsDir, undefined, undefined, () => recordsDir);
     const records = store.collectRecords(10, "all", undefined, true);
 
     expect(records).toHaveLength(1);
@@ -194,22 +197,22 @@ describe("[身份换源] 无 identity entry 子文件的身份域 = 事件流折
     expect(rec.model).toBe("prov/model-fold");
     expect(rec.thinkingLevel).toBe("high");
     expect(rec.worktree).toBe(true);
-    // 子文件锚（折叠腿必须把扫描到的文件路径带回 base）
+    // 子文件锚（折叠路径必须把扫描到的文件路径带回 base）
     expect(rec.sessionFile).toBe(file);
     // 终态收条（折叠的 record-settled 帧，非 .state sidecar）
     expect(rec.status).toBe("idle");
     expect(rec.stopReason).toBe("completed");
     // [② 读侧换源] 统计域已换源折叠收条：endedAt/turns/totalTokens 取 settled 帧
-    //（原 binding 快照投影随读侧换源退场——登记项的落地翻转）。
+    //（原 binding 快照派生视图随读侧换源退场——登记项的落地翻转）。
     expect(rec.endedAt).toBe(STARTED_AT + 2000);
     expect(rec.turns).toBe(1);
     expect(rec.totalTokens).toBe(30);
   });
 
-  it("对照组：无事件文件也无绑定 → 不重建（证明重建确由折叠腿承载，不是别的兜底）", () => {
+  it("对照组：无事件文件也无绑定 → 不重建（证明重建确由折叠路径承载，不是别的兜底）", () => {
     writeIdentityLessChildSession(sessionsDir);
 
-    const store = new RecordStore(sessionsDir, undefined, undefined, recordsDir);
+    const store = new RecordStore(() => sessionsDir, undefined, undefined, () => recordsDir);
     expect(store.collectRecords(10, "all", undefined, true)).toEqual([]);
   });
 
@@ -217,24 +220,24 @@ describe("[身份换源] 无 identity entry 子文件的身份域 = 事件流折
     writeIdentityLessChildSession(sessionsDir);
     await seedCreatedFrame(recordsDir);
 
-    const store = new RecordStore(sessionsDir, undefined, undefined, recordsDir);
+    const store = new RecordStore(() => sessionsDir, undefined, undefined, () => recordsDir);
     expect(store.collectRecords(10, "all", undefined, true)).toEqual([]);
   });
 
-  it("fold 身份腿不认损坏载荷：record-created 身份域类型漂移 → 不重建（零幻影——损坏残留不误判成身份）", async () => {
+  it("fold 身份路径不认损坏载荷：record-created 身份域类型漂移 → 不重建（零幻影——损坏残留不误判成身份）", async () => {
     const file = writeIdentityLessChildSession(sessionsDir);
     seedCorruptCreatedFrame(recordsDir, file);
 
-    const store = new RecordStore(sessionsDir, undefined, undefined, recordsDir);
+    const store = new RecordStore(() => sessionsDir, undefined, undefined, () => recordsDir);
     expect(store.collectRecords(10, "all", undefined, true)).toEqual([]);
   });
 
-  it("折叠腿命中后 findLightById 可直查（id→file 索引随扫描建立）", async () => {
+  it("折叠路径命中后 findLightById 可直查（id→file 索引随扫描建立）", async () => {
     const file = writeIdentityLessChildSession(sessionsDir);
     await seedCreatedFrame(recordsDir);
     await seedBoundFrame(recordsDir, file);
 
-    const store = new RecordStore(sessionsDir, undefined, undefined, recordsDir);
+    const store = new RecordStore(() => sessionsDir, undefined, undefined, () => recordsDir);
     expect(store.collectRecords(10, "all", undefined, true)).toHaveLength(1);
     expect(store.findLightById(RECORD_ID)?.id).toBe(RECORD_ID);
   });

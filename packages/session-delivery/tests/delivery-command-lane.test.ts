@@ -1,12 +1,12 @@
 /**
  * 无标记条目内核契约测试（pi1-disposition-chat-flow D2②/D14⑥ 起源；ADR-0122 首败即停
  * 统一语义 + skill-input-marker-pollution 技能通路并入后为「无标记条目」统一契约）：
- * - 首败即停（ADR-0122）：port.send 失败一次即收口，全条目统一（无 backoff 重试链）——
+ * - 首败即停（ADR-0122）：port.send 失败一次即收尾，全条目统一（无 backoff 重试链）——
  *   unmarked 条目从内核移除（无 tombstone）、checked 条目 reject、普通 send() 条目
  *   onSettled('rejected') 逐条上报后移除
  * - failInFlight：断连事件驱动的显式失败终局——in-flight 条目批量转 failed（留守活跃集
  *   等用户处置），queued 条目不触碰
- * - D2② 组批隔离：无标记条目与普通条目同窗挂账 / 同队列积累时无标记条目恒单独成批
+ * - D2② 组批隔离：无标记条目与普通条目同窗挂起 / 同队列积累时无标记条目恒单独成批
  *   （port.send 收到裸文本，不被 BATCH_SEP 拼接为混合 composed——拼接文本使命令解析与
  *   适配器全文身份匹配必然 miss）+ 普通条目合批语义不变（对照）
  * - F1-11：handled 终局路径 checked waiter 受理口径 settle
@@ -159,7 +159,7 @@ describe('D2② 组批隔离：无标记条目不与普通条目拼为混合 com
     return payload.kind === 'text' ? payload.content : ''
   }
 
-  it('pump 混合挂账：无标记+普通同窗挂账 → 无标记条目独立成段（port.send 收到裸文本），普通条目随后照常出站', async () => {
+  it('pump 混合挂起：无标记+普通同窗挂起 → 无标记条目独立成段（port.send 收到裸文本），普通条目随后照常出站', async () => {
     // 每批 send 挂起、逐批放行（advanceTimersByTimeAsync 的微任务 flush 会跑完同步级联，
     // 逐批受控才能逐批断言 composed 形态）
     const resolvers: Array<() => void> = []
@@ -170,7 +170,7 @@ describe('D2② 组批隔离：无标记条目不与普通条目拼为混合 com
     })
     const handle = createDelivery(port)
     const m1 = handle.sendChecked(msg('普通一'), { id: 'm-1' })
-    // 在途窗口内连发：无标记 + 普通先后挂账（隔离生效前 pump 会把两者汇为一批拼接出站）
+    // 在途窗口内连发：无标记 + 普通先后挂起（隔离生效前 pump 会把两者汇为一批拼接出站）
     const c1 = handle.sendChecked(msg('/todos'), { id: 'c-1', unmarked: true })
     const m2 = handle.sendChecked(msg('普通二'), { id: 'm-2' })
     await vi.advanceTimersByTimeAsync(0)
@@ -195,7 +195,7 @@ describe('D2② 组批隔离：无标记条目不与普通条目拼为混合 com
     handle.dispose()
   })
 
-  it('pump 双无标记挂账：无标记批恒单条（两条命令互拼同样使命令解析 miss）', async () => {
+  it('pump 双无标记挂起：无标记批恒单条（两条命令互拼同样使命令解析 miss）', async () => {
     const resolvers: Array<() => void> = []
     const port = makeMockPort({
       send: () => new Promise<void>((resolve) => {
@@ -277,7 +277,7 @@ describe('F1-11：handled 终局路径 checked waiter 受理口径 settle', () =
     const full = handle.entriesFull()
     expect(full.active.some((e) => e.id === 'cmd-handled')).toBe(false)
     expect(full.tombstones.some((t) => t.id === 'cmd-handled' && t.state === 'delivered')).toBe(true)
-    // waiter 已随终局了结（checkedPending 清空）：dispose 不再有挂账可 reject（无
+    // waiter 已随终局了结（checkedPending 清空）：dispose 不再有挂起可 reject（无
     // 未处理 rejection 即 waiter 已被 resolveWaitersOf 移除的间接锚定）
     handle.dispose()
     await checked

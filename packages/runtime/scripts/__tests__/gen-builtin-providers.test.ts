@@ -128,9 +128,9 @@ describe('gen-builtin-providers', () => {
   })
 
   it('t10: 快照自包含指纹（D3）——header 指纹 == providers 内容 + piAiVersion == 实装 + 快照 == 提取函数输出', () => {
-    // 自包含断言替代手写基线数字（旧基线 1220 在 pi 0.84.1→0.84.4 升级时失守，守卫自身成为
+    // 自包含断言替代手写基线数字（旧基线 1220 在 pi 0.84.1→0.84.4 升级时失守，检查自身成为
     // 需要人工同步的第三份数据）。pi 升级后只需重跑 gen 重生成快照即自洽；model 级内容漂移的
-    // 人工核对面（升级 PR 的快照 diff）归 check-pi-sync 守卫的快照新鲜度检查。
+    // 人工核对面（升级 PR 的快照 diff）归 check-pi-sync 检查的快照新鲜度检查。
     // ① header 指纹 == 快照 providers 实际内容（生成端与产物端的自洽契约）
     expect(snapshot.providerCount).toBe(snapshot.providers.length)
     const totalModels = snapshot.providers.reduce((s, p) => s + p.models.length, 0)
@@ -138,8 +138,8 @@ describe('gen-builtin-providers', () => {
     // ② 磁盘快照 == 当前代码 + 当前实装 pi-ai 的提取输出：快照过期（pi 升级未重生成）
     //    或 gen 脚本提取逻辑变更未重生成时在此暴露
     expect(snapshot.providers).toEqual(providers)
-    // ③ 快照 piAiVersion == node_modules 实装版本——与 check-pi-sync 守卫矩阵第 3 项构成
-    //    刻意双通道：本条在测试期跑（CI test 路径），守卫在提交期跑（pre-commit + CI invariants）
+    // ③ 快照 piAiVersion == node_modules 实装版本——与 check-pi-sync 检查矩阵第 3 项构成
+    //    刻意双通道：本条在测试期跑（CI test 路径），检查在提交期跑（pre-commit + CI invariants）
     expect(snapshot.piAiVersion).toBe(readPiAiVersion())
   })
 })

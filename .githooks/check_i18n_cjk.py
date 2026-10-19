@@ -26,7 +26,7 @@ GREEN = '\033[0;32m'
 YELLOW = '\033[1;33m'
 NC = '\033[0m'
 
-# 扫描根：桌面 renderer 组件 + 移动壳 src 全部 .vue（双壳并列消费面；
+# 扫描根：桌面 renderer 组件 + 移动壳 src 全部 .vue（双壳并列消费方；
 # mobile-renderer 缺席是 TokenInputView 硬编码中文漏网的盲区根因）
 SCAN_ROOTS = (
     Path('packages/renderer/src/components'),

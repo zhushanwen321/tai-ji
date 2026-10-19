@@ -19,6 +19,9 @@
  */
 import type { ExtensionAPI, ExtensionCommandContext } from "@earendil-works/pi-coding-agent";
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import { mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 
 // ── module mocks（必须在 import 被测模块之前声明）──────────────
 
@@ -39,11 +42,24 @@ vi.mock("@zhushanwen/pi-extension-logger", () => ({
   setPiHandle: vi.fn(),
 }));
 
+// 本包 vitest alias 把 @earendil-works/pi-coding-agent 指向 mocks/pi-coding-agent.ts
+//（getAgentDir 硬编码 /home/user/.pi/agent）。结果文件回执用例经 PI_CODING_AGENT_DIR
+// 钉到 mkdtemp 临时目录——部分覆写 mock 的 getAgentDir 加 env 优先语义（对齐
+// adoption.test.ts 手法），其余 mock 成员原样保留。
+vi.mock("@earendil-works/pi-coding-agent", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@earendil-works/pi-coding-agent")>();
+  return {
+    ...actual,
+    getAgentDir: (): string => process.env.PI_CODING_AGENT_DIR || actual.getAgentDir(),
+  };
+});
+
 // ── 延迟 import 被测模块（取 mock 后的实现）──────────────────
 
 // 被 mock 的模块——vi.mock 路径与被测源文件解析到同一物理模块，确保 vitest 拦截同一模块实例。
 // 使用 import 副作用顺序：vi.mock 在文件顶部提升，此处 import 拿到的是 mock 版本。
 import { setSubagentService, setModelConfigService } from "@zhushanwen/subagent-core";
+import { ENV_ROOT_CWD, getSubagentMessageResultsDir } from "@zhushanwen/subagent-core";
 import { registerWorkflowsCommand } from "../interface/command/commands.ts";
 import { registerSubagentsCommand } from "../interface/command/subagents.ts";
 import {
@@ -79,6 +95,45 @@ function injectModelServiceWith(entries: Array<{ provider: string; id: string }>
   } as never);
 }
 
+// ── 结果文件回执用例的环境钉制（结果回执契约 2026-10-18）────────────────
+//
+// writeMessageResultFile 落盘路径 = getSubagentMessageResultsDir(getAgentDir(), cwd)。
+// 用例经 PI_CODING_AGENT_DIR 把 getAgentDir 钉到临时目录（顶部 partial mock 已加 env
+// 优先）+ ctx.cwd 提供会话 cwd；PI_SUBAGENT_ROOT_CWD（writeMessageResultFile 的 cwd
+// 优先位）与宿主环境隔离——保存/恢复，防污染同 worker 其他用例。
+
+function pinReceiptEnv(): { agentDir: string; cwd: string; dispose: () => void } {
+  const agentDir = mkdtempSync(join(tmpdir(), "rpc-cmd-receipt-agent-"));
+  const cwd = mkdtempSync(join(tmpdir(), "rpc-cmd-receipt-cwd-"));
+  const savedAgentDir = process.env.PI_CODING_AGENT_DIR;
+  const savedRootCwd = process.env[ENV_ROOT_CWD];
+  process.env.PI_CODING_AGENT_DIR = agentDir;
+  delete process.env[ENV_ROOT_CWD];
+  return {
+    agentDir,
+    cwd,
+    dispose: () => {
+      if (savedAgentDir === undefined) delete process.env.PI_CODING_AGENT_DIR;
+      else process.env.PI_CODING_AGENT_DIR = savedAgentDir;
+      if (savedRootCwd === undefined) delete process.env[ENV_ROOT_CWD];
+      else process.env[ENV_ROOT_CWD] = savedRootCwd;
+      rmSync(agentDir, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 });
+      rmSync(cwd, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 });
+    },
+  };
+}
+
+/** mock ctx 回退腿的 rootSessionId（与两处 ctx 构造的 sessionManager.getSessionId 同值）。 */
+const TEST_ROOT_SID = "mock-root-sid";
+
+/** 读 --req 结果文件回执并解析（错误语义断言用；路径与写侧同源单源函数推导——
+ *  同 rootSessionId 分区键 + 同 env 数据根缺省）。 */
+function readReceipt(_agentDir: string, _cwd: string, requestId: string): unknown {
+  return JSON.parse(
+    readFileSync(join(getSubagentMessageResultsDir(TEST_ROOT_SID), `${requestId}.json`), "utf8"),
+  );
+}
+
 /** 经真实单例访问器注入 fake service（消费方 interface/* 经 barrel 读同一 globalThis 槽）。 */
 function injectFakeService(service: unknown): void {
   setSubagentService(service as never);
@@ -86,8 +141,9 @@ function injectFakeService(service: unknown): void {
 
 // ── 类型辅助 ────────────────────────────────────────────────
 
-/** 最小 ctx mock：mode/hasUI/ui.notify（handler RPC 分支依赖）+ isIdle（留痕分流判据）。 */
-type CtxMock = Pick<ExtensionCommandContext, "mode" | "hasUI" | "ui" | "isIdle">;
+/** 最小 ctx mock：mode/hasUI/ui.notify（handler RPC 分支依赖）+ isIdle（留痕分流判据）
+ *  + cwd（结果文件回执用例的写入面）。 */
+type CtxMock = Pick<ExtensionCommandContext, "mode" | "hasUI" | "ui" | "isIdle" | "cwd">;
 
 /** ExtensionAPI 的最小子集：registerCommand 捕获 handler + sendMessage 捕获留痕调用。 */
 type PiMock = Pick<ExtensionAPI, "registerCommand" | "sendMessage">;
@@ -250,7 +306,7 @@ describe("parseSubagentRpcCommand message/start（定向消息通道）", () => 
 
 describe("转义协议互逆（message/start 文本往返不变）", () => {
   // runtime 侧 encodeDirectiveText（session-service.ts）的本地镜像：extension 不依赖
-  // runtime 包（依赖边界 F7），互逆性靠两侧测试对同一 wire 协议双向钉死。
+  // runtime 包（依赖边界 F7），互逆性靠两侧测试对同一 wire 协议双向固定。
   // 编码规则：原生反斜杠 → \\（先）、真实换行 → 字面 \n（后），命令保持单行。
   const encodeMirror = (s: string) => s.replace(/\\/g, "\\\\").replace(/\n/g, "\\n");
 
@@ -383,6 +439,9 @@ describe("registerSubagentsCommand — RPC 分支 dispatch", () => {
       hasUI: true,
       ui: { notify: vi.fn() } as unknown as CtxMock["ui"],
       isIdle: vi.fn(() => true),
+      // resolveRootSessionId 的 env 缺省回退腿读 sessionManager.getSessionId（换根后
+      // message/cancel 结果文件按 rootSessionId 分区键定位）
+      sessionManager: { getSessionId: () => "mock-root-sid" },
     };
     cancelMock = vi.fn();
     // 默认注入一个带 cancel 的 service（由用例覆写 cancelMock 行为）
@@ -424,17 +483,27 @@ describe("registerSubagentsCommand — RPC 分支 dispatch", () => {
     expect(ctx.ui.notify).toHaveBeenCalledWith("Usage: /subagents cancel <id>", "warning");
   });
 
-  it("RPC + cancel + service.cancel 抛异常 → try/catch 兜底 warning 文案", async () => {
+  it("RPC + cancel + service.cancel 抛异常 → 错误经 --req 结果文件传回，notify 不再走", async () => {
+    // [结果回执契约 2026-10-18] prompt 通道对命令 handler 异常不拒绝（resolve 语义），
+    // 失败经请求作用域结果文件传回——renderer cancelSubagent 依赖 rejection 回滚乐观
+    // 翻边；旧「Failed to cancel ...」warning notify 通道已删
+    const receipt = pinReceiptEnv();
+    ctx.cwd = receipt.cwd;
     cancelMock.mockImplementation(() => {
       throw new Error("service disposed");
     });
 
-    await runHandler("cancel bg-y");
+    try {
+      await runHandler("cancel bg-y --req=req-err-1");
 
-    expect(ctx.ui.notify).toHaveBeenCalledWith(
-      "Failed to cancel subagent bg-y: service disposed",
-      "warning",
-    );
+      expect(ctx.ui.notify).not.toHaveBeenCalled();
+      expect(readReceipt(receipt.agentDir, receipt.cwd, "req-err-1")).toEqual({
+        scope: "error",
+        error: { code: "subagent_cancel_failed", message: "Error: service disposed" },
+      });
+    } finally {
+      receipt.dispose();
+    }
   });
 
   it("RPC + noop（空参）→ info 文案（兜底）", async () => {
@@ -487,6 +556,8 @@ describe("registerSubagentsCommand — RPC message/start dispatch + 留痕", () 
       hasUI: true,
       ui: { notify: vi.fn() } as unknown as CtxMock["ui"],
       isIdle: vi.fn(() => true),
+      // resolveRootSessionId 的 env 缺省回退腿（同 TEST_ROOT_SID）
+      sessionManager: { getSessionId: () => TEST_ROOT_SID },
     };
     // 槽清理 + 非 null 兜底（message 缺 text 类用例在触 service 前走 Usage 分支，
     // 但 handler 先检查 service 就绪——空槽会提前进 "not ready" 分支）
@@ -518,7 +589,7 @@ describe("registerSubagentsCommand — RPC message/start dispatch + 留痕", () 
     const deliverChatMessage = vi.fn();
     const getRecordForAction = vi.fn(() => record);
     const engineSupportsConversation = vi.fn(() => true);
-    // [D4 聚合跟随] message/close 生产消费面 = service.chatActions
+    // [D4 聚合跟随] message/close 生产消费方 = service.chatActions
     injectFakeService({
       chatActions: {
         getRecordForAction,
@@ -557,7 +628,7 @@ describe("registerSubagentsCommand — RPC message/start dispatch + 留痕", () 
   it("message 正常（streaming）→ 留痕走 deliverAs:nextTurn，不 steer 主 agent 当前 turn", async () => {
     const record = makeRecord();
     const deliverChatMessage = vi.fn();
-    // [D4 聚合跟随] message/close 生产消费面 = service.chatActions
+    // [D4 聚合跟随] message/close 生产消费方 = service.chatActions
     injectFakeService({
       chatActions: {
         getRecordForAction: vi.fn(() => record),
@@ -590,8 +661,13 @@ describe("registerSubagentsCommand — RPC message/start dispatch + 留痕", () 
     );
   });
 
-  it("message 目标不存在（getRecordForAction throw）→ warning 文案，不留痕", async () => {
-    // [D4 聚合跟随] message/close 生产消费面 = service.chatActions
+  it("message 目标不存在（getRecordForAction throw）→ 错误经 --req 结果文件传回，不留痕、notify 不再走", async () => {
+    // [结果回执契约 2026-10-18] messageHandler 同步拒绝经结果文件传回（scope:error →
+    // runtime 抛分型错误 → WS error envelope → composer 车道 toast + restoreSegments
+    // 恢复草稿）；notify 只达 TUI/横幅不达回执面，旧 warning 通道已删
+    const receipt = pinReceiptEnv();
+    ctx.cwd = receipt.cwd;
+    // [D4 聚合跟随] message/close 生产消费方 = service.chatActions
     injectFakeService({
       chatActions: {
         getRecordForAction: vi.fn(() => {
@@ -601,14 +677,20 @@ describe("registerSubagentsCommand — RPC message/start dispatch + 留痕", () 
       },
     });
 
-    await runHandler("message sa-x hi");
+    try {
+      // --req 标记在 recordId 之后、text 之前（text 是剩余全量，标记必须在其前面才可剥离）
+      await runHandler("message sa-x --req=req-err-2 hi");
 
-    expect(ctx.ui.notify).toHaveBeenCalledWith(
-      'Failed to message subagent sa-x: No subagent record with id "sa-x"',
-      "warning",
-    );
-    // 失败不留痕（GUI 按 toast 错误处理，不产生假成功 entry）
-    expect(sendMessageMock).not.toHaveBeenCalled();
+      expect(ctx.ui.notify).not.toHaveBeenCalled();
+      // 失败不留痕（失败时无 subagent-directive 假成功 entry）
+      expect(sendMessageMock).not.toHaveBeenCalled();
+      expect(readReceipt(receipt.agentDir, receipt.cwd, "req-err-2")).toEqual({
+        scope: "error",
+        error: { code: "subagent_message_failed", message: 'Error: No subagent record with id "sa-x"' },
+      });
+    } finally {
+      receipt.dispose();
+    }
   });
 
   it("message 缺 recordId → Usage warning 指明缺什么，不触 service", async () => {
@@ -703,19 +785,18 @@ describe("registerSubagentsCommand — RPC message/start dispatch + 留痕", () 
     );
   });
 
-  it("start service.execute 抛错（slug 超长等）→ warning 文案，不留痕", async () => {
+  it("start service.execute 抛错（slug 超长等）→ 沿 prompt 通道抛回（GUI 依赖 rejection），不留痕", async () => {
     injectFakeService({
       execute: vi.fn().mockRejectedValue(new Error("slug must be ≤35 chars")),
-      // [U1/U2] startHandler 解析链（E4 守卫前置）在 execute 之前调；缺省 async 不触发额外分支
+      // [U1/U2] startHandler 解析链（E4 检查前置）在 execute 之前调；缺省 async 不触发额外分支
       getCollectSyncDefault: () => "async",
     });
 
-    await runHandler("start x task text");
+    // [结果回执契约 2026-10-18] start 无 --req 回执面——失败原样 rethrow 沿 prompt
+    // 通道抛回，renderer 依赖 rejection 呈现失败；旧 warning notify 通道已删
+    await expect(runHandler("start x task text")).rejects.toThrow("slug must be ≤35 chars");
 
-    expect(ctx.ui.notify).toHaveBeenCalledWith(
-      "Failed to start subagent x: slug must be ≤35 chars",
-      "warning",
-    );
+    expect(ctx.ui.notify).not.toHaveBeenCalled();
     expect(sendMessageMock).not.toHaveBeenCalled();
   });
 });
@@ -744,6 +825,8 @@ describe("registerWorkflowsCommand — RPC 分支 dispatch", () => {
       hasUI: true,
       ui: { notify: vi.fn() } as unknown as CtxMock["ui"],
       isIdle: vi.fn(() => true),
+      // resolveRootSessionId 的 env 缺省回退腿（同 TEST_ROOT_SID）
+      sessionManager: { getSessionId: () => TEST_ROOT_SID },
     };
   });
 

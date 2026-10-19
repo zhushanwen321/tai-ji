@@ -46,7 +46,7 @@ const CANNED_REPLY = "好的，我来处理这个请求。（mock 模拟回复�
 
 /** markdown 宽表回复（关键词 'md-table' 触发）—— 复刻真实对话流里的 CJK 短标签列 +
  *  长 inline code token 组合（auto table layout 在 max-content/max-width 夹紧下会把短中文列
- *  压向 min-content 的形态），供 e2e/markdown-table-layout.spec.ts 的列宽地板回归守卫取数。
+ *  压向 min-content 的形态），供 e2e/markdown-table-layout.spec.ts 的列宽地板回归检查取数。
  *  哨兵词取 ASCII 形态，避免自然语言误触发（同 emitUiRequest 的 'ui-select' 哨兵纪律）。 */
 const TABLE_REPLY = [
   "| 维度 | pi | zcode | 风险 |",
@@ -285,7 +285,7 @@ export async function runSendStream(
 ): Promise<void> {
   const { nextId, emit, sleep, isCancelled, TIMING } = deps;
   const messageId = nextId("m");
-  // 哨兵词 'md-table' → markdown 宽表回复（列宽地板 e2e 守卫数据源，见 TABLE_REPLY）；
+  // 哨兵词 'md-table' → markdown 宽表回复（列宽地板 e2e 检查数据源，见 TABLE_REPLY）；
   // 其余走固定回复。表格前留空行：段落到表格显式分块，避免依赖 GFM 的段落中断行为。
   const reply = TABLE_TRIGGER_RE.test(text)
     ? `已处理："${text}"。\n\n${TABLE_REPLY}`

@@ -9,7 +9,7 @@
 // 1. offset 续读（readEventTail）：per-file 字节偏移，只推进到完整行边界——
 //    runtime 派生视图的缺口补读与冷读入口（events-projection readFromOffset）；
 // 2. 幂等全量重读：文件变短（截断/重建）→ 偏移归零重读——重复行的去重归域
-//    fold（record 域 seq 单调守卫构造性保证；run 域 seq 由 W1 补齐）。
+//    fold（record 域 seq 单调检查构造性保证；run 域 seq 由 W1 补齐）。
 //
 // [event-push-channel W-P3 退役登记] watch 族三原语（目录级 fs.watch / 30s 周期复查
 // 兜底 / 5s 失败重挂 + 200ms 合并）已整体删除——ADR-0122「活状态走订阅推送，存储只

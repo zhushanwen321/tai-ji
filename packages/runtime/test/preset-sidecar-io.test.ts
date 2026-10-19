@@ -2,8 +2,8 @@
  * preset sidecar IO 单测（wave2）。
  *
  * 覆盖：
- * - persistPresetBinding：写入 / 文件守卫（规则#6）/ 缓存失效
- * - readPresetBinding：正例 / ENOENT / JSON 畸形 / 类型守卫
+ * - persistPresetBinding：写入 / 文件检查（规则#6）/ 缓存失效
+ * - readPresetBinding：正例 / ENOENT / JSON 畸形 / 类型检查
  * - scanSessionMeta 四读合一：launchPresetId 合并进 meta + 缓存命中
  *
  * 策略：真实 mkdtemp 临时目录 + 真实 fs（参考 scan-cache-merge.test.ts 范式）。
@@ -130,9 +130,9 @@ describe('preset sidecar IO', () => {
     expect(realFs.existsSync(filePath + '.preset.json')).toBe(false)
   })
 
-  // ── V9-④ 根修：create 路径 skipJsonlExistsGuard 放行 ──
+  // ── V9-④ 从根源修复：create 路径 skipJsonlExistsGuard 放行 ──
   // 场景复现 Gate B fail：landing create 后 pi 延迟写入窗口内 .jsonl 未 flush
-  //（文件不存在，路径由 pi SessionManager 构造时确定性生成），此前 existsSync 守卫
+  //（文件不存在，路径由 pi SessionManager 构造时确定性生成），此前 existsSync 检查
   // 恒跳过且 preset/agent 无补偿写点 → sidecar 结构性永不落盘，重启后 preset 绑定
   // 回退 builtin:full。放行后 create 即落盘；sidecar 是 taiji 自有文件（atomicWrite，
   // 不触碰 .jsonl 本体），不违反规则 #6。tc2 同时守住非 create 路径默认跳过语义。
@@ -157,13 +157,13 @@ describe('preset sidecar IO', () => {
     const filePath = join(tmpDir, 'unflushed-family.jsonl')
     expect(realFs.existsSync(filePath)).toBe(false)
 
-    // create 放行面：project / agent 与 preset 同写点同根因
+    // create 放行范围：project / agent 与 preset 同写点同根因
     persistProjectBinding(filePath, 'proj-9', { skipJsonlExistsGuard: true })
     expect(JSON.parse(realFs.readFileSync(filePath + '.project.json', 'utf-8'))).toEqual({ projectId: 'proj-9', version: 1 })
     persistAgentBinding(filePath, 'agent', 'pa-9', { skipJsonlExistsGuard: true })
     expect(JSON.parse(realFs.readFileSync(filePath + '.agent.json', 'utf-8'))).toEqual({ spawnSource: 'agent', parentAgentSessionId: 'pa-9', version: 1 })
 
-    // 默认守卫语义（fork/restore/setProject 等非 create 调用方不传 flag）保持跳过：
+    // 默认检查语义（fork/restore/setProject 等非 create 调用方不传 flag）保持跳过：
     // 新路径无 .jsonl → 不产生新 sidecar
     const otherPath = join(tmpDir, 'unflushed-other.jsonl')
     persistProjectBinding(otherPath, 'proj-x')
@@ -233,7 +233,7 @@ describe('preset sidecar IO', () => {
     expect(readPresetBinding(filePath)).toBeUndefined()
   })
 
-  it('tc7: readPresetBinding presetId 非字符串 → 返回 undefined（类型守卫）', () => {
+  it('tc7: readPresetBinding presetId 非字符串 → 返回 undefined（类型检查）', () => {
     const filePath = makeSessionFile('s5')
     realFs.writeFileSync(
       filePath + '.preset.json',

@@ -104,7 +104,7 @@ describe('parseSkillMarkers 往返无损', () => {
     expect(parsed[0].name).toBe('a"b\\c')
   })
 
-  it('残缺标记不解析（顺序错乱 / 非自闭合 / 未闭合引号 / 尾部截断）——破坏即透传（D8）', () => {
+  it('残缺标记不解析（顺序错乱 / 非自封闭 / 未结束引号 / 尾部截断）——破坏即透传（D8）', () => {
     expect(parseSkillMarkers('<taiji-skill location="/b.md" name="a"/>')).toHaveLength(0)
     expect(parseSkillMarkers('<taiji-skill name="a">')).toHaveLength(0)
     expect(parseSkillMarkers('<taiji-skill name="a" location="/b">')).toHaveLength(0)
@@ -219,7 +219,7 @@ describe('parseSkillsFallbackBlocks（D7 降级块解析）', () => {
     const blocks = parseSkillsFallbackBlocks(text)
     expect(blocks).toHaveLength(1)
     expect(blocks[0].skills[0].name).toBe('a')
-    // 区间止于闭合标签（指引行不存在，可选组不吞入），切片交叉验证
+    // 区间止于结束标签（指引行不存在，可选组不吞入），切片交叉验证
     expect(blocks[0].index).toBe(text.indexOf(`<${SKILLS_BLOCK_TAG}>`))
     expect(text.slice(blocks[0].index, blocks[0].index + blocks[0].length)).toBe(stripped)
     expect(text.slice(blocks[0].index + blocks[0].length)).toBe('\n后')
@@ -530,13 +530,13 @@ describe('findSkillDataBlockRange（R4 D11 剥块定位切片）', () => {
     expect(text.slice(range.end)).toBe('')
   })
 
-  it('未命中：纯文本 / 只有开标签未闭合 / 只有闭合标签 → null', () => {
+  it('未命中：纯文本 / 只有开标签未结束 / 只有结束标签 → null', () => {
     expect(findSkillDataBlockRange('纯文本消息')).toBeNull()
     expect(findSkillDataBlockRange('<taiji-skill-data>\n<taiji-skill name="a"/>')).toBeNull()
     expect(findSkillDataBlockRange('正文 </taiji-skill-data> 尾')).toBeNull()
   })
 
-  it('嵌套截断：非贪婪止于首个闭合标签（嵌套非生产形态，与 parseSkillsFallbackBlocks 同语义）', () => {
+  it('嵌套截断：非贪婪止于首个结束标签（嵌套非生产形态，与 parseSkillsFallbackBlocks 同语义）', () => {
     const close = '</taiji-skill-data>'
     const text = `<${SKILL_DATA_BLOCK_TAG}>A<${SKILL_DATA_BLOCK_TAG}>B${close}C${close}`
     const range = findSkillDataBlockRange(text)

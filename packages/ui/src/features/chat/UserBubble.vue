@@ -1,7 +1,7 @@
 <template>
   <!--
     UserBubble：用户气泡（展示态/编辑态 + skill/file/image badge + hover actions）。
-    从 Turn.vue 拆出。emit edit-state-change 通知父组件（MessageStream.onEditStateChange 按 turnKey 身份持有钉扎状态）。
+    从 Turn.vue 拆出。emit edit-state-change 通知父组件（MessageStream.onEditStateChange 按 turnKey 身份持有钉住状态）。
   -->
   <!-- user 区：编辑态 = 简化版 composer（富编辑器经 ChatViewDeps.editComposerRenderer 注入，
        见 chat-view-deps 契约；未注入的宿主回退纯 Textarea 编辑器）；展示态气泡 + hover actions。
@@ -176,7 +176,7 @@
         <Pencil class="size-3" />
       </Button>
       <!-- [U5 消息撤回 D6] 撤回按钮：生成中（isActive 置灰 + tooltip，D2 附带裁决）用伪禁用
-           （aria-disabled + click 守卫）而非 disabled attribute——disabled 元素不触发 hover，
+           （aria-disabled + click 检查）而非 disabled attribute——disabled 元素不触发 hover，
            tooltip 会被一并吞掉。 -->
       <Button
         variant="ghost"
@@ -199,7 +199,7 @@ import { computed, onUnmounted, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { ArrowRight, Check, Copy, FileText, Pencil, Undo2 } from '@lucide/vue'
 // primitives 直接路径（不经 @taiji/ui 顶层 barrel）：chat 组件被 barrel 再导出，
-// barrel 自引用会闭合一族循环依赖环（详见 BashOutputBlock.vue 同款注释）
+// barrel 自引用会封住一族循环依赖环（详见 BashOutputBlock.vue 同款注释）
 import { Button } from '../../primitives/button'
 import { Textarea } from '../../primitives/textarea'
 import { turnStableId } from '@taiji/core/domain/chat'
@@ -226,7 +226,7 @@ const props = withDefaults(
 
 const emit = defineEmits<{
   // D2：turnKey = turnStableId(turn)，编辑身份由事件源携带——父组件不再把数组索引
-  // 快照当钉扎状态（virtua keepMounted 越界崩溃根因），改为按稳定身份反查当前索引。
+  // 快照当钉住状态（virtua keepMounted 越界崩溃根因），改为按稳定身份反查当前索引。
   // 本组件只渲染有 user 的 turn，实际恒取 turn.user.id，但仍走 turnStableId 保持
   // 与渲染层 renderKey 单一身份口径。
   'edit-state-change': [{ editing: boolean; turnKey: string }]
@@ -320,7 +320,7 @@ const { copied, copy } = useCopy()
 const userCopyKey = computed(() => `user-${props.turn.user?.id ?? props.turn.index}`)
 
 /* ── [U5 消息撤回 D6] 撤回单入口：UI 透传 targetId，路由判定（在途 cancel / 已送达回退）
-      只在 core useChat.revokeMessage 单点（内核投影复核分派）；UI 仅用 isActive 谓词做
+      只在 core useChat.revokeMessage 单点（内核派生视图复核分派）；UI 仅用 isActive 谓词做
       展示态（生成中置灰 + tooltip）。 ── */
 
 /** 撤回 targetId = 消息 id 原样（live 态 `u-<uuid>` clientUuid / 基线重开态 pi entryId，形态分派在 runtime） */
@@ -332,7 +332,7 @@ const revokeTargetId = computed(() => props.turn.user?.id ?? null)
  */
 const isRevokeDisabled = computed(() => chatViewDeps.isActive(props.sessionId))
 
-/** 撤回点击：生成中守卫（伪禁用兜底）→ 单回调透传，路由分派在 core */
+/** 撤回点击：生成中检查（伪禁用兜底）→ 单回调透传，路由分派在 core */
 function onRevokeClick(): void {
   const id = revokeTargetId.value
   if (!id || isRevokeDisabled.value) return
@@ -352,7 +352,7 @@ watch(isEditingThisUser, (editing) => {
 
 // D3 卸载清理（谁置位谁清理）：切 session / 数据换血等路径卸载本组件时，编辑态
 // 的解除只能在这里发——watch 随组件作用域失效不再触发，cancelEdit/submitEdit 两个
-// 显式动作也不会执行。缺此清理会让父组件钉扎状态残留，keepMounted 越界渲染崩溃
+// 显式动作也不会执行。缺此清理会让父组件钉住状态残留，keepMounted 越界渲染崩溃
 // （编辑身份改为 turnKey 反查后此 emit 是反查失效的信号源）。
 // C2 实测（happy-dom + @vue/test-utils 2.4.11）：onUnmounted 内 emit 父监听器
 // 仍可达，wrapper.emitted 能收到该条记录——无需降级 onBeforeUnmount。
@@ -371,7 +371,7 @@ function startEdit(): void {
   // ② 含 skill/slash 段的消息在编辑框显示序列化标记文本而非 chip——视觉退化按原样接受，
   //    「从 Segment[] 重建 chip」的完整优化项经评估延期未实施（重审条件 = 用户反馈编辑重发体验）。
   // 坑：勿在此做「标记文本还原成 chip」的局部修复——提交侧 segment-rebuild 已按「剥离与保留段
-  // 重复的序列化文本」收口防标记翻倍，回填侧另造一套还原会形成两套口径。
+  // 重复的序列化文本」收尾防标记翻倍，回填侧另造一套还原会形成两套口径。
   // [user-bubble-edit-composer] draftText 现只服务回退路径（未注入 editComposerRenderer 的
   // 宿主）：富编辑器路径自带 setSegments 真 chip 还原，草稿真源在编辑框 DOM 内，不经本 ref。
   draftText.value = normalizeContent(props.turn.user.content)
@@ -386,10 +386,10 @@ function cancelEdit(): void {
  * 无序列化标记文本）→ 直提 editAndResend，与主 composer send 同契约（core useChat
  * editAndResend 签名即 Segment[]；segmentsToText 内部 slash 归位，chip 在 DOM 尾部也
  * 序列化到行首，提交顺序无虞）。
- * 与回退路径 submitEdit 同一收口链：
- * ① 空稿守卫（segmentsToText 序列化 trim 为空 = 无可提交内容 → 保持编辑态不收口）；
+ * 与回退路径 submitEdit 同一收尾链：
+ * ① 空稿检查（segmentsToText 序列化 trim 为空 = 无可提交内容 → 保持编辑态不收尾）；
  * ② [D3] 双发锁早退（提交在途 → 忽略，编辑态保持、草稿不丢——与 submitEdit 同序）；
- * ③ editingUserId=null 收口 → editAndResend（截断 + 重发）。
+ * ③ editingUserId=null 收尾 → editAndResend（截断 + 重发）。
  */
 function onEditorSubmit(segments: Segment[]): void {
   const user = props.turn.user
@@ -408,7 +408,7 @@ async function submitEdit(): Promise<void> {
   // [D3] 双发锁：提交在途（send 或上一次 editAndResend 的 pendingSend 瞬时态）时直接
   // return 忽略——与 Composer isSending 语义对齐，防 editAndResend 与 send 并发覆盖
   // useChat 的 pendingDirectSends（per-sid 单条 Map，后写覆盖前写致 rejected 帧误回滚）。
-  // 早退置于 editingUserId=null 之前：编辑态保持、草稿不丢，用户可在提交收口后重试。
+  // 早退置于 editingUserId=null 之前：编辑态保持、草稿不丢，用户可在提交收尾后重试。
   if (isPendingSend(props.sessionId)) return
   editingUserId.value = null
   const segments = rebuildSegmentsWithEditedText(user.content, text)

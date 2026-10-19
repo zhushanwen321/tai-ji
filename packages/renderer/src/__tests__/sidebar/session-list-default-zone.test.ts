@@ -183,9 +183,9 @@ describe('SessionList: 目录模式默认区（置顶目录标签 + folder 行�
     expect(wrapper.emitted('exportJsonl')).toEqual([[{ sessionId: 's1' }]])
   })
 
-  it('默认区批量删除守卫放行（cwd 全量会话都在默认区）→ 两段式确认 → emit deleteFolder(cwd)', async () => {
+  it('默认区批量删除检查放行（cwd 全量会话都在默认区）→ 两段式确认 → emit deleteFolder(cwd)', async () => {
     setupProjects(DEFAULT_PROJECT_ID)
-    // /repo 两条会话全部未归类 → 默认区包含该 cwd 全量 → 删除按钮放行（MF-2 守卫）
+    // /repo 两条会话全部未归类 → 默认区包含该 cwd 全量 → 删除按钮放行（MF-2 检查）
     const wrapper = mountList([
       { cwd: '/repo', sessions: [makeSession('s1', '/repo'), makeSession('s2', '/repo')] },
     ])

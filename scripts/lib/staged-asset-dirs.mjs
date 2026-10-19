@@ -9,7 +9,7 @@
  *  - verify-staged-extensions.mjs：按 staged 目录名（pi-<short>，查表前去 pi- 前缀）
  *    校验每个登记目录存在且非空。这些目录不走 pi manifest 三字段（agents/skills/
  *    workflows），manifest 模式的 resource-discovery 不扫 staged 目录，checkManifest
- *    探测不到——登记表是缺失/为空的唯一 postbuild 拦截面。
+ *    探测不到——登记表是缺失/为空的唯一 postbuild 拦截点。
  *
  * 现有条目：plan 的 templates/ —— 内置计划模板 .md，<available-plans> 清单注入与
  * select-template 的数据源（templates.ts 被 esbuild inline 进包根 index.js 后按同级
@@ -18,7 +18,7 @@
  * warn 不 throw 的静默失效），<available-plans> 清单为空、agent 被引导自行组织章节，
  * 内置模板能力整体丢失。
  *
- * 分发链与 relay/workflows 同理：bundle staged（bundle-extensions.mjs）→
+ * 分发链与 workflows 同理：bundle staged（bundle-extensions.mjs）→
  * electron-builder extraResources 整目录携带，无需改 yml。
  */
 export const PACKAGE_ASSET_DIRS = {

@@ -1,10 +1,10 @@
 // @vitest-environment node
 
 /**
- * Chat store 瞬态状态收口回归测试（W3）。
+ * Chat store 瞬态状态收尾回归测试（W3）。
  *
  * 锁定 W3 改动：断连 / runtime 重启等异常路径下，chat store 的全部瞬态状态
- * （streaming + compacting + retry + queue + pendingSend）应由一个统一收口 helper
+ * （streaming + compacting + retry + queue + pendingSend）应由一个统一收尾 helper
  * （resetTransientStates）一次性清理，避免后台 session 的 compaction 指示位、
  * 重试指示位、队列态在断连后永久残留（UI 卡「压缩中 / 重试中」）。
  *
@@ -12,7 +12,7 @@
  * retry / queue。断连后这些态会一直挂着，直到下一次相关事件到达才清——
  * 但断连意味着不会再有事件到达，于是永久残留。
  *
- * 预期（W3 后）：finalizeAllStreaming 内部调用 resetTransientStates 全收口，
+ * 预期（W3 后）：finalizeAllStreaming 内部调用 resetTransientStates 全收尾，
  * 或直接扩展为清理 compacting / retry / queue。以下断言在 W3 未实现前应全部红灯。
  *
  * 运行：pnpm --filter @taiji/frontend run test -- src/__tests__/chat-transient-reset.test.ts
@@ -21,7 +21,7 @@ import { describe, it, expect, beforeEach } from 'vitest'
 import { createPinia, setActivePinia } from 'pinia'
 import { useChatStore } from '@/stores/chat'
 
-describe('chat store 瞬态状态收口（W3：finalizeAllStreaming 应全收口）', () => {
+describe('chat store 瞬态状态收尾（W3：finalizeAllStreaming 应全收尾）', () => {
   beforeEach(() => setActivePinia(createPinia()))
 
   it('断连时 finalizeAllStreaming 清理 compactingSessions（不只 streaming）', () => {
@@ -60,13 +60,13 @@ describe('chat store 瞬态状态收口（W3：finalizeAllStreaming 应全收口
     expect(store.getRetryState(sid)).toBeUndefined()
   })
 
-  it('[u3c/u5a 退役] queue_update 帧零落点——瞬态收口面收敛为 occupancy/retry/streaming', () => {
+  it('[u3c/u5a 退役] queue_update 帧零落点——瞬态收尾点收敛为 occupancy/retry/streaming', () => {
     // [HISTORICAL] 前身「断连时 finalizeAllStreaming 清理 queueStates」用例：queue_update 帧
-    // 已随投递所有权内核降级为内核内部回执（u3b 退役 queueStates 写入腿；u5a 结清分区与
+    // 已随投递所有权内核降级为内核内部回执（u3b 退役 queueStates 写入路径；u5a 结清分区与
     // 读写 API 本身），本用例前提（queue_update 能置 queueStates）结构性不成立。
-    // 断言面保留「帧到达不产生任何瞬态」：messages 与 retry 分区零写入。
-    // 替代覆盖：内核投影随 session 销毁/disposeSession 清理（core clearDeliveryProjection，
-    // 见 core chat __tests__/effects-delivery-receipt.test.ts）+ 本文件其余瞬态收口用例。
+    // 断言范围保留「帧到达不产生任何瞬态」：messages 与 retry 分区零写入。
+    // 替代覆盖：内核派生视图随 session 销毁/disposeSession 清理（core clearDeliveryProjection，
+    // 见 core chat __tests__/effects-delivery-receipt.test.ts）+ 本文件其余瞬态收尾用例。
     const store = useChatStore()
     const sid = 's-queue'
     store.applyMessageEvent(sid, {
@@ -77,7 +77,7 @@ describe('chat store 瞬态状态收口（W3：finalizeAllStreaming 应全收口
     expect(store.getRetryState(sid)).toBeUndefined()
   })
 
-  it('正常 message.complete 不清 compacting（只有 finalizeAllStreaming 全收口）', () => {
+  it('正常 message.complete 不清 compacting（只有 finalizeAllStreaming 全收尾）', () => {
     const store = useChatStore()
     const sid = 's-normal'
 
@@ -88,7 +88,7 @@ describe('chat store 瞬态状态收口（W3：finalizeAllStreaming 应全收口
       payload: { sessionId: sid, messageId: 'a1' },
     })
 
-    // 正常收尾：message.complete 收口 streaming 实体
+    // 正常收尾：message.complete 收尾 streaming 实体
     store.applyMessageEvent(sid, {
       type: 'message.complete',
       payload: { sessionId: sid, stopReason: 'end_turn' },
@@ -105,7 +105,7 @@ describe('chat store 瞬态状态收口（W3：finalizeAllStreaming 应全收口
     const sid = 's-reset'
 
     // 置满所有瞬态：streaming + compacting + retry + pendingSend
-    // （[u3c] queueStates 置位腿已随 queue_update 退役，不再计入瞬态面）
+    // （[u3c] queueStates 置位路径已随 queue_update 退役，不再计入瞬态面）
     store.applyMessageEvent(sid, {
       type: 'message.message_start',
       payload: { sessionId: sid, messageId: 'a1' },
@@ -122,7 +122,7 @@ describe('chat store 瞬态状态收口（W3：finalizeAllStreaming 应全收口
     expect(store.getRetryState(sid)).toBeDefined()
     expect(store.isActive(sid)).toBe(true)
 
-    // W3：调用统一收口 helper（resetTransientStates 已在 store API 暴露）
+    // W3：调用统一收尾 helper（resetTransientStates 已在 store API 暴露）
     store.resetTransientStates(sid)
 
     // 关键：全部瞬态一次性清零

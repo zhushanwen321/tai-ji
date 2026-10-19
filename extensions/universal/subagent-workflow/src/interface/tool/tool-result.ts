@@ -29,7 +29,7 @@ export interface RunStartDetails {
   status: "running" | "not_found" | "invalid_args";
   /** Run 级 slug（可选，旧 run 缺失为 undefined）。 */
   slug?: string;
-  /** run 状态快照文件绝对路径（<sessionDir>/workflow-state/<runId>.jsonl）。 */
+  /** run 状态快照文件绝对路径（<root>/<rootSid>/workflow/runs/<runId>.jsonl）。 */
   stateFile?: string;
 }
 

@@ -1,23 +1,23 @@
 // src/execution/__tests__/permanent-session-intent-actions.test.ts
 //
-// [U5 / §3.2.5 收口动作] 验收单测族（实施单元 U5 验收条款逐项）：
+// [U5 / §3.2.5 收尾动作] 验收单测族（实施单元 U5 验收条款逐项）：
 //   1. cancel 新语义：abort 当前轮 → settle idle + interrupted + 放弃轮标记（无
 //      closedReason、不终态化）——设计表格 cancel 行 / S1 取消后续聊前置。
-//   2. close 收口落账编排：worktreeHandle 清句 + worktree 回收（patch 前移落盘）+
+//   2. close 收尾写入 journal 记录编排：worktreeHandle 清句 + worktree 回收（patch 前移落盘）+
 //      `.alive` release + pending 注销补发（completed reason）——设计表格 close 行
 //      资源处置列。
-//   3. 顺序约束 [写死]：收口轮 settle → 轮次通知送达 → 收口落账（Continuation
-//      settle 分支 order 账本断言——route 先于 archive，防丢收口轮通知）。
+//   3. 顺序约束 [写死]：收尾轮 settle → 轮次通知送达 → 收尾写入 journal 记录（Continuation
+//      settle 分支 order 账本断言——route 先于 archive，防丢收尾轮通知）。
 //   4. worktree 续聊重建三失败形态（worktree-manager.reconstruct：①patch 丢失/分支
 //      不存在 → degrade-reopen；②apply 冲突 → 干净基线 conflict；③IO 错 → 响亮 throw）
 //      ——设计 §3.2.5 worktree 续聊重建段。
-//   5. message 复活：已收口会话（idle）message 到达 → reviveOrThrow 翻 running
-//      （收口落账不动占用位，复活由既有 revive 格构造性承接）。
+//   5. message 复活：已收尾会话（idle）message 到达 → reviveOrThrow 翻 running
+//      （收尾写入 journal 记录不动占用位，复活由既有 revive 格构造性承接）。
 //   6. notifyId epoch 防撞：epoch>0 轮次通知 key = `id:epoch:round`（§3.2.3，reopen
 //      后 round 归零不与历史轮撞键；epoch=0 恒旧格式——磁盘账本零迁移）。
 //
 // mock 形态：worktree 重建族 = mock execFile/registry/fs（对齐 worktree-manager.test.ts
-// 同源范式）；close 收口编排 = mock deps 注入（RecordLifecycle 构造注入，无 fs 依赖）；
+// 同源范式）；close 收尾编排 = mock deps 注入（RecordLifecycle 构造注入，无 fs 依赖）；
 // Continuation 顺序约束 = mock host + order 账本（对齐 conversation-continuation.test.ts）。
 
 import { beforeEach, describe, expect, it, vi } from "vitest";
@@ -85,7 +85,7 @@ import { execFile } from "node:child_process";
 import * as fs from "node:fs";
 import * as os from "node:os";
 
-import { encodeCwd } from "../assembly/path-encoding.ts";
+import { encodeCwd } from "@taiji/shared/paths";
 import type { ContinuationHost } from "../assembly/conversation-continuation.ts";
 import { WorktreeManager, type WorktreeRebuildOutcome } from "../worktree/worktree-manager.ts";
 
@@ -260,6 +260,7 @@ describe("[U5 / §3.2.5] worktree 续聊重建三失败形态（WorktreeManager.
 import * as path from "node:path";
 import { RecordLifecycle, type RecordLifecycleDeps } from "../service/record-lifecycle.ts";
 import { createRecord } from "../persistence/execution-record.ts";
+import { getSubagentSessionDir } from "../assembly/path-encoding.ts";
 import type { ExecutionRecord } from "../domain/record-model.ts";
 import type { WorktreeManager as WorktreeManagerType } from "../worktree/worktree-manager.ts";
 
@@ -319,7 +320,7 @@ function makeLifecycleDeps(overrides: Partial<RecordLifecycleDeps> = {}): {
   return { deps, calls };
 }
 
-describe("[U5 / §3.2.5 close 行] 收口落账编排：worktree 回收 + patch 前移 + `.alive` 面 + pending 注销补发", () => {
+describe("[U5 / §3.2.5 close 行] 收尾写入 journal 记录编排：worktree 回收 + patch 前移 + `.alive` 面 + pending 注销补发", () => {
   it("archiveRecord：collectPatch 前移（written 回填 patchFile）→ worktree cleanup → markSettledOut → 注销（reason=completed）→ notifyClosed", async () => {
     const { deps, calls } = makeLifecycleDeps();
     const lifecycle = new RecordLifecycle(deps);
@@ -328,14 +329,20 @@ describe("[U5 / §3.2.5 close 行] 收口落账编排：worktree 回收 + patch 
 
     await lifecycle.archiveRecord(record, "test");
 
-    // patch 前移：patch 落 sessionsDir/<branch>.patch（written 回填 record.patchFile）
-    expect(calls.patches).toEqual([path.join("/tmp/agent-dir", "subagents", "--repo--", "sessions", "pi-sub-arch.patch")]);
-    expect(record.patchFile).toBe(path.join("/tmp/agent-dir", "subagents", "--repo--", "sessions", "pi-sub-arch.patch"));
+    // patch 前移：patch 落 sessionsDir/<branch>.patch（written 回填 record.patchFile）。
+    // [session-store-layout-inversion] 生产落点 = getSubagentSessionDir(record.rootSessionId)
+    // （env dataDir 兜底，vitest global-setup 注入 tmp）——断言用同一单源公式推导。
+    const expectedPatchFile = path.join(
+      getSubagentSessionDir("root-session", process.env.TAIJI_AGENT_DATA_DIR),
+      "pi-sub-arch.patch",
+    );
+    expect(calls.patches).toEqual([expectedPatchFile]);
+    expect(record.patchFile).toBe(expectedPatchFile);
     // worktree 立即回收
     expect(calls.cleanupHandles).toEqual(["pi-sub-arch"]);
-    // 收口落账委托达点（markSettledOut stub 被调——worktreeHandle 清句由真实原语承担）
-    expect(record.status).toBe("running"); // 收口落账不动占用位
-    // 收口点补发注销（承接原 emitUnregister 语义——reason=completed）
+    // 收尾写入 journal 记录委托达点（markSettledOut stub 被调——worktreeHandle 清句由真实原语承担）
+    expect(record.status).toBe("running"); // 收尾写入 journal 记录不动占用位
+    // 收尾点补发注销（承接原 emitUnregister 语义——reason=completed）
     expect(calls.unregistered).toEqual([{ id: "sa-archive-1", reason: "completed" }]);
   });
 
@@ -349,17 +356,17 @@ describe("[U5 / §3.2.5 close 行] 收口落账编排：worktree 回收 + patch 
 
     expect(killChildSpy).toHaveBeenCalledWith("sa-archive-idle", "archiveIdleRecord");
     expect(record.status).toBe("idle");
-    // 不终态化：closedReason 恒 undefined（新 settle 语义——收口落账不写死因）
+    // 不终态化：closedReason 恒 undefined（新 settle 语义——收尾写入 journal 记录不写死因）
     expect(record.closedReason).toBeUndefined();
   });
 });
 
 // ============================================================
-// [U5 / §3.2.5 顺序约束 [写死]] 收口轮 settle → 通知送达 → 收口落账
+// [U5 / §3.2.5 顺序约束 [写死]] 收尾轮 settle → 通知送达 → 收尾写入 journal 记录
 // ============================================================
 
-describe("[U5] close 顺序约束：Continuation settle 分支 route（通知送达）先于 archiveAfterClosingRound（收口落账）", () => {
-  it("closeAfterRound 挂起轮 settle：order = finalize → route → archive（收口落账不吞收口轮通知）", async () => {
+describe("[U5] close 顺序约束：Continuation settle 分支 route（通知送达）先于 archiveAfterClosingRound（收尾写入 journal 记录）", () => {
+  it("closeAfterRound 挂起轮 settle：order = finalize → route → archive（收尾写入 journal 记录不吞收尾轮通知）", async () => {
     const record = makeIntentRecord("sa-order-close", { status: "running" });
     const order: string[] = [];
     // typed host（对齐 conversation-continuation.test.ts makeHost）：缺成员/多成员均编译红，
@@ -370,7 +377,7 @@ describe("[U5] close 顺序约束：Continuation settle 分支 route（通知送
         order.push("finalize");
       },
       // [collect 退役] 原 routeRecord（collectCoordinator.route 成功通知路由）收敛为
-      // notifyComplete 直通面；isCollectMember 失败轮分流判据随批机制删除。
+      // notifyComplete 直通路径；isCollectMember 失败轮分流判据随批机制删除。
       notifyComplete: () => {
         order.push("route");
       },
@@ -392,16 +399,16 @@ describe("[U5] close 顺序约束：Continuation settle 分支 route（通知送
     };
     const { ConversationContinuation } = await import("../assembly/conversation-continuation.ts");
     const cont = new ConversationContinuation(record, host);
-    record.closeAfterRound = true; // close 优雅收口挂起
+    record.closeAfterRound = true; // close 优雅收尾挂起
 
     cont.onRunSettled({ content: "closing round", engineId: "pi" });
 
     await vi.waitFor(() => expect(order).toEqual(["finalize", "route", "archive"]));
-    // 收口后标志消费
+    // 收尾后标志消费
     expect(record.closeAfterRound).toBeUndefined();
   });
 
-  it("无挂起（正常轮 settle）：不触发收口消费", async () => {
+  it("无挂起（正常轮 settle）：不触发收尾消费", async () => {
     const record = makeIntentRecord("sa-order-normal", { status: "running" });
     const archived: string[] = [];
     const host: ContinuationHost = {
@@ -435,22 +442,22 @@ describe("[U5] close 顺序约束：Continuation settle 分支 route（通知送
 });
 
 // ============================================================
-// [u-arch] message 复活：已收口会话 message 到达 → reviveOrThrow 翻 running
-// （收口落账不动占用位，复活由既有 revive 格构造性承接——翻 active 的独立原语
+// [u-arch] message 复活：已收尾会话 message 到达 → reviveOrThrow 翻 running
+// （收尾写入 journal 记录不动占用位，复活由既有 revive 格构造性承接——翻 active 的独立原语
 // 已随收起概念删除，message 复活行为不回归）
 // ============================================================
 
-describe("[U5 / §3.2.2 事件表] 已收口会话 + message → revive 翻 running（复活路径不回归）", () => {
-  it("markSettledOut 收口后 message 到达 → status 翻 running + 新轮派发（reviveOrThrow 承接）", async () => {
+describe("[U5 / §3.2.2 事件表] 已收尾会话 + message → revive 翻 running（复活路径不回归）", () => {
+  it("markSettledOut 收尾后 message 到达 → status 翻 running + 新轮派发（reviveOrThrow 承接）", async () => {
     const { RecordStore } = await import("../persistence/record-store.ts");
-    const store = new RecordStore("/tmp/u5-reactivate", undefined, {});
+    const store = new RecordStore(() => "/tmp/u5-reactivate", undefined, {});
     const record = makeIntentRecord("sa-reactivate", { status: "idle" });
     store.register(record);
 
-    // close 收口落账（record 留内存 idle——占用位不动）
+    // close 收尾写入 journal 记录（record 留内存 idle——占用位不动）
     expect(store.markSettledOut(record)).toBe(true);
     expect(record.status).toBe("idle");
-    expect(store.getMutable("sa-reactivate")).toBe(record); // 收口 ≠ 内存回收
+    expect(store.getMutable("sa-reactivate")).toBe(record); // 收尾 ≠ 内存回收
 
     // message 复活：onMessage → status !== running → reviveOrThrow 翻 running。
     const handle = Object.freeze({ path: "/tmp/wt-reactivate", branch: "pi-sub-sa-reactivate", baseCommit: "abc", mainCwd: "/repo" });
@@ -477,9 +484,9 @@ describe("[U5 / §3.2.2 事件表] 已收口会话 + message → revive 翻 runn
     store.dispose();
   });
 
-  it("[S5] markSettledOut 清 worktreeHandle + 置 hadWorktree（重建守卫第三条判据承接）+ 幂等", async () => {
+  it("[S5] markSettledOut 清 worktreeHandle + 置 hadWorktree（重建检查第三条判据承接）+ 幂等", async () => {
     const { RecordStore } = await import("../persistence/record-store.ts");
-    const store = new RecordStore("/tmp/u5-markarch-hw", undefined, {});
+    const store = new RecordStore(() => "/tmp/u5-markarch-hw", undefined, {});
     const handle = Object.freeze({ path: "/tmp/wt-ma", branch: "pi-sub-sa-ma-hw", baseCommit: "abc", mainCwd: "/repo" });
     const record = makeIntentRecord("sa-markarch-hw", { worktreeHandle: handle });
     store.register(record);
@@ -487,11 +494,11 @@ describe("[U5 / §3.2.2 事件表] 已收口会话 + message → revive 翻 runn
     expect(store.markSettledOut(record)).toBe(true);
 
     // 清句：handle 指向已删目录（调用方已回收 worktree），残留会让 Continuation
-    // 重建守卫（!record.worktreeHandle）永不触发——S5 三层缺口之二。
+    // 重建检查（!record.worktreeHandle）永不触发——S5 三层缺口之二。
     expect(record.worktreeHandle).toBeUndefined();
-    // hadWorktree 兜底：entry/binding 的 worktree 投影与重建守卫第一条判据由本标志承载
+    // hadWorktree 兜底：entry/binding 的 worktree 派生视图与重建检查第一条判据由本标志承载
     expect(record.hadWorktree).toBe(true);
-    // 幂等：重复收口（handle 已清）零影响
+    // 幂等：重复收尾（handle 已清）零影响
     expect(store.markSettledOut(record)).toBe(true);
     expect(record.hadWorktree).toBe(true);
     // 无 worktree record：零影响（hadWorktree 不被误置）
@@ -545,7 +552,7 @@ describe("[U5] dispatchRoundAsync worktree 绑定丢失 → 自动重建三分�
     return { host, calls };
   }
 
-  it("rebuilt：handle 回填 record（后续轮/收口回收复用）+ 正常 resume 续轮派发", async () => {
+  it("rebuilt：handle 回填 record（后续轮/收尾回收复用）+ 正常 resume 续轮派发", async () => {
     const handle = Object.freeze({ path: "/tmp/wt-rb", branch: `pi-sub-sa-wt-rb`, baseCommit: "abc", mainCwd: "/repo" });
     const record = makeIntentRecord("sa-wt-rb", { hadWorktree: true, worktreeHandle: undefined });
     const { host, calls } = makeTestRig(record, async () => ({ kind: "rebuilt", handle }));
@@ -633,11 +640,11 @@ describe("[U5] dispatchRoundAsync worktree 绑定丢失 → 自动重建三分�
     expect(record.status).toBe("running");
   });
 
-  it("[§4 在途门] 重建 await 窗口内 cancel 抢先收口 → 本轮作废，不走轮始簿记（不把已收口 record 翻回 running）", async () => {
+  it("[§4 在途门] 重建 await 窗口内 cancel 抢先收尾 → 本轮作废，不走轮始簿记（不把已收尾 record 翻回 running）", async () => {
     const handle = Object.freeze({ path: "/tmp/wt-race", branch: "pi-sub-sa-wt-race", baseCommit: "abc", mainCwd: "/repo" });
     const record = makeIntentRecord("sa-wt-race", { hadWorktree: true, worktreeHandle: undefined });
     const { host, calls } = makeTestRig(record, async () => {
-      // 窗口内 cancel 抢先收口（markSettledOut 语义：status → idle，有意不写 endedAt
+      // 窗口内 cancel 抢先收尾（markSettledOut 语义：status → idle，有意不写 endedAt
       // ——正是轮终原语 endedAt 门与轮始原语 status 判据都拦不住的形态）。
       record.status = "idle";
       record.stopReason = "interrupted";
@@ -657,7 +664,7 @@ describe("[U5] dispatchRoundAsync worktree 绑定丢失 → 自动重建三分�
     });
     expect(roundStarts).toEqual([]); // 轮始簿记不发生
     expect(calls.dispatched).toEqual([]); // 本轮作废（不派发）
-    expect(record.status).toBe("idle"); // 内存态与磁盘收口一致——不被翻回 running
+    expect(record.status).toBe("idle"); // 内存态与磁盘收尾一致——不被翻回 running
     // handle 回填发生在 await 之内（真实重建产物，留用无害）——本轮废弃不回滚句柄。
     expect(record.worktreeHandle).toBe(handle);
   });
@@ -668,27 +675,26 @@ describe("[U5] dispatchRoundAsync worktree 绑定丢失 → 自动重建三分�
 // ============================================================
 
 describe("[U5] notifyId epoch 防撞：epoch>0 → `id:epoch:round`（epoch=0 恒旧格式）", () => {
-  it("轮次通知 key 按 epoch 分段（`id:round` / `id:epoch:round`）", async () => {
-    // ledger 写账断言（生产装配形态——notifyId 在 notify 投影边界物化进账本 entry）
-    const ledgerEntries: Array<{ customType: string; data: Record<string, unknown> }> = [];
+  it("轮次通知幂等键按 epoch 分段（`id:round` / `id:epoch:round`）", async () => {
+    // port.deliver 受理断言（unified-delivery 波 2 生产装配形态——notifyId 在 notify
+    // 派生边界物化为 port.deliver 的幂等键 id）
+    const notifyPorts = await import("../../core/notify-ports.ts");
     const { createNotifier } = await import("../notify/notifier.ts");
-    const { bindNotifyLedgerHost, _resetNotifyLedgerForTest } = await import("../notify/notify-ledger.ts");
-    _resetNotifyLedgerForTest();
-    bindNotifyLedgerHost({
-      appendLedgerEntry: (customType, data) => {
-        ledgerEntries.push({ customType, data: data as Record<string, unknown> });
+    const acceptedIds: string[] = [];
+    const fakePort: import("../../core/notify-ports.ts").DeliveryPortHandle = {
+      deliver(envelope) {
+        acceptedIds.push(envelope.id ?? "gen-id");
+        return { kind: "accepted", id: envelope.id ?? "gen-id" };
       },
-      readSessionEntries: () => [],
-      isIdle: () => true,
-      onAgentSettled: () => {},
-      sendDelivery: () => {},
-    });
+      flush: () => {},
+    };
+    notifyPorts.configureNotifyDomain({ getDeliveryPort: () => fakePort });
     const notifier2 = createNotifier({
-      sendMessage: () => {},
+      sendMessage: () => {}, // port 主投不经此端口；仅缺席直发兜底消费
       hasRunningBackground: () => false,
       isIdle: () => true,
     });
-    // epoch=0（缺省）→ 旧格式 `id:round`（磁盘账本零迁移）
+    // epoch=0（缺省）→ 旧格式 `id:round`（磁盘投递日志零迁移）
     notifier2.notify({
       id: "sa-epoch",
       status: "running",
@@ -709,9 +715,8 @@ describe("[U5] notifyId epoch 防撞：epoch>0 → `id:epoch:round`（epoch=0 �
       round: 2,
       epoch: 3,
     });
-    const ids = ledgerEntries.map((e) => e.data.notifyId);
-    expect(ids).toContain("sa-epoch:2");
-    expect(ids).toContain("sa-epoch:3:2");
-    _resetNotifyLedgerForTest();
+    expect(acceptedIds).toContain("sa-epoch:2");
+    expect(acceptedIds).toContain("sa-epoch:3:2");
+    notifyPorts.resetNotifyDomainForTests();
   });
 });

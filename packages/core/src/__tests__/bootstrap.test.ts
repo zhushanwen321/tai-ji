@@ -14,7 +14,7 @@ import {
 import { createFakeWebSocket } from '../transport/__tests__/helpers/fake-websocket'
 
 // initConnection 真实现 import use-connection（连带端口装配依赖链）——模块级拦截为无副作用
-// stub。步骤调用面经 bootstrapSteps spy 拦截（下方用例全覆盖），此处 mock 防 spy 未覆盖的
+// stub。步骤调用点经 bootstrapSteps spy 拦截（下方用例全覆盖），此处 mock 防 spy 未覆盖的
 // 调用路径意外触发真实连接编排。
 vi.mock('../transport/use-connection', () => ({
   useConnection: () => ({ init: async () => {} }),

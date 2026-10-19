@@ -8,7 +8,7 @@
   生命周期：
    - 挂载/主题变化 → renderMermaid(source, theme) 产出 svg → 注入气泡容器
    - 渲染失败 → 显示「渲染失败」提示 + 折叠源码（可复制）
-   - 流式增量下 source 变化用 renderSeq 守卫防旧渲染覆盖
+   - 流式增量下 source 变化用 renderSeq 检查防旧渲染覆盖
 
   v-html 受控点：renderMermaid 产出的 SVG 由 mermaid 库生成（非用户原始 HTML）。
   mermaid 源码经 mermaid 解析生成 SVG path，不透传用户 HTML（与 shiki codeToHtml 同论证）。
@@ -87,7 +87,7 @@
 <script setup lang="ts">
 /**
  * Mermaid 图表渲染器。
- * - props.source 变化（流式增量 / mermaid 块更新）触发重新渲染；renderSeq 守卫防旧覆盖。
+ * - props.source 变化（流式增量 / mermaid 块更新）触发重新渲染；renderSeq 检查防旧覆盖。
  * - 主题变化（<html data-theme>）触发重新渲染（mermaid 颜色 bake 进 SVG，需重渲）。
  * - 全屏 Dialog 内 zoom 用 useMermaidZoom（Ctrl/Cmd+wheel 缩放，按钮 zoom-in/out/fit/1:1）。
  */
@@ -95,7 +95,7 @@ import { ref, watch, onMounted, onUnmounted, nextTick } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { AlertTriangle, Check, ChevronRight, Copy, Maximize, Minimize, X, ZoomIn, ZoomOut } from '@lucide/vue'
 // primitives 直接路径（不经 @taiji/ui 顶层 barrel）：chat 组件被 barrel 再导出，
-// barrel 自引用会闭合一族循环依赖环（详见 BashOutputBlock.vue 同款注释）
+// barrel 自引用会封住一族循环依赖环（详见 BashOutputBlock.vue 同款注释）
 import { Button } from '../../primitives/button'
 import { Dialog, DialogClose, DialogContent, DialogDescription, DialogTitle } from '../../primitives/dialog'
 import { getCurrentTheme } from './composables/use-theme'
@@ -133,7 +133,7 @@ function copySource(): void {
   copy(props.source, 'mermaid-src')
 }
 
-/** 渲染 mermaid（序号守卫防流式增量旧覆盖） */
+/** 渲染 mermaid（序号检查防流式增量旧覆盖） */
 async function doRender(): Promise<void> {
   const seq = ++renderSeq
   const source = props.source.trim()

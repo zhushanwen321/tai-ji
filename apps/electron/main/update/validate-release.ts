@@ -5,7 +5,7 @@
  * downloadUrl: 'file:///etc/passwd' 或 name: '../../evil' 之类的恶意值。
  * 本模块在安装前做严格白名单校验，拒绝任何非法输入。
  * 现行调用点：update:install handler 对 preloaded-update.json 读出的 release
- * 做防御纵深校验（m11）——preloaded 是磁盘写入面，可能被绕过 download 路径篡改。
+ * 做防御纵深校验（m11）——preloaded 是磁盘写入点，可能被绕过 download 路径篡改。
  *
  * [HISTORICAL] 设计要点：
  * - downloadUrl 白名单：只允许两源 release 下载域（GitHub：github.com +

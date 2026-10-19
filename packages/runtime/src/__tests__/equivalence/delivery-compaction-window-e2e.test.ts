@@ -1,33 +1,36 @@
 /**
- * 压缩窗口投递 equivalence e2e（投递所有权内核 V1 的机器化形态，A1 的 L3 形态）——
+ * 压缩窗口投递 equivalence e2e（投递所有权内核 V1 的机器化形态，A1 的 L3 形态；u5a 起
+ * 承载 v3 受理即出站下的 compaction 持有行为——统一消息投递重构设计「compaction 持有
+ * 保留」的唯一提交侧等待状态验收）——
  * 设计 §3.1 失败故事 A 原景重写 / §4 V1「压缩中发送按序必达」/ P-e2e 探针。
  *
  * 形态与 send-queue-e2e.test.ts（S1）/ completion-backflow-e2e.test.ts（S2）同款：spawn 真实
- * pi rpc 子进程（目标 session），驱动器接上 **真实** SessionDeliveryRegistry（真 delivery 内核），
- * 仅 SessionService 由驱动器以最小内存态 view + 事件泵替换。压缩窗口由 runtime 权威投影
- * （`view.isCompacting`，生产路径 = session.compaction_start 置位）构造——被测语义是内核
- * 「不可投期间持有 → 压缩结束按 FIFO 逐条投递」，与压缩算法本身无关（压缩由 pi 执行）。
+ * pi rpc 子进程（目标 session），驱动器接上 **真实** SessionDeliveryRegistry（真 delivery 内核，
+ * v3 on-accept 装配），仅 SessionService 由驱动器以最小内存态 view + 事件泵替换。压缩窗口由
+ * runtime 权威派生视图（`view.isCompacting`，生产路径 = session.compaction_start 置位）构造——
+ * 被测语义是「唯一保留的提交侧等待状态（pi 硬拒绝一切 prompt，agent-session.js:1498-1500）
+ * 期间持有 → 压缩结束按 FIFO 逐条投递」，与压缩算法本身无关（压缩由 pi 执行）。
  *
  * 断言链（事件同步，禁固定 sleep；busy 前提结构化断言）：
  * 压缩中（isCompacting=true）经 registry.submit 提交两条（= delivery.submit 真实入口）→
- * 两条回执 lane='queued' 且内核 depth()===2（**压缩中零投递**：pi get_state.pendingMessageCount
- * ===0 且 transcript 无这两条文本——防「抢跑投递」假通过）→ 压缩结束（isCompacting=false +
- * agent_settled 边沿事件泵）→ 内核 flush 按 FIFO 逐条出站 → get_entries 断言两条 user entry
- * 在树且**顺序与提交序一致、各恰好一次**、各带自己的出站裸标记（D2 标记确认）→ 内核条目双终态
- * delivered（送达回执 message_end(user) 标记命中，D2 第二阶段）。
+ * 两条回执 lane='queued' 且在途登记表两条 queued 在册（受理登记，A8 功能等价）且内核
+ * depth()===2（**压缩中零投递**：pi get_state.pendingMessageCount ===0 且 transcript 无
+ * 这两条文本——防「抢跑投递」假通过）→ 压缩结束（isCompacting=false + agent_settled 边沿
+ * 事件泵唤醒 waitDeliverable）→ 按 FIFO 逐条出站 → get_entries 断言两条 user entry
+ * 在树且**顺序与提交序一致、各恰好一次**、各带自己的出站裸标记（D2 标记确认）→ 内核条目
+ * 双终态 delivered（送达回执 message_end(user) 标记命中，D2 第二阶段）。
  *
- * 双车道事实（两条都在压缩结束后同批 flush，第二条的落点由 pi 当时状态决定，两条路径都合法）：
- * - pi 仍在 turn 1（faux TPS 节流制造流式窗口）→ prompt 撞 'Agent is already processing'
- *   → 内核适配器按 D6 转 steer 重试 → turn 边界注入（真实生产路径的同一分支）；
+ * 出站车道事实（两条都在压缩结束后出站，第二条的落点由 pi 当时状态决定，两条路径都合法）：
+ * - pi 仍在 turn 1（faux TPS 节流制造流式窗口）→ prompt 带 steer 入 pi 队列 → turn 边界
+ *   注入（v3 受理即出站的同一分支）；
  * - pi 已 idle → 直投开新 turn。
- * 断言只锚终态（顺序 / 唯一性 / 标记 / delivered），不锚中间车道——车道是 pi 状态函数，
- * 结构上不可稳定构造（设计 D1 把 lane 判定收到 runtime 后仍是「当时状态」的函数）。
+ * 断言只锚终态（顺序 / 唯一性 / 标记 / delivered），不锚中间车道——车道是 pi 状态函数。
  *
  * 环境约定照抄 equivalence 族（pi-fixture.ts）。faux LLM 轨（L2.5）：被测语义是
  * 「压缩窗口的持有与释放按序投递」，非模型智能；门控 FAUX_PI_READY（只判 binary，凭证无关）。
  *
  * 运行：cd packages/runtime && npx vitest run src/__tests__/equivalence/delivery-compaction-window-e2e.test.ts
- * 登记：docs/testing/e2e-map.json E2E-EQUIV-01（equivalence 目录族，R2 按改动面触发）
+ * 登记：docs/testing/e2e-map.json E2E-EQUIV-01（equivalence 目录族，R2 按改动范围触发）
  */
 
 import { describe, it, expect } from 'vitest'
@@ -72,7 +75,7 @@ function makeView(id: string, cwd: string, label: string): IManagedSessionView {
     tokenCount: 0,
     inputTokens: 0,
     isGenerating: false,
-    // 压缩窗口前提：runtime 权威 occupancy 投影的压缩标志（生产 = compaction_start 置位）
+    // 压缩窗口前提：runtime 权威 occupancy 派生视图的压缩标志（生产 = compaction_start 置位）
     isCompacting: true,
     isBashRunning: false,
     bashRunToken: undefined,
@@ -135,7 +138,7 @@ describe.skipIf(!FAUX_PI_READY)(`delivery compaction window e2e faux pi${FAUX_PI
       const view = makeView(targetSessionId!, targetFx.sessionDir, 'cw-target')
 
       // 事件泵：pi 事件流 → ①settled 边沿（内核 flush 触发点）②client.onEvent 订阅者
-      // （送达回执 message_end(user) 的转发面——pi-fixture 是拉取式，故轮询转发）。
+      // （送达回执 message_end(user) 的转发侧——pi-fixture 是拉取式，故轮询转发）。
       // 50ms 轮询与 fixture waitForEvent 的 EVENT_POLL_INTERVAL_MS 同构（事件边沿驱动）。
       const settledCbs: Array<(sid: string) => void> = []
       const clientEventSubs = new Set<(event: unknown) => void>()
@@ -189,11 +192,17 @@ describe.skipIf(!FAUX_PI_READY)(`delivery compaction window e2e faux pi${FAUX_PI
       const replyA = registry.submit(targetSessionId!, { content: `${MARK_A} 第一条`, clientUuid: CLIENT_UUID_A })
       const replyB = registry.submit(targetSessionId!, { content: `${MARK_B} 第二条`, clientUuid: CLIENT_UUID_B })
 
-      // 压缩窗口 = 不可投 → lane/state 双 queued（D1 唯一判定源读 runtime 权威投影）
+      // 压缩窗口 = 不可投 → lane/state 双 queued（唯一判定源读 runtime 权威派生视图）
       expect(replyA, `压缩中提交应落 queued 车道：${JSON.stringify(replyA)}`).toMatchObject({ clientUuid: CLIENT_UUID_A, lane: 'queued', state: 'queued' })
       expect(replyB, `压缩中提交应落 queued 车道：${JSON.stringify(replyB)}`).toMatchObject({ clientUuid: CLIENT_UUID_B, lane: 'queued', state: 'queued' })
       const handle = registry.getOrCreateDelivery(targetSessionId!)
       expect(handle.depth(), '压缩中两条应全部持有在内核队列（depth = queued 计数）').toBe(2)
+      // 在途登记表（A8 功能等价·受理登记）：压缩中提交的两条以 queued 态在册（GUI 状态帧
+      // 的状态源——v3 在途登记表功能等价替换 v2 队列状态）
+      const activeIds = handle.entriesFull().active.filter((e) => e.state === 'queued').map((e) => e.id)
+      expect(activeIds, `压缩中两条应以 queued 态在途在册：${JSON.stringify(handle.entriesFull().active)}`).toEqual(
+        expect.arrayContaining([CLIENT_UUID_A, CLIENT_UUID_B]),
+      )
 
       // ── 4. 压缩窗口零投递结构化断言（防「抢跑投递」假通过）──
       const midState = await targetFx.sendCommand('get_state')

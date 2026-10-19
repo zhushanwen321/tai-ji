@@ -3,8 +3,8 @@
  *
  * 背景：process-control.ts 的既有测试（runtime-supervisor-crash-restart /
  * supervisor-health-liveness）把整个模块 vi.mock 掉，getDescendantPids 既有覆盖为零。
- * 本文件锚定其可观测行为面（stop() 时序 T0 依赖，[HISTORICAL] 必须在 SIGTERM 前调用）：
- *   - 平台/入参守卫：win32 / pid=0 / NaN → []（不触 pgrep）
+ * 本文件锚定其可观测行为范围（stop() 时序 T0 依赖，[HISTORICAL] 必须在 SIGTERM 前调用）：
+ *   - 平台/入参检查：win32 / pid=0 / NaN → []（不触 pgrep）
  *   - BFS 遍历：广度优先按代收集（子→孙），后代不含根
  *   - pgrep 输出解析：按行 split + Number 过滤（非数字/负数/0 剔除）
  *   - 失败分类：exit 1（无子进程）与 ENOENT 静默；其他真实错误 warn（文案锚定）
@@ -50,7 +50,7 @@ describe('getDescendantPids', () => {
   beforeEach(() => {
     originalPlatform = Object.getOwnPropertyDescriptor(process, 'platform')
     // 本测试用例集按 pgrep 可用平台（macOS/Linux）设计；CI 若在 win32 跑，
-    // 需要非 win 用例的守卫分支显式桩 darwin（下方用例各自桩）。
+    // 需要非 win 用例的检查分支显式桩 darwin（下方用例各自桩）。
     execFileSyncMock.mockReset()
     warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {})
   })
@@ -73,7 +73,7 @@ describe('getDescendantPids', () => {
     expect(execFileSyncMock).not.toHaveBeenCalled()
   })
 
-  it('parentPid 为 0 / NaN → 返回 []（ falsy 守卫，不触 pgrep）', async () => {
+  it('parentPid 为 0 / NaN → 返回 []（ falsy 检查，不触 pgrep）', async () => {
     stubPgrepPlatform()
     const { getDescendantPids } = await loadModule()
 

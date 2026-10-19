@@ -11,11 +11,11 @@
  *   - D7（adversarial-review-fixes §3.4）：失败回写**错误态标志**（非空数组降级——空态
  *     两因「加载失败 vs 无结果」需区分，浮层错误态 + 重试入口）；truncated（DoS 5000
  *     截止）透出供浮层底部条件提示。
- *   - B5/#10 cwd 快照守卫：open 边沿先清候选 ref（上一 cwd 的陈旧候选不得在本次打开
+ *   - B5/#10 cwd 快照检查：open 边沿先清候选 ref（上一 cwd 的陈旧候选不得在本次打开
  *     显示——FileNode.path 相对 cwd，跨目录显示是事实错误）；回写前比对发起时快照 cwd
  *     与当前 cwd，不一致丢弃（成功/失败对称裁决）。
  * - session：不 open 拉（sessionStore 启动常驻 + 广播维护，D1/D7）。
- * 节流（防浮层反复开关刷屏）：各路独立 1s 窗口，窗口内重复打开不重拉；重试入口绕过
+ * 节流（防浮层反复开关刷屏）：各路独立 1s 窗口，窗口内重复打开不重新拉取；重试入口绕过
  * 节流（用户显式动作，adversarial-review-fixes D7「浮层内重试」）。
  *
  * landing cwd 路 $ 候选的组件侧视图态同收本文件（u20 合并原 useCommandPopoverCwdFileView，
@@ -52,7 +52,7 @@ export function useCommandPopoverOpenFetch(opts: {
   fileNoResultsVisible: ComputedRef<boolean>
   /** 截断提示：runtime DoS 上限 5000 截止（结果非空时列表底部条件提示） */
   fileTruncatedVisible: ComputedRef<boolean>
-  /** D7：浮层内重试（绕过 1s 节流；快照守卫/错误态/截断透出与 open 边沿同路） */
+  /** D7：浮层内重试（绕过 1s 节流；快照检查/错误态/截断透出与 open 边沿同路） */
   retryCwdFileFetch: () => void
 } {
   const commandStore = useCommandStore()
@@ -121,7 +121,7 @@ export function useCommandPopoverOpenFetch(opts: {
         lastSubagentFetchAt = Date.now()
         void subagentStore.loadSubagents(sid)
       } else if (type === 'file') {
-        // D3 分路守卫：panel（有 sid）走 store 缓存路，open-fetch 不重复拉；
+        // D3 分路检查：panel（有 sid）走 store 缓存路，open-fetch 不重复拉；
         // landing（无 sid）有 cwd 才拉（cwd 通道），两者皆无不拉（无数据源不弹，S4b）
         if (sid) return
         // B5/#10：open 边沿先清候选与状态——上一 cwd 的陈旧候选（path 相对旧 cwd）不得

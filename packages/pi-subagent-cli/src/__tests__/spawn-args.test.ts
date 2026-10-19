@@ -6,7 +6,7 @@
 // [裁决锚] pi-mcp-management P11 的 `--extension builtin:mcp` 仅主 agent 模板装载
 // （subagent 装载 = N 个并行进程 × M 个启用服务器的连接放大 + mcp_servers 提示词节
 // + direct 档首 prompt 延迟，且 subagent 消费 MCP 工具为零证据场景，设计 §5 U1
-// 辐射面裁决不预付）——本包期望值**不**传导该 token，并显式断言不含（回归锚，
+// 波及范围裁决不预付）——本包期望值**不**传导该 token，并显式断言不含（回归锚，
 // 防未来误传导）。
 import { spawnSync } from "node:child_process";
 import * as fs from "node:fs";
@@ -18,7 +18,7 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { buildEnvBlock, buildSpawnArgs } from "../spawn-args.ts";
 
 describe("buildSpawnArgs", () => {
-  // [U1 D2] modelRef 为必填（spawn 前置守卫：未经裁决的裸字符串类型层面不可达）。
+  // [U1 D2] modelRef 为必填（spawn 前置检查：未经裁决的裸字符串类型层面不可达）。
   // 类型直接锚定 buildSpawnArgs 入参（thinkingLevel 在协议层是宿主校验后的 string 透传）
   const baseParams: Parameters<typeof buildSpawnArgs>[0] = {
     modelRef: { provider: "openai", id: "gpt-4o" },
@@ -47,12 +47,12 @@ describe("buildSpawnArgs", () => {
     expect(args).not.toContain("--print");
   });
 
-  it("回归锚：subagent 模板不含 builtin:mcp（P11 仅主 agent 模板装载，设计 §5 U1 辐射面裁决——本断言防未来误传导）", () => {
+  it("回归锚：subagent 模板不含 builtin:mcp（P11 仅主 agent 模板装载，设计 §5 U1 波及范围裁决——本断言防未来误传导）", () => {
     const args = buildSpawnArgs(baseParams);
     expect(args).not.toContain("builtin:mcp");
   });
 
-  it("回归锚：subagent 模板不含 builtin:tool-search（tool-declaration-slimming D4 仅主 agent 模板装载——subagent 工具面为显式白名单语义、无 tool_search 检索需求；本断言防未来误传导）", () => {
+  it("回归锚：subagent 模板不含 builtin:tool-search（tool-declaration-slimming D4 仅主 agent 模板装载——subagent 工具范围为显式白名单语义、无 tool_search 检索需求；本断言防未来误传导）", () => {
     const args = buildSpawnArgs(baseParams);
     expect(args).not.toContain("builtin:tool-search");
   });
@@ -163,7 +163,7 @@ describe("buildSpawnArgs", () => {
     // 场景：orchestrator 模板声明了 ask_user，但用户环境未装 pi-ask-user 扩展。
     // 期望：subagent-workflow 不做特殊处理，仅原样透传给 pi CLI；
     // 静默兼容的责任在 Pi（args.ts 不校验、agent-session 的 _rebuildSystemPrompt
-    // 对未注册工具名静默过滤）。本测试钉死这个透传行为，避免有人擅自加
+    // 对未注册工具名静默过滤）。本测试固定这个透传行为，避免有人擅自加
     // 「未注册工具检测」导致原本兼容的场景崩溃。
     const args = buildSpawnArgs({
       ...baseParams,

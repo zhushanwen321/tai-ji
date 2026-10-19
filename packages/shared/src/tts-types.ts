@@ -1,7 +1,7 @@
 /**
  * 语音合成朗读（TTS）契约类型 —— shared 协议层 SSOT。
  *
- * 设计文档：.tmp/tech-design/ai-voice-tts.md §7.1（WS 协议面）/ §7.3（driver 接口与能力表）。
+ * 设计文档：.tmp/tech-design/ai-voice-tts.md §7.1（WS 协议范围）/ §7.3（driver 接口与能力表）。
  * 全部形状以该设计 §7.3 TS 块为唯一权威；消费方：
  * - runtime driver（infra/tts/，u2）：实现 TtsDriver，消费 TtsCapabilities / InternalSpeechRequest
  * - runtime service / transport（u3）：打包 InternalSpeechRequest、reply 协议载荷
@@ -11,7 +11,7 @@
  * 纯类型无 node 依赖，barrel 安全（renderer 整包 import 不触发 node:os/:path）。
  */
 
-/** TTS 服务商 id（M0 三家；新增厂商 = 加一个 driver + 能力表与表单投影各一份声明，设计 §2）。 */
+/** TTS 服务商 id（M0 三家；新增厂商 = 加一个 driver + 能力表与表单派生视图各一份声明，设计 §2）。 */
 export type TtsProviderId = 'stepfun' | 'minimax' | 'mimo'
 
 /**
@@ -83,7 +83,7 @@ export interface TtsCapabilities {
 }
 
 /**
- * 表单投影数据：设置页表单渲染的唯一数据源（tts.getCapabilities 的 reply 载荷，设计 §7.3）。
+ * 表单派生视图数据：设置页表单渲染的唯一数据源（tts.getCapabilities 的 reply 载荷，设计 §7.3）。
  * 与该家能力表同文件定义在 driver——派生关系 = 内嵌能力表（联动置灰读 speedRange/perModel 等）
  * + 表单专属枚举与值域。控件存在性规则：枚举类空数组 = 控件不渲染；数值类 null = 控件置灰；
  * 开关/结构类不在清单 / 为 0 = 不渲染。
@@ -119,7 +119,7 @@ export interface TtsFormModel {
 /**
  * 表单值落盘形状（tts.json 每家一个条目，设计 D4/§7.3；长尾字段按厂商 API 原名原路径存，
  * D2 连带裁决——service 打包 passthrough = vendor 子树恒等搬运，零字段名知识、零厂商判断）。
- * 标准位字段占顶层（跨家通用名，值经表单投影校验）；厂商私有字段收在 vendor 子树。
+ * 标准位字段占顶层（跨家通用名，值经表单派生视图校验）；厂商私有字段收在 vendor 子树。
  */
 export interface TtsConfig {
   baseUrl: string
@@ -136,8 +136,8 @@ export interface TtsConfig {
 
 /**
  * 内部统一合成请求（OpenAI `POST /v1/audio/speech` 形 + 受控扩展，设计 D1/§7.3）。
- * driver 职责 = 字段换家 + 钳制/丢弃；`response_format` 恒 pcm 系值（D9——进类型面使
- * D5 缓存键全集与类型面逐项对齐）：StepFun `pcm` / MiniMax `audio_setting.format=pcm` / MiMo `pcm16`。
+ * driver 职责 = 字段换家 + 钳制/丢弃；`response_format` 恒 pcm 系值（D9——进类型范围使
+ * D5 缓存键全集与类型范围逐项对齐）：StepFun `pcm` / MiniMax `audio_setting.format=pcm` / MiMo `pcm16`。
  * `passthrough` 是 speak 时由 TtsConfig.vendor 子树恒等搬运组装出的请求字段（派生值，不落盘），
  * driver 将其 deep-merge 进厂商请求体（护栏见设计 D2）。
  */
@@ -152,7 +152,7 @@ export interface InternalSpeechRequest {
   passthrough?: Record<string, unknown>
 }
 
-/** 单家配置的脱敏投影条目（tts.getConfig reply；永不回 Key 本体，Key 在独立 secrets 文件）。 */
+/** 单家配置的脱敏派生视图条目（tts.getConfig reply；永不回 Key 本体，Key 在独立 secrets 文件）。 */
 export interface SanitizedTtsProviderState {
   /** 该家表单值（TtsConfig 本身不含 Key 字段——Key 唯一权威在 secrets/tts-<厂商>-apikey.txt）。 */
   config: TtsConfig
@@ -163,14 +163,14 @@ export interface SanitizedTtsProviderState {
 }
 
 /**
- * tts.getConfig reply 的 config 载荷（设计 §7.1）：activeProvider + 三家脱敏投影。
+ * tts.getConfig reply 的 config 载荷（设计 §7.1）：activeProvider + 三家脱敏派生视图。
  * 敏感信息只含 hasApiKey 与 providerKeyAvailable 两个布尔（永不回 Key 本体，D4「明文不出 runtime」）；
  * 表单值本身非敏感（u4 保存/读取往返单测依赖此载荷回读一致）。
  */
 export interface SanitizedTtsConfig {
   /** 默认朗读服务商（设置页卡片单选；朗读与「保存并测试」都用它）。 */
   activeProvider: TtsProviderId
-  /** 三家各自的表单值 + 敏感投影（每家独立记忆，互不影响）。 */
+  /** 三家各自的表单值 + 敏感派生视图（每家独立记忆，互不影响）。 */
   providers: Record<TtsProviderId, SanitizedTtsProviderState>
 }
 

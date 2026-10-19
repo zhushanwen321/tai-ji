@@ -3,7 +3,7 @@
 // 时序收尾逻辑（从 subagent-service.ts 提取，降低主文件行数 < 1000 上限）。
 //
 // [U2a / §3.1 意图 API 迁移] 终态持久化原语（entry/archive + manifest + .alive 删）
-// 归口 store.markFinalized / markCancelled——本文件降级为**副作用编排层**
+// 归属 store.markFinalized / markCancelled——本文件降级为**副作用编排层**
 // （collectPatch / completeLegacyClosed / worktree cleanup / pending 注销① / onFinalized 钩子，
 // §3.1 副作用归属边界）。文件布局知识（写哪个文件、什么顺序）不再散落此处：D8 v7 写序
 //（binding 快照 → archive/manifest → .alive 删；磁盘收条由 record-settled 帧承载）由
@@ -43,16 +43,16 @@ export interface FinalizeDeps {
   /** pending-notifications 终态注销（绑定 pi.events.emit，由调用方闭包提供）。 */
   emitUnregister(id: string, status: string): void;
   /**
-   * [F-5 修复] record 终态化的宿主侧收口钩子（recordId；best-effort，抛错由调用方
-   * 在闭包内自行兜底）。[永久会话模型] 现行调用面（recordLifecycle.finalizeRecord →
+   * [F-5 修复] record 终态化的宿主侧收尾钩子（recordId；best-effort，抛错由调用方
+   * 在闭包内自行兜底）。[永久会话模型] 现行调用点（recordLifecycle.finalizeRecord →
    * doFinalizeRecord 的全部生产入口）：workflow-origin D7 例外族（settleOneShotOutcome
    * 成功/失败/abort 终态化 + finalizeFailed / finalizeAborted 的 workflow 分支）+
    * 监督器放弃（finalizeClosed）。旧 finalizeEngineOutcome 兜底（引擎死亡不可接管
-   * 形态的终态化）已删——引擎死亡现走 Continuation 失败分支收口（settleRoundFailed，
+   * 形态的终态化）已删——引擎死亡现走 Continuation 失败分支收尾（settleRoundFailed，
    * idle 可恢复不终态化），不经本钩子。旧「全部 closed 终态必经路径」口径已失效：tool-origin 轮终走
-   * settle/markRoundIdle 不终态化（万物可续 G1），close = 收口落账（consumePendingArchive）、
-   * dispose = settle + 自动收口，均不经本钩子。收口面现 = Continuation 实例清理
-   *（onRecordFinalizedCleanup 汇聚点；[H1 U6] 旧 chat 轮路由注销面已随 interact 面退役）。
+   * settle/markRoundIdle 不终态化（万物可续 G1），close = 收尾落定（consumePendingArchive）、
+   * dispose = settle + 自动收尾，均不经本钩子。收尾面现 = Continuation 实例清理
+   *（onRecordFinalizedCleanup 汇聚点；[H1 U6] 旧 chat 轮路由注销侧已随 interact 面退役）。
    * finalizeRoundToIdle 不经本钩子（回 idle 非终态，续聊仍需容器）。
    */
   onFinalized?: (recordId: string) => void;
@@ -102,7 +102,7 @@ function findSessionFileByRecordIdentity(
 /**
  * [T1/PS-9] Step 序言：sessionFile 缺失时按 record 身份在 sessionDir 反查回填。
  *
- * 放在一切步骤前，让终态原语（archive 投影 / binding 快照 / manifest / .alive release）
+ * 放在一切步骤前，让终态原语（archive 派生视图 / binding 快照 / manifest / .alive release）
  * 统一受益。RC-1（握手失败）+ LC-4（收尾反查未命中）的残余形态下，磁盘上 session
  * 文件仍可能真实存在（identity 携带 record.id）——反查命中则终态原语有了锚点，
  * 终态原因不再丢失、alive marker 不再残留；未命中则保持旧行为（best-effort 跳过）。
@@ -129,7 +129,6 @@ async function collectPatchIfWorktree(deps: FinalizeDeps, record: ExecutionRecor
   await collectWorktreePatch({
     record,
     getWorktreeManager: () => deps.worktreeManager,
-    getAgentDir: () => deps.modelService.getAgentDir(),
     label: "collectPatch (finalizeRecord Step0)",
   });
 }
@@ -148,7 +147,7 @@ async function cleanupWorktreeIfBound(deps: FinalizeDeps, record: ExecutionRecor
 }
 
 /**
- * 时序收尾（D-017，[U2a] 终态持久化面归口 store 意图原语后的编排形态）。
+ * 时序收尾（D-017，[U2a] 终态持久化归属 store 意图原语后的编排形态）。
  *
  * 步骤：序言 sessionFile 反查 → Step 0 collectPatch → Step 1 completeLegacyClosed →
  * Step 2 终态原语（store.markFinalized / markCancelled：binding 快照 + entry/
@@ -179,7 +178,7 @@ export async function doFinalizeRecord(
     bestEffort(err, "completeLegacyClosed (finalizeRecord B9)", "error");
   }
 
-  // ── Step 2: 终态持久化原语归口（B1 迁移点）──
+  // ── Step 2: 终态持久化原语归属（B1 迁移点）──
   // cancelled 走 markCancelled，其余 markFinalized。两原语内部写序 = binding 快照 →
   // archive/manifest → .alive 删（release 出口①，D8 v7；磁盘收条由 record-settled
   // 帧承载）。生产路径恒 manifestDir 接线（subagent-service 构造点）；缺省异步分支
@@ -195,7 +194,7 @@ export async function doFinalizeRecord(
   }
   if (!persisted) {
     // [§3.4 / U1 偏差 6 接线] 终态原语意外抛错（B9 吞错路径）响亮 entry 上报——GUI
-    // 通知面腿；日志 error 级腿已由 store 层完成。record 留 running 形态（未
+    // 通知侧路径；日志 error 级路径已由 store 层完成。record 留 running 形态（未
     // archive），下次 boot 孤儿恢复终态化承接。
     const reasonDesc = closedReason ?? record.closedReason ?? "gc";
     logger.error(
@@ -219,15 +218,15 @@ export async function doFinalizeRecord(
   // pending-notifications：终态注销（只记 registry 状态，通知由 BgNotifier 发）
   // [W4 发射点枚举归属①] 注销合法发射点枚举（设计 D2）第 ① 处：subagent record
   // 终态化（finalizeRecord 路径）。其余合法发射点：② = store
-  // .markRoundIdle 簿记⑧（U5 收口后编排层无直发；setPendingUnregister →
-  // emitPendingUnregister 唯一发射）；③ workflow run 终局落账（dispatch 链
+  // .markRoundIdle 簿记⑧（U5 收尾后编排层无直发；setPendingUnregister →
+  // emitPendingUnregister 唯一发射）；③ workflow run 终局写入（dispatch 链
   // terminal，[D6(a)] 终局判定走终局记录注册表）；
   // ⑤ 注册对账 sweep 补发（registry-reconcile/reconcile-sweep.ts）。进程退出本身
   // 永远不是注销理由（subagent-service disposeAllRecords 的 emit 属①——其同批
   // completeLegacyClosed+archive 终态化）。
   deps.emitUnregister(record.id, status);
 
-  // [F-5 修复] 宿主侧终态收口钩子（chat 轮路由注销的单一汇聚点，见 FinalizeDeps
+  // [F-5 修复] 宿主侧终态收尾钩子（chat 轮路由注销的单一汇聚点，见 FinalizeDeps
   // .onFinalized 注释）。fire-and-forget：钩子失败不阻断收尾（闭包内自查）。
   try {
     deps.onFinalized?.(record.id);
@@ -250,7 +249,7 @@ export type RoundSettlementOutcome =
 /**
  * 对话模式轮次完成收尾：record 进 idle 态（非终态化，等待续聊）。
  *
- * [U2a/B5] 轮终簿记全集（①-⑫）归口 store.markRoundIdle——本方法瘦身为编排薄壳。
+   * [U2a/B5] 轮终簿记全集（①-⑫）归属 store.markRoundIdle——本方法瘦身为编排薄壳。
  * 簿记语义（细节与 result 写入规则见 record-store.markRoundIdle 方法头）：
  *   - 不调 completeLegacyClosed（record 不冻结，保留 turns[] 等运行时状态供续聊累积）
  *   - 不调 store.archive（record 留内存，getMutable 可查、list 可见）
@@ -262,22 +261,22 @@ export type RoundSettlementOutcome =
  *     （复活终态的调用即 bug——S7 防御），throw 先于 store 簿记⑧的注销发射
  *
  * @throws Error record 终态簿记已冻结（completeLegacyClosed 已跑）仍被调用（store.markRoundIdle
- *   内硬断言——冻结权威判据 = endedAt 已设，写点枚举与两构造性调用面论证见其方法头）。
+ *   内硬断言——冻结权威判据 = endedAt 已设，写点枚举与两构造性调用点论证见其方法头）。
  */
 export async function doFinalizeRoundToIdle(
   deps: FinalizeDeps,
   record: ExecutionRecord,
   outcome: RoundSettlementOutcome,
 ): Promise<void> {
-  // 簿记①-⑫归口（含 A3 硬断言与⑨ reportRecordTransition entry 上报；⑩ stopReason
-  // 展示位 / ⑪ 轮终磁盘面为 A-lite 增补 / ⑫ 轮终 manifest 派生投影（B2 修复，
+  // 簿记①-⑫归属（含 A3 硬断言与⑨ reportRecordTransition entry 上报；⑩ stopReason
+  // 展示位 / ⑪ 轮终磁盘写点为 A-lite 增补 / ⑫ 轮终 manifest 派生视图（B2 修复，
   // session-reader manifest 直读主路径数据源），见 record-store.markRoundIdle 方法头）。
-  // 返回 false = record 不在 store 内存（debug 留痕，无副作用）——两构造性调用面
+  // 返回 false = record 不在 store 内存（debug 留痕，无副作用）——两构造性调用点
   //（Continuation 轮末分流 / settleOneShotOutcome SP-5）的 record 均在内存，false 即
   // 调用方 bug，留痕足够。
   deps.store.markRoundIdle(record.id, outcome);
 
-  // [W4 发射点②] pending 注销（进程已死，从活跃后代差集移除）已随 U5 收口进
+  // [W4 发射点②] pending 注销（进程已死，从活跃后代差集移除）已随 U5 收尾进
   // markRoundIdle 簿记⑧——SubagentService 构造点经 setPendingUnregister 注入
   // notifyHost.emitPendingUnregister，本编排层不再双轨重复发射。
 }

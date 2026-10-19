@@ -74,7 +74,7 @@ export interface EngineAwarenessDeps {
   setLastEngine(engine: string): void;
 }
 
-/** 单次 per-turn 检测的编排结果（测试断言面 + 诊断留痕消费）。 */
+/** 单次 per-turn 检测的编排结果（测试断言范围 + 诊断留痕消费）。 */
 export type EngineAwarenessOutcome =
   | { outcome: "changed"; from: string; to: string }
   | { outcome: "unchanged"; engine: string }
@@ -92,7 +92,7 @@ export type EngineAwarenessOutcome =
  *   - last === target（absent 归一后同值也在内）→ 无事。
  *   - last ≠ target（含 ENOENT=合法缺省）→ 提交缓存先行 → 通知 → 记账，三步同 turn。
  *
- * 抛错面：不主动 try-catch——readGlobalConfig 三态返回不抛，applyRead/sendMessage 的
+ * 抛错路径侧：不主动 try-catch——readGlobalConfig 三态返回不抛，applyRead/sendMessage 的
  * 生产实现各自吞错；handler 顶层 catch 兜底（fail-safe 不阻塞 agent loop）。
  */
 export function runEngineAwarenessTurn(deps: EngineAwarenessDeps): EngineAwarenessOutcome {

@@ -77,7 +77,7 @@ describe('assertZcodeDbPathAllowed：检查顺序三段递进（存在性先于�
     )
   })
 
-  it('第 2 段路径：存在但集合外 → zcode_db_path_forbidden（安全面错误语义更重）', () => {
+  it('第 2 段路径：存在但集合外 → zcode_db_path_forbidden（安全侧错误语义更重）', () => {
     const outside = join(root, 'evil.sqlite')
     writeFileSync(outside, '', 'utf8')
     try {

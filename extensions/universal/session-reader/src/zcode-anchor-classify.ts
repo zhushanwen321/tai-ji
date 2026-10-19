@@ -5,7 +5,7 @@
  *
  * 判定与 entry-anchor.ts 的 zcodeAnchorOfEntry 双键判据同构（v1 快照 / v2 终态条
  * 双版本门），协议字面量同值（写侧 subagent-core record-entry.ts
- * SUBAGENT_RECORD_CUSTOM_TYPE，漂移由 entry-anchor.test.ts 守卫）。
+ * SUBAGENT_RECORD_CUSTOM_TYPE，漂移由 entry-anchor.test.ts 检查）。
  */
 import type { Entry } from '@zhushanwen/session-core'
 import type { ZcodeAnchorMissingReason } from './discovery/zcode-manifest.js'
@@ -13,7 +13,7 @@ import type { ZcodeAnchorMissingReason } from './discovery/zcode-manifest.js'
 /**
  * v2 条目 data 的认识版本词表（W1 起 = 2）。与写侧 subagent-core
  * SUBAGENT_RECORD_ENTRY_VERSION 同值——本地持有 + entry-anchor.test.ts 跨包断言
- * 守卫漂移（生产依赖面不引 subagent-core，同 entry-anchor.ts 的协议字面量模式）。
+ * 检查漂移（生产依赖范围不引 subagent-core，同 entry-anchor.ts 的协议字面量模式）。
  */
 const SUBAGENT_RECORD_ENTRY_V2 = 2
 

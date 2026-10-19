@@ -8,20 +8,20 @@
  *
  * 消费方 = 扩展 reconstructPlanState（读方①）+ runtime plan-state-extractor（读方②）直引；
  * renderer 侧兜底映射已随批次 3 条目 1 删除（不引）。原 shared fixture 等价表与双套平行断言
- * 随下沉删除——映射契约唯一断言面 = 本目录 legacy-entries.test.ts。
+ * 随下沉删除——映射契约唯一断言范围 = 本目录 legacy-entries.test.ts。
  *
  * 范围注记：本模块只承载 lifecycle/resumeHint 两个跨包映射；templateProvidedPath 等其余旧
  * 字段映射仍留扩展读侧（extension 域私有，无第二消费方，无跨包单源诉求）。
  *
  * 纯数据 + 纯函数，零依赖（仅同包 state-machine 值域），与 state-machine.ts（纯契约模块）
- * 刻意分文件——legacy 读取规则有自己的退役时钟，不混入长期契约面。
+ * 刻意分文件——legacy 读取规则有自己的退役时钟，不混入长期契约范围。
  */
 import { PLAN_LIFECYCLE_STATES } from './state-machine'
 import type { PlanLifecycleState } from './state-machine'
 
 /**
  * plan-state entry 的 customType（pi appendEntry custom entry 判别键）。磁盘形态冻结：
- * 扩展写读两侧（persistPlanState / isPlanStateEntry）与 runtime 投影链（plan-state-extractor /
+ * 扩展写读两侧（persistPlanState / isPlanStateEntry）与 runtime 派生视图链（plan-state-extractor /
  * session-records）均消费本常量，值同源——改值即历史会话全部失联，禁改（冻结锚测试见
  * 本目录 legacy-entries.test.ts）。
  */
@@ -30,7 +30,7 @@ export const PLAN_STATE_CUSTOM_TYPE = 'plan-state'
 /**
  * 生命周期状态读取（D2 读方①②共用映射，原扩展 state.ts / runtime extractor 内联拷贝的
  * 单源归并）：
- * ① 新字段直读（值域守卫：PLAN_LIFECYCLE_STATES 之外的垃圾值按缺失处理，落映射——
+ * ① 新字段直读（值域检查：PLAN_LIFECYCLE_STATES 之外的垃圾值按缺失处理，落映射——
  *    不信任外部写入）；
  * ② 旧 entry 无 state（或垃圾 state）时映射 reviewState（awaiting→reviewing /
  *    revising→revising / 其余值→planning|idle 按 isActive）。

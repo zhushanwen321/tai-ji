@@ -7,8 +7,8 @@
  * - cancel(providerId)：abort 进行中的 flow（停轮询 / 关 callback server / 清 state）
  * - hasOAuth(providerId)：读 auth.json 是否有 oauth 凭据（provider 列表徽章数据源）
  * - logout(providerId)：退出登录——移除 auth.json 凭证（B-1 场景 C，先中止进行中 flow）
- * - getCredential/saveCredential(providerId)：auth.json 凭证的收口读/写通道（A1-4）
- *   ——全 runtime 对 auth.json 的写入唯一入口（三 Store 收口，架构 §3.4）
+ * - getCredential/saveCredential(providerId)：auth.json 凭证的收敛读/写通道（A1-4）
+ *   ——全 runtime 对 auth.json 的写入唯一入口（三 Store 收敛，架构 §3.4）
  * - both 清理②（I9）：login 成功后清 models.json apiKey——authMode='both' 的 provider
  *   切换认证方式时清另一种凭据，避免 pi 优先级困惑
  *
@@ -68,7 +68,7 @@ export class AuthService implements IAuthService {
   /**
    * 中止进行中的 OAuth flow。幂等：无进行中 flow 返回 cancelled:false（不报错）。
    * 同步清 activeFlows（不等 abort 异步链走完）——cancel 后立即重新 login 不被拒。
-   * finally 的 delete 带身份守卫（Map 条目仍是本 controller 才删除），不误删新 flow 条目。
+   * finally 的 delete 带身份检查（Map 条目仍是本 controller 才删除），不误删新 flow 条目。
    */
   cancel(providerId: string): { cancelled: boolean } {
     const controller = this.activeFlows.get(providerId)
@@ -103,7 +103,7 @@ export class AuthService implements IAuthService {
   }
 
   /**
-   * 写 auth.json 凭证（A1-4 写收口）：全 runtime 对 authStorage.set 的直接调用只剩
+   * 写 auth.json 凭证（A1-4 写收敛）：全 runtime 对 authStorage.set 的直接调用只剩
    * 本方法（catalog apiKey 保存 / provider 导入 / legacy 迁移 / OAuth 登录全部经此）。
    * AuthStorage 的锁语义（@zhushanwen/pi-file-lock/core 统一 mkdir 锁 + 原子写 + 0600）不变，只是调用点收拢。
    */
@@ -187,7 +187,7 @@ export class AuthService implements IAuthService {
     } finally {
       // ABA 防护（M4-01）：cancel() 同步 abort+delete 后用户立即 re-login（新 controller
       // 入 Map），旧 flow 的 abort 异步链走完后 finally 若无条件 delete 会删掉新 flow 的
-      // 条目（用户无法取消新 flow / 可并发双流 / 迟到 success）。身份守卫：只有 Map 中
+      // 条目（用户无法取消新 flow / 可并发双流 / 迟到 success）。身份检查：只有 Map 中
       // 仍是本 controller 时才删除。
       if (this.activeFlows.get(providerId) === controller) {
         this.activeFlows.delete(providerId)

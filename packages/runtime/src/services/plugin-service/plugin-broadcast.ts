@@ -6,10 +6,10 @@
  * 的全部「插件面向前端」广播出口——同一优先级链（broadcastFn 优先 → broker.broadcast
  * 回退）+ messageBus 定向发布（wave:perf-w08/09 接口收敛语义）：
  *  - broadcastOrBrokerWith：通用广播原语（plugin:crashed / permissionRequest / statusChange
- *    / uiRequest 回退腿等全部经此）；
+ *    / uiRequest 回退路径等全部经此）；
  *  - publishViewUpdateTo：views.update 定向发布（bus 装配 → publish；未装配 → 回退全局广播）；
  *  - createUiRequestBroadcastFn：UiRequestQueue 的广播回调装配（撤窗直发 global 通道 +
- *    payload 注入活跃 sessionId + uiRequest 的 bus 定向/回退双腿）。
+ *    payload 注入活跃 sessionId + uiRequest 的 bus 定向/回退双路径）。
  *
  * 动态状态（deps.broadcastFn / messageBus 晚期注入、activeSessionResolver 求值时点）一律
  * 经 getter 闭包注入——调用时求值，与原实例方法动态读 this.* 逐字等价。
@@ -90,9 +90,9 @@ export function publishViewUpdateTo(
 export interface UiRequestBroadcastDeps {
   /** MF-2：广播 payload 注入当前活跃 sessionId——resolve 时点求值（同一会话串行队列内稳定）。 */
   readonly resolveActiveSessionId: () => string | undefined
-  /** IMessageBus 晚期注入，经 getter 每次调用动态读（m2 腿）。 */
+  /** IMessageBus 晚期注入，经 getter 每次调用动态读（m2 路径）。 */
   readonly getMessageBus: () => IMessageBus | null
-  /** 回退腿 = PluginService.broadcastOrBroker（经绑定闭包注入，动态读 broadcastFn/broker）。
+  /** 回退路径 = PluginService.broadcastOrBroker（经绑定闭包注入，动态读 broadcastFn/broker）。
    *  签名与 broadcastOrBrokerWith 同步泛型化（type/payload 经 ServerMessageMap 关联）。 */
   readonly broadcastOrBroker: <T extends ServerMessageType>(type: T, id: string, payload: ServerMessageMap[T]) => void
 }
@@ -101,7 +101,7 @@ export interface UiRequestBroadcastDeps {
  * 装配 UiRequestQueue 的广播回调（原 plugin-service 构造器内联回调，行为保持迁出）。
  *
  * MF-2：payload 注入当前活跃 sessionId（前端 DialogRequestQueue/useExtensionUI 按
- * sessionId 分区消费，无 sid 的 uiRequest 会被双消费方丢弃，C2 守卫），plugin dialog
+ * sessionId 分区消费，无 sid 的 uiRequest 会被双消费方丢弃，C2 检查），plugin dialog
  * 永不弹出。wave:perf-w08（02 文档 D1-1）：sid 为 string 且 bus 已装配 → bus.publish(sid)
  * 定向发布（plugin:uiRequest 归 stream 类，分配 seq + 入 ring 可回放），不再 broadcast；
  * sid undefined（无活跃 session 的弹窗仍须必达全部连接）或 bus 未装配 → 保持全局广播。

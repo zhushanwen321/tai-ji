@@ -1,13 +1,21 @@
 // apps/electron/preload/preload.ts
 import { contextBridge, ipcRenderer } from 'electron'
-import type { LatestReleaseInfo, UpdateStage, UpdateSettings, UpdateErrorPayload, ProxyTestResult, LaunchResult, UpdateCheckResult, UpdateInstallResult, RendererLogPayload, ImageCacheWritePayload, ImageCacheWriteResult, DebugRunLogRetentionResult, DiagnosticExportBundlePayload, DiagnosticExportBundleResult, SessionJsonlExportPayload, SessionJsonlExportResult, RemoteAccessInfo, RemoteAccessToggleResult, ShieldsFacesPayload, OverlayContentKind, LocalFileServableResult, LocalFileReadResult } from '@taiji/shared'
-import { RENDERER_LOG, IMAGE_CACHE_WRITE, DEBUG_RUN_LOG_RETENTION, DIAGNOSTICS_EXPORT_BUNDLE, SESSION_EXPORT_JSONL, LOCAL_FILE_SERVABLE, LOCAL_FILE_READ } from '@taiji/shared'
+import type { LatestReleaseInfo, UpdateStage, UpdateSettings, UpdateErrorPayload, ProxyTestResult, LaunchResult, UpdateCheckResult, UpdateInstallResult, RendererLogPayload, ImageCacheWritePayload, ImageCacheWriteResult, DebugRunLogRetentionResult, DiagnosticExportBundlePayload, DiagnosticExportBundleResult, SessionJsonlExportPayload, SessionJsonlExportResult, RemoteAccessInfo, RemoteAccessToggleResult, ShieldsFacesPayload, OverlayContentKind, BrowserFrameState, LocalFileServableResult, LocalFileReadResult } from '@taiji/shared'
+import { RENDERER_LOG, IMAGE_CACHE_WRITE, DEBUG_RUN_LOG_RETENTION, DIAGNOSTICS_EXPORT_BUNDLE, SESSION_EXPORT_JSONL, LOCAL_FILE_SERVABLE, LOCAL_FILE_READ,
+  RUNTIME_PORT, RUNTIME_ERROR, RUNTIME_RESTARTING, RUNTIME_FAILED, GET_RUNTIME_PORT, GET_RUNTIME_PORT_OFFSET, GET_RUNTIME_TOKEN, GET_RUNTIME_START_ERROR, RUNTIME_RESTART,
+  CREATE_WINDOW, GET_WINDOWS, FOCUS_WINDOW, WINDOW_LIST_UPDATED, WINDOW_MINIMIZE, WINDOW_TOGGLE_MAXIMIZE, WINDOW_CLOSE, FULLSCREEN_CHANGED,
+  PICK_DIRECTORY, PICK_FILE, OPEN_EXTERNAL, REVEAL_IN_FOLDER, GET_DATA_DIR,
+  SHORTCUT, SHORTCUT_FORWARD,
+  BROWSER_CREATE, BROWSER_NAVIGATE, BROWSER_HIDE, BROWSER_SHOW, BROWSER_FOCUS, BROWSER_SET_RECT, BROWSER_DESTROY, BROWSER_BACK, BROWSER_FORWARD, BROWSER_SET_ZOOM, BROWSER_GET_ZOOM, BROWSER_GET_SELECTION, BROWSER_OVERLAY_STATE, BROWSER_SHIELDS, BROWSER_FORWARD_KEYS, BROWSER_STATE,
+  UPDATE_CHECK, UPDATE_DOWNLOAD, UPDATE_INSTALL, UPDATE_GET_PRELOADED, UPDATE_GET_LAUNCH_RESULT, UPDATE_GET_PROXY_CONFIG, UPDATE_SET_PROXY_CONFIG, UPDATE_TEST_PROXY, UPDATE_GET_PENDING, UPDATE_GET_SETTINGS, UPDATE_SET_SETTINGS, UPDATE_OPEN_MANUAL_DIR, UPDATE_PROGRESS, UPDATE_ERROR,
+  GET_REMOTE_ACCESS_INFO, ROTATE_REMOTE_ACCESS_TOKEN, SET_REMOTE_ACCESS_ENABLED,
+  SOUND_LIST, SOUND_PLAY } from '@taiji/shared'
 
 // local-file 预检 / 源码读取的 payload 类型（LocalFileServableResult / LocalFileReadResult）
 // 定义 SSOT = `packages/shared/src/ipc-payloads.ts`（C-comm-22 唯一类型源），本文件只 import
 // 用于 ElectronAPI 方法签名——从前在此处另立一份副本会与 main / renderer 侧静默漂移。
 
-export interface ElectronAPI { // oe-exempt:20261003:framework:类型契约先行——容器/编排/注册表契约层，D1 下游单元即为消费面
+export interface ElectronAPI { // oe-exempt:20261003:framework:类型契约先行——容器/编排/注册表契约层，D1 下游单元即为消费方
   /** 监听 runtime 端口事件 */
   onRuntimePort(callback: (port: number) => void): () => void
   /** 监听 runtime 启动失败事件 */
@@ -66,9 +74,10 @@ export interface ElectronAPI { // oe-exempt:20261003:framework:类型契约先�
   revealInFolder(filePath: string): Promise<boolean>
   /**
    * 预检绝对路径是否可服务（chat-html-support §6.9 D9）：内联预览容器 HtmlPreviewInline
-   * （经 deps `probeArtifact?`）挂载前预检（v16 唯一渲染面，ADR-0119）。谓词 = 准入前缀
+   * （经 deps `probeArtifact?`）挂载前预检（v16 唯一渲染进程侧，ADR-0119）。谓词 = 准入前缀
    * 成员资格（先行短路）→ 存在性 → 目录性，与 main 的 local-file 协议 handler 同一模块
-   * 函数；准入前缀 = 会话产物子树 `<dataDir>/artifacts/**`（读/预检通道收窄面，非协议
+   * 函数；准入前缀 = 会话产物子树 `<dataDir>/ext-sessions/<sid>/artifacts/**`（读/预检
+   * 通道收窄范围，非协议
    * handler 全量白名单——通道入参含模型消息文本路径载荷）。入参 = 明文绝对路径（% 解码
    * 由 URL 入口承担，IPC 不重复解码）。
    */
@@ -78,7 +87,7 @@ export interface ElectronAPI { // oe-exempt:20261003:framework:类型契约先�
    * 消费方 = 内联容器源码态（deps `readArtifact`）与 DetailPane 变更集/文件树产物源码读取
    * （useDetailPane `loadPreviewContent`）——产物目录在 session cwd 外，runtime file.read
    * 的 cwd 守门不可达。谓词与 `localFileServable` 同一模块函数，准入前缀同为产物子树
-   * `<dataDir>/artifacts/**`（收窄面），越界返回 `out_of_whitelist`（不触 fs），消费方
+   * `<dataDir>/ext-sessions/<sid>/artifacts/**`（收窄范围），越界返回 `out_of_whitelist`（不触 fs），消费方
    * 回落既有 cwd 通道。
    */
   localFileRead(absPath: string): Promise<LocalFileReadResult>
@@ -100,12 +109,12 @@ export interface ElectronAPI { // oe-exempt:20261003:framework:类型契约先�
   browserNavigate(sessionId: string, url: string): Promise<void>
   /** 隐藏 view（keep-alive，不销毁） */
   browserHide(sessionId: string): Promise<void>
-  /** 显示请求（恢复最近 rect）。收敛到显示收口谓词（§7.4 show 统一谓词）：
+  /** 显示请求（恢复最近 rect）。收敛到显示收敛谓词（§7.4 show 统一谓词）：
    *  show 当且仅当「浮层开 ∧ 内容 browser ∧ 无错误态 ∧ 无相交 shieldsView 面」，
    *  谓词为假时保持/进入隐藏（非失败） */
   browserShow(sessionId: string): Promise<void>
   /** 切换可见 view 到指定 session。浮层随行豁免（§5.1 规则 5）：浮层开 ∧ 内容 browser 时
-   *  换显整体豁免（view 保持发起会话的）；非显示收口谓词态只隐藏不显示（防残影复活） */
+   *  换显整体豁免（view 保持发起会话的）；非显示收敛谓词态只隐藏不显示（防残影复活） */
   browserFocus(sessionId: string): Promise<void>
   /** 设置 view 位置/尺寸（CSS px = DIP，不乘 dpr；renderer 经 getBoundingClientRect 推送） */
   browserSetRect(sessionId: string, rect: { x: number; y: number; width: number; height: number }): Promise<void>
@@ -122,7 +131,7 @@ export interface ElectronAPI { // oe-exempt:20261003:framework:类型契约先�
   browserGetZoom(sessionId: string): Promise<number>
   /** 读取 WebContentsView 内当前选区文本 + URL（二期扩展点，Wave 6 预留） */
   browserGetSelection(sessionId: string): Promise<{ text: string; url: string }>
-  /** 显示收口事实源之一（display-containers §7.4）：浮层开合/内容切换上报。
+  /** 显示收敛事实源之一（display-containers §7.4）：浮层开合/内容切换上报。
    *  契约：BrowserPane 挂载/重开前先上报（谓词事实先于 show 请求）；浮层关闭/换出 browser
    *  内容时立即上报——主进程侧联动隐藏 view（keep-alive）。非法 payload reject（error envelope） */
   browserSetOverlayState(state: {
@@ -131,8 +140,8 @@ export interface ElectronAPI { // oe-exempt:20261003:framework:类型契约先�
     content: OverlayContentKind | null
     sessionId: string | null
   }): Promise<void>
-  /** 显示收口事实源之一（§5.1 规则 6② / §6.7）：shieldsView 遮蔽面**全量**上报（替换语义）。
-   *  fullscreen=true 无条件隐藏 view；非全屏面与 view 矩形几何相交才隐藏（双阈值空间滞回），
+  /** 显示收敛事实源之一（§5.1 规则 6② / §6.7）：shieldsView 遮蔽视图**全量**上报（替换语义）。
+   *  fullscreen=true 无条件隐藏 view；非全屏遮罩与 view 矩形几何相交才隐藏（双阈值空间滞回），
    *  成员开态内 rect 变化（横幅改宽）也须重报。非法 payload reject（error envelope） */
   browserSetShields(payload: ShieldsFacesPayload): Promise<void>
   /** 转发键清单全量上报（§7.4 [MANDATORY]）：初始化 / settings 重录快捷键 / renderer 重载时调。
@@ -149,18 +158,10 @@ export interface ElectronAPI { // oe-exempt:20261003:framework:类型契约先�
   onBrowserForwardKey(callback: (payload: { accelerator: string }) => void): () => void
   /** 监听 browser 状态变化（url/isLoading/error/processGone/canGoBack/canGoForward/zoomFactor，
    *  主进程 did-navigate 等事件推送），返回取消订阅函数。
+   *  载荷形态 SSOT = @taiji/shared BrowserFrameState（browser:state 通道契约，C-comm-22）。
    *  两类错误占位区分（§5.3）：processGone 非 null → 「创建失败/进程崩溃」占位（重试 = create + show +
    *  navigate）；error 非 null → 「页面加载失败」占位。两者非 null 时 view 已被主进程联动隐藏 */
-  onBrowserState(callback: (state: {
-    sessionId: string
-    currentUrl: string
-    isLoading: boolean
-    error: { errorCode: number; errorDescription: string; validatedURL: string } | null
-    processGone: { reason: string } | null
-    canGoBack: boolean
-    canGoForward: boolean
-    zoomFactor: number
-  }) => void): () => void
+  onBrowserState(callback: (state: BrowserFrameState) => void): () => void
   // ── 自动升级检测 ──────────────────────────────────────────────
   /**
    * 检测最新可用版本。
@@ -199,8 +200,6 @@ export interface ElectronAPI { // oe-exempt:20261003:framework:类型契约先�
   onUpdateProgress(callback: (payload: { stage: UpdateStage; percent: number }) => void): () => void
   /** 监听升级错误事件（stage + message + errorCode + suggestion），返回取消订阅函数 */
   onUpdateError(callback: (payload: UpdateErrorPayload) => void): () => void
-  /** 不支持当前平台时，打开备用下载页（release 页面） */
-  openUpdateFallbackUrl(url: string): Promise<void>
   /**
    * 打开手动升级产物目录（update-network-resilience D9 设置页手动通道）。
    * main 侧先幂等建目录（用户无需手动创建）再 shell.openPath 打开；打开失败时 reject
@@ -272,7 +271,7 @@ export interface ElectronAPI { // oe-exempt:20261003:framework:类型契约先�
    * 失败/畸形 payload 不 reject（main handler 零抛错，返回逐图 invalid/quota-full 结果）。
    */
   imageCacheWrite(payload: ImageCacheWritePayload): Promise<ImageCacheWriteResult>
-  // ── 验收调试口（A9②；无鉴权面，不进产品 UI）─────────────────
+  // ── 验收调试口（A9②；无鉴权，不进产品 UI）─────────────────
   /**
    * 手动触发 main 侧 logs/ 保留期清理扫描一次（runLogRetentionNow，与 main-logger init
    * / 每日定时器同一函数）。**验收调试入口，仅 dev 调试用途，renderer 产品代码不得调用**。
@@ -282,7 +281,7 @@ export interface ElectronAPI { // oe-exempt:20261003:framework:类型契约先�
   // ── 诊断包导出（crash-forensics §3.3 D6 / u3a）─────────────────
   /**
    * 导出诊断包：main 先弹保存对话框（用户自选保存位置；payload.defaultPath 为初始目录），
-   * 打包双台账 + 日志尾部 + 水位摘录 + 触发状态表 + summary.md 为 zip。永不 reject——
+   * 打包双登记清单 + 日志尾部 + 水位摘录 + 触发状态表 + summary.md 为 zip。永不 reject——
    * 返回三态（exported 携带产物路径与摘要含知情文案 privacyNotice / canceled 用户取消
    * / error 携带具体 errno），调用方（u3b）按 status 分支展示。
    */
@@ -300,54 +299,54 @@ export interface ElectronAPI { // oe-exempt:20261003:framework:类型契约先�
 contextBridge.exposeInMainWorld('electronAPI', {
   onRuntimePort: (callback: (port: number) => void) => {
     const handler = (_event: Electron.IpcRendererEvent, port: number) => callback(port)
-    ipcRenderer.on('runtime-port', handler)
-    return () => ipcRenderer.removeListener('runtime-port', handler)
+    ipcRenderer.on(RUNTIME_PORT, handler)
+    return () => ipcRenderer.removeListener(RUNTIME_PORT, handler)
   },
   onRuntimeError: (callback: (error: { message: string }) => void) => {
     const handler = (_event: Electron.IpcRendererEvent, error: { message: string }) => callback(error)
-    ipcRenderer.on('runtime-error', handler)
-    return () => ipcRenderer.removeListener('runtime-error', handler)
+    ipcRenderer.on(RUNTIME_ERROR, handler)
+    return () => ipcRenderer.removeListener(RUNTIME_ERROR, handler)
   },
   // RD-3#2：启动失败真因拉取（boot 竞态兜底，main 侧 get-runtime-start-error 只读 handler）
-  getRuntimeStartError: () => ipcRenderer.invoke('get-runtime-start-error'),
+  getRuntimeStartError: () => ipcRenderer.invoke(GET_RUNTIME_START_ERROR),
   onRuntimeRestarting: (callback: (payload: { attempt: number }) => void) => {
     const handler = (_event: Electron.IpcRendererEvent, payload: { attempt: number }) => callback(payload)
-    ipcRenderer.on('runtime-restarting', handler)
-    return () => ipcRenderer.removeListener('runtime-restarting', handler)
+    ipcRenderer.on(RUNTIME_RESTARTING, handler)
+    return () => ipcRenderer.removeListener(RUNTIME_RESTARTING, handler)
   },
   onRuntimeFailed: (callback: (payload: { attempts: number; message: string }) => void) => {
     const handler = (_event: Electron.IpcRendererEvent, payload: { attempts: number; message: string }) => callback(payload)
-    ipcRenderer.on('runtime-failed', handler)
-    return () => ipcRenderer.removeListener('runtime-failed', handler)
+    ipcRenderer.on(RUNTIME_FAILED, handler)
+    return () => ipcRenderer.removeListener(RUNTIME_FAILED, handler)
   },
-  restartRuntime: () => ipcRenderer.invoke('runtime-restart'),
+  restartRuntime: () => ipcRenderer.invoke(RUNTIME_RESTART),
   onShortcut: (callback: (type: string) => void) => {
     const handler = (_event: Electron.IpcRendererEvent, type: string) => callback(type)
-    ipcRenderer.on('shortcut', handler)
-    return () => ipcRenderer.removeListener('shortcut', handler)
+    ipcRenderer.on(SHORTCUT, handler)
+    return () => ipcRenderer.removeListener(SHORTCUT, handler)
   },
-  getRuntimePort: () => ipcRenderer.invoke('get-runtime-port'),
-  getRuntimePortOffset: () => ipcRenderer.invoke('get-runtime-port-offset'),
-  getRuntimeToken: () => ipcRenderer.invoke('get-runtime-token'),
+  getRuntimePort: () => ipcRenderer.invoke(GET_RUNTIME_PORT),
+  getRuntimePortOffset: () => ipcRenderer.invoke(GET_RUNTIME_PORT_OFFSET),
+  getRuntimeToken: () => ipcRenderer.invoke(GET_RUNTIME_TOKEN),
 
   // ── 窗口管理 ──────────────────────────────────────────────────
-  createWindow: (sessionId?: string) => ipcRenderer.invoke('create-window', { sessionId }),
-  getWindows: () => ipcRenderer.invoke('get-windows'),
-  focusWindow: (windowId: string) => ipcRenderer.invoke('focus-window', windowId),
+  createWindow: (sessionId?: string) => ipcRenderer.invoke(CREATE_WINDOW, { sessionId }),
+  getWindows: () => ipcRenderer.invoke(GET_WINDOWS),
+  focusWindow: (windowId: string) => ipcRenderer.invoke(FOCUS_WINDOW, windowId),
   onWindowListUpdated: (callback: () => void) => {
     const handler = () => callback()
-    ipcRenderer.on('window-list-updated', handler)
-    return () => ipcRenderer.removeListener('window-list-updated', handler)
+    ipcRenderer.on(WINDOW_LIST_UPDATED, handler)
+    return () => ipcRenderer.removeListener(WINDOW_LIST_UPDATED, handler)
   },
   pickDirectory: (options?: { title?: string; defaultPath?: string }) =>
-    ipcRenderer.invoke('pick-directory', options),
+    ipcRenderer.invoke(PICK_DIRECTORY, options),
   pickFile: (options?: {
     title?: string
     defaultPath?: string
     filters?: Array<{ name: string; extensions: string[] }>
-  }) => ipcRenderer.invoke('pick-file', options),
-  openExternal: (url: string) => ipcRenderer.invoke('open-external', url),
-  revealInFolder: (filePath: string) => ipcRenderer.invoke('reveal-in-folder', filePath),
+  }) => ipcRenderer.invoke(PICK_FILE, options),
+  openExternal: (url: string) => ipcRenderer.invoke(OPEN_EXTERNAL, url),
+  revealInFolder: (filePath: string) => ipcRenderer.invoke(REVEAL_IN_FOLDER, filePath),
   // 通道名 SSOT = @taiji/shared 的 LOCAL_FILE_SERVABLE / LOCAL_FILE_READ
   // （packages/shared/src/ipc-channels.ts）；main 侧 gateway/local-file-handlers 同 import
   // ——两侧禁止字面量分叉
@@ -355,105 +354,86 @@ contextBridge.exposeInMainWorld('electronAPI', {
   localFileRead: (absPath: string) => ipcRenderer.invoke(LOCAL_FILE_READ, absPath),
   onFullscreenChanged: (callback: (payload: { isFullscreen: boolean }) => void) => {
     const handler = (_event: Electron.IpcRendererEvent, payload: { isFullscreen: boolean }) => callback(payload)
-    ipcRenderer.on('fullscreen-changed', handler)
-    return () => ipcRenderer.removeListener('fullscreen-changed', handler)
+    ipcRenderer.on(FULLSCREEN_CHANGED, handler)
+    return () => ipcRenderer.removeListener(FULLSCREEN_CHANGED, handler)
   },
   // ── 窗口控制（win/linux 自绘圆点点击）─────────────────────────
-  windowMinimize: () => ipcRenderer.invoke('window-minimize'),
-  windowToggleMaximize: () => ipcRenderer.invoke('window-toggle-maximize'),
-  windowClose: () => ipcRenderer.invoke('window-close'),
+  windowMinimize: () => ipcRenderer.invoke(WINDOW_MINIMIZE),
+  windowToggleMaximize: () => ipcRenderer.invoke(WINDOW_TOGGLE_MAXIMIZE),
+  windowClose: () => ipcRenderer.invoke(WINDOW_CLOSE),
   // ── Browser drawer（嵌入式浏览器）─────────────────────────────
-  browserCreate: (sessionId: string, windowId: string) => ipcRenderer.invoke('browser:create', { sessionId, windowId }),
-  browserNavigate: (sessionId: string, url: string) => ipcRenderer.invoke('browser:navigate', { sessionId, url }),
-  browserHide: (sessionId: string) => ipcRenderer.invoke('browser:hide', sessionId),
-  browserShow: (sessionId: string) => ipcRenderer.invoke('browser:show', sessionId),
-  browserFocus: (sessionId: string) => ipcRenderer.invoke('browser:focus', sessionId),
+  browserCreate: (sessionId: string, windowId: string) => ipcRenderer.invoke(BROWSER_CREATE, { sessionId, windowId }),
+  browserNavigate: (sessionId: string, url: string) => ipcRenderer.invoke(BROWSER_NAVIGATE, { sessionId, url }),
+  browserHide: (sessionId: string) => ipcRenderer.invoke(BROWSER_HIDE, sessionId),
+  browserShow: (sessionId: string) => ipcRenderer.invoke(BROWSER_SHOW, sessionId),
+  browserFocus: (sessionId: string) => ipcRenderer.invoke(BROWSER_FOCUS, sessionId),
   browserSetRect: (sessionId: string, rect: { x: number; y: number; width: number; height: number }) =>
-    ipcRenderer.invoke('browser:set-rect', { sessionId, rect }),
-  browserDestroy: (sessionId: string) => ipcRenderer.invoke('browser:destroy', sessionId),
-  browserBack: (sessionId: string) => ipcRenderer.invoke('browser:back', sessionId),
-  browserForward: (sessionId: string) => ipcRenderer.invoke('browser:forward', sessionId),
-  browserSetZoom: (sessionId: string, factor: number) => ipcRenderer.invoke('browser:set-zoom', { sessionId, factor }),
-  browserGetZoom: (sessionId: string) => ipcRenderer.invoke('browser:get-zoom', sessionId),
-  browserGetSelection: (sessionId: string) => ipcRenderer.invoke('browser:get-selection', sessionId),
+    ipcRenderer.invoke(BROWSER_SET_RECT, { sessionId, rect }),
+  browserDestroy: (sessionId: string) => ipcRenderer.invoke(BROWSER_DESTROY, sessionId),
+  browserBack: (sessionId: string) => ipcRenderer.invoke(BROWSER_BACK, sessionId),
+  browserForward: (sessionId: string) => ipcRenderer.invoke(BROWSER_FORWARD, sessionId),
+  browserSetZoom: (sessionId: string, factor: number) => ipcRenderer.invoke(BROWSER_SET_ZOOM, { sessionId, factor }),
+  browserGetZoom: (sessionId: string) => ipcRenderer.invoke(BROWSER_GET_ZOOM, sessionId),
+  browserGetSelection: (sessionId: string) => ipcRenderer.invoke(BROWSER_GET_SELECTION, sessionId),
   browserSetOverlayState: (state: {
     open: boolean
     content: OverlayContentKind | null
     sessionId: string | null
-  }) => ipcRenderer.invoke('browser:overlay-state', state),
-  browserSetShields: (payload: ShieldsFacesPayload) => ipcRenderer.invoke('browser:shields', payload),
-  browserSetForwardKeys: (keys: string[]) => ipcRenderer.invoke('browser:forward-keys', { set: keys }),
+  }) => ipcRenderer.invoke(BROWSER_OVERLAY_STATE, state),
+  browserSetShields: (payload: ShieldsFacesPayload) => ipcRenderer.invoke(BROWSER_SHIELDS, payload),
+  browserSetForwardKeys: (keys: string[]) => ipcRenderer.invoke(BROWSER_FORWARD_KEYS, { set: keys }),
   browserUpdateForwardKeys: (delta: { add?: string[]; remove?: string[] }) =>
-    ipcRenderer.invoke('browser:forward-keys', { add: delta.add, remove: delta.remove }),
+    ipcRenderer.invoke(BROWSER_FORWARD_KEYS, { add: delta.add, remove: delta.remove }),
   onBrowserForwardKey: (callback: (payload: { accelerator: string }) => void) => {
     const handler = (_event: Electron.IpcRendererEvent, payload: { accelerator: string }) => callback(payload)
-    ipcRenderer.on('shortcut:forward', handler)
-    return () => ipcRenderer.removeListener('shortcut:forward', handler)
+    ipcRenderer.on(SHORTCUT_FORWARD, handler)
+    return () => ipcRenderer.removeListener(SHORTCUT_FORWARD, handler)
   },
-  onBrowserState: (callback: (state: {
-    sessionId: string
-    currentUrl: string
-    isLoading: boolean
-    error: { errorCode: number; errorDescription: string; validatedURL: string } | null
-    processGone: { reason: string } | null
-    canGoBack: boolean
-    canGoForward: boolean
-    zoomFactor: number
-  }) => void) => {
-    const handler = (_event: Electron.IpcRendererEvent, state: {
-      sessionId: string
-      currentUrl: string
-      isLoading: boolean
-      error: { errorCode: number; errorDescription: string; validatedURL: string } | null
-      processGone: { reason: string } | null
-      canGoBack: boolean
-      canGoForward: boolean
-      zoomFactor: number
-    }) => callback(state)
-    ipcRenderer.on('browser:state', handler)
-    return () => ipcRenderer.removeListener('browser:state', handler)
+  onBrowserState: (callback: (state: BrowserFrameState) => void) => {
+    const handler = (_event: Electron.IpcRendererEvent, state: BrowserFrameState) => callback(state)
+    ipcRenderer.on(BROWSER_STATE, handler)
+    return () => ipcRenderer.removeListener(BROWSER_STATE, handler)
   },
   // ── 自动升级检测 ──────────────────────────────────────────────
   checkForUpdate: (opts?: { force?: boolean }) =>
-    ipcRenderer.invoke('update:check', { force: opts?.force }),
+    ipcRenderer.invoke(UPDATE_CHECK, { force: opts?.force }),
   // ── 自动升级执行（w3）──────────────────────────────────────
   updateDownload: (version: string) =>
-    ipcRenderer.invoke('update:download', { version }),
+    ipcRenderer.invoke(UPDATE_DOWNLOAD, { version }),
   // ── 自动升级拆分流程（download → install）──────────────────────
-  updateInstall: () => ipcRenderer.invoke('update:install'),
-  getPreloaded: () => ipcRenderer.invoke('update:getPreloaded'),
-  getLaunchResult: () => ipcRenderer.invoke('update:getLaunchResult'),
+  updateInstall: () => ipcRenderer.invoke(UPDATE_INSTALL),
+  getPreloaded: () => ipcRenderer.invoke(UPDATE_GET_PRELOADED),
+  getLaunchResult: () => ipcRenderer.invoke(UPDATE_GET_LAUNCH_RESULT),
   onUpdateProgress: (callback: (payload: { stage: UpdateStage; percent: number }) => void) => {
     const handler = (_event: Electron.IpcRendererEvent, payload: { stage: UpdateStage; percent: number }) => callback(payload)
-    ipcRenderer.on('update:progress', handler)
-    return () => ipcRenderer.removeListener('update:progress', handler)
+    ipcRenderer.on(UPDATE_PROGRESS, handler)
+    return () => ipcRenderer.removeListener(UPDATE_PROGRESS, handler)
   },
   onUpdateError: (callback: (payload: UpdateErrorPayload) => void) => {
     const handler = (_event: Electron.IpcRendererEvent, payload: UpdateErrorPayload) => callback(payload)
-    ipcRenderer.on('update:error', handler)
-    return () => ipcRenderer.removeListener('update:error', handler)
+    ipcRenderer.on(UPDATE_ERROR, handler)
+    return () => ipcRenderer.removeListener(UPDATE_ERROR, handler)
   },
-  openUpdateFallbackUrl: (url: string) => ipcRenderer.invoke('open-external', url),
-  openUpdateManualDir: () => ipcRenderer.invoke('update:openManualDir'),
+  openUpdateManualDir: () => ipcRenderer.invoke(UPDATE_OPEN_MANUAL_DIR),
   // ── 代理配置 ────────────────────────────────────────────────────
-  getDataDir: () => ipcRenderer.invoke('get-data-dir'),
+  getDataDir: () => ipcRenderer.invoke(GET_DATA_DIR),
   // v2 §3：chooseDirectory 薄包装 pick-directory handler，返回 path（canceled→null），对齐 ui ChooseDirectoryFn 契约
   chooseDirectory: () =>
-    ipcRenderer.invoke('pick-directory').then((r: { canceled: boolean; path: string | null }) => r.path),
+    ipcRenderer.invoke(PICK_DIRECTORY).then((r: { canceled: boolean; path: string | null }) => r.path),
   // ── remote-access（设置面板连接信息）────────────────────────
-  getRemoteAccessInfo: () => ipcRenderer.invoke('get-remote-access-info'),
-  rotateRemoteAccessToken: () => ipcRenderer.invoke('rotate-remote-access-token'),
-  setRemoteAccessEnabled: (enabled: boolean) => ipcRenderer.invoke('set-remote-access-enabled', enabled),
-  getProxyConfig: () => ipcRenderer.invoke('update:getProxyConfig'),
-  setProxyConfig: (config) => ipcRenderer.invoke('update:setProxyConfig', config),
-  testProxy: (config) => ipcRenderer.invoke('update:testProxy', config),
+  getRemoteAccessInfo: () => ipcRenderer.invoke(GET_REMOTE_ACCESS_INFO),
+  rotateRemoteAccessToken: () => ipcRenderer.invoke(ROTATE_REMOTE_ACCESS_TOKEN),
+  setRemoteAccessEnabled: (enabled: boolean) => ipcRenderer.invoke(SET_REMOTE_ACCESS_ENABLED, enabled),
+  getProxyConfig: () => ipcRenderer.invoke(UPDATE_GET_PROXY_CONFIG),
+  setProxyConfig: (config) => ipcRenderer.invoke(UPDATE_SET_PROXY_CONFIG, config),
+  testProxy: (config) => ipcRenderer.invoke(UPDATE_TEST_PROXY, config),
   // ── 升级提醒持久化标志 + 升级设置 ────────────────────────────────
-  getPendingUpdate: () => ipcRenderer.invoke('update:getPending'),
-  getUpdateSettings: () => ipcRenderer.invoke('update:getSettings'),
-  setUpdateSettings: (settings: Partial<UpdateSettings>) => ipcRenderer.invoke('update:setSettings', settings),
+  getPendingUpdate: () => ipcRenderer.invoke(UPDATE_GET_PENDING),
+  getUpdateSettings: () => ipcRenderer.invoke(UPDATE_GET_SETTINGS),
+  setUpdateSettings: (settings: Partial<UpdateSettings>) => ipcRenderer.invoke(UPDATE_SET_SETTINGS, settings),
   // ── 系统提示音 ──────────────────────────────────────────────
-  listSystemSounds: () => ipcRenderer.invoke('sound:list'),
-  playSystemSound: (name: string, kind?: 'success' | 'error') => ipcRenderer.invoke('sound:play', name, kind),
+  listSystemSounds: () => ipcRenderer.invoke(SOUND_LIST),
+  playSystemSound: (name: string, kind?: 'success' | 'error') => ipcRenderer.invoke(SOUND_PLAY, name, kind),
   // ── renderer 错误上报（D2；通道名经 shared SSOT 常量，禁字面量分叉）──
   reportRendererLog: (payload: RendererLogPayload) => ipcRenderer.invoke(RENDERER_LOG, payload),
   // ── toolResult 图片落盘（D6-⑨；通道名经 shared SSOT 常量）──

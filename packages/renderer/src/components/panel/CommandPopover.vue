@@ -11,7 +11,7 @@
     判定无从发生，浮层不因输入被 dismiss。
     键盘事件（↑↓ ⏎ Tab Esc）主入口 = 本组件经 command-popover-keyboard.ts 注册的 window
     capture 监听；Composer 在 ComposerInput keydown 时调 handleKeydown 为兜底路（见
-    composer-keydown.ts），二者共用同一 handleKeydown——幂等守卫（e.defaultPrevented）在
+    composer-keydown.ts），二者共用同一 handleKeydown——幂等检查（e.defaultPrevented）在
     command-popover-keyboard.ts 内，同一事件只被先到的入口消费。
     **@open-auto-focus.prevent**：禁掉 reka-ui PopoverContent 的 FocusScope 自动聚焦——
     否则浮层打开会把焦点抢到首个命令按钮，contenteditable 不再收键，导致
@@ -155,7 +155,7 @@
               <span v-if="item.description" class="shrink-0 text-neutral-faint">·</span>
               <span v-if="item.description" class="ml-auto shrink-0 truncate max-w-[520px] text-neutral-dim">{{ item.description }}</span>
               <!-- skill 已选标记（多 skill 注入 D2）：命中 selectedSkillNames 的项显示「已选」，
-                   onSelect 守卫禁选（防同一 skill 重复注入全文） -->
+                   onSelect 检查禁选（防同一 skill 重复注入全文） -->
               <span v-if="item.selected" class="ml-auto shrink-0 text-[length:var(--text-3xs)] text-neutral-dim">{{ t('panel.command.skillSelected') }}</span>
               <span v-else-if="!item.description" class="ml-auto shrink-0 text-[length:var(--text-3xs)] text-neutral-dim">{{ item.kind }}</span>
             </template>
@@ -212,7 +212,7 @@ const props = defineProps<{
   variant?: ComposerVariant
   /** 过滤 query（输入区 / 或 # 后的内容，空串/缺省=不过滤；file 按 name+path 过滤，slash 按命令名过滤） */
   query?: string
-  /** 已插入的 skill 名集合（多 skill 注入 D2 已选禁选数据面）：Composer 从当前 segments 取。
+  /** 已插入的 skill 名集合（多 skill 注入 D2 已选禁选数据范围）：Composer 从当前 segments 取。
    *  命中项显示「已选」并禁选（同一 skill 不重复注入全文，防上下文浪费）。默认空。 */
   selectedSkillNames?: string[]
   /** 全局 skill（useGlobalSkills → skillRegistry globalCache，W4 FR-5）。skill 段两态共用 +
@@ -226,7 +226,7 @@ const props = defineProps<{
   shellInputRef?: Readonly<Ref<ShellInputInstance | null>>
 }>()
 
-/** select / select-and-send 共用 payload 字段面（五路归一；字段语义见 useCommandPopoverTrigger 的 CommandSelectPayload） */
+/** select / select-and-send 共用 payload 字段侧（五路归一；字段语义见 useCommandPopoverTrigger 的 CommandSelectPayload） */
 interface CommandSelectEmit {
   type: CmdType
   name: string
@@ -271,7 +271,7 @@ onMounted(() => { void loadCandidates() })
 watch(sessionIdRef, () => { void loadCandidates() })
 /**
  * landing cwd 路 $ 候选 + D7 三态（无 sid 时 open-fetch 边沿拉取，D2；panel 有 sid 走上方
- * fileCandidates）。错误态/空态两因区分 + 5000 截断提示 + B5/#10 cwd 快照守卫与 open 边沿清 ref，
+ * fileCandidates）。错误态/空态两因区分 + 5000 截断提示 + B5/#10 cwd 快照检查与 open 边沿清 ref，
  * 拉取与视图态同在 command-popover-open-fetch.ts 的 useCommandPopoverOpenFetch。
  */
 const {
@@ -340,7 +340,7 @@ const slashCommands = computed(() => {
   )
 })
 
-/** slash 命令投递闭环（挂载/切 session 补拉 + session.commands 订阅；open 边沿拉取归
+/** slash 命令投递闭环（挂载/切 session 补充拉取 + session.commands 订阅；open 边沿拉取归
  *  useCommandPopoverOpenFetch，双路并存会重复 RPC——详见 useCommandSync） */
 useCommandSync(sessionIdRef)
 
@@ -440,8 +440,8 @@ function toSelectPayload(item: CmdItem): CommandSelectEmit {
 }
 
 function onSelect(item: CmdItem): void {
-  // 已选禁选守卫（多 skill 注入 D2）：命中 selectedSkillNames 的 skill 项不再派发 select
-  // （同一 skill 不重复注入全文）；键盘 Enter/Tab 与鼠标点击共用本函数，一处守卫双路生效
+  // 已选禁选检查（多 skill 注入 D2）：命中 selectedSkillNames 的 skill 项不再派发 select
+  // （同一 skill 不重复注入全文）；键盘 Enter/Tab 与鼠标点击共用本函数，一处检查双路生效
   if (item.selected) return
   emit('select', toSelectPayload(item))
 }

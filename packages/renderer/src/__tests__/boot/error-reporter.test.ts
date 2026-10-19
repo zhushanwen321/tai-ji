@@ -90,7 +90,7 @@ function dispatchUnhandledRejection(reason: unknown): void {
   }
 }
 
-/** 取最近一次上报 payload（测试断言面）。 */
+/** 取最近一次上报 payload（测试断言范围）。 */
 function lastReport(): RendererLogPayload {
   expect(reportMock).toHaveBeenCalled()
   const calls = reportMock.mock.calls as unknown as Array<[RendererLogPayload]>
@@ -148,7 +148,7 @@ describe('boot/error-reporter 三件套', () => {
     const payload = lastReport()
     expect(payload.source).toBe('unhandledrejection')
     expect(payload.message).toContain('rejection-boom')
-    // 捕获面不干扰用户可见界面
+    // 捕获点不干扰用户可见界面
     expectGoodChildAlive(container)
   })
 

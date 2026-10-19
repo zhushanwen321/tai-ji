@@ -1,5 +1,5 @@
 /**
- * u5d 契约测试（自动升级可靠性优化 · 批次 5 收口单元）。
+ * u5d 契约测试（自动升级可靠性优化 · 批次 5 收尾单元）。
  *
  * 覆盖 4 项改动的验收条款：
  *   m8  Intel mac 架构门控：darwin + 非 arm64 → downloadUpdate 入口抛
@@ -111,7 +111,7 @@ function updateDirPath(): string {
   return path.join(TMP_DATA_DIR, 'update')
 }
 
-describe('u5d: 自动升级批次 5 收口契约', () => {
+describe('u5d: 自动升级批次 5 收尾契约', () => {
   let originalPlatform: PropertyDescriptor | undefined
   let originalArch: PropertyDescriptor | undefined
   let originalFetch: typeof globalThis.fetch

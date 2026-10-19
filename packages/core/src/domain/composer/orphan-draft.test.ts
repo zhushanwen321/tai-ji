@@ -3,7 +3,7 @@
  *
  * 覆盖 TC6：stash→take 同段返回（image needsMigrate 标志保真）/ take 一次性语义 /
  * 覆盖式后写优先 + [D] 未消费槽被覆盖 console.warn（泄漏/交叉污染信号）/ reset 测试隔离。
- * 挂载消费面（composer-shell onMounted take → restoreSegments）由 send.test ⑫b（暂存侧）+
+ * 挂载消费方（composer-shell onMounted take → restoreSegments）由 send.test ⑫b（暂存侧）+
  * 真机验收 3（消费侧 DOM 形态）闭环。正确性前提 = Landing 单挂载点不变量（见模块注释 [D]）。
  *
  * 运行：cd packages/core && npx vitest run src/domain/composer/orphan-draft.test.ts

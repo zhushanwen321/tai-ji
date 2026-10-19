@@ -2,10 +2,10 @@
  * P5 接线测试：SessionService.getSubagentHistory 的 record 路由段——engine 字段路由
  * 到分协议读取链（非 pi → readEngineSubagentHistory 三级降级；pi → 现有 JSONL 直读链）。
  *
- * [W1 / D6] record 注入点随读侧换源更新：getSubagents 读 journal 投影（会话文件
- * 流式扫描 → 投影派生），不再调 extractSubagentsFromSessionFile——fixture 为真实
+ * [W1 / D6] record 注入点随读侧换源更新：getSubagents 读 journal 派生视图（会话文件
+ * 流式扫描 → 派生视图派生），不再调 extractSubagentsFromSessionFile——fixture 为真实
  * v2 subagent-record 条目对落盘（注册条目定身份，终态条目承载 engine/engineHandle/
- * result，经投影真实透传），路由/降级链（extractRecordEngine /
+ * result，经派生视图真实透传），路由/降级链（extractRecordEngine /
  * readEngineSubagentHistory / DEFAULT_SUBAGENT_ENGINE）全程真实现。
  */
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
@@ -53,6 +53,8 @@ function createMockSessionStore(mainSessionFile: string, mainSessionId: string):
     persistHandoffSidecar: () => {},
     // G4/u-h4：port trash 签名改 Promise<void>（失败保留文件并 reject），本测试不触删除路径
     trash: () => Promise.resolve(),
+    // [session-store-layout-inversion D5] 目录级整树软删 port（本测试不触删除路径）
+    trashDirectory: () => Promise.resolve(),
   }
 }
 
@@ -71,7 +73,7 @@ function createSvc(tempDir: string): SessionService {
 }
 
 /**
- * v2 注册条目 JSONL 行（W1 [D1] 身份域；rootSessionId 是投影摄入侧的会话归属键）。
+ * v2 注册条目 JSONL 行（W1 [D1] 身份域；rootSessionId 是派生视图摄入侧的会话归属键）。
  * engine/engineHandle 不在本条目——v2 契约把它们放在终态条目（settled 行）。
  */
 function subagentRegisteredEntry(extra: Record<string, unknown> = {}): string {
@@ -193,8 +195,8 @@ describe('SessionService.getSubagentHistory engine routing (P5)', () => {
     writeFileSync(join(tempDir, 'main.jsonl'), `${subagentRegisteredEntry()}\n`, { flag: 'a' })
 
     const svc = createSvc(tempDir)
-    // 现有链路读取了主 session 文件（投影冷启动流式扫描定位 record）——路由前置
-    // 数据面真实经过了会话文件读取（record 命中即文件已读，路由确实落在 pi 分支）
+    // 现有链路读取了主 session 文件（派生视图冷启动流式扫描定位 record）——路由前置
+    // 数据范围真实经过了会话文件读取（record 命中即文件已读，路由确实落在 pi 分支）
     const subagents = await svc.getSubagents(MAIN_SESSION_ID)
     expect(subagents.records.map((r) => r.subagentId)).toEqual(['bg-route-1'])
     expect(subagents.records[0]?.engine).toBeUndefined()

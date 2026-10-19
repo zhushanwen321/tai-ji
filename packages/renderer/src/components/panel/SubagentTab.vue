@@ -159,10 +159,14 @@
         </span>
       </div>
 
-      <!-- 只读提示（差异化层：subagent 为 background 任务，无 composer）。
-           对齐 demo .sub-ro：头行下方的纯文字行（3xs 档 mid、无边框无图标），
-           不再是底部 border-t 条。 -->
-      <div class="flex shrink-0 items-center px-3.5 pb-2 text-[length:var(--text-3xs)] text-neutral-mid">
+      <!-- 只读提示（差异化层）：composer 不出时（agentcall 快照视图 / 引擎未声明续聊
+           能力）保留只读说明。对齐 demo .sub-ro：头行下方的纯文字行（3xs 档 mid、
+           无边框无图标），不再是底部 border-t 条。composer 出现时本行消失（文案
+           「无 composer」与事实矛盾）。 -->
+      <div
+        v-if="!composerVisible"
+        class="flex shrink-0 items-center px-3.5 pb-2 text-[length:var(--text-3xs)] text-neutral-mid"
+      >
         <span>{{ t('panel.sideDrawer.subagentReadonly') }}</span>
       </div>
 
@@ -175,6 +179,19 @@
       >
         <Clock class="size-3 shrink-0 opacity-70" />
         <span>{{ t('panel.sideDrawer.subagentCoarseHint', { engine: coarseHintEngine }) }}</span>
+      </div>
+
+      <!-- live 流降级提示（M3 relay-spawn-transport D6）：镜像 seq 空洞 → runtime 停止
+           live 发布，reply.degraded=true 经 core 流状态机透传；内容以落盘为准，
+           刷新/重开拉全量历史。 -->
+      <div
+        v-if="streamDegraded"
+        class="flex shrink-0 items-center gap-1.5 border-b border-hairline bg-warn-soft px-3.5 py-1.5 text-[length:var(--text-3xs)] text-warn"
+        role="status"
+        data-testid="subagent-stream-degraded"
+      >
+        <TriangleAlert class="size-3 shrink-0 opacity-80" aria-hidden="true" />
+        <span>{{ t('panel.sideDrawer.subagentStreamDegraded') }}</span>
       </div>
 
       <!-- 错误态：历史加载失败（fail-fast，提供重试入口，不阻塞主对话流） -->
@@ -208,6 +225,15 @@
         :session-id="activeTab"
         :main-session-id="panelStore.focusedSessionId ?? undefined"
       />
+
+      <!-- composer 带（subagent-composer 2026-10-18）：与主面板同一 band 壳
+           （COMPOSER_BAND_CLASS 单源，几何关系一致）+ 同一 Composer（subagent 车道形态：
+           发送/中止经 session.subagentAction 通道分流，左簇/指标/模型簇裁剪——模型入口
+           留在本组件头部）。回显事实源 = SubagentTee entry 帧（含 user entry），与主
+           agent 定向消息（@ mention）同一链路。 -->
+      <div v-if="composerVisible" :class="COMPOSER_BAND_CLASS" data-fs-scope="chat" data-testid="drawer-subagent-composer-band">
+        <Composer :session-id="activeTab" :show-btw="false" subagent />
+      </div>
     </template>
   </div>
 </template>
@@ -215,10 +241,11 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { AlertCircle, Bot, ChevronDown, ChevronLeft, Clock, X } from '@lucide/vue'
+import { AlertCircle, Bot, ChevronDown, ChevronLeft, Clock, TriangleAlert, X } from '@lucide/vue'
 import { Button } from '@taiji/ui'
 import { useSubagentSelection, openWorkflowInDrawer } from '@taiji/core/domain/drawer'
 import { usePanelStore } from '@/stores/panel'
+import { useChatStore } from '@/stores/chat'
 import {
   useSubagentStore,
   isSubagentVirtualId,
@@ -232,11 +259,14 @@ import {
 } from '@/stores/workflow'
 import type { ProviderId, SubagentRecord, WorkflowAgentCall } from '@taiji/shared'
 import MessageStream from './MessageStream.vue'
+import Composer from './Composer.vue'
+import { COMPOSER_BAND_CLASS } from './composer-band'
+import { isSubagentComposerEligible } from '@/composables/panel/subagent-composer-lane'
 import ModelSelectPopover from './ModelSelectPopover.vue'
 import { PopoverTrigger } from '@/components/ui/popover'
 import { DEFAULT_ENGINE_ID } from '@/constants/engine-icons'
-// u6.1 chat facet 收口：对话流数据编排（chat store ops 面消费）下沉 composable，
-// 组件只保留 readers 面消费
+// u6.1 chat facet 收尾：对话流数据编排（chat store ops 范围消费）下沉 composable，
+// 组件只保留 readers 范围消费
 import { useSubagentTabData } from '@/composables/panel/useSubagentTabData'
 import { useSubagentDrawerTabs } from '@/composables/panel/useSubagentDrawerTabs'
 // subagent-model-switch §7.1（U1）：执行模型切换（回执写状态禁乐观写）+ 标签读取规则
@@ -249,6 +279,7 @@ import {
 
 const { t } = useI18n()
 const panelStore = usePanelStore()
+const chatStore = useChatStore()
 const subagentStore = useSubagentStore()
 const workflowStore = useWorkflowStore()
 
@@ -275,7 +306,7 @@ function findAgentCall(acsId: string): WorkflowAgentCall | undefined {
   return undefined
 }
 
-/** 标题栏元信息形状（chat record 与 agentcall 快照两视图共用的投影）。 */
+/** 标题栏元信息形状（chat record 与 agentcall 快照两视图共用的派生视图）。 */
 type SubagentHeaderMeta = { agent: string; slug?: string; meta?: string; engine?: string; stopReason?: string }
 
 /** 三段式虚拟 id（chat 域 record）的标题栏元信息。 */
@@ -292,7 +323,7 @@ function subagentRecordMeta(vid: string): SubagentHeaderMeta | null {
     slug: record.slug || undefined,
     meta: thinkingLevel ? `thinking ${thinkingLevel}` : undefined,
     engine: record.engine || undefined,
-    // 停因词（U8b §3.2.8）：有值即投影——idle 与 A-lite 轮终 running-resumable 均携带
+    // 停因词（U8b §3.2.8）：有值即派生——idle 与 A-lite 轮终 running-resumable 均携带
     // 合法停因；「为什么停」一句话解释，不参与资格判定
     stopReason: record.stopReason,
   }
@@ -424,6 +455,15 @@ const coarseHintVisible = computed<boolean>(() => {
   return subagentStore.isStreamingSubagent(extractMainSessionId(activeTab.value ?? ''), record.subagentId)
 })
 
+/** live 流降级可见性（M3 D6）：core 流状态机透传 degraded=true（镜像 seq 空洞 → runtime
+ * 停止发布）。恢复 = 刷新/重开拉全量历史（内容以落盘为准）；agentcall 快照无 live 流 → false。 */
+const streamDegraded = computed<boolean>(() => {
+  const vid = activeTab.value
+  const record = currentRecord.value
+  if (!vid || !record) return false
+  return chatStore.isSubagentStreamDegraded(vid, record.subagentId)
+})
+
 /** coarse 提示的引擎名（可见时 record.engine 恒非空非 pi） */
 const coarseHintEngine = computed<string>(() => {
   const record = currentRecord.value
@@ -441,6 +481,9 @@ const outcomeSummaryText = computed<string | null>(() => {
   return outcome !== undefined ? outcome : null
 })
 
+/** composer 可见性（判据单点在 subagent-composer-lane.isSubagentComposerEligible） */
+const composerVisible = computed(() => isSubagentComposerEligible(activeTab.value, currentRecord.value))
+
 /** selectedSubagentId 变化：停旧订阅 + 加载新数据（immediate 覆盖 onMounted 首次加载） */
 watch(
   selectedSubagentId,
@@ -453,12 +496,12 @@ watch(
 
 /**
  * 非 pi 终态回填桥（D2）：
- * 非 pi 引擎无实时流通道，运行中打开的 tab 内容停在打开时刻——record 跨越收口
- * （running → 非 running）时重拉一次，对话流自动收敛到完整内容。四守卫：
+ * 非 pi 引擎无实时流通道，运行中打开的 tab 内容停在打开时刻——record 跨越收尾
+ * （running → 非 running）时重新拉取一次，对话流自动收敛到完整内容。四检查：
  * cur/prev 任一 null（agentcall / 未选中）跳过；vid 或 subId 变化 = 切换 subagent
  * 跳过（新 vid 由上方 activeTab watch 负责）；仅 running → 非 running 跨越
- * 触发（打开时已收口由首拉覆盖）；pi 引擎跳过（D5 零变化）。
- * [U8b 两态判据核对] 占用两态下 settle 写 idle——running → idle 即收口跨越，本判据
+ * 触发（打开时已收尾由首次拉取覆盖）；pi 引擎跳过（D5 零变化）。
+ * [U8b 两态判据核对] 占用两态下 settle 写 idle——running → idle 即收尾跨越，本判据
  * 无需改动即正确触发（idle → running 续轮走 pi 实时流 / 非 pi coarse 轮终再跨越，
  * 与旧 closed → running 复活行为一致）；legacy 五值同落非 running 半边，兼容不破。
  */

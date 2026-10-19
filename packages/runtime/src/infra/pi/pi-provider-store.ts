@@ -12,16 +12,16 @@
 import builtinData from '../../generated/builtin-providers.json'
 import { deriveEnabled, getMergedCatalogModels, isCatalogProvider } from '../../services/provider-catalog.js'
 // U6③：id 规则与写侧共享同一谓词单点（分层说明见 provider-model-item.ts 头注释；
-// 守卫白名单登记同 provider-catalog 纯函数先例）
+// 检查白名单登记同 provider-catalog 纯函数先例）
 import { normalizeModelIdOrReject } from '../../services/provider-model-item.js'
-// 链 3（凭据读路径收口，D3）：infra 层只 type-only import 接口，不 value import 实现
+// 链 3（凭据读路径收尾，D3）：infra 层只 type-only import 接口，不 value import 实现
 // （C-comm-03；实现在 services/auth，由组合根经模块级 init setter 注入）。
 import type { IProviderCredentialResolver } from '../../services/ports/provider-credential-resolver.js'
 import { existsSync, readdirSync } from 'node:fs'
 import { basename, dirname, join } from 'node:path'
 import { JsonStore, quarantineCorruptFile } from '../../utils/json-store.js'
 import { getModelsPath } from './pi-paths.js'
-// settings.json 的唯一读写层（D17 收口）：readSettings/updateSettingsFields/PiSettings/缓存/
+// settings.json 的唯一读写层（D17 收尾）：readSettings/updateSettingsFields/PiSettings/缓存/
 // 跨进程锁/原子写都收敛到 pi-settings-store，model 域（本文件）与 extension 域共享同一
 // 所有者 + 缓存 + 锁。
 import {
@@ -93,7 +93,7 @@ export interface PiModelsConfig {
   providers: Record<string, PiProviderConfig>
 }
 
-// services 层消费面别名（pi 词汇边界：PiXxx 类型只许 infra/pi 内部命名，消费方
+// services 层消费方别名（pi 词汇边界：PiXxx 类型只许 infra/pi 内部命名，消费方
 // 经别名取只读快照视图——readModels/getProviderConfig 返回值的引用形态）
 export type ProviderConfigView = PiProviderConfig
 export type ModelsConfigView = PiModelsConfig
@@ -164,7 +164,7 @@ function createModelsStore(path: string): JsonStore<PiModelsConfig> {
       if (!schemaOk) {
         // schema 不匹配 = 损坏（M4/RT-3#4）：隔离保现场后回空骨架，不再只 warn——
         // 否则下一次 writeModels 会以 {providers:{}} 全量覆写，用户全部 provider 配置
-        // （含明文 apiKey）不可逆丢失。providers 为 null/数组是穿透原 typeof 守卫的
+        // （含明文 apiKey）不可逆丢失。providers 为 null/数组是穿透原 typeof 检查的
         // 隐患形态，一并按损坏处置。
         quarantineCorruptFile(path, {
           tag: 'provider-store',
@@ -223,7 +223,7 @@ export function getProviderConfig(providerId: string): PiProviderConfig | undefi
 function pickFirstModelProvider(
   providers: Record<string, PiProviderConfig>,
 ): { provider: ProviderId; modelId: string } | undefined {
-  // A8：跳过被 enabledModels 禁用的 provider（与 findValidDefaultModel 主路径守卫一致），
+  // A8：跳过被 enabledModels 禁用的 provider（与 findValidDefaultModel 主路径检查一致），
   // 避免 removeProvider/upsertProvider 重选与 findValidDefaultModel fallback 选到用户已禁用的 provider。
   // enabledModels 空（全启用）时 deriveEnabled 恒 true，行为不变。重选场景 enabledModels 不变，
   // 实时读 getEnabledModels 安全（无 updateSettingsFields 回调内 stale 风险）。
@@ -239,7 +239,7 @@ function pickFirstModelProvider(
 }
 
 /**
- * Provider 凭据解析唯一通道（D3 链 3 消费面）：模块级 init 注入（检查点 5 首选形态）。
+ * Provider 凭据解析唯一通道（D3 链 3 消费方）：模块级 init 注入（检查点 5 首选形态）。
  *
  * 为什么是模块级 setter 而非构造参数：本模块的消费点（findValidDefaultModel / getDefaultModel）
  * 是模块级函数，调用方（rpc-client spawn / session 激活 / PiConfigStore 委托）到不了构造参数。
@@ -451,7 +451,7 @@ function adjudicateCatalogOnlyDefault(
 ): { result: { provider: ProviderId; modelId: string } | null; wasFixed: boolean } | null {
   const mergedCatalog = getMergedCatalogModels(defaultProvider)
   if (!mergedCatalog || mergedCatalog.models.length === 0) return null
-  // 链 3（D3 收口）：凭据判定经唯一通道 sync 布尔版（auth.json → models.json 双源），
+  // 链 3（D3 收尾）：凭据判定经唯一通道 sync 布尔版（auth.json → models.json 双源），
   // 未注入视为无凭据（安全降级，RT-3#5 warn 显形）。
   const hasCredential = credentialResolverOrWarn('adjudicateCatalogOnlyDefault')?.hasProviderCredential(defaultProvider) ?? false
   if (!hasCredential || !isEnabled) return null
@@ -487,7 +487,7 @@ function pickCredentialBackedCatalogProvider(): {
     id: string
     models?: Array<{ id: string }>
   }>
-  // 链 3（D3 收口）：遍历 39 个 builtin 候选用**批量形态**——auth.json / models.json 各单次
+  // 链 3（D3 收尾）：遍历 39 个 builtin 候选用**批量形态**——auth.json / models.json 各单次
   // 读盘（B3 先例：消除 N+1）。未注入视为无凭据（安全降级，RT-3#5 warn 显形）。
   const credentialBackedIds = credentialResolverOrWarn('pickCredentialBackedCatalogProvider')?.listCredentialBackedProviderIds() ?? new Set<string>()
   for (const bp of builtinProviders) {
@@ -596,7 +596,7 @@ export function setDefaultThinkingLevel(level: string): void {
  * 修复在用（MF-5）。
  *
  * 为什么修复路径不用合并视图（D4；[D7 前提更新]）：修复是**写盘动作**，其输入必须是
- * 与运行期缓存状态无关的确定性数据源——MF-6 守卫要求 catalog models 每个模型都有真实
+ * 与运行期缓存状态无关的确定性数据源——MF-6 检查要求 catalog models 每个模型都有真实
  * baseUrl（every(m => !!m.baseUrl)），编译期快照（构建期权威）满足该要求；合并视图不满足：
  * overlay never-seen/expired 时它退化为快照、fresh 时混入远程模型，修复名单随运行期缓存
  * 漂移（同一份 models.json 在不同启动时刻可能得到「修复」与「删除」两种处置），用户数据
@@ -614,7 +614,7 @@ const snapshotCatalogModelsById = new Map<string, PiModelDefinition[]>(
 )
 
 /**
- * 清洗段的 providers.json 标记读取注入面（设计 D2 分层约束，审查 R3-3）。
+ * 清洗段的 providers.json 标记读取注入点（设计 D2 分层约束，审查 R3-3）。
  *
  * providers.json 的唯一读写者是 services 层 TaijiProviderStore（C-comm-03）——本层（infra/pi）
  * 不得 value import 其实现，标记读取经调用方注入的同步原语（与 TaijiProviderStore.getExtrasSync
@@ -673,7 +673,7 @@ function stripEmptyStringSchemaKeys(cfg: PiProviderConfig): string[] {
         return
       }
       const m = model as Record<string, unknown>
-      // U6③（id 类毒化收口·存量自愈）：id 规则与写侧 translateModelSchemaFields 共用同一
+      // U6③（id 类毒化收尾·存量自愈）：id 规则与写侧 translateModelSchemaFields 共用同一
       // 谓词——旧实现只在「id 是 string 且 trim 空」时丢弃，**id 缺失（undefined/null/
       // non-string）会原样保留** → 盘上存量条目对 pi 永久 `Invalid schema`（整文件拒载、
       // 全部 provider 一起失效）且无任何自愈路径。改为同口径「可强转则强转、不可用才丢」。
@@ -751,7 +751,7 @@ interface SanitizeAccumulator {
 
 /**
  * cfg 是可写对象判定（非 null / 非数组）——原内联句 `cfg && typeof cfg === 'object' &&
- * !Array.isArray(cfg)` 的命名谓词，判定不变（JSON.parse 结果的实际形状不可信，故保留运行时守卫）。
+ * !Array.isArray(cfg)` 的命名谓词，判定不变（JSON.parse 结果的实际形状不可信，故保留运行时检查）。
  */
 function isPlainProviderRecord(cfg: unknown): cfg is PiProviderConfig {
   return !!cfg && typeof cfg === 'object' && !Array.isArray(cfg)
@@ -822,7 +822,7 @@ function repairOrRemoveInvalidEntry(
   acc.removed.push(id)
 }
 
-/** 写盘守卫：有删除/修复/剥除才触发出盘；无变化 = 不写（幂等）。 */
+/** 写盘检查：有删除/修复/剥除才触发出盘；无变化 = 不写（幂等）。 */
 function hasSanitizeChanges(acc: SanitizeAccumulator): boolean {
   return acc.removed.length > 0 || acc.repaired.length > 0 || acc.strippedAny
 }

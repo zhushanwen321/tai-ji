@@ -1,18 +1,18 @@
 /**
- * zcode 导入产物的 pi 读面不变量锚（PS-44 探针，2026-09-21 毒消息事故回归）。
+ * zcode 导入产物的 pi 读侧不变量锚（PS-44 探针，2026-09-21 毒消息事故回归）。
  * 来源注记：自 runtime zcode-import dev 演进版移植（用例语义零改动，git 可追溯）；
  * 产物构造适配本包 canonical 契约（convertZcodeTranscript + serializeSession + header 行
  * 包内拼装），pi dist 定位改为包内轻量实现——不跨包 import runtime（跨包会成环，
  * 手段自证先例见 converter.test 头注）。
  *
  * 事故链：zcode 取消轮导入后产物里出现「assistant、stopReason='stop'、无 usage」——
- * pi 0.84.4 读面对这种形态裸读崩溃：
+ * pi 0.84.4 读侧对这种形态裸读崩溃：
  *   - dist/core/agent-session.js:2678 getSessionStats → addUsageToTotals(
- *     assistantMsg.usage) 读 .input（toolResult 分支 :2668 有存在性守卫，assistant 分支无）
+ *     assistantMsg.usage) 读 .input（toolResult 分支 :2668 有存在性检查，assistant 分支无）
  *   - dist/core/agent-session.js:2721 turn 前上下文扫描 → calculateContextTokens(
  *     assistant.usage) 读 .totalTokens（仅跳过 stopReason aborted/error）
  * AgentSession 无法无 LLM 构造，两处按行级实装复演为谓词（parseSessionEntries /
- * buildContextEntries 则是真实 dist 调用——pi 解析器本身不校验 usage，守卫责任在
+ * buildContextEntries 则是真实 dist 调用——pi 解析器本身不校验 usage，检查责任在
  * 产物写侧，即 converter 的不变量门）。
  *
  * 实装加载：包内 locatePiCodingAgentDist 动态 import dist JS（cwd 上溯定位，与 runtime
@@ -127,12 +127,12 @@ function convertedCancelledTurn(): string {
     },
   ]
   const session = convertZcodeTranscript(msgs, SESSION_INPUT)
-  // 序列化装配面（converter 不产 header 行——首行在此拼装，导入薄包装同款形态）
+  // 序列化装配逻辑（converter 不产 header 行——首行在此拼装，导入薄包装同款形态）
   return `${JSON.stringify({ type: 'session', version: 3, ...session.header })}\n${serializeSession(session.entries)}`
 }
 
 describe('pi reader invariant (PS-44): assistant entries must carry usage for unguarded pi reads', () => {
-  it('事故形态（伪 stop + 无 usage）被两谓词捕获——pi 解析器本身放行，守卫责任在写侧', () => {
+  it('事故形态（伪 stop + 无 usage）被两谓词捕获——pi 解析器本身放行，检查责任在写侧', () => {
     const entries = parseSessionEntries(POISON_JSONL) as ParsedEntry[]
     // pi 解析器不校验 usage（事故正是这样溜进来的）——真实 parse 必须成功
     expect(entries).toHaveLength(2)

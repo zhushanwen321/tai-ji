@@ -100,12 +100,12 @@ function makeStore(
   appended: Array<{ customType: string; data: Record<string, unknown> }>;
 } {
   const appended: Array<{ customType: string; data: Record<string, unknown> }> = [];
-  const store = new RecordStore(sessionsDir, undefined, {
+  const store = new RecordStore(() => sessionsDir, undefined, {
     appendEntry: (customType: string, data: unknown) => {
       appendEntryImpl?.(customType, data);
       appended.push({ customType, data: data as Record<string, unknown> });
     },
-  } as never, recordsDir);
+  } as never, () => recordsDir);
   return { store, appended };
 }
 
@@ -203,14 +203,14 @@ describe("[U4a / D3b (a″)] 孤儿恢复活实例跳过：现查探针（pid �
     const { sessionsDir, recordsDir, mainFile } = makeOrphanLayout();
     const captured: Array<{ customType: string; data: unknown }> = [];
     const seedStore = new RecordStore(
-      sessionsDir,
+      () => sessionsDir,
       undefined,
       {
         appendEntry: (customType: string, data: unknown) => {
           captured.push({ customType, data });
         },
       } as never,
-      recordsDir,
+      () => recordsDir,
     );
     const rec = v2MakeRecord({ id, rootSessionId: "sess-orphan" });
     seedStore.register(rec); // record-created 帧 + v2 注册条目（身份 + 锚点）
@@ -350,7 +350,7 @@ describe("收编入口（W1 D4：journal 重放 + 收编幂等）", () => {
   /** 崩溃前形态种子：v2 注册条目 + created/bound 帧、无终态（kill -9 等价）。 */
   function seedCrashedRecord(id: string): ExecutionRecord {
     const captured: unknown[] = [];
-    const store = new RecordStore(sessionsDir, undefined, v2CapturePi(captured), recordsDir);
+    const store = new RecordStore(() => sessionsDir, undefined, v2CapturePi(captured), () => recordsDir);
     const rec = v2MakeRecord({ id });
     store.register(rec);
     const sessionFile = path.join(sessionsDir, `${id}.jsonl`);
@@ -365,7 +365,7 @@ describe("收编入口（W1 D4：journal 重放 + 收编幂等）", () => {
 
   /** 收编链（等价 kill -9 重启）：新 store + 主文件 → recoverOrphanRecords。 */
   function rebootStore(captured: unknown[]): RecordStore {
-    const store = new RecordStore(sessionsDir, undefined, v2CapturePi(captured), recordsDir);
+    const store = new RecordStore(() => sessionsDir, undefined, v2CapturePi(captured), () => recordsDir);
     store.recoverOrphanRecords(undefined, mainFile);
     return store;
   }
@@ -464,7 +464,7 @@ describe("收编入口（W1 D4：journal 重放 + 收编幂等）", () => {
     // 用户复活续跑：markResurrected 翻回活态 + markRoundStarted 落轮始帧——fold
     // settled 被 round-started 清除（record-events.ts fold 转移），旧 interrupted
     // 终态条目在（stopReason=interrupted-by-restart，中断族不构成跳过证据）。
-    const liveStore = new RecordStore(sessionsDir, undefined, v2CapturePi([]), recordsDir);
+    const liveStore = new RecordStore(() => sessionsDir, undefined, v2CapturePi([]), () => recordsDir);
     liveStore.markResurrected(rec, true);
     expect(liveStore.markRoundStarted(id)).toBe(true);
     expect(
@@ -511,7 +511,7 @@ describe("收编入口（W1 D4：journal 重放 + 收编幂等）", () => {
 
   it("活体保护：内存持有（在途）与异宿主在持（pi 锚探活）均不收编", async () => {
     const capturedSeed: unknown[] = [];
-    const holdingStore = new RecordStore(sessionsDir, undefined, v2CapturePi(capturedSeed), recordsDir);
+    const holdingStore = new RecordStore(() => sessionsDir, undefined, v2CapturePi(capturedSeed), () => recordsDir);
     const rec = v2MakeRecord({ id: "sa-adopt-live" });
     holdingStore.register(rec);
     const sessionFile = path.join(sessionsDir, "sa-adopt-live.jsonl");
@@ -528,13 +528,13 @@ describe("收编入口（W1 D4：journal 重放 + 收编幂等）", () => {
 
     // 新 store 无内存持有：正常收编（对照组——证明上一步跳过是活体保护所致）。
     const capturedCtrl: unknown[] = [];
-    const ctrlStore = new RecordStore(sessionsDir, undefined, v2CapturePi(capturedCtrl), recordsDir);
+    const ctrlStore = new RecordStore(() => sessionsDir, undefined, v2CapturePi(capturedCtrl), () => recordsDir);
     ctrlStore.recoverOrphanRecords(undefined, mainFile);
     expect(v2ReadEventLines(recordsDir, "sa-adopt-live").some((e) => e.type === "record-settled")).toBe(true);
   });
 
   it("空 journal / journal 未接线 / 坏链：skippedMissing / skippedNoIdentity 分类", async () => {
-    const store = new RecordStore(sessionsDir, undefined, undefined, recordsDir);
+    const store = new RecordStore(() => sessionsDir, undefined, undefined, () => recordsDir);
     // 空 journal（从未落账）。
     expect(store.adoptInterruptedRecord("sa-never-existed")).toBe("skippedMissing");
 
@@ -544,7 +544,7 @@ describe("收编入口（W1 D4：journal 重放 + 收编幂等）", () => {
       `${JSON.stringify({ type: "record-journal", id: "sa-broken-chain" })}\n`,
       "utf8",
     );
-    const journal = createRecordEventStream(recordsDir);
+    const journal = createRecordEventStream(() => recordsDir);
     await journal.append("sa-broken-chain", {
       type: "record-bound",
       ts: Date.now(),
@@ -556,7 +556,7 @@ describe("收编入口（W1 D4：journal 重放 + 收编幂等）", () => {
     expect(store.adoptInterruptedRecord("sa-broken-chain")).toBe("skippedNoIdentity");
 
     // journal 未接线（纯内存形态）：恒 skippedMissing。
-    const memStore = new RecordStore(sessionsDir);
+    const memStore = new RecordStore(() => sessionsDir);
     expect(memStore.adoptInterruptedRecord("sa-any")).toBe("skippedMissing");
   });
 });

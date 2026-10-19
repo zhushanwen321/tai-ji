@@ -3,7 +3,7 @@
  *
  * 渲染纯逻辑（markdown.ts / markdown-incremental.ts，依赖 markdown-it/shiki/katex，
  * 经 `@taiji/ui` 渲染 subpath 导出）产出/消费本文件类型，经 ChatViewDeps.renderMarkdown
- * 注入 ui 的 MarkdownRenderer。桌面壳与移动壳共用同一协议面。
+ * 注入 ui 的 MarkdownRenderer。桌面壳与移动壳共用同一协议范围。
  *
  * - text 段：渲染后的 HTML 字符串（含代码块/链接等，走 v-html）
  * - mermaid 段：原始 mermaid 源码（走 MermaidRenderer 组件渲染）
@@ -11,7 +11,7 @@
  *   被预览 HTML 文件的路径字符串（fence info 首词 = 'html-preview'，单行路径；绝对路径直用、
  *   相对路径按 resourceBaseDir ?? sessionCwdOf(sessionId) 矩阵解析）。容器 DOM 由
  *   HtmlPreviewInline 组件产出，**不进 v-html / DOMPurify 信任槽**——纯路径载荷。
- * - streaming-fence 段（D-5 增量渲染，W22 协议 / W23 消费）：未闭合 fence 的流式占位
+ * - streaming-fence 段（D-5 增量渲染，W22 协议 / W23 消费）：未结束 fence 的流式占位
  *   ——content 为 fence 内已到达源码，lang 为语言名，mermaid 标记是否 mermaid fence；
  *   占位 UI（语言名 + spinner 行）由 MarkdownRenderer 特殊渲染
  *
@@ -45,7 +45,7 @@ export interface MarkdownSegment {
  * 两者首渲染时可能为空集（fileSearch 未加载）→ 路径降级纯文本，加载完成后响应式重渲染。
  *
  * - resourceBaseDir：本条消息/文档的相对资源解析基准目录（绝对路径；设计 markdown-html-sanitize-render
- *   D4）。无则该消费面不做相对资源解析——img 相对 src 不重写（原样输出）、正文相对链接点击
+ *   D4）。无则该消费方不做相对资源解析——img 相对 src 不重写（原样输出）、正文相对链接点击
  *   preventDefault 无动作。来源：对话流 = session cwd（useChatViewDeps 工厂装配）、drawer =
  *   打开文件所在目录（DetailPane 传 dirname）、更新日志不传（undefined）。
  *

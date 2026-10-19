@@ -33,7 +33,7 @@ export interface PendingUIRequest {
 /**
  * getPendingRequests 返回值类型：原始字段 + payload 解包到顶层（`{ ...r, ...r.payload }`）。
  * payload 字段不固定（ask/confirm/select 各自不同），故解包部分用索引签名收纳——
- * 消费方（renderer 经类型守卫收窄为 ExtensionUIRequest）按 dialogKind 取具体字段。
+ * 消费方（renderer 经类型检查收窄为 ExtensionUIRequest）按 dialogKind 取具体字段。
  */
 export type PendingUIRequestResolved = PendingUIRequest & Record<string, unknown>
 

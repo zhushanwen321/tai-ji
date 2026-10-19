@@ -35,7 +35,7 @@ import {
 } from '@/composables/panel/composer-shell'
 import type { ProviderId } from '@taiji/shared'
 
-// ── useComposerModelThinking 可控注入（reject 源；其余导出面保持实装）──
+// ── useComposerModelThinking 可控注入（reject 源；其余导出清单保持实装）──
 const modelThinking = vi.hoisted(() => ({
   onModelSelect: vi.fn((_payload: { modelId: string; provider: ProviderId }) => Promise.resolve()),
   onThinkingSelect: vi.fn((_level: string) => Promise.resolve()),
@@ -61,7 +61,7 @@ vi.mock('@taiji/core/domain/composer', async (importOriginal) => {
   }
 })
 
-// ── toast spy（断言面：错误文案 + 恰一次）──
+// ── toast spy（断言范围：错误文案 + 恰一次）──
 const toastMock = vi.hoisted(() => ({ error: vi.fn(), info: vi.fn(), warning: vi.fn() }))
 vi.mock('@/composables/useToast', () => ({ useToast: () => toastMock }))
 
@@ -72,7 +72,7 @@ vi.mock('@/api', () => composerApiModule())
 vi.mock('@/stores/chat', () => composerChatStoreModule())
 vi.mock('@/stores/session', () => composerSessionStoreModule())
 
-/** 最小壳层参数（Composer.vue 局部状态的同构 stub；input/box ref 恒 null——不触发输入面） */
+/** 最小壳层参数（Composer.vue 局部状态的同构 stub；input/box ref 恒 null——不触发输入范围） */
 function shellParams(): ComposerShellParams {
   return {
     sessionIdRef: computed(() => 's1'),

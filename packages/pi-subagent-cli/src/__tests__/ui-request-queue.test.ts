@@ -158,7 +158,7 @@ describe("UI 请求队列 — timeout 字段透传（LC-3/T2⑦）", () => {
 });
 
 // ── extractMethodFields 字段复制链路（经 createUiRequestQueue → handleUiRequest 锁定）──
-// 13 个 method-specific 字段的复制语义：typed 守卫字段（string/number/array）验型通过才复制、
+// 13 个 method-specific 字段的复制语义：typed 检查字段（string/number/array）验型通过才复制、
 // presence-only 字段（statusText/widgetLines/widgetPlacement）仅 in 检查直赋、缺失字段不复制。
 // 协议形状来自 JSON 反序列化，坏类型运行时可达——用例以 as unknown as 构造越界形状做防御锁定。
 
@@ -171,7 +171,7 @@ describe("UI 请求队列 — method-specific 字段复制（extractMethodFields
     return { enqueue: createUiRequestQueue(child, ctx) };
   }
 
-  it("全字段请求：typed 守卫字段与 presence-only 字段全部复制到 UiRequest", async () => {
+  it("全字段请求：typed 检查字段与 presence-only 字段全部复制到 UiRequest", async () => {
     const received: UiRequest[] = [];
     const { enqueue } = makeQueue((req) => {
       received.push(req);
@@ -217,7 +217,7 @@ describe("UI 请求队列 — method-specific 字段复制（extractMethodFields
     });
   });
 
-  it("typed 守卫字段类型不符时跳过复制，其余字段照常", async () => {
+  it("typed 检查字段类型不符时跳过复制，其余字段照常", async () => {
     const received: UiRequest[] = [];
     const { enqueue } = makeQueue((req) => {
       received.push(req);
@@ -245,7 +245,7 @@ describe("UI 请求队列 — method-specific 字段复制（extractMethodFields
   it("typed 非法 title（number）在上游 startsWith 处炸链路 → handler 不被调、单请求失败被吞不阻塞队列", async () => {
     // HEAD 真实行为锚定（探针实证）：title: 42 在 extractMethodFields 之前的环节
     // 触发 str.startsWith is not a function，异常被 handleUiRequest 的 .catch 吞掉
-    //（注释声明的「单个请求失败不阻塞后续」语义）——守卫的「跳过该字段」对 title 不可达。
+    //（注释声明的「单个请求失败不阻塞后续」语义）——检查的「跳过该字段」对 title 不可达。
     const received: UiRequest[] = [];
     const { enqueue } = makeQueue((req) => {
       received.push(req);

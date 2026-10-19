@@ -9,7 +9,7 @@
  *   1004=鉴权、1042/2013=参数）；OpenAI 同形三家（StepFun/MiMo/MiniMax）的 HTTP 非 2xx 语义一致
  *   （401=鉴权、402=额度、其余=厂商错误），同表收敛在 translateHttpFailure 供 driver 显式调用——
  *   postTtsRequest 本身不翻译，非 2xx 原样交本家 driver（基座职责边界不变）。
- * 统一层（service 与协议面）只消费统一错误码，零厂商判断。
+ * 统一层（service 与协议范围）只消费统一错误码，零厂商判断。
  *
  * 超时形态照 model-connection-tester.ts 实装（范式源）：test(request) 签名无外部 signal，
  * AbortSignal.timeout 在 fetch 调用点内部构造。墙钟量级按被保护对象校准（仓库超时默认原则）：

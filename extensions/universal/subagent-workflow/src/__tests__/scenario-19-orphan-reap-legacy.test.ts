@@ -17,7 +17,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { _resetOncePerProcessForTest } from "@zhushanwen/pi-ext-guards";
-import { resolvePiSessionScopedDir, STATE_DIR_NAME } from "@zhushanwen/subagent-core";
+import { resolvePiWorkflowRunsDir } from "@zhushanwen/subagent-core";
 import { ORPHAN_RUN_GRACE_WINDOW_MS_ENV } from "@zhushanwen/subagent-core/execution/persistence/run-state-evidence.ts";
 
 const { mockAgentDir } = vi.hoisted(() => ({
@@ -81,6 +81,9 @@ vi.mock("../interface/tool/tool-workflow-script.ts", () => ({ registerWorkflowSc
 vi.mock("../interface/command/commands.ts", () => ({ registerWorkflowsCommand: vi.fn() }));
 
 import { setupSessionLifecycle } from "../session-lifecycle.ts";
+
+/** 夹具 sid（stateDir 的分区键——布局反转后 runs 目录按 sid 分区）。 */
+const FIXTURE_SID = "sess-fixture";
 
 let tmpDir: string;
 let agentDir: string;
@@ -162,8 +165,11 @@ const OLD = Date.now() - 30 * 86_400_000;
 
 beforeEach(() => {
   tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "wf-s19-legacy-"));
+  // [session-store-layout-inversion D2/D3] 数据根经 env 注入（生产链同形态）——维护轮
+  // 的 stateDir 与 stateDirs 枚举都由它派生。
+  vi.stubEnv("TAIJI_AGENT_DATA_DIR", tmpDir);
   agentDir = path.join(tmpDir, "agent");
-  stateDir = path.join(resolvePiSessionScopedDir({ agentDir }), STATE_DIR_NAME);
+  stateDir = resolvePiWorkflowRunsDir(FIXTURE_SID);
   fs.mkdirSync(stateDir, { recursive: true });
   // 夹具布局与 pi 实装同构（对齐 U5 修复后采集路径）：sessions 根 = <agentDir>/sessions
   // （pi config.js getSessionsDir = join(getAgentDir(), "sessions")），session 文件
@@ -175,6 +181,7 @@ beforeEach(() => {
 });
 
 afterEach(() => {
+  vi.unstubAllEnvs();
   mockAgentDir.current = "/home/user/.pi/agent";
   delete process.env[ORPHAN_RUN_GRACE_WINDOW_MS_ENV];
   fs.rmSync(tmpDir, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 });

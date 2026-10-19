@@ -1,30 +1,30 @@
 /**
- * scheduler-manager —— taiji builtin plugin（任务管理面板；数据面零 scheduler 专属 API）。
+ * scheduler-manager —— taiji builtin plugin（任务管理面板；数据范围零 scheduler 专属 API）。
  *
  * 点位使用：
  * - headerAction：本会话启用任务数徽标（空任务无数字）+ 入口可见性（hidden）——
  *   任务清单为空推 hidden=true（宿主渲染端整体不渲染该入口，与 disabled 灰置正交；
  *   声明侧静态形状由 core builtinContributions 承担），有任务推 false 恢复显示。
- *   刷新触发 = entry 失效订阅 + onDidActivateSession 补拉 + 写命令成功后的清 notice
+ *   刷新触发 = entry 失效订阅 + onDidActivateSession 补充拉取 + 写命令成功后的清 notice
  *   推送（「任务集合可能变化」的时点统一汇聚在 pushTreeAndBadge → pushHeaderAction
  *   出口，非写入驱动，场景 9）；读失败态不重算 hidden（保持上次值，「恢复中」语义）。
  *   入口点击由宿主渲染端直开 workflow-viz overlay 定时任务 tab（activation 声明驱动
  *   分派，不经插件命令链）；本插件只经 views.update 持续推树，overlay 的 ViewHost
  *   消费（SCHEDULER_MODAL_VIEW_ID 分区）。内容树严格按 §3.1.1 字段操作对账表组装，表外零元素（G6）。
  * - action-bar：每任务三动作（暂停/恢复 toggle、立即执行 run、删除 rm）。
- * - 数据面：per-session 累计 entries（首拉全量 + sinceEntryId 增量 append），
+ * - 数据范围：per-session 累计 entries（首次拉取全量 + sinceEntryId 增量 append），
  *   折叠始终对累计全量调共享 replayFoldEntries（前缀依赖语义不被破坏）；游标失效
- *   （Entry not found）→ 丢弃累计全量重拉自愈（E11）；无 client → SESSION_NOT_ACTIVE
+ *   （Entry not found）→ 丢弃累计全量重新拉取自愈（E11）；无 client → SESSION_NOT_ACTIVE
  *   → 按会话 status 分「恢复中/不可用」两态（E4）。树回退（消息撤回）经
- *   'taiji:revoked' 失效信号触发镜像重建（丢弃累计 → 全量重拉，runtime readEntries
+ *   'taiji:revoked' 失效信号触发镜像重建（丢弃累计 → 全量重新拉取，runtime readEntries
  *   已按活跃路径裁剪，被撤子树的 task op 不在回包——面板/徽标残留随之清除）。
  *
  * 写路径（设计 §3.3 D6）：三个动作（toggle/run/delete，overlay 树内 action-bar 按钮）
  * 只拼白名单子命令字面量 on|off|rm|run + 折叠快照中存在的 8 位 hex id（快照无该 id →
  * TASK_NOT_FOUND 行内提示、不发命令，E5——防 /schedule 参数路由落空进创建分支，
  * §2.4 坑 3），经 sendMessage({requireCommand: 'schedule'}) 原子校验后发 /schedule 命令；
- * 回执 {accepted, reason?} 驱动行内 notice（E7/E14；运行面分支只看 accepted，reason 仅
- * 文案面）。不乐观更新——快照与游标由失效订阅驱动刷新（C-pi-13 不撒谎）。
+ * 回执 {accepted, reason?} 驱动行内 notice（E7/E14；运行态分支只看 accepted，reason 仅
+ * 文案）。不乐观更新——快照与游标由失效订阅驱动刷新（C-pi-13 不撒谎）。
  *
  * 按钮灰置（E13，插件侧判定）：getCommands(sessionId) 查 'schedule' 命令名（纯查询）
  * → 未注册 = disabled + tooltip（宿主渲染端按 availability 三态合成 i18n tooltip，
@@ -90,7 +90,7 @@ const SCHEDULE_COMMAND_NAME = 'schedule'
  */
 const REVOKED_SIGNAL_CUSTOM_TYPE = 'taiji:revoked'
 
-/** 失效信号防抖合并窗口（ms）：风暴合并成一次重拉（对齐 session-records 先例量级） */
+/** 失效信号防抖合并窗口（ms）：风暴合并成一次重新拉取（对齐 session-records 先例量级） */
 const READ_DEBOUNCE_MS = 200
 /**
  * E4 恢复窗口自动重试间隔/次数（2s × 5 = 10s 上界）。耗尽后停自动重试、提示升级为
@@ -247,7 +247,7 @@ interface ReadFailure {
 
 interface SessionMirror {
   sessionId: string
-  /** 累计 entries（首拉全量 + 增量 append；事件只做失效不直写——数据唯一入口是 readEntries） */
+  /** 累计 entries（首次拉取全量 + 增量 append；事件只做失效不直写——数据唯一入口是 readEntries） */
   entries: SchedulerEntryLike[]
   /** 游标（末条 entryId → sinceEntryId 增量） */
   cursor?: string
@@ -325,7 +325,7 @@ function ensureMirror(api: Api, sessionId: string, sink: DisposableLike[]): Sess
   mirror.disposables.push(sub)
   sink.push(sub)
   // 树回退（消息撤回）信号：累计镜像按活跃路径权威态重建（与 TASK_ENTRY_TYPE 订阅
-  // 并列，同一 disposables 管理）——丢弃累计 + 全量重拉，被撤 task op 随 runtime 侧
+  // 并列，同一 disposables 管理）——丢弃累计 + 全量重新拉取，被撤 task op 随 runtime 侧
   // 活跃路径裁剪从回包消失，面板/徽标残留清除。
   const revokedSub = api.sessions.onEntriesInvalidated(sessionId, REVOKED_SIGNAL_CUSTOM_TYPE, (sid) => {
     const revokedMirror = mirrors.get(sid)
@@ -340,7 +340,7 @@ function ensureMirror(api: Api, sessionId: string, sink: DisposableLike[]): Sess
   return mirror
 }
 
-/** 失效信号 → 防抖合并 → 一次重拉。外部信号 = 会话侧新证据，重置恢复重试预算。 */
+/** 失效信号 → 防抖合并 → 一次重新拉取。外部信号 = 会话侧新证据，重置恢复重试预算。 */
 function scheduleRefresh(api: Api, sessionId: string): void {
   const mirror = mirrors.get(sessionId)
   if (!mirror) return
@@ -365,7 +365,7 @@ function refresh(api: Api, sessionId: string): Promise<void> {
 
 /**
  * 丢弃累计镜像（E11 游标失效自愈 / 'taiji:revoked' 撤回信号镜像重建共用的小函数）：
- * 清 entries + cursor，下一次 doRefresh 因 cursor undefined 走全量重拉。全量回包已经
+ * 清 entries + cursor，下一次 doRefresh 因 cursor undefined 走全量重新拉取。全量回包已经
  * runtime 活跃路径过滤（readEntries 裁剪），折叠输入天然不含被撤子树 op。
  */
 function discardAccumulatedMirror(mirror: SessionMirror): void {
@@ -394,7 +394,7 @@ async function doRefresh(api: Api, mirror: SessionMirror): Promise<void> {
     if (hadFailure) await reevaluateCommandAvailability(api, mirror)
   } catch (e) {
     if (isEntryNotFound(e)) {
-      // E11 游标失效 → 丢弃累计全量重拉（自愈，用户无感）。全量（无 cursor）理论上
+      // E11 游标失效 → 丢弃累计全量重新拉取（自愈，用户无感）。全量（无 cursor）理论上
       // 不会再触发该错误；若触发按恢复窗口处理防循环。
       if (mirror.cursor !== undefined || mirror.entries.length > 0) {
         // 自愈对用户无感，但必须对排查可见（pi 侧 entry 截断/会话重建的证据链入口）
@@ -402,10 +402,10 @@ async function doRefresh(api: Api, mirror: SessionMirror): Promise<void> {
           `[scheduler-manager] cursor invalidated, full re-pull (session=${mirror.sessionId})`,
         )
         discardAccumulatedMirror(mirror)
-        // 重拉必须挂在当前 in-flight 结束之后：此刻 refresh() 仍能看见本轮登记的
+        // 重新拉取必须挂在当前 in-flight 结束之后：此刻 refresh() 仍能看见本轮登记的
         // promise（finally 未跑、refreshInFlight 未清），直接调会被并发合并复用返回，
         // 自愈拉取静默丢失（E11 用例实测抓出）。挂到 settle 之后登记已清空，
-        // refresh() 才真正发起全量重拉。
+        // refresh() 才真正发起全量重新拉取。
         const settle = mirror.refreshInFlight ?? Promise.resolve()
         void settle.then(() => refresh(api, mirror.sessionId))
         return
@@ -587,7 +587,7 @@ async function handleWrite(
     await setNoticeAndPush(api, sessionId, `操作未生效：无效的任务标识（/schedule ${fallbackSub} <8位id>）`)
     return
   }
-  // E5：折叠快照无该 id → TASK_NOT_FOUND，不发命令 + 重拉
+  // E5：折叠快照无该 id → TASK_NOT_FOUND，不发命令 + 重新拉取
   if (!mirror || !foldTasks(mirror).has(parsed.id)) {
     await setNoticeAndPush(api, sessionId, '任务已不存在，列表已刷新')
     scheduleRefresh(api, sessionId)
@@ -621,7 +621,7 @@ async function handleWrite(
       )
       return
     }
-    // 回执失败：reason 是诊断/文案面，行为分支只看 accepted（E7 词表纪律）。
+    // 回执失败：reason 是诊断/文案，行为分支只看 accepted（E7 词表纪律）。
     // busy/compacting/bash 退役值已随 SendPromptReason 词表收窄删除（「排队取代拒绝」
     // 后投递内核对暂不可收时态只排队不回拒）——除 command-missing 外的失败统一走
     // 通用重试文案。
@@ -649,14 +649,14 @@ export async function activate(context: PluginContext): Promise<void> {
   const { api } = context
   const sink = context.subscriptions
 
-  // 焦点会话追踪（写命令链 sessionId 唯一来源）+ 激活补拉（场景 9：重启后仍正确）
+  // 焦点会话追踪（写命令链 sessionId 唯一来源）+ 激活补充拉取（场景 9：重启后仍正确）
   sink.push(
     api.sessions.onDidActivateSession((session) => {
       focusSessionId = session.id
       const mirror = ensureMirror(api, session.id, sink)
       // 已存在镜像若停在恢复窗口（读失败重试耗尽、文案停「恢复超时」），激活信号 =
-      // 进程就绪后的新证据（didActivate 在会话激活完成后投递），重置预算重拉自愈；
-      // 新建镜像的首拉已由 ensureMirror 武装，此处不重复
+      // 进程就绪后的新证据（didActivate 在会话激活完成后投递），重置预算重新拉取自愈；
+      // 新建镜像的首次拉取已由 ensureMirror 武装，此处不重复
       if (mirror.readFailure !== null) scheduleRefresh(api, session.id)
     }),
   )

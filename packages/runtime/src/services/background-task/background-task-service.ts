@@ -3,8 +3,9 @@
  * D1/D2/D6/D7/D8 —— docs/architecture/background-task-sidebar-view.md §3.3）。
  *
  * 职责（u-runtime-svc）：
- *  - registry 读：`<getPiAgentDir()>/base-tool-enhance/<sid>/registry.json`（损坏 →
- *    corrupt 语义：空表 + 错误标记，不 throw；垃圾 sid ENOENT 静默空表）
+ *  - registry 读：`<dataDir>/ext-sessions/<sessionId>/background-tasks/registry.json`
+ *    （getSessionRegistryPath 推导，与 extension 写侧同一新公式；损坏 → corrupt 语义：
+ *    空表 + 错误标记，不 throw；垃圾 sid ENOENT 静默空表）
  *  - 变更检测（D2，三触发面共享同一 last-seen mtime 判定，单广播源）：
  *      ① 2s mtime 轮询（变化才重读+广播）；
  *      ② pi 事件钩子（event-adapter 旁路转发，u-runtime-rpc 组合根接线到

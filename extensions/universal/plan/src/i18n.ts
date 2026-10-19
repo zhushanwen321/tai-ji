@@ -1,5 +1,5 @@
 /**
- * plan 包 i18n 层（u-locale-channel 消费端）：只本地化「给人看的交互面」——complete
+ * plan 包 i18n 层（u-locale-channel 消费端）：只本地化「给人看的交互侧」——complete
  * 执行方式选择的 FormOverlay 单 choice 问题（question/header/options）与 ctx.ui.notify
  * 提示。tool result 里的英文是给 LLM 的执行指令，不进词典（agent 会以会话语言转述，
  * 指令语言 ≠ UI 语言）。
@@ -13,7 +13,7 @@ import { DEFAULT_UI_LOCALE, readUiLocale, type UiLocale } from "@zhushanwen/pi-l
 
 export { DEFAULT_UI_LOCALE, readUiLocale, type UiLocale };
 
-/** 词典 key 集合（exec-choice 交互面 + notify；键缺失回落链见 t()）。 */
+/** 词典 key 集合（exec-choice 交互侧 + notify；键缺失回落链见 t()）。 */
 type Dictionary = Record<string, string>;
 
 const EN_US: Dictionary = {

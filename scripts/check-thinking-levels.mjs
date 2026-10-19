@@ -1,11 +1,11 @@
 #!/usr/bin/env node
 /**
- * check-thinking-levels.mjs —— thinking 档位词表比对守卫。
- * （设计：docs/architecture/ext-simplify-17-shared-extraction.md §3.2 D5「机器守卫补强」）
+ * check-thinking-levels.mjs —— thinking 档位词表比对检查。
+ * （设计：docs/architecture/ext-simplify-17-shared-extraction.md §3.2 D5「机器检查补强」）
  *
  * 背景：extensions 侧 THINKING_LEVELS 白名单是 pi-ai ModelThinkingLevel 联合的本地副本
  * （分层约束禁跨包 import，D5 双登记裁决），副本漂移钉值单测抓不到——单测只锚副本自身
- * 字面量，pi 升级改联合成员时副本静默过期（P1-a 漏 xhigh 即该代价已兑现的实证）。本守卫
+ * 字面量，pi 升级改联合成员时副本静默过期（P1-a 漏 xhigh 即该代价已兑现的实证）。本检查
  * 在提交期做构建期词表比对，补上这个红灯缺口。
  *
  * 与 check-pi-sync.mjs / check-pi-semantics.mjs 的分工——零重叠自查：
@@ -17,12 +17,12 @@
  *   shared PI_THINKING_LEVELS）单向比对——pi-rpc 改为档位透传（合法性权威 = 宿主与 pi）、
  *   扩展共享库改为非空字符串归一（合法性归写入侧 UI 与 pi），两处副本均已删除。
  *
- * 守卫项 2 组：
+ * 检查项 2 组：
  *   T3 subagent-core THINKING_ORDER（宿主侧有序数组副本，ext-simplify-18 §3.4 D6
  *      纳入；比对语义 = 成员集合一致性，不判低→高顺序——顺序语义由 subagent-core
  *      自身测试锚定）[fail]
  *   T4 shared PI_THINKING_LEVELS（前端派生源，packages/core 与 packages/renderer 都从它
- *      派生；此前只靠 packages/shared 自身钉值单测兜住，shared 一漂即整体漂且无机器守卫。
+ *      派生；此前只靠 packages/shared 自身钉值单测兜住，shared 一漂即整体漂且无机器检查。
  *      同款比对语义 = 成员集合一致性，不判低→高顺序——顺序语义由 shared 自身钉值单测
  *      与 runtime ThinkingLevelDriftGuard 锁定）[fail]
  *
@@ -201,7 +201,7 @@ function main() {
     process.exit(1)
   }
   const piMembers = extracted.values
-  console.log(`thinking-levels 守卫：权威源 pi-ai ${piAiVersion} ModelThinkingLevel（${piMembers.length} 值）↔ 两份词表（subagent-core shared/model-ref THINKING_ORDER + shared src/pi-preset PI_THINKING_LEVELS）`)
+  console.log(`thinking-levels 检查：权威源 pi-ai ${piAiVersion} ModelThinkingLevel（${piMembers.length} 值）↔ 两份词表（subagent-core shared/model-ref THINKING_ORDER + shared src/pi-preset PI_THINKING_LEVELS）`)
 
   // 词表比对（两个比对面：宿主侧校验用 core 副本 + 前端派生源 shared）
   const T3_RECOVERY_SUFFIX = `——恢复动作：人工核对 ${dtsPath} 的 ModelThinkingLevel 定义后同步 THINKING_ORDER 与 ${DESIGN_DOC_18} D6（pi 升级新增/移除档位即红灯），重跑 node scripts/check-thinking-levels.mjs`
@@ -219,10 +219,10 @@ function main() {
 
   // T3：subagent-core THINKING_ORDER（宿主侧唯一副本，ext-simplify-18 D6 纳入比对面）。
   // 有序数组但比对语义 = 成员集合一致性（setDiff 集合差异天然不判序）——低→高顺序语义
-  // 由 subagent-core 自身测试锚定，守卫只抓成员漂移。
+  // 由 subagent-core 自身测试锚定，检查只抓成员漂移。
   {
     if (!existsSync(SUBAGENT_CORE_MODEL_REF)) {
-      fail(`T3 subagent-core model-ref.ts 缺失: ${SUBAGENT_CORE_MODEL_REF}——恢复动作：确认文件未被移动/删除（副本迁移时同步本守卫路径与 ${DESIGN_DOC_18} D6）`)
+      fail(`T3 subagent-core model-ref.ts 缺失: ${SUBAGENT_CORE_MODEL_REF}——恢复动作：确认文件未被移动/删除（副本迁移时同步本检查路径与 ${DESIGN_DOC_18} D6）`)
     } else {
       const r = extractConstListMembers(readFileSync(SUBAGENT_CORE_MODEL_REF, 'utf-8'), 'THINKING_ORDER')
       if (r.error) {
@@ -238,7 +238,7 @@ function main() {
   // 同款集合比对（不判序：顺序语义由 shared 钉值单测 + runtime ThinkingLevelDriftGuard 锁定）。
   {
     if (!existsSync(SHARED_PI_PRESET)) {
-      fail(`T4 shared pi-preset.ts 缺失: ${SHARED_PI_PRESET}——恢复动作：确认文件未被移动/删除（文件迁移时同步本守卫路径）`)
+      fail(`T4 shared pi-preset.ts 缺失: ${SHARED_PI_PRESET}——恢复动作：确认文件未被移动/删除（文件迁移时同步本检查路径）`)
     } else {
       const r = extractConstListMembers(readFileSync(SHARED_PI_PRESET, 'utf-8'), 'PI_THINKING_LEVELS')
       if (r.error) {
@@ -251,8 +251,8 @@ function main() {
 
   // 汇总
   guardExit(
-    `✓ thinking-levels 守卫通过（pi-ai ${piAiVersion} 权威源 ↔ 宿主侧 core 与前端派生源 shared 两份词表一致）`,
-    'thinking-levels 守卫未通过，按上方 ✗ 明细修复后重跑（每条报错自带恢复动作）',
+    `✓ thinking-levels 检查通过（pi-ai ${piAiVersion} 权威源 ↔ 宿主侧 core 与前端派生源 shared 两份词表一致）`,
+    'thinking-levels 检查未通过，按上方 ✗ 明细修复后重跑（每条报错自带恢复动作）',
   )
 }
 

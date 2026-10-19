@@ -1,14 +1,14 @@
 # zcode engine app-server 常驻化改造设计（core 侧）
 
 > **2026-09 breaking 修订（用户拍板，`refactor-zcode-engine-shared-home` 分支落地）**：
-> ① **删除 CLI spawn 降级链**——`TAIJI_ZCODE_MODE` 钉扎、probe 冒烟门控（appserver-probe.ts）、
+> ① **删除 CLI spawn 降级链**——`TAIJI_ZCODE_MODE` 模式固定变量、probe 冒烟门控（appserver-probe.ts）、
 > protocol-drift 首败降级全部移除；launcher.ts / appserver-home.ts / appserver-probe.ts 整文件删除。
 > 协议漂移不再降级保底，直接报可操作错误。本文 D2（降级链）章节随之**作废**。
 > **[注入机制观察项，2026-09-19 R-upgrade 阶段 5 trace 实证]** 3.12.x CLI 的 provider
 > 凭据/模型解析实际读取 `~/.zcode/v2/provider_config.json`（CLI homedir 解析走 passwd
 > 不吃 HOME env），而非本节所述 `~/.zcode/cli/config.json`——上句的 v2 provider 注入
 > 机制对现行 CLI 疑似 no-op（引擎全链靠 provider_config.json 原生凭据工作，V1/V6 真机
-> 通过不受影响）。注入面语义在引擎下次升级协议重锚时一并重验（R-upgrade impl-plan
+> 通过不受影响）。注入范围语义在引擎下次升级协议重锚时一并重验（R-upgrade impl-plan
 > 验收记录观察项①）。
 > ② **删除 HOME 池化，共享宿主 HOME**——spawn env 不再覆写 HOME（db/plugins/MCP 继承
 > 宿主 HOME，会话与 GUI 共写同一 SQLite，WAL 并发安全）；**凭据经 fs 拦截 launcher 注入**
@@ -16,12 +16,12 @@
 > 读凭据而 GUI 登录态落在 `~/.zcode/v2/config.json`，wrapper patch fs 把对前者的读取重定向为
 > 「真实文件 + v2 provider 注入」内存合并，同 id 时 v2 整条优先——v2 是权威凭据源）。
 > D7（常驻 HOME）章节随之**作废**。已接受代价：GUI 会话列表可见 headless 会话（**已由 2026-09
-> 会话库隔离撤销**——写入面改落独立库后不再可见，见下方修订块）；登录态
+> 会话库隔离撤销**——写侧改落独立库后不再可见，见下方修订块）；登录态
 > 轮换后常驻连接需引擎进程重启才用新凭据（凭据内容 hash 刷新机制删除）；zcode 升级
-> schema migration 竞争无契约担保。新漂移面：zcode 升级若改变配置读取路径/方式，失败信号
+> schema migration 竞争无契约担保。新漂移风险：zcode 升级若改变配置读取路径/方式，失败信号
 > 为 missing baseURL / Model config is missing 明确报错（不静默坏）。收益：HOME 依赖副作用
 > （pnpm store 随 HOME 翻转等）根治；锁/pidfile/孤儿回收/派生目录整章复杂度删除。journal
-> 固定落 `engines/zcode/shared/`（[池抽象降级 2026-09-13] poolKey 协议面已整体退役——原
+> 固定落 `engines/zcode/shared/`（[池抽象降级 2026-09-13] poolKey 协议范围已整体退役——原
 > PI_POOL_KEY/ZCODE_SHARED_POOL_KEY 常量与 onPoolResolved 通道删除，journal 落盘路径构造
 > 即终值）；handle.sessionRef.dbPath 为
 > 绝对路径（隔离库 `<engineDataDir>/engines/zcode/session-db/db.sqlite`，`zcodeSessionDbPath()`
@@ -42,7 +42,7 @@
 > subagent 会话不再进 ZCode GUI 侧边栏。上方修订块中三处口径随之撤销/改写：「会话与 GUI 共写
 > 同一 SQLite」「已接受代价：GUI 会话列表可见 headless 会话」「handle.dbPath 锚定宿主库
 > `ZCODE_HOST_DB_SUFFIX`」。**HOME 保持共享**（凭据 / 插件 / MCP / pnpm store 语义零变化）、
-> 凭据 fs 拦截注入、journal 固定分组 `'shared'`（[池抽象降级] poolKey 协议面已删）、常驻连接 / abort 链 / 会话自包含 / capabilities /
+> 凭据 fs 拦截注入、journal 固定分组 `'shared'`（[池抽象降级] poolKey 协议范围已删）、常驻连接 / abort 链 / 会话自包含 / capabilities /
 > 停机路径全部不变。两条读取链按 `zcodeDbPathAllowlist(dataDir)` 白名单集合成员判定放行
 > （隔离库 + 宿主库存量兼容锚点）。
 
@@ -52,7 +52,7 @@
 
 ## §1 背景目标
 
-**一句话结论**：core（`@zhushanwen/subagent-core`）的 zcode engine 从「spawn 单轮」升级为「app-server 常驻」，EnginePort 接口除新增一个可选 `dispose()`（引擎停机路径）与 RunContext 一个可选回调 `onHandleReady`（运行中句柄回填通道，§3.4 不变量 3）外零改动——两处字段级扩展均已在本文登记，满足 port.ts 头注纪律；宿主（taiji pi 壳 / zsw 壳）零改动获得引擎升级收益（收益边界：GUI live 逐字推送依赖 relay 通道另行建设，grace 兜底仅在宿主存活时生效——见 G2 与 D6①）；漂移防御内化到 core 的 probe + capabilities + conformance 体系。
+**一句话结论**：core（`@zhushanwen/subagent-core`）的 zcode engine 从「spawn 单轮」升级为「app-server 常驻」，EnginePort 接口除新增一个可选 `dispose()`（引擎停机路径）与 RunContext 一个可选回调 `onHandleReady`（运行中句柄回填通道，§3.4 不变量 3）外零改动——两处字段级扩展均已在本文登记，满足 port.ts 头注纪律；宿主（taiji pi 壳 / zsw 壳）零改动获得引擎升级收益（收益边界：GUI live 逐字推送由 pi 引擎的 fd3 raw mirror + runtime `SubagentTee` 承载（M3 relay-spawn-transport，ADR-0145；zcode 引擎无 child stdout，不在该镜像面），grace 兜底仅在宿主存活时生效——见 G2 与 D6①）；漂移防御内化到 core 的 probe + capabilities + conformance 体系。
 
 **SCQA**：
 
@@ -68,14 +68,14 @@
 | # | 目标 | 使用者视角 |
 |---|------|-----------|
 | G1 | 长驻进程 + 零冷启动 | zsw 用户跑 map-reduce 多任务，第 2 个起 subagent 启动耗时从 ~1.5s 降为 ~0 |
-| G2 | 实时事件流（coarse→stream） | 引擎以 stream 粒度实时流出事件：zsw workflow 终端 live 输出实时刷新；taiji 侧 journal 增量落盘且**运行中**的 record entry 即携带 ①②级读取钥匙（sessionRef/poolKey/journalPath，W4 回填机制——①级命中依赖 sessionRef），subagent 详情页中途打开可见当时进度快照、重开与 live 一致。GUI live 逐字推送（`subagent.stream_delta` WS 帧）依赖 relay 通道建设（subagent-realtime-channel.md 已论证 launcher 层模式可复制——该文档已删除，git 可追溯，机制记录在案在 relay/relay.mjs 与 pi-invocation.ts 注释），**不属本设计**——chat 域 engine 任务的 onEvent 现只接 journal 落盘，无 GUI 广播通道（subagent-service.ts runEngineTask） |
+| G2 | 实时事件流（coarse→stream） | 引擎以 stream 粒度实时流出事件：zsw workflow 终端 live 输出实时刷新；taiji 侧 journal 增量落盘且**运行中**的 record entry 即携带 ①②级读取钥匙（sessionRef/poolKey/journalPath，W4 回填机制——①级命中依赖 sessionRef），subagent 详情页中途打开可见当时进度快照、重开与 live 一致。GUI live 逐字推送（`subagent.stream_delta` WS 帧）现由 pi 引擎 fd3 raw mirror + runtime `SubagentTee` 承载（M3 relay-spawn-transport，ADR-0145；仅覆盖有 child stdout 的 pi 引擎，zcode 引擎走 app-server RPC 无此镜像面；subagent-realtime-channel.md 已删除，git 可追溯），**不属本设计**——chat 域 engine 任务的 onEvent 现只接 journal 落盘，无 GUI 广播通道（subagent-service.ts runEngineTask） |
 | G3 | per-session model | 同一常驻进程上，任务 A 与任务 B 各用不同模型，互不干扰 |
 | G4 | 宿主零改动 | pi 壳与 zsw 壳不改一行代码、不发 breaking 版本即获得上述收益 |
 | G5 | 漂移防御内化 | zcode 平台升级导致协议漂移时，core probe/golden/conformance 承接，宿主无感或按 capabilities 声明自适应 |
 
 **in scope**：zcode engine 常驻化（连接层 + 会话层 + launcher 双模式）；EnginePort `dispose()` 停机路径；abort 链从杀进程改 `session/stop`；capabilities 升级（仅 eventGranularity）；probe / golden 语料 / conformance 套件适配；spawn 降级路径保留（见 D2）。
 
-**out of scope**：steer（运行中插话）——旧 app-server 实测 send-while-running 恒 `-32010` 硬错误，RPC 面无此能力，属引擎 turn-steer 面的后续升级项；conversation 热会话续聊 / 热会话 idle 复用 / `-32004` 四步恢复序——`EnginePort.interact` 生产代码零调用方，zsw 侧已登记 upstream gap，配套恢复序留 conversation 阶段；pi 引擎与其他引擎；GUI relay 实时通道建设（subagent-realtime-channel.md 已论证模式可复制——已删除，git 可追溯，launcher 层加环境分支即可复用，不提前建设）；zsw 宿主与 pi 壳的任何改动。
+**out of scope**：steer（运行中插话）——旧 app-server 实测 send-while-running 恒 `-32010` 硬错误，RPC 面无此能力，属引擎 turn-steer 面的后续升级项；conversation 热会话续聊 / 热会话 idle 复用 / `-32004` 四步恢复序——`EnginePort.interact` 生产代码零调用方，zsw 侧已登记 upstream gap，配套恢复序留 conversation 阶段；pi 引擎与其他引擎；GUI 实时通道建设（pi 引擎逐字 live 已由 fd3 raw mirror + runtime `SubagentTee` 承载，ADR-0145，不属本设计；zcode 引擎无 child stdout 镜像面，其逐字实时推送不在现行承载面）；zsw 宿主与 pi 壳的任何改动。
 
 ## §2 现状与问题分析
 
@@ -107,7 +107,7 @@ spawn 单轮是 D-010（`.taiji-harness/subagent-engine-abstraction/decisions.md
 
 **已具备（不需要动）**：
 
-- `RunContext.onEvent` 回调式事件流全程贯通：engine → journal 增量落盘（`event-journal.ts` append/flush 天然支持流式）→ workflow liveRecord → journal-replay 复用 live reducer。pi 引擎已是 stream 粒度，下游消费链路中 journal ②级读取（reload 路径）与 zsw workflow liveRecord 对 stream 事件无兼容问题；**taiji GUI live 推送不在此列**——chat 域 engine 任务的 onEvent 只接 journal.append，无 stream 通道与 WS 广播（实时逐字依赖 relay 通道，另行设计）。
+- `RunContext.onEvent` 回调式事件流全程贯通：engine → journal 增量落盘（`event-journal.ts` append/flush 天然支持流式）→ workflow liveRecord → journal-replay 复用 live reducer。pi 引擎已是 stream 粒度，下游消费链路中 journal ②级读取（reload 路径）与 zsw workflow liveRecord 对 stream 事件无兼容问题；**taiji GUI live 推送不在此列**——chat 域 engine 任务的 onEvent 只接 journal.append，无 stream 通道与 WS 广播（pi 引擎的实时逐字由 fd3 raw mirror + runtime `SubagentTee` 承载，ADR-0145；zcode 引擎无 child stdout 镜像面，不在本设计范围）。
 - AbortSignal 传递链完整（workflow 域 `mergeTimeoutSignal` / chat 域 record controller → `ctx.signal` → 引擎 abort listener）。
 - `eventGranularity` 能力位**生产代码零消费方**（全仓 grep 证实；唯一 capabilities() 生产消费是 `assertEngineParamSupport`，只看 conversation/steer/sandbox）——coarse→stream 翻转对上层零影响。
 - 隔离池/并发池/降级层（schema-emulation、kill-chain；persona-router 已删除 2026-09-13——零生产接线）与进程形态解耦。
@@ -147,7 +147,7 @@ task ─┘                    │ ① session/create {workspace, mode, model, .
 
 **成功路径（zsw 用户）**：`zsw run` 一个 map-reduce workflow（1 个主任务 + 3 个并行 subagent）。第一个任务触发常驻进程惰性启动（首任务仍含一次进程冷启动），三个 subagent 任务在同一条连接上各自 create 会话、并发 send、`turn.terminal` 判定终态、read 取全文、close 会话。`zsw status` 可见三条 record 的耗时中不再有每任务 ~1.5s 的进程启动段；record 留痕 `engineHandle.sessionRef.sessionId` 为 app-server 会话 id。
 
-**成功路径（taiji GUI 用户）**：chat 域发起 zcode 引擎 subagent，任务运行中途打开详情页——record entry 在 journal writer 创建后即已回填 ②级读取钥匙（W4 回填机制，create 应答后并入 sessionId），详情页可见打开时刻的进度快照（journal 已增量落盘的 text_delta）；任务进行中刷新/重开 session，详情页渲染与 live 所见一致（读取链 ①级 sqlite / ②级 journal 无论哪级命中，内容一致）。GUI 内的逐字实时推送属 relay 通道建设（out of scope，见 G2 边界）。
+**成功路径（taiji GUI 用户）**：chat 域发起 zcode 引擎 subagent，任务运行中途打开详情页——record entry 在 journal writer 创建后即已回填 ②级读取钥匙（W4 回填机制，create 应答后并入 sessionId），详情页可见打开时刻的进度快照（journal 已增量落盘的 text_delta）；任务进行中刷新/重开 session，详情页渲染与 live 所见一致（读取链 ①级 sqlite / ②级 journal 无论哪级命中，内容一致）。GUI 内的逐字实时推送由 pi 引擎 fd3 raw mirror + runtime `SubagentTee` 承载（zcode 引擎无 child stdout 镜像面，不在本设计范围，见 G2 边界）。
 
 **失败路径 1（协议漂移）**：zcode 升级后协议漂移（如 `session/create` 返回 `-32602`）——**现行行为：不再降级保底，直接报可操作错误**（2026-09 breaking 删除 spawn 降级链；原「自动降级 spawn 重跑 + record 标注」方案 git 可追溯）。
 
@@ -210,7 +210,7 @@ task ─┘                    │ ① session/create {workspace, mode, model, .
 - 常驻进程**不进** `spawnedChildren: Map<recordId, ChildProcess>`（避免 per-record 重复注册/重复 SIGTERM/单任务 abort 误杀全局）；其生命周期完全归引擎 dispose。`onChildSpawned` 对常驻连接不调用（port.ts:88-90 已明文允许「引擎内部不 spawn 进程时不调用」——常驻进程归引擎所有，同理不逐任务注册；契约文案随实施补充一句）。
 - 不采用：EnginePort 加必选 dispose（breaking，pi 引擎等所有实现被迫补方法——用可选方法保持向后兼容）；常驻进程注册进 per-record Map（盘点已证语义冲突）。
 - 证据：盘点 §2.3 硬缺口；zsw 壳现役 shutdown 链（runner-core.js → markAllSpawnedChildrenDead）零改动验证（A7 场景）。
-- **子决策①（签名与等待策略）**：dispose 双面——同步范围：`markAllSpawnedChildrenDead` 在返回前**先 fire 全部 `session/close` 帧、后同步发出 SIGTERM**（`child.kill()` 为同步系统调用，顺序规定避免 SIGTERM 先发致 close 帧必丢；close 帧不等待应答），保证「调用返回时终止信号已发出」；异步面：`dispose?(): Promise<void>` 走完整序列（close → SIGTERM → grace → SIGKILL）。**异步面的现役消费方为空**——pi 壳 `SubagentService.dispose(): void` 同步（subagent-service.ts:525），zsw `CoreRunner.shutdown()` 虽 async 但不 await markAllSpawnedChildrenDead（runner-core.js:383-388），且两者均受 G4 禁改；grace→SIGKILL 兜底仅在宿主进程存活时生效（zsw daemon shutdown 后若进程继续存活数秒则 grace 链生效，否则仅同步 SIGTERM 面）——此边界如实声明，异步面供未来宿主/测试消费（A7 判据按此口径）。
+- **子决策①（签名与等待策略）**：dispose 双面——同步范围：`markAllSpawnedChildrenDead` 在返回前**先 fire 全部 `session/close` 帧、后同步发出 SIGTERM**（`child.kill()` 为同步系统调用，顺序规定避免 SIGTERM 先发致 close 帧必丢；close 帧不等待应答），保证「调用返回时终止信号已发出」；异步侧：`dispose?(): Promise<void>` 走完整序列（close → SIGTERM → grace → SIGKILL）。**异步侧的现役消费方为空**——pi 壳 `SubagentService.dispose(): void` 同步（subagent-service.ts:525），zsw `CoreRunner.shutdown()` 虽 async 但不 await markAllSpawnedChildrenDead（runner-core.js:383-388），且两者均受 G4 禁改；grace→SIGKILL 兜底仅在宿主进程存活时生效（zsw daemon shutdown 后若进程继续存活数秒则 grace 链生效，否则仅同步 SIGTERM 面）——此边界如实声明，异步侧供未来宿主/测试消费（A7 判据按此口径）。
 - **子决策②（dispose 触发粒度与 pi 壳收益边界）**：pi 壳的 dispose 挂在 session_shutdown（每 session 关闭触发，subagent-service.ts:521-536）——即常驻进程随 session 结束回收。接受该边界：**G1 在 taiji 侧的收益面 = session 生命周期内多任务零冷启动**（每 session 一次进程冷启动，摊薄到 session 内任务数）；zsw daemon 生命周期长，收益完整。不采用：跨 session idle 保活常驻进程——违背 dispose = 防泄漏语义，且 pi 壳在 G4 约束下无法感知进程归属，保活即泄漏面。
 - **子决策③（孤儿自愈）——已作废（2026-09 breaking）**：pidfile / HOME 目录锁机制随 D7 HOME 池化删除（appserver-home.ts 整文件删除），HOME 共享后无池目录派生与孤儿回收问题。原文 git 可追溯。
 
@@ -246,7 +246,7 @@ task ─┘                    │ ① session/create {workspace, mode, model, .
 
 ### 3.4 实施不变量（从决策推导，conformance 承接）
 
-1. **事件不变量沿用 C3 全量**：stream 模式下 text_delta 拼接 == read 全文；终态唯一（turn.terminal 权威）；message_end.usage 完整；tool_start/tool_end 配对（app-server 推送帧能提供 toolCallCount，但首期事件面若无逐工具帧，tool 事件不合成——granularity 声明与实际流出一致即可）。
+1. **事件不变量沿用 C3 全量**：stream 模式下 text_delta 拼接 == read 全文；终态唯一（turn.terminal 权威）；message_end.usage 完整；tool_start/tool_end 配对（app-server 推送帧能提供 toolCallCount，但首期事件范围若无逐工具帧，tool 事件不合成——granularity 声明与实际流出一致即可）。
 2. **run resolve 先于 journal close**：事件 emit 完成先于 run resolve（现有不变量 5 在流式形态下自然成立——turn.terminal 后 read 兜底完成才 resolve）。
 3. **onPoolResolved 先于首事件 + 运行中 entry 携带读取钥匙**：常驻通道 poolKey 为静态常量（'home-appserver' 或派生目录名，W4 已定案），onPoolResolved 可在连接建立前极早调用；**传递通道（r3 固定）：RunContext 新增可选回调 `onHandleReady(partial: Pick<EngineHandleData, 'sessionRef' | 'poolKey'>)`**——与 onPoolResolved 分立两个时点（poolKey 在 prepare 期经 onPoolResolved，sessionRef 在 create 应答后经 onHandleReady；字段级扩展已在本设计登记，满足 port.ts 头注纪律）。编排层收到回调后立即回填 `record.engineHandle = { sessionRef, poolKey, journalPath }` 并经 `reportRecordTransition` 落 entry（record-store.ts:434 既有上报通道）——运行中的 GUI 经 entry 重建 record 即拿到 ①②级读取钥匙，不再等 `engine.run` resolve 后的回填（subagent-service.ts:1746 现状）。
 4. **dispose 幂等**：重复调用无副作用；dispose 后首个 run 自动重建（与「进程死后重建」同一代码路径）。
@@ -259,11 +259,11 @@ task ─┘                    │ ① session/create {workspace, mode, model, .
 |---|------|------|---------|------|
 | A1 | zsw 多任务零冷启动 | 真机 `zsw run` 一个 map-reduce（主任务 + 3 subagent），对比改造前同 workflow | 第 2-4 个 subagent 任务无进程启动段（record 耗时显著低于首任务；`ps` 全程只见 1 个 app-server 进程，**探针窗口的独立短命连接除外**）；结果与改造前等价 | G1 |
 | A2 | stream 事件流出 + 快照一致性 | ①zsw 真机跑 workflow，观察终端 live 输出实时刷新；②taiji dev 起 zcode 引擎 subagent，任务运行中打开详情页、任务中途重开 session | ①workflow live 输出随任务运行实时出现（非终态一次性）；②详情页打开可见当时进度快照，重开后渲染与 live 一致（①级 sqlite / ②级 journal 无论哪级命中，内容一致） | G2 |
-| A3 | per-session model | 同进程上并发两任务：任务 A 与任务 B 各指定不同模型（如 `model: <model-a>` / `model: <model-b>`） | 两任务各自成功、响应面无串线（sessionId/usage 各归各）；record 各自留痕正确 model | G3 |
+| A3 | per-session model | 同进程上并发两任务：任务 A 与任务 B 各指定不同模型（如 `model: <model-a>` / `model: <model-b>`） | 两任务各自成功、响应侧无串线（sessionId/usage 各归各）；record 各自留痕正确 model | G3 |
 | A4 | abort 不连坐 | 两任务并发在途，取消其一 | 被取消任务终态 exitCode=null；另一任务正常完成不受影响（session/stop 只作用于目标会话） | G1/G3 |
 | A5 | 漂移降级 + 重探重建——**已作废**（2026-09 breaking：降级链与探针随 spawn 通道删除，协议漂移直接报错） | — | — | — |
 | A6 | 崩溃重建 | 任务运行中 `kill -9` 常驻进程 | 在途任务失败（错误含 stderr 尾）；紧接的下一任务自动重建进程并成功 | G1 |
-| A7 | 无孤儿进程（三种退出形态） | ①zsw daemon 正常退出（现役 shutdown 链零改动——异步面现役消费方为空，实际生效的是同步 SIGTERM 面，见 D6①）；②宿主 SIGKILL 后重启宿主，**跑一个 zcode 任务（或触发 probe）后再 ps**（引擎惰性实例化，回收挂在引擎初始化而非宿主启动，见 D6③）；③pi 壳 session 关闭触发同步 dispose | ①②每次之后 `ps` 无残留 `app-server` 进程——②的判据为**重启并触发引擎初始化后完成 stale 回收**（pidfile 机制）；③SIGTERM 已随 dispose 同步发出、session 内无泄漏（grace→SIGKILL 兜底边界见 D6 子决策①） | G4 |
+| A7 | 无孤儿进程（三种退出形态） | ①zsw daemon 正常退出（现役 shutdown 链零改动——异步侧现役消费方为空，实际生效的是同步 SIGTERM 面，见 D6①）；②宿主 SIGKILL 后重启宿主，**跑一个 zcode 任务（或触发 probe）后再 ps**（引擎惰性实例化，回收挂在引擎初始化而非宿主启动，见 D6③）；③pi 壳 session 关闭触发同步 dispose | ①②每次之后 `ps` 无残留 `app-server` 进程——②的判据为**重启并触发引擎初始化后完成 stale 回收**（pidfile 机制）；③SIGTERM 已随 dispose 同步发出、session 内无泄漏（grace→SIGKILL 兜底边界见 D6 子决策①） | G4 |
 | A8 | conformance 全绿 | 跑 engine conformance 套件（真机 gate）+ zcode 单测族迁移后全量 | C1-C8 适配后全绿；golden 帧序列语料 diff 通过；pi 引擎测试零改动零回归 | G4/G5 |
 | A9 | 宿主零改动验证 | zsw 仓与 pi 壳**自有代码**不改（vendor 刷新除外——zsw 经 vendored 副本消费 core，`lib/vendor/subagent-core/` 刷新属依赖升级载体不算改动；pi 壳 workspace 引用同理走 core 版本 bump），重跑 A1 | zsw 壳 runner-core.js 等自有源码 diff 为空、vendor 目录刷新除外，功能全部成立；待 npm 自包含 bundle 通道就绪后以真依赖升级复验一次 | G4 |
 
@@ -287,9 +287,9 @@ A1/A2/A3/A4/A6/A7 为必过门（真机）；A5 的 ①为回归门、②③为�
 3. zsw 仓决策记录：状态从「待实施」更新为实施进度（跨仓 PR 同步）。
 4. `.taiji-harness/subagent-engine-abstraction/decisions.md` D-010：追加 revisit 行（终态决策时间与出处），不改写原决策记录。
 
-**版本与排序**：core 当前待发 0.3.0（host-surface，changeset 已备）。本设计落 **core 0.4.0**（capabilities 声明变化 = 消费方可见语义变化，minor）。与 convergence 设计（原计划 0.4.0，W1-W9）的先后排序是**用户决策点**：本设计与 convergence 正交（决策记录 §5 已论证），推荐本设计先行（用户当前优先级），convergence 顺延 0.5.0；两设计无文件级冲突面（convergence 不动引擎）。
+**版本与排序**：core 当前待发 0.3.0（host-surface，changeset 已备）。本设计落 **core 0.4.0**（capabilities 声明变化 = 消费方可见语义变化，minor）。与 convergence 设计（原计划 0.4.0，W1-W9）的先后排序是**用户决策点**：本设计与 convergence 正交（决策记录 §5 已论证），推荐本设计先行（用户当前优先级），convergence 顺延 0.5.0；两设计无文件级冲突风险（convergence 不动引擎）。
 
-**待验证检查点（实施期，R1-R6 落地后 2026-08-31 回填）**：①`--surface` / `--stdio` 矩阵（D10）——**已定案基线不带 flag**（connection.ts 落地，旧 runner 不带实测可用的依据），三态矩阵留待跨仓真机段补验；②stream.chunk 帧是否偶发携带文本字段——实现已做宽容双形态兜底（session-channel 推送泵对带文本的 stream.chunk 一并消费），真机实录待跨仓段替换合成语料；③`-32022` 当前版本错误码——未确认，实现按「连接 onClose + 全部在途 reject」形态处理（与错误码无关），真机待验；④`session/read` 的 `step-finish` tokens 结构——实现按宽容解析（usage 权威取收尾帧，read step-finish 仅兜底，字段缺席不抛）；⑤**GUI ①级锚定**——实现面已落（poolKey 静态常量 + 派生目录记实际名 + read 侧 resolvePoolDir 重定位；live 用例已写入 zcode-engine.live.test），真机验证（RA2-②）属跨仓验收段。
+**待验证检查点（实施期，R1-R6 落地后 2026-08-31 回填）**：①`--surface` / `--stdio` 矩阵（D10）——**已定案基线不带 flag**（connection.ts 落地，旧 runner 不带实测可用的依据），三态矩阵留待跨仓真机段补验；②stream.chunk 帧是否偶发携带文本字段——实现已做宽容双形态兜底（session-channel 推送泵对带文本的 stream.chunk 一并消费），真机实录待跨仓段替换合成语料；③`-32022` 当前版本错误码——未确认，实现按「连接 onClose + 全部在途 reject」形态处理（与错误码无关），真机待验；④`session/read` 的 `step-finish` tokens 结构——实现按宽容解析（usage 权威取收尾帧，read step-finish 仅兜底，字段缺席不抛）；⑤**GUI ①级锚定**——实现侧已落（poolKey 静态常量 + 派生目录记实际名 + read 侧 resolvePoolDir 重定位；live 用例已写入 zcode-engine.live.test），真机验证（RA2-②）属跨仓验收段。
 
 ---
 

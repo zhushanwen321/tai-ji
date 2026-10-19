@@ -4,14 +4,14 @@
  * 覆盖任务书六组 + configure 写路校验与 Key 联动 + message-handler 协议往返形状：
  * 1. 缓存键稳定性：改 instructions / sample_rate / baseUrl / passthrough 任一项键必变；同配置命中缓存
  * 2. FIFO 双条件封顶：文件数条件、字节条件、并发幂等（force rm 目标已删不抛）、单文件失败（EBUSY）跳过 speak 不失败
- * 3. 配置脱敏投影：reply 永无 Key 本体
+ * 3. 配置脱敏派生视图：reply 永无 Key 本体
  * 4. tts.json 原子写（无 tmp 残留）+ parse 失败降级（getConfig 回骨架 / speak 报 tts_not_configured）
  * 5. providerKeyAvailable 判定：{ key } true / { unsupported } false / undefined false / stepfun 恒 false
  * 6. 八步编排 happy path：mock driver 两段拼接，WAV 头采样率/声道取第一段回报值
  * 7. configure 校验（speed 域内/词典格式/不落半改）+ Key 联动（from-provider 带入/unsupported 指引/MiMo baseUrl 预填）
  * 8. handler 协议往返：payload/reply 键名与 §7.1 表逐字段一致 + invalid_payload 入口防御
  * 9. speak 请求端点跟随配置 baseUrl（真 driver + fetch 桩）：非默认 baseUrl 打到该地址 /
- *    缺 baseUrl 回退表单投影出厂默认 / 出厂默认回归锁定
+ *    缺 baseUrl 回退表单派生视图出厂默认 / 出厂默认回归锁定
  *
  * 失败注入手段：FS 上限经构造参数注入小值（默认取 shared SSOT）；封顶删除通道经
  * cacheRemove / remove 注入 stub——不 vi.mock node:fs（fs-guard 全局 mock 会被文件级
@@ -121,7 +121,7 @@ function makeResolver(
   baseUrls: Record<string, string | undefined> = {},
 ): IProviderCredentialResolver {
   return {
-    // 与生产语义对齐：凭据 outcomes 登记过的 id = 持凭据（D3 验收后守卫依赖此判定）
+    // 与生产语义对齐：凭据 outcomes 登记过的 id = 持凭据（D3 验收后检查依赖此判定）
     hasProviderCredential: (id) => id in outcomes,
     listCredentialBackedProviderIds: () => new Set<string>(Object.keys(outcomes)),
     resolveProviderCredential: async (id) => outcomes[id],
@@ -149,7 +149,7 @@ function makeServiceDeps(): ServiceDeps {
 function makeService(deps: ServiceDeps): TtsService {
   return new TtsService({
     dataDir: dir,
-    // driver 现建工厂：按 id 返回对应 mock driver（合成调用经 calls 观测）；表单投影取自
+    // driver 现建工厂：按 id 返回对应 mock driver（合成调用经 calls 观测）；表单派生视图取自
     // 同一 mock driver（capabilities 同源，与生产接线 getTtsFormModels + createTtsDriver 同构）
     createDriver: (id) => deps[id].driver,
     formModels: {
@@ -358,10 +358,10 @@ describe('缓存双条件 FIFO 封顶（§7.4 步骤 7）', () => {
   })
 })
 
-// ── 3. 配置脱敏投影 ──────────────────────────────────────────────────────
+// ── 3. 配置脱敏派生视图 ──────────────────────────────────────────────────────
 
-describe('getConfig 脱敏投影（永不回 Key 本体）', () => {
-  it('hasApiKey 反映 secrets 状态；投影串不含 Key 本体', async () => {
+describe('getConfig 脱敏派生视图（永不回 Key 本体）', () => {
+  it('hasApiKey 反映 secrets 状态；派生视图串不含 Key 本体', async () => {
     const deps = makeServiceDeps()
     writeTtsJson({ stepfun: baseStepfunConfig() })
     writeSecret('stepfun')
@@ -370,23 +370,23 @@ describe('getConfig 脱敏投影（永不回 Key 本体）', () => {
     const withKey = await svc.getConfig()
     expect(withKey.providers.stepfun.hasApiKey).toBe(true)
     expect(withKey.providers.minimax.hasApiKey).toBe(false)
-    // 全量序列化后搜不到 Key 本体（脱敏投影的结构性证明）
+    // 全量序列化后搜不到 Key 本体（脱敏派生视图的结构性证明）
     expect(JSON.stringify(withKey)).not.toContain(SECRET_VALUE)
 
-    // 清除 Key 后投影跟随
+    // 清除 Key 后派生视图跟随
     rmSync(join(dir, 'secrets', 'tts-stepfun-apikey.txt'))
     const withoutKey = await svc.getConfig()
     expect(withoutKey.providers.stepfun.hasApiKey).toBe(false)
   })
 })
 
-describe('getCapabilities 表单投影（三家键，本层纯转发）', () => {
-  it('返回三家键的全集投影，数据源 = 构造注入的 formModels（本层零加工）', () => {
+describe('getCapabilities 表单派生视图（三家键，本层纯转发）', () => {
+  it('返回三家键的全集派生视图，数据源 = 构造注入的 formModels（本层零加工）', () => {
     const deps = makeServiceDeps()
     const svc = makeService(deps)
     const forms = svc.getCapabilities()
     expect(Object.keys(forms).sort()).toEqual(['mimo', 'minimax', 'stepfun'])
-    // 投影与注入源同对象引用（纯转发语义，与生产接线 getTtsFormModels 同构）
+    // 派生视图与注入源同对象引用（纯转发语义，与生产接线 getTtsFormModels 同构）
     expect(forms.stepfun).toBe(deps.stepfun.driver.formModel)
     expect(forms.minimax).toBe(deps.minimax.driver.formModel)
     expect(forms.mimo).toBe(deps.mimo.driver.formModel)
@@ -413,7 +413,7 @@ describe('tts.json 原子写与 parse 失败降级', () => {
     const deps = makeServiceDeps()
     const svc = makeService(deps)
     const config = await svc.getConfig()
-    expect(config.providers.stepfun.config.baseUrl).toBe(DEFAULT_BASE_URL) // 骨架值来自表单投影 isDefault
+    expect(config.providers.stepfun.config.baseUrl).toBe(DEFAULT_BASE_URL) // 骨架值来自表单派生视图 isDefault
     expect(config.providers.stepfun.config.vendor).toEqual({})
   })
 
@@ -805,7 +805,7 @@ describe('speak 请求端点跟随配置 baseUrl（真 driver + fetch 桩）', (
     return fetchMock
   }
 
-  /** 生产同构接线：真 driver 工厂 + 真三家表单投影（infra/tts 唯一装配出口）。 */
+  /** 生产同构接线：真 driver 工厂 + 真三家表单派生视图（infra/tts 唯一装配出口）。 */
   function makeRealDriverService(): TtsService {
     return new TtsService({
       dataDir: dir,
@@ -831,7 +831,7 @@ describe('speak 请求端点跟随配置 baseUrl（真 driver + fetch 桩）', (
     expect(url).toBe(`${altBase}/audio/speech`)
   })
 
-  it('tts.json 缺 baseUrl 字段：回退表单投影出厂默认（与 skeleton 行为一致）', async () => {
+  it('tts.json 缺 baseUrl 字段：回退表单派生视图出厂默认（与 skeleton 行为一致）', async () => {
     const fetchMock = stubFetch()
     writeFileSync(
       join(dir, 'tts.json'),

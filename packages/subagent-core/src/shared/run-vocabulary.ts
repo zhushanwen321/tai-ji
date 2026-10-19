@@ -36,7 +36,7 @@ export type RunDoneReason = "completed" | "failed" | "aborted" | "budget_limited
  *
  * [D2] 词表变更登记（现行四值与重构前四值的差异，逐条显式登记）：
  * 1. **completed → done 改名**：与 shared `WorkflowRunStatus` 终局值 'done' 统一
- *    字面量——status 域与 outcome 域的成功/终局值同词，投影链无需两套叫法；
+ *    字面量——status 域与 outcome 域的成功/终局值同词，派生视图链无需两套叫法；
  * 2. **interrupted 移出 outcome（入 lifecycle 暂停态）**：「终局了却又没死透」的
  *    概念矛盾消除——中断 = run-interrupted 转移事件（running/settling →
  *    interrupted），可经 run-resumed 复活，非终局；
@@ -49,7 +49,7 @@ export type RunDoneReason = "completed" | "failed" | "aborted" | "budget_limited
  *    三值（time_limited 为 run 级终局、interrupted 已移出 outcome——均不出现在
  *    call 帧，沿用「ask 级实装取值 = result.failureKind 映射」的值域边界纪律）。
  *
- * 值域跟随锚：shared `WorkflowRunOutcome`（投影派生输出口径的第三份字面量，
+ * 值域跟随锚：shared `WorkflowRunOutcome`（派生视图推算的输出口径的第三份字面量，
  * core↔shared 依赖方向不允许物理单源）经 runtime 侧双包值级等价断言钉住
  * （core ALL_RUN_OUTCOMES ≡ extractor 集合 ≡ shared 词表成员，runtime 单测）。
  */
@@ -65,7 +65,7 @@ export type RunOutcome = (typeof ALL_RUN_OUTCOMES)[number];
  * 终局/中断错误码：「怎么死的」（终局）与「为什么此刻被中断」（中断）的结构化编码。
  *
  * 词表复用两族既有实装，不造新词（D5-1）：
- * - 引擎错误码：SDK 协议固定词表（engine_crashed 等 9 个）+ 引擎自报透传面
+ * - 引擎错误码：SDK 协议固定词表（engine_crashed 等 9 个）+ 引擎自报透传侧
  *   （engine_ 前缀、core 不解释文案的 passthrough 契约）。显式并列
  *   EngineProtocolErrorCode 而非只留模板面——固定词表是该 union 的权威枚举源，
  *   SDK 侧词表演进（含非 engine_ 前缀的新码）自动跟进；
@@ -78,7 +78,7 @@ export type RunOutcome = (typeof ALL_RUN_OUTCOMES)[number];
  * budget_limited 是 run 级终局码（dispatchFinalRunSettle 生产：DoneReason 同名
  * 字面量恒等映射）——不描述引擎/agent 怎么失败，描述「为什么此刻被判终局」
  * （harness 系统层裁决）。不复用既有族的依据：engine_ 前缀有「引擎自报」契约
- * （SDK error-codes.ts 透传面，预算耗尽是宿主侧裁决非引擎上报，借用即伪造自
+ * （SDK error-codes.ts 透传侧，预算耗尽是宿主侧裁决非引擎上报，借用即伪造自
  * 报）；AgentFailureKind 是 agent 级失败分诊三态（预算耗尽不是 agent 失败形态）。
  *
  * [D2] time_limited 保留为历史帧解析成员：升格为 RunOutcome 独立值后，新写入方
@@ -119,7 +119,7 @@ export type RunErrorCode =
  * [D1] record 单源存储收敛改名（`.events.jsonl` → `.record.jsonl`）：record 流是
  * run 域唯一事实源（append-only），文件名换新后缀使旧格式两件套（旧 journal
  * `.events.jsonl` + state 快照 `<runId>.jsonl`）与新流在文件名层面天然可分——
- * 全部读取路径只认本后缀（旧两件不读、不写、不主动删，历史 run 从壳侧读取面
+ * 全部读取路径只认本后缀（旧两件不读、不写、不主动删，历史 run 从壳侧读侧
  * 消失即 D1 历史数据处置的预期行为）。
  *
  * 单源导出（barrel 上收）：core 内部全部落/扫点（本文件 recordPath、
@@ -133,17 +133,6 @@ export type RunErrorCode =
  * 读侧适配批（D16 ③）同批落地。
  */
 export const RUN_EVENTS_SUFFIX = ".record.jsonl";
-/**
- * run 状态目录名（<dataRoot> 下的固定分量）。
- *
- * 单源导出（barrel 上收）：pi 壳 JsonlRunStore / workflow-events 的
- * `<sessionDir>/workflow-state` 布局与 pi 宿主枚举的 agentDir 根回退目录
- * 同名分量——字面量散布时任一侧单独改名即静默漂移（store 读写错目录 /
- * stall 判定读不到 journal）。归位本文件（run 域词汇常量最低层声明处）：
- * workflow-state-root（assembly 目录派生）与 runtime 读侧（gateway /
- * model-override-query / session-records）双向消费不产生反向边（dmg-r3-3）。
- */
-export const STATE_DIR_NAME = "workflow-state";
 /**
  * slug 最大长度（D6 合流迁入本文件，原权威定义在已删除的 execution/execute-options-mapper.ts）。
  * 历史值 20 偏紧——描述性 slug 如 "audit-structured-output"（23）/ "fix-subagent-wf-tools"（21）
@@ -203,7 +192,7 @@ export function runSettledOutcomeToDoneReason(outcome: RunOutcome, errorCode?: R
     default:
       // 词表外防御（判定核单点收敛）：穷尽 switch 无兜底时词表外值漏出
       // undefined，会击穿 RunSettlementEvidence.reason: string 契约（枚举 status /
-      // 注销 reason 等消费面直接透传）。运行时可达形态 = 历史 manifest 的
+      // 注销 reason 等消费方直接透传）。运行时可达形态 = 历史 manifest 的
       // outcome=interrupted 族（[D2] 前旧收编链物化，文件名未随 [D1] 迁移故磁盘
       // 可达，经 findRunSettlementEvidence 的 as RunOutcome 强转读入）——统一
       // 折叠 "failed" 诊断兜底容器（W2 D5 先例「interrupted → failed」：中断形态

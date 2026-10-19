@@ -72,7 +72,7 @@ export interface SchedulerBackend {
    */
   getEntries(): SchedulerEntryLike[]
   /**
-   * U6c：session_tree（树回退）重折叠订阅。生产注册面在 extension factory 顶层
+   * U6c：session_tree（树回退）重折叠订阅。生产注册点在 extension factory 顶层
    * （index.ts：pi.on('session_tree') 每代恰一，事件经 activeBackend 委托
    * PiSchedulerBackend.refoldSessionTree），事件到达时按活跃路径重折叠任务集并回调
    * listener——落点是 SchedulerRuntime 的内存任务 Map（runtime 构造时订阅，backend
@@ -107,7 +107,7 @@ export interface SchedulerBackendCtx {
    */
   isIdle?(): boolean
   /**
-   * 会话当前模型（真实 ExtensionContext.model: Model<any> | undefined，结构兼容此处最小投影）。
+   * 会话当前模型（真实 ExtensionContext.model: Model<any> | undefined，结构兼容此处最小派生视图）。
    * 可选 = 无模型会话（ExtensionContext.model 本身可为 undefined）。
    */
   model?: SchedulerCurrentModel
@@ -156,7 +156,7 @@ export class PiSchedulerBackend implements SchedulerBackend {
 
   /**
    * U6c：session_tree（树回退）事件委托体，由 extension factory 顶层注册的 handler
-   * 经 activeBackend 调用（index.ts；不在本类构造函数注册，注册面理由见该处注释）。
+   * 经 activeBackend 调用（index.ts；不在本类构造函数注册，注册点理由见该处注释）。
    * 纯重建体：只按活跃路径重折叠任务集（loadTasks）并回调 runtime 换 Map——不做
    * 任何 sendMessage / appendEntry / tickTimer 启停（tick 常驻循环照常消费新任务集，
    * 被撤子树任务不在集内即到点不触发，A14）。
@@ -215,14 +215,14 @@ export class PiSchedulerBackend implements SchedulerBackend {
    *
    * ctx.isIdle 缺失（最小 duck ctx）时保守返回 false（视作「有轮在跑」）：ack 机制的
    * fail-safe 方向是「不确定则不介入」——运行中的轮次会自然产出 assistant 消息、打开会话
-   * 落盘闸门（设计 §3.3 D4 / G4），而未知状态下注入合成轮反而可能吞掉用户消息。
+   * 落盘门禁（设计 §3.3 D4 / G4），而未知状态下注入合成轮反而可能吞掉用户消息。
    */
   isIdle(): boolean {
     return this.ctx.isIdle ? this.ctx.isIdle() : false
   }
 
   /**
-   * 会话当前模型的最小投影（**类方法，非接口成员**，理由同 isIdle）；ctx.model 缺失/
+   * 会话当前模型的最小派生视图（**类方法，非接口成员**，理由同 isIdle）；ctx.model 缺失/
    * undefined（无模型会话）时返回 undefined。
    */
   getCurrentModel(): SchedulerCurrentModel | undefined {

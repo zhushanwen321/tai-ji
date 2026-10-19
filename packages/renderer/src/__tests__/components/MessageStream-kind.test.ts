@@ -47,13 +47,13 @@ import type { Message } from '@taiji/shared'
 //   全程无 index < data.length 检查（依据 node_modules/virtua/lib/vue/index.js：slot
 //   调用 wrapper 起于 483（f.default 调用 484-487）/ keepMounted 并入循环在 505-511，
 //   new Set 在 506）：idx 越界时 item=undefined 直传 slot。这不是
-//   mock 的疏漏而是被测崩溃机理本身——生产代码编辑钉扎残留越界索引时，模板
+//   mock 的疏漏而是被测崩溃机理本身——生产代码编辑固定残留越界索引时，模板
 //   `item.kind` 读 undefined.kind 抛 TypeError。U3 身份锚定（反查 + clamp + D8 清零）落地后用例转绿。
 const slotKeyCollector = vi.hoisted(() => ({ keys: [] as (string | number | symbol | null | undefined)[][] }))
 
 // [U3] keepMounted 收集器：记录每次渲染 MessageStream 传给 Virtualizer 的 :keep-mounted prop
 //   原值（不含 mock 并入的可视范围索引）——供 U0 链路断言（编辑激活时含编辑 turn 索引，证明
-//   钉扎链路未断路）与 A2 白盒断言（重排后跟随编辑回合新索引）使用，模式同 slotKeyCollector。
+//   固定链路未断路）与 A2 白盒断言（重排后跟随编辑回合新索引）使用，模式同 slotKeyCollector。
 const keepMountedCollector = vi.hoisted(() => ({ entries: [] as number[][] }))
 
 vi.mock('virtua/vue', async () => {
@@ -96,7 +96,7 @@ vi.mock('virtua/vue', async () => {
         // 并入的可视范围索引）供断言（[U3] keepMountedCollector）。
         keepMountedCollector.entries.push([...((ctx.keepMounted as number[]) ?? [])])
         // Set 迭代序 = 插入序：keepMounted 先入、可视范围后入（与 virtua 实装 m([...e]) 一致）。
-        // 既有用例不产生钉扎（pinnedIndexes=[]）→ 集合退化为 0..n-1，与旧 map 行为逐字节等价。
+        // 既有用例不产生固定（pinnedIndexes=[]）→ 集合退化为 0..n-1，与旧 map 行为逐字节等价。
         const indexes = new Set<number>((ctx.keepMounted as number[]) ?? [])
         for (let i = 0; i < data.length; i += 1) indexes.add(i)
         return h(
@@ -126,7 +126,7 @@ vi.mock('virtua/vue', async () => {
 // 等重组件树，happy-dom 下 mount 成本与脆弱面都大，而本测关心的链路只有：
 // canEdit prop（MessageStream 侧「最后 user turn 才可编辑」的真实判定结果）→ 编辑动作
 // → emit → MessageStream.onEditStateChange。stub 只替换 Turn/UserBubble 的内部 UI，
-// handler/钉扎派生/keepMounted 绑定全是真实生产代码路径。
+// handler/固定派生/keepMounted 绑定全是真实生产代码路径。
 // [U3 stub 与真实 UserBubble 事件行为同构]（设计 §3.3 D2/D3）：
 // - 置位负载 {editing:true, turnKey}，turnKey 用与生产同一身份函数 turnStableId（首条消息
 //   id，与 renderKey 的 `t-` 空间一致）——生产 pinnedIndexes 按 `t-${turnKey}` 反查；
@@ -353,9 +353,9 @@ describe('MessageStream kind 查表分发（M1）', () => {
  *
  * 【U3 起本用例为绿】编辑态改为身份锚定（editingTurnKey + useStreamingPin 反查 + clamp +
  * watch(sessionId) D8 清零 + UserBubble 卸载 emit，D2/D3/D8）后崩溃路径结构性消除。
- * 但「不崩」本身可能是断路假绿（旧参被静默忽略 → 编辑钉扎整体断路 → 不崩也没钉），
+ * 但「不崩」本身可能是断路假绿（旧参被静默忽略 → 编辑固定整体断路 → 不崩也没钉），
  * 故断言双通道取证：
- * - 切 session 前 keepMounted **含有**编辑 turn 的索引 → 钉扎链路真实接通（非断路）；
+ * - 切 session 前 keepMounted **含有**编辑 turn 的索引 → 固定链路真实接通（非断路）；
  * - 切短会话后 keepMounted **不含**越界索引 → 修复真实生效（D8 清零 / D3 卸载 emit 幂等归 null，
  *   反查 miss 不入 pinnedIndexes，clamp 兜底）。
  */
@@ -366,7 +366,7 @@ describe('P5 探针门：keepMounted 越界渲染崩溃复现（U0 红 → U3 �
     keepMountedCollector.entries.length = 0
   })
 
-  it('编辑中切短会话 → mount/重渲染不抛，且 keepMounted 证明钉扎链路接通后随切换收敛（U3）', async () => {
+  it('编辑中切短会话 → mount/重渲染不抛，且 keepMounted 证明固定链路接通后随切换收敛（U3）', async () => {
     const chat = useChatStore()
 
     // 长会话 5 个 turn（每 turn = user + assistant）：末 turn 是最后 user turn，
@@ -404,7 +404,7 @@ describe('P5 探针门：keepMounted 越界渲染崩溃复现（U0 红 → U3 �
     expect(wrapper.find('[data-testid="turn-edit-box"]').exists()).toBe(true)
 
     // [非断路假绿证明] 编辑激活时 keepMounted 必含编辑 turn 的索引 4（t-u5 反查命中）——
-    // 钉扎链路真实接通（断路假绿形态下此处恒为 []）
+    // 固定链路真实接通（断路假绿形态下此处恒为 []）
     const keepMountedActive = keepMountedCollector.entries[keepMountedCollector.entries.length - 1] ?? []
     expect(keepMountedActive).toContain(4)
 
@@ -443,7 +443,7 @@ describe('P5 探针门：keepMounted 越界渲染崩溃复现（U0 红 → U3 �
  * 「编辑中后台消息入流」的最小重排形态——前插一条 system 消息使编辑 turn 索引整体后移。
  * 身份锚定下 pinnedIndexes 每次从当前 items 反查（D1），keepMounted 必须跟随编辑回合的
  * 新索引（G3：钉在身份上，不钉在位置上）——位置快照协议在此会错钉/残留旧索引（E-now-2）。
- * setMessages 直接覆盖（不受 hydrate 一次性守卫），renderKey 身份不变 → Turn 实例按 key
+ * setMessages 直接覆盖（不受 hydrate 一次性检查），renderKey 身份不变 → Turn 实例按 key
  * 复用，编辑态不被打断（G2）。
  */
 describe('A2 白盒：编辑中数组重排 → keepMounted 跟随编辑回合身份（U3）', () => {

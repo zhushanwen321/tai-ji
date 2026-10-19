@@ -11,8 +11,8 @@
  * 附带评价落 edge.support）+ §2.5 聚合 2 不变量（条目 id 存在 / 终态附停回说明 /
  * 审查与修复分离）。
  */
-import type { CanvasActionParams, CanvasActor, CanvasState } from '@zhushanwen/extension-protocol'
-import { edgeOf, eventData, eventOf, fail, isTrunkEdge, truncate, type CanvasEventBody } from './canvas-foundation.js'
+import type { CanvasActionParams, CanvasActor } from '@zhushanwen/extension-protocol'
+import { edgeOf, eventData, eventOf, fail, isTrunkEdge, truncate, type CanvasDomainState, type CanvasEventBody } from './canvas-foundation.js'
 
 /** 审查循环轮次上限（审查引擎参数，对齐 review-fix-loop 的 maxRounds；非画布生长预算）。 */
 export const DEFAULT_REVIEW_MAX_ROUNDS = 5
@@ -21,12 +21,12 @@ export const DEFAULT_REVIEW_MAX_ROUNDS = 5
  * 条目 = 已完成。尚无条目 = 本轮未完成——再发起是同一轮的重发（GUI 双跳的第二跳：
  * user 发起 → 回推 → agent run 再发起），不推进轮次、不消耗轮次预算（maxRounds 按
  * 完成的审查循环计数——设计 §3.1:173 GUI 链路一次循环计一轮，R1 全面审语义由此保持）。 */
-function roundHasReport(review: NonNullable<CanvasState['review']>): boolean {
+function roundHasReport(review: NonNullable<CanvasDomainState['review']>): boolean {
   return review.entries.some((e) => e.round === review.round)
 }
 
 export function applyReviewRequest(
-  draft: CanvasState,
+  draft: CanvasDomainState,
   params: CanvasActionParams['review-request'],
   actor: CanvasActor,
   at: string,
@@ -79,7 +79,7 @@ export function applyReviewRequest(
 }
 
 export function applyReviewAppend(
-  draft: CanvasState,
+  draft: CanvasDomainState,
   params: CanvasActionParams['review-append'],
   actor: CanvasActor,
   at: string,
@@ -105,7 +105,7 @@ export function applyReviewAppend(
 }
 
 /** 聚合 2 不变量 1：条目引用的图元素 id 必须存在于画布（节点 / 边 / 评论三类 id 全集）。 */
-function validateEntryRefs(draft: CanvasState, entries: CanvasActionParams['review-append']['entries']): void {
+function validateEntryRefs(draft: CanvasDomainState, entries: CanvasActionParams['review-append']['entries']): void {
   const knownIds = new Set<string>([...draft.nodes.map((n) => n.id), ...draft.edges.map((e) => e.id), ...draft.comments.map((c) => c.id)])
   for (const entry of entries) {
     if (!knownIds.has(entry.targetId)) fail('entry_ref_missing', `报告条目「${entry.id}」引用的图元素「${entry.targetId}」不存在`)
@@ -122,7 +122,7 @@ function validateEntryRefs(draft: CanvasState, entries: CanvasActionParams['revi
  * 门禁③按残缺条目集判定，必须 upfront 整批拒绝。同轮同 id 只拦同批内部重复：跨调用
  * 的重试批与已落库条目同 (round, id) 是崩溃重试幂等 upsert（见 upsertReviewEntries），
  * 不拦。 */
-function validateEntryIds(draft: CanvasState, params: CanvasActionParams['review-append']): void {
+function validateEntryIds(draft: CanvasDomainState, params: CanvasActionParams['review-append']): void {
   const review = draft.review
   if (!review) return
   const seenInBatch = new Set<string>()
@@ -146,7 +146,7 @@ function validateEntryIds(draft: CanvasState, params: CanvasActionParams['review
  * 随条目落 edge.support）：评价目标必须是主干边（裁决点 R3：论证边不评级）；
  * gap 必附缺口清单、sufficient/invalid 不得夹带清单（「有缺口附清单」词条语义，
  * 与契约守卫同规则双向——重放 / WS 直连不经 marker 守卫，runtime 是唯一防线）。 */
-function validateSupportRatings(draft: CanvasState, entries: CanvasActionParams['review-append']['entries']): void {
+function validateSupportRatings(draft: CanvasDomainState, entries: CanvasActionParams['review-append']['entries']): void {
   for (const entry of entries) {
     if (entry.supportRating === undefined) continue
     const edge = edgeOf(draft, entry.targetId)
@@ -167,7 +167,7 @@ function validateSupportRatings(draft: CanvasState, entries: CanvasActionParams[
  * 等）；跨轮同 id 已被 validateEntryIds 前置拒绝，此处查找不会命中异轮条目。review
  * 聚合由调用方（applyReviewAppend 首分支）保证已初始化——本地 guard 仅为类型收窄
  * （收窄不跨函数边界），运行时不可达。 */
-function upsertReviewEntries(draft: CanvasState, params: CanvasActionParams['review-append']): void {
+function upsertReviewEntries(draft: CanvasDomainState, params: CanvasActionParams['review-append']): void {
   const review = draft.review
   if (!review) return
   for (const entry of params.entries) {
@@ -189,7 +189,7 @@ const RESOLUTION_NOTE_MAX = 20
 
 /** 处置链责任方（设计 §3.1(1)）：主 agent = 执行侧；user = 复核与直接处置；first-writer-wins。 */
 export function applyReviewResolve(
-  draft: CanvasState,
+  draft: CanvasDomainState,
   params: CanvasActionParams['review-resolve'],
   actor: CanvasActor,
   at: string,

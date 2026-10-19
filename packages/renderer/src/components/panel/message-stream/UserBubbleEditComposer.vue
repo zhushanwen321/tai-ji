@@ -1,5 +1,5 @@
 <!--
-  split-justified: 用户气泡编辑态 = 简化版 composer（user-bubble-edit-composer）。输入面五件
+  split-justified: 用户气泡编辑态 = 简化版 composer（user-bubble-edit-composer）。输入范围五件
   （ComposerInput 富文本 + CommandPopover 四符号浮层 + 五路触发态机 + skill 候选源 + 键盘路由）
   与底部 Composer 同源复用，只裁掉 chrome（+ 按钮 / 底栏左簇 / 右簇 / staging / 草稿分区 /
   历史召回 / 拖拽落位）——「气泡框变成输入框」的富编辑器实现。经 ChatViewDeps.editComposerRenderer
@@ -11,9 +11,9 @@
   - 无 QueueBubble / Staging banner / ContextChipsBar（image chip 内联在 contenteditable 内，
     无独立管理行）/ 拖拽落位 / bash 豁免 / per-session 草稿分区 / ↑↓ 历史召回。
   保留：发送语义（⏎ 提交、⇧⏎ 换行、IME 组字放行——dom-core 免费提供）、exactMatch 直发
-  （浮层内 ⏎ 精确命中 = 插 chip + 提交，与 Composer 同链）、双发锁展示面（disabled）。
+  （浮层内 ⏎ 精确命中 = 插 chip + 提交，与 Composer 同链）、双发锁的展示（disabled）。
   提交不回写本组件：emit('submit', segments) 交还 UserBubble（双发锁早退 + editAndResend
-  收口链在 ui 侧单点，契约见 chat-view-deps.ts EditComposerProps）。
+  收尾链在 ui 侧单点，契约见 chat-view-deps.ts EditComposerProps）。
 -->
 <template>
   <!-- 命令浮层：anchor = 编辑框盒子（slot），side=top 向上开、宽 = 盒宽（N3 min(72%,64ch)
@@ -88,7 +88,7 @@ import { provideComposerInputDeps } from '@/composables/panel/composer-input-dep
 /**
  * props 契约 = chat-view-deps.ts EditComposerProps（UserBubble 经 component :is 注入）。
  * - segments：原消息 segments，挂载整框回填为真 chip；
- * - disabled：isPendingSend 透传（双发锁展示面，语义同 Composer isSending）；
+ * - disabled：isPendingSend 透传（双发锁的展示，语义同 Composer isSending）；
  * - messageId：编辑目标定位锚（ui 侧 editAndResend 消费），本组件仅用于目标变更重填。
  */
 const props = withDefaults(
@@ -157,7 +157,7 @@ const projectSkillsCwd = computed<string | null>(
 const { projectSkills } = useProjectSkills(projectSkillsCwd)
 const { globalSkills } = useGlobalSkills()
 
-// ── 草稿 + 已选 skill 集合（禁选数据面）──
+// ── 草稿 + 已选 skill 集合（禁选数据范围）──
 // getSegments 读 DOM 非响应式 → 随 input 显式刷新（与 Composer onInputChange 同模式）。
 const draft = ref('')
 const selectedSkillNames = ref<string[]>([])
@@ -169,7 +169,7 @@ function onInputChange(text: string): void {
     .map((s) => s.name)
 }
 
-/** 可提交：非空稿（trim 后）∧ 非提交在途。空稿守卫与 ui 侧 onEditorSubmit 的
+/** 可提交：非空稿（trim 后）∧ 非提交在途。空稿检查与 ui 侧 onEditorSubmit 的
  *  segmentsToText trim 双闸同语义（主 Composer canSend = hasInput ∧ ¬isSending 同构）。 */
 const canSubmit = computed(() => draft.value.trim().length > 0 && !props.disabled)
 

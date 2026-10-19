@@ -21,7 +21,7 @@
  *    required 的真实 typebox 锁由 structured-output cross-package-contract.test.ts
  *    承担（本包 vitest 把 typebox alias 到 mocks/typebox.ts，丢 options）。
  *
- * 旧名残留负锚（U-B1 验收条款③的机器化）：全部声明面源文件的模型可见文案零
+ * 旧名残留负锚（U-B1 验收条款③的机器化）：全部声明侧源文件的模型可见文案零
  * 旧工具名指引（`subagent` / `workflow` backtick 指引、action:"start" 旧调用形态）。
  *
  * 框架：vitest（禁 node:test）。
@@ -95,7 +95,7 @@ function extractDescription(src: string): string {
 const START_DESCRIPTION = extractDescription(START_SECTION);
 
 /** 截取 promptGuidelines 数组文本——防 KNOWN_ARG_KEYS 等注释/代码中的裸词污染断言。
- * 数到数组闭合（跳过字符串字面量内的括号，exec-review F9：'],' 序列静默截断）。 */
+ * 数到数组封口（跳过字符串字面量内的括号，exec-review F9：'],' 序列静默截断）。 */
 function promptGuidelinesText(src: string): string {
   const start = src.indexOf("promptGuidelines: [");
   if (start < 0) return "";
@@ -120,7 +120,7 @@ function promptGuidelinesText(src: string): string {
 
 // ── schema 数据源（原 subagent-schema-collect.test.ts）──
 
-/** 运行时守卫（不用裸类型断言：extensions taste/no-unsafe-cast 规范）。 */
+/** 运行时检查（不用裸类型断言：extensions taste/no-unsafe-cast 规范）。 */
 function isRecord(v: unknown): v is Record<string, unknown> {
   return typeof v === "object" && v !== null;
 }
@@ -139,13 +139,13 @@ function startProperties(): Record<string, unknown> {
 }
 
 // ══════════════════════════════════════════════════════════════
-// 旧名残留负锚（U-B1 验收条款③）：全部声明面源文件零旧工具名指引
+// 旧名残留负锚（U-B1 验收条款③）：全部声明侧源文件零旧工具名指引
 // ══════════════════════════════════════════════════════════════
 
-describe("旧名残留负锚（U-B1）：声明面源文件零旧工具名指引", () => {
+describe("旧名残留负锚（U-B1）：声明侧源文件零旧工具名指引", () => {
   // 负锚形态界定：backtick 精确包裹旧名（`subagent` / `workflow`）= 模型可见的
   // 工具名指引；代码标识符（registerSubagentTool）、两键控集合保留的旧名、历史注释
-  // 不在声明面（验收条款③除外项）。旧调用形态 action:"start" 同属拆分前结构指引。
+  // 不在声明侧（验收条款③除外项）。旧调用形态 action:"start" 同属拆分前结构指引。
   const DECLARATION_SOURCES: Array<[string, string]> = [
     ["subagent-tool.ts", SUBAGENT_TOOL_SRC],
     ["tool-workflow.ts", TOOL_WORKFLOW_SRC],
@@ -208,9 +208,9 @@ describe("旧名残留负锚（U-B1）：声明面源文件零旧工具名指引
  *      落位点，"subagentId":"sa- id 格式锚随之迁移）
  *  B2  manage/message promptGuidelines 使用纪律锚：manage 含 "Never guess" + list 先行
  *      调用形状（subagent_start 侧 A6 的本工具落点）；message 含 session tree 归属
- *      纪律（nested 经其 parent——归属守卫 record-access 直接父校验的模型可见面）
+ *      纪律（nested 经其 parent——归属检查 record-access 直接父校验的模型可见范围）
  *  B3  schema subagentId 说明含打断/复活副作用（"interrupts its in-flight round" /
- *      "starts a new round"）——必填字段说明是模型填参必读面，打断语义不依赖
+ *      "starts a new round"）——必填字段说明是模型填参必读内容，打断语义不依赖
  *      deprecated interrupt 字段（interrupt 只声明 no-op 本身）
  */
 describe("subagent_start description — 锚词保留清单（D2/D3 契约）", () => {
@@ -241,7 +241,7 @@ describe("subagent_start description — 锚词保留清单（D2/D3 契约）", 
     // 拆分后 start 无 action 键：正例与正文中不得复活旧调用结构
     expect(START_DESCRIPTION).not.toContain('"action"');
     expect(START_DESCRIPTION).not.toContain('"startParam"');
-    // agent ref 硬守卫拒绝裸名——示例必须教绝对路径 .md 形态（<available_subagents>
+    // agent ref 硬检查拒绝裸名——示例必须教绝对路径 .md 形态（<available_subagents>
     // 注入的 <location> 形态）。
     expect(START_DESCRIPTION).not.toMatch(/"agent":"(?!\/)[^"]*"/);
     expect(START_DESCRIPTION).toMatch(/"agent":"\/[^"]*\.md"/);
@@ -343,7 +343,7 @@ describe("subagent_manage / subagent_message description — call shapes 与 id 
 
   it("message 打断/复活语义锚（B3）：subagentId 必填字段说明承载副作用，interrupt 只声明 no-op", () => {
     const schemaSrc = readFileSync(join(__dirname, "../subagent-tool-schema.ts"), "utf-8");
-    // 只切 messageParam 块（cancel/close 处有同名 subagentId 声明，不在断言面）
+    // 只切 messageParam 块（cancel/close 处有同名 subagentId 声明，不在断言范围）
     const start = schemaSrc.indexOf("messageParam:");
     const end = schemaSrc.indexOf("forkFromParam:");
     if (start < 0 || end < 0 || end <= start) throw new Error("messageParam block not found");
@@ -367,7 +367,7 @@ describe("subagent_manage / subagent_message description — call shapes 与 id 
 });
 
 // ══════════════════════════════════════════════════════════════
-// subagent start 运行时守卫（原「handler 错误文案 Correct 正例」组）
+// subagent start 运行时检查（原「handler 错误文案 Correct 正例」组）
 // ══════════════════════════════════════════════════════════════
 
 describe("subagent runtime handler — 错误文案含纠正正例", () => {
@@ -378,8 +378,8 @@ describe("subagent runtime handler — 错误文案含纠正正例", () => {
   it("startHandler throw 含 Correct 纠正正例（平铺形态）", () => {
     // [D6②] startHandler 内核（含 Correct 文案）已下沉 core subagent-actions-core，
     // 断言目标跟随文案权威源。锚点用 ./workflows/* 子入口（exports 映射包根真实目录，
-    // 随源码走不依赖 dist 构建——relay-env 锚在 require 条件下落 dist/，CI 不构建
-    // workspace 包时 resolve 直接 MODULE_NOT_FOUND）。
+    // 随源码走不依赖 dist 构建——require 条件下 workspace 包 dist 未构建时
+    // resolve 直接 MODULE_NOT_FOUND）。
     const coreRoot = join(
       dirname(
         createRequire(import.meta.url).resolve("@zhushanwen/subagent-core/workflows/README.md"),
@@ -460,11 +460,11 @@ describe("workflow_run promptGuidelines 契约（U1/TC4 拆分重排）", () => 
     expect(guidelines).toContain("`workflow_run`");
   });
 
-  it("KNOWN_ARG_KEYS 退役守卫（参数知识源 = schema 动态集 argKeysFromMeta，静态枚举不得复活）", () => {
+  it("KNOWN_ARG_KEYS 退役检查（参数知识源 = schema 动态集 argKeysFromMeta，静态枚举不得复活）", () => {
     // 原「runtime handler 错误文案含 Correct 正例 + 平铺检测」grep 条已删：
     // 行为版（Correct 文案 / findFlattenedArgKeys / argKeysFromMeta 真实触发）
     // 在 tool-workflow.test.ts 平铺检测 throw 条与 TC3i 接线条锁定。
-    // 退役负向守卫保留：KNOWN_ARG_KEYS 曾是静态已知键枚举，m6 后数据源为动态
+    // 退役负向检查保留：KNOWN_ARG_KEYS 曾是静态已知键枚举，m6 后数据源为动态
     // argKeysFromMeta（schema 即 SSOT）——静态枚举不得复活。
     expect(TOOL_WORKFLOW_SRC).not.toMatch(/const\s+KNOWN_ARG_KEYS/);
   });
@@ -519,7 +519,7 @@ describe("subagent start schema: collect param retired (批量入口 = subagents
     const manage = schemaData(SubagentManageParams, "SubagentManageParams");
     const message = schemaData(SubagentMessageParams, "SubagentMessageParams");
     expect(Object.keys(start.properties as Record<string, unknown>)).not.toContain("collect");
-    // 数据面全量断言（描述文本里的 collect 措辞随之删除）：三个拆分 schema 序列化后零残留。
+    // 数据全量断言（描述文本里的 collect 措辞随之删除）：三个拆分 schema 序列化后零残留。
     expect(JSON.stringify(start)).not.toContain("collect");
     expect(JSON.stringify(manage)).not.toContain("collect");
     expect(JSON.stringify(message)).not.toContain("collect");

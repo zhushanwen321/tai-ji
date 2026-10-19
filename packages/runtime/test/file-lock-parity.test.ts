@@ -190,10 +190,10 @@ describe('S3 锁互操作集成探针（runtime 自实现 × proper-lockfile@4.1
       const selfReport = parseWorkerReport(selfRes, 'a')
       const plReport = parseWorkerReport(plRes, 'b')
 
-      // ② 并发形态守卫：两 worker 运行区间真实重叠（防探针退化为先后交替执行仍「绿」）
+      // ② 并发形态检查：两 worker 运行区间真实重叠（防探针退化为先后交替执行仍「绿」）
       const overlapMs =
         Math.min(selfReport.endedAtMs, plReport.endedAtMs) - Math.max(selfReport.startedAtMs, plReport.startedAtMs)
-      expect(overlapMs, '两 worker 运行区间重叠毫秒数（并发形态守卫）').toBeGreaterThan(0)
+      expect(overlapMs, '两 worker 运行区间重叠毫秒数（并发形态检查）').toBeGreaterThan(0)
 
       // ③ 最终内容无交错损坏：恰好 200 行、行行成形、每方序号恰为 1..100 顺序完整
       //（并发 RMW 互斥失效 → 后写者覆盖先写者 → 丢行；撕裂写 → 畸形行——双双在此红）

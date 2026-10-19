@@ -107,7 +107,7 @@ describe("registerPlanCommand", () => {
 
   // --- abort subcommand ---
 
-  it("abort（idle 常态格）: warn 纠偏文案 + 幂等退出——不落盘、无快照不动工具集（D-B1-1 单入口守卫极性，原 info no-op 取消）", async () => {
+  it("abort（idle 常态格）: warn 纠偏文案 + 幂等退出——不落盘、无快照不动工具集（D-B1-1 单入口检查极性，原 info no-op 取消）", async () => {
     await handler("abort", ctx);
     expect((ctx as ReturnType<typeof createMocks>["ctx"]).ui.notify).toHaveBeenCalledWith("No active plan mode.", "warning");
     // ④ 快照式幂等（dmg-r1-2）：idle 格从未进入（无快照）→ no-op——不按 exposure
@@ -152,9 +152,9 @@ describe("registerPlanCommand", () => {
 
     await handler("abort", ctx);
 
-    // 挂起 select 被 abort（→ resolve undefined → tool execute 归口分支 → turn 结束 → settled → busy defer 恢复）
+    // 挂起 select 被 abort（→ resolve undefined → tool execute 收尾分支 → turn 结束 → settled → busy defer 恢复）
     expect(pending.controller.signal.aborted).toBe(true);
-    // D-B1-2：入口解散先打 'self' 标（同步先于 abort，等待处归口按来源直传判别）
+    // D-B1-2：入口解散先打 'self' 标（同步先于 abort，等待处收尾按来源直传判别）
     expect(pending.dissolvedBy).toBe("self");
     // 顺序断言：abort 必须先于 reset entry 落盘（反序 = 挂起 select 无人 resolve → session 卡死）
     const resetCallIndex = (pi.appendEntry as ReturnType<typeof vi.fn>).mock.calls.findIndex(

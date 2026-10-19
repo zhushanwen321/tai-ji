@@ -4,7 +4,7 @@
  * 归位动机：SideDrawer / CommandPopover 等组件原本各自 import
  * @/api（extension）/ @/api/events 做会话级订阅。订阅编排（订阅时机、sessionId 切换重订、
  * 卸载退订）是跨组件重复的样板，且按 ADR「api 调用只在 features 层」铁律，@/api/events
- * 不应被组件层直接引用。本 composable 收口订阅生命周期，组件只声明「关心哪些 type + handler」。
+ * 不应被组件层直接引用。本 composable 收尾订阅生命周期，组件只声明「关心哪些 type + handler」。
  *
  * 范式对称 useChat.ensureStreamSubscription（会话级订阅 + 模块 Map 去重）：
  * - 会话级订阅：每个 composable 实例对当前 sessionId 持有一条底层 events.on 订阅，
@@ -61,10 +61,10 @@ interface Registration {
  * ```
  *
  * 生命周期：watch(sessionIdRef, { immediate }) 触发首订 + 重订；onBeforeUnmount 退订。
- * 需在组件 setup 同步调用（内部用 getCurrentInstance 守卫 + 注册 onBeforeUnmount）。
+ * 需在组件 setup 同步调用（内部用 getCurrentInstance 检查 + 注册 onBeforeUnmount）。
  */
 export function useSessionEvents(sessionIdRef: Ref<string | null | undefined>): OnMessage {
-  // 守卫：必须在组件 setup 内调用（onBeforeUnmount / watch 需要 active instance）
+  // 检查：必须在组件 setup 内调用（onBeforeUnmount / watch 需要 active instance）
   if (!getCurrentInstance()) {
     throw new Error('useSessionEvents 必须在组件 setup 同步阶段调用（依赖 onBeforeUnmount）')
   }
@@ -123,7 +123,7 @@ export function useSessionEvents(sessionIdRef: Ref<string | null | undefined>): 
   ): void => {
     const types = new Set(Array.isArray(typeOrTypes) ? typeOrTypes : [typeOrTypes])
     // 类型擦除说明：单 type 的 TypedHandler<T> 接收窄 ServerMessage<T>，但路由表统一存宽 handler。
-    // 运行时分发只喂命中 type 的 msg（types.has(msg.type) 守卫）+ 订阅时 sid，调用方拿到的 msg.type
+    // 运行时分发只喂命中 type 的 msg（types.has(msg.type) 检查）+ 订阅时 sid，调用方拿到的 msg.type
     // 必然 ∈ 白名单，故窄断言安全（与 events.onGlobalType 的 erased 模式同构）。
     registrations.push({ types, handler: handler as (msg: ServerMessage, sid: string) => void })
   }

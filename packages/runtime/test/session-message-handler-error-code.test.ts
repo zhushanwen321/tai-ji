@@ -103,7 +103,7 @@ describe('W1/L4: session.create/fork model 未配置返回 MODEL_NOT_CONFIGURED'
 
 // u-h4/P4-1 回归锁（timeout-audit-hygiene-batch §3.4）：trash 失败时 delete case 不吞错误、
 // 不 reply 成功——错误向上抛给 server.ts handleMessage 外层统一 catch → sendError
-//（e.code ?? 'handler_error'），handler 内不加 try/catch（设计 P4-1 判定：外层收口已存在）。
+//（e.code ?? 'handler_error'），handler 内不加 try/catch（设计 P4-1 判定：外层收尾已存在）。
 describe('u-h4: session.delete trash 失败错误通道', () => {
   it('delete: sessionService.delete throw（移废纸篓失败）→ rethrow 不吞、不 reply session.deleted', async () => {
     const trashError = new Error(
@@ -119,7 +119,7 @@ describe('u-h4: session.delete trash 失败错误通道', () => {
     ).rejects.toThrow('移入废纸篓失败')
     // 关键：失败时绝不 reply session.deleted（否则前端误判删除成功）
     expect(cap.replies).toHaveLength(0)
-    // handler 自身不 sendError——sendError 由 server.ts 外层统一收口负责
+    // handler 自身不 sendError——sendError 由 server.ts 外层统一收尾负责
     expect(cap.errors).toHaveLength(0)
   })
 })

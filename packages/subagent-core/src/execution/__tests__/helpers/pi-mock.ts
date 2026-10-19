@@ -6,7 +6,7 @@
 //
 // 迁移状态（2026-09-17 批量收敛完成）：内联 function 形态 25 个已迁 24；仅
 // registry-reconcile/sweep-binding.test.ts 有意保留内联——其 TestPi 在三键外额外携带
-// sent/appended/emitted 捕获数组（全文件断言消费面），helper 不提供该形态。
+// sent/appended/emitted 捕获数组（全文件断言消费方），helper 不提供该形态。
 // orchestration pump 测试的三键对象字面量形态已同批迁移。
 // **新测试强制走本 helper**，禁止再内联本地 makePi。
 //
@@ -18,7 +18,7 @@ import { vi, type Mock } from "vitest";
 import type { PiLike } from "../../notify/notify-host.ts";
 
 /**
- * makePi 产物的精确 mock 类型（断言面：appendEntry.mock.calls / sendMessage.mock 等）。
+ * makePi 产物的精确 mock 类型（断言范围：appendEntry.mock.calls / sendMessage.mock 等）。
  * 成员签名取自 PiLike 对应方法——Mock<具体签名> 结构上可赋给 PiLike（历史内联版
  * `ReturnType<typeof vi.fn>` 是 Procedure|Constructable 宽联合，才被迫 `as unknown as` 强转）。
  */

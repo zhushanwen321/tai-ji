@@ -43,13 +43,13 @@ const logger = getLogger("subagents");
 // ui-interaction-model 四个 core 件、唯一生产消费方是壳 index.ts——划壳将迫使壳深引
 // core 内部件并分裂 UiRequestHandler 契约；r2 修正原「双消费」措辞），pi SDK 的
 // ExtensionContext 虽仅 type import 也不得留在 core 闭包（D1 判据）——改为 core 自持
-// 的结构化窄面类型：只声明本模块实际消费的字段（mode 分流 + ui 透传方法），ui 方法
+// 的结构化窄接口类型：只声明本模块实际消费的字段（mode 分流 + ui 透传方法），ui 方法
 // 签名按 SDK ExtensionUIContext 真实形状（read from
 // @earendil-works/pi-coding-agent dist/core/extensions/types.d.ts，注释见
 // defaultDialogForward）逐字段同构。宿主壳直传各自 ctx：pi 的 ExtensionContext 结构
 // 兼容本类型（结构化类型系统按字段子集赋值），zsw 壳按同形状实现，core 不感知宿主类型。
 
-/** 宿主 UI 通道方法面（core 消费的最小集）。 */
+/** 宿主 UI 通道方法侧（core 消费的最小集）。 */
 export interface HostUIChannel {
   select(title: string, options: string[], opts?: unknown): Promise<string | undefined>;
   confirm(title: string, message: string, opts?: unknown): Promise<boolean>;
@@ -215,7 +215,7 @@ async function forwardInput(req: UiRequest, ui: HostUIChannel): Promise<UiRespon
 
 async function forwardEditor(req: UiRequest, ui: HostUIChannel): Promise<UiResponse> {
   // SDK editor 必填，但部分 host 运行时未实现——try/catch 降级 cancelled + warn（不卡队列）。
-  // 不用 typeof 守卫：editor 在类型上必填，typeof 检查会被 TS2367 拒（条件永假）。
+  // 不用 typeof 检查：editor 在类型上必填，typeof 检查会被 TS2367 拒（条件永假）。
   try {
     const text = await ui.editor(req.title ?? "", req.prefill);
     return text === undefined ? { cancelled: true } : { value: text };

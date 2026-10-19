@@ -4,7 +4,7 @@
 //
 // 字段形态覆盖矩阵（D3 定稿）：单行 key:value、行内数组、block-scalar、
 // 多行 `- item` 列表、无 frontmatter 宽容降级不抛；另含 legacy fallback
-// （meta=null 单行兜底）与 parseResourceMeta 严格层新字段投影断言
+// （meta=null 单行兜底）与 parseResourceMeta 严格层新字段映射断言
 // （AgentMeta 扩 maxTurns/disallowedTools/skills 的 typecheckMeta 行为）。
 
 import { describe, expect, it } from "vitest";
@@ -103,14 +103,14 @@ body`,
     expect(profile.warnings).toEqual([]);
   });
 
-  it("未闭合 frontmatter：name 经 legacy fallback、全文作 body、warning 可见", () => {
+  it("frontmatter 缺结束标记：name 经 legacy fallback、全文作 body、warning 可见", () => {
     const text = `---\nname: broken\nmodel: x/y`;
     const profile = parseAgentProfile(text, "/x/broken.md");
     expect(profile.name).toBe("broken");
     expect(profile.body).toBe(text);
     expect(profile.meta).toBeNull();
     expect(profile.warnings).toHaveLength(1);
-    expect(profile.warnings[0]).toContain("未闭合");
+    expect(profile.warnings[0]).toContain("缺结束标记");
   });
 
   it("IF1 失败（缺 description）：执行字段经单行 legacy fallback 不丢失 + warning", () => {
@@ -157,8 +157,8 @@ body`,
   });
 });
 
-describe("parseResourceMeta 严格层新字段投影（AgentMeta D3 扩展的 typecheckMeta 行为）", () => {
-  it("数字 maxTurns + 数组 disallowedTools/skills 投影进 AgentMeta", () => {
+describe("parseResourceMeta 严格层新字段映射（AgentMeta D3 扩展的 typecheckMeta 行为）", () => {
+  it("数字 maxTurns + 数组 disallowedTools/skills 映射进 AgentMeta", () => {
     const meta = parseResourceMeta(
       `---
 name: coder

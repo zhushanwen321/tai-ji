@@ -213,7 +213,7 @@ export class PluginRegistry {
    * 直接 `import(pluginPath)`，ESM 禁止目录导入（ERR_UNSUPPORTED_DIR_IMPORT），
    * 存目录会导致所有插件激活必炸（built-in 插件目录曾有此形态事故）。
    *
-   * 入口守卫：main 必须解析到插件目录内（拒绝 ../ 逃逸与绝对路径），
+   * 入口检查：main 必须解析到插件目录内（拒绝 ../ 逃逸与绝对路径），
    * 防止插件声明越权入口 import 插件目录外的任意文件。越权 → warning + null。
    */
   private resolveEntry(

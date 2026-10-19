@@ -4,16 +4,16 @@
 // 同名域测试文件。本文件用例自 subagent-service.test.ts「execute() worktree 路径」
 // 块整块迁入（用例名与断言零改动，纯移动）；壳级生命周期/查询/emit 面用例留在
 // subagent-service.test.ts。同域姊妹文件：conversation-continuation.test.ts（Continuation
-// 协作面）/ chat-engine-routing.test.ts（引擎编排分叉）/ execute-nesting.test.ts /
+// 协作范围）/ chat-engine-routing.test.ts（引擎编排分叉）/ execute-nesting.test.ts /
 // execute-and-await-worktree.test.ts / delivery-methods.test.ts /
 // stream-sink-retirement.test.ts / explicit-agent-ref-guard.test.ts /
-// subagent-service-notify-gate.test.ts / workflow-agent-dispatch.test.ts（派发链 × run 域协作面）。
+// subagent-service-notify-gate.test.ts / workflow-agent-dispatch.test.ts（派发链 × run 域协作范围）。
 //
 // 覆盖（execute 入口 = RunOrchestration.execute，worktree 与 fork 解耦后）：
 //   1. worktree:true + fork:false → 解耦后正常（不抛 requires fork）
 //   2. worktree:true + fork:true  → 创建 worktree 路径（不抛 requires fork）
 //   3. worktree:false + fork:false → 默认路径（不创建 worktree）
-//   4. create-await 竞态守卫：create 的 await 窗口内 dispose 抢先 → cleanup 被调 +
+//   4. create-await 竞态检查：create 的 await 窗口内 dispose 抢先 → cleanup 被调 +
 //      early-failed 返回（不 kickOff）——「赋值 worktreeHandle → 终态检查 → 轮次
 //      kick-off 同一同步段」不变量的回归锚点。
 //
@@ -146,12 +146,12 @@ describe("execute() worktree 路径（worktree 与 fork 解耦）", () => {
   });
 
   // ============================================================
-  // create-await 竞态守卫（Phase 2）：create 的 await 窗口内 dispose/cancel
-  // 可把 record CAS 成 closed——守卫须主动 cleanup + early-failed 返回，不 kickOff。
+  // create-await 竞态检查（Phase 2）：create 的 await 窗口内 dispose/cancel
+  // 可把 record CAS 成 closed——检查须主动 cleanup + early-failed 返回，不 kickOff。
   // 实现约束固化：「赋值 record.worktreeHandle → 终态检查 → 轮次 kick-off」
   // 必须同一同步段（中间禁止 await），本用例即该不变量的回归锚点。
   // ============================================================
-  it("守卫：create await 窗口内 dispose 抢先 → cleanup 被调 + early-failed 返回（不 kickOff）", async () => {
+  it("检查：create await 窗口内 dispose 抢先 → cleanup 被调 + early-failed 返回（不 kickOff）", async () => {
     const service = makeReadyService();
     const wtm = Reflect.get(service, "worktreeManager") as WorktreeManager;
     const handle = Object.freeze({
@@ -176,12 +176,12 @@ describe("execute() worktree 路径（worktree 与 fork 解耦）", () => {
     // 微任务推进：record 已建 + execute 挂在 pending create 上
     await new Promise((r) => { setTimeout(r, 0); });
     // dispose 抢先（无需 record id）：CAS running → closed，此时 worktreeHandle 仍
-    // undefined（dispose 的 fire-and-forget cleanup 跳过）——守卫是唯一的清理点
+    // undefined（dispose 的 fire-and-forget cleanup 跳过）——检查是唯一的清理点
     service.disposeAllRecords("parent-shutdown");
     resolveCreate(handle);
 
     const ret = await execP;
-    // 守卫生效：handle 被主动清理（不等 60s reaper）
+    // 检查生效：handle 被主动清理（不等 60s reaper）
     expect(cleanupSpy).toHaveBeenCalledWith(handle);
     // 返回 early-failed 形态（details.status 已 closed），而非 kickOff 的 running 形态
     expect(ret.mode).toBe("background");

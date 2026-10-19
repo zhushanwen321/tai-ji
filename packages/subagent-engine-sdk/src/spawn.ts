@@ -9,7 +9,7 @@
 //   禁止 'inherit'/fd 形态——否则宿主死后代仍持写端、EOF 永不到达，自灭主判据失效
 //   （R9-4②）。
 //
-// armEngineSelfDestruct 是引擎 CLI 的宿主死亡自灭守卫：主判据 stdio EOF，
+// armEngineSelfDestruct 是引擎 CLI 的宿主死亡自灭检查：主判据 stdio EOF，
 // 辅助判据 in-flight 反向请求计时超时（已 ack 的人机交互 / 两阶段长运行请求除外）。
 
 import { spawn } from "node:child_process";
@@ -49,7 +49,7 @@ export interface SpawnEngineChildOptions {
  */
 export const ENGINE_ABORT_KILL_GRACE_MS = 30_000;
 
-/** 这些键出现即拒绝：spawn 形态是本原语的契约面，不允许调用方绕过硬编码值。 */
+/** 这些键出现即拒绝：spawn 形态是本原语的契约范围，不允许调用方绕过硬编码值。 */
 const FORBIDDEN_OPTION_KEYS = ["detached", "stdio", "stdin", "windowsHide"] as const;
 
 /**
@@ -111,19 +111,19 @@ export const ENGINE_HOST_REQUEST_TIMEOUT_ENV = "TAIJI_ENGINE_HOST_REQUEST_TIMEOU
 /** 计时巡检周期（ms）。仅为辅助判据的采样粒度，不构成行为契约。 */
 const SWEEP_INTERVAL_MS = 1_000;
 
-/** 反向请求计时面操作接口（消费方 = 引擎 CLI 的反向通道分发层）。 */
+/** 反向请求计时侧操作接口（消费方 = 引擎 CLI 的反向通道分发层）。 */
 export interface ReverseRequestClock {
-  /** 反向请求已发出（未 ack）——进入计时面。 */
+  /** 反向请求已发出（未 ack）——进入计时侧。 */
   started(id: string): void;
   /**
    * 收到 ack（两阶段第一阶段：已 ack 的 host/askUser、HostBridge.executeAndAwait
-   * 的 ack）——移出计时面但不终结（R9-2：已 ack 的等待不计入 in-flight 超时，
+   * 的 ack）——移出计时侧但不终结（R9-2：已 ack 的等待不计入 in-flight 超时，
    * ADR-0047 静默 ≠ 卡死）。
    */
   acked(id: string): void;
   /** 请求终结（应答完成/失败/取消）——彻底移出。 */
   settled(id: string): void;
-  /** 卸载守卫（引擎正常 shutdown 路径；自灭后幂等）。 */
+  /** 卸载检查（引擎正常 shutdown 路径；自灭后幂等）。 */
   dispose(): void;
 }
 
@@ -154,27 +154,83 @@ function resolveHostRequestTimeoutMs(opts: EngineSelfDestructOptions): number {
   return parsed;
 }
 
-/** 缺省自灭：先杀自己进程组（-pid，收割引擎 spawn 的任务子进程），失败回落杀自己。 */
-function killOwnProcessGroup(): void {
+/** taskkill 子进程的最小面（self-destruct 是 fire-and-forget：只挂 error + unref）。 */
+export type KillOwnProcessGroupSpawnResult = {
+  on(event: "error", listener: (err: Error) => void): unknown;
+  unref?: () => void;
+};
+
+/** 自灭杀链依赖（缺省 = 真实 platform / spawn / process.kill；测试注入分支用）。 */
+export type KillOwnProcessGroupDeps = {
+  readonly platform?: NodeJS.Platform;
+  readonly spawnFn?: (
+    command: string,
+    args: readonly string[],
+    options: { readonly stdio: "ignore"; readonly windowsHide: boolean },
+  ) => KillOwnProcessGroupSpawnResult;
+  readonly killFn?: (pid: number, signal: NodeJS.Signals) => unknown;
+};
+
+/**
+ * 缺省自灭：先杀自己进程组（收割引擎 spawn 的任务子进程），失败回落杀自己。
+ *
+ * 平台矩阵（设计 D7）：POSIX = 负 pid 组杀；Windows 无进程组信号语义，用
+ * `taskkill /PID <self> /T /F` 树杀（stdio ignore + fire-and-forget，不阻塞自灭链）。
+ * Windows 分支在 taskkill 根本起不来（spawn 同步抛错，或 child 'error'：PATH 缺
+ * System32 / EMFILE 等）时回落 `SIGKILL` 杀自己（R2A-N4）：只杀自己是「可接受
+ * 降级」（后代 pi 交给 runtime sweep / 组登记），但引擎自身必须停住——否则引擎事件
+ * 循环仍有活句柄时宿主死后引擎与 pi 都不死，比原行为更差。两条失败路径都 warn 留痕。
+ * 依赖可注入 = 平台分支单测 seam（不实跑 Windows）。
+ */
+export function killOwnProcessGroup(deps: KillOwnProcessGroupDeps = {}): void {
   const pid = process.pid;
+  const kill = deps.killFn ?? ((targetPid: number, signal: NodeJS.Signals) => process.kill(targetPid, signal));
+  if ((deps.platform ?? process.platform) === "win32") {
+    // [R2A-N4] taskkill 不可用时的自灭兜底（至少停引擎）：后代由 runtime sweep 收尾。
+    const fallbackSelfKill = (reason: string): void => {
+      logger.warn(`taskkill self-tree failed (${reason}); falling back to self SIGKILL`);
+      try {
+        kill(pid, "SIGKILL");
+      } catch (err) {
+        logger.warn(
+          `self SIGKILL fallback failed (${String(err)}); descendant pi may linger until runtime sweep`,
+        );
+      }
+    };
+    const spawnFn = deps.spawnFn
+      ?? ((command, args, options) => spawn(command, [...args], options));
+    try {
+      const child = spawnFn("taskkill", ["/PID", String(pid), "/T", "/F"], {
+        stdio: "ignore",
+        windowsHide: true,
+      });
+      child.on("error", (err) => {
+        fallbackSelfKill(String(err));
+      });
+      child.unref?.();
+    } catch (err) {
+      fallbackSelfKill(`spawn threw: ${String(err)}`);
+    }
+    return;
+  }
   try {
-    process.kill(-pid, "SIGKILL");
+    kill(-pid, "SIGKILL");
   } catch (err) {
-    // 进程组杀失败（非组长 / Windows 形态差异）——回落单进程杀，任务子进程由
+    // 按进程组终止失败（非组长 / Windows 形态差异）——回落单进程杀，任务子进程由
     // 各自的 stdio EOF / 宿主回收层兜底。
     logger.warn(`process-group kill failed (${String(err)}), falling back to self kill`);
-    process.kill(pid, "SIGKILL");
+    kill(pid, "SIGKILL");
   }
 }
 
 /**
- * 武装引擎侧自灭守卫。返回 ReverseRequestClock 给反向通道分发层登记请求生命周期。
+ * 武装引擎侧自灭检查。返回 ReverseRequestClock 给反向通道分发层登记请求生命周期。
  *
  * 判据：
- * - 主判据 stdio EOF：stdin 'end'（数据面读尽）或 'close'（fd 关闭）→ 立即自灭
+ * - 主判据 stdio EOF：stdin 'end'（数据范围读尽）或 'close'（fd 关闭）→ 立即自灭
  *   （宿主死后无人再写协议帧，引擎继续跑只烧 token）；
  * - 辅助判据 in-flight 反向请求计时：未 ack 的反向请求超过 hostRequestTimeoutMs
- *   仍无 ack → 宿主大概率已死（EOF 未达或正在关闭）→ 自灭。**排除面**：已 ack 的
+ *   仍无 ack → 宿主大概率已死（EOF 未达或正在关闭）→ 自灭。**排除情形**：已 ack 的
  *   host/askUser 与两阶段 ack 的长运行 HostBridge.executeAndAwait（ack 后等待任意
  *   时长合法，漏此项即「>30s pi 任务被自灭」turnTimeoutMs 同型事故）。
  *
@@ -185,7 +241,7 @@ export function armEngineSelfDestruct(opts: EngineSelfDestructOptions): ReverseR
   const timeoutMs = resolveHostRequestTimeoutMs(opts);
   const killSelf = opts.killSelf ?? killOwnProcessGroup;
 
-  // pending = 已发出未 ack（计时面）；settled/acked 请求不在面内。
+  // pending = 已发出未 ack（计时侧）；settled/acked 请求不计入计时侧。
   const pending = new Map<string, number>();
   let disposed = false;
 

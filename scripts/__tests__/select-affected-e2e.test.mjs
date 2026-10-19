@@ -7,7 +7,7 @@
  *   - 删除形态的路径串（纯函数健壮性：selectRules 对输入无存在性要求；生产管线
  *     changedFiles 已 --diff-filter=d 剔除删除文件——删除不产生登记义务，
  *     validate-e2e-map 的 existsSync 强校验拒绝死资产条目，该输入生产不可达）
- *   - always rule 恒入选、--layer 过滤、--release 触发面选择
+ *   - always rule 恒入选、--layer 过滤、--release 触发范围选择
  *   - --check 防漏登记：watched root 下未覆盖文件 / 已覆盖文件 / 看护域外文件
  * 末组烟测加载真实 docs/testing/e2e-map.json，防 map 与脚本结构漂移无信号。
  */

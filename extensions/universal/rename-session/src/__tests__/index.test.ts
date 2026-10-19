@@ -50,9 +50,9 @@ interface MockSetup {
 	setSessionNameMock: ReturnType<typeof vi.fn>;
 	/** 防覆盖检查读 pi.getSessionName()，非 ctx——默认未命名（undefined）。 */
 	getSessionNameMock: ReturnType<typeof vi.fn>;
-	/** usage 落账入口：landing.ts 注入回调体内调 pi.appendEntry，接线断言用（时点与 catch 归属契约见 llm.ts）。 */
+	/** usage 记录入口：landing.ts 注入回调体内调 pi.appendEntry，接线断言用（时点与 catch 归属契约见 llm.ts）。 */
 	appendEntryMock: ReturnType<typeof vi.fn>;
-	/** registerTool mock（agent-tool 注册面接线断言用）。 */
+	/** registerTool mock（agent-tool 注册点接线断言用）。 */
 	registerToolMock: ReturnType<typeof vi.fn>;
 	turnEndHandler: (event: unknown, ctx: ExtensionContext) => void | Promise<void>;
 	/** message_end handler（first-prompt 入口）。 */
@@ -218,7 +218,7 @@ describe("renameSessionExtension", () => {
 		vi.mocked(loadRenameConfig).mockReset();
 		vi.mocked(resolveModel).mockReset();
 		vi.mocked(callLLM).mockReset();
-		// 工厂注册面在 load 时读一次 config（工具注册判定）——工厂调用前必须有可用返回值
+		// 工厂注册点在 load 时读一次 config（工具注册判定）——工厂调用前必须有可用返回值
 		vi.mocked(loadRenameConfig).mockReturnValue(ENABLED_CONFIG);
 		setup = createMockPi();
 		renameSessionExtension(setup.pi);
@@ -230,7 +230,7 @@ describe("renameSessionExtension", () => {
 		expect(setup.pi.on).toHaveBeenCalledWith("message_end", expect.any(Function));
 		expect(setup.turnEndHandler).toBeTypeOf("function");
 		expect(setup.messageEndHandler).toBeTypeOf("function");
-		// first-stop（ENABLED_CONFIG）非 agent-tool → 工具不注册（注册面 load 求值时点）
+		// first-stop（ENABLED_CONFIG）非 agent-tool → 工具不注册（注册点 load 求值时点）
 		expect(setup.registerToolMock).not.toHaveBeenCalled();
 	});
 
@@ -265,7 +265,7 @@ describe("renameSessionExtension", () => {
 	});
 
 	// ────────────────────────────────────────────────────
-	// message_end 入口三模式分派（live 读 mode / first-prompt 守卫链）
+	// message_end 入口三模式分派（live 读 mode / first-prompt 检查链）
 	// ────────────────────────────────────────────────────
 
 	it("TC-M1: first-prompt 模式首条 user message_end → callLLM 发起，prompt 从 event 载荷取（entries 空，finalText 空走两条降级）", async () => {
@@ -283,7 +283,7 @@ describe("renameSessionExtension", () => {
 		// 不等回复：finalText 空 → 两条 [user(promptText), user(instruction)]，无 assistant 条目
 		expect(opts.messages.map((m) => m.role)).toEqual(["user", "user"]);
 		expect(opts.messages[0].content[0].text).toBe("帮我修复登录超时，并补上单测");
-		// 落库走同一管道（防覆盖重查 → setSessionName → renamed to）
+		// 写入走同一管道（防覆盖重查 → setSessionName → renamed to）
 		await vi.waitFor(() => expect(setup.setSessionNameMock).toHaveBeenCalledWith("修复登录超时"));
 	});
 
@@ -337,7 +337,7 @@ describe("renameSessionExtension", () => {
 		expect(warnText(warnSpy)).toContain("firstPrompt skip: mode=first-stop");
 	});
 
-	it("TC-M6: agent-tool 模式 message_end(user) 与 turn_end 均不触发自动命名（事件面 live 分派，V10 A 段「切走即停」）", async () => {
+	it("TC-M6: agent-tool 模式 message_end(user) 与 turn_end 均不触发自动命名（事件路径 live 分派，V10 A 段「切走即停」）", async () => {
 		const warnSpy = debugWarnSpy();
 		vi.mocked(loadRenameConfig).mockReturnValue(AGENT_TOOL_CONFIG);
 		vi.mocked(resolveModel).mockReturnValue(STUB_MODEL);
@@ -351,7 +351,7 @@ describe("renameSessionExtension", () => {
 		expect(log).toContain(`turnIndex=${FIRE_TURN_INDEX} skip: mode=agent-tool`);
 	});
 
-	it("TC-M7: first-prompt 模式 subagents 路径 → isSubagentSession 早退（守卫链复用，C-ext-21 覆盖新入口）", async () => {
+	it("TC-M7: first-prompt 模式 subagents 路径 → isSubagentSession 早退（检查链复用，C-ext-21 覆盖新入口）", async () => {
 		vi.mocked(loadRenameConfig).mockReturnValue(FIRST_PROMPT_CONFIG);
 		vi.mocked(resolveModel).mockReturnValue(STUB_MODEL);
 
@@ -364,7 +364,7 @@ describe("renameSessionExtension", () => {
 		expect(setup.setSessionNameMock).not.toHaveBeenCalled();
 	});
 
-	it("TC-M8: first-prompt 模式 enabled=false → 不触发（开关守卫优先于 mode）", async () => {
+	it("TC-M8: first-prompt 模式 enabled=false → 不触发（开关检查优先于 mode）", async () => {
 		vi.mocked(loadRenameConfig).mockReturnValue({ ...FIRST_PROMPT_CONFIG, enabled: false });
 		vi.mocked(resolveModel).mockReturnValue(STUB_MODEL);
 
@@ -374,7 +374,7 @@ describe("renameSessionExtension", () => {
 		expect(setup.setSessionNameMock).not.toHaveBeenCalled();
 	});
 
-	it("TC-M9: first-prompt 落库前防覆盖重查——LLM 窗口内已有名 → skip: name exists，不落库", async () => {
+	it("TC-M9: first-prompt 写入前防覆盖重查——LLM 窗口内已有名 → skip: name exists，不写入", async () => {
 		const warnSpy = debugWarnSpy();
 		vi.mocked(loadRenameConfig).mockReturnValue(FIRST_PROMPT_CONFIG);
 		vi.mocked(resolveModel).mockReturnValue(STUB_MODEL);
@@ -444,7 +444,7 @@ describe("renameSessionExtension", () => {
 		const warnSpy = debugWarnSpy();
 		vi.mocked(loadRenameConfig).mockReturnValue(ENABLED_CONFIG);
 		vi.mocked(resolveModel).mockReturnValue(STUB_MODEL);
-		// ok:false 即可满足断言需要（callLLM 被调 + 不落库），聚焦触发判定本身
+		// ok:false 即可满足断言需要（callLLM 被调 + 不写入），聚焦触发判定本身
 		vi.mocked(callLLM).mockResolvedValue({ ok: false, error: "by-design" });
 
 		const FINAL_TEXT = "最终回复：已修复登录超时";
@@ -476,7 +476,7 @@ describe("renameSessionExtension", () => {
 		await fire(setup, createMockCtx({ entries: afterErrorRound }), stopMessage);
 		await vi.waitFor(() => expect(callLLM).toHaveBeenCalledTimes(2));
 
-		// 组3：纯 error 轮（stop entry 未落库的异常防御——真实时序 stop turn_end 时 count>=1 恒成立）
+		// 组3：纯 error 轮（stop entry 未写入的异常防御——真实时序 stop turn_end 时 count>=1 恒成立）
 		// → 不触发 + skip: count=0
 		const errorOnly = [
 			{ type: "message", message: { role: "user", content: "继续修复" } },
@@ -540,14 +540,14 @@ describe("renameSessionExtension", () => {
 		expect(setup.setSessionNameMock).not.toHaveBeenCalled();
 	});
 
-	it("LTC10: callLLM 返回 {ok:true,content} → cleanTitle 后 setSessionName 落库", async () => {
+	it("LTC10: callLLM 返回 {ok:true,content} → cleanTitle 后 setSessionName 写入", async () => {
 		vi.mocked(loadRenameConfig).mockReturnValue(ENABLED_CONFIG);
 		vi.mocked(resolveModel).mockReturnValue(STUB_MODEL);
 		vi.mocked(callLLM).mockResolvedValue({ ok: true, content: "  修复登录bug  " });
 
 		await fire(setup, createMockCtx());
 		// handler 内 callRenameLLM 是 detached promise（fire-and-forget），fire 立即 resolve；
-		// 需等 detached promise settle 后再断言落库结果。
+		// 需等 detached promise settle 后再断言写入结果。
 		await vi.waitFor(() => expect(setup.setSessionNameMock).toHaveBeenCalledWith("修复登录bug"));
 
 		expect(callLLM).toHaveBeenCalledTimes(1);
@@ -585,10 +585,10 @@ describe("renameSessionExtension", () => {
 	});
 
 	// ────────────────────────────────────────────────────
-	// TC3 防覆盖：落库前重查（含 LLM 调用窗口竞态）
+	// TC3 防覆盖：写入前重查（含 LLM 调用窗口竞态）
 	// ────────────────────────────────────────────────────
 
-	it("TC3: LLM 调用窗口内手动命名 → 落库前重查命中，不调 setSessionName（skip: name exists）", async () => {
+	it("TC3: LLM 调用窗口内手动命名 → 写入前重查命中，不调 setSessionName（skip: name exists）", async () => {
 		const warnSpy = debugWarnSpy();
 		vi.mocked(loadRenameConfig).mockReturnValue(ENABLED_CONFIG);
 		vi.mocked(resolveModel).mockReturnValue(STUB_MODEL);
@@ -604,18 +604,18 @@ describe("renameSessionExtension", () => {
 		await fire(setup, createMockCtx());
 		await vi.waitFor(() => expect(callLLM).toHaveBeenCalledTimes(1));
 
-		// 竞态窗口内：用户手动 /name 命名（落库前重查必须看到它）
+		// 竞态窗口内：用户手动 /name 命名（写入前重查必须看到它）
 		setup.getSessionNameMock.mockReturnValue("我的手动名字");
 
 		resolveLLM({ ok: true, content: "自动生成的标题" });
 		await vi.waitFor(() => expect(warnText(warnSpy)).toContain("skip: name exists"));
 
 		expect(setup.setSessionNameMock).not.toHaveBeenCalled();
-		// 移位契约：renamed to 在 setSessionName 之后才打——竞态命中（未落库）时该日志不出现
+		// 移位契约：renamed to 在 setSessionName 之后才打——竞态命中（未写入）时该日志不出现
 		expect(warnText(warnSpy)).not.toContain("renamed to");
 	});
 
-	it("TC3 对照组: getSessionName 始终 undefined → 正常落库 + renamed to 日志（setSessionName 之后、handler 侧带 turnIndex）", async () => {
+	it("TC3 对照组: getSessionName 始终 undefined → 正常写入 + renamed to 日志（setSessionName 之后、handler 侧带 turnIndex）", async () => {
 		const warnSpy = debugWarnSpy();
 		vi.mocked(loadRenameConfig).mockReturnValue(ENABLED_CONFIG);
 		vi.mocked(resolveModel).mockReturnValue(STUB_MODEL);
@@ -630,7 +630,7 @@ describe("renameSessionExtension", () => {
 		expect(String(warnSpy.mock.calls[renamedIdx][0])).toMatch(
 			new RegExp(`^t=\\d{4}-\\d{2}-\\d{2}T.* turnIndex=${FIRE_TURN_INDEX} renamed to "自动生成的标题"$`),
 		);
-		// 移位契约（时序）：日志调用序晚于 setSessionName——先落库后报捷
+		// 移位契约（时序）：日志调用序晚于 setSessionName——先写入后报捷
 		expect(warnSpy.mock.invocationCallOrder[renamedIdx]).toBeGreaterThan(
 			setup.setSessionNameMock.mock.invocationCallOrder[0],
 		);
@@ -648,12 +648,12 @@ describe("renameSessionExtension", () => {
 		vi.mocked(loadRenameConfig).mockReturnValue(ENABLED_CONFIG);
 		vi.mocked(resolveModel).mockReturnValue(STUB_MODEL);
 
-		// 组1：有内容 → 全流程落库
+		// 组1：有内容 → 全流程写入
 		vi.mocked(callLLM).mockResolvedValueOnce({ ok: true, content: "标题一" });
 		await fire(setup, createMockCtx());
 		await vi.waitFor(() => expect(setup.setSessionNameMock).toHaveBeenCalledWith("标题一"));
 
-		// 组2：空内容 → cleanTitle 空 → 返回 null 不落库
+		// 组2：空内容 → cleanTitle 空 → 返回 null 不写入
 		vi.mocked(callLLM).mockResolvedValueOnce({ ok: true, content: "   " });
 		await fire(setup, createMockCtx());
 		await vi.waitFor(() => expect(callLLM).toHaveBeenCalledTimes(2));
@@ -690,7 +690,7 @@ describe("renameSessionExtension", () => {
 });
 
 // ────────────────────────────────────────────────────
-// usage 落账接线（appendUsageEntry 回调注入；时点与 catch 归属契约见 llm.ts）
+// usage 记录接线（appendUsageEntry 回调注入；时点与 catch 归属契约见 llm.ts）
 // ────────────────────────────────────────────────────
 
 /** 合法 Usage 夹具（pi-ai Usage 全必填字段，消除 unsafe-cast 强断言）。 */
@@ -703,7 +703,7 @@ const STUB_USAGE: Usage = {
 	cost: { input: 0.01, output: 0.02, cacheRead: 0, cacheWrite: 0, total: 0.03 },
 };
 
-describe("usage 落账接线（appendUsageEntry 回调注入）", () => {
+describe("usage 记录接线（appendUsageEntry 回调注入）", () => {
 	let setup: MockSetup;
 
 	beforeEach(() => {
@@ -717,7 +717,7 @@ describe("usage 落账接线（appendUsageEntry 回调注入）", () => {
 		renameSessionExtension(setup.pi);
 	});
 
-	it("接线：callLLM ok:true + usage → pi.appendEntry 恰被调一次 ('rename-session', {model, usage})，且先于 setSessionName（标题照常落库）", async () => {
+	it("接线：callLLM ok:true + usage → pi.appendEntry 恰被调一次 ('rename-session', {model, usage})，且先于 setSessionName（标题照常写入）", async () => {
 		vi.mocked(callLLM).mockResolvedValue({
 			ok: true,
 			content: "自动生成的标题",
@@ -732,13 +732,13 @@ describe("usage 落账接线（appendUsageEntry 回调注入）", () => {
 			model: "stub/stub-model",
 			usage: STUB_USAGE,
 		});
-		// 时序：appendEntry 在 callRenameLLM 内（cleanTitle 前）触发，setSessionName 在其后 .then——落账先于落库
+		// 时序：appendEntry 在 callRenameLLM 内（cleanTitle 前）触发，setSessionName 在其后 .then——记录先于写入
 		expect(setup.appendEntryMock.mock.invocationCallOrder[0]).toBeLessThan(
 			setup.setSessionNameMock.mock.invocationCallOrder[0],
 		);
 	});
 
-	it("catch 在回调体内：pi.appendEntry 抛错（session 已切换等）→ logger.error 且后续流程照常（标题照常落库）", async () => {
+	it("catch 在回调体内：pi.appendEntry 抛错（session 已切换等）→ logger.error 且后续流程照常（标题照常写入）", async () => {
 		vi.mocked(callLLM).mockResolvedValue({
 			ok: true,
 			content: "自动生成的标题",
@@ -749,7 +749,7 @@ describe("usage 落账接线（appendUsageEntry 回调注入）", () => {
 		});
 
 		await fire(setup, createMockCtx());
-		// 「标题照常落库」：appendEntry 抛错被回调体内 catch，detached 链继续走 cleanTitle → setSessionName
+		// 「标题照常写入」：appendEntry 抛错被回调体内 catch，detached 链继续走 cleanTitle → setSessionName
 		await vi.waitFor(() => expect(setup.setSessionNameMock).toHaveBeenCalledWith("自动生成的标题"));
 
 		expect(loggerMock.error).toHaveBeenCalledWith("failed to append usage entry", {
@@ -762,7 +762,7 @@ describe("usage 落账接线（appendUsageEntry 回调注入）", () => {
 		expect(outerCatchCalls).toHaveLength(0);
 	});
 
-	it("usage 缺失 → appendEntry 不被调（存在性守卫），标题照常落库", async () => {
+	it("usage 缺失 → appendEntry 不被调（存在性检查），标题照常写入", async () => {
 		vi.mocked(callLLM).mockResolvedValue({ ok: true, content: "自动生成的标题" });
 
 		await fire(setup, createMockCtx());
@@ -773,7 +773,7 @@ describe("usage 落账接线（appendUsageEntry 回调注入）", () => {
 });
 
 // ────────────────────────────────────────────────────
-// rename_session 工具注册与 execute 守卫（load 求值时点 / agent-tool 模式）
+// rename_session 工具注册与 execute 检查（load 求值时点 / agent-tool 模式）
 // ────────────────────────────────────────────────────
 
 /** 注册到的工具定义形态（registerTool 捕获后测试侧调用 execute 用）。 */
@@ -792,10 +792,10 @@ interface RegisteredRenameTool {
 	}>;
 }
 
-describe("rename_session 工具注册与 execute 守卫（D3）", () => {
+describe("rename_session 工具注册与 execute 检查（D3）", () => {
 	let setup: MockSetup;
 
-	/** 显式设置 load 时 mode 后重建工厂（注册面只在 load 求值一次）。 */
+	/** 显式设置 load 时 mode 后重建工厂（注册点只在 load 求值一次）。 */
 	function setupWithMode(config: RenameSessionConfig): void {
 		vi.mocked(loadRenameConfig).mockReset();
 		vi.mocked(loadRenameConfig).mockReturnValue(config);
@@ -819,7 +819,7 @@ describe("rename_session 工具注册与 execute 守卫（D3）", () => {
 		expect(tool.parameters).toHaveProperty("properties.title");
 	});
 
-	it("TC-T2: load 时 mode=first-prompt → 工具不注册（三值互斥，工具面 load 求值）", () => {
+	it("TC-T2: load 时 mode=first-prompt → 工具不注册（三值互斥，工具范围 load 求值）", () => {
 		setupWithMode(FIRST_PROMPT_CONFIG);
 		expect(setup.registerToolMock).not.toHaveBeenCalled();
 	});
@@ -833,7 +833,7 @@ describe("rename_session 工具注册与 execute 守卫（D3）", () => {
 		setupWithMode(AGENT_TOOL_CONFIG); // load 时注册
 		const tool = setup.registeredTool as RegisteredRenameTool;
 
-		// 运行中 GUI 切到 first-stop（live 读 config，残留工具被守卫兜底——V10 B 段）
+		// 运行中 GUI 切到 first-stop（live 读 config，残留工具被检查兜底——V10 B 段）
 		vi.mocked(loadRenameConfig).mockReturnValue(FIRST_PROMPT_CONFIG);
 
 		await expect(
@@ -864,7 +864,7 @@ describe("rename_session 工具注册与 execute 守卫（D3）", () => {
 		expect(result.content[0].text).toBe("已命名：重构配置加载");
 	});
 
-	it("TC-T6: execute 时 title 清洗后为空（纯标点）→ isError（throw），不落库", async () => {
+	it("TC-T6: execute 时 title 清洗后为空（纯标点）→ isError（throw），不写入", async () => {
 		setupWithMode(AGENT_TOOL_CONFIG);
 		const tool = setup.registeredTool as RegisteredRenameTool;
 
@@ -874,7 +874,7 @@ describe("rename_session 工具注册与 execute 守卫（D3）", () => {
 		expect(setup.setSessionNameMock).not.toHaveBeenCalled();
 	});
 
-	it("TC-T7: agent 显式改名允许覆盖既有名（不走 getSessionName 防覆盖守卫——语义等同 GUI 手动 rename，D3）", async () => {
+	it("TC-T7: agent 显式改名允许覆盖既有名（不走 getSessionName 防覆盖检查——语义等同 GUI 手动 rename，D3）", async () => {
 		setupWithMode(AGENT_TOOL_CONFIG);
 		const tool = setup.registeredTool as RegisteredRenameTool;
 		// 既有自动名/语义名
@@ -885,11 +885,11 @@ describe("rename_session 工具注册与 execute 守卫（D3）", () => {
 		expect(setup.setSessionNameMock).toHaveBeenCalledWith("agent 的新名字");
 	});
 
-	it("TC-T8: execute 时 subagent session 路径 → isError（throw 守卫，D7 三入口闭环 / C-ext-21）且不调 setSessionName；正常 session 路径不受影响", async () => {
+	it("TC-T8: execute 时 subagent session 路径 → isError（throw 检查，D7 三入口闭环 / C-ext-21）且不调 setSessionName；正常 session 路径不受影响", async () => {
 		setupWithMode(AGENT_TOOL_CONFIG);
 		const tool = setup.registeredTool as RegisteredRenameTool;
 
-		// subagent 路径：throw 且不落库（文案只说结论与指引，不暴露 subagents 目录路径细节）
+		// subagent 路径：throw 且不写入（文案只说结论与指引，不暴露 subagents 目录路径细节）
 		await expect(
 			tool.execute(
 				"call-1",
@@ -901,7 +901,7 @@ describe("rename_session 工具注册与 execute 守卫（D3）", () => {
 		).rejects.toThrow(/subagent.*不支持重命名/);
 		expect(setup.setSessionNameMock).not.toHaveBeenCalled();
 
-		// 对照：正常 session 路径（默认 sessionDir 不含 subagents 段）同一工具照常落库
+		// 对照：正常 session 路径（默认 sessionDir 不含 subagents 段）同一工具照常写入
 		await tool.execute("call-2", { title: "正常标题" }, undefined, undefined, createMockCtx());
 		expect(setup.setSessionNameMock).toHaveBeenCalledWith("正常标题");
 	});

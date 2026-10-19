@@ -2,7 +2,7 @@
 //
 // 原 core 版测的是 registerZcodeEngine → core registry 接线；引擎包无 core
 // registry（发现/装载走 manifest + 宿主发现器，见 registration.ts 文件头），本文件
-// 改测包内构造面：DI 工厂、engineDataDir 的 SDK env 解析通道、TAIJI_ZCODE_CLI 覆盖。
+// 改测包内构造侧：DI 工厂、engineDataDir 的 SDK env 解析通道、TAIJI_ZCODE_CLI 覆盖。
 // （deviation 登记：core 版注册表断言留在 core 侧原文件——过渡期双轨。）
 
 import { afterEach, describe, expect, it, vi } from "vitest";

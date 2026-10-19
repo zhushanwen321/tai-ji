@@ -136,7 +136,7 @@ export class GitHeadWatcher {
     }
   }
 
-  // ── 测试观测面（@internal，不进生产逻辑）────────────────────────────
+  // ── 测试观测范围（@internal，不进生产逻辑）────────────────────────────
 
   /** @internal 测试观测：真实 fs.watch 事件已入 debounce 批次、尚未放行。 */
   hasPendingGitEventsForTests(): boolean {

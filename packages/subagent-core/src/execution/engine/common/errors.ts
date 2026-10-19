@@ -60,7 +60,7 @@ export class EngineError extends Error {
     this.recovery = recovery;
   }
 
-  /** 结构化投影（code/message 与 GUI 警告条共用形态）。 */
+  /** 结构化派生视图（code/message 与 GUI 警告条共用形态）。 */
   toStructured(): { code: EngineErrorCode; message: string; recovery: string } {
     return { code: this.code, message: this.message, recovery: this.recovery };
   }
@@ -132,7 +132,7 @@ function truncate(text: string, max: number): string {
  * prepare 期报——禁止 spawn 后撞 E2BIG 才失败（§3.3.3 第 10 行）。
  *
  * [现状] 唯一历史生产消费方 persona-router（argv 预算断言）已删除；本工厂与错误码
- * 枚举、DEFAULT_RECOVERY_HINTS 模板一并保留（错误码全集 = 协议/文档面契约，
+ * 枚举、DEFAULT_RECOVERY_HINTS 模板一并保留（错误码全集 = 协议/文档侧契约，
  * Record 全集覆盖由编译强制），当前仅 errors.test.ts 消费，无生产调用方。
  */
 export function promptTooLargeError(actualBytes: number, limitBytes: number): EngineError {
@@ -172,5 +172,5 @@ export function engineRunFailedDetail(reason: string, exitCode: number | null, s
 }
 
 // schema_emulation_failed 的终报文案（schemaEmulationFailedDetail）已随 schema-emulation
-// 死镜像收口删除：活体单源 SDK error-codes.ts（emulated 引擎的宿主编排层经 SDK 消费），
+// 死镜像收尾删除：活体单源 SDK error-codes.ts（emulated 引擎的宿主编排层经 SDK 消费），
 // core 侧此前仅剩自身测试引用（test-only）。

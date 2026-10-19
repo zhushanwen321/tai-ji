@@ -1,7 +1,7 @@
 // watch-orchestration.test.ts — notify-once U4 extension 编排单测（mock select 响应）。
 // 覆盖：send/create arm（register 三键 + 开表不传 timeout + willNotify 透传）/
 // reason 类别分支 / deathSeq·settleSeq 分组去重（两层攒批模型）/ 两例外（cancelled·orphaned
-// 静默 + 死亡新闻槽）/ record 幂等键与 deliveryCustomType / session_compact 接线。
+// 静默 + 死亡新闻槽）/ port.deliver 幂等键与通道（外部通道逐条）。
 //
 // watch select 全部走 deferred：开表时挂起，用例按调用序精确控制应答时机与内容
 // （覆盖「晚 respond」「W1 悬置 W2 应答」等时序形态）。
@@ -12,6 +12,7 @@ import { afterEach, beforeEach, describe, expect, it, vi, type Mock } from "vite
 import { SESSION_MANAGER_MARKER } from "@zhushanwen/extension-protocol";
 // logger mock helper 必须先于 extension-harness（其 import 链触发被 mock 模块加载）
 import { createLoggerModuleMock, getLoggerMock } from "./helpers/logger-mock.ts";
+import { DELIVERY_PORT_SLOT_KEY } from "@zhushanwen/pi-delivery-port";
 import {
 	flushMicrotasks,
 	makeRespondWatch,
@@ -26,7 +27,9 @@ vi.mock("@zhushanwen/pi-extension-logger", () => createLoggerModuleMock());
 
 const loggerMock = getLoggerMock();
 
-const LEDGER_SLOT_KEY = Symbol.for("@zhushanwen/subagent-core.notifyLedger");
+// pi-delivery-port 进程级槽（C-ext-06；recordManagedNotify 的消费入口——unified-
+// delivery 波 2 切换后 watch 应答的投递观测点 = port.deliver）。
+const PORT_SLOT_KEY = DELIVERY_PORT_SLOT_KEY;
 
 /** watch 开表调用（deferred）——opts 为开表时传入的 select 第三参原样值 */
 interface DeferredWatch extends WatchInvocation {
@@ -79,35 +82,62 @@ function emittedIds(h: Harness, event: string): string[] {
 	return h.emitted.filter((e) => e.event === event).map((e) => e.data.id as string);
 }
 
-function registersOf(h: Harness): Array<{ id: string; type: unknown; name: unknown }> {
+function registersOf(h: Harness): Array<{ id: string; type: unknown; name: unknown; kind: unknown }> {
 	return h.emitted
 		.filter((e) => e.event === "pending:register")
-		.map((e) => ({ id: String(e.data.id), type: e.data.type, name: e.data.name }));
+		.map((e) => ({ id: String(e.data.id), type: e.data.type, name: e.data.name, kind: e.data.kind }));
 }
 
 const SEND_OK = '{"queued":true,"willNotify":true}';
 const SEND_NO_NOTIFY = '{"queued":true,"willNotify":false}';
 
-/** 植入 ledger 槽（notify-ledger 镜像的读取目标）——record spy 由用例自持 */
-function plantLedger(
-	record: (id: string, content: string, details: object, options?: unknown) => boolean,
-	compactionCheck: () => number = () => 0,
-): void {
-	Reflect.set(globalThis, LEDGER_SLOT_KEY, { current: { record, compactionCheck } });
+type DeliverCall = {
+	id: string | undefined;
+	customType: string;
+	content: string;
+	details: unknown;
+	collectKey: string[] | undefined;
+};
+
+/** 植入投递端口槽（pi-delivery-port 槽镜像的读取目标）——deliver spy 由用例自持；
+ *  merge 判定在端口侧，本替身逐条受理即 accepted（无窗口语义，recorded 即投递）。 */
+function plantPort(acceptAll = true): Array<DeliverCall> {
+	const calls: Array<DeliverCall> = [];
+	Reflect.set(globalThis, PORT_SLOT_KEY, {
+		current: {
+			deliver: (
+				envelope: {
+					id?: string;
+					payload: { customType: string; content: string; details?: unknown };
+				},
+				opts?: { collectKey?: string[] },
+			) => {
+				if (!acceptAll) return { kind: "rejected", reason: "persist-failed (fake)" };
+				calls.push({
+					id: envelope.id,
+					customType: envelope.payload.customType,
+					content: envelope.payload.content,
+					details: envelope.payload.details,
+					collectKey: opts?.collectKey,
+				});
+				return { kind: "accepted", id: envelope.id ?? "gen-id" };
+			},
+			flush: () => {},
+		},
+	});
+	return calls;
 }
 
-function recordSpy(): ReturnType<typeof vi.fn> {
-	const spy = vi.fn(() => true);
-	plantLedger(spy as never);
-	return spy;
+function deliverSpy(): Array<DeliverCall> {
+	return plantPort(true);
 }
 
-/** 「兼容与防御」组共用前置：植入 record spy → arm 单笔 send → 应答首个 watch →
+/** 「兼容与防御」组共用前置：植入投递端口（deliver spy）→ arm 单笔 send → 应答首个 watch →
  * 排干微任务 → 推进 50ms 攒批窗（三用例的时序骨架逐字同款） */
 async function armSendAndRespondWatch(
 	respondValue: unknown,
-): Promise<{ record: ReturnType<typeof vi.fn>; h: Harness }> {
-	const record = recordSpy();
+): Promise<{ delivered: Array<DeliverCall>; h: Harness }> {
+	const delivered = deliverSpy();
 	const h = createHarness();
 	h.actionResults.send = () => SEND_OK;
 	await runToolCall(h, "send_to_session", { sessionId: "child-1", prompt: "x" });
@@ -115,7 +145,7 @@ async function armSendAndRespondWatch(
 	h.respondWatch(0, respondValue);
 	await flushMicrotasks();
 	await vi.advanceTimersByTimeAsync(50);
-	return { record, h };
+	return { delivered, h };
 }
 
 beforeEach(() => {
@@ -125,7 +155,7 @@ beforeEach(() => {
 
 afterEach(() => {
 	vi.useRealTimers();
-	Reflect.deleteProperty(globalThis, LEDGER_SLOT_KEY);
+	Reflect.deleteProperty(globalThis, PORT_SLOT_KEY);
 });
 
 // ── arm：send/create 成功 → register + 开表 + willNotify 透传 ──────────────────
@@ -137,7 +167,7 @@ describe("arm（send/create → pending:register + watch 开表）", () => {
 		await runToolCall(h, "send_to_session", { sessionId: "child-1", prompt: "go" });
 		await flushMicrotasks();
 
-		// 请求面：send params 携带 sm- 形态 notifyId
+		// 请求侧：send params 携带 sm- 形态 notifyId
 		const sendPayload = JSON.parse(h.selectMock.mock.calls[0][1][0]) as {
 			action: string;
 			params: Record<string, unknown>;
@@ -145,11 +175,13 @@ describe("arm（send/create → pending:register + watch 开表）", () => {
 		expect(sendPayload.action).toBe("send");
 		expect(String(sendPayload.params.notifyId)).toMatch(/^sm-/);
 
-		// register：P4 三键契约（label 缓存空 → name 退化 sessionId）
+		// register：P4 三键契约（label 缓存空 → name 退化 sessionId）+ send 债权无 kind
+		// （缺省 = send；result-collect 设计 §3.4）
 		const regs = registersOf(h);
 		expect(regs).toHaveLength(1);
 		expect(regs[0].id).toMatch(/^sm-/);
 		expect(regs[0]).toEqual({ id: regs[0].id, type: "session", name: "child-1" });
+		expect(regs[0].kind).toBeUndefined();
 
 		// 开表：同 notifyId、无 timeout（D2/P1 fire-and-forget）
 		expect(h.watches).toHaveLength(1);
@@ -157,7 +189,7 @@ describe("arm（send/create → pending:register + watch 开表）", () => {
 		expect(h.watches[0].opts?.timeout).toBeUndefined();
 	});
 
-	it("工具结果原样透传：send result 含 willNotify 字段（LLM 契约面显式化）", async () => {
+	it("工具结果原样透传：send result 含 willNotify 字段（LLM 契约范围显式化）", async () => {
 		const h = createHarness();
 		h.actionResults.send = () => SEND_OK;
 		const result = await runToolForText(h, "send_to_session", {
@@ -190,7 +222,9 @@ describe("arm（send/create → pending:register + watch 开表）", () => {
 		expect(regs).toHaveLength(2);
 		expect(regs[0].id).toMatch(/^sm-/);
 		expect(regs[0]).toEqual({ id: regs[0].id, type: "session", name: "auth-refactor" });
-		expect(regs[1]).toEqual({ id: lifetime, type: "session", name: "auth-refactor" });
+		// lifetime 死亡债权注册申报 kind:"lifetime"（result-collect 设计 §3.4：emit
+		// payload 增字段，collect 缺省等待集据此排除；send 债权无 kind = 缺省）
+		expect(regs[1]).toEqual({ id: lifetime, type: "session", name: "auth-refactor", kind: "lifetime" });
 		expect(h.watches.map((w) => w.notifyId)).toEqual([regs[0].id, lifetime]);
 
 		// label 缓存回填：随后 send 的 register name = 工具入参 label（D9 正常路径）
@@ -222,7 +256,8 @@ describe("arm（send/create → pending:register + watch 开表）", () => {
 		const regs = registersOf(h);
 		expect(regs).toHaveLength(1);
 		// lifetime register：type 'session' + name=label（label 缺省 → sessionId 回退前的入参）
-		expect(regs[0]).toEqual({ id: lifetime, type: "session", name: "L" });
+		// + kind:"lifetime" 债权类别标记（result-collect 设计 §3.4）
+		expect(regs[0]).toEqual({ id: lifetime, type: "session", name: "L", kind: "lifetime" });
 		// lifetime watch 无条件开（死亡通知载体）
 		expect(h.watches.map((w) => w.notifyId)).toEqual([lifetime]);
 		expect(h.watches[0].opts?.timeout).toBeUndefined();
@@ -251,9 +286,9 @@ describe("arm（send/create → pending:register + watch 开表）", () => {
 	});
 });
 
-// ── 默认 record + trailing debounce 两层攒批（settle 腿） ──────────────────────
+// ── 默认 record + trailing debounce 两层攒批（settle 路径） ──────────────────────
 
-describe("watch 应答 → 两层攒批 record（settle 腿）", () => {
+describe("watch 应答 → 两层攒批 record（settle 路径）", () => {
 	async function armTwoSends(h: Harness): Promise<{ id1: string; id2: string }> {
 		h.actionResults.send = () => SEND_OK;
 		await runToolCall(h, "send_to_session", { sessionId: "child-1", prompt: "a" });
@@ -266,7 +301,7 @@ describe("watch 应答 → 两层攒批 record（settle 腿）", () => {
 	}
 
 	it("同 settleSeq 两笔 → 恰一条 record（fulfills 2）+ 逐笔 unregister；trailing 50ms 前不 flush（A6 合批）", async () => {
-		const record = recordSpy();
+		const delivered = deliverSpy();
 		const h = createHarness();
 		const { id1, id2 } = await armTwoSends(h);
 
@@ -280,30 +315,28 @@ describe("watch 应答 → 两层攒批 record（settle 腿）", () => {
 		h.respondWatch(1, JSON.stringify(respond));
 		await flushMicrotasks();
 
-		// trailing debounce：应答到达但 50ms 窗未到 → 零 record 零 unregister
-		expect(record).not.toHaveBeenCalled();
+		// trailing debounce：应答到达但 50ms 窗未到 → 零投递零 unregister
+		expect(delivered).toHaveLength(0);
 		expect(emittedIds(h, "pending:unregister")).toHaveLength(0);
 
 		await vi.advanceTimersByTimeAsync(50);
-		expect(record).toHaveBeenCalledTimes(1);
-		const [notifyId, content, details, options] = record.mock.calls[0] as [
-			string,
-			string,
-			Record<string, unknown>,
-			{ deliveryCustomType: string },
-		];
-		expect(notifyId).toBe(id1); // 批幂等键 = 批内首个响应 notifyId
-		expect(content).toBe(
+		expect(delivered).toHaveLength(1);
+		const call = delivered[0]!;
+		expect(call.id).toBe(id1); // 批幂等键 = 批内首个响应 notifyId（port.deliver 的 id）
+		expect(call.content).toBe(
 			'Managed session "child-1" (child-1) finished with status "completed". (fulfills 2 requests)',
 		);
-		expect(details).toEqual({
+		expect(call.details).toEqual({
 			notifyId: id1,
 			sessionId: "child-1",
 			reason: "completed",
 			fulfills: 2,
 			label: "child-1",
 		});
-		expect(options.deliveryCustomType).toBe("managed-session-notify");
+		expect(call.customType).toBe("managed-session-notify"); // 外部通道（port 批组隔离恒逐条）
+		// collectKey = 批内全部债权键（result-collect 设计 §3.4 managed 行：合批条目
+		// 载荷幂等键 = 批首债权键，collect 按键集逐键展开定位非首键）
+		expect(call.collectKey).toEqual([id1, id2]);
 		expect(emittedIds(h, "pending:unregister").sort()).toEqual([id1, id2].sort());
 		expect(
 			h.emitted.filter((e) => e.event === "pending:unregister").map((e) => e.data.reason),
@@ -311,7 +344,7 @@ describe("watch 应答 → 两层攒批 record（settle 腿）", () => {
 	});
 
 	it("不同 settleSeq → 两条 record（A7：每轮一次，seq 边界排除跨轮合流）", async () => {
-		const record = recordSpy();
+		const delivered = deliverSpy();
 		const h = createHarness();
 		const { id1, id2 } = await armTwoSends(h);
 		h.respondWatch(
@@ -324,13 +357,13 @@ describe("watch 应答 → 两层攒批 record（settle 腿）", () => {
 		);
 		await flushMicrotasks();
 		await vi.advanceTimersByTimeAsync(50);
-		expect(record).toHaveBeenCalledTimes(2);
-		expect(record.mock.calls.map((c) => c[0]).sort()).toEqual([id1, id2].sort());
+		expect(delivered).toHaveLength(2);
+		expect(delivered.map((c) => c.id).sort()).toEqual([id1, id2].sort());
 		expect(emittedIds(h, "pending:unregister")).toHaveLength(2);
 	});
 
 	it("reason 分类：failed / stopped 应答 → 文案 status 对应（渲染侧 outcome 再映射）", async () => {
-		const record = recordSpy();
+		const delivered = deliverSpy();
 		const h = createHarness();
 		const { id1, id2 } = await armTwoSends(h);
 		h.respondWatch(
@@ -343,14 +376,14 @@ describe("watch 应答 → 两层攒批 record（settle 腿）", () => {
 		);
 		await flushMicrotasks();
 		await vi.advanceTimersByTimeAsync(50);
-		expect(record).toHaveBeenCalledTimes(2);
-		const byId = new Map(record.mock.calls.map((c) => [c[0], c[1] as string]));
+		expect(delivered).toHaveLength(2);
+		const byId = new Map(delivered.map((c) => [c.id, c.content] as const));
 		expect(byId.get(id1)).toContain('status "failed"');
 		expect(byId.get(id2)).toContain('status "stopped"');
 	});
 
-	it("跨 session 不合批（分拣键 sessionId 腿）：同 settleSeq 不同 session → 两条 record", async () => {
-		const record = recordSpy();
+	it("跨 session 不合批（分拣键 sessionId 路径）：同 settleSeq 不同 session → 两条 record", async () => {
+		const delivered = deliverSpy();
 		const h = createHarness();
 		h.actionResults.send = () => SEND_OK;
 		await runToolCall(h, "send_to_session", { sessionId: "child-a", prompt: "x" });
@@ -367,13 +400,18 @@ describe("watch 应答 → 两层攒批 record（settle 腿）", () => {
 		);
 		await flushMicrotasks();
 		await vi.advanceTimersByTimeAsync(50);
-		expect(record).toHaveBeenCalledTimes(2);
-		const sessions = record.mock.calls.map((c) => (c[2] as { sessionId: string }).sessionId);
+		expect(delivered).toHaveLength(2);
+		const sessions = delivered.map((c) => (c.details as { sessionId: string }).sessionId);
 		expect(sessions.sort()).toEqual(["child-a", "child-b"]);
 	});
 
-	it("record 返回 false（幂等拒收/槽空降级）不改 unregister 语义", async () => {
-		plantLedger(() => false);
+	it("port rejected（persist-failed）/槽空降级 → false 不改 unregister 语义", async () => {
+		Reflect.set(globalThis, PORT_SLOT_KEY, {
+			current: {
+				deliver: () => ({ kind: "rejected", reason: "persist-failed (fake)" }),
+				flush: () => {},
+			},
+		});
 		const h = createHarness();
 		await armTwoSends(h);
 		const respond = {
@@ -393,8 +431,8 @@ describe("watch 应答 → 两层攒批 record（settle 腿）", () => {
 // ── 两例外（D3）─────────────────────────────────────────────────────────────────
 
 describe("两例外（cancelled·orphaned 静默 / 死亡新闻槽）", () => {
-	it("例外1：cancelled / orphaned → 逐笔即时 unregister（50ms 窗前即到），零 record", async () => {
-		const record = recordSpy();
+	it("例外1：cancelled / orphaned → 逐笔即时 unregister（50ms 窗前即到），零投递", async () => {
+		const delivered = deliverSpy();
 		const h = createHarness();
 		const { id1, id2 } = await armTwo();
 		h.respondWatch(0, JSON.stringify({ reason: "cancelled", sessionId: "child-1" }));
@@ -403,10 +441,10 @@ describe("两例外（cancelled·orphaned 静默 / 死亡新闻槽）", () => {
 
 		// 逐笔即时（不被攒批窗延迟）
 		expect(emittedIds(h, "pending:unregister").sort()).toEqual([id1, id2].sort());
-		expect(record).not.toHaveBeenCalled();
+		expect(delivered).toHaveLength(0);
 
 		await vi.advanceTimersByTimeAsync(50);
-		expect(record).not.toHaveBeenCalled();
+		expect(delivered).toHaveLength(0);
 
 		async function armTwo() {
 			h.actionResults.send = () => SEND_OK;
@@ -418,7 +456,7 @@ describe("两例外（cancelled·orphaned 静默 / 死亡新闻槽）", () => {
 	});
 
 	it("例外2：同 (sessionId, deathSeq) 首条死亡新闻 record + fulfills N，同键后续仅 unregister；新 deathSeq 自然发声", async () => {
-		const record = recordSpy();
+		const delivered = deliverSpy();
 		const h = createHarness();
 		const lifetime = "sm-11111111-2222-3333-4444-555555555555";
 		h.actionResults.create = () =>
@@ -449,8 +487,10 @@ describe("两例外（cancelled·orphaned 静默 / 死亡新闻槽）", () => {
 		await flushMicrotasks();
 		await vi.advanceTimersByTimeAsync(50);
 
-		expect(record).toHaveBeenCalledTimes(1);
-		const [id, content, details] = record.mock.calls[0] as [string, string, Record<string, unknown>];
+		expect(delivered).toHaveLength(1);
+		const id = delivered[0]!.id;
+		const content = delivered[0]!.content;
+		const details = delivered[0]!.details as Record<string, unknown>;
 		expect(id).toBe(claimId); // 首条 = 批内首个响应（claim 先应答）
 		expect(content).toContain(
 			'Managed session "doomed" (child-d) finished with status "exited" (exit code: 1).',
@@ -473,22 +513,22 @@ describe("两例外（cancelled·orphaned 静默 / 死亡新闻槽）", () => {
 		);
 		await flushMicrotasks();
 		await vi.advanceTimersByTimeAsync(50);
-		expect(record).toHaveBeenCalledTimes(2);
-		expect(record.mock.calls[1][0]).toBe(emittedIds(h, "pending:register")[2]);
-		expect(String(record.mock.calls[1][1])).toContain("(exit code: 2).");
-		expect(String(record.mock.calls[1][1])).not.toContain("fulfills");
-		expect(String(record.mock.calls[1][1])).not.toContain("Full transcript");
+		expect(delivered).toHaveLength(2);
+		expect(delivered[1]!.id).toBe(emittedIds(h, "pending:register")[2]);
+		expect(delivered[1]!.content).toContain("(exit code: 2).");
+		expect(delivered[1]!.content).not.toContain("fulfills");
+		expect(delivered[1]!.content).not.toContain("Full transcript");
 	});
 
 	it("例外2 跨 reason 组同槽：claim 'exited' 与 lifetime 'deleted' 同 deathSeq → 仅首条发声（分拣组保序）", async () => {
-		const record = recordSpy();
+		const delivered = deliverSpy();
 		const lifetime = "sm-11111111-2222-3333-4444-555555555555";
 		const claimId = "sm-aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee";
 		const h = createHarness([
 			{ customType: "pending:register", data: { id: claimId, type: "session", name: "D" } },
 			{ customType: "pending:register", data: { id: lifetime, type: "session", name: "D" } },
 		]);
-		// 经收口腿开两条 watch（开表序 = entries 序，claim 先到）
+		// 经收尾路径开两条 watch（开表序 = entries 序，claim 先到）
 		h.handlers.session_start({ type: "session_start" }, h.ctx);
 		await flushMicrotasks();
 		expect(h.watches).toHaveLength(2);
@@ -504,9 +544,9 @@ describe("两例外（cancelled·orphaned 静默 / 死亡新闻槽）", () => {
 		await flushMicrotasks();
 		await vi.advanceTimersByTimeAsync(50);
 
-		expect(record).toHaveBeenCalledTimes(1);
-		expect(record.mock.calls[0][0]).toBe(claimId); // 先到先占槽（claim 组先入队）
-		expect(String(record.mock.calls[0][1])).toContain('status "exited"');
+		expect(delivered).toHaveLength(1);
+		expect(delivered[0]!.id).toBe(claimId); // 先到先占槽（claim 组先入队）
+		expect(delivered[0]!.content).toContain('status "exited"');
 		expect(emittedIds(h, "pending:unregister").sort()).toEqual([claimId, lifetime].sort());
 		const unregisterPairs = h.emitted
 			.filter((e) => e.event === "pending:unregister")
@@ -521,20 +561,20 @@ describe("两例外（cancelled·orphaned 静默 / 死亡新闻槽）", () => {
 	});
 });
 
-// ── 兼容与防御（D6 象限 / 形状守卫）─────────────────────────────────────────────
+// ── 兼容与防御（D6 象限 / 形状检查）─────────────────────────────────────────────
 
 describe("兼容与防御", () => {
 	it("旧 runtime 象限：respond 'null' → 折叠 cancelled 静默 unregister，零 record", async () => {
-		const { record, h } = await armSendAndRespondWatch("null");
-		expect(record).not.toHaveBeenCalled();
+		const { delivered, h } = await armSendAndRespondWatch("null");
+		expect(delivered).toHaveLength(0);
 		expect(emittedIds(h, "pending:unregister")).toHaveLength(1);
 		// D6 显式静默豁免：null 不是漂移信号，零 warn 留痕
 		expect(loggerMock.warn).not.toHaveBeenCalled();
 	});
 
-	it("畸形/词表外 payload → 折叠 cancelled 收口（不落 default 误标、不产通知）+ 漂移 warn 留痕", async () => {
-		const { record, h } = await armSendAndRespondWatch(JSON.stringify({ reason: "some-future-reason" }));
-		expect(record).not.toHaveBeenCalled();
+	it("畸形/词表外 payload → 折叠 cancelled 收尾（不落 default 误标、不产通知）+ 漂移 warn 留痕", async () => {
+		const { delivered, h } = await armSendAndRespondWatch(JSON.stringify({ reason: "some-future-reason" }));
+		expect(delivered).toHaveLength(0);
 		expect(emittedIds(h, "pending:unregister")).toHaveLength(1);
 		// 协议漂移信号必须留痕：warn 带 notifyId + 漂移形态摘要（词表外 reason 原词）
 		expect(loggerMock.warn).toHaveBeenCalledTimes(1);
@@ -546,18 +586,12 @@ describe("兼容与防御", () => {
 		});
 	});
 
-	it("select 侧 cancelled（应答未达，resolve undefined）→ 不动 pending（残留交下次 session_start 收口腿）", async () => {
-		const { record, h } = await armSendAndRespondWatch(undefined);
+	it("select 侧 cancelled（应答未达，resolve undefined）→ 不动 pending（残留交下次 session_start 收尾路径）", async () => {
+		const { delivered, h } = await armSendAndRespondWatch(undefined);
 		expect(emittedIds(h, "pending:unregister")).toHaveLength(0);
-		expect(record).not.toHaveBeenCalled();
+		expect(delivered).toHaveLength(0);
 	});
 
-	it("session_compact → compactionCheck 接线（D3 装配纪律④）", () => {
-		const compactionCheck = vi.fn(() => 0);
-		plantLedger(vi.fn(() => true) as never, compactionCheck);
-		const h = createHarness();
-		expect(h.handlers.session_compact).toBeTypeOf("function");
-		h.handlers.session_compact({ type: "session_compact" }, h.ctx);
-		expect(compactionCheck).toHaveBeenCalledTimes(1);
-	});
+	// [session_compact → compactionCheck 接线随波 2 账本退役删除]：pi session
+	// append-only 契约排除 entry 被清事件（unified-delivery §3.7②），无补写接线可锁。
 });

@@ -31,7 +31,7 @@
         class="m-0 whitespace-pre-wrap break-all p-2 font-mono text-[length:var(--text-xs)] leading-[1.55] text-neutral-fg/90"
       >{{ content }}</pre>
     </div>
-    <!-- 截断/续读提示（pi read 输出尾部自带的 [Showing lines ...] 等脚注，上移为块内收口行） -->
+    <!-- 截断/续读提示（pi read 输出尾部自带的 [Showing lines ...] 等脚注，上移为块内收尾行） -->
     <div
       v-if="footer"
       class="border-t border-hairline px-3 py-1 font-mono text-[length:var(--text-2xs)] text-neutral-dim"
@@ -52,7 +52,7 @@ const props = defineProps<{
   path: string
   /** 起始行号（read input.offset，分段读续读时行号连续；缺省 1） */
   startLine?: number
-  /** 截断脚注（pi read 输出尾部提示原文，块内底部收口行展示） */
+  /** 截断脚注（pi read 输出尾部提示原文，块内底部收尾行展示） */
   footer?: string
 }>()
 

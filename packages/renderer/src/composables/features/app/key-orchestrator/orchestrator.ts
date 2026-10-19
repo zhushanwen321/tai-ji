@@ -2,17 +2,17 @@
  * 键盘栈序编排器（display-containers §6.7/§7.5 唯一属主）——Esc / ⌘W / ⌃` / Ctrl+F 的判定单源。
  *
  * 职责：
- * - **Esc**（window keydown **bubble**，AppShell 根 setup 首位注册）：isComposing 前置守卫
+ * - **Esc**（window keydown **bubble**，AppShell 根 setup 首位注册）：isComposing 前置检查
  *   → defaultPrevented 先检（先行档局部消费方已消费则不动作）→ 模态表面聚合让位（yieldsEsc
  *   成员开 ⇒ 不动作，Esc 先服务视觉最外层的模态/弹层）→ 层级序剥层（stack-order）。
  *   **禁 capture 监听**（§6.7 第 3 层）：xterm 对 Escape 走 cancel(force)=preventDefault +
  *   stopPropagation，bubble 天然让位给终端输入；capture 会在 xterm 之前抢走 Esc。
  * - **⌘W**（主进程 before-input-event → 'shortcut' type='close' 转发，useCloseShortcut 桥）：
- *   isImeComposing 守卫 → yields⌘W 聚合让位（模态族让位、弹出层族不让——R4 双键拆分）→
+ *   isImeComposing 检查 → yields⌘W 聚合让位（模态族让位、弹出层族不让——R4 双键拆分）→
  *   同一层级序逐层关，全关后调 windowClose 关窗（before-input-event 已吞默认关窗行为）。
  * - **⌃`**（主进程 before-input-event 窗口级 → 'shortcut' type='toggle-bottom-drawer'）：
- *   isImeComposing 守卫 → toggleBottomDrawer()（浮层开着照常切换——§5.1 规则 3）。
- * - **Ctrl/Cmd+F**（find-in-surface）：isComposing 守卫 → defaultPrevented 先检 →
+ *   isImeComposing 检查 → toggleBottomDrawer()（浮层开着照常切换——§5.1 规则 3）。
+ * - **Ctrl/Cmd+F**（find-in-surface）：isComposing 检查 → defaultPrevented 先检 →
  *   useFindInSurface.openFindAtPointer()（悬停归属优先 → 回退栈序 → 全无不动作）。
  *   Esc 分支内含「查找框开着 → 先关查找框」层（临时覆盖层先于容器剥层）。
  * - **Tab 焦点陷阱**（浮层分支）：浮层开着时 Tab 首末循环（§7.3 随迁保位，W2 随 OverlayShell
@@ -37,7 +37,7 @@ import { closeTopContainer } from './stack-order'
 import { useFindInSurface } from '@/composables/features/find/useFindInSurface'
 
 /**
- * §6.7 模态共存守卫（Esc / Tab 双检同源）：先行档消费方（capture/document/元素级）已消费
+ * §6.7 模态共存检查（Esc / Tab 双检同源）：先行档消费方（capture/document/元素级）已消费
  * （defaultPrevented）或聚合让位族（yieldsEsc）任一成员开着 → 不动作（先服务视觉最外层）。
  */
 function modalSurfaceBlocksEvent(e: KeyboardEvent): boolean {
@@ -58,7 +58,7 @@ function closeFindIfOpen(e: KeyboardEvent): boolean {
   return true
 }
 
-/** Esc 分支：模态共存守卫 → 查找框优先 → 层级序剥层。 */
+/** Esc 分支：模态共存检查 → 查找框优先 → 层级序剥层。 */
 function handleEscapeKeydown(e: KeyboardEvent): void {
   if (modalSurfaceBlocksEvent(e)) return
   if (closeFindIfOpen(e)) return
@@ -91,8 +91,8 @@ function handleFindShortcutKeydown(e: KeyboardEvent): void {
 
 /**
  * window keydown（bubble 相位）——按键分发到 Esc / Tab 浮层 / Ctrl+F 三个分支。
- * isComposing 守卫统一前置（§6.7：IME 组合态三键一律不动作；组合态 Esc 是「取消候选」
- * 的输入键，Tab 同守卫防组合态误改焦点）。
+ * isComposing 检查统一前置（§6.7：IME 组合态三键一律不动作；组合态 Esc 是「取消候选」
+ * 的输入键，Tab 同检查防组合态误改焦点）。
  */
 function onWindowKeydown(e: KeyboardEvent): void {
   if (e.isComposing) return
@@ -108,7 +108,7 @@ function onWindowKeydown(e: KeyboardEvent): void {
 }
 
 /**
- * ⌘W（'shortcut' type='close'）：让位守卫 → 层级序逐层关 → 全关后关窗。
+ * ⌘W（'shortcut' type='close'）：让位检查 → 层级序逐层关 → 全关后关窗。
  * yields⌘W 成员开着 → 无动作（窗口不关、容器不动、模态不动——防带着未提交表单关整窗；
  * 弹出层族 yieldsCmdW=false 不让位，⌘W 不是死键）。
  */

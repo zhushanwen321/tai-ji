@@ -3,15 +3,15 @@
  *
  * 覆盖（照 plan-review / ask-user 检测测试形态，全部 mock 零真实 pi）：
  * - title=UI_FORM_MARKER 的 select 事件 → 成对产出 extension-ui kind + extension.dialog
- *   广播帧，payload 含 form:true 标记 + formQuestions（守卫过滤后的合法项）+ allowCancel
- * - 消费端守卫失败策略（设计 D2 末条，与 ask-user 整体判否不同）：isFormQuestion 逐项过滤，
+ *   广播帧，payload 含 form:true 标记 + formQuestions（检查过滤后的合法项）+ allowCancel
+ * - 消费端检查失败策略（设计 D2 末条，与 ask-user 整体判否不同）：isFormQuestion 逐项过滤，
  *   混合数组仅保留合法项；全不合法 / 非 JSON / formQuestions 非数组 → 降级普通 select
  * - kind 双事件断言：extension-ui kind（watchdog 暂停 + server 跟踪 + pending 缓存的编排
  *   入口，interpreter 路由 onExtensionUIRequest）+ message kind（前端广播帧）成对且字段一致
  * - 既有 marker 分支无回归（legacy 归一上移：ASK_USER / SCHEDULE_CREATE 分支同样产出
  *   form:true 统一表单帧——askUser 源 type 推断映射、scheduleCreate 源保留键分流应答形状）
  * - expectTurn 条件落键（form-submit-busy-convergence D1 段 3 单点透传）：options 显式
- *   false → 帧含 expectTurn:false；缺省 / 非 boolean → 帧无该键（类型守卫）
+ *   false → 帧含 expectTurn:false；缺省 / 非 boolean → 帧无该键（类型检查）
  *
  * 运行：cd packages/runtime && npx vitest run src/infra/pi/__tests__/event-adapter-ui-form-marker.test.ts
  */
@@ -117,11 +117,11 @@ describe('EventAdapter UI_FORM_MARKER 检测路由（u2）', () => {
     expect(payload).not.toHaveProperty('expectTurn')
   })
 
-  it('expectTurn 非 boolean（字符串 "false"）→ 不入帧（类型守卫，与 renderer 侧 typeof === "boolean" 守卫对齐）', () => {
+  it('expectTurn 非 boolean（字符串 "false"）→ 不入帧（类型检查，与 renderer 侧 typeof === "boolean" 检查对齐）', () => {
     const payload = broadcastPayload(
       selectTranslate(JSON.stringify({ formQuestions: [{ type: 'text', question: 'q' }], expectTurn: 'false' })),
     )
-    // form 帧照常产出，仅该键被守卫拦截
+    // form 帧照常产出，仅该键被检查拦截
     expect(payload?.['form']).toBe(true)
     expect(payload).not.toHaveProperty('expectTurn')
   })
@@ -284,7 +284,7 @@ describe('EventAdapter 既有 marker 分支回归（legacy 归一上移后）', 
     expect(payload?.['allowCancel']).toBe(true)
   })
 
-  it('UI_FORM_MARKER 非 boolean allowCancel（MF-1-14）→ 收窄回 true（与 ask-user 分支同款守卫）', () => {
+  it('UI_FORM_MARKER 非 boolean allowCancel（MF-1-14）→ 收窄回 true（与 ask-user 分支同款检查）', () => {
     const questions = [{ type: 'text', question: '备注?' }]
     const events = translate(
       selectEvent({ title: UI_FORM_MARKER, options: [JSON.stringify({ formQuestions: questions, allowCancel: 0 })] }),

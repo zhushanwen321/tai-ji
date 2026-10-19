@@ -24,9 +24,9 @@ import { getDataDir } from '@taiji/shared/paths'
 import { readLogKeepDays } from '@taiji/shared'
 
 /**
- * 清理前缀全集（logs/ 目录全部日志家族的写入面覆盖）：
+ * 清理前缀全集（logs/ 目录全部日志家族的写侧覆盖）：
  * - `runtime-`：runtime 主日志（runtime-<date>.log / .1 滚动）
- * - `pi-`：pi stdout tee（pi-<date>-<sid>.jsonl）、relay 镜像（pi-relay-*）、崩溃取证
+ * - `pi-`：pi stdout tee（pi-<date>-<sid>.jsonl）、subagent 镜像（pi-subagent-*）、崩溃取证
  *   （pi-crash-*）——后两者复用 pi- 前缀使命名惯例自动纳入清理（logger.ts 既有注释）
  * - `plugin-crash-`：plugin worker 崩溃取证（u5b 落点，前缀先行登记）
  * - `main-`：main 进程日志（本单元 main-logger.ts 写入）

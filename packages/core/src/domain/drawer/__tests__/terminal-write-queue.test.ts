@@ -10,7 +10,7 @@
  * - WQ-6 多实例隔离（同会话两实例 / 跨会话两实例独立队列）
  * - WQ-7 removeInstance 清理实例态并返回丢弃的滞留命令数
  * - WQ-8/9 pendingWrites 容量上限
- * - MI-* 关闭沿入队守卫（注册成员资格，与存活镜像解耦）/ 精确前缀扇出 / 世代重置 / 幽灵拒收
+ * - MI-* 关闭沿入队检查（注册成员资格，与存活镜像解耦）/ 精确前缀扇出 / 世代重置 / 幽灵拒收
  *
  * 运行：cd packages/core && npx vitest run src/domain/drawer/__tests__/terminal-write-queue.test.ts
  * 测试框架 vitest（禁止 node:test / tsx --test）。
@@ -127,22 +127,22 @@ describe('terminal-write-queue 状态机（多实例）', () => {
     expect(writeFn).toHaveBeenNthCalledWith(MAX_PENDING_WRITES, T1, `cmd-${MAX_PENDING_WRITES - 1}`)
   })
 
-  // ── 多实例：关闭沿入队守卫 / 扇出 / 世代重置 ─────────────────────────────
+  // ── 多实例：关闭沿入队检查 / 扇出 / 世代重置 ─────────────────────────────
 
-  it('MI-1: 关闭沿入队守卫——注册表否定时拒绝入队且不建档（无幽灵实例态）', () => {
+  it('MI-1: 关闭沿入队检查——注册表否定时拒绝入队且不建档（无幽灵实例态）', () => {
     const isRegistered = vi.fn((terminalId: string) => terminalId === T1)
     const queue = createTerminalWriteQueue(writeFn, { isRegistered })
     queue.enqueueWrite(T2, 'closed-instance')
-    // 守卫被征询（判据 = 注册成员资格），且未建档：pendingCountOf / isPtyAlive 均回落默认（不产生幽灵条目）
+    // 检查被征询（判据 = 注册成员资格），且未建档：pendingCountOf / isPtyAlive 均回落默认（不产生幽灵条目）
     expect(isRegistered).toHaveBeenCalledWith(T2)
     expect(queue.pendingCountOf(T2)).toBe(0)
     expect(queue.isPtyAlive(T2)).toBe(false)
     expect(writeFn).not.toHaveBeenCalled()
-    // 「输入可能丢失」提示腿在 renderer store 兼容层（core 零 UI 依赖）——见
+    // 「输入可能丢失」提示路径在 renderer store 兼容层（core 零 UI 依赖）——见
     // packages/renderer/src/__tests__/terminal/terminal-write-queue.test.ts MI-1。
   })
 
-  it('MI-2: 守卫判据与存活镜像解耦——已建档未 alive 仍入 pendingWrites，markAlive 后 flush', () => {
+  it('MI-2: 检查判据与存活镜像解耦——已建档未 alive 仍入 pendingWrites，markAlive 后 flush', () => {
     const isRegistered = vi.fn(() => true)
     const queue = createTerminalWriteQueue(writeFn, { isRegistered })
     queue.enqueueWrite(T1, 'cmd-before-alive')

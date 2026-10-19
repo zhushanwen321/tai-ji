@@ -156,7 +156,7 @@ describe('MSG_ID_TAG_RE 双形态匹配（投递身份标记 SSOT）', () => {
     expect(m![2]).toBe(bare)
   })
 
-  it('u- 前缀形态：捕获组 1 = u-、组 2 = 裸 uuid（同 clientUuid 双形态收口）', () => {
+  it('u- 前缀形态：捕获组 1 = u-、组 2 = 裸 uuid（同 clientUuid 双形态收尾）', () => {
     const m = MSG_ID_TAG_RE.exec(`<!--taiji:msg:u-${bare}-->`)
     expect(m![1]).toBe('u-')
     expect(m![2]).toBe(bare)

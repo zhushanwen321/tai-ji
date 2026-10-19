@@ -34,7 +34,7 @@ export {
 
 /**
  * killing intent：bash_kill / 后台 timeout 已发令、exit 事件边沿未确认的瞬态标记。
- * 标记写入单例表与 registry 两侧（查询面立即可见，无「已 kill 仍 running」倒挂）；
+ * 标记写入单例表与 registry 两侧（查询结果立即可见，无「已 kill 仍 running」倒挂）；
  * exit 边沿据此决定终态 reason，消费后清除。
  */
 export interface KillingIntent {

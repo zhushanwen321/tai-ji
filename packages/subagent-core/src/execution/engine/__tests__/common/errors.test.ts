@@ -71,7 +71,7 @@ describe("EngineError", () => {
     expect(err.name).toBe("EngineError");
   });
 
-  it("toStructured 投影 code/message/recovery 三字段", () => {
+  it("toStructured 派生视图 code/message/recovery 三字段", () => {
     const structured = new EngineError("model_not_available", "no such model", "pick another").toStructured();
     expect(structured).toEqual({
       code: "model_not_available",
@@ -118,9 +118,9 @@ describe("具名构造器", () => {
     expect(engineRunFailedDetail("crash", null, "t")).toContain("killed by signal");
   });
 
-  // nestedSpawnRejectedError 用例已随构造器删除（nesting-guard 收编 SDK 后死导出，
+  // nestedSpawnRejectedError 用例已随构造器删除（nesting-guard 收编 SDK 后导出但无任何调用点，
   // 活体单源 SDK nesting-guard.ts NestedSpawnRejectedError，其行为由 SDK
   // __tests__/primitives.test.ts + 本目录 nesting-guard.test.ts 覆盖）。
-  // schemaEmulationFailedDetail 用例已随函数删除（test-only 死镜像收口，活体单源
+  // schemaEmulationFailedDetail 用例已随函数删除（test-only 死镜像收尾，活体单源
   // SDK error-codes.ts，其行为由 SDK __tests__/primitives.test.ts 覆盖）。
 });

@@ -53,7 +53,7 @@ defineProps<{ ext: ExtensionItem }>()
 const settingsStore = getSettingsStore()
 const { t } = useI18n()
 
-// autoUpgrade 开关的乐观切换（toggling 防双击 / error 就近错误面；编排与 ExtensionActions
+// autoUpgrade 开关的乐观切换（toggling 防双击 / error 就近错误范围；编排与 ExtensionActions
 // 的启用开关共用 extension-flag-toggle）
 const { toggling, error, toggleFlag } = useOptimisticExtensionFlagToggle()
 

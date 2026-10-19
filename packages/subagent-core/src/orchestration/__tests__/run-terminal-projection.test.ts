@@ -1,6 +1,6 @@
 // src/orchestration/__tests__/run-terminal-projection.test.ts
 //
-// [P1b-2] manifest-write 输出动作执行实装单测（D5-④ 终态投影）。
+// [P1b-2] manifest-write 输出动作执行实装单测（D5-④ 终态派生视图）。
 //
 // 锁四面（P1 验收条款 a：终态写读经 dispatchRunTrigger 真实终局转移链驱动，
 // 非直写构造）：
@@ -9,8 +9,8 @@
 //    cancel-requested 控制事件合成路径）。
 // 2. errorCode 载荷溯源：errorCode 只来自 run-settled 事件载荷（cancel 合成路径
 //    无结构化码——manifest 不落 errorCode 键）。
-// 3. 投影时机：终局转移前的中间态零投影（manifest 文件不存在），转移后恰一次。
-// 4. 投影失败不阻断终局（journal 侧断言独立成立——coda 权威面与取证面分离）。
+// 3. 派生视图生成时机：终局转移前的中间态零派生视图（manifest 文件不存在），转移后恰一次。
+// 4. 派生视图生成失败不阻断终局（journal 侧断言独立成立——coda 权威路径与取证路径分离）。
 
 import * as fs from "node:fs";
 import * as os from "node:os";
@@ -77,7 +77,7 @@ function makeRun(runId: string): WorkflowRun {
   return run;
 }
 
-// ── 1. 终局转移链 → 双面投影三形态（验收 a） ─────────────────
+// ── 1. 终局转移链 → 双路径派生视图三形态（验收 a） ─────────────────
 
 describe("终态写读三形态（验收 a：manifest 经真实转移链）", () => {
   it("成功 = completed：run-settled(completed) → manifest 落 outcome", async () => {
@@ -136,7 +136,7 @@ describe("终态写读三形态（验收 a：manifest 经真实转移链）", ()
 // ── 2. errorCode 载荷溯源 ────────────────────────────────────
 
 describe("errorCode 只溯源 run-settled 载荷", () => {
-  it("completed 终局带 errorCode 载荷位但无值 → 投影不落 errorCode 键", async () => {
+  it("completed 终局带 errorCode 载荷位但无值 → 派生视图不落 errorCode 键", async () => {
     const run = makeRun("wf-proj-ok-noerr");
     await dispatchRunCreated(run);
     await dispatchRunTrigger(run, {
@@ -150,9 +150,9 @@ describe("errorCode 只溯源 run-settled 载荷", () => {
   });
 });
 
-// ── 3. 投影时机（中间态零投影） ──────────────────────────────
+// ── 3. 派生视图生成时机（中间态零派生视图） ──────────────────────────────
 
-describe("投影时机（终局前的中间态零投影）", () => {
+describe("派生视图生成时机（终局前的中间态零派生视图）", () => {
   it("run-created / ask 链中间态不写 manifest；终局转移后恰一次", async () => {
     const run = makeRun("wf-proj-timing");
     await dispatchRunCreated(run);
@@ -173,7 +173,7 @@ describe("投影时机（终局前的中间态零投影）", () => {
     });
     expect(await readRunTerminalManifest(projectionDir, run.runId)).not.toBeNull();
 
-    // terminal 后再投递 = IllegalTransitionError 让位，投影不被重写（状态不变量）
+    // terminal 后再投递 = IllegalTransitionError 让位，派生视图不被重写（状态不变量）
     await expect(
       dispatchRunTrigger(run, {
         type: "agent-settled",
@@ -190,10 +190,10 @@ describe("投影时机（终局前的中间态零投影）", () => {
   });
 });
 
-// ── 4. journal 与投影独立（取证面与投影面分离） ──────────────
+// ── 4. journal 与派生视图独立（取证路径与派生视图分离） ──────────────
 
-describe("投影与 journal 共存（同目录不同文件）", () => {
-  it("终局后 journal 含 run-settled 帧 + manifest 落投影（互不干扰）", async () => {
+describe("派生视图与 journal 共存（同目录不同文件）", () => {
+  it("终局后 journal 含 run-settled 帧 + manifest 落派生视图（互不干扰）", async () => {
     const run = makeRun("wf-proj-coexist");
     await dispatchRunCreated(run);
     await dispatchRunTrigger(run, {
@@ -209,14 +209,14 @@ describe("投影与 journal 共存（同目录不同文件）", () => {
     expect(await readRunTerminalManifest(projectionDir, run.runId)).toMatchObject({
       outcome: "failed",
     });
-    // 目录投影文件齐备：journal / manifest
+    // 目录派生视图文件齐备：journal / manifest
     const names = fs.readdirSync(projectionDir).sort();
     expect(names).toContain(`${run.runId}.record.jsonl`);
     expect(names).toContain(`${run.runId}.json`);
   });
 });
 
-// ── 5. 生产链（finalizeRun → dispatchFinalRunSettle 构造 errorCode → 投影） ──
+// ── 5. 生产链（finalizeRun → dispatchFinalRunSettle 构造 errorCode → 派生视图） ──
 
 /** deps mock（形态对齐 worker-message-pump-run-events.test.ts）。 */
 function makeDeps(): LifecycleDeps {
@@ -248,7 +248,7 @@ function makeSettledCall(callId: number, result: AgentResult): AgentCall {
   return call;
 }
 
-describe("生产链 errorCode 投影（finalizeRun 构造 → manifest，S2 死亡可诊断）", () => {
+describe("生产链 errorCode 派生视图（finalizeRun 构造 → manifest，S2 死亡可诊断）", () => {
   it("engine_crashed 终局 → manifest{outcome:failed, errorCode:engine_crashed}（journal 终帧同源）", async () => {
     const run = makeRun("wf-prod-ec");
     await dispatchRunCreated(run);

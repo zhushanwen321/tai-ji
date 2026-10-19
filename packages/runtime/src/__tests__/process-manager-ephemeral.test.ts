@@ -75,7 +75,7 @@ describe('ProcessManager.withEphemeralPi（W11 短命 pi 附着）', () => {
     })
 
     expect(result).toBe(42)
-    // 附着原语 = switchSession(sessionFile)（非 --session CLI flag，rpc-client 参数面未扩）
+    // 附着原语 = switchSession(sessionFile)（非 --session CLI flag，rpc-client 参数侧未扩）
     const client = rpcMock.instances[0]
     expect(client).toBeDefined()
     expect(client.switchSession).toHaveBeenCalledTimes(1)

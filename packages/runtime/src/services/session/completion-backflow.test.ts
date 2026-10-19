@@ -189,7 +189,7 @@ describe('U6_EXIT_FAILBACK 迁移：终局死亡 respond 携 exitCode/stderrTail
       expect(r.payload.stderrTail).toBe('FATAL: oom')
       expect(r.payload.sessionFilePath).toBe(FILE)
     }
-    // 即时删除 + clearSession 兜底（latch 语义：迟到 exit 腿查无记录自然静默）
+    // 即时删除 + clearSession 兜底（latch 语义：迟到 exit 路径查无记录自然静默）
     expect(ledger.count()).toBe(0)
     expect(ledger.clearSession(CHILD)).toBe(0)
   })
@@ -311,10 +311,10 @@ describe('U6_MULTI_RUN 迁移：两次 settled 两次 respond（settleSeq 批身
   })
 })
 
-// ─── TTL 清扫腿（设计 D7；handler watch describe 消费同一助手）───────────────
+// ─── TTL 清扫路径（设计 D7；handler watch describe 消费同一助手）───────────────
 
 describe('TTL 清扫：已挂 watch 的悬挂 claim 转 orphaned → 同步 respond orphaned（防孤儿 promise）', () => {
-    it('aborted → cancelled 携 sessionId（静默收口数据源不回带不消费）', () => {
+    it('aborted → cancelled 携 sessionId（静默收尾数据源不回带不消费）', () => {
     const payload = toWatchRespondPayload({ type: 'aborted' }, CHILD)
     expect(payload).toEqual({ reason: 'cancelled', sessionId: CHILD })
   })

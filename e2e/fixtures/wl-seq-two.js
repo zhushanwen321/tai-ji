@@ -1,6 +1,6 @@
 // wl-seq-two.js — 窗口生命周期验收模板（batch-window-reuse-recovery.spec.ts A6/V6 配套 fixture）
 //
-// 顺序两次 agent()：第一条在飞期被外部 kill 薄壳进程（剧本注入）→ 收 engine_crashed
+// 顺序两次 agent()：第一条在途时被外部 kill 薄壳进程（剧本注入）→ 收 engine_crashed
 // 合成 error outcome（既有路径）；第二条应 respawn 新薄壳继续完成（设计 D7 保留语义：
 // 崩溃不放大为整个 run 失败）。失败以 AgentResult{error} resolve 不 throw（worker
 // postAgentResult 形态），模板防御式双收（try/catch 兜 throw 形态）。

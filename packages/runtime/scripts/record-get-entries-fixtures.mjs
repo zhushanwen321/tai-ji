@@ -9,7 +9,7 @@
  * parity 测试（A24）对这两个产物逐条 diff（RPC 内存态 == 文件态）。
  *
  * 输入源：packages/core 的 session-trace fixtures（真实 session 复制脱敏 + 等结构合成）。
- * 三个 session 的选择（覆盖面）：
+ * 三个 session 的选择（覆盖范围）：
  *   1. real-mixed-kinds            —— 真实数据：custom×44/custom_message/model_change/
  *                                     id-less session_info 侧支（124 行）
  *   2. synthetic-compaction-single —— compaction 语义（firstKeptEntryId + model_change）

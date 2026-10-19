@@ -2,7 +2,7 @@
  * TraceSync — session trace / system-prompt 同步域（S4 从 SessionService 迁出，
  * 与原 session-trace.ts 纯函数合并：一个概念一个模块，纯函数与编排半截同居）。
  *
- * 上半（纯函数，原 session-trace.ts 逐字随迁）：session trace 台账的**读取与归一化**——
+ * 上半（纯函数，原 session-trace.ts 逐字随迁）：session trace 条目清单的**读取与归一化**——
  *   - 路径 A（活跃 session）：RPC get_entries 权威解析（pi 原生，entry 结构演进跟随 pi
  *     升级）+ 文件首行补 header（pi getEntries() 明确不含 header，session-manager docstring）
  *     + 文件解析补 malformed（pi 静默跳坏行，G1 占位可见）。
@@ -12,8 +12,8 @@
  *     「session 尚未落盘」空态；不创建/触碰文件。
  *
  * 下半（编排半截，原 SessionService trace 域方法族逐字随迁，S4 前零直接测试——
- * 本模块化为 G2「stub 面 = 消费面」创造了直接测试面，见 __tests__/trace-sync.test.ts）：
- * getTraceEntries（全量拉取 + RPC→文件→empty 混合路由）/ syncTraceEntries（增量腿
+ * 本模块化为 G2「stub 面 = 消费方」形态创造了直接测试入口，见 __tests__/trace-sync.test.ts）：
+ * getTraceEntries（全量拉取 + RPC→文件→empty 混合路由）/ syncTraceEntries（增量路径
  * 串行链 + traceEntryAppended 广播）/ fetchCurrentSystemPrompt（常驻扩展现取通道轮询）
  * + 私有状态 traceLeafCache / traceSyncChains（per-session 基线与串行链，销毁经
  * onSessionDisposed 由 Facade removeSessionEntry 第 ⑤ 步直调清理）。
@@ -51,7 +51,7 @@ export function nextTracePushId(): string {
  */
 export const CURRENT_SYSTEM_PROMPT_CUSTOM_TYPE = 'taiji:current-system-prompt'
 
-/** trace 台账快照（= session.traceEntries WS payload；类型单源 = shared 协议载荷）。 */
+/** trace 条目清单快照（= session.traceEntries WS payload；类型单源 = shared 协议载荷）。 */
 export type SessionTraceSnapshot = ServerMessageMap['session.traceEntries']
 
 /**
@@ -172,7 +172,7 @@ const FETCH_CURRENT_PROMPT_TIMEOUT_MS = 8000
  * `new Error(msg.error)`，错误原文进 Error.message。匹配用大小写宽容的 includes
  * （防御 pi 上游微调文案大小写）+ 前缀锚定（避免误吞其他含 "entry" 字样的错误）。
  *
- * S4 起随 trace 域导出：Facade 残余的 history / record 域（getHistory 增量腿与 record
+ * S4 起随 trace 域导出：Facade 残余的 history / record 域（getHistory 增量路径与 record
  * entries 游标自愈）同判 pi 该错误，import 本模块（单一定义，双向共享）。
  */
 export function isEntryNotFoundError(e: unknown): boolean {
@@ -186,7 +186,7 @@ type PromptPollStep =
   | { hit: unknown; delta: unknown[]; newLeafId: string | null }
 
 /**
- * get_entries(since) 响应的消费面结构（C-comm-02：pi 协议类型 PiMessage 不出 infra/pi——
+ * get_entries(since) 响应的消费方结构（C-comm-02：pi 协议类型 PiMessage 不出 infra/pi——
  * 本文件是新模块不进 hook 存量 allowlist，消费点只用 entries/leafId 两字段，本别名即
  * trace 域的协议收窄边界；getEntriesSince 返回后无需再 as 收窄）。
  */
@@ -218,18 +218,18 @@ export interface TraceSyncDeps {
 
 export class TraceSync {
   /**
-   * session-trace 增量腿基线（A33）：per-session 上次全量拉取的 leafId（since 基准）。
+   * session-trace 增量路径基线（A33）：per-session 上次全量拉取的 leafId（since 基准）。
    * getTraceEntries 活跃路径写入；syncTraceEntries 读取后 get_entries(since) 拉 delta 并
-   * 滚动更新。无基线（trace 视图未打开过）→ 增量腿 no-op（前端打开时会全量拉取建立基线）。
+   * 滚动更新。无基线（trace 视图未打开过）→ 增量路径 no-op（前端打开时会全量拉取建立基线）。
    * 哨兵 ''（review round1 MUST_FIX）：空 session（pi leafId=null）也要建立基线，语义 =
    * 「基线已建立但当前无叶子」——后续 sync 经 getEntriesSince 无参全量拉（'' 不是合法
-   * entry id，不可下传 pi 当 since），拉到真实 leaf 后推进；否则空 session 台账冻结空态
+   * entry id，不可下传 pi 当 since），拉到真实 leaf 后推进；否则空 session 条目清单冻结空态
    * 且无恢复出口。removeSessionEntry 第 ⑤ 步经 onSessionDisposed 清除（与 historyCache
    * 同汇聚点）。
    */
   private readonly traceLeafCache = new Map<string, string>()
   /**
-   * session-trace 增量腿串行链（A33）：per-session promise 链，同 session 触发事件按到达序
+   * session-trace 增量路径串行链（A33）：per-session promise 链，同 session 触发事件按到达序
    * 串行拉取（message_end + agent_settled 几乎同时到达 → 链式串行后第二次 since 已是新
    * leaf，空 delta 不广播；burst 天然合并）。每段 catch 兜底，链永不 reject（diffChain 同款）。
    */
@@ -238,11 +238,11 @@ export class TraceSync {
   constructor(private readonly deps: TraceSyncDeps) {}
 
   /**
-   * session-trace 台账全量拉取（design D4 数据通路 A1，A31/A32）。
+   * session-trace 条目清单全量拉取（design D4 数据通路 A1，A31/A32）。
    *
    * 路由：① 活跃（pm 有 client）→ RPC get_entries（pi 权威解析）+ 文件首行补 header
    * （getEntries() 不含 header）+ 文件解析补 malformed（pi 静默跳坏行，G1 占位可见）
-   * + sidecar session_end；成功后写 traceLeafCache（增量腿
+   * + sidecar session_end；成功后写 traceLeafCache（增量路径
    * since 基线）。② RPC 失败（pi 进程异常）或无 client → 路径 B 文件直读（core parse-jsonl
    * 坏行容错 + sidecar 合并；design §3.1 降级路径：前端 banner「来自磁盘文件」）。
    * ③ 未落盘（pi 延迟写入窗口）→ source='empty' 空态标记。
@@ -258,7 +258,7 @@ export class TraceSync {
         const entries = result.data?.entries ?? []
         const leafId = result.data?.leafId ?? null
         // 空 session（仅 header，pi _buildIndex 置 leafId=null）也必须建立基线（哨兵 ''），
-        // 否则 doSyncTraceEntries 恒 no-op——台账冻结空态且无恢复出口（review round1 MUST_FIX）
+        // 否则 doSyncTraceEntries 恒 no-op——条目清单冻结空态且无恢复出口（review round1 MUST_FIX）
         this.traceLeafCache.set(sessionId, leafId ?? '')
         const filePath = this.resolveTraceFilePath(sessionId)
         const header = parseTraceHeaderLine(filePath !== null ? this.deps.sessionStore.readSessionHeaderLine(filePath) : null)
@@ -288,7 +288,7 @@ export class TraceSync {
   }
 
   /**
-   * session-trace 增量腿补拉（A33）：触发事件（message_end/compaction_end/agent_settled/
+   * session-trace 增量路径补充拉取（A33）：触发事件（message_end/compaction_end/agent_settled/
    * entry_appended，经 event-interpreter onTraceSync）或 lifecycle RPC（set_model/
    * set_thinking_level 成功后未方法内直调）到达后调用。
    *
@@ -313,7 +313,7 @@ export class TraceSync {
 
   private async doSyncTraceEntries(sessionId: string, trigger: string): Promise<void> {
     const baseline = this.traceLeafCache.get(sessionId)
-    if (baseline === undefined) return // 无基线（trace 视图未打开过）→ 增量腿 no-op
+    if (baseline === undefined) return // 无基线（trace 视图未打开过）→ 增量路径 no-op
     const client = this.deps.pm.getClient(sessionId)
     if (!client) return // 无活跃 client → 无 RPC 增量源（文件路径无 leaf 概念）
     let delta: unknown[] = []
@@ -376,7 +376,7 @@ export class TraceSync {
    *   → 本方法轮询 get_entries(since=基线) 拉到该 entry 后提取返回。
    *
    * 副作用：命中后滚动 traceLeafCache 基线 + 广播 session.traceEntryAppended（现取 entry
-   * 作为 DATA 行同步出现在 trace 台账，留下取值痕迹；custom 不进 LLM context，零模型影响——
+   * 作为 DATA 行同步出现在 trace 条目清单，留下取值痕迹；custom 不进 LLM context，零模型影响——
    * pi sessionEntryToContextMessages 对 type=custom 落入末尾 return []，session-manager.ts:383-413）。
    *
    * @throws code=session_not_active（无活跃 pi 进程——非活跃 session 无现取源）/
@@ -405,7 +405,7 @@ export class TraceSync {
         continue
       }
       if (!step.hit) continue
-      // 增量同步给 trace 台账（DATA 行留取值痕迹；消费端按 entry.id 去重）
+      // 增量同步给 trace 条目清单（DATA 行留取值痕迹；消费端按 entry.id 去重）
       if (step.delta.length > 0) {
         const bus = this.deps.getMessageBus()
         if (bus) {
@@ -470,7 +470,7 @@ export class TraceSync {
 
   /**
    * session 销毁的域清理（Facade removeSessionEntry 第 ⑤ 步直调，S4 各域清理汇聚形态）：
-   * 清 trace 增量腿基线与串行链（与 historyCache 同因——基线跨进程存活无意义；链已
+   * 清 trace 增量路径基线与串行链（与 historyCache 同因——基线跨进程存活无意义；链已
    * settled，删 Map 条目只释放槽位）。
    */
   onSessionDisposed(sessionId: string): void {

@@ -65,6 +65,68 @@ const SESSIONS_DIRNAME = 'sessions'
 const SUBAGENTS_DIRNAME = 'subagents'
 
 /**
+ * taiji session 存储树根段（`<dataDir>/ext-sessions/`）。
+ *
+ * session-reader 是 extension 不 import @taiji/shared——本常量是 shared
+ * `SESSION_STORE_DIR_SEGMENT` 的同字面镜像，dataDir 推导先例 = `dirname(agentDir)`
+ * 基址（布局 B `agentDir = <dataDir>/agent`；同 tool-handler doExport 导出落点）。
+ * 字面量一致性由对拍机检锚点 `scripts/check-artifact-dir-formula-sync.mjs`（域 9
+ * session-reader discovery 断言位）锁定，树根段改名时 shared 与此处同批改。
+ */
+const SESSION_STORE_DIR_SEGMENT = 'ext-sessions'
+
+/**
+ * 存储树分区目录名合法性正则（镜像 shared `PI_SESSION_ID_PATTERN`，同域规则：首尾
+ * 字母数字，中间允许 [A-Za-z0-9._-]；禁 `:`——btw 虚拟 id 必拒）。对拍机检锚点同上。
+ *
+ * [session-store-layout-inversion] 存储树扫描（subagent 根 / records manifest）以
+ * 此过滤 `<root>/` 一级目录——既是剪枝也是路径注入防线（目录名即 sessionId）。
+ */
+const PI_SESSION_ID_PATTERN = /^[A-Za-z0-9](?:[A-Za-z0-9._-]*[A-Za-z0-9])?$/
+
+/**
+ * session 存储树根目录（`<dataDir>/ext-sessions/`，dataDir = dirname(agentDir)）。
+ *
+ * 新布局全部 session 维度衍生数据的统一落点（布局权威 = shared getSessionStoreDir，
+ * 本函数是 extension 侧镜像推导）；旧布局 `<agentDir>/subagents` 不再读写（设计裁决
+ * D6：旧布局存量原位保留、不可见）。
+ */
+export function resolveSessionStoreRoot(agentDir: string): string {
+  return join(dirname(agentDir), SESSION_STORE_DIR_SEGMENT)
+}
+
+/** 存储树某根会话分区的 subagent 域目录（`<root>/<rootSessionId>/subagents/`）。 */
+export function resolveStoreSubagentsDir(agentDir: string, rootSessionId: string): string {
+  return join(resolveSessionStoreRoot(agentDir), rootSessionId, SUBAGENTS_DIRNAME)
+}
+
+/** subagent 会话 jsonl 目录（`<root>/<rootSessionId>/subagents/sessions/`）。 */
+export function resolveStoreSubagentSessionsDir(agentDir: string, rootSessionId: string): string {
+  return join(resolveStoreSubagentsDir(agentDir, rootSessionId), 'sessions')
+}
+
+/** ExecutionRecord manifest 目录（`<root>/<rootSessionId>/subagents/records/`）。 */
+export function resolveStoreSubagentRecordsDir(agentDir: string, rootSessionId: string): string {
+  return join(resolveStoreSubagentsDir(agentDir, rootSessionId), 'records')
+}
+
+/**
+ * 枚举存储树 `<root>/` 一级合法会话分区目录名（isPiSessionId 过滤，见
+ * PI_SESSION_ID_PATTERN 注释）。根不存在/无权限 → 空数组，不抛错。
+ */
+export async function listSessionStorePartitions(storeRoot: string): Promise<string[]> {
+  let entries: Dirent[]
+  try {
+    entries = await readdir(storeRoot, { withFileTypes: true })
+  } catch {
+    return []
+  }
+  return entries
+    .filter((e) => e.isDirectory() && PI_SESSION_ID_PATTERN.test(e.name))
+    .map((e) => e.name)
+}
+
+/**
  * `[live]` 规范化（§6.1/§7B 要点 3）：`getSessionDir()` 在纯 pi 返回按 cwd 编码的子目录
  *（`<agentDir>/sessions/--Users-x--`），在 taiji 覆盖态返回根本身。判据：basename
  * 匹配 encodeCwd 形态（`--` 开头 `--` 结尾）则取 dirname，否则取自身。
@@ -90,7 +152,10 @@ function sessionRootSpecs(signals: SessionRootSignals): SessionRoot[] {
   }
   specs.push(spec('default', 'main', join(signals.agentDir, SESSIONS_DIRNAME)))
   specs.push(spec('legacy', 'main', join(dirname(signals.agentDir), SESSIONS_DIRNAME)))
-  specs.push(spec('subagent', 'subagent', join(signals.agentDir, SUBAGENTS_DIRNAME)))
+  // [session-store-layout-inversion] subagent 根 = 存储树根（`<dataDir>/ext-sessions`），
+  // 扫描在 sid 分区内定向探 subagents/sessions/（scanStoreSubagentJsonl）；旧布局
+  // `<agentDir>/subagents` 不再读（设计裁决 D6：存量原位保留、不可见）。
+  specs.push(spec('subagent', 'subagent', resolveSessionStoreRoot(signals.agentDir)))
   return specs
 }
 
@@ -120,7 +185,7 @@ const SKIP_DIRS_NONE = new Set<string>()
 
 // ============================================================
 // 扫描 options（u8 追加：doctor「同一数据源两处渲染，不重复实现探测」§6.3——
-// doctor 经 options 驱动 subagent 根不扫。原 u8 的进程内缓存注入面已删除
+// doctor 经 options 驱动 subagent 根不扫。原 u8 的进程内缓存注入点已删除
 // （ext-simplify-04 U3）：每次调用实扫，本模块不再持有任何缓存语义）
 // ============================================================
 
@@ -139,11 +204,12 @@ export interface SessionRootScanOptions {
  *
  * 优先级 live > default > legacy > subagent；按 realpath 去重：同路径多信号只扫一次，
  * 保留最高优先级 kind 标签，被去重的根以 `dedupedInto` 标注（不产生 fileCount/scanMs）。
- * 逐根复用 scanJsonlRecursive（main 源跳 workflow-state；subagent 源不跳）。单根失败
+ * 逐根扫描：main 源整树递归（跳 workflow-state）；subagent 源 = 存储树定向扫描
+ *（[session-store-layout-inversion] 单新根，见 scanStoreSubagentJsonl）。单根失败
  * （不存在/无权限）→ 空结果继续，不抛错（沿用 listXxxSessions 契约）。
  *
  * options（u8 追加，全部缺省安全）：`subagents:'stat'` 让 subagent 根只做存在性检查。
- * 无缓存——每次调用实扫（原 u8 cache 注入面已删除，ext-simplify-04 U3；find/F1
+ * 无缓存——每次调用实扫（原 u8 cache 注入点已删除，ext-simplify-04 U3；find/F1
  * 自检行计数与 doctor 表计数同取本次实扫，§7B 要点 8）。
  */
 export async function resolveSessionRoots(
@@ -166,9 +232,13 @@ export async function resolveSessionRoots(
       out.push({ ...candidate, exists: await pathExists(candidate.path) })
       continue
     }
-    const skipDirs = candidate.source === 'main' ? SKIP_DIRS_MAIN : SKIP_DIRS_NONE
+    // subagent 源 = 存储树定向扫描（sid 分区剪枝，见 scanStoreSubagentJsonl）；
+    // main 源维持整树递归（跳 workflow-state）
     const t0 = performance.now()
-    const files = await scanJsonlRecursive(candidate.path, skipDirs)
+    const files =
+      candidate.source === 'subagent'
+        ? await scanStoreSubagentJsonl(candidate.path)
+        : await scanJsonlRecursive(candidate.path, SKIP_DIRS_MAIN)
     const scanMs = performance.now() - t0
     const exists = await pathExists(candidate.path)
     const root: SessionRoot = {
@@ -194,7 +264,7 @@ export interface SessionFileMeta {
 /**
  * main sessions 扫描时整体跳过的子目录名。
  * `workflow-state` 目录存放 workflow 运行状态文件（wf-*.jsonl，首行 `{"v":"wf-run-v1"|"wf-run-v2"...}`，
- * 版本随 subagent-workflow 快照格式演进，读取侧 v1/v2 兼容），非 session 文件——属 family 腿
+ * 版本随 subagent-workflow 快照格式演进，读取侧 v1/v2 兼容），非 session 文件——属 family 路径
  * 独立处理（design §3.3 D-7），扫描 main sessions 时排除，
  * 否则会把 wf 文件误收为 session（且 find.ts 读其首行 header 时会因 type≠session 被丢弃，
  * 在此排除可避免这批无效首行扫描）。
@@ -208,6 +278,24 @@ const SKIP_DIRS_MAIN = new Set(['workflow-state'])
  */
 function isSessionJsonl(name: string): boolean {
   return name.endsWith('.jsonl')
+}
+
+/**
+ * 存储树 subagent 根定向扫描（[session-store-layout-inversion] 读侧单新根）：
+ * 只探 `<root>/<rootSessionId>/subagents/sessions/` 固定位置。`<root>/` 一级只进
+ * isPiSessionId 形态目录（剪枝：不进 logs/attachments 等大目录，也挡非分区名目录）；
+ * 每 sid 分区内 records/ model-switch/ 不扫（会话文件域独立）。sessions/ 内部维持
+ * 递归 + stat（复用 scanJsonlRecursive，`.finalized` 天然排除）。存储树根或分区目录
+ * 不存在/无权限 → 空结果，不抛错（listXxxSessions 契约）。
+ */
+async function scanStoreSubagentJsonl(storeRoot: string): Promise<SessionFileMeta[]> {
+  const results: SessionFileMeta[] = []
+  for (const sid of await listSessionStorePartitions(storeRoot)) {
+    results.push(
+      ...(await scanJsonlRecursive(join(storeRoot, sid, SUBAGENTS_DIRNAME, 'sessions'), SKIP_DIRS_NONE)),
+    )
+  }
+  return results
 }
 
 /**

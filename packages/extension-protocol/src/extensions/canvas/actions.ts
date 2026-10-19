@@ -204,7 +204,10 @@ export interface CanvasReadParams { // oe-exempt:20261015:framework:画布域类
   subtree?: string
 }
 
-/** list：无参数（全量画布清单；过滤无字段——Record 结构性拒绝夹带）。 */
+/** list：无参数（全量画布清单的 action 侧形状——归属过滤字段不在共享 params 内：
+ * sessionId 是**通道级字段**（WS payload 携带、marker 通道由 dispatch 上下文的发起
+ * 会话注入，与 canvas.mutate 的 actor/sessionId 同款通道字段模式），runtime 按归属
+ * 会话过滤（D4 裁决 3）。Record 结构性拒绝夹带任何过滤字段）。 */
 export type CanvasListParams = Record<string, never>
 
 /** 16 action 的 params 映射（SSOT；两通道共用——WS RPC 与 marker 的 params 同构）。 */
@@ -238,7 +241,7 @@ export type CanvasMutateRequest = {
 
 export type CanvasMarkerAction = (typeof CANVAS_MARKER_ACTIONS)[number]
 
-/** enter（canvas_enter 打开形态）：读全量 + 登记绑定；非画布 mutation、不产事件。 */
+/** enter（canvas_enter 打开形态）：读全量（归属校验在 readState，非 owner → forbidden）；非画布 mutation、不产事件、无登记动作。 */
 export interface CanvasEnterParams { // oe-exempt:20261015:framework:画布域类型契约（数据形状/端口/测试 harness，非抽象接口单实现）
   canvasId: string
 }
@@ -494,7 +497,8 @@ export function isCanvasReadParams(v: unknown): v is CanvasReadParams {
   return isRecord(v) && requireCanvasId(v) && isOptionalString(v.subtree)
 }
 
-/** list：无参数——Record 结构性拒绝夹带任何过滤字段（session-manager list 同款）。 */
+/** list：无参数——Record 结构性拒绝夹带任何过滤字段（session-manager list 同款；
+ * 归属过滤字段是通道级的，见 CanvasListParams 注释）。 */
 export function isCanvasListParams(v: unknown): v is CanvasListParams {
   return isRecord(v)
 }

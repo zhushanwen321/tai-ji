@@ -6,8 +6,8 @@
 // 运行态数据移出主 session JSONL（eventLog/displayItems 端到端死字节停写），事实源 =
 // record 事件文件（record-events.ts）。
 //
-// v1 全量快照形态（W16 [D4]）与其写点/读面已随「项目未上线、无 v1 数据」整体删除
-// （登记 §3.3，2026-09-30）——本文件不再持有 v1 接口、投影函数与版本分支：读侧按
+// v1 全量快照形态（W16 [D4]）与其写点/读侧已随「项目未上线、无 v1 数据」整体删除
+// （登记 §3.3，2026-09-30）——本文件不再持有 v1 接口、派生视图函数与版本分支：读侧按
 // v 判别只认当前版本，旧形态一律跳过而非猜测。
 //
 // customType 与既有 `subagent-identity`（session 文件首行身份 entry）同族命名
@@ -19,7 +19,7 @@ import type { SubagentModelSource } from "../domain/record-model.ts";
 /** 自描述 record entry 的 customType。写点字面量与本常量的等值由
  *  __tests__/record-store.test.ts 断言钉住（消费方引用本常量，勿用裸字符串）。
  *
- * @experimental execution 运行时面（U10① D6）：一个 minor 周期内允许签名微调。 */
+ * @experimental execution 运行时侧（U10① D6）：一个 minor 周期内允许签名微调。 */
 export const SUBAGENT_RECORD_CUSTOM_TYPE = "subagent-record";
 
 // ── v2 条目契约（W1 / D1：注册 + 终态两条小条目）──────────────
@@ -40,8 +40,8 @@ export type SubagentRecordEntryKind = (typeof SUBAGENT_RECORD_ENTRY_KINDS)[numbe
 /**
  * v2 注册条目 data（设计 D1 条目契约表 subagent-record 行·注册列）。
  *
- * 诞生时写一条：身份 + 家族链锚点。字段集对照三个消费面枚举核对（session-reader
- * 锚链 / runtime 投影构造集 / SubagentTab 展示集）——身份域一次定清。事件文件
+ * 诞生时写一条：身份 + 家族链锚点。字段集对照三个消费方枚举核对（session-reader
+ * 锚链 / runtime 派生视图构造集 / SubagentTab 展示集）——身份域一次定清。事件文件
  * 寻址不经本条目（D3：注册条目 id 直接定址 `<recordsDir>/<sa-id>.events`，无需
  * eventsPath 锚点字段）。
  */
@@ -57,7 +57,7 @@ export interface SubagentRecordRegisteredEntryData {
   parentRunId?: string;
   /** origin="workflow" 时在 run 内的步骤索引（tool 来源缺省）。 */
   stepIndex?: number;
-  /** 派发期模型来源（engine-ref 时代的运行态展示面；缺席 = 存量/未知）。 */
+  /** 派发期模型来源（engine-ref 时代的运行态展示侧；缺席 = 存量/未知）。 */
   modelSource?: SubagentModelSource;
   /** 根 session id（session 隔离过滤用）。 */
   rootSessionId: string;
@@ -73,7 +73,7 @@ export interface SubagentRecordRegisteredEntryData {
  *
  * 结束时写一条（收编幂等补写同一形态）：终局 + 摘要 + session-reader 锚链载荷。
  * result 完整文本一次性写（SubagentTab 重启视图依赖，D1 增量裁决）；统计终值与
- * record-settled 事件（record-events.ts）同源——条目是 journal 的投影锚，不是
+ * record-settled 事件（record-events.ts）同源——条目是 journal 的派生视图锚，不是
  * 第二事实源。
  */
 export interface SubagentRecordSettledEntryData {

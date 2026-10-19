@@ -65,7 +65,7 @@ function warnDroppedEntriesOnce(count: number): void {
 }
 
 /**
- * 条目形状守卫：localStorage 是外部输入，合法 JSON 不代表条目形状合法。
+ * 条目形状检查：localStorage 是外部输入，合法 JSON 不代表条目形状合法。
  * 只接受 plain object；unread/markedDone 必须为 boolean 才保留（漂移字段剔除而非整条丢弃，
  * 合法标记不因同条目另一字段漂移而丢失）；重建后无任何合法字段的条目不可用，返回 undefined。
  */

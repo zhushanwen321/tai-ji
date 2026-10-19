@@ -9,7 +9,7 @@
  * 全量 200+ 语言 → 289 个死语言 chunk 8.1MB）改为 shiki/core + 12 个静态 grammar import
  * + 2 主题 import。本文件用**真实初始化**（不 mock shiki/core）锁定四条行为：
  *
- * 1. SHIKI_LANGS 13 项逐个 codeToHtml 产出非空且含 <span 样式节点（注册面完整）
+ * 1. SHIKI_LANGS 13 项逐个 codeToHtml 产出非空且含 <span 样式节点（注册清单完整）
  * 2. bash/sh/shell/zsh alias 均按 shellscript grammar 高亮——alias 桥接依赖 grammar
  *    自带 aliases（无显式 langAlias 配置），断言 alias 高亮 HTML 与 shellscript 逐字节
  *    一致，防 shiki 升级丢 grammar aliases 的静默回归（r1 审查要求）
@@ -17,7 +17,7 @@
  * 4. 双主题输出：defaultColor:false 时颜色走 --shiki-dark/--shiki-light CSS 变量
  *
  * 与 mock 系测试（markdown.test.ts 等）互补：那边锁定 fence 包装逻辑，这边锁定
- * 真实 shiki 注册面与 alias 语义。JS 正则引擎（createJavaScriptRegexEngine）纯 JS
+ * 真实 shiki 注册清单与 alias 语义。JS 正则引擎（createJavaScriptRegexEngine）纯 JS
  * 实现，node/vitest 环境可直接真实初始化，无 WASM 依赖。
  *
  * [D10 渲染链下沉] 自 renderer 随渲染链迁入 ui（import 改相对路径）。

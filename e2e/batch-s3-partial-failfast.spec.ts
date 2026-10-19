@@ -1,7 +1,7 @@
 /**
  * BATCH S3 部分失败 + 反向断言（E2E-BATCH-03）—— 坏 agent 路径 partial / message 域边界拒绝 / agents 数量错配 fail-fast。
  *
- * 登记：E2E-BATCH-03（docs/testing/e2e-map.json，R2 按改动面 on-diff，serial 空载串行，
+ * 登记：E2E-BATCH-03（docs/testing/e2e-map.json，R2 按改动范围 on-diff，serial 空载串行，
  * L3 真实 LLM）。本 spec 是 2026-09-22 丢失剧本的重建产物（W1 介质归位触发义务）
  * ——落 git 跟踪路径、不落 .tmp；e2e-map assets 产物行的回填归 U6 同 commit。
  *
@@ -13,17 +13,17 @@
  *   （介质归位）+ D7 终态双维度语义：
  *   ① S3a partial：fan-out 脚本返回 status=partial（脚本层失败），但 run 自身正常完成——
  *      journal run-settled outcome=completed（「脚本层失败 = outcome:completed + 脚本返回失败
- *      结论」与「run 自身怎么死的 = outcome:failed」在通知面可区分）；
+ *      结论」与「run 自身怎么死的 = outcome:failed」在通知侧可区分）；
  *   ② v2 条目每实体两条（registered/settled）且 settled 数 === registered 数
  *      （每注册实体必有终态——W1 D4 恢复语义的静息面）；
  *   ③ S3c fail-fast：journal run-created 后紧跟 run-settled(failed) 且零 ask 帧
  *      （错配在模板入口拦截，不派发任何成员）。
  *
- * 可复用登记声明：本 spec 是 E2E-BATCH-03 的可复用真机资产（后续触碰批量失败面行为时
+ * 可复用登记声明：本 spec 是 E2E-BATCH-03 的可复用真机资产（后续触碰批量失败行为时
  * 直接执行本文件，不再重建一次性剧本）。
  *
  * 执行侧约定（与 E2E-BATCH-01 同族）：
- * - 触发：scope diff 命中时开发期按改动面空载串行执行；双凭证门 = TAIJI_PI_LIVE=1 +
+ * - 触发：scope diff 命中时开发期按改动范围空载串行执行；双凭证门 = TAIJI_PI_LIVE=1 +
  *   本机 provider 凭证（缺一 skip 不 fail）；CI/PR/merge 门禁不跑。
  *   前置：real renderer bundle（VITE_E2E=true pnpm run build:e2e，不带 VITE_MOCK）。
  * - 预算：S3a 600s（真实 LLM：一好一坏双成员）/ S3b 180s（单 turn 拒绝）/ S3c 300s
@@ -33,7 +33,7 @@
  *   全页截图 + <dataDir>/logs/。重试禁令：失败先归因，禁止不归因直接重试。
  *
  * 形态说明：三个子场景共享一个真实 app 实例与同一会话（serial describe——S3b 依赖
- * S3a 产出的 record id；任一失败后续跳过，天然依赖链）。断言 ground truth =
+ * S3a 产出的 record id；任一失败后续跳过，天然依赖链）。断言原始证据文档 =
  * 主 session JSONL + journal 文件（磁盘事实）。good agent 为 spec 自建 fixture
  * （mkdtemp 内写 agent .md——只依赖成员引擎的 agent 解析，不依赖本机 agent 清单）。
  */
@@ -198,7 +198,7 @@ function extractCustomEntries(file: string, customType: string): Record<string, 
     .map((e) => (e['data'] ?? {}) as Record<string, unknown>)
 }
 
-/** 送达标签通道：type=custom_message（pi.sendMessage 落盘形态——权威消费面
+/** 送达标签通道：type=custom_message（pi.sendMessage 落盘形态——权威消费方
  *  collectDeliveredNotifyIds 只认此形态）。与 plain custom entry（type=custom，
  *  data 平铺）是两条落盘通道，customType 同名不能混用 extractor。 */
 function extractCustomMessageEntries(file: string, customType: string): Record<string, unknown>[] {
@@ -295,7 +295,7 @@ test.describe.serial('BATCH-S3 partial / message boundary / agents mismatch', ()
     }
   })
 
-  /** 发 prompt → 等主 turn complete（真实 LLM 调工具后收口）。
+  /** 发 prompt → 等主 turn complete（真实 LLM 调工具后收尾）。
    *  busy-retry：上一场景的 wf-done 通知（triggerTurn）唤醒的 turn 可能仍在跑，
    *  此时 message.send 的 RPC 回执成功但 pi 层 prompt 失败被静默丢弃（runtime 日志
    *  'Agent is already processing'——r3 实测 S3b 证据，sessionTail 空白佐证）。
@@ -352,7 +352,7 @@ test.describe.serial('BATCH-S3 partial / message boundary / agents mismatch', ()
     }
   }
 
-  test('S3a (batch real): 坏 agent 路径 → partial 收口（脚本层失败 ≠ run 死法）', async ({ }, testInfo) => {
+  test('S3a (batch real): 坏 agent 路径 → partial 收尾（脚本层失败 ≠ run 死法）', async ({ }, testInfo) => {
     test.setTimeout(600_000)
     const s = shared!
     const tasks = [
@@ -383,7 +383,7 @@ test.describe.serial('BATCH-S3 partial / message boundary / agents mismatch', ()
     const journalFile = listFilesRecursive(agentDir, '.events.jsonl')[0]
     const runId = path.basename(journalFile).replace(/\.events\.jsonl$/, '')
 
-    // notifyDone 到达（坏成员也要等全批收口——allSettled 语义）
+    // notifyDone 到达（坏成员也要等全批收尾——allSettled 语义）
     const notifyId = `wf-done:${runId}`
     const notifyArrived = await waitUntil(() => fs.readFileSync(s.sessionFile, 'utf8').includes(notifyId), NOTIFY_TIMEOUT_MS)
     if (!notifyArrived) {
@@ -408,7 +408,7 @@ test.describe.serial('BATCH-S3 partial / message boundary / agents mismatch', ()
       writeDiag(testInfo, 'batch-s3a-script-result-unparsable.json', { contentHead: content.slice(0, 2000) })
       throw new Error('Script Result 段应为合法 JSON')
     }
-    expect(scriptResult.status, `批收口 status 应为 partial（收到 "${String(scriptResult.status)}"）`).toBe('partial')
+    expect(scriptResult.status, `批收尾 status 应为 partial（收到 "${String(scriptResult.status)}"）`).toBe('partial')
     const okEntries = (scriptResult.results ?? []).filter((r) => r.status === 'ok')
     const failedEntries = (scriptResult.results ?? []).filter((r) => r.status === 'failed')
     expect(okEntries.length, '应恰 1 条 ok（good agent 成员）').toBe(1)
@@ -419,7 +419,7 @@ test.describe.serial('BATCH-S3 partial / message boundary / agents mismatch', ()
     const frames = readJournalFrames(journalFile)
     const settledFrames = frames.filter((f) => f['type'] === 'run-settled')
     expect(settledFrames.length, 'run-settled 应恰 1 帧').toBe(1)
-    expect(settledFrames[0]?.['outcome'], 'partial 收口的 run outcome 应为 completed（run 正常跑完，失败在脚本层结论）').toBe('completed')
+    expect(settledFrames[0]?.['outcome'], 'partial 收尾的 run outcome 应为 completed（run 正常跑完，失败在脚本层结论）').toBe('completed')
 
     // v2 条目：settled 数 === registered 数（每注册实体必有终态）+ record id 留给 S3b
     const saRegistered = extractCustomEntries(s.sessionFile, 'subagent-record').filter((d) => d['v'] === 2 && d['kind'] === 'registered')
@@ -428,9 +428,9 @@ test.describe.serial('BATCH-S3 partial / message boundary / agents mismatch', ()
     expect(saSettled.length, 'subagent-record v2 settled 数应 === registered 数（W1 D4：每注册实体必有终态）').toBe(saRegistered.length)
     const wfSettled = extractCustomEntries(s.sessionFile, 'workflow-record').filter((d) => d['v'] === 2 && d['kind'] === 'settled')
     expect(wfSettled.length, 'workflow-record v2 settled 应恰 1').toBe(1)
-    expect(wfSettled[0]['outcome'], 'workflow-record settled 条目 outcome 应与 journal 一致（journal 唯一事实源投影面）').toBe('completed')
+    expect(wfSettled[0]['outcome'], 'workflow-record settled 条目 outcome 应与 journal 一致（journal 唯一事实源派生视图）').toBe('completed')
     s.s3aRecordId = typeof saRegistered[0]?.['id'] === 'string' ? saRegistered[0]['id'] as string : undefined
-    console.log(`[batch-s3a] PASS：runId=${runId} partial 收口，recordId=${s.s3aRecordId}`)
+    console.log(`[batch-s3a] PASS：runId=${runId} partial 收尾，recordId=${s.s3aRecordId}`)
   })
 
   test('S3b (batch real): message 域边界拒绝——workflow-origin record 不进 message 通道', async ({ }, testInfo) => {
@@ -560,6 +560,6 @@ test.describe.serial('BATCH-S3 partial / message boundary / agents mismatch', ()
     expect(s3cSettled?.['outcome'], 'S3c settled 条目 outcome 应为 failed（与 journal 一致）').toBe('failed')
 
     await s.page.screenshot({ path: testInfo.outputPath('s3c-failfast.png'), fullPage: true })
-    console.log(`[batch-s3c] PASS：runId=${runId} fail-fast 零 ask 帧收口`)
+    console.log(`[batch-s3c] PASS：runId=${runId} fail-fast 零 ask 帧收尾`)
   })
 })

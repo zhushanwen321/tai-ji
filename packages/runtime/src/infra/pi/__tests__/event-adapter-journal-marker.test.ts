@@ -2,7 +2,7 @@
  * EventAdapter SUBAGENT_JOURNAL_MARKER 旁路测试（event-push-channel）。
  *
  * 覆盖（照 plan-review marker / inflight 测试形态，全部 mock 零真实 pi）：
- * - translate 守卫分支：marker 帧恒零产出（不进任何前端广播——第二道防线）；
+ * - translate 检查分支：marker 帧恒零产出（不进任何前端广播——第二道防线）；
  * - attach 旁路：合法报告 → journal-report-router 送达 sink（连接归属 sessionId）
  *   → 应用成功回 JOURNAL_REPORT_ACK（生效回执 D7）；
  * - 路由无消费方（sink 拒绝 / 未注册）→ 帧消费但不 ack（写侧按 D5 失败折叠）；
@@ -75,7 +75,7 @@ function makeAdapter() {
   return { adapter, interpret, responses, emit }
 }
 
-describe('translate 守卫分支（marker 帧恒零产出）', () => {
+describe('translate 检查分支（marker 帧恒零产出）', () => {
   it('journal marker 帧零产出（不进任何前端广播）', () => {
     const events = translate(
       selectEvent({ title: SUBAGENT_JOURNAL_MARKER, options: [JSON.stringify(validReport())] }) as unknown as Parameters<typeof translate>[0],
@@ -100,7 +100,7 @@ describe('attach 旁路（路由 + 生效回执）', () => {
     expect(interpret).not.toHaveBeenCalled() // marker 帧不进翻译/编排
   })
 
-  it('sink 拒绝（投影未就绪返回 false）→ 帧消费但不 ack（写侧按 D5 失败折叠）', () => {
+  it('sink 拒绝（派生视图未就绪返回 false）→ 帧消费但不 ack（写侧按 D5 失败折叠）', () => {
     makeSink(false)
     const { responses, emit } = makeAdapter()
 

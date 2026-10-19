@@ -7,7 +7,7 @@
  * `computed(() => usePanelStore().focusedSessionId)`（惰性 computed，首次求值 pinia 已 active）。
  *
  * 分层（C4 单向依赖）：本文件（control）= 纯控制态原语（isOpen/activeTab + 分区键），
- * 不感知 pendingOpen 守卫 / 瞬时参数 / 选中态（那是 coordination 与 selection 层职责）。
+ * 不感知 pendingOpen 检查 / 瞬时参数 / 选中态（那是 coordination 与 selection 层职责）。
  * coordination → control → foundation/use-session-scoped-state；selection/<域> → control
  * （drawerSessionKey）；control 不 import coordination/selection（无环）。
  *
@@ -52,7 +52,7 @@ export function bindDrawerSessionId(bound: Ref<string | null>): void {
   boundSid.value = bound
 }
 
-/** 读取当前绑定分区键（coordination 层守卫分发 / FR-9 清理用）。null = 未绑定或绑定值为 null */
+/** 读取当前绑定分区键（coordination 层检查分发 / FR-9 清理用）。null = 未绑定或绑定值为 null */
 export function getBoundSessionId(): string | null {
   return sidRef.value
 }

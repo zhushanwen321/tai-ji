@@ -1,19 +1,19 @@
 // @vitest-environment node
 
 /**
- * 反向守卫：`panel.*` / `settings.providerEdit.*` / `composable.*` 的 locale 叶子 key 必须被源码消费。
+ * 反向检查：`panel.*` / `settings.providerEdit.*` / `composable.*` 的 locale 叶子 key 必须被源码消费。
  *
  * 存在动机：
- * 仓库已有「引用 → 存在」守卫（provider-edit-key-existence.test.ts，防裸 key 透出），
- * 但没有反方向守卫，于是多年迭代后 locale 里沉淀了大量零引用死键（本守卫落地时
+ * 仓库已有「引用 → 存在」检查（provider-edit-key-existence.test.ts，防裸 key 透出），
+ * 但没有反方向检查，于是多年迭代后 locale 里积累了大量零引用死键（本检查落地时
  * 一次清扫了 97 条，见 commit message）。本测试补上「存在 → 被引用」这条通路。
  *
  * 判定语义：
  * - 消费者 = 仓库源码里的字面全路径引用（`t('panel.x.y')`、key 映射表里的字符串等）。
  *   `__tests__` / `*.test.*` / `e2e/` 不算消费者——测试断言只能证明「key 存在」，
- *   不能证明 UI 会渲染它（否则给死键补一行断言就能让守卫永远绿）。
+ *   不能证明 UI 会渲染它（否则给死键补一行断言就能让检查永远绿）。
  * - 消费者之外，唯一合法豁免是 ALLOWLIST 里的显式条目（常量数组 + 逐条理由）。
- *   禁止整段正则/目录豁免——那会把守卫变成橡皮图章。
+ *   禁止整段正则/目录豁免——那会把检查变成橡皮图章。
  *
  * 自证不空转（防「扫描根写错 → 空集合恒绿」）：
  * - 叶子 key 数量与被引用数量都有下界断言；
@@ -147,7 +147,7 @@ const REFS = collectLiteralRefs(NAMESPACES)
 const UNREFERENCED = NAMESPACES.flatMap((ns) => LEAVES[ns].filter((key) => !REFS.has(key)))
 const ALLOWED = new Set(ALLOWLIST.map((entry) => entry.key))
 
-describe('locale 反向守卫：panel.* / settings.providerEdit.* / composable.* 无零引用死键', () => {
+describe('locale 反向检查：panel.* / settings.providerEdit.* / composable.* 无零引用死键', () => {
   it('扫描通路有效：叶子 key 与被引用数量都有合理下界（防空集合恒绿）', () => {
     expect(LEAVES.panel.length).toBeGreaterThan(MIN_PANEL_LEAVES)
     expect(LEAVES['settings.providerEdit'].length).toBeGreaterThan(MIN_PROVIDER_EDIT_LEAVES)
@@ -163,7 +163,7 @@ describe('locale 反向守卫：panel.* / settings.providerEdit.* / composable.*
           `  - ${key}\n` +
           '      处置二选一：\n' +
           '        (1) 删键 —— 在 packages/ui/src/locale/{zh-CN,en-US}/ 对应文件里同号删除\n' +
-          '            （locale-sync-check 守卫要求双侧键集合一致，只删一侧会红）；\n' +
+          '            （locale-sync-check 检查要求双侧键集合一致，只删一侧会红）；\n' +
           '        (2) 保留 —— 仅当存在动态组装可达时，把 key 加入本文件顶部的 ALLOWLIST 常量，\n' +
           '            并在 reason 里写明「由哪一处、什么形式可达（file:line）」；无动态可达不得豁免。',
       )

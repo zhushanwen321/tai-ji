@@ -21,7 +21,7 @@ type Translate = (key: string, named?: Record<string, unknown>) => string
 
 /**
  * Provider 编辑会话（[C4] 三组子 interface）。本模块按组消费：form.draft（写 baseUrl）/
- * discover（test 状态转 props）/ models（模型数）——不逐名解构扁平返回面。
+ * discover（test 状态转 props）/ models（模型数）——不逐名解构扁平返回结构。
  */
 type ProviderEditState = ProviderEditSession
 

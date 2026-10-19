@@ -73,7 +73,7 @@ const fakeProc = {
     // kill 即死（mock 语义）：微任务内 emit exit 短路 killPiProcess 的 grace 真实等待。
     // [HISTORICAL] 2026-09-14 审计：空 vi.fn() 永不发 exit → 每次 afterEach kill 真睡
     // DEFAULT_PI_KILL_GRACE_MS(2s)，27 用例 ≈ 68s 纯等待（runtime 测试 top10 慢因头号构成）。
-    // 重复驱动由 kill-chain settled 幂等守卫兜底；收敛目标 = test/helpers/rpc-client-mock.ts。
+    // 重复驱动由 kill-chain settled 幂等检查兜底；收敛目标 = test/helpers/rpc-client-mock.ts。
     queueMicrotask(() => {
       if (procExitHandlers.length === 0) return
       const handlers = procExitHandlers

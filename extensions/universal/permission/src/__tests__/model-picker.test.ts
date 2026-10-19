@@ -285,7 +285,7 @@ describe("MPT5: ProviderModelSelectorComponent model onSelect", () => {
 		expect(comp.render(80).join("\n")).toContain("Select Provider"); // 回到 provider stage
 	});
 
-	it("_resolved 守卫：done 后再 handleInput no-op", () => {
+	it("_resolved 检查：done 后再 handleInput no-op", () => {
 		const done = vi.fn();
 		const models = makeModelsMap({ "co": [makeEntry("co", "m1")] });
 		const comp = new ProviderModelSelectorComponent("auto", ["co"], models, done);

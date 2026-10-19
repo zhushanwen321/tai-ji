@@ -12,7 +12,7 @@
 // （pool-manager cleanupExpiredJournals）。
 //
 // 机制语义：writer 创建即路径定稿；run 终态后 close（flush + fsync 一次，§3.3.6
-// 写入纪律；写失败已由 writer 内部 warn + failed 收口，close 不抛，journal 是②级
+// 写入纪律；写失败已由 writer 内部 warn + failed 收尾，close 不抛，journal 是②级
 // 尽力而为数据源）。
 
 import { SHARED_POOL_KEY } from "@zhushanwen/subagent-engine-sdk";
@@ -35,7 +35,7 @@ export interface JournalWiringOptions {
   forwardEvents?: (event: AgentEvent) => void;
 }
 
-/** wireEventJournal 的产物（喂给 RunContext 的回调簇 + 终态收口/回填面）。 */
+/** wireEventJournal 的产物（喂给 RunContext 的回调簇 + 终态收尾/回填面）。 */
 export interface JournalWiring {
   /** journaling onEvent：先落盘再转发——RunContext.onEvent 的值。 */
   onEvent: (event: AgentEvent) => void;
@@ -45,7 +45,7 @@ export interface JournalWiring {
    * （workflow 域 backfillHandle）都取本值。
    */
   readonly path: string;
-  /** run 终态收口（flush + fsync；幂等，不抛——见文件头）。 */
+  /** run 终态收尾（flush + fsync；幂等，不抛——见文件头）。 */
   close(): Promise<void>;
   /**
    * handle 回填：EngineHandleData.eventsPath = writer 终态路径（read ②级经
@@ -68,11 +68,11 @@ export function wireEventJournal(opts: JournalWiringOptions): JournalWiring {
     // 先落盘再转发（原 onEvent 未传时也恒传包装版——下游 onEvent 通道是事件生成后的
     // 纯转发，无行为分支，仅多一次入队）。
     //
-    // activity 豁免 append：纯活性信号不进持久/重放面——双侧 reducer（SDK
+    // activity 豁免 append：纯活性信号不进持久/重放侧——双侧 reducer（SDK
     // journal-replay / core execution-record）对其 no-op，豁免不破坏 live≡reload
     // 重放等价性；seq 由 append 铸造、过滤在 append 前故无 seq 空洞；
     // forwardEvents 照发（workflow liveRecord reducer no-op，chat/守护刷新面在
-    // observedEvent 上游不受影响）；取证面由 pi stdout/stderr tee 覆盖。
+    // observedEvent 上游不受影响）；取证侧由 pi stdout/stderr tee 覆盖。
     onEvent: (event) => {
       if (event.type !== "activity") journal.append(event);
       opts.forwardEvents?.(event);

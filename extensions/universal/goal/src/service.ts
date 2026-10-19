@@ -154,14 +154,14 @@ export function createGoal(
 /**
  * 唯一终态序列入口（FR-3.3 / AC-3）。
  *
- * 收口所有 active→terminal 转换的完整副作用序列——service（budget 终态）与
+ * 收尾所有 active→terminal 转换的完整副作用序列——service（budget 终态）与
  * command-adapter（clear / resume 超预算）、goal-control-adapter（complete）共用
  * 同一 `transitionStatus + completedAtTurnIndex + writeHistory + appendState` 序列。
  *
  * 序列（严格顺序）：
  * 1. tickState(state)（FR-6.5：转 terminal 前累加当前运行段——此时 status 仍为 active）
  * 2. finalizeGoal(state, terminalStatus, ports)
- *    — transitionStatus(终态守卫) + completedAtTurnIndex= + appendHistory（FR-8.7 矩阵）
+ *    — transitionStatus(终态检查) + completedAtTurnIndex= + appendHistory（FR-8.7 矩阵）
  * 3. ports.persistence.appendState(serializeState(state))（持久化终态 state）
  *
  * @param state runtime state（mutate）
@@ -255,10 +255,10 @@ export function applyEvent(
 
 	switch (eventType) {
 		case "message_end": {
-			// token 累加（FR-8.6 G-R2-001）—— 仅 active 时累加（回归修复：原缺 isActiveStatus 守卫，
+			// token 累加（FR-8.6 G-R2-001）—— 仅 active 时累加（回归修复：原缺 isActiveStatus 检查，
 			// blocked 等 non-active 状态会错误累加 token）。复用 engine 纯函数。
 			if (!isActiveStatus(session.state.status)) break;
-			// 运行时守卫解析事件数据（未知形状 → 可选字段），替代全可选结构断言
+			// 运行时检查解析事件数据（未知形状 → 可选字段），替代全可选结构断言
 			const data = toMessageEndData(eventData);
 			if (data?.message?.role !== "assistant") break;
 			const usage = data.message.usage;

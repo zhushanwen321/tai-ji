@@ -1,7 +1,7 @@
 /**
  * transport handler 共享工具。
  *
- * sendHandlerError 收口 git / file / extension 三个 handler 此前各自复制的 sendXError
+ * sendHandlerError 收尾 git / file / extension 三个 handler 此前各自复制的 sendXError
  * 样板（D10/P0-B 错误契约）：`instanceof XError → use .code/.message else fallbackCode + toErrorMessage`。
  * 各 handler 只需声明「认领的错误类 + 兜底 code + details」，分支判断交给本工具。
  */

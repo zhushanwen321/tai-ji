@@ -7,7 +7,7 @@
  * `.bak`），runtime 的 find-pi-executable 解析链（resources/pi 缺失时 PATH →
  * node_modules/.bin/pi）命中新 spawn；窗口结束 restore-mock-pi.mjs 三证恢复。
  *
- * 协议面 = `packages/runtime/src/infra/pi/pi-protocol.ts`（JSONL over stdin/stdout）：
+ * 协议范围 = `packages/runtime/src/infra/pi/pi-protocol.ts`（JSONL over stdin/stdout）：
  * - 命令应答 `{id, type:'response', command, success, error?, data?}`；未知命令回 error envelope；
  * - `extension_ui_response` 不回 RPC reply（与真实 pi rpc-mode 一致）；
  * - 事件帧经 lib/frames.mjs 构造（含 error envelope 与边界帧族）；
@@ -208,14 +208,14 @@ function handleAbort(cmd) {
   })();
 }
 
-// ── get_state 快照（create/attach 链恒经的恒定状态面）─────────────────
+// ── get_state 快照（create/attach 链恒经的恒定状态侧）─────────────────
 // 字段集对齐 pi 实装 0.84.4 dist/modes/rpc/rpc-mode.js:347-362（12 字段）。runtime 消费：
 // - sessionId：readBackCreateState（session-lifecycle.ts），缺失 = create 链 fatal；
 // - sessionFile：attach 断言 I1 / 崩溃取证（rpc-client getState）——switch_session 绑定后
 //   回报绑定路径，未绑定时省略 key（pi 首次 flush 前 session 路径未定，JSON 序列化丢
 //   undefined key 与实装同构）；
-// - model{provider,id} + thinkingLevel：restore-seeding 播种 + 标量投影（replicated-states
-//   .config 'required' 空值语义——缺失 = 协议异常退避重拉，故给非空 stub）。
+// - model{provider,id} + thinkingLevel：restore-seeding 播种 + 标量派生视图（replicated-states
+//   .config 'required' 空值语义——缺失 = 协议异常退避重新拉取，故给非空 stub）。
 // 无真值来源的字段用 stub 常量（steeringMode/followUpMode = 实装缺省值，见
 // dist/core/settings-manager.js getSteeringMode/getFollowUpMode）。
 function buildState() {

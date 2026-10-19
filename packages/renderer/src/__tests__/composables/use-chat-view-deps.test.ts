@@ -119,7 +119,7 @@ describe('onSpeak 朗读装配（ai-voice-tts §5.1）', () => {
     stop()
   })
 
-  it('speakStateOf 查询直通 useTtsPlayer（按 messageId 投影三态）', () => {
+  it('speakStateOf 查询直通 useTtsPlayer（按 messageId 映射三态）', () => {
     const { deps, stop } = setupDeps('s-tts-state')
     ttsStateMock.mockReturnValue('loading')
 

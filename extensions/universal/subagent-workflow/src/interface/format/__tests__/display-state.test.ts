@@ -1,6 +1,6 @@
 // src/interface/__tests__/display-state.test.ts
 //
-// [§2.2 B 档] run 域展示态单点：三态投影 + 色调 / 徽标 / 签名片段三张映射的等价性。
+// [§2.2 B 档] run 域展示态单点：三态派生视图 + 色调 / 徽标 / 签名片段三张映射的等价性。
 //
 // 回归价值：本批把原散在 WorkflowsView 三处的判定收敛到一处——本测试同时钉住
 // 「与既有 TUI 输出逐字一致」与「run 域色档与 format.ts 的 statusColorToken 同档」
@@ -70,7 +70,7 @@ function makeRun(shape: {
   } as unknown as WorkflowRun;
 }
 
-describe("runDisplayStateOf（三态投影与可中断性）", () => {
+describe("runDisplayStateOf（三态派生视图与可中断性）", () => {
   it("running → status running + abortable", () => {
     const ds = runDisplayStateOf(makeRun());
     expect(ds.status).toBe("running");
@@ -91,7 +91,7 @@ describe("runDisplayStateOf（三态投影与可中断性）", () => {
     expect(ds.doneReason).toBe("failed");
   });
 
-  it("会计面透传活体快照（含 maxTokens 缺席形态）", () => {
+  it("记账侧透传活体快照（含 maxTokens 缺席形态）", () => {
     const ds = runDisplayStateOf(makeRun({ budget: { usedTokens: 1234, usedCost: 0.5 } }));
     expect(ds.accounting).toEqual({ usedTokens: 1234, usedCost: 0.5 });
   });
@@ -136,7 +136,7 @@ describe("映射表（色调 / 徽标 / 失败族）", () => {
     }
   });
 
-  it("签名片段：生命周期面全字段进签名（状态/原因/可中断性任一变化即失效）", () => {
+  it("签名片段：生命周期侧全字段进签名（状态/原因/可中断性任一变化即失效）", () => {
     const running = runDisplaySignaturePart(runDisplayStateOf(makeRun()));
     const failed = runDisplaySignaturePart(runDisplayStateOf(makeRun({ status: "done", reason: "failed" })));
     const completed = runDisplaySignaturePart(runDisplayStateOf(makeRun({ status: "done", reason: "completed" })));

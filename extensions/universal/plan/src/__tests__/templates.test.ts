@@ -195,7 +195,7 @@ describe("<available-plans> 段拼装纯函数（D6）", () => {
       { name: "é", path: "/3" },
       { name: "z", path: "/4" },
     ]);
-    // guide 行里的 '<name>' 占位符无闭合标签，正则只命中真实条目
+    // guide 行里的 '<name>' 占位符无结束标签，正则只命中真实条目
     const order = [...section.matchAll(/<name>([^<]*)<\/name>/g)].map((m) => m[1]);
     expect(order).toEqual(["a-c", "ab", "z", "é"]);
   });
@@ -210,11 +210,11 @@ describe("<available-plans> 段拼装纯函数（D6）", () => {
 });
 
 describe("template ↔ extractPlanSteps alignment guard (D4)", () => {
-  // 守卫对象：模板生成端的步骤节标题与解析端正则同仓同测，漂移即红——
+  // 检查对象：模板生成端的步骤节标题与解析端正则同仓同测，漂移即红——
   // ① 模板标题改名 → 恰一节断言失败；
   // ② 解析正则与标题脱节 → 提取退化到 fallback 收进其他节的噪音项 → toEqual 失败。
   it.each(BUILTIN_TEMPLATE_NAMES)("template '%s' has exactly one '## Implementation Steps' section that extractPlanSteps consumes", (name) => {
-    // 胜者 path 直读（读取侧已随 select-template 单次扫描复用收口——不另有按名读取 API）
+    // 胜者 path 直读（读取侧已随 select-template 单次扫描复用收敛——不另有按名读取 API）
     const winner = listTemplates(isolatedSources()).find((t) => t.name === name);
     expect(winner).toBeDefined();
     const content = winner ? fs.readFileSync(winner.path, "utf-8") : "";

@@ -29,14 +29,14 @@
  *
  * filter 仅用于读取分流 + 入队第二道闸（富交互硬过滤之后）：store 存富交互 pending，
  * 多个 composable 实例（Panel 入 overlay 读取、审批条入 planReview 读取——D5）各按
- * filter 读同一份 store 分区。默认 formFilter（统一表单 form 键，Panel inline 渲染面）；
- * dialog 请求（非标记类）已由 CompanionBand 消费 bus 直连（wave1 起），不经 store。
+ * filter 读同一份 store 分区。默认 formFilter（统一表单 form 键，Panel inline 渲染范围）；
+ * dialog 请求（非标记类）已由 CompanionBand 消费 bus 直连（wave1 起），不再经 store。
  *
- * legacy 归一已上移 runtime（ui-presentation-protocol D7 收口，MF-1-5）：旧 askUser /
+ * legacy 归一已上移 runtime（ui-presentation-protocol D7 收尾，MF-1-5）：旧 askUser /
  * scheduleCreate marker 帧由 runtime event-adapter 分支直接产出 form:true 统一表单帧
  * （askUser 源含 type 推断映射），本层只消费 view-ready 帧、不再有 renderer 侧归一挂点。
  *
- * btw 侧（btw-question M3-c）：本模块只承载 btw 挂起的失效/修剪收口与 D7⑤ 草稿状态
+ * btw 侧（btw-question M3-c）：本模块只承载 btw 挂起的失效/修剪收尾与 D7⑤ 草稿状态
  * 本体（文件尾）；drawer 内联确认条编排本体（D8 降级路径）拆在
  * panel/useBtwInteraction.ts（单向依赖：编排 → 本模块，无环）。
  */
@@ -82,8 +82,8 @@ export const formFilter: UIRequestFilter = (req) => req.form === true
  * PlanReviewComment / PlanReviewResponse 本地同形副本已删除迁移，consumers.md 一④）。
  * `selfReview`（D9③）：agent 自审结论，与 canonical `PlanReviewRequest.selfReview` 同名同义，
  * 帧搬运走 pickPlanFields 白名单（热帧）/ 快照全量解包（冷补）双入店路径。
- * 本文件的 `isPlanReviewRequest` 是**帧标记守卫**（入 store 的请求面），与 canonical
- * `@zhushanwen/extension-protocol` 的同名**载荷形状守卫**（select options JSON 解析面）
+ * 本文件的 `isPlanReviewRequest` 是**帧标记检查**（入 store 的请求面），与 canonical
+ * `@zhushanwen/extension-protocol` 的同名**载荷形状检查**（select options JSON 解析范围）
  * 输入域不同、互不替代。
  */
 export interface PlanReviewUIRequest extends ExtensionUIRequest {
@@ -93,7 +93,7 @@ export interface PlanReviewUIRequest extends ExtensionUIRequest {
 }
 
 /**
- * 类型守卫：是否 planReview 审批请求。select 挂起期是「审批可交互」的权威信号（D5：
+ * 类型检查：是否 planReview 审批请求。select 挂起期是「审批可交互」的权威信号（D5：
  * 挂起 select 是 GUI→extension 的唯一可靠交互通道），审批条「有挂起请求」判定以此为源。
  * 谓词本体委托 @taiji/ui/extension-host isPlanReviewFrame（双壳帧守卫单点，MF-1-7）。
  */
@@ -239,9 +239,9 @@ type RequestsInvalidatedEvent = Extract<InternalEvent, { kind: 'requests-invalid
 let invalidatedUnsub: (() => void) | null = null
 
 /**
- * planReview 挂起镜像同步（D4 稳定窗输入面，store 禁 import store 的漏斗单写）：
+ * planReview 挂起镜像同步（D4 稳定窗输入范围，store 禁 import store 的漏斗单写）：
  * 本模块是 planReview 请求入店/出店的唯一漏斗（热帧 / 冷补 / respond / 失效 / 快照修剪），
- * 每个漏斗点 mutation 后按 registry 现值同步一次（幂等）——setPlanReviewPending 内含
+ * 每个写入点 mutation 后按 registry 现值同步一次（幂等）——setPlanReviewPending 内含
  * 「新 pending 到达解除已应答标记」语义。
  */
 function syncPlanReviewWindow(sid: string): void {
@@ -250,8 +250,8 @@ function syncPlanReviewWindow(sid: string): void {
   usePlanStore().setPlanReviewPending(sid, has)
 }
 
-// ── 冷拉对账 pending 再入店 sink（plan-store D4③：10s 兑底冷拉的 registry 写入缝）──
-// store 禁 import store：plan-store 只广播冷拉真值，registry 落店由本 sink 完成
+// ── 冷读路径拉取对账 pending 再入店 sink（plan-store D4③：10s 兜底冷读路径拉取的 registry 写入缝）──
+// store 禁 import store：plan-store 只广播冷读路径拉取真值，registry 落店由本 sink 完成
 // （呈 ready 需可枚举 requestId，respond 定位随之可用）。模块级一次注册，惰性取店
 //（事件到达时点 pinia 必已 active，同 invalidated 订阅的「现取」纪律）。
 let coldSinkRegistered = false
@@ -277,19 +277,19 @@ function ensureInvalidatedSubscription(): void {
   })
 }
 
-/** dialog level 白名单守卫（ExtensionUIRequest.level 契约面，三值）。 */
+/** dialog level 白名单检查（ExtensionUIRequest.level 契约范围，三值）。 */
 function isDialogLevel(value: unknown): value is 'info' | 'warn' | 'error' {
   return value === 'info' || value === 'warn' || value === 'error'
 }
 
-/** string[] 守卫（options 契约面）：数组且逐项 string。 */
+/** string[] 检查（options 契约范围）：数组且逐项 string。 */
 function isStringArray(value: unknown): value is string[] {
   return Array.isArray(value) && value.every(item => typeof item === 'string')
 }
 
 /** dialog 基础展示字段搬运（title/message/options/default/level/prefill）。
  *  DialogRequest 索引签名读原始 payload，值域 unknown，按 ExtensionUIRequest 契约
- *  运行时守卫收窄（isPlanReviewRequest 同范式）：畸形值（非 string / 非 string[] /
+ *  运行时检查收窄（isPlanReviewRequest 同范式）：畸形值（非 string / 非 string[] /
  *  越界 level）按无值处理落缺键降级分支，不伪造类型流入渲染层。 */
 function pickDialogFields(
   request: DialogRequest,
@@ -305,7 +305,7 @@ function pickDialogFields(
 }
 
 /** 统一表单扩展字段搬运（白名单漏补 = 字段静默剥离，FormOverlay 渲染拿不到问题集）；
- *  formQuestions 值域 unknown[]（isFormQuestion 守卫在消费端收窄），无需断言 */
+ *  formQuestions 值域 unknown[]（isFormQuestion 检查在消费端收窄），无需断言 */
 function pickFormFields(
   request: DialogRequest,
 ): Partial<Pick<ExtensionUIRequest, 'form' | 'formQuestions' | 'allowCancel'>> {
@@ -330,7 +330,7 @@ function pickLegacyFields(
 }
 
 /**
- * planReview 源键搬运（白名单漏补 = 字段静默剥离——selfReview 是 D9③ 投影链终点，漏补即
+ * planReview 源键搬运（白名单漏补 = 字段静默剥离——selfReview 是 D9③ 派生视图链终点，漏补即
  * 「切回 session 有自审行、实时挂起无」半残形态）：planReview 标记（挂起枚举依赖）+
  * selfReview（自审结论，非 string 值不入店）。热帧（bus→toExtensionUIRequest）走本白名单，
  * 冷补（getPendingRequests 快照全量解包）不经本函数但同样携带两键——双入店路径的
@@ -370,7 +370,7 @@ function toExtensionUIRequest(sid: string, request: DialogRequest): ExtensionUIR
     ...pickPlanFields(request),
     // expectTurn 源元数据透传（form-submit-busy-convergence D1 段 4）：帧上仅显式 false 落键
     //（runtime event-adapter 条件落键），undefined 缺键 = 缺省桥接态——按帧原样透传进 store，
-    // respond 分型据其三态判定；非 boolean 值不入帧（守卫即透传闸）。
+    // respond 分型据其三态判定；非 boolean 值不入帧（检查即透传闸）。
     ...(typeof request.expectTurn === 'boolean' ? { expectTurn: request.expectTurn } : {}),
     receivedAt: typeof rawReceivedAt === 'number' ? rawReceivedAt : Date.now(),
   }
@@ -384,7 +384,7 @@ export function useExtensionUI(
   // store.addRequest 含 requestId dedup（T1），无需手写去重。
   // P2-2 失效链订阅（模块级单例；首个使用者挂上后永驻，与 store 生命周期一致）
   ensureInvalidatedSubscription()
-  // 冷拉对账 pending 再入店 sink（模块级一次；plan-store D4③ 的 registry 写入缝）
+  // 冷读路径拉取对账 pending 再入店 sink（模块级一次；plan-store D4③ 的 registry 写入缝）
   ensurePlanReviewColdSink()
 
   let unsubFns: Array<() => void> = []
@@ -402,7 +402,7 @@ export function useExtensionUI(
     // PlanReviewBar；普通 dialog 由 CompanionBand 消费 bus，shell-adapters 侧对称排除，
     // 零重叠契约），filter 是第二道闸（实例只放各自标记——store 共享，谁放行谁入队，
     // requestId dedup 兜底双实例幂等）。
-    // C2：事件 sid 缺失（无 sid 的 ui-request）跳过入队（warn）——渲染面依赖 session 分区。
+    // C2：事件 sid 缺失（无 sid 的 ui-request）跳过入队（warn）——渲染范围依赖 session 分区。
     unsubFns.push(
       subscribeBus((e) => {
         const eventSid = e.sessionId
@@ -455,7 +455,7 @@ export function useExtensionUI(
   })
 
   /**
-   * 挂起 planReview 审批请求列表（D5 审批条消费面）：
+   * 挂起 planReview 审批请求列表（D5 审批条消费方）：
    * 「有挂起请求」判定 + respond 定位都按 requestId 枚举本列表——正常时序恒单条
    * （extension 单挂起），列表形态防多请求并发时的队首假设（pi 无串行保证，对齐
    * removeRequest 的 requestId 精确语义）。切 session 读不同分区，无 sid 恒空。

@@ -1,5 +1,5 @@
 /**
- * 移动壳自有文案（en-US）：与 zh-CN.ts 逐 key 镜像（结构对齐由 __tests__/mobile-locale.test.ts 守卫）。
+ * 移动壳自有文案（en-US）：与 zh-CN.ts 逐 key 镜像（结构对齐由 __tests__/mobile-locale.test.ts 检查）。
  */
 export default {
   mobile: {

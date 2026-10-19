@@ -52,7 +52,7 @@ function die(msg) {
   process.exit(1);
 }
 
-// 纯逻辑导出面（scripts/__tests__/gitcode-release-sync.test.mjs 单测——MF-3：发布同步
+// 纯逻辑导出清单（scripts/__tests__/gitcode-release-sync.test.mjs 单测——MF-3：发布同步
 // 关键分支不再只靠人工真发布验证）。token/repo 在模块加载时读 env（测试先设 env 再动态 import）。
 export {
   apiCall, assetList, buildExistingAssetMap, checkEnv, createRelease,
@@ -365,7 +365,7 @@ function diffNameSets(expected, actual) {
   };
 }
 
-/** 推后验证：GitCode 的分支+tags 引用集与 refSource 逐条比对（hash+refname 全等），
+/** 推送后验证：GitCode 的分支+tags 引用集与 refSource 逐条比对（hash+refname 全等），
  * 把「镜像完成」变成 exit 0 的可验证语义。无此验证时 GitCode 平台侧行为（如
  * release API 自动打 tag 到旧 commit，2026-09-07 v0.9.14 实测）会造成静默漂移。 */
 async function verifyMirrorAlignment(refSource, gitcodeUrl) {
@@ -390,8 +390,8 @@ async function verifyMirrorAlignment(refSource, gitcodeUrl) {
   console.log(`[push-repo] 镜像验证通过：分支+tags 引用集与 ${refSource} 完全一致`);
 }
 
-/** 附件推后验证：把「附件镜像完成」也变成 exit 0 语义（与 verifyMirrorAlignment 同构）。
- * [HISTORICAL] 2026-09-07 复盘遗留：refs 镜像有推后集合比对，assets 链路此前只验 PUT 2xx，
+/** 附件推送后验证：把「附件镜像完成」也变成 exit 0 语义（与 verifyMirrorAlignment 同构）。
+ * [HISTORICAL] 2026-09-07 复盘遗留：refs 镜像有推送后集合比对，assets 链路此前只验 PUT 2xx，
  * 而 GitCode asset 条目无 size 字段 → 幂等跳过按「同名即跳过」判定，同名旧附件残留 /
  * 上传截断都静默通过。两级校验补齐：
  * ① name 集合比对——缺失 = 用户拿不到文件，fail；多余只 WARN（sync 是幂等补齐语义而非

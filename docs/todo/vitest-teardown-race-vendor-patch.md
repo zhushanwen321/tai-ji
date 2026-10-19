@@ -23,7 +23,7 @@
 
 ## 退役条件
 
-上游发布修复后：**移除补丁 → 全仓 20 轮探针复验**（脚本模板见本次验证，产物曾落 `.tmp/vitest-patch-verify/`）→ 零假红才删除 `patches/vitest.patch` 与 `pnpm-workspace.yaml` 登记。补丁用**裸键** `vitest:`（不带版本）登记：vitest 升级导致补丁打不上即 install 报错——这是刻意选的**响亮失败**（若用版本钉死键，升级后会静默跳过补丁、假红复现而无人察觉）。
+上游发布修复后：**移除补丁 → 全仓 20 轮探针复验**（脚本模板见本次验证，产物曾落 `.tmp/vitest-patch-verify/`）→ 零假红才删除 `patches/vitest.patch` 与 `pnpm-workspace.yaml` 登记。补丁用**裸键** `vitest:`（不带版本）登记：vitest 升级导致补丁打不上即 install 报错——这是刻意选的**响亮失败**（若用固定版本号的键，升级后会静默跳过补丁、假红复现而无人察觉）。
 
 ## 验证证据（2026-10-03）
 

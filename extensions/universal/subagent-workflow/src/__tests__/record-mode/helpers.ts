@@ -22,22 +22,22 @@ import {
 } from "@zhushanwen/subagent-core";
 import type { WorkflowRunEvent } from "@zhushanwen/subagent-core";
 
-/** 自建自删的临时 workflow-state 环境（store 的 sessionDir 锚 + record 流路径构造）。 */
+/** 自建自删的临时 runs 目录环境（store 的 runsDir 锚 + record 流路径构造）。 */
 export interface RecordFixtureEnv { // oe-exempt:20260929:test:record-mode fixture env contract (test infra)
-  sessionDir: string;
+  runsDir: string;
   stateDir: string;
   recordPath(runId: string): string;
   cleanup(): void;
 }
 
 export function mkRecordEnv(label: string): RecordFixtureEnv {
-  const sessionDir = fs.mkdtempSync(path.join(os.tmpdir(), `wf-record-${label}-`));
-  const stateDir = path.join(sessionDir, "workflow-state");
+  const runsDir = fs.mkdtempSync(path.join(os.tmpdir(), `wf-record-${label}-`));
+  const stateDir = path.join(runsDir);
   return {
-    sessionDir,
+    runsDir,
     stateDir,
     recordPath: (runId: string) => path.join(stateDir, `${runId}${RUN_EVENTS_SUFFIX}`),
-    cleanup: () => fs.rmSync(sessionDir, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 }),
+    cleanup: () => fs.rmSync(runsDir, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 }),
   };
 }
 
@@ -91,10 +91,10 @@ export function runCreated(opts: {
   runId: string;
   workflowName?: string;
   scriptSource: string;
-  /** run-created 帧的 scriptPath 锚定载荷（生产写面 dispatchRunCreated 随帧落；缺省 = 旧格式帧）。 */
+  /** run-created 帧的 scriptPath 锚定载荷（生产写侧 dispatchRunCreated 随帧落；缺省 = 旧格式帧）。 */
   scriptPath?: string;
   argsSummary?: string;
-  /** run-created 帧的 args 全文（设计 §3.1 载荷表——生产写面 dispatchRunCreated 随帧落）。 */
+  /** run-created 帧的 args 全文（设计 §3.1 载荷表——生产写侧 dispatchRunCreated 随帧落）。 */
   args?: Record<string, unknown>;
   model?: string;
 }): WorkflowRunEvent {

@@ -1,7 +1,7 @@
 /**
  * lifecycle — runWorkflow/abortRun/terminateRunningRuns/scheduleTimeBudget/evict 测试。
  *
- * 用真实 WorkflowRun（含真实状态机 + I1/I2 不变式守卫）+ mock RunRuntime（释放副作用
+ * 用真实 WorkflowRun（含真实状态机 + I1/I2 不变式检查）+ mock RunRuntime（释放副作用
  * 可控）+ mock LifecycleDeps（store/workerHost/eventBus 可观察）。这样能真正测到
  * transition/assignRuntime/releaseRuntime 的状态机逻辑，而非全 mock 聚合根。
  *
@@ -152,7 +152,7 @@ afterEach(() => {
 // ── scheduleTimeBudget ───────────────────────────────────────
 
 
-/** [W2/V1] 六态机引导：journal 首帧（run-created）落账——finalizeRun/abortRun 等
+/** [W2/V1] 六态机引导：journal 首帧（run-created）写入 journal 记录——finalizeRun/abortRun 等
  *  活体终局入口的六态机裁决要求 created→dispatched 已在链上（生产链路由
  *  runWorkflow 正点发射承接；直测终局入口的用例经本 helper 补齐同一引导）。 */
 async function seedRunCreated(run: WorkflowRun): Promise<void> {
@@ -317,9 +317,9 @@ describe("runWorkflow", () => {
   });
 
   // [Q2/D9-1] run-created 正点接线（dispatchRunCreated 唯一生产调用点）：创建期
-  // 校验通过 + run 装配完成后落 journal 首帧——runWorkflow 返回 ⟹ 注册表投影可查
+  // 校验通过 + run 装配完成后落 journal 首帧——runWorkflow 返回 ⟹ 注册表派生视图可查
   //（active，fold 终帧 dispatched）。
-  it("run-created 正点发射：runWorkflow 返回后 journal 首帧落账，投影 = active/dispatched", async () => {
+  it("run-created 正点发射：runWorkflow 返回后 journal 首帧写入 journal 记录，派生视图 = active/dispatched", async () => {
     const journalDir = fs.mkdtempSync(path.join(os.tmpdir(), "lifecycle-run-created-"));
     setRunEventJournalDirForTest(journalDir);
     try {
@@ -344,7 +344,7 @@ describe("runWorkflow", () => {
       expect(projection.phase).toBe("active");
       // [D2] dispatched 并入 running——run-created 首帧后 fold 即 running
       expect(projection.state.lifecycle).toBe("running");
-      // [W1 / D1] v2 注册条目（两写点之一）：journal 首帧落账成功后经
+      // [W1 / D1] v2 注册条目（两写点之一）：journal 首帧写入 journal 记录成功后经
       // appendEntry 写主 session——recordPath 锚点指向真实 journal 文件
       const registered = deps.appendEntry.mock.calls.find((c) => c[0] === "workflow-record");
       expect(registered).toBeDefined();
@@ -397,7 +397,7 @@ describe("runWorkflow", () => {
 
   // 竞态锁（L4 A4 附带发现：8 跑 1 丢 6 帧）：run-created 入队必须先于
   // workerHost.start——enqueueRunDispatch 同步入队 + 队列执行序 = 入队序，
-  // worker 首个 agent() 的 ask 帧必然排在 created 之后落账。
+  // worker 首个 agent() 的 ask 帧必然排在 created 之后写入 journal 记录。
   it("run-created 入队先于 worker.start：start 同步段内首 ask 到达 → journal 帧序 created 先行、零丢帧", async () => {
     const journalDir = fs.mkdtempSync(path.join(os.tmpdir(), "lifecycle-race-"));
     setRunEventJournalDirForTest(journalDir);
@@ -419,7 +419,7 @@ describe("runWorkflow", () => {
 
       const runId = await runWorkflow(spec, deps);
 
-      // cancel-requested 作队列尾哨兵：await 它 = 该 run 投递队列排空（ask 帧已落账）。
+      // cancel-requested 作队列尾哨兵：await 它 = 该 run 投递队列排空（ask 帧已写入 journal 记录）。
       // 带完整 source（spec 含注入后的 _runId）——runId 键投递不携带 terminal 事件。
       await dispatchRunTrigger(
         { runId, spec },
@@ -465,11 +465,11 @@ describe("runWorkflow", () => {
     const runId = await runWorkflow(spec, deps);
     const run = deps.runs.get(runId)!;
 
-    // 生产行为面①：budgetTimeMs>0 → RunRuntime.timeBudgetTimer 被真实挂载
+    // 生产行为范围①：budgetTimeMs>0 → RunRuntime.timeBudgetTimer 被真实挂载
     //（scheduleTimeBudget 产出的 Node timer，非死代码 spy）
     expect(run.runtime?.timeBudgetTimer).toBeDefined();
 
-    // 生产行为面②：到期后 abortRun(time_limited) 真实触发——run 终局（[W2/V1]
+    // 生产行为范围②：到期后 abortRun(time_limited) 真实触发——run 终局（[W2/V1]
     // 断言换源：两态机字段停更，经终局记录判定），reason/error/通知全部落位
     //（文件级 beforeEach 已 fake timers）
     await vi.advanceTimersByTimeAsync(3000);
@@ -585,7 +585,7 @@ describe("abortRun", () => {
     // 旧实现裸调 emit：listener 抛错 → 异常上抛给 tool 调用方 + 跳过 onRunDone
     await expect(abortRun("wf-abort-fence", deps, "abort with broken bus")).resolves.toBeUndefined();
 
-    // abort 成功语义保持：终局落账/terminate 照常完成
+    // abort 成功语义保持：终局写入 journal 记录/terminate 照常完成
     expect(isRunSettled(run)).toBe(true);
     expect(settledRecordOf(run.runId)).toMatchObject({ outcome: "cancelled" });
     expect(terminate).toHaveBeenCalledTimes(1);
@@ -732,7 +732,7 @@ describe("terminateRunningRuns", () => {
   it("中断条目宿主回调抛错不吞收尾链：三步收尾仍执行、中断帧已落、错误留痕", async () => {
     const runId = "wf-term-entry-throw";
     const { run, terminate } = makeRunningRealRun(runId);
-    // 在途 call（running 态）——第一步 closeOutInFlightCalls 的收口对象
+    // 在途 call（running 态）——第一步 closeOutInFlightCalls 的收尾对象
     const traceNode: ExecutionTraceNode = {
       stepIndex: 1, agent: "worker", task: "in-flight", model: "test", status: "running",
     };
@@ -770,7 +770,7 @@ describe("terminateRunningRuns", () => {
       await terminateRunningRuns(deps, "Session switched: run terminated");
 
       // 三步收尾仍执行（修复前全部被跳过）
-      expect(call.status).toBe("done"); // ① closeOutInFlightCalls：在途 call 收口取消
+      expect(call.status).toBe("done"); // ① closeOutInFlightCalls：在途 call 收尾取消
       expect(call.result?.error).toContain("Cancelled");
       expect(run.runtime).toBeUndefined(); // ② releaseRuntime：worker 解绑停机
       expect(terminate).toHaveBeenCalledTimes(1);
@@ -791,11 +791,11 @@ describe("terminateRunningRuns", () => {
 // ── evictDoneRunsBeyondCap ────────────────────────────────────
 
 /**
- * 构造可重水合的 WorkflowRun 快照（对齐 crash-recovery.test.ts makeRun 模式）。
+ * 构造可重新加载的 WorkflowRun 快照（对齐 crash-recovery.test.ts makeRun 模式）。
  *
  * [D6(a) 第 1 步] 终局判定源 = 终局记录注册表：done 形态必须同时注入注册表条目
- * （生产 = 壳重建点 noteRebuiltSettlement 把 run-settled 帧事实带进消费面）；
- * settledAt 缺省取快照 completedAt（重水合 run 的条目 = run-settled 帧时序）。
+ * （生产 = 壳重建点 noteRebuiltSettlement 把 run-settled 帧事实带进消费方）；
+ * settledAt 缺省取快照 completedAt（重新加载 run 的条目 = run-settled 帧时序）。
  *
  * @param runId run 标识
  * @param opts.completedAt 完成时刻 ISO 串（缺省=缺失场景，模拟旧格式/异常快照）

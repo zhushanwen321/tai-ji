@@ -67,7 +67,7 @@ describe('migrateSettingsSkillsToDiscovery', () => {
     expect(dirs).toHaveLength(2)
     expect(dirs).toContain(piContainer)
     expect(dirs).toContain(agentsContainer)
-    // settings.json.skills 应同步投影为容器粒度
+    // settings.json.skills 应同步映射为容器粒度
     expect(readSettings().skills).toEqual(dirs)
   })
 

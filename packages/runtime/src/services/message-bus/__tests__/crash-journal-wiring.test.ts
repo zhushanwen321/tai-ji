@@ -2,13 +2,13 @@
  * u1e 条件信号事件接线测试（crash-forensics-and-watchdog §3.3 D1 写入点矩阵）。
  *
  * 覆盖映射（impl-plan u1e 验收条款）：
- * - push 告警档帧 → 台账 frame-truncated(reason=warn-tier)；守卫原有行为不变（原样广播、seq 正常）
- * - push 截断档帧 → 台账 frame-truncated(reason=trunc-tier)；截断仍截断（截断版广播、入 ring）
- * - push 注册表 miss → 台账 registry-miss；仍走原分支（不占 seq 不广播，后续 seq 连续）
+ * - push 告警档帧 → journal 登记 frame-truncated(reason=warn-tier)；检查原有行为不变（原样广播、seq 正常）
+ * - push 截断档帧 → journal 登记 frame-truncated(reason=trunc-tier)；截断仍截断（截断版广播、入 ring）
+ * - push 注册表 miss → journal 登记 registry-miss；仍走原分支（不占 seq 不广播，后续 seq 连续）
  * - push 替换后仍超限 → registry-miss（reason=still_oversize_after_truncate 区分两 miss 形态）
  * - reply 超限（broker）→ frame-truncated(trunc-tier)；错误 envelope 形态不变
  * - reply 告警档 → frame-truncated(warn-tier)；reply 原样送达
- * - 台账未初始化（no-op 单例）时挂点不抛、守卫行为照旧（best-effort 双写不反噬主链）
+ * - journal 未初始化（no-op 单例）时挂点不抛、检查行为照旧（best-effort 双写不反噬主链）
  *
  * 真实 IO（不 mock fs/writer）：写删目标 mkdtempSync 自建 tmp 目录自删（fs-guard 白名单），
  * 断言经 writer.close() 后读 runtime.jsonl 逐行 JSON.parse——整条「挂点 → getCrashJournal
@@ -93,7 +93,7 @@ function sentMessages(client: ReturnType<typeof makeClient>): ServerMessage[] {
   return client.send.mock.calls.map((call: unknown[]) => JSON.parse(call[0] as string) as ServerMessage)
 }
 
-/** 最小 BrokerServices（reply 守卫不读 services）。 */
+/** 最小 BrokerServices（reply 检查不读 services）。 */
 const mockServices = {
   sessionService: { listPersistedSessions: () => [] },
   configService: { listProviders: () => [], getDefaultModel: () => null, loadSkills: () => [], loadAgents: () => [] },
@@ -107,7 +107,7 @@ const mockServices = {
 // ── push 通路（MessageBus.publish） ────────────────────────────────
 
 describe('MessageBus.publish 条件信号事件接线（u1e）', () => {
-  it('告警档帧 → frame-truncated(reason=warn-tier)；消息原样广播 seq 正常（双写不改变守卫行为）', async () => {
+  it('告警档帧 → frame-truncated(reason=warn-tier)；消息原样广播 seq 正常（双写不改变检查行为）', async () => {
     const dir = initDataDir()
     initCrashJournal(dir)
     vi.spyOn(console, 'warn').mockImplementation(() => {})
@@ -298,8 +298,8 @@ describe('ServerMessageBroker.reply 条件信号事件接线（u1e）', () => {
 
 // ── best-effort 契约 ───────────────────────────────────────────────
 
-describe('台账未初始化（no-op 单例）时挂点零影响', () => {
-  it('不 init 台账：告警/截断/miss/reply 全部挂点不抛，守卫行为照旧', () => {
+describe('journal 未初始化（no-op 单例）时挂点零影响', () => {
+  it('不 init journal：告警/截断/miss/reply 全部挂点不抛，检查行为照旧', () => {
     initDataDir() // 只建目录，不 initCrashJournal
     vi.spyOn(console, 'warn').mockImplementation(() => {})
     vi.spyOn(console, 'error').mockImplementation(() => {})
@@ -313,7 +313,7 @@ describe('台账未初始化（no-op 单例）时挂点零影响', () => {
       bus.publish('s1', makeMessageEndFrame([{ type: 'text', text: 'x'.repeat(5000) }]))
       bus.publish('s1', { type: 'message.complete', payload: { sessionId: 's1', stopReason: 'end_turn', blob: 'x'.repeat(5000) } })
     }).not.toThrow()
-    // 守卫行为照旧：告警帧 + 截断帧送达，miss 帧丢弃 → 2 条
+    // 检查行为照旧：告警帧 + 截断帧送达，miss 帧丢弃 → 2 条
     expect(sentMessages(ws)).toHaveLength(2)
 
     const ws2 = makeWsClient()
@@ -321,7 +321,7 @@ describe('台账未初始化（no-op 单例）时挂点零影响', () => {
     expect(() => broker.reply(ws2, 'req-1', 'message.error', { sessionId: 's1', message: 'x'.repeat(5000) })).not.toThrow()
     expect(wsSent(ws2)).toHaveLength(1)
 
-    // 台账文件不存在（no-op writer 未产生任何写入面）
+    // journal 文件不存在（no-op writer 未产生任何写入）
     expect(existsSync(join(dataDir, 'logs', 'crashes'))).toBe(false)
   })
 })

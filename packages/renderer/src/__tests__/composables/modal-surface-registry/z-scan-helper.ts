@@ -49,7 +49,7 @@ export function findRepoRoot(startDir: string = process.cwd()): string {
   throw new Error(`z-scan: 从 ${startDir} 向上未找到 pnpm-workspace.yaml（仓库根）`)
 }
 
-/** 递归收集扫描面内的源文件（排序稳定，报错信息可复现）；selfDirFragment = null 时不排除登记目录 */
+/** 递归收集扫描范围内的源文件（排序稳定，报错信息可复现）；selfDirFragment = null 时不排除登记目录 */
 function collectFiles(root: string, dir: string, out: string[], selfDirFragment: string | null = SELF_DIR_FRAGMENT): void {
   const entries = readdirSync(dir, { withFileTypes: true }).sort((a, b) => (a.name < b.name ? -1 : 1))
   for (const entry of entries) {
@@ -163,7 +163,7 @@ export function scanZSurfaces(root: string): ZOccurrence[] {
     a.file === b.file ? (a.literal < b.literal ? -1 : a.literal > b.literal ? 1 : 0) : a.file < b.file ? -1 : 1)
 }
 
-/** Esc 消费方命中（局部表面两档对照基线的扫描面，§6.7） */
+/** Esc 消费方命中（局部表面两档对照基线的扫描范围，§6.7） */
 export interface EscConsumerOccurrence { // oe-exempt:20261003:test:esc 基线扫描测试夹具数据形态
   /** 仓库根相对路径 */
   file: string

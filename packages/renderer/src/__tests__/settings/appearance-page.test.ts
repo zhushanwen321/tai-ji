@@ -4,9 +4,9 @@
  * 覆盖（三视角：构建者渲染断言 + 使用者交互路径）：
  *  - 首屏渲染：h1 =「外观」、分区字号卡文案命中 locale（无 raw key 泄漏）、
  *    三个区域 Select trigger + 终端字号 input testid 存在。
- *  - 太极主题按钮：点击 → emit update {theme, themePreset}（持久化路径，与 store 落库闭环）。
- *  - Select 载荷守卫：外观模式/全局字号/分区字号三 Select 经 reka 真实交互点选 →
- *    update emit 走 onXxxSelect 运行时守卫收窄（不写死模板 as 断言的回归面）。
+ *  - 太极主题按钮：点击 → emit update {theme, themePreset}（持久化路径，与 store 落盘闭环）。
+ *  - Select 载荷检查：外观模式/全局字号/分区字号三 Select 经 reka 真实交互点选 →
+ *    update emit 走 onXxxSelect 运行时类型收窄（不写死模板 as 断言的回归测试）。
  *  - 终端字号：mount 拉取 getTerminalConfig；改值 + blur → setTerminalConfig 整体写回
  *    （保留 shell 等其他字段）+ clamp 边界（30 → 24）。
  *
@@ -99,9 +99,9 @@ describe('AppearancePage 渲染 gate', () => {
   })
 })
 
-describe('AppearancePage Select 载荷守卫（reka Select 交互 → update emit）', () => {
+describe('AppearancePage Select 载荷检查（reka Select 交互 → update emit）', () => {
   // reka Select 真实交互（pointerdown 开下拉 + option 点选）单源在 helpers/reka-select-harness。
-  // [appearance-grid 外观模式/全局字号已改 segmented（值域闭合字面量直调），仅分区字号仍走 Select]
+  // [appearance-grid 外观模式/全局字号已改 segmented（值域封闭字面量直调），仅分区字号仍走 Select]
 
   function lastUpdate(): Record<string, unknown> {
     const emitted = (wrapper as any).emitted('update')
@@ -109,7 +109,7 @@ describe('AppearancePage Select 载荷守卫（reka Select 交互 → update emi
     return emitted.at(-1)[0]
   }
 
-  it('外观模式 segmented：点「浅色」→ emit update {theme:"light"}（字面量直调，isThemeMode 守卫仍收窄）', async () => {
+  it('外观模式 segmented：点「浅色」→ emit update {theme:"light"}（字面量直调，isThemeMode 检查仍收窄）', async () => {
     wrapper = mountPage() // DEFAULT_SYSTEM theme=dark → 深色 active
     await flushPromises()
     const light = document.body.querySelector<HTMLElement>('[data-testid="appearance-mode-light"]')

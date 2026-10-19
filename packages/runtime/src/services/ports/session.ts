@@ -29,7 +29,7 @@ export interface ScannedSessionMeta {
   launchPresetId?: string
   /** 归属 project id（从 .project.json sidecar 读，D14 语义修正 2026-08-04）。 */
   projectId?: string
-  /** session 来源标记（从 .agent.json sidecar 读，agent-managed-session，与 infra/pi/session-file-utils 版本对齐——readAgentBinding 守卫已收窄枚举）。 */
+  /** session 来源标记（从 .agent.json sidecar 读，agent-managed-session，与 infra/pi/session-file-utils 版本对齐——readAgentBinding 检查已收窄枚举）。 */
   spawnSource?: 'user' | 'agent'
   /** 父 agent session id（从 .agent.json sidecar 读，agent-managed-session，与 infra/pi/session-file-utils 版本对齐）。 */
   parentAgentSessionId?: string
@@ -57,7 +57,7 @@ export interface SessionJsonlOversizeMark {
 }
 
 /**
- * 流式归一化的行级纯变换回调（D5⑤ 变换腿）。
+ * 流式归一化的行级纯变换回调（D5⑤ 变换路径）。
  *
  * 返回变换后的行文本；返回 null = 剔除该行。纯函数契约：只做字符串变换，不触 IO——
  * IO（分块读/临时名写入/rename-over）全部归 port 实现，services 层调用方经本 port
@@ -69,7 +69,7 @@ export type SessionJsonlLineTransform = (line: string, isFirstKeptLine: boolean)
  * session .jsonl 首行 header entry（type=session）解析结果。
  *
  * 纯数据类型（全 string 字段），从 infra/pi/session-file-utils.ts 提升到 port：
- * parseSessionHeader 收口到 port 后其返回类型必须 port 可见。
+ * parseSessionHeader 收敛到 port 后其返回类型必须 port 可见。
  * infra 原 SessionHeader 与之结构兼容（TS 结构类型，infra 侧无需改 import 源
  * 即可被 PiSessionStore 委托返回）。
  */
@@ -95,9 +95,9 @@ export interface SessionEndSidecarMeta {
  * entry 树重建历史结果。
  *
  * 纯数据类型（Message[] + Map），从 infra/pi/entry-tree-builder.ts 提升到 port：
- * rebuildHistoryFromEntries 收口到 port 后其返回类型必须 port 可见。
+ * rebuildHistoryFromEntries 收敛到 port 后其返回类型必须 port 可见。
  * 保留 clientUuidMap（userEntryId→clientUuid 映射）——未来增量拉取
- * （getEntries(since=leafId)）/ branch 完整性判断需用，收口不降级原函数能力。
+ * （getEntries(since=leafId)）/ branch 完整性判断需用，收敛不降级原函数能力。
  * ⚠️ 映射是稀疏的（最小写入）：仅含非纯文本消息（send 端 needsBackfill 谓词门控），
  * steer/followUp/compact 重放消息历来无映射。上述未来特性不得假设映射覆盖全部 user entry。
  */
@@ -145,11 +145,11 @@ export interface ISessionStore {
   refreshAll(): void
   /** 持久化 session 终态（W4，ADR 0042）。 */
   persistSessionEnd(filePath: string, outcome: SessionOutcome, reason?: string): void
-  /** 持久化 launch preset 绑定到 .preset.json sidecar（设计文档 §4）。opts.skipJsonlExistsGuard 仅限 create 路径（V9-④ 根修）。 */
+  /** 持久化 launch preset 绑定到 .preset.json sidecar（设计文档 §4）。opts.skipJsonlExistsGuard 仅限 create 路径（V9-④ 从根源修复）。 */
   persistPresetBinding(filePath: string, presetId: string, opts?: { skipJsonlExistsGuard?: boolean }): void
-  /** 持久化归属 project 到 .project.json sidecar（D14 语义修正，2026-08-04）。opts.skipJsonlExistsGuard 仅限 create 路径（V9-④ 根修）。 */
+  /** 持久化归属 project 到 .project.json sidecar（D14 语义修正，2026-08-04）。opts.skipJsonlExistsGuard 仅限 create 路径（V9-④ 从根源修复）。 */
   persistProjectBinding(filePath: string, projectId: string, opts?: { skipJsonlExistsGuard?: boolean }): void
-  /** 持久化 agent-managed 标记到 .agent.json sidecar（G-1，重启恢复链路）。opts.skipJsonlExistsGuard 仅限 create 路径（V9-④ 根修）。 */
+  /** 持久化 agent-managed 标记到 .agent.json sidecar（G-1，重启恢复链路）。opts.skipJsonlExistsGuard 仅限 create 路径（V9-④ 从根源修复）。 */
   persistAgentBinding(filePath: string, spawnSource: 'user' | 'agent', parentAgentSessionId: string | undefined, opts?: { skipJsonlExistsGuard?: boolean }): void
   /** 读取 session 终态（W5）；无 session_end entry 返回 null（历史 session）。 */
   extractSessionOutcome(filePath: string): SessionOutcome | null
@@ -197,7 +197,7 @@ export interface ISessionStore {
    */
   readSessionJsonlText(filePath: string): string | SessionJsonlOversizeMark | null
   /**
-   * 分块流式归一化 session JSONL 并 rename-over 原子替换原文件（D5⑤ 变换腿，crash-resilience
+   * 分块流式归一化 session JSONL 并 rename-over 原子替换原文件（D5⑤ 变换路径，crash-resilience
    * §3.3 降级形态：超 READ_PRECHECK_MAX_BYTES 文件的附着前最小规范化，不构造全文件字符串）。
    *
    * IO（分块读 / '.tmp-migrate-' 临时名写入 / rename / 失败回滚）全部在本 port 实现内；
@@ -232,4 +232,10 @@ export interface ISessionStore {
    * （session-lifecycle），禁止断头成 unhandledRejection（timeout-audit-hygiene-batch u-h4）。
    */
   trash(path: string): Promise<void>
+  /**
+   * [session-store-layout-inversion D5] 目录级软删：`<root>/<sid>/` 整树进废纸篓
+   * （session 删除链③段）。Promise 语义同 trash——失败保留原地并 reject，rejection
+   * 经 session-lifecycle 传播（可恢复形态，重试删除即达终态）。
+   */
+  trashDirectory(dirPath: string): Promise<void>
 }

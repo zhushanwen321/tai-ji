@@ -3,7 +3,7 @@
 /**
  * useModel 回执消费测试（U6/C-pi-13，pi-boundary-reliability D3②）。
  *
- * 锁定（事故 B 根因 ③ + 事故 A 形态——「无受理确认 + 乐观写」的闭合）：
+ * 锁定（事故 B 根因 ③ + 事故 A 形态——「无受理确认 + 乐观写」的闭环缺失）：
  * - thinkingLevel 显示值 = reply 回执的生效值（pi 钳制时 ≠ 请求值，如 mimo 族 max → high），
  *   第一毫秒起就是真值——不存在 30s 后「自己变回去」；
  * - modelId 显示值 = reply 回执的生效值（pi pattern 引擎静默换模时生效 ≠ 请求）；

@@ -23,21 +23,21 @@
  *   因此消费本 helper 的 spec 必须在 launchRealApp 前设 process.env.TAIJI_AGENT_DEBUG='1'。
  * - preserved 计数语义：runs = workflow run 聚合根数；records = Σ run.state.calls.size
  *   （每 call 对应一条 subagent record）；stores = sessionState 条目数（workflow-events.ts:477-487）。
- * - run 存活反证串：`[relay] connection lost, killing child (kill-on-disconnect)` 与
- *   `[relay] child exited recordId=... code=143`（infra/relay/relay-registry.ts:465/459）。
+ * - run 存活反证串：`[subagent-control] kill decision action=terminate_channel channelId=...
+ *   reason=...` 与 `[subagent-control] engine closed channelId=... code=... signal=...
+ *   reason=...`（infra/subagent-control/control-server.ts）。
  * - workflow-record 权威 entry：主 session JSONL `{"customType":"workflow-record","data":
  *   {v:2,kind}}`（W1 record/journal 媒体重定位起现行格式，schema SSOT =
  *   subagent-core orchestration/workflow-record-entry.ts）：kind=registered（起跑，无
  *   status 字段）与 kind=settled（终局，status ∈ 'done'|'interrupted'）两条小条目——
- *   读取形态同 lastWorkflowRecordFor（registered 投影 running，settled 取 status）。
+ *   读取形态同 lastWorkflowRecordFor（registered 映射为 running，settled 取 status）。
  * - composer skill 浮层候选行：CommandPopover.vue `.pop-item`（portal 到 body，00-overview §6.4），
  *   skill 项 displayName = 裸名（command-popover-skill-candidates.ts:68，`/skill:` 前缀已去）。
  *   触发 = 行中空白后 `/`（非换行空白 + `/`，空 query 合法——dom-core skill-trigger.test.ts 锁定语义）。
  * - 托盘：`[data-testid="tray-builtin-button"][data-kind="workflow"]` +
  *   `[data-testid="tray-builtin-count"]`（ComposerTray.vue:81/106-110；data-state running|idle）。
  * - 引擎 CLI 进程 marker：`pi-subagent-cli.mjs`（faux 轨 seedFauxDataDir 的 subagents/config.json
- *   command/args，launch-app-real.ts:185-193）；relay 代理 marker `relay.mjs`（内嵌镜像脚本文件名，
- *   subagent-core/src/execution/relay-env.ts:12）；真实 pi 子进程 marker：bundled pi 二进制
+ *   command/args，launch-app-real.ts:185-193）；真实 pi 子进程 marker：bundled pi 二进制
  *   `resources/pi/`（findPiExecutable 缺省）。
  * - 项目 skill 目录 `<cwd>/.pi/skills` 进扫描集与 watch 集：services/skill-dirs.ts:39/95
  *   （A1 扫描集对账）；skill name = 目录名（scanners/skill-scanner.ts loadSkillFromDir）。
@@ -116,7 +116,7 @@ export function writeGlobalSkill(dataDir: string, name: string, description: str
 }
 
 /**
- * workflow 探针脚本源码（单 agent() 调用，faux 槽位演员长响应保持 run 在飞）。
+ * workflow 探针脚本源码（单 agent() 调用，faux 槽位演员长响应保持 run 在途）。
  * lintScript 约束：含 agent() 入口 / 无 bare IIFE / 不用 result 作变量名。
  */
 export function makeSurvivalProbeSource(scriptName: string, model: string, description: string): string {
@@ -161,7 +161,7 @@ export function mainDispatchSteps(runPaths: string[], closingText: string): Faux
   return steps
 }
 
-/** subagent faux 队列（model-keyed）：长流式响应保持 run 在飞跨越编辑→reload→adoption 全窗口 */
+/** subagent faux 队列（model-keyed）：长流式响应保持 run 在途跨越编辑→reload→adoption 全窗口 */
 export function survivorSteps(model: string, streamText: string, extraSteps: FauxStep[] = []): Record<string, FauxStep[]> {
   return { [model]: [{ text: streamText }, ...extraSteps] }
 }
@@ -178,7 +178,7 @@ export function readExtensionLogs(dataDir: string): string {
 
 /** 轮询节奏常量（日志/文件轮询间隔） */
 const LOG_POLL_INTERVAL_MS = 500
-/** 引擎执行树死亡级联（stdin EOF → relay 断连 → kill-on-disconnect）的宽限上界 */
+/** 引擎执行树死亡级联（stdin EOF → control 断连 → kill-on-disconnect）的宽限上界 */
 const ENGINE_TREE_GONE_TIMEOUT_MS = 15_000
 /** 引擎执行树归零核对间隔 */
 const TREE_POLL_INTERVAL_MS = 1000
@@ -232,7 +232,7 @@ export function readJsonlEntries(file: string): unknown[] | null {
   }
 }
 
-/** workflow-record entry 最小投影（只取断言消费的 runId/status 面） */
+/** workflow-record entry 最小派生视图（只取断言消费的 runId/status 面） */
 export interface WorkflowRecordView {
   runId: string
   status: string | undefined
@@ -248,7 +248,7 @@ const WORKFLOW_RECORD_ENTRY_V = 2
 /**
  * 提取主 session JSONL 内指定 runId 的最后一条 workflow-record（W17：last-wins 终态）。
  * v2 条目形态（W1 record/journal 媒体重定位起，classifyWorkflowRecordEntryData 同款判别键）：
- * registered = run 起跑（无 status 字段，投影 running）；settled = 终局（status ∈
+ * registered = run 起跑（无 status 字段，映射为 running）；settled = 终局（status ∈
  * 'done'|'interrupted'）。测试 session 全新创建只写 v2；v1 快照格式已随该重定位退役。
  */
 export function lastWorkflowRecordFor(file: string, runId: string): WorkflowRecordView | null {
@@ -273,7 +273,7 @@ export function lastWorkflowRecordFor(file: string, runId: string): WorkflowReco
 // ── run 完成 → done 增量信号帧到达的双锚计时（S1b/S2 共用，G1 必达窗口断言） ──
 
 /**
- * 双锚计时结果（reload-closeout-reliability 设计 §4 A1 新断言的观测面）。
+ * 双锚计时结果（reload-closeout-reliability 设计 §4 A1 新断言的观测范围）。
  * - tDoneRecord：主 session JSONL 末条 workflow-record 落 done 的首见时刻——完成锚
  *   （权威 record 落盘 = 系统语义上的「run 完成」，W17 last-wins 终态）。
  * - tFrameSeen：spec WS events 首见 status=done 增量信号帧的时刻——到达锚
@@ -329,7 +329,7 @@ function doneRecordSeenAt(sessionFile: string | null, runId: string): number {
  * 两锚都见到才返回（时序不定：帧可先于文件 flush 到达，反之亦然）；deadline 内未见全返回 null。
  *
  * runId 取 events 内首条 workflowUpdate 帧（running 帧——run 启动即广播；harness 防重播种
- * 守卫后每 session 单 run，首个 runId 即目标）。events 全量遍历（禁 find：running 帧先入数组
+ * 检查后每 session 单 run，首个 runId 即目标）。events 全量遍历（禁 find：running 帧先入数组
  * 且 find 恒返回首帧，done 帧永不被检视——S1b/S2 既有注释同款教训）。
  */
 export async function awaitWorkflowDoneTimed(
@@ -356,7 +356,7 @@ export async function awaitWorkflowDoneTimed(
   return null
 }
 
-/** G1 必达窗口红线（ms）：agent_settled 对账腿秒级 / 15s 定时腿最坏 ≈15s+单轮，30s = 2x 余量 */
+/** G1 必达窗口红线（ms）：agent_settled 对账路径秒级 / 15s 定时路径最坏 ≈15s+单轮，30s = 2x 余量 */
 export const WORKFLOW_DONE_MAX_LATENCY_MS = 30_000
 
 /** 观测容差倍数：完成锚与到达锚各含一次观测延迟 */
@@ -367,7 +367,7 @@ export const DONE_TIMING_OBSERVE_SLACK_MS = OBSERVE_SLACK_MULTIPLIER * DONE_TIMI
 
 // ── 进程面（孤儿检查 / 引擎 pid 稳定性） ──────────────────────────────
 
-/** ps 单行最小面 */
+/** ps 单行最小字段集 */
 interface PsEntry {
   pid: number
   command: string
@@ -382,19 +382,19 @@ function psEntries(): PsEntry[] {
   })
 }
 
-/** 引擎执行树 marker（含子进程；孤儿子集都是这三族，见文件头 marker 说明） */
-const ENGINE_TREE_MARKERS = ['pi-subagent-cli.mjs', 'relay.mjs', 'resources/pi/'] as const
+/** 引擎执行树 marker（含子进程；孤儿子集都是这两族，见文件头 marker 说明） */
+const ENGINE_TREE_MARKERS = ['pi-subagent-cli.mjs', 'resources/pi/'] as const
 
 function pidsMatching(markers: readonly string[]): number[] {
-  // 排除宿主同跑实例：marker 是通用串（relay.mjs / resources/pi/ / pi-subagent-cli.mjs），
+  // 排除宿主同跑实例：marker 是通用串（resources/pi/ / pi-subagent-cli.mjs），
   // 同机其他 taiji 实例的引擎执行树进程同样命中，全局 ps 扫描凭 marker 无法区分。
   // 判属锚点 = binary/cli 载体路径（REPO_ROOT）：被测实例全部引擎进程都从本 worktree
-  // 的 resources 加载（electron dist spawn 的 pi binary / relay / cli 全在本仓下），
+  // 的 resources 加载（electron dist spawn 的 pi binary / cli 全在本仓下），
   // argv 必含 REPO_ROOT；兄弟 worktree dev 实例与打包版 TaiJi.app 的载体路径都在别处。
   // 不能凭 session-dir / 数据目录特征判属——数据目录走 env 不走 argv，两类外来实例
-  // 都实测出现过 argv 无 --session-dir 且无 ~/.taiji 提法的形态（打包版 relay 曾因此
-  // 误计入 baseline，2026-09-19 复验实证；兄弟 dev 的 rpc pi 曾因此落入「不含 ~/.taiji
-  // 兜底」误报孤儿，2026-09-19 终态确认实证，活态污染 3→6→8 个）；--append-system-prompt
+  // 都实测出现过 argv 无 --session-dir 且无 ~/.taiji 提法的形态（兄弟 dev 的 rpc pi
+  // 曾因此落入「不含 ~/.taiji 兜底」误报孤儿，2026-09-19 终态确认实证，活态污染
+  // 3→6→8 个）；--append-system-prompt
   // 等参数值也可能恰好落在本机 tmp 根下，任意 tmp 提法匹配同样不可靠。
   return psEntries()
     .filter((e) => markers.some((mk) => e.command.includes(mk)))
@@ -403,7 +403,7 @@ function pidsMatching(markers: readonly string[]): number[] {
     .sort((a, b) => a - b)
 }
 
-/** 引擎 CLI 进程 pid 集（D2b 稳定性断言面：reload 前后同一集合 = 单例未被 dispose 重建） */
+/** 引擎 CLI 进程 pid 集（D2b 稳定性断言范围：reload 前后同一集合 = 单例未被 dispose 重建） */
 export function engineCliPids(): number[] {
   return pidsMatching(['pi-subagent-cli.mjs'])
 }
@@ -413,7 +413,7 @@ export function engineTreePids(): number[] {
   return pidsMatching(ENGINE_TREE_MARKERS)
 }
 
-/** 轮询引擎执行树 pid 归零（相对基线；宽限给 stdin EOF → relay 断连 → kill 级联留时） */
+/** 轮询引擎执行树 pid 归零（相对基线；宽限给 stdin EOF → control 断连 → kill 级联留时） */
 export async function waitForEngineTreeGone(baselinePids: number[], timeoutMs = ENGINE_TREE_GONE_TIMEOUT_MS): Promise<number[]> {
   const deadline = Date.now() + timeoutMs
   let remaining = engineTreePids().filter((pid) => baselinePids.includes(pid))

@@ -172,10 +172,10 @@ export function registerPlanCommand(
 }
 
 /**
- * Handle /plan abort subcommand——exit 链单入口（D-B1-1）的 command 路投影：
+ * Handle /plan abort subcommand——exit 链单入口（D-B1-1）的 command 路映射：
  * 动作清单（解散挂起/转移落盘/widget/工具集恢复/反馈文案）全在 exitPlanMode 内，
- * 本函数只把 ExitResult 投影为 notify。非活跃格全谱（idle/终态）统一 warn 纠偏
- * 文案（原 isActive 前置守卫的 info no-op 已由单入口守卫极性取代，D-B1-1 行为变更）。
+ * 本函数只把 ExitResult 映射为 notify。非活跃格全谱（idle/终态）统一 warn 纠偏
+ * 文案（原 isActive 前置检查的 info no-op 已由单入口检查极性取代，D-B1-1 行为变更）。
  */
 async function handleAbort(
   pi: ExtensionAPI,

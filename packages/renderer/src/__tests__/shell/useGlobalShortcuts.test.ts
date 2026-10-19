@@ -103,7 +103,7 @@ describe('useGlobalShortcuts shortcutOverrides 分支', () => {
       fireKey({ key: 'j', shiftKey: true })
       expect(sidebar.collapsed).toBe(!before)
 
-      // 默认键 ⌘B 失效（override 取代默认匹配，且 j 键默认走 handoff 分支有 composer 守卫，此处无关）
+      // 默认键 ⌘B 失效（override 取代默认匹配，且 j 键默认走 handoff 分支有 composer 检查，此处无关）
       fireKey({ key: 'b', metaKey: true })
       expect(sidebar.collapsed).toBe(!before)
     } finally {

@@ -13,7 +13,7 @@
  *   pending 进行时 / #2 空闲 pending 等待态 + 恢复入口提示（无独立按钮）/ isGenerating
  *   两态切换；isActive && docs 空期间 legacy 降级条目不渲染（已接受代价）
  * - docs 空 / 无 plan 状态 → 空态不渲染主体（D10 联动；isActive=false 且 docs 空同场景——
- *   isActive=false 但 docs 非空仍渲染，D5 终态矩阵「产物 tab 与 isActive 解耦」钉死）
+ *   isActive=false 但 docs 非空仍渲染，D5 终态矩阵「产物 tab 与 isActive 解耦」定死）
  * - 划选评论草稿（quote 捕获后经 Popover emit → 草稿新增 / 删除；浮条细节归 plan-comment-popover.test.ts）
  * - 修订刷新（G3）：version bump / state 离开 revising → 重新 file.read
  * - 草稿回看消费（§3.5，u-review-source-ui）：审批条计数点击 → plan-store 回看请求 →
@@ -103,7 +103,7 @@ async function flushAsync(): Promise<void> {
 }
 
 /**
- * 挂载面板：首拉经 commandMock 返回 view（可覆写），file.read 由 readMock 承接。
+ * 挂载面板：首次拉取经 commandMock 返回 view（可覆写），file.read 由 readMock 承接。
  * PlanCommentPopover 默认 stub（浮条细节归 plan-comment-popover.test.ts；本文件经组件实例
  * emit submit 驱动草稿链，stub 保留实例供 findComponent）；opts.stubCommentPopover=false
  * 时挂真实浮条（D13⑪ 划选/Esc 行为断言用）。
@@ -190,7 +190,7 @@ describe('PlanDocsPanel 空态与 isActive 解耦（D10 / D5）', () => {
     expect(wrapper.findAll('[data-testid="plan-docs-tab"]')).toHaveLength(3)
   })
 
-  it('首拉失败且无既有 view（C-U1）→ 空态分支呈现错误行（错误原文 + 恢复指引），非静默降级', async () => {
+  it('首次拉取失败且无既有 view（C-U1）→ 空态分支呈现错误行（错误原文 + 恢复指引），非静默降级', async () => {
     commandMock.mockRejectedValue(new Error('rpc timeout'))
     const wrapper = mount(PlanDocsPanel, {
       props: { sessionId: SID },
@@ -351,7 +351,7 @@ describe('PlanDocsPanel 正文加载（file.read 带 sessionId）', () => {
     expect(wrapper.find('.md-stub').text()).toContain('body-of-impl')
   })
 
-  it('[RD-2#4] 版本 bump（修订刷新）触发重拉 → 同样先进 loading，旧版本正文不残留', async () => {
+  it('[RD-2#4] 版本 bump（修订刷新）触发重新拉取 → 同样先进 loading，旧版本正文不残留', async () => {
     readMock.mockResolvedValue({ content: 'v1 body', truncated: false })
     const wrapper = await mountPanel(viewOf())
     expect(wrapper.find('.md-stub').text()).toContain('v1 body')
@@ -452,8 +452,8 @@ describe('PlanDocsPanel 草稿回看消费（§3.5：审批条计数点击 → �
   })
 
   function primeDraftsWithView(store: ReturnType<typeof usePlanStore>): void {
-    // 先建立 isActive=true 旧 view 再加草稿——组件挂载首拉 resolve 后 true→true 不触发翻转清，
-    // 草稿保留（同时反向覆盖「首拉不误清审阅中草稿」）
+    // 先建立 isActive=true 旧 view 再加草稿——组件挂载首次拉取 resolve 后 true→true 不触发翻转清，
+    // 草稿保留（同时反向覆盖「首次拉取不误清审阅中草稿」）
     store.applyFrame(SID, viewOf())
     store.addDraftComment({ quote: '回看引文', comment: '回看评语' })
   }

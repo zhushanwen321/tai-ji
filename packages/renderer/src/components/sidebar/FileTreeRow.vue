@@ -1,9 +1,9 @@
 <template>
   <!--
     [W28/D-7.2] 纯行组件（收 VisibleRow，替代旧递归行）：
-    - 递归 v-for（旧 :65-71）移出——展开子行由 FileView 的扁平行投影（projectVisibleRows）产出，
+    - 递归 v-for（旧 :65-71）移出——展开子行由 FileView 的扁平行派生视图（projectVisibleRows）产出，
       本组件只渲染单行（dir/file/loading/error/empty 五态）
-    - 零 store 依赖：depth/expanded/childCount/gitStatus/lineStats 全部来自 row（投影预计算），
+    - 零 store 依赖：depth/expanded/childCount/gitStatus/lineStats 全部来自 row（派生时预计算），
       交互（toggle/select）经 emit 交给 FileView（持有 useFileTree + useSideDrawer）
     - data-testid 用 path（E2E 选择器，与旧递归版一致），dir/file 区分前缀
     - [HISTORICAL v-if/v-else 链断裂事故] 五态链保持单根：loading v-if → error v-else-if →
@@ -113,7 +113,7 @@
         ]"
         :title="row.name"
       >{{ row.name }}</span>
-      <!-- git overlay 角标（D-012 树/标注分离：从投影的 row.gitStatus 取 status）。
+      <!-- git overlay 角标（D-012 树/标注分离：从派生视图的 row.gitStatus 取 status）。
            形态 = demo .gmark（10px fw-mid / radius-xs / 1×5 padding / 语义软底） -->
       <span
         v-if="gitBadge"
@@ -144,7 +144,7 @@ import type { VisibleRow } from '@/stores/fileTree'
 const { t } = useI18n()
 
 const props = defineProps<{
-  /** 可见行（投影产物，depth/expanded/徽章/角标已预计算） */
+  /** 可见行（派生视图产物，depth/expanded/徽章/角标已预计算） */
   row: VisibleRow
   /** 选中态（store.getSelectedPath(sessionId) === row.path，由 FileView 传入——本组件零 store 依赖） */
   selected?: boolean
@@ -171,13 +171,13 @@ const chevronSlotClass = 'w-[14px] shrink-0 inline-flex items-center justify-cen
 
 /**
  * 行 padding-left（D-022 单一公式）：dir/file/hint 行共用。
- * hint 行的 depth 在投影时已 +1（子区占位缩进），无需旧 childHintPaddingStyle 双公式。
+ * hint 行的 depth 在派生时已 +1（子区占位缩进），无需旧 childHintPaddingStyle 双公式。
  */
 const rowPaddingStyle = computed(() => ({
   paddingLeft: `${props.row.depth * INDENT_STEP + BASE_PADDING}px`,
 }))
 
-/** git overlay 角标（从投影 row.gitStatus 取，非 node 字段） */
+/** git overlay 角标（从派生视图 row.gitStatus 取，非 node 字段） */
 const gitStatus = computed(() => props.row.gitStatus?.status)
 
 /**

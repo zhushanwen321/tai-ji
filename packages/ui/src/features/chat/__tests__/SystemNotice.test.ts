@@ -52,7 +52,7 @@ const NOW = Date.now()
 const LINE_GRADIENT_CLASS =
   'bg-[image:linear-gradient(to_right,transparent,var(--border-strong)_18%,var(--border-strong)_82%,transparent)]'
 
-/** 构造 reload 形态的 subagent-directive Message（mapSessionEntries 覆写 display:true 后的投影） */
+/** 构造 reload 形态的 subagent-directive Message（mapSessionEntries 覆写 display:true 后的派生视图） */
 function directiveMessage(over: Partial<Message> = {}): Message {
   return {
     id: 'cm-1',
@@ -131,7 +131,7 @@ describe('SystemNotice subagent 定向气泡（U2b）', () => {
 // RespawnNoticeBar.test.ts 覆盖，此处锁定 SystemNotice 的分支派发与降级契约。
 
 /**
- * 构造 reload 形态的 pi-respawn-notice Message（chat store appendRespawnNotice 投影）。
+ * 构造 reload 形态的 pi-respawn-notice Message（chat store appendRespawnNotice 派生视图）。
  * details 放宽为 unknown：畸形载荷用例（降级分支）刻意构造契约外形态。
  */
 function respawnMessage(over: Omit<Partial<Message>, 'details'> & { details?: unknown } = {}): Message {

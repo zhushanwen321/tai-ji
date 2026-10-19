@@ -27,7 +27,7 @@ const mocks = vi.hoisted(() => ({
   loadTree: vi.fn(),
   cancelFlow: vi.fn(),
   startFlow: vi.fn().mockResolvedValue(undefined),
-  // TC-5 重连重拉：extension scan / workspace listRecent 走 fire-and-forget，需可控 spy
+  // TC-5 重连重新拉取：extension scan / workspace listRecent 走 fire-and-forget，需可控 spy
   extensionScan: vi.fn().mockResolvedValue(undefined),
   workspaceListRecent: vi.fn().mockResolvedValue([]),
 }))
@@ -95,14 +95,14 @@ vi.mock('@/composables/features/file-tree/useFileTree', () => ({ useFileTree: vi
 // ── useCommandStore 壳单例 mock（[G1] clearSlashCommands hook 接线后 deleteSession 会取
 //    commandStore.clearCommands；真实壳单例依赖 AppShell providePlatform 时序，测试未注入
 //    会 fail-fast 抛错。原「registerAppCommands 不需 mock」注释随之修正——本文件 initApp
-//    不跑，mock 不影响覆盖面）──
+//    不跑，mock 不影响覆盖范围）──
 vi.mock('@/composables/features/command/useCommandStore', () => ({
   useCommandStore: () => ({
     appCommands: { value: [] },
     shortcutOverrides: { value: {} },
     clearCommands: vi.fn(),
     // registerAppCommands（useAppCommands）在 initApp 启动期调用——缺此方法会让
-    // bootstrap fail-fast，TC-5 的重连重拉用例整条崩
+    // bootstrap fail-fast，TC-5 的重连重新拉取用例整条崩
     registerApp: vi.fn(),
   }),
 }))
@@ -174,7 +174,7 @@ describe('useSidebar 接缝（TC-1..TC-4）', () => {
     expect(sidebar.focusedSessionId.value).toBe('s2')
 
     // 二次 selectSession 同 sid：切入刷新（后台 session reconcile，2026-08-22）——
-    // 旧 isHydrated 一次性守卫已废，已 hydrate 的 session 切入时静默重拉（agent-managed
+    // 旧 isHydrated 一次性检查已废，已 hydrate 的 session 切入时静默重新拉取（agent-managed
     // 子 session 的 turn 可能在前端不在场时完成）
     mocks.getHistory.mockClear()
     await sidebar.selectSession('s2')
@@ -275,7 +275,7 @@ describe('useSidebar 接缝（TC-1..TC-4）', () => {
     expect(sidebarStore.collapsed).toBe(!before)
   })
 
-  it('TC-5 重连 onConnected 对聚焦 session 重拉 subagent/workflow（首连不拉；分区数据刷新用户可见）', async () => {
+  it('TC-5 重连 onConnected 对聚焦 session 重新拉取 subagent/workflow（首连不拉；分区数据刷新用户可见）', async () => {
     const sessionDomain = await import('@taiji/core/transport/api/domains/session')
     const getSubagentsMock = sessionDomain.getSubagents as ReturnType<typeof vi.fn>
     const getWorkflowsMock = sessionDomain.getWorkflows as ReturnType<typeof vi.fn>
@@ -297,13 +297,13 @@ describe('useSidebar 接缝（TC-1..TC-4）', () => {
     getSubagentsMock.mockClear()
     getWorkflowsMock.mockClear()
 
-    // 首连（initApp 路径）不含 subagent/workflow 重拉——列表首拉归挂载消费方
-    // （现行 = composer 任务托盘 useTrayCounts 的 watch(sessionId) 拉取腿）
+    // 首连（initApp 路径）不含 subagent/workflow 重新拉取——列表首次拉取归挂载消费方
+    // （现行 = composer 任务托盘 useTrayCounts 的 watch(sessionId) 拉取路径）
     await sidebar.onConnected()
     expect(getSubagentsMock).not.toHaveBeenCalled()
     expect(getWorkflowsMock).not.toHaveBeenCalled()
 
-    // 重连：对聚焦 s1 重拉（RPC 直读磁盘，不依赖派生缓存事件）；分区更新 = 侧栏列表数据源
+    // 重连：对聚焦 s1 重新拉取（RPC 直读磁盘，不依赖派生缓存事件）；分区更新 = 侧栏列表数据源
     await sidebar.onConnected()
     await new Promise((r) => setTimeout(r, 0))
     expect(getSubagentsMock).toHaveBeenCalledWith('s1')
@@ -311,7 +311,7 @@ describe('useSidebar 接缝（TC-1..TC-4）', () => {
     expect(useSubagentStore().getRecordsBySession('s1')).toEqual([record])
   })
 
-  it('TC-5b 重连时空焦点（无聚焦 session）不触发重拉', async () => {
+  it('TC-5b 重连时空焦点（无聚焦 session）不触发重新拉取', async () => {
     const sessionDomain = await import('@taiji/core/transport/api/domains/session')
     const getSubagentsMock = sessionDomain.getSubagents as ReturnType<typeof vi.fn>
     const sidebar = useSidebar()
@@ -325,7 +325,7 @@ describe('useSidebar 接缝（TC-1..TC-4）', () => {
 
 // ── 原 select-session-pull.test.ts 并入（同 SUT selectSession 编排、同 mock 骨架）──
 // [HISTORICAL] 2026-07-29 handoff 回复丢失事故：selectSession 须统一注册订阅 + 不再主动
-// 拉列表（remove-bandaids 反转断言）。幂等守卫本体在 core ensureStreamSubscription 内部
+// 拉列表（remove-bandaids 反转断言）。幂等检查本体在 core ensureStreamSubscription 内部
 //（本文件 mock 掉该层，幂等由 core useChat 测试锁定），此处锁编排层可见信号。
 describe('selectSession 订阅建立 + 不主动拉列表（remove-bandaids 反转断言）', () => {
   beforeEach(() => {

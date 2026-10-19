@@ -5,9 +5,9 @@
  * 覆盖映射：
  * - 封闭枚举 14 行逐行断言（occupancy 三维 patch + 三布尔派生语义，转移表即文档）；
  * - 幂等去重：非 announce 行值未变化零广播帧；
- * - announce-idle 特例：状态 no-op + 跳过全等去重强制广播当前投影（Gate B V6b④ 语义，
+ * - announce-idle 特例：状态 no-op + 跳过全等去重强制广播当前派生视图（Gate B V6b④ 语义，
  *   registerSession 宣告帧收编行）；
- * - 通路归属：广播经注入的 publish（= bus.publish state-topic 通路的结构化窄投影），
+ * - 通路归属：广播经注入的 publish（= bus.publish state-topic 通路的结构化窄派生视图），
  *   payload 形状与 shared protocol 'session.occupancy' 一致。
  *
  * mock 策略：纯函数直测，零依赖 mock。
@@ -185,7 +185,7 @@ describe('applySessionOccupancyTransition：幂等去重与 announce-idle 强制
     expect(session.occupancy).toEqual({ turn: 'idle', compacting: true, bash: false })
   })
 
-  it("'announce-idle'：状态 no-op + 跳过全等去重强制广播当前投影（registerSession 宣告帧收编行）", () => {
+  it("'announce-idle'：状态 no-op + 跳过全等去重强制广播当前派生视图（registerSession 宣告帧收编行）", () => {
     // 对象初值即 idle（registerSession 现场）：全等去重会短路广播，announce 行必须照发
     const session = makeSession({ occupancy: { turn: 'idle', compacting: false, bash: false } })
     const publish = makePublish()
@@ -197,7 +197,7 @@ describe('applySessionOccupancyTransition：幂等去重与 announce-idle 强制
     ])
   })
 
-  it("'announce-idle'：非 idle 投影同样原样强制广播（宣告的是当前投影，不做转移）", () => {
+  it("'announce-idle'：非 idle 派生视图同样原样强制广播（宣告的是当前派生视图，不做转移）", () => {
     const session = makeSession({ occupancy: { turn: 'generating', compacting: true, bash: false } })
     const publish = makePublish()
     applySessionOccupancyTransition(session, { publish }, 'announce-idle')
@@ -214,7 +214,7 @@ describe('applySessionOccupancyTransition：幂等去重与 announce-idle 强制
     expect(session.isGenerating).toBe(true)
   })
 
-  it('封闭枚举外无第五种写法：非法转移值在编译期拦截（运行时形状守卫——表外值 undefined 即抛）', () => {
+  it('封闭枚举外无第五种写法：非法转移值在编译期拦截（运行时形状检查——表外值 undefined 即抛）', () => {
     // 运行时防御形态断言（编译期由 SessionOccupancyTransition 封闭联合保证）：
     // 表外值查表得 undefined，解构抛 TypeError——不会静默写成脏状态。
     const session = makeSession()

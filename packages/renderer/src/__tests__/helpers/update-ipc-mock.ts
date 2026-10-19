@@ -51,7 +51,7 @@ export function createMemoryAppUpdateIpc(): MemoryAppUpdateIpc {
     getPendingUpdate: vi.fn<() => Promise<LatestReleaseInfo | null>>(),
     getLaunchResult: vi.fn<() => Promise<LaunchResult | null>>(),
     getUpdateSettings: vi.fn<() => Promise<UpdateSettings>>(),
-    openUpdateFallbackUrl: vi.fn<(url: string) => Promise<void>>(),
+    openExternal: vi.fn<(url: string) => Promise<void>>(),
     onUpdateProgress: vi.fn((cb: (p: UpdateProgressPayload) => void) => {
       progressCb = cb
       return () => {

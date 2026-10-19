@@ -181,7 +181,7 @@ opencode 两层 message/part（user message → N 个 assistant message，各含
 
 - `method: "select"`：title=header，message=question，options=labels；应答 `POST /question/{requestID}/reply {answers: string[][]}` → `{value: <label>}`；`POST /question/{requestID}/reject` → `{cancelled: true}`（工具侧收 Question.RejectedError，processor.ts:200）。
 
-**UiRequest 9 method 对齐度**：select←question.v2；confirm←permission.asked；**input/editor/notify/setStatus/setWidget/setTitle/set_editor_text 无对应**——opencode 无文本输入/展示写入类交互面，一律 `{unsupported:true}` 或适配器本地降级（记日志丢弃）。
+**UiRequest 9 method 对齐度**：select←question.v2；confirm←permission.asked；**input/editor/notify/setStatus/setWidget/setTitle/set_editor_text 无对应**——opencode 无文本输入/展示写入类交互侧，一律 `{unsupported:true}` 或适配器本地降级（记日志丢弃）。
 
 ## 8. 能力位 11 位表
 
@@ -201,7 +201,7 @@ opencode 两层 message/part（user message → N 个 assistant message，各含
 
 ## 9. gap 清单
 
-**源有靶无**（opencode 有、taiji 协议面无承载，适配器丢弃）：
+**源有靶无**（opencode 有、taiji 协议范围无承载，适配器丢弃）：
 - session 树操作：children、fork 树（parentID）、revert/unrevert、消息/part 删除与改写 API（groups/session.ts:144-155,369-394,409-444）。
 - 多模态与富 part：file part 输入、subtask part（内部子任务派发）、patch/snapshot parts、session.diff、todo.updated（§3.2/§4.1）。
 - 入口变体：`POST /session/{id}/command`（斜杠命令模板）、`/shell`（直跑 shell）、`/init`、`/summarize`（手动压缩）、`prompt_async` 之外的 share/init 面（groups/session.ts:343-315）。

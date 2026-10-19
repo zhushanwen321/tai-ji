@@ -8,7 +8,7 @@
  * - discover（自动发现）：带 baseUrl/apiKey/providerType 全参，结果合并入模型清单（去重 + D9①）
  *   apiKey 取「真实未保存草稿」投影（回显值 = 所存值不发，MF-1-1），由装配方注入 pendingApiKey
  *
- * 接口即测试面（interface is the test surface）：行为矩阵见 provider-edit-discover.test.ts。
+ * 接口即测试入口（interface is the test surface）：行为矩阵见 provider-edit-discover.test.ts。
  */
 import { ref, type Ref } from 'vue'
 import type { ConnectionTestResultRow, ProviderInfo } from '@taiji/shared'

@@ -8,7 +8,7 @@
  *   会把内置定义冻结成 override）
  * - discover 合并（mergeDiscoveredModels：去重 + D9① 出厂显式 reasoning）
  *
- * 接口即测试面（interface is the test surface）：行为矩阵见 provider-edit-models.test.ts。
+ * 接口即测试入口（interface is the test surface）：行为矩阵见 provider-edit-models.test.ts。
  */
 import { ref, reactive, watch, type Ref } from 'vue'
 import { PI_THINKING_LEVELS, type ProviderInfo, type SetProviderData } from '@taiji/shared'
@@ -54,7 +54,7 @@ export interface NewModelDraft {
   /**
    * 思考能力开关（D4 addModel reasoning 显式化，U6）：出厂显式 boolean 不允许 undefined——
    * 同一个 undefined pi 解释为「关」而旧本地推算解释为「支持」，写入时语义
-   * 坍缩正是事故 B 根因。默认 true；选非 all-levels 思考策略时自动置 true（用户可显式关）。
+   * 失去区分度正是事故 B 根因。默认 true；选非 all-levels 思考策略时自动置 true（用户可显式关）。
    */
   reasoning: boolean
 }
@@ -287,7 +287,7 @@ export function createProviderEditModels(input: { t: Translate }): ProviderEditM
    * D9②：reasoning 缺失时补显式 true——pi 两级门控把缺失判「关」，不补则用户设的策略
    * 根本轮不到被读取（弹层只显示「关」）。永不覆盖用户显式 false（显式选择优先于联动）；
    * all-levels 与其余策略同规则——存量最常见形态正是「从未设策略 = all-levels + reasoning
-   * 缺失」，救回路径必须闭合在 all-levels 分支上。
+   * 缺失」，救回路径必须封住在 all-levels 分支上。
    */
   function pickStrategy(m: LocalModel, strategy: ThinkingStrategy): void {
     if (m.reasoning === undefined) m.reasoning = true

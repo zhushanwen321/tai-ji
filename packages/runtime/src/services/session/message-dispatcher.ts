@@ -6,16 +6,16 @@
  *
  * [投递所有权内核 u2] 用户消息路径（sendMessage）**内核化**：投递所有权移交
  * SessionDeliveryRegistry（D1 单一所有者）——本类保留「BeforeSend hook 拦截 + 入口 touch +
- * 错误面编排」，投递交由 `registry.submit()`（lane 判定 + 裸标记 + 内核 FIFO + 两阶段回执
- * 全在注册表/内核侧）。退役面：busy 预检（rejectBusyPrecheck）、send.rejected 广播（budy
+ * 错误范围编排」，投递交由 `registry.submit()`（lane 判定 + 裸标记 + 内核 FIFO + 两阶段回执
+ * 全在注册表/内核侧）。退役路径：busy 预检（rejectBusyPrecheck）、send.rejected 广播（budy
  * 类拒绝转译）、markSessionActive 三副作用（迁至注册表 deliverOne 的出站交接点，§3.4+ 表）、
- * skill 注入（迁至同一交接点——注入器所有权随出站交接点走）。保留面：BeforeSend hook
+ * skill 注入（迁至同一交接点——注入器所有权随出站交接点走）。保留范围：BeforeSend hook
  * （提交前）、入口 touchActivity（idle-pi-reclamation D6-1）。pi busy 类拒绝识别函数
  * classifyPromptRejection 定义与消费均在注册表（session-delivery-registry.ts）。
  * [occupancy D2 拒绝转译] 错误分类迁移后由注册表的出站交接 catch 面消费（D6）。
  * [HISTORICAL] sendSubagentMessage(marker 拼装分支)已删除(composer 四符号设计 D2)——
  * 定向消息改走 session-service.subagentAction 直发 client.prompt,不经本骨架。
- * [MF-1-8 退役] steerMessage / followUpMessage 转发腿已删除——renderer/core 消费方经
+ * [MF-1-8 退役] steerMessage / followUpMessage 转发路径已删除——renderer/core 消费方经
  * delivery.submit 统一提交（u3b），协议侧 message.steer / message.follow_up 条目随
  * runtime transport 路由删除同批退役（u5a 退役条件兑现）。
  * 注：bash 通道（sendBash / abortBash）不经 LLM turn、不经投递内核，行为不变
@@ -26,7 +26,7 @@
  * 调用点实测 6 方法,见 session-internal.ts)、
  * pm(getClient / 进程操作)、messageBus(发布,wave:perf-w09 接口收敛——
  * dispatcher 只依赖 publish 抽象,broker 依赖已删除:命令编排消息全部是
- * session 级 push 型,单通道走 bus 定向发布,broadcast 双写腿已收口)。
+ * session 级 push 型,单通道走 bus 定向发布,broadcast 双写路径已收敛)。
  * delivery（[MF-1-7 装配收编] 投递注册表）：经 setDeliveryRegistry 后置注入（组合根装配序：
  * 注册表创建晚于 SessionService/本类构造，后置注入对齐 setMessageBus 先例）——原进程内
  * 活动槽（getActiveDeliveryRegistry）已删除，依赖在 setter 可见。
@@ -55,7 +55,7 @@ export type AbortSource = 'user' | 'convergence'
 
 // sendMessage 回执 reason 词表 SSOT = shared SendPromptReason（msg-pipeline-debloat
 // D4-6 单点收敛，原 5 处手写词表归一；busy/compacting/bash 退役值收窄裁决与值语义见
-// shared 定义处）。运行面分支只看 blocked——插件/调用方不得依赖 reason 精确值做行为
+// shared 定义处）。运行侧分支只看 blocked——插件/调用方不得依赖 reason 精确值做行为
 // 分支。本类型经 @taiji/shared 出口供 interfaces / session-api / session-service /
 // plugin-sdk 同源消费。
 
@@ -75,12 +75,12 @@ export type SystemCommandOutcome =
 
 export class MessageDispatcher {
   private sendMessageHook: SendMessageHook | null = null
-  /** per-session 受理串行链（hook 竞态顺序闭合，见 sendMessage；settled 后自清）。 */
+  /** per-session 受理串行链（hook 竞态顺序封闭，见 sendMessage；settled 后自清）。 */
   private readonly sendMessageChains = new Map<string, Promise<unknown>>()
 
   /**
    * bash 通道协作实例（[MF-1-10] 实现在 bash-dispatcher.ts，本类构造持有；公开方法
-   * sendBash/abortBash/flushPendingBashResults 签名不变，session-service 消费面零改动）。
+   * sendBash/abortBash/flushPendingBashResults 签名不变，session-service 消费方零改动）。
    */
   private readonly bash: BashDispatcher
 
@@ -147,7 +147,7 @@ export class MessageDispatcher {
    * busy 预检与 send.rejected 已退役——排队取代拒绝（D5）：暂不可收时态（compacting / bash）
    * 由内核持有，settled 边沿/对账器驱动投递，消息不再被拒回 renderer。
    *
-   * [hook 竞态顺序闭合（复审 R2）] 同 session 并发提交按 per-session 链串行：hook 是异步
+   * [hook 竞态顺序封闭（复审 R2）] 同 session 并发提交按 per-session 链串行：hook 是异步
    * 等待（Worker RPC，单 handler 5s 超时），而 WS 分发逐帧 fire-and-forget——不串行时
    * hook 完成序可倒置内核提交序（内核 FIFO 保提交序而非发送序，G1/V6 可违）。串行化让
    * 到达序 = 提交序；链只含 hook + 同步内核提交（有界：hook 数 × 5s），settled 后自清。
@@ -160,7 +160,7 @@ export class MessageDispatcher {
    */
   async sendMessage(sessionId: string, content: string, images?: Array<{ data: string; mimeType: string }>, clientUuid?: string, requireCommand?: string): Promise<{ blocked: boolean; rejected?: boolean; receipt?: DeliverySubmitResult; reason?: SendPromptReason }> {
     // ── per-session 受理串行链（到达序 = 内核提交序）──
-    // 前驱失败不毒化链（catch 吞 rejection，错误面已由链内各层自广播）。
+    // 前驱失败不毒化链（catch 吞 rejection，错误范围已由链内各层自广播）。
     const prev = this.sendMessageChains.get(sessionId) ?? Promise.resolve()
     const run = prev.catch(() => undefined).then(() => this.runAcceptance(sessionId, content, images, clientUuid, requireCommand))
     this.sendMessageChains.set(sessionId, run)
@@ -179,7 +179,7 @@ export class MessageDispatcher {
     clientUuid?: string,
     requireCommand?: string,
   ): Promise<{ blocked: boolean; rejected?: boolean; receipt?: DeliverySubmitResult; reason?: SendPromptReason }> {
-    // ── BeforeSend hook（提交前唯一拦截面）──
+    // ── BeforeSend hook（提交前唯一拦截点）──
     // blocked: 已广播 message.error（错误气泡），此处返回 {blocked:true} 让 handler 改发 error envelope。
     // modifiedContent: hook 改写后的文本（transform 语义，Fix-1），未改写时回退原文。
     // [D6/u5a] reason:'hook-blocked' 为回执面增量（hook 管道既有 reason 已随 message.error 上浮）。
@@ -210,8 +210,8 @@ export class MessageDispatcher {
   /**
    * requireCommand 探测（plugin-header-action-modal-points D6/u5a）：直连
    * client.getCommands()（不走 sessionService.getCommands 的 markDirty 查询语义——那是
-   * UI 状态查询面路径）。单次探测（ADR-0122：500ms×6 就绪轮询已删）；client 未附着 =
-   * 未命中（拒发由调用方收口）；探测 RPC 失败视同未命中，warn 留排查线索（非静默吞）。
+   * UI 状态查询范围路径）。单次探测（ADR-0122：500ms×6 就绪轮询已删）；client 未附着 =
+   * 未命中（拒发由调用方收尾）；探测 RPC 失败视同未命中，warn 留排查线索（非静默吞）。
    */
   private async ensureCommandAvailable(sessionId: string, requireCommand: string): Promise<boolean> {
     const client = this.pm.getClient(sessionId)
@@ -238,7 +238,7 @@ export class MessageDispatcher {
    * pi 同步执行、不进模型、无 turn，P2 前提）。
    *
    * 分流契约（D1 逐条）：
-   * - **不经 runBeforeSendHook**：系统指令不是用户消息，不暴露给插件 veto/transform 改写面
+   * - **不经 runBeforeSendHook**：系统指令不是用户消息，不暴露给插件 veto/transform 改写侧
    *   （hook 的 transform 可破坏命令形态，D1 否决记录的第三缺陷）；
    * - **不经 registry.submit**：无裸标记尾附（标记会污染 command args 使 navigateTree throw）、
    *   无内核条目、无车道判定——信令不被 hold/排队（撤回编排自持 revoking hold，若经内核
@@ -345,7 +345,7 @@ export class MessageDispatcher {
 
   /**
    * 中止 session 当前 turn（协作式 abort RPC）：成功 → occupancy #9 idle 复位 + stopped 终态
-   * 写入 + message.complete{aborted} 收口广播；失败 → 显式上报收口（occupancy 复位 + stopped
+   * 写入 + message.complete{aborted} 收尾广播；失败 → 显式上报收尾（occupancy 复位 + stopped
    * 终态 + error 广播）。
    * [ADR-0122 退役登记] abort RPC 超时三级阶梯（chat-domain-v1x-liveness-governance W7/D3，
    * 含 FROZEN_EVENT_SILENCE_MS 10min 保守窗——推翻 crash-forensics 附录 E 对 abort 阶梯
@@ -362,7 +362,7 @@ export class MessageDispatcher {
    * turn 在中止（pi compact() 自身已先 abort 过回合；idle 手动 /compact 更无回合），用户
    * 中止的是压缩流程本身——成功路径因此**不写 stopped 终态**（会话仍存活且空闲，写了会在
    * 重启/重扫后把健康会话误标成 stopped + 骗出一个 restore 入口）、**不广播
-   * message.complete{aborted}**（无流式实体可收口，帧语义谎报「回合被中止」）。占用
+   * message.complete{aborted}**（无流式实体可收尾，帧语义谎报「回合被中止」）。占用
    * idle 复位与 abort-idle 对账保持（压缩期排队的消息立即投出，compacting 维度由 pi
    * compaction_end{aborted} 事件复位）。入口态在 await 前快照——compaction_end 事件与 RPC
    * reply 的到达序不定，await 后读 isCompacting 会漂移。
@@ -388,13 +388,13 @@ export class MessageDispatcher {
       // 之后再经 getSessionByClient 反查会拿 undefined。
       const active = this.svc.getSessionByClient(client)
       if (active) {
-        // occupancy #9（D2 迁移）：abort await 失败收口 → 'idle' 行（进入此分支的都是 pi 已
+        // occupancy #9（D2 迁移）：abort await 失败收尾 → 'idle' 行（进入此分支的都是 pi 已
         // 退出/流错误等显式失败，agent_settled 不会再到达，turn 不能停留在
         // dispatching/generating/settling）。isGenerating=false 由原语 flags 派生。
         applySessionOccupancyTransition(active, this.messageBus, 'idle')
       }
 
-      // 非超时错误（EPIPE / 进程已退出 / RPC 显式失败等）：显式上报收口（规则 #3）。
+      // 非超时错误（EPIPE / 进程已退出 / RPC 显式失败等）：显式上报收尾（规则 #3）。
       // W4：abort 失败（异常退出）写 stopped 终态
       this.svc.persistSessionOutcome(sessionId, 'stopped', `Abort failed: ${errMsg}`)
       const abortErrMsg = { type: 'message.error' as const, payload: { sessionId, message: `Abort failed: ${errMsg}` } }
@@ -404,13 +404,13 @@ export class MessageDispatcher {
     // [HISTORICAL] abort 成功后必须主动广播 message.complete{stopReason:'aborted'} + 重置
     // isGenerating。不能依赖 pi 自发 agent_end——pi 卡死（静默不退出）时永远不会发。
     // session-message-handler 的 message.status{status:'aborted'} reply 走 pending 通道，
-    // 只让 renderer 的 abort() Promise resolve，不触发 chat store 的 message.complete 收口
+    // 只让 renderer 的 abort() Promise resolve，不触发 chat store 的 message.complete 收尾
     // 逻辑（chat-message-effects 只认 'message.complete' type），isStreaming 仍为 true。
-    // 广播流式 message.complete 让前端正常收口（与 sendPrompt 错误路径广播 message.error 对称）。
+    // 广播流式 message.complete 让前端正常收尾（与 sendPrompt 错误路径广播 message.error 对称）。
     const active = this.svc.getSessionByClient(client)
     if (active) {
       // occupancy #9（D2 迁移）：abort 成功 → 'idle' 行（与上方的 message.complete{aborted}
-      // 收口对称）。isGenerating=false 由原语 flags 派生。compacting 维度不在此行复位
+      // 收尾对称）。isGenerating=false 由原语 flags 派生。compacting 维度不在此行复位
       // （'idle' 行只动 turn）——由 pi compaction_end{aborted} 事件的 'compacting-end'
       // 转移复位（压缩取消与压缩成功/失败同路，三路对称）。
       applySessionOccupancyTransition(active, this.messageBus, 'idle')
@@ -458,7 +458,7 @@ export class MessageDispatcher {
       // 缺标记会让后续 restore 的收敛环不设防，被杀的旧执行复活。
       // [code-harden RT-4#1] 幂等成功仅限「无条目或占用已复位」：条目还在且 occupancy≠idle
       // 时，占用态已卡死且事件源已断（无进程可再产生 agent_settled）——按「幂等成功」返回
-      // 是假成功（前端 isGenerating/turn 投影永久滞留），必须继续走 forceQuitSession 完整
+      // 是假成功（前端 isGenerating/turn 派生视图永久滞留），必须继续走 forceQuitSession 完整
       // 收敛链（stopped 终态 + full-reset + session.exited + removeEntry）。
       const session = this.svc.getSession(sessionId)
       const occ = session?.occupancy ?? IDLE_SESSION_OCCUPANCY
@@ -482,7 +482,7 @@ export class MessageDispatcher {
   /**
    * 强杀收敛编排（abort RPC 超时路径与 forceQuit 共用）：detach → destroy → persist stopped →
    * 广播 session.exited → removeEntry。收敛需手动编排而非依赖 pm.onSessionExit 回调：kill 路径
-   * 的 exit 事件被双层守卫拦截（rpc-client.kill 置 _killing 跳过 exitCallback；process-manager
+   * 的 exit 事件被双层检查拦截（rpc-client.kill 置 _killing 跳过 exitCallback；process-manager
    * 的 exit 回调按 processes.has 拦截 intentional destroy），不会传播到 session-service 的
    * onSessionExit 收敛链。编排与 lifecycle.delete / onSessionExit 回调同构，非新发明。
    *
@@ -491,12 +491,12 @@ export class MessageDispatcher {
    * [D4] source 为置位分型（K1 user_force_quit / K2 abort_timeout）：「用户要停」的调用方
    * 在编排开头置 userStopped 标记（宿主 = session-service.ts 模块级 Map，独立于
    * ManagedSession 生命周期——尾步 removeSessionEntry 删条目后标记仍可被 restore 读到）。
-   * 标记驱动 restore-abort 收敛环：被杀的旧执行（notify replay / 补发腿）不得自动复活。
+   * 标记驱动 restore-abort 收敛环：被杀的旧执行（notify replay / 补发路径）不得自动复活。
    *
    * [code-harden RT-4#1] 失败语义：编排体 try/finally——detach / destroy / persist 失败
    * 降级为日志，不再阻断收敛；三步终态（full-reset / session.exited 广播 / removeEntry）
-   * 在 finally 中必达（占位投影复位 + 前端 dead 标记 + 条目摘除），任一步异常只落日志 +
-   * crash 台账（runDestroyStepIsolated，reason=destroy-chain-step-failed），不沿调用链上抛。
+   * 在 finally 中必达（占位派生视图复位 + 前端 dead 标记 + 条目摘除），任一步异常只落日志 +
+   * crash journal 登记（runDestroyStepIsolated，reason=destroy-chain-step-failed），不沿调用链上抛。
    * 本链刻意不含 respawn.schedule / config.sessions（用户手动强杀结构性不触发自动恢复，
    * 见 registerSessionExitHandler 注释——respawn 承诺只挂 onSessionExit 链）。
    */
@@ -514,7 +514,7 @@ export class MessageDispatcher {
       // detach/destroy/persist 失败只降级日志：收敛（终态三步）必须继续。
       console.error(`[message-dispatcher] forceQuitSession pre-terminal steps failed (sessionId=${sessionId}):`, e)
     } finally {
-      // occupancy #10（D2 迁移，forceQuit/abort 超时收敛腿）：进程被强杀后 agent_settled /
+      // occupancy #10（D2 迁移，forceQuit/abort 超时收敛路径）：进程被强杀后 agent_settled /
       // compaction_end 永不到达，'full-reset' 行三维全复位 + 三布尔派生同步复位（结构上不再有
       // 「只复位一边」）——session.exited 广播前发，且必须在 removeSessionEntry（内部
       // bus.clearSession）之前，否则帧送空集合。
@@ -523,7 +523,7 @@ export class MessageDispatcher {
         if (exiting) applySessionOccupancyTransition(exiting, this.messageBus, 'full-reset')
       })
       // session.exited 须在 removeSessionEntry 前发（其后 messageBus.clearSession 清空
-      // 订阅者集合，再发等于空投，前端一条也收不到）。code=null：强杀场景退出码未知，
+      // 订阅者集合，再发等于消息被丢弃，前端一条也收不到）。code=null：强杀场景退出码未知，
       // 与 shared 协议「被信号杀死无退出码」语义一致。前端 handleSessionExited 会把
       // reason 作为 error 消息插入聊天流 + toast（与 pi 崩溃路径同一入口）。
       runDestroyStepIsolated('session.exited', sessionId, () => {
@@ -600,11 +600,11 @@ export class MessageDispatcher {
           : 'agent generating'
       const errMsg = `Cannot compact while ${reason}`
       console.warn(`[message-dispatcher] compact preemptive reject (busy), sid=${sessionId}, reason=${reason}`)
-      // 对话流内联呈现（msg-pipeline-debloat D4-2）：busy 拒绝的可见面从 renderer toast
+      // 对话流内联呈现（msg-pipeline-debloat D4-2）：busy 拒绝的可见部分从 renderer toast
       // 改为对话流 system 提示条目——走 message.stream_warn（非终结性提示通道：仅追加
       // system 消息、不调 finalizeSession，正在流式的 turn 不受影响；runtime 自产提示、
       // pi 无 entry 的正确入流形态）。不能用 message.error——其终态 effect 会把生成中的
-      // assistant 误收口为 error。renderer catch 见 compact_busy 分类码抑制 toast，双呈现
+      // assistant 误收尾为 error。renderer catch 见 compact_busy 分类码抑制 toast，双呈现
       // 不叠加。零生命周期广播不变：不广播 session.compacted{error}（预检在 RPC 前，pi
       // 未发 compaction_start，interpreter 状态机不参与）。
       this.messageBus?.publish(sessionId, { type: 'message.stream_warn', payload: { sessionId, content: errMsg } })

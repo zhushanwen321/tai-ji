@@ -14,10 +14,10 @@ export const MAX_ERROR_LOGS = 500;
 export const MALFORMED_MSG_LOG_PREVIEW_CHARS = 200;
 
 /**
- * [OR-8] run 到达 done 终态时残留 in-flight call 的收口文案。
+ * [OR-8] run 到达 done 终态时残留 in-flight call 的收尾文案。
  *
  * trace/call 状态枚举封闭（无 "cancelled" 态），以 failed + 本固定文案表达
- * 「run 终态前被收口」——GUI/快照侧不再出现 done run 含 running 节点的不一致。
+ * 「run 终态前被收尾」——GUI/快照侧不再出现 done run 含 running 节点的不一致。
  */
 export const IN_FLIGHT_CALL_CANCELLED_MSG =
   "Cancelled: run reached terminal state while this call was in flight";

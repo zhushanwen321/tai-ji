@@ -46,14 +46,14 @@ import { useWorkflowStore } from '@/stores/workflow'
 import { usePanelStore } from '@/stores/panel'
 import type { WorkflowDag, WorkflowRunRecord } from '@taiji/shared'
 
-// ── core SSOT 读出投影（u-w1-core 迁移：开合态唯一权威 = core/domain/overlay）────
+// ── core SSOT 读出派生视图（u-w1-core 迁移：开合态唯一权威 = core/domain/overlay）────
 
 /** 浮层是否开着（原 overlayOpen ref 已退役，读 core SSOT） */
 function isOverlayOpen(): boolean {
   return getOverlayControlState().isOpen
 }
 
-/** 当前 workflow run 投影（core OverlayContent → { sessionId, runId } 断言口径） */
+/** 当前 workflow run 派生视图（core OverlayContent → { sessionId, runId } 断言口径） */
 function currentRun(): { sessionId: string; runId: string } | null {
   const cur = getOverlayControlState().current
   return cur !== null && cur.kind === 'workflow' ? cur.payload : null
@@ -104,12 +104,12 @@ vi.mock('../../panel/WorkflowLivePanel.vue', () => ({
 
 // ── mock：BrowserOverlay stub（kind 门控用例经 openBrowser 换入 browser 内容）────
 // 真实 BrowserOverlay 会拉起 BrowserPane/view 链路；本文件只关心 Host 侧 kind 门控，
-// 壳内容无断言观测面，stub 掉保用例密闭。
+// 壳内容无断言观测范围，stub 掉保用例密闭。
 vi.mock('@/components/panel/BrowserOverlay.vue', () => ({
   default: { name: 'BrowserOverlayStub', template: '<div />' },
 }))
 
-// ── mock：Guard 挂载计数包装（U4 kind 门控对账观测面）─────────────────────────
+// ── mock：Guard 挂载计数包装（U4 kind 门控对账观测范围）─────────────────────────
 // 保留真实 Guard 回落语义（onErrorCaptured → emit fallback 原样转发），仅在 setup 计数：
 // guardEpoch 重挂 = Guard 重建（:key 换代），计数即重挂次数。
 const { guardMounts } = vi.hoisted(() => ({ guardMounts: { count: 0 } }))
@@ -193,7 +193,7 @@ beforeEach(async () => {
   focusPanel(SID)
 })
 
-describe('opener 反查（D1 调用面：托盘 runId 直开 + block (name, slug) 反查）', () => {
+describe('opener 反查（D1 调用点：托盘 runId 直开 + block (name, slug) 反查）', () => {
   it('托盘路径：runId 精确匹配直开（openWorkflow(runId) 零改动语义）', async () => {
     await seedRecords([makeRun('wf-1', 's1'), makeRun('wf-2', 's2', { scriptName: 'flow-b' })])
 
@@ -323,7 +323,7 @@ describe('DAG 通道（§3.1-5 两路错误归一 + 在途丢弃 + 重试）', (
     expect(mockGetDag).toHaveBeenCalledTimes(2)
   })
 
-  it('retryDagParse：parse_failed 后重试重拉当前 run', async () => {
+  it('retryDagParse：parse_failed 后重试重新拉取当前 run', async () => {
     await seedRecords([makeRun('wf-1', 's1')])
     mockGetDag.mockResolvedValueOnce({ runId: 'wf-1', code: 'parse_failed', message: 'bad syntax' })
 
@@ -491,14 +491,14 @@ describe('scheduler 一级 tab（Host 挂载门控 + tab 状态机，scheduler �
   })
 })
 
-describe('canvas 一级 tab（problem-solve-canvas §3.1(3)：画布跨 session，scheduler 双入口先例平移）', () => {
-  it('canvas 直达打开（kind 直达）：overlay 面板呈现 + canvas pane 在场且 CanvasPane 真实挂载（core 内容 kind=canvas、canvasId=cvs-1）+ runs/scheduler body 不在场 + header 换画布标题', async () => {
+describe('canvas 一级 tab（problem-solve-canvas §3.1(3)：画布按归属会话隔离 D4，scheduler 双入口先例平移）', () => {
+  it('canvas 直达打开（kind 直达）：overlay 面板呈现 + canvas pane 在场且 CanvasPane 真实挂载（core 内容 kind=canvas、canvasId=cvs-1 + 归属 sessionId）+ runs/scheduler body 不在场 + header 换画布标题', async () => {
     const wrapper = mount(WorkflowVizOverlayHost)
 
-    openCanvasTab('cvs-1')
+    openCanvasTab('cvs-1', SID)
     await flushPromises()
 
-    expect(getOverlayControlState().current).toEqual({ kind: 'canvas', payload: { canvasId: 'cvs-1' } })
+    expect(getOverlayControlState().current).toEqual({ kind: 'canvas', payload: { canvasId: 'cvs-1', sessionId: SID } })
     expect(wrapper.find('[data-testid="wfvz-overlay-panel"]').exists()).toBe(true)
     expect(wrapper.find('[data-testid="wfvz-overlay-canvas-pane"]').exists()).toBe(true)
     // CanvasPane 异步导入（defineAsyncComponent）落定后真实挂载——canvas-pane 为其根元素
@@ -540,7 +540,7 @@ describe('canvas 一级 tab（problem-solve-canvas §3.1(3)：画布跨 session�
   it('tab 切换互不串扰：canvas 直达开着切 scheduler——scheduler pane 替换 canvas pane（CanvasPane 随之卸载），再点 canvas 段还原', async () => {
     const wrapper = mount(WorkflowVizOverlayHost)
 
-    openCanvasTab('cvs-1')
+    openCanvasTab('cvs-1', SID)
     await flushPromises()
     expect(wrapper.find('[data-testid="wfvz-overlay-canvas-pane"]').exists()).toBe(true)
 
@@ -557,22 +557,27 @@ describe('canvas 一级 tab（problem-solve-canvas §3.1(3)：画布跨 session�
   })
 
   it('关闭复位对 canvas 内容同构：关（任意通道）→ overlayTab 复位 runs；重开由入口定', () => {
-    openCanvasTab('cvs-1')
+    openCanvasTab('cvs-1', SID)
     expect(overlayTab.value).toBe('canvas')
     closeOverlay()
     expect(overlayTab.value).toBe('runs')
 
-    openCanvasTab('cvs-1')
+    openCanvasTab('cvs-1', SID)
     expect(overlayTab.value).toBe('canvas')
     closeWorkflowVizOverlay()
     expect(overlayTab.value).toBe('runs')
   })
 
-  it('session 删除级联对 canvas 内容不关（画布跨 session 无会话归属——级联判据不适用）', () => {
-    openCanvasTab('cvs-1')
-    closeWorkflowVizOverlayForSession(SID)
+  it('session 删除级联对 canvas 内容关（D4：删除画布归属会话 → 关浮层；删其他会话不关）', () => {
+    openCanvasTab('cvs-1', SID)
+    // 删非归属会话 → 条件式级联不动浮层
+    closeWorkflowVizOverlayForSession('s-other')
     expect(isOverlayOpen()).toBe(true)
     expect(getOverlayControlState().current?.kind).toBe('canvas')
+
+    // 删归属会话 → 关浮层（载荷 sessionId = 归属会话，与 workflow/scheduler 同判据）
+    closeWorkflowVizOverlayForSession(SID)
+    expect(isOverlayOpen()).toBe(false)
   })
 })
 
@@ -615,7 +620,7 @@ describe('kind 门控（U4 修复对账）：Guard 重挂与时长 tick 只随 w
     openWorkflowVizOverlay(SID, 'wf-1')
     await flushPromises()
     expect(setSpy).toHaveBeenCalledTimes(1) // workflow 开 → tick 启动
-    // 时长的用户可见消费面（壳 header 时长槽）随开渲染
+    // 时长的用户可见消费方（壳 header 时长槽）随开渲染
     expect(wrapper.find('[data-testid="wfvz-overlay-elapsed"]').exists()).toBe(true)
 
     openBrowser('http://localhost:1420', SID)

@@ -1,5 +1,5 @@
 /**
- * provider-importer catalog 分路写凭据测试（A1-4 收口核心变更，PR #187 round-1 review MUST_FIX #1）。
+ * provider-importer catalog 分路写凭据测试（A1-4 收敛核心变更，PR #187 round-1 review MUST_FIX #1）。
  *
  * 测试框架：vitest（从 vitest 导入 describe/it/expect/vi/beforeEach/afterEach，禁 node:test）。
  * 运行命令：cd packages/runtime && npx vitest run src/services/__tests__/provider-importer-credential-writer.test.ts

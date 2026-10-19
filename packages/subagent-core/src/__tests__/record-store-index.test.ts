@@ -29,7 +29,7 @@
 // 清理约定：真实 jsonl fixture 的 afterEach rmSync 必带 maxRetries（fire-and-forget
 // 索引写与清理的 ENOTEMPTY 竞态，见 get-record-for-action-restart.test.ts）。
 //
-// 环境守卫约定：chmod 000 零探测用例（S1TC1/2/7/13）用 chmodProbeIt——win32 的
+// 环境检查约定：chmod 000 零探测用例（S1TC1/2/7/13）用 chmodProbeIt——win32 的
 // chmod 000 仅映射 read-only、root 无视 000，断言会静默退化为恒真，须跳过。
 
 import * as fs from "node:fs";
@@ -47,7 +47,7 @@ const { loggerMock } = vi.hoisted(() => ({
 }));
 vi.mock("../core/logger.ts", () => ({ getLogger: () => loggerMock }));
 
-/** chmod 000 零探测用例的环境守卫：win32 上 chmod 000 仅映射 read-only（读仍被允许）、
+/** chmod 000 零探测用例的环境检查：win32 上 chmod 000 仅映射 read-only（读仍被允许）、
  *  root 无视 000——两种环境下「零内容读取」断言静默退化为恒真（实现退化回读也不失败），
  *  跳过防假绿。平台短路在前，getuid 仅 POSIX 存在。 */
 const chmodProbeIt = process.platform === "win32" || process.getuid?.() === 0 ? it.skip : it;
@@ -312,14 +312,14 @@ describe("RecordStore 索引接入 [perf L-1]（S1TC1-9/13）", () => {
     const f1 = writeSession({ name: "a.jsonl", id: "sa-1", assistantTexts: ["r1"] });
     writeSession({ name: "b.jsonl", id: "sa-2", assistantTexts: ["r2"] });
 
-    const storeA = new RecordStore(sessionsDir);
+    const storeA = new RecordStore(() => sessionsDir);
     storeA.collectRecords(100, "all", "root-1");
     await waitForIndex();
 
     // 去读权限：statSync 仍可用（戳 mtimeMs/size 不变 → 索引条目仍命中），readFileSync/
     // openSync 失败——若实现退化回读文件，readIdentityHeader 捕获异常返回 undefined → sa-1 消失。
     fs.chmodSync(f1, 0o000);
-    const storeB = new RecordStore(sessionsDir);
+    const storeB = new RecordStore(() => sessionsDir);
     const records = storeB.collectRecords(100, "all", "root-1");
     expect(records.map((r) => r.id).sort()).toEqual(["sa-1", "sa-2"]);
     const sa1 = records.find((r) => r.id === "sa-1");
@@ -335,7 +335,7 @@ describe("RecordStore 索引接入 [perf L-1]（S1TC1-9/13）", () => {
     const fA = writeTailIdentitySession("a.jsonl", "sa-1", "initial");
     writeSession({ name: "b.jsonl", id: "sa-2", assistantTexts: ["r2"] });
 
-    const storeA = new RecordStore(sessionsDir);
+    const storeA = new RecordStore(() => sessionsDir);
     storeA.collectRecords(100, "all", "root-1");
     await waitForIndex();
 
@@ -352,7 +352,7 @@ describe("RecordStore 索引接入 [perf L-1]（S1TC1-9/13）", () => {
     fs.chmodSync(path.join(sessionsDir, "b.jsonl"), 0o000);
 
     const bBefore = loadIndex(encDir).entries.get("b.jsonl");
-    const storeB = new RecordStore(sessionsDir);
+    const storeB = new RecordStore(() => sessionsDir);
     const records = storeB.collectRecords(100, "all", "root-1");
     expect(records.find((r) => r.id === "sa-1")?.task).toBe("resumed"); // a 重探测取尾部 identity
     expect(records.map((r) => r.id).sort()).toEqual(["sa-1", "sa-2"]); // b 索引命中仍在
@@ -375,7 +375,7 @@ describe("RecordStore 索引接入 [perf L-1]（S1TC1-9/13）", () => {
     fs.writeFileSync(indexPath, "{not valid json");
     const errSpy = vi.spyOn(console, "error").mockImplementation(() => {});
 
-    const store = new RecordStore(sessionsDir);
+    const store = new RecordStore(() => sessionsDir);
     const records = store.collectRecords(100, "all", "root-1");
     expect(records.map((r) => r.id).sort()).toEqual(["sa-1", "sa-2"]); // 空索引=今天的全量行为
 
@@ -395,7 +395,7 @@ describe("RecordStore 索引接入 [perf L-1]（S1TC1-9/13）", () => {
     fs.writeFileSync(indexPath, JSON.stringify({ version: 999, pid: 1, entries: {} }));
     const before = { content: fs.readFileSync(indexPath, "utf-8"), mtimeMs: fs.statSync(indexPath).mtimeMs };
 
-    const store = new RecordStore(sessionsDir);
+    const store = new RecordStore(() => sessionsDir);
     const records = store.collectRecords(100, "all", "root-1");
     expect(records.map((r) => r.id).sort()).toEqual(["sa-1", "sa-2"]); // 空索引全量探测，结果正确
 
@@ -409,7 +409,7 @@ describe("RecordStore 索引接入 [perf L-1]（S1TC1-9/13）", () => {
     writeSession({ name: "b.jsonl", id: "sa-2", assistantTexts: ["r2"] });
     fs.writeFileSync(indexPath, JSON.stringify({ version: 0, pid: 1, entries: {} }));
 
-    const store = new RecordStore(sessionsDir);
+    const store = new RecordStore(() => sessionsDir);
     const records = store.collectRecords(100, "all", "root-1");
     expect(records.map((r) => r.id).sort()).toEqual(["sa-1", "sa-2"]);
 
@@ -425,7 +425,7 @@ describe("RecordStore 索引接入 [perf L-1]（S1TC1-9/13）", () => {
     writeSession({ name: "a.jsonl", id: "sa-1", assistantTexts: ["r1"] });
     writeJunk("junk.jsonl");
 
-    const storeA = new RecordStore(sessionsDir);
+    const storeA = new RecordStore(() => sessionsDir);
     storeA.collectRecords(100, "all", "root-1");
     await waitForIndex();
 
@@ -433,7 +433,7 @@ describe("RecordStore 索引接入 [perf L-1]（S1TC1-9/13）", () => {
     expect(negEntry).toEqual({ negative: true, mtimeMs: expect.any(Number), size: expect.any(Number) }); // 负缓存持久化
 
     const before = fs.statSync(indexPath).mtimeMs;
-    const storeB = new RecordStore(sessionsDir);
+    const storeB = new RecordStore(() => sessionsDir);
     const records = storeB.collectRecords(100, "all", "root-1");
     expect(records.map((r) => r.id)).toEqual(["sa-1"]); // junk 无 identity 本就不产记录；a 命中在
 
@@ -444,7 +444,7 @@ describe("RecordStore 索引接入 [perf L-1]（S1TC1-9/13）", () => {
   it("S1TC6: 索引落 dirname(sessionsDir) 且写后 L0 快路径不失效", { timeout: 15_000 }, async () => {
     writeSession({ name: "a.jsonl", id: "sa-1", assistantTexts: ["r1"] });
     writeSession({ name: "b.jsonl", id: "sa-2", assistantTexts: ["r2"] });
-    const store = new RecordStore(sessionsDir); // 不挂 manifestStore：排除 listAllSync 的 readdir 干扰
+    const store = new RecordStore(() => sessionsDir); // 不挂 manifestStore：排除 listAllSync 的 readdir 干扰
 
     const first = store.collectRecords(100, "all", "root-1");
     await waitForIndex();
@@ -472,7 +472,7 @@ describe("RecordStore 索引接入 [perf L-1]（S1TC1-9/13）", () => {
     const fb = writeSession({ name: "b.jsonl", id: "sa-2", assistantTexts: ["r2"] });
     const fj = writeJunk("junk.jsonl");
 
-    const storeA = new RecordStore(sessionsDir);
+    const storeA = new RecordStore(() => sessionsDir);
     const recordsA = storeA.collectRecords(100, "all", "root-1");
     await waitForIndex();
 
@@ -481,7 +481,7 @@ describe("RecordStore 索引接入 [perf L-1]（S1TC1-9/13）", () => {
     fs.chmodSync(fj, 0o000);
     const before = fs.statSync(indexPath).mtimeMs;
 
-    const storeB = new RecordStore(sessionsDir);
+    const storeB = new RecordStore(() => sessionsDir);
     const recordsB = storeB.collectRecords(100, "all", "root-1");
     const project = (rs: typeof recordsA) =>
       rs.map((r) => `${r.id}|${r.agent}|${r.task}|${r.startedAt}|${r.rootSessionId}|${r.status}`).sort();
@@ -496,7 +496,7 @@ describe("RecordStore 索引接入 [perf L-1]（S1TC1-9/13）", () => {
     writeSession({ name: "b.jsonl", id: "sa-2", assistantTexts: ["r2"] });
     writeJunk("junk.jsonl");
 
-    const storeA = new RecordStore(sessionsDir);
+    const storeA = new RecordStore(() => sessionsDir);
     const recordsA = storeA.collectRecords(100, "all", "root-1");
     await waitForIndex();
 
@@ -511,7 +511,7 @@ describe("RecordStore 索引接入 [perf L-1]（S1TC1-9/13）", () => {
     expect(aEntry.id).toBe(recordsA.find((r) => r.id === "sa-1")?.id);
     expect(aEntry.task).toBe("test task");
     // [R4/D6-①] 头部探测拿不到 model_change → undefined（缺席语义——旧「空串 DS4
-    // 合法」哨兵随 model 可选化退役，索引读侧守卫已放行 undefined）
+    // 合法」哨兵随 model 可选化退役，索引读侧检查已放行 undefined）
     expect(aEntry.model).toBeUndefined();
   });
 
@@ -522,7 +522,7 @@ describe("RecordStore 索引接入 [perf L-1]（S1TC1-9/13）", () => {
     const T0 = Date.now();
     vi.setSystemTime(T0);
     try {
-      const store = new RecordStore(sessionsDir);
+      const store = new RecordStore(() => sessionsDir);
 
       // 第一段：首扫必写（lastIndexWriteAt=0 过节流窗），索引含 a
       writeSession({ name: "a.jsonl", id: "sa-1", assistantTexts: ["r1"] });
@@ -563,7 +563,7 @@ describe("RecordStore 索引接入 [perf L-1]（S1TC1-9/13）", () => {
   chmodProbeIt("S1TC13: dispose→revive 后重扫惰性重载索引命中（/resume /fork 高频路径）", { timeout: 15_000 }, async () => {
     const fa = writeSession({ name: "a.jsonl", id: "sa-1", assistantTexts: ["r1"] });
     const fb = writeSession({ name: "b.jsonl", id: "sa-2", assistantTexts: ["r2"] });
-    const store = new RecordStore(sessionsDir);
+    const store = new RecordStore(() => sessionsDir);
     store.collectRecords(100, "all", "root-1");
     await waitForIndex();
 
@@ -579,12 +579,12 @@ describe("RecordStore 索引接入 [perf L-1]（S1TC1-9/13）", () => {
   chmodProbeIt("S1TC15: [R4/D6-③] 存量索引空串归一回归——索引直查路径 model:\"\" 条目产出 model undefined 的 record", { timeout: 15_000 }, async () => {
     const f1 = writeSession({ name: "a.jsonl", id: "sa-1", assistantTexts: ["r1"] });
 
-    const storeA = new RecordStore(sessionsDir);
+    const storeA = new RecordStore(() => sessionsDir);
     storeA.collectRecords(100, "all", "root-1");
     await waitForIndex();
 
     // 篡改落盘索引为 R4 升级前旧写侧形态（model:"" 存量条目）：loadIndex 的
-    // hasModelFields 守卫接受 "" 合法 string，条目可进内存映像参与直查命中
+    // hasModelFields 检查接受 "" 合法 string，条目可进内存映像参与直查命中
     const loaded = loadIndex(encDir);
     const aEntry = loaded.entries.get("a.jsonl");
     if (aEntry === undefined || aEntry.negative === true) throw new Error("a.jsonl should be a positive entry");
@@ -593,10 +593,10 @@ describe("RecordStore 索引接入 [perf L-1]（S1TC1-9/13）", () => {
 
     // 冷启动新实例：jsonl 未变、戳匹配 → buildEntryFromIndex 索引直查命中（零探测）。
     // chmod 000 阻断内容读取防假绿：若实现退化回读/重探测，readIdentityHeader 失败 →
-    // sa-1 消失，下方 toBeDefined 即失败（S1TC1 同款守卫手法）
+    // sa-1 消失，下方 toBeDefined 即失败（S1TC1 同款检查手法）
     fs.chmodSync(f1, 0o000);
     try {
-      const storeB = new RecordStore(sessionsDir);
+      const storeB = new RecordStore(() => sessionsDir);
       const light = storeB.collectRecords(100, "all", "root-1").find((r) => r.id === "sa-1");
       expect(light).toBeDefined();
       expect(light?.model).toBeUndefined(); // 空串归一为缺席，非 ""

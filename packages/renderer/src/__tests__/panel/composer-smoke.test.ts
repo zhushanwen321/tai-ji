@@ -81,13 +81,13 @@ const depsMock = vi.hoisted(() => ({
 }))
 vi.mock('@/composables/features/new-task/useNewTaskDeps', () => ({
   // deps.flow 的 currentCwd 同样真 ref（Landing `flow.currentCwd.value` 直读）；与
-  // useNewTaskFlow 工厂各持独立实例——冒烟零跨面写入，语义等价
+  // useNewTaskFlow 工厂各持独立实例——冒烟零跨实例写入，语义等价
   useNewTaskDeps: () => ({ flow: { ...flowMock, currentCwd: ref<string | null>(null) }, ...depsMock }),
 }))
 
 // ── useExtensionUI mock（Panel 的表单订阅，ask-user-inline 范式）──
 // formReq 形状对齐 ExtensionUIRequest 的 form 帧子集（requestId/formQuestions 供
-// formQuestions 复核守卫 warn 断言消费）
+// formQuestions 复核检查 warn 断言消费）
 const uiMock = vi.hoisted(() => ({
   formReq: { value: undefined as { form?: boolean; requestId?: string; formQuestions?: unknown[] } | undefined },
   respond: () => {},
@@ -100,7 +100,7 @@ vi.mock('@/composables/useExtensionUI', () => ({
     cancel: uiMock.cancel,
   }),
   formFilter: (req: { form?: boolean } | undefined) => req?.form === true,
-  // PanelModeBar（Panel composer 上方常驻挂载）setup 消费 planReviewFilter——窄 mock 需补齐该导出面
+  // PanelModeBar（Panel composer 上方常驻挂载）setup 消费 planReviewFilter——窄 mock 需补齐该导出清单
   planReviewFilter: (req: { planReview?: boolean } | undefined) => req?.planReview === true,
 }))
 
@@ -131,7 +131,7 @@ vi.mock('@/stores/session', () => ({
   useSessionStore: () => ({ active: undefined, list: [], applySnapshot: vi.fn(), revive: vi.fn() }),
 }))
 
-// ── ComposerInput mock（共用面收敛 helpers/composer-mount；data-testid 供冒烟断言）──
+// ── ComposerInput mock（共用部分收敛 helpers/composer-mount；data-testid 供冒烟断言）──
 const { lastInputText, lastSetText, ComposerInputMock } = makeComposerInputMock()
 
 const SIMPLE = defineComponent({ name: 'SimpleStub', template: '<div />' })
@@ -222,7 +222,7 @@ describe('[robustness P2/③b] orphan 草稿挂载取回（composer-shell onMoun
   })
 })
 
-describe('formQuestions 复核守卫 warn（设计 D2：非法项跳过 + 留痕）', () => {
+describe('formQuestions 复核检查 warn（设计 D2：非法项跳过 + 留痕）', () => {
   it('非法问题项被滤除时 console.warn 留痕（requestId + 滤除数）', () => {
     // 一合法（text 题）+ 一非法（question 非 string，isFormQuestion 拒收）→ 过滤发生
     uiMock.formReq.value = {

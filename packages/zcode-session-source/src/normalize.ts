@@ -1,6 +1,6 @@
 /**
  * zcode session id 归一化（自 runtime services/session/zcode-import/normalize.ts 迁入
- * 改造；runtime 侧旧文件已随共享基座实施收口删除（git 可追溯），本包为其唯一现行承载。
+ * 改造；runtime 侧旧文件已随共享基座实施收敛删除（git 可追溯），本包为其唯一现行承载。
  * 设计 §1.5「id 归一化
  * 收敛为基座/source 单点」——候选打标与转换 header 两个调用点 import 同源实现，
  * 各内联一份则单边漂移、打标失配即幂等失效）。
@@ -14,7 +14,7 @@
  * assertValidSessionId 允许集的真子集，收紧方向安全；锚点
  * dist/core/session-manager.js assertValidSessionId 正则字面量（语义登记 PS-52，verifiedWith 以该登记为准））。
  *
- * 相对 runtime 旧版的改造（设计 §1.5 source 包契约第 4 条「错误面归消费侧」）：不再
+ * 相对 runtime 旧版的改造（设计 §1.5 source 包契约第 4 条「错误范围归消费侧」）：不再
  * 抛 runtime services 层的 ImportServiceError（本包不私建 import_* / zcode_* 错误码），
  * 归一化失败抛普通 Error——消费方（session-reader 路由 / runtime 导入薄包装）按各自
  * 错误词表映射（reader → zcode_param_invalid；runtime → import_invalid_session）。

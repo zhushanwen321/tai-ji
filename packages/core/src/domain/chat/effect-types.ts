@@ -22,7 +22,7 @@ import type { MessagesRef } from './mutations'
  *
  * - messages/retryStates：原 ChunkContext，chunk 状态写入目标（[u5a] queueStates 维度退役）。
  * - applyFileChanges/markChangeSetsSuperseded：原 ChunkContext 回调（store 内合并逻辑）。
- * - finalizeSession + clearPendingSend：统一收口出口（替代 setStreaming flag 翻转）。
+ * - finalizeSession + clearPendingSend：统一收尾出口（替代 setStreaming flag 翻转）。
  */
 export interface MessageEffectContext {
   /** D-1 容器范式：读数组需 `.value.get(sid)?.value ?? []`（内层是 per-session ShallowRef） */
@@ -38,7 +38,7 @@ export interface MessageEffectContext {
   ) => void
   /** changeSetInvalidated case 调 store.markChangeSetsSuperseded（commit 后旧卡片过期） */
   markChangeSetsSuperseded: (sessionId: string) => void
-  /** 统一收口出口（替代 setStreaming）。终态 handler 调。
+  /** 统一收尾出口（替代 setStreaming）。终态 handler 调。
    *  reason 决定终态映射；handler 自己改 entity status 后调此方法（幂等：entity 已终态则 no-op，
    *  只清 pendingSend + timer）。errorText 可选：error/stream_error 时写入。 */
   finalizeSession: (sessionId: string, reason: FinalizeReason, errorText?: string) => void
@@ -46,12 +46,12 @@ export interface MessageEffectContext {
   clearPendingSend: (sessionId: string) => void
   /**
    * 追加 user 消息（Segment[]，ADR-0043）。
-   * 可选 id：提供则气泡沿用该 id，缺省自生成 `u-<uuid>`。保号消费方 = 送达回执的两分支
+   * 可选 id：提供则气泡沿用该 id，缺省自生成 `u-<uuid>`。保留原 id 消费方 = 送达回执的两分支
    * 入流（① morph 段 / ② 外来纯文本降级，effects/user-delivery）——重建气泡沿用提交时
    * clientUuid，使 live 窗口（未刷新，reconcile 仅切入/重试触发）的已送达消息可按
    * clientUuid 定位（消息撤回入口的结构前提：换号不在映射、不匹配文件末尾标记，撤回
    * 定位双通道会构造性 miss）。乐观插入（统一提交）不传 id，保持自生成现行为。
-   * [B1 退役] 前身 queue_update 计数腿（drainN/reconcilePending）已随投递所有权内核删除。
+   * [B1 退役] 前身 queue_update 计数路径（drainN/reconcilePending）已随投递所有权内核删除。
    */
   appendUser: (sessionId: string, segments: Segment[], id?: string) => string
   /**
@@ -63,7 +63,7 @@ export interface MessageEffectContext {
   applyEntryFrame: (sessionId: string, entry: PiEntry) => void
   /**
    * [steer-bubble u0 / D2] per-session
-   * inflight 投递确认计数读写——语义 = **已挂账待确认的投递数**（统一提交的乐观气泡其
+   * inflight 投递确认计数读写——语义 = **已记为待确认的投递数**（统一提交的乐观气泡其
    * 确认帧 message_end(user) 未到）。不变式 ≥ 0（decrement 钳制，配额漂移不产生负值），
    * 正常路径逐投递归零。实现在 store（getInflight 等）。
    */

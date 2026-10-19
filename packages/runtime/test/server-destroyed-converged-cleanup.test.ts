@@ -126,7 +126,7 @@ describe('D6a: 真实 SessionService 两条销毁路径触发 onSessionDestroyed
 
     // 构造「占用中 pi 死亡」场景（D3 转移 #10 的主防线语义）：占用中 agent_settled /
     // compaction_end 永不到达，onSessionExit 全复位是唯一兜底——否则重连 renderer 经
-    // stateSnapshot 回放恢复的是永久占用投影。先置占用投影（订阅前，received 只收
+    // stateSnapshot 回放恢复的是永久占用派生视图。先置占用派生视图（订阅前，received 只收
     // triggerExit 后的帧），再订阅并触发退出。
     applySessionOccupancyTransition(session, bus, 'generating')
     applySessionOccupancyTransition(session, bus, 'compacting-start')
@@ -148,7 +148,7 @@ describe('D6a: 真实 SessionService 两条销毁路径触发 onSessionDestroyed
     const occFrames = received.filter((m) => m.type === 'session.occupancy')
     expect(occFrames).toHaveLength(1)
     expect(occFrames[0]!.payload).toMatchObject({ sessionId: 's-exit', turn: 'idle', compacting: false, bash: false })
-    // session.exited 同样经 bus publish 到达订阅者（broadcast 腿已删，publish 唯一通道）
+    // session.exited 同样经 bus publish 到达订阅者（broadcast 路径已删，publish 唯一通道）
     expect(received.some((m) => m.type === 'session.exited')).toBe(true)
 
     // 帧序约束：occupancy 复位 publish 先于 clearSession 清空——clearSession 之后订阅者

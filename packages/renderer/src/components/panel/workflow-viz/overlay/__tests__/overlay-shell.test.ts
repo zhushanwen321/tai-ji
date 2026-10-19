@@ -8,7 +8,7 @@
  *   陷阱逻辑单源在编排器——`getOverlayFocusTrapPanel` 为读点）+ 焦点契约（打开 focus
  *   面板 / 关闭回 composer）；
  * - 观察者形态：ESC 不由壳消费（负向锚：无 close 事件、不 preventDefault——双监听会
- *   一次 Esc 连剥两层）+ IME 组合态不产生壳级动作（守卫单源在编排器 isComposing 前置）。
+ *   一次 Esc 连剥两层）+ IME 组合态不产生壳级动作（检查单源在编排器 isComposing 前置）。
  *
  * DOM 契约：wfvz-overlay* 四锚点为 WorkflowVizOverlay 时代沿用 testid（抽壳零 DOM 变化，
  * e2e/docs/overlay 单测族共享），壳通用命名的改名清理登记在 OverlayShell 头注。
@@ -88,7 +88,7 @@ describe('OverlayShell 壳（黑盒 DOM）', () => {
     expect(e.defaultPrevented, '壳不消费 Esc（连 preventDefault 约定也不置位）').toBe(false)
   })
 
-  it('IME 组合态壳级零动作（守卫单源在编排器 isComposing 前置——组合态 Esc 不发 close）', async () => {
+  it('IME 组合态壳级零动作（检查单源在编排器 isComposing 前置——组合态 Esc 不发 close）', async () => {
     const wrapper = mountShell()
     window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', isComposing: true, bubbles: true }))
     await wrapper.vm.$nextTick()

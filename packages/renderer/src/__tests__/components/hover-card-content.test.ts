@@ -1,7 +1,7 @@
 // @vitest-environment happy-dom
 
 /**
- * HoverCardContent 组件单测 —— fallthrough attrs 转发守卫（MF-1-15）。
+ * HoverCardContent 组件单测 —— fallthrough attrs 转发检查（MF-1-15）。
  *
  * 守护契约：本封装模板单根是 HoverCardPortal（Teleport），Vue 对 Teleport 根不继承
  * fallthrough attrs——组件声明 inheritAttrs=false 并把 $attrs 显式合并进内部 reka

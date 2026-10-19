@@ -4,7 +4,7 @@
  * 域函数 = 「command 原语 + reply 解包」或「events 订阅路由」的薄封装，本测试验证封装契约：
  * - RPC：type / payload 形状（含条件键省略，如 send 无 images 时不带 images 键）、超时取值
  *   （compact/bash 引用 shared 常量 + RENDERER_RPC_MARGIN_MS）、reply 字段解包返回
- * - 订阅：onGlobalType/on 的事件类型 + payload 解包 + sessionId 过滤守卫 + 取消函数透传
+ * - 订阅：onGlobalType/on 的事件类型 + payload 解包 + sessionId 过滤检查 + 取消函数透传
  *
  * mock 链路：request.command / events.on|onGlobalType / ws-client.send（extension.ui_response
  * fire-and-forget）。mock 路径相对测试文件解析（../../request = transport/api/request.ts），
@@ -286,7 +286,7 @@ describe('extension 域 RPC 动作', () => {
     expect(mockCommand.mock.calls[1][0]).toBe('extension.list')
   })
 
-  it('getPendingRequests 按类型守卫过滤非法条目', async () => {
+  it('getPendingRequests 按类型检查过滤非法条目', async () => {
     mockCommand.mockResolvedValueOnce({
       requests: [
         { requestId: 'ok1', dialogKind: 'confirm', sessionId: 's1' },
@@ -904,6 +904,36 @@ describe('config 域 请求-响应', () => {
     mockCommand.mockResolvedValueOnce({ results: { K: true } })
     await expect(config.checkEnvVars(['K'])).resolves.toEqual({ K: true })
   })
+
+  it('网络代理（llm-network-proxy U1）：get/set/test/stats/reset 走对应 type + reply 透传', async () => {
+    const cfg = {
+      enabled: true,
+      proxy: { protocol: 'http' as const, host: '127.0.0.1', port: 7890, username: '', password: '' },
+      noProxy: ['localhost'],
+      rules: ['api.anthropic.com'],
+    }
+    mockCommand.mockResolvedValueOnce({ config: cfg })
+    await expect(config.getNetworkProxyConfig()).resolves.toEqual({ config: cfg })
+    expect(mockCommand.mock.calls[0].slice(0, 2)).toEqual(['config.getNetworkProxy', {}])
+
+    mockCommand.mockResolvedValueOnce({ config: cfg })
+    await expect(config.setNetworkProxyConfig(cfg)).resolves.toEqual({ config: cfg })
+    expect(mockCommand.mock.calls[1].slice(0, 2)).toEqual(['config.setNetworkProxy', { config: cfg }])
+
+    const testReply = { ok: false, stage: 'proxy' as const, message: '无法连接代理', elapsedMs: 1200 }
+    mockCommand.mockResolvedValueOnce(testReply)
+    await expect(config.testNetworkProxy(cfg)).resolves.toEqual(testReply)
+    expect(mockCommand.mock.calls[2].slice(0, 2)).toEqual(['config.testNetworkProxy', { config: cfg }])
+
+    const statsReply = { stats: [{ host: 'api.anthropic.com', proxied: 3, direct: 1 }] }
+    mockCommand.mockResolvedValueOnce(statsReply)
+    await expect(config.getNetworkProxyStats('24h')).resolves.toEqual(statsReply)
+    expect(mockCommand.mock.calls[3].slice(0, 2)).toEqual(['config.getNetworkProxyStats', { range: '24h' }])
+
+    mockCommand.mockResolvedValueOnce(statsReply)
+    await expect(config.resetNetworkProxyStats()).resolves.toEqual(statsReply)
+    expect(mockCommand.mock.calls[4].slice(0, 2)).toEqual(['config.resetNetworkProxyStats', {}])
+  })
 })
 
 describe('config 域 动作-ack', () => {
@@ -1019,6 +1049,20 @@ describe('config 域 订阅（onGlobalType 通道）', () => {
     expect(hTc).toHaveBeenCalledWith({ shell: 'zsh' }, true)
     byType['config.retryConfig']({ payload: { config: { maxRetries: 1 }, configured: false } })
     expect(hRc).toHaveBeenCalledWith({ config: { maxRetries: 1 }, configured: false })
+  })
+
+  it('onNetworkProxyConfig 解包 payload.config（llm-network-proxy U1）', () => {
+    const subs: Array<[string, (msg: { payload: unknown }) => void]> = []
+    mockOnGlobalType.mockImplementation((type, handler) => {
+      subs.push([type, handler])
+      return vi.fn()
+    })
+    const hNp = vi.fn()
+    config.onNetworkProxyConfig(hNp)
+    const byType = Object.fromEntries(subs)
+    const cfg = { enabled: true, proxy: { protocol: 'http', host: '127.0.0.1', port: 7890, username: '', password: '' }, noProxy: [], rules: [] }
+    byType['config.networkProxy']({ payload: { config: cfg } })
+    expect(hNp).toHaveBeenCalledWith(cfg)
   })
 
   it('OAuth 事件订阅：auth.deviceCode / authUrl / success / error', () => {

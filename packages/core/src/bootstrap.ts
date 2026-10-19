@@ -32,7 +32,7 @@ import type { ContributionRegistry } from './extension-host/contribution-registr
 // 连接编排提交（D2 裁决②）：发现 runtime 端口并 connectWs。resolve 即编排已提交——
 // 不等待 connected（握手/auth 异步，connected 驱动的视图初始化留壳侧）。
 // init() 只消费 env.isMock（mock/真实由壳 env 端口注入），无连接模式参数（双开关源删一）；
-// ConnectionPorts 未注入时 useConnection().init() 自身 warn 降级（ES2），bootstrap 层不加守卫。
+// ConnectionPorts 未注入时 useConnection().init() 自身 warn 降级（ES2），bootstrap 层不加检查。
 export async function initConnection(): Promise<void> {
   console.log('[bootstrap] step 2/5 initConnection')
   await useConnection().init()

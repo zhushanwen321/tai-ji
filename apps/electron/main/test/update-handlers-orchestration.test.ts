@@ -53,7 +53,7 @@ const settingsMocks = vi.hoisted(() => ({
   setUpdateSettings: vi.fn<(settings: Partial<UpdateSettings>) => void>(),
 }))
 // [多源 D3] 部分真实：normalizeUpdateSourcePref / UPDATE_SOURCE_PREFS / DEFAULT_UPDATE_SETTINGS
-// 取真实导出（handler 的 updateSource 归一校验消费真实守卫，杜绝 mock 复刻三值列表漂移）。
+// 取真实导出（handler 的 updateSource 归一校验消费真实检查，杜绝 mock 复刻三值列表漂移）。
 // constants.ts 已全路径延迟求值（module-eager-binding 修复），importOriginal 无 fs 副作用；
 // get/set 两个 fs 函数仍走 mock（本文件不读真实 fs）。
 vi.mock('../update/update-settings.js', async (importOriginal) => {
@@ -265,7 +265,7 @@ describe('S#9 update-handlers: settings & pending IPC', () => {
     const result = await handler({}, { updateSource: 'atomgit' })
 
     expect(settingsMocks.setUpdateSettings).toHaveBeenCalledTimes(1)
-    // 旧标识符接受不拒（该源即 GitCode 旧称），落盘值归一为新标识符——与读取侧 normalize 同源守卫
+    // 旧标识符接受不拒（该源即 GitCode 旧称），落盘值归一为新标识符——与读取侧 normalize 同源检查
     expect(settingsMocks.setUpdateSettings).toHaveBeenCalledWith({ updateSource: 'gitcode' })
     expect(result).toEqual({ success: true })
   })
@@ -307,7 +307,7 @@ describe('S#7 update-handlers: preload orchestration in update:check', () => {
    */
   function register(orch: MockOrchestrator): void {
     const checkForLatestRelease = vi.fn(async (): Promise<LatestReleaseInfo | null> => FIXTURE)
-    // fetchReleaseByTag 为 u-foundation 补的接口必需方法：handler 编排（本文件覆盖面）不
+    // fetchReleaseByTag 为 u-foundation 补的接口必需方法：handler 编排（本文件覆盖范围）不
     // 消费它（消费方是 orchestrator 下载降级，u-download-failover），桩空实现满足接口形状
     const mockChecker: IReleaseChecker = {
       checkForLatestRelease,
@@ -661,7 +661,7 @@ describe('T4 update-handlers: update:download / update:install / update:getPrelo
     // installUpdate 收到 preloaded 的 release + filePath（不是前端传入）
     expect(orch.installUpdate).toHaveBeenCalledTimes(1)
     expect(orch.installUpdate).toHaveBeenCalledWith(FIXTURE, '/tmp/pre.zip', expect.any(Function))
-    // readPreloadedUpdateRaw 收到 app.getVersion() = '0.8.14'（版本守卫传参，WTC12 集成验证）
+    // readPreloadedUpdateRaw 收到 app.getVersion() = '0.8.14'（版本检查传参，WTC12 集成验证）
     expect(preloadedMocks.readPreloadedUpdateRaw).toHaveBeenCalledWith('0.8.14')
     // triggerRestart=true → 安排 quit（setImmediate）
     expect(capturedQuitCallback).not.toBeNull()

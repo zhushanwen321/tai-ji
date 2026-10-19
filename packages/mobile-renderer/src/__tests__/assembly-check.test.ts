@@ -6,7 +6,7 @@
 //
 // 移动侧断言入口 = __testing 测试后门命名空间（生产代码禁止消费，对齐 companion-bridge
 // 先例；导出测试专用符号不扩大 API 面常驻语义）：
-// - app-runtime.__testing.sessionEntry —— sessionEntry 端口束原始注入面（切入链订阅/LRU 三步）
+// - app-runtime.__testing.sessionEntry —— sessionEntry 端口束原始注入点（切入链订阅/LRU 三步）
 // - bootstrap.__testing.shellEffects   —— 壳 effects 回调集（lifecycle factory 三生命周期回调）
 //
 // __testing 零消费 grep 断言（D9②）：扫描本包 src 生产文件（排除测试与出口定义点），

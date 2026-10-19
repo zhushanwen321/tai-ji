@@ -86,7 +86,7 @@ function workflowRowBySlug(page: Page, panel: Locator, slug: string): Locator {
   })
 }
 
-/** D8 演员表（冻结清单的 e2e 断言投影）：slug 用于托盘行定位，scriptName 用于 header 对账 */
+/** D8 演员表（冻结清单的 e2e 断言派生视图）：slug 用于托盘行定位，scriptName 用于 header 对账 */
 const ACTORS = {
   baseline: { slug: 'deploy', scriptName: 'deploy-flow', bucket: 'ended' },
   running: { slug: 'running', scriptName: 'feature-impl', bucket: 'running' },
@@ -269,7 +269,7 @@ test.describe('Workflow 可视化 overlay E2E', () => {
     await expect(fallback.locator('[data-testid="wfvz-overlay-dag-fallback-call"]')).toHaveCount(1)
     await expect(overlay.getByTestId('wfvz-overlay-dag-fallback-group-Do')).toContainText('worker-W1')
 
-    // 重试钮可用：重拉后 mock 恒返回 parse_failed（失败不缓存故可重试）→ 降级形态保持
+    // 重试钮可用：重新拉取后 mock 恒返回 parse_failed（失败不缓存故可重试）→ 降级形态保持
     await retry.click()
     await expect(overlay.getByTestId('wfvz-overlay-dag-error-code')).toHaveText('parse_failed')
     await expect(fallback).toBeVisible()
@@ -293,7 +293,7 @@ test.describe('Workflow 可视化 overlay E2E', () => {
     await overlay.getByTestId('wf-viz-trace-row-1').click()
     await expect(overlay.getByTestId('l2-tab-agent:1')).toHaveAttribute('data-active', 'true')
 
-    // 关闭激活 tab（agent:1）→ 激活左侧相邻 agent:0（内容面随激活键切换）
+    // 关闭激活 tab（agent:1）→ 激活左侧相邻 agent:0（内容侧随激活键切换）
     await overlay.getByTestId('l2-tab-close-agent:1').click()
     await expect(overlay.getByTestId('l2-tab-agent:0')).toHaveAttribute('data-active', 'true')
     await expect(overlay.getByTestId('wf-viz-agent-tab')).toBeVisible()
@@ -412,7 +412,7 @@ test.describe('Workflow 可视化 overlay E2E', () => {
     await expect(retryingStatus.locator('svg')).toHaveClass(/animate-spin/)
     await page.keyboard.press('Escape')
 
-    // ── skipped 演员：done + 零挂接 → skipped（六态收口）。[同上缺陷登记] done 终局
+    // ── skipped 演员：done + 零挂接 → skipped（六态收尾）。[同上缺陷登记] done 终局
     // run 的 neutral 叠加短路 nodeTone——skipped 本色（dasharray 4_3 虚线）被吞，故
     // rect 虚线断言缺口随同一 deviations 上报；opacity-50 在节点卡根不受叠加影响，照锁
     overlay = await openOverlay(page, ACTORS.mismatched)
@@ -426,7 +426,7 @@ test.describe('Workflow 可视化 overlay E2E', () => {
     await activateSession(page)
 
     // neutral 档：wf-mock-interrupted（run-interrupted 后无 resume，在途 migrator-W1
-    // 投影仍 running → 停止叠加优先于六态：中性暗、无脉冲）
+    // 派生视图仍 running → 停止叠加优先于六态：中性暗、无脉冲）
     let overlay = await openOverlay(page, ACTORS.interrupted)
     const neutralNode = dagNode(overlay, 'agent-L3-N0')
     await expect(neutralNode).toHaveAttribute('data-state', 'running')
@@ -501,7 +501,7 @@ test.describe('Workflow 可视化 overlay E2E', () => {
 
     // V1 演员载体断言固化：单 phase 7+ agent 演员（wf-mock-wide-phase，W-2 纵向边界
     // 载体）——7 节点全部挂载且态分布与 fixture 对账（4 done + 3 running）；列高越界的
-    // pan 兜底几何走查归 V1/L4（真机视口实算，非黑盒断言面）
+    // pan 兜底几何走查归 V1/L4（真机视口实算，非黑盒断言范围）
     overlay = await openOverlay(page, ACTORS.widePhase)
     for (let i = 0; i < 7; i++) {
       await expect(dagNode(overlay, `agent-L3-N${i}`)).toHaveAttribute('data-state', i < 4 ? 'done' : 'running')

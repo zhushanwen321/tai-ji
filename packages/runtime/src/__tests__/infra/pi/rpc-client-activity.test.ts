@@ -1,5 +1,5 @@
 /**
- * RpcClient 活动时钟（lastActivityAt）测试（观测面）。
+ * RpcClient 活动时钟（lastActivityAt）测试（观测范围）。
  *
  * 锁定：
  * - 初值 = spawn 时刻（start() 内重置；构造时刻仅未 start 形态兜底）
@@ -8,8 +8,8 @@
  * - sendRaw 是内部调试旁路，不刷新
  *
  * 退役登记（ADR-0122 防御机制清查）：空闲回收判定消费（idle-pi-reclamation D1/D6-1）、
- * maintenance 维护通道双腿排除、touchActivity 手动刷新已随空闲回收机制整体删除；
- * 活动时钟保留为观测面（crash 取证「死前最后活动时刻」等）。
+ * maintenance 维护通道双路径排除、touchActivity 手动刷新已随空闲回收机制整体删除；
+ * 活动时钟保留为观测范围（crash 取证「死前最后活动时刻」等）。
  *
  * 策略：与 rpc-client-response-guard.test.ts 同构——mock node:child_process + fake
  * stdout 'data' handler（emitPiLine 直投由 LF-only 读取器分帧进 handleMessage），fake
@@ -109,7 +109,7 @@ async function settleLastCommand(p: Promise<unknown>): Promise<void> {
 
 // ── Tests ────────────────────────────────────────────────────────
 
-describe('RpcClient 活动时钟 lastActivityAt（观测面）', () => {
+describe('RpcClient 活动时钟 lastActivityAt（观测范围）', () => {
   let client: RpcClient
 
   beforeEach(async () => {

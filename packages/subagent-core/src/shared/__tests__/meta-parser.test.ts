@@ -134,7 +134,7 @@ describe("parseResourceMeta (discovery, fail-safe null)", () => {
     expect(a.description).toBe("代码审查");
   });
 
-  it("agent frontmatter 未闭合（无结束 ---）返 null", () => {
+  it("agent frontmatter 未收尾（无结束 ---）返 null", () => {
     expect(parseResourceMeta("---\nname: worker\ndescription: x", "agent")).toBeNull();
   });
 
@@ -356,7 +356,7 @@ describe("typecheckMeta 分支覆盖补充（特征锚定）", () => {
 
   // ── workflow 分支 ─────────────────────────────────────────
 
-  it("workflow: phase 对象形态 {title, detail} 合法投影（与字符串元素混排）", () => {
+  it("workflow: phase 对象形态 {title, detail} 合法映射（与字符串元素混排）", () => {
     const meta = parseResourceMeta(
       "/* @pi-meta\nname: x\ndescription: d\nphases:\n  - title: A\n    detail: do a\n  - B\n*/",
       "workflow",
@@ -396,7 +396,7 @@ describe("typecheckMeta 分支覆盖补充（特征锚定）", () => {
     expect(meta).toBeNull();
   });
 
-  it("agent: tools 逗号分隔字符串 → 数组投影（trim + 空段过滤）", () => {
+  it("agent: tools 逗号分隔字符串 → 数组映射（trim + 空段过滤）", () => {
     const meta = parseResourceMeta(
       "---\nname: x\ndescription: d\ntools: read, bash ,, grep\n---\nbody",
       "agent",
@@ -434,7 +434,7 @@ describe("typecheckMeta 分支覆盖补充（特征锚定）", () => {
     expect(meta).toBeNull();
   });
 
-  it("agent: engine 字符串投影", () => {
+  it("agent: engine 字符串映射", () => {
     const meta = parseResourceMeta("---\nname: x\ndescription: d\nengine: zsw\n---\nbody", "agent");
     expect(meta).not.toBeNull();
     const a = meta as AgentMeta;
@@ -452,7 +452,7 @@ describe("typecheckMeta 分支覆盖补充（特征锚定）", () => {
     const r = parseResourceMetaDetailed("no block here", "workflow");
     expect(r.ok).toBe(false);
     if (!r.ok) {
-      expect(r.error).toBe("未找到 meta 块（缺少 /* @pi-meta */ 或 frontmatter，或闭合 */ 不在行首）");
+      expect(r.error).toBe("未找到 meta 块（缺少 /* @pi-meta */ 或 frontmatter，或结束符 */ 不在行首）");
       expect(r.linePos).toBeUndefined();
     }
   });

@@ -1,11 +1,11 @@
 // src/__tests__/record-model-override.test.ts
 //
 // [subagent-model-switch u-foundation] modelOverride 用户覆盖记账字段的轻量契约测试：
-// ① 序列化/反序列化往返保形（record 持久化经 JSON 条目投影，ref 对象 + setAt 数值
+// ① 序列化/反序列化往返保形（record 持久化经 JSON 条目派生视图，ref 对象 + setAt 数值
 //    必须无损往返）；② 旧记录（无字段）兼容读取（可选字段向后兼容——undefined 即
 //    「从未被用户覆盖」，旧 session 文件反序列化不破）。
 //
-// 行为实装（setModel 编排 / 解析链第 0 层 / entry 持久化投影）归 U2，不在本测试范围。
+// 行为实装（setModel 编排 / 解析链第 0 层 / entry 持久化派生视图）归 U2，不在本测试范围。
 
 import { describe, expect, it } from "vitest";
 

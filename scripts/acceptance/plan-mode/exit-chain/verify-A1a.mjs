@@ -8,7 +8,7 @@
  * （OpenAI chat/completions 流式，models.json 自定义 provider 指向 127.0.0.1）按剧本应答，
  * 零外部 token。
  *
- * 八场景（设计 §4 V1 行，④a/④b/⑥ 已按设计沉淀为单测、不在本剧本）：
+ * 八场景（设计 §4 V1 行，④a/④b/⑥ 已按设计转化为单测、不在本剧本）：
  *   ① 审批挂起中 /plan abort
  *   ② 审批挂起中 agent 调 plan 工具 abort（同批 [submit-review, abort] sequential 顺序执行）
  *   ③ 执行方式表单挂起中 /plan abort（fixture-skill 触发表单）
@@ -317,7 +317,7 @@ async function scene2(log) {
   }
 }
 
-/** ③ 执行方式表单挂起中 /plan abort（fixture-skill 触发表单，归口② self no-op） */
+/** ③ 执行方式表单挂起中 /plan abort（fixture-skill 触发表单，收敛点② self no-op） */
 async function scene3(log) {
   const ws = makeWorkspace('s3');
   plantFixtureSkill(ws.PROJECT);
@@ -357,10 +357,10 @@ async function scene3(log) {
     assert(last.state === 'exited' && last.isActive === false, `final entry exited+inactive, got ${JSON.stringify(last)}`);
     const submitEnd = api.frames.filter((f) => f.type === 'tool_execution_end' && f.toolName === 'plan'
       && f.result?.details?.action === 'complete-cancelled');
-    assert(submitEnd.length === 1 && toolResultText(submitEnd[0]).includes(FORM_PENDING_EXIT_TEXT), 'complete-cancelled归口 self no-op text present, no extra persist');
+    assert(submitEnd.length === 1 && toolResultText(submitEnd[0]).includes(FORM_PENDING_EXIT_TEXT), 'complete-cancelled收敛点 self no-op text present, no extra persist');
     const tools = lastRequestTools(llm);
     assert(tools.includes('edit') && tools.includes('write'), `full tool set restored, got ${tools.join(',')}`);
-    log('PASS ③ 执行方式表单挂起中 /plan abort：UI_FORM select 解散、归口② self no-op 不落盘、exited 落盘（dispatching 保留）、工具集恢复、无挂死');
+    log('PASS ③ 执行方式表单挂起中 /plan abort：UI_FORM select 解散、收敛点② self no-op 不落盘、exited 落盘（dispatching 保留）、工具集恢复、无挂死');
   } finally {
     await stopPi(api);
     llm.server.close();
@@ -407,12 +407,12 @@ async function scene5(log) {
     assert(entriesAfter.length === entriesBefore.length, `no new plan-state entry after abort on completed (免覆写), before=${entriesBefore.length} after=${entriesAfter.length}`);
     const lastAfter = entriesAfter[entriesAfter.length - 1];
     assert(lastAfter.state === 'completed' && lastAfter.isActive === false, `completed entry intact, got ${JSON.stringify(lastAfter)}`);
-    // tool 路反馈不走 notify（那是 command 路投影）：纠偏指令语义承载于 tool result 文本（A9）
+    // tool 路反馈不走 notify（那是 command 路派生视图）：纠偏指令语义承载于 tool result 文本（A9）
     const inactiveEnd = toolEndsOf(api, 'review-error').filter((f) => toolResultText(f).startsWith(NOTIFY_INACTIVE_WARN_PREFIX));
     assert(inactiveEnd.length === 1, `abort tool result carried inactive correction text, got ${inactiveEnd.map(toolResultText)}`);
     const tools = lastRequestTools(llm);
     assert(tools.includes('edit') && tools.includes('write') && tools.includes('plan'), `tool set untouched (full), got ${tools.join(',')}`);
-    log('PASS ⑤ completed 终局后再调 abort：completed entry 免覆写无新落盘、tool result 纠偏指令反馈（tool 路投影）、状态面已退出态幂等、无副作用');
+    log('PASS ⑤ completed 终局后再调 abort：completed entry 免覆写无新落盘、tool result 纠偏指令反馈（tool 路派生视图）、状态侧已退出态幂等、无副作用');
   } finally {
     await stopPi(api);
     llm.server.close();

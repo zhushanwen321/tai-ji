@@ -4,10 +4,10 @@ import { redactArgv } from './argv-redact.js'
 import { recordSpawnMarkers } from './spawn-markers.js'
 import { getDefaultModel } from './pi-provider-store.js'
 import type { ProviderId } from '@taiji/shared'
-// B3 出站契约唯一构建器（U3 收口点；实现本体在 @taiji/shared，此处走 runtime 门面）
+// B3 出站契约唯一构建器（U3 收尾点；实现本体在 @taiji/shared，此处走 runtime 门面）
 import { buildOutboundChildEnv } from '../spawn-env.js'
 import type { IPiEngine, PiSessionStats, PiCompactionResult, PiBashResult, PiCommandInfo } from '../../services/ports/pi-engine.js'
-import { createPiSessionLog, writePiCrashLog, captureMemorySnapshot, type PiSessionLog, type PiCrashContext } from '../logger.js'
+import { createPiSessionLog, migratePiSessionLogTree, writePiCrashLog, captureMemorySnapshot, type PiSessionLog, type PiCrashContext } from '../logger.js'
 import { captureMachinePiSnapshotSection, collectUnifiedLogCorrelation } from '../crash-correlation.js'
 // pi 进程 RPC 公共层（@zhushanwen/pi-rpc；设计 docs/architecture/subagent-permanent-session-model.md
 // §3.3.2，G5 收敛）：argv 构造 / LF-only 行分帧 / pending 表（请求-响应配对）/
@@ -170,7 +170,7 @@ function resolveStartModel(options: RpcClientOptions): string | undefined {
     : options.model ?? (modelRef ? `${modelRef.provider}/${modelRef.modelId}` : '')
 }
 
-// 出站 env 构建（B3 出站契约收口）与 pi CLI argv 构造已上移 @zhushanwen/pi-rpc
+// 出站 env 构建（B3 出站契约收尾）与 pi CLI argv 构造已上移 @zhushanwen/pi-rpc
 // （env / spawn-args 模块单源，行为逐字等价提取）：start() 经 buildPiOutboundEnv
 // （底层白名单构建器注入 shared buildOutboundChildEnv——C-proc-09 唯一构建点语义
 // 不变）与 buildPiMainAgentArgs 消费。flag 语义全文（--approve 信任边界 /
@@ -212,8 +212,8 @@ export class RpcClient implements IPiEngine {
   private _killing = false
   /**
    * exitCallbacks 多播是否已发（RT-2#6）：proc 'error' 与 'exit' 合并为单一 terminate
-   * 出口后，运行中 error 先通知、exit 随后到场的形态需要幂等守卫防双发（spawn 失败
-   * 形态只有 error 无 exit，本守卫不影响其必达）。
+   * 出口后，运行中 error 先通知、exit 随后到场的形态需要幂等检查防双发（spawn 失败
+   * 形态只有 error 无 exit，本检查不影响其必达）。
    */
   private _exitNotified = false
   /**
@@ -231,7 +231,7 @@ export class RpcClient implements IPiEngine {
    * 现场只剩 2 行，TypeError 之上的输出全部丢失。现为全量累计 + STDERR_CRASH_MAX_BYTES
    * 字节硬上限（超限丢最旧并置 stderrTruncated，crash log 头部标注）。策略取舍：
    * 「崩溃前已累计全量」而非「常态 tee 磁盘」——tee 与「正常退出不写 crash 文件」
-   * 冲突（临时文件生命周期/句柄常驻/残留清理是新失败面），内存上限制常态增量可忽略。
+   * 冲突（临时文件生命周期/句柄常驻/残留清理是新失败情形），内存上限制常态增量可忽略。
    */
   private stderrChunks: string[] = []
   /** stderrChunks 当前累计字节数（上限判定用，避免每次重算） */
@@ -240,6 +240,29 @@ export class RpcClient implements IPiEngine {
   private stderrTruncated = false
   /** pi stdout JSONL 原始流落盘（架构约定 #4，诊断 pi 卡死的决定性证据） */
   private piSessionLog: PiSessionLog | null = null
+
+  /**
+   * [session-store-layout-inversion D5 补] rekey 时重定向 tee：create 路径 tee 先按
+   * tempId 落树，pi 真实 id 回读后须把日志文件迁到真实 id 树（否则 turn 输出成孤儿、
+   * 真实 id 树缺首段）。close 旧 writer → logger 层迁移文件 → reopen（append 语义由
+   * createPiSessionLog（createPiStreamWriter flags:'a'）自带）→ 写 retarget 边界行（同 spawn_boundary 的代际标注）。
+   * tee 未初始化（logger 未初始化/无 sessionId）时 no-op。
+   */
+  retargetSessionLog(newSessionId: string): void {
+    if (!this.piSessionLog || this.options.sessionId === newSessionId) return
+    this.piSessionLog.end()
+    migratePiSessionLogTree(this.options.sessionId as string, newSessionId)
+    this.options.sessionId = newSessionId
+    this.piSessionLog = createPiSessionLog(newSessionId)
+    this.piSessionLog.write(
+      JSON.stringify({
+        type: '_retarget_boundary',
+        ts: new Date().toISOString(),
+        from: 'temp-id-tree (migrated)',
+        note: 'session id rekeyed after readBackCreateState; preceding lines migrated from temp tree',
+      }) + '\n',
+    )
+  }
 
   // ── 崩溃取证上下文（crash-resilience §3.3 D6-④）：崩溃时刻 writeCrashLogIfNeeded
   // 采集进 pi-crash log 头部的 runtime 侧字段。未知保持 null（显式落盘「没采到」）。
@@ -271,7 +294,7 @@ export class RpcClient implements IPiEngine {
   async start(): Promise<void> {
     // P1（pi-assumption final gate）：附着恢复路径不拼 --model——见 resolveStartModel。
     const model = resolveStartModel(this.options)
-    // B3 出站契约收口（§5-U3）：pi-rpc env 模块组装——底层白名单构建器注入 shared
+    // B3 出站契约收尾（§5-U3）：pi-rpc env 模块组装——底层白名单构建器注入 shared
     // buildOutboundChildEnv（deny 兜底剥 TAIJI_AGENT_PACKAGED/TAIJI_RUNTIME_TOKEN 语义不变），
     // extras 过滤 + TAIJI_AGENT_EXT_LOG 恒注入 + PI_CODING_AGENT_DIR 隔离（<dataDir>/agent/）。
     const env = buildPiOutboundEnv({
@@ -301,7 +324,7 @@ export class RpcClient implements IPiEngine {
     const spawnCwd = this.options.cwd ?? process.cwd()
 
     // argv 回显脱敏（设计 `mode-system-composer-density` §7.2 argv 日志脱敏
-    // / §7.6 写入面 / 探针 P15）：两个提示词 flag 的值只记 `<N chars>`，防 16k 正文落日志。
+    // / §7.6 写侧 / 探针 P15）：两个提示词 flag 的值只记 `<N chars>`，防 16k 正文落日志。
     console.log('[rpc] spawning pi:', piCmd, redactArgv(args), 'cwd:', spawnCwd)
 
     this.proc = spawn(piCmd, args, {
@@ -321,7 +344,7 @@ export class RpcClient implements IPiEngine {
     if (this.options.sessionId) {
       this.piSessionLog = createPiSessionLog(this.options.sessionId)
       // respawn 边界行：同 session 的 pi 进程可能多次 spawn（runtime 重启后 restore /
-      // 崩溃重拉），tee 是 append 模式，无边界行时无法从文件内区分代际——排障时
+      // 崩溃重新拉取），tee 是 append 模式，无边界行时无法从文件内区分代际——排障时
       // 「崩溃前最后输出」与「重启后首输出」会混读（2026-09-24 事故取证的实测痛点）。
       // 下划线前缀 type 与 pi 自身事件命名空间区分，消费方按未知类型忽略。
       this.piSessionLog.write(
@@ -391,7 +414,7 @@ export class RpcClient implements IPiEngine {
     // 为什么必须在源头接线：proc.on('error') 只覆盖 spawn 失败；stdout/stderr 是独立
     // Readable stream，pi 崩溃 / 管道断裂（EPIPE / ECONNRESET）时它们各自 emit 'error'，
     // 若无 listener 则升级为 uncaughtException → runtime 主进程崩溃（2026-09-04 stdout
-    // 事故）。stdin 是 runtime → pi 的唯一写入面（sendCommand / sendRaw）；pi 半关闭
+    // 事故）。stdin 是 runtime → pi 的唯一写侧（sendCommand / sendRaw）；pi 半关闭
     // （写端已死）或崩溃后再写 stdin，流错误（EPIPE / ERR_STREAM_DESTROYED）异步 emit
     // 到 stdin——写调用本身不抛，try/catch 接不住；若无 listener 会被 uncaught-policy
     // log-continue 吞掉：_exited 不置位、pending 不 reject、自愈强杀不触发 → 后续每条
@@ -457,11 +480,11 @@ export class RpcClient implements IPiEngine {
    *
    * 此前 error handler 只 rejectAll：spawn 失败（ENOENT 等）不 emit 'exit'，piSessionLog
    * 的 fd 悬挂、exitCallbacks 永不触发（ProcessManager 会话表收不到死亡通知）。现补齐
-   * exit 处置链的全部收口（对齐批次 3 stdin stream error 的完整处置链口径：_exited 置位
+   * exit 处置链的全部收尾（对齐批次 3 stdin stream error 的完整处置链口径：_exited 置位
    * + rejectAll 必达）；运行中 error 后 exit 若仍到场，各步幂等（piSessionLog 已置 null /
-   * rejectAll 空表 no-op），exitCallbacks 通知由 notifyExitOnce 幂等守卫防双发。
+   * rejectAll 空表 no-op），exitCallbacks 通知由 notifyExitOnce 幂等检查防双发。
    * _killing 语义与 exit handler 对齐：主动 kill 流程不发死亡通知（kill() 的 onExit
-   * rejectAll 统一收口）。
+   * rejectAll 统一收尾）。
    */
   private terminateFromError(err: Error): void {
     this._exited = true
@@ -498,7 +521,7 @@ export class RpcClient implements IPiEngine {
 
   private handleMessage(msg: PiMessage): void {
     // 入站 touch：任何 stdout 帧（response / 事件）都证明 pi 在产出——活动时钟
-    // 供崩溃取证（pi 死前最后活动时刻）等观测面消费。
+    // 供崩溃取证（pi 死前最后活动时刻）等观测范围消费。
     this._lastActivityAt = Date.now()
     // If id matches a pending request, resolve it; otherwise emit as event.
     // resolve 只认 RPC response：pi 的 RpcResponse union 所有变体 type === 'response'
@@ -584,7 +607,7 @@ export class RpcClient implements IPiEngine {
    * 注意：调用方自行保证 JSON 格式正确 + 换行符结尾。
    *
    * 返回 boolean（false = 未送达：pi 进程不在/已退出，或 stdin 写抛错——流已损坏）。
-   * 该应答在 pi 侧没有对应 RPC pending（pi 不回确认），无法以 reject 收口，false 是
+   * 该应答在 pi 侧没有对应 RPC pending（pi 不回确认），无法以 reject 收尾，false 是
    * 唯一的失败信号——调用方必须消费它走可感知失败路径（终结请求 + 上行错误），
    * 不允许静默丢弃；错误日志已在函数内留痕（经 logger.patchConsole tee 落 runtime 日志）。
    */
@@ -699,8 +722,10 @@ export class RpcClient implements IPiEngine {
    * !this._killing 分支内；process error 路径传 code=null）。
    * code=null（信号死亡 / spawn 失败的 process error，如管道断裂后的 SIGKILL）同属异常退出，落盘。
    * 正常退出（code=0）与主动 kill 流程不写。
-   * 文件：<logsDir>/pi-crash-<date>-<sid>.log（logger.ts writePiCrashLog，复用 pi-*
-   * 命名惯例，保留期清理自动覆盖）。
+   * 文件：合法 sid → `<root>/<sid>/logs/pi-crash-<date>.log`（session 存储树 logs/ 域，
+   * 文件名去 sid）；sid 缺失 → 全局 `<logsDir>/pi-crash-<date>-nosid.log`；非法形态 →
+   * 全局 `<logsDir>/pi-crash-<date>-<清洗sid>.log`（清洗后为空才落 nosid；
+   * logger.ts writePiCrashLog，复用 pi-* 命名惯例，保留期清理自动覆盖）。
    *
    * best-effort 观测路径：任何失败（logger 未初始化 / 宿主环境未接线该能力，如
    * 单元测试部分 mock logger 模块）都不得影响 exit 主流程（rejectAll / exitCallbacks
@@ -726,7 +751,7 @@ export class RpcClient implements IPiEngine {
         '',
       ].filter(Boolean).join('\n')
       writePiCrashLog(this.options.sessionId, `${header}${this.stderrChunks.join('\n')}`, context)
-      // D10：崩溃关联取证——①同步机器面 pi 快照（同秒连坐的幸存者视图）+ ②异步统一日志
+      // D10：崩溃关联取证——①同步的机器检查侧 pi 快照（同秒连坐的幸存者视图）+ ②异步统一日志
       // 关联采样（±5s 窗内的 Electron 退出 / 兄弟 pi 死亡 / launchd 信号，fire-and-forget
       // 完成后补写进同一 pi-crash log，append 语义）。两者内部均以 isPiCrashLogEnabled
       // 为门（无 sink 不采样），且全捕获不向上抛——观测增强不得影响 exit 主流程。
@@ -740,7 +765,7 @@ export class RpcClient implements IPiEngine {
   /**
    * 崩溃关联取证补写（crash-forensics-and-watchdog §3.3 D10，crash-correlation.ts）。
    *
-   * ①同步：机器面 pi 快照 section（~10ms，ps 枚举 taiji 家族幸存者 + ppid 归属）；
+   * ①同步：机器检查侧 pi 快照 section（~10ms，ps 枚举 taiji 家族幸存者 + ppid 归属）；
    * ②异步：统一日志关联采样（darwin-only，±5s 窗，log show 最多 10s）完成后追加写
    * 同一 pi-crash log——写点在本方法返回后数秒，靠 writePiCrashLog 的 append 语义与
    * createPiStreamWriter 惰性打开落盘（closeLogger 退出 flush 覆盖晚到的补写）。
@@ -801,7 +826,7 @@ export class RpcClient implements IPiEngine {
    */
   /**
    * 最近一次 pi 双向活动时刻（ms epoch）。
-   * 只读暴露：消费方为观测面（crash 取证「死前最后活动时刻」等）。写点集中在
+   * 只读暴露：消费方为观测范围（crash 取证「死前最后活动时刻」等）。写点集中在
    * RpcClient 内部（出站 sendCommand / 入站 handleMessage），防止时钟被随意重置。
    * 原空闲回收判定（idle-pi-reclamation D1/D6-1 touchActivity + maintenance 豁免）
    * 已随 ADR-0122 防御机制清查退役。
@@ -844,7 +869,7 @@ export class RpcClient implements IPiEngine {
    * 全文 indexOf 匹配无 id，PS-64），上层（delivery registry 对账器）据此完成「全收 → 按裸标记
    * 识别 → 自有条目重投 / 外来文本收养」（§3.1 场景 D / D3）。
    *
-   * 形状守卫：响应非对象或缺数组字段时归一为空数组（协议异常不炸对账主链——对账器把
+   * 形状检查：响应非对象或缺数组字段时归一为空数组（协议异常不炸对账主链——对账器把
    * 「空」解释为「无滞留」，最坏形态是滞留留到下一触发点，而非对账链路抛错）。
    */
   async clearQueue(): Promise<PiQueueSnapshot> {
@@ -902,7 +927,7 @@ export class RpcClient implements IPiEngine {
     // 压缩 RPC 墙钟（COMPACT_RPC_TIMEOUT_MS 30min，timeout-slow-flow-wallclock D3）
     // 已随 ADR-0122 退役（见文件头，推翻该量级校准裁决）。
     const msg = await this.sendCommand('compact', customInstructions ? { customInstructions } : {})
-    // RT-2#4：形状守卫（bash 式，对照 getAvailableModels）——pi compact 成功响应恒带
+    // RT-2#4：形状检查（bash 式，对照 getAvailableModels）——pi compact 成功响应恒带
     // CompactionResult 对象（rpc-mode.js case "compact" → success(id,"compact",result)），
     // 且三必填字段齐备（pi 1.0.0 dist/core/compaction/compaction.d.ts CompactionResult：
     // summary:string / firstKeptEntryId:string / tokensBefore:number），与 port 契约
@@ -954,7 +979,7 @@ export class RpcClient implements IPiEngine {
 
   async getCommands(): Promise<PiCommandInfo[]> {
     const msg = await this.sendCommand('get_commands', {})
-    // RT-2#4：形状守卫（bash 式，对照 getAvailableModels）——pi get_commands 恒返回
+    // RT-2#4：形状检查（bash 式，对照 getAvailableModels）——pi get_commands 恒返回
     // commands 数组（可为空），缺失/非数组 = 协议异常。此前 `?? []` 把协议异常折成
     // 空数组：session-state-projection 的 publishCommandsSnapshot 只挡 undefined，
     // 空数组照发 session.commands → 命令面板静默清空，且「无命令」与「响应畸形」不可分。
@@ -969,9 +994,9 @@ export class RpcClient implements IPiEngine {
 
   async getSessionStats(): Promise<PiSessionStats> {
     const msg = await this.sendCommand('get_session_stats')
-    // RT-2#4：形状守卫——pi get_session_stats 恒返回 stats 对象（tokens=null 是对象内
+    // RT-2#4：形状检查——pi get_session_stats 恒返回 stats 对象（tokens=null 是对象内
     // 字段表达的合法无值态），data 缺失/非对象 = 协议异常。此前 `?? {}` 折空对象，
-    // 投影层读不到 contextUsage 被当「无值」处理，协议异常被永久掩盖。
+    // 派生视图层读不到 contextUsage 被当「无值」处理，协议异常被永久掩盖。
     // 抛错承接：fetchSessionStatsSnapshot 的失败语义 = 实例快照失败退避重试 + 保留旧值。
     const data = msg.data as unknown
     if (typeof data !== 'object' || data === null) {

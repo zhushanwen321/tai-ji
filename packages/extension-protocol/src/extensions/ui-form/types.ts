@@ -1,7 +1,7 @@
 /**
  * 统一提问表单协议（ui-form）的类型定义。
  *
- * 把 plan / scheduler / ask-user 三个 extension 的提问交互收口为一个表单协议：
+ * 把 plan / scheduler / ask-user 三个 extension 的提问交互收敛为一个表单协议：
  * 问题即数据（类型化问题集），GUI 链路统一（wire 协议 + 渲染器）——多问 = 多 tab，
  * 单问 = 单视图。extension 侧经 uiFormInteract() 序列化进 select 的 options[0]，
  * runtime event-adapter 检测 UI_FORM_MARKER 广播 form 帧，前端 FormOverlay

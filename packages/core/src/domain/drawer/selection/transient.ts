@@ -10,7 +10,7 @@
  * 的活数据源（连续 computed 读取、不清空）；detailFilePath 由 useDetailPane 消费后
  * 置 null（避免残留导致下次打开 detail tab 被旧值劫持）。
  *
- * 读取面 = 可写 computed（名字沿用旧全局 ref：selectedCommandName / detailFilePath），
+ * 读侧 = 可写 computed（名字沿用旧全局 ref：selectedCommandName / detailFilePath），
  * 既有消费方（useSideDrawer 兼容层 / CommandDocPanel / useDetailPane）`.value` 读写零改动。
  */
 import { computed, reactive } from 'vue'
@@ -19,7 +19,7 @@ import { useSessionScopedState } from '../../../foundation/use-session-scoped-st
 import { drawerSessionKey } from '../control'
 
 /** 瞬时参数分区（per-session，useSessionScopedState，ADR-0049） */
-export interface TransientParamsState { // oe-exempt:20261003:framework:类型契约先行——selection 分区契约，renderer 消费面即本批 D1 单元
+export interface TransientParamsState { // oe-exempt:20261003:framework:类型契约先行——selection 分区契约，renderer 消费方即本批 D1 单元
   /** Doc tab 当前展示的命令名（如 '/commit'，点击用户气泡 slash chip 时设置） */
   selectedCommandName: string | null
   /** Detail tab 打开时立即展示的文件路径（变更集卡等非文件树入口设置，useDetailPane 消费后清空） */

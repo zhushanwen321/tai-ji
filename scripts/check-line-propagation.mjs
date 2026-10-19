@@ -1,11 +1,11 @@
 #!/usr/bin/env node
 /**
- * check-line-propagation.mjs —— 集成线传播守卫（ADR-0092 / C-proc-30）。
+ * check-line-propagation.mjs —— 集成线传播检查（ADR-0092 / C-proc-30）。
  *
  * 背景：多条 dev-x.x.x 集成线数周并行 + 修复落在其中一条 + 打包/合并从另一条，
  * 传播全靠人记——2026-09-24 dev-0.10.6 打包版事故（review-fix-loop 全员
  * review-failure，根因 = 修复只活在 dev-0.10.5，dev-0.10.6 与 main 均无）。
- * 本守卫把「目标线不得落后 main」「兄弟线未传播 commit 可见」变成打包/集成合并
+ * 本检查把「目标线不得落后 main」「兄弟线未传播 commit 可见」变成打包/集成合并
  * 前的机器检查。
  *
  * 两级检查（exit code 只由硬检查决定，软提示恒不阻塞）：
@@ -29,7 +29,7 @@
  *   写死为 'main' 字面量：它在任何 worktree 跑都恒绿，接线即空转。
  *
  * 退出码：0 = 通过（或 --allow-diverged 越过）；1 = 硬检查红；2 = 用法/基础设施错误。
- * 挂载：prerelease / dev-merge skill 前置步骤（人工触发，非 pre-commit——本守卫
+ * 挂载：prerelease / dev-merge skill 前置步骤（人工触发，非 pre-commit——本检查
  * 语义是打包/集成线门，不是逐 commit 门）。
  *
  * 只读 git（branch / merge-base / log / ls-tree），零写操作、零第三方依赖。
@@ -108,7 +108,7 @@ function checkHardInclusion(target) {
     for (const line of missing.trim().split('\n')) {
       if (line) console.error(`    ${line}`)
     }
-    console.error('    恢复指引：在目标线 worktree 内 git merge main 后重跑本守卫；')
+    console.error('    恢复指引：在目标线 worktree 内 git merge main 后重跑本检查；')
     console.error('    确有正当理由一次性越过：node scripts/check-line-propagation.mjs --target <ref> --allow-diverged')
     return true
   }

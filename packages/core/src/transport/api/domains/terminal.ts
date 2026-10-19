@@ -45,8 +45,8 @@ export const terminalApi = {
   },
   /**
    * 查询被查询会话的存活实例清单（`terminal.list` 对账）。
-   * 返回 ack 的 `instances` 字段（缺省空数组）；拉取失败的 reject 由调用方按触发点分腿处置
-   * （世代变更重连腿静默、⌘R / 会话激活腿保留既有条目、下次触发自然重试）。
+   * 返回 ack 的 `instances` 字段（缺省空数组）；拉取失败的 reject 由调用方按触发点分路径处置
+   * （世代变更重连路径静默、⌘R / 会话激活路径保留既有条目、下次触发自然重试）。
    */
   async list(sessionId: string): Promise<TerminalInstanceSummary[]> {
     const ack: ServerMessageMap['terminal.ack'] = await command('terminal.list', { sessionId }, RPC_BACKSTOP_TIMEOUT_MS)

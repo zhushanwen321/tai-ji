@@ -187,7 +187,7 @@ describe('ThinkingLevel（W2 值域 SSOT：PI_THINKING_LEVELS 全集派生）', 
 })
 
 describe('isPiLaunchPreset', () => {
-  // 测试增强 #5：类型守卫合法性 + 否定断言。
+  // 测试增强 #5：类型检查合法性 + 否定断言。
   it('合法 PiLaunchPreset 对象返回 true', () => {
     expect(isPiLaunchPreset({
       id: 'test',
@@ -210,7 +210,7 @@ describe('isPiLaunchPreset', () => {
       modelOverride: 'anthropic/claude-sonnet-4',
       thinkingLevel: 'high',
     })).toBe(true)
-    // DEFAULT_PRESETS 每个元素都通过守卫
+    // DEFAULT_PRESETS 每个元素都通过检查
     for (const p of DEFAULT_PRESETS) {
       expect(isPiLaunchPreset(p)).toBe(true)
     }

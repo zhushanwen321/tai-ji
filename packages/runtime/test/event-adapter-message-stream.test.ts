@@ -1,16 +1,16 @@
 /**
- * EventAdapter message_update / message_start / message_end 定向测试（CRAP 靶子：
+ * EventAdapter message_update / message_start / message_end 定向测试（CRAP 检查清单：
  * handleMessageUpdate / handleMessageStart / handleMessageEnd）。
  *
  * 已有覆盖：FR-5 error sub-type、FR-2 customType 透传、toolResult/user role 忽略、
  * toolcall_end 锚点（equivalence/tool-call-index）。本文件补齐 sub-type 翻译矩阵的
- * 其余分支与 message_start 的畸形字段守卫（type-safety review：来源是 extension 第三方
+ * 其余分支与 message_start 的畸形字段检查（type-safety review：来源是 extension 第三方
  * 代码，畸形值不得以谎报类型进 wire 帧）：
  * - text_delta / thinking_delta：delta 缺省空串 + contentIndex 锚点透传（D-2 合帧依据）
  * - thinking_start / thinking_end：载荷形态（含 contentIndexAnchor 缺省不产字段）
  * - toolcall_start / toolcall_delta / text_start / text_end：noop（噪声抑制）
  * - 未知 sub-type：warn + noop（不崩）
- * - customStart 畸形守卫：customType 非字符串不误入 custom 分支、details 数组/原始值 →
+ * - customStart 畸形检查：customType 非字符串不误入 custom 分支、details 数组/原始值 →
  *   undefined、content 非字符串 → undefined、display 非布尔 → undefined
  * - message_end role 白名单（R3 business-logic INFO）：allowed role 通过（user/assistant/
  *   toolResult 全量下发）、未建模 role（bashExecution 等）warn + 跳过（双计防线）、
@@ -125,7 +125,7 @@ describe('message_update sub-type 翻译矩阵（handleMessageUpdate）', () => 
   })
 })
 
-describe('message_start 畸形字段守卫（handleMessageStart custom 分支）', () => {
+describe('message_start 畸形字段检查（handleMessageStart custom 分支）', () => {
   it('customType 非字符串（number / null）→ 不走 custom 分支，按 assistant turn 产 message_start', async () => {
     const { adapter, sent } = createAdapter()
     dispatchOne(adapter, { type: 'message_start', message: { customType: 123, content: 'x' } })

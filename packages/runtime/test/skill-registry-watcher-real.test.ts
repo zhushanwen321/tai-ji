@@ -7,7 +7,7 @@
  * 退化为纯 Node fs.watch，对「新建子目录 / 新文件」事件不可靠（nodejs/node#52601），实测触发率
  * ~40%（flaky）；当时修复为 WATCH_OPTIONS usePolling:true。2026-08-28 复测该缺陷在当前 Node
  * 不再复现，默认回到原生事件（polling 留 TAIJI_AGENT_SKILL_WATCH_POLLING=1 降级开关）——
- * 本测试随之成为原生事件路径的回归守卫，正是它要防的场景。
+ * 本测试随之成为原生事件路径的回归检查，正是它要防的场景。
  *
  * 本文件不 mock chokidar（顶层的 vi.mock('chokidar') 仅作用于 skill-registry.test.ts 同文件作用域，
  * 独立 test 文件默认走真实 chokidar），用真实磁盘 + 跨进程 spawn 创建 skill 子目录，验证 onChange 被触发。

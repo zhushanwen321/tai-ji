@@ -1,5 +1,5 @@
 /**
- * PS-02 / PS-12 探针：思考能力两级门控 + 档位钳制就近回落（pi 语义依赖机器守卫，D6 探针层）。
+ * PS-02 / PS-12 探针：思考能力两级门控 + 档位钳制就近回落（pi 语义依赖机器检查，D6 探针层）。
  *
  * 登记条目（docs/pi-semantics.json）：
  * - PS-02「!model.reasoning（含 undefined）→ ["off"]，thinkingLevelMap 仅在开关打开后生效」

@@ -34,7 +34,7 @@ export const RENAME_INSTRUCTION_MAX_LENGTH = 2000;
 /**
  * rename-session 配置 schema（落盘到 `<agentDir>/config/rename-session-ext-config.json`，路径由 llm-shared 推导）。
  *
- * 收口自旧版 pure.ts 的 `RenameConfig`（switchFilePath/maxTitleLength/renameInstruction 硬编码常量）：
+ * 收敛自旧版 pure.ts 的 `RenameConfig`（switchFilePath/maxTitleLength/renameInstruction 硬编码常量）：
  * - 开关双机制：`enabled` 字段（pi CLI 用户主开关，默认 false）+ taiji runtime 的
  *   auto-rename-enabled flag 文件（live 覆盖源，存在即开，见下方 [COMPAT] 契约）
  * - model 从「搭便车 ctx.model」改为独立 `ModelSelector`（仅支持 ref 精确指定；空 ref 跟随会话主模型，见 llm.ts 的空 ref fallback）
@@ -175,7 +175,7 @@ export function normalizeRenameConfig(raw: unknown): RenameSessionConfig {
 			? obj.maxTitleLength
 			: DEFAULT_RENAME_CONFIG.maxTitleLength;
 
-	// normalizeModelSelector：llm-shared 导出（ext-simplify-17 D6 收口）
+	// normalizeModelSelector：llm-shared 导出（ext-simplify-17 D6 收敛）
 	const model = normalizeModelSelector(obj.model) ?? DEFAULT_RENAME_CONFIG.model;
 
 	const thinkingLevel = normalizeThinkingLevel(obj.thinkingLevel) ?? DEFAULT_RENAME_CONFIG.thinkingLevel;
@@ -276,7 +276,7 @@ export function countSuccessfulAssistantReplies(entries: ReadonlyArray<EntryLike
 // ──────────────────────── 标题清洗 ────────────────────────
 
 /**
- * 按 Unicode 码点截断（ext-simplify-17 D13：收口包内三处同构 `Array.from` 骨架——
+ * 按 Unicode 码点截断（ext-simplify-17 D13：收敛包内三处同构 `Array.from` 骨架——
  * cleanTitle / truncateForTitle / previewText，三处差异全部参数化）。
  *
  * Array.from 按码点切分，星面字符（emoji 等，占 2 个 UTF-16 码元）不会被劈成半个代理对。
@@ -310,14 +310,14 @@ export function truncateCodePoints(
  *
  * 输入是 callLLM 已 extractText+trim 的 string（llm-shared/call.ts 的 extractText 负责从
  * AssistantMessage.content 提取 text block 拼接并 trim）。本函数只做 rename 特有的包装清理，
- * 是旧版 extractTitle（从 resp.content 提取）的收口后形态。
+ * 是旧版 extractTitle（从 resp.content 提取）的收敛后形态。
  */
 export function cleanTitle(content: string, maxLength: number): string {
 	const trimmed = content.trim();
 	if (!trimmed) return "";
 
 	// B1: 归一化内部空白——把所有连续空白（含 \n / \r / \t）压成单空格，
-	// 避免 LLM 返回多行标题（如 "重构API层\n更新文档"）原样落库破坏 UI 标题/列表渲染
+	// 避免 LLM 返回多行标题（如 "重构API层\n更新文档"）原样写入破坏 UI 标题/列表渲染
 	const normalized = trimmed.replace(/\s+/g, " ");
 
 	// 去首部引号/markdown 标记 + 尾部引号/markdown/标点（。．.，,、;；!！?？：:）。

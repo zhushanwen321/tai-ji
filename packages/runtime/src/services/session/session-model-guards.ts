@@ -15,7 +15,7 @@ import { toErrorMessage } from '../../utils/errors.js'
 import type { IConfigService } from '../../interfaces.js'
 
 /**
- * 模型是否在 taiji 注册表投影里（`listProviders()` = catalog 合并集 + models.json override，
+ * 模型是否在 taiji 注册表派生视图里（`listProviders()` = catalog 合并集 + models.json override，
  * 与 composer 模型列表同源）。configService 未注入 → true（fail-open）。
  */
 export function isModelInRegistry(

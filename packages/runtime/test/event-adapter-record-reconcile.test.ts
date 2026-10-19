@@ -4,7 +4,7 @@
  * 两段：
  * - event-adapter：agent_settled 经组合注册（withRecordReconcileTrigger ∘ withTraceTrigger）
  *   追加 record-reconcile-trigger 中间事件——原 handler 输出在前、两路追加在后互不取代；
- *   非 agent_settled 事件不追加（对账腿只挂 run 级联边界信号）。
+ *   非 agent_settled 事件不追加（对账路径只挂 run 级联边界信号）。
  * - event-interpreter：record-reconcile-trigger → onRecordReconcile(sessionId) fire-and-forget
  *   恰好一次；未注入回调 no-op。
  *
@@ -26,7 +26,7 @@ describe('event-adapter：agent_settled → record-reconcile-trigger（组合注
     ])
   })
 
-  it('entry_appended（record 主信号）不追加对账触发（对账腿不挂 entry 级信号）', () => {
+  it('entry_appended（record 主信号）不追加对账触发（对账路径不挂 entry 级信号）', () => {
     const out = translate(
       { type: 'entry_appended', entry: { type: 'custom', customType: 'subagent-record' } } as unknown as PiEvent,
       's1',
@@ -36,7 +36,7 @@ describe('event-adapter：agent_settled → record-reconcile-trigger（组合注
     expect(out.some((ev) => ev.kind === 'record-reconcile-trigger')).toBe(false)
   })
 
-  it('message_end 只追加 trace-trigger（trace 腿与对账腿不串扰）', () => {
+  it('message_end 只追加 trace-trigger（trace 路径与对账路径不串扰）', () => {
     const out = translate({
       type: 'message_end',
       message: { id: 'm1', role: 'assistant', content: [] },

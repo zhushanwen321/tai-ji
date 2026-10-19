@@ -2,8 +2,8 @@
  * 投递所有权内核实现：createDelivery（v2）。
  *
  * 在 v1 投递循环（入队 → dedupe → 合批窗口 → busy gate → port.send → settled 边沿
- * 驱动）之上升级为条目制所有权内核（设计 .tmp/tech-design/delivery-ownership-kernel.md
- * §3 D9①②③⑤ / D5②③ / D3，单元 u1）。零 pi 依赖不变：确认/回收由适配器（runtime
+ * 驱动）之上升级为条目制所有权内核（v2 设计批次 D9①②③⑤ / D5②③ / D3，单元 u1——
+ * 设计文档未入 git，裁决随本仓 commit 历史可溯）。零 pi 依赖不变：确认/回收由适配器（runtime
  * registry）调 handle 方法驱动。
  *
  * 五态状态机（D9①，types.ts 迁移表）+ 本文件登记的两处实施扩展：
@@ -24,11 +24,13 @@
  *   对已标记条目事实优先转 delivered（delivered 事实 > cancel 意图）。
  * - [扩展③] confirmAccepted 受理登记（分段 port 实现用，dmg-r1-4）：申报批内条目
  *   已由底层通道受理——queued → in-flight + 出批 + checked waiter 受理口径 resolve。
- *   合批分段中途失败时已登记段留守 in-flight（等回执/对账），仅未受理段走失败面。
+ *   合批分段中途失败时已登记段留守 in-flight（等回执/对账），仅未受理段按失败处理。
  *
  * 失败语义（ADR-0122 首败即停，2026-10-05 用户裁决，backoff 自动重试链退役）：
- * port.send 失败（含 accepted:false）一次即收口——checked 条目 reject + 从内核移除；
- * 非 checked 条目 onSettled('rejected') 逐条显式上报 + 从内核移除。重试决策归消费方
+ * port.send 失败（含 accepted:false）一次即收尾——checked 条目 reject + 从内核移除；
+ * 非 checked 条目 onSettled('rejected') 逐条显式上报 + 从内核移除。唯一例外：拒绝
+ * 回执为 deferred 形态（设计内等待，DeliveryDeferReason——如 port 合批提交窗 hold）
+ * 不计首败，条目留守等投递端下一边沿重提（onSendDeferred）。重试决策归消费方
  * （人看页面通知、agent 收失败回执），内核只做忠实投递与事实上报。
  *
  * onSettled 记账口径（D9⑤ 升级）：
@@ -47,19 +49,50 @@
  *   同步了结（resolveWaitersOf）——契约「受理成功即 resolve」对命令条目成立，
  *   waiter 不因 settle 时序倒挂滞留。
  *
- * 双视图（D9②/D5③）：entriesFull() = 全量视图（活跃条目 + 全量 tombstone，对账/
- * 判重消费）；projection() = 投影视图（活跃全量 + delivered 最近 50 条完整条目，
- * cancelled 不投影；窗口恒为默认常量）。delivered 完整条目留存上限
- * = 默认投影窗口 50（tombstone 全量保留不受限——判重正确性不依赖展示窗口）。
+ * 双视图（D9②/D5③）：entriesFull() = 全量视图（活跃条目 + 全量终局记录，对账/
+ * 判重消费）；projection() = 派生视图（活跃全量 + delivered 最近 50 条完整条目，
+ * cancelled 不进派生视图；窗口恒为默认常量）。delivered 完整条目留存上限
+ * = 默认派生视图窗口 50（终局记录全量保留不受限——判重正确性不依赖展示窗口）。
  *
- * 判重 tombstone（D5②）：delivered 与 cancelled 都写 tombstone，runtime 存活期内
- * 全量保留、不设数量窗口；resync 重报/重建以显式 id 查活跃集与 tombstone 去重
- * （send/sendChecked 的 opts.id 命中即吞）。条目 id = opts.id ?? 内部生成；未传
- * id 的消息不参与幂等判重（v1「无 dedupe 配置不去重」语义保持）。
+ * 判重（v3 统一：在途条目 → 内存已完结 id 索引 → 持久记录，设计 unified-delivery
+ * §3.5.5）：resync 重报/重建以显式 id 查三级判重链去重（send/sendChecked 的 opts.id
+ * 命中即吞）。一级 = 活跃集（activeIndex，含 queued/in-flight/failed）；二级 = 内存
+ * 已完结 id 索引（terminalIndex：store.loadTerminalIds 启动播种 + 终局即时登记）；
+ * 三级 = 持久记录（store.hasTerminal，索引 miss 的持久兜底）。v2 的 tombstone 独立
+ * 判重机制与 DeliveryTombstone 类型退役；已撤销消息的防复活凭据 = 撤销时写持久
+ * 终局（store.ack）。条目 id = opts.id ?? 内部生成；未传 id 的消息不参与幂等判重
+ * （v1「无 dedupe 配置不去重」语义保持）。
  *
- * 其余 v1 机制逐条保持：busy gate（isIdle + 内核在途内查双条件——hasPendingMessages
+ * v3 增量（波 1 纯增量零行为变化——装配不传新参数 = v2 行为逐字节不变）：
+ * - DeliveryStore 端口（config.store）：send/sendChecked 受理前先 persist（耐久承诺
+ *   先于投递尝试；persist 抛错 = 承诺未落 → 拒收 rejected('persist-failed')，条目
+ *   回滚不入队不投递）；终局 delivered / cancelled 后 ack（finalizeEntry / drain）；
+ *   forget 失败条目 discard（无终局语义的记录无痕移除，防重启复活）。ack / 判重
+ *   查询的 store 异常降级 warn 留痕、状态机照常（终局事实已发生 / 探测降级同
+ *   safeIsIdle 型）；persist 异常 fail-fast 拒收（承诺语义）。
+ * - 送达凭据三档（receiptAnchor）：'details-id' 与 'marker' / 'acceptance' 并列
+ *   （ADR-0074 词条扩展）。details-id 条目受理后维持 in-flight 等回执（同 marker）；
+ *   判定逻辑以可注入凭据检查函数（config.proofCheck）承载，调用点 =
+ *   handle.confirmDeliveredByProof(id)——装配方在回执证据到达时调用，内核按条目
+ *   凭据档位分派（非 details-id 条目一律拒绝，防误确认）。
+ * - 失败保留策略（opts.onFailure：'forget' | 'retain'，缺省 custom=retain /
+ *   text=forget）：retain 条目首败后内存态转回 queued 留守（下一 settled 边沿 /
+ *   外部 flush 重入队，事件驱动无定时器；失败轮不主动重投——防 idle 同步失败循环），
+ *   store 记录保留（重启经 loadUndelivered 重入队）；forget 条目维持现状首败即停。
+ *   sendChecked 挂起条目恒 forget（同步失败回执契约与 retain 重投矛盾，显式申报
+ *   retain 按 forget 处置 + 一次性 warn）。
+ * - 受理即出站模式（config.dispatchMode: 'on-accept'）：忙闲门禁旁路（受理后立即
+ *   port.send，承重前提 = 底层唯一队列忙时不拒）+ 合批窗口不用（队列唯一化后无
+ *   组批时机，合批归 port 提交侧）；in-flight 防重保留。生产装配恒为 'on-accept'
+ *   （runtime session-delivery-registry 与 extensions/shared/delivery-port 均显式
+ *   传参）；缺省 'queue-hold' = v2 队列持有行为（busy gate 排队 + settled 边沿
+ *   flush + 合批窗口），现为仅本包测试装配消费的非生产形态（零行为变化锚）——
+ *   其代码路径物理删除（含缺省值翻转 on-accept 与既有测试显式传参）留待后续
+ *   清理波（登记：docs/todo/unified-delivery-residuals.md #1）。
+ *
+ * 其余 v1/v2 机制逐条保持：busy gate（isIdle + 内核在途内查双条件——hasPendingMessages
  * 自镜像四件套已按 msg-pipeline-debloat D2 拆除，busy 判定内查 active 表）、合批窗口、
- * settled 边沿驱动、dedupe LRU、dispose 语义（丢弃不触发 onSettled、checked 挂账
+ * settled 边沿驱动、dedupe LRU、dispose 语义（丢弃不触发 onSettled、checked 挂起
  * reject）。[ADR-0122 退役登记] backoff 自动重试链、port.send settle 挂死兜底
  * （60s）、watchdog 30s 定时复核、无订阅装配 busy 退避轮询——时间平抑/补偿类机制
  * 全部删除，busy 等待归 settled 边沿与外部触发。depth() 口径保持 v1 = 尚未受理的
@@ -70,17 +103,21 @@ import { DeliveryReclaimError } from './errors.js'
 import { LruSet } from './lru.js'
 import type {
   DeliveryConfig,
+  DeliveryDeferReason,
   DeliveryEntry,
   DeliveryEntriesFull,
   DeliveryEntriesProjection,
   DeliveryEntryState,
+  DeliveryFailurePolicy,
   DeliveryHandle,
   DeliveryIntent,
   DeliveryLane,
   DeliveryMessage,
   DeliveryPayload,
   DeliveryPort,
-  DeliveryTombstone,
+  DeliveryReceiptAnchor,
+  DeliveryStore,
+  DeliveryTerminalRecord,
   SendReceipt,
 } from './types.js'
 
@@ -113,19 +150,36 @@ export interface DeliverySubmitOptions {
   /** 投递车道（D1）：适配器判定后传入记录；缺省 'direct'（既有调用方语义）。 */
   lane?: DeliveryLane
   /**
-   * 送达回执锚申报（msg-pipeline-debloat D1 申报制）：提交方声明本条目的送达判定锚。
+   * 送达回执锚申报（msg-pipeline-debloat D1 申报制；v3 三档，ADR-0074 词条扩展）：
+   * 提交方声明本条目的送达判定锚。
    * - 'marker'（缺省）= 出站文本尾附裸标记、送达以 message_end 回执命中为准
    *   （用户消息主通路语义）；受理后维持 in-flight 等回执。
    * - 'acceptance' = 无回执锚点条目（agent 通路：完成回流 / session_manager send /
    *   notifier 通知——出站文本原样不改），port.send 受理成功即落 delivered 终态
    *   （「受理 = 送达」是唯一可判事实，v1 记账口径 / D9⑤ 显式例外）。
+   * - 'details-id'（v3）= 通知条目凭据（deliveryId 由注入端写入 details，业务字段
+   *   保持原样）：送达判定 = 对话记录中出现 details 携带本条目 id 的通知条目；受理
+   *   后维持 in-flight 等回执（同 'marker'），终局由装配方调 handle.confirmDeliveredByProof
+   *   驱动（判定逻辑经 config.proofCheck 注入，内核零 pi 知识）。
    *
    * 缺省 'marker' 是刻意的保守取向：无标记提交点漏申报的代价 = 复发已知死锁形态
    * （in-flight 永挂、gate 恒关，有全链诊断可查，可见）；误申报 'acceptance' 的代价
    * = 静默丢送达确认语义（更隐蔽）。两害取可见者。新增无标记投递来源必须显式申报
-   * 'acceptance' 并登记来源清单（ADR-0074 词条）。
+   * 'acceptance' 或 'details-id' 并登记来源清单（ADR-0074 词条）。
    */
-  receiptAnchor?: 'marker' | 'acceptance'
+  receiptAnchor?: DeliveryReceiptAnchor
+  /**
+   * 失败保留策略（v3）：port.send 首败时本条目的处置（ADR-0122 无内核自动重试不变
+   * ——retain 不是重试机制，是失败条目的留存策略）。
+   * - 'forget' = 首败即停 + 显式上报后移除（runtime 文本车道现状；store 已 persist
+   *   的记录同步 discard）。
+   * - 'retain' = 失败条目留守：内存态转回 queued 等下一 settled 边沿 / 外部 flush
+   *   重入队；store 记录保留（重启经 loadUndelivered 重入队）。
+   * 缺省按载荷类型：custom = 'retain' / text = 'forget'（§3.4 缺省值表：交互在席 vs
+   * 无人值守）。sendChecked 挂起条目恒 forget（同步失败回执契约与 retain 重投矛盾；
+   * 显式申报 retain 时按 forget 处置 + 一次性 warn）。
+   */
+  onFailure?: DeliveryFailurePolicy
   /**
    * 无标记条目标志（pi1-disposition-chat-flow D14⑥ 起源；技能/芯片通路并入后为
    * 「出站不注标条目」统一标志——命令 / 手打 skill 与 prompt 模板 / `<taiji-skill>`
@@ -142,13 +196,14 @@ export interface DeliverySubmitOptions {
 }
 
 /**
- * send() 受理结果（b31-D6：失败双表面窄口收口）。调用方忽略返回值不受影响
+ * send() 受理结果（b31-D6：失败双表面窄口收尾）。调用方忽略返回值不受影响
  * （v1 句柄面 send 仍声明 void，结构兼容）。三分口径：
  * - accepted：已入队并进入投递流程（id = 条目 id，供调用方对账/判重锚定）
  * - swallowed：幂等吞（already-seen = 显式 id 命中活跃集/tombstone；duplicate-content
  *   = dedupeKey 内容级去重命中）——设计内去重，非失败
  * - rejected：拒收未入队（disposed = 句柄已销毁；unsupported-payload = 通路能力
- *   不含该 payload kind）——仅 warn 单表面 + 本返回值，无终态无 onSettled
+ *   不含该 payload kind；persist-failed = store 受理前写入记录失败——耐久承诺未写入，
+ *   v3 仅 config.store 装配时可达）——仅 warn 单表面 + 本返回值，无终态无 onSettled
  *
  * void 兼容口径（与 SendReceipt 的 U2 扩展位同构）：接口返回类型含 void——
  * v1 → v2 测试替身适配（runtime asHandleV2 直转发 v1 handle.send）返回 void =
@@ -157,7 +212,7 @@ export interface DeliverySubmitOptions {
 export type DeliverySendResult =
   | { kind: 'accepted'; id: string }
   | { kind: 'swallowed'; reason: 'already-seen' | 'duplicate-content' }
-  | { kind: 'rejected'; reason: 'disposed' | 'unsupported-payload' }
+  | { kind: 'rejected'; reason: 'disposed' | 'unsupported-payload' | 'persist-failed' }
 
 /** v2 句柄：v1 DeliveryHandle 的超集（结构兼容，既有消费者零改动）。 */
 export interface DeliveryHandleV2 extends DeliveryHandle {
@@ -166,7 +221,7 @@ export interface DeliveryHandleV2 extends DeliveryHandle {
   sendChecked(msg: DeliveryMessage, opts?: DeliverySubmitOptions): Promise<void>
   /** 全量视图（D9②）：活跃条目（完整字段）+ 全部 tombstone。快照（防御性拷贝）。 */
   entriesFull(): DeliveryEntriesFull
-  /** 投影视图（D9②/D5③）：活跃全量 + delivered 最近 50 条完整条目，cancelled 不投影。 */
+  /** 派生视图（D9②/D5③）：活跃全量 + delivered 最近 50 条完整条目，cancelled 不进派生视图。 */
   projection(): DeliveryEntriesProjection
   /**
    * 变更订阅（state topic 装配用）：任何条目创建/迁移/终态触发。返回退订函数。
@@ -180,15 +235,26 @@ export interface DeliveryHandleV2 extends DeliveryHandle {
    */
   confirmDelivered(id: string): boolean
   /**
+   * 凭据检查驱动的送达确认（v3，'details-id' 凭据调用点）：仅对申报 'details-id'
+   * 的条目生效——调 config.proofCheck(id)（对话记录中出现 details 携带本条目 id 的
+   * 通知条目的判定，由装配方注入实现），true → confirmDelivered（终局化 + onSettled
+   * 回调），false → 留守。非 details-id 条目（marker / acceptance 有各自判定通路）、
+   * 未注入 proofCheck、proofCheck 抛错（降级 warn 视为未送达，同 safeIsIdle 型）时
+   * 一律返回 false 不转移。装配方在回执证据到达（message_end 等）或重放扫描时对本
+   * 批候选条目调用，内核保证凭据档位分派（误确认在结构上不可达）。
+   * 幂等：未知/已终态 no-op。@returns 是否发生了状态转移。
+   */
+  confirmDeliveredByProof(id: string): boolean
+  /**
    * 受理登记（[扩展③]，dmg-r1-4）：分段 port 实现申报「本条目已由底层通道受理」。
    * 只接受当前出站批内的 queued 条目（受理事实锚定于在途投递）；生效即 queued →
    * in-flight 转移 + 出批 + checked waiter 按受理口径 resolve（D9⑤）。幂等：非批内/
    * 已转移/未知 id 返回 false。合批分段中途失败时已登记段留守 in-flight（等回执/对账），
-   * 仅未受理段走失败面——已进底层通道的文本不再误报「投递失败」。
+   * 仅未受理段按失败处理——已进底层通道的文本不再误报「投递失败」。
    */
   confirmAccepted(id: string): boolean
   /**
-   * 断连事件驱动的显式失败终局（ADR-0122 命令终局事件化的断连腿）：把全部 in-flight
+   * 断连事件驱动的显式失败终局（ADR-0122 命令终局事件化的断连路径）：把全部 in-flight
    * 条目批量转 failed 终态（留守活跃集等用户处置：resync 重试 / cancel 移除），
    * 逐条 onSettled('rejected') 显式上报。queued 条目不触碰（未触达底层通道，随队列
    * 存活，重连后照常投递）。幂等：无 in-flight 条目返回 0。@returns 终态化条数。
@@ -213,7 +279,7 @@ export interface DeliveryHandleV2 extends DeliveryHandle {
 export type DeliveryCancelResult =
   | { kind: 'cancelled'; entry: DeliveryEntry }
   | { kind: 'reclaim-requested'; entry: DeliveryEntry }
-  | { kind: 'already-final'; tombstone: DeliveryTombstone }
+  | { kind: 'already-final'; tombstone: DeliveryTerminalRecord }
   | { kind: 'not-found' }
 
 /** drain() 返回：全部未终态条目的文本取回（Segment[] 快照切分归上层，ADR-0043）。 */
@@ -221,16 +287,16 @@ export type DrainResult = ReadonlyArray<{ id: string; payload: DeliveryPayload }
 
 /** 默认配置（D4 策略默认值）。 */
 const DEFAULT_CONFIG: Required<
-  Omit<DeliveryConfig, 'mergeHoldActive' | 'dedupe' | 'onSettled'>
+  Omit<DeliveryConfig, 'mergeHoldActive' | 'dedupe' | 'onSettled' | 'store' | 'proofCheck' | 'dispatchMode'>
 > = {
   intent: 'interrupt-at-turn-boundary',
   mergeWindowMs: 0,
 }
 
-/** 投影视图默认窗口（D5③）；同时是 delivered 完整条目留存上限（环形）。 */
+/** 派生视图默认窗口（D5③）；同时是 delivered 完整条目留存上限（环形）。 */
 const DEFAULT_DELIVERED_WINDOW = 50
 
-/** sendChecked 的挂账：resolve/reject 挂钩所属条目的 port.send 受理结果。 */
+/** sendChecked 的挂起：resolve/reject 挂钩所属条目的 port.send 受理结果。 */
 interface CheckedWaiter {
   entry: KernelEntry
   resolve: () => void
@@ -240,16 +306,17 @@ interface CheckedWaiter {
 /**
  * 内核条目：DeliveryEntry + 实现私有字段。msg 为原始消息引用（合批构造 /
  * onSettled 回调身份源）；cancelRequested 为 in-flight 撤销两段式的待收回标记；
- * receiptAnchor 为提交方申报的送达回执锚（D1 申报制，沿 opts.id/opts.lane 持久化
- * 先例直达内部字段——不进 DeliveryEntry 条目视图 DTO，投影面零扩散）；
+ * receiptAnchor 为提交方申报的送达凭据档位（D1 申报制 / v3 三档，沿 opts.id/opts.lane
+ * 持久化先例直达内部字段——不进 DeliveryEntry 条目视图 DTO，派生视图零扩散）；
  * unmarked 为无标记出站条目标志（命令/技能，组批隔离判定源；同一持久化先例，
- * 投影面零扩散）。
+ * 派生视图零扩散）；onFailure 为失败保留策略（v3，创建时按载荷类型解析缺省后定型）。
  */
 interface KernelEntry extends DeliveryEntry {
   msg: DeliveryMessage
   cancelRequested: boolean
-  receiptAnchor: 'marker' | 'acceptance'
+  receiptAnchor: DeliveryReceiptAnchor
   unmarked: boolean
+  onFailure: DeliveryFailurePolicy
 }
 
 function isThenable(v: unknown): v is Promise<SendReceipt | void> {
@@ -396,22 +463,33 @@ export function createDelivery(
   const active: KernelEntry[] = []
   const activeIndex = new Map<string, KernelEntry>()
   /**
-   * 判重 tombstone（D5②）：delivered/cancelled 轻量元数据，handle 存活期内全量
-   * 保留、不设数量窗口（断连积压长队列的 resync 判重锚不丢；cancelled 防 resync
-   * 复活）。dispose 时随 handle 释放（不跨 runtime 重启，reattach 判重锚回落
-   * transcript 扫描——适配器职责）。
+   * 已完结 id 判重索引（v3，判重第二级）：terminalRecords 的 id 集合 + store 播种
+   * （loadTerminalIds，启动 / 重放时构建——覆盖本 handle 生命周期之前的持久终局）+
+   * 终局即时登记。判重链 = activeIndex（一级，在途）→ 本索引（二级）→
+   * store.hasTerminal（三级，持久兜底）。
    */
-  const tombstones = new Map<string, DeliveryTombstone>()
+  const terminalIndex = new Set<string>()
   /**
-   * delivered 完整条目环形留存（投影视图源，D5③「最近 50 条完整条目」）。
+   * 终局记录表（entriesFull().tombstones 视图源 + cancel already-final 承载）：本
+   * handle 生命周期内终局条目的完整元数据，handle 存活期内全量保留、不设数量窗口。
+   * v2 的 tombstone 独立判重机制退役——本表不再参与判重（判重走 terminalIndex +
+   * store 持久终局），只承载派生的视图数据。dispose 时随 handle 释放（不跨 runtime 重启，
+   * 重启后的判重锚 = store.loadTerminalIds 播种）。
+   */
+  const terminalRecords = new Map<string, DeliveryTerminalRecord>()
+  /** store 装配缺省一次性 warn 去重（checked+retain 覆写 / on-accept 合批忽略等）。 */
+  let checkedRetainWarned = false
+  let mergeIgnoredWarned = false
+  /**
+   * delivered 完整条目环形留存（派生视图源，D5③「最近 50 条完整条目」）。
    * 上限 = DEFAULT_DELIVERED_WINDOW；判重正确性不依赖它（tombstone 全量）。
    */
   const deliveredLog: KernelEntry[] = []
-  /** sendChecked 等待受理确认的挂账（条目在 active，出站批次或等待 gate）。 */
+  /** sendChecked 等待受理确认的挂起（条目在 active，出站批次或等待 gate）。 */
   const checkedPending: CheckedWaiter[] = []
   /**
    * 出站批次：doSend/checked 直投从 active 锁定后、终态前持有引用。条目 state
-   * 保持 queued（受理才转 in-flight，D2 两阶段）；port.send 失败按首败即停收口
+   * 保持 queued（受理才转 in-flight，D2 两阶段）；port.send 失败按首败即停收尾
    * （ADR-0122，批次成员从内核移除）。
    */
   let inflightBatch: KernelEntry[] = []
@@ -428,6 +506,59 @@ export function createDelivery(
 
   // onChange 订阅（D9②，state topic 装配消费）
   const changeSubs = new Set<() => void>()
+
+  // ─── v3 DeliveryStore 装配（设计 §3.5.1）───────────────────
+  // 缺省 undefined = 无耐久面（v2 行为）；提供时构造期播种判重索引（启动 / 重放
+  // 语义：把持久终局记录构建为内存索引，对齐账本 ackedIds 播种）。loadTerminalIds
+  // 抛错不吞——装配错误 fail-fast 早暴露（与 persist 的承诺语义同侧）。
+  const store: DeliveryStore | undefined = config?.store
+  if (store) {
+    for (const id of store.loadTerminalIds()) terminalIndex.add(id)
+  }
+
+  /**
+   * 受理前写入记录（耐久承诺先于投递尝试）。抛错 = 承诺未写入 → 调用方拒收条目（send
+   * 返回 persist-failed / sendChecked 同步 throw），不进入投递流程。
+   * record = 条目创建时点的持久化派生数据（intent 按条目定型解析——重入队时按原档重报）。
+   */
+  function persistRecord(e: KernelEntry): void {
+    if (!store) return
+    store.persist({
+      id: e.id,
+      lane: e.lane,
+      payload: e.payload,
+      intent: e.msg.intent ?? cfg.intent,
+      recordedAt: e.createdAt,
+      receiptAnchor: e.receiptAnchor,
+      unmarked: e.unmarked,
+      meta: e.msg.meta,
+    })
+  }
+
+  /** 终局写持久终局（finalizeEntry / drain 调用）。异常降级 warn——终局事实已发生，状态机不回滚。 */
+  function ackStore(id: string): void {
+    if (!store) return
+    try {
+      store.ack(id)
+    } catch (err) {
+      warn(`store.ack failed (terminal record not persisted; id=${id})`, err)
+    }
+  }
+
+  /**
+   * 判重第三级「查持久记录」（safeIsIdle 同型降级）：store.hasTerminal 异常视为
+   * miss + warn 留痕（探测降级保守放行——重投风险可见可查，不破坏 send 入口
+   * never-throw 契约）。
+   */
+  function safeHasTerminal(id: string): boolean {
+    if (!store) return false
+    try {
+      return store.hasTerminal(id)
+    } catch (err) {
+      warn(`store.hasTerminal threw; treating as not-terminal (id=${id})`, err)
+      return false
+    }
+  }
 
   function now(): number {
     return Date.now()
@@ -501,7 +632,7 @@ export function createDelivery(
     return false
   }
 
-  /** 活跃条目是否仍在册（出站批/迟到回执守卫：已 cancel/drain/dispose 的条目不在）。 */
+  /** 活跃条目是否仍在册（出站批/迟到回执检查：已 cancel/drain/dispose 的条目不在）。 */
   function inRegistry(e: KernelEntry): boolean {
     return activeIndex.get(e.id) === e
   }
@@ -511,7 +642,7 @@ export function createDelivery(
     return false
   }
 
-  /** 终态落定：出活跃集 + 写 tombstone（D5②）。调用方负责 onSettled/通知语义。 */
+  /** 终态落定：出活跃集 + 登记判重索引 + 写终局记录 + 持久终局（v3 判重统一）。调用方负责 onSettled/通知语义。 */
   function finalizeEntry(e: KernelEntry, state: Extract<DeliveryEntryState, 'delivered' | 'cancelled'>): void {
     // 终态同步摘出出站批次（dmg-r1-1）：终态条目不得随在途批次引用留存，否则迟到
     // 路径（旧批次引用等）会把已撤销/已送达文本随批次再次处理。原地 splice 保持
@@ -525,7 +656,12 @@ export function createDelivery(
     const ts = now()
     e.updatedAt = ts
     e.settledAt = ts
-    tombstones.set(e.id, { id: e.id, state, lane: e.lane, settledAt: ts })
+    // v3 判重统一（设计 §3.5.5）：终局即时登记内存索引 + 终局记录 + 持久终局
+    // （已撤销消息的防复活凭据 = 撤销时写持久终局；store 未装配时索引 ≡ 记录表，
+    // 行为与 v2 tombstones Map 逐字节等价）。
+    terminalIndex.add(e.id)
+    terminalRecords.set(e.id, { id: e.id, state, lane: e.lane, settledAt: ts })
+    ackStore(e.id)
     if (state === 'delivered') {
       // F1-11：delivered 终局同步了结 checked waiter 的受理口径（resolveWaitersOf
       // 注释）——防止「confirmDelivered 先于 port.send promise settle」时序倒挂下
@@ -600,8 +736,10 @@ export function createDelivery(
     if (settledUnsub || !port.subscribeSettled) return
     settledUnsub = port.subscribeSettled(() => {
       if (disposed) return
-      // settled 边沿 → busy 复核（isIdle 已先于事件复位，agent-session.js:327-336）→ flush
-      if (!isBusySafe()) {
+      // settled 边沿 → busy 复核（isIdle 已先于事件复位，agent-session.js:327-336）→ flush。
+      // on-accept 模式（v3）：边沿即重投触发（忙闲门禁旁路——retain 留守条目的
+      // 「下一边沿重入队」同样旁路，否则 busy 场景留守条目永无重投时机）。
+      if (cfg.dispatchMode === 'on-accept' || !isBusySafe()) {
         flush()
       }
     })
@@ -616,9 +754,9 @@ export function createDelivery(
 
   // ─── attemptSend：对出站批次执行 port.send ────────────────
   function attemptSend(): void {
-    // 在册守卫重过滤（dmg-r1-1 兜底防线）：finalizeEntry 已同步摘出终态条目，此处
+    // 在册检查重过滤（dmg-r1-1 兜底防线）：finalizeEntry 已同步摘出终态条目，此处
     // 对迟到路径（旧批次引用等）统一按在册过滤——已撤销条目不随批次重发；批次清空
-    // 则按空收口（复位在途，不投任何文本）。此时不存在未 settle 的旧 port.send
+    // 则按空收尾（复位在途，不投任何文本）。此时不存在未 settle 的旧 port.send
     // promise（进入本函数的前提是上一 promise 已 settle 或首投），复位 inFlight 后
     // pump 启动新投递无防重竞态。
     if (inflightBatch.some((e) => !inRegistry(e))) {
@@ -648,11 +786,17 @@ export function createDelivery(
   }
 
   /**
-   * 受理判定（U2 回执口径）：显式 `{accepted:false}` → 发送失败路径（错误重试 /
-   * reject 链路）；void / `{accepted:true}` / 其他形态 = 受理成功（旧 port 兼容）。
+   * 受理判定（U2 回执口径）：拒绝分支按判别字段分流（MF-1-4）——`{ accepted: false,
+   * deferred }` 为设计内等待（DeliveryDeferReason，F1-13）走 onSendDeferred 收尾
+   * （暂不收，非失败）；`{ accepted: false, reason }` 走发送失败收尾（首败语义）；
+   * void / `{ accepted: true }` = 受理成功（旧 port 兼容）。
    */
   function onSendReceipt(receipt: SendReceipt | void): void {
     if (receipt !== undefined && receipt.accepted === false) {
+      if ('deferred' in receipt) {
+        onSendDeferred(receipt.deferred)
+        return
+      }
       onSendFail(new Error(receipt.reason ?? 'port.send rejected (accepted:false)'))
       return
     }
@@ -669,7 +813,7 @@ export function createDelivery(
     // 受理 → in-flight（两阶段回执第一阶段，D2）。'delivered' 的 onSettled 回调
     // 不在此触发（D9⑤ 送达口径：由 confirmDelivered 驱动）。
     // 批内条目可能已被 confirmDelivered（回执先到）/cancel（出站中撤销）先行
-    // 终结或移出——按在册守卫跳过。
+    // 终结或移出——按在册检查跳过。
     let changed = false
     for (const e of batch) {
       if (disposed) break
@@ -691,14 +835,19 @@ export function createDelivery(
   }
 
   /**
-   * 发送失败收口（ADR-0122 首败即停，2026-10-05 用户裁决）：port.send 失败（含
-   * accepted:false）一次即终——重试是补偿决策，前提是知道「重试是否安全」，该语义
-   * 知识在消费方手里不在内核手里，内核只做事实上报：
-   * - checked 条目：waiter reject（失败同步交调用方，agent 工具调用收到失败回执）；
-   * - 非 checked 条目：onSettled('rejected') 逐条显式上报（失败通知面，消费方裁决
-   *   重发）。
-   * 全部失败条目从内核移除、不产 tombstone（未受理无判重语义——「失败 = 可能已执行」
-   * 的命令条目重投会重复执行；重发裁决交知道语义的一方）。
+   * 发送失败收尾（ADR-0122 首败即停，2026-10-05 用户裁决）：port.send 失败（含
+   * accepted:false，设计内等待 reason 除外——onSendDeferred）一次即终——重试是
+   * 补偿决策，前提是知道「重试是否安全」，该语义
+   * 知识在消费方手里不在内核手里，内核只做事实上报。失败处置按条目 onFailure
+   * 策略分流（v3）：
+   * - forget（缺省 text / checked 恒定）：checked 条目 waiter reject（失败同步交
+   *   调用方，agent 工具调用收到失败回执）；非 checked 条目 onSettled('rejected')
+   *   逐条显式上报（失败通知面，消费方裁决重发）。全部失败条目从内核移除 + store
+   *   记录 discard（未受理无判重语义——「失败 = 可能已执行」的命令条目重投会重复
+   *   执行；记录残留会让重启后 loadUndelivered 把已弃条目当未投递复活）。
+   * - retain（缺省 custom）：失败条目留守——内存态转回 queued（下一 settled 边沿 /
+   *   外部 flush 重入队，事件驱动无定时器），store 记录保留（重启经 loadUndelivered
+   *   重入队）。失败轮不主动重投（见尾部 pump 抑制）。
    */
   function onSendFail(err: unknown): void {
     if (disposed) return
@@ -708,18 +857,55 @@ export function createDelivery(
     warn('port.send failed (first-failure stop, no kernel retry)', err)
     const rejected = settleChecked(batch, err, checkedPending)
     let changed = false
+    let retained = false
     for (const e of batch) {
       if (!inRegistry(e)) continue
-      if (rejected.has(e)) continue // checked 已随 reject 收口
+      if (rejected.has(e)) continue // checked 已随 reject 收尾
+      if (e.onFailure === 'retain') continue // 留守非终局——不发失败终局通知（见下）
       callOnSettled(e.msg, 'rejected')
     }
     for (const e of batch) {
       if (!inRegistry(e)) continue
+      if (e.onFailure === 'retain') {
+        // retain 留守：转回 queued 等下一边沿 / 重启重入队；store 记录保留（不
+        // discard 不 ack——仍是未投递事实）。不 onSettled（终态未落，留守非终局；
+        // 失败可见性走 warn 留痕）。
+        e.state = 'queued'
+        e.updatedAt = now()
+        changed = true
+        retained = true
+        warn(`entry retained after failure (id=${e.id}); re-dispatch waits for next settled edge or external flush`)
+        continue
+      }
+      store?.discard(e.id)
       removeActive(e)
       changed = true
     }
     if (changed) notifyChange()
-    pump()
+    // 本轮含 retain 留守条目时不主动 pump：idle 下立即重投会形成「失败 → 重投 →
+    // 失败」同步循环（首败即停红线的对偶面）。「下一边沿」语义 = 等 settled 边沿 /
+    // 外部 flush / 新 send 触发（事件驱动）。
+    if (!retained) pump()
+  }
+
+  /**
+   * 设计内等待收尾（F1-13）：port.send 返回 `{ accepted: false, deferred }`（设计内
+   * 等待，DeliveryDeferReason——如 port 合批提交窗的 'merge-commit-hold'：注入门禁
+   * hold，窗口结束后投递端会 kernel.flush() 重提）时，条目从未被注入（host.sendMessage
+   * 未调用），拒绝不是失败：不计首败——不 store.discard、不 removeActive、不
+   * onSettled('rejected')、checked waiter 不 reject（受理未发生亦无首败），条目保持
+   * active 在册（queued）等投递端下一边沿重新提交（port 合批窗提交 / 缓冲重放会
+   * 重提）。本轮不主动 pump：提交窗未结束时重投必再次被 hold（同步循环，与 retain
+   * 分支「失败轮不主动重投」同理）——重投触发由投递端的窗口结束 flush 承诺。
+   */
+  function onSendDeferred(reason: DeliveryDeferReason): void {
+    if (disposed) return
+    const batch = inflightBatch
+    inFlight = false
+    inflightBatch = []
+    warn(
+      `port.send deferred (designed-in wait, reason=${reason}); ${batch.length} entry(ies) stay queued for next dispatch edge`,
+    )
   }
 
   // ─── pump：在途结束后决定下一步（checked 优先，然后普通队列走 gate）──
@@ -734,7 +920,7 @@ export function createDelivery(
       }
       if (batch.length > 0) {
         // 无标记条目组批隔离（D2②）：在途窗口（上一条 prompt RPC 往返 / 压缩等待）内连发的
-        // 多条 checked 挂账经本处汇成一批——批内含无标记条目时只取队首一条单独出站，
+        // 多条 checked 挂起经本处汇成一批——批内含无标记条目时只取队首一条单独出站，
         // 防裸命令/技能文本与普通条目被分隔符拼接为一条 composed（pi 命令解析必然 miss）。
         inflightBatch = isolateUnmarkedEntry(batch)
         inFlight = true
@@ -746,14 +932,14 @@ export function createDelivery(
       scheduleFlush()
       return
     }
-    // 全空闲：无待收尾面（watchdog 定时复核腿已随 ADR-0122 退役）
+    // 全空闲：无待收尾条目（watchdog 定时复核路径已随 ADR-0122 退役）
   }
 
   // ─── doSend：普通队列出站 ─────────────────────────────────
   function doSend(): void {
     if (disposed || inFlight) return
 
-    // 候选批 = 全部 queued 条目（port.send 失败按首败即停收口，受理成功才转移）；
+    // 候选批 = 全部 queued 条目（port.send 失败按首败即停收尾，受理成功才转移）；
     // 无标记条目组批隔离（D2②）：busy park 积累的队列中无标记条目与普通条目同批时
     // 只取队首一条单独出站（同 pump，防拼接文本使命令解析/身份匹配 miss），普通条目
     // 留守待下一轮。
@@ -764,18 +950,20 @@ export function createDelivery(
     attemptSend()
   }
 
-  // ─── scheduleFlush：busy gate（settled 边沿驱动）──────────
+  // ─── scheduleFlush：出站驱动（queue-hold：settled 边沿 busy gate / on-accept：受理即出站）──
   function scheduleFlush(): void {
     if (disposed || !hasQueuedEntries()) return
 
-    // in-flight 防重（在途投递不打断）
+    // in-flight 防重（在途投递不打断）——内核自身并发保护，两种模式都保留
     if (inFlight) return
 
-    // busy gate（isIdle + 内核在途内查双条件，D2）：busy 即留守——settled 边沿
-    // （agent 回合结束）驱动重投，无订阅装配由外部 flush/send 触发重投。
+    // busy gate（isIdle + 内核在途内查双条件，D2）：queue-hold 模式 busy 即留守——
+    // settled 边沿（agent 回合结束）驱动重投，无订阅装配由外部 flush/send 触发重投。
     // [ADR-0122 退役登记] 原「无订阅装配退避轮询 + 达上限强发」「watchdog 30s 定时
-    // 复核」两条时间平抑腿已删除：本机链路边沿信号足够，轮询是补偿性猜测。
-    if (isBusySafe()) return
+    // 复核」两条时间平抑路径已删除：本机链路边沿信号足够，轮询是补偿性猜测。
+    // on-accept 模式（v3 受理即出站，设计 §3.5.6）：忙闲门禁旁路——底层唯一队列忙时
+    // 入队不拒（承重前提，适配层保证），受理后立即出站无排队语义。
+    if (cfg.dispatchMode !== 'on-accept' && isBusySafe()) return
 
     doSend()
   }
@@ -786,6 +974,14 @@ export function createDelivery(
 
   function warn(msg: string, err?: unknown): void {
     warnSink(msg, err)
+  }
+
+  // on-accept 模式下合批窗口不用（§3.5.6：队列唯一化后无组批时机，合批归 port 提交
+  // 侧）——配置层冲突一次性 warn 留痕（提交方 merge:true 的逐条忽略不刷屏，仅配置
+  // 层提示一次）。
+  if (config?.dispatchMode === 'on-accept' && (config.mergeWindowMs ?? 0) > 0 && !mergeIgnoredWarned) {
+    mergeIgnoredWarned = true
+    warn('dispatchMode=on-accept ignores mergeWindowMs (batching moves to submit side)')
   }
 
   // ─── dedupe 入口检查（send/sendChecked 共用）──────────────
@@ -806,10 +1002,34 @@ export function createDelivery(
     return true
   }
 
-  // ─── v2 幂等判重（D5②：显式 id 命中活跃集或 tombstone 即吞）───
+  // ─── v3 幂等判重（三级：在途条目 → 内存已完结 id 索引 → 持久记录，设计 §3.5.5）───
   function seenId(id: string | undefined): boolean {
     if (id === undefined) return false
-    return activeIndex.has(id) || tombstones.has(id)
+    if (activeIndex.has(id)) return true // 一级：在途（queued/in-flight/failed 活跃集）
+    if (terminalIndex.has(id)) return true // 二级：内存索引（播种 + 终局即时登记）
+    return safeHasTerminal(id) // 三级：持久记录（索引 miss 的持久兜底）
+  }
+
+  /** 失败保留策略缺省解析（§3.4 缺省值表：custom = retain / text = forget）。 */
+  function resolveOnFailure(msg: DeliveryMessage, opts?: DeliverySubmitOptions): DeliveryFailurePolicy {
+    return opts?.onFailure ?? (msg.payload.kind === 'custom' ? 'retain' : 'forget')
+  }
+
+  /**
+   * 受理前写入记录 + 失败回滚（v3 耐久承诺先于投递尝试）。persist 抛错 = 承诺未写入 →
+   * 条目回滚出活跃集（未受理未投递，无判重语义——同 forget 首败），调用方按各自
+   * 入口契约上报（send 返回 rejected('persist-failed') / sendChecked 同步 throw）。
+   * @returns true = 写入记录成功继续投递流程；false = 已回滚（调用方直接返回）。
+   */
+  function persistBeforeAccept(e: KernelEntry): boolean {
+    try {
+      persistRecord(e)
+      return true
+    } catch (err) {
+      warn(`store.persist failed before accept; entry rejected (id=${e.id})`, err)
+      removeActive(e)
+      return false
+    }
   }
 
   function createEntry(msg: DeliveryMessage, opts?: DeliverySubmitOptions): KernelEntry {
@@ -825,6 +1045,7 @@ export function createDelivery(
       cancelRequested: false,
       receiptAnchor: opts?.receiptAnchor ?? 'marker',
       unmarked: opts?.unmarked ?? false,
+      onFailure: resolveOnFailure(msg, opts),
     }
     active.push(entry)
     activeIndex.set(entry.id, entry)
@@ -855,12 +1076,18 @@ export function createDelivery(
     // 3. dedup（v1 内容级，正交保留）
     if (!passDedupe(msg)) return { kind: 'swallowed', reason: 'duplicate-content' }
 
-    // 4. 入条目（queued）
+    // 4. 入条目（queued）+ 受理前写入记录（v3 耐久承诺先于投递尝试；persist 失败 =
+    //    承诺未写入 → 拒收，条目已回滚）
     const entry = createEntry(msg, opts)
+    if (!persistBeforeAccept(entry)) {
+      return { kind: 'rejected', reason: 'persist-failed' }
+    }
 
-    // 5. 合批窗口判定
+    // 5. 合批窗口判定（on-accept 模式合批窗口不用——队列唯一化后无组批时机，合批
+    //    归 port 提交侧承载；显式 merge 请求被忽略）
     const useMerge =
-      opts?.merge ?? (cfg.mergeWindowMs > 0 && cfg.mergeHoldActive != null && cfg.mergeHoldActive())
+      cfg.dispatchMode !== 'on-accept' &&
+      (opts?.merge ?? (cfg.mergeWindowMs > 0 && cfg.mergeHoldActive != null && cfg.mergeHoldActive()))
 
     if (useMerge) {
       // 走合批窗口：重置 timer
@@ -894,8 +1121,23 @@ export function createDelivery(
     // dedupe
     if (!passDedupe(msg)) return // 已见过，resolve
 
-    // 入条目（诊断口径含在途；投递由下方统一循环接管）
+    // v3：checked 挂起条目恒 forget——同步失败回执契约（waiter reject = 调用方已
+    // 收到失败）与 retain 重投矛盾（重投成功会产生「失败但送达」的矛盾观测）；显式
+    // 申报 retain 按 forget 处置 + 一次性 warn 留痕。
+    if (opts?.onFailure === 'retain') {
+      if (!checkedRetainWarned) {
+        checkedRetainWarned = true
+        warn('sendChecked ignores onFailure=retain (checked entries are always forget)')
+      }
+      opts = { ...opts, onFailure: 'forget' }
+    }
+
+    // 入条目（诊断口径含在途；投递由下方统一循环接管）+ 受理前写入记录（v3；persist
+    // 失败 = 承诺未写入 → 同步 throw，条目已回滚）
     const entry = createEntry(msg, opts)
+    if (!persistBeforeAccept(entry)) {
+      throw new Error(`store.persist failed before accept (id=${entry.id})`)
+    }
     ensureSettledSub()
 
     // 统一投递循环（#3/#8）：resolve 挂钩本条目的 port.send 受理结果（D9⑤ 受理
@@ -910,7 +1152,7 @@ export function createDelivery(
         inFlight = true
         attemptSend()
       }
-      // inFlight：挂账等待，在途终态后 pump 优先直投本条目
+      // inFlight：挂起等待，在途终态后 pump 优先直投本条目
     })
   }
 
@@ -932,16 +1174,17 @@ export function createDelivery(
   // ─── v2 所有权 API（D9②③）────────────────────────────────
 
   function entriesFull(): DeliveryEntriesFull {
-    // 全量视图（对账/判重消费）：活跃条目完整字段 + 全部 tombstone 元数据
+    // 全量视图（对账/判重消费）：活跃条目完整字段 + 全部终局记录（本 handle 生命
+    // 周期内；重启前的已完结 id 经 store.loadTerminalIds 进判重索引，不进本视图）
     return {
       active: active.map(snapshot),
-      tombstones: [...tombstones.values()].map((t) => ({ ...t })),
+      tombstones: [...terminalRecords.values()].map((t) => ({ ...t })),
     }
   }
 
   function projection(): DeliveryEntriesProjection {
-    // 投影视图（D5③）：活跃全量 + delivered 最近 50 条完整条目（deliveredLog 环形
-    // 留存上限即 DEFAULT_DELIVERED_WINDOW，投影恒用默认常量）；cancelled 不投影
+    // 派生视图（D5③）：活跃全量 + delivered 最近 50 条完整条目（deliveredLog 环形
+    // 留存上限即 DEFAULT_DELIVERED_WINDOW，派生视图恒用默认常量）；cancelled 不进派生视图
     // （cancel 即出活跃集且不进 deliveredLog，结构性满足）
     return { entries: [...active.map(snapshot), ...deliveredLog.map(snapshot)] }
   }
@@ -959,7 +1202,7 @@ export function createDelivery(
       return false
     }
     const e = activeIndex.get(id)
-    if (!e) return false // 未知 id / 已终态（tombstone 在册）：幂等 no-op
+    if (!e) return false // 未知 id / 已终态（终局记录在册）：幂等 no-op
     // 接受 in-flight（正规送达路径）与 queued（扩展①：rebuild 直确认 / 出站中
     // 回执先到的竞态——事实优先，delivered 事实 > cancel 意图，含已标记待收回条目）
     if (e.state !== 'queued' && e.state !== 'in-flight') return false
@@ -967,6 +1210,34 @@ export function createDelivery(
     // D9⑤：'delivered' 仅由送达回执（本调用）驱动回调；per-message 契约保持
     if (!disposed) callOnSettled(e.msg, 'delivered')
     return true
+  }
+
+  function confirmDeliveredByProof(id: string): boolean {
+    if (disposed) {
+      warn(`confirmDeliveredByProof ignored: delivery handle disposed (id=${id})`)
+      return false
+    }
+    const e = activeIndex.get(id)
+    // 幂等：未知 / 已终态 no-op；凭据档位分派——只有申报 'details-id' 的条目走
+    // 凭据检查（marker 走回执命中、acceptance 受理即终态，各有判定通路，误确认
+    // 在结构上不可达）
+    if (!e || e.receiptAnchor !== 'details-id') return false
+    if (e.state !== 'queued' && e.state !== 'in-flight') return false
+    if (!cfg.proofCheck) {
+      warn(`details-id entry has no proofCheck injected; delivery unconfirmed (id=${id})`)
+      return false
+    }
+    let proven: boolean
+    try {
+      proven = cfg.proofCheck(id)
+    } catch (err) {
+      // 凭据检查异常降级：视为未送达 + warn 留痕（safeIsIdle 同型；条目留守等
+      // 下一次证据驱动调用，不破坏状态机）
+      warn(`proofCheck threw; treating as not-delivered (id=${id})`, err)
+      return false
+    }
+    if (!proven) return false
+    return confirmDelivered(id)
   }
 
   function confirmAccepted(id: string): boolean {
@@ -1032,7 +1303,7 @@ export function createDelivery(
     }
     const e = activeIndex.get(id)
     if (!e) {
-      const tb = tombstones.get(id)
+      const tb = terminalRecords.get(id)
       if (tb) return { kind: 'already-final', tombstone: { ...tb } }
       return { kind: 'not-found' }
     }
@@ -1093,8 +1364,11 @@ export function createDelivery(
     inFlight = false
     const ts = now()
     const result = drained.map((e) => {
-      // 全部记 cancelled tombstone：drain 后该 id 不应再被 resync 重报复活
-      tombstones.set(e.id, { id: e.id, state: 'cancelled', lane: e.lane, settledAt: ts })
+      // 全部记 cancelled 终局：drain 后该 id 不应再被 resync 重报复活（v3：判重
+      // 索引 + 终局记录 + 持久终局——防复活凭据在持久终局记录里）
+      terminalIndex.add(e.id)
+      terminalRecords.set(e.id, { id: e.id, state: 'cancelled', lane: e.lane, settledAt: ts })
+      ackStore(e.id)
       return { id: e.id, payload: e.payload }
     })
     // 挂起中的 checked 不留永久 pending
@@ -1108,7 +1382,7 @@ export function createDelivery(
 
   /**
    * 终态回调契约：dispose 丢弃 active/出站条目但**不**触发 onSettled(_, 'rejected')
-   * （sendChecked 挂账除外——显式 reject 兜底）。依赖 onSettled 做清理/对账的调用方须
+   * （sendChecked 挂起除外——显式 reject 兜底）。依赖 onSettled 做清理/对账的调用方须
    * 自行在 dispose 路径补记账（scheduler 场景由 resume 重放兜底）。
    */
   function dispose(): void {
@@ -1119,10 +1393,12 @@ export function createDelivery(
     clearMergeTimer()
     teardownSettledSub()
 
-    // 丢弃条目集（含 tombstone——随 handle 释放，不跨 runtime 重启，D5②）
+    // 丢弃条目集（含终局记录与判重索引——随 handle 释放，不跨 runtime 重启；重启
+    // 后的判重锚 = store.loadTerminalIds 播种，D5② / v3 判重统一）
     active.length = 0
     activeIndex.clear()
-    tombstones.clear()
+    terminalIndex.clear()
+    terminalRecords.clear()
     deliveredLog.length = 0
     inflightBatch = []
     inFlight = false
@@ -1135,5 +1411,5 @@ export function createDelivery(
     dedupSet?.clear()
   }
 
-  return { send, sendChecked, flush, depth, entriesFull, projection, onChange, confirmDelivered, confirmAccepted, requeue, cancel, failInFlight, drain, dispose }
+  return { send, sendChecked, flush, depth, entriesFull, projection, onChange, confirmDelivered, confirmDeliveredByProof, confirmAccepted, requeue, cancel, failInFlight, drain, dispose }
 }

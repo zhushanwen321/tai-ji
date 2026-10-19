@@ -1,5 +1,5 @@
 /**
- * zcode 会话语义闭集写死锚（消息投影对齐设计 §6-D5，先例形态 =
+ * zcode 会话语义闭集写死锚（消息派生视图对齐设计 §6-D5，先例形态 =
  * host-db-suffix-parity.test.ts 的「SSOT 改错即红」）。
  * 来源注记：自 runtime test/zcode-semantics-parity.test.ts dev 演进版整文件移植
  * （用例零改动，git 可追溯）——SSOT 随实现迁入本包，锚随 SSOT 同址。
@@ -15,7 +15,7 @@
  *     实测口径以本文件期望值为准）；
  *   - compactSummary：taiji 特判落点，asar 同分支返回 providerContextOnly，taiji 侧改落
  *     compaction entry（设计 §6-D2 规格）——锚定 D2 规格，不对拍 asar；
- *   - unclassified 不在闭集：它是 D4 降级态而非投影策略，不参与策略 → entry 落点映射。
+ *   - unclassified 不在闭集：它是 D4 降级态而非派生视图策略，不参与策略 → entry 落点映射。
  */
 
 import { describe, expect, it } from 'vitest'
@@ -113,7 +113,7 @@ describe('metadata.source 旧字段闭集（17 值，逐成员写死）', () => 
   })
 })
 
-describe('投影策略闭集（6 值：asar 原生 5 + taiji 特判 1）', () => {
+describe('派生视图策略闭集（6 值：asar 原生 5 + taiji 特判 1）', () => {
   it('长度恒为 6 且无重复成员', () => {
     expect(PROJECTION_POLICIES.length).toBe(6)
     expect(PROJECTION_POLICY_SET.size).toBe(6)
@@ -131,7 +131,7 @@ describe('投影策略闭集（6 值：asar 原生 5 + taiji 特判 1）', () =>
     expect(PROJECTION_POLICIES[5]).toBe('compactSummary')
   })
 
-  it('unclassified 不在闭集（D4 降级态，不是投影策略）', () => {
+  it('unclassified 不在闭集（D4 降级态，不是派生视图策略）', () => {
     expect(PROJECTION_POLICIES).not.toContain('unclassified')
     expect(PROJECTION_POLICY_SET.has('unclassified')).toBe(false)
   })

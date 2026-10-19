@@ -73,8 +73,8 @@ function expandFallback(msg: Message): OrderedBlock[] {
  * 填充点契约：全部填充点（live feed = effects/registry.ts、streaming =
  * streaming-state-machine.ts、重放 = apply-entry-convert.ts、历史转换 =
  * runtime infra/pi/message-converter.ts）必须 append-only + 单 message 最多
- * 1 个 text 块（`.some(b => b.type === 'text')` 幂等守卫，见 registry:544 /
- * streaming-state-machine:162 先例）——新增填充点必须带同款守卫，否则 fallback
+ * 1 个 text 块（`.some(b => b.type === 'text')` 幂等检查，见 registry:544 /
+ * streaming-state-machine:162 先例）——新增填充点必须带同款检查，否则 fallback
  * 分支会对每个 text 块重复 push 完整 content。顺序语义统一按 contentIndex
  * （产出顺序）insert，禁止退化为「事件到达顺序」与「content array 顺序」双轨。
  */

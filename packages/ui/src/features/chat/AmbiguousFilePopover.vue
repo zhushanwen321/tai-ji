@@ -65,7 +65,7 @@ import { computed, onBeforeUnmount, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { File as FileIcon } from '@lucide/vue'
 // primitives 直接路径（不经 @taiji/ui 顶层 barrel）：chat 组件被 barrel 再导出，
-// barrel 自引用会闭合一族循环依赖环（详见 BashOutputBlock.vue 同款注释）
+// barrel 自引用会封住一族循环依赖环（详见 BashOutputBlock.vue 同款注释）
 import { Button } from '../../primitives/button'
 import { Popover, PopoverAnchor, PopoverContent } from '../../primitives/popover'
 import type { FileNode } from '@taiji/shared'
@@ -113,7 +113,7 @@ function onSelect(node: FileNode): void {
 
 /**
  * 键盘导航（与 CommandPopover 同模式）：↑↓ 切换、⏎/Tab 选中、Esc 关闭。
- * 幂等守卫 e.defaultPrevented 防双入口重复处理。
+ * 幂等检查 e.defaultPrevented 防双入口重复处理。
  */
 function handleKeydown(e: KeyboardEvent): boolean {
   if (!props.open) return false
@@ -157,7 +157,7 @@ function onWindowKeydown(e: KeyboardEvent): void {
 
 if (typeof window !== 'undefined') {
   window.addEventListener('keydown', onWindowKeydown, true)
-  // composingRef 维护：组合发生在消息区外的输入面，window capture 感知组合起止
+  // composingRef 维护：组合发生在消息区外的输入范围，window capture 感知组合起止
   const onCompositionStart = (): void => { composingRef.value = true }
   const onCompositionEnd = (): void => { composingRef.value = false }
   window.addEventListener('compositionstart', onCompositionStart, true)

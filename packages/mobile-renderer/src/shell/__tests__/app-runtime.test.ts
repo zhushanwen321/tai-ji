@@ -4,7 +4,7 @@
 // 锁定移动壳切入链装配对齐桌面的三件事（验收口径 = 装配面，非 12 步链本体——链编排在
 // core use-session.test.ts 既有覆盖）：
 //   1. 三成员（ensureStreamSubscription/touchRecency/evictLru）非 no-op——以行为证明：
-//      no-op 调用零可观测效果，真实接线各有确定的可观测投影（events 订阅 / LRU recency
+//      no-op 调用零可观测效果，真实接线各有确定的可观测派生视图（events 订阅 / LRU recency
 //      写入 / 驱逐退订 RPC）
 //   2. cancelActiveFlow/preloadFileTree 保持缺省 no-op（headless 形态契约，D2 采用段：
 //      移动壳无 new-task flow 活跃取消面与文件树；clearUnread 同批缺省——未读体系属 W4）。
@@ -14,7 +14,7 @@
 //      会话收到 session.unsubscribe RPC，保留区零 RPC
 //
 // U14（A7）：core toast 通道（coreChannelDeps + subDeps 两处注入）= 错误条通道（error-bar
-// 单槽单例），非 console——core 失败面（revoke/stop/bash/compact 等 RPC 失败）对用户可见。
+// 单槽单例），非 console——core 失败情形（revoke/stop/bash/compact 等 RPC 失败）对用户可见。
 //
 // mock 策略：仅 transport 出口（streamSubscribe/unsubscribe）模块级 vi.mock 隔离 WS，
 // app-runtime 组装与 core 链保持全真实（对齐 mobile-new-task.spec「mock 组件层会变成
@@ -115,7 +115,7 @@ describe('core toast 通道装配（A7/U14）', () => {
   })
 
   it('toast 注入 = 错误条通道（非 console）：error 调用即写入错误条单槽', () => {
-    // core 失败面形态实调（useChat 侧 deps.toast.error(deps.t(...)) 的翻译后文案直入）
+    // core 失败情形形态实调（useChat 侧 deps.toast.error(deps.t(...)) 的翻译后文案直入）
     __testing.errorBarToast.error('composable.revokeFailed 文案')
 
     expect(errorBarMessage.value).toBe('composable.revokeFailed 文案')

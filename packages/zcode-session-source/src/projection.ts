@@ -1,5 +1,5 @@
 /**
- * zcode 消息投影分类器（消息投影对齐设计 §6-D1 / §7.2——ZCode app.asar 内
+ * zcode 消息派生视图分类器（消息派生视图对齐设计 §6-D1 / §7.2——ZCode app.asar 内
  * `getConversationMessageProjectionPolicy`（minified 标识 `Ss`）的逐条移植体）。
  * 来源注记：自 runtime services/session/zcode-import dev 演进版移植（判定逻辑零改动，
  * git 可追溯），本包为现行唯一承载。
@@ -20,7 +20,7 @@
  * Nf='model-only' / Uf='fork' / vN=LEGACY_METADATA_SOURCE_SET。
  *
  * 纯函数（无 IO 无时钟），输入 = message.data 与已解析 part 对象数组（宿主库 JSON 行集，
- * 外部宽形态——全部经运行时守卫读取，禁 any，malformed 字段按 undefined 语义消费）。
+ * 外部宽形态——全部经运行时检查读取，禁 any，malformed 字段按 undefined 语义消费）。
  */
 
 import {
@@ -52,14 +52,14 @@ const SUBAGENT_NOTIFICATION_TAG = '<subagent-notification>'
 /** part.metadata.source 上的 goal-continuation 通道（asar xN 第二判据）。 */
 const GOAL_CONTINUATION_SOURCE = 'goal-continuation'
 
-// ── 运行时守卫（asar ur / bs 的等价移植）─────────────────────────────────────────────
+// ── 运行时检查（asar ur / bs 的等价移植）─────────────────────────────────────────────
 
-/** 对象守卫（asar ur/metadataRecord）：null / 数组 / 原始值 → undefined。 */
+/** 对象检查（asar ur/metadataRecord）：null / 数组 / 原始值 → undefined。 */
 function asRecord(v: unknown): Record<string, unknown> | undefined {
   return typeof v === 'object' && v !== null && !Array.isArray(v) ? (v as Record<string, unknown>) : undefined
 }
 
-/** 非空字符串守卫（asar bs/stringValue）：空串不作为有效值参与 `??` 兜底链。 */
+/** 非空字符串检查（asar bs/stringValue）：空串不作为有效值参与 `??` 兜底链。 */
 function asNonEmptyString(v: unknown): string | undefined {
   return typeof v === 'string' && v.length > 0 ? v : undefined
 }
@@ -73,10 +73,10 @@ function inClosedSet(v: unknown, set: ReadonlySet<string>): boolean {
 
 /**
  * 消息来源四路回退（asar kN/messageSource）：data.source → metadata.source →
- * semantics.source → 首个携带 metadata.source 的 part。非空字符串守卫只挂第二路与第四路
+ * semantics.source → 首个携带 metadata.source 的 part。非空字符串检查只挂第二路与第四路
  * （asar bs 同款）；首路与第三路 semantics.source 裸取，`??` 只跳过 null/undefined
  * （kN 函数体 2026-09-21 按对拍口径重提取核实：
- * `e.source??bs(o?.source)??e.semantics?.source`——第三路无守卫，实现与其一致）。
+ * `e.source??bs(o?.source)??e.semantics?.source`——第三路无检查，实现与其一致）。
  * 注意：data.source 为空串时本函数返回空串（falsy），由闭集前置检查按未知值处理（asar
  * 原函数空串 falsy 直接跳过 source 分支——空串在真实数据中不存在，对拍报告核验节）。
  */
@@ -241,7 +241,7 @@ function classifyLegacyFallback(
 }
 
 /**
- * 单条消息的投影策略判定（zcode getConversationMessageProjectionPolicy 移植体）。
+ * 单条消息的派生视图策略判定（zcode getConversationMessageProjectionPolicy 移植体）。
  * 判定序：闭集前置（D4）→ ① compactSummary 特判 → ② semantics 六分支 → ③ 兜底链；
  * src 在判定前一次性求值（messageSource 纯函数，求值点提前不影响判定顺序与结果）。
  *
@@ -249,7 +249,7 @@ function classifyLegacyFallback(
  *              synthetic / metadata / summary 等，外部宽形态）
  * @param parts 该消息的 part.data 已解析对象数组（联合序；元素含 type / text / synthetic /
  *              metadata / summaryMessageId 等）
- * @returns 六种投影策略之一（PROJECTION_POLICIES）或 'unclassified' 降级态（D4）
+ * @returns 六种派生视图策略之一（PROJECTION_POLICIES）或 'unclassified' 降级态（D4）
  */
 export function classifyMessage(
   data: Record<string, unknown>,

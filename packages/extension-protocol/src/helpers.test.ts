@@ -353,8 +353,8 @@ describe('validateWidgetIconPaths（自定义 icon paths 白名单，宿主 fall
 
   describe('非法字符拒绝', () => {
     it.each([
-      ['标签注入面', 'M0 0" onload="alert(1)'],
-      ['脚本注入面', 'M0 0</path><script>'],
+      ['标签注入', 'M0 0" onload="alert(1)'],
+      ['脚本注入', 'M0 0</path><script>'],
       ['指数记法（e/E 不在白名单）', 'M0 0e5'],
       ['换行', 'M0 0\nL1 1'],
       ['中文', 'M0 0中文'],

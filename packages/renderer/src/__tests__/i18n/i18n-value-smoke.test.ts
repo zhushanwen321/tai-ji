@@ -16,7 +16,7 @@
  *   upgradeFailed 族键
  *   是真正的动态组装键（use-app-update-errors.ts 的 resolveFailedToastKey 拼接
  *   `sidebar.update.${mapped}` / upgradeFailedInstaller / 兜底 upgradeFailed，
- *   escape 出 locale-key-usage-guard 的字面扫描，键存在性由 upgradeFailed* 专用用例守卫）
+ *   escape 出 locale-key-usage-guard 的字面扫描，键存在性由 upgradeFailed* 专用用例检查）
  * - settings.update testProxy keys 完整性
  * - landing 模式改名（D4）值的回归锁定：`newTask.presetSelect.*` 用「模式」措辞
  *   （R3 补完——landing 侧曾漏改，改名落地无测试覆盖即会再次回退）

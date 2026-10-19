@@ -11,7 +11,7 @@
  *    锁定「必须先建运行时」这一硬约束（本测试是该缺口的回归防线）。
  *
  * 材料：真 createDelivery 内核 + 真 registry（fake pi client / fake session view）；
- * 编排腿用真 runStartupReattach + fake checkpoint（tmp 目录，fs-guard 白名单内）。
+ * 编排路径用真 runStartupReattach + fake checkpoint（tmp 目录，fs-guard 白名单内）。
  *
  * 运行：cd packages/runtime && npx vitest run src/__tests__/services/reattach-delivery-trigger.test.ts
  */
@@ -33,7 +33,7 @@ import type { SkillInjectionResult, SkillInjector, SkillNotice } from '../../ser
 
 const SID = 's-reattach-1'
 
-/** 滞留文本（无标记外来文本形态：subagent notifyDone / scheduler 提醒存量注入面）。 */
+/** 滞留文本（无标记外来文本形态：subagent notifyDone / scheduler 提醒存量注入点）。 */
 const STRANDED_TEXT = '滞留的外来通知文本'
 
 function makeView(): IManagedSessionView {
@@ -172,11 +172,11 @@ describe('无提交活动下的 reattach 收养重建（A5/V5）', () => {
     expect(entries!.active.length + entries!.tombstones.length).toBeGreaterThan(0)
   })
 
-  it('端到端编排腿：runStartupReattach（checkpoint 单候选）→ restore 包装被调 → 收养路径触发', async () => {
+  it('端到端编排路径：runStartupReattach（checkpoint 单候选）→ restore 包装被调 → 收养路径触发', async () => {
     const runDir = mkdtempSync(join(tmpdir(), 'u4-reattach-trigger-'))
     try {
       // 只写 session.jsonl（restoreOne staleness guard 依赖 fileExists(entry.filePath)）。
-      // runtime-checkpoint.json 磁盘文件不写：checkpoint 读面被下方 mock store 覆盖，
+      // runtime-checkpoint.json 磁盘文件不写：checkpoint 读侧被下方 mock store 覆盖，
       // 真文件不进任何断言；deleteCheckpointFile 对不存在路径走 ENOENT 容错（返回 false）。
       writeFileSync(join(runDir, 'session.jsonl'), '{}\n')
       const h = makeRegistryHarness()

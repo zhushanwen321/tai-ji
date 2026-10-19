@@ -224,7 +224,7 @@ describe('ScopedModelSection', () => {
 })
 
 describe('A6: ScopedModelSection 组件单元测试', () => {
-  it('A6: 实现 token 存在（红阶段区分力守卫）', () => {
+  it('A6: 实现 token 存在（红阶段区分力检查）', () => {
     // 基线代码树无 scoped-model-types.ts → import fail → 红阶段不通过
     expect(SCOPED_MODEL_IMPLEMENTATION_TOKEN).toBe('scoped-model-v1')
   })

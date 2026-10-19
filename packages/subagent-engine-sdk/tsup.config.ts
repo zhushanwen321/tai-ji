@@ -5,7 +5,7 @@ import { defineConfig } from 'tsup'
 // entry 逐模块具名登记（impl-plan §2.1 末行「SDK tsup entry 显式登记」，R2 S-Y2 / R3 S-A）：
 //   protocol/（protocol/index 单 entry 覆盖目录闭包）+ 7 原语模块（schema-emulation /
 //   nesting-guard / logger / kill-chain / journal-replay / data-dir / paths）+
-//   ui-types.ts + env.ts + spawn.ts——W12 扩 env/spawn 实现时同守卫核对，后续新增模块
+//   ui-types.ts + env.ts + spawn.ts——W12 扩 env/spawn 实现时同检查核对，后续新增模块
 //   必须同步登记 entry。index 为主 barrel（供 exports "."；§2.1 清单外补登记）。
 //
 // 跨 entry 共享模块的形态说明：各原语 entry 闭包引用 protocol/* 与 logger（如
@@ -32,7 +32,6 @@ export default defineConfig({
     spawn: 'src/spawn.ts',
     'node-executor': 'src/node-executor.ts',
     'logs/stderr-rotation': 'src/logs/stderr-rotation.ts',
-    'relay-env': 'src/relay-env.ts',
     'error-message': 'src/error-message.ts',
     'best-effort': 'src/best-effort.ts',
     'journal-io': 'src/journal-io.ts',

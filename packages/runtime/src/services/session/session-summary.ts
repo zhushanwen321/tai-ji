@@ -1,10 +1,10 @@
 /**
- * SessionSummary 投影组装（自 session-service.ts toSummary 行为保持抽取）。
+ * SessionSummary 派生组装（自 session-service.ts toSummary 行为保持抽取）。
  *
- * 为什么独立函数：toSummary 是「IManagedSessionView → SessionSummary」的纯投影
+ * 为什么独立函数：toSummary 是「IManagedSessionView → SessionSummary」的纯派生
  * （git 信息读 + bare workspace 检测 + usage 快照派生 + binding 内存态透传），不依赖
  * Facade 其余状态——gitInfoReader 与 replicated states 读点参数化后即可模块级化。
- * Facade 保留同名方法一行委托（ISessionService/窄接口契约面不变）。
+ * Facade 保留同名方法一行委托（ISessionService/窄接口契约范围不变）。
  */
 import type { SessionStatus, SessionSummary } from '@taiji/shared'
 import type { IGitInfoReader } from '../ports/git-info.js'
@@ -45,7 +45,7 @@ export function buildSessionSummary(
     // 到 builtin:full 的事实随内存态透传（scanner 磁盘路径无此字段——回落态是「本进程本次
     // 运行」的内存态事实，进程重开即归零，不持久化，避免「未重启也声称已回落」的假陈述）。
     launchPresetFallbackTo: (s as ManagedSession).launchPresetFallbackTo,
-    // D14 语义修正：归属 project 透传到 summary（内存态兑底，sidecar 扫描路径在 scanner）。
+    // D14 语义修正：归属 project 透传到 summary（内存态兜底，sidecar 扫描路径在 scanner）。
     projectId: s.projectId,
     // B-2：agent-managed 标记透传——list 按 spawnSource/parentAgentSessionId 过滤时
     // active session 走本路径（scanned 路径被 activeFilePaths 排除），漏透传 = 过滤失效。

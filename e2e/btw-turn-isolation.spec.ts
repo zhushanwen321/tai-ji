@@ -1,17 +1,17 @@
 /**
  * btw S7 真实进程 e2e —— 主 turn 进行中 btw 连发 3 条：主 turn 无 abort / 无 steer 注入 / 主流历史不含 btw 内容。
  *
- * 登记：E2E-BTW-01（docs/testing/e2e-map.json，R2 按改动面 on-diff，serial 空载串行，L3 真实 LLM）。
+ * 登记：E2E-BTW-01（docs/testing/e2e-map.json，R2 按改动范围 on-diff，serial 空载串行，L3 真实 LLM）。
  * 来源：btw-question 设计 §4 S7 负面场景 + impl-plan 验收计划 A7（L3 脚本）。
  * 通过标准（设计 S7 原文口径）：主 turn 全程无 abort / 无 steer 注入；主流历史不含 btw 内容（滚动检查）。
  *
  * 执行侧六要素（与 e2e-map E2E-BTW-01.note 同步维护，改其一须同 commit 改另一）：
  * - 触发：scope diff 命中（btw 会话生命周期 / 消息路由 / 协议帧 / vid 工厂 + spec 自身）时开发期
- *   按改动面执行；双凭证门 = env TAIJI_PI_LIVE=1 + 本机 provider 凭证（缺一 skip 不 fail——防
+ *   按改动范围执行；双凭证门 = env TAIJI_PI_LIVE=1 + 本机 provider 凭证（缺一 skip 不 fail——防
  *   `--project=electron` 全量扫跑烧 token，CI/PR/merge 门禁不跑本轨，AGENTS.md e2e 执行准则）。
  *   前置：real renderer bundle（`VITE_E2E=true pnpm run build:e2e`，不带 VITE_MOCK；mock 轨跑过
  *   之后必须重建——launch-real pre-flight 会 fail-fast 并给出重建命令）。
- * - 预算：test.setTimeout 300s；**主 turn 在飞窗口旋钮 = MAIN_PROMPT 里的 bash `sleep 40`**
+ * - 预算：test.setTimeout 300s；**主 turn 在途窗口旋钮 = MAIN_PROMPT 里的 bash `sleep 40`**
  *   （真实 LLM 三轮 btw 问答须在窗口内完成；窗口不足属预算校准 → 调 sleep 秒数，禁止放宽断言
  *   或膨胀其他预算换绿灯）；单事件等待 30-90s。
  * - 事件：listen WS 订阅 mainSid 与 btw vid 的 message.message_start / message.complete；负向监听
@@ -33,11 +33,11 @@
  * 形态说明：
  * - WS 直连驱动（TEST-STRATEGY 既定约定：UI/OS dialog 不可自动化处用 WS 触发等效业务动作）：
  *   session.create → message.send（主长 turn）→ btw.create → message.send × 3（vid 串行）。
- *   S7 断言面全部落在事件帧与 pi session JSONL，不依赖 DOM。
+ *   S7 断言范围全部落在事件帧与 pi session JSONL，不依赖 DOM。
  * - L3 真实 LLM（impl-plan A7 方式列）：faux 统一队列无法表达「主长 turn × btw 三短问」的进程间
  *   异构节奏（两进程独立 shift 同一序列、turn 边界结构性对齐），model-keyed 分道被 btw spawn 的
  *   inheritSessionModel（model: undefined，argv 无 --model）挡死——不翻 L2.5，理由登记 e2e-map note。
- * - 凭证播种：拷本机真实 provider 配置（models.json/auth.json）+ settings 最小面（defaultProvider/
+ * - 凭证播种：拷本机真实 provider 配置（models.json/auth.json）+ settings 最小子集（defaultProvider/
  *   defaultModel/retry）进临时 dataDir——刻意剥 packages/skills，防用户扩展/skill 清单漂移进 e2e
  *   （pi-fixture「不拷 settings 全量」同款理由）。只读源目录，不触碰真实数据目录（写删全在 tmp）。
  *
@@ -67,7 +67,7 @@ const SESSION_LABEL = 's7-btw-isolation'
 const MAIN_MARKER = 'TAIJI-S7-MAIN-7291'
 const BTW_MARKERS = ['TAIJI-S7-Q1-7291', 'TAIJI-S7-Q2-7291', 'TAIJI-S7-Q3-7291'] as const
 
-/** 主 turn 在飞窗口旋钮（六要素「预算」）：bash sleep 秒数，三轮 btw 问答须落其内。 */
+/** 主 turn 在途窗口旋钮（六要素「预算」）：bash sleep 秒数，三轮 btw 问答须落其内。 */
 const MAIN_TURN_SLEEP_S = 40
 const MAIN_PROMPT =
   `S7 main-turn task: first use the bash tool to run exactly \`sleep ${MAIN_TURN_SLEEP_S}\`, ` +
@@ -87,7 +87,7 @@ const JSONL_FLUSH_TIMEOUT_MS = 20_000
 /** 本机 provider 凭证源目录（taiji 数据目录的 agent 子树，运行时动态推导）。
  * TAIJI_S7_CREDENTIAL_SOURCE 可覆盖：真实安装的凭证文件形态因版本/安装方式而异
  * （auth.json/models.json 不必然在默认 agent 子树，如 dev 实例目录），覆盖值指向
- * 含同名文件的 agent 目录即可，spec 只读该目录、写面仍恒为临时 dataDir。 */
+ * 含同名文件的 agent 目录即可，spec 只读该目录、写侧仍恒为临时 dataDir。 */
 function sourceAgentDir(): string {
   const override = process.env['TAIJI_S7_CREDENTIAL_SOURCE']
   if (override && override.trim() !== '') return override
@@ -117,7 +117,7 @@ function realCredentialSkipReason(): string | null {
 }
 
 /**
- * 播种临时 dataDir 的 agent 子树：拷 models.json/auth.json（存在才拷）+ 写 settings 最小面
+ * 播种临时 dataDir 的 agent 子树：拷 models.json/auth.json（存在才拷）+ 写 settings 最小子集
  * （defaultProvider/defaultModel——过 runtime getDefaultModel 门禁；retry 关闭保预算确定性）。
  * 刻意剥 packages/skills：用户扩展/skill 清单不进 e2e（pi-fixture 同款防漂移理由）。
  */
@@ -221,7 +221,7 @@ test('S7 (btw real): 主 turn 进行中 btw 连发 3 条 → 主 turn 无 abort 
   // 凭证双门（六要素「触发」）：真实 LLM 轨只在显式授权 + 本机凭证齐备时执行
   test.skip(
     process.env['TAIJI_PI_LIVE'] !== '1',
-    '真实 LLM 轨门：TAIJI_PI_LIVE=1 才执行（e2e 执行准则——开发期按改动面手动触发，CI/门禁不跑）',
+    '真实 LLM 轨门：TAIJI_PI_LIVE=1 才执行（e2e 执行准则——开发期按改动范围手动触发，CI/门禁不跑）',
   )
   const credSkip = realCredentialSkipReason()
   test.skip(credSkip !== null, credSkip ?? '')
@@ -309,11 +309,11 @@ test('S7 (btw real): 主 turn 进行中 btw 连发 3 条 → 主 turn 无 abort 
       ).toBe(true)
     }
 
-    // ── 断言 ①（窗口重叠）：第 3 轮完成时主 turn 仍在飞 ──
+    // ── 断言 ①（窗口重叠）：第 3 轮完成时主 turn 仍在途 ──
     const mainDoneBeforeRound3End = countOf(mainEvents, 'message.complete') > 0
     if (mainDoneBeforeRound3End) {
       writeDiag('s7-window.json', {
-        hint: `主 turn 在三轮完成前已结束——在飞窗口不足，调 MAIN_PROMPT sleep（当前 ${MAIN_TURN_SLEEP_S}s），不放宽断言`,
+        hint: `主 turn 在三轮完成前已结束——在途窗口不足，调 MAIN_PROMPT sleep（当前 ${MAIN_TURN_SLEEP_S}s），不放宽断言`,
         mainEventTypes: seenTypes(mainEvents),
         runtimeLogsTail: readRuntimeLogs(dataDir).slice(-3000),
       })
@@ -323,7 +323,7 @@ test('S7 (btw real): 主 turn 进行中 btw 连发 3 条 → 主 turn 无 abort 
       `第 3 轮 btw complete 时主 turn 已 message.complete——S7 窗口重叠断言失败（预算旋钮 = MAIN_TURN_SLEEP_S=${MAIN_TURN_SLEEP_S}）`,
     ).toBe(false)
 
-    // ── 断言 ①（无 abort）：等主 turn 正常收口 ──
+    // ── 断言 ①（无 abort）：等主 turn 正常收尾 ──
     const mainDone = await waitUntil(
       () => countOf(mainEvents, 'message.complete') > 0,
       MAIN_COMPLETE_TIMEOUT_MS,
@@ -335,7 +335,7 @@ test('S7 (btw real): 主 turn 进行中 btw 连发 3 条 → 主 turn 无 abort 
     expect(mainStopReason, `主 turn stopReason 应非 aborted（收到 "${String(mainStopReason)}"）`).not.toBe('aborted')
     expect(mainStopReason, `主 turn stopReason 应非 error（收到 "${String(mainStopReason)}"）`).not.toBe('error')
 
-    // ── 断言 ②（事件面负向）：监听窗内无 error / rejected / exited 帧 ──
+    // ── 断言 ②（事件范围负向）：监听窗内无 error / rejected / exited 帧 ──
     const badMainFrames = mainEvents.filter((e) =>
       e.type === 'message.error' || e.type === 'send.rejected' || e.type === 'session.exited')
     if (badMainFrames.length > 0) {
@@ -343,7 +343,7 @@ test('S7 (btw real): 主 turn 进行中 btw 连发 3 条 → 主 turn 无 abort 
     }
     expect(
       badMainFrames.map((e) => e.type),
-      '主会话监听窗内不应出现 message.error / send.rejected / session.exited（= steer/abort/失败 注入面）',
+      '主会话监听窗内不应出现 message.error / send.rejected / session.exited（= steer/abort/失败 注入范围）',
     ).toEqual([])
 
     mainSub.ws.close()
@@ -351,7 +351,7 @@ test('S7 (btw real): 主 turn 进行中 btw 连发 3 条 → 主 turn 无 abort 
     mainListen = undefined
     vidListen = undefined
 
-    // ── 断言 ②③（持久面）：pi session JSONL 全文滚动检查 ──
+    // ── 断言 ②③（持久化侧）：pi session JSONL 全文滚动检查 ──
     const agentDir = path.join(dataDir, 'agent')
     // 会话文件落 sessions/<encodeCwd>/<sid>.jsonl 子目录（与 btw/<encodeCwd>/ 同构布局），
     // 递归扫描——首版扁平 readdir 假设是该 spec 首次真执行（阶段 5 A7）暴露的资产 bug。
@@ -371,13 +371,13 @@ test('S7 (btw real): 主 turn 进行中 btw 连发 3 条 → 主 turn 无 abort 
     if (!mainFile) {
       writeDiag('s7-main-file-missing.json', {
         sessionsDir: listJsonlUnder(path.join(agentDir, 'sessions')),
-        btwDir: listJsonlUnder(path.join(agentDir, 'btw')),
+        btwTree: listJsonlUnder(path.join(dataDir, 'ext-sessions', mainSid, 'btw')),
       })
     }
     expect(mainFile, '含 MAIN 哨兵的主会话 JSONL 应可定位（零直写约束下由 pi 自己落盘）').toBeDefined()
 
     const mainText = fs.readFileSync(mainFile!, 'utf8')
-    // ② steer/重复投递面：MAIN 哨兵恰 1 次 + 全文无 aborted
+    // ② steer/重复投递检查：MAIN 哨兵恰 1 次 + 全文无 aborted
     expect(
       countOccurrences(mainText, MAIN_MARKER),
       '主会话 JSONL 中 MAIN 哨兵应恰 1 次（>1 = 主 prompt 被重复投递/steer 注入痕迹）',
@@ -388,12 +388,15 @@ test('S7 (btw real): 主 turn 进行中 btw 连发 3 条 → 主 turn 无 abort 
     if (leaked.length > 0) writeDiag('s7-leak.json', { leaked, mainFile })
     expect(leaked, '主会话 JSONL 全文不应含任何 btw 问哨兵（= 主流历史不含 btw 内容）').toEqual([])
 
-    // 正面对照：三问确实落进 btw 线会话文件（缺席主流才有意义）
-    const btwFile = findJsonlWithMarker(path.join(agentDir, 'btw'), BTW_MARKERS[0])
+    // 正面对照：三问确实落进 btw 线会话文件（缺席主流才有意义）。
+    // btw 线会话文件自布局反转起落新存储树 <dataDir>/ext-sessions/<mainSid>/btw/
+    // （旧布局 <agentDir>/btw/<encodeCwd>/<mainSid>/ 不再读写）。
+    const btwTree = path.join(dataDir, 'ext-sessions', mainSid, 'btw')
+    const btwFile = findJsonlWithMarker(btwTree, BTW_MARKERS[0])
     if (!btwFile) {
-      writeDiag('s7-btw-file-missing.json', { btwDir: listJsonlUnder(path.join(agentDir, 'btw')) })
+      writeDiag('s7-btw-file-missing.json', { btwDir: listJsonlUnder(btwTree) })
     }
-    expect(btwFile, 'btw 线会话文件（<agentDir>/btw/<encodeCwd>/<mainSid>/）应含三问哨兵').toBeDefined()
+    expect(btwFile, 'btw 线会话文件（<dataDir>/ext-sessions/<mainSid>/btw/）应含三问哨兵').toBeDefined()
     const btwText = fs.readFileSync(btwFile!, 'utf8')
     for (const m of BTW_MARKERS) {
       expect(btwText.includes(m), `btw 线文件应含哨兵 ${m}（正面对照）`).toBe(true)

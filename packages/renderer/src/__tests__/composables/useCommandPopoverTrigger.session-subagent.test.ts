@@ -131,7 +131,7 @@ describe('useCommandPopoverTrigger session/subagent 触发（# / @ 符号路径�
     expect(result.cmdOpen.value).toBe(false)
   })
 
-  it('onCmdSelect(type=subagent) 缺 slug record（顺带发现 2 收口）→ 显示名回落 subagentId，不吃「新任务」占位', () => {
+  it('onCmdSelect(type=subagent) 缺 slug record（顺带发现 2 收尾）→ 显示名回落 subagentId，不吃「新任务」占位', () => {
     const { result, inputMock } = setup()
 
     result.onCmdSelect({ type: 'subagent', name: 'x', subagentId: 'sa-direct-9', slug: '' })

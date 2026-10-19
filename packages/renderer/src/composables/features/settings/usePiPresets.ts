@@ -16,7 +16,7 @@
  *   上次的非默认模式会话**（不经 landing）时 store 为空，声明行会误报「模式已删除」。
  *   App bootstrap 只提交连接编排、**不等 connected**（冷启时 preset.list/getDefault 两条 WS RPC
  *   必 rejected），故加载点挂在连接态（`watch(getState())`）而非 bootstrap：首次 connected 拉一次，
- *   成功即置位、重连不重复；加载失败不置位 → 下一次 connected 自动补拉（E7 ③ 恢复通道）。
+ *   成功即置位、重连不重复；加载失败不置位 → 下一次 connected 自动补充拉取（E7 ③ 恢复通道）。
  *
  * 依赖方向：
  * - 读 SettingsTransport seam（[C3] preset 域 RPC：listPresets / getDefaultPreset / setDefaultPreset /
@@ -41,7 +41,7 @@ import type { PiLaunchPreset } from '@taiji/shared'
 export function createPresetAutoLoad() {
   /** 安装标志（幂等：多次调用只挂一个 watcher）。 */
   let installed = false
-  /** 已成功加载标志（置位后重连不重复拉；加载失败不置位 → 下一次 connected 补拉）。 */
+  /** 已成功加载标志（置位后重连不重复拉；加载失败不置位 → 下一次 connected 补充拉取）。 */
   let loadedOnce = false
   /** detached effect scope 持有 watch（不随调用方组件卸载停止）。 */
   let scope: EffectScope | null = null
@@ -52,7 +52,7 @@ export function createPresetAutoLoad() {
    * 行为：
    * - immediate：若安装时已 connected（AppShell 仅在 connected 后渲染 → 稳态路径）立即拉一次；
    * - 边沿：之后每次进入 connected 仅在尚未成功加载时拉（重连不重复）；
-   * - 失败补拉：任一 RPC rejected → store.loadError 非空 → 不置位 → 下一次 connected 重试。
+   * - 失败补充拉取：任一 RPC rejected → store.loadError 非空 → 不置位 → 下一次 connected 重试。
    * 实现细节：watch 放在 detached effectScope 内（app 生命周期单例，不随组件卸载停止）。
    */
   function install(): void {
@@ -66,7 +66,7 @@ export function createPresetAutoLoad() {
         (s) => {
           if (s !== 'connected' || loadedOnce) return
           void loadPresets().then(() => {
-            // 加载失败（loadError 非空）保持未置位，等下一次 connected 补拉（E7 ③ 恢复通道）
+            // 加载失败（loadError 非空）保持未置位，等下一次 connected 补充拉取（E7 ③ 恢复通道）
             if (usePresetStore().loadError === null) loadedOnce = true
           })
         },

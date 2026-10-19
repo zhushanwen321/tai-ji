@@ -16,14 +16,14 @@ import type { ImportService } from '../services/session/import-service.js'
 // U10 起唯一承载 = @zhushanwen/zcode-session-source）。
 import { zcodeImportDbAllowlist } from '@zhushanwen/zcode-session-source'
 // BackgroundTaskService（background-task-sidebar D3，u-runtime-rpc）：仅类型 import——
-// 实例由 SessionService 构造器组装（session-service 领地），handler 经 ctx 结构读取消费面。
+// 实例由 SessionService 构造器组装（session-service 领地），handler 经 ctx 结构读取消费方。
 import type { BackgroundTaskService } from '../services/background-task/background-task-service.js'
 import { toErrorMessage, isEnoent, errorCodeOf, MODEL_NOT_CONFIGURED, SESSION_NOT_FOUND, RESTORE_FAILED } from '../utils/errors.js'
 import type { MessageHandlerContext } from './message-context.js'
 // MessageBus（wave:runtime-wiring）：session.subscribe/unsubscribe RPC handler 用它注册订阅。
 // type-only import（handler 不持有 bus 实例的创建，只调它的方法）。
 import type { IMessageBus } from '../services/message-bus/message-bus.js'
-// GenStatsService（composer-gen-stats u3）：session.getGenStats 恢复腿 RPC 的降级链解析
+// GenStatsService（composer-gen-stats u3）：session.getGenStats 恢复路径 RPC 的降级链解析
 // + 快照构造（写 3 回填在 getSnapshotForSession 内部完成）。可选注入：未注入时该 case 报
 // unsupported（组合根保证注入；importService 同款模式）。
 import type { GenStatsService } from '../services/session/gen-stats-service.js'
@@ -38,7 +38,7 @@ import { SessionDeliveryTopic, frameLaneOf, frameStateOf, stripDeliveryMarkers }
 
 /**
  * backgroundTask 域 WS 消费端口（background-task-sidebar D3，u-runtime-rpc）：
- * BackgroundTaskService 的 handler 消费面窄视图（Pick 收窄——kill 五分支矩阵 / mtime 轮询
+ * BackgroundTaskService 的 handler 消费方窄视图（Pick 收窄——kill 五分支矩阵 / mtime 轮询
  * 等内部编排不对传输层暴露）。
  */
 export type BackgroundTaskRpcPort = Pick<
@@ -56,12 +56,12 @@ export const OUTPUT_TAIL_MAX_REQUEST_BYTES = 1_048_576
 /** Interface for server methods needed by this handler */
 export interface SessionHandlerContext extends MessageHandlerContext {
   /**
-   * session 服务门面。交叉可选成员 = SessionService 上不在 ISessionService 接口面的
+   * session 服务门面。交叉可选成员 = SessionService 上不在 ISessionService 接口侧的
    * 消费端口（可选属性使组合根 server.ts setServices 的 ctx 对象字面量（静态类型
    * ISessionService）经结构兼容零改动通过类型检查——运行时实例恒有该成员；缺省仅出
    * 现在测试最小 mock 中，调用侧判空走防御分支）：
    * - backgroundTasks（background-task-sidebar D3）：BackgroundTaskService 的 handler
-   *   消费面窄视图，case 内判空走 background_task_unsupported 防御分支。
+   *   消费方窄视图，case 内判空走 background_task_unsupported 防御分支。
    * - markSessionViewed（idle pi reclamation D2 #6，u1b）：session.switch 处理器记录
    *   查看时间戳（存储在 session-service 侧 per-sid Map）。可选链静默跳过而非报错——
    *   记录是 reaper 豁免信号（u2 消费），非 switch 主流程的一部分，最小 mock 缺该
@@ -75,10 +75,10 @@ export interface SessionHandlerContext extends MessageHandlerContext {
    *   可选链防御与 markSessionViewed 同款——激活投递是旁路信号，最小 mock 缺该成员不应
    *   让 switch 请求失败。
    * - revokeMessage（message-revoke 设计 §3.3 D2，U4）：session.revokeMessage 七步编排
-   *   （RevokeOrchestrator）的转发面。可选成员形态对齐 getPlanState 先例——缺省仅出现
+   *   （RevokeOrchestrator）的转发侧。可选成员形态对齐 getPlanState 先例——缺省仅出现
    *   在测试最小 mock 中，case 内判空走 revoke_unsupported 防御分支。
    * - getWorkflowRunEvents / getWorkflowDag（workflow-visualization U3，设计 §3.1-4/§3.1-5）：
-   *   事件流拉取与 DAG 解析两 RPC 的转发面。可选成员形态对齐 revokeMessage 先例——
+   *   事件流拉取与 DAG 解析两 RPC 的转发侧。可选成员形态对齐 revokeMessage 先例——
    *   缺省仅出现在测试最小 mock 中，case 内判空走 *_unsupported 防御分支。
    */
   sessionService: ISessionService & {
@@ -91,7 +91,7 @@ export interface SessionHandlerContext extends MessageHandlerContext {
     getWorkflowDag?(sessionId: string, runId: string): Promise<WorkflowDagReply>
     /**
      * 会话消息条数（悬停详情卡消息计数）：SessionRecords
-     * 路径解析 + session-message-count 流式计数的转发面。可选成员形态对齐 getPlanState
+     * 路径解析 + session-message-count 流式计数的转发侧。可选成员形态对齐 getPlanState
      * 先例——缺省仅出现在测试最小 mock 中，case 内判空走 *_unsupported 防御分支。
      */
     getMessageCount?(sessionId: string): Promise<number>
@@ -109,7 +109,7 @@ export interface SessionHandlerContext extends MessageHandlerContext {
    */
   messageBus?: IMessageBus
   /**
-   * 生成指标服务（composer-gen-stats u3）：session.getGenStats 恢复腿 RPC 用。
+   * 生成指标服务（composer-gen-stats u3）：session.getGenStats 恢复路径 RPC 用。
    * 可选：未注入时该 case 报 unsupported（组合根保证注入）。
    */
   genStatsService?: GenStatsService
@@ -233,7 +233,7 @@ export class SessionMessageHandler {
 
   /**
    * D1: 本 handler 认领的 ClientMessageType 清单——派生自 routes 表（S1 收敛：单一事实源，
-   * 「只改 handles 漏改 routes」的漂移类结构性消灭，RT-1#6 运行时守卫随之退为纯防御）。
+   * 「只改 handles 漏改 routes」的漂移类结构性消灭，RT-1#6 运行时检查随之退为纯防御）。
    * 不含 session.compact：它由 server 路由表直接接 handleSessionCompact（不经本表分发），
    * 且 server 装配期 b26-F2 撞键 fail-fast 会把双登记拦死——与退役前手写清单的排除理由一致。
    * 声明必须位于 routes 之后（字段初始化按声明序执行，派生读 this.routes）。
@@ -257,14 +257,14 @@ export class SessionMessageHandler {
     }
     // 路由表 key 与 msg.type 字面量同源（上方 routes 逐 key 登记），查表命中即类型匹配；
     // TS 无法静态关联索引访问与 key（correlated types，microsoft/TypeScript#30581），
-    // `as never` 是该不变式下的类型层收口，运行时分发行为与原 switch 完全一致。
+    // `as never` 是该不变式下的类型层收尾，运行时分发行为与原 switch 完全一致。
     await handler(msg as never, ws)
   }
 
-  // ── 失败收口 / 可选服务守卫（S3 收敛：catch 尾三连与判空样板单一实现）──
+  // ── 失败收尾 / 可选服务检查（S3 收敛：catch 尾三连与判空样板单一实现）──
 
   /**
-   * 请求级失败统一收口（D10/P0-B）：toErrorMessage 归一 + console.error 留痕 + error envelope。
+   * 请求级失败统一收尾（D10/P0-B）：toErrorMessage 归一 + console.error 留痕 + error envelope。
    * envelope 四元组（code/message/id/details）与收敛前各 case 逐字节一致；message 覆写槽供
    * 需拼恢复指引的 case 使用（留痕恒记原始 errMsg，与收敛前日志一致）。
    * import 域的「code 透传变体」不入本 helper：其日志嵌 resolved code（errorCodeOf 求值先于
@@ -283,7 +283,7 @@ export class SessionMessageHandler {
   }
 
   /**
-   * delivery 域可选注册表守卫（四 RPC 共用）：缺省时回 delivery_unsupported error envelope
+   * delivery 域可选注册表检查（四 RPC 共用）：缺省时回 delivery_unsupported error envelope
    * 并返回 undefined（调用方早退）；命中返回注册表实例。
    */
   private requireDeliveryRegistry(ws: WsType, msg: { id?: string }, sessionId: string): SessionDeliveryRegistry | undefined {
@@ -296,8 +296,8 @@ export class SessionMessageHandler {
   }
 
   /**
-   * backgroundTask 域可选端口守卫（三 RPC 共用）：缺省时回 background_task_unsupported
-   * error envelope 并返回 undefined（调用方早退）；命中返回服务消费面窄视图。
+   * backgroundTask 域可选端口检查（三 RPC 共用）：缺省时回 background_task_unsupported
+   * error envelope 并返回 undefined（调用方早退）；命中返回服务消费方窄视图。
    */
   private requireBackgroundTasks(ws: WsType, msg: { id?: string }, sessionId: string): BackgroundTaskRpcPort | undefined {
     const port = this.ctx.sessionService.backgroundTasks
@@ -314,7 +314,7 @@ export class SessionMessageHandler {
     // B3：透传 modelOverride / thinkingOverride（Landing Chip 覆盖值，设计文档 §5.2）。
     // 优先级：Landing Chip override > preset.modelOverride/thinkingLevel > 全局默认。
     // 之前只透传了 hidden/presetId，覆盖值在 transport 层被丢弃，导致 Landing Chip 选型不生效。
-    // projectId：D14 语义修正（2026-08-04），创建时归属当前 activeProject（空 = 默认项目兑底）。
+    // projectId：D14 语义修正（2026-08-04），创建时归属当前 activeProject（空 = 默认项目兜底）。
     // 错误路径直通 server 中央 catch（S2 收敛）：create payload 无 sessionId 字段，中央
     // code 透传（含 MODEL_NOT_CONFIGURED L4 差异化引导）产出的信封与原 per-case 特判逐字节一致。
     const session = await this.ctx.sessionService.create(msg.payload.cwd, msg.payload.label, {
@@ -472,7 +472,7 @@ export class SessionMessageHandler {
     // renderer switchSession 返回 void 不读 reply payload，历史消费路径是 selectSession
     // 内显式 chat.getHistory（session.history RPC）——reply 里的 messages 是纯浪费的
     // 全量序列化（长 session 数 MB）。被驱逐 session 切回由显式 history RPC（享受 D6
-    // 重建缓存增量）拉取；LRU 窗口内切回本就零请求（isHydrated 守卫）。
+    // 重建缓存增量）拉取；LRU 窗口内切回本就零请求（isHydrated 检查）。
     const switchId = msg.payload.sessionId
     // idle pi reclamation D2 #6：switch 即用户查看该 session，记录时间戳供 reaper 查看豁免
     // 判定（u2 消费，30 分钟窗口内不回收）。挂点在处理器入口（getSummary 之前）：switch
@@ -499,7 +499,7 @@ export class SessionMessageHandler {
           throw new Error(`Session ${switchId} restored but summary unavailable`)
         }
         // 自动 restore 分支同投递（AP-4：switch 成功含其自动 restore 路径——冷启动/崩溃恢复
-        // 后的补拉由 didActivate 承接，场景 9「重启后仍正确」）。
+        // 后的补充拉取由 didActivate 承接，场景 9「重启后仍正确」）。
         this.notifySessionActivatedSafe(restored)
         this.ctx.reply(ws, msg.id, 'session.switched', { sessionId: switchId, session: restored })
       } catch (e) {
@@ -525,14 +525,14 @@ export class SessionMessageHandler {
     try {
       this.ctx.sessionService.notifySessionActivated?.(summary)
     } catch (e) {
-      // 降级策略（best-effort）：激活投递只损失一次补拉信号（插件下次失效订阅/激活重试可收敛），
+      // 降级策略（best-effort）：激活投递只损失一次补充拉取信号（插件下次失效订阅/激活重试可收敛），
       // switch 主流程照常（reply 语义不变）；warn 落日志留排查线索（非静默吞，无需豁免）。
       console.warn('[runtime] session.switch notifySessionActivated failed:', toErrorMessage(e))
     }
   }
 
   private async handleSessionGetGenStats(msg: Extract<ClientMessage, { type: 'session.getGenStats' }>, ws: WsType): Promise<void> {
-    // composer-gen-stats（D4）：生成指标恢复腿。reply = session.stats_update payload 同形
+    // composer-gen-stats（D4）：生成指标恢复路径。reply = session.stats_update payload 同形
     // （GenStatsFrame）；modelId 解析降级链（get_state → 内存映射 → replicated states →
     // 全 null）+ 写 3 回填全部在 service.getSnapshotForSession 内部完成，handler 只透传。
     const genStats = this.ctx.genStatsService
@@ -549,7 +549,7 @@ export class SessionMessageHandler {
   private async handleBackgroundTaskList(msg: Extract<ClientMessage, { type: 'backgroundTask.list' }>, ws: WsType): Promise<void> {
     // renderer 切 session / 打开「后台命令」tab 主动拉取（C6 时序竞争：广播只做增量，
     // 拉取是唯一真相）。副作用 = 把 session 加入 watched 集合（D8③，订阅语义由 list
-    // 隐含，D3 被否 subscribe/unsubscribe 专设消息）。顺序：先读后 mark——markWatched
+    // 隐含，D3 不采用 subscribe/unsubscribe 专设消息）。顺序：先读后 mark——markWatched
     // 以当前 mtime 为基线（「调用方刚拉取过全量」语义），之后的变更才触发广播，不重播。
     const listSid = msg.payload.sessionId
     const port = this.requireBackgroundTasks(ws, msg, listSid)
@@ -569,7 +569,7 @@ export class SessionMessageHandler {
     const port = this.requireBackgroundTasks(ws, msg, outSid)
     if (!port) return
     // wire 预检（对齐 delivery 域 invalid_payload 范式）：maxBytes 类型标注 number，但 JSON
-    // 层可写任意形态（同 import dbPath 的 typeof 守卫先例）；负数/NaN 穿透 clamp 会在下游
+    // 层可写任意形态（同 import dbPath 的 typeof 检查先例）；负数/NaN 穿透 clamp 会在下游
     // output-tail 的 Buffer.alloc 抛 Node 内部 RangeError（handler_error 泛化、不可操作）。
     if (maxBytes !== undefined && (typeof maxBytes !== 'number' || !(maxBytes >= 0))) {
       return this.ctx.sendError(ws, 'invalid_payload', 'backgroundTask.output requires "maxBytes" to be a non-negative number', msg.id, { sessionId: outSid })
@@ -606,7 +606,7 @@ export class SessionMessageHandler {
     // [u6] 游标翻页（D4 中期）：payload { cursor?, limitTurns?, maxBytes? } 透传 service——
     // cursor=turn 边界锚点 entryId 时返回锚点之前的最近窗口（活跃/离线共用语义）；
     // cursor 未命中 → 空页 + truncated=false（翻页到头，不报错）。
-    // [u6] legacy historyTruncated 字段退役（偏差表 D7 清账：与 truncated 同值并存的双轨收口）。
+    // [u6] legacy historyTruncated 字段退役（偏差表 D7 关闭：与 truncated 同值并存的双轨收敛）。
     const { sessionId, cursor, limitTurns, maxBytes } = msg.payload
     const { messages, truncated, loadedTurns, totalTurnsEstimate } = await this.ctx.sessionService.getHistory(sessionId, { cursor, limitTurns, maxBytes })
     return this.ctx.reply(ws, msg.id, 'session.history', {
@@ -635,7 +635,7 @@ export class SessionMessageHandler {
 
   private async handleSessionGetSubagentStreamState(msg: Extract<ClientMessage, { type: 'session.getSubagentStreamState' }>, ws: WsType): Promise<void> {
     // B2 subagent-stream-chunk §4.1：运行中 subagent 流状态拉取（renderer 失步/接入恢复
-    // 数据源）。同步内存读（RelayTee 三元组单次读出，构造性一致无锁）；无进行中流 =
+    // 数据源）。同步内存读（SubagentTee 三元组单次读出，构造性一致无锁）；无进行中流 =
     // found:false 合法回执（协议无独立错误码词表），透传不加工。
     const { sessionId, recordId } = msg.payload
     return this.ctx.reply(ws, msg.id, 'session.getSubagentStreamState', this.ctx.sessionService.getSubagentStreamState(sessionId, recordId))
@@ -722,12 +722,12 @@ export class SessionMessageHandler {
     return this.ctx.reply(ws, msg.id, 'session.workflowActionDone', { sessionId: msg.payload.sessionId, action: msg.payload.action, runId: msg.payload.runId })
   }
 
-  // ── plan 模式重设计（D1⑥ 冷启动首拉 + D5/E9 PlanModeBar 退出命令）──
+  // ── plan 模式重设计（D1⑥ 冷启动首次拉取 + D5/E9 PlanModeBar 退出命令）──
 
   private async handleSessionGetPlanState(msg: Extract<ClientMessage, { type: 'session.getPlanState' }>, ws: WsType): Promise<void> {
-    // D1⑥：冷启动/切换首拉（stateSnapshot 是 bus 内存态、pi exit 即清空——冷送达靠本 RPC，
-    // 与 getSubagents 首拉同构）。冷路径 = SessionRecords.getPlanState（session-records.ts:510，
-    // 磁盘 JSONL → scanPlanStateEntries 派生，与 live 投影同一份派生代码），照 getSubagents
+    // D1⑥：冷启动/切换首次拉取（stateSnapshot 是 bus 内存态、pi exit 即清空——冷送达靠本 RPC，
+    // 与 getSubagents 首次拉取同构）。冷路径 = SessionRecords.getPlanState（session-records.ts:510，
+    // 磁盘 JSONL → scanPlanStateEntries 派生，与 live 派生视图同一份派生代码），照 getSubagents
     // handler 消费形态透传；reply 复用 session.planState 广播 payload（shared 协议同
     // getSubagents → session.subagents 复用形态）。
     const { sessionId } = msg.payload
@@ -746,7 +746,7 @@ export class SessionMessageHandler {
     // prompt('/plan abort') + 失效链回调上抛）在 service 层（session-service.ts abortPlan，
     // MF-1-7 下沉，形态对齐 subagentAction「handler 只透传 payload 字段」）；失效链消费
     // 单一出口在 server.ts（setOnPlanAborted → invalidatePendingUiRequests）。退出结果经
-    // 投影链 session.planState 广播推回，此处只回 message.status ack（renderer
+    // 派生视图链 session.planState 广播推回，此处只回 message.status ack（renderer
     // register<void> 不读 status 值，CL10 宽 string 形态）。
     const { sessionId } = msg.payload
     try {
@@ -815,7 +815,7 @@ export class SessionMessageHandler {
     // `fromSeq < snapshot[0].seq（ring 最旧 seq）`。D5 topic 分类后 ring 只存 stream 类
     // （state 类分配 seq 但不入 ring、由 stateSnapshot 覆盖重连；transient 类不分配 seq），
     // 该判定语义自洽：state 消息不入 ring 不产生「假最旧 seq」，混合 session 正常重连
-    // （fromSeq ≥ ring 最旧）不误报 gap；只有 ring 真实溢出（长断线）才 gap=true 全量重拉。
+    // （fromSeq ≥ ring 最旧）不误报 gap；只有 ring 真实溢出（长断线）才 gap=true 全量重新拉取。
     const { sessionId, fromSeq } = msg.payload
     const bus = this.ctx.messageBus
     if (!bus) {
@@ -824,9 +824,9 @@ export class SessionMessageHandler {
     }
     // delivery 域装配（D5/D7；msg-pipeline-debloat D4-4 后唯一装配入口）：subscribe
     // **之前**发一帧 session.delivery 全量快照——本次 subscribe 的 stateSnapshot 即含该帧，
-    // renderer 队列区在切 session/重连后零竞态恢复（G2/V5「断连重连队列区自动恢复」的装配面，
+    // renderer 队列区在切 session/重连后零竞态恢复（G2/V5「断连重连队列区自动恢复」的装配侧，
     // [HISTORICAL] 约束 7 的主动拉取机制，非冗余）。零抛错（sync 内部 warn 降级）：
-    // 帧装配失败不得拖垮订阅主链。已有内核运行时才发帧（无运行时 = 无队列事实可投影）。
+    // 帧装配失败不得拖垮订阅主链。已有内核运行时才发帧（无运行时 = 无队列事实可派生视图）。
     this.deliveryTopic.sync(sessionId)
     const result = bus.subscribe(sessionId, ws as unknown as BusClient)
     let gap = false
@@ -984,7 +984,7 @@ export class SessionMessageHandler {
       return this.ctx.reply(ws, msg.id, 'session.importCandidates', result)
     } catch (e) {
       // ImportServiceError.code 透传（错误规格表权威清单）；非预期错误归 import_failed
-      //（对齐 worktree handler 的「无 code 兜底」模式）。errorCodeOf 守卫式读取：非 string
+      //（对齐 worktree handler 的「无 code 兜底」模式）。errorCodeOf 检查式读取：非 string
       // code 一律 undefined 走兜底。日志嵌 resolved code（reportFailure 形状之外，保留内联）。
       const code = errorCodeOf(e)
       const errMsg = toErrorMessage(e)
@@ -1007,12 +1007,12 @@ export class SessionMessageHandler {
     }
     // wire 帧 dbPath 白名单（MF-3-1 加固）：dbPath 在 wire 上是任意 WS 客户端可写字段，
     // 仅放行 zcodeImportDbAllowlist(dataDir) 封闭集合（隔离库/宿主库）；缺省 undefined =
-    // source 侧动态推导，放行。校验在 transport 边界执行（不可信面收口），与源无关——
+    // source 侧动态推导，放行。校验在 transport 边界执行（不可信数据侧收尾），与源无关——
     // pi 源不消费 dbPath，带值即异常请求同拦。测试 fixture 库注入走 source deps 进程内
     // 通道（构造注入 getHostDbPath），不经 wire，不受本校验影响。
     const wireDbPath = msg.payload.dbPath
     if (wireDbPath !== undefined) {
-      // typeof 守卫先于集合成员判定：wire 帧类型标注 string，但 JSON 层可写任意形态
+      // typeof 检查先于集合成员判定：wire 帧类型标注 string，但 JSON 层可写任意形态
       if (typeof wireDbPath !== 'string' || !zcodeImportDbAllowlist(getDataDir()).includes(wireDbPath)) {
         return this.ctx.sendError(
           ws,
@@ -1031,7 +1031,7 @@ export class SessionMessageHandler {
       //（对齐 session.create / session.setProject 惯例）。
       this.ctx.broadcastSessionList()
     } catch (e) {
-      // errorCodeOf 守卫式读取（同 importCandidates 分支）：非 string code 一律 undefined 走兜底
+      // errorCodeOf 检查式读取（同 importCandidates 分支）：非 string code 一律 undefined 走兜底
       const code = errorCodeOf(e)
       const errMsg = toErrorMessage(e)
       console.error(`[runtime] session.import failed (code=${code ?? 'unknown'}):`, errMsg)
@@ -1069,15 +1069,15 @@ export class SessionMessageHandler {
     // 响应永不可达——摘除 runtime pending 缓存 + 广播失效帧，renderer 移除本屏请求
     //（「忽略」按钮的审批条消失即由本链驱动）。
     // D6（plan-mode-state-machine F4①）失效帧前置 + try/finally 补摘：
-    // ① 前置腿 = 「失效帧必达」的唯一保障——invalidate 是纯本地缓存操作 + 广播（空清单
+    // ① 前置路径 = 「失效帧必达」的唯一保障——invalidate 是纯本地缓存操作 + 广播（空清单
     //    不发布、重复摘除天然幂等，不产生第二帧），无依赖 abort 结果；同步执行先于下方
     //    await abort，故 abort 抛错（getClientOrThrow 不在 dispatcher try 内 / RPC 阶梯）
     //    时失效帧已发布，renderer 不留僵尸 ready。先行执行同时使 abort RPC 60s 超时阶梯
-    //    期间失效帧不迟到（被否形态：只补 try/finally 不调序——分钟级阶梯期间失效帧仍
+    //    期间失效帧不迟到（不采用形态：只补 try/finally 不调序——分钟级阶梯期间失效帧仍
     //    迟到，renderer 65s backstop 先报错）。
-    // ② finally 腿不承担必达（abort 抛错时它对帧无增量、空转）；它覆盖前置腿管不到的两类
+    // ② finally 路径不承担必达（abort 抛错时它对帧无增量、空转）；它覆盖前置路径管不到的两类
     //    形态：前置 invalidate 自身抛错时的重试、abort 在途窗口内新到挂起的追加摘除
-    //    （窗口内新挂起不会被前置腿摘除，只能在 abort 后补摘；server 侧空清单不发布，
+    //    （窗口内新挂起不会被前置路径摘除，只能在 abort 后补摘；server 侧空清单不发布，
     //    补摘无挂起时零成本）。abort 极端失败的其余行为（异常传播、不 reply ack）保持
     //    不变（D6「行为不变、概率不增」）。判别断言见 session-message-handler-plan.test.ts。
     try {
@@ -1096,7 +1096,7 @@ export class SessionMessageHandler {
     // （帧丢失不再致「未执行」误判 → 草稿恢复 → 命令双执行）。
     // 失败不再走 error envelope（error envelope 会让 pending.reject，消费方拿不到执行状态）：
     // 失败原因随回执 error 携带；对话流呈现继续由 message.bashStart/bashResult/message.error
-    // 广播（dispatcher 各收口点）承担。实际 bash 输出经广播通道推回（fire-and-forget）。
+    // 广播（dispatcher 各收尾点）承担。实际 bash 输出经广播通道推回（fire-and-forget）。
     const { sessionId, command, excludeFromContext } = msg.payload
     const result = await this.ctx.sessionService.sendBash(sessionId, command, excludeFromContext)
     return this.ctx.reply(ws, msg.id, 'message.status', {
@@ -1109,7 +1109,7 @@ export class SessionMessageHandler {
   private async handleMessageAbortBash(msg: Extract<ClientMessage, { type: 'message.abortBash' }>, ws: WsType): Promise<void> {
     // 与 message.abort 对称：调 dispatcher.abortBash → 按 abort_bash 实际发送结果回执
     // （P6 断言④回执真实化）。sent=true（abort_bash 已发出且 pi 确认取消）→ reply
-    // message.status{aborted}；sent=false（守卫短路：无 bash 在跑且无孤儿标记，或
+    // message.status{aborted}；sent=false（检查短路：无 bash 在跑且无孤儿标记，或
     // abort_bash 发送失败）→ 不得谎报 aborted，走 error envelope（renderer useChat.abortBash
     // catch → stopFailed toast 兜底）。兜底终态经独立帧 message.bashAborted 广播推回
     // （msg-pipeline-debloat D4-3 帧类型化，dispatcher.abortBash 兜底广播），不依赖 reply。
@@ -1123,7 +1123,7 @@ export class SessionMessageHandler {
 
   // ── delivery 域（投递所有权内核 D5，u3a）────────────────────────────────
   //
-  // 四 RPC = 内核适配器（u2 registry）的协议面：handler 只做「payload 校验 → 委托 →
+  // 四 RPC = 内核适配器（u2 registry）的协议范围：handler 只做「payload 校验 → 委托 →
   // reply」，lane 判定 / 队列收回 / 判重全在 registry（D1 单一判定源）。
   // 帧单发（msg-pipeline-debloat D4-4）：RPC 入口不再 sync()——内核每次真实变更经
   // onChange 内联同步发一帧（先于 reply 到达 renderer，reply 语义落地时 UI 状态已在位），
@@ -1135,7 +1135,7 @@ export class SessionMessageHandler {
     const { sessionId, content, images, clientUuid, segments } = msg.payload
     const registry = this.requireDeliveryRegistry(ws, msg, sessionId)
     if (!registry) return
-    // 字段校验（协议面防御：clientUuid 是内核判重锚 D5② 与出站标记身份源 D2，缺失即无判重语义）
+    // 字段校验（协议范围防御：clientUuid 是内核判重锚 D5② 与出站标记身份源 D2，缺失即无判重语义）
     if (typeof sessionId !== 'string' || sessionId === '' || typeof content !== 'string' || typeof clientUuid !== 'string' || clientUuid === '') {
       return this.ctx.sendError(ws, 'invalid_payload', 'delivery.submit requires non-empty sessionId, content and clientUuid', msg.id, { sessionId })
     }
@@ -1156,7 +1156,7 @@ export class SessionMessageHandler {
     // segments 快照登记（MF-1-2 / ADR-0043）：受理回执后按 clientUuid 交注册表持有，
     // cancel/drain 回草稿时随全文返回。快照属提交载荷的旁路登记（不经 sendMessage 链——
     // hook 只 transform 文本，不感知 segments），仅接受数组形态（JSON 层可写任意形态，同
-    // maxBytes 守卫先例）；条目已终态时注册表侧丢弃（防泄漏）。
+    // maxBytes 检查先例）；条目已终态时注册表侧丢弃（防泄漏）。
     if (Array.isArray(segments) && segments.length > 0) {
       registry.attachSegments(sessionId, result.clientUuid, segments)
     }
@@ -1168,7 +1168,7 @@ export class SessionMessageHandler {
     // session.deliveryHandled 终局通知或错误回执。
     return this.ctx.reply(ws, msg.id, 'delivery.submit', {
       clientUuid: result.clientUuid,
-      // 条目态映射（D5③：cancelled 不投影）。submit 返回时刻 cancelled 结构上不可达
+      // 条目态映射（D5③：cancelled 不映射）。submit 返回时刻 cancelled 结构上不可达
       // （同 tick 无用户撤销动作），映射缺席走 queued 兜底而非谎报终态。
       state: frameStateOf(result.state) ?? 'queued',
       lane: frameLaneOf(result.lane),
@@ -1186,10 +1186,10 @@ export class SessionMessageHandler {
     // queued/failed 本地移除；in-flight 走 clear_queue 收回-重投（D3 复用对账路径）。
     // 不可撤（已 delivered / 收回失败）→ cancelled:false + reason（§3.4），条目由对账器兜底。
     const outcome = await registry.cancel(sessionId, clientUuid)
-    // content 剥除出站裸标记（草稿恢复是用户面文本，投递元数据不进输入框；u3c restoreDraft 直取）
+    // content 剥除出站裸标记（草稿恢复是用户侧文本，投递元数据不进输入框；u3c restoreDraft 直取）
     const content = outcome.cancelled && outcome.content !== undefined ? stripDeliveryMarkers(outcome.content) : undefined
     // segments 快照（MF-1-2）：提交时经 attachSegments 持有的原始 segments，撤销成功才返回
-    // （渲染面按 ADR-0043 Segment[] 整段恢复 chips；无快照的条目不带键 → 纯文本恢复链）
+    // （渲染侧按 ADR-0043 Segment[] 整段恢复 chips；无快照的条目不带键 → 纯文本恢复链）
     return this.ctx.reply(ws, msg.id, 'delivery.cancel', {
       clientUuid,
       cancelled: outcome.cancelled,
@@ -1240,7 +1240,7 @@ export class SessionMessageHandler {
     // handler 只透传 payload 字段（七步编排全在 RevokeOrchestrator）；reply 直接透传
     // SessionRevokeMessageReply（revoked:true + content / revoked:false + error 六码）。
     // 领域回执不走 error envelope——错误码驱动 renderer 置灰 / toast / 刷新建议（D8
-    // 呈现列）；此处 catch 只收口编排 throw（组合根装配缺失类运行时异常）。
+    // 呈现列）；此处 catch 只收尾编排 throw（组合根装配缺失类运行时异常）。
     const { sessionId, targetId } = msg.payload
     if (typeof sessionId !== 'string' || sessionId === '' || typeof targetId !== 'string' || targetId === '') {
       return this.ctx.sendError(ws, 'invalid_payload', 'session.revokeMessage requires non-empty sessionId and targetId', msg.id, { sessionId })
@@ -1276,7 +1276,7 @@ export class SessionMessageHandler {
       // compact 失败：dispatcher.compact 已广播 session.compacted(error)（流式通知），此处补请求级 error envelope。
       // 分类码（msg-pipeline-debloat D4-2）：busy 预检拒绝的错误携带 code='compact_busy'
       //（dispatcher 抛出，对话流内联呈现已由 stream_warn 编排）；其余（pi 层失败——interpreter
-      // 对话流呈现 / ensureActive 恢复失败——session 状态面呈现）归 'compact_failed'。
+      // 对话流呈现 / ensureActive 恢复失败——session 状态侧呈现）归 'compact_failed'。
       // renderer 据分类码路由 toast 抑制（CompactErrorCode SSOT，未知码保守回退 toast）。
       const code = (e as { code?: string }).code === 'compact_busy' ? 'compact_busy' : 'compact_failed'
       return this.ctx.sendError(ws, code, toErrorMessage(e), msg.id, { sessionId: compactId })

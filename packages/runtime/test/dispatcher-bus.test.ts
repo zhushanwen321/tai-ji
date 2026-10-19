@@ -66,7 +66,7 @@ function makeMocks(opts: {
   const isGenerating = opts.isGenerating ?? false
   const isCompacting = opts.isCompacting ?? false
   const isBashRunning = opts.isBashRunning ?? false
-  // [u3b 预检改读 occupancy] sendPrompt 预检输入源改为 occupancy 投影。fixture 镜像真实
+  // [u3b 预检改读 occupancy] sendPrompt 预检输入源改为 occupancy 派生视图。fixture 镜像真实
   // 链路的原子同步（原语「合并 + 派生」双写合一）。
   const session = opts.session ?? makeMockSession({
     isGenerating,
@@ -96,7 +96,7 @@ function makeMocks(opts: {
     touchActivity: vi.fn(),
   } as unknown as IPiEngine
 
-  // S2 ISP 化：结构性满足 dispatcher 窄接口（6 方法 = 实际消费面），无强转；
+  // S2 ISP 化：结构性满足 dispatcher 窄接口（6 方法 = 消费方实际用到的全部），无强转；
   // applyContextUpdate 不在窄接口（event-interpreter 组合根回调消费），随迁移移除
   const svc: IDispatcherSessionOps = {
     ensureActive: vi.fn(async () => client),
@@ -125,7 +125,7 @@ function makeMocks(opts: {
     getMessageBus: () => messageBus as unknown as IMessageBus,
   })
 
-  // wave:perf-w09（D1-2）：broker 双写腿已删，dispatcher 只依赖 publish 抽象（4 参构造）；
+  // wave:perf-w09（D1-2）：broker 双写路径已删，dispatcher 只依赖 publish 抽象（4 参构造）；
   // [MF-1-7] 注册表经 setDeliveryRegistry 后置注入（审计候选 12：构造期注入参已删）
   const dispatcher = new MessageDispatcher(svc, pm, workspace, messageBus as unknown as IMessageBus)
   dispatcher.setDeliveryRegistry(registry)
@@ -154,7 +154,7 @@ describe('message-dispatcher bus integration', () => {
     const { dispatcher, messageBus } = makeMocks({ isGenerating: true })
     await dispatcher.sendMessage('s1', 'hello')
     await flushDelivery(30)
-    // 退役面显式断言（原 send.rejected 广播）：bus 上不再出现拒绝帧
+    // 退役路径显式断言（原 send.rejected 广播）：bus 上不再出现拒绝帧
     const types = messageBus.publish.mock.calls.map((c: unknown[]) => (c[1] as ServerMessage).type)
     expect(types).not.toContain('send.rejected')
   })
@@ -204,7 +204,7 @@ describe('message-dispatcher bus integration', () => {
 
   it('abort 压缩期（isCompacting ∧ ¬isGenerating）→ 压缩取消语义：零 stopped 终态 + 零 message.complete', async () => {
     // 用户中止的是压缩流程而非回合：会话仍存活且空闲，写 stopped 会在重启/重扫后误标 +
-    // 骗出 restore 入口；无流式实体可收口，message.complete{aborted} 帧语义谎报。
+    // 骗出 restore 入口；无流式实体可收尾，message.complete{aborted} 帧语义谎报。
     const { dispatcher, svc, messageBus, abortFn } = makeMocks({ isCompacting: true })
     await dispatcher.abort('s1')
     expect(abortFn).toHaveBeenCalled() // pi 侧 abortCompaction 仍经 session.abort 执行
@@ -216,7 +216,7 @@ describe('message-dispatcher bus integration', () => {
 
   it('abort generating∧compacting（turn 在跑）→ 保持既有 turn abort 语义（stopped + message.complete）', async () => {
     // 阈值自动压缩与 turn 并存时点击停止 = 中止回合（pi compact 自身已 abort 过回合），
-    // 终态与收口帧必须照旧——压缩取消语义只覆盖「无 turn 在跑」形态。
+    // 终态与收尾帧必须照旧——压缩取消语义只覆盖「无 turn 在跑」形态。
     const { dispatcher, svc, messageBus } = makeMocks({ isGenerating: true, isCompacting: true })
     await dispatcher.abort('s1')
     expect(svc.persistSessionOutcome).toHaveBeenCalledWith('s1', 'stopped', 'User aborted')
@@ -281,7 +281,7 @@ describe('message-dispatcher bus integration', () => {
     const { dispatcher, messageBus, bashFn } = makeMocks()
     bashFn.mockRejectedValue(new Error('bash failed'))
     const result = await dispatcher.sendBash('s1', 'bad-cmd')
-    expect(result.status).toBe('settled') // 已执行并收口（失败终态已广播）
+    expect(result.status).toBe('settled') // 已执行并收尾（失败终态已广播）
     expect(result.error).toContain('bash failed')
     // Should have both bashResult and message.error
     const types = messageBus.publish.mock.calls.map((c: any[]) => c[1].type)
@@ -407,7 +407,7 @@ describe('message-dispatcher bus integration', () => {
       removeSessionEntry: vi.fn(),
       detachSession: vi.fn(),
     }
-    // getClient → undefined：无附着 client 形态（sendPrompt 入口 touch 的空守卫分支）
+    // getClient → undefined：无附着 client 形态（sendPrompt 入口 touch 的空检查分支）
     const pm = { getClient: vi.fn(() => undefined) } as unknown as IProcessManager
     const workspace = { record: vi.fn() } as unknown as WorkspaceService
     const dispatcher = new MessageDispatcher(svc, pm, workspace)
@@ -431,7 +431,7 @@ describe('message-dispatcher bus integration', () => {
     const workspace = { record: vi.fn() } as unknown as WorkspaceService
     const dispatcher = new MessageDispatcher(svc, pm, workspace)
     await dispatcher.abort('s1')
-    // wave:perf-w09：messageBus 未注入时 abort 的 complete 终态静默丢失（旧 broadcast 腿已删），
+    // wave:perf-w09：messageBus 未注入时 abort 的 complete 终态静默丢失（旧 broadcast 路径已删），
     // 但不得 throw——组合根恒注入 bus，此处只锁 null-safety
   })
 

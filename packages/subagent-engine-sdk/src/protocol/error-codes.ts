@@ -1,7 +1,7 @@
 // src/protocol/error-codes.ts
 //
 // 协议错误码表（impl-plan §2.1「错误码表」逐项）+ 结构化错误载体 + kill-chain 消费的
-// 具名错误文案构造器（自 core execution/engine/common/errors.ts 迁入 SDK 的引擎面
+// 具名错误文案构造器（自 core execution/engine/common/errors.ts 迁入 SDK 的引擎侧
 // 子集；core 侧错误 SSOT 留守，双侧错误码词表由测试互证）。
 //
 // 错误码语义与 core 侧处置（设计 §3.3 错误码表）：
@@ -16,7 +16,7 @@
 //   engine_handshake_timeout    initialize 超时（HANDSHAKE_TIMEOUT_MS=10s）→ 引擎不可用
 //   engine_crashed              进程意外退出 → 在途 run 失败（附 stderr 尾
 //                               STDERR_TAIL_CHARS=400 字符）；重建最多 3 次退避 1s/2s/4s
-//   engine_probe_failed         probe 失败 → 既有 fallback 三守卫不变
+//   engine_probe_failed         probe 失败 → 既有 fallback 三项检查不变
 //   engine_model_not_in_snapshot  setModel 目标模型不在子进程快照 → 宿主写覆盖意图
 //                               （模型本身有效，下一轮 spawn 现取目录）
 //   engine_credential_missing   setModel 子进程凭据校验失败（checkAuth 权威兜底）→
@@ -30,15 +30,111 @@
 //                               成员态——非失败分型，不进 SET_MODEL_ERROR_CODES）
 //   其余 engine_*               引擎在 error 帧原样给出 → core 透传，文案契约不变
 //
-// [登记非实装·透传面新码] engine_method_unsupported——未知成员宽容语义②（条文权威
+// [登记非实装·透传类新码] engine_method_unsupported——未知成员宽容语义②（条文权威
 // = ADR-0071）：新宿主派本引擎未知的正向 method → 引擎回 error 帧，旧宿主经
 // isEngineErrorPassthroughCode 原样透传不崩。实装码现状：两引擎 server（pi/zcode
 // dispatch 表落空分支）对未知 method 回的是 engine_protocol_unknown_method（同为
-// engine_ 前缀透传面，非本码）；本码刻意不进下方 ENGINE_PROTOCOL_ERROR_CODES
+// engine_ 前缀透传逻辑，非本码）；本码刻意不进下方 ENGINE_PROTOCOL_ERROR_CODES
 // 消费词表（该集是 core 消费集；C 型「无消费方不进协议」纪律——当前全仓零消费方，
 // 故只登记不实装）；引擎应答义务成文 =
-// docs/extensions/subagents/engine-development-guide.md（未知 method 必回透传面
+// docs/extensions/subagents/engine-development-guide.md（未知 method 必回透传侧
 // 错误码 + conformance 用例）。
+
+// ============================================================
+// relay-spawn-transport M1/M2/M3 错误码（设计 §3.3 D10：engine 侧 3 + runtime 侧 5）。
+// 家族纪律：本组 8 码**刻意不进** ENGINE_PROTOCOL_ERROR_CODES——主词表是「引擎 error
+// 帧 + core 同步拦截」的核心集（协议面词表），本组是引擎进程 spawn/送达窗口与 runtime
+// control 通道的宿主侧生命周期错误，不出现在引擎 error 帧里；两族分离由测试锁定
+// （transport-error-codes.test.ts 断言交集 = ∅）。recovery 文案同文件登记（设计 D10
+// 「全部登记到 error-codes.ts，带 recovery 文案」），消费方经 EngineSdkError(code,
+// detail, RECOVERY[code]) 构造——u-m2-engine-ack（3 码）与 u-m3-local/u-m3-rt-transport
+// （5 码，connectOnce preserve 白名单 = ENGINE_TRANSPORT_ERROR_CODES）。
+// ============================================================
+
+/**
+ * 引擎进程侧 spawn/送达窗口错误码（M1/M2 送达回执，设计 D10「engine 侧」）。
+ * 消费方 = pi-subagent-cli（u-m2-engine-ack 接线）：
+ * - prompt_not_delivered：prompt 写入后零 stdout（零输出判定）/ stdin 不可用 / EPIPE——
+ *   任务从未被真实 pi 受理，静默丢失的显式失败形态；
+ * - prompt_rejected：pi 对 prompt 命令回 success:false（已送达但被拒绝）——带 pi 的
+ *   error 文本，与 not_delivered 分型防误诊（D3 不采用合并条目）；
+ * - spawn_handshake_timeout：引擎 spawn 握手窗口超时——runtime/引擎停在
+ *   spawn/handshake 的显式失败（control 侧同类失败码 = engine_open_timeout）。
+ */
+export const ENGINE_SPAWN_DELIVERY_ERROR_CODES = [
+  "engine_prompt_not_delivered",
+  "engine_prompt_rejected",
+  "engine_spawn_handshake_timeout",
+] as const;
+
+export type EngineSpawnDeliveryErrorCode =
+  (typeof ENGINE_SPAWN_DELIVERY_ERROR_CODES)[number];
+
+/**
+ * runtime 控制面传输错误码（M3 control 通道，设计 D8/D10「runtime 侧」）。
+ * 消费方 = EngineClient.connectOnce preserve 白名单（u-m3-local：来自
+ * RuntimeEngineTransport 的 EngineSdkError 原样保留 code 与 recovery，不再包装成
+ * engine_crashed——UC-20 的显式失败不被吞掉）。语义（设计 D5/D8）：
+ * - transport_unavailable：control socket connect / hello 失败——托管态 runtime 故障
+ *   显式可见，不静默回退 local spawn；
+ * - transport_lost：control 连接中途丢失（与 engine 自身 crash 区分）——标记不可用、
+ *   fan-out 该连接全部 in-flight，不在同一连接重试；
+ * - open_timeout：engine_open 超时（runtime spawn/归属卡住）；
+ * - frame_too_large：单帧（含 partial-line 缓冲）超 32MB 上限——不截断、按 channel
+ *   归因关闭；
+ * - backpressure_overflow：channel（32MB/4096 帧）或连接聚合（256MB）待写队列溢出——
+ *   不丢帧、不静默，溢出面（channel/connection）标注在 detail。
+ */
+export const ENGINE_TRANSPORT_ERROR_CODES = [
+  "engine_transport_unavailable",
+  "engine_transport_lost",
+  "engine_open_timeout",
+  "engine_frame_too_large",
+  "engine_backpressure_overflow",
+] as const;
+
+export type EngineTransportErrorCode = (typeof ENGINE_TRANSPORT_ERROR_CODES)[number];
+
+/**
+ * 引擎侧 spawn/送达错误码的 recovery 文案（键完整性由类型 Record + 测试锁定）。
+ * detail 由消费方拼装（诊断五元组 / pi error 文本），文案只给恢复动作。
+ */
+export const ENGINE_SPAWN_DELIVERY_ERROR_RECOVERY: Record<
+  EngineSpawnDeliveryErrorCode,
+  string
+> = {
+  engine_prompt_not_delivered:
+    "The task never reached the child pi (zero stdout after the prompt write, or the engine stdin was unavailable). " +
+    "Re-run the task; if it recurs, inspect the engine/pi logs (the failure carries the delivery diagnostics) and the runtime log.",
+  engine_prompt_rejected:
+    "The child pi explicitly rejected the prompt command (success:false). Check the pi-side reason carried in the error detail " +
+    "(busy/queue/extension takeover states are reported by pi itself), then re-run.",
+  engine_spawn_handshake_timeout:
+    "The engine spawn handshake did not complete in time. Check the runtime log for a spawn/handshake stall, " +
+    "then restart taiji and re-run the task.",
+};
+
+/** runtime 控制面传输错误码的 recovery 文案（键完整性由类型 Record + 测试锁定）。 */
+export const ENGINE_TRANSPORT_ERROR_RECOVERY: Record<
+  EngineTransportErrorCode,
+  string
+> = {
+  engine_transport_unavailable:
+    "The runtime control socket is unreachable (connect or hello failed). The runtime side is failing explicitly instead of " +
+    "silently falling back to local spawn — restart taiji and re-run the task.",
+  engine_transport_lost:
+    "The control connection to the runtime was lost mid-flight (runtime restart or crash). In-flight requests were rejected; " +
+    "restart taiji (or wait for the runtime to come back) and re-run the task — the connection is not retried in place.",
+  engine_open_timeout:
+    "The runtime did not finish opening the engine channel in time (spawn/attribution stalled). Check the runtime log " +
+    "(engine opened / kill decision lines), then re-run the task.",
+  engine_frame_too_large:
+    "A single frame exceeded the control-plane size limit and the channel was closed without truncation. " +
+    "Shrink the task/result payload (e.g. point the agent at files instead of inlining them) and re-run.",
+  engine_backpressure_overflow:
+    "The control-plane write queue overflowed (engine consumed frames too slowly) and the overflowed scope was torn down " +
+    "without dropping frames silently. Re-run the task; if it recurs, reduce concurrent subagent fan-out.",
+};
 
 // ============================================================
 // setModel 方法错误码子词表（设计 subagent-model-switch §7.3/§7.5；
@@ -77,7 +173,7 @@ export type SetModelErrorCode = (typeof SET_MODEL_ERROR_CODES)[number];
  * 四个竞态窗口内发现子进程已退出——**同一处置**按无活进程形态应答，引擎回本码
  * error 帧）。进主词表的依据与 SET_MODEL_ERROR_CODES 三型相同：宿主消费分型
  * （chat 域转已记账型应答 / run 级聚合落 not-active 成员态，§7.2 处置表），不是
- * 「core 不解释文案」的纯透传面。刻意**不进** SET_MODEL_ERROR_CODES：聚合失败
+ * 「core 不解释文案」的纯透传逻辑。刻意**不进** SET_MODEL_ERROR_CODES：聚合失败
  * 名单的分型值域只收「转发失败」三型，无活进程是成员三态之一（not-active），
  * 不是失败——两值域语义正交。
  */
@@ -108,7 +204,7 @@ export function isEngineProtocolErrorCode(value: unknown): value is EngineProtoc
   );
 }
 
-/** 其余引擎自报错误码的前缀契约（透传面；core 不解释文案）。 */
+/** 其余引擎自报错误码的前缀契约（透传侧；core 不解释文案）。 */
 export const ENGINE_ERROR_CODE_PREFIX = "engine_";
 
 export function isEngineErrorPassthroughCode(value: string): boolean {
@@ -143,7 +239,7 @@ export class EngineSdkError extends Error {
     this.data = data;
   }
 
-  /** 协议 error 帧载荷投影。 */
+  /** 协议 error 帧载荷派生视图。 */
   toStructured(): ProtocolError {
     return { code: this.code, message: this.message, recovery: this.recovery, data: this.data };
   }
@@ -226,7 +322,7 @@ export function engineSetModelUnsupportedError(
 }
 
 // ============================================================
-// kill-chain 消费的引擎面错误文案（自 core errors.ts 迁入，逐字等价）
+// kill-chain 消费的引擎侧错误文案（自 core errors.ts 迁入，逐字等价）
 // ============================================================
 
 /** 错误回显长度上限（截断长输出，避免错误消息爆炸）。 */

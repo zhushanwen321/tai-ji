@@ -1,7 +1,7 @@
 /**
- * 事件 2: turn_end（FR-6.7 ESC 守卫 + 递增）。
+ * 事件 2: turn_end（FR-6.7 ESC 检查 + 递增）。
  *
- * FR-6.7 ESC 守卫：ctx.signal.aborted 时跳过递增（ESC 不算 goal turn）。
+ * FR-6.7 ESC 检查：ctx.signal.aborted 时跳过递增（ESC 不算 goal turn）。
  * 正常路径：currentTurnIndex++ + updateWidget。
  *
  * 委托 service.applyEvent("turn_end") 递增 currentTurnIndex（H3：applyEvent 改 void，
@@ -23,7 +23,7 @@ export async function handleTurnEnd(
 	ctx: ExtensionContext,
 ): Promise<void> {
 	if (!session.state) return;
-	// FR-6.7 ESC 守卫
+	// FR-6.7 ESC 检查
 	if (ctx.signal?.aborted) return;
 
 	const ports = buildPorts(pi, ctx);

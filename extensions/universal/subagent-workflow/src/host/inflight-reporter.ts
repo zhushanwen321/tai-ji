@@ -41,7 +41,7 @@ import { getInFlightSnapshot } from "@zhushanwen/subagent-core";
 import { getLogger } from "@zhushanwen/pi-extension-logger";
 import { toErrorMessage } from "@zhushanwen/pi-ext-guards";
 
-/** select 通道级超时（控制面单请求，秒级校准——超时默认原则规则 19）；fire-and-forget
+/** select 通道级超时（控制通道单请求，秒级校准——超时默认原则规则 19）；fire-and-forget
  *  帧不留 pending 挂死面。失败不重试（ADR-0122），置脏等下一个事件。 */
 const SELECT_TIMEOUT_MS = 2_000;
 

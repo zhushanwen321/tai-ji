@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * check-subagent-core-closure.mjs —— subagent-core 依赖闭包守卫（D9-①）+ 检查点 5 断言。
+ * check-subagent-core-closure.mjs —— subagent-core 依赖闭包检查（D9-①）+ 检查点 5 断言。
  *
  * 背景：packages/subagent-core（@zhushanwen/subagent-core）是跨宿主共享的引擎中立
  * 执行层，设计红线 = 依赖闭包不含 pi SDK 与宿主专属依赖（否则 zcode 宿主被拖入
@@ -8,7 +8,7 @@
  * 本脚本机器化该判据（docs/architecture/subagent-core-package-extraction.md §3.3 D9-①）。
  *
  * 检查项：
- * 0. 版本双源一致性（残留风险 11 闭合）：src/index.ts 的 CORE_PACKAGE_VERSION 与
+ * 0. 版本双源一致性（残留风险 11 已完成）：src/index.ts 的 CORE_PACKAGE_VERSION 与
  *    package.json version 两处字面量必须相等——手动同步漂移在 pre-commit/CI 拦截，
  *    不等发布现场（smoke 门仅断言非空，不比对）。
  * 1. package.json：dependencies + peerDependencies + optionalDependencies 不含
@@ -17,10 +17,10 @@
  *    同判据，不扫 = 换段绕过。
  * 2. 源码 import 闭包：C/src 全量非测试源码（.ts/.mts/.cts/.js/.mjs/.cjs，
  *    .d.ts/.d.mts/.d.cts 声明文件豁免）的 import/export-from/动态 import/
- *    require 说明符不含禁用依赖。扫描面为可达闭包的超集（全量已发布源码；
+ *    require 说明符不含禁用依赖。扫描范围为可达闭包的超集（全量已发布源码；
  *    传递闭包经相对 import 的真实展开由检查项 3 的 worker 子图承载）。
  *    非测试源码中类型 import 同样违规——dist d.ts 会引用 pi 类型，npm 消费者
- *    （zsw 纯 CJS 无 TS loader）的 TS 编译面被拖入 pi SDK。
+ *    （zsw 纯 CJS 无 TS loader）的 TS 编译侧被拖入 pi SDK。
  *    __tests__/ 豁免：测试 type-only import 在编译期擦除、不进 dist、vitest 由
  *    workspace devDeps 解析，不构成发布物运行时闭包（mocks/ + vitest.config.ts
  *    alias 同理）。
@@ -41,9 +41,9 @@
  *
  * 零第三方依赖（node:fs/node:path/node:module）。退出码：0 = 通过；1 = 违规。
  *
- * 自测模式 --self-test（残留风险 10 闭合）：以子进程跑脚本本体，双探针（D9-①
+ * 自测模式 --self-test（残留风险 10 已完成）：以子进程跑脚本本体，双探针（D9-①
  * import 闭包 + 检查点 5 worker 子图）各自注入违规源码 → 断言转红（exit 1 且
- * stderr 指名违规定位）→ 移除 → 断言复绿（exit 0），把 V6-①「守卫有牙」证据
+ * stderr 指名违规定位）→ 移除 → 断言复绿（exit 0），把 V6-①「检查有牙」证据
  * 固化为可随时复现的命令。要求当前基线干净——基线本身红时复绿段诚实失败，不绕过。
  */
 import { readFileSync, readdirSync, existsSync, statSync, writeFileSync, rmSync } from 'node:fs'
@@ -125,7 +125,7 @@ if (process.argv.includes('--self-test')) {
       writeFileSync(probe, content)
       const red = runGuard()
       const redHit = red.status === 1 && redPattern.test(red.stderr ?? '')
-      console.log(`  ${redHit ? '✓' : '✗'} [${label}] 注入探针 → 转红（exit ${red.status}${redHit ? '，stderr 指名违规定位' : '，未指名——守卫可能无牙'}）`)
+      console.log(`  ${redHit ? '✓' : '✗'} [${label}] 注入探针 → 转红（exit ${red.status}${redHit ? '，stderr 指名违规定位' : '，未指名——检查可能无牙'}）`)
       if (!redHit) {
         allOk = false
         console.error((red.stderr ?? '').split('\n').filter(Boolean).slice(0, 5).join('\n'))
@@ -136,16 +136,16 @@ if (process.argv.includes('--self-test')) {
   }
   const green = runGuard()
   const greenOk = green.status === 0
-  console.log(`  ${greenOk ? '✓' : '✗'} 移除双探针 → 复绿（exit ${green.status}${greenOk ? '' : '——基线不干净或守卫误报'}）`)
+  console.log(`  ${greenOk ? '✓' : '✗'} 移除双探针 → 复绿（exit ${green.status}${greenOk ? '' : '——基线不干净或检查误报'}）`)
   if (!greenOk) {
     allOk = false
     console.error((green.stderr ?? '').split('\n').filter(Boolean).slice(0, 5).join('\n'))
   }
   if (!allOk) {
-    console.error('subagent-core 闭包守卫自测未通过（注入不转红 / 移除不复绿——扫描面或 fail 链路断裂）')
+    console.error('subagent-core 闭包检查自测未通过（注入不转红 / 移除不复绿——扫描范围或 fail 链路断裂）')
     process.exit(1)
   }
-  console.log('✓ 闭包守卫自测通过（D9-① 与检查点 5 双探针注入-转红-移除-复绿，V6-① 有牙证据固化为可复现命令）')
+  console.log('✓ 闭包检查自测通过（D9-① 与检查点 5 双探针注入-转红-移除-复绿，V6-① 有牙证据固化为可复现命令）')
   process.exit(0)
 }
 
@@ -158,11 +158,11 @@ try {
   process.exit(1)
 }
 
-// 0. 版本双源一致性（残留风险 11 闭合，见头注检查项 0）：CORE_PACKAGE_VERSION 与
+// 0. 版本双源一致性（残留风险 11 已完成，见头注检查项 0）：CORE_PACKAGE_VERSION 与
 //    package.json version 两处字面量必须相等，手动同步漂移在此拦截而非发布现场。
 const INDEX_TS = join(SRC_DIR, 'index.ts')
 if (!existsSync(INDEX_TS)) {
-  fail('找不到 src/index.ts（CORE_PACKAGE_VERSION 锚点文件被移动？请同步本守卫路径）')
+  fail('找不到 src/index.ts（CORE_PACKAGE_VERSION 锚点文件被移动？请同步本检查路径）')
 } else {
   const vMatches = [...readFileSync(INDEX_TS, 'utf-8').matchAll(/export const CORE_PACKAGE_VERSION = "([^"]+)"/g)]
   if (vMatches.length === 0) {
@@ -184,7 +184,7 @@ for (const section of ['dependencies', 'peerDependencies', 'optionalDependencies
 }
 
 // ── 2. 源码 import 闭包（非测试源码全量扫描，扩展名见头注释检查项 2） ──────────
-// 已发布源码的 TS/JS 全形态扩展名都在扫描面（.mts/.cts/.js/.mjs/.cjs 漏扫 =
+// 已发布源码的 TS/JS 全形态扩展名都在扫描范围（.mts/.cts/.js/.mjs/.cjs 漏扫 =
 // 换扩展名绕过）；声明文件（.d.ts/.d.mts/.d.cts）豁免——不承载可执行 import，
 // 且其内容随实现文件进入检查项 2 的类型违规判据（非测试 type import 同样违规）。
 const SRC_EXTENSIONS = ['.ts', '.mts', '.cts', '.js', '.mjs', '.cjs']
@@ -286,7 +286,7 @@ function scanWorkerClosure(file, rootDir, seen) {
   const normalized = text.replace(LEFTOVER_CONCAT_RE, ' ')
   const leftover = /\brequire\s*\(\s*[^"')\s]/g
   while (leftover.exec(normalized) !== null) {
-    fail(`worker 入口子图含无法静态解析的 require(...)（${rel(file)}）——闭包守卫无法证明 worker 零宿主服务，请改为字面量或 SCRIPT_DIR 拼接形态`)
+    fail(`worker 入口子图含无法静态解析的 require(...)（${rel(file)}）——闭包检查无法证明 worker 零宿主服务，请改为字面量或 SCRIPT_DIR 拼接形态`)
   }
 }
 for (const root of workerRoots) {
@@ -296,7 +296,7 @@ for (const root of workerRoots) {
 // 3b. worker-script-builder.ts：eval:true 内联模板的承载文件。
 //     模板源码在字符串字面量里，在 worker 线程执行——其 require 面只允许 node
 //     内置，且禁止任何 host-services / notify-ports / 禁用依赖引用。该文件自身
-//     的真实 import（主线程、type-only）不在 call-form 扫描面，不误报。
+//     的真实 import（主线程、type-only）不在 call-form 扫描范围，不误报。
 //     [已知局限（前瞻性登记，当前零实例）] ① FROM_HOST_RE 只拦「指向
 //     host-services/notify-ports 的 from-import」——模板内其他裸 from-import
 //     不拦，与上方 require 面的 fail-closed 口径不一致；② 本条正则作用于全文、
@@ -321,7 +321,7 @@ if (existsSync(wsbFile)) {
     fail(`检查点 5 违规: ${WSB_REL} 出现指向 host-services/notify-ports 的 import（内联模板零宿主服务）`)
   }
 } else {
-  fail(`找不到 ${WSB_REL}（worker 模板承载文件被移动？请同步本守卫的检查点 5 路径）`)
+  fail(`找不到 ${WSB_REL}（worker 模板承载文件被移动？请同步本检查的检查点 5 路径）`)
 }
 
 // ── 汇总 ────────────────────────────────────────────────────────────
@@ -333,5 +333,5 @@ if (failed === 0) {
   )
   process.exit(0)
 }
-console.error('subagent-core 依赖闭包守卫未通过（D9-①），修复上方 ✗ 明细后重跑')
+console.error('subagent-core 依赖闭包检查未通过（D9-①），修复上方 ✗ 明细后重跑')
 process.exit(1)

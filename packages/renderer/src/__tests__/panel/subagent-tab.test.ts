@@ -37,7 +37,7 @@ import * as events from '@taiji/core/transport/api'
 // scoped slot，setup 暴露 VirtualizerHandle 兼容字段——论证见该 helper 文件头）
 vi.mock('virtua/vue', () => virtuaVueMockModule())
 
-// sessionApi mock：fetchAndInject 内部调 getSubagentHistory（快照腿）。
+// sessionApi mock：fetchAndInject 内部调 getSubagentHistory（快照路径）。
 // [B2 u-renderer] getSubagentStreamState = 接入拉取（触发点①）执行通道（chat store
 // subagentStreamPull 执行器经 '@/api' 门面直达本域 mock）——缺成员时触发点①同步 TypeError，
 // 必须在工厂给默认回执（found:false = 无进行中流，core 分支 3 不动作）。
@@ -80,7 +80,7 @@ class NoopResizeObserver {
 }
 
 /**
- * Turn stub：透出对话流内容（黑盒断言面——MessageStream 渲染树末端的消息文本）。
+ * Turn stub：透出对话流内容（黑盒断言范围——MessageStream 渲染树末端的消息文本）。
  * template 表达式受限于 stub 形态，用 computed 归一 user/assistant 文本。
  */
 const globalStubs = {
@@ -103,6 +103,9 @@ const globalStubs = {
   BashOutputBlock: { name: 'BashOutputBlock', template: '<div />' },
   ForkNotice: { name: 'ForkNotice', template: '<div />' },
   Button: { name: 'Button', template: '<button><slot /></button>' },
+  // composer 车道行为有专属单测（subagent-composer-lane.test.ts）——本文件只断言
+  // SubagentTab 的挂载门（chatCapable），壳体 stub 掉避免拖入 composer 全依赖树。
+  Composer: { name: 'Composer', template: '<div data-testid="composer-stub" />' },
 }
 
 const MAIN_SID = 's-tab-main'
@@ -146,7 +149,7 @@ describe('SubagentTab E-4 接入（entry 帧 + 恒订阅）', () => {
     // 绑 focusedSessionId，测试直连 core 域同款手法——panel-container-drawer-mode.test.ts 先例）
     bindDrawerSessionId(ref(MAIN_SID))
     // [subagent-detail-tabs] drawer 二级 tab 分区键 = focusedSessionId（SubagentTab 消费）——
-    // 与 drawer 选中态分区同 sid 对齐（panel store loadSession 即真实 app 的 useSideDrawer 绑定面）
+    // 与 drawer 选中态分区同 sid 对齐（panel store loadSession 即真实 app 的 useSideDrawer 绑定侧）
     usePanelStore().loadSession(ROOT_PANEL_ID, MAIN_SID)
     vi.stubGlobal('ResizeObserver', NoopResizeObserver)
     HTMLElement.prototype.scrollTo = vi.fn()
@@ -217,7 +220,7 @@ describe('SubagentTab E-4 接入（entry 帧 + 恒订阅）', () => {
     const wrapper = mountTab()
     await settle(wrapper)
 
-    // 快照腿确实走了 mock（而非 VITE_MOCK 的 mockApi 挂起实现），恒订阅才有执行机会
+    // 快照路径确实走了 mock（而非 VITE_MOCK 的 mockApi 挂起实现），恒订阅才有执行机会
     expect(sessionApi.getSubagentHistory).toHaveBeenCalledWith(MAIN_SID, SUB_ID)
     // 双键订阅（主 sid + 虚拟分区 id，tee 帧 payload.sessionId 归属差异适配）
     expect(events.on).toHaveBeenCalledWith(MAIN_SID, expect.any(Function))
@@ -410,7 +413,7 @@ describe('SubagentTab E-4 接入（entry 帧 + 恒订阅）', () => {
     wrapper.unmount()
   })
 
-  it('停因词：running（在飞轮无停因）与无 stopReason 的 record → 不渲染停因元素', async () => {
+  it('停因词：running（在途轮次无停因）与无 stopReason 的 record → 不渲染停因元素', async () => {
     useSubagentStore().applyRecords(MAIN_SID, [makeRecord({ status: 'running' })])
     vi.mocked(sessionApi.getSubagentHistory).mockResolvedValue([])
     openSubagent({ virtualId: VIRTUAL_ID, enteredFrom: 'chat' })
@@ -418,7 +421,7 @@ describe('SubagentTab E-4 接入（entry 帧 + 恒订阅）', () => {
     await settle(wrapper)
     expect(wrapper.find('[data-testid="subagent-stop-reason"]').exists()).toBe(false)
 
-    // idle 但无停因（从未收口 / 存量数据）→ 同样不渲染
+    // idle 但无停因（从未收尾 / 存量数据）→ 同样不渲染
     useSubagentStore().applyRecords(MAIN_SID, [makeRecord({ status: 'idle' })])
     await settle(wrapper)
     expect(wrapper.find('[data-testid="subagent-stop-reason"]').exists()).toBe(false)
@@ -535,7 +538,7 @@ describe('SubagentTab U4：zcode 终态渲染 + 运行中 coarse 提示', () => 
     wrapper.unmount()
   })
 
-  it('RPC 返回空结果 + engine=zcode 有 result → 客户端 outcome 兜底投影渲染（不白屏）', async () => {
+  it('RPC 返回空结果 + engine=zcode 有 result → 客户端 outcome 兜底派生视图渲染（不白屏）', async () => {
     useSubagentStore().applyRecords(MAIN_SID, [
       makeRecord({ engine: 'zcode', status: 'done', result: '兜底摘要文本', endedAt: 2000 }),
     ])
@@ -551,9 +554,9 @@ describe('SubagentTab U4：zcode 终态渲染 + 运行中 coarse 提示', () => 
     wrapper.unmount()
   })
 
-  it('RPC 返回空结果 + pi record → seed task 用户气泡（1 turn），不注入兜底投影', async () => {
+  it('RPC 返回空结果 + pi record → seed task 用户气泡（1 turn），不注入兜底派生视图', async () => {
     // drawer-blank-fix T5 预期翻转（旧断言：0 turn「行为不变」）：u2 seed 生效后，pi 空历史
-    // 种入 record.task 用户气泡（分区 1 turn），杜绝首开白屏；pi 仍不走 outcome 兜底投影。
+    // 种入 record.task 用户气泡（分区 1 turn），杜绝首开白屏；pi 仍不走 outcome 兜底派生视图。
     useSubagentStore().applyRecords(MAIN_SID, [makeRecord({ status: 'done', result: 'pi 轮终结果' })])
     vi.mocked(sessionApi.getSubagentHistory).mockResolvedValue([])
     openSubagent({ virtualId: VIRTUAL_ID, enteredFrom: 'chat' })
@@ -568,8 +571,8 @@ describe('SubagentTab U4：zcode 终态渲染 + 运行中 coarse 提示', () => 
 })
 
 /**
- * 非 pi 终态回填桥（status watch，D2）：运行中打开的 tab 在 record 跨越 running→终态 时经 loadSubagentData 重拉一次，
- * 对话流自动收敛到完整内容。四守卫反例（pi 零变化 / vid 切换 / 已终态不二拉）同组守护。
+ * 非 pi 终态回填桥（status watch，D2）：运行中打开的 tab 在 record 跨越 running→终态 时经 loadSubagentData 重新拉取一次，
+ * 对话流自动收敛到完整内容。四检查反例（pi 零变化 / vid 切换 / 已终态不二拉）同组守护。
  */
 describe('SubagentTab 非 pi 终态回填（status watch，D2）', () => {
   beforeEach(() => {
@@ -586,7 +589,7 @@ describe('SubagentTab 非 pi 终态回填（status watch，D2）', () => {
 
   it('非 pi running→done 推送 → fetchAndInject 第 2 次拉取 + coarse hint 消失 + 终态内容出现', async () => {
     vi.mocked(sessionApi.getSubagentHistory)
-      // 首拉：运行中空历史（窗口 B 形态，task seed 兜底）
+      // 首次拉取：运行中空历史（窗口 B 形态，task seed 兜底）
       .mockResolvedValueOnce([])
       // 回填拉取：终态完整对话
       .mockResolvedValueOnce([
@@ -597,7 +600,7 @@ describe('SubagentTab 非 pi 终态回填（status watch，D2）', () => {
     const wrapper = mountTab()
     await settle(wrapper)
 
-    // 运行中形态：coarse hint 在场，首拉 1 次
+    // 运行中形态：coarse hint 在场，首次拉取 1 次
     expect(wrapper.find('[data-testid="subagent-coarse-hint"]').exists()).toBe(true)
     expect(sessionApi.getSubagentHistory).toHaveBeenCalledTimes(1)
 
@@ -635,7 +638,7 @@ describe('SubagentTab 非 pi 终态回填（status watch，D2）', () => {
     wrapper.unmount()
   })
 
-  it('vid 切换：停留 B 期间推 A 终态 → 不为 A 触发加载；切回 A → vid watch 首拉兜底', async () => {
+  it('vid 切换：停留 B 期间推 A 终态 → 不为 A 触发加载；切回 A → vid watch 首次拉取兜底', async () => {
     const SUB_ID_B = 'sub-tab-2'
     const VIRTUAL_ID_B = subagentVirtualId(MAIN_SID, SUB_ID_B)
     const recordA = makeRecord({ engine: 'zcode' })
@@ -649,13 +652,13 @@ describe('SubagentTab 非 pi 终态回填（status watch，D2）', () => {
     await settle(wrapper)
     expect(sessionApi.getSubagentHistory).toHaveBeenCalledTimes(1)
 
-    // 切到 B：vid watch 首拉 B（第 2 次，参数 B）
+    // 切到 B：vid watch 首次拉取 B（第 2 次，参数 B）
     openSubagent({ virtualId: VIRTUAL_ID_B, enteredFrom: 'chat' })
     await settle(wrapper)
     expect(sessionApi.getSubagentHistory).toHaveBeenCalledTimes(2)
     expect(sessionApi.getSubagentHistory).toHaveBeenLastCalledWith(MAIN_SID, SUB_ID_B)
 
-    // 停留 B 期间 A 终态推送：status watch 的 vid 守卫跳过（A 非 current vid，源变化即切换守卫拦截）
+    // 停留 B 期间 A 终态推送：status watch 的 vid 检查跳过（A 非 current vid，源变化即切换检查拦截）
     useSubagentStore().applyRecords(MAIN_SID, [
       makeRecord({ engine: 'zcode', status: 'done', result: 'A 结果', endedAt: 3000 }),
       makeRecord({ subagentId: SUB_ID_B, engine: 'zcode' }),
@@ -663,7 +666,7 @@ describe('SubagentTab 非 pi 终态回填（status watch，D2）', () => {
     await settle(wrapper)
     expect(sessionApi.getSubagentHistory).toHaveBeenCalledTimes(2)
 
-    // 切回 A：vid watch 首拉兜底（非 status watch）
+    // 切回 A：vid watch 首次拉取兜底（非 status watch）
     openSubagent({ virtualId: VIRTUAL_ID, enteredFrom: 'chat' })
     await settle(wrapper)
     expect(sessionApi.getSubagentHistory).toHaveBeenCalledTimes(3)
@@ -671,7 +674,7 @@ describe('SubagentTab 非 pi 终态回填（status watch，D2）', () => {
     wrapper.unmount()
   })
 
-  it('打开时已终态 → 首拉后推 records（status 不变 done→done）→ 不二次加载', async () => {
+  it('打开时已终态 → 首次拉取后推 records（status 不变 done→done）→ 不二次加载', async () => {
     useSubagentStore().applyRecords(MAIN_SID, [
       makeRecord({ engine: 'zcode', status: 'done', result: '结果', endedAt: 2000 }),
     ])
@@ -691,11 +694,11 @@ describe('SubagentTab 非 pi 终态回填（status watch，D2）', () => {
   })
 })
 
-// ── [W0/V8] agentcall 标题 meta 锚定（findAgentCall 消费合并投影；显式预期变化：无值 → 有值）──
+// ── [W0/V8] agentcall 标题 meta 锚定（findAgentCall 消费合并派生视图；显式预期变化：无值 → 有值）──
 // mock 输入按 D2-R3 契约形状（id/agent/slug/status/startedAt/sessionId、phase 可 undefined）；
-// U2 合并投影落地后由主 agent 复核真实形状。
+// U2 合并派生视图落地后由主 agent 复核真实形状。
 
-describe('SubagentTab [W0/V8] agentcall 标题 meta（findAgentCall 命中合并投影行）', () => {
+describe('SubagentTab [W0/V8] agentcall 标题 meta（findAgentCall 命中合并派生视图行）', () => {
   beforeEach(() => {
     setActivePinia(createPinia())
     vi.clearAllMocks()
@@ -735,7 +738,7 @@ describe('SubagentTab [W0/V8] agentcall 标题 meta（findAgentCall 命中合并
 
     const wrapper = mountTab()
     await settle(wrapper)
-    // 标题栏 agent 名来自 findAgentCall（合并投影 record-only 行携带 sessionId + agent）
+    // 标题栏 agent 名来自 findAgentCall（合并派生视图 record-only 行携带 sessionId + agent）
     expect(wrapper.text()).toContain('reviewer-1')
     // 从 workflow 进入：返回按钮在场（enteredFrom 语义不受影响）
     expect(wrapper.find('[data-testid="drawer-subagent-back"]').exists()).toBe(true)
@@ -752,6 +755,49 @@ describe('SubagentTab [W0/V8] agentcall 标题 meta（findAgentCall 命中合并
     expect(wrapper.find('[data-testid="drawer-subagent-tab"]').exists()).toBe(true)
     expect(wrapper.text()).toContain('subagent')
     expect(wrapper.text()).not.toContain('reviewer-1')
+    wrapper.unmount()
+  })
+})
+
+describe('subagent composer 挂载门（chatCapable，subagent-composer 2026-10-18）', () => {
+  beforeEach(() => {
+    setActivePinia(createPinia())
+    vi.clearAllMocks()
+    _resetDrawerForTest()
+    bindDrawerSessionId(ref(MAIN_SID))
+    usePanelStore().loadSession(ROOT_PANEL_ID, MAIN_SID)
+    vi.stubGlobal('ResizeObserver', NoopResizeObserver)
+    HTMLElement.prototype.scrollTo = vi.fn()
+    vi.mocked(sessionApi.getSubagentHistory).mockResolvedValue([])
+  })
+
+  it('chatCapable=true：挂 composer 带（.composer-band 同壳）+ 只读提示行消失', async () => {
+    useSubagentStore().applyRecords(MAIN_SID, [makeRecord({ status: 'idle', chatCapable: true })])
+    openSubagent({ virtualId: VIRTUAL_ID, enteredFrom: 'chat' })
+    const wrapper = mountTab()
+    await settle(wrapper)
+    const band = wrapper.find('[data-testid="drawer-subagent-composer-band"]')
+    expect(band.exists()).toBe(true)
+    expect(band.classes()).toContain('composer-band')
+    expect(wrapper.find('[data-testid="composer-stub"]').exists()).toBe(true)
+    wrapper.unmount()
+  })
+
+  it('chatCapable 缺省（未刷新旧帧语义 = 不支持）：不挂带，回退只读提示', async () => {
+    useSubagentStore().applyRecords(MAIN_SID, [makeRecord({ status: 'idle' })])
+    openSubagent({ virtualId: VIRTUAL_ID, enteredFrom: 'chat' })
+    const wrapper = mountTab()
+    await settle(wrapper)
+    expect(wrapper.find('[data-testid="drawer-subagent-composer-band"]').exists()).toBe(false)
+    wrapper.unmount()
+  })
+
+  it('chatCapable=false（引擎声明不支持）：不挂带', async () => {
+    useSubagentStore().applyRecords(MAIN_SID, [makeRecord({ status: 'idle', chatCapable: false })])
+    openSubagent({ virtualId: VIRTUAL_ID, enteredFrom: 'chat' })
+    const wrapper = mountTab()
+    await settle(wrapper)
+    expect(wrapper.find('[data-testid="drawer-subagent-composer-band"]').exists()).toBe(false)
     wrapper.unmount()
   })
 })

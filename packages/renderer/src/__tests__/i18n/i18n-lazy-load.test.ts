@@ -5,7 +5,7 @@
  * - setLocale('en-US') 动态 import + setLocaleMessage 后文案为英文，zh-CN 可切回
  * - en-US 偏好冷启动：模块解析（top-level await）完成即 en-US 可用，无回退闪烁
  * - 连续快速切换后写胜（过期的动态加载完成晚到不回写 locale）
- * - [Fix-2] fallbackLocale 'en-US' 懒加载的兜底恢复：启动后 idle 预载（幂等守卫零重复注册）
+ * - [Fix-2] fallbackLocale 'en-US' 懒加载的兜底恢复：启动后 idle 预载（幂等检查零重复注册）
  * - [Fix-3] en-US 动态 import 失败：内部 catch + 可操作 warn，locale 停留旧值、无 unhandledrejection
  *
  * 每个用例经 vi.resetModules + 动态 import 取全新模块实例（i18n 是模块级单例，
@@ -93,7 +93,7 @@ describe('i18n 惰性 locale 加载（Q1-2）', () => {
     }
   })
 
-  it('[Fix-2] en-US 已加载时 idle 预载零开销（幂等守卫：不重复 import/setLocaleMessage）', async () => {
+  it('[Fix-2] en-US 已加载时 idle 预载零开销（幂等检查：不重复 import/setLocaleMessage）', async () => {
     const idleCallbacks: Array<() => void> = []
     window.requestIdleCallback = ((cb: () => void) => {
       idleCallbacks.push(cb)
@@ -103,7 +103,7 @@ describe('i18n 惰性 locale 加载（Q1-2）', () => {
       const mod = await importFreshI18n()
       await mod.setLocale('en-US') // en-US 已动态加载
       const before = mod.default.global.getLocaleMessage('en-US')
-      // 此时触发启动时注册的 idle 预载回调：loadedLocales 幂等守卫早退，
+      // 此时触发启动时注册的 idle 预载回调：loadedLocales 幂等检查早退，
       // 不重复 import / setLocaleMessage → messages 对象引用不变
       idleCallbacks[0]!()
       await Promise.resolve()

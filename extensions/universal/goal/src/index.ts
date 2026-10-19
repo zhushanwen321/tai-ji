@@ -14,7 +14,7 @@
  *
  * FR-4.2/D-16：ctx 必填，移除 lastCtx 模块级可变状态。
  * FR-6.4：移除 hasPendingInjection。
- * FR-6.7：移除 pendingPause（ESC 改用 ctx.signal.aborted 守卫，在各 event handler）。
+ * FR-6.7：移除 pendingPause（ESC 改用 ctx.signal.aborted 检查，在各 event handler）。
  */
 
 import type { ExtensionAPI, ExtensionCommandContext, ExtensionContext, MessageEndEvent } from "@earendil-works/pi-coding-agent";
@@ -104,7 +104,7 @@ export default function goalExtension(pi: ExtensionAPI) {
 		updateWidget(session, ports.ui);
 	});
 
-	// MF-R2-1 根修：session_shutdown 在 runner invalidate 之前触发（此刻 pi/ctx
+	// MF-R2-1 从根源修复：session_shutdown 在 runner invalidate 之前触发（此刻 pi/ctx
 	// 仍可用），取消待发的退避 continuation timer——覆盖 reload / new / resume /
 	// fork / quit 全部失效路径，旧 timer 不再携 stale ctx 闭包存活到到期
 	pi.on("session_shutdown", async (_event, _ctx: ExtensionContext) => {
@@ -138,7 +138,7 @@ export default function goalExtension(pi: ExtensionAPI) {
 	 * FR-4.2/D-16: ctx 必填（消除 lastCtx 模块级可变状态）。
 	 * ports 构造复用 adapters/ports.buildPorts（DRY：单一 ports 构造点）。
 	 *
-	 * 通道形态（C-ext-06 globalThis slot 惯例）：裸函数直挂——plan 侧使用点以 typeof 守卫
+	 * 通道形态（C-ext-06 globalThis slot 惯例）：裸函数直挂——plan 侧使用点以 typeof 检查
 	 * 读取 `globalThis[Symbol.for("@zhushanwen/pi-goal.goalInit")]`（plan/src/compact.ts）。
 	 * 不挂 pi API 对象：pi 为每个扩展创建独立 ExtensionAPI（1.0.0 复核同构），挂 pi 对象的字段
 	 * 跨扩展不可见。

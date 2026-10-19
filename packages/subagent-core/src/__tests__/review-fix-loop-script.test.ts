@@ -15,7 +15,7 @@
 //
 // 注：弱格式通道相关测试（summarizeDegradedTrigger 直测 / F-1 前缀契约锁定 /
 // degraded 三落点锚点 / 兜底差集清单锚点）已随 fail-fast 改造整体退役——
-// 结构化返回失败即终判，脚本侧无 F-1 字面量、无降级可观测面；引擎侧
+// 结构化返回失败即终判，脚本侧无 F-1 字面量、无降级可观测性；引擎侧
 // DETERMINISTIC_SCHEMA_FAILURE_PREFIX 常量仍被宿主 execute-agent-call 重试分诊
 // 消费（output-collector.test.ts 侧覆盖），与本脚本无契约关系。
 import { execFile } from "node:child_process";
@@ -34,7 +34,7 @@ const WORKFLOW_SOURCE = readFileSync(
 
 /** 按函数名从源码文本截取完整函数段（参数括号配平后 brace 配平函数体）。
  *  抽取不到 → 显式报错（防漂移）。buildCallRecord 的解构参数含花括号，
- *  函数体起点必须从参数列表闭合括号之后找，不能直接 indexOf("{")。 */
+ *  函数体起点必须从参数列表的结束括号之后找，不能直接 indexOf("{")。 */
 function extractFn(name: string): string {
   const marker = "function " + name + "(";
   const start = WORKFLOW_SOURCE.indexOf(marker);
@@ -438,7 +438,7 @@ describe("review-fix-loop.js fixAgent=fallow-scan 显式拒收（RX2-F2）", () 
 // fixer 修错文件或读不到任务文档），因此逐字节锁定文档内容与组/条目的严格一致，
 // 以及组 → 文档 → 调用的一一对应。
 describe("review-fix-loop.js fixerDocPath + groupCalls（fixer 文件总线渲染与派发组装）", () => {
-  /** 从 marker 起截取完整语句（跳过字符串/模板串/行注释/块注释，depth-0 `;` 收口）。 */
+  /** 从 marker 起截取完整语句（跳过字符串/模板串/行注释/块注释，depth-0 `;` 收尾）。 */
   function extractStatement(marker: string): string {
     const start = WORKFLOW_SOURCE.indexOf(marker);
     if (start < 0) {
@@ -737,18 +737,93 @@ describe("review-fix-loop.js 结构化失败终判恢复指引锚点", () => {
     expect(WORKFLOW_SOURCE.match(/\+ REVIEWER_RECOVERY_HINT;/g)?.length).toBe(2);
   });
 
-  it("fail-fast 形态锚点：failFastAgent 包装存在、脚本无 F-1 字面量、无 degraded 可观测面", () => {
+  it("fail-fast 形态锚点：failFastAgent 包装存在、脚本无 F-1 字面量、无 degraded 可观测性", () => {
     // failFastAgent 单一声明 + reviewer/fixer/reviewer 解析失败原位重试 三处消费
     //（声明含 `(`，共 4 次；重试消费点 = 结果无效时的回注重派，2026-09-30 同步 dev-merge-gates）
     expect(WORKFLOW_SOURCE).toContain("function failFastAgent(call, failedLabel)");
     expect(WORKFLOW_SOURCE.match(/failFastAgent\(/g)?.length).toBe(4);
     // F-1 引擎前缀字面量不再内联（引擎侧常量仍被宿主重试分诊消费，与本脚本无契约关系）
     expect(WORKFLOW_SOURCE).not.toContain("Structured output failed deterministically");
-    // 弱格式降级可观测面零残留（degraded 三落点已整体拆除）
+    // 弱格式降级可观测性零残留（degraded 三落点已整体拆除）
     expect(WORKFLOW_SOURCE).not.toContain("degradedRounds");
     expect(WORKFLOW_SOURCE).not.toContain("degradedRoundKeys");
     expect(WORKFLOW_SOURCE).not.toContain("baselineDirtyPaths");
     expect(WORKFLOW_SOURCE).not.toContain("recoverFromReportFile");
     expect(WORKFLOW_SOURCE).not.toContain("parseAggregatedMd");
+  });
+});
+
+// ── W2 分析产物落盘（skill-data-redesign 设计 §5.1-§5.4）：写盘点结构锚 ──
+// 行为级断言（序列化函数本身）在 review-fix-loop-utils.test.ts（纯函数直测）；
+// 本组锁脚本侧的写盘点编排形态：四类产物 + run.json 轮转在循环体有落点、每个
+// round 退出点都带 critical 计数（mustFixTrajectory 数据源不缺位点）。
+describe("review-fix-loop.js W2 落盘写盘点锚点", () => {
+  it("四类产物 + 终态双文件在循环体有写盘点（文件名与设计 §5.1-§5.4 逐字对齐）", () => {
+    // 每轮 review 后：reviewer 原始发现（problems.json，外层 {round, problems}）
+    expect(WORKFLOW_SOURCE).toContain('roundDir + "/problems.json"');
+    expect(WORKFLOW_SOURCE).toContain("buildProblemsDoc(round,");
+    // 聚合成功后：聚合结构化返回序列化（aggregated.json，非 agent 第二产物）
+    expect(WORKFLOW_SOURCE).toContain('roundDir + "/aggregated.json"');
+    expect(WORKFLOW_SOURCE).toContain("buildAggregatedDoc(agg, { round, batch: batchIndex })");
+    // 每轮 fix 后：逐问题对账（result.json，disposition 四值词表，全清单态映射）
+    expect(WORKFLOW_SOURCE).toContain('roundDir + "/result.json"');
+    expect(WORKFLOW_SOURCE).toContain("buildRoundReconciliation(fixResult, state.issues, fixIdMap)");
+    // 终态：run.json（轮转归档前置）+ final.json（return 契约全集 + 计算字段）
+    expect(WORKFLOW_SOURCE).toContain('const runJsonPath = RUN_ROOT + "/run.json";');
+    expect(WORKFLOW_SOURCE).toContain("rotateRunJson({");
+    expect(WORKFLOW_SOURCE).toContain('RUN_ROOT + "/final.json"');
+    expect(WORKFLOW_SOURCE).toContain("buildFinalDoc(result, {");
+    // 序列化全部走 writeAnalysisJson（分析面写失败 WARN 降级，不炸修复循环）
+    expect(WORKFLOW_SOURCE.match(/writeAnalysisJson\(/g)?.length).toBe(6);
+  });
+
+  it("每个 batchRounds.push 都带 critical 计数（mustFixTrajectory 数据源不缺位点）", () => {
+    const pushCount = WORKFLOW_SOURCE.match(/batchRounds\.push\(/g)?.length ?? 0;
+    const criticalCount = WORKFLOW_SOURCE.match(/critical: roundCritical\b/g)?.length ?? 0;
+    expect(pushCount).toBeGreaterThan(0);
+    // 数量相等 = 无缺 critical 的退出点；新增退出点漏带 critical 即红
+    expect(criticalCount).toBe(pushCount);
+    // 聚合成功轮的计数据源 = 清单活跃口径（open/regressed critical，聚合 + reconcile 后
+    // 求值；与 zcode 镜像同源）；all-clean 轮无聚合定 0；失败终态轮保持 null（轨迹剔除）
+    expect(WORKFLOW_SOURCE).toContain("roundCritical = countLedgerCritical(state.issues);");
+    expect(WORKFLOW_SOURCE).toContain("roundCritical = 0;");
+    // 终态轨迹 = batchRounds.critical 扁平化 + 剔除未聚合轮 null（数字序列与 zcode 镜像同构）
+    expect(WORKFLOW_SOURCE).toContain("const mustFixTrajectory = state.batches.flatMap((b) =>");
+    expect(WORKFLOW_SOURCE).toContain(".filter((v) => v !== null),");
+  });
+
+  it("run.json schema 字段装配齐全（§5.1 字段集源级锁定）+ 轮转归档命名（冒号换连字符）", () => {
+    const manifestCall = WORKFLOW_SOURCE.slice(
+      WORKFLOW_SOURCE.indexOf("buildRunManifest({"),
+      WORKFLOW_SOURCE.indexOf("}));", WORKFLOW_SOURCE.indexOf("buildRunManifest({")),
+    );
+    for (const field of [
+      "projectRoot", "worktreePath", "branch", "baseCommit", "headCommit",
+      "attempt", "model", "startedAt", "endedAt", "rounds",
+    ]) {
+      expect(manifestCall).toContain(field + ":");
+    }
+    // terminated / mustFixTrajectory 以 shorthand 透传（与脚本局部变量同名，无冒号形态）
+    expect(manifestCall).toContain("terminated");
+    expect(manifestCall).toContain("mustFixTrajectory");
+    // attempt 恒 1（本循环族无 attempt 机制，防覆盖由轮转归档承担——与 zcode 镜像同口径）
+    expect(WORKFLOW_SOURCE).toContain("attempt: 1,");
+    // model 取不到 → null（分析侧按模型分层的字段，缺席显式可见）
+    expect(manifestCall).toContain("model: MODEL || null");
+    // baseCommit 用启动期锁定的 base hash（RC-6）
+    expect(manifestCall).toContain("baseCommit: lockedBase.hash || \"\"");
+    // startedAt 轮转命名规则在 utils 侧（rotateRunJson 用例覆盖冒号换连字符），此处锁
+    // 脚本传入的是 run 启动时刻（state.meta.startedAt）——同 runId 重放覆写判据的数据源
+    expect(WORKFLOW_SOURCE).toContain("startedAt: state.meta.startedAt,");
+  });
+
+  it("reviewerSchema / aggregatorSchema 增补字段在场（problems 申报 + sourceRefs 申报）", () => {
+    expect(WORKFLOW_SOURCE).toContain('roundDir + "/problems.json"');
+    // problems 申报：ref/level/title 三字段 + 本族 severity 词表
+    expect(WORKFLOW_SOURCE).toContain('level: { type: "string", enum: ["critical", "major", "minor"]');
+    // sourceRefs 申报：可选项（缺失不 fail，归一/序列化边界补 []），元素 {round, ref}
+    // 与 zcode 镜像同构
+    expect(WORKFLOW_SOURCE).toContain("sourceRefs: {");
+    expect(WORKFLOW_SOURCE).toContain('round: { type: "number"');
   });
 });

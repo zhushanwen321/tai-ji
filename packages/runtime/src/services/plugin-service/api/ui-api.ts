@@ -77,7 +77,7 @@ export const DEFAULT_UI_REQUEST_TIMEOUT_MS =
 /**
  * Node setTimeout delay 安全上限（2^31-1）：超域 delay 被 Node 塌缩为 1ms 立即触发
  * （语义反转）。权威源 @zhushanwen/subagent-core/shared/timer-delay.ts——与
- * tool-timeout（D1）同取「本地同值定义」惯例（平台常量无漂移面），避免首创跨包深路径耦合。
+ * tool-timeout（D1）同取「本地同值定义」惯例（平台常量无漂移情形），避免首创跨包深路径耦合。
  */
 export const MAX_TIMER_DELAY_MS = 2_147_483_647
 
@@ -100,9 +100,9 @@ export function resolveUiRequestTimeoutMs(timeout: number | undefined): number {
   return Math.min(resolved, MAX_TIMER_DELAY_MS)
 }
 
-// re-export（NON-BREAKING）：UiDialogOptions 权威契约定义在 plugin-types.ts
-//（单一定义消除本文件历史副本）；既有消费者（plugin-ui-timeout-authority.test.ts）
-// 仍从本文件导入，导出面不变。
+// re-export（NON-BREAKING）：UiDialogOptions 权威契约定义在 plugin-types.ts（单一定义，
+// 本文件不留历史副本）；既有消费者（plugin-ui-timeout-authority.test.ts）仍从本文件导入，
+// 导出清单不变。
 export type { UiDialogOptions }
 
 /** Worker→host dialog 请求携带的计时/取消控制字段（queue 尊重来方值）。 */
@@ -111,7 +111,7 @@ export interface UiRequestMeta {
   timeoutMs?: number
 }
 
-/** 从 handler params 提取控制字段（类型守卫窄化，非法值不进 meta——queue 侧回落兜底）。 */
+/** 从 handler params 提取控制字段（类型检查窄化，非法值不进 meta——queue 侧回落兜底）。 */
 function extractUiRequestMeta(params: Record<string, unknown>): UiRequestMeta {
   const meta: UiRequestMeta = {}
   if (typeof params.requestId === 'string' && params.requestId.length > 0) {

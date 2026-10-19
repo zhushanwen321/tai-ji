@@ -87,7 +87,7 @@ describe('useUrlBar', () => {
 
   it('非编辑态 Esc 不拦（§6.7 行为分界）：不 preventDefault，Esc 归编排器层级序', () => {
     // 未聚焦（isEditingUrl=false）：处理器不消费——结构上元素级监听仅在聚焦时收到真实按键，
-    // 此处直调验证显式守卫：不置位 defaultPrevented（编排器照常走层级序关浮层）
+    // 此处直调验证显式检查：不置位 defaultPrevented（编排器照常走层级序关浮层）
     const evt = new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true })
     result.onUrlEscape(evt)
     expect(evt.defaultPrevented).toBe(false)

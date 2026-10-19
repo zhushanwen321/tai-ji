@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * check-global-slot-keys.mjs —— 进程级全局槽键归属守卫（§2.6，约束 C-state-20）。
+ * check-global-slot-keys.mjs —— 进程级全局槽键归属检查（§2.6，约束 C-state-20）。
  *
  * 背景：进程级单例经 `globalThis[Symbol.for(键)]` 共享（workspace 源码 / npm dist /
  * pi jiti 三实例化通道下模块级变量会分裂）。键字面量散落多前缀时，撞名无编译期报错，
@@ -27,7 +27,7 @@ const ROOT_FLAG = ARGS.indexOf("--root");
 const BASE = resolve(process.cwd(), ROOT_FLAG >= 0 ? ARGS[ROOT_FLAG + 1] : ".");
 
 /**
- * 扫描面 = subagent 体系三包（§2.6 的范围：core + engine SDK + 壳）。
+ * 扫描范围 = subagent 体系三包（§2.6 的范围：core + engine SDK + 壳）。
  * 其他 extension（如 goal/plan 共享的 `@zhushanwen/pi-goal.goalInit`）的槽键前缀与
  * 归属包一致，不属本约束范围。
  */

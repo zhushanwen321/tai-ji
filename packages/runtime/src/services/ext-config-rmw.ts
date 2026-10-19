@@ -38,12 +38,16 @@ export function extractRefString(raw: Record<string, unknown>, field: string): s
  * ext-config 文件 RMW 只覆盖指定字段（rename / smart-context 两个写点共用）：读文件 → 展开基底 →
  * apply 覆盖 → 原子写（2 空格缩进 + 尾换行，与 extension llm-shared saveConfig 序列化格式一致）。
  * 文件不存在/坏 JSON → defaultBase()（与 extension 读取侧的回退语义一致：坏文件本来就无效）。
+ *
+ * @param mode 可选落盘权限透传（如 0o600，network-proxy 域凭据文件要求，设计 llm-network-proxy
+ *   §3.3 决策 3）。不传时走 atomicWrite 默认路径，既有调用方（rename / smart-context）行为零变化。
  */
 export function rmwExtConfigField(
   configPath: string,
   lockOptions: SyncFileLockOptions,
   defaultBase: () => Record<string, unknown>,
   apply: (base: Record<string, unknown>) => void,
+  mode?: number,
 ): void {
   withFileLockSync(configPath, () => {
     let base: Record<string, unknown>
@@ -59,6 +63,6 @@ export function rmwExtConfigField(
     mkdirSync(dirname(configPath), { recursive: true })
     // tmp 唯一化：对端（extension llm-shared saveConfig）写同一文件，其 tmp 已带 pid+随机段；
     // 本侧留固定 .tmp 会与旧版对端碰撞（锁互斥下无害但脏残留），对齐同形态。
-    atomicWrite(configPath, `${JSON.stringify(base, null, EXT_CONFIG_JSON_INDENT)}\n`, extConfigTmpSuffix())
+    atomicWrite(configPath, `${JSON.stringify(base, null, EXT_CONFIG_JSON_INDENT)}\n`, extConfigTmpSuffix(), mode)
   }, lockOptions)
 }

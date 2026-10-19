@@ -97,7 +97,7 @@ describe('RT-3#4 schema 不匹配路径（deserialize 补隔离）', () => {
     expect(existsSync(modelsPath())).toBe(false)
   })
 
-  it('providers 为 null / 顶层非对象：同样按损坏隔离（穿透原 typeof 守卫的形态）', () => {
+  it('providers 为 null / 顶层非对象：同样按损坏隔离（穿透原 typeof 检查的形态）', () => {
     writeFileSync(modelsPath(), '{"providers": null}', 'utf-8')
     expect(readModels()).toEqual({ providers: {} })
     expect(findCorruptCopy()).toBeDefined()

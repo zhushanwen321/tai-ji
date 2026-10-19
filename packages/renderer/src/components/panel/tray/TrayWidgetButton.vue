@@ -15,7 +15,7 @@
   emits.toggle-pin —— 点击 icon（外壳据此切换 pin）
 
   数据流（D3/D7）：本组件**不持数据源**——条目存在与否由外壳 entries computed 决定
-  （ViewHostStore 有 entry 即渲染、invalidate 即消失）；组件只把 entry.meta 投影成
+  （ViewHostStore 有 entry 即渲染、invalidate 即消失）；组件只把 entry.meta 映射成
   icon/badge/status 视觉（O(1) 派生），guiTree 不经本组件（面板职责）。
 
   ── 依赖追踪契约（承自已退役的对话流 widget pill entries computed 头注，托盘为唯一消费端）──

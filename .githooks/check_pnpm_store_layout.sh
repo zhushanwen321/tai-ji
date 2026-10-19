@@ -28,7 +28,7 @@ command -v pnpm >/dev/null 2>&1 || exit 0
 # EXPECTED 解析（双历史修复合并，两分支各覆盖一类环境）：
 # [HISTORICAL 2026-09-29] globalconfig store-dir 分支：pnpm 的 `pnpm store path` 不反映
 # globalconfig（~/Library/Preferences/pnpm/rc）的 store-dir 配置，而 install 读它
-# ——两命令分叉使本守卫对配置了全局 store-dir 的环境永久假阳性（install 写
+# ——两命令分叉使本检查对配置了全局 store-dir 的环境永久假阳性（install 写
 # <store-dir>/v<major>，store path 报默认位置）。config 有 store-dir 时取
 # 「<store-dir>/v<major>」，否则回落同源 store path（沙箱 HOME 覆写场景下 config
 # 无 store-dir，回落路径与原防线语义不变）。

@@ -126,7 +126,7 @@ function consumeArmedRestore(args: {
   if (!armed) return false
   const inFlight = deps.getInFlightCount?.() ?? 0
   if (Date.now() - armed.at > ARMED_EXPIRY_MS && inFlight === 0) {
-    // 规则 1：过期 token 只清不消费——陈旧 token 若被消费即「chip 突跳伪恢复」（D3 被否②a）
+    // 规则 1：过期 token 只清不消费——陈旧 token 若被消费即「chip 突跳伪恢复」（D3 不采用②a）
     deps.clearArmed?.()
     return false
   }
@@ -241,7 +241,7 @@ export function useThinkingLevelSync(
     // [u2/D4] armed 消费置于回调最顶部，先于「无档位」「首触发」「体系判定」所有分支。
     // [U5/D5] 入口快照语义：armedSnapshot 在 consumeArmedRestore 执行前捕获——消费块内的
     // clearArmed 不影响该局部变量，故「记忆未命中的显式切换」（回落路径先清 armed）仍能放行
-    // 对齐分支。禁止读消费块之后的 armed 值（D5 被否③）。
+    // 对齐分支。禁止读消费块之后的 armed 值（D5 不采用③）。
       const armedSnapshot = deps.getArmed?.() ?? null
       if (
         consumeArmedRestore({
@@ -275,7 +275,7 @@ export function useThinkingLevelSync(
         return
       }
       // [U5/D5] 分支 4/5 门禁：无入口快照时同体系映射与跨体系重置一并跳过
-      //（置于 isSameThinkingScheme 判定之前，一处守卫覆盖两分支；分支 3 已在上面 return）
+      //（置于 isSameThinkingScheme 判定之前，一处检查覆盖两分支；分支 3 已在上面 return）
       if (!armedSnapshot) return
       // 模型切换：同体系 → 直接映射当前档位 key 到新模型 value
       if (isSameThinkingScheme(oldSupported, supported)) {

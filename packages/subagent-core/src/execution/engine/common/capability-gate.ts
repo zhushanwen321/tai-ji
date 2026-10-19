@@ -16,7 +16,7 @@
 // unsupported → 同步拒）随派发参数删除退役——conversation 能力轴仍在 fork OR 借位
 // （assertTaskShapeSupported）、握手 mismatch（assertGateCapabilitiesMatched）、
 // message 资格门（engineConversationMessageUnsupportedError）三处消费；unsupported
-// 引擎的 start 从「即拒」放宽为「放行 + message 续聊拒」（与 LLM 工具面自洽）。
+// 引擎的 start 从「即拒」放宽为「放行 + message 续聊拒」（与 LLM 工具范围自洽）。
 //
 // [W3 协议化能力位方向判定（设计 §3.3 能力位表）] capabilities 的同步源 = manifest
 // 快照（注册期读，非握手缓存）。被 gate 判据涉及的能力位（steer+conversation /
@@ -24,7 +24,7 @@
 //   - **少声明**（任务要求的能力 manifest 未声明）→ 本文件同步拒
 //     engine_capability_unsupported；恢复指引 = 「修 manifest / 升级引擎包」——不写
 //     「先派一次任务触发握手」（gate 读 manifest，握手不参与同步判据，那个指引是空转）；
-//   - **多声明**（manifest 声明支持而引擎实际不支持）→ gate 读不到（同步面只有
+//   - **多声明**（manifest 声明支持而引擎实际不支持）→ gate 读不到（同步部分只有
 //     manifest），由首个 run 的协议握手 `initialize` 发现 → engine_capability_mismatch
 //     该 run 失败 + record 标 failed + **清理 run 前已建的前置副作用**（worktree：
 //     executeViaEngine 在 kickOffChatRound 派发前创建，经 finalizeFailed → finalizeRecord
@@ -32,7 +32,7 @@
 //     assertGateCapabilitiesMatched（core 侧判据；协议客户端握手尾接线归 client/ 领地）。
 //   - **非 gate 位**（personaInjection / eventGranularity / sessionRead / resume /
 //     interrupt / permissionMode / schemaEnforcement）不一致（无论强弱）→ 一律 warn
-//     留痕不阻断（诊断面 = EngineClient.warnOnManifestDiagnostics）。
+//     留痕不阻断（诊断范围 = EngineClient.warnOnManifestDiagnostics）。
 //
 // 调用点仍是两处（单点的是实现，不是调用点）：
 //   - chat 域：executeViaEngine 同步段、record 创建前（engine.capabilities() 同步可得，
@@ -50,7 +50,7 @@ import type { EngineCapabilities } from "../types.ts";
 
 /**
  * 预检输入的任务形状子集——ExecuteOptions（chat 域）与 AgentCallOpts（D6 合流后的
- * 单一任务形状，workflow 域 SAR 直传）共有的能力相关字段面。结构子集而非具体类型：
+ * 单一任务形状，workflow 域 SAR 直传）共有的能力相关字段侧。结构子集而非具体类型：
  * 两域的 opts 类型都能直接传入。
  */
 export interface TaskShapeForGate {
@@ -69,7 +69,7 @@ const MANIFEST_RECOVERY_TAIL = "修 manifest capabilities / 升级引擎包（�
  * 含 capabilities 依据与恢复指引（修 manifest / 升级引擎包 / 调整任务参数）。
  *
  * fork 判据说明（借位裁定）：fork 依赖父 session 上下文继承（父会话文件作为分叉源），
- * 引擎具备该语义的能力面信号 = 会话分叉/交互通道族（steer 或 conversation 任一非
+ * 引擎具备该语义的能力侧信号 = 会话分叉/交互通道族（steer 或 conversation 任一非
  * 'unsupported'，**OR 语义任一可用即放行**）。pi conversation='native'（轮终 idle
  * 复用）→ 放行；zcode conversation='cold'（续聊 = 冷查重建 + 新 run + resume 锚点，
  * 协议线 run.params.chat 承载）→ 同样放行。拒绝例证（假设值）：steer 与 conversation
@@ -121,7 +121,7 @@ export function assertTaskShapeSupported(
  * 方向（少声明方向在派发前已被 assertTaskShapeSupported 同步拦，握手不会发生——gate
  * 先行的结构性结果）；命中抛 EngineError(engine_capability_mismatch)，由首个 run 的
  * 协议路径转化为该 run 失败 + record 标 failed + 清理前置副作用（契约变更⑤）。
- * 非 gate 位不一致不进本判定（无论强弱一律 warn 留痕，归 EngineClient 诊断面）。
+ * 非 gate 位不一致不进本判定（无论强弱一律 warn 留痕，归 EngineClient 诊断范围）。
  *
  * 各 gate 位的「manifest 可用」取值语义与 assertTaskShapeSupported 逐条对偶：
  *   conversation 应答 'unsupported' 而 manifest 非 'unsupported' → mismatch

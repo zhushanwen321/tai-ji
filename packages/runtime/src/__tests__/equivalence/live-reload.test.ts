@@ -123,7 +123,7 @@ describe.skipIf(!FAUX_PI_READY)(
 
       // live 侧：message_end 流经生产 translate() 重构 entry → 喂同一 reducer
       const liveEntries = collectLiveEntries(fx, sid)
-      // 非空守卫（防 0 == 0 空转）：至少 user prompt + assistant 两条
+      // 非空检查（防 0 == 0 空转）：至少 user prompt + assistant 两条
       expect(liveEntries.length).toBeGreaterThanOrEqual(2)
       const liveState = replayEntries(liveEntries)
 
@@ -139,7 +139,7 @@ describe.skipIf(!FAUX_PI_READY)(
       expect(liveState.orphanToolResults).toEqual(reloadState.orphanToolResults)
       expect(liveState.lastAssistantWithToolCalls).toBe(reloadState.lastAssistantWithToolCalls)
 
-      // 工具链路覆盖守卫：assistant 带 toolCalls 且 toolResult 已回填（非孤儿）
+      // 工具链路覆盖检查：assistant 带 toolCalls 且 toolResult 已回填（非孤儿）
       const assistantWithTool = reloadState.messages.find((m) => (m.toolCalls?.length ?? 0) > 0)
       expect(assistantWithTool).toBeDefined()
       expect(assistantWithTool?.toolCalls?.[0]?.output).toContain('probe-w21')
@@ -203,7 +203,7 @@ describe.skipIf(!FAUX_PI_READY)(
 
       // bashExecution.timestamp 非同源（reply 无 timestamp）→ 归一后全量对比
       expect(normalizeBashTimestamps(liveState)).toEqual(normalizeBashTimestamps(reloadState))
-      // bash 消息守卫：两侧各恰好一条 bashExecution 且输出一致
+      // bash 消息检查：两侧各恰好一条 bashExecution 且输出一致
       const liveBash = liveState.messages.filter((m) => m.bashExecution !== undefined)
       const reloadBash = reloadState.messages.filter((m) => m.bashExecution !== undefined)
       expect(liveBash).toHaveLength(1)
@@ -280,8 +280,8 @@ describe.skipIf(!FAUX_PI_READY)(
 
 // ── plan-state entry 等价（plan 模式重设计 A7——静态 fixture）──────────────────
 //
-// plan 状态投影的「live ≡ reload」由 scanPlanStateEntries 唯一派生代码构造性保证
-// （plan-state-extractor.ts：live = SessionRecords 增量重拉的前缀切片派生；reload =
+// plan 状态派生视图的「live ≡ reload」由 scanPlanStateEntries 唯一派生代码构造性保证
+// （plan-state-extractor.ts：live = SessionRecords 增量重新拉取的前缀切片派生；reload =
 // getPlanState 磁盘全量派生——同一函数，冷热共用）。本组用静态 entry 序列（不 spawn pi
 // 进程，与上方 faux 轨 describe.skipIf 块正交、任何环境可跑）钉住该构造性：fixture 含旧
 // 四字段与新七字段（skills/docs/reviewState 三 optional，D4）两种 schema entry + 噪声
@@ -332,11 +332,11 @@ describe('plan-state entry 等价（A7 静态 fixture）：live 增量折叠 ≡
     ),
   ]
 
-  it('冷启动全量派生 ≡ 逐条前缀增量折叠（live 增量重拉镜像，构造性不变量）', () => {
+  it('冷启动全量派生 ≡ 逐条前缀增量折叠（live 增量重新拉取镜像，构造性不变量）', () => {
     // reload 路径：getPlanState 磁盘全量 → 同一份派生函数
     const cold = scanPlanStateEntries(SEQUENCE)
     expect(cold).not.toBeNull()
-    // live 路径镜像：SessionRecords 增量重拉（前缀切片）折叠
+    // live 路径镜像：SessionRecords 增量重新拉取（前缀切片）折叠
     // k=4 中段字面量锚点（不从生产函数取）：该前缀已穿越 goal-context 噪声与坏
     // plan-state（data 非对象），view 仍 = 前缀内最后一条合法 entry（旧四字段）的
     // 派生——钉住「跳过继续向前 + 最后一条合法 entry wins」的折叠语义

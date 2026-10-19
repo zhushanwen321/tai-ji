@@ -111,7 +111,7 @@
                普通 element 包装层不进缓存、实例不保留）——demo 同款机制兼容性最稳：
                v-show 保留组件实例（表单态跨分区不丢），display:none ↔ 可见切换 + 类重挂
                重触发 300ms 淡入。分区首访才挂载（visitedViews），避免开弹层即触发全部
-               15 分区的加载副作用。extension 域子视图（contributions）是独立访问键，
+               分区的加载副作用。extension 域子视图（contributions）是独立访问键，
                切回扩展管理页表单态同样保留。 -->
           <template v-for="view in visitedViews" :key="view">
             <div v-show="activeView === view" class="sec-fade" :class="{ on: activeView === view }">
@@ -138,6 +138,7 @@
               <ExtensionPage v-else-if="view === 'extension'" :extensions="extensions" @open-contributions="extensionView = 'contributions'" />
               <PluginContributionsPage v-else-if="view === 'extension-contributions'" @back="extensionView = 'main'" />
               <SystemPage v-else-if="view === 'system'" :system="system" @update="onSystemUpdate" />
+              <NetworkPage v-else-if="view === 'network-proxy'" />
               <SystemPromptPage v-else-if="view === 'system-prompt'" />
               <RenameSessionPage v-else-if="view === 'rename-session'" />
               <TerminalPage v-else-if="view === 'terminal'" :is-active="activeView === 'terminal'" />
@@ -161,7 +162,7 @@
 import { computed, nextTick, onBeforeUnmount, ref, watch } from 'vue'
 import { useEventListener } from '@vueuse/core'
 import { useI18n } from 'vue-i18n'
-import { Settings, Sparkles, Bot, Blocks, SlidersHorizontal, ScrollText, Tag, TerminalSquare, GitBranch, ClipboardList, Server, Volume2, X, Download, Palette, ChartColumn, ArrowLeft, ArrowRight, PanelLeftClose, Wifi, type LucideIcon } from '@lucide/vue'
+import { Settings, Sparkles, Bot, Blocks, SlidersHorizontal, ScrollText, Tag, TerminalSquare, GitBranch, ClipboardList, Server, Volume2, X, Download, Palette, ChartColumn, ArrowLeft, ArrowRight, PanelLeftClose, Wifi, Waypoints, type LucideIcon } from '@lucide/vue'
 import { Button } from '@/components/ui/button'
 import { registerModalSurface, otherSurfaceYieldsEsc } from '@/composables/features/app/modal-surface-registry'
 import { detectPlatform } from '@/composables/effects/usePlatformChrome'
@@ -187,6 +188,7 @@ import UpdatePage from './update/UpdatePage.vue'
 import RemoteAccessPage from './remote-access/RemoteAccessPage.vue'
 import UsagePage from './usage/UsagePage.vue'
 import AppearancePage from './appearance/AppearancePage.vue'
+import NetworkPage from './network/NetworkPage.vue'
 
 // mac 灯组为 OS 绘制，几何随系统版本 → 左上 chrome 组平移按平台分叉（推导见 template 内注释）
 const isMac = detectPlatform() === 'mac'
@@ -221,6 +223,7 @@ const navGroups = [
       { id: 'worktree', labelKey: 'settings.menu.worktree', icon: GitBranch },
       { id: 'update', labelKey: 'settings.menu.update', icon: Download },
       { id: 'remote-access', labelKey: 'settings.menu.remoteAccess', icon: Wifi },
+      { id: 'network-proxy', labelKey: 'settings.menu.networkProxy', icon: Waypoints },
       { id: 'system', labelKey: 'settings.menu.system', icon: SlidersHorizontal },
       { id: 'usage', labelKey: 'settings.menu.usage', icon: ChartColumn },
     ],
@@ -261,7 +264,7 @@ const activeView = computed(() =>
     ? 'extension-contributions'
     : (activeMenu.value as string),
 )
-/** 已访问分区清单（首访挂载，此后 v-show 常挂载——demo「15 分区组件常挂载、切分区
+/** 已访问分区清单（首访挂载，此后 v-show 常挂载——demo「分区组件常挂载、切分区
  *  不丢已填表单与交互态」的 real 形态；首访才挂载是 real 侧加载副作用的收敛差异）。
  *  activeView 变化即登记，覆盖 nav 点击与 extension 子视图事件两条进入路径。 */
 const visitedViews = ref<string[]>([])

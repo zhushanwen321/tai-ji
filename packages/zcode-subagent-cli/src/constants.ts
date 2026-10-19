@@ -28,7 +28,7 @@ export const ZCODE_CLI_DEFAULT_PATH = "/Applications/ZCode.app/Contents/Resource
 /**
  * 唯一凭据源 config（桌面端登录态，zsub V2_CONFIG_PATH 同构）。
  * 为什么绝不读 ~/.zcode/cli/config.json 作为引擎侧凭据校验源：它不在 ZCode GUI
- * 管理面，可能残留历史验证配置（2026-08-25 事故：8/24 zsub 开发残留把默认模型
+ * 管理侧，可能残留历史验证配置（2026-08-25 事故：8/24 zsub 开发残留把默认模型
  * 劫持到失效 router 端点，turn 0 即 401）；桌面端登录凭据落在 v2/config.json，
  * 是 zsub 生产验证过的凭据源。共享宿主 HOME 后引擎侧只读它做模型解析校验；
  * app-server 进程侧 CLI 只认 ~/.zcode/cli/config.json（GUI 从不写该文件），由
@@ -54,7 +54,7 @@ export const ZCODE_KILL_GRACE_MS = 5_000;
 export const ZCODE_ERROR_TAIL_CHARS = 2000;
 
 /**
- * [R2] app-server 控制面请求默认超时（ms）。依据：旧 zsw 实现 REQUEST_TIMEOUT_MS=15s
+ * [R2] app-server 控制范围请求默认超时（ms）。依据：旧 zsw 实现 REQUEST_TIMEOUT_MS=15s
  * （60+ fake-server 用例 + 真机 e2e 验证值）。
  */
 export const ZCODE_APPSERVER_REQUEST_TIMEOUT_MS = 15_000;
@@ -77,7 +77,7 @@ export const ZCODE_APPSERVER_STDERR_TAIL_BUFFER_CHARS = 2048;
 export const ZCODE_APPSERVER_TURN_READ_TIMEOUT_MS = 5_000;
 
 /**
- * [R3] 任务收尾 session/close 的控制面超时（ms，best-effort——失败只 warn 不抛）。
+ * [R3] 任务收尾 session/close 的控制范围超时（ms，best-effort——失败只 warn 不抛）。
  * 旧 zsw 实现 RELEASE_CLOSE_TIMEOUT_MS=1500（wave2 D2，同值同语义）。
  */
 export const ZCODE_APPSERVER_TURN_CLOSE_TIMEOUT_MS = 1_500;
@@ -92,7 +92,7 @@ export type ZcodeTurnTimeoutEnvParse =
   | { state: "invalid" };
 
 /**
- * [R4 D3] abort 链第一级：session/stop 的控制面超时（ms）。stop 失败/超时即落
+ * [R4 D3] abort 链第一级：session/stop 的控制范围超时（ms）。stop 失败/超时即落
  * killChain（协议此时已不可信）。
  */
 export const ZCODE_APPSERVER_STOP_TIMEOUT_MS = 3_000;
@@ -147,9 +147,9 @@ export const ZCODE_APPSERVER_HARVEST_GRACE_MS = 1_000;
 /**
  * 失败终态判据（⛔P-Z2 门修正）：真实 status 枚举 = ["success","interrupted",
  * "failed"]（app-server dist schema f.enum 实证，**无 "error"**——v1 判据
- * `=== "error"` 对真实 failed 终态漏分流即假成功，本修复轮根修）。裁决：
+ * `=== "error"` 对真实 failed 终态漏分流即假成功，本修复轮从根源修复）。裁决：
  *   - "failed" → run-failed（模型/服务端真实失败——§5.2 F-3）；
- *   - "interrupted" → 不分流（用户中断，不属引擎失败——随宿主 abort 主路径收口，
+ *   - "interrupted" → 不分流（用户中断，不属引擎失败——随宿主 abort 主路径收尾，
  *     引擎侧不抢先把它终态化为失败）；
  *   - "error" → 保留为容错分支（非真实枚举，防协议漂移/旧版本形态再滑入假成功；
  *     假成功代价 >> 误报失败代价，取并集防御）。
@@ -179,7 +179,7 @@ export const ZCODE_RESUME_CHARS_PER_TOKEN = 4;
 /**
  * [U6 TTL 通道] sweep defer 时点（ms）：运行时建立后让位首 run 的 create 请求先
  * 出站（sweep 同步执行，大库删除 + checkpoint 可能达秒级——不推后则抢占首 run
- * 的控制面时序）。unref（不阻塞进程退出）。
+ * 的控制范围时序）。unref（不阻塞进程退出）。
  */
 export const ZCODE_SESSION_SWEEP_DEFER_MS = 50;
 

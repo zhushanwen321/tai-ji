@@ -32,7 +32,7 @@ TOTAL_TIMEOUT_SECS=180
 # shellcheck source=scripts/cw/lib/red-phase-guard.sh
 source "$SCRIPT_DIR/lib/red-phase-guard.sh"
 
-# ── 红阶段守卫：实现产物存在（区分力检查——基线代码树无这些产物会 fail）──
+# ── 红阶段检查：实现产物存在（区分力检查——基线代码树无这些产物会 fail）──
 red_phase_guard
 EXTENSION_IMPL="$PROJECT_ROOT/extensions/universal/session-manager/src/index.ts"
 for guard_file in "$EXTENSION_IMPL" "$PROJECT_ROOT/packages/runtime/$TEST_FILE"; do

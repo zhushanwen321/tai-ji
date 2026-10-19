@@ -6,7 +6,7 @@ runtime 子进程 env 出站契约静态检查（约束 C-proc-09）
 调用点（spawn / execFile / execFileSync / fork / pty.spawn / new Worker /
 utilityProcess.fork），要求每个调用点的实参区窗口内出现出站契约构建器
 （buildOutboundChildEnv / composeChildEnvBase）的调用形态，否则按调用点逐一报错并
-给出修复指引；间接组装（包装函数/外部注入/类型契约）与无 env 出站面的调用点在
+给出修复指引；间接组装（包装函数/外部注入/类型契约）与无 env 出站的调用点在
 本脚本 EXEMPT_CALLSITES 内逐条注明理由豁免。
 
 设计依据与背景：docs/architecture/env-propagation-boundary.md
@@ -22,9 +22,9 @@ utilityProcess.fork），要求每个调用点的实参区窗口内出现出站�
    形态），向后到「调用行 + FORWARD_LINES 行」与「自调用括号起点按配对括号延伸的
    实参区终点（FORWARD_MAX_LINES 封顶）」的较大者（覆盖 env 内联在长实参区中段的
    形态，如 git-executor 的 execFile options）。旧「文件内出现构建器即整文件通过」
-   的文件级白名单已废弃——relay-registry `ps` 与 terminal `dscl` 两点未传 env
-   （继承全量父环境含 TAIJI_RUNTIME_TOKEN），却因同文件其他调用点 import/调用了
-   构建器而整文件搭便车放行（审计 RT-8#9）；逐调用点判定消除该盲区。
+   的文件级白名单已废弃——同文件中存在未传 env 的探测点（继承全量父环境含
+   TAIJI_RUNTIME_TOKEN）却因其他调用点 import/调用了构建器而整文件搭便车放行
+   （审计 RT-8#9）；逐调用点判定消除该盲区。
    已知局限：相邻两调用点距离落在窗口内时，前一调用点的构建器调用可能让后一未武装
    调用点搭 12 行内的短程便车——窗口取值以覆盖全部真实武装形态的最小值为准，
    这是文本级检查接受的残余风险（豁免指纹与逐条人工复核兜底）；
@@ -40,7 +40,7 @@ utilityProcess.fork），要求每个调用点的实参区窗口内出现出站�
 3. 窗口内无构建器形态的调用点查 EXEMPT_CALLSITES（file 后缀 + 行内稳定子串指纹）：
    命中则放行并计入豁免统计。用行内容子串而非行号做指纹，代码平移不会让豁免
    静默漂移到新位置；豁免失效时宁可重新报警人工复核，不允许静默放行。
-   豁免两类：无 env 出站面（只读探测 / kill / Worker 同进程线程），与间接组装
+   豁免两类：无 env 出站（只读探测 / kill / Worker 同进程线程），与间接组装
    （env 经本文件包装函数 / 跨包注入 / SDK 类型契约封住，豁免理由须指向组装点）。
 
 退出码：0=通过；2=存在违规；1=脚本自身异常。
@@ -69,7 +69,7 @@ SCAN_ROOTS = [
     "packages/pi-subagent-cli",
     # [W11 收尾 / W12 拖尾子项④，终态口径] engines/ 内建目录已删、壳侧裸 spawn 已消
     # （唯一 spawn 面 = EngineClient（buildEngineChildEnv）/ worktree git
-    # （buildOutboundChildEnv）/ relay-env 探针（豁免通道兜底））——core/src 已入扫描；
+    # （buildOutboundChildEnv）/ SDK node-executor 探针（豁免通道兜底））——core/src 已入扫描；
     # 收尾判据 = 「迁移期临时豁免清零」（engines/zcode 相关临时条目随目录删除消失），
     # 现存 6 条 core 侧永久类豁免（pid-file/reaper/pi-engine/session-runner×2/worker-host
     # 的只读探测/kill/Worker 场景，EXEMPT_CALLSITES 逐条附理由，语义合理非泄漏面）；
@@ -106,7 +106,7 @@ BACKWARD_LINES = 12
 # 向前固定兜底：覆盖 env 内联在调用实参区中段的形态（实测最远 git-executor.ts
 # execFile options 的 env 在调用行后第 12 行，取 15）。
 FORWARD_LINES = 15
-# 向前括号延伸封顶：自调用括号起点按净未闭合括号数延伸实参区，防字符串/正则内的
+# 向前括号延伸封顶：自调用括号起点按净未结束括号数延伸实参区，防字符串/正则内的
 # 括号使计数失真导致窗口无界飞出。
 FORWARD_MAX_LINES = 30
 
@@ -183,19 +183,31 @@ EXEMPT_CALLSITES = [
         "——类型契约形态豁免（RT-8#9 检查逐调用点化登记 2026-09-20）",
     ),
     (
+        "engine-sdk/src/spawn.ts",
+        "spawn(command, [...args], options)",
+        "SDK 自灭链 Windows 分支 taskkill 自身进程树的 spawn 缺省实现（D7/B-U-4）："
+        "数组参数不经 shell、stdio ignore、windowsHide、fire-and-forget，无 env 出站面"
+        "（与 engine/client/reaper.ts / transport/local.ts taskkill 先例同构；"
+        "spawnFn 为平台分支单测 seam，缺省实现仅在 win32 分支调用 taskkill）",
+    ),
+    (
         "node-executor.ts",
         'spawn(execPath, ["--eval", "process.exit(0)"]',
-        "引擎执行器可用性探针（W9，与 runtime relay-env 探针同款语义的 SDK 复刻）："
+        "引擎执行器可用性探针（W9，SDK 单源）："
         "手工构造的白名单最小 env（仅 PATH/HOME/ELECTRON_RUN_AS_NODE）探测执行器可运行性，"
         "父 env 全量不继承，deny 键零暴露——语义强于构建器（全量继承 + deny 剥离），"
         "改用构建器反而放宽 env 面，故按白名单显式构造豁免（db-isolation/protocolization W9 登记 2026-09-09）",
     ),
     # --- packages/runtime/src ---
     (
-        "infra/relay/relay-env.ts",
-        "spawn(execPath",
-        "relay 可用性探针：手工构造的最小 env（PATH 指向候选执行体目录）探测 pi "
-        "可执行性，非父 env 继承型调用，不存在产品变量外泄面（设计文档 §3.6 R5 点名）",
+        "infra/subagent-control/control-server.ts",
+        "spawn(launch.command",
+        "引擎 CLI 进程 spawn（M3 控制通道唯一 spawn 面）：env 由本文件 buildEngineLaunchEnv "
+        "组装（内部 buildEngineChildEnv 三层契约——L1 deny 剥 PACKAGED/TOKEN/凭证键、"
+        "L2 manifest prefixes 放行、L0 基础设施键注入），等价性由 "
+        "__tests__/subagent-control/engine-launch-env.test.ts 键集合锚定；构建器调用距 "
+        "spawn 18 行、超出检查器 12 行武装窗口故走豁免通道（relay-spawn-transport "
+        "u-m3-control 登记 2026-10-18）",
     ),
     (
         "services/reap-orphan-pi.ts",
@@ -206,7 +218,7 @@ EXEMPT_CALLSITES = [
     (
         "infra/crash-correlation.ts",
         "execFileSync(",
-        "崩溃时刻机器面 pi 快照的 ps 只读探测（crash-forensics D10）：数组参数不经 "
+        "崩溃时刻的机器检查对 pi 快照的 ps 只读探测（crash-forensics D10）：数组参数不经 "
         "shell、显式 timeout，仅读系统进程表回读 stdout，无 env 传播意图"
         "（与 reap-orphan-pi.ts ps 探测先例同构）",
     ),
@@ -239,7 +251,7 @@ EXEMPT_CALLSITES = [
         "services/session/background-task-reaper.ts",
         "spawnSync('pgrep'",
         "收殓补杀的子孙 pid 只读枚举（kill 树兜底残留清理）：数组参数不经 shell，"
-        "仅读进程表，无 env 出站面（与 reap-orphan-pi.ts 先例同构）",
+        "仅读进程表，无 env 出站（与 reap-orphan-pi.ts 先例同构）",
     ),
     (
         "services/session/background-task-reaper.ts",
@@ -261,14 +273,6 @@ EXEMPT_CALLSITES = [
         "node:worker_threads 的 Worker 是同进程线程而非 OS 子进程，不存在 env 出站边界；"
         "trusted 插件域真正跨进程出站统一收敛于 plugin-host-process.ts 的 fork 接线点"
         "（该文件经 buildOutboundChildEnv 组装）",
-    ),
-    (
-        "infra/relay/relay-registry.ts",
-        "spawn(this.piCommand",
-        "relay 子进程 spawn 的 env 内联经本文件导出包装 buildChildEnv(frame) 组装"
-        "（内部即 buildOutboundChildEnv：帧 env 全量拷贝基座 + relay 五键剥离 + deny"
-        "兜底，B8 出站接线，导出供单测直验）——间接组装形态，非裸继承"
-        "（RT-8#9 检查逐调用点化登记 2026-09-20）",
     ),
     (
         "infra/pi/rpc-client.ts",
@@ -310,31 +314,31 @@ EXEMPT_CALLSITES = [
         "supervisor/windows-process.ts taskkill.exe 先例同构）",
     ),
     (
-        "engine/client/engine-client.ts",
+        "engine/client/transport/local.ts",
         'spawn("taskkill"',
-        "Windows 进程树终止 kill 处置（崩溃/超时收割补杀），stdio ignore、无数据回流"
-        "通路，无 env 出站面（与 engine/client/reaper.ts taskkill 先例同构）"
-        "（RT-8#9 检查逐调用点化登记 2026-09-20）",
+        "Windows 进程树终止 kill 处置（u-m3-local 自 engine-client.ts 进程面迁移的同一"
+        "豁免，签名/语义未变），stdio ignore、无数据回流通路，无 env 出站面"
+        "（relay-spawn-transport u-m3-local 登记 2026-10-18）",
     ),
     (
         "engine/engines/pi/pi-engine.ts",
         "execFile(",
         "pi 可执行入口版本探测（`<command> --version` 只读探测、显式 timeout、"
-        "仅回读 stdout 版本串，无 env 传播意图；chat 域 inproc 保留面，W7 包内"
+        "仅回读 stdout 版本串，无 env 传播意图；chat 域 inproc 保留范围，W7 包内"
         "等价物同形态）",
     ),
     (
         "engine/engines/pi/session-runner.ts",
         'spawnSync("ps"',
         "后代 pid cmdline 只读探测（身份校验/收割判定），数组参数不经 shell、显式"
-        " timeout，仅读进程表（chat 域 inproc 保留面）",
+        " timeout，仅读进程表（chat 域 inproc 保留范围）",
     ),
     (
         "engine/engines/pi/session-runner.ts",
         'execFile(\n          "git"',
         "git rev-parse --abbrev-ref HEAD 只读探测（子进程 env block 的 branch 行数据"
         "源），cwd 限定、显式 timeout、仅回读 stdout，无 env 传播意图（chat 域 "
-        "inproc 保留面）",
+        "inproc 保留范围）",
     ),
     (
         "orchestration/worker-host.ts",

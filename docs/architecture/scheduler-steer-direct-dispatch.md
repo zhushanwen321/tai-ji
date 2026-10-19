@@ -1,4 +1,4 @@
-# scheduler 投递模型简化：steer 直投（ext-simplify-08 投递面 supersede）
+# scheduler 投递模型简化：steer 直投（ext-simplify-08 投递侧 supersede）
 
 > **一句话结论**：把 scheduler 的到期投递从「session-delivery 内核 park 队列（busy gate + 防重标记 + TTL + 合批 + per-message settled 回调记账）」简化为「tick 到期直接 `pi.sendMessage(steer)` + 受理即记账」；删除 delivery handle 装配、防重标记、`QUEUE_DEDUPE_TTL`、`handleSettled` 与 `schedule` 工具的 `force` 参数。触发链：2026-09-14 验收观测 idle 期 ~10min 精确延迟投递 → 归因为投递链时序反转缺陷 → 用户裁决投递模型过重，提醒类注入应立即 steer 打断，整体大幅简化。
 
@@ -40,7 +40,7 @@ tick 扫描（30s）→ 到期任务 pending → dispatchTask
 
 1. **投递一步化**：tick 到期 → `pi.sendMessage(prompt, {deliverAs:'steer', triggerTurn:true})` → 调用返回即记账。无中间层、无跨层回调契约。
 2. **bug 载体消失**：防重标记、TTL、settled 回调绑定全部删除——10min 延迟缺陷的机制载体不复存在（受理即记账，无「入队未终态」窗口，防重不再需要）。
-3. **工具面简化**：`schedule` 删除 `force` 参数（全部任务统一语义）；创建回显删 `no-force`/`force` 标签。
+3. **工具范围简化**：`schedule` 删除 `force` 参数（全部任务统一语义）；创建回显删 `no-force`/`force` 标签。
 4. **调度本体不动**：tick 轮询 + pending 状态机、rate limit（6 次/分钟）、append-only 记账（upsert/advance/toggle/delete）、croner 解析、resume 重放、importer 一次性迁移——全部保留。
 
 **In-scope**：`extensions/universal/scheduler/`（src + tests + package.json version bump 0.6.0 → 0.7.0）；本文档 + ext-simplify-08 设计文档头部 supersede 注记；changeset；`.tmp/dev-flow/ext-simplify-group-a.impl-plan.md` 风险 10 登记收尾（归因结论 + 以简化移除载体关闭）。
@@ -123,7 +123,7 @@ schedule_control list：runCount +1、nextRunAt 推进（与注入同 tick，不
 |---|---|---|
 | V1 | **idle 周期触发回归**（原 bug 场景）：pi CLI 本地源码 + 单任务 1m interval + 纯 idle 静置 ≥12min | 每轮注入延迟 ≤ tick 粒度 + 投递开销（~35s 内），**无 10min 延迟形态**；advance entry 逐轮 +1、nextRunAt = at+60s |
 | V2 | **busy 打断**：长 prompt 让 agent busy 跨任务到期 | 到期后 ≤35s 内消息以 steer 形态出现在当前 run 内（session JSONL entry 序列佐证），记账同步推进 |
-| V3 | 工具面回归：`schedule` 不带 force 建任务成功、回显无 force 标签；旧调用带 force → typebox 参数校验报错（可理解的错误形态）；`schedule_control list/run/toggle/delete` 全操作正常；会话重开任务恢复（replay 兼容旧 entry 多余 force 字段） |
+| V3 | 工具范围回归：`schedule` 不带 force 建任务成功、回显无 force 标签；旧调用带 force → typebox 参数校验报错（可理解的错误形态）；`schedule_control list/run/toggle/delete` 全操作正常；会话重开任务恢复（replay 兼容旧 entry 多余 force 字段） |
 | V4 | 邻居零影响：`pnpm extensions:typecheck && extensions:lint && extensions:test` 三连绿；`packages/session-delivery` 套件零改动全绿（包本身不动）；runtime 包 delivery 消费套件抽查绿 |
 
 V1 与本次归因实验（/tmp/sched-idle-probe-data，10min23ms 复现）构成同场景对照。

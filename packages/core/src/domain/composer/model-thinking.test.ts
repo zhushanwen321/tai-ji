@@ -7,7 +7,7 @@
  *
  * [u3] 记忆恢复套件（D2/D3 探针表）：
  * - armed 序列族 9 断言点：armed 为内部状态，全部经行为序列断言（恢复 RPC 是否发出 =
- *   token 设立/保留/消费/清除的可观测投影），用真实 u1 memory API（record 预置记忆）
+ *   token 设立/保留/消费/清除的可观测派生视图），用真实 u1 memory API（record 预置记忆）
  *
  * [U2a authored-only 重写]（设计 state-truth-sync-architecture.md D1/D2，随 landing 显示
  * 改线 + 记录点收窄同批）：
@@ -17,7 +17,7 @@
  *   localThinkingLevel 恒 undefined，显示值不写入本地态
  * - 记录 authored-only：唯一记录点 = onThinkingSelect（显式选档时刻入表，不问生效——
  *   staging 试选后取消 / landing 选后未发送同样留痕，刻意反转声明，设计 D2）；「生效即
- *   记录」watch 及纪元/第三形态守卫已删——挂载/建站/换绑/切换链 flush 全程零写入
+ *   记录」watch 及纪元/第三形态检查已删——挂载/建站/换绑/切换链 flush 全程零写入
  * - armed 序列族（已建态）与 staging armed 用例保留不动（V8 回归线）
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
@@ -508,7 +508,7 @@ describe('useComposerModelThinking · Staging Mode（ADR-0056）', () => {
     result.enterStagingMode()
     // 快照初值直断言：源 enterStagingMode 为「先快照 stagingThinking 再置 stagingModel」——
     // stagingModel 置位后两个 computed 才切读 staging 分支，故读到的都是切换前的常规态原值，
-    // 快照初值可直接断言（若回退为反序，thinking 快照会落 undefined，见下一用例守卫）
+    // 快照初值可直接断言（若回退为反序，thinking 快照会落 undefined，见下一用例检查）
     expect(result.currentModelId.value).toBe('provider-A/model-A')
     expect(result.currentThinkingLevel.value).toBe('high')
     // staging 活跃：onModelSelect 写快照，不调 RPC
@@ -524,7 +524,7 @@ describe('useComposerModelThinking · Staging Mode（ADR-0056）', () => {
   })
 
   it('enterStagingMode 快照直断言：快照初值即原值（先快照后切换，防反序回退）', () => {
-    // 反序回退守卫：旧顺序「先置 stagingModel 再读 currentThinkingLevel」下，stagingModel
+    // 反序回退检查：旧顺序「先置 stagingModel 再读 currentThinkingLevel」下，stagingModel
     // 置位后 currentThinkingLevel computed 即切读 staging 分支，读到尚未赋值的
     // stagingThinking（undefined）写进快照——此断言在旧顺序下必红
     const { result, scope } = mount('s1', {
@@ -574,7 +574,7 @@ describe('useComposerModelThinking · Staging Mode（ADR-0056）', () => {
 //
 // 断言策略：armed 是内部状态，全部经行为序列断言——记忆恢复是「同内容异身份 map」下
 // 唯一会调 setThinkingLevel 的路径（既有对齐分支静默），故「恢复 RPC 是否发出」即
-// token 设立/保留/消费/清除的可观测投影。预置记忆用真实 u1 record()。
+// token 设立/保留/消费/清除的可观测派生视图。预置记忆用真实 u1 record()。
 // 已建态基线：s1 =（p/X，'h'），X/Y/Z 同体系（sameContentMap 异身份 + fourLevels）。
 function mountArmedBaseline() {
   return mountMem({
@@ -858,7 +858,7 @@ describe('useComposerModelThinking · 记忆防污染（authored-only 结构保�
     expect(h.result.currentThinkingLevel.value).toBe('l')
     expect(h.result.localThinkingLevel.value).toBeUndefined()
     // 模拟 submitFirstMessage：session create + 新 session 真值落地——
-    // 旧「生效即记录」watch 会在此 flush 写表（D2 被否③ 污染通道），已结构性删除
+    // 旧「生效即记录」watch 会在此 flush 写表（D2 不采用③ 污染通道），已结构性删除
     h.sessionId.value = 's1'
     h.sessionRef.value = { modelId: 'p/M', thinkingLevel: 'l' }
     await nextTick()
@@ -962,16 +962,16 @@ describe('useComposerModelThinking · 记录 authored-only（onThinkingSelect �
   })
 })
 
-// ══════════ [U2a] 切换链零写入（authored-only 结构保证，原 Gate B 跨写污染守卫已删）══════════
+// ══════════ [U2a] 切换链零写入（authored-only 结构保证，原 Gate B 跨写污染检查已删）══════════
 // 历史背景（V4 档位记忆场景，真实 app 复现）：mem[flash]='low'、mem[glm-5.3]='max'，
 // 显式切走再切回后 mem[flash] 变 max——根因是「生效即记录」watch 在切模型回包链的
 // 两次 store 写（applySnapshot({modelId}) 与 applySnapshot({thinkingLevel})）之间的
-// flush 上读到跨纪元错配快照并写穿。旧防线 = 纪元守卫 + 第三形态守卫（armed 在途判定）。
+// flush 上读到跨纪元错配快照并写穿。旧防线 = 纪元检查 + 第三形态检查（armed 在途判定）。
 //
 // [U2a] 处置（设计 D9「删除」类）：记录 watch 整体删除后，非 authored 值结构性不到达
 // 记录路径——切换链任意 flush 时刻（含错配中间态、pi 归一独立帧先落形态）零写入，
-// by construction 无需任何守卫。本组用例保留生产保真 harness（realisticSetLevel）跑
-// 完整切换链时序，断言全链零写入 + authored 手选照常入表（守卫不过度拦截正常记录）。
+// by construction 无需任何检查。本组用例保留生产保真 harness（realisticSetLevel）跑
+// 完整切换链时序，断言全链零写入 + authored 手选照常入表（检查不过度拦截正常记录）。
 const fiveLevelMap = () => ({ ...sameContentMap(), max: 'x' })
 const fiveLevels = [...fourLevels, 'max']
 
@@ -1048,11 +1048,11 @@ describe('useComposerModelThinking · 切换链零写入（authored-only 结构�
     // 切 X → Y：armed={p/Y} 设立，switchModel RPC 在途（不 resolve——模型回包未到）
     const p = h.result.onModelSelect({ modelId: 'Y', provider: 'p' as ProviderId })
     // pi setModel 归一档位独立帧先落：store=(p/X,'x')（旧模型×新档位——
-    // 旧第三形态守卫在此拦 record(p/X,'max')，现结构性无记录路径）
+    // 旧第三形态检查在此拦 record(p/X,'max')，现结构性无记录路径）
     h.sessionRef.value = { modelId: 'p/X', thinkingLevel: 'x' }
     await nextTick()
     expect(lookup('p/X')).toBe('low')
-    // 模型回包落库：store=(p/Y,'x')，consume 幂等命中 mem[Y]='max' 清 armed
+    // 模型回包写入仓库：store=(p/Y,'x')，consume 幂等命中 mem[Y]='max' 清 armed
     h.pending[0].applyAndResolve('p/Y')
     await nextTick()
     expect(h.setLevelCalls).toHaveLength(0)
@@ -1068,8 +1068,8 @@ describe('useComposerModelThinking · 切换链零写入（authored-only 结构�
   })
 })
 
-// ══════════ [u5→U2a] 探针表收口（已建态隔离 / 钳制冻结 / 反查幂等，authored-only 语义）══════════
-describe('useComposerModelThinking · 探针表收口（authored-only 语义更新）', () => {
+// ══════════ [u5→U2a] 探针表收尾（已建态隔离 / 钳制冻结 / 反查幂等，authored-only 语义）══════════
+describe('useComposerModelThinking · 探针表收尾（authored-only 语义更新）', () => {
   it('F4/已建态不受 landing 解析影响：localThinkingLevel 不被触碰（唯一写点 = landing 支路由）', async () => {
     record('p/X', 'low') // 记忆存在——若 landing 链路误写 local 会留下痕迹
     const h = mountMem({

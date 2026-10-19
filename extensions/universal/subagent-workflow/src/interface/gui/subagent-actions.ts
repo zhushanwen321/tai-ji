@@ -3,13 +3,13 @@
 // subagent tool 六 action 的 TUI/GUI 渲染壳（sink 设计 D6② 消费收缩）。
 //
 // 领域内核（入参校验 / message 拒绝文案分流 / fork-from 拒绝链 / 终态映射 /
-// list 投影）在 core @zhushanwen/subagent-core/execution/assembly/subagent-actions-core，
+// list 派生视图）在 core @zhushanwen/subagent-core/execution/assembly/subagent-actions-core，
 // 六 handler + 领域类型消费方经 core barrel import；行为快照等值锚定见 core
 // __tests__/subagent-actions-core.test.ts（期望值硬编码自迁移前实测输出，含错误
 // 文案逐字锚）。参数提取位于 subagent-tool.ts 三入口 execute（D3 拆分终态）：
 // executeSubagentStart（无 action 路由；skillPath-cwd 路径检查）/ executeSubagentManage
-//（isManageAction 守卫 + listParam/cancelParam/closeParam 解包）/ executeSubagentMessage
-//（isMessageAction 守卫 + messageParam/forkFromParam 解包）。本壳只做渲染：
+//（isManageAction 检查 + listParam/cancelParam/closeParam 解包）/ executeSubagentMessage
+//（isMessageAction 检查 + messageParam/forkFromParam 解包）。本壳只做渲染：
 // adapter（领域对象 → {content, details}）+ buildGuiComponent（GUI 协议组件）。
 //
 // content（JSON 字符串）给 LLM，details（SubagentToolResult）给 renderResult，同源同处生成。

@@ -143,7 +143,7 @@ const fullUrl = computed(() =>
 const qrDataUrl = ref('')
 
 /**
- * QR 生成序号（竞态守卫）：fullUrl 快速切换（轮换 token / 换地址）时多代生成并发在途，
+ * QR 生成序号（竞态检查）：fullUrl 快速切换（轮换 token / 换地址）时多代生成并发在途，
  * toDataURL 异步返回乱序——旧一代慢返回不得覆盖新一代结果，每代 await 后比对序号。
  */
 let qrSeq = 0

@@ -2,6 +2,7 @@ import { readFile, readdir } from 'node:fs/promises'
 import { statSync } from 'node:fs'
 import { join } from 'node:path'
 
+import { resolveSessionStoreRoot, listSessionStorePartitions } from './roots.js'
 import type { ZcodeAnchor } from './entry-anchor.js'
 import type { ZcodeFamilyNode } from '../core/family.js'
 
@@ -9,9 +10,9 @@ import type { ZcodeFamilyNode } from '../core/family.js'
  * zcode manifest 直读与枚举（design session-reader-shared-core §3.1 第①步 / D5 / D5-1）。
  *
  * 背景（F21）：pi 路径的 `isRecordManifest` 三必填含 `sessionFile`，而 zcode manifest
- * 落盘时该键被 JSON.stringify 丢弃（subagent-core record-store-rebuild.ts:665/725 投影
+ * 落盘时该键被 JSON.stringify 丢弃（subagent-core record-store-rebuild.ts:665/725 派生视图
  * 照写 `sessionFile: undefined`）→ `listRecordManifests` 对 zcode manifest 恒返回 []。
- * 本单元另开一条**不经过该守卫**的独立路径：
+ * 本单元另开一条**不经过该检查**的独立路径：
  * - **定点直读**（`readZcodeManifest`）：manifest 文件名由 sa-id 完全确定（写侧
  *   `path.join(recordsDir, \`${record.id}.json\`)`，manifest-store.ts:141/153），按确定性
  *   文件名 `<sa-id>.json` 在 `<agentDir>/subagents/<cwd>/records/` 下**窄 walk（命中即止，
@@ -24,7 +25,7 @@ import type { ZcodeFamilyNode } from '../core/family.js'
  * `listRecordManifests`（subagents.ts）一行不改——pi manifest 仍走原扫描路径，本单元
  * 的谓词**不走** isRecordManifest。判别规则与 runtime `transcriptAnchorOf` 同构
  * （F8：`engine === 'zcode'` 第一判据 + sessionRef 双键齐）。用 `engine` 判别而非
- * 「engineHandle 存在性」的理由见 D5 被否项 ②（pi record 提升后 engineHandle 仍持久化，
+ * 「engineHandle 存在性」的理由见 D5 不采用项 ②（pi record 提升后 engineHandle 仍持久化，
  * 存在性判别会误路由）。
  */
 
@@ -43,7 +44,7 @@ export interface ZcodeManifestRecord extends ZcodeFamilyNode {
 /**
  * anchor-missing 的缺失键归因（§3.4：缺失键名进结构化日志——engineHandle 整体缺席 /
  * 缺 sessionRef / 缺 sessionId / 缺 dbPath 归因不同：整体缺席多为旧版本产物，缺
- * sessionId 多为引擎未回调 onHandleReady，缺 dbPath 多为写入面截断）。entry 兜底侧
+ * sessionId 多为引擎未回调 onHandleReady，缺 dbPath 多为写侧截断）。entry 兜底侧
  * 的同构分类（tool-handler classifyIncompleteEntryAnchor）复用本类型单源。
  */
 export type ZcodeAnchorMissingReason =
@@ -67,7 +68,7 @@ export type ZcodeManifestLookup =
   | { kind: 'not-zcode' }
   | { kind: 'anchor-missing'; reason: ZcodeAnchorMissingReason }
 
-/** manifest 顶层 JSON 的读取视图（守卫输入） */
+/** manifest 顶层 JSON 的读取视图（检查输入） */
 type ManifestJson = Record<string, unknown>
 
 function asObject(v: unknown): ManifestJson | undefined {
@@ -125,7 +126,7 @@ function richFieldsOf(m: ManifestJson): ManifestRichFields {
   return out
 }
 
-/** stat 存在性（任意路径无安全面——D5-1 只查「文件在不在」，不开库） */
+/** stat 存在性（任意路径无安全侧——D5-1 只查「文件在不在」，不开库） */
 function fileExists(p: string): boolean {
   try {
     statSync(p)
@@ -161,7 +162,13 @@ function toZcodeManifestRecord(m: ManifestJson): ZcodeManifestRecord | undefined
   }
 }
 
-/** `<agentDir>/subagents` 布局常量（与写侧 path-encoding/manifest-store 布局对齐） */
+/**
+ * [session-store-layout-inversion D6/单新根] zcode manifest 读侧 = session 存储树分区
+ * 固定位置 `<root>/<rootSessionId>/subagents/records/`（根推导与分区枚举复用 roots.ts
+ * 的 resolveSessionStoreRoot / listSessionStorePartitions——同包单源防漂移）。旧布局
+ * `<agentDir>/subagents/<cwdSlug>/records/` 不再读写（D6 存量不迁移不读取——旧 zcode
+ * record 从 agent 面消失是 D6 取舍清单明示项）。
+ */
 const SUBAGENTS_DIR = 'subagents'
 const RECORDS_DIR = 'records'
 
@@ -196,22 +203,16 @@ export async function readZcodeManifest(
   agentDir: string,
   saId: string,
 ): Promise<ZcodeManifestLookup> {
-  const root = join(agentDir, SUBAGENTS_DIR)
-  let slugs: DirentLike[]
-  try {
-    slugs = await readdir(root, { withFileTypes: true })
-  } catch {
-    return { kind: 'not-zcode' } // subagents 根不存在/不可读 → 无 manifest
-  }
-  for (const e of slugs) {
-    if (!e.isDirectory()) continue
-    const file = join(root, e.name, RECORDS_DIR, `${saId}.json`)
+  const root = resolveSessionStoreRoot(agentDir)
+  const partitions = await listSessionStorePartitions(root)
+  for (const part of partitions) {
+    const file = join(root, part, SUBAGENTS_DIR, RECORDS_DIR, `${saId}.json`)
     let raw: string
     try {
       // 命中即止：只读这一个文件（文件名由 sa-id 确定），坏内容同样终止（见 parseManifestLookup）
       raw = await readFile(file, 'utf8')
     } catch {
-      continue // 该 cwd 目录下无此 manifest → 下一候选目录
+      continue // 该分区无此 manifest → 下一候选分区
     }
     return parseManifestLookup(raw)
   }
@@ -236,17 +237,11 @@ interface DirentLike {
  * family 是列表视图，单节点不可达不炸整屏（D5-1 GC 语义）。
  */
 export async function listZcodeManifests(agentDir: string): Promise<ZcodeManifestRecord[]> {
-  const root = join(agentDir, SUBAGENTS_DIR)
+  const root = resolveSessionStoreRoot(agentDir)
   const out: ZcodeManifestRecord[] = []
-  let slugs: DirentLike[]
-  try {
-    slugs = await readdir(root, { withFileTypes: true })
-  } catch {
-    return out // 根不存在/不可读 → 空（无 zcode 节点，不报错）
-  }
+  const slugs = await listSessionStorePartitions(root)
   for (const slug of slugs) {
-    if (!slug.isDirectory()) continue
-    const recordsDir = join(root, slug.name, RECORDS_DIR)
+    const recordsDir = join(root, slug, SUBAGENTS_DIR, RECORDS_DIR)
     let files: DirentLike[]
     try {
       files = await readdir(recordsDir, { withFileTypes: true })

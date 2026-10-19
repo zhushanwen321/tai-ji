@@ -11,15 +11,23 @@
  *
  * 依赖方向（单向不变）：gateway 层（update-handlers）→ update 层（本模块）→ @taiji/shared。
  * 本模块只依赖 @taiji/shared（getDataDir + IProxyConfig）+ node:fs/node:path
+ * + ../utils/atomic-write-json（main 叶子工具，不依赖 electron 运行时）
  * + 动态 require electron（safeStorage），不静态依赖 electron。
  */
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
+import { existsSync, readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import type { IProxyConfig } from '@taiji/shared'
 import { getDataDir } from '@taiji/shared/paths'
+import { atomicWriteJsonFile } from '../utils/atomic-write-json.js'
 
 /** 落盘文件名（消除原两处 'proxy-config.json' 硬编码） */
 const PROXY_CONFIG_FILENAME = 'proxy-config.json'
+
+/**
+ * 落盘文件权限（凭据档 0600，对齐 remote-access store 先例）：本文件承载
+ * safeStorage 降级时的明文 base64 代理凭据，禁 group/other 读取。
+ */
+const PROXY_CONFIG_FILE_MODE = 0o600
 
 /**
  * 代理配置落盘结构（SSOT 定义，原两处 IStoredProxyConfig 收敛于此）。
@@ -207,11 +215,11 @@ export function readProxyConfig(): IProxyConfig {
 /**
  * 写入代理配置（凭证剥离 + 加密，URL 不落明文密码）。
  *
- * 自动 mkdirSync(getDataDir, recursive)，确保目录存在。
+ * 原子写（tmp+rename，崩溃窗口不留半写文件）+ 0600 凭据档 + fsync（rename 落定
+ * 时刻数据已在盘上）；父目录由 atomicWriteJsonFile 自动创建。
  */
 export function writeProxyConfig(config: IProxyConfig): void {
   const filePath = getProxyConfigPath()
-  mkdirSync(getDataDir(), { recursive: true })
 
   const stored: IStoredProxyConfig = { mode: config.mode }
   const credentials: Record<string, string> = {}
@@ -228,8 +236,7 @@ export function writeProxyConfig(config: IProxyConfig): void {
   if (Object.keys(credentials).length > 0) {
     stored.credentials = credentials
   }
-  // eslint-disable-next-line no-magic-numbers -- 2 = JSON 缩进空格数（人类可读）
-  writeFileSync(filePath, JSON.stringify(stored, null, 2))
+  atomicWriteJsonFile(filePath, stored, { mode: PROXY_CONFIG_FILE_MODE, fsync: true })
 }
 
 /**

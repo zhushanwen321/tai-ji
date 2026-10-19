@@ -1,15 +1,15 @@
 // src/execution/__tests__/subagent-service-notify-gate.test.ts
 //
-// [u-svc / T4] 通知可靠性（subagent-service 侧三措施）：
+// [u-svc / T4] 通知可靠性（subagent-service 侧措施）：
 //   - T4①/PS-2：kickOffChatRound.then notify 门按 closedReason 白名单放行——
 //     parent-new/parent-fork 不注入（可能已切换的）新 session（A-6 决策落实）；
 //   - T4②/PS-4：idleTimeoutMs 非法值（>2^31-1 / 非有限值）在 spawn 入口同步 fail-fast，
-//     错误含合法范围（不静默 clamp、不静默不挂）；
-//   - T4④/PS-5：shutdown flush 被 isIdle 门拦时，未投递 pending 复写落盘（ledger entry
-//     通道，notifyId 幂等）供重启 replay——修复「flush 后 dispose 防丢失」注释承诺差距。
+//     错误含合法范围（不静默 clamp、不静默不挂）。
+//   - [T4④/PS-5 随波 2 账本退役] shutdown flush 复写机制已删除——port 形态下
+//     pending 在受理前已落投递日志（受理前落盘先于投递尝试），等待条目由
+//     session_start 差集重放补投，shutdown 复写无对象可补（其用例段一并退役）。
 //
-// mock 形态沿用 subagent-service-message-close.test.ts；notify-ledger 用真模块
-//（bindNotifyLedgerHost + fake host 构造 pending）。
+// mock 形态沿用 subagent-service-message-close.test.ts。
 
 import * as fs from "node:fs";
 import * as os from "node:os";
@@ -27,7 +27,6 @@ vi.mock("../../core/logger.ts", () => ({ getLogger: () => loggerMock }));
 import { registerFakePiEngine } from "./helpers/fake-engine-port.ts";
 import { makePi, type PiMock } from "./helpers/pi-mock.ts";
 import { clearEngines } from "../engine/registry.ts";
-import { bindNotifyLedgerHost, NOTIFY_LEDGER_CUSTOM_TYPE, _resetNotifyLedgerForTest } from "../notify/notify-ledger.ts";
 import { createRecord } from "../persistence/execution-record.ts";
 import { ModelConfigService } from "../assembly/model-config-service.ts";
 import type { RecordStore } from "../persistence/record-store.ts";
@@ -81,9 +80,9 @@ describe("T4① notify gate 二元组（[U5 / §3.2.7] 放弃轮标记阻断 + �
     expect(
       notifyGateAllowsDelivery({ round: 3, lastAbandonedRound: { epoch: 0, round: 2 } }),
     ).toBe(true);
-    // 无标记（settle 竞态迟到回注、user-close/gc 等真实收口）照旧回注。
+    // 无标记（settle 竞态迟到回注、user-close/gc 等真实收尾）照旧回注。
     // [u-arch] gate ①（intent=archived 静默）随收起概念删除退役——编排性关闭的
-    // 迟到回注阻断由放弃轮标记（下方 dispose 集成用例）+ 轮身份守卫 + notifyId
+    // 迟到回注阻断由放弃轮标记（下方 dispose 集成用例）+ 轮身份检查 + notifyId
     // 账本承接。
     expect(notifyGateAllowsDelivery({})).toBe(true);
     expect(notifyGateAllowsDelivery({ round: 5 })).toBe(true);
@@ -188,127 +187,5 @@ describe("T4② idleTimeoutMs entry fail-fast", () => {
     // 校验通过后执行链继续（runSpawn 被 mock，返回 undefined result 会在后续流程抛错/
     // 返回——但绝不能是 idleTimeoutMs 校验错误）
     await expect(service.execute({ task: "x", slug: "test", idleTimeoutMs: 0 })).rejects.not.toThrow(/idleTimeoutMs/);
-  });
-});
-
-describe("T4④ shutdown flush blocked → pending persisted for replay", () => {
-  let agentDir: string;
-  let service: SubagentService;
-  let pi: MockPi;
-
-  beforeEach(() => {
-    _resetNotifyLedgerForTest();
-    ({ agentDir, service, pi } = setup({ isIdle: () => false }));
-  });
-
-  afterEach(() => {
-    _resetNotifyLedgerForTest();
-    fs.rmSync(agentDir, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 });
-  });
-
-  it("persists undelivered pending notifications as ledger entries on dispose when main agent is busy", () => {
-    // 绑定真 ledger 并制造一条未投递 pending（isIdle=false → attemptDeliver 挂回 pending）
-    const ledger = bindNotifyLedgerHost({
-      appendLedgerEntry: (customType, data) => pi.appendEntry(customType, data),
-      readSessionEntries: () => [],
-      isIdle: () => false,
-      onAgentSettled: () => {},
-      sendDelivery: (message) => pi.sendMessage(message as never),
-    });
-    const recorded = ledger.record("notify-1", "Subagent x completed", { id: "sa-x", agent: "x" });
-    expect(recorded).toBe(true);
-    expect(ledger.pendingEntries()).toHaveLength(1);
-
-    service.dispose();
-
-    // 复写落盘：NOTIFY_LEDGER_CUSTOM_TYPE entry 携带 notifyId（幂等键）+ v1 schema
-    const replayEntries = pi.appendEntry.mock.calls.filter(
-      (c) => c[0] === NOTIFY_LEDGER_CUSTOM_TYPE && (c[1] as { notifyId?: string })?.notifyId === "notify-1",
-    );
-    expect(replayEntries.length).toBeGreaterThanOrEqual(2); // record 原账 + dispose 复写
-    expect(replayEntries[0]?.[1]).toMatchObject({ v: 1, notifyId: "notify-1" });
-    expect(loggerMock.warn).toHaveBeenCalledWith(
-      expect.stringContaining("persisted to ledger for replay"),
-      expect.objectContaining({ count: 1 }),
-    );
-    // 重启 replay 可重放：新 ledger 实例扫账面（含复写 entry）应入账该 pending
-    const host2 = {
-      appendLedgerEntry: vi.fn(),
-      readSessionEntries: () =>
-        pi.appendEntry.mock.calls
-          .filter((c) => c[0] === NOTIFY_LEDGER_CUSTOM_TYPE)
-          .map((c) => ({ type: "custom", customType: c[0], data: c[1] })),
-      isIdle: () => false,
-      onAgentSettled: () => {},
-      sendDelivery: vi.fn(),
-    };
-    const ledger2 = bindNotifyLedgerHost(host2);
-    expect(ledger2.recoverFromSession()).toBe(1);
-  });
-
-  it("rewritten entry carries deliveryCustomType — wf-done replays on workflow-result channel, not default", () => {
-    // 通道保真回归：复写 entry 缺通道字段时，恢复扫描的后写覆盖会把 wf-done 改判成
-    // 默认通道（subagent-bg-notify）——runtime W18 失效信号按 customType==='workflow-result'
-    // 判定，错通道则 workflows 增量不刷新 + 边缘聚合误判 unparsed。
-    const ledger = bindNotifyLedgerHost({
-      appendLedgerEntry: (customType, data) => pi.appendEntry(customType, data),
-      readSessionEntries: () => [],
-      isIdle: () => false,
-      onAgentSettled: () => {},
-      sendDelivery: (message) => pi.sendMessage(message as never),
-    });
-    expect(
-      ledger.record("wf-done:run-1", "Workflow run finished", { name: "my-flow" }, { deliveryCustomType: "workflow-result" }),
-    ).toBe(true);
-
-    service.dispose();
-
-    // dispose 复写（最后一条 NOTIFY_LEDGER_CUSTOM_TYPE entry）必须携带通道字段
-    const replayEntries = pi.appendEntry.mock.calls.filter(
-      (c) => c[0] === NOTIFY_LEDGER_CUSTOM_TYPE && (c[1] as { notifyId?: string })?.notifyId === "wf-done:run-1",
-    );
-    expect(replayEntries.length).toBeGreaterThanOrEqual(2);
-    const rewritten = replayEntries[replayEntries.length - 1]?.[1] as { deliveryCustomType?: string };
-    expect(rewritten.deliveryCustomType).toBe("workflow-result");
-
-    // 恢复侧闭环：新 ledger 扫账面（含复写 entry 的后写覆盖），pending 通道保持 workflow-result
-    const host2 = {
-      appendLedgerEntry: vi.fn(),
-      readSessionEntries: () =>
-        pi.appendEntry.mock.calls
-          .filter((c) => c[0] === NOTIFY_LEDGER_CUSTOM_TYPE)
-          .map((c) => ({ type: "custom", customType: c[0], data: c[1] })),
-      isIdle: () => false,
-      onAgentSettled: () => {},
-      sendDelivery: vi.fn(),
-    };
-    const ledger2 = bindNotifyLedgerHost(host2);
-    expect(ledger2.recoverFromSession()).toBe(1);
-    expect(ledger2.pendingEntries()[0]).toMatchObject({
-      notifyId: "wf-done:run-1",
-      deliveryCustomType: "workflow-result",
-    });
-  });
-
-  it("does not rewrite when main agent is idle (flush already delivered)", () => {
-    const ledger = bindNotifyLedgerHost({
-      appendLedgerEntry: (customType, data) => pi.appendEntry(customType, data),
-      readSessionEntries: () => [],
-      isIdle: () => false,
-      onAgentSettled: () => {},
-      sendDelivery: (message) => pi.sendMessage(message as never),
-    });
-    ledger.record("notify-2", "content", { id: "sa-y" });
-    pi.appendEntry.mockClear();
-
-    // idle service：flush 投出（无门拦），dispose 无复写动作
-    const idleService = new SubagentService({
-      cwd: agentDir,
-      modelService: new ModelConfigService({ agentDir, cwd: agentDir }),
-    });
-    const piIdle = makePi();
-    idleService.initSession({ pi: piIdle, sessionId: "root-session", isIdle: () => true });
-    idleService.dispose();
-    expect(piIdle.appendEntry).not.toHaveBeenCalled();
   });
 });

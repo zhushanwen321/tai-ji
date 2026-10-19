@@ -1,11 +1,11 @@
 /**
- * 同数据目录单实例互斥守卫（唯一「拒绝双 runtime」判定点）。
+ * 同数据目录单实例互斥检查（唯一「拒绝双 runtime」判定点）。
  *
  * 背景 [HISTORICAL] 2026-09-22 批量 subagent exit 143 事故：独立 runtime 进程
  * （`pnpm --filter @taiji/runtime start` 形态，验收脚本「重启 runtime」场景）与安装版
  * runtime 以同一数据目录 `~/.taiji` 并行双跑（端口不同不互抢）——新实例把旧实例的
  * session 当自己的 reattach + reaping orphan 杀幸存 subagent，退出时 destroyAll +
- * relay kill-on-disconnect 屠杀全部主 pi 与 subagent，单日 17 轮。根因 = 「同数据
+ * control 通道 kill-on-disconnect 屠杀全部主 pi 与 subagent，单日 17 轮。根因 = 「同数据
  * 目录已有活实例」零互斥；端口探活互斥从根断链（fail-fast 早于任何子进程 spawn）。
  *
  * 判定模型（端口活性为权威，文件只是候选来源）：
@@ -34,7 +34,7 @@ import path from 'node:path'
 import { RUNTIME_INSTANCE_FILE, type RuntimeInstanceRecord } from '@taiji/shared'
 
 // 文件名与记录形状的单一权威在 shared（supervisor port-discoverer 同源消费）；此处
-// re-export 保持本模块既有导入面（测试/调用方）零改动。
+// re-export 保持本模块既有导入侧（测试/调用方）零改动。
 export { RUNTIME_INSTANCE_FILE }
 export type { RuntimeInstanceRecord }
 

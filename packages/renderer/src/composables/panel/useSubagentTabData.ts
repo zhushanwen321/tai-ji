@@ -1,5 +1,5 @@
 /**
- * SubagentTab 对话流数据编排（chat store ops 面消费收口，renderer-deepening D6/u6.1）。
+ * SubagentTab 对话流数据编排（chat store ops 范围消费收尾，renderer-deepening D6/u6.1）。
  *
  * 从 SubagentTab.vue 内联编排下沉而来（行为逐字等价）：组件只保留 readers 面消费
  * （getMessages），写虚拟分区（setMessages / applySubagentStreamDelta /
@@ -11,8 +11,8 @@
  *   恒订阅 stream（E-4 / R3 消解：不依赖 isRunning 陈旧缓存判定订阅时机；B2 后该订阅
  *   承担 delta/chunk/clear 三路分派 + 触发点①接入拉取——本文件是三触发点唯一生产
  *   接线点，见 loadSubagentVirtualPartition 内 B2 注释）
- *   + 客户端 outcome-only 兜底投影（U4 A8，判定先行）
- *   + 空历史时 task 用户气泡种入（drawer-blank u2：outcome 先行、seed 复用分区空守卫随后，
+ *   + 客户端 outcome-only 兜底派生视图（U4 A8，判定先行）
+ *   + 空历史时 task 用户气泡种入（drawer-blank u2：outcome 先行、seed 复用分区空检查随后，
  *   判定顺序即优先级）
  * - agentcall 两段式：快照只读，仅拉历史（D4：不接实时流式；现余 drawer workflow tab
  *   入口）+ 登记虚拟 key 到主 session 清理映射（[MUST_FIX 1]，防 deleteSession 泄漏）
@@ -41,12 +41,12 @@ import { toErrorMessage } from '@taiji/core'
 export interface SubagentTabDataDeps {
   /** 当前选中 subagent 的 record（组件 computed；三段式虚拟 id 才有，agentcall 两段式为 null） */
   currentRecord: ComputedRef<SubagentRecord | null>
-  /** 兜底投影的「无结果」文案（i18n key 由组件注入，composable 不绑 useI18n） */
+  /** 兜底派生视图的「无结果」文案（i18n key 由组件注入，composable 不绑 useI18n） */
   noOutcomeText: () => string
   /**
    * [可视化] agentcall 快照的归属主 session 显式覆盖（可选；缺省回落焦点 pane 的
    * focusedSessionId——SubagentTab 现状行为不变）。workflow-viz overlay 的 agent tab
-   * 必传：overlay 绑定发起 session（D11⑤ 不随焦点切换），焦点漂移窗口内的信号重拉
+   * 必传：overlay 绑定发起 session（D11⑤ 不随焦点切换），焦点漂移窗口内的信号重新拉取
    * 若走焦点 session 会打错分区且清理映射登记错位。
    */
   agentcallMainSid?: () => string | undefined
@@ -72,7 +72,7 @@ function recordEngine(record: SubagentRecord): string {
 }
 
 /**
- * 客户端 outcome-only 兜底投影（读链空结果时，U4 A8）：形状对齐 runtime
+ * 客户端 outcome-only 兜底派生视图（读链空结果时，U4 A8）：形状对齐 runtime
  * subagent-engine-history 的 ③级 outcomeOnlyMessages（user task + result/error 摘要）。
  */
 function outcomeFallbackMessages(record: SubagentRecord, noOutcomeText: string): Message[] {
@@ -110,8 +110,8 @@ export function useSubagentTabData(deps: SubagentTabDataDeps) {
    *   消费走 routeInbound 兜底链不依赖 drawer，订阅打开即挂，非 running 时空转零成本；B2 后
    *   同一订阅承担 delta/chunk/clear 三路分派 + 触发点①接入拉取，见 loadSubagentVirtualPartition
    *   内 B2 注释）
-   *   空历史时兜底判定顺序即优先级（drawer-blank-fix 设计 §7.2）：①outcome 投影（非 pi）先行
-   *   ②task 用户气泡种入随后——两判定共用分区空守卫，①命中或 E-4 已投影时②自然跳过
+   *   空历史时兜底判定顺序即优先级（drawer-blank-fix 设计 §7.2）：①outcome 派生视图（非 pi）先行
+   *   ②task 用户气泡种入随后——两判定共用分区空检查，①命中或 E-4 已派生时②自然跳过
    * - agentcall 两段式：快照只读，仅拉历史（D4：不接实时流式）
    */
   async function loadSubagentData(vid: string): Promise<void> {
@@ -133,9 +133,9 @@ export function useSubagentTabData(deps: SubagentTabDataDeps) {
     const subId = extractSubagentId(vid)
     const history = await subagentStore.fetchAndInject(mainSessionId, subId, (id, msgs) => chatStore.setMessages(id, msgs))
     // 空历史兜底判定顺序即优先级（drawer-blank-fix 设计 §7.2，顺序写死禁止颠倒）：
-    // ① outcome 先行 → ② task 种入随后；①命中后分区非空 → ②自然跳过（靠分区空守卫）。
+    // ① outcome 先行 → ② task 种入随后；①命中后分区非空 → ②自然跳过（靠分区空检查）。
     // ① U4 A8 兜底：非 pi record 读链异常返回空（③级保底失效等异常形态）→ 客户端
-    // outcome 投影顶上，详情页不白屏。pi 空结果行为不变（正常空 session 也可能是空）。
+    // outcome 派生视图顶上，详情页不白屏。pi 空结果行为不变（正常空 session 也可能是空）。
     const record = deps.currentRecord.value
     if (
       record &&
@@ -147,7 +147,7 @@ export function useSubagentTabData(deps: SubagentTabDataDeps) {
     }
     // ② task 种入判定随后（drawer-blank-fix 设计 §7.2）：空历史 × 分区空 × task 非空 →
     // 种入 record.task 用户气泡（来自侧边栏已在 record，零额外 RPC 秒开初始态）。①命中或
-    // E-4 已投影（u1 空历史不擦）时分区非空 → 自然跳过，不加额外排除条件。
+    // E-4 已派生（u1 空历史不擦）时分区非空 → 自然跳过，不加额外排除条件。
     // history.length === 0 即「空历史」前提（fetchAndInject 返回值消费点）；非 pi 无 outcome
     // 的 seed 可达场景 = runtime 磁盘扫描滞后窗口（设计 §5.1 变体）。
     if (

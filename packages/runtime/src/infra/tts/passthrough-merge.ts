@@ -9,7 +9,7 @@
  * 剥离（护栏③⑤，merge 前生效）：鉴权与端点类键（authorization / api-key / url 等，
  * passthrough 只进请求体，不碰 header 与 URL）与协议行为类键（本家由 taiji 内部固定，
  * 如 StepFun return_url / stream_format）从 passthrough 顶层剥离，大小写不敏感。
- * 仅剥顶层：嵌套位置的 vendor 私有字段（词典条目内容等）不含注入面，不得误伤。
+ * 仅剥顶层：嵌套位置的 vendor 私有字段（词典条目内容等）不含注入点，不得误伤。
  *
  * 零字段名知识（护栏①的合并侧）：merge 对 passthrough 键恒等搬运，不做本家字段白名单
  * 过滤——「只消费本家 key」由 service 打包侧结构保证（passthrough = 本家 vendor 子树恒等

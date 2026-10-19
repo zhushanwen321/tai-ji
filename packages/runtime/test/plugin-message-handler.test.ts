@@ -2,7 +2,7 @@
  * PluginMessageHandler 单测 — plugin.* 表驱动分发全分支锚定。
  *
  * 覆盖（complexity-debt 第二批 U08，handlePluginMessage switch→表驱动重构的行为锚定）：
- * - 前置守卫：pluginService null → sendError('handler_error')，不触分发表
+ * - 前置检查：pluginService null → sendError('handler_error')，不触分发表
  * - 12 个 plugin.* case 的 reply/error 路径（payload 透传 + 文案逐字节）
  * - plugin.install 的 invalid_params / success / failure(+error 缺省兜底) 三分支
  * - E6（AP-3）：executeCommand args 非标量 → INVALID_ARGS，不 dispatch
@@ -65,7 +65,7 @@ function buildMsg(type: string, payload: Record<string, unknown>, id = 'm1'): Cl
 
 const WS = {} as never
 
-describe('PluginMessageHandler — 前置守卫（D3）', () => {
+describe('PluginMessageHandler — 前置检查（D3）', () => {
   it('pluginService 为 null → sendError handler_error，不触分发表', async () => {
     const { replies, errors, pluginService } = makeHandler()
     const nullCtx = {

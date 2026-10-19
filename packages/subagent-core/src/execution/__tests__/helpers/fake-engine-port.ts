@@ -1,6 +1,6 @@
 // src/execution/__tests__/helpers/fake-engine-port.ts
 //
-// [W3 chat 域收口 → H1 U6 定形] SubagentService 编排层测试共享的 pi EnginePort 替身。
+// [W3 chat 域收尾 → H1 U6 定形] SubagentService 编排层测试共享的 pi EnginePort 替身。
 //
 // 背景：会话形态轮经协议客户端（registry 'pi' 的 cli 形态 port——RemoteEngine）发往
 // pi-subagent-cli 引擎进程；原 inproc 链路的测试替身随删件消亡。本 helper 是协议 seam
@@ -27,7 +27,7 @@ import type {
 } from "../../../execution/engine/types.ts";
 import { registerEngine } from "../../../execution/engine/registry.ts";
 
-/** 一次 run 调用的捕获（task + ctx + 结算控制面）。 */
+/** 一次 run 调用的捕获（task + ctx + 结算控制范围）。 */
 export class FakeRun {
   readonly task: AgentCallOpts;
   readonly ctx: RunContext;
@@ -107,7 +107,7 @@ export class FakePiEnginePort implements EnginePort {
   autoRejectOnAbort = false;
 
   capabilities(): EngineCapabilities {
-    // 与 pi-subagent-cli manifest 逐位一致（gate 同步面放行 pi 全参数——V4⑤ 反向守护）。
+    // 与 pi-subagent-cli manifest 逐位一致（gate 参数同步路径放行 pi 全参数——V4⑤ 反向守护）。
     return {
       schemaEnforcement: "native",
       steer: "unsupported",

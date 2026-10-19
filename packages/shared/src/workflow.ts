@@ -1,5 +1,5 @@
 /**
- * Workflow 数据模型 —— runtime 投影链的 shared 消费契约。
+ * Workflow 数据模型 —— runtime 派生视图链的 shared 消费契约。
  *
  * 数据来源：pi-subagent-workflow 扩展注册的 workflow 工具族（tool-declaration-slimming
  * D3 拆分后 = `workflow_run`（启动）/ `workflow_control`（status/abort/resume））。主 agent
@@ -10,7 +10,7 @@
  * workflow run 的唯一持久化 = record 事件流（`<sessionDir>/workflow-state/
  * <runId>.record.jsonl`，append-only——[D1] record 单源存储收敛，快照文件已删）。
  * 主 session JSONL 里每 run 写 `workflow-record` v2 注册/终态两条小条目（身份 +
- * record 流路径锚点 / 终局摘要，appendEntry 通路）；runtime 投影（journal-
+ * record 流路径锚点 / 终局摘要，appendEntry 通路）；runtime 派生视图（journal-
  * projection）以注册条目定界、record 流 fold 为骨架合成 WorkflowRunRecord。
  * v1 全量快照条目与 `workflow-state-link` 指针条目仅作历史 run 的 v1 冻结兼容
  * 读（[D16②]：不再新增事件、不可 resume，跟随裁决点 7 清理消亡）。
@@ -24,7 +24,7 @@
 import type { SubagentModelOverrideStatus, SubagentRecentEffectiveModel } from './subagent'
 
 /**
- * workflow run 状态投影三态（[D2] workflow-run-resume-revision）：running（进行中）/
+ * workflow run 状态派生视图三态（[D2] workflow-run-resume-revision）：running（进行中）/
  * interrupted（已中断、可续跑——暂停态，非终局）/ done（终局）。中断 run 在 GUI
  * 显示「已中断（可续跑）」而非「运行中」；[D2] dispatched 并入 running 后快照层
  * 无预备段区分。'paused' legacy 值已随 Pause/Resume 按钮链路退役删除。
@@ -78,15 +78,15 @@ export interface WorkflowAgentCall {
   error?: string
   /**
    * [P3/D6] 该 ask 最近一次事件边沿的墙钟时间（epoch ms；fold ask 步骤行透出，
-   * 事件 journal fold 投影）。可缺省——旧投影无此字段，消费侧缺省渲染
+   * 事件 journal fold 派生视图）。可缺省——旧派生视图无此字段，消费侧缺省渲染
    * （时长槽/停滞判定省略）。
    */
   lastProgressAt?: number
   /**
-   * [可视化 U2] 重试计数（fold 透出，runtime 投影消费 fold 行 attempts——该 call
+   * [可视化 U2] 重试计数（fold 透出，runtime 派生视图消费 fold 行 attempts——该 call
    * 至今的失败尝试次数，无重试 undefined，值域与 core fold 对齐——fold attempts 仅
    * 由 agent-retrying 帧写入）。供 retrying 派生态与 trace attempt 列；缺省 = 旧
-   * 投影无此字段（消费侧展示按 1 处理，判定语义按无重试）。
+   * 派生视图无此字段（消费侧展示按 1 处理，判定语义按无重试）。
    */
   attempts?: number
   /**
@@ -100,7 +100,7 @@ export interface WorkflowAgentCall {
    * 透出，源 = SubagentRecord.id——run 级模型切换聚合应答的成员标识与其同源：前端
    * 成员回执显示态键 = subagentMemberDisplayKey(runId, memberRecordId)，写端聚合应答
    * member.runId 与读端本字段对齐（两值域都是成员 record id）。缺席 = 该 call 无已
-   * 创建成员 record 或载荷未经详情增强通道（live 帧投影）。
+   * 创建成员 record 或载荷未经详情增强通道（live 帧派生视图）。
    */
   memberRecordId?: string
   /**
@@ -111,7 +111,7 @@ export interface WorkflowAgentCall {
   modelOverride?: SubagentModelOverrideStatus
   /**
    * 最近生效值（subagent-model-switch §6.4 分叉态重载承接字段，run 详情侧逐成员携带、
-   * 聚合面不取单一值——同族替换可只发生在部分成员）。仅 pi 引擎成员派生（源 = 该成员
+   * 聚合范围不取单一值——同族替换可只发生在部分成员）。仅 pi 引擎成员派生（源 = 该成员
    * pi session 文件 model_change 尾条目）；与 SubagentRecord.recentEffectiveModel 同构，
    * 语义见该字段注释。
    */
@@ -119,11 +119,11 @@ export interface WorkflowAgentCall {
 }
 
 /**
- * [P3/D6] run 终局形态（record 事件流 run-settled 终帧 outcome，事件 journal fold 投影）。
+ * [P3/D6] run 终局形态（record 事件流 run-settled 终帧 outcome，事件 journal fold 派生视图）。
  * 与 status/reason（DoneReason）正交——「run 自身怎么死的」维度（harness 系统层）。
  *
- * [W2 D5 → D2] 四值终态词表（done/failed/cancelled/time_limited），归类为**投影派生输出**（单一生产者 = runtime extractor
- * 投影构建点，renderer 消费投影载荷字段、不自行翻译）：core↔shared 依赖方向
+ * [W2 D5 → D2] 四值终态词表（done/failed/cancelled/time_limited），归类为**派生视图输出**（单一生产者 = runtime extractor
+ * 派生视图构建点，renderer 消费派生视图载荷字段、不自行翻译）：core↔shared 依赖方向
  * （@taiji/shared 为 private 包、subagent-core 为 npm 发布包）不允许物理单源，
  * 值域跟随由两道锚承载——① runtime extractor 值级判定集合 WORKFLOW_RUN_OUTCOMES
  * （漏升 = interrupted 经提取链被静默丢弃）；② runtime 双包值级等价断言
@@ -141,7 +141,7 @@ export type WorkflowRunOutcome = 'done' | 'failed' | 'cancelled' | 'time_limited
  * SUBAGENT_STATUS_ALL 先例）。
  *
  * 用途：跨包值级等价断言的成员集合（runtime 单测逐成员比对 core
- * ALL_RUN_OUTCOMES / extractor 集合）+ 消费方全集遍历数据源。扩枚举守卫：
+ * ALL_RUN_OUTCOMES / extractor 集合）+ 消费方全集遍历数据源。扩枚举检查：
  * 上方联合与本元组须同步改——正向（元组含非联合值）由 satisfies 编译期拦截；
  * 反向（联合扩值漏改元组）由下方覆盖编译锁拦截。
  */
@@ -186,17 +186,17 @@ export const WORKFLOW_RUN_OUTCOME_LABELS: Record<WorkflowRunOutcome, string> = {
 /**
  * 单条 workflow run 记录（列表项 + 详情数据）。
  *
- * 字段来源对应关系（v2 双源投影：注册/终态条目 + record 事件流 fold——runtime
+ * 字段来源对应关系（v2 双源派生视图：注册/终态条目 + record 事件流 fold——runtime
  * events-projection / workflow-record-projection）：
  * - runId：注册条目 runId（缺注册时终态条目兜底；如 "wf-1783679279983-hlpc46"）
  * - scriptName/slug/startedAt：注册条目（缺注册时 fold created 帧兜底）
- * - description：投影不产出，恒缺省
+ * - description：派生视图不产出，恒缺省
  * - status：fold 三态（run-settled 终帧 → done / 状态机 interrupted →
  *   interrupted / 其余 running）；fold 缺席时终态条目三态自描述
  * - reason：终态条目（core DoneReason 收窄到本词表，词表外归一缺省）
  * - completedAt/usedTokens/totalCallCount：终态条目统计摘要
  * - outcome/errorCode：fold run-settled 终帧优先，终态条目兜底
- * - agentCalls：fold ask 步骤行逐项映射（[P3/D6] lastProgressAt 等投影字段随行透出）
+ * - agentCalls：fold ask 步骤行逐项映射（[P3/D6] lastProgressAt 等派生视图字段随行透出）
  * - stateFilePath：注册条目 recordPath（run 事件 journal 锚——详情面板「run
  *   关联持久化文件」展示位）；缺注册时 ''，消费侧对空串隐藏
  */
@@ -207,7 +207,7 @@ export interface WorkflowRunRecord {
   scriptName: string
   /**
    * workflow 脚本绝对路径（spec.scriptPath——GUI 详情层 workflow 全路径展示源）。
-   * 可缺省：v2 注册条目缺该字段的旧 run / v1 快照投影按缺省处理（空串 = 未记录）。
+   * 可缺省：v2 注册条目缺该字段的旧 run / v1 快照派生视图按缺省处理（空串 = 未记录）。
    */
   scriptPath?: string
   /** run 级短标签（spec.slug，≤20 字符，区分并发 run。旧 run 缺失时为 undefined） */
@@ -231,8 +231,8 @@ export interface WorkflowRunRecord {
   /** state 路径：v2 = 注册条目 recordPath（详情面板「run 关联持久化文件」展示位）；v1 快照恒 ''（对空串隐藏） */
   stateFilePath: string
   /**
-   * [P3/D6] run 级 health（run 停滞观测面）。仅 lastProgressAt 单字段；
-   * stalledSince 由消费侧 lastProgressAt + 阈值推导。v2 事件 fold 投影不产出
+   * [P3/D6] run 级 health（run 停滞观测范围）。仅 lastProgressAt 单字段；
+   * stalledSince 由消费侧 lastProgressAt + 阈值推导。v2 事件 fold 派生视图不产出
    * 本字段（历史快照形态遗留），消费侧按 unknown 处理（不判定停滞）。
    */
   health?: { lastProgressAt: number }
@@ -241,23 +241,23 @@ export interface WorkflowRunRecord {
   /** [P3/D6] 终局结构化错误码（state.errorCode，failed 终局携带）。 */
   errorCode?: string
   /**
-   * [可视化 U2] phase 折叠投影（fold 透出）。fold 对同名 phase 是 last-wins 单行
+   * [可视化 U2] phase 折叠派生视图（fold 透出）。fold 对同名 phase 是 last-wins 单行
    * 快照——多轮丢旧轮、resume 重放可产逆序区间（引擎 fold 已知取舍），消费位 =
    * 对话流 block chips（只表达 phase 名与最新一轮状态）；Gantt 色带/头卡经事件流
    * RPC 按轮分段，禁消费本字段（workflow-visualization 设计 §3.1-2④）。缺省 =
-   * 旧投影无此字段。
+   * 旧派生视图无此字段。
    */
   phases?: WorkflowRunPhaseFoldEntry[]
   /**
    * [可视化 U2] run args 摘要（fold created 行透出——引擎写侧恒写的行内小摘要，
    * 体积有界；args 全文查看经事件流 RPC 的 run-created.args 截断形态）。消费位 =
-   * overlay header args 摘要。缺省 = 旧投影无此字段。
+   * overlay header args 摘要。缺省 = 旧派生视图无此字段。
    */
   argsSummary?: string
 }
 
 /**
- * 单个 phase 的折叠投影行（[可视化 U2]，投影 fold 的 RunPhaseFold 行——last-wins
+ * 单个 phase 的折叠派生视图行（[可视化 U2]，派生视图 fold 的 RunPhaseFold 行——last-wins
  * 单行快照语义）。settledBy 是 fold 内部翻回裁决标记、协议不透出（消费方只读
  * settledAt 判收束：未收束 = 进行中）。
  */
@@ -272,7 +272,7 @@ export interface WorkflowRunPhaseFoldEntry {
 
 // ═══ Workflow 可视化（workflow-visualization 设计 §5-U2）：shared 协议类型冻结 ═══
 //
-// runtime 投影链与 renderer 可视化组件（overlay DAG / 事件流 / Gantt）的共同契约，
+// runtime 派生视图链与 renderer 可视化组件（overlay DAG / 事件流 / Gantt）的共同契约，
 // 纯加法冻结（不动本文件既有字段与类型签名）。
 //
 // 类型跟随的权威源（@taiji/shared 为 private 包、subagent-core 为 npm 发布包，
@@ -284,8 +284,8 @@ export interface WorkflowRunPhaseFoldEntry {
 // - Gantt 分段视图模型 = 设计 §3.1-2 语义规则①②③的输出形态（U5 派生函数与
 //   U4 展示组件共用契约；派生实装落 renderer gantt-segments.ts，不在本包）。
 //
-// token 分项（设计 §3.1-4 投影扩展之一）经上方 WorkflowAgentCall 既有
-// inputTokens/outputTokens/turns 三字段透出（runtime 投影消费 fold usage 分项填充），
+// token 分项（设计 §3.1-4 派生视图扩展之一）经上方 WorkflowAgentCall 既有
+// inputTokens/outputTokens/turns 三字段透出（runtime 派生视图消费 fold usage 分项填充），
 // 不另设嵌套 usage 字段——同一信息禁止双轨。
 
 // ── 大字段截断形态（§3.1-4 D4）────────────────────────────────
@@ -310,7 +310,7 @@ export type WorkflowRunEventTruncatedField = (typeof WORKFLOW_RUN_EVENT_TRUNCATE
 
 /**
  * 单字段截断阈值（字节，2KB——设计 §3.1-4）。截断实装（读 record 流后按字段
- * 序列化并按字节截断）归 U3 runtime 投影单元；实装侧消费本常量，禁止另立第二常量。
+ * 序列化并按字节截断）归 U3 runtime 派生视图单元；实装侧消费本常量，禁止另立第二常量。
  * 消费方 = runtime workflow-run-events-reader 的 truncateUtf8ByBytes（U3 已实装）。
  */
 export const WORKFLOW_RUN_EVENT_TRUNCATE_BYTES = 2048
@@ -341,13 +341,13 @@ export const WORKFLOW_RUN_EVENT_TYPES_ALL = [
 export type WorkflowRunEventType = (typeof WORKFLOW_RUN_EVENT_TYPES_ALL)[number]
 
 /**
- * 事件流条目公共信封（投影 core EventEnvelope）。
+ * 事件流条目公共信封（映射 core EventEnvelope）。
  *
  * ts = epoch ms（core 事件信封原样；注意与 WorkflowAgentCall 的 ISO 字符串不同源
  * ——事件流各帧 ts 是 Gantt 反推公式的输入，单位恒 epoch ms）。seq = 行级单调
- * 序号（可选 = W1 前旧格式行无 seq，core 读取面对缺失放行；消费方不得以 seq 存在
+ * 序号（可选 = W1 前旧格式行无 seq，core 读侧对缺失放行；消费方不得以 seq 存在
  * 性判数据新旧）。truncatedFields = 本行被截断的大字段名清单（缺省 = 无截断）；
- * 截断值仅供展示——任何恢复/重放/对账读面不得以截断载荷为数据源（设计 §3.1-4
+ * 截断值仅供展示——任何恢复/重放/对账读侧不得以截断载荷为数据源（设计 §3.1-4
  * D12 防误用边界：resume 的 $ARGS 恢复与 args 一致性校验在引擎侧读 record 原文
  * 全文字段，不经本通道）。
  */
@@ -436,7 +436,7 @@ export interface WorkflowRunAgentSettledEntry extends WorkflowRunEventEntryBase 
   errorCode?: string
   /** 终局尝试的墙钟耗时毫秒。 */
   durationMs: number
-  /** 失败时子进程 stderr tee 文件路径（诊断引用，与 errorCode 一起落账）。 */
+  /** 失败时子进程 stderr tee 文件路径（诊断引用，与 errorCode 一起写入 journal 记录）。 */
   stderrTeePath?: string
   /** 结果全文的截断值（record 原文为结果对象——本值 = JSON 序列化文本的前缀；截断后禁止 parse 消费）。 */
   result?: string
@@ -498,7 +498,7 @@ export interface WorkflowRunModelOverrideEntry extends WorkflowRunEventEntryBase
   thinkingLevel?: string
 }
 
-/** `worker-log` 条目（worker 诊断日志帧——不参与生命周期状态机的诊断面）。 */
+/** `worker-log` 条目（worker 诊断日志帧——不参与生命周期状态机的诊断范围）。 */
 export interface WorkflowRunWorkerLogEntry extends WorkflowRunEventEntryBase {
   type: 'worker-log'
   /**
@@ -559,7 +559,7 @@ export const WORKFLOW_RUN_EVENT_ENTRY_COVERAGE_LOCK: _WorkflowRunEventEntryCover
 /**
  * attempt 分段收束态。'running' = 未收束（含 run 停止截断的末段——停止着色归
  * 消费方按 run 级 status/outcome 派生，设计 §3.3-D9 单点实现；数据层未 settled
- * 恒投影 running 的现状语义在段级保持一致）。
+ * 恒派生 running 的现状语义在段级保持一致）。
  */
 export type WorkflowGanttSegmentState = 'running' | 'done' | 'failed' | 'cancelled'
 
@@ -720,7 +720,7 @@ export interface WorkflowDagLoop { // oe-exempt:20261002:framework:workflow-viz 
   id: string
   /** 循环体节点 id 集合（按执行序）。 */
   nodeIds: string[]
-  /** 循环回边 id（kind='loop-back' 的边——回边闭合循环体）。 */
+  /** 循环回边 id（kind='loop-back' 的边——回边封住循环体）。 */
   backEdgeId: string
   /** 循环条件/标签原文（可缺省）。 */
   label?: string

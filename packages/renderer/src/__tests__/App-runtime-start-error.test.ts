@@ -5,7 +5,7 @@
  * { message } 推送，此前全仓零消费——启动失败真因永不可见，用户只能在 ~60s 后看到通用
  * failed 文案。修复后 App.vue（failed 屏所在组件）订阅 onRuntimeError + 拉取兜底：
  * - 推送/拉取到达 → failed 屏渲染真实 message（通用 failed 文案保留为兜底）；
- * - 真因经 error-reporter（renderer-log 通道，source='runtime-start-failed'）落台账；
+ * - 真因经 error-reporter（renderer-log 通道，source='runtime-start-failed'）写入登记清单；
  * - 同因去重（推送与拉取兜底双通道不重复上报）；
  * - 无事件 → 只显示既有通用 failed（回归锚）；
  * - App 卸载退订（与 setup 安装配对）；
@@ -93,7 +93,7 @@ vi.mock('@/components/ui/ToastContainer.vue', () => ({ default: { name: 'ToastCo
 // App.vue setup 调 usePermissionRequest()（permission 全局弹窗状态，App.vue:190）——真实实现
 // 要求 main.ts 先 initPermissionRequest（controller 模块级，测试环境无 init）→ 直接 throw。
 // 本用例只验 failed 屏真因呈现，与 permission 链路无关：mock 最小 state（对齐 App.vue :79
-// 消费面 pluginId/permissions/pending/error），init no-op。
+// 消费方 pluginId/permissions/pending/error），init no-op。
 vi.mock('@/composables/shell/usePermissionRequest', () => ({
   usePermissionRequest: () => ({ pluginId: '', permissions: [], pending: false, error: null }),
   initPermissionRequest: vi.fn(),
@@ -173,7 +173,7 @@ describe('RD-3#2：连接屏显示 runtime 启动失败真因', () => {
     expect(wrapper.find('[data-testid="runtime-error-cause"]').exists()).toBe(false)
   })
 
-  it('推送到达 → failed 屏渲染真实 message（通用文案保留），并落台账（source=runtime-start-failed）', async () => {
+  it('推送到达 → failed 屏渲染真实 message（通用文案保留），并写入登记清单（source=runtime-start-failed）', async () => {
     wrapper = mountFailedScreen()
     // 拉取兜底保持 pending（模拟推送先于拉取返回的场景不成立时的自然挂起）
     pushRuntimeError('Runtime binary not found: taiji-runtime')
@@ -186,7 +186,7 @@ describe('RD-3#2：连接屏显示 runtime 启动失败真因', () => {
     expect(cause.text()).toContain('原因：')
     // 通用兜底文案保留（真因是补充显示，不替换）
     expect(wrapper.text()).toContain(GENERIC_FAILED_TEXT)
-    // 台账：经 error-reporter → renderer-log 通道上报
+    // 登记清单：经 error-reporter → renderer-log 通道上报
     expect(ipcHolder.reportRendererLog).toHaveBeenCalledTimes(1)
     expect(ipcHolder.reportRendererLog).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -196,7 +196,7 @@ describe('RD-3#2：连接屏显示 runtime 启动失败真因', () => {
     )
   })
 
-  it('拉取兜底（推送早于订阅安装已丢的 boot 竞态）→ failed 屏同样渲染真因 + 落台账', async () => {
+  it('拉取兜底（推送早于订阅安装已丢的 boot 竞态）→ failed 屏同样渲染真因 + 写入登记清单', async () => {
     wrapper = mountFailedScreen()
     ipcHolder.pullResolve!('EADDRINUSE: port 3310 already occupied')
     await flushPromises()
@@ -213,7 +213,7 @@ describe('RD-3#2：连接屏显示 runtime 启动失败真因', () => {
     )
   })
 
-  it('同因去重：推送与拉取兜底先后到达同一 message → 台账只上报一次', async () => {
+  it('同因去重：推送与拉取兜底先后到达同一 message → 登记清单只上报一次', async () => {
     wrapper = mountFailedScreen()
     pushRuntimeError('spawn ENOENT')
     await flushPromises()

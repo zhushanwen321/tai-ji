@@ -5,7 +5,7 @@
        real 的添加走 Select 下拉（功能结构，demo 为 mock 逐个添加），形态对齐 ghost。 -->
   <GroupCard :title="t('settings.system.smartContextTitle')">
     <div class="px-[10px] pt-[4px] pb-[8px]">
-      <!-- RD-4#8：读配置失败常驻提示（默认值非已存值）+ 重试；控件禁用直到重拉成功 -->
+      <!-- RD-4#8：读配置失败常驻提示（默认值非已存值）+ 重试；控件禁用直到重新拉取成功 -->
       <div
         v-if="loadError"
         data-testid="smart-context-load-error"

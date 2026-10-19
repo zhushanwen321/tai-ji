@@ -48,12 +48,12 @@ const successCriteriaSchema = GoalControlParams.properties.successCriteria;
 const PARAM_DESCRIPTION =
 	typeof successCriteriaSchema.description === "string" ? successCriteriaSchema.description : "";
 
-// ── 第 2 层切片：工具 description 模板字面量（"description: `" 到闭合反引号）──
+// ── 第 2 层切片：工具 description 模板字面量（"description: `" 到结束反引号）──
 
 const TOOL_DESCRIPTION = sliceBetween(ADAPTER_SRC, "description: `", "`");
 
 // ── 第 3 层切片：promptGuidelines 赋值块 ─────────────────────
-// 闭合 "]" 不能用 indexOf 找——块内 guideline 文本自身含 "string[]" 的 "]"，
+// 结束 "]" 不能用 indexOf 找——块内 guideline 文本自身含 "string[]" 的 "]"，
 // 故按行扫描 trim() === "]," 的行作块尾（缩进无关）。
 
 function extractPromptGuidelinesBlock(src: string): string {

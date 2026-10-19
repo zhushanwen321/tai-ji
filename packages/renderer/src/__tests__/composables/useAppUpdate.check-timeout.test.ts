@@ -3,14 +3,14 @@
  *
  * 背景缺陷（2026-09-30 排障）：Electron invoke 无内置超时，ipc.checkForUpdate 一旦
  * 永不返回会连锁杀死两条通路——自动调度链（runAutoCheck 在 await 之后才排下一周期，
- * 单次挂死 = 递归 setTimeout 链永久断裂）与 state（固化 checking，canCheck 守卫此后
- * 跳过一切自动检查）。修复 = check 轴内 withIpcTimeout 60s 兜底，超时按失败收口。
+ * 单次挂死 = 递归 setTimeout 链永久断裂）与 state（固化 checking，canCheck 检查此后
+ * 跳过一切自动检查）。修复 = check 轴内 withIpcTimeout 60s 兜底，超时按失败收尾。
  *
  * 覆盖：
  * - auto 链挂死自愈：invoke 永不返回 → 60s 超时 → state 静默回 idle（不固化 checking）
  *   → 15min 周期照常排上并触发第二次检查（链未断）
  * - manual 挂死超时显形：state='error'（用户可见失败，不再无限等待）
- * - 迟到 resolve 丢弃：超时收口后原 promise 才 resolve，state 不被迟到结果改写
+ * - 迟到 resolve 丢弃：超时收尾后原 promise 才 resolve，state 不被迟到结果改写
  *
  * Mock 策略：族级共享 harness（../helpers/app-update-mount.ts）——ipc 七键默认值 +
  * fake timers/epoch 起点 + markdown 桩 '<h2>notes</h2>'；挂死 = makeCheckHang 返回
@@ -47,7 +47,7 @@ describe('useAppUpdate ipc check 超时兜底', () => {
     expect(ipc.checkForUpdate).toHaveBeenCalledTimes(1)
     expect(result.state.state).toBe('checking')
 
-    // 60s 墙钟到点：超时按 auto 失败收口 → state 回 idle（不固化 checking）
+    // 60s 墙钟到点：超时按 auto 失败收尾 → state 回 idle（不固化 checking）
     await vi.advanceTimersByTimeAsync(60_000)
     expect(result.state.state).toBe('idle')
 
@@ -66,7 +66,7 @@ describe('useAppUpdate ipc check 超时兜底', () => {
     await vi.advanceTimersByTimeAsync(0)
     expect(result.state.state).toBe('checking')
 
-    // 60s 墙钟到点：超时按 manual 失败收口 → error 态显形
+    // 60s 墙钟到点：超时按 manual 失败收尾 → error 态显形
     await vi.advanceTimersByTimeAsync(60_000)
     await pending
     expect(result.state.state).toBe('error')
@@ -74,7 +74,7 @@ describe('useAppUpdate ipc check 超时兜底', () => {
     stop()
   })
 
-  it('迟到 resolve 丢弃：超时收口后原 promise 才返回，state 不被迟到结果改写', async () => {
+  it('迟到 resolve 丢弃：超时收尾后原 promise 才返回，state 不被迟到结果改写', async () => {
     const resolveLate = makeCheckHang()
     const { result, stop } = await startAutoCheckChain()
 

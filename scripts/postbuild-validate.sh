@@ -13,7 +13,7 @@
 set -euo pipefail
 
 # 检查失败原则：任何非 0 退出都输出（不管从哪个 exit 点）
-trap '[ $? -ne 0 ] && echo "[原则] 无论是否本次改动引入的问题，都必须正面修复解决，不允许跳过。" >&2' EXIT
+trap '[ $? -ne 0 ] && echo "[原则] 无论是否本次改动引入的问题，都必须当场直接修复解决，不允许跳过。" >&2' EXIT
 
 RED='\033[0;31m'
 GREEN='\033[0;32m'
@@ -126,7 +126,7 @@ check_wasm_chunks() {
     return 0
 }
 
-# 内置 pi 扩展资产存活 + 发现面完整性（2026-10-03 B′ 事故护栏，三平台共用）
+# 内置 pi 扩展资产存活 + 发现范围完整性（2026-10-03 B′ 事故护栏，三平台共用）
 #
 # 背景：打包态扩展是 esbuild 自包含 bundle（@zhushanwen/subagent-core 被 inline），
 # staged 布局无 node_modules ⇒ `require.resolve` 锚点必败。修复路径 = 回退到 staged
@@ -161,7 +161,7 @@ check_builtin_ext_assets() {
     ag_src=$(find "$core_src/agents" -maxdepth 1 -name '*.md' 2>/dev/null | wc -l | tr -d ' ')
     ag_pkg=$(find "$sw/agents" -maxdepth 1 -name '*.md' 2>/dev/null | wc -l | tr -d ' ')
 
-    # ① + ② 发现面资产存在且与源同量（口径：workflows 只算 .js 且排除 `_` 前缀；agents 算 .md）
+    # ① + ② 发现范围内的资产存在且与源同量（口径：workflows 只算 .js 且排除 `_` 前缀；agents 算 .md）
     if [ "$wf_src" -gt 0 ] && [ "$wf_pkg" = "$wf_src" ]; then
         echo -e "  ${GREEN}✓${NC} 内置 workflow 资产齐备（$wf_pkg 个，与源同量）"
     else
@@ -183,7 +183,7 @@ check_builtin_ext_assets() {
     (cd "$packaged_root" && find . -type f) | sort > "$tmp_post"
     # 白名单（精确模式）：包根文档仅 `./<pkg>/README.md|ARCHITECTURE.md` 一级（传入根已为
     # scope 目录；**非递归**，不得写成 `**/`）+ sourcemap / 类型声明 / 测试基建 /
-    # tree-sitter 源码与 debug wasm（与 electron-builder.yml 排除面一致）
+    # tree-sitter 源码与 debug wasm（与 electron-builder.yml 排除项一致）
     local allowed='^\./[^/]+/(README|ARCHITECTURE)\.md$|\.map$|\.d\.ts$|/__tests__/|\.test\.|/tree-sitter-bash/src/|/tree-sitter-bash/grammar\.js$|/web-tree-sitter/debug/'
     deleted=$(comm -23 "$tmp_pre" "$tmp_post" | grep -vE "$allowed" || true)
     rm -f "$tmp_pre" "$tmp_post"
@@ -345,7 +345,7 @@ if [ -d "$OUTPUT_DIR/mac-arm64" ]; then
             FAILED=1
         fi
 
-        # node-pty prebuilds 平台裁剪守卫 — u2（设计 batch3 §3.2.2）靠 electron-builder.yml
+        # node-pty prebuilds 平台裁剪检查 — u2（设计 batch3 §3.2.2）靠 electron-builder.yml
         # mac 平台段 files 排除 win32-*/darwin-x64 prebuilds。yml 回退或 electron-builder
         # 升级改变 files 匹配语义时，全平台 prebuilds 会静默回到产物（死重 + 体积回涨），
         # CI 无感。产物级断言：prebuilds 目录仅含 darwin-arm64，且 pty.node/spawn-helper 在位
@@ -412,7 +412,7 @@ if [ -d "$OUTPUT_DIR/mac-arm64" ]; then
         if ! check_staged_engines "$APP_PATH/Contents/Resources/engines"; then
             FAILED=1
         fi
-        # 内置 pi 扩展资产存活 + 发现面完整性（B′ 事故护栏）
+        # 内置 pi 扩展资产存活 + 发现范围完整性（B′ 事故护栏）
         if ! check_builtin_ext_assets "apps/electron/resources/extensions/@zhushanwen" "$BUILTIN_EXT_DIR"; then
             FAILED=1
         fi
@@ -420,7 +420,7 @@ if [ -d "$OUTPUT_DIR/mac-arm64" ]; then
         # web 构建（build 编排 build:mobile 先行产出）+ electron-builder extraResources
         # 复制 → <Resources>/mobile-dist。index.html 是 runtime 同源静态托管入口，
         # 缺失 = 构建编排漏跑 build:mobile 或 extraResources 漏配（supervisor prod 分支
-        # 拼 --mobile-dist 时 runtime 启动会报 E5 静态面禁用，这里在产物级提前拦截）。
+        # 拼 --mobile-dist 时 runtime 启动会报 E5 静态范围禁用，这里在产物级提前拦截）。
         MOBILE_DIST_DIR="$APP_PATH/Contents/Resources/mobile-dist"
         if [ -f "$MOBILE_DIST_DIR/index.html" ]; then
             grep -q "Content-Security-Policy" "$MOBILE_DIST_DIR/index.html" \
@@ -506,7 +506,7 @@ if [ -d "$OUTPUT_DIR/win-unpacked" ]; then
     if ! check_staged_engines "$WIN_RESOURCES/engines"; then
         FAILED=1
     fi
-    # 内置 pi 扩展资产存活 + 发现面完整性（B′ 事故护栏）
+    # 内置 pi 扩展资产存活 + 发现范围完整性（B′ 事故护栏）
     if ! check_builtin_ext_assets "apps/electron/resources/extensions/@zhushanwen" "$WIN_BUILTIN"; then
         FAILED=1
     fi
@@ -604,7 +604,7 @@ if [ -d "$OUTPUT_DIR/linux-unpacked" ]; then
     if ! check_staged_engines "$LINUX_RESOURCES/engines"; then
         FAILED=1
     fi
-    # 内置 pi 扩展资产存活 + 发现面完整性（B′ 事故护栏）
+    # 内置 pi 扩展资产存活 + 发现范围完整性（B′ 事故护栏）
     if ! check_builtin_ext_assets "apps/electron/resources/extensions/@zhushanwen" "${LINUX_BUILTIN}"; then
         FAILED=1
     fi

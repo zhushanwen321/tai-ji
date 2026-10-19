@@ -107,8 +107,8 @@ export interface SubagentIdentityData {
   parentSessionId?: string;
   /**
    * 来源身份（H2 S3 修复）。旧文件缺失 → undefined（= "tool" 语义，缺省零迁移）。
-   * standalone 形态（identity entry 链）的 workflow record 经本字段在重建面保留
-   * origin 过滤语义；读取侧经 normalizeReconOrigin 守卫归一（非法值 → undefined）。
+   * standalone 形态（identity entry 链）的 workflow record 经本字段在重建侧保留
+   * origin 过滤语义；读取侧经 normalizeReconOrigin 检查归一（非法值 → undefined）。
    */
   origin?: RecordOrigin;
   /** origin="workflow" 时所属 workflow run id。旧文件缺失 → undefined。 */
@@ -138,9 +138,9 @@ interface JsonlEntry {
 export const IDENTITY_CUSTOM_TYPE = "subagent-identity";
 
 /**
- * 身份域字段单源（identity custom entry 经守卫归一后的公共投影）。全量重建
+ * 身份域字段单源（identity custom entry 经检查归一后的公共派生视图）。全量重建
  * （ReconstructedRecord）与轻量头部读取（IdentityHeaderRecon）共用——字段清单
- * 与守卫归一语义以此为准，两投影的差异只在可变状态/详情域。
+ * 与检查归一语义以此为准，两派生视图的差异只在可变状态/详情域。
  */
 interface RecordIdentityFields {
   id: string;
@@ -161,17 +161,17 @@ interface RecordIdentityFields {
   /** [review round2] worktree 隔离标志（见 SubagentIdentityData.worktree）。 */
   worktree?: boolean;
   /**
-   * 来源身份（H2 S3 修复，来自 identity custom entry 经守卫归一；旧文件 undefined =
-   * "tool" 语义）。漏本字段则全量重建面（getFullRecord → reconstructFromFile）丢
-   * origin，workflow record 逃过 D1 投影过滤。
+   * 来源身份（H2 S3 修复，来自 identity custom entry 经检查归一；旧文件 undefined =
+   * "tool" 语义）。漏本字段则全量重建侧（getFullRecord → reconstructFromFile）丢
+   * origin，workflow record 逃过 D1 派生视图过滤。
    */
   origin: RecordOrigin | undefined;
-  /** origin="workflow" 时所属 workflow run id（守卫归一后；缺省 undefined）。 */
+  /** origin="workflow" 时所属 workflow run id（检查归一后；缺省 undefined）。 */
   parentRunId: string | undefined;
   /**
    * [W0 / D1] origin="workflow" 时在 run 内的步骤索引（同族身份域）。identity
    * custom entry 本体不承载本字段（写入期子文件无此概念）；此处声明是
-   * identityFromBinding 重建投影的类型通道——binding sidecar 携带 stepIndex 时经
+   * identityFromBinding 重建派生视图的类型通道——binding sidecar 携带 stepIndex 时经
    * IdentityHeaderRecon 进 buildRecord 落位。缺省 undefined = 存量形态零迁移。
    */
   stepIndex: number | undefined;
@@ -245,10 +245,10 @@ function isIdentityData(data: unknown): data is SubagentIdentityData {
 }
 
 /**
- * 来源域守卫归一（H2 S3 修复）：origin 非法值/缺省 → undefined（= "tool" 语义）。
- * 字面量守卫与 record-store.readEntryOriginFields（主 entry 重建侧）逐字对齐——
+ * 来源域检查归一（H2 S3 修复）：origin 非法值/缺省 → undefined（= "tool" 语义）。
+ * 字面量检查与 record-store.readEntryOriginFields（主 entry 重建侧）逐字对齐——
  * identity entry 的 data 经 JSON.parse 后 origin 运行时值不可信，TS 类型只是断言，
- * 消费投影点必须守卫。
+ * 消费派生点必须检查。
  */
 function normalizeReconOrigin(v: unknown): RecordOrigin | undefined {
   return v === "workflow" || v === "tool" ? v : undefined;
@@ -459,7 +459,7 @@ function rebuildTurns(entries: JsonlEntry[]): RebuiltTurns {
   return { turns, lastError, totalTokens, lastEntryTsMs };
 }
 
-/** 组装 ReconstructedRecord（终态投影：status 恒 closed/gc + 身份字段归一化 + 派生数据）。 */
+/** 组装 ReconstructedRecord（终态派生视图：status 恒 closed/gc + 身份字段归一化 + 派生数据）。 */
 function buildReconstructedRecord(
   sessionFile: string,
   identity: SubagentIdentityData,
@@ -469,8 +469,8 @@ function buildReconstructedRecord(
   thinkingLevel: string | undefined,
 ): ReconstructedRecord {
   // 终态 status：最后一条 assistant message 的 stopReason 推导（与 finalizeRecord 的判定一致）。
-  // SP-1：done/failed 合并为统一收口态，cancelled 由 tombstone override（record-store 层），本函数不感知。
-  // [U2 两态] 内部词汇无 closed——重建基底 status 恒 idle（已收口语义），终态遗留位
+  // SP-1：done/failed 合并为统一收尾态，cancelled 由 tombstone override（record-store 层），本函数不感知。
+  // [U2 两态] 内部词汇无 closed——重建基底 status 恒 idle（已收尾语义），终态遗留位
   // closedReason="gc" 保留（buildRecord sidecar 矩阵随后覆盖/校正）。
   const status: ExecutionStatus = "idle";
   // closedReason 统 gc（通用完成/失败）。error/aborted 的区分由 error 字段保留。
@@ -484,7 +484,7 @@ function buildReconstructedRecord(
   const rootSessionId = identity.rootSessionId ?? identity.parentSessionId;
   // slug 兜底：旧 identity entry 无 slug 字段 → 空串（与 SubagentRecord.slug: string 契约一致）。
   const slug = identity.slug ?? "";
-  // 来源域归一（H2 S3）：非法值/缺省 → undefined = "tool" 语义（守卫见 normalizeReconOrigin）。
+  // 来源域归一（H2 S3）：非法值/缺省 → undefined = "tool" 语义（检查见 normalizeReconOrigin）。
   const origin = normalizeReconOrigin(identity.origin);
   const parentRunId = normalizeReconParentRunId(identity.parentRunId);
   return {
@@ -533,7 +533,7 @@ function buildReconstructedRecord(
  *   ║       toolCall block → 待匹配队列；stopReason error → lastError  ║
  *   ║     - role:"toolResult" → 配对 toolCallId                         ║
  *   ║       产 InternalToolCall(done/failed)推进请求 Turn              ║
- *   ║  4. 闭合所有 turn；算 turnCount/totalTokens/result/eventLog       ║
+ *   ║  4. 结束所有 turn；算 turnCount/totalTokens/result/eventLog       ║
  *   ╚══════════════════════════════════════════════════════════════════╝
  *
  * 返回 undefined：文件缺失/空/损坏/缺 identity entry/无 assistant message。
@@ -558,13 +558,13 @@ export function reconstructFromFile(sessionFile: string): ReconstructedRecord | 
   const rebuilt = rebuildTurns(entries);
   if (rebuilt.turns.length === 0) return undefined; // 无 assistant message → 空壳，降级。
 
-  // 4. 闭合所有 turn（重建的是历史，全是已完成 turn）。
+  // 4. 结束所有 turn（重建的是历史，全是已完成 turn）。
   for (const turn of rebuilt.turns) {
     turn.closed = true;
   }
 
   // eventLog 从 turns[] 派生（与活态 record 的 getEventLog 同形，消费方无感知差异）。
-  // 必须在闭合 turn 之后派生（deriveEventLog 读 turn.closed）。
+  // 必须在结束 turn 之后派生（deriveEventLog 读 turn.closed）。
   const eventLog = deriveEventLog(rebuilt.turns, rebuilt.lastError, identity.startedAt);
 
   return buildReconstructedRecord(sessionFile, identity, rebuilt, eventLog, model, thinkingLevel);
@@ -739,7 +739,7 @@ function absorbScannedEntry(state: LightIdentityScan, entry: JsonlEntry): boolea
   return false;
 }
 
-/** 扫描态 → IdentityHeaderRecon（归一化与全量 recon 同源：rootSessionId fallback 旧字段、slug 兜底空串、origin/parentRunId 守卫归一）。 */
+/** 扫描态 → IdentityHeaderRecon（归一化与全量 recon 同源：rootSessionId fallback 旧字段、slug 兜底空串、origin/parentRunId 检查归一）。 */
 function toIdentityRecon(
   state: LightIdentityScan,
   identity: SubagentIdentityData,

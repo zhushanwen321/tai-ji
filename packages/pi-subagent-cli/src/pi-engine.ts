@@ -9,10 +9,10 @@
 //     → 本包 spawn-runner（迁移物）；
 //   - chat 轮次 → run 派发形态（每轮一进程：首轮无锚点新建，续聊 resume 锚点
 //     --session 续写原文件；agent_settled resolve + 收割——D7）。U5 起 registry 本体
-//     与 interact 控制面已删除（续聊不经 interact——deliverChatMessage 面 = U2 建
+//     与 interact 控制范围已删除（续聊不经 interact——deliverChatMessage 面 = U2 建
 //     ConversationContinuation 后的 run 域派发）；
-//   - 宿主编排面（executeAndAwait / record 状态回写 / idle 定时器）→ core
-//     （W3 改线消费本引擎的事件面）；
+//   - 宿主编排侧（executeAndAwait / record 状态回写 / idle 定时器）→ core
+//     （W3 改线消费本引擎的事件范围）；
 //   - read：①级 pi 原生读取依赖 core session-reconstructor（§2.7「保持 core」），
 //     引擎包 read 走 ②级 journal 重放（SDK journal-replay）→ ③级 outcome-only
 //     降级链（deviations 登记：①级留在 core 侧过渡期链路，W10 conformance 定夺）。
@@ -130,12 +130,11 @@ export class PiEngine implements EnginePort {
     };
   }
 
-  /** 探针（D7）：invocation 可解析（二进制/脚本存在）+ 版本解析。relay:false 显式
-   *  直连——探针测 pi 本体可解析性，经 relay 探到的是 runtime 健康，语义错位。 */
+  /** 探针（D7）：invocation 可解析（二进制/脚本存在）+ 版本解析。 */
   async probe(opts?: { force?: boolean }): Promise<ProbeReport> {
     if (!opts?.force && this.probeCache) return this.probeCache;
 
-    const invocation = getPiInvocation(["--version"], { relay: false });
+    const invocation = getPiInvocation(["--version"]);
     const invocationOk = isInvocationResolvable(invocation);
     const checks: ProbeReport["checks"] = [
       {
@@ -189,7 +188,7 @@ export class PiEngine implements EnginePort {
     // handle）。dataDir 本身不参与 sessionDir 推导——session 目录唯一源 = 宿主注入
     // ctx.sessionDir（Option C）。
     resolveEngineDataRootOrThrow(this.deps.dataDir);
-    // [池抽象降级 2026-09-13] 原 onPoolResolved 恒值声明已随 poolKey 协议面退役删除
+    // [池抽象降级 2026-09-13] 原 onPoolResolved 恒值声明已随 poolKey 协议范围退役删除
     //（journal 固定落 engines/pi/shared/，宿主侧路径构造即终值）。
 
     const cwd = task.cwd ?? process.cwd();
@@ -202,7 +201,7 @@ export class PiEngine implements EnginePort {
   }
 
   /**
-   * read 三级降级（协议化形态）：②级 journal 重放（SDK journal-replay 纯投影）
+   * read 三级降级（协议化形态）：②级 journal 重放（SDK journal-replay 纯派生视图）
    * → ③级 outcome-only。①级 pi 原生读取（session-reconstructor）按 §2.7 保持
    * core，不随迁（deviations 登记）。
    */
@@ -274,7 +273,7 @@ export class PiEngine implements EnginePort {
     killAllActiveChildren();
   }
 
-  // ── 反向通道注入面（server 构造后接线 host/askUser） ──
+  // ── 反向通道注入点（server 构造后接线 host/askUser） ──
 
   private askUserHandler: ((req: UiRequest) => Promise<UiResponse>) | undefined;
 
@@ -380,7 +379,7 @@ function buildRunOptionalFlags(task: AgentCallOpts, ctx: RunContext): Partial<Sp
     // fork-from 显式分叉源（协议 task.forkSource → --fork）。fork-from 与会话形态轮
     // 互不相交（fork-from 无 resume 键——宿主保证，续写走 resumeSessionFile）。
     ...(task.forkSource !== undefined ? { forkSource: task.forkSource } : {}),
-    // [F6] 根 session id 透传（relay 归属键 SESSION_ID 权威源；undefined 不挂键）。
+    // [F6] 根 session id 透传（嵌套引擎 engine_open 归属键；undefined 不挂键）。
     ...(ctx.sessionRootId !== undefined ? { sessionRootId: ctx.sessionRootId } : {}),
     // [D2 扩展加载显式化] 孙进程扩展路径集透传（协议 ctx 还原 → spawn-args 逐项拼
     // --extension；undefined 不挂键 = 不拼）。
@@ -457,7 +456,7 @@ function toOutcome(result: SpawnRunResult): AgentOutcome {
     ...(result.error !== undefined ? { error: result.error } : {}),
     ...(result.sessionId !== undefined ? { sessionId: result.sessionId } : {}),
     ...(result.sessionFile !== undefined ? { sessionFile: result.sessionFile } : {}),
-    // [D5 诊断引用落账] 失败伴随的 stderr tee 路径透传上协议（spawn-runner 装配，
+    // [D5 诊断引用写入 journal 记录] 失败伴随的 stderr tee 路径透传上协议（spawn-runner 装配，
     // 判据见 AgentOutcome.stderrTeePath 注释）。
     ...(result.stderrTeePath !== undefined ? { stderrTeePath: result.stderrTeePath } : {}),
     toolCalls: result.toolCalls.map((tc) => ({
@@ -468,7 +467,7 @@ function toOutcome(result: SpawnRunResult): AgentOutcome {
   };
 }
 
-/** usage 域映射（collector 聚合面 → AgentOutcomeUsage 的必填字段装配）。 */
+/** usage 域映射（collector 聚合范围 → AgentOutcomeUsage 的必填字段装配）。 */
 function toOutcomeUsage(result: SpawnRunResult): import("@zhushanwen/subagent-engine-sdk").AgentOutcomeUsage {
   const u = result.usage!;
   return {

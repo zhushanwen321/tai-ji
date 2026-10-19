@@ -2,9 +2,9 @@
  * 容器注册表单测 —— display-containers u-foundation（§7.2 条目文本逐字锚 + 载入序列对账）。
  *
  * 三视角：构建者白盒（条目六字段形状/单一事实源引用同一对象）、使用者黑盒（tab 数 8/1/2、
- * 显示序、条目文本——DrawerPanel L1 图标条的用户可见投影）、观察者形态（注册表纯数据形态）。
+ * 显示序、条目文本——DrawerPanel L1 图标条的用户可见派生视图）、观察者形态（注册表纯数据形态）。
  * core 为 headless node 环境（vitest.config 零 DOM），用户可见断言落在 tab 数/顺序/文本等
- * 可见投影锚上；DOM 渲染断言归 ui 层 DrawerPanel 接线单元（E2E-MOCK-02 对账）。
+ * 可见派生视图锚上；DOM 渲染断言归 ui 层 DrawerPanel 接线单元（E2E-MOCK-02 对账）。
  *
  * 运行：cd packages/core && npx vitest run src/domain/drawer/__tests__/registry.test.ts
  */

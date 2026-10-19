@@ -12,8 +12,8 @@
  *   description 对齐 pi.registerCommand 注册期静态串（i18n.ts 中文词条）
  *
  * 曾声明的 base-tool-enhance「后台命令」sidebar.tab view 已随该 native 视图退役
- * （composer-task-tray D10：托盘承接后台命令观察面，Plugins tab 的 plugin sidebar
- * view 机制本身保留——现由 external plugin 贡献面提供）。
+ * （composer-task-tray D10：托盘承接后台命令的观察入口，Plugins tab 的 plugin sidebar
+ * view 机制本身保留——现由 external plugin 贡献点提供）。
  *
  * 本文件是 ContributionRegistry 的扁平贡献源，也是消费侧唯一真相（曾并存的插件
  * 实体级 manifest builtin/tasks/manifest.ts 已随 D11 死面清理删除——形状漂移且生产零消费）。

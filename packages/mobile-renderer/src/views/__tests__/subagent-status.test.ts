@@ -9,7 +9,7 @@
 //      D5 去留表口径的机器断言）。
 //
 // 写分区语义 = 桌面 stores/subagent.ts applyRecords 的最小子集（分区范式：不可变整 Map 替换；
-// 推送是权威数据，空数组照写——对齐桌面推送路径不经 strike 守卫）。
+// 推送是权威数据，空数组照写——对齐桌面推送路径不经 strike 检查）。
 //
 // 运行：cd packages/mobile-renderer && npx vitest run src/views/__tests__/subagent-status.test.ts
 import { describe, expect, it, beforeEach } from 'vitest'

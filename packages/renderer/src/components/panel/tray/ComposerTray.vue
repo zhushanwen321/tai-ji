@@ -7,15 +7,15 @@
   挂 `Composer.vue` 的 `.composer-bar` 左簇、AddMenuPopover 之后（`v-if="sessionId"`，landing 态
   隐藏与指标聚合按钮同判据——无 session 无任务面）；随 Composer 实例化（per-Composer 归属），数据按该 Composer 绑定
   的 sessionId 过滤——各件计数走 `useTrayCounts(sessionId)`（**唯一实例在本外壳创建**，见文末
-  「数据面归属」），widget 走 ViewHostStore 的 per-session 分区，切 session 即跟随。
+  「数据范围归属」），widget 走 ViewHostStore 的 per-session 分区，切 session 即跟随。
   条目 = built-in 五件（bash → subagent → workflow → session → canvas，固定序恒在最左）+
   协议 widget 区（排序后逐个 TrayWidgetButton）。两类条目共用同一套外壳状态机（hover/pin/互斥），
   面板内容按类型分流：
 
     built-in 三件任务域 → TrayNativePanel（kind / sessionId / **显式透传 pinned**——否则行内操作永不渲染）
     built-in 第 4 件 session（u7）→ TraySessionPanel（子会话扁平列表，:session-id / pinned）
-    built-in 第 5 件 canvas（u-tray-entry）→ TrayCanvasPanel（画布清单 + 新建表单，:pinned——
-      画布是跨 session 全局资源，无 :session-id）
+    built-in 第 5 件 canvas（u-tray-entry）→ TrayCanvasPanel（画布清单 + 新建表单，:session-id /
+      :pinned——D4 隔离：清单按归属会话过滤，新建 owner = 焦点会话）
     widget   → TrayWidgetPanel（viewId / meta / guiTree，meta+guiTree 取自外壳 entries 切片）
 
   ── built-in 三态（D7；验收 N2「归零不虚亮」）──
@@ -59,9 +59,9 @@
   ['todo','goal'] 优先 + 当前插入序）决定；拆开即断链。可运行复刻样例见
   __tests__/panel/tray/tray-widget.test.ts 的「外壳契约复刻」宿主。
 
-  ── 数据面归属（D2/D13）──
-  计数/首拉/错误态全部在 useTrayCounts，**唯一实例在本外壳创建**（面板随 Popover 开合反复
-  挂载/卸载，数据面必须活在外壳上：面板打开时数据已在，且打开/关闭不重发首拉 RPC）——创建即
+  ── 数据范围归属（D2/D13）──
+  计数/首次拉取/错误态全部在 useTrayCounts，**唯一实例在本外壳创建**（面板随 Popover 开合反复
+  挂载/卸载，数据范围必须活在外壳上：面板打开时数据已在，且打开/关闭不重发首次拉取 RPC）——创建即
   provide(TRAY_COUNTS_KEY)，面板经 useTrayCountsContext inject 消费同一实例；行集与行内操作在
   TrayNativePanel 自持（面板 emits 为空，外壳无需回调）。
 -->
@@ -131,7 +131,7 @@
         @interact-outside="onInteractOutside"
         @open-auto-focus="onOpenAutoFocus"
       >
-        <!-- 插件 headerAction 段（demo composer-bar spec §2.1 B3：L2 聚合面 = 定时任务 + 托盘 →
+        <!-- 插件 headerAction 段（demo composer-bar spec §2.1 B3：L2 聚合范围 = 定时任务 + 托盘 →
              layers 单钮，被聚合 clock 的直开动作由面板首段承接——demo TrayPanel ⓪「定时任务
              入口行」的对位；与左簇挂载点互斥渲染（左簇只在 expanded 挂），同一份数据源）。
              有可见按钮才出段（hasVisibleHeaderActions，可见性条件单点 isVisibleHeaderAction、
@@ -165,7 +165,7 @@
 
     <template v-if="!aggregated">
     <!-- built-in 五件（固定序 bash → subagent → workflow → session → canvas；三态判定见文件头，
-         canvas 件恒渲染——创建入口豁免，见 builtinItems 注释） -->
+         canvas 件同三态——D4 隔离后无恒渲染豁免，见 builtinItems 注释） -->
     <Popover
       v-for="item in builtinItems"
       :key="item.kind"
@@ -231,6 +231,7 @@
         />
         <TrayCanvasPanel
           v-else
+          :session-id="sessionId"
           :pinned="isPinnedOf(builtinKey(item.kind))"
         />
       </TrayPanelSurface>
@@ -278,7 +279,7 @@
 
 <script setup lang="ts">
 /**
- * 脚本分区：常量与类型 / 数据面（计数 + widget entries） / 外壳状态机（hover·pin·互斥） /
+ * 脚本分区：常量与类型 / 数据范围（计数 + widget entries） / 外壳状态机（hover·pin·互斥） /
  * 关闭路径接线（reka 层） / 会话切换与卸载清理。
  */
 import { computed, inject, onBeforeUnmount, provide, ref, watch } from 'vue'
@@ -324,7 +325,7 @@ const props = withDefaults(
 /**
  * 托盘三态上抛（能力标志 `hasTrayItems`）：托盘数据的唯一实例在本外壳（D2），Composer 底栏的
  * 密度状态机需要「托盘是否全无条目」才能决定序 4 是否生效——故由本外壳 watch 后经事件上抛，
- * 而不是让 Composer 自建第二份托盘数据面。
+ * 而不是让 Composer 自建第二份托盘数据范围。
  */
 const emit = defineEmits<{ 'update:hasItems': [hasItems: boolean] }>()
 
@@ -381,15 +382,15 @@ interface WidgetItem {
   entry: ViewCacheEntry
 }
 
-// ── 数据面 ──
+// ── 数据范围 ──
 
 /** 托盘根节点：层外 pointerdown 判定用（点击自身按钮行不算「面板外」，见文件头） */
 const trayRootEl = ref<HTMLElement | null>(null)
 
 /**
- * built-in 各件计数（口径/首拉/错误态全在 useTrayCounts；本组件只做三态判定）。
- * **数据面单例**：本组件是唯一实例创建者，创建即 provide 给面板（TRAY_COUNTS_KEY）——
- * 面板随 Popover 每次打开重新挂载，自建实例会在每次 hover 打开时重发首拉 RPC。
+ * built-in 各件计数（口径/首次拉取/错误态全在 useTrayCounts；本组件只做三态判定）。
+ * **数据范围单例**：本组件是唯一实例创建者，创建即 provide 给面板（TRAY_COUNTS_KEY）——
+ * 面板随 Popover 每次打开重新挂载，自建实例会在每次 hover 打开时重发首次拉取 RPC。
  */
 const tray = useTrayCounts(computed(() => props.sessionId))
 provide(TRAY_COUNTS_KEY, tray)
@@ -397,15 +398,14 @@ provide(TRAY_COUNTS_KEY, tray)
 /**
  * built-in 条目 = 有记录的件（三态：running > 0 亮 / 有历史 dim / 全无 → 不渲染）。
  * 计数源与面板列表同源（useTrayCounts），不产生第二份口径。
- * **canvas 件豁免「全无不渲染」**：新建画布的唯一入口 = 托盘面板的「＋ 新建画布」，
- * 零画布时按钮若消失创建即死锁；且三态过滤的原始语境是 per-session 任务记录
- * （画布是跨 session 全局资源，「本 session 无记录」前提不成立）——canvas 恒渲染
- * （零画布 = dim 态），hasTrayItems 随之恒 true（聚合入口恒在，含 canvas 段）。
+ * canvas 件无豁免（session-store-layout-inversion 裁决 4）：画布按归属会话隔离后
+ * 「本 session 无画布」前提成立——零画布时按钮隐藏；新建入口随首张画布出现（agent
+ * canvas_enter create / 托盘面板在既有画布会话中新建）。
  */
 const builtinItems = computed<BuiltinItem[]>(() =>
   BUILTIN_ORDER.flatMap((kind) => {
     const { running, total } = tray.counts.value[kind]
-    if (total === 0 && kind !== 'canvas') return []
+    if (total === 0) return []
     return [{ kind, icon: BUILTIN_ICONS[kind], running, total }]
   }),
 )
@@ -436,8 +436,7 @@ const widgetItems = computed<WidgetItem[]>(() => {
 /**
  * 托盘是否有条目（built-in 任一类别有记录 或 协议 widget 有 entry）——三态之「全无」的对立面，
  * 供 ① 序 4 聚合入口是否渲染（本地）② Composer 底栏密度状态机的 `hasTrayItems`（上抛）。
- * canvas 件恒渲染（创建入口豁免，见 builtinItems 注释）→ 本标志恒 true：托盘入口恒在是
- * 该豁免的一致推论（非聚合态 canvas 按钮恒在 / 聚合态聚合钮恒在，两形态同一入口可达性）。
+ * canvas 件同样按「本会话有画布」参与三态（D4 隔离后无恒渲染豁免，见 builtinItems 注释）。
  * 声明位置在 widgetItems 之后：`immediate` 立即求值，不得落进 widgetItems 的 TDZ 窗口。
  */
 const hasTrayItems = computed(() => builtinItems.value.length > 0 || widgetItems.value.length > 0)
@@ -445,7 +444,7 @@ const hasTrayItems = computed(() => builtinItems.value.length > 0 || widgetItems
 watch(hasTrayItems, (value) => emit('update:hasItems', value), { immediate: true })
 
 /**
- * 插件 headerAction 可见面（聚合面板首段的渲染条件；与左簇挂载点互斥——左簇只在
+ * 插件 headerAction 可见性（聚合面板首段的渲染条件；与左簇挂载点互斥——左簇只在
  * leftCluster==='expanded' 挂 HeaderActionsHost，聚合态同一数据源改由本面板承载，
  * demo composer-bar spec §2.1 B3「定时任务 + 托盘 → layers 单钮」的入口承接）。
  */
@@ -454,7 +453,7 @@ const hasHeaderActions = computed(() =>
   !!headerActionsSource && hasVisibleHeaderActions(headerActionsSource, props.sessionId),
 )
 
-/** 插件 toolbar 贡献面 + 聚合入口可见条件（W3a：托盘有条目 / 插件 toolbar 有贡献 /
+/** 插件 toolbar 贡献点 + 聚合入口可见条件（W3a：托盘有条目 / 插件 toolbar 有贡献 /
  *  headerAction 有入口三者任一，皆无不留死入口；贡献判定实现见 use-plugin-toolbar，
  *  headerAction 判定 = hasVisibleHeaderActions——与密度状态机的 absent 判据同构，
  *  缺一会造成「状态机判 aggregated 而聚合钮不渲染」的入口丢失）。 */

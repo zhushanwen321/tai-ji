@@ -1,6 +1,6 @@
 /**
  * legacy-entries.test.ts — plan-state entry legacy 映射行为测试（D-B4-1 下沉后映射契约
- * 唯一断言面）。
+ * 唯一断言范围）。
  *
  * 承接原 shared fixture 等价表（LEGACY_ENTRY_VIEW_EQUIVALENCE_PAIRS，5 对等价契约，随下沉
  * 删除）的契约义务：读方①（扩展 reconstructPlanState）/ 读方②（runtime extractor）共用的
@@ -15,7 +15,7 @@ import { PLAN_LIFECYCLE_STATES } from './state-machine'
 import { PLAN_STATE_CUSTOM_TYPE, readLifecycleState, readResumeHint } from './legacy-entries'
 
 describe('PLAN_STATE_CUSTOM_TYPE 字面量冻结锚', () => {
-  it("恒为 'plan-state'（扩展写侧落盘与 runtime 投影链共用判别键，改即历史会话失联）", () => {
+  it("恒为 'plan-state'（扩展写侧落盘与 runtime 派生视图链共用判别键，改即历史会话失联）", () => {
     expect(PLAN_STATE_CUSTOM_TYPE).toBe('plan-state')
   })
 })
@@ -34,12 +34,12 @@ describe('readLifecycleState：新字段直读', () => {
 })
 
 describe('readLifecycleState：旧 entry 映射（原 5 对等价契约的映射分支）', () => {
-  it("reviewState 'awaiting' → reviewing（等价对样本 0/② 的映射腿）", () => {
+  it("reviewState 'awaiting' → reviewing（等价对样本 0/② 的映射路径）", () => {
     expect(readLifecycleState({ reviewState: 'awaiting' }, true)).toBe('reviewing')
     expect(readLifecycleState({ reviewState: 'awaiting' }, false)).toBe('reviewing')
   })
 
-  it("reviewState 'revising' → revising（等价对样本 ① 的映射腿）", () => {
+  it("reviewState 'revising' → revising（等价对样本 ① 的映射路径）", () => {
     expect(readLifecycleState({ reviewState: 'revising' }, true)).toBe('revising')
     expect(readLifecycleState({ reviewState: 'revising' }, false)).toBe('revising')
   })

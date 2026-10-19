@@ -1,9 +1,9 @@
 #!/usr/bin/env node
 /**
- * 数据布局字面量守卫（check-layout-literals，设计 §10 U18 / 约束 C-pi-14）。
+ * 数据布局字面量检查（check-layout-literals，设计 §10 U18 / 约束 C-pi-14）。
  *
  * 动机：taiji 数据布局与 pi 0.84.x 默认布局同构（agent/ 子树），唯一差异 = 根目录
- * （~/.pi/ vs <dataDir>/）。守卫把「旧 pi/ 兄弟布局字面量回流」变成可机检的失败
+ * （~/.pi/ vs <dataDir>/）。检查把「旧 pi/ 兄弟布局字面量回流」变成可机检的失败
  * （布局切换期曾抓到 config-service-paths.test.ts 断言旧布局的存量失真）。
  *
  * 检查逻辑（行级正则，两个模式族）：
@@ -25,7 +25,7 @@
  * 新增豁免必须附理由；理由消失（如对应插件/脚本改造完成）时同步移除条目。
  *
  * 用法：node scripts/check-layout-literals.mjs（每次全量扫描，毫秒级，无增量模式——
- * 触发面由 pre-commit 按路径控制）
+ * 触发范围由 pre-commit 按路径控制）
  */
 import { readFileSync, readdirSync, statSync } from 'node:fs'
 import { join, relative } from 'node:path'
@@ -47,11 +47,11 @@ const SKIP_DIRS = new Set(['node_modules', 'dist', 'test-results', '.git', 'buil
 export const LAYOUT_LITERAL_EXEMPT = [
   {
     file: 'scripts/check-layout-literals.mjs',
-    reason: '守卫本体——模式定义、文档注释与豁免理由表必然引用被检字面量（定义处即合法持有者）',
+    reason: '检查本体——模式定义、文档注释与豁免理由表必然引用被检字面量（定义处即合法持有者）',
   },
   {
     file: 'scripts/__tests__/check-layout-literals.test.mjs',
-    reason: '守卫单测——用例必须构造新旧字面量样本（报红/放行/排除断言的 fixture）',
+    reason: '检查单测——用例必须构造新旧字面量样本（报红/放行/排除断言的 fixture）',
   },
   {
     file: 'packages/runtime/src/infra/pi/pi-maintenance.ts',
@@ -68,7 +68,7 @@ export const LAYOUT_LITERAL_EXEMPT = [
   },
   {
     file: 'packages/runtime/test/recent-workspaces-real.test.ts',
-    reason: '负向回归断言：字面量 pi/agent 即「getConfigDir() 返回值不得含旧布局子串」的断言本体（守卫同盟，非违规）',
+    reason: '负向回归断言：字面量 pi/agent 即「getConfigDir() 返回值不得含旧布局子串」的断言本体（检查同盟，非违规）',
   },
   {
     file: 'scripts/prepare-pi-resources.sh',

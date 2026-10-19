@@ -5,7 +5,7 @@
  * 覆盖：
  * - URL 注入链终点：core openBrowser(url, sessionId) → 浮层壳（wfvz-overlay）内渲染 BrowserPane
  *   （S5「渲染可点」的 DOM 面——点击链前半在 ui MarkdownRenderer ⑤路用例，后半在此）
- * - 显示收口事实源：browser:overlay-state 上报 {open, content, sessionId}，且**先于** show 请求
+ * - 显示收尾事实源：browser:overlay-state 上报 {open, content, sessionId}，且**先于** show 请求
  *   （preload 契约「谓词事实先于 show 请求」）；关闭态同样上报
  * - view 定位浮层视口（S5）：rect 同步观测目标 = 浮层壳内 browser-vp 元素——pushRect 推送该
  *   元素 getBoundingClientRect 的 round 值（jsdom stub 单元素，断言观测对象即浮层视口）
@@ -101,7 +101,7 @@ describe('BrowserOverlay（BrowserPane 挂浮层壳，S5 渲染可点）', () =>
     wrapper.unmount()
   })
 
-  it('显示收口事实源：browser:overlay-state 上报 {open, content, sessionId} 且先于 show 请求（谓词事实先行）', async () => {
+  it('显示收尾事实源：browser:overlay-state 上报 {open, content, sessionId} 且先于 show 请求（谓词事实先行）', async () => {
     const wrapper = await mountBrowserOverlay()
     expect(mockBrowserSetOverlayState).toHaveBeenCalledWith({
       open: true,
@@ -119,9 +119,11 @@ describe('BrowserOverlay（BrowserPane 挂浮层壳，S5 渲染可点）', () =>
     wrapper.unmount()
   })
 
-  it("canvas 内容上报：openCanvasOverlay → browser:overlay-state 收 content='canvas' 且 sessionId=null（画布跨 session 无会话归属，设计 D4/D7）", async () => {
+  it("canvas 内容上报：openCanvasOverlay(canvasId, 归属会话) → browser:overlay-state 收 content='canvas' 且 sessionId=null", async () => {
+    // [u-canvas] payload 现持归属会话（core openCanvasOverlay 双参契约，画布归属创建会话）；
+    // 主进程显示谓词面 sessionId 恒报 null（canvas 内容不驱动 browser view 显示，谓词面语义不变）
     const wrapper = mount(BrowserOverlay)
-    openCanvasOverlay('cvs-1')
+    openCanvasOverlay('cvs-1', 'sess-canvas')
     await nextTick()
     await nextTick()
     expect(mockBrowserSetOverlayState).toHaveBeenCalledWith({

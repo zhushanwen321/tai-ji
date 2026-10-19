@@ -10,7 +10,7 @@
   ScrollArea 一个有界高度（其根是 flex-1 + min-h-0，无界高度下内部滚动不成立）。
 
   ── 契约 ──
-  props.sessionId: string —— 焦点 session id（透传段内面板；数据面经 inject 消费外壳单例，
+  props.sessionId: string —— 焦点 session id（透传段内面板；数据范围经 inject 消费外壳单例，
     本组件不自建 useTrayCounts 实例）
   props.sections: 段头 + 段体所需的 built-in 切片（kind / icon / running / total；由外壳
     ComposerTray 从同一份 `useTrayCounts` 计数派生传入——计数只有一份口径）
@@ -29,7 +29,7 @@
       <!-- 段间 hairline 分隔（demo .tray-seg + .tray-seg { border-top: 1px solid var(--hairline) }） -->
       <div class="flex flex-col divide-y divide-hairline">
         <!-- built-in 各类别段（顺序 = 外壳 built-in 固定序 bash → subagent → workflow → session →
-             canvas；canvas 段恒在——外壳对 canvas 件豁免「全无不渲染」，创建入口恒可达） -->
+             canvas；段集 = 外壳 builtinItems——D4 隔离后 canvas 段同三态，零画布不出段） -->
         <section
           v-for="section in sections"
           :key="section.kind"
@@ -58,7 +58,7 @@
               :pinned="pinned"
             />
             <TraySessionPanel v-else-if="section.kind === 'session'" :session-id="sessionId" :pinned="pinned" />
-            <TrayCanvasPanel v-else :pinned="pinned" />
+            <TrayCanvasPanel v-else :session-id="sessionId" :pinned="pinned" />
           </div>
         </section>
 

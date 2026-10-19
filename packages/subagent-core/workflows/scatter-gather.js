@@ -42,7 +42,7 @@ if (!task) {
 // 必须用 workerData.scriptPath 锚定脚本目录（review-fix-loop 同模式）；
 // scriptPath 注入是 worker 契约的显式前提（D1 加固），缺席或为空串即 fail-fast
 // （空串 = record 流为 scriptPath 载荷落地前的旧格式，resume 重建无锚可恢复），
-// 不回退 cwd——消除从用户目录误加载/被植入同名 _shared/agent-refs.cjs 的代码加载面。
+// 不回退 cwd——消除从用户目录误加载/被植入同名 _shared/agent-refs.cjs 的代码加载路径侧。
 if (typeof workerData === "undefined" || !workerData || typeof workerData.scriptPath !== "string" || workerData.scriptPath === "") {
   if (workerData && typeof workerData.scriptPath === "string") {
     throw new Error("scatter-gather: core_module_load_failed: workerData.scriptPath 为空串（record 流为旧格式，无 scriptPath 载荷），无法定位 workflows/_shared/agent-refs.cjs。" +

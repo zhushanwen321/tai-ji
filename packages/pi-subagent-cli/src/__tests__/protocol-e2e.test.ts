@@ -185,7 +185,7 @@ describe("pi-subagent-cli 协议 e2e（bin 真机 NDJSON 往返）", () => {
       host.replyReverse(String(childSpawned.id), { ok: true });
 
       // host/log 是条件通道（仅引擎有 warn/error 时发出）——不在此等待，
-      // 数据面应答形态已由 poolResolved/childSpawned/handleReady 覆盖。
+      // 数据范围应答形态已由 poolResolved/childSpawned/handleReady 覆盖。
 
       // handleReady：get_state 握手回填 sessionFile
       const handleReady = await host.waitForReverse("host/handleReady");

@@ -96,7 +96,7 @@ describe('ws-client probeAlive 探活死链检测', () => {
     vi.advanceTimersByTime(10_000)
     expect(f.closeCalls).toBe(0)
 
-    // 坏帧（parse 失败路径）同样是链路活性证据——清除点在大小守卫/parse 之前
+    // 坏帧（parse 失败路径）同样是链路活性证据——清除点在大小检查/parse 之前
     probeAlive()
     f.triggerMessage('{oops')
     vi.advanceTimersByTime(10_000)

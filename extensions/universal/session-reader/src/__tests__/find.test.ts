@@ -3,6 +3,10 @@ import { tmpdir } from 'node:os'
 import { mkdtemp, mkdir, writeFile, rm, utimes } from 'node:fs/promises'
 import { join } from 'node:path'
 import { findSessions } from '../discovery/find.js'
+import {
+  resolveStoreSubagentSessionsDir,
+  resolveStoreSubagentRecordsDir,
+} from '../discovery/roots.js'
 import { FIX_E6 } from './fixtures.js'
 
 /**
@@ -131,21 +135,31 @@ async function makeSubagentSession(
 }
 
 describe('findSessions', () => {
+  let root: string
   let agentDir: string
   let slugDir: string
-  /** subagent fixture 目录（模拟 subagents/<cwd编码>/sessions/ 结构，resolveSessionRoots [subagent] 根扫描路径） */
+  /**
+   * subagent fixture 目录（[session-store-layout-inversion] 新布局存储树
+   * `<root>/<rootSessionId>/subagents/sessions/`，resolveSessionRoots [subagent] 根
+   * 定向扫描路径；分区键取 FIX_SID，生产同源推导函数落盘）。
+   */
   let saDir: string
 
   let recordsDir: string
 
+  /** 存储树分区 sid fixture（合法 pi sid 形态）。 */
+  const FIX_SID = '0aaaaaaa-bbbb-7ccc-dddd-0000000000f1'
+
   beforeEach(async () => {
-    agentDir = await mkdtemp(join(tmpdir(), 'find-test-'))
+    // 生产拓扑复刻（布局 B）：agentDir = <dataDir>/agent
+    root = await mkdtemp(join(tmpdir(), 'find-test-'))
+    agentDir = join(root, 'agent')
     slugDir = join(agentDir, 'sessions', '--Users-demo--')
-    saDir = join(agentDir, 'subagents', '--Users-demo--', 'sessions')
-    recordsDir = join(agentDir, 'subagents', '--Users-demo--', 'records')
+    saDir = resolveStoreSubagentSessionsDir(agentDir, FIX_SID)
+    recordsDir = resolveStoreSubagentRecordsDir(agentDir, FIX_SID)
   })
   afterEach(async () => {
-    await rm(agentDir, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 })
+    await rm(root, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 })
   })
 
   it('uuid 片段匹配正确的 session（sessionId 含 query）', async () => {
@@ -357,6 +371,37 @@ describe('findSessions', () => {
     expect(matches[0].source).toBe('subagent')
     expect(matches[0].sessionId).toBe('sub-shared')
     expect(matches[0].fileName).toContain('subagents')
+  })
+
+  it('D6 单新根锚定：旧布局 <agentDir>/subagents 造 subagent 会话 → find 不发现（存量不可见）', async () => {
+    await makeSession(slugDir, { name: 'm.jsonl', id: 'main-shared', cwd: '/demo' })
+    // 旧布局存量原位保留（D6 裁决：不迁移、不再读写）
+    const legacyDir = join(agentDir, 'subagents', '--Users-demo--', 'sessions')
+    await makeSession(legacyDir, { name: 's-legacy.jsonl', id: 'sub-legacy', cwd: '/demo' })
+
+    const { matches } = await findSessions('shared', agentDir)
+    expect(matches.map((m) => m.sessionId)).toEqual(['main-shared'])
+  })
+
+  it('存储树分区目录名（= rootSessionId）不把根会话 id 的完整 id 查询吸成伪 multi', async () => {
+    // 新布局路径 `<root>/<rootSessionId>/subagents/sessions/<subId>.jsonl` 含根会话 id——
+    // 完整 id 查询若走路径子串匹配会同时命中 subagent 候选（伪 multi 消歧）。
+    // 精确等值短路：完整 id 直查恒精确命中（find.ts [session-store-layout-inversion]）。
+    const rootId = '0aaaaaaa-bbbb-7ccc-dddd-0000000000q1'
+    const subId = '0aaaaaaa-bbbb-7ccc-dddd-0000000000q2'
+    await makeSession(slugDir, { name: `${rootId}.jsonl`, id: rootId, cwd: '/demo' })
+    await makeSession(resolveStoreSubagentSessionsDir(agentDir, rootId), {
+      name: `${subId}.jsonl`,
+      id: subId,
+      cwd: '/demo',
+    })
+
+    // 完整 id：精确等值直返，不被 subagent 路径里的分区 id 误吸
+    const exact = await findSessions(rootId, agentDir)
+    expect(exact.matches.map((m) => m.sessionId)).toEqual([rootId])
+    // 真片段查询：路径维度命中仍然保留（按路径片段定位文件的能力不回退）
+    const fragment = await findSessions('0000000000q', agentDir)
+    expect(fragment.matches.map((m) => m.sessionId).sort()).toEqual([rootId, subId].sort())
   })
 
   it("recent 也尊重 source 过滤（含不传 source 时两侧按 mtime 混合倒序）", async () => {

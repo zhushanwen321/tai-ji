@@ -3,7 +3,7 @@
  *
  * 覆盖：瞬时参数（selectedCommandName/detailFilePath 设置 + 按会话分区，
  * display-containers §6.6② 跨会话劫持消除）/ 公开 API 薄封装。
- * [P4 s5 drawer-widget-removal] pendingOpen 置/读/消费、openTasksDrawerOnFirstData 守卫分发、
+ * [P4 s5 drawer-widget-removal] pendingOpen 置/读/消费、openTasksDrawerOnFirstData 检查分发、
  * cleanup 注册（清 pendingOpenMap）用例已删——pendingOpen 机制随 tasks 域移除（PluginViewContainer 承接）。
  * [display-containers §6.6③ W0] toggleDock 用例已删（docked 死状态全链删除）。
  *

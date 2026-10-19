@@ -1,7 +1,7 @@
 /**
  * RestartPolicy —— runtime 崩溃重启策略（纯逻辑，无 electron 依赖，可单测）。
  *
- * 职责（单一变化轴「重启编排决策」）：
+ * 职责（单一变化原因「重启编排决策」）：
  * - 判定是否应重启（stopping 标志 / 计数上限）
  * - 计算退避延迟（指数退避，1s/2s/4s/8s/16s）
  * - 崩溃计数只在用户显式重试（clearForManualRestart）时清零，无时间窗
@@ -120,7 +120,7 @@ export class RestartPolicy {
    * 是 clearForManualRestart（用户显式重试）。
    */
   recordSuccess(): void {
-    // 无操作：保留方法以维持 supervisor 调用面稳定（记录点的存在本身有日志价值时再扩展）
+    // 无操作：保留方法以维持 supervisor 全部调用点稳定（记录点的存在本身有日志价值时再扩展）
   }
 
   /** 当前重启计数（测试/日志用） */

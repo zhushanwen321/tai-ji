@@ -9,7 +9,7 @@
  * 只承载组合根接线决策——缺省路径拼装（真实三路径 homedir 推导 + 副本路径 getDataDir
  * 派生，段常量 = SDK zcode-db-paths.ts 的 ZCODE_PI_SYNCED_PROVIDER_CONFIG_SEGMENTS 单源，
  * 与 zcode-subagent-cli preparer 解析链同源 import——SDK 是跨包契约根，不违 C-ext-13
- * 的「runtime 不 import 引擎包」红线，relay-registry.ts 同款先例）+ catalog 单点直传
+ * 的「runtime 不 import 引擎包」红线，control-server.ts 同款先例）+ catalog 单点直传
  * + try/catch 降级 + 结果摘要日志。
  */
 import { homedir } from 'node:os'
@@ -42,7 +42,7 @@ export function defaultZcodeProviderSyncPaths(): ZcodeProviderSyncPaths {
   }
 }
 
-/** 组合根实际装配的三项必填；其余为测试注入面（缺省 = 生产形态）。 */
+/** 组合根实际装配的三项必填；其余为测试注入点（缺省 = 生产形态）。 */
 export interface ZcodeProviderStartupSyncDeps { // oe-exempt:20261012:framework:接线 DI 契约,单实现常态
   readonly configStore: Pick<IConfigStore, 'readModels' | 'getEnabledModels'>
   readonly credentialResolver: Pick<

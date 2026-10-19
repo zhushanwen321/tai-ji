@@ -2,17 +2,17 @@
 //
 // [collect 退役 + v1 快照退役] sync collect 批机制本体（SyncCollectDomain/E9 dispose
 // 转账/flushBatch/预算热读/manifest 屏障）与 v1 全量快照写点（reportSubagentRecord /
-// toSubagentRecordEntry）已整体删除，本文件保留的非批覆盖面（真实文件通路）：
-//   1. 存量 entry 读侧守卫：终态字段经 v2 条目对（registered/settled）扫描投影可见
-//      （投影口径 = collectV2EntryPairs + v2PairToRecord，rebuildEntryRecord 已退役）；
+// toSubagentRecordEntry）已整体删除，本文件保留的非批覆盖范围（真实文件通路）：
+//   1. 存量 entry 读侧检查：终态字段经 v2 条目对（registered/settled）扫描派生视图可见
+//      （派生口径 = collectV2EntryPairs + v2PairToRecord，rebuildEntryRecord 已退役）；
 //   2. entry-born orphan 收编（recoverEntryOnlyOrphans）+ 收编幂等；P-rebuild /
 //      P-manifest 探针不变量。
 //
 // 通路保真（U8 红线：禁 mock record 断言）：
-//   种子 entry 由 v2Entries(record) 投影 → mock pi 的真实 appendEntry 通路（真实
+//   种子 entry 由 v2Entries(record) 派生视图 → mock pi 的真实 appendEntry 通路（真实
 //   appendFileSync）落 tmpdir 主 session JSONL → 读侧真实 readFileSync 扫描
-//   （scanLastRecordEntries → collectV2EntryPairs + v2PairToRecord 投影）。
-//   断言全部打在「磁盘文件内容 + 真实投影产物」上，scan/投影/落盘三层零 mock。
+//   （scanLastRecordEntries → collectV2EntryPairs + v2PairToRecord 派生视图）。
+//   断言全部打在「磁盘文件内容 + 真实派生视图产物」上，scan/派生视图/落盘三层零 mock。
 //
 // mock 手法：mock logger；record-store 走真实实现（tmpdir 自建自删，红线）。
 
@@ -42,17 +42,13 @@ import { createMemberRecord } from "./helpers/subagent-record-fixture.ts";
 import { v2Entries, v2RegisteredEntry } from "./helpers/v2-record-entry.ts";
 import { SubagentService } from "../subagent-service.ts";
 
-/** 剥身份/relay env：身份 env 会让 service 误判自己是子进程（跳过恢复扫描），
- *  relay env 属 pi-invocation/relay-env 存量测试的敏感面（测试纪律：env 剥离）。 */
+/** 剥身份 env：身份 env 会让 service 误判自己是子进程（跳过恢复扫描）。 */
 const ENV_KEYS_TO_STRIP = [
   "PI_SUBAGENT_ROOT_SESSION_ID",
   "PI_SUBAGENT_SELF_RECORD_ID",
   "PI_SUBAGENT_DEPTH",
   "PI_SUBAGENT_ROOT_CWD",
   "PI_SUBAGENT_FORK_DEPTH",
-  "TAIJI_SUBAGENT_RELAY_SOCKET",
-  "TAIJI_SUBAGENT_RELAY_NODE",
-  "TAIJI_SUBAGENT_RELAY_SCRIPT",
 ] as const;
 
 const ROOT_SESSION = "root-session-crash";
@@ -96,14 +92,14 @@ type WritingPi = ReturnType<typeof makeWritingPi>;
 /** 种子成员 record（真实 v2Entries 入参——条目构造/落盘/扫描三层真实）。 */
 const memberRecord = createMemberRecord({ task: "seed task", slug: "seed", rootSessionId: ROOT_SESSION });
 
-describe("[collect 退役] 存量 entry 读侧守卫 + entry-born orphan 收编（真实文件通路）", () => {
+describe("[collect 退役] 存量 entry 读侧检查 + entry-born orphan 收编（真实文件通路）", () => {
   let agentDir: string;
   let mainFile: string;
 
   beforeEach(() => {
     for (const k of ENV_KEYS_TO_STRIP) delete process.env[k];
     agentDir = fs.mkdtempSync(path.join(os.tmpdir(), "core-sync-recovery-"));
-    fs.mkdirSync(getSubagentSessionDir(agentDir, agentDir), { recursive: true });
+    fs.mkdirSync(getSubagentSessionDir(ROOT_SESSION, agentDir), { recursive: true });
     mainFile = path.join(agentDir, "main-session.jsonl");
   });
 
@@ -161,7 +157,7 @@ describe("[collect 退役] 存量 entry 读侧守卫 + entry-born orphan 收编�
    *  appendModelChange 初值，session_start hook 的 identity 随后），readIdentityHeader
    *  解析 identity 前途经的 model_change 产出 light 重建的 rec.model。 */
   function writeChildSessionFile(recordId: string, task: string, headModel?: string): string {
-    const childFile = path.join(getSubagentSessionDir(agentDir, agentDir), `${recordId}.jsonl`);
+    const childFile = path.join(getSubagentSessionDir(ROOT_SESSION, agentDir), `${recordId}.jsonl`);
     const ts = new Date(1000).toISOString();
     const modelChangeLine =
       headModel === undefined
@@ -200,10 +196,10 @@ describe("[collect 退役] 存量 entry 读侧守卫 + entry-born orphan 收编�
   }
 
   // ============================================================
-  // 投影白名单（collectV2EntryPairs + v2PairToRecord）——存量 entry 读侧守卫
+  // 派生视图白名单（collectV2EntryPairs + v2PairToRecord）——存量 entry 读侧检查
   // ============================================================
 
-  it("终态字段经真实落盘→扫描投影后可见（collectV2EntryPairs + v2PairToRecord）", () => {
+  it("终态字段经真实落盘→扫描派生后可见（collectV2EntryPairs + v2PairToRecord）", () => {
     // 成员 A：注册（running）→ 终态（idle + stopReason + result）两笔真实 v2 条目
     seedRecord(memberRecord({ id: "sa-a", model: "prov/a-m" }));
     seedRecord(
@@ -222,7 +218,7 @@ describe("[collect 退役] 存量 entry 读侧守卫 + entry-born orphan 收编�
       memberRecord({ id: "sa-b", status: "idle", stopReason: "failed", endedAt: 3000, error: "boom" }),
     );
 
-    // 读侧：真实 readFileSync 扫描 + 投影（零 mock；store 经测试后门访问）
+    // 读侧：真实 readFileSync 扫描 + 派生（零 mock；store 经测试后门访问）
     const recovery = makeRecoveryService(makeAssertPi());
     const scanned = (recovery as unknown as { store: RecordStore }).store.scanLastRecordEntries(mainFile);
     const byId = new Map(scanned.map((r) => [r.id, r]));
@@ -247,7 +243,7 @@ describe("[collect 退役] 存量 entry 读侧守卫 + entry-born orphan 收编�
 
   // ============================================================
   // kill -9 同构形态：重启 orphan 判定自洽 + 收编幂等
-  // （[collect 退役] 原批协调不恢复断言随批机制删除——无恢复面即无补发面）
+  // （[collect 退役] 原批协调不恢复断言随批机制删除——无恢复侧即无补发路径）
   // ============================================================
 
   it("kill -9 同构主用例：轮终 idle 末条自洽 → 重启 orphan 判定自洽 + 收编幂等", async () => {
@@ -287,7 +283,7 @@ describe("[collect 退役] 存量 entry 读侧守卫 + entry-born orphan 收编�
 
   it("P-rebuild：entry-born 孤儿判定只看「注册 ∧ 无终态」（无子文件锚仍入收编）", () => {
     // 注册形态末条（running，无终态条目），子文件不存在——recoverEntryOnlyOrphans 的
-    // 「registered ∧ 无非 interrupted 终态条目」判定不应因投影字段而跳过该 id。
+    // 「registered ∧ 无非 interrupted 终态条目」判定不应因派生视图字段而跳过该 id。
     seedRecord(memberRecord({ id: "sa-p-rebuild", result: "round done" }));
 
     const pi = makeAssertPi();
@@ -305,22 +301,22 @@ describe("[collect 退役] 存量 entry 读侧守卫 + entry-born orphan 收编�
   });
 
   // ============================================================
-  // 探针 P-manifest：存量 manifest 与子文件锚并存时，manifest 不得改变重建投影——
-  // 有子文件锚的成员永不被 manifest 补充投影覆盖（record-store byId.has 跳过语义）。
+  // 探针 P-manifest：存量 manifest 与子文件锚并存时，manifest 不得改变重建派生视图——
+  // 有子文件锚的成员永不被 manifest 补充派生视图覆盖（record-store byId.has 跳过语义）。
   // [collect 退役] 后 manifest 为磁盘遗留形态（批时代落标产物），种子改为存量模拟
   //（v2 条目 + 手写 manifest）。
   // ============================================================
 
-  it("P-manifest 不变量：子文件锚 + manifest 并存 → 重启重建 list 投影与删 manifest 后逐字段一致", () => {
+  it("P-manifest 不变量：子文件锚 + manifest 并存 → 重启重建 list 派生视图与删 manifest 后逐字段一致", () => {
     const childFile = writeChildSessionFile("sa-pm", "p-manifest task");
     // 种子：v2 注册 + 终态条目（轮终 idle + 锚在子文件）；manifest 以
-    // derivedManifestRecord 投影手写（批时代 barrier 的磁盘遗留形态）。
+    // derivedManifestRecord 派生视图手写（批时代 barrier 的磁盘遗留形态）。
     const pmFull = memberRecord({ id: "sa-pm", sessionFile: childFile, status: "idle", stopReason: "completed", result: "p-manifest full result" });
     seedRecord(pmFull);
-    const manifestFile = path.join(getSubagentRecordsDir(agentDir, agentDir), "sa-pm.json");
+    const manifestFile = path.join(getSubagentRecordsDir(ROOT_SESSION, agentDir), "sa-pm.json");
     // records/ 目录在 v1 写点（reportSubagentRecord）删除后不再由种子隐式创建——
     // manifest 是手写磁盘遗留形态，目录显式自建。
-    fs.mkdirSync(getSubagentRecordsDir(agentDir, agentDir), { recursive: true });
+    fs.mkdirSync(getSubagentRecordsDir(ROOT_SESSION, agentDir), { recursive: true });
     fs.writeFileSync(
       manifestFile,
       JSON.stringify(derivedManifestRecord(pmFull), null, 2),
@@ -331,19 +327,19 @@ describe("[collect 退役] 存量 entry 读侧守卫 + entry-born orphan 收编�
     // 模拟重启重建：全新 RecordStore + ManifestStore（内存缓存零残留），manifest 存在时
     const freshStore = () =>
       new RecordStore(
-        getSubagentSessionDir(agentDir, agentDir),
-        new ManifestStore(getSubagentRecordsDir(agentDir, agentDir)),
+        () => getSubagentSessionDir(ROOT_SESSION, agentDir),
+        new ManifestStore(() => getSubagentRecordsDir(ROOT_SESSION, agentDir)),
       );
     const withManifest = freshStore().collectRecords(100, "all", ROOT_SESSION);
     const pm = withManifest.find((r) => r.id === "sa-pm");
     expect(pm).toBeDefined();
-    // 投影来自子文件锚重建（[U3 / §3.2.4] 纠偏 idle + interrupted-by-restart，无
-    // sidecar 落盘），非 manifest（status 下行投影）——stopReason 是可辨差异位
+    // 派生视图来自子文件锚重建（[U3 / §3.2.4] 纠偏 idle + interrupted-by-restart，无
+    // sidecar 落盘），非 manifest（status 下行派生视图）——stopReason 是可辨差异位
     expect(pm!.status).toBe("idle");
     expect(pm!.stopReason).toBe("interrupted-by-restart");
 
-    // 删 manifest 文件 → 同款重建 → 投影逐字段一致（不变量：manifest 的存在不改变
-    // list 形态——补充投影只服务「entry/子文件源完全缺失」的孤儿）
+    // 删 manifest 文件 → 同款重建 → 派生视图逐字段一致（不变量：manifest 的存在不改变
+    // list 形态——补充派生视图只服务「entry/子文件源完全缺失」的孤儿）
     fs.rmSync(manifestFile);
     const withoutManifest = freshStore().collectRecords(100, "all", ROOT_SESSION);
     expect(withoutManifest).toEqual(withManifest);

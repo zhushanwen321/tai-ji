@@ -138,7 +138,7 @@ describe('WorkflowVizOverlay 壳（黑盒 DOM）', () => {
     expect(e.defaultPrevented, '壳不消费 Esc（连 preventDefault 约定也不置位）').toBe(false)
   })
 
-  it('IME 守卫已随迁编排器：壳不再自行判定 isComposing（组合态 Esc 也不发 close）', async () => {
+  it('IME 检查已随迁编排器：壳不再自行判定 isComposing（组合态 Esc 也不发 close）', async () => {
     const wrapper = mountOverlay()
     window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', isComposing: true, bubbles: true }))
     await wrapper.vm.$nextTick()
@@ -244,7 +244,7 @@ describe('WorkflowVizOverlay 壳（黑盒 DOM）', () => {
   })
 })
 
-describe('WorkflowVizOverlay 未匹配实例分组（D2⑥ 展示面，黑盒 DOM）', () => {
+describe('WorkflowVizOverlay 未匹配实例分组（D2⑥ 展示侧，黑盒 DOM）', () => {
   const unmatched: WorkflowUnmatchedInstance[] = [
     { call: { id: 0, agent: 'orphan-agent', phase: 'gate', status: 'done' }, hitCount: 0, ambiguous: false },
     { call: { id: 1, agent: 'reviewer-x', phase: 'review', status: 'running' }, hitCount: 2, ambiguous: true },
@@ -286,7 +286,7 @@ describe('WorkflowVizOverlay 未匹配实例分组（D2⑥ 展示面，黑盒 DO
     expect(group.text()).toContain('no-phase-agent')
   })
 
-  it('DAG 不可得时不渲染未匹配分组（分组属 DAG 就绪分支的展示面）', () => {
+  it('DAG 不可得时不渲染未匹配分组（分组属 DAG 就绪分支的展示侧）', () => {
     const wrapper = mountOverlay({ dagError: { code: 'parse_failed', message: 'bad' }, unmatched })
     expect(wrapper.find('[data-testid="wfvz-overlay-unmatched"]').exists()).toBe(false)
   })

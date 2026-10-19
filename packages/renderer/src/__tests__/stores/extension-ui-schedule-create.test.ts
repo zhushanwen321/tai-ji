@@ -8,7 +8,7 @@
  * scheduleCreate 帧经 useExtensionUI 归一层附加——store 记录入队前必经归一）。本文件锁定：
  * - getter 对 legacy scheduler 表单请求（归一后 form + scheduleCreate 双键）的查询结果
  *   （消费方 ①deriveStatus waiting 的数据源）
- * - 裸 legacy 形状（无 form 键、未经归一）不命中 overlay 判定（判定面收敛语义）
+ * - 裸 legacy 形状（无 form 键、未经归一）不命中 overlay 判定（判定侧收敛语义）
  *
  * 运行：cd packages/renderer && npx vitest run src/__tests__/stores/extension-ui-schedule-create.test.ts
  */
@@ -79,7 +79,7 @@ describe('form 键判定：hasPendingBlockingOverlay 覆盖 legacy scheduler 表
     expect(store.hasPendingBlockingOverlay('sess-A')).toBe(false)
   })
 
-  it('判定面收敛语义：裸 legacy 形状（无 form 键、未经归一）不命中 overlay 判定', () => {
+  it('判定侧收敛语义：裸 legacy 形状（无 form 键、未经归一）不命中 overlay 判定', () => {
     // store 判定键只认 form——裸 scheduleCreate/askUser 形状只在归一层之前存在
     //（useExtensionUI 双挂点保证入 store 前必经归一，此处裸形状 = 归一层回归的探针）
     const store = useExtensionUIStore()

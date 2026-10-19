@@ -1,6 +1,6 @@
 // src/execution/__tests__/record-binding.test.ts
 //
-// [UF-1] 跨重启续聊绑定（record↔sessionFile 映射）写面与事件流重建源。
+// [UF-1] 跨重启续聊绑定（record↔sessionFile 映射）写侧与事件流重建源。
 //
 // 背景：engine-CLI 化后子 session 文件只含 {session, model_change,
 // thinking_level_change, message} 条目族（无身份 entry），旧
@@ -9,11 +9,11 @@
 // 扫描源可见 3 条 record、message 链全部 not-found 的双注册表不同源形态）。
 //
 // 现行形态（[身份换源第二步] 后，本套件锁定）：
-//   ① 写面：sessionFile 回填点（轮应答 / idle 帧锚点 / run 域 outcome）经
+//   ① 写侧：sessionFile 回填点（轮应答 / idle 帧锚点 / run 域 outcome）经
 //      writeBindingForRecord 落 `<sessionFile>.record-binding`（best-effort，
-//      写失败 warn 不阻断派发主路径）——写面保留（读侧已换源事件流，绑定剩
+//      写失败 warn 不阻断派发主路径）——写侧保留（读侧已换源事件流，绑定剩
 //      戳职责与跨进程负缓存击穿职责）；
-//   ② 读面：record-store scanFile 在 identity miss 时据事件流折叠重建 light
+//   ② 读侧：record-store scanFile 在 identity miss 时据事件流折叠重建 light
 //      （created 身份域 + bound.sessionFile 反查键，模拟重启后空内存），
 //      findLightById/collectRecords 恢复 id→file 解析；
 //   ③ 全链：getRecordForAction（coldLookupForAction）→ 折叠重建 → register →
@@ -22,7 +22,7 @@
 //      矩阵构造性保证）；终态后绑定保留——保留选项由此套件锁定；
 //   ⑤ 绑定写失败（只读目录）不阻塞派发主路径。
 //   ⑥ [H2 S3] origin/parentRunId/stepIndex 身份域随 record-created 帧往返保真
-//      （原 binding 身份面职责已随读侧换源移入事件载荷）。
+//      （原 binding 身份侧职责已随读侧换源移入事件载荷）。
 //
 // fixture 一律 mkdtempSync 自建自删（tmpdir），不触碰真实数据目录。
 
@@ -68,6 +68,13 @@ const IDENTITY_ENV_KEYS = [
 ] as const;
 
 const STARTED_AT = 1_700_000_000_000;
+
+/**
+ * [session-store-layout-inversion] 目录分区键 fixture（新布局
+ * `<root>/<rootSid>/subagents/`；取值 = service describes 的 initSession sid，
+ * 纯 store describe 经显式 getter 注入目录、sid 只须过 shared 合法性校验）。
+ */
+const PARTITION_SID = "root-session";
 
 /** engine-CLI 化子 session 文件 fixture：{session, message} 条目族，无身份 entry。 */
 function writePlainChildSession(sessionsDir: string): string {
@@ -142,7 +149,7 @@ describe("[UF-1] record 绑定 sidecar 读写（state-marker）", () => {
 
     const target = `${sessionFile}${RECORD_BINDING_SIDECAR_EXT}`;
     expect(fs.existsSync(target)).toBe(true);
-    // 原子写收口：tmp 中间产物不残留
+    // 原子写收尾：tmp 中间产物不残留
     expect(fs.readdirSync(dir).filter((f) => f.includes(".tmp"))).toEqual([]);
 
     const binding = readRecordBinding(sessionFile);
@@ -200,7 +207,7 @@ describe("[UF-1] record 绑定 sidecar 读写（state-marker）", () => {
 });
 
 // ============================================================
-// B. record-store 消费面（模拟重启后空内存——事件流折叠重建源）
+// B. record-store 消费方（模拟重启后空内存——事件流折叠重建源）
 // ============================================================
 
 describe("[UF-1] record-store 据事件流折叠重建（跨重启空内存场景）", () => {
@@ -210,8 +217,8 @@ describe("[UF-1] record-store 据事件流折叠重建（跨重启空内存场�
 
   beforeEach(() => {
     agentDir = fs.mkdtempSync(path.join(os.tmpdir(), "record-binding-store-"));
-    sessionsDir = getSubagentSessionDir(agentDir, agentDir);
-    recordsDir = getSubagentRecordsDir(agentDir, agentDir);
+    sessionsDir = getSubagentSessionDir(PARTITION_SID, agentDir);
+    recordsDir = getSubagentRecordsDir(PARTITION_SID, agentDir);
     fs.mkdirSync(sessionsDir, { recursive: true });
   });
 
@@ -238,7 +245,7 @@ describe("[UF-1] record-store 据事件流折叠重建（跨重启空内存场�
   it("collectRecords：无 identity 子文件 + 事件流（bound 反查键）→ 重建 idle light（id/rootSessionId/sessionFile）", () => {
     const file = writePlainChildSession(sessionsDir);
     seedInFlightEvents(file);
-    const store = new RecordStore(sessionsDir, undefined, undefined, recordsDir);
+    const store = new RecordStore(() => sessionsDir, undefined, undefined, () => recordsDir);
 
     const records = store.collectRecords(10, "all", undefined);
     expect(records).toHaveLength(1);
@@ -256,7 +263,7 @@ describe("[UF-1] record-store 据事件流折叠重建（跨重启空内存场�
   it("findLightById：冷启动空索引先 miss → collectRecords 全扫填充 → 索引命中（coldLookup 步骤 1 链）", () => {
     const file = writePlainChildSession(sessionsDir);
     seedInFlightEvents(file);
-    const store = new RecordStore(sessionsDir, undefined, undefined, recordsDir);
+    const store = new RecordStore(() => sessionsDir, undefined, undefined, () => recordsDir);
 
     // 重启后 idToFile 未热：直查 miss
     expect(store.findLightById("sa-bind-1")).toBeUndefined();
@@ -272,7 +279,7 @@ describe("[UF-1] record-store 据事件流折叠重建（跨重启空内存场�
   it("rootSessionId 过滤仍生效：异树过滤排除折叠 record（session 隔离不因反查旁路）", () => {
     const file = writePlainChildSession(sessionsDir);
     seedInFlightEvents(file);
-    const store = new RecordStore(sessionsDir, undefined, undefined, recordsDir);
+    const store = new RecordStore(() => sessionsDir, undefined, undefined, () => recordsDir);
 
     expect(store.collectRecords(10, "all", "other-root")).toHaveLength(0);
     expect(store.collectRecords(10, "all", "root-session")).toHaveLength(1);
@@ -280,17 +287,17 @@ describe("[UF-1] record-store 据事件流折叠重建（跨重启空内存场�
 
   it("无 identity 无事件流 → 不重建（负缓存语义保持，不误建幽灵 record）", () => {
     writePlainChildSession(sessionsDir);
-    const store = new RecordStore(sessionsDir, undefined, undefined, recordsDir);
+    const store = new RecordStore(() => sessionsDir, undefined, undefined, () => recordsDir);
     expect(store.collectRecords(10, "all", undefined)).toHaveLength(0);
     expect(store.findLightById("sa-bind-1")).toBeUndefined();
   });
 
   it("[②B] 负缓存事件侧信号：bound 帧追加进既有事件文件且无 binding 写 → 下次扫描必须可见", () => {
-    // 时序（生产形态：spawn 未回填 → 首扫负缓存 → 回填落账）：负缓存条目没有 id、
+    // 时序（生产形态：spawn 未回填 → 首扫负缓存 → 回填写入 journal 记录）：负缓存条目没有 id、
     // 不能按 `<id>.events` 取戳，jsonl/binding 戳全不变——若无事件侧反查，回填后的
-    // record 在磁盘扫描层永久不可见（列表面有内存源遮蔽，archive 除名后即暴露）。
+    // record 在磁盘扫描层永久不可见（列表侧有内存源遮蔽，archive 除名后即暴露）。
     const file = writePlainChildSession(sessionsDir);
-    const store = new RecordStore(sessionsDir, undefined, undefined, recordsDir);
+    const store = new RecordStore(() => sessionsDir, undefined, undefined, () => recordsDir);
     // ① register（无 sessionFile——spawn 未回填）：事件文件只有 created 帧。
     const rec = createRecord("sa-bind-1", {
       agent: "general-purpose",
@@ -317,7 +324,7 @@ describe("[UF-1] record-store 据事件流折叠重建（跨重启空内存场�
     //    是打破负缓存的信号源）。
     expect(fs.existsSync(`${file}${RECORD_BINDING_SIDECAR_EXT}`)).toBe(false);
 
-    // ④ 除名内存源（archive 对 running record = 纯内存除名，零写面），让末次扫描
+    // ④ 除名内存源（archive 对 running record = 纯内存除名，零写侧），让末次扫描
     //    只走磁盘层：反查命中 → 打破负缓存 → 正常探测重建 → 可见。
     store.archive(rec);
     const records = store.collectRecords(10, "all", undefined);
@@ -328,15 +335,15 @@ describe("[UF-1] record-store 据事件流折叠重建（跨重启空内存场�
 });
 
 // ============================================================
-// D. [H2 S3] 来源身份（origin/parentRunId）往返保真（写面载荷 + 事件流读侧）
+// D. [H2 S3] 来源身份（origin/parentRunId）往返保真（写侧载荷 + 事件流读侧）
 // ============================================================
 //
-// [身份换源第二步] 后读侧身份源 = 事件流（identityFromFold 守卫归一，D 套件锁定）；
-// binding 写面载荷单源（identityBindingPayload）与 merge 更新（updateRecordBinding）
-// 仍是生产写面——本节锁定写面守卫归一行为（读侧守卫 readRecordBinding 仍被
+// [身份换源第二步] 后读侧身份源 = 事件流（identityFromFold 检查归一，D 套件锁定）；
+// binding 写侧载荷单源（identityBindingPayload）与 merge 更新（updateRecordBinding）
+// 仍是生产写侧——本节锁定写侧检查归一行为（读侧检查 readRecordBinding 仍被
 // merge-or-create 写点消费，损坏残留不误判成合法载荷）。
 
-describe("[H2 S3] binding 身份面 origin/parentRunId 往返保真（写面载荷）", () => {
+describe("[H2 S3] binding 身份侧 origin/parentRunId 往返保真（写侧载荷）", () => {
   let dir: string;
 
   beforeEach(() => {
@@ -347,7 +354,7 @@ describe("[H2 S3] binding 身份面 origin/parentRunId 往返保真（写面载�
     fs.rmSync(dir, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 });
   });
 
-  it("读侧守卫归一：origin=workflow + parentRunId 保真；缺省 → undefined；非法值 → undefined", () => {
+  it("读侧检查归一：origin=workflow + parentRunId 保真；缺省 → undefined；非法值 → undefined", () => {
     const sessionFile = path.join(dir, "child.jsonl");
     fs.writeFileSync(sessionFile, "{}\n", "utf-8");
 
@@ -361,7 +368,7 @@ describe("[H2 S3] binding 身份面 origin/parentRunId 往返保真（写面载�
     expect(absent.origin).toBeUndefined();
     expect(absent.parentRunId).toBeUndefined();
 
-    // 非法值负向（字面量守卫，对齐 readEntryOriginFields）
+    // 非法值负向（字面量检查，对齐 readEntryOriginFields）
     for (const badOrigin of ["bogus", 1, null]) {
       writeBindingFixture(sessionFile, { origin: badOrigin as unknown as "workflow" });
       expect(readRecordBinding(sessionFile)!.origin).toBeUndefined();
@@ -370,7 +377,7 @@ describe("[H2 S3] binding 身份面 origin/parentRunId 往返保真（写面载�
     expect(readRecordBinding(sessionFile)!.parentRunId).toBeUndefined();
   });
 
-  it("[H2 A3] updateRecordBinding merge 更新 usage 快照：合法值保真、非法守卫、binding 缺失不造新", () => {
+  it("[H2 A3] updateRecordBinding merge 更新 usage 快照：合法值保真、非法检查、binding 缺失不造新", () => {
     const sessionFile = path.join(dir, "child-usage.jsonl");
     fs.writeFileSync(sessionFile, "{}\n", "utf-8");
 
@@ -389,7 +396,7 @@ describe("[H2 S3] binding 身份面 origin/parentRunId 往返保真（写面载�
       endedAt: 999,
     });
 
-    // 非法值守卫：写侧不会写非法值（类型约束），读侧对磁盘垃圾值归一 undefined
+    // 非法值检查：写侧不会写非法值（类型约束），读侧对磁盘垃圾值归一 undefined
     fs.writeFileSync(
       `${sessionFile}${RECORD_BINDING_SIDECAR_EXT}`,
       JSON.stringify({
@@ -411,19 +418,19 @@ describe("[H2 S3] binding 身份面 origin/parentRunId 往返保真（写面载�
 // ============================================================
 //
 // Gate B S3 FAIL 根因的现行承载（[身份换源第二步] 后）：origin/parentRunId 随
-// record-created 帧落事件流，读侧守卫归一在 identityFromFold（折叠身份投影）。
+// record-created 帧落事件流，读侧检查归一在 identityFromFold（折叠身份派生视图）。
 // 本套件锁定：帧载荷 → 折叠重建 → 过滤（collectRecords 缺省排除 / includeWorkflow
-// + parentRunId 下钻可见）链路。binding 写面的同字段载荷单源性由 E 套件锁定。
+// + parentRunId 下钻可见）链路。binding 写侧的同字段载荷单源性由 E 套件锁定。
 
-describe("[H2 S3] record-store 据事件流重建 origin（D1 投影过滤端到端）", () => {
+describe("[H2 S3] record-store 据事件流重建 origin（D1 派生视图过滤端到端）", () => {
   let agentDir: string;
   let sessionsDir: string;
   let recordsDir: string;
 
   beforeEach(() => {
     agentDir = fs.mkdtempSync(path.join(os.tmpdir(), "record-binding-origin-store-"));
-    sessionsDir = getSubagentSessionDir(agentDir, agentDir);
-    recordsDir = getSubagentRecordsDir(agentDir, agentDir);
+    sessionsDir = getSubagentSessionDir(PARTITION_SID, agentDir);
+    recordsDir = getSubagentRecordsDir(PARTITION_SID, agentDir);
     fs.mkdirSync(sessionsDir, { recursive: true });
   });
 
@@ -441,9 +448,9 @@ describe("[H2 S3] record-store 据事件流重建 origin（D1 投影过滤端到
       boundSessionFile: file,
       inFlight: true,
     });
-    const store = new RecordStore(sessionsDir, undefined, undefined, recordsDir);
+    const store = new RecordStore(() => sessionsDir, undefined, undefined, () => recordsDir);
 
-    // 默认 list（includeWorkflow 缺省 false）：workflow record 被排除（S3 FAIL 的验收面）
+    // 默认 list（includeWorkflow 缺省 false）：workflow record 被排除（S3 FAIL 的验收侧）
     expect(store.collectRecords(10, "all", undefined)).toHaveLength(0);
     // includeWorkflow:true：可见且字段保真
     const visible = store.collectRecords(10, "all", undefined, true);
@@ -462,7 +469,7 @@ describe("[H2 S3] record-store 据事件流重建 origin（D1 投影过滤端到
       boundSessionFile: file,
       inFlight: true,
     });
-    const store = new RecordStore(sessionsDir, undefined, undefined, recordsDir);
+    const store = new RecordStore(() => sessionsDir, undefined, undefined, () => recordsDir);
 
     const records = store.collectRecords(10, "all", undefined);
     expect(records).toHaveLength(1);
@@ -480,7 +487,7 @@ describe("[H2 S3] record-store 据事件流重建 origin（D1 投影过滤端到
       boundSessionFile: file,
       stopReason: "disconnected",
     });
-    const store = new RecordStore(sessionsDir, undefined, undefined, recordsDir);
+    const store = new RecordStore(() => sessionsDir, undefined, undefined, () => recordsDir);
 
     expect(store.collectRecords(10, "all", undefined)).toHaveLength(0);
     const visible = store.collectRecords(10, "all", undefined, true);
@@ -503,7 +510,7 @@ describe("[H2 S3] record-store 据事件流重建 origin（D1 投影过滤端到
       totalTokens: 60725,
       endedAt: STARTED_AT + 55_000,
     });
-    const store = new RecordStore(sessionsDir, undefined, undefined, recordsDir);
+    const store = new RecordStore(() => sessionsDir, undefined, undefined, () => recordsDir);
 
     const visible = store.collectRecords(10, "all", undefined, true);
     expect(visible).toHaveLength(1);
@@ -512,7 +519,7 @@ describe("[H2 S3] record-store 据事件流重建 origin（D1 投影过滤端到
     expect(visible[0]!.endedAt).toBe(STARTED_AT + 55_000);
   });
 
-  it("[② 读侧换源] 在途无收条（存量形态）→ 不投影，保持 light 缺省 0/0/undefined", () => {
+  it("[② 读侧换源] 在途无收条（存量形态）→ 不派生，保持 light 缺省 0/0/undefined", () => {
     const file = writePlainChildSession(sessionsDir);
     seedTerminalRecord(recordsDir, {
       id: "sa-bind-1",
@@ -520,7 +527,7 @@ describe("[H2 S3] record-store 据事件流重建 origin（D1 投影过滤端到
       boundSessionFile: file,
       inFlight: true,
     });
-    const store = new RecordStore(sessionsDir, undefined, undefined, recordsDir);
+    const store = new RecordStore(() => sessionsDir, undefined, undefined, () => recordsDir);
 
     const records = store.collectRecords(10, "all", undefined);
     expect(records).toHaveLength(1);
@@ -536,7 +543,7 @@ describe("[H2 S3] record-store 据事件流重建 origin（D1 投影过滤端到
 //
 // 禁经 state-marker 原语（writeRecordBinding）手构 fixture 断言——原语只验证
 // schema/normalize 白名单（U0 已覆盖），载荷构造才是生产链路。本套件锁定两个
-// 生产构造点的载荷含 stepIndex（写面——run 视图关联键的落盘面），以及读侧
+// 生产构造点的载荷含 stepIndex（写侧——run 视图关联键的落盘路径），以及读侧
 // （[身份换源第二步] 后 = created 帧折叠重建）不丢字段。
 
 describe("[W0 / D1] binding 载荷 stepIndex（生产构造点）与折叠重建读侧", () => {
@@ -548,8 +555,11 @@ describe("[W0 / D1] binding 载荷 stepIndex（生产构造点）与折叠重建
   beforeEach(() => {
     for (const k of IDENTITY_ENV_KEYS) delete process.env[k];
     agentDir = fs.mkdtempSync(path.join(os.tmpdir(), "record-binding-stepidx-"));
-    sessionsDir = getSubagentSessionDir(agentDir, agentDir);
-    recordsDir = getSubagentRecordsDir(agentDir, agentDir);
+    // 生产 store 目录经 getSubagentSessionDir(resolveStoreRootSessionId())（env dataDir
+    // 兜底）解析——stubEnv 把写删目标收进本 mkdtemp 目录（自建自删红线）。
+    vi.stubEnv("TAIJI_AGENT_DATA_DIR", agentDir);
+    sessionsDir = getSubagentSessionDir(PARTITION_SID, agentDir);
+    recordsDir = getSubagentRecordsDir(PARTITION_SID, agentDir);
     fs.mkdirSync(sessionsDir, { recursive: true });
     clearEngines();
     registerFakePiEngine();
@@ -564,6 +574,7 @@ describe("[W0 / D1] binding 载荷 stepIndex（生产构造点）与折叠重建
     _resetLifecycleState();
     _resetCoreSpawnedChildrenMirrorForTest();
     fs.rmSync(agentDir, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 });
+    vi.unstubAllEnvs();
     for (const k of IDENTITY_ENV_KEYS) delete process.env[k];
   });
 
@@ -603,7 +614,7 @@ describe("[W0 / D1] binding 载荷 stepIndex（生产构造点）与折叠重建
     });
   });
 
-  it("fullBindingPayload 载荷含 stepIndex（settle merge-or-create 的 create 腿 / reopen 新锚构造器）", () => {
+  it("fullBindingPayload 载荷含 stepIndex（settle merge-or-create 的 create 路径 / reopen 新锚构造器）", () => {
     const sessionFile = path.join(agentDir, "wf-step-full.jsonl");
     const record = makeWorkflowRecord("sa-step-full", sessionFile, 12);
     const payload = fullBindingPayload(record, undefined);
@@ -637,7 +648,7 @@ describe("[W0 / D1] binding 载荷 stepIndex（生产构造点）与折叠重建
       inFlight: true,
     });
 
-    const store = new RecordStore(sessionsDir, undefined, undefined, recordsDir);
+    const store = new RecordStore(() => sessionsDir, undefined, undefined, () => recordsDir);
     const visible = store.collectRecords(10, "all", undefined, true);
     expect(visible).toHaveLength(1);
     expect(visible[0]!.origin).toBe("workflow");
@@ -645,7 +656,7 @@ describe("[W0 / D1] binding 载荷 stepIndex（生产构造点）与折叠重建
     expect(visible[0]!.stepIndex).toBe(2);
   });
 
-  it("created 帧无 stepIndex（tool 来源形态）→ 重建归一 undefined（run 视图守卫的上游形态）", () => {
+  it("created 帧无 stepIndex（tool 来源形态）→ 重建归一 undefined（run 视图检查的上游形态）", () => {
     const file = writePlainChildSession(sessionsDir);
     seedTerminalRecord(recordsDir, {
       id: "sa-bind-1",
@@ -655,7 +666,7 @@ describe("[W0 / D1] binding 载荷 stepIndex（生产构造点）与折叠重建
       boundSessionFile: file,
       inFlight: true,
     });
-    const store = new RecordStore(sessionsDir, undefined, undefined, recordsDir);
+    const store = new RecordStore(() => sessionsDir, undefined, undefined, () => recordsDir);
 
     const visible = store.collectRecords(10, "all", undefined, true);
     expect(visible).toHaveLength(1);
@@ -704,7 +715,10 @@ describe("[UF-1] SubagentService 集成：回填点绑定落盘 + 跨重启 mess
   beforeEach(() => {
     for (const k of IDENTITY_ENV_KEYS) delete process.env[k];
     agentDir = fs.mkdtempSync(path.join(os.tmpdir(), "record-binding-svc-"));
-    sessionsDir = getSubagentSessionDir(agentDir, agentDir);
+    // 生产 store 目录经 getSubagentSessionDir(resolveStoreRootSessionId())（env dataDir
+    // 兜底）解析——stubEnv 把写删目标收进本 mkdtemp 目录（自建自删红线）。
+    vi.stubEnv("TAIJI_AGENT_DATA_DIR", agentDir);
+    sessionsDir = getSubagentSessionDir(PARTITION_SID, agentDir);
     fs.mkdirSync(sessionsDir, { recursive: true });
     clearEngines();
     fake = registerFakePiEngine();
@@ -719,12 +733,13 @@ describe("[UF-1] SubagentService 集成：回填点绑定落盘 + 跨重启 mess
     clearEngines();
     _resetLifecycleState();
     _resetCoreSpawnedChildrenMirrorForTest();
-    // 只读目录先恢复权限再删（⑤用例的绑定写失败面）
+    // 只读目录先恢复权限再删（⑤用例的绑定写失败情形）
     if (readOnlyDir !== undefined) {
       fs.chmodSync(readOnlyDir, 0o755);
       readOnlyDir = undefined;
     }
     fs.rmSync(agentDir, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 });
+    vi.unstubAllEnvs();
     for (const k of IDENTITY_ENV_KEYS) delete process.env[k];
   });
 
@@ -739,8 +754,8 @@ describe("[UF-1] SubagentService 集成：回填点绑定落盘 + 跨重启 mess
 
     // 轮应答（= L2797 回填点）后绑定在盘，身份域与 record 对齐
     await vi.waitFor(() => expect(fs.existsSync(`${sessionFile}${RECORD_BINDING_SIDECAR_EXT}`)).toBe(true));
-    // 轮正常收口（绑定写不影响派发主路径）——先等轮终 round+1 完成，再读快照
-    //（[A-lite] 轮终 markRoundIdle 亦 merge binding，读取须在轮终收口后无竞态）。
+    // 轮正常收尾（绑定写不影响派发主路径）——先等轮终 round+1 完成，再读快照
+    //（[A-lite] 轮终 markRoundIdle 亦 merge binding，读取须在轮终收尾后无竞态）。
     await vi.waitFor(() => expect(record.round).toBe(2));
     const binding = readRecordBinding(sessionFile);
     expect(binding).toMatchObject({
@@ -764,17 +779,17 @@ describe("[UF-1] SubagentService 集成：回填点绑定落盘 + 跨重启 mess
     fs.mkdirSync(readOnlyDir, { recursive: true });
     const sessionFile = path.join(readOnlyDir, "sa-bind-ro-session.jsonl");
     const record = makeChatRecord("sa-bind-ro", sessionFile); // makeChatRecord 内部落 sessionFile（此刻目录仍可写）
-    fs.chmodSync(readOnlyDir, 0o555); // 轮应答（绑定写点）前锁只读——写失败面就位
+    fs.chmodSync(readOnlyDir, 0o555); // 轮应答（绑定写点）前锁只读——写失败情形就位
     store.register(record);
 
     await service.chatActions.deliverChatMessage(record, "round on read-only dir");
     await vi.waitFor(() => expect(fake.runs.length).toBe(1));
     fake.runs[0]!.settle({ content: "reply", sessionFile });
 
-    // 主路径不受影响：回填推进 + 轮终收口照常
+    // 主路径不受影响：回填推进 + 轮终收尾照常
     await vi.waitFor(() => expect(record.round).toBe(2));
     expect(record.sessionFile).toBe(sessionFile);
-    // 记账面如实留痕：绑定缺失 + warn
+    // 记账侧如实留痕：绑定缺失 + warn
     expect(fs.existsSync(`${sessionFile}${RECORD_BINDING_SIDECAR_EXT}`)).toBe(false);
     expect(loggerMock.warn).toHaveBeenCalledWith(
       expect.stringContaining("record binding write failed"),
@@ -786,7 +801,7 @@ describe("[UF-1] SubagentService 集成：回填点绑定落盘 + 跨重启 mess
     const file = writePlainChildSession(sessionsDir);
     // 身份源 = 事件流（[身份换源第二步]）：created 身份域 + bound 反查键（在途形态，
     // 与重启前「等待续聊」语义一致）。
-    seedTerminalRecord(getSubagentRecordsDir(agentDir, agentDir), {
+    seedTerminalRecord(getSubagentRecordsDir(PARTITION_SID, agentDir), {
       id: "sa-bind-1",
       startedAt: STARTED_AT,
       rootSessionId: "root-session",
@@ -813,7 +828,7 @@ describe("[UF-1] SubagentService 集成：回填点绑定落盘 + 跨重启 mess
   it("④ [U4 万物可续] 折叠终态（settled 收条）→ getRecordForAction 重建放行（终态单向语义随终态概念消亡）", async () => {
     const file = writePlainChildSession(sessionsDir);
     writeBindingFixture(file);
-    seedTerminalRecord(getSubagentRecordsDir(agentDir, agentDir), {
+    seedTerminalRecord(getSubagentRecordsDir(PARTITION_SID, agentDir), {
       id: "sa-bind-1",
       startedAt: STARTED_AT,
       rootSessionId: "root-session",

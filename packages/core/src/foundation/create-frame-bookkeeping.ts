@@ -1,5 +1,5 @@
 /**
- * createFrameBookkeeping —— 「live 帧流 × RPC 恢复腿」写入仲裁簿记原语（recency 序号表，
+ * createFrameBookkeeping —— 「live 帧流 × RPC 恢复路径」写入仲裁簿记原语（recency 序号表，
  * per-instance 工厂）。
  *
  * 【登记】质量审查结构收敛批产物：原 useGenStats / useContextUsage 各持一份逐字同构的
@@ -26,7 +26,7 @@ export interface FrameBookkeeping {
   bumpSeq(sid: string): void
   /** sid 当前 recency 序号（无帧史 = 0；RPC 发起时捕获入 in-flight meta） */
   seqAt(sid: string): number
-  /** recency 守卫：RPC 发起（seqAtIssue）后该 sid 已有更新帧落地 → true（reply 应弃写） */
+  /** recency 检查：RPC 发起（seqAtIssue）后该 sid 已有更新帧落地 → true（reply 应弃写） */
   hasNewerFrame(sid: string, seqAtIssue: number): boolean
 }
 

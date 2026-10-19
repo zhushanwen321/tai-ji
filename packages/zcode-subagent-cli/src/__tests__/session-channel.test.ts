@@ -494,7 +494,7 @@ describe("onActivity（tool 执行期活性）", () => {
   // session/event 每隔 ~1.0s 推一帧 tool.updated {kind:"progress"}——既非
   // final-frame（无 response）也非 delta（无 delta 字段），此前不产生任何宿主可见
   // 回调，「仅工具执行、零正文」形态下宿主侧无进展守护饿死误杀。onActivity 即该
-  // 帧族的宿主刷新面（引擎映射 AgentEvent {type:"activity"}）。
+  // 帧族的宿主刷新逻辑（引擎映射 AgentEvent {type:"activity"}）。
   function toolUpdatedProgressFrame(
     elapsedMs: number,
     stdoutTail: string
@@ -551,7 +551,7 @@ describe("onActivity（tool 执行期活性）", () => {
 
   it("final-frame（payload.response）→ onActivity 不调（终态帧非活性语义）", async () => {
     const onActivity = vi.fn();
-    // dropTurnTerminal：终态仅由收尾帧宽松判定——final-frame 路径直达断言面
+    // dropTurnTerminal：终态仅由收尾帧宽松判定——final-frame 路径直达断言范围
     const { ch, workspacePath } = makeChannel({ dropTurnTerminal: true });
     const r = await ch.runTurn({ workspacePath, mode: "yolo" }, "做点什么", {
       onActivity,
@@ -625,10 +625,10 @@ describe("权威终态迟到分级日志", () => {
     const r = await ch.runTurn({ workspacePath, mode: "yolo" }, "做点什么");
     expect(r.terminal).toEqual({ status: "success", source: "final-frame" }); // 落定语义不变
     expect(r.lastTerminalStatus).toBe("success"); // 入账路径不动
-    expect(lateTerminalLogs()).toEqual([]); // 常态迟到零日志（降噪根修点）
+    expect(lateTerminalLogs()).toEqual([]); // 常态迟到零日志（降噪从根源修复点）
   }, 10_000);
 
-  it("迟到 failed：warn 保留（假成功识破防御面），文案含原样 status；lastTerminalError 照常入账", async () => {
+  it("迟到 failed：warn 保留（假成功识破防御机制），文案含原样 status；lastTerminalError 照常入账", async () => {
     const { ch, workspacePath } = makeChannel({
       dropTurnTerminal: true,
       extraSendPushes: [
@@ -746,7 +746,7 @@ describe("usage", () => {
     const { ch, workspacePath } = makeChannel({ dropFinalFrame: true });
     const r = await ch.runTurn({ workspacePath, mode: "yolo" }, "做点什么");
     expect(r.usage).toEqual(GOLDEN_READ_TOKENS);
-    // 提取函数单点：golden readResponse 的 tokens 结构（宽容解析面）
+    // 提取函数单点：golden readResponse 的 tokens 结构（宽容解析范围）
     expect(
       extractReadUsage(JSON.parse(ZCODE_APPSERVER_GOLDEN.readResponse))
     ).toEqual(GOLDEN_READ_TOKENS);
@@ -910,7 +910,7 @@ describe("连接崩溃收割（R4 onClose 面）", () => {
     const onlyRunning = [ZCODE_APPSERVER_GOLDEN.pushStream[0]];
     const { ch, conn, stateFile, workspacePath } = makeChannel({ replaceSendPushes: onlyRunning });
     const turn = ch.runTurn({ workspacePath, mode: "yolo" }, "做点什么");
-    // 等 send 已达（fake 流水可观测）后在同一连接上触发自杀（崩溃收割的触发面）
+    // 等 send 已达（fake 流水可观测）后在同一连接上触发自杀（崩溃收割的触发范围）
     await vi.waitFor(() => {
       expect(sentFrames(stateFile, "session/send")).toHaveLength(1);
     }, { timeout: 5_000 });
@@ -995,7 +995,7 @@ describe("golden 双副本与四类样本", () => {
     ).toEqual(GOLDEN_READ_TOKENS);
   });
 
-  it("golden 帧序列全链回放（fake 逐字回放四类样本）：不变量 1 + usage + sessionId 一次收口", async () => {
+  it("golden 帧序列全链回放（fake 逐字回放四类样本）：不变量 1 + usage + sessionId 一次收尾", async () => {
     const { ch, workspacePath } = makeChannel(); // scenario 即 golden 四类样本
     const r = await ch.runTurn({ workspacePath, mode: "yolo" }, "做点什么");
     expect(r.sessionId).toBe(GOLDEN_SESSION_ID);

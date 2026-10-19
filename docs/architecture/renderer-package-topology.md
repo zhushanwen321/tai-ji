@@ -90,7 +90,7 @@ routeInbound 只做三件事：pending 分流、seq 中间件、查表执行。*
 
 ### 2.4 T&C 双模式与多端的关键约束
 
-1. **连接发现策略可插拔（已实装）**：本地 = IPC 端口发现（经 PlatformPort），远程 = profile（storage 经 PlatformPort），mock = VITE_MOCK。形态判定收口在 transport 一处（`packages/core/src/transport/use-connection.ts` 的 resolveConnectionMode() 薄谓词，init 首连 / HMR 重连 / retryRuntime 三处消费；连接目标解析留在各分支原地），壳不感知。profile 的壳侧注入实现 = `packages/mobile-renderer/src/platform/connection-profile.ts`（D4 三分支：query token 验身落 storage + 抹地址栏 / storage 兜底 / 皆无落 token 输入视图；见 [CONTEXT.md](../CONTEXT.md)「profile 连接策略」词条）。移动壳 bootstrap 已对接该序列（platform 注入 → profile 分支 → restoreSessions）。
+1. **连接发现策略可插拔（已实装）**：本地 = IPC 端口发现（经 PlatformPort），远程 = profile（storage 经 PlatformPort），mock = VITE_MOCK。形态判定收敛在 transport 一处（`packages/core/src/transport/use-connection.ts` 的 resolveConnectionMode() 薄谓词，init 首连 / HMR 重连 / retryRuntime 三处消费；连接目标解析留在各分支原地），壳不感知。profile 的壳侧注入实现 = `packages/mobile-renderer/src/platform/connection-profile.ts`（D4 三分支：query token 验身落 storage + 抹地址栏 / storage 兜底 / 皆无落 token 输入视图；见 [CONTEXT.md](../CONTEXT.md)「profile 连接策略」词条）。移动壳 bootstrap 已对接该序列（platform 注入 → profile 分支 → restoreSessions）。
 2. **可靠投递语义不进 domain**：seq gap/reconcile/seqReset→reload 全部在 transport+coordination。domain store 只面对「已排序、已去重的消息流」。
 3. **send.rejected 是 reply 点对点**，不回退广播语义。
 4. **presence 弱可靠通道**：不入 seq 桶、靠 auth.ok/presence.list 兜底——在 `coordination/presence.ts` 注释并测试锁定，防未来误「修复」成入桶。
@@ -123,7 +123,7 @@ extension-host/
 
 渲染件（ui/src/extension-host/）：`ViewHost.vue`、`PluginSettingsPage.vue`、`PermissionRequestDialog.vue`。
 
-提问表单渲染面（renderer/src/components/extension/form/，桌面壳）：`FormOverlay.vue`（壳：表头 / 多问 tab 条 / Submit 门 / 取消）+ `ChoiceQuestion.vue` / `TextQuestion.vue` / `ScheduleForm.vue` 三类型渲染器——统一提问表单协议（ui-form，ask-user / scheduler / plan 三方提问收尾）的 GUI 唯一渲染面，Panel 内联覆盖 composer 挂载。
+提问表单渲染范围（renderer/src/components/extension/form/，桌面壳）：`FormOverlay.vue`（壳：表头 / 多问 tab 条 / Submit 门 / 取消）+ `ChoiceQuestion.vue` / `TextQuestion.vue` / `ScheduleForm.vue` 三类型渲染器——统一提问表单协议（ui-form，ask-user / scheduler / plan 三方提问收尾）的 GUI 唯一渲染范围，Panel 内联覆盖 composer 挂载。
 
 ### 4.2 三套 UI 接口统一（pi ctx.ui × plugin api.ui × GuiComponent）
 
@@ -139,7 +139,7 @@ extension-host/
 
 **挂载点不是硬编码在 ExtensionHost，而是由壳注册**：桌面壳 bootstrap 注册 sidebar.tab / panel.header / composer.toolbar（挂载点全集以 `packages/core/src/bootstrap.ts` registerMountPoints 为 SSOT）；移动壳只注册 message-stream / slash / companion。ContributionRegistry 把 plugin 声明按类型路由到对应挂载点——mobile 天然获得子集，无需 if-else 特判；未来新形态只写自己的挂载点注册。
 
-**Plugin 交互点位（headerAction）**：`panel.header` 挂载点上并存两条点位——既有 ViewHost GuiComponent 信息条（非交互）与 `headerActions` 声明式按钮区（宿主原生渲染，运行时 `api.ui.updateHeaderAction(sessionId, …)` 改徽标/tooltip/disabled；运行时徽标帧 `plugin:headerActionUpdate` 经 broker 全局广播 transient 不入 ring）。可交互原语 `action-bar` 是 GuiComponent 协议首个交互件（items 携 commandId，点击经壳层 provide 的执行器走既有命令链）。首消费者 = `resources/plugins/scheduler-manager`（定时任务管理面；面板内容走 WorkflowVizOverlay 定时任务 tab，`views.update` 显式 sessionId 必填）。
+**Plugin 交互点位（headerAction）**：`panel.header` 挂载点上并存两条点位——既有 ViewHost GuiComponent 信息条（非交互）与 `headerActions` 声明式按钮区（宿主原生渲染，运行时 `api.ui.updateHeaderAction(sessionId, …)` 改徽标/tooltip/disabled；运行时徽标帧 `plugin:headerActionUpdate` 经 broker 全局广播 transient 不入 ring）。可交互原语 `action-bar` 是 GuiComponent 协议首个交互件（items 携 commandId，点击经壳层 provide 的执行器走既有命令链）。首消费者 = `resources/plugins/scheduler-manager`（定时任务管理侧；面板内容走 WorkflowVizOverlay 定时任务 tab，`views.update` 显式 sessionId 必填）。
 
 **Plugin DX**：挂载点未注册 ≠ 静默失败——打 warning 日志（含 plugin id + contribution id + 期望挂载点），管理页对不可用 contribution 置灰；提供 `api.views.listMountPoints()` 让 plugin 自行降级。
 

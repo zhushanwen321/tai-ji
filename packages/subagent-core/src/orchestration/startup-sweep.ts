@@ -9,7 +9,7 @@
 // 一切周期任务——生产常态（宿主挂机）下停摆，是死机制。替代 = runtime 启动序列
 // 的一次性全量收编扫描：单实例锁确立后、先于任何 pi spawn 的时点，全量枚举 pi
 // 宿主形态 run（createPiHostRunEnumeration——[D16⑥] 枚举判据换源：候选 = record
-// 事件流文件族，status = 共享判定核 fold record 读折叠投影，不读快照行），对
+// 事件流文件族，status = 共享判定核 fold record 读取折叠派生视图，不读快照行），对
 // 判读 running 的 run 逐个收编（adoptInterruptedRun → [D15] interruptRun 中断
 // 编排入口，run-interrupted 转移帧一件直落）。
 //
@@ -19,7 +19,7 @@
 // 只可能是上一生命周期的孤儿 pi。孤儿 pi 若正常收尾，其 run-settled 帧与终态
 // manifest 已落盘：收编被三面证据幂等让位（skippedTerminal），误收编不发生；
 // 孤儿 pi 若已死/挂死，收编即正确修正。删窗后残余形态 = 收编帧抢先落在孤儿 pi
-// 尾帧之前（fold 读面保守停帧在 interrupted，读面不崩坏）——manifest 事实面
+// 尾帧之前（fold 读侧保守停帧在 interrupted，读侧不崩坏）——manifest 事实面
 // 完好、下次扫描以 manifest 为准让位，数据最终一致（已接受代价：该 run 的显示
 // 面在本进程内短暂呈 interrupted）。
 //
@@ -39,8 +39,12 @@
 // configureCore，core logger 是 NULL_HOST 缺省实现（debug 级 no-op 且发生在
 // console patch 之前），扫描结果行将无处落盘（决策 6 否决记录）。
 //
-// 分层边界：只消费 agentDir 注入与收编原语，零进程态依赖（不读 env/cwd——目录
+// 分层边界：只消费数据根注入与收编原语，零进程态依赖（不读 env/cwd——目录
 // 活源由调用方注入，与 pi-host-run-store 同款纪律）。
+//
+// [session-store-layout-inversion D2/D3] 注入面换根：旧形态注入 agentDir（枚举
+// `<agentDir>/sessions/<slug>/workflow-state/` cwd 分区布局）；新形态注入数据根
+// （枚举 session 存储树一级 sid 目录的 `<root>/<rootSid>/workflow/runs/`）。
 //
 // [D1 拆边 Class C] 2026-09-30 自 `execution/assembly/` 上移本目录：本模块的实质是
 // 「启动收编」这一编排动作（枚举 execution 侧 record 流 → 经 [D15] 中断入口收编），
@@ -98,7 +102,7 @@ const LOG_PREFIX = "[subagents] startup sweep:";
  * `[subagents] startup sweep: adopted N run(s), skipped M, across K state dir(s)`
  */
 export async function startupSweep(
-  getAgentDir: () => string,
+  getDataDir: () => string,
   log: SweepLogChannel,
 ): Promise<StartupSweepResult> {
   const result: StartupSweepResult = {
@@ -109,7 +113,7 @@ export async function startupSweep(
   };
   let runs: Array<{ runId: string; stateDir: string; status: string }>;
   try {
-    runs = await createPiHostRunEnumeration(getAgentDir).loadAll();
+    runs = await createPiHostRunEnumeration(getDataDir).loadAll();
   } catch (err) {
     // 枚举整体失败（EACCES/EIO 等真 IO 故障经读错分通道上抛到达）：error 留痕
     // + 不阻断启动——僵尸修正不是启动的前置条件，fail-fast 会把磁盘 IO 抖动

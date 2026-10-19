@@ -191,7 +191,7 @@ function shellPids(): Set<number> {
   return new Set(parsed.processes.map((p) => p.pid))
 }
 
-interface SubagentListItem { // oe-exempt:20260927:test:e2e 剧本内视图形状声明（DOM mock 类型，非架构契约面）
+interface SubagentListItem { // oe-exempt:20260927:test:e2e 剧本内视图形状声明（DOM mock 类型，非架构契约范围）
   subagentId: string
   sessionFile: string | null
   slug: string
@@ -243,7 +243,7 @@ test('CR (batch real): chat 轮 idle 薄壳退出（V5①）+ revive 冷续写�
 
     // ── 预热 turn（主 session JSONL 首次 flush 触发）：pi session 延迟写入——首条
     // assistant 消息前文件不存在（AGENTS.md pi session 规则）。subagentAction 通道
-    // 不经主 LLM，若不先产生一轮主对话，主 session 文件不落盘 → getSubagents 投影
+    // 不经主 LLM，若不先产生一轮主对话，主 session 文件不落盘 → getSubagents 派生视图
     // （entry 游标 + journal tail 读 JSONL）恒空。真实用户场景 = 先有对话再派
     // subagent，预热 turn 与之同构。 ──
     const warmReply = await wsRoundTrip(port, {
@@ -322,7 +322,7 @@ test('CR (batch real): chat 轮 idle 薄壳退出（V5①）+ revive 冷续写�
       })
     }
     expect(respawnSeen, `revive 后新薄壳应在 ${REVIVE_SPAWN_BUDGET_MS}ms 内 respawn（实际 ${respawnMs}ms；超线归因 spawn/握手/续写分段）`).toBeTruthy()
-    console.log(`[batch-cr] revive respawn：${respawnMs}ms（预算 ${REVIVE_SPAWN_BUDGET_MS}ms）；事件面首批：${firstEvents.slice(0, 6).join(',') || '（无）'}`)
+    console.log(`[batch-cr] revive respawn：${respawnMs}ms（预算 ${REVIVE_SPAWN_BUDGET_MS}ms）；事件范围首批：${firstEvents.slice(0, 6).join(',') || '（无）'}`)
 
     // ── V5③：续写轮完成（running→idle，turns 增至 2） ──
     const idle2 = await waitUntil(async () => {
@@ -338,7 +338,7 @@ test('CR (batch real): chat 轮 idle 薄壳退出（V5①）+ revive 冷续写�
 
     // ── V5④：历史完整（同 sessionFile 含两轮任务文本） ──
     const sessionFile = idle2!.sessionFile
-    expect(sessionFile, 'record 投影应携带 sessionFile 路径').toBeTruthy()
+    expect(sessionFile, 'record 派生视图应携带 sessionFile 路径').toBeTruthy()
     const sessionText = fs.readFileSync(sessionFile!, 'utf8')
     const hasRound1 = sessionText.includes('WL-CHAT-7777')
     const hasRevive = sessionText.includes('WL-CHAT-7778')

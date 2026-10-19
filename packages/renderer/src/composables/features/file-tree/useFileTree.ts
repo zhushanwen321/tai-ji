@@ -1,7 +1,7 @@
 /**
  * useFileTree —— 文件树前端编排（#3，K-9 跨 store 编排入口）。
  *
- * 职责（单一变化轴「文件树用户交互编排」）：
+ * 职责（单一变化原因「文件树用户交互编排」）：
  * - loadTree：首加载（api/domains/file.tree + git.status overlay 并行）+ 展开态 rehydrate（D-019）
  * - expandNode：展开/折叠（loaded 复用缓存 / loading 幂等去重 / error 重试 / stale 丢弃）
  * - selectFile：薄包装 store action（[2026-10-15 退役] toggleShowIgnored 随 showIgnored 开关删除）

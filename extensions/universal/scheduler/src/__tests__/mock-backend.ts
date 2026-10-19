@@ -2,7 +2,7 @@ import type { SchedulerBackend, SchedulerProviderOverride } from '../backend.js'
 import { replayFoldEntries, type SchedulerEntryLike } from '../replay.js'
 import type { ScheduledTask, SchedulerEntryOp } from '../types.js'
 
-// 测试专用 mock（ext-simplify-08 L9：从 backend.ts 迁出——导出面即测试面的收敛，
+// 测试专用 mock（ext-simplify-08 L9：从 backend.ts 迁出——导出范围即测试范围的收敛，
 // 生产模块不再携带测试脚手架；MockSchedulerBackend/SentMessage 零生产引用）。
 
 export interface SentMessage {

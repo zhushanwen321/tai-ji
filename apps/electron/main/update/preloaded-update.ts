@@ -3,7 +3,7 @@
  *
  * 后台预下载成功后记录已下载文件信息（version/assetName/filePath/downloadedAt + 完整性），
  * 用户点击更新时 update:install handler 以它为安装权威源：读出 release + filePath
- * 直接 installUpdate（版本守卫 + 完整性校验在读取路径完成，见 readPreloadedUpdateRaw）。
+ * 直接 installUpdate（版本检查 + 完整性校验在读取路径完成，见 readPreloadedUpdateRaw）。
  *
  * 清除时机：
  *   - 版本不匹配（pending.version 与本次要安装的 release.version 不一致）→ 清除
@@ -17,15 +17,16 @@
  * 不做 TTL / 不读 downloadedAt，保留期方案同日裁决否决）。
  *
  * 依赖方向：preloaded-update → constants + pick-platform-asset + hash + @taiji/shared + node:fs/path
- *   （hash 为无网络依赖的纯函数叶子模块，见 hash.ts / review S#13）
+ *   + main/utils/atomic-write-json（原子写）（hash 为无网络依赖的纯函数叶子模块，见 hash.ts / review S#13）
  */
-import { existsSync, mkdirSync, readFileSync, readdirSync, unlinkSync, writeFileSync, statSync } from 'node:fs'
+import { existsSync, readFileSync, readdirSync, unlinkSync, statSync } from 'node:fs'
 import path from 'node:path'
 import { compare } from 'compare-versions'
 import type { LatestReleaseInfo } from '@taiji/shared'
 import { getPreloadedUpdateFile, getUpdateDir } from './constants.js'
 import { pickPlatformAsset, pickPlatformAssetName } from './pick-platform-asset.js'
 import { hashFileSha256 } from './hash.js'
+import { atomicWriteJsonFile } from '../utils/atomic-write-json.js'
 
 /**
  * 预载安装包版本封顶保留个数（2026-10-12 用户裁决，缺口 3）：
@@ -71,7 +72,7 @@ interface PreloadedUpdateData {
 }
 
 /**
- * 类型守卫：逐字段校验反序列化结果是否为合法的 PreloadedUpdateData。
+ * 类型检查：逐字段校验反序列化结果是否为合法的 PreloadedUpdateData。
  *
  * JSON.parse 结果类型为 any，直接 `as PreloadedUpdateData` 断言后 TS 不再保护，
  * 缺字段运行时拿到 undefined。这里用 unknown + typeof 逐字段校验，
@@ -109,7 +110,6 @@ export function writePreloadedUpdate(release: LatestReleaseInfo, filePath: strin
     return
   }
   try {
-    mkdirSync(path.dirname(getPreloadedUpdateFile()), { recursive: true })
     const data: PreloadedUpdateData = {
       version: release.version,
       assetName: asset.name,
@@ -119,8 +119,9 @@ export function writePreloadedUpdate(release: LatestReleaseInfo, filePath: strin
       sha256: asset.sha256,
       release,
     }
-    // eslint-disable-next-line no-magic-numbers -- 2 = JSON 缩进空格数（人类可读）
-    writeFileSync(getPreloadedUpdateFile(), JSON.stringify(data, null, 2))
+    // 原子写（main/utils/atomic-write-json 缺省档）：裸写的崩溃窗口半写会在
+    // install 恢复路径留下半截 JSON（读取侧判损坏清除，快路径失效）
+    atomicWriteJsonFile(getPreloadedUpdateFile(), data)
   } catch (err) {
     // best-effort：写元信息失败不影响已下载的文件，快路径降级为完整下载
     console.warn('[preloaded-update] write failed:', err)
@@ -215,7 +216,7 @@ export async function readPreloadedUpdate(release: LatestReleaseInfo): Promise<s
     return null
   }
 
-  // 类型守卫逐字段校验：缺字段/类型错误 → 视为损坏，清除后返回 null（见 S#5）
+  // 类型检查逐字段校验：缺字段/类型错误 → 视为损坏，清除后返回 null（见 S#5）
   if (!isPreloadedUpdateData(parsed)) {
     console.warn('[preloaded-update] invalid schema, clearing')
     clearPreloadedUpdate()
@@ -296,7 +297,7 @@ export async function readPreloadedUpdateRaw(
     return null
   }
 
-  // 类型守卫含 release 字段校验：旧格式（无 release）isPreloadedUpdateData 返回 false → 清除
+  // 类型检查含 release 字段校验：旧格式（无 release）isPreloadedUpdateData 返回 false → 清除
   if (!isPreloadedUpdateData(parsed)) {
     console.warn('[preloaded-update] invalid schema, clearing')
     clearPreloadedUpdate()

@@ -3,17 +3,17 @@
 /**
  * useInboundFrameGuard 单测（crash-forensics-and-watchdog §3.3 D8 / §4 A6 renderer 半边）。
  *
- * 覆盖（core ws-client 守卫在 core 已有 11 用例；本文件只验 renderer 消费编排）：
- * - 台账上报：每次丢帧（含无法归因形态）经既有 renderer-log 通道带结构化标记上报，
- *   否则 A6 的台账 ×4 计数语义在 renderer 侧断链
- * - 静态提示态投影：valveTripped → 该 session 置位；其余 session 不连坐
+ * 覆盖（core ws-client 检查在 core 已有 11 用例；本文件只验 renderer 消费编排）：
+ * - 登记清单上报：每次丢帧（含无法归因形态）经既有 renderer-log 通道带结构化标记上报，
+ *   否则 A6 的登记清单 ×4 计数语义在 renderer 侧断链
+ * - 静态提示态派生视图：valveTripped → 该 session 置位；其余 session 不连坐
  * - 恢复触发器：用户切走再切回 tripped session → 解除暂停 + 重试订阅恰好一次；
  *   非 tripped 切换 / 原地不动（cur===prev）零动作；首次进入 tripped session 亦触发
  *   （从宽语义，见 composable 注释）；retry 返回 false（非 tripped 残留防御）不重试订阅
  * - install 幂等 / uninstall 解绑（teardown 配对）
  * - [RD-1#7] session 销毁清理挂点：registerSessionCleanup(clearTripped)——
  *   triggerSessionCleanups(sid) 回收已删 session 的提示态（集合不再只增不清）；
- *   uninstall 一并清空投影集合并反注册
+ *   uninstall 一并清空派生视图集合并反注册
  *
  * mock 策略：partial mock '@taiji/core'（onInboundFrameDropped 捕获回调 +
  * retryInboundDroppedSession/subscribeSession 调用断言）+ '@/lib/ipc'（reportRendererLog）；
@@ -64,7 +64,7 @@ function makeDrop(overrides: Partial<InboundFrameDroppedInfo> = {}): InboundFram
   }
 }
 
-describe('useInboundFrameGuard 入站守卫 renderer 消费编排（D8 / A6）', () => {
+describe('useInboundFrameGuard 入站检查 renderer 消费编排（D8 / A6）', () => {
   let panel: ReturnType<typeof usePanelStore>
 
   /** 模拟 core 侧处理完一帧后的回调通知（valveTripped 由 core 判定）。 */
@@ -94,7 +94,7 @@ describe('useInboundFrameGuard 入站守卫 renderer 消费编排（D8 / A6）',
     _resetInboundFrameGuardForTest()
   })
 
-  it('每次丢帧都上报（含无法归因形态）——A6 台账 ×4 计数的 renderer 侧源头', () => {
+  it('每次丢帧都上报（含无法归因形态）——A6 登记清单 ×4 计数的 renderer 侧源头', () => {
     installInboundFrameGuard()
 
     // 4 次丢弃：1-3 为同 session 连续（第 3 次 trip），第 4 次继续上报
@@ -200,7 +200,7 @@ describe('useInboundFrameGuard 入站守卫 renderer 消费编排（D8 / A6）',
     expect(isInboundSessionTripped('s1')).toBe(false)
   })
 
-  it('[RD-1#7] session 销毁（triggerSessionCleanups）→ tripped 投影按 sid 回收，不连坐其他 session', () => {
+  it('[RD-1#7] session 销毁（triggerSessionCleanups）→ tripped 派生视图按 sid 回收，不连坐其他 session', () => {
     installInboundFrameGuard()
     fireDrop({ sessionId: 's1', sessionDropCount: 3, valveTripped: true })
     fireDrop({ sessionId: 's2', sessionDropCount: 3, valveTripped: true })
@@ -215,7 +215,7 @@ describe('useInboundFrameGuard 入站守卫 renderer 消费编排（D8 / A6）',
     expect(isInboundSessionTripped('s2')).toBe(true) // 不连坐
   })
 
-  it('[RD-1#7] uninstall → 投影集整体清空 + 反注册 session cleanup（teardown 配对）', () => {
+  it('[RD-1#7] uninstall → 派生视图集整体清空 + 反注册 session cleanup（teardown 配对）', () => {
     installInboundFrameGuard()
     fireDrop({ sessionId: 's1', sessionDropCount: 3, valveTripped: true })
     expect(isInboundSessionTripped('s1')).toBe(true)

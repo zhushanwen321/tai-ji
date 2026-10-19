@@ -41,14 +41,14 @@ jobs:
 
     name: Build ${{ matrix.platform }}
     runs-on: ${{ matrix.os }}
-    # 上限守卫只能放本 job：GitHub 对 uses: 复用 workflow 的 caller job 只接受
+    # 上限检查只能放本 job：GitHub 对 uses: 复用 workflow 的 caller job 只接受
     # name/needs/if/permissions/concurrency/strategy/with/secrets 字段，caller 上写
     # timeout-minutes 是 parse 期 startup_failure（ci.yml 全线 0 job 失败，2026-09-18）。
     timeout-minutes: 20
     env:
       # 提到 job 级：Cache pi resources 步骤的 key 和 prepare 步骤共用同一版本号。
       # 与 scripts/prepare-pi-resources.sh 默认值对齐（1.0.0），避免 CI 打包内置旧 pi。
-      # 该值受 scripts/check-pi-sync.mjs S1 守卫（pre-commit 按路径触发 + ci.yml invariants），
+      # 该值受 scripts/check-pi-sync.mjs S1 检查（pre-commit 按路径触发 + ci.yml invariants），
       # 与根 package.json 声明不一致时会被拦截。
       PI_VERSION: '1.0.0'
 
@@ -113,7 +113,7 @@ jobs:
         shell: bash
         run: bash scripts/preflight-check.sh --ci
 
-      # 引擎包边界守卫（W9，与 pre-commit / ci.yml invariants 同源直调）：引擎包
+      # 引擎包边界检查（W9，与 pre-commit / ci.yml invariants 同源直调）：引擎包
       # （packages/subagent-engine-* + pi/zcode-subagent-cli）不得依赖/导入 core
       # 内部路径 + DoD#2 断言——打包链上同源拦截，防本地 hook 被绕过（D7 通则）。
       - name: Engine package boundary guards (W9)
@@ -145,7 +145,7 @@ jobs:
       # 根 package.json 的 prebuild 只在根 `pnpm run build` 时触发；本 workflow 直接
       # --filter @taiji/electron run build / build:dir 都会绕过它——必须显式执行，
       # 否则 pi-ai 升级后 CI 静默用仓库里的旧 JSON（生成物与 pi-ai 版本漂移，
-      # verifyEnvVars 守卫只在本地生效）。
+      # verifyEnvVars 检查只在本地生效）。
       - name: Generate builtin providers catalog
         shell: bash
         run: node packages/runtime/scripts/gen-builtin-providers.mjs

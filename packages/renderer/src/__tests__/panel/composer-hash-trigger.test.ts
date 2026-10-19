@@ -515,7 +515,7 @@ describe('slash 浮层打开主动拉（SL 组）', () => {
     await wrapper.setProps({ open: true })
     await flushPromises()
     expect(getCommandsMock).toHaveBeenCalledTimes(1)
-    // 关→开（1s 窗口内）：节流命中，不重拉
+    // 关→开（1s 窗口内）：节流命中，不重新拉取
     await wrapper.setProps({ open: false })
     await wrapper.setProps({ open: true })
     await flushPromises()
@@ -712,9 +712,9 @@ describe('选中插 chip 集成（C 组，真实浮层 + 真实输入区）', ()
   })
 
   it('C2 @ 选 subagent → 插 .mention-at chip（@slug + dataset.chipSubagentId）', async () => {
-    // 同一 session 分区有两条合法拉取腿：ComposerTray 外壳挂载即首拉（useTrayCounts D13
+    // 同一 session 分区有两条合法拉取路径：ComposerTray 外壳挂载即首次拉取（useTrayCounts D13
     // watch immediate）+ 浮层 open 边沿刷新（command-popover-open-fetch）。mock 必须用稳定
-    // 实现供满两次——Once 会被首拉消耗，open 刷新落到默认空 mock 反向清空分区。
+    // 实现供满两次——Once 会被首次拉取消耗，open 刷新落到默认空 mock 反向清空分区。
     getSubagentsMock.mockResolvedValue({ subagents: SUBAGENT_FIXTURE, oversize: false })
     wrapper = mountRealComposer()
     await flushPromises()

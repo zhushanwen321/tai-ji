@@ -1,6 +1,6 @@
 /**
  * 启用语音朗读总开关（ai-voice-tts 设计 §5.2 通用配置；§5.1「关闭后朗读按钮报
- * 语音服务未配置」的行为面）。
+ * 语音服务未配置」的行为范围）。
  *
  * 存储落点说明：u1 协议形状（SanitizedTtsConfig / TtsConfig / tts.configure payload）
  * 未承载全局开关字段——本开关属 renderer 侧功能偏好，落 localStorage（与主题/字号等

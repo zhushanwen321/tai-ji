@@ -2,9 +2,9 @@
 //
 // [engine-ref-translation D2] 派发层模型 ref 翻译编排（2026-10-14 用户裁决）。
 //
-// 四层解析产物（显式/偏好）经引擎翻译面（EnginePort.translateModelRef，可选成员）
+// 四层解析产物（显式/偏好）经引擎翻译侧（EnginePort.translateModelRef，可选成员）
 // 改写为引擎原生 ref（zcode 实装：zai-coding-cn/* → account:bigmodel-individual-*，
-// 其余 provider 两世界 1:1 原样、不在表内透传）。record/上报面呈现实际发给引擎的
+// 其余 provider 两世界 1:1 原样、不在表内透传）。record/上报侧呈现实际发给引擎的
 // ref（UI 跟随事实）。两层失败语义分立：
 //   - 显式层（task / frontmatter——作者/用户显式意图）：翻译失败 = 显式抛错
 //     （首败即停——引擎确实供不了该模型，错误自带恢复指引；由编排层既有错误包装
@@ -75,7 +75,7 @@ export function resolveEngineModelWithTranslation(
  * 偏好层的翻译 + 降级语义（自主函数拆出的模块内私有辅助——metrics-gate 复杂度治理：
  * 主函数只留四层路由判定，翻译失败降级与清单校验降级的分支链留本函数）。
  *
- * 偏好层失败语义补口（MF-2）：引擎翻译面对历史遗留/清单漂移的偏好值可能抛
+ * 偏好层失败语义补口（MF-2）：引擎翻译侧对历史遗留/清单漂移的偏好值可能抛
  * model_not_available（zcode 实装 translatePiModelRefToZcode 三处同步 throw）。
  * 显式层首败即停不变；偏好层按本文件头声明的语义降级——跳过偏好层走引擎缺省
  * + warn，不炸派发（settings 页可重选）。code 用结构化探测，不 import 具体
@@ -101,9 +101,9 @@ function resolvePreferenceLayer(
     );
     return { engineModel: undefined, source: "default" };
   }
-  // 清单成员校验仅对「有枚举面」的引擎生效：undefined/null = port 契约的「无自有
-  // 枚举面」形态（放行——引擎侧 validateModel 仍兜底；回归守卫：不可把无面引擎
-  // 当空清单处理，否则偏好层被误跳过）；空数组 = 枚举面在册但当前无可用模型 → 跳过。
+  // 清单成员校验仅对「有枚举侧」的引擎生效：undefined/null = port 契约的「无自有
+  // 枚举侧」形态（放行——引擎侧 validateModel 仍兜底；回归检查：不可把无面引擎
+  // 当空清单处理，否则偏好层被误跳过）；空数组 = 枚举侧在册但当前无可用模型 → 跳过。
   const list = route.engine.listModels?.();
   const known = list === undefined || list === null || list.some((m) => m.id === translated);
   if (known) return { engineModel: translated, source: "preference" };

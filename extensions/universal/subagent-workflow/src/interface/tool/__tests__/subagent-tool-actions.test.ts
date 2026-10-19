@@ -1,9 +1,9 @@
 /**
- * subagent 工具组非 start 通道 + renderCall 预解析测试（与 path-guard 的 start 守卫面
+ * subagent 工具组非 start 通道 + renderCall 预解析测试（与 path-guard 的 start 检查范围
  * 互补，覆盖 subagent_manage / subagent_message 的 action 路由全分支、subagent_start
  * 的顶层透传与 renderCall 的 model 预解析降级链）。
  *
- * 覆盖面（tool-declaration-slimming D3 拆分后）：
+ * 覆盖范围（tool-declaration-slimming D3 拆分后）：
  *   - subagent_start：service 缺席 → 带恢复动作的错误；顶层 params 原样透传
  *   - subagent_manage：list/cancel/close 三通道 handler 接线 + adapter 包装；
  *     未知 action → immediate throw
@@ -102,7 +102,7 @@ afterEach(() => {
   resetServiceSlot();
 });
 
-describe("注册面：三工具名（D3 拆分终态）", () => {
+describe("注册点：三工具名（D3 拆分终态）", () => {
   it("registerSubagentTool 注册 subagent_start / subagent_manage / subagent_message 三工具", () => {
     const names: string[] = [];
     const pi = mockExtensionApi({
@@ -113,7 +113,7 @@ describe("注册面：三工具名（D3 拆分终态）", () => {
   });
 });
 
-describe("subagent_start execute：守卫与缺席面", () => {
+describe("subagent_start execute：检查与缺席范围", () => {
   it("service 缺席 → immediate throw，错误带恢复动作指引", async () => {
     const tool = captureToolByName("subagent_start"); // 槽未注入
     await expect(

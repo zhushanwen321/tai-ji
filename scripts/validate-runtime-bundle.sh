@@ -17,7 +17,7 @@ set -e
 
 # 检查失败原则提示（合并进 cleanup EXIT trap，避免覆盖）
 __check_principle() {
-  [ $? -ne 0 ] && echo "[原则] 无论是否本次改动引入的问题，都必须正面修复解决，不允许跳过。" >&2
+  [ $? -ne 0 ] && echo "[原则] 无论是否本次改动引入的问题，都必须当场直接修复解决，不允许跳过。" >&2
   return 0
 }
 
@@ -35,7 +35,7 @@ fi
 PROJECT_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$PROJECT_ROOT"
 
-# Gate 0：pnpm store 布局守卫——布局被沙箱执行体（zsw 引擎 HOME 覆盖）翻转时，
+# Gate 0：pnpm store 布局检查——布局被沙箱执行体（zsw 引擎 HOME 覆盖）翻转时，
 # 下方 verify-plugin-e2e 的自含 install 会以 ERR_PNPM_ABORTED_REMOVE_MODULES_DIR_NO_TTY
 # 硬崩；先拦下给出可操作指引（见 docs/TROUBLESHOOTING.md「pnpm store 布局双向翻转」）。
 bash "$PROJECT_ROOT/.githooks/check_pnpm_store_layout.sh" || exit 1
@@ -218,7 +218,7 @@ if (bad.length > 0) {
   for (const b of bad) console.error("  " + b);
   process.exit(1);
 }
-console.log("[OK] " + files.length + " 个产物的裸 require 说明符均在允许集合内（传递内联链闭合）");
+console.log("[OK] " + files.length + " 个产物的裸 require 说明符均在允许集合内（传递内联链已补全）");
 ' "$BUNDLE_DIR_FOR_GREP" "$TSUP_EXTERNAL"; then
     echo -e "${YELLOW}[FIX] 纯 JS 依赖补进 $RUNTIME_DIR/tsup.config.ts 的 noExternal（内联）后重跑 build；native module（含 .node 二进制）才走 external + electron-builder asarUnpack${NC}"
     exit 1
@@ -330,7 +330,7 @@ done
 
 # 启动 runtime，等待 ready，发送 health check，清理
 RUNTIME_PID=""
-# 数据目录隔离：验证 runtime 的全部写面（日志 / runtime.port / crash journal /
+# 数据目录隔离：验证 runtime 的全部写侧（日志 / runtime.port / crash journal /
 # 单实例注册）必须落临时目录，禁止写任何真实数据目录（prod ~/.taiji 或 dev 树）。
 # 同时剥 TAIJI_AGENT_PACKAGED：宿主泄漏该标志会使验证 runtime 按打包态解析不存在
 # 的捆绑 pi 二进制、boot 即挂（spawn-env-contract 探针 P1 实锤）。

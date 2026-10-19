@@ -56,14 +56,15 @@ afterEach(() => {
 });
 
 function writeRun(repoSlug: string, runId: string, state: Record<string, unknown> | string): string {
-  const dir = join(home, ".review-fix-loop", repoSlug, runId);
+  const dir = join(home, ".agents", "skill-data", "review-fix-loop", "rfl", repoSlug, runId);
   mkdirSync(dir, { recursive: true });
   writeFileSync(join(dir, "state.json"), typeof state === "string" ? state : JSON.stringify(state), "utf8");
   return dir;
 }
 
 async function rfl(args: string[]): Promise<{ stdout: string }> {
-  return run(process.execPath, [RFL_PATH, ...args], { env: { ...process.env, HOME: home } });
+  // SKILL_DATA_DIR 显式置空：防宿主环境残留值把 ROOT 重定向出 HOME 隔离树
+  return run(process.execPath, [RFL_PATH, ...args], { env: { ...process.env, HOME: home, SKILL_DATA_DIR: "" } });
 }
 
 describe("rfl stats 深度渲染", () => {
@@ -255,7 +256,10 @@ describe("rfl import-execute（静态依赖边 + main 即时执行）", () => {
     const realExit = process.exit;
     const realArgv = process.argv;
     const realHome = process.env.HOME;
+    const realSkillDataDir = process.env.SKILL_DATA_DIR;
     process.env.HOME = home;
+    // SKILL_DATA_DIR 显式清空：ROOT 在 import 时求值，防宿主残留值重定向出 HOME 隔离树
+    delete process.env.SKILL_DATA_DIR;
     process.argv = ["node", "rfl.mjs", "list", "repo-imp"];
     console.log = ((...args: unknown[]) => { lines.push(args.map(String).join(" ")); }) as typeof console.log;
     // exit 拦截为 no-op 记录：switch 分支 break 后模块正常完成，不杀 vitest worker
@@ -268,6 +272,8 @@ describe("rfl import-execute（静态依赖边 + main 即时执行）", () => {
       process.exit = realExit;
       process.argv = realArgv;
       process.env.HOME = realHome;
+      if (realSkillDataDir === undefined) delete process.env.SKILL_DATA_DIR;
+      else process.env.SKILL_DATA_DIR = realSkillDataDir;
     }
     expect(exitCodes[0]).toBe(0);
     expect(lines.join("\n")).toContain("wf-import-1");

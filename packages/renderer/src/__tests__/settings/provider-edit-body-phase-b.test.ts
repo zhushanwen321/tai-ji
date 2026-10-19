@@ -96,7 +96,7 @@ const ZHIPU_NO_KEY_P: ProviderInfo = {
 
 const setProviderSpy = vi.fn(async () => undefined)
 
-/** [C3] 共享 seam 桩工厂（全方法面中性默认）+ 本文件 spy/映射（保存 spy + quota RPC）。 */
+/** [C3] 共享 seam 桩工厂（全方法侧中性默认）+ 本文件 spy/映射（保存 spy + quota RPC）。 */
 function makeTransport(): SettingsTransport {
   return makeSettingsTransportStub({
     setProvider: setProviderSpy,

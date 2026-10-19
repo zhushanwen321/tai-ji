@@ -141,7 +141,8 @@ describe('D6-④ pi-crash 上下文头', () => {
     })
     await logger.closeLogger()
     const date = new Date().toISOString().slice(0, 10)
-    const content = readFileSync(join(logsDir(), `pi-crash-${date}-ctx-sid.log`), 'utf8')
+    // 布局反转：合法 sid 落树内 <root>/<sid>/logs/pi-crash-<date>.log（文件名去 sid）
+    const content = readFileSync(join(dataDir, 'ext-sessions', 'ctx-sid', 'logs', `pi-crash-${date}.log`), 'utf8')
     // 顺序：runtime-context 头块 → 空行分隔 → stderr 原文
     const ctxIdx = content.indexOf('[runtime-context] sessionId=ctx-sid')
     const memIdx = content.indexOf('[runtime-context] memory=')
@@ -162,7 +163,7 @@ describe('D6-④ pi-crash 上下文头', () => {
     logger.writePiCrashLog('legacy-sid', 'old-style crash')
     await logger.closeLogger()
     const date = new Date().toISOString().slice(0, 10)
-    const content = readFileSync(join(logsDir(), `pi-crash-${date}-legacy-sid.log`), 'utf8')
+    const content = readFileSync(join(dataDir, 'ext-sessions', 'legacy-sid', 'logs', `pi-crash-${date}.log`), 'utf8')
     expect(content).toContain('old-style crash')
     expect(content).not.toContain('[runtime-context]')
   })
@@ -230,7 +231,7 @@ describe('D6-⑦ 清理前缀扩展与保留天数 shared 化', () => {
     return file
   }
 
-  it('超龄 plugin-crash-* 被清理（新写入面配清理通道，D6-⑦ 有写入无清理 = 新债）', async () => {
+  it('超龄 plugin-crash-* 被清理（新写侧配清理通道，D6-⑦ 有写入无清理 = 新债）', async () => {
     const oldPluginCrash = seedLog('plugin-crash-2026-07-01-trusted-1.log', 10)
     const recentPluginCrash = seedLog(`plugin-crash-${new Date().toISOString().slice(0, 10)}-trusted-2.log`, 0)
     logger = await loadLogger({ TAIJI_LOG_KEEP_DAYS: '7' })

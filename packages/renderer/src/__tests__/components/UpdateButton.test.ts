@@ -7,7 +7,7 @@
  * - W4TC6c error：AlertCircle + errorMessage
  * - W4TC6d idle：不渲染（v-if 排除）
  * - W4TC7  downloading：Loader2 + 进度条
- * - W4TC8  unsupported：「前往下载」按钮 + click 触发 openUpdateFallbackUrl
+ * - W4TC8  unsupported：「前往下载」按钮 + click 触发 openExternal
  * - W4TC9  available click：触发 performDownload
  *
  * Mock 策略：vi.mock('@/composables/features/settings/useAppUpdate') 工厂注入真实控制器
@@ -61,7 +61,7 @@ describe('UpdateButton', () => {
   })
 
   it('W4TC9：available click 触发 performDownload', async () => {
-    // latestRelease 前置：controller.performDownload 无 release 短路不调 ipc（真实守卫语义）
+    // latestRelease 前置：controller.performDownload 无 release 短路不调 ipc（真实检查语义）
     setCardUpdateState({ state: 'available', latestRelease: makeCardRelease('0.9.0') })
     const wrapper = mount(UpdateButton)
     await wrapper.find('[data-testid="update-available"]').trigger('click')
@@ -99,7 +99,7 @@ describe('UpdateButton', () => {
     expect(errorEl.text()).toContain('升级失败')
   })
 
-  it('W4TC8：unsupported 渲染「前往下载」按钮，click 触发 openUpdateFallbackUrl', async () => {
+  it('W4TC8：unsupported 渲染「前往下载」按钮，click 触发 openExternal', async () => {
     // 摆 latestRelease：真实链 available → main 推送 unsupported 错误时 release 数据保留，
     // controller.openFallbackUrl 前置 latestRelease 提供 htmlUrl（无 release 时短路不调 ipc）
     setCardUpdateState({ state: 'unsupported', latestRelease: makeCardRelease('0.9.0') })
@@ -109,8 +109,8 @@ describe('UpdateButton', () => {
     expect(unsupported.text()).toContain('前往下载')
 
     await unsupported.trigger('click')
-    expect(getCardUpdateHarness().ipc.openUpdateFallbackUrl).toHaveBeenCalledTimes(1)
-    expect(getCardUpdateHarness().ipc.openUpdateFallbackUrl).toHaveBeenCalledWith('https://example.com/release')
+    expect(getCardUpdateHarness().ipc.openExternal).toHaveBeenCalledTimes(1)
+    expect(getCardUpdateHarness().ipc.openExternal).toHaveBeenCalledWith('https://example.com/release')
   })
 
   it('replacing 渲染 spinner + 「替换中」文案', () => {

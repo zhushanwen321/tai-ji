@@ -5,7 +5,7 @@
  *
  * 聚焦不产生任何可见视觉（v6 3px accent 外环 → 外框 border-strong 提亮 → R3 无边界，
  * 两代旧形态均已退役）；isFocused 仅作聚焦态挂点（ComposerInput 的 is-focused 同语义），
- * focusRingClass 恒空，保留返回面维持 Composer.vue 接线契约不变（勿再往里加聚焦视觉）。
+ * focusRingClass 恒空，保留返回结构维持 Composer.vue 接线契约不变（勿再往里加聚焦视觉）。
  */
 import { computed, ref, type ComputedRef, type Ref } from 'vue'
 

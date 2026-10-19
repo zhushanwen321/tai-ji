@@ -317,7 +317,7 @@ describe('BrowserViewManager', () => {
       const win = makeWindow()
       const mgr = new BrowserViewManager(makeWindowManager('win-1', win))
       mgr.create('sess-1', 'win-1')
-      // 显示收口谓词（§7.4）：show 仅在「浮层开 ∧ 内容 browser ∧ 无错误 ∧ 无相交 shieldsView」时生效
+      // 显示收敛谓词（§7.4）：show 仅在「浮层开 ∧ 内容 browser ∧ 无错误 ∧ 无相交 shieldsView」时生效
       mgr.setOverlayState({ open: true, content: 'browser', sessionId: 'sess-1' })
       // 通过 setRect 设置 lastRect（由 setRect 正确维护，hide 不再覆盖）
       mgr.setRect('sess-1', { x: 10, y: 10, width: 200, height: 300 })
@@ -392,7 +392,7 @@ describe('BrowserViewManager', () => {
       mgr.setRect('sess-1', { x: 5, y: 5, width: 100, height: 100 })
       const setBoundsCountAfterSetRect = createdViews[0].setBounds.mock.calls.length
 
-      // 开浮层 browser 内容（显示收口谓词为真）→ isVisible=true，setBounds(lastRect=刚推的 rect)
+      // 开浮层 browser 内容（显示收敛谓词为真）→ isVisible=true，setBounds(lastRect=刚推的 rect)
       mgr.setOverlayState({ open: true, content: 'browser', sessionId: 'sess-1' })
       const showBoundsCall = createdViews[0].setBounds.mock.calls.at(-1)![0]
       expect(showBoundsCall).toEqual({ x: 5, y: 5, width: 100, height: 100 })

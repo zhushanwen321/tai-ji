@@ -99,7 +99,7 @@ describe('renderReleaseNotes — 传值矩阵「更新日志」行（设计 mark
     // 容器化后渲染轴经工厂持有 state（C5）：测试建独立容器实例，无需单例复位
     const { renderReleaseNotes } = createNotesAxis(createUpdateState())
     renderReleaseNotes(BILINGUAL_BODY)
-    // 既有行为回归断言：UpdateButton 渲染面调 renderMarkdown 只传内容不传 env（env 缺省 →
+    // 既有行为回归断言：UpdateButton 渲染范围调 renderMarkdown 只传内容不传 env（env 缺省 →
     // 净化 hook 的 resourceBaseDir undefined → 相对 src 不重写、④路 preventDefault 无动作）
     expect(markdown.renderMarkdown).toHaveBeenCalledOnce()
     const [notes, env] = vi.mocked(markdown.renderMarkdown).mock.calls[0] ?? []

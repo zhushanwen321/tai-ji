@@ -92,7 +92,7 @@ Gate 是 CW 的核心价值（机器检查门，防 AI 谎报）。本子维度�
   - `testsAllPass`（`test.ts:79`）判定 `testRunResult.passed=true`（fail 数=0）；测试由 cli.ts 用 `spawnSync` 执行（per-wave testCommand），结果解析后传入 gate，gate 零 IO。任何「测试失败也当 pass」的改动 = MUST_FIX
   - `testCasesExecuted` / `testReferencesDesignReview`（`test.ts:117` / `:212`）做精确匹配。若改匹配逻辑（加 trim/substring 容差），破坏「防 AI 谎报」设计意图 → MUST_FIX
 - **freeze 校验绕过**：`checkFreeze`（`freeze.ts:141`）在 closeout 时校验 artifacts drift + 冻结 evidence（frozenAt）。任何跳过 freeze 检查的改动 → MUST_FIX
-- **测试命令执行安全**：cli.ts:736 用 `spawnSync(testCommand, {shell:true})` 执行 per-wave testCommand（agent 撰写）。审查命令注入风险应聚焦此处 + `guardTestCommand`（cli.ts:672）的空白短路守卫，确认 testCommand 非纯空白才放行 spawn
+- **测试命令执行安全**：cli.ts:736 用 `spawnSync(testCommand, {shell:true})` 执行 per-wave testCommand（agent 撰写）。审查命令注入风险应聚焦此处 + `guardTestCommand`（cli.ts:672）的空白短路检查，确认 testCommand 非纯空白才放行 spawn
 
 ### SUGGESTION 标准
 
@@ -106,7 +106,7 @@ Gate 是 CW 的核心价值（机器检查门，防 AI 谎报）。本子维度�
 const result = commitExists(unit, deps);
 // 缺：store.appendStatusHistory(unit, { action: "test", gateResult: result });
 
-// pass：testCommand 非纯空白才 spawn（guardTestCommand 空白短路守卫），shell:true 执行 per-wave 命令
+// pass：testCommand 非纯空白才 spawn（guardTestCommand 空白短路检查），shell:true 执行 per-wave 命令
 guardTestCommand(unit.plan.testCommand); // 空白短路返回，不 spawn
 const r = spawnSync(unit.plan.testCommand.trim(), { shell: true });
 ```

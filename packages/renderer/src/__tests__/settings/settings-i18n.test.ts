@@ -48,6 +48,18 @@ describe('U10: settings UI 文案经 i18n 渲染', () => {
     // 命令名（快捷键展示用）
     expect(i18n.global.t('settings.command.new-session')).toBe('新建任务')
     expect(i18n.global.t('settings.command.toggle-sidebar')).toBe('收起侧栏')
+    // 网络代理页（llm-network-proxy U4：menu 项 + network 命名空间三卡文案）
+    expect(i18n.global.t('settings.menu.networkProxy')).toBe('网络代理')
+    expect(i18n.global.t('settings.menu.networkProxyDesc')).toBe('配置 LLM 出站代理服务器与分流规则')
+    expect(i18n.global.t('settings.network.serverCard')).toBe('代理服务器')
+    expect(i18n.global.t('settings.network.enabled')).toBe('启用网络代理')
+    expect(i18n.global.t('settings.network.authPairHint')).toBe('用户名与密码须成对填写，或同时留空')
+    expect(i18n.global.t('settings.network.savedToast')).toBe('已保存，自下一轮对话起生效')
+    expect(i18n.global.t('settings.network.quickAdd')).toBe('从服务商快速添加')
+    expect(i18n.global.t('settings.network.noBaseUrl')).toBe('未配置 baseURL')
+    expect(i18n.global.t('settings.network.rangeAll')).toBe('累计')
+    expect(i18n.global.t('settings.network.truncatedNote')).toBe('累计数据基于保留的历史窗口，更早的记录已清理')
+    expect(i18n.global.t('settings.network.testElapsed', { ms: 42 })).toBe('耗时 42 ms')
   })
 
   it('en-US locale 含完整 settings namespace 且 t() 返回英文', async () => {
@@ -76,6 +88,18 @@ describe('U10: settings UI 文案经 i18n 渲染', () => {
     expect(i18n.global.t('settings.loadPaths.title')).toBe('Load paths')
     expect(i18n.global.t('settings.command.new-session')).toBe('New session')
     expect(i18n.global.t('settings.command.toggle-sidebar')).toBe('Toggle sidebar')
+    // 网络代理页（llm-network-proxy U4：menu 项 + network 命名空间三卡文案，en-US 侧完整）
+    expect(i18n.global.t('settings.menu.networkProxy')).toBe('Network Proxy')
+    expect(i18n.global.t('settings.menu.networkProxyDesc')).toBe('Configure LLM outbound proxy server and routing rules')
+    expect(i18n.global.t('settings.network.serverCard')).toBe('Proxy Server')
+    expect(i18n.global.t('settings.network.enabled')).toBe('Enable network proxy')
+    expect(i18n.global.t('settings.network.authPairHint')).toBe('Username and password must be filled as a pair, or both left empty')
+    expect(i18n.global.t('settings.network.savedToast')).toBe('Saved. Takes effect from the next conversation turn')
+    expect(i18n.global.t('settings.network.quickAdd')).toBe('Quick add from providers')
+    expect(i18n.global.t('settings.network.noBaseUrl')).toBe('No baseURL configured')
+    expect(i18n.global.t('settings.network.rangeAll')).toBe('All time')
+    expect(i18n.global.t('settings.network.truncatedNote')).toBe('All-time stats cover the retained history window; older records have been trimmed')
+    expect(i18n.global.t('settings.network.testElapsed', { ms: 42 })).toBe('took 42 ms')
   })
 
   it('切换 locale 后同一 key 返回不同文案（响应式切换生效）', async () => {

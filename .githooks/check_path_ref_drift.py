@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 # 路径引用漂移检查：staged 变更删除/移动了文件时，全仓代码与脚本范围 grep 旧路径的
-# 字符串残留引用——守卫触发正则 / 测试 fixture / 构建与钩子脚本里内嵌的路径不随迁移
+# 字符串残留引用——检查触发正则 / 测试 fixture / 构建与钩子脚本里内嵌的路径不随迁移
 # 更新 = 防线静默失效（钩子不触发、测试 ENOENT，要到 CI 或构建才暴露；v0.10.14 轮
-# 实例：markdown-sanitize.ts 迁 renderer→ui 后 install-hooks.sh 触发正则与守卫测试
+# 实例：markdown-sanitize.ts 迁 renderer→ui 后 install-hooks.sh 触发正则与检查测试
 # fixture 仍指老路径）。
 #
 # 匹配口径：旧路径去扩展名的完整相对串；正则转义形态（`foo\.ts`）与普通形态同判
@@ -54,6 +54,16 @@ def path_to_pattern(rel_path):
     return re.escape(stem).replace("\\.", "\\\\.")
 
 
+def points_at_sibling_only(line, old):
+    """命中行是否只指向同 stem 不同扩展名的兄弟文件（如旧 preload.js 删除后行内引用
+    全部是 preload.ts）——去扩展名匹配的副作用误伤，非残留，豁免。行内含任一旧扩展名
+    具体引用、或只有裸 stem 引用（指向不明，旧文件删除后失效）时按残留处理。"""
+    stem = re.sub(r"\.[^./]+$", "", old)
+    old_ext = old[len(stem):]
+    exts = re.findall(re.escape(stem) + r"\.([A-Za-z0-9]+)", line)
+    return bool(exts) and all("." + e != old_ext for e in exts)
+
+
 def grep_pattern(pattern):
     out = subprocess.run(
         ["git", "grep", "-E", "-I", "-n", "-e", pattern, "--", *SCAN_PATHSPEC],
@@ -75,6 +85,8 @@ def main():
     for old in removed:
         pattern = path_to_pattern(old)
         for line in grep_pattern(pattern):
+            if points_at_sibling_only(line, old):
+                continue
             ref_file = line.split(":", 1)[0]
             if (old, ref_file) in PATH_REF_EXEMPT:
                 continue

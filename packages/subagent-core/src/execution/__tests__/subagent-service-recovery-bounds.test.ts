@@ -3,7 +3,7 @@
 // [u-svc / T2] 服务侧回收上界与 kill 收敛：
 //   - T2④/LC-2：closeChatIdle / cancelBackground 终止路径收敛到
 //     killRecordChildWithEscalation（spy 断言调用点与参数）；
-//   - T2⑥/PS-1：disposeAllRecords 补回收面（controller.abort + kill + disarm idle timer）；
+//   - T2⑥/PS-1：disposeAllRecords 补回收侧（controller.abort + kill + disarm idle timer）；
 //
 // [W3 改写 → H1 U6] 替身 = 协议 seam（registerFakePiEngine）。[H1 U6] interact 断言
 //（cancel/close 终止意图受理）随 interact 面退役删除：真实杀链 = 轮级 abort signal →
@@ -138,7 +138,7 @@ describe("T2④ service-side kill convergence", () => {
     expect(record.stopReason).toBe("interrupted");
     expect(record.closedReason).toBeUndefined();
     expect(record.lastAbandonedRound).toEqual({ epoch: 0, round: 0 });
-    expect(record.hadWorktree).toBeUndefined(); // cancel ≠ 收口
+    expect(record.hadWorktree).toBeUndefined(); // cancel ≠ 收尾
   });
 
   it("archiveIdleRecord (via closeSubagent force:false on idle) routes through killRecordChildWithEscalation and disarms timers", async () => {
@@ -146,7 +146,7 @@ describe("T2④ service-side kill convergence", () => {
     store.register(record);
     armIdleTimer(record.id, () => {}); // Path A：idle timer armed（进程保活）
     await service["closeSubagent"](record, false);
-    // [U5] close = 收口落账（archiveIdleRecord——kill 链保留 + disarm；不终态化）。
+    // [U5] close = 收尾写入 journal 记录（archiveIdleRecord——kill 链保留 + disarm；不终态化）。
     expect(killChildSpy).toHaveBeenCalledWith(record.id, "archiveIdleRecord");
     expect(hasIdleTimer(record.id)).toBe(false);
     expect(record.status).toBe("idle");
@@ -164,26 +164,26 @@ describe("T2④ service-side kill convergence", () => {
     const count = service.disposeAllRecords("parent-new");
 
     expect(count).toBe(2);
-    // 回收面 i：controller.abort
+    // 回收侧 i：controller.abort
     expect(running.controller?.signal.aborted).toBe(true);
     expect(idle.controller?.signal.aborted).toBe(true);
-    // 回收面 ii：kill 收敛到 escalation 入口
+    // 回收侧 ii：kill 收敛到 escalation 入口
     expect(killChildSpy).toHaveBeenCalledWith(running.id, "disposeAllRecords (parent-new)");
     expect(killChildSpy).toHaveBeenCalledWith(idle.id, "disposeAllRecords (parent-new)");
-    // 回收面 iii：idle timer disarm
+    // 回收侧 iii：idle timer disarm
     expect(hasIdleTimer(idle.id)).toBe(false);
-    // [U5] 编排性关闭：settle idle + interrupted-by-parent + 收口落账（不终态化
-    // ——closedReason 恒 undefined，stopReason 承载展示位）；在飞轮置放弃轮标记。
+    // [U5] 编排性关闭：settle idle + interrupted-by-parent + 收尾写入 journal 记录（不终态化
+    // ——closedReason 恒 undefined，stopReason 承载展示位）；在途轮置放弃轮标记。
     expect(running.status).toBe("idle");
     expect(idle.status).toBe("idle");
     expect(running.closedReason).toBeUndefined();
     expect(running.stopReason).toBe("interrupted-by-parent");
     expect(running.lastAbandonedRound).toEqual({ epoch: 0, round: 0 });
-    expect(running.worktreeHandle).toBeUndefined(); // 收口落账 worktreeHandle 清句（S5）
+    expect(running.worktreeHandle).toBeUndefined(); // 收尾写入 journal 记录 worktreeHandle 清句（S5）
   });
 });
 
-describe("record-access 越界守卫（S11）", () => {
+describe("record-access 越界检查（S11）", () => {
   let agentDir: string;
   let service: SubagentService;
 
@@ -201,8 +201,8 @@ describe("record-access 越界守卫（S11）", () => {
     fs.rmSync(agentDir, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 });
   });
 
-  // [S11] record-access 越界守卫（review batch 回填）：disposed 后读面返回 undefined 不抛。
-  it("record-access 越界守卫：disposed 后 lookupRecordAnyState → undefined（不抛）", async () => {
+  // [S11] record-access 越界检查（review batch 回填）：disposed 后读侧返回 undefined 不抛。
+  it("record-access 越界检查：disposed 后 lookupRecordAnyState → undefined（不抛）", async () => {
     service.dispose();
     const record = service.queries.lookupRecordAnyState("any-id");
     expect(record).toBeUndefined();

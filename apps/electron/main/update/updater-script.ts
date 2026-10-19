@@ -11,7 +11,7 @@
  * 2026-08 自动升级可靠性优化批次 1）：
  * - 核心不变量（G1 安装中断不装坏）：S4 换装成功前正式位置零接触——任一失败点上
  *   .app 要么是完整新版、要么是完整旧版。
- * - 状态机：S0 守卫（只读卷检测 → PID 等待退出 → sha256）→ S1 staging 解包
+ * - 状态机：S0 检查（只读卷检测 → PID 等待退出 → sha256）→ S1 staging 解包
  *   （dmg 挂载 + ditto 拷贝到同卷临时目录）→ S2 mv 内层 .app 为 .app.new
  *   → S3 备份 mv（.app → .app.old）→ S4 原子换装（.app.new → .app，失败回滚
  *   .old）→ S5 xattr / rm .old / 写 done → open 重启。
@@ -85,7 +85,7 @@ export interface LinuxUpdaterScriptVars {
  * Shell 转义：把值安全地注入 bash 双引号上下文。
  *
  * 双引号上下文里 `$`、`` ` ``、`\`、`"` 是危险字符（前两个触发命令/变量展开，
- * `\` 是转义符，`"` 闭合引号），需反斜杠转义。其它字符（含空格、`;`、`&`、`<`、
+ * `\` 是转义符，`"` 结束引号），需反斜杠转义。其它字符（含空格、`;`、`&`、`<`、
  * `>`、`|`、`'`）在双引号内为字面量，无需处理。
  *
  * 防御对象：路径 / 版本号 / sha256 等来自外部（manifest/用户环境）的值若被污染
@@ -116,12 +116,12 @@ function jsonEscapeString(s: string): string {
  * 生成 mac updater bash 脚本（staging 状态机，见文件头 [HISTORICAL] 说明）。
  *
  * @throws TypeError parentPid 为空/未传时（脚本会拒绝在无父 PID 下运行——
- *         等待退出是「不拆运行中进程底座」的守卫，模板侧同样 fail-fast 兜底）
+ *         等待退出是「不拆运行中进程底座」的检查，模板侧同样 fail-fast 兜底）
  */
 export function buildUpdaterScript(vars: UpdaterScriptVars): string {
   const { appBundle, dmgPath, sha256, logPath, resultPath, appName, targetVersion, parentPid } = vars
   if (!parentPid) {
-    // 模板契约：无 PARENT_PID 就没有可靠的「等待 app 退出」守卫，宁可拒绝升级
+    // 模板契约：无 PARENT_PID 就没有可靠的「等待 app 退出」检查，宁可拒绝升级
     // 也不静默跳过等待（静默跳过 = 升级脚本可能拆掉运行中进程的底座）。
     throw new TypeError('buildUpdaterScript: parentPid is required (main process pid)')
   }
@@ -181,7 +181,7 @@ export function buildLinuxUpdaterScript(vars: LinuxUpdaterScriptVars): string {
 // 不可写）且独立于 $STAGING_DIR（detach 失败滞留挂载时 staging 清理不得波及挂载卷）。
 const MAC_UPDATER_TEMPLATE = `#!/bin/bash
 # mac 升级脚本：staging 状态机（设计 .tmp/update-reliability.tech-design.md §3.3）
-# S0 守卫（只读卷 → PID 等待退出 → sha256）→ S1 staging 解压 → S2 mv 为 .app.new
+# S0 检查（只读卷 → PID 等待退出 → sha256）→ S1 staging 解压 → S2 mv 为 .app.new
 # → S3 备份 mv → S4 原子换装 → S5 xattr/清理/写 done → open 重启（无 -n）
 set -uo pipefail
 exec > "{{LOG_PATH}}" 2>&1
@@ -335,7 +335,7 @@ if ! mv "\$APP_NEW" "\$APP"; then
   fail "swap failed"
 fi
 
-# ── S5: 清 quarantine（未签名发布：xattr -cr 绕 Gatekeeper，command -v 守卫 +
+# ── S5: 清 quarantine（未签名发布：xattr -cr 绕 Gatekeeper，command -v 检查 +
 #    || true 不致命）→ 删 .old → 写 done（原子）→ open 重启（无 -n：已有实例则
 #    激活，open -n 强制新实例会被单实例锁弹掉 = 重启静默失败，RM6）──
 echo "[\$(date)] [stage] S5 finalize begin"

@@ -9,7 +9,7 @@
  *                         字段集对齐 pi 实装 dist/modes/rpc/rpc-mode.js:347-362）
  *   plan-review-flow      prompt → agent_start → plan-state 落盘 → 审批 select 挂起
  *   select-delay-1500     select 登记延迟参数化（1.5s 形态可构造，S3 稳定窗靶向）
- *   abort-dissolve        abort 解散 + 现版 cancelled 形态不落盘（F1 机制面）
+ *   abort-dissolve        abort 解散 + 现版 cancelled 形态不落盘（F1 机制部分）
  *   crash-on-abort        杀进程/崩溃注入（SIGKILL 自杀可观测）
  *   abort-unanswered      abort 无应答（60s 阶梯前置构造）
  *   boundary-frames       空载荷 / 非法形态 / 超限 / error envelope 帧族逐项性质断言
@@ -298,7 +298,7 @@ async function caseAbortDissolve(work) {
     const entries = readFileSync(sessionPath, 'utf-8').trim().split('\n').map((l) => JSON.parse(l));
     const last = entries.at(-1);
     assert$('abort-dissolve/no-entry-on-cancel', entries.length === 1 && last?.data?.reviewState === 'awaiting',
-      `abort 后零新 entry，末条 reviewState 仍 ${last?.data?.reviewState}（现版 cancelled 分支不落盘 = F1 机制面）`);
+      `abort 后零新 entry，末条 reviewState 仍 ${last?.data?.reviewState}（现版 cancelled 分支不落盘 = F1 机制部分）`);
   } finally {
     mp.close();
   }

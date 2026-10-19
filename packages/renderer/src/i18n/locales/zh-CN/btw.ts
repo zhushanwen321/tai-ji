@@ -3,7 +3,7 @@
  * - drawer 命名空间：btw tab 元信息与无内容 fallback（DrawerPanel TabMeta）
  * - panel 命名空间：BtwPanel 线列表头 / 新建入口 / 空态 / 错误条
  * - pill 命名空间：fork pill 三态口径（D3 源状态三分支，创建期一次性，不跨重启回填）
- * 双侧 key 对齐守卫 = locale-sync-check（zh-CN/btw.ts ↔ en-US/btw.ts 逐键对称）。
+ * 双侧 key 对齐检查 = locale-sync-check（zh-CN/btw.ts ↔ en-US/btw.ts 逐键对称）。
  */
 export default {
   drawer: {
@@ -40,7 +40,7 @@ export default {
   // M3-c 交互闭环（D8 降级路径：drawer 内联确认条 + 失效提示；第四面状态区已随
   // 2026-10-15 用户裁决退役——btw 状态区恒空，无对应文案键）
   interaction: {
-    // 终态机失效支行内提示（失效支单入口 invalidateBtwRequests——事件帧一路：撤下 + badge 清 + 本提示同拍收口，D-B2-3）
+    // 终态机失效支行内提示（失效支单入口 invalidateBtwRequests——事件帧一路：撤下 + badge 清 + 本提示同拍收尾，D-B2-3）
     expiredNotice: '请求已失效',
     dismissExpired: '知道了',
     // 运行期错误边界（单线失败 = 行内错误 + 可重试，不外溢主面板）

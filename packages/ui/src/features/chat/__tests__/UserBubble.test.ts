@@ -6,13 +6,13 @@
  * - [pin-identity U2] D2 turnKey 负载断言 + D3 卸载清理（编辑态 unmount → emit {editing:false, turnKey}）
  * - [MF-1] slash 段按归位序渲染为 `/name` 纯文本；**段序仅含 slash/text 段**时气泡文本
  *   === segmentsToText(同段)（含 badge 段时不等价的两条并存原因——边界空格不显式渲染 +
- *   展示投影 ≠ 序列化——见本文件下方 [MF-1] 组注释，文件头不复述原因以免口径分叉）
+ *   展示派生视图 ≠ 序列化——见本文件下方 [MF-1] 组注释，文件头不复述原因以免口径分叉）
  * - [MF-2] submitEdit 编辑含命令的消息后 prompt 中命令只出现一次
  * - [chat-flow-timestamp U2] turn.user.timestamp 行尾时刻（设计 §3 A4）：展示态 user-timestamp 槽显本地时刻；
  *   编辑态不渲染该槽
  * - [user-bubble-edit-composer] hover actions 摆位（气泡下方流内固定槽位，非气泡内 absolute）+
  *   编辑态富编辑器注入路径（ChatViewDeps.editComposerRenderer：segments 回填 / submit 经双发锁
- *   收口链调 editAndResend / cancel 收口 / 空稿守卫；未注入 = Textarea 回退，存量用例即回退路径）
+ *   收尾链调 editAndResend / cancel 收尾 / 空稿检查；未注入 = Textarea 回退，存量用例即回退路径）
  *
  * 运行：cd packages/ui && npx vitest run src/features/chat/__tests__/UserBubble.test.ts
  */
@@ -68,8 +68,8 @@ describe('W4TC3: UserBubble 展示态', () => {
     expect(bubble.classes()).toContain('bg-\[var\(--bubble-bg\)\]')
   })
 
-  it('N3 宽度纪律：气泡 max-width min(72%, 64ch) + overflow-wrap anywhere（锁 class 机制面）', () => {
-    // 测试环境无布局引擎，锁 DOM 机制面：宽度纪律与长令牌折行由这两个 class 承载，
+  it('N3 宽度纪律：气泡 max-width min(72%, 64ch) + overflow-wrap anywhere（锁 class 机制部分）', () => {
+    // 测试环境无布局引擎，锁 DOM 机制部分：宽度纪律与长令牌折行由这两个 class 承载，
     // 实际宽度/折行视觉随场景 7③ 真机走查验收。
     const wrapper = mountBubble()
     const bubble = wrapper.find('.rounded-lg')
@@ -77,7 +77,7 @@ describe('W4TC3: UserBubble 展示态', () => {
     expect(bubble.classes()).toContain('[overflow-wrap:anywhere]')
   })
 
-  it('气泡行 self-stretch 占满列宽（百分比 max-width 基准确定，锁 class 机制面）', () => {
+  it('气泡行 self-stretch 占满列宽（百分比 max-width 基准确定，锁 class 机制部分）', () => {
     // 行若回到收缩适配（shrink-to-fit）宽度，气泡 max-width 的 72% 百分比基准 = 行自身
     // 宽度 → 循环依赖下布局引擎解出的行宽 < 内容单行自然宽，短 CJK+Latin 消息被折成
     // 「删除 / installe / r」三行（ff4f0bb04）。self-stretch 让行占满列宽、百分比有确定
@@ -227,7 +227,7 @@ describe('[user-bubble-edit-composer] UserBubble 编辑态富编辑器注入路�
     expect(stub.props('segments')).toEqual([{ type: 'text', text: 'hello world' }])
   })
 
-  it('注入组件 submit(segments) → editAndResend(sid, msgId, segments) + 编辑态收口', async () => {
+  it('注入组件 submit(segments) → editAndResend(sid, msgId, segments) + 编辑态收尾', async () => {
     const editAndResend = vi.fn()
     const wrapper = mountBubble(
       { canEdit: true, isSessionEditable: false },
@@ -237,7 +237,7 @@ describe('[user-bubble-edit-composer] UserBubble 编辑态富编辑器注入路�
     await wrapper.find('[data-testid="stub-submit"]').trigger('click')
     expect(editAndResend).toHaveBeenCalledTimes(1)
     expect(editAndResend).toHaveBeenCalledWith('s1', 'u1', [{ type: 'text', text: 'edited text' }])
-    // 收口：编辑态退出（注入组件卸载）
+    // 收尾：编辑态退出（注入组件卸载）
     expect(wrapper.find('[data-testid="edit-composer-stub"]').exists()).toBe(false)
   })
 
@@ -262,11 +262,11 @@ describe('[user-bubble-edit-composer] UserBubble 编辑态富编辑器注入路�
     await enterEdit(wrapper)
     await wrapper.find('[data-testid="stub-submit"]').trigger('click')
     expect(editAndResend).not.toHaveBeenCalled()
-    // 编辑态保持（草稿不丢，提交收口后可重试）
+    // 编辑态保持（草稿不丢，提交收尾后可重试）
     expect(wrapper.find('[data-testid="edit-composer-stub"]').exists()).toBe(true)
   })
 
-  it('空稿 submit（segments 序列化为空）→ 早退不收口（与 Textarea 回退路径同语义）', async () => {
+  it('空稿 submit（segments 序列化为空）→ 早退不收尾（与 Textarea 回退路径同语义）', async () => {
     const editAndResend = vi.fn()
     const EmptyStub = defineComponent({
       name: 'EmptySubmitStub',
@@ -370,7 +370,7 @@ describe('W4TC3: UserBubble skill badge', () => {
 // badge 是 inline span、text 段经 MarkdownRenderer 渲染为块级（.md-render div + markdown-it <p>），
 // 混排时块级边界使 badge 前后必然换行。isMixedContent 判定「同时含 text 段与非 text 段」时给
 // 气泡容器加 is-mixed，组件 scoped CSS 据此把 .md-render/段容器 div/p 置 inline（badge 与正文
-// 同流）。测试环境无布局引擎，锁定 DOM 机制面：修饰 class 的加与不加 + badge/text 段均可见。
+// 同流）。测试环境无布局引擎，锁定 DOM 机制部分：修饰 class 的加与不加 + badge/text 段均可见。
 describe('[D12] UserBubble 混排 inline 化（is-mixed）', () => {
   /** 渲染 content prop 的 MarkdownRenderer stub（默认 stub 不输出文本） */
   const MarkdownContentStub = {
@@ -465,7 +465,7 @@ describe('[D12] UserBubble 混排 inline 化（is-mixed）', () => {
 // `fileBasename(path)`、session 显示 `label`（序列化为 `#sessionId`）、skill/subagent 显示
 // name/slug、image 显示缩略图，均 ≠ 序列化形态；且 `segmentsToText` 经 `needsBoundarySpace`
 // 对 chip→text 边界补空格，气泡只对 prev 为 slash 时渲染空格、其余 badge 走自身 `mr-1` 间距
-// ——两条原因并存。该展示投影与序列化的差异是本分支之前既有（normalizeContent 纯文本投影面），
+// ——两条原因并存。该展示派生视图与序列化的差异是本分支之前既有（normalizeContent 纯文本派生视图范围），
 // 不在本组用例锁定范围。
 //
 // **等价锁的层次（轮 3-5 复审 N-3a）**：本锁在下方 `MarkdownContentStub`（显式注册、只回显
@@ -538,7 +538,7 @@ describe('[MF-1] UserBubble slash 段（归位序渲染 + live ≡ reload）', (
     ]
     // 序列化形态：完整路径
     expect(segmentsToText(segments)).toBe('/compact src/a.ts 正文')
-    // 气泡文本：slash 纯文本 + file badge（basename）+ text；不等价是既有展示投影差异
+    // 气泡文本：slash 纯文本 + file badge（basename）+ text；不等价是既有展示派生视图差异
     const text = bubbleText(mountWithSlash(segments))
     expect(text).toContain('/compact')
     expect(text).toContain('a.ts')
@@ -569,7 +569,7 @@ describe('W4TC3: UserBubble 编辑态', () => {
     expect(wrapper.find('textarea').exists()).toBe(true)
   })
 
-  it('N3 编辑态气泡同宽同纪律：max-width min(72%, 64ch) + overflow-wrap anywhere（锁 class 机制面）', async () => {
+  it('N3 编辑态气泡同宽同纪律：max-width min(72%, 64ch) + overflow-wrap anywhere（锁 class 机制部分）', async () => {
     // 设计决策 8 N3「编辑态气泡同宽」：编辑态容器与展示态气泡持同一宽度/折行纪律。
     // w-full 是编辑态不进「百分比基准循环」的凭据：宽度 100% 基准 = items-end 列
     // （确定宽），不像展示态行那样依赖内容解宽——与展示态 self-stretch 用例成对。
@@ -604,7 +604,7 @@ describe('W4TC3: UserBubble 编辑态', () => {
   })
 
   // D3 卸载清理（C2 检查点）：编辑态中组件卸载时必须补发解除信号——切 session 等
-  // 路径卸载本组件时 watch 随作用域失效、显式清理动作不会执行，父组件钉扎状态
+  // 路径卸载本组件时 watch 随作用域失效、显式清理动作不会执行，父组件钉住状态
   // 只能靠这条 emit 复位。C2 实测：onUnmounted 内 emit 父监听器可达。
   it('编辑态中卸载 → 父组件收到 { editing: false, turnKey }（D3 卸载清理）', async () => {
     const wrapper = mountBubble({ canEdit: true, isSessionEditable: false })
@@ -652,12 +652,12 @@ describe('[D3] submitEdit 双发锁', () => {
     const { wrapper, editAndResend } = await enterEditAndType({ isPendingSend: () => true }, '编辑后的内容')
     await findSendButton(wrapper).trigger('click')
     expect(editAndResend).not.toHaveBeenCalled()
-    // 早退置于 editingUserId=null 之前：编辑态保持、draftText 保留（提交收口后可重试）
+    // 早退置于 editingUserId=null 之前：编辑态保持、draftText 保留（提交收尾后可重试）
     expect(wrapper.find('textarea').exists()).toBe(true)
     expect((wrapper.find('textarea').element as HTMLTextAreaElement).value).toBe('编辑后的内容')
   })
 
-  it('isPendingSend=false → 正常提交（segments 重建 + editAndResend）+ 编辑态收口', async () => {
+  it('isPendingSend=false → 正常提交（segments 重建 + editAndResend）+ 编辑态收尾', async () => {
     const { wrapper, editAndResend } = await enterEditAndType({ isPendingSend: () => false }, '编辑后的内容')
     await findSendButton(wrapper).trigger('click')
     expect(editAndResend).toHaveBeenCalledTimes(1)
@@ -734,7 +734,7 @@ describe('[MF-2] submitEdit 编辑重发 slash 段不翻倍', () => {
   })
 })
 
-// ── [轮 3 收口] submitEdit 编辑含 skill 段的消息：prompt 中标记只出现一次 ──
+// ── [轮 3 收尾] submitEdit 编辑含 skill 段的消息：prompt 中标记只出现一次 ──
 // 草稿由 normalizeContent 回填标记文本（视觉退化，已登记 §3.5-⑤②）；提交时
 // rebuildSegmentsWithEditedText 剥离编辑稿中与该段重复的标记并保留段——修复前标记翻倍，
 // runtime 注入器按标记逐个展开 ⇒ 同一 SKILL.md 注入两遍。
@@ -857,8 +857,8 @@ describe('chat-flow-timestamp U2: UserBubble 行尾时刻（A4 + D2 悬停化）
 
 // ── [U5 消息撤回 D6] 撤回按钮单入口（生成中置灰 + 单回调透传）──
 // D6 收敛后 UI 不做路由判定（在途 cancel / 已送达树内回退的分派在 core useChat.revokeMessage
-// 单点，其投影复核由 core 侧测试覆盖），UI 仅用 isActive 谓词做展示态（置灰 + tooltip）；
-// 此处锁定单回调透传与生成中守卫。
+// 单点，其派生视图复核由 core 侧测试覆盖），UI 仅用 isActive 谓词做展示态（置灰 + tooltip）；
+// 此处锁定单回调透传与生成中检查。
 describe('[U5] UserBubble 撤回单入口（D6）', () => {
   const onRevokeMessage = vi.fn()
 

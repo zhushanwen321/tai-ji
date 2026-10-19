@@ -8,7 +8,7 @@
  *   损坏形态（"enabled": "false" 字符串 / capability 非对象）→ 注入（与 readSection 解析方向相反）
  * - before_agent_start 注入顺序：base → global instructions → capability → append（indexOf 链锁定，
  *   swap 注入顺序两行的 mutant 会被顺序用例 kill）
- * - -nc / --no-context-files 守卫：global 注入跳过、append 不受影响
+ * - -nc / --no-context-files 检查：global 注入跳过、append 不受影响
  * - global 候选选择：候选序优先、空白内容跳过继续找、目录缺失降级
  * - fail-safe：handler 全程 throw → return undefined + logger.error 可观测；logger 自身抛错的
  *   终极兜底 process.stderr.write；systemPrompt 非法类型的旧 quirk 锚定
@@ -38,6 +38,7 @@ import createExtension, {
   CAPABILITY_INLINE_TAG_FAMILIES,
   CAPABILITY_PRESENTATION_ATTRS,
   SESSION_ARTIFACTS_DIR_SEGMENT,
+  SESSION_STORE_DIR_SEGMENT,
   resolveSessionArtifactsDir,
 } from '../index'
 import type { ExtensionAPI, BeforeAgentStartEvent } from '@earendil-works/pi-coding-agent'
@@ -136,7 +137,7 @@ const savedEnv: Record<string, string | undefined> = {}
 const savedArgv = process.argv
 
 beforeEach(() => {
-  vi.clearAllMocks() // 清跨用例的 fs mock 调用记录（「守卫不触发」类断言依赖零计数）
+  vi.clearAllMocks() // 清跨用例的 fs mock 调用记录（「检查不触发」类断言依赖零计数）
   for (const k of ENV_KEYS) savedEnv[k] = process.env[k]
   process.env.TAIJI_AGENT_DATA_DIR = DATA_DIR
   process.env.TAIJI_GLOBAL_AGENTS_DIR = GLOBAL_DIR
@@ -237,7 +238,7 @@ describe('before_agent_start 注入顺序（base → global → capability → a
     expect(prompt).toContain(path.join(GLOBAL_DIR, 'AGENTS.md'))
   })
 
-  it('capability 段文案覆盖四点能力面（HTML 白名单 / 相对图片 / 相对链接双通道 / 远程图片不渲染）', () => {
+  it('capability 段文案覆盖四点能力侧（HTML 白名单 / 相对图片 / 相对链接双通道 / 远程图片不渲染）', () => {
     setupFs({ config: '{"append": {"enabled": false, "prompt": ""}}' })
     const prompt = runHook('BASE-PROMPT')!.systemPrompt as string
     const capText = prompt.slice(prompt.indexOf(CAP_HEADER))
@@ -314,9 +315,9 @@ describe('capability 段三态锚点（设计 D6：仅显式布尔 false 关闭�
   })
 })
 
-describe('-nc / --no-context-files 守卫（contextFilesDisabled）', () => {
-  // capability 与守卫正交（内置段不受 --no-context-files 影响，该旗标只管上下文文件
-  // 发现），用例显式关 capability 隔离守卫语义。
+describe('-nc / --no-context-files 检查（contextFilesDisabled）', () => {
+  // capability 与检查正交（内置段不受 --no-context-files 影响，该旗标只管上下文文件
+  // 发现），用例显式关 capability 隔离检查语义。
   it('argv 含 --no-context-files → global 不注入，append 仍生效（用户显式退出不得溜回来）', () => {
     setupFs({
       config: `{"append": {"enabled": true, "prompt": "APPEND-TEXT"}, ${CAP_OFF}}`,
@@ -325,11 +326,11 @@ describe('-nc / --no-context-files 守卫（contextFilesDisabled）', () => {
     })
     process.argv = ['node', 'pi', '--no-context-files']
     expect(runHook('BASE-PROMPT')).toEqual({ systemPrompt: 'BASE-PROMPT\n\nAPPEND-TEXT' })
-    // 守卫在读 global 文件之前：readdirSync 不应被调用（global 目录完全不被触碰）
+    // 检查在读 global 文件之前：readdirSync 不应被调用（global 目录完全不被触碰）
     expect(readdirSync).not.toHaveBeenCalled()
   })
 
-  it('argv 含 -nc 短形式 → 同样跳过 global 注入（pi CLI 等价短形式，守卫两种形式都命中）', () => {
+  it('argv 含 -nc 短形式 → 同样跳过 global 注入（pi CLI 等价短形式，检查两种形式都命中）', () => {
     setupFs({
       config: `{"append": {"enabled": true, "prompt": "APPEND-TEXT"}, ${CAP_OFF}}`,
       globalEntries: ['AGENTS.md'],
@@ -404,7 +405,7 @@ describe('fail-safe（外层 catch return undefined，永不阻断 agent loop）
   })
 
   it('systemPrompt 非法类型（undefined）且无 append → 旧 quirk 锚定：返回仅含 capability 段的结果而非 undefined', () => {
-    // R3 复核锚定的返回值守卫 quirk（index.ts newPrompt === event.systemPrompt 比较）：
+    // R3 复核锚定的返回值检查 quirk（index.ts newPrompt === event.systemPrompt 比较）：
     // base 收敛 ''，capability 默认开 → newPrompt 非空且 !== undefined → 必然返回对象。
     // 与重构前行为一致（非回归）：quirk 在「有注入时必然返回对象」，schema v2 后 capability
     // 默认开使该形态成为常态。
@@ -529,17 +530,20 @@ describe('capability 段 ①② 渲染锁定（文案 = 常量渲染产物，手
   })
 })
 
-describe('产物目录镜像常量与推导 helper（设计 D1/D7，供 u-artifacts 公式对拍消费）', () => {
-  it('段名字面量为 artifacts', () => {
+describe('产物目录镜像常量与推导 helper（session 存储树布局，公式对拍机检消费）', () => {
+  it('段名字面量：树根段 ext-sessions + 域段 artifacts（与 shared SESSION_STORE_DIR_SEGMENT / getSessionArtifactsDir 对拍）', () => {
+    expect(SESSION_STORE_DIR_SEGMENT).toBe('ext-sessions')
     expect(SESSION_ARTIFACTS_DIR_SEGMENT).toBe('artifacts')
   })
 
-  it('合法 pi sid → <dataDir>/artifacts/<sessionId>', () => {
+  it('合法 pi sid → <dataDir>/ext-sessions/<sessionId>/artifacts', () => {
     expect(resolveSessionArtifactsDir('0198ab12-cdef-7000-8000-1234567890ab')).toBe(
-      path.join(DATA_DIR, 'artifacts', '0198ab12-cdef-7000-8000-1234567890ab'),
+      path.join(DATA_DIR, 'ext-sessions', '0198ab12-cdef-7000-8000-1234567890ab', 'artifacts'),
     )
     // 允许 `.` 与 `_`（与 isPiSessionId 同域）
-    expect(resolveSessionArtifactsDir('a.b-c_d')).toBe(path.join(DATA_DIR, 'artifacts', 'a.b-c_d'))
+    expect(resolveSessionArtifactsDir('a.b-c_d')).toBe(
+      path.join(DATA_DIR, 'ext-sessions', 'a.b-c_d', 'artifacts'),
+    )
   })
 
   it('非法 sessionId（含冒号 / 空串 / 首尾非字母数字）→ throw（防路径穿越）', () => {
@@ -551,7 +555,9 @@ describe('产物目录镜像常量与推导 helper（设计 D1/D7，供 u-artifa
   it('resolveDataDir 回退（无 TAIJI_AGENT_DATA_DIR 时取 PI_CODING_AGENT_DIR 上级）', () => {
     delete process.env.TAIJI_AGENT_DATA_DIR
     process.env.PI_CODING_AGENT_DIR = path.join('/tmp/fallback-data', 'agent')
-    expect(resolveSessionArtifactsDir('abc')).toBe(path.join('/tmp/fallback-data', 'artifacts', 'abc'))
+    expect(resolveSessionArtifactsDir('abc')).toBe(
+      path.join('/tmp/fallback-data', 'ext-sessions', 'abc', 'artifacts'),
+    )
   })
 })
 
@@ -576,9 +582,9 @@ describe('capability 段 ③④（HTML 交付约定 + 预览约束）与产物�
 
   it('ctx 会话 id 在 → ③ 段含产物目录绝对路径（与会话 id 匹配）', () => {
     const text = capabilityTextWithCtx(ctxWithSessionId(() => SID))
-    // 路径 = <dataDir>/artifacts/<sid>（与 shared getSessionArtifactsDir 同公式）
+    // 路径 = <dataDir>/ext-sessions/<sid>/artifacts（与 shared getSessionArtifactsDir 同公式）
     expect(text).toContain(resolveSessionArtifactsDir(SID))
-    expect(text).toContain(path.join(DATA_DIR, 'artifacts', SID))
+    expect(text).toContain(path.join(DATA_DIR, 'ext-sessions', SID, 'artifacts'))
     // ③ 段交付约定与 ④ 段预览约束齐备
     expect(text).toContain('info string is html-preview')
     expect(text).toContain("that file's absolute path")
@@ -605,7 +611,7 @@ describe('capability 段 ③④（HTML 交付约定 + 预览约束）与产物�
       expect(text).toContain('blocked by the browser CORS policy')
       expect(text).toContain('CDN links will not load')
       // 不出现半截/伪造路径
-      expect(text).not.toContain(path.join(DATA_DIR, 'artifacts'))
+      expect(text).not.toContain(path.join(DATA_DIR, 'ext-sessions'))
     }
   })
 
@@ -616,7 +622,7 @@ describe('capability 段 ③④（HTML 交付约定 + 预览约束）与产物�
       const text = capabilityTextWithCtx(ctx)
       expect(text).toContain('(unavailable this turn)')
       expect(text).toContain('info string is html-preview')
-      expect(text).not.toContain(path.join(DATA_DIR, 'artifacts'))
+      expect(text).not.toContain(path.join(DATA_DIR, 'ext-sessions'))
     }
   })
 

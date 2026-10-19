@@ -77,7 +77,7 @@ export function createSessionCommand(
       const chosen = await ctx.ui.select('选择一个 session 插入 # 引用', labels)
       if (chosen === undefined) return
       // chosen 必属 labels（select 契约返回列表成员或 undefined，后者上一行已拦截），
-      // indexOf 恒命中——不再保留 idx<0 死防御分支
+      // indexOf 恒命中——不再保留 idx<0 永不命中的防御机制分支
       const idx = labels.indexOf(chosen)
       // 选中后插入 # + 完整 uuid（剥 # 算片段，再补 # 插入编辑器）
       const frag = toCandidate(top[idx]).insertText.slice(1)

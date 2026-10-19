@@ -5,7 +5,7 @@
   + §3.3 D5（drawer 接线第 8 tab）/ D7（输出 = 按需 tail RPC + running 2s 跟随）/ D6（kill 回执
   分支④⑤ toast）。u-drawer 单元。
 
-  数据面（不自持 listener，AGENTS 规则 2）：
+  数据范围（不自持 listener，AGENTS 规则 2）：
   - 控制态：selectedBackgroundTaskId 经 core useBashTaskSelection()（selection/bash-task.ts，
     display-containers §6.6① 迁出后落点）读 per-session 分区
     （undefined=未选中 → PanelContainer 不注入本组件，DrawerPanel 空态 fallback 承载）；
@@ -15,7 +15,7 @@
     条目消失即停轮询（D6 #13：快照冻结只兜元信息渲染，对已消失条目继续发 output RPC 属
     无效空转）；
   - 输出：backgroundTask.output 按需 tail（D7：打开/切任务拉一次；running 且 drawer 打开时
-    每 2s 重拉。drawer 关闭 = DrawerPanel aside v-if 收起 = 本组件卸载，与组件卸载同一停止
+    每 2s 重新拉取。drawer 关闭 = DrawerPanel aside v-if 收起 = 本组件卸载，与组件卸载同一停止
     机制；任务终态由 store 分区条目 state 驱动跟随启停）；truncated=true 时输出区顶部提示
     「仅显示尾部」（D5 协议字段消费）+ 元信息区展示 outputFile 全量输出文件路径（可复制）；
   - 终止：两段式（第一次点击进入确认态，再点才发 backgroundTask.kill，D10④ drawer 内同款）；
@@ -206,7 +206,7 @@ const outputTruncated = ref(false)
 /** running 计时基准（跟随 interval 节拍顺带刷新，零额外 timer；终态用 durationMs 固定值） */
 const now = ref(Date.now())
 
-/** 迟到响应守卫：切任务后旧任务的 output reply 不得写进新任务视图 */
+/** 迟到响应检查：切任务后旧任务的 output reply 不得写进新任务视图 */
 let fetchSeq = 0
 
 async function fetchOutput(): Promise<void> {
@@ -267,7 +267,7 @@ watch(following, (on) => {
 
 onBeforeUnmount(stopFollow)
 
-// 切任务：重置全部视图状态 + 首拉（immediate 覆盖挂载首拉，D7「打开/切任务时拉一次」）
+// 切任务：重置全部视图状态 + 首次拉取（immediate 覆盖挂载首次拉取，D7「打开/切任务时拉一次」）
 watch(selectedTaskId, () => {
   fetchSeq += 1
   outputText.value = ''

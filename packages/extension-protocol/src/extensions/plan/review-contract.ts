@@ -1,12 +1,12 @@
 /**
- * plan 审阅回传值域契约（plan 模式状态机显式化 D3①⑤ / D9③）——纯函数守卫，零依赖。
+ * plan 审阅回传值域契约（plan 模式状态机显式化 D3①⑤ / D9③）——纯函数检查，零依赖。
  *
- * 为什么守卫是契约级承重：TS 判别联合的穷尽性（switch/never 断言）管不到运行时值域——
- * respond 通道透传的是任意字符串 parse 出的 unknown（P-2），值域守卫漏改即「搁置应答被判
- * 垃圾 → bad-response 引导重挂」再入循环（F1 复活路径）。canonical 守卫与判别联合同住
- * 契约包，消费面（extensions/universal/plan tool.ts）接线见同目录 consumers.md。
+ * 为什么检查是契约级承重：TS 判别联合的穷尽性（switch/never 断言）管不到运行时值域——
+ * respond 通道透传的是任意字符串 parse 出的 unknown（P-2），值域检查漏改即「搁置应答被判
+ * 垃圾 → bad-response 引导重挂」再入循环（F1 复活路径）。canonical 检查与判别联合同住
+ * 契约包，消费方（extensions/universal/plan tool.ts）接线见同目录 consumers.md。
  *
- * 降级双分源（D3①）——parse 失败必须区分两类（envelope 判别保留），消费面出口同款：
+ * 降级双分源（D3①）——parse 失败必须区分两类（envelope 判别保留），消费方出口同款：
  * - `unknown-decision`（对象合法但 decision 不在值域）：版本错配信号（R2），消费方
  *   额外 logger.warn 留痕；出口与文案与 malformed 同款——bad-response 报错提示重挂。
  *   裁决与重审触发（候选替代 = 恢复独立 version-mismatch 不重挂出口）登记于消费方
@@ -16,7 +16,7 @@
  *
  * selfReview 有界字段（D9③ / R3）：有界性由**写侧单点截断**保证（截断点 = 扩展 payload
  * 构造处），4KB 上限与 UTF-8 字节界安全截断的唯一权威在本模块；透传层（runtime）不截、
- * 入站守卫不二次截（上限已在写侧达成）。
+ * 入站检查不二次截（上限已在写侧达成）。
  */
 import type { PlanDocMeta, PlanReviewRequest, PlanReviewResponse } from '../../core/types'
 
@@ -59,7 +59,7 @@ export function truncateSelfReview(text: string): string {
 }
 /* eslint-enable no-magic-numbers */
 
-// ── 入站 request 帧守卫（PLAN_REVIEW_MARKER select options[0] = PlanReviewRequest JSON）──
+// ── 入站 request 帧检查（PLAN_REVIEW_MARKER select options[0] = PlanReviewRequest JSON）──
 
 function isPlanDocMeta(value: unknown): value is PlanDocMeta {
   if (typeof value !== 'object' || value === null) return false
@@ -73,7 +73,7 @@ function isPlanDocMeta(value: unknown): value is PlanDocMeta {
 }
 
 /**
- * `PlanReviewRequest` 形状守卫（E5 垃圾数据判据）：
+ * `PlanReviewRequest` 形状检查（E5 垃圾数据判据）：
  * docs 必为 `PlanDocMeta[]`（逐项形状）；selfReview 缺省或 string——**optional 是兼容契约**
  * （旧扩展不携带 → 自审行不渲染的降级形态，D9③），值域上限不在此拒绝（写侧截断已界）。
  * 空载荷（undefined/null/非对象/缺 docs）与非法形态（docs 非数组 / 元素形状不合法 /
@@ -115,8 +115,8 @@ function normalizeComments(value: unknown): PlanReviewResponse | null {
 }
 
 /**
- * respond 回传解析（值域守卫的判别版）：dismiss 样本必通（D3 主干），未知 decision 值域
- * 落降级枚举而非垃圾（两类降级可判别分离；消费面出口同款引导重挂，见文件头「降级双分源」）。
+ * respond 回传解析（值域检查的判别版）：dismiss 样本必通（D3 主干），未知 decision 值域
+ * 落降级枚举而非垃圾（两类降级可判别分离；消费方出口同款引导重挂，见文件头「降级双分源」）。
  */
 export function parsePlanReviewResponse(value: unknown): PlanReviewResponseEnvelope {
   if (typeof value !== 'object' || value === null) return { ok: false, code: 'malformed' }
@@ -140,7 +140,7 @@ export function parsePlanReviewResponse(value: unknown): PlanReviewResponseEnvel
 }
 
 /**
- * `PlanReviewResponse` 值域守卫（含 dismiss 员，D3①）——`parsePlanReviewResponse` 的谓词形。
+ * `PlanReviewResponse` 值域检查（含 dismiss 员，D3①）——`parsePlanReviewResponse` 的谓词形。
  * 消费方需要区分 unknown-decision / malformed 两类降级时用 parse 版。
  */
 export function isPlanReviewResponse(value: unknown): value is PlanReviewResponse {

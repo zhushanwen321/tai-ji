@@ -35,7 +35,7 @@ function makeActiveState(): PlanState {
   return {
     isActive: true,
     // 生产真实形态（enter.ts：<project>/.tmp/plans/<slug>/plan.md）——合成单层路径会让
-    // slug 派生类消费面（buildPlanSlug 取 basename）在测试数据上失真
+    // slug 派生类消费方（buildPlanSlug 取 basename）在测试数据上失真
     planFilePath: "/tmp/test-project/.tmp/plans/login-page/plan.md",
     requirement: "Add login page",
     templateName: "default",
@@ -124,7 +124,7 @@ describe("handlePlanComplete", () => {
 
       const steer = lastSteer(pi);
       expect(steer).toContain("/tmp/fixtures/skills/loose-tool.md"); // 文件路径本身
-      expect(steer).not.toContain("loose-tool.md/SKILL.md"); // 不再拼接 SKILL.md（悬空指引根修）
+      expect(steer).not.toContain("loose-tool.md/SKILL.md"); // 不再拼接 SKILL.md（悬空指引从根源修复）
       expect(steer).not.toContain("/tmp/fixtures/skills/SKILL.md"); // 旧缺陷形态：散 .md 的 dirname + SKILL.md
     });
 

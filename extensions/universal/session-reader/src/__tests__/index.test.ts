@@ -11,9 +11,9 @@ import { Check } from 'typebox/value'
  * mock pi/ctx（as unknown as ExtensionAPI），测：
  * 1. execute 错误路径 throw（W4：pi 只对 execute throw 置 isError:true——agent-loop
  *    丢弃返回值里的 isError 字段，「错误轮被标成功」契约守护）
- * 2. session_start handler 的 ctx.mode!=='tui' 守卫
+ * 2. session_start handler 的 ctx.mode!=='tui' 检查
  * 3. registeredPis WeakSet 去重：同 pi 二次 session_start 不重复注册；不同 pi 可注册
- * 4. typeof ctx.ui.addAutocompleteProvider 运行时守卫（ui 缺方法 → 跳过，不崩）
+ * 4. typeof ctx.ui.addAutocompleteProvider 运行时检查（ui 缺方法 → 跳过，不崩）
  * 5. registerCommand + addAutocompleteProvider 组装（tui 模式下各注册一次）
  * 6. TypeBox schema 与 SessionReadParams 对齐：合法 params 过、非法 action/scope 拒
  * 7. U3 信号包采集降级：sessionManager 缺 getSessionDir 方法 / getSessionDir 抛错 →
@@ -271,7 +271,7 @@ describe('sessionReaderExtension - session_start TUI 注册', () => {
     expect(fake2.registerCommand).toHaveBeenCalledTimes(1)
   })
 
-  it('ctx.ui 无 addAutocompleteProvider（typeof 守卫）→ 跳过注册不崩', () => {
+  it('ctx.ui 无 addAutocompleteProvider（typeof 检查）→ 跳过注册不崩', () => {
     const fake = makeFakePi()
     sessionReaderExtension(fake.pi as unknown as ExtensionAPI)
     const { ctx } = makeFakeCtx({ withUi: false })

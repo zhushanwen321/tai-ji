@@ -2,15 +2,15 @@
 //
 // [H2 W2] executeWorkflowAgent 统一编排入口单测（设计锚点：
 // subagent-workflow-record-unification.md 的 §3.4 错误规格 / §3.5 终态数据流 / D3 池顺序 / D4 守护 / D6 通知
-// gate / D7 成功收口 / adopt 豁免双点）。
+// gate / D7 成功收尾 / adopt 豁免双点）。
 //
 // 锁以下组面：
-//   1. 注册面：record 带 origin:"workflow" + parentRunId；record 级
+//   1. 注册范围：record 带 origin:"workflow" + parentRunId；record 级
 //      pending:register/unregister 配对（D5：record 级照旧）。
 //   2. 池顺序（D3）：路由/预检失败先于池 acquire——零池占用 + 同步抛错 + 零孤儿 record。
 //   3. 守护（D4/M3 复刻）：arm 键 = record.id（ctx.taskId 即守护键）；双刷新源
 //      （journal.onEvent 包装 ∪ stream.onDelta 包装）；fire 后失败结果追注恢复指引。
-//   4. D7 收口 CAS 规格：成功 → closed/gc 立即终态化 + archive；close 路径抢先
+//   4. D7 收尾 CAS 规格：成功 → closed/gc 立即终态化 + archive；close 路径抢先
 //      （user-close 已写 closedReason）→ 静默跳过不覆盖（memory closedReason 不分叉）；
 //      aborted+success 竞态 → 落 cancelled 分支不漂移；origin=tool 负向对照
 //      （executeAndAwait 成功仍 SP-5 running-resumable，D7 零外溢）。
@@ -21,7 +21,7 @@
 //      catch（已删）/ finalizeEngineOutcome exitCode===null（已删））对 workflow record 落空即终态化。
 //   7. [H2 W3 must-fix] stream 缺省自构：runWorkflowEngineTask 在 stream 实参缺省时
 //      经 createBackgroundStream 自构（kickOffChatRound 同款策略）——三形态（TUI
-//      widget 接通 / GUI+relay 停发私货 / sink 未注入降级 no-op）+ 内构对象的守护
+//      widget 接通 / GUI+control 停发私货 / sink 未注入降级 no-op）+ 内构对象的守护
 //
 // 替身形态：pi EnginePort = registerFakePiEngine（协议 seam 替身）；受限引擎
 // （strict-engine）本地构造（预检命中用）；pi = mock（appendEntry 捕获 subagent-record
@@ -59,7 +59,7 @@ import type { ExecutionRecord } from "../domain/record-model.ts";
 import { registerFakePiEngine, type FakePiEnginePort, type FakeRun } from "./helpers/fake-engine-port.ts";
 import { CTX_MODEL as ctxModel, emptyRegistry } from "./helpers/model-registry-mock.ts";
 import { makePi, type PiMock } from "./helpers/pi-mock.ts";
-// [D3 协议版 P6] armed 消费落账端到端用例：journal 注入面（orchestration/pump 公共
+// [D3 协议版 P6] armed 消费写入 journal 记录端到端用例：journal 注入点（orchestration/pump 公共
 // 测试钩子）+ journal 读回（run-events 唯一实装）。
 import {
   dispatchRunTrigger,
@@ -134,7 +134,7 @@ function soleRun(fake: FakePiEnginePort): FakeRun {
   return fake.runs[0]!;
 }
 
-/** 从 store 取内存 running record（getMutable 公共面）。 */
+/** 从 store 取内存 running record（getMutable 公共部分）。 */
 function runningRecord(store: RecordStore): ExecutionRecord {
   const running = store.listRunning();
   expect(running).toHaveLength(1);
@@ -190,10 +190,10 @@ afterEach(() => {
 });
 
 // ============================================================
-// 1. 注册面（origin/parentRunId + pending:register 配对）
+// 1. 注册范围（origin/parentRunId + pending:register 配对）
 // ============================================================
 
-describe("executeWorkflowAgent 注册面", () => {
+describe("executeWorkflowAgent 注册范围", () => {
   it("[U2 窗口键] piEngine 注入携带 parentRunId——pi 同步短路位是成员 run 的执行体，无键即 WindowScopeEngineError（batch-s4 真机首跑实锤的回归锁）", async () => {
     const { service, fake } = makeHarness();
     const runOrchestration = Reflect.get(service, "runOrchestration") as {
@@ -204,7 +204,7 @@ describe("executeWorkflowAgent 注册面", () => {
     const pending = service.executeWorkflowAgent(baseOpts(), "run-win-key");
     await flush();
 
-    // 装配面契约：routeWorkflowEngine 的 piEngine 注入 = resolveChatEnginePort(parentRunId)
+    // 装配侧契约：routeWorkflowEngine 的 piEngine 注入 = resolveChatEnginePort(parentRunId)
     //（per-window 引擎经窗口实例解析单点取用，probe 与 run 同实例；shared-service 透传保形）。
     expect(portSpy).toHaveBeenCalledWith("run-win-key");
     // 缺省网关下（保守 shared-service 透传）run 仍须可达 fake pi port——键传递不改变既有派发行为
@@ -227,7 +227,7 @@ describe("executeWorkflowAgent 注册面", () => {
     // record 级 pending:register 照旧（与既有派发路径同款）
     const registered = pi.events.emit.mock.calls.find((c) => c[0] === "pending:register");
     expect(registered?.[1]).toMatchObject({ id: record.id, type: "subagent" });
-    // parentRunId 查询面（W1）命中
+    // parentRunId 查询范围（W1）命中
     expect(service.queries.collectRecordsByParentRunId("run-42", 10).map((r) => r.id)).toEqual([record.id]);
 
     run.settle({ content: "done" });
@@ -251,7 +251,7 @@ describe("executeWorkflowAgent 注册面", () => {
 
     run.settle({ content: "done" });
     await pending;
-    // register 落盘 entry（recordToSubagent → v2 注册条目投影）同步携带
+    // register 落盘 entry（recordToSubagent → v2 注册条目派生视图）同步携带
     // stepIndex 仅存在于 registered 变体（settled 无该域）——按 kind 窄化后查找。
     const withStep = entries.find((e) => e.kind === "registered" && e.stepIndex === 3);
     expect(withStep).toMatchObject({ id: record.id, origin: "workflow", parentRunId: "run-step" });
@@ -286,9 +286,9 @@ describe("executeWorkflowAgent 池顺序", () => {
     expect(pi.events.emit).not.toHaveBeenCalledWith("pending:register", expect.anything());
   });
 
-  it("池排队中被 abort → run 域 cancelled 收口（acquirePoolOrFinalize S1 同款分支）", async () => {
+  it("池排队中被 abort → run 域 cancelled 收尾（acquirePoolOrFinalize S1 同款分支）", async () => {
     const { service, store, fake, entries } = makeHarness();
-    // 占满共享池（maxConcurrent 槽全占）→ 新派发排队；run 级 signal abort → cancelled 收口
+    // 占满共享池（maxConcurrent 槽全占）→ 新派发排队；run 级 signal abort → cancelled 收尾
     const pool = Reflect.get(service, "pool") as {
       maxConcurrent: number;
       acquire(p: number, m?: number, s?: AbortSignal): Promise<void>;
@@ -307,7 +307,7 @@ describe("executeWorkflowAgent 池顺序", () => {
     const result = await pending;
     expect(result.error).toContain("cancelled"); // 合成 failed result 回脚本
     expect(record.status).toBe("idle");
-    expect(record.closedReason).toBe("cancelled"); // run 域 cancelled 收口
+    expect(record.closedReason).toBe("cancelled"); // run 域 cancelled 收尾
     expect(entries.at(-1)).toMatchObject({ id: record.id, kind: "settled", stopReason: "cancelled" });
     expect(fake.runs).toHaveLength(0); // 零引擎副作用
   });
@@ -319,10 +319,9 @@ describe("executeWorkflowAgent 池顺序", () => {
 
 describe("executeWorkflowAgent stream 自构（设计 D2「service 派发路径既有通道承载」）", () => {
   afterEach(() => {
-    // relay 三键注入的清理（防泄漏到同文件其他用例）
-    delete process.env["TAIJI_SUBAGENT_RELAY_SOCKET"];
-    delete process.env["TAIJI_SUBAGENT_RELAY_NODE"];
-    delete process.env["TAIJI_SUBAGENT_RELAY_SCRIPT"];
+    // control env 注入的清理（防泄漏到同文件其他用例）
+    delete process.env["TAIJI_SUBAGENT_CONTROL_SOCKET"];
+    delete process.env["TAIJI_SUBAGENT_CONTROL_ROOT_SESSION_ID"];
   });
 
   it("TUI 形态：内构 stream 接通 widget——emitDelta 流式可见 + settle 后 dispose 清除", async () => {
@@ -347,10 +346,9 @@ describe("executeWorkflowAgent stream 自构（设计 D2「service 派发路径�
     expect(sink.setWidget).toHaveBeenLastCalledWith(widgetKey, undefined);
   });
 
-  it("GUI + relay 激活：停发私货（createBackgroundStream H1 策略）——sink 零调用", async () => {
-    process.env["TAIJI_SUBAGENT_RELAY_SOCKET"] = "/tmp/relay.sock";
-    process.env["TAIJI_SUBAGENT_RELAY_NODE"] = "node-1";
-    process.env["TAIJI_SUBAGENT_RELAY_SCRIPT"] = "/tmp/relay.mjs";
+  it("GUI + control 激活（托管态）：停发私货（createBackgroundStream H1 策略）——sink 零调用", async () => {
+    process.env["TAIJI_SUBAGENT_CONTROL_SOCKET"] = "/tmp/subagent-control.sock";
+    process.env["TAIJI_SUBAGENT_CONTROL_ROOT_SESSION_ID"] = "root-1";
     const sink = { setWidget: vi.fn() };
     const { service, fake } = makeHarness({ streamSink: sink, mode: "rpc" });
     const pending = service.executeWorkflowAgent(baseOpts(), "run-stream-gui");
@@ -380,10 +378,10 @@ describe("executeWorkflowAgent stream 自构（设计 D2「service 派发路径�
 });
 
 // ============================================================
-// 4. D7 收口 CAS 规格
+// 4. D7 收尾 CAS 规格
 // ============================================================
 
-describe("executeWorkflowAgent D7 成功收口", () => {
+describe("executeWorkflowAgent D7 成功收尾", () => {
   it("成功 → closed/gc 立即终态化 + archive（非 SP-5 running-idle）+ 字段保真回脚本", async () => {
     const { service, store, fake, entries, tmpRoot } = makeHarness();
     const pending = service.executeWorkflowAgent(baseOpts(), "run-7");
@@ -392,7 +390,7 @@ describe("executeWorkflowAgent D7 成功收口", () => {
     const record = runningRecord(store);
 
     // [H4/U5 适配] sessionFile 必须是真实可写路径（mkdtemp 下）——假路径会让
-    // 终态落账（事件 + binding 快照）失败，旧断言（终态化 + archive）随之失效。
+    // 终态写入 journal 记录（事件 + binding 快照）失败，旧断言（终态化 + archive）随之失效。
     fs.mkdirSync(path.join(tmpRoot, "wf"), { recursive: true });
     const sessionFile = path.join(tmpRoot, "wf", "session.jsonl");
     run.settle({
@@ -426,7 +424,7 @@ describe("executeWorkflowAgent D7 成功收口", () => {
     const run = soleRun(fake);
     const record = runningRecord(store);
 
-    // 模拟 close 路径赢家（close 收口前的终态写点抢先形态：closed + user-close）
+    // 模拟 close 路径赢家（close 收尾前的终态写点抢先形态：closed + user-close）
     expect(trySettleLegacyClosed(record, "user-close")).toBe(true);
 
     run.settle({ content: "done" });
@@ -457,7 +455,7 @@ describe("executeWorkflowAgent D7 成功收口", () => {
     expect(result.content).toBe("done");
   });
 
-  it("origin=tool 负向对照：executeAndAwait 成功仍 SP-5 收口可续聊（D7 零外溢；[two-state-convergence U4] 翻边 idle）", async () => {
+  it("origin=tool 负向对照：executeAndAwait 成功仍 SP-5 收尾可续聊（D7 零外溢；[two-state-convergence U4] 翻边 idle）", async () => {
     const { service, store, fake } = makeHarness();
     const pending = service.executeAndAwait({ task: "tool one-shot", slug: "tool-shot", ctxModel });
     await flush();
@@ -484,7 +482,7 @@ describe("executeWorkflowAgent live usage 喂入（H2 A3）", () => {
     const run = soleRun(fake);
 
     // 引擎协议事件：message_end 携带 usage（pi-subagent-cli spawn-event-translator
-    // accumulateMessageEnd 的协议产物形态），turn_end 闭合 turn。
+    // accumulateMessageEnd 的协议产物形态），turn_end 结束 turn。
     run.emitEvent({ type: "message_end", usage: { input: 100, output: 50, cacheRead: 20, cacheWrite: 10, cost: 0.5 } });
     run.emitEvent({ type: "text_delta", delta: "working" });
     run.emitEvent({ type: "message_end", usage: { input: 7, output: 3, cacheRead: 0, cacheWrite: 0 } });
@@ -512,7 +510,7 @@ describe("executeWorkflowAgent live usage 喂入（H2 A3）", () => {
     run.settle({ content: "", error: "boom" });
     await pending;
 
-    // 失败收口不受喂入影响（终态 entry 正常落盘）
+    // 失败收尾不受喂入影响（终态 entry 正常落盘）
     // status 仅存在于 settled 变体（v2 判别联合）——先按 kind 窄化再读。
     const finalEntry = entries.at(-1);
     expect(finalEntry?.kind).toBe("settled");

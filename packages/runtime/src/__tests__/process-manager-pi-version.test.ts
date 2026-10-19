@@ -8,7 +8,7 @@
  *
  * Mock 策略：mock find-pi-executable（固定路径，免真实扫盘）+ 合并式 mock
  * node:child_process（importActual 保留 spawn 等其余导出，只覆盖 execSync——依赖图内
- * relay-env import spawn，工厂整体替换会破坏模块图）。
+ * 其它模块 import spawn，工厂整体替换会破坏模块图）。
  *
  * 运行：cd packages/runtime && npx vitest run src/__tests__/process-manager-pi-version.test.ts
  */

@@ -8,7 +8,7 @@
  *   - TC2 catalog 分支：清 auth.json 凭据 + 清 models.json override（removeProvider）+ 清 enabledModels 残留。
  *     不删 pi catalog 定义（本测试只验证 taiji 侧清理动作，pi 定义不可触达故不断言）。
  *   - TC3 custom 分支：删 models.json 条目（removeProvider）+ 清残留。
- *   - 边界3(a) 残留清除空数组守卫：清完残留后白名单空 → cleanEnabledModelsResidue 调 clearEnabledModels（非 setEnabledModels([])）。
+ *   - 边界3(a) 残留清除空数组检查：清完残留后白名单空 → cleanEnabledModelsResidue 调 clearEnabledModels（非 setEnabledModels([])）。
  *
  * 策略：mock IConfigStore（写方法 vi.fn 断言路由）+ mock authStorage.remove 断言清凭据调用。
  * makeStore 借鉴 config-service-toggle.test.ts 的状态化 mock 模式，但本测试聚焦「调用路由」
@@ -280,10 +280,10 @@ describe('TC3: removeProviderByKind(custom) 删 models.json 条目 + 清 enabled
   })
 })
 
-// ══ 边界3(a): cleanEnabledModelsResidue 空数组守卫（pi-provider-store 层） ════════════
-// 注：removeProviderByKind 调 configStore.cleanEnabledModelsResidue（port），实际守卫逻辑
+// ══ 边界3(a): cleanEnabledModelsResidue 空数组检查（pi-provider-store 层） ════════════
+// 注：removeProviderByKind 调 configStore.cleanEnabledModelsResidue（port），实际检查逻辑
 // 在 pi-provider-store.cleanEnabledModelsResidue。此用例直接测 pi-provider-store 导出函数，
-// 验证「重算空 → clearEnabledModels（delete 字段，非 setEnabledModels([])）」的边界3(a) 守卫。
+// 验证「重算空 → clearEnabledModels（delete 字段，非 setEnabledModels([])）」的边界3(a) 检查。
 
 import { mkdtempSync, mkdirSync, rmSync, readFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'

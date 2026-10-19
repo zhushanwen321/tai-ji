@@ -59,8 +59,10 @@ describe('background-task registry 常量', () => {
     expect(MAX_TERMINAL_REGISTRY_ENTRIES).toBe(50)
   })
 
-  it('目录布局拼装出 <agentDir>/base-tool-enhance/<sessionId>/registry.json', () => {
-    // 路径分段的值级锁（实际拼装在写侧 getRegistryPath，契约只锁分段字面量）
+  it('[遗留] 旧布局根目录名段字面量锁（BASE_TOOL_ENHANCE_DIRNAME 保活，退役随 npm 出口清理裁决）', () => {
+    // [遗留] 保活断言：锁旧布局（<agentDir>/base-tool-enhance/<sessionId>/registry.json）
+    // 分段字面量不漂移（npm 出口 re-export 的消费方兼容锚点）；现行布局已换根到
+    // session 存储树（见 background-task.ts 文件头「目录布局」），本用例随该常量退役一并删除
     const segments = [BASE_TOOL_ENHANCE_DIRNAME, 'sess-a', BACKGROUND_TASK_REGISTRY_FILENAME]
     expect(segments.join('/')).toBe('base-tool-enhance/sess-a/registry.json')
   })

@@ -1,14 +1,18 @@
 /**
  * registry.json 持久化读写（per-sessionId 目录，D8）。
  *
- * 路径：<dataDir>/base-tool-enhance/<sessionId>/registry.json（dataDir = pi
- * getAgentDir() 同源路径，由调用方解析传入）。条目记 ownerPiPid——收殓侧属主
- * 判定依据（u-bte-remove 后 = taiji runtime background-task-reaper），M2 只负责
- * 写入。
+ * 路径（session 存储树，session-store-layout-inversion 域 5）：
+ * <dataDir>/ext-sessions/<sessionId>/background-tasks/registry.json。dataDir = taiji
+ * 数据根（resolveTaijiDataDir 推导，由调用方解析传入）——不再是 pi getAgentDir()
+ * （<dataDir>/agent，旧布局基址）；树根/域段常量与 shared paths.ts 同字面镜像（本包
+ * 不 import @taiji/shared：包边界 + shared getDataDir 打包态门禁，同 system-prompt
+ * 镜像先例），一致性由 scripts/check-artifact-dir-formula-sync.mjs 对拍机检守护。
+ * 条目记 ownerPiPid——收殓侧属主判定依据（u-bte-remove 后 = taiji runtime
+ * background-task-reaper），M2 只负责写入。
  *
  * 行为原语单点（ext-simplify-13）：解析防御 / corrupt 隔离 / 原子写 / 序列化 /
  * 终态 LRU 裁剪自 @zhushanwen/extension-protocol background-task 子出口引入——此前
- * 本地实现与 runtime 侧逐字同构、靠注释对齐；本模块只保留 bte 形态薄壳：Map 投影
+ * 本地实现与 runtime 侧逐字同构、靠注释对齐；本模块只保留 bte 形态薄壳：Map 映射
  * readRegistry 与锁内 RMW 写壳。
  *
  * 写入协议：
@@ -22,9 +26,9 @@
  *    收殓兜底（§3.5「registry/entry 写不进则条目停留 running」）
  */
 
-import { join } from "node:path";
+import { join, resolve } from "node:path";
 
-// 契约常量（LRU 上限）走 index 出口（background-task.ts 契约面）；行为原语走
+// 契约常量（LRU 上限）走 index 出口（background-task.ts 契约范围）；行为原语走
 // background-task 子出口（含 node 内建依赖，不进 index——renderer/core 零触达）
 import { MAX_TERMINAL_REGISTRY_ENTRIES } from "@zhushanwen/extension-protocol";
 import {
@@ -45,17 +49,55 @@ const logger = getLogger("base-tool-enhance");
 /** protocol registry 原语 → 本包 logger 适配（corrupt 隔离 warn 是排障生命线）。 */
 const registryFileLog: RegistryFileLogFn = (level, event, detail) => logger[level](event, { detail });
 
-export function getBaseToolEnhanceDir(dataDir: string): string {
-	return join(dataDir, "base-tool-enhance");
-}
+/**
+ * session 存储树根段镜像常量（session-store-layout-inversion D1）：`<dataDir>/ext-sessions/<sessionId>/…`。
+ * shared 侧单点声明 = packages/shared/src/paths.ts 的 SESSION_STORE_DIR_SEGMENT /
+ * getSessionStoreDir；本包不 import @taiji/shared（同 system-prompt 镜像理由），以同名字面量
+ * 镜像，一致性由 scripts/check-artifact-dir-formula-sync.mjs 对拍机检守护。
+ */
+export const SESSION_STORE_DIR_SEGMENT = "ext-sessions";
 
-export function getRegistryPath(dataDir: string, sessionId: string): string {
-	return join(getBaseToolEnhanceDir(dataDir), sessionId, "registry.json");
+/**
+ * 后台任务域段镜像常量（session 存储树域 5）：`<dataDir>/ext-sessions/<sessionId>/background-tasks/`。
+ * shared 侧单点 = getSessionBackgroundTasksDir 的域段（'background-tasks'），对拍机检逐字比对。
+ */
+export const BACKGROUND_TASKS_DIR_SEGMENT = "background-tasks";
+
+/**
+ * taiji dataDir 镜像推导（system-prompt resolveDataDir 同式）：TAIJI_AGENT_DATA_DIR 优先
+ * （runtime 注入的权威值，与 getDataDir() 同源），缺失时 PI_CODING_AGENT_DIR
+ * （=<dataDir>/agent）剥一层。pi getAgentDir() 恒指向 <dataDir>/agent，不能直接当存储树
+ * 基址（新树挂 <dataDir>/ext-sessions）——旧布局 getAgentDir() 基址随换根退役。
+ *
+ * 每 handler 调用点现读 env（不缓存），env 变更即时生效（system-prompt 同款语义）。
+ */
+export function resolveTaijiDataDir(): string {
+	if (process.env.TAIJI_AGENT_DATA_DIR) {
+		return process.env.TAIJI_AGENT_DATA_DIR;
+	}
+	return resolve(process.env.PI_CODING_AGENT_DIR ?? "", "..");
 }
 
 /**
- * 读取 registry 全量条目（Map 投影薄壳）。文件不存在 / 读失败 / 解析失败均返回
- * 空表（工具面不因 registry 问题崩溃）；解析失败由 protocol 原语重命名 .corrupt
+ * sessionId 同域校验（shared assertPiSessionId / runtime isPiSessionId 同域正则镜像：
+ * 首尾字母数字，中间允许 [A-Za-z0-9._-]，禁冒号——btw 虚拟 id 必拒）。目录名即
+ * sessionId，非法 id 会在 join 后逃逸出分区（路径穿越），统一在此 throw（fail-fast）。
+ * 正则字面量三方一致性由对拍机检守护。
+ */
+function assertPiSessionId(sessionId: string): void {
+	if (!/^[A-Za-z0-9](?:[A-Za-z0-9._-]*[A-Za-z0-9])?$/.test(sessionId)) {
+		throw new Error(`invalid sessionId (path traversal blocked): ${sessionId}`);
+	}
+}
+
+export function getRegistryPath(dataDir: string, sessionId: string): string {
+	assertPiSessionId(sessionId);
+	return join(dataDir, SESSION_STORE_DIR_SEGMENT, sessionId, BACKGROUND_TASKS_DIR_SEGMENT, "registry.json");
+}
+
+/**
+ * 读取 registry 全量条目（Map 映射薄壳）。文件不存在 / 读失败 / 解析失败均返回
+ * 空表（工具范围不因 registry 问题崩溃）；解析失败由 protocol 原语重命名 .corrupt
  * 保留现场 + warn（§3.6）。
  */
 export function readRegistry(registryPath: string): Map<string, RegistryEntry> {

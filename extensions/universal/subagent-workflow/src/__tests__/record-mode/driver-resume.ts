@@ -20,6 +20,7 @@ import { setTimeout as delay } from "node:timers/promises";
 import { resumeRun } from "../../../../../../packages/subagent-core/src/orchestration/resume-run.ts";
 import { runSummary } from "../../../../../../packages/subagent-core/src/orchestration/workflow-run-summary.ts";
 import { WorkerHostImpl } from "../../../../../../packages/subagent-core/src/orchestration/worker-host.ts";
+import { setRunEventJournalDirForTest } from "../../../../../../packages/subagent-core/src/orchestration/terminal-actions.ts";
 import type { LifecycleDeps } from "../../../../../../packages/subagent-core/src/orchestration/models/ports.ts";
 
 const STATE_DIR = process.env.WF_DRIVER_STATE_DIR ?? "";
@@ -31,6 +32,15 @@ if (STATE_DIR === "" || RUN_ID === "" || (ROLE !== "holder" && ROLE !== "contend
   process.stderr.write("driver-resume: WF_DRIVER_STATE_DIR / WF_DRIVER_RUN_ID / WF_DRIVER_ROLE(holder|contender) required\n");
   process.exit(2);
 }
+
+// journal 模块锚 = 本轮 tmp stateDir（与主测试进程 setRunEventJournalDirForTest
+// 同一注入机制——driver 是独立 OS 进程，模块态不继承，必须自锚）。[session-store-
+// layout-inversion D2/D3] 新布局下生产链的活体 dispatch（agent-settled 等经
+// WorkflowRun 投递，不带 per-call journalDir）走进程级 rootSessionId 锚
+// （SessionBaselines.initSession 绑定）；driver 不是 pi 宿主（无 initSession），
+// 生产同位锚不可用，按场景 kit 惯例锚显式目录（resume 的 per-call journalDir 与
+// 锚同目录，跨进程锁语义不受影响）。
+setRunEventJournalDirForTest(STATE_DIR);
 
 /** 持锁方 marker（同步写——appendEntry 是同步调用点，且后续 Atomics.wait 会
  * 冻结 event loop，异步写在阻塞窗口内不可达）。文件名与 scenario-kit 的

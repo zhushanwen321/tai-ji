@@ -5,7 +5,7 @@
 //     validateModel/dispose/ping）× fake 引擎 CLI 往返；
 //   - 6 反向通道（host/log、host/askUser、host/streamDelta、
 //     host/handleReady、host/childSpawned、host/childStateChanged——[池抽象降级]
-//     原 host/poolResolved 通道已随 poolKey 协议面退役删除；[permission 退役]
+//     原 host/poolResolved 通道已随 poolKey 协议范围退役删除；[permission 退役]
 //     host/permission 已删——两引擎 permissionMode=native 零 emit）
 //     的 core 侧到达断言；
 //   - 错误帧：run 失败帧 / 未知方法帧（码原样透传）/ initialize 版本越界
@@ -56,7 +56,7 @@ if (fixture.schemaVersion !== 1) {
   throw new Error(`unsupported fixture schemaVersion ${String(fixture.schemaVersion)}`);
 }
 
-/** AgentEvent 字段白名单（结构等价比对的逐字段面；text_delta.delta 内容显式排除）。 */
+/** AgentEvent 字段白名单（结构等价比对的逐字段侧；text_delta.delta 内容显式排除）。 */
 const FIELD_WHITELIST: Record<string, readonly string[]> = {
   text_delta: ["type", "delta"],
   message_end: ["type", "usage"],
@@ -164,7 +164,7 @@ describe("协议黑盒：9 正向方法 × fake 引擎回放", () => {
       )) as { entries: unknown[] };
       expect(Array.isArray(view.entries)).toBe(true);
 
-      // ping 协议方法往返（诊断面：不 throw 即通——客户端便捷方法已删，走裸 request）
+      // ping 协议方法往返（诊断范围：不 throw 即通——客户端便捷方法已删，走裸 request）
       await h.client.request("ping", {}, { timeoutMs: 5_000 });
     } finally {
       await h.client.dispose();
@@ -201,7 +201,7 @@ describe("协议黑盒：9 正向方法 × fake 引擎回放", () => {
     }
   });
 
-  it("dispose：幂等收口（应答 ok + 进程退出）", async () => {
+  it("dispose：幂等收尾（应答 ok + 进程退出）", async () => {
     const h = makeHarness();
     await h.client.ensureConnected();
     const r = (await h.client.request("dispose", {}, { timeoutMs: 5_000 })) as { ok: boolean };
@@ -218,8 +218,8 @@ describe("协议黑盒：6 反向通道 core 侧到达", () => {
       await h.client.ensureConnected();
       await h.client.request("run", fixture.run.params);
 
-      // host/log：注入观测面已随 ReverseRouterDeps.log 注入点删除（恒走缺省
-      // logger facade），到达面由 engine-client.test 的 host/log 数据面用例覆盖。
+      // host/log：注入观测范围已随 ReverseRouterDeps.log 注入点删除（恒走缺省
+      // logger facade），到达面由 engine-client.test 的 host/log 数据范围用例覆盖。
       // host/streamDelta
       expect(h.streamDeltas).toEqual(["Hello", " world"]);
       // host/handleReady
@@ -231,7 +231,7 @@ describe("协议黑盒：6 反向通道 core 侧到达", () => {
       expect(typeof entries[0]?.pid).toBe("number");
       expect(entries[0]?.recordId).toBe(fixture.run.params.runId);
       expect(entries[0]?.state).toBe("exited");
-      // host/askUser（交互面 ack 两阶段）
+      // host/askUser（交互侧 ack 两阶段）
       expect(h.askUserRequests).toHaveLength(1);
     } finally {
       await h.client.dispose();
@@ -363,7 +363,7 @@ describe("协议黑盒：fixture 回放结构等价（基线三层①）", () =>
   it("POSIX 组探测：childSpawned 上报 pid 非组长（在引擎收割组内；A3 前提；Windows 显式跳过）", async () => {
     if (process.platform === "win32") {
       // Windows 无外部组判据（无 kill(-pid,0) 等价物）——仅 SDK 层 spawnEngineChild
-      // 的 detached/stdio 规约保证，真机面挂 A3 手动门（taskkill /T /F 形态）。
+      // 的 detached/stdio 规约保证，真机验证挂 A3 手动门（taskkill /T /F 形态）。
       return;
     }
     const h = makeHarness();

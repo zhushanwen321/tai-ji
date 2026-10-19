@@ -11,7 +11,7 @@
  * Mock 策略：族级共享 harness（../helpers/app-update-mount.ts）注入内存 adapter 与
  * markdown 桩 '<p>test</p>'；onUpdateError 捕获 cb 供 ipc.fireError 手动触发。
  *  - vi.mock('@/i18n') t 返回 key（追加文案断言 key 本身即可，文案正确性由
- *    update-manual-channel.test.ts 的真实 zh-CN 文案断言守卫）
+ *    update-manual-channel.test.ts 的真实 zh-CN 文案断言检查）
  *  - 用例体统一经 inUpdateScope 包 effectScope（onScopeDispose 依赖活跃 scope）
  *
  * 运行：cd packages/renderer && npx vitest run src/__tests__/composables/useAppUpdate.manual-channel.test.ts

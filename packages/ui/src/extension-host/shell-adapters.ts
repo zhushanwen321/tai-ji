@@ -52,7 +52,7 @@ import { sendExtensionUIResponse } from '@taiji/core/transport/api/domains/exten
  *
  * ADR-0060：数据源从 raw-message-tap 旁路改为 events 正规双订阅（route-inbound 单一真相源）：
  * - onGlobal：收无 sid 的 plugin:*（notification/uiRequest 等走 global 通道）
- * - onCrossSession：收带 sid 的 extension:*（widget/widgetGui/status/notify/ui_request
+ * - onCrossSession：收带 sid 的 extension:*（widget/widgetGui/notify/requestsInvalidated/dialog
  *   + plugin:uiRequest/plugin:viewUpdate，route-inbound 声明式条目 crossSession 字段分发，
  *   全局单例消费者 ExtensionHost 接收）
  * 经 source filter 后消息集合与旧 raw-tap 全量订阅等价（plugin:* 无 sid + extension.* 带 sid）。
@@ -88,7 +88,7 @@ export function createWsPluginMessageSource(): PluginMessageSource {
 
 type UiRequestEvent = Extract<InternalEvent, { kind: 'ui-request' }>
 
-// ── 类型守卫（索引签名字段收窄，禁止 any 断言） ──────────────────────
+// ── 类型检查（索引签名字段收窄，禁止 any 断言） ──────────────────────
 
 const DIALOG_METHODS: readonly DialogRequest['method'][] = ['confirm', 'select', 'input', 'editor']
 
@@ -96,7 +96,7 @@ function isDialogMethod(v: unknown): v is DialogRequest['method'] {
   return typeof v === 'string' && (DIALOG_METHODS as readonly string[]).includes(v)
 }
 
-/** options 对象形状守卫：{ label: string, value: string, description?: string } */
+/** options 对象形状检查：{ label: string, value: string, description?: string } */
 function isOptionObject(v: unknown): v is { label: string; value: string; description?: string } {
   if (typeof v !== 'object' || v === null) return false
   const o = v as Record<string, unknown>
@@ -179,7 +179,7 @@ function toInteractMethod(method: string): ExtensionInteractMethod {
 /**
  * 双壳共享 factory 的壳层能力注入（桌面 useExtensionHostBridge / 移动 companion-bridge）：
  * - onPiResponseSettled：通路级收尾锚点（plain-dialog-submit-settle D1；ADR-0072 cancel 型
- *   分型先例 → ADR-0073 D4a 壳层锚点与通路级收口）。sendPiResponse 应答终局无条件调用
+ *   分型先例 → ADR-0073 D4a 壳层锚点与通路级收尾）。sendPiResponse 应答终局无条件调用
  *   （cancel / 提交 / WS 断连三型统一，清在 delivered 判定之前——断连期 turn 同样不可达）。
  *   桌面壳注入 chatStore.clearPendingSend（plain dialog 通路默认值 = 无 turn 预期，生产者
  *   穷尽论证见 ADR-0073）；移动壳无 pendingSend 链不注入 = 空操作。
@@ -264,7 +264,7 @@ export function createUiResponseTransport(options: CompanionDialogAdaptersOption
       // 通路级收尾锚点：应答终局无条件清（cancel / 提交 / 断连三型统一；恒清不吞 turn 信号
       // ——若某源提交后真有 turn，message_start 照常驱动 isGenerating；clearPendingSend 幂等）。
       // 清在 delivered 判定之前：断连期 turn 同样不可达，不清则该形态仍走 30s 兜底
-      // （「意图先于送达」的两通路相位分叉登记见 ADR-0073；已知失真与重审条件见 ADR-0072 收口）。
+      // （「意图先于送达」的两通路相位分叉登记见 ADR-0073；已知失真与重审条件见 ADR-0072 收尾）。
       options.onPiResponseSettled?.(sessionId)
       const delivered = sendExtensionUIResponse(sessionId, requestId, toInteractMethod(method), result)
       if (!delivered) {

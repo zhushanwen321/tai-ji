@@ -1,15 +1,15 @@
 // 跨包集成（[U4c / G4-S5③] record 持久化收敛 P4c 验收锚点）：
-// subagent-core 重建/终态写面产出的 manifest → session-reader identity 投影不降级。
+// subagent-core 重建/终态写侧产出的 manifest → session-reader identity 派生视图不降级。
 //
 // 断言链（设计 subagent-record-persistence-consolidation D5 前向兼容判定 + S5③）：
 //   1. manifest 被人为删除（S5 缓存可丢场景）→ subagent-core RecordStore.rebuildIndexes
 //      全量重建 → session-reader listRecordManifests 重新可见；
-//   2. 重建窗口前后，session-reader identity 投影的输入字段集（rootSessionId/slug/
+//   2. 重建窗口前后，session-reader identity 派生视图的输入字段集（rootSessionId/slug/
 //      task/agentName/model/status/sessionFile/parentRecordId）逐字段一致——双写过渡
-//      字段（executionStatus）在场且不被本包消费（旧 status 三态投影继续生效）；
+//      字段（executionStatus）在场且不被本包消费（旧 status 三态派生视图继续生效）；
 //   3. 重建源 = 事件流折叠 + identity entry（[③ .state 退场] 后终态位消失）——
 //      身份/富字段逐字段保真；legacy status 不再保真 closed（重建单规则恒 idle +
-//      无 closedReason → derivedManifestRecord 如实投影 legacy "running"，终态语义
+//      无 closedReason → derivedManifestRecord 如实派生 legacy "running"，终态语义
 //      由 record-settled 事件帧承载）。
 //
 // 形态同 cross-package-subagent-core.test.ts：subagent-core 真实 tmpdir 产出磁盘
@@ -32,7 +32,7 @@ import { listRecordManifests, type RecordManifest } from '../discovery/subagents
 
 const ROOT_SESSION = 'root-dual-write'
 
-/** session-reader identity 投影（manifestIdentityData）消费的字段集——重建窗口
+/** session-reader identity 派生视图（manifestIdentityData）消费的字段集——重建窗口
  *  前后必须逐字段一致（降级 = 任一字段缺失/漂移）。 */
 function identityView(m: RecordManifest) {
   return {
@@ -49,15 +49,21 @@ function identityView(m: RecordManifest) {
 }
 
 describe('跨包集成：subagent-core rebuildIndexes 重建 manifest → session-reader 投影不降级', () => {
+  let dataDir: string
   let agentDir: string
   let sessionsDir: string
   let recordsDir: string
   let childFile: string
 
   beforeEach(() => {
-    agentDir = fs.mkdtempSync(path.join(os.tmpdir(), 'sr-rebuild-dualwrite-'))
-    sessionsDir = getSubagentSessionDir(agentDir, agentDir)
-    recordsDir = getSubagentRecordsDir(agentDir, agentDir)
+    // 生产拓扑复刻（[session-store-layout-inversion 域 9]）：agentDir = <dataDir>/agent
+    //（session-reader 的 agentDir 语义），subagent-core 写侧经新公式落存储树
+    // <dataDir>/ext-sessions/<rootSid>/subagents/——listRecordManifests 双根扫描的新根
+    //（dirname(agentDir)/ext-sessions）与写侧落点相遇
+    dataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'sr-rebuild-dualwrite-'))
+    agentDir = path.join(dataDir, 'agent')
+    sessionsDir = getSubagentSessionDir(ROOT_SESSION, dataDir)
+    recordsDir = getSubagentRecordsDir(ROOT_SESSION, dataDir)
     fs.mkdirSync(sessionsDir, { recursive: true })
     fs.mkdirSync(recordsDir, { recursive: true })
 
@@ -95,11 +101,11 @@ describe('跨包集成：subagent-core rebuildIndexes 重建 manifest → sessio
   })
 
   afterEach(() => {
-    fs.rmSync(agentDir, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 })
+    fs.rmSync(dataDir, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 })
   })
 
-  it('S5③: manifest 删除 → rebuildIndexes 重建 → identity 投影字段集前后一致（双写字段在场）', async () => {
-    // ── 初始 manifest：subagent-core 终态写面（markFinalized）真实产出 ──
+  it('S5③: manifest 删除 → rebuildIndexes 重建 → identity 派生视图字段集前后一致（双写字段在场）', async () => {
+    // ── 初始 manifest：subagent-core 终态写侧（markFinalized）真实产出 ──
     const record = createRecord('sa-dw', {
       agent: 'worker',
       model: 'prov/m1',
@@ -119,7 +125,8 @@ describe('跨包集成：subagent-core rebuildIndexes 重建 manifest → sessio
       closedReason: 'gc' as const,
       endedAt: 2000,
     })
-    const writer = new RecordStore(sessionsDir, undefined, undefined, recordsDir)
+    // [u-subagent dir 晚绑定] RecordStore 构造 = 目录取值函数（非目录字符串）
+    const writer = new RecordStore(() => sessionsDir, undefined, undefined, () => recordsDir)
     expect(writer.markFinalized(record, 'gc')).toBe(true)
     writer.dispose()
 
@@ -127,9 +134,9 @@ describe('跨包集成：subagent-core rebuildIndexes 重建 manifest → sessio
     expect(before).toBeDefined()
     const viewBefore = identityView(before!)
 
-    // 双写过渡字段在写面就位（本包不消费，但前向兼容锚要求其在场）。
+    // 双写过渡字段在写侧就位（本包不消费，但前向兼容锚要求其在场）。
     // [U2 两态] executionStatus 是内部权威词汇（running|idle 两态，终态概念删除）
-    // → 终态化后恒 'idle'；status 旧三态是 session-reader 直读投影（永久保留）→ 'closed'。
+    // → 终态化后恒 'idle'；status 旧三态是 session-reader 直读派生视图（永久保留）→ 'closed'。
     const rawBefore = JSON.parse(fs.readFileSync(path.join(recordsDir, 'sa-dw.json'), 'utf-8')) as Record<string, unknown>
     expect(rawBefore.executionStatus).toBe('idle')
     expect(rawBefore.status).toBe('closed')
@@ -138,15 +145,15 @@ describe('跨包集成：subagent-core rebuildIndexes 重建 manifest → sessio
     for (const f of fs.readdirSync(recordsDir)) fs.rmSync(path.join(recordsDir, f))
     expect((await listRecordManifests(agentDir)).filter((m) => m.id === 'sa-dw')).toHaveLength(0)
 
-    const rebuilder = new RecordStore(sessionsDir, undefined, undefined, recordsDir)
+    const rebuilder = new RecordStore(() => sessionsDir, undefined, undefined, () => recordsDir)
     expect(rebuilder.rebuildIndexes()).toBe(1)
     rebuilder.dispose()
 
-    // ── session-reader 视角：重建后 identity 投影不降级 ──
+    // ── session-reader 视角：重建后 identity 派生视图不降级 ──
     const after = (await listRecordManifests(agentDir)).find((m) => m.id === 'sa-dw')
     expect(after).toBeDefined()
     // 字段集保真（身份/富字段逐字段一致）；仅 legacy status 按 ③ 后重建语义如实
-    // 投影 running（终态权威 = 事件流 record-settled 帧，磁盘重建无 closedReason 载体）。
+    // 派生 running（终态权威 = 事件流 record-settled 帧，磁盘重建无 closedReason 载体）。
     expect(identityView(after!)).toEqual({ ...viewBefore, status: 'running' })
 
     const rawAfter = JSON.parse(fs.readFileSync(path.join(recordsDir, 'sa-dw.json'), 'utf-8')) as Record<string, unknown>
@@ -156,10 +163,10 @@ describe('跨包集成：subagent-core rebuildIndexes 重建 manifest → sessio
     expect(rawAfter.closedReason).toBeUndefined()
   })
 
-  it('惰性通道：查询面（collectRecords）补建的 manifest 同样可被本包读取投影', async () => {
-    // 不经终态写面（无 manifest 初始形态）：磁盘 record 只有 identity + 无 sidecar
+  it('惰性通道：查询结果（collectRecords）补建的 manifest 同样可被本包读取派生视图', async () => {
+    // 不经终态写侧（无 manifest 初始形态）：磁盘 record 只有 identity + 无 sidecar
     // → 查询触发惰性补建。
-    const store = new RecordStore(sessionsDir, undefined, undefined, recordsDir)
+    const store = new RecordStore(() => sessionsDir, undefined, undefined, () => recordsDir)
     expect(store.collectRecords(10).map((r) => r.id)).toContain('sa-dw')
     store.dispose()
 
@@ -172,8 +179,8 @@ describe('跨包集成：subagent-core rebuildIndexes 重建 manifest → sessio
     expect(found!.sessionFile).toBe(childFile)
     expect(found!.parentRecordId).toBe('sa-parent')
     // 双写过渡字段（[U3 重建单规则] 无 sidecar 重建一律 idle：executionStatus 如实
-    // 投影两态词汇；legacy status 经桥接判据派生——无 closedReason 遗留位的 idle
-    // 投影 "running"（session-reader 视角的活跃成员，§3.2.8 下行映射）。
+    // 派生两态词汇；legacy status 经桥接判据派生——无 closedReason 遗留位的 idle
+    // 派生 "running"（session-reader 视角的活跃成员，§3.2.8 下行映射）。
     const raw = JSON.parse(fs.readFileSync(path.join(recordsDir, 'sa-dw.json'), 'utf-8')) as Record<string, unknown>
     expect(raw.executionStatus).toBe('idle')
     expect(raw.status).toBe('running')

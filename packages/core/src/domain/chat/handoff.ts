@@ -24,7 +24,7 @@ export interface HandoffController {
   /**
    * 设置交接态（useHandoffActions.handoff 触发→true / session.handoffComplete 广播、
    * handoffAborted 广播或 RPC reject catch→false）。
-   * 不可变 set 保证响应性，镜像 occupancy 投影的不可变写（[u5b] setCompacting 退役后仍成立的响应性范式）。
+   * 不可变 set 保证响应性，镜像 occupancy 派生视图的不可变写（[u5b] setCompacting 退役后仍成立的响应性范式）。
    */
   setHandingOff: (sessionId: string, value: boolean) => void
 }

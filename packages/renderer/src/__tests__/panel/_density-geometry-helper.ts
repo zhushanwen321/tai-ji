@@ -5,7 +5,7 @@
  * 收编的同构段（原两文件各自维护的形态同构假差异，改一处漏一处的来源）：
  * - `flushFitPasses`：fit 收敛回路的 rAF 链排空；
  * - `makeMountPointSource` / `toolbarEntry`：挂载点数据源替身（只服务
- *   `getView(sid, 'composer.toolbar')` 的插件 toolbar 贡献面）；
+ *   `getView(sid, 'composer.toolbar')` 的插件 toolbar 贡献点）；
  * - `dispatchFitGeometry`：打桩 clientWidth + 两簇 getBoundingClientRect + RO 派发 +
  *   rAF 链排空（右簇占宽支持定值或按 `data-fit` 分级回落两种口径）。
  *
@@ -29,9 +29,9 @@ export async function flushFitPasses(): Promise<void> {
 }
 
 /**
- * 挂载点数据源替身：**只服务 `getView(sid, 'composer.toolbar')`**（插件 toolbar 贡献面），
+ * 挂载点数据源替身：**只服务 `getView(sid, 'composer.toolbar')`**（插件 toolbar 贡献点），
  * `getViewIds` 恒空——不冒充 widget 区条目（否则挂载点 view 会被托盘 widget 区当成条目）。
- * 需要测试中途变更贡献面时传 reactive Map（调用方决定响应式形态）。
+ * 需要测试中途变更贡献点时传 reactive Map（调用方决定响应式形态）。
  */
 export function makeMountPointSource(
   sid: string,

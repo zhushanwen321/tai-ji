@@ -5,7 +5,7 @@
  *
  * 背景：u-2c 删除 `./*` 开发态通配后，对 dist 产物做过三项一次性人工核验（结论仅存
  * commit message）：①主 bundle × 4 子入口重叠 module = 恰 4 个纯常量/函数模块；
- * ②4 子入口导出面 src↔dist 符号一致（3+9+5+8=25）；③require smoke。人工核验不可
+ * ②4 子入口导出清单 src↔dist 符号一致（3+9+5+8=25）；③require smoke。人工核验不可
  * 复跑——未来新增子入口 / tsup 配置漂移无机器拦截。本脚本把 ①② 固化为可复跑静态门
  * （③已有 scripts/smoke-core-dist.mjs 承载，不重复）。
  *
@@ -17,13 +17,15 @@
  * new Map(/new Set(。含可变状态的交集 module = FAIL；纯常量/函数 = PASS（警告列出
  * ——重叠即双份分发，纯度靠启发式背书，新增顶层 let 时会被本门拦下）。
  * 语义边界（如实登记）：「对象字面量被内部函数写入」形态文本不可判，不在硬信号内；
+ * 顶层类型注解为 ReadonlySet/ReadonlyMap（含 Readonly<Set/Map>）的声明按「纯常量」
+ * 豁免（类型级只读契约，无状态分裂面；容器值只读而容器本身可变的嵌套形态不豁免）。
  * ESM 侧子入口经 chunk 共享（运行时同实例，无分裂），但 chunk 拆分形态由 tsup
  * splitting 决定，重叠监测对 ESM 同样保留（配置漂移翻回物理重复时仍被覆盖）。
  *
- * 门② 子入口导出面 src↔dist 符号比对：对 exports 的每条子入口（非 `.`、非通配），
+ * 门② 子入口导出清单 src↔dist 符号比对：对 exports 的每条子入口（非 `.`、非通配），
  * 从 src 入口（exports import 条件）解析具名导出符号，与 dist 对应 .d.cts
  * （exports require.types）及同基 .d.ts 的导出符号集双向比对，差集非空 = FAIL。
- * `export * from` 无法文本枚举——按依赖闭包守卫同款 fail-closed 处理，直接 FAIL。
+ * `export * from` 无法文本枚举——按依赖闭包检查同款 fail-closed 处理，直接 FAIL。
  *
  * 门③ workflows/ 手写声明对导出符号双向对账：./workflows/* 子入口源码直发（不经
  * tsup，门② 覆盖不到），同名 .cjs + .d.cts 手写声明对（现 review-fix-loop-utils）
@@ -48,7 +50,7 @@ const ROOT = join(__dirname, '..')
 const CORE_DIR = join(ROOT, 'packages', 'subagent-core')
 const PKG_PATH = join(CORE_DIR, 'package.json')
 
-// 纯函数导出面（scripts/__tests__/check-core-dist-gate.test.mjs 直挂单测——发布门禁
+// 纯函数导出清单（scripts/__tests__/check-core-dist-gate.test.mjs 直挂单测——发布门禁
 // 解析逻辑的边界行为必须有机器锁定，见 MF-2）。仅 CLI 直跑时执行下方 main()。
 // gateTwo 额外接受 coreDir 注入（默认 CORE_DIR）——单测 fixture 落 tmpdir 用，CLI 不传。
 export {
@@ -61,6 +63,7 @@ export {
   extractCjsModuleExportsKeys,
   extractDctsRuntimeExportNames,
   gateWorkflowsDeclarationPairs,
+  findModuleLevelMutableState,
 }
 
 let failures = 0
@@ -77,7 +80,7 @@ function ok(msg) {
 /**
  * 剥离 // 与块注释（保留字符串字面量）——启发式解析前置，避免注释里的语法样式
  * 误报。已知局限：模板串 ${} 内嵌引号会提前结束字符串状态（倾向误报而非漏报，
- * 与依赖闭包守卫的 fail-closed 取向一致）。
+ * 与依赖闭包检查的 fail-closed 取向一致）。
  */
 /** 行注释跳过：consume 到行尾（不含换行符——\n 留给主循环作为普通字符输出）。 */
 function skipLineComment(text, i) {
@@ -85,7 +88,7 @@ function skipLineComment(text, i) {
   return i
 }
 
-/** 块注释跳过：consume 整段（含闭合定界符；EOF 处未闭合时越过末尾，主循环随之结束）。 */
+/** 块注释跳过：consume 整段（含结束定界符；EOF 处未封口时越过末尾，主循环随之结束）。 */
 function skipBlockComment(text, i) {
   i += 2
   while (i < text.length && !(text[i] === '*' && text[i + 1] === '/')) i++
@@ -93,7 +96,7 @@ function skipBlockComment(text, i) {
 }
 
 /**
- * 字符串字面量整段消费：从开引号扫到匹配闭引号（`\x` 转义跳两个字符；未闭合时
+ * 字符串字面量整段消费：从开引号扫到匹配闭引号（`\x` 转义跳两个字符；未封口时
  * 保留到 EOF）。返回原文片段（逐字节原样，含引号与转义）与游标后继。
  */
 function consumeString(text, i) {
@@ -171,6 +174,16 @@ function collectBundleClosure(entryAbs) {
 }
 
 /**
+ * 门① 只读容器豁免：顶层类型注解锚定为 ReadonlySet/ReadonlyMap（或
+ * Readonly<Set/Map>）的声明 = 类型级只读契约（无变更方法；顶层 let/var 已被上一分支
+ * 捕获，本分支实际只及 const——绑定不可重赋值），双 bundle 各持副本无状态分裂面，
+ * 按「纯常量」语义放行（警告列出）。注解必须锚定在声明符顶层——
+ * Record<string, ReadonlySet<..>> 这类容器值只读、容器本身可变的形态不在豁免内。
+ */
+const READONLY_CONTAINER_DECL_RE =
+  /^(?:export\s+)?(?:const|let|var)\s+[A-Za-z_$][\w$]*\s*:\s*(?:Readonly(?:Set|Map)|Readonly\s*<\s*(?:Set|Map)\s*)</
+
+/**
  * 模块级可变状态文本启发式（门① 硬信号）。列 0 锚定 = 模块顶层（函数/循环体内
  * 声明必然缩进；for 行以 for 开头不命中 let/var 规则）。
  */
@@ -184,7 +197,8 @@ function findModuleLevelMutableState(srcAbs) {
       signals.push({ lineNo: i + 1, code: line.trim(), signal: '模块顶层 let/var 声明（可变绑定）' })
     } else if (
       /^(?:export\s+)?(?:const|let|var)\s+[A-Za-z_$][\w$]*[^;=]*=/.test(line) &&
-      /new\s+(?:Map|Set)\s*[<(]/.test(line)
+      /new\s+(?:Map|Set)\s*[<(]/.test(line) &&
+      !READONLY_CONTAINER_DECL_RE.test(line)
     ) {
       signals.push({ lineNo: i + 1, code: line.trim(), signal: '模块级 new Map/Set（可变容器）' })
     }
@@ -192,16 +206,16 @@ function findModuleLevelMutableState(srcAbs) {
   return signals
 }
 
-// ---------- 导出面符号提取 ----------
+// ---------- 导出符号提取 ----------
 
 /**
  * 解析全部 `export { ... }` 块（可多行、含 `type X` 前缀与 `X as Y` 重命名）。
  * 解析不了的 part 记入 problems（fail-closed：宁可报错人工看，不静默漏符号）。
  */
-// export 块单项形态：标识符/default + 可选 as 重命名（重命名后符号才是导出面）
+// export 块单项形态：标识符/default + 可选 as 重命名（重命名后符号才是导出项）
 const EXPORT_PART_RE = /^([A-Za-z_$][\w$]*|default)(?:\s+as\s+([A-Za-z_$][\w$]*|default))?$/
 
-/** 花括号配对扫描：从 open 起找 depth 归零的闭合 }（未闭合返回 -1） */
+/** 花括号配对扫描：从 open 起找 depth 归零的结束 }（未封口返回 -1） */
 function findBlockClose(text, open) {
   let depth = 0
   for (let j = open; j < text.length; j++) {
@@ -226,11 +240,14 @@ function addExportPart(rawPart, names, problems, where) {
 
 function parseExportBlocks(text, problems, where) {
   const names = new Set()
-  for (const m of text.matchAll(/^export\s*\{/gm)) {
+  // `export type { ... }`（TS 4.5+ 显式类型重导出块）与普通 `export { ... }` 同为
+  // 符号清单块——漏解析会造成 src 侧假性缺符号（门② 假阳性：dist 如实重导出而 src
+  // 解析不到）。
+  for (const m of text.matchAll(/^export\s*(?:type\s+)?\{/gm)) {
     const open = text.indexOf('{', m.index)
     const close = findBlockClose(text, open)
     if (close < 0) {
-      problems.push(`${where}: export { } 花括号未闭合——文本解析失败`)
+      problems.push(`${where}: export { } 花括号未封口——文本解析失败`)
       continue
     }
     for (const rawPart of text.slice(open + 1, close).split(',')) {
@@ -251,7 +268,7 @@ function extractSrcExportNames(tsRaw, where) {
   if (/^export\s+default\b/m.test(t)) names.add('default')
   for (const m of t.matchAll(/^export\s+\*(?:\s+as\s+([A-Za-z_$][\w$]*))?\s+from\b/gm)) {
     if (m[1]) names.add(m[1])
-    else problems.push(`${where}: src 出现裸 export * from（重导出面无法文本枚举）——请展开为显式具名导出`)
+    else problems.push(`${where}: src 出现裸 export * from（重导出清单无法文本枚举）——请展开为显式具名导出`)
   }
   return { names, problems }
 }
@@ -267,7 +284,7 @@ function extractDtsExportNames(dtsRaw, where) {
   if (/^export\s+default\b/m.test(t)) names.add('default')
   for (const m of t.matchAll(/^export\s+\*(?:\s+as\s+([A-Za-z_$][\w$]*))?\s+from\b/gm)) {
     if (m[1]) names.add(m[1])
-    else problems.push(`${where}: d.ts 出现裸 export * from（导出面无法文本枚举）`)
+    else problems.push(`${where}: d.ts 出现裸 export * from（导出清单无法文本枚举）`)
   }
   return { names, problems }
 }
@@ -430,7 +447,7 @@ function reportExportDrift(sub, dctsRel, dtsRel, src, dcts, dts) {
   if (onlyInDistDcts.length > 0) fail(`${sub.key}: 仅 ${dctsRel} 有、src 缺: ${onlyInDistDcts.join(', ')}`)
   if (onlyInSrcDts.length > 0) fail(`${sub.key}: 仅 src 有、${dtsRel} 缺: ${onlyInSrcDts.join(', ')}`)
   if (onlyInDistDts.length > 0) fail(`${sub.key}: 仅 ${dtsRel} 有、src 缺: ${onlyInDistDts.join(', ')}`)
-  console.error(`    排查：tsup dts 配置漂移或 src 导出面变更未重建——cd packages/subagent-core && pnpm build 后重跑`)
+  console.error(`    排查：tsup dts 配置漂移或 src 导出清单变更未重建——cd packages/subagent-core && pnpm build 后重跑`)
 }
 
 /** 单子入口三向产物定位（src / .d.cts / .d.ts），任一缺失即 fail 并返回 null */
@@ -453,13 +470,13 @@ function locateSubentryFaces(pkg, sub, coreDir) {
     return null
   }
   if (!existsSync(dtsAbs)) {
-    fail(`${sub.key}: dist 声明产物缺失 ${dtsRel}（import 条件消费面断裂——核对 tsup.config.ts dts 输出）`)
+    fail(`${sub.key}: dist 声明产物缺失 ${dtsRel}（import 条件消费方断裂——核对 tsup.config.ts dts 输出）`)
     return null
   }
   return { srcAbs, dctsRel, dctsAbs, dtsRel, dtsAbs }
 }
 
-/** 单子入口导出面比对：三向符号提取 → 解析 problems 优先 fail → 四向差集报告 */
+/** 单子入口导出清单比对：三向符号提取 → 解析 problems 优先 fail → 四向差集报告 */
 function checkSubentryFace(pkg, sub, coreDir) {
   const faces = locateSubentryFaces(pkg, sub, coreDir)
   if (faces === null) return
@@ -474,9 +491,9 @@ function checkSubentryFace(pkg, sub, coreDir) {
   reportExportDrift(sub, faces.dctsRel, faces.dtsRel, src, dcts, dts)
 }
 
-/** 门②：子入口导出面 src↔dist 符号比对（.d.cts + .d.ts 双格式，双向差集） */
+/** 门②：子入口导出清单 src↔dist 符号比对（.d.cts + .d.ts 双格式，双向差集） */
 function gateTwo(pkg, subentries, coreDir = CORE_DIR) {
-  console.log('[门②] 子入口导出面 src↔dist 符号比对（.d.cts + .d.ts 双格式，双向差集）')
+  console.log('[门②] 子入口导出清单 src↔dist 符号比对（.d.cts + .d.ts 双格式，双向差集）')
   if (subentries.length === 0) {
     console.log('  ⚠ exports 无子入口条目——门②空转（新增子入口自动纳入监测）')
     return
@@ -670,7 +687,7 @@ function main() {
   // ---------- 汇总 ----------
 
 if (failures === 0) {
-  console.log('✓ subagent-core dist 静态门通过（重叠 module 纯度 + 导出面零漂移 + workflows 声明对零漂移）')
+  console.log('✓ subagent-core dist 静态门通过（重叠 module 纯度 + 导出清单零漂移 + workflows 声明对零漂移）')
   process.exit(0)
 }
 console.error(`✗ subagent-core dist 静态门失败：${failures} 项 FAIL（上方 ✗ 行）`)

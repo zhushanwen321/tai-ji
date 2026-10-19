@@ -58,7 +58,7 @@ const props = defineProps<{
   /** 主 session id（三段式 vid 的命名空间中段——overlay 绑定发起 session，D11⑤）。 */
   sessionId: string
   call: WorkflowAgentCall
-  /** run 投影状态（D9 派生输入）。 */
+  /** run 派生视图状态（D9 派生输入）。 */
   runStatus: WorkflowRunStatus
 }>()
 

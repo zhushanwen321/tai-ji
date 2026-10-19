@@ -1,11 +1,11 @@
 // src/__tests__/scenario-25-host-projection.test.ts
 //
-// 场景 25（修订设计 §4，D2/D16）：中断 run 宿主投影。
+// 场景 25（修订设计 §4，D2/D16）：中断 run 宿主派生视图。
 //
 // 两段结构（任务书 §2）：
-// - 无门段（节点级默认跑）：宿主投影数据面——中断形态条目（workflow-record-entry
+// - 无门段（节点级默认跑）：宿主派生视图数据——中断形态条目（workflow-record-entry
 //   契约单源）、概览链三态渲染、执行树家族链 calls[].sessionFile 提取（D16 ③
-//   强制连带断言——挂靠本文件：宿主投影族同域）。session-reader 实装经 tsx 子进程
+//   强制连带断言——挂靠本文件：宿主派生视图族同域）。session-reader 实装经 tsx 子进程
 //   probe 加载（vite resolver 不解析跨包物理相对路径——见 scenario-kit 尾注）。
 // - CDP 门段（describe.skipIf(!process.env.TAIJI_E2E_HOST_PROJECTION_CDP)）：
 //   真机 dev app（TAIJI_DEV_BACKGROUND=1 pnpm dev + CDP）断 GUI workflow 列表
@@ -25,7 +25,7 @@ import { registeredEntry } from "./record-mode/helpers.ts";
 
 const RUN_ID = "wf-s25-projection";
 
-describe("场景 25 无门段：中断 run 宿主投影数据面", () => {
+describe("场景 25 无门段：中断 run 宿主派生视图数据", () => {
   it("中断形态条目（workflow-record-entry 契约单源）：status 字面量 'interrupted'", () => {
     const entry = buildWorkflowRecordInterruptedEntryData({
       runId: RUN_ID,
@@ -35,7 +35,7 @@ describe("场景 25 无门段：中断 run 宿主投影数据面", () => {
       callCount: 2,
       usedTokens: 0,
     });
-    // D2 宿主投影②：进入 interrupted 时写中断形态条目——kind 复用 settled 条目
+    // D2 宿主派生视图②：进入 interrupted 时写中断形态条目——kind 复用 settled 条目
     // 形态，中断语义由 status 字面量 'interrupted' 承载（schema 契约单源
     // workflow-record-entry 的现行设计）
     expect(entry).toMatchObject({ kind: "settled", runId: RUN_ID, status: "interrupted" });
@@ -52,7 +52,7 @@ describe("场景 25 无门段：中断 run 宿主投影数据面", () => {
         ],
         inflight: [{ agent: "C" }],
       });
-      // 中断态：概览渲染 interrupted（GUI「已中断（可续跑）」的数据面——文案消费
+      // 中断态：概览渲染 interrupted（GUI「已中断（可续跑）」的数据——文案消费
       // 归 renderer，词面由 state-tone-lock 锁）
       await runSessionReaderProbe("overview-interrupted", env.recordPath(RUN_ID), RUN_ID);
       // 复活流（run-resumed 落流、无终局帧）：run-resumed 是 interrupted → running
@@ -76,11 +76,11 @@ describe("场景 25 无门段：中断 run 宿主投影数据面", () => {
         inflight: [{ agent: "C" }],
       });
 
-      // 家族链发现面（D16 ③ 换源后的单点提取函数）：settled 帧 result.sessionFile
+      // 家族链发现范围（D16 ③ 换源后的单点提取函数）：settled 帧 result.sessionFile
       // 按 taskIndex 归位提取，非空 = workflow 子节点可跳转（不退空）
       await runSessionReaderProbe("family-files", env.recordPath(RUN_ID), RUN_ID);
 
-      // v2 注册条目锚点 = record 流路径（新形态实体——发现链数据面）
+      // v2 注册条目锚点 = record 流路径（新形态实体——发现链数据）
       const entry = registeredEntry(RUN_ID, env.recordPath(RUN_ID));
       expect(entry.data).toMatchObject({
         v: 2,
@@ -101,9 +101,9 @@ describe("场景 25 无门段：中断 run 宿主投影数据面", () => {
 // 实例，node apps/electron/scripts/dev-instance.mjs --print 取 CDP 端口注入
 // TAIJI_E2E_HOST_PROJECTION_CDP；窗口内已构造一个 interrupted run（剧本步骤）。
 // 断言 = workflow 列表渲染「已中断（可续跑）」（非「运行中」）；resume 后复查
-// 恢复 running 投影。
+// 恢复 running 派生视图。
 describe("场景 25 CDP 门段：GUI workflow 列表文案（真机 dev app）", () => {
-  it.skipIf(!process.env.TAIJI_E2E_HOST_PROJECTION_CDP)("中断 run 列表显示「已中断（可续跑）」；resume 后恢复 running 投影", async () => {
+  it.skipIf(!process.env.TAIJI_E2E_HOST_PROJECTION_CDP)("中断 run 列表显示「已中断（可续跑）」；resume 后恢复 running 派生视图", async () => {
     const port = Number(process.env.TAIJI_E2E_HOST_PROJECTION_CDP);
     const listRes = await fetch(`http://localhost:${port}/json/list`);
     const pages = (await listRes.json()) as Array<{ type: string; webSocketDebuggerUrl: string; url: string }>;
@@ -137,7 +137,7 @@ describe("场景 25 CDP 门段：GUI workflow 列表文案（真机 dev app）",
     expect(bodyOnInterrupted).toContain("已中断（可续跑）");
     expect(bodyOnInterrupted).not.toContain("运行中");
 
-    // resume 后复查（剧本执行 resume 步骤后轮询恢复 running 投影）
+    // resume 后复查（剧本执行 resume 步骤后轮询恢复 running 派生视图）
     const deadline = Date.now() + 60_000;
     for (;;) {
       const body = await evalBodyText();

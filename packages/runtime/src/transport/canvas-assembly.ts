@@ -23,9 +23,10 @@ export interface CanvasAssembly { // oe-exempt:20261015:framework:画布域类�
 }
 
 /**
- * 构造 CanvasService（构造期扫描 <dataDir>/canvases 重建）与 CanvasMessageHandler，
- * 并接广播线（service.onUpdated → handler.broadcastUpdated，闭包晚绑定：handler 构造
- * 后即就绪，广播只发生在 mutate 成功路径）。
+ * 构造 CanvasService（构造期扫描 ext-sessions 树重建，布局 =
+ * `<dataDir>/ext-sessions/<ownerSessionId>/canvases/<canvasId>/`，session-store-layout-
+ * inversion D4）与 CanvasMessageHandler，并接广播线（service.onUpdated →
+ * handler.broadcastUpdated，闭包晚绑定：handler 构造后即就绪，广播只发生在 mutate 成功路径）。
  */
 export function assembleCanvas(deps: CanvasAssemblyDeps): CanvasAssembly {
   // 晚绑定 holder：service 构造先于 handler，广播回调经 holder 转发（handler 构造后即就绪）。

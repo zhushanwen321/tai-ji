@@ -123,12 +123,12 @@ const FAUX_ACTORS: Array<{ id: string; name: string; reasoning: boolean }> = [
 const FAUX_PROVIDER_EXT_DIR = path.join(REPO_ROOT, 'e2e', 'fixtures', 'faux-provider-ext')
 
 /**
- * 预置 faux 轨数据目录：settings.json + models.json + 响应脚本 + 子进程注入面
+ * 预置 faux 轨数据目录：settings.json + models.json + 响应脚本 + 子进程注入范围
  * （见文件头「注入链」）。settings/models 落 <dataDir>/agent/（runtime pi-paths
  * getPiAgentDir = <dataDir>/agent，同时是 RpcClient 注入 pi 的 PI_CODING_AGENT_DIR
  * ——runtime 门禁与 pi 模型解析同源）。
  *
- * 子进程注入面（workflow agent() / subagent 的 pi 孙进程）：
+ * 子进程注入范围（workflow agent() / subagent 的 pi 孙进程）：
  * - extensions/faux-llm-ext.ts 复制：孙进程扩展加载显式化（D2）后孙进程恒
  *   --no-extensions（自动发现全关）+ 仅加载白名单集，faux-llm-ext 不在生产白名单
  *   ——由 subagent-workflow pi-host 的 e2e 门放行（process.env.TAIJI_E2E=1 且
@@ -227,7 +227,7 @@ export async function launchRealApp(opts: RealLaunchOptions = {}): Promise<{
   }
 
   // 子进程 env：继承 process.env 后剥离 ELECTRON_RUN_AS_NODE（与 launch-app.ts mock 轨同款
-  // 构造性免疫）。该变量（relay 打包模式注入，agent bash / Electron 宿主内可见）会让
+  // 构造性免疫）。该变量（打包模式注入，agent bash / Electron 宿主内可见）会让
   // electron 二进制退化成纯 node 模式，不认 --remote-debugging-port → 全部用例
   // electron.launch `Process failed to launch!` + `Electron: bad option`——剧本级
   // `env -u ELECTRON_RUN_AS_NODE` 之外的第二道防线，直接裸跑 fixture 同样免疫。
@@ -285,14 +285,14 @@ export async function waitForRuntime(dataDir: string, timeoutMs = RUNTIME_START_
   throw new Error(`runtime.port not found in ${dataDir} within ${timeoutMs}ms — runtime failed to start`)
 }
 
-// ── real 轨共享 helper（各 spec 原自带同款副本，L2.5 翻轨收口到 fixture 层） ──
+// ── real 轨共享 helper（各 spec 原自带同款副本，L2.5 翻轨收尾到 fixture 层） ──
 
 /**
  * 打开 WS 并完成 auth 握手（S1-W1 契约：连接后首条消息必须是 {type:'auth'}，token =
  * <dataDir>/runtime-token——main spawn runtime 时写入，轮询等文件出现）。auth 失败直接
  * 抛错（token 文件缺失 = runtime 未起或装配断链，fail-fast）。
  */
-/** runtime WS 帧最小面（e2e 只消费 type/id/payload；更深结构由调用方按需收窄） */
+/** runtime WS 帧最小字段集（e2e 只消费 type/id/payload；更深结构由调用方按需收窄） */
 export interface WsFrame {
   id?: string
   type?: string

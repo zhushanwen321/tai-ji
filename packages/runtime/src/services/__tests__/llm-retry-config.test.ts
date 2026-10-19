@@ -64,7 +64,7 @@ describe('resolveRetryConfig · 缺省合并 pi 默认（D7）', () => {
     expect(config.provider!.timeoutMs).toBe(700000)
   })
 
-  it('provider.timeoutMs=0 → 读侧清为未设（写侧必拒值，往返对称闭合：resolved 不含该键回落默认）', () => {
+  it('provider.timeoutMs=0 → 读侧清为未设（写侧必拒值，往返对称成立：resolved 不含该键回落默认）', () => {
     const { config, configured } = resolveRetryConfig({ provider: { timeoutMs: 0 } })
     // configured 仍 true：键在即「文件里有显式配置意图」（`in` 判定），值回落不改判定
     expect(configured).toBe(true)

@@ -8,7 +8,7 @@
  * foundation ← review-actions ← 本文件 ← canvas-domain.ts（主入口）。
  */
 import { isArgumentMateriality, isArgumentPolarity } from '@zhushanwen/extension-protocol'
-import type { CanvasActionParams, CanvasActor, CanvasComment, CanvasCreateParams, CanvasEdge, CanvasGrowItem, CanvasNode, CanvasState } from '@zhushanwen/extension-protocol'
+import type { CanvasActionParams, CanvasActor, CanvasComment, CanvasCreateParams, CanvasEdge, CanvasGrowItem, CanvasNode } from '@zhushanwen/extension-protocol'
 import {
   argumentPolarity,
   CANVAS_NAME_MAX,
@@ -28,6 +28,7 @@ import {
   selectedOptionOf,
   subtreeOf,
   truncate,
+  type CanvasDomainState,
   type CanvasEventBody,
   type CanvasTransformRequest,
   type CreateIds,
@@ -61,10 +62,11 @@ export function applyCreate(
   actor: CanvasActor,
   at: string,
   ids: CreateIds,
-): { state: CanvasState; events: CanvasEventBody[]; evType: CanvasEventBody['type']; summary: string } {
+): { state: CanvasDomainState; events: CanvasEventBody[]; evType: CanvasEventBody['type']; summary: string } {
   if (params.statement.trim() === '') fail('invalid_params', '根问题陈述（statement）为空')
   if (params.criterias.length === 0) fail('invalid_params', '根完成判据（criterias）至少一条——否则收敛无判据（不可砍项）')
-  const state: CanvasState = {
+  // 归属字段不在此填充（领域事件流不承载归属）——服务层 withOwner 从落盘路径推导注入。
+  const state: CanvasDomainState = {
     canvasId: ids.canvasId,
     name: params.name?.trim() || truncate(params.statement.trim(), CANVAS_NAME_MAX),
     root: {
@@ -98,7 +100,7 @@ export function applyCreate(
 // ── 主分发（canvas-domain.applyMutation 的骨架；本文件内聚 per-action 规则）──
 
 export function applyByAction(
-  draft: CanvasState,
+  draft: CanvasDomainState,
   req: CanvasTransformRequest,
   actor: CanvasActor,
   at: string,
@@ -125,7 +127,7 @@ export function applyByAction(
 // ── grow（批量原子事务 + 邻接矩阵 + 不变量 2 + 幂等重试判定）──
 
 function applyGrow(
-  draft: CanvasState,
+  draft: CanvasDomainState,
   params: CanvasActionParams['grow'],
   actor: CanvasActor,
   at: string,
@@ -146,7 +148,7 @@ function applyGrow(
 /** grow 单条：新节点 + 连接边。节点 id 由 agent 生成（幂等重试判定的键）；边 id 确定性
  * 派生自节点 id（`e-<节点id>`）——同 id 重试按声明一致性判定（下方 growItemDivergence）：
  * 声明一致 = 原样保留（幂等无副作用），声明分歧 = 拒绝。 */
-function applyGrowItem(draft: CanvasState, item: CanvasGrowItem, at: string): void {
+function applyGrowItem(draft: CanvasDomainState, item: CanvasGrowItem, at: string): void {
   validateGrowVocabulary(item)
   validateGrowAdjacency(draft, item)
   const existing = nodeOf(draft, item.id)
@@ -211,7 +213,7 @@ function applyGrowItem(draft: CanvasState, item: CanvasGrowItem, at: string): vo
  * factVerified / dispatchable / criterias / lifecycle 等 patch 可演化的字段刻意不入
  * 比对——重试携带的是首次声明值，与演化后值不同是正常形态，纳入会把合法重试误判为分歧。
  */
-function growItemDivergence(existing: CanvasNode, item: CanvasGrowItem, draft: CanvasState): string | null {
+function growItemDivergence(existing: CanvasNode, item: CanvasGrowItem, draft: CanvasDomainState): string | null {
   if (existing.type !== item.type) return `类型「${existing.type}」与本次声明「${item.type}」不一致`
   if (existing.content !== item.content) return '内容与首次写入不一致'
   if (item.type === 'argument') {
@@ -246,7 +248,7 @@ function validateGrowVocabulary(item: CanvasGrowItem): void {
 /** 邻接合法性（概念 §2.3 边模型，MVP 四种边）：表外组合 invalid_params；端点缺失
  * node_not_found / edge_not_found。每种边型的规则拆单条子守卫（各自圈复杂度预算内
  * ——单 switch 25 分支超 metrics 门禁阈值）。 */
-function validateGrowAdjacency(draft: CanvasState, item: CanvasGrowItem): void {
+function validateGrowAdjacency(draft: CanvasDomainState, item: CanvasGrowItem): void {
   const attachNode = nodeOf(draft, item.attachTo)
   const attachEdge = attachNode ? undefined : edgeOf(draft, item.attachTo)
   switch (item.edge) {
@@ -304,7 +306,7 @@ function validateRebutAdjacency(item: CanvasGrowItem, attachNode: CanvasNode | u
 // ── patch（内容编辑 + root 三要素同步 + 不变量 5/7/9）──────────
 
 function applyPatch(
-  draft: CanvasState,
+  draft: CanvasDomainState,
   params: CanvasActionParams['patch'],
   actor: CanvasActor,
   at: string,
@@ -334,7 +336,7 @@ function applyPatch(
 
 /** content 字段应用：节点内容 + 根问题时同步 root.statement（元数据镜像，单处）。 */
 function applyPatchContent(
-  draft: CanvasState,
+  draft: CanvasDomainState,
   node: CanvasNode,
   params: CanvasActionParams['patch'],
   changes: string[],
@@ -347,7 +349,7 @@ function applyPatchContent(
 
 /** criterias 字段应用：根问题写 root.criterias、执行叶子写节点（不变量 7 的载体域）。 */
 function applyPatchCriterias(
-  draft: CanvasState,
+  draft: CanvasDomainState,
   node: CanvasNode,
   params: CanvasActionParams['patch'],
   changes: string[],
@@ -382,7 +384,7 @@ function applyPatchFactVerified(node: CanvasNode, params: CanvasActionParams['pa
 // ── decide-direction（画布元数据 + 事件留痕，R4：非图节点）────
 
 function applyDecideDirection(
-  draft: CanvasState,
+  draft: CanvasDomainState,
   params: CanvasActionParams['decide-direction'],
   actor: CanvasActor,
   at: string,
@@ -398,7 +400,7 @@ function applyDecideDirection(
 // ── select（不变量 3：至多一条 selected + 换选迁移 + D9）──────
 
 function applySelect(
-  draft: CanvasState,
+  draft: CanvasDomainState,
   params: CanvasActionParams['select'],
   actor: CanvasActor,
   at: string,
@@ -446,7 +448,7 @@ function applySelect(
 // ── transition（状态机 + 不变量 4/5/7 + 根豁免）──────────────
 
 function applyTransition(
-  draft: CanvasState,
+  draft: CanvasDomainState,
   params: CanvasActionParams['transition'],
   actor: CanvasActor,
   at: string,
@@ -485,7 +487,7 @@ function applyTransition(
 }
 
 /** 不变量 5 + 7：passed 前置——执行叶子判据必填；支撑该节点的 fact 论据必须已核实。 */
-function assertPassable(draft: CanvasState, node: CanvasNode): void {
+function assertPassable(draft: CanvasDomainState, node: CanvasNode): void {
   if (node.type === 'option' && node.dispatchable === true && (!node.criterias || node.criterias.length === 0)) {
     fail('lifecycle_transition_illegal', `执行叶子「${node.id}」passed 前必须填写完成判据（不变量 7）`)
   }
@@ -501,7 +503,7 @@ function assertPassable(draft: CanvasState, node: CanvasNode): void {
 // ── comment / comment-respond（不变量 8 响应义务）────────────
 
 function applyComment(
-  draft: CanvasState,
+  draft: CanvasDomainState,
   params: CanvasActionParams['comment'],
   actor: CanvasActor,
   at: string,
@@ -526,7 +528,7 @@ function applyComment(
 }
 
 function applyCommentRespond(
-  draft: CanvasState,
+  draft: CanvasDomainState,
   params: CanvasActionParams['comment-respond'],
   actor: CanvasActor,
   at: string,
@@ -546,7 +548,7 @@ function applyCommentRespond(
 // ── converge-check / export（不变量 10 三门禁）────────────────
 
 function applyConvergeCheck(
-  draft: CanvasState,
+  draft: CanvasDomainState,
   actor: CanvasActor,
   at: string,
   events: CanvasEventBody[],
@@ -568,7 +570,7 @@ function applyConvergeCheck(
 }
 
 function applyExport(
-  draft: CanvasState,
+  draft: CanvasDomainState,
   params: CanvasActionParams['export'],
   actor: CanvasActor,
   at: string,
@@ -602,7 +604,7 @@ function applyExport(
 const DISPATCH_POINTER_MAX = 40
 
 function applyDispatch(
-  draft: CanvasState,
+  draft: CanvasDomainState,
   params: CanvasActionParams['dispatch'],
   actor: CanvasActor,
   at: string,

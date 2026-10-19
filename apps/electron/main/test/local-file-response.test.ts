@@ -112,7 +112,7 @@ describe('local-file 错误响应可读性（§11 检查点 3 实施项）', () 
     }
   })
 
-  it('错误文档不回显请求路径（无反射注入面）', async () => {
+  it('错误文档不回显请求路径（无反射注入范围）', async () => {
     const body = await buildLocalFileErrorResponse('not_found').text()
     expect(body).not.toContain('/Users/')
     expect(body).not.toContain('%')

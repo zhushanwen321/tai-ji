@@ -43,7 +43,7 @@ export function commitMessages(
 
 /**
  * 纯 error assistant 气泡的条目构造单源（M2 形态统一：错误文本只住 error 字段、
- * content 恒空——无 streaming 气泡可收口时追加的 error 气泡即全文，渲染端只有
+ * content 恒空——无 streaming 气泡可收尾时追加的 error 气泡即全文，渲染端只有
  * 「追加形态」一种 error 形态）。
  *
  * 消费点：store.markSessionError 与 registry 的 message.complete 秒败分支 /
@@ -88,15 +88,15 @@ export function truncateMessagesFrom(
 
 /**
  * W4 H4：历史去重合并到列表头部（模块级，从 chat.ts 移入控制行数）。
- * 终态消息 patch（message.complete 双通道单源，S4-A6 收口）。
+ * 终态消息 patch（message.complete 双通道单源，S4-A6 收敛）。
  *
- * 为什么在此导出：message.complete 的两条消费链——registry 的 streaming 收口分支与
+ * 为什么在此导出：message.complete 的两条消费链——registry 的 streaming 收尾分支与
  * message.complete 追加分支——对同一气泡应用同一组终态字段
  * （status / usage / error / content 条件展开），此前靠注释「finalizeMessages 双通道同语义」
  * 人肉同步。本函数把该不变量结构化：任一分支的终态字段演化只需改这一处。
  *
- * 只做字段 patch，不含通道各自的命中守卫（streaming 收口 vs timeoutIds 打标实体）与
- * 外层守卫留在调用方。
+ * 只做字段 patch，不含通道各自的命中检查（streaming 收尾 vs timeoutIds 打标实体）与
+ * 外层检查留在调用方。
  */
 export interface TerminalMessagePatchOptions {
   /** 末位 assistant 索引（usage 回填 / content 覆盖 / error 写入只作用于末位，turn 级聚合） */
@@ -110,14 +110,14 @@ export interface TerminalMessagePatchOptions {
   /** complete 原始 payload（usage 回填读值） */
   payload: Record<string, unknown>
   /**
-   * 收口时刻（epoch ms，本轮产出结束）——只写末位 assistant 的 Message.endedAt。
+   * 收尾时刻（epoch ms，本轮产出结束）——只写末位 assistant 的 Message.endedAt。
    * 时钟由调用方注入（本函数保持纯函数），缺省读取侧回退 timestamp（旧行为）。
    */
   endedAt: number
 }
 
 /**
- * error 类收口 reason（终态取向 error 的 FinalizeReason 子集）。
+ * error 类收尾 reason（终态取向 error 的 FinalizeReason 子集）。
  * 类型谓词 isErrorFinalizeReason 收窄后 REASON_FALLBACK_ERROR_TEXT[reason] 恒 string。
  */
 export type ErrorFinalizeReason = Extract<FinalizeReason, 'error' | 'stream_error' | 'disconnect' | 'restart'>
@@ -128,17 +128,17 @@ export function isErrorFinalizeReason(reason: FinalizeReason): reason is ErrorFi
 }
 
 /**
- * error 类收口 reason 的兜底错误文案（errorText 缺失路径）。
+ * error 类收尾 reason 的兜底错误文案（errorText 缺失路径）。
  *
- * 不变量（M2 error-visibility 追加形态的渲染依据）：凡 streaming 收口产出 error 终态的
+ * 不变量（M2 error-visibility 追加形态的渲染依据）：凡 streaming 收尾产出 error 终态的
  * assistant 消息，error 字段必非空——渲染层以「error 字段有无」区分纯 error 形态（content
  * 即错误文本，整条 danger）与追加形态（content 崩溃前正文原色 + error 独立 danger 行）。
  * errorText 缺失时若无兜底，崩溃前正常正文会被误判纯 error 整条染红。
  *
  * 本模块导出（两个终态出口共享单一实现）：finalizeStreamingMessage
- * （streaming-state-machine.ts，断连/超时/重启等 FinalizeReason 收口）与
- * terminalMessagePatch（本文件，message.complete 的 isErrorStop 收口）。
- * 兜底收口在出口而非各调用点——新增收口调用漏传文案不破坏不变量。
+ * （streaming-state-machine.ts，断连/超时/重启等 FinalizeReason 收尾）与
+ * terminalMessagePatch（本文件，message.complete 的 isErrorStop 收尾）。
+ * 兜底收尾在出口而非各调用点——新增收尾调用漏传文案不破坏不变量。
  * 文案对齐 runtime 侧用户可见错误文本惯例（中文，随消息持久化）。
  */
 export const REASON_FALLBACK_ERROR_TEXT: Record<ErrorFinalizeReason, string> = {

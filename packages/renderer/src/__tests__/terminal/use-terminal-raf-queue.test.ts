@@ -150,7 +150,7 @@ beforeEach(() => {
     Promise.resolve({ terminalId: `term:${params.sessionId ?? 's'}:1` }),
   )
   // terminal.list 动态镜像注册表（忠实模拟 runtime 存活全集）：已建档实例不会被对账误回收，
-  // 空会话返回空清单（走首开自动新建腿）。「清单外清理」路径在 use-terminal.test.ts RC-* 覆盖。
+  // 空会话返回空清单（走首开自动新建路径）。「清单外清理」路径在 use-terminal.test.ts RC-* 覆盖。
   terminalApiMock.list.mockImplementation((sid: string) =>
     Promise.resolve(
       listInstances(sid)

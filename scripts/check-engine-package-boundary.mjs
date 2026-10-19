@@ -1,13 +1,13 @@
 #!/usr/bin/env node
 // check-engine-package-boundary.mjs
 //
-// 引擎包边界守卫（W9 交付，impl-plan §2.9 新守卫 / 设计 §3.7「SSOT 与守卫」）。
+// 引擎包边界检查（W9 交付，impl-plan §2.9 新检查 / 设计 §3.7「SSOT 与检查」）。
 // 与 .githooks/check-engine-sdk-boundary.mjs（W1，SDK 不得 import core）同精神、
-// 扫描面扩展到引擎 CLI 包，另加 DoD#2 的 exports/barrel 断言。
+// 扫描范围扩展到引擎 CLI 包，另加 DoD#2 的 exports/barrel 断言。
 //
 // 规则（扫描对象 = packages/subagent-engine-* + packages/pi-subagent-cli +
 // packages/zcode-subagent-cli；引擎包是 CLI/npm 库，落位 packages/，不进
-// extensions/ 的扩展守卫体系——check-extension-dependencies 的 EXT_DIR 只扫
+// extensions/ 的扩展检查体系——check-extension-dependencies 的 EXT_DIR 只扫
 // extensions/，覆盖不到这里）：
 //   1. 依赖边界：package.json 的 dependencies/peerDependencies/optionalDependencies
 //      不得含 @zhushanwen/subagent-core（引擎经 engine-protocol v1 + SDK 与 core
@@ -151,7 +151,7 @@ function checkSourceFile(filePath, pkgDir, violations) {
   }
 }
 
-/** 规则 2 + 3b 的 src/bin 源码扫描面。 */
+/** 规则 2 + 3b 的 src/bin 源码扫描范围。 */
 function checkPackageSources(pkgDir, violations) {
   for (const sub of ["src", "bin"]) {
     for (const f of listFiles(join(pkgDir, sub), SRC_EXTENSIONS)) {

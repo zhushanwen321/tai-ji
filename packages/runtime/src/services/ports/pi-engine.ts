@@ -4,7 +4,7 @@
  * 🔒 三层架构：services 定义 port，infra/pi/rpc-client.ts + process-manager.ts 实现。
  * services 经此与 pi 交互，不直接持有 RpcClient/ProcessManager 具体类。
  *
- * 归属约定（D24 收口）：pi 相关的 port 定义一律在本文件，interfaces.ts 只保留
+ * 归属约定（D24 收敛）：pi 相关的 port 定义一律在本文件，interfaces.ts 只保留
  * 跨服务 facade 契约。本文件是 pi 引擎 / 进程池接口的唯一权威定义点。
  */
 
@@ -17,7 +17,7 @@ import type { ProviderId } from '@taiji/shared'
  * 描述。services 用 `as PiMessage` 后再 `as` 具体结构——这是「类型系统对 pi 动态响应认输」
  * 的诚实标注，不是协议泄露。
  *
- * 注意：sendCommand/sendRaw 逃生口已从 IPiEngine 删除（W2 收口）。响应归一下沉到
+ * 注意：sendCommand/sendRaw 逃生口已从 IPiEngine 删除（W2 收敛）。响应归一下沉到
  * RpcClient 内部，services 只消费语义方法（switchSession/getState/sendExtensionUiResponse 等），
  * 不再有「发任意 pi 命令」的能力。
  */
@@ -136,7 +136,7 @@ export interface PiSessionOptions {
  * 涵盖「单个 pi 进程的全部能力」：与 pi 的命令通信 + 该进程自身的生命周期
  * （start / kill / onExit / exited）+ session 级命令（compact）。
  *
- * 逃生口已关闭（W2 收口）：sendCommand/sendRaw 不再暴露，响应归一下沉到 RpcClient 内部。
+ * 逃生口已关闭（W2 收敛）：sendCommand/sendRaw 不再暴露，响应归一下沉到 RpcClient 内部。
  * 调用方消费语义方法（switchSession/getState/sendExtensionUiResponse 等），不再有「发任意 pi 命令」的能力。
  *
  * RPC 墙钟超时（sendCommand timeout 档位 / prompt timeoutMs 不限时档 /
@@ -153,7 +153,7 @@ export interface IPiEngine {
    * 保持 pi 私有字段不出 infra 层（AGENTS.md 规则 #5）。undefined/空数组归一化为不传。
    *
    * streamingBehavior 控制 streaming 期间的投递语义：
-   * - undefined（默认）：streaming 时抛错（旧行为，MessageDispatcher 等调用方依赖此守卫）
+   * - undefined（默认）：streaming 时抛错（旧行为，MessageDispatcher 等调用方依赖此检查）
    * - 'steer'：streaming 时入队，turn 边界注入（等价于 pi steer）
    * - 'followUp'：streaming 时入队，run 结束后注入（等价于 pi followUp）
    */
@@ -220,11 +220,11 @@ export interface IPiEngine {
   /** 进程是否已退出。 */
   readonly exited: boolean
 
-  // ── 活动时钟（观测面） ──
+  // ── 活动时钟（观测范围） ──
   /**
    * 最近一次 pi 双向活动时刻（ms epoch）。
    * 写点（RpcClient 内部）：出站 sendCommand / 入站 handleMessage 全帧。初值 = spawn 时刻。
-   * 消费方为观测面（crash 取证「死前最后活动时刻」等）。原空闲回收判定消费
+   * 消费方为观测范围（crash 取证「死前最后活动时刻」等）。原空闲回收判定消费
    * （idle-pi-reclamation reaper + touchActivity 手动刷新）已随 ADR-0122 退役。
    */
   readonly lastActivityAt: number

@@ -11,7 +11,7 @@
  *   重新挂载）时被 onMounted 补消费——回收文本进入输入框（可见、可改、可一键重发）
  * - R2 追加不覆盖：消费通道 = insertTextAtCursor（dom-core contenteditable 实现为
  *   execCommand('insertText') 光标插入，已有内容保留——该行为由 dom-core
- *   contenteditable.test.ts 锁定）；本测试锁定消费面**不触碰覆盖型 API（setText/clear）**
+ *   contenteditable.test.ts 锁定）；本测试锁定消费方**不触碰覆盖型 API（setText/clear）**
  * - R3 提示文案：两 locale key 形态 + zh 渲染产物（30 字内、只陈述事实）
  *
  * jsdom 不实现 document.execCommand（contenteditable 真实 DOM 写入不可行），故 R1/R2 以
@@ -33,14 +33,14 @@ import {
   composerChildStubs,
 } from '../helpers/composer-mount'
 
-// ── mock 段：工厂委托共享 helper（单源；ComposerInput stub 下方自留——expose 断言面专属）──
+// ── mock 段：工厂委托共享 helper（单源；ComposerInput stub 下方自留——expose 断言范围专属）──
 vi.mock('@/composables/features/chat/useChat', () => composerChatModule())
 vi.mock('@/composables/features/new-task/useNewTaskFlow', () => composerFlowModule())
 vi.mock('@/api', () => composerApiModule())
 vi.mock('@/stores/chat', () => composerChatStoreModule())
 vi.mock('@/stores/session', () => composerSessionStoreModule())
 
-// ── ComposerInput stub：expose 面带 insertTextAtCursor / setText 等 spy（消费 API 断言面）──
+// ── ComposerInput stub：expose 面带 insertTextAtCursor / setText 等 spy（消费 API 断言范围）──
 interface InputCalls {
   insertTextAtCursor: ReturnType<typeof vi.fn>
   setText: ReturnType<typeof vi.fn>
@@ -128,7 +128,7 @@ describe('队列回收 → Composer 草稿（session-dead D3 / V1② 组件层�
     expect(composerInjectionStore.pendingInjection.value).toBeNull()
   })
 
-  it('R2: Composer 已有内容时追加不覆盖——消费面只走光标插入通道，覆盖型 API 零调用', async () => {
+  it('R2: Composer 已有内容时追加不覆盖——消费方只走光标插入通道，覆盖型 API 零调用', async () => {
     wrappers.push(mountComposer({ sessionId: 's1', variant: 'panel' }))
 
     // 第一批注入（模拟既有草稿/先回收的一批）

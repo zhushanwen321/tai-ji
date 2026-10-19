@@ -353,7 +353,7 @@ function handleUpdate(
  * 这样 goal 创建的唯一路径是 goal_control toolcall（统一入口），
  * slug/objective/budget 都由 AI 在 toolcall 时决定。
  *
- * D25 守卫仍在此处预检：非终态旧 goal（active/paused/blocked）→ 拒绝，
+ * D25 检查仍在此处预检：非终态旧 goal（active/paused/blocked）→ 拒绝，
  * 提示 /goal resume 或 /goal clear（避免 AI 在已有未完成 goal 时重复创建）。
  *
  * budget flag（--tokens）写入消息体，让 AI 原样传给 create。

@@ -15,7 +15,7 @@
  *
  * [2026-09 测试审计] 本文件为壳侧 subagent action 域唯一宿主：吸收原 tool-action.test.ts
  * 的 adapter 出参结构 5 条 + schema 1 条 + model 全等回显 1 条、原 subagent-message-close.test.ts
- * 的 adapter message/close 2 条（handler 行为面权威在 core subagent-actions-core.test.ts）。
+ * 的 adapter message/close 2 条（handler 行为范围权威在 core subagent-actions-core.test.ts）。
  */
 
 import { readFileSync } from "node:fs";
@@ -265,11 +265,11 @@ describe("adapter message/close action", () => {
 });
 
 // ============================================================
-// start model 全等回显（自 tool-action.test.ts 迁并；handler 校验/启动行为面权威在 core）
+// start model 全等回显（自 tool-action.test.ts 迁并；handler 校验/启动行为范围权威在 core）
 // ============================================================
 
 describe("start model 全等回显", () => {
-	/** 最小 stub service：startHandler 解析链（E4 守卫前置）触达的读面 + execute。 */
+	/** 最小 stub service：startHandler 解析链（E4 检查前置）触达的读取范围 + execute。 */
 	function makeStartService(execute: (opts: { task: string; slug?: string }) => Promise<ExecutionHandle>): SubagentService {
 		const findRecord = vi.fn(() => undefined);
 		const collectRecords = vi.fn(() => []);

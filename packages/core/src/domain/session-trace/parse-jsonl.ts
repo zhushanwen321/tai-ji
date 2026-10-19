@@ -2,7 +2,7 @@
  * JSONL 解析（保留损坏行占位）。
  *
  * 与 pi `parseSessionEntries`（session-manager.ts:299）的差异是本模块的存在理由：
- * pi 静默跳过 malformed 行；trace 是全量台账（design G1），损坏行必须以占位行可见、
+ * pi 静默跳过 malformed 行；trace 是全量条目清单（design G1），损坏行必须以占位行可见、
  * 不静默丢失（§3.1 失败路径），因此解析产物保留行号与原文。
  *
  * 判定「损坏」：空行跳过（与 pi 一致）；JSON.parse 失败、或解析结果不是

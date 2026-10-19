@@ -157,7 +157,7 @@ describe('mock session domain', () => {
     expect(r.deleted).toContain(forked.id)
   })
 
-  it('create/fork override 生效面（G4 锚定后 mock 补齐）：override 落 summary 可断言 + fork 血缘/继承', async () => {
+  it('create/fork override 生效范围（G4 锚定后 mock 补齐）：override 落 summary 可断言 + fork 血缘/继承', async () => {
     // create 四参 override：presetId→launchPresetId / projectId / modelOverride→modelId / thinkingOverride→thinkingLevel
     const created = await session.create('/tmp/ov', 'ov-src', 'preset-x', 'proj-x', 'test/model-x', 'high')
     expect(created.launchPresetId).toBe('preset-x')
@@ -359,8 +359,8 @@ describe('mock chat domain', () => {
 
   // [u5a 退役] 前身用例「steer/followUp：入队 queue_update → drain（队列清空 + assistant 补发）」
   // 已删：mock 的 steer/followUp 镜像与其唯一职责（喂 queue_update 快照）整体退役——u3b 退役
-  // queue_update 消费腿、u3c 队列区转 session.delivery 单源后该链零消费方（mock-domains 与
-  // dbg-steer 是仅存的消费面，属测试对被测机制的自证，非回归防线）。
+  // queue_update 消费路径、u3c 队列区转 session.delivery 单源后该链零消费方（mock-domains 与
+  // dbg-steer 是仅存的消费方，属测试对被测机制的自证，非回归防线）。
   it('submitDelivery：提交 → session.delivery 快照帧（in-flight/direct）+ 流式闭环', async () => {
     const frames: ServerMessageUnion[] = []
     const un = chat.streamSubscribe('s-queue', (m) => frames.push(m))
@@ -535,6 +535,38 @@ describe('mock config domain', () => {
     expect(rc.configured).toBe(false)
     expect(typeof config.onRetryConfig(() => {})).toBe('function')
   })
+
+  it('网络代理 stub（llm-network-proxy U4）：get 内存态 / set 深拷贝广播 / test 恒成功 / stats 演示行 + reset 清空', async () => {
+    // get 初始 = 禁用态默认（mock 模块级内存态，此前用例未触碰）
+    const np0 = await config.getNetworkProxyConfig()
+    expect(np0.config.enabled).toBe(false)
+    // set 深拷贝后广播 + 回执同形；调用方原地改写不影响 mock 内存态
+    const next = {
+      enabled: true,
+      proxy: { protocol: 'http' as const, host: '127.0.0.1', port: 7891, username: '', password: '' },
+      noProxy: ['localhost'],
+      rules: ['api.anthropic.com'],
+    }
+    const npSeen: unknown[] = []
+    const unNp = config.onNetworkProxyConfig((c) => npSeen.push(c))
+    const npSet = await config.setNetworkProxyConfig(next)
+    expect(npSet.config.enabled).toBe(true)
+    await waitFor(() => npSeen.some((c) => (c as { enabled?: boolean }).enabled === true))
+    // 订阅注册即触发初始推送（mock 订阅型惯例）——set 后广播的是最后一条
+    expect(npSeen[npSeen.length - 1]).toEqual(next)
+    next.proxy.port = 9999
+    const np1 = await config.getNetworkProxyConfig()
+    expect(np1.config.proxy.port).toBe(7891)
+    // test 恒成功（演示值）；stats 非空演示行、reset 清空
+    const testReply = await config.testNetworkProxy(np1.config)
+    expect(testReply.ok).toBe(true)
+    expect(testReply.stage).toBe('done')
+    const stats = await config.getNetworkProxyStats('24h')
+    expect(stats.stats.length).toBeGreaterThan(0)
+    const afterReset = await config.resetNetworkProxyStats()
+    expect(afterReset.stats).toEqual([])
+    unNp()
+  })
 })
 
 describe('mock model / extension / plugin / composer / search domain', () => {
@@ -623,14 +655,14 @@ describe('mock workspace / quota / project / preset domain', () => {
     expect(await quota.configure({ providerId: 'p', enabled: true })).toEqual({ ok: true })
   })
 
-  it('project：load 空态 + save ack（[G4 锚定] 对齐 real void 契约，原返回透传偏差已收口）', async () => {
+  it('project：load 空态 + save ack（[G4 锚定] 对齐 real void 契约，原返回透传偏差已收尾）', async () => {
     expect(await project.load()).toEqual({ projects: [], activeProjectId: '' })
     const state = { projects: [], activeProjectId: 'p1' }
     await expect(project.save(state)).resolves.toBeUndefined()
   })
 
   it('preset：内置目录非空 + CRUD + default', async () => {
-    // [u7a] 由「返回空列表」收口为返回内置模式目录：空列表与「未加载」不可区分，会让非默认模式
+    // [u7a] 由「返回空列表」收尾为返回内置模式目录：空列表与「未加载」不可区分，会让非默认模式
     // 会话的 chip / 声明行永远落不到正常分支（见 mock/index.ts 的 mockPresets 注释）。
     const builtins = await preset.list()
     expect(builtins.map((x) => x.id)).toEqual([
@@ -715,7 +747,7 @@ describe('mock tts 域', () => {
     expect(readback.config.providers.minimax.config).toEqual(next)
   })
 
-  it('getCapabilities：三家投影齐备且形状关键位符合控件存在性三分支（MiMo 语速 null 置灰 / MiniMax 情感非空 / StepFun 情感空数组）', async () => {
+  it('getCapabilities：三家派生视图齐备且形状关键位符合控件存在性三分支（MiMo 语速 null 置灰 / MiniMax 情感非空 / StepFun 情感空数组）', async () => {
     const { forms } = await tts.getCapabilities()
     expect(Object.keys(forms).sort()).toEqual(['mimo', 'minimax', 'stepfun'])
     expect(forms.mimo.capabilities.speedRange).toBeNull()

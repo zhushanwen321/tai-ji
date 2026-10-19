@@ -1,9 +1,9 @@
 /**
  * ModelCatalog —— pi 引擎模型目录（workflow-architecture-redesign D8）。
  *
- * 目录 = 宿主 Provider Registry 投影（pi 引擎可用模型空间）：pi SDK 在 session_start
+ * 目录 = 宿主 Provider Registry 派生视图（pi 引擎可用模型空间）：pi SDK 在 session_start
  * 把 `ctx.modelRegistry` 注入 ModelConfigService（宿主注入通道，H2/P5 同款先例——
- * extension 不 import runtime 模块），本模块是这套注册表之上的**分类化裁决投影**。
+ * extension 不 import runtime 模块），本模块是这套注册表之上的**分类化裁决派生视图**。
  *
  * 两层挂点（D8 挂点分层）：
  *   ① 创建期（工具同步期）：工具参数 model（agent 资产 frontmatter model 无静态
@@ -16,7 +16,7 @@
  * 与 shared/model-ref 的关系（单一权威，不复制裁决逻辑）：命中判定复用
  * assertCanonicalModelRef 的同一全等谓词（provider 精确 + id 全等含大小写 +
  * `:thinking` 后缀 strip）；本模块只补 **漂移分类**（查无 vs provider 配置漂移）——
- * 大小写孪生守卫不在此复制（防双实现漂移），由派发期 identity 解析的
+ * 大小写孪生检查不在此复制（防双实现漂移），由派发期 identity 解析的
  * assertCanonicalModelRef 全量裁决兜住（孪生输入创建期放行 → 首 ask 派发前仍被拒，
  * 拒单时机语义不变）。
  *
@@ -34,8 +34,8 @@ const MODEL_LIST_LIMIT = 20;
  * 可 mock）。
  *
  * [§2.1 改名] 原名 `ModelCatalogEntry` 与 SDK 引擎协议里的 `ModelCatalogEntry`
- *（`@zhushanwen/subagent-engine-sdk` 的 manifest/能力面载荷）同名异义：两者形状相近
- * 但归属不同（本类型 = pi 侧注册表目录，SDK 类型 = 引擎声明面），同名会让读者误以为
+ *（`@zhushanwen/subagent-engine-sdk` 的 manifest/能力侧载荷）同名异义：两者形状相近
+ * 但归属不同（本类型 = pi 侧注册表目录，SDK 类型 = 引擎声明侧），同名会让读者误以为
  * 同一契约。改为 `PiRegistryModelEntry` 后各自可检索。
  */
 export interface PiRegistryModelEntry { // oe-exempt:20260929:framework:workflow/record 协议契约类型——ports 类型契约先行、单实现常态（dev-0.10.5 已验收代码 merge 带入）
@@ -74,7 +74,7 @@ export interface ModelCatalogOptions { // oe-exempt:20260929:framework:workflow/
 }
 
 /**
- * 模型串 → 目录裁决（不抛错，纯投影）。命中判定与 shared/model-ref 的
+ * 模型串 → 目录裁决（不抛错，纯派生视图）。命中判定与 shared/model-ref 的
  * assertCanonicalModelRef 同一谓词（provider 精确 + id 全等 + thinking 后缀 strip；
  * 一致性由 model-catalog 单测的「无孪生 registry 下两裁决逐输入等价」用例机器锁定）。
  */

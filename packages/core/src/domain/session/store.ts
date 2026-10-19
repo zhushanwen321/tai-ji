@@ -11,7 +11,7 @@
  * 移动 MobileSessionList），core 只承载纯判定谓词。
  *
  * 注：session 派生状态的「纯判定谓词」自 U20 起在此导出（deriveSessionStatus，A14 参数化
- * 输入下沉——桌面全量投影 / 移动 occupancy + subagent 运行态子集，blockingOverlay 移动
+ * 输入下沉——桌面全量派生视图 / 移动 occupancy + subagent 运行态子集，blockingOverlay 移动
  * 恒 false 见 D9② 白名单）；跨 store 协调（chat 分区 + session 元数据的读取编排）仍是
  * 壳层职责，不在本 store factory 内。
  */
@@ -35,7 +35,7 @@ export function sessionsInRuntimeGroupOrder(groups: readonly SessionGroup[]): Se
 /**
  * 状态派生谓词的参数化输入契约（remote-use A14/U20，同 D2 端口束「按形态可选」设计）：
  * 谓词本体（9 态判定）双壳同源，输入按壳形态收集——
- * - 桌面全量投影：isActive/isCompacting（chat 分区）+ hasBackgroundWork（subagent/workflow
+ * - 桌面全量派生视图：isActive/isCompacting（chat 分区）+ hasBackgroundWork（subagent/workflow
  *   store 聚合，useBackgroundWork）+ hasBlockingOverlay（extensionUI store，form/planReview
  *   键）+ metaStatus（session 元数据）；
  * - 移动子集：isActive/isCompacting（core chat store）+ hasBackgroundWork（A9 subagent
@@ -47,7 +47,7 @@ export function sessionsInRuntimeGroupOrder(groups: readonly SessionGroup[]): Se
 export interface SessionStatusInputs {
   /** pendingSend ∨ isGenerating（提交后到 message_start 空窗 + 流式占用的 UI 层 SSOT） */
   isActive: boolean
-  /** compact 互斥态（occupancy 投影 compacting 维） */
+  /** compact 互斥态（occupancy 派生视图 compacting 维） */
   isCompacting: boolean
   /** 主 turn 已结束但 background subagent/workflow 仍在 running（working 态判定源） */
   hasBackgroundWork: boolean
@@ -128,7 +128,7 @@ export function createSessionStore() {
    * 模型状态局部更新 / 整表载入三个写入口全部删除，D7：renderer 零派生）。
    *
    * 两种快照粒度，均以 runtime owner 实例为权威：
-   * - 整表：config.sessions 广播 / session.list RPC 的全量分组投影，直接替换 groups 真源
+   * - 整表：config.sessions 广播 / session.list RPC 的全量分组派生视图，直接替换 groups 真源
    *   （整表语义，含分组增删与重排——单条快照无法表达）；
    * - 单 session：session.renamed / state_changed 广播 + 乐观更新本地入参，按 D1b 整字段
    * 覆盖合并进既有条目（未知 id 静默跳过）。
@@ -136,10 +136,10 @@ export function createSessionStore() {
    * 乐观更新形态：本地入参只带乐观字段（如 rename 先显示 { label }），权威确认经 runtime
    * 广播回流（config.sessions 整表 / state_changed 单条），同一入口重复写入幂等。
    *
-   * [W15 守卫] 磁盘占位值守卫已在 mergeViewSnapshot 落地（扫描来源快照的 modelId:''/
+   * [W15 检查] 磁盘占位值检查已在 mergeViewSnapshot 落地（扫描来源快照的 modelId:''/
    * tokenCount:0 占位值不覆盖实例/广播真值——#2 空串覆盖事故的最后防线，详该函数注释）。
    * 历史：三入口时代 setGroups 整表覆盖曾把实例广播入列表的真值抹回磁盘扫描的空串
-   * （updateSessionState 局部更新正是当时为避开此坑而设），W13 收敛单入口 + 本守卫
+   * （updateSessionState 局部更新正是当时为避开此坑而设），W13 收敛单入口 + 本检查
    * 后按来源分流根治。
    */
   function applySnapshot(id: string, snapshot: SessionViewSnapshot): void
@@ -149,7 +149,7 @@ export function createSessionStore() {
     snapshot?: SessionViewSnapshot,
   ): void {
     if (typeof idOrList !== 'string') {
-      // [HISTORICAL] dead 态穿越刷新（fix-respawn-pi §12.2#1；随 W13 单入口收敛，守卫自
+      // [HISTORICAL] dead 态穿越刷新（fix-respawn-pi §12.2#1；随 W13 单入口收敛，检查自
       // 原 setGroups 移植至此——整表快照的唯一消费点）：runtime 在 pi 死亡时先广播
       // session.exited（markDead 置 dead），同一回调末尾紧接全量广播 config.sessions
       // （磁盘 outcome：done/stopped 等），两者数十 ms 内先后到达。dead 是运行时进程态
@@ -188,20 +188,20 @@ export function createSessionStore() {
    * pendingMessageCount/commands 等归各自消费 store（W15+ 收敛对象），不在本 store 落盘
    *（usagePercent/inputTokens/contextLimit 已随 D1 协议收敛从 SessionViewSnapshot 删除）。
    *
-   * [W15 守卫] 磁盘占位值守卫（#2 空串覆盖事故最后防线）：仅 source === 'scan' 的快照生效——
+   * [W15 检查] 磁盘占位值检查（#2 空串覆盖事故最后防线）：仅 source === 'scan' 的快照生效——
    * 扫描读不出 modelId/tokenCount，其 ''/0 是占位值而非权威空值，target 已有非空真值时跳过
    * 覆盖。与 owner 快照空值语义**按来源分流、不混用**（D1b 两条规则并存）：owner 快照
    * （缺省来源）的显式空值是权威声明（如 sessionName 空 = 未命名，wire 形态 label:''），
-   * 必须整字段覆盖（TC-4b 锁定）；守卫只拦扫描占位，不拦 owner 权威空。历史踩坑：setGroups
-   * 全量覆盖曾把真值抹成空串（见 applySnapshot 注释），本守卫是该事故路径的结构性收口。
+   * 必须整字段覆盖（TC-4b 锁定）；检查只拦扫描占位，不拦 owner 权威空。历史踩坑：setGroups
+   * 全量覆盖曾把真值抹成空串（见 applySnapshot 注释），本检查是该事故路径的结构性收敛。
    */
   function mergeViewSnapshot(target: SessionSummary, snapshot: SessionViewSnapshot | undefined): void {
     if (!snapshot) return
-    // W15：来源分流——仅扫描来源快照的占位空值触发守卫（判定不依赖魔法值，靠显式标记）。
+    // W15：来源分流——仅扫描来源快照的占位空值触发检查（判定不依赖魔法值，靠显式标记）。
     const isScan = snapshot.source === 'scan'
     if (snapshot.label !== undefined) target.label = snapshot.label
     if (snapshot.status !== undefined) target.status = snapshot.status
-    // 守卫条件 = 快照值是占位空 && target 有非空真值可保；target 本身也是占位（同为 ''/0）时
+    // 检查条件 = 快照值是占位空 && target 有非空真值可保；target 本身也是占位（同为 ''/0）时
     // 覆盖与否等值，走覆盖分支保持行为单一。
     if (snapshot.modelId !== undefined && !(isScan && snapshot.modelId === '' && target.modelId !== '')) {
       target.modelId = snapshot.modelId

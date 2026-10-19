@@ -2,7 +2,7 @@
  * apply-entry 模块群共享底层（apply-entry.ts + apply-entry-convert.ts + apply-entry-utils.ts 三件套）。
  *
  * 本文件承载三件套的共享底层：工具产出归一（normalizePiToolResult / stripAnsi）、
- * 确定性派生与 Record 守卫（toMs / isLooseRecord / isPlainRecord）、reducer 簇共用
+ * 确定性派生与 Record 检查（toMs / isLooseRecord / isPlainRecord）、reducer 簇共用
  * 类型（PiToolResultBody）。reducer 本体在 apply-entry.ts，
  * message body 转换群在 apply-entry-convert.ts；整体职责叙事见 apply-entry.ts 文件头。
  *
@@ -22,7 +22,7 @@ export interface PiToolResultBody extends PiMessageBody {
 /**
  * 累积态单条 tool output 截断阈值：64KB（UTF-8 字节）。
  *
- * 与 truncate-tool-output.ts 的 TOOL_OUTPUT_MAX_BYTES(4KB) 是两个层级：4KB 是**渲染投影**
+ * 与 truncate-tool-output.ts 的 TOOL_OUTPUT_MAX_BYTES(4KB) 是两个层级：4KB 是**渲染派生视图**
  * （六类工具，reducer 之外的 display 层，entryStates 保持全量的旧契约）；本阈值是**累积态
  * 本体**的条目级帽——entryStates 累积的 toolCall.output/outputRaw 超限即截断 + 标记
  * （ToolCall.outputTruncated），消除「长会话大 entry 在 reducer 累积面无界」的内存压力
@@ -53,7 +53,7 @@ const ENTRY_MARKER_BYTES = entryTextEncoder.encode(ENTRY_TRUNCATION_MARKER).leng
  * （含标记总长 ≤ 64KB）。codepoint 对齐逻辑与 truncate-tool-output.ts 的
  * truncateToBytes 同型——不复用是模块群自包含约束（apply-entry 三件套只 import
  * '@taiji/shared' 与群内文件，防 vue 依赖渗入 runtime bundle，见文件头），
- * 两处是「投影层 vs 累积层」不同变化轴的真差异，收敛归 shared 留待后续 wave。
+ * 两处是「派生视图层 vs 累积层」不同变化原因的真差异，收敛归 shared 留待后续 wave。
  */
 export function truncateEntryToolOutput(text: string): { text: string; truncated: boolean } {
   const encoded = entryTextEncoder.encode(text)
@@ -76,12 +76,12 @@ export function toMs(timestamp: string): number {
   return Number.isFinite(ms) ? ms : 0
 }
 
-/** unknown → Record 守卫（details 透传用；数组也放行——迁移前 custom details 是 cast 透传）。 */
+/** unknown → Record 检查（details 透传用；数组也放行——迁移前 custom details 是 cast 透传）。 */
 export function isLooseRecord(v: unknown): v is Record<string, unknown> {
   return typeof v === 'object' && v !== null
 }
 
-/** unknown → 非数组 Record 守卫（toolResult details 透传用，迁移前显式排除数组）。 */
+/** unknown → 非数组 Record 检查（toolResult details 透传用，迁移前显式排除数组）。 */
 export function isPlainRecord(v: unknown): v is Record<string, unknown> {
   return typeof v === 'object' && v !== null && !Array.isArray(v)
 }
@@ -168,7 +168,7 @@ export function normalizePiToolResult(raw: unknown): NormalizedToolResult {
   return { output, outputRaw, images }
 }
 
-// ── 归一 + 截断的合并派生（tool_call_end live 帧双腿共享的单一计算点）──────────────
+// ── 归一 + 截断的合并派生（tool_call_end live 帧双路径共享的单一计算点）──────────────
 
 /** 归一（normalizePiToolResult）+ 64KB 截断（truncateEntryToolOutput）一次算清的字段包。 */
 export interface ToolResultOutputs {
@@ -178,14 +178,14 @@ export interface ToolResultOutputs {
 }
 
 /**
- * 归一 + 64KB 截断按 body 引用 memo 后一次算清（perf：tool_call_end 双腿单次归一）。
+ * 归一 + 64KB 截断按 body 引用 memo 后一次算清（perf：tool_call_end 双路径单次归一）。
  *
- * message.tool_call_end 一帧把同一 toolResult body 喂两处：reducer 腿
- * （applyEntryFrame → fillHostToolCall → computeToolCallFill）与 live overlay 腿
- * （registry deriveToolCallEndOverlay）。两腿各自 inline 归一 + 截断时，同一 MB 级
+ * message.tool_call_end 一帧把同一 toolResult body 喂两处：reducer 路径
+ * （applyEntryFrame → fillHostToolCall → computeToolCallFill）与 live overlay 路径
+ * （registry deriveToolCallEndOverlay）。两路径各自 inline 归一 + 截断时，同一 MB 级
  * output 在 WS 回调同步段重复全文正则扫描 + 重复 UTF-8 encode（单次 encode ≈ 1-2ms，
- * 见 truncate-tool-output.ts）。本函数以 body 对象引用为键 memo 产物：两腿持同一
- * entry.message 引用时第二腿命中，全文扫描与 encode 各只发生一次。
+ * 见 truncate-tool-output.ts）。本函数以 body 对象引用为键 memo 产物：两路径持同一
+ * entry.message 引用时第二路径命中，全文扫描与 encode 各只发生一次。
  *
  * 正确性前提 =「引用同 ⇒ 内容同」：pi entry body 在本模块群内不可变（reducer 纯度契约
  * 「不 mutate 输入 entry」），与登记表 #58 派生缓存族同款归属语义。对 memo 无关的路径

@@ -1,8 +1,8 @@
 /**
- * server→client 出站帧大小守卫（crash-resilience §3.3 D3 / 实施计划 u4a-outbound-guard）。
+ * server→client 出站帧大小检查（crash-resilience §3.3 D3 / 实施计划 u4a-outbound-guard）。
  *
  * E3 事故（9/9 renderer OOM）的传输段防线：现网出站帧无上限（ws maxPayload 只管入站，
- * P-ws-oneway），巨帧直打内存紧张的 renderer。本模块实现 push 通路守卫：
+ * P-ws-oneway），巨帧直打内存紧张的 renderer。本模块实现 push 通路检查：
  *
  * - **契约保持式截断**：超截断档（OUTBOUND_FRAME_TRUNCATE_BYTES，默认 32MB）的 session 级
  *   push 帧，消息类型不变，按「帧内字段路径注册表」把大字段原地替换为占位载荷（content 类
@@ -11,11 +11,11 @@
  *   分配 seq、按 topic 三分类流转、广播——客户端收到截断版，ring 存截断版，断连回放与重
  *   订阅拉到的都是同一份截断版，seq 连续性 / gap 检测 / live≡reload 语义全部不被破坏。
  * - **miss 兜底**：注册表未覆盖该类型、或替换后仍超硬上限 → 调用方在 seq 分配前整条丢弃
- *   （该消息从未占用 seq，不触发 gap——D3 被否方案④「seq 分配后丢弃」会触发
+ *   （该消息从未占用 seq，不触发 gap——D3 不采用的方案④「seq 分配后丢弃」会触发
  *   gap-重订阅失败死循环，见设计 D3 反例）。8MB 告警档先于截断档暴露 miss。
  * - **告警档**（OUTBOUND_FRAME_WARN_BYTES，默认 8MB）：写 warn 日志，不截断——哨兵定位
  *   （pi 上游自截失效时告警先于截断暴露）。
- * - **零抛错**：守卫自身 try/catch，任何异常放行原消息 + error 日志——防御设施不能成为
+ * - **零抛错**：检查自身 try/catch，任何异常放行原消息 + error 日志——防御设施不能成为
  *   新崩溃源。
  *
  * 不变式：本模块不 mutate 入参消息（沿路径不可变克隆替换）——publish 调用方（event-adapter /
@@ -26,10 +26,10 @@ import type { ServerMessage } from '@taiji/shared'
 import { OUTBOUND_FRAME_WARN_BYTES, OUTBOUND_FRAME_TRUNCATE_BYTES } from '@taiji/shared'
 import { getCrashJournal } from '../../infra/crash-journal.js'
 
-// ── 守卫阈值契约 ────────────────────────────────────────────────────
+// ── 检查阈值契约 ────────────────────────────────────────────────────
 
 /**
- * 守卫可注入选项：阈值参数化（测试传小阈值走真实行为逻辑，生产路径用 shared 常量
+ * 检查可注入选项：阈值参数化（测试传小阈值走真实行为逻辑，生产路径用 shared 常量
  * 默认值——A10 阈值校准法同型的标准做法）+ session 文件路径解析器（占位文案填实路径）。
  */
 export interface OutboundFrameGuardOptions {
@@ -39,7 +39,7 @@ export interface OutboundFrameGuardOptions {
   truncateBytes: number
   /**
    * sessionId → session JSONL 文件路径（占位文案恢复指引用）。解析失败/未注入时占位文案
-   * 退化为「（见 runtime 日志）」。实现抛错被守卫吞掉（返回 null 语义），不打断消息流转。
+   * 退化为「（见 runtime 日志）」。实现抛错被检查吞掉（返回 null 语义），不打断消息流转。
    * 组合根接线点：push 通路 = MessageBus 构造第二参；reply 通路 = server.setServices 的
    * replyGuardResolver（ServerMessageBroker replyGuard）——index.ts 两通路共用同一 resolver。
    */
@@ -55,7 +55,7 @@ export const DEFAULT_OUTBOUND_FRAME_GUARD_OPTIONS: OutboundFrameGuardOptions = {
 // ── publish 调用点大字段穷举表（u4a 交付物：静态穷举 + 每类型判定） ──────────
 //
 // 穷举方法：grep 全部 messageBus.publish 实际调用点（packages/runtime/src 下 40 处，
-// 含 relay-tee / terminal-service / plugin-service 等「组合根注入 publish 包装」的间接
+// 含 subagent-tee / terminal-service / plugin-service 等「组合根注入 publish 包装」的间接
 // 调用），按 wire 帧类型（shared protocol.ts ServerMessageMap）归类，判定帧内是否存在
 // 无上界大字段（坐标系 = WS 帧内字段路径，非 runtime/renderer 内部归一化对象）。
 //
@@ -67,12 +67,12 @@ export const DEFAULT_OUTBOUND_FRAME_GUARD_OPTIONS: OutboundFrameGuardOptions = {
 // | message.tool_call_end              | payload.entry.message.content           | content  | services/session/event-interpreter.ts:1089（工具结果文本；与 message_end 双路下发，两帧都注册保帧间一致） |
 // | message.tool_call_start            | payload.entry.arguments                 | record   | services/session/event-interpreter.ts:1032（write 类工具写入全文在 arguments，toolResult 只回小确认） |
 // | session.traceEntryAppended         | payload.entries                         | array-entry | services/session/trace-sync.ts:363 / :434（pi entry JSON 逐条增量） |
-// | session.subagentEntriesAppended    | payload.entries                         | array-entry | infra/relay/relay-tee.ts:204（穷举新发现——subagent entry 增量帧，与 traceEntryAppended 同构；subagent 历史是巨型 JSONL 高发源，设计 D5① 自证） |
-// | subagent.stream_delta              | payload.lines                           | array-string | services/session/event-interpreter.ts:780（W 路径全量形态，lines = 累积全文 split('\n')；B2 后 R 路径 relay-tee 仅余清除帧 lines undefined 小帧不触发守卫） |
+// | session.subagentEntriesAppended    | payload.entries                         | array-entry | infra/subagent-control/subagent-tee.ts（subagent entry 增量帧，与 traceEntryAppended 同构；subagent 历史是巨型 JSONL 高发源，设计 D5① 自证） |
+// | subagent.stream_delta              | payload.lines                           | array-string | services/session/event-interpreter.ts:780（W 路径全量形态，lines = 累积全文 split('\n')；B2 后 R 路径 subagent-tee 仅余清除帧 lines undefined 小帧不触发检查） |
 // | message.bashResult                 | payload.output                          | string   | services/session/message-dispatcher.ts:1042 / :1115（穷举新发现——bash 终态帧的 output 全文；上游 pi bash RPC 自截是既有防线，本条目是其失效时的纵深） |
 // | terminal.data                      | payload.data                            | string   | services/terminal/terminal-service.ts:113（穷举新发现——PTY 输出块，用户 cat 大文件可达 MB 级；transient 类，miss 丢弃无 gap 风险） |
 //
-// 【判定不登记（控制面 / 有界载荷，逐类留痕防复穷举）】
+// 【判定不登记（控制范围 / 有界载荷，逐类留痕防复穷举）】
 //
 // - message.error / message.status / message.stream_error / send.rejected /
 //   message.complete / message.message_start / message.customStart / message.tool_call_update：
@@ -89,8 +89,8 @@ export const DEFAULT_OUTBOUND_FRAME_GUARD_OPTIONS: OutboundFrameGuardOptions = {
 // - session.delivery（transport/session-delivery-topic.ts:181 publish；TOPIC_TABLE state 类
 //   last-value 快照，投递所有权内核 D5 新增帧）：队列状态帧，payload.entries 单条 preview
 //   按 DELIVERY_PREVIEW_MAX_CHARS（@taiji/shared = 80 字符，session-delivery-topic.ts:80）
-//   截断、delivered 侧仅投影最近 DEFAULT_DELIVERED_WINDOW（session-delivery = 50 条，
-//   delivery.ts 投影规则）——载荷双重有界，不登记；未来投影放大（preview 放宽 / 窗口取消）
+//   截断、delivered 侧仅派生视图最近 DEFAULT_DELIVERED_WINDOW（session-delivery = 50 条，
+//   delivery.ts 派生视图规则）——载荷双重有界，不登记；未来派生视图放大（preview 放宽 / 窗口取消）
 //   必须登记 LARGE_FIELD_REGISTRY。
 // - session.occupancy / session.state_changed / context.update / session.commands /
 //   session.subagents / session.workflowUpdate / session.stats_update / session.skillNotice /
@@ -99,13 +99,13 @@ export const DEFAULT_OUTBOUND_FRAME_GUARD_OPTIONS: OutboundFrameGuardOptions = {
 //   extensions/universal/plan/src/state.ts capPlanRequirement）/ backgroundTask:updated /
 //   terminal.alive / terminal.exit / terminal.ack /
 //   subagent.directive：标量/小列表状态帧。
-// - subagent.stream_chunk（B2 subagent-stream-chunk §4.1，infra/relay/relay-tee.ts 产生）：
+// - subagent.stream_chunk（B2 subagent-stream-chunk §4.1，infra/subagent-control/subagent-tee.ts 产生）：
 //   增量内容 chunk 小消息（单条 delta 片段 + msgSeq/deltaSeq 序号），payload 无无上界大
 //   字段——不登记。单条 chunk 超限（理论形态：单个 delta 超阈值）走 miss 整条丢弃，消费
 //   端表现为 deltaSeq 跳号、走失步拉取恢复（设计 §4.3 chunk 超限特例）——刻意不登记截断：
 //   截断占位文本会被拼进消息流成为内容污染，丢弃 + 跳号拉取才是正确恢复形态。既有
 //   subagent.stream_delta lines 登记保留（widget 通道 W 路径全量形态仍在用；R 路径余留
-//   清除帧 payload 小，不触发守卫）。
+//   清除帧 payload 小，不触发检查）。
 // - plugin:uiRequest（plugin-service.ts:206）/ plugin:viewUpdate（:291）：插件动态 payload
 //   （dialog/html 字段无固定路径）——transient/stream 兜底覆盖（超限丢弃 + error 日志）。
 // - extension.ui_request（event-adapter.ts:526 统一产点，planReview 帧产点 :875）：交互请求
@@ -125,7 +125,7 @@ interface LargeFieldSpec {
 
 /**
  * 帧内大字段路径注册表（上表 8 条）。key = wire 帧类型。
- * TOPIC_TABLE fallback='stream' 语义不受影响——守卫在 publish 入口（topicOf 流转之前）执行。
+ * TOPIC_TABLE fallback='stream' 语义不受影响——检查在 publish 入口（topicOf 流转之前）执行。
  */
 const LARGE_FIELD_REGISTRY: Readonly<Record<string, readonly LargeFieldSpec[]>> = {
   'message.message_end': [{ path: ['payload', 'entry', 'message', 'content'], kind: 'content' }],
@@ -171,7 +171,7 @@ export function formatTruncationNote(originalBytes: number, sessionId: string, o
  * 占位 entry id 自增序号（进程内唯一）：同 session 两次截断帧各得独立 id，防 reducer 按
  * entry.id 把两条不同消息折叠成一条；'truncated-' 前缀与真实 pi entry id（uuidv7）及
  * reducer 派生 id（'e<N>'）命名空间均无碰撞。counter 不跨进程持久——ring/reducer 状态
- * 同为进程内存态，重启后各自重建，无跨重启同 id 折叠面。
+ * 同为进程内存态，重启后各自重建，无跨重启同 id 折叠侧。
  */
 let placeholderEntrySeq = 0
 function nextPlaceholderEntryId(): string {
@@ -244,7 +244,7 @@ function byteLenOf(value: unknown): number {
   }
 }
 
-// ── push 通路守卫 ──────────────────────────────────────────────────
+// ── push 通路检查 ──────────────────────────────────────────────────
 
 /**
  * 8MB 告警档哨兵日志（D3 已接受代价 B / A10④：miss 消息必然先打告警——告警档先于
@@ -255,7 +255,7 @@ function warnLargePushFrame(type: string, sessionId: string, bytes: number): voi
   console.warn(`[outbound-frame-guard] large outbound push frame (warn): type=${type} sessionId=${sessionId} bytes=${bytes}`)
 }
 
-/** 守卫判定结果。 */
+/** 检查判定结果。 */
 export type PushFrameGuardResult =
   | { action: 'passthrough'; message: ServerMessage; bytes: number }
   | {
@@ -270,11 +270,11 @@ export type PushFrameGuardResult =
   | { action: 'dropped'; bytes: number; dropReason: 'registry_miss' | 'still_oversize_after_truncate' }
 
 /**
- * push 通路出站帧守卫（MessageBus.publish 内、wire 序列化后调用；drop 语义 =
+ * push 通路出站帧检查（MessageBus.publish 内、wire 序列化后调用；drop 语义 =
  * 「seq 分配前整条丢弃」——调用方对 dropped 回滚 seq，外部可观察行为等价）。
  *
  * 为什么不是「seq 分配前直接调本函数」：w09 TC-V1 既有验收契约要求单条消息全程
- * JSON.stringify 恰好 1 次——守卫测量必须复用 publish 的广播序列化文本（wire 字节数），
+ * JSON.stringify 恰好 1 次——检查测量必须复用 publish 的广播序列化文本（wire 字节数），
  * 而该文本必须在 seq 写入后生成（wire 帧携带 seq）。故 seq 预写 + drop 回滚，同步单线程
  * 内无观察窗口，与「seq 分配前丢弃」可观察行为等价（不占 seq 不触发 gap）。
  *
@@ -353,14 +353,14 @@ export function guardOutboundPushFrame(
   }
 }
 
-// ── reply 通路守卫辅助（message-broker.reply 消费） ─────────────────
+// ── reply 通路检查辅助（message-broker.reply 消费） ─────────────────
 
 /**
- * reply 通路条件信号事件 → 崩溃台账（crash-forensics-and-watchdog §3.3 D1 写入点矩阵
+ * reply 通路条件信号事件 → 崩溃 journal（crash-forensics-and-watchdog §3.3 D1 写入点矩阵
  * 「message-broker reply 超限分支」，u1e）：告警档 → frame-truncated(warn-tier)、整帧
  * 替换 error envelope → frame-truncated(trunc-tier)。与既有日志/替换行为同点双写，
  * append 为 fire-and-forget（writer 未初始化 no-op 单例、内部自吞异常），不改变 reply
- * 守卫本身行为。reply 通路无注册表（整帧 envelope 替换），不产生 registry-miss。
+ * 检查本身行为。reply 通路无注册表（整帧 envelope 替换），不产生 registry-miss。
  *
  * 归属注：本函数原在 transport/message-broker.ts，为避免 transport→infra 首条反向
  * import（三层方向 transport→services←infra）下移到本模块（services 引 infra 合法，

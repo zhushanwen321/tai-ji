@@ -249,7 +249,7 @@ const isCompatExpanded = (modelId: string): boolean => unref(deps.expandedCompat
 /** model 级 api 优先，缺失回退 provider 级 api（compat 字段集 + 预设按钮按此过滤） */
 const resolveApi = (modelApi?: string): string | undefined => modelApi || providerApi.value
 
-// reka Select 的 update:modelValue payload 是宽联合（AcceptableValue），先运行时守卫收窄
+// reka Select 的 update:modelValue payload 是宽联合（AcceptableValue），先运行时检查收窄
 // 再进 module 写入（对齐 useQuotaConfigure.selectType 的 unknown+guard 范式），不用模板
 // as 断言把非法 payload 直接放行。不做 Number(value) 强转——NaN 会伪装成合法上下文值。
 const onCtxSelect = (m: LocalModel, value: unknown): void => {

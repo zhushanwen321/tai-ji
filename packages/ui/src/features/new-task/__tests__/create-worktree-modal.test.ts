@@ -93,7 +93,7 @@ describe('CreateWorktreeModal Enter 提交', () => {
     wrapper.unmount()
   })
 
-  it('分支名为空时 submit 不触发创建（守卫与按钮 disabled 一致）', async () => {
+  it('分支名为空时 submit 不触发创建（检查与按钮 disabled 一致）', async () => {
     const deps = makeDeps()
     const wrapper = await mountModal(deps)
     expect(bySel('[data-testid="worktree-create-btn"]').attributes('disabled')).toBeDefined()

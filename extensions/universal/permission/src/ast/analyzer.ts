@@ -181,7 +181,7 @@ function parseChildToken(child: Node): string | null {
 /**
  * 从一个 command 节点提取 argv（对应 Rust parse_plain_command_from_node）。
  *
- * 主函数编排：类型守卫 → 逐 named child 分发（parseChildToken）→ 组装 words。
+ * 主函数编排：类型检查 → 逐 named child 分发（parseChildToken）→ 组装 words。
  * 任一 child 解析失败 → 返回 null。
  */
 function parsePlainCommand(cmd: Node): string[] | null {

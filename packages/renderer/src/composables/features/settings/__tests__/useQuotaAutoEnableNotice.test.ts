@@ -1,9 +1,9 @@
 /**
  * useQuotaAutoEnableNotice composable 单测（「新增即默认同意」额度自动开启 toast）。
  *
- * 覆盖 notifyQuotaAutoEnabled 判定矩阵（round3 MF-3-1：!name 守卫分支此前仅经
+ * 覆盖 notifyQuotaAutoEnabled 判定矩阵（round3 MF-3-1：!name 检查分支此前仅经
  * ProviderPage UI 级测试间接触达，无 enabled=true + name=undefined 组合的直接用例，
- * 守卫删除现有测试仍全绿）。UI 级正/反例已由
+ * 检查删除现有测试仍全绿）。UI 级正/反例已由
  * components/settings/provider/__tests__/ProviderPage.test.ts「新增即默认同意」组锁定，
  * 此处不重复建 UI 用例，只锁 composable 分支语义。
  *
@@ -34,7 +34,7 @@ describe('notifyQuotaAutoEnabled 判定矩阵', () => {
     vi.clearAllMocks()
   })
 
-  it('enabled=true 且 name=undefined → 不 toast（!name 守卫：savedId 空时调用点真传 undefined）', () => {
+  it('enabled=true 且 name=undefined → 不 toast（!name 检查：savedId 空时调用点真传 undefined）', () => {
     const { notifyQuotaAutoEnabled } = useQuotaAutoEnableNotice()
     notifyQuotaAutoEnabled(true, undefined)
     expect(toastMock.info).not.toHaveBeenCalled()

@@ -5,7 +5,7 @@
  * closeOverlay 关浮层并复位 current（§7.4 发起会话删除级联同语义）。
  *
  * 载荷校验（边界防御，契约用例覆盖）：载荷关键字段为空串/非有限值 = no-op
- * （不改开合态——无效内容不进浮层，调用方（renderer controller）已有同口径守卫）。
+ * （不改开合态——无效内容不进浮层，调用方（renderer controller）已有同口径检查）。
  *
  * W2 扩展位（u-w2-browser-mount）：openBrowser(url, sessionId) 协调函数落本文件（URL 注入链）。
  * 入口语义分立（§6.4）：openWorkflow（drawer/coordination，改向开浮层）与
@@ -14,7 +14,7 @@
 import { overlayControl, getOverlayControlState } from './state'
 import type { OverlayContent } from './types'
 
-/** 载荷有效性判据（browser:url+sessionId 非空 / workflow:sessionId+runId 均非空 / scheduler:sessionId 非空 / canvas:canvasId 非空） */
+/** 载荷有效性判据（browser:url+sessionId 非空 / workflow:sessionId+runId 均非空 / scheduler:sessionId 非空 / canvas:canvasId+sessionId 均非空） */
 function isValidContent(content: OverlayContent): boolean {
   if (content.kind === 'browser') {
     return content.payload.url.trim() !== '' && content.payload.sessionId.trim() !== ''
@@ -23,7 +23,7 @@ function isValidContent(content: OverlayContent): boolean {
     return content.payload.sessionId.trim() !== ''
   }
   if (content.kind === 'canvas') {
-    return content.payload.canvasId.trim() !== ''
+    return content.payload.canvasId.trim() !== '' && content.payload.sessionId.trim() !== ''
   }
   return content.payload.sessionId.trim() !== '' && content.payload.runId.trim() !== ''
 }
@@ -70,15 +70,28 @@ export function openSchedulerOverlay(sessionId: string): void {
 
 /**
  * 打开浮层问题解决画布 tab（problem-solve-canvas §3.1(3)：对齐 scheduler 双入口先例
- * ——同壳 tab 切换 + 独立 content kind 直达打开）。画布跨 session 共享（设计 D4/D7），
- * 载荷只有 canvasId、无会话归属：会话删除级联对 canvas 内容不适用（不关浮层）。
+ * ——同壳 tab 切换 + 独立 content kind 直达打开）。画布按归属会话隔离
+ * （session-store-layout-inversion D4）：载荷带归属 sessionId（对齐 workflow/scheduler
+ * 先例），消费侧 per-session 数据分区与删除级联判定的键。
  *
- * @param canvasId 画布 id（托盘列表 / 程序化直达打开的唯一寻址键）
+ * @param canvasId  画布 id（托盘列表 / 程序化直达打开的唯一寻址键）
+ * @param sessionId 画布归属会话 id（创建会话）
  *
  * 已开态调用 = 单例换内容（换画布直接换载荷）；无效载荷 no-op（openOverlay 校验）。
  */
-export function openCanvasOverlay(canvasId: string): void {
-  openOverlay({ kind: 'canvas', payload: { canvasId } })
+export function openCanvasOverlay(canvasId: string, sessionId: string): void {
+  openOverlay({ kind: 'canvas', payload: { canvasId, sessionId } })
+}
+
+/**
+ * 会话删除级联（canvas 分支，D4 隔离配套）：删除的是浮层当前 canvas 内容的归属会话
+ * → 关浮层；其它会话被删不动浮层（条件式语义，对齐 browser/workflow 先例）。
+ * 落点在 core coordination（与 closeBrowserOverlayForSession 同层）——renderer 侧
+ * workflow-viz-overlay 的 session 删除编排直接消费本函数。
+ */
+export function closeCanvasOverlayForSession(sessionId: string): void {
+  const cur = getOverlayControlState().current
+  if (cur?.kind === 'canvas' && cur.payload.sessionId === sessionId) closeOverlay()
 }
 
 /**

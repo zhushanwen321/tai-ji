@@ -12,7 +12,7 @@
  * 形态裁决（[C3] adapter 浅层收敛）：报告建议的「方法 → 命令/门面映射表 + 循环生成」在
  * 本接口形态下会损失类型安全（8 个门面签名异构，表驱动生成需跨型断言/any），按报告豁免
  * 条款保留逐方法显式转发（每行即一条映射，编译期与 SettingsTransport 逐签名配对）；
- * 接口分组（读/写/订阅）已反映真实消费面（transport.ts）。
+ * 接口分组（读/写/订阅）已反映真实消费方（transport.ts）。
  *
  * 签名对齐 core SettingsTransport 接口；mock 兼容硬约束（@/api 的 on* 订阅 / listProviders 等
  * 已就位，settings/quota/preset/usage/session 域 mock 与 real 同构）。
@@ -55,6 +55,8 @@ export function createSettingsTransport(): SettingsTransport {
     getSystemPrompt: () => config.getSystemPrompt(),
     getTerminalConfig: () => config.getTerminalConfig(),
     getRetryConfig: () => config.getRetryConfig(),
+    getNetworkProxyConfig: () => config.getNetworkProxyConfig(),
+    getNetworkProxyStats: (range) => config.getNetworkProxyStats(range),
     getWorktreeRootDir: () => settings.getWorktreeRootDir(),
     getSetupScript: () => settings.getSetupScript(),
     getBareSetupScript: () => settings.getBareSetupScript(),
@@ -88,6 +90,9 @@ export function createSettingsTransport(): SettingsTransport {
     setSystemPrompt: (cfg) => config.setSystemPrompt(cfg),
     setTerminalConfig: (cfg) => config.setTerminalConfig(cfg),
     setRetryConfig: (cfg) => config.setRetryConfig(cfg),
+    setNetworkProxyConfig: (cfg) => config.setNetworkProxyConfig(cfg),
+    testNetworkProxy: (cfg) => config.testNetworkProxy(cfg),
+    resetNetworkProxyStats: () => config.resetNetworkProxyStats(),
     setWorktreeRootDir: (dir) => settings.setWorktreeRootDir(dir),
     setSetupScript: (script) => settings.setSetupScript(script),
     setBareSetupScript: (script) => settings.setBareSetupScript(script),
@@ -141,6 +146,7 @@ export function createSettingsTransport(): SettingsTransport {
     onSystemPrompt: (h) => config.onSystemPrompt(h),
     onTerminalConfig: (h) => config.onTerminalConfig(h),
     onRetryConfig: (h) => config.onRetryConfig(h),
+    onNetworkProxyConfig: (h) => config.onNetworkProxyConfig(h),
     onAuthDeviceCode: (h) => config.onAuthDeviceCode(h),
     onAuthAuthUrl: (h) => config.onAuthAuthUrl(h),
     onAuthSuccess: (h) => config.onAuthSuccess(h),

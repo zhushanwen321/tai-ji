@@ -8,7 +8,7 @@
  *   订阅该 sid 的 ws 收到 1 条、订阅其它 sid 的 ws / 未订阅 ws 均 0 条。
  * - TC-V1b（send 层集成）：SessionService 的 send 回调（EventAdapter 透传路径）转发
  *   session 级消息 → 全程 JSON.stringify 恰好 1 次（只有 bus 的定向推送一次），
- *   broker.broadcast 0 次（盲广播腿已删）。
+ *   broker.broadcast 0 次（盲广播路径已删）。
  * - TC-V1c（transient）：delta 类不占 seq，同一窗口 stringify 仍恰好 1 次。
  *
  * 运行：cd packages/runtime && npx vitest run src/__tests__/w09-single-channel-v1.test.ts
@@ -110,7 +110,7 @@ describe('W09 单通道确定性验收（02 §4 V1）', () => {
     send({ type: 'message.status', payload: { sessionId: 's-v1', status: 'thinking' } })
 
     // 单次序列化：send 回调 → bus.publish（seq + ring + 定向推送）是唯一出口，
-    // broker.broadcast 腿已删（D1-2），全程 stringify 计数 = 1
+    // broker.broadcast 路径已删（D1-2），全程 stringify 计数 = 1
     expect(stringifySpy).toHaveBeenCalledTimes(1)
     expect(broker.broadcast).not.toHaveBeenCalled()
     expect(broadcasts).toHaveLength(0)

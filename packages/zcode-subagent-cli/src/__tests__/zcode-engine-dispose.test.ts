@@ -1,4 +1,4 @@
-// zcode-engine-dispose.test.ts —— P0-1 U5 dispose 收割（引擎集成面，fake-appserver
+// zcode-engine-dispose.test.ts —— P0-1 U5 dispose 收割（引擎集成测试，fake-appserver
 // 子进程，绝不 spawn 真 zcode.cjs）。
 //
 // 设计锚点：退化
@@ -164,7 +164,7 @@ function makeCtx(overrides?: Partial<RunContext>): RunContext {
 // dispose 收割（P0-1 U5/D7：在途 turn 收敛 + 不重试 + 窗口量级）
 // ============================================================
 
-describe("dispose 收割（P0-1 U5：引擎集成面）", () => {
+describe("dispose 收割（P0-1 U5：引擎集成测试）", () => {
   it("dispose 时在途 turn 收敛为明确失败且不重试：engine_run_failed、boot 1、create×1（收割≠瞬时崩溃，u-z4 disposed 短路）", async () => {
     // 本用例的失败终态只能来自 dispose 收割链（onClose failAllTurns → dispose
     // no-op 幂等；close 吞没变体由 channel 层 mock 测试承载）——channel 已无
@@ -194,7 +194,7 @@ describe("dispose 收割（P0-1 U5：引擎集成面）", () => {
     expect(bootCount(f.stateFile)).toBe(1);
 
     // 窗口量级：dispose 全链不超 kill 链 + HARVEST_GRACE + 进程调度余量——
-    // 收割在 grace 量级窗口闭合（确定性收尾时序，非等待型挂起）
+    // 收割在 grace 量级窗口完成（确定性收尾时序，非等待型挂起）
     expect(disposeMs).toBeLessThan(ZCODE_KILL_GRACE_MS + ZCODE_APPSERVER_HARVEST_GRACE_MS + 2000);
   }, 30_000);
 

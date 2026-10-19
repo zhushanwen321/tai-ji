@@ -5,7 +5,7 @@
  * 单分区（'global'），内键 = cwd 绝对路径，值 = RecentWorkspaceRecord。
  *
  * 不变量：
- * - INV-1: cwd 非空串守卫（store 层兜底，service 层主守卫）
+ * - INV-1: cwd 非空串检查（store 层兜底，service 层主检查）
  * - INV-2: 最多保留 6 条，淘汰 lastUsedAt 最小者
  * - INV-3: 同 cwd 不重复，更新 lastUsedAt
  * - INV-4: 文件损坏返空，不抛
@@ -106,7 +106,7 @@ export class RecentWorkspacesStore {
       const home = homedir()
       for (const record of parsed) {
         if (record && typeof record.cwd === 'string' && record.cwd) {
-          // [方案A自愈] 跳过 homedir 条目：守卫挡新 record，此处清理存量
+          // [方案A自愈] 跳过 homedir 条目：检查挡新 record，此处清理存量
           if (record.cwd === home) continue
           map.set(record.cwd, record)
         }

@@ -1,5 +1,5 @@
 /**
- * @zhushanwen/session-core 唯一导出面。
+ * @zhushanwen/session-core 唯一导出清单。
  *
  * 负面契约（设计 §5 Phase 0）：本包不导出任何 header 合法性谓词（判定「首行算不算
  * 合法 session header」的 parse/guard 类函数）——reader/runtime 两侧谓词语义差异

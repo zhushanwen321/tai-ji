@@ -1,7 +1,7 @@
 /**
  * MRT 系列：model-resolver.ts 单元测试（picker 相关 API）。
  *
- * E2（CL-picker-scope 收口）后 listAvailableModels 改走 ctx.modelRegistry.getAll() +
+ * E2（CL-picker-scope 收敛）后 listAvailableModels 改走 ctx.modelRegistry.getAll() +
  * hasConfiguredAuth() 过滤（不再读 models.json），loadModelsJson / flattenModels 已删除。
  * E1：ResolvedModelEntry.apiKey / hasApiKey 已删。
  *

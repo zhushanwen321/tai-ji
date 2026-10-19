@@ -346,7 +346,7 @@ describe('MarkdownRenderer · H2 rAF trailing 节流', () => {
     expect(mockRenderMarkdown).not.toHaveBeenCalled()
   })
 
-  it('H2-5 (AC-5): renderSeq 序号守卫保留——节流后连续渲染最终 DOM 为最新 content', async () => {
+  it('H2-5 (AC-5): renderSeq 序号检查保留——节流后连续渲染最终 DOM 为最新 content', async () => {
     mockRenderMarkdown.mockResolvedValue([{ type: 'text', content: '<p>v1</p>' }])
     const wrapper = mountMd({ content: 'first' })
     await nextTick()
@@ -362,7 +362,7 @@ describe('MarkdownRenderer · H2 rAF trailing 节流', () => {
     await wrapper.setProps({ content: 'second' })
     flushRAF()
     await waitForDom(() => wrapper.html().includes('v2-updated'))
-    // 序号守卫：新渲染覆盖旧，DOM 是 v2（非 v1）
+    // 序号检查：新渲染覆盖旧，DOM 是 v2（非 v1）
     expect(wrapper.find('.md-render > div').html()).toContain('v2-updated')
   })
 

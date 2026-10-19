@@ -324,8 +324,8 @@ describe("session_start hook（E3：按 state 查表恢复）", () => {
   });
 });
 
-describe("进入引导单源（systemPrompt 注入面已收敛到 tool promptSnippet）", () => {
-  it("before_agent_start 钩子不注册：taiji 宿主注入面与 tool 描述面不再同时含进入引导（C1 行为变更组锚）", () => {
+describe("进入引导单源（systemPrompt 注入点已收敛到 tool promptSnippet）", () => {
+  it("before_agent_start 钩子不注册：taiji 宿主注入点与 tool 描述面不再同时含进入引导（C1 行为变更组锚）", () => {
     const { handlers } = setup();
     expect(handlers.has("before_agent_start")).toBe(false);
   });

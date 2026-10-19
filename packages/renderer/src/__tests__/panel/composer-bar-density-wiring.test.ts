@@ -14,7 +14,7 @@
  *
  * 策略：
  * - `useTrayCounts` 替身（托盘三态计数注入）——真 ComposerTray 渲染，聚合入口是真实组件；
- * - `VIEW_HOST_SOURCE_KEY` provide（插件 toolbar 贡献面：有 entry → 贡献数 1）；`getViewIds` 返回空
+ * - `VIEW_HOST_SOURCE_KEY` provide（插件 toolbar 贡献点：有 entry → 贡献数 1）；`getViewIds` 返回空
  *   （该 mock 只服务挂载点查询，不冒充 widget 区条目）；
  * - `ManualResizeObserverStub`（`../effects/_virtua-mock-helper` 定稿件）确定性派发；
  * - 真 pinia + 真 chat store（与 composer-send-button-states 同范式），mock useChat / useNewTaskFlow /
@@ -98,7 +98,7 @@ vi.mock('@/api', () => ({
 }))
 vi.mock('@/stores/session', () => composerSessionStoreModule())
 
-// ── 子组件 stub（ComposerInput mock 收敛 composer-mount 共用面工厂）──
+// ── 子组件 stub（ComposerInput mock 收敛 composer-mount 共用部分工厂）──
 const { lastInputText, ComposerInputMock } = makeComposerInputMock()
 // GenStatsTriggers 专属空 stub（共享骨架未覆盖的本文件特例）
 const SIMPLE = defineComponent({ name: 'SimpleStub', template: '<div />' })
@@ -156,7 +156,7 @@ function makeMountPointSource(partition: Map<string, ViewCacheEntry>): ViewHostS
 }
 
 /**
- * headerAction 数据源替身（B3 聚合面用例：scheduler overlay 直开声明形态——
+ * headerAction 数据源替身（B3 聚合范围用例：scheduler overlay 直开声明形态——
  * hasVisibleHeaderActions 判定消费 getDeclarations/getRuntimeState 两面）。
  */
 function makeHeaderActionSource(hidden = false): object {
@@ -398,7 +398,7 @@ describe('S4 模型名零截断 + `»` 退役（构造性回归防线）', () =>
   })
 })
 
-describe('B3 聚合面：headerAction（定时任务钮）随左簇聚合走（demo composer-bar spec §2.1/§4.2）', () => {
+describe('B3 聚合范围：headerAction（定时任务钮）随左簇聚合走（demo composer-bar spec §2.1/§4.2）', () => {
   it('L0 expanded：headerAction 钮在左簇渲染（clock 直开入口在场）', async () => {
     mountComposer(makeMountPointSource(reactive(new Map())), makeHeaderActionSource())
     await dispatchTick()
@@ -427,29 +427,29 @@ describe('B3 聚合面：headerAction（定时任务钮）随左簇聚合走（d
     expect(bar().find('[data-testid="tray-aggregate-button"]').exists()).toBe(true)
   })
 
-  it('声明运行时 hidden=true → 不构成左簇内容：hidden 钮不渲染，左簇仅剩恒在的 canvas 件', async () => {
+  it('声明运行时 hidden=true → 不构成左簇内容：hidden 钮不渲染，三源全空 → 左簇 absent', async () => {
     setTrayCounts(0, 0)
     // hidden 声明不构成左簇内容（hasVisibleHeaderActions 判定），mountAndFit 的空 provide 路径
     // 不带 headerSource——为覆盖「hidden 源在场」形态走显式挂载
     mountComposer(makeMountPointSource(reactive(new Map())), makeHeaderActionSource(true))
     await dispatchFitGeometry(800, 80, { 0: 300, 1: 200, 2: 150, 3: 120 })
-    // [u-tray-entry 后] canvas 件恒渲染（创建入口豁免）→ 左簇不再有 absent 形态；
-    // hidden headerAction 钮照旧不渲染（该判定语义不变）
-    expect(bar().attributes('data-slot-left-cluster')).toBe('expanded')
+    // [session-store-layout-inversion 裁决 4] canvas 件恒渲染豁免已删除（画布按归属会话隔离，
+    // 零画布即隐藏）→ hidden headerAction 不构成内容时三源全空 → 不留死入口 absent
+    expect(bar().attributes('data-slot-left-cluster')).toBe('absent')
     expect(bar().find('[data-testid="header-action-scheduler-manager-open"]').exists()).toBe(false)
-    expect(bar().find('[data-testid="tray-builtin-button"][data-kind="canvas"]').exists()).toBe(true)
+    expect(bar().find('[data-testid="tray-builtin-button"][data-kind="canvas"]').exists()).toBe(false)
   })
 })
 
 describe('不留死入口（能力标志 → 左簇形态）', () => {
-  it('托盘全无任务条目 + 插件零贡献 → leftCluster expanded（canvas 恒渲染件在场，无聚合入口）', async () => {
+  it('托盘全无任务条目 + 插件零贡献 → leftCluster absent（不留死入口；canvas 件零画布同隐藏）', async () => {
     setTrayCounts(0, 0)
     await mountAndFit(800, { 0: 300, 1: 200, 2: 150, 3: 120 })
-    // [u-tray-entry 后] canvas 件恒渲染（创建入口豁免）→「托盘全无 → absent」形态不可达，
-    // 宽裕档下左簇 = expanded（恒在的 canvas 按钮，dim 态）
-    expect(bar().attributes('data-slot-left-cluster')).toBe('expanded')
+    // [session-store-layout-inversion 裁决 4] canvas 件恒渲染豁免已删除（画布归属会话隔离
+    // 后「本 session 无画布」前提成立）→ 三源全空 = absent 形态（新建入口随首张画布出现）
+    expect(bar().attributes('data-slot-left-cluster')).toBe('absent')
     expect(bar().find('[data-testid="tray-aggregate-button"]').exists()).toBe(false)
-    expect(bar().find('[data-testid="tray-builtin-button"][data-kind="canvas"]').exists()).toBe(true)
+    expect(bar().find('[data-testid="tray-builtin-button"][data-kind="canvas"]').exists()).toBe(false)
     // `+` 仍在（序 0 与托盘无关）
     expect(firstButtonTitle()).toBe('添加内容（附件 / 命令）')
   })
@@ -462,14 +462,15 @@ describe('不留死入口（能力标志 → 左簇形态）', () => {
     expect(aggregate.exists()).toBe(true)
     expect(aggregate.find('[data-testid="tray-aggregate-count"]').text()).toBe('3')
 
-    // 条目归零 → has-items 恒 true（canvas 件豁免，见 ComposerTray builtinItems 注释）→
-    // 左簇保持聚合形态；运行数角标归零消失（归零不虚亮），外壳未被卸载
+    // 条目归零 → [session-store-layout-inversion 裁决 4] canvas 件无豁免 → 三源全空
+    // → 左簇 absent、聚合按钮与角标一并消失（归零不虚亮）；托盘外壳恒挂载（emitter 与
+    // useTrayCounts 数据面唯一实例不卸载，见 Composer.vue 挂载注释），响应链存活
     setTrayCounts(0, 0)
     await nextTick()
-    expectClusterShape({ leftCluster: 'aggregated' })
-    expect(bar().find('[data-testid="tray-aggregate-count"]').exists()).toBe(false)
+    expectClusterShape({ leftCluster: 'absent' })
+    expect(bar().find('[data-testid="tray-aggregate-button"]').exists()).toBe(false)
 
-    // 条目恢复 → 同一数据面仍驱动重算 → 运行数角标回升（响应链存活，无需重挂）
+    // 条目恢复 → 同一数据面仍驱动重算 → 聚合形态与运行数角标回升（无需重挂）
     setTrayCounts(2, 1)
     await nextTick()
     expectClusterShape({ leftCluster: 'aggregated' })

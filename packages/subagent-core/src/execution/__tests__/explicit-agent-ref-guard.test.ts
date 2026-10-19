@@ -14,10 +14,10 @@
 //
 // [W3 改写] 原 vi.mock(inproc pi 引擎目录/session-runner)（buildSpawnArgs spy）随删件消亡
 // ——「spawn 链路零触达」的结构性证据改经协议替身（engine.run 零调用）+ appendEntry
-// 零触达承载；守卫位于同步裁决期、引擎派发前置的结构不变。
+// 零触达承载；检查位于同步裁决期、引擎派发前置的结构不变。
 //
 // harness 复用 start-sync-model-guard.test.ts（真实 SubagentService + tmpdir +
-// 协议替身），保证守卫位于同步裁决期、引擎派发前置的结构性证据可断言。
+// 协议替身），保证检查位于同步裁决期、引擎派发前置的结构性证据可断言。
 
 import * as fs from "node:fs";
 import * as os from "node:os";
@@ -114,7 +114,7 @@ describe("显式 agent ref 失败报错（非静默降级 general-purpose）", (
 
   // ── 放行对照：两类合法语义不误伤 ──
 
-  it("不传 agent（默认 general-purpose 语义）→ 不触发 agent ref 守卫", async () => {
+  it("不传 agent（默认 general-purpose 语义）→ 不触发 agent ref 检查", async () => {
     const promise = service.execute({
       task: "probe task",
       slug: "ref-default-ok",
@@ -131,7 +131,7 @@ describe("显式 agent ref 失败报错（非静默降级 general-purpose）", (
     expect(pi.appendEntry).toHaveBeenCalled();
   });
 
-  it("显式合法绝对路径 agent .md → 守卫零误伤，identity 放行", async () => {
+  it("显式合法绝对路径 agent .md → 检查零误伤，identity 放行", async () => {
     const agentFile = path.join(tmpDir, "worker.md");
     fs.writeFileSync(agentFile, "You are a test worker agent.");
     const promise = service.execute({

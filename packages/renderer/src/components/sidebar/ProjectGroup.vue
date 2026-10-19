@@ -146,7 +146,7 @@ const emit = defineEmits<{
   headClick: []
   /** 组头「+」：先落点该项目再进空态新建（落点在父级 handler 内完成） */
   createTask: []
-  /** 行内重命名提交（Enter / 失焦；空名已在组件内守卫不 emit） */
+  /** 行内重命名提交（Enter / 失焦；空名已在组件内检查不 emit） */
   renameCommit: [name: string]
   /** 删除请求（确认弹层在父级） */
   deleteRequest: []

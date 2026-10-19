@@ -1,5 +1,5 @@
 /**
- * 三个 parser（pi / codex / zcode）共享的单条目守卫与文案 helper。
+ * 三个 parser（pi / codex / zcode）共享的单条目检查与文案 helper。
  *
  * W4 复杂度债务偿还（行为保持纯提取）：三个 parser 的 providers 循环体同构——
  * null/非对象条目跳过警告、catch 警告模板、topWarnings 收尾三处文案逐字节一致

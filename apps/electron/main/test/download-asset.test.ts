@@ -87,7 +87,7 @@ vi.mock('node:fs', async (importOriginal) => {
 })
 
 // curl-download 部分 mock：downloadViaCurl 可控（curl 接管场景编排写 temp / 断言），
-// 其余透传真实现。仅「返回值观测面」describe 的 curl 接管用例编排它，其余用例
+// 其余透传真实现。仅「返回值观测范围」describe 的 curl 接管用例编排它，其余用例
 // 不触 curl 路径（若编排回归意外触发，vi.fn 默认 resolve undefined 快速暴露）。
 vi.mock('../update/curl-download.js', async (importOriginal) => {
   const actual = await importOriginal<typeof import('../update/curl-download.js')>()
@@ -221,7 +221,7 @@ describe('W3: download-asset (W3TC1-3)', () => {
     expect(readFileSync(result.filePath)).toEqual(TEST_CONTENT)
     // .downloading 临时文件已清理
     expect(existsSync(`${result.filePath}.downloading`)).toBe(false)
-    // 返回值观测面（download-success 数据源，设计 §8.2 S1）：小文件纯单段成功形态
+    // 返回值观测范围（download-success 数据源，设计 §8.2 S1）：小文件纯单段成功形态
     expect(result.multiPart).toBe(false)
     expect(result.engine).toBe('undici')
   })
@@ -644,10 +644,15 @@ describe('批次 5: resume-state 原子写序列（§3.7.2）', () => {
 
     expect(result.filePath).toMatch(/multipart-atomic\.zip$/)
 
-    // 序列断言：resume-state.json.tmp 的 writeFileSync 先于 renameSync(→resume-state.json)
-    const tmpWrite = fsSpy.writeCalls.find((c) => c.path.endsWith('resume-state.json.tmp'))
+    // 序列断言（原子写助手形态）：resume-state 派生 tmp 名（含 pid+seq、.tmp 结尾）的
+    // writeFileSync 先于 renameSync(→resume-state.json)，rename 源 = 该 tmp
+    const isResumeTmp = (p: string) => {
+      const base = p.split(path.sep).pop() ?? ''
+      return base.startsWith('resume-state.json') && base.endsWith('.tmp')
+    }
+    const tmpWrite = fsSpy.writeCalls.find((c) => isResumeTmp(c.path))
     const rename = fsSpy.renameCalls.find((c) => c.to.endsWith('resume-state.json'))
-    expect(tmpWrite, '应先写 resume-state.json.tmp').toBeDefined()
+    expect(tmpWrite, '应先写 resume-state 派生名的 .tmp 文件').toBeDefined()
     expect(rename, '应 renameSync 到 resume-state.json 终态').toBeDefined()
     const writeIdx = fsSpy.writeCalls.indexOf(tmpWrite!)
     const renameIdx = fsSpy.renameCalls.indexOf(rename!)
@@ -655,7 +660,8 @@ describe('批次 5: resume-state 原子写序列（§3.7.2）', () => {
     expect(rename!.from).toBe(tmpWrite!.path)
     // 下载成功后 clearResumeState 清掉终态文件（且 .tmp 不残留）
     expect(existsSync(path.join(TMP_DATA_DIR, 'update', 'resume-state.json'))).toBe(false)
-    expect(existsSync(path.join(TMP_DATA_DIR, 'update', 'resume-state.json.tmp'))).toBe(false)
+    const leftoverTmp = fsSpy.writeCalls.filter((c) => isResumeTmp(c.path))
+    expect(leftoverTmp.every((c) => !existsSync(c.path))).toBe(true)
   })
 })
 
@@ -1063,7 +1069,7 @@ describe('probe 四出口归类（GET Range 0-0 + Content-Range 判定）', () =
     expect(rangeLog.filter((r) => r !== undefined && r !== PROBE_RANGE)).toHaveLength(4)
     // 产物完整正确（多段合并 + sha 通过）
     expect(readFileSync(result.filePath).compare(MULTI_PART_CONTENT)).toBe(0)
-    // 返回值观测面：probe supported 且多段真实完成（S1 断言「multiPart: true」防
+    // 返回值观测范围：probe supported 且多段真实完成（S1 断言「multiPart: true」防
     // probe 改造回归静默退化单段）
     expect(result.multiPart).toBe(true)
     expect(result.engine).toBe('undici')
@@ -1090,7 +1096,7 @@ describe('probe 四出口归类（GET Range 0-0 + Content-Range 判定）', () =
     // 无段请求：探测之后唯一一次请求是单段全新下载（无 Range 头）
     expect(rangeLog).toEqual([undefined])
     expect(readFileSync(result.filePath).compare(MULTI_PART_CONTENT)).toBe(0)
-    // 返回值观测面：total 低于阈值未走多段
+    // 返回值观测范围：total 低于阈值未走多段
     expect(result.multiPart).toBe(false)
     expect(result.engine).toBe('undici')
   })
@@ -1121,7 +1127,7 @@ describe('probe 四出口归类（GET Range 0-0 + Content-Range 判定）', () =
 
     expect(rangeLog).toEqual([undefined])
     expect(readFileSync(result.filePath).compare(MULTI_PART_CONTENT)).toBe(0)
-    // 返回值观测面：Content-Range 不可用一律单段
+    // 返回值观测范围：Content-Range 不可用一律单段
     expect(result.multiPart).toBe(false)
     expect(result.engine).toBe('undici')
   })
@@ -1144,12 +1150,12 @@ describe('probe 四出口归类（GET Range 0-0 + Content-Range 判定）', () =
 
     expect(rangeLog).toEqual([undefined])
     expect(readFileSync(result.filePath).compare(MULTI_PART_CONTENT)).toBe(0)
-    // 返回值观测面：200 全量退化（服务器/代理剥 Range）单段合法出口
+    // 返回值观测范围：200 全量退化（服务器/代理剥 Range）单段合法出口
     expect(result.multiPart).toBe(false)
     expect(result.engine).toBe('undici')
   })
 
-  // curl 接管成功形态（engine 观测面）：flag=curl 入口分流 → 全程 undici 零调用，
+  // curl 接管成功形态（engine 观测范围）：flag=curl 入口分流 → 全程 undici 零调用，
   // curl 引擎完成下载。engine=curl 断言锁「实际成功者」语义（降级后成功以 curl 为准）。
   it('flag=curl 入口接管成功 → engine=curl 且 multiPart=false', async () => {
     // 真实置位链路构造 flag（仅连接建立失败档置位）

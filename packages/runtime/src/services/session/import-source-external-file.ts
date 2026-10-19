@@ -65,7 +65,7 @@ function matchesQuery(item: ImportCandidate, query: string): boolean {
 //（消费侧薄包装职责，基座不吞错误分类信息）。
 
 // header 解析（parseHeaderFromFirstLine）直接消费 session-file-external-scan 导出的同一函数
-//（D1 字段清单 SSOT 单副本）：含 null/非 object 运行时守卫，null 首行（TOCTOU 源文件被
+//（D1 字段清单 SSOT 单副本）：含 null/非 object 运行时检查，null 首行（TOCTOU 源文件被
 // 替换）与畸形 JSON 一律返回 null → import_invalid_session，不逃逸原始 TypeError。
 // 本源只消费 id/cwd，timestamp 是外部扫描侧的对齐保留字段。
 
@@ -116,7 +116,7 @@ export class ExternalFileImportSource implements SessionImportSource {
     return { total, items: filtered.slice(0, limit), dirs }
   }
 
-  /** 轻量 meta（D3 二次修订）：字段集 = id/name/cwd/filePath/lastModified/size，与 toCandidate 消费面一致。 */
+  /** 轻量 meta（D3 二次修订）：字段集 = id/name/cwd/filePath/lastModified/size，与 toCandidate 消费方一致。 */
   private toCandidate(rootDir: string, m: ExternalSessionMeta, importedIds: Set<string>): ImportCandidate {
     return {
       sessionId: m.id,
@@ -157,7 +157,7 @@ export class ExternalFileImportSource implements SessionImportSource {
 
     // 2. 文件名标记校验（r2-S1）：导入落地后会被自家扫描过滤器挡成 limbo，前置拒绝。
     //    RT-3#10：走 isTmpResidueFileName 精确后缀形态判定（与扫描过滤/清扫同一谓词，
-    //    双副本漂移面消灭）——旧 includes 子串判定会误拒 session id 中段含标记串的真实文件。
+    //    双副本漂移风险消灭）——旧 includes 子串判定会误拒 session id 中段含标记串的真实文件。
     if (isTmpResidueFileName(sourceName)) {
       throw new ImportServiceError('import_marker_filename', `文件名为临时残留形态（.tmp-migrate-/.tmp-import- 后缀）：${sourceName}`)
     }

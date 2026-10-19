@@ -1,11 +1,11 @@
 /**
- * PiPresetsPage 模式提示词「保存闸门」测试（F2 修复 · must-fix）。
+ * PiPresetsPage 模式提示词「保存门禁」测试（F2 修复 · must-fix）。
  *
  * 设计依据 `mode-system-composer-density` §6.3 D3b / §7.5 E2（用户裁决 ③）：
  * 模式级「替换」启用后，保存必须二次确认（取消 = 改为仅追加），因为替换段会顶掉 pi 内置行为规范。
  *
  * 缺陷原状（F2）：确认闸只挂在替换卡入口 `onSaveReplace`，追加卡入口直接调写盘；而写盘 payload
- * **恒含两段**（replace + append）→ 追加卡的「保存」可把启用态替换段无确认落盘。本文件把闸门
+ * **恒含两段**（replace + append）→ 追加卡的「保存」可把启用态替换段无确认落盘。本文件把门禁
  * 钉在「唯一写点」上做黑盒验证：追加卡保存 + 替换段 dirty → 必须弹同一确认框、未确认零落盘。
  *
  * 覆盖：追加卡保存（dirty 替换段）零落盘 / 确认后一次落盘且 payload 含两段 / 取消零落盘且改回仅追加 /
@@ -57,7 +57,7 @@ function dialogButton(text: string): HTMLButtonElement | undefined {
   ) as HTMLButtonElement | undefined
 }
 
-describe('PiPresetsPage 提示词保存闸门（F2：两卡共用唯一写点）', () => {
+describe('PiPresetsPage 提示词保存门禁（F2：两卡共用唯一写点）', () => {
   it('追加卡保存 + 替换段 dirty → 弹确认且零落盘（preset.update 不被调用）', async () => {
     await mountWithBothSegmentsDirty()
 

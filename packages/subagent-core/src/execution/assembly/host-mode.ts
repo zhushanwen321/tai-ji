@@ -3,7 +3,7 @@
 // 主进程运行模式分类工具。
 //
 // 将 Pi 的 ExtensionMode（"tui"|"rpc"|"json"|"print"）聚合为业务语义的
-// HostMode（"tui"|"gui"|"headless"），供 session-runner 的 W4 提示词守卫、
+// HostMode（"tui"|"gui"|"headless"），供 session-runner 的 W4 提示词检查、
 // handler 工厂分流、stdio 选择等消费点统一调用。
 //
 // 判定依据见 AGENTS.md「运行时环境区分」章节 +

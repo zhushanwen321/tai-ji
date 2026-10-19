@@ -21,6 +21,14 @@ import {
   RUNTIME_PATTERN_CONST,
   SHARED_TREE_CONST,
   RUNTIME_TREE_FNS,
+  STORE_SEGMENT_CONST,
+  SHARED_PATTERN_CONST,
+  BTE_STORE_SEGMENT_CONST,
+  BTE_DOMAIN_SEGMENT_CONST,
+  SHARED_BG_TASKS_FN,
+  SHARED_VIEW_FN,
+  SR_VIEW_FN_ANCHOR,
+  compareTreeSegmentsShape,
   extractFunctionBlock,
   extractJoinSegment,
   extractSessionIdRegex,
@@ -28,6 +36,9 @@ import {
   extractConstRegex,
   extractConstStringArray,
   extractTreeRootSegment,
+  extractViewTreeRootSegment,
+  extractViewFileSegment,
+  extractViewSessionIdRegex,
   mirrorUsesSegmentConst,
 } from '../check-artifact-dir-formula-sync.mjs'
 import { expectGuardDirectRunPasses, makeGuardMirror } from './helpers/guard-mirror.mjs'
@@ -42,11 +53,9 @@ const DEFAULT_REGEX = '/^[A-Za-z0-9](?:[A-Za-z0-9._-]*[A-Za-z0-9])?$/'
 describe('提取器纯函数', () => {
   it('函数块截取到行首 } 为止（体内缩进 } 不误截）', () => {
     const src = [
-      `export function ${SHARED_FN}(sessionId: string): string {`,
-      `  if (!${DEFAULT_REGEX}.test(sessionId)) {`,
-      `    throw new Error('bad')`,
-      `  }`,
-      `  return join(getDataDir(), 'artifacts', sessionId)`,
+      `export function ${SHARED_FN}(sessionId: string, dataDir?: string): string {`,
+      `  assertPiSessionId(sessionId)`,
+      `  return join(getSessionStoreDir(dataDir), sessionId, 'artifacts')`,
       `}`,
       `export function nextOne() {}`,
     ].join('\n')
@@ -55,47 +64,53 @@ describe('提取器纯函数', () => {
     expect(block.text).toContain(SHARED_FN)
     expect(block.text).not.toContain('nextOne')
     expect(extractJoinSegment(block.text).value).toBe('artifacts')
-    expect(extractSessionIdRegex(block.text).value).toBe(DEFAULT_REGEX)
   })
 
-  it('函数缺失 / 无字面量段名 / 无校验正则 → error（宁可误报不可漏报）', () => {
+  it('函数缺失 / 无字面量域段 / 无校验正则 → error（宁可误报不可漏报）', () => {
     expect(extractFunctionBlock('const x = 1', 'export function missing').error).toBeDefined()
-    expect(extractJoinSegment('return join(x, y, sessionId)').error).toBeDefined()
+    expect(extractJoinSegment(`return join(getSessionStoreDir(dataDir), sessionId)`).error).toBeDefined()
+    expect(extractJoinSegment(`return join(getDataDir(), 'artifacts', sessionId)`).error).toBeDefined()
     expect(extractSessionIdRegex('const x = 1').error).toBeDefined()
   })
 
-  it('常量段名提取 + 镜像经常量拼段名判定', () => {
+  it('常量段名提取（根段 + 域段）+ 镜像经两常量拼路径判定', () => {
     const mirror = [
+      `export const ${STORE_SEGMENT_CONST} = 'ext-sessions'`,
       `export const ${MIRROR_SEGMENT_CONST} = 'artifacts'`,
       `export function ${MIRROR_FN}(sessionId: string): string {`,
-      `  return path.join(resolveDataDir(), ${MIRROR_SEGMENT_CONST}, sessionId)`,
+      `  return path.join(resolveDataDir(), ${STORE_SEGMENT_CONST}, sessionId, ${MIRROR_SEGMENT_CONST})`,
       `}`,
     ].join('\n')
+    expect(extractConstLiteral(mirror, STORE_SEGMENT_CONST).value).toBe('ext-sessions')
     expect(extractConstLiteral(mirror, MIRROR_SEGMENT_CONST).value).toBe('artifacts')
     const block = extractFunctionBlock(mirror, `export function ${MIRROR_FN}`)
     expect(mirrorUsesSegmentConst(block.text)).toBe(true)
-    expect(mirrorUsesSegmentConst(`return path.join(resolveDataDir(), 'artifacts', sessionId)`)).toBe(false)
+    expect(
+      mirrorUsesSegmentConst(`return path.join(resolveDataDir(), 'ext-sessions', sessionId, 'artifacts')`),
+    ).toBe(false)
   })
 
-  it('第三源 const 正则声明提取（runtime 声明形态；.test 调用行不误匹配；带分号兼容）', () => {
-    const runtime = [
-      'export function isPiSessionId(id: string): boolean {',
-      `  return ${RUNTIME_PATTERN_CONST}.test(id)`,
-      '}',
-      '',
-      `const ${RUNTIME_PATTERN_CONST} = ${DEFAULT_REGEX}`,
-    ].join('\n')
-    expect(extractConstRegex(runtime, RUNTIME_PATTERN_CONST).value).toBe(DEFAULT_REGEX)
-    expect(extractConstRegex(`const ${RUNTIME_PATTERN_CONST} = ${DEFAULT_REGEX};`, RUNTIME_PATTERN_CONST).value).toBe(
-      DEFAULT_REGEX,
-    )
+  it('const 正则声明提取（shared / runtime 同形态；.test 调用行不误匹配；带分号兼容）', () => {
+    const decl = `const ${RUNTIME_PATTERN_CONST} = ${DEFAULT_REGEX}`
+    expect(extractConstRegex(decl, RUNTIME_PATTERN_CONST).value).toBe(DEFAULT_REGEX)
+    expect(extractConstRegex(`${decl};`, RUNTIME_PATTERN_CONST).value).toBe(DEFAULT_REGEX)
+    expect(extractConstRegex(`export function isPiSessionId(id: string): boolean {
+  return ${RUNTIME_PATTERN_CONST}.test(id)
+}
+
+${decl}`, RUNTIME_PATTERN_CONST).value).toBe(DEFAULT_REGEX)
     expect(extractConstRegex('const OTHER = /x/;', RUNTIME_PATTERN_CONST).error).toBeDefined()
     expect(extractConstRegex('export const x = 1', RUNTIME_PATTERN_CONST).error).toBeDefined()
   })
 
   it('树段常量数组提取 + runtime 布局函数树根段对位提取（第四组对拍提取器）', () => {
-    const shared = `export const ${SHARED_TREE_CONST} = ['sessions', 'subagents', 'btw'] as const`
-    expect(extractConstStringArray(shared, SHARED_TREE_CONST).value).toEqual(['sessions', 'subagents', 'btw'])
+    const shared = `export const ${SHARED_TREE_CONST} = ['sessions', 'subagents', 'btw', 'ext-sessions'] as const`
+    expect(extractConstStringArray(shared, SHARED_TREE_CONST).value).toEqual([
+      'sessions',
+      'subagents',
+      'btw',
+      'ext-sessions',
+    ])
     const runtime = [
       `export function ${RUNTIME_TREE_FNS[0]}(): string {`,
       `  return join(getPiAgentDir(), 'sessions')`,
@@ -121,29 +136,93 @@ describe('提取器纯函数', () => {
     expect(extractConstStringArray('const OTHER = 1', SHARED_TREE_CONST).error).toBeDefined()
     expect(extractTreeRootSegment('return join(other(), x)').error).toBeDefined()
   })
+
+  it('树段形态断言：宿主段 + 存储树末位段；缺末位段报 error（第四组形态校验纯函数）', () => {
+    expect(compareTreeSegmentsShape(['sessions', 'subagents', 'btw', 'ext-sessions'], 3, 'ext-sessions').error).toBeUndefined()
+    expect(compareTreeSegmentsShape(['sessions', 'subagents', 'btw'], 3, 'ext-sessions').error).toBeDefined()
+    expect(compareTreeSegmentsShape(['sessions', 'subagents', 'btw', 'other-root'], 3, 'ext-sessions').error).toBeDefined()
+  })
+
+  it('域 6 提取器：doExport 裸字面量三段提取（树根段 / 文件段 / 内联正则；形态不符报 error）', () => {
+    const block = extractFunctionBlock(sessionReaderViewSrc(), SR_VIEW_FN_ANCHOR)
+    expect(block.error).toBeUndefined()
+    expect(extractViewTreeRootSegment(block.text).value).toBe('ext-sessions')
+    expect(extractViewFileSegment(block.text).value).toBe('session-view.md')
+    expect(extractViewSessionIdRegex(block.text).value).toBe(DEFAULT_REGEX)
+    // 调用形态锁定：基址 / 变量名 / .test 目标任一变化 → error（宁可误报不可漏报）
+    expect(extractViewTreeRootSegment(`const outDir = join(dataRoot(), 'ext-sessions', resolved.sessionId)`).error).toBeDefined()
+    expect(extractViewFileSegment(`const outPath = join(target, 'session-view.md')`).error).toBeDefined()
+    expect(extractViewSessionIdRegex(`if (!${DEFAULT_REGEX}.test(sessionId)) {`).error).toBeDefined()
+  })
 })
 
 // ── fixture 生成（源文件真实形态：函数块 + 常量）────────────────────────
 
-const DEFAULT_TREE_SEGMENTS = ['sessions', 'subagents', 'btw']
+const DEFAULT_TREE_SEGMENTS = ['sessions', 'subagents', 'btw', 'ext-sessions']
 
-const sharedPathsSrc = ({ segment = 'artifacts', regex = DEFAULT_REGEX, treeSegments = DEFAULT_TREE_SEGMENTS } = {}) =>
+const sharedPathsSrc = ({
+  segment = 'artifacts',
+  regex = DEFAULT_REGEX,
+  storeSegment = 'ext-sessions',
+  treeSegments = DEFAULT_TREE_SEGMENTS,
+  bgTasksSegment = 'background-tasks',
+  viewFileSegment = 'session-view.md',
+  subagentsSegment = 'subagents',
+} = {}) =>
   [
+    `export const ${STORE_SEGMENT_CONST} = '${storeSegment}'`,
+    ``,
+    `const ${SHARED_PATTERN_CONST} = ${regex}`,
+    ``,
     `export function ${SHARED_FN}(sessionId: string, dataDir?: string): string {`,
-    `  if (!${regex}.test(sessionId)) {`,
-    `    throw new Error('invalid sessionId (path traversal blocked): ' + sessionId)`,
-    `  }`,
-    `  return join(dataDir ?? getDataDir(), '${segment}', sessionId)`,
+    `  assertPiSessionId(sessionId)`,
+    `  return join(getSessionStoreDir(dataDir), sessionId, '${segment}')`,
     `}`,
     ``,
+    // 第五组（域 5）对拍权威函数：bgTasksSegment = null 注入「函数缺席」形态
+    ...(bgTasksSegment
+      ? [
+          `export function ${SHARED_BG_TASKS_FN}(sessionId: string, dataDir?: string): string {`,
+          `  assertPiSessionId(sessionId)`,
+          `  return join(getSessionStoreDir(dataDir), sessionId, '${bgTasksSegment}')`,
+          `}`,
+          ``,
+        ]
+      : []),
+    // 第六组（域 6）对拍权威函数：viewFileSegment = null 注入「函数缺席」形态
+    ...(viewFileSegment
+      ? [
+          `export function ${SHARED_VIEW_FN}(sessionId: string, dataDir?: string): string {`,
+          `  assertPiSessionId(sessionId)`,
+          `  return join(getSessionStoreDir(dataDir), sessionId, '${viewFileSegment}')`,
+          `}`,
+          ``,
+        ]
+      : []),
+    // 第七组（域 9）对拍权威函数：subagentsSegment = null 注入「函数缺席」形态
+    ...(subagentsSegment
+      ? [
+          `export function getSessionSubagentsDir(sessionId: string, dataDir?: string): string {`,
+          `  assertPiSessionId(sessionId)`,
+          `  return join(getSessionStoreDir(dataDir), sessionId, '${subagentsSegment}')`,
+          `}`,
+          ``,
+        ]
+      : []),
     // treeSegments = null 注入「常量缺席」形态（守卫第四组提取失败一律 fail）
     ...(treeSegments
       ? [`export const ${SHARED_TREE_CONST} = [${treeSegments.map((s) => `'${s}'`).join(', ')}] as const`, '']
       : []),
   ].join('\n')
 
-const mirrorSystemPromptSrc = ({ segmentConst = 'artifacts', regex = DEFAULT_REGEX, useConst = true } = {}) =>
+const mirrorSystemPromptSrc = ({
+  segmentConst = 'artifacts',
+  storeSegmentConst = 'ext-sessions',
+  regex = DEFAULT_REGEX,
+  useConst = true,
+} = {}) =>
   [
+    `export const ${STORE_SEGMENT_CONST} = '${storeSegmentConst}'`,
     `export const ${MIRROR_SEGMENT_CONST} = '${segmentConst}'`,
     ``,
     `export function ${MIRROR_FN}(sessionId: string): string {`,
@@ -151,8 +230,8 @@ const mirrorSystemPromptSrc = ({ segmentConst = 'artifacts', regex = DEFAULT_REG
     `    throw new Error('invalid sessionId (path traversal blocked): ' + sessionId)`,
     `  }`,
     useConst
-      ? `  return path.join(resolveDataDir(), ${MIRROR_SEGMENT_CONST}, sessionId)`
-      : `  return path.join(resolveDataDir(), 'artifacts', sessionId)`,
+      ? `  return path.join(resolveDataDir(), ${STORE_SEGMENT_CONST}, sessionId, ${MIRROR_SEGMENT_CONST})`
+      : `  return path.join(resolveDataDir(), 'ext-sessions', sessionId, 'artifacts')`,
     `}`,
     ``,
   ].join('\n')
@@ -179,47 +258,189 @@ const runtimePiPathsSrc = ({ regex = DEFAULT_REGEX, treeSegments = DEFAULT_TREE_
     '',
   ].join('\n')
 
+// 第五组（域 5）fixture：base-tool-enhance registry 双引号形态（包内 prettier 风格）
+const bteRegistrySrc = ({ storeSegment = 'ext-sessions', domainSegment = 'background-tasks', regex = DEFAULT_REGEX } = {}) =>
+  [
+    `export const ${BTE_STORE_SEGMENT_CONST} = "${storeSegment}"`,
+    `export const ${BTE_DOMAIN_SEGMENT_CONST} = "${domainSegment}"`,
+    ``,
+    `function assertPiSessionId(sessionId: string): void {`,
+    `  if (!${regex}.test(sessionId)) {`,
+    `    throw new Error('invalid sessionId (path traversal blocked): ' + sessionId)`,
+    `  }`,
+    `}`,
+    ``,
+    `export function getRegistryPath(dataDir: string, sessionId: string): string {`,
+    `  assertPiSessionId(sessionId);`,
+    `  return join(dataDir, ${BTE_STORE_SEGMENT_CONST}, sessionId, ${BTE_DOMAIN_SEGMENT_CONST}, "registry.json");`,
+    `}`,
+    ``,
+  ].join('\n')
+
+// 第六组（域 6）fixture：session-reader tool-handler 裸字面量形态（doExport 落盘段缩样）
+const sessionReaderViewSrc = ({ treeSegment = 'ext-sessions', fileSegment = 'session-view.md', regex = DEFAULT_REGEX } = {}) =>
+  [
+    `async function doExport(`,
+    `  params: SessionReadParams,`,
+    `  agentDir: string,`,
+    `): Promise<ToolResult> {`,
+    `  if (!${regex}.test(resolved.sessionId)) {`,
+    `    throw err('导出拒绝')`,
+    `  }`,
+    `  const outDir = join(dirname(agentDir), '${treeSegment}', resolved.sessionId)`,
+    `  const outPath = join(outDir, '${fileSegment}')`,
+    `  await mkdir(outDir, { recursive: true })`,
+    `}`,
+    ``,
+  ].join('\n')
+
+// 第七组（域 9）fixture：session-reader discovery roots 常量镜像形态（树根段 / subagent
+// 域段 / 分区名正则；drift 注入任一字面量观察守卫红）
+const sessionReaderDiscoveryRootsSrc = ({
+  storeSegment = 'ext-sessions',
+  subagentsSegment = 'subagents',
+  regex = DEFAULT_REGEX,
+} = {}) =>
+  [
+    `const SESSIONS_DIRNAME = 'sessions'`,
+    `const SUBAGENTS_DIRNAME = '${subagentsSegment}'`,
+    ``,
+    `const ${STORE_SEGMENT_CONST} = '${storeSegment}'`,
+    ``,
+    `const ${SHARED_PATTERN_CONST} = ${regex}`,
+    ``,
+  ].join('\n')
+
 /**
  * tmp mirror 工厂：目录布局对齐守卫 ROOT 相对路径（packages/shared/src、extensions/taiji/
- * system-prompt/src、packages/runtime/src/infra/pi）。overrides 覆盖任一侧公式（漂移
- * 注入点），missing 指定不落盘的文件。root/落盘/清理/守卫副本装置见 guard-mirror.mjs。
+ * system-prompt/src、packages/runtime/src/infra/pi、extensions/universal/base-tool-enhance/
+ * src/background、extensions/universal/session-reader/src）。overrides 覆盖任一侧公式
+ * （漂移注入点），missing 指定不落盘的文件。root/落盘/清理/守卫副本装置见 guard-mirror.mjs。
  */
-function makeMirror({ shared = {}, mirror = {}, runtime = {}, missing = [] } = {}) {
+function makeMirror({ shared = {}, mirror = {}, runtime = {}, bte = {}, sr = {}, srRoots = {}, missing = [] } = {}) {
   return makeGuardMirror({
     prefix: 'artifact-formula-fx-',
-    files: {    'packages/shared/src/paths.ts': sharedPathsSrc(shared),
-    'extensions/taiji/system-prompt/src/index.ts': mirrorSystemPromptSrc(mirror),
-    'packages/runtime/src/infra/pi/pi-paths.ts': runtimePiPathsSrc(runtime),
+    files: {
+      'packages/shared/src/paths.ts': sharedPathsSrc(shared),
+      'extensions/taiji/system-prompt/src/index.ts': mirrorSystemPromptSrc(mirror),
+      'packages/runtime/src/infra/pi/pi-paths.ts': runtimePiPathsSrc(runtime),
+      'extensions/universal/base-tool-enhance/src/background/registry.ts': bteRegistrySrc(bte),
+      'extensions/universal/session-reader/src/tool-handler.ts': sessionReaderViewSrc(sr),
+      'extensions/universal/session-reader/src/discovery/roots.ts': sessionReaderDiscoveryRootsSrc(srRoots),
     },
     missing,
     script: SCRIPT,
-  }
-)}
-
+  })
+}
 
 describe('CLI 集成（守卫脚本 × tmp mirror）', () => {
-  it('三方一致 → exit 0，各条比较逐一报一致（含 runtime 第三源）', () => {
+  it('三方一致 → exit 0，各条比较逐一报一致（含 runtime 第三源与存储树段）', () => {
     const fx = makeMirror()
     try {
       const r = fx.run()
       expect(r.status).toBe(0)
       expect(r.stdout).toContain('✓ 产物目录公式对拍通过')
-      expect(r.stdout).toContain("段名字面量一致（'artifacts'")
+      expect(r.stdout).toContain("域段字面量一致（'artifacts'")
+      expect(r.stdout).toContain(`存储树根段字面量一致（'ext-sessions'，shared ${STORE_SEGMENT_CONST} ↔ 镜像）`)
       expect(r.stdout).toContain(`sessionId 校验正则字面量一致（${DEFAULT_REGEX}）`)
       expect(r.stdout).toContain(`runtime ${RUNTIME_PATTERN_CONST} 与 shared sessionId 正则一致（${DEFAULT_REGEX}）`)
-      expect(r.stdout).toContain(`镜像 ${MIRROR_FN} 经 ${MIRROR_SEGMENT_CONST} 拼段名`)
+      expect(r.stdout).toContain(`镜像 ${MIRROR_FN} 经 ${STORE_SEGMENT_CONST} + ${MIRROR_SEGMENT_CONST} 拼路径`)
+      expect(r.stdout).toContain(`存储树末位段一致（${SHARED_TREE_CONST} 末位 ↔ shared ${STORE_SEGMENT_CONST}='ext-sessions'）`)
+      // 第五组（域 5）：registry 镜像三字面量对拍
+      expect(r.stdout).toContain(`域 5 存储树根段一致（'ext-sessions'，shared ↔ base-tool-enhance 镜像）`)
+      expect(r.stdout).toContain(`域 5 后台任务域段一致（'background-tasks'，shared ${SHARED_BG_TASKS_FN} ↔ 镜像常量）`)
+      expect(r.stdout).toContain(`域 5 sessionId 校验正则一致（${DEFAULT_REGEX}）`)
+      // 第六组（域 6）：session-reader 镜像三字面量对拍
+      expect(r.stdout).toContain(`域 6 存储树根段一致（'ext-sessions'，shared ↔ session-reader 镜像）`)
+      expect(r.stdout).toContain(`域 6 导出文件段一致（'session-view.md'，shared ${SHARED_VIEW_FN} ↔ 镜像字面量）`)
+      expect(r.stdout).toContain(`域 6 sessionId 校验正则一致（${DEFAULT_REGEX}）`)
+      // 第七组（域 9）：session-reader discovery 镜像三字面量对拍
+      expect(r.stdout).toContain(`域 9 存储树根段一致（'ext-sessions'，shared ↔ session-reader discovery 镜像）`)
+      expect(r.stdout).toContain(`域 9 subagent 域段一致（'subagents'，shared getSessionSubagentsDir ↔ 镜像常量）`)
+      expect(r.stdout).toContain(`域 9 sessionId 校验正则一致（${DEFAULT_REGEX}）`)
     } finally {
       fx.cleanup()
     }
   })
 
-  it('漂移红（镜像段名常量与 shared join 字面量不一致）→ exit 1，报双侧值', () => {
+  it('漂移红（域 9 discovery 镜像 subagent 域段与 shared getSessionSubagentsDir 不一致）→ exit 1，报双侧值', () => {
+    const fx = makeMirror({ srRoots: { subagentsSegment: 'sub-agent' } })
+    try {
+      const r = fx.run()
+      expect(r.status).toBe(1)
+      expect(r.stderr).toContain(`域 9 subagent 域段漂移: shared='subagents' vs 镜像='sub-agent'`)
+      expect(r.stderr).toContain('恢复动作')
+    } finally {
+      fx.cleanup()
+    }
+  })
+
+  it('漂移红（域 9 discovery 镜像分区名正则与 shared 不一致）→ exit 1，报双侧值', () => {
+    const fx = makeMirror({ srRoots: { regex: '/^[A-Za-z0-9_-]+$/' } })
+    try {
+      const r = fx.run()
+      expect(r.status).toBe(1)
+      expect(r.stderr).toContain(`域 9 sessionId 校验正则漂移: shared=${DEFAULT_REGEX} vs 镜像=/^[A-Za-z0-9_-]+$/`)
+      expect(r.stderr).toContain('恢复动作')
+    } finally {
+      fx.cleanup()
+    }
+  })
+
+  it('漂移红（域 6 session-reader 镜像导出文件段与 shared getSessionViewPath 不一致）→ exit 1，报双侧值', () => {
+    const fx = makeMirror({ sr: { fileSegment: 'session-view.txt' } })
+    try {
+      const r = fx.run()
+      expect(r.status).toBe(1)
+      expect(r.stderr).toContain(`域 6 导出文件段漂移: shared='session-view.md' vs 镜像='session-view.txt'`)
+      expect(r.stderr).toContain('恢复动作')
+    } finally {
+      fx.cleanup()
+    }
+  })
+
+  it('漂移红（域 5 registry 镜像域段与 shared 后台任务域段不一致）→ exit 1，报双侧值', () => {
+    const fx = makeMirror({ bte: { domainSegment: 'background-task' } })
+    try {
+      const r = fx.run()
+      expect(r.status).toBe(1)
+      expect(r.stderr).toContain("域 5 域段漂移: shared='background-tasks' vs 镜像='background-task'")
+      expect(r.stderr).toContain('恢复动作')
+    } finally {
+      fx.cleanup()
+    }
+  })
+
+  it('漂移红（镜像域段常量与 shared join 字面量不一致）→ exit 1，报双侧值', () => {
     const fx = makeMirror({ mirror: { segmentConst: 'artifact' } })
     try {
       const r = fx.run()
       expect(r.status).toBe(1)
-      expect(r.stderr).toContain("段名字面量漂移: shared='artifacts' vs 镜像='artifact'")
+      expect(r.stderr).toContain("域段字面量漂移: shared='artifacts' vs 镜像='artifact'")
       expect(r.stderr).toContain('恢复动作')
+    } finally {
+      fx.cleanup()
+    }
+  })
+
+  it('漂移红（镜像树根段常量与 shared 常量不一致）→ exit 1（存储树根段对拍非恒绿）', () => {
+    const fx = makeMirror({ mirror: { storeSegmentConst: 'ext-session' } })
+    try {
+      const r = fx.run()
+      expect(r.status).toBe(1)
+      expect(r.stderr).toContain("存储树根段字面量漂移: shared='ext-sessions' vs 镜像='ext-session'")
+      expect(r.stderr).toContain('恢复动作')
+    } finally {
+      fx.cleanup()
+    }
+  })
+
+  it('漂移红（shared 树段常量缺存储树末位段）→ exit 1（形态断言非恒绿）', () => {
+    const fx = makeMirror({ shared: { treeSegments: ['sessions', 'subagents', 'btw'] } })
+    try {
+      const r = fx.run()
+      expect(r.status).toBe(1)
+      expect(r.stderr).toContain(`须含 pi 宿主 ${RUNTIME_TREE_FNS.length} 段 + 末位存储树根段 'ext-sessions'`)
     } finally {
       fx.cleanup()
     }
@@ -242,7 +463,7 @@ describe('CLI 集成（守卫脚本 × tmp mirror）', () => {
     try {
       const r = fx.run()
       expect(r.status).toBe(1)
-      expect(r.stderr).toContain(`镜像 ${MIRROR_FN} 未经 ${MIRROR_SEGMENT_CONST} 拼段名`)
+      expect(r.stderr).toContain(`镜像 ${MIRROR_FN} 未经段常量拼路径`)
       expect(r.stderr).toContain('重写死字面量会被本守卫漏掉漂移')
     } finally {
       fx.cleanup()
@@ -263,7 +484,7 @@ describe('CLI 集成（守卫脚本 × tmp mirror）', () => {
   })
 
   it('漂移红（runtime btw 树根段与 shared 常量第三位不一致）→ exit 1（证明 ④ 非恒绿）', () => {
-    const fx = makeMirror({ runtime: { treeSegments: ['sessions', 'subagents', 'btw-lines'] } })
+    const fx = makeMirror({ runtime: { treeSegments: ['sessions', 'subagents', 'btw-lines', 'ext-sessions'] } })
     try {
       const r = fx.run()
       expect(r.status).toBe(1)
@@ -302,6 +523,28 @@ describe('CLI 集成（守卫脚本 × tmp mirror）', () => {
       const r = fx.run()
       expect(r.status).toBe(1)
       expect(r.stderr).toContain('runtime pi-paths 源文件 缺失')
+    } finally {
+      fx.cleanup()
+    }
+  })
+
+  it('域 6 镜像源文件缺失 → exit 1，报 session-reader tool-handler 缺失路径', () => {
+    const fx = makeMirror({ missing: ['extensions/universal/session-reader/src/tool-handler.ts'] })
+    try {
+      const r = fx.run()
+      expect(r.status).toBe(1)
+      expect(r.stderr).toContain('session-reader tool-handler 源文件 缺失')
+    } finally {
+      fx.cleanup()
+    }
+  })
+
+  it('域 9 镜像源文件缺失 → exit 1，报 session-reader discovery roots 缺失路径', () => {
+    const fx = makeMirror({ missing: ['extensions/universal/session-reader/src/discovery/roots.ts'] })
+    try {
+      const r = fx.run()
+      expect(r.status).toBe(1)
+      expect(r.stderr).toContain('session-reader discovery roots 源文件 缺失')
     } finally {
       fx.cleanup()
     }

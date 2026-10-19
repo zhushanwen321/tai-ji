@@ -1,6 +1,11 @@
 /**
  * canvas 单测共享设施：tmp 目录（自建自删，fs-guard 白名单内）、确定性 id 序列、
  * 画布构造 helper（各阶段形态的画布推进）。
+ *
+ * 布局（session-store-layout-inversion D4）：CanvasService 的落盘根 = 注入 dataDir 下的
+ * ext-sessions 树（`<dataDir>/ext-sessions/<ownerSessionId>/canvases/<canvasId>/`，
+ * 路径推导走 shared getSessionCanvasesDir SSOT）；服务方法全部带归属会话参数
+ * （mutate/request sid、readState、listCanvases），默认 SID 常量供各测试统一。
  */
 import { mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
@@ -9,6 +14,11 @@ import { expect } from 'vitest'
 import { CanvasService } from '../canvas-service.js'
 import { isCanvasDomainError } from '../canvas-domain.js'
 import type { CanvasMutateReply, CanvasState } from '@zhushanwen/extension-protocol'
+
+/** 默认归属会话 id（各 helper 统一；跨会话拒绝用例用 SID_B 对照）。 */
+export const SID = 'sid-owner'
+/** 对照会话 id（跨会话拒绝 / 清单过滤用例的「非 owner」侧）。 */
+export const SID_B = 'sid-other'
 
 export function makeTmpCanvasDir(): string {
   return mkdtempSync(join(tmpdir(), 'taiji-canvas-test-'))
@@ -30,9 +40,9 @@ export interface ServiceHandle { // oe-exempt:20261015:framework:画布域类型
   dispose: () => void
 }
 
-export function makeService(opts?: { onUpdated?: (u: { canvasId: string; evType: string; eventId: string; summary: string }) => void }): ServiceHandle {
+export function makeService(opts?: { onUpdated?: (u: { canvasId: string; ownerSessionId: string; evType: string; eventId: string; summary: string }) => void }): ServiceHandle {
   const dir = makeTmpCanvasDir()
-  const svc = new CanvasService({ canvasesDir: dir, generateId: makeSeqIdGen(), onUpdated: opts?.onUpdated })
+  const svc = new CanvasService({ dataDir: dir, generateId: makeSeqIdGen(), onUpdated: opts?.onUpdated })
   return { svc, dir, dispose: (): void => { svc.dispose(); removeDir(dir) } }
 }
 
@@ -42,12 +52,12 @@ export interface TestCanvas { // oe-exempt:20261015:framework:画布域类型契
   state: () => CanvasState
 }
 
-/** 最小画布：根三要素。 */
-export function createCanvas(svc: CanvasService, actor: 'user' | 'agent' = 'agent', statement = '如何落地多引擎支持'): TestCanvas {
-  const reply = svc.mutate({ action: 'create', params: { statement, criterias: ['四引擎全部可用且互切无感'], scopeExclusions: ['不做引擎自研'] } }, actor)
+/** 最小画布：根三要素（owner = sid 入参，缺省 SID）。 */
+export function createCanvas(svc: CanvasService, actor: 'user' | 'agent' = 'agent', statement = '如何落地多引擎支持', sid: string = SID): TestCanvas {
+  const reply = svc.mutate({ action: 'create', params: { statement, criterias: ['四引擎全部可用且互切无感'], scopeExclusions: ['不做引擎自研'] } }, actor, sid)
   if (!reply.ok) throw new Error(`create 失败：${JSON.stringify(reply.error)}`)
   const canvasId = reply.canvasId as string
-  return { canvasId, rootId: svc.readState(canvasId).root.nodeId, state: () => svc.readState(canvasId) }
+  return { canvasId, rootId: svc.readState(canvasId, sid).root.nodeId, state: () => svc.readState(canvasId, sid) }
 }
 
 export interface GrownCanvas extends TestCanvas { // oe-exempt:20261015:framework:画布域类型契约（数据形状/端口/测试 harness，非抽象接口单实现）
@@ -72,7 +82,7 @@ export function growCanvas(svc: CanvasService, base: TestCanvas, opts?: { o1Disp
       ],
       reason: '按 MECE 分解引擎层',
     },
-  }, 'agent')
+  }, 'agent', SID)
   if (!grow.ok) throw new Error(`grow 失败：${JSON.stringify(grow.error)}`)
   return { ...base, q1, o1, o2 }
 }
@@ -84,16 +94,16 @@ export interface ConvergedCanvas extends GrownCanvas { // oe-exempt:20261015:fra
 /** 推进到「三门禁全绿但未收敛」的画布（converge-check / export 门禁测试的前置形态）。 */
 export function buildAllGreenCanvas(svc: CanvasService, base: TestCanvas): ConvergedCanvas {
   const g = growCanvas(svc, base, { o1Dispatchable: true })
-  const select = svc.mutate({ action: 'select', params: { canvasId: g.canvasId, questionId: g.q1, optionId: g.o1, reason: '长期演进性优于单形态的短期实现速度' } }, 'user')
+  const select = svc.mutate({ action: 'select', params: { canvasId: g.canvasId, questionId: g.q1, optionId: g.o1, reason: '长期演进性优于单形态的短期实现速度' } }, 'user', SID)
   if (!select.ok) throw new Error(`select 失败：${JSON.stringify(select.error)}`)
-  const patch = svc.mutate({ action: 'patch', params: { canvasId: g.canvasId, nodeId: g.o1, criterias: ['抽象层单测覆盖率 ≥ 90%'], reason: '补执行叶子判据' } }, 'user')
+  const patch = svc.mutate({ action: 'patch', params: { canvasId: g.canvasId, nodeId: g.o1, criterias: ['抽象层单测覆盖率 ≥ 90%'], reason: '补执行叶子判据' } }, 'user', SID)
   if (!patch.ok) throw new Error(`patch 失败：${JSON.stringify(patch.error)}`)
-  const propose = svc.mutate({ action: 'transition', params: { canvasId: g.canvasId, nodeId: g.o1, to: 'under-review', reason: '提案进入审查' } }, 'agent')
+  const propose = svc.mutate({ action: 'transition', params: { canvasId: g.canvasId, nodeId: g.o1, to: 'under-review', reason: '提案进入审查' } }, 'agent', SID)
   if (!propose.ok) throw new Error(`transition(under-review) 失败：${JSON.stringify(propose.error)}`)
-  const transition = svc.mutate({ action: 'transition', params: { canvasId: g.canvasId, nodeId: g.o1, to: 'passed', reason: '审查通过：判据齐备且支撑论据已核实' } }, 'user')
+  const transition = svc.mutate({ action: 'transition', params: { canvasId: g.canvasId, nodeId: g.o1, to: 'passed', reason: '审查通过：判据齐备且支撑论据已核实' } }, 'user', SID)
   if (!transition.ok) throw new Error(`transition 失败：${JSON.stringify(transition.error)}`)
   // 发起审查（agent）——同时消费清空 select/patch 产生的待重审路径。
-  const review = svc.mutate({ action: 'review-request', params: { canvasId: g.canvasId } }, 'agent')
+  const review = svc.mutate({ action: 'review-request', params: { canvasId: g.canvasId } }, 'agent', SID)
   if (!review.ok) throw new Error(`review-request 失败：${JSON.stringify(review.error)}`)
   return { ...g, leaf: g.o1 }
 }
@@ -101,7 +111,7 @@ export function buildAllGreenCanvas(svc: CanvasService, base: TestCanvas): Conve
 /** 推进到收敛终态的画布（converge-check 成功路径的完整前置链）。 */
 export function buildConvergedCanvas(svc: CanvasService, base: TestCanvas): ConvergedCanvas {
   const green = buildAllGreenCanvas(svc, base)
-  const converge = svc.mutate({ action: 'converge-check', params: { canvasId: green.canvasId } }, 'user')
+  const converge = svc.mutate({ action: 'converge-check', params: { canvasId: green.canvasId } }, 'user', SID)
   if (!converge.ok) throw new Error(`converge-check 失败：${JSON.stringify(converge.error)}`)
   return green
 }
@@ -122,45 +132,45 @@ export function runActionHappyPath(
   }
   switch (action) {
     case 'create':
-      return exec(svc.mutate({ action: 'create', params: { statement: '独立画布', criterias: ['c1'], scopeExclusions: [] } }, actor as 'user' | 'agent'))
+      return exec(svc.mutate({ action: 'create', params: { statement: '独立画布', criterias: ['c1'], scopeExclusions: [] } }, actor as 'user' | 'agent', SID))
     case 'grow':
-      return exec(svc.mutate({ action: 'grow', params: { canvasId: base.canvasId, batch: [{ id: 'g1', type: 'question', content: 'g', attachTo: base.rootId, edge: 'decompose' }], reason: 'r' } }, actor as 'agent'))
+      return exec(svc.mutate({ action: 'grow', params: { canvasId: base.canvasId, batch: [{ id: 'g1', type: 'question', content: 'g', attachTo: base.rootId, edge: 'decompose' }], reason: 'r' } }, actor as 'agent', SID))
     case 'patch':
-      return exec(svc.mutate({ action: 'patch', params: { canvasId: base.canvasId, nodeId: base.rootId, content: '改述后的问题', reason: 'r' } }, actor as 'user' | 'agent'))
+      return exec(svc.mutate({ action: 'patch', params: { canvasId: base.canvasId, nodeId: base.rootId, content: '改述后的问题', reason: 'r' } }, actor as 'user' | 'agent', SID))
     case 'decide-direction':
-      return exec(svc.mutate({ action: 'decide-direction', params: { canvasId: base.canvasId, direction: 'top-down', reason: '目标清晰' } }, actor as 'user'))
+      return exec(svc.mutate({ action: 'decide-direction', params: { canvasId: base.canvasId, direction: 'top-down', reason: '目标清晰' } }, actor as 'user', SID))
     case 'select': {
       const g = growCanvas(svc, base)
-      return exec(svc.mutate({ action: 'select', params: { canvasId: g.canvasId, questionId: g.q1, optionId: g.o1, reason: 'r' } }, actor as 'user' | 'agent'))
+      return exec(svc.mutate({ action: 'select', params: { canvasId: g.canvasId, questionId: g.q1, optionId: g.o1, reason: 'r' } }, actor as 'user' | 'agent', SID))
     }
     case 'transition':
-      return exec(svc.mutate({ action: 'transition', params: { canvasId: base.canvasId, nodeId: base.rootId, to: 'under-review', reason: '提案' } }, actor as 'user' | 'agent'))
+      return exec(svc.mutate({ action: 'transition', params: { canvasId: base.canvasId, nodeId: base.rootId, to: 'under-review', reason: '提案' } }, actor as 'user' | 'agent', SID))
     case 'comment':
-      return exec(svc.mutate({ action: 'comment', params: { canvasId: base.canvasId, anchorId: base.rootId, text: '议题' } }, actor as 'user'))
+      return exec(svc.mutate({ action: 'comment', params: { canvasId: base.canvasId, anchorId: base.rootId, text: '议题' } }, actor as 'user', SID))
     case 'comment-respond': {
-      expectOk(svc.mutate({ action: 'comment', params: { canvasId: base.canvasId, anchorId: base.rootId, text: '议题' } }, 'user'))
-      const commentId = svc.readState(base.canvasId).comments[0]!.id
-      return exec(svc.mutate({ action: 'comment-respond', params: { canvasId: base.canvasId, commentId, disposition: 'adopted', note: '落实说明' } }, actor as 'agent'))
+      expectOk(svc.mutate({ action: 'comment', params: { canvasId: base.canvasId, anchorId: base.rootId, text: '议题' } }, 'user', SID))
+      const commentId = svc.readState(base.canvasId, SID).comments[0]!.id
+      return exec(svc.mutate({ action: 'comment-respond', params: { canvasId: base.canvasId, commentId, disposition: 'adopted', note: '落实说明' } }, actor as 'agent', SID))
     }
     case 'review-request':
-      return exec(svc.mutate({ action: 'review-request', params: { canvasId: base.canvasId } }, actor as 'user' | 'agent'))
+      return exec(svc.mutate({ action: 'review-request', params: { canvasId: base.canvasId } }, actor as 'user' | 'agent', SID))
     case 'review-append':
-      return exec(svc.mutate({ action: 'review-append', params: { canvasId: base.canvasId, round: 1, entries: [{ id: 'e1', round: 1, dimension: 'completeness', severity: 'must-fix', targetId: base.rootId, note: '缺口' }] } }, actor as 'review'))
+      return exec(svc.mutate({ action: 'review-append', params: { canvasId: base.canvasId, round: 1, entries: [{ id: 'e1', round: 1, dimension: 'completeness', severity: 'must-fix', targetId: base.rootId, note: '缺口' }] } }, actor as 'review', SID))
     case 'review-resolve': {
-      expectOk(svc.mutate({ action: 'review-append', params: { canvasId: base.canvasId, round: 1, entries: [{ id: 'e1', round: 1, dimension: 'completeness', severity: 'must-fix', targetId: base.rootId, note: '缺口' }] } }, 'review'))
-      return exec(svc.mutate({ action: 'review-resolve', params: { canvasId: base.canvasId, entryId: 'e1', disposition: 'accepted', note: '已修复' } }, actor as 'user' | 'agent'))
+      expectOk(svc.mutate({ action: 'review-append', params: { canvasId: base.canvasId, round: 1, entries: [{ id: 'e1', round: 1, dimension: 'completeness', severity: 'must-fix', targetId: base.rootId, note: '缺口' }] } }, 'review', SID))
+      return exec(svc.mutate({ action: 'review-resolve', params: { canvasId: base.canvasId, entryId: 'e1', disposition: 'accepted', note: '已修复' } }, actor as 'user' | 'agent', SID))
     }
     case 'converge-check': {
       const green = buildAllGreenCanvas(svc, base)
-      return exec(svc.mutate({ action: 'converge-check', params: { canvasId: green.canvasId } }, actor as 'user'))
+      return exec(svc.mutate({ action: 'converge-check', params: { canvasId: green.canvasId } }, actor as 'user', SID))
     }
     case 'export': {
       const conv = buildConvergedCanvas(svc, base)
-      return exec(svc.mutate({ action: 'export', params: { canvasId: conv.canvasId, target: { target: 'planning-doc' } } }, actor as 'user' | 'agent'))
+      return exec(svc.mutate({ action: 'export', params: { canvasId: conv.canvasId, target: { target: 'planning-doc' } } }, actor as 'user' | 'agent', SID))
     }
     case 'dispatch': {
       const conv = buildConvergedCanvas(svc, base)
-      return exec(svc.mutate({ action: 'dispatch', params: { canvasId: conv.canvasId, nodeId: conv.leaf, pointer: 'downstream/design' } }, actor as 'user'))
+      return exec(svc.mutate({ action: 'dispatch', params: { canvasId: conv.canvasId, nodeId: conv.leaf, pointer: 'downstream/design' } }, actor as 'user', SID))
     }
   }
 }

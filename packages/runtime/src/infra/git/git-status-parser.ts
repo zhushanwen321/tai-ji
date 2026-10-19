@@ -3,7 +3,7 @@
  *
  * 纯函数、无 IO，归 shared（与 ignore-parser.ts 同范式：纯计算放 shared，IO 走 port）。
  * GitService 调 IGitExecutor.exec('status') 拿 raw stdout 后，经此函数解析——
- * IO 边界在 IGitExecutor port 处闭合，解析逻辑独立可测。
+ * IO 边界收束在 IGitExecutor port，解析逻辑独立可测。
  *
  * 迁移自 runtime/src/infra/git-status-parser.ts（原靠「§5.1 豁免」自我豁免 infra→services 直连）。
  * 现作为纯函数归 shared，services 经 @taiji/shared 引用，不构成分层违规。

@@ -23,7 +23,7 @@
  * ③ 判定同源：入清单约束/匹配语义与主进程 gateway/forward-keys.ts 配对契约同判定
  *   （渲染侧不可跨层 import 主进程模块，此处为镜像实现，键矩阵测试两侧对账）。
  *   guardComposerFocus 不用于转发派发：转发事件蕴含焦点在 WebContentsView，宿主 composer
- *   必然不在输入态（守卫针对的冲突场景不存在）。
+ *   必然不在输入态（检查针对的冲突场景不存在）。
  */
 import { onScopeDispose, watch } from 'vue'
 import { useEventListener } from '@vueuse/core'
@@ -56,7 +56,7 @@ export interface UseGlobalShortcutsOptions {
 }
 
 /** 键盘事件判定所需子集（KeyboardEvent 与转发测试桩共用形状） */
-export interface ShortcutInput { // oe-exempt:20261003:framework:类型契约先行——键盘编排契约层，键矩阵测试即消费面
+export interface ShortcutInput { // oe-exempt:20261003:framework:类型契约先行——键盘编排契约层，键矩阵测试即消费方
   key: string
   metaKey?: boolean
   ctrlKey?: boolean
@@ -108,11 +108,11 @@ export function useGlobalShortcuts(options: UseGlobalShortcutsOptions): void {
     { key: 'i', action: () => { onOpenImportSession() } },
     { key: 'b', commandId: 'toggle-sidebar', action: () => { sidebar.toggleCollapsed() } },
     // FR-16：⌘⇧P 打开启动预设选择 Popover（与 useAppCommands 注册的 open-preset-select 同源）。
-    // commandId 让 shortcutOverrides 生效（设置页可重录）；shift 守卫确保仅 ⌘⇧P 触发，避免 ⌘P 误命中。
+    // commandId 让 shortcutOverrides 生效（设置页可重录）；shift 检查确保仅 ⌘⇧P 触发，避免 ⌘P 误命中。
     // 默认无 override 时走 fallback：mod + 'p' + shift；fallback 的默认 shortcut 在 useAppCommands 声明为 'shift+p'。
     { key: 'p', shift: true, commandId: 'open-preset-select', action: () => { usePresetStore().requestOpen() } },
     // FR-16 fork 快捷键：⌘G 从末条 assistant 后台 fork（留在原线）；⌘⇧G 进 composer fork 模式。
-    // shift 守卫（keydown handler 内）区分同 key 的 shift/非 shift 项，避免 ⌘G 误命中 ⌘⇧G。
+    // shift 检查（keydown handler 内）区分同 key 的 shift/非 shift 项，避免 ⌘G 误命中 ⌘⇧G。
     // 每条 entry 形如 { key: 'g'…}：'g' 后 shift 字段决定修饰要求。
     { key: 'g', guardComposerFocus: true, action: () => { void forkFromLastAssistant() } },
     { key: 'g', shift: true, guardComposerFocus: true, action: () => { void enterForkModeFromLastAssistant() } },
@@ -150,7 +150,7 @@ export function useGlobalShortcuts(options: UseGlobalShortcutsOptions): void {
   const forwardList = deriveForwardAccelerators(keymap, commandStore.shortcutOverrides.value)
   void browserSetForwardKeys(forwardList)
   // ② settings 重录（overrides 运行时可变）→ 注册/注销增量重报（注销旧 accelerator + 注册新；
-  //    主进程 registry 幂等可乱序补报，丢失面由下次全量重报收敛——AGENTS 拉推分工的 push 臂）。
+  //    主进程 registry 幂等可乱序补报，丢失风险由下次全量重报收敛——AGENTS 拉推分工的 push 臂）。
   let prevForwardList = forwardList
   const stopOverridesWatch = watch(
     () => deriveForwardAccelerators(keymap, commandStore.shortcutOverrides.value),
@@ -242,7 +242,7 @@ function forwardedAcceleratorHits(accelerator: string, m: KeymapEntry, overrides
 }
 
 /**
- * composer 是否聚焦（全局快捷键守卫用）：activeElement 落在 composer-box 内即为聚焦。
+ * composer 是否聚焦（全局快捷键检查用）：activeElement 落在 composer-box 内即为聚焦。
  * composer-box 是 contenteditable 输入区（ComposerInput 根元素带 composer-box class + data-testid），
  * 用户在其中键入时 activeElement 是它或其后代；此时 ⌘G/⌘⇧G 不应触发 fork（与输入语义冲突）。
  */

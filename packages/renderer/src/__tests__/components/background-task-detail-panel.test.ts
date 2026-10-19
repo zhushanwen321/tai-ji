@@ -9,7 +9,7 @@
  * - 观察者（形态）：终态无 kill 按钮、跟随 interval 的启停（fake timers 计次）
  *
  * mock 策略：
- * - useBackgroundTasks mock：分区内容由测试直接 mutate（广播/终态翻转的注入面）；组件零
+ * - useBackgroundTasks mock：分区内容由测试直接 mutate（广播/终态翻转的注入点）；组件零
  *   listener 的契约使 mock 形态与真实 store 分区同构（reactive { tasks, loaded }）
  * - api/domains/background-task mock：output/kill RPC 回执可控
  * - vue-i18n 文件内 override（ui vitest.setup 先例）：t(key, named) 返回 `key(k=v)` 形态——
@@ -45,7 +45,7 @@ vi.mock('@taiji/core/transport/api/domains/background-task', () => ({
   kill: vi.fn(),
 }))
 
-// ── i18n 文件内 override：t(key, named) → `key(k=v)`（key 引用 + 参数双断言面）──
+// ── i18n 文件内 override：t(key, named) → `key(k=v)`（key 引用 + 参数双断言范围）──
 vi.mock('vue-i18n', async (importOriginal) => {
   const actual = await importOriginal<typeof import('vue-i18n')>()
   return {
@@ -105,7 +105,7 @@ beforeEach(() => {
   usePanelStore().loadSession(ROOT_PANEL_ID, SID)
   partitionState = reactive({ tasks: [], loaded: true })
   vi.spyOn(navigator.clipboard, 'writeText').mockResolvedValue(undefined)
-  // output 默认回执：非跟随用例（元信息/kill 组）挂载首拉不落 debug 噪音
+  // output 默认回执：非跟随用例（元信息/kill 组）挂载首次拉取不落 debug 噪音
   vi.mocked(backgroundTaskApi.output).mockResolvedValue(outputReply())
   useToast().toasts.value = []
   vi.useFakeTimers({ now: FIXED_NOW })
@@ -199,7 +199,7 @@ describe('BackgroundTaskDetailPanel 元信息渲染（G2）', () => {
 })
 
 describe('BackgroundTaskDetailPanel 输出跟随（D7：2s interval + 停止条件）', () => {
-  it('running：挂载首拉一次，随后每 2s 重拉（fake timers 计次）', async () => {
+  it('running：挂载首次拉取一次，随后每 2s 重新拉取（fake timers 计次）', async () => {
     partitionState.tasks = [makeEntry()]
     selectTask(TASK_ID)
     vi.mocked(backgroundTaskApi.output).mockResolvedValue(outputReply({ text: 'tail-1' }))

@@ -8,7 +8,7 @@
  *   corner「用户原文以分隔符开头——段首字面保留」、多条空行合并回单草稿；
  * - restoreRevokedDraft 层 2 兜底：混入无标记段 / 内嵌标记形态 / 单标记非末尾 / 无标记
  *   ——整条原样返回，不剥任何标记（宁合不裂，内容不丢优先）；
- * - 跨包可达性：index.ts allowlist 登记守卫。
+ * - 跨包可达性：index.ts allowlist 登记检查。
  *
  * 输入形态锚定（内核实装核实）：单条 = `原文\n<!--taiji:msg:<uuid>-->`（withDeliveryMarker
  * 恒尾附）；降级整批 = 各条已带标记的文本以 `\n\n---\n\n` 连接（buildBatchPayload BATCH_SEP）。

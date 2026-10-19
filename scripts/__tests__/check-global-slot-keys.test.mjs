@@ -1,7 +1,7 @@
 // scripts/__tests__/check-global-slot-keys.test.mjs
 //
-// C-state-20 守卫（scripts/check-global-slot-keys.mjs）的 fixture 单测：声明文件外的
-// 字面量必红 / 前缀越界必红 / 跨文件重复键必红 / 合规树绿——四态覆盖「守卫恒绿」与
+// C-state-20 检查（scripts/check-global-slot-keys.mjs）的 fixture 单测：声明文件外的
+// 字面量必红 / 前缀越界必红 / 跨文件重复键必红 / 合规树绿——四态覆盖「检查恒绿」与
 // 「误伤声明文件」两侧退化。fixture 全在 tmpdir（禁触真实仓库）。
 import { spawnSync } from "node:child_process";
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";

@@ -11,7 +11,7 @@ const REPO_ROOT = path.dirname(fileURLToPath(import.meta.url))
  *
  * 四 project 架构（W3 新增 visual-chromium；2026-09-15 新增 electron-smoke；electron 排除
  * real 轨 spec 族 + 新增 electron-real 承接，见 REAL_TRACK_SPECS 注释）：
- * - electron        : 行为 E2E mock 轨全量（_electron.launch + mock 构建产物），testIgnore visual/** + real 轨 spec 族（launch-app-real 与 mock bundle 互斥，按改动面单独跑）
+ * - electron        : 行为 E2E mock 轨全量（_electron.launch + mock 构建产物），testIgnore visual/** + real 轨 spec 族（launch-app-real 与 mock bundle 互斥，按改动范围单独跑）
  * - electron-real   : real 轨承接（真实 app 启动轨），testMatch = real 轨 spec 族；只为显式文件
  *                     命令（e2e-map REAL 族 run 形态）提供发现通道，不进任何门禁全量
  * - electron-smoke  : 行为 E2E 的 P0 smoke 子集（grep @p0-smoke 用例标签），CI e2e-behavior job
@@ -28,7 +28,7 @@ const REPO_ROOT = path.dirname(fileURLToPath(import.meta.url))
  * - workers: 1（Electron 多实例争抢 userData LOCK + 端口，强制串行；visual 也串行保证 baseline 稳定）
  *
  * smoke 子集圈定 SSOT = 本 project 的 grep 标签（@p0-smoke）；候选 = 覆盖「新建任务首条消息流 /
- * session 切换隔离 / composer slash / 侧栏核心交互 / 错误态收口 / 对话流渲染布局」的现存用例，
+ * session 切换隔离 / composer slash / 侧栏核心交互 / 错误态收尾 / 对话流渲染布局」的现存用例，
  * 名单与归宿纪律见 docs/TEST-STRATEGY.md「e2e 资产归宿纪律」章节。
  *
  * visual project 的 vite 由 e2e/visual/fixtures/visual-server.ts 的 worker-scoped fixture 管理
@@ -82,7 +82,7 @@ export default defineConfig({
       use: {},
     },
     {
-      // real 轨承接 project：真实 app 启动（launch-app-real / 真机轨），按改动面显式文件跑
+      // real 轨承接 project：真实 app 启动（launch-app-real / 真机轨），按改动范围显式文件跑
       // （docs/testing/e2e-map.json REAL/SKILLRELOAD/BTW/MODELS 各 rule 的 run 命令）。
       // 只为让显式文件命令在 electron project 排除 real 族后仍可发现测试；不得全量扫跑
       // （CI/PR/merge 门禁不跑本轨，AGENTS.md e2e 执行准则）

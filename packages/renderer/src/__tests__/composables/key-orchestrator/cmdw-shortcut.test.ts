@@ -72,7 +72,7 @@ describe('⌘W：yields⌘W 让位 + 层级序逐层关 + 全关后关窗', () =
     expect(windowClose).toHaveBeenCalledTimes(1)
   })
 
-  it('设置页（yieldsCmdW ✓）开着：⌘W 无动作——窗口不关、容器不动、模态不动（S7 让位守卫）', () => {
+  it('设置页（yieldsCmdW ✓）开着：⌘W 无动作——窗口不关、容器不动、模态不动（S7 让位检查）', () => {
     const dispose = registerModalSurface({
       surface: 'settings-modal',
       key: 'cmdw-settings',

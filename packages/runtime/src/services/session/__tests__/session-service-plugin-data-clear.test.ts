@@ -1,11 +1,11 @@
 /**
- * B5 plugin sessionData 清理的触发面测试（memory-leak-remediation §3.1 + §3.2-B5；触发面
+ * B5 plugin sessionData 清理的触发点测试（memory-leak-remediation §3.1 + §3.2-B5；触发点
  * 收窄 2026-09-15）。
  *
  * 锁定语义「**真删除才清**」：清理（tombstone 登记 + 分区摘除 + trash 软删除）绑定用户
  * 删除——lifecycle.delete（active / scanned 两分支）尾段经模块级 clearRemovedSessionData
  * 分发，插件数据与 session 本体一同进废纸篓（§3.1）；didDestroy 投递先行，插件 worker
- * 迟到的 set()/delete() 由 tombstone 写守卫丢弃（不复活文件）。
+ * 迟到的 set()/delete() 由 tombstone 写检查丢弃（不复活文件）。
  *
  * 三条 session **存活**路径反例（回归锚：曾因清理无条件挂在 removeSessionEntry 汇聚点，
  * pi 崩溃 respawn / forceQuit / restore 后插件空状态、旧数据只在废纸篓）：
@@ -20,7 +20,7 @@
  * 装置：真 SessionService（session-service-checkpoint.test.ts createSetup 同款轻量桩）+
  * 真 SessionDataStore（tmp configDir，自注册进分发表）。trash port 注入式 mock（禁触真实
  * 废纸篓）；sessionStore.refreshAll/invalidateScanCache/trash spy 掉（provider 重扫与真实
- * 废纸篓不属本域断言面）。
+ * 废纸篓不属本域断言范围）。
  *
  * 运行：cd packages/runtime && npx vitest run src/services/session/__tests__/session-service-plugin-data-clear.test.ts
  */
@@ -36,7 +36,7 @@ const mockTrashFile = async (filePath: string): Promise<void> => {
   trashState.calls.push(filePath)
   rmSync(filePath, { force: true })
 }
-// getPiAgentDir → tmp（removeSessionEntry 的 reapSessionBackgroundTasks fire-and-forget 腿
+// getPiAgentDir → tmp（removeSessionEntry 的 reapSessionBackgroundTasks fire-and-forget 路径
 // 读该目录，session-service-background-task.test.ts 同款隔离）
 const paths = vi.hoisted(() => ({ agentDir: '' }))
 vi.mock('../../../infra/pi/pi-paths.js', async (importOriginal) => {
@@ -48,6 +48,7 @@ import { SessionService } from '../session-service.js'
 import { MessageDispatcher } from '../message-dispatcher.js'
 import { SessionLifecycle } from '../session-lifecycle.js'
 import { SessionDataStore, isSessionDataCleared } from '../../plugin-service/session-data-store.js'
+import { getSessionPluginDataPath } from '@taiji/shared/paths'
 import { initRuntimeCheckpointStore } from '../runtime-checkpoint.js'
 import { PiConfigStore } from '../../../infra/pi/pi-config-store.js'
 import { PiSessionStore } from '../../../infra/pi/session-store.js'
@@ -65,8 +66,8 @@ const CLIENT_ACTIVITY_AT = 1_700_000_500_000
 let runDir: string
 let store: SessionDataStore
 
-/** plugin sessionData 持久化文件路径（SessionDataStore 内部推导同款）。 */
-const dataFile = (sid: string): string => join(runDir, 'session-data', `${sid}.json`)
+/** plugin sessionData 持久化文件路径（session 存储树域 4，SessionDataStore 内部推导同源）。 */
+const dataFile = (sid: string): string => getSessionPluginDataPath(sid, runDir)
 
 beforeAll(() => {
   runDir = mkdtempSync(join(tmpdir(), 'session-service-plugin-data-clear-'))
@@ -107,7 +108,7 @@ function createSetup(): Setup {
     destroySession: vi.fn(async () => undefined),
     destroyAll: vi.fn(async () => undefined),
   }
-  // 真删除链尾的 refreshAll（pi provider 盘上重扫）与 trash（真实废纸篓）不属本域断言面：
+  // 真删除链尾的 refreshAll（pi provider 盘上重扫）与 trash（真实废纸篓）不属本域断言范围：
   // spy 掉——refreshAll/invalidateScanCache no-op 化，trash 落 tmp 内 rm（mockTrashFile 同款
   // 语义，保 existsSync 断言可判）。
   const sessionStore = new PiSessionStore()
@@ -139,7 +140,7 @@ function createDispatcher(service: SessionService): MessageDispatcher {
     ensureActive: vi.fn(async () => { throw new Error('forceQuit path must not call ensureActive') }),
   }
   const pm = {
-    // forceQuit 入口守卫：getClient 非 null 才走强杀编排（null 会早退不触发收殓链）
+    // forceQuit 入口检查：getClient 非 null 才走强杀编排（null 会早退不触发收殓链）
     getClient: vi.fn(() => ({ lastActivityAt: CLIENT_ACTIVITY_AT, exited: false } as unknown as IPiEngine)),
     destroySession: vi.fn(async () => undefined),
   }
@@ -221,7 +222,7 @@ function createRestoreLifecycle(service: SessionService, sid: string, bodyFile: 
   return { lifecycle, notifyCreated, removeEntryOnService, pm }
 }
 
-describe('B5 触发面收窄：真删除才清 plugin sessionData（§3.1 trash 绑定用户删除）', () => {
+describe('B5 触发点收窄：真删除才清 plugin sessionData（§3.1 trash 绑定用户删除）', () => {
   it('真删除（lifecycle.delete active 分支）：tombstone + 文件进 trash + 迟到 set 被丢弃', async () => {
     const sid = 'sid-delete-active'
     const { service } = createSetup()
@@ -235,13 +236,13 @@ describe('B5 触发面收窄：真删除才清 plugin sessionData（§3.1 trash 
     // 用户删除（session-message-handler session.delete RPC 同链：facade.delete → lifecycle.delete）
     await service.delete(sid)
 
-    // 清理是 void…catch 分发（异步腿），trash 到达是微任务
+    // 清理是 void…catch 分发（异步路径），trash 到达是微任务
     await vi.waitFor(() => expect(trashState.calls).toContain(dataFile(sid)))
     expect(isSessionDataCleared(sid)).toBe(true)
     expect(existsSync(dataFile(sid))).toBe(false)
     expect(service.getSummary(sid)).toBeUndefined() // 真销毁完成（内存条目已收殓）
 
-    // didDestroy fire-and-forget 后插件 worker 迟到的 set：被写守卫丢弃，不复活文件
+    // didDestroy fire-and-forget 后插件 worker 迟到的 set：被写检查丢弃，不复活文件
     store.set(sid, 'k2', 'late-write')
     store.flushAll()
     expect(existsSync(dataFile(sid))).toBe(false)

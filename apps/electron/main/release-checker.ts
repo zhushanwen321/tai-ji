@@ -32,7 +32,7 @@
  * §6.5「全部源都在退避窗口才报 rateLimited」由此精确成立。
  * 退避记录点：源 latest fetch 撞 GitHub 403/429（适配层 rate-limited 分类）；
  * manifest fetch 撞 GitHub 403/429（两引擎同形态重建）。GitCode manifest 的
- * 403/429 是 auth_key 签名直链的签名/权限拒绝（§4.1），按普通失败收口不记退避，
+ * 403/429 是 auth_key 签名直链的签名/权限拒绝（§4.1），按普通失败收尾不记退避，
  * 由该源失败降级兜底。
  *
  * [manifest 填充（胜出源，§4.2⑤ 权威通路）]：manifest 是 release 资产之一，
@@ -93,7 +93,7 @@ const RATE_LIMIT_BACKOFF_MS =
  * [枚举同步锚点] 成员与 shared 的 UpdateSource 联合类型一一对应
  * （packages/shared/src/update.ts——shared 只导出类型无运行时值常量；适配层
  * RELEASE_SOURCE_HOSTS 的键是 host 用途名而非源名，不可作源枚举）。新增源时
- * 同批更新本常量，防类型面与运行时枚举双轨漂移。
+ * 同批更新本常量，防类型侧与运行时枚举双轨漂移。
  */
 const KNOWN_UPDATE_SOURCES: readonly UpdateSource[] = ['github', 'gitcode']
 
@@ -221,7 +221,7 @@ interface CacheEntry {
 /** 逐源尝试的失败记录（源降级登记与混合态判定的输入） */
 interface SourceAttemptFailure {
   source: UpdateSource
-  /** 失败归类（诊断 errorCode 字段透传，取 ReleaseFetchErrorKind / 收口语义值） */
+  /** 失败归类（诊断 errorCode 字段透传，取 ReleaseFetchErrorKind / 收尾语义值） */
   errorCode: string
 }
 
@@ -318,7 +318,7 @@ export class ReleaseChecker implements IReleaseChecker {
         continue
       }
       if (!release) {
-        // null 收口：404/非 2xx（该源无响应数据）→「未确认」桶（不写全局负缓存），试次源
+        // null 收尾：404/非 2xx（该源无响应数据）→「未确认」桶（不写全局负缓存），试次源
         failedSources.push({ source, errorCode: 'no-release' })
         continue
       }
@@ -417,18 +417,18 @@ export class ReleaseChecker implements IReleaseChecker {
   }
 
   /**
-   * 登记本轮检查的源选择结果（source-selection 成功登记，S1/S2/F5 观测面）。
+   * 登记本轮检查的源选择结果（source-selection 成功登记，S1/S2/F5 观测范围）。
    *
    * probe 观测口径（R1-U1a 接线）：
    * - auto 路径透传 resolver 最近一次排序决策的探测详情（getLastProbeOutcome，
-   *   S2 观测面）：executed=true + results（Partial<Record> → SourceProbeRecord[]
+   *   S2 观测范围）：executed=true + results（Partial<Record> → SourceProbeRecord[]
    *   映射，basis 取决策通道 via 原值——ProbeSourceOutcome 不含探测手段明细，
    *   决策通道即本次排序依据；缺键源如实缺项不捏造，代理短路下仅 github 键）。
    *   返回 null 为防御性兜底（理论上 auto 必有决策）→ executed=false +
    *   reason 'resolver-internal'。
    * - 显式偏好路径不产生探测决策，维持 executed=false + reason
    *   'explicit-preference'（resolver 对显式偏好将详情重置为 null，语义一致）。
-   * tags = 各源 fetch 响应的 latest tag（F5 同步缺失观测面），
+   * tags = 各源 fetch 响应的 latest tag（F5 同步缺失观测范围），
    * 该源无响应（失败/退避短路）则缺 key。
    */
   private logSourceSelection(
@@ -516,7 +516,7 @@ export class ReleaseChecker implements IReleaseChecker {
    *   { version, releasedAt, assets: { "<filename>": { sha256, size } } }
    * 失败（网络/超时/解析/404）一律返回 null（不阻塞，按源归类由调用方分派）；
    * GitHub 路径 403/429 额外记录该源 2h 限流退避（两引擎同形态）后同样返回 null；
-   * GitCode 路径 403/429 按普通 manifest 失败收口（auth_key 签名直链的 403 = 签名/
+   * GitCode 路径 403/429 按普通 manifest 失败收尾（auth_key 签名直链的 403 = 签名/
    * 权限拒绝，非限流信号，见 closeManifestHttpError）。
    *
    * 通道编排与 latest 同策略：代理优先 + 失败降级直连（引擎降级内嵌 upgradeFetch）。
@@ -539,7 +539,7 @@ export class ReleaseChecker implements IReleaseChecker {
       return await this.doFetchManifest(source, manifestUrl, useProxy ? proxyUrl : undefined)
     } catch (err) {
       // 403/429 重建的限流信号（仅 GitHub 路径会抛出）——服务器已响应，不触发通道
-      // 维度直连重试，记该源退避窗口后按 manifest 失败收口（null → 由调用方按源归类）
+      // 维度直连重试，记该源退避窗口后按 manifest 失败收尾（null → 由调用方按源归类）
       if (err instanceof ReleaseRateLimitedError) {
         this.recordRateLimitBackoff(source, 'manifest')
         return null
@@ -550,7 +550,7 @@ export class ReleaseChecker implements IReleaseChecker {
         try {
           return await this.doFetchManifest(source, manifestUrl, undefined)
         } catch (directErr) {
-          // 直连重试撞 403/429：就地记退避后收口 null——此处不能 rethrow（本 catch 位于
+          // 直连重试撞 403/429：就地记退避后收尾 null——此处不能 rethrow（本 catch 位于
           // 外层 catch 块内，rethrow 会直接冒泡出 fetchManifest，破坏「manifest 失败由
           // 调用方按源归类」契约），退避必须在此记录
           if (directErr instanceof ReleaseRateLimitedError) {
@@ -590,11 +590,11 @@ export class ReleaseChecker implements IReleaseChecker {
       return parseManifestAssets(result.bodyText)
     } catch (err) {
       // 限流信号直通（undici !ok 分支在 try 内 throw，若无此保护会被下方包装成
-      // 'fetch failed' 网络错误吞掉退避语义——与适配层 doFetchSourceRelease 同款首行守卫）
+      // 'fetch failed' 网络错误吞掉退避语义——与适配层 doFetchSourceRelease 同款首行检查）
       if (err instanceof ReleaseRateLimitedError) throw err
       // D8 curl 引擎 HTTP 状态交互规则：携带 httpStatusCode 的 CurlFetchError = 服务器
       // 已响应——GitHub 403/429 重建限流信号供外层记退避且不触发直连重试；404/5xx 与
-      // GitCode 403/429 按 manifest null 语义收口（同样不触发直连重试）
+      // GitCode 403/429 按 manifest null 语义收尾（同样不触发直连重试）
       if (isCurlHttpStatusError(err)) {
         return closeManifestHttpError(source, err.httpStatusCode)
       }
@@ -608,7 +608,7 @@ export class ReleaseChecker implements IReleaseChecker {
 /**
  * manifest HTTP 错误状态分流（两引擎同款，D8 无漂移）：GitHub 403/429 重建
  * ReleaseRateLimitedError（外层记该源退避）；GitCode 403/429 与其他 HTTP 错误
- * 按普通 manifest null 语义收口（不记限流退避）。
+ * 按普通 manifest null 语义收尾（不记限流退避）。
  *
  * 按源分派的依据（§4.1）：「403 = 限流/配额拒绝」前提仅在 GitHub 域成立（60 次/h
  * 匿名配额 + X-RateLimit-* 头）；GitCode manifest 直链落 file-cdn.gitcode.com 的

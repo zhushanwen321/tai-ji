@@ -399,8 +399,8 @@ describe('extractSubagentsFromSessionFile', () => {
     expect(records[0].slug).toBe('review-code')
   })
 
-  // v4 B-1：closed 统一终态携带 closedReason，extractor 投影到 SubagentRecord 供 renderer 派生展示
-  it('v4 closed 终态 bg-notify（closedReason=gc + error）→ 投影 status=closed + closedReason + error', () => {
+  // v4 B-1：closed 统一终态携带 closedReason，extractor 映射到 SubagentRecord 供 renderer 派生展示
+  it('v4 closed 终态 bg-notify（closedReason=gc + error）→ 映射出 status=closed + closedReason + error', () => {
     const sessionFile = join(tempDir, 'closed-bg.jsonl')
     const bgSubagentId = 'bg-closed-1-8888888888'
     const toolCallId = 'call_closed1'
@@ -474,10 +474,10 @@ describe('extractSubagentsFromSessionFile', () => {
     expect(records[0].error).toBe('provider 429')
   })
 
-  // 与实时路径（event-interpreter handleSubagentBgNotify）同构守卫：closedReason 仅
-  // status === 'closed' 时投影。最后一条 notify 为 running（轮次完成通知）时：
+  // 与实时路径（event-interpreter handleSubagentBgNotify）同构检查：closedReason 仅
+  // status === 'closed' 时派生视图。最后一条 notify 为 running（轮次完成通知）时：
   // 1) notify 自身异常携带的 closedReason 被丢弃；2) 不从早先 list item（closed）兜底。
-  it('running 终态守卫：最后 notify 为 running 时 closedReason 不投影（无 running + closedReason 脏组合）', () => {
+  it('running 终态检查：最后 notify 为 running 时 closedReason 不映射（无 running + closedReason 脏组合）', () => {
     const sessionFile = join(tempDir, 'running-guard.jsonl')
     const bgSubagentId = 'bg-run-guard-1-7777777777'
     const toolCallId = 'call_runguard'
@@ -566,7 +566,7 @@ describe('extractSubagentsFromSessionFile', () => {
     const { records } = extractSubagentsFromSessionFile(sessionFile)
     expect(records).toHaveLength(1)
     expect(records[0].status).toBe('running')
-    // 守卫生效：notify 异常残留与 listItem 兜底都不进入输出
+    // 检查生效：notify 异常残留与 listItem 兜底都不进入输出
     expect(records[0].closedReason).toBeUndefined()
   })
 
@@ -1015,7 +1015,7 @@ describe('scanSubagentEntries（entry 扫描器：v2 自描述优先 + legacy �
     }
   }
 
-  it('自描述命中：v2 条目对 → SubagentRecord 全字段投影（身份 / 终局 / 统计 / 引擎锚）', () => {
+  it('自描述命中：v2 条目对 → SubagentRecord 全字段派生视图（身份 / 终局 / 统计 / 引擎锚）', () => {
     const engineHandle = { sessionRef: { sessionId: 'z-1', dbPath: '/db/z.sqlite' }, poolKey: 'shared' }
     const records = scanSubagentEntries([
       { type: 'session', id: 's', cwd: '/proj', timestamp: '2026-08-19T00:00:00Z' },
@@ -1073,7 +1073,7 @@ describe('scanSubagentEntries（entry 扫描器：v2 自描述优先 + legacy �
     expect(running?.sessionFile).toBeNull()
   })
 
-  it('两态投影：终态条目在场 → idle + stopReason 原样下行；无终态条目 → running 且终局字段全空', () => {
+  it('两态派生视图：终态条目在场 → idle + stopReason 原样下行；无终态条目 → running 且终局字段全空', () => {
     const idle = scanSubagentEntries([
       registeredEntry({ id: 'sa-idle' }),
       settledEntry({ id: 'sa-idle', stopReason: 'interrupted-by-restart' }),

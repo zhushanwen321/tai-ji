@@ -2,7 +2,7 @@ import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-a
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 // index.ts 只做装配：mock 掉子模块注册函数，只捕获 pi.on 的 hook、sessions 缓存与
-// widget 刷新（session_tree handler 纯重建断言的观察面）
+// widget 刷新（session_tree handler 纯重建断言的观测点）
 vi.mock("../tool.js", () => ({
   registerPlanTool: vi.fn(
     (_pi: unknown, planCtx: { states: Map<string, unknown> }) => {
@@ -72,7 +72,7 @@ describe("reconstructPlanState 活跃路径裁剪（U6b）", () => {
   });
 
   it("活跃路径内无 plan-state（plan 进入随子树整个被撤）→ 重建 DEFAULT，不回退到旧分支 entry", () => {
-    // 无裁剪的旧实现逆序全量扫描会命中 e2（被撤子树）——这正是撤回要封堵的注入面
+    // 无裁剪的旧实现逆序全量扫描会命中 e2（被撤子树）——这正是撤回要封堵的注入点
     const entries = [
       { type: "message", id: "e1", parentId: null, timestamp: "t", message: { role: "user", content: "hi" } },
       planStateEntry("e2", "e1", { isActive: true, planFilePath: "/p/revoked.md", requirement: "revoked", templateName: "" }),
@@ -113,7 +113,7 @@ describe("reconstructPlanState 活跃路径裁剪（U6b）", () => {
 
 describe("环状 parentId 防御（损坏文件 / 非 pi 产出写入）", () => {
   it("环状 parentId（a↔b，leafId 指向环内）→ 回溯终止不挂死，重建完成且不抛错", () => {
-    // 环：a.parentId=b、b.parentId=a；leafId=a → 回溯 a→b→(二次命中 a) 守卫终止
+    // 环：a.parentId=b、b.parentId=a；leafId=a → 回溯 a→b→(二次命中 a) 检查终止
     const entries = [
       planStateEntry("a", "b", { isActive: true, planFilePath: "/p/cycle-a.md", requirement: "cycle-a", templateName: "" }),
       planStateEntry("b", "a", { isActive: true, planFilePath: "/p/cycle-b.md", requirement: "cycle-b", templateName: "" }),
@@ -176,7 +176,7 @@ describe("session_tree handler 即时重建（U6b：纯重建体 + 缓存同步�
     expect(pi.sendMessage).not.toHaveBeenCalled();
     expect(pi.appendEntry).not.toHaveBeenCalled();
     expect(pi.setActiveTools).not.toHaveBeenCalled();
-    // widget 刷新（显示面与重建态一致）
+    // widget 刷新（显示侧与重建态一致）
     expect(updatePlanWidget).toHaveBeenCalledTimes(1);
   });
 
@@ -190,7 +190,7 @@ describe("session_tree handler 即时重建（U6b：纯重建体 + 缓存同步�
 
     await handlers.get("session_tree")!({ type: "session_tree" }, makeCtx(branchedEntries, "L"));
 
-    // 「缓存命中 = 最新重建态」：stale 窗口消除（压缩摘要注入面读 getPlanState 不再拿到被撤 requirement）
+    // 「缓存命中 = 最新重建态」：stale 窗口消除（压缩摘要注入点读 getPlanState 不再拿到被撤 requirement）
     const cached = captured.sessions!.get("test-session");
     expect(cached?.requirement).toBe("active-branch");
     expect(cached?.requirement).not.toBe("stale-revoked");

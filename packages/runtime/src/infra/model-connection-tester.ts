@@ -46,7 +46,7 @@ export const CONNECTION_TEST_APIS = ['anthropic-messages', 'openai-completions',
 
 export type ConnectionTestApi = (typeof CONNECTION_TEST_APIS)[number]
 
-/** 单次测试连接的墙钟上限（控制面单请求 = 秒级，design §3.3 D4 已接受代价①）。 */
+/** 单次测试连接的墙钟上限（控制范围单请求 = 秒级，design §3.3 D4 已接受代价①）。 */
 const CONNECTION_TEST_TIMEOUT_MS = 10_000
 
 /** 最小请求的生成上限（1 token 级；responses 另有协议下限，见下）。 */

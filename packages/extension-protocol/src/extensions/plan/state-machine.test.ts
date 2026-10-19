@@ -216,13 +216,13 @@ describe('derivePhase 呈现映射（8 存储态 → 5 呈现相位）', () => {
     expect(derivePhase(state)).toBe(phase)
   })
 
-  it('终态两值同映 terminal（completed/exited 呈现层不新造消费面，D1）', () => {
+  it('终态两值同映 terminal（completed/exited 呈现层不新造消费方，D1）', () => {
     expect(derivePhase('completed')).toBe(derivePhase('exited'))
   })
 
   it('混装格垃圾 state 降级 idle（无 plan 缺省，不误示进行中）——含原型链继承键', () => {
     // constructor/toString/valueOf 曾穿透裸查表返回 Object 构造函数等（非 nullish 绕过 ?? 兜底）——
-    // 白名单守卫后垃圾 state 全输入域精确落 'idle'，函数/对象不得作为相位流出
+    // 白名单检查后垃圾 state 全输入域精确落 'idle'，函数/对象不得作为相位流出
     for (const state of ['bogus', '__proto__', 'constructor', 'toString', 'valueOf'] as const) {
       expect(derivePhase(state as unknown as PlanLifecycleState)).toBe('idle')
     }

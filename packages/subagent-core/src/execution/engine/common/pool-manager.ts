@@ -15,10 +15,10 @@
 // core 无触发点，done record 的 journal 没有精确回收锚，按 mtime 兜底回收是既有口径的
 // 落地（原 D8 分域「journal 依赖 30 天 TTL 自然回收」）。
 //
-// 目录枚举边界（保留原 A9 守卫形态）：扫描把 engines/<engineId>/ 下每个子目录都
+// 目录枚举边界（保留原 A9 检查形态）：扫描把 engines/<engineId>/ 下每个子目录都
 // 遍历——zcode 隔离会话库 session-db/ 会被当子目录枚举，但 db.sqlite* 不匹配任何
-// 删除条件（只删 journal-*.jsonl 与 refs.json 残留），由 zcode 侧 A9 守卫测试
-//（公共 API + 枚举断言）钉死。
+// 删除条件（只删 journal-*.jsonl 与 refs.json 残留），由 zcode 侧 A9 检查测试
+//（公共 API + 枚举断言）固定。
 
 import * as fsSync from "node:fs";
 import { join } from "node:path";
@@ -35,7 +35,7 @@ const JOURNAL_PREFIX = "journal-";
 /** journal 文件名后缀。 */
 const JOURNAL_SUFFIX = ".jsonl";
 /**
- * 池时代 refs.json 的残留清理目标（[池抽象降级] 后不再有写面；存量文件按 mtime
+ * 池时代 refs.json 的残留清理目标（[池抽象降级] 后不再有写侧；存量文件按 mtime
  * 同 TTL 回收，处理降级过渡期残留）。
  */
 const LEGACY_REFS_FILENAME = "refs.json";
@@ -46,7 +46,7 @@ interface DirEntryLike {
   isDirectory(): boolean;
 }
 
-/** 清理的文件系统依赖面（结构接口：测试注入 fake，免 vi.mock 整个 fs 模块）。 */
+/** 清理的文件系统依赖范围（结构接口：测试注入 fake，免 vi.mock 整个 fs 模块）。 */
 export interface PoolFsDeps {
   readdirSync(path: string): DirEntryLike[];
   statSync(path: string): { mtimeMs: number };

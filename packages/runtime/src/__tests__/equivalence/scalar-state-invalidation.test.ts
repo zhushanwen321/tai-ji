@@ -31,8 +31,8 @@ type StateShape = Record<string, unknown>
 function makeState(overrides: StateShape = {}): StateShape {
   return {
     // W7 minor 修复（W8 顺手补）：pi Model 形态 = 裸 modelId（id）+ 独立 provider 字段
-    //（曾写成 id 内嵌 'provider/model' 且缺 provider——modelId 投影要求两者都是 string，
-    // 缺 provider 会丢 key 走 'required' 归一，播种退避）。组合口径 'provider/model' 由投影完成。
+    //（曾写成 id 内嵌 'provider/model' 且缺 provider——modelId 映射要求两者都是 string，
+    // 缺 provider 会丢 key 走 'required' 归一，播种退避）。组合口径 'provider/model' 由映射完成。
     model: { id: 'test-model', provider: 'test-provider' },
     thinkingLevel: 'low',
     sessionName: '旧名',

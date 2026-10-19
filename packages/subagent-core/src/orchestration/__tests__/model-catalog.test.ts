@@ -3,7 +3,7 @@
 // [D8 Q1] 模型目录（model-catalog）单测：命中/未命中分类（not_found vs
 // provider_drift）/可用清单渲染/恢复指引/assertModelInCatalog 拒单，以及与
 // shared/model-ref.assertCanonicalModelRef 的一致性锁定（无孪生 registry 下两裁决
-// 逐输入等价——命中谓词单一权威的机器守卫；孪生面由派发期 identity 全量裁决，
+// 逐输入等价——命中谓词单一权威的机器检查；孪生范围由派发期 identity 全量裁决，
 // 目录刻意不复制，见 model-catalog.ts 头注）。
 
 import { describe, expect, it } from "vitest";
@@ -116,7 +116,7 @@ describe("assertModelInCatalog", () => {
 
 describe("与 assertCanonicalModelRef 的一致性（机器锁）", () => {
   // 无孪生 registry：目录命中谓词与 canonical ref 全等裁决必须逐输入等价。
-  // 孪生输入不在本表（目录刻意不含孪生守卫——派发期 identity 全量裁决兜住）。
+  // 孪生输入不在本表（目录刻意不含孪生检查——派发期 identity 全量裁决兜住）。
   const INPUTS = [
     "prov1/good-a",
     "prov1/good-b",

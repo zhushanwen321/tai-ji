@@ -77,7 +77,7 @@ function bind(el: HTMLElement | null): void {
 
 onMounted(() => {
   // matchMedia 缺失环境（happy-dom 等测试宿主）跳过 transparency 监听：reducedTransparency
-  // 保持 false = 渐焦全功能生效（守卫降级而非崩溃，onTransparencyChange 已容 null media）
+  // 保持 false = 渐焦全功能生效（检查降级而非崩溃，onTransparencyChange 已容 null media）
   if (typeof window.matchMedia === 'function') {
     transparencyMedia = window.matchMedia('(prefers-reduced-transparency: reduce)')
     transparencyMedia.addEventListener('change', onTransparencyChange)

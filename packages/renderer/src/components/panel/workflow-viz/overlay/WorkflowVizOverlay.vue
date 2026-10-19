@@ -5,7 +5,7 @@
   查询」的资源清理手法）。
 
   结构与分层（display-containers §6.5/§7.3）：面板 + 遮罩 + 两通道关闭（点遮罩 /
-  按钮）+ Tab 焦点陷阱注册 + IME 守卫 + 焦点契约（打开 focus 面板 / 关闭回 composer）
+  按钮）+ Tab 焦点陷阱注册 + IME 检查 + 焦点契约（打开 focus 面板 / 关闭回 composer）
   全部归 OverlayShell；本组件是挂进壳标题栏 slot 与 body 的 workflow 内容层。
   header 三态（scheduler 整合一级 tab，2026-10-06 用户裁决；canvas 画布 tab，
   problem-solve-canvas §3.1(3)）：tab=runs = 六元素行
@@ -182,7 +182,7 @@
             </span>
           </div>
           <!-- 未匹配实例分组（D2⑥：零命中/歧义实例不静默丢弃——画布下方按 phase
-               分组的指定展示面；正常 run 无未匹配实例时零渲染，画布不受影响） -->
+               分组的指定展示侧；正常 run 无未匹配实例时零渲染，画布不受影响） -->
           <div
             v-if="unmatchedGroups.length > 0"
             class="flex max-h-[35%] flex-none flex-col gap-1 overflow-y-auto border-t border-hairline px-3 py-2"
@@ -238,7 +238,7 @@
             >
               {{ t('panel.workflowViz.dagRetryParse') }}
             </Button>
-            <!-- 降级列表：按 phase 分组的调用点只读形态（等价 WorkflowTab 内容的最小面） -->
+            <!-- 降级列表：按 phase 分组的调用点只读形态（等价 WorkflowTab 内容的最小形态） -->
             <div
               v-for="group in fallbackGroups"
               :key="group.phase"
@@ -281,7 +281,12 @@
         class="flex min-h-0 flex-1 flex-col"
         data-testid="wfvz-overlay-canvas-pane"
       >
-        <CanvasPane v-if="canvasPaneId" :key="canvasPaneId" :canvas-id="canvasPaneId" />
+        <CanvasPane
+          v-if="canvasPaneId"
+          :key="canvasPaneId"
+          :canvas-id="canvasPaneId"
+          :session-id="canvasPaneSessionId"
+        />
       </div>
       <!-- tab=scheduler：定时任务面板（viewId 单源常量 = 控制器 SCHEDULER_MODAL_VIEW_ID，
            树未到 = hidden 零 DOM，容器仍锚定内容区形态） -->
@@ -364,12 +369,18 @@ const emit = defineEmits<{
 
 const { t } = useI18n()
 
-// 当前 canvas 内容载荷（core 开合态单例读——本壳只在 tab==='canvas' 时消费其 canvasId）
+// 当前 canvas 内容载荷（core 开合态单例读——本壳只在 tab==='canvas' 时消费其 canvasId
+// 与归属 sessionId，D4 会话隔离：CanvasPane 按归属会话分区取数）
 const { current: overlayContent } = useOverlayControl()
 
 const canvasPaneId = computed<string>(() => {
   const cur = overlayContent.value
   return cur !== null && cur.kind === 'canvas' ? cur.payload.canvasId : ''
+})
+
+const canvasPaneSessionId = computed<string>(() => {
+  const cur = overlayContent.value
+  return cur !== null && cur.kind === 'canvas' ? cur.payload.sessionId : ''
 })
 
 // ── 一级 tab 条（scheduler 整合）：分段定义（序 = 缺省视图优先）──
@@ -381,7 +392,7 @@ const tabSegments = computed<Array<{ value: OverlayTab; label: string; icon: typ
   { value: 'canvas', label: t('panel.workflowViz.overlayTabCanvas'), icon: Network },
 ])
 
-/** tab 点击（禁用判据在入口守卫，不依赖浏览器对 disabled 按钮的点击抑制）：无 run 时「运行」不可进。 */
+/** tab 点击（禁用判据在入口检查，不依赖浏览器对 disabled 按钮的点击抑制）：无 run 时「运行」不可进。 */
 function onTabClick(value: OverlayTab): void {
   if (value === 'runs' && props.run === null) return
   emit('update:tab', value)
@@ -479,7 +490,7 @@ const hasExplicitPhases = computed(() =>
   fallbackGroups.value.some((g) => g.phase !== ''),
 )
 
-// ── 未匹配实例分组（D2⑥ 展示面：零命中/歧义实例按 phase 分组，不静默丢弃）──
+// ── 未匹配实例分组（D2⑥ 展示侧：零命中/歧义实例按 phase 分组，不静默丢弃）──
 
 interface UnmatchedGroup {
   phase: string

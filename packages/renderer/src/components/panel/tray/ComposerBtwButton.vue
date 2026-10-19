@@ -5,12 +5,12 @@
 
   契约：
   - props.sessionId: string —— 焦点主会话 id（Composer 只在 showBtw && sessionId 时挂载本组件，
-    badge 数据面 = 该主会话名下线，D7 焦点绑定②③④）
+    badge 数据范围 = 该主会话名下线，D7 焦点绑定②③④）
   - 点击 = openDrawerTab('btw')（D7 唯一入口；drawer 开合与 tab 状态归 core drawer 域）
   - badge 两态（§1.4 裁决，挂点 = composer 按钮聚合）：双零 → 不渲染（常态归零）；
     unread >0 → Σ 计数角标（右上角，accent 实底；清除 = 线内容进视口）；pending >0 →
-    Σ 待处理徽点（右下角独立徽点，D8 终态机驱动 = 挂起请求 ∪ 回收提醒线数；M4-a 挂账
-    「badge 待处理视觉消费面」的销账落点）。数据通道 = useBtwTabData，聚合 = 当前主会话
+    Σ 待处理徽点（右下角独立徽点，D8 终态机驱动 = 挂起请求 ∪ 回收提醒线数；M4-a 挂着不处理
+    「badge 待处理视觉消费方」的逐条处理完毕（关闭）落点）。数据通道 = useBtwTabData，聚合 = 当前主会话
     名下线 Σ。
   - 退化序登记 = 序 0（不退化，与 `+`/发送位同档）：见 use-composer-bar-density 的
     COMPOSER_BTW_BUTTON_DEGRADATION_ORDER——badge 是后台回复/待处理唯一通知载体，任何宽度常驻。

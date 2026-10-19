@@ -39,7 +39,7 @@ describe("truncLine — indexOf 化 byte-identical 快照（IF12）", () => {
   it("10k 混合长行在多个截断宽度下均一致（fixture 内 maxWidth 之外再加宽度扫描）", () => {
     const mixed = CASES.find((c) => c.label === "sgr-mixed-10k")!;
     for (const w of [8, 15, 30, 61, 100]) {
-      const expected = mixed.expected; // fixture 锁 maxWidth=60；其他宽度靠 oracle 断言
+      const expected = mixed.expected; // fixture 锁 maxWidth=60；其他宽度靠最终裁决角色断言
       void expected;
       // 非 fixture 宽度用行为断言：输出含省略号且无裸换行
       const out = truncLine(mixed.text, w);

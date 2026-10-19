@@ -1,6 +1,6 @@
 /**
  * useRollingRestartStatus —— 滚动重启四态横幅 + reattach 高压延迟轻态（crash-forensics-
- * and-watchdog §3.3 D5/D3，实施单元 u7d + 偏差 #27 纵切片 renderer 半腿）。
+ * and-watchdog §3.3 D5/D3，实施单元 u7d + 偏差 #27 纵切片 renderer 半路径）。
  *
  * **双信号源**（D5 横幅契约「持续态必须可拉取」——broadcast 时序竞争教训）：
  * 1. 三个 WS 广播（rollingRestart:deferred / :countdown / :forced）+ reattach:deferred
@@ -61,7 +61,7 @@ export const RECOVERED_AUTO_CLEAR_MS = 30_000
 
 // taste:allow-no-data-owner W24-EX-B（模块级单例 UI 瞬态，已登记 §4 ⑧ 2026-09-12）：滚动重启横幅相位（窗口级全局观测态）
 const phase = shallowRef<RollingRestartBannerPhase>({ kind: 'idle' })
-// taste:allow-no-data-owner W24-EX-C（非 GUI 数据技术结构，已登记 §4 ⑧ 2026-09-12）：最近一次 status 拉取快照（观测面）
+// taste:allow-no-data-owner W24-EX-C（非 GUI 数据技术结构，已登记 §4 ⑧ 2026-09-12）：最近一次 status 拉取快照（观测范围）
 const lastStatus = shallowRef<RollingRestartStatusPayload | null>(null)
 // taste:allow-no-data-owner W24-EX-B（模块级单例 UI 瞬态，已登记 §4 ⑧ 2026-09-12）：滚动重启活跃态出现过标记（终态分叉判定源，窗口级布尔）
 /** 本窗口生命周期内是否出现过滚动重启活跃态（终态分叉判定源，见文件头）。 */
@@ -135,7 +135,7 @@ async function pullStatus(): Promise<void> {
     applyStatus(status)
   } catch (e: unknown) {
     // best-effort 降级：transport 不可用（send false 即 reject）或超时——保持现状不传播。
-    // 恢复路径 = 下一事件到达或下次 connected 转变再拉；持续告警无动作面，仅 debug 留痕。
+    // 恢复路径 = 下一事件到达或下次 connected 转变再拉；持续告警无对应动作，仅 debug 留痕。
     console.debug('[useRollingRestartStatus] status pull failed (kept current phase):', e)
   } finally {
     pullInFlight = false

@@ -6,7 +6,7 @@
 // 实装签名 = RunModelSwitchAggregateCall，本文件）。
 //
 // 职责边界（§7.4）：对已受理成员 runId 全量逐个经引擎 setModel 转发——
-//   - **不做宿主侧存活预判**：进程存活事实的权威在引擎侧，宿主 record 状态只是投影
+//   - **不做宿主侧存活预判**：进程存活事实的权威在引擎侧，宿主 record 状态只是派生视图
 //     （简洁审裁决，review-simplicity#1）；已退出成员由引擎 not-active 应答承接。
 //   - **capability 预检门控先于调用**（§8 场景 7 步骤④）：成员引擎 setModel 位非
 //     native → not-applicable，引擎调用与目标模型校验均不发生（zcode 成员即使目标
@@ -54,7 +54,7 @@ export type SetModelCapableEnginePort = EnginePort & {
 };
 
 /**
- * 成员引擎转发面：成员 runId → 该成员引擎的 setModel 通道（per-member 解析——混合
+ * 成员到引擎的转发：成员 runId → 该成员引擎的 setModel 通道（per-member 解析——混合
  * 引擎 run 的成员经 per-agent engine 字段路由到不同引擎，§8 场景 7）。宿主侧解析
  * 归调用方（U2 编排：成员 record 的 engine 留痕 + 窗口实例解析单点
  * resolveWorkflowWindowEnginePort(runId, engineId)），聚合函数不触 record 存储。
@@ -65,14 +65,14 @@ export type ResolveMemberEnginePort = (memberRunId: string) => SetModelCapableEn
 
 /**
  * 聚合调用输入 = 契约输入（assembly/types.ts RunModelSwitchAggregateInput，u-foundation
- * 定形）+ 本函数运行时必需的依赖注入面（引擎转发）。
+ * 定形）+ 本函数运行时必需的依赖注入范围（引擎转发）。
  *
- * [u-foundation 修正通道] 契约 input 未承载引擎访问面（u-foundation runlog「形状定形
+ * [u-foundation 修正通道] 契约 input 未承载引擎访问范围（u-foundation runlog「形状定形
  * 裁决」第 4 条预留「U5 消费时如有出入按实际联调修正并回写本条」）；本扩展类型即该
  * 修正的落地形态——契约文件不动（任务书领地禁碰），U2 接线按本类型消费。
  */
-export interface RunModelSwitchAggregateCall extends RunModelSwitchAggregateInput { // oe-exempt:20261006:framework:u-foundation 契约的修正通道注入面（契约文件领地禁碰，单实现常态）
-  /** per-member 引擎转发面（见 ResolveMemberEnginePort）。 */
+export interface RunModelSwitchAggregateCall extends RunModelSwitchAggregateInput { // oe-exempt:20261006:framework:u-foundation 契约的修正通道注入点（契约文件领地禁碰，单实现常态）
+  /** per-member 引擎转发侧（见 ResolveMemberEnginePort）。 */
   resolveMemberPort: ResolveMemberEnginePort;
 }
 
@@ -87,7 +87,7 @@ type MemberOutcome =
 /**
  * run 级全切聚合（契约 input 见 assembly/types.ts RunModelSwitchAggregateInput；
  * 本实装入参 = RunModelSwitchAggregateCall = 契约 input + resolveMemberPort 依赖
- * 注入面——实装签名落点即本函数，types.ts 形状 SSOT 注释指向此处）。
+ * 注入点——实装签名落点即本函数，types.ts 形状 SSOT 注释指向此处）。
  *
  * 语义（设计 §7.4，逐成员独立、受理序保序；成员转发并发扇出、结果按受理序组装
  * ——§7.1.1 出站点 60s 墙钟超时的量级匹配前提「逐成员秒级收敛窗 + 并发扇出」）：
@@ -173,7 +173,7 @@ function errorCodeOf(err: unknown): string | undefined {
   return undefined;
 }
 
-/** 词表成员守卫（运行时收窄，无断言）。 */
+/** 词表成员检查（运行时收窄，无断言）。 */
 function isSetModelErrorCode(code: string): code is SetModelErrorCode {
   return (SET_MODEL_ERROR_CODES as readonly string[]).includes(code);
 }

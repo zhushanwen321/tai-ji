@@ -27,7 +27,7 @@ const DAY_MS = HOURS_PER_DAY * MINUTES_PER_HOUR * SECONDS_PER_MINUTE * MS_PER_SE
 /** 缺省保留天数（与宿主 logger 同源缺省：7 天）。 */
 export const DEFAULT_STDERR_KEEP_DAYS = 7;
 
-/** 轮转参数（env 覆盖面 = 宿主 logger 同款 TAIJI_LOG_* 两键）。 */
+/** 轮转参数（env 覆盖范围 = 宿主 logger 同款 TAIJI_LOG_* 两键）。 */
 export interface StderrRotationParams {
   maxBytes: number;
   keepDays: number;
@@ -40,7 +40,7 @@ function positiveIntEnv(env: NodeJS.ProcessEnv, key: string): number | undefined
   return Number.isFinite(n) && n > 0 ? n : undefined;
 }
 
-/** 读 env 解析轮转参数（非法值回缺省——取证面配置不拖垮主通道）。 */
+/** 读 env 解析轮转参数（非法值回缺省——取证侧配置不拖垮主通道）。 */
 export function stderrRotationParams(env: NodeJS.ProcessEnv): StderrRotationParams {
   return {
     maxBytes:
@@ -78,7 +78,7 @@ export function isPidAlive(pid: number): boolean {
 /**
  * 尺寸轮转：当前文件超过 maxBytes 时 rename 为 `<path>.<时间戳>` 副本并返回
  * true（调用方懒重开新文件继续 append）。rename 失败返回 false（继续 append 原
- * 文件——轮转是取证面优化，不是主通道）。
+ * 文件——轮转是取证侧优化，不是主通道）。
  */
 export function rotateStderrLogIfNeeded(
   path: string,
@@ -109,7 +109,7 @@ export interface CleanupResult {
 
 /**
  * 过期清理：扫描 logsDir 下同前缀文件，三判据同时成立才删。目录缺失/读失败返回
- * 零删除（取证面 best-effort）。
+ * 零删除（取证侧 best-effort）。
  */
 export function cleanupStaleStderrLogs(
   logsDir: string,

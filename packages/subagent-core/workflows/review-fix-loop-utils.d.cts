@@ -1,4 +1,4 @@
-// review-fix-loop-utils.cjs 的消费面类型声明（test-only 类型基建：src/__tests__/
+// review-fix-loop-utils.cjs 的消费方类型声明（test-only 类型基建：src/__tests__/
 // review-fix-loop-utils.test.ts 顶层 import 本模块；tsc 纳入测试后需要声明锚点）。
 // 与 .cjs 同名同目录的 .d.cts 会被 TS 自动关联（相对路径导入解析）。
 // 仅声明测试消费的导出——未来消费新导出时在编译期报缺并在此补充。
@@ -192,6 +192,7 @@ export declare function resolveRunRoot(opts: {
   tmpDir?: string;
   exec?: (cmd: string) => string;
   mkdir?: (p: string) => void;
+  env?: Record<string, string | undefined>;
 }): { root: string; slug: string; degraded: boolean; [key: string]: unknown };
 export declare function computeOrigin(
   entry: { [key: string]: unknown },
@@ -341,3 +342,76 @@ export declare function buildR2ReviewPrompt(args: {
   reviewPrompt?: string;
   reviewInstruction?: string;
 }): string;
+
+// ── W2 分析产物落盘（skill-data-redesign 设计 §5.1-§5.4） ──────────────
+
+/** reviewer problems 申报归一条目（normalizeReviewerProblems 产物 / problems.json 元素）。 */
+export interface ReviewerProblemEntry {
+  ref: string;
+  level: string;
+  title: string;
+}
+
+/** result.json 逐问题对账条目（buildRoundReconciliation 产物，§5.2 词表）。 */
+export interface RoundReconciliationEntry {
+  issueId: string;
+  disposition: "fixed" | "not-fixed" | "disputed" | "regressed";
+  evidence?: string;
+}
+
+/** run.json 统一 manifest（buildRunManifest 产物，§5.1 schema 字段集）。 */
+export interface RunManifest {
+  workflow: string;
+  segment: string;
+  host: string;
+  projectRoot: string;
+  worktreePath: string;
+  branch: string;
+  baseCommit: string;
+  headCommit: string;
+  attempt: number;
+  model: string | null;
+  startedAt: string;
+  endedAt: string;
+  terminated: string;
+  rounds: number;
+  mustFixTrajectory: Array<number | null>;
+}
+
+export declare function countLedgerCritical(issues: Record<string, unknown> | null | undefined): number;
+export declare function buildRoundReconciliation(
+  fixResult: unknown,
+  issues: Record<string, unknown> | null | undefined,
+  idMap: Record<string, string> | null | undefined,
+): RoundReconciliationEntry[];
+export declare function buildAggregatedDoc(
+  agg: unknown,
+  ctx?: { round?: number; batch?: number },
+): {
+  round: number | null;
+  batch: number | null;
+  report_file?: string;
+  must_fix: number;
+  suggestion: number;
+  issues: Array<AggMustFixEntry & { sourceRefs: Array<{ round?: number; ref: string }> }>;
+  groups: Array<{ issueIds: string[]; id?: string; note?: string }>;
+  fixes_caution: string[];
+  scores?: ScoreEntry[];
+};
+export declare function normalizeReviewerProblems(raw: unknown): ReviewerProblemEntry[];
+export declare function buildProblemsDoc(
+  round: number | undefined,
+  problems: unknown,
+): { round: number | null; problems: ReviewerProblemEntry[] };
+export declare function buildRunManifest(ctx: unknown): RunManifest;
+export declare function rotateRunJson(opts: {
+  runJsonPath: string;
+  startedAt: string;
+  read: (p: string) => string;
+  rename: (src: string, dst: string) => void;
+}): { archived: boolean; archivePath?: string };
+export declare function buildFinalDoc(
+  result: Record<string, unknown>,
+  extras: { issues?: Record<string, unknown>; mustFixTrajectory?: Array<number | null> },
+): Record<string, unknown>;
+export declare function computeFixAttemptsMax(issues: Record<string, unknown> | null | undefined): number;

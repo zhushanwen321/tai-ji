@@ -19,7 +19,7 @@ export function useCopy() {
 
   function copy(text: string, key: string): void {
     // 非安全上下文（LAN http，如移动壳远程访问）navigator.clipboard 为 undefined——同步
-    // 访问 .writeText 即抛 TypeError，.catch 接不住同步 throw；先守卫静默降级
+    // 访问 .writeText 即抛 TypeError，.catch 接不住同步 throw；先检查静默降级
     // （对齐 OAuthDialog onCopyCode 的 !clipboard 分支先例）。
     if (!navigator.clipboard) return
     navigator.clipboard.writeText(text).catch(() => {

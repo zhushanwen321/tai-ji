@@ -41,6 +41,11 @@ import type {
   CodemodeEnabledResult,
   CodemodeSetEnabledResult,
   SendPromptReason,
+  NetworkProxyConfig,
+  NetworkProxyStats,
+  NetworkProxyStatsRange,
+  NetworkProxyTestResult,
+  NetworkProxyValidationResult,
 } from '@taiji/shared'
 import type { SubagentEngineConfigView } from '@zhushanwen/extension-protocol'
 import type { SaveAppConfigResult } from './services/app-config-store.js'
@@ -54,7 +59,7 @@ import type { OversizeAwareResult } from './services/session/session-records.js'
 import type { CatalogRefreshResult } from './services/provider-catalog-refresh.js'
 
 /**
- * pi 引擎 / 进程池 port 的权威定义在 services/ports/pi-engine.ts（D24 收口）。
+ * pi 引擎 / 进程池 port 的权威定义在 services/ports/pi-engine.ts（D24 收尾）。
  *
  * 历史上 IRpcClient（engine 的重复定义）与 IProcessManager 都在本文件，
  * 现已迁移到 ports/。此处仅 re-export，保留 interfaces.ts 作为「跨服务 facade
@@ -77,7 +82,7 @@ export type { IPiEngine, IProcessManager } from './services/ports/pi-engine.js'
  * 只服务 payload 无 sessionId 的全局消息（config.*、app.info、plugin:crashed、
  * session.forkNotice、session.handoffComplete/handoffAborted 等，见 02 文档 D5-1 排除清单）。
  * session 级 push 型消息（payload 带 sessionId）一律走 `IMessageBus.publish`
- * （services/message-bus，seq/ring/snapshot + 只推订阅该 sid 的连接），双写已收口。
+ * （services/message-bus，seq/ring/snapshot + 只推订阅该 sid 的连接），双写已收尾。
  */
 export interface IMessageBroker {
   send(ws: unknown, msg: ServerMessage): void
@@ -190,7 +195,7 @@ export interface ISessionService {
    * 直接执行 bash 命令（pi bash RPC，不经 LLM turn）。
    *
    * 返回 bash 投递回执（执行状态的权威判定，dmg-r1-2）：
-   * status='started' = 已开跑未收口（超时置孤儿仍在执行）/'settled' = 已执行并收口
+   * status='started' = 已开跑未收尾（超时置孤儿仍在执行）/'settled' = 已执行并收尾
    * （成功或失败终态已广播，失败原因在 error）/'rejected' = 未执行（busy 预检 / 空命令 /
    * restore 失败）。transport 层把它翻译进 message.status reply，消费方据此决定是否恢复
    * `!command` 草稿（不依赖推送帧是否到达）。
@@ -201,7 +206,7 @@ export interface ISessionService {
    * 取消进行中的 bash 执行（pi abort_bash）。
    *
    * 返回 sent = abort_bash RPC 是否发出且 pi 确认（P6 断言④回执真实化）：
-   * 守卫短路（无 bash 在跑且无孤儿标记）或发送失败均为 false，调用方不得据此回 aborted。
+   * 检查短路（无 bash 在跑且无孤儿标记）或发送失败均为 false，调用方不得据此回 aborted。
    */
   abortBash(sessionId: string): Promise<{ sent: boolean }>
   switchModel(sessionId: string, provider: string, modelId: string): Promise<string>
@@ -234,7 +239,7 @@ export interface ISessionService {
    * 运行中 subagent 流状态只读快照（B2 subagent-stream-chunk §4.1，session.getSubagentStreamState
    * RPC 后端）。found=false = 该 record 当前无进行中流（未开始 / 已定稿 / 无在管 tee），
    * 此时 msgSeq/lastDeltaSeq 恒 0、lines 恒空数组——协议合法回执，非错误（无独立错误码
-   * 词表）。同步内存读（RelayTee 三元组单次读出，构造性一致无锁）。
+   * 词表）。同步内存读（SubagentTee 三元组单次读出，构造性一致无锁）。
    */
   getSubagentStreamState(sessionId: string, recordId: string): ServerMessageMap['session.getSubagentStreamState']
   /**
@@ -262,9 +267,9 @@ export interface ISessionService {
    */
   getWorkflows(sessionId: string): Promise<OversizeAwareResult<WorkflowRunRecord>>
   /**
-   * 获取 session 的 plan 模式状态投影（plan 模式重设计 D1⑥ 冷腿，session.getPlanState
+   * 获取 session 的 plan 模式状态派生视图（plan 模式重设计 D1⑥ 冷路径，session.getPlanState
    * RPC 后端）。纯磁盘读取（主 session JSONL 最后一条 plan-state entry → scanPlanStateEntries
-   * 派生，与 live 投影同一份派生代码），不依赖 pi 进程活跃；「从未进过 plan」形态归一
+   * 派生，与 live 路径同一份派生代码），不依赖 pi 进程活跃；「从未进过 plan」形态归一
    * 「未激活」缺省 View（reply 契约 planState 无 null 域）。
    */
   getPlanState(sessionId: string): Promise<PlanStateView>
@@ -282,11 +287,11 @@ export interface ISessionService {
   /** 触发 workflow 生命周期操作（abort，经扩展 slash command，不经 LLM） */
   workflowAction(sessionId: string, action: 'abort', runId: string): Promise<void>
   /**
-   * 拉取 session trace 台账快照（session-trace design D4 数据通路 A1）。
+   * 拉取 session trace journal 快照（session-trace design D4 数据通路 A1）。
    *
    * 路由：活跃 session 走 pi get_entries RPC（权威解析）+ 文件首行补 header；非活跃/
    * RPC 失败降级走 JSONL+sidecar 文件直读（core parse-jsonl 容错）；未落盘返回
-   * source='empty' 空态标记。同时建立增量腿 since 基线（活跃路径）。供 renderer
+   * source='empty' 空态标记。同时建立增量路径 since 基线（活跃路径）。供 renderer
    * Trace 视图打开时全量拉取（session.getTraceEntries → reply session.traceEntries）。
    */
   getTraceEntries(sessionId: string): Promise<SessionTraceSnapshot>
@@ -298,7 +303,7 @@ export interface ISessionService {
    */
   fetchCurrentSystemPrompt(sessionId: string): Promise<ServerMessageMap['session.currentSystemPrompt']>
   /**
-   * 增量腿补拉（session-trace A33）：触发事件（message_end/compaction_end/agent_settled/
+   * 增量路径补充拉取（session-trace A33）：触发事件（message_end/compaction_end/agent_settled/
    * entry_appended）或 lifecycle RPC（set_model/set_thinking_level）成功后调用。
    * get_entries(since=上次 leafId) 拉 delta → 广播 session.traceEntryAppended（含
    * sessionId）；无基线（trace 未打开过）/无活跃 client 时 no-op。fire-and-forget 安全。
@@ -364,7 +369,7 @@ export interface ISessionService {
   getInputTokens(sessionId: string): number | null
   /**
    * 处理 context.update（pi agent_end/turn_end 推 inputTokens + totalTokens）。session 级状态单一 owner：
-   * W12 起事件只做 usage 实例失效（markDirty + 防抖重拉 get_session_stats），发布归
+   * W12 起事件只做 usage 实例失效（markDirty + 防抖重新拉取 get_session_stats），发布归
    * 快照应用后的挂钩（payload 全字段来自实例快照；W18 起 resolver 窗口重算链已删）。
    * index.ts onContextUpdate 仅调本方法。W10：事件参数不再直写 session 缓存
    * （totalTokens 与 inputTokens 同值，tokenCount 由 usage 实例快照派生）。
@@ -374,18 +379,18 @@ export interface ISessionService {
    * W18（data-source-governance P3.1）：自描述 record entry（subagent-record /
    * workflow-record）失效信号唯一入口（interpreter 经组合根注入；entry_appended 主信号
    * + subagent/workflow 事件兜底信号汇于此）。只做失效（防抖调度），事件 payload 不进
-   * 数据缓存——数据写路径唯一 = journal 投影重算（applyEntryBatch 双源单点合并，
+   * 数据缓存——数据写路径唯一 = journal 派生视图重算（applyEntryBatch 双源单点合并，
    * session-records 同口径）。
    */
   invalidateRecordEntries(sessionId: string, customType: string): void
   /**
-   * [reload-closeout D2]：送达水位对账入口（agent_settled 腿；interpreter 经组合根注入）。
-   * 重跑 fetch→merge→publish 管线，发布门 = 已发布快照水位——守卫/发布门处（hasSession
+   * [reload-closeout D2]：送达水位对账入口（agent_settled 路径；interpreter 经组合根注入）。
+   * 重跑 fetch→merge→publish 管线，发布门 = 已发布快照水位——检查/发布门处（hasSession
    * 瞬态 false / bus 未注入）曾丢的帧下轮触发必补发，稳态零帧。
    */
   reconcileRecordEntries(sessionId: string): void
   /**
-   * W10：取 session 当前 usagePercent——usage 实例快照派生（pi 权威 percent 投影）。
+   * W10：取 session 当前 usagePercent——usage 实例快照派生（pi 权威 percent 派生视图）。
    * [RT-4#7] 无快照返回 null（语义对齐 getInputTokens：无值 ≠ 0%）。
    */
   getUsagePercent(sessionId: string): number | null
@@ -432,7 +437,7 @@ export interface ISessionService {
   setThinkingLevel(sessionId: string, level: string): Promise<string>
   // [MF-1-8 退役] steerMessage / followUpMessage 已删除：renderer/core 消费方经
   // delivery.submit 统一提交（u3b），协议侧 message.steer / message.follow_up 条目随
-  // runtime transport 路由 + dispatcher 转发腿删除同批退役（u5a 退役条件兑现）。
+  // runtime transport 路由 + dispatcher 转发路径删除同批退役（u5a 退役条件兑现）。
 
   // ── wave:runtime-patch ipc-converge-a3 W2：业务持久化写（从 main IPC 迁 WS，安全校验原样搬 TC3）──
   /** 写入粘贴截图（base64→attachments/tmpdir）。安全校验：mimeType image/* + 20MB 上限 + name sanitize */
@@ -506,7 +511,7 @@ export interface IConfigService {
    */
   updateToolPermissions(permissions: Record<string, string>): SaveAppConfigResult
   // ── Skill/Agent 加载路径（ADR-0021 §1 discovery.json v2 SSOT）──
-  /** 覆盖 skill 路径（SkillDirConfig[] 带 scope，按 scope 分发写 projectPaths/globalPaths）。写 discovery.json + 投影 settings.json。 */
+  /** 覆盖 skill 路径（SkillDirConfig[] 带 scope，按 scope 分发写 projectPaths/globalPaths）。写 discovery.json + 派生视图 settings.json。 */
   setSkillDirs(dirs: SkillDirConfig[]): void
   /** 读取 skill 合并路径（project ∪ global 去重，项目在前）。 */
   getSkillDirs(): string[]
@@ -663,6 +668,17 @@ export interface IConfigService {
   setSmartContextThresholds(thresholds: number[]): void
   /** 设置排除模型列表（过滤无 "/" 条目去重后写入 excludedModels 字段）。 */
   setSmartContextExcludedModels(models: string[]): void
+  // ── LLM 网络代理配置（llm-network-proxy 设计 §5 U3）──
+  /** 读取网络代理配置快照（ext-config 文件，缺失/坏 JSON/字段非法回默认值）。 */
+  getNetworkProxyConfig(): NetworkProxyConfig
+  /** 写入网络代理配置：校验失败返回错误清单不落盘；成功持锁 RMW 覆盖四字段（文件 0600）。 */
+  setNetworkProxyConfig(config: NetworkProxyConfig): NetworkProxyValidationResult
+  /** 测试连接两段探测（TCP 连代理 + 规则非空时经代理探规则首条主机名 443），失败段可归因。 */
+  testNetworkProxyConnection(config: NetworkProxyConfig): Promise<NetworkProxyTestResult>
+  /** 读取请求统计（24h/7d 时间过滤 / all 截断保尾窗口累计；截断发生时附 truncatedNote）。 */
+  getNetworkProxyStats(range: NetworkProxyStatsRange): { stats: NetworkProxyStats[]; truncatedNote?: string }
+  /** 追加重置水位行（读侧只累计最后一个水位之后的行，效果 = 统计清零）。 */
+  resetNetworkProxyStats(): void
   // ── Scoped Models（scoped-model 设计文档 §3.3 D2）──
   /** 读取 scoped models 白名单（providers.json 顶层 scopedModels 字段）。空数组 = 未启用。 */
   getScopedModels(): string[]
@@ -718,9 +734,9 @@ export interface IAuthService {
   hasOAuth(providerId: string): Promise<boolean>
   /** 退出登录（B-1 场景 C）：移除 auth.json 中该 provider 的凭证（有进行中 flow 先中止，幂等）。 */
   logout(providerId: string): Promise<void>
-  /** 读 auth.json 凭证（A1-4 收口读通道，Phase A2 QuotaService 凭证源）。直读不缓存。 */
+  /** 读 auth.json 凭证（A1-4 收尾读通道，Phase A2 QuotaService 凭证源）。直读不缓存。 */
   getCredential(providerId: string): Promise<Credential | undefined>
-  /** 写 auth.json 凭证（A1-4 收口写通道）：全 runtime 对 auth.json 写入的唯一入口。 */
+  /** 写 auth.json 凭证（A1-4 收尾写通道）：全 runtime 对 auth.json 写入的唯一入口。 */
   saveCredential(providerId: string, credential: Credential): Promise<void>
 }
 
@@ -745,7 +761,7 @@ export interface IModelService {
   /** Set thinking level for a session's pi subprocess. Returns pi-effective level (P3: pi clamps unsupported levels). */
   setThinkingLevel(sessionId: string, level: string): Promise<string>
 
-  /** 给 ProviderInfo.models 逐模型标注 supportedLevels（U5 能力注册表服务面，pi 同源计算，
+  /** 给 ProviderInfo.models 逐模型标注 supportedLevels（U5 能力注册表服务侧，pi 同源计算，
    *  签名与 ModelService 逐字对齐——view-ready 字段，renderer 零推导）。 */
   attachSupportedLevels(providers: ProviderInfo[], piVersion?: string): ProviderInfo[]
   /** 在线对账（U6 D2②）：session 附着后调用，返回本次 drift 项（引擎不可用/RPC 失败降级返回 []）。 */
@@ -815,7 +831,7 @@ export interface IPluginService {
   setPluginConfig(pluginId: string, key: string, value: unknown): Promise<void>
   /** 覆盖式写入挂载点集合（renderer 经 plugin.mountPoints.sync 上报，DM3 全量镜像） */
   syncMountPoints(mountPoints: string[]): void
-  // [B5 触发面收窄 2026-09-15] 原 clearSessionData(sessionId) 条目已删：实装 facade 零调用点
+  // [B5 触发点收窄 2026-09-15] 原 clearSessionData(sessionId) 条目已删：实装 facade 零调用点
   // （真删除链经模块级 clearRemovedSessionData 分发，见 session-lifecycle.ts delete），
   // 且原签名 sync void 与实现 async 不符（陈旧契约，组 A 顺手修 low 项）。
   /** Handle UI response from frontend (confirm/select/input dialogs) */

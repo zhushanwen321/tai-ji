@@ -3,7 +3,7 @@
  *
  * buffer 是跨 feed 调用持久的 mutable 累积缓冲（store entryStates 活容器形态），与
  * applyEntry（copy-on-write）/ replayEntries（fold 内 mutable）共享同一派生段与 dispatch
- * 骨架（apply-entry.ts 文件头 collector 叙事）——本文件以四个维度机器守卫「活容器累积、
+ * 骨架（apply-entry.ts 文件头 collector 叙事）——本文件以四个维度机器检查「活容器累积、
  * 产物同构」约定：
  * 1. 产物同构：混合全类型序列 buffer feed 与 reduce 两条路径全量 state deep-equal
  *    （messages / orphanToolResults / deliveredToolResultIds / lastAssistantWithToolCalls
@@ -13,7 +13,7 @@
  * 3. 输入纯度：feed 不 mutate 外部传入的 entry 对象（buffer 自身容器可变，不适用
  *    structuredClone 整表对照——纯度断言对象是输入 entry 而非容器）；
  * 4. 长序列形态：10k 条无 id entry 的 feed 正确性 + `e<N>` 确定性 id 全程唯一（O(1)
- *    每帧落账路径的结构验证，不计时——性能画像归基准工具）。
+ *    每帧记账路径的结构验证，不计时——性能画像归基准工具）。
  *
  * 附带锁定活容器约束的读口义务：snapshot() 是低频浅拷贝（快照不随后续 feed 漂移），
  * `state` 引用恒定、内容随 feed 累积（跨帧持有其容器引用 = 观察到后续变更，属契约外用法）。
@@ -70,7 +70,7 @@ describe('createChatViewStateBuffer 连续 feed ≡ reduce(applyEntry) 元断言
     const viaBuffer = feedMixed()
     const viaReduce = mixedEntries().reduce(applyEntry, createInitialChatViewState())
     expect(viaBuffer.state).toEqual(viaReduce)
-    // 用户可见内容非空守卫（防两侧同归于空 / no-op 假等价）：user / assistant / 回填 /
+    // 用户可见内容非空检查（防两侧同归于空 / no-op 假等价）：user / assistant / 回填 /
     // 孤儿 / bash / 双形态压缩 / 分支 / 自定义通知各就各位
     expect(viaBuffer.state.messages.filter((m) => m.role === 'user')).toHaveLength(1)
     expect(viaBuffer.state.messages.filter((m) => m.role === 'assistant')).toHaveLength(1)
@@ -80,7 +80,7 @@ describe('createChatViewStateBuffer 连续 feed ≡ reduce(applyEntry) 元断言
     expect(viaBuffer.state.messages.filter((m) => m.compactionSummary !== undefined)).toHaveLength(2)
     expect(viaBuffer.state.messages.filter((m) => m.branchSummary !== undefined)).toHaveLength(1)
     expect(viaBuffer.state.messages.filter((m) => m.customType === 'goal-context')).toHaveLength(1)
-    // custom（client-msg-id）纯数据 entry：两路径同为 no-op（零对话流投影）
+    // custom（client-msg-id）纯数据 entry：两路径同为 no-op（零对话流派生视图）
     expect(viaBuffer.state.messages.every((m) => m.customType !== 'taiji.client-msg-id')).toBe(true)
     // 幂等簿记：同 id 双投递收敛单投递（deliveredToolResultIds 两路径同构）
     expect(viaBuffer.state.deliveredToolResultIds).toEqual(new Set(['tc-1', 'tc-none']))

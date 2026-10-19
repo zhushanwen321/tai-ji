@@ -20,7 +20,7 @@ describe("FR-8: Orphan Recovery from Manifest", () => {
     sessionsDir = path.join(rootDir, "sessions");
     fs.mkdirSync(sessionsDir);
     recordsDir = path.join(rootDir, "records");
-    manifestStore = new ManifestStore(recordsDir);
+    manifestStore = new ManifestStore(() => recordsDir);
   });
 
   afterEach(() => {
@@ -29,7 +29,7 @@ describe("FR-8: Orphan Recovery from Manifest", () => {
   });
 
   it("should recover orphan records from manifest when session.jsonl is missing", async () => {
-    const store = new RecordStore(sessionsDir, manifestStore);
+    const store = new RecordStore(() => sessionsDir, manifestStore);
 
     // Write a manifest record (simulating a subagent that crashed before writing session.jsonl)
     await manifestStore.writeManifest({
@@ -82,7 +82,7 @@ describe("FR-8: Orphan Recovery from Manifest", () => {
       sessionFile,
     });
 
-    const store = new RecordStore(sessionsDir, manifestStore);
+    const store = new RecordStore(() => sessionsDir, manifestStore);
     const records = store.collectRecords(100, "all", "session-main");
 
     // Should have exactly 1 record (no duplication)
@@ -91,7 +91,7 @@ describe("FR-8: Orphan Recovery from Manifest", () => {
   });
 
   it("should filter manifest records by rootSessionId", async () => {
-    const store = new RecordStore(sessionsDir, manifestStore);
+    const store = new RecordStore(() => sessionsDir, manifestStore);
 
     await manifestStore.writeManifest({
       id: "orphan-session-a",
@@ -119,7 +119,7 @@ describe("FR-8: Orphan Recovery from Manifest", () => {
   });
 
   it("should map manifest status correctly (4-state)", async () => {
-    const store = new RecordStore(sessionsDir, manifestStore);
+    const store = new RecordStore(() => sessionsDir, manifestStore);
 
     await manifestStore.writeManifest({
       id: "status-completed",
@@ -158,7 +158,7 @@ describe("FR-8: Orphan Recovery from Manifest", () => {
   });
 
   it("mapManifestStatus 越界值返回 null：collectRecords 跳过损坏 record（不降级 failed）", async () => {
-    const store = new RecordStore(sessionsDir, manifestStore);
+    const store = new RecordStore(() => sessionsDir, manifestStore);
 
     // 合法 record（对照组）
     await manifestStore.writeManifest({
@@ -169,7 +169,7 @@ describe("FR-8: Orphan Recovery from Manifest", () => {
       createdAt: 1000,
     });
 
-    // 直接写磁盘注入非法 status（绕过 writeManifest 的 TS 类型守卫）。
+    // 直接写磁盘注入非法 status（绕过 writeManifest 的 TS 类型检查）。
     // crashed 不在 4 态枚举——它是重建派生态,意外出现在 manifest 应被跳过而非降级 failed。
     fs.writeFileSync(path.join(recordsDir, "bad-crashed.json"), JSON.stringify({
       id: "bad-crashed", rootSessionId: "session-main", agentName: "worker",
@@ -189,7 +189,7 @@ describe("FR-8: Orphan Recovery from Manifest", () => {
   });
 
   it("in-memory records should take priority over manifest records", async () => {
-    const store = new RecordStore(sessionsDir, manifestStore);
+    const store = new RecordStore(() => sessionsDir, manifestStore);
 
     // Register a running record in memory
     store.register({
@@ -234,7 +234,7 @@ describe("FR-8: Orphan Recovery from Manifest", () => {
   });
 
   it("should work without manifestStore (backward compatible)", () => {
-    const store = new RecordStore(sessionsDir); // No manifestStore
+    const store = new RecordStore(() => sessionsDir); // No manifestStore
 
     // Should not throw
     const records = store.collectRecords(100, "all", "session-main");
@@ -242,7 +242,7 @@ describe("FR-8: Orphan Recovery from Manifest", () => {
   });
 
   it("should handle manifest with status=running as running", async () => {
-    const store = new RecordStore(sessionsDir, manifestStore);
+    const store = new RecordStore(() => sessionsDir, manifestStore);
 
     await manifestStore.writeManifest({
       id: "still-running",
