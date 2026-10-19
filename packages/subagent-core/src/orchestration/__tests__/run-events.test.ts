@@ -550,7 +550,12 @@ function stateOf(lifecycle: RunLifecycle): RunLifecycleState {
   return lifecycle === "terminal" ? { lifecycle, outcome: "done" } : { lifecycle };
 }
 
-/** 表外转移断言：抛 IllegalTransitionError，且错误信息含当前态与事件名。 */
+/**
+ * 表外转移断言：抛 IllegalTransitionError，错误信息含当前态、事件名与该态
+ * 合法事件清单（V3「消息仍含合法事件清单」子项——清单由基建 legalDetail 组装
+ * 进 detail、run 域 errorFactory 拼 detail 进消息；errorFactory 若丢弃 detail
+ * 参数，此断言即红，清单语义不静默流失）。
+ */
 function expectIllegalTransition(state: RunLifecycleState, trigger: TransitionTrigger): void {
   let caught: unknown;
   try {
@@ -564,6 +569,11 @@ function expectIllegalTransition(state: RunLifecycleState, trigger: TransitionTr
   expect(err.on).toBe(trigger.type);
   expect(err.message).toContain(state.lifecycle);
   expect(err.message).toContain(trigger.type);
+  // 清单形态按态二分（基建 legalDetail 两分支）：非 terminal 态列合法事件清单；
+  // terminal 吸收态无出边，形态为「无任何合法后续事件」
+  expect(err.message).toMatch(
+    state.lifecycle === "terminal" ? /该态无任何合法后续事件/ : /该态合法事件：/,
+  );
 }
 
 // ── 状态词表 ─────────────────────────────────────────────────
@@ -673,6 +683,18 @@ describe("机器声明完整性", () => {
         expect(row.terminalOutcome).toBeDefined();
       } else {
         expect(row.terminalOutcome).toBeUndefined();
+      }
+    }
+  });
+
+  it("声明行 outputs 逐项落在 TRANSITION_OUTPUT_TYPES 词表内且非空（还原旧表级穷举防线：from/to/on 已由基建泛型字面量类型 + 定义期自检更强接住；outputs 基建类型层是自由 string[] 无约束——run-events.ts transition 返回处的词表保证注释由本断言实际锁定，拼错名会静默漏执行 appendTransition 分派）", () => {
+    const outputSet = new Set<string>(TRANSITION_OUTPUT_TYPES);
+    const edges = expandRows();
+    expect(edges.length).toBeGreaterThan(0);
+    for (const edge of edges) {
+      expect(edge.outputs.length).toBeGreaterThan(0);
+      for (const output of edge.outputs) {
+        expect(outputSet.has(output)).toBe(true);
       }
     }
   });
