@@ -29,17 +29,17 @@ Session 的视口。每个 Panel 最多绑定一个 Session，每个 Session 同
 用户从「无活跃会话」进入「准备开聊」的业务动作。终点是 session 发出第一条消息。用户流程 5 步：落地空态 → 选目录 popover → 选分支 popover → 系统原生目录选择器 → 创建分支 modal；对应状态机 8 态（`idle/landing/dir-popover/branch-popover/dir-dialog/branch-modal/completed/cancelled`，`useNewTaskFlow.ts`）。**directory / branch** 是 session 的元信息，非任务本体，显示为 composer 顶部 chip，可随时改。
 
 ### 模式（Mode）
-**启动预设（launch preset）的用户可见名**：一组 pi 启动参数（工具范围 + 扩展范围 + 提示词面）的命名集合，用户可创建/编辑/删除，内置四项（全工具 / Orchestrator / 只读 / 调度）。**代码与协议保留 `preset` 标识**（RPC `preset.*`、类型 `PiLaunchPreset`、**会话绑定字段 `SessionSummary.launchPresetId`**、sidecar `<sessionFile>.preset.json`）——改名只落在用户可见文案层（设置页菜单、landing chip、命令面板、chip tooltip）。
+**启动预设（launch preset）的用户可见名**：一组 pi 启动参数（工具范围 + 扩展范围 + 提示词配置）的命名集合，用户可创建/编辑/删除，内置四项（全工具 / Orchestrator / 只读 / 调度）。**代码与协议保留 `preset` 标识**（RPC `preset.*`、类型 `PiLaunchPreset`、**会话绑定字段 `SessionSummary.launchPresetId`**、sidecar `<sessionFile>.preset.json`）——改名只落在用户可见文案层（设置页菜单、landing chip、命令面板、chip tooltip）。
 
 **锁定语义 = 锁模式 id，不锁模式定义**：模式 id 在会话创建时确定、生命周期内不可更换（无任何 UI 路径可切）；模式定义（提示词文本 / 工具范围 / 扩展范围）以设置页为唯一可信源（活定义），用户编辑后该模式的全部会话（含已建）在**下次进程启动**（restore / fork / respawn）采用新定义。会话 = 对模式 id 的引用，不是创建时快照。
 
 **可见性**：landing 首行第三 chip（可选，三档退化：模式名 → 短名 → 纯图标）+ 对话态 `#meta-row` 只读 chip（**仅非默认模式渲染**，判据 `launchPresetId !== (defaultPresetId || 'builtin:full')`——**用 `||` 不用 `??`**：store 未加载时 `defaultPresetId === ''`，`??` 会让空串穿透，把任意会话误判为非默认）+ 非默认模式在消息流顶部一条派生**模式声明行**（零新 entry 类型，不进 transcript、不进 LLM 上下文）。
 
 ### 模式提示词（Mode Prompt）
-模式的可选提示词面（`PiLaunchPreset.prompt`）：`replace` 段顶掉 pi 核心系统提示词、`append` 段追加在 pi 基础之后，两段各自启用；**单段与两段合计均 ≤ 16000 字符**。校验双语义：写路（保存 / 导入）整条拒绝、读路（磁盘加载）段级折叠（超限优先丢 `append`）。注入通道 = pi 原生两条 argv（`--system-prompt` / `--append-system-prompt`），**不新增 env、扩展零改动**；替换优先级 = **模式 > 全局 > pi 默认**。链序与 `\n` 前缀构造性区分（防 pi 把文案当文件路径）见 [pi-launch-presets.md §2.6](architecture/pi-launch-presets.md)。
+模式的可选提示词配置（`PiLaunchPreset.prompt`）：`replace` 段顶掉 pi 核心系统提示词、`append` 段追加在 pi 基础之后，两段各自启用；**单段与两段合计均 ≤ 16000 字符**。校验双语义：写路（保存 / 导入）整条拒绝、读路（磁盘加载）段级折叠（超限优先丢 `append`）。注入通道 = pi 原生两条 argv（`--system-prompt` / `--append-system-prompt`），**不新增 env、扩展零改动**；替换优先级 = **模式 > 全局 > pi 默认**。链序与 `\n` 前缀构造性区分（防 pi 把文案当文件路径）见 [pi-launch-presets.md §2.6](architecture/pi-launch-presets.md)。
 
 ### 调度模式（Session Dispatch Mode）
-内置模式 `builtin:session-dispatch`（显示序第 4）：主 agent 只做拆解与派发、执行由独立会话完成。工具范围 = `allowlist`（`read/grep/find/ls` + 六个 session 管理工具 + `ask_user/todo`），扩展范围 = `denylist` 屏蔽 `@zhushanwen/pi-subagent-workflow`（派发不经 subagent，直接开会话），提示词面 = 预置可编辑 `append` 纪律文案。子会话经 `create_managed_session` 创建，**服务端继承父会话 projectId**（不新增工具参数），在侧栏命名 project 视图与父会话同屏。
+内置模式 `builtin:session-dispatch`（显示序第 4）：主 agent 只做拆解与派发、执行由独立会话完成。工具范围 = `allowlist`（`read/grep/find/ls` + 六个 session 管理工具 + `ask_user/todo`），扩展范围 = `denylist` 屏蔽 `@zhushanwen/pi-subagent-workflow`（派发不经 subagent，直接开会话），提示词配置 = 预置可编辑 `append` 纪律文案。子会话经 `create_managed_session` 创建，**服务端继承父会话 projectId**（不新增工具参数），在侧栏命名 project 视图与父会话同屏。
 
 ### 通知债权（claim / lifetime / notifyId）
 
@@ -116,7 +116,7 @@ Agent Runtime（一个 Node.js 进程）
 
 ### IPC 通道名 SSOT（ipc-channels.ts）
 
-preload 与 main 两侧全部 Electron IPC 通道名的唯一常量登记处（`packages/shared/src/ipc-channels.ts`，payload 类型伴生 `ipc-payloads.ts`）；renderer 经 preload `electronAPI` 方法面间接消费，不持通道名。_Avoid_：通道名内联字面量 / preload 本地副本。
+preload 与 main 两侧全部 Electron IPC 通道名的唯一常量登记处（`packages/shared/src/ipc-channels.ts`，payload 类型伴生 `ipc-payloads.ts`）；renderer 经 preload `electronAPI` 方法间接消费，不持通道名。_Avoid_：通道名内联字面量 / preload 本地副本。
 
 ### 原子写助手（atomicWriteJsonFile）
 
@@ -193,11 +193,11 @@ subagent 运行状态的内存单源（`packages/subagent-core/src/execution/per
 
 ### control server
 
-runtime 侧的 control 通道服务端（`SubagentControlServer`，`packages/runtime/src/infra/subagent-control/control-server.ts`）：socket 权限（`run/` 0700 + socket 0600）与跨代扫描、`hello` 握手、`engine_open`（校验归属根/在册引擎/绝对路径，spawn 引擎并回 `engine_opened`）、`engine_frame` 双向路由、`engine_close` 有界等待后组杀、`engine_closed` 通知、channel 注册表、pid 文件/启动 sweep、raw mirror 读取。runtime listen 后同步初始化，失败即 fatal（托管态下 control 通道是引擎 spawn 的唯一权威，不静默回落 local）。
+runtime 侧的 control 通道服务端（`SubagentControlServer`，`packages/runtime/src/infra/subagent-control/control-server.ts`）：socket 权限（`run/` 0700 + socket 0600）与跨代扫描、`hello` 握手、`engine_open`（校验归属根/在册引擎/绝对路径，spawn 引擎并回 `engine_opened`）、`engine_frame` 双向路由、`engine_close` 有界等待后按进程组终止、`engine_closed` 通知、channel 注册表、pid 文件/启动 sweep、raw mirror 读取。runtime listen 后同步初始化，失败即 fatal（托管态下 control 通道是引擎 spawn 的唯一权威，不静默回落 local）。
 
 ### EngineTransport
 
-extension ↔ engine 接缝的传输契约（`EngineTransport`，`packages/subagent-core/src/execution/engine/client/transport/types.ts`）：`open` / `writeFrame` / `onFrame` / `onExit` / `close`，另有只读 `rootSessionId` 与可选 `onTransportError`。它只负责帧搬运与通道生死；engine-protocol 语义（initialize 握手 / 请求-应答关联 / 反向路由 / 崩溃重建）留在 `EngineClient`，送达回执留在引擎 run 生命周期。两实现 = `LocalEngineTransport` / `RuntimeEngineTransport`，选择谓词单源 = SDK `isControlEnvActive`；`TAIJI_SUBAGENT_TRANSPORT=local` 是显式逃生舱（强制 local，不改变 control env 注入面）。
+extension ↔ engine 接缝的传输契约（`EngineTransport`，`packages/subagent-core/src/execution/engine/client/transport/types.ts`）：`open` / `writeFrame` / `onFrame` / `onExit` / `close`，另有只读 `rootSessionId` 与可选 `onTransportError`。它只负责帧搬运与通道生死；engine-protocol 语义（initialize 握手 / 请求-应答关联 / 反向路由 / 崩溃重建）留在 `EngineClient`，送达回执留在引擎 run 生命周期。两实现 = `LocalEngineTransport` / `RuntimeEngineTransport`，选择谓词单源 = SDK `isControlEnvActive`；`TAIJI_SUBAGENT_TRANSPORT=local` 是显式逃生舱（强制 local，不改变 control env 注入范围）。
 
 ### LocalEngineTransport
 
@@ -331,7 +331,7 @@ ask-user / scheduler / plan 三个 extension 提问交互的统一协议：问�
 
 ### form 通道
 
-form / planReview 类 ui-request 请求的双壳消费通道：C4 富交互放行面 + per-session 挂起分区 + 快照对账 + 作答回传的合称；与 dialog 通道（CompanionBand 简单对话）、permission 通道（审批弹窗）并列 extension-host 三通道。通道算法（分区容器 / 快照对账 / 作答编码）单点在 `packages/ui/src/extension-host/`（form-request-channel.ts / form-protocol.ts，[ADR-0140](adr/decisions.md)），壳只留策略回调。_Avoid_：「extensionUI 链」「表单链」等泛称。
+form / planReview 类 ui-request 请求的双壳消费通道：C4 富交互放行清单 + per-session 挂起分区 + 快照对账 + 作答回传的合称；与 dialog 通道（CompanionBand 简单对话）、permission 通道（审批弹窗）并列 extension-host 三通道。通道算法（分区容器 / 快照对账 / 作答编码）单点在 `packages/ui/src/extension-host/`（form-request-channel.ts / form-protocol.ts，[ADR-0140](adr/decisions.md)），壳只留策略回调。_Avoid_：「extensionUI 链」「表单链」等泛称。
 
 ### Schedule Create（schedule 创建表单 / 触发反转，2026-09-20）
 
@@ -751,10 +751,10 @@ taiji 的 assistant 回复朗读能力（ai-voice-tts 设计，P2 辅助功能�
 
 tech-design-wf 之前的方向规划层：一张人机共编的分层论证图画布——agent 经结构化工具生长（growth），用户在 overlay 画布上裁决（选定 / 否决 / 评论 / 改判据）并回推 agent 响应，反向对抗式审查迭代到 must-fix（必修项）清零即规划收敛，收敛后的执行叶子经需求卡（requirement card）派发给 tech-design-wf。领域结构（两聚合 + 不变量 + 状态机）的登记 SSOT = [domain-model.md](domain-model.md)；本节承载统一语言词条。状态权威 = runtime CanvasService 唯一入口 `mutate`，画布按归属落盘 session 存储树域 8：`<dataDir>/ext-sessions/<ownerSessionId>/canvases/<canvasId>/`（归属定义见下「归属 session」词条）。
 
-**代码映射**: 领域核心 `packages/runtime/src/services/canvas/`（聚合根 + 不变量 + 落盘 + 重建）；契约（action 词表 / actor 权限矩阵 / marker）`packages/extension-protocol/src/extensions/canvas/`；agent 工具面 `extensions/taiji/canvas/`（6 工具全 deferred）；GUI `packages/renderer/src/stores/canvas.ts` + `packages/renderer/src/components/canvas/`；wire 登记 `packages/shared/src/protocol.ts`（`canvas.updated` 等）。
+**代码映射**: 领域核心 `packages/runtime/src/services/canvas/`（聚合根 + 不变量 + 落盘 + 重建）；契约（action 词表 / actor 权限矩阵 / marker）`packages/extension-protocol/src/extensions/canvas/`；agent 工具 `extensions/taiji/canvas/`（6 工具全 deferred）；GUI `packages/renderer/src/stores/canvas.ts` + `packages/renderer/src/components/canvas/`；wire 登记 `packages/shared/src/protocol.ts`（`canvas.updated` 等）。
 
 ### 归属 session（owner session）
-画布与 session 的归属关系：一张画布恒归属创建它的 session（`ownerSessionId` 字段），归属即路径——画布落盘在归属 session 的存储树内（`<dataDir>/ext-sessions/<ownerSessionId>/canvases/<canvasId>/`），一个 session 可有多个画布（1:N）。画布的创建与访问都校验归属：GUI 清单与 agent 工具面 canvas_list 按归属过滤，跨会话访问返回 `forbidden` 结构化拒绝；session 删除级联删除其全部画布（随整树回收）。领域规则 SSOT = [domain-model.md](domain-model.md) 画布域不变量 12，决策登记 [ADR-0151](adr/decisions.md) 条目 3。**Avoid**: 不叫「所属会话」「拥有者」。
+画布与 session 的归属关系：一张画布恒归属创建它的 session（`ownerSessionId` 字段），归属即路径——画布落盘在归属 session 的存储树内（`<dataDir>/ext-sessions/<ownerSessionId>/canvases/<canvasId>/`），一个 session 可有多个画布（1:N）。画布的创建与访问都校验归属：GUI 清单与 agent 工具 canvas_list 按归属过滤，跨会话访问返回 `forbidden` 结构化拒绝；session 删除级联删除其全部画布（随整树回收）。领域规则 SSOT = [domain-model.md](domain-model.md) 画布域不变量 12，决策登记 [ADR-0151](adr/decisions.md) 条目 3。**Avoid**: 不叫「所属会话」「拥有者」。
 
 ### 画布（canvas）
 承载一个问题域完整规划的聚合根：一张图 + 配置 + 历史。**Avoid**: 不叫「白板」「文档」。
@@ -805,7 +805,7 @@ tech-design-wf 之前的方向规划层：一张人机共编的分层论证图�
 被显式标记可派发的叶子；画布的原子交付单元。**Avoid**: 不叫「任务节点」。
 
 ### 派发（dispatch）
-执行叶子 → 下游（tech-design-wf）的移交动作，登记产物指针；用户拍板动作（agent 工具面不持有）。**Avoid**: 不叫「发布」「移交」。
+执行叶子 → 下游（tech-design-wf）的移交动作，登记产物指针；用户拍板动作（agent 工具不持有）。**Avoid**: 不叫「发布」「移交」。
 
 ### 需求卡（requirement card）
 执行叶子的导出翻译格式（目标 / 上溯链 / 已排除方案 / 论据核实态 / 生效约束五要素），对接 tech-design-wf T1 的防腐层。**Avoid**: 不叫「工单」。
