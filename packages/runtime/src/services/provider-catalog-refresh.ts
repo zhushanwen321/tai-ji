@@ -127,6 +127,9 @@ type OverlaySnapshot = {
   pi: OverlaySourceSnapshot
 }
 
+// @data-owner #67（data-source-registry.md）：provider-catalog-overlay 落盘缓存的读侧内存
+// 快照（own + pi 两份源，mtime 失效检测），持久权威是磁盘 overlay 文件与 pi models-store
+// ——persistOwnCache 落盘后置 null 失效本快照，非第二写方。
 let overlaySnapshot: OverlaySnapshot | null = null
 
 /**
