@@ -565,6 +565,9 @@ importers:
       '@zhushanwen/pi-extension-logger':
         specifier: workspace:*
         version: link:../../shared/extension-logger
+      '@zhushanwen/pi-llm-shared':
+        specifier: workspace:*
+        version: link:../../shared/llm-shared
     devDependencies:
       '@vitest/coverage-v8':
         specifier: ^4.1.9

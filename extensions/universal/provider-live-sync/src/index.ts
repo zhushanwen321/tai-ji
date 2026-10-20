@@ -17,6 +17,16 @@
  * runProviderRefreshPhase）
  * ——**零网络请求**。
  *
+ * 目录投喂（第二个职责，设计 §3.3 D1/D2/D5）：taiji 的模型目录缓存
+ * （`<getDataDir()>/provider-catalog-overlay.json`）经 pi 官方注册点
+ * `pi.registerProvider` 注入注册表，修的是「上游目录新模型在 pi 执行侧不可见」那类
+ * 断裂（rename 静默跳过 / `set_model` 报 ENGINE_MODEL_MISSING / spawn `--model`
+ * 近似回退等 8 个同根因症状）。注册发生在**工厂函数体内**（pi 内部进 pending 队列，
+ * 装配链在 `--model` 解析之前统一 flush），运行中窗口由本扩展既有的轮询 tick 承载：
+ * 该缓存文件作为**第三个监视条目**挂进 tick（绝对路径 + mtime 比较，与既有两条目的
+ * 内容字节比较正交），检出变化即触发同一次零网络刷新，由注册时携带的
+ * `refreshModels` 钩子重读缓存返回新并集。实装在 `src/catalog-bridge.ts`。
+ *
  * 设计取舍（详见 docs 侧设计文档 §3.3 D3/D11/D12）：
  * - **轮询而非 fs.watch**：仓内 `skill-registry` 有 macOS `fs.watch` 触发率 ~40% 前科；轮询不依赖
  *   事件送达，无静默漏报面。代价 = 每进程 2 个小文件 / 2s 的只读 I/O。
@@ -45,6 +55,7 @@ import { join } from "node:path";
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { getAgentDir } from "@earendil-works/pi-coding-agent";
 import { getLogger, setPiHandle } from "@zhushanwen/pi-extension-logger";
+import { injectCatalogOverlay, type OverlayCacheWatcher } from "./catalog-bridge.ts";
 
 /** 轮询周期（ms）。设计标定：内容变更到生效的上界 ≈ 2s，小于「保存 → 切回会话 → 点选」的人工时延。 */
 export const POLL_INTERVAL_MS = 2_000;
@@ -225,6 +236,10 @@ const logger = getLogger("provider-live-sync");
 export default function providerLiveSync(pi: ExtensionAPI): void {
   // 最早期注入 pi handle——上方 logger 的 error 通道（appendEntry）由此生效（session-reader 同款）。
   setPiHandle(pi);
+  // 目录投喂（设计 D1）：必须在同步的工厂体内完成——pi 的 pending 队列在全部工厂返回后
+  // 统一 flush，晚于 `--model` 解析就覆盖不了 spawn 近似回退。返回 null = 非 taiji 托管
+  // 环境（R1），第三个监视条目整条不挂。
+  const overlayWatcher: OverlayCacheWatcher | null = injectCatalogOverlay(pi);
   const snapshot: Snapshot = { baselines: new Map(), initialized: false, suppressed: new Set() };
   /** ctx 每次 session_start 重新捕获（pi 可能换实例；未就绪时本拍跳过且不推进基线）。 */
   let ctx: ExtensionContext | null = null;
@@ -266,11 +281,21 @@ export default function providerLiveSync(pi: ExtensionAPI): void {
         return;
       }
       for (const file of WATCHED_FILES) missingLogged.delete(file);
-      if (decision.action !== "refresh") return;
+
+      // 第三个监视条目：taiji 目录缓存（绝对路径 + mtime 比较，状态由 catalog-bridge 持有）。
+      // 检出变化 → 同一次零网络本地刷新，由注册时携带的 refreshModels 钩子重读缓存返回
+      // 新并集（设计 D5 运行中窗口）。放在 skip-missing 的 early return **之后**：配置源
+      // 缺失窗口内一律不刷新，目录缓存的变化不得穿透该抑制；代价是抑制期内该条目的基线
+      // 不推进，抑制解除后补一次刷新（保守方向，不会漏）。
+      const overlayChanged = overlayWatcher !== null && overlayWatcher.observe() ? overlayWatcher.label : null;
+
+      const changed: string[] = decision.action === "refresh" ? [...decision.changedFiles] : [];
+      if (overlayChanged !== null) changed.push(overlayChanged);
+      if (changed.length === 0) return;
       // 首个基线拍不刷新（进程启动时 pi 已按磁盘配置建过快照，重复刷新纯浪费）。
       if (firstBaseline) return;
 
-      logger.debug(`config change detected (${decision.changedFiles.join(", ")}) → refreshing model snapshot`);
+      logger.debug(`config change detected (${changed.join(", ")}) → refreshing model snapshot`);
       const result = await currentCtx.modelRegistry.refresh({ allowNetwork: false });
       // 有效判据 = getError() 全文（本退化类 errors.size/aborted 恒为空/假，见模块头注释）。
       const error = currentCtx.modelRegistry.getError();
