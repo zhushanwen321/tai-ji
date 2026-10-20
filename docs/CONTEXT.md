@@ -581,7 +581,7 @@ provider-edit 域动作错误的归属判定机制：每条动作错误带 sourc
 ### 目录投喂（catalog overlay）
 taiji 向 pi 注册表补投模型目录的机制：runtime 把 catalog 模型清单刷进目录缓存文件（`<数据目录>/provider-catalog-overlay.json`），provider-live-sync 扩展在该文件变化时于 pi 进程内 `registerProvider` 注入（工厂期首注入 + 运行中 tick 检出刷新，实测 ~2s）。注入是**映射替换**语义（pi extension 层 `models.map`）——注入集就是该 provider 的最终可见集合；过期（lastModified 过旧）不注入、撤销回落内置基线、结构缺失的模型跳过不阻断其他 provider。**Avoid**：叫「模型同步」（与 provider-live-sync 的凭据/启停同步职责混淆）、「模型注入」（丢了「目录缓存文件」这个载体语义）。
 
-**代码映射**: `extensions/shared/llm-shared/src/catalog-overlay.ts`（判据模块：读缓存 + staleness + 注册表比对）；`extensions/universal/provider-live-sync/src/catalog-bridge.ts`（注入执行 + 运行中监视）；runtime 刷缓存写点 `provider-catalog-refresh.ts`。约束登记 [C-ext-31](constraints.json)；边界登记 [models.json 可见性](todo/catalog-overlay-models-json-boundary.md) / [默认模型可见性](todo/catalog-overlay-default-model-boundary.md)。
+**代码映射**: `extensions/shared/llm-shared/src/catalog-overlay.ts`（判据模块：读缓存 + staleness + 注册表比对）；`extensions/universal/provider-live-sync/src/catalog-bridge.ts`（注入执行 + 运行中监视）；runtime 刷缓存写点 `provider-catalog-refresh.ts`。约束登记 [C-ext-31](constraints.json)；边界登记 [models.json 可见性](todo/catalog-overlay-models-json-boundary.md)。
 
 ### 播种（seeding，投喂域）
 验收/测试场景里往目录缓存文件写入一条投喂条目的准备动作（如给 xiaomi 名下加一个内置目录不存在的模型 id），使「[overlay-only 模型](#overlay-only-模型)」在真机数据条件下成立。**Avoid**：叫「mock」（形态是真实缓存文件的真实条目，pi 侧全链路真实消费）。
@@ -592,7 +592,7 @@ pi 内置模型目录内的 provider（pi-ai 编译期目录快照；`getBuiltin
 **代码映射**: 目录合并视图 `packages/runtime/src/services/provider-catalog.ts`；pi 实装锚 `dist/providers/all.js`。
 
 ### overlay-only 模型
-只在 taiji 目录缓存、pi 内置目录没有的模型（如远端目录比内置快照先出的新模型、验收播种的条目）。经目录投喂注入后在 pi 执行侧可见；所属条目过期（[三态判据](#三态判据)判 expired）或缓存文件被清即从视图消失。可见性边界：不进 runtime 默认模型校验基准（models.json 不含注入集合），不可设为持久默认——[默认模型可见性](todo/catalog-overlay-default-model-boundary.md)。
+只在 taiji 目录缓存、pi 内置目录没有的模型（如远端目录比内置快照先出的新模型、验收播种的条目）。经目录投喂注入后在 pi 执行侧可见；所属条目过期（[三态判据](#三态判据)判 expired）或缓存文件被清即从视图消失。可设为默认模型（默认模型校验基准 = models.json ⊕ 目录缓存合并视图）；所属 provider 无投喂条目（从未配置凭据）时其下模型整体不可用，属 provider 级配置约束。
 
 ### 三态判据
 对目录缓存条目相对 pi 内置快照的三态判定（`CatalogOverlayState`）：**fresh**（有条目且 `lastModified` 晚于快照时刻）→ 条目模型进注入集；**expired**（有条目但 `lastModified` 缺失或不晚于快照时刻，含远端 404/501 落盘的 `lastModified: 0` 否定信号）→ 不注入；**never-seen**（无条目：缓存文件缺失/损坏、该 provider 从未出现、条目缺 `models` 数组）→ 不注入。快照时刻锚 = `getBuiltinModelDataGeneratedAt()`（编译期 manifest 值，非运行时钟；导出为 undefined 时扩展侧回落 0 取保守档——否定信号条目不注入）。runtime 侧对时刻缺失跳过检查视为 fresh，与扩展侧差异是有意的：扩展侧裁决「执行可见性」，执行侧权威是 pi 的判定。

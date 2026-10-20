@@ -766,4 +766,4 @@ WorkflowTab 步骤列表的数据源绑定从「workflow-record 全量快照（6
 
 **为什么**：pi 注册表的 extension 层是映射替换而非合并，全部症状（rename 静默跳过 / set_model 报模型缺失 / 子代理校验抛错等 8 个同根因症状）的根子是「pi 可用集合不含 overlay-only 模型」。候选通道对比：改 models.json（物化机器数据进用户配置区，刷新/清理语义与用户手编冲突）、fork pi（违反不 fork 上游红线）、CLI spawn `--model` 近似回退（掩盖而非解决）、extension 注入（唯一不触碰用户配置与上游源码的通道）——注入且映射替换语义下，注入集即最终可见集，无「双源合并」的排序/去重歧义。staleness 基准 = pi-ai 官方导出的目录生成时刻（`@earendil-works/pi-ai/providers/all` 子路径导出），过期即整体回落内置基线，不投半新半旧。
 
-**边界**：注入集合不参与 runtime 默认模型有效性校验（`findValidDefaultModel` 基准 = models.json）——投喂模型不可设为持久默认，替代通道 = 会话级 `set_model` 与显式 `--model`（均已实测可用）；已登记边界族见 docs/todo/catalog-overlay-*-boundary.md（models.json 手写条目被挤出 / 默认模型 auto-fix 回退两篇）。
+**边界**：投喂条目按 provider 挂靠——目录缓存 entries 只含用户已配置（有凭据）的 provider，provider 本身无投喂条目时（如从未配置凭据的 provider）其下模型整体不在合并视图，默认模型校验自然回退，属 provider 级配置约束而非投喂通道限制。投喂模型挂在已配置 provider 名下时可正常设为默认模型（默认模型校验基准 = models.json ⊕ 目录缓存合并视图，`provider-catalog.ts` `getMergedCatalogModels` 单点；2026-10-20 实证 spawn `--model` 直达）。models.json 手写条目被挤出的边界见 docs/todo/catalog-overlay-models-json-boundary.md。
