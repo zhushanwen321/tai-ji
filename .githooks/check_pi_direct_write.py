@@ -172,6 +172,11 @@ ALLOWLIST: dict[str, str] = {
     # db-isolation W5a 清理工具（dev-0.9.16 侧登记，registry §4 对应条目锚见该侧）：
     # 残留清单/操作凭证落盘两写点，原行号键 :445/:464 转文件级。
     "scripts/zcode-session-db-cleanup.mjs": "zcode 会话 db 清理工具：残留清单/操作凭证落盘两写点（原行号键 :445/:464 转文件级）",
+    # 登记表 §4 ⑳（session-archive D1，ADR-0153）：归档域写点——压缩体/簿记（archive/
+    # 树内）+ unarchive 解压 tmp+rename 中间态（写时 pi 已终止、原路径主文件不存在，
+    # 互斥不变量 1）；fixture 构造器写点全在 mkdtemp tmp 树。
+    "packages/runtime/src/services/archive/archive-service.ts": "session 归档域服务：压缩体/簿记/解压 tmp 三类写点（登记表 §4 ⑳，ADR-0153）",
+    "packages/runtime/src/services/archive/archive-fixture.ts": "session 归档测试构造器：写点全在 mkdtemp tmp 树（登记表 §4 ⑳）",
 }
 
 # ---------------------------------------------------------------------------
