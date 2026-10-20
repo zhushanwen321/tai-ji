@@ -4,9 +4,9 @@ agent-managed session pi extension：把 session 的创建/发送/读取/列表/
 
 ## 通道契约
 
-- 工具调用经 `ctx.ui.select(SESSION_MANAGER_MARKER, [JSON], {timeout})` 发出，超时按 action 分档（create/history 60s、其余 30s，SSOT 在 `src/index.ts` 的 `SELECT_TIMEOUT_MS`）；marker 为 `\x00TAIJI_SESSION_MANAGER`（NUL 前缀防与普通 select title 冲突，SSOT 在 `@zhushanwen/extension-protocol`）
+- 工具调用经 `ctx.ui.select(SESSION_MANAGER_MARKER, [JSON])` 发出，全 action 不传 timeout（ADR-0122：无包内挂死兜底，handler 不回包时工具调用长挂）；marker 为 `\x00TAIJI_SESSION_MANAGER`（NUL 前缀防与普通 select title 冲突，SSOT 在 `@zhushanwen/extension-protocol`）
 - 请求体为嵌套形状 `{ action, params }`（形状 SSOT 在 `@zhushanwen/extension-protocol`）；**不要扁平化展开**——runtime event-adapter 按 `data.params` 提取，扁平化会导致 params 丢失
-- 应答方是 taiji runtime 的 `SessionManagerHandler`（select value 通道回写 JSON 字符串；取消/超时返回 null）
+- 应答方是 taiji runtime 的 `SessionManagerHandler`（select value 通道回写 JSON 字符串；取消返回 null——本扩展不传 timeout、无超时态，pi select 层对取消/超时本就不可区分，见 protocol `callMarkerRpc`）
 
 ## 工具（8 个工具，每工具 1 个 action）
 
@@ -23,7 +23,7 @@ agent-managed session pi extension：把 session 的创建/发送/读取/列表/
 
 ## 运行要求
 
-应答端（runtime handler）在 taiji 桌面应用内；独立 pi CLI 环境无 handler 应答，工具会等待至超时（create/history 60s、其余 30s）后返回 isError 错误结果（文案 `cancelled or timed out`——pi 实装对取消与超时不可区分，见 protocol `callMarkerRpc`）。
+应答端（runtime handler）在 taiji 桌面应用内；独立 pi CLI 环境无 handler 应答，工具调用长挂（hangs forever——不传 timeout，ADR-0122）。通道取消/断开折叠为 isError 错误结果（文案开头 `cancelled or channel error — check the taiji runtime connection first…`，含重试安全性与 duplicate-notifyId 例外，全文见 `src/index.ts` 的 executeTool）。
 
 ## 安装
 

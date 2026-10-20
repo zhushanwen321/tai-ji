@@ -259,6 +259,8 @@ export default function sessionManagerExtension(pi: ExtensionAPI): void {
 	registerSessionTool(pi, {
 		name: "create_managed_session",
 		label: "Create Managed Session",
+		promptSnippet:
+			"Create a new managed child session in a working directory, optionally with an initial prompt.",
 		description: `Create a new managed child session in a working directory, optionally with an initial prompt.
 
 Returns the new session's id and its initial status. With a prompt it is delivered immediately (new sessions are always idle) and exactly one completion notification is delivered to this session when that first run finishes (see pending_notifications, type 'session'); without a prompt, no completion notification. If the session dies later, its terminal death is notified once regardless — independent of completion notifications.
@@ -307,6 +309,7 @@ The returned sessionId is the value all other session tools take — keep it; li
 	registerSessionTool(pi, {
 		name: "send_to_session",
 		label: "Send to Session",
+		promptSnippet: "Send a message to an existing managed session (queued if it is busy).",
 		description: `Send a message to an existing managed session.
 
 The message is queued asynchronously: if the target session is busy (generating/compacting/running bash) it is delivered at its next turn boundary and {queued: true} returns immediately. willNotify: exactly one completion notification is delivered to this session when the queued message is consumed and that run finishes; several queued messages merge into a single notification with a count. On synchronous failure the tool call errors (check get_session_status, then retry).
@@ -337,6 +340,8 @@ Ids come from list_my_sessions — never guess; on unknown-id error re-list, don
 	registerSessionTool(pi, {
 		name: "read_session_history",
 		label: "Read Session History",
+		promptSnippet:
+			"Read the conversation history of a managed session (optionally only the most recent turns).",
 		description: `Read the conversation history of a managed session.
 
 Returns the session's messages. Pass tailTurns to limit the result to the most recent turns (default: all).
@@ -362,6 +367,8 @@ Ids come from list_my_sessions — never guess; on unknown-id error re-list, don
 	registerSessionTool(pi, {
 		name: "list_my_sessions",
 		label: "List My Sessions",
+		promptSnippet:
+			"List all sessions managed by you — the single source of sessionId values for every other session tool.",
 		description: `List all sessions managed by you, with id, label, cwd, and status.
 
 This listing is the single source of sessionId values for every other session tool. The response also carries undeliveredResults: the total count of completion notifications not yet delivered to you across your sessions.
@@ -396,6 +403,8 @@ Ids come from this listing — never guess; on unknown-id error re-list, don't r
 	registerSessionTool(pi, {
 		name: "get_session_status",
 		label: "Get Session Status",
+		promptSnippet:
+			"Get a managed session's current status and model info without reading its history.",
 		description: `Get the current status of a managed session without reading its history.
 
 Returns the session's status (active, idle, error, etc.), its model info, and undeliveredResults — the count of that session's finished runs whose completion notifications have not been delivered to you yet. An unknown or non-owned id does not error: it returns status 'not_found'.
@@ -421,6 +430,7 @@ Ids come from list_my_sessions — never guess; on unknown-id error re-list, don
 	registerSessionTool(pi, {
 		name: "abort_session",
 		label: "Abort Session",
+		promptSnippet: "Stop a managed session's current run, keeping the session and its history.",
 		description: `Stop a managed session's current run, keeping the session and its history.
 
 The session stops processing; its final status will be 'stopped'. Pending completion notifications for the aborted run are cancelled, not delivered.
