@@ -637,7 +637,7 @@ const tableCases = generateTableTests(RUN_MACHINE, {
   ctxSamples: [undefined, { enterSettling: true }] as readonly TransitionContext[],
 });
 
-// ── 机器声明完整性（M6：表从 RUN_TRANSITIONS 常量迁 RUN_MACHINE 声明）──
+// ── 机器声明完整性（表 = RUN_MACHINE 声明）──
 
 /** 声明行展开为逐态规范边（from 数组消重复的还原形态，断言用）。 */
 function expandRows(): { from: string; on: string; to: string | null; guard: unknown; terminalOutcome: unknown; outputs: readonly string[] }[] {
