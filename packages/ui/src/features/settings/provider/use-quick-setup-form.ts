@@ -176,6 +176,28 @@ export function useQuickSetupForm(
     const data: SetProviderData = {
       name: template.value.name,
     }
+    // taiji 远程清单模板（remote-config 域 1）：非 catalog——baseUrl/api/models 必须
+    // 落盘 models.json（pi 执行侧只认 models.json，该 provider 无 pi.dev overlay 通道），
+    // remoteSource 回传供 runtime 写 extras 标记（远程模型热更新的唯一判据）。与下方
+    // 防线⑥不冲突：防线⑥针对 catalog 模板的快照 artifact baseUrl（写-剥循环），本分支
+    // 的 baseUrl 就是该 provider 的真实端点，必须落盘。
+    if (template.value.remoteSource) {
+      const tpl = template.value
+      data.baseUrl = tpl.baseUrl
+      data.type = tpl.api
+      data.remoteSource = tpl.remoteSource
+      data.models = tpl.models.map((m) => ({
+        id: m.id,
+        name: m.name,
+        reasoning: m.reasoning,
+        input: m.input as Array<'text' | 'image'>,
+        contextWindow: m.contextWindow,
+        ...(m.api !== undefined ? { api: m.api } : {}),
+        ...(m.baseUrl !== undefined ? { baseUrl: m.baseUrl } : {}),
+        ...(m.maxTokens != null ? { maxTokens: m.maxTokens } : {}),
+        ...(m.thinkingLevelMap != null ? { thinkingLevelMap: m.thinkingLevelMap } : {}),
+      }))
+    }
     if (authMethod.value === 'plaintext') {
       data.apiKey = apiKeyInput.value
       data.authMethod = 'api_key'

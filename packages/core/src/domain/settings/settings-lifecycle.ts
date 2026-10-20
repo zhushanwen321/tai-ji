@@ -110,6 +110,10 @@ export function createSettingsLifecycle() {
     unsubs.push(...localUnsubs)
     initialized = true
 
+    // quota presets 合并视图拉取（remote-config 域 2）：连接建立即拉（fire-and-forget，
+    // 失败静默——消费方回落编译期基线），不阻塞 init 契约。
+    void refreshQuotaPresets()
+
     // [W4 交接] 原 renderer 实现的 theme=system 时 watch(store.system.theme) + matchMedia
     // 监听（updateSystemThemeListener）不迁 core——壳侧 watch system.theme 挂/卸监听。
   }
@@ -126,6 +130,20 @@ export function createSettingsLifecycle() {
     // eslint-disable-next-line taste/no-silent-catch -- 拉取失败不阻塞 UI：onProviders 订阅会兜底推回最新数据，无需打扰用户
     } catch (e) {
       console.warn('[settings] listProviders 失败，依赖订阅兜底', e)
+    }
+  }
+
+  /**
+   * quota presets 合并视图拉取（remote-config 域 2）。init（连接建立）与进设置页两处
+   * 触发——聊天面板 hover 额度依赖，不能只在进设置页拉。失败静默（沿用现有缓存；
+   * store 初始空数组时消费方匹配不到 preset，UI 显式回落基线的路径在 ProviderEditBody）。
+   */
+  async function refreshQuotaPresets(): Promise<void> {
+    const store = getSettingsStore()
+    try {
+      store.setQuotaPresets(await getSettingsTransport().listQuotaPresets())
+    } catch (e) {
+      console.warn('[settings] listQuotaPresets 失败，沿用现有缓存/基线', e)
     }
   }
 
@@ -156,6 +174,7 @@ export function createSettingsLifecycle() {
   return {
     init,
     refreshProviders,
+    refreshQuotaPresets,
     refreshModels,
     dispose,
   }

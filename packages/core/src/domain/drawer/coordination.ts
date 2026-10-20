@@ -11,7 +11,7 @@
  *
  * 选中态写入编排（display-containers §6.6① 五字段迁出后）：选中态落 selection/<域>
  * 分区、切 tab + 开合落 control——跨两分区的编排收敛在本层（control 保持纯控制态，C4）。
- * 各选中态写侧（setSubagentView / clearSubagentView / setWorkflowView / setBtwView / setBackgroundTaskView）
+ * 各选中态写侧（setSubagentView / clearSubagentView / setBtwView / setBackgroundTaskView）
  * 状态本体在 selection/<域>，经 drawer barrel 单一出口（本文件不重复导出，防 export * 同名冲突）。
  *
  * 分层（C4）：单向依赖 control.ts（drawerControl 原语 + getBoundSessionId + getDrawerControlState）
@@ -21,7 +21,6 @@ import { ref } from 'vue'
 import type { WorkflowRunRecord } from '@taiji/shared'
 import { drawerControl, getDrawerControlState, _resetDrawerControlForTest } from './control'
 import { setSubagentView, clearSubagentView } from './selection/subagent'
-import { setWorkflowView } from './selection/workflow'
 import { setBackgroundTaskView } from './selection/bash-task'
 import { selectedCommandName, detailFilePath } from './selection/transient'
 import { _resetSelectionForTest } from './selection'
@@ -57,13 +56,12 @@ export function setDrawerTab(tab: RightDrawerTab): void {
 
 /**
  * 打开 subagent tab，展示指定 subagent 的只读对话流（D3：复用 MessageStream）。
- * virtualId 由调用方（chat subagent 块 / composer 任务托盘 / workflow WorkflowTab）用
+ * virtualId 由调用方（chat subagent 块 / composer 任务托盘）用
  * subagentVirtualId(mainSid, subId) 或 agentCallVirtualId(acsId) 算好传入；core 不感知 id 结构。
- * enteredFrom 驱动 SubagentTab 返回按钮显隐（D4）：'workflow'=从 workflow tab 进入显返回；'chat'=无返回。
- * 选中态（selectedSubagentId + enteredFrom）落 subagent 内容域分区（§6.6①），切 tab + 开 drawer 落控制态。
+ * 选中态（selectedSubagentId）落 subagent 内容域分区（§6.6①），切 tab + 开 drawer 落控制态。
  */
 export function openSubagent(opts: OpenSubagentOptions): void {
-  setSubagentView(opts.virtualId, opts.enteredFrom)
+  setSubagentView(opts.virtualId)
   drawerControl.open('subagent')
 }
 
@@ -92,6 +90,8 @@ export function selectBackgroundTask(taskId: string | undefined): void {
 // 模式，绑定动作发生在 renderer 装配模块加载时，函数体首次执行在用户交互时刻——
 // pinia 已 active）。未绑定时 openWorkflow no-op / lookupWorkflowRun 返回 undefined
 // （headless/测试环境安全默认）。
+// [2026-10-19] openWorkflowInDrawer（drawer workflow tab 显式语义）已随该 tab 删除
+// 移除——workflow 唯一入口 = openWorkflow（开浮层）。
 
 /** overlay 打开回调（renderer 注入）：收 nameOrRunId（双语义，同 openWorkflow 形参约定）+ 可选 slug/sessionId */
 export type WorkflowOverlayOpener = (nameOrRunId: string, slug?: string, sessionId?: string) => void
@@ -124,27 +124,9 @@ export function bindWorkflowRunLookup(lookup: WorkflowRunLookup | null): void {
  * workflowStore 反查 runId 的动作在 renderer opener 内单处执行——core 不感知
  * store 数据）。opts.sessionId = 发起 pane 的 session（block 场景精确传，缺省由
  * renderer opener 回落 focusedSessionId）。
- *
- * 同一函数不承担「开 overlay」与「注入 drawer 选中态」两种语义（D1）——drawer
- * 语义见 openWorkflowInDrawer。
  */
 export function openWorkflow(workflowName?: string, opts?: { slug?: string; sessionId?: string }): void {
   boundOverlayOpener.value?.(workflowName ?? '', opts?.slug, opts?.sessionId)
-}
-
-/**
- * 打开 drawer workflow tab，展示指定 workflow 的 agent call 列表（显式 drawer 语义，
- * D1：现 openWorkflow 实现的移位保留）。
- *
- * 形参双语义与 WorkflowTab 兼容解析现状一致：传 runId（精确命中）或脚本名（取最新）；
- * 空串时仅切到 workflow tab（不记录选中名，显空态或全部）。消费方 = D10 回落链
- * （Guard → openDrawerTab('workflow') + 本函数注入选中态）、SubagentTab 返回按钮
- * （返回 drawer workflow tab）、block 反查未命中的兜底归宿。
- * 选中态落 workflow 内容域分区（§6.6①），切 tab + 开 drawer 落控制态。
- */
-export function openWorkflowInDrawer(workflowName?: string): void {
-  setWorkflowView(workflowName ?? '')
-  drawerControl.open('workflow')
 }
 
 /**

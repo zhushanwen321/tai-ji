@@ -4,7 +4,9 @@
  * 覆盖（三视角 TEST-STRATEGY §3：每条至少一个用户可见 DOM 断言）：
  * - 声明渲染 N 按钮 + testid 形态（header-action-<pluginId>-<id 段>，设计场景 1 契约）
  * - order 升序排序（缺省排后）
- * - badge ≤4 字符宿主截断 + 全文进 tooltip（AP-1 徽标契约）
+ * - badge ≤4 字符宿主截断 + 全文进 tooltip（AP-1 徽标契约；tooltip = 主题化 Tooltip 浮层，
+ *   2026-10-19 原生 title 退役——文案合成断言落 aria-label（与浮层内容同源同串），
+ *   浮层渲染本身由 ui 包 Tooltip 原语族保证）
  * - E13 三态：registered 可点 / unregistered 灰置 / unknown 首次缺省可点 + 保持上次值
  * - 运行时镜像 entry.disabled：true 灰置（插件业务态）/ false / undefined 不灰置；
  *   disabled=true 缺 tooltip → 「暂不可用」泛化文案（场景 12，与 unregistered 的
@@ -24,9 +26,11 @@ import { nextTick, ref } from 'vue'
 import { mount } from '@vue/test-utils'
 import HeaderActionsHost from '@/components/extension/HeaderActionsHost.vue'
 // 真模块顶层有 core overlay 绑定/watch 副作用（模块加载即装配），测试只消费
-// openSchedulerTab 纯写入口——整体 mock 隔离，装配副作用不进测试环境
+// openSchedulerTab 纯写入口——整体 mock 隔离，装配副作用不进测试环境。
+// SCHEDULER_MODAL_VIEW_ID 常量同源保留（SchedulerQuickCard 的 ViewHost 分区键）
 vi.mock('@/components/panel/workflow-viz/overlay/workflow-viz-overlay', () => ({
   openSchedulerTab: vi.fn(),
+  SCHEDULER_MODAL_VIEW_ID: 'scheduler-modal',
 }))
 import { openSchedulerTab } from '@/components/panel/workflow-viz/overlay/workflow-viz-overlay'
 import {
@@ -88,7 +92,7 @@ describe('HeaderActionsHost', () => {
     // panel 顶栏迁入 composer 左簇）+ 声明 title 兜底 tooltip
     expect(btn.classes()).toContain('size-[30px]')
     expect(btn.classes()).toContain('rounded-sm')
-    expect(btn.attributes('title')).toBe('定时任务')
+    expect(btn.attributes('aria-label')).toBe('定时任务')
     // 无 badge 时不渲染徽标
     expect(btn.find('span').exists()).toBe(false)
   })
@@ -131,7 +135,7 @@ describe('HeaderActionsHost', () => {
     const wrapper = mountHost(source)
     const btn = wrapper.find('[data-testid=header-action-scheduler-manager-open]')
     expect(btn.text()).toBe('1234')
-    expect(btn.attributes('title')).toContain('12345')
+    expect(btn.attributes('aria-label')).toContain('12345')
   })
 
   it('E13 unregistered：按钮灰置 + tooltip「本会话未加载所需扩展」', () => {
@@ -139,7 +143,7 @@ describe('HeaderActionsHost', () => {
     const wrapper = mountHost(source)
     const btn = wrapper.find('[data-testid=header-action-scheduler-manager-open]')
     expect(btn.attributes('disabled')).toBeDefined()
-    expect(btn.attributes('title')).toBe('本会话未加载所需扩展')
+    expect(btn.attributes('aria-label')).toBe('本会话未加载所需扩展')
   })
 
   it('E13 unknown：首次缺省可点，tooltip「会话恢复中，暂无法判定」', () => {
@@ -147,7 +151,7 @@ describe('HeaderActionsHost', () => {
     const wrapper = mountHost(source)
     const btn = wrapper.find('[data-testid=header-action-scheduler-manager-open]')
     expect(btn.attributes('disabled')).toBeUndefined()
-    expect(btn.attributes('title')).toBe('会话恢复中，暂无法判定')
+    expect(btn.attributes('aria-label')).toBe('会话恢复中，暂无法判定')
   })
 
   it('E13 unknown：保持上一次 disabled 值（恢复窗口不翻转判定）', async () => {
@@ -173,7 +177,7 @@ describe('HeaderActionsHost', () => {
     }
     const source = makeSource({ getRuntimeState: () => entry })
     const wrapper = mountHost(source)
-    expect(wrapper.find('[data-testid=header-action-scheduler-manager-open]').attributes('title')).toBe('3 个启用任务')
+    expect(wrapper.find('[data-testid=header-action-scheduler-manager-open]').attributes('aria-label')).toBe('3 个启用任务')
   })
 
   it('运行时镜像 entry.disabled=true 且无 tooltip：灰置 + tooltip「暂不可用」（场景 12，F6 泛化 key）', () => {
@@ -188,12 +192,12 @@ describe('HeaderActionsHost', () => {
     const btn = wrapper.find('[data-testid=header-action-scheduler-manager-open]')
     expect(btn.attributes('disabled')).toBeDefined()
     // 灰置按钮缺插件文案时落 disabled 态泛化提示，不得落到声明 title（误导可点语义）
-    expect(btn.attributes('title')).toBe('暂不可用')
+    expect(btn.attributes('aria-label')).toBe('暂不可用')
   })
 
   it('F6 文案分叉：unregistered →「本会话未加载所需扩展」≠ 业务 disabled 缺 tooltip →「暂不可用」', () => {
     const unregistered = mountHost(makeSource({ resolveCommandAvailability: () => 'unregistered' }))
-    expect(unregistered.find('[data-testid=header-action-scheduler-manager-open]').attributes('title')).toBe('本会话未加载所需扩展')
+    expect(unregistered.find('[data-testid=header-action-scheduler-manager-open]').attributes('aria-label')).toBe('本会话未加载所需扩展')
 
     const businessDisabled: HeaderActionEntry = {
       headerActionId: 'scheduler-manager.open',
@@ -202,7 +206,7 @@ describe('HeaderActionsHost', () => {
       updatedAt: 1,
     }
     const disabledHost = mountHost(makeSource({ getRuntimeState: () => businessDisabled }))
-    expect(disabledHost.find('[data-testid=header-action-scheduler-manager-open]').attributes('title')).toBe('暂不可用')
+    expect(disabledHost.find('[data-testid=header-action-scheduler-manager-open]').attributes('aria-label')).toBe('暂不可用')
   })
 
   it('运行时镜像 entry.disabled=true 且插件推了 tooltip：插件文案优先于泛化提示', () => {
@@ -217,7 +221,7 @@ describe('HeaderActionsHost', () => {
     const wrapper = mountHost(source)
     const btn = wrapper.find('[data-testid=header-action-scheduler-manager-open]')
     expect(btn.attributes('disabled')).toBeDefined()
-    expect(btn.attributes('title')).toBe('调度器运行中不可配置')
+    expect(btn.attributes('aria-label')).toBe('调度器运行中不可配置')
   })
 
   it('运行时镜像 entry.disabled=false：不灰置且 tooltip 仍落声明 title（现状不变）', () => {
@@ -231,7 +235,7 @@ describe('HeaderActionsHost', () => {
     const wrapper = mountHost(source)
     const btn = wrapper.find('[data-testid=header-action-scheduler-manager-open]')
     expect(btn.attributes('disabled')).toBeUndefined()
-    expect(btn.attributes('title')).toBe('定时任务')
+    expect(btn.attributes('aria-label')).toBe('定时任务')
     // 未推送运行时帧（getRuntimeState → undefined）：E13 registered 主路径可点
     const noEntry = mountHost(makeSource({ getRuntimeState: () => undefined }))
     expect(noEntry.find('[data-testid=header-action-scheduler-manager-open]').attributes('disabled')).toBeUndefined()
@@ -321,8 +325,8 @@ describe('HeaderActionsHost', () => {
   })
 })
 
-describe('activation 分派（scheduler-overlay 直开 overlay，声明驱动）', () => {
-  it("activation='scheduler-overlay'：点击调 openSchedulerTab(sid)，不调 executeCommand、不触 E13 判定", async () => {
+describe('activation 分派（scheduler-overlay → SchedulerQuickCard 快捷面板，声明驱动）', () => {
+  it("activation='scheduler-overlay'：点击 = pin 快捷面板（aria-expanded 翻转），不调 executeCommand/openSchedulerTab、不触 E13 判定", async () => {
     const executeCommand = vi.fn(() => true)
     const resolveCommandAvailability = vi.fn((): HeaderActionCommandAvailability => 'registered')
     const source = makeSource({
@@ -331,11 +335,14 @@ describe('activation 分派（scheduler-overlay 直开 overlay，声明驱动）
       resolveCommandAvailability,
     })
     const wrapper = mountHost(source)
-    await wrapper.find('[data-testid=header-action-scheduler-manager-open]').trigger('click')
-    // 用户可见断言：按钮仍在命令链之外直开 overlay（转发发起 session id）
-    expect(openSchedulerTab).toHaveBeenCalledTimes(1)
-    expect(openSchedulerTab).toHaveBeenCalledWith('s1')
+    const btn = wrapper.find('[data-testid=header-action-scheduler-manager-open]')
+    // 点击 = pin 快捷面板（面板开：aria-expanded=true）；overlay 直开移入面板底部条
+    await btn.trigger('click')
+    expect(btn.attributes('aria-expanded')).toBe('true')
+    await btn.trigger('click')
+    expect(btn.attributes('aria-expanded')).toBe('false')
     expect(executeCommand).not.toHaveBeenCalled()
+    expect(openSchedulerTab).not.toHaveBeenCalled()
     // E13 判定有 lastResolved 簿记副作用，overlay 路径不得触碰
     expect(resolveCommandAvailability).not.toHaveBeenCalled()
   })
@@ -356,8 +363,8 @@ describe('activation 分派（scheduler-overlay 直开 overlay，声明驱动）
     const disabledWrapper = mountHost(disabledSource)
     const btn = disabledWrapper.find('[data-testid=header-action-scheduler-manager-open]')
     expect(btn.attributes('disabled')).toBeDefined()
-    expect(btn.attributes('title')).toBe('暂不可用')
-    // 无运行时 disabled：即使命令 unregistered 也不灰置、tooltip 落声明 title
+    expect(btn.attributes('aria-label')).toBe('暂不可用')
+    // 无运行时 disabled：即使命令 unregistered 也不灰置、提示落声明 title
     const noEntrySource = makeSource({
       getDeclarations: () => [schedulerOverlayAction],
       resolveCommandAvailability: () => 'unregistered',
@@ -365,7 +372,7 @@ describe('activation 分派（scheduler-overlay 直开 overlay，声明驱动）
     const noEntryWrapper = mountHost(noEntrySource)
     const cleanBtn = noEntryWrapper.find('[data-testid=header-action-scheduler-manager-open]')
     expect(cleanBtn.attributes('disabled')).toBeUndefined()
-    expect(cleanBtn.attributes('title')).toBe('定时任务')
+    expect(cleanBtn.attributes('aria-label')).toBe('定时任务')
   })
 
   it('hidden 剔除对两种声明同样生效（overlay 直开声明 hidden=true 同样零 DOM）', () => {

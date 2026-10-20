@@ -1,14 +1,14 @@
 /**
- * useWorkflowAction —— workflow abort 两段式动作单点（drawer WorkflowTab + tray workflow
- * 面板共享，质量审查结构收敛批：原两组件各持一份「两段式确认 + workflowAction RPC +
- * loadWorkflows 刷新 + toast」双实现收敛于此）。
+ * useWorkflowAction —— workflow abort 两段式动作单点（tray workflow 面板消费，质量审查
+ * 结构收敛批：原多组件各持一份「两段式确认 + workflowAction RPC + loadWorkflows 刷新 +
+ * toast」双实现收敛于此）。
  *
  * - 确认态：单槽（useTwoStepConfirm 原语：首击置位、再击执行并复位）；clearAbortConfirm
  *   供行 mouseleave 防误触残留清理（tray 面板消费）。
  * - 执行：workflowAction RPC + loadWorkflows 刷新（不做乐观写——workflow 状态由 runtime
  *   推送权威）；失败 toast（错误文案单 key panel.tray.workflowOpFailed，zh/en 同步登记）。
- * - sessionId 由调用方以 getter 注入（tab 消费 panelStore.focusedSessionId / tray 消费
- *   props.sessionId），getter 返回空时不发 RPC（检查边界）。
+ * - sessionId 由调用方以 getter 注入（tray 消费 props.sessionId），getter 返回空时不发
+ *   RPC（检查边界）。
  */
 import { useI18n } from 'vue-i18n'
 import { toErrorMessage } from '@taiji/core'

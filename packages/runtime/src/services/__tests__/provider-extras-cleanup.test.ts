@@ -243,3 +243,31 @@ describe('S2: setProvider modelStates 按保留集合清理（custom=payload 全
     })
   })
 })
+
+// ══ S3: setProvider remoteSource 落 providers.json extras（remote-config 域 1）════════════════════════════════════════
+
+describe('S3: setProvider remoteSource 标记落盘（QuickSetup 从 taiji 清单创建时回传）', () => {
+  it('payload 回传 remoteSource → extras.remoteSource 落盘；重保存不回传不丢标记', async () => {
+    writeModelsJson({ 'relay-provider': { apiKey: 'sk-a', baseUrl: 'https://relay.example.com' } })
+    const svc = makeSvc()
+
+    await svc.setProvider('relay-provider', { apiKey: 'sk-a', remoteSource: 'taiji-relay' })
+    expect(readExtrasRaw()['relay-provider']).toMatchObject({ remoteSource: 'taiji-relay' })
+
+    // 重保存不回传 = 不动（语义同 persistAuthMethod：既有标记保留，远程模型热更新判据不丢）
+    await svc.setProvider('relay-provider', { apiKey: 'sk-b' })
+    expect(readExtrasRaw()['relay-provider']).toMatchObject({ remoteSource: 'taiji-relay' })
+  })
+
+  it('extrasStore 未注入 + 回传 remoteSource → warn 丢弃（宁丢不写错位，生产恒注入）', async () => {
+    writeModelsJson({ 'relay-provider': { apiKey: 'sk-a' } })
+    const svc = new ConfigService('/tmp/project', configStore, undefined, undefined, undefined, stubResolver)
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
+
+    await svc.setProvider('relay-provider', { apiKey: 'sk-a', remoteSource: 'taiji-relay' })
+
+    expect(warn).toHaveBeenCalledWith(expect.stringContaining('remoteSource dropped for relay-provider'))
+    warn.mockRestore()
+    expect(readExtrasRaw()).toEqual({})
+  })
+})

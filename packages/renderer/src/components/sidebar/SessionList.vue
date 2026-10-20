@@ -4,13 +4,17 @@
     区头「项目与会话」+ 总会话计数 + 双段模式开关，下方为：
     - 默认项目区（用户裁决 2026-10-13 方案 A）：默认项目 = 未归类收件箱，不展示项目框——
       平铺模式 = 置顶平铺会话区（无组头/无左线/无缩进）；目录模式 = 置顶目录标签序列
-      （无组头包裹）。空区不渲染；不可锚定（恒可见，无需组头）。
-    - 命名项目组：保持 ProjectGroup 框（组头 + 左线 + 缩进）。平铺模式 = 锚定聚焦：
-      仅当前组展开，其余组折叠一行；点其他组头 = 切换锚定并展开（唯一项目切换路径），
-      点当前组头 = 折叠/展开翻转。目录模式 = 浏览态：全部组默认展开，组头只开合自己、
-      不切换锚定，「当前」chip 只读；组内按 cwd 目录静态标签分组（SessionDirLabel，
-      与默认项目目录区共用同一实现）。目录行悬停操作（目录内新建 / 批量删除）为
-      real 独有功能性入口。
+      （无组头包裹）。空区不渲染；锚定/新建/拖放入口 = DefaultProjectHead 轻量头行
+      （点行锚定默认项目 +「+」在此新建 + session drop 落点）。
+    - 命名项目组：保持 ProjectGroup 框（组头 + 左线 + 缩进）。两种模式的展开态都按组
+      独立记忆（多项目同开）：平铺模式点组头 = 切换锚定并展开目标组（其余组开合不动，
+      点当前组头 = 折叠/展开翻转），锚定只决定新会话归属与「当前」chip；目录模式 =
+      浏览态：全部组默认展开，组头只开合自己、不切换锚定，「当前」chip 只读；组内按
+      cwd 目录静态标签分组（SessionDirLabel，与默认项目目录区共用同一实现）。目录行
+      悬停操作（目录内新建 / 批量删除）为 real 独有功能性入口。
+    - session 拖拽移动归属（落点 = 各组头 + 默认头行）：useSessionDropTarget 统一交互
+      （types 命中判别 + dropActive 高亮），drop 走既有 setProject 事件链（同归属 no-op），
+      落折叠组后强制展开。
     分组规则 SSOT = sessionBelongsToProject（默认项目聚合未归类 + 孤儿）；组序 SSOT =
     projectStore.orderedProjects（lastUsedAt 稳定序 + 默认项目固定最后，锚定切换不重排；
     默认区置顶是纯视图层拆分，不改组序）。组内平铺序 = runtime 组序展平。
@@ -108,6 +112,14 @@
           class="flex flex-col"
           data-testid="default-project-flat-zone"
         >
+          <!-- 默认项目轻量头行（锚定/新建/drop 落点入口；有会话才渲染，与空区不渲染一致） -->
+          <DefaultProjectHead
+            :current="projectStore.isDefaultProject"
+            :name="defaultZone.name"
+            @anchor="onAnchorDefault"
+            @create-task="onCreateTaskIn(defaultZone)"
+            @drop-session="onDropToDefault"
+          />
           <SessionItem
             v-for="s in defaultZone.items"
             :key="s.id"
@@ -126,9 +138,10 @@
             @export-jsonl="emit('exportJsonl', $event)"
           />
         </div>
-        <!-- 命名项目组（锚定聚焦：当前组展开 + 左缘细线，位置不重排；其余组恒折叠一行）。
-             会话行缩进（demo .pgi .si）：行内左距 9px 与目录标签对齐；作用到 ProjectGroup
-             槽内直接子 .session-item（任意变体替代 scoped 后代选择器） -->
+        <!-- 命名项目组（多开：每組开合独立记忆，点组头切锚定并展开目标组、其余组不动；
+             「当前」chip 标识锚定组。会话行缩进（demo .pgi .si）：行内左距 9px 与目录标签
+             对齐；作用到 ProjectGroup 槽内直接子 .session-item（任意变体替代 scoped 后代
+             选择器） -->
         <ProjectGroup
           v-for="pg in namedGroups"
           :key="pg.id"
@@ -136,13 +149,14 @@
           :name="pg.name"
           :count="pg.items.length"
           :current="pg.id === projectStore.activeProjectId"
-          :expanded="pg.id === projectStore.activeProjectId && curOpen"
+          :expanded="!flatClosed.has(pg.id)"
           :is-default="pg.isDefault"
           class="[&>.session-item]:pl-[9px]"
           @head-click="onGroupHeadClick(pg)"
           @create-task="onCreateTaskIn(pg)"
           @rename-commit="onRenameCommit(pg, $event)"
           @delete-request="requestDelete(pg)"
+          @drop-session="onDropToGroup(pg, $event)"
         >
           <SessionItem
             v-for="s in pg.items"
@@ -172,9 +186,18 @@
       </template>
       <!-- 目录模式：默认项目目录区（置顶，无组框）+ 命名项目组（浏览态） -->
       <template v-else>
-        <!-- 默认项目：无组头，目录标签直接平铺在列表顶部（用户裁决 2026-10-13：
-             默认项目不展示项目 item；目录模式下同样不给框，标签自描述无需包裝） -->
+        <!-- 默认项目：无组头，轻量头行（锚定/新建/drop 入口，同平铺模式）+ 目录标签直接
+             平铺在列表顶部（用户裁决 2026-10-13：默认项目不展示项目 item；目录模式下同样
+             不给框，标签自描述无需包裝） -->
         <template v-if="defaultZone">
+          <DefaultProjectHead
+            v-if="defaultZone.items.length"
+            :current="projectStore.isDefaultProject"
+            :name="defaultZone.name"
+            @anchor="onAnchorDefault"
+            @create-task="onCreateTaskIn(defaultZone)"
+            @drop-session="onDropToDefault"
+          />
           <template v-for="g in defaultZone.dirs" :key="g.cwd">
             <SessionDirLabel
               :cwd="g.cwd"
@@ -222,6 +245,7 @@
           @create-task="onCreateTaskIn(pg)"
           @rename-commit="onRenameCommit(pg, $event)"
           @delete-request="requestDelete(pg)"
+          @drop-session="onDropToGroup(pg, $event)"
         >
           <div
             v-if="!pg.items.length"
@@ -305,9 +329,10 @@ import { ScrollArea } from '@/components/ui/scroll-area'
 import { EdgeFade } from '@/components/ui/edge-fade'
 import { isSessionCompleted } from '@/composables/logic/sessionStatus'
 import { registerModalSurface } from '@/composables/features/app/modal-surface-registry'
-import { useProjectStore } from '@/stores/project'
+import { useProjectStore, DEFAULT_PROJECT_ID } from '@/stores/project'
 import { useProjectGroups, type ProjectGroupVM, type SidebarSessionMode } from '@/composables/features/sidebar/useProjectGroups'
 import ProjectGroup from './ProjectGroup.vue'
+import DefaultProjectHead from './DefaultProjectHead.vue'
 import SessionDirLabel from './SessionDirLabel.vue'
 import SessionItem from './SessionItem.vue'
 
@@ -468,8 +493,9 @@ function setMode(next: SidebarSessionMode): void {
 const {
   projectGroups,
   totalCount,
-  curOpen,
+  flatClosed,
   dirClosed,
+  expandGroup,
   onGroupHeadClick,
   onCreateTaskIn,
   deleteOpen,
@@ -490,12 +516,38 @@ const {
   onNewSession: () => emit('newSession'),
 })
 
+// ── 默认项目头行交互 + session 拖拽落点（拖到组头/默认行 = 移动归属，走既有 setProject 链）──
+
+/** 点默认头行主体：锚定切回默认项目（修复「锚定一旦落到命名项目即无法新建到默认区」死角） */
+function onAnchorDefault(): void {
+  projectStore.setActiveProject(DEFAULT_PROJECT_ID)
+}
+
+/** drop 落点统一写入口：同归属 no-op（防自拖自落 + 省一次 RPC），否则透传既有 setProject
+ *  事件链（Sidebar → assignSessionToProject → RPC + 乐观更新），拖拽与右键菜单同一写通道 */
+function assignDropped(projectId: string, sessionId: string): void {
+  const session = props.groups.flatMap((g) => g.sessions).find((s) => s.id === sessionId)
+  if ((session?.projectId ?? '') === projectId) return
+  emit('setProject', { sessionId, projectId })
+}
+
+/** 拖入命名组头：移动归属 + 强制展开目标组（落折叠组后会话直接可见，不消失） */
+function onDropToGroup(pg: ProjectGroupVM, sessionId: string): void {
+  assignDropped(pg.id, sessionId)
+  expandGroup(pg.id)
+}
+
+/** 拖入默认头行：归回未归类聚合（projectId 空串语义，assign-targets 同口径） */
+function onDropToDefault(sessionId: string): void {
+  assignDropped('', sessionId)
+}
+
 /**
  * 默认项目区 vs 命名项目组（用户裁决 2026-10-13 方案 A：默认项目不展示项目框）。
  * 默认项目 = 未归类收件箱：平铺模式渲染为置顶平铺区（无组头/左线/缩进），目录模式
  * 渲染为置顶目录标签序列（无组头包裹）；命名项目组保持 ProjectGroup 框。组序 SSOT
  * 不动（orderedProjects 默认项目仍固定最后），拆分纯视图层：区置顶 = 渲染位置，
- * 非重排。默认组不可锚定（无组头）也不需要——它恒展开可见。
+ * 非重排。锚定/新建/drop 入口由 DefaultProjectHead 轻量头行承载（不恢复项目框）。
  */
 const defaultZone = computed(() => projectGroups.value.find((pg) => pg.isDefault))
 const namedGroups = computed(() => projectGroups.value.filter((pg) => !pg.isDefault))

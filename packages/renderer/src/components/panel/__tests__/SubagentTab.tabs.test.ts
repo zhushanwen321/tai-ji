@@ -23,28 +23,24 @@ import { JSDOM } from 'jsdom'
 // ── drawer：选中态 ref 可变（驱动 tab 开/关编排）────────────────────────────
 const drawerState = {
   selectedSubagentId: ref<string | null>(null),
-  enteredFrom: ref<'chat' | 'workflow' | null>('chat'),
 }
-// drawer 域 importOriginal 部分 mock（挂载树模块图的顶层装配面持续增长——手写桩
+// drawer 域 importOriginal 部分 mock（挂载树模块图的顶层装配持续增长——手写桩
 // 逐导出补齐必漏）：真模块承接 barrel 全导出与顶层绑定（bindDrawerSessionId /
 // bindWorkflowOverlayOpener / bindWorkflowRunLookup，core headless 零副作用），
-// 只覆写组件消费的读侧/写侧桩。
+// 只覆写组件消费的读取侧桩。
 vi.mock('@taiji/core/domain/drawer', async (importOriginal) => {
   const actual = await importOriginal<typeof import('@taiji/core/domain/drawer')>()
   return {
     ...actual,
     useDrawerControl: () => drawerState,
     useSubagentSelection: () => drawerState,
-    openWorkflowInDrawer: vi.fn(),
     // 真实语义：写选中态（tab 点击/关闭的选中同步通道）
-    openSubagent: vi.fn((opts: { virtualId: string; enteredFrom?: 'chat' | 'workflow' }) => {
+    openSubagent: vi.fn((opts: { virtualId: string }) => {
       drawerState.selectedSubagentId.value = opts.virtualId
-      if (opts.enteredFrom !== undefined) drawerState.enteredFrom.value = opts.enteredFrom
     }),
     // 真实语义：tab 全关回空态时清 core 选中态（close() 空态分支同步通道）
     clearSubagentSelection: vi.fn(() => {
       drawerState.selectedSubagentId.value = null
-      drawerState.enteredFrom.value = null
     }),
   }
 })
@@ -157,7 +153,6 @@ beforeEach(() => {
   drawerTabsFixture.tabs = []
   drawerTabsFixture.active = null
   drawerState.selectedSubagentId.value = null
-  drawerState.enteredFrom.value = 'chat'
   void JSDOM
 })
 
@@ -234,7 +229,6 @@ describe('SubagentTab 二级 tab 编排（subagent-detail-tabs）', () => {
     const { useSubagentDrawerTabs } = await import('@/composables/panel/useSubagentDrawerTabs')
     const tabsApi = useSubagentDrawerTabs({
       selectedSubagentId: drawerState.selectedSubagentId,
-      enteredFrom: drawerState.enteredFrom,
       labelOf: (vid) => vid,
       stopStream,
     })
@@ -257,7 +251,6 @@ describe('SubagentTab 二级 tab 编排（subagent-detail-tabs）', () => {
     const { useSubagentDrawerTabs } = await import('@/composables/panel/useSubagentDrawerTabs')
     const tabsApi = useSubagentDrawerTabs({
       selectedSubagentId: drawerState.selectedSubagentId,
-      enteredFrom: drawerState.enteredFrom,
       labelOf: (vid) => vid,
       stopStream: vi.fn(),
     })

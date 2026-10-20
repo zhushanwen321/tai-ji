@@ -46,6 +46,9 @@ export default {
     pluginActionExtensionNotLoaded: '本会话未加载所需扩展',
     pluginActionRestoring: '会话恢复中，暂无法判定',
     pluginActionTemporarilyUnavailable: '暂不可用',
+    // scheduler 快捷面板（SchedulerQuickCard，2026-10-19 左簇浮层优化）：
+    schedulerPanelTitle: '定时任务',
+    schedulerQuickOpen: '打开定时任务面板',
   },
   composer: {
     send: '发送',
@@ -383,7 +386,6 @@ export default {
     subagentNoOutcome: '（无结果记录）',
     engineBadgeTitle: '执行引擎：{engine}',
     subagentStopReason: '上一轮为什么停（停因词，仅展示）',
-    backToWorkflow: '返回工作流',
     subagentLoadFailed: '加载失败',
     subagentRetry: '重试',
     workflowRunning: '运行中',

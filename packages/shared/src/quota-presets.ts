@@ -38,7 +38,12 @@ export interface QuotaPreset {
   requiresWorkspace?: boolean
 }
 
-/** 内置 provider 预设（SSOT）。 */
+/**
+ * 内置 5 个 provider 预设（基线数据源——remote-config 域 2 上线后，运行时权威 =
+ * runtime「基线 ⊕ 远程 configs/remote/quota-fetchers.json presets 整体替换」合并视图
+ * （quota-providers/index.ts listQuotaPresets）；本常量仅作拉取失败/无远程覆盖时的
+ * 编译期兜底与类型形状定义，不再直接作为运行时匹配数据源。
+ */
 export const QUOTA_PRESETS: QuotaPreset[] = [
   {
     fetcher: 'zhipu',
@@ -117,22 +122,72 @@ export const QUOTA_PRESETS: QuotaPreset[] = [
 ]
 
 /**
- * 根据 provider 的 baseUrl 和 name 匹配内置预设。
+ * QuotaPreset wire 形状守卫（remote-config presets 段元素校验用）。
+ *
+ * 必填字段（fetcher/label/auth/match）缺失或类型漂移即拒——匹配链对 match 解构、
+ * QuotaService 按 auth 数组序解析凭证、UI 渲染 label/helpUrl，畸形元素漏到消费侧
+ * 会在运行期抛 TypeError。可选字段（helpUrl/helpText/requiresWorkspace）提供即校验；
+ * 未知字段放行（远程向后兼容扩展不被旧版本整体拒用）。auth 元素只校验 string 不锁
+ * 'api-key'|'oauth'|'cookie' 值域：新形态由旧版本 auth 数组判定与凭证解析链自然降级，
+ * 不因单个未知值拒用整个 presets 表。
+ */
+export function isQuotaPreset(v: unknown): v is QuotaPreset {
+  if (typeof v !== 'object' || v === null || Array.isArray(v)) return false
+  const p = v as Record<string, unknown>
+  if (typeof p['fetcher'] !== 'string' || p['fetcher'] === '') return false
+  if (typeof p['label'] !== 'string') return false
+  if (!Array.isArray(p['auth']) || !p['auth'].every((k) => typeof k === 'string')) return false
+  const match = p['match']
+  if (typeof match !== 'object' || match === null || Array.isArray(match)) return false
+  const m = match as Record<string, unknown>
+  if (m['baseUrlPattern'] !== undefined && typeof m['baseUrlPattern'] !== 'string') return false
+  if (m['namePattern'] !== undefined && typeof m['namePattern'] !== 'string') return false
+  if (p['helpUrl'] !== undefined && typeof p['helpUrl'] !== 'string') return false
+  if (p['helpText'] !== undefined && typeof p['helpText'] !== 'string') return false
+  if (p['requiresWorkspace'] !== undefined && typeof p['requiresWorkspace'] !== 'boolean') return false
+  return true
+}
+
+/**
+ * 读取侧空态回落：presets 合并视图尚未下发时取编译期基线。
+ *
+ * 判据取「空态」而非 nullish：settings-store 的 quotaPresets 初值是 `[]`（非 undefined），
+ * `??` 只覆盖 undefined——空数组会原样穿过回落表达式，额度类型下拉与 matchedPreset 在
+ * RPC 未回包 / 拉取失败 / mock 轨时永久为空（C-proc-21：用户可见的辅助能力失败必须有
+ * 可见反馈，禁静默空值）。空态在读取侧与「权威显式下发空表」不可区分，统一回落基线
+ * （基线即无远程覆盖时的合并视图原形，见 QUOTA_PRESETS 注释）。
+ *
+ * 与 runtime listQuotaPresets()（远程 presets ?? 基线）同口径：runtime 侧恒非空，
+ * 前端读取侧经本函数补齐同一判据，展示链与匹配链读同一权威。
+ */
+export function resolveQuotaPresets(presets: readonly QuotaPreset[] | undefined): readonly QuotaPreset[] {
+  return presets?.length ? presets : QUOTA_PRESETS
+}
+
+/**
+ * 根据 provider 的 baseUrl 和 name 匹配预设。
  *
  * @param provider - 提供 baseUrl 和/或 name 的对象（来自 ProviderInfo）。
+ * @param presets - 候选预设集（必填，无缺省）：调用方显式决定权威来源——runtime 侧传
+ *   listQuotaPresets()「基线 ⊕ 远程」合并视图 / 前端传 RPC config.listQuotaPresets
+ *   下发数组。契约必填化（原缺省回落编译期基线）堵「漏传静默读基线」通道：远程 presets
+ *   下发后匹配链与自动开启判定链必须与展示链读同一权威。
  * @returns 匹配到的 QuotaPreset，或 undefined（无匹配）。
  */
-export function matchQuotaPreset(provider: {
-  baseUrl?: string
-  name?: string
-}): QuotaPreset | undefined {
+export function matchQuotaPreset(
+  provider: {
+    baseUrl?: string
+    name?: string
+  },
+  presets: readonly QuotaPreset[],
+): QuotaPreset | undefined {
   const { baseUrl, name } = provider
   if (!baseUrl && !name) return undefined
 
   const normalizedBaseUrl = baseUrl?.toLowerCase() ?? ''
   const normalizedName = name?.toLowerCase() ?? ''
 
-  for (const preset of QUOTA_PRESETS) {
+  for (const preset of presets) {
     const { baseUrlPattern, namePattern } = preset.match
 
     // baseUrl 匹配：归一化大小写后判断包含（pattern 自身也归一化，避免 'BigModel.CN' 漏配）

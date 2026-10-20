@@ -1,11 +1,11 @@
 /* eslint-disable no-magic-numbers -- mock fixture 数据（workflow/subagent 记录、事件流行、预置 DAG）的字面量数值属领域数据，非逻辑魔数（data.ts 同款先例） */
 /**
  * Workflow/subagent mock fixture —— E2E 验证任务列表渲染（composer 任务托盘面板 /
- * drawer workflow tab）+ 跟随 session 切换 + workflow-viz overlay 边界态演员。
+ * workflow-viz overlay）+ 跟随 session 切换 + workflow-viz overlay 边界态演员。
  *
  * 从 mock/index.ts 拆出（文件行数超 500 限制）。
  * [HISTORICAL] 2026-09-16 侧栏 Flows/Agents tab 退役后，列表渲染断言范围迁至任务托盘
- * （workflow 详情视图 2 = drawer WorkflowTab）。
+ * （workflow 详情视图 = workflow-viz overlay）。
  *
  * [D8] workflow-overlay-refine §3.3 演员清单（SSOT = .tmp/dev-flow/ui-redesign-combined.runlog/
  * u-wf-mock.md 冻结清单）：既有 done（wf-mock-001）之外 10 个演员定义 = 6 类边界态

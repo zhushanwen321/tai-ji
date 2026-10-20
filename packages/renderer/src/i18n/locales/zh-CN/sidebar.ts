@@ -89,6 +89,8 @@ export default {
     header: '项目与会话',
     groupEmpty: '暂无会话，点组头「+」在此新建任务',
     newSessionInProject: '在此项目新建任务',
+    // DefaultProjectHead 轻量头行「+」：锚定默认项目后新建（修复锚定切走后新会话进不了默认区）
+    newSessionInDefault: '在默认项目新建任务',
     newSessionInFolder: '在此目录新建会话',
     deleteFolderConfirm: '确认删除此文件夹下所有会话？',
     // N8 A/C 双模式（ui-optimize-unified 决策 9）：双段图标开关的模式名（title 悬停提示）

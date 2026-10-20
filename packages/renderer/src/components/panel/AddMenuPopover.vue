@@ -7,14 +7,20 @@
     提示标（demo .slash-hint：hover 底胶囊，中性档——N14 口径 accent 底保留给未读需关注态）。
   -->
   <Popover v-model:open="open">
-    <PopoverTriggerButton
-      :open="open"
-      variant="icon"
-      :show-chevron="false"
-      :title="t('panel.composer.addContent')"
-    >
-      <Plus class="size-[16px]" :stroke-width="1.6" />
-    </PopoverTriggerButton>
+    <!-- tooltip = 主题化浮层（2026-10-19 左簇浮层优化：原生 title 退役）；aria-label 保留可读名 -->
+    <Tooltip>
+      <TooltipTrigger as-child>
+        <PopoverTriggerButton
+          :open="open"
+          variant="icon"
+          :show-chevron="false"
+          :aria-label="t('panel.composer.addContent')"
+        >
+          <Plus class="size-[16px]" :stroke-width="1.6" />
+        </PopoverTriggerButton>
+      </TooltipTrigger>
+      <TooltipContent data-testid="add-menu-tooltip">{{ t('panel.composer.addContent') }}</TooltipContent>
+    </Tooltip>
     <!-- 容器对齐 demo `.popover` 基形态：左锚 / 锚距 10px / 最小宽 160px / r-lg / 4px 内边距 -->
     <PopoverContent
       side="top"
@@ -48,6 +54,7 @@ import { useI18n } from 'vue-i18n'
 import { Plus } from '@lucide/vue'
 import { Button } from '@/components/ui/button'
 import { Popover, PopoverContent, PopoverTriggerButton } from '@/components/ui/popover'
+import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
 
 type AddType = 'attach' | 'image' | 'slash'
 

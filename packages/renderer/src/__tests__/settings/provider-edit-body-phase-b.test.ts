@@ -17,6 +17,7 @@ import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 import { mount, flushPromises } from '@vue/test-utils'
 import { createPinia, setActivePinia } from 'pinia'
 import type { ProviderInfo } from '@taiji/shared'
+import { QUOTA_PRESETS } from '@taiji/shared'
 import {
   providePlatform,
   provideSettingsTransport,
@@ -113,7 +114,11 @@ let wrapper: ReturnType<typeof mount> | null = null
 beforeEach(() => {
   setActivePinia(createPinia())
   __resetPlatformForTesting()
-  provideSettingsStore(createSettingsStore())
+  // W3c 后 quota presets 数据源 = runtime 下发的合并视图（store 默认空数组）；测试无 runtime，
+  // 灌编译期基线等价（基线正是无远程覆盖时的合并视图原样）
+  const settingsStore = createSettingsStore()
+  settingsStore.setQuotaPresets([...QUOTA_PRESETS])
+  provideSettingsStore(settingsStore)
   providePlatform({
     kind: 'mock',
     storage: inMemoryStorage(),

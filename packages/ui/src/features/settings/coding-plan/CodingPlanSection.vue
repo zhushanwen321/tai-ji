@@ -69,7 +69,7 @@
         />
       </div>
 
-      <!-- Cookie 类：cookie 输入（D7 去掩码，草稿只放用户真实输入；「已配置」为独立标记） -->
+      <!-- Cookie 类：cookie 输入（D7 掩码哨兵：已保存显示 QUOTA_SECRET_MASK，聚焦全选粘贴即覆盖） -->
       <div v-if="view.credential.form === 'cookie'" class="mt-2" data-testid="quota-cookie-block">
         <Label class="mb-1 block text-[length:var(--text-3xs)] text-neutral-mid">
           Cookie
@@ -80,6 +80,7 @@
           class="min-h-[56px] resize-y font-mono text-[length:var(--text-2xs)]"
           :placeholder="t('settings.providerEdit.quotaCookiePlaceholder')"
           data-testid="quota-cookie-input"
+          @focus="selectSecretMask('cookie', $event)"
         />
         <p
           v-if="isMissing('cookie')"
@@ -127,6 +128,7 @@
             class="h-8 font-mono text-[length:var(--text-2xs)]"
             :placeholder="exclusiveKeyPlaceholder"
             data-testid="quota-apikey-input"
+            @focus="selectSecretMask('apiKey', $event)"
           />
           <p
             v-if="isMissing('apiKey')"
@@ -261,6 +263,7 @@ import { useI18n } from 'vue-i18n'
 import { formatQuotaTimeAgo } from './format-time-ago'
 
 import type { QuotaCredentialSource } from '@taiji/shared'
+import { QUOTA_SECRET_MASK } from '@taiji/core'
 import { useQuotaConfigureModule } from '../injection-keys'
 import QuotaWindowList from './QuotaWindowList.vue'
 
@@ -293,6 +296,17 @@ function setCredentialSource(value: QuotaCredentialSource): void {
 /** 失败态点「更新 Cookie」：清空草稿引导重贴（清的是草稿不是磁盘，D7） */
 function clearCookieDraft(): void {
   draft.value.cookie = ''
+}
+
+/**
+ * 密文掩码哨兵聚焦全选（D7）：点进输入框即选中掩码串，直接粘贴新值覆盖；不动则掩码展示
+ * 保持原样（哨兵保存侧识别为「保留既存」，误保存也不会覆盖真实凭证）。
+ */
+function selectSecretMask(field: 'cookie' | 'apiKey', e: FocusEvent): void {
+  if (draft.value[field] !== QUOTA_SECRET_MASK) return
+  if (e.target instanceof HTMLTextAreaElement || e.target instanceof HTMLInputElement) {
+    e.target.select()
+  }
 }
 
 /** 三窗口标签（i18n 化，与 QuotaWins 顺序对齐：5h / 本周 / 本月）。 */

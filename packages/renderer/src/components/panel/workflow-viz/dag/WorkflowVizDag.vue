@@ -10,9 +10,10 @@
     FIT_PAD_PX 空隙并居中（computeFitTransform，内容小于视口不放大 k 封顶 1）；
     此后滚轮缩放（wheel 指数缩放，以指针为缩放中心）/ 拖拽平移照旧，实例流式
     到达引起的节点增高不追打 fit（不与用户手势竞争，切 run 时自然重 fit）；
-  - 点击上抛：实例行 → semantic 'agent' + callId（钻取该实例）；agent 节点 →
-    semantic 'agent'；pending/skipped 节点（零实例、无对话可看——skipped = run
-    终局后零实例）与 phase 分区 → semantic 'phase'（设计 §3.1-2 点击行为边界）。
+  - 点击上抛（[2026-10-19] agent 钻取语义删除，钻取入口 = 下方实例 trace 行）：
+    pending/skipped 节点（零实例、无对话可看——skipped = run 终局后零实例）与
+    phase 分区 → semantic 'phase'（设计 §3.1-2 点击行为边界）；其余节点/实例行
+    no-op（纯展示）。
 
   运行实况：节点六态经 props.nodeStates 接收已派生映射（派生单处归 u5，D9 单点
   实现——本组件不自行判定 retrying/skipped）；执行实例经 props.instancesByNode
@@ -179,7 +180,7 @@ const props = defineProps<{
 }>()
 
 const emit = defineEmits<{
-  /** 点击上抛：agent 节点 / pending 节点（=phase 语义）/ phase 分区三类。 */
+  /** 点击上抛：pending/skipped 节点（=phase 语义）/ phase 分区（agent 钻取语义已删）。 */
   select: [payload: WorkflowVizDagClickPayload]
 }>()
 
@@ -350,10 +351,10 @@ function onWheel(e: WheelEvent): void {
 }
 
 /**
- * 点击路由：实例行优先（携带 callId 钻取该实例），其次节点，再次 phase 分区。
- * 节点按渲染态分语义——pending（运行中零实例）与 skipped（run 终局后零实例）同为
- * 「零实例、无对话可看」，点击均开所属 phase tab 而非落 agent 语义（Host 侧 byNode
- * 空导致静默 no-op，设计 §3.1-2 点击行为边界）。
+ * 点击路由（[2026-10-19] agent 钻取语义删除——节点/实例行不再开 agent 详情，归宿 =
+ * 下方实例 trace 行）：节点按渲染态分语义——pending（运行中零实例）与 skipped（run
+ * 终局后零实例）同为「零实例、无对话可看」，点击开所属 phase tab（设计 §3.1-2 点击
+ * 行为边界）；其余态节点与实例行 no-op（纯展示）；phase 分区点击开 phase tab。
  */
 function routeClick(target: EventTarget | null): void {
   const el = target as Element | null
@@ -366,17 +367,7 @@ function routeClick(target: EventTarget | null): void {
     const state = nodeState(id)
     if (state === 'pending' || state === 'skipped') {
       emit('select', { semantic: 'phase', phase: node.phase })
-      return
     }
-    const instanceEl = (el as Element).closest('[data-wfvz-instance]')
-    const callId = instanceEl !== null ? Number(instanceEl.getAttribute('data-wfvz-instance')) : NaN
-    emit('select', {
-      semantic: 'agent',
-      nodeId: id,
-      templateName: node.templateName,
-      phase: node.phase,
-      ...(Number.isFinite(callId) ? { callId } : {}),
-    })
     return
   }
   const clusterEl = (el as Element).closest('[data-wfvz-cluster]')

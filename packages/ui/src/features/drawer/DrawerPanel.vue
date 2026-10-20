@@ -194,7 +194,7 @@ const ICON_BY_ID: Record<string, Component> = {
 /** 注册表新增图标标识未入映射时的占位（file-text 同形中性图标；新条目评审/测试可见） */
 const FALLBACK_ICON: Component = FileText
 
-/** L1 tab 列表 = 右抽屉容器声明（单一权威 §7.7：禁止与注册表各自文字化；终态 8 条——
+/** L1 tab 列表 = 右抽屉容器声明（单一权威 §7.7：禁止与注册表各自文字化；终态 7 条——
  *  u-w2-browser-mount 撤 browser 载入序列后直读容器声明）。各 tab 的桌面内容面板仍由壳层
  *  （PanelContainer）经默认 slot v-if chain 注入（C2），本组件不感知面板归属；空态/未读徽章不变。 */
 const tabs = computed<TabMeta[]>(() =>

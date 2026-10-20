@@ -127,13 +127,13 @@ describe('drawer types：btw tab 扩展（btw-question D7，M3-a）', () => {
   })
 })
 
-// ── 右抽屉 8 tab 枚举（display-containers §7.1，u-foundation 类型契约）──
+// ── 右抽屉 7 tab 枚举（display-containers §7.1，u-foundation 类型契约）──
 // 形态照 bashTask/plan/btw 先例：编译期断言由 tsc 系执行，运行期影子验证成员合法。
 // 负向断言用条件类型锚（不依赖 @ts-expect-error：若负向条件成立（即收窄被回退），
 // 类型从 true 塌缩为 false，赋值即 tsc 红）。
 
-// §7.1 终态 8 员逐字成员序（成员缺失/改序即 tsc 红）
-const rightDrawerTabs: RightDrawerTab[] = ['git', 'doc', 'detail', 'subagent', 'bashTask', 'plan', 'btw', 'workflow']
+// §7.1 终态 7 员逐字成员序（成员缺失/改序即 tsc 红）
+const rightDrawerTabs: RightDrawerTab[] = ['git', 'doc', 'detail', 'subagent', 'bashTask', 'plan', 'btw']
 
 // 'terminal' 不属于右抽屉终态枚举（已迁底抽屉）——若 RightDrawerTab 混入 'terminal'，本类型塌缩为 false、赋值 tsc 红
 type TerminalIsNotRightTab = 'terminal' extends RightDrawerTab ? false : true
@@ -159,9 +159,9 @@ type ParasiteFieldsRemoved = 'docked' extends keyof DrawerControlState
       : true
 const controlStateSlimAnchor: ParasiteFieldsRemoved = true
 
-describe('drawer types：右抽屉 8 tab 枚举（display-containers §7.1，U7 收窄终态）', () => {
-  it('RightDrawerTab = §7.1 终态 8 员（编译期断言的运行期影子）', () => {
-    expect(rightDrawerTabs).toEqual(['git', 'doc', 'detail', 'subagent', 'bashTask', 'plan', 'btw', 'workflow'])
+describe('drawer types：右抽屉 7 tab 枚举（display-containers §7.1，U7 收窄终态）', () => {
+  it('RightDrawerTab = §7.1 终态 7 员（编译期断言的运行期影子）', () => {
+    expect(rightDrawerTabs).toEqual(['git', 'doc', 'detail', 'subagent', 'bashTask', 'plan', 'btw'])
   })
 
   it("'terminal'/'browser' 均不可赋给 RightDrawerTab（条件类型负向锚的运行期影子；tab 类型单一化 = RightDrawerTab）", () => {

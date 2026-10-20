@@ -17,7 +17,7 @@ import { computed, onScopeDispose, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
 import type { Ref } from 'vue'
 import type { NormalizedQuotaRow } from '@taiji/shared'
-import { matchQuotaPreset, QUOTA_PRESETS } from '@taiji/shared'
+import { matchQuotaPreset, resolveQuotaPresets } from '@taiji/shared'
 import { getSettingsStore } from '@taiji/core'
 import { useQuotaQuery } from './useQuotaQuery'
 
@@ -102,9 +102,12 @@ export function useQuotaDisplay(modelIdRef: Ref<string | undefined>): UseQuotaDi
     const providerInfo = settingsStore.providers.value.find((p) => p.id === pid)
     if (!providerInfo) return null
     const manualFetcher = providerInfo.quota?.fetcher
+    // 空态回落基线（store 初值 `[]` / RPC 拉取失败）：与 ProviderEditBody 的 matchedPreset
+    // 同源同判据，额度 label 不会因合并视图未下发而永久为空
+    const presets = resolveQuotaPresets(settingsStore.quotaPresets.value)
     const preset = manualFetcher
-      ? QUOTA_PRESETS.find((p) => p.fetcher === manualFetcher)
-      : matchQuotaPreset({ baseUrl: providerInfo.baseUrl, name: providerInfo.name })
+      ? presets.find((p) => p.fetcher === manualFetcher)
+      : matchQuotaPreset({ baseUrl: providerInfo.baseUrl, name: providerInfo.name }, presets)
     return preset?.label ?? null
   })
 

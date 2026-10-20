@@ -46,6 +46,9 @@ export default {
     pluginActionExtensionNotLoaded: 'Required extension not loaded in this session',
     pluginActionRestoring: 'Session restoring, availability unknown',
     pluginActionTemporarilyUnavailable: 'Temporarily unavailable',
+    // Scheduler quick card (SchedulerQuickCard, left-cluster popover pass 2026-10-19):
+    schedulerPanelTitle: 'Scheduled tasks',
+    schedulerQuickOpen: 'Open scheduled tasks panel',
   },
   composer: {
     send: 'Send',
@@ -392,7 +395,6 @@ export default {
     subagentNoOutcome: '(no outcome recorded)',
     engineBadgeTitle: 'Engine: {engine}',
     subagentStopReason: 'Why the last round stopped (display only)',
-    backToWorkflow: 'Back to workflow',
     subagentLoadFailed: 'Load failed',
     subagentRetry: 'Retry',
     workflowRunning: 'Running',

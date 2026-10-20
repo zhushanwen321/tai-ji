@@ -35,7 +35,7 @@ import { parseProviders } from '../provider-parser.js'
 import { getProviderNames, upsertProvider } from '../../../infra/pi/pi-provider-store.js'
 import { _resetCacheForTest } from '../preview-cache.js'
 import { matchAutoEnablePreset } from '../../quota-auto-enable.js'
-import { matchQuotaPreset } from '@taiji/shared'
+import { matchQuotaPreset, QUOTA_PRESETS } from '@taiji/shared'
 import type { QuotaPreset } from '@taiji/shared'
 import type { ProviderExtras } from '../../provider-extras-store.js'
 import type { ParsedProvider, ParseResult } from '../provider-parser.js'
@@ -818,13 +818,15 @@ describe('provider-importer · coding-plan 额度显示自动开启（导入即�
     // 先行返回——第四条件对现网 preset 不可达，须注入合成 preset（api-key 类 + requiresWorkspace）
     // 才能触达 quota-auto-enable.ts 的 `if (preset.requiresWorkspace) return undefined` 分支。
     // 对照组证明 mock 生效且阻断仅来自 requiresWorkspace：删掉该分支时对照返回值翻转、用例变红。
+    // presets 形参（契约必填，生产传 listQuotaPresets() 合并视图）此处传基线表占位——
+    // matchQuotaPreset 已 mock，命中结果由 mockReturnValue 注入。
     const base = { fetcher: 'synthetic', label: 'Synthetic', auth: ['api-key'] as const, match: {} }
     vi.mocked(matchQuotaPreset)
       .mockReturnValueOnce({ ...base, requiresWorkspace: true } satisfies QuotaPreset)
       .mockReturnValueOnce({ ...base } satisfies QuotaPreset)
 
-    expect(matchAutoEnablePreset({ baseUrl: 'https://synthetic.example' }, 'plaintext')).toBeUndefined()
-    expect(matchAutoEnablePreset({ baseUrl: 'https://synthetic.example' }, 'plaintext')).toEqual({ ...base })
+    expect(matchAutoEnablePreset({ baseUrl: 'https://synthetic.example' }, 'plaintext', QUOTA_PRESETS)).toBeUndefined()
+    expect(matchAutoEnablePreset({ baseUrl: 'https://synthetic.example' }, 'plaintext', QUOTA_PRESETS)).toEqual({ ...base })
   })
 
   it.each(['env', 'command'] as const)('组1 custom：%s 占位凭证不自动开启（quota 凭证链不解占位，开了只会查询失败）', async (credentialType) => {

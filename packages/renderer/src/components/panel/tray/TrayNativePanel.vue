@@ -447,7 +447,7 @@ function isEnded(entry: BackgroundTaskEntry): boolean {
 function formatSeconds(seconds: number): string {
   return formatCompactDuration(seconds, { hours: true })
 }
-/** token K 格式化单点在 lib/token-format（与 WorkflowTab 共享）；unit 走 i18n 由本组件注入 */
+/** token K 格式化单点在 lib/token-format；unit 走 i18n 由本组件注入 */
 function formatTokens(tokens: number): string {
   return formatTokensK(tokens, t('panel.tray.tokUnit'))
 }
@@ -510,15 +510,15 @@ function workflowPercent(record: WorkflowRunRecord): number {
   return Math.round((completedAgentCount(record) / record.agentCalls.length) * PERCENT_BASE)
 }
 
-// ── 行点击归宿矩阵（D2：subagent/bash 对齐现状；workflow 行改收尾 drawer workflow tab）──
+// ── 行点击归宿矩阵（D2：subagent/bash 对齐现状；workflow 行 = 开浮层）──
 function openSubagentRow(record: SubagentRecord): void {
-  openSubagent({ virtualId: subagentVirtualId(props.sessionId, record.subagentId), enteredFrom: 'chat' })
+  openSubagent({ virtualId: subagentVirtualId(props.sessionId, record.subagentId) })
 }
 function openBashTask(entry: BackgroundTaskEntry): void {
   // 选中态落 bashTask 内容域分区（selection/bash-task.ts，§6.6①）+ 切 tab + 开 drawer
   selectBackgroundTask(entry.taskId)
 }
-/** workflow 行传 runId（drawer WorkflowTab 先按 runId 精确匹配，后回退 scriptName 取最新） */
+/** workflow 行传 runId（opener 反查 findRun 先按 runId 精确匹配，后回退 scriptName 归一匹配取最新） */
 function openWorkflowRow(record: WorkflowRunRecord): void {
   openWorkflow(record.runId)
 }
@@ -560,7 +560,7 @@ async function cancelSubagent(subagentId: string): Promise<void> {
 }
 
 // ── 行内操作 3：workflow abort（两段式；pause/resume 随扩展 D-2 一次性生命周期移除）──
-// 动作单点在 useWorkflowAction（与 drawer WorkflowTab 共享：两段式确认 + RPC + 刷新 + toast）
+// 动作单点在 useWorkflowAction（两段式确认 + RPC + 刷新 + toast）
 const { isAbortConfirming, onAbortClick, clearAbortConfirm } = useWorkflowAction(
   () => props.sessionId,
 )

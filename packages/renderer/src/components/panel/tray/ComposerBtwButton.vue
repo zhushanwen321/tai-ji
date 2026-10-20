@@ -16,32 +16,40 @@
     COMPOSER_BTW_BUTTON_DEGRADATION_ORDER——badge 是后台回复/待处理唯一通知载体，任何宽度常驻。
 -->
 <template>
-  <Button
-    variant="ghost"
-    size="icon"
-    class="relative size-[30px] shrink-0 rounded-sm p-0 text-neutral-dim transition-colors hover:bg-surface-hover hover:text-neutral-fg"
-    data-testid="composer-btw-button"
-    :title="title"
-    @click="openBtw"
-  >
-    <MessagesSquare class="size-[16px]" :stroke-width="1.6" />
-    <!-- 计数角标（demo .cbtn .badge 形态：右上角 -3px、min-w/h 14px、px 3px 胶囊、
-         mono 10px fw-mid；Badge 范式 = 计数角标，DESIGN §5.13；accent 实底 + accent-fg 字，
-         PanelContainer unread badge 同款语义色对） -->
-    <span
-      v-if="totalUnread > 0"
-      data-testid="composer-btw-badge"
-      class="pointer-events-none absolute -right-[3px] -top-[3px] grid h-[14px] min-w-[14px] place-items-center rounded-full bg-accent px-[3px] font-mono text-[length:var(--text-3xs)] [font-weight:var(--fw-mid)] text-accent-fg"
-    >{{ totalUnread > 9 ? '9+' : totalUnread }}</span>
-    <!-- 待处理徽点（badge 两态并列呈现：右下角独立徽点，与右上计数角标分角共存；
-         形态 = DESIGN §5.13 Status Dot 6-8px 圆点，色相走灰阶 neutral-mid token
-         （彩色降噪，与 accent 计数角标可区分）；数据 = totalPending 待处理线数 Σ） -->
-    <span
-      v-if="totalPending > 0"
-      data-testid="composer-btw-pending"
-      class="pointer-events-none absolute -bottom-1 -right-1 size-[8px] rounded-full bg-neutral-mid"
-    />
-  </Button>
+  <!-- tooltip = 主题化浮层（2026-10-19 左簇浮层优化：原生 title 系统绘制与主题脱节，
+       全族退役；文案三态合成逻辑不变，承载从 title 属性换成 Tooltip 浮层，aria-label
+       同文案保留可读名） -->
+  <Tooltip>
+    <TooltipTrigger as-child>
+      <Button
+        variant="ghost"
+        size="icon"
+        class="relative size-[30px] shrink-0 rounded-sm p-0 text-neutral-dim transition-colors hover:bg-surface-hover hover:text-neutral-fg"
+        data-testid="composer-btw-button"
+        :aria-label="title"
+        @click="openBtw"
+      >
+        <MessagesSquare class="size-[16px]" :stroke-width="1.6" />
+        <!-- 计数角标（demo .cbtn .badge 形态：右上角 -3px、min-w/h 14px、px 3px 胶囊、
+             mono 10px fw-mid；Badge 范式 = 计数角标，DESIGN §5.13；accent 实底 + accent-fg 字，
+             PanelContainer unread badge 同款语义色对） -->
+        <span
+          v-if="totalUnread > 0"
+          data-testid="composer-btw-badge"
+          class="pointer-events-none absolute -right-[3px] -top-[3px] grid h-[14px] min-w-[14px] place-items-center rounded-full bg-accent px-[3px] font-mono text-[length:var(--text-3xs)] [font-weight:var(--fw-mid)] text-accent-fg"
+        >{{ totalUnread > 9 ? '9+' : totalUnread }}</span>
+        <!-- 待处理徽点（badge 两态并列呈现：右下角独立徽点，与右上计数角标分角共存；
+             形态 = DESIGN §5.13 Status Dot 6-8px 圆点，色相走灰阶 neutral-mid token
+             （彩色降噪，与 accent 计数角标可区分）；数据 = totalPending 待处理线数 Σ） -->
+        <span
+          v-if="totalPending > 0"
+          data-testid="composer-btw-pending"
+          class="pointer-events-none absolute -bottom-1 -right-1 size-[8px] rounded-full bg-neutral-mid"
+        />
+      </Button>
+    </TooltipTrigger>
+    <TooltipContent data-testid="composer-btw-tooltip">{{ title }}</TooltipContent>
+  </Tooltip>
 </template>
 
 <script setup lang="ts">
@@ -50,6 +58,7 @@ import { useI18n } from 'vue-i18n'
 import { MessagesSquare } from '@lucide/vue'
 import { openDrawerTab } from '@taiji/core/domain/drawer'
 import { Button } from '@/components/ui/button'
+import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
 import { useBtwTabData } from '@/composables/panel/useBtwTabData'
 
 const props = defineProps<{

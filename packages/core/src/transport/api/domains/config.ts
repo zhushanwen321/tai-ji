@@ -29,6 +29,7 @@ import type {
   BuiltinProviderTemplate,
   ProviderImportPreview,
   ProviderImportResult,
+  QuotaPreset,
   SkillCacheInvalidatedPayload,
   ServerMessage,
   ServerMessageMap,
@@ -66,6 +67,21 @@ export async function refreshProviderCatalogs(): Promise<{
 }> {
   const reply = await command('config.refreshProviderCatalogs', {}, RPC_BACKSTOP_TIMEOUT_MS)
   return { refreshed: reply.refreshed, failed: reply.failed, corrupt: reply.corrupt, persistFailed: reply.persistFailed }
+}
+
+/** quota presets 合并视图（runtime 基线 ⊕ 远程；remote-config 域 2 下发通道）。 */
+export async function listQuotaPresets(): Promise<QuotaPreset[]> {
+  const reply = await command('config.listQuotaPresets', {}, RPC_BACKSTOP_TIMEOUT_MS)
+  return reply.presets
+}
+
+/**
+ * models-store.json 变化感知开关（ack 型，ReplyPayloadMap 已定 void）。
+ * 设置页 Provider 页签进入 enable / 离开 disable；变化时 runtime 广播 config.providers，
+ * 消费方走既有 onProviders 订阅，本调用只等 reply 不做状态管理。
+ */
+export async function setProviderCatalogWatch(enable: boolean): Promise<void> {
+  await command('config.setProviderCatalogWatch', { enable }, RPC_BACKSTOP_TIMEOUT_MS)
 }
 
 export async function scanSkills(sources: string[]): Promise<ScannedSkillInfo[]> {

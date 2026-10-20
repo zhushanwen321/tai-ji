@@ -7,7 +7,7 @@
  * 运行：cd packages/shared && npx vitest run src/__tests__/quota-workspace.test.ts
  */
 import { describe, it, expect } from 'vitest'
-import { normalizeQuotaWorkspaceUrl } from '../quota-types'
+import { extractQuotaWorkspaceId, normalizeQuotaWorkspaceUrl } from '../quota-types'
 import { QUOTA_PRESETS } from '../quota-presets'
 
 describe('normalizeQuotaWorkspaceUrl · 两形态归一化（P1-1）', () => {
@@ -129,5 +129,28 @@ describe('normalizeQuotaWorkspaceUrl · opendesign 分流', () => {
 
   it('过短输入（fetcherId=opendesign）→ error（不满足 id 最短形态）', () => {
     expect(normalizeQuotaWorkspaceUrl('abc', 'opendesign').ok).toBe(false)
+  })
+})
+
+describe('extractQuotaWorkspaceId · 读侧 id 提取', () => {
+  it('规范 URL（normalizeQuotaWorkspaceUrl 产物）→ 提取 id', () => {
+    expect(extractQuotaWorkspaceId('https://opencode.ai/workspace/wrk_abc123/go')).toBe('wrk_abc123')
+  })
+
+  it('裸 wrk_ id → 原样返回', () => {
+    expect(extractQuotaWorkspaceId('wrk_abc123')).toBe('wrk_abc123')
+  })
+
+  it('其他路径形态（如 /console/<id>/go）→ 提取 id（读侧容忍存量数据形态差异）', () => {
+    expect(extractQuotaWorkspaceId('https://opencode.ai/console/wrk_abc123/go')).toBe('wrk_abc123')
+  })
+
+  it('首尾空白 → trim 后提取', () => {
+    expect(extractQuotaWorkspaceId('  https://opencode.ai/workspace/wrk_abc123/go  ')).toBe('wrk_abc123')
+  })
+
+  it('无 wrk_ id → null（调用方按配置不可用处理）', () => {
+    expect(extractQuotaWorkspaceId('https://opencode.ai/console')).toBeNull()
+    expect(extractQuotaWorkspaceId('')).toBeNull()
   })
 })

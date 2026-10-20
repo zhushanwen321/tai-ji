@@ -16,11 +16,11 @@
 
     Drawer 协调（W4 drawer-shell-integration）：drawer 固定挂本容器（单实例），恒作 flex 子项与
     Panel 各占一半并排（mode='split'），贴右展开（direction='right'）。单 panel 下不再有 overlay
-    浮层模式。[U7] subagent/agent call 详情走 drawer tab（SubagentTab/WorkflowTab），PanelHeader
+    浮层模式。[U7] subagent/agent call 详情走 drawer tab（SubagentTab），PanelHeader
     不再承载 overlay 返回/标题/JSONL 路径（那套展示层已随 overlay 移除）。本容器渲染跨端共享容器
     DrawerPanel（@taiji/ui/features/drawer，W3 迁移自旧
     SideDrawer.vue），并按 C2 contract 经默认 slot 注入桌面独占内容面板（GitPanel/SubagentTab
-    等，v-if chain 对齐注册表终态 8 员；TerminalView 现挂本文件 bottom-drawer 块——
+    等，v-if chain 对齐注册表终态 7 员；TerminalView 现挂本文件 bottom-drawer 块——
     display-containers §7.6）。git 状态唯一数据源在此层 provide
     （按 panel 的 session），GitPanel 注入共享。
 
@@ -137,7 +137,7 @@
           @close="onDrawerClose"
           @set-tab="onDrawerSetTab"
         >
-          <!-- 桌面独占内容面板（C2 v-if chain；分支与 RIGHT_DRAWER_REGISTRY 终态 8 员一一对应）：
+          <!-- 桌面独占内容面板（C2 v-if chain；分支与 RIGHT_DRAWER_REGISTRY 终态 7 员一一对应）：
                Git tab → GitPanel（inject GIT_STATUS_KEY，非 git 仓库组件内自隐藏走空态）
                Doc tab → CommandDocPanel（selectedCommandName 由 core 瞬时参数指定）
                Detail tab → DetailPane（W3 多文件 tab：selectFile 同步注入 detail 分区，store 响应式自动加载）
@@ -155,13 +155,11 @@
             :key="detailRetryKey"
             :session-id="panelSessionId"
           />
-          <!-- subagent/workflow tab（2026-08-14 subagent-workflow-drawer-tab U2/U3/U4）：内容由
-               SubagentTab/WorkflowTab 自治（读 core selection/ 各内容域选中态 + 各自 store），
-               不依赖 panelSessionId，延续默认 slot 注入模式。WorkflowTab 为懒加载挂载点
-               （display-containers §5.3 第 2 行：浮层回落目标，chunk 同样可能失败 →
-               AsyncErrorFallback 占位 + 重试链，见下方懒加载块） -->
+          <!-- subagent tab（2026-08-14 subagent-workflow-drawer-tab U2/U3/U4）：内容由
+               SubagentTab 自治（读 core selection/ 内容域选中态 + store），
+               不依赖 panelSessionId，延续默认 slot 注入模式。
+               （workflow tab 2026-10-19 删除：workflow 唯一入口 = 浮层。） -->
           <SubagentTab v-else-if="drawerTab === 'subagent'" />
-          <WorkflowTab v-else-if="drawerTab === 'workflow'" :key="workflowRetryKey" />
           <!-- bashTask tab（2026-09 background-task-sidebar-view D5③）：后台命令详情。未选中
                任务（selectedBackgroundTaskId undefined，bashTask 内容域选中态）不注入 →
                DrawerPanel 空态 fallback（C2 v-if chain 语义与 browser 无 URL 同款） -->
@@ -302,11 +300,9 @@ import { createLazyChunkRetry } from '@/components/ui/lazy-chunk-retry'
 
 // D-8 懒加载（§3.3 边界判据：首屏不渲染 + 重依赖）：DetailPane（DiffView 等专属依赖）在抽屉
 // detail tab、TerminalView（xterm + 4 addon）在底抽屉，各自激活才挂载 → 首次激活才拉 chunk
-// （xterm 移出首屏初始请求集合）；WorkflowTab（抽屉 workflow 回落内容）同为懒加载挂载点
-// ——它同时是浮层装载失败的回落目标（display-containers §5.3），回落目标自身的 chunk 也
-// 可能失败（file:// chunk 404），必须挂同一 AsyncErrorFallback 占位链才有「回落目标失败 →
-// 占位」的呈现侧。其余条件挂载面板（GitPanel/CommandDocPanel/SubagentTab）不拆：
+// （xterm 移出首屏初始请求集合）。其余条件挂载面板（GitPanel/CommandDocPanel/SubagentTab）不拆：
 // 均无重第三方依赖（重依赖判据不满足），拆分只引入 async 边界无字节收益。
+// （WorkflowTab 懒加载挂载点 2026-10-19 随 drawer workflow tab 删除移除。）
 // 错误兜底（§3.5 · D6 2026-10-03 用户裁决改版）：界面无重试按钮——装载失败由内部有界自动
 // 重试承接（createLazyChunkRetry：3 次 × 300ms 递增退避，失败 URL 提取 + ?t=N cache-busting
 // 绕过浏览器 module map 对失败模块的记忆化——同 URL 重试零网络请求、busting 才有真自愈，
@@ -333,15 +329,6 @@ const TerminalView = defineAsyncComponent({
   errorComponent: AsyncErrorFallback,
   delay: 200,
   onError: terminalRetryState.onError,
-})
-const workflowRetryState = createLazyChunkRetry(() => import('@/components/panel/WorkflowTab.vue'))
-const { retryKey: workflowRetryKey } = workflowRetryState
-const WorkflowTab = defineAsyncComponent({
-  loader: workflowRetryState.loader,
-  loadingComponent: AsyncErrorFallback,
-  errorComponent: AsyncErrorFallback,
-  delay: 200,
-  onError: workflowRetryState.onError,
 })
 
 const { t } = useI18n()
@@ -388,7 +375,7 @@ function statusOf(l: PanelLeaf) {
 
 // [U7] overlay 展示层（subagentLabel / isViewingSubagent / overlaySessionFile /
 // onSubagentBack / agentCallOverlayFile watch）已随 overlay 移除。subagent/agent call 详情
-// 走 drawer SubagentTab/WorkflowTab，PanelHeader 不再承载 overlay 标题/返回/JSONL 路径。
+// 走 drawer SubagentTab，PanelHeader 不再承载 overlay 标题/返回/JSONL 路径。
 /** Drawer 控制态（§6.3 点5 架构解耦）：workspace-body 单实例。
  *  读 core drawer 域当前分区（isOpen/activeTab）。分区键显式绑定 panel store 的
  *  focusedSessionId（惰性 computed，首次求值 pinia 已 active）——本容器自持绑定，不依赖

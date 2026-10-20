@@ -1,3 +1,4 @@
+<!-- split-justified: Provider 设置页单一语义域（供应商列表 + 手风琴就地编辑 + QuickSetup + OAuth + scoped models + 额度 presets 拉取——围绕同一 provider 配置状态机的页面级编排，业务逻辑已拆至 features/settings composable） -->
 <template>
   <!--
     Settings · Provider 菜单页（v6 spec §6.4 R4：手风琴就地编辑，取代 ProviderEditModal 双层 modal）。
@@ -192,6 +193,7 @@
           :provider="p.id === NEW_ID ? null : p"
           :oauth-present="oauthPresenceStatus(p.id)"
           :oauth-supported="isOauthSupported(p.id)"
+          :quota-presets="settingsStore.quotaPresets.value"
           @dirty-change="onBodyDirtyChange"
           @saved="onEditSaved"
           @cancel="onBodyCancel"
@@ -286,7 +288,7 @@ import { Switch } from '@/components/ui/switch'
 import { PopoverTrigger } from '@/components/ui/popover'
 import ModelSelectPopover from '@/components/panel/ModelSelectPopover.vue'
 import type { BuiltinProviderTemplate, ProviderInfo, ProviderStatus, SetProviderData, ProviderId } from '@taiji/shared'
-import { getSettingsStore, getSettingsTransport } from '@taiji/core'
+import { getSettingsStore, getSettingsTransport, useSettings } from '@taiji/core'
 import { useQuotaStore } from '@/stores/quota'
 import { useProviderImport } from '@/composables/features/settings/useProviderImport'
 import { useToast } from '@/composables/useToast'
@@ -312,6 +314,9 @@ import { authBadgeClass, authBadgeTextKey } from './provider-badge'
 const toast = useToast()
 // [C3] settings 域 transport 只经 SettingsTransport seam（禁直连 @/api 门面 / 禁深 import transport 域）
 const transport = getSettingsTransport()
+// quota presets 拉取走 core 唯一编排 refreshQuotaPresets（init 与进设置页同源同语义：
+// 失败 console.warn 沿用缓存，不静默吞），不内联重复「listQuotaPresets → setQuotaPresets」
+const { refreshQuotaPresets } = useSettings()
 
 // Scoped Models 白名单（乐观更新 + 失败回滚；RPC 失败 rethrow 由下方包装 handler 统一反馈）
 const { scopedRenderItems, selectableModels, addScopedModels, removeScopedModel, moveScopedModel } = useScopedModels()
@@ -348,7 +353,20 @@ onMounted(async () => {
   // 广播推回 store 自动更新。RD-4#10 的陈旧判据（failed[] / transport reject）见
   // composables/features/settings/useProviderCatalogsStale.ts。
   await refreshCatalogs()
+  // W1+W3c：页签可见期启用 models-store.json 变化感知 + 重拉 quota presets（fire-and-forget，
+  // 编排走 core refreshQuotaPresets 单一实现——失败 warn 沿用缓存，消费方回落基线）。
+  // watch 启用失败同样留痕：enable 失败 = 设置页开期间失去 models-store.json 变化感知
+  // （列表停在挂载时快照），属用户可见辅助能力降级，warn 可见而非裸吞。
+  transport.setProviderCatalogWatch(true).catch((e) => {
+    console.warn('[settings] setProviderCatalogWatch(true) failed:', e)
+  })
+  void refreshQuotaPresets()
 })
+
+// disable 失败后果有界（重进页签即恢复），降为 debug 但不静默。
+onUnmounted(() => transport.setProviderCatalogWatch(false).catch((e) => {
+  console.debug('[settings] setProviderCatalogWatch(false) failed:', e)
+}))
 
 /** 选中内置模板 → 打开 QuickSetup（先刷新 OAuth presence + env 检测） */
 async function onTemplateSelect(tpl: BuiltinProviderTemplate): Promise<void> {

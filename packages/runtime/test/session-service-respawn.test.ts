@@ -20,9 +20,12 @@
  *   （普通懒 spawn / startup-reattach 形态）静默不发布。restoreSession 替身一律按生产
  *   契约在成功尾部调用 service.onRestoreSuccess（spy 掉 lifecycle FS 链后出口须补齐）。
  *
- * restore 内核以 spyOn(service, 'restoreSession') 模拟（不触碰 lifecycle spawn 链 /
- * 真实文件系统 / 真实 ~/.taiji——fs 红线；spawn 进程数断言经 mock impl 内对
- * pm.createSession 的一次调用表达）。
+ * restore 内核替身挂点 [switch-race-window]：恢复执行内核 = RespawnDeps.restore 直连
+ * lifecycle.restoreSession（facade.restoreSession 只是 join 包装）——替身 spy lifecycle
+ * 才能门控全部恢复入口（ensureActive / facade 直连 / startup-reattach 形态）。替身镜像
+ * 生产内核契约（deferred 挂起 → spawn → 注册汇聚点落 Map）；onRestoreSuccess 成功出口
+ * 是真实内核尾部，随替身 resolve 自动执行，不进替身。不触碰真实文件系统 / 真实
+ * ~/.taiji——fs 红线；spawn 进程数断言经替身内对 pm.createSession 的一次调用表达。
  */
 import { describe, it, expect, vi, afterEach } from 'vitest'
 import { tmpdir } from 'node:os'
@@ -71,10 +74,11 @@ interface Setup {
   service: SessionService
   messageBus: IMessageBus
   clientMap: Map<string, MockClient>
-  createSessionSpy: ReturnType<typeof vi.fn>
+  /** pm.createSession 的 spy（进程数观测点）；交叉签名供替身内直接调用（spawn 步镜像）。 */
+  createSessionSpy: ReturnType<typeof vi.fn> & ((sessionId: string, cwd: string) => Promise<IPiEngine>)
   triggerExit: (sessionId: string, code: number | null, stderr?: string) => void
-  /** 注册一个 session 到 lifecycle Map（绕过 spawn 链，直接走注册汇聚点）。 */
-  register: (sessionId: string, sessionFilePath?: string) => MockClient
+  /** 注册一个 session 到 lifecycle Map（绕过 spawn 链，直接走注册汇聚点；await 落 Map 后返回）。 */
+  register: (sessionId: string, sessionFilePath?: string) => Promise<MockClient>
   /** 以受控 deferred 模拟 restore 内核（含一次 pm.createSession = spawn 进程数观测点）。 */
   spyRestoreWithDeferred: (sessionId: string) => { spy: ReturnType<typeof vi.fn>; resolve: () => void; reject: (e: unknown) => void }
 }
@@ -163,28 +167,32 @@ function createSetup(): Setup {
   )
   service.setMessageBus(messageBus)
 
-  const register = (sessionId: string, sessionFilePath?: string): MockClient => {
+  const register = async (sessionId: string, sessionFilePath?: string): Promise<MockClient> => {
     const client = makeMockClient()
     clientMap.set(sessionId, client)
-    // 同步注册汇聚点（create/restore 共用的 initializeManagedSession 委托）。
-    void service.initializeManagedSession(sessionId, client, tmpdir(), 'label', sessionFilePath)
+    // 同步注册汇聚点（create/restore 共用的 initializeManagedSession 委托）；await 确保
+    // 断言前 Map 条目已落（restoreSession facade 的 getSummary 后置条件依赖注册态）。
+    await service.initializeManagedSession(sessionId, client, tmpdir(), 'label', sessionFilePath)
     return client
   }
 
   const spyRestoreWithDeferred = (sessionId: string) => {
     let resolveFn: (() => void) | null = null
     let rejectFn: ((e: unknown) => void) | null = null
-    const spy = vi.spyOn(service, 'restoreSession').mockImplementationOnce(async (id: string) => {
+    // [switch-race-window] 替身挂 lifecycle 内核（门控全部恢复入口）；镜像生产内核契约：
+    // deferred 挂起 → spawn（pm.createSession = 进程数观测点）→ 注册汇聚点落 Map
+    //（registerRestoredSession 的等价步——facade getSummary 后置条件的成立前提）。
+    // onRestoreSuccess 不进替身：它是真实内核（deps.restore）尾部，随替身 resolve 自动执行。
+    const lc = service as unknown as { lifecycle: { restoreSession: (sessionId: string) => Promise<unknown> } }
+    const spy = vi.spyOn(lc.lifecycle, 'restoreSession').mockImplementationOnce(async (id: string) => {
       // deferred 先于 spawn await 登记（async 函数体首语句同步执行，reject/resolve 可
       // 在调用方无微任务窗口时立即生效）；spawn（进程数观测点）在 deferred 挂起期间发生。
       await new Promise<void>((res, rej) => {
         resolveFn = () => res()
         rejectFn = (e: unknown) => rej(e)
       })
-      await pm.createSession(id, tmpdir())
-      // [D3] 被替身替换的 facade 跳过 lifecycle 链，但成功尾部出口必须按生产契约
-      // 补齐——session.restored 的唯一发布点在 facade 尾部（onRestoreSuccess）。
-      service.onRestoreSuccess(id)
+      const client = await pm.createSession(id, tmpdir())
+      await service.initializeManagedSession(id, client, tmpdir(), 'label', `/fake/${id}.jsonl`)
       return { id } as never
     })
     return {
@@ -210,10 +218,16 @@ function createSetup(): Setup {
   }
 }
 
-/** [D3] 恢复成功替身：跳过 lifecycle FS 链 + 按生产契约在成功尾部收尾出口。 */
-function spyRestoreSuccessWithFacadeTail(setup: Setup, summary: Record<string, unknown> = { id: 's1' }): ReturnType<typeof vi.fn> {
-  return vi.spyOn(setup.service, 'restoreSession').mockImplementation(async (id: string) => {
-    setup.service.onRestoreSuccess(id)
+/** [D3] 恢复内核替身（成功形态）：跳过 lifecycle FS 链的 FS 段；替身镜像生产内核契约的
+ * spawn + 注册步（spawnRestoreClient → registerRestoredSession 等价）——崩溃后的重恢复
+ * 场景 clientMap 旧条目已被 exit 收殓链清除、lifecycle Map 条目已被 removeSessionEntry
+ * 摘除，生产语义 = 重 spawn 新 pi 重注册；成功出口（onRestoreSuccess）是真实内核尾部
+ * 随替身 resolve 自动执行。facade getSummary 后置条件（恢复成功 ⇒ summary 可查）由此成立。 */
+function spyRestoreSuccess(setup: Setup, summary: Record<string, unknown> = { id: 's1' }): ReturnType<typeof vi.fn> {
+  const lc = setup.service as unknown as { lifecycle: { restoreSession: (sessionId: string) => Promise<unknown> } }
+  return vi.spyOn(lc.lifecycle, 'restoreSession').mockImplementation(async (id: string) => {
+    const client = await setup.createSessionSpy(id, tmpdir())
+    await setup.service.initializeManagedSession(id, client, tmpdir(), 'label', `/fake/${id}.jsonl`)
     return summary as never
   })
 }
@@ -230,8 +244,8 @@ describe('u8 组装级（SessionService 接线：崩溃上报 + 惰性恢复 joi
 
   it('崩溃上报集成：非主动退出（triggerExit）→ 崩溃显式上报，不做自动 restore；手动恢复成功后恰好一条 restored', async () => {
     const setup = createSetup()
-    setup.register('s1', '/fake/s1.jsonl')
-    const restoreSpy = spyRestoreSuccessWithFacadeTail(setup)
+    await setup.register('s1', '/fake/s1.jsonl')
+    const restoreSpy = spyRestoreSuccess(setup)
     setup.triggerExit('s1', 1, 'boom')
     // 进程退出链：session.exited 照常发布（既有行为不回归）
     expect(setup.messageBus.publish).toHaveBeenCalledWith('s1', expect.objectContaining({ type: 'session.exited' }))
@@ -249,10 +263,10 @@ describe('u8 组装级（SessionService 接线：崩溃上报 + 惰性恢复 joi
 
   it('②反向（A7）：forceQuit 不触发崩溃上报（forceQuitSession 手工编排不经 onSessionExit 链）', async () => {
     const setup = createSetup()
-    const restoreSpy = vi.spyOn(setup.service, 'restoreSession').mockResolvedValue({ id: 's1' } as never)
-    // 挂一个活跃 client（不注册 lifecycle Map——真实 forceQuit 场景 session 在 Map，但
-    // 本断言的核心是 forceQuit 链路自身不产生 exit 通知 / 不调 crashExit）
-    setup.clientMap.set('s1', makeMockClient())
+    const restoreSpy = spyRestoreSuccess(setup)
+    // 注册态播种（register 同时挂活跃 client——真实 forceQuit 场景 session 在 Map）。
+    // facade getSummary 后置条件（恢复成功 ⇒ summary 可查）也依赖此注册态。
+    await setup.register('s1', '/fake/s1.jsonl')
     await setup.service.forceQuit('s1')
     // session.exited 照常广播（用户可见的强制退出反馈）
     expect(setup.messageBus.publish).toHaveBeenCalledWith('s1', expect.objectContaining({ type: 'session.exited' }))
@@ -301,8 +315,8 @@ describe('u8 组装级（SessionService 接线：崩溃上报 + 惰性恢复 joi
 
   it('⑧session 删除核销：removeSessionEntry 汇聚点核销崩溃登记（删除后的恢复不发布 restored）', async () => {
     const setup = createSetup()
-    setup.register('s1', '/fake/s1.jsonl')
-    const restoreSpy = spyRestoreSuccessWithFacadeTail(setup)
+    await setup.register('s1', '/fake/s1.jsonl')
+    const restoreSpy = spyRestoreSuccess(setup)
     setup.triggerExit('s1', 1, 'boom')
     // 用户删除 session（主动删经 removeSessionEntry 汇聚点）
     setup.service.removeSessionEntry('s1')
@@ -314,8 +328,8 @@ describe('u8 组装级（SessionService 接线：崩溃上报 + 惰性恢复 joi
 
   it('shutdown 入口：cancelAllPendingRespawns 核销崩溃登记（组合根 shutdown 序列消费）', async () => {
     const setup = createSetup()
-    setup.register('s1', '/fake/s1.jsonl')
-    const restoreSpy = spyRestoreSuccessWithFacadeTail(setup)
+    await setup.register('s1', '/fake/s1.jsonl')
+    const restoreSpy = spyRestoreSuccess(setup)
     setup.triggerExit('s1', 1, 'boom')
     setup.service.cancelAllPendingRespawns()
     await setup.service.restoreSession('s1')
@@ -325,10 +339,68 @@ describe('u8 组装级（SessionService 接线：崩溃上报 + 惰性恢复 joi
 
   it('D3-反向 无崩溃上下文的 restore（普通懒 spawn / startup-reattach 形态）→ 静默不发布 restored', async () => {
     const setup = createSetup()
-    const restoreSpy = spyRestoreSuccessWithFacadeTail(setup, { id: 's-fresh' })
+    // 注册态播种：facade getSummary 后置条件（恢复成功 ⇒ summary 可查）的前提
+    await setup.register('s-fresh', '/fake/s-fresh.jsonl')
+    const restoreSpy = spyRestoreSuccess(setup, { id: 's-fresh' })
     // 从未崩溃（无崩溃登记）的恢复入口
     await setup.service.restoreSession('s-fresh')
     expect(restoreSpy).toHaveBeenCalledTimes(1)
     expect(restoredPublishCalls(setup)).toHaveLength(0)
+  })
+
+  it('[switch-race-window] 窗口竞态主回归（事故形态）：内核 spawn 完成、附着进行中（client 已登记、Map 未落），switch 腿 join 不误报', async () => {
+    const setup = createSetup()
+    const lc = setup.service as unknown as { lifecycle: { restoreSession: (sessionId: string) => Promise<unknown> } }
+    let resolveAttach!: () => void
+    const attachGate = new Promise<void>((res) => { resolveAttach = res })
+    // 内核替身按事故时序编排：spawn 先行（client 登记进程表）→ 附着挂起（registerSession
+    // 未落 Map）——正是冷启动 reattach 恢复的 ~700ms 窗口形态
+    const kernelSpy = vi.spyOn(lc.lifecycle, 'restoreSession').mockImplementationOnce(async (id: string) => {
+      const client = await setup.createSessionSpy(id, tmpdir())
+      await attachGate
+      await setup.service.initializeManagedSession(id, client, tmpdir(), 'label', `/fake/${id}.jsonl`)
+      return { id } as never
+    })
+    // reattach 形态：不经 ensureActive 直连 facade 发起恢复
+    const restoreP = setup.service.restoreSession('s-win')
+    // 等内核推进到附着挂起（client 已入进程表）
+    await vi.waitFor(() => {
+      if (!setup.clientMap.has('s-win')) throw new Error('kernel spawn not yet run')
+    })
+    // 窗口态断言（事故复现前提）：client 已在进程表、summary 不可查
+    expect(setup.clientMap.get('s-win')).toBeDefined()
+    expect(setup.service.getSummary('s-win')).toBeUndefined()
+    // 窗口内 session.switch 到达：getSummary 落空 → ensureActive
+    const switchP = setup.service.ensureActive('s-win')
+    let switchSettled = false
+    void switchP.then(() => { switchSettled = true })
+    let allSettled = false
+    void Promise.all([restoreP, switchP]).then(() => { allSettled = true })
+    await Promise.resolve()
+    await Promise.resolve()
+    // 切换腿在窗口内不得提前返回（原缺陷：快路径直返半成品 client → getSummary 落空误报）
+    expect(switchSettled).toBe(false)
+    expect(allSettled).toBe(false)
+    resolveAttach()
+    const [summary, client] = await Promise.all([restoreP, switchP])
+    // 恢复完成后切换腿拿到完整注册态：summary 可查、client 与内核 spawn 的一致
+    expect(summary).toMatchObject({ id: 's-win' })
+    expect(client).toBe(setup.clientMap.get('s-win'))
+    expect(kernelSpy).toHaveBeenCalledTimes(1)
+    // join 不双跑（P-respawn-join）：restore 内核只 spawn 一个 pi——无双 spawn / 无 K3 杀重开
+    expect(setup.createSessionSpy).toHaveBeenCalledTimes(1)
+  })
+
+  it('[switch-race-window] 窗口内并发手动 restore（session.restore RPC 形态）→ join 等待同一内核，双方拿到同一 summary，不双跑', async () => {
+    const setup = createSetup()
+    const deferred = setup.spyRestoreWithDeferred('s-manual')
+    const p1 = setup.service.restoreSession('s-manual')
+    const p2 = setup.service.restoreSession('s-manual')
+    deferred.resolve()
+    const [s1, s2] = await Promise.all([p1, p2])
+    // 同一恢复：内核只进入一次、只 spawn 一个 pi（原缺陷：第二路直连内核清场杀掉在途 pi 重开）
+    expect(deferred.spy).toHaveBeenCalledTimes(1)
+    expect(setup.createSessionSpy).toHaveBeenCalledTimes(1)
+    expect(s1).toEqual(s2)
   })
 })

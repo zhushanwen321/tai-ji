@@ -21,24 +21,22 @@ import { mount } from '@vue/test-utils'
 import { JSDOM } from 'jsdom'
 
 // ── drawer：三段式虚拟 id 固定选中（chat 域 record 视图）────────────────────
-// useSubagentSelection = main 合并后 SubagentTab 的选中态读侧（core selection 域，
-// enteredFrom 词表 'chat' | 'workflow' | null）；useDrawerControl 为旧读侧保留 mock
-// （组件已不消费，防挂载树其他子组件引用）。
+// useSubagentSelection = SubagentTab 的选中态读取侧（core selection 域，现契约仅
+// selectedSubagentId）；useDrawerControl 为旧读取侧保留 mock（组件已不消费，防挂载树
+// 其他子组件引用）。
 const drawerState = {
   selectedSubagentId: ref<string>('subagent:main-1:sa-1'),
-  enteredFrom: ref<'chat' | 'workflow' | null>('chat'),
 }
-// drawer 域 importOriginal 部分 mock（挂载树模块图的顶层装配面持续增长——手写桩
+// drawer 域 importOriginal 部分 mock（挂载树模块图的顶层装配持续增长——手写桩
 // 逐导出补齐必漏）：真模块承接 barrel 全导出与顶层绑定（bindDrawerSessionId /
 // bindWorkflowOverlayOpener / bindWorkflowRunLookup，core headless 零副作用），
-// 只覆写组件消费的读侧/写侧桩。
+// 只覆写组件消费的读取侧桩。
 vi.mock('@taiji/core/domain/drawer', async (importOriginal) => {
   const actual = await importOriginal<typeof import('@taiji/core/domain/drawer')>()
   return {
     ...actual,
     useDrawerControl: () => drawerState,
     useSubagentSelection: () => drawerState,
-    openWorkflowInDrawer: vi.fn(),
   }
 })
 

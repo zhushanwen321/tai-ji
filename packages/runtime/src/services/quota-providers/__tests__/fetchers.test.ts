@@ -12,10 +12,15 @@ vi.mock('../../../infra/logger.js', () => ({
 }))
 
 import type { ProviderQuotaFetcher, QuotaAuthKind } from '../types.js'
-import { kimiFetcher } from '../kimi.js'
-import { mimoFetcher } from '../mimo.js'
-import { minimaxFetcher } from '../minimax.js'
-import { zhipuFetcher } from '../zhipu.js'
+import { normalizeCookieHeader } from '@taiji/shared'
+// W3 迁移：被测对象从硬编码 TS fetcher 换为「基线配置 ⊕ 声明式引擎」——同一批 wire
+// fixture 断言不变 = 等价证明（迁移红线）。id 为持久化契约（providers.json extras）。
+import { getQuotaFetcher } from '../index.js'
+
+const kimiFetcher = getQuotaFetcher('kimi-coding')!
+const mimoFetcher = getQuotaFetcher('mimo')!
+const minimaxFetcher = getQuotaFetcher('minimax')!
+const zhipuFetcher = getQuotaFetcher('zhipu')!
 
 const NOW_ISO = '2026-08-23T10:00:00.000Z'
 const NOW_MS = new Date(NOW_ISO).getTime()
@@ -236,6 +241,30 @@ describe('mimoFetcher', () => {
     expect(fetchMock).not.toHaveBeenCalled()
   })
 
+  // ── cookie 空判据判归一后的值（types.ts normalizeCookieHeader 契约）──
+  // `';'` / `' ; '` 等无任何 k=v 对的粘贴伪影原文非空、归一后为空串——判原文会带着空
+  // cookie 头真发一次请求（对齐迁移前 mimo fetcher 先归一再判空）
+
+  it('cookie 归一后为空（";" / " ; " / 纯空白）→ cookie-invalid-format 且不发请求', async () => {
+    const mock = setupFetch(() => jsonResponse({ code: 0, message: 'ok', data: {} }))
+    for (const raw of [';', ' ; ', '   ', '; ;']) {
+      expect(await mimoFetcher.fetchQuota(raw, 'cookie')).toEqual({ ok: false, reason: 'cookie-invalid-format' })
+    }
+    expect(mock).not.toHaveBeenCalled()
+  })
+
+  it('cookie 空白伪影归一后照常发送（header 拿归一值，非原文）', async () => {
+    const mock = setupFetch(() => jsonResponse({
+      code: 0,
+      message: 'ok',
+      data: { usage: { percent: 0.1, items: [] } },
+    }))
+    const out = await mimoFetcher.fetchQuota(' sid = 1 ; x = 2 ', 'cookie')
+    expect(out.ok).toBe(true)
+    const init = mock.mock.calls[0]?.[1] as RequestInit | undefined
+    expect((init?.headers as Record<string, string>)['cookie']).toBe('sid=1; x=2')
+  })
+
   it('401 → unauthorized，500 → network', async () => {
     setupFetch(() => jsonResponse({}, 401))
     expect(await mimoFetcher.fetchQuota('sid=1', 'cookie')).toEqual({ ok: false, reason: 'unauthorized' })
@@ -260,6 +289,11 @@ describe('mimoFetcher', () => {
     setupFetch(() => new Response('not json'))
     expect(await mimoFetcher.fetchQuota('sid=1', 'cookie')).toEqual({ ok: false, reason: 'parse' })
     expect(await fetchOk(mimoFetcher, { code: '401' })).toEqual({ ok: false, reason: 'parse' })
+  })
+
+  it('code 字段消失（决策字段缺失）→ parse（漂移可见，不引导查订阅）', async () => {
+    expect(await fetchOk(mimoFetcher, { message: 'no code field' })).toEqual({ ok: false, reason: 'parse' })
+    expect(await fetchOk(mimoFetcher, { code: null })).toEqual({ ok: false, reason: 'parse' })
   })
 
   it('code 非 0（非过期码）→ no-subscription', async () => {
@@ -350,6 +384,39 @@ describe('mimoFetcher', () => {
         ],
       },
     })
+  })
+
+  it('detail resetSec 字段级漂移（currentPeriodEnd 非字符串 / data 非对象）→ resetSec=null，主数据保留', async () => {
+    // 字段级漂移与请求级失败（上方用例）同语义：仅 reset 信息缺失，pct/绝对量陪葬不发生
+    const monthBody = {
+      code: 0,
+      message: 'ok',
+      data: { monthUsage: { percent: 0.25, items: [{ used: 100, limit: 400 }] }, usage: { percent: 0.1, items: [] } },
+    }
+    const expected = {
+      ok: true,
+      data: {
+        label: 'MiMo Coding',
+        wins: [
+          { pct: null, resetSec: null },
+          { pct: null, resetSec: null },
+          { pct: 25, used: 100, limit: 400, unit: 'tokens', resetSec: null },
+        ],
+      },
+    }
+    setupFetch((input) => {
+      const url = String(input)
+      if (url.includes('/detail')) return jsonResponse({ code: 0, message: 'ok', data: { currentPeriodEnd: 12345 } })
+      return jsonResponse(monthBody)
+    })
+    expect(await mimoFetcher.fetchQuota('sid=1', 'cookie')).toEqual(expected)
+    // 路径容器形态漂移（detail data 非对象）同只降级 resetSec
+    setupFetch((input) => {
+      const url = String(input)
+      if (url.includes('/detail')) return jsonResponse({ code: 0, message: 'ok', data: 123 })
+      return jsonResponse(monthBody)
+    })
+    expect(await mimoFetcher.fetchQuota('sid=1', 'cookie')).toEqual(expected)
   })
 
   // ── RT-7#5：monthUsage.percent 缺失不产 pct=0 假未用 ──
@@ -483,6 +550,19 @@ describe('minimaxFetcher', () => {
     })
     expect(out.ok).toBe(true)
     if (out.ok) {
+      expect(out.data.wins[0]).toEqual({ pct: null, resetSec: null })
+      expect(out.data.wins[1]).toEqual({ pct: null, resetSec: null })
+    }
+  })
+
+  it('status 字段缺失（状态不可知）→ 该窗口 INFINITE_WIN，不放行求 pct', async () => {
+    const out = await fetchOk(minimaxFetcher, {
+      base_resp: { status_code: 0 },
+      model_remains: [{ ...generalModel, current_interval_status: undefined, current_weekly_status: undefined }],
+    })
+    expect(out.ok).toBe(true)
+    if (out.ok) {
+      // 缺失若被放行，5h 会产 pct=30、week 会产 pct=90 的假可用态
       expect(out.data.wins[0]).toEqual({ pct: null, resetSec: null })
       expect(out.data.wins[1]).toEqual({ pct: null, resetSec: null })
     }
@@ -629,6 +709,27 @@ describe('zhipuFetcher', () => {
       expect(out.data.label).toBe('Z.ai')
       expect(out.data.wins[0]).toEqual({ pct: 5, resetSec: 4 * 3600 + 11 * 60 })
     }
+  })
+
+  // ── label 插值源形态漂移（迁移前 zhipu guard isOptionalField(d.level, 'string') 等价）──
+  // 插值字段存在但非 string 不得被静默 stringify 成 `Z.ai-123`——整查询归 parse（漂移可见）
+
+  it('data.level 类型漂移（number / boolean / 对象）→ parse，不产 Z.ai-123', async () => {
+    for (const level of [3, true, { name: 'Max' }]) {
+      expect(await fetchOk(zhipuFetcher, {
+        success: true,
+        data: { level, limits: [{ type: 'TOKENS_LIMIT', percentage: 42 }] },
+      })).toEqual({ ok: false, reason: 'parse' })
+    }
+  })
+
+  it('data.level 为 null → 按缺失走 label 兜底 Z.ai（不产尾部分隔符 Z.ai-）', async () => {
+    const out = await fetchOk(zhipuFetcher, {
+      success: true,
+      data: { level: null, limits: [{ type: 'TOKENS_LIMIT', percentage: 42 }] },
+    })
+    expect(out.ok).toBe(true)
+    if (out.ok) expect(out.data.label).toBe('Z.ai')
   })
 
   // ── RT-7#5：TOKENS_LIMIT 无 percentage / 无该条目 → 不产 pct=0 假未用 ──

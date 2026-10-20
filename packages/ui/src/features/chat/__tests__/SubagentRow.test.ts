@@ -19,7 +19,7 @@ import { SubagentRow } from '@taiji/ui'
 import type { ToolCall } from '@taiji/shared'
 import { subagentVirtualId } from '@taiji/shared'
 
-// mock drawer 协同层：断言点击整行时 openSubagent 以 virtualId + enteredFrom 被调
+// mock drawer 协同层：断言点击整行时 openSubagent 以 virtualId 被调（enteredFrom 已随 workflow tab 删除移除）
 const { openSubagentMock } = vi.hoisted(() => ({ openSubagentMock: vi.fn() }))
 vi.mock('@taiji/core/domain/drawer', () => ({
   openSubagent: openSubagentMock,
@@ -171,7 +171,7 @@ describe('SubagentRow: collapsed only（§10：task 预览 / 展开体 / bg 状�
 })
 
 describe('SubagentRow: 点击行为（开 drawer subagent tab）', () => {
-  it('output 含 subagentId + sessionId → openSubagent(virtualId, enteredFrom:chat)', async () => {
+  it('output 含 subagentId + sessionId → openSubagent(virtualId)', async () => {
     const wrapper = mount(SubagentRow, {
       props: {
         tool: makeSubagent({
@@ -189,7 +189,6 @@ describe('SubagentRow: 点击行为（开 drawer subagent tab）', () => {
     expect(openSubagentMock).toHaveBeenCalledTimes(1)
     expect(openSubagentMock).toHaveBeenCalledWith({
       virtualId: subagentVirtualId('s1', '1338dda5'),
-      enteredFrom: 'chat',
     })
   })
 

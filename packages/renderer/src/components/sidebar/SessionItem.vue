@@ -38,12 +38,14 @@
       ref="rootEl"
       role="button"
       tabindex="0"
+      draggable="true"
       class="session-item group/item relative flex cursor-pointer select-none items-center gap-[8px] rounded-sm px-[8px] py-[7px] transition-colors duration-[var(--duration-fast)] ease-[var(--ease-out)] hover:bg-surface-hover"
       :class="[
         active ? 'bg-surface-hover text-neutral-fg' : '',
-        isDead ? 'opacity-50' : '',
+        isDead || dragging ? 'opacity-50' : '',
       ]"
       :aria-label="ariaLabel"
+      data-testid="session-item"
       @click="emit('select', session.id)"
       @keydown="onItemKeydown"
       @pointerenter="onDetailEnter"
@@ -51,6 +53,8 @@
       @focusin="onDetailEnter"
       @focusout="onDetailLeave"
       @mouseleave="confirming = false"
+      @dragstart="onDragStart"
+      @dragend="onDragEnd"
     >
       <!-- 右槽与悬停钮：Actions 经默认 slot 注入 Display 右槽（absolute inset-0 覆盖点+时间，
            2026-10-11 裁决：钮只覆盖槽区，名称由槽左缘截断构造性不受遮） -->
@@ -122,6 +126,7 @@ import { Folder, GitBranch } from '@lucide/vue'
 import { isMarkedDone } from '@/composables/useSessionMarkers'
 import { formatRelativeTime } from '@/composables/logic/formatTime'
 import { fetchSessionMessageCount } from './session-item/use-message-count'
+import { SESSION_DRAG_MIME } from './session-drag'
 import type { DerivedStatus } from '@/types'
 import SessionItemContextMenu from './session-item/SessionItemContextMenu.vue'
 import SessionItemDisplay from './session-item/SessionItemDisplay.vue'
@@ -279,6 +284,25 @@ function onDetailEnter(): void {
 /** 行 hover/聚焦离开（及卡体进入）：收卡——demo 卡体 @mouseenter=closeCard，卡为纯展示不可进入 */
 function onDetailLeave(): void {
   detailVisible.value = false
+}
+
+// ── 拖拽移动到项目（侧栏拖拽落点 = ProjectGroup 组头 / DefaultProjectHead）──
+
+/** dragstart 写入 sessionId（SESSION_DRAG_MIME），落点按 types 命中识别（dragover 阶段
+ *  getData 不可读）。dragging 半透明反馈源行；dragend 兜底复位（drop 被取消也还原）。 */
+const dragging = ref(false)
+
+function onDragStart(e: DragEvent): void {
+  if (!e.dataTransfer) return
+  e.dataTransfer.setData(SESSION_DRAG_MIME, props.session.id)
+  e.dataTransfer.effectAllowed = 'move'
+  dragging.value = true
+  // drag 期间 pointerleave 不触发，详情卡显式收起
+  detailVisible.value = false
+}
+
+function onDragEnd(): void {
+  dragging.value = false
 }
 
 /** 失焦自动重置：切到其它 session（active → false）时清掉残留确认态 */
