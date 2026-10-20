@@ -27,6 +27,7 @@ function makeCtx(overrides: Partial<CreateSessionFlowCtx> = {}): CreateSessionFl
       ),
       rename: vi.fn(),
       remove: vi.fn(),
+      archive: vi.fn(),
       removeByCwd: vi.fn(),
       migrateImage: vi.fn(async () => ({ path: '/data/attachments/ns/x.png' })),
       onConfigSessions: vi.fn(() => () => {}),

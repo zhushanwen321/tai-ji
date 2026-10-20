@@ -80,6 +80,9 @@ const sessionApiPort: SessionApiPort = {
     sessionApi.create(cwd, label, presetId, projectId, modelOverride, thinkingOverride, clientUuid),
   rename: (id, label) => sessionApi.rename(id, label),
   remove: (id) => sessionApi.remove(id),
+  // [u-renderer-entry] 归档 RPC 透传（SessionApiPort 必选成员；移动壳无归档 UI 入口，
+  // 端口形状对齐——createUseSession.archiveSession 编排可用）
+  archive: (id) => sessionApi.archive(id),
   // [remote-use A3/U12] dead 会话显式重开 RPC 透传（session.restore）——恢复三步编排原语之一
   restoreSession: (id) => sessionApi.restoreSession(id),
   removeByCwd: (cwd) => sessionApi.removeByCwd(cwd),
@@ -315,6 +318,8 @@ export const __testing = {
   sessionEntry,
   /** toast 通道装配断言出口（U14/A7：core 两处注入的 toast = 错误条通道，非 console） */
   errorBarToast,
+  /** SessionApiPort 装配断言出口（[u-renderer-entry] 归档 RPC 透传等端口成员形状锁定） */
+  sessionApiPort,
 }
 
 /** 当前激活 session（响应式） */

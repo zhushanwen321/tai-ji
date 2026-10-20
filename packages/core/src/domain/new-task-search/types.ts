@@ -18,14 +18,16 @@
  * 复用的外部类型（import 复用，不重定义）：
  *  - FileNode：@taiji/shared
  *  - SessionSummary / SessionGroup：@taiji/shared
+ *  - ArchiveSummary：@taiji/shared（归档搜索项载荷）
  *  - SessionCommand：./command-store
  */
+import type { ArchiveSummary } from '@taiji/shared'
 
 /** SideDrawer tab（本域子集，core 不依赖 renderer 的 6 值联合）。 */
 export type SideDrawerTab = 'tasks' | 'sideDrawer' | 'detail'
 
-/** 搜索项类型（四类：命令/文件/符号/会话） */
-export type SearchType = 'command' | 'file' | 'symbol' | 'session'
+/** 搜索项类型（五类：命令/文件/符号/会话/归档） */
+export type SearchType = 'command' | 'file' | 'symbol' | 'session' | 'archive'
 
 /** 搜索结果项（编排层 allSettled 聚合后的统一 DTO，mock + real 源都映射到此） */
 export interface SearchItem {
@@ -56,6 +58,12 @@ export interface SearchItem {
    * 与 CommandPopover 的 slash 候选 location 同源，供 chip dataset 携带 + runtime 反解析。
    */
   location?: string
+  /**
+   * 归档条目载荷（仅 type='archive' 项携带）：选中跳转（打开主区摘要视图）与摘要内容
+   * 匹配的数据源。recents 回填的归档项无此字段（持久化只存 title/sub）——confirm 时
+   * 缺载荷走 archiveOpenFailed 错误路径。
+   */
+  archive?: ArchiveSummary
 }
 
 /** 应用内置命令（#2，含 action 行为故非纯值对象） */
@@ -88,7 +96,7 @@ export interface RecentEntry {
  * 字段语义：kind 是非本地化稳定标识（机器读），label 是本地化展示文案（人读），
  * 两者解耦后可避免 en-US 下 's.label === \'最近\'' 之类的硬编码字面量比较（AH-S3 回归点）。
  */
-export type SectionKind = 'recent' | 'suggested' | 'command' | 'file' | 'symbol' | 'session' | 'shortcut'
+export type SectionKind = 'recent' | 'suggested' | 'command' | 'file' | 'symbol' | 'session' | 'archive' | 'shortcut'
 
 /** 分组（domain/composable 输出整形，GAP-E1） */
 export interface Section {

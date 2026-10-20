@@ -129,6 +129,17 @@ export function getAgentsDir(): string {
 }
 
 /**
+ * 归档根目录（session-archive 设计 D1）：`<agentDir>/archive/`——与 sessions/ 平级，
+ * 内部镜像 sessions 布局（`archive/<encodeCwd>/<原主文件名>…` + `assets/<sessionId>/`
+ * 附件三目录），树段登记见 shared PI_SESSION_TREE_SEGMENTS 的 'archive' 段（加入后
+ * staging 期归档目录内明文 .jsonl 可过 main 侧会话导出的路径安全校验
+ * isInsideSessionTrees）。
+ */
+export function getArchiveDir(): string {
+  return join(getPiAgentDir(), 'archive')
+}
+
+/**
  * 编码 cwd 为目录名（pi 布局 SSOT = @taiji/shared/paths encodeCwd，本处仅 re-export 保持
  * 既有 import 面；规则与例见 shared 实现——main 侧会话项目 .tmp 准入接入时两份平行
  * 实现收敛为单源）。

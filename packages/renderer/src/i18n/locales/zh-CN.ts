@@ -19,6 +19,7 @@ import workflowViz from './zh-CN/workflow-viz'
 import canvas from './zh-CN/canvas'
 import find from './zh-CN/find'
 import subagent from './zh-CN/subagent'
+import archive from './zh-CN/archive'
 
 export default {
   common,
@@ -26,6 +27,7 @@ export default {
   app,
   settings,
   sidebar,
+  archive,
   // tray.ts 只含 tray 子树，展开并入 panel 命名空间（运行时 key = panel.tray.*；
   // 顶层键唯一性约束下不能并列两个 panel 键）。panel 本体文案经 ui locale 域文件
   // 下沉迁移自 @taiji/ui/locale，tray 子树留守本壳（无 ui 组件消费）。workflow-viz.ts

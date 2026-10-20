@@ -17,6 +17,7 @@
 //
 // Core 层叶子原语：仅依赖 types.ts。零 Pi / Runtime / TUI 依赖。
 
+import { permanentSessionStatusMachine } from "../domain/record-status-machine.ts";
 import type { ClosedReason, ExecutionMode, ExecutionOutcome, ExecutionStatus, ProjectedOutcome, RecordOrigin, StopReason } from "../domain/record-types.ts";
 import type { AgentResult, ExecutionRecord, SubagentModelSource } from "../domain/record-model.ts";
 import type { AgentEvent, AgentEventLogEntry, AgentUsage, AgentUsageTotal, DisplayItem, InternalToolCall, RecordSnapshot, SubagentToolDetails, ToolCall, Turn } from "../assembly/types.ts";
@@ -194,6 +195,9 @@ export function createRecord(
     parentRunId: identity.parentRunId,
 
     // 状态（实时更新）
+    // [state-machine-infrastructure M2 机器管辖外登记] 出生构造不经机器（initial/
+    // 占位承载、非转移判定——对照归档单元 initial: 'staging' 同款表述，翻边判定
+    // 归 record-status-machine）。
     status: "running",
     // turns[] 初始化为 [空 turn]——第一个 turn 从创建即存在，
     // updateFromEvent 直接往 turns[last] 累积，无需「无 turn」分支判断。
@@ -699,6 +703,11 @@ export function getTotalUsage(record: ExecutionRecord): AgentUsageTotal | undefi
  * 仅当 `record.status === "running"` 时收尾并返回 true，否则返回 false。**status
  * 状态机本身就是互斥锁**——check-then-set 在 JS 单线程事件循环里天然原子。
  *
+ * [state-machine-infrastructure M2 迁移] 抢锁前置判定走
+ * permanentSessionStatusMachine（事件 settle-legacy-closed：仅 running 源合法）
+ * ——表外拒绝（含词表外坏值）经 result 策略返回 { ok:false }，本原语转 return
+ * false 保形，判定与赋值的 CAS 语义逐用例不变。
+ *
  * [W2/V3 说谎签名退役] 前身函数的 target 参数被 void 丢弃（说谎签名），本原语是
  * 同一行为的诚实命名——无目标参数：收尾
  * 目标恒为 legacy closed 形态（idle + closedReason/stopReason 双写，桥接不变量
@@ -716,7 +725,7 @@ export function trySettleLegacyClosed(
   record: ExecutionRecord,
   closedReason?: ClosedReason,
 ): boolean {
-  if (record.status !== "running") return false;
+  if (!permanentSessionStatusMachine.transition(record.status, "settle-legacy-closed").ok) return false;
   record.status = "idle";
   record.closedReason = closedReason ?? "gc";
   record.stopReason = record.closedReason;
@@ -730,12 +739,16 @@ export function trySettleLegacyClosed(
  * running↔idle 迁移侧，非法迁移（对 running 重复 settle / 对 running 重复 wake）
  * 由 CAS 前置判据拒绝。
  *
+ * [state-machine-infrastructure M2 迁移] 抢锁前置判定走
+ * permanentSessionStatusMachine（事件 enter-running：仅 idle 源合法）——表外拒绝
+ * 经 result 策略返回 false 保形。
+ *
  * 用途：message 链对 idle record 的接管（U4 准入单点接线）；不清收尾位——
  * stopReason/closedReason 的清除归接管编排（对齐 resurrectClosed 桥接语义），
  * 本原语只做占用位翻转。
  */
 export function tryEnterRunning(record: ExecutionRecord): boolean {
-  if (record.status !== "idle") return false;
+  if (!permanentSessionStatusMachine.transition(record.status, "enter-running").ok) return false;
   record.status = "running";
   return true;
 }
@@ -748,6 +761,11 @@ export function tryEnterRunning(record: ExecutionRecord): boolean {
  * message 链接管时经本函数翻回 running。running 入态防御性 no-op：接管是已收尾
  * record 的专属回边，不是万能改写器。U4 准入判据单点重写（reviveOrThrow 合并）
  * 后本函数由新接管原语承接。
+ *
+ * [state-machine-infrastructure M2 迁移] 抢锁前置判定走
+ * permanentSessionStatusMachine（事件 resurrect：仅 idle 源合法——两个调用入口
+ * markResurrected 内部与 subagent-service 复活成员直调均经此机器）——表外拒绝
+ * 经 result 策略返回 false 保形。
  */
 export function resurrectClosed(
   record: {
@@ -757,7 +775,7 @@ export function resurrectClosed(
     endedAt?: number;
   },
 ): boolean {
-  if (record.status !== "idle") return false;
+  if (!permanentSessionStatusMachine.transition(record.status, "resurrect").ok) return false;
   record.status = "running";
   record.closedReason = undefined;
   record.stopReason = undefined;
@@ -767,6 +785,10 @@ export function resurrectClosed(
 
 /**
  * 重建专用收尾：跳过 CAS 直接赋值 status。
+ *
+ * [state-machine-infrastructure 机器管辖外登记（待验证检查点 2）] 重建是「初始态
+ * 确定」不是「转移」——本原语是磁盘重建的恢复通道，不经 permanentSessionStatusMachine
+ * 判定（D6-M2 边界声明：session-reconstructor 重建终态 record 的直写位）。
  *
  * 仅用于 session-reconstructor 从 session.jsonl 重建终态 record 时——
  * 重建的 record 没有 running 状态需要保护，直接赋值即可。
@@ -785,6 +807,10 @@ export function markReconstructedStatus(
  * 不修改 turns/totalTokens——已由 updateFromEvent 累积，本函数只读不重置。
  *
  * ⚠ 前置条件：调用方必须先通过 trySettleLegacyClosed 抢到锁（status 已被 CAS 置 idle）。
+ *
+ * [state-machine-infrastructure M2 机器管辖外登记] 函数体的 status = "idle" 是
+ * 跟随写（前置条件即机器 settle-legacy-closed 已抢锁置 idle），随链不单列、
+ * 不再经机器判定（D6-M2 边界声明）。
  *
  * [W2/V3 说谎签名退役] 前身函数的 status 参数被 void 丢弃（说谎签名），本原语是
  * 同一行为的诚实命名——无目标

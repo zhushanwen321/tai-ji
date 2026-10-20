@@ -191,13 +191,15 @@ export function encodeCwd(cwd: string): string {
 }
 
 /**
- * 会话文件树段全集（pi 宿主三棵树段 + taiji session 存储树根段）。
+ * 会话文件树段全集（pi 宿主四棵树段 + taiji session 存储树根段）。
  *
- * 前三位是 pi 宿主树段（`<piAgentDir>/sessions|subagents|btw`，布局权威 = runtime
- * pi-paths.ts 的 getSessionsDir / getSubagentSessionDir / getBtwSessionsRoot，对拍
- * 机检逐位核对，改树名时同批更新）：
+ * 除末位外是 pi 宿主树段（`<piAgentDir>/sessions|subagents|btw|archive`，布局权威 =
+ * runtime pi-paths.ts 的 getSessionsDir / getSubagentSessionDir / getBtwSessionsRoot /
+ * getArchiveDir，前三位对拍由机检逐位核对，改树名时同批更新）：
  *   sessions = 主会话树 / subagents = 子代理会话树（`<agentDir>/subagents/<encodeCwd>/sessions/`）
- *   / btw = btw 线会话树（`<agentDir>/btw/<encodeCwd>/<mainSid>/`）。
+ *   / btw = btw 线会话树（`<agentDir>/btw/<encodeCwd>/<mainSid>/`）
+ *   / archive = 归档根（session-archive D1——镜像 sessions 布局的压缩归档单元，
+ *   staging 期含明文 .jsonl，消费方 isInsideSessionTrees 据此放行导出）。
  *
  * [session-store-layout-inversion] 终态口径：subagents / btw 两段现指旧布局残余读取面
  * （存量静置；新写入走 getSessionSubagentsDir / getSessionBtwDir 存储树函数族，见
@@ -207,14 +209,14 @@ export function encodeCwd(cwd: string): string {
  * piAgentDir），与 getSessionStoreDir / SESSION_STORE_DIR_SEGMENT 同源，对拍机检核对
  * 两者字面量一致。**消费注意**：本数组混两种基址，逐段 join(piAgentDir, segment) 的
  * 消费方（如 main 侧 isInsideSessionTrees）对末位段会 join 出不存在的基址——按
- * 「pi 宿主树段」语义消费前三位；需要存储树根时用 getSessionStoreDir 推导。
+ * 「pi 宿主树段」语义消费除末位外各段；需要存储树根时用 getSessionStoreDir 推导。
  *
  * main 进程不能 import runtime（包边界），树内包含判定（如会话 JSONL 导出的路径安全
  * 校验）等跨进程消费经本 SSOT 推导，禁止各进程自带树段字面量——与 getPiSessionsDir
  * 同款收敛（曾因手拼层级致跨进程判据漂移），runtime 改树名时唯一改点在本常量 +
  * 权威源两处，消费方零改。
  */
-export const PI_SESSION_TREE_SEGMENTS = ['sessions', 'subagents', 'btw', 'ext-sessions'] as const
+export const PI_SESSION_TREE_SEGMENTS = ['sessions', 'subagents', 'btw', 'archive', 'ext-sessions'] as const
 
 // ── session 存储树（`<dataDir>/ext-sessions/`）────────────────────────────────
 //

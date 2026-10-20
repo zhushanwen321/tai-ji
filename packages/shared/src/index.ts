@@ -92,6 +92,32 @@ export type { SegmentsMetadataFile, SegmentsMetadataEntry } from './message-meta
 export type {
   SessionStatus, SessionSummary, SessionGroup,
 } from './session'
+// session 归档域共享契约（session-archive 设计 §7 D3 簿记 schema + D5 RPC 消息，
+// 实施计划 u-foundation：ArchiveSummary / 簿记 schema 与解析校验 / 三 RPC payload /
+// 错误码词表——runtime ArchiveService、renderer 归档视图、session-reader 三端共同
+// import 防止裁量漂移；纯类型/常量/纯函数无 node 依赖，barrel 安全）。
+export type {
+  ArchiveLedgerStatus,
+  ArchiveSummaryTurn,
+  ArchiveConversationSummary,
+  ArchiveLedgerStaging,
+  ArchiveLedgerArchived,
+  ArchiveLedger,
+  ArchiveLedgerParseResult,
+  ArchiveSummary,
+  ArchiveErrorCode,
+  SessionArchiveRequest, SessionArchiveReply,
+  SessionUnarchiveRequest, SessionUnarchiveReply,
+  SessionPurgeArchiveRequest, SessionPurgeArchiveReply,
+  ConfigArchivesReply,
+} from './archive'
+export {
+  ARCHIVE_LEDGER_STATUSES,
+  ARCHIVE_LEDGER_STATUS_COVERAGE_LOCK,
+  ARCHIVE_ERROR_CODES,
+  ARCHIVE_ERROR_CODE_COVERAGE_LOCK,
+  parseArchiveLedger,
+} from './archive'
 export type {
   ProviderStatus, ProviderInfo, BuiltinProviderTemplate, BuiltinOAuthConfig, ModelInfo,
   SkillInfo, AgentInfo,

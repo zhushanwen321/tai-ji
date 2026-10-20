@@ -53,8 +53,8 @@ afterEach(() => {
 })
 
 describe('PI_SESSION_TREE_SEGMENTS', () => {
-  it('树段全集：pi 宿主三段（sessions / subagents / btw，布局权威 = runtime pi-paths.ts 三函数）+ 末位存储树根段 ext-sessions', () => {
-    expect([...PI_SESSION_TREE_SEGMENTS]).toEqual(['sessions', 'subagents', 'btw', 'ext-sessions'])
+  it('树段全集：pi 宿主三段（sessions / subagents / btw，布局权威 = runtime pi-paths.ts 三函数）+ 归档段 archive（session-archive D1 树段 SSOT 登记）+ 末位存储树根段 ext-sessions', () => {
+    expect([...PI_SESSION_TREE_SEGMENTS]).toEqual(['sessions', 'subagents', 'btw', 'archive', 'ext-sessions'])
   })
 
   it('末位段与 SESSION_STORE_DIR_SEGMENT / getSessionStoreDir 同源（存储树根段一致）', () => {

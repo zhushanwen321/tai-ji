@@ -5,9 +5,9 @@
  * - DerivedStatus: 已迁 @taiji/core/domain/chat/derive-status.ts（renderer-model M3），
  *   此处 re-export 转发保持消费方 import '@/types' 路径零改动。
  */
-/** 导航历史栈条目（plan-frontend §4） */
+/** 导航历史栈条目（plan-frontend §4）。view:'archive' = 主区归档摘要视图（session-archive D11，u-renderer-entry）。 */
 export type NavEntry = {
-  view: 'chat' | 'settings'
+  view: 'chat' | 'settings' | 'archive'
   sessionId?: string
   activeTab?: string
 }

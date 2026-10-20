@@ -71,10 +71,12 @@
         :file-count="fileCount"
       />
 
-      <!-- 子视图区：会话列表 / 文件视图 / plugin sidebar view。
+      <!-- 子视图区：会话列表 / 归档列表 / 文件视图 / plugin sidebar view。
            视图切换方向滑入（spec §3.1 裁决 P1-6，demo vt-slide 同语言）：三个分支各挂
            viewSlideCls——目标视图序号更大自右滑入、反之自左；v-if 分支重挂载使动画每次
-           切换重播；首次进入不播（方向类初始为空，watch 置值前无类）。 -->
+           切换重播；首次进入不播（方向类初始为空，watch 置值前无类）。
+           [session-archive D10，u-renderer-entry] sessions tab 内容区二态视图：
+           archive store.viewOpen 时切为归档列表（ArchiveListView），否则会话列表。 -->
       <div class="min-h-0 flex-1 overflow-hidden">
         <template v-if="sidebar.activeTab === 'sessions'">
           <div class="h-full min-h-0" :class="viewSlideCls">
@@ -88,15 +90,32 @@
               <p class="text-[length:var(--text-2xs)] text-neutral-mid">{{ t('sidebar.sessionListLoadFailed', { error: session.listLoadError }) }}</p>
               <Button variant="ghost" class="h-6 text-[length:var(--text-2xs)] text-accent" data-testid="session-list-retry" @click="onRetryLoadSessions">{{ t('sidebar.retry') }}</Button>
             </div>
+            <!-- 归档列表视图（D10：工具组归档入口打开；返回钮/恢复成功切回） -->
+            <ArchiveListView
+              v-else-if="archiveStore.viewOpen"
+              :archives="archiveStore.archives"
+              :loading="archiveStore.loading"
+              :list-error="archiveStore.listError"
+              :restoring-session-id="archiveStore.restoringSessionId"
+              :purging-session-id="archiveStore.purgingSessionId"
+              @back="onArchiveBack"
+              @select="onArchiveSelect"
+              @restore="onArchiveRestore"
+              @purge="onArchivePurge"
+              @retry="onArchiveRetry"
+            />
             <SessionList
               v-else
               :groups="session.groups"
               :active-id="focusedSessionId"
               :status-of="statusOf"
+              :archive-count="archiveStore.archiveCount"
+              :restored-session-id="archiveStore.restoredSessionId"
               @select="onSelectSession"
               @new-session="onNewSession"
               @rename="onRenameSession"
-              @delete="onDeleteSession"
+              @archive="onArchiveSession"
+              @open-archives="onOpenArchives"
               @delete-folder="onDeleteFolder"
               @new-session-in-folder="onNewSessionInFolder"
               @abort="onAbortSession"
@@ -322,6 +341,9 @@ import { useGlobalShortcuts } from '@/composables/shell/useGlobalShortcuts'
 import { useNavigationStore } from '@/stores/navigation'
 import { useSidebarCounts } from '@/composables/features/sidebar/useSidebarCounts'
 import { useSidebarSessionActions } from '@/composables/features/sidebar/useSidebarSessionActions'
+import { useArchiveView, useArchiveCountBroadcast } from '@/composables/features/sidebar/useArchiveView'
+import { useArchiveStore } from '@/stores/archive'
+import ArchiveListView from './ArchiveListView.vue'
 import { useAppUpdate } from '@/composables/features/settings/useAppUpdate'
 import { useI18n } from 'vue-i18n'
 import { useToast } from '@/composables/useToast'
@@ -430,7 +452,7 @@ async function applyChatTier(tier: FontScaleTier): Promise<void> {
     toastError(e instanceof Error ? e.message : String(e))
   }
 }
-const { selectSession, restoreSession, newSession, loadSessions, renameSession, deleteSession, deleteFolder, assignSessionToProject, focusedSessionId, focusedSession: currentSession, forkFromLastAssistant, enterForkModeFromLastAssistant, handoffFromLastAssistant } = useSidebar()
+const { selectSession, restoreSession, newSession, loadSessions, renameSession, deleteSession, archiveSession, deleteFolder, assignSessionToProject, focusedSessionId, focusedSession: currentSession, forkFromLastAssistant, enterForkModeFromLastAssistant, handoffFromLastAssistant } = useSidebar()
 const piVersion = ref('')
 const versionLabel = computed(() => piVersion.value ? `v${__APP_VERSION__} · pi v${piVersion.value}` : `v${__APP_VERSION__}`)
 const renameOpen = ref(false)
@@ -444,7 +466,20 @@ function onSessionImported(payload: ImportSessionImportedPayload): void {
 const { sessionCount, fileCount } = useSidebarCounts(focusedSessionId)
 const { derivedStatus } = useSessionDerivations()
 function statusOf(id: string) { return derivedStatus(id).value }
-const { onSelectSession, onNewSession, onNewSessionInFolder, onRenameSession, onDeleteSession, onDeleteFolder, onAbortSession, onForceQuitSession, onConfirmRename, onAssignProject, onExportSessionJsonl, onRetryLoadSessions, searchDeps, onOpenSearchDrawer } = useSidebarSessionActions({ selectSession, restoreSession, newSession, loadSessions, renameSession, deleteSession, deleteFolder, assignSessionToProject, renameOpen, targetSessionId })
+const { onSelectSession, onNewSession, onNewSessionInFolder, onRenameSession, onArchiveSession, onDeleteFolder, onAbortSession, onForceQuitSession, onConfirmRename, onAssignProject, onExportSessionJsonl, onRetryLoadSessions, searchDeps, onOpenSearchDrawer } = useSidebarSessionActions({ selectSession, restoreSession, newSession, loadSessions, renameSession, deleteSession, archiveSession, deleteFolder, assignSessionToProject, renameOpen, targetSessionId })
+
+// ── 归档视图编排（session-archive D10/D11，u-renderer-entry）──
+const archiveStore = useArchiveStore()
+const {
+  openArchiveView: onOpenArchives,
+  closeArchiveView: onArchiveBack,
+  openSummary: onArchiveSelect,
+  restoreArchive: onArchiveRestore,
+  purgeArchiveEntry: onArchivePurge,
+  refreshArchives: onArchiveRetry,
+} = useArchiveView()
+// archiveCount 角标广播订阅（config.sessions 帧携带值；模块级 refCount 多实例安全，见 composable 注释）
+useArchiveCountBroadcast()
 useGlobalShortcuts({ onNewSession, onOpenImportSession: () => { importOpen.value = true }, forkFromLastAssistant, enterForkModeFromLastAssistant, handoffFromLastAssistant, navigation: useNavigationStore(), openSettings })
 // [B3 / 2026-09-14 内存审计 §2.4] app.info 退订函数保存 + onBeforeUnmount 调用：App.vue 以
 // v-if="connectionState !== 'connected'" 卸载 AppShell，runtime 崩溃自动重启下断连重连是

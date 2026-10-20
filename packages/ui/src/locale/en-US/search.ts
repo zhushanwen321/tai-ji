@@ -1,7 +1,7 @@
 export default {
   title: 'Search',
-  description: 'Search commands, files, symbols and sessions',
-  placeholder: 'Search commands, files, symbols, sessions…',
+  description: 'Search commands, files, symbols, sessions and archives',
+  placeholder: 'Search commands, files, symbols, sessions, archives…',
   searching: 'Searching…',
   startHint: 'Enter keywords to start searching',
   noResult: 'No results for "{query}"',
@@ -11,6 +11,7 @@ export default {
   sectionFile: 'File',
   sectionSymbol: 'Symbol',
   sectionSession: 'Session',
+  sectionArchive: 'Archived',
   recent: 'Recent',
   suggestedCommand: 'Suggested commands',
   dirLabel: 'Directory',
@@ -20,4 +21,5 @@ export default {
   fileOpenFailed: 'Failed to open file',
   sessionNotFound: 'Session not found: {title}',
   sessionSwitchFailed: 'Failed to switch session',
+  archiveOpenFailed: 'Failed to open archive entry, please search again',
 }

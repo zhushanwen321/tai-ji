@@ -23,6 +23,8 @@ import {
   type CanvasNodeLifecycle,
   type CanvasState,
 } from '@zhushanwen/extension-protocol'
+import { defineStateMachine } from '@zhushanwen/state-machine'
+import type { IllegalTransitionInfo } from '@zhushanwen/state-machine'
 
 /** mutate 词表的写面（16 action 减 read / list 两个查询类——查询不产事件、不在对账范围）。 */
 export type CanvasMutationAction = Exclude<CanvasAction, 'read' | 'list'>
@@ -234,23 +236,59 @@ export function findTrunkCycle(state: CanvasDomainState): string | null {
 // ── 状态机（概念 §2.4：生命周期维度合法转移表）────────────────
 
 /**
- * 生命周期合法转移表（状态机穷举单测的断言权威）：
- * draft→under-review / draft→shelved / under-review→passed / under-review→rejected /
- * under-review→shelved / rejected→draft（复活，须留理由）/ shelved→draft。
- * 表外（含自转移、passed 终态、rejected 直转 passed——不变量 4）一律 fail-fast。
- * 派发维度正交（node.dispatch 字段，不经本表）。
+ * 生命周期状态机（@zhushanwen/state-machine 行式声明；设计锚点
+ * state-machine-infrastructure §6 D6-M5）：draft→under-review / draft→shelved /
+ * under-review→passed / under-review→rejected / under-review→shelved /
+ * rejected→draft（复活，须留理由）/ shelved→draft。表外（含自转移、passed 终态、
+ * rejected 直转 passed——不变量 4）一律 fail-fast。派发维度正交（node.dispatch 字段，
+ * 不经本机）。
+ *
+ * 事件词表从 transition action 的目标态语义派生（事件名 = params.to 的目标态名）——
+ * mutate 词表 16 action 中仅 transition 驱动本机，其余不改 lifecycle（事件维度按此收窄）。
+ *
+ * 表外转移由 errorPolicy:'throw' + errorFactory 构造既有 CanvasDomainError（
+ * lifecycle_transition_illegal 错误码 + recover 恢复指引随 canvasError 构造性携带）
+ * ——canvas-service 三处 catch 与 canvas-message-handler 两处 isCanvasDomainError
+ * 分类分支按 instanceof 命中，类型保形非仅消息形态。
  */
-export const LIFECYCLE_TRANSITIONS: Readonly<Record<CanvasNodeLifecycle, readonly CanvasNodeLifecycle[]>> = {
-  draft: ['under-review', 'shelved'],
-  'under-review': ['passed', 'rejected', 'shelved'],
-  passed: [],
-  rejected: ['draft'],
-  shelved: ['draft'],
+function canvasLifecycleErrorFactory(info: IllegalTransitionInfo): Error {
+  return new CanvasDomainError(
+    canvasError(
+      'lifecycle_transition_illegal',
+      `状态机不允许「${info.from}」→「${info.on}」（rejected / shelved 须先复活为 draft）`,
+    ),
+  )
 }
 
-export function isTransitionAllowed(from: CanvasNodeLifecycle, to: CanvasNodeLifecycle): boolean {
-  return LIFECYCLE_TRANSITIONS[from].includes(to)
-}
+export const canvasLifecycleMachine = defineStateMachine<CanvasNodeLifecycle, CanvasNodeLifecycle>({
+  name: 'canvas-node-lifecycle',
+  states: {
+    draft: {},
+    'under-review': {},
+    passed: { terminal: true },
+    rejected: {},
+    shelved: {},
+  },
+  initial: 'draft',
+  events: {
+    draft: {},
+    'under-review': {},
+    passed: {},
+    rejected: {},
+    shelved: {},
+  },
+  transitions: [
+    { from: 'draft', on: 'under-review', to: 'under-review' },
+    { from: 'draft', on: 'shelved', to: 'shelved' },
+    { from: 'under-review', on: 'passed', to: 'passed' },
+    { from: 'under-review', on: 'rejected', to: 'rejected' },
+    { from: 'under-review', on: 'shelved', to: 'shelved' },
+    { from: 'rejected', on: 'draft', to: 'draft' },
+    { from: 'shelved', on: 'draft', to: 'draft' },
+  ],
+  errorPolicy: 'throw',
+  errorFactory: canvasLifecycleErrorFactory,
+})
 
 // ── 就绪递归（概念 §2.3）─────────────────────────────────────
 

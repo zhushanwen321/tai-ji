@@ -33,6 +33,7 @@ export function buildSessionApiPort(): SessionApiPort {
     create: (...args: Parameters<SessionApiPort['create']>) => sessionApi.create(...args),
     rename: (...args: Parameters<SessionApiPort['rename']>) => sessionApi.rename(...args),
     remove: (...args: Parameters<SessionApiPort['remove']>) => sessionApi.remove(...args),
+    archive: (...args: Parameters<SessionApiPort['archive']>) => sessionApi.archive(...args),
     removeByCwd: (...args: Parameters<SessionApiPort['removeByCwd']>) =>
       sessionApi.removeByCwd(...args),
     migrateImage: (...args: Parameters<SessionApiPort['migrateImage']>) =>

@@ -33,7 +33,8 @@ import {
 import type { Family } from './core/family.js'
 import { SESSION_ID_PREFIX_LEN, rangeLabel } from './handler-utils.js'
 import { formatNoMatch } from './no-match.js'
-import type { ToolResult } from './tool-handler.js'
+import { archivedResult } from './discovery/archive-match.js'
+import type { ResolveResult, ToolResult } from './tool-handler.js'
 
 // 结构化日志通道（zcodeReadErrorMessage 的降级/TOCTOU warn）：getLogger 按名缓存
 // 单例，与 tool-handler 侧调用取同一实例，appendEntry/文件日志行为不变。
@@ -227,6 +228,16 @@ export function disambiguate(query: string, candidates: MatchedSession[]): ToolR
     `${candidates.length} 个匹配 "${query}"：\n${lines.join('\n')}\n` +
     `👉 用更长的 uuid 片段${hint}，或 action:"find" 加 cwd 过滤。`
   return { content: [{ type: 'text', text }], details: { ambiguous: true, candidates } }
+}
+
+/**
+ * ResolveResult 非 ok 支的统一分发（[session-archive D7] 归并点）：multi → 既有
+ * F2 消歧；archived / archived-multi → 归档态返回（archive-match 两支渲染，不读
+ * 压缩体）。8 个 do* 的「multi 消歧 + 归档短路」重复分支收敛到本函数单一出口。
+ */
+export function resolveNonOkResult(resolved: Exclude<ResolveResult, { kind: 'ok' }>): ToolResult {
+  if (resolved.kind === 'multi') return disambiguate(resolved.query, resolved.candidates)
+  return archivedResult(resolved)
 }
 
 // ---------------------------------------------------------------------------

@@ -57,6 +57,7 @@ import {
   toSettledEntryData,
 } from "./record-entry-write.ts";
 import type { StopReason } from "../domain/record-types.ts";
+import { permanentSessionStatusMachine } from "../domain/record-status-machine.ts";
 import type { ExecutionRecord } from "../domain/record-model.ts";
 import type { AgentEvent } from "../assembly/types.ts";
 import type { RoundSettlementOutcome } from "./finalize-record.ts";
@@ -160,6 +161,9 @@ export function markRoundStartedImpl(id: string, ctx: RoundsCtx): boolean {
   // [轮次轴 CAS] 终态冻结门（判定依据见方法头）：endedAt 已设 = 真终态簿记已落，
   // 此刻轮始即复活终态 = 调用方 bug。合法 revive 链经 resurrectClosed /
   // reviveOrThrow 在轮始前清本位，不会触达本门。
+  // [state-machine-infrastructure M2 机器管辖外登记] 本门是 throw 语义、endedAt
+  // 不是 ExecutionStatus 的函数（两态词表表达不了）——留原语层、先于机器判定执行
+  //（false 与 throw 是两种拒绝形态，不折算混同，D6-M2 边界声明）。
   if (rec.endedAt !== undefined) {
     throw new Error(
       `markRoundStarted(${id}): terminal bookkeeping already frozen ` +
@@ -168,6 +172,11 @@ export function markRoundStartedImpl(id: string, ctx: RoundsCtx): boolean {
         `Recovery: caller must gate on record.status before dispatching a round; revived records must clear endedAt via markResurrected/reviveOrThrow first.`,
     );
   }
+  // [state-machine-infrastructure M2 迁移] 翻边判定走机器（round-started 双态可达，
+  // 机器两行承载：idle 源 = 翻边执行 / running 源 = 幂等重申自环——被机器表外拒绝
+  // 即行为漂移，续轮/首轮主链的轮始簿记会静默失败）。两态词表内本判定结构性恒
+  // ok，拒绝分支是 result 判别联合的类型收窄位，行为零变化。
+  if (!permanentSessionStatusMachine.transition(rec.status, "round-started").ok) return false;
   rec.status = "running";
   rec.result = undefined;
   // [U6/D4 轮始清点族扩字段] 上轮停因随轮始清点——isOccupied 的 stopReason 子句
@@ -304,6 +313,9 @@ export function markRoundIdleImpl(id: string, outcome: RoundSettlementOutcome, c
     return false;
   }
   if (rec.endedAt !== undefined) {
+    // [state-machine-infrastructure M2 机器管辖外登记] 终态冻结门是 throw 语义、
+    // endedAt 不是 ExecutionStatus 的函数——留原语层、先于机器判定执行（同
+    // markRoundStartedImpl 门，D6-M2 边界声明）。
     throw new Error(
       `markRoundIdle(${id}): terminal bookkeeping already frozen ` +
         `(status: ${rec.status}${rec.closedReason !== undefined ? `/${rec.closedReason}` : ""}, endedAt: ${rec.endedAt}) — ` +
@@ -317,10 +329,11 @@ export function markRoundIdleImpl(id: string, outcome: RoundSettlementOutcome, c
   // 多写一条 record-round-idle 事件行（事件流事实源被污染）。三类生产调用链
   // （settleOneShotOutcome / finalizeFailed / chat 域 onRunSettled）均在 running 门下，
   // 本段为原语级兜底（chat 域的门与轮终之间隔着 settleRoundXxx 的 await 边界）。
-  // 拒绝语义对齐 markReopened / markSettled：warn 留痕 + 返回 false，不抛错——调用
-  // 链是 `void settleRoundXxx(...)` 的断头 promise 形式，抛错会升级为无人接的
-  // promise 拒绝（而不是被上层的 status 门接住）。
-  if (rec.status !== "running") {
+  // [state-machine-infrastructure M2 迁移] 在途门判定走机器（round-idle：仅 running
+  // 源合法）。拒绝语义对齐 markReopened / markSettled：warn 留痕 + 返回 false，不抛
+  // 错——调用链是 `void settleRoundXxx(...)` 的断头 promise 形式，抛错会升级为无人接
+  // 的 promise 拒绝（而不是被上层的 status 门接住）。
+  if (!permanentSessionStatusMachine.transition(rec.status, "round-idle").ok) {
     logger.warn("[subagents] markRoundIdle: CAS rejected (record not running)", {
       detail: { id, status: rec.status, stopReason: rec.stopReason },
     });

@@ -1,12 +1,18 @@
 /**
- * plan 模式生命周期状态机（plan 模式状态机显式化 D1）——纯数据 + 纯函数，零依赖。
+ * plan 模式生命周期状态机（plan 模式状态机显式化 D1）——8 值状态集 + 9 事件
+ * 边表的单一状态契约。表与判定迁移 @zhushanwen/state-machine 基建承载（M4）：
+ * 矩阵改行式声明 + errorPolicy:'result'（表外 `{ ok: false }` 不炸 turn）+ 原型链
+ * 白名单口径统一到机器 coerceState（域内枚举 includes 白名单先例被基建吸收，
+ * V10）；对外 `transition` / `derivePhase` 签名与返回形态保形（消费方零改动，
+ * 消费方清单 = consumers.md）。
  *
  * plan 模式的状态散落在 pi 扩展 entry / runtime 挂起注册表 / renderer 派生公式三处时，
  * 任意两者漂移即产「僵尸/谎言」UI（F1-F5）。本模块是全链路共享的单一状态契约：
  * 8 值状态集 + 9 事件边表 + `transition` 纯函数（检查集中一处）+ `derivePhase` 呈现映射。
  *
  * 语义要点（设计 D1 逐条锚定）：
- * - 非法转移返回 `{ ok: false }`，由调用方降级（**不 throw 炸 turn**）；副作用不进返回值
+ * - 非法转移返回 `{ ok: false }`（机器 errorPolicy:'result' 的表外分支转译——不携带
+ *   next 键、不 throw），由调用方降级（**不 throw 炸 turn**）；副作用不进返回值
  *   （effects-as-data 无已登记消费方属投机间接层），各 action 在转移成功后内联执行自身副作用。
  * - `reviewing --dismiss--> planning`：用户「搁置」（协议级 dismiss 决策，D3）——落盘即
  *   planning，被搁置的审批不复活（F1/F2/F3 构造性消除）。
@@ -27,11 +33,13 @@
  * - `reviewing --submit--> reviewing`：审批重挂自环（E3 会话重启恢复 / D8「重新提交审批」
  *   按钮——重提交不推进生命周期，落盘回 reviewing 重挂即等价于旧调用方特判放行形态）。
  *
- * 呈现映射（derivePhase）：用户视角四主态 + idle 缺省——四主态是呈现，不是存储
- * （用户口述模型 = 呈现层，reviewing/dispatching 两个挂起态是崩溃恢复的真实分叉点，
- * 存储层保留 8 值）。终态两值（completed = 批准并派发执行 / exited = 主动退出）共享
- * 全部终态规则，呈现层同映 'terminal'（诊断/审计语义保留存储区分）。
+ * 发布位次登记（D7③）：本包（@zhushanwen/extension-protocol）自 M4 起依赖
+ * @zhushanwen/state-machine（workspace 协议），npm 发布顺序必须基建包在先——
+ * 位次断链时 npm 消费者会装到缺依赖的 extension-protocol（changeset 依赖图
+ * 自然保证，发布 PR 人工核对本条）。
  */
+
+import { defineStateMachine } from '@zhushanwen/state-machine'
 
 // ── 状态集（8 值，D1）──
 
@@ -83,11 +91,7 @@ export const PLAN_LIFECYCLE_EVENTS = [
   'exit',
 ] as const satisfies readonly PlanLifecycleEvent[]
 
-// ── 转移函数（检查集中一处，D1）──
-
-export type PlanTransitionResult =
-  | { ok: true; next: PlanLifecycleState }
-  | { ok: false }
+// ── 机器声明（M4：矩阵迁行式，表 = 全状态 × 全事件的唯一权威）──
 
 /**
  * 边表：全状态 × 全事件的唯一权威（合法 19 边，其余 53 格非法）。
@@ -102,51 +106,85 @@ export type PlanTransitionResult =
  * | dispatching  | — | — | — | — | approved | — | completed | approved | exited |
  * | completed    | planning | — | — | — | — | — | — | — | — |
  * | exited       | planning | — | — | — | — | — | — | — | — |
+ *
+ * completed / exited 是「terminal 显式声明 + enter 重启出边并存」的合法形态（D3——
+ * 终态可开新一轮，非 run 域的吸收态）。行级无 guard / outputs / terminalOutcome
+ * （plan 边是无条件裸转移，planned 恒空——副作用由调用方在转移成功后内联执行）。
  */
-const TRANSITION_TABLE: Record<PlanLifecycleState, Partial<Record<PlanLifecycleEvent, PlanLifecycleState>>> = {
-  idle: { enter: 'planning' },
-  planning: { submit: 'reviewing', exit: 'exited' },
-  reviewing: {
-    submit: 'reviewing',
-    revise: 'revising',
-    dismiss: 'planning',
-    review_aborted: 'planning',
-    approve: 'dispatching',
-    exit: 'exited',
+export const PLAN_MACHINE = defineStateMachine({
+  name: 'plan-lifecycle',
+  states: {
+    idle: {},
+    planning: {},
+    reviewing: {},
+    revising: {},
+    approved: {},
+    dispatching: {},
+    completed: { terminal: true },
+    exited: { terminal: true },
   },
-  revising: { submit: 'reviewing', exit: 'exited' },
-  approved: { approve: 'dispatching', exit: 'exited' },
-  dispatching: {
-    review_aborted: 'approved',
-    exec_chosen: 'completed',
-    later: 'approved',
-    exit: 'exited',
+  initial: 'idle',
+  events: {
+    enter: {},
+    submit: {},
+    revise: {},
+    dismiss: {},
+    review_aborted: {},
+    approve: {},
+    exec_chosen: {},
+    later: {},
+    exit: {},
   },
-  completed: { enter: 'planning' },
-  exited: { enter: 'planning' },
-}
+  transitions: [
+    { from: 'idle', on: 'enter', to: 'planning' },
+    { from: 'planning', on: 'submit', to: 'reviewing' },
+    { from: 'planning', on: 'exit', to: 'exited' },
+    { from: 'reviewing', on: 'submit', to: 'reviewing' },
+    { from: 'reviewing', on: 'revise', to: 'revising' },
+    { from: 'reviewing', on: 'dismiss', to: 'planning' },
+    { from: 'reviewing', on: 'review_aborted', to: 'planning' },
+    { from: 'reviewing', on: 'approve', to: 'dispatching' },
+    { from: 'reviewing', on: 'exit', to: 'exited' },
+    { from: 'revising', on: 'submit', to: 'reviewing' },
+    { from: 'revising', on: 'exit', to: 'exited' },
+    { from: 'approved', on: 'approve', to: 'dispatching' },
+    { from: 'approved', on: 'exit', to: 'exited' },
+    { from: 'dispatching', on: 'review_aborted', to: 'approved' },
+    { from: 'dispatching', on: 'exec_chosen', to: 'completed' },
+    { from: 'dispatching', on: 'later', to: 'approved' },
+    { from: 'dispatching', on: 'exit', to: 'exited' },
+    { from: ['completed', 'exited'], on: 'enter', to: 'planning' },
+  ],
+  errorPolicy: 'result',
+})
+
+// ── 转移函数（检查集中一处，D1；机器判定的保形包装）──
+
+export type PlanTransitionResult =
+  | { ok: true; next: PlanLifecycleState }
+  | { ok: false }
 
 /**
- * 纯函数转移：`(state, event) → { ok: true, next } | { ok: false }`。
+ * 纯函数转移：`(state, event) → { ok: true, next } | { ok: false }`——机器
+ * errorPolicy:'result' 判定的保形包装（签名与返回形态不变，消费方零改动）。
  *
  * 非法转移（含运行时垃圾 state/event 值——跨版本帧、坏反序列化）返回 `{ ok: false }`
  * 且**不携带 next 键**，由调用方降级（不 throw 炸 turn）。调用方义务：`ok:false` 时
  * 不落盘、不执行副作用（终态上 `ok:false` 不落盘即 D3 归属划分点的兜底保险）。
  *
- * 入口白名单检查（与 derivePhase 同一机制）：普通对象字面量查表会沿原型链命中继承键——
- * `transition('reviewing', '__proto__')` 取出 Object.prototype、`('__proto__', 'valueOf')`
- * 取出函数，均被误判为合法 next（违背本契约）。故垃圾键必须先挡在查表前。
- * **选「枚举 includes 白名单」而非 null-prototype 表 / Object.hasOwn**：① transition 与
- * derivePhase 共用同一检查形态（单一机制，不并存两种写法）；② PLAN_LIFECYCLE_STATES /
- * PLAN_LIFECYCLE_EVENTS 就是值域 SSOT（测试穷举同源），includes 判定与之同源，
- * 原型键天然不在白名单内。
+ * 垃圾输入的分层判定（原型链白名单口径已统一到基建 coerceState 的同族机制）：
+ * 词表外 state 由机器词表集合拒绝（Set 查询不走原型链）；词表外 event 字符串由
+ * 机器 (from, on) 行索引拒绝（Map 复合键查询不走原型链）；非字符串 event 由基建
+ * 归一 undefined 落入表外拒绝（§5.2 失败路径表第 3 行，不 crash），下方前置守卫
+ * 是域内显式等价拒绝（同结果先行返回，「不炸 turn」契约双保险）。plan 表无
+ * to:null 消亡行（基建 null 语义 = 实体离开机器，plan 8 态全在机器内），state 为
+ * null 的分支运行时不可达，收窄仅为类型完备。
  */
 export function transition(state: PlanLifecycleState, event: PlanLifecycleEvent): PlanTransitionResult {
-  if (!PLAN_LIFECYCLE_STATES.includes(state) || !PLAN_LIFECYCLE_EVENTS.includes(event)) {
-    return { ok: false }
-  }
-  const next = TRANSITION_TABLE[state][event]
-  return next === undefined ? { ok: false } : { ok: true, next }
+  if (typeof event !== 'string') return { ok: false }
+  const result = PLAN_MACHINE.transition(state, event)
+  if (!result.ok) return { ok: false }
+  return result.state === null ? { ok: false } : { ok: true, next: result.state }
 }
 
 // ── 呈现映射（derivePhase，D1 用户视角四主态 + idle 缺省）──
@@ -177,11 +215,13 @@ const PHASE_OF_STATE: Record<PlanLifecycleState, PlanPhase> = {
  * 8 存储态 → 5 呈现相位的单点映射（renderer 阶段指示/状态带共用，禁止消费方各自 if 拼）。
  * 运行时垃圾 state（混装格坏帧）降级 'idle'（无 plan 缺省，fail-safe 不误示进行中）。
  *
- * 入口白名单检查（理由同 transition，见彼处）：裸查表对继承键 'constructor' / 'toString'
- * 会取出 Object 构造函数等并经 `?? 'idle'` 流出（非 nullish 不落兜底）——垃圾 state
- * 必须精确落 'idle'，函数/对象不得作为相位流入 renderer。
+ * 入口白名单检查 = 机器 coerceState（原型链白名单口径统一到基建，V10）：裸查表对
+ * 继承键 'constructor' / 'toString' 会取出 Object 构造函数等并经 `?? 'idle'` 流出
+ * （非 nullish 不落兜底）——垃圾 state 必须精确落 'idle'，函数/对象不得作为相位
+ * 流入 renderer。
  */
 export function derivePhase(state: PlanLifecycleState): PlanPhase {
-  if (!PLAN_LIFECYCLE_STATES.includes(state)) return 'idle'
-  return PHASE_OF_STATE[state]
+  const coerced = PLAN_MACHINE.coerceState(state)
+  if (coerced === null) return 'idle'
+  return PHASE_OF_STATE[coerced]
 }
