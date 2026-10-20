@@ -98,6 +98,8 @@ import {
   type CatalogRefreshResult,
 } from './provider-catalog-refresh.js'
 import { syncRemoteProviderModels } from './remote-config/remote-provider-sync.js'
+import { refreshRemoteConfig } from './remote-config/remote-config-fetch.js'
+import { isQuotaFetchersRemoteConfig } from './quota-providers/index.js'
 import {
   loadSkills as loadSkillsImpl,
   saveSkills as saveSkillsImpl,
@@ -248,10 +250,17 @@ export class ConfigService implements IConfigService {
   }
 
   /**
-   * taiji 远程配置拉取 + provider 清单域同步（remote-config 域 1，checkedAt 4h 节流在
-   * fetch 层内建）。触发点：进设置 Provider 页（handleRefreshProviderCatalogs 顺带）+
-   * runtime 启动延迟（组合根）。返回实际发生模型合并写盘的 provider 列表供调用方决定
-   * 是否广播（空 = 拉取失败/无变化/无同步对象，fail-safe 链内建在 sync 层）。
+   * taiji 远程配置拉取 + 两个域同步（remote-config 域 1 provider 清单 + 域 2 quota-fetchers，
+   * checkedAt 4h 节流在 fetch 层内建）。触发点：进设置 Provider 页
+   * （handleRefreshProviderCatalogs 顺带）+ runtime 启动延迟（组合根）。
+   *
+   * 域 2（quota-fetchers）只有读侧消费方（quota-providers/index.ts 的 loadRemoteConfig），
+   * 拉取结果无需任何下游动作——落盘缓存即生效，读侧下次调用自然吃到新数据。故本方法只
+   * 负责触发拉取，不消费其 outcome（失败沿用 fetch 层内建 fail-safe 链：回退缓存/基线 +
+   * warn，无需额外 try/catch）。
+   *
+   * 返回实际发生模型合并写盘的 provider 列表供调用方决定是否广播（空 = 拉取失败/无变化/
+   * 无同步对象，fail-safe 链内建在 sync 层）。
    */
   async refreshRemoteProviders(): Promise<{ updatedProviders: string[] }> {
     const result = await syncRemoteProviderModels({
@@ -260,6 +269,8 @@ export class ConfigService implements IConfigService {
       authStorage: this.authStorage,
       credentialWriter: this.credentialWriter,
     })
+    // 域 2 拉取（与域 1 同触发点；await 保证启动/进页路径在返回前完成落盘，读侧立即可见）
+    await refreshRemoteConfig('quota-fetchers', isQuotaFetchersRemoteConfig)
     return { updatedProviders: result.updatedProviders }
   }
 

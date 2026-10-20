@@ -458,7 +458,8 @@ export interface IConfigService {
   /** 远程模型目录按需刷新（settings-provider 页进入时触发，fail-safe）。 */
   refreshProviderCatalogs(): Promise<CatalogRefreshResult>
   /**
-   * taiji 远程配置拉取 + provider 清单域同步（remote-config；进设置页与启动延迟触发）。
+   * taiji 远程配置拉取 + 两域同步（remote-config 域 1 provider 清单 + 域 2 quota-fetchers；
+   * 进设置页与启动延迟触发，checkedAt 4h 节流在 fetch 层内建）。
    * 返回实际发生模型合并写盘的 provider 列表（空 = 失败/无变化/无同步对象）。
    */
   refreshRemoteProviders(): Promise<{ updatedProviders: string[] }>
