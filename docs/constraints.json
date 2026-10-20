@@ -3307,7 +3307,7 @@
     },
     {
       "id": "C-ext-31",
-      "summary": "模型可见性投喂单点 = provider-live-sync 包（extensions/universal/provider-live-sync/，投喂模块 src/catalog-bridge.ts）：taiji 侧目录缓存 → pi 进程注册表常驻条目的写入单点。新增模型数据来源（未来第三条缓存链、新目录源）时改该投喂模块的输入，禁止在其他扩展新开 registerProvider/registerVirtualModel 常驻注入——注入修的是注册表这一事实源，消费方（--model 解析 / rpc set_model / rename / smart-context / permission / scheduler / subagent 校验 / provider 对账）零改动自动受益，新开注入点等于绕过单点、制造第二写入方。scheduler 的 ack 合成轮（src/ack-turn.ts 临时注册合成 provider、one-shot 注销）是执行通道覆写、非可见性投喂，语义不同不在禁列。机器执行点 = check_register_allowlist.py 调用点白名单（包粒度：provider-live-sync + scheduler 两包，测试目录排除）",
+      "summary": "模型可见性投喂单点 = provider-live-sync 包（extensions/universal/provider-live-sync/，投喂模块 src/catalog-bridge.ts）：taiji 侧目录缓存 → pi 进程注册表常驻条目的写入单点。新增模型数据来源（未来第三条缓存链、新目录源）时改该投喂模块的输入，禁止在其他扩展新开 registerProvider/registerNativeProvider/registerVirtualModel 常驻注入——注入修的是注册表这一事实源，消费方（--model 解析 / rpc set_model / rename / smart-context / permission / scheduler / subagent 校验 / provider 对账）零改动自动受益，新开注入点等于绕过单点、制造第二写入方。scheduler 的 ack 合成轮（src/ack-turn.ts 临时注册合成 provider、one-shot 注销）是执行通道覆写、非可见性投喂，语义不同不在禁列。机器执行点 = check_register_allowlist.py 调用点白名单（包粒度：provider-live-sync + scheduler 两包，测试目录排除）",
       "scope": [
         "extensions/**"
       ],
