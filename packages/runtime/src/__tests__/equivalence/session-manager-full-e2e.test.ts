@@ -206,7 +206,8 @@ async function runFullChain(options: ChainOptions = {}): Promise<FullChain> {
   timings.coldStartMs = Date.now() - t0
 
   // notify-once 债权账本（handler 的 claims 面）：watch 三路径的被路由对象。随 cleanup
-  // dispose——内部 TTL 清扫 interval 不 unref，漏停会拖住 vitest worker teardown。
+  // dispose（现为空体——ledger 无内部定时器，无 teardown 拖挂风险；调用保持接口契约，
+  // 防未来重新引入需停资源时漏收尾）。
   const claims = createClaimLedger()
   const cleanup = (): void => {
     claims.dispose()

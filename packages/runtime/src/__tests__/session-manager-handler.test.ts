@@ -64,7 +64,7 @@ function makeMockDelivery(overrides: Partial<SessionDeliveryRegistry> = {}): Ses
   } as unknown as SessionDeliveryRegistry
 }
 
-/** 每个 makeMockOptions 的真实 ClaimLedger 登记（afterEach 统一 dispose 停内部清扫定时器） */
+/** 每个 makeMockOptions 的真实 ClaimLedger 登记（afterEach 统一 dispose——ledger 无内部定时器，调用仅为接口契约与防泄漏习惯位） */
 const spawnedLedgers: ClaimLedger[] = []
 
 function makeMockOptions(overrides: Partial<SessionManagerHandlerOptions> = {}): SessionManagerHandlerOptions {
@@ -831,7 +831,7 @@ describe('SessionManagerHandler', () => {
   // handle 接线的真实行为验证由上方 U4-A1~A6 各 action 用例承担。
 
   // ─── notify-once watch 桥（设计 D2/D6/U3；验收：params 检查两面 / 路由三分支 /
-  //     respond 回写 / ownership / 二次校验两态 / TTL 已挂 watch 同步 respond）────────
+  //     respond 回写 / ownership / 二次校验两态）────────
   describe('notify-once watch 路由：单键寻址三分支 + respond 前二次归属校验', () => {
     const VALID_NID = 'sm-12345678-1234-4234-8234-123456789012'
     const VALID_NID2 = 'sm-12345678-1234-4234-8234-123456789013'

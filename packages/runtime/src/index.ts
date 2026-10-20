@@ -36,7 +36,7 @@ import { createSessionDeliveryRegistry, createDiskDeliveryStoreForSession } from
 import { createResumeDecision } from './services/session/resume-decision.js'
 // u4 追加项（A5/V5）：reattach restore 包装——先建投递运行时再触发对账（reconcile 无运行时即 no-op）。
 import { createReattachRestore } from './services/session/reattach-delivery-trigger.js'
-// notify-once U3（组合根接线，实施计划偏差 D-1）：ClaimLedger 构造 + settle/死亡/清扫路径；
+// notify-once U3（组合根接线，实施计划偏差 D-1）：ClaimLedger 构造 + settle/死亡路径；
 // 词形映射与 respond 回执助手自 session-manager-handler 模块复用（映射单点）。
 import { createClaimLedger, type DeathCause } from './services/session/notify-claims.js'
 import { collectStderrTail, deliverRespondTargets } from './transport/session-manager-handler.js'
@@ -726,7 +726,9 @@ async function main(): Promise<void> {
   // ── notify-once（设计 U3 + 偏差 D-1：ClaimLedger 组合根接线）─────────────
   // 职责面：respond 写回通道 / settle 兑现路径（agentSettledListeners）/ 终局死亡发声
   //（delete·forceQuit·非 respawn 链 exit·熔断四汇聚点）/ 父死亡批量 orphan（触发器②）/
-  // TTL 清扫消费 / shutdown 非零 warn（D7b）。
+  // shutdown 非零 warn（D7b）。（TTL 清扫已随 ADR-0122 防御机制清查退役——claimLedger
+  // 消费点全集仅上述八方法：onSessionDeath/clearSession/settle/orphanByParent/markInjected/
+  // disarmDeliveryFailed/count/dispose，无定时回收路径。）
   // 订阅顺序硬约束：pm.onSessionExit 订阅须先于下方
   // `new SessionService` 的 exit 清理路径（按订阅序分发，本路径排前才能读到 session 内存态）。
   // 前向引用（sessionService/sessionStore）为 createAdapter 同款「声明在后、调用在运行期」模式。
@@ -1565,7 +1567,7 @@ async function main(): Promise<void> {
     // 缺席时 server 构造退化实例并 warn（违反单例约束，仅测试装配遗漏场景）。
     delivery: sessionDelivery,
     // notify-once U3（偏差 D-1）：通知债权状态机透传 server → SessionManagerHandler
-    //（settle/死亡/清扫路径在上方组合根直接消费同一实例）。
+    //（settle/死亡路径在上方组合根直接消费同一实例）。
     claims: claimLedger,
     // 导入会话（import-session D5/U2 + 多源 §3.7）：session.importCandidates / session.import
     // 路由，payload.source（缺省 'pi'）在 ImportService 内按注册表分发。

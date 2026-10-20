@@ -27,22 +27,21 @@
  *   「claim 随单笔请求生灭、lifetime 随 session 生灭」；A4：lifetime 仅在死亡时发声）——
  *   settle 只兑现 kind=claim；lifetime 的 armed/injected 是健康稳态（等待终局死亡），
  *   若按「armed/injected 悬挂」扫描会在 TTL 后把全部存活 session 的终身 watch 销成孤儿，
- *   构造性破坏裁决2。lifetime 可被 orphan/死亡/clear 终结，其 orphaned 照常进 TTL 回收。
+ *   构造性破坏裁决2。lifetime 可被 orphan/死亡/clear 终结，其 orphaned 与 claim 同规：滞留至
+ *   clearSession，无自动回收。
  * - **死亡批量即时删除**（设计 D2 死亡行新态=「删除」，无中间态）：respond 素材随返回值带出；
  *   其 respond 失败时记录已不在册，`onRespond` 记 absent 空转——残留 register 由收尾路径
  *   （D7③）清理，与附录 C-9 口径一致。其余 respond（settle/catch-up/abort/late-watch）
  *   走统一回收：`onRespond(true)` → 删除；`onRespond(false)` → orphaned + 计数（触发器①）。
- * - **TTL 三类扫描**（设计 D7/D2 行）：① kind=claim 的 armed/injected 悬挂；② fulfilled-no-watch；
- *   ③ orphaned 达 TTL 回收（≥ 下界窗口保证杀父重启后收尾路径拿得到精确 orphaned 应答）。
- *   扫描转移时 watch 已挂 → 返回 `respondOrphaned` 信号（调用方须同步 respond，防孤儿 promise）。
- *   aborted 不入扫描（bridge 契约：每条 respond 素材必回一次 onRespond；session 删除兜底清理）。
+ * - **悬挂记录去向（原 TTL 三类扫描已退役）**：kind=claim 的 armed/injected 悬挂与
+ *   fulfilled-no-watch 无自动回收，滞留至 clearSession（session 删除 / shutdown）；orphaned
+ *   为吸收态同规滞留。aborted 亦无回收路径（bridge 契约：每条 respond 素材必回一次
+ *   onRespond；session 删除兜底清理）。
  * - **undeliveredResults**：每次转入 orphaned（任一触发器）+1，按被管理子会话 sessionId 分桶，
  *   事实计数随记录回收不回退；`clearSession` 随 session 消亡一并清零。
  * - **seq 计数器**：settleSeq/deathSeq per-session 递增，仅在批次非空时递增（seq 即批次身份，
  *   空批不产 respond 不占号）；sessionId 不复用 + 空批不产号 ⇒ clearSession 清零安全。
  */
-
-/** TTL 下界 = 10min（设计审查条款：≥10min——保证杀父重启窗口内 orphaned 记录仍在、收尾路径拿得到精确应答）。 */
 
 // ─── 词表（runtime 自持，非协议词形）────────────────────────────────────────
 
@@ -150,16 +149,6 @@ export interface OrphanBatch {
   orphaned: ClaimView[]
 }
 
-/** TTL 清扫结果（D7 回收策略）。 */
-export interface SweepResult {
-  /** 本轮转入 orphaned 的记录（无 watch：仅状态转移 + 计数） */
-  orphaned: ClaimView[]
-  /** 其中 watch 已挂者 → 调用方须同步 respond 结束语（extension 按 D3 例外1 静默收尾） */
-  respondOrphaned: RespondTarget[]
-  /** orphaned 达 TTL 回收删除的记录数 */
-  purged: number
-}
-
 /** onRespond 回执处置（供 bridge 观测/测试断言）。 */
 export type RespondDisposition = 'deleted' | 'orphaned' | 'absent' | 'noop'
 
@@ -189,7 +178,7 @@ export interface ClaimLedger {
   /**
    * 终局死亡（delete/forceQuit 汇聚点，先于杀进程；exit = 非 respawn 链进程死亡）。
    * armed/injected/fulfilled 全种类即时删除并返回 respond 素材（同 deathSeq）；orphaned/aborted
-   * 为终结态不参与（clearSession / TTL 兜底）。respawn 链静默 = bridge 不调用本方法。
+   * 为终结态不参与（clearSession 兜底）。respawn 链静默 = bridge 不调用本方法。
    */
   onSessionDeath(sessionId: string, cause: DeathCause): DeathBatch
   /** 父死亡批量转移（D7 触发器②）：该父全部未终结记录 → orphaned + 计数，返回 warn 素材（不 respond）。 */
@@ -208,7 +197,7 @@ export interface ClaimLedger {
   count(): number
   /** 未送达结果事实计数（D6 undeliveredResults，按被管理子会话分桶）。 */
   undeliveredCount(sessionId: string): number
-  /** 停清扫定时器（不丢记录——shutdown warn 顺序见文件头）。 */
+  /** 生命周期收尾钩子（现为空实装——无内部定时器可停；不丢记录，shutdown warn 顺序见文件头）。 */
   dispose(): void
 }
 
@@ -220,7 +209,7 @@ interface ClaimRecord {
   state: ClaimState
   watchId?: string
   outcomeSnapshot?: OutcomeSnapshot
-  /** 进入当前 state 的时刻（TTL 判据） */
+  /** 进入当前 state 的时刻（原 TTL 判据；TTL 退役后无读取方，仅 transition 写入留痕） */
   stateSince: number
 }
 
@@ -275,7 +264,7 @@ export function createClaimLedger(deps: ClaimLedgerDeps = {}): ClaimLedger {
     }
   }
 
-  /** 单条 respond 素材组装（watchId 由调用方给——openWatch/abort/sweep 的挂表时点不同）。 */
+  /** 单条 respond 素材组装（watchId 由调用方给——openWatch/abort 的挂表时点不同）。 */
   function targetOf(r: ClaimRecord, watchId: string, payload: RespondPayload): RespondTarget {
     return {
       parentSid: r.parentSid,
@@ -318,7 +307,7 @@ export function createClaimLedger(deps: ClaimLedgerDeps = {}): ClaimLedger {
     return out
   }
 
-  /** 未终结态（可被死亡/父亡/清扫继续处理的活跃态）。orphaned（吸收）/aborted（已终结）不算。 */
+  /** 未终结态（可被兑现/abort/死亡/父亡继续处理的活跃态）。orphaned（吸收）/aborted（已终结）不算。 */
   const isLive = (r: ClaimRecord): boolean =>
     r.state === 'armed' || r.state === 'injected' || r.state === 'fulfilled'
 

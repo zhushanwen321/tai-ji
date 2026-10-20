@@ -46,7 +46,7 @@ function makeHarness(overrides: {
   createResult?: Partial<SessionSummary>
   ensureActiveError?: Error
   recordWorkspaceError?: Error
-  /** false = 不接受理回执（P9 否定用例：armed 悬挂交 TTL）；缺省 true（组合根同款接线） */
+  /** false = 不接受理回执（P9 否定用例：armed 悬挂滞留至 clearSession）；缺省 true（组合根同款接线） */
   wireReceipt?: boolean
 } = {}) {
   const calls: CallLog = []
@@ -157,7 +157,7 @@ beforeEach(() => {
 })
 
 afterEach(() => {
-  // ClaimLedger 内部清扫定时器收尾（每 harness 一个实例，登记制统一 dispose）
+  // ClaimLedger 统一收尾（每 harness 一个实例，登记制 dispose——ledger 无内部定时器，调用保持接口契约）
   while (spawnedLedgers.length > 0) spawnedLedgers.pop()!.dispose()
   vi.useRealTimers()
 })
@@ -423,7 +423,7 @@ describe('P9-accept-receipt-vitest: 受理回执（onSettled delivered → markI
     expect(batch.fulfilled[0].notifyId).toBe(NID)
   })
 
-  it('否定用例：回执缺位（registry 未接 onSettledMessage）→ settle 不兑现（armed 悬挂，交 TTL 清扫）', async () => {
+  it('否定用例：回执缺位（registry 未接 onSettledMessage）→ settle 不兑现（armed 悬挂滞留至 clearSession）', async () => {
     const h = makeHarness({ wireReceipt: false })
     await h.handler.handle('req-1', 'parent-1', 'send', {
       sessionId: 's1',
