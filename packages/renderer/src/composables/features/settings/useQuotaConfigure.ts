@@ -8,7 +8,8 @@
  * - 类型 / 凭证 / Workspace 进草稿，经 saveAndTest 一次点击提交（D2/D5）；开关只写配置位（D4）
  * - readiness 是「保存并测试」按钮禁用状态的唯一依据；密文字段取「草稿 ∨ 已保存」并集，
  *   明文的 Workspace 只看草稿（D13）
- * - cookie 输入去掩码（D7）：cookie 草稿永远只放用户真实输入，保存成功后清空
+ * - 密文输入掩码哨兵（D7）：已保存的 cookie / 专属 Key 在输入框显示 QUOTA_SECRET_MASK，
+ *   保存侧识别哨兵不发送（保留既存）；哨兵展示单源来自 syncFromProvider 的磁盘态重建
  */
 import { ref, computed, watch } from 'vue'
 import type {
@@ -34,7 +35,7 @@ import type {
   QuotaTestView,
   ReadinessMissing,
 } from '@taiji/core'
-import { API_KEY_CLEAR_SENTINEL, getSettingsTransport } from '@taiji/core'
+import { API_KEY_CLEAR_SENTINEL, QUOTA_SECRET_MASK, getSettingsTransport } from '@taiji/core'
 import { optimisticUpdate, refCell } from '@taiji/core/foundation/optimistic-update'
 import { useQuotaStore } from '@/stores/quota'
 
@@ -167,7 +168,7 @@ export function useQuotaConfigure(inputs: QuotaConfigureInputs): QuotaConfigureM
   /** 类型草稿底层态：外部经 selectType（同值短路 + 真变清凭证草稿）写入 */
   const fetcherIdDraft = ref<string | undefined>(undefined)
   /**
-   * 输入草稿（D7 去掩码：cookie / 专属 Key 只放用户真实输入，不回填掩码、不回填密文）。
+   * 输入草稿（D7 掩码哨兵：已保存的密文以 QUOTA_SECRET_MASK 展示；真实输入随时覆盖哨兵）。
    * D13 已知代价（设计 §6.14）：UI 不支持清除已保存 workspace（清空草稿 → readiness 置灰
    * 保存不出去）；换地址直接覆盖、停用关开关。显式清除按钮是登记的重审触发条件，勿在
    * readiness 里单独开「空串 = 清除」后门。
@@ -369,12 +370,12 @@ export function useQuotaConfigure(inputs: QuotaConfigureInputs): QuotaConfigureM
     enabled.value = p.quota.enabled
     // fetcherId 初始值：手动指定的 quota.fetcher 优先，未设置时 fallback 到自动匹配值
     applyFetcherId(p.quota.fetcher ?? preset.value?.fetcher)
-    // D7 去掩码：密文（cookie / 专属 Key）一律不回填，输入框只承载用户本次的真实输入；
-    // workspace 非凭证（用户浏览器地址栏可见的 URL），明文回显供编辑
+    // D7 掩码哨兵：runtime 不回传密文，已保存的 cookie / 专属 Key 以 QUOTA_SECRET_MASK 展示
+    // 「已保存密文在此」；workspace 非凭证（用户浏览器地址栏可见的 URL），明文回显供编辑
     // D3 读侧：未显式设置时按既存标记推断（历史数据兼容）；两端调用同一函数避免推断背离
     draft.value = {
-      cookie: '',
-      apiKey: '',
+      cookie: p.quota.cookieSet ? QUOTA_SECRET_MASK : '',
+      apiKey: p.quota.apiKeySet ? QUOTA_SECRET_MASK : '',
       credentialSource: resolveQuotaCredentialSource(p.quota),
       workspace: p.quota.workspace ?? '',
     }
@@ -477,6 +478,10 @@ export function useQuotaConfigure(inputs: QuotaConfigureInputs): QuotaConfigureM
     const source = draft.value.credentialSource
     const cookieDraft = draft.value.cookie.trim()
     const apiKeyDraft = draft.value.apiKey.trim()
+    // 掩码哨兵 = 「已保存密文」的展示态（D7），不是用户输入：照常发送会把圆点串写成真实凭证。
+    // 哨兵与空串同归「未填新值」；类型切换时哨兵已被 selectType 清空，不落入此分支
+    const cookieMasked = cookieDraft === QUOTA_SECRET_MASK
+    const apiKeyMasked = apiKeyDraft === QUOTA_SECRET_MASK
 
     configureError.value = ''
 
@@ -499,9 +504,10 @@ export function useQuotaConfigure(inputs: QuotaConfigureInputs): QuotaConfigureM
       // 恒传当前选择（幂等）：显式化磁盘字段，消除「未设置」这一中间态
       credentialSource: source,
       // 类型一变旧 Cookie 的归属就不成立 → 无条件清除（''）；类型没变则缺省 = 保留既存
-      cookie: cookieDraft || (typeChanged ? '' : undefined),
+      //（哨兵同归「未填新值」：undefined 保留既存）
+      cookie: cookieMasked ? undefined : (cookieDraft || (typeChanged ? '' : undefined)),
       // 专属 Key 永不传 ''：失效由 credentialSource 表达，删文件不可逆（D3）
-      apiKey: source === 'exclusive' && apiKeyDraft ? apiKeyDraft : undefined,
+      apiKey: source === 'exclusive' && apiKeyDraft && !apiKeyMasked ? apiKeyDraft : undefined,
       workspace: workspacePayload,
     }
 
@@ -517,9 +523,8 @@ export function useQuotaConfigure(inputs: QuotaConfigureInputs): QuotaConfigureM
         configureError.value = result.error || t('settings.providerEdit.quotaSaveAndTestFail')
         return
       }
-      // 保存成功：密文草稿清空（不回显）；已保存态由 provider 广播 → syncFromProvider 重建
-      draft.value.cookie = ''
-      draft.value.apiKey = ''
+      // 保存成功：密文草稿不动（用户输入保留在框内，不再「保存即消失」）；掩码哨兵展示态
+      // 由 provider 广播 → syncFromProvider 按磁盘态统一重建（展示态单源，见 syncFromProvider）
       await testQuery()
     } catch (e) {
       configureError.value = e instanceof Error ? e.message : t('settings.providerEdit.quotaSaveAndTestFail')

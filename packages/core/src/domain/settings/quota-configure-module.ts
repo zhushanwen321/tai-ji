@@ -18,7 +18,7 @@
  *   开关退化为纯配置位、即时落盘（D4）
  * - 密文字段（cookie / 专属 Key）取「草稿 ∨ 已保存」并集，明文 Workspace 只看草稿（D13）
  * - readiness 是「保存并测试」按钮禁用状态的唯一依据，也是字段徽标 / 提示的唯一真相源（D1）
- * - cookie 输入去掩码：草稿只放用户真实输入，保存成功后清空（D7）
+ * - 密文输入掩码哨兵：已保存的 cookie / 专属 Key 在输入框显示 QUOTA_SECRET_MASK（D7）
  * - 凭证来源显式化（D3）：UI 显示的选择与 runtime 使用的凭证由同一份持久化数据驱动
  */
 import type { Ref } from 'vue'
@@ -29,6 +29,14 @@ import type {
   QuotaPreset,
 } from '@taiji/shared'
 import type { Translate } from './provider-edit-types'
+
+/**
+ * 密文掩码哨兵（D7）：已保存的 cookie / 专属 Key 在输入框展示的脱敏符号。
+ * runtime 不回传密文，前端无法回显掩码摘要，故以固定圆点串表达「已保存密文在此」：
+ * 保存侧识别该值即不发送（undefined = 保留既存），聚焦时全选、粘贴即覆盖。
+ * 值取真实圆点字符（渲染即脱敏形态）；真实 cookie / API Key 不可能等于纯圆点串。
+ */
+export const QUOTA_SECRET_MASK = '••••••••'
 
 /** 测试查询状态 */
 export type QuotaTestStatus = 'idle' | 'loading' | 'success' | 'error'
@@ -101,11 +109,11 @@ export interface QuotaFailure {
  * 类型草稿不在其中 —— 它有写入规则（同值短路 / 真变清凭证草稿），写入必须经 selectType。
  */
 export interface QuotaDraftInput {
-  /** cookie 输入草稿（cookie 类 provider 专用）。D7 去掩码：永远只放用户真实输入，
-   *  保存成功后清空；「已配置」由 readiness 驱动独立标记 */
+  /** cookie 输入草稿（cookie 类 provider 专用）。掩码哨兵语义（D7）：值 = QUOTA_SECRET_MASK
+   *  表示「已保存密文的展示态」，保存时识别跳过；其余非空值为用户真实输入，照常落盘 */
   cookie: string
-  /** 专属 API Key 输入草稿（api-key 类）。密文不回显：保存时只在草稿非空才传，
-   *  空 = 未填新值（来源选择由 credentialSource 显式表达，D3） */
+  /** 专属 API Key 输入草稿（api-key 类）。掩码哨兵语义同 cookie；保存时只在非哨兵且非空才传
+   *  （空 = 未填新值，来源选择由 credentialSource 显式表达，D3） */
   apiKey: string
   /** 凭证来源选择（D3，api-key 类专用；cookie 类不适用）。切换只改这一个字段、
    *  不删专属 Key 文件（可逆） */

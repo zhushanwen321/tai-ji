@@ -13,10 +13,10 @@
  *    api-key 类按 credentialSource 分流（provider 看 providerAvailable，
  *    exclusive 看「草稿 ∨ (¬typeChanged ∧ apiKeySet)」）；workspace 只看草稿
  * ② 凭证归属（D5）：savedFetcher undefined 不算类型已变；类型切换后旧凭证不计入齐备
- * ③ saveAndTest 的 payload 逐键构造（§7.2 细节 4）：cookie 空草稿 → typeChanged ? '' : undefined；
- *    apiKey 仅 exclusive 且草稿非空才传且永不 ''；workspace 必填永不 ''；credentialSource / enabled 恒传
+ * ③ saveAndTest 的 payload 逐键构造（§7.2 细节 4）：cookie 空草稿 / 掩码哨兵 → typeChanged ? '' : undefined；
+ *    apiKey 仅 exclusive 且草稿非空且非哨兵才传且永不 ''；workspace 必填永不 ''；credentialSource / enabled 恒传
  * ④ setEnabled（D4）：只发 { providerId, enabled }，零查询调用
- * ⑤ 去掩码（D7）：syncFromProvider 后 cookie / apiKey 草稿为空
+ * ⑤ 掩码哨兵（D7）：syncFromProvider 后已保存密文显示 QUOTA_SECRET_MASK；保存不清空草稿
  * ⑥ 类型草稿写入（D5 细节 2）：同值短路 / 真变清凭证草稿 / 非字符串守卫
  * ⑦ loadCached：data=null + reason 时保留失败态（D6 影响面表修正）
  * ⑧ configureError 走 i18n（D9）：quotaConfigureFail / quotaSaveAndTestFail
@@ -36,7 +36,7 @@ import type { Ref } from 'vue'
 import type { NormalizedQuotaRow, ProviderId, ProviderInfo, QuotaConfigurePayload, QuotaFetchFailureReason, QuotaPreset } from '@taiji/shared'
 import { QUOTA_PRESETS } from '@taiji/shared'
 import type { QuotaConfigureModule, QuotaFailureKind, QuotaSnapshot, Translate } from '@taiji/core'
-import { provideSettingsTransport } from '@taiji/core'
+import { QUOTA_SECRET_MASK, getSettingsStore, provideSettingsTransport } from '@taiji/core'
 import { makeSettingsTransportStub } from '../helpers/settings-transport-stub'
 
 // [C3] quota RPC 经 SettingsTransport seam 桩注入（getCachedQuota/configureQuota/refreshQuota
@@ -142,6 +142,9 @@ const mockRow: NormalizedQuotaRow = {
 
 beforeEach(() => {
   setActivePinia(createPinia())
+  // W3c 后 presets 数据源 = runtime 下发的合并视图（store 默认空数组）；测试无 runtime，
+  // 灌编译期基线等价（基线正是无远程覆盖时的合并视图原样）
+  getSettingsStore().setQuotaPresets([...QUOTA_PRESETS])
   vi.clearAllMocks()
   vi.mocked(quotaApi.getCached).mockResolvedValue({ data: null, lastFetchAt: null })
   vi.mocked(quotaApi.fetchQuota).mockResolvedValue({ data: null, lastFetchAt: null })
@@ -181,7 +184,8 @@ describe('readiness 齐备性矩阵（D1 / D13）', () => {
   it('cookie 类：已保存 cookie 且类型未变 → 齐备（密文取「草稿 ∨ 已保存」并集）', async () => {
     const { module } = await mountBaseline('mimo')
 
-    expect(module.draft.value.cookie).toBe('')
+    // 已保存密文以掩码哨兵展示（D7），非空草稿本身就满足齐备
+    expect(module.draft.value.cookie).toBe(QUOTA_SECRET_MASK)
     expect(module.view.value.readiness).toEqual({ ready: true, missing: [] })
   })
 
@@ -432,6 +436,8 @@ describe('saveAndTest payload 构造（§7.2 细节 4）', () => {
     )
     await Promise.resolve()
 
+    // 初始态是掩码哨兵（apiKeySet: true），显式清空以覆盖「空草稿」分支
+    module.draft.value.apiKey = ''
     await module.saveAndTest()
     expect(lastConfigurePayload()?.apiKey).toBeUndefined()
 
@@ -439,6 +445,34 @@ describe('saveAndTest payload 构造（§7.2 细节 4）', () => {
     module.draft.value.apiKey = '   '
     await module.saveAndTest()
     expect(lastConfigurePayload()?.apiKey).toBeUndefined()
+  })
+
+  it('exclusive 来源：掩码哨兵草稿 → 不发送哨兵（undefined 保留既存，D7）', async () => {
+    const { module } = mountModule(
+      provider({
+        id: 'zhipu-p',
+        quota: { enabled: false, fetcher: 'zhipu', apiKeySet: true, credentialSource: 'exclusive' },
+      }),
+      { preset: ZHIPU_PRESET },
+    )
+    await Promise.resolve()
+
+    expect(module.draft.value.apiKey).toBe(QUOTA_SECRET_MASK)
+    await module.saveAndTest()
+    expect(lastConfigurePayload()?.apiKey).toBeUndefined()
+  })
+
+  it('cookie 类：掩码哨兵草稿 → 不发送哨兵；输入新值照常落盘（D7）', async () => {
+    const { module } = await mountBaseline('mimo')
+
+    expect(module.draft.value.cookie).toBe(QUOTA_SECRET_MASK)
+    await module.saveAndTest()
+    expect(lastConfigurePayload()?.cookie).toBeUndefined()
+
+    vi.mocked(quotaApi.configure).mockClear()
+    module.draft.value.cookie = ' session=new '
+    await module.saveAndTest()
+    expect(lastConfigurePayload()?.cookie).toBe('session=new')
   })
 
   it('source=provider 时即使草稿填了 apiKey 也不传（专属 Key 失效由来源表达，D3）', async () => {
@@ -499,8 +533,8 @@ describe('saveAndTest payload 构造（§7.2 细节 4）', () => {
     expect(lastConfigurePayload()?.workspace).toBeUndefined()
   })
 
-  it('保存成功后清空密文草稿（不回显，D7）', async () => {
-    const { module } = mountModule(
+  it('保存成功不清空密文草稿；provider 广播重建后转掩码哨兵（D7）', async () => {
+    const { module, provider: providerRef } = mountModule(
       provider({
         id: 'zhipu-p',
         quota: { enabled: false, fetcher: 'zhipu', apiKeySet: true, credentialSource: 'exclusive' },
@@ -509,10 +543,19 @@ describe('saveAndTest payload 构造（§7.2 细节 4）', () => {
     )
     await Promise.resolve()
 
+    expect(module.draft.value.apiKey).toBe(QUOTA_SECRET_MASK)
     module.draft.value.apiKey = 'sk-own'
     await module.saveAndTest()
 
-    expect(module.draft.value.apiKey).toBe('')
+    // 用户输入保留在框内（不再「保存即消失」）
+    expect(module.draft.value.apiKey).toBe('sk-own')
+
+    // 掩码哨兵展示态单源来自磁盘态重建（真实链路 = configure 成功后 runtime 广播 provider 列表）
+    providerRef.value = provider({
+      id: 'zhipu-p',
+      quota: { enabled: false, fetcher: 'zhipu', apiKeySet: true, credentialSource: 'exclusive' },
+    })
+    await vi.waitFor(() => { expect(module.draft.value.apiKey).toBe(QUOTA_SECRET_MASK) })
   })
 
   it('落盘成功后触发一次查询（D2：保存并测试合一）', async () => {
@@ -606,9 +649,9 @@ describe('setEnabled 纯配置位（D4）', () => {
   })
 })
 
-// ── ⑤ 去掩码（D7） ──────────────────────────────────────────────────────────
-describe('去掩码（D7）', () => {
-  it('syncFromProvider 后 cookie / 专属 Key 输入框为空（不回填掩码或密文）', async () => {
+// ── ⑤ 掩码哨兵（D7） ────────────────────────────────────────────────────────
+describe('掩码哨兵（D7）：已保存密文显示 QUOTA_SECRET_MASK', () => {
+  it('syncFromProvider 后已保存的 cookie / 专属 Key 显示掩码哨兵（密文本身不回传）', async () => {
     const { module } = mountModule(
       provider({
         id: 'oc-p',
@@ -619,11 +662,21 @@ describe('去掩码（D7）', () => {
     )
     await Promise.resolve()
 
-    expect(module.draft.value.cookie).toBe('')
-    expect(module.draft.value.apiKey).toBe('')
+    expect(module.draft.value.cookie).toBe(QUOTA_SECRET_MASK)
+    expect(module.draft.value.apiKey).toBe(QUOTA_SECRET_MASK)
   })
 
-  it('provider 快照更新（广播）重跑 syncFromProvider → 草稿被重置为磁盘态（已保存标记独立可见）', async () => {
+  it('未保存的密文草稿保持空（不预填哨兵）', async () => {
+    const { module } = mountModule(
+      provider({ id: 'mimo-p', quota: { enabled: false, fetcher: 'mimo' } }),
+      { preset: MIMO_PRESET },
+    )
+    await Promise.resolve()
+
+    expect(module.draft.value.cookie).toBe('')
+  })
+
+  it('provider 快照更新（广播）重跑 syncFromProvider → 已保存密文显示为掩码哨兵（磁盘态单源）', async () => {
     const { module, provider: providerRef } = mountModule(
       provider({ id: 'oc-p', quota: { enabled: false, fetcher: 'opencode-go' } }),
       { preset: OPENCODE_PRESET },
@@ -642,7 +695,7 @@ describe('去掩码（D7）', () => {
     })
 
     await vi.waitFor(() => { expect(module.draft.value.workspace).toBe('https://opencode.ai/workspace/wrk_saved/go') })
-    expect(module.draft.value.cookie).toBe('')
+    expect(module.draft.value.cookie).toBe(QUOTA_SECRET_MASK)
   })
 })
 
