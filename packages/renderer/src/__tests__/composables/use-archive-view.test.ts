@@ -9,7 +9,9 @@
  * - openSummary：登记 selected + navigation.push({view:'archive'})
  * - refreshArchives：拉取产物落地 + archiveCount 对账；失败置 listError
  * - handleConfigSessionsFrame（压缩完成帧的 renderer 消费点，D11）：视图关闭仅更新
- *   角标；归档视图/摘要视图打开时顺带刷新归档列表
+ *   角标；归档视图/摘要视图打开时顺带刷新归档列表——selected 持 staging 对象时
+ *   重拉后按 sessionId 重锚为 archived 态新对象（「摘要生成中」占位清除的判据），
+ *   条目消失置 null（主区空态占位）
  * - purgeArchiveEntry keep-all 分支：keptSubagentsDir 携带 → warning toast（D5 步骤 7
  *   失败显式上报）；主区呈现该条目时同步离开
  *
@@ -66,6 +68,20 @@ function makeArchive(sessionId = 'arc-1'): ArchiveSummary {
     compressedBytes: 2.5 * MB,
     sha256: 'a'.repeat(64),
     summary: { turns: [] },
+  }
+}
+
+/** staging 态条目（D5 同步段骨架：搬移完成、压缩/摘要未完成——summary 显式 null、无压缩产物字段）。 */
+function makeStagingArchive(sessionId = 'arc-1'): ArchiveSummary {
+  return {
+    sessionId,
+    name: 'v0.10 renderer 重构',
+    originalFile: '2026-10-20T10-00-00_a1b2c3d4.jsonl',
+    cwd: '/Users/demo/proj',
+    archivedAt: '2026-10-20T12:34:56.789Z',
+    rawBytes: 12.4 * MB,
+    status: 'staging',
+    summary: null,
   }
 }
 
@@ -145,6 +161,8 @@ describe('restoreArchive（验收条款：恢复成功切回会话列表）', ()
   it('失败（RPC reject）：视图保持 + 错误 toast + 无恢复高亮', async () => {
     const { restoreArchive, openArchiveView, openSummary } = useArchiveView()
     const archive = makeArchive()
+    // 首拉列表含该条目（真实时序：行可点 = 列表已含该条目；空列表会使重锚清空 selected）
+    apiMocks.listArchives.mockResolvedValue([archive])
     openArchiveView()
     openSummary(archive)
     apiMocks.unarchive.mockRejectedValue(new Error('恢复失败：原路径已存在同名会话文件 (archive_restore_conflict)'))
@@ -215,15 +233,33 @@ describe('config.sessions 帧消费（D11 压缩完成刷新 + 角标更新）',
     wrapper.unmount()
   })
 
-  it('摘要视图打开（selected 非空）而侧栏已返回：收帧同样刷新——「摘要生成中」占位随完成帧刷新', async () => {
+  it('摘要视图打开（selected 持 staging 对象）而侧栏已返回：完成帧重拉后 selected 换为 archived 态新对象——「摘要生成中」占位清除（D11）', async () => {
     const store = useArchiveStore()
-    store.selectArchive(makeArchive()) // 主区摘要视图仍呈现该条目（viewOpen=false）
+    store.selectArchive(makeStagingArchive()) // 主区摘要视图呈现 staging 态（viewOpen=false），「摘要生成中」全区占位
+    const archived = makeArchive() // 压缩完成后 config.archives 返回的 archived 态新对象（后台任务簿记重写）
+    apiMocks.listArchives.mockClear()
+    apiMocks.listArchives.mockResolvedValue([archived])
+    const wrapper = mountSubscriber()
+
+    dispatchGlobal({ id: 'push_broadcast_3', type: 'config.sessions', payload: { groups: [], archiveCount: 1 } })
+    // 占位清除判据（D11）：ArchiveMainView 以 selected 驱动 ArchiveSummaryView，selected
+    // 持旧 staging 引用则 isArchived 恒 false、「摘要生成中」占位永不消失——重锚后
+    // status 须为 archived（pinia store 读出对象为 reactive proxy，引用断言不可靠，
+    // 以判别字段 status 为准；无重锚逻辑时此处恒 'staging' 必红）
+    await vi.waitFor(() => expect(store.selected?.status).toBe('archived'))
+
+    wrapper.unmount()
+  })
+
+  it('摘要视图打开但条目已在新快照消失（远端窗口恢复/删除）：selected 置 null——主区空态占位', async () => {
+    const store = useArchiveStore()
+    store.selectArchive(makeStagingArchive('arc-gone'))
     apiMocks.listArchives.mockClear()
     apiMocks.listArchives.mockResolvedValue([])
     const wrapper = mountSubscriber()
 
-    dispatchGlobal({ id: 'push_broadcast_3', type: 'config.sessions', payload: { groups: [], archiveCount: 1 } })
-    await vi.waitFor(() => expect(apiMocks.listArchives).toHaveBeenCalledTimes(1))
+    dispatchGlobal({ id: 'push_broadcast_5', type: 'config.sessions', payload: { groups: [], archiveCount: 0 } })
+    await vi.waitFor(() => expect(store.selected).toBeNull())
 
     wrapper.unmount()
   })

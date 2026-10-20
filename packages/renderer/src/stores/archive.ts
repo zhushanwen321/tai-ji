@@ -44,10 +44,23 @@ export const useArchiveStore = defineStore('archive', () => {
   /** 恢复高亮自动清除定时器（重复恢复时重置；store 为 pinia 单例无泄漏窗口） */
   let restoredClearTimer: ReturnType<typeof setTimeout> | null = null
 
-  /** 拉取产物落地（count 同步对账——列表即事实源，D9 不变量 3） */
+  /**
+   * 拉取产物落地（count 同步对账——列表即事实源，D9 不变量 3）。
+   *
+   * selected 重锚（D11「后台任务完成事件刷新」的摘要视图半边）：selected 持的是点击
+   * 行时捕获的对象引用，压缩完成帧触发的重拉产出了新对象（staging→archived 簿记重写）
+   * ——不重锚则摘要视图继续渲染旧 staging 对象，「摘要生成中」占位永不清除。按
+   * sessionId 从新列表定位换代（与 restoredSessionId 的 id 匹配同族——引用脱锚的
+   * 唯一防线）；条目已消失（恢复/彻底删除在远端窗口完成）置 null——主区空态占位，
+   * 用户可经侧栏重新选择。
+   */
   function setArchives(list: ArchiveSummary[]): void {
     archives.value = list
     archiveCount.value = list.length
+    const current = selected.value
+    if (current !== null) {
+      selected.value = list.find((a) => a.sessionId === current.sessionId) ?? null
+    }
   }
 
   /** 广播帧携带的 archiveCount 更新（字段缺省不覆盖现值——旧 runtime 无归档数据语义） */
