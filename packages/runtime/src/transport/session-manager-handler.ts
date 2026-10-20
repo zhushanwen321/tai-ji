@@ -259,7 +259,7 @@ export interface SessionManagerHandlerOptions {
 }
 
 /**
- * SessionManagerHandler — 处理 agent-managed session 的 7 个 action（含 notify-once watch 纯应答通道）。
+ * SessionManagerHandler — 处理 agent-managed session 的 9 个 action（含 notify-once watch 纯应答通道）。
  *
  * handle() 是唯一入口，由 EventInterpreter.onSessionManagerRequest 调用。
  * dispatch() 纯分发（各分支只 return 结果），回写统一由 respond() 收尾；
