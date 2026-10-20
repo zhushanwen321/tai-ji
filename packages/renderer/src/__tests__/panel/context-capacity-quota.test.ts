@@ -371,6 +371,20 @@ describe('ComposerMetricsAggregate coding-plan 区', () => {
       return { wrapper, entry: entry! }
     }
 
+    /**
+     * 失败态 popover 用例共同开场：seed 旧数据 + 置 network error（store 失败态 =
+     * 旧 data + error）→ 开 popover → flush。D11 凭证缺失形态不走此助手（error 文案不同）。
+     */
+    async function openFailedPopover(): Promise<ReturnType<typeof mount>> {
+      setupProviders([zhipuProvider])
+      const quotaStore = useQuotaStore()
+      quotaStore.setCache('zhipu', mockQuotaRow, 500)
+      quotaStore.setError('zhipu', 'panel.context.quotaFailNetwork')
+      const wrapper = await openPopover()
+      await flushPromises()
+      return wrapper
+    }
+
     beforeEach(() => {
       vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] })
     })
@@ -441,14 +455,7 @@ describe('ComposerMetricsAggregate coding-plan 区', () => {
     })
 
     it('失败态 popover 渲染「查询失败：{error}」（queryFailed DOM 断言，全库首例）', async () => {
-      setupProviders([zhipuProvider])
-      const quotaStore = useQuotaStore()
-      quotaStore.setCache('zhipu', mockQuotaRow, 500)
-      // 模拟上一次查询失败（store 失败态：旧 data + error）
-      quotaStore.setError('zhipu', 'panel.context.quotaFailNetwork')
-
-      const wrapper = await openPopover()
-      await flushPromises()
+      const wrapper = await openFailedPopover()
 
       // coding-plan 区失败提示渲染（v-if="error" 分支）：「查询失败：{error}」，
       // error 经 '@/i18n' mock 返回 key 本身（vitest-i18n-setup 插值 {error}）
@@ -460,13 +467,7 @@ describe('ComposerMetricsAggregate coding-plan 区', () => {
     it('失败态兜底：有旧数据时余量三窗口行与失败提示并存（不再整体替换为失败文案）', async () => {
       // 兜底语义：查询失败时最后成功余量（store 的 setError 恒保留旧 data）继续展示，
       // 失败原因降级为一行提示——旧实现 v-if="error" 独占，一次失败即把余量行整个换掉
-      setupProviders([zhipuProvider])
-      const quotaStore = useQuotaStore()
-      quotaStore.setCache('zhipu', mockQuotaRow, 500)
-      quotaStore.setError('zhipu', 'panel.context.quotaFailNetwork')
-
-      const wrapper = await openPopover()
-      await flushPromises()
+      const wrapper = await openFailedPopover()
 
       const bodyText = document.body.textContent ?? ''
       // 余量行仍在：68% 来自 mockQuotaRow.wins[0].pct

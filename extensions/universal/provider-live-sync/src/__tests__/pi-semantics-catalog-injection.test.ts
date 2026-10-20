@@ -29,6 +29,8 @@ import {
   getBuiltinModelDataGeneratedAt,
 } from '@earendil-works/pi-ai/providers/all'
 
+import { expectVisibleIds, fullBaselineConfig, runtimeWithFullBaseline, swapToSingleExpectShrink } from './pi-runtime-testkit.ts'
+
 // ── pi 实装 dist 源码读取（源码层断言的输入）────────────────────────────
 // 两包的 exports map 都不暴露 ./package.json，改经主入口解析（`.` → dist/index.js），
 // 取 dirname 即包内 dist 根——与硬编码 node_modules 路径等价但不依赖仓库布局假设。
@@ -159,36 +161,27 @@ describe('PS-81 —— 装配顺序：工厂期注册先于 --model 解析与 se
 // ─────────────────────────────────────────────────────────────────────
 describe('PS-82 —— registerProvider 重复注册幂等 + 尾随零网络本地 refresh', () => {
   it('运行时层：有值字段合并（models 在只注册 refreshModels 时保留）', async () => {
-    const baseline = getBuiltinModels(PROVIDER)
-    const rt = await newRuntime()
-
-    rt.registerProvider(PROVIDER, { models: baseline.map((m) => ({ ...m })) })
-    expect(rt.getModels(PROVIDER).map((m) => m.id)).toEqual(baseline.map((m) => m.id))
+    const { rt, baseline } = await runtimeWithFullBaseline(PROVIDER, tmpDir)
 
     // 第二次只注册 refreshModels → models 不得被清空（字段级合并，非整体替换 config）
     rt.registerProvider(PROVIDER, { refreshModels: async () => undefined })
     const cfg = rt.getRegisteredProviderConfig(PROVIDER)
     expect(cfg?.models).toHaveLength(baseline.length)
     expect(typeof cfg?.refreshModels).toBe('function')
-    expect(rt.getModels(PROVIDER).map((m) => m.id)).toEqual(baseline.map((m) => m.id))
+    expectVisibleIds(rt, PROVIDER, baseline.map((m) => m.id))
   })
 
   it('运行时层：models 数组整体替换（不是与上一次注册的 models 数组合并）', async () => {
-    const baseline = getBuiltinModels(PROVIDER)
-    const rt = await newRuntime()
-    rt.registerProvider(PROVIDER, { models: baseline.map((m) => ({ ...m })) })
+    const { rt, baseline } = await runtimeWithFullBaseline(PROVIDER, tmpDir)
 
-    rt.registerProvider(PROVIDER, {
-      models: [{ ...baseline[0] }],
-    })
     // 只留一个 = 整体替换；若为合并则仍是 3 个
-    expect(rt.getModels(PROVIDER).map((m) => m.id)).toEqual([baseline[0].id])
+    swapToSingleExpectShrink(rt, PROVIDER, baseline[0])
   })
 
   it('运行时层：undefined 值不覆盖已有注册（合并只取有值字段）', async () => {
     const baseline = getBuiltinModels(PROVIDER)
     const rt = await newRuntime()
-    rt.registerProvider(PROVIDER, { name: 'Kept Name', models: baseline.map((m) => ({ ...m })) })
+    rt.registerProvider(PROVIDER, { name: 'Kept Name', ...fullBaselineConfig(PROVIDER) })
 
     rt.registerProvider(PROVIDER, { name: undefined, models: undefined })
     const cfg = rt.getRegisteredProviderConfig(PROVIDER)
@@ -222,12 +215,11 @@ describe('PS-83 —— extension 层 models 即最终可见集合 + 注册时逐
   it('运行时层：models 数组是该 provider 的最终可见集合（映射替换，非与内置层合并）', async () => {
     const baseline = getBuiltinModels(PROVIDER)
     const rt = await newRuntime()
-    // 注入集只含 1 个模型 → 可见集合收缩为 1 个（内置层 3 个未被保留）
-    rt.registerProvider(PROVIDER, { models: [{ ...baseline[0] }] })
-    expect(rt.getModels(PROVIDER).map((m) => m.id)).toEqual([baseline[0].id])
+    // 注入集只含 1 个模型 → 可见集合收缩为 1（内置层 3 个未被保留）
+    swapToSingleExpectShrink(rt, PROVIDER, baseline[0])
     // 反向：注入全集 → 可见集合 = 全集
-    rt.registerProvider(PROVIDER, { models: baseline.map((m) => ({ ...m })) })
-    expect(rt.getModels(PROVIDER).map((m) => m.id)).toEqual(baseline.map((m) => m.id))
+    rt.registerProvider(PROVIDER, fullBaselineConfig(PROVIDER))
+    expectVisibleIds(rt, PROVIDER, baseline.map((m) => m.id))
   })
 
   it('运行时层：缺 api/baseUrl 且无同类型基线可继承 → 注册抛错（结构校验生效）', async () => {
@@ -277,7 +269,7 @@ describe('PS-83 —— extension 层 models 即最终可见集合 + 注册时逐
       refreshOnCreate: false,
       authPath: join(tmpDir, 'auth.json'),
     })
-    rt.registerProvider(PROVIDER, { models: getBuiltinModels(PROVIDER).map((m) => ({ ...m })) })
+    rt.registerProvider(PROVIDER, fullBaselineConfig(PROVIDER))
     await rt.refresh({ allowNetwork: false })
     // 前置：初始态无组合错误（自证后置断言非恒真）
     expect(rt.getError()).toBeUndefined()

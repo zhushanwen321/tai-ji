@@ -238,6 +238,47 @@ function comparableCount(observations: Map<WatchedFile, FileObservation>): numbe
  */
 const logger = getLogger("provider-live-sync");
 
+/** skip-missing 拍的跃迁去重日志：只在「曾存在 → 缺失」那一拍记，持续缺失零输出。 */
+function logMissingTransitions(missingLogged: Set<WatchedFile>, missingFiles: WatchedFile[]): void {
+  for (const file of missingFiles) {
+    if (missingLogged.has(file)) continue;
+    missingLogged.add(file);
+    logger.error(
+      `config file disappeared: ${file} — refresh suppressed until it is written again `
+      + "(rebuilding from an empty config would drop the user's custom providers from the running "
+      + "engine; it keeps its last good snapshot meanwhile; restarting the session also recovers).",
+    );
+  }
+}
+
+/**
+ * 第三个监视条目（taiji 目录缓存）的观测并进本拍变更集：mtime 变化 → 其标签进 changed。
+ * 必须在 skip-missing 的 early return **之后**调用：配置源缺失窗口内一律不刷新，目录缓存
+ * 的变化不得穿透该抑制；代价是抑制期内该条目的基线不推进，抑制解除后补一次刷新
+ * （保守方向，不会漏）。
+ */
+function mergeOverlayChange(
+  decision: SyncDecision,
+  overlayWatcher: OverlayCacheWatcher | null,
+): { changed: string[]; overlayChanged: string | null } {
+  const overlayChanged = overlayWatcher !== null && overlayWatcher.observe() ? overlayWatcher.label : null;
+  const changed: string[] = decision.action === "refresh" ? [...decision.changedFiles] : [];
+  if (overlayChanged !== null) changed.push(overlayChanged);
+  return { changed, overlayChanged };
+}
+
+/** 拍内零网络本地刷新 + 结果报告（`getError()` 全文是唯一有效判据，见模块头注释）。 */
+async function refreshAndReport(modelRegistry: ExtensionContext["modelRegistry"]): Promise<void> {
+  const result = await modelRegistry.refresh({ allowNetwork: false });
+  // 有效判据 = getError() 全文（本退化类 errors.size/aborted 恒为空/假，见模块头注释）。
+  const error = modelRegistry.getError();
+  if (error) {
+    logger.error(`model config rejected by the engine (models.json / auth.json): ${error}`);
+  } else if (result.errors.size > 0 || result.aborted) {
+    logger.error(`refresh finished with errors (aborted=${String(result.aborted)}, providers=${result.errors.size})`);
+  }
+}
+
 export default function providerLiveSync(pi: ExtensionAPI): void {
   // 最早期注入 pi handle——上方 logger 的 error 通道（appendEntry）由此生效（session-reader 同款）。
   setPiHandle(pi);
@@ -273,29 +314,12 @@ export default function providerLiveSync(pi: ExtensionAPI): void {
       const firstBaseline = !snapshot.initialized;
       if (comparableCount(observations) === WATCHED_FILES.length) snapshot.initialized = true;
       if (decision.action === "skip-missing") {
-        for (const file of decision.missingFiles) {
-          if (!missingLogged.has(file)) {
-            missingLogged.add(file);
-            logger.error(
-              `config file disappeared: ${file} — refresh suppressed until it is written again `
-              + "(rebuilding from an empty config would drop the user's custom providers from the running "
-              + "engine; it keeps its last good snapshot meanwhile; restarting the session also recovers).",
-            );
-          }
-        }
+        logMissingTransitions(missingLogged, decision.missingFiles);
         return;
       }
       for (const file of WATCHED_FILES) missingLogged.delete(file);
 
-      // 第三个监视条目：taiji 目录缓存（绝对路径 + mtime 比较，状态由 catalog-bridge 持有）。
-      // 检出变化 → 同一次零网络本地刷新，由注册时携带的 refreshModels 钩子重读缓存返回
-      // 新并集（设计 D5 运行中窗口）。放在 skip-missing 的 early return **之后**：配置源
-      // 缺失窗口内一律不刷新，目录缓存的变化不得穿透该抑制；代价是抑制期内该条目的基线
-      // 不推进，抑制解除后补一次刷新（保守方向，不会漏）。
-      const overlayChanged = overlayWatcher !== null && overlayWatcher.observe() ? overlayWatcher.label : null;
-
-      const changed: string[] = decision.action === "refresh" ? [...decision.changedFiles] : [];
-      if (overlayChanged !== null) changed.push(overlayChanged);
+      const { changed, overlayChanged } = mergeOverlayChange(decision, overlayWatcher);
       if (changed.length === 0) return;
       // 首个基线拍不刷新（进程启动时 pi 已按磁盘配置建过快照，重复刷新纯浪费）——该前提
       // 只对既有 models.json/auth.json 两条目成立：pi spawn 时按磁盘建快照读的是它们。
@@ -305,14 +329,7 @@ export default function providerLiveSync(pi: ExtensionAPI): void {
       if (firstBaseline && overlayChanged === null) return;
 
       logger.debug(`config change detected (${changed.join(", ")}) → refreshing model snapshot`);
-      const result = await currentCtx.modelRegistry.refresh({ allowNetwork: false });
-      // 有效判据 = getError() 全文（本退化类 errors.size/aborted 恒为空/假，见模块头注释）。
-      const error = currentCtx.modelRegistry.getError();
-      if (error) {
-        logger.error(`model config rejected by the engine (models.json / auth.json): ${error}`);
-      } else if (result.errors.size > 0 || result.aborted) {
-        logger.error(`refresh finished with errors (aborted=${String(result.aborted)}, providers=${result.errors.size})`);
-      }
+      await refreshAndReport(currentCtx.modelRegistry);
     } catch (err) {
       // 轮询绝不自杀：本拍失败下一拍继续（内容未变则基线已推进 → 不会重复刷新同一内容）。
       const message = err instanceof Error ? err.message : String(err);

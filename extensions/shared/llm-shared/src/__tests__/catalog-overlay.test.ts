@@ -108,6 +108,24 @@ function piStore(entries: Record<string, OverlayEntry>): string {
 	return JSON.stringify(entries);
 }
 
+/** computeInjectionSet 的标准驱动（PROVIDER + 基线夹具 + fresh 条目时刻）——并集用例共用。 */
+function computeWithBaseline(models: OverlayModel[]): ReturnType<typeof computeInjectionSet> {
+	return computeInjectionSet({
+		providerId: PROVIDER,
+		entry: entry(models, FRESH_AT),
+		generatedAt: GENERATED_AT,
+		baseline: BASELINE,
+	});
+}
+
+/** 标准驱动并断言 fresh 且零跳过（并集用例的共同前置）；返回结果供各用例特化断言。 */
+function computeFresh(models: OverlayModel[]): ReturnType<typeof computeInjectionSet> {
+	const result = computeWithBaseline(models);
+	expect(result.state).toBe("fresh");
+	expect(result.skipped).toEqual([]);
+	return result;
+}
+
 /**
  * 复刻 bridge 的判据组合（两份都读 → 新者胜 → 并集），供 D2 反向断裂防线用例驱动。
  * 这是「taiji 侧数据 → pi 注册表」判据链的完整形态，单测锁的是链本身而非单个函数。
@@ -125,6 +143,16 @@ function injectAcrossBothCaches(
 		pi?.status === "ok" ? pi.entries[providerId] : undefined,
 	);
 	return computeInjectionSet({ providerId, entry: merged, generatedAt: GENERATED_AT, baseline });
+}
+
+/** 单侧缓存驱动并集并断言 overlay-only 进入并集（D2 反向防线：taiji-only / store-only 用例共用）。 */
+function expectSingleSideUnion(side: "taiji" | "store"): void {
+	const entries: Record<string, OverlayEntry> = { [PROVIDER]: entry([OVERLAY_ONLY], FRESH_AT) };
+	const result = side === "taiji"
+		? injectAcrossBothCaches(PROVIDER, taijiCache(entries), undefined)
+		: injectAcrossBothCaches(PROVIDER, undefined, piStore(entries));
+	expect(result.state).toBe("fresh");
+	expect(result.models.map(m => m.id)).toContain(OVERLAY_ONLY.id);
 }
 
 // ══════════════════════════════════════════════════════════
@@ -293,14 +321,7 @@ describe("parseOverlayCache（version 包装 / 顶层分桶双形态）", () => 
 describe("computeInjectionSet（内置基线 ⊕ 有效条目）", () => {
 	it("基线保全 + 同 id 缓存版本整对象覆盖 + 新 id 追加", () => {
 		const overridden: OverlayModel = { ...BASELINE[0]!, name: "GLM Baseline A (remote)", contextWindow: 999999 };
-		const result = computeInjectionSet({
-			providerId: PROVIDER,
-			entry: entry([overridden, OVERLAY_ONLY], FRESH_AT),
-			generatedAt: GENERATED_AT,
-			baseline: BASELINE,
-		});
-		expect(result.state).toBe("fresh");
-		expect(result.skipped).toEqual([]);
+		const result = computeFresh([overridden, OVERLAY_ONLY]);
 		// 基线两个模型都在（只注 diff 会把它们挤出视图——D2 明确不采用）
 		expect(result.models.map(m => m.id)).toEqual([overridden.id, BASELINE[1]!.id, OVERLAY_ONLY.id]);
 		// 同 id 取缓存版本整对象（不是字段级合并）
@@ -311,25 +332,13 @@ describe("computeInjectionSet（内置基线 ⊕ 有效条目）", () => {
 
 	it("R3 有内置继承：缺 api/baseUrl 但同 id 有内置定义 → 照常注入，不进 skipped", () => {
 		const inheritable: OverlayModel = { id: BASELINE[0]!.id, name: "GLM Baseline A (endpoint-less)" };
-		const result = computeInjectionSet({
-			providerId: PROVIDER,
-			entry: entry([inheritable], FRESH_AT),
-			generatedAt: GENERATED_AT,
-			baseline: BASELINE,
-		});
-		expect(result.state).toBe("fresh");
-		expect(result.skipped).toEqual([]);
+		const result = computeFresh([inheritable]);
 		expect(result.models.map(m => m.id)).toEqual([inheritable.id, BASELINE[1]!.id]);
 		expect(result.models[0]).toBe(inheritable);
 	});
 
 	it("R3 无内置继承：缺 api/baseUrl 且同 id 无内置定义 → 跳过进 skipped，其余照常", () => {
-		const result = computeInjectionSet({
-			providerId: PROVIDER,
-			entry: entry([ENDPOINT_LESS, OVERLAY_ONLY], FRESH_AT),
-			generatedAt: GENERATED_AT,
-			baseline: BASELINE,
-		});
+		const result = computeWithBaseline([ENDPOINT_LESS, OVERLAY_ONLY]);
 		expect(result.state).toBe("fresh");
 		expect(result.skipped).toEqual([{ modelId: ENDPOINT_LESS.id, reason: "missing-api-or-baseUrl" }]);
 		expect(result.models.map(m => m.id)).toEqual([BASELINE[0]!.id, BASELINE[1]!.id, OVERLAY_ONLY.id]);
@@ -341,12 +350,7 @@ describe("computeInjectionSet（内置基线 ⊕ 有效条目）", () => {
 		// 模型静默继承缺失字段——正是 R3 明文禁止的行为，故判据层提前跳闸。
 		const apiOnly: OverlayModel = { id: "glm-api-only", name: "GLM Api Only", api: "openai-completions" };
 		const baseUrlOnly: OverlayModel = { id: "glm-baseurl-only", name: "GLM BaseUrl Only", baseUrl: "https://x.dev/v1" };
-		const result = computeInjectionSet({
-			providerId: PROVIDER,
-			entry: entry([apiOnly, baseUrlOnly], FRESH_AT),
-			generatedAt: GENERATED_AT,
-			baseline: BASELINE,
-		});
+		const result = computeWithBaseline([apiOnly, baseUrlOnly]);
 		expect(result.skipped).toEqual([
 			{ modelId: apiOnly.id, reason: "missing-api-or-baseUrl" },
 			{ modelId: baseUrlOnly.id, reason: "missing-api-or-baseUrl" },
@@ -412,23 +416,11 @@ describe("computeInjectionSet（内置基线 ⊕ 有效条目）", () => {
 
 describe("D2 两份缓存都读（反向断裂防线）", () => {
 	it("只在 taiji 缓存出现的 provider → 进并集", () => {
-		const result = injectAcrossBothCaches(
-			PROVIDER,
-			taijiCache({ [PROVIDER]: entry([OVERLAY_ONLY], FRESH_AT) }),
-			undefined,
-		);
-		expect(result.state).toBe("fresh");
-		expect(result.models.map(m => m.id)).toContain(OVERLAY_ONLY.id);
+		expectSingleSideUnion("taiji");
 	});
 
 	it("只在 pi store 出现的 provider → 进并集（链 B 领先时不得被挤出视图）", () => {
-		const result = injectAcrossBothCaches(
-			PROVIDER,
-			undefined,
-			piStore({ [PROVIDER]: entry([OVERLAY_ONLY], FRESH_AT) }),
-		);
-		expect(result.state).toBe("fresh");
-		expect(result.models.map(m => m.id)).toContain(OVERLAY_ONLY.id);
+		expectSingleSideUnion("store");
 	});
 
 	it("两份都有 → 新者胜（pi store 更新时取 pi store 的模型集）", () => {

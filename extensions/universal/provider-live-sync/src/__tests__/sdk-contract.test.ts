@@ -39,6 +39,8 @@ import { ModelRuntime } from '@earendil-works/pi-coding-agent'
 import { getBuiltinModels, getBuiltinProviders } from '@earendil-works/pi-ai/providers/all'
 import type { ProviderConfigInput } from '@earendil-works/pi-coding-agent'
 
+import { fullBaselineConfig, runtimeWithFullBaseline, swapToSingleExpectShrink } from './pi-runtime-testkit.ts'
+
 /** 被测 provider：catalog provider，内置基线 3 个 chat 模型（M2.7 / M2.7-highspeed / M3）。 */
 const PROVIDER = 'minimax-cn'
 
@@ -116,16 +118,10 @@ describe('① 完整 Model 对象入注 → 组合结果字段等价（前提 7 
   })
 
   it('models 数组即最终可见集合（映射替换，非与内置层合并）——注入策略的直接依据', async () => {
-    const baseline = getBuiltinModels(PROVIDER)
-    const rt = await newRuntime()
-    rt.registerProvider(PROVIDER, { models: baseline.map((m) => ({ ...m })) })
-    expect(rt.getModels(PROVIDER).map((m) => m.id)).toEqual(baseline.map((m) => m.id))
+    const { rt, baseline } = await runtimeWithFullBaseline(PROVIDER, tmpDir)
 
     // 只注一个模型 → 该 provider 的可见集合收缩为这一个（内置层未被保留）
-    rt.registerProvider(PROVIDER, {
-      models: [{ ...baseline[0] }],
-    })
-    expect(rt.getModels(PROVIDER).map((m) => m.id)).toEqual([baseline[0].id])
+    swapToSingleExpectShrink(rt, PROVIDER, baseline[0])
   })
 })
 
@@ -161,7 +157,7 @@ describe('② 极简定义形状入注 → pi 展开语义（四级兜底继承�
     const target = baseline[baseline.length - 1]
     const rt = await newRuntime()
     // 先注入完整基线，再以「同 id 但缺 api/baseUrl」的极简定义覆盖
-    rt.registerProvider(PROVIDER, { models: baseline.map((m) => ({ ...m })) })
+    rt.registerProvider(PROVIDER, fullBaselineConfig(PROVIDER))
     rt.registerProvider(PROVIDER, { models: [minimal(target.id)] })
 
     const got = rt.getModel(PROVIDER, target.id)!

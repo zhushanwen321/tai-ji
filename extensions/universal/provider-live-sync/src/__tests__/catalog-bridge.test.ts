@@ -29,8 +29,8 @@ import { join } from 'node:path'
 import { getBuiltinModelDataGeneratedAt, getBuiltinModels } from '@earendil-works/pi-ai/providers/all'
 import type { ExtensionAPI, ProviderConfig, ProviderModelConfig } from '@earendil-works/pi-coding-agent'
 
-import providerLiveSync, { POLL_INTERVAL_MS } from '../index.ts'
-import { createOverlayCacheWatcher, injectCatalogOverlay } from '../catalog-bridge.ts'
+import { createOverlayCacheWatcher, injectCatalogOverlay, type OverlayCacheWatcher } from '../catalog-bridge.ts'
+import { startWithRegistryCtx, tickOnce } from './tick-harness.ts'
 
 const loggerMocks = vi.hoisted(() => ({
   debug: vi.fn(),
@@ -177,6 +177,45 @@ function endpointModel(id: string, name = id) {
   return { id, name, api: 'openai-completions', baseUrl: `https://example.invalid/${id}` }
 }
 
+/** 写 taiji 缓存条目后注入（单条目注册用例的共同路径：写缓存 → makePi → inject）。 */
+function injectWithEntries(entries: Record<string, unknown>): FakePi {
+  writeTaijiCache(entries)
+  const pi = makePi()
+  injectCatalogOverlay(asApi(pi))
+  return pi
+}
+
+/** 播种单模型（Model-A）缓存并钉 mtime —— hook / mtime 短路 / watcher 用例的共同开场。 */
+function seedCatalogPinned(at: Date): void {
+  writeTaijiCache({ [SYNTHETIC_PROVIDER]: entry([endpointModel('Model-A')], FRESH_AT) })
+  utimesSync(TAiji_CACHE_PATH(), at, at)
+}
+
+/** 改写缓存为 A+B 两模型并钉新 mtime（模拟上游目录更新 / 钩子返回新并集）。 */
+function rewriteCatalogPinned(at: Date): void {
+  writeTaijiCache({
+    [SYNTHETIC_PROVIDER]: entry([endpointModel('Model-A'), endpointModel('Model-B')], FRESH_AT),
+  })
+  utimesSync(TAiji_CACHE_PATH(), at, at)
+}
+
+/** 注册一个 fresh 注入并断言 Model-A 落表（缓存已写、mtime 钉 T0）。 */
+function injectFresh(): FakePi {
+  seedCatalogPinned(MTIME_T0)
+  const pi = makePi()
+  injectCatalogOverlay(asApi(pi))
+  expect(modelIds(registeredConfig(pi, SYNTHETIC_PROVIDER))).toEqual(['Model-A'])
+  return pi
+}
+
+/** 播种 + 注入并返回监视条目（watcher 用例的共同开场）。 */
+function injectWatcherPinned(at: Date): OverlayCacheWatcher | null {
+  seedCatalogPinned(at)
+  const watcher = injectCatalogOverlay(asApi(makePi()))
+  expect(watcher).not.toBeNull()
+  return watcher
+}
+
 // ─────────────────────────────────────────────────────────
 describe('注入全链路（D1 注册时机 + D2 注入集并集）', () => {
   it('env 在位 + fresh → registerProvider 被调，models = 内置基线 ⊕ 缓存条目（同 id 整对象覆盖）', () => {
@@ -211,11 +250,8 @@ describe('注入全链路（D1 注册时机 + D2 注入集并集）', () => {
   it('两份缓存都读：只在 taiji 里的 provider 与只在 store 里的 provider 都被注册', () => {
     // 新者胜合并的粒度是**条目（per provider）**，不是模型——同 provider 的两份条目
     // 二选一，不会把两侧的 models 数组并起来。故「两份都读」用两个互斥 provider 证。
-    writeTaijiCache({ 'taiji-only-provider': entry([endpointModel('Taiji-Model')], FRESH_AT) })
     writePiStore({ 'store-only-provider': entry([endpointModel('Store-Model')], FRESH_AT) })
-
-    const pi = makePi()
-    injectCatalogOverlay(asApi(pi))
+    const pi = injectWithEntries({ 'taiji-only-provider': entry([endpointModel('Taiji-Model')], FRESH_AT) })
 
     expect(pi.registerProvider.mock.calls.map((c) => c[0]).sort()).toEqual([
       'store-only-provider',
@@ -317,9 +353,7 @@ describe('R2 / R5 —— 缓存缺失、损坏与三态非 fresh 都不注入', 
   })
 
   it('R5 never-seen（两份缓存都没有该 provider）→ 不进计算集，无注册动作也无日志', () => {
-    writeTaijiCache({ 'other-provider': entry([endpointModel('Other')], FRESH_AT) })
-    const pi = makePi()
-    injectCatalogOverlay(asApi(pi))
+    const pi = injectWithEntries({ 'other-provider': entry([endpointModel('Other')], FRESH_AT) })
 
     // 计算集 = 缓存里出现过的 provider；未出现的连判定都不做（不是异常，不该有日志）
     expect(pi.registerProvider.mock.calls.map((c) => c[0])).toEqual(['other-provider'])
@@ -394,22 +428,9 @@ describe('R4 —— registerProvider 抛错不扩散', () => {
 
 // ─────────────────────────────────────────────────────────
 describe('refreshModels 钩子三分支（D5 运行中窗口）', () => {
-  /** 注册一个 fresh 注入并返回 fake pi（缓存已写、mtime 已钉死在 T0）。 */
-  function injectFresh(): FakePi {
-    writeTaijiCache({ [SYNTHETIC_PROVIDER]: entry([endpointModel('Model-A')], FRESH_AT) })
-    utimesSync(TAiji_CACHE_PATH(), MTIME_T0, MTIME_T0)
-    const pi = makePi()
-    injectCatalogOverlay(asApi(pi))
-    expect(modelIds(registeredConfig(pi, SYNTHETIC_PROVIDER))).toEqual(['Model-A'])
-    return pi
-  }
-
   it('fresh → 钩子返回新并集（新模型无需重开会话即可见）', async () => {
     const pi = injectFresh()
-    writeTaijiCache({
-      [SYNTHETIC_PROVIDER]: entry([endpointModel('Model-A'), endpointModel('Model-B')], FRESH_AT),
-    })
-    utimesSync(TAiji_CACHE_PATH(), MTIME_T1, MTIME_T1)
+    rewriteCatalogPinned(MTIME_T1)
 
     const refreshed = await callHook(pi, SYNTHETIC_PROVIDER)
     expect(refreshed?.map((m) => m.id)).toEqual(['Model-A', 'Model-B'])
@@ -468,11 +489,7 @@ describe('refreshModels 钩子三分支（D5 运行中窗口）', () => {
 // ─────────────────────────────────────────────────────────
 describe('mtime 短路（D5：文件未变直接返回上次结果，不重算）', () => {
   it('内容变了但 mtime 不变 → 钩子返回旧结果（证明没重读）；mtime 一变 → 立刻重算', async () => {
-    writeTaijiCache({ [SYNTHETIC_PROVIDER]: entry([endpointModel('Model-A')], FRESH_AT) })
-    utimesSync(TAiji_CACHE_PATH(), MTIME_T0, MTIME_T0)
-    const pi = makePi()
-    injectCatalogOverlay(asApi(pi))
-    expect(modelIds(registeredConfig(pi, SYNTHETIC_PROVIDER))).toEqual(['Model-A'])
+    const pi = injectFresh()
 
     // 内容换成 Model-B，但把 mtime 钉回原值——短路成立则钩子看不到这次改写
     writeTaijiCache({ [SYNTHETIC_PROVIDER]: entry([endpointModel('Model-B')], FRESH_AT) })
@@ -522,26 +539,15 @@ describe('第三个监视条目（tick 挂载用的 mtime 观测器）', () => {
   it('工厂期播种基线 + 窗口内 mtime 变更 → observe() 返回 true（运行中窗口 D5 的检出）', () => {
     // 经 injectCatalogOverlay 取观测器——工厂期在 runPass 之前捕获的 mtime 即初始基线
     // （生产接线；直接调 createOverlayCacheWatcher(path, initial) 测不到这层传递）。
-    writeTaijiCache({ [SYNTHETIC_PROVIDER]: entry([endpointModel('Model-A')], FRESH_AT) })
-    utimesSync(TAiji_CACHE_PATH(), MTIME_T0, MTIME_T0)
-    const pi = makePi()
-    const watcher = injectCatalogOverlay(asApi(pi))
-    expect(watcher).not.toBeNull()
+    const watcher = injectWatcherPinned(MTIME_T0)
 
     // 工厂期注入与 tick 1 之间（~2s 窗）缓存被更新（taiji runtime 的 tmp+rename 原子替换写）
-    writeTaijiCache({
-      [SYNTHETIC_PROVIDER]: entry([endpointModel('Model-A'), endpointModel('Model-B')], FRESH_AT),
-    })
-    utimesSync(TAiji_CACHE_PATH(), MTIME_T1, MTIME_T1)
+    rewriteCatalogPinned(MTIME_T1)
     expect(watcher?.observe()).toBe(true)
   })
 
   it('工厂期播种基线 + 无变更 → observe() 返回 false（首拍不产生幻觉变化）', () => {
-    writeTaijiCache({ [SYNTHETIC_PROVIDER]: entry([endpointModel('Model-A')], FRESH_AT) })
-    utimesSync(TAiji_CACHE_PATH(), MTIME_T0, MTIME_T0)
-    const pi = makePi()
-    const watcher = injectCatalogOverlay(asApi(pi))
-
+    const watcher = injectWatcherPinned(MTIME_T0)
     expect(watcher?.observe()).toBe(false)
   })
 
@@ -607,10 +613,9 @@ describe('第三个监视条目（tick 挂载用的 mtime 观测器）', () => {
  * 上面那些用例分别证明了钩子与观测器各自正确，但**两者的接线**（index.ts 的 tick 把
  * 观测结果并进刷新决策）只有这一层能覆盖——真机 V6 依赖的正是它。
  *
- * 驱动方式与 model-sync.test.ts 的 tick 层同款：fake timers 只替换
- * setTimeout/clearTimeout，tick 链上的 readFile 与 setImmediate 保持真实；每拍等
- * `getTimerCount() >= 1`（本拍 tick 落地后 `.finally(schedule)` 必注册下一个 fake
- * timer）作为确定性拍屏障。models.json/auth.json 全程缺席（catalog-only 安装常态），
+ * 驱动件与 model-sync.test.ts 的 tick 层共用 `./tick-harness.ts`（fake timers 只替换
+ * setTimeout/clearTimeout，tick 链上的 readFile 与 setImmediate 保持真实；拍屏障
+ * 说明见该文件头注释）。models.json/auth.json 全程缺席（catalog-only 安装常态），
  * 于是唯一的刷新信号来自目录缓存——隔离得干净。
  */
 describe('tick 接线 —— 目录缓存 mtime 变化触发一次零网络本地刷新', () => {
@@ -622,38 +627,21 @@ describe('tick 接线 —— 目录缓存 mtime 变化触发一次零网络本�
     vi.useRealTimers()
   })
 
-  /** 逐真实事件循环轮次（setImmediate 未被 fake）轮询等待谓词成立。 */
-  async function waitFor(predicate: () => boolean, maxTurns = 5_000): Promise<void> {
-    for (let i = 0; i < maxTurns && !predicate(); i += 1) {
-      await new Promise<void>((resolve) => setImmediate(resolve))
-    }
+  /** 「恰一次零网络本地刷新」断言（tick 接线用例共用）。 */
+  function expectRefreshedOnce(refresh: ReturnType<typeof vi.fn>): void {
+    expect(refresh).toHaveBeenCalledTimes(1)
+    expect(refresh).toHaveBeenCalledWith({ allowNetwork: false })
   }
 
-  /** 推进一个轮询周期并等本拍 tick 完整落地（见上方拍屏障说明）。 */
-  async function tickOnce(): Promise<void> {
-    await vi.advanceTimersByTimeAsync(POLL_INTERVAL_MS)
-    await waitFor(() => vi.getTimerCount() >= 1)
-  }
-
+  /** 经 harness 启动扩展（pi 宿主面 = appendEntry + registerProvider spy）。 */
   function startWithFakeCtx(): { refresh: ReturnType<typeof vi.fn>; registerProvider: ReturnType<typeof vi.fn> } {
-    const refresh = vi.fn(async () => ({ aborted: false, errors: new Map() }))
-    const getError = vi.fn(() => null)
-    const ctx = { modelRegistry: { refresh, getError } }
     const registerProvider = vi.fn<(provider: string, config: ProviderConfig) => void>()
-    const on = vi.fn()
-    providerLiveSync({ on, appendEntry: vi.fn(), registerProvider } as unknown as ExtensionAPI)
-    const handler = on.mock.calls.find((call) => call[0] === 'session_start')?.[1] as
-      | ((event: unknown, sessionCtx: unknown) => void)
-      | undefined
-    expect(handler).toBeTypeOf('function')
-    handler?.({ type: 'session_start' }, ctx)
+    const { refresh } = startWithRegistryCtx({ appendEntry: vi.fn(), registerProvider })
     return { refresh, registerProvider }
   }
 
   it('首拍只建基线不刷新；缓存 mtime 变化 → refresh({ allowNetwork: false }) 恰一次', async () => {
-    writeTaijiCache({ [SYNTHETIC_PROVIDER]: entry([endpointModel('Model-A')], FRESH_AT) })
-    utimesSync(TAiji_CACHE_PATH(), MTIME_T0, MTIME_T0)
-
+    seedCatalogPinned(MTIME_T0)
     const { refresh, registerProvider } = startWithFakeCtx()
     // 工厂期已注入（D1）——tick 只是触发方，不是注册方
     expect(registerProvider).toHaveBeenCalledTimes(1)
@@ -662,20 +650,13 @@ describe('tick 接线 —— 目录缓存 mtime 变化触发一次零网络本�
     expect(refresh).not.toHaveBeenCalled()
 
     // 上游目录更新（taiji runtime 的 tmp+rename 原子替换写）→ mtime 变
-    writeTaijiCache({
-      [SYNTHETIC_PROVIDER]: entry([endpointModel('Model-A'), endpointModel('Model-B')], FRESH_AT),
-    })
-    utimesSync(TAiji_CACHE_PATH(), MTIME_T1, MTIME_T1)
-
+    rewriteCatalogPinned(MTIME_T1)
     await tickOnce()
-    expect(refresh).toHaveBeenCalledTimes(1)
-    expect(refresh).toHaveBeenCalledWith({ allowNetwork: false })
+    expectRefreshedOnce(refresh)
   })
 
   it('运行中窗口不断裂：工厂期注入后、首个 tick 触发前改缓存 → 首个 tick 必须 refresh（firstBaseline 不放行 overlay 变化）', async () => {
-    writeTaijiCache({ [SYNTHETIC_PROVIDER]: entry([endpointModel('Model-A')], FRESH_AT) })
-    utimesSync(TAiji_CACHE_PATH(), MTIME_T0, MTIME_T0)
-
+    seedCatalogPinned(MTIME_T0)
     const { refresh, registerProvider } = startWithFakeCtx()
     // 工厂期已注入（D1）——tick 只是触发方，不是注册方
     expect(registerProvider).toHaveBeenCalledTimes(1)
@@ -683,30 +664,20 @@ describe('tick 接线 —— 目录缓存 mtime 变化触发一次零网络本�
     // 「工厂期注入 → tick 1」约 2s 窗内的缓存变更（真机实证：spawn 后 ~200ms 变更时
     // 30s 内新模型不出现）——首拍抑制的前提（pi spawn 时已按磁盘建快照）只对既有
     // models.json/auth.json 成立，overlay 条目的变化必须放行，否则运行中窗口断裂。
-    writeTaijiCache({
-      [SYNTHETIC_PROVIDER]: entry([endpointModel('Model-A'), endpointModel('Model-B')], FRESH_AT),
-    })
-    utimesSync(TAiji_CACHE_PATH(), MTIME_T1, MTIME_T1)
+    rewriteCatalogPinned(MTIME_T1)
 
     await tickOnce() // 首个 tick：既有两条目双 absent 无变化，唯一信号 = overlay 变化
-    expect(refresh).toHaveBeenCalledTimes(1)
-    expect(refresh).toHaveBeenCalledWith({ allowNetwork: false })
+    expectRefreshedOnce(refresh)
   })
 
   it('对照不变量：缓存内容变了但 mtime 不变 → 零刷新（mtime 是这一条目的比较基准）', async () => {
-    writeTaijiCache({ [SYNTHETIC_PROVIDER]: entry([endpointModel('Model-A')], FRESH_AT) })
-    utimesSync(TAiji_CACHE_PATH(), MTIME_T0, MTIME_T0)
-
+    seedCatalogPinned(MTIME_T0)
     const { refresh } = startWithFakeCtx()
     await tickOnce()
     expect(refresh).not.toHaveBeenCalled()
 
     // 改写内容但把 mtime 钉回原值——该条目判「未变」
-    writeTaijiCache({
-      [SYNTHETIC_PROVIDER]: entry([endpointModel('Model-A'), endpointModel('Model-B')], FRESH_AT),
-    })
-    utimesSync(TAiji_CACHE_PATH(), MTIME_T0, MTIME_T0)
-
+    rewriteCatalogPinned(MTIME_T0)
     await tickOnce()
     expect(refresh).not.toHaveBeenCalled()
   })

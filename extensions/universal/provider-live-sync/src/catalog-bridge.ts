@@ -178,7 +178,7 @@ type PassOutcome =
   | { status: "read-failed" };
 
 /** 单文件 mtime 观测态（与既有 `FileObservation` 同构的三分态，比较对象是 mtime 而非内容字节）。 */
-type MtimeObservation =
+export type MtimeObservation =
   | { state: "present"; mtimeMs: number }
   | { state: "absent" }
   | { state: "unreadable" };
