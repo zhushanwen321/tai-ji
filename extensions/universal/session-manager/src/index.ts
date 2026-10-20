@@ -1,5 +1,5 @@
 // src/index.ts — @zhushanwen/pi-session-manager
-// 6 个 session 管理工具，通过 ctx.ui.select(SESSION_MANAGER_MARKER) 通道与 runtime handler 通信。
+// 8 个 session 管理工具，通过 ctx.ui.select(SESSION_MANAGER_MARKER) 通道与 runtime handler 通信。
 
 import type {
 	ExtensionAPI,
@@ -52,6 +52,15 @@ const GetSessionStatusParams = Type.Object({
 
 const AbortSessionParams = Type.Object({
 	sessionId: Type.String({ description: "Target session ID to abort" }),
+});
+
+// 两终局操作的 sessionId 字段 description 走全族统一句式（填参层：id 唯一来源 + 错误恢复指引）
+const DeleteSessionParams = Type.Object({
+	sessionId: Type.String({ description: "From list_my_sessions output. Unknown/stale ids error — re-list instead of retrying." }),
+});
+
+const ArchiveSessionParams = Type.Object({
+	sessionId: Type.String({ description: "From list_my_sessions output. Unknown/stale ids error — re-list instead of retrying." }),
 });
 
 // ── select 通道辅助 ──
@@ -160,7 +169,7 @@ async function executeTool(
 	// 成功路径副作用编排（notify-once U4）：send/create 的 willNotify arm（register + 开表）、
 	// label 缓存回填（list）——错误路径已 throw，天然不触发。
 	onResult?.(ctx, params, parsed);
-	// details.summary 一行摘要（工具收起态展示）：六工具共用本骨架统一组装，
+	// details.summary 一行摘要（工具收起态展示）：八工具共用本骨架统一组装，
 	// 文案由各工具 cfg.toSummary 从协议 params + 回包产出（未配置 = details 缺省）。
 	return {
 		content: [{ type: "text" as const, text: raw }],
@@ -175,6 +184,14 @@ interface SessionToolConfig<S extends TObject> {
 	name: string
 	label: string
 	description: string
+	/**
+	 * 识别层（session-manager-archive-delete 四层信息协议）：系统提示词 Available tools
+	 * 清单的一行片段。deferred 工具激活前不在活跃集、带不带都不进清单；激活后带
+	 * snippet 者进清单（pi SDK 1.0.0 system-prompt 工具清单机制：visibleTools =
+	 * selectedTools ∩ 有 promptSnippet）——deferred 工具配 promptSnippet 的原因。
+	 * 不配置 = 激活后也不进清单（pi SDK 原生语义）。
+	 */
+	promptSnippet?: string
 	parameters: S
 	action: SessionManagerAction
 	/** schema params → 协议 params 的映射（undefined 字段由 JSON.stringify 丢弃） */
@@ -191,7 +208,7 @@ interface SessionToolConfig<S extends TObject> {
 }
 
 /**
- * 注册一个 session 管理工具。6 个工具共用同一 execute 骨架——
+ * 注册一个 session 管理工具。8 个工具共用同一 execute 骨架——
  * 统一忽略 signal/onUpdate（session 管理是单次请求-响应，无流式更新），
  * 不 ctx.ui 交互（走 marker select 通道，不弹用户 UI）。
  */
@@ -202,6 +219,7 @@ function registerSessionTool<S extends TObject>(pi: ExtensionAPI, cfg: SessionTo
 		// deferred（tool-declaration-slimming D4）：六件套整体不常驻声明，tool_search
 		// 命中即激活；迁移写入的 +tool_search 条目（runtime pi-codemode-settings）承载检索入口
 		exposure: "deferred",
+		promptSnippet: cfg.promptSnippet,
 		description: cfg.description,
 		parameters: cfg.parameters,
 		renderResult(result: unknown, options: { expanded: boolean }, theme: Theme) {
@@ -369,6 +387,64 @@ export default function sessionManagerExtension(pi: ExtensionAPI): void {
 		toSummary: (params) => {
 			const sessionId = stringField(params, "sessionId");
 			return sessionId ? `Aborted ${sessionId}` : "Aborted";
+		},
+	});
+
+	// delete_session（session-manager-archive-delete U4）：人身约束（USER-INITIATED ONLY）
+	// 仅存于文案层——description 与 promptSnippet 双锚词在册（契约测试锁）；description
+	// 逐字来自设计 §3.1 内嵌样例。不配 onResult：forgetLabel 已裁决不做（T2 D-1-9，
+	// label 缓存为进程级无回写形态，死 id 无读取方、残留无害）。
+	registerSessionTool(pi, {
+		name: "delete_session",
+		label: "Delete Session",
+		promptSnippet:
+			"Permanently delete one of your managed sessions. USER-INITIATED ONLY — never call unless the user explicitly asks to delete.",
+		description: `Permanently delete one of your managed sessions — kills its process if running, moves the conversation file and ALL derived data (artifacts, attachments, canvases, logs) to the trash. UNRECOVERABLE. On success any open completion-watch for it resolves as 'deleted' and it disappears from the user's sidebar immediately.
+
+USER-INITIATED ONLY: call this tool ONLY when the user's message unmistakably asks for irreversible deletion. NEVER call it on your own initiative — not for cleanup, not to free resources, not after a task finishes, not because a session looks stale or unused. If you think a session is no longer needed, suggest archive_session instead and let the user decide. Ambiguous wording ("clean up", "get it out of the sidebar", "tidy up") means archive_session, NOT this tool — the desktop sidebar's delete button archives, so users often say "delete" when they mean archive. Reserve this tool for explicit irreversible intent ("permanently delete", "delete and don't keep it"); before calling, restate to the user that this is unrecoverable.
+
+Different from abort_session (stops the current run, session kept) and archive_session (reversible, user can restore): deletion is the only irreversible action.
+
+## Example
+{"sessionId":"<id from list_my_sessions>"}
+
+Ids come from list_my_sessions — never guess; on unknown-id error re-list, don't retry the same id. Archived sessions are NOT deletable via this tool (the call errors) — they are managed by the user in the archive list. Requires the taiji desktop runtime (in standalone pi this tool hangs forever — no runtime answers the channel).`,
+		parameters: DeleteSessionParams,
+		action: "delete",
+		toParams: (p) => ({ sessionId: p.sessionId }),
+		toSummary: (params) => {
+			const sessionId = stringField(params, "sessionId");
+			return sessionId ? `Deleted ${sessionId}` : "Deleted";
+		},
+	});
+
+	// archive_session（session-manager-archive-delete U4）：AI 主动可调的收尾整理动作，
+	// 纪律写为正向指引（与 delete 的人身禁令相反）；archive_io_error 两态善后文案
+	// 按设计 §3.1 R1 修正（T2 D-1-7）：搬移前失败重试安全 / 搬移中途失败同进程重试
+	// 改报 not found——该形态 = 搬移部分完成，提示重启由启动自愈归位，不是已归档完成。
+	registerSessionTool(pi, {
+		name: "archive_session",
+		label: "Archive Session",
+		promptSnippet:
+			"Archive one of your managed sessions to tidy the sidebar — reversible by the user; appropriate to call on your own initiative when a session's work is finished.",
+		description: `Archive one of your managed sessions — it leaves the active sidebar and moves to the archive area (compressed); the user can view its summary and restore it anytime. Reversible by the user.
+
+Appropriate to call on your own initiative when a child session's work is finished and you want to keep its history but tidy the sidebar. The session must not be generating — abort first or wait for completion, otherwise the call errors with archive_generating. On success any open completion-watch for it resolves as 'exited'.
+
+Different from abort_session (stops the current run, session kept) and delete_session (irreversible): archiving keeps the full history and the user can restore the session anytime. If the session is already archived the call errors with archive_already_archived — no need to call again.
+
+On archive_io_error the outcome depends on when the failure happened: if the session file had not been moved yet, retrying the call is safe; if the failure happened mid-move, a same-process retry reports 'target session not found' — that means the archive is partially done (NOT completed): tell the user to restart the app so the startup self-heal moves the session back to its original place, and do not treat it as already archived.
+
+## Example
+{"sessionId":"<id from list_my_sessions>"}
+
+Ids come from list_my_sessions — never guess; on unknown-id error re-list, don't retry the same id. Requires the taiji desktop runtime (in standalone pi this tool hangs forever — no runtime answers the channel).`,
+		parameters: ArchiveSessionParams,
+		action: "archive",
+		toParams: (p) => ({ sessionId: p.sessionId }),
+		toSummary: (params) => {
+			const sessionId = stringField(params, "sessionId");
+			return sessionId ? `Archived ${sessionId}` : "Archived";
 		},
 	});
 }

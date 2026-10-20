@@ -149,10 +149,10 @@ describe("renderSessionManagerResult 两态", () => {
 		expect(renderedText({ content: [{ type: "text", text: "raw" }], details: { summary: 7 } }, false)).toContain("raw");
 	});
 
-	it("六工具注册的 renderResult 均存在且折叠态行为一致（共用渲染内核）", () => {
+	it("八工具注册的 renderResult 均存在且折叠态行为一致（共用渲染内核）", () => {
 		const harness = createHarness();
 		const renderFns = harness.registered.map((t) => t.renderResult);
-		expect(renderFns).toHaveLength(6);
+		expect(renderFns).toHaveLength(8);
 		for (const fn of renderFns) expect(typeof fn).toBe("function");
 		// 抽查一个 handler：折叠态出摘要、不出原始 JSON（handler 是各 registerTool
 		// 的方法包装，内核同为 renderSessionManagerResult）
