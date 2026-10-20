@@ -2,7 +2,7 @@
   SchedulerQuickCard —— composer 左簇定时任务快捷面板（左簇浮层优化 2026-10-19）。
 
   替代形态：此前该入口是 HeaderActionsHost 通用按钮（原生 title 提示 + 点击直开 overlay）。
-  现在按钮不变（时钟 + badge + 点击仍直开 overlay tab），新增 hover 快捷面板：
+  现在按钮形态不变（时钟 + badge），点击语义改为 toggle pin 快捷面板，overlay 直开移入面板底部操作条：
   160ms 悬停即出任务列表（含每任务 暂停/恢复 · 立即执行 · 删除 行内操作），无需点开 overlay。
 
   数据面（零新增接线）：直接消费 scheduler-manager 插件经 views.update 持续推送的
