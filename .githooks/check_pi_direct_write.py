@@ -193,6 +193,14 @@ ALLOWLIST_STMT_PATTERNS: dict[str, tuple[re.Pattern, ...]] = {
     "scripts/zcode-session-db-cleanup.mjs": (
         re.compile(r"\bfs\.writeFileSync\s*\("),
     ),
+    # 登记表 §4 ⑳（session-archive D1）：归档域写点——压缩体/解压 tmp+rename 与簿记
+    # 原子写的已评审形态（writeFileSync(tmp…) 与 writeFileSync(簿记/fixture 构造…)）。
+    "packages/runtime/src/services/archive/archive-service.ts": (
+        re.compile(r"\bwriteFileSync\s*\("),
+    ),
+    "packages/runtime/src/services/archive/archive-fixture.ts": (
+        re.compile(r"\bwriteFileSync\s*\("),
+    ),
 }
 
 

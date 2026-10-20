@@ -62,6 +62,13 @@ function buildSelfCheckLines(roots: SessionRoot[]): string[] {
       continue
     }
     const count = r.fileCount ?? r.files.length
+    // [session-archive D2 U2] 归档根不计入 find 候选集合计（find 只迭代在场 .jsonl，
+    // 归档根 files 恒空、fileCount = 簿记数——计入则「候选集非空」陈述失真）；
+    // 措辞对齐 doctor 的「N 归档单元」实名（区别于 .jsonl 文件计数）。
+    if (r.kind === 'archive') {
+      lines.push(`  [${r.kind}]`.padEnd(F1_ROOT_LABEL_PAD) + `${r.path}：${count} 归档单元`)
+      continue
+    }
     totalFiles += count
     lines.push(`  [${r.kind}]`.padEnd(F1_ROOT_LABEL_PAD) + `${r.path}：${count} 文件`)
   }
