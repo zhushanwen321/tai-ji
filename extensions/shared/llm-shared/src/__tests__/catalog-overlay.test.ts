@@ -334,16 +334,23 @@ describe("computeInjectionSet（内置基线 ⊕ 有效条目）", () => {
 		expect(result.models.map(m => m.id)).toEqual([BASELINE[0]!.id, BASELINE[1]!.id, OVERLAY_ONLY.id]);
 	});
 
-	it("只认 baseUrl 也视为自带端点（api 与 baseUrl 任一即可）", () => {
+	it("缺其一即进 skipped（api 与 baseUrl 两端点齐备才算自带端点声明）", () => {
+		// 缺其一的条目若放行，pi 组合期会经 findExtensionModelDefaults 的四级兜底
+		//（同 id → 同 api → openai-completions → candidates[0]）从任意同 provider
+		// 模型静默继承缺失字段——正是 R3 明文禁止的行为，故判据层提前跳闸。
+		const apiOnly: OverlayModel = { id: "glm-api-only", name: "GLM Api Only", api: "openai-completions" };
 		const baseUrlOnly: OverlayModel = { id: "glm-baseurl-only", name: "GLM BaseUrl Only", baseUrl: "https://x.dev/v1" };
 		const result = computeInjectionSet({
 			providerId: PROVIDER,
-			entry: entry([baseUrlOnly], FRESH_AT),
+			entry: entry([apiOnly, baseUrlOnly], FRESH_AT),
 			generatedAt: GENERATED_AT,
 			baseline: BASELINE,
 		});
-		expect(result.skipped).toEqual([]);
-		expect(result.models.map(m => m.id)).toContain(baseUrlOnly.id);
+		expect(result.skipped).toEqual([
+			{ modelId: apiOnly.id, reason: "missing-api-and-baseUrl" },
+			{ modelId: baseUrlOnly.id, reason: "missing-api-and-baseUrl" },
+		]);
+		expect(result.models.map(m => m.id)).toEqual([BASELINE[0]!.id, BASELINE[1]!.id]);
 	});
 
 	it("expired / never-seen → 纯内置基线（R5 否定信号不注入、R6 撤销注入）", () => {
@@ -424,8 +431,19 @@ describe("D2 两份缓存都读（反向断裂防线）", () => {
 	});
 
 	it("两份都有 → 新者胜（pi store 更新时取 pi store 的模型集）", () => {
-		const taijiOnly: OverlayModel = { id: "glm-taiji-only", name: "GLM Taiji Only", api: "openai-completions" };
-		const piOnly: OverlayModel = { id: "glm-pi-only", name: "GLM Pi Only", api: "openai-completions" };
+		// 夹具带齐 api/baseUrl：本用例证的是条目级新者胜合并，端点完整性由 R3 用例覆盖
+		const taijiOnly: OverlayModel = {
+			id: "glm-taiji-only",
+			name: "GLM Taiji Only",
+			api: "openai-completions",
+			baseUrl: "https://open.bigmodel.cn/api/paas/v4",
+		};
+		const piOnly: OverlayModel = {
+			id: "glm-pi-only",
+			name: "GLM Pi Only",
+			api: "openai-completions",
+			baseUrl: "https://open.bigmodel.cn/api/paas/v4",
+		};
 		const piNewer = injectAcrossBothCaches(
 			PROVIDER,
 			taijiCache({ [PROVIDER]: entry([taijiOnly], GENERATED_AT) }),

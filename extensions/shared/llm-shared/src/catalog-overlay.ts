@@ -13,23 +13,19 @@
  * fail-safe 都在调用方。
  */
 
-import { homedir } from "node:os";
 import { join } from "node:path";
 import { getBuiltinModelDataGeneratedAt, getBuiltinModels, type BuiltinProvider } from "@earendil-works/pi-ai/providers/all";
+import { getAgentDir } from "@earendil-works/pi-coding-agent";
 import { isRecord } from "@zhushanwen/pi-ext-guards";
 
 // ──────────────────────── 路径解析 ────────────────────────
 
 /** taiji 数据目录 env（runtime spawn pi 时注入；缺失 = 非 taiji 托管环境）。 */
 const TAIJI_DATA_DIR_ENV = "TAIJI_AGENT_DATA_DIR";
-/** pi agent 目录 env（pi 上游 `ENV_AGENT_DIR` 实装值）。 */
-const PI_AGENT_DIR_ENV = "PI_CODING_AGENT_DIR";
 /** taiji 自刷目录缓存文件名（写入方 = runtime `provider-catalog-refresh.ts`）。 */
 const OVERLAY_CACHE_FILENAME = "provider-catalog-overlay.json";
 /** pi store 文件名（写入方 = pi 进程自身，`FileModelsStore`）。 */
 const MODELS_STORE_FILENAME = "models-store.json";
-/** pi 配置目录名（pi 上游 `CONFIG_DIR_NAME` = `pkg.piConfig.configDir`，实装值 `.pi`）。 */
-const PI_CONFIG_DIR_NAME = ".pi";
 
 /** 取非空字符串 env / 显式入参；空串与缺失一视同仁（env 设成空串等同未设）。 */
 function nonEmpty(value: string | undefined): string | undefined {
@@ -48,18 +44,19 @@ export function getTaijiOverlayCachePath(dataDir?: string): string | null {
 }
 
 /**
- * pi store 绝对路径：env `PI_CODING_AGENT_DIR` 优先（taiji 托管形态下 runtime 注入的
- * 隔离区 `<dataDir>/agent`，见 `packages/runtime/src/infra/pi/rpc-client.ts` 的
- * `buildPiOutboundEnv`），缺省 = `~/.pi/agent`（os.homedir() 动态推导，禁硬编码绝对路径）。
+ * pi store 绝对路径 = `join(getAgentDir(), "models-store.json")`（设计 §2.5 前提 5）。
+ *
+ * agent 目录推导委托 pi 官方导出 `getAgentDir`（env `PI_CODING_AGENT_DIR` 优先——taiji
+ * 托管形态下 runtime 注入的隔离区 `<dataDir>/agent`，见 `packages/runtime/src/infra/pi/
+ * rpc-client.ts` 的 `buildPiOutboundEnv`；缺省 = `~/.pi/agent`），不在本模块复刻 env 名
+ * 与配置目录名（同包 `config.ts` 的路径解析禁令：禁止自实现，pi 改任一项时两份推导会
+ * 静默分叉）。显式入参 `agentDir` 仅供测试注入，生产路径恒由 pi 推导。
  *
  * 与 runtime 侧「只读 `<getPiAgentDir()>` 隔离区、禁止触碰用户全局 `~/.pi/agent`」铁律
  * 一致：托管形态下 env 恒被注入，家目录缺省只在原生 pi 用户场景生效。
  */
-export function getPiStorePath(agentDir?: string): string | null {
-	const fromEnv = nonEmpty(agentDir ?? process.env[PI_AGENT_DIR_ENV]);
-	if (fromEnv !== undefined) return join(fromEnv, MODELS_STORE_FILENAME);
-	const home = nonEmpty(homedir());
-	return home === undefined ? null : join(home, PI_CONFIG_DIR_NAME, "agent", MODELS_STORE_FILENAME);
+export function getPiStorePath(agentDir?: string): string {
+	return join(agentDir ?? getAgentDir(), MODELS_STORE_FILENAME);
 }
 
 // ──────────────────────── 三态判定 ────────────────────────
@@ -284,7 +281,7 @@ function loadBuiltinBaseline(providerId: string): OverlayModel[] {
 	return getBuiltinModels(providerId as BuiltinProvider);
 }
 
-/** 条目是否自带端点声明（`api` 与 `baseUrl` 至少其一）。 */
+/** 条目是否自带端点声明（`api` 与 `baseUrl` 两端点齐备才算自带）。 */
 function hasEndpoint(model: OverlayModel): boolean {
-	return model.api !== undefined || model.baseUrl !== undefined;
+	return model.api !== undefined && model.baseUrl !== undefined;
 }

@@ -161,7 +161,8 @@ type CacheStamp = { taiji: number; store: number };
 /** 投喂桥的进程内状态（taiji 每会话一个独立 pi 进程，无跨会话残留问题）。 */
 type BridgeState = {
   taijiPath: string;
-  storePath: string | null;
+  /** pi store 路径（`getPiStorePath` 委托 pi `getAgentDir` 推导，恒有值）。 */
+  storePath: string;
   /** 已成功注册的 provider id——缓存里消失的 provider 也要进计算集（否则撤销注入无从触发）。 */
   registered: Set<string>;
   /** 上次成功计算的 mtime 戳与结果；null = 尚未计算过。 */
@@ -201,7 +202,7 @@ function stampOf(observation: MtimeObservation): number {
 function readStamp(state: BridgeState): CacheStamp {
   return {
     taiji: stampOf(observeMtime(state.taijiPath)),
-    store: state.storePath === null ? -1 : stampOf(observeMtime(state.storePath)),
+    store: stampOf(observeMtime(state.storePath)),
   };
 }
 
@@ -224,10 +225,7 @@ function runPass(state: BridgeState): PassOutcome {
   }
 
   const taiji = readCacheEntries("taiji overlay cache", state.taijiPath);
-  const store =
-    state.storePath === null
-      ? { entries: {} as Record<string, OverlayEntry>, failed: false }
-      : readCacheEntries("pi models store", state.storePath);
+  const store = readCacheEntries("pi models store", state.storePath);
   if (taiji.failed || store.failed) return { status: "read-failed" };
 
   const merged = mergeSources(taiji.entries, store.entries);
@@ -389,8 +387,8 @@ export function injectCatalogOverlay(pi: ExtensionAPI): OverlayCacheWatcher | nu
     for (const skipped of result.skipped) {
       // R3：缺 api/baseUrl 且同 id 无内置定义可继承（判据层已滤，此处只负责日志）
       logger.warn(
-        `catalog overlay model skipped: ${providerId}/${skipped.modelId} has neither api nor baseUrl `
-        + "and no same-id builtin model to inherit from — waiting for the next catalog refresh "
+        `catalog overlay model skipped: ${providerId}/${skipped.modelId} is missing api or baseUrl `
+        + "and has no same-id builtin model to inherit from — waiting for the next catalog refresh "
         + "to bring complete data",
       );
     }

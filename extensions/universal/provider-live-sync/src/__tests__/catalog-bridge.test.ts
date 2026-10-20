@@ -39,7 +39,9 @@ const loggerMocks = vi.hoisted(() => ({
   info: vi.fn(),
 }))
 
-/** tick 层用例：mock pi 宿主的 getAgentDir 指向真实 tmp fixture（与 model-sync.test.ts 同手法）。 */
+/** mock pi 宿主的 getAgentDir 指向真实 tmp fixture（与 model-sync.test.ts 同手法）。
+ *  全部用例都需要它：catalog-bridge 的 pi store 路径经 llm-shared 的 getPiStorePath
+ *  委托 pi getAgentDir 推导（不读 env），mock 不指向 tmp 会落到相对路径。 */
 const piMocks = vi.hoisted(() => ({ agentDir: '' }))
 
 vi.mock('@zhushanwen/pi-extension-logger', () => ({
@@ -137,6 +139,7 @@ beforeEach(() => {
   savedAgentDirEnv = process.env.PI_CODING_AGENT_DIR
   process.env.TAIJI_AGENT_DATA_DIR = dataDir
   process.env.PI_CODING_AGENT_DIR = agentDir
+  piMocks.agentDir = agentDir
   loggerMocks.debug.mockClear()
   loggerMocks.warn.mockClear()
   loggerMocks.error.mockClear()
@@ -612,7 +615,6 @@ describe('第三个监视条目（tick 挂载用的 mtime 观测器）', () => {
  */
 describe('tick 接线 —— 目录缓存 mtime 变化触发一次零网络本地刷新', () => {
   beforeEach(() => {
-    piMocks.agentDir = agentDir
     vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] })
   })
 
