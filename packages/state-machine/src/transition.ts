@@ -11,8 +11,9 @@ import type {
 
 /**
  * 纯函数转移内核（D2/D3）——无 IO、无时间源；副作用执行归编排外壳（runTransition，
- * 另一子出口）。机器实例的 `transition` 方法是本内核的薄包装；导出独立函数形态
- * 供编排外壳与重放场景直取内核。
+ * 另一源文件）。机器实例的 `transition` 方法是本内核的薄包装，编排外壳与各消费域
+ * 均经机器方法进入内核（无绕过机器方法直取本函数的生产调用方）；导出独立函数
+ * 形态供 define 组装与测试直取。
  */
 
 /** 规范化表行：from 数组已展开、outputs 已归一（缺省空名单）。 */
@@ -108,7 +109,7 @@ function reject<S extends string>(
 function resolveTerminalOutcome<S extends string, E extends string>(
   machineName: string,
   from: S,
-  on: E,
+  on: string,
   spec: TerminalOutcomeSpec,
   event: MachineEvent<E>,
 ): string {
@@ -142,22 +143,30 @@ export function transitionOnCore<S extends string, E extends string, Ctx>(
   event: MachineEvent<E>,
   ctx?: Ctx,
 ): TransitionResult<S> {
-  const on = typeof event === 'string' ? event : event.type
-  if (!core.stateSet.has(state)) {
-    return reject(core.definition, {
-      machine: core.name,
-      from: String(state),
-      on,
-      detail: 'state 不在状态词表内——磁盘读回字符串、跨版本坏值先经 coerceState 归化（null 走域内恢复路径）。',
-    })
-  }
-  const candidates = core.rowIndex.get(rowKey(state, on)) ?? []
+// 词表外事件值（null/undefined/数字/无 type 字段对象——磁盘读回坏值形态）归一为
+// undefined，靠 rowKey 未命中落入表外 reject（同表外处置，§5.2 失败路径表第 3 行）——
+// 不在事件名解析处裸 TypeError crash（无机器名、无恢复指引）。
+const on =
+  typeof event === 'string'
+    ? event
+    : typeof event === 'object' && event !== null && typeof event.type === 'string'
+      ? event.type
+      : undefined
+if (!core.stateSet.has(state)) {
+  return reject(core.definition, {
+    machine: core.name,
+    from: String(state),
+    on: String(on),
+    detail: 'state 不在状态词表内——磁盘读回字符串、跨版本坏值先经 coerceState 归化（null 走域内恢复路径）。',
+  })
+}
+const candidates = core.rowIndex.get(rowKey(state, on ?? '')) ?? []
   const hits = candidates.filter((row) => row.guard === undefined || row.guard(ctx, event))
   if (hits.length === 0) {
     return reject(core.definition, {
       machine: core.name,
       from: state,
-      on,
+      on: String(on),
       detail: legalDetail(core.legalEvents.get(state)),
     })
   }
@@ -170,7 +179,7 @@ export function transitionOnCore<S extends string, E extends string, Ctx>(
   const row = hits[0]
   const result: TransitionOk<S> = { ok: true, state: row.to, planned: { outputs: row.outputs } }
   if (row.terminalOutcome !== undefined) {
-    result.terminalOutcome = resolveTerminalOutcome(core.name, state, on, row.terminalOutcome, event)
+    result.terminalOutcome = resolveTerminalOutcome(core.name, state, String(on), row.terminalOutcome, event)
   }
   return result
 }

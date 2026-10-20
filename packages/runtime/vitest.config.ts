@@ -26,7 +26,9 @@ import { taijiTestConfig, guardProjectSetup } from '../../test-guard/factory.ts'
  * L2.5 首批（chaos / live-reload / thinking-level-effective-e2e）与二批（attach-lifecycle /
  * broadcast-getstate / completion-backflow / pi-protocol-contract / send-queue-e2e /
  * session-manager-full-e2e / tool-call-index / usage-queue-commands-invalidation /
- * pi-semantics-skill-expansion-golden / idle-pi-reclaim-integration）均已翻轨回 main 组。
+ * pi-semantics-skill-expansion-golden / idle-pi-reclaim-integration）均已翻轨回 main 组
+ * （后 idle-pi-reclaim-integration 2026-09-26、session-manager-full-e2e 2026-10-20 按
+ * 数组内日期注释再登记进串行尾组——当前分组以 REAL_PI_TESTS 数组为准）。
  *
  * 防线（globalSetup env 固定 + fs-guard 切面）经 test-guard/factory 顶层注入；
  * projects 内 setupFiles **不**继承 root 级（vitest projects 语义，实测 setup 0ms 不执行），

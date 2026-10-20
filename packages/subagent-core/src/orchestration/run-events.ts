@@ -732,11 +732,10 @@ export const TRANSITION_OUTPUT_TYPES = [
 
 export type TransitionOutput = (typeof TRANSITION_OUTPUT_TYPES)[number];
 
-// ── 合法转移表 + 唯一入口 transition（M6 迁基建承载）──────────
+// ── 合法转移表 + 唯一入口 transition（基建承载）──────────
 //
-// [M6] 表从本模块的私有数据（RUN_TRANSITIONS 行式数组 + guardMatches 标签解析）
-// 迁为 @zhushanwen/state-machine 机器声明（见下方 RUN_MACHINE）：行式表直译
-// （guard 字符串标签 → 行内函数值；from 数组消重复行），判定（查表 / guard 求值 /
+// 表 = @zhushanwen/state-machine 机器声明（见下方 RUN_MACHINE）：行式表
+// （guard 行内函数值；from 数组消重复行），判定（查表 / guard 求值 /
 // 多命中不变量 / 合法事件清单派生）归基建内核。域内保留：
 // - 对外 transition 三参签名与返回形态（本模块消费方 = terminal-actions 的
 //   appendTransition 编排 + 域内 fold——两者零改动，run 是事务外壳边界外域见 D2）；
@@ -783,10 +782,9 @@ export class IllegalTransitionError extends Error {
 type RunTransitionEvent = Exclude<RunEventType, "worker-log" | "model-override"> | ControlTriggerType;
 
 /**
- * run 生命周期机器声明（M6：原 RUN_TRANSITIONS 15 行直译，from 数组消重复后
- * 12 行、展开仍 15 边）。
+ * run 生命周期机器声明（行式表 12 行、展开 15 边——from 数组消重复）。
  *
- * - guard 二支（running × agent-settled）迁行内函数值：互补 guard
+ * - guard 二支（running × agent-settled）行内函数值：互补 guard
  *   `ctx?.enterSettling !== true` / `=== true` 恒单命中（「其余情况落到此行」的
  *   兜底语义由互补 guard 表达，不设无 guard 垫底行——D3 匹配语义）；undefined
  *   ctx 落 more-work-expected 支，域内 fold 调 transition 不传 ctx 的保守取支

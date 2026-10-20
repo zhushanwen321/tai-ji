@@ -155,6 +155,22 @@ describe('errorPolicy: throw 表外处置', () => {
     )
   })
 
+  it('词表外 event 值（null/undefined/数字/无 type 对象）按表外处置拒绝，不裸 crash', () => {
+    for (const bad of [null, undefined, 42, {}, { type: 42 }] as unknown[]) {
+      // throw 机器：IllegalTransitionError（消息含机器名与该态合法事件清单，指向排查方向）
+      expect(() => throwMachine.transition('staging', bad as 'compress_done')).toThrow(
+        IllegalTransitionError,
+      )
+      try {
+        throwMachine.transition('staging', bad as 'compress_done')
+      } catch (e) {
+        expect((e as IllegalTransitionError).from).toBe('staging')
+        expect((e as IllegalTransitionError).on).toBe(String(undefined))
+        expect((e as Error).message).toContain('该态合法事件')
+      }
+    }
+  })
+
   it('errorFactory 保形既有错误类型（instanceof 分类分支仍命中）', () => {
     class ArchiveDomainError extends Error {
       constructor(readonly code: string) {
@@ -214,6 +230,15 @@ describe('errorPolicy: result 表外处置（plan「不炸 turn」契约）', ()
       ok: false,
       reason: 'illegal-transition',
     })
+  })
+
+  it('词表外 event 值（null/undefined/数字/无 type 对象）同样返回 ok: false', () => {
+    for (const bad of [null, undefined, 42, {}, { type: 42 }] as unknown[]) {
+      expect(resultMachine.transition('planning', bad as 'submit')).toEqual({
+        ok: false,
+        reason: 'illegal-transition',
+      })
+    }
   })
 })
 
