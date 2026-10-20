@@ -32,7 +32,9 @@
       <span class="font-mono text-[length:var(--text-2xs)] text-neutral-fg-2">{{ totalCount }}</span>
       <!-- 右侧工具组（用户裁决 2026-10-11）：新建项目「+」紧贴模式开关（组内 gap 2px，
            组整体 ml-auto 承接右贴）。新建项目入口 = 区头「+」→ 列表顶部草稿行（见列表容器首行），
-           不再使用区头内联输入。 -->
+           不再使用区头内联输入。
+           [session-archive D10] 归档入口插在「+」与模式开关之间：Package 图标 +
+           archiveCount 角标（count 0 隐藏，按钮仍可点——空归档列表有引导空态）。 -->
       <div class="ml-auto flex items-center gap-[2px]">
         <Button
           variant="ghost"
@@ -44,6 +46,23 @@
           @click="startCreate"
         >
           <Plus :stroke-width="1.8" />
+        </Button>
+        <Button
+          variant="ghost"
+          size="icon"
+          data-testid="sidebar-archive-entry-btn"
+          class="relative grid size-[24px] place-items-center rounded-[var(--radius-xs)] p-0 text-neutral-dim transition-colors hover:bg-surface-hover hover:text-neutral-fg [&_svg]:size-[13px]"
+          :title="t('sidebar.archiveEntry.title', { count: archiveCount })"
+          :aria-label="t('sidebar.archiveEntry.title', { count: archiveCount })"
+          @click="emit('openArchives')"
+        >
+          <Package :stroke-width="1.8" />
+          <!-- 计数角标（D10：count 0 隐藏；>0 右上角 accent 圆形 mono 小字，99 封顶） -->
+          <span
+            v-if="archiveCount > 0"
+            data-testid="sidebar-archive-count-badge"
+            class="absolute -right-[3px] -top-[3px] grid min-w-[14px] place-items-center rounded-full bg-accent px-[3px] font-mono text-[9px] leading-[14px] text-neutral-fg"
+          >{{ archiveCount > 99 ? '99+' : archiveCount }}</span>
         </Button>
         <!-- A/C 双段图标开关（demo .mode-seg：surface 槽 + hairline 边 + 26×24 钮 + 13px 图标）：
              选中态 = demo Tier A 状态件范式（--sel-bg accent tint 底 + fg 字 + 1px --sel-edge 内描边）。
@@ -128,9 +147,10 @@
             :status="statusOf(s.id)"
             :child-count="childCountOf(s)"
             :parent-label="parentLabelOf(s)"
+            :restored-highlight="s.id === restoredSessionId"
             @select="emit('select', $event)"
             @rename="emit('rename', $event)"
-            @delete="emit('delete', $event)"
+            @archive="emit('archive', $event)"
             @set-project="emit('setProject', $event)"
             @navigate-parent="emit('navigateParent', $event)"
             @abort="emit('abort', $event)"
@@ -166,9 +186,10 @@
             :status="statusOf(s.id)"
             :child-count="childCountOf(s)"
             :parent-label="parentLabelOf(s)"
+            :restored-highlight="s.id === restoredSessionId"
             @select="emit('select', $event)"
             @rename="emit('rename', $event)"
-            @delete="emit('delete', $event)"
+            @archive="emit('archive', $event)"
             @set-project="emit('setProject', $event)"
             @navigate-parent="emit('navigateParent', $event)"
             @abort="emit('abort', $event)"
@@ -217,9 +238,10 @@
                 :status="statusOf(s.id)"
                 :child-count="childCountOf(s)"
                 :parent-label="parentLabelOf(s)"
+                :restored-highlight="s.id === restoredSessionId"
                 @select="emit('select', $event)"
                 @rename="emit('rename', $event)"
-                @delete="emit('delete', $event)"
+                @archive="emit('archive', $event)"
                 @set-project="emit('setProject', $event)"
                 @navigate-parent="emit('navigateParent', $event)"
                 @abort="emit('abort', $event)"
@@ -280,9 +302,10 @@
                   :status="statusOf(s.id)"
                   :child-count="childCountOf(s)"
                   :parent-label="parentLabelOf(s)"
+                  :restored-highlight="s.id === restoredSessionId"
                   @select="emit('select', $event)"
                   @rename="emit('rename', $event)"
-                  @delete="emit('delete', $event)"
+                  @archive="emit('archive', $event)"
                   @set-project="emit('setProject', $event)"
                   @navigate-parent="emit('navigateParent', $event)"
                   @abort="emit('abort', $event)"
@@ -320,7 +343,7 @@ import type { SessionGroup, SessionSummary } from '@taiji/shared'
 import type { DerivedStatus } from '@/types'
 import { computed, onBeforeUnmount, onMounted, provide, ref, watch, type Ref } from 'vue'
 import { useEventListener } from '@vueuse/core'
-import { Plus, Folder, List } from '@lucide/vue'
+import { Plus, Folder, List, Package } from '@lucide/vue'
 import { useI18n } from 'vue-i18n'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -330,7 +353,8 @@ import { EdgeFade } from '@/components/ui/edge-fade'
 import { isSessionCompleted } from '@/composables/logic/sessionStatus'
 import { registerModalSurface } from '@/composables/features/app/modal-surface-registry'
 import { useProjectStore, DEFAULT_PROJECT_ID } from '@/stores/project'
-import { useProjectGroups, type ProjectGroupVM, type SidebarSessionMode } from '@/composables/features/sidebar/useProjectGroups'
+import { useProjectGroups, type ProjectGroupVM } from '@/composables/features/sidebar/useProjectGroups'
+import { useSidebarSessionMode } from '@/composables/features/sidebar/use-sidebar-session-mode'
 import ProjectGroup from './ProjectGroup.vue'
 import DefaultProjectHead from './DefaultProjectHead.vue'
 import SessionDirLabel from './SessionDirLabel.vue'
@@ -339,19 +363,37 @@ import SessionItem from './SessionItem.vue'
 const { t } = useI18n()
 const projectStore = useProjectStore()
 
-const props = defineProps<{
+const props = withDefaults(defineProps<{
   /** 按 cwd 分组的会话（对齐后端 SessionGroup[]，全量、不预过滤——分组归属在本组件按项目切分） */
   groups: SessionGroup[]
   activeId: string | null
   /** 派生状态点，由容器注入 useSessionDerivations.derivedStatus */
   statusOf: (id: string) => DerivedStatus
-}>()
+  /**
+   * 归档条目数（session-archive D10 归档入口角标数据源）：config.sessions 广播帧携带值
+   * / 归档列表拉取对账（store.archiveCount 经 Sidebar 注入）。0 = 角标隐藏，按钮仍可点。
+   * 可选缺省 0（既有测试挂载不传时角标隐藏的默认形态）。
+   */
+  archiveCount?: number
+  /**
+   * 刚恢复的 session id（session-archive §5.1 恢复高亮：unarchive reply 消费点，经
+   * Sidebar 从 archive store 注入；null = 无恢复高亮）。置顶构造性成立（恢复重写主文件
+   * → mtime = 恢复时刻 → 组内第一），本字段只驱动行 accent-soft 高亮渐隐。
+   */
+  restoredSessionId?: string | null
+}>(), { archiveCount: 0, restoredSessionId: null })
 
 const emit = defineEmits<{
   select: [sessionId: string]
   rename: [sessionId: string]
-  delete: [sessionId: string]
+  /**
+   * 归档（session-archive D6）：SessionItem 悬停归档钮两段确认后透传——Sidebar 接
+   * useSidebarSessionActions.onArchiveSession（useSidebar.archiveSession core 编排）。
+   */
+  archive: [sessionId: string]
   newSession: []
+  /** 打开归档列表视图（D10 工具组归档入口钮；Sidebar 接 useArchiveView.openArchiveView） */
+  openArchives: []
   /** 目录行「+」：以该 cwd 为预选目录进 landing 新建（延迟 create，由 Sidebar 调 newSession(cwd)） */
   newSessionInFolder: [cwd: string]
   /** 停止运行中的 session（软停止，SessionItem 两段确认后调 abort → stopped，可 restore） */
@@ -470,23 +512,10 @@ function onFolderMouseLeave(cwd: string): void {
 
 // ── A/C 双模式（N8 延续：flat = 锚定聚焦 / groups = 目录浏览态；类型来自 useProjectGroups）──
 
-/** 模式持久化键（与 useDrawerSplitWidth 的 `taiji:` 前缀 UI 偏好同通道、同 localStorage 直存形态） */
-const SESSION_MODE_KEY = 'taiji:sidebar-session-mode'
-
-/** 恢复持久化模式（缺失/非法值回退默认平铺——N8 默认 A） */
-function loadSidebarSessionMode(): SidebarSessionMode {
-  return localStorage.getItem(SESSION_MODE_KEY) === 'groups' ? 'groups' : 'flat'
-}
-
-const mode = ref<SidebarSessionMode>(loadSidebarSessionMode())
-
-/** 切换模式并持久化；离开目录模式时复位组头删除确认态（组头随模式卸载，确认态不留残） */
-function setMode(next: SidebarSessionMode): void {
-  if (mode.value === next) return
-  mode.value = next
+/** 模式开关抽 composable（use-sidebar-session-mode，持久化键与恢复逻辑随迁）；切模式实际发生后的联动复位经回调留在本组件 */
+const { mode, setMode } = useSidebarSessionMode(() => {
   folderConfirmingCwd.value = null
-  localStorage.setItem(SESSION_MODE_KEY, next)
-}
+})
 
 // ── 项目分组派生与动作（useProjectGroups：归属切分 / 组序 / 锚定交互 / 新建草稿流 /
 //    重命名与删除确认态；切模式复位 folderConfirmingCwd 的联动保留在本组件 setMode）──

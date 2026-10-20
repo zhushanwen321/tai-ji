@@ -11,6 +11,14 @@ export default {
   switchSessionFailed: 'Failed to switch session: {msg}',
   newTaskFailed: 'Failed to create task: {msg}',
   deleteSessionFailed: 'Failed to delete session: {msg}',
+  // Archive action toasts (session-archive §5.1 success path; compression runs in
+  // background — wording does not claim completion)
+  archiveSessionDone: 'Archived "{name}"',
+  archiveSessionFailed: 'Archive failed: {msg}',
+  // Toolbar archive entry (D10: Package icon + count badge, hidden at 0)
+  archiveEntry: {
+    title: 'Archived sessions ({count})',
+  },
   deleteFolderFailed: 'Failed to delete folder sessions: {msg}',
   // S7：用 vue-i18n 复数（'|' 分隔单/复数，调用方 t(key, count, { count, error })），
   // 替换原 '(s)' hack；带 error 占位符让用户感知首个失败原因（S3）。
@@ -56,6 +64,11 @@ export default {
     rename: 'Rename',
     delete: 'Delete',
     deleteConfirm: 'Confirm delete?',
+    // Archive (session-archive D6/D12/D13, u-renderer-entry): hover archive button
+    // two-step confirm + generating-state disabled title
+    archive: 'Archive',
+    archiveConfirm: 'Click again to confirm archive',
+    archiveGenerating: 'Cannot archive while generating',
     forkFrom: 'forked from',
     markDone: 'Mark done',
     unmarkDone: 'Unmark done',

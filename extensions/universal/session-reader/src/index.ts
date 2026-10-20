@@ -159,6 +159,9 @@ const guidelines = [
   // zcode 路由（U9）对 LLM 的唯一可见部分：sa-id 输入自动路由，无需任何参数；首遇
   // zcode_* 错误码前先有背景预告。
   'sa- ids route transparently to pi or zcode engine sessions; sess_ prefixed ids are not accepted—use the completion-notice sa- id.',
+  // [session-archive D7] 归档态硬契约的 LLM 侧预告：引用已归档 session 只得摘要
+  //（返回头部显式标注「已归档」），恢复完整历史是用户操作。
+  'Archived sessions return summary-only views (marked 已归档/archived)—for full history, ask the user to restore the session.',
   'Errors carry a 👉 recovery hint—follow it to retry.',
   'Unsure about host environment or session roots? Run action:"doctor".',
 ]

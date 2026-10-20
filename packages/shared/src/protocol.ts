@@ -34,6 +34,17 @@ import type {
 } from './migration'
 import type { SegmentsMetadataEntry } from './message-metadata'
 import type { ImportCandidatesRequest, ImportCandidatesReply, ImportRequest, ImportReply } from './import-session'
+// 归档域 payload/reply 形状 SSOT 在 ./archive（session-archive 设计 D5 三 RPC + config.archives，
+// 本文件仅登记 type→payload 映射——u-renderer-entry 发起侧接线；runtime 分发表属 u-rpc-wiring）
+import type {
+  SessionArchiveRequest,
+  SessionArchiveReply,
+  SessionUnarchiveRequest,
+  SessionUnarchiveReply,
+  SessionPurgeArchiveRequest,
+  SessionPurgeArchiveReply,
+  ConfigArchivesReply,
+} from './archive'
 // codemode 域：payload/reply 形状 SSOT 在 ./codemode（codemode 设计 D1/A1，本文件仅登记
 // type→payload 映射）
 import type { CodemodeEnabledResult, CodemodeSetEnabledRequest, CodemodeSetEnabledResult } from './codemode'
@@ -192,6 +203,12 @@ export type ClientMessageType =
   // session.importCandidates / session.import（docs/design/import-session.md（已删除，git 可追溯）§3.3 D5）：导入 pi 会话
   // 两步流——importCandidates 拉候选列表，import 执行导入；reply 同名（request/reply 同名模式）。
   | 'session.importCandidates' | 'session.import'
+  // session 归档域三 RPC + 列表拉取（session-archive 设计 D5）：archive 归档（同步段搬移 +
+  // 簿记骨架，后台压缩异步）、unarchive 恢复回原路径原分组、purgeArchive 彻底删除（= delete
+  // 的归档态版本）；config.archives 拉归档列表（拉为主——打开归档视图时调用）。命名避开
+  // session.restore（已承载「重开 dead session 重新 spawn pi」语义）。reply 与 request 同名
+  //（payload 消费型，session.getSubagentStreamState 同模式）。
+  | 'session.archive' | 'session.unarchive' | 'session.purgeArchive' | 'config.archives'
   | 'message.send' | 'message.abort'
   // delivery.*（投递所有权内核 D5，ADR-0046 配对）：renderer 统一提交/单条撤销/全量回收回草稿/
   // 断连重报四 RPC。submit 后内核永不拒绝（排队取代拒绝）。
@@ -740,6 +757,12 @@ export interface ClientMessageMap {
   // 导入 pi 会话两步流：importCandidates 拉候选列表（对话框/搜索/切目录），import 执行导入。
   'session.importCandidates': ImportCandidatesRequest
   'session.import': ImportRequest
+  // session 归档域三 RPC 请求（session-archive 设计 D5；payload 形状 SSOT = ./archive）。
+  'session.archive': SessionArchiveRequest
+  'session.unarchive': SessionUnarchiveRequest
+  'session.purgeArchive': SessionPurgeArchiveRequest
+  // config.archives：归档列表拉取（无参数——列表 = 归档目录扫描全量派生，D9 不变量 3）。
+  'config.archives': Record<string, never>
   // message.send：images 是 Cmd+V 富呈现通路的图片数据（base64，不含 data: 前缀）。
   // runtime 适配层（rpc-client）补 type:'image' 组装成 pi 的 ImageContent。
   // 不带 type 字段（type 是 pi 私有，runtime 适配层负责补）。
@@ -1314,6 +1337,8 @@ export type ServerMessageType =
   // session.importCandidates / session.import（docs/design/import-session.md（已删除，git 可追溯）§3.3 D5）：reply 与 request
   // 同名（session.subscribe 模式，sendCommand 按 id resolve），payload 见 ServerMessageMapBase。
   | 'session.importCandidates' | 'session.import'
+  // session 归档域 reply（与 request 同名，payload 消费型——session.getSubagentStreamState 同模式）
+  | 'session.archive' | 'session.unarchive' | 'session.purgeArchive' | 'config.archives'
   | 'session.exited'
   // D7（u8-pi-respawn）：pi 崩溃自动恢复结果推送（payload 见
   // ServerMessageMapBase 两行注释）。
@@ -2245,7 +2270,10 @@ export interface ServerMessageMapBase {
   // 清理唤醒）——撤窗语义两值一致，approved 供消费端审计/展示，不参与匹配。
   'plugin:permissionRequestResolved': { pluginId: string; requestId: string; approved: boolean } & Record<string, unknown>
   'model.list': { models: ModelInfo[] }
-  'config.sessions': { groups: SessionGroup[] }
+  // config.sessions：reply + broadcast 双用帧。archiveCount（session-archive 设计 D5 协议
+  // 变更点）= 归档目录条目数（侧栏归档入口角标数据源），reply 与广播帧均携带；可选字段
+  //（旧 runtime / mock 缺省 = 无归档数据，消费方按 0 隐藏角标）。
+  'config.sessions': { groups: SessionGroup[]; archiveCount?: number }
   /** config.systemPrompt：reply + broadcast + 初始推送三用。corrupted=true 表示磁盘配置损坏已回退默认（SR5）。 */
   'config.systemPrompt': { config: SystemPromptConfig; corrupted?: boolean }
   // config.uiLocaleSet：config.setUiLocale 的 ack 型 reply（无读回字段——写盘失败走错误信封）。
@@ -2399,6 +2427,14 @@ export interface ServerMessageMapBase {
   // 与 ClientMessageMap 同名 request 一一对应；失败走 error envelope（code 见 ImportErrorCode）。
   'session.importCandidates': ImportCandidatesReply
   'session.import': ImportReply
+  // session 归档域三 RPC reply（与 request 同名，payload 消费型）：unarchive 返回恢复后的
+  // SessionSummary（前端原项目组顶部高亮置顶）；purgeArchive 在 keep-all 保守分支触发时
+  // 携带 keptSubagentsDir（失败显式上报，D5 步骤 7）。领域错误走统一 error envelope
+  //（code 见 ./archive ARCHIVE_ERROR_CODES 六值词表）。
+  'session.archive': SessionArchiveReply
+  'session.unarchive': SessionUnarchiveReply
+  'session.purgeArchive': SessionPurgeArchiveReply
+  'config.archives': ConfigArchivesReply
   // session.subagents：当前 session 派生的 subagent 列表。
   // [W1 读路径换源] 数据源 = runtime 每会话内存派生视图（pi entry 游标 + record 事件文件 journal tail
   //   双增量源喂入，主 session JSONL 不再全文重读——v2 注册/终态条目稀疏化后 entry 通道只承载
@@ -3297,6 +3333,12 @@ export interface ReplyPayloadMap {
   // session.importCandidates / session.import（docs/design/import-session.md（已删除，git 可追溯）§3.3 D5）：reply 与 request 同名
   'session.importCandidates': ServerMessageMap['session.importCandidates']
   'session.import': ServerMessageMap['session.import']
+  // session 归档域（session-archive 设计 D5）：三 RPC reply 同名（payload 消费型）+
+  // config.archives 归档列表拉取。领域错误走统一 error envelope（ARCHIVE_ERROR_CODES）。
+  'session.archive': ServerMessageMap['session.archive']
+  'session.unarchive': ServerMessageMap['session.unarchive']
+  'session.purgeArchive': ServerMessageMap['session.purgeArchive']
+  'config.archives': ServerMessageMap['config.archives']
   // plugin.* RPC reply 映射（plugin-message-handler.ts 全部发 reply）：
   //  - plugin.list / toggle / uninstall / install → reply 'config.plugins' { plugins }（前端读 plugins 列表刷新 UI）
   //  - 权限命令（approvePermissions / revokePermissions / denyPermissions）→ reply 'pong' {}

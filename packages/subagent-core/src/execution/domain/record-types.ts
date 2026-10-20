@@ -30,6 +30,11 @@
  * （out-of-scope 维持现状）；收尾动作（U5）走 markSettled 只写 stopReason 不写
  * closedReason（不终态化），close 收尾写入 journal 记录走 markSettledOut（不动占用位）——
  * closedReason 不再由 cancel/close/编排性关闭产出。
+ *
+ * [state-machine-infrastructure M2] 两态词表的翻边判定权威 =
+ * record-status-machine.ts（permanentSessionStatusMachine，errorPolicy:'result'）
+ * ——running/idle 全部 status 翻边写点经机器判定；词表对齐由声明处 satisfies
+ * 双向锁定（加态先改本词表，机器声明编译期报错跟投）。
  */
 export type ExecutionStatus = "running" | "idle";
 

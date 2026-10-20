@@ -320,19 +320,21 @@ describe('后行档契约：SessionList 确认态本体入聚合（yieldsEsc 让
     window.localStorage.removeItem('taiji:sidebar-session-mode')
   })
 
-  it('SessionItem 后代删除确认态开着 → 聚合让位（N 后代确认态聚合谓词）', async () => {
+  it('SessionItem 后代归档确认态开着 → 聚合让位（N 后代确认态聚合谓词）', async () => {
     const wrapper = mountList()
     await nextTick()
-    const itemDelete = wrapper.find('.session-item button[title="删除"]')
-    expect(itemDelete.exists(), 'session 删除按钮在 DOM').toBe(true)
+    // [session-archive D6] 悬停第三钮已从「删除」迁移为「归档」（两段确认 accent 态）
+    // ——确认态载体不变（confirming ref 注入聚合集合），title 文案随语义迁移
+    const itemArchive = wrapper.find('.session-item button[title="归档"]')
+    expect(itemArchive.exists(), 'session 归档按钮在 DOM').toBe(true)
 
-    await itemDelete.trigger('click')
-    expect(wrapper.find('.session-item button[title="确认删除？"]').exists(), '确认态 DOM').toBe(true)
+    await itemArchive.trigger('click')
+    expect(wrapper.find('.session-item button[title="再次点击确认归档"]').exists(), '确认态 DOM').toBe(true)
     expect(anyModalSurfaceYieldsEsc(), '后代确认态 ⇒ 让位').toBe(true)
 
     await wrapper.find('.session-item').trigger('mouseleave')
     await nextTick()
-    expect(wrapper.find('.session-item button[title="删除"]').exists(), '确认态已复位').toBe(true)
+    expect(wrapper.find('.session-item button[title="归档"]').exists(), '确认态已复位').toBe(true)
     expect(anyModalSurfaceYieldsEsc(), '确认态清 ⇒ 让位解除').toBe(false)
     wrapper.unmount()
   })

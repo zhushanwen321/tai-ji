@@ -103,13 +103,17 @@ pi 子进程事件 → infra/pi/event-adapter(翻译) → ServerMessage(WS)
 | NewTaskFlow | 8 态：`idle/landing/dir-popover/branch-popover/dir-dialog/branch-modal/completed/cancelled` | `useNewTaskFlow.ts` |
 | Plugin 生命周期 | `UNLOADED → LOADING → ACTIVATING → ACTIVE → DEACTIVATING → UNLOADED`（+ CRASHED） | [CONTEXT.md](CONTEXT.md)「Plugin」词条 |
 | 投递条目（delivery 内核） | `queued → in-flight → delivered/failed/cancelled`（每条目记 lane：direct/steer/queued）；delivered/cancelled 转判重 tombstone（轻量元数据，runtime 存活期）；受理 ≠ 送达两阶段，failed 可重试/撤销 | [ADR-0074](adr/decisions.md)（投递所有权内核） |
-| Workflow run 生命周期 | 4 态 `created → running → settling → terminal`（lifecycle，dispatched 并入 running）+ `interrupted` 暂停态（崩溃收编 / terminate 被动失联进入，resume 流回 running——非终局）× outcome 四值 `done/failed/cancelled/time_limited`（仅 terminal 态产生、与 lifecycle 正交；interrupted 入 lifecycle 非 outcome），`RUN_TRANSITIONS` 显式转移表裁决、表外 fail-fast；record 事件流（`<runId>.record.jsonl`）为唯一事实源，主 session 每实体只写注册/终态两条 v2 条目（[ADR-0094](adr/decisions.md)、[ADR-0080](adr/decisions.md)、[ADR-0082](adr/decisions.md)） | `subagent-core/src/orchestration/run-events.ts`（[subagents/architecture.md](extensions/subagents/architecture.md) §4） |
+| Workflow run 生命周期 | 4 态 `created → running → settling → terminal`（lifecycle，dispatched 并入 running）+ `interrupted` 暂停态（崩溃收编 / terminate 被动失联进入，resume 流回 running——非终局）× outcome 四值 `done/failed/cancelled/time_limited`（仅 terminal 态产生、与 lifecycle 正交；interrupted 入 lifecycle 非 outcome），`RUN_MACHINE` 机器声明裁决（`@zhushanwen/state-machine`，[ADR-0152](adr/decisions.md)）、表外 fail-fast；record 事件流（`<runId>.record.jsonl`）为唯一事实源，主 session 每实体只写注册/终态两条 v2 条目（[ADR-0094](adr/decisions.md)、[ADR-0080](adr/decisions.md)、[ADR-0082](adr/decisions.md)） | `subagent-core/src/orchestration/run-events.ts`（[subagents/architecture.md](extensions/subagents/architecture.md) §4） |
 
 ## 共享类型（shared）
 
 `packages/shared/` 是独立 npm package，三上下文共享。
 
 `message.ts`（ClientMessage/ServerMessage 协议）、`protocol.ts`、`session.ts`、`panel.ts`、`settings.ts`、`provider.ts`、`extension.ts`、`constants.ts`（`ENV_WHITELIST_PREFIXES` 等 SSOT）、`errors.ts`。依赖方向：`main/runtime/renderer → shared → 外部`，禁止反向。
+
+## 共享状态机基建（state-machine）
+
+`packages/state-machine`（npm `@zhushanwen/state-machine`，[ADR-0152](adr/decisions.md)）是「领域状态必须显式状态机」裁决的共享实现载体，与 shared 的分工 = shared 承载协议类型（无运行期实现），本包承载运行时机器机制：`defineStateMachine` 声明式工厂（词表 + 行式转移表 + guard + 动作引用 + 每实体错误策略）+ `transition` 纯函数内核 + `runTransition` 事务编排外壳 + `generateTableTests` 穷举单测生成。零运行时依赖；runtime / subagent-core / extension-protocol 经 workspace 依赖，pi 扩展侧（goal 等）经 npm 发布通道依赖（发布位次：基建包先行于依赖它的包进 npm）。存量五域状态机（workflow run / 画布节点 / plan / goal / permanent-session）与归档单元已迁移至本基建（领域登记见 [domain-model.md](domain-model.md)「状态机基建」节），新有状态领域一律声明即用。
 
 ## 核心架构约束
 

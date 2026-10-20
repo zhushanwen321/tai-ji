@@ -25,15 +25,15 @@ export interface ModelRef {
 
 /**
  * 模型清单源的最小 duck 接口（只读 getAvailable）。
- * execution/model-resolver.ts 的 ModelRegistryLike 结构兼容（getAvailable 返回 ModelInfo 超集）。
+ * execution/assembly/model-resolver.ts 的 ModelRegistryLike 结构兼容（getAvailable 返回 ModelInfo 超集）。
  */
 export interface ModelRefSource {
   getAvailable(): ReadonlyArray<{ provider: string; id: string }>;
 }
 
 // ============================================================
-// thinking level 白名单（SSOT：原 execution/model-resolver.ts 常量迁入，
-// model-resolver re-export 保持既有 import 路径不变）
+// thinking level 白名单（SSOT；由 execution/assembly/model-resolver.ts
+// re-export 保持既有 import 路径不变）
 // ============================================================
 
 /**

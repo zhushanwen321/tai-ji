@@ -17,6 +17,7 @@
  */
 import type { Entry, ParseResult } from '@zhushanwen/session-core'
 import { textBlockParts } from './core/render.js'
+import { archivedResult } from './discovery/archive-match.js'
 import type { MatchedSession } from './discovery/find.js'
 import { listRecordManifests, type RecordManifest } from './discovery/subagents.js'
 import { err, requireStr, SESSION_ID_PREFIX_LEN, stripHash } from './handler-utils.js'
@@ -208,6 +209,11 @@ export async function doResult(
   for (const id of ids) {
     const resolved = await deps.resolveSessionId(id, 'result', agentDir, params.source, prefetchedManifests)
     if (resolved.kind === 'multi') return deps.disambiguate(resolved.query, resolved.candidates)
+    // [session-archive D7] 片段命中归档 session：完整正文不可读，统一返回归档态摘要
+    //（构造与渲染收敛在 archive-match 的 archivedResult，与 tool-handler 同一出口）
+    if (resolved.kind === 'archived' || resolved.kind === 'archived-multi') {
+      return archivedResult(resolved)
+    }
     const { entries } = await deps.safeParse(resolved.fileName)
     const text = extractFinalAssistantText(entries)
     if (text.length === 0) {

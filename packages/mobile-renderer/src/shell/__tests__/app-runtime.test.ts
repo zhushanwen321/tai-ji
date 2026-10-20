@@ -31,9 +31,10 @@ import {
 import { __testing, chatStore } from '../app-runtime'
 import { errorBarMessage, __testing as errorBarTesting } from '../error-bar'
 
-const { mockStreamSubscribe, mockUnsubscribe } = vi.hoisted(() => ({
+const { mockStreamSubscribe, mockUnsubscribe, mockArchive } = vi.hoisted(() => ({
   mockStreamSubscribe: vi.fn(() => vi.fn()),
   mockUnsubscribe: vi.fn(() => Promise.resolve()),
+  mockArchive: vi.fn(() => Promise.resolve({ sessionId: 'arc-sid' })),
 }))
 
 vi.mock('@taiji/core/transport/api/domains/chat', async (importOriginal) => {
@@ -42,7 +43,7 @@ vi.mock('@taiji/core/transport/api/domains/chat', async (importOriginal) => {
 })
 vi.mock('@taiji/core/transport/api/domains/session', async (importOriginal) => {
   const actual = await importOriginal<typeof import('@taiji/core/transport/api/domains/session')>()
-  return { ...actual, unsubscribe: mockUnsubscribe }
+  return { ...actual, unsubscribe: mockUnsubscribe, archive: mockArchive }
 })
 
 const sessionEntry = __testing.sessionEntry
@@ -106,6 +107,17 @@ describe('sessionEntry 端口束装配（D2/U5）', () => {
     sessionEntry.evictLru!(null)
 
     expect(mockUnsubscribe).not.toHaveBeenCalled()
+  })
+})
+
+describe('SessionApiPort 归档 RPC 透传（[u-renderer-entry]）', () => {
+  beforeEach(() => {
+    mockArchive.mockClear()
+  })
+
+  it('archive 成员透传 session.archive（移动壳无归档 UI 入口，端口形状对齐桌面）', async () => {
+    await expect(__testing.sessionApiPort.archive!('arc-sid')).resolves.toEqual({ sessionId: 'arc-sid' })
+    expect(mockArchive).toHaveBeenCalledWith('arc-sid')
   })
 })
 

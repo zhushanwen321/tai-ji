@@ -54,6 +54,14 @@ import {
   isEngineProtocolErrorCode,
 } from "@zhushanwen/subagent-engine-sdk";
 
+// [M6] 状态机表与判定迁移 @zhushanwen/state-machine 基建承载（设计
+// state-machine-infrastructure §6 D6-M6 / §7.2 V3）：表行 guard/outputs/
+// terminalOutcome 声明直译；编排（appendTransition）与 fold 留域内（run 是
+// 事务外壳边界外域，见 D2）。错误类型保形经 errorFactory 构造既有
+// IllegalTransitionError 实例（terminal-actions 4 处 instanceof 分类分支与
+// worker-message-pump 让位吸收路径仍命中，D4）。
+import { defineStateMachine, type MachineEvent } from "@zhushanwen/state-machine";
+
 // [D1 Class A] run 域词汇下沉 shared；本文件 re-export 保持 orchestration 消费面与 barrel 不变
 import type { RunEventType } from "../shared/run-vocabulary.ts";
 import type { RunErrorCode, RunOutcome } from "../shared/run-vocabulary.ts";
@@ -498,14 +506,14 @@ export interface WorkflowModelOverride {
  * 决策六①：run 的事件流追加覆盖记录，事件流是追加式单源、唯一合法持久化形态）。
  *
  * **不参与生命周期状态机**（worker-log 同款——记账面与状态面正交）：fold 显式
- * 跳过（foldRunEventCheckpoint），不占 RUN_TRANSITIONS 表行，水位照常推进。
+ * 跳过（foldRunEventCheckpoint），不占 RUN_MACHINE 表行，水位照常推进。
  * 硬约束（调研 S3）：覆盖记录只做记账持久化与 resume 生效值缺省，不进 worker
  * 的 `$MODEL`、不改重建 spec 的 run 级模型、不碰回放一致性比对——覆盖走宿主
  * 派发侧覆写（决策六②），三者在场时回放哈希不受扰动。
  *
  * 写入面 = 宿主切换编排（U4b）经 journal append 单点直写（seq 由 journal 实装
  * 分配，W1 seq 契约：新写行信封必填正整数 seq）；不经 dispatchRunTrigger——
- * model-override 是非转移记账事件（不占 RUN_TRANSITIONS 表行），
+ * model-override 是非转移记账事件（不占 RUN_MACHINE 表行），
  * appendTransition 首行 transition() 对无转移表行事件必抛 IllegalTransitionError，
  * 结构上进不了转移裁决链（RunDispatchSource = { runId, journalDir? } 对
  * interrupted 态 run 本可达，见 §8 验收场景 3 中断后补切；不可达的是转移通道而非
@@ -521,7 +529,7 @@ export interface ModelOverrideEvent extends EventEnvelope, WorkflowModelOverride
  * worker 诊断日志帧（[§2.1 errorLogs 持久化] ADR-0093）。
  *
  * **不参与生命周期状态机**：诊断面与状态面正交——fold 显式跳过本类事件（见
- * foldRunEventCheckpoint），故不占 RUN_TRANSITIONS 表行，也不受终态吸收约束（run
+ * foldRunEventCheckpoint），故不占 RUN_MACHINE 表行，也不受终态吸收约束（run
  * 终局后迟到的诊断日志不会把 fold 判成坏帧）。唯一消费面 = `errorLogsFromEvents`
  * 重建（与活体写入同语义：按序追加 + 尾部上限裁剪）。
  */
@@ -608,7 +616,7 @@ export interface RunEventJournal {
  * model-override 记账直写（resume-run.ts appendResumeModelOverride，第三合法写点
  * ——F1-26 后续项「补切 + 无参 resume 合一步」的统一记账通道）。直写登记理由：
  * model-override 是非转移
-   * 记账事件（不占 RUN_TRANSITIONS 表行），appendTransition 首行 transition()
+   * 记账事件（不占 RUN_MACHINE 表行），appendTransition 首行 transition()
    * 对无转移表行事件必抛 IllegalTransitionError——结构上进不了转移裁决链
    * （RunDispatchSource = { runId, journalDir? } 对 interrupted 态 run 本可达，
    * 不可达的是转移通道而非 run 本身）；同款直写先例 = appendRunDiagnosticEvent
@@ -724,86 +732,14 @@ export const TRANSITION_OUTPUT_TYPES = [
 
 export type TransitionOutput = (typeof TRANSITION_OUTPUT_TYPES)[number];
 
-// ── 合法转移表（数据 = 唯一权威；表外一律 fail-fast）───────────
-
-/**
- * running × agent-settled 的二支判别（D5 转移表行 3/4 的条件维度）。
- *
- * 为什么这一族需要条件行：「重试预算未尽 → 留在 running」与「预算耗尽 / 全部
- * settled → 进入终局判定」依赖状态机外的事实（在途 ask 数、排定的重试），事件
- * 载荷本身不可判定。裁决输入经 TransitionContext.enterSettling 显式传入，两支
- * 都落表（而非散落 if），穷尽单测照常遍历。
- */
-export type AskSettleBranch = "more-work-expected" | "adjudicate-now";
-
-/** 单条转移规则（表行）。 */
-export interface TransitionRule { // oe-exempt:20260929:framework:workflow/record 协议契约类型——ports 类型契约先行、单实现常态（dev-0.10.5 已验收代码 merge 带入）
-  from: RunLifecycle;
-  on: RunEventType | ControlTriggerType;
-  /**
-   * 条件行判别标签：同 (from, on) 键二支时区分，undefined = 无条件行。
-   * 当前唯一条件族 = running × agent-settled。
-   */
-  guard?: AskSettleBranch;
-  next: RunLifecycle;
-  /**
-   * next === "terminal" 时的终局形态来源：固定值（cancel → cancelled）或缺省 =
-   * 从 run-settled 事件载荷取（event.outcome）。
-   * 非 terminal 行恒缺省。abandon 路径的 errorCode（interrupted_abandoned）
-   * 是 manifest 写入内容而非状态——由收编原语消费方附着，不进 RunLifecycleState
-   * （词表边界见 RunErrorCode 注释）。
-   */
-  terminalOutcome?: RunOutcome;
-  /** 该转移应发生的输出动作（声明性标签，执行归调用侧）。 */
-  outputs: readonly TransitionOutput[];
-}
-
-/**
- * 合法转移表（[D2] 四态 + interrupted 重写后 15 行；沿革：[W2 D2] 17 行 →
- * [D2]（workflow-run-resume-revision）重写：dispatched 并入 running（两态行为
- * 相同无消费方）、armed 三行随 [D5] 删、member-pool 三行随 [D6] 删、新增
- * run-interrupted 两行 + run-resumed 一行 + phase-started/phase-settled 三行
- * （[D3]）——原为续跑设计的 terminal→dispatched 特殊转移行与 guard 收窄整体
- * 取消（interrupted 是普通流转，无特例））。
- *
- * D5 示意表的落地 + 补全的必要转移：phase-started/phase-settled 的 running 自环
- * （phase 切换与 phase 收束不迁移 run lifecycle——phase 是 run 聚合内的子状态机，
- * [D3]）、后续 agent-started/agent-retrying 的 running 自环（parallel/pipeline
- * 多波）、run-settled 自 running 的终局行（cancel 路径合成 run-settled 与零 call
- * 脚本的 record fold 重放需要——fold 只见 record 事件，控制事件不在流中）、
- * run-interrupted 自 running/settling（[D2] 崩溃收编 / terminate 被动失联——
- * outputs 仅 journal-append：中断非终局，不写 manifest 派生缓存、不发终局通知）、
- * run-resumed 自 interrupted（[D2] 复活——outputs 仅 journal-append：复活非终局，
- * 通知语义归 resume 编排（U2））。
- */
-export const RUN_TRANSITIONS: readonly TransitionRule[] = [
-  // ── created：创建落账前 ──
-  { from: "created", on: "run-created", next: "running", outputs: ["journal-append"] },
-
-  // ── running：call 执行段（多波自环 + agent-settled 二支 + phase 子状态机自环）──
-  { from: "running", on: "phase-started", next: "running", outputs: ["journal-append"] },
-  { from: "running", on: "phase-settled", next: "running", outputs: ["journal-append"] },
-  { from: "running", on: "agent-started", next: "running", outputs: ["journal-append"] },
-  { from: "running", on: "agent-retrying", next: "running", outputs: ["journal-append"] },
-  { from: "running", on: "agent-settled", guard: "more-work-expected", next: "running", outputs: ["journal-append"] },
-  { from: "running", on: "agent-settled", guard: "adjudicate-now", next: "settling", outputs: ["journal-append"] },
-  { from: "running", on: "run-interrupted", next: "interrupted", outputs: ["journal-append"] },
-  { from: "running", on: "run-settled", next: "terminal", outputs: ["journal-append", "manifest-write", "notify"] },
-  { from: "running", on: "cancel-requested", next: "terminal", terminalOutcome: "cancelled", outputs: ["journal-append", "manifest-write", "notify"] },
-
-  // ── settling：终局判定中（等 run-settled / cancel；崩溃窗内可被中断）──
-  { from: "settling", on: "phase-settled", next: "settling", outputs: ["journal-append"] },
-  { from: "settling", on: "run-interrupted", next: "interrupted", outputs: ["journal-append"] },
-  { from: "settling", on: "run-settled", next: "terminal", outputs: ["journal-append", "manifest-write", "notify"] },
-  { from: "settling", on: "cancel-requested", next: "terminal", terminalOutcome: "cancelled", outputs: ["journal-append", "manifest-write", "notify"] },
-
-  // ── interrupted：暂停态（[D2] 非终局——run-resumed 复活是唯一出边）──
-  { from: "interrupted", on: "run-resumed", next: "running", outputs: ["journal-append"] },
-
-  // ── terminal：吸收态，无表行（任意事件 fail-fast，D5 表末行）──
-];
-
-// ── 唯一入口 transition（纯函数）──────────────────────────────
+// ── 合法转移表 + 唯一入口 transition（基建承载）──────────
+//
+// 表 = @zhushanwen/state-machine 机器声明（见下方 RUN_MACHINE）：行式表
+// （guard 行内函数值；from 数组消重复行），判定（查表 / guard 求值 /
+// 多命中不变量 / 合法事件清单派生）归基建内核。域内保留：
+// - 对外 transition 三参签名与返回形态（本模块消费方 = terminal-actions 的
+//   appendTransition 编排 + 域内 fold——两者零改动，run 是事务外壳边界外域见 D2）；
+// - IllegalTransitionError 错误类型（errorFactory 保形构造，D4）。
 
 /**
  * running × agent-settled 二支的裁决输入。
@@ -835,28 +771,84 @@ export class IllegalTransitionError extends Error {
   }
 }
 
-function guardMatches(rule: TransitionRule, ctx?: TransitionContext): boolean {
-  if (rule.guard === undefined) return true;
-  return rule.guard === "adjudicate-now" ? ctx?.enterSettling === true : ctx?.enterSettling !== true;
-}
+/**
+ * 转移事件词表（机器 events）= journal 事件去掉诊断/记账两类 + 控制事件。
+ *
+ * worker-log / model-override 不进机器词表（M6 fold 侧登记①）：诊断/记账面与
+ * 生命周期正交，fold 显式枚举跳过（foldRunEventCheckpoint）；对 transition 投递
+ * 则恒表外 fail-fast（appendTransition 首行的结构防线——非转移事件进不了转移
+ * 裁决链，合法直写走 journal.append 的记账/诊断写点）。
+ */
+type RunTransitionEvent = Exclude<RunEventType, "worker-log" | "model-override"> | ControlTriggerType;
 
-/** 从表派生某 lifecycle 的合法事件清单（错误信息用，不手工维护第二份）。 */
-function legalTriggerTypesOf(lifecycle: RunLifecycle): string[] {
-  const seen = new Set<string>();
-  for (const rule of RUN_TRANSITIONS) {
-    if (rule.from === lifecycle) seen.add(rule.on);
-  }
-  return [...seen];
-}
+/**
+ * run 生命周期机器声明（行式表 12 行、展开 15 边——from 数组消重复）。
+ *
+ * - guard 二支（running × agent-settled）行内函数值：互补 guard
+ *   `ctx?.enterSettling !== true` / `=== true` 恒单命中（「其余情况落到此行」的
+ *   兜底语义由互补 guard 表达，不设无 guard 垫底行——D3 匹配语义）；undefined
+ *   ctx 落 more-work-expected 支，域内 fold 调 transition 不传 ctx 的保守取支
+ *   由此保形。
+ * - terminalOutcome：cancel-requested 行固定值 'cancelled'；run-settled 行
+ *   `{ fromEvent: "outcome" }` 从事件载荷取（RunSettledEvent.outcome）。
+ * - errorPolicy 'throw' + errorFactory 构造既有 IllegalTransitionError 实例
+ *   （错误类型保形，D4：terminal-actions 4 处 instanceof 分类分支与
+ *   worker-message-pump 让位吸收路径仍命中；消息含合法事件清单的结构不变，
+ *   detail 文本由基建统一组装）。
+ * - terminal 是吸收态：states 显式 `terminal: true` 声明、无出边——任意事件
+ *   表外 fail-fast。
+ */
+export const RUN_MACHINE = defineStateMachine<RunLifecycle, RunTransitionEvent, TransitionContext>({
+  name: "run-lifecycle",
+  states: {
+    created: {},
+    running: {},
+    settling: {},
+    interrupted: {},
+    terminal: { terminal: true },
+  },
+  initial: "created",
+  events: {
+    "run-created": {},
+    "phase-started": {},
+    "phase-settled": {},
+    "agent-started": {},
+    "agent-retrying": {},
+    "agent-settled": {},
+    "run-interrupted": {},
+    "run-resumed": {},
+    "run-settled": {},
+    "cancel-requested": {},
+  },
+  transitions: [
+    // ── created：创建落账前 ──
+    { from: "created", on: "run-created", to: "running", outputs: ["journal-append"] },
 
-function resolveTerminalOutcome(rule: TransitionRule, trigger: TransitionTrigger): RunOutcome {
-  if (rule.terminalOutcome !== undefined) return rule.terminalOutcome;
-  if (trigger.type === "run-settled") return trigger.outcome;
-  // 表不变量：无固定 terminalOutcome 的终局行只能是 run-settled 行（穷尽单测把守）
-  throw new Error(
-    `转移表不变量破坏：(from=${rule.from}, on=${rule.on}) 终局行既无固定 terminalOutcome 也无法从事件取 outcome——修 RUN_TRANSITIONS 该行。`,
-  );
-}
+    // ── running：call 执行段（多波自环 + agent-settled 二支 + phase 子状态机自环）──
+    { from: "running", on: "phase-started", to: "running", outputs: ["journal-append"] },
+    { from: "running", on: "phase-settled", to: "running", outputs: ["journal-append"] },
+    { from: "running", on: "agent-started", to: "running", outputs: ["journal-append"] },
+    { from: "running", on: "agent-retrying", to: "running", outputs: ["journal-append"] },
+    // agent-settled 二支：more-work-expected（重试预算未尽/在途 ask 仍在 → 留 running；
+    // undefined ctx 也落此支——fold 保守取支）
+    { from: "running", on: "agent-settled", to: "running", guard: (ctx) => ctx?.enterSettling !== true, outputs: ["journal-append"] },
+    // adjudicate-now（预算耗尽/全部 settled → 终局判定）——与上行互补恒单命中
+    { from: "running", on: "agent-settled", to: "settling", guard: (ctx) => ctx?.enterSettling === true, outputs: ["journal-append"] },
+    { from: ["running", "settling"], on: "run-interrupted", to: "interrupted", outputs: ["journal-append"] },
+    { from: ["running", "settling"], on: "run-settled", to: "terminal", terminalOutcome: { fromEvent: "outcome" }, outputs: ["journal-append", "manifest-write", "notify"] },
+    { from: ["running", "settling"], on: "cancel-requested", to: "terminal", terminalOutcome: "cancelled", outputs: ["journal-append", "manifest-write", "notify"] },
+
+    // ── settling：终局判定中（等 run-settled / cancel；崩溃窗内可被中断）──
+    { from: "settling", on: "phase-settled", to: "settling", outputs: ["journal-append"] },
+
+    // ── interrupted：暂停态（[D2] 非终局——run-resumed 复活是唯一出边）──
+    { from: "interrupted", on: "run-resumed", to: "running", outputs: ["journal-append"] },
+
+    // ── terminal：吸收态，无表行（任意事件 fail-fast，D5 表末行）──
+  ],
+  errorPolicy: "throw",
+  errorFactory: (info) => new IllegalTransitionError(info.from, info.on, info.detail),
+});
 
 /**
  * 状态机唯一入口（纯函数）：(当前态, 触发) → (次态, 输出动作)。
@@ -870,38 +862,43 @@ function resolveTerminalOutcome(rule: TransitionRule, trigger: TransitionTrigger
  *    停在 running（= 投影侧 interrupted 判读的输入）；
  * 3. 状态查询走投影（事件流 fold），禁止直写状态字段（D5-4）。
  *
- * 表外转移抛 {@link IllegalTransitionError}（含当前态 / 事件 / 该态合法事件表，
- * 错误信息可操作）。
+ * M6 后判定委托 RUN_MACHINE.transition（基建内核承载查表/guard 求值/多命中
+ * 不变量/合法事件清单派生）；表外转移仍抛 {@link IllegalTransitionError}
+ * （errorFactory 保形构造既有类实例——含当前态 / 事件 / 该态合法事件清单，
+ * 错误信息可操作）。签名与返回形态对消费方（appendTransition 编排 + 域内
+ * fold）保形零改动。
  */
 export function transition(
   state: RunLifecycleState,
   trigger: TransitionTrigger,
   ctx?: TransitionContext,
 ): TransitionResult {
-  const on = trigger.type;
-  const candidates = RUN_TRANSITIONS.filter(
-    (rule) => rule.from === state.lifecycle && rule.on === on && guardMatches(rule, ctx),
+  // TransitionTrigger 判别联合成员是 interface 形态（无隐式索引签名），
+  // MachineEvent 的 `{ type } & Record<string, unknown>` 交叉目标只认 type alias
+  // 对象——运行时形态恒带 type 字段（判别键），结构兼容，经此断言进入机器
+  const result = RUN_MACHINE.transition(
+    state.lifecycle,
+    trigger as MachineEvent<RunTransitionEvent>,
+    ctx,
   );
-  if (candidates.length === 0) {
-    const legal = legalTriggerTypesOf(state.lifecycle);
-    const detail =
-      legal.length === 0
-        ? "该态无任何合法后续事件——terminal 是吸收态，已终局 run 再投递任何事件均为编程错误（检查单写者是否在 run-settled 后仍向该 run 追加事件）。"
-        : `该态合法事件：${legal.join(" / ")}。排查：事件投递是否乱序（journal 重放 / 恢复对账）；若确需新增转移，先改设计 D5 转移表再补 RUN_TRANSITIONS 表行与穷尽单测。`;
-    throw new IllegalTransitionError(state.lifecycle, on, detail);
-  }
-  if (candidates.length > 1) {
-    // guard 互斥性破坏 = 表 bug，与表外转移同为编程错误，但指向修表而非修调用方
+  // errorPolicy:'throw' 机器恒返回 ok 分支（表外已在内核 throw）；run 实体不
+  // 消亡、表无 to:null 行——null 次态是机器声明破坏，fail-fast 指向修表
+  if (result.state === null) {
     throw new Error(
-      `转移表不变量破坏：(from=${state.lifecycle}, on=${on}) 命中多条规则——检查 RUN_TRANSITIONS 的 guard 互斥性。`,
+      "转移表不变量破坏：run 机器声明了 to:null 消亡行——run 实体不消亡，修 RUN_MACHINE 声明。",
     );
   }
-  const rule = candidates[0];
-  const nextState: RunLifecycleState = { lifecycle: rule.next };
-  if (rule.next === "terminal") {
-    nextState.outcome = resolveTerminalOutcome(rule, trigger);
+  const nextState: RunLifecycleState = { lifecycle: result.state };
+  if (result.terminalOutcome !== undefined) {
+    // 仅终局行声明 terminalOutcome（cancel-requested 固定值 / run-settled 从
+    // 事件载荷取）——非 terminal 行 outcome 恒缺省的二维正交不变量由此保持
+    nextState.outcome = result.terminalOutcome as RunOutcome;
   }
-  return { state: nextState, outputs: rule.outputs };
+  return {
+    state: nextState,
+    // 值域构造性保证：全部表行 outputs 字面量都在 TRANSITION_OUTPUT_TYPES 词表内
+    outputs: result.planned.outputs as readonly TransitionOutput[],
+  };
 }
 
 // ── journal fold 循环（投影侧共享单源）──────────────────────

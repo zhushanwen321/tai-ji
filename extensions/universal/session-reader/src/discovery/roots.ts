@@ -2,6 +2,11 @@ import { readdir, stat, realpath } from 'node:fs/promises'
 import type { Dirent } from 'node:fs'
 import { join, basename, dirname } from 'node:path'
 import { performance } from 'node:perf_hooks'
+import {
+  resolveArchiveDir,
+  scanArchiveLedgers,
+  type ArchiveLedgerEntry,
+} from './archive-ledger.js'
 
 /**
  * M2 discovery 发现层：文件系统扫描（design §3.3 D-5 首行扫描策略的文件定位部分）。
@@ -33,10 +38,10 @@ export interface SessionRootSignals {
   liveSessionDir?: string
 }
 
-/** 候选根来源标签；kind 优先级 live > default > legacy > subagent（§6.1 信号序） */
-export type SessionRootKind = 'live' | 'default' | 'legacy' | 'subagent'
+/** 候选根来源标签；kind 优先级 live > default > legacy > subagent > archive（§6.1 信号序 + D7 追加） */
+export type SessionRootKind = 'live' | 'default' | 'legacy' | 'subagent' | 'archive'
 
-/** main 源 = 主 session 根（live/default/legacy）；subagent 源 = subagent 会话根 */
+/** main 源 = 主 session 根（live/default/legacy/archive）；subagent 源 = subagent 会话根 */
 export type SessionRootSource = 'main' | 'subagent'
 
 /** 候选根（含扫描结果）。去重后每 kind 至多一个根，kind 即 doctor 表行键。 */
@@ -53,6 +58,12 @@ export interface SessionRoot {
   scanMs?: number
   /** 扫描所得文件列表（design §7B 要点 8「本就在返回值里」）；未扫描时空数组 */
   files: SessionFileMeta[]
+  /**
+   * 归档根（kind='archive'）专属：簿记收集器产出（D7 独立收集契约——收
+   * `.archive.json` 不收 `.jsonl`，故 files 恒空、fileCount = 簿记数）。
+   * 其余根不挂此字段。
+   */
+  archiveEntries?: ArchiveLedgerEntry[]
   /**
    * realpath 与更高优先级根同路径 → 指向保留根的 kind，本根未扫描（doctor 渲染
    * 「与 N 同路径，已去重」注记的依据，§7B 要点 4）。
@@ -140,7 +151,8 @@ export function normalizeLiveSessionDir(liveSessionDir: string): string {
 
 /**
  * 从信号包推导候选根（未扫描骨架），数组序 = 优先级序（§6.1）。
- * `[subagent]` 恒在（常量推导）；`[live]` 仅在信号存在时出现。
+ * `[subagent]` 恒在（常量推导）；`[live]` 仅在信号存在时出现；`[archive]` 恒在
+ * 骨架中（D7 第五根，纳入与否由 resolveSessionRoots 按「存在才扫」判定）。
  */
 function sessionRootSpecs(signals: SessionRootSignals): SessionRoot[] {
   // 空 agentDir 防御：派生式会退化为 cwd 相对路径（'sessions'/'./sessions'），可能扫到
@@ -156,6 +168,10 @@ function sessionRootSpecs(signals: SessionRootSignals): SessionRoot[] {
   // 扫描在 sid 分区内定向探 subagents/sessions/（scanStoreSubagentJsonl）；旧布局
   // `<agentDir>/subagents` 不再读（设计裁决 D6：存量原位保留、不可见）。
   specs.push(spec('subagent', 'subagent', resolveSessionStoreRoot(signals.agentDir)))
+  // [session-archive D7] 第五根 = 归档根（`<agentDir>/archive`，镜像 sessions 平级布局）。
+  // 收集契约与四根不同：不收 .jsonl、收 .archive.json 簿记（见 resolveSessionRoots
+  // 分流与 scanArchiveLedgers）；source=main（归档对象是主 session）。
+  specs.push(spec('archive', 'main', resolveArchiveDir(signals.agentDir)))
   return specs
 }
 
@@ -202,11 +218,13 @@ export interface SessionRootScanOptions {
 /**
  * 解析候选根并逐根扫描（design 2026-09-10 §6.1 候选根探测 / §7B 要点 3/4/6）。
  *
- * 优先级 live > default > legacy > subagent；按 realpath 去重：同路径多信号只扫一次，
- * 保留最高优先级 kind 标签，被去重的根以 `dedupedInto` 标注（不产生 fileCount/scanMs）。
- * 逐根扫描：main 源整树递归（跳 workflow-state）；subagent 源 = 存储树定向扫描
- *（[session-store-layout-inversion] 单新根，见 scanStoreSubagentJsonl）。单根失败
- * （不存在/无权限）→ 空结果继续，不抛错（沿用 listXxxSessions 契约）。
+ * 优先级 live > default > legacy > subagent > archive；按 realpath 去重：同路径多信号
+ * 只扫一次，保留最高优先级 kind 标签，被去重的根以 `dedupedInto` 标注（不产生
+ * fileCount/scanMs）。逐根扫描：main 源整树递归（跳 workflow-state）；subagent 源 =
+ * 存储树定向扫描（[session-store-layout-inversion] 单新根，见 scanStoreSubagentJsonl）；
+ * archive 源 = 簿记收集器（[session-archive D7] 收 .archive.json 不收 .jsonl，
+ * **存在才纳入**——目录不存在时该根不进返回列表，对无归档目录的环境零行为变化）。
+ * 单根失败（不存在/无权限）→ 空结果继续，不抛错（沿用 listXxxSessions 契约）。
  *
  * options（u8 追加，全部缺省安全）：`subagents:'stat'` 让 subagent 根只做存在性检查。
  * 无缓存——每次调用实扫（原 u8 cache 注入点已删除，ext-simplify-04 U3；find/F1
@@ -220,6 +238,35 @@ export async function resolveSessionRoots(
   const out: SessionRoot[] = []
   const byRealPath = new Map<string, SessionRoot>()
   for (const candidate of sessionRootSpecs(signals)) {
+    if (candidate.kind === 'archive') {
+      // [session-archive D7] 存在才纳入：目录不存在 → 整根不进返回（备注「目录存在即
+      // 纳入」的逆向——非 taiji/纯 pi 用户无 archive 目录，doctor 表与 F1 自检行零变化）
+      if (!(await pathExists(candidate.path))) continue
+      const key = await safeRealpath(candidate.path)
+      const kept = byRealPath.get(key)
+      if (kept) {
+        // 同 realpath：不扫描，标注归属（与普通根 kept 检查同构——archive kind 优先级
+        // 最低，归档目录与更高优先级根同路径时只保留一根，doctor 表不重复计数；
+        // 漏此检查会既出重复根、又以本根覆盖 byRealPath 致后续根 dedupedInto 失效）
+        out.push({ ...candidate, exists: true, dedupedInto: kept.kind })
+        continue
+      }
+      const t0 = performance.now()
+      const archiveEntries = await scanArchiveLedgers(candidate.path)
+      const scanMs = performance.now() - t0
+      // 归档根不走 scanJsonlRecursive（.jsonl 不收）：files 恒空，fileCount = 簿记数
+      const root: SessionRoot = {
+        ...candidate,
+        exists: true,
+        fileCount: archiveEntries.length,
+        scanMs,
+        files: [],
+        archiveEntries,
+      }
+      byRealPath.set(key, root)
+      out.push(root)
+      continue
+    }
     const key = await safeRealpath(candidate.path)
     const kept = byRealPath.get(key)
     if (kept) {

@@ -6,7 +6,7 @@
  */
 import { describe, it, expect } from 'vitest'
 import type { SessionApiPort } from '../api-port'
-import type { SessionGroup, SessionSummary, BatchDeleteResult } from '@taiji/shared'
+import type { SessionGroup, SessionSummary, BatchDeleteResult, SessionArchiveReply } from '@taiji/shared'
 
 describe('SessionApiPort 类型契约', () => {
   it('TC-7 fake 对象满足 SessionApiPort 形状（编译期验证）', () => {
@@ -17,6 +17,7 @@ describe('SessionApiPort 类型契约', () => {
         ({ id: 's1', cwd, label, status: 'idle' }) as SessionSummary,
       rename: async (): Promise<void> => {},
       remove: async (): Promise<void> => {},
+      archive: async (): Promise<SessionArchiveReply> => ({ sessionId: 's1' }),
       removeByCwd: async (): Promise<BatchDeleteResult> => ({ cwd: '/a', deleted: [], failed: [] }),
       migrateImage: async (): Promise<{ path: string }> => ({ path: '/data/x.png' }),
       onConfigSessions: (): (() => void) => () => {},
@@ -32,6 +33,7 @@ describe('SessionApiPort 类型契约', () => {
       create: async (): Promise<SessionSummary> => ({ id: 's1' }) as SessionSummary,
       rename: async () => {},
       remove: async () => {},
+      archive: async () => ({ sessionId: 's1' }),
       removeByCwd: async (): Promise<BatchDeleteResult> => ({ cwd: '/a', deleted: [], failed: [] }),
       migrateImage: async (p: { fromPath: string; sessionId: string; fileName: string }): Promise<{ path: string }> => {
         void p

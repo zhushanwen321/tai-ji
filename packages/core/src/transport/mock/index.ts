@@ -53,6 +53,7 @@ import type {
   UsageStatsResult,
   UiLocale,
   Segment,
+  ArchiveSummary,
 } from '@taiji/shared'
 import { recommendedExtensions, PRESET_SKILL_DIRS, PRESET_AGENT_DIRS, PRESET_EXTENSION_DIRS, DEFAULT_DISCOVERY_CONFIG, DEFAULT_PRESETS, DELIVERY_PREVIEW_MAX_CHARS, QUOTA_PRESETS } from '@taiji/shared'
 import { createSession, fixtureMessages, fixtureSessions, e2eTestSession } from './data'
@@ -232,8 +233,22 @@ function buildGroups(): SessionGroup[] {
  * useSidebar 经 events.onGlobalType('config.sessions') 订阅（refCount 防重复），mock 直 dispatchGlobal。
  */
 function pushSessionList(): void {
-  events.dispatchGlobal({ type: 'config.sessions', id: nextId('sl'), payload: { groups: buildGroups() } })
+  events.dispatchGlobal({ type: 'config.sessions', id: nextId('sl'), payload: { groups: buildGroups(), archiveCount: mockArchives.length } })
 }
+
+// ── session 归档域 mock（session-archive 设计 D5；行为对齐 real 域四函数签名）──────────
+// mock 无磁盘搬移/压缩/簿记，归档单元 = 内存 mockArchives 数组派生视图（不变量 3 的 mock
+// 同构：列表恒等于数组扫描）。archive 同步落 archived 态条目（mock 无后台压缩任务可过渡，
+// 直接给可演示的终态 + 一条演示 turn，VITE_MOCK UI 开发可预览归档列表/摘要视图）；
+// 被归档 session 暂存 restored 预备表，unarchive 原样放回 fixtureSessions。
+// taste:allow-no-data-owner W24-EX-C（非 GUI 数据技术结构，登记草稿）：归档 mock 内存表
+//（mock 面行为对齐 runtime ArchiveService 内存态，非 GUI 数据）
+const mockArchives: ArchiveSummary[] = []
+// taste:allow-no-data-owner W24-EX-C（非 GUI 数据技术结构，登记草稿）：unarchive 放回预备表
+//（mock 行为对齐件，同上非 GUI 数据）
+const mockArchivedSessions = new Map<string, SessionSummary>()
+/** mock 簿记 sha256 占位长度（archived 态字段形状对齐——64 位 hex；命名常量承载 no-magic-numbers） */
+const MOCK_SHA256_HEX_LENGTH = 64
 
 /** Mock 静态 slash 命令（模拟 pi getCommands 返回的扩展命令） */
 const MOCK_COMMANDS = [
@@ -632,9 +647,82 @@ const sessionImpl = {
     return { cwd, deleted, failed: [] }
   },
 
-  /** 设置思考等级（mock：持久到 fixture session.thinkingLevel；回执生效值形状对齐协议修型 U6） */
-  async setThinkingLevel(sessionId: string, level: string): Promise<{ sessionId: string; level: string }> {
+  // ── 归档域四函数（[G4 锚定 SessionDomain] 签名与 real 域全等；行为最小同构）──
+
+  /**
+   * Mock 归档：fixtureSessions 移除 + mockArchives 落 archived 态条目（内存派生视图，
+   * 无磁盘搬移/压缩）+ 广播（archiveCount 随帧）。session 暂存预备表供 unarchive 放回。
+   */
+  async archive(sessionId: string): Promise<import('@taiji/shared').SessionArchiveReply> {
     await sleep(TIMING.ack)
+    const idx = fixtureSessions.findIndex((s) => s.id === sessionId)
+    if (idx === -1) {
+      throw new Error(`mock: session ${sessionId} 不存在，无法归档`)
+    }
+    const [removed] = fixtureSessions.splice(idx, 1)
+    mockArchivedSessions.set(sessionId, removed!)
+    mockArchives.push({
+      sessionId,
+      name: removed!.label,
+      originalFile: `${new Date(removed!.lastActiveAt || Date.now()).toISOString().replace(/[:.]/g, '-')}_${sessionId}.jsonl`,
+      cwd: removed!.cwd,
+      archivedAt: new Date().toISOString(),
+      rawBytes: 1024,
+      status: 'archived',
+      codec: 'zstd-3',
+      compressedBytes: 256,
+      sha256: '0'.repeat(MOCK_SHA256_HEX_LENGTH),
+      summary: { turns: [{ user: '（mock 归档演示）', agent: null }] },
+      ...(removed!.projectId ? { projectId: removed!.projectId } : {}),
+    })
+    pushSessionList()
+    return { sessionId }
+  },
+
+  /**
+   * Mock 恢复：mockArchives 移除条目 + 预备表 session 放回 fixtureSessions + 广播；
+   * reply 形状对齐 real（{ sessionId, session }——前端高亮置顶消费）。放回行为对齐
+   * real 置顶语义：列表头插入 + lastActiveAt 更新为恢复时刻（real 侧 = 恢复路径全量
+   * 重写主文件使 mtime = 恢复时刻，扫描按 mtime 降序自然置顶）。
+   */
+  async unarchive(sessionId: string): Promise<SessionSummary> {
+    await sleep(TIMING.ack)
+    const idx = mockArchives.findIndex((a) => a.sessionId === sessionId)
+    if (idx === -1) {
+      throw new Error(`mock: 归档记录 ${sessionId} 不存在`)
+    }
+    mockArchives.splice(idx, 1)
+    const session = mockArchivedSessions.get(sessionId)
+    mockArchivedSessions.delete(sessionId)
+    if (session) {
+      session.lastActiveAt = Date.now()
+      fixtureSessions.unshift(session)
+    }
+    pushSessionList()
+    return session ?? { id: sessionId, label: `label-${sessionId}`, cwd: '/mock', status: 'idle', lastActiveAt: Date.now(), modelId: '', tokenCount: 0 }
+  },
+
+  /** Mock 彻底删除：mockArchives 移除条目 + 广播（无 keep-all 分支可触发，恒干净删除）。 */
+  async purgeArchive(sessionId: string): Promise<{ sessionId: string }> {
+    await sleep(TIMING.ack)
+    const idx = mockArchives.findIndex((a) => a.sessionId === sessionId)
+    if (idx === -1) {
+      throw new Error(`mock: 归档记录 ${sessionId} 不存在`)
+    }
+    mockArchives.splice(idx, 1)
+    mockArchivedSessions.delete(sessionId)
+    pushSessionList()
+    return { sessionId }
+  },
+
+  /** Mock 归档列表：内存数组快照（调用方突变不污染源）。 */
+  async listArchives(): Promise<ArchiveSummary[]> {
+    await sleep(TIMING.ack)
+    return mockArchives.map((a) => ({ ...a }))
+  },
+
+  /** 设置思考等级（mock：持久到 fixture session.thinkingLevel；回执生效值形状对齐协议修型 U6） */
+  async setThinkingLevel(sessionId: string, level: string): Promise<{ sessionId: string; level: string }> {    await sleep(TIMING.ack)
     const target = fixtureSessions.find((s) => s.id === sessionId)
     if (target) target.thinkingLevel = level
     return { sessionId, level }
@@ -1851,8 +1939,8 @@ export const search = {
         { kind: 'suggested', label: '建议命令', items: SEARCH_MOCK.command.slice(0, SEARCH_SUGGESTED_COUNT).map((i) => ({ ...i })) },
       ]
     }
-    const TYPES: SearchItem['type'][] = ['command', 'file', 'symbol', 'session']
-    const LABEL: Record<SearchItem['type'], string> = { command: '命令', file: '文件', symbol: '符号', session: '会话' }
+    const TYPES: SearchItem['type'][] = ['command', 'file', 'symbol', 'session', 'archive']
+    const LABEL: Record<SearchItem['type'], string> = { command: '命令', file: '文件', symbol: '符号', session: '会话', archive: '归档' }
     return TYPES
       .map((t) => ({
         kind: t,

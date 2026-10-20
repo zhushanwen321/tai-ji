@@ -69,6 +69,10 @@ import type { HandoffService } from '../services/handoff-service.js'
 import type { ImportService } from '../services/session/import-service.js'
 // GenStatsService（composer-gen-stats u3）：session.getGenStats 恢复路径 RPC 路由依赖。
 import type { GenStatsService } from '../services/session/gen-stats-service.js'
+// ArchiveService（session-archive 设计 D5，u-rpc-wiring）：归档域三 RPC + config.archives +
+// config.sessions 帧 archiveCount 的服务核心。type-only：实例由组合根构造（deps 注入 delete
+// 活跃分支原语），经 setServices optional.archive 注入 broker（角标）与 sessionHandler（RPC）。
+import type { ArchiveService } from '../services/archive/archive-service.js'
 import type { ITerminalService } from '../services/ports/terminal-service.js'
 import type { QuotaService } from '../services/quota-service.js'
 import type { TtsService } from '../services/tts-service.js'
@@ -139,6 +143,12 @@ export interface RuntimeServerOptionalServices {
   /** 生成指标服务（composer-gen-stats D4）：session.getGenStats 恢复路径路由依赖。可选：未注入时该 case 报 unsupported。 */
   genStats?: GenStatsService
   /**
+   * 归档服务（session-archive 设计 D5，u-rpc-wiring）：session.archive / unarchive /
+   * purgeArchive 三 RPC + config.archives + config.sessions 帧 archiveCount 角标路由依赖。
+   * 可选：未注入时四 case 报 archive_unsupported（组合根恒注入；缺省服务存量测试装配）。
+   */
+  archive?: ArchiveService
+  /**
    * reply 通路出站检查的 session 文件路径解析器（u8 与 push 通路对称接线：push 经
    * MessageBus 构造注入，reply 经 broker 构造注入，组合根两处共用同一 resolver 实例）。
    * 可选：未注入时 reply 超限占位文案退化为「（见 runtime 日志）」，阈值仍用默认常量。
@@ -197,6 +207,8 @@ export class RuntimeServer implements IMessageBroker {
   private importService?: ImportService
   /** 生成指标服务（composer-gen-stats u3）：可选，setServices 注入后经 sessionHandler ctx 触达。 */
   private genStatsService?: GenStatsService
+  /** 归档服务（session-archive u-rpc-wiring）：setServices 注入后经 broker（archiveCount）与 sessionHandler ctx（三 RPC）触达。 */
+  private archiveService?: ArchiveService
   /**
    * MessageBus 单例（wave:runtime-wiring）：注入到 SessionMessageHandler ctx，
    * 供 session.subscribe/unsubscribe RPC 注册/取消订阅。ws 断开时 onDisconnect 回调调
@@ -303,12 +315,13 @@ export class RuntimeServer implements IMessageBroker {
   private assignServices(session: ISessionService, config: IConfigService, model: IModelService, optional: RuntimeServerOptionalServices): void {
     // genStats（composer-gen-stats D4）：恢复路径 RPC 路由依赖（sessionHandler ctx 读
     // this.genStatsService）；其余可选服务由 assembleOptionalHandlers 按域自行解构。
-    const { extension, plugin, git, file, skillRegistry, handoff, importService, genStats, zcodeProviderMirrorSync } = optional
+    const { extension, plugin, git, file, skillRegistry, handoff, importService, genStats, zcodeProviderMirrorSync, archive } = optional
     this.zcodeProviderMirrorSync = zcodeProviderMirrorSync
     this.gitService = git
     this.fileService = file
     this.handoffService = handoff
     this.genStatsService = genStats
+    this.archiveService = archive
     this.sessionService = session
     // D6a（integrity-hardening §3.6）：挂起 UI 请求的汇聚清理。extensionTimeoutMgr 的
     // per-session 残留（pendingRequests / session 跟踪）此前只在
@@ -357,6 +370,8 @@ export class RuntimeServer implements IMessageBroker {
       extensionService: this.extensionService,
       projectRoot: this.projectRoot,
       appInfo: appInfo ?? { appVersion: 'unknown', piVersion: 'unknown' },
+      // archiveCount 角标数据源（session-archive u-rpc-wiring）：未注入时帧内字段缺省。
+      archiveService: this.archiveService,
     // u8 对称接线：resolver 存在时传第三参（阈值仍用默认常量）；缺省时不传（broker 构造
     // 默认值——阈值同为默认常量、resolver 为 undefined），测试默认行为不变。
     }, replyGuardResolver !== undefined ? {
@@ -439,6 +454,9 @@ export class RuntimeServer implements IMessageBroker {
       // 投递所有权内核（u3a）：delivery.* 四 RPC + session.delivery state topic 装配。
       // 与 SessionManagerHandler 同一注册表实例（sessionId 单例约束，见 assembleSessionManagerHandler）。
       deliveryRegistry: optional.delivery,
+      // 归档域（session-archive u-rpc-wiring）：三 RPC + config.archives + config.sessions
+      // 响应 archiveCount 路由依赖；未注入时四 case 走 archive_unsupported 防御分支。
+      archiveService: this.archiveService,
       // wave:runtime-wiring：注入 MessageBus 供 session.subscribe/unsubscribe RPC 用。
       messageBus: this.messageBus,
       nextPushId: () => this.broker.nextPushId(),

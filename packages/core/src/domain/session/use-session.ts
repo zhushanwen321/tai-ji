@@ -11,7 +11,8 @@
  *
  * 保留契约：
  * - deleteSession 是「session 销毁唯一编排点」——triggerSessionCleanups(id)（ADR-0049 AC-8）
- *   只经本编排触发，跨 store 分区释放全在 cleanupSessionState 内按 S3 顺序执行
+ *   只经 deleteSession/deleteFolder/archiveSession 触发（归档 = 前端侧退场，清理同族，
+ *   session-archive 设计 D14），跨 store 分区释放全在 cleanupSessionState 内按 S3 顺序执行
  *
  * [P4 s5 drawer-widget-removal] selectSession 内 consumePendingOpen / cleanupSessionState 内
  * clearPendingOpen 已删除：pendingOpen 路由机制随 tasks 域移除（PluginViewContainer 承接）。
@@ -494,12 +495,13 @@ export function createUseSession(deps: UseSessionDeps) {
     hooks.closeWorkflowOverlay?.(id)
     // ADR-0049 W5：触发所有 useSessionScopedState 实例清理该 sid 的 Map 分区，
     // 防已销毁 session 的 per-session 状态条目在 Map 中积累导致内存泄漏（AC-8）。
-    // 销毁唯一编排点契约：triggerSessionCleanups 只经 deleteSession/deleteFolder 触发。
+    // 销毁唯一编排点契约：triggerSessionCleanups 只经 deleteSession/deleteFolder/
+    // archiveSession（归档退场，D14）触发。
     triggerSessionCleanups(id)
   }
 
   /**
-   * [D7 空态承接] 删除路径的空态出口统一编排（deleteSession/deleteFolder 专用）：
+   * [D7 空态承接] 删除路径的空态出口统一编排（deleteSession/deleteFolder/archiveSession 专用）：
    * push chat 空态 + 显式 startFlow——终态下 landing 渲染需 flow 活跃，flow=idle 时
    * 面板落入无输入范围死态 empty（旧壳 enterEmptyChatState 同构上收）。
    * flow 未接线（headless 形态）时只 push。不用于 newSession 延迟 create 分支——
@@ -531,6 +533,38 @@ export function createUseSession(deps: UseSessionDeps) {
           await (deps.selectSessionFallback ?? selectSession)(next.id)
         } catch {
           // 回退 selectSession 失败（网络抖动）→ [D7] 空态承接，避免 activeId=next 但 panel 空载撕裂（S4）
+          enterEmptyChatState()
+        }
+      } else {
+        enterEmptyChatState()
+      }
+    }
+  }
+
+  /**
+   * 归档 session（session-archive 设计 D14：发起窗口本地编排与 deleteSession 同款）。
+   *
+   * RPC 成功后：wasActive 快照 → cleanupSessionState（panel 解绑 + 全部 per-session
+   * 分区释放 + triggerSessionCleanups——与 deleteSession 共用同一清理链，归档 session
+   * 对前端即退场）→ wasActive 时回退 list[0] / 空态（归档的恰是当前查看的 session 时
+   * 切回相邻 session）。列表数据刷新由 runtime broadcastSessionList 帧回流（远端窗口
+   * 同款，P7——本编排不做额外远端通知）。
+   *
+   * 与 deleteSession 的差异仅在 RPC 与语义（归档非销毁，恢复后完整回场）；清理编排
+   * 完全同族——归档 session 的全部前端 per-session 状态（chat 分区/流订阅/LRU/文件树）
+   * 随退场释放，恢复后按普通重开路径重建。
+   */
+  async function archiveSession(id: string): Promise<void> {
+    await api.archive(id)
+    const wasActive = store.getActiveId() === id
+    cleanupSessionState(id)
+    if (wasActive) {
+      const next = store.getList()[0]
+      if (next) {
+        try {
+          await (deps.selectSessionFallback ?? selectSession)(next.id)
+        } catch {
+          // 回退 selectSession 失败（网络抖动）→ [D7] 空态承接（与 deleteSession S4 同款）
           enterEmptyChatState()
         }
       } else {
@@ -599,6 +633,7 @@ export function createUseSession(deps: UseSessionDeps) {
     newSession,
     renameSession,
     deleteSession,
+    archiveSession,
     deleteFolder,
     loadSessions,
   }

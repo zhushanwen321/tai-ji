@@ -15,7 +15,7 @@
  * - C-W3-4：recents localStorage → storage 端口（KVStorage async）。
  * - C-W3-5：AppCommandActionsPort 三项 action 全注入 + isMac 平台标志注入（D8 收编）。
  */
-import type { FileNode, SessionGroup } from '@taiji/shared'
+import type { ArchiveSummary, FileNode, SessionGroup } from '@taiji/shared'
 import type { KVStorage } from '../../platform/port'
 import type { TranslatePort } from './ports'
 import type { FileTreePort } from './ports'
@@ -65,6 +65,24 @@ export interface SessionSelectPort {
 }
 
 /**
+ * 归档列表端口（归档搜索源）：壳适配 renderer api/domains/session listArchives
+ * （config.archives RPC——簿记扫描派生，D9 不变量 3）。搜索打开时按需拉取（拉为主，
+ * ADR-0097），不常驻。
+ */
+export interface ArchiveListPort {
+  listArchives(): Promise<ArchiveSummary[]>
+}
+
+/**
+ * 归档跳转端口（选中归档项 → 主区摘要视图）：壳适配 renderer
+ * useArchiveView().openSummary（selectArchive + navigation.push({view:'archive'})，
+ * 与归档列表行点击同路径）。core 不 import renderer（D4 铁律），经端口注入。
+ */
+export interface ArchiveJumpPort {
+  openArchive(archive: ArchiveSummary): void
+}
+
+/**
  * 应用命令 actions 端口（C-W3-5 三项全注入，打破循环 import 先例）。
  * 壳适配 renderer useSidebar/useSidebar initApp 注入：
  * - newSession：useSidebar().newSession（新建任务）
@@ -97,6 +115,10 @@ export interface SearchPorts {
   sessionList: SessionListPort['list']
   /** session 跳转（AC-6.6） */
   selectSession: SessionSelectPort['selectSession']
+  /** 归档列表（归档搜索源，按需拉取） */
+  archiveList: ArchiveListPort['listArchives']
+  /** 归档跳转（选中归档项 → 主区摘要视图） */
+  archiveJump: ArchiveJumpPort['openArchive']
   /** 域内文案（壳适配 renderer i18n.global.t） */
   t: TranslatePort['t']
 }

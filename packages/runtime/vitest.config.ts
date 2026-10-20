@@ -26,7 +26,9 @@ import { taijiTestConfig, guardProjectSetup } from '../../test-guard/factory.ts'
  * L2.5 首批（chaos / live-reload / thinking-level-effective-e2e）与二批（attach-lifecycle /
  * broadcast-getstate / completion-backflow / pi-protocol-contract / send-queue-e2e /
  * session-manager-full-e2e / tool-call-index / usage-queue-commands-invalidation /
- * pi-semantics-skill-expansion-golden / idle-pi-reclaim-integration）均已翻轨回 main 组。
+ * pi-semantics-skill-expansion-golden / idle-pi-reclaim-integration）均已翻轨回 main 组
+ * （后 idle-pi-reclaim-integration 2026-09-26、session-manager-full-e2e 2026-10-20 按
+ * 数组内日期注释再登记进串行尾组——当前分组以 REAL_PI_TESTS 数组为准）。
  *
  * 防线（globalSetup env 固定 + fs-guard 切面）经 test-guard/factory 顶层注入；
  * projects 内 setupFiles **不**继承 root 级（vitest projects 语义，实测 setup 0ms 不执行），
@@ -44,6 +46,12 @@ const REAL_PI_TESTS = [
   // 不存在」前提对双 spawn + jiti 冷编译形态证伪。按池的调度语义（真进程隔离、
   // main 组完整结束后顺序尾组）登记，非断言放宽。
   'src/__tests__/services/idle-pi-reclaim-integration.test.ts',
+  // [2026-10-20 state-machine-infrastructure u-m1] session-manager-full-e2e（纯 faux
+  // 轨，双 spawn + 真 extension jiti 冷编译）同款自愿登记：满并行下 7/7 红（2026-10-20
+  // 两轮实证：runtime 全量 669 文件满载下该文件整体失败），单跑 12s 恒绿 7/7——
+  // 按上例同判（双 spawn + jiti 冷编译形态的满并行竞态，非用例自身缺陷），登记
+  // 串行尾组，非断言放宽。
+  'src/__tests__/equivalence/session-manager-full-e2e.test.ts',
 ] as const
 
 export default taijiTestConfig({

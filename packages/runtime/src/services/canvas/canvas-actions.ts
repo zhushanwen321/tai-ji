@@ -12,6 +12,7 @@ import type { CanvasActionParams, CanvasActor, CanvasComment, CanvasCreateParams
 import {
   argumentPolarity,
   CANVAS_NAME_MAX,
+  canvasLifecycleMachine,
   COMMENT_ID_SEPARATOR,
   convergenceBlockers,
   dirtyEvent,
@@ -20,7 +21,6 @@ import {
   eventOf,
   fail,
   findTrunkCycle,
-  isTransitionAllowed,
   isTrunkEdge,
   markDirty,
   nodeOf,
@@ -460,9 +460,10 @@ function applyTransition(
   if (node.id === draft.root.nodeId && (params.to === 'shelved' || params.to === 'rejected')) {
     fail('lifecycle_transition_illegal', '根节点不可搁置 / 否决（否则就绪递归对根豁免将使收敛门禁空集通过）')
   }
-  if (!isTransitionAllowed(node.lifecycle, params.to)) {
-    fail('lifecycle_transition_illegal', `状态机不允许「${node.lifecycle}」→「${params.to}」（rejected / shelved 须先复活为 draft）`)
-  }
+  // 表外转移（含自转移 / passed 终态 / 词表外 to）由机器 errorFactory 抛既有
+  // CanvasDomainError（lifecycle_transition_illegal + recover 指引）——判定与拒绝
+  // 单入口；状态应用（node.lifecycle 赋值）与事件构造仍在本函数（编排留域内）。
+  canvasLifecycleMachine.transition(node.lifecycle, params.to)
   if (params.to === 'rejected') {
     if (!params.rejection?.reason) fail('invalid_params', '否决（rejected）必须附否决记录（rejection.reason）——否决分支灰显保留、不可删除')
     node.rejection = { reason: params.rejection.reason, reviveCondition: params.rejection.reviveCondition }

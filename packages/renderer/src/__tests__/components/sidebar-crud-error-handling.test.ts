@@ -1,9 +1,12 @@
 /**
  * Sidebar CRUD handler 异常处理测试（W3 / S2）。
  *
- * 验证 onSelectSession / onDeleteSession / onConfirmRename / onNewSession 四个
- * async handler 在底层 reject 时 catch + toastError，不产生 unhandled rejection。
- * 对齐同组件已有的 onSelectAgentCall / onWorkflowAction 模式。
+ * 验证 onSelectSession / onArchiveSession 两个 async handler 在底层 reject 时
+ * catch + toastError，不产生 unhandled rejection。对齐同组件已有的
+ * onSelectAgentCall / onWorkflowAction 模式。
+ *
+ * 覆盖边界：onDeleteSession 的 UI 挂点已迁移为归档钮（handler 保留但无 UI 挂点）；
+ * onConfirmRename / onNewSession 的错误路径不在本文件覆盖范围。
  *
  * 策略：mount Sidebar 前把 useSidebar 返回的方法 mock 成 reject，mock useToast 捕获
  * toastError 调用。mount 后通过 DOM 事件或直接调 handler 触发。
@@ -27,6 +30,7 @@ vi.mock('@/composables/useToast', () => ({
 const sidebarMocks = vi.hoisted(() => ({
   selectSession: vi.fn(),
   deleteSession: vi.fn(),
+  archiveSession: vi.fn(),
   renameSession: vi.fn(),
   newSession: vi.fn(),
   focusedSessionId: { value: null },
@@ -104,6 +108,8 @@ vi.mock('@taiji/core/transport/api', () => ({
 }))
 vi.mock('@taiji/core/transport/api/domains/session', () => ({
   list: vi.fn().mockResolvedValue([]),
+  // 归档搜索源（useSearchModalDeps 壳组装引用；本用例不涉归档，空列表即足）
+  listArchives: vi.fn().mockResolvedValue([]),
 }))
 
 import Sidebar from '@/components/sidebar/Sidebar.vue'
@@ -114,6 +120,7 @@ beforeEach(() => {
   // 默认 resolve（非异常用例的基础状态）
   sidebarMocks.selectSession.mockResolvedValue(undefined)
   sidebarMocks.deleteSession.mockResolvedValue(undefined)
+  sidebarMocks.archiveSession.mockResolvedValue(undefined)
   sidebarMocks.renameSession.mockResolvedValue(undefined)
   sidebarMocks.newSession.mockResolvedValue(null)
 })
@@ -144,21 +151,24 @@ describe('Sidebar CRUD handler 异常处理', () => {
   /**
    * U6: onDeleteSession remove 失败时 toast 报错。
    */
-  it('onDeleteSession 失败时 toast 报错', async () => {
-    sidebarMocks.deleteSession.mockRejectedValue(new Error('server error'))
+  it('onArchiveSession 失败时 toast 报错', async () => {
+    // [session-archive D6] 悬停删除钮已迁移为归档钮——Sidebar 异常处理契约的现行载体是
+    // archive 链路（onDeleteSession handler 保留但无 UI 挂点，其 catch 契约由本用例的
+    // 同构链路 onArchiveSession 承载断言）
+    sidebarMocks.archiveSession.mockRejectedValue(new Error('server error'))
     const wrapper = shallowMount(Sidebar)
 
     await wrapper.vm.$nextTick()
     const sessionList = wrapper.findComponent({ name: 'SessionList' })
-    sessionList.vm.$emit('delete', 's1')
+    sessionList.vm.$emit('archive', 's1')
 
     await vi.waitFor(() => {
-      expect(sidebarMocks.deleteSession).toHaveBeenCalledWith('s1')
+      expect(sidebarMocks.archiveSession).toHaveBeenCalledWith('s1')
     })
 
     await vi.waitFor(() => {
       expect(toastError).toHaveBeenCalledTimes(1)
-      expect(toastError.mock.calls[0][0]).toContain('删除会话失败')
+      expect(toastError.mock.calls[0][0]).toContain('归档失败')
     })
   })
 })

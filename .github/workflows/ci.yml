@@ -94,6 +94,9 @@ jobs:
       - name: TypeCheck - shared
         run: pnpm --filter @taiji/shared run typecheck
 
+      - name: TypeCheck - state-machine
+        run: pnpm --filter @zhushanwen/state-machine run typecheck
+
       # 协议演进宪法 D11 机器锁执行点：C3 事件词表 / C4 双写禁令 / C2 能力位必填
       # 全部是 SDK 包内编译期断言，缺本步则锁为纸面（与 pre-commit SDK typecheck 段同口径）。
       - name: TypeCheck - subagent-engine-sdk
@@ -121,7 +124,8 @@ jobs:
   # 现为契约 SSOT，runtime 经 plugin-types 薄壳 re-export 消费——不存在「两份
   # 文件需保持同步」的漂移风险，sync-types.sh 生成方向已不存在。
 
-  # Test 拆分为 4 个并行 job（原串行 214s → 关键路径 ~120s，省 ~95s）。
+  # Test 拆分为 5 个并行 job（原串行 214s → 关键路径 ~120s，省 ~95s；state-machine
+  # 基础设施包 2026-10 独立成第 5 个 job，套件秒级）。
   # runner 分钟数总量不变（ubuntu 充足），build gate 语义保持（任一失败不启动 build）。
   # mac 完整 main tests（updater-script-integration 的 mac 专属用例）仍由 build.yml mac 平台跑，
   # 此处 test-main 只跑 ubuntu 上能跑的子集。
@@ -247,6 +251,33 @@ jobs:
 
       - name: Test
         run: pnpm --filter @taiji/electron run test:main
+
+  # state-machine 基础设施包（runtime/subagent-core/extension-protocol/goal 四消费方）
+  # 独立 test job：包内 5 测试文件此前 CI 零执行。轻量包不并入其他 test job 的分片
+  # 逻辑（语义按域拆分），秒级套件不构成关键路径压力。
+  test-state-machine:
+    name: Test (state-machine)
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+
+      - uses: pnpm/action-setup@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+
+      - name: Install dependencies
+        env:
+          ELECTRON_SKIP_BINARY_DOWNLOAD: '1'
+        run: pnpm install --frozen-lockfile
+
+      - name: Test
+        run: pnpm --filter @zhushanwen/state-machine run test
 
   test-extensions:
     name: Test (extensions)
@@ -470,11 +501,15 @@ jobs:
       # dist 发布包 files 白名单 ↔ 构建产出双向对齐（幽灵条目 / 产物目录反向覆盖 /
       # 自包含探针 / workspace 依赖发布闭包）。dist 产物被 .gitignore、干净 checkout
       # 上必红，刻意不挂 pre-commit（与 extensions 方向的刻意不对称，设计 D2）——
-      # pre-commit 之外的 CI 面同源拦截（D7 通则，同 D9-① 挂载理由）：先构建 9 包
-      # 10 档再同源直调检查，漂移在 PR 软拦截而非发布现场硬拦截（两级拦截等级声明
+      # pre-commit 之外的 CI 面同源拦截（D7 通则，同 D9-① 挂载理由）：先构建 10 包
+      # 11 档再同源直调检查，漂移在 PR 软拦截而非发布现场硬拦截（两级拦截等级声明
       # 见设计 D2）。
       - name: Build dist packages (publish surface guard)
         run: |
+          # state-machine 是 extension-protocol 的 runtime dependency（发布闭包最上游，
+          # First release 已登记 changeset），构建顺序必须在前——surface guard 动态
+          # 发现机制已把该包纳入 files↔dist 双向检查，缺本步则干净 checkout 上必红
+          pnpm --filter @zhushanwen/state-machine run build
           pnpm --filter @zhushanwen/extension-protocol run build
           pnpm --filter @zhushanwen/session-delivery run build
           pnpm --filter @zhushanwen/subagent-core run build
@@ -756,12 +791,12 @@ jobs:
 
   # PR 构建检查：electron-builder 打包流程，不在 PR 上传产物。
   # dir-only=true：只产出 unpacked 目录，跳过安装器压缩（省 ~185s）。安装器配置回归交给 release.yml。
-  # needs gate：lint/typecheck + 4 个 test job + 两个 E2E job（visual 像素轨 + behavior P0 smoke 轨）
+  # needs gate：lint/typecheck + 5 个 test job + 两个 E2E job（visual 像素轨 + behavior P0 smoke 轨）
   # 任一已知失败时不浪费 mac runner（mac 构建 5-8min）。
   # （sdk-sync 已随 plugin-types SSOT 收敛删除——SDK 升权威源、runtime 薄壳 re-export，无同步可查。）
   build:
     name: Build
-    needs: [lint, typecheck, test-runtime, test-renderer, test-main, test-extensions, e2e-visual, e2e-behavior]
+    needs: [lint, typecheck, test-runtime, test-renderer, test-main, test-state-machine, test-extensions, e2e-visual, e2e-behavior]
     uses: ./.github/workflows/build.yml
     with:
       upload-artifacts: false
