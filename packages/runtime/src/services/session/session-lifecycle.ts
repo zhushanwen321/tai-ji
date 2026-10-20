@@ -94,7 +94,7 @@ export function subscribeSessionDeathDisposition(
   return () => { deathDispositionSubscribers.delete(cb) }
 }
 
-function fireDeathDisposition(sessionId: string, disposition: SessionDeathDisposition, detail: SessionDeathDispositionDetail): void {
+export function fireDeathDisposition(sessionId: string, disposition: SessionDeathDisposition, detail: SessionDeathDispositionDetail): void {
   for (const cb of [...deathDispositionSubscribers]) {
     try {
       cb(sessionId, disposition, detail)

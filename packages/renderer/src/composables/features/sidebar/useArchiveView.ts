@@ -1,0 +1,171 @@
+/**
+ * useArchiveView —— 归档列表视图与主区摘要视图的编排（session-archive 设计 D10/D11，
+ * u-renderer-entry；D5 config.archives 拉取 + 恢复/彻底删除成功路径）。
+ *
+ * 「api 调用只在 features 层」铁律的归档域落点：config.archives / session.unarchive /
+ * session.purgeArchive 三 RPC 经此编排；session.archive（归档发起）走
+ * useSidebar.archiveSession（core createUseSession 编排——cleanupSessionState 同族 +
+ * wasActive 回退，D14），由 useSidebarSessionActions.onArchiveSession 承接。
+ *
+ * 形态 = 模块级单例函数集（subagent-composer-lane / useChat 的 tFn 先例）：消费点跨
+ * Sidebar（侧栏视图切换）与 MainPanel→ArchiveMainView（主区恢复编排）两棵子树，
+ * 无组件作用域依赖（store 走 pinia 单例、toast 文案走 i18n.global.t），多调用点返回
+ * 等价闭包。恢复后的会话列表刷新走 runtime unarchive 步骤 7 的 broadcastSessionList
+ * 广播回流（core bindSessionListBroadcast 自动 applySnapshot——owner 唯一写通道，
+ * 本编排不旁路直呼 store mutation；重连对账兜底由 useSidebar.onConnected 既有链承担）。
+ *
+ * 恢复成功编排（D5 步骤 7 / D10）：unarchive reply 的 SessionSummary 不自动切入
+ * （设计 §5.1：恢复后主区是确认形态，点击行才打开完整对话）——切回会话列表 +
+ * 主区导航回 chat + toast 确认。彻底删除成功：刷新归档列表；keep-all 保守分支
+ * （keptSubagentsDir 携带）出声说明残留目录（D5 步骤 7 失败显式上报）。
+ */
+import { onBeforeUnmount, onMounted } from 'vue'
+import type { ArchiveSummary } from '@taiji/shared'
+import { session as sessionApi } from '@/api'
+import * as events from '@taiji/core/transport/api'
+import { toErrorMessage } from '@taiji/core'
+import i18n from '@/i18n'
+import { useArchiveStore } from '@/stores/archive'
+import { useNavigationStore } from '@/stores/navigation'
+import { useToast } from '@/composables/useToast'
+
+/** toast/占位文案（i18n 全局实例——模块级编排无组件 setup 上下文，cast 先例同 useChat tFn）。 */
+const t = i18n.global.t as (key: string, params?: Record<string, unknown>) => string
+
+/**
+ * 拉取归档列表（config.archives；打开视图 / 归档域操作成功后对账）。失败置 listError
+ * 供归档列表重试入口（拉为主：列表 = 归档目录扫描派生，D9 不变量 3）。
+ */
+async function refreshArchives(): Promise<void> {
+  const store = useArchiveStore()
+  store.loading = true
+  store.listError = null
+  try {
+    const archives = await sessionApi.listArchives()
+    store.setArchives(archives)
+  } catch (e) {
+    store.listError = toErrorMessage(e)
+  } finally {
+    store.loading = false
+  }
+}
+
+/**
+ * 打开侧栏归档列表视图（D10 入口钮：角标 count 0 隐藏，按钮恒可点）+ 拉取列表。
+ */
+function openArchiveView(): void {
+  useArchiveStore().openView()
+  void refreshArchives()
+}
+
+/** 返回侧栏会话列表（归档列表头返回钮）。 */
+function closeArchiveView(): void {
+  useArchiveStore().closeView()
+}
+
+/**
+ * 点击归档行 → 主区呈现摘要视图（D11）：登记选中条目 + 导航到 view:'archive'。
+ * 侧栏保持归档列表（主区/侧栏独立——用户可继续换条目预览）。
+ */
+function openSummary(archive: ArchiveSummary): void {
+  useArchiveStore().selectArchive(archive)
+  useNavigationStore().push({ view: 'archive' })
+}
+
+/** 主区摘要视图离开（view 切回 chat；选中条目清空防陈旧引用）。 */
+function closeSummary(): void {
+  useArchiveStore().selectArchive(null)
+  useNavigationStore().push({ view: 'chat' })
+}
+
+/** 条目显示名（name 空串回退未命名占位，D3 合法形态）。 */
+function displayName(archive: ArchiveSummary): string {
+  return archive.name.length > 0 ? archive.name : t('archive.summary.unnamed')
+}
+
+/**
+ * 恢复归档 session（D5 步骤 7 / D10 恢复钮）：解压回原路径原分组成功后——切回会话
+ * 列表 + 主区回 chat + 归档列表刷新（该条目消失）+ toast 确认。恢复的 session 回场
+ * 会话列表由 runtime broadcastSessionList 广播回流（core bindSessionListBroadcast 自动
+ * applySnapshot——数据 owner 唯一写通道，本编排不旁路直呼 store mutation；重连对账
+ * 兜底由 useSidebar.onConnected 既有链承担）。失败 toast（error envelope message 含
+ * 恢复指引语义）。
+ */
+async function restoreArchive(archive: ArchiveSummary): Promise<void> {
+  const { error: toastError, info: toastInfo } = useToast()
+  try {
+    await sessionApi.unarchive(archive.sessionId)
+  } catch (e) {
+    toastError(t('archive.entry.restoreFailed', { msg: toErrorMessage(e) }))
+    return
+  }
+  const store = useArchiveStore()
+  store.closeView()
+  store.selectArchive(null)
+  useNavigationStore().push({ view: 'chat' })
+  void refreshArchives()
+  toastInfo(t('archive.entry.restoreSuccess', { name: displayName(archive) }))
+}
+
+/**
+ * 彻底删除归档 session（D5 purgeArchive；归档列表悬停 danger 两段确认后）：成功刷新
+ * 归档列表与角标；keep-all 保守分支（keptSubagentsDir 携带，D5 步骤 7）出声说明残留
+ * 目录指引——失败显式上报，用户不以「成功 toast + 磁盘无提示残留」组合形态遭遇该分支。
+ */
+async function purgeArchiveEntry(archive: ArchiveSummary): Promise<void> {
+  const { error: toastError, info: toastInfo, warning: toastWarning } = useToast()
+  let keptSubagentsDir: string | undefined
+  try {
+    const reply = await sessionApi.purgeArchive(archive.sessionId)
+    keptSubagentsDir = reply.keptSubagentsDir
+  } catch (e) {
+    toastError(t('archive.entry.purgeFailed', { msg: toErrorMessage(e) }))
+    return
+  }
+  const store = useArchiveStore()
+  // 主区正在呈现该条目时同步离开（列表行消失，摘要视图不留悬空引用）
+  if (store.selected?.sessionId === archive.sessionId) {
+    store.selectArchive(null)
+    useNavigationStore().push({ view: 'chat' })
+  }
+  void refreshArchives()
+  if (keptSubagentsDir) {
+    toastWarning(t('archive.entry.purgeKeptSubagents', { name: displayName(archive), dir: keptSubagentsDir }))
+  } else {
+    toastInfo(t('archive.entry.purgeSuccess', { name: displayName(archive) }))
+  }
+}
+
+/**
+ * 归档域编排函数集（多调用点等价闭包——store 走 pinia 单例，无实例态）。
+ * 消费点：Sidebar（侧栏视图切换 + 事件接线）、ArchiveMainView（主区恢复编排）。
+ */
+export function useArchiveView() {
+  return {
+    refreshArchives,
+    openArchiveView,
+    closeArchiveView,
+    openSummary,
+    closeSummary,
+    restoreArchive,
+    purgeArchiveEntry,
+  }
+}
+
+/**
+ * archiveCount 角标的广播订阅（config.sessions 帧携带值，D5 协议变更点）：
+ * 组件作用域 composable（onMounted 订阅 / onBeforeUnmount 退订）——Sidebar 单实例
+ * 挂载调用。字段缺省（旧 runtime / mock 无归档数据）不覆盖现值；冷启动首帧前角标
+ * 读初始 0 隐藏，Sidebar 挂载时的 openArchiveView 首拉对账兜底。与 useSidebar 的
+ * onConfigSessions（core 列表应用通道，refCount 防重复）职责正交：本订阅只读
+ * archiveCount 字段。
+ */
+export function useArchiveCountBroadcast(): void {
+  onMounted(() => {
+    const unsubscribe = events.onGlobalType('config.sessions', (msg) => {
+      const count = msg.payload.archiveCount
+      if (typeof count === 'number') useArchiveStore().setCount(count)
+    })
+    onBeforeUnmount(() => unsubscribe())
+  })
+}

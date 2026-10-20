@@ -2,7 +2,7 @@
  * SessionList 默认项目区（2026-10-13 方案 A）事件接线与目录模式渲染补测。
  *
  * 背景：coverage gate 指出分支新增可执行行未触达，本文件补齐两类缺口：
- * - 平铺默认区 SessionItem 的 @select/@rename/@delete 透传（模板事件绑定行）：
+ * - 平铺默认区 SessionItem 的 @select/@rename/@archive 透传（模板事件绑定行）：
  *   既有 session-list-project-filter 只断渲染归属，未断事件透传
  * - 目录模式默认区（模板默认项目目录段）：默认项目目录标签（SessionDirLabel）+
  *   会话行 + folder 行操作（+ 新建 / 两段式批量删除）此前只在命名项目组语境下有覆盖，
@@ -10,7 +10,8 @@
  *
  * 行为断言（用户可见 DOM 优先）：
  * - 点默认区会话行 → emit('select', id)（真实 click 链路，非 stub 注入）
- * - rename/delete 事件自 SessionItem 原样透传（SessionList 接线契约，payload 逐字相等）
+ * - rename/archive 事件自 SessionItem 原样透传（SessionList 接线契约，payload 逐字相等；
+ *   [session-archive D6] 悬停第三钮语义 delete → archive 迁移）
  * - 目录模式默认区：目录标签置顶（DOM 序先于任何 project-group）、无 ProjectGroup 包裹；
  *   点「+」→ emit('newSessionInFolder', cwd)；两段式删除首击进确认态（title 翻转）、
  *   再击 emit('deleteFolder', cwd)
@@ -94,7 +95,7 @@ describe('SessionList: 平铺默认区事件透传', () => {
     expect(wrapper.emitted('select')).toEqual([['sb']])
   })
 
-  it('默认区 SessionItem 的 rename / delete 事件原样透传（SessionList 接线契约，payload 逐字相等）', async () => {
+  it('默认区 SessionItem 的 rename / archive 事件原样透传（SessionList 接线契约，payload 逐字相等）', async () => {
     setupProjects(DEFAULT_PROJECT_ID)
     const wrapper = mountList([
       { cwd: '/repo', sessions: [makeSession('sb', '/repo')] },
@@ -103,11 +104,11 @@ describe('SessionList: 平铺默认区事件透传', () => {
     const item = defaultZoneOf(wrapper).findComponent(SessionItem)
     expect(item.exists()).toBe(true)
     item.vm.$emit('rename', 'sb')
-    item.vm.$emit('delete', 'sb')
+    item.vm.$emit('archive', 'sb')
     await nextTick()
 
     expect(wrapper.emitted('rename')).toEqual([['sb']])
-    expect(wrapper.emitted('delete')).toEqual([['sb']])
+    expect(wrapper.emitted('archive')).toEqual([['sb']])
   })
 })
 
@@ -152,7 +153,7 @@ describe('SessionList: 目录模式默认区（置顶目录标签 + folder 行�
     expect(wrapper.emitted('newSessionInFolder')).toEqual([['/repo']])
   })
 
-  it('默认区 SessionItem 全部事件原样透传（select/rename/delete/setProject/navigateParent/abort/forceQuit/exportJsonl）', async () => {
+  it('默认区 SessionItem 全部事件原样透传（select/rename/archive/setProject/navigateParent/abort/forceQuit/exportJsonl）', async () => {
     setupProjects(DEFAULT_PROJECT_ID)
     const wrapper = mountList([
       { cwd: '/repo', sessions: [makeSession('s1', '/repo')] },
@@ -165,7 +166,7 @@ describe('SessionList: 目录模式默认区（置顶目录标签 + folder 行�
 
     item.vm.$emit('select', 's1')
     item.vm.$emit('rename', 's1')
-    item.vm.$emit('delete', 's1')
+    item.vm.$emit('archive', 's1')
     item.vm.$emit('setProject', { sessionId: 's1', projectId: 'proj-a' })
     item.vm.$emit('navigateParent', 'parent-1')
     item.vm.$emit('abort', 's1')
@@ -175,7 +176,7 @@ describe('SessionList: 目录模式默认区（置顶目录标签 + folder 行�
 
     expect(wrapper.emitted('select')).toEqual([['s1']])
     expect(wrapper.emitted('rename')).toEqual([['s1']])
-    expect(wrapper.emitted('delete')).toEqual([['s1']])
+    expect(wrapper.emitted('archive')).toEqual([['s1']])
     expect(wrapper.emitted('setProject')).toEqual([[{ sessionId: 's1', projectId: 'proj-a' }]])
     expect(wrapper.emitted('navigateParent')).toEqual([['parent-1']])
     expect(wrapper.emitted('abort')).toEqual([['s1']])

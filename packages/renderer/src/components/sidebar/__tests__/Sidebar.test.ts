@@ -180,16 +180,22 @@ describe('Sidebar app.info 退订（B3 / 2026-09-14 内存审计 §2.4）', () =
     expect(unsub).toHaveBeenCalledTimes(1)
   })
 
-  it('TC5: 重复挂卸循环对称——每次 mount 订阅一次 / unmount 退订一次（A4 场景：重连重挂后 handler 数恒 1）', () => {
-    // 连接抖动模拟：5 轮 mount/unmount，退订函数逐次消费（mock 队列 5 份）
-    const unsubs = Array.from({ length: 5 }, () => vi.fn())
+  it('TC5: 重复挂卸循环对称——每次 mount 订阅、unmount 全退（A4 场景：重连重挂后 handler 数恒定）', () => {
+    // 连接抖动模拟：5 轮 mount/unmount。Sidebar 每轮 mount 注册两个全局订阅
+    //（[session-archive D10] archiveCount 角标的 config.sessions 订阅先于 app.info——
+    // useArchiveCountBroadcast 的 onMounted 注册在 setup 前段），退订函数逐次消费
+    //（mock 队列每轮 2 份 × 5 轮 = 10 份）；断言全队列 unmount 后恰好各调一次。
+    const unsubs = Array.from({ length: 10 }, () => vi.fn())
     for (const un of unsubs) vi.mocked(onGlobalType).mockReturnValueOnce(un)
 
     for (let i = 0; i < 5; i++) {
       const wrapper = shallowMount(Sidebar)
-      expect(unsubs[i]).not.toHaveBeenCalled()
+      // 本轮两份退订函数均未被调（mount 后、unmount 前）
+      expect(unsubs[i * 2]).not.toHaveBeenCalled()
+      expect(unsubs[i * 2 + 1]).not.toHaveBeenCalled()
       wrapper.unmount()
-      expect(unsubs[i]).toHaveBeenCalledTimes(1)
+      expect(unsubs[i * 2]).toHaveBeenCalledTimes(1)
+      expect(unsubs[i * 2 + 1]).toHaveBeenCalledTimes(1)
     }
   })
 })

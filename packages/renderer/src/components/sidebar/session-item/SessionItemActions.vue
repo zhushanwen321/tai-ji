@@ -1,15 +1,20 @@
 <template>
   <!--
     SessionItem hover ghost 操作子块（2026-10-10 用户裁决：悬停钮收敛为 3 个 =
-    rename / 删除两段确认 / 归入项目 Popover；标记完成与引用到输入区迁右键菜单
+    rename / 归档两段确认 / 归入项目 Popover；标记完成与引用到输入区迁右键菜单
     SessionItemContextMenu——「其他的功能都放到右键」）。两段确认的状态在主组件
     （reset 通道：根 div mouseleave / watch active / Esc / onClickOutside 的锚点
     都在主组件），经 v-model:confirming 双向。
+
+    [session-archive D6/D12/D13，u-renderer-entry] 悬停第三钮 = 归档钮（原删除钮语义
+    迁移——删除链路整体移到归档列表的彻底删除）：PackageCheck 图标（D12 指定
+    PackageDown 在本仓 @lucide/vue 无此导出，取同族「包裹+勾」收纳语义图标）+
+    两段确认 accent 轻确认（归档非破坏性，区别于原 danger 红底）；生成中（D13
+    renderer 拦截层）禁用 + title 说明，runtime archive RPC 三门之首兜底。
   -->
   <!-- 位置 = Display 右槽覆盖层（2026-10-11 用户裁决：absolute inset-0 覆盖「点 + 时间」
        定宽槽、justify-end 贴右；槽定宽 58px 由 Display 声明，名称在槽左缘截断构造性不受遮）。
-       钮序 = 重命名 → 归入项目 → 删除（用户裁决 2026-10-13：破坏性操作移至视线动线末端，
-       误触路径最长）。删除走两段式确认。
+       钮序 = 重命名 → 归入项目 → 归档（破坏性/退场性操作移至视线动线末端，误触路径最长）。
        三钮 tabindex=-1（spec §3.4：键盘不走悬停钮，走行 Tab → Enter/Space → ContextMenu
        右键菜单通道）+ @pointerdown.stop（demo 同款：按下不触发行侧副作用）。
        钮 18px 视觉（缩宽裁决）+ after 伪元素外扩 3px = 24px 热区下限口径（同 .pp-act 技法）。 -->
@@ -71,29 +76,32 @@
         </div>
       </PopoverContent>
     </Popover>
-    <!-- 删除（两段确认）——钮序末位（用户裁决 2026-10-13：破坏性操作最右） -->
+    <!-- 归档（两段确认，accent 轻确认——归档非破坏性，D6）——钮序末位（退场性操作最右）。
+         生成中禁用 + title（D13 renderer 拦截层；runtime archive_generating 门兜底）。 -->
     <Button
       variant="ghost"
       size="icon"
       tabindex="-1"
+      data-testid="session-archive-btn"
+      :disabled="generating"
       class="relative size-[18px] rounded-sm after:absolute after:inset-[-3px] after:content-['']"
       :class="confirming
-        ? 'bg-danger text-neutral-fg'
-        : 'text-neutral-dim hover:bg-surface-hover hover:text-danger'"
-      :title="confirming ? t('sidebar.sessionItem.deleteConfirm') : t('sidebar.sessionItem.delete')"
-      @click.stop="onRemoveClick"
+        ? 'bg-accent-soft text-accent'
+        : 'text-neutral-dim hover:bg-surface-hover hover:text-neutral-fg'"
+      :title="archiveTitle"
+      @click.stop="onArchiveClick"
       @pointerdown.stop
     >
       <Check v-if="confirming" class="size-[12px]" />
-      <Trash2 v-else class="size-[12px]" />
+      <PackageCheck v-else class="size-[12px]" />
     </Button>
   </div>
 </template>
 
 <script setup lang="ts">
-import { ref } from 'vue'
+import { computed, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { Check, Pencil, Trash2, FolderKanban } from '@lucide/vue'
+import { Check, Pencil, PackageCheck, FolderKanban } from '@lucide/vue'
 import { Button } from '@/components/ui/button'
 import { Popover, PopoverTrigger, PopoverContent } from '@/components/ui/popover'
 import { useAssignTargets } from './assign-targets'
@@ -101,19 +109,34 @@ import type { SessionItemSession } from './types'
 
 const props = defineProps<{
   session: SessionItemSession
-  /** 删除两段式确认态（状态在主组件，reset 多路通道锚点在主组件） */
+  /** 归档两段式确认态（状态在主组件，reset 多路通道锚点在主组件） */
   confirming: boolean
+  /**
+   * 生成中（D13 归档门 renderer 拦截层）：true 时归档钮禁用 + title 说明——生成中归档
+   * 会丢尾部未落盘 entry，runtime archive RPC 首门（archive_generating）兜底直发路径。
+   * 判据 = DerivedStatus 六瞬态（isSessionGenerating，主组件按 status prop 计算）。
+   */
+  generating: boolean
 }>()
 
 const emit = defineEmits<{
   'update:confirming': [value: boolean]
-  delete: [sessionId: string]
+  /** 归档（session-archive D6：原 delete 语义迁移——发起侧编排 useSidebar.archiveSession） */
+  archive: [sessionId: string]
   rename: [sessionId: string]
   /** 归入项目（D14 语义修正）：payload 单对象（规则 #1）。projectId 空串 = 归回默认项目。 */
   setProject: [{ sessionId: string; projectId: string }]
 }>()
 
 const { t } = useI18n()
+
+/** 归档钮 title：生成中说明 / 确认态再击提示 / 默认动作名（D6/D13 文案）。 */
+const archiveTitle = computed(() => {
+  if (props.generating) return t('sidebar.sessionItem.archiveGenerating')
+  return props.confirming
+    ? t('sidebar.sessionItem.archiveConfirm')
+    : t('sidebar.sessionItem.archive')
+})
 
 // ── 归入项目菜单（D14 语义修正 2026-08-04）──
 const assignOpen = ref(false)
@@ -125,15 +148,17 @@ function onAssign(projectId: string): void {
   assignOpen.value = false
 }
 
-/** 删除两段式确认：首次点击进确认态（不 emit），再次点击才 emit delete。
+/** 归档两段式确认：首次点击进确认态（不 emit），再次点击才 emit archive。
+ *  生成中（D13）按钮已禁用，本函数不可达禁用态——防御性早退保持语义自足。
  *  复位由主组件多路通道执行（见 props.confirming 注释）。 */
-function onRemoveClick(): void {
+function onArchiveClick(): void {
+  if (props.generating) return
   if (!props.confirming) {
     emit('update:confirming', true)
     return
   }
   emit('update:confirming', false)
-  emit('delete', props.session.id)
+  emit('archive', props.session.id)
 }
 
 </script>

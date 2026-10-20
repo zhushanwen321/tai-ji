@@ -53,6 +53,7 @@ function makeFixture() {
     create: vi.fn(),
     rename: vi.fn().mockResolvedValue(undefined),
     remove: vi.fn().mockResolvedValue(undefined),
+    archive: vi.fn().mockResolvedValue(undefined),
     removeByCwd: vi.fn().mockResolvedValue({ cwd: '/a', deleted: [], failed: [] } as BatchDeleteResult),
     migrateImage: vi.fn(),
     onConfigSessions: vi.fn(() => vi.fn()),

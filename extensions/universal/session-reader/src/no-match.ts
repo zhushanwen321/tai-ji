@@ -117,8 +117,15 @@ function formatSuggestionLines(suggestions: NoMatchSuggestion[], query: string):
   return lines
 }
 
-/** ③ 正确做法四条 + ④ 封死 shell 绕行（纯静态文案）。 */
-function guidanceLines(): string[] {
+/**
+ * ③ 正确做法四条 + ④ 封死 shell 绕行（纯静态文案）。
+ *
+ * [session-archive D7] archiveHint：归档根存在且有簿记时由 formatNoMatch 追加第
+ * 五条（目标可能已归档的引用指引）——find 结果不含归档条目，归档引用通道是深读
+ * action 的 session 参数（resolveByFragment 的归档回退层）。无归档目录 → 空数组，
+ * 文案零变化。
+ */
+function guidanceLines(archiveHint: string[] = []): string[] {
   return [
     '',
     '正确做法：',
@@ -126,6 +133,7 @@ function guidanceLines(): string[] {
     `  - 已知文件路径时直接传绝对路径：session_read { action:"outline", session:"<绝对路径>.jsonl" }`,
     `  - 截断/过期 id 用更短前缀：session_read { action:"find", query:"<更短前缀>" }`,
     `  - 想先看环境与根目录状态：session_read { action:"doctor" }`,
+    ...archiveHint,
     '',
     '不要用 shell find/ls/rg 搜 session 目录，不要 cat/read 原始 .jsonl —— session_read 是唯一入口。',
   ]
@@ -150,12 +158,22 @@ function guidanceLines(): string[] {
  * 无「👉 用 recent 看全量」误导指引（recent 候选对写错的 uuid 无自纠价值，§6.7 不采用项）。
  */
 export function formatNoMatch(query: string, roots: SessionRoot[]): string {
+  // [session-archive D7] 归档指引（条件行）：归档根存在且簿记非空才出现——自检行
+  // 已列 [archive] 根计数，此处补「怎么引用」的动作指引，find→深读链路对归档
+  // session 不断链。无归档目录的 roots 不含 archive 根，guidanceLines 零变化。
+  const archiveRoot = roots.find((r) => r.kind === 'archive' && r.dedupedInto === undefined)
+  const archiveHint =
+    archiveRoot !== undefined && (archiveRoot.fileCount ?? 0) > 0
+      ? [
+          `  - 目标可能已归档：直接用 session 参数引用（返回归档摘要），如 session_read { action:"outline", session:"<名称片段或id>" }`,
+        ]
+      : []
   return [
     `无匹配 session："${query}"`,
     '',
     ...buildSelfCheckLines(roots),
     '',
     ...formatSuggestionLines(collectSuggestions(query, roots), query),
-    ...guidanceLines(),
+    ...guidanceLines(archiveHint),
   ].join('\n')
 }

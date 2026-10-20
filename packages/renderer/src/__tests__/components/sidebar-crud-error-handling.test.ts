@@ -27,6 +27,7 @@ vi.mock('@/composables/useToast', () => ({
 const sidebarMocks = vi.hoisted(() => ({
   selectSession: vi.fn(),
   deleteSession: vi.fn(),
+  archiveSession: vi.fn(),
   renameSession: vi.fn(),
   newSession: vi.fn(),
   focusedSessionId: { value: null },
@@ -114,6 +115,7 @@ beforeEach(() => {
   // 默认 resolve（非异常用例的基础状态）
   sidebarMocks.selectSession.mockResolvedValue(undefined)
   sidebarMocks.deleteSession.mockResolvedValue(undefined)
+  sidebarMocks.archiveSession.mockResolvedValue(undefined)
   sidebarMocks.renameSession.mockResolvedValue(undefined)
   sidebarMocks.newSession.mockResolvedValue(null)
 })
@@ -144,21 +146,24 @@ describe('Sidebar CRUD handler 异常处理', () => {
   /**
    * U6: onDeleteSession remove 失败时 toast 报错。
    */
-  it('onDeleteSession 失败时 toast 报错', async () => {
-    sidebarMocks.deleteSession.mockRejectedValue(new Error('server error'))
+  it('onArchiveSession 失败时 toast 报错', async () => {
+    // [session-archive D6] 悬停删除钮已迁移为归档钮——Sidebar 异常处理契约的现行载体是
+    // archive 链路（onDeleteSession handler 保留但无 UI 挂点，其 catch 契约由本用例的
+    // 同构链路 onArchiveSession 承载断言）
+    sidebarMocks.archiveSession.mockRejectedValue(new Error('server error'))
     const wrapper = shallowMount(Sidebar)
 
     await wrapper.vm.$nextTick()
     const sessionList = wrapper.findComponent({ name: 'SessionList' })
-    sessionList.vm.$emit('delete', 's1')
+    sessionList.vm.$emit('archive', 's1')
 
     await vi.waitFor(() => {
-      expect(sidebarMocks.deleteSession).toHaveBeenCalledWith('s1')
+      expect(sidebarMocks.archiveSession).toHaveBeenCalledWith('s1')
     })
 
     await vi.waitFor(() => {
       expect(toastError).toHaveBeenCalledTimes(1)
-      expect(toastError.mock.calls[0][0]).toContain('删除会话失败')
+      expect(toastError.mock.calls[0][0]).toContain('归档失败')
     })
   })
 })

@@ -20,9 +20,15 @@ import { buildBtwThreadListPayload } from './transport/btw-message-handler.js'
 // btw-line-spawn-options 工厂——getMigrationGate 经下方 createBtwLineSpawnOptionsFactory 接线）。
 // [M4-a] setBtwCascadeOps：deleteSession/deleteByCwd 的 btw 级联支线注入点（session-lifecycle）；
 // subscribeSessionDeathDisposition：notify-once D5 死亡处置登记（delete/suppress 汇聚点）。
-import { getMigrationGate, setBtwCascadeOps, subscribeSessionDeathDisposition } from './services/session/session-lifecycle.js'
+import { getMigrationGate, setBtwCascadeOps, subscribeSessionDeathDisposition, fireDeathDisposition } from './services/session/session-lifecycle.js'
 // [M4-a] 线终结的插件 sessionData 真删清理（onLineTerminated 扇出，与主会话 delete B5 段同源）。
 import { clearRemovedSessionData } from './services/plugin-service/session-data-store.js'
+// 归档域（session-archive 设计 D5，u-rpc-wiring 组合根接线）：ArchiveService 构造 deps 逐项
+// 对齐 delete 活跃分支原语（见下方装配注释）。
+import { ArchiveService } from './services/archive/archive-service.js'
+import { userStoppedGate } from './services/session/event-interpreter.js'
+import { reapSessionBackgroundTasks } from './services/session/background-task-reaper.js'
+import { unbindCanvasOnSessionDeleted } from './services/canvas/canvas-service.js'
 import { findPiExecutable } from './infra/pi/find-pi-executable.js'
 import { GenStatsService } from './services/session/gen-stats-service.js'
 import { createSessionDeliveryRegistry, createDiskDeliveryStoreForSession } from './services/session/session-delivery-registry.js'
@@ -1458,6 +1464,40 @@ async function main(): Promise<void> {
   if (btwLinesRebuilt > 0) {
     console.log(`[btw] startup rebuild: lines rebuilt=${btwLinesRebuilt}`)
   }
+
+  // ── ArchiveService（session-archive 设计 D5，u-rpc-wiring 组合根接线）──────────
+  // deps 逐项对齐 delete 活跃分支原语（session-lifecycle.ts delete 方法体）：归档的杀 pi
+  // 编排与删除同链（userStopped 清理 → suppress 处置登记先于杀进程 → btw 级联 → detach/
+  // destroy/摘除 → 收殓在途后台任务）；purge 的残树处置 / 插件 KV tombstone / 画布解绑
+  // 复用 delete 同名原语；trash 经 sessionStore（与 cascade 生产装配同源，G4 语义——失败
+  // 原样上抛保持可恢复形态）。getActiveSession 映射 getSession（IManagedSessionView 含
+  // cwd/sessionFilePath/isGenerating，ArchiveService 消费的最小字段集）。
+  const archiveService = new ArchiveService({
+    isGenerating: (sid) => sessionService.getSession(sid)?.isGenerating ?? false,
+    getActiveSession: (sid) => sessionService.getSession(sid),
+    findScannedSession: (sid) => sessionService.findScannedSession(sid),
+    disposeUserStopped: (sid) => userStoppedGate.disposeForDelete(sid),
+    fireSuppressDisposition: (sid, hasDestroySink) => fireDeathDisposition(sid, 'suppress', { hasDestroySink }),
+    closeAllBtwLines: (mainSid, cwd) => btwService.closeAllForMain(mainSid, cwd),
+    detachSession: (sid) => sessionService.detachSession(sid),
+    destroyPiSession: (sid) => pm.destroySession(sid),
+    removeSessionEntry: (sid) => sessionService.removeSessionEntry(sid),
+    reapBackgroundTasks: (agentDir, sid) => reapSessionBackgroundTasks(agentDir, sid),
+    clearRemovedSessionData,
+    unbindCanvas: unbindCanvasOnSessionDeleted,
+    trash: (path) => sessionStore.trash(path),
+    trashDirectory: (dirPath) => sessionStore.trashDirectory(dirPath),
+    invalidateScanCache: () => sessionStore.invalidateScanCache(),
+    broadcastSessionList: () => server.broadcastSessionList(),
+    getSessionSummary: (sid) => sessionService.getSummary(sid),
+    warn: (message) => console.warn(message),
+  })
+  // 启动自愈（D5 六行表）：listen 前完成——归位先于任何归档域 RPC 到达（.restoring 回滚 /
+  // 孤儿补簿记等同步段无 RPC 竞态窗口）；重做压缩经 service 在途任务表串行化，即便慢也
+  // 不影响后续同 session RPC 的正确性。staging 重压缩在大文件上可达秒级，仅崩溃残留场景
+  // 出现，正常启动为纯归档根扫描。
+  await archiveService.healOnStartup()
+
   /**
    * btw.create 主会话解析（handler ctx，BtwRoutingDeps.resolveMain）：活跃路径携带主 turn
    * 活跃信号（分支③ pill 增强）；扫盘路径（冷主会话）无可读占用态恒 false。
@@ -1524,6 +1564,9 @@ async function main(): Promise<void> {
     importService,
     // composer-gen-stats（D4）：session.getGenStats 恢复路径 RPC（降级链 + 写 3 回填在 service 内部）。
     genStats: genStatsService,
+    // 归档域（session-archive D5）：三 RPC + config.archives + config.sessions 帧 archiveCount
+    // 角标（上方组合根构造，deps 对齐 delete 活跃分支原语）。
+    archive: archiveService,
     // u8（reply 通路对称接线）：reply 超限错误 envelope 的恢复指引携带 session 文件实路径，
     // 与上方 MessageBus（push 通路）共用同一 resolveSessionFilePath resolver 实例。
     replyGuardResolver: resolveSessionFilePath,

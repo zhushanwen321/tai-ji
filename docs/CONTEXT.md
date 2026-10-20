@@ -292,6 +292,21 @@ taiji 自有全部 session 维度衍生数据的统一落点：`<dataDir>/ext-se
 
 **代码映射**: `packages/shared/src/paths.ts` 的 `getSessionArtifactsDir`（公式单点，含 sessionId 穿越校验）；system-prompt 扩展侧以镜像推导（不 import shared——包边界 + 运行时门禁）。
 
+### 归档（archive）
+session 的可恢复中间存储态：把闲置 session 的主文件与旁挂、附件三目录整体搬入归档目录并做 zstd 压缩（实测省 70%-94%），名称与摘要明文存[簿记文件](#簿记文件archivejson)供免解压查看，恢复时解压回原路径、project 归属随旁挂自动还原——补齐「在场 ↔ 销毁」之间缺的「退场但可回」一档。归档是**文件位置派生态**：文件移出 sessions/ 扫描根即从侧边栏构造性消失，不进 SessionStatus 词表（不产生列表条目的枚举死值）；一等载体是簿记 status 字段与 ArchiveSummary。用户入口 = 侧边栏悬停归档钮（两段确认，PackageDown 图标——与「标记完成」的 Archive 图标 + "archived" ariaLabel 是两个语义：做完了 vs 收起来，图标区分文案不共用）；agent 入口 = session_read 命中归档 session 只见摘要且显式标注「已归档」。语义边界：与 [Compaction](#compaction) 互补——compaction 压的是 LLM 上下文、JSONL 文件只增不减，归档压的是文件本身。机制与决策登记 [ADR-0153](adr/decisions.md)；领域登记见 [domain-model.md](domain-model.md) session 存储归档域。
+
+**代码映射**: runtime `packages/runtime/src/services/archive/`（ArchiveService 三操作 archive/unarchive/purgeArchive + 自愈 + 状态机）；RPC 挂 session 域（`session.archive` / `session.unarchive` / `session.purgeArchive`）；renderer `packages/renderer/src/components/archive/`（归档列表 + 摘要视图）+ sidebar 归档入口；session-reader `extensions/universal/session-reader/` 第五扫描根（簿记收集器）。
+
+### 归档单元（ArchiveEntry）
+一个已归档 session 的全部归档物构成的聚合：主文件压缩体（staging 期为明文）+ 六类旁挂文件（原样明文随迁）+ 附件三目录（`assets/<sessionId>/{attachments,artifacts,image-cache}`，源 = session 存储树三域，显式映射搬入）+ [簿记文件](#簿记文件archivejson)。聚合根 = 簿记文件——簿记在即归档单元在（列表条目存在、purge 可重试），簿记消失即单元消亡（恢复或彻底删除完成）。物理落位镜像 sessions 布局：`<agentDir>/archive/<encodeCwd>/<原主文件名>…`。聚合自带显式状态机（staging / archived / restoring 三态 + compress_done / unarchive / restore_done / 双回滚 / purge 六事件，`@zhushanwen/state-machine` 声明），状态判定唯一权威 = 读磁盘（无簿记 = 无单元；status 字段 = staging/archived；`.restoring` 后缀 = restoring）；不变量四条（互斥存在 / 压缩体消费前校验 / 列表派生 / 扫描范围互斥）登记见 [domain-model.md](domain-model.md)。
+
+**代码映射**: 状态机声明 `packages/runtime/src/services/archive/archive-entry-machine.ts`；路径派生与簿记扫描 `archive-paths.ts`；共享契约 `packages/shared/src/archive.ts`。
+
+### 簿记文件（.archive.json）
+归档单元的元数据载体与聚合根：每个归档单元一份，明文 JSON（名称/摘要免解压读取的前提），文件名 = `<原主文件名>.archive.json`，与主文件压缩体同目录。两段式写入——归档 reply 前写骨架（status: staging，含名称，不含 summary），后台压缩任务完成后原子重写终态（status: archived，补 summary / sha256 / compressedBytes）。恢复中标记 = 同名 rename 为 `.restoring` 后缀（移出列表扫描范围，崩溃后可识别）。归档列表 = 扫描 `archive/**/*.archive.json` 派生，不建独立索引（目录即事实源，杜绝索引与目录漂移）；project 归属不冗余进簿记（权威源 = 随迁的 `.project.json` 旁挂，列表渲染时读旁挂回填）。
+
+**代码映射**: schema SSOT `packages/shared/src/archive.ts`（`ArchiveLedger` 判别联合 + `parseArchiveLedger` 解析校验）；写读 = runtime `archive-service.ts` / `archive-paths.ts`；extension 侧消费 = session-reader 簿记收集器。
+
 ### Thinking
 模型的内部推理过程，在回答生成前产生。属于单条 Message（挂在 `Message.thinking[]` 上），不属于整个 Session。UI 中默认折叠展示。
 

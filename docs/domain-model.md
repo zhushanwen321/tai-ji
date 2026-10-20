@@ -1,6 +1,6 @@
 # taiji 领域模型登记
 
-> **本文件定位**：领域聚合、不变量与状态机的登记处（统一语言词条在 [CONTEXT.md](CONTEXT.md)）。当前登记域：**画布（problem-solve canvas，聚合与不变量，2026-10）**；**状态机基建与五域状态机（run / 画布节点 / plan / goal / permanent-session + 归档单元，2026-10，见下「状态机基建」节）**。
+> **本文件定位**：领域聚合、不变量与状态机的登记处（统一语言词条在 [CONTEXT.md](CONTEXT.md)）。当前登记域：**画布（problem-solve canvas，聚合与不变量，2026-10）**；**状态机基建与五域状态机（run / 画布节点 / plan / goal / permanent-session + 归档单元，2026-10，见下「状态机基建」节）**；**session 存储归档域（归档单元聚合 + 不变量 + 转移表，2026-10，见下「session 存储归档域」节）**。
 >
 ## 状态机基建（@zhushanwen/state-machine）
 
@@ -23,7 +23,7 @@
 | permanent-session 两态 | running / idle（词表与 ExecutionStatus satisfies 双向锁定） | `permanentSessionStatusMachine`（packages/subagent-core/src/execution/domain/record-status-machine.ts） | result——表外拒绝经域内原语转 return false（两态 CAS 语义保形） |
 | 归档单元（session 归档子域，基建首个新消费者） | staging / archived / restoring | `archiveEntryMachine`（packages/runtime/src/services/archive/archive-entry-machine.ts） | throw——对外错误码由服务层承载 |
 
-边界登记：session / background-task 两个域尚无转移表（显式化各自独立立项，ADR-0152）；core 的 streaming-state-machine.ts 是消费顺序 factory 深模块、非转移表状态机，不属本基建范畴；归档子域的聚合与不变量登记由 session-archive 设计承接（本节只登记其状态机实现载体）。
+边界登记：session / background-task 两个域尚无转移表（显式化各自独立立项，ADR-0152）；core 的 streaming-state-machine.ts 是消费顺序 factory 深模块、非转移表状态机，不属本基建范畴；归档子域的聚合与不变量登记见下「session 存储归档域」节（本节只登记其状态机实现载体）。
 
 ## 画布域
 > 机制纪律：不变量与状态机转移表的实现单点在 runtime CanvasService（`packages/runtime/src/services/canvas/`）——renderer / extension 侧不复制领域规则，全部写操作经唯一入口 `mutate`（契约 = `packages/extension-protocol/src/extensions/canvas/`，agent 工具面 = `extensions/taiji/canvas/`，GUI 写通道 = WS RPC `canvas.mutate`）。
@@ -82,3 +82,35 @@
 ### 领域事件
 
 节点历史 = 事件流回放（who / when / why / what）。每个 mutation action 至少产出一个事件（read / list 为查询类不产事件）；事件词表 18 值（全量 SSOT = 契约 `CANVAS_EVENT_TYPES`，`packages/extension-protocol/src/extensions/canvas/state.ts`）：主事件族（14 mutation action 各一，映射 = 契约 `ACTION_EVENT_MAP`）CanvasCreated / GrowthDirectionDecided / NodeCreated / NodeModified / StateTransitioned / OptionSelected / NodeDispatched / CommentAdded / CommentResponded / ReviewRequested / ReviewEntryAppended / ReviewEntryResolved / ConvergenceChecked / CanvasExported，附属事件（不独立对应 action）DirtiedPathMarked（待重审标记）与审查终态族 ReviewConverged / ReviewMaxRoundsReached / ReviewEscalated。`events.jsonl` 是唯一持久权威，`canvas.json` 快照损坏或不一致时从事件流头全量重放重建。
+
+## session 存储归档域
+> 机制纪律：领域规则的实现单点在 runtime ArchiveService（`packages/runtime/src/services/archive/`）——renderer（归档列表/摘要视图）、transport（三 RPC 分发）、extension（session-reader 归档根感知）不复制领域规则，全部经共享契约（`packages/shared/src/archive.ts`）消费。统一语言词条（归档 / 归档单元 / 簿记文件）见 [CONTEXT.md](CONTEXT.md)；存储布局与「归档态不进 SessionStatus」决策登记 [ADR-0153](adr/decisions.md)。
+
+session 存储域（SessionLifecycle 写、SessionScanner 读、文件系统为唯一持久化）的归档存储子域：输入是「在场 session 的全部磁盘构成」，输出是「归档目录内的归档单元」，与运行时对话状态（pi 进程、内存 Map）解耦。归档态与 session 的「在场」状态空间正交（归档 = 不在场，条目不进列表响应），**不进 SessionStatus 词表**——一等载体是簿记 status 字段与 ArchiveSummary。
+
+### 聚合：归档单元（ArchiveEntry，聚合根 = 簿记文件）
+
+成员：主文件压缩体（`<原主文件名>.jsonl.zst`，staging 期为明文 `.jsonl`）+ 六类旁挂文件（project / 终态 / 预设 / agent 绑定等，原样明文随迁）+ 附件三目录（`assets/<sessionId>/{attachments,artifacts,image-cache}`——源为 session 存储树三域，恢复时反向搬回）+ 簿记文件（`.archive.json`，聚合根——簿记在即单元在，簿记消失即单元消亡）。物理落位镜像 sessions 布局（`<agentDir>/archive/<encodeCwd>/`）。留置域（btw 线 / subagents / canvases / workflow / plugin-data / logs 等）不随档、原位未动（随档范围逐域裁决见 ADR-0153）。
+
+不变量（全部可核对：单测 + e2e 可断言，运行时校验 fail-fast）：
+
+1. **互斥存在**：同一 session 的主文件（sessions/ 树内 `.jsonl`）与归档单元（archive/ 树内 `.archive.json` / `.restoring` 簿记）不得同时存在于稳定态——恢复前冲突检测（`archive_restore_conflict`）与启动自愈（双存在归位）保证
+2. **压缩体消费前校验**：恢复与 purge 引用枚举两条路径消费压缩体前 sha256 校验必须通过（agent 引用只读簿记明文，不消费压缩体，不涉校验；purge 侧校验不过 = 引用状态不可知 → 级联 keep-all 保守保留，宁保留不误删）
+3. **列表派生**：归档列表条目恒等于 `archive/**/*.archive.json` 扫描结果——不允许存在独立登记渠道（`.restoring` 标记不在列表，恢复中条目对用户不可见）
+4. **扫描范围互斥**：归档目录永不进 SessionScanner 的 sessions 扫描范围（物理隔离，构造性保证——两根互不为对方子树）
+
+**归档单元状态机**（`@zhushanwen/state-machine` 声明，实现载体登记见上「状态机基建」节；表外转移一律 fail-fast）：
+
+| from | on | to | 说明 |
+|------|----|----|------|
+| （initial） | — | staging | archive 动作创建实体（同步段完成搬移 + 簿记骨架），由机器 `initial: 'staging'` 承载 |
+| staging | compress_done | archived | 后台压缩任务提交簿记终态 |
+| staging \| archived | unarchive | restoring | 簿记 rename 为 `.restoring` 后缀 |
+| restoring | restore_done | （消亡） | 恢复完成，归档单元清除——`to: null` 实体消亡形态 |
+| restoring | restore_rollback_to_staging | staging | 冲突/校验失败回滚（原态 = staging 支） |
+| restoring | restore_rollback_to_archived | archived | 冲突/校验失败回滚（原态 = archived 支） |
+| staging \| archived | purge | （消亡） | 彻底删除——`to: null` |
+
+状态判定唯一权威 = 读磁盘（无簿记 = 无单元；status 字段 = staging / archived；`.restoring` 后缀 = restoring）。同 session 的归档域操作（后台压缩任务 / unarchive / purgeArchive）按到达顺序串行执行，后到者对已消失归档单元按簿记存在性门 fail-fast（`archive_not_found`，拒绝时零副作用）；操作中途崩溃由启动自愈归位（六行表覆盖全部中间态：archive / unarchive 态自动归位，purge 态簿记保持可见、重试幂等达终态）。
+
+**唯一入口**：全部归档操作经三条 WS RPC（`session.archive` / `session.unarchive` / `session.purgeArchive`，分发表挂 session 域，命名避开已承载「重开 dead session」语义的 `session.restore`）；彻底删除复用 session 删除级联原语（cascadeDeleteSessionContent + 引用枚举源入参扩展），不自建删除清单。

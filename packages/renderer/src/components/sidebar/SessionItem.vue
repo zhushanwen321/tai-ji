@@ -3,7 +3,8 @@
     展示组件 · 单会话项（7px 单一 icon 范式），职责块拆子组件（session-item/）：
       - SessionItemContextMenu：右键菜单整棵树 + 强制退出两段确认状态机（Trigger as-child 合并到根 div）
       - SessionItemDisplay：7px 状态 icon + unread 圆点 + label + 徽标 + sub 元信息 + 时间（纯展示零 emit）
-      - SessionItemActions：hover ghost 操作 + 归入项目菜单 + 删除两段确认 UI（confirming 经 v-model 提升）
+      - SessionItemActions：hover ghost 操作 + 归入项目菜单 + 归档两段确认 UI（confirming 经 v-model 提升；
+        [session-archive D6] 原删除钮语义迁移为归档，删除入口移到归档列表彻底删除）
     本组件只保留：对外 props/emit 契约、根 div 与确认态多路 reset 通道、ariaLabel 语义补回。
   -->
   <!-- N8 hover 详情卡（demo .sess-pop 权威形态）：Teleport fixed 全局浮层，不被侧栏
@@ -58,7 +59,8 @@
         <SessionItemActions
           v-model:confirming="confirming"
           :session="session"
-          @delete="emit('delete', $event)"
+          :generating="generating"
+          @archive="emit('archive', $event)"
           @rename="emit('rename', $event)"
           @set-project="emit('setProject', $event)"
         />
@@ -121,6 +123,7 @@ import { onClickOutside } from '@vueuse/core'
 import { Folder, GitBranch } from '@lucide/vue'
 import { isMarkedDone } from '@/composables/useSessionMarkers'
 import { formatRelativeTime } from '@/composables/logic/formatTime'
+import { isSessionGenerating } from '@/composables/logic/sessionStatus'
 import { fetchSessionMessageCount } from './session-item/use-message-count'
 import type { DerivedStatus } from '@/types'
 import SessionItemContextMenu from './session-item/SessionItemContextMenu.vue'
@@ -153,7 +156,11 @@ const props = withDefaults(defineProps<{
 const emit = defineEmits<{
   select: [sessionId: string]
   rename: [sessionId: string]
-  delete: [sessionId: string]
+  /**
+   * 归档（session-archive D6，u-renderer-entry）：原 delete 悬停语义迁移——两段确认
+   * （accent 态）后 emit，上层（Sidebar/useSidebarSessionActions）接 useSidebar.archiveSession。
+   */
+  archive: [sessionId: string]
   /** 归入项目（D14 语义修正）：payload 单对象（规则 #1）。projectId 空串 = 归回默认项目。 */
   setProject: [{ sessionId: string; projectId: string }]
   /** 查看父 session（U8）：payload 单字符串 = parentAgentSessionId（与 select 同形）。
@@ -171,6 +178,12 @@ const emit = defineEmits<{
 
 /** dead session（进程已退出）置灰，仍可点击（点击触发 restore 重开） */
 const isDead = computed(() => props.session.status === 'dead')
+/**
+ * 生成中/在途（session-archive D13 归档门 renderer 拦截层）：DerivedStatus 六瞬态判据
+ * （isSessionGenerating），透传 SessionItemActions 禁用归档钮——runtime archive RPC
+ * 首门（archive_generating）兜底 RPC 直发路径。
+ */
+const generating = computed(() => isSessionGenerating(props.status))
 /** 右键「查看父 session」条件：agent 经 session-manager 创建且带父 id。 */
 const hasAgentParent = computed(
   () => props.session.spawnSource === 'agent' && !!props.session.parentAgentSessionId,
@@ -192,9 +205,9 @@ const displaySession = computed<SessionItemSession>(() =>
 )
 
 /**
- * 删除两段式确认态（确认 UI 在 Actions 子组件，经 v-model:confirming 双向）。
- * 首次点击进入红底确认态（不 emit），再次点击才 emit delete。
- * 多路 reset 防红按钮长期停留：mouseleave（模板兜底）、失焦（watch active）、
+ * 删除→归档两段式确认态（session-archive D6：确认 UI 在 Actions 子组件，经 v-model:confirming
+ * 双向；accent 轻确认）。首次点击进入 accent 确认态（不 emit），再次点击才 emit archive。
+ * 多路 reset 防确认钮长期停留：mouseleave（模板兜底）、失焦（watch active）、
  * Esc 键、点击外部（onClickOutside）。
  */
 const confirming = ref(false)

@@ -123,6 +123,21 @@ export type SessionContentCascadeInput = {
    * + 整树软删 + 清孤儿 sidecar——树与 sidecar 不依赖主文件内容）。
    */
   skipIfMainFileMissing: boolean
+  /**
+   * 引用枚举源路径（session-archive D5 purgeArchive 步骤 3 的入参扩展——枚举源与
+   * 删除对象分离）：段 2 的被删会话子代理锚枚举从此路径读取，缺省 = sessionFilePath
+   * （delete 语义不变）。
+   *
+   * 两形态分支契约（实现红线——「可读性」由段内枚举器读取结果承载，**禁实现为段前
+   * 存在性预检**）：
+   * - 缺省（undefined）：段 2 guard 保持 `mainFileExisted` 不变——主文件缺失 → 段 2
+   *   跳过、referenceScan='skipped'（delete scanned 分支现状语义）。
+   * - 显式提供：**无条件进入段 2**，源缺失/不可读由枚举器 readFileSync 失败承载 →
+   *   failed → keep-all 保守保留（整棵 subagents/ 暂存回迁，宁保留不误删）。purge
+   *   侧传归档目录内的引用源（staging 明文直读 / archived 压缩体过 sha256 后的解压
+   *   临时产物）；若误实现为段前预检跳过段 2，purge 解压失败场景即失去引用保护。
+   */
+  referenceEnumerationSource?: string
 }
 
 /** 依赖注入面（全部可注入——测试 zero mock-module、零真实数据目录）。 */
@@ -197,11 +212,14 @@ export async function cascadeDeleteSessionContent(
   // 1. 收殓（先于一切删除动作——杀在途后台进程 + 写 orphaned 终态）
   await reapBackgroundTasksBeforeDelete(agentDir, sessionId, deps)
 
-  // 2. 引用并集判定 + fork 回退暂存（主文件在场才枚举得出锚）
+  // 2. 引用并集判定 + fork 回退暂存（枚举源入参形态分两支——缺省 = mainFileExisted
+  //    guard 不变〔delete 现状语义〕；显式提供 = 无条件进段，可读性由枚举器读取承载，
+  //    读失败 → failed → keep-all。禁段前存在性预检，见 SessionContentCascadeInput 注释）
   let staging: StagedFamilies | null = null
   const subagentsDir = join(sessionStoreRoot, sessionId, 'subagents')
-  if (mainFileExisted) {
-    const enumeration = collectSubagentFamilyCandidates(sessionFilePath, failures, deps.warn)
+  const enumerationSource = input.referenceEnumerationSource ?? sessionFilePath
+  if (mainFileExisted || input.referenceEnumerationSource !== undefined) {
+    const enumeration = collectSubagentFamilyCandidates(enumerationSource, failures, deps.warn)
     const union = collectAliveReferenceUnion(sessionsRoot, sessionFilePath, deps.warn)
     // 两个判定输入任一失败（主文件不可读致候选锚枚举失败 / 并集扫描失败）= 引用
     // 状态不可知（头注保守语义），都走 keep-all 保守分支。
