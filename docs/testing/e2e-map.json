@@ -2908,7 +2908,7 @@
       "run": "npx playwright test --project=electron e2e/session-archive.spec.ts",
       "owner": "packages/renderer",
       "authority": "docs/TEST-STRATEGY.md#e2e-资产归宿纪律三态-r1r2r3",
-      "note": "R2 态（session-archive 设计 §8 e2e 影响面评估表登记建议：V1-V4 按改动范围触发的行为类资产）。mock 轨可达范围 = 交互行为（V1/V2/V4/V8/V5①）；仅 L3 可验场景（V3 agent session_read 引用真 extension 链路 / V5② wscat 直发生成中门 / V6 恢复冲突 / V7 崩溃自愈全中间态 / V9 后台任务收殓 / V10 staging 过渡态三处可见性 + V1/V4/V8 的磁盘断言）归 D3 验收实例化按验收计划 A1-A10 执行（L3 磁盘 fixture 构造 = packages/runtime/src/services/archive/archive-fixture.ts）；可持续回归防线由 runtime archive 单测族（不变量 1-4 / 状态机穷举 / 自愈六行 / cascade 三组 / 串行化 / 簿记门）+ renderer 组件测试 + session-reader 三连承担（Gate A 全量）。scope 圈定 = spec 自身触发声明（改归档组件/入口/状态/mock 归档域跑本 spec）；packages/renderer/src/** 与 packages/core/src/** 整体已由 E2E-MOCK-01 覆盖（mock 全量轨不含本 spec——本 rule 是归档域的精确选中侧）；SessionItemActions/SessionList/SessionItem 为归档钮与入口所在组件（悬停钮语义 D6/D12）"
+      "note": "R2 态（session-archive 设计 §8 e2e 影响面评估表登记建议：V1-V4 按改动范围触发的行为类资产）。mock 轨可达范围 = 交互行为（V1/V2/V4/V8/V5①）；仅 L3 可验场景（V3 agent session_read 引用真 extension 链路 / V5② wscat 直发生成中门 / V6 恢复冲突 / V7 崩溃自愈全中间态 / V9 后台任务收殓 / V10 staging 过渡态三处可见性 + V1/V4/V8 的磁盘断言）归 D3 验收实例化按验收计划 A1-A10 执行（L3 磁盘 fixture 构造 = packages/runtime/src/services/archive/archive-fixture.ts）；可持续回归防线由 runtime archive 单测族（不变量 1-4 / 状态机穷举 / 自愈七行 / cascade 三组 / 串行化 / 簿记门）+ renderer 组件测试 + session-reader 三连承担（Gate A 全量）。scope 圈定 = spec 自身触发声明（改归档组件/入口/状态/mock 归档域跑本 spec）；packages/renderer/src/** 与 packages/core/src/** 整体已由 E2E-MOCK-01 覆盖（mock 全量轨不含本 spec——本 rule 是归档域的精确选中侧）；SessionItemActions/SessionList/SessionItem 为归档钮与入口所在组件（悬停钮语义 D6/D12）"
     }
   ]
 }
