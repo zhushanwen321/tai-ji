@@ -407,6 +407,9 @@ describe('mock config domain', () => {
   it('空签名同构 stub：builtin/refresh/checkEnv/oauth/discover/detectSources', async () => {
     expect(await config.listBuiltinProviders()).toEqual([])
     expect(await config.refreshProviderCatalogs()).toEqual({ refreshed: [], failed: [], corrupt: [] })
+    // W3c/W1 新增 config.*：mock 无网络/落盘层，签名同构 ack（presets 返基线空数组）
+    expect(await config.listQuotaPresets()).toEqual([])
+    await expect(config.setProviderCatalogWatch(true)).resolves.toBeUndefined()
     expect(await config.checkEnvVars(['PATH'])).toEqual({ PATH: true })
     expect(await config.oauthLogin('p')).toMatchObject({ started: false })
     expect(await config.oauthCancel('p')).toEqual({ cancelled: false })

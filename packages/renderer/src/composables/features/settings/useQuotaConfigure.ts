@@ -455,6 +455,46 @@ export function useQuotaConfigure(inputs: QuotaConfigureInputs): QuotaConfigureM
   }
 
   /**
+   * 保存 payload 构造段（§7.2 细节 4 的构造表；从 saveAndTest 拆出，语义注释在彼处）。
+   * workspace 校验失败 = { ok:false, errorKey }，调用方落错误终止。
+   */
+  function buildConfigurePayload(p: { id: string }, typeChanged: boolean): { ok: true; payload: QuotaConfigurePayload } | { ok: false; errorKey: string } {
+    const source = draft.value.credentialSource
+    const cookieDraft = draft.value.cookie.trim()
+    const apiKeyDraft = draft.value.apiKey.trim()
+    // 掩码哨兵 = 「已保存密文」的展示态（D7），不是用户输入：照常发送会把圆点串写成真实凭证。
+    // 哨兵与空串同归「未填新值」；类型切换时哨兵已被 selectType 清空，不落入此分支
+    const cookieMasked = cookieDraft === QUOTA_SECRET_MASK
+    const apiKeyMasked = apiKeyDraft === QUOTA_SECRET_MASK
+
+    // Workspace：明文回显字段，传归一化后的草稿（D13：永不传 ''）；空 / 非法输入本地拦截
+    let workspacePayload: string | undefined
+    if (needsWorkspace.value) {
+      const normalized = normalizeWorkspaceDraft(draft.value.workspace)
+      if (!normalized.ok) return { ok: false, errorKey: normalized.errorKey }
+      workspacePayload = normalized.payload
+    }
+
+    return {
+      ok: true,
+      payload: {
+        providerId: p.id,
+        // 恒传当前值：保存并测试不改启用状态（开关是独立动作，D4）
+        enabled: enabled.value,
+        fetcher: fetcherIdDraft.value,
+        // 恒传当前选择（幂等）：显式化磁盘字段，消除「未设置」这一中间态
+        credentialSource: source,
+        // 类型一变旧 Cookie 的归属就不成立 → 无条件清除（''）；类型没变则缺省 = 保留既存
+        //（哨兵同归「未填新值」：undefined 保留既存）
+        cookie: cookieMasked ? undefined : (cookieDraft || (typeChanged ? '' : undefined)),
+        // 专属 Key 永不传 ''：失效由 credentialSource 表达，删文件不可逆（D3）
+        apiKey: source === 'exclusive' && apiKeyDraft && !apiKeyMasked ? apiKeyDraft : undefined,
+        workspace: workspacePayload,
+      },
+    }
+  }
+
+  /**
    * 保存并测试（D2）：先把草稿落盘（quota.configure），成功后再触发查询（quota.refresh）。
    * 参数构造严格按 §7.2 细节 4 的构造表；credentialSource 恒由 payload 显式值落盘，**写侧禁用**
    * resolveQuotaCredentialSource 推断——该函数是**显式值优先**（`quota?.credentialSource ?? …`），
@@ -475,45 +515,17 @@ export function useQuotaConfigure(inputs: QuotaConfigureInputs): QuotaConfigureM
     const draftFetcher = fetcherIdDraft.value
     // 归属判据同 readiness（§7.2 细节 1）：无既存归属不算类型已变
     const typeChanged = savedFetcher !== undefined && draftFetcher !== savedFetcher
-    const source = draft.value.credentialSource
-    const cookieDraft = draft.value.cookie.trim()
-    const apiKeyDraft = draft.value.apiKey.trim()
-    // 掩码哨兵 = 「已保存密文」的展示态（D7），不是用户输入：照常发送会把圆点串写成真实凭证。
-    // 哨兵与空串同归「未填新值」；类型切换时哨兵已被 selectType 清空，不落入此分支
-    const cookieMasked = cookieDraft === QUOTA_SECRET_MASK
-    const apiKeyMasked = apiKeyDraft === QUOTA_SECRET_MASK
 
     configureError.value = ''
-
-    // Workspace：明文回显字段，传归一化后的草稿（D13：永不传 ''）；空 / 非法输入本地拦截
-    let workspacePayload: string | undefined
-    if (needsWorkspace.value) {
-      const normalized = normalizeWorkspaceDraft(draft.value.workspace)
-      if (!normalized.ok) {
-        configureError.value = t(normalized.errorKey)
-        return
-      }
-      workspacePayload = normalized.payload
-    }
-
-    const payload: QuotaConfigurePayload = {
-      providerId: p.id,
-      // 恒传当前值：保存并测试不改启用状态（开关是独立动作，D4）
-      enabled: enabled.value,
-      fetcher: draftFetcher,
-      // 恒传当前选择（幂等）：显式化磁盘字段，消除「未设置」这一中间态
-      credentialSource: source,
-      // 类型一变旧 Cookie 的归属就不成立 → 无条件清除（''）；类型没变则缺省 = 保留既存
-      //（哨兵同归「未填新值」：undefined 保留既存）
-      cookie: cookieMasked ? undefined : (cookieDraft || (typeChanged ? '' : undefined)),
-      // 专属 Key 永不传 ''：失效由 credentialSource 表达，删文件不可逆（D3）
-      apiKey: source === 'exclusive' && apiKeyDraft && !apiKeyMasked ? apiKeyDraft : undefined,
-      workspace: workspacePayload,
+    const built = buildConfigurePayload(p, typeChanged)
+    if (!built.ok) {
+      configureError.value = t(built.errorKey)
+      return
     }
 
     configuring.value = true
     try {
-      const result = await getSettingsTransport().configureQuota(payload)
+      const result = await getSettingsTransport().configureQuota(built.payload)
       // 半提交窗口对齐（runtime 改动 4：清理锚定 persist 成功而非 configure 整体成功）：
       // persist 成功 + secrets 段失败 → runtime 返回 ok:false 但 QuotaCache 已清、fetcher
       // 已换新 —— renderer 镜像失效不能只挂在 ok:true 上，typeChanged 时无条件同步失效

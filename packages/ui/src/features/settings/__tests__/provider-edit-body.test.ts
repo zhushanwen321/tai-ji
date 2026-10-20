@@ -30,9 +30,11 @@
  */
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 import { mount, flushPromises, type VueWrapper } from '@vue/test-utils'
+import type { Ref } from 'vue'
 import type {
   ProviderInfo,
   ProviderId,
+  QuotaPreset,
   SetProviderData,
 } from '@taiji/shared'
 import {
@@ -41,6 +43,7 @@ import {
   provideSettingsStore,
   createSettingsStore,
   __resetPlatformForTesting,
+  type QuotaConfigureFactoryInputs,
   type SettingsTransport,
   type DiscoverModelsResponse,
 } from '@taiji/core'
@@ -153,8 +156,9 @@ const CATALOG_GATEWAY_P: ProviderInfo = {
 // ── injection stub（零 renderer import：契约对齐 core quota-configure-module.ts）──
 
 /** QUOTA_CONFIGURE_FACTORY_KEY stub 工厂（vi.fn 包装供「注入被真实消费」断言；契约门由
- *  makeQuotaModuleStub 的 QuotaConfigureModule 返回标注承担） */
-const quotaFactoryStub = vi.fn(() => makeQuotaModuleStub({ state: 'ready' }))
+ *  makeQuotaModuleStub 的 QuotaConfigureModule 返回标注承担）。入参可选：preset 捕获用例
+ *  经 mockImplementationOnce 收 QuotaConfigureFactoryInputs，其余用例零参兼容。 */
+const quotaFactoryStub = vi.fn((_inputs?: QuotaConfigureFactoryInputs) => makeQuotaModuleStub({ state: 'ready' }))
 
 const toastInfoSpy = vi.fn()
 const toastStub: SettingsToast = {
@@ -273,6 +277,35 @@ describe('凭证区条件化：oauth 型 provider', () => {
     const loginBtn = wrapper.find('[data-testid="oauth-relogin-btn"]')
     expect(loginBtn.exists()).toBe(true)
     expect(loginBtn.text().trim()).toBe('settings.providerEdit.credentialOauthLogin')
+  })
+
+  it('quota preset 自动关联：baseUrl 命中基线 → 工厂收到的 preset 求值命中；无关 baseUrl → undefined', async () => {
+    // matchedPreset computed 由 quota module 消费（preset.value）触发求值；工厂 stub 捕获
+    // 注入引用并读值，覆盖 ProviderEditBody 的 preset 匹配链（命中与未命中两分支）。
+    let captured: Ref<QuotaPreset | undefined> | undefined
+    quotaFactoryStub.mockImplementationOnce((inputs?: QuotaConfigureFactoryInputs) => {
+      captured = inputs?.preset
+      return makeQuotaModuleStub({ state: 'ready' })
+    })
+    wrapper = mountBody({ ...OAUTH_P, baseUrl: 'https://open.bigmodel.cn/api/paas/v4' })
+    await flushPromises()
+    expect(captured).toBeDefined()
+    expect(captured!.value?.fetcher).toBe('zhipu')
+    // 第一段收尾后再挂第二段（双实例并存会让 afterEach 的 unmount 走已清 DOM 报错）
+    wrapper.unmount()
+    wrapper = null
+    document.body.innerHTML = ''
+
+    let capturedMiss: Ref<QuotaPreset | undefined> | undefined
+    quotaFactoryStub.mockImplementationOnce((inputs?: QuotaConfigureFactoryInputs) => {
+      capturedMiss = inputs?.preset
+      return makeQuotaModuleStub({ state: 'ready' })
+    })
+    // CUSTOM_P（name 'My OpenAI'）无 preset 关键字，自建 baseUrl 也无 pattern 命中
+    wrapper = mountBody({ ...CUSTOM_P, baseUrl: 'https://self-hosted.example.internal/v1' })
+    await flushPromises()
+    expect(capturedMiss).toBeDefined()
+    expect(capturedMiss!.value).toBeUndefined()
   })
 
   it('点 relogin 按钮 → 上抛 oauth-login（OAuth 状态机在父组件，ui 零 renderer import）', async () => {

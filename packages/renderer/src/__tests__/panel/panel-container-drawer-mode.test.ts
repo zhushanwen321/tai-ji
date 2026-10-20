@@ -28,7 +28,7 @@
  * 兼容层——C1）：测试同样直连 core（bindDrawerSessionId + openDrawerTab + _resetDrawerForTest）。
  * 静态依赖隔离：重面板（GitPanel/CommandDocPanel/BackgroundTaskDetailPanel/PlanDocsPanel/
  * BtwPanel）与壳层组件（Panel/PanelHeader/ToastContainer/TraceInspector/SubagentTab/
- * WorkflowTab/StatusBar）vi.mock 占位组件（import 期替换——global.stubs 只在渲染期替换，
+ * StatusBar）vi.mock 占位组件（import 期替换——global.stubs 只在渲染期替换，
  * import 期仍加载原模块触发 PanelContainer 整棵依赖图 transform，四个 PanelContainer 测试
  * 文件的用例时间合计被该 transform 主导；壳层组件零 DOM 断言，占位只保挂载点）。懒加载
  * DetailPane/TerminalView（PanelContainer 动态 import，不在静态图内）保留渲染期 stub。
@@ -108,9 +108,6 @@ vi.mock('@/components/panel/trace/TraceInspector.vue', () => ({
 }))
 vi.mock('@/components/panel/SubagentTab.vue', () => ({
   default: { name: 'SubagentTab', template: '<div />' },
-}))
-vi.mock('@/components/panel/WorkflowTab.vue', () => ({
-  default: { name: 'WorkflowTab', template: '<div />' },
 }))
 vi.mock('@taiji/ui/extension-host', () => ({
   StatusBar: { name: 'StatusBar', template: '<div />' },

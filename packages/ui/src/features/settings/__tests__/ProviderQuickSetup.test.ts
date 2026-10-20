@@ -312,4 +312,37 @@ describe('onSave authMethod（TC6，I6 契约）', () => {
     expect(save.data.apiKey).toBe('sk-abc')
     w.unmount()
   })
+
+  it('remoteSource 模板（taiji 远程清单）：baseUrl/api/models/remoteSource 落盘（pi 执行侧只认 models.json）', async () => {
+    const w = await mountSetup({
+      template: tpl({
+        api: 'openai-compatible',
+        baseUrl: 'https://relay.example.internal/v1',
+        remoteSource: 'taiji-relay',
+        models: [
+          { id: 'm1', name: 'M1', reasoning: true, input: ['text', 'image'], contextWindow: 128000, api: 'openai-compatible', baseUrl: 'https://relay.example.internal/v1', maxTokens: 8192, thinkingLevelMap: { high: 'medium' } },
+          { id: 'm2', name: 'M2', reasoning: false, input: ['text'], contextWindow: 0 },
+        ],
+      }),
+    })
+    ;(query('[data-testid="auth-option-plaintext"]')! as HTMLElement).click()
+    await flushPromises()
+    const input = query('[data-testid="credential-apikey-input"]') as HTMLInputElement
+    input.value = 'sk-abc'
+    input.dispatchEvent(new Event('input'))
+    await flushPromises()
+    ;(query('[data-testid="provider-quick-setup-save"]')! as HTMLElement).click()
+    const save = w.emitted('save')![0][0] as { data: Record<string, unknown> }
+    // 远程清单模板的 baseUrl 是真实端点（非 catalog 快照 artifact），必须落盘
+    expect(save.data.baseUrl).toBe('https://relay.example.internal/v1')
+    expect(save.data.type).toBe('openai-compatible')
+    expect(save.data.remoteSource).toBe('taiji-relay')
+    expect(save.data.models).toEqual([
+      { id: 'm1', name: 'M1', reasoning: true, input: ['text', 'image'], contextWindow: 128000, api: 'openai-compatible', baseUrl: 'https://relay.example.internal/v1', maxTokens: 8192, thinkingLevelMap: { high: 'medium' } },
+      // 模板缺省模型字段直映射透传（onSave 不做展示缺省填充——那是模板卡展示的
+      // remoteModelToSummary ?? 0 惯例以外的行为；fixture 值原样进 payload）
+      { id: 'm2', name: 'M2', reasoning: false, input: ['text'], contextWindow: 0 },
+    ])
+    w.unmount()
+  })
 })

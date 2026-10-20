@@ -104,6 +104,62 @@ async function persistCache(domain: RemoteConfigDomain, envelope: RemoteCacheEnv
   cacheSnapshots.set(domain, { mtime: mtimeOf(path), envelope })
 }
 
+/** 缓存数据过 guard 后返回（guard 拒绝 = 无数据，不部分采纳）。 */
+function guardedCacheData<T>(cached: RemoteCacheEnvelope | null, guard: (v: unknown) => v is T): T | undefined {
+  return cached && guard(cached.data) ? cached.data : undefined
+}
+
+/** 网络请求段：失败/超时归 network（返回 null，调用方回退缓存）。 */
+async function fetchRemote(domain: RemoteConfigDomain, cached: RemoteCacheEnvelope | null): Promise<globalThis.Response | null> {
+  try {
+    const headers: Record<string, string> = { accept: 'application/json' }
+    if (cached?.etag) headers['if-none-match'] = cached.etag
+    return await fetch(`${REMOTE_CONFIG_BASE_URL}/${domain}.json`, {
+      headers,
+      signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
+    })
+  } catch (err) {
+    logger.warn('[remote-config] fetch failed, falling back to cache', {
+      domain,
+      error: err instanceof Error ? err.message : String(err),
+    })
+    return null
+  }
+}
+
+/** 200 响应应用段：JSON 解析 + guard 整体校验 + 变更检测 + 落盘（落盘失败不阻断返回）。 */
+async function applyRemotePayload<T>(
+  domain: RemoteConfigDomain,
+  guard: (v: unknown) => v is T,
+  cached: RemoteCacheEnvelope | null,
+  res: globalThis.Response,
+): Promise<RemoteRefreshOutcome<T>> {
+  let body: unknown
+  try {
+    body = await res.json()
+  } catch {
+    logger.warn('[remote-config] response body is not JSON, falling back to cache', { domain })
+    return { data: guardedCacheData(cached, guard), refreshed: false, reason: 'invalid' }
+  }
+  if (!guard(body)) {
+    logger.warn('[remote-config] remote payload rejected by domain guard, falling back to cache', { domain })
+    return { data: guardedCacheData(cached, guard), refreshed: false, reason: 'invalid' }
+  }
+
+  const changed = !cached || JSON.stringify(cached.data) !== JSON.stringify(body)
+  const etag = res.headers.get('etag') ?? undefined
+  try {
+    await persistCache(domain, { version: CACHE_VERSION, checkedAt: Date.now(), etag, data: body })
+  } catch (e) {
+    // 落盘失败不阻断本次返回（内存数据已可用），下次触发点重刷
+    logger.warn('[remote-config] persist cache failed', {
+      domain,
+      error: e instanceof Error ? e.message : String(e),
+    })
+  }
+  return { data: body, refreshed: changed, reason: changed ? undefined : 'throttled' }
+}
+
 /**
  * 拉取域配置并返回可用数据（含节流/ETag/fail-safe 全语义）。
  *
@@ -122,59 +178,23 @@ export async function refreshRemoteConfig<T>(
 ): Promise<RemoteRefreshOutcome<T>> {
   const cached = loadCache(domain)
   if (!options?.force && cached && Date.now() - cached.checkedAt < REFRESH_INTERVAL_MS) {
-    return { data: guard(cached.data) ? cached.data : undefined, refreshed: false, reason: 'throttled' }
+    return { data: guardedCacheData(cached, guard), refreshed: false, reason: 'throttled' }
   }
 
-  let res: globalThis.Response
-  try {
-    const headers: Record<string, string> = { accept: 'application/json' }
-    if (cached?.etag) headers['if-none-match'] = cached.etag
-    res = await fetch(`${REMOTE_CONFIG_BASE_URL}/${domain}.json`, {
-      headers,
-      signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
-    })
-  } catch (err) {
-    logger.warn('[remote-config] fetch failed, falling back to cache', {
-      domain,
-      error: err instanceof Error ? err.message : String(err),
-    })
-    return { data: cached && guard(cached.data) ? cached.data : undefined, refreshed: false, reason: 'network' }
-  }
+  const res = await fetchRemote(domain, cached)
+  if (!res) return { data: guardedCacheData(cached, guard), refreshed: false, reason: 'network' }
 
   if (res.status === HTTP_NOT_MODIFIED && cached) {
     await persistCache(domain, { ...cached, checkedAt: Date.now() }).catch(() => {})
-    return { data: guard(cached.data) ? cached.data : undefined, refreshed: false, reason: 'throttled' }
+    return { data: guardedCacheData(cached, guard), refreshed: false, reason: 'throttled' }
   }
   if (!res.ok) {
     void res.body?.cancel()
     logger.warn('[remote-config] non-ok response, falling back to cache', { domain, status: res.status })
-    return { data: cached && guard(cached.data) ? cached.data : undefined, refreshed: false, reason: 'network' }
+    return { data: guardedCacheData(cached, guard), refreshed: false, reason: 'network' }
   }
 
-  let body: unknown
-  try {
-    body = await res.json()
-  } catch {
-    logger.warn('[remote-config] response body is not JSON, falling back to cache', { domain })
-    return { data: cached && guard(cached.data) ? cached.data : undefined, refreshed: false, reason: 'invalid' }
-  }
-  if (!guard(body)) {
-    logger.warn('[remote-config] remote payload rejected by domain guard, falling back to cache', { domain })
-    return { data: cached && guard(cached.data) ? cached.data : undefined, refreshed: false, reason: 'invalid' }
-  }
-
-  const changed = !cached || JSON.stringify(cached.data) !== JSON.stringify(body)
-  const etag = res.headers.get('etag') ?? undefined
-  try {
-    await persistCache(domain, { version: CACHE_VERSION, checkedAt: Date.now(), etag, data: body })
-  } catch (e) {
-    // 落盘失败不阻断本次返回（内存数据已可用），下次触发点重刷
-    logger.warn('[remote-config] persist cache failed', {
-      domain,
-      error: e instanceof Error ? e.message : String(e),
-    })
-  }
-  return { data: body, refreshed: changed, reason: changed ? undefined : 'throttled' }
+  return applyRemotePayload(domain, guard, cached, res)
 }
 
 /** 读域数据（纯缓存，不发网络；域消费方的同步读侧入口）。 */

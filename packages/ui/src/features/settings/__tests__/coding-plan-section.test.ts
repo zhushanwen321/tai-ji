@@ -482,6 +482,25 @@ describe('⑤ D7 掩码哨兵：已保存密文显示 QUOTA_SECRET_MASK，「已
     )
   })
 
+  it('专属 Key 掩码哨兵聚焦 → 全选（粘贴即覆盖）；真实输入聚焦不劫持选区', async () => {
+    quota.draft.value.credentialSource = 'exclusive'
+    quota.draft.value.apiKey = QUOTA_SECRET_MASK
+    wrapper = mountSection()
+    await flushPromises()
+
+    const input = wrapper.find<HTMLInputElement>('[data-testid="quota-apikey-input"]')
+    await input.trigger('focus')
+    expect(input.element.selectionStart).toBe(0)
+    expect(input.element.selectionEnd).toBe(QUOTA_SECRET_MASK.length)
+
+    quota.draft.value.apiKey = 'user-input'
+    await flushPromises()
+    // 先清选区再聚焦：断言 handler 未触发全选（若误触发，selectionEnd 会变成掩码长度）
+    input.element.setSelectionRange(0, 0)
+    await input.trigger('focus')
+    expect(input.element.selectionEnd).toBe(0)
+  })
+
   it('掩码哨兵聚焦 → 全选（粘贴即覆盖）；真实输入聚焦不劫持选区', async () => {
     quota.view.value.credential.form = 'cookie'
     quota.view.value.type.selected = 'mimo'

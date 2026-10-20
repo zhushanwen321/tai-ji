@@ -266,6 +266,19 @@ describe('refreshModels 分支', () => {
   })
 })
 
+describe('refreshQuotaPresets 分支（W3c quota presets 下发缓存）', () => {
+  it('失败：不抛错（console.warn 兜底，沿用现有缓存/基线）', async () => {
+    provideBase()
+    const { transport } = makeRecordingTransport()
+    ;(transport.listQuotaPresets as ReturnType<typeof vi.fn>).mockRejectedValueOnce(new Error('net'))
+    provideSettingsTransport(transport)
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    await expect(lifecycle.refreshQuotaPresets()).resolves.toBeUndefined()
+    expect(warn).toHaveBeenCalled()
+    warn.mockRestore()
+  })
+})
+
 describe('dispose 清理', () => {
   it('dispose 调用全部取消函数', async () => {
     provideBase()

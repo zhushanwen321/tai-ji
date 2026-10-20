@@ -21,7 +21,7 @@ import type { TaijiProviderStore, ProviderExtras } from './provider-extras-store
 import { readAllExtrasWithFallback, type ProviderExtrasReader } from './migration/provider-extras-migration.js'
 import { pickModelCapabilityFields } from './model-mapper.js'
 import type { IProviderCredentialResolver } from './ports/provider-credential-resolver.js'
-import { listRemoteProviderTemplates } from './remote-config/remote-provider-sync.js'
+import { listRemoteProviderTemplates } from './remote-config/remote-provider-templates.js'
 
 /** auth.json 存储能力（ConfigService 注入，与 ConfigService 构造函数 authStorage 同构）。
  * 不含 'set'——写入唯一经 credentialWriter（A1-4 收口，AuthService.saveCredential）。

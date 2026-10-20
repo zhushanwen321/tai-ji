@@ -15,10 +15,9 @@
  *   level → `Z.ai`）。
  */
 
-import type { NormalizedQuotaRow, QuotaAuthKind, QuotaFetchFailureReason, QuotaFetchOutcome, QuotaWindow } from '@taiji/shared'
+import type { QuotaAuthKind, QuotaFetchFailureReason, QuotaFetchOutcome, QuotaWindow } from '@taiji/shared'
 import { INFINITE_WIN, isRecord, isoResetRemaining, normalizeCookieHeader, numericField, statusToReason } from './types.js'
 import { extractQuotaWorkspaceId } from '@taiji/shared'
-import type { ProviderQuotaFetcher } from './types.js'
 
 const REQUEST_TIMEOUT_MS = 8000
 const SEC_PER_DAY = 86400
@@ -26,6 +25,8 @@ const SEC_PER_HOUR = 3600
 const SEC_PER_MIN = 60
 const PERCENT_SCALE = 100
 const MS_PER_SEC = 1000
+/** label 插值定界符 `{{` / `}}` 的长度（slice 剥壳用）。 */
+const LABEL_DELIM_LEN = 2
 
 // ── 配置类型 ────────────────────────────────────────────────
 
@@ -85,77 +86,129 @@ function isFailReason(v: unknown): v is QuotaFetchFailureReason {
   return typeof v === 'string' && (FAIL_REASONS as readonly string[]).includes(v)
 }
 
-function isWindowValid(w: unknown): boolean {
-  if (!isRecord(w)) return false
+// 窗口 guard 按子对象分组（每组只对一组决策依赖字段负责；分组本身 = DeclarativeWindow
+// 的可选字段清单，主 guard 逐字段调子 guard）。
+
+function isGateValid(g: unknown): boolean {
+  if (!isRecord(g) || typeof g['path'] !== 'string' || g['path'] === '') return false
+  return g['missing'] === 'query-fail' || g['missing'] === 'infinite-win'
+}
+
+function isGateValueValid(g: unknown): boolean {
+  return isRecord(g) && typeof g['path'] === 'string' && g['path'] !== '' && typeof g['equals'] === 'number'
+}
+
+function isPctValid(p: unknown): boolean {
+  if (!isRecord(p)) return false
+  // usedOverLimit 的 pct 由 usedLimit 派生，无独立字段路径
+  const pathRequired = p['via'] !== 'usedOverLimit'
+  if (typeof p['via'] !== 'string' || !(PCT_VIAS as readonly string[]).includes(p['via'])) return false
+  return !pathRequired || (typeof p['path'] === 'string' && p['path'] !== '')
+}
+
+function isResetSecValid(r: unknown): boolean {
+  if (!isRecord(r) || typeof r['path'] !== 'string' || r['path'] === '') return false
+  if (typeof r['mode'] !== 'string' || !(RESET_MODES as readonly string[]).includes(r['mode'])) return false
+  return r['fromRequest'] === undefined || typeof r['fromRequest'] === 'string'
+}
+
+function isUsedLimitValid(u: unknown): boolean {
+  if (!isRecord(u) || typeof u['used'] !== 'string' || typeof u['limit'] !== 'string') return false
+  if (u['remaining'] !== undefined && typeof u['remaining'] !== 'string') return false
+  return u['unit'] === undefined || typeof u['unit'] === 'string'
+}
+
+/** 窗口基础字段（slot + fromRequest）。 */
+function isWindowBaseFieldsValid(w: Record<string, unknown>): boolean {
   if (typeof w['slot'] !== 'string' || !(SLOTS as readonly string[]).includes(w['slot'])) return false
   if (w['fromRequest'] !== undefined && typeof w['fromRequest'] !== 'string') return false
-  if (w['gate'] !== undefined) {
-    const g = w['gate']
-    if (!isRecord(g) || typeof g['path'] !== 'string' || g['path'] === '') return false
-    if (g['missing'] !== 'query-fail' && g['missing'] !== 'infinite-win') return false
-  }
-  if (w['gateValue'] !== undefined) {
-    const g = w['gateValue']
-    if (!isRecord(g) || typeof g['path'] !== 'string' || g['path'] === '' || typeof g['equals'] !== 'number') return false
-  }
-  if (w['pct'] !== undefined) {
-    const p = w['pct']
-    if (!isRecord(p)) return false
-    // usedOverLimit 的 pct 由 usedLimit 派生，无独立字段路径
-    const pathRequired = p['via'] !== 'usedOverLimit'
-    if (typeof p['via'] !== 'string' || !(PCT_VIAS as readonly string[]).includes(p['via'])) return false
-    if (pathRequired && (typeof p['path'] !== 'string' || p['path'] === '')) return false
-  }
-  if (w['resetSec'] !== undefined) {
-    const r = w['resetSec']
-    if (!isRecord(r) || typeof r['path'] !== 'string' || r['path'] === '') return false
-    if (typeof r['mode'] !== 'string' || !(RESET_MODES as readonly string[]).includes(r['mode'])) return false
-    if (r['fromRequest'] !== undefined && typeof r['fromRequest'] !== 'string') return false
-  }
-  if (w['usedLimit'] !== undefined) {
-    const u = w['usedLimit']
-    if (!isRecord(u) || typeof u['used'] !== 'string' || typeof u['limit'] !== 'string') return false
-    if (u['remaining'] !== undefined && typeof u['remaining'] !== 'string') return false
-    if (u['unit'] !== undefined && typeof u['unit'] !== 'string') return false
-  }
   return true
+}
+
+/** 可选子对象字段统一形态：未定义合法（缺省跳过），已定义必须过子 guard。 */
+function isOptionalSubObjectValid(w: Record<string, unknown>, key: string, guard: (x: unknown) => boolean): boolean {
+  return w[key] === undefined || guard(w[key])
+}
+
+function isWindowValid(w: unknown): boolean {
+  if (!isRecord(w)) return false
+  if (!isWindowBaseFieldsValid(w)) return false
+  return (
+    isOptionalSubObjectValid(w, 'gate', isGateValid) &&
+    isOptionalSubObjectValid(w, 'gateValue', isGateValueValid) &&
+    isOptionalSubObjectValid(w, 'pct', isPctValid) &&
+    isOptionalSubObjectValid(w, 'resetSec', isResetSecValid) &&
+    isOptionalSubObjectValid(w, 'usedLimit', isUsedLimitValid)
+  )
+}
+
+// 顶层 guard 按字段段分组（分组本身 = DeclarativeFetcherConfig 的字段清单：必选标量段 /
+// 可选段 / requests 段 / windows 段）。
+
+function isAuthArrayValid(v: unknown[]): boolean {
+  return v.every(a => typeof a === 'string')
+}
+
+function isPreconditionValid(p: unknown): boolean {
+  if (!isRecord(p)) return false
+  if (p['from'] !== 'workspaceUrl' || p['extractor'] !== 'quotaWorkspaceId') return false
+  if (typeof p['header'] !== 'string' || p['header'] === '') return false
+  return isFailReason(p['failReason'])
+}
+
+function isRequestEntryValid(r: unknown): boolean {
+  if (!isRecord(r) || typeof r['name'] !== 'string' || r['name'] === '' || typeof r['url'] !== 'string' || r['url'] === '') return false
+  return r['role'] === undefined || r['role'] === 'primary' || r['role'] === 'auxiliary'
+}
+
+function isStatusMapValid(m: unknown): boolean {
+  return isRecord(m) && Object.values(m).every(isFailReason)
+}
+
+function isBodyCodeValid(b: unknown): boolean {
+  if (!isRecord(b) || typeof b['path'] !== 'string' || b['path'] === '') return false
+  if (typeof b['success'] !== 'number' && typeof b['success'] !== 'boolean') return false
+  if (b['map'] !== undefined && !isRecord(b['map'])) return false
+  if (b['else'] !== undefined && !isFailReason(b['else'])) return false
+  return b['successRequires'] === undefined || (typeof b['successRequires'] === 'string' && b['successRequires'] !== '')
+}
+
+function isRequiredScalarFieldsValid(v: Record<string, unknown>): boolean {
+  if (typeof v['label'] !== 'string' || v['label'] === '') return false
+  if (!Array.isArray(v['auth']) || !isAuthArrayValid(v['auth'])) return false
+  if (typeof v['credential'] !== 'string' || !(CREDENTIAL_MODES as readonly string[]).includes(v['credential'])) return false
+  return true
+}
+
+function isOptionalFieldsValid(v: Record<string, unknown>): boolean {
+  if (v['strictNumbers'] !== undefined && typeof v['strictNumbers'] !== 'boolean') return false
+  if (v['extraHeaders'] !== undefined && !isRecord(v['extraHeaders'])) return false
+  if (v['precondition'] !== undefined && !isPreconditionValid(v['precondition'])) return false
+  if (v['statusMap'] !== undefined && !isStatusMapValid(v['statusMap'])) return false
+  if (v['bodyCode'] !== undefined && !isBodyCodeValid(v['bodyCode'])) return false
+  if (v['requires'] !== undefined && !Array.isArray(v['requires'])) return false
+  return true
+}
+
+function isRequestsSectionValid(v: Record<string, unknown>): boolean {
+  if (!Array.isArray(v['requests']) || (v['requests'] as unknown[]).length === 0) return false
+  return (v['requests'] as unknown[]).every(isRequestEntryValid)
+}
+
+function isWindowsSectionValid(v: Record<string, unknown>): boolean {
+  if (!Array.isArray(v['windows']) || (v['windows'] as unknown[]).length === 0) return false
+  return (v['windows'] as unknown[]).every(isWindowValid)
 }
 
 /** 声明式配置形状 guard（决策依赖字段全字段级校验；拒绝 = 整体拒用）。 */
 export function isDeclarativeFetcherConfig(v: unknown): v is DeclarativeFetcherConfig {
   if (!isRecord(v)) return false
-  if (typeof v['label'] !== 'string' || v['label'] === '') return false
-  if (!Array.isArray(v['auth']) || !(v['auth'] as unknown[]).every(a => typeof a === 'string')) return false
-  if (typeof v['credential'] !== 'string' || !(CREDENTIAL_MODES as readonly string[]).includes(v['credential'])) return false
-  if (v['strictNumbers'] !== undefined && typeof v['strictNumbers'] !== 'boolean') return false
-  if (v['extraHeaders'] !== undefined && !isRecord(v['extraHeaders'])) return false
-  if (v['precondition'] !== undefined) {
-    const p = v['precondition']
-    if (!isRecord(p)) return false
-    if (p['from'] !== 'workspaceUrl' || p['extractor'] !== 'quotaWorkspaceId') return false
-    if (typeof p['header'] !== 'string' || p['header'] === '') return false
-    if (!isFailReason(p['failReason'])) return false
-  }
-  if (!Array.isArray(v['requests']) || (v['requests'] as unknown[]).length === 0) return false
-  for (const r of v['requests'] as unknown[]) {
-    if (!isRecord(r) || typeof r['name'] !== 'string' || r['name'] === '' || typeof r['url'] !== 'string' || r['url'] === '') return false
-    if (r['role'] !== undefined && r['role'] !== 'primary' && r['role'] !== 'auxiliary') return false
-  }
-  if (v['statusMap'] !== undefined) {
-    if (!isRecord(v['statusMap'])) return false
-    if (!Object.values(v['statusMap']).every(isFailReason)) return false
-  }
-  if (v['bodyCode'] !== undefined) {
-    const b = v['bodyCode']
-    if (!isRecord(b) || typeof b['path'] !== 'string' || b['path'] === '') return false
-    if (typeof b['success'] !== 'number' && typeof b['success'] !== 'boolean') return false
-    if (b['map'] !== undefined && !isRecord(b['map'])) return false
-    if (b['else'] !== undefined && !isFailReason(b['else'])) return false
-    if (b['successRequires'] !== undefined && (typeof b['successRequires'] !== 'string' || b['successRequires'] === '')) return false
-  }
-  if (v['requires'] !== undefined && !Array.isArray(v['requires'])) return false
-  if (!Array.isArray(v['windows']) || (v['windows'] as unknown[]).length === 0) return false
-  return (v['windows'] as unknown[]).every(isWindowValid)
+  return (
+    isRequiredScalarFieldsValid(v) &&
+    isOptionalFieldsValid(v) &&
+    isRequestsSectionValid(v) &&
+    isWindowsSectionValid(v)
+  )
 }
 
 // ── 字段路径原语 ────────────────────────────────────────────
@@ -164,49 +217,64 @@ export function isDeclarativeFetcherConfig(v: unknown): v is DeclarativeFetcherC
  * 语义对齐各家现行 shape guard：字段缺失合法（undefined 透传）；**期望容器处拿到非容器**
  * （非对象上取属性 / 非数组上下标选取）= wire 形态漂移 → WireDriftError（fail-visible 归
  * parse，不静默当缺失降级）。 */
+/** 下标选取 `[N]`：数组上下标选取；期望数组处拿到非容器 = 漂移。 */
+function pickBracketIndexed(cur: unknown, idx: RegExpMatchArray, path: string, key: string): unknown {
+  if (!Array.isArray(cur)) {
+    if (cur === undefined || cur === null) return undefined
+    throw new WireDriftError(`array expected at '${key}${idx[0]}' in '${path}'`)
+  }
+  return cur[Number(idx[1])]
+}
+
+/** 条件选取无命中时判定是否类型漂移：数组非空但无命中、且存在条目的条件字段为非 string
+ * 类型 = 类型漂移致无命中 → parse（fail-visible，对齐 minimax guard 的 model_name 字段级
+ * 类型校验——正常无命中（值不同）才降级缺失）。 */
+function isConditionalMissByDrift(cur: unknown[], field: string): boolean {
+  return cur.some((e) => {
+    if (!isRecord(e)) return true
+    return typeof (e as Record<string, unknown>)[field] !== 'string'
+  })
+}
+
+/** 条件选取 `[k=v]`：严格 string 比较首命中（与各家现行 find(m => m[k] === 'v') 逐字对齐）。 */
+function pickBracketConditional(cur: unknown, cond: RegExpMatchArray, path: string, key: string): unknown {
+  if (!Array.isArray(cur)) {
+    if (cur === undefined || cur === null) return undefined
+    throw new WireDriftError(`array expected at '${key}${cond[0]}' in '${path}'`)
+  }
+  const [, field, value] = cond
+  const hit = cur.find((e) => isRecord(e) && (e as Record<string, unknown>)[field] === value)
+  if (!hit && cur.length > 0 && isConditionalMissByDrift(cur, field)) {
+    throw new WireDriftError(`condition field type drift at '${key}${cond[0]}' in '${path}'`)
+  }
+  return hit
+}
+
+/** 单路径段：`name` | `name[0]`（下标）| `name[k=v]`（条件选取首命中）。
+ * 语义对齐各家现行 shape guard：字段缺失合法（undefined 透传）；**期望容器处拿到非容器**
+ * （非对象上取属性 / 非数组上下标选取）= wire 形态漂移 → WireDriftError（fail-visible 归
+ * parse，不静默当缺失降级）。 */
+function pickSegment(cur: unknown, seg: string, path: string): unknown {
+  if (cur === undefined || cur === null) return undefined
+  const m = seg.match(/^([^\[]+)((?:\[[^\]]*\])?)$/)
+  if (!m) return undefined
+  const [, key, bracket] = m
+  if (typeof cur !== 'object' || cur === null) {
+    throw new WireDriftError(`container expected at '${key}' in '${path}'`)
+  }
+  const next: unknown = (cur as Record<string, unknown>)[key]
+  if (!bracket) return next
+  const idx = bracket.match(/^\[(\d+)\]$/)
+  if (idx) return pickBracketIndexed(next, idx, path, key)
+  const cond = bracket.match(/^\[([^=\]]+)=([^\]]+)\]$/)
+  if (cond) return pickBracketConditional(next, cond, path, key)
+  return undefined
+}
+
 function pickPath(data: unknown, path: string): unknown {
   let cur: unknown = data
   for (const seg of path.split('.')) {
-    if (cur === undefined || cur === null) return undefined
-    const m = seg.match(/^([^\[]+)((?:\[[^\]]*\])?)$/)
-    if (!m) return undefined
-    const [, key, bracket] = m
-    if (typeof cur !== 'object' || cur === null) {
-      throw new WireDriftError(`container expected at '${key}' in '${path}'`)
-    }
-    cur = (cur as Record<string, unknown>)[key]
-    if (!bracket) continue
-    const idx = bracket.match(/^\[(\d+)\]$/)
-    if (idx) {
-      if (!Array.isArray(cur)) {
-        if (cur === undefined || cur === null) return undefined
-        throw new WireDriftError(`array expected at '${key}${bracket}' in '${path}'`)
-      }
-      cur = cur[Number(idx[1])]
-      continue
-    }
-    const cond = bracket.match(/^\[([^=\]]+)=([^\]]+)\]$/)
-    if (cond) {
-      if (!Array.isArray(cur)) {
-        if (cur === undefined || cur === null) return undefined
-        throw new WireDriftError(`array expected at '${key}${bracket}' in '${path}'`)
-      }
-      // 严格 string 比较（与各家现行 find(m => m[k] === 'v') 逐字对齐）；数组非空但无命中、
-      // 且存在条目的条件字段为非 string 类型 = 类型漂移致无命中 → parse（fail-visible，
-      // 对齐 minimax guard 的 model_name 字段级类型校验——正常无命中（值不同）才降级缺失）
-      const hit = cur.find((e) => isRecord(e) && (e as Record<string, unknown>)[cond[1]] === cond[2])
-      if (!hit && cur.length > 0) {
-        const drifted = cur.some((e) => {
-          if (!isRecord(e)) return true
-          const v = (e as Record<string, unknown>)[cond[1]]
-          return typeof v !== 'string'
-        })
-        if (drifted) throw new WireDriftError(`condition field type drift at '${key}${bracket}' in '${path}'`)
-      }
-      cur = hit
-      continue
-    }
-    return undefined
+    cur = pickSegment(cur, seg, path)
   }
   return cur
 }
@@ -243,55 +311,72 @@ function parseRelativeLabel(label: string): number {
   return sec
 }
 
-/** resetSec 各模式（语义见 DeclarativeWindow.resetSec 注释）。返回 null = 无重置信息。 */
-function evalResetSec(raw: unknown, mode: ResetSecMode): number | null {
-  const epochOf = (s: string): number | null => {
-    const ms = Number(s)
-    if (!ms || Number.isNaN(ms)) return null
-    const rem = Math.floor(ms / MS_PER_SEC) - Math.floor(Date.now() / MS_PER_SEC)
-    return rem > 0 ? rem : null
-  }
-  if (mode === 'iso') {
-    const s = strictString(raw)
-    return s ? isoResetRemaining(s) : null
-  }
-  if (mode === 'epochMs') {
-    const n = strictNumeric(raw)
-    if (n === undefined) return null
-    const rem = Math.floor(n / MS_PER_SEC) - Math.floor(Date.now() / MS_PER_SEC)
-    return rem > 0 ? rem : null
-  }
-  if (mode === 'relativeLabel') {
-    const s = strictString(raw)
-    return s ? parseRelativeLabel(s) : null
-  }
-  if (mode === 'zonelessUtcWallClock') {
-    const s = strictString(raw)
-    if (!s) return null
-    // 无时区标记串按 UTC 解析（与固定发送的 x-timezone: UTC 强一致，mimo 实测）；带标记串 Date.parse 直解
-    const zoneless = /^\d{4}-\d{2}-\d{2}[ T]\d{2}:\d{2}(:\d{2})?$/.test(s)
-    const t = zoneless ? Date.parse(`${s.replace(' ', 'T')}Z`) : Date.parse(s)
-    if (Number.isNaN(t)) return null
-    const sec = Math.floor((t - Date.now()) / MS_PER_SEC)
-    return sec > 0 ? sec : null
-  }
-  if (mode === 'relativeMs') {
-    const n = strictNumeric(raw)
-    return n !== undefined && n > 0 ? Math.ceil(n / MS_PER_SEC) : null
-  }
-  // epochMsElseRelativeLabel：number/数值串走 epoch；非数值串走相对 label（zhipu 双格式）
-  if (typeof raw === 'number') return evalResetSec(raw, 'epochMs')
+/** resetSec 各模式求值器（语义见 DeclarativeWindow.resetSec 注释）。返回 null = 无重置信息。 */
+
+function evalIsoReset(raw: unknown): number | null {
+  const s = strictString(raw)
+  return s ? isoResetRemaining(s) : null
+}
+
+function evalEpochMsReset(raw: unknown): number | null {
+  const n = strictNumeric(raw)
+  if (n === undefined) return null
+  const rem = Math.floor(n / MS_PER_SEC) - Math.floor(Date.now() / MS_PER_SEC)
+  return rem > 0 ? rem : null
+}
+
+function evalRelativeLabelReset(raw: unknown): number | null {
+  const s = strictString(raw)
+  return s ? parseRelativeLabel(s) : null
+}
+
+function evalZonelessUtcReset(raw: unknown): number | null {
+  const s = strictString(raw)
+  if (!s) return null
+  // 无时区标记串按 UTC 解析（与固定发送的 x-timezone: UTC 强一致，mimo 实测）；带标记串 Date.parse 直解
+  const zoneless = /^\d{4}-\d{2}-\d{2}[ T]\d{2}:\d{2}(:\d{2})?$/.test(s)
+  const t = zoneless ? Date.parse(`${s.replace(' ', 'T')}Z`) : Date.parse(s)
+  if (Number.isNaN(t)) return null
+  const sec = Math.floor((t - Date.now()) / MS_PER_SEC)
+  return sec > 0 ? sec : null
+}
+
+function evalRelativeMsReset(raw: unknown): number | null {
+  const n = strictNumeric(raw)
+  return n !== undefined && n > 0 ? Math.ceil(n / MS_PER_SEC) : null
+}
+
+// epochMsElseRelativeLabel：number/数值串走 epoch；非数值串走相对 label（zhipu 双格式）
+function evalEpochMsElseRelativeLabelReset(raw: unknown): number | null {
+  if (typeof raw === 'number') return evalEpochMsReset(raw)
   const s = strictString(raw)
   if (s === undefined) return null
-  return epochOf(s) ?? parseRelativeLabel(s)
+  const ms = Number(s)
+  if (ms && !Number.isNaN(ms)) {
+    const rem = Math.floor(ms / MS_PER_SEC) - Math.floor(Date.now() / MS_PER_SEC)
+    if (rem > 0) return rem
+  }
+  return parseRelativeLabel(s)
+}
+
+const RESET_EVALUATORS: Readonly<Record<ResetSecMode, (raw: unknown) => number | null>> = {
+  iso: evalIsoReset,
+  epochMs: evalEpochMsReset,
+  relativeLabel: evalRelativeLabelReset,
+  zonelessUtcWallClock: evalZonelessUtcReset,
+  epochMsElseRelativeLabel: evalEpochMsElseRelativeLabelReset,
+  relativeMs: evalRelativeMsReset,
+}
+
+function evalResetSec(raw: unknown, mode: ResetSecMode): number | null {
+  return RESET_EVALUATORS[mode](raw)
 }
 
 /** label 模板插值：`{{path}}` 替换；任一路径缺失 → strip 全部插值段 + strip 尾部 `- `。 */
 function evalLabel(template: string, data: unknown): string {
   if (!template.includes('{{')) return template
   const segs = template.match(/\{\{([^}]+)\}\}/g) ?? []
-  console.error('PROBE label:', template, 'segs:', JSON.stringify(segs), 'level:', JSON.stringify(pickPath(data, 'level')))
-  const allPresent = segs.every((s) => pickPath(data, s.slice(2, -2)) !== undefined)
+  const allPresent = segs.every((s) => pickPath(data, s.slice(LABEL_DELIM_LEN, -LABEL_DELIM_LEN)) !== undefined)
   if (allPresent) {
     return template.replace(/\{\{([^}]+)\}\}/g, (_, p: string) => String(pickPath(data, p) ?? ''))
   }
@@ -312,13 +397,12 @@ function allRequiresMissing(data: unknown, requires: string[]): boolean {
   })
 }
 
-function evalWindow(
+/** 窗口门控求值（gate 存在性 + gateValue 取值门控）；返回非 null = 整窗提前返回。 */
+function evalWindowGate(
   win: DeclarativeWindow,
-  reqs: ResolvedRequests,
+  source: unknown,
   strict: boolean,
-): { win: QuotaWindow; queryFail?: true } {
-  const source = win.fromRequest ? reqs.byName[win.fromRequest] : reqs.byName[reqs.primaryName]
-
+): { win: QuotaWindow; queryFail?: true } | null {
   if (win.gate) {
     const hit = pickPath(source, win.gate.path)
     if (hit === undefined || hit === null) {
@@ -330,20 +414,31 @@ function evalWindow(
     const v = strictNumeric(pickPath(source, win.gateValue.path), strict)
     if (v !== undefined && v !== win.gateValue.equals) return { win: INFINITE_WIN }
   }
+  return null
+}
 
-  // 绝对量（usedLimit）：used 折算内建（used ?? limit−remaining，均缺不输出）
-  let usedLimit: { used: number; limit: number; unit: NonNullable<QuotaWindow['unit']> } | undefined
-  if (win.usedLimit) {
-    const limit = strictNumeric(pickPath(source, win.usedLimit.limit), strict)
-    const usedRaw = strictNumeric(pickPath(source, win.usedLimit.used), strict)
-    const remaining = win.usedLimit.remaining ? strictNumeric(pickPath(source, win.usedLimit.remaining), strict) : undefined
-    const used = usedRaw ?? (limit !== undefined && remaining !== undefined ? limit - remaining : undefined)
-    if (limit !== undefined && used !== undefined && limit > 0) {
-      usedLimit = { used, limit, unit: (win.usedLimit.unit ?? 'requests') as NonNullable<QuotaWindow['unit']> }
-    }
-  }
+/** 绝对量求值（usedLimit）：used 折算内建（used ?? limit−remaining，均缺不输出）。 */
+function evalUsedLimit(
+  win: DeclarativeWindow,
+  source: unknown,
+  strict: boolean,
+): { used: number; limit: number; unit: NonNullable<QuotaWindow['unit']> } | undefined {
+  if (!win.usedLimit) return undefined
+  const limit = strictNumeric(pickPath(source, win.usedLimit.limit), strict)
+  const usedRaw = strictNumeric(pickPath(source, win.usedLimit.used), strict)
+  const remaining = win.usedLimit.remaining ? strictNumeric(pickPath(source, win.usedLimit.remaining), strict) : undefined
+  const used = usedRaw ?? (limit !== undefined && remaining !== undefined ? limit - remaining : undefined)
+  if (limit === undefined || used === undefined || limit <= 0) return undefined
+  return { used, limit, unit: (win.usedLimit.unit ?? 'requests') as NonNullable<QuotaWindow['unit']> }
+}
 
-  // pct
+/** pct 求值；`infiniteWin` = 主数据不可知整窗 INFINITE_WIN（direct/usedOverLimit 派生链）。 */
+function evalWindowPct(
+  win: DeclarativeWindow,
+  source: unknown,
+  strict: boolean,
+  usedLimit: { used: number; limit: number } | undefined,
+): { pct: number | null; infiniteWin?: true } {
   let pct: number | null = null
   if (win.pct && win.pct.path) {
     const raw = strictNumeric(pickPath(source, win.pct.path), strict)
@@ -357,13 +452,29 @@ function evalWindow(
   // pct direct 缺失 = 主数据不可知 → 整窗 INFINITE_WIN（resetSec 同折 null，zhipu 现行
   // 语义「TOKENS_LIMIT percentage 缺失 → INFINITE_WIN」；percent01to100/remainingToUsed
   // 的主数据是 percent 本身，缺失仅 pct=null、resetSec 独立输出——mimo/minimax 现行）
-  if (win.pct?.via === 'direct' && pct === null) return { win: INFINITE_WIN }
+  if (win.pct?.via === 'direct' && pct === null) return { pct, infiniteWin: true }
   if (win.pct?.via === 'usedOverLimit') {
     // pct 由绝对量派生时，绝对量缺失 = 主数据不可知 → 整窗 INFINITE_WIN（resetSec 同折 null，
     // 对齐 opencode/kimi 现行语义——与 mimo「pct 缺失仅 pct=null、resetSec 独立输出」相区分）
-    if (!usedLimit) return { win: INFINITE_WIN }
+    if (!usedLimit) return { pct, infiniteWin: true }
     pct = Math.round((usedLimit.used / usedLimit.limit) * PERCENT_SCALE)
   }
+  return { pct }
+}
+
+function evalWindow(
+  win: DeclarativeWindow,
+  reqs: ResolvedRequests,
+  strict: boolean,
+): { win: QuotaWindow; queryFail?: true } {
+  const source = win.fromRequest ? reqs.byName[win.fromRequest] : reqs.byName[reqs.primaryName]
+
+  const gate = evalWindowGate(win, source, strict)
+  if (gate) return gate
+
+  const usedLimit = evalUsedLimit(win, source, strict)
+  const { pct, infiniteWin } = evalWindowPct(win, source, strict, usedLimit)
+  if (infiniteWin) return { win: INFINITE_WIN }
 
   // resetSec 源：可覆写窗级源请求（mimo resetSec 来自辅助 detail 请求）
   const resetSrc = win.resetSec?.fromRequest ? reqs.byName[win.resetSec.fromRequest] : source
@@ -437,6 +548,72 @@ async function fetchPrimary(
   }
 }
 
+/** 请求前置（opencode workspace 提取）：提取失败返回 undefined（调用方落 failReason）。 */
+function resolvePreconditionHeader(config: DeclarativeFetcherConfig, fetcherConfig?: { workspaceUrl?: string }): string | undefined {
+  if (!config.precondition) return undefined
+  const from = fetcherConfig?.[config.precondition.from]
+  const value = from && config.precondition.extractor === 'quotaWorkspaceId' ? extractQuotaWorkspaceId(from) : undefined
+  return value ?? undefined
+}
+
+/** 辅助请求并行 + 独立 fail-safe（mimo detail：失败仅 resetSec 降级，不影响主数据）。
+ * allSettled 表达「独立数据源允许部分降级」：单请求失败不拖垮其余辅助请求。 */
+async function fetchAuxiliaryRequests(
+  config: DeclarativeFetcherConfig,
+  primaryDef: DeclarativeFetcherConfig['requests'][number],
+  headers: Record<string, string>,
+  fetchImpl: (url: string, init: RequestInit) => Promise<Response>,
+  reqs: ResolvedRequests,
+): Promise<void> {
+  await Promise.allSettled(config.requests.filter(r => r !== primaryDef).map(async (def) => {
+    const r = await fetchPrimary(config, def.url, headers, fetchImpl)
+    if (r.ok) reqs.byName[def.name] = r.data
+  }))
+}
+
+/** 在体业务码判定（mimo code / minimax base_resp.status_code / zhipu success boolean）；返回非 null = 提前返回。 */
+function evaluateBodyCode(config: DeclarativeFetcherConfig, primaryData: unknown): { ok: false; reason: QuotaFetchFailureReason } | null {
+  const bodyCode = config.bodyCode
+  if (!bodyCode) return null
+  const rawCode = pickPath(primaryData, bodyCode.path)
+  // 现状各家 guard 均要求 code 原生 number/boolean（字符串形态 = 漂移归 parse，
+  // 防 "401" 绕过类型检查命中 map）
+  if (rawCode !== undefined && rawCode !== null && typeof rawCode !== 'number' && typeof rawCode !== 'boolean') {
+    throw new WireDriftError(`non-numeric body code: ${JSON.stringify(rawCode)}`)
+  }
+  const code = rawCode
+  if (code !== bodyCode.success) {
+    const reason = (typeof code === 'string' || typeof code === 'number')
+      ? bodyCode.map?.[String(code)]
+      : undefined
+    return { ok: false, reason: reason ?? bodyCode.else ?? 'no-subscription' }
+  }
+  if (bodyCode.successRequires !== undefined) {
+    const required = pickPath(primaryData, bodyCode.successRequires)
+    if (!isRecord(required)) return { ok: false, reason: 'parse' }
+  }
+  return null
+}
+
+/** 数据源存在性判定（kimi limits/usage、opencode 三 meter 对象级）。 */
+function evaluateRequires(config: DeclarativeFetcherConfig, primaryData: unknown): { ok: false; reason: QuotaFetchFailureReason } | null {
+  if (config.requires && allRequiresMissing(primaryData, config.requires)) {
+    return { ok: false, reason: 'no-subscription' }
+  }
+  return null
+}
+
+/** 窗口装配（未声明的 slot 恒 INFINITE_WIN）。 */
+function assembleWindows(config: DeclarativeFetcherConfig, reqs: ResolvedRequests, primaryData: unknown): QuotaFetchOutcome {
+  const wins: Record<QuotaSlot, QuotaWindow> = { fiveHour: INFINITE_WIN, week: INFINITE_WIN, month: INFINITE_WIN }
+  for (const win of config.windows) {
+    const r = evalWindow(win, reqs, config.strictNumbers === true)
+    if (r.queryFail) return { ok: false, reason: 'no-subscription' }
+    wins[win.slot] = r.win
+  }
+  return { ok: true, data: { label: evalLabel(config.label, primaryData), wins: [wins.fiveHour, wins.week, wins.month] } }
+}
+
 /**
  * 执行声明式 fetcher（ProviderQuotaFetcher.fetchQuota 的引擎实现）。
  * doFetch 注入参数供测试；生产走全局 fetch。
@@ -450,11 +627,10 @@ export async function runDeclarativeFetcher(
   if (!credential) return { ok: false, reason: 'unauthorized' }
 
   const extra = { ...(config.extraHeaders ?? {}) }
+  const preconditionValue = resolvePreconditionHeader(config, fetcherConfig)
   if (config.precondition) {
-    const from = fetcherConfig?.[config.precondition.from]
-    const value = from && config.precondition.extractor === 'quotaWorkspaceId' ? extractQuotaWorkspaceId(from) : undefined
-    if (!value) return { ok: false, reason: config.precondition.failReason }
-    extra[config.precondition.header] = value
+    if (!preconditionValue) return { ok: false, reason: config.precondition.failReason }
+    extra[config.precondition.header] = preconditionValue
   }
   const headers = buildHeaders(config, credential, extra)
 
@@ -463,11 +639,7 @@ export async function runDeclarativeFetcher(
   const primary = await fetchPrimary(config, primaryDef.url, headers, fetchImpl)
   if (!primary.ok) return primary
   const reqs: ResolvedRequests = { primaryName: primaryDef.name, byName: { [primaryDef.name]: primary.data } }
-  // 辅助请求并行 + 独立 fail-safe（mimo detail：失败仅 resetSec 降级，不影响主数据）
-  await Promise.all(config.requests.filter(r => r !== primaryDef).map(async (def) => {
-    const r = await fetchPrimary(config, def.url, headers, fetchImpl)
-    if (r.ok) reqs.byName[def.name] = r.data
-  }))
+  await fetchAuxiliaryRequests(config, primaryDef, headers, fetchImpl, reqs)
 
   // 求值段（业务码/存在性/窗口/label）：任何 wire 形态漂移（WireDriftError）→ parse，
   // fail-visible 不静默降级（对齐各家现行 shape guard 的「漂移可见」语义）。
@@ -475,41 +647,12 @@ export async function runDeclarativeFetcher(
   // bodyCode/requires 提前短路遮蔽后续路径的漂移——先盲跑全部窗口路径的形态检查再进业务判定。
   try {
     prevalidateWindowPaths(config, reqs.byName[reqs.primaryName])
-    // 在体业务码（mimo code / minimax base_resp.status_code / zhipu success boolean）
-    if (config.bodyCode) {
-      const rawCode = pickPath(reqs.byName[reqs.primaryName], config.bodyCode.path)
-      // 现状各家 guard 均要求 code 原生 number/boolean（字符串形态 = 漂移归 parse，
-      // 防 "401" 绕过类型检查命中 map）
-      if (rawCode !== undefined && rawCode !== null && typeof rawCode !== 'number' && typeof rawCode !== 'boolean') {
-        throw new WireDriftError(`non-numeric body code: ${JSON.stringify(rawCode)}`)
-      }
-      const code = rawCode
-      if (code !== config.bodyCode.success) {
-        const reason = (typeof code === 'string' || typeof code === 'number')
-          ? config.bodyCode.map?.[String(code)]
-          : undefined
-        return { ok: false, reason: reason ?? config.bodyCode.else ?? 'no-subscription' }
-      }
-      if (config.bodyCode.successRequires !== undefined) {
-        const required = pickPath(reqs.byName[reqs.primaryName], config.bodyCode.successRequires)
-        if (!isRecord(required)) return { ok: false, reason: 'parse' }
-      }
-    }
-
-    // 数据源存在性（kimi limits/usage、opencode 三 meter 对象级）
-    if (config.requires && allRequiresMissing(reqs.byName[reqs.primaryName], config.requires)) {
-      return { ok: false, reason: 'no-subscription' }
-    }
-
-    // 窗口装配（未声明的 slot 恒 INFINITE_WIN）
-    const wins: Record<QuotaSlot, QuotaWindow> = { fiveHour: INFINITE_WIN, week: INFINITE_WIN, month: INFINITE_WIN }
-    for (const win of config.windows) {
-      const r = evalWindow(win, reqs, config.strictNumbers === true)
-      if (r.queryFail) return { ok: false, reason: 'no-subscription' }
-      wins[win.slot] = r.win
-    }
-
-    return { ok: true, data: { label: evalLabel(config.label, reqs.byName[reqs.primaryName]), wins: [wins.fiveHour, wins.week, wins.month] } }
+    const primaryData = reqs.byName[reqs.primaryName]
+    const bodyResult = evaluateBodyCode(config, primaryData)
+    if (bodyResult) return bodyResult
+    const requiresResult = evaluateRequires(config, primaryData)
+    if (requiresResult) return requiresResult
+    return assembleWindows(config, reqs, primaryData)
   } catch (e) {
     if (e instanceof WireDriftError) return { ok: false, reason: 'parse' }
     throw e

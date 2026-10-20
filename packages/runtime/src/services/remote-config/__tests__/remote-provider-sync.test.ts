@@ -4,6 +4,7 @@
  * 合并语义红线用例：同 id 覆盖 / 新 id 追加 / 不删除本地（含用户手动加的模型）/
  * 远程下线条目不动 / 无 remoteSource 标记不更新 / 无变化 no-op / guard 拒绝不写盘。
  * 策略同 remote-config-fetch.test.ts（tmp dataDir + fetch mock + resetModules）。
+ * 模板读侧在 remote-provider-templates.ts（helper ↔ sync 解环拆分），一并覆盖。
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { mkdtempSync, rmSync } from 'node:fs'
@@ -28,7 +29,10 @@ afterEach(() => {
 
 async function loadFresh() {
   vi.resetModules()
-  return await import('../remote-provider-sync.js')
+  return {
+    sync: await import('../remote-provider-sync.js'),
+    templates: await import('../remote-provider-templates.js'),
+  }
 }
 
 function remoteConfig(providers: Array<Record<string, unknown>>) {
@@ -87,10 +91,10 @@ describe('listRemoteProviderTemplates', () => {
         { id: 'taiji-relay', name: 'Relay', api: 'openai-compatible', baseUrl: 'https://r.example', models: [{ id: 'm1', name: 'M1', contextWindow: 128000 }] },
       ]) }),
     )
-    const mod = await loadFresh()
-    const templates = mod.listRemoteProviderTemplates()
-    expect(templates).toHaveLength(1)
-    expect(templates[0]).toMatchObject({
+    const { templates: mod } = await loadFresh()
+    const list = mod.listRemoteProviderTemplates()
+    expect(list).toHaveLength(1)
+    expect(list[0]).toMatchObject({
       id: 'taiji-relay',
       name: 'Relay',
       api: 'openai-compatible',
@@ -101,11 +105,11 @@ describe('listRemoteProviderTemplates', () => {
       modelCount: 1,
       remoteSource: 'taiji-relay',
     })
-    expect(templates[0].models[0]).toMatchObject({ id: 'm1', name: 'M1', contextWindow: 128000, reasoning: false, input: ['text'] })
+    expect(list[0].models[0]).toMatchObject({ id: 'm1', name: 'M1', contextWindow: 128000, reasoning: false, input: ['text'] })
   })
 
   it('无缓存 → 空列表', async () => {
-    const mod = await loadFresh()
+    const { templates: mod } = await loadFresh()
     expect(mod.listRemoteProviderTemplates()).toEqual([])
   })
 })
@@ -126,7 +130,7 @@ describe('syncRemoteProviderModels 合并写盘', () => {
         { id: 'manual', name: 'User Added' },
       ] },
     })
-    const mod = await loadFresh()
+    const { sync: mod } = await loadFresh()
     const result = await mod.syncRemoteProviderModels({
       configStore: store,
       extrasStore: makeExtrasStore({ 'taiji-relay': { remoteSource: 'taiji-relay' } }),
@@ -147,7 +151,7 @@ describe('syncRemoteProviderModels 合并写盘', () => {
   it('远程下线条目 → 该 provider 不写盘', async () => {
     mockFetch200(remoteConfig([]))
     const { store, upserts } = makeConfigStore({ 'taiji-relay': { models: [{ id: 'm1' }] } })
-    const mod = await loadFresh()
+    const { sync: mod } = await loadFresh()
     const result = await mod.syncRemoteProviderModels({
       configStore: store,
       extrasStore: makeExtrasStore({ 'taiji-relay': { remoteSource: 'taiji-relay' } }),
@@ -159,7 +163,7 @@ describe('syncRemoteProviderModels 合并写盘', () => {
   it('无 remoteSource 标记的 provider 不更新（custom 隔离）', async () => {
     mockFetch200(remoteConfig([ENTRY]))
     const { store, upserts } = makeConfigStore({ 'my-custom': { models: [{ id: 'm1' }] } })
-    const mod = await loadFresh()
+    const { sync: mod } = await loadFresh()
     const result = await mod.syncRemoteProviderModels({
       configStore: store,
       extrasStore: makeExtrasStore({ 'my-custom': {} }),
@@ -173,7 +177,7 @@ describe('syncRemoteProviderModels 合并写盘', () => {
     const { store, upserts } = makeConfigStore({
       'taiji-relay': { models: [{ id: 'm1', name: 'M1' }] },
     })
-    const mod = await loadFresh()
+    const { sync: mod } = await loadFresh()
     const result = await mod.syncRemoteProviderModels({
       configStore: store,
       extrasStore: makeExtrasStore({ 'taiji-relay': { remoteSource: 'taiji-relay' } }),
@@ -185,7 +189,7 @@ describe('syncRemoteProviderModels 合并写盘', () => {
   it('guard 拒绝坏配置 → 不写盘 + fetchReason invalid', async () => {
     mockFetch200({ version: 1, providers: 'broken' })
     const { store, upserts } = makeConfigStore({ 'taiji-relay': { models: [{ id: 'm1' }] } })
-    const mod = await loadFresh()
+    const { sync: mod } = await loadFresh()
     const result = await mod.syncRemoteProviderModels({
       configStore: store,
       extrasStore: makeExtrasStore({ 'taiji-relay': { remoteSource: 'taiji-relay' } }),
@@ -198,7 +202,7 @@ describe('syncRemoteProviderModels 合并写盘', () => {
   it('extrasStore 未注入 → 零同步对象直接返回', async () => {
     mockFetch200(remoteConfig([ENTRY]))
     const { store, upserts } = makeConfigStore({ 'taiji-relay': { models: [{ id: 'm1' }] } })
-    const mod = await loadFresh()
+    const { sync: mod } = await loadFresh()
     const result = await mod.syncRemoteProviderModels({ configStore: store })
     expect(result.updatedProviders).toEqual([])
     expect(upserts).toHaveLength(0)
