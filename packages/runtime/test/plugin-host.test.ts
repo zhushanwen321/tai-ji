@@ -160,10 +160,12 @@ describe('PluginHost', { timeout: 30_000 }, () => {
 
     await host.shutdown()
     // sandbox 子进程 SIGTERM→exit 传播 ms 级（getWorkerInstance 仅声明 Worker 形态，
-    // sandbox 无可靠 exit 事件可挂，保留小余量固定等待）
-    await new Promise((resolve) => setTimeout(resolve, 100))
-
-    expect(crashes).toEqual([])
+    // sandbox 无可靠 exit 事件可挂）。负向断言（窗口内不出 crash）无完成信号可等——
+    // 分片采样替换单点盲等（5×20ms 总窗量级不变），每片断言一次
+    for (let i = 0; i < 5; i++) {
+      await new Promise((r) => setTimeout(r, 20))
+      expect(crashes).toEqual([])
+    }
   })
 
 })

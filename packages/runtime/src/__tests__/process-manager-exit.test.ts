@@ -253,8 +253,12 @@ describe('ProcessManager 信号取证环 restart 路径（MF-3）', () => {
     await pm.destroySession('a') // 受管清零 → 环停（空闲 runtime 零开销）
 
     const frozen = psProbeCalls.count
-    await new Promise(resolve => setTimeout(resolve, 80))
-    expect(psProbeCalls.count).toBe(frozen) // 环已停：无心跳
+    // 负向断言（环已停：无心跳）无完成信号可等——分片采样替换单点盲等，
+    // 总观察窗量级不变（8×10ms），每片让出事件循环后断言一次
+    for (let i = 0; i < 8; i++) {
+      await new Promise((r) => setTimeout(r, 10))
+      expect(psProbeCalls.count).toBe(frozen) // 环已停：无心跳
+    }
 
     // 新 session 到来 → start 再武装
     await pm.createSession('b', '/project')

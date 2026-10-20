@@ -206,12 +206,24 @@ it('首屏渲染：<页面> DOM 含关键交互元素', () => {
 - **mock 不支持项（显式登记，非静默丢弃）**：session.handoff 的 options（modelOverride/thinkingOverride）——无 runtime HandoffService / handoff turn 可跑，stub resolve；chat.compact 的 customInstructions——无 pi 会话可挂指令；config retry 配置——get 恒 `configured:false`、不持久化、不广播；session.getSubagentEngineConfig 恒空清单（无 engines.json 基建）。
 - **未锚定域及理由**：settings（[C3] 字段读写已补齐为内存态 fixture 全域——worktree / 自动重命名 / 智能上下文 21 个 get/set 回显 mock；因转发 extension.onExtensions 的宽类型偏差暂不能锚定，W08 收敛时一并锚定）／extension（onExtensions 宽类型为登记过的有意偏差，W08 收敛时一并锚定）／search（real 侧无单源 domain，编排归 useSearchModalDeps）／git、file（独立 mock 文件，待后续同法锚定）。
 
+## 异步等待写法（防 CPU 并发时序偶发）
+
+「sleep 固定毫秒后断言异步效果」（盲等）在 CPU 忙时事件循环延迟吃掉预留余量，断言在条件成立前执行——表现为「单跑绿、并发挂」的偶发假红。等待一律按下列优先级写；pre-commit 对 staged 测试文件机器拦截盲等形态（`.githooks/check-test-blind-wait.mjs`，无独立 SKIP 开关；豁免登记表 = 同文件 `BLIND_WAIT_EXEMPT`，逐条附理由，条件轮询 helper 的循环间隔属合法豁免形态）：
+
+1. **有确定性信号 → 直接 await 信号**（首选）：事件回调、chokidar `ready`、对端回包、mock 调用、目标文件出现。信号到达即证明前置动作已完成，等待时长自适应。
+2. **等条件成立 → `vi.waitFor(() => expect(条件)...)`**：条件成立即返回（默认 1000ms 超时），断言本身就是轮询条件，强度不稀释。负向断言（验证「未发生」）不能直接用——轮询第 1 次就通过会稀释观察窗，走第 3 条。
+3. **负向断言（无完成信号）→ 分片采样**：多次 `sleep(<50ms)` 每片断言一次（如 8×10ms），总观察窗量级与原固定等待一致，每片让出事件循环，消除单点盲等形态。
+4. **被测方内部 timer → `vi.useFakeTimers()` + `advanceTimersByTimeAsync`**：确定性推进不依赖真实时钟；`afterEach` 必须恢复。同步 `advanceTimersByTime` 仅在被测回调纯同步（无 promise 链）时可用——同步推进不 flush 微任务队列。
+
+禁止：`sleep(N≥50)` 后直接断言；为修 flaky 加大 sleep 时长（掩盖非修复）；catch 首断言失败再重试的伪重试。
+
 ## 6. pre-commit hook
 
 提交前自动跑（`.githooks/`）：
 1. **前端 ESLint 检查**（含 taste 规则：no-magic-spacing / no-silent-catch 等）
 2. **vue-tsc 类型检查**
 3. **代码规范检查**
+4. **测试盲等形态检查**（staged 测试文件，见「异步等待写法」节）
 
 taste/no-silent-catch 处理：纯 console.warn 仍报（要求传播/重抛）。项目惯例用 `// eslint-disable-next-line taste/no-silent-catch -- <理由>`（参考 runtime `fetchAndBroadcastCommands`、useSidebar/useNewTaskFlow 的 getCommands catch）。**改 catch 前先 `grep -rn "no-silent-catch"` 看现有写法**。
 

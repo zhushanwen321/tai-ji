@@ -2916,6 +2916,32 @@
       "owner": "scripts/",
       "authority": "docs/TEST-STRATEGY.md#e2e-资产归宿纪律三态-r1r2r3",
       "note": "v0.11.9 发布前人工盘点才发现 dev-0.11.7 起残留的 private 包 changeset 后的三层防线（pre-commit 段 0.6 / changeset-check.mjs 方向② FAIL / AGENTS.md changeset 准则），判定唯一源 = scripts/changeset-versionable.mjs（changesets shouldSkipPackage 同语义：private ∨ config.ignore）；CI 固定环节 = ci.yml「Test - scripts guards」步骤同批文件"
+    },
+    {
+      "id": "E2E-BLINDWAIT-01",
+      "summary": "测试盲等形态拦截防再发：pre-commit staged 检查（.githooks 0.7 段）+ CI scripts guards 判定语义回归——「sleep 固定毫秒后断言异步效果」CPU 忙时偶发假红",
+      "scope": [
+        ".githooks/check-test-blind-wait.mjs",
+        ".githooks/install-hooks.sh",
+        "scripts/__tests__/check-test-blind-wait.test.mjs"
+      ],
+      "layer": "L1",
+      "assets": [
+        {
+          "kind": "script",
+          "ref": ".githooks/check-test-blind-wait.mjs"
+        },
+        {
+          "kind": "spec",
+          "ref": "scripts/__tests__/check-test-blind-wait.test.mjs"
+        }
+      ],
+      "trigger": "on-diff",
+      "serial": false,
+      "run": "pnpm exec vitest run scripts/__tests__/check-test-blind-wait.test.mjs",
+      "owner": "scripts/",
+      "authority": "docs/TEST-STRATEGY.md#异步等待写法防-cpu-并发时序偶发",
+      "note": "判定唯一源 = .githooks/check-test-blind-wait.mjs（豁免登记表 BLIND_WAIT_EXEMPT 同文件，逐条附理由）；对 staged 测试文件的强制拦截不经本对账（pre-commit 0.7 段直接跑检查本体），本 rule 只看护判定语义自身的回归。仓根 e2e/ Playwright real 轨域显式排除（其存量盲等登记 docs/todo/e2e-spec-blind-wait-cleanup.md）。2026-10-20 随盲等全仓清理批落地（改动测试文件即被 pre-commit 检查本体拦截，无需本 rule 触发）。"
     }
   ]
 }

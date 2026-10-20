@@ -277,8 +277,7 @@ describe("RemoteEngine run 帧映射", () => {
     // leading edge 同步 flush（["d1"]）；trailing edge 100ms 合并——buffer 累积语义
     // （widget 是累积预览，flush 不清 buffer，现状实现特征）
     expect(flushed[0]).toEqual(["d1"]);
-    await new Promise((resolve) => setTimeout(resolve, 200));
-    expect(flushed[1]).toEqual(["d1d2"]);
+    await vi.waitFor(() => expect(flushed[1]).toEqual(["d1d2"]));
     stream.dispose();
     await cleanup();
   });

@@ -240,6 +240,25 @@ if [ "$SKIP_ALL_CHECKS" != "1" ]; then
 fi
 
 # ============================================================================
+# 0.7 测试盲等形态检查（CPU 并发时序偶发防再发）
+#     「sleep 固定毫秒后断言异步效果」在 CPU 忙时事件循环延迟吃掉余量，断言先于
+#     条件成立执行 → 「单跑绿、并发挂」偶发假红（v0.11.9 ui 包偶发失败的根因
+#     形态；2026-10-20 全仓清理 16 处后加机器防线防再发）。判定唯一源 =
+#     .githooks/check-test-blind-wait.mjs（豁免登记表 BLIND_WAIT_EXEMPT 同文件）。
+#     按 R1 惯例不设独立 SKIP 开关，走 SKIP_ALL_CHECKS。
+# ============================================================================
+if [ "$SKIP_ALL_CHECKS" != "1" ]; then
+    TEST_BLIND_WAIT_STAGED=$(echo "$STAGED_FILES" | grep -E "\.(test|spec)\.tsx?$" || true)
+    if [ -n "$TEST_BLIND_WAIT_STAGED" ]; then
+        echo -e "${BLUE}[INFO] 运行测试盲等形态检查...${NC}"
+        if ! node .githooks/check-test-blind-wait.mjs $TEST_BLIND_WAIT_STAGED; then
+            echo -e "${RED}[原则] 无论是否本次改动引入的问题，都必须当场直接修复解决，不允许跳过。${NC}"
+            exit 1
+        fi
+    fi
+fi
+
+# ============================================================================
 # 1. 前端 ESLint 检查
 # ============================================================================
 

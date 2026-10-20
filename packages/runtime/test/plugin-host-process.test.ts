@@ -287,11 +287,15 @@ describe('PluginHostProcess', () => {
     // 3. 等旧进程晚到的 exit 传播：修复前旧 child 监听残留，exit 会命中新 handle
     //    （健康进程被误标 crashed + crash 回调重复触发）；修复后 createProcess 已
     //    removeAllListeners 旧 child + handleProcessCrash kill 兜底，不应再有任何影响。
-    //    600ms = mock fatalThenExit 的 300ms 退出延迟 + 传播余量（mock 竞态窗口构造
-    //    部件，与 disconnectGraceMs 无关，不可随宽限注入等比缩小）
-    await new Promise((resolve) => setTimeout(resolve, 600))
-    expect(host.getProcessHandleById(processId)!.status).toBe('active')
-    expect(crashes.length).toBe(1)
+    //    观察窗须覆盖 mock fatalThenExit 的 300ms 退出延迟 + 传播余量（mock 竞态窗口
+    //    构造部件，与 disconnectGraceMs 无关，不可随宽限注入等比缩小）。负向断言
+    //    （窗口内不出第二起 crash）无完成信号可等——分片采样替换单点盲等（15×40ms
+    //    总窗 600ms 与原观察窗一致），每片让出事件循环后断言一次，回归时中途即红
+    for (let i = 0; i < 15; i++) {
+      await new Promise((r) => setTimeout(r, 40))
+      expect(host.getProcessHandleById(processId)!.status).toBe('active')
+      expect(crashes.length).toBe(1)
+    }
   })
 
   // ── TC14: sandbox 复用分支 pluginIds 去重（M6a-06）───────────
