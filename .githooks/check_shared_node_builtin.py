@@ -11,6 +11,11 @@ import 语句 from 'node:*' 即违规——shared 是浏览器/runtime 共享层
 import node:os/node:path）——疑似与 ADR-0027 冲突，待架构确认后收编（挪 runtime 或
 拆分纯计算部分）；确认前不拦，其余文件违规即拦。
 
+session-store-paths.ts（2026-10-20 登记，C-ext-31）：paths.ts 拆分出的纯计算半边
+（session 存储树公式族，仅 import node:path 的 join、零 IO 零 env）——恰是本检查
+治理方向「拆分纯计算部分」的产物；跨平台分隔符正确性需要 node:path，随 paths.ts
+基线一同治理。
+
 退出码: 0 通过 / 2 违规
 """
 
@@ -22,7 +27,8 @@ PROJECT_ROOT = Path(__file__).resolve().parent.parent
 SHARED_SRC = PROJECT_ROOT / "packages/shared/src"
 
 # 存量待治理（2026-08-22 基线；治理完成后删除即全量拦截）
-ALLOWLIST_FILES = {"paths.ts"}
+# session-store-paths.ts：paths.ts 拆分出的纯公式半边（仅 node:path join，C-ext-31）
+ALLOWLIST_FILES = {"paths.ts", "session-store-paths.ts"}
 
 NODE_IMPORT_RE = re.compile(r"""from\s+['"]node:[^'"]+['"]""")
 

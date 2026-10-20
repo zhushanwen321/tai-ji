@@ -394,10 +394,12 @@ if [ -d "$OUTPUT_DIR/mac-arm64" ]; then
         # builtin pi extensions 完整性校验（index.js 存在 / 无 .ts 残留 R3 / permission wasm / dry-run import）
         # prepare-builtin-extensions.sh 部署 + electron-builder extraResources 拷贝。
         # 复用 verify-staged-extensions.mjs：文件级校验 + import dry-run（external 缺失降级，
-        # prod 环境无 node_modules 属预期，pi runtime 提供）。
+        # prod 环境无 node_modules 属预期，pi runtime 提供）。--engines-dir 让 C-ext-31
+        # 门禁与构建期 bundle-extensions.mjs 覆盖对齐：引擎 staged 产物同扫。
         BUILTIN_EXT_DIR="$APP_PATH/Contents/Resources/extensions/@zhushanwen"
+        BUILTIN_ENGINES_DIR="$APP_PATH/Contents/Resources/engines"
         if [ -d "$BUILTIN_EXT_DIR" ]; then
-            if node "$PROJECT_ROOT/scripts/verify-staged-extensions.mjs" --staged-dir "$BUILTIN_EXT_DIR" > /tmp/ext-verify-mac.log 2>&1; then
+            if node "$PROJECT_ROOT/scripts/verify-staged-extensions.mjs" --staged-dir "$BUILTIN_EXT_DIR" --engines-dir "$BUILTIN_ENGINES_DIR" > /tmp/ext-verify-mac.log 2>&1; then
                 echo -e "  ${GREEN}✓${NC} builtin ext 完整性校验通过（verify-staged）"
             else
                 echo -e "  ${RED}✗${NC} builtin ext 完整性校验失败（缺 index.js / 残留 .ts / 缺 wasm）:"
@@ -488,10 +490,10 @@ if [ -d "$OUTPUT_DIR/win-unpacked" ]; then
             FAILED=1
         fi
     done
-    # builtin pi extensions（Windows 同 mac 校验，复用 verify-staged）
+    # builtin pi extensions（Windows 同 mac 校验，复用 verify-staged；--engines-dir 同扫引擎产物 C-ext-31）
     WIN_BUILTIN="$WIN_RESOURCES/extensions/@zhushanwen"
     if [ -d "$WIN_BUILTIN" ]; then
-        if node "$PROJECT_ROOT/scripts/verify-staged-extensions.mjs" --staged-dir "$WIN_BUILTIN" > /tmp/ext-verify-win.log 2>&1; then
+        if node "$PROJECT_ROOT/scripts/verify-staged-extensions.mjs" --staged-dir "$WIN_BUILTIN" --engines-dir "$WIN_RESOURCES/engines" > /tmp/ext-verify-win.log 2>&1; then
             echo -e "  ${GREEN}✓${NC} builtin ext 完整性校验通过（verify-staged）"
         else
             echo -e "  ${RED}✗${NC} builtin ext 完整性校验失败:"
@@ -584,12 +586,12 @@ if [ -d "$OUTPUT_DIR/linux-unpacked" ]; then
             fi
         done
     fi
-    # builtin pi extensions（Linux 同 mac/win 校验，复用 verify-staged）。builtin 迁移
-    # npm 包化（2026-08）时 mac/win 补了本校验、linux 覆盖丢失（PR #185 review S1），
-    # extraResources from 路径错等 linux 专属回归将静默漏检。
+    # builtin pi extensions（Linux 同 mac/win 校验，复用 verify-staged；--engines-dir 同扫引擎产物
+    # C-ext-31）。builtin 迁移 npm 包化（2026-08）时 mac/win 补了本校验、linux 覆盖丢失
+    # （PR #185 review S1），extraResources from 路径错等 linux 专属回归将静默漏检。
     LINUX_BUILTIN="$LINUX_RESOURCES/extensions/@zhushanwen"
     if [ -d "$LINUX_BUILTIN" ]; then
-        if node "$PROJECT_ROOT/scripts/verify-staged-extensions.mjs" --staged-dir "$LINUX_BUILTIN" > /tmp/ext-verify-linux.log 2>&1; then
+        if node "$PROJECT_ROOT/scripts/verify-staged-extensions.mjs" --staged-dir "$LINUX_BUILTIN" --engines-dir "$LINUX_RESOURCES/engines" > /tmp/ext-verify-linux.log 2>&1; then
             echo -e "  ${GREEN}✓${NC} builtin ext 完整性校验通过（verify-staged）"
         else
             echo -e "  ${RED}✗${NC} builtin ext 完整性校验失败:"

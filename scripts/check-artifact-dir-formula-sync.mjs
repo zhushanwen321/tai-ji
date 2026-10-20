@@ -86,6 +86,9 @@ import {
 
 const ROOT = repoRootFrom(import.meta.url)
 const SHARED_PATHS_SRC = join(ROOT, 'packages', 'shared', 'src', 'paths.ts')
+/** shared 存储树纯公式模块（SESSION_STORE_DIR_SEGMENT / PI_SESSION_ID_PATTERN 与
+ *  存储树函数族 join 域段的提取源——公式本体自 C-ext-31 拆分起在此文件）。 */
+const SHARED_STORE_SRC = join(ROOT, 'packages', 'shared', 'src', 'session-store-paths.ts')
 const SYSTEM_PROMPT_SRC = join(ROOT, 'extensions', 'taiji', 'system-prompt', 'src', 'index.ts')
 const RUNTIME_PI_PATHS_SRC = join(ROOT, 'packages', 'runtime', 'src', 'infra', 'pi', 'pi-paths.ts')
 const BASE_TOOL_ENHANCE_REGISTRY_SRC = join(
@@ -484,11 +487,11 @@ function extractFormulaBlocksOrFail(sharedText, mirrorText) {
 }
 
 /** 提取阶段②：公式对拍全部字面量（域段 ×2 / 树根段 ×2 / sessionId 正则 ×3 源）。失败 → ✗ + fail-fast。 */
-function extractFormulaLiteralsOrFail(sharedText, sharedBlock, mirrorBlock, mirrorText, runtimeText) {
+function extractFormulaLiteralsOrFail(storeText, sharedBlock, mirrorBlock, mirrorText, runtimeText) {
   const extracted = {
     sharedSegment: extractJoinSegment(sharedBlock.text),
-    sharedStoreSegment: extractConstLiteral(sharedText, STORE_SEGMENT_CONST),
-    sharedRegex: extractConstRegex(sharedText, SHARED_PATTERN_CONST),
+    sharedStoreSegment: extractConstLiteral(storeText, STORE_SEGMENT_CONST),
+    sharedRegex: extractConstRegex(storeText, SHARED_PATTERN_CONST),
     mirrorStoreSegment: extractConstLiteral(mirrorText, STORE_SEGMENT_CONST),
     mirrorSegment: extractConstLiteral(mirrorText, MIRROR_SEGMENT_CONST),
     mirrorRegex: extractSessionIdRegex(mirrorBlock.text),
@@ -528,7 +531,7 @@ function compareStoreSegmentLiteral(sharedStoreSegment, mirrorStoreSegment) {
   } else {
     fail(
       `存储树根段字面量漂移: shared='${sharedStoreSegment}' vs 镜像='${mirrorStoreSegment}'` +
-        `——恢复动作：人工核对 ${SHARED_PATHS_SRC} 与 ${SYSTEM_PROMPT_SRC} 的 ${STORE_SEGMENT_CONST}`,
+        `——恢复动作：人工核对 ${SHARED_STORE_SRC} 与 ${SYSTEM_PROMPT_SRC} 的 ${STORE_SEGMENT_CONST}`,
     )
   }
 }
@@ -550,7 +553,7 @@ function compareSessionIdRegexes(sharedRegex, mirrorRegex, runtimeRegex) {
   } else {
     fail(
       `sessionId 校验正则漂移: shared=${sharedRegex} vs runtime ${RUNTIME_PATTERN_CONST}=${runtimeRegex}` +
-        `——恢复动作：人工核对 ${SHARED_PATHS_SRC} 的 ${SHARED_PATTERN_CONST} 与 ${RUNTIME_PI_PATHS_SRC} 的 ${RUNTIME_PATTERN_CONST}` +
+        `——恢复动作：人工核对 ${SHARED_STORE_SRC} 的 ${SHARED_PATTERN_CONST} 与 ${RUNTIME_PI_PATHS_SRC} 的 ${RUNTIME_PATTERN_CONST}` +
         `（同域规则：首尾字母数字，中间允许 [A-Za-z0-9._-]，禁 :）`,
     )
   }
@@ -633,10 +636,10 @@ function compareTreeSegments(sharedText, runtimeText, sharedStoreSegment) {
  * 域段 / sessionId 校验正则三字面量逐字一致——runtime 读侧经 shared 函数推导，镜像漂移
  * 即收殓读不到、任务清单空转。
  */
-function compareBaseToolEnhanceRegistry(sharedText, registryText, sharedStoreSegment, sharedRegex) {
+function compareBaseToolEnhanceRegistry(storeText, registryText, sharedStoreSegment, sharedRegex) {
   const registryBlock = extractFunctionBlock(registryText, BTE_REGISTRY_FN_ANCHOR)
   const assertBlock = extractFunctionBlock(registryText, BTE_ASSERT_FN_ANCHOR)
-  const sharedBgTasksBlock = extractFunctionBlock(sharedText, `export function ${SHARED_BG_TASKS_FN}`)
+  const sharedBgTasksBlock = extractFunctionBlock(storeText, `export function ${SHARED_BG_TASKS_FN}`)
   if (registryBlock.error) fail(`镜像 ${BTE_REGISTRY_FN_ANCHOR} 提取失败: ${registryBlock.error}`)
   if (assertBlock.error) fail(`镜像 ${BTE_ASSERT_FN_ANCHOR} 提取失败: ${assertBlock.error}`)
   if (sharedBgTasksBlock.error) fail(`shared ${SHARED_BG_TASKS_FN} 提取失败: ${sharedBgTasksBlock.error}`)
@@ -663,7 +666,7 @@ function compareBaseToolEnhanceRegistry(sharedText, registryText, sharedStoreSeg
   } else {
     fail(
       `域 5 存储树根段漂移: shared='${sharedStoreSegment}' vs 镜像='${extracted.bteStoreSegment.value}'` +
-        `——恢复动作：人工核对 ${SHARED_PATHS_SRC} 的 ${STORE_SEGMENT_CONST} 与 ${BTE_REGISTRY_SRC} 的 ${BTE_STORE_SEGMENT_CONST}`,
+        `——恢复动作：人工核对 ${SHARED_STORE_SRC} 的 ${STORE_SEGMENT_CONST} 与 ${BTE_REGISTRY_SRC} 的 ${BTE_STORE_SEGMENT_CONST}`,
     )
   }
   if (extracted.bteDomainSegment.value === extracted.sharedDomainSegment.value) {
@@ -671,7 +674,7 @@ function compareBaseToolEnhanceRegistry(sharedText, registryText, sharedStoreSeg
   } else {
     fail(
       `域 5 域段漂移: shared='${extracted.sharedDomainSegment.value}' vs 镜像='${extracted.bteDomainSegment.value}'` +
-        `——恢复动作：人工核对 ${SHARED_PATHS_SRC} 的 ${SHARED_BG_TASKS_FN} 与 ${BTE_REGISTRY_SRC} 的 ${BTE_DOMAIN_SEGMENT_CONST}`,
+        `——恢复动作：人工核对 ${SHARED_STORE_SRC} 的 ${SHARED_BG_TASKS_FN} 与 ${BTE_REGISTRY_SRC} 的 ${BTE_DOMAIN_SEGMENT_CONST}`,
     )
   }
   if (extracted.bteRegex.value === sharedRegex) {
@@ -679,7 +682,7 @@ function compareBaseToolEnhanceRegistry(sharedText, registryText, sharedStoreSeg
   } else {
     fail(
       `域 5 sessionId 校验正则漂移: shared=${sharedRegex} vs 镜像=${extracted.bteRegex.value}` +
-        `——恢复动作：人工核对 ${SHARED_PATHS_SRC} 的 ${SHARED_PATTERN_CONST} 与 ${BTE_REGISTRY_SRC} 的 ${BTE_ASSERT_FN_ANCHOR}`,
+        `——恢复动作：人工核对 ${SHARED_STORE_SRC} 的 ${SHARED_PATTERN_CONST} 与 ${BTE_REGISTRY_SRC} 的 ${BTE_ASSERT_FN_ANCHOR}`,
     )
   }
 }
@@ -690,9 +693,9 @@ function compareBaseToolEnhanceRegistry(sharedText, registryText, sharedStoreSeg
  * 供 runtime/测试消费，镜像侧供 extension 写入），漂移即导出 md 落到树外错误位置
  * （随会话删除不回收、布局规约破坏）。
  */
-function compareSessionReaderView(sharedText, handlerText, sharedStoreSegment, sharedRegex) {
+function compareSessionReaderView(storeText, handlerText, sharedStoreSegment, sharedRegex) {
   const viewBlock = extractFunctionBlock(handlerText, SR_VIEW_FN_ANCHOR)
-  const sharedViewBlock = extractFunctionBlock(sharedText, `export function ${SHARED_VIEW_FN}`)
+  const sharedViewBlock = extractFunctionBlock(storeText, `export function ${SHARED_VIEW_FN}`)
   if (viewBlock.error) fail(`镜像 ${SR_VIEW_FN_ANCHOR} 提取失败: ${viewBlock.error}`)
   if (sharedViewBlock.error) fail(`shared ${SHARED_VIEW_FN} 提取失败: ${sharedViewBlock.error}`)
   exitIfFailed('域 6 session-view 公式对拍：函数块提取失败，按上方 ✗ 修复后重跑')
@@ -718,7 +721,7 @@ function compareSessionReaderView(sharedText, handlerText, sharedStoreSegment, s
   } else {
     fail(
       `域 6 存储树根段漂移: shared='${sharedStoreSegment}' vs 镜像='${extracted.srTreeSegment.value}'` +
-        `——恢复动作：人工核对 ${SHARED_PATHS_SRC} 的 ${STORE_SEGMENT_CONST} 与 ${SR_TOOL_HANDLER_SRC} 的 doExport 落盘段`,
+        `——恢复动作：人工核对 ${SHARED_STORE_SRC} 的 ${STORE_SEGMENT_CONST} 与 ${SR_TOOL_HANDLER_SRC} 的 doExport 落盘段`,
     )
   }
   if (extracted.srFileSegment.value === extracted.sharedFileSegment.value) {
@@ -726,7 +729,7 @@ function compareSessionReaderView(sharedText, handlerText, sharedStoreSegment, s
   } else {
     fail(
       `域 6 导出文件段漂移: shared='${extracted.sharedFileSegment.value}' vs 镜像='${extracted.srFileSegment.value}'` +
-        `——恢复动作：人工核对 ${SHARED_PATHS_SRC} 的 ${SHARED_VIEW_FN} 与 ${SR_TOOL_HANDLER_SRC} 的 doExport 落盘段`,
+        `——恢复动作：人工核对 ${SHARED_STORE_SRC} 的 ${SHARED_VIEW_FN} 与 ${SR_TOOL_HANDLER_SRC} 的 doExport 落盘段`,
     )
   }
   if (extracted.srRegex.value === sharedRegex) {
@@ -744,8 +747,8 @@ function compareSessionReaderView(sharedText, handlerText, sharedStoreSegment, s
  * 分区名校验正则三字面量与 shared 逐字一致——session-reader 读侧与写侧（subagent-core
  * 经 shared 函数族落盘）两侧各有一份推导，漂移即 subagent 会话/记录发现为空。
  */
-function compareSessionReaderDiscovery(sharedText, rootsText, sharedStoreSegment, sharedRegex) {
-  const sharedSubagentsBlock = extractFunctionBlock(sharedText, `export function ${SHARED_SUBAGENTS_FN}`)
+function compareSessionReaderDiscovery(storeText, rootsText, sharedStoreSegment, sharedRegex) {
+  const sharedSubagentsBlock = extractFunctionBlock(storeText, `export function ${SHARED_SUBAGENTS_FN}`)
   if (sharedSubagentsBlock.error) fail(`shared ${SHARED_SUBAGENTS_FN} 提取失败: ${sharedSubagentsBlock.error}`)
   exitIfFailed('域 9 discovery 公式对拍：函数块提取失败，按上方 ✗ 修复后重跑')
 
@@ -792,8 +795,9 @@ function compareSessionReaderDiscovery(sharedText, rootsText, sharedStoreSegment
 }
 
 function main() {
-  const [sharedText, mirrorText, runtimeText, registryText, handlerText, rootsText] = readSourcesOrFail([
+  const [sharedText, storeText, mirrorText, runtimeText, registryText, handlerText, rootsText] = readSourcesOrFail([
     [SHARED_PATHS_SRC, 'shared paths 源文件'],
+    [SHARED_STORE_SRC, 'shared session-store-paths 源文件'],
     [SYSTEM_PROMPT_SRC, 'system-prompt 源文件'],
     [RUNTIME_PI_PATHS_SRC, 'runtime pi-paths 源文件'],
     [BTE_REGISTRY_SRC, 'base-tool-enhance registry 源文件'],
@@ -802,16 +806,16 @@ function main() {
   ])
 
   const { sharedBlock, mirrorBlock } = extractFormulaBlocksOrFail(sharedText, mirrorText)
-  const lits = extractFormulaLiteralsOrFail(sharedText, sharedBlock, mirrorBlock, mirrorText, runtimeText)
+  const lits = extractFormulaLiteralsOrFail(storeText, sharedBlock, mirrorBlock, mirrorText, runtimeText)
 
   compareSegmentLiteral(lits.sharedSegment.value, lits.mirrorSegment.value)
   compareStoreSegmentLiteral(lits.sharedStoreSegment.value, lits.mirrorStoreSegment.value)
   compareSessionIdRegexes(lits.sharedRegex.value, lits.mirrorRegex.value, lits.runtimeRegex.value)
   checkMirrorConstUsage(mirrorBlock)
   compareTreeSegments(sharedText, runtimeText, lits.sharedStoreSegment.value)
-  compareBaseToolEnhanceRegistry(sharedText, registryText, lits.sharedStoreSegment.value, lits.sharedRegex.value)
-  compareSessionReaderView(sharedText, handlerText, lits.sharedStoreSegment.value, lits.sharedRegex.value)
-  compareSessionReaderDiscovery(sharedText, rootsText, lits.sharedStoreSegment.value, lits.sharedRegex.value)
+  compareBaseToolEnhanceRegistry(storeText, registryText, lits.sharedStoreSegment.value, lits.sharedRegex.value)
+  compareSessionReaderView(storeText, handlerText, lits.sharedStoreSegment.value, lits.sharedRegex.value)
+  compareSessionReaderDiscovery(storeText, rootsText, lits.sharedStoreSegment.value, lits.sharedRegex.value)
 
   guardExit(
     '✓ 产物目录公式对拍通过（域段 + 存储树根段 + sessionId 校验正则三方 + pi 会话树段 + 域 5 registry 镜像 + 域 6 session-view 镜像 + 域 9 discovery 镜像逐字一致）',

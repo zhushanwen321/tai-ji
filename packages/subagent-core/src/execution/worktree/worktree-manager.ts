@@ -29,10 +29,11 @@ import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
 
-import { encodeCwd, getSessionStoreDir } from "@taiji/shared/paths";
+import { encodeCwd, getSessionStoreDir } from "@taiji/shared/session-store-paths";
 import type { PatchResult,WorktreeHandle } from "../assembly/types.ts";
 import { DirtyWorktreeError } from "../assembly/types.ts";
 import { bestEffort } from "../assembly/best-effort.ts";
+import { resolveSessionStoreBase } from "../assembly/store-base.ts";
 import { getLogger } from "../../core/logger.ts";
 import { isProcessAlive } from "../persistence/alive-store.ts";
 import { SPAWN_GRACE_MS,type WorktreeEntry,WorktreeRegistry } from "./worktree-registry.ts";
@@ -216,7 +217,7 @@ export class WorktreeManager {
     this.reconciler = new WorktreeReconciler({
       gitRunAsync: (args, opts) => this.gitRunAsync(args, opts),
       registry: this.registry,
-      storeRoot: getSessionStoreDir(),
+      storeRoot: getSessionStoreDir(resolveSessionStoreBase()),
     });
   }
 

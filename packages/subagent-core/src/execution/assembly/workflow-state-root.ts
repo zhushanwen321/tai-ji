@@ -23,13 +23,21 @@
 // （见 setPiWorkflowRootSessionId）——只在 pi 进程内、session_start 之后调用才
 // 与写侧落盘一致。
 //
-// 公式消费 shared 新函数族（subagent-core 直接 import @taiji/shared，非镜像场景；
-// shared getDataDir 读 TAIJI_AGENT_DATA_DIR，taiji 生产链经 ENV_WHITELIST_PREFIXES
-// 注入 pi/引擎进程，裸跑落缺省 dev 树）。
+// 公式本体 import 自 shared 纯公式模块 '@taiji/shared/session-store-paths'（零 env
+// 读写，dataDir 必传）；base 缺省经 store-base resolveSessionStoreBase（显式 dataDir
+// → env TAIJI_AGENT_DATA_DIR → 宿主 dataRoot，与 engine journal 同一通道）。禁止改回
+// '@taiji/shared/paths' 的 env 缺省形态——其 C-proc-26 准入检查在打包态 pi/引擎进程内
+// 必抛（C-ext-31，2026-10-19 打包版 subagent 全灭事故根因）。
 
-import { getSessionStoreDir, getSessionWorkflowRunsDir, isPiSessionId } from "@taiji/shared/paths";
+import {
+  getSessionStoreDir,
+  getSessionWorkflowRunsDir,
+  isPiSessionId,
+} from "@taiji/shared/session-store-paths";
 import type { Dirent } from "node:fs";
 import { readdir } from "node:fs/promises";
+
+import { resolveSessionStoreBase } from "./store-base.ts";
 
 /**
  * 进程级当前 rootSessionId 锚（晚绑定）。
@@ -77,7 +85,7 @@ export function hasPiWorkflowRootSessionId(): boolean {
  *
  * @param rootSessionId 分区键（根会话 id）；省略 = 进程级锚（见
  *   setPiWorkflowRootSessionId），未绑定时抛错
- * @param dataDir 可选数据根目录（测试注入）；缺省读 shared getDataDir()
+ * @param dataDir 可选数据根目录（测试注入）；缺省经 resolveSessionStoreBase（见 store-base.ts）
  * @throws Error 当 rootSessionId 省略且进程级锚未绑定，或 sid 非法
  */
 export function resolvePiWorkflowRunsDir(rootSessionId?: string, dataDir?: string): string {
@@ -89,7 +97,7 @@ export function resolvePiWorkflowRunsDir(rootSessionId?: string, dataDir?: strin
         "at session_start (SessionBaselines.initSession is the production binding point).",
     );
   }
-  return getSessionWorkflowRunsDir(sid, dataDir);
+  return getSessionWorkflowRunsDir(sid, resolveSessionStoreBase(dataDir));
 }
 
 /**
@@ -103,10 +111,11 @@ export function resolvePiWorkflowRunsDir(rootSessionId?: string, dataDir?: strin
  * 从未落盘的正常空态（返回空数组）；EACCES / EIO 等真 IO 故障上抛——静默折叠成
  * 空集会让持续 IO 故障伪装成「0 个 run 待对账」。
  *
- * @param dataDir 可选数据根目录（测试注入）；缺省读 shared getDataDir()
+ * @param dataDir 可选数据根目录（测试注入）；缺省经 resolveSessionStoreBase（见 store-base.ts）
  */
 export async function listWorkflowRunsDirs(dataDir?: string): Promise<string[]> {
-  const storeRoot = getSessionStoreDir(dataDir);
+  const base = resolveSessionStoreBase(dataDir);
+  const storeRoot = getSessionStoreDir(base);
   let entries: Dirent[];
   try {
     entries = await readdir(storeRoot, { withFileTypes: true });
@@ -116,5 +125,5 @@ export async function listWorkflowRunsDirs(dataDir?: string): Promise<string[]> 
   }
   return entries
     .filter((ent) => ent.isDirectory() && isPiSessionId(String(ent.name)))
-    .map((ent) => getSessionWorkflowRunsDir(String(ent.name), dataDir));
+    .map((ent) => getSessionWorkflowRunsDir(String(ent.name), base));
 }

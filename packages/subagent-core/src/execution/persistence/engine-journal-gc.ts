@@ -33,9 +33,10 @@
 import * as fs from "node:fs";
 import * as path from "node:path";
 
-import { getSessionStoreDir, isPiSessionId } from "@taiji/shared/paths";
+import { getSessionStoreDir, isPiSessionId } from "@taiji/shared/session-store-paths";
 
 import { getEngineDataDir } from "../engine/common/data-dir.ts";
+import { resolveSessionStoreBase } from "../assembly/store-base.ts";
 import { cleanupExpiredJournals } from "../engine/common/pool-manager.ts";
 
 /** worktree patch 备份文件后缀（worktree-patch-collection.ts 落盘字面量）。 */
@@ -55,14 +56,14 @@ const GC_RESWEEP_INTERVAL_MS = HOURS_PER_DAY * MINUTES_PER_HOUR * SECONDS_PER_MI
 /**
  * 回收引擎 journal + worktree .patch 孤儿（确定性触发，由调用方决定时机）。
  * best-effort——任何异常不外抛。dataDir 解析失败 = 未配置宿主服务，同样吞掉。
- * .patch 清扫无条件执行：清扫根 = getSessionStoreDir(dataDir)（dataDir 缺省时
- * 走 getDataDir() 缺省推导，与写侧同源同值——生产接线 startEngineJournalGcTimer
- * 恒无参，条件化会使设计声明的 mtime 兜底通道在生产失效）。
+ * .patch 清扫无条件执行：清扫根 = getSessionStoreDir(resolveSessionStoreBase(dataDir))
+ * （缺省经 env → 宿主 dataRoot 通道解析，与写侧同源同值——生产接线
+ * startEngineJournalGcTimer 恒无参，条件化会使设计声明的 mtime 兜底通道在生产失效）。
  */
 export function cleanupExpiredEngineJournals(dataDir?: string): void {
   try {
     cleanupExpiredJournals(getEngineDataDir(), TTL_MS);
-    cleanupOrphanWorktreePatches(getSessionStoreDir(dataDir), TTL_MS);
+    cleanupOrphanWorktreePatches(getSessionStoreDir(resolveSessionStoreBase(dataDir)), TTL_MS);
   } catch (_e) {
     // best-effort：异常不外抛
     void _e;
@@ -113,7 +114,7 @@ function cleanupOrphanWorktreePatches(storeRoot: string, ttlMs: number): void {
 /**
  * 确定性触发接线：立即扫一次 + 每 24h 定时复扫（unref 不 hold 进程退出），
  * 返回 stop 函数（测试清理用）。形态对齐 main 侧 log-retention 的 startLogRetentionTimer；
- * 调用方以 oncePerProcess 守卫防重复接线。无参——.patch 清扫根经 getSessionStoreDir
+ * 调用方以 oncePerProcess 守卫防重复接线。无参——.patch 清扫根经 resolveSessionStoreBase
  * 缺省推导（与写侧同源同值；单测注入走 cleanupExpiredEngineJournals(dataDir)）。
  */
 export function startEngineJournalGcTimer(): () => void {

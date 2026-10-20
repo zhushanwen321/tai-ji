@@ -138,10 +138,12 @@ describe("cleanupExpiredEngineJournals: worktree patch sweep", () => {
     expect(() => cleanupExpiredEngineJournals(tmpDataDir)).not.toThrow();
   });
 
-  it("不传 dataDir：清扫根走 getSessionStoreDir 缺省推导（与写侧同源），超龄 .patch 仍回收", () => {
-    // 缺省推导根 = getDataDir()（vitest 防线固定为 tmp 数据目录，非真实 ~/.taiji）；
+  it("不传 dataDir：清扫根经 resolveSessionStoreBase（getEngineDataDir 通道）推导，超龄 .patch 仍回收", () => {
+    // 缺省通道 = store-base resolveSessionStoreBase → getEngineDataDir（本文件 mock 为
+    // holder.value = tmpDataDir；生产 = env TAIJI_AGENT_DATA_DIR → 宿主 dataRoot，C-ext-31
+    // ——事故回归锚：不得回退 shared getDataDir env 缺省，打包态 pi env 组合下必抛）。
     // 造数自建自删，不依赖 dataDirHolder 注入。
-    const defaultRoot = getSessionStoreDir();
+    const defaultRoot = getSessionStoreDir(tmpDataDir);
     const sid = "sid-gc-default-root";
     const patch = path.join(defaultRoot, sid, "subagents", "sessions", "feat-main.patch");
     fs.mkdirSync(path.dirname(patch), { recursive: true });

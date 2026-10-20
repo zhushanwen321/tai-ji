@@ -2544,15 +2544,25 @@
     },
     {
       "id": "E2E-PIPE-15",
-      "summary": "verify-staged-extensions：打包 staged 资产完整性检查脚本轨（bundle 清单 + staged 扩展/引擎存在性，缺失即 fail-fast）",
+      "summary": "verify-staged-extensions：打包 staged 资产完整性检查脚本轨（bundle 清单 + staged 扩展/引擎存在性 + pi-env admission 门禁（C-ext-31：staged bundle 禁含 C-proc-26 准入检查代码），缺失即 fail-fast）",
       "scope": [
-        "scripts/verify-staged-extensions.mjs"
+        "scripts/verify-staged-extensions.mjs",
+        "scripts/lib/pi-env-admission-gate.mjs",
+        "scripts/__tests__/pi-env-admission-gate.test.mjs"
       ],
       "layer": "L1",
       "assets": [
         {
           "kind": "script",
           "ref": "scripts/verify-staged-extensions.mjs"
+        },
+        {
+          "kind": "script",
+          "ref": "scripts/lib/pi-env-admission-gate.mjs"
+        },
+        {
+          "kind": "script",
+          "ref": "scripts/__tests__/pi-env-admission-gate.test.mjs"
         }
       ],
       "trigger": "on-diff",
@@ -2560,7 +2570,7 @@
       "run": "node scripts/verify-staged-extensions.mjs",
       "owner": "scripts/",
       "authority": "docs/TEST-STRATEGY.md#e2e-资产归宿纪律三态-r1r2r3",
-      "note": "R2 态：真实运行形态 = apps/electron build:pre 与 scripts/postbuild-validate.sh 自动调用（打包前置门）；改动本脚本须本地跑通——无 staged 产物时报错属预期失败形态，先跑 node scripts/bundle-extensions.mjs 再验"
+      "note": "R2 态：真实运行形态 = apps/electron build:pre 与 scripts/postbuild-validate.sh 自动调用（打包前置门）；改动本脚本须本地跑通——无 staged 产物时报错属预期失败形态，先跑 node scripts/bundle-extensions.mjs 再验；C-ext-31 门禁单一实现 = scripts/lib/pi-env-admission-gate.mjs（bundle-extensions.mjs 构建期同拦，该脚本已由 E2E-PLUGINCONTRACT-01/E2E-PKG-01 scope 覆盖），改动门禁须本地跑 bundle + verify-staged 双验"
     },
     {
       "id": "E2E-PIPE-16",
@@ -2596,6 +2606,31 @@
       "owner": "scripts/",
       "authority": "docs/TEST-STRATEGY.md#e2e-资产归宿纪律三态-r1r2r3",
       "note": "R2 态：check-unsafe-stream-writes 真实运行形态 = pre-commit 按路径触发（2026-09-04 事故防线的机器门，扫描全仓裸流写）；staged-asset-dirs 是 bundle/verify 脚本共享的目录单一来源（被其消费者间接验证）；smoke-core-dist 为 core dist barrel 冒烟。补登原因（2026-10-18 u-m3-delete）：relay 路径清理触及三者，暴露零登记被 e2e-map --staged 门禁拦截"
+    },
+    {
+      "id": "E2E-PIPE-17",
+      "summary": "pi 子树源码级 shared import 边界检查脚本轨（C-ext-31 源码层拦截：bundle 门禁只匹配准入检查标记，import '@taiji/shared/paths' 纯符号不带守卫码、暂未调用 getDataDir 时门禁恒绿；扫 packages/subagent-core/src 与 extensions/ 源码的 import/from 语句，命中 '@taiji/shared/paths' 或裸根 '@taiji/shared' 即红灯并列行号）",
+      "scope": [
+        "scripts/check-pi-subtree-shared-imports.mjs",
+        "scripts/__tests__/check-pi-subtree-shared-imports.test.mjs"
+      ],
+      "layer": "L1",
+      "assets": [
+        {
+          "kind": "script",
+          "ref": "scripts/check-pi-subtree-shared-imports.mjs"
+        },
+        {
+          "kind": "spec",
+          "ref": "scripts/__tests__/check-pi-subtree-shared-imports.test.mjs"
+        }
+      ],
+      "trigger": "on-diff",
+      "serial": false,
+      "run": "node scripts/check-pi-subtree-shared-imports.mjs && pnpm exec vitest run scripts/__tests__/check-pi-subtree-shared-imports.test.mjs",
+      "owner": "scripts/",
+      "authority": "docs/TEST-STRATEGY.md#e2e-资产归宿纪律三态-r1r2r3",
+      "note": "R2 态：真实运行形态 = pre-commit 按路径触发（触发范围 = packages/subagent-core/src/ 或 extensions/ 或本脚本自身 staged，见 .githooks/install-hooks.sh pi 边界可靠性护栏段）+ ci.yml scripts guards 步骤跑其单测；无 staged 产物依赖。改动本脚本须本地双验（本表 run 两条）；非恒绿证明（静态/动态/多行 import 三类违规各一例红 + 注释与 __tests__ 排除不误拦）由同 scope 单测覆盖。补登原因（dmg-r1-4）：新脚本落入 scripts/ 看护目录，零登记被 e2e-map --staged 门禁拦截，随修复同批补登"
     },
     {
       "id": "E2E-BOUNDARY-01",
