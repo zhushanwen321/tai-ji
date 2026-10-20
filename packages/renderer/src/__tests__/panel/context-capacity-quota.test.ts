@@ -230,25 +230,9 @@ describe('ComposerMetricsAggregate coding-plan 区', () => {
     })
   })
 
-  describe('未配置态「配置」按钮（偏差 #D）', () => {
-    it('未配置 provider 时 footer 渲染「配置」按钮（跳转 Settings）', async () => {
-      setupProviders([deepseekProvider])
-
-      const wrapper = mount(ComposerMetricsAggregate, {
-        props: { sessionId: 's1', modelId: 'deepseek/v3' },
-        global: {
-          provide: { openSettings: () => {} },
-        },
-      })
-      await flushPromises()
-
-      // 注：HoverCardContent 在 reka-ui HoverCardPortal 内，happy-dom 下不渲染。
-      // 「配置」按钮在 footer（portal 内），这里断言组件正常渲染不 crash；
-      // trigger 按钮在 portal 外，始终可断言。
-      const trigger = wrapper.find('[data-testid="composer-metrics-aggregate"]')
-      expect(trigger.exists()).toBe(true)
-    })
-  })
+  // 未配置态「配置」按钮无独立用例：同文件下方 D11 边界用例（provider 未命中 quota →
+  // footer 只有「配置」）经 focus+advanceTimersByTimeAsync 打开 popover，以更强的
+  // findBodyButton 断言守护同一契约（2026-10-20 垃圾测试审计 D 类裁决删除原弱断言用例）
 
   describe('quota store 写入', () => {
     it('hover 后 quota store 写入缓存数据', async () => {
@@ -614,23 +598,7 @@ describe('ComposerMetricsAggregate coding-plan 区', () => {
     })
   })
 
-  describe('quota store 状态', () => {
-    it('quota store 独立工作：setCache + getEntry', () => {
-      const store = useQuotaStore()
-      store.setCache('zhipu', mockQuotaRow, 1000)
-
-      const entry = store.getEntry('zhipu')
-      expect(entry).toBeDefined()
-      expect(entry!.data!.label).toBe('智谱 GLM Coding Plan')
-      expect(entry!.data!.wins[0].pct).toBe(68)
-    })
-
-    it('quota store pending 保护', () => {
-      const store = useQuotaStore()
-      expect(store.markPending('zhipu')).toBe(true)
-      expect(store.markPending('zhipu')).toBe(false)
-      store.unmarkPending('zhipu')
-      expect(store.markPending('zhipu')).toBe(true)
-    })
-  })
+  // quota store 自身行为（setCache/getEntry/markPending 幂等）的守护归
+  // stores/quota-store.test.ts 专用单测，此处不再重复直测（2026-10-20 垃圾测试审计
+  // D 类裁决：组件测试内直测 store 内部契约属重复证明）
 })
