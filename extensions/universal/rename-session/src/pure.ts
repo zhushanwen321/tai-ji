@@ -18,11 +18,11 @@ import {
 export type RenameMode = "first-prompt" | "first-stop" | "agent-tool";
 
 /**
- * 标题提示词风格枚举（设计 rename-prompt-config）：slug/sentence/emoji = 内置词表（随 extension
+ * 标题提示词风格枚举（设计 rename-prompt-config）：slug/sentence/emoji/topic = 内置词表（随 extension
  * 版本升级自动跟随），custom = 用户自定义自由文本（customInstruction 承载，空串回落内置 slug）。
  * 与 @taiji/shared RenameStyle 值域同构（跨包不 import，本包 role=universal）。
  */
-export type RenameStyle = "slug" | "sentence" | "emoji" | "custom";
+export type RenameStyle = "slug" | "sentence" | "emoji" | "topic" | "custom";
 
 /**
  * 自定义标题提示词长度上限（Unicode 码点数）——与 @taiji/shared RENAME_INSTRUCTION_MAX_LENGTH
@@ -77,7 +77,13 @@ export interface RenameSessionConfig {
 const RENAME_MODES: ReadonlySet<string> = new Set(["first-prompt", "first-stop", "agent-tool"]);
 
 /** 合法提示词风格清单（与 RenameStyle 一致；normalize 校验用）。 */
-const RENAME_STYLES: ReadonlySet<string> = new Set(["slug", "sentence", "emoji", "custom"]);
+const RENAME_STYLES: ReadonlySet<string> = new Set([
+	"slug",
+	"sentence",
+	"emoji",
+	"topic",
+	"custom",
+]);
 
 /**
  * 类型谓词：unknown 是否为合法触发模式（normalizeRenameConfig 校验用，单点断言）。

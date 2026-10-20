@@ -41,6 +41,16 @@ const SENTENCE_INSTRUCTION =
 	"根据以上对话，为这个会话生成一个简短标题：一个不超过 20 字的完整短句，概括本次任务的目标或结果，不加句尾标点。反例（错误）：「重构」。使用对话所用的语言。只输出标题文本。";
 
 /**
+ * 「主题标签」风格内置词表（rename-prompt-config 设计）：主题标签 = 「对象 + 动作」短词组
+ * （如「对话投递重构」「provider统一」），代码符号保留英文原词；定时/等待类任务例外用
+ * 「触发条件 + 动作」完整短句。正反例取自用户真实重命名样本（风格锚定，与
+ * RENAME_INSTRUCTION 同范式）。仅 BUILTIN_TEMPLATES 消费（renderer 侧是跨包字面量
+ * 对拍测试，不 import 本模块）。
+ */
+const TOPIC_INSTRUCTION =
+	"为会话生成一个「主题标签」式标题——像代码库里的分支名或任务卡名，不像一句话。\n默认形态：对象 + 动作（修复、重构、优化、简化、清理、设计、审查、适配、统一），4~15 个字。\n- 会话围绕具体模块、工具、技能或文件时，标题里直接用它的原词（英文原样保留），例：「provider统一」「composer icon」「pr-cr-fix」\n- 主题本身就是单一功能点时，裸名词即可，例：「托盘」「快捷键」「changeset」\n例外：定时或等待类任务（定时执行、等某条件满足后继续、额度恢复后重试），标题写成「触发条件 + 动作」的完整短句，例：「18:46 额度恢复后继续 dev-flow 开发」「每30分钟检查两会话完成后执行 pr-cr-fix」\n禁止：完整叙述句（如「我帮你修复了登录 bug」）、超长任务描述（如「分析侧边栏会话重命名失败的问题并给出修复方案」）、时态与结果表述（已修复X、完成了X）、emoji、句尾标点。\n用对话所用的语言写，代码符号保留原词。只输出标题文本。";
+
+/**
  * 「Emoji 点缀」风格内置词表（rename-prompt-config 设计）：以贴切 emoji 开头 + 不超过 15 字
  * 词组或短句。正例锚定输出形态，避免模型漏掉 emoji 或输出多行。
  * 仅 BUILTIN_TEMPLATES 消费（同 SENTENCE_INSTRUCTION，renderer 侧字面量对拍不 import）。
@@ -64,11 +74,15 @@ export const BUILTIN_TEMPLATES: Readonly<Record<Exclude<RenameStyle, "custom">, 
 	slug: RENAME_INSTRUCTION,
 	sentence: SENTENCE_INSTRUCTION,
 	emoji: EMOJI_INSTRUCTION,
+	topic: TOPIC_INSTRUCTION,
 };
 
 /**
  * 按配置解析生效的标题提示词（rename-prompt-config 设计核心收敛点）：
  * - 非 custom 枚举风格 → BUILTIN_TEMPLATES 词表 + RENAME_SYSTEM_PROMPT（slug 约束与词表自洽）
+ * - topic 例外 → 词表 + GENERIC_SYSTEM_PROMPT（topic 词表自带完整风格约束，且含定时类
+ *   「完整短句」例外正例，与 RENAME_SYSTEM_PROMPT 的「不要完整句子」直接冲突——风格
+ *   权威 = 词表指令，system 降级为输出契约骨架，与 custom 路径同理由）
  * - custom 且自定义指令非空 → 自定义指令 + GENERIC_SYSTEM_PROMPT（风格权威 = 用户指令，
  *   system 降级为输出契约骨架，消解双处风格冲突）
  * - custom 但自定义指令为空（含全空白）→ 回落 slug 默认（与「空 = 内置默认」语义一致）
@@ -80,6 +94,9 @@ export function resolveTitlePrompt(config: RenameSessionConfig): { systemPrompt:
 	// custom 但自定义指令为空（含全空白）→ 回落 slug 默认（「空 = 内置默认」语义）；
 	// 其余枚举 → 词表直查（Record 键完备，无 fallback 分支）
 	const style: Exclude<RenameStyle, "custom"> = config.style === "custom" ? "slug" : config.style;
+	if (style === "topic") {
+		return { systemPrompt: GENERIC_SYSTEM_PROMPT, instruction: BUILTIN_TEMPLATES.topic };
+	}
 	return { systemPrompt: RENAME_SYSTEM_PROMPT, instruction: BUILTIN_TEMPLATES[style] };
 }
 

@@ -129,6 +129,7 @@ export default {
     styleSlug: 'Slug 词组（默认）',
     styleSentence: '完整短句',
     styleEmoji: 'Emoji 点缀',
+    styleTopic: '主题标签',
     styleCustom: '自定义…',
     exampleLabel: '标题示例',
     instructionLabel: '标题提示词（追加在对话末尾的用户指令）',

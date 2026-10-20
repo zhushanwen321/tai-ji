@@ -129,6 +129,7 @@ export default {
     styleSlug: 'Slug phrase (default)',
     styleSentence: 'Full sentence',
     styleEmoji: 'Emoji accent',
+    styleTopic: 'Topic tag',
     styleCustom: 'Custom…',
     exampleLabel: 'Example title',
     instructionLabel: 'Title prompt (user instruction appended to the conversation)',

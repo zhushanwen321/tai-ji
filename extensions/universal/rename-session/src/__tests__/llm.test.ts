@@ -274,8 +274,14 @@ describe("resolveTitlePrompt", () => {
 		});
 		expect(resolveTitlePrompt({ ...baseCfg, style: "sentence" }).instruction).toBe(BUILTIN_TEMPLATES.sentence);
 		expect(resolveTitlePrompt({ ...baseCfg, style: "emoji" }).instruction).toBe(BUILTIN_TEMPLATES.emoji);
-		// 非 custom 风格的 system 恒为 slug 版（词表与 slug 约束自洽）
+		// slug/sentence/emoji 的 system 为 slug 版（topic 例外走 GENERIC，见下）
 		expect(resolveTitlePrompt({ ...baseCfg, style: "sentence" }).systemPrompt).toBe(RENAME_SYSTEM_PROMPT);
+	});
+
+	it("topic → BUILTIN_TEMPLATES.topic + GENERIC_SYSTEM_PROMPT（词表含定时类完整短句例外，slug system 的「不要完整句子」会与之冲突）", () => {
+		const r = resolveTitlePrompt({ ...baseCfg, style: "topic" });
+		expect(r.instruction).toBe(BUILTIN_TEMPLATES.topic);
+		expect(r.systemPrompt).toBe(GENERIC_SYSTEM_PROMPT);
 	});
 
 	it("custom 且指令非空 → 自定义指令 + GENERIC_SYSTEM_PROMPT（风格权威 = 用户指令）", () => {
