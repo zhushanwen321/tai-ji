@@ -6,8 +6,13 @@
  * 唯一实现：pr-pre-merge.sh 改调本脚本（--json），Gate-1a.5 与 dev-merge gates 消费其输出。
  * 禁止在任何调用方复制判定逻辑（WARN 文案单源 = 本脚本 lines 字段）。
  *
- * 判定：diff 触及 extensions/<pkg>/src/** 且该包无 .changeset/*.md 声明 → WARN 清单。
- * WARN 不阻断（退出码 0），与现行 check_changeset 行为一致。
+ * 判定（两个方向）：
+ * ① 漏声明（WARN）：diff 触及 extensions/<pkg>/src/** 且该包无 .changeset/*.md 声明 → WARN 清单。
+ *    WARN 不阻断（退出码 0），与现行 check_changeset 行为一致。
+ * ② 无效声明（FAIL）：.changeset/*.md 声明了不可版本化包（private ∨ config.ignore）→ FAIL。
+ *    该声明永不生效（纯 private 被 version 静默跳过残留、混合声明阻断 version），无任何
+ *    合法场景，无条件扫描（不依赖 base 解析成功），退出码 1 阻断。判定唯一源 =
+ *    scripts/changeset-versionable.mjs（与 pre-commit check_changeset_packages 同源）。
  *
  * 已知口径（与原实现对拍保留，不擅自收紧）：missing 判定是子串匹配（原实现
  * `grep -qF`），包名互为前缀时（pi-foo vs pi-foobar）按「已声明」放行——误放方向，
@@ -15,15 +20,17 @@
  *
  * 用法：node scripts/changeset-check.mjs [--json]
  *   默认输出人可读文案行；--json 输出单行 JSON：
- *   {status: skip|pass|warn, base, changed: [pkg], missing: [pkg], lines: [文案行]}
+ *   {status: skip|pass|warn|fail, base, changed: [pkg], missing: [pkg],
+ *    unversionable: [{file, name, bumpType}], lines: [文案行]}
  *   lines 与默认输出同源，pr-pre-merge.sh 消费该字段透传（保持 [pr-pre-merge] 前缀与 QUIET 语义）。
- * 退出码：0 = pass/warn/skip；2 = 工具错误（git 异常等）
+ * 退出码：0 = pass/warn/skip；1 = fail（无效声明）；2 = 工具错误（git 异常等）
  */
 import { execFileSync } from 'node:child_process'
 import { existsSync, readFileSync, readdirSync } from 'node:fs'
 import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { resolve } from 'node:path'
+import { findUnversionable, loadPackageRegistry, parseChangesetFrontmatter } from './changeset-versionable.mjs'
 
 // 三种包目录布局：旧扁平 extensions/<name>/、2026-08-22 分组后 extensions/<group>/<name>/
 // （group ∈ shared|taiji|universal）。[HISTORICAL] 曾只特判 shared/ 一个分组，
@@ -90,8 +97,16 @@ export function computeMissing(changed, declared) {
 }
 
 /** 文案行单源（与原 check_changeset 的 log 文案逐字一致，缺前缀——前缀由宿主 log() 加）。 */
-export function renderLines({ status, changed, missing }) {
+export function renderLines({ status, changed, missing, unversionable = [] }) {
   if (status === 'skip') return ['↷ skip（找不到 main 分支，无法对比）']
+  if (status === 'fail') {
+    return [
+      `✗ ${unversionable.length} 个 changeset 声明了不可版本化的包（private/config.ignore，声明永不生效）：`,
+      ...unversionable.map((d) => `  - ${d.file}: '${d.name}': ${d.bumpType}`),
+      '如需发布，运行: pnpm changeset',
+      '如是纯文档/测试/重构改动无需发布，可忽略此警告',
+    ]
+  }
   if (status === 'pass' && changed.length === 0) return ['✓ 无 extension src/ 改动，跳过 changeset 检查']
   if (status === 'pass') return [`✓ 所有改动的 extension 包都有 changeset（${changed.length} 个包）`]
   return [
@@ -102,11 +117,41 @@ export function renderLines({ status, changed, missing }) {
   ]
 }
 
+/**
+ * 无效声明扫描（方向②，无条件跑）：磁盘 .changeset/*.md 声明中出现 private/ignore 包
+ * 即 fail。不依赖 base——残留声明在任何分支状态下都是错的。
+ */
+export function scanUnversionable(root, registry) {
+  let texts = []
+  try {
+    const csDir = join(root, '.changeset')
+    texts = readdirSync(csDir)
+      .filter((f) => f.endsWith('.md') && f !== 'README.md')
+      .map((f) => ({ file: `.changeset/${f}`, text: readFileSync(join(csDir, f), 'utf-8') }))
+  } catch {
+    return [] // .changeset/ 缺失 = 无声明
+  }
+  const out = []
+  for (const { file, text } of texts) {
+    for (const d of parseChangesetFrontmatter(text)) {
+      if (findUnversionable([d.name], registry).length > 0) {
+        out.push({ file, name: d.name, bumpType: d.bumpType })
+      }
+    }
+  }
+  return out
+}
+
 export function runCheck(deps) {
   const root = deps.root
+  const registry = deps.loadRegistry ? deps.loadRegistry(root) : loadPackageRegistry(root)
+  const unversionable = scanUnversionable(root, registry)
+  if (unversionable.length > 0) {
+    return { status: 'fail', base: null, changed: [], missing: [], unversionable }
+  }
   const base = resolveBase(deps.git)
   if (!base) {
-    return { status: 'skip', base: null, changed: [], missing: [] }
+    return { status: 'skip', base: null, changed: [], missing: [], unversionable: [] }
   }
   let files = []
   try {
@@ -129,7 +174,7 @@ export function runCheck(deps) {
     }
   })
   if (changed.length === 0) {
-    return { status: 'pass', base, changed, missing: [] }
+    return { status: 'pass', base, changed, missing: [], unversionable: [] }
   }
   let texts = []
   try {
@@ -142,7 +187,7 @@ export function runCheck(deps) {
   }
   const declared = extractDeclaredPkgs(texts)
   const missing = computeMissing(changed, declared)
-  return { status: missing.length > 0 ? 'warn' : 'pass', base, changed, missing }
+  return { status: missing.length > 0 ? 'warn' : 'pass', base, changed, missing, unversionable: [] }
 }
 
 function createDefaultDeps(cwd = process.cwd()) {
@@ -170,7 +215,7 @@ export function main(argv) {
   } else {
     for (const line of renderLines(result)) console.log(line)
   }
-  process.exit(0) // WARN 不阻断（与原 check_changeset 一致）
+  process.exit(result.status === 'fail' ? 1 : 0) // fail = 无效声明阻断；WARN 不阻断（与原 check_changeset 一致）
 }
 
 if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {

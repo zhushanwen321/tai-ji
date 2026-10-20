@@ -216,6 +216,30 @@ EOF
 fi
 
 # ============================================================================
+# 0.6 changeset 声明包合法性检查（private/ignore 包声明即拦截）
+#     @taiji/* 等 private 包不发 npm，changeset 声明永不生效：纯 private 声明被
+#     changeset version 静默跳过（文件永久残留，v0.11.9 发布前人工盘点才发现），
+#     与发布包混合声明则阻断 version。判定语义与 changesets shouldSkipPackage 对齐
+#     （private ∨ config.ignore），唯一判定源 = scripts/changeset-versionable.mjs
+#     （Gate-1a.5 反方向检查同源）。按 R1 惯例不设独立 SKIP 开关，走 SKIP_ALL_CHECKS。
+# ============================================================================
+if [ "$SKIP_ALL_CHECKS" != "1" ]; then
+    CHANGESET_STAGED=$(echo "$STAGED_FILES" | grep -E "^\.changeset/[^/]+\.md$" | grep -vE "^\.changeset/(README\.md|config\.json)$" || true)
+    if [ -n "$CHANGESET_STAGED" ]; then
+        echo -e "${BLUE}[INFO] 运行 changeset 声明包合法性检查...${NC}"
+        if [ ! -f ".githooks/check_changeset_packages.mjs" ]; then
+            echo -e "${YELLOW}[WARN] 找不到检查脚本 .githooks/check_changeset_packages.mjs${NC}"
+        else
+            # shellcheck disable=SC2086 —— 文件路径无空格（.changeset/<random>.md），词切分即列表
+            if ! node .githooks/check_changeset_packages.mjs $CHANGESET_STAGED; then
+                echo -e "${RED}[原则] 无论是否本次改动引入的问题，都必须当场直接修复解决，不允许跳过。${NC}"
+                exit 1
+            fi
+        fi
+    fi
+fi
+
+# ============================================================================
 # 1. 前端 ESLint 检查
 # ============================================================================
 

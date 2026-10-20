@@ -120,6 +120,12 @@ describe('renderLines：文案与原 check_changeset 逐字对拍（缺 [pr-pre-
 
 describe('端到端（临时 git 仓库跑真实脚本进程）', () => {
   const dirs = []
+  // 方向②（scanUnversionable）经 @manypkg 扫包全景：fixture 需最小 workspace 定义
+  //（真实仓库恒为 pnpm workspace，非 workspace 目录 getPackagesSync 直接 throw）
+  function writeWorkspaceDefs(dir) {
+    writeFileSync(join(dir, 'package.json'), JSON.stringify({ name: 'fixture-root', private: true }))
+    writeFileSync(join(dir, 'pnpm-workspace.yaml'), 'packages:\n  - packages/*\n')
+  }
   function makeRepo() {
     const dir = mkdtempSync(join(tmpdir(), 'changeset-check-test-'))
     dirs.push(dir)
@@ -131,6 +137,7 @@ describe('端到端（临时 git 仓库跑真实脚本进程）', () => {
     git(['init', '-q', '-b', 'main'])
     git(['config', 'user.email', 't@t.local'])
     git(['config', 'user.name', 't'])
+    writeWorkspaceDefs(dir)
     return { dir, git }
   }
   afterEach(() => {
@@ -152,6 +159,8 @@ describe('端到端（临时 git 仓库跑真实脚本进程）', () => {
     git2(['config', 'user.email', 't@t.local'])
     git2(['config', 'user.name', 't'])
     writeFileSync(join(dir2, 'x.txt'), 'x')
+    writeFileSync(join(dir2, 'package.json'), JSON.stringify({ name: 'fixture-root', private: true }))
+    writeFileSync(join(dir2, 'pnpm-workspace.yaml'), 'packages:\n  - packages/*\n')
     git2(['add', '-A'])
     git2(['commit', '-qm', 'init'])
     const deps = { root: dir2, git: git2 }

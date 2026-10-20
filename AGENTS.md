@@ -179,7 +179,7 @@ merge skill 判定承载脚本的实现在仓库 `scripts/merge/`（Node，判�
 
 两条独立管线：Electron 打包（`v*` tag → release.yml → `verify-ci-release.sh` 验证）与 npm 发布（`npm-*` tag → release-npm.yml）。npm 两条机制：main 稳定发布（人工定 type + `check-version-changes.sh` + `apply-version.sh`，merge skill 阶段 4N 封装，**禁止本地 `changeset publish`**，曾因 registry 最终一致性 E403）与 dev-npm 预发布（changeset pre，`scripts/npm-prerelease.sh`）。补强（npm-publish-surface-guard D2，C-proc-11）：npm 发布实为三条路径（正式 `release-npm.yml` / dev 线推 `dev-npm-*` 分支触发 `release-npm-dev.yml` / 本地 `npm-prerelease.sh`），publish 前均挂 `scripts/check-publish-surface.mjs` 硬拦截（幽灵 files 条目 / 产物目录反向覆盖 / 自包含探针）——「push tag 后验证 CI」流程中检查红灯是合法失败形态。
 
-- changeset 准则（PR 阶段）：type 字段先作初步判断，最终由人工确定；body 认真写（进 CHANGELOG）；dep 传播不在 PR 声明（merge 时自动补齐）
+- changeset 准则（PR 阶段）：type 字段先作初步判断，最终由人工确定；body 认真写（进 CHANGELOG）；dep 传播不在 PR 声明（merge 时自动补齐）。**只声明 npm 发布包（`@zhushanwen/*`）**：`@taiji/*` 全部 private，不发 npm，禁写 changeset——产品功能的版本语义由 Electron 发布线承载，不经 changesets；声明 private/ignore 包会被 pre-commit（`check_changeset_packages.mjs`）与 Gate-1a.5（`changeset-check.mjs` 方向②）以 FAIL 拦截（纯 private 声明被 version 静默跳过成永久残留，混合声明阻断 version），判定唯一源 = `scripts/changeset-versionable.mjs`
 - **[MANDATORY] push tag 后必须验证 CI 产物**：push 发布 tag 后禁直接宣布完成，轮询 CI 验证产物直到脚本 exit 0（预发布 `prerelease-test.sh` 内置 / 正式 `bash scripts/verify-ci-release.sh v<version>`）。exit 非 0 修到 0，禁说「应该没问题」
 - **[MANDATORY] Release Notes 中英双语 + 写作规范**：`<!-- LANG:en -->` 在前 `<!-- LANG:zh -->` 在后，标记独占一行，无标记旧 release 向后兼容；写作规范 SSOT 在全局指引 `~/.agents/guide/release-notes.md`（三节结构 / 每条 30 字以内面向用户模糊化 / 工程细节不进 note），项目特化补充见 [docs/release-notes.md](docs/release-notes.md)，撰写前必读
 

@@ -203,10 +203,48 @@ run_step() {
         log "  --- last 30 lines of output ---"
         tail -30 "$output_file" >&2 || true
         log "  -------------------------------"
+        snapshot_test_evidence "step:$name exit=$exit_code" "$output_file"
         rm -f "$output_file"
         write_result_marker "FAIL"
         return $exit_code
     fi
+}
+
+# 失败证据快照：任意步骤失败或注入 FAIL 时，把全仓 vitest junit 报告与失败步骤完整
+# 输出复制进带时间戳的证据目录再退出。背景：v0.11.9 ui 包 CPU 并发偶发失败的用例名
+# 因复跑覆盖 junit 而永久丢失——「先保 junit 再复跑」从 AI 行为约定改为脚本必然。
+# junit 的 mtime 可能早于本次运行（typecheck/lint 失败时未重跑测试），以 manifest 所列
+# mtime 判新旧。快照内部任何失败只 WARN，不改变主流程退出码与判定。
+snapshot_test_evidence() {
+    local reason="$1" step_output="${2:-}"
+    local ev_root ev_dir ts f rel
+    ts="$(date +%Y%m%d-%H%M%S)"
+    ev_root="$(node "$GIT_ROOT/scripts/skill-data-dir.mjs" pre-merge-evidence "$GIT_ROOT" 2>/dev/null || true)"
+    # 解析失败降级 /tmp（skill-data 目录机制不可用时不阻断主流程）
+    [[ -n "$ev_root" ]] || ev_root="/tmp/pre-merge-evidence"
+    ev_dir="$ev_root/$ts"
+    if ! mkdir -p "$ev_dir/junit" 2>/dev/null; then
+        log "  WARN: 证据快照目录创建失败（$ev_dir），跳过快照"
+        return 0
+    fi
+    find "$GIT_ROOT" \( -name node_modules -o -name .git \) -prune -o \
+        -type f -name 'vitest-junit.xml' -path '*/test-results/*' -print 2>/dev/null |
+        while IFS= read -r f; do
+            rel="${f#"$GIT_ROOT"/}"
+            mkdir -p "$ev_dir/junit/$(dirname "$rel")"
+            cp "$f" "$ev_dir/junit/$rel" 2>/dev/null || true
+        done
+    if [[ -n "$step_output" && -f "$step_output" ]]; then
+        cp "$step_output" "$ev_dir/failed-step-output.log" 2>/dev/null || true
+    fi
+    {
+        echo "reason: $reason"
+        echo "time: $ts"
+        echo "head: $(git rev-parse HEAD 2>/dev/null || true)"
+        echo "junit files (含 mtime，判新旧用):"
+        ( cd "$ev_dir/junit" && find . -type f -exec ls -l {} + 2>/dev/null || true )
+    } > "$ev_dir/manifest.txt" 2>/dev/null || true
+    log "  证据已快照: $ev_dir"
 }
 
 # 写入 stage gate marker（供 pr-status.sh 与 pr-lifecycle workflow 读取）。
@@ -296,8 +334,10 @@ else
     run_step "build" pnpm run build
 fi
 
-# ── Step 5: changeset 完整性检查（WARNING 级别，不阻断）
-# 检测：改了 extensions/ 发布包但无对应 changeset → 提醒（不发版的改动可忽略）
+# ── Step 5: changeset 完整性检查
+# 方向①（WARN 不阻断）：改了 extensions/ 发布包但无对应 changeset → 提醒（不发版的改动可忽略）
+# 方向②（FAIL 阻断）：changeset 声明了 private/config.ignore 包——声明永不生效（纯 private 被
+#   version 静默跳过残留、混合声明阻断 version），无条件扫描，脚本退出码 1
 # [review-pipeline-redesign 决策 7] 判定逻辑唯一实装 = scripts/changeset-check.mjs；
 # 本函数只做调用、文案行透传（--json 的 lines 字段，文案单源在该脚本）与 RESULTS 簿记。
 check_changeset() {
@@ -310,11 +350,11 @@ check_changeset() {
         write_result_marker "FAIL"
         exit 2
     fi
-    # 一次 node 调用渲染：首行 = "status changed_n missing_n" 元数据，其余行 = 文案行
-    local rendered first_line rest line status changed_n missing_n
+    # 一次 node 调用渲染：首行 = "status changed_n missing_n unversionable_n" 元数据，其余行 = 文案行
+    local rendered first_line rest line status changed_n missing_n unversionable_n
     if ! rendered="$(node -e '
 const j = JSON.parse(require("fs").readFileSync(0, "utf8"));
-console.log(j.status + " " + j.changed.length + " " + j.missing.length);
+console.log(j.status + " " + j.changed.length + " " + j.missing.length + " " + (j.unversionable ? j.unversionable.length : 0));
 for (const l of j.lines) console.log(l);
 ' <<< "$cs_json")"; then
         log "  ✗ changeset-check 渲染失败（产物非 JSON）："
@@ -326,7 +366,7 @@ for (const l of j.lines) console.log(l);
     first_line="${rendered%%$'\n'*}"
     rest=""
     [[ "$rendered" == *$'\n'* ]] && rest="${rendered#*$'\n'}"
-    read -r status changed_n missing_n <<< "$first_line"
+    read -r status changed_n missing_n unversionable_n <<< "$first_line"
     if [ -n "$rest" ]; then
         while IFS= read -r line; do
             [ -z "$line" ] && continue
@@ -346,6 +386,11 @@ for (const l of j.lines) console.log(l);
             ;;
         warn)
             RESULTS+=("WARN changeset-check 0s (${missing_n} missing)")
+            ;;
+        fail)
+            RESULTS+=("FAIL changeset-check 0s (${unversionable_n} unversionable)")
+            write_result_marker "FAIL"
+            exit 2
             ;;
         *)
             log "  ✗ changeset-check 输出不可解析：$cs_json"
@@ -375,6 +420,7 @@ fi
 if [[ "$FINAL_RESULT" == "PASS" ]]; then
     echo "[pr-pre-merge] all checks passed ✓"
 else
+    snapshot_test_evidence "injected:test-result=FAIL（extensions/renderer 由 coverage-gate 判定，junit 为其实跑产物）" ""
     echo "[pr-pre-merge] FAILED ✗ —— 注入测试判定为 FAIL（test:extensions / test:renderer 未实跑，" >&2
     echo "判定继承自 coverage-gate；失败明细见 coverage.json 的 packages[].reason）" >&2
 fi

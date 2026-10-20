@@ -2876,6 +2876,46 @@
       "owner": "scripts/",
       "authority": "docs/TEST-STRATEGY.md#e2e-资产归宿纪律三态-r1r2r3",
       "note": "merge skill 判定承载脚本（pr-merge/wait-for-ci 的 Node 实装 + lib）迁入仓库后的登记：真实运行形态 = merge skill 薄壳经 main worktree 调起（.agents/skills/merge/scripts 同名 .sh），本表 run = 零 token fixture 回归（79 用例）；CI 固定环节 = ci.yml「Test - scripts guards」步骤同批文件"
+    },
+    {
+      "id": "E2E-CHANGESET-01",
+      "summary": "changeset 声明包合法性双防线：pre-commit staged 拦截 + Gate-1a.5/dev-merge gates 无条件 fail 方向——private/ignore 包声明永不生效（纯 private 被 version 静默跳过残留、混合声明阻断 version）",
+      "scope": [
+        "scripts/changeset-versionable.mjs",
+        "scripts/changeset-check.mjs",
+        ".githooks/check_changeset_packages.mjs",
+        "scripts/__tests__/changeset-versionable.test.mjs",
+        "scripts/__tests__/changeset-check.test.mjs"
+      ],
+      "layer": "L1",
+      "assets": [
+        {
+          "kind": "script",
+          "ref": "scripts/changeset-versionable.mjs"
+        },
+        {
+          "kind": "script",
+          "ref": ".githooks/check_changeset_packages.mjs"
+        },
+        {
+          "kind": "script",
+          "ref": "scripts/changeset-check.mjs"
+        },
+        {
+          "kind": "spec",
+          "ref": "scripts/__tests__/changeset-versionable.test.mjs"
+        },
+        {
+          "kind": "spec",
+          "ref": "scripts/__tests__/changeset-check.test.mjs"
+        }
+      ],
+      "trigger": "on-diff",
+      "serial": false,
+      "run": "pnpm exec vitest run scripts/__tests__/changeset-versionable.test.mjs scripts/__tests__/changeset-check.test.mjs",
+      "owner": "scripts/",
+      "authority": "docs/TEST-STRATEGY.md#e2e-资产归宿纪律三态-r1r2r3",
+      "note": "v0.11.9 发布前人工盘点才发现 dev-0.11.7 起残留的 private 包 changeset 后的三层防线（pre-commit 段 0.6 / changeset-check.mjs 方向② FAIL / AGENTS.md changeset 准则），判定唯一源 = scripts/changeset-versionable.mjs（changesets shouldSkipPackage 同语义：private ∨ config.ignore）；CI 固定环节 = ci.yml「Test - scripts guards」步骤同批文件"
     }
   ]
 }
