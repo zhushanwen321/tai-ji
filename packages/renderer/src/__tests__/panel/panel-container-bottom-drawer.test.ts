@@ -95,9 +95,6 @@ vi.mock('@/components/panel/trace/TraceInspector.vue', () => ({
 vi.mock('@/components/panel/SubagentTab.vue', () => ({
   default: { name: 'SubagentTab', template: '<div />' },
 }))
-vi.mock('@/components/panel/WorkflowTab.vue', () => ({
-  default: { name: 'WorkflowTab', template: '<div />' },
-}))
 // StatusBar mock 带 testid（布局顺序断言面：底抽屉在 status-bar 之前）
 vi.mock('@taiji/ui/extension-host', () => ({
   StatusBar: { name: 'StatusBar', template: '<div data-testid="status-bar" />' },

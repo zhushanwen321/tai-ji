@@ -14,7 +14,7 @@
  *
  * 状态：纯数据注册表，无行为实装（类型契约不实装行为）。终态容器归属 = CONTAINER_REGISTRY
  * （右 7/底 1/浮 2，§7.2）；右抽屉数组以 ContainerRegistryEntry<RightDrawerTab> 实例化——
- * 编译层锁终态 8 员（terminal/browser 混入右抽屉声明即 tsc 红），DrawerPanel 直接读
+ * 编译层锁终态 7 员（terminal/browser 混入右抽屉声明即 tsc 红），DrawerPanel 直接读
  * RIGHT_DRAWER_REGISTRY（CONTAINER_REGISTRY['right-drawer'] 同对象）
  */
 import type { RightDrawerTab } from './types'
@@ -28,7 +28,7 @@ export type ContainerContentType = RightDrawerTab | 'terminal' | 'browser' | 'wo
 export type ContainerId = 'right-drawer' | 'bottom-drawer' | 'overlay'
 
 /** 容器注册表条目（§7.2：内容类型 + 图标标识字符串 + 标签/空态文案的 i18n key）。
- * 泛型按容器实例化：RIGHT_DRAWER_REGISTRY = <RightDrawerTab>（编译层锁终态 8 员）；
+ * 泛型按容器实例化：RIGHT_DRAWER_REGISTRY = <RightDrawerTab>（编译层锁终态 7 员）；
  * 底抽屉/浮层条目持全集类型（各容器条目数 1/2 由单测锚定，§7.2 声明即终态）。 */
 export interface ContainerRegistryEntry<C extends ContainerContentType = ContainerContentType> { // oe-exempt:20261003:framework:类型契约先行——容器契约层声明，D1 下游单元即为消费面
   /** 内容类型（tab/内容标识；泛型参数 C 精确到容器承接的内容类型） */

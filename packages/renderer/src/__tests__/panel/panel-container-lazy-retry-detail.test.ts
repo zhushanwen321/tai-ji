@@ -95,9 +95,6 @@ vi.mock('@/components/panel/trace/TraceInspector.vue', () => ({
 vi.mock('@/components/panel/SubagentTab.vue', () => ({
   default: { name: 'SubagentTab', template: '<div />' },
 }))
-vi.mock('@/components/panel/WorkflowTab.vue', () => ({
-  default: { name: 'WorkflowTab', template: '<div />' },
-}))
 vi.mock('@taiji/ui/extension-host', () => ({
   StatusBar: { name: 'StatusBar', template: '<div />' },
 }))

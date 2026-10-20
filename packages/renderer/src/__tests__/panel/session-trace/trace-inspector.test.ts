@@ -45,9 +45,6 @@ vi.mock('@/components/panel/CommandDocPanel.vue', () => ({
 vi.mock('@/components/panel/SubagentTab.vue', () => ({
   default: { name: 'SubagentTab', template: '<div data-testid="subagent-panel" />' },
 }))
-vi.mock('@/components/panel/WorkflowTab.vue', () => ({
-  default: { name: 'WorkflowTab', template: '<div data-testid="workflow-panel" />' },
-}))
 
 // ── mock chatStore（unread badge 计数读 getMessages）──
 const chatMock = vi.hoisted(() => {

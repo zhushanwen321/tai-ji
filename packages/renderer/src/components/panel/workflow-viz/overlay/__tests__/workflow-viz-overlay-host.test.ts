@@ -275,7 +275,7 @@ describe('opener 反查（D1 调用面：托盘 runId 直开 + block (name, slug
     expect(currentRun()?.runId).toBe('wf-2')
   })
 
-  it('slug 缺失回落「name → 最新 run」（记录末条，与 WorkflowTab 兼收解析同口径）', async () => {
+  it('slug 缺失回落「name → 最新 run」（记录末条，run-name 归一后取最新）', async () => {
     await seedRecords([makeRun('wf-1', 's1'), makeRun('wf-2', 's2'), makeRun('wf-3', 's3')])
 
     openWorkflow('flow-a', { sessionId: SID })

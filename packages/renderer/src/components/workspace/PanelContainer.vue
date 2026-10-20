@@ -16,11 +16,11 @@
 
     Drawer 协调（W4 drawer-shell-integration）：drawer 固定挂本容器（单实例），恒作 flex 子项与
     Panel 各占一半并排（mode='split'），贴右展开（direction='right'）。单 panel 下不再有 overlay
-    浮层模式。[U7] subagent/agent call 详情走 drawer tab（SubagentTab/WorkflowTab），PanelHeader
+    浮层模式。[U7] subagent/agent call 详情走 drawer tab（SubagentTab），PanelHeader
     不再承载 overlay 返回/标题/JSONL 路径（那套展示层已随 overlay 移除）。本容器渲染跨端共享容器
     DrawerPanel（@taiji/ui/features/drawer，W3 迁移自旧
     SideDrawer.vue），并按 C2 contract 经默认 slot 注入桌面独占内容面板（GitPanel/SubagentTab
-    等，v-if chain 对齐注册表终态 8 员；TerminalView 现挂本文件 bottom-drawer 块——
+    等，v-if chain 对齐注册表终态 7 员；TerminalView 现挂本文件 bottom-drawer 块——
     display-containers §7.6）。git 状态唯一数据源在此层 provide
     （按 panel 的 session），GitPanel 注入共享。
 
@@ -137,7 +137,7 @@
           @close="onDrawerClose"
           @set-tab="onDrawerSetTab"
         >
-          <!-- 桌面独占内容面板（C2 v-if chain；分支与 RIGHT_DRAWER_REGISTRY 终态 8 员一一对应）：
+          <!-- 桌面独占内容面板（C2 v-if chain；分支与 RIGHT_DRAWER_REGISTRY 终态 7 员一一对应）：
                Git tab → GitPanel（inject GIT_STATUS_KEY，非 git 仓库组件内自隐藏走空态）
                Doc tab → CommandDocPanel（selectedCommandName 由 core 瞬时参数指定）
                Detail tab → DetailPane（W3 多文件 tab：selectFile 同步注入 detail 分区，store 响应式自动加载）
