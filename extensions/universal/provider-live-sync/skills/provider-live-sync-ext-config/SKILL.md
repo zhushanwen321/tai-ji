@@ -1,6 +1,6 @@
 ---
 name: provider-live-sync-ext-config
-description: 使用或排查 @zhushanwen/pi-provider-live-sync（运行中 pi 的模型快照实时同步 + 目录投喂）时加载。说明它为何存在（pi 快照冻结在 spawn 时刻）、轮询语义（2s：models.json/auth.json 两条目内容比较 + taiji 目录缓存一条目 mtime 比较，后者工厂期播种基线、首拍放行）、四态规则（缺失常态 / 曾存在→缺失抑制 / 读失败跳过 / 变化触发）、目录投喂三态（fresh 注入 / expired·never-seen 不注入 / 损坏·不可读保留注入）、零网络保证、错误可见性（getError 全文）、日志与排障、无配置项的原因。触发词：provider 不刷新、新加模型切不过去、Model not found、模型快照、provider-live-sync、配置变更不生效、refresh 模型、扩展刷新、目录投喂、catalog overlay、catalog cache、registerProvider。
+description: "使用或排查 @zhushanwen/pi-provider-live-sync（运行中 pi 的模型快照实时同步 + 目录投喂）时加载。说明它为何存在（pi 快照冻结在 spawn 时刻）、轮询语义（2s：models.json/auth.json 两条目内容比较 + taiji 目录缓存一条目 mtime 比较，后者工厂期播种基线、首拍放行）、四态规则（缺失常态 / 曾存在→缺失抑制 / 读失败跳过 / 变化触发）、目录投喂三态（fresh 注入 / expired·never-seen 不注入 / 损坏·不可读保留注入）、零网络保证、错误可见性（getError 全文）、日志与排障、无配置项的原因。触发词：provider 不刷新、新加模型切不过去、Model not found、模型快照、provider-live-sync、配置变更不生效、refresh 模型、扩展刷新、目录投喂、catalog overlay、catalog cache、registerProvider。"
 ---
 
 # provider-live-sync 扩展说明
@@ -20,9 +20,11 @@ pi 自身没有文件 watcher、也没有 refresh RPC。因此「会话开着 �
 （`<数据目录>/provider-catalog-overlay.json`）经 pi 官方注册点 `pi.registerProvider` 注入注册表，
 修的是「上游目录新模型在 pi 执行侧不可见」那类断裂（`set_model` 报 ENGINE_MODEL_MISSING、
 spawn `--model` 近似回退等）。注册发生在扩展工厂函数体内；该缓存文件作为**第三个监视条目**
-挂进同一个 tick（mtime 比较，区别于既有两条目的内容比较），检出变化即触发同一次零网络刷新，
-新目录模型对运行中的会话立即可见。此职责只在 taiji 托管环境（`TAIJI_AGENT_DATA_DIR` 存在）
-生效，原生 pi 用户整条不挂（pass-through）。
+挂进同一个 tick（mtime 比较，区别于既有两条目的内容比较），检出变化先做一次**注册对账**
+（对本拍 fresh 且尚未注册的 provider 补 `registerProvider`——工厂期因过期 / 缺失 / 损坏未注入的
+provider 没有刷新钩子，单靠刷新重建不了注入），再触发同一次零网络刷新，新目录模型对运行中的
+会话立即可见。此职责只在 taiji 托管环境（`TAIJI_AGENT_DATA_DIR` 存在）生效，原生 pi 用户整条
+不挂（pass-through）。
 
 ## 无配置项（有意）
 
@@ -42,9 +44,9 @@ spawn `--model` 近似回退等）。注册发生在扩展工厂函数体内；�
 | 刷新抛错 | 基线照常推进（同一内容不重复刷新），下一拍继续 | 否则同一坏内容会每拍刷新 + 每拍报错（日志风暴） |
 | 半写文件（截断的内容） | 视为内容变化 → 刷新一次；完整内容到达后再刷一次 | 唯一非原子写方是 pi 对 auth.json 的原地写；瞬时收缩下一拍自愈 |
 | 第三个监视条目（目录缓存）的比较方式 | **mtime** 比较（写入方是 runtime 的 tmp+rename 原子替换写，mtime 可靠）；基线在**工厂期播种**、首拍放行 | 「工厂期注入 → tick 1」约 2s 窗内的缓存变更必须可检出，否则 mtime 稳定后永不重检 |
-| 目录缓存条目 **fresh**（`lastModified` 晚于内置快照时刻） | 注入「内置基线 ⊕ 缓存条目」全量并集；运行中变化经同一 tick 刷新 | 新目录模型立即可见，无需重开会话 |
+| 目录缓存条目 **fresh**（`lastModified` 晚于内置快照时刻） | 注入「内置基线 ⊕ 缓存条目」全量并集；运行中变化经同一 tick 刷新——工厂期未注册的 provider（当时过期 / 缺失 / 损坏）在该拍先补注册再刷新 | 新目录模型立即可见，无需重开会话；没有刷新钩子的 provider 不会被 pi 的刷新碰到，必须先补注册 |
 | 目录缓存条目 **expired / never-seen**（过期、从未见过、缓存缺失） | 不注入；已注入的经 `refreshModels` 钩子回落纯内置基线（撤销注入） | 无权威数据时凭空造模型禁止（过期含远端 404/501 落盘的否定信号） |
-| 目录缓存**损坏 / 不可读——注册期** | 本次不注入；恢复 = 修复或删除该文件（下次设置页目录刷新会重写）后重开会话 | 注册期没有已注入的集合可保，损坏即按 never-seen 跳过 |
+| 目录缓存**损坏 / 不可读——工厂期或对账拍** | 不注入新 provider（已注入的按下一行保留）；恢复 = 修复或删除该文件（下次设置页目录刷新会重写）→ 文件 mtime 变化 → 下一拍 tick 对账自动重建注入，无需重开会话 | 尚未注册的 provider 没有已注入的集合可保，损坏即按 never-seen 跳过 |
 | 目录缓存**损坏 / 不可读——运行期刷新拍** | 钩子返回 undefined → pi 保留当前注入；文件恢复可读后下一拍自动恢复 | 宁可保留最后一份好快照，不因瞬时读失败清空可见集合 |
 | `models.json` 抑制窗口内目录缓存变化 | 不穿透抑制（窗口内一律不刷新）；抑制解除后补一次刷新 | 配置源缺失窗口内绝不 refresh，代价是保守方向的延迟 |
 
@@ -68,10 +70,10 @@ spawn `--model` 近似回退等）。注册发生在扩展工厂函数体内；�
 | `refresh finished with errors (aborted=…, providers=N)` | error | 通用加固记录（网络 / 凭据 / 取消类；**不是**坏配置判据） |
 | `tick failed: …` | error | 本拍异常（下拍继续，不影响 pi） |
 | `catalog cache absent (<label>): <路径> — its providers fall to never-seen …` | debug | 目录缓存文件不存在（首装未开过设置页目录刷新的常态）：该 provider 按 never-seen 不注入 |
-| `catalog cache corrupt/unreadable (<label>), overlay injection skipped: <路径>` | warn | **注册期**目录缓存损坏（JSON / 结构非法）或不可读（权限等）：本次不注入。恢复 = 修复或删除该文件（下次设置页目录刷新会重写）后重开会话 |
+| `catalog cache corrupt/unreadable (<label>), overlay injection skipped: <路径>` | warn | 目录缓存损坏（JSON / 结构非法）或不可读（权限等），出现在工厂期或 tick 的对账拍：本拍不注入新 provider。恢复 = 修复或删除该文件（下次设置页目录刷新会重写），文件 mtime 变化后下一拍自动对账重建注入，无需重开会话 |
 | `catalog cache unreadable during refresh for <providerId>, keeping the current injection` | warn | **运行期**刷新拍缓存不可读：钩子返回 undefined，pi 保留当前注入；文件恢复可读后下一拍自动恢复 |
 | `catalog overlay model skipped: <providerId>/<modelId> is missing api or baseUrl …` | warn | 目录条目缺 `api` / `baseUrl` 且同 id 无内置模型可继承，被保守档滤掉；等下次目录刷新带来完整数据 |
-| `registerProvider failed for <providerId>: <pi 原文>` | error | pi 对注册入参的结构校验失败：该 provider 保持 pi 内置行为，不阻断其他 provider 注入；按日志里的缓存路径修复目录数据源，或重开会话重试 |
+| `registerProvider failed for <providerId>: <pi 原文>` | error | pi 对注册入参的结构校验失败：该 provider 保持 pi 内置行为，不阻断其他 provider 注入；按日志里的缓存路径修复目录数据源，下次目录刷新重写缓存后自动重试注册（重开会话同样重试） |
 | `catalog overlay injected for <providerId>: N models …` | debug | 目录投喂注入成功（内置基线 ⊕ 缓存，state=fresh） |
 | `catalog overlay not injected for <providerId>: state=expired/never-seen — falling back to pi's builtin behavior` | debug | 条目过期（含远端 404/501 否定信号）或从未见过：不注入，回落 pi 内置行为 |
 | `catalog overlay revoked for <providerId>: state=… — returning the builtin baseline` | debug | 运行中刷新拍条目转为非 fresh：钩子撤销注入，返回纯内置基线 |
@@ -87,12 +89,13 @@ spawn `--model` 近似回退等）。注册发生在扩展工厂函数体内；�
 - **`config file disappeared` 之后模型列表变少**：这是抑制窗口内的预期形态（引擎保留最后一份
   好快照）；把 `models.json` 写正后下一拍自动恢复，重启会话同样可恢复。
 - **日志出现 `catalog cache corrupt` / `catalog cache unreadable`（目录缓存损坏 / 不可读）**：
-  注册期出现（`overlay injection skipped`）→ 本会话没有目录投喂，修复或删除该缓存文件
-  （设置页下次目录刷新会重写）后**重开会话**即恢复；运行期出现（`during refresh … keeping the
-  current injection`）→ 注入保留，文件恢复可读后 ≤2s 自动恢复。
+  `overlay injection skipped` 形态（工厂期或对账拍）→ 该拍没有注入新 provider，修复或删除该缓存
+  文件（设置页下次目录刷新会重写）后 ≤2s 自动对账重建注入，无需重开会话；`during refresh …
+  keeping the current injection` 形态（运行期刷新拍）→ 已注入的保留，文件恢复可读后 ≤2s 自动恢复。
 - **新目录模型切不过去，日志有 `catalog overlay model skipped` 或 `registerProvider failed`**：
   目录数据不完整（条目缺 `api` / `baseUrl`）或 pi 结构校验失败——`skipped` 等下次设置页目录
-  刷新带来完整数据；`registerProvider failed` 按日志里的缓存路径排查数据源，修复后重开会话重试。
+  刷新带来完整数据；`registerProvider failed` 按日志里的缓存路径排查数据源，修复后下次目录刷新
+  重写缓存即自动重试注册（重开会话同样重试）。
 - **目录缓存变了但没看到 `config change detected`**：`models.json` 处于「曾存在 → 缺失」抑制
   窗口时，目录缓存的变化不穿透抑制（保守方向）；文件写回、抑制解除后补一次刷新。
 
@@ -102,5 +105,6 @@ spawn `--model` 近似回退等）。注册发生在扩展工厂函数体内；�
 - 目录投喂（第二个职责）：写入单点约束 C-ext-31（constraints.json）；
   术语见 docs/CONTEXT.md「目录投喂（catalog overlay）」。
 - pi 语义锚点：`ModelRuntime.refresh()` 重读磁盘（`dist/core/model-runtime.js:501-513`）、
-  `getError()` 合成（`:305-317`）、pi-ai 本地相位提前返回（`dist/models.js:153-158`）；
+  `getError()` 合成（`:305-317`）、pi-ai 本地相位提前返回（`dist/models.js:153-158`）、
+  扩展工厂返回后 `registerProvider` 直连注册表立即生效（PS-87，对账注册的依据）；
   登记于 `docs/pi-semantics.json`，受 C-proc-08 版本门禁约束。

@@ -2,13 +2,14 @@
  * catalog-bridge 单元测试（设计 §4.2「单元（extension）」的投喂分支断言）。
  *
  * 被测面 = `src/catalog-bridge.ts` 的投喂分支：env 检测（R1）→ 两份缓存新者胜合并 →
- * 三态判定与并集（D2）→ `registerProvider` + `refreshModels` 钩子（D1/D5）→ mtime 短路
+ * 三态判定与并集（D2）→ `registerProvider` + `refreshModels` 钩子（D1/D5）→ 运行中注册
+ * 对账（`reconcile`：工厂期非 fresh 的 provider 在缓存变 fresh 后补注册）→ mtime 短路
  * → R2/R3/R4/R5/R6/R7 的 fail-safe 降级。判据本体（解析/合并/三态/并集）的单测在
  * llm-shared 包，本文件只测「IO + 日志 + 注册」这一层的接线与降级。
  *
  * 与 model-sync.test.ts 的分工：那份测既有 models.json/auth.json 同步的 per-file 比较
  * 语义（本文件一行不改它）；本文件测新增的目录投喂，直接调 `injectCatalogOverlay`，
- * 不经 tick。
+ * 不经 tick（文末「tick 接线」组除外——它证的是 index.ts 的接线）。
  *
  * 隔离方式：
  * - env：`TAIJI_AGENT_DATA_DIR` / `PI_CODING_AGENT_DIR` 各指一个 mkdtemp 真实目录
@@ -29,7 +30,12 @@ import { join } from 'node:path'
 import { getBuiltinModelDataGeneratedAt, getBuiltinModels } from '@earendil-works/pi-ai/providers/all'
 import type { ExtensionAPI, ProviderConfig, ProviderModelConfig } from '@earendil-works/pi-coding-agent'
 
-import { createOverlayCacheWatcher, injectCatalogOverlay, type OverlayCacheWatcher } from '../catalog-bridge.ts'
+import {
+  createOverlayCacheWatcher,
+  injectCatalogOverlay,
+  type CatalogOverlayBridge,
+  type OverlayCacheWatcher,
+} from '../catalog-bridge.ts'
 import { startWithRegistryCtx, tickOnce } from './tick-harness.ts'
 
 const loggerMocks = vi.hoisted(() => ({
@@ -68,9 +74,10 @@ const REAL_PROVIDER = 'minimax-cn'
 /** 无内置基线的合成 provider id——R3 的「同 id 无可继承定义」分支要靠空基线构造。 */
 const SYNTHETIC_PROVIDER = 'overlay-test-provider'
 
-/** mtime 钉死用的两个固定时刻（相差足够大，避免文件系统时间粒度吞掉差异）。 */
+/** mtime 钉死用的三个固定时刻（相差足够大，避免文件系统时间粒度吞掉差异）。 */
 const MTIME_T0 = new Date('2024-01-02T03:04:05.000Z')
 const MTIME_T1 = new Date('2024-06-07T08:09:10.000Z')
+const MTIME_T2 = new Date('2025-01-02T03:04:05.000Z')
 
 type RefreshModelsFn = NonNullable<ProviderConfig['refreshModels']>
 type RefreshModelsContext = Parameters<RefreshModelsFn>[0]
@@ -191,6 +198,12 @@ function seedCatalogPinned(at: Date): void {
   utimesSync(TAiji_CACHE_PATH(), at, at)
 }
 
+/** 播种 **expired** 单模型缓存并钉 mtime（工厂期 R5 不注入 → 运行中变 fresh 的跃迁开场）。 */
+function seedExpiredPinned(at: Date): void {
+  writeTaijiCache({ [SYNTHETIC_PROVIDER]: entry([endpointModel('Model-A')], GENERATED_AT) })
+  utimesSync(TAiji_CACHE_PATH(), at, at)
+}
+
 /** 改写缓存为 A+B 两模型并钉新 mtime（模拟上游目录更新 / 钩子返回新并集）。 */
 function rewriteCatalogPinned(at: Date): void {
   writeTaijiCache({
@@ -208,12 +221,20 @@ function injectFresh(): FakePi {
   return pi
 }
 
+/** 注入并同时返回 pi 与桥（对账用例要同时持有 registerProvider spy 与 reconcile 入口）。 */
+function injectBridge(): { pi: FakePi; bridge: CatalogOverlayBridge } {
+  const pi = makePi()
+  const bridge = injectCatalogOverlay(asApi(pi))
+  if (bridge === null) throw new Error('injectCatalogOverlay 返回 null：env 未在位（R1），对账用例前置不成立')
+  return { pi, bridge }
+}
+
 /** 播种 + 注入并返回监视条目（watcher 用例的共同开场）。 */
-function injectWatcherPinned(at: Date): OverlayCacheWatcher | null {
+function injectWatcherPinned(at: Date): OverlayCacheWatcher | undefined {
   seedCatalogPinned(at)
-  const watcher = injectCatalogOverlay(asApi(makePi()))
-  expect(watcher).not.toBeNull()
-  return watcher
+  const bridge = injectCatalogOverlay(asApi(makePi()))
+  expect(bridge).not.toBeNull()
+  return bridge?.watcher
 }
 
 // ─────────────────────────────────────────────────────────
@@ -228,7 +249,7 @@ describe('注入全链路（D1 注册时机 + D2 注入集并集）', () => {
     })
 
     const pi = makePi()
-    const watcher = injectCatalogOverlay(asApi(pi))
+    const bridge = injectCatalogOverlay(asApi(pi))
 
     expect(pi.registerProvider).toHaveBeenCalledTimes(1)
     const config = registeredConfig(pi, REAL_PROVIDER)
@@ -242,9 +263,10 @@ describe('注入全链路（D1 注册时机 + D2 注入集并集）', () => {
     expect(loggerMocks.debug).toHaveBeenCalledWith(
       expect.stringContaining(`catalog overlay injected for ${REAL_PROVIDER}`),
     )
-    // 监视条目照挂（tick 挂载用），标签 = taiji 自刷缓存文件名
-    expect(watcher).not.toBeNull()
-    expect(watcher?.label).toBe('provider-catalog-overlay.json')
+    // 监视条目 + 注册对账入口照挂（tick 挂载用），标签 = taiji 自刷缓存文件名
+    expect(bridge).not.toBeNull()
+    expect(bridge?.watcher.label).toBe('provider-catalog-overlay.json')
+    expect(bridge?.reconcile).toBeTypeOf('function')
   })
 
   it('两份缓存都读：只在 taiji 里的 provider 与只在 store 里的 provider 都被注册', () => {
@@ -287,9 +309,9 @@ describe('R1 —— 非 taiji 环境（env 无数据目录）零注册', () => {
     writeTaijiCache({ [SYNTHETIC_PROVIDER]: entry([endpointModel('Never-Reached')], FRESH_AT) })
 
     const pi = makePi()
-    const watcher = injectCatalogOverlay(asApi(pi))
+    const bridge = injectCatalogOverlay(asApi(pi))
 
-    expect(watcher).toBeNull()
+    expect(bridge).toBeNull()
     expect(pi.registerProvider).not.toHaveBeenCalled()
     expect(loggerMocks.warn).not.toHaveBeenCalled()
     expect(loggerMocks.error).not.toHaveBeenCalled()
@@ -314,13 +336,15 @@ describe('R2 / R5 —— 缓存缺失、损坏与三态非 fresh 都不注入', 
     expect(loggerMocks.warn).not.toHaveBeenCalled()
   })
 
-  it('缓存损坏（JSON 非法）→ 零注册 + warn 记 corrupt（缺失记 debug、损坏记 warn，级别区分常态与异常）', () => {
+  it('缓存损坏（JSON 非法）→ 零注册 + warn 记 corrupt（缺失记 debug、损坏记 warn，级别区分常态与异常）；桥照样返回供下一拍对账恢复', () => {
     writeFileSync(TAiji_CACHE_PATH(), '{ not json')
     const pi = makePi()
-    injectCatalogOverlay(asApi(pi))
+    const bridge = injectCatalogOverlay(asApi(pi))
 
     expect(pi.registerProvider).not.toHaveBeenCalled()
     expect(loggerMocks.warn).toHaveBeenCalledWith(expect.stringContaining('catalog cache corrupt'))
+    // R2 不注入但不断链：监视条目与对账入口照样返回，文件修复后下一拍 reconcile 重建注入
+    expect(bridge).not.toBeNull()
   })
 
   it('R5 expired（lastModified 不晚于基准时刻）→ 不注入 + debug 记 state=expired', () => {
@@ -487,6 +511,105 @@ describe('refreshModels 钩子三分支（D5 运行中窗口）', () => {
 })
 
 // ─────────────────────────────────────────────────────────
+/**
+ * 注册对账（D5 运行中窗口的另一半）：`refreshModels` 钩子只挂在**已注册**的 provider 上，
+ * pi-ai 的刷新只碰带钩子的 provider——工厂期 expired / never-seen / 损坏的 provider 单靠
+ * 刷新永远重建不了注入。`reconcile()` 对本拍 fresh 且尚未注册的 provider 补注册（挂同一
+ * 钩子），下面逐条锁三种跃迁 + 幂等 + read-failed + R4 重试。
+ */
+describe('注册对账 reconcile（工厂期非 fresh → 运行中变 fresh 的跃迁）', () => {
+  it('工厂期 expired → 缓存变 fresh → reconcile 返回 true、registerProvider 携带钩子被调，钩子立即可用', async () => {
+    seedExpiredPinned(MTIME_T0)
+    const { pi, bridge } = injectBridge()
+    expect(pi.registerProvider).not.toHaveBeenCalled()
+    expect(loggerMocks.debug).toHaveBeenCalledWith(
+      expect.stringContaining(`catalog overlay not injected for ${SYNTHETIC_PROVIDER}: state=expired`),
+    )
+
+    rewriteCatalogPinned(MTIME_T1)
+    expect(bridge.reconcile()).toBe(true)
+
+    const config = registeredConfig(pi, SYNTHETIC_PROVIDER)
+    expect(modelIds(config)).toEqual(['Model-A', 'Model-B'])
+    expect(config.refreshModels).toBeTypeOf('function')
+    expect(loggerMocks.debug).toHaveBeenCalledWith(
+      expect.stringContaining(`catalog overlay injected for ${SYNTHETIC_PROVIDER}`),
+    )
+    // 对账注册携带的是同一只钩子：mtime 短路命中（同拍已算过）直接返回新并集
+    expect((await callHook(pi, SYNTHETIC_PROVIDER))?.map((m) => m.id)).toEqual(['Model-A', 'Model-B'])
+  })
+
+  it('工厂期 never-seen（缓存缺失）→ 缓存出现且 fresh → reconcile 注册', () => {
+    const { pi, bridge } = injectBridge()
+    expect(pi.registerProvider).not.toHaveBeenCalled()
+
+    seedCatalogPinned(MTIME_T1)
+    expect(bridge.reconcile()).toBe(true)
+    expect(modelIds(registeredConfig(pi, SYNTHETIC_PROVIDER))).toEqual(['Model-A'])
+  })
+
+  it('工厂期损坏（R2）→ 文件修复为 fresh → reconcile 重建注入（恢复路径不依赖重开会话）', () => {
+    writeFileSync(TAiji_CACHE_PATH(), '{ not json')
+    utimesSync(TAiji_CACHE_PATH(), MTIME_T0, MTIME_T0)
+    const { pi, bridge } = injectBridge()
+    expect(pi.registerProvider).not.toHaveBeenCalled()
+    expect(loggerMocks.warn).toHaveBeenCalledWith(expect.stringContaining('catalog cache corrupt'))
+
+    seedCatalogPinned(MTIME_T1)
+    expect(bridge.reconcile()).toBe(true)
+    expect(modelIds(registeredConfig(pi, SYNTHETIC_PROVIDER))).toEqual(['Model-A'])
+  })
+
+  it('幂等：已注册的 provider 不重复注册（缓存无变化与有变化都返回 false，更新由钩子承担）', () => {
+    seedCatalogPinned(MTIME_T0)
+    const { pi, bridge } = injectBridge()
+    expect(pi.registerProvider).toHaveBeenCalledTimes(1)
+
+    expect(bridge.reconcile()).toBe(false)
+    rewriteCatalogPinned(MTIME_T1)
+    expect(bridge.reconcile()).toBe(false)
+    expect(pi.registerProvider).toHaveBeenCalledTimes(1)
+  })
+
+  it('对账拍缓存损坏 → 返回 false 不注册（R2 同款：未注册的 provider 没有注入可建）；修复后下一次对账注册', () => {
+    seedExpiredPinned(MTIME_T0)
+    const { pi, bridge } = injectBridge()
+    loggerMocks.warn.mockClear()
+
+    writeFileSync(TAiji_CACHE_PATH(), '{ truncated')
+    utimesSync(TAiji_CACHE_PATH(), MTIME_T1, MTIME_T1)
+    expect(bridge.reconcile()).toBe(false)
+    expect(pi.registerProvider).not.toHaveBeenCalled()
+    expect(loggerMocks.warn).toHaveBeenCalledWith(expect.stringContaining('catalog cache corrupt'))
+
+    seedCatalogPinned(MTIME_T2)
+    expect(bridge.reconcile()).toBe(true)
+    expect(modelIds(registeredConfig(pi, SYNTHETIC_PROVIDER))).toEqual(['Model-A'])
+  })
+
+  it('R4 在对账期：registerProvider 抛错 → error 日志（含自动重试提示）+ 返回 false；缓存再次重写后重试成功', () => {
+    seedExpiredPinned(MTIME_T0)
+    const { pi, bridge } = injectBridge()
+    pi.registerProvider.mockImplementationOnce(() => {
+      throw new Error(`Provider ${SYNTHETIC_PROVIDER}: "baseUrl" is required when defining custom models.`)
+    })
+
+    rewriteCatalogPinned(MTIME_T1)
+    expect(bridge.reconcile()).toBe(false)
+    expect(pi.registerProvider).toHaveBeenCalledTimes(1)
+    expect(loggerMocks.error).toHaveBeenCalledWith(
+      expect.stringContaining(`registerProvider failed for ${SYNTHETIC_PROVIDER}`),
+    )
+    expect(loggerMocks.error).toHaveBeenCalledWith(expect.stringContaining('the next catalog refresh retries'))
+
+    // 失败的 provider 不入已注册集：下一次缓存重写后的对账重试（这次 spy 不再抛）
+    rewriteCatalogPinned(MTIME_T2)
+    expect(bridge.reconcile()).toBe(true)
+    expect(pi.registerProvider).toHaveBeenCalledTimes(2)
+  })
+})
+
+// ─────────────────────────────────────────────────────────
 describe('mtime 短路（D5：文件未变直接返回上次结果，不重算）', () => {
   it('内容变了但 mtime 不变 → 钩子返回旧结果（证明没重读）；mtime 一变 → 立刻重算', async () => {
     const pi = injectFresh()
@@ -633,8 +756,10 @@ describe('tick 接线 —— 目录缓存 mtime 变化触发一次零网络本�
     expect(refresh).toHaveBeenCalledWith({ allowNetwork: false })
   }
 
+  type RegisterProviderSpy = ReturnType<typeof vi.fn<(provider: string, config: ProviderConfig) => void>>
+
   /** 经 harness 启动扩展（pi 宿主面 = appendEntry + registerProvider spy）。 */
-  function startWithFakeCtx(): { refresh: ReturnType<typeof vi.fn>; registerProvider: ReturnType<typeof vi.fn> } {
+  function startWithFakeCtx(): { refresh: ReturnType<typeof vi.fn>; registerProvider: RegisterProviderSpy } {
     const registerProvider = vi.fn<(provider: string, config: ProviderConfig) => void>()
     const { refresh } = startWithRegistryCtx({ appendEntry: vi.fn(), registerProvider })
     return { refresh, registerProvider }
@@ -680,6 +805,78 @@ describe('tick 接线 —— 目录缓存 mtime 变化触发一次零网络本�
     rewriteCatalogPinned(MTIME_T0)
     await tickOnce()
     expect(refresh).not.toHaveBeenCalled()
+  })
+
+  /** 对账注册的接线断言：tick 内 registerProvider 携带钩子落表、且先于本拍 refresh。 */
+  function expectReconciledThenRefreshed(
+    registerProvider: RegisterProviderSpy,
+    refresh: ReturnType<typeof vi.fn>,
+    expectedIds: string[],
+  ): void {
+    expect(registerProvider).toHaveBeenCalledTimes(1)
+    const [providerId, config] = registerProvider.mock.calls[0]
+    expect(providerId).toBe(SYNTHETIC_PROVIDER)
+    expect(modelIds(config)).toEqual(expectedIds)
+    expect(config.refreshModels).toBeTypeOf('function')
+    expectRefreshedOnce(refresh)
+    // 顺序契约：先补注册（挂上钩子）再刷新——反过来刷新碰不到这个 provider
+    expect(registerProvider.mock.invocationCallOrder[0]).toBeLessThan(refresh.mock.invocationCallOrder[0])
+  }
+
+  it('跃迁①：工厂期 expired → 缓存变 fresh → tick 内 registerProvider 携带钩子被调（先于 refresh）', async () => {
+    seedExpiredPinned(MTIME_T0)
+    const { refresh, registerProvider } = startWithFakeCtx()
+    // 工厂期 R5：expired 不注入——此时该 provider 没有钩子，pi 的刷新碰不到它
+    expect(registerProvider).not.toHaveBeenCalled()
+
+    await tickOnce() // 首拍：mtime 未变，无动作
+    expect(registerProvider).not.toHaveBeenCalled()
+    expect(refresh).not.toHaveBeenCalled()
+
+    // 上游目录刷新把条目写成 fresh（mtime 变）→ 本拍对账补注册，再刷新
+    rewriteCatalogPinned(MTIME_T1)
+    await tickOnce()
+    expectReconciledThenRefreshed(registerProvider, refresh, ['Model-A', 'Model-B'])
+  })
+
+  it('跃迁②：工厂期 never-seen（缓存缺失）→ 缓存出现且 fresh → tick 内注册', async () => {
+    const { refresh, registerProvider } = startWithFakeCtx()
+    expect(registerProvider).not.toHaveBeenCalled()
+
+    await tickOnce() // 首拍：缓存持续缺失 = 非变化信号
+    expect(refresh).not.toHaveBeenCalled()
+
+    seedCatalogPinned(MTIME_T1) // absent → present
+    await tickOnce()
+    expectReconciledThenRefreshed(registerProvider, refresh, ['Model-A'])
+  })
+
+  it('跃迁③：工厂期损坏（R2 跳过注入）→ 文件修复 → tick 内重建注入，无需重开会话', async () => {
+    writeFileSync(TAiji_CACHE_PATH(), '{ not json')
+    utimesSync(TAiji_CACHE_PATH(), MTIME_T0, MTIME_T0)
+    const { refresh, registerProvider } = startWithFakeCtx()
+    expect(registerProvider).not.toHaveBeenCalled()
+    expect(loggerMocks.warn).toHaveBeenCalledWith(expect.stringContaining('catalog cache corrupt'))
+
+    await tickOnce() // 首拍：损坏文件 mtime 未变，无动作
+    expect(refresh).not.toHaveBeenCalled()
+
+    seedCatalogPinned(MTIME_T1) // 修复（设置页目录刷新重写 / 手工修复）
+    await tickOnce()
+    expectReconciledThenRefreshed(registerProvider, refresh, ['Model-A'])
+  })
+
+  it('对照：既有 models.json/auth.json 变化但目录缓存未变 → 刷新但不触发对账（无新注册）', async () => {
+    seedExpiredPinned(MTIME_T0)
+    const { refresh, registerProvider } = startWithFakeCtx()
+    await tickOnce() // 首拍建基线
+
+    // 仅 auth.json 出现（absent → present）→ 既有两条目的刷新路径
+    writeFileSync(join(agentDir, 'auth.json'), '{}')
+    await tickOnce()
+    expectRefreshedOnce(refresh)
+    // 目录缓存 mtime 未变 → 三态不可能变化 → 不对账；expired 的 provider 仍不注册
+    expect(registerProvider).not.toHaveBeenCalled()
   })
 
   it('R1：env 无数据目录 → 工厂期零注册，tick 也不因目录缓存刷新', async () => {

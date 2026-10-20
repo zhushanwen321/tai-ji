@@ -22,28 +22,36 @@
  *   监视条目（`createOverlayCacheWatcher`，绝对路径 + mtime 比较），其基线在
  *   **工厂期播种**（`injectCatalogOverlay` 在 runPass 之前捕获 mtime 传入）——
  *   「工厂期注入 → tick 1」约 2s 窗内的缓存变更必须可检出，否则运行中窗口在该
- *   窗口断裂且此后 mtime 稳定即永不重检。
+ *   窗口断裂且此后 mtime 稳定即永不重检。钩子只覆盖**已注册**的 provider（pi-ai
+ *   `ModelsStore.refresh` 只刷新带 `refreshModels` 的 provider），故 tick 检出变化后
+ *   先经 `reconcile` 做一次**注册对账**：对本拍 fresh 且尚未注册的 provider 补
+ *   `registerProvider`（挂同一钩子）——覆盖「工厂期 expired / never-seen / 损坏 →
+ *   运行中变 fresh」的跃迁；工厂返回后的注册直连注册表立即生效、无需 /reload（PS-87）。
  *
  * 失败路径映射（设计 §3.1 R1-R7，全部 fail-safe 降级不抛错）：
  * - R1 无 `TAIJI_AGENT_DATA_DIR`（原生 pi 用户）→ 入口返回 null，零文件访问、零注册；
- * - R2 缓存缺失记 debug / 损坏或不可读记 warn，两分支都按 never-seen 跳过注入；
+ * - R2 缓存缺失记 debug / 损坏或不可读记 warn，两分支都按 never-seen 跳过注入；文件
+ *   恢复后下一拍 tick 的注册对账重建注入（恢复路径不依赖重开会话）；
  * - R3 fresh 条目缺 `api`/`baseUrl` 且同 id 无内置定义可继承 → 判据层已滤并回传
  *   `skipped`，本模块负责 warn 日志（保守档：只认同 id 继承，不从任意同 provider
  *   模型继承——兜底继承到的端点语义未经上游目录声明）；
  * - R4 `registerProvider` 抛错（结构校验失败）→ 捕获 + error 日志（含 pi 原文与
- *   恢复动作）+ 不阻断其他 provider 的注入；
+ *   恢复动作）+ 不阻断其他 provider 的注入；失败的 provider 不入已注册集，缓存下次
+ *   重写后的对账自动重试；
  * - R5 expired（含远端 404/501 落盘的否定信号）与 never-seen 不注入 + debug；
  * - R6 钩子对非 fresh 态返回纯内置基线（等价撤销注入）；
  * - R7 钩子运行期任一份缓存损坏/不可读 → warn + 返回 undefined。
  *
- * R2 与 R7 对「损坏」的处置**有意不同**：注册期没有已注入的集合可保，损坏即降级为
- * never-seen（不注入）；运行期有注入在，损坏按 R7 保留最后一份好快照。同一份文件
- * 在生命周期两端的风险面不同，不是双轨判据。
+ * R2 与 R7 对「损坏」的处置**有意不同**：注册侧（工厂期与运行中对账）对尚未注册的
+ * provider 没有已注入的集合可保，损坏即降级为 never-seen（不注入）；已注册的 provider
+ * 在运行期有注入在，损坏按 R7 由钩子保留最后一份好快照。同一份文件对两类 provider 的
+ * 风险面不同，不是双轨判据。
  *
- * 文件读取用同步 API（`readFileSync`/`statSync`）：注册必须发生在**同步的工厂
+ * 文件读取用同步 API（`readFileSync`/`statSync`）：工厂期注册必须发生在**同步的工厂
  * 函数体内**——pi 的 pending 队列在全部工厂返回后统一 flush，异步化会把注册推到
- * flush 之后，D1 的时机前提即失效；且两份缓存都是 KB 级小文件、读取频率 ≤ 每 2s
- * 一拍，与写入方 runtime `provider-catalog-refresh.ts` 的同款同步读一致。
+ * flush 之后，D1 的时机前提即失效（运行中对账已过 flush 期，走 post-bind 直连路径，
+ * 同步读在此只是沿用）；且两份缓存都是 KB 级小文件、读取频率 ≤ 每 2s 一拍，与写入方
+ * runtime `provider-catalog-refresh.ts` 的同款同步读一致。
  *
  * 日志通道 = `@zhushanwen/pi-extension-logger` 的 `provider-live-sync` 具名
  * singleton（`getLogger` 按名缓存，与 src/index.ts 是同一实例）——warn/error 落
@@ -342,7 +350,96 @@ function sameObservation(previous: MtimeObservation | undefined, current: MtimeO
   return previous.state === current.state;
 }
 
+// ──────────────────────── 注册执行 ────────────────────────
+
+/**
+ * 把一个 fresh 态 provider 注入 pi 注册表（工厂期循环与运行中对账共用的单 provider
+ * 注册体）：R3 的 skipped warn 与 R4 的抛错捕获都在此；注册成功才入 `state.registered`
+ * （失败的 provider 留在未注册集，缓存下次重写后的对账自动重试）。返回是否注册成功。
+ */
+function registerFreshProvider(
+  pi: ExtensionAPI,
+  state: BridgeState,
+  providerId: string,
+  result: ComputeInjectionSetResult,
+): boolean {
+  for (const skipped of result.skipped) {
+    // R3：缺 api/baseUrl 且同 id 无内置定义可继承（判据层已滤，此处只负责日志）
+    logger.warn(
+      `catalog overlay model skipped: ${providerId}/${skipped.modelId} is missing api or baseUrl `
+      + "and has no same-id builtin model to inherit from — waiting for the next catalog refresh "
+      + "to bring complete data",
+    );
+  }
+  try {
+    pi.registerProvider(providerId, {
+      models: toProviderModels(result.models),
+      // 断言理由见 `RefreshModelsFn` 的类型注释：pi 声明不收 undefined，实装收（R7 靠它）
+      refreshModels: makeRefreshModels(state, providerId) as ProviderConfig["refreshModels"],
+    });
+    state.registered.add(providerId);
+    logger.debug(
+      `catalog overlay injected for ${providerId}: ${result.models.length} models `
+      + "(builtin baseline ⊕ cache, state=fresh)",
+    );
+    return true;
+  } catch (err) {
+    // R4：结构校验失败等——不阻断其他 provider 的注入
+    const message = err instanceof Error ? err.message : String(err);
+    logger.error(
+      `registerProvider failed for ${providerId}: ${message} — the provider keeps pi's current `
+      + `behavior; fix the catalog data source (${state.taijiPath}) — the next catalog refresh `
+      + "retries the registration automatically, or restart the session to retry",
+    );
+    return false;
+  }
+}
+
+/**
+ * 对一拍计算结果中**尚未注册**的 provider 执行注入判定：fresh → 注册（挂钩子）；
+ * 非 fresh → R5 debug 不注入。已注册的 provider 由其 `refreshModels` 钩子负责（R6/R7），
+ * 此处跳过。工厂期（已注册集为空）与运行中对账共用。返回是否有新注册。
+ */
+function injectUnregistered(
+  pi: ExtensionAPI,
+  state: BridgeState,
+  results: Map<string, ComputeInjectionSetResult>,
+): boolean {
+  let registered = false;
+  for (const [providerId, result] of results) {
+    if (state.registered.has(providerId)) continue;
+    if (result.state !== "fresh") {
+      // R5：过期（含远端 404/501 的否定信号）与从未见过都不注入——凭空造模型禁止
+      logger.debug(
+        `catalog overlay not injected for ${providerId}: state=${result.state} — `
+        + "falling back to pi's builtin behavior",
+      );
+      continue;
+    }
+    if (registerFreshProvider(pi, state, providerId, result)) registered = true;
+  }
+  return registered;
+}
+
 // ──────────────────────── 入口 ────────────────────────
+
+/** 工厂期入口的返回值：第三个监视条目的观测器 + 运行中窗口的注册对账入口（tick 挂载用）。 */
+export type CatalogOverlayBridge = {
+  /** 第三个监视条目的观测器（provider-live-sync 既有 tick 每拍调用一次）。 */
+  readonly watcher: OverlayCacheWatcher;
+  /**
+   * 注册对账（tick 检出目录缓存变化后、触发刷新之前调用一次）：重算单拍，对
+   * state=fresh 且尚未注册的 provider 补 `registerProvider`（挂同一 `refreshModels` 钩子）。
+   *
+   * 覆盖「工厂期 expired / never-seen / 损坏 → 运行中变 fresh」的跃迁——pi-ai
+   * `ModelsStore.refresh` 只刷新带 `refreshModels` 的 provider，没有钩子的 provider 单靠
+   * 刷新永远重建不了注入。工厂返回后的 `registerProvider` 直连注册表立即生效（PS-87）。
+   *
+   * 返回本次是否有新注册。read-failed 拍不动作：未注册的 provider 没有注入可建（R2 同款，
+   * 读取层已记 warn），已注册的由各自钩子按 R7 保留。
+   */
+  reconcile(): boolean;
+};
 
 /**
  * 工厂期目录投喂入口（设计 D1）。
@@ -350,11 +447,12 @@ function sameObservation(previous: MtimeObservation | undefined, current: MtimeO
  * 在扩展工厂函数体内**同步**完成注册：pi 的 `registerProvider` 在加载期只进
  * pending 队列，装配链在 `--model` 解析之前统一 flush + 本地 refresh（PS-81）。
  *
- * 返回值 = 第三个监视条目的观测器（供 provider-live-sync 既有 tick 挂载）；
+ * 返回值 = 第三个监视条目的观测器 + 运行中窗口的注册对账入口（供 provider-live-sync
+ * 既有 tick 挂载：每拍 `watcher.observe()`，检出变化先 `reconcile()` 再刷新）；
  * R1（`TAIJI_AGENT_DATA_DIR` 缺失 = 非 taiji 托管环境）返回 null——调用方整条
  * 跳过，零文件访问、零注册，该 provider 自然落 never-seen、上层零投喂。
  */
-export function injectCatalogOverlay(pi: ExtensionAPI): OverlayCacheWatcher | null {
+export function injectCatalogOverlay(pi: ExtensionAPI): CatalogOverlayBridge | null {
   const taijiPath = getTaijiOverlayCachePath();
   if (taijiPath === null) return null; // R1：原生 pi 用户的 pass-through 设计态
   const storePath = getPiStorePath();
@@ -368,49 +466,17 @@ export function injectCatalogOverlay(pi: ExtensionAPI): OverlayCacheWatcher | nu
   const initialObservation = observeMtime(taijiPath);
 
   const outcome = runPass(state);
-  if (outcome.status === "read-failed") {
-    // R2 的损坏/不可读分支：本次不注入；监视条目照挂，但无 provider 注册即无
-    // refreshModels 钩子——文件恢复后 tick 的刷新重建不了注入，恢复路径 = 下次会话
-    // 启动重读（设计 §3.1 R2）
-    return createOverlayCacheWatcher(taijiPath, initialObservation);
-  }
+  // R2 的损坏/不可读分支（read-failed）：本次不注入——没有已注入的集合可保。监视条目与
+  // 对账入口照样返回：文件修复后 mtime 变化，下一拍 tick 的 reconcile 重建注入，不依赖
+  // 重开会话（设计 §3.1 R2）
+  if (outcome.status === "ok") injectUnregistered(pi, state, outcome.results);
 
-  for (const [providerId, result] of outcome.results) {
-    if (result.state !== "fresh") {
-      // R5：过期（含远端 404/501 的否定信号）与从未见过都不注入——凭空造模型禁止
-      logger.debug(
-        `catalog overlay not injected for ${providerId}: state=${result.state} — `
-        + "falling back to pi's builtin behavior",
-      );
-      continue;
-    }
-    for (const skipped of result.skipped) {
-      // R3：缺 api/baseUrl 且同 id 无内置定义可继承（判据层已滤，此处只负责日志）
-      logger.warn(
-        `catalog overlay model skipped: ${providerId}/${skipped.modelId} is missing api or baseUrl `
-        + "and has no same-id builtin model to inherit from — waiting for the next catalog refresh "
-        + "to bring complete data",
-      );
-    }
-    try {
-      pi.registerProvider(providerId, {
-        models: toProviderModels(result.models),
-        // 断言理由见 `RefreshModelsFn` 的类型注释：pi 声明不收 undefined，实装收（R7 靠它）
-        refreshModels: makeRefreshModels(state, providerId) as ProviderConfig["refreshModels"],
-      });
-      state.registered.add(providerId);
-      logger.debug(
-        `catalog overlay injected for ${providerId}: ${result.models.length} models `
-        + "(builtin baseline ⊕ cache, state=fresh)",
-      );
-    } catch (err) {
-      // R4：结构校验失败等——不阻断其他 provider 的注入
-      const message = err instanceof Error ? err.message : String(err);
-      logger.error(
-        `registerProvider failed for ${providerId}: ${message} — the provider keeps pi's current `
-        + `behavior; fix the catalog data source (${taijiPath}) or restart the session to retry`,
-      );
-    }
-  }
-  return createOverlayCacheWatcher(taijiPath, initialObservation);
+  return {
+    watcher: createOverlayCacheWatcher(taijiPath, initialObservation),
+    reconcile: (): boolean => {
+      const pass = runPass(state);
+      if (pass.status === "read-failed") return false;
+      return injectUnregistered(pi, state, pass.results);
+    },
+  };
 }

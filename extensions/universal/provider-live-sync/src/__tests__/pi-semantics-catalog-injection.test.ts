@@ -1,17 +1,19 @@
 /**
- * pi 语义 guard 探针 —— 登记表 docs/pi-semantics.json 的 PS-81 ~ PS-84 + PS-86 断言。
+ * pi 语义 guard 探针 —— 登记表 docs/pi-semantics.json 的 PS-81 ~ PS-84 + PS-86 + PS-87 断言。
  *
  * PS-81 ~ PS-84 四条是 provider-catalog-sync 设计（目录投喂）最重的 pi 私有语义依赖面，
  * 方案成立全部系于它们（设计 §2.5 前提 1-4）；PS-86 是 R7 规则的承重语义（refreshModels
- * 钩子 falsy 返回=保留注入集）。pi 升级时 `scripts/check-pi-semantics.mjs` 的四包版本
- * 门禁会 fail 并列出待重验条目，本文件即重验入口——装配顺序 / 幂等语义 / 映射替换 /
- * 官方导出 / 钩子 falsy 保留任一漂移都在此变红，不依赖人读 ADR 记忆。
+ * 钩子 falsy 返回=保留注入集）；PS-87 是 D5 运行中注册对账的承重语义（扩展工厂返回后
+ * registerProvider 直连注册表立即生效）。pi 升级时 `scripts/check-pi-semantics.mjs` 的四包
+ * 版本门禁会 fail 并列出待重验条目，本文件即重验入口——装配顺序 / 幂等语义 / 映射替换 /
+ * 官方导出 / 钩子 falsy 保留 / post-bind 直连任一漂移都在此变红，不依赖人读 ADR 记忆。
  *
  * 断言分两层：
  * - **源码层**：读 pi 实装 dist 文件，断言关键语句的存在与**先后顺序**（装配链的顺序
  *   无法用单次调用观测，只能从实装推演——顺序契约本身是断言对象）。
  * - **运行时层**：对实装版 pi 真实调用（`ModelRuntime` / `createExtensionRuntime` /
- *   pi-ai 官方导出），断言返回结构与合并语义。禁 mock pi 本体——mock 掉的正是被测面。
+ *   `ExtensionRunner` / pi-ai 官方导出），断言返回结构与合并语义。禁 mock pi 本体——mock
+ *   掉的正是被测面。
  *
  * 行号锚全部基于 pi@1.0.0 实装实测（2026-10-20）。源码层断言按锚点语句内容定位
  * （lineOf / lineOfAfter）：pi bump 后纯行号漂移不断言也不红；锚点语句被改写/删除或
@@ -23,7 +25,15 @@ import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { ModelRuntime, createExtensionRuntime } from '@earendil-works/pi-coding-agent'
+import {
+  ExtensionRunner,
+  ModelRegistry,
+  ModelRuntime,
+  SessionManager,
+  createExtensionRuntime,
+  type ExtensionActions,
+  type ExtensionContextActions,
+} from '@earendil-works/pi-coding-agent'
 import {
   getBuiltinProviders,
   getBuiltinModels,
@@ -71,6 +81,7 @@ function lineOfAfter(source: string, startNeedle: string, needle: string): numbe
 
 const AGENT_SERVICES = () => readDist(PI_AGENT_DIST, 'core/agent-session-services.js')
 const LOADER = () => readDist(PI_AGENT_DIST, 'core/extensions/loader.js')
+const RUNNER = () => readDist(PI_AGENT_DIST, 'core/extensions/runner.js')
 const RESOURCE_LOADER = () => readDist(PI_AGENT_DIST, 'core/resource-loader.js')
 const MODEL_RUNTIME = () => readDist(PI_AGENT_DIST, 'core/model-runtime.js')
 const PROVIDER_COMPOSER = () => readDist(PI_AGENT_DIST, 'core/provider-composer.js')
@@ -427,5 +438,195 @@ describe('PS-86 —— refreshModels 钩子 falsy 返回=保留注入集（R7 �
       'applyExtension(providerId, applyModelsJson(providerId, getAllProviderModels(base), config), {',
     )
     expect(publishLine, '发布分支内的 applyExtension 缺失').toBeGreaterThan(branchLine)
+  })
+})
+
+// ─────────────────────────────────────────────────────────────────────
+describe('PS-87 —— 扩展工厂返回后 registerProvider 直连注册表立即生效（D5 注册对账承重）', () => {
+  /** 无内置基线的合成 provider：注册前可见集合恒空，注册后出现即「立即生效」的直接证据。 */
+  const SYNTHETIC = 'no-such-catalog-provider'
+
+  /** 合成 provider 的完整模型定义（克隆一条内置模型换 id，api/baseUrl 齐全、过结构校验）。 */
+  function syntheticModel(id: string) {
+    return { ...getBuiltinModels(PROVIDER)[0], id, name: id }
+  }
+
+  /**
+   * bindCore 的两组回调桩：bindCore 只是把它们拷进 runtime（runner.js bindCore 开头的逐字段
+   * 赋值），本探针不触发任何会话动作，故一律用抛错桩——被意外调用即红，而不是静默假绿。
+   */
+  const notBound = (): never => {
+    throw new Error('probe stub: session action must not be invoked by registerProvider')
+  }
+  const actions: ExtensionActions = {
+    sendMessage: notBound,
+    sendUserMessage: notBound,
+    appendEntry: notBound,
+    setSessionName: notBound,
+    getSessionName: notBound,
+    setLabel: notBound,
+    getActiveTools: notBound,
+    getAllTools: notBound,
+    getSettings: notBound,
+    setActiveTools: notBound,
+    refreshTools: notBound,
+    getCommands: notBound,
+    setModel: notBound,
+    getThinkingLevel: notBound,
+    setThinkingLevel: notBound,
+  }
+  const contextActions: ExtensionContextActions = {
+    getModel: notBound,
+    getScopedModels: notBound,
+    isIdle: notBound,
+    isProjectTrusted: notBound,
+    getSignal: notBound,
+    abort: notBound,
+    hasPendingMessages: notBound,
+    shutdown: notBound,
+    getContextUsage: notBound,
+    compact: notBound,
+    getSystemPrompt: notBound,
+  }
+
+  /** 真实装配骨架：扩展 runtime + 真实 ModelRuntime + ExtensionRunner（与 agent-session.js 同形态：ModelRegistry 包装 ModelRuntime）。 */
+  async function newRunnerSetup() {
+    const runtime = createExtensionRuntime()
+    const rt = await newRuntime()
+    const runner = new ExtensionRunner([], runtime, tmpDir, SessionManager.inMemory(tmpDir), new ModelRegistry(rt))
+    return { runtime, rt, runner }
+  }
+
+  it('运行时层：bindCore 前排队不可见；bindCore flush 后可见；bindCore 后再注册立即可见且不再排队', async () => {
+    const { runtime, rt, runner } = await newRunnerSetup()
+
+    // 工厂期形态（pre-bind）：只排队，注册表不动——PS-81 的「工厂期进 pending 队列」在此做对照
+    runtime.registerProvider(SYNTHETIC, { models: [syntheticModel('Factory-Model')] })
+    expect(runtime.pendingProviderRegistrations).toHaveLength(1)
+    expectVisibleIds(rt, SYNTHETIC, [])
+
+    // bindCore（无 providerActions → 直连 modelRegistry，runner.js :314 分支）：flush 工厂期队列
+    runner.bindCore(actions, contextActions)
+    expect(runtime.pendingProviderRegistrations).toEqual([])
+    expectVisibleIds(rt, SYNTHETIC, ['Factory-Model'])
+
+    // post-bind 形态（provider-live-sync 运行中注册对账走的路径）：同步调用返回即可见，
+    // 不进队列、不等任何 refresh / reload——catalog-bridge reconcile 对「工厂期 never-seen →
+    // 运行中变 fresh」补注册依赖的正是这一点
+    runtime.registerProvider(SYNTHETIC, { models: [syntheticModel('Factory-Model'), syntheticModel('Post-Bind-Model')] })
+    expect(runtime.pendingProviderRegistrations).toEqual([])
+    expectVisibleIds(rt, SYNTHETIC, ['Factory-Model', 'Post-Bind-Model'])
+  })
+
+  it('运行时层：post-bind 注册一个全新 provider（工厂期从未注册过）同样立即可见', async () => {
+    const { runtime, rt, runner } = await newRunnerSetup()
+    runner.bindCore(actions, contextActions)
+    expectVisibleIds(rt, SYNTHETIC, [])
+
+    runtime.registerProvider(SYNTHETIC, { models: [syntheticModel('Late-Joiner')] })
+    expectVisibleIds(rt, SYNTHETIC, ['Late-Joiner'])
+    // 与 PS-82 一致：带 refreshModels 钩子的注册同样立即落表（对账注册携带钩子的形态）
+    runtime.registerProvider(SYNTHETIC, { refreshModels: async () => undefined })
+    expect(typeof rt.getRegisteredProviderConfig(SYNTHETIC)?.refreshModels).toBe('function')
+    expectVisibleIds(rt, SYNTHETIC, ['Late-Joiner'])
+  })
+
+  it('运行时层：生产形态的 providerActions.registerProvider 分支（agent-session.js 第三参）同步直达同一 ModelRuntime', async () => {
+    const { runtime, rt, runner } = await newRunnerSetup()
+    let viaProviderActions = 0
+    runner.bindCore(actions, contextActions, {
+      registerProvider: (name, config) => {
+        viaProviderActions += 1
+        rt.registerProvider(name, config)
+      },
+    })
+
+    runtime.registerProvider(SYNTHETIC, { models: [syntheticModel('Via-Actions')] })
+    expect(viaProviderActions).toBe(1)
+    expectVisibleIds(rt, SYNTHETIC, ['Via-Actions'])
+  })
+
+  it('运行时层：post-bind 注册的结构校验同步抛错且不污染注册表（catalog-bridge R4 在运行中对账期可捕获）', async () => {
+    const { runtime, rt, runner } = await newRunnerSetup()
+    runner.bindCore(actions, contextActions)
+
+    // 工厂期同样的坏入参被 bindCore flush 时只进 emitError 不抛回扩展；post-bind 直连则同步抛——
+    // 这正是 reconcile 复用 R4 try/catch 的依据
+    expect(() =>
+      runtime.registerProvider(SYNTHETIC, {
+        models: [
+          {
+            id: 'No-Api',
+            name: 'No-Api',
+            input: ['text'],
+            cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
+            reasoning: false,
+            contextWindow: 1,
+            maxTokens: 1,
+          },
+        ],
+      }),
+    ).toThrow(/no "api" specified/)
+    expect(rt.getRegisteredProviderConfig(SYNTHETIC)).toBeUndefined()
+    expectVisibleIds(rt, SYNTHETIC, [])
+  })
+
+  it('源码层：bindCore 在 flush pending 队列之后把 runtime.registerProvider 替换为直连 modelRegistry', () => {
+    const src = RUNNER()
+    const bindLine = lineOf(src, 'bindCore(actions, contextActions, providerActions) {')
+    expect(bindLine).toBeGreaterThan(0)
+    const flushLine = lineOfAfter(src, 'bindCore(actions, contextActions, providerActions) {', 'this.runtime.pendingProviderRegistrations = [];')
+    const commentLine = lineOfAfter(
+      src,
+      'bindCore(actions, contextActions, providerActions) {',
+      '// From this point on, provider registration/unregistration takes effect immediately',
+    )
+    const rebindLine = lineOfAfter(src, 'bindCore(actions, contextActions, providerActions) {', 'this.runtime.registerProvider = (name, config) => {')
+    const directLine = lineOfAfter(src, 'this.runtime.registerProvider = (name, config) => {', 'this.modelRegistry.registerProvider(name, config);')
+    expect(flushLine, 'bindCore 内 pending 队列清空缺失').toBeGreaterThan(bindLine)
+    expect(commentLine, '「takes effect immediately」注释缺失——post-bind 立即生效的契约陈述被改写').toBeGreaterThan(flushLine)
+    expect(rebindLine, 'bindCore 内 runtime.registerProvider 的 post-bind 替换缺失').toBeGreaterThan(commentLine)
+    expect(directLine, 'post-bind registerProvider 直连 modelRegistry.registerProvider 缺失').toBeGreaterThan(rebindLine)
+  })
+
+  it('源码层：loader 的 applyRuntimeChange 非 loading 态直接执行；api.registerProvider 经它转发；commit 置 active', () => {
+    const src = LOADER()
+    const stateLine = lineOf(src, 'let state = "loading";')
+    const applyLine = lineOf(src, 'const applyRuntimeChange = (change) => {')
+    const queueLine = lineOfAfter(src, 'const applyRuntimeChange = (change) => {', 'pendingRuntimeChanges.push(change);')
+    const directLine = lineOfAfter(src, 'pendingRuntimeChanges.push(change);', 'change();')
+    expect(stateLine).toBeGreaterThan(0)
+    expect(applyLine, 'applyRuntimeChange 缺失').toBeGreaterThan(stateLine)
+    expect(queueLine, 'loading 态排队分支缺失').toBeGreaterThan(applyLine)
+    expect(directLine, '非 loading 态直接执行分支缺失').toBeGreaterThan(queueLine)
+
+    const apiLine = lineOf(src, 'registerProvider(providerOrName, config) {')
+    const forwardLine = lineOfAfter(
+      src,
+      'registerProvider(providerOrName, config) {',
+      'applyRuntimeChange(() => runtime.registerProvider(providerOrName, config, extension.path));',
+    )
+    expect(apiLine, 'api.registerProvider 缺失').toBeGreaterThan(applyLine)
+    expect(forwardLine, 'api.registerProvider 未经 applyRuntimeChange 转发').toBeGreaterThan(apiLine)
+
+    const commitLine = lineOf(src, 'commit: () => {')
+    const replayLine = lineOfAfter(src, 'commit: () => {', 'for (const apply of pendingRuntimeChanges)')
+    const activeLine = lineOfAfter(src, 'commit: () => {', 'state = "active";')
+    expect(commitLine, 'commit 缺失').toBeGreaterThan(apiLine)
+    expect(replayLine, 'commit 内回放 pendingRuntimeChanges 缺失').toBeGreaterThan(commitLine)
+    expect(activeLine, 'commit 内 state = "active" 缺失').toBeGreaterThan(replayLine)
+  })
+
+  it('源码层：ModelRuntime.registerProvider 体内 recomposeProvider → updateModelSnapshot（注册即进可见快照）', () => {
+    const src = MODEL_RUNTIME()
+    const start = 'registerProvider(providerId, config) {'
+    const registerLine = lineOf(src, start)
+    const unregisterLine = lineOf(src, 'unregisterProvider(providerId) {')
+    const recomposeLine = lineOfAfter(src, start, 'this.recomposeProvider(providerId);')
+    const snapshotLine = lineOfAfter(src, start, 'this.updateModelSnapshot();')
+    expect(registerLine).toBeGreaterThan(0)
+    expect(recomposeLine, 'registerProvider 体内 recomposeProvider 缺失').toBeGreaterThan(registerLine)
+    expect(snapshotLine, 'registerProvider 体内 updateModelSnapshot 缺失').toBeGreaterThan(recomposeLine)
+    expect(snapshotLine, '快照更新应在 registerProvider 函数体内').toBeLessThan(unregisterLine)
   })
 })

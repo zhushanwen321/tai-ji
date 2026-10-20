@@ -24,8 +24,11 @@
  * 近似回退等 8 个同根因症状）。注册发生在**工厂函数体内**（pi 内部进 pending 队列，
  * 装配链在 `--model` 解析之前统一 flush），运行中窗口由本扩展既有的轮询 tick 承载：
  * 该缓存文件作为**第三个监视条目**挂进 tick（绝对路径 + mtime 比较，与既有两条目的
- * 内容字节比较正交），检出变化即触发同一次零网络刷新，由注册时携带的
- * `refreshModels` 钩子重读缓存返回新并集。实装在 `src/catalog-bridge.ts`。
+ * 内容字节比较正交），检出变化先做一次**注册对账**（`reconcile`：对本拍 fresh 且尚未
+ * 注册的 provider 补 `registerProvider`——工厂期 expired / never-seen / 损坏的 provider
+ * 没有 `refreshModels` 钩子，pi 的刷新不会碰它，单靠刷新重建不了注入；工厂返回后的注册
+ * 直连注册表立即生效，PS-87），再触发同一次零网络刷新，由注册时携带的 `refreshModels`
+ * 钩子重读缓存返回新并集。实装在 `src/catalog-bridge.ts`。
  *
  * 设计取舍（行为语义以本头注释为权威；包定位与投喂写入单点见根 AGENTS.md 的
  * provider-live-sync 括注与 constraints.json 约束 C-ext-31；术语见 docs/CONTEXT.md
@@ -58,7 +61,7 @@ import { join } from "node:path";
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { getAgentDir } from "@earendil-works/pi-coding-agent";
 import { getLogger, setPiHandle } from "@zhushanwen/pi-extension-logger";
-import { injectCatalogOverlay, type OverlayCacheWatcher } from "./catalog-bridge.ts";
+import { injectCatalogOverlay, type CatalogOverlayBridge } from "./catalog-bridge.ts";
 
 /** 轮询周期（ms）。设计标定：内容变更到生效的上界 ≈ 2s，小于「保存 → 切回会话 → 点选」的人工时延。 */
 export const POLL_INTERVAL_MS = 2_000;
@@ -259,9 +262,10 @@ function logMissingTransitions(missingLogged: Set<WatchedFile>, missingFiles: Wa
  */
 function mergeOverlayChange(
   decision: SyncDecision,
-  overlayWatcher: OverlayCacheWatcher | null,
+  overlayBridge: CatalogOverlayBridge | null,
 ): { changed: string[]; overlayChanged: string | null } {
-  const overlayChanged = overlayWatcher !== null && overlayWatcher.observe() ? overlayWatcher.label : null;
+  const overlayChanged =
+    overlayBridge !== null && overlayBridge.watcher.observe() ? overlayBridge.watcher.label : null;
   const changed: string[] = decision.action === "refresh" ? [...decision.changedFiles] : [];
   if (overlayChanged !== null) changed.push(overlayChanged);
   return { changed, overlayChanged };
@@ -286,8 +290,8 @@ export default function providerLiveSync(pi: ExtensionAPI): void {
   setPiHandle(pi);
   // 目录投喂（设计 D1）：必须在同步的工厂体内完成——pi 的 pending 队列在全部工厂返回后
   // 统一 flush，晚于 `--model` 解析就覆盖不了 spawn 近似回退。返回 null = 非 taiji 托管
-  // 环境（R1），第三个监视条目整条不挂。
-  const overlayWatcher: OverlayCacheWatcher | null = injectCatalogOverlay(pi);
+  // 环境（R1），第三个监视条目与注册对账整条不挂。
+  const overlayBridge: CatalogOverlayBridge | null = injectCatalogOverlay(pi);
   const snapshot: Snapshot = { baselines: new Map(), initialized: false, suppressed: new Set() };
   /** ctx 每次 session_start 重新捕获（pi 可能换实例；未就绪时本拍跳过且不推进基线）。 */
   let ctx: ExtensionContext | null = null;
@@ -321,7 +325,7 @@ export default function providerLiveSync(pi: ExtensionAPI): void {
       }
       for (const file of WATCHED_FILES) missingLogged.delete(file);
 
-      const { changed, overlayChanged } = mergeOverlayChange(decision, overlayWatcher);
+      const { changed, overlayChanged } = mergeOverlayChange(decision, overlayBridge);
       if (changed.length === 0) return;
       // 首个基线拍不刷新（进程启动时 pi 已按磁盘配置建过快照，重复刷新纯浪费）——该前提
       // 只对既有 models.json/auth.json 两条目成立：pi spawn 时按磁盘建快照读的是它们。
@@ -329,6 +333,12 @@ export default function providerLiveSync(pi: ExtensionAPI): void {
       // （基线工厂期播种），「工厂期注入 → tick 1」约 2s 窗内的缓存变更必须刷新，否则
       // 运行中窗口（设计 D5）在该窗口断裂且此后 mtime 稳定即永不重检。
       if (firstBaseline && overlayChanged === null) return;
+
+      // 目录缓存变化先做注册对账（D5）：工厂期 expired / never-seen / 损坏的 provider 没有
+      // refreshModels 钩子，pi 的 refresh 只刷新带钩子的 provider（pi-ai refreshable 过滤），
+      // 单靠下面的刷新重建不了注入——对本拍 fresh 且尚未注册的 provider 先补注册（post-bind
+      // registerProvider 直连注册表立即生效，PS-87），再刷新让已注册 provider 的钩子重读。
+      if (overlayBridge !== null && overlayChanged !== null) overlayBridge.reconcile();
 
       logger.debug(`config change detected (${changed.join(", ")}) → refreshing model snapshot`);
       await refreshAndReport(currentCtx.modelRegistry);

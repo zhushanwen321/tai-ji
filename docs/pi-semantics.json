@@ -1852,5 +1852,40 @@
       "test": "extensions/universal/provider-live-sync/src/__tests__/pi-semantics-catalog-injection.test.ts"
     },
     "verifiedWith": "1.0.0"
+  },
+  {
+    "id": "PS-87",
+    "claim": "D5 注册对账承重（post-bind registerProvider 立即生效）：pi 1.0.0 扩展工厂返回后（loader 的 createExtensionAPI commit 置 state=active、Runner.bindCore 完成 pending 队列 flush），扩展再调 pi.registerProvider(name, config) 走直连路径——loader 的 applyRuntimeChange 在非 loading 态直接执行 change()，runtime.registerProvider 已被 bindCore 替换为直调 modelRegistry.registerProvider（有 providerActions 时经 agent-session 的 _modelRuntime.registerProvider + _refreshCurrentModelFromRegistry），ModelRuntime.registerProvider 同步校验 → 落 extensionProviders → recomposeProvider + updateModelSnapshot（注册即进可见快照，无需 /reload）→ 尾随一次 allowNetwork:false 本地 refresh。provider-live-sync 的运行中注册对账（catalog-bridge reconcile：工厂期 expired / never-seen / 损坏的 provider 在缓存变 fresh 后于 tick 内补注册）依赖此语义——没有 refreshModels 钩子的 provider 不在 pi-ai refreshable 过滤集内，单靠 refresh 永远重建不了注入。若 pi 改为运行期注册也需 /reload 或重新排队到下次装配，对账注册静默不生效，须改为触发 ctx.reload 或退回「下次会话」恢复路径并同步文档承诺",
+    "piAnchor": [
+      {
+        "pkg": "pi-coding-agent",
+        "distPath": "dist/core/extensions/runner.js",
+        "symbol": "ExtensionRunner.bindCore 对 runtime.registerProvider 的 post-bind 替换",
+        "note": ":208 bindCore(actions, contextActions, providerActions)；:248-267 flush 工厂期 pending 队列（:255 this.modelRegistry.registerProvider(name, config)）；:307-308 注释「From this point on, provider registration/unregistration takes effect immediately without requiring a /reload.」；:309 this.runtime.registerProvider = (name, config) => {（替换 pre-bind 的排队实现）→ :314 this.modelRegistry.registerProvider(name, config)（无 providerActions 时直连）【行号锚基于 pi@1.0.0 实装实测】"
+      },
+      {
+        "pkg": "pi-coding-agent",
+        "distPath": "dist/core/extensions/loader.js",
+        "symbol": "createExtensionAPI 的 applyRuntimeChange / commit / api.registerProvider",
+        "note": ":193 let state = \"loading\"；:200 const applyRuntimeChange = (change) => {（:201-202 loading 态入 pendingRuntimeChanges；:204 否则直接 change()）；:357 api.registerProvider(providerOrName, config) → :362 applyRuntimeChange(() => runtime.registerProvider(providerOrName, config, extension.path))；:428 commit → :436 回放 pendingRuntimeChanges → :438 state = \"active\"（工厂返回后 api 调用即走直连）【行号锚基于 pi@1.0.0 实装实测】"
+      },
+      {
+        "pkg": "pi-coding-agent",
+        "distPath": "dist/core/model-runtime.js",
+        "symbol": "ModelRuntime.registerProvider（同步校验 + 注册即进可见快照）",
+        "note": ":656 registerProvider(providerId, config) → 同步 validateExtensionProvider（失败抛错不触碰 stored config）→ extensionProviders.set → :670 this.recomposeProvider(providerId) → :671 this.updateModelSnapshot()（getModels / getAvailableSnapshot 立即含新 provider）→ 尾随 void this.refresh({ allowNetwork: false })【行号锚基于 pi@1.0.0 实装实测】"
+      },
+      {
+        "pkg": "pi-coding-agent",
+        "distPath": "dist/core/agent-session.js",
+        "symbol": "生产装配的 providerActions.registerProvider（bindCore 第三参）",
+        "note": ":2751 this._modelRuntime.registerProvider(name, config) → :2752 this._refreshCurrentModelFromRegistry()（生产形态经 providerActions 直达同一 ModelRuntime.registerProvider，语义与无 providerActions 的直连一致）；:2884 new ExtensionRunner(..., new ModelRegistry(this._modelRuntime))【行号锚基于 pi@1.0.0 实装实测】"
+      }
+    ],
+    "guard": {
+      "type": "probe",
+      "test": "extensions/universal/provider-live-sync/src/__tests__/pi-semantics-catalog-injection.test.ts"
+    },
+    "verifiedWith": "1.0.0"
   }
 ]
