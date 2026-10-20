@@ -173,9 +173,11 @@ describe('ActivityStrip · 四类状态各自渲染（P1）', () => {
       executingBash: { command: 'pnpm test', startedAt: Date.now() },
     })
     await wrapper.find('[data-testid="activity-strip-text-bash"]').trigger('pointerenter')
-    await new Promise((r) => setTimeout(r, 260))
-    const detailBody = document.querySelector('[data-testid="activity-strip-detail-body-bash"]')
-    expect(detailBody?.textContent).toBe('pnpm test')
+    // vi.waitFor 轮询断言（替代固定 260ms 盲等）：HoverCard open-delay（150ms）+ portal 渲染
+    // 完成即通过，CPU 忙时自适应延长，不赌固定余量
+    await vi.waitFor(() => {
+      expect(document.querySelector('[data-testid="activity-strip-detail-body-bash"]')?.textContent).toBe('pnpm test')
+    })
     expect(document.querySelector('[data-testid="activity-strip-detail-bash"]')?.textContent).toContain(
       t('panel.message.bashCommandLabel'),
     )

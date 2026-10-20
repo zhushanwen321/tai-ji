@@ -43,7 +43,7 @@ afterEach(() => {
   rmSync(dataDir, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 });
 });
 
-function makeEngine(): { engine: RemoteEngine; dispose: () => Promise<void> } {
+function makeEngine(): { engine: RemoteEngine; client: EngineClient; dispose: () => Promise<void> } {
   const client = new EngineClient({
     engineId: "fake",
     command: process.execPath,
@@ -61,12 +61,12 @@ function makeEngine(): { engine: RemoteEngine; dispose: () => Promise<void> } {
     dataDir,
     hostKind: "test",
   });
-  return { engine, dispose: () => engine.dispose() };
+  return { engine, client, dispose: () => engine.dispose() };
 }
 
 describe("conformance C4：abort 行为（协议黑盒：cancel 帧 + 引擎收敛）", () => {
   it("挂起 run 中 abort → cancel 帧送达 → 引擎窗口内收敛终态，run 正常 resolve（不悬挂）", async () => {
-    const { engine, dispose } = makeEngine();
+    const { engine, client, dispose } = makeEngine();
     try {
       const controller = new AbortController();
       const events: AgentEvent[] = [];
@@ -85,10 +85,16 @@ describe("conformance C4：abort 行为（协议黑盒：cancel 帧 + 引擎收�
         model: "fake/fake-1",
         cwd: dataDir,
       };
+      // 推进到 run 受理再 abort——abort 先于受理会走 pre-aborted 短路面（cancel 帧
+      // 先于 run 帧写入，覆盖不到 cancel 收敛），确定性推进两步：
+      // ① 预建连接（真实信号：spawn + initialize 握手完成）；
+      await client.ensureConnected(ctx.sessionRootId);
       const runP = engine.run(task, ctx);
-      // 推进到 run 受理（fake 引擎进入 hang，poolResolved 反向帧已回）再 abort——
-      // abort 先于受理会走 pre-aborted 短路面，覆盖不到 cancel 帧
-      await new Promise((r) => setTimeout(r, 300));
+      // ② 跨一个宏任务边沿再 abort。连接就绪后 run() 的「ensureConnected 幂等返回 →
+      // wireAbortSignal 注册 → run 帧同步写入」全链是纯微任务，宏任务边沿构造性保证
+      // run 帧已写入 stdin；同一 stdio FIFO 保序 → 引擎必先受理挂起再收 cancel
+      //（顺序契约保证，零时长余量——CPU 忙只推迟连接建立，不改写帧顺序）。
+      await new Promise<void>((resolve) => setImmediate(resolve));
       controller.abort();
       const { outcome } = await runP; // 必须正常 resolve（引擎收敛，无需杀链）
 

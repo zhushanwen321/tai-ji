@@ -120,13 +120,32 @@ if (!has('--no-read-stdin')) {
   setInterval(() => {}, 1000)
 }
 
+// emit-lines-on 批次的 stdout write 回调计数 + 延迟退出：process.exit 会丢弃 Node stdout
+// 缓冲中未 flush 的数据，exit-on 命中时必须等「全部 emit 帧已 flush 进管道」再退出——
+// 否则引擎侧「已退出」不能作为「数据帧已完整离开引擎」的确定性信号（测试侧只能靠
+// 墙钟余量赌 flush 完成，CPU 忙时偶发丢帧红）。write 回调 = 数据已写入内核管道，
+// 回调清零后退出 = flush 完成的事件保证，非墙钟余量。
+let pendingEmitWrites = 0
+let deferredExit = null
+function trackedEmitWrite(chunk) {
+  pendingEmitWrites++
+  process.stdout.write(chunk, () => {
+    pendingEmitWrites--
+    if (pendingEmitWrites === 0 && deferredExit !== null) {
+      const exitFn = deferredExit
+      deferredExit = null
+      exitFn()
+    }
+  })
+}
+
 function handleLine(line) {
   // 按 token 触发多行巨帧（背压/顺序用例）：先于 exit-on（同 token 场景由调用方避免）
   const emitOnIdx = args.indexOf('--emit-lines-on')
   if (emitOnIdx !== -1 && line.includes(args[emitOnIdx + 1])) {
     const count = Number(args[emitOnIdx + 2] ?? '0')
     const size = Number(args[emitOnIdx + 3] ?? '0')
-    for (let i = 0; i < count; i++) process.stdout.write(`${'w'.repeat(size)}\n`)
+    for (let i = 0; i < count; i++) trackedEmitWrite(`${'w'.repeat(size)}\n`)
     return
   }
   // --exit-on 判定先于回包（退出语义优先）
@@ -136,6 +155,11 @@ function handleLine(line) {
     const delayMs = Number(argOf('--exit-delay-ms') ?? '0')
     if (delayMs > 0) {
       setTimeout(() => process.exit(code), delayMs)
+      return
+    }
+    // 有未 flush 的 emit 批次：等 write 回调清零再退出（见 pendingEmitWrites 注释）
+    if (pendingEmitWrites > 0) {
+      deferredExit = () => process.exit(code)
       return
     }
     process.exit(code)

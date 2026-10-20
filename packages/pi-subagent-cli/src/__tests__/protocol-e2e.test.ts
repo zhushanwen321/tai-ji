@@ -192,14 +192,17 @@ describe("pi-subagent-cli 协议 e2e（bin 真机 NDJSON 往返）", () => {
       expect(typeof (handleReady.params as { sessionRef: Record<string, string> }).sessionRef.sessionFile).toBe("string");
       host.replyReverse(String(handleReady.id), { ok: true });
 
-      // askUser 两阶段：先 ack（不终结等待），fake pi 挂起等用户答案
+      // askUser 两阶段：先 ack（不终结等待——引擎 settleReverse 对 ack 只记账计时侧，
+      // 最终结果帧才落位），fake pi 挂起等用户答案
       const askUser = await host.waitForReverse("host/askUser");
       const askParams = askUser.params as { runId: string; request: { method: string; channel?: string } };
       expect(askParams.runId).toBe("run-e2e-1");
       expect(askParams.request.method).toBe("select");
       host.replyReverse(String(askUser.id), { ack: true });
-      await new Promise((r) => setTimeout(r, 100));
-      // 第二阶段：最终结果（value 送达 fake pi → extension_ui_response）
+      // 第二阶段：最终结果（value 送达 fake pi → extension_ui_response）。
+      // 无需间隔等待：ack/value 是同一 NDJSON 连接的两帧，FIFO 保序；引擎侧
+      // settleReverse 两阶段处理纯同步（ack 分支不 settle、value 分支按 id 落位），
+      // 顺序由通道构造性保证，原 100ms 固定等待无任何时序保护作用。
       host.replyReverse(String(askUser.id), { value: "A" });
 
       // 4. 终态应答：handle + outcome

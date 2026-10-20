@@ -226,13 +226,27 @@ function bashMessage(over: Omit<Partial<Message>, 'details'> & { details?: unkno
 
 /**
  * 悬停详情打开（portal 挂 body，vue-test-utils 树外）：reka HoverCardTrigger 监听
- * pointerenter/focus（非 mouseenter），触发后等 open-delay（组件 150ms）+ 余量，
- * 再在 document 上查详情节点。afterEach 兑现清理（防 portal 残留）。
+ * pointerenter/focus（非 mouseenter），触发后经 vi.waitFor 轮询在 document 上查详情节点
+ * （替代固定时长盲等——CPU 忙时事件循环延迟会吃掉固定余量致偶发红）。
+ *
+ * 正路径（详情应出现）：portal 节点出现即返回，reka open-delay（组件 150ms）+ Vue 渲染
+ * 完成即可，条件成立自适应，不赌固定余量。负路径（无 detail 的行不弹面板）：waitFor
+ * 回调挂「墙钟已过 260ms 观察窗」检查（> open-delay 150ms），未过窗持续重试、过窗仍无
+ * 才返回 null——保持原固定等待的观察窗强度，避免负断言在 open-delay 生效前空过。
+ * afterEach 兑现清理（防 portal 残留）。
  */
 async function openDetailAndQuery(wrapper: { find: (sel: string) => { trigger: (ev: string) => Promise<void> } }): Promise<Element | null> {
+  const startedAt = Date.now()
   await wrapper.find('[data-testid="system-notice-body"]').trigger('pointerenter')
-  await new Promise((r) => setTimeout(r, 260))
-  return document.querySelector('[data-testid="system-notice-detail"]')
+  return vi.waitFor(
+    () => {
+      const detail = document.querySelector('[data-testid="system-notice-detail"]')
+      if (detail) return detail
+      expect(Date.now() - startedAt).toBeGreaterThanOrEqual(260)
+      return null
+    },
+    { timeout: 2000, interval: 50 },
+  )
 }
 
 describe('SystemNotice background-bash 结构化行（U3 / D2 / 方案 A）', () => {

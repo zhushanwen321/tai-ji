@@ -70,9 +70,12 @@ const RUN_LEVEL_TRANSITIONS: ReadonlySet<string> = new Set([
 // ── harness ─────────────────────────────────────────────────
 
 let journalDir: string;
+/** 本文件活跃用例的 runId（afterEach 轮询等终局 manifest 落盘的定位锚）。 */
+let activeRunId: string | undefined;
 
 beforeEach(() => {
   journalDir = mkdtempSync(join(tmpdir(), "u0-rebuild-sample-"));
+  activeRunId = undefined;
   // record journal 显式注入（vitest 防线下的唯一真落盘通道；编排侧包装额外清
   // 活体 fold 缓存 / 终局注册表——跨用例隔离）。
   setRunEventJournalDirForTest(journalDir);
@@ -80,9 +83,17 @@ beforeEach(() => {
 
 afterEach(async () => {
   setRunEventJournalDirForTest(undefined);
-  // 等终局 manifest 派生写（run-settled 转移链内 fire-and-forget 段，失败仅 warn
+  // 终局 manifest 派生写（run-settled 转移链内 fire-and-forget 段，失败仅 warn
   // 留痕）落定后再删 tmp——立即删会让迟到的 rename 撞 ENOENT 刷 stderr 噪音。
-  await new Promise((r) => setTimeout(r, 120));
+  // 等待信号 = manifest 文件出现（`<runId>.json` 落 journalDir，确定性落盘锚），
+  // 替换原固定时长盲等：CPU 忙时盲等会先删后写刷 ENOENT，轮询到出现为止不会。
+  if (activeRunId !== undefined) {
+    const manifestPath = join(journalDir, `${activeRunId}.json`);
+    await vi.waitFor(
+      () => expect(existsSync(manifestPath), `终局 manifest 未落盘: ${manifestPath}`).toBe(true),
+      { timeout: 5_000, interval: 25 },
+    );
+  }
   rmSync(journalDir, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 });
   vi.unstubAllEnvs();
   vi.restoreAllMocks();
@@ -250,6 +261,7 @@ describe("U0 resume 代际 record 样本采集", () => {
       );
 
       const runId = await runWorkflow(spec, deps);
+      activeRunId = runId;
       await waitForRecord(
         runId,
         (events) =>

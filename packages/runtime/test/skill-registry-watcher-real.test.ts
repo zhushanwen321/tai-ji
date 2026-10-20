@@ -14,11 +14,12 @@
  *
  * 运行：cd packages/runtime && npx vitest run test/skill-registry-watcher-real.test.ts
  */
-import { describe, it, expect, beforeEach, afterEach } from 'vitest'
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 import { mkdtempSync, mkdirSync, writeFileSync, rmSync, readdirSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { spawnSync } from 'node:child_process'
+import type { FSWatcher } from 'chokidar'
 import type { SkillInfo } from '@taiji/shared'
 
 /**
@@ -29,14 +30,6 @@ import type { SkillInfo } from '@taiji/shared'
  * 配合 it() timeout（30000ms）确保测试本身不会先于 deadline 超时。
  */
 const WATCH_DETECT_DEADLINE_MS = 12000
-
-/**
- * watcher baseline 预热时长（ms）。
- *
- * [HISTORICAL] 该等待源自 polling 时代的 first-tick baseline 竞态（新建文件若先于 first-tick
- * 落盘会被 baseline 吞掉）；原生事件路径无此竞态，300ms 仅为 watcher 建立监听的保守余量。
- */
-const WATCH_BASELINE_WARMUP_MS = 300
 
 /**
  * 简易 scanFn：把 skill 容器目录下的子目录当作 skill 返回（每个含 SKILL.md 的子目录一项）。
@@ -101,20 +94,27 @@ describe('SkillRegistry watcher real fs (W5: 新建 skill 子目录触发 rescan
       const events: Array<{ scope: string; affectedSessionIds: string[] }> = []
       reg.onChange(e => events.push({ scope: e.scope, affectedSessionIds: e.affectedSessionIds }))
 
-      // 等 watcher 建立监听（原生事件路径无 first-tick baseline 竞态，见 WATCH_BASELINE_WARMUP_MS 注释）
-      await new Promise(r => setTimeout(r, WATCH_BASELINE_WARMUP_MS))
+      // 等 watcher 建立监听的确定性信号 = chokidar 'ready' 事件（初始扫描完成 + 底层
+      // fs.watch 全部建立）——ready 后创建的文件必然触发事件。
+      // [HISTORICAL] 原 300ms 墙钟余量源自 polling 时代的 first-tick baseline 竞态
+      // （新建文件若先于 first-tick 落盘会被 baseline 吞掉）；原生事件路径无此竞态，
+      // 'ready' 是建立监听完成的事件化形态，不再依赖墙钟余量。
+      const globalWatcher = (reg as unknown as { globalWatcher: FSWatcher | null }).globalWatcher
+      expect(globalWatcher, 'global watcher should be attached by initGlobal').not.toBeNull()
+      await new Promise<void>((resolve, reject) => {
+        globalWatcher!.once('ready', () => resolve())
+        globalWatcher!.once('error', reject)
+      })
 
       // 跨进程新建 skill 子目录（不经 settings，模拟用户直接磁盘操作）
       createSkillSubdir(skillDir, 'new-skill-w5a')
 
-      // 等 watcher 触发（原生事件驱动，亚秒级）；最长等 WATCH_DETECT_DEADLINE_MS（CI 抖动有缓冲）
-      const deadline = Date.now() + WATCH_DETECT_DEADLINE_MS
-      while (Date.now() < deadline && events.length === 0) {
-        await new Promise(r => setTimeout(r, 200))
-      }
+      // 等 watcher 触发（原生事件驱动，亚秒级）；上界 WATCH_DETECT_DEADLINE_MS（CI 抖动缓冲）
+      await vi.waitFor(() => {
+        expect(events.length).toBeGreaterThan(0)
+      }, { timeout: WATCH_DETECT_DEADLINE_MS, interval: 200 })
 
       // 核心断言：watcher 触发了 rescan → onChange 收到 global scope 通知
-      expect(events.length).toBeGreaterThan(0)
       expect(events[0]).toMatchObject({ scope: 'global', affectedSessionIds: ['sid-w5a'] })
       // rescan 后 globalCache 含新 skill
       const skills = reg.getGlobalSkills()
@@ -145,18 +145,22 @@ describe('SkillRegistry watcher real fs (W5: 新建 skill 子目录触发 rescan
         const events: Array<{ scope: string; cwd?: string }> = []
         reg.onChange(e => events.push({ scope: e.scope, cwd: e.cwd }))
 
-        // 等 watcher 建立监听（见 WATCH_BASELINE_WARMUP_MS 注释）。
-        await new Promise(r => setTimeout(r, WATCH_BASELINE_WARMUP_MS))
+        // 等 watcher 建立监听（同 W5a：chokidar 'ready' 事件，建立监听完成的确定性信号）
+        const projectWatchers = (reg as unknown as { projectWatchers: Map<string, FSWatcher> }).projectWatchers
+        const projectWatcher = projectWatchers.get(cwd)
+        expect(projectWatcher, 'project watcher should be attached by getProjectSkills').toBeDefined()
+        await new Promise<void>((resolve, reject) => {
+          projectWatcher!.once('ready', () => resolve())
+          projectWatcher!.once('error', reject)
+        })
 
         // 跨进程新建项目 skill 子目录
         createSkillSubdir(projectSkillDir, 'new-proj-skill')
 
-        const deadline = Date.now() + WATCH_DETECT_DEADLINE_MS
-        while (Date.now() < deadline && events.length === 0) {
-          await new Promise(r => setTimeout(r, 200))
-        }
+        await vi.waitFor(() => {
+          expect(events.length).toBeGreaterThan(0)
+        }, { timeout: WATCH_DETECT_DEADLINE_MS, interval: 200 })
 
-        expect(events.length).toBeGreaterThan(0)
         expect(events[0]).toMatchObject({ scope: 'project', cwd })
         const skills = await reg.getProjectSkills(cwd)
         expect(skills.some(s => s.id === 'new-proj-skill')).toBe(true)

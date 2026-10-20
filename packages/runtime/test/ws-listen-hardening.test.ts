@@ -93,17 +93,26 @@ describe('SEC-U2 WS transport hardening (loopback + maxPayload + auth handshake)
   })
 
   it('SEC-U2 无 auth 的客户端被拒——pre-auth 业务消息被丢弃，auth 超时断开', async () => {
-    const { conn, port } = await startManager(TEST_TOKEN)
-    cleanup.push(() => conn.stop())
-    const onMessage = (conn as unknown as { callbacks: { onMessage: (msg: ClientMessage) => void } }).callbacks.onMessage
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    try {
+      const { conn, port } = await startManager(TEST_TOKEN)
+      cleanup.push(() => conn.stop())
+      const onMessage = (conn as unknown as { callbacks: { onMessage: (msg: ClientMessage) => void } }).callbacks.onMessage
 
-    const ws = new WebSocket(`ws://127.0.0.1:${port}`)
-    await new Promise<void>((resolve) => ws.once('open', () => resolve()))
-    // auth 前发业务消息：静默丢弃（不进 handleMessage、不断开——等 auth 超时再断）
-    ws.send(JSON.stringify({ type: 'plugin.toggle', id: 'evil-1', payload: { pluginId: 'x', enabled: false } }))
-    await new Promise<void>((r) => setTimeout(r, 300))
-    expect(onMessage).not.toHaveBeenCalled()
-    ws.close()
+      const ws = new WebSocket(`ws://127.0.0.1:${port}`)
+      await new Promise<void>((resolve) => ws.once('open', () => resolve()))
+      // auth 前发业务消息：静默丢弃（不进 handleMessage、不断开——等 auth 超时再断）
+      ws.send(JSON.stringify({ type: 'plugin.toggle', id: 'evil-1', payload: { pluginId: 'x', enabled: false } }))
+      // 丢弃路径的确定性完成信号 = 首条 pre-auth 必打的 warn（服务端逐条同步处理，
+      // warn 已发生即该消息已按丢弃路径处理完毕）——替代固定 300ms 盲等
+      await vi.waitFor(() => {
+        expect(warnSpy.mock.calls.some((c) => String(c[0]).includes('dropping pre-auth'))).toBe(true)
+      })
+      expect(onMessage).not.toHaveBeenCalled()
+      ws.close()
+    } finally {
+      warnSpy.mockRestore()
+    }
   })
 
   it('SEC-U2 pre-auth 丢弃告警连接级频控——同一连接第二条非 auth 消息不再 warn', async () => {
@@ -117,14 +126,20 @@ describe('SEC-U2 WS transport hardening (loopback + maxPayload + auth handshake)
 
       const ws = new WebSocket(`ws://127.0.0.1:${port}`)
       await new Promise<void>((resolve) => ws.once('open', () => resolve()))
-      // 首条非 auth 消息：warn 一次（含消息 type）
+      // 首条非 auth 消息：warn 一次（含消息 type）——warn 是丢弃路径的确定性产物，
+      // 等它出现即该消息已处理完毕（替代固定 200ms 盲等）
       ws.send(JSON.stringify({ type: 'plugin.toggle', id: 'evil-1', payload: { pluginId: 'x', enabled: false } }))
-      await new Promise<void>((r) => setTimeout(r, 200))
-      expect(droppingCalls().length).toBe(1)
+      await vi.waitFor(() => {
+        expect(droppingCalls().length).toBe(1)
+      })
       expect(String(droppingCalls()[0]?.[0])).toContain('type=plugin.toggle')
-      // 第二条：静默丢弃，不再 warn
+      // 第二条：静默丢弃，不再 warn。其处理完毕的确定性信号 = 随后的错误 token auth
+      // 走完拒绝链（close 1008 到达）——WS 消息按序处理，close 到达即前一条已处理完
+      const closed = waitClose(ws)
       ws.send(JSON.stringify({ type: 'plugin.toggle', id: 'evil-2', payload: { pluginId: 'x', enabled: false } }))
-      await new Promise<void>((r) => setTimeout(r, 200))
+      ws.send(JSON.stringify({ type: 'auth', payload: { token: 'forged-after-drop' } }))
+      const { code } = await closed
+      expect(code).toBe(1008)
       expect(droppingCalls().length).toBe(1)
       ws.close()
     } finally {

@@ -473,7 +473,11 @@ describe('reportPiExitSignalForensics', () => {
         exitCode: 143,
         ring: ringWithPreDeathSample(),
       })
-      await new Promise(r => setTimeout(r, 50))
+      // gate 关闭时 report 同步 return（不创建任何采集任务）；事件循环排空数轮覆盖
+      // 「若门控失效会创建的微任务采集链」（stub 采集是纯微任务，setImmediate 回调前
+      // 必然执行完）——排空后 stub 未被调用即门控结构性生效（替代固定 50ms 盲等）
+      for (let i = 0; i < 5; i++) await new Promise(r => setImmediate(r))
+      expect(listAllProcessesStub).not.toHaveBeenCalled()
       // no-op = 连 logs 目录都不创建（writeForensicsDetailFile 的 mkdir 未被触达）
       expect(existsSync(join(dataDir, 'logs'))).toBe(false)
     } finally {

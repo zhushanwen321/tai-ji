@@ -383,10 +383,12 @@ describe('MessageStream executing bash 瞬时行（[u6a] ActivityStrip bash 行�
     expect(wrapper.find('[data-testid="executing-bash-notice"]').exists()).toBe(false)
 
     // 方案 A 悬停详情：命令原文经 HoverCard portal 挂 body（手法同 ActivityStrip.test.ts 的
-    // detail 用例——pointerenter 后过 open-delay 150ms 再读 portal 节点）
+    // detail 用例——pointerenter 后 vi.waitFor 轮询断言 portal 内容，open-delay 150ms + 渲染
+    // 完成即通过，CPU 忙时自适应延长，替代固定 260ms 盲等）
     await wrapper.find('[data-testid="activity-strip-text-bash"]').trigger('pointerenter')
-    await new Promise((r) => setTimeout(r, 260))
-    expect(document.querySelector('[data-testid="activity-strip-detail-body-bash"]')?.textContent).toBe('npm test')
+    await vi.waitFor(() => {
+      expect(document.querySelector('[data-testid="activity-strip-detail-body-bash"]')?.textContent).toBe('npm test')
+    })
 
     // bashAborted 到达（abort 兜底终态帧：只清执行态不产 entry）→ 行消失，无残留 spinner
     bashEffects['message.bashAborted']?.(fakeCtx, sid, { sessionId: sid, timestamp: 0 })

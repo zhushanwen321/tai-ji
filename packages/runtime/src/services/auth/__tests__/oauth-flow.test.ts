@@ -561,9 +561,14 @@ describe('runOAuthLogin — token exchange 错误路径（MF-1）', () => {
     const url = new URL(authUrl.url)
     const state = url.searchParams.get('state') as string
     const callbackPort = new URL(url.searchParams.get('redirect_uri') as string).port
-    // 触发 exchange（callback 到达 → exchange 发起，挂起）；给 exchange 一点时间发起后再 abort
+    // 触发 exchange（callback 到达 → exchange 发起，挂起）；等 exchange fetch 确实
+    // 发起（挂起的 token 端点请求已被调用）再 abort——原 50ms 盲等在 CPU 忙时会让
+    // abort 早于 exchange 发起，signal 串联未被真正验证（假通过）
     await fetch(`http://127.0.0.1:${callbackPort}/callback?code=authz-123&state=${state}`)
-    await new Promise((r) => setTimeout(r, 50))
+    const fetchMock = vi.mocked(globalThis.fetch)
+    await vi.waitFor(() => {
+      expect(fetchMock.mock.calls.some(([url]) => String(url).includes('/v1/oauth/token'))).toBe(true)
+    })
     controller.abort()
     await expect(flow).rejects.toThrow()
   })

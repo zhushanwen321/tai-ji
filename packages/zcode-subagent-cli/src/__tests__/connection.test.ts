@@ -119,9 +119,15 @@ describe("惰性启动与惰性重建", () => {
     const { conn, stateFile } = makeConnection();
     expect(conn.alive).toBe(false);
     expect(conn.pid).toBeUndefined();
-    await sleep(80);
-    expect(existsSync(stateFile)).toBe(false);
-    expect(conn.pid).toBeUndefined();
+    // 负向断言（验证「未发生」）无完成信号可等——用分片采样替换单点 sleep(80)：
+    // 每片让出事件循环后立即断言，构造若被误触发 spawn 会在任一片被抓住
+    //（总采样窗口量级与原 80ms 相当；CPU 忙时负向条件只会更稳，无假红风险）
+    for (let slice = 0; slice < 8; slice += 1) {
+      await sleep(10);
+      expect(existsSync(stateFile), `第 ${slice} 片发现 stateFile——构造路径被误触发 spawn`).toBe(false);
+      expect(conn.pid).toBeUndefined();
+      expect(conn.alive).toBe(false);
+    }
   });
 
   it("首次请求才 spawn：boot 流水出现，argv 形态 = `app-server --cwd <dir>`（D10 基线，不带 --stdio/--surface）", async () => {

@@ -32,7 +32,7 @@ import { homedir } from 'node:os'
 import { pathToFileURL } from 'node:url'
 
 /** 合法段名（design.md §4 段名对照的封闭集合；typo 段名 fail-fast 防数据散落不同 slug 目录） */
-export const SEGMENTS = ['tech-design', 'dev-flow', 'review-fix-loop', 'dev-merge', 'pr-review']
+export const SEGMENTS = ['tech-design', 'dev-flow', 'review-fix-loop', 'dev-merge', 'pr-review', 'pre-merge-evidence']
 
 /** 数据根：SKILL_DATA_DIR env 非空替代，否则 HOME 下动态推导（禁写死绝对路径） */
 export function skillDataRoot() {
