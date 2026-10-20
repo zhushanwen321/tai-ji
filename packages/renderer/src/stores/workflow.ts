@@ -5,7 +5,8 @@
  * 由调用方通过回调注入，store 内不 import 其他 store。
  *
  * 职责：
- * - 共享 workflow 列表（records）—— 所有消费面（composer 任务托盘 / drawer WorkflowTab）只读消费
+ * - 共享 workflow 列表（records）—— 所有消费面（composer 任务托盘 / workflow-viz overlay
+ *   实况视图）只读消费
  * - agentcall 虚拟 key 清理映射（mainSessionAgentCalls）：deleteSession 时清 agentcall 虚拟分区
  * - [可视化 U5/D11] 事件流缓存（runId 分区 + LRU5 + 活跃 run 锚 + workflowUpdate 信号
  *   联动 force 重拉）—— workflow-viz 面板（overlay 右栏实况面板）消费
@@ -42,7 +43,7 @@ import { createInflightDedup } from '@taiji/core/foundation/create-inflight-dedu
 import { createEmptyResultStrikeGuard, createPartitionedLoadState, createPartitionedRecords } from '../lib/partitioned-session-records'
 import { session as sessionApi } from '@/api'
 
-// ── [P3/D6] progress 投影消费（纯函数，drawer WorkflowTab 与托盘面板共用）──
+// ── [P3/D6] progress 投影消费（纯函数）──
 
 /**
  * [P3/D6] 单 ask 已执行时长（「每 ask 已执行时长」槽）：running 且 trace.startedAt
@@ -428,7 +429,7 @@ export const useWorkflowStore = defineStore('workflow', () => {
    *   dirty（只补一次）会在补拉在途窗口复刻终态吞没，故 dirty 必须可再武装。
    *
    * 现行调用拓扑：托盘首拉/retry（useTrayCounts，D13 首拉触发迁移）、abort 后刷新
-   * （TrayNativePanel / drawer WorkflowTab）、WS 重连重拉（useSidebar.onConnected）、
+   * （TrayNativePanel）、WS 重连重拉（useSidebar.onConnected）、
    * workflowUpdate 信号（triggerWorkflowReload）。
    */
   function loadWorkflows(sessionId: string): Promise<void> {

@@ -34,8 +34,8 @@
 
   D10 回落：本壳**不内置** Guard——Guard（WorkflowVizOverlayGuard）由挂载方包在
   壳外（errorCaptured 只捕获后代错误，壳自身 render 帧的错误只有父层能捕）；
-  壳经 emits 暴露回落链所需语义（close / select / retry-dag），回落 drawer 的
-  openDrawerTab + openWorkflowInDrawer 接线归 U6。
+  壳经 emits 暴露回落链所需语义（close / select / retry-dag），fallback 动作序列
+  （关 overlay；重开即重试，Guard :key 重挂复位）的接线归 U6（WorkflowVizOverlayHost）。
 
   数据边界（u4 与 u5 的派生单处分工）：节点六态映射（nodeStates）与已用时长
   （elapsedMs，含 D9 中断停走口径）为已派生输入——单点实现在 renderer 侧
@@ -105,9 +105,9 @@
           class="shrink-0 font-mono text-[length:var(--text-3xs)] text-neutral-mid"
           data-testid="wfvz-overlay-elapsed"
         >{{ formatDuration(elapsedMs) }}</span>
-        <!-- run 级执行模型全切入口（[2026-10-19] 自 drawer WorkflowTab 平移——demo 裁决归宿 =
-             标题栏 runs 态，与 run 元素同进退：scheduler/canvas 态 run 元素让位时入口随之消失；
-             run 为 null（数据未就绪）不渲染。展示态/切换动作由宿主注入与承接（壳纯展示分工）。 -->
+        <!-- run 级执行模型全切入口（demo 裁决归宿 = 标题栏 runs 态，与 run 元素同进退：
+             scheduler/canvas 态 run 元素让位时入口随之消失；run 为 null（数据未就绪）不渲染。
+             展示态/切换动作由宿主注入与承接（壳纯展示分工）。 -->
         <ModelSelectPopover
           v-if="run !== null && modelDisplay !== undefined"
           :selected="modelDisplay.label ?? ''"
@@ -266,7 +266,7 @@
             >
               {{ t('panel.workflowViz.dagRetryParse') }}
             </Button>
-            <!-- 降级列表：按 phase 分组的调用点只读形态（等价 WorkflowTab 内容的最小面） -->
+            <!-- 降级列表：按 phase 分组的调用点只读形态 -->
             <div
               v-for="group in fallbackGroups"
               :key="group.phase"
@@ -513,7 +513,7 @@ const fallbackGroups = computed<FallbackGroup[]>(() => {
   return [...groups.entries()].map(([phase, calls]) => ({ phase, calls }))
 })
 
-/** 存在显式 phase 才显示分组 header（WorkflowTab 同款判据：线性脚本无 phase 不分组）。 */
+/** 存在显式 phase 才显示分组 header（线性脚本无 phase 不分组）。 */
 const hasExplicitPhases = computed(() =>
   fallbackGroups.value.some((g) => g.phase !== ''),
 )
@@ -559,7 +559,7 @@ const dagErrorLabel = computed(() => {
 
 // ── 展示工具 ──
 
-/** ms → 耗时（WorkflowTab 口径：无小时档；换算单点在 lib/duration-format）。 */
+/** ms → 耗时（无小时档口径；换算单点在 lib/duration-format）。 */
 function formatDuration(ms: number): string {
   return formatCompactDuration(Math.floor(ms / MS_PER_SECOND), { hours: false })
 }

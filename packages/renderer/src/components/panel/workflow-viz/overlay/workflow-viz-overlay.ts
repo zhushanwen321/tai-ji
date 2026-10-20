@@ -15,8 +15,7 @@
  *   顶层装配；绑定动作在模块加载时执行，函数体首次执行在用户交互时刻，pinia 已 active）。
  *   托盘行传 runId（零改动）、对话流 block 传 (scriptName, slug, sessionId)——反查动作
  *   （先 runId 精确匹配、后 (scriptName, slug) 匹配取最新；slug 缺失回落 name → 最新）
- *   在 findRun 单处执行，与 drawer 侧 WorkflowTab 的兼收解析口径逐字对齐（记录末条 =
- *   最新）。
+ *   在 findRun 单处执行（记录末条 = 最新）。
  * - DAG 通道接线（§3.1-5）：session.getWorkflowDag 拉取 + 两通道错误归一（结构化领域
  *   回执 code 透传 / RPC 通道错误 → 'channel'）+ 在途丢弃（settle 时活跃组合已切走则
  *   丢弃，对齐 store D11①）+ parse_failed 重试（失败不缓存故可重试）。
@@ -92,8 +91,7 @@ watch(
  * ① nameOrRunId 先按 runId 精确匹配（托盘行路径，零改动直开）；
  * ② 否则按 scriptName 匹配——slug 有值时要求 record.slug 等值（区分并发 run，slug 的
  *    设计本职 shared/workflow.ts:160），slug 缺失/空串回落「name → 最新 run」现状语义；
- * ③ 命中多条（slug 碰撞极端形态）取记录末条（= 最新，与 WorkflowTab.vue 的
- *    byName[byName.length - 1] 逐字同口径），照常打开不阻塞。
+ * ③ 命中多条（slug 碰撞极端形态）取记录末条（= 最新），照常打开不阻塞。
  */
 function findRun(sessionId: string, nameOrRunId: string, slug?: string): WorkflowRunRecord | undefined {
   if (!sessionId || !nameOrRunId) return undefined
@@ -101,8 +99,7 @@ function findRun(sessionId: string, nameOrRunId: string, slug?: string): Workflo
   const byRunId = records.find((w) => w.runId === nameOrRunId)
   if (byRunId) return byRunId
   // 名字形态归一（L4 走查发现）：主 agent 调 workflow 工具常传脚本路径（/abs/path/x.js），
-  // record.scriptName 存 basename（x）——严格等值恒 miss。归一单源在 run-name.ts（与
-  // drawer WorkflowTab 共用，两入口判据同源）；slug 判据不变。
+  // record.scriptName 存 basename（x）——严格等值恒 miss。归一单源在 run-name.ts；slug 判据不变。
   const want = normalizeWorkflowScriptName(nameOrRunId)
   const byName = records.filter(
     (w) => normalizeWorkflowScriptName(w.scriptName) === want && (slug === undefined || slug === '' || w.slug === slug),

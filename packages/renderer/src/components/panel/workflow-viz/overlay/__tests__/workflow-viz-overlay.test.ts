@@ -10,8 +10,8 @@
  *   fallback 事件 + slot 卸载 + 全局 errorHandler 零调用）；
  * - 观察者形态：role="dialog" / aria-modal / data-status 形态断言。
  *
- * 回落 drawer 的 openDrawerTab + openWorkflowInDrawer 接线归 U6（D10 动作序列在
- * 接线方）——本测试只断言壳/边界的事件契约。
+ * fallback 动作序列（关 overlay；重开即重试，Guard :key 重挂复位）的接线归 U6
+ * （WorkflowVizOverlayHost，D10）——本测试只断言壳/边界的事件契约。
  *
  * 运行：cd packages/renderer && npx vitest run src/components/panel/workflow-viz/overlay/__tests__/workflow-viz-overlay.test.ts
  */

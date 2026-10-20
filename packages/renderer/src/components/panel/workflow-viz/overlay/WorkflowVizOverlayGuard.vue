@@ -5,14 +5,14 @@
   边界捕获 → 上报（console.error + reportCapturedError，与全局 errorHandler 同通道）
   → emit('fallback') → return false 阻断向全局传播。
 
-  捕获后的动作序列归接线方（U6）：fallback handler 内关闭 overlay（清瞬态、停订阅）
-  并调 drawer 编排 openDrawerTab('workflow') + openWorkflowInDrawer(runId)——回落
-  **不得**经改向后的 openWorkflow（会重入 overlay 入口形成循环，D1）。
+  捕获后的动作序列归接线方（U6，实装 WorkflowVizOverlayHost）：fallback handler 内
+  关闭 overlay；重开 overlay（入口每次点击）即重试——Host 经 :key="guardEpoch" 在
+  开合沿重挂全新 Guard 实例复位 failed。
 
-  与 StreamItemBoundary 的差异：无占位行、无重试入口——装载失败的整体处置是切容器
-  （回落 drawer WorkflowTab），不是树内恢复；failed 后 slot 卸载、本边界渲染空
-  （overlay 已随 fallback 关闭，用户经 drawer 达成「打开 workflow」的意图）。无
-  「连续失败计数后直落 drawer」机制（D10：每次点击入口均重试 overlay）。
+  与 StreamItemBoundary 的差异：无占位行、无树内恢复入口——装载失败的整体处置是切
+  容器（关 overlay），不是树内恢复；failed 后 slot 卸载、本边界渲染空（overlay 已随
+  fallback 关闭，用户再次点击入口重试）。无「连续失败计数后跳过重试」机制（D10：
+  每次点击入口均重试 overlay）。
 
   边界自身 render 不消费响应式子树（failed 分支为空），自身抛错面结构性为零。
 -->
@@ -27,7 +27,7 @@ import { onErrorCaptured, ref } from 'vue'
 import { reportCapturedError } from '@/boot/error-reporter'
 
 const emit = defineEmits<{
-  /** 装载失败：接线方在此关闭 overlay 并回落 drawer（D10 动作序列）。 */
+  /** 装载失败：接线方在此关闭 overlay（D10 动作序列；重开即重试）。 */
   fallback: []
 }>()
 

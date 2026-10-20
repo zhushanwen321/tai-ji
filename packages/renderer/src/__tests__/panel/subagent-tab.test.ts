@@ -178,7 +178,7 @@ describe('SubagentTab E-4 接入（entry 帧 + 恒订阅）', () => {
       { id: 'uuid-u1', role: 'user', content: '分析这个仓库', status: 'complete', timestamp: 1000 },
       { id: 'uuid-a1', role: 'assistant', content: '第一段产出', status: 'complete', timestamp: 2000 },
     ] as Message[])
-    openSubagent({ virtualId: VIRTUAL_ID, enteredFrom: 'chat' })
+    openSubagent({ virtualId: VIRTUAL_ID })
 
     const wrapper = mountTab()
     await settle(wrapper)
@@ -212,7 +212,7 @@ describe('SubagentTab E-4 接入（entry 帧 + 恒订阅）', () => {
     // 非 running（done）record：旧逻辑 isRunning=false 不订阅；E-4 恒订阅
     useSubagentStore().applyRecords(MAIN_SID, [makeRecord({ status: 'done' })])
     vi.mocked(sessionApi.getSubagentHistory).mockResolvedValue([])
-    openSubagent({ virtualId: VIRTUAL_ID, enteredFrom: 'chat' })
+    openSubagent({ virtualId: VIRTUAL_ID })
 
     const wrapper = mountTab()
     await settle(wrapper)
@@ -242,7 +242,7 @@ describe('SubagentTab E-4 接入（entry 帧 + 恒订阅）', () => {
 
   it('接入拉取（触发点①）：running record 打开 → 订阅建立后主动 getSubagentStreamState，详情页正常在场', async () => {
     vi.mocked(sessionApi.getSubagentHistory).mockResolvedValue([])
-    openSubagent({ virtualId: VIRTUAL_ID, enteredFrom: 'chat' })
+    openSubagent({ virtualId: VIRTUAL_ID })
     const wrapper = mountTab()
     try {
       await settle(wrapper)
@@ -262,7 +262,7 @@ describe('SubagentTab E-4 接入（entry 帧 + 恒订阅）', () => {
     // running record 的接入拉取在途期间会去重掉并发失步拉取，属 §4.3 既定行为，不在本用例混排）
     useSubagentStore().applyRecords(MAIN_SID, [makeRecord({ status: 'done' })])
     vi.mocked(sessionApi.getSubagentHistory).mockResolvedValue([])
-    openSubagent({ virtualId: VIRTUAL_ID, enteredFrom: 'chat' })
+    openSubagent({ virtualId: VIRTUAL_ID })
     const wrapper = mountTab()
     try {
       await settle(wrapper)
@@ -301,7 +301,7 @@ describe('SubagentTab E-4 接入（entry 帧 + 恒订阅）', () => {
   it('清除帧 msgSeq 定稿水位：清除帧落水位后，同消息的失步拉取响应不复活定稿内容', async () => {
     useSubagentStore().applyRecords(MAIN_SID, [makeRecord({ status: 'done' })]) // done：零接入拉取基线
     vi.mocked(sessionApi.getSubagentHistory).mockResolvedValue([])
-    openSubagent({ virtualId: VIRTUAL_ID, enteredFrom: 'chat' })
+    openSubagent({ virtualId: VIRTUAL_ID })
     const wrapper = mountTab()
     try {
       await settle(wrapper)
@@ -333,7 +333,7 @@ describe('SubagentTab E-4 接入（entry 帧 + 恒订阅）', () => {
     // done record：接入拉取零调用基线，W 清除帧后仍为零（不进 chunk 状态机）
     useSubagentStore().applyRecords(MAIN_SID, [makeRecord({ status: 'done' })])
     vi.mocked(sessionApi.getSubagentHistory).mockResolvedValue([])
-    openSubagent({ virtualId: VIRTUAL_ID, enteredFrom: 'chat' })
+    openSubagent({ virtualId: VIRTUAL_ID })
     const wrapper = mountTab()
     try {
       await settle(wrapper)
@@ -354,7 +354,7 @@ describe('SubagentTab E-4 接入（entry 帧 + 恒订阅）', () => {
   it('引擎 badge（U3 D9）：engine 缺省 → 常态 badge 显示 pi', async () => {
     useSubagentStore().applyRecords(MAIN_SID, [makeRecord({ engine: undefined })])
     vi.mocked(sessionApi.getSubagentHistory).mockResolvedValue([])
-    openSubagent({ virtualId: VIRTUAL_ID, enteredFrom: 'chat' })
+    openSubagent({ virtualId: VIRTUAL_ID })
     const wrapper = mountTab()
     await settle(wrapper)
     const badge = wrapper.find('[data-testid="subagent-engine-badge"]')
@@ -367,7 +367,7 @@ describe('SubagentTab E-4 接入（entry 帧 + 恒订阅）', () => {
   it('引擎 badge：engine=zcode → 常态 badge 显示 zcode', async () => {
     useSubagentStore().applyRecords(MAIN_SID, [makeRecord({ engine: 'zcode' })])
     vi.mocked(sessionApi.getSubagentHistory).mockResolvedValue([])
-    openSubagent({ virtualId: VIRTUAL_ID, enteredFrom: 'chat' })
+    openSubagent({ virtualId: VIRTUAL_ID })
     const wrapper = mountTab()
     await settle(wrapper)
     const badge = wrapper.find('[data-testid="subagent-engine-badge"]')
@@ -383,7 +383,7 @@ describe('SubagentTab E-4 接入（entry 帧 + 恒订阅）', () => {
       makeRecord({ status: 'idle', stopReason: 'interrupted-by-restart' }),
     ])
     vi.mocked(sessionApi.getSubagentHistory).mockResolvedValue([])
-    openSubagent({ virtualId: VIRTUAL_ID, enteredFrom: 'chat' })
+    openSubagent({ virtualId: VIRTUAL_ID })
     const wrapper = mountTab()
     await settle(wrapper)
     const reason = wrapper.find('[data-testid="subagent-stop-reason"]')
@@ -401,7 +401,7 @@ describe('SubagentTab E-4 接入（entry 帧 + 恒订阅）', () => {
       }),
     ])
     vi.mocked(sessionApi.getSubagentHistory).mockResolvedValue([])
-    openSubagent({ virtualId: VIRTUAL_ID, enteredFrom: 'chat' })
+    openSubagent({ virtualId: VIRTUAL_ID })
     const wrapper = mountTab()
     await settle(wrapper)
     const reason = wrapper.find('[data-testid="subagent-stop-reason"]')
@@ -413,7 +413,7 @@ describe('SubagentTab E-4 接入（entry 帧 + 恒订阅）', () => {
   it('停因词：running（在飞轮无停因）与无 stopReason 的 record → 不渲染停因元素', async () => {
     useSubagentStore().applyRecords(MAIN_SID, [makeRecord({ status: 'running' })])
     vi.mocked(sessionApi.getSubagentHistory).mockResolvedValue([])
-    openSubagent({ virtualId: VIRTUAL_ID, enteredFrom: 'chat' })
+    openSubagent({ virtualId: VIRTUAL_ID })
     const wrapper = mountTab()
     await settle(wrapper)
     expect(wrapper.find('[data-testid="subagent-stop-reason"]').exists()).toBe(false)
@@ -449,7 +449,7 @@ describe('SubagentTab U4：zcode 终态渲染 + 运行中 coarse 提示', () => 
   it('running + engine=zcode → coarse 提示条渲染（文案含引擎名与「不支持实时流」）', async () => {
     useSubagentStore().applyRecords(MAIN_SID, [makeRecord({ engine: 'zcode' })])
     vi.mocked(sessionApi.getSubagentHistory).mockResolvedValue([])
-    openSubagent({ virtualId: VIRTUAL_ID, enteredFrom: 'chat' })
+    openSubagent({ virtualId: VIRTUAL_ID })
     const wrapper = mountTab()
     await settle(wrapper)
     const hint = wrapper.find('[data-testid="subagent-coarse-hint"]')
@@ -462,7 +462,7 @@ describe('SubagentTab U4：zcode 终态渲染 + 运行中 coarse 提示', () => 
   it('running + 无 engine（pi）→ 无提示条，恒订阅流式行为不变', async () => {
     // makeRecord 默认 status running（pi 真在跑场景）
     vi.mocked(sessionApi.getSubagentHistory).mockResolvedValue([])
-    openSubagent({ virtualId: VIRTUAL_ID, enteredFrom: 'chat' })
+    openSubagent({ virtualId: VIRTUAL_ID })
     const wrapper = mountTab()
     await settle(wrapper)
     expect(wrapper.find('[data-testid="subagent-coarse-hint"]').exists()).toBe(false)
@@ -477,7 +477,7 @@ describe('SubagentTab U4：zcode 终态渲染 + 运行中 coarse 提示', () => 
       makeRecord({ engine: 'zcode', sessionFile: null, status: 'done', endedAt: 2000 }),
     ])
     vi.mocked(sessionApi.getSubagentHistory).mockResolvedValue([])
-    openSubagent({ virtualId: VIRTUAL_ID, enteredFrom: 'chat' })
+    openSubagent({ virtualId: VIRTUAL_ID })
     const wrapper = mountTab()
     await settle(wrapper)
     expect(sessionApi.getSubagentHistory).toHaveBeenCalledWith(MAIN_SID, SUB_ID)
@@ -510,7 +510,7 @@ describe('SubagentTab U4：zcode 终态渲染 + 运行中 coarse 提示', () => 
         ],
       },
     ] as Message[])
-    openSubagent({ virtualId: VIRTUAL_ID, enteredFrom: 'chat' })
+    openSubagent({ virtualId: VIRTUAL_ID })
     const wrapper = mountTab()
     await settle(wrapper)
     const turns = wrapper.findAll('[data-testid="turn-stub"]')
@@ -525,7 +525,7 @@ describe('SubagentTab U4：zcode 终态渲染 + 运行中 coarse 提示', () => 
       makeRecord({ engine: 'zcode', status: 'done', result: '最终结论：一切正常', endedAt: 2000 }),
     ])
     vi.mocked(sessionApi.getSubagentHistory).mockRejectedValue(new Error('rpc timeout'))
-    openSubagent({ virtualId: VIRTUAL_ID, enteredFrom: 'chat' })
+    openSubagent({ virtualId: VIRTUAL_ID })
     const wrapper = mountTab()
     await settle(wrapper)
     expect(wrapper.find('[data-testid="drawer-subagent-error"]').exists()).toBe(true)
@@ -540,7 +540,7 @@ describe('SubagentTab U4：zcode 终态渲染 + 运行中 coarse 提示', () => 
       makeRecord({ engine: 'zcode', status: 'done', result: '兜底摘要文本', endedAt: 2000 }),
     ])
     vi.mocked(sessionApi.getSubagentHistory).mockResolvedValue([])
-    openSubagent({ virtualId: VIRTUAL_ID, enteredFrom: 'chat' })
+    openSubagent({ virtualId: VIRTUAL_ID })
     const wrapper = mountTab()
     await settle(wrapper)
     const turns = wrapper.findAll('[data-testid="turn-stub"]')
@@ -556,7 +556,7 @@ describe('SubagentTab U4：zcode 终态渲染 + 运行中 coarse 提示', () => 
     // 种入 record.task 用户气泡（分区 1 turn），杜绝首开白屏；pi 仍不走 outcome 兜底投影。
     useSubagentStore().applyRecords(MAIN_SID, [makeRecord({ status: 'done', result: 'pi 轮终结果' })])
     vi.mocked(sessionApi.getSubagentHistory).mockResolvedValue([])
-    openSubagent({ virtualId: VIRTUAL_ID, enteredFrom: 'chat' })
+    openSubagent({ virtualId: VIRTUAL_ID })
     const wrapper = mountTab()
     await settle(wrapper)
     const turns = wrapper.findAll('[data-testid="turn-stub"]')
@@ -593,7 +593,7 @@ describe('SubagentTab 非 pi 终态回填（status watch，D2）', () => {
         { id: 'ref-u1', role: 'user', content: 'do something', status: 'complete', timestamp: 1000 },
         { id: 'ref-a1', role: 'assistant', content: '终态完整产出', status: 'complete', timestamp: 2000 },
       ] as Message[])
-    openSubagent({ virtualId: VIRTUAL_ID, enteredFrom: 'chat' })
+    openSubagent({ virtualId: VIRTUAL_ID })
     const wrapper = mountTab()
     await settle(wrapper)
 
@@ -622,7 +622,7 @@ describe('SubagentTab 非 pi 终态回填（status watch，D2）', () => {
   it('pi record（engine 缺省）同样推送 running→done → fetchAndInject 仍 1 次（零变化守护）', async () => {
     useSubagentStore().applyRecords(MAIN_SID, [makeRecord({ engine: undefined })])
     vi.mocked(sessionApi.getSubagentHistory).mockResolvedValue([])
-    openSubagent({ virtualId: VIRTUAL_ID, enteredFrom: 'chat' })
+    openSubagent({ virtualId: VIRTUAL_ID })
     const wrapper = mountTab()
     await settle(wrapper)
     expect(sessionApi.getSubagentHistory).toHaveBeenCalledTimes(1)
@@ -644,13 +644,13 @@ describe('SubagentTab 非 pi 终态回填（status watch，D2）', () => {
       makeRecord({ subagentId: SUB_ID_B, engine: 'zcode' }),
     ])
     vi.mocked(sessionApi.getSubagentHistory).mockResolvedValue([])
-    openSubagent({ virtualId: VIRTUAL_ID, enteredFrom: 'chat' })
+    openSubagent({ virtualId: VIRTUAL_ID })
     const wrapper = mountTab()
     await settle(wrapper)
     expect(sessionApi.getSubagentHistory).toHaveBeenCalledTimes(1)
 
     // 切到 B：vid watch 首拉 B（第 2 次，参数 B）
-    openSubagent({ virtualId: VIRTUAL_ID_B, enteredFrom: 'chat' })
+    openSubagent({ virtualId: VIRTUAL_ID_B })
     await settle(wrapper)
     expect(sessionApi.getSubagentHistory).toHaveBeenCalledTimes(2)
     expect(sessionApi.getSubagentHistory).toHaveBeenLastCalledWith(MAIN_SID, SUB_ID_B)
@@ -664,7 +664,7 @@ describe('SubagentTab 非 pi 终态回填（status watch，D2）', () => {
     expect(sessionApi.getSubagentHistory).toHaveBeenCalledTimes(2)
 
     // 切回 A：vid watch 首拉兜底（非 status watch）
-    openSubagent({ virtualId: VIRTUAL_ID, enteredFrom: 'chat' })
+    openSubagent({ virtualId: VIRTUAL_ID })
     await settle(wrapper)
     expect(sessionApi.getSubagentHistory).toHaveBeenCalledTimes(3)
     expect(sessionApi.getSubagentHistory).toHaveBeenLastCalledWith(MAIN_SID, SUB_ID)
@@ -676,7 +676,7 @@ describe('SubagentTab 非 pi 终态回填（status watch，D2）', () => {
       makeRecord({ engine: 'zcode', status: 'done', result: '结果', endedAt: 2000 }),
     ])
     vi.mocked(sessionApi.getSubagentHistory).mockResolvedValue([])
-    openSubagent({ virtualId: VIRTUAL_ID, enteredFrom: 'chat' })
+    openSubagent({ virtualId: VIRTUAL_ID })
     const wrapper = mountTab()
     await settle(wrapper)
     expect(sessionApi.getSubagentHistory).toHaveBeenCalledTimes(1)
@@ -745,7 +745,7 @@ describe('SubagentTab [W0/V8] agentcall 标题 meta（findAgentCall 命中合并
   it('无值形态对照：agentCalls 空（盲区旧形态）→ 标题回退「subagent」兜底，不炸', async () => {
     seedWorkflowRecords([])
     vi.mocked(sessionApi.getAgentCallHistory).mockResolvedValue([])
-    openSubagent({ virtualId: agentCallVirtualId('acs-v8-none'), enteredFrom: 'workflow' })
+    openSubagent({ virtualId: agentCallVirtualId('acs-v8-none') })
 
     const wrapper = mountTab()
     await settle(wrapper)
