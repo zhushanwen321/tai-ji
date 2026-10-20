@@ -4,7 +4,8 @@
 //   - appendEvent（事件追加，turns/eventLog/totalTokens 归约）；
 //   - markRoundStarted（轮始重置——字段①②⑤ + [U6/D4] stopReason 清点）；
 //   - markRoundIdle（轮末收尾簿记全集①-⑫——[two-state-convergence U4/D3] 轮终翻边
-//     写 idle + A-lite 轮终磁盘写点 `.state` 收条 + binding 快照 + pending 注销发射点②
+//     写 idle + A-lite 轮终磁盘写点 binding 快照（轮终停因由 record-round-idle 事件
+//     帧承载）+ pending 注销发射点②
 //     + [B2] 轮终 manifest 派生视图——session-reader manifest 直读主路径的数据源）；
 //   - adoptEngineDeath（引擎死亡收养——error/result/stopReason 三写，[U5/D4] W4 新态）。
 //
@@ -12,7 +13,7 @@
 // 轮次语义演进（SP-5 升级链、A-lite 展示位、U7 统计口径的轮终快照）集中在此。
 // binding settle 快照本体在终态原语轴（record-store-terminal.ts），本文件消费。
 //
-// [D7 写侧约束] 同终态轴：`.state` 写函数与两个 manifest 物化面（轮终派生视图
+// [D7 写侧约束] 同终态轴：两个 manifest 物化面（轮终派生视图
 // writeDerivedManifest / bound 物化 materializeBoundManifest）均经 ctx 或写侧构造
 // 参数注入，本文件零 R1 字面、零写函数 import（manifest-store 写函数调用字面只留
 // record-store.ts——写侧检查 R1 的豁免清单）。依赖方向单向：rounds → {terminal, rebuild}，
