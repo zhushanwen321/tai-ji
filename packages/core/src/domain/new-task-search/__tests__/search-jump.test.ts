@@ -290,4 +290,17 @@ describe('TC-11: 归档分支（选中归档项 → 主区摘要视图）', () =
     expect(result.ok).toBe(false)
     expect(deps.ports.archiveJump).not.toHaveBeenCalled()
   })
+
+  it('archiveJump 抛错 → {ok:false} 错误消息透传（浮层保持打开，用户可重新搜索）', async () => {
+    const deps = makeDeps()
+    ;(deps.ports.archiveJump as ReturnType<typeof vi.fn>).mockImplementation(() => { throw new Error('open failed') })
+    const archive = makeArchive()
+    const { confirm } = useSearchJump(deps)
+    const item: SearchItem = { type: 'archive', title: 'v0.10 renderer 重构', sub: 'renderer 重构开始', archive }
+
+    const result = await confirm(item, { activeSessionId: null })
+
+    expect(result.ok).toBe(false)
+    expect((result as { error: string }).error).toBe('open failed')
+  })
 })

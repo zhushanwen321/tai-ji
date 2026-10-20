@@ -537,6 +537,30 @@ describe('session 域 请求-响应', () => {
     expect(mockCommand.mock.calls[5].slice(0, 2)).toEqual(['session.deleteByCwd', { cwd: '/a' }])
   })
 
+  it('归档域四函数：archive / unarchive / purgeArchive / listArchives 的 type + payload + reply 解包', async () => {
+    // archive：ack 型回执 { sessionId } 原样透传
+    mockCommand.mockResolvedValueOnce({ sessionId: 's1' })
+    await expect(session.archive('s1')).resolves.toEqual({ sessionId: 's1' })
+    expect(mockCommand.mock.calls[0].slice(0, 2)).toEqual(['session.archive', { sessionId: 's1' }])
+
+    // unarchive：reply 解包 .session（恢复后的 SessionSummary）
+    mockCommand.mockResolvedValueOnce({ session: { id: 's1', label: '恢复的会话' } })
+    await expect(session.unarchive('s1')).resolves.toEqual({ id: 's1', label: '恢复的会话' })
+    expect(mockCommand.mock.calls[1].slice(0, 2)).toEqual(['session.unarchive', { sessionId: 's1' }])
+
+    // purgeArchive：keptSubagentsDir 条件键透传
+    mockCommand.mockResolvedValueOnce({ sessionId: 's1' })
+    await expect(session.purgeArchive('s1')).resolves.toEqual({ sessionId: 's1' })
+    expect(mockCommand.mock.calls[2].slice(0, 2)).toEqual(['session.purgeArchive', { sessionId: 's1' }])
+    mockCommand.mockResolvedValueOnce({ sessionId: 's1', keptSubagentsDir: '/tmp/keep' })
+    await expect(session.purgeArchive('s1')).resolves.toEqual({ sessionId: 's1', keptSubagentsDir: '/tmp/keep' })
+
+    // listArchives：config.archives 拉取 + reply 解包 .archives
+    mockCommand.mockResolvedValueOnce({ archives: [{ sessionId: 'arc-1', name: '旧会话' }] })
+    await expect(session.listArchives()).resolves.toEqual([{ sessionId: 'arc-1', name: '旧会话' }])
+    expect(mockCommand.mock.calls[4].slice(0, 2)).toEqual(['config.archives', {}])
+  })
+
   it('setThinkingLevel / getSubagents / getSubagentHistory / 引擎配置', async () => {
     mockCommand.mockResolvedValueOnce({ sessionId: 's1', level: 'max' })
     await expect(session.setThinkingLevel('s1', 'max')).resolves.toEqual({ sessionId: 's1', level: 'max' })

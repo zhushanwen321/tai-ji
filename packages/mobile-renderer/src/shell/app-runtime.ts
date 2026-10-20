@@ -318,6 +318,8 @@ export const __testing = {
   sessionEntry,
   /** toast 通道装配断言出口（U14/A7：core 两处注入的 toast = 错误条通道，非 console） */
   errorBarToast,
+  /** SessionApiPort 装配断言出口（[u-renderer-entry] 归档 RPC 透传等端口成员形状锁定） */
+  sessionApiPort,
 }
 
 /** 当前激活 session（响应式） */

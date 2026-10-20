@@ -149,6 +149,97 @@ function parseSummaryTurn(raw: unknown, index: number): ArchiveSummaryTurn | str
 }
 
 /**
+ * 公共必填字段校验（两态共享）。返回 base 对象或错误消息字符串（调用方包成
+ * { ok: false, error }）——顺序即报错优先级，与拆分前逐行 if 一致。
+ */
+function parseArchiveLedgerBase(obj: Record<string, unknown>): ArchiveLedgerBase | string {
+  if (!isNonEmptyString(obj.sessionId)) {
+    return `sessionId 必须为非空 string，实际 ${typeof obj.sessionId}`
+  }
+  if (typeof obj.name !== 'string') {
+    return `name 必须为 string（允许空串），实际 ${typeof obj.name}`
+  }
+  if (!isNonEmptyString(obj.originalFile)) {
+    return `originalFile 必须为非空 string，实际 ${typeof obj.originalFile}`
+  }
+  if (/[/\\]/.test(obj.originalFile)) {
+    return `originalFile 不得含路径分隔符（恢复时按文件名拼路径，防穿越），实际 "${obj.originalFile}"`
+  }
+  if (!isNonEmptyString(obj.cwd)) {
+    return `cwd 必须为非空 string，实际 ${typeof obj.cwd}`
+  }
+  if (!isIsoTimestamp(obj.archivedAt)) {
+    return `archivedAt 必须为 ISO 8601 时刻字符串，实际 ${JSON.stringify(obj.archivedAt)}`
+  }
+  if (!isNonNegativeInt(obj.rawBytes)) {
+    return `rawBytes 必须为非负整数，实际 ${JSON.stringify(obj.rawBytes)}`
+  }
+  return {
+    sessionId: obj.sessionId,
+    name: obj.name,
+    originalFile: obj.originalFile,
+    cwd: obj.cwd,
+    archivedAt: obj.archivedAt,
+    rawBytes: obj.rawBytes,
+  }
+}
+
+/** staging 态校验：骨架不含压缩产物字段 + summary 显式 null（D5 步骤 4 写入口径）。 */
+function parseStagingLedger(obj: Record<string, unknown>, base: ArchiveLedgerBase): ArchiveLedgerParseResult {
+  // hasOwnProperty.call 而非 Object.hasOwn：renderer 侧 vue-tsc 的 lib 是 ES2020，
+  // Object.hasOwn 报 TS2550（同 message.ts asWorkflowDoneReason 先例）。
+  for (const field of ['codec', 'compressedBytes', 'sha256'] as const) {
+    if (Object.prototype.hasOwnProperty.call(obj, field)) {
+      return { ok: false, error: `staging 态簿记不得携带压缩产物字段 ${field}（骨架不含，D5 步骤 4）` }
+    }
+  }
+  if (!('summary' in obj) || obj.summary !== null) {
+    return { ok: false, error: `staging 态 summary 必须为显式 null（骨架写入口径，D5 步骤 4），实际 ${JSON.stringify(obj.summary)}` }
+  }
+  return { ok: true, ledger: { ...base, status: 'staging', summary: null } }
+}
+
+/** archived 态校验：压缩产物三字段 + summary.turns 逐条形态。 */
+function parseArchivedLedger(obj: Record<string, unknown>, base: ArchiveLedgerBase): ArchiveLedgerParseResult {
+  if (!isNonEmptyString(obj.codec)) {
+    return { ok: false, error: `archived 态 codec 必须为非空 string，实际 ${typeof obj.codec}` }
+  }
+  if (!isNonNegativeInt(obj.compressedBytes)) {
+    return { ok: false, error: `archived 态 compressedBytes 必须为非负整数，实际 ${JSON.stringify(obj.compressedBytes)}` }
+  }
+  if (typeof obj.sha256 !== 'string' || !/^[0-9a-f]{64}$/.test(obj.sha256)) {
+    return { ok: false, error: `archived 态 sha256 必须为 64 位小写 hex 字符串，实际 ${JSON.stringify(obj.sha256)}` }
+  }
+  const summary = obj.summary
+  if (typeof summary !== 'object' || summary === null || Array.isArray(summary)) {
+    return { ok: false, error: `archived 态 summary 必须为 { turns } 对象，实际 ${Array.isArray(summary) ? 'array' : typeof summary}` }
+  }
+  const turns = (summary as Record<string, unknown>).turns
+  if (!Array.isArray(turns)) {
+    return { ok: false, error: `archived 态 summary.turns 必须为数组，实际 ${typeof turns}` }
+  }
+  const parsedTurns: ArchiveSummaryTurn[] = []
+  for (let i = 0; i < turns.length; i++) {
+    const turn = parseSummaryTurn(turns[i], i)
+    if (typeof turn === 'string') {
+      return { ok: false, error: turn }
+    }
+    parsedTurns.push(turn)
+  }
+  return {
+    ok: true,
+    ledger: {
+      ...base,
+      status: 'archived',
+      codec: obj.codec,
+      compressedBytes: obj.compressedBytes,
+      sha256: obj.sha256,
+      summary: { turns: parsedTurns },
+    },
+  }
+}
+
+/**
  * 解析并校验簿记 JSON（`JSON.parse` 产物或等价 unknown 输入）。
  *
  * 校验规则（staging-archived 两态字段完备性，u-foundation 验收条款）：
@@ -162,6 +253,10 @@ function parseSummaryTurn(raw: unknown, index: number): ArchiveSummaryTurn | str
  *   小写 hex、summary 为 { turns: ArchiveSummaryTurn[] }。
  * - 未知顶层字段忽略（向前兼容：新版本簿记对旧版本消费方不致命；已知字段的
  *   类型/两态一致性仍严格拒绝——与「校验宽松」不同维度）。
+ *
+ * 结构 = 顶层形态门 + 公共字段（parseArchiveLedgerBase）+ 两态分派
+ * （parseStagingLedger / parseArchivedLedger）——拆分只为单函数分支数受控，
+ * 校验规则与报错文案逐条不变。
  */
 export function parseArchiveLedger(raw: unknown): ArchiveLedgerParseResult {
   if (typeof raw !== 'object' || raw === null || Array.isArray(raw)) {
@@ -169,91 +264,17 @@ export function parseArchiveLedger(raw: unknown): ArchiveLedgerParseResult {
   }
   const obj = raw as Record<string, unknown>
 
-  if (!isNonEmptyString(obj.sessionId)) {
-    return { ok: false, error: `sessionId 必须为非空 string，实际 ${typeof obj.sessionId}` }
-  }
-  if (typeof obj.name !== 'string') {
-    return { ok: false, error: `name 必须为 string（允许空串），实际 ${typeof obj.name}` }
-  }
-  if (!isNonEmptyString(obj.originalFile)) {
-    return { ok: false, error: `originalFile 必须为非空 string，实际 ${typeof obj.originalFile}` }
-  }
-  if (/[/\\]/.test(obj.originalFile)) {
-    return { ok: false, error: `originalFile 不得含路径分隔符（恢复时按文件名拼路径，防穿越），实际 "${obj.originalFile}"` }
-  }
-  if (!isNonEmptyString(obj.cwd)) {
-    return { ok: false, error: `cwd 必须为非空 string，实际 ${typeof obj.cwd}` }
-  }
-  if (!isIsoTimestamp(obj.archivedAt)) {
-    return { ok: false, error: `archivedAt 必须为 ISO 8601 时刻字符串，实际 ${JSON.stringify(obj.archivedAt)}` }
-  }
-  if (!isNonNegativeInt(obj.rawBytes)) {
-    return { ok: false, error: `rawBytes 必须为非负整数，实际 ${JSON.stringify(obj.rawBytes)}` }
-  }
-
-  const base = {
-    sessionId: obj.sessionId,
-    name: obj.name,
-    originalFile: obj.originalFile,
-    cwd: obj.cwd,
-    archivedAt: obj.archivedAt,
-    rawBytes: obj.rawBytes,
+  const base = parseArchiveLedgerBase(obj)
+  if (typeof base === 'string') {
+    return { ok: false, error: base }
   }
 
   if (obj.status === 'staging') {
-    // 骨架不含压缩产物字段（D5 步骤 4 写入口径）——出现即簿记形态与状态机不符。
-    // hasOwnProperty.call 而非 Object.hasOwn：renderer 侧 vue-tsc 的 lib 是 ES2020，
-    // Object.hasOwn 报 TS2550（同 message.ts asWorkflowDoneReason 先例）。
-    for (const field of ['codec', 'compressedBytes', 'sha256'] as const) {
-      if (Object.prototype.hasOwnProperty.call(obj, field)) {
-        return { ok: false, error: `staging 态簿记不得携带压缩产物字段 ${field}（骨架不含，D5 步骤 4）` }
-      }
-    }
-    if (!('summary' in obj) || obj.summary !== null) {
-      return { ok: false, error: `staging 态 summary 必须为显式 null（骨架写入口径，D5 步骤 4），实际 ${JSON.stringify(obj.summary)}` }
-    }
-    return { ok: true, ledger: { ...base, status: 'staging', summary: null } }
+    return parseStagingLedger(obj, base)
   }
-
   if (obj.status === 'archived') {
-    if (!isNonEmptyString(obj.codec)) {
-      return { ok: false, error: `archived 态 codec 必须为非空 string，实际 ${typeof obj.codec}` }
-    }
-    if (!isNonNegativeInt(obj.compressedBytes)) {
-      return { ok: false, error: `archived 态 compressedBytes 必须为非负整数，实际 ${JSON.stringify(obj.compressedBytes)}` }
-    }
-    if (typeof obj.sha256 !== 'string' || !/^[0-9a-f]{64}$/.test(obj.sha256)) {
-      return { ok: false, error: `archived 态 sha256 必须为 64 位小写 hex 字符串，实际 ${JSON.stringify(obj.sha256)}` }
-    }
-    const summary = obj.summary
-    if (typeof summary !== 'object' || summary === null || Array.isArray(summary)) {
-      return { ok: false, error: `archived 态 summary 必须为 { turns } 对象，实际 ${Array.isArray(summary) ? 'array' : typeof summary}` }
-    }
-    const turns = (summary as Record<string, unknown>).turns
-    if (!Array.isArray(turns)) {
-      return { ok: false, error: `archived 态 summary.turns 必须为数组，实际 ${typeof turns}` }
-    }
-    const parsedTurns: ArchiveSummaryTurn[] = []
-    for (let i = 0; i < turns.length; i++) {
-      const turn = parseSummaryTurn(turns[i], i)
-      if (typeof turn === 'string') {
-        return { ok: false, error: turn }
-      }
-      parsedTurns.push(turn)
-    }
-    return {
-      ok: true,
-      ledger: {
-        ...base,
-        status: 'archived',
-        codec: obj.codec,
-        compressedBytes: obj.compressedBytes,
-        sha256: obj.sha256,
-        summary: { turns: parsedTurns },
-      },
-    }
+    return parseArchivedLedger(obj, base)
   }
-
   return {
     ok: false,
     error: `status 必须为 staging|archived（restoring 态由 .restoring 后缀承载，不进词表），实际 ${JSON.stringify(obj.status)}`,

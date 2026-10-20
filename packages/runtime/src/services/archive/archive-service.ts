@@ -185,6 +185,10 @@ export class ArchiveService {
   /**
    * 归档：前置三门 → 活跃编排五步复刻 delete 分支 → 搬移（旁挂→主文件→附件三目录）
    * → 簿记骨架 → 广播。后台压缩任务经在途任务表异步派发（reply 后执行）。
+   *
+   * 结构 = 三门定位 + 三段提取（teardownForArchive 活跃退场五步 / moveAssetsToUnit
+   * 搬移 / writeStagingLedger 簿记骨架）——拆分只为单函数分支数受控，步骤顺序与
+   * 错误映射逐条不变。
    */
   async archive(sessionId: string): Promise<{ sessionId: string }> {
     // 门 1：生成中拒绝（D13——杀 pi 会丢尾部未落盘 entry）。
@@ -201,8 +205,9 @@ export class ArchiveService {
     }
     // 定位：活跃（内存 Map）优先，其次扫描态（磁盘）。
     const active = this.deps.getActiveSession(sessionId)
-    const cwd = active?.cwd ?? this.deps.findScannedSession(sessionId)?.cwd
-    const mainPath = active?.sessionFilePath ?? this.deps.findScannedSession(sessionId)?.filePath
+    const scanned = this.deps.findScannedSession(sessionId)
+    const cwd = active?.cwd ?? scanned?.cwd
+    const mainPath = active?.sessionFilePath ?? scanned?.filePath
     if (cwd === undefined || mainPath === undefined) {
       throw new Error(`Session ${sessionId} not found (不在内存 Map 且磁盘无主文件，无归档对象)`)
     }
@@ -217,33 +222,62 @@ export class ArchiveService {
 
     // 活跃/非活跃共用：停止名下 btw 线（D8——不停止则线进程持有 mainSid 上下文继续写
     // 留置的 btw/ 域，与主 session 退场状态矛盾）。活跃分支五步复刻 delete（D5 步骤 2）。
-    if (active !== undefined) {
-      // ① userStopped 清理（标记与收敛环定时器随退场清理；恢复后是新进程无标记语义）。
+    await this.teardownForArchive(sessionId, cwd, active !== undefined)
+
+    // 搬移（顺序固定，D5 步骤 3）：旁挂六类 → 主文件 → 附件三目录（源缺失跳过）。
+    this.moveAssetsToUnit(sessionId, mainPath, unitDir, originalFile)
+
+    // 读归档目录内明文提取名称（尾读有界）+ 写簿记骨架（D5 步骤 4）。
+    const stagingLedger = this.writeStagingLedger(sessionId, unitDir, originalFile, cwd)
+
+    // 步骤 5：缓存失效 + 广播（reply 由 u-rpc-wiring 层发；archiveCount 属帧构造）。
+    this.deps.invalidateScanCache()
+    this.deps.broadcastSessionList()
+
+    // 后台压缩任务（reply 后异步执行；经在途任务表串行化）。
+    void this.queueCompression(stagingLedger, unitDir).catch((e: unknown) => {
+      this.deps.warn(`[archive] 后台压缩任务失败（条目保持 staging 态，启动自愈重试）(sessionId=${sessionId}): ${toMessage(e)}`)
+    })
+    return { sessionId }
+  }
+
+  /**
+   * 归档前活跃 session 退场五步（D5 步骤 2，复刻 delete 分支；非活跃 session 只跑
+   * btw 级联停止）：
+   * ① userStopped 清理（标记与收敛环定时器随退场清理；恢复后是新进程无标记语义）；
+   * ② 死亡处置登记 suppress——先于任何杀进程（防 exit 事件被组合根按崩溃路径响应；
+   *   disposition = 'suppress'（非终局杀，组合根标记静默 + 销毁回调跳过，不产生伪造
+   *   死亡通知；intentional destroy 的 exit 被 process-manager clientToId 反查拦截，
+   *   R2 探针核实见 runlog）；
+   * ③ 级联停止名下 btw 线（closeAllForMain 原语；线 jsonl 留置主树 btw/ 域，D8）；
+   * ④ detach + 终止 pi 进程 + 内存 Map 摘除（「停止并归档」语义，D13）；
+   * ⑤ 收殓在途后台任务（先于一切搬移动作——base-tool-enhance 后台任务在主 turn 结束
+   *   后仍可能在途而 isGenerating 已为 false；不收殓 = 后台进程泄漏 + 迟到写重建孤儿）。
+   */
+  private async teardownForArchive(sessionId: string, cwd: string, isActive: boolean): Promise<void> {
+    if (isActive) {
       this.deps.disposeUserStopped(sessionId)
-      // ② 死亡处置登记 suppress——先于任何杀进程（防 exit 事件被组合根按崩溃路径响应）；
-      //   disposition = 'suppress'（非终局杀，组合根标记静默 + 销毁回调跳过，不产生伪造
-      //   死亡通知；intentional destroy 的 exit 被 process-manager clientToId 反查拦截，
-      //   R2 探针核实见 runlog）。
       this.deps.fireSuppressDisposition(sessionId, true)
     }
-    // ③ 级联停止名下 btw 线（closeAllForMain 原语；线 jsonl 留置主树 btw/ 域，D8）。
     await this.closeBtwLinesQuietly(sessionId, cwd)
-    if (active !== undefined) {
-      // ④ detach + 终止 pi 进程 + 内存 Map 摘除（「停止并归档」语义，D13）。
+    if (isActive) {
       this.deps.detachSession(sessionId)
       await this.deps.destroyPiSession(sessionId)
       this.deps.removeSessionEntry(sessionId)
     }
-    // ⑤ 收殓在途后台任务（先于一切搬移动作——base-tool-enhance 后台任务在主 turn 结束
-    //   后仍可能在途而 isGenerating 已为 false；不收殓 = 后台进程泄漏 + 迟到写重建孤儿）。
     try {
       await this.deps.reapBackgroundTasks(this.agentDir, sessionId)
     } catch (e: unknown) {
       // 收殓失败不阻断归档（幂等原语，重试路径同 delete 侧 best-effort 语义）；出声。
       this.deps.warn(`[archive] 收殓在途后台任务失败，继续归档 (sessionId=${sessionId}): ${toMessage(e)}`)
     }
+  }
 
-    // 搬移（顺序固定，D5 步骤 3）：旁挂六类 → 主文件 → 附件三目录（源缺失跳过）。
+  /**
+   * 搬移归档物到单元目录（D5 步骤 3，顺序固定）：旁挂六类 → 主文件 → 附件三目录
+   * （源缺失跳过）。任一步失败统一映射 archive_io_error。
+   */
+  private moveAssetsToUnit(sessionId: string, mainPath: string, unitDir: string, originalFile: string): void {
     try {
       for (const sidecar of existingSidecars(mainPath)) {
         renameSync(sidecar, join(unitDir, basename(sidecar)))
@@ -259,8 +293,13 @@ export class ArchiveService {
     } catch (e: unknown) {
       throw new ArchiveError('archive_io_error', `归档搬移失败 (sessionId=${sessionId}): ${toMessage(e)}`)
     }
+  }
 
-    // 读归档目录内明文提取名称（尾读有界）+ 写簿记骨架（D5 步骤 4）。
+  /**
+   * 写 staging 簿记骨架（D5 步骤 4）：读归档目录内明文提取名称（尾读有界）+ 字节数
+   * + 原子写入。写入失败映射 archive_io_error。
+   */
+  private writeStagingLedger(sessionId: string, unitDir: string, originalFile: string, cwd: string): ArchiveLedgerStaging {
     const plainPath = archivePlainMainPath(unitDir, originalFile)
     const name = extractSessionName(plainPath) ?? ''
     const rawBytes = statSync(plainPath).size
@@ -279,16 +318,7 @@ export class ArchiveService {
     } catch (e: unknown) {
       throw new ArchiveError('archive_io_error', `归档簿记写入失败 (sessionId=${sessionId}): ${toMessage(e)}`)
     }
-
-    // 步骤 5：缓存失效 + 广播（reply 由 u-rpc-wiring 层发；archiveCount 属帧构造）。
-    this.deps.invalidateScanCache()
-    this.deps.broadcastSessionList()
-
-    // 后台压缩任务（reply 后异步执行；经在途任务表串行化）。
-    void this.queueCompression(stagingLedger, unitDir).catch((e: unknown) => {
-      this.deps.warn(`[archive] 后台压缩任务失败（条目保持 staging 态，启动自愈重试）(sessionId=${sessionId}): ${toMessage(e)}`)
-    })
-    return { sessionId }
+    return stagingLedger
   }
 
   /** btw 级联停止的 best-effort 包装（失败不阻断归档主链；对齐 delete 的降级语义）。 */

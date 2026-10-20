@@ -108,6 +108,8 @@ vi.mock('@taiji/core/transport/api', () => ({
 }))
 vi.mock('@taiji/core/transport/api/domains/session', () => ({
   list: vi.fn().mockResolvedValue([]),
+  // 归档搜索源（useSearchModalDeps 壳组装引用；本用例不涉归档，空列表即足）
+  listArchives: vi.fn().mockResolvedValue([]),
 }))
 
 import Sidebar from '@/components/sidebar/Sidebar.vue'

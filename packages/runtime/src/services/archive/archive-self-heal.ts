@@ -109,6 +109,9 @@ function healRestoringLedger(ctx: HealContext, l: LocatedLedger): void {
  * - 存在（归档未生效）→ 孤儿文件（主文件 + 旁挂）搬回 sessions/ 原位。
  * 无 .jsonl 锚的孤儿（纯旁挂/附件且 sessions/ 侧无主文件 = 数据已缺失）跳过并 warn——
  * 无 sessionId 可归属，超出自愈能力面。
+ *
+ * 结构 = 主循环（识别锚 + 分派）+ 两分支提取（moveOrphanBackToOriginal 搬回 /
+ * writeOrphanStagingLedger 补写）——拆分只为单函数分支数受控，判定与 warn 文案不变。
  */
 function healOrphanFiles(ctx: HealContext, located: LocatedLedger[]): void {
   const knownLedgers = new Set(located.map((l) => archiveLedgerPath(l.unitDir, l.ledger.originalFile)))
@@ -138,38 +141,61 @@ function healOrphanFiles(ctx: HealContext, located: LocatedLedger[]): void {
     const originalMain = sessionOriginalPath(ctx.sessionsRoot, header.cwd, plainName)
     if (existsSync(originalMain)) {
       // 归档未生效：孤儿（主文件 + 旁挂）搬回原位。
-      try {
-        renameSync(plainPath, originalMain)
-        for (const ext of SESSION_SIDECAR_EXTS) {
-          const sidecar = plainPath + ext
-          if (existsSync(sidecar)) renameSync(sidecar, originalMain + ext)
-        }
-        ctx.warn(`[archive-self-heal] 行4 归档未生效，孤儿文件搬回原位: ${plainName} (sessionId=${header.id})`)
-      } catch (e: unknown) {
-        ctx.warn(`[archive-self-heal] 行4 孤儿搬回失败（下次启动重试）: ${plainPath}: ${toMessage(e)}`)
-      }
+      moveOrphanBackToOriginal(ctx, plainPath, originalMain, plainName, header.id)
       continue
     }
     // 归档已生效：补写 staging 簿记（已有簿记的桶不进孤儿分支，双保险查重）。
     const ledgerPath = archiveLedgerPath(unitDir, plainName)
     if (knownLedgers.has(ledgerPath) || knownRestoring.has(archiveRestoringPath(unitDir, plainName))) continue
-    try {
-      const staging: ArchiveLedgerStaging = {
-        sessionId: header.id,
-        name: extractSessionName(plainPath) ?? '',
-        originalFile: plainName,
-        cwd: header.cwd,
-        archivedAt: new Date().toISOString(),
-        rawBytes: statSync(plainPath).size,
-        status: 'staging',
-        summary: null,
-      }
-      // 一次性写（目标不存在，无原子覆盖需求；格式与 writeLedgerAtomic 一致）。
-      writeFileSync(ledgerPath, `${JSON.stringify(staging, null, HEAL_LEDGER_INDENT)}\n`)
-      ctx.warn(`[archive-self-heal] 行4 补写 staging 簿记（按完成归档处理）(sessionId=${header.id})`)
-    } catch (e: unknown) {
-      ctx.warn(`[archive-self-heal] 行4 补写簿记失败（下次启动重试）: ${ledgerPath}: ${toMessage(e)}`)
+    writeOrphanStagingLedger(ctx, unitDir, plainPath, plainName, ledgerPath, header)
+  }
+}
+
+/** 行 4 分支 A：归档未生效——孤儿（主文件 + 旁挂）搬回 sessions/ 原位。 */
+function moveOrphanBackToOriginal(
+  ctx: HealContext,
+  plainPath: string,
+  originalMain: string,
+  plainName: string,
+  sessionId: string,
+): void {
+  try {
+    renameSync(plainPath, originalMain)
+    for (const ext of SESSION_SIDECAR_EXTS) {
+      const sidecar = plainPath + ext
+      if (existsSync(sidecar)) renameSync(sidecar, originalMain + ext)
     }
+    ctx.warn(`[archive-self-heal] 行4 归档未生效，孤儿文件搬回原位: ${plainName} (sessionId=${sessionId})`)
+  } catch (e: unknown) {
+    ctx.warn(`[archive-self-heal] 行4 孤儿搬回失败（下次启动重试）: ${plainPath}: ${toMessage(e)}`)
+  }
+}
+
+/** 行 4 分支 B：归档已生效——补写 staging 簿记（一次性写，目标不存在无原子覆盖需求）。 */
+function writeOrphanStagingLedger(
+  ctx: HealContext,
+  unitDir: string,
+  plainPath: string,
+  plainName: string,
+  ledgerPath: string,
+  header: { id: string; cwd: string },
+): void {
+  try {
+    const staging: ArchiveLedgerStaging = {
+      sessionId: header.id,
+      name: extractSessionName(plainPath) ?? '',
+      originalFile: plainName,
+      cwd: header.cwd,
+      archivedAt: new Date().toISOString(),
+      rawBytes: statSync(plainPath).size,
+      status: 'staging',
+      summary: null,
+    }
+    // 一次性写（目标不存在，无原子覆盖需求；格式与 writeLedgerAtomic 一致）。
+    writeFileSync(ledgerPath, `${JSON.stringify(staging, null, HEAL_LEDGER_INDENT)}\n`)
+    ctx.warn(`[archive-self-heal] 行4 补写 staging 簿记（按完成归档处理）(sessionId=${header.id})`)
+  } catch (e: unknown) {
+    ctx.warn(`[archive-self-heal] 行4 补写簿记失败（下次启动重试）: ${ledgerPath}: ${toMessage(e)}`)
   }
 }
 
