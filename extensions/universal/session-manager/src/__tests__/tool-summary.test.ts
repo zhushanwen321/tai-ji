@@ -1,4 +1,4 @@
-// tool-summary.test.ts — details.summary 产出（六工具文案断言，走 execute 骨架）+
+// tool-summary.test.ts — details.summary 产出（八工具文案断言，走 execute 骨架）+
 // renderSessionManagerResult 两态（折叠态一行摘要 / 展开态原始 content 文本）。
 
 import type { Theme } from "@earendil-works/pi-coding-agent";
@@ -36,7 +36,7 @@ function renderedText(result: unknown, expanded: boolean): string {
 	return renderSessionManagerResult(result, { expanded }, mockTheme).render(400).join("\n");
 }
 
-describe("execute 组装 details.summary（六工具文案）", () => {
+describe("execute 组装 details.summary（八工具文案）", () => {
 	let harness: ReturnType<typeof createHarness>;
 
 	beforeEach(() => {

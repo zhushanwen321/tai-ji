@@ -279,8 +279,11 @@ agent("w");
 
 describe("actionSave/actionDelete error paths (W4: throw 范式)", () => {
   /**
-   * W4：save/delete 失败路径从 return {isError:true} 改为 throw——pi 只对 execute
-   * throw 置 isError:true（agent-loop.js:453-483 丢弃返回值里的 isError）。
+   * W4：save/delete 失败路径从 return {isError:true} 改为 throw——execute throw →
+   * pi agent-loop catch 置 isError:true（pi-agent-core dist/agent-loop.js
+   * executePreparedToolCall，1.0.0 实读 catch :581-588；1.0.0 起正常 return 的
+   * isError 也被尊重——:579 isError: result.isError === true，0.84.4 才硬编码
+   * false——本包失败恒走 throw，行为不变）。
    * 经 registerWorkflowScriptTool 注册层测（mock workflow-files 的 FS 依赖）。
    */
   const ctx = { mode: "tui" as const, hasUI: true };

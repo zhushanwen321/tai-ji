@@ -12,7 +12,7 @@
  * send/create 受理点 arm、watch 单键寻址路由（fail-closed / wait / catch-up 三分支）、
  * handleAbort 入口同步抹除、respond 前二次归属校验；state→协议 reason 的词形映射
  * （toWatchRespondPayload）与 respond 回执循环（deliverRespondTargets）
- * 以导出函数形态供组合根 index.ts 共用（settle/death/TTL 清扫路径），保证映射单点。
+ * 以导出函数形态供组合根 index.ts 共用（settle/death 路径），保证映射单点。
  *
  * [架构备注，PR #189 review] 本 handler 承载业务编排（归属校验 / list 过滤 / history
  * tailTurns 截断；notify-once 导出助手 collectStderrTail / toWatchRespondPayload /
@@ -107,7 +107,9 @@ function logNotifyIdAbsence(action: 'send' | 'create'): void {
  * pending 项（pi 实装 dist/modes/rpc/rpc-mode.js handleInputLine 的 extension_ui_response
  * 分支按 id resolve pendingExtensionRequests，1.0.0 实读；既有锚
  * rpc-client.ts:1129-1133）。watch 长挂 select 无 timeout，pi 侧不超时清项（PS-59）；
- * 写成功未消费的残余由 TTL 清扫路径（D7③）兜底。
+ * 写成功未消费的残余无定时回收（TTL 清扫已随 ADR-0122 退役）——runtime 债权侧经
+ * onRespond 即时清账，pi 侧迟到行无 pending 项即静默丢弃（rpc-mode.js handleInputLine，
+ * 1.0.0 实读）。
  */
 export type WatchRespondFn = (
   parentSid: string,
@@ -328,7 +330,7 @@ export class SessionManagerHandler {
     return this.opts.sendExtensionUiResponse(parentSid, watchId, JSON.stringify(payload), 'select') === true
   }
 
-  /** 组合根共用的 respond 适配（settle/death/TTL 清扫路径把素材交给同一写回通道语义）。 */
+  /** 组合根共用的 respond 适配（settle/death 路径把素材交给同一写回通道语义）。 */
   readonly watchRespond: WatchRespondFn = (parentSid, watchId, payload) =>
     this.respondWatch(parentSid, watchId, payload)
 
@@ -825,7 +827,7 @@ export class SessionManagerHandler {
    * - fail-closed：查无 claim（含 claims 停用象限）→ 立即 respond cancelled（无 claim 可回带，
    *   不携 sessionId——D-4），防长挂 select 泄漏；
    * - wait：未兑现 → 挂等（单 watch 槽新覆盖旧，被覆盖的旧 watch 永不 respond，
-   *   悬 promise 已知无害 P1）——本次调用零 respond，应答由 settle/death/abort/TTL 路径晚达；
+   *   悬 promise 已知无害 P1）——本次调用零 respond，应答由 settle/death/abort 路径晚达；
    * - respond：已兑现/已终结 → 立即应答，**respond 前二次归属校验**（D6 两态）：
    *   session 已不在（getSummary 缺失）→ 'exited'（死亡通知不凭空消失，'deleted' 仅由删除
    *   编排点登记）；session 仍在但归属失效 → 'cancelled'（静默）；仍有效 → 快照应答。
@@ -848,7 +850,7 @@ export class SessionManagerHandler {
         this.respondWatch(parentSessionId, watchId, { reason: 'cancelled' })
         return null
       case 'wait':
-        // deferred：无应答对象变更，promise 挂起至 settle/death/abort/TTL 路径晚达
+        // deferred：无应答对象变更，promise 挂起至 settle/death/abort 路径晚达
         return null
       case 'respond': {
         const t = routing.target
