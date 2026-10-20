@@ -189,8 +189,15 @@ export function useQuotaConfigure(inputs: QuotaConfigureInputs): QuotaConfigureM
   /** 最近一次查询失败原因（A2-4 reason 透传；null = 无失败）。旧缓存保留在 quotaData（「查看上次成功数据」） */
   const testFailReason = ref<QuotaFetchFailureReason | null>(null)
 
-  /** 下拉框选项：presets 合并视图映射为 { value, label } */
-  const fetcherOptions = getSettingsStore().quotaPresets.value.map((p) => ({ value: p.fetcher, label: p.label }))
+  /**
+   * 下拉框选项：presets 合并视图映射为 { value, label }。
+   * computed 而非 setup 期一次性快照：quotaPresets 由 config.listQuotaPresets RPC 异步填充，
+   * 回包晚于本 composable 装配——一次性求值会让下拉恒空且本挂载期不恢复（与 isCookieAuth /
+   * activePreset 的 computed 读取路径保持同源新鲜度）。
+   */
+  const fetcherOptions = computed(() =>
+    getSettingsStore().quotaPresets.value.map((p) => ({ value: p.fetcher, label: p.label })),
+  )
 
   /**
    * 类型草稿写入（§7.1：类型进草稿，由 saveAndTest 一次提交，不再即时落盘）。
@@ -318,7 +325,7 @@ export function useQuotaConfigure(inputs: QuotaConfigureInputs): QuotaConfigureM
     return {
       type: {
         selected: fetcherIdDraft.value,
-        options: fetcherOptions,
+        options: fetcherOptions.value,
         undetermined,
       },
       enabled: enabled.value,
