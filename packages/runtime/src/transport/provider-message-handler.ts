@@ -103,8 +103,8 @@ export class ProviderMessageHandler {
 
   // settings-provider 页进入时触发：远程模型目录 ETag 协商刷新（单请求 4s 超时，
   // 全部 fail-safe），完成后广播新列表（store 常驻订阅自动更新，renderer 零状态管理）。
-  // 顺带触发 taiji 远程配置同步（remote-config 域 1，checkedAt 4h 节流在 fetch 层）：
-  // 有 provider 模型合并写盘时再广播一次（无变化不重复广播）。
+  // 顺带触发 taiji 远程配置同步（remote-config 域 1 provider 清单 + 域 2 quota-fetchers，
+  // checkedAt 4h 节流在 fetch 层）：有 provider 模型合并写盘时再广播一次（无变化不重复广播）。
   // 该同步是 reply 之后的旁路动作，失败必须降级为 warn 留痕、不得上抛——reply 已对同一
   // msg.id 发出成功 envelope，异常冒泡到 server.ts handleMessage 的 catch 会对同一 id 补发
   // error envelope（成功 + 失败双回复）。降级形态与启动路径 index.ts 的 startup refresh
