@@ -10,12 +10,6 @@ export type {
   RunTransitionOptions,
   RunTransitionReturn,
 } from './run-transition'
-export {
-  transitionOnCore,
-  buildMachineCore,
-  type MachineCore,
-  type NormalizedRow,
-} from './transition'
 export type {
   ErrorPolicy,
   EventSpec,
