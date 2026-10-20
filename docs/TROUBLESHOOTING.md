@@ -541,7 +541,7 @@ git -C <repo> remote                          # 清单里没有 'origin' 即中�
 git -C <repo> for-each-ref refs/remotes/origin --format='%(refname) %(objectname:short)'
 ```
 
-runtime 侧防护（2026-10-20 落地）：默认 base 不再硬编码 `origin/main`，按 `git remote` 实况动态推导（origin → checkout.defaultRemote → 单一远端 → 清单首个；无远端用本地 main，实现 `packages/runtime/src/services/worktree/default-base-resolver.ts`）；显式传 `<remote>/<branch>` 时若远端未配置且 ref 落在 `refs/remotes/` 下会拒绝采信（RT-8#8 warn 留痕 + fallback 推导默认）；打开仓库（workspace.record）后台 fetch 默认远端保新鲜。
+runtime 侧防护（2026-10-20 落地）：默认 base 不再硬编码 `origin/main`，按 `git remote` 实况动态推导（checkout.defaultRemote → origin → 单一远端 → 清单首个；无远端用本地 main，实现 `packages/runtime/src/services/worktree/default-base-resolver.ts`）；显式传 `<remote>/<branch>` 时若远端未配置且 ref 落在 `refs/remotes/` 下会拒绝采信（RT-8#8 warn 留痕 + fallback 推导默认）；打开仓库（workspace.record）后台 fetch 默认远端保新鲜。
 
 **恢复动作**（清理残留 refs，卫生性修复）：
 

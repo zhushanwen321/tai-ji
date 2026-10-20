@@ -51,13 +51,27 @@ describe('DefaultBaseResolver', () => {
     expect(result.defaultBaseRef).toBe('github/main')
   })
 
-  it('origin 存在则优先于清单顺序', async () => {
+  it('无 checkout.defaultRemote 配置时 origin 优先于清单顺序', async () => {
     const r = makeResolver(baseTable(['upstream', 'origin'], new Map([
+      // 显式给出「未配置」形态（git config --get 对缺失键非零退出），不依赖 mock 的未知命令兜底
+      ['config --get checkout.defaultRemote', { stdout: '', stderr: '', exitCode: 1 }],
       ['symbolic-ref refs/remotes/origin/HEAD', { stdout: 'refs/remotes/origin/main\n', stderr: '', exitCode: 0 }],
     ])))
     const result = await r.resolve('/repo')
     expect(result.defaultRemote).toBe('origin')
     expect(result.defaultBaseRef).toBe('origin/main')
+  })
+
+  it('含 origin 且 checkout.defaultRemote 指向其他远端 → 取配置值（用户显式意图优先于惯例名）', async () => {
+    const r = makeResolver(baseTable(['origin', 'github'], new Map([
+      ['config --get checkout.defaultRemote', { stdout: 'github\n', stderr: '', exitCode: 0 }],
+      ['symbolic-ref refs/remotes/github/HEAD', { stdout: 'refs/remotes/github/main\n', stderr: '', exitCode: 0 }],
+      // origin 的 HEAD 同样可解析——确保结果来自配置选择而非 origin 不可用的退路
+      ['symbolic-ref refs/remotes/origin/HEAD', { stdout: 'refs/remotes/origin/main\n', stderr: '', exitCode: 0 }],
+    ])))
+    const result = await r.resolve('/repo')
+    expect(result.defaultRemote).toBe('github')
+    expect(result.defaultBaseRef).toBe('github/main')
   })
 
   it('无 origin 时 checkout.defaultRemote 配置优先（且必须在清单内）', async () => {
@@ -77,6 +91,15 @@ describe('DefaultBaseResolver', () => {
     ])))
     const result = await r.resolve('/repo')
     expect(result.defaultRemote).toBe('github')
+  })
+
+  it('checkout.defaultRemote 不在清单内且含 origin → 忽略配置，穿透到 origin（非清单首个）', async () => {
+    const r = makeResolver(baseTable(['upstream', 'origin'], new Map([
+      ['config --get checkout.defaultRemote', { stdout: 'nonexistent\n', stderr: '', exitCode: 0 }],
+      ['symbolic-ref refs/remotes/origin/HEAD', { stdout: 'refs/remotes/origin/main\n', stderr: '', exitCode: 0 }],
+    ])))
+    const result = await r.resolve('/repo')
+    expect(result.defaultRemote).toBe('origin')
   })
 
   it('symref 失败（幽灵直接 ref / 无 HEAD）→ rev-parse 验证 <remote>/main', async () => {

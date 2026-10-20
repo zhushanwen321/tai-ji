@@ -26,8 +26,8 @@ export interface WorkspaceDetectResult {
   repoRoot: string
   defaultBranch: string
   /**
-   * 推导默认 base ref（如 'github/main'）：按仓库远端实况动态推导（origin →
-   * checkout.defaultRemote → 单一远端 → 清单首个；无远端用本地 main）。repo 两态附带；
+   * 推导默认 base ref（如 'github/main'）：按仓库远端实况动态推导（checkout.defaultRemote →
+   * origin → 单一远端 → 清单首个；无远端用本地 main）。repo 两态附带；
    * 解析失败或 not-repo 缺省。前端建 worktree 的默认基线直接用它，不再自拼 origin/*。
    */
   defaultBaseRef?: string

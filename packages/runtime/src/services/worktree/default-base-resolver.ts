@@ -8,18 +8,25 @@
  * `git remote` 实况，幽灵 ref 天然不进候选。
  *
  * 默认远端挑选顺序（多远端时谁排最前）：
- * ① origin（git clone 通行惯例）② git config checkout.defaultRemote（git 官方的
- * 默认远端裁决配置，用户显式意图）③ 单一远端 ④ 清单首个。
+ * ① git config checkout.defaultRemote（git 官方的默认远端裁决配置——用户显式意图，必须在
+ * `git remote` 清单内才采信）② origin（git clone 通行惯例）③ 单一远端 ④ 清单首个。
+ * 显式配置排惯例名之前：仓库同时有 origin 与另一远端且 defaultRemote 指向后者时，
+ * 'auto' 必须解析到用户指定的那个，而不是被惯例名静默盖掉。
  *
  * 默认分支：<remote>/HEAD 的 symref（symbolic-ref 对非 symref 的残留直接 ref 非零退出，
  * 幽灵 HEAD 天然不污染）→ 依次 rev-parse 验证 <remote>/main、<remote>/master → 均无则
  * 退本地 main。
  */
+import { WORKTREE_AUTO_BASE_BRANCH } from '@taiji/shared'
 import type { IGitExecutor } from '../ports/git-executor.js'
 import { logger } from '../../infra/logger.js'
 
-/** baseBranch 配置哨兵：动态推导（worktree-config-helper 的 DEFAULT_BASE_BRANCH）。 */
-export const AUTO_BASE_BRANCH = 'auto'
+/**
+ * baseBranch 配置哨兵：动态推导（worktree-config-helper 的 DEFAULT_BASE_BRANCH）。
+ * 值 SSOT = @taiji/shared WORKTREE_AUTO_BASE_BRANCH（跨端协议哨兵，C-comm-22）；此处 re-export
+ * 保持 runtime 域内既有 import 路径不变。
+ */
+export const AUTO_BASE_BRANCH = WORKTREE_AUTO_BASE_BRANCH
 
 /** 无远端 / 远端无可用分支时的兜底基线（本地 main）。 */
 const LOCAL_MAIN = 'main'
@@ -105,12 +112,15 @@ export class DefaultBaseResolver {
     return null
   }
 
-  /** 按挑选顺序决出默认远端。 */
+  /**
+   * 按挑选顺序决出默认远端：① checkout.defaultRemote（须在清单内）② origin ③ 单一远端
+   * ④ 清单首个（③④ 同为 remotes[0]）。
+   */
   private async pickDefaultRemote(repoDir: string, remotes: string[]): Promise<string | null> {
-    if (remotes.includes('origin')) return 'origin'
     const configured = await this.gitExecutor.exec(repoDir, 'config', ['--get', 'checkout.defaultRemote'])
     const preferred = configured.exitCode === 0 ? configured.stdout.trim() : ''
     if (preferred && remotes.includes(preferred)) return preferred
+    if (remotes.includes('origin')) return 'origin'
     return remotes[0] ?? null
   }
 
