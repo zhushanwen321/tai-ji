@@ -76,8 +76,8 @@ export async function syncRemoteProviderModels(deps: RemoteProviderSyncDeps): Pr
   const { data, refreshed, reason } = await refreshRemoteConfig(DOMAIN, isRemoteProvidersConfig)
   const result: RemoteProviderSyncResult = { updatedProviders: [], ...(reason !== undefined ? { fetchReason: reason } : {}) }
   if (!data) return result
-  // 内容未变化时仍走逐 provider 重算（内部与现值 deep-equal 后 no-op），不依赖 domain 级
-  // 变更标记——正确性不建立在「refreshed 判定精确」上，代价是变化时多一次 stringify 比较
+  // 内容未变化时仍走逐 provider 重算（内部与现值比对后 no-op），不依赖 domain 级
+  // 变更标记——正确性不建立在「refreshed 判定精确」上，代价是变化时多一次逐字段比对
   void refreshed
 
   // remoteSource 标记的 provider 集合（extras 全量读；未注入 extrasStore = 无标记，无同步对象）
@@ -91,13 +91,27 @@ export async function syncRemoteProviderModels(deps: RemoteProviderSyncDeps): Pr
     if (!entry) continue
 
     const current = (deps.configStore.getProviderConfig(providerId)?.models ?? []) as unknown as Array<Record<string, unknown>>
-    const byId = new Map<string, Record<string, unknown>>(current.map((m) => [String(m['id']), m]))
+    const currentById = new Map<string, Record<string, unknown>>(current.map((m) => [String(m['id']), m]))
+    const byId = new Map<string, Record<string, unknown>>(currentById)
     for (const rm of entry.models) {
       byId.set(rm.id, remoteModelToDefinition(rm) as unknown as Record<string, unknown>)
     }
     const models = [...byId.values()]
-    // 无变化 no-op（refreshed 但该 provider 模型未变的常态路径）
-    if (JSON.stringify(current) === JSON.stringify(models)) continue
+    // 无变化 no-op（refreshed 但该 provider 模型未变的常态路径）。
+    // 判据对齐 setProvider 写路径语义（mergeProviderModel：base spread + 远程字段覆盖）：
+    // 远程字段全部与现值相同且无新 id → 写后与现值一致。不能 stringify 比较「合并形态 vs
+    // 现值」——远程条目省略的可选字段（reasoning/input/contextWindow 等）在 QuickSetup
+    // 落盘形态里已由 remoteModelToSummary 补默认值（reasoning ?? false / input ?? ['text']
+    // / contextWindow ?? 0），裸形态替换会让内容相同的 models.json 每轮 atomicWrite 重写
+    // 并触发 mtime 广播。
+    const noChange = entry.models.every((rm) => {
+      const cur = currentById.get(rm.id)
+      if (!cur) return false // 新 id = 追加，非 no-op
+      return Object.entries(remoteModelToDefinition(rm)).every(
+        ([k, v]) => JSON.stringify(cur[k]) === JSON.stringify(v),
+      )
+    })
+    if (noChange) continue
 
     await setProviderImpl(deps.configStore, deps.authStorage, deps.extrasStore, deps.credentialWriter, providerId, {
       models: models as NonNullable<SetProviderInput['models']>,

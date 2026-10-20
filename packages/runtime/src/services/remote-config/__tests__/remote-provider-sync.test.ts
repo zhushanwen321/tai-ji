@@ -186,6 +186,38 @@ describe('syncRemoteProviderModels 合并写盘', () => {
     expect(upserts).toHaveLength(0)
   })
 
+  it('QuickSetup 落盘形态（显式 reasoning/input/contextWindow 默认值）+ 远程省略可选字段 → no-op 不写盘', async () => {
+    // 回归 dmg-r2-3：QuickSetup 经 remoteModelToSummary 补默认值后落盘，远程条目省略
+    // reasoning/input/contextWindow 时裸形态替换会让内容相同的 models.json 每轮重写。
+    mockFetch200(remoteConfig([{ id: 'taiji-relay', name: 'Relay', models: [{ id: 'm1', name: 'M1' }] }]))
+    const { store, upserts } = makeConfigStore({
+      'taiji-relay': { models: [{ id: 'm1', name: 'M1', reasoning: false, input: ['text'], contextWindow: 0 }] },
+    })
+    const { sync: mod } = await loadFresh()
+    const result = await mod.syncRemoteProviderModels({
+      configStore: store,
+      extrasStore: makeExtrasStore({ 'taiji-relay': { remoteSource: 'taiji-relay' } }),
+    })
+    expect(result.updatedProviders).toEqual([])
+    expect(upserts).toHaveLength(0)
+  })
+
+  it('QuickSetup 落盘形态 + 远程显式改字段 → 写盘（no-op 判据不过度抑制）', async () => {
+    mockFetch200(remoteConfig([{ id: 'taiji-relay', name: 'Relay', models: [{ id: 'm1', name: 'M1', reasoning: true }] }]))
+    const { store, upserts } = makeConfigStore({
+      'taiji-relay': { models: [{ id: 'm1', name: 'M1', reasoning: false, input: ['text'], contextWindow: 0 }] },
+    })
+    const { sync: mod } = await loadFresh()
+    const result = await mod.syncRemoteProviderModels({
+      configStore: store,
+      extrasStore: makeExtrasStore({ 'taiji-relay': { remoteSource: 'taiji-relay' } }),
+    })
+    expect(result.updatedProviders).toEqual(['taiji-relay'])
+    expect(upserts).toHaveLength(1)
+    const models = upserts[0].entry.models as Array<{ id: string; reasoning?: boolean }>
+    expect(models.find((m) => m.id === 'm1')?.reasoning).toBe(true)
+  })
+
   it('guard 拒绝坏配置 → 不写盘 + fetchReason invalid', async () => {
     mockFetch200({ version: 1, providers: 'broken' })
     const { store, upserts } = makeConfigStore({ 'taiji-relay': { models: [{ id: 'm1' }] } })
