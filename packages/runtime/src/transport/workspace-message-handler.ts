@@ -8,10 +8,16 @@ import type { WebSocket as WsType } from 'ws'
 import type { ClientMessage, ClientMessageType } from '@taiji/shared'
 import type { MessageHandlerContext } from './message-context.js'
 import type { WorkspaceService } from '../services/workspace/workspace-service.js'
+import type { IWorktreeService } from '../services/ports/worktree-service.js'
 
 /** Workspace handler 的上下文（extends 共享发消息契约 + 领域依赖） */
 export interface WorkspaceHandlerContext extends MessageHandlerContext {
   workspaceService: WorkspaceService
+  /**
+   * worktree 域服务（可选）：workspace.record 时后台 prefetch 默认远端。server 注入；
+   * 未注入（防御/测试）跳过，record 主流程不受影响。
+   */
+  worktreeService?: IWorktreeService | null
 }
 
 export class WorkspaceMessageHandler {
@@ -38,6 +44,10 @@ export class WorkspaceMessageHandler {
           return
         }
         this.ctx.workspaceService.record(cwd)
+        // 打开仓库预热：后台刷新默认远端的 remote-tracking ref（默认 base 推导的数据源）。
+        // fire-and-forget——prefetch 内部吞全部错误且不阻塞本 reply；fetch 是网络命令，
+        // 同 repo 并发由 git fetch 锁消解。
+        void this.ctx.worktreeService?.prefetchDefaultRemote(cwd)
         return this.ctx.reply(ws, msg.id, 'workspace.recentList', {
           records: this.ctx.workspaceService.list(),
         })

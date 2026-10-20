@@ -25,13 +25,22 @@ export interface WorkspaceDetectResult {
   barePath: string
   repoRoot: string
   defaultBranch: string
+  /**
+   * 推导默认 base ref（如 'github/main'）：按仓库远端实况动态推导（origin →
+   * checkout.defaultRemote → 单一远端 → 清单首个；无远端用本地 main）。repo 两态附带；
+   * 解析失败或 not-repo 缺省。前端建 worktree 的默认基线直接用它，不再自拼 origin/*。
+   */
+  defaultBaseRef?: string
 }
 
 /** worktree 创建参数。 */
 export interface WorktreeCreateParams {
   /** 新分支名（如 'feat/oauth'）。目录名由其派生（/ → -）。 */
   branch: string
-  /** 基分支：'current'（继承当前分支，默认）/ 'origin/main'（校验远端 ref 存在后使用）/ 任意分支名。 */
+  /**
+   * 基分支：'current'（继承当前分支）/ 'auto'（远端实况动态推导，缺省默认）/
+   * '<remote>/<branch>'（先验证远端已配置，幽灵 ref 拒绝采信）/ 任意本地分支名。
+   */
   baseBranch?: string
   /** worktree 创建位置模式。省略时 bare 模式默认 'workspace'，plain-repo 默认 'dedicated-dir'。 */
   locationMode?: 'workspace' | 'repo-dir' | 'dedicated-dir'
@@ -68,10 +77,12 @@ export interface WorktreeCreateResult {
 export interface WorktreeBranchListResult {
   /** 本地分支名列表。 */
   local: string[]
-  /** 远程分支名列表（origin/*）。 */
+  /** 远程分支名列表（仅已配置远端前缀下的条目——refs/remotes/ 残留的死数据被过滤）。 */
   remote: string[]
   /** 默认分支名（如 'main'）。检测不到则为空串。 */
   defaultBranch: string
+  /** 推导默认 base ref（如 'github/main'，远端实况动态推导）；解析失败为本地 'main'。 */
+  defaultBaseRef: string
 }
 
 /** 单个 worktree 条目。 */
@@ -111,4 +122,9 @@ export interface IWorktreeService {
   listBranches(cwd: string): Promise<WorktreeBranchListResult>
   /** 列出 cwd 所在 workspace 的所有 worktree。 */
   list(cwd: string): Promise<WorktreeListResult>
+  /**
+   * 后台刷新默认远端的 remote-tracking ref（打开仓库预热）。永不抛：预热失败仅日志留痕，
+   * 不影响调用方主流程——workspace.record 的 fire-and-forget 调用依赖此契约。
+   */
+  prefetchDefaultRemote(cwd: string): Promise<void>
 }

@@ -39,6 +39,9 @@ import { ShellRunnerError } from '../ports/shell-runner.js'
 import type { IGitExecutor } from '../ports/git-executor.js'
 import type { IGitInfoReader } from '../ports/git-info.js'
 import { logger } from '../../infra/logger.js'
+import { DefaultBaseResolver } from './default-base-resolver.js'
+import { resolveWorktreeBaseRef } from './base-ref-resolution.js'
+import { prefetchDefaultRemoteWorktree } from './worktree-prefetch.js'
 import type {
   IWorktreeService,
   WorktreeCreateParams,
@@ -54,7 +57,7 @@ import type {
  * 经结构化类型自动满足；测试 mock 只需 stub 这 5 个方法，不再复制 60+ 方法胖接口。
  */
 export interface WorktreeConfigService {
-  /** 默认基分支（create 未显式指定 baseBranch 时的 fallback），默认 'origin/main'。 */
+  /** 默认基分支（create 未显式指定 baseBranch 时的 fallback），默认 'auto'（远端实况动态推导）。 */
   getDefaultBaseBranch(): string
   /** bare-workspace 初始化脚本相对路径（不存在则跳过）。 */
   getBareSetupScript(): string
@@ -170,7 +173,15 @@ function computePlainRepoWorktreeDir(
 }
 
 export class WorktreeService implements IWorktreeService {
-  constructor(private deps: WorktreeServiceDeps) {}
+  private readonly deps: WorktreeServiceDeps
+
+  /** 默认 base 解析器（远端实况推导；gitExecutor 与本服务同一实例，测试经 deps mock）。 */
+  private readonly baseResolver: DefaultBaseResolver
+
+  constructor(deps: WorktreeServiceDeps) {
+    this.deps = deps
+    this.baseResolver = new DefaultBaseResolver(deps.gitExecutor)
+  }
 
   /**
    * 检测 cwd 所在仓库的三态模式（bare-workspace / plain-repo / not-repo）。
@@ -179,13 +190,22 @@ export class WorktreeService implements IWorktreeService {
   async detect(cwd: string): Promise<WorkspaceDetectResultPort> {
     const detector = this.createDetector()
     const result = await detector.detect(cwd)
-    return {
+    const reply: WorkspaceDetectResultPort = {
       mode: result.mode,
       wsRoot: result.wsRoot,
       barePath: result.barePath,
       repoRoot: result.repoRoot,
       defaultBranch: result.defaultBranch,
     }
+    // 推导默认 base（远端实况）：repo 两态附带，前端建 worktree 的默认基线直接可用；
+    // 解析失败（git 不可用/超时）safeResolve 内部降级返回 null——reply 缺省该字段，
+    // 三态结果本身不受影响
+    if (result.mode !== 'not-repo') {
+      const repoDir = result.mode === 'bare-workspace' ? result.barePath : result.repoRoot
+      const derived = await this.baseResolver.safeResolve(repoDir)
+      if (derived) reply.defaultBaseRef = derived.defaultBaseRef
+    }
+    return reply
   }
 
   /**
@@ -300,6 +320,12 @@ export class WorktreeService implements IWorktreeService {
     const repoDir = detection.mode === 'bare-workspace' ? detection.barePath : detection.repoRoot
     const defaultBranch = detection.defaultBranch || LOCAL_MAIN
 
+    // 远端实况：remote 列表过滤 + defaultBaseRef 一次取齐。safeResolve 在 git 不可用/
+    // 超时时降级返回 null——过滤退化为不过滤（保留旧行为）+ defaultBaseRef 本地 main 兜底
+    const resolution = await this.baseResolver.safeResolve(repoDir)
+    const remotes = resolution?.remotes ?? null
+    const defaultBaseRef = resolution?.defaultBaseRef ?? LOCAL_MAIN
+
     // 获取本地分支
     const localResult = await this.deps.gitExecutor.exec(repoDir, 'branch', [
       '--list',
@@ -317,14 +343,17 @@ export class WorktreeService implements IWorktreeService {
       )
     }
 
-    // 获取远程分支
+    // 获取远程分支：只保留已配置远端前缀下的条目——refs/remotes/ 里可能残留外部工具
+    // 镜像的死数据（远端已不存在），不过滤会把幽灵分支列进 UI 可选项
     const remoteResult = await this.deps.gitExecutor.exec(repoDir, 'branch', [
       '--list',
       '--remotes',
       '--format=%(refname:short)',
     ])
     const remote = remoteResult.exitCode === 0
-      ? remoteResult.stdout.split('\n').map(b => b.trim()).filter(b => Boolean(b) && !b.endsWith('/HEAD'))
+      ? remoteResult.stdout.split('\n').map(b => b.trim()).filter(b => (
+        Boolean(b) && !b.endsWith('/HEAD') && (remotes === null || remotes.some(r => b.startsWith(`${r}/`)))
+      ))
       : []
     if (remoteResult.exitCode !== 0) {
       console.warn(
@@ -332,7 +361,23 @@ export class WorktreeService implements IWorktreeService {
       )
     }
 
-    return { local, remote, defaultBranch }
+    return { local, remote, defaultBranch, defaultBaseRef }
+  }
+
+  /**
+   * 后台刷新默认远端的 remote-tracking ref（打开仓库时预热：landing 选仓库 →
+   * workspace.record → fire-and-forget 调这里）。实现在 worktree-prefetch.ts
+   * （自本文件抽出控 max-lines）；契约：永不抛，失败仅日志留痕。
+   */
+  async prefetchDefaultRemote(cwd: string): Promise<void> {
+    return prefetchDefaultRemoteWorktree(
+      {
+        gitExecutor: this.deps.gitExecutor,
+        baseResolver: this.baseResolver,
+        createDetector: () => this.createDetector(),
+      },
+      cwd,
+    )
   }
 
   /**
@@ -374,23 +419,9 @@ export class WorktreeService implements IWorktreeService {
         return r.exitCode === 0 ? r.stdout.trim() : null
       },
       getDefaultBranch: async (cwd: string) => {
-        // 先尝试 symbolic-ref（最准确），失败后 fallback 读 git config
-        const r = await this.deps.gitExecutor.exec(cwd, 'rev-parse', [
-          '--abbrev-ref', 'origin/HEAD',
-        ])
-        if (r.exitCode === 0) {
-          // 输出格式：origin/main → 去掉 origin/ 前缀
-          const ref = r.stdout.trim()
-          return ref.replace(/^origin\//, '')
-        }
-        // fallback: 尝试 main 或 master
-        for (const candidate of ['main', 'master']) {
-          const check = await this.deps.gitExecutor.exec(cwd, 'rev-parse', [
-            '--verify', `refs/heads/${candidate}`,
-          ])
-          if (check.exitCode === 0) return candidate
-        }
-        return null
+        // 默认分支名解析全部在 resolver（远端实况推导 + 本地 main/master 兜底）——
+        // 不硬编码 origin（幽灵 origin/HEAD 是直接 ref 时 symbolic-ref 失败，天然不污染）
+        return this.baseResolver.resolveDefaultBranchName(cwd)
       },
     }
     return new WorkspaceDetector(fsAdapter, gitAdapter)
@@ -639,14 +670,9 @@ export class WorktreeService implements IWorktreeService {
   }
 
   /**
-   * 解析 base ref。
-   * - 'current'：用 gitInfoReader 读当前分支，读不到 fallback main
-   * - 'origin/main'：用 gitExecutor rev-parse 验证远端 ref 存在，不存在 fallback 本地 main
-   * - 其他字符串：作为具体分支名，用 gitExecutor rev-parse 验证存在性
-   *
-   * RT-8#8：fallback 不再静默——baseBranch 校验失败改用 LOCAL_MAIN 是「创建基线被偷换」，
-   * 新 worktree 会落在用户没选的基线上。warn 留痕 + 调用方把返回的 usedBaseRef 带回
-   * worktree.created envelope（前端可见实际用了哪个 ref）。
+   * 解析 base ref（实现在 base-ref-resolution.ts，自本文件抽出控 max-lines）。
+   * 四形态：'current' / 'auto'（动态推导）/ '<remote>/<branch>'（幽灵 ref 防护）/
+   * 任意分支名——语义与 RT-8#8 留痕契约见该模块头注释。
    */
   private async resolveBaseRef(
     repoDir: string,
@@ -654,32 +680,14 @@ export class WorktreeService implements IWorktreeService {
     baseBranch: string,
     workspaceHint?: string,
   ): Promise<string> {
-    if (baseBranch === 'current') {
-      const info = this.deps.gitInfoReader.readGitInfo(workspaceHint ?? process.cwd())
-      if (info?.branch) return info.branch
-      logger.warn('[worktree-service] base 解析 fallback：current 读不到，改用本地 main', {
-        branch,
-        repoDir,
-        requestedBaseBranch: baseBranch,
-        fallback: LOCAL_MAIN,
-        reason: 'gitInfoReader 返回空',
-        impact: '新 worktree 基于本地 main 而非当前分支',
-      })
-      return LOCAL_MAIN
-    }
-    // 验证 ref 存在
-    const result = await this.deps.gitExecutor.exec(repoDir, 'rev-parse', ['--verify', baseBranch])
-    if (result.exitCode === 0) return baseBranch
-    logger.warn('[worktree-service] base 解析 fallback：请求 ref 校验失败，改用本地 main', {
-      branch,
-      repoDir,
-      requestedBaseBranch: baseBranch,
-      fallback: LOCAL_MAIN,
-      revParseExit: result.exitCode,
-      revParseStderr: result.stderr.trim(),
-      impact: '新 worktree 基于本地 main 而非请求的 base（创建基线被偷换）',
-    })
-    return LOCAL_MAIN
+    return resolveWorktreeBaseRef(
+      {
+        gitExecutor: this.deps.gitExecutor,
+        gitInfoReader: this.deps.gitInfoReader,
+        baseResolver: this.baseResolver,
+      },
+      repoDir, branch, baseBranch, workspaceHint,
+    )
   }
 
   /**

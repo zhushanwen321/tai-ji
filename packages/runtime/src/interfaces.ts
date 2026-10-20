@@ -634,7 +634,7 @@ export interface IConfigService {
   getTimeout(): number
   /** 写入 worktree 创建超时时间到 config.json.worktreeTimeout。config.json 损坏降级态返回 {ok:false}（不写盘）。 */
   setTimeout(timeout: number): SaveAppConfigResult
-  /** 读取默认基分支（config.json.defaultBaseBranch），默认 'origin/main'。 */
+  /** 读取默认基分支（config.json.defaultBaseBranch），默认 'auto'（按仓库远端实况动态推导）。 */
   getDefaultBaseBranch(): string
   /** 写入默认基分支到 config.json.defaultBaseBranch。config.json 损坏降级态返回 {ok:false}（不写盘）。 */
   setDefaultBaseBranch(baseBranch: string): SaveAppConfigResult

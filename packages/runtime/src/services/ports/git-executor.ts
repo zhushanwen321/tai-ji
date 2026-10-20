@@ -18,11 +18,29 @@ import type { GitFileStatus } from '@taiji/shared'
  * - checkout：切换分支（#6 `checkout <name>`）/ 创建并检出分支（#7 `checkout -b <name>`），共用白名单项
  * - branch：只读列举分支（#6 选分支 popover 数据源，`branch --list --format`）
  * - worktree：worktree 管理（W1 `worktree add <path> -b <branch> <base>`，bare repo + worktree 结构创建隔离工作目录）
+ * - remote / symbolic-ref / config：只读远端探测（`remote` 列远端、`symbolic-ref` 读 <remote>/HEAD
+ *   symref、`config --get` 读 checkout.defaultRemote）——worktree 默认 base 动态推导用。
+ *   本仓内新增用途限只读（config 不做写）。
+ * - fetch：后台刷新远端跟踪 ref（打开仓库时 prefetch 默认远端）。网络命令，调用方必须自带
+ *   长超时档（对齐 WORKTREE_GIT_TIMEOUT_MS 量级）并吞错降级。
  *
  * 路径/message/分支名 作为 args 数组元素传入（如 ['--', 'src/a.ts']、['-m', 'msg']、['main']），
  * 由 GitService 保证语义正确，executor 只负责以数组形式交给 execFile。
  */
-export type GitCommand = 'status' | 'add' | 'reset' | 'commit' | 'diff' | 'rev-parse' | 'checkout' | 'branch' | 'worktree'
+export type GitCommand =
+  | 'status'
+  | 'add'
+  | 'reset'
+  | 'commit'
+  | 'diff'
+  | 'rev-parse'
+  | 'checkout'
+  | 'branch'
+  | 'worktree'
+  | 'remote'
+  | 'symbolic-ref'
+  | 'config'
+  | 'fetch'
 
 /** IGitExecutor.exec 的返回。exitCode 非 0 时 GitService 按 stderr 判定失败类型。 */
 export interface GitExecutorResult {

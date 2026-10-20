@@ -500,6 +500,9 @@ export class RuntimeServer implements IMessageBroker {
       this.workspaceMessageHandler = new WorkspaceMessageHandler({
         ...messaging,
         workspaceService: workspace,
+        // 打开仓库预热（workspace.record → prefetch 默认远端）：worktree 未注入时跳过，
+        // record 主流程不受影响（对齐 worktree/git handler 的可选注入防御形态）
+        worktreeService: worktree ?? null,
       })
     }
     if (project) {

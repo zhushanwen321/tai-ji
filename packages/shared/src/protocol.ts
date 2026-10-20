@@ -2647,6 +2647,12 @@ export interface ServerMessageMapBase {
     barePath: string
     repoRoot: string
     defaultBranch: string
+    /**
+     * 推导默认 base ref（如 'github/main'）：按仓库远端实况动态推导（origin →
+     * checkout.defaultRemote → 单一远端 → 清单首个；无远端用本地 main）。repo 两态附带，
+     * 解析失败缺省——前端建 worktree 的默认基线直接用它，不自拼 origin/*。
+     */
+    defaultBaseRef?: string
   }
   /** worktree.created：worktree.create 的成功 reply（新 worktree 的 cwd 与分支名）。
    *  usedBaseRef：实际用作创建基线的 ref（RT-8#8）。请求的 baseBranch 校验失败时
@@ -2681,8 +2687,8 @@ export interface ServerMessageMapBase {
   'quota.configure:result': { ok: boolean; error?: string }
   'quota.refresh:result': QuotaFetchResultPayload
   'usage.getStats:result': UsageStatsResult
-  /** worktree.branches：worktree.listBranches 的 reply（本地/远程分支列表 + 默认分支名）。 */
-  'worktree.branches': { local: string[]; remote: string[]; defaultBranch: string }
+  /** worktree.branches：worktree.listBranches 的 reply（本地/远程分支列表 + 默认分支名 + 推导默认 base ref）。 */
+  'worktree.branches': { local: string[]; remote: string[]; defaultBranch: string; defaultBaseRef?: string }
   /** worktree.list:result：worktree.list 的 reply（worktree 条目列表）。 */
   'worktree.list:result': { items: Array<{ path: string; branch: string; HEAD: boolean; bare: boolean }> }
   /** config.worktreeRootDir：config.getWorktreeRootDir 的 reply。 */
