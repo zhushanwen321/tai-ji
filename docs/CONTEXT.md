@@ -581,7 +581,7 @@ provider-edit 域动作错误的归属判定机制：每条动作错误带 sourc
 ### 目录投喂（catalog overlay）
 taiji 向 pi 注册表补投模型目录的机制：runtime 把 catalog 模型清单刷进目录缓存文件（`<数据目录>/provider-catalog-overlay.json`），provider-live-sync 扩展在该文件变化时于 pi 进程内 `registerProvider` 注入（工厂期首注入 + 运行中 tick 检出刷新，实测 ~2s）。注入是**映射替换**语义（pi extension 层 `models.map`）——注入集就是该 provider 的最终可见集合；过期（lastModified 过旧）不注入、撤销回落内置基线、结构缺失的模型跳过不阻断其他 provider。**Avoid**：叫「模型同步」（与 provider-live-sync 的凭据/启停同步职责混淆）、「模型注入」（丢了「目录缓存文件」这个载体语义）。
 
-**代码映射**: `extensions/shared/llm-shared/src/catalog-overlay.ts`（判据模块：读缓存 + staleness + 注册表比对）；`extensions/universal/provider-live-sync/src/catalog-bridge.ts`（注入执行 + 运行中监视）；runtime 刷缓存写点 `provider-catalog-refresh.ts`。约束登记 [C-ext-31](constraints.json)。
+**代码映射**: `extensions/shared/llm-shared/src/catalog-overlay.ts`（判据模块：缓存解析 + staleness + 并集判据，纯函数零 IO）；`extensions/universal/provider-live-sync/src/catalog-bridge.ts`（缓存文件读取 + 注入执行 + 运行中监视）；runtime 刷缓存写点 `provider-catalog-refresh.ts`。约束登记 [C-ext-31](constraints.json)。
 
 ### 播种（seeding，投喂域）
 验收/测试场景里往目录缓存文件写入一条投喂条目的准备动作（如给 xiaomi 名下加一个内置目录不存在的模型 id），使「[overlay-only 模型](#overlay-only-模型)」在真机数据条件下成立。**Avoid**：叫「mock」（形态是真实缓存文件的真实条目，pi 侧全链路真实消费）。

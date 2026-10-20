@@ -762,7 +762,7 @@ WorkflowTab 步骤列表的数据源绑定从「workflow-record 全量快照（6
 
 ### ADR-0141 目录投喂通道：extension 进程内 registerProvider 注入，models.json 零改动（2026-10-20 用户裁决，provider-catalog-sync）
 
-**决定**：overlay-only 模型（内置目录存在但 pi 执行侧不可见的 catalog 模型，如 `minimax-cn/MiniMax-M3.1-Flash`）的补投通道 = provider-live-sync 扩展在 pi 进程内 `registerProvider` 注入：runtime 把 catalog 模型清单刷进目录缓存文件（`<数据目录>/provider-catalog-overlay.json`），扩展在文件变化时注入（pi 工厂期首注入 + 运行中 tick 检出刷新）。`models.json` 零改动——不写用户配置文件、不物化用户配置内容。注入是映射替换语义（pi extension 层 `models.map`），注入集 = 该 provider 的最终可见集合；过期不注入、撤销回落内置基线。判据模块（读缓存 + staleness + 注册表比对）落 `extensions/shared/llm-shared/src/catalog-overlay.ts`，注入执行落 provider-live-sync 的 `catalog-bridge.ts`。约束登记 C-ext-31（registerProvider 唯一执行点 = provider-live-sync，白名单外调用由 pre-commit 拦截）。
+**决定**：overlay-only 模型（内置目录存在但 pi 执行侧不可见的 catalog 模型，如 `minimax-cn/MiniMax-M3.1-Flash`）的补投通道 = provider-live-sync 扩展在 pi 进程内 `registerProvider` 注入：runtime 把 catalog 模型清单刷进目录缓存文件（`<数据目录>/provider-catalog-overlay.json`），扩展在文件变化时注入（pi 工厂期首注入 + 运行中 tick 检出刷新）。`models.json` 零改动——不写用户配置文件、不物化用户配置内容。注入是映射替换语义（pi extension 层 `models.map`），注入集 = 该 provider 的最终可见集合；过期不注入、撤销回落内置基线。判据模块（缓存解析 + staleness + 并集判据，纯函数零 IO）落 `extensions/shared/llm-shared/src/catalog-overlay.ts`，缓存文件读取与注入执行落 provider-live-sync 的 `catalog-bridge.ts`。约束登记 C-ext-31（registerProvider 唯一执行点 = provider-live-sync，白名单外调用由 pre-commit 拦截）。
 
 **为什么**：pi 注册表的 extension 层是映射替换而非合并，全部症状（rename 静默跳过 / set_model 报模型缺失 / 子代理校验抛错等 8 个同根因症状）的根子是「pi 可用集合不含 overlay-only 模型」。候选通道对比：改 models.json（物化机器数据进用户配置区，刷新/清理语义与用户手编冲突）、fork pi（违反不 fork 上游红线）、CLI spawn `--model` 近似回退（掩盖而非解决）、extension 注入（唯一不触碰用户配置与上游源码的通道）——注入且映射替换语义下，注入集即最终可见集，无「双源合并」的排序/去重歧义。staleness 基准 = pi-ai 官方导出的目录生成时刻（`@earendil-works/pi-ai/providers/all` 子路径导出），过期即整体回落内置基线，不投半新半旧。
 
