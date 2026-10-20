@@ -26,11 +26,11 @@ function makeDeps(overrides?: Partial<NewTaskDeps>): NewTaskDeps {
       gitInfo: ref({ branch: 'main' }),
     } as unknown as NewTaskDeps['flow'],
     recentWorkspaces: ref([]),
-    listBranches: vi.fn(async () => ({ local: [], remote: ['origin/main', 'origin/dev'], defaultBranch: 'main' })),
+    listBranches: vi.fn(async () => ({ local: [], remote: ['origin/main', 'origin/dev'], defaultBranch: 'main', defaultBaseRef: 'origin/main' })),
     createWorktree: vi.fn(async () => ({ cwd: '/Code/ws/feat-a', branch: 'feat-a' })),
     detectWorkspace: vi.fn(async () => ({
       mode: 'bare-workspace' as const, wsRoot: '/Code/ws', barePath: '/Code/ws/.bare',
-      repoRoot: '/Code/ws/main', defaultBranch: 'main',
+      repoRoot: '/Code/ws/main', defaultBranch: 'main', defaultBaseRef: 'origin/main',
     })),
     pickDirectory: vi.fn(async () => ({ canceled: true })),
     presets: ref([]),

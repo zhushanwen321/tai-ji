@@ -227,7 +227,7 @@ const timeout = timeoutField.value
 const timeoutBusy = timeoutField.busy
 
 // ── Section 3：通用 ──
-const baseBranchField = group.field<string>('origin/main', {
+const baseBranchField = group.field<string>('auto', {
   load: () => transport.getDefaultBaseBranch().then((res) => res.baseBranch),
   // RD-4#7：非空校验（runtime setDefaultBaseBranch 不校验空串，直到 git 操作才炸），inline error 形态
   validate: (next) => (next.trim() === '' ? 'settings.worktree.baseBranchEmpty' : null),
