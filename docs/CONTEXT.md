@@ -578,6 +578,14 @@ provider-edit 域动作错误的归属判定机制：每条动作错误带 sourc
 ### 组级 load 归并（loadError）
 字段组（`setting-field` 的 `SettingFieldGroup`）任一字段 loader 失败即整组置 loadError：控件禁用 + 常驻提示 + 重试，加载失败时默认值明确标注为默认而非已存值（RD-4#8 契约），全部 loader 成功后复位。**Avoid**：逐字段独立 try/catch 后按默认值静默渲染、console.warn 冒充已存值。
 
+### 目录投喂（catalog overlay）
+taiji 向 pi 注册表补投模型目录的机制：runtime 把 catalog 模型清单刷进目录缓存文件（`<数据目录>/provider-catalog-overlay.json`），provider-live-sync 扩展在该文件变化时于 pi 进程内 `registerProvider` 注入（工厂期首注入 + 运行中 tick 检出刷新，实测 ~2s）。注入是**映射替换**语义（pi extension 层 `models.map`）——注入集就是该 provider 的最终可见集合；过期（lastModified 过旧）不注入、撤销回落内置基线、结构缺失的模型跳过不阻断其他 provider。**Avoid**：叫「模型同步」（与 provider-live-sync 的凭据/启停同步职责混淆）、「模型注入」（丢了「目录缓存文件」这个载体语义）。
+
+**代码映射**: `extensions/shared/llm-shared/src/catalog-overlay.ts`（判据模块：读缓存 + staleness + 注册表比对）；`extensions/universal/provider-live-sync/src/catalog-bridge.ts`（注入执行 + 运行中监视）；runtime 刷缓存写点 `provider-catalog-refresh.ts`。约束登记 [C-ext-31](constraints.json)；边界登记 [models.json 可见性](todo/catalog-overlay-models-json-boundary.md) / [默认模型可见性](todo/catalog-overlay-default-model-boundary.md)。
+
+### 播种（seeding，投喂域）
+验收/测试场景里往目录缓存文件写入一条投喂条目的准备动作（如给 xiaomi 名下加一个内置目录不存在的模型 id），使「overlay-only 模型」在真机数据条件下成立。**Avoid**：叫「mock」（形态是真实缓存文件的真实条目，pi 侧全链路真实消费）。
+
 ## v3 UI 结构术语（2026-06 重构）
 
 > 以下术语由 v3-demo 设计稿确立。原规范源 `docs/page-design/archive/v3/architecture-and-terminology.html` 已随 v3 视觉稿于 2026-08-02 被 v6 取代删除（归档说明见 `docs/architecture/v3-specs/README.md`，其指认本章节为术语/拓扑定义载体）；当前视觉 SSOT = `docs/DESIGN.md`。

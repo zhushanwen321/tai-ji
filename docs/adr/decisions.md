@@ -759,3 +759,11 @@ WorkflowTab 步骤列表的数据源绑定从「workflow-record 全量快照（6
 **为什么**：form 通道曾是三通道家族唯一未下沉成员，核心双壳各一份靠镜像注释手工维持对齐（companion-bridge 11 处 + useExtensionUI 8 处「同构/镜像」注释），已发生第一处真实漂移（移动壳断连不清挂起 form，桌面壳清——用户可见后果为断连期僵尸 form 假成功提交）。dialog/permission 先行下沉的先例证明 factory 形态可行；第四通道再出镜像即是回归。
 
 **边界**：呈现形态差异（桌面 tab / 移动堆叠、band 样式）留壳侧，不下沉；下沉对象是通道的**行为算法**，不是 UI。
+
+### ADR-0141 目录投喂通道：extension 进程内 registerProvider 注入，models.json 零改动（2026-10-20 用户裁决，provider-catalog-sync）
+
+**决定**：overlay-only 模型（内置目录存在但 pi 执行侧不可见的 catalog 模型，如 `minimax-cn/MiniMax-M3.1-Flash`）的补投通道 = provider-live-sync 扩展在 pi 进程内 `registerProvider` 注入：runtime 把 catalog 模型清单刷进目录缓存文件（`<数据目录>/provider-catalog-overlay.json`），扩展在文件变化时注入（pi 工厂期首注入 + 运行中 tick 检出刷新）。`models.json` 零改动——不写用户配置文件、不物化用户配置内容。注入是映射替换语义（pi extension 层 `models.map`），注入集 = 该 provider 的最终可见集合；过期不注入、撤销回落内置基线。判据模块（读缓存 + staleness + 注册表比对）落 `extensions/shared/llm-shared/src/catalog-overlay.ts`，注入执行落 provider-live-sync 的 `catalog-bridge.ts`。约束登记 C-ext-31（registerProvider 唯一执行点 = provider-live-sync，白名单外调用由 pre-commit 拦截）。
+
+**为什么**：pi 注册表的 extension 层是映射替换而非合并，全部症状（rename 静默跳过 / set_model 报模型缺失 / 子代理校验抛错等 8 个同根因症状）的根子是「pi 可用集合不含 overlay-only 模型」。候选通道对比：改 models.json（物化机器数据进用户配置区，刷新/清理语义与用户手编冲突）、fork pi（违反不 fork 上游红线）、CLI spawn `--model` 近似回退（掩盖而非解决）、extension 注入（唯一不触碰用户配置与上游源码的通道）——注入且映射替换语义下，注入集即最终可见集，无「双源合并」的排序/去重歧义。staleness 基准 = pi-ai 官方导出的目录生成时刻（`@earendil-works/pi-ai/providers/all` 子路径导出），过期即整体回落内置基线，不投半新半旧。
+
+**边界**：注入集合不参与 runtime 默认模型有效性校验（`findValidDefaultModel` 基准 = models.json）——投喂模型不可设为持久默认，替代通道 = 会话级 `set_model` 与显式 `--model`（均已实测可用）；已登记边界族见 docs/todo/catalog-overlay-*-boundary.md（models.json 手写条目被挤出 / 默认模型 auto-fix 回退两篇）。
