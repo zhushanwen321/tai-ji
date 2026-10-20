@@ -23,6 +23,7 @@ import { homedir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { getBuiltinModels } from "@earendil-works/pi-ai/providers/all";
+import { CONFIG_DIR_NAME } from "@earendil-works/pi-coding-agent";
 
 import {
 	computeInjectionSet,
@@ -155,14 +156,14 @@ describe("getPiStorePath（pi store 路径）", () => {
 		expect(getPiStorePath("/explicit/agent")).toBe(join("/explicit/agent", "models-store.json"));
 	});
 
-	it("env 缺失 → 缺省 ~/.pi/agent（os.homedir() 动态推导，禁硬编码绝对路径）", () => {
+	it("env 缺失 → 缺省 ~/.pi/agent（委托 pi getAgentDir 推导，env 缺失落 pi 缺省）", () => {
 		vi.stubEnv("PI_CODING_AGENT_DIR", undefined);
-		expect(getPiStorePath()).toBe(join(homedir(), ".pi", "agent", "models-store.json"));
+		expect(getPiStorePath()).toBe(join(homedir(), CONFIG_DIR_NAME, "agent", "models-store.json"));
 	});
 
 	it("env 空串 → 同样落缺省（空串等同未设）", () => {
 		vi.stubEnv("PI_CODING_AGENT_DIR", "");
-		expect(getPiStorePath()).toBe(join(homedir(), ".pi", "agent", "models-store.json"));
+		expect(getPiStorePath()).toBe(join(homedir(), CONFIG_DIR_NAME, "agent", "models-store.json"));
 	});
 });
 
@@ -330,7 +331,7 @@ describe("computeInjectionSet（内置基线 ⊕ 有效条目）", () => {
 			baseline: BASELINE,
 		});
 		expect(result.state).toBe("fresh");
-		expect(result.skipped).toEqual([{ modelId: ENDPOINT_LESS.id, reason: "missing-api-and-baseUrl" }]);
+		expect(result.skipped).toEqual([{ modelId: ENDPOINT_LESS.id, reason: "missing-api-or-baseUrl" }]);
 		expect(result.models.map(m => m.id)).toEqual([BASELINE[0]!.id, BASELINE[1]!.id, OVERLAY_ONLY.id]);
 	});
 
@@ -347,8 +348,8 @@ describe("computeInjectionSet（内置基线 ⊕ 有效条目）", () => {
 			baseline: BASELINE,
 		});
 		expect(result.skipped).toEqual([
-			{ modelId: apiOnly.id, reason: "missing-api-and-baseUrl" },
-			{ modelId: baseUrlOnly.id, reason: "missing-api-and-baseUrl" },
+			{ modelId: apiOnly.id, reason: "missing-api-or-baseUrl" },
+			{ modelId: baseUrlOnly.id, reason: "missing-api-or-baseUrl" },
 		]);
 		expect(result.models.map(m => m.id)).toEqual([BASELINE[0]!.id, BASELINE[1]!.id]);
 	});

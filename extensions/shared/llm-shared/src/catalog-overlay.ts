@@ -221,7 +221,7 @@ function toModelArray(value: unknown): OverlayModel[] | undefined {
 // ──────────────────────── 并集计算 ────────────────────────
 
 /** R3 保守档过滤跳过的条目（调用方据此记 warn 级日志）。 */
-export type SkippedModel = { modelId: string; reason: "missing-api-and-baseUrl" };
+export type SkippedModel = { modelId: string; reason: "missing-api-or-baseUrl" };
 
 export type ComputeInjectionSetInput = {
 	providerId: string;
@@ -267,7 +267,7 @@ export function computeInjectionSet(input: ComputeInjectionSetInput): ComputeInj
 	for (const model of entry.models) {
 		// R3：缺 api/baseUrl 且同 id 无内置定义可继承 → 跳过（pi 实为四级兜底，本设计取最保守档）
 		if (!hasEndpoint(model) && !byId.has(model.id)) {
-			skipped.push({ modelId: model.id, reason: "missing-api-and-baseUrl" });
+			skipped.push({ modelId: model.id, reason: "missing-api-or-baseUrl" });
 			continue;
 		}
 		byId.set(model.id, model);
