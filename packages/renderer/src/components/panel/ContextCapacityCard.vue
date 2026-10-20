@@ -77,7 +77,7 @@
           v-for="(win, idx) in visibleWindows"
           :key="idx"
           class="grid items-center py-0.5"
-          style="grid-template-columns: 32px 1fr 32px 52px; column-gap: 8px; font-size: 11px; line-height: 1.4;"
+          style="grid-template-columns: 32px 1fr 44px 52px; column-gap: 8px; font-size: 11px; line-height: 1.4;"
         >
           <span class="font-sans text-[10.5px] text-neutral-mid">{{ windowLabels[win.idx] }}</span>
           <div class="relative h-1 overflow-hidden rounded-full bg-surface-2">
@@ -91,7 +91,7 @@
               'text-right font-semibold tabular-nums',
               win.pct >= DANGER_THRESHOLD ? 'text-danger' : win.pct >= HIGH_THRESHOLD ? 'text-warn' : 'text-neutral-fg',
             )"
-          >{{ win.pct }}%</span>
+          >{{ formatQuotaPct(win.pct) }}%</span>
           <span class="truncate text-right font-mono text-[9.5px] tabular-nums text-neutral-dim">
             {{ formatReset(win.resetSec) }}
           </span>
@@ -166,6 +166,7 @@ import { useContextUsage } from '@/composables/features/model/useContextUsage'
 import { useQuotaStore } from '@/stores/quota'
 import { useQuotaDisplay } from '@/composables/features/model/useQuotaDisplay'
 import { quotaFailReasonText } from '@/composables/features/model/useQuotaQuery'
+import { formatQuotaPct } from '@taiji/shared'
 import { formatTokens, usageBarClass } from './context-usage-display'
 import * as quotaApi from '@taiji/core/transport/api/domains/quota'
 

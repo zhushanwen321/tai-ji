@@ -335,7 +335,7 @@ export type {
   QuotaCredentialSource,
   QuotaConfigurePayload,
 } from './quota-types'
-export { normalizeQuotaWorkspaceUrl, normalizeCookieHeader, resolveQuotaCredentialSource, supportsExclusiveCredential } from './quota-types'
+export { normalizeQuotaWorkspaceUrl, normalizeCookieHeader, resolveQuotaCredentialSource, supportsExclusiveCredential, formatQuotaPct, QUOTA_PCT_DECIMALS } from './quota-types'
 export type { QuotaPreset } from './quota-presets'
 export { QUOTA_PRESETS, matchQuotaPreset } from './quota-presets'
 // 语音合成朗读（TTS）契约类型（ai-voice-tts 设计 §7.1/§7.3；协议载荷形状 SSOT，纯类型无 node 依赖）

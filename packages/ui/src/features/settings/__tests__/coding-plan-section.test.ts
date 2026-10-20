@@ -762,6 +762,28 @@ describe('B-3 额度显示双轨（used/limit + pct）', () => {
     expect(windows.text()).not.toContain('quotaUsedOf')
   })
 
+  it('pct 展示口径 = 2 位小数，与指标聚合页同一 SSOT（formatQuotaPct）', async () => {
+    // [HISTORICAL] 回归锚：本组件原用 `Math.round(win.pct)`（0 位小数），与 ContextCapacityCard
+    // 的原样插值不同口径——同一窗口在设置页显 3%、指标页显 2.9499999999999997%。
+    quota.test.value.status = 'success'
+    quota.test.value.row = {
+      label: 'OpenDesign Plan',
+      wins: [
+        { pct: 0.148, resetSec: 10680 },
+        { pct: 2.9499999999999997, resetSec: 10680 },
+        { pct: null, resetSec: null },
+      ],
+    }
+    wrapper = mountSection()
+    await flushPromises()
+
+    const text = wrapper.find('[data-testid="quota-result-windows"]').text()
+    expect(text).toContain('0.15%')
+    expect(text).toContain('2.95%')
+    // 浮点尾数不得泄漏到用户可见文本
+    expect(text).not.toContain('2.949999')
+  })
+
   it('计费单位三分支：tokens / credits 渲染各自 i18n 标签', async () => {
     quota.test.value.status = 'success'
     quota.test.value.row = {
