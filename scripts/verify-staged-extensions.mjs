@@ -22,6 +22,7 @@
  * Usage:
  *   node scripts/verify-staged-extensions.mjs                      # 默认 dev staged
  *   node scripts/verify-staged-extensions.mjs --staged-dir <path>  # 自定义（如 postbuild Resources/extensions/@zhushanwen）
+ *   node scripts/verify-staged-extensions.mjs --engines-dir <path> # C-ext-31 门禁追加引擎 staged 根（postbuild Resources/engines）
  */
 import { readdir } from "node:fs/promises";
 import { existsSync, readFileSync } from "node:fs";
@@ -38,15 +39,19 @@ import {
 
 const REPO_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 
-// 解析 --staged-dir 参数（默认 dev staged 目录）
+// 解析 --staged-dir / --engines-dir 参数（默认 dev staged 目录）
 let STAGED_DIR = null;
+let ENGINES_DIR = null;
 const args = process.argv.slice(2);
 for (let i = 0; i < args.length; i++) {
 	if (args[i] === "--staged-dir" && args[i + 1]) {
 		STAGED_DIR = resolve(args[i + 1]);
 		i++;
+	} else if (args[i] === "--engines-dir" && args[i + 1]) {
+		ENGINES_DIR = resolve(args[i + 1]);
+		i++;
 	} else if (args[i] === "--help" || args[i] === "-h") {
-		console.log("Usage: verify-staged-extensions.mjs [--staged-dir <path>]");
+		console.log("Usage: verify-staged-extensions.mjs [--staged-dir <path>] [--engines-dir <path>]");
 		process.exit(0);
 	}
 }
@@ -328,9 +333,14 @@ async function main() {
 
 	// C-ext-31 门禁：pi 子树 bundle 禁含 @taiji/shared 的 C-proc-26 准入检查代码
 	// （打包态 pi 进程没有 TAIJI_AGENT_PACKAGED，进入 bundle 即 session_start 装配
-	// 失败、subagent 全灭）。bundle 时已拦一道，postbuild 逐平台产物再拦一道。
+	// 失败、subagent 全灭）。bundle 时已拦一道，postbuild 逐平台产物再拦一道——
+	// 扩展 staged 根恒扫；--engines-dir 传入时引擎 staged 根同扫（与构建期
+	// bundle-extensions.mjs 的 [STAGED_ROOT, ENGINES_STAGED_ROOT] 覆盖对齐）。
+	// 目录不存在时 collect 侧静默跳过（readdir catch），沿用现有宽容形态。
 	assertNoPiEnvAdmissionGuard(
-		await collectPiEnvAdmissionGuardViolations([STAGED]),
+		await collectPiEnvAdmissionGuardViolations(
+			ENGINES_DIR ? [STAGED, ENGINES_DIR] : [STAGED],
+		),
 		"[verify-staged] staged bundle 门禁红灯：",
 	);
 
