@@ -107,12 +107,40 @@ export const QUOTA_PRESETS: QuotaPreset[] = [
 ]
 
 /**
- * 根据 provider 的 baseUrl 和 name 匹配内置预设。
+ * QuotaPreset wire 形状守卫（remote-config presets 段元素校验用）。
+ *
+ * 必填字段（fetcher/label/auth/match）缺失或类型漂移即拒——匹配链对 match 解构、
+ * QuotaService 按 auth 数组序解析凭证、UI 渲染 label/helpUrl，畸形元素漏到消费侧
+ * 会在运行期抛 TypeError。可选字段（helpUrl/helpText/requiresWorkspace）提供即校验；
+ * 未知字段放行（远程向后兼容扩展不被旧版本整体拒用）。auth 元素只校验 string 不锁
+ * 'api-key'|'oauth'|'cookie' 值域：新形态由旧版本 auth 数组判定与凭证解析链自然降级，
+ * 不因单个未知值拒用整个 presets 表。
+ */
+export function isQuotaPreset(v: unknown): v is QuotaPreset {
+  if (typeof v !== 'object' || v === null || Array.isArray(v)) return false
+  const p = v as Record<string, unknown>
+  if (typeof p['fetcher'] !== 'string' || p['fetcher'] === '') return false
+  if (typeof p['label'] !== 'string') return false
+  if (!Array.isArray(p['auth']) || !p['auth'].every((k) => typeof k === 'string')) return false
+  const match = p['match']
+  if (typeof match !== 'object' || match === null || Array.isArray(match)) return false
+  const m = match as Record<string, unknown>
+  if (m['baseUrlPattern'] !== undefined && typeof m['baseUrlPattern'] !== 'string') return false
+  if (m['namePattern'] !== undefined && typeof m['namePattern'] !== 'string') return false
+  if (p['helpUrl'] !== undefined && typeof p['helpUrl'] !== 'string') return false
+  if (p['helpText'] !== undefined && typeof p['helpText'] !== 'string') return false
+  if (p['requiresWorkspace'] !== undefined && typeof p['requiresWorkspace'] !== 'boolean') return false
+  return true
+}
+
+/**
+ * 根据 provider 的 baseUrl 和 name 匹配预设。
  *
  * @param provider - 提供 baseUrl 和/或 name 的对象（来自 ProviderInfo）。
- * @param presets - 候选预设集（remote-config 上线后调用方必须显式传「基线 ⊕ 远程」合并
- *   视图——runtime 侧 listQuotaPresets() / 前侧 RPC config.listQuotaPresets 下发数组）；
- *   缺省回落编译期基线（兼容既有调用与测试）。
+ * @param presets - 候选预设集（必填，无缺省）：调用方显式决定权威来源——runtime 侧传
+ *   listQuotaPresets()「基线 ⊕ 远程」合并视图 / 前端传 RPC config.listQuotaPresets
+ *   下发数组。契约必填化（原缺省回落编译期基线）堵「漏传静默读基线」通道：远程 presets
+ *   下发后匹配链与自动开启判定链必须与展示链读同一权威。
  * @returns 匹配到的 QuotaPreset，或 undefined（无匹配）。
  */
 export function matchQuotaPreset(
@@ -120,7 +148,7 @@ export function matchQuotaPreset(
     baseUrl?: string
     name?: string
   },
-  presets: readonly QuotaPreset[] = QUOTA_PRESETS,
+  presets: readonly QuotaPreset[],
 ): QuotaPreset | undefined {
   const { baseUrl, name } = provider
   if (!baseUrl && !name) return undefined

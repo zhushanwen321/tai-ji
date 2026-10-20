@@ -135,8 +135,8 @@ export function createSettingsLifecycle() {
 
   /**
    * quota presets 合并视图拉取（remote-config 域 2）。init（连接建立）与进设置页两处
-   * 触发——聊天面板 hover 额度依赖，不能只在进设置页拉。失败静默（基线形状空数组时
-   * 消费方回落编译期基线——matchQuotaPreset 缺省参数）。
+   * 触发——聊天面板 hover 额度依赖，不能只在进设置页拉。失败静默（沿用现有缓存；
+   * store 初始空数组时消费方匹配不到 preset，UI 显式回落基线的路径在 ProviderEditBody）。
    */
   async function refreshQuotaPresets(): Promise<void> {
     const store = getSettingsStore()

@@ -12,7 +12,9 @@
  *   即刻可用：quota 凭证链（provider-credential-resolver，D3 收口）拒执行 command
  *   （不执行 shell），env 引用的取值取决于运行时环境——自动开启均成立不了「查即可用」；
  *   明文 key 即刻可用
- * - matchQuotaPreset 命中（baseUrl/name 命中内置预设）
+ * - matchQuotaPreset 命中（baseUrl/name 命中 presets 合并视图——与查询/展示链同一
+ *   权威 listQuotaPresets()，本包同目录直引；远程 presets 下发后判定规则同步生效，
+ *   不读编译期基线）
  * - preset.auth 含 'api-key'：凭证复用 provider 自己的 key（credentialSource 缺省推导
  *   'provider' → auth.json → models.json，正是落盘位置）。cookie 类（mimo / opencode-go）
  *   不适用——无 cookie 可复用，自动开启只会得到 no-credential 失败态
@@ -29,6 +31,7 @@
  */
 import { matchQuotaPreset } from '@taiji/shared'
 import type { QuotaPreset } from '@taiji/shared'
+import { listQuotaPresets } from './quota-providers/index.js'
 import type { TaijiProviderStore } from './provider-extras-store.js'
 
 /** 自动开启的 extras 写入通道（可选注入，对齐 credentialWriter 先例）。 */
@@ -48,13 +51,17 @@ export function isPlaintextCredential(raw: string | undefined): boolean {
 /**
  * 判定「默认同意自动开启」是否适用：返回应落盘的 preset，不适用返回 undefined。
  * credentialType 只有 'plaintext' 适用（导入侧六态 / setProvider 侧明文判定，语义见文件头）。
+ *
+ * @param presets - 候选预设集（必填）：调用方传 listQuotaPresets() 合并视图——契约必填，
+ *   与查询/展示链同一权威（原 matchQuotaPreset 缺省参数正是漏迁移静默读基线的通道）。
  */
 export function matchAutoEnablePreset(
   provider: { baseUrl?: string; name?: string },
   credentialType: string,
+  presets: readonly QuotaPreset[],
 ): QuotaPreset | undefined {
   if (credentialType !== 'plaintext') return undefined
-  const preset = matchQuotaPreset(provider)
+  const preset = matchQuotaPreset(provider, presets)
   if (!preset) return undefined
   if (!preset.auth.includes('api-key')) return undefined
   if (preset.requiresWorkspace) return undefined
@@ -99,7 +106,7 @@ export async function autoEnableQuotaDisplayOnCreate(
   credentialUsable: boolean,
 ): Promise<boolean> {
   if (!credentialUsable) return false
-  const preset = matchAutoEnablePreset(identity, 'plaintext')
+  const preset = matchAutoEnablePreset(identity, 'plaintext', listQuotaPresets())
   if (!preset) return false
   return autoEnableQuotaDisplay(store, providerId, preset.fetcher)
 }

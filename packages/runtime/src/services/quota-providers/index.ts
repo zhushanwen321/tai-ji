@@ -11,7 +11,7 @@
  * （不静默回退旧缓存）。
  */
 import type { QuotaPreset } from '@taiji/shared'
-import { QUOTA_PRESETS } from '@taiji/shared'
+import { isQuotaPreset, QUOTA_PRESETS } from '@taiji/shared'
 import type { ProviderQuotaFetcher } from '@taiji/shared'
 import { isRecord } from './types.js'
 import { isDeclarativeFetcherConfig, runDeclarativeFetcher, type DeclarativeFetcherConfig } from './declarative-engine.js'
@@ -33,7 +33,12 @@ export function isQuotaFetchersRemoteConfig(v: unknown): v is QuotaFetchersRemot
     if (!isRecord(v['fetchers'])) return false
     if (!Object.values(v['fetchers']).every(isDeclarativeFetcherConfig)) return false
   }
-  if (v['presets'] !== undefined && !Array.isArray(v['presets'])) return false
+  // presets 元素逐个校验形状（与 fetchers 段同强度）：畸形元素（如缺 match）若放行，
+  // 会经 listQuotaPresets 下发前端/进入匹配链，matchQuotaPreset 对其解构即 TypeError
+  // （额度 label computed / 自动开启判定渲染期抛错）。拒 = 整体拒用回退基线 QUOTA_PRESETS。
+  if (v['presets'] !== undefined) {
+    if (!Array.isArray(v['presets']) || !v['presets'].every(isQuotaPreset)) return false
+  }
   return true
 }
 

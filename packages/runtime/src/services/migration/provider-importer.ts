@@ -52,6 +52,7 @@ import { applyProviderWritePolicy, type ProviderWriteKind } from '../provider-co
 import type { CredentialWriter } from '../auth/auth-storage.js'
 import type { QuotaPreset } from '@taiji/shared'
 import { autoEnableQuotaDisplay, matchAutoEnablePreset, type QuotaExtrasWriter } from '../quota-auto-enable.js'
+import { listQuotaPresets } from '../quota-providers/index.js'
 
 /**
  * catalog provider 导入在 credentialWriter 未注入时的降级 reason（设计 D1④）。
@@ -553,6 +554,9 @@ export async function applyImport(
   // apply 时再次查冲突（preview 后 models.json 可能被改）
   const existingIds = new Set(getProviderNames())
   const autoEnableTargets: QuotaAutoEnableTarget[] = []
+  // preset 决策权威：基线 ⊕ 远程合并视图（apply 内取一次共用，两条收集腿同表判定——
+  // 与 quota-service 查询链 / 前端展示链同源，远程 presets 下发后自动开启规则同步生效）
+  const quotaPresets = listQuotaPresets()
 
   // ══ 组 1 → 组 2 顺序应用：收集 imported 条目与 quota 自动开启目标 ══
   // 组 1：models.json 已定义的 provider 逐条应用（分体系处理见 applyProviderEntry），
@@ -566,6 +570,7 @@ export async function applyImport(
       (provider) => matchAutoEnablePreset(
         { baseUrl: provider.baseUrl, name: provider.name ?? provider._sourceName },
         provider._credentialType,
+        quotaPresets,
       ),
       autoEnableTargets,
     )),
@@ -575,7 +580,7 @@ export async function applyImport(
       (oc) => {
         const tpl = matchBuiltinTemplate(oc.providerId)
         return tpl
-          ? matchAutoEnablePreset({ baseUrl: tpl.baseUrl, name: tpl.name }, oc.credentialType)
+          ? matchAutoEnablePreset({ baseUrl: tpl.baseUrl, name: tpl.name }, oc.credentialType, quotaPresets)
           : undefined
       },
       autoEnableTargets,

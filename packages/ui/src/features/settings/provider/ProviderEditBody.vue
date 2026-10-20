@@ -328,7 +328,7 @@ import {
   Eye, EyeOff,
   X, Trash2,
 } from '@lucide/vue'
-import { matchQuotaPreset, type QuotaPreset } from '@taiji/shared'
+import { matchQuotaPreset, QUOTA_PRESETS, type QuotaPreset } from '@taiji/shared'
 
 import type { ProviderInfo } from '@taiji/shared'
 // API_KEY_CLEAR_SENTINEL：清除哨兵常量与 core save 链同源（MF-1-9：模板判断不再手写
@@ -376,8 +376,10 @@ const builtinModels = computed(() => props.provider?.models.filter((m) => m.sour
 // ── Coding Plan 额度查询：自动关联 + 配置 ──
 const matchedPreset = computed(() => {
   const p = props.provider
-  // quotaPresets 缺省 = 编译期基线（测试/无下发场景兼容）；生产由 renderer 传合并视图
-  return matchQuotaPreset({ baseUrl: p?.baseUrl, name: p?.name }, props.quotaPresets)
+  // quotaPresets 未下发（测试/无下发场景）显式回落编译期基线；生产由 renderer 传合并视图。
+  // matchQuotaPreset 的 presets 形参契约必填（无缺省）——调用点显式写回落表达式，
+  // 堵「漏传静默读基线」通道（远程 presets 下发后展示链与 runtime 匹配链读同一权威）。
+  return matchQuotaPreset({ baseUrl: p?.baseUrl, name: p?.name }, props.quotaPresets ?? QUOTA_PRESETS)
 })
 
 // 业务编排全在 core 三组 module（[C4] 31 成员扁平返回面收敛为 form / discover / models 三组
