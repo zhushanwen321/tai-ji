@@ -17,6 +17,9 @@ import { defineStore } from 'pinia'
 import { ref } from 'vue'
 import type { ArchiveSummary } from '@taiji/shared'
 
+/** 恢复高亮停留时长（§5.1 恢复样例「accent-soft 高亮渐隐」：置顶行高亮数秒后渐隐回普通行） */
+const RESTORED_HIGHLIGHT_MS = 5_000
+
 export const useArchiveStore = defineStore('archive', () => {
   /** 归档列表快照（config.archives 拉取产物；空数组 = 无归档，与加载失败经 listError 分形） */
   const archives = ref<ArchiveSummary[]>([])
@@ -30,6 +33,16 @@ export const useArchiveStore = defineStore('archive', () => {
   const loading = ref(false)
   /** 列表拉取失败原因（null = 无失败；归档列表显示重试入口） */
   const listError = ref<string | null>(null)
+  /**
+   * 刚恢复的 session id（§5.1 恢复样例「原项目组顶部、accent-soft 高亮渐隐」的前端
+   * 高亮态）：unarchive reply 的 SessionSummary.id 消费点（D5 步骤 7「前端高亮置顶」）。
+   * null = 无恢复高亮。置顶构造性成立（恢复路径重写主文件 → mtime = 恢复时刻 → 列表
+   * 序 = mtime 降序组内第一），本字段只驱动行高亮渐隐。行定位按 id 匹配（不持
+   * SessionSummary 引用——广播回流后列表条目实例会重建，持引用会脱锚）。
+   */
+  const restoredSessionId = ref<string | null>(null)
+  /** 恢复高亮自动清除定时器（重复恢复时重置；store 为 pinia 单例无泄漏窗口） */
+  let restoredClearTimer: ReturnType<typeof setTimeout> | null = null
 
   /** 拉取产物落地（count 同步对账——列表即事实源，D9 不变量 3） */
   function setArchives(list: ArchiveSummary[]): void {
@@ -57,6 +70,16 @@ export const useArchiveStore = defineStore('archive', () => {
     selected.value = archive
   }
 
+  /** 登记刚恢复的 session（恢复成功编排调用；数秒后自动清除触发高亮渐隐） */
+  function markRestored(sessionId: string): void {
+    if (restoredClearTimer !== null) clearTimeout(restoredClearTimer)
+    restoredSessionId.value = sessionId
+    restoredClearTimer = setTimeout(() => {
+      restoredSessionId.value = null
+      restoredClearTimer = null
+    }, RESTORED_HIGHLIGHT_MS)
+  }
+
   return {
     archives,
     archiveCount,
@@ -64,10 +87,12 @@ export const useArchiveStore = defineStore('archive', () => {
     selected,
     loading,
     listError,
+    restoredSessionId,
     setArchives,
     setCount,
     openView,
     closeView,
     selectArchive,
+    markRestored,
   }
 })

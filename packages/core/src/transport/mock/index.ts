@@ -680,7 +680,9 @@ const sessionImpl = {
 
   /**
    * Mock 恢复：mockArchives 移除条目 + 预备表 session 放回 fixtureSessions + 广播；
-   * reply 形状对齐 real（{ sessionId, session }——前端高亮置顶消费）。
+   * reply 形状对齐 real（{ sessionId, session }——前端高亮置顶消费）。放回行为对齐
+   * real 置顶语义：列表头插入 + lastActiveAt 更新为恢复时刻（real 侧 = 恢复路径全量
+   * 重写主文件使 mtime = 恢复时刻，扫描按 mtime 降序自然置顶）。
    */
   async unarchive(sessionId: string): Promise<SessionSummary> {
     await sleep(TIMING.ack)
@@ -691,7 +693,10 @@ const sessionImpl = {
     mockArchives.splice(idx, 1)
     const session = mockArchivedSessions.get(sessionId)
     mockArchivedSessions.delete(sessionId)
-    if (session) fixtureSessions.push(session)
+    if (session) {
+      session.lastActiveAt = Date.now()
+      fixtureSessions.unshift(session)
+    }
     pushSessionList()
     return session ?? { id: sessionId, label: `label-${sessionId}`, cwd: '/mock', status: 'idle', lastActiveAt: Date.now(), modelId: '', tokenCount: 0 }
   },

@@ -19,7 +19,7 @@
  */
 import { describe, it, expect, afterEach } from 'vitest'
 import { createHash } from 'node:crypto'
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, renameSync, rmSync, statSync, utimesSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { zstdDecompressSync } from 'node:zlib'
@@ -324,6 +324,9 @@ describe('后台压缩任务', () => {
     })
     // 明文已删。
     expect(existsSync(plain)).toBe(false)
+    // 压缩完成通知（D11「后台任务完成事件刷新」的事件源）：archive 步骤 5 广播 +
+    // 压缩终态写入后广播各一次（staging→archived 的 renderer 刷新由收帧侧拉取承载）。
+    expect(f.calls.filter((c) => c === 'broadcast')).toHaveLength(2)
   })
 })
 
@@ -335,10 +338,15 @@ describe('ArchiveService.unarchive', () => {
     const sid = 'sess-uuuu77'
     const mainPath = f.writeMainFile(sid, CWD_A, { sidecars: ['.project.json'] })
     const original = readFileSync(mainPath)
+    // 原文件 mtime 设旧（锚定置顶排序语义：列表序 = 主文件 mtime 降序，恢复必须让
+    // mtime = 恢复时刻，§5.1「原项目组顶部」——否则按旧时间落回旧位置）。
+    const stale = new Date('2020-01-01T00:00:00Z')
+    utimesSync(mainPath, stale, stale)
     f.seedAssetDomain(sid, 'attachments')
     f.registerScanned(sid, CWD_A, mainPath)
     f.setSummary(sid, summaryOf(sid, CWD_A))
     await archiveAndCompress(f, sid)
+    const restoreStartedAt = Date.now()
 
     const reply = await f.service.unarchive(sid)
 
@@ -347,6 +355,8 @@ describe('ArchiveService.unarchive', () => {
     expect(readFileSync(mainPath).equals(original)).toBe(true)
     expect(existsSync(`${mainPath}.project.json`)).toBe(true)
     expect(existsSync(join(f.storeRoot, sid, 'attachments', 'item-attachments.dat'))).toBe(true)
+    // 恢复置顶排序语义：重建主文件 mtime = 恢复时刻（远新于 2020 锚点）。
+    expect(statSync(mainPath).mtimeMs).toBeGreaterThanOrEqual(restoreStartedAt)
     // 归档单元清空（簿记/压缩体/旁挂/assets 全消失——目录壳可留）。
     const unitDir = join(f.archiveRoot, ENC_A)
     expect(existsSync(join(unitDir, `2026-10-20T00-00-00-000Z_${sid}.jsonl.archive.json`))).toBe(false)

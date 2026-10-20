@@ -42,8 +42,10 @@
       class="session-item group/item relative flex cursor-pointer select-none items-center gap-[8px] rounded-sm px-[8px] py-[7px] transition-colors duration-[var(--duration-fast)] ease-[var(--ease-out)] hover:bg-surface-hover"
       :class="[
         active ? 'bg-surface-hover text-neutral-fg' : '',
+        restoredHighlight ? 'bg-accent-soft' : '',
         isDead ? 'opacity-50' : '',
       ]"
+      :data-testid="restoredHighlight ? 'session-item-restored-highlight' : undefined"
       :aria-label="ariaLabel"
       @click="emit('select', session.id)"
       @keydown="onItemKeydown"
@@ -151,7 +153,14 @@ const props = withDefaults(defineProps<{
   /** 父 session 显示名（SessionList 反查血缘注入，hover 详情卡血缘行展示「fork 自 <父名>」；
    *  缺省回退 session.parentSession 原值——卡片血缘行的 `parentLabel || parentSession`） */
   parentLabel?: string
-}>(), { childCount: 0 })
+  /**
+   * 刚恢复高亮（session-archive §5.1 恢复样例「accent-soft 高亮渐隐」）：unarchive 成功
+   * 后由 SessionList 按 archive store restoredSessionId 注入，数秒后随 store 清除渐隐回
+   * 普通行（transition-colors 承载渐隐）。与 active 互斥构造成立——恢复前该 session 不在
+   * 场（归档态）、恢复编排不切换 active。
+   */
+  restoredHighlight?: boolean
+}>(), { childCount: 0, restoredHighlight: false })
 
 const emit = defineEmits<{
   select: [sessionId: string]

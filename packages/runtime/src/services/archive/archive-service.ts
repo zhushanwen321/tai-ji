@@ -302,8 +302,9 @@ export class ArchiveService {
 
   /**
    * 后台压缩任务（D5）：读明文全量 → 提取摘要（D4）→ zstd 压缩 tmp+rename → 删明文 →
-   * 簿记原子重写终态。状态机判定：staging + compress_done（磁盘 status 非 staging 或
-   * 明文已失 = 幂等重入，直接返回——自愈重试与竞态双跑安全）。
+   * 簿记原子重写终态 → 广播完成通知（staging 占位刷新的事件源，见函数体注释）。状态机
+   * 判定：staging + compress_done（磁盘 status 非 staging 或明文已失 = 幂等重入，直接
+   * 返回——自愈重试与竞态双跑安全）。
    */
   private async queueCompression(ledger: ArchiveLedgerStaging, unitDir: string): Promise<CompressionOutcome> {
     return this.serialize(ledger.sessionId, async () => {
@@ -348,6 +349,12 @@ export class ArchiveService {
         sha256: sha256Hex(compressed),
         summary,
       })
+      // 压缩完成的完成通知（D11「后台任务完成事件刷新」的事件源承载）：归档条目不在
+      // 会话列表、archiveCount 两态同计（staging/archived 均计数），会话列表帧内容不变——
+      // 广播的作用 = 提示帧本身（renderer 收帧时归档视图/摘要视图打开则重拉 config.archives，
+      // 「压缩中」标注与「摘要生成中」占位随之刷新）。拉为主：帧丢失或视图关闭时按
+      // 既有拉取路径收敛（打开视图/域内操作后刷新），无额外补偿。
+      this.deps.broadcastSessionList()
     } catch (e: unknown) {
       // 残留 tmp 不回滚（自愈行 6 清收）；条目保持 staging 态，自愈行 1 重试。
       throw new ArchiveError('archive_io_error', `压缩任务写盘失败 (sessionId=${ledger.sessionId}): ${toMessage(e)}`)
@@ -437,6 +444,9 @@ export class ArchiveService {
     }
 
     // 步骤 5：解压到 sessions/ 原位（tmp+rename）+ 旁挂、附件三目录反向搬回。
+    // 主文件重建（writeFileSync 全量重写 + rename 回原位）→ mtime = 恢复时刻：列表序
+    // = 主文件 mtime 降序（scanner lastActiveAt 派生源），恢复的 session 构造性落组内
+    // 顶部（§2 目标 4 / §5.1「原项目组顶部」）——零额外置顶机制，语义由单测锚定。
     try {
       const tmp = tmpPathOf(originalMainPath)
       writeFileSync(tmp, restoredContent)

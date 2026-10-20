@@ -135,6 +135,7 @@
             :status="statusOf(s.id)"
             :child-count="childCountOf(s)"
             :parent-label="parentLabelOf(s)"
+            :restored-highlight="s.id === restoredSessionId"
             @select="emit('select', $event)"
             @rename="emit('rename', $event)"
             @archive="emit('archive', $event)"
@@ -171,6 +172,7 @@
             :status="statusOf(s.id)"
             :child-count="childCountOf(s)"
             :parent-label="parentLabelOf(s)"
+            :restored-highlight="s.id === restoredSessionId"
             @select="emit('select', $event)"
             @rename="emit('rename', $event)"
             @archive="emit('archive', $event)"
@@ -213,6 +215,7 @@
                 :status="statusOf(s.id)"
                 :child-count="childCountOf(s)"
                 :parent-label="parentLabelOf(s)"
+                :restored-highlight="s.id === restoredSessionId"
                 @select="emit('select', $event)"
                 @rename="emit('rename', $event)"
                 @archive="emit('archive', $event)"
@@ -275,6 +278,7 @@
                   :status="statusOf(s.id)"
                   :child-count="childCountOf(s)"
                   :parent-label="parentLabelOf(s)"
+                  :restored-highlight="s.id === restoredSessionId"
                   @select="emit('select', $event)"
                   @rename="emit('rename', $event)"
                   @archive="emit('archive', $event)"
@@ -345,7 +349,13 @@ const props = withDefaults(defineProps<{
    * 可选缺省 0（既有测试挂载不传时角标隐藏的默认形态）。
    */
   archiveCount?: number
-}>(), { archiveCount: 0 })
+  /**
+   * 刚恢复的 session id（session-archive §5.1 恢复高亮：unarchive reply 消费点，经
+   * Sidebar 从 archive store 注入；null = 无恢复高亮）。置顶构造性成立（恢复重写主文件
+   * → mtime = 恢复时刻 → 组内第一），本字段只驱动行 accent-soft 高亮渐隐。
+   */
+  restoredSessionId?: string | null
+}>(), { archiveCount: 0, restoredSessionId: null })
 
 const emit = defineEmits<{
   select: [sessionId: string]

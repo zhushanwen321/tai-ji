@@ -22,7 +22,7 @@ function makeSession(id: string): SessionSummary {
   return { id, label: `会话 ${id}`, cwd: '/alpha', status: 'idle', lastActiveAt: 1, modelId: 'm', tokenCount: 0 }
 }
 
-function mountList(archiveCount?: number) {
+function mountList(archiveCount?: number, restoredSessionId?: string) {
   const groups: SessionGroup[] = [{ cwd: '/alpha', sessions: [makeSession('a1')] }]
   return mount(SessionList, {
     props: {
@@ -30,6 +30,7 @@ function mountList(archiveCount?: number) {
       activeId: null,
       statusOf: () => 'done' as never,
       ...(archiveCount !== undefined ? { archiveCount } : {}),
+      ...(restoredSessionId !== undefined ? { restoredSessionId } : {}),
     },
   })
 }
@@ -86,6 +87,23 @@ describe('SessionList 归档事件透传（D6 悬停归档钮链路）', () => {
     await btn.trigger('click')
 
     expect(wrapper.emitted('archive')).toEqual([['a1']])
+    wrapper.unmount()
+  })
+})
+
+describe('SessionList 恢复高亮（session-archive §5.1「原项目组顶部、accent-soft 高亮渐隐」）', () => {
+  it('restoredSessionId 匹配行：accent-soft 底色 + highlight testid；其余行与缺省态无高亮', () => {
+    const wrapper = mountList(undefined, 'a1')
+    const row = wrapper.find('[data-testid="session-item-restored-highlight"]')
+    expect(row.exists()).toBe(true)
+    expect(row.classes()).toContain('bg-accent-soft')
+    wrapper.unmount()
+  })
+
+  it('restoredSessionId 无匹配（null 或他行）：无高亮 testid、无 accent-soft 底色', () => {
+    const wrapper = mountList(undefined, 'other-id')
+    expect(wrapper.find('[data-testid="session-item-restored-highlight"]').exists()).toBe(false)
+    expect(wrapper.find('.session-item').classes()).not.toContain('bg-accent-soft')
     wrapper.unmount()
   })
 })

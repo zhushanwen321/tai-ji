@@ -108,6 +108,7 @@
               :active-id="focusedSessionId"
               :status-of="statusOf"
               :archive-count="archiveStore.archiveCount"
+              :restored-session-id="archiveStore.restoredSessionId"
               @select="onSelectSession"
               @new-session="onNewSession"
               @rename="onRenameSession"
