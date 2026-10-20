@@ -58,6 +58,9 @@ function makeDeps(overrides?: Partial<SearchDeps>): SearchDeps {
           'search.sectionFile': '文件',
           'search.sectionSession': '会话',
           'search.sectionArchive': '归档',
+          // archive 域词条（renderer zh-CN/archive.ts 同值）：归档条目状态标注经 t 通道取词
+          'archive.summary.compressing': '压缩中',
+          'archive.summary.empty': '（无对话记录）',
         }
         return labels[key] ?? key
       }),
@@ -382,9 +385,23 @@ describe('归档源（名称 + 摘要全文匹配，载荷透传）', () => {
     const { query } = useSearch(ref<string | null>(null), deps)
     const byName = await query('压缩中', { activeSessionId: null })
     expect(findSection(byName, 'archive')?.items[0]?.sub).toBe('压缩中')
+    // 状态标注必须经 i18n 通道取词（archive 域词条单源）——硬编码中文绕过 ports.t 的回归在此拦截
+    expect(deps.ports.t).toHaveBeenCalledWith('archive.summary.compressing')
 
     const bySummary = await query('六层分层', { activeSessionId: null })
     expect(findSection(bySummary, 'archive')).toBeUndefined()
+  })
+
+  it('archived 态 turns 空数组 → sub 走 archive.summary.empty 词条（i18n 通道，不硬编码）', async () => {
+    const deps = makeDeps()
+    const emptyTurns = { ...makeArchivedArchive(), summary: { turns: [] } }
+    ;(deps.ports.archiveList as ReturnType<typeof vi.fn>).mockResolvedValue([emptyTurns])
+
+    const { query } = useSearch(ref<string | null>(null), deps)
+    const sections = await query('renderer', { activeSessionId: null })
+
+    expect(findSection(sections, 'archive')?.items[0]?.sub).toBe('（无对话记录）')
+    expect(deps.ports.t).toHaveBeenCalledWith('archive.summary.empty')
   })
 
   it('archiveList reject → 归档分组空，其他源不阻断（MR-4.2 同款）', async () => {

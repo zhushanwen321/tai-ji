@@ -197,14 +197,18 @@ export function useSearch(
     return parts.join(' ')
   }
 
-  /** 归档条目 → SearchItem（载荷透传供跳转；sub = 摘要首段或状态标注）。 */
+  /**
+   * 归档条目 → SearchItem（载荷透传供跳转；sub = 摘要首段或状态标注）。
+   * 状态标注经 TranslatePort 复用 renderer archive 域词条（archive.summary.*，双语在册，
+   * 与 ArchiveListView/摘要视图同源单份），不硬编码中文——en-US 用户搜索归档项 sub 须随 locale。
+   */
   function toArchiveItem(a: ArchiveSummary): SearchItem {
     let sub: string
     if (a.status === 'staging') {
-      sub = '压缩中'
+      sub = ports.t('archive.summary.compressing')
     } else {
       const first = a.summary.turns[0]?.user ?? ''
-      sub = first.length > 0 ? (first.length > 80 ? `${first.slice(0, 80)}…` : first) : '（无对话记录）'
+      sub = first.length > 0 ? (first.length > 80 ? `${first.slice(0, 80)}…` : first) : ports.t('archive.summary.empty')
     }
     return { type: 'archive', title: a.name.length > 0 ? a.name : a.sessionId, sub, archive: a }
   }
