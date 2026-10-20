@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { matchQuotaPreset, QUOTA_PRESETS } from '../quota-presets'
+import { matchQuotaPreset, resolveQuotaPresets, QUOTA_PRESETS } from '../quota-presets'
 
 describe('QUOTA_PRESETS', () => {
   it('有 5 个预设', () => {
@@ -122,5 +122,28 @@ describe('matchQuotaPreset', () => {
   it('name 含独立 glm token 匹配 zhipu（如 my-glm-service）', () => {
     const result = matchQuotaPreset({ name: 'my-glm-service' }, QUOTA_PRESETS)
     expect(result?.fetcher).toBe('zhipu')
+  })
+})
+
+// 读取侧空态回落（dmg-r3-1）：settings-store 的 quotaPresets 初值是 `[]`（非 undefined），
+// `??` 只覆盖 undefined——空数组原样穿过回落表达式会让额度类型下拉与 matchedPreset 在
+// RPC 未回包 / 拉取失败 / mock 轨时永久为空（C-proc-21 禁静默空值）。
+describe('resolveQuotaPresets', () => {
+  it('空数组（store 初值 / RPC 失败未写）→ 回落编译期基线', () => {
+    expect(resolveQuotaPresets([])).toBe(QUOTA_PRESETS)
+  })
+
+  it('undefined（props 未传）→ 回落编译期基线', () => {
+    expect(resolveQuotaPresets(undefined)).toBe(QUOTA_PRESETS)
+  })
+
+  it('非空合并视图 → 原样返回（不复制、不改写，远程 presets 是权威）', () => {
+    const merged = [QUOTA_PRESETS[0]!]
+    expect(resolveQuotaPresets(merged)).toBe(merged)
+  })
+
+  it('回落后匹配链仍可用：空态 + zhipu baseUrl 命中基线', () => {
+    const preset = matchQuotaPreset({ baseUrl: 'https://bigmodel.cn/api' }, resolveQuotaPresets([]))
+    expect(preset?.fetcher).toBe('zhipu')
   })
 })

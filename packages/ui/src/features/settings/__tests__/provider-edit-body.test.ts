@@ -308,6 +308,21 @@ describe('凭证区条件化：oauth 型 provider', () => {
     expect(capturedMiss!.value).toBeUndefined()
   })
 
+  it('quotaPresets 传空数组（store 初值 / RPC 拉取失败）→ 回落编译期基线，matchedPreset 不永久为空', async () => {
+    // dmg-r3-1 回归：settings-store 的 quotaPresets 初值是 `[]`（非 undefined），`??` 只覆盖
+    // undefined——空数组原样穿过回落表达式会让 matchedPreset 恒 undefined，额度区拿不到
+    // 自动关联的 preset（C-proc-21：用户可见的辅助能力失败禁静默空值）。
+    let captured: Ref<QuotaPreset | undefined> | undefined
+    quotaFactoryStub.mockImplementationOnce((inputs?: QuotaConfigureFactoryInputs) => {
+      captured = inputs?.preset
+      return makeQuotaModuleStub({ state: 'ready' })
+    })
+    wrapper = mountBody({ ...OAUTH_P, baseUrl: 'https://open.bigmodel.cn/api/paas/v4' }, { quotaPresets: [] })
+    await flushPromises()
+    expect(captured).toBeDefined()
+    expect(captured!.value?.fetcher).toBe('zhipu')
+  })
+
   it('点 relogin 按钮 → 上抛 oauth-login（OAuth 状态机在父组件，ui 零 renderer import）', async () => {
     wrapper = mountBody(OAUTH_P, { oauthPresent: true })
     await flushPromises()

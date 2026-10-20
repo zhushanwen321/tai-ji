@@ -867,6 +867,21 @@ describe('既有回归（reason 透传 / preset 派生）', () => {
     expect(module.view.value.credential.form).toBe('cookie')
     expect(module.view.value.workspace.required).toBe(true)
   })
+
+  it('store quotaPresets 为空数组（RPC 未回包 / 拉取失败）→ 类型下拉回落编译期基线，不永久为空', async () => {
+    // dmg-r3-1 回归：settings-store 的 quotaPresets 初值是 `[]`（非 undefined），裸读 .value
+    // 会让 fetcherOptions 恒空、isCookieAuth 对已选类型判不出 cookie 形态（C-proc-21 禁静默空值）。
+    getSettingsStore().setQuotaPresets([])
+    const { module } = mountModule(
+      provider({ id: 'mimo-p', quota: { enabled: false, fetcher: 'mimo', cookieSet: true } }),
+    )
+    await Promise.resolve()
+
+    expect(module.view.value.type.options).toHaveLength(QUOTA_PRESETS.length)
+    expect(module.view.value.type.options.map((o) => o.value)).toEqual(QUOTA_PRESETS.map((p) => p.fetcher))
+    // 空态回落后已选 cookie 类类型的凭证形态仍可判定（否则 readiness 会误判成 api-key 分支）
+    expect(module.view.value.credential.form).toBe('cookie')
+  })
 })
 
 // ── ⑩ 收拢进 implementation 的派生面（C1） ──────────────────────────────────

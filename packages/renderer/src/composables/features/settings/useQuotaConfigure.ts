@@ -20,7 +20,7 @@ import type {
   QuotaAuthKind,
   QuotaFetchFailureReason,
 } from '@taiji/shared'
-import { normalizeQuotaWorkspaceUrl, resolveQuotaCredentialSource, supportsExclusiveCredential } from '@taiji/shared'
+import { normalizeQuotaWorkspaceUrl, resolveQuotaCredentialSource, resolveQuotaPresets, supportsExclusiveCredential } from '@taiji/shared'
 // W3c：presets 数据源从编译期基线切到 runtime 下发的合并视图（remote-config 域 2）
 import { getSettingsStore } from '@taiji/core'
 import type {
@@ -60,9 +60,20 @@ function normalizeWorkspaceDraft(
   return { ok: true, payload: normalized.url }
 }
 
+/**
+ * 当前 presets 合并视图（空态回落编译期基线）。
+ *
+ * store 初值是 `[]`（非 undefined）且 RPC 拉取失败只 warn 不写基线——裸读 `.value` 会让
+ * 类型下拉在合并视图未下发期间恒空且本挂载期不恢复（C-proc-21：用户可见的辅助能力失败
+ * 必须有可见反馈，禁静默空值）。回落判据与 ProviderEditBody 的 matchedPreset 同源。
+ */
+function currentPresets(): readonly QuotaPreset[] {
+  return resolveQuotaPresets(getSettingsStore().quotaPresets.value)
+}
+
 /** 当前草稿 fetcher 对应的预设；未选择草稿时 fallback 到自动匹配的 preset。 */
 function findPreset(fetcherId: string | undefined, fallback: QuotaPreset | undefined): QuotaPreset | undefined {
-  if (fetcherId) return getSettingsStore().quotaPresets.value.find((p) => p.fetcher === fetcherId)
+  if (fetcherId) return currentPresets().find((p) => p.fetcher === fetcherId)
   return fallback
 }
 
@@ -193,10 +204,11 @@ export function useQuotaConfigure(inputs: QuotaConfigureInputs): QuotaConfigureM
    * 下拉框选项：presets 合并视图映射为 { value, label }。
    * computed 而非 setup 期一次性快照：quotaPresets 由 config.listQuotaPresets RPC 异步填充，
    * 回包晚于本 composable 装配——一次性求值会让下拉恒空且本挂载期不恢复（与 isCookieAuth /
-   * activePreset 的 computed 读取路径保持同源新鲜度）。
+   * activePreset 的 computed 读取路径保持同源新鲜度）。读取经 currentPresets 空态回落基线，
+   * RPC 未回包 / 拉取失败期间下拉同样非空。
    */
   const fetcherOptions = computed(() =>
-    getSettingsStore().quotaPresets.value.map((p) => ({ value: p.fetcher, label: p.label })),
+    currentPresets().map((p) => ({ value: p.fetcher, label: p.label })),
   )
 
   /**
@@ -233,7 +245,7 @@ export function useQuotaConfigure(inputs: QuotaConfigureInputs): QuotaConfigureM
   const isCookieAuth = computed(() => {
     const fid = fetcherIdDraft.value
     if (fid) {
-      const opt = getSettingsStore().quotaPresets.value.find((p) => p.fetcher === fid)
+      const opt = currentPresets().find((p) => p.fetcher === fid)
       return opt?.auth.includes('cookie') ?? false
     }
     return preset.value?.auth.includes('cookie') ?? false

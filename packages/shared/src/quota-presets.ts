@@ -134,6 +134,22 @@ export function isQuotaPreset(v: unknown): v is QuotaPreset {
 }
 
 /**
+ * 读取侧空态回落：presets 合并视图尚未下发时取编译期基线。
+ *
+ * 判据取「空态」而非 nullish：settings-store 的 quotaPresets 初值是 `[]`（非 undefined），
+ * `??` 只覆盖 undefined——空数组会原样穿过回落表达式，额度类型下拉与 matchedPreset 在
+ * RPC 未回包 / 拉取失败 / mock 轨时永久为空（C-proc-21：用户可见的辅助能力失败必须有
+ * 可见反馈，禁静默空值）。空态在读取侧与「权威显式下发空表」不可区分，统一回落基线
+ * （基线即无远程覆盖时的合并视图原形，见 QUOTA_PRESETS 注释）。
+ *
+ * 与 runtime listQuotaPresets()（远程 presets ?? 基线）同口径：runtime 侧恒非空，
+ * 前端读取侧经本函数补齐同一判据，展示链与匹配链读同一权威。
+ */
+export function resolveQuotaPresets(presets: readonly QuotaPreset[] | undefined): readonly QuotaPreset[] {
+  return presets?.length ? presets : QUOTA_PRESETS
+}
+
+/**
  * 根据 provider 的 baseUrl 和 name 匹配预设。
  *
  * @param provider - 提供 baseUrl 和/或 name 的对象（来自 ProviderInfo）。

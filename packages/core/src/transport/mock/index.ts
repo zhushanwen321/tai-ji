@@ -50,7 +50,7 @@ import type {
   UiLocale,
   Segment,
 } from '@taiji/shared'
-import { recommendedExtensions, PRESET_SKILL_DIRS, PRESET_AGENT_DIRS, PRESET_EXTENSION_DIRS, DEFAULT_DISCOVERY_CONFIG, DEFAULT_PRESETS, DELIVERY_PREVIEW_MAX_CHARS } from '@taiji/shared'
+import { recommendedExtensions, PRESET_SKILL_DIRS, PRESET_AGENT_DIRS, PRESET_EXTENSION_DIRS, DEFAULT_DISCOVERY_CONFIG, DEFAULT_PRESETS, DELIVERY_PREVIEW_MAX_CHARS, QUOTA_PRESETS } from '@taiji/shared'
 import { createSession, fixtureMessages, fixtureSessions, e2eTestSession } from './data'
 import { fixtureProviders, fixtureSkills, fixtureAgents, fixtureExtensions, toCandidate } from './settings-data'
 import { MOCK_MODELS, mockModelToInfo, FILE_CANDIDATES } from './composer-data'
@@ -1282,10 +1282,11 @@ const configImpl = {
   async setProviderCatalogWatch(_enable: boolean): Promise<void> {
     await sleep(TIMING.ack)
   },
-  // quota presets 合并视图：mock 返基线形状空数组（签名同构，facade 三元）。
+  // quota presets 合并视图：mock 无 remote-config 层，返编译期基线（与 runtime
+  // listQuotaPresets() 的「远程 presets ?? 基线」同口径——mock 轨额度类型下拉非空）。
   async listQuotaPresets(): Promise<QuotaPreset[]> {
     await sleep(TIMING.ack)
-    return []
+    return QUOTA_PRESETS
   },
   // wave-env-check：env 检测。mock 读 process.env 同构（浏览器 mock 下多为未设置）。
   async checkEnvVars(names: string[]): Promise<Record<string, boolean>> {
