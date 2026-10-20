@@ -183,7 +183,7 @@ describe('Sidebar app.info 退订（B3 / 2026-09-14 内存审计 §2.4）', () =
   it('TC5: 重复挂卸循环对称——每次 mount 订阅、unmount 全退（A4 场景：重连重挂后 handler 数恒定）', () => {
     // 连接抖动模拟：5 轮 mount/unmount。Sidebar 每轮 mount 注册两个全局订阅
     //（[session-archive D10] archiveCount 角标的 config.sessions 订阅先于 app.info——
-    // useArchiveCountBroadcast 的 onMounted 注册在 setup 前段），退订函数逐次消费
+    // useArchiveCountBroadcast 的 setup 顶层同步注册在前），退订函数逐次消费
     //（mock 队列每轮 2 份 × 5 轮 = 10 份）；断言全队列 unmount 后恰好各调一次。
     const unsubs = Array.from({ length: 10 }, () => vi.fn())
     for (const un of unsubs) vi.mocked(onGlobalType).mockReturnValueOnce(un)

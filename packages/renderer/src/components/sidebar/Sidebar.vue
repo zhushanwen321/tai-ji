@@ -478,7 +478,7 @@ const {
   purgeArchiveEntry: onArchivePurge,
   refreshArchives: onArchiveRetry,
 } = useArchiveView()
-// archiveCount 角标广播订阅（config.sessions 帧携带值；Sidebar 单实例挂载，见 composable 注释）
+// archiveCount 角标广播订阅（config.sessions 帧携带值；模块级 refCount 多实例安全，见 composable 注释）
 useArchiveCountBroadcast()
 useGlobalShortcuts({ onNewSession, onOpenImportSession: () => { importOpen.value = true }, forkFromLastAssistant, enterForkModeFromLastAssistant, handoffFromLastAssistant, navigation: useNavigationStore(), openSettings })
 // [B3 / 2026-09-14 内存审计 §2.4] app.info 退订函数保存 + onBeforeUnmount 调用：App.vue 以

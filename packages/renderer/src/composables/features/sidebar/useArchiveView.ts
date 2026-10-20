@@ -21,7 +21,7 @@
  * 列表；keep-all 保守分支（keptSubagentsDir 携带）出声说明残留目录（D5 步骤 7 失败
  * 显式上报）。
  */
-import { onBeforeUnmount, onMounted } from 'vue'
+import { onScopeDispose } from 'vue'
 import type { ArchiveSummary } from '@taiji/shared'
 import { session as sessionApi } from '@/api'
 import * as events from '@taiji/core/transport/api'
@@ -194,11 +194,15 @@ export function useArchiveView() {
 
 /**
  * archiveCount 角标的广播订阅（config.sessions 帧携带值，D5 协议变更点）：
- * 组件作用域 composable（onMounted 订阅 / onBeforeUnmount 退订）——Sidebar 单实例
- * 挂载调用。字段缺省（旧 runtime / mock 无归档数据）不覆盖现值；冷启动首帧前角标
- * 读初始 0 隐藏，Sidebar 挂载时的 openArchiveView 首拉对账兜底。与 useSidebar 的
- * onConfigSessions（core 列表应用通道，refCount 防重复）职责正交：本订阅只读
- * archiveCount 字段 + 承载压缩完成的顺带刷新（见 handleConfigSessionsFrame）。
+ * 模块级 refCount + onScopeDispose 订阅——范式对齐 core use-session.ts 的
+ * bindSessionListBroadcast（同帧既有消费者）：首个实例注册、末个实例卸载退订，
+ * 多实例共享同一监听；组件 setup 顶层同步绑定（订阅只是 handler 注册表写操作，
+ * 不依赖 mounted 时序）。裸订阅配逐实例退订会在多实例挂载下提前删掉共享监听
+ * （onGlobalType 底层 Set 对同一 handler 引用去重，首个实例退订即全删）。字段
+ * 缺省（旧 runtime / mock 无归档数据）不覆盖现值；冷启动首帧前角标读初始 0 隐藏，
+ * Sidebar 挂载时的 openArchiveView 首拉对账兜底。与 useSidebar 的 onConfigSessions
+ * （core 列表应用通道，同款 refCount 防重复）职责正交：本订阅只读 archiveCount
+ * 字段 + 承载压缩完成的顺带刷新（见 handleConfigSessionsFrame）。
  *
  * 压缩完成刷新（D11「后台任务完成事件刷新」/ §5.1「后台压缩完成后自动刷新」的
  * renderer 消费点）：runtime 压缩任务终态写入后广播 config.sessions 帧（帧内容不含
@@ -207,10 +211,20 @@ export function useArchiveView() {
  * 标注与「摘要生成中」占位随之刷新。推管即时拉管正确（ADR-0097）：帧丢失或视图
  * 关闭时按既有拉取路径收敛，无轮询无补偿。
  */
+let archiveCountSubCount = 0
+let archiveCountUnsub: (() => void) | null = null
+
 export function useArchiveCountBroadcast(): void {
-  onMounted(() => {
-    const unsubscribe = events.onGlobalType('config.sessions', handleConfigSessionsFrame)
-    onBeforeUnmount(() => unsubscribe())
+  archiveCountSubCount += 1
+  if (archiveCountSubCount === 1) {
+    archiveCountUnsub = events.onGlobalType('config.sessions', handleConfigSessionsFrame)
+  }
+  onScopeDispose(() => {
+    archiveCountSubCount = Math.max(0, archiveCountSubCount - 1)
+    if (archiveCountSubCount === 0 && archiveCountUnsub) {
+      archiveCountUnsub()
+      archiveCountUnsub = null
+    }
   })
 }
 

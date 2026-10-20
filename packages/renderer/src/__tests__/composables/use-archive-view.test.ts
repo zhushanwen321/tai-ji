@@ -208,7 +208,7 @@ describe('markRestored 恢复高亮生命周期（§5.1「accent-soft 高亮渐�
 })
 
 describe('config.sessions 帧消费（D11 压缩完成刷新 + 角标更新）', () => {
-  /** 挂载一个调用 useArchiveCountBroadcast 的空组件（onMounted 订阅真实事件总线）。 */
+  /** 挂载一个调用 useArchiveCountBroadcast 的空组件（setup 顶层订阅真实事件总线）。 */
   function mountSubscriber() {
     return mount(defineComponent({ setup: () => { useArchiveCountBroadcast(); return () => null } }))
   }
