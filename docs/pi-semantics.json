@@ -1720,5 +1720,91 @@
       "test": "packages/runtime/src/infra/pi/__tests__/pi-semantics-signal-exit-codes.test.ts"
     },
     "verifiedWith": "1.0.0"
+  },
+  {
+    "id": "PS-81",
+    "claim": "前提 1（provider-catalog-sync 装配顺序）：pi 1.0.0 的会话装配链顺序为 ModelRuntime.create → 扩展工厂执行（工厂体内 pi.registerProvider 只进 pending 队列、不直写注册表）→ pending 队列 flush 进注册表 → 一次 allowNetwork:false 的本地 refresh → 才轮到 createAgentSession 的 model 入参（--model 解析）→ 最后 emit session_start。若顺序相反（注册晚于 --model 解析），工厂期注册覆盖不了 spawn --model 的近似回退症状，目录投喂的注册时机须重设计（设计 D1 作废）",
+    "piAnchor": [
+      {
+        "pkg": "pi-coding-agent",
+        "distPath": "dist/core/agent-session-services.js",
+        "symbol": "createAgentSessionServices / createAgentSessionFromServices 装配链",
+        "note": ":53 createAgentSessionServices；:57 ModelRuntime.create；:69 await resourceLoader.reload（扩展工厂执行入口）；:72-83 pendingProviderRegistrations 循环 flush（:74 modelRuntime.registerProvider）；:111 await modelRuntime.refresh({ allowNetwork: false })；:129 createAgentSessionFromServices → :130 createAgentSession({ ... :137 model: options.model（--model 解析落点）... :144 sessionStartEvent })【行号锚基于 pi@1.0.0 实装实测】"
+      },
+      {
+        "pkg": "pi-coding-agent",
+        "distPath": "dist/core/extensions/loader.js",
+        "symbol": "createExtensionRuntime().registerProvider（pending 队列） / initializeExtension 的工厂调用",
+        "note": ":106 createExtensionRuntime；:165-166 registerProvider: (name, config) => runtime.pendingProviderRegistrations.push(...)（工厂期只排队）；:171-174 unregisterProvider 从队列过滤（工厂期纠错通道）；:505 initializeExtension → :509 await factory(load.api)（工厂执行点）【行号锚基于 pi@1.0.0 实装实测】"
+      },
+      {
+        "pkg": "pi-coding-agent",
+        "distPath": "dist/core/resource-loader.js",
+        "symbol": "reload / loadExtensionsCached",
+        "note": ":350 async reload；:506 const extensionsResult = await loadExtensionsCached(extensionPaths, ...)（reload 内经 loadExtensionsCached → loadExtension → initializeExtension 执行扩展工厂）【行号锚基于 pi@1.0.0 实装实测】"
+      }
+    ],
+    "guard": {
+      "type": "probe",
+      "test": "extensions/universal/provider-live-sync/src/__tests__/pi-semantics-catalog-injection.test.ts"
+    },
+    "verifiedWith": "1.0.0"
+  },
+  {
+    "id": "PS-82",
+    "claim": "前提 2（registerProvider 幂等）：pi 1.0.0 的 registerProvider(name, config) 重复注册是幂等的——同名再注册按「有值字段合并、models 数组整体替换」处理（previous 展开后只覆盖 config 里 value !== undefined 的键，models 作为单键被整体替换而非逐元素合并），且注册尾随一次 void this.refresh({ allowNetwork: false }) 的零网络本地 refresh。若叠加不覆盖（或尾随 refresh 缺失），目录投喂的二次注册（refreshModels 钩子补挂）会丢注入集或拿不到刷新，须改为注册前 unregisterProvider",
+    "piAnchor": [
+      {
+        "pkg": "pi-coding-agent",
+        "distPath": "dist/core/model-runtime.js",
+        "symbol": "ModelRuntime.registerProvider",
+        "note": ":656 registerProvider(providerId, config)；:659 validateExtensionProvider（注册前结构校验，broken re-registration 抛错且不污染 stored config）；:663 const previous = this.extensionProviders.get(providerId)；:665-668 for (const [key, value] of Object.entries(config)) if (value !== undefined) effective[key] = value（有值字段合并）；:669 this.extensionProviders.set；:673 void this.refresh({ allowNetwork: false })（尾随零网络本地 refresh，函数体下界 :675 unregisterProvider）【行号锚基于 pi@1.0.0 实装实测】"
+      }
+    ],
+    "guard": {
+      "type": "probe",
+      "test": "extensions/universal/provider-live-sync/src/__tests__/pi-semantics-catalog-injection.test.ts"
+    },
+    "verifiedWith": "1.0.0"
+  },
+  {
+    "id": "PS-83",
+    "claim": "前提 3（extension 层映射替换 + 逐模型结构校验）：pi 1.0.0 的 extension 层注册的 models 数组就是该 provider 的最终可见集合（applyExtension 对 config.models 做 map 替换，不与内置层合并——只注 diff 会把该 provider 全部既有模型挤出视图）；注册时逐个模型定义做结构校验，缺 api/baseUrl 抛错。但抛错条件是「四级兜底全空」：extensionModelFromDefinition 的 api/baseUrl 依次取 定义自带 → provider 级 config → findExtensionModelDefaults 兜底（同 id → 同 api → openai-completions → 该 provider 首个同类型模型），仅当该 provider 无任何同类型基线模型时才抛。设计 R3 因此不依赖 pi 兜底——overlay-only 新模型经兜底继承到的 api/baseUrl 语义未经上游目录声明，取保守档只认同 id 继承",
+    "piAnchor": [
+      {
+        "pkg": "pi-coding-agent",
+        "distPath": "dist/core/provider-composer.js",
+        "symbol": "applyExtension / extensionModelFromDefinition / findExtensionModelDefaults / validateExtensionProvider",
+        "note": ":171 applyExtension；:177 return config.models.map((definition) => extensionModelFromDefinition(...))（map 替换，非 concat）；:175 无 models 时走 baseUrl 覆盖或原样返回；:111 findExtensionModelDefaults（四级兜底：同 id → 同 api → openai-completions → candidates[0]）；:119 extensionModelFromDefinition；:121-124 api 缺失抛错（no \"api\" specified）；:126-128 baseUrl 缺失抛错（\"baseUrl\" is required when defining custom models）；:130/:133/:135 return { ...definition, api, provider: providerId, baseUrl, headers: undefined }（Model 对象超集属性经展开保留，headers 被硬置 undefined）；:325 validateExtensionProvider（含 streamSimple 无 api 的 provider 级校验）【行号锚基于 pi@1.0.0 实装实测】"
+      },
+      {
+        "pkg": "pi-coding-agent",
+        "distPath": "dist/core/model-runtime.js",
+        "symbol": "composeProvider / compositionErrors / getError",
+        "note": ":151-168 composeProvider（:160 composeModelProvider 合成；:165 compositionErrors.set 记录 per-provider 组合错误并回退 base）；:330-341 getError（拼接 config 错误 + compositionErrors + availabilityError——运行中窗口的归因通道）【行号锚基于 pi@1.0.0 实装实测】"
+      }
+    ],
+    "guard": {
+      "type": "probe",
+      "test": "extensions/universal/provider-live-sync/src/__tests__/pi-semantics-catalog-injection.test.ts"
+    },
+    "verifiedWith": "1.0.0"
+  },
+  {
+    "id": "PS-84",
+    "claim": "前提 4（三态判据材料可经官方导出取得）：pi 1.0.0 的扩展进程内可经 pi-ai 官方导出拿到 staleness 三态判据的全部材料——getBuiltinProviders（内置 provider 清单）/ getBuiltinModels(provider)（内置模型基线）/ getBuiltinModelDataGeneratedAt（快照时刻锚）三者均可调用且返回有效值，且时刻锚读的是编译期 manifest 的 generatedAt 字段（非运行时时钟，同进程多次读取稳定）。若导出缺失或返回无效，判据退化为 env 注入 taiji 侧值或判据弱化",
+    "piAnchor": [
+      {
+        "pkg": "pi-ai",
+        "distPath": "dist/providers/all.js",
+        "symbol": "getBuiltinProviders / getBuiltinModels / getBuiltinModelDataGeneratedAt",
+        "note": ":59 getBuiltinProviders（Object.keys(MODELS)）；:63-66 getBuiltinModelDataGeneratedAt（:64 Date.parse(modelDataManifest.generatedAt)，NaN → undefined）；:67-70 getBuiltinModels(provider)（Object.values(MODELS[provider] ?? {})，未知 provider 返回空数组）。注意：三个导出在 pi-ai 的 providers/all 子路径，主入口 @earendil-works/pi-ai 不导出它们（实测主入口三符号均为 undefined）【行号锚基于 pi@1.0.0 实装实测】"
+      }
+    ],
+    "guard": {
+      "type": "probe",
+      "test": "extensions/universal/provider-live-sync/src/__tests__/pi-semantics-catalog-injection.test.ts"
+    },
+    "verifiedWith": "1.0.0"
   }
 ]
