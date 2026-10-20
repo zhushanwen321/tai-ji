@@ -9,8 +9,10 @@
  *   与 outcome 快照 runtime 自持（词汇 = session_end outcome 等 runtime 既有词形）；
  *   state→协议 reason/payload 的词形映射归 u-bridge（协议 SSOT 由桥接与扩展双侧 import 承载）。
  * - **顺序不变量（设计 D2）**：arm/disarm/兑现/respond 转移在 runtime 单线程事件循环内顺序执行。
- * - **调用序约定**：session 删除汇聚点必须先 `onSessionDeath(...)` 取 respond 素材、后
- *   `clearSession(sessionId)`（反序会使死亡批量查无记录）；shutdown warn 在 `dispose()` 前读 `count()`。
+ * - **调用序约定**：session 死亡汇聚点必须先 `onSessionDeath(...)` 取 respond 素材、后
+ *   `clearSession(sessionId)`（反序会使死亡批量查无记录）——该序列的唯一实装 =
+ *   session-manager-handler 导出的 `settleClaimsOnDeath`（组合根 speakSessionDeath 与
+ *   handleArchive 共调），新死亡发声点一律经它、禁手抄；shutdown warn 在 `dispose()` 前读 `count()`。
  *
  * 状态机（设计 D2 表；「删除」= 记录移除）：
  * ```

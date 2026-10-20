@@ -11,12 +11,13 @@
  * notify-once 桥接（设计 U3）：本 handler 是债权状态机（ClaimLedger）的受理侧——
  * send/create 受理点 arm、watch 单键寻址路由（fail-closed / wait / catch-up 三分支）、
  * handleAbort 入口同步抹除、respond 前二次归属校验；state→协议 reason 的词形映射
- * （toWatchRespondPayload）与 respond 回执循环（deliverRespondTargets）
- * 以导出函数形态供组合根 index.ts 共用（settle/death 路径），保证映射单点。
+ * （toWatchRespondPayload）、respond 回执循环（deliverRespondTargets）与终局死亡收尾序列
+ * （settleClaimsOnDeath）以导出函数形态供组合根 index.ts 共用（settle/death 路径），
+ * 保证映射与收尾序列各自单点。
  *
  * [架构备注，PR #189 review] 本 handler 承载业务编排（归属校验 / list 过滤 / history
  * tailTurns 截断；notify-once 导出助手 collectStderrTail / toWatchRespondPayload /
- * deliverRespondTargets 供组合根 index.ts 反向 import 共用，及
+ * deliverRespondTargets / settleClaimsOnDeath 供组合根 index.ts 反向 import 共用，及
  * node:crypto randomUUID 的 lifetimeNotifyId 生成），与 transport「纯路由」定义有偏差；
  * 迁移 services/session/（interface 经 ports 暴露）是既定方向、待后续 wave——助手与
  * node:crypto 依赖随迁，组合根消费方同步消失。当前留在 transport 与 Quota/Preset handler
@@ -27,7 +28,7 @@ import type { ISessionService } from '../interfaces.js'
 import type { SessionDeliveryRegistry } from '../services/session/session-delivery-registry.js'
 // 通知债权状态机（u-claims）：本 handler 是其唯一受理侧消费方；组合根 index.ts 经
 // 本模块导出的映射/回执助手（toWatchRespondPayload 等）消费同一批素材。
-import type { ClaimLedger, RespondPayload, RespondTarget, SettleOutcome } from '../services/session/notify-claims.js'
+import type { ClaimLedger, DeathCause, RespondPayload, RespondTarget, SettleOutcome } from '../services/session/notify-claims.js'
 // ArchiveError 值导入（handle() catch 对归档域错误的 instanceof 特判，code 透传）；
 // ArchiveService 仅类型导入（可选注入，缺省 = 停用象限报可操作错误）。
 import { ArchiveError } from '../services/archive/archive-service.js'
@@ -200,6 +201,37 @@ export function deliverRespondTargets(
     }
     claims.onRespond(t.parentSid, t.notifyId, ok)
   }
+}
+
+/**
+ * 终局死亡收尾序列（D5 汇聚点的唯一实装；组合根 speakSessionDeath 与本 handler 的
+ * handleArchive 共调，新死亡发声点一律经此、禁手抄）：
+ * onSessionDeath 同 deathSeq 批终结全部种类债权（即时删除，含 abortClaims 覆盖不到的
+ * lifetime）→ terminated 非空则逐 target respond（携 sessionFilePath / exitCode / stderrTail）
+ * → clearSession 清残留记录 + seq/undelivered 计数器（迟到 exit 路径查无记录自然静默）。
+ *
+ * 顺序不变量 = ClaimLedger 文件头「调用序约定」（先 onSessionDeath 取素材、后 clearSession，
+ * 反序会使死亡批量查无记录）。幂等：重复调用空批空转（不占 deathSeq、无二次 respond），
+ * clearSession 无条件执行。sessionFilePath 取值：extra 显式值优先（崩溃 stash 的退出现场），
+ * 缺省经 resolveSessionFile 现查；查不到不填（payload 整行省略）。
+ */
+export function settleClaimsOnDeath(
+  claims: ClaimLedger,
+  sessionId: string,
+  cause: DeathCause,
+  respond: WatchRespondFn,
+  resolveSessionFile: (sessionId: string) => string | undefined,
+  extra: WatchRespondExtra = {},
+): void {
+  const batch = claims.onSessionDeath(sessionId, cause)
+  if (batch.terminated.length > 0) {
+    deliverRespondTargets(claims, batch.targets, respond, {
+      sessionFilePath: extra.sessionFilePath ?? resolveSessionFile(sessionId),
+      ...(extra.exitCode !== undefined ? { exitCode: extra.exitCode } : {}),
+      ...(extra.stderrTail !== undefined ? { stderrTail: extra.stderrTail } : {}),
+    })
+  }
+  claims.clearSession(sessionId)
 }
 
 /** dispatch 的统一返回形状：即时应答 action 的结果 + 错误闭环（send 同步失败 / create 后置失败）——watch 纯应答通道三分支（fail-closed / 挂等 / 晚 respond）均返回 null，不产生本形状 */
@@ -788,15 +820,23 @@ export class SessionManagerHandler {
 
   /**
    * archive 分支（session-manager-archive-delete 决策 2/5）：扩展归属校验 → 归档服务执行 →
-   * **成功后**三步收尾（与组合根 speakSessionDeath 序列逐行对齐——onSessionDeath('exit') 一次
-   * 终结全部种类债权（含 abortClaims 覆盖不到的 lifetime）→ deliverRespondTargets（挂起 watch
-   * 统一收 'exited'，会话退场的事实陈述）→ clearSession 清残留记录与 undelivered 计数器）。
+   * **成功后**经 settleClaimsOnDeath（与组合根 speakSessionDeath 同一实装）以 cause='exit'
+   * 收尾——一次终结全部种类债权（含 abortClaims 覆盖不到的 lifetime），挂起 watch 统一收
+   * 'exited'（会话退场的事实陈述），清残留记录与 undelivered 计数器。
    *
    * 时序不变量：收尾必须在 archive() resolve 之后——三门任一拒绝（archive_generating 等）
    * 时债权零损伤（先收尾会把「等完成通知再重试」的在途债权不可逆抹除）。
-   * 幂等形态与组合根同款：空批（terminated.length === 0）不 respond；clearSession 无条件
-   * 执行（迟到记录查无即静默）；pendingExitDeaths latch 属组合根私有，handler 侧不涉及。
+   * pendingExitDeaths latch 属组合根私有，handler 侧不涉及。
    * claims 缺席 = 停用象限：无债权可收，跳过收尾直接回成功。
+   *
+   * 已知缺口（基线既有，非本分支引入）：同一归档操作的 GUI 入口 `session.archive`
+   * （session-message-handler.ts handleSessionArchive）只调 archive.archive 后 reply，不收尾
+   * watch——归档 teardown 向死亡处置汇聚点发的是 'suppress'（archive-service.ts
+   * teardownForArchive → fireSuppressDisposition），组合根 subscribeSessionDeathDisposition 仅对
+   * 'delete' 发声；用户在侧栏归档 agent 子会话时，父 agent 挂起的 watch 悬至 runtime 重启。
+   * 长期方案 = SessionDeathDisposition（session-lifecycle.ts）增 'archive' 值，归档 teardown
+   * 改发该值，组合根统一 speakSessionDeath(sid, 'exit')——两入口同判，本处工具路径收尾
+   * 随之并入汇聚点、handler 侧收尾删除。
    */
   private async handleArchive(parentSessionId: string, params: SessionManagerArchiveParams): Promise<SessionManagerArchiveResult> {
     const { sessionId } = params
@@ -810,13 +850,7 @@ export class SessionManagerHandler {
     await archiveService.archive(sessionId)
     const claims = this.opts.claims
     if (claims) {
-      const batch = claims.onSessionDeath(sessionId, 'exit')
-      if (batch.terminated.length > 0) {
-        deliverRespondTargets(claims, batch.targets, this.watchRespond, {
-          sessionFilePath: this.resolveSessionFile(sessionId),
-        })
-      }
-      claims.clearSession(sessionId)
+      settleClaimsOnDeath(claims, sessionId, 'exit', this.watchRespond, (sid) => this.resolveSessionFile(sid))
     }
     return { sessionId, archived: true }
   }
