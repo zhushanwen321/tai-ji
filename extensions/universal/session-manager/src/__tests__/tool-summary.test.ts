@@ -88,6 +88,14 @@ describe("execute 组装 details.summary（八工具文案）", () => {
 	it("abort_session：Aborted <sessionId>", async () => {
 		expect(await summaryOf("abort_session", { sessionId: "s1" }, { success: true })).toBe("Aborted s1");
 	});
+
+	it("delete_session：Deleted <sessionId>", async () => {
+		expect(await summaryOf("delete_session", { sessionId: "s1" }, { sessionId: "s1", deleted: true })).toBe("Deleted s1");
+	});
+
+	it("archive_session：Archived <sessionId>", async () => {
+		expect(await summaryOf("archive_session", { sessionId: "s1" }, { sessionId: "s1", archived: true })).toBe("Archived s1");
+	});
 });
 
 describe("toSummary 数据缺失分支（形状漂移退化为短文案，不抛错）", () => {
