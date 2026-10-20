@@ -8,7 +8,7 @@
  * | staging 簿记 + 明文已删 + 压缩体 .zst 在场 | 压缩收尾窗口中断（明文删除后、簿记终态写入前崩溃） | 解压回明文位重做后台压缩任务 |
  * | `.restoring` 簿记 + sessions/ 原路径主文件已存在 | 恢复已完成（崩溃在删单元前） | 补删归档单元残余（含簿记） |
  * | `.restoring` 簿记 + 原路径主文件不存在 | 恢复未完成 | 簿记 rename 回 .archive.json，清理 sessions/ 下 .tmp 残留 |
- * | 归档目录内无簿记的孤儿文件 | 归档进行到一半 | 读孤儿明文首行 header 取 sessionId：sessions/ 无主文件 → 补写 staging 簿记；有 → 孤儿搬回原位 |
+ * | 归档目录内无簿记的孤儿文件 | 归档进行到一半 | 读孤儿明文首行 header 取 sessionId（过 pi 会话 id 同域校验，非法 = 跳过待人工处置）：sessions/ 无主文件 → 补写 staging 簿记；有 → 孤儿搬回原位 |
  * | 簿记在 + 归档物部分缺失 / 残树已删 | purge 进行到一半 | 条目保持可见（簿记在即列表在），不自动补删——重试 purge 幂等达终态 |
  * | sessions/ 与 archive/ 两树内 *.tmp 残留 | 压缩/解压中断 | 直接清理 |
  *
@@ -18,7 +18,7 @@
 import { existsSync, readdirSync, readFileSync, renameSync, rmSync, statSync, unlinkSync, writeFileSync } from 'node:fs'
 import { zstdDecompressSync } from 'node:zlib'
 import { join } from 'node:path'
-import { encodeCwd } from '@taiji/shared/paths'
+import { encodeCwd, isPiSessionId } from '@taiji/shared/paths'
 import type { ArchiveLedger, ArchiveLedgerStaging } from '@taiji/shared'
 import { extractSessionName, parseSessionHeader } from '../../infra/pi/session-file-utils.js'
 import {
@@ -148,7 +148,9 @@ function restorePlainFromCompressed(ctx: HealContext, l: LocatedLedger, plainPat
  * 行 4：无簿记的孤儿文件归位。识别 = 归档桶内既非簿记（.archive.json/.restoring）也非
  * assets/ 的文件；以其中的明文主文件（.jsonl）为锚——读首行 header 取 sessionId（id
  * 权威来源同扫描侧口径），对照 sessions/ 同名主文件：
- * - 不存在（归档已生效）→ 补写 staging 簿记（assets/ 孤儿随簿记归属该单元）；
+ * - 不存在（归档已生效）→ 补写 staging 簿记（assets/ 孤儿随簿记归属该单元）；header.id
+ *   非 pi 会话 id 形态先拒绝（穿越形态一经簿记固化即流向 assets/ 分区与 purge 删除
+ *   原语）——跳过 + warn、不写簿记；
  * - 存在（归档未生效）→ 孤儿文件（主文件 + 旁挂）搬回 sessions/ 原位。
  * 无 .jsonl 锚的孤儿（纯旁挂/附件且 sessions/ 侧无主文件 = 数据已缺失）跳过并 warn——
  * 无 sessionId 可归属，超出自愈能力面。
@@ -188,6 +190,14 @@ function healOrphanFiles(ctx: HealContext, located: LocatedLedger[]): void {
       continue
     }
     // 归档已生效：补写 staging 簿记（已有簿记的桶不进孤儿分支，双保险查重）。
+    // header.id 读自磁盘 JSONL 首行（非 pi 来源文件可含任意值），写簿记前过 pi 会话
+    // id 同域校验——非法 id 一经簿记固化即流向 assets/ 分区与 purge 的 rmSync 破坏性
+    // 原语（防穿越）；不过 = 跳过该孤儿 + warn，不写簿记（同「无 sessionId 可归属，
+    // 超出自愈能力面」形态，磁盘事实保留待人工处置）。
+    if (!isPiSessionId(header.id)) {
+      ctx.warn(`[archive-self-heal] 行4 孤儿主文件 header.id 非 pi 会话 id 形态，跳过（不写簿记，待人工处置）: ${plainPath} (id=${JSON.stringify(header.id)})`)
+      continue
+    }
     const ledgerPath = archiveLedgerPath(unitDir, plainName)
     if (knownLedgers.has(ledgerPath) || knownRestoring.has(archiveRestoringPath(unitDir, plainName))) continue
     writeOrphanStagingLedger(ctx, unitDir, plainPath, plainName, ledgerPath, header)

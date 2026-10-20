@@ -23,7 +23,7 @@
  */
 import { existsSync, readdirSync, readFileSync, renameSync, unlinkSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
-import { encodeCwd, getAttachmentsDir, getImageCacheDir, getSessionArtifactsDir, getSessionStoreDir } from '@taiji/shared/paths'
+import { encodeCwd, getAttachmentsDir, getImageCacheDir, getSessionArtifactsDir, getSessionStoreDir, isPiSessionId } from '@taiji/shared/paths'
 import type { ArchiveLedger } from '@taiji/shared'
 import { parseArchiveLedger } from '@taiji/shared'
 import { getArchiveDir } from '../../infra/pi/pi-paths.js'
@@ -84,8 +84,21 @@ export function archiveRestoringPath(unitDir: string, originalFile: string): str
   return join(unitDir, `${originalFile}.restoring`)
 }
 
-/** 归档单元内附件域目录（`<unitDir>/assets/<sessionId>/<domain>`）。 */
+/**
+ * 归档单元内附件域目录（`<unitDir>/assets/<sessionId>/<domain>`）。
+ *
+ * sessionId 内联断言兜底：簿记读回侧的形态校验权威在 parseArchiveLedger（shared），
+ * 本函数的返回值流向 rmSync(recursive, force) 等破坏性原语（disposeArchiveUnit /
+ * 自愈行 2）——非法 id（含 `/` `..` 等）会在 join 后逃逸出 assets/ 分区，此处
+ * fail-fast 挡住未来新增消费点绕过解析器直调本函数的路径（同 session-data-store
+ * resolveSessionFilePath 的两道防线先例；domain 取自 ASSET_DOMAINS 闭集不校验）。
+ *
+ * @throws Error 当 sessionId 非 pi 会话 id 形态（路径穿越被拦截）
+ */
 export function archiveAssetDomainDir(unitDir: string, sessionId: string, domain: string): string {
+  if (!isPiSessionId(sessionId)) {
+    throw new Error(`invalid sessionId (path traversal blocked): ${sessionId}`)
+  }
   return join(unitDir, 'assets', sessionId, domain)
 }
 

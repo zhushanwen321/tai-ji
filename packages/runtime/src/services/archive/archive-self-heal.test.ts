@@ -191,6 +191,20 @@ describe('启动自愈七行表（D5）', () => {
     expect(ledger?.rawBytes).toBeGreaterThan(0)
   })
 
+  it('行 4：孤儿主文件 header.id 非 pi 会话 id 形态 → 跳过不写簿记 + warn（防穿越：非法 id 一经簿记固化即流向 assets/ 分区与 purge 删除原语）', async () => {
+    const f = makeFixture()
+    // 磁盘构造非 pi 来源 .jsonl：首行 header.id 含穿越序列（dmg-r2-1 场景）。
+    const p = join(f.unitDir, MAIN)
+    writeFileSync(p, `${JSON.stringify({ type: 'session', id: '../evil', cwd: CWD })}\n{"type":"session_info","name":"非法 id 孤儿"}`)
+
+    await f.heal()
+
+    // 不写簿记（条目不入归档列表），孤儿明文保留待人工处置，warn 出声。
+    expect(existsSync(join(f.unitDir, `${MAIN}.archive.json`))).toBe(false)
+    expect(existsSync(p)).toBe(true)
+    expect(f.warnings.some((w) => w.includes('行4') && w.includes('非 pi 会话 id 形态') && w.includes('../evil'))).toBe(true)
+  })
+
   it('行 4b：无簿记孤儿 + sessions/ 仍有主文件 → 孤儿搬回原位（归档未生效）', async () => {
     const f = makeFixture()
     writePlainMain(f, 'orphan-content')

@@ -124,6 +124,15 @@ function isNonEmptyString(v: unknown): v is string {
   return typeof v === 'string' && v.length > 0
 }
 
+/**
+ * pi 会话 id 同域校验正则——bundle 隔离镜像（本文件是 renderer barrel 出口，禁 import
+ * 带 node 依赖的 ./paths，与 session-reader discovery 侧复制同口径）：权威实现 =
+ * paths.ts 的 isPiSessionId，字面量一致性由 scripts/check-artifact-dir-formula-sync.mjs
+ * 域 10「归档镜像对拍」逐字守护。首尾字母数字、中间 [A-Za-z0-9._-]——结构性拒绝
+ * `/` `\` `..` 冒号空格等穿越形态，防簿记 sessionId 流向 assets/ 分区与 rmSync。
+ */
+const PI_SESSION_ID_PATTERN = /^[A-Za-z0-9](?:[A-Za-z0-9._-]*[A-Za-z0-9])?$/
+
 function isNonNegativeInt(v: unknown): v is number {
   return typeof v === 'number' && Number.isSafeInteger(v) && v >= 0
 }
@@ -155,6 +164,9 @@ function parseSummaryTurn(raw: unknown, index: number): ArchiveSummaryTurn | str
 function parseArchiveLedgerBase(obj: Record<string, unknown>): ArchiveLedgerBase | string {
   if (!isNonEmptyString(obj.sessionId)) {
     return `sessionId 必须为非空 string，实际 ${typeof obj.sessionId}`
+  }
+  if (!PI_SESSION_ID_PATTERN.test(obj.sessionId)) {
+    return `sessionId 必须为 pi 会话 id 形态（首尾字母数字，中间 [A-Za-z0-9._-]；assets/ 分区键与删除原语消费，防穿越），实际 "${obj.sessionId}"`
   }
   if (typeof obj.name !== 'string') {
     return `name 必须为 string（允许空串），实际 ${typeof obj.name}`
@@ -243,8 +255,10 @@ function parseArchivedLedger(obj: Record<string, unknown>, base: ArchiveLedgerBa
  * 解析并校验簿记 JSON（`JSON.parse` 产物或等价 unknown 输入）。
  *
  * 校验规则（staging-archived 两态字段完备性，u-foundation 验收条款）：
- * - 公共必填：sessionId / originalFile / cwd 非空 string；name 为 string（允许空串
- *   ——名称提取失败的合法形态）；archivedAt 为 ISO 8601 时刻；rawBytes 非负安全整数。
+ * - 公共必填：sessionId 非空 string 且为 pi 会话 id 形态（同 isPiSessionId 域——
+ *   assets/ 分区键与 dispose 删除原语的消费值，穿越形态 parse 即拒）；originalFile /
+ *   cwd 非空 string；name 为 string（允许空串——名称提取失败的合法形态）；archivedAt
+ *   为 ISO 8601 时刻；rawBytes 非负安全整数。
  * - status ∈ {'staging','archived'}（词表外一律拒绝——含 'restoring'，该态由
  *   `.restoring` 后缀承载，D9）。
  * - staging 态：summary 必须为显式 null，且不得携带压缩产物字段

@@ -71,7 +71,10 @@
  * ②D7 归档态返回正文四字面（ARCHIVED_HEADER / RESTORE_NOTE /
  * USER_ATTACHMENT_PLACEHOLDER / AGENT_NO_TEXT_PLACEHOLDER）的 renderer 预检正文
  * （agent-reference-format.ts）↔ extension 真实返回正文（archive-ledger.ts）逐字比对——
- * 漂移 = 用户预检与 agent 实见正文不一致且无红灯。
+ * 漂移 = 用户预检与 agent 实见正文不一致且无红灯；③簿记 sessionId 同域正则（shared
+ * paths.ts PI_SESSION_ID_PATTERN 权威 ↔ shared archive.ts bundle 隔离镜像，dmg-r2-1
+ * 防线）逐字比对——镜像漂移 = 归档簿记解析侧与 pi 会话 id 权威域收窄口径分裂，穿越
+ * 形态 id 一经簿记固化即流向 assets/ 分区与 purge 删除原语。
  *
  * 形态照搬 scripts/check-capability-allowlist-sync.mjs（读源文件文本、零散文解析、
  * 提取失败一律 fail、`--self-test` 纯函数自检）。
@@ -538,6 +541,7 @@ function parseSummaryTurn(raw: unknown, index: number): ArchiveSummaryTurn | str
   const agent = (raw as Record<string, unknown>).agent
   return { user, agent }
 }
+const PI_SESSION_ID_PATTERN = /^[A-Za-z0-9](?:[A-Za-z0-9._-]*[A-Za-z0-9])?$/
 function other() {}`
 
   const ledgerText = `export interface ArchiveLedgerTurn {
@@ -583,6 +587,11 @@ const AGENT_NO_TEXT_PLACEHOLDER = '（此 turn 以工具调用结束，无文本
     '两侧 turn 成员名一致（样例）',
   )
   assert(extractInterfaceMembers('interface X {\n  member\n}').error !== undefined, 'interface 成员零提取报 error')
+  const sharedPatternText = `const PI_SESSION_ID_PATTERN = /^[A-Za-z0-9](?:[A-Za-z0-9._-]*[A-Za-z0-9])?$/`
+  assert(
+    extractConstRegex(sharedSchemaText, SHARED_PATTERN_CONST).value === extractConstRegex(sharedPatternText, SHARED_PATTERN_CONST).value,
+    '域 10 簿记 sessionId 正则两侧一致（shared paths 权威 ↔ archive 镜像，样例）',
+  )
   for (const name of D7_LITERAL_CONSTS) {
     assert(
       extractConstLiteral(ledgerText, name).value === extractConstLiteral(rendererText, name).value,
@@ -976,6 +985,23 @@ function compareArchiveMirror(sharedText, ledgerText, runtimePathsText, runtimeP
     }
   }
 
+  // 簿记 sessionId 同域正则：shared archive.ts（renderer barrel 出口，bundle 隔离镜像）
+  // ↔ shared paths.ts（isPiSessionId 权威实现）。镜像漂移 = 归档簿记解析侧与 pi 会话
+  // id 权威域对同一 sessionId 的收窄口径分裂——簿记侧放行的穿越形态 id 会流向 assets/
+  // 分区键与 purge 的 rmSync 破坏性原语（dmg-r2-1 防线）。
+  const ledgerSessionIdRegex = extractConstRegex(sharedSchemaText, SHARED_PATTERN_CONST)
+  if (ledgerSessionIdRegex.error) fail(`shared ${SHARED_ARCHIVE_SCHEMA_SRC} 的 ${SHARED_PATTERN_CONST} 提取失败: ${ledgerSessionIdRegex.error}`)
+  exitIfFailed('域 10 归档镜像对拍：簿记 sessionId 正则提取失败')
+  const sessionIdRegex = extractConstRegex(sharedText, SHARED_PATTERN_CONST)
+  if (sessionIdRegex.value === ledgerSessionIdRegex.value) {
+    ok(`域 10 簿记 sessionId 正则一致（${ledgerSessionIdRegex.value}，shared paths isPiSessionId ↔ shared archive parse 镜像）`)
+  } else {
+    fail(
+      `域 10 簿记 sessionId 正则漂移: shared paths='${sessionIdRegex.value}' vs shared archive='${ledgerSessionIdRegex.value}'` +
+        `——恢复动作：人工核对 ${SHARED_PATHS_SRC} 的 ${SHARED_PATTERN_CONST} 与 ${SHARED_ARCHIVE_SCHEMA_SRC} 的 ${SHARED_PATTERN_CONST}（bundle 隔离镜像逐字同步）`,
+    )
+  }
+
   compareArchiveSchemaFields(sharedSchemaText, ledgerText)
   compareD7LiteralMirror(ledgerText, rendererText)
 }
@@ -1103,7 +1129,7 @@ function main() {
   compareArchiveMirror(sharedText, ledgerText, runtimePathsText, runtimeText, sharedSchemaText, rendererText)
 
   guardExit(
-    '✓ 产物目录公式对拍通过（域段 + 存储树根段 + sessionId 校验正则三方 + pi 会话树段 + 域 5 registry 镜像 + 域 6 session-view 镜像 + 域 9 discovery 镜像 + 域 10 归档镜像〔目录名/后缀/schema 字段级/D7 四字面〕逐字一致）',
+    '✓ 产物目录公式对拍通过（域段 + 存储树根段 + sessionId 校验正则三方 + pi 会话树段 + 域 5 registry 镜像 + 域 6 session-view 镜像 + 域 9 discovery 镜像 + 域 10 归档镜像〔目录名/后缀/sessionId 正则/schema 字段级/D7 四字面〕逐字一致）',
     '产物目录公式对拍未通过，按上方 ✗ 明细修复后重跑（每条报错自带恢复动作）',
   )
 }

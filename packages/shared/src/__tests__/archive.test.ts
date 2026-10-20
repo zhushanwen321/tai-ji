@@ -123,6 +123,14 @@ describe('parseArchiveLedger 拒绝非法（结构层）', () => {
   it.each([
     ['sessionId 空串', { sessionId: '' }],
     ['sessionId 非 string', { sessionId: 123 }],
+    ['sessionId 为纯相对段 ..（首字符非字母数字）', { sessionId: '..' }],
+    ['sessionId 含路径穿越序列（dmg-r2-1：assets/ 分区键与 purge rmSync 的消费值）', { sessionId: '../evil' }],
+    ['sessionId 含 /', { sessionId: 'sub/sess' }],
+    ['sessionId 含 \\', { sessionId: 'sub\\sess' }],
+    ['sessionId 含冒号（btw 虚拟 id 形态拒）', { sessionId: 'btw:sess01' }],
+    ['sessionId 含空格', { sessionId: 'sess 01' }],
+    ['sessionId 首字符非字母数字', { sessionId: '.hidden' }],
+    ['sessionId 尾字符非字母数字', { sessionId: 'sess01-' }],
     ['originalFile 空串', { originalFile: '' }],
     ['originalFile 含 /', { originalFile: 'sub/dir/file.jsonl' }],
     ['originalFile 含 \\', { originalFile: 'sub\\file.jsonl' }],
@@ -137,6 +145,17 @@ describe('parseArchiveLedger 拒绝非法（结构层）', () => {
   ])('公共字段非法拒绝：%s', (_label, patch) => {
     const result = parseArchiveLedger({ ...stagingFixture, ...patch })
     expect(result.ok).toBe(false)
+  })
+
+  it('sessionId 穿越形态拒绝且报错含防穿越语义（合法 uuid 形态不受影响）', () => {
+    const traversing = parseArchiveLedger({ ...stagingFixture, sessionId: '../evil' })
+    expect(traversing.ok).toBe(false)
+    if (!traversing.ok) {
+      expect(traversing.error).toContain('pi 会话 id 形态')
+      expect(traversing.error).toContain('防穿越')
+    }
+    expect(parseArchiveLedger({ ...stagingFixture, sessionId: 'a1b2c3d4-e5f6-4a7b-8c9d-0e1f2a3b4c5d' }).ok).toBe(true)
+    expect(parseArchiveLedger({ ...stagingFixture, sessionId: 'sess-heal01.v2_test' }).ok).toBe(true)
   })
 })
 

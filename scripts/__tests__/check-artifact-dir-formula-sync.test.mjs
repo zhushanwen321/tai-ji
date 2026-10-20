@@ -329,8 +329,13 @@ const sessionReaderDiscoveryRootsSrc = ({
   ].join('\n')
 
 // 第八组（域 10）fixture：归档镜像四源（shared schema / extension 簿记解析 / runtime
-// 簿记路径 / renderer 预检正文；drift 注入观察域 10 各轴红）
-const sharedArchiveSchemaSrc = ({ statuses = ['staging', 'archived'], turnMembers = ['user', 'agent'] } = {}) =>
+// 簿记路径 / renderer 预检正文；drift 注入观察域 10 各轴红）。sessionIdRegex 为
+// dmg-r2-1 轴（shared schema 内 PI_SESSION_ID_PATTERN 镜像 ↔ shared paths 权威）。
+const sharedArchiveSchemaSrc = ({
+  statuses = ['staging', 'archived'],
+  turnMembers = ['user', 'agent'],
+  sessionIdRegex = '/^[A-Za-z0-9](?:[A-Za-z0-9._-]*[A-Za-z0-9])?$/',
+} = {}) =>
   [
     `export const ${SHARED_ARCHIVE_STATUS_CONST} = [`,
     ...statuses.map((s) => `  '${s}',`),
@@ -344,6 +349,8 @@ const sharedArchiveSchemaSrc = ({ statuses = ['staging', 'archived'], turnMember
     ...turnMembers.map((m) => `  const ${m} = (raw as Record<string, unknown>).${m}`),
     `  return { ${turnMembers.join(', ')} }`,
     `}`,
+    ``,
+    `const ${SHARED_PATTERN_CONST} = ${sessionIdRegex}`,
     ``,
   ].join('\n')
 
@@ -639,6 +646,18 @@ describe('CLI 集成（守卫脚本 × tmp mirror）', () => {
       const r = fx.run()
       expect(r.status).toBe(1)
       expect(r.stderr).toContain(`域 10 summary.turns 成员名漂移: shared=[user,agent,extra] vs 镜像=[user,agent]`)
+      expect(r.stderr).toContain('恢复动作')
+    } finally {
+      fx.cleanup()
+    }
+  })
+
+  it('漂移红（域 10 簿记 sessionId 正则与 shared paths 权威不一致）→ exit 1，报双侧值（dmg-r2-1 轴非恒绿）', () => {
+    const fx = makeMirror({ sharedArchive: { sessionIdRegex: '/^[A-Za-z0-9_-]+$/' } })
+    try {
+      const r = fx.run()
+      expect(r.status).toBe(1)
+      expect(r.stderr).toContain(`域 10 簿记 sessionId 正则漂移: shared paths='/^[A-Za-z0-9](?:[A-Za-z0-9._-]*[A-Za-z0-9])?$/' vs shared archive='/^[A-Za-z0-9_-]+$/'`)
       expect(r.stderr).toContain('恢复动作')
     } finally {
       fx.cleanup()
