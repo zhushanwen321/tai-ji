@@ -1,14 +1,16 @@
 /**
  * SessionManagerHandler 单元测试。
  *
- * 覆盖 U4-A1~A6 验收标准：
- * - A1: create 分支完整链路（四步串行时序）
- * - A2: send/history/status/list/abort 五个 action 分支
- * - A3: malformed 兜底
- * - A4: 错误闭环（含 createdId 有值时附 sessionId+hint）
- * - A5: modelId 从 state.model 组装
- * - A6: broadcastSessionList opts 注入与解耦
- * - A9: handler 接线验证
+ * 覆盖（分节概述，验收 id 在各 describe 名内）：
+ * - U4 六 action 分支：A1 create 四步串行链路 / A2 send/history/status/list/abort /
+ *   A3 malformed 兜底 / A4 错误闭环（含 createdId 有值时附 sessionId+hint）/
+ *   A5 modelId 从 state.model 组装 / A6 broadcastSessionList opts 注入与解耦
+ *   （A9「handler 接线验证」已删——expect(promise) 无判别力，见文内 [2026-09 测试舰队
+ *   审查 r2-20] 注释，真实行为验证由 A1~A6 各 action 用例承担）
+ * - u8: 子会话 project 归属继承父会话
+ * - notify-once watch 桥：单键寻址三分支 + respond 前二次归属校验；无 notifyId 降级 once 日志
+ * - session-manager-archive-delete U3: delete/archive 终局双 action（扩展归属校验 /
+ *   archiveService 停用象限 / 归档成功后三步收尾）
  *
  * 运行：pnpm --filter @taiji/runtime exec vitest run session-manager-handler
  */

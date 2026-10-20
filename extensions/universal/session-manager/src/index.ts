@@ -199,7 +199,7 @@ interface SessionToolConfig<S extends TObject> {
 	/** 成功结果钩子（仅非错误通道结果触发）——notify-once 的 arm/label 缓存编排 */
 	onResult?: (ctx: ExtensionContext, params: Record<string, unknown>, result: unknown) => void
 	/**
-	 * 一行收起态摘要（details.summary 的产出函数，六工具共用 executeTool 骨架统一
+	 * 一行收起态摘要（details.summary 的产出函数，八工具共用 executeTool 骨架统一
 	 * 组装）：输入 = 协议 params（toParams 产物）+ 成功回包；纯函数、缺数据省略
 	 * 对应段不抛错。消费方 = taiji GUI 对话流（details.summary）与本包 renderResult
 	 * 折叠态（pi TUI）。
@@ -216,7 +216,8 @@ function registerSessionTool<S extends TObject>(pi: ExtensionAPI, cfg: SessionTo
 	pi.registerTool({
 		name: cfg.name,
 		label: cfg.label,
-		// deferred（tool-declaration-slimming D4）：六件套整体不常驻声明，tool_search
+		// deferred（tool-declaration-slimming D4）：session-manager 工具族（八件套，与
+		// ADR-0136 现行登记一致）整体不常驻声明，tool_search
 		// 命中即激活；迁移写入的 +tool_search 条目（runtime pi-codemode-settings）承载检索入口
 		exposure: "deferred",
 		promptSnippet: cfg.promptSnippet,
@@ -372,6 +373,8 @@ Ids come from list_my_sessions — never guess; on unknown-id error re-list, don
 		description: `List all sessions managed by you, with id, label, cwd, and status.
 
 This listing is the single source of sessionId values for every other session tool. The response also carries undeliveredResults: the total count of completion notifications not yet delivered to you across your sessions.
+
+Different from get_session_status (per-session detail): this tool lists all your sessions at once.
 
 ## Example
 {}

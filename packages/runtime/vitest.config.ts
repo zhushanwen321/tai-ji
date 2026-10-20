@@ -46,8 +46,10 @@ const REAL_PI_TESTS = [
   // 不存在」前提对双 spawn + jiti 冷编译形态证伪。按池的调度语义（真进程隔离、
   // main 组完整结束后顺序尾组）登记，非断言放宽。
   'src/__tests__/services/idle-pi-reclaim-integration.test.ts',
-  // [2026-10-20 state-machine-infrastructure u-m1] session-manager-full-e2e（纯 faux
-  // 轨，双 spawn + 真 extension jiti 冷编译）同款自愿登记：满并行下 7/7 红（2026-10-20
+  // [2026-10-20 state-machine-infrastructure u-m1] session-manager-full-e2e（faux 轨
+  // 7 用例 + session-manager-archive-delete U9 加入的真 LLM 轨 3 用例——经
+  // REAL_PI_READY 门控，无凭证环境自动 skip；双 spawn + 真 extension jiti 冷编译）
+  // 同款自愿登记：满并行下 faux 7/7 红（2026-10-20
   // 两轮实证：runtime 全量 669 文件满载下该文件整体失败），单跑 12s 恒绿 7/7——
   // 按上例同判（双 spawn + jiti 冷编译形态的满并行竞态，非用例自身缺陷），登记
   // 串行尾组，非断言放宽。

@@ -13,8 +13,9 @@
  *   {action,params} / 快照帧，不引入内部 stringify 异常面）；
  * - mode 门控留调用方（inflight 在 attachSession 处 / session-manager 无门控——
  *   四态 reason 无 non-rpc 语义）；
- * - `ui.select` 缺席（非 GUI ctx）由调用方前置判定（沿 ask-user askUserInteract 的
- *   `isGuiCapable(ctx) && ctx.ui?.select` 先例）；误用即 throw 明确错误。
+ * - `ui.select` 缺席（非 GUI ctx）由调用方前置判定（沿已退役的 ask-user askUserInteract
+ *   先例——`isGuiCapable(ctx) && ctx.ui?.select`，git 历史可溯；isGuiCapable 现存于本包
+ *   core/helpers 并经包入口导出）；误用即 throw 明确错误。
  *
  * 设计权威源：docs/architecture/ext-simplify-17-shared-extraction.md §3.3 D8（v7 冻结形态）。
  */
@@ -65,10 +66,16 @@ export function isChannelErrorResult(v: unknown): v is ChannelErrorResult {
   )
 }
 
-/** error + hint 文本拼接（hint 缺席只回 error）——plugin-bridge errorResult 与
- * session-manager 错误闭环文本的共用单源 */
+/** error + code + hint 文本拼接（code/hint 缺席各自省略对应行）——plugin-bridge
+ * errorResult 与 session-manager 错误闭环文本的共用单源。code present 时以
+ * `error_code: <code>` 行拼入（session-manager-archive-delete 决策 5：结构化错误码
+ * 对模型可见——工具 description 教 agent 认的码词在 throw 文本里在场，善后层恢复
+ * 指引的第一跳不断链）；code 缺席（旧 runtime 回包 / canvas 等无码消费方）行为不变 */
 export function formatChannelErrorText(err: ChannelErrorResult): string {
-  return err.hint ? `${err.error}\nhint: ${err.hint}` : err.error
+  const lines = [err.error]
+  if (err.code) lines.push(`error_code: ${err.code}`)
+  if (err.hint) lines.push(`hint: ${err.hint}`)
+  return lines.join('\n')
 }
 
 /** 失败留痕单点（channel-error / non-json 两态调用）：`opts?.log` 双层可选链收敛，
@@ -96,8 +103,8 @@ export async function callMarkerRpc(
   if (!select) {
     throw new Error(
       `callMarkerRpc() requires ctx.ui.select (marker ${JSON.stringify(marker)}). ` +
-        'Non-GUI ctx must be gated by the caller first — see askUserInteract precedent ' +
-        '(isGuiCapable(ctx) && ctx.ui?.select, or a mode check).',
+        'Non-GUI ctx must be gated by the caller first — gate with ' +
+        'isGuiCapable(ctx) && ctx.ui?.select (exported from @zhushanwen/extension-protocol), or a mode check.',
     )
   }
   let value: string | undefined

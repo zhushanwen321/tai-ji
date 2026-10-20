@@ -25,7 +25,8 @@
 #
 # 护栏：
 #   - 每步 60s 上限在测试内（waitForEvent STEP_TIMEOUT_MS；真 LLM 轨 agent 未调工具可重试 2 次）
-#   - 总脚本 180s watchdog（超时杀 vitest + 孤儿 pi）
+#   - 总脚本 480s watchdog（超时杀 vitest + 孤儿 pi；预算按真 LLM 轨最坏路径校准——
+#     3 条真 LLM 用例各 150s 上限 + 重试护栏 3 attempts + faux 12s + vitest/spawn 启动）
 #   - trap 清理：pi 进程结束必须 kill，session-dir 命名带 u9-smoke 便于 pgrep 核查
 
 set -euo pipefail
@@ -33,7 +34,7 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 PROJECT_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
 TEST_FILE="src/__tests__/equivalence/session-manager-full-e2e.test.ts"
-TOTAL_TIMEOUT_SECS=180
+TOTAL_TIMEOUT_SECS=480
 
 # shellcheck source=scripts/cw/lib/red-phase-guard.sh
 source "$SCRIPT_DIR/lib/red-phase-guard.sh"

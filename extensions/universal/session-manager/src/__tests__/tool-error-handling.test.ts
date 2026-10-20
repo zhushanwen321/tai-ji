@@ -1,7 +1,8 @@
 // tool-error-handling.test.ts — U5-A4: null/undefined returns → cancelled throw; exceptions → propagate;
-// {error} respond → throw（W4 throw 范式：pi agent-loop 仅在 execute throw 时置 isError:true——
-// pi-agent-core dist/agent-loop.js:453-483 executePreparedToolCall 正常 return 硬编码 isError:false；
-// 语义登记 PS-56）
+// {error} respond → throw（W4 throw 范式：execute throw → pi agent-loop catch 置 isError:true——
+// pi-agent-core dist/agent-loop.js executePreparedToolCall，1.0.0 实读 catch :581-588；1.0.0 起
+// 正常 return 的 isError 也被尊重（同文件 :579 `isError: result.isError === true`，0.84.4 才是
+// 硬编码 false）——本包失败恒走 throw，两版语义等价（语义登记 PS-56）
 
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { createToolHarness, expectToolRejects, runToolForText } from "./helpers/extension-harness.ts";
@@ -58,6 +59,23 @@ describe("U5-A4 tool-error-handling", () => {
 		);
 	});
 
+	it("runtime respond 携带 {error, code}（ArchiveError 码透传）→ throw 文本含结构化错误码（决策 5：archive_generating 对模型可见）", async () => {
+		await expectToolRejects(
+			createToolHarness(
+				vi.fn().mockResolvedValue(
+					JSON.stringify({
+						error: "会话正在生成中，无法归档 (sessionId=s1)",
+						code: "archive_generating",
+						hint: "abort first or wait for completion, then retry archive",
+					}),
+				),
+			),
+			"archive_session",
+			{ sessionId: "s1" },
+			/archive_generating/,
+		);
+	});
+
 	it("runtime respond 正常 JSON → 成功返回（不含 isError 字段）", async () => {
 		const result = await runToolForText(
 			createToolHarness(vi.fn().mockResolvedValue(JSON.stringify({ queued: true }))),
@@ -68,7 +86,7 @@ describe("U5-A4 tool-error-handling", () => {
 		expect(JSON.parse(result.content[0].text)).toEqual({ queued: true });
 	});
 
-	it("all 6 tools handle null gracefully（cancelled throw）", async () => {
+	it("all 8 tools handle null gracefully（cancelled throw）", async () => {
 		const { registered, ctx } = createToolHarness(vi.fn().mockResolvedValue(null));
 		for (const tool of registered) {
 			const params = tool.name === "create_managed_session"

@@ -244,6 +244,22 @@ describe('error envelope（watch 检查拒绝时 handler 错误闭环的回包�
     expect(formatChannelErrorText(envelope)).toContain('hint: use send_to_session to retry')
   })
 
+  it('带 code 的 envelope（ArchiveError 码透传，§3.3 决策 5）：格式化文本含 error_code 行——结构化错误码对模型可见', () => {
+    // ArchiveError 的 error 文本是中文人话不含码字样（archive-service）——code 只能经
+    // formatChannelErrorText 拼入才对 LLM 可见（description 教 agent 认的码词在 throw 文本在场）
+    const envelope = {
+      error: '会话正在生成中，无法归档 (sessionId=s1)',
+      code: 'archive_generating',
+      hint: 'abort first or wait for completion, then retry archive',
+    }
+    expect(isChannelErrorResult(envelope)).toBe(true)
+    const text = formatChannelErrorText(envelope)
+    expect(text).toContain('error_code: archive_generating')
+    expect(text).toContain('hint: abort first or wait for completion, then retry archive')
+    // 无 code 回包（旧 runtime）行为不变：不出现 error_code 行
+    expect(formatChannelErrorText({ error: 'boom', hint: 'h' })).not.toContain('error_code')
+  })
+
   it('envelope 与 respond payload 互不误判（判别字段正交：error vs reason）', () => {
     const envelope = { error: "invalid params for session-manager action 'watch'" }
     const payload: SessionManagerWatchRespondPayload = { reason: 'completed', sessionId: 's' }

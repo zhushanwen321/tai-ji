@@ -1,14 +1,15 @@
 ---
 name: session-manager-ext-config
-description: "使用或排查 @zhushanwen/pi-session-manager（agent-managed session 六工具与完成通知）时加载。说明完成通知链（notifyId → watch 长挂通道 → managed-session-notify 送达）、投递日志存储（delivery-port outbox/ack entry + session_start 差集重放）、pending 列表 type 'session' 条目的生命周期、willNotify 与 fulfills 合并语义、lifetimeNotifyId 死亡通知、未收到通知与 pending 残留的排查入口。触发词：session-manager、managed session、create_managed_session、send_to_session、完成通知没收到、通知未送达、notifyId、pending 列表有 session 条目、投递日志、delivery-port、managed-session-notify、willNotify、session-manager-ext-config。"
+description: "使用或排查 @zhushanwen/pi-session-manager（agent-managed session 八工具与完成通知）时加载。说明完成通知链（notifyId → watch 长挂通道 → managed-session-notify 送达）、投递日志存储（delivery-port outbox/ack entry + session_start 差集重放）、pending 列表 type 'session' 条目的生命周期、willNotify 与 fulfills 合并语义、lifetimeNotifyId 死亡通知、archive_session/delete_session 成功后 watch 收 exited/deleted 的收尾语义、未收到通知与 pending 残留的排查入口。触发词：session-manager、managed session、create_managed_session、send_to_session、archive_session、delete_session、完成通知没收到、通知未送达、notifyId、pending 列表有 session 条目、投递日志、delivery-port、managed-session-notify、willNotify、session-manager-ext-config。"
 ---
 
 # session-manager 使用与排查指南
 
-> @zhushanwen/pi-session-manager：agent-managed session 扩展。父 session 通过 6 个工具
+> @zhushanwen/pi-session-manager：agent-managed session 扩展。父 session 通过 8 个工具
 > （create_managed_session / send_to_session / read_session_history / list_my_sessions /
-> get_session_status / abort_session）以子 session 形态并行工作。本指南讲完成通知链、
-> 投递日志与排查入口；工具契约细节（marker 通道 / 无 timeout 长挂语义）见包 README。
+> get_session_status / abort_session / delete_session / archive_session）以子 session 形态
+> 并行工作。本指南讲完成通知链、投递日志与排查入口；工具契约细节（marker 通道 /
+> 无 timeout 长挂语义）见包 README。
 
 ## 重要前提
 
@@ -29,7 +30,8 @@ description: "使用或排查 @zhushanwen/pi-session-manager（agent-managed ses
    type: 'session', name = label}，由 pending-notifications 扩展消费落 pending 列表）+
    开 watch（fire-and-forget，不传 timeout，长挂等待 runtime 应答）。
 3. **watch 应答**：子 session 完成/死亡后 runtime 经 watch 通道回一条应答，reason 词表：
-   `completed` / `failed` / `stopped`（结果新闻）、`exited` / `deleted`（死亡新闻）、
+   `completed` / `failed` / `stopped`（结果新闻）、`exited` / `deleted`（死亡新闻——
+   archive_session / delete_session 工具成功后的收尾即产出这两种应答）、
    `cancelled` / `orphaned`（静默注销，不产出通知）。应答经 50ms trailing debounce 攒批：
    分拣键 (sessionId, reason)，批身份 settleSeq/deathSeq——同一批合并为一条通知。
 4. **入账投递**：攒批结果经 `recordManagedNotify` → delivery-port 的 `port.deliver`
@@ -82,3 +84,5 @@ runtime 查得到时附 `Full transcript: <sessionFilePath>` 指针行。
 | `list_my_sessions` | 列本 agent 管理的 session（顺带回填 label 缓存，修复重启后的文案 label 降级） |
 | `get_session_status` | 查子 session 状态与模型信息 |
 | `abort_session` | 中止运行中的子 session（终态 stopped） |
+| `archive_session` | 归档收尾已完成的子 session（AI 可主动调用；生成中会话报错 archive_generating，先 abort 或等完成；成功后 open watch 收 'exited'，用户可从归档区恢复） |
+| `delete_session` | 彻底删除子 session（仅用户明示不可恢复删除时调用——USER-INITIATED ONLY；模糊整理词归 archive_session；成功后 open watch 收 'deleted'，不可恢复） |

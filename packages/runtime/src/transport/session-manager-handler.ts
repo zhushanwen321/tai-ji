@@ -11,12 +11,12 @@
  * notify-once 桥接（设计 U3）：本 handler 是债权状态机（ClaimLedger）的受理侧——
  * send/create 受理点 arm、watch 单键寻址路由（fail-closed / wait / catch-up 三分支）、
  * handleAbort 入口同步抹除、respond 前二次归属校验；state→协议 reason 的词形映射
- * （toWatchRespondPayload）与 respond 回执循环（deliverRespondTargets / runClaimSweep）
+ * （toWatchRespondPayload）与 respond 回执循环（deliverRespondTargets）
  * 以导出函数形态供组合根 index.ts 共用（settle/death/TTL 清扫路径），保证映射单点。
  *
  * [架构备注，PR #189 review] 本 handler 承载业务编排（归属校验 / list 过滤 / history
  * tailTurns 截断；notify-once 导出助手 collectStderrTail / toWatchRespondPayload /
- * deliverRespondTargets / runClaimSweep 供组合根 index.ts 反向 import 共用，及
+ * deliverRespondTargets 供组合根 index.ts 反向 import 共用，及
  * node:crypto randomUUID 的 lifetimeNotifyId 生成），与 transport「纯路由」定义有偏差；
  * 迁移 services/session/（interface 经 ports 暴露）是既定方向、待后续 wave——助手与
  * node:crypto 依赖随迁，组合根消费方同步消失。当前留在 transport 与 Quota/Preset handler
