@@ -3010,6 +3010,45 @@
       "owner": "packages/renderer",
       "authority": "docs/TEST-STRATEGY.md#e2e-资产归宿纪律三态-r1r2r3",
       "note": "R2 态（session-archive 设计 §8 e2e 影响面评估表登记建议：V1-V4 按改动范围触发的行为类资产）。mock 轨可达范围 = 交互行为（V1/V2/V4/V8/V5①）；仅 L3 可验场景（V3 agent session_read 引用真 extension 链路 / V5② wscat 直发生成中门 / V6 恢复冲突 / V7 崩溃自愈全中间态 / V9 后台任务收殓 / V10 staging 过渡态三处可见性 + V1/V4/V8 的磁盘断言）归 D3 验收实例化按验收计划 A1-A10 执行（L3 磁盘 fixture 构造 = packages/runtime/src/services/archive/archive-fixture.ts）；可持续回归防线由 runtime archive 单测族（不变量 1-4 / 状态机穷举 / 自愈七行 / cascade 三组 / 串行化 / 簿记门）+ renderer 组件测试 + session-reader 三连承担（Gate A 全量）。scope 圈定 = spec 自身触发声明（改归档组件/入口/状态/mock 归档域跑本 spec）；packages/renderer/src/** 与 packages/core/src/** 整体已由 E2E-MOCK-01 覆盖（mock 全量轨不含本 spec——本 rule 是归档域的精确选中侧）；SessionItemActions/SessionList/SessionItem 为归档钮与入口所在组件（悬停钮语义 D6/D12）"
+    },
+    {
+      "id": "E2E-PISEM-01",
+      "summary": "pi 语义断言守卫（check-pi-semantics）：docs/pi-semantics.json 结构校验 + 探针存在性 + 版本门禁（verifiedWith 比对）——pi bump 后语义断言漂移在提交期红；恢复消息含三侧重验命令（runtime / ext-guards / extensions 契约测试）",
+      "scope": [
+        "scripts/check-pi-semantics.mjs"
+      ],
+      "trigger": "on-diff",
+      "run": "node scripts/check-pi-semantics.mjs",
+      "assets": [
+        {
+          "kind": "script",
+          "ref": "scripts/check-pi-semantics.mjs"
+        }
+      ],
+      "authority": "scripts/check-pi-semantics.mjs",
+      "owner": "packages/runtime",
+      "serial": false,
+      "layer": "L2"
+    },
+    {
+      "id": "E2E-REGALLOW-01",
+      "summary": "模型可见性投喂单点调用点白名单检查脚本轨（约束 C-ext-32）：extensions/ 下 registerProvider|registerNativeProvider|registerVirtualModel 调用点只许出现在 provider-live-sync（目录投喂写入单点）与 scheduler（ack 合成轮临时覆写 + backend 转发）两包——防新开常驻注入点绕过单点制造第二写入方",
+      "scope": [
+        ".githooks/check_register_allowlist.py"
+      ],
+      "layer": "L1",
+      "assets": [
+        {
+          "kind": "script",
+          "ref": ".githooks/check_register_allowlist.py"
+        }
+      ],
+      "trigger": "on-diff",
+      "serial": false,
+      "run": "python3 .githooks/check_register_allowlist.py",
+      "owner": "extensions/universal/provider-live-sync",
+      "authority": "docs/constraints.json",
+      "note": "R2 态：真实运行形态 = pre-commit 2i 段按路径触发（extensions/**/*.{ts,mts,cts,js,mjs} / 本脚本 / install-hooks.sh 任一 staged，复用 SKIP_EXTENSION_LINT 开关）；判定唯一源 = 脚本内两包白名单常量，新增合法注入点须同 commit 改白名单并同步 C-ext-32 登记；零第三方依赖、全量扫描 ~0.1s"
     }
   ]
 }

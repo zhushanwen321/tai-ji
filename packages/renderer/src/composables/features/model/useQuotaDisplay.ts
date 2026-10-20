@@ -18,6 +18,7 @@ import { useI18n } from 'vue-i18n'
 import type { Ref } from 'vue'
 import type { NormalizedQuotaRow } from '@taiji/shared'
 import { matchQuotaPreset, resolveQuotaPresets } from '@taiji/shared'
+import i18n from '@/i18n'
 import { getSettingsStore } from '@taiji/core'
 import { useQuotaQuery } from './useQuotaQuery'
 
@@ -32,6 +33,44 @@ const MIN_PER_HOUR = 60
 const HOUR_PER_DAY = 24
 const SEC_PER_HOUR = SEC_PER_MIN * MIN_PER_HOUR
 const SEC_PER_DAY = HOUR_PER_DAY * SEC_PER_HOUR
+
+/**
+ * 格式化剩余秒数（i18n 化；null/<=0 → '--'）。模块级单点实现：useQuotaDisplay 返回的
+ * formatReset 与套餐浮层（PlanQuotaItem）共用（i18n.global.t 非 setup 模式，同
+ * useQuotaQuery 的 cast 先例）。
+ */
+export function formatResetSec(sec: number | null): string {
+  const t = i18n.global.t as (key: string, params?: Record<string, number>) => string
+  if (sec == null || sec <= 0) return t('panel.context.resetEmpty')
+  const d = Math.floor(sec / SEC_PER_DAY)
+  const h = Math.floor((sec % SEC_PER_DAY) / SEC_PER_HOUR)
+  const m = Math.floor((sec % SEC_PER_HOUR) / SEC_PER_MIN)
+  if (d > 0) return t('panel.context.resetRemainingDays', { d, h })
+  if (h > 0) return t('panel.context.resetRemainingHours', { h, m })
+  if (m > 0) return t('panel.context.resetRemainingMinutes', { m })
+  return t('panel.context.resetRemainingSoon')
+}
+
+/**
+ * 解析 provider 的 quota preset 显示名（手动 fetcher 优先，fallback 按 baseUrl/name
+ * 自动匹配）。无匹配 → null。useQuotaDisplay（单 provider 容量 chip）与
+ * useQuotaPlanList（套餐浮层清单）共用，防两处匹配规则漂移。
+ * 预设源 = settingsStore.quotaPresets（远程配置下发的合并视图）；空态回落基线
+ * （store 初值 `[]` / RPC 拉取失败）由 resolveQuotaPresets 承担——与 ProviderEditBody 的
+ * matchedPreset 同源同判据，额度 label 不会因合并视图未下发而永久为空。
+ */
+export function resolveQuotaPresetLabel(providerInfo: {
+  baseUrl?: string
+  name: string
+  quota?: { fetcher?: string }
+}): string | null {
+  const presets = resolveQuotaPresets(getSettingsStore().quotaPresets.value)
+  const manualFetcher = providerInfo.quota?.fetcher
+  const preset = manualFetcher
+    ? presets.find((p) => p.fetcher === manualFetcher)
+    : matchQuotaPreset({ baseUrl: providerInfo.baseUrl, name: providerInfo.name }, presets)
+  return preset?.label ?? null
+}
 
 /** 可见窗口项（过滤 pct=null 的 ∞ 窗口）。 */
 export interface VisibleWindow {
@@ -95,20 +134,13 @@ export function useQuotaDisplay(modelIdRef: Ref<string | undefined>): UseQuotaDi
     return provider
   })
 
-  /** 匹配到的 quota preset 显示名（手动 fetcher 优先，fallback 自动匹配）。 */
+  /** 匹配到的 quota preset 显示名（手动 fetcher 优先，fallback 自动匹配；实现单点 resolveQuotaPresetLabel）。 */
   const matchedPresetLabel = computed<string | null>(() => {
     const pid = matchedProviderId.value
     if (!pid) return null
     const providerInfo = settingsStore.providers.value.find((p) => p.id === pid)
     if (!providerInfo) return null
-    const manualFetcher = providerInfo.quota?.fetcher
-    // 空态回落基线（store 初值 `[]` / RPC 拉取失败）：与 ProviderEditBody 的 matchedPreset
-    // 同源同判据，额度 label 不会因合并视图未下发而永久为空
-    const presets = resolveQuotaPresets(settingsStore.quotaPresets.value)
-    const preset = manualFetcher
-      ? presets.find((p) => p.fetcher === manualFetcher)
-      : matchQuotaPreset({ baseUrl: providerInfo.baseUrl, name: providerInfo.name }, presets)
-    return preset?.label ?? null
+    return resolveQuotaPresetLabel(providerInfo)
   })
 
   const { data: quotaData, lastFetchAt, error, isPending, onHoverEnter: queryOnHoverEnter } = useQuotaQuery(matchedProviderId)
@@ -133,16 +165,9 @@ export function useQuotaDisplay(modelIdRef: Ref<string | undefined>): UseQuotaDi
   const quotaWarning = computed(() => visibleWindows.value.some((w) => w.pct >= HIGH_THRESHOLD && w.pct < DANGER_THRESHOLD))
   const quotaDanger = computed(() => visibleWindows.value.some((w) => w.pct >= DANGER_THRESHOLD))
 
-  /** 格式化剩余秒数（i18n 化）。null/<=0 → '--'。 */
+  /** 格式化剩余秒数（i18n 化；实现单点 formatResetSec，与套餐浮层共用）。null/<=0 → '--'。 */
   function formatReset(sec: number | null): string {
-    if (sec == null || sec <= 0) return t('panel.context.resetEmpty')
-    const d = Math.floor(sec / SEC_PER_DAY)
-    const h = Math.floor((sec % SEC_PER_DAY) / SEC_PER_HOUR)
-    const m = Math.floor((sec % SEC_PER_HOUR) / SEC_PER_MIN)
-    if (d > 0) return t('panel.context.resetRemainingDays', { d, h })
-    if (h > 0) return t('panel.context.resetRemainingHours', { h, m })
-    if (m > 0) return t('panel.context.resetRemainingMinutes', { m })
-    return t('panel.context.resetRemainingSoon')
+    return formatResetSec(sec)
   }
 
   /** 格式化 lastFetchAt 为相对时间（i18n 化）。 */

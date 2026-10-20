@@ -19,12 +19,12 @@ import type { ExtensionAPI } from '@earendil-works/pi-coding-agent'
 import providerLiveSync, {
   evaluateSnapshot,
   readObservation,
-  POLL_INTERVAL_MS,
   WATCHED_FILES,
   type FileObservation,
   type Snapshot,
   type WatchedFile,
 } from '../index.ts'
+import { startWithRegistryCtx, tickOnce } from './tick-harness.ts'
 
 // tick 层用例：mock pi 宿主模块的 getAgentDir 指向真实 tmp fixture。纯函数用例不经
 // getAgentDir（readObservation 显式传目录），mock 对它们无影响。
@@ -110,7 +110,8 @@ describe('evaluateSnapshot —— D3 四态（models.json 缺失是 catalog-only
     const d = evaluateSnapshot(snap, obs({ 'models.json': { state: 'absent' }, 'auth.json': present('X') }))
     expect(d).toEqual({ action: 'skip-missing', missingFiles: ['models.json'] })
     // 持续缺失：抑制保持（每拍仍判定 skip-missing），但调用方按跃迁去重 → 只在第一拍记一行
-    // 日志（`missingLogged`），后续拍零输出（稳态无噪声，设计 §3.6 行 2/S9a②）。
+    // 日志（`missingLogged`），后续拍零输出（抑制持续语义见 src/index.ts 的
+    // Snapshot.suppressed 注释与 evaluateSnapshot 实装）。
     const d2 = evaluateSnapshot(snap, obs({ 'models.json': { state: 'absent' }, 'auth.json': present('X') }))
     expect(d2).toEqual({ action: 'skip-missing', missingFiles: ['models.json'] })
   })
@@ -242,38 +243,11 @@ describe('tick 层 —— 首基线置位时机与 refresh 触发', () => {
     rmSync(agentDir, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 })
   })
 
+  /** 经 harness 启动扩展（pi 宿主面 = appendEntry spy；拍屏障说明见 tick-harness 头注释）。 */
   function startWithFakeCtx(): { refresh: ReturnType<typeof vi.fn>; appendEntry: ReturnType<typeof vi.fn> } {
-    const refresh = vi.fn(async () => ({ aborted: false, errors: new Map() }))
-    const getError = vi.fn(() => null)
-    const ctx = { modelRegistry: { refresh, getError } }
     const appendEntry = vi.fn()
-    const on = vi.fn()
-    providerLiveSync({ on, appendEntry } as unknown as ExtensionAPI)
-    const handler = on.mock.calls.find((call) => call[0] === 'session_start')?.[1] as
-      | ((event: unknown, sessionCtx: unknown) => void)
-      | undefined
-    expect(handler).toBeTypeOf('function')
-    handler({ type: 'session_start' }, ctx)
+    const { refresh } = startWithRegistryCtx({ appendEntry })
     return { refresh, appendEntry }
-  }
-
-  /** 逐真实事件循环轮次（setImmediate 未被 fake）轮询等待谓词成立。 */
-  async function waitFor(predicate: () => boolean, maxTurns = 5_000): Promise<void> {
-    for (let i = 0; i < maxTurns && !predicate(); i += 1) {
-      await new Promise<void>((resolve) => setImmediate(resolve))
-    }
-  }
-
-  /**
-   * 推进一个轮询周期并等本拍 tick **完整落地**。确定性拍屏障：tick 完成后其
-   * `.finally(schedule)` 必然注册下一个 fake timer——等 `getTimerCount() >= 1`
-   * 即证明本拍 readFile 链（真实线程池 I/O）已结束。固定轮次 flush 不行：线程池
-   * 完成回调的到达轮次不定，偶发「tick 晚于下一拍的 writeFileSync 完成 → 新内容
-   * 被当首基线」假红。
-   */
-  async function tickOnce(): Promise<void> {
-    await vi.advanceTimersByTimeAsync(POLL_INTERVAL_MS)
-    await waitFor(() => vi.getTimerCount() >= 1)
   }
 
   it('MF-1-1：首拍双 absent（catalog-only 全新安装）→ auth.json 首次出现 → 必须 refresh', async () => {

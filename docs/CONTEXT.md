@@ -675,6 +675,30 @@ provider-edit 域动作错误的归属判定机制：每条动作错误带 sourc
 ### 组级 load 归并（loadError）
 字段组（`setting-field` 的 `SettingFieldGroup`）任一字段 loader 失败即整组置 loadError：控件禁用 + 常驻提示 + 重试，加载失败时默认值明确标注为默认而非已存值（RD-4#8 契约），全部 loader 成功后复位。**Avoid**：逐字段独立 try/catch 后按默认值静默渲染、console.warn 冒充已存值。
 
+### 目录投喂（catalog overlay）
+taiji 向 pi 注册表补投模型目录的机制：runtime 把 catalog 模型清单刷进目录缓存文件（`<数据目录>/provider-catalog-overlay.json`），provider-live-sync 扩展在该文件变化时于 pi 进程内 `registerProvider` 注入（工厂期首注入 + 运行中 tick 检出刷新，实测 ~2s）。注入是**映射替换**语义（pi extension 层 `models.map`）——注入集就是该 provider 的最终可见集合；过期（lastModified 过旧）不注入、撤销回落内置基线、结构缺失的模型跳过不阻断其他 provider。**Avoid**：叫「模型同步」（与 provider-live-sync 的凭据/启停同步职责混淆）、「模型注入」（丢了「目录缓存文件」这个载体语义）。
+
+**代码映射**: `extensions/shared/llm-shared/src/catalog-overlay.ts`（判据模块：缓存解析 + staleness + 并集判据，纯函数零 IO）；`extensions/universal/provider-live-sync/src/catalog-bridge.ts`（缓存文件读取 + 注入执行 + 运行中监视）；runtime 刷缓存写点 `provider-catalog-refresh.ts`。约束登记 [C-ext-32](constraints.json)。
+
+### 播种（seeding，投喂域）
+验收/测试场景里往目录缓存文件写入一条投喂条目的准备动作（如给 xiaomi 名下加一个内置目录不存在的模型 id），使「[overlay-only 模型](#overlay-only-模型)」在真机数据条件下成立。**Avoid**：叫「mock」（形态是真实缓存文件的真实条目，pi 侧全链路真实消费）。
+
+### catalog provider
+pi 内置模型目录内的 provider（pi-ai 编译期目录快照；`getBuiltinProviders` 列全集——注意三个目录导出在 pi-ai 的 `providers/all` 子路径、主入口不导出，pi 语义门禁登记 docs/pi-semantics.json PS-85）。目录投喂不新建 provider，只往既有 catalog provider 名下注入模型（映射替换语义，注入集 = 该 provider 的最终可见集合）；用户在 `models.json` 手写的自定义模型在该 provider 被注入后从视图挤出，属已接受边界（2026-10-20 用户裁决不立项修法；删掉手写条目即恢复）。
+
+**代码映射**: 目录合并视图 `packages/runtime/src/services/provider-catalog.ts`；pi 实装锚 `dist/providers/all.js`。
+
+### overlay-only 模型
+只在 taiji 目录缓存、pi 内置目录没有的模型（如远端目录比内置快照先出的新模型、验收播种的条目）。经目录投喂注入后在 pi 执行侧可见；所属条目过期（[三态判据](#三态判据)判 expired）或缓存文件被清即从视图消失。可设为默认模型（默认模型校验基准 = models.json ⊕ 目录缓存合并视图）；所属 provider 无投喂条目（从未配置凭据）时其下模型整体不可用，属 provider 级配置约束。
+
+### 三态判据
+对目录缓存条目相对 pi 内置快照的三态判定（`CatalogOverlayState`）：**fresh**（有条目且 `lastModified` 晚于快照时刻）→ 条目模型进注入集；**expired**（有条目但 `lastModified` 缺失或不晚于快照时刻，含远端 404/501 落盘的 `lastModified: 0` 否定信号）→ 不注入；**never-seen**（无条目：缓存文件缺失/损坏、该 provider 从未出现、条目缺 `models` 数组）→ 不注入。快照时刻锚 = `getBuiltinModelDataGeneratedAt()`（编译期 manifest 值，非运行时钟；导出为 undefined 时扩展侧回落 0 取保守档——否定信号条目不注入）。runtime 侧对时刻缺失跳过检查视为 fresh，与扩展侧差异是有意的：扩展侧裁决「执行可见性」，执行侧权威是 pi 的判定。
+
+**代码映射**: `extensions/shared/llm-shared/src/catalog-overlay.ts`（`getCatalogOverlayState`）；runtime 侧同名实现 `packages/runtime/src/services/provider-catalog-refresh.ts`（`getCatalogOverlayState`）。
+
+### 模型可见性投喂
+目录投喂通道承载的写入单点约束命名：把 taiji 侧可见的目录数据常驻写入 pi 注册表，写入单点 = provider-live-sync 包（投喂模块 `catalog-bridge.ts`）——新增模型数据来源只改该模块输入，禁止在其他扩展新开 `registerProvider` / `registerNativeProvider` / `registerVirtualModel` 常驻注入；消费方（--model 解析 / rpc set_model / rename / smart-context 等）零改动自动受益。约束登记 [C-ext-32](constraints.json)；守则章节 extension-conventions「模型可见性投喂单点 [MANDATORY]」；机器执行点 = 调用点白名单检查 `check_register_allowlist.py`。与 [目录投喂](#目录投喂catalog-overlay) 的边界：彼词条描述机制与数据流（缓存文件载体、注入语义），本词条是该通道写入单点约束的登记名（constraints / 守则 / 机器检查引用的形态）；scheduler 的 ack 合成轮是执行通道覆写、非可见性投喂，不在禁列。
+
 ## v3 UI 结构术语（2026-06 重构）
 
 > 以下术语由 v3-demo 设计稿确立。原规范源 `docs/page-design/archive/v3/architecture-and-terminology.html` 已随 v3 视觉稿于 2026-08-02 被 v6 取代删除（归档说明见 `docs/architecture/v3-specs/README.md`，其指认本章节为术语/拓扑定义载体）；当前视觉 SSOT = `docs/DESIGN.md`。

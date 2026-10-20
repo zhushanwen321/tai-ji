@@ -17,9 +17,25 @@
  * runProviderRefreshPhase）
  * ——**零网络请求**。
  *
- * 设计取舍（详见 docs 侧设计文档 §3.3 D3/D11/D12）：
+ * 目录投喂（第二个职责，设计 §3.3 D1/D2/D5）：taiji 的模型目录缓存
+ * （`<getDataDir()>/provider-catalog-overlay.json`）经 pi 官方注册点
+ * `pi.registerProvider` 注入注册表，修的是「上游目录新模型在 pi 执行侧不可见」那类
+ * 断裂（rename 静默跳过 / `set_model` 报 ENGINE_MODEL_MISSING / spawn `--model`
+ * 近似回退等 8 个同根因症状）。注册发生在**工厂函数体内**（pi 内部进 pending 队列，
+ * 装配链在 `--model` 解析之前统一 flush），运行中窗口由本扩展既有的轮询 tick 承载：
+ * 该缓存文件作为**第三个监视条目**挂进 tick（绝对路径 + mtime 比较，与既有两条目的
+ * 内容字节比较正交），检出变化先做一次**注册对账**（`reconcile`：对本拍 fresh 且尚未
+ * 注册的 provider 补 `registerProvider`——工厂期 expired / never-seen / 损坏的 provider
+ * 没有 `refreshModels` 钩子，pi 的刷新不会碰它，单靠刷新重建不了注入；工厂返回后的注册
+ * 直连注册表立即生效，PS-88），再触发同一次零网络刷新，由注册时携带的 `refreshModels`
+ * 钩子重读缓存返回新并集。实装在 `src/catalog-bridge.ts`。
+ *
+ * 设计取舍（行为语义以本头注释为权威；包定位与投喂写入单点见根 AGENTS.md 的
+ * provider-live-sync 括注与 constraints.json 约束 C-ext-32；术语见 docs/CONTEXT.md
+ * 「目录投喂（catalog overlay）」词条）：
  * - **轮询而非 fs.watch**：仓内 `skill-registry` 有 macOS `fs.watch` 触发率 ~40% 前科；轮询不依赖
- *   事件送达，无静默漏报面。代价 = 每进程 2 个小文件 / 2s 的只读 I/O。
+ *   事件送达，无静默漏报面。代价 = 每进程 3 个监视目标 / 2s 的只读 I/O（稳态每拍
+ *   2 次内容读 + 1 次 mtime stat；检出变化时钩子重读两份目录缓存）。
  * - **按文件独立「存在性 + 内容」基线**：状态 = 缺失/存在 × 内容字节。① 持续缺失 = 非变化信号
  *   （**models.json 本就不存在是 catalog-only 安装的常态**，不能因此关停另一文件的比较）；
  *   ② 「曾存在 → 缺失」（quarantine / 外部删除窗口）→ 更新基线但**抑制 refresh**（否则会以空配置
@@ -45,6 +61,7 @@ import { join } from "node:path";
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { getAgentDir } from "@earendil-works/pi-coding-agent";
 import { getLogger, setPiHandle } from "@zhushanwen/pi-extension-logger";
+import { injectCatalogOverlay, type CatalogOverlayBridge } from "./catalog-bridge.ts";
 
 /** 轮询周期（ms）。设计标定：内容变更到生效的上界 ≈ 2s，小于「保存 → 切回会话 → 点选」的人工时延。 */
 export const POLL_INTERVAL_MS = 2_000;
@@ -66,7 +83,9 @@ export interface Snapshot {
   baselines: Map<WatchedFile, FileBaseline>;
   /**
    * 是否已完成首个**可比**基线拍：两受监视文件各完成一次可比观察（absent 计入、
-   * unreadable 不计）。此后首拍只建基线、不触发 refresh（pi spawn 时已按磁盘建过快照）。
+   * unreadable 不计）。此后首拍只建基线、不触发 refresh（pi spawn 时已按磁盘建过快照
+   * ——该前提只对 models.json/auth.json 两条目成立；第三个监视条目 taiji 目录缓存的
+   * 基线工厂期已播种，其变化在首拍必须放行，见 tick 内 firstBaseline 抑制处注释）。
    * 置位与当拍 decision 无关——双 absent 首拍（catalog-only 常态）也构成完整基线。
    */
   initialized: boolean;
@@ -75,8 +94,8 @@ export interface Snapshot {
    *
    * 抑制是**持续**的（不是一拍）：只要 `models.json` 处于这个集合里，任何 refresh 都会重读磁盘、
    * 以「无 override 的空配置」重建可用集合——把一次坏写放大成用户自定义 provider 的**真正丢失**
-   * （设计 D3②/§3.6「『曾存在 → 缺失』跃迁抑制 refresh」）。恢复 = 该文件重新出现（内容变化）
-   * 或会话重启（spawn 期重读）。
+   * （取舍 = 「『曾存在 → 缺失』跃迁抑制 refresh」，见本文件头注释与 evaluateSnapshot 实装）。
+   * 恢复 = 该文件重新出现（内容变化）或会话重启（spawn 期重读）。
    *
    * 只对 `models.json` 生效：`auth.json` 消失不威胁配置本身（凭据缺失是自愈的——文件写回后
    * 下一拍 refresh 即恢复），按普通内容变化处理，避免「凭据变更被静默丢弃」。
@@ -222,9 +241,57 @@ function comparableCount(observations: Map<WatchedFile, FileObservation>): numbe
  */
 const logger = getLogger("provider-live-sync");
 
+/** skip-missing 拍的跃迁去重日志：只在「曾存在 → 缺失」那一拍记，持续缺失零输出。 */
+function logMissingTransitions(missingLogged: Set<WatchedFile>, missingFiles: WatchedFile[]): void {
+  for (const file of missingFiles) {
+    if (missingLogged.has(file)) continue;
+    missingLogged.add(file);
+    logger.error(
+      `config file disappeared: ${file} — refresh suppressed until it is written again `
+      + "(rebuilding from an empty config would drop the user's custom providers from the running "
+      + "engine; it keeps its last good snapshot meanwhile; restarting the session also recovers).",
+    );
+  }
+}
+
+/**
+ * 第三个监视条目（taiji 目录缓存）的观测并进本拍变更集：mtime 变化 → 其标签进 changed。
+ * 必须在 skip-missing 的 early return **之后**调用：配置源缺失窗口内一律不刷新，目录缓存
+ * 的变化不得穿透该抑制；代价是抑制期内该条目的基线不推进，抑制解除后补一次刷新
+ * （保守方向，不会漏）。
+ */
+function mergeOverlayChange(
+  decision: SyncDecision,
+  overlayBridge: CatalogOverlayBridge | null,
+): { changed: string[]; overlayChanged: string | null } {
+  const overlayChanged =
+    overlayBridge !== null && overlayBridge.watcher.observe() ? overlayBridge.watcher.label : null;
+  const changed: string[] = decision.action === "refresh" ? [...decision.changedFiles] : [];
+  if (overlayChanged !== null) changed.push(overlayChanged);
+  return { changed, overlayChanged };
+}
+
+/** 拍内零网络本地刷新 + 结果报告（`getError()` 全文是唯一有效判据，见模块头注释）。 */
+async function refreshAndReport(modelRegistry: ExtensionContext["modelRegistry"]): Promise<void> {
+  const result = await modelRegistry.refresh({ allowNetwork: false });
+  // 有效判据 = getError() 全文（本退化类 errors.size/aborted 恒为空/假，见模块头注释）。
+  const error = modelRegistry.getError();
+  if (error) {
+    // 不限定来源（models.json/auth.json/目录投喂注入集都可能被拒）：composition error 的
+    // 归因在各自产生侧（目录投喂侧见 catalog-bridge.ts 的 registerProvider/skipped 日志）。
+    logger.error(`model config rejected by the engine: ${error}`);
+  } else if (result.errors.size > 0 || result.aborted) {
+    logger.error(`refresh finished with errors (aborted=${String(result.aborted)}, providers=${result.errors.size})`);
+  }
+}
+
 export default function providerLiveSync(pi: ExtensionAPI): void {
   // 最早期注入 pi handle——上方 logger 的 error 通道（appendEntry）由此生效（session-reader 同款）。
   setPiHandle(pi);
+  // 目录投喂（设计 D1）：必须在同步的工厂体内完成——pi 的 pending 队列在全部工厂返回后
+  // 统一 flush，晚于 `--model` 解析就覆盖不了 spawn 近似回退。返回 null = 非 taiji 托管
+  // 环境（R1），第三个监视条目与注册对账整条不挂。
+  const overlayBridge: CatalogOverlayBridge | null = injectCatalogOverlay(pi);
   const snapshot: Snapshot = { baselines: new Map(), initialized: false, suppressed: new Set() };
   /** ctx 每次 session_start 重新捕获（pi 可能换实例；未就绪时本拍跳过且不推进基线）。 */
   let ctx: ExtensionContext | null = null;
@@ -253,32 +320,28 @@ export default function providerLiveSync(pi: ExtensionAPI): void {
       const firstBaseline = !snapshot.initialized;
       if (comparableCount(observations) === WATCHED_FILES.length) snapshot.initialized = true;
       if (decision.action === "skip-missing") {
-        for (const file of decision.missingFiles) {
-          if (!missingLogged.has(file)) {
-            missingLogged.add(file);
-            logger.error(
-              `config file disappeared: ${file} — refresh suppressed until it is written again `
-              + "(rebuilding from an empty config would drop the user's custom providers from the running "
-              + "engine; it keeps its last good snapshot meanwhile; restarting the session also recovers).",
-            );
-          }
-        }
+        logMissingTransitions(missingLogged, decision.missingFiles);
         return;
       }
       for (const file of WATCHED_FILES) missingLogged.delete(file);
-      if (decision.action !== "refresh") return;
-      // 首个基线拍不刷新（进程启动时 pi 已按磁盘配置建过快照，重复刷新纯浪费）。
-      if (firstBaseline) return;
 
-      logger.debug(`config change detected (${decision.changedFiles.join(", ")}) → refreshing model snapshot`);
-      const result = await currentCtx.modelRegistry.refresh({ allowNetwork: false });
-      // 有效判据 = getError() 全文（本退化类 errors.size/aborted 恒为空/假，见模块头注释）。
-      const error = currentCtx.modelRegistry.getError();
-      if (error) {
-        logger.error(`model config rejected by the engine (models.json / auth.json): ${error}`);
-      } else if (result.errors.size > 0 || result.aborted) {
-        logger.error(`refresh finished with errors (aborted=${String(result.aborted)}, providers=${result.errors.size})`);
-      }
+      const { changed, overlayChanged } = mergeOverlayChange(decision, overlayBridge);
+      if (changed.length === 0) return;
+      // 首个基线拍不刷新（进程启动时 pi 已按磁盘配置建过快照，重复刷新纯浪费）——该前提
+      // 只对既有 models.json/auth.json 两条目成立：pi spawn 时按磁盘建快照读的是它们。
+      // 第三个条目（taiji 目录缓存）不成立——pi 不读目录缓存，扩展工厂期注入才是初始态
+      // （基线工厂期播种），「工厂期注入 → tick 1」约 2s 窗内的缓存变更必须刷新，否则
+      // 运行中窗口（设计 D5）在该窗口断裂且此后 mtime 稳定即永不重检。
+      if (firstBaseline && overlayChanged === null) return;
+
+      // 目录缓存变化先做注册对账（D5）：工厂期 expired / never-seen / 损坏的 provider 没有
+      // refreshModels 钩子，pi 的 refresh 只刷新带钩子的 provider（pi-ai refreshable 过滤），
+      // 单靠下面的刷新重建不了注入——对本拍 fresh 且尚未注册的 provider 先补注册（post-bind
+      // registerProvider 直连注册表立即生效，PS-88），再刷新让已注册 provider 的钩子重读。
+      if (overlayBridge !== null && overlayChanged !== null) overlayBridge.reconcile();
+
+      logger.debug(`config change detected (${changed.join(", ")}) → refreshing model snapshot`);
+      await refreshAndReport(currentCtx.modelRegistry);
     } catch (err) {
       // 轮询绝不自杀：本拍失败下一拍继续（内容未变则基线已推进 → 不会重复刷新同一内容）。
       const message = err instanceof Error ? err.message : String(err);
@@ -293,7 +356,8 @@ export default function providerLiveSync(pi: ExtensionAPI): void {
     timer.unref();
   };
 
-  // 首拍只建基线（不 refresh）；此后每拍比较。（pi 无 extension 生命周期 shutdown 钩子，
-  // 进程退出时 unref 定时器自然消失。）
+  // 首拍对既有两条目只建基线（不 refresh）；此后每拍比较。第三个监视条目（taiji 目录
+  // 缓存）的基线工厂期已播种，其变化首拍即放行。（pi 无 extension 生命周期 shutdown
+  // 钩子，进程退出时 unref 定时器自然消失。）
   schedule();
 }

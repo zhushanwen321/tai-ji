@@ -288,6 +288,16 @@ export default {
     pillConflict: 'Conflict',
     unavailableTitle: 'Git unavailable, repository status cannot be read',
   },
+  quotaFloat: {
+    // Conversation-left plan quota float (plan-quota-float): three-window usage for every quota.enabled provider
+    title: 'Plan quotas',
+    current: 'Current',
+    expand: 'Expand plan panel',
+    collapse: 'Collapse plan panel',
+    noWindowData: 'No data for this window',
+    usedPct: 'Used {pct}%',
+    fetchFailed: 'Quota query failed',
+  },
   context: {
     // Metrics aggregate entry (W3a single-icon button; resident at all fit levels since ui-optimize decision 6; hover opens the capacity/TTFT/speed/cache four-card aggregate page) title
     metricsAggregateTitle: 'Metrics',

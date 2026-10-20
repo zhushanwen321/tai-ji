@@ -3,6 +3,7 @@
 // call: LLM 调用（completeSimple + 凭证 + 文本提取）
 // config: 泛型配置读写（mtime+size 双 key 缓存 + 原子写）
 // ui-locale: UI 语言读取单点（<dataDir>/ui-preferences.json，mtime+size 读缓存 + 降级）
+// catalog-overlay: 目录缓存判据（两份缓存解析 + 新者胜合并 + 三态判定 + 注入集并集，纯函数零 IO）
 export {
 	resolveModel,
 	parseModelRef,
@@ -15,3 +16,19 @@ export { callLLM, joinTextBlocks, extractText, type CallLLMOptions, type CallLLM
 export { getConfigPath, loadConfig, saveConfig, clearConfigCache } from "./config.ts";
 export { readUiLocale, DEFAULT_UI_LOCALE, type UiLocale } from "./ui-locale.ts";
 export { migrateLegacyConfig } from "./migrate.ts";
+export {
+	getTaijiOverlayCachePath,
+	getPiStorePath,
+	getCatalogOverlayState,
+	getCatalogGeneratedAt,
+	mergeEntriesNewerWins,
+	parseOverlayCache,
+	computeInjectionSet,
+	type CatalogOverlayState,
+	type OverlayModel,
+	type OverlayEntry,
+	type ParseResult,
+	type SkippedModel,
+	type ComputeInjectionSetInput,
+	type ComputeInjectionSetResult,
+} from "./catalog-overlay.ts";

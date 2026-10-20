@@ -280,6 +280,16 @@ export default {
     pillConflict: '冲突',
     unavailableTitle: 'Git 不可用，无法读取仓库状态',
   },
+  quotaFloat: {
+    // 对话流左侧套餐浮层（plan-quota-float）：全部 quota.enabled provider 的三窗口用量
+    title: '套餐额度',
+    current: '当前',
+    expand: '展开套餐面板',
+    collapse: '折叠套餐面板',
+    noWindowData: '无该窗口数据',
+    usedPct: '已用 {pct}%',
+    fetchFailed: '额度查询失败',
+  },
   context: {
     // 指标聚合入口（W3a 单图标聚合按钮；ui-optimize 决策 6 起对所有 fit 级常驻，hover 出容量+TTFT+速度+缓存四卡聚合页）title
     metricsAggregateTitle: '指标',

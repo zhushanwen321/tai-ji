@@ -124,7 +124,7 @@ harness 必备能力（业务价值视角，2026-09-12 用户裁决）：
 | base-tool-enhance | universal | P1 | bash 前台链挂了 agent 失去执行能力（原生回退仅保底） |
 | msg-id-mapper | taiji | P1 | 挂了消息映射错乱 |
 | permission | universal | P1 | 审批闭环（边界判例 #7） |
-| provider-live-sync | universal | **P0** | 挂了 = 运行中会话看不到新增/变更的 provider·模型·凭据，切新模型报 `Model not found` 且只能重开会话（模型控制主链路的实时性前提；与 ask-user/subagent-workflow 同族的「能力静默失效」形态，故 tier=infrastructure 不可禁） |
+| provider-live-sync | universal | **P0** | 挂了 = 运行中会话看不到新增/变更的 provider·模型·凭据，切新模型报 `Model not found` 且只能重开会话；目录投喂（catalog overlay）同挂于此包——投喂的 overlay-only 模型对新会话不可见（模型控制主链路的实时性前提；与 ask-user/subagent-workflow 同族的「能力静默失效」形态，故 tier=infrastructure 不可禁） |
 | system-prompt | taiji | P1 | 挂了 agent 裸人格、所有会话质量崩 |
 | pending-notifications | universal | P2 | 通知汇聚 + collect_results 批量收取（一次阻塞等待批量收割并行后台任务终态）。挂掉后果：批量收取面失效，agent 失去 collect_results——后台任务结果退回逐条 push 唤醒，N 任务 = N 轮碎片 turn（result-collect phase 2 交付） |
 | plan | universal | P2 | 面板能力 + 审批闸口（修订/执行/搁置 + 降级重新提交）+ 执行方式选择（2026-09-24 状态机显式化后行为描述核对：挂掉后果不变，P 级语义不变） |
