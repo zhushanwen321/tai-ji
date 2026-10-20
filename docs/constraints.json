@@ -3313,7 +3313,11 @@
         "extensions/**",
         "packages/shared/src/session-store-paths.ts",
         "packages/shared/src/paths.ts",
-        "scripts/lib/pi-env-admission-gate.mjs"
+        "scripts/lib/pi-env-admission-gate.mjs",
+        "scripts/check-pi-subtree-shared-imports.mjs",
+        "scripts/__tests__/check-pi-subtree-shared-imports.test.mjs",
+        ".githooks/install-hooks.sh",
+        ".github/workflows/ci.yml"
       ],
       "authority": [
         "../packages/shared/src/session-store-paths.ts",
@@ -3332,6 +3336,14 @@
         {
           "type": "machine",
           "hook": "verify-staged-extensions.mjs"
+        },
+        {
+          "type": "machine",
+          "hook": "install-hooks.sh §2h-3 C-ext-31 段（提交期 staged 重建门禁触发）"
+        },
+        {
+          "type": "machine",
+          "hook": "check-pi-subtree-shared-imports.mjs"
         },
         {
           "type": "review",

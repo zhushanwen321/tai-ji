@@ -740,7 +740,8 @@ fi
 #     无任何触发，准入检查退化（标记被清空 / 扫描范围被改窄）可静默进主干，
 #     直到下次 CI build 才炸（2026-10-19 打包版 subagent 全灭事故即此类滞后）。
 #     本段补提交期触发：执行 node scripts/bundle-extensions.mjs 全量重建 staged
-#     （<1s，引擎 staging 末尾自带门禁断言 assertNoPiEnvAdmissionGuard），同时覆盖
+#     （<1s，main() 内 staging 全量完成后执行门禁断言 assertNoPiEnvAdmissionGuard，
+#     与 bundleEngines() 解耦），同时覆盖
 #     门禁脚本 / bundle 脚本 / postbuild 复扫脚本 / pi 子树源码 / shared paths 与
 #     session-store-paths 两源任一变更。红灯 = staged bundle 内含准入检查标记或
 #     重建失败，按下方恢复动作处理。
