@@ -114,12 +114,17 @@ describe('Sidebar zh-CN locale + SegmentedTab tab label i18n', () => {
 // ── thinking-levels（原 thinking-levels-i18n.test.ts；死 import ThinkingLevelPopover 已删）──
 
 describe('thinking-levels 数据源 i18n 化', () => {
-  it('THINKING_LEVELS 7 档全部带 labelKey 字段', () => {
+  it('THINKING_LEVELS 7 档 labelKey 双语可解析（非 key 回退）', async () => {
     expect(THINKING_LEVELS).toHaveLength(7)
-    for (const opt of THINKING_LEVELS) {
-      expect(opt.labelKey).toBeDefined()
-      expect(typeof opt.labelKey).toBe('string')
-      expect(opt.labelKey).toMatch(/^composable\.thinkingLevel\./)
+    for (const locale of ['zh-CN', 'en-US'] as const) {
+      await setLocale(locale)
+      for (const opt of THINKING_LEVELS) {
+        expect(opt.labelKey).toBeDefined()
+        expect(typeof opt.labelKey).toBe('string')
+        expect(opt.labelKey).toMatch(/^composable\.thinkingLevel\./)
+        // 缺 key 时 vue-i18n 回退为 key 本身——解析值等于 key 即漏翻
+        expect(i18n.global.t(opt.labelKey!)).not.toBe(opt.labelKey)
+      }
     }
   })
 
@@ -138,12 +143,16 @@ describe('thinking-levels 数据源 i18n 化', () => {
     expect(label).toBe('高')
   })
 
-  it('THINKING_STRATEGIES 3 项全部带 labelKey 字段', () => {
+  it('THINKING_STRATEGIES 3 项 labelKey 双语可解析（非 key 回退；en-US 精确值由下方用例锁定）', async () => {
     expect(THINKING_STRATEGIES).toHaveLength(3)
-    for (const s of THINKING_STRATEGIES) {
-      expect(s.labelKey).toBeDefined()
-      expect(typeof s.labelKey).toBe('string')
-      expect(s.labelKey).toMatch(/^composable\.thinkingStrategy\./)
+    for (const locale of ['zh-CN', 'en-US'] as const) {
+      await setLocale(locale)
+      for (const s of THINKING_STRATEGIES) {
+        expect(s.labelKey).toBeDefined()
+        expect(typeof s.labelKey).toBe('string')
+        expect(s.labelKey).toMatch(/^composable\.thinkingStrategy\./)
+        expect(i18n.global.t(s.labelKey!)).not.toBe(s.labelKey)
+      }
     }
   })
 

@@ -50,8 +50,8 @@ describe('PluginRegistry', () => {
     expect(descriptors.length >= 1).toBeTruthy()
     const hw = descriptors.find(d => d.pluginId === 'hello-world')!
     expect(hw).toBeTruthy()
-    // Version comes from fixture package.json; don't hardcode to avoid CI flakiness
-    expect(hw.version).toBeTruthy()
+    // fixture package.json 是仓库内静态目录，版本恒定——精确断言可抓「读错字段」回归
+    expect(hw.version).toBe('0.3.14')
     expect(hw.displayName).toBe('Hello World')
     expect(hw.description).toBe('A test plugin for taiji')
     expect(hw.main).toBe('index.js')
