@@ -42,6 +42,44 @@ export interface RemoteProvidersConfig { // oe-exempt:20261019:framework:taiji �
   providers: RemoteProviderEntry[]
 }
 
+/** maxTokens 与写盘链 applyValidatedModelFields 同口径（正整数）：只拦 typeof 会放负数 /
+ * 非整数穿到写盘链 throw（sync 链无 per-provider catch，整体 reject），必须在 guard 拦下。 */
+function isOptionalPositiveInt(v: unknown): boolean {
+  return v === undefined || (typeof v === 'number' && Number.isInteger(v) && v > 0)
+}
+
+/** input：可选 'text'|'image' 字符串数组（与 RemoteProviderModel.input 声明对齐）。 */
+function isOptionalModelInputValid(v: unknown): boolean {
+  return v === undefined || (Array.isArray(v) && v.every((s: unknown) => s === 'text' || s === 'image'))
+}
+
+/** thinkingLevelMap：可选 Record<string, string|null>（排 null/数组，口径对齐写盘链
+ * isValidThinkingLevelMap——typeof [] === 'object'，数组当 Record 放行会直写盘）。 */
+function isOptionalThinkingLevelMapValid(v: unknown): boolean {
+  if (v === undefined) return true
+  if (!isRecord(v) || Array.isArray(v)) return false
+  return Object.values(v).every((t) => t === null || typeof t === 'string')
+}
+
+/**
+ * 远程模型条目字段级 guard（与 RemoteProviderModel 接口逐字段对齐，均可选字段）。
+ * 写盘链 applyValidatedModelFields 只校验 reasoning/maxTokens/cost/headers——name/
+ * contextWindow/input/thinkingLevelMap 等此处放行的值经 remoteModelToDefinition 原样
+ * 直写 models.json，坏值触发 pi schema 整表拒载，字段类型必须在此拦（guard 是唯一拦截点，
+ * 任一非法 = 清单整体拒用回退缓存，与 declarative-engine isWindowValid 同纪律）。
+ */
+function isRemoteModelValid(m: unknown): boolean {
+  if (!isRecord(m) || typeof m.id !== 'string' || m.id === '') return false
+  return (
+    isOptionalField(m.name, 'string') &&
+    isOptionalField(m.contextWindow, 'number') &&
+    isOptionalPositiveInt(m.maxTokens) &&
+    isOptionalField(m.reasoning, 'boolean') &&
+    isOptionalModelInputValid(m.input) &&
+    isOptionalThinkingLevelMapValid(m.thinkingLevelMap)
+  )
+}
+
 /** 形状 guard（字段级：决策依赖字段类型不符即拒，整体拒用回退缓存——RT-7#5 同纪律）。 */
 export function isRemoteProvidersConfig(v: unknown): v is RemoteProvidersConfig {
   if (!isRecord(v)) return false
@@ -50,7 +88,7 @@ export function isRemoteProvidersConfig(v: unknown): v is RemoteProvidersConfig 
   return v.providers.every((p) => {
     if (!isRecord(p) || typeof p.id !== 'string' || p.id === '' || typeof p.name !== 'string') return false
     if (!Array.isArray(p.models)) return false
-    if (!p.models.every((m) => isRecord(m) && typeof m.id === 'string' && m.id !== '')) return false
+    if (!p.models.every(isRemoteModelValid)) return false
     return (
       isOptionalField(p.api, 'string') &&
       isOptionalField(p.baseUrl, 'string') &&
