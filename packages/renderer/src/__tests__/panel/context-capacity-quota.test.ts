@@ -543,6 +543,50 @@ describe('ComposerMetricsAggregate coding-plan 区', () => {
     })
   })
 
+  describe('额度百分比展示口径（2 位小数）', () => {
+    /** 卡内三窗口行走的是同一模版直渲染（不经 HoverCard portal，直接 mount 本卡即可断言文本） */
+    function mountCardWithRow(row: NormalizedQuotaRow): ReturnType<typeof mount> {
+      setupProviders([zhipuProvider])
+      useQuotaStore().setCache('zhipu', row, 1000)
+      return mount(ContextCapacityCard, { props: { sessionId: 's1', modelId: 'zhipu/glm-4' } })
+    }
+
+    it('[HISTORICAL] 浮点尾数不泄漏：2.9499999999999997 → 2.95%（截图事故原值）', async () => {
+      // 事故形态：OpenDesign 的 pct = usedCredits/limitCredits*100 是连续量，原模板
+      // `{{ win.pct }}%` 直接插值，满屏 `2.9499999999999997%` 撑爆 32px 数字列并溢出行宽。
+      const wrapper = mountCardWithRow({
+        label: 'OpenDesign Coding Plan',
+        wins: [
+          { pct: 0.148, resetSec: 10680 },
+          { pct: 2.9499999999999997, resetSec: 10680 },
+          { pct: null, resetSec: null },
+        ],
+      })
+      await flushPromises()
+
+      const text = wrapper.text()
+      expect(text).toContain('0.15%')
+      expect(text).toContain('2.95%')
+      // 用户可见文本里不得出现未格式化尾数
+      expect(text).not.toContain('2.949999')
+      wrapper.unmount()
+    })
+
+    it('整数 pct 不补尾零，与设置页同一函数（formatQuotaPct）', async () => {
+      const wrapper = mountCardWithRow({
+        label: '智谱 GLM Coding Plan',
+        wins: [{ pct: 68, resetSec: 4980 }, { pct: 100, resetSec: 266400 }, { pct: null, resetSec: null }],
+      })
+      await flushPromises()
+
+      const text = wrapper.text()
+      expect(text).toContain('68%')
+      expect(text).toContain('100%')
+      expect(text).not.toContain('68.00%')
+      wrapper.unmount()
+    })
+  })
+
   describe('容量区零回归', () => {
     // [迁移来源] 原锚为平铺触发器按钮文字（决策 6 退役）——quota 环境下的容量显示回归宿主
     // 换为 ContextCapacityCard（聚合按钮本身无数值文本，数字在 hover 页卡内）。
