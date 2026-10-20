@@ -41,6 +41,8 @@ import type { SessionGroup, SessionSummary, ArchiveSummary } from '@taiji/shared
  * UI 层基于 items.length===MAX_SEARCH_RESULTS 判断是否显示截断提示。
  */
 const MAX_SEARCH_RESULTS = 5000
+/** 归档条目 sub 的用户消息预览截断长度（超过加省略号）。 */
+const ARCHIVE_SUMMARY_PREVIEW_LIMIT = 80
 /** 空查询时显示的建议命令数量（对齐 mock SEARCH_SUGGESTED_COUNT） */
 const SUGGESTED_COMMAND_COUNT = 3
 
@@ -208,7 +210,7 @@ export function useSearch(
       sub = ports.t('archive.summary.compressing')
     } else {
       const first = a.summary.turns[0]?.user ?? ''
-      sub = first.length > 0 ? (first.length > 80 ? `${first.slice(0, 80)}…` : first) : ports.t('archive.summary.empty')
+      sub = first.length > 0 ? (first.length > ARCHIVE_SUMMARY_PREVIEW_LIMIT ? `${first.slice(0, ARCHIVE_SUMMARY_PREVIEW_LIMIT)}…` : first) : ports.t('archive.summary.empty')
     }
     return { type: 'archive', title: a.name.length > 0 ? a.name : a.sessionId, sub, archive: a }
   }

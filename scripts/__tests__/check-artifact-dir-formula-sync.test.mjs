@@ -29,8 +29,6 @@ import {
   SHARED_VIEW_FN,
   SR_VIEW_FN_ANCHOR,
   SHARED_ARCHIVE_STATUS_CONST,
-  SHARED_TURN_INTERFACE,
-  MIRROR_TURN_INTERFACE,
   D7_LITERAL_CONSTS,
   compareTreeSegmentsShape,
   extractFunctionBlock,
@@ -43,8 +41,6 @@ import {
   extractViewTreeRootSegment,
   extractViewFileSegment,
   extractViewSessionIdRegex,
-  extractMirrorStatusLiterals,
-  extractInterfaceMembers,
   mirrorUsesSegmentConst,
 } from '../check-artifact-dir-formula-sync.mjs'
 import { expectGuardDirectRunPasses, makeGuardMirror } from './helpers/guard-mirror.mjs'
