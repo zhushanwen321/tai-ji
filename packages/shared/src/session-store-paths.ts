@@ -16,8 +16,11 @@
  *   - env 缺省形态（dataDir? 缺省 getDataDir()）只保留在 paths.ts，仅 runtime /
  *     main 进程合法消费（env 对完整：TAIJI_AGENT_PACKAGED + TAIJI_AGENT_DATA_DIR
  *     成对注入，C-proc-26）；
- *   - 机器门禁：scripts/bundle-extensions.mjs 扫 staged bundle，出现准入检查
- *     标记（assertNotLeakedProdDataDir / prod-admission guard）即构建失败。
+ *   - 机器门禁：scripts/bundle-extensions.mjs 扫 staged bundle，命中禁入标记即构建
+ *     失败（标记清单 SSOT = scripts/lib/pi-env-admission-gate.mjs 的
+ *     PI_ENV_ADMISSION_GUARD_MARKERS）。标记一律取「只可能出现在可执行代码里」的
+ *     字面量形态，因此本文件及全部 pi 子树源码的注释严禁逐字抄写标记——bundler
+ *     保留注释（legal-comments）时抄写即让合法 bundle 被误拦。
  */
 import { join } from 'node:path'
 
