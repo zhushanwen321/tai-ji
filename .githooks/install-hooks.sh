@@ -700,11 +700,12 @@ fi
 #     可见性的事实源，消费方（--model 解析 / rpc set_model / rename /
 #     smart-context / permission / scheduler / subagent 校验 / provider 对账）
 #     零改动即自动受益，新开注入点等于绕过单点。零第三方依赖，实测 ~0.1s
-#     （326 个源文件全仓扫描，随仓库线性增长）。复用 SKIP_EXTENSION_LINT
+#     （328 个非测试源文件，extensions/ 全量扫描、已排除测试目录，随仓库线性
+#     增长）。复用 SKIP_EXTENSION_LINT
 #     开关（与 2b-2e 扩展检查同族，不新增逃生口）。
 # ============================================================================
 
-if echo "$STAGED_FILES" | grep -qE "^extensions/.*\.ts$|^\.githooks/check_register_allowlist\.py$|^\.githooks/install-hooks\.sh$"; then
+if echo "$STAGED_FILES" | grep -qE "^extensions/.*\.(ts|mts|cts|js|mjs)$|^\.githooks/check_register_allowlist\.py$|^\.githooks/install-hooks\.sh$"; then
     print_section "[模型可见性投喂单点调用点白名单检查]"
 
     if [ "$SKIP_EXTENSION_LINT" != "1" ]; then

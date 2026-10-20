@@ -40,7 +40,8 @@ mock-backend.ts 的桩实现）与 structured-output `tests/mock-pi-fixture.ts`
   - 全仓扫描（不走 staged 过滤）——白名单是包粒度全集，与提交范围无关，
     确定性语义便于 CI 与本地同口径复跑。
 
-零第三方依赖（纯标准库）。实测 ~0.05s（655 个源文件全仓扫描）。
+零第三方依赖（纯标准库）。实测 ~0.1s（328 个非测试源文件，extensions/ 全量扫描，
+已排除 __tests__/ 与 tests/ 目录；含测试目录时为 661 个）。
 
 退出码: 0 通过 / 1 发现白名单外调用点
 """
@@ -115,7 +116,7 @@ def is_declaration(text: str, open_paren: int) -> bool:
     j = i + 1
     while j < n and text[j] in " \t\r\n":
         j += 1
-    return j < n and text[j] in ":"
+    return j < n and text[j] in ":{"
 
 
 def line_of(text: str, offset: int) -> int:
