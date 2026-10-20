@@ -457,6 +457,25 @@ describe('ComposerMetricsAggregate coding-plan 区', () => {
       wrapper.unmount()
     })
 
+    it('失败态兜底：有旧数据时余量三窗口行与失败提示并存（不再整体替换为失败文案）', async () => {
+      // 兜底语义：查询失败时最后成功余量（store 的 setError 恒保留旧 data）继续展示，
+      // 失败原因降级为一行提示——旧实现 v-if="error" 独占，一次失败即把余量行整个换掉
+      setupProviders([zhipuProvider])
+      const quotaStore = useQuotaStore()
+      quotaStore.setCache('zhipu', mockQuotaRow, 500)
+      quotaStore.setError('zhipu', 'panel.context.quotaFailNetwork')
+
+      const wrapper = await openPopover()
+      await flushPromises()
+
+      const bodyText = document.body.textContent ?? ''
+      // 余量行仍在：68% 来自 mockQuotaRow.wins[0].pct
+      expect(bodyText).toContain('68%')
+      // 失败提示并存（非二选一替换）
+      expect(bodyText).toContain('查询失败：panel.context.quotaFailNetwork')
+      wrapper.unmount()
+    })
+
     // ── D11（coding-plan-quota-config-ux §6.12）：失败态 footer 双入口 ──
 
     it('D11 失败态 footer 同时给「刷新」与「配置」；点「配置」触发 openSettings（死路给出路）', async () => {

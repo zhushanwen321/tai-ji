@@ -66,13 +66,15 @@
         >{{ matchedPresetLabel }}</span>
       </div>
 
-      <!-- 查询失败提示（B2：区分「从未查询」vs「查询失败」） -->
+      <!-- 查询失败提示（B2：区分「从未查询」vs「查询失败」）。与余量行并存而非整体替换：
+           最后成功余量恒保留在 quota store（provider 隔离），失败时兜底继续展示，
+           失败原因降级为数据上方的一行提示 -->
       <div v-if="error" class="py-1.5 text-center text-[10.5px] text-danger">
         {{ t('panel.context.queryFailed', { error }) }}
       </div>
 
-      <!-- 3 窗口行（4 列 grid） -->
-      <template v-else-if="quotaRow">
+      <!-- 3 窗口行（4 列 grid；有数据即渲染，含失败态兜底） -->
+      <template v-if="quotaRow">
         <div
           v-for="(win, idx) in visibleWindows"
           :key="idx"
@@ -98,8 +100,8 @@
         </div>
       </template>
 
-      <!-- 无数据时的占位 -->
-      <div v-else class="py-1.5 text-center text-[10.5px] text-neutral-dim">
+      <!-- 无数据且无失败时的占位 -->
+      <div v-else-if="!error" class="py-1.5 text-center text-[10.5px] text-neutral-dim">
         {{ isPending ? t('panel.context.quotaQuerying') : t('panel.context.noQuotaData') }}
       </div>
     </div>
