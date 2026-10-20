@@ -1,20 +1,22 @@
 /**
- * 归档启动自愈（session-archive 设计 D5 自愈六行表）——覆盖全部中间态：
+ * 归档启动自愈（session-archive 设计 D5 自愈七行表）——覆盖全部中间态：
  * archive/unarchive 态自动归位，purge 态保持可见可重试（破坏性动作只经用户显式触发）。
  *
  * | 启动时发现 | 判定 | 归位动作 |
  * |---|---|---|
  * | staging 簿记 + 明文 .jsonl 在归档目录 | 压缩未完成 | 重做后台压缩任务 |
+ * | staging 簿记 + 明文已删 + 压缩体 .zst 在场 | 压缩收尾窗口中断（明文删除后、簿记终态写入前崩溃） | 解压回明文位重做后台压缩任务 |
  * | `.restoring` 簿记 + sessions/ 原路径主文件已存在 | 恢复已完成（崩溃在删单元前） | 补删归档单元残余（含簿记） |
  * | `.restoring` 簿记 + 原路径主文件不存在 | 恢复未完成 | 簿记 rename 回 .archive.json，清理 sessions/ 下 .tmp 残留 |
  * | 归档目录内无簿记的孤儿文件 | 归档进行到一半 | 读孤儿明文首行 header 取 sessionId：sessions/ 无主文件 → 补写 staging 簿记；有 → 孤儿搬回原位 |
  * | 簿记在 + 归档物部分缺失 / 残树已删 | purge 进行到一半 | 条目保持可见（簿记在即列表在），不自动补删——重试 purge 幂等达终态 |
  * | sessions/ 与 archive/ 两树内 *.tmp 残留 | 压缩/解压中断 | 直接清理 |
  *
- * 独立模块的原因：六行表是纯磁盘事实驱动的恢复逻辑，与服务编排（三操作）变化原因
+ * 独立模块的原因：七行表是纯磁盘事实驱动的恢复逻辑，与服务编排（三操作）变化原因
  * 不同；经 HealContext 注入压缩任务派发口（服务持有在途任务表），不自持状态。
  */
-import { existsSync, readdirSync, renameSync, rmSync, statSync, unlinkSync, writeFileSync } from 'node:fs'
+import { existsSync, readdirSync, readFileSync, renameSync, rmSync, statSync, unlinkSync, writeFileSync } from 'node:fs'
+import { zstdDecompressSync } from 'node:zlib'
 import { join } from 'node:path'
 import { encodeCwd } from '@taiji/shared/paths'
 import type { ArchiveLedger, ArchiveLedgerStaging } from '@taiji/shared'
@@ -31,6 +33,8 @@ import {
   existingSidecars,
   scanLedgers,
   sessionOriginalPath,
+  tmpPathOf,
+  writeLedgerAtomic,
 } from './archive-paths.js'
 
 /** 自愈上下文（服务组装注入——压缩任务经在途任务表派发，归位动作共享 warn 通道）。 */
@@ -48,10 +52,12 @@ export interface HealContext {  // oe-exempt:20261020:wip:归档域内部形态�
  */
 export async function healArchiveOnStartup(ctx: HealContext): Promise<void> {
   const located = scanLedgers(ctx.archiveRoot, ctx.warn)
-  // 行 1：staging 簿记 + 明文在 → 重做压缩任务。
+  // 行 1/1b：staging 簿记归位——明文在 → 重做压缩任务；明文不在 + 压缩体在（压缩收尾
+  // 窗口中断）→ 先解压回明文位再重做压缩任务。
   for (const l of located) {
     if (l.restoring || l.ledger.status !== 'staging') continue
-    if (!existsSync(archivePlainMainPath(l.unitDir, l.ledger.originalFile))) continue
+    const plainPath = archivePlainMainPath(l.unitDir, l.ledger.originalFile)
+    if (!existsSync(plainPath) && !restorePlainFromCompressed(ctx, l, plainPath)) continue
     try {
       await ctx.queueCompression(l.ledger, l.unitDir)
     } catch (e: unknown) {
@@ -99,6 +105,43 @@ function healRestoringLedger(ctx: HealContext, l: LocatedLedger): void {
   } catch (e: unknown) {
     ctx.warn(`[archive-self-heal] .restoring 归位失败（下次启动重试）(sessionId=${l.ledger.sessionId}): ${toMessage(e)}`)
   }
+}
+
+/**
+ * 行 1b：压缩收尾窗口中间态归位（staging 簿记 + 明文已删 + 压缩体在场）——崩溃落在
+ * runCompression 的 unlinkSync(明文) 与簿记终态写入之间。归位 = 解压压缩体回明文位
+ * （tmp+rename 原子写：写中途崩溃残留 `.jsonl.tmp` 由行 6 清收、下次启动重跑本行），
+ * 成功后由调用方重做压缩任务——摘要与校验值经生产链重算，簿记终态字段不降级。
+ *
+ * 判定边界：压缩体也不在 = 行 5 形态（归档物部分缺失），返回 false 保持条目可见可重试。
+ * staging 簿记无 sha256 可校验，损坏压缩体可能解出部分内容——解压/写盘失败时保持
+ * staging 原样（不半途改写簿记），失败显式 warn 出声。
+ *
+ * 返回 true = 明文已回场（调用方继续重做压缩）；false = 保持原状（条目仍 staging）。
+ */
+function restorePlainFromCompressed(ctx: HealContext, l: LocatedLedger, plainPath: string): boolean {
+  const compressedPath = archiveCompressedPath(l.unitDir, l.ledger.originalFile)
+  if (!existsSync(compressedPath)) return false
+  const tmp = tmpPathOf(plainPath)
+  try {
+    const restored = zstdDecompressSync(readFileSync(compressedPath))
+    try {
+      writeFileSync(tmp, restored)
+      renameSync(tmp, plainPath)
+    } catch (e: unknown) {
+      try {
+        unlinkSync(tmp)
+      } catch {
+        void 0 // 清理失败不掩盖原错误
+      }
+      throw e
+    }
+  } catch (e: unknown) {
+    ctx.warn(`[archive-self-heal] 行1b 解压回明文位失败（条目保持 staging，下次启动重试）(sessionId=${l.ledger.sessionId}): ${toMessage(e)}`)
+    return false
+  }
+  ctx.warn(`[archive-self-heal] 行1b 压缩收尾窗口中间态归位：明文已回场，重做压缩任务 (sessionId=${l.ledger.sessionId})`)
+  return true
 }
 
 /**
@@ -171,7 +214,7 @@ function moveOrphanBackToOriginal(
   }
 }
 
-/** 行 4 分支 B：归档已生效——补写 staging 簿记（一次性写，目标不存在无原子覆盖需求）。 */
+/** 行 4 分支 B：归档已生效——补写 staging 簿记（写侧走 writeLedgerAtomic 单点原语）。 */
 function writeOrphanStagingLedger(
   ctx: HealContext,
   unitDir: string,
@@ -191,15 +234,16 @@ function writeOrphanStagingLedger(
       status: 'staging',
       summary: null,
     }
-    // 一次性写（目标不存在，无原子覆盖需求；格式与 writeLedgerAtomic 一致）。
-    writeFileSync(ledgerPath, `${JSON.stringify(staging, null, HEAL_LEDGER_INDENT)}\n`)
+    // 原子写（tmp+rename，archive-paths 单点原语）——补写目标是新文件，但半截簿记
+    // 会让 scanLedgers parse 失败跳过、条目不可见需人工处置，原子性照常必要（C-data-11）。
+    writeLedgerAtomic(ledgerPath, staging)
     ctx.warn(`[archive-self-heal] 行4 补写 staging 簿记（按完成归档处理）(sessionId=${header.id})`)
   } catch (e: unknown) {
     ctx.warn(`[archive-self-heal] 行4 补写簿记失败（下次启动重试）: ${ledgerPath}: ${toMessage(e)}`)
   }
 }
 
-/** 行 6：两树内 *.tmp 残留清理（压缩 `.zst.tmp` / 解压 `.jsonl.tmp` 的中断兜底）。 */
+/** 行 6：两树内 *.tmp 残留清理（压缩 `.zst.tmp` / 解压与行 1b `.jsonl.tmp` / 簿记 `.archive.json.tmp` 的中断兜底）。 */
 function cleanupTmpResidues(ctx: HealContext): void {
   for (const root of [ctx.archiveRoot, ctx.sessionsRoot]) {
     for (const dir of listDirs(root)) {
@@ -216,9 +260,6 @@ function cleanupTmpResidues(ctx: HealContext): void {
     }
   }
 }
-
-/** 簿记 JSON 缩进（与 archive-service writeLedgerAtomic 的写入形态一致）。 */
-const HEAL_LEDGER_INDENT = 2
 
 // ── helpers ───────────────────────────────────────────────────────────────────
 

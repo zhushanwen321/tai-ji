@@ -1,6 +1,7 @@
 /**
- * 归档单元路径派生（session-archive 设计 D1 镜像布局）——纯路径函数 + 簿记扫描，
- * 无 IO 副作用（扫描只读）。
+ * 归档单元路径派生（session-archive 设计 D1 镜像布局）——纯路径函数 + 簿记扫描 +
+ * 簿记原子写原语。扫描只读；写侧收敛为本模块唯一簿记写入口（writeLedgerAtomic，
+ * C-data-11 对齐——服务与自愈两消费方不再各自手写 tmp+rename）。
  *
  * 归档根 `<agentDir>/archive/` 与 sessions/ 平级（getArchiveDir），内部镜像 sessions
  * 布局：`archive/<encodeCwd>/<原主文件名>…`；附件三目录按显式映射（源在 ext-sessions
@@ -17,9 +18,10 @@
  * ```
  *
  * tmp 约定（D5：tmp+rename 原子范式）：一切中间产物 = 目标路径 + '.tmp'（压缩体
- * `.zst.tmp` / 恢复与 purge 解压 `.jsonl.tmp`），自愈表按 `*.tmp` 统一清收。
+ * `.zst.tmp` / 恢复与 purge 解压 `.jsonl.tmp` / 簿记 `.archive.json.tmp`），自愈表按
+ * `*.tmp` 统一清收。
  */
-import { existsSync, readdirSync, readFileSync } from 'node:fs'
+import { existsSync, readdirSync, readFileSync, renameSync, unlinkSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { encodeCwd, getAttachmentsDir, getImageCacheDir, getSessionArtifactsDir, getSessionStoreDir } from '@taiji/shared/paths'
 import type { ArchiveLedger } from '@taiji/shared'
@@ -27,9 +29,9 @@ import { parseArchiveLedger } from '@taiji/shared'
 import { getArchiveDir } from '../../infra/pi/pi-paths.js'
 
 /**
- * 六类旁挂后缀（与 session-lifecycle purgeSessionSidecars 的 pi 树内 6 段对齐——
- * 归档搬移面 = delete 清理面，两清单漂移即旁挂丢失/残留）。新增 sidecar 后缀时
- * 与该清理点同步。
+ * 六类旁挂后缀（词表 SSOT，runtime 单点）：归档搬移（existingSidecars）与 delete
+ * 清理（session-lifecycle purgeSessionSidecars）两侧消费同一常量——归档搬移面 =
+ * delete 清理面，新增 sidecar 后缀只改本清单，两消费方无漂移窗口。
  */
 export const SESSION_SIDECAR_EXTS: readonly string[] = [
   '.meta.json',
@@ -90,6 +92,34 @@ export function archiveAssetDomainDir(unitDir: string, sessionId: string, domain
 /** tmp 中间产物（目标路径 + '.tmp'——压缩/解压原子范式的统一后缀约定）。 */
 export function tmpPathOf(targetPath: string): string {
   return `${targetPath}.tmp`
+}
+
+/** 簿记 JSON 缩进（明文可读性——与 session 侧 sidecar 写入形态一致的两空格）。 */
+const LEDGER_JSON_INDENT = 2
+
+/**
+ * 簿记原子写入（tmp+rename 范式）——archive 域唯一簿记写入口（C-data-11 SSOT 对齐；
+ * 服务三写点与自愈补写共用本原语）。
+ *
+ * C-data-11 豁免声明（不消费 utils/fs-utils atomicWrite 的理由）：本域 tmp 约定 =
+ * 目标 + '.tmp'（tmpPathOf），自愈行 6 按 `*.tmp` 后缀统一清收两树残留——固定后缀使
+ * 崩溃残留（写中途进程死亡）落进该清理族；fs-utils 的 pid+序号后缀（`.tmp_<pid>_<seq>`）
+ * 不以 `.tmp` 结尾，逃逸该族。失败路径清理对齐 atomicWrite 的 catch-unlink 语义：
+ * write/rename 失败删 tmp 再原样上抛，重试调用方拿到的错误语义不变。
+ */
+export function writeLedgerAtomic(ledgerPath: string, ledger: ArchiveLedger): void {
+  const tmp = tmpPathOf(ledgerPath)
+  try {
+    writeFileSync(tmp, `${JSON.stringify(ledger, null, LEDGER_JSON_INDENT)}\n`)
+    renameSync(tmp, ledgerPath)
+  } catch (e: unknown) {
+    try {
+      unlinkSync(tmp)
+    } catch {
+      void 0 // 清理失败不掩盖原错误
+    }
+    throw e
+  }
 }
 
 // ── 簿记扫描（只读；列表 = 扫描派生，不建独立索引，D3）─────────────────────────

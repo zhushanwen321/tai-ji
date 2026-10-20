@@ -1489,10 +1489,18 @@ async function main(): Promise<void> {
     trashDirectory: (dirPath) => sessionStore.trashDirectory(dirPath),
     invalidateScanCache: () => sessionStore.invalidateScanCache(),
     broadcastSessionList: () => server.broadcastSessionList(),
-    getSessionSummary: (sid) => sessionService.getSummary(sid),
+    // unarchive reply 的 SessionSummary 读回：活跃 Map（getSummary）优先；恢复态
+    // （非活跃）session 走持久化扫描侧构造——unarchive 不 spawn pi、不进 lifecycle
+    // Map（Map 装载唯一入口 = create/restore/fork），只接 getSummary 时恢复后必然
+    // 读不到，unarchive 恒以「恢复完成但读回失败」失败。扫描腿复用
+    // listPersistedSessions 的合并链（活跃优先 + 磁盘扫描），runUnarchive 步骤 7
+    // invalidateScanCache 后扫描即含刚回场的恢复文件。
+    getSessionSummary: (sid) =>
+      sessionService.getSummary(sid) ??
+      sessionService.listPersistedSessions().flatMap((g) => g.sessions).find((s) => s.id === sid),
     warn: (message) => console.warn(message),
   })
-  // 启动自愈（D5 六行表）：listen 前完成——归位先于任何归档域 RPC 到达（.restoring 回滚 /
+  // 启动自愈（D5 七行表）：listen 前完成——归位先于任何归档域 RPC 到达（.restoring 回滚 /
   // 孤儿补簿记等同步段无 RPC 竞态窗口）；重做压缩经 service 在途任务表串行化，即便慢也
   // 不影响后续同 session RPC 的正确性。staging 重压缩在大文件上可达秒级，仅崩溃残留场景
   // 出现，正常启动为纯归档根扫描。

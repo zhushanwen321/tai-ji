@@ -12,20 +12,21 @@
  *
  * D9 转移表穷举单测（generateTableTests 18 组合）在 archive-entry-machine.test.ts
  * （基建包 M1 交付，testCommand 同被 `vitest run archive` 命中）；cascade 引用枚举
- * 源入参扩展的分支断言三组在 session-content-cascade-archive.test.ts；自愈六行在
+ * 源入参扩展的分支断言三组在 session-content-cascade-archive.test.ts；自愈七行在
  * archive-self-heal.test.ts。
  *
  * 运行：cd packages/runtime && npx vitest run src/services/archive/archive-service.test.ts
  */
 import { describe, it, expect, afterEach } from 'vitest'
 import { createHash } from 'node:crypto'
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, renameSync, rmSync, statSync, utimesSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, renameSync, rmSync, statSync, utimesSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
-import { join } from 'node:path'
+import { basename, join } from 'node:path'
 import { zstdDecompressSync } from 'node:zlib'
 import type { SessionSummary } from '@taiji/shared'
 import { encodeCwd } from '@taiji/shared/paths'
 import { subscribeSessionDeathDisposition, fireDeathDisposition } from '../session/session-lifecycle.js'
+import { extractSessionName, parseSessionHeader } from '../../infra/pi/session-file-utils.js'
 import { ArchiveError, ArchiveService, type ArchiveServiceDeps } from './archive-service.js'
 
 // ── fixture ───────────────────────────────────────────────────────────────────
@@ -105,7 +106,11 @@ function makeFixture(): Fixture {
     },
     invalidateScanCache: () => { calls.push('invalidateScan') },
     broadcastSessionList: () => { calls.push('broadcast') },
-    getSessionSummary: (sid) => summaries.get(sid),
+    // 读回链真实化（生产接线语义，index.ts 组装根同构）：活跃 summaries Map 优先
+    // （模拟 sessionService.getSummary 的 lifecycle Map 读取），miss 走持久化扫描侧
+    // 构造（扫 sessions/ 树按 header.id 定位 + 名称尾读）——恢复态（非活跃）session
+    // 的 summary 从磁盘真实读回，禁 canned 注入形态掩盖读回链断裂。
+    getSessionSummary: (sid) => summaries.get(sid) ?? scanPersistedSummary(sessionsRoot, sid),
     warn: (message) => { warnings.push(message) },
   }
   const service = new ArchiveService(deps, { dataDir, archiveRoot, agentDir, sessionsRoot })
@@ -158,6 +163,37 @@ function summaryOf(sid: string, cwd: string): SessionSummary {
     modelId: '',
     tokenCount: 0,
   }
+}
+
+/**
+ * 持久化扫描侧 summary 构造（fixture 读回链的磁盘腿——镜像 SessionScanner.listAll
+ * 持久化路径的最小形态：扫 sessions/ 桶按 header.id 定位 + extractSessionName 尾读
+ * 取名 + 主文件 mtime 排序键）。生产接线 = index.ts 组装根 listPersistedSessions 合并链。
+ */
+function scanPersistedSummary(sessionsRoot: string, sid: string): SessionSummary | undefined {
+  if (!existsSync(sessionsRoot)) return undefined
+  for (const bucket of readdirSync(sessionsRoot, { withFileTypes: true })) {
+    if (!bucket.isDirectory()) continue
+    const dir = join(sessionsRoot, bucket.name)
+    for (const file of readdirSync(dir)) {
+      if (!file.endsWith('.jsonl')) continue
+      const filePath = join(dir, file)
+      const header = parseSessionHeader(filePath)
+      if (header === null || header.id !== sid || header.cwd === undefined) continue
+      return {
+        id: sid,
+        label: extractSessionName(filePath) ?? basename(header.cwd),
+        cwd: header.cwd,
+        status: 'idle',
+        lastActiveAt: statSync(filePath).mtimeMs,
+        modelId: '',
+        tokenCount: 0,
+        source: 'scan',
+        sessionFile: filePath,
+      }
+    }
+  }
+  return undefined
 }
 
 function sha256Hex(buf: Buffer): string {
@@ -379,6 +415,26 @@ describe('ArchiveService.unarchive', () => {
     expect(readFileSync(mainPath).equals(original)).toBe(true)
   })
 
+  it('真实读回链：恢复态（非活跃）session 从磁盘扫描侧构造 summary（不注入活跃读回）', async () => {
+    // unarchive 不 spawn pi、不进 lifecycle Map（Map 装载唯一入口 = create/restore/fork）——
+    // 恢复后的 session 只存在于磁盘。本用例不调 setSummary（活跃 Map 恒空），reply 的
+    // SessionSummary 必须经磁盘扫描腿真实读回：sessionFile 指向回场原路径、名称从恢复
+    // 文件 session_info 尾读提取（与生产 listPersistedSessions 合并链同语义）。
+    const f = makeFixture()
+    const sid = 'sess-rrrr11'
+    const mainPath = f.writeMainFile(sid, CWD_A)
+    f.registerScanned(sid, CWD_A, mainPath)
+    await archiveAndCompress(f, sid)
+
+    const reply = await f.service.unarchive(sid)
+
+    expect(reply.session.id).toBe(sid)
+    expect(reply.session.cwd).toBe(CWD_A)
+    expect(reply.session.label).toBe(`会话-${sid}`)
+    expect(reply.session.source).toBe('scan')
+    expect(reply.session.sessionFile).toBe(mainPath)
+  })
+
   it('冲突检测前置：原路径已存在同名主文件 → archive_restore_conflict，簿记归位、原件不动', async () => {
     const f = makeFixture()
     const sid = 'sess-cccc99'
@@ -466,8 +522,39 @@ describe('ArchiveService.purgeArchive', () => {
     expect(existsSync(mainPath)).toBe(true)
   })
 
-  it('keep-all 保守分支：压缩体损坏 → 引用枚举源缺失 → subagents 整域保留 + reply 携带 keptSubagentsDir', async () => {
+  it('staging + 压缩体残留（压缩收尾窗口形态）：purge mainCandidates 补处置压缩体（防永久孤儿）', async () => {
     const f = makeFixture()
+    const sid = 'sess-tail66'
+    const mainPath = f.writeMainFile(sid, CWD_A)
+    f.registerScanned(sid, CWD_A, mainPath)
+    await archiveAndCompress(f, sid)
+    // 手工构造压缩收尾窗口磁盘形态（未经自愈）：明文已删 + 压缩体在场 + 簿记改回 staging。
+    const unitDir = join(f.archiveRoot, ENC_A)
+    const plain = join(unitDir, `2026-10-20T00-00-00-000Z_${sid}.jsonl`)
+    rmSync(plain, { force: true })
+    const archived = readJson(join(unitDir, `2026-10-20T00-00-00-000Z_${sid}.jsonl.archive.json`))
+    const stagingLedger = {
+      sessionId: archived.sessionId,
+      name: archived.name,
+      originalFile: archived.originalFile,
+      cwd: archived.cwd,
+      archivedAt: archived.archivedAt,
+      rawBytes: archived.rawBytes,
+      status: 'staging',
+      summary: null,
+    }
+    const ledgerPath = join(unitDir, `2026-10-20T00-00-00-000Z_${sid}.jsonl.archive.json`)
+    writeFileSync(ledgerPath, `${JSON.stringify(stagingLedger, null, 2)}\n`)
+
+    await f.service.purgeArchive(sid)
+
+    // staging 分支补压缩体候选：明文（已缺，存在性跳过）+ 压缩体都进处置，簿记消失达终态。
+    const compressedPath = join(unitDir, `2026-10-20T00-00-00-000Z_${sid}.jsonl.zst`)
+    expect(f.trashed).toContain(compressedPath)
+    expect(existsSync(ledgerPath)).toBe(false)
+  })
+
+  it('keep-all 保守分支：压缩体损坏 → 引用枚举源缺失 → subagents 整域保留 + reply 携带 keptSubagentsDir', async () => {    const f = makeFixture()
     const sid = 'sess-kkkk44'
     const mainPath = f.writeMainFile(sid, CWD_A)
     f.registerScanned(sid, CWD_A, mainPath)

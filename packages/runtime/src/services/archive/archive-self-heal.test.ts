@@ -1,5 +1,5 @@
 /**
- * 归档启动自愈六行表单测（session-archive 设计 D5 自愈清单）。
+ * 归档启动自愈七行表单测（session-archive 设计 D5 自愈清单）。
  *
  * 每行一用例（构造该中间态的磁盘事实 → healArchiveOnStartup → 断言归位动作）；
  * 压缩任务派发口经 HealContext 注入 spy（自愈只负责判定与归位，压缩执行属服务）。
@@ -10,6 +10,7 @@ import { describe, it, expect, afterEach } from 'vitest'
 import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
+import { zstdCompressSync } from 'node:zlib'
 import { encodeCwd } from '@taiji/shared/paths'
 import type { ArchiveLedgerStaging } from '@taiji/shared'
 import { healArchiveOnStartup } from './archive-self-heal.js'
@@ -91,7 +92,7 @@ function writePlainMain(f: HealFixture, content: string): string {
   return p
 }
 
-describe('启动自愈六行表（D5）', () => {
+describe('启动自愈七行表（D5）', () => {
   it('行 1：staging 簿记 + 明文在归档目录 → 重做后台压缩任务', async () => {
     const f = makeFixture()
     f.writeLedger(`${MAIN}.archive.json`, stagingLedger())
@@ -100,6 +101,47 @@ describe('启动自愈六行表（D5）', () => {
     await f.heal()
 
     expect(f.compressed).toEqual(['sess-heal01'])
+  })
+
+  it('行 1b：staging 簿记 + 明文已删 + 压缩体在场（压缩收尾窗口中断）→ 解压回明文位重做压缩', async () => {
+    const f = makeFixture()
+    f.writeLedger(`${MAIN}.archive.json`, stagingLedger())
+    // 崩溃形态构造：runCompression 的 unlinkSync(明文) 已执行、簿记终态未写。
+    const plainContent = `${JSON.stringify({ type: 'session', id: 'sess-heal01', cwd: CWD })}\n${'{"type":"session_info","name":"自愈测试"}'}`
+    writeFileSync(join(f.unitDir, `${MAIN}.zst`), zstdCompressSync(Buffer.from(plainContent)))
+
+    await f.heal()
+
+    // 明文回场（内容与压缩体一致）+ 压缩任务重新派发。
+    expect(existsSync(join(f.unitDir, MAIN))).toBe(true)
+    expect(readFileSync(join(f.unitDir, MAIN), 'utf8')).toBe(plainContent)
+    expect(f.compressed).toEqual(['sess-heal01'])
+    // 解压中间 tmp 不残留（行 6 前已 rename 消费）。
+    expect(existsSync(join(f.unitDir, `${MAIN}.tmp`))).toBe(false)
+  })
+
+  it('行 1b：明文与压缩体都缺（归档物部分缺失）→ 行 5 形态，条目保持可见不派发压缩', async () => {
+    const f = makeFixture()
+    f.writeLedger(`${MAIN}.archive.json`, stagingLedger())
+
+    await f.heal()
+
+    expect(f.compressed).toEqual([])
+    expect(existsSync(join(f.unitDir, `${MAIN}.archive.json`))).toBe(true)
+  })
+
+  it('行 1b：压缩体损坏不可解压 → 保持 staging 原样（不半途改写簿记），warn 出声', async () => {
+    const f = makeFixture()
+    f.writeLedger(`${MAIN}.archive.json`, stagingLedger())
+    const ledgerPath = join(f.unitDir, `${MAIN}.archive.json`)
+    const ledgerBefore = readFileSync(ledgerPath, 'utf8')
+    writeFileSync(join(f.unitDir, `${MAIN}.zst`), Buffer.from('corrupt-not-zstd-body'))
+
+    await f.heal()
+
+    expect(f.compressed).toEqual([])
+    expect(readFileSync(ledgerPath, 'utf8')).toBe(ledgerBefore)
+    expect(f.warnings.some((w) => w.includes('行1b'))).toBe(true)
   })
 
   it('行 2：.restoring 簿记 + sessions/ 原路径主文件已存在 → 补删归档单元残余（含簿记）', async () => {

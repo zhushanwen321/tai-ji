@@ -111,6 +111,6 @@ session 存储域（SessionLifecycle 写、SessionScanner 读、文件系统为�
 | restoring | restore_rollback_to_archived | archived | 冲突/校验失败回滚（原态 = archived 支） |
 | staging \| archived | purge | （消亡） | 彻底删除——`to: null` |
 
-状态判定唯一权威 = 读磁盘（无簿记 = 无单元；status 字段 = staging / archived；`.restoring` 后缀 = restoring）。同 session 的归档域操作（后台压缩任务 / unarchive / purgeArchive）按到达顺序串行执行，后到者对已消失归档单元按簿记存在性门 fail-fast（`archive_not_found`，拒绝时零副作用）；操作中途崩溃由启动自愈归位（六行表覆盖全部中间态：archive / unarchive 态自动归位，purge 态簿记保持可见、重试幂等达终态）。
+状态判定唯一权威 = 读磁盘（无簿记 = 无单元；status 字段 = staging / archived；`.restoring` 后缀 = restoring）。同 session 的归档域操作（后台压缩任务 / unarchive / purgeArchive）按到达顺序串行执行，后到者对已消失归档单元按簿记存在性门 fail-fast（`archive_not_found`，拒绝时零副作用）；操作中途崩溃由启动自愈归位（七行表覆盖全部中间态，含压缩收尾窗口〔明文已删 + 压缩体在场 + 簿记仍 staging〕：archive / unarchive 态自动归位，purge 态簿记保持可见、重试幂等达终态）。
 
 **唯一入口**：全部归档操作经三条 WS RPC（`session.archive` / `session.unarchive` / `session.purgeArchive`，分发表挂 session 域，命名避开已承载「重开 dead session」语义的 `session.restore`）；彻底删除复用 session 删除级联原语（cascadeDeleteSessionContent + 引用枚举源入参扩展），不自建删除清单。

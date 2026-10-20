@@ -13,7 +13,7 @@
  *
  * 失败语义：领域错误抛 ArchiveError（code ∈ ARCHIVE_ERROR_CODES，u-rpc-wiring 转
  * error envelope）；IO 失败映射 archive_io_error；操作中途崩溃由启动自愈归位
- * （archive-self-heal.ts，六行表覆盖全部中间态）。
+ * （archive-self-heal.ts，七行表覆盖全部中间态）。
  */
 import { createHash } from 'node:crypto'
 import { existsSync, mkdirSync, readFileSync, renameSync, rmSync, statSync, unlinkSync, writeFileSync } from 'node:fs'
@@ -45,6 +45,7 @@ import {
   scanLedgers,
   sessionOriginalPath,
   tmpPathOf,
+  writeLedgerAtomic,
 } from './archive-paths.js'
 
 /** 归档域领域错误（code 词表 = shared ARCHIVE_ERROR_CODES；u-rpc-wiring 按 code 转 envelope）。 */
@@ -314,7 +315,7 @@ export class ArchiveService {
       summary: null,
     }
     try {
-      this.writeLedgerAtomic(archiveLedgerPath(unitDir, originalFile), stagingLedger)
+      writeLedgerAtomic(archiveLedgerPath(unitDir, originalFile), stagingLedger)
     } catch (e: unknown) {
       throw new ArchiveError('archive_io_error', `归档簿记写入失败 (sessionId=${sessionId}): ${toMessage(e)}`)
     }
@@ -371,7 +372,7 @@ export class ArchiveService {
       writeFileSync(tmpPath, compressed)
       renameSync(tmpPath, compressedPath)
       unlinkSync(plainPath)
-      this.writeLedgerAtomic(archiveLedgerPath(unitDir, ledger.originalFile), {
+      writeLedgerAtomic(archiveLedgerPath(unitDir, ledger.originalFile), {
         ...ledger,
         status: 'archived',
         codec: CODEC_ZSTD_3,
@@ -596,7 +597,12 @@ export class ArchiveService {
     // 步骤 6：归档物处置（最后——簿记殿后；全部前置存在性检查，幂等重试不卡死）。
     const compressedPath = archiveCompressedPath(unitDir, ledger.originalFile)
     const plainPath = archivePlainMainPath(unitDir, ledger.originalFile)
-    const mainCandidates = ledger.status === 'archived' ? [compressedPath] : [plainPath]
+    // staging 分支补压缩体候选：压缩收尾窗口崩溃形态（明文已删 + 压缩体在场 + 簿记仍
+    // staging）若未被启动自愈行 1b 归位（如崩溃前条目从未被重扫），purge 重试须能处置
+    // 该残留压缩体，防永久孤儿（disposeArchiveUnit 对缺席候选存在性跳过，正常 staging
+    // 形态零行为变化）。
+    const mainCandidates =
+      ledger.status === 'archived' ? [compressedPath] : [plainPath, compressedPath]
     await this.disposeArchiveUnit(unitDir, ledger, { trashMain: true, mainCandidates })
 
     // 步骤 7：广播 + reply（keep-all 保守保留说明——判据 referenceScan === 'failed'）。
@@ -690,11 +696,7 @@ export class ArchiveService {
 
   // ── 簿记原子写入（tmp+rename 范式）───────────────────────────────────────────
 
-  private writeLedgerAtomic(ledgerPath: string, ledger: ArchiveLedger): void {
-    const tmp = tmpPathOf(ledgerPath)
-    writeFileSync(tmp, `${JSON.stringify(ledger, null, LEDGER_INDENT)}\n`)
-    renameSync(tmp, ledgerPath)
-  }
+  // 写原语 = archive-paths.writeLedgerAtomic（C-data-11 单点；本文件不再手写 tmp+rename）。
 
   /**
    * 归档列表（config.archives 响应数据源，D5）：扫描归档根下全部 `.archive.json` 簿记
@@ -711,7 +713,7 @@ export class ArchiveService {
       })
   }
 
-  /** 自愈入口（启动时组合根调用一次；六行表见 archive-self-heal.ts）。 */
+  /** 自愈入口（启动时组合根调用一次；七行表见 archive-self-heal.ts）。 */
   async healOnStartup(): Promise<void> {
     await healArchiveOnStartup({
       archiveRoot: this.archiveRoot,
@@ -728,9 +730,6 @@ export class ArchiveService {
 function rollbackEventOf(state: 'staging' | 'archived'): 'restore_rollback_to_staging' | 'restore_rollback_to_archived' {
   return state === 'staging' ? 'restore_rollback_to_staging' : 'restore_rollback_to_archived'
 }
-
-/** 簿记 JSON 缩进（明文可读性——与 session 侧 sidecar 写入形态一致的两空格）。 */
-const LEDGER_INDENT = 2
 
 function sha256Hex(buf: Buffer): string {
   return createHash('sha256').update(buf).digest('hex')
