@@ -58,6 +58,13 @@ jobs:
           fi
           echo "No .changeset/pre.json — stable release mode confirmed."
 
+      # state-machine 新包构建入口（C-proc-11 三要素补齐）：extension-protocol 的
+      # runtime dependency（发布闭包最上游），First release changeset 已登记——
+      # publish 前磁盘无 dist 会发出坏包（files 幽灵条目，surface guard 连坐拦截）。
+      # 构建顺序必须在 extension-protocol 之前。
+      - name: Build state-machine
+        run: pnpm --filter @zhushanwen/state-machine build
+
       - name: Build extension-protocol
         run: pnpm --filter @zhushanwen/extension-protocol build
 
@@ -137,6 +144,7 @@ jobs:
           echo "Published all packages with pending changesets to npm." >> "$GITHUB_STEP_SUMMARY"
           echo "" >> "$GITHUB_STEP_SUMMARY"
           echo "This includes:" >> "$GITHUB_STEP_SUMMARY"
+          echo "- \`@zhushanwen/state-machine\` (builds dist)" >> "$GITHUB_STEP_SUMMARY"
           echo "- \`@zhushanwen/extension-protocol\` (builds dist)" >> "$GITHUB_STEP_SUMMARY"
           echo "- \`@zhushanwen/session-delivery\` (builds dist)" >> "$GITHUB_STEP_SUMMARY"
           echo "- \`@zhushanwen/session-core\` (builds dist)" >> "$GITHUB_STEP_SUMMARY"
