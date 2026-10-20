@@ -30,6 +30,11 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 // staged 特殊资产目录单一登记表（MF-1-17）：与 bundle-extensions.mjs 共读同一登记处，
 // 契约与条目动机见该模块注释——本脚本不得另持字面量表
 import { PACKAGE_ASSET_DIRS } from "./lib/staged-asset-dirs.mjs";
+// C-ext-31 门禁（pi 子树 bundle 禁含 C-proc-26 准入检查代码），单一实现
+import {
+	assertNoPiEnvAdmissionGuard,
+	collectPiEnvAdmissionGuardViolations,
+} from "./lib/pi-env-admission-gate.mjs";
 
 const REPO_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 
@@ -320,6 +325,14 @@ async function main() {
 	assertStagedDirExists();
 	const pkgDirs = await listStagedPackageDirs();
 	assertPackageSetMatchesSSOT(pkgDirs);
+
+	// C-ext-31 门禁：pi 子树 bundle 禁含 @taiji/shared 的 C-proc-26 准入检查代码
+	// （打包态 pi 进程没有 TAIJI_AGENT_PACKAGED，进入 bundle 即 session_start 装配
+	// 失败、subagent 全灭）。bundle 时已拦一道，postbuild 逐平台产物再拦一道。
+	assertNoPiEnvAdmissionGuard(
+		await collectPiEnvAdmissionGuardViolations([STAGED]),
+		"[verify-staged] staged bundle 门禁红灯：",
+	);
 
 	console.log(`=== verify-staged-extensions ===`);
 	console.log(`staged: ${STAGED}`);

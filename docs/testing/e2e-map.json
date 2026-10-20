@@ -2544,15 +2544,25 @@
     },
     {
       "id": "E2E-PIPE-15",
-      "summary": "verify-staged-extensions：打包 staged 资产完整性检查脚本轨（bundle 清单 + staged 扩展/引擎存在性，缺失即 fail-fast）",
+      "summary": "verify-staged-extensions：打包 staged 资产完整性检查脚本轨（bundle 清单 + staged 扩展/引擎存在性 + pi-env admission 门禁（C-ext-31：staged bundle 禁含 C-proc-26 准入检查代码），缺失即 fail-fast）",
       "scope": [
-        "scripts/verify-staged-extensions.mjs"
+        "scripts/verify-staged-extensions.mjs",
+        "scripts/lib/pi-env-admission-gate.mjs",
+        "scripts/__tests__/pi-env-admission-gate.test.mjs"
       ],
       "layer": "L1",
       "assets": [
         {
           "kind": "script",
           "ref": "scripts/verify-staged-extensions.mjs"
+        },
+        {
+          "kind": "script",
+          "ref": "scripts/lib/pi-env-admission-gate.mjs"
+        },
+        {
+          "kind": "script",
+          "ref": "scripts/__tests__/pi-env-admission-gate.test.mjs"
         }
       ],
       "trigger": "on-diff",
@@ -2560,7 +2570,7 @@
       "run": "node scripts/verify-staged-extensions.mjs",
       "owner": "scripts/",
       "authority": "docs/TEST-STRATEGY.md#e2e-资产归宿纪律三态-r1r2r3",
-      "note": "R2 态：真实运行形态 = apps/electron build:pre 与 scripts/postbuild-validate.sh 自动调用（打包前置门）；改动本脚本须本地跑通——无 staged 产物时报错属预期失败形态，先跑 node scripts/bundle-extensions.mjs 再验"
+      "note": "R2 态：真实运行形态 = apps/electron build:pre 与 scripts/postbuild-validate.sh 自动调用（打包前置门）；改动本脚本须本地跑通——无 staged 产物时报错属预期失败形态，先跑 node scripts/bundle-extensions.mjs 再验；C-ext-31 门禁单一实现 = scripts/lib/pi-env-admission-gate.mjs（bundle-extensions.mjs 构建期同拦，该脚本已由 E2E-PLUGINCONTRACT-01/E2E-PKG-01 scope 覆盖），改动门禁须本地跑 bundle + verify-staged 双验"
     },
     {
       "id": "E2E-PIPE-16",
