@@ -3,8 +3,8 @@
 状态：已接受边界（2026-10-20 D3 端到端验收实证登记；不立项一阶段修法）
 
 关联：与 [catalog-overlay-models-json-boundary.md](catalog-overlay-models-json-boundary.md)
-同族（目录投喂通道与既有配置/校验层的边界族）；D1 验收对同一边界的 environment 归档见
-`provider-catalog-sync.acceptance/summary.md` V1 行。
+同族（目录投喂通道与既有配置/校验层的边界族）；D1 验收对同一边界的 environment 归档 =
+2026-10-20 端到端验收（V1 场景产物留工作流产物区，不入库）。
 
 ## 边界内容
 

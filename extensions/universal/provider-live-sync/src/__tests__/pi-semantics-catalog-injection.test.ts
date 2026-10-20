@@ -12,11 +12,13 @@
  * - **运行时层**：对实装版 pi 真实调用（`ModelRuntime` / `createExtensionRuntime` /
  *   pi-ai 官方导出），断言返回结构与合并语义。禁 mock pi 本体——mock 掉的正是被测面。
  *
- * 行号锚全部基于 pi@1.0.0 实装实测（2026-10-20）。pi bump 后行号可能漂移，此时源码层
- * 断言会红——按报错重新核对锚点语义是否仍成立，再更新 docs/pi-semantics.json 的 note。
+ * 行号锚全部基于 pi@1.0.0 实装实测（2026-10-20）。源码层断言按锚点语句内容定位
+ * （lineOf / lineOfAfter）：pi bump 后纯行号漂移不断言也不红；锚点语句被改写/删除或
+ * 相对顺序漂移才红——此时按报错重新核对锚点语义是否仍成立，再更新
+ * docs/pi-semantics.json 的 note。
  */
 import { describe, it, expect, beforeAll, afterAll } from 'vitest'
-import { mkdtempSync, readFileSync, rmSync } from 'node:fs'
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -247,9 +249,7 @@ describe('PS-83 —— extension 层 models 即最终可见集合 + 注册时逐
     ).toThrow(/no "api" specified/)
   })
 
-  it('运行时层：组合错误进 compositionErrors（getError 可见，运行中窗口的归因通道）', async () => {
-    // R4 的运行中窗口归因依赖 getError() 含 per-provider 组合错误。用「streamSimple 但无
-    // api」触发 validateExtensionProvider 的 provider 级校验分支。
+  it('运行时层：provider 级校验——streamSimple 无 api 注册期即抛错，且 broken 注册不污染 stored config', async () => {
     const rt = await newRuntime()
     expect(() =>
       rt.registerProvider('no-such-catalog-provider', {
@@ -260,6 +260,53 @@ describe('PS-83 —— extension 层 models 即最终可见集合 + 注册时逐
     ).toThrow(/"api" is required when registering streamSimple/)
     // 抛错的注册不落进注册表（broken re-registration 不得污染 stored config）
     expect(rt.getRegisteredProviderConfig('no-such-catalog-provider')).toBeUndefined()
+  })
+
+  it('运行时层：compose 期异常落 compositionErrors 并经 getError 可见（R4 运行中归因通道）', async () => {
+    // R4 的运行中归因依赖「compose 失败落入 compositionErrors 并经 getError 可见」。
+    // 构造 = 注册期合法（全基线过校验），随后落盘写坏的用户配置 models.json 条目使
+    // compose 期变坏——配置变更使 compose 抛错而注册期校验已过的窗口正是 R4 语义。
+    // 两个构造约束（pi@1.0.0 实测）：坏条目须落在无内置基线的 provider 上（有基线时
+    // modelFromJson 的四级兜底静默继承 api/baseUrl 不抛错，sdk-contract.test.ts 第③组
+    // 已锁）；条目还须过 models.json 的 config schema（cost.cacheRead/cacheWrite 必填）
+    // ——schema 层错误走 configError（getError 首段），不是本用例要锁的
+    // compositionErrors 通道。
+    const modelsPath = join(tmpDir, 'compose-error-models.json')
+    const rt = await ModelRuntime.create({
+      modelsPath,
+      refreshOnCreate: false,
+      authPath: join(tmpDir, 'auth.json'),
+    })
+    rt.registerProvider(PROVIDER, { models: getBuiltinModels(PROVIDER).map((m) => ({ ...m })) })
+    await rt.refresh({ allowNetwork: false })
+    // 前置：初始态无组合错误（自证后置断言非恒真）
+    expect(rt.getError()).toBeUndefined()
+    writeFileSync(
+      modelsPath,
+      JSON.stringify({
+        providers: {
+          'no-such-catalog-provider': {
+            models: [
+              {
+                id: 'Broken-Compose',
+                name: 'Broken-Compose',
+                input: ['text'],
+                cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
+                reasoning: false,
+                contextWindow: 1,
+                maxTokens: 1,
+              },
+            ],
+          },
+        },
+      }),
+    )
+    await rt.refresh({ allowNetwork: false })
+    // composeProvider 捕获组合异常落 compositionErrors，getError 拼 `Provider "<id>": <msg>`
+    // （dist/core/model-runtime.js composeProvider catch 分支 + getError 拼接段）——
+    // provider-live-sync 运行中 tick 消费 getError() 的正是这个形态（非空即 error 日志）。
+    expect(rt.getError()).toMatch(/Provider "/)
+    expect(rt.getError()).toMatch(/no "api" specified/)
   })
 
   it('源码层：applyExtension 对 models 做 map 替换（非 concat / merge）', () => {

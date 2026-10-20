@@ -152,6 +152,40 @@ for (const entry of entries) {
   }
 }
 
+// ── 探针族重验命令（从登记表 guard.test 动态生成）──────────────────────
+// 恢复消息的重验命令清单与登记表同源：新增 probe 登记自动进清单，不靠手工维护的
+// 静态枚举（静态枚举会漏——曾只列 runtime/ext-guards 两侧，pi bump 按消息逐条执行
+// 漏跑 extensions 侧探针 PS-81~85，版本门禁因 verifiedWith 已改即过，注入语义漂移
+// 静默放行）。按「包根（含 vitest.config.ts 的目录）分组」生成 cd <包根> &&
+// npx vitest run <相对路径>；包结构外路径回退从仓库根跑（根目录是全仓唯一合法入口）。
+function probeRerunCommands(testPaths) {
+  const byPkgRoot = new Map()
+  for (const p of new Set(testPaths)) {
+    const seg = p.split('/')
+    let pkgRoot, rel
+    if (seg[0] === 'packages' && seg.length > 2) {
+      // packages/<pkg> 两段；extensions/<group>/<pkg> 三段
+      pkgRoot = seg.slice(0, 2).join('/')
+      rel = seg.slice(2).join('/')
+    } else if (seg[0] === 'extensions' && seg.length > 3) {
+      pkgRoot = seg.slice(0, 3).join('/')
+      rel = seg.slice(3).join('/')
+    } else {
+      pkgRoot = '.'
+      rel = p
+    }
+    if (!byPkgRoot.has(pkgRoot)) byPkgRoot.set(pkgRoot, new Set())
+    byPkgRoot.get(pkgRoot).add(rel)
+  }
+  return [...byPkgRoot].map(([root, rels]) => `cd ${root} && npx vitest run ${[...rels].sort().join(' ')}`)
+}
+
+const PROBE_RERUN_CMDS = probeRerunCommands(
+  entries
+    .filter((e) => typeof e === 'object' && e !== null && e.guard?.type === 'probe' && isNonEmptyStr(e.guard?.test))
+    .map((e) => e.guard.test),
+)
+
 // ── 3. 四包版本门禁 ─────────────────────────────────────────────────
 /** 读 <root>/node_modules/@earendil-works/<pkg>/package.json 的 version（缺失返回 undefined）。 */
 function installedVersion(pkg) {
@@ -211,7 +245,7 @@ if (missingPkgs.length > 0) {
     )
     if (stale.length > 0) {
       fail(
-        `pi 实装为 ${common}，但 ${stale.length} 条语义登记的 verifiedWith 过期: ${stale.map((e) => `${e.id}(${e.verifiedWith})`).join('、')}——恢复动作：先重跑探针族验证语义仍成立（runtime 侧探针：cd packages/runtime && npx vitest run src/infra/pi/__tests__/pi-semantics；ext-guards 侧探针（PS-30 stale 文案）：cd extensions/shared/ext-guards && npx vitest run src/__tests__/pi-semantics-stale-ctx-wording.test.ts），全绿后把 docs/pi-semantics.json 对应条目 verifiedWith 更新为 "${common}"；任一探针红 = pi 语义漂移，先按报错复核锚点再更新`,
+        `pi 实装为 ${common}，但 ${stale.length} 条语义登记的 verifiedWith 过期: ${stale.map((e) => `${e.id}(${e.verifiedWith})`).join('、')}——恢复动作：先重跑探针族验证语义仍成立（重验命令按登记表 guard.test 生成，${PROBE_RERUN_CMDS.length} 组：\n  ${PROBE_RERUN_CMDS.join('\n  ')}），全绿后把 docs/pi-semantics.json 对应条目 verifiedWith 更新为 "${common}"；任一探针红 = pi 语义漂移，先按报错复核锚点再更新`,
       )
     }
   }
@@ -240,7 +274,7 @@ try {
       .some((f) => /pi-semantics-[^/]*\.test\.ts$/.test(f) || f.endsWith('thinking-level-effective-e2e.test.ts'))
     if (!probeTouched) {
       warn(
-        `staged 的 docs/pi-semantics.json 有 ${vwChangedLines} 行 verifiedWith 变更，但无任何探针测试文件（pi-semantics-*.test.ts / thinking-level-effective-e2e.test.ts）陪跑——D6 软门禁仅提醒不拦截；恢复动作：先跑探针族确认语义仍成立（runtime 侧探针：cd packages/runtime && npx vitest run src/infra/pi/__tests__/pi-semantics；ext-guards 侧探针（PS-30 stale 文案）：cd extensions/shared/ext-guards && npx vitest run src/__tests__/pi-semantics-stale-ctx-wording.test.ts），全绿再更新 verifiedWith`,
+        `staged 的 docs/pi-semantics.json 有 ${vwChangedLines} 行 verifiedWith 变更，但无任何探针测试文件（pi-semantics-*.test.ts / thinking-level-effective-e2e.test.ts）陪跑——D6 软门禁仅提醒不拦截；恢复动作：先跑探针族确认语义仍成立（重验命令按登记表 guard.test 生成：\n  ${PROBE_RERUN_CMDS.join('\n  ')}），全绿再更新 verifiedWith`,
       )
     }
   }

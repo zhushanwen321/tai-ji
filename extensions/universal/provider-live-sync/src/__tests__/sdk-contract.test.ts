@@ -36,7 +36,7 @@ import { mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { ModelRuntime } from '@earendil-works/pi-coding-agent'
-import { getBuiltinModels } from '@earendil-works/pi-ai/providers/all'
+import { getBuiltinModels, getBuiltinProviders } from '@earendil-works/pi-ai/providers/all'
 import type { ProviderConfigInput } from '@earendil-works/pi-coding-agent'
 
 /** 被测 provider：catalog provider，内置基线 3 个 chat 模型（M2.7 / M2.7-highspeed / M3）。 */
@@ -179,6 +179,66 @@ describe('② 极简定义形状入注 → pi 展开语义（四级兜底继承�
     expect(got.api).toBe('openai-completions')
     // baseUrl 无 provider 级值 → 仍走兜底继承
     expect(got.baseUrl).toBe(getBuiltinModels(PROVIDER)[0].baseUrl)
+  })
+
+  // 四级兜底第 2/3 级的构造参数从内置目录动态选定（pi bump 目录数据变化时自适应）：
+  // 要求基线内 chat 模型 ≥2 种 api，且目标级继承源 ≠ candidates[0]（baseUrl 可区分
+  // ——否则断言与第 4 级不可区分）。构造条件不成立 = pi 目录数据形态变化，重验者
+  // 须重新核对 findExtensionModelDefaults 语义后重找构造。
+  const level23 = (() => {
+    for (const providerId of getBuiltinProviders()) {
+      const chat = getBuiltinModels(providerId).filter((m) => (m.type ?? 'chat') === 'chat')
+      const first = chat[0]
+      if (!first) continue
+      const openaiCompletions = chat.find((m) => m.api === 'openai-completions')
+      const level3 =
+        openaiCompletions && first.api !== 'openai-completions' && openaiCompletions.baseUrl !== first.baseUrl
+          ? { openaiCompletions }
+          : null
+      let level2: { api: string; sameApi: (typeof chat)[number] } | null = null
+      for (const api of new Set(chat.map((m) => m.api))) {
+        const sameApi = chat.find((m) => m.api === api)
+        if (sameApi && sameApi.id !== first.id && sameApi.baseUrl !== first.baseUrl) {
+          level2 = { api, sameApi }
+          break
+        }
+      }
+      if (level2 && level3) return { providerId, first, level2, level3 }
+    }
+    return null
+  })()
+
+  it('四级兜底第 2 级：定义带 api → baseUrl 继承基线首个同 api 模型（非 candidates[0]）', async () => {
+    expect(
+      level23,
+      '内置目录找不到「同 api 继承源 ≠ candidates[0]」的构造——pi 目录数据形态变化后须重核 findExtensionModelDefaults 语义并重找构造',
+    ).not.toBeNull()
+    const { providerId, first, level2 } = level23!
+    const rt = await newRuntime()
+    rt.registerProvider(providerId, { models: [{ ...minimal('Overlay-L2-Case'), api: level2.api }] })
+
+    const got = rt.getModel(providerId, 'Overlay-L2-Case')!
+    // api 取定义自带值；baseUrl 走第 2 级（基线首个同 api 模型），不是 candidates[0]
+    expect(got.api).toBe(level2.api)
+    expect(got.baseUrl).toBe(level2.sameApi.baseUrl)
+    expect(got.baseUrl).not.toBe(first.baseUrl)
+  })
+
+  it('四级兜底第 3 级：定义无 api、基线含 openai-completions → 继承首个 openai-completions 基线（非 candidates[0]）', async () => {
+    expect(
+      level23,
+      '内置目录找不到「openai-completions 继承源 ≠ candidates[0]」的构造——pi 目录数据形态变化后须重核 findExtensionModelDefaults 语义并重找构造',
+    ).not.toBeNull()
+    const { providerId, first, level3 } = level23!
+    expect(first.api).not.toBe('openai-completions') // 前置：candidates[0] 不经第 3 级命中，构造有效
+    const rt = await newRuntime()
+    rt.registerProvider(providerId, { models: [minimal('Overlay-L3-Case')] })
+
+    const got = rt.getModel(providerId, 'Overlay-L3-Case')!
+    // 定义与 provider 级 config 都无 api → api/baseUrl 都取基线首个 openai-completions 模型
+    expect(got.api).toBe('openai-completions')
+    expect(got.baseUrl).toBe(level3.openaiCompletions.baseUrl)
+    expect(got.baseUrl).not.toBe(first.baseUrl)
   })
 })
 

@@ -1806,5 +1806,22 @@
       "test": "extensions/universal/provider-live-sync/src/__tests__/pi-semantics-catalog-injection.test.ts"
     },
     "verifiedWith": "1.0.0"
+  },
+  {
+    "id": "PS-85",
+    "claim": "前提 7（provider-catalog-sync 注入构造等价性）：pi 1.0.0 的内置基线 Model 对象放进 ProviderConfigInput.models 经组合后字段等价（Model 对象是定义形状的超集，超集属性经 {...definition} 展开保留，如 enabled/lab/providers/thinkingLevelMap）；唯一规范化 = 组合对象的 headers 恒为 undefined（请求期头解析读原始定义不受损）；缺 api/baseUrl 的定义经 findExtensionModelDefaults 四级兜底继承（同 id → 定义带 api 时同 api → openai-completions → candidates[0]，另有 provider 级 config.api/config.baseUrl 优先档），仅四级全空才抛。若组合对 Model 对象做字段裁剪/重命名，目录投喂不能直接并集注入，须改显式挑字段构造（设计前提 7「不成立」列的预案）",
+    "piAnchor": [
+      {
+        "pkg": "pi-coding-agent",
+        "distPath": "dist/core/provider-composer.js",
+        "symbol": "extensionModelFromDefinition（{...definition} 展开 + headers 硬置）",
+        "note": ":119 extensionModelFromDefinition；:130/:133/:135 return { ...definition, api, provider: providerId, baseUrl, headers: undefined }（超集属性经展开保留、headers 是唯一被硬置字段）；:111 findExtensionModelDefaults 四级兜底【行号锚基于 pi@1.0.0 实装实测】"
+      }
+    ],
+    "guard": {
+      "type": "probe",
+      "test": "extensions/universal/provider-live-sync/src/__tests__/sdk-contract.test.ts"
+    },
+    "verifiedWith": "1.0.0"
   }
 ]

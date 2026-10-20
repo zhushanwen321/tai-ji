@@ -2436,6 +2436,25 @@
       "owner": "packages/subagent-core",
       "authority": "docs/adr/decisions.md",
       "note": "R2 态：守卫改本体或扩面时实跑三命令全绿（rfl-parity 对真实两侧 exit 0 + 门③双向零漂移 + 门③自测）；问题清单层语义差异（title 权威 / title 可选性 / 复活模型）以守卫脚本头部 D1-D4 登记清单为准"
+    },
+    {
+      "id": "E2E-PISEM-01",
+      "summary": "pi 语义断言守卫（check-pi-semantics）：docs/pi-semantics.json 结构校验 + 探针存在性 + 版本门禁（verifiedWith 比对）——pi bump 后语义断言漂移在提交期红；恢复消息含三侧重验命令（runtime / ext-guards / extensions 契约测试）",
+      "scope": [
+        "scripts/check-pi-semantics.mjs"
+      ],
+      "trigger": "on-diff",
+      "run": "node scripts/check-pi-semantics.mjs",
+      "assets": [
+        {
+          "kind": "script",
+          "ref": "scripts/check-pi-semantics.mjs"
+        }
+      ],
+      "authority": "scripts/check-pi-semantics.mjs",
+      "owner": "packages/runtime",
+      "serial": false,
+      "layer": "L2"
     }
   ]
 }

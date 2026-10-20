@@ -110,7 +110,8 @@ describe('evaluateSnapshot —— D3 四态（models.json 缺失是 catalog-only
     const d = evaluateSnapshot(snap, obs({ 'models.json': { state: 'absent' }, 'auth.json': present('X') }))
     expect(d).toEqual({ action: 'skip-missing', missingFiles: ['models.json'] })
     // 持续缺失：抑制保持（每拍仍判定 skip-missing），但调用方按跃迁去重 → 只在第一拍记一行
-    // 日志（`missingLogged`），后续拍零输出（稳态无噪声，设计 §3.6 行 2/S9a②）。
+    // 日志（`missingLogged`），后续拍零输出（抑制持续语义见 src/index.ts 的
+    // Snapshot.suppressed 注释与 evaluateSnapshot 实装）。
     const d2 = evaluateSnapshot(snap, obs({ 'models.json': { state: 'absent' }, 'auth.json': present('X') }))
     expect(d2).toEqual({ action: 'skip-missing', missingFiles: ['models.json'] })
   })

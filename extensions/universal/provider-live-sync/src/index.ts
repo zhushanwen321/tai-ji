@@ -27,7 +27,9 @@
  * 内容字节比较正交），检出变化即触发同一次零网络刷新，由注册时携带的
  * `refreshModels` 钩子重读缓存返回新并集。实装在 `src/catalog-bridge.ts`。
  *
- * 设计取舍（详见 docs 侧设计文档 §3.3 D3/D11/D12）：
+ * 设计取舍（行为语义以本头注释为权威；包定位与投喂写入单点见根 AGENTS.md 的
+ * provider-live-sync 括注与 constraints.json 约束 C-ext-31；术语见 docs/CONTEXT.md
+ * 「目录投喂（catalog overlay）」词条）：
  * - **轮询而非 fs.watch**：仓内 `skill-registry` 有 macOS `fs.watch` 触发率 ~40% 前科；轮询不依赖
  *   事件送达，无静默漏报面。代价 = 每进程 3 个监视目标 / 2s 的只读 I/O（稳态每拍
  *   2 次内容读 + 1 次 mtime stat；检出变化时钩子重读两份目录缓存）。
@@ -89,8 +91,8 @@ export interface Snapshot {
    *
    * 抑制是**持续**的（不是一拍）：只要 `models.json` 处于这个集合里，任何 refresh 都会重读磁盘、
    * 以「无 override 的空配置」重建可用集合——把一次坏写放大成用户自定义 provider 的**真正丢失**
-   * （设计 D3②/§3.6「『曾存在 → 缺失』跃迁抑制 refresh」）。恢复 = 该文件重新出现（内容变化）
-   * 或会话重启（spawn 期重读）。
+   * （取舍 = 「『曾存在 → 缺失』跃迁抑制 refresh」，见本文件头注释与 evaluateSnapshot 实装）。
+   * 恢复 = 该文件重新出现（内容变化）或会话重启（spawn 期重读）。
    *
    * 只对 `models.json` 生效：`auth.json` 消失不威胁配置本身（凭据缺失是自愈的——文件写回后
    * 下一拍 refresh 即恢复），按普通内容变化处理，避免「凭据变更被静默丢弃」。

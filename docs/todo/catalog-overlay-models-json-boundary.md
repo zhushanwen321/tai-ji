@@ -3,7 +3,7 @@
 状态：已接受边界（2026-10-20 u-acceptance 真机核对登记；未发现真实使用，不立项一阶段修法）
 
 设计源：provider-catalog-sync 设计 §3.3 D6「models.json 层的可见性边界」；销号记录 =
-`provider-catalog-sync.acceptance/checkpoints.md` 检查点 3。
+2026-10-20 端到端验收检查点 3 真机核对（下方「真机核对结论」，产物留工作流产物区，不入库）。
 
 ## 边界内容
 
