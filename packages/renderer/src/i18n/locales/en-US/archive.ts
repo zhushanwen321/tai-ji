@@ -38,4 +38,15 @@ export default {
   main: {
     noSelection: 'Select a session in the sidebar archive list to view its summary',
   },
+  // Rendered form of design §5.2 failure-path table ("UI presentation + recovery guidance"
+  // columns): branches on the error envelope code; unknown codes fall back to the
+  // operation-level generic template with the runtime message.
+  error: {
+    generating: 'Archive failed: the session is still generating (archive_generating). Wait for generation to finish, then archive again',
+    alreadyArchived: 'Archive failed: this session already has an archive record (archive_already_archived). Restore or permanently delete it in the archive list first',
+    restoreConflict: 'Restore failed: a session file with the same name already exists at the original path (archive_restore_conflict). Handle that session (delete or archive it) before restoring this one',
+    corrupted: 'Restore failed: archive data checksum mismatch (archive_corrupted). The archive is corrupted and cannot be restored; the original archive is kept, please report the issue',
+    notFound: 'Permanent deletion failed: archive record not found (archive_not_found). The archive list may be stale; reopen the archive list and try again',
+    ioError: 'Operation failed: {msg} (archive_io_error). Session state follows the disk, startup self-healing will settle it; retry or check the disk',
+  },
 }

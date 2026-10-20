@@ -2,8 +2,8 @@
  * 公共归档构造 helper（session-archive 设计 impl-plan u-e2e-cases）——归档单元磁盘
  * fixture 一键构造：簿记 / 压缩体 / 旁挂 / 附件树（+ 自愈中间态 / 引用族 / 损坏变体）。
  *
- * 消费方 = D3 验收实例化的 L3 剧本（exec-plan 验收计划 A1-A10 各验收项独立构造
- * fixture——对齐 F2 裁决「场景间 fixture 独立」）；构造产物对齐生产链消费形态：
+ * 消费方 = archive-fixture.test.ts（生产契约锚）；D3 验收如需独立 L3 剧本可复用本
+ * helper。构造产物对齐生产链消费形态：
  * - 簿记字段严格按 @taiji/shared ArchiveLedger schema（parseArchiveLedger 可解析，
  *   archive-fixture.test.ts 锚定）；
  * - 压缩体 = zstdCompressSync(level 3)（D2 现行编码），sha256 为压缩体真实 hash；

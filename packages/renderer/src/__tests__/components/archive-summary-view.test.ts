@@ -6,7 +6,7 @@
  * - turn 无文本占位：agent null → 「（此 turn 以工具调用结束……」占位，非 null turn 正常渲染
  * - 纯图片占位：user 空串 → 气泡内「[图片/附件消息]」
  * - staging 全占位：全区「摘要生成中」，tab/摘要流不渲染；banner 压缩信息显示「压缩中」
- * - 已归档 pill 与压缩信息渲染：pill 文案 + `12.4 MB → 2.5 MB · -79%` meta
+ * - 已归档 pill 与压缩信息渲染：pill 文案 + `12.4 MB → 2.5 MB · -80%` meta
  * - 恢复钮 emit restore；agent 引用视图正文 = session_read 返回形态（D7 字面）
  *
  * 挂载为纯展示组件（无 pinia / 无 ChatViewDeps 依赖）；i18n 经全局 setup mock
@@ -65,7 +65,7 @@ function mountView(archive: ArchiveSummary, projectName?: string) {
 }
 
 describe('ArchiveSummaryView · banner（已归档 pill 与压缩信息）', () => {
-  it('已归档 pill + 会话名 + 原项目/压缩信息 meta 渲染（12.4 MB → 2.5 MB · -79%）', () => {
+  it('已归档 pill + 会话名 + 原项目/压缩信息 meta 渲染（12.4 MB → 2.5 MB · -80%）', () => {
     const wrapper = mountView(makeArchived(), 'taiji')
 
     const pill = wrapper.find('[data-testid="archive-archived-pill"]')

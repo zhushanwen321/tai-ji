@@ -61,4 +61,14 @@ export default {
     // view:'archive' 无选中条目的占位（恢复/删除后编排清空、异常直达）
     noSelection: '在侧栏归档列表中选择一个会话查看摘要',
   },
+  // §5.2 失败路径表「界面表现 + 恢复指引」两列的渲染落点（error envelope code 分流；
+  // 未命中码回退操作级通用模板 + runtime message）
+  error: {
+    generating: '归档失败：会话正在生成中（archive_generating）。请等待生成完成后再归档',
+    alreadyArchived: '归档失败：该会话已有归档记录（archive_already_archived）。请先在归档列表恢复或彻底删除该条，再归档',
+    restoreConflict: '恢复失败：原路径已存在同名会话文件（archive_restore_conflict）。请先处理该同名会话（删除或归档它），再恢复本条',
+    corrupted: '恢复失败：归档数据校验失败（archive_corrupted）。压缩包已损坏无法恢复；归档原件保留，可提交问题反馈',
+    notFound: '彻底删除失败：归档记录不存在（archive_not_found）。归档列表数据可能已过期，重新打开归档列表后重试',
+    ioError: '操作失败：{msg}（archive_io_error）。session 状态以磁盘为准，启动自愈会归位，重试或检查磁盘',
+  },
 }

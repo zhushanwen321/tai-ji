@@ -512,6 +512,25 @@ describe('per-session 串行化（D5 在途任务表）', () => {
     expect(existsSync(join(f.archiveRoot, ENC_A, `2026-10-20T00-00-00-000Z_${sid}.jsonl.archive.json`))).toBe(false)
   })
 
+  it('压缩中发起 purgeArchive：等待压缩终态后执行，压缩体先生成再进废纸篓', async () => {
+    const f = makeFixture()
+    const sid = 'sess-wait77'
+    const mainPath = f.writeMainFile(sid, CWD_A)
+    f.registerScanned(sid, CWD_A, mainPath)
+    f.setSummary(sid, summaryOf(sid, CWD_A))
+    await f.service.archive(sid) // 压缩任务刚入队（未完成）
+
+    const reply = await f.service.purgeArchive(sid) // 与在途压缩任务并发——串行化等待
+
+    // 压缩先达终态后 purge 才执行：归档态压缩体进废纸篓（staging 明文直读路径不会产生该处置）。
+    expect(reply.sessionId).toBe(sid)
+    const compressedPath = join(f.archiveRoot, ENC_A, `2026-10-20T00-00-00-000Z_${sid}.jsonl.zst`)
+    expect(f.trashed).toContain(compressedPath)
+    // 归档单元终态全清（簿记与压缩体均不在）。
+    expect(existsSync(join(f.archiveRoot, ENC_A, `2026-10-20T00-00-00-000Z_${sid}.jsonl.archive.json`))).toBe(false)
+    expect(existsSync(compressedPath)).toBe(false)
+  })
+
   it('unarchive 与 purgeArchive 并发：后到者对已消失归档单元 fail-fast（archive_not_found）', async () => {
     const f = makeFixture()
     const sid = 'sess-race66'

@@ -103,7 +103,7 @@ export interface ArchiveLedgerArchived extends ArchiveLedgerBase { // oe-exempt:
   status: 'archived'
   /** 压缩编码标识（D2 现值 'zstd-3'；值域开放——schema 预留 codec 字段的已发生演进点，设计 §4）。 */
   codec: string
-  /** 压缩体字节数（`<originalFile>.jsonl.zst`）。 */
+  /** 压缩体字节数（`<originalFile>.zst`，originalFile 已含 `.jsonl`）。 */
   compressedBytes: number
   /** 主文件压缩体 sha256（64 位小写 hex；恢复与 purge 引用枚举的消费前校验依据，D9 不变量 2）。 */
   sha256: string
@@ -284,7 +284,10 @@ export type ArchiveSummary =
  * **失败通道**：三 RPC 的领域错误走统一 error envelope（code = 本词表值 +
  * message，sessionId 随 envelope 携带——同 ImportErrorCode / CompactErrorCode
  * 先例；impl-plan u-rpc-wiring 验收条款「错误码 envelope」）。renderer 按 code
- * 分流显示 §5.2 对应恢复指引文案。值语义与触发 RPC：
+ * 分流显示 §5.2 对应恢复指引文案。**闭集指领域码**：transport 层另有两个码不在
+ * 本词表——archive_failed（handler 对词表外意外 throw 的归一兜底，杜绝 fs 系统码
+ * 泄漏到 renderer）与 archive_unsupported（archiveService 未注入的防御码，生产组合
+ * 根恒注入、仅测试最小 mock 可达）。值语义与触发 RPC：
  * - archive_generating：session.archive——会话生成中（isGenerating），前置三门
  *   之首（防 RPC 绕过前端禁用后杀 pi 丢尾部未落盘 entry）。
  * - archive_already_archived：session.archive——归档目录已存在该 sessionId 的

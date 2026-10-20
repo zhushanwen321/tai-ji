@@ -666,11 +666,6 @@ export class ArchiveService {
     renameSync(tmp, ledgerPath)
   }
 
-  /** 在途任务表观测口（测试断言串行化用；生产只读诊断）。 */
-  hasInflight(sessionId: string): boolean {
-    return this.inflight.has(sessionId)
-  }
-
   /**
    * 归档列表（config.archives 响应数据源，D5）：扫描归档根下全部 `.archive.json` 簿记
    * 派生（不变量 3——不存在独立登记渠道；.restoring 不在列表，恢复中条目对用户不可见）。

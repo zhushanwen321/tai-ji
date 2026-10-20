@@ -279,7 +279,7 @@ DetailPane 对 HTML 文件的 iframe 预览形态（v16 前与「源码态」相
 ### session 存储树（ext-sessions）
 taiji 自有全部 session 维度衍生数据的统一落点：`<dataDir>/ext-sessions/<sessionId>/<domain>/`——一个 session 一棵树，树内按 domain 分层（attachments / artifacts / image-cache / plugin-data.json / background-tasks / session-view.md / btw / canvases / logs / subagents / workflow）。会话删除 = 整树进废纸篓。树结构 SSOT = `packages/shared/src/paths.ts`（`getSessionStoreDir` + 各域具名推导函数，sessionId 过 `isPiSessionId` 同域校验）；新域接入规约与豁免清单见项目 AGENTS.md「数据目录布局」条目，决策登记 ADR-0151。
 
-**代码映射**: `packages/shared/src/paths.ts` 的 `getSessionStoreDir`（树根）与 `PI_SESSION_TREE_SEGMENTS`（pi 宿主三树段 + 存储树根段）；旧推导函数 `getAttachmentsDir` / `getImageCacheDir` / `getSessionArtifactsDir` 返回新布局。
+**代码映射**: `packages/shared/src/paths.ts` 的 `getSessionStoreDir`（树根）与 `PI_SESSION_TREE_SEGMENTS`（pi 宿主四树段 sessions/subagents/btw/archive + 存储树根段 ext-sessions）；旧推导函数 `getAttachmentsDir` / `getImageCacheDir` / `getSessionArtifactsDir` 返回新布局。
 
 ### 分区键
 目录布局中承载「这条数据属于哪个会话」的那一级目录名的取值来源。session 存储树的分区键 = sessionId（一级目录名即会话 id）；btw / subagent / workflow 三个域反转前按 encodeCwd（工作目录编码名，按项目聚合）分区、会话关联只在记录字段里——反转后分区键统一为 rootSessionId（record / run 创建记录 / 主会话 id），「同项目记录聚一起」的目录语义由字段级过滤承接（跨会话按项目盘点 = 按 rootSessionId 字段全根遍历过滤，ADR-0151）。
@@ -295,7 +295,7 @@ taiji 自有全部 session 维度衍生数据的统一落点：`<dataDir>/ext-se
 ### 归档（archive）
 session 的可恢复中间存储态：把闲置 session 的主文件与旁挂、附件三目录整体搬入归档目录并做 zstd 压缩（实测省 70%-94%），名称与摘要明文存[簿记文件](#簿记文件archivejson)供免解压查看，恢复时解压回原路径、project 归属随旁挂自动还原——补齐「在场 ↔ 销毁」之间缺的「退场但可回」一档。归档是**文件位置派生态**：文件移出 sessions/ 扫描根即从侧边栏构造性消失，不进 SessionStatus 词表（不产生列表条目的枚举死值）；一等载体是簿记 status 字段与 ArchiveSummary。用户入口 = 侧边栏悬停归档钮（两段确认，PackageCheck 图标——与「标记完成」的 Archive 图标 + "archived" ariaLabel 是两个语义：做完了 vs 收起来，图标区分文案不共用）；agent 入口 = session_read 命中归档 session 只见摘要且显式标注「已归档」。语义边界：与 [Compaction](#compaction) 互补——compaction 压的是 LLM 上下文、JSONL 文件只增不减，归档压的是文件本身。机制与决策登记 [ADR-0153](adr/decisions.md)；领域登记见 [domain-model.md](domain-model.md) session 存储归档域。
 
-**代码映射**: runtime `packages/runtime/src/services/archive/`（ArchiveService 三操作 archive/unarchive/purgeArchive + 自愈 + 状态机）；RPC 挂 session 域（`session.archive` / `session.unarchive` / `session.purgeArchive`）；renderer `packages/renderer/src/components/archive/`（归档列表 + 摘要视图）+ sidebar 归档入口；session-reader `extensions/universal/session-reader/` 第五扫描根（簿记收集器）。
+**代码映射**: runtime `packages/runtime/src/services/archive/`（ArchiveService 三操作 archive/unarchive/purgeArchive + 自愈 + 状态机）；RPC 挂 session 域（`session.archive` / `session.unarchive` / `session.purgeArchive`）；renderer `packages/renderer/src/components/archive/`（主区摘要视图宿主 + 摘要视图）+ `packages/renderer/src/components/sidebar/ArchiveListView.vue`（归档列表视图）+ sidebar 归档入口；session-reader `extensions/universal/session-reader/` 第五扫描根（簿记收集器）。
 
 ### 归档单元（ArchiveEntry）
 一个已归档 session 的全部归档物构成的聚合：主文件压缩体（staging 期为明文）+ 六类旁挂文件（原样明文随迁）+ 附件三目录（`assets/<sessionId>/{attachments,artifacts,image-cache}`，源 = session 存储树三域，显式映射搬入）+ [簿记文件](#簿记文件archivejson)。聚合根 = 簿记文件——簿记在即归档单元在（列表条目存在、purge 可重试），簿记消失即单元消亡（恢复或彻底删除完成）。物理落位镜像 sessions 布局：`<agentDir>/archive/<encodeCwd>/<原主文件名>…`。聚合自带显式状态机（staging / archived / restoring 三态 + compress_done / unarchive / restore_done / 双回滚 / purge 六事件，`@zhushanwen/state-machine` 声明），状态判定唯一权威 = 读磁盘（无簿记 = 无单元；status 字段 = staging/archived；`.restoring` 后缀 = restoring）；不变量四条（互斥存在 / 压缩体消费前校验 / 列表派生 / 扫描范围互斥）登记见 [domain-model.md](domain-model.md)。

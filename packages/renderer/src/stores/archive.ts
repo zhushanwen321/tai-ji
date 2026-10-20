@@ -34,6 +34,13 @@ export const useArchiveStore = defineStore('archive', () => {
   /** 列表拉取失败原因（null = 无失败；归档列表显示重试入口） */
   const listError = ref<string | null>(null)
   /**
+   * 在途恢复/彻底删除的 sessionId（null = 无操作在途）。按 sessionId 而非布尔：
+   * 不同条目的归档域操作本就按 per-session 串行，互不阻塞。消费点 = 归档列表行钮
+   * 禁用态（防双击）与编排入口防重入（§5.1 恢复钮 loading 语义的落地形态）。
+   */
+  const restoringSessionId = ref<string | null>(null)
+  const purgingSessionId = ref<string | null>(null)
+  /**
    * 刚恢复的 session id（§5.1 恢复样例「原项目组顶部、accent-soft 高亮渐隐」的前端
    * 高亮态）：unarchive reply 的 SessionSummary.id 消费点（D5 步骤 7「前端高亮置顶」）。
    * null = 无恢复高亮。置顶构造性成立（恢复路径重写主文件 → mtime = 恢复时刻 → 列表
@@ -101,6 +108,8 @@ export const useArchiveStore = defineStore('archive', () => {
     loading,
     listError,
     restoredSessionId,
+    restoringSessionId,
+    purgingSessionId,
     setArchives,
     setCount,
     openView,

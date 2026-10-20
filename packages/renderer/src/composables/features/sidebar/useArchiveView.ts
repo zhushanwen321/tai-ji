@@ -30,6 +30,7 @@ import i18n from '@/i18n'
 import { useArchiveStore } from '@/stores/archive'
 import { useNavigationStore } from '@/stores/navigation'
 import { useToast } from '@/composables/useToast'
+import { archiveErrorKey } from './archive-error-text'
 
 /** toast/占位文案（i18n 全局实例——模块级编排无组件 setup 上下文，cast 先例同 useChat tFn）。 */
 const t = i18n.global.t as (key: string, params?: Record<string, unknown>) => string
@@ -115,18 +116,24 @@ function displayName(archive: ArchiveSummary): string {
  * 恢复的 session 回场会话列表由 runtime broadcastSessionList 广播回流（core
  * bindSessionListBroadcast 自动 applySnapshot——数据 owner 唯一写通道，本编排不旁路
  * 直呼 store mutation；重连对账兜底由 useSidebar.onConnected 既有链承担）。失败
- * toast（error envelope message 含恢复指引语义）。
+ * toast 按 error envelope code 分流（§5.2 界面表现 + 恢复指引；未知码回退通用模板）。
+ * 入口按 sessionId 防重入：在途期间同一行再次触发直接忽略（列表行钮同时禁用）。
  */
 async function restoreArchive(archive: ArchiveSummary): Promise<void> {
   const { error: toastError, info: toastInfo } = useToast()
+  const store = useArchiveStore()
+  if (store.restoringSessionId === archive.sessionId) return
+  store.restoringSessionId = archive.sessionId
   let restoredId: string
   try {
     restoredId = (await sessionApi.unarchive(archive.sessionId)).id
   } catch (e) {
-    toastError(t('archive.entry.restoreFailed', { msg: toErrorMessage(e) }))
+    const key = archiveErrorKey('unarchive', e)
+    toastError(t(key ?? 'archive.entry.restoreFailed', { msg: toErrorMessage(e) }))
     return
+  } finally {
+    store.restoringSessionId = null
   }
-  const store = useArchiveStore()
   store.markRestored(restoredId)
   store.closeView()
   store.selectArchive(null)
@@ -142,15 +149,20 @@ async function restoreArchive(archive: ArchiveSummary): Promise<void> {
  */
 async function purgeArchiveEntry(archive: ArchiveSummary): Promise<void> {
   const { error: toastError, info: toastInfo, warning: toastWarning } = useToast()
+  const store = useArchiveStore()
+  if (store.purgingSessionId === archive.sessionId) return
+  store.purgingSessionId = archive.sessionId
   let keptSubagentsDir: string | undefined
   try {
     const reply = await sessionApi.purgeArchive(archive.sessionId)
     keptSubagentsDir = reply.keptSubagentsDir
   } catch (e) {
-    toastError(t('archive.entry.purgeFailed', { msg: toErrorMessage(e) }))
+    const key = archiveErrorKey('purge', e)
+    toastError(t(key ?? 'archive.entry.purgeFailed', { msg: toErrorMessage(e) }))
     return
+  } finally {
+    store.purgingSessionId = null
   }
-  const store = useArchiveStore()
   // 主区正在呈现该条目时同步离开（列表行消失，摘要视图不留悬空引用）
   if (store.selected?.sessionId === archive.sessionId) {
     store.selectArchive(null)

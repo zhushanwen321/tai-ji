@@ -96,6 +96,8 @@
               :archives="archiveStore.archives"
               :loading="archiveStore.loading"
               :list-error="archiveStore.listError"
+              :restoring-session-id="archiveStore.restoringSessionId"
+              :purging-session-id="archiveStore.purgingSessionId"
               @back="onArchiveBack"
               @select="onArchiveSelect"
               @restore="onArchiveRestore"

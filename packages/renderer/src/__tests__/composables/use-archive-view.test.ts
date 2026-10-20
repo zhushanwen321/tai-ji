@@ -165,7 +165,10 @@ describe('restoreArchive（验收条款：恢复成功切回会话列表）', ()
     apiMocks.listArchives.mockResolvedValue([archive])
     openArchiveView()
     openSummary(archive)
-    apiMocks.unarchive.mockRejectedValue(new Error('恢复失败：原路径已存在同名会话文件 (archive_restore_conflict)'))
+    // 生产信封形态：message 为 runtime 原文（不含 toast 前缀），code 挂 Error.code。
+    apiMocks.unarchive.mockRejectedValue(
+      Object.assign(new Error('原路径已存在同名会话文件'), { code: 'archive_restore_conflict' }),
+    )
 
     await restoreArchive(archive)
 
@@ -173,8 +176,10 @@ describe('restoreArchive（验收条款：恢复成功切回会话列表）', ()
     expect(store.viewOpen).toBe(true)
     expect(store.selected).toEqual(archive)
     expect(store.restoredSessionId).toBeNull()
+    expect(store.restoringSessionId).toBeNull()
+    // §5.2 界面表现 + 恢复指引（code 分流，单前缀；i18n zh-CN）
     expect(toastMocks.error).toHaveBeenCalledWith(
-      '恢复失败：恢复失败：原路径已存在同名会话文件 (archive_restore_conflict)',
+      '恢复失败：原路径已存在同名会话文件（archive_restore_conflict）。请先处理该同名会话（删除或归档它），再恢复本条',
     )
   })
 })

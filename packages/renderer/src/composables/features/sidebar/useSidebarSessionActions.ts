@@ -30,6 +30,7 @@ import { useProjectStore } from '@/stores/project'
 import { useToast } from '@/composables/useToast'
 import { markForcedExit, consumeForcedExit } from '@/composables/effects/forced-exit-marks'
 import { useI18n } from 'vue-i18n'
+import { archiveErrorKey } from './archive-error-text'
 
 /** useSidebarSessionActions 所需的注入依赖（来自 useSidebar + Sidebar.vue 本地 UI ref） */
 export interface UseSidebarSessionActionsOptions {
@@ -116,8 +117,8 @@ export function useSidebarSessionActions(options: UseSidebarSessionActionsOption
    * 归档 session（session-archive D6/D13，u-renderer-entry）：悬停归档钮两段确认后经
    * SessionItem/SessionList emit 到此。成功 toast「已归档 "<名>"」（§5.1 成功路径；压缩
    * 在后台进行，文案不宣称已压缩——toast 无 action 通道，[查看归档] 跳转降级为侧栏
-   * 归档入口角标 +1 的即时可见反馈）。失败 toast（error envelope message 含错误码——
-   * archive_generating 等六码词表的恢复指引语义由 runtime message 承载）。
+   * 归档入口角标 +1 的即时可见反馈）。失败 toast 按 error envelope code 分流（§5.2
+   * 界面表现 + 恢复指引的双语文案；未知码回退通用模板 + runtime message）。
    * 生成中已由归档钮禁用拦截（D13 renderer 层），此处到达的均为可归档态。
    */
   async function onArchiveSession(id: string): Promise<void> {
@@ -125,8 +126,8 @@ export function useSidebarSessionActions(options: UseSidebarSessionActionsOption
     try {
       await archiveSession(id)
     } catch (e) {
-      const msg = e instanceof Error ? e.message : String(e)
-      toastError(t('sidebar.archiveSessionFailed', { msg }))
+      const key = archiveErrorKey('archive', e)
+      toastError(t(key ?? 'sidebar.archiveSessionFailed', { msg: e instanceof Error ? e.message : String(e) }))
       return
     }
     toastInfo(t('sidebar.archiveSessionDone', { name: label.length > 0 ? label : t('archive.summary.unnamed') }))

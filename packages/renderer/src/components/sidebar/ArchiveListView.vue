@@ -107,7 +107,8 @@
                 size="icon"
                 tabindex="-1"
                 data-testid="archive-row-restore-btn"
-                class="relative size-[18px] rounded-sm text-accent after:absolute after:inset-[-3px] after:content-[''] hover:bg-surface-hover"
+                class="relative size-[18px] rounded-sm text-accent after:absolute after:inset-[-3px] after:content-[''] hover:bg-surface-hover disabled:cursor-default disabled:opacity-40"
+                :disabled="restoringSessionId === entry.sessionId"
                 :title="t('archive.summary.restore')"
                 @click.stop="emit('restore', entry)"
                 @pointerdown.stop
@@ -119,7 +120,8 @@
                 size="icon"
                 tabindex="-1"
                 data-testid="archive-row-purge-btn"
-                class="relative size-[18px] rounded-sm after:absolute after:inset-[-3px] after:content-['']"
+                class="relative size-[18px] rounded-sm after:absolute after:inset-[-3px] after:content-[''] disabled:cursor-default disabled:opacity-40"
+                :disabled="purgingSessionId === entry.sessionId"
                 :class="purgeConfirmingId === entry.sessionId
                   ? 'bg-danger text-neutral-fg'
                   : 'text-neutral-dim hover:bg-surface-hover hover:text-danger'"
@@ -148,13 +150,17 @@ import { ScrollArea } from '@/components/ui/scroll-area'
 import { formatRelativeTime } from '@/composables/logic/formatTime'
 import { useProjectStore } from '@/stores/project'
 
-defineProps<{
+const props = defineProps<{
   /** 归档列表（config.archives 拉取快照，store.archives 经 Sidebar 转发） */
   archives: ArchiveSummary[]
   /** 拉取进行中（空态判定的防闪条件） */
   loading: boolean
   /** 拉取失败原因（null = 无失败；显示重试入口） */
   listError: string | null
+  /** 在途恢复的 sessionId（该行恢复钮禁用——§5.1 loading 语义的防双击落地） */
+  restoringSessionId: string | null
+  /** 在途彻底删除的 sessionId（该行删除钮禁用） */
+  purgingSessionId: string | null
 }>()
 
 const emit = defineEmits<{
@@ -181,6 +187,7 @@ const projectStore = useProjectStore()
 const purgeConfirmingId = ref<string | null>(null)
 
 function onPurgeClick(archive: ArchiveSummary): void {
+  if (props.purgingSessionId === archive.sessionId) return
   if (purgeConfirmingId.value !== archive.sessionId) {
     purgeConfirmingId.value = archive.sessionId
     return

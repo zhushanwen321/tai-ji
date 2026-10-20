@@ -4,7 +4,7 @@
   挂载方（归档列表视图，u-renderer-entry）点击归档行后以本组件呈现：props 收
   config.archives 元素（ArchiveSummary DTO，staging/archived 两态）+ projectName
   （按 projectId 解析的原项目名）；[恢复完整会话] 钮只 emit restore，恢复编排
-  （RPC 调用 / 侧栏切回 / wasActive 回退）在挂载方。
+  （RPC 调用 / 侧栏切回 / 主区回 chat / 列表刷新）在挂载方。
 
   结构（D11）：
   - banner：[已归档] pill + 会话名 + 原项目/压缩信息 meta + 双 tab + accent 恢复钮
@@ -180,8 +180,13 @@ const displayName = computed(() =>
   props.archive.name.length > 0 ? props.archive.name : t('archive.summary.unnamed'),
 )
 
-/** agent 引用视图正文（session_read 返回形态，纯函数预检）。 */
-const agentReference = computed(() => formatArchiveAgentReference(props.archive))
+/**
+ * agent 引用视图正文（session_read 返回形态，纯函数预检）：staging 态内容区由全区
+ * 占位接替（模板 v-if），此处不求值——空串仅为类型完整性兜底，不会渲染。
+ */
+const agentReference = computed(() =>
+  props.archive.status === 'archived' ? formatArchiveAgentReference(props.archive) : '',
+)
 
 /** banner 原项目/压缩信息 meta（archived：`原项目：X · 12.4 MB → 2.5 MB · -80%`；staging：`… · 压缩中`）。 */
 const bannerMeta = computed(() => {

@@ -13,15 +13,19 @@
  * 实现，任一侧改动（头部标注 / turn 分隔 / 尾注 / 占位字面）必须同步另一侧与两侧
  * 测试锚定字面。输入形态差异：extension 消费 ArchiveLedgerEntry（簿记消费子集），
  * 本函数消费 shared ArchiveSummary（config.archives DTO）；两输入的同名字段语义
- * 一致（name 空串 = 未命名，summary staging 期 null）。
+ * 一致（name 空串 = 未命名）。
+ *
+ * 只覆盖 archived 态：renderer 的归档摘要视图在 staging 期渲染全区「摘要生成中」占位
+ * （ArchiveSummaryView 内容区 v-if，双 tab 亦隐藏），staging 头部形态只存在于 agent
+ * 侧真实返回（extension STAGING_HEADER）——本预检函数不为不可达形态维护副本。
  */
 import type { ArchiveSummary } from '@taiji/shared'
 
+/** 归档态摘要条目（预检函数的唯一输入形态；staging 期由组件占位，不进入本函数）。 */
+type ArchivedSummary = Extract<ArchiveSummary, { status: 'archived' }>
+
 /** 归档态头部标注（D7 字面契约，与 extension ARCHIVED_HEADER 同字面）。 */
 const ARCHIVED_HEADER = '状态: 已归档 (archived) — 完整内容已压缩离线，以下仅为摘要'
-
-/** staging 态头部标注（与 extension STAGING_HEADER 同字面）。 */
-const STAGING_HEADER = '状态: 已归档 (staging) — 摘要生成中，请稍后再查'
 
 /** 尾注恢复指引（D7 字面契约，与 extension RESTORE_NOTE 同字面）。 */
 const RESTORE_NOTE = '注: 如需完整历史，请让用户在归档列表中恢复该会话。'
@@ -33,21 +37,13 @@ const USER_ATTACHMENT_PLACEHOLDER = '[图片/附件消息]'
 const AGENT_NO_TEXT_PLACEHOLDER = '（此 turn 以工具调用结束，无文本回复）'
 
 /**
- * 渲染 session_read 对归档 session 的返回正文（用户预检视图用，两态）：
- *
- * - archived：`[session-reader]` 头行 + 头部标注 + `── turn N ──` 分隔的摘要 turns
- *   （user / assistant (摘要) 两行）+ 尾注恢复指引。
- * - staging：头行 + staging 头部标注 + 尾注（无摘要可渲染）。
+ * 渲染 session_read 对归档 session 的返回正文（用户预检视图用）：
+ * `[session-reader]` 头行 + 头部标注 + `── turn N ──` 分隔的摘要 turns
+ * （user / assistant (摘要) 两行）+ 尾注恢复指引。
  */
-export function formatArchiveAgentReference(archive: ArchiveSummary): string {
+export function formatArchiveAgentReference(archive: ArchivedSummary): string {
   const displayName = archive.name.length > 0 ? archive.name : archive.sessionId
   const lines: string[] = []
-  if (archive.status === 'staging') {
-    lines.push(`[session-reader] session: ${displayName}（id: ${archive.sessionId}）`)
-    lines.push(STAGING_HEADER)
-    lines.push(RESTORE_NOTE)
-    return lines.join('\n')
-  }
   lines.push(`[session-reader] session: ${displayName}`)
   lines.push(ARCHIVED_HEADER)
   for (let i = 0; i < archive.summary.turns.length; i++) {

@@ -1,9 +1,12 @@
 /**
  * Sidebar CRUD handler 异常处理测试（W3 / S2）。
  *
- * 验证 onSelectSession / onDeleteSession / onConfirmRename / onNewSession 四个
- * async handler 在底层 reject 时 catch + toastError，不产生 unhandled rejection。
- * 对齐同组件已有的 onSelectAgentCall / onWorkflowAction 模式。
+ * 验证 onSelectSession / onArchiveSession 两个 async handler 在底层 reject 时
+ * catch + toastError，不产生 unhandled rejection。对齐同组件已有的
+ * onSelectAgentCall / onWorkflowAction 模式。
+ *
+ * 覆盖边界：onDeleteSession 的 UI 挂点已迁移为归档钮（handler 保留但无 UI 挂点）；
+ * onConfirmRename / onNewSession 的错误路径不在本文件覆盖范围。
  *
  * 策略：mount Sidebar 前把 useSidebar 返回的方法 mock 成 reject，mock useToast 捕获
  * toastError 调用。mount 后通过 DOM 事件或直接调 handler 触发。
