@@ -152,7 +152,7 @@
 
 <script setup lang="ts">
 import { ref, computed, onUnmounted, watch, nextTick, type Component, type ComponentPublicInstance } from 'vue'
-import { Search, Terminal, FileText, Code, MessageSquare, Clock, Loader2 } from '@lucide/vue'
+import { Search, Terminal, FileText, Code, MessageSquare, Clock, Loader2, Package } from '@lucide/vue'
 import { useI18n } from 'vue-i18n'
 // ui 原语走包内相对导入（不经 @taiji/ui 顶层 barrel）：SearchModal 经顶层 barrel
 // 再导出，顶层 barrel 自引用会封住循环依赖环（R2 S-1）
@@ -200,7 +200,7 @@ const disposeSurfaceRegistration = registerUiModalSurface({
 })
 onUnmounted(disposeSurfaceRegistration)
 
-const ICON: Record<SearchType, Component> = { command: Terminal, file: FileText, symbol: Code, session: MessageSquare }
+const ICON: Record<SearchType, Component> = { command: Terminal, file: FileText, symbol: Code, session: MessageSquare, archive: Package }
 
 /**
  * #9 Tab 切类：activeType ref（null=全部）。Tab/Shift+Tab 循环切换四类 + 全部。
@@ -222,6 +222,7 @@ const kindToType = computed<Record<string, SearchType | undefined>>(() => ({
   file: 'file',
   symbol: 'symbol',
   session: 'session',
+  archive: 'archive',
   recent: undefined,
   suggested: undefined,
   shortcut: undefined,
@@ -306,7 +307,7 @@ function onKeydown(e: KeyboardEvent) {
   // #9 AC-9.1：Tab/Shift+Tab 循环切类（先于 total 检查，使空过滤态仍可继续切换出空类型）。
   if (e.key === 'Tab') {
     e.preventDefault()
-    const types: (SearchType | null)[] = [null, 'command', 'file', 'symbol', 'session']
+    const types: (SearchType | null)[] = [null, 'command', 'file', 'symbol', 'session', 'archive']
     const cur = types.indexOf(activeType.value)
     activeType.value = e.shiftKey
       ? types[(cur - 1 + types.length) % types.length]
@@ -359,9 +360,10 @@ async function confirmSel(): Promise<void> {
   // 显式字段搬运：confirm 只吃 SearchItem（IdxItem 的 idx 是渲染专用，不传）。
   // isSkill/location 必须一并搬运——漏传会让 skill 命令项在 useSearchJump 里读不到标记，
   // 静默退回命令 chip 通路（丢 SKILL.md 路径与多 skill 共存）。
-  const { type, title, sub, icon, commandKind, isSkill, location } = cur
+  // archive 载荷同理——漏传归档项跳转走 archiveOpenFailed 错误路径。
+  const { type, title, sub, icon, commandKind, isSkill, location, archive } = cur
   const result = await confirm(
-    { type, title, sub, icon, commandKind, isSkill, location },
+    { type, title, sub, icon, commandKind, isSkill, location, archive },
     { activeSessionId: props.activeSessionId ?? null },
   )
   if (result.ok) {

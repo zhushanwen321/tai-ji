@@ -1928,8 +1928,8 @@ export const search = {
         { kind: 'suggested', label: '建议命令', items: SEARCH_MOCK.command.slice(0, SEARCH_SUGGESTED_COUNT).map((i) => ({ ...i })) },
       ]
     }
-    const TYPES: SearchItem['type'][] = ['command', 'file', 'symbol', 'session']
-    const LABEL: Record<SearchItem['type'], string> = { command: '命令', file: '文件', symbol: '符号', session: '会话' }
+    const TYPES: SearchItem['type'][] = ['command', 'file', 'symbol', 'session', 'archive']
+    const LABEL: Record<SearchItem['type'], string> = { command: '命令', file: '文件', symbol: '符号', session: '会话', archive: '归档' }
     return TYPES
       .map((t) => ({
         kind: t,

@@ -7,7 +7,7 @@
  * 环境：vitest node。
  */
 import { describe, expect, it, vi, beforeEach } from 'vitest'
-import type { FileNode, SessionGroup } from '@taiji/shared'
+import type { ArchiveSummary, FileNode, SessionGroup } from '@taiji/shared'
 import type { KVStorage } from '../../../platform/port'
 import { createCommandStore } from '../command-store'
 import { useSearchJump } from '../search-jump'
@@ -43,6 +43,8 @@ function makeDeps(overrides?: Partial<SearchDeps>): SearchDeps {
       fileCandidates: vi.fn(async () => [] as FileNode[]),
       sessionList: vi.fn(async () => [] as SessionGroup[]),
       selectSession: vi.fn(async () => {}),
+      archiveList: vi.fn(async () => [] as ArchiveSummary[]),
+      archiveJump: vi.fn(),
       t: vi.fn((key: string) => key),
     },
     commandStore,
@@ -246,5 +248,46 @@ describe('symbol 占位（D-001）', () => {
     expect(deps.ports.fileRead).not.toHaveBeenCalled()
     expect(deps.ports.selectSession).not.toHaveBeenCalled()
     expect(deps.commandStore.pendingSlash.value).toBeNull()
+  })
+})
+
+describe('TC-11: 归档分支（选中归档项 → 主区摘要视图）', () => {
+  function makeArchive(): ArchiveSummary {
+    return {
+      sessionId: 'arc-1',
+      name: 'v0.10 renderer 重构',
+      originalFile: '2026-10-20T00-00-00-000Z_arc-1.jsonl',
+      cwd: '/proj/x',
+      archivedAt: '2026-10-20T00:00:00.000Z',
+      rawBytes: 1024,
+      status: 'archived',
+      codec: 'zstd-3',
+      compressedBytes: 256,
+      sha256: 'a'.repeat(64),
+      summary: { turns: [{ user: 'renderer 重构开始', agent: '六层分层方案' }] },
+    }
+  }
+
+  it('带载荷 → archiveJump 调（载荷原样透传）+ {ok:true}', async () => {
+    const deps = makeDeps()
+    const archive = makeArchive()
+    const { confirm } = useSearchJump(deps)
+    const item: SearchItem = { type: 'archive', title: 'v0.10 renderer 重构', sub: 'renderer 重构开始', archive }
+
+    const result = await confirm(item, { activeSessionId: null })
+
+    expect(result).toEqual({ ok: true })
+    expect(deps.ports.archiveJump).toHaveBeenCalledWith(archive)
+  })
+
+  it('无载荷（recents 回填项只存 title/sub）→ {ok:false, archiveOpenFailed} + archiveJump 不调', async () => {
+    const deps = makeDeps()
+    const { confirm } = useSearchJump(deps)
+    const item: SearchItem = { type: 'archive', title: 'v0.10 renderer 重构', sub: 'renderer 重构开始' }
+
+    const result = await confirm(item, { activeSessionId: null })
+
+    expect(result.ok).toBe(false)
+    expect(deps.ports.archiveJump).not.toHaveBeenCalled()
   })
 })
