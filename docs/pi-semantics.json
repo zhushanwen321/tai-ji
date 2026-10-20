@@ -1823,5 +1823,34 @@
       "test": "extensions/universal/provider-live-sync/src/__tests__/sdk-contract.test.ts"
     },
     "verifiedWith": "1.0.0"
+  },
+  {
+    "id": "PS-86",
+    "claim": "R7 承重（refreshModels 钩子 falsy 返回=保留注入）：pi 1.0.0 的 ProviderConfig.refreshModels 钩子返回 falsy（undefined）时 composeProvider 合成包装的发布分支跳过（provider-composer.js 的 if (refreshed) 不进）→ 注册表保留当前注入集，不清空不抛错（publish.update 内只落 oauthCredential，不触碰 models）；且 refresh() 对 refreshable provider 无论 allowNetwork 都先跑一轮 allowNetwork:false 的 phase 钩子（pi-ai ModelsStore.refresh），本地零网络路径也会真实调用钩子。类型声明不含 undefined（types.d.ts 的 ProviderConfig 与 provider-composer.d.ts 的 ProviderConfigInput 同款），扩展按实装语义声明宽一档并显式断言挂载（catalog-bridge 的 RefreshModelsFn，R7「瞬时读失败保留最后一份好快照」依赖它）。若 pi 收紧为 falsy 视为错误或清空注入集，R7 fail-safe 静默失效，须改为发布前拦截或恢复上次快照",
+    "piAnchor": [
+      {
+        "pkg": "pi-coding-agent",
+        "distPath": "dist/core/extensions/types.d.ts",
+        "symbol": "ProviderConfig.refreshModels（声明不含 undefined）",
+        "note": ":1403 refreshModels?(context: RefreshModelsContext): Promise<ProviderModelConfig[]>（pi 声明不收 undefined；扩展侧宽一档声明 + 显式断言挂载的依据，catalog-bridge 的 RefreshModelsFn 类型注释同锚）【行号锚基于 pi@1.0.0 实装实测】"
+      },
+      {
+        "pkg": "pi-coding-agent",
+        "distPath": "dist/core/provider-composer.js",
+        "symbol": "composeProvider 合成 refreshModels 包装的 falsy 发布分支",
+        "note": ":384 refreshModels: base?.refreshModels || extension?.refreshModels || extension?.oauth?.modifyModels（合成条件）；:389 refreshed = await extension.refreshModels(context)；:395 if (refreshed) {（falsy 不进，全文件唯一）；:397 发布分支 applyExtension(providerId, applyModelsJson(...), { ...extension, models: refreshed })——falsy 时 publish.update 只落 extensionOAuthCredential，注册表保留当前注入【行号锚基于 pi@1.0.0 实装实测】"
+      },
+      {
+        "pkg": "pi-ai",
+        "distPath": "dist/models.js",
+        "symbol": "ModelsStore.refresh / runProviderRefreshPhase（钩子的零网络调用路径）",
+        "note": ":181 refreshable 过滤（provider.refreshModels !== undefined）；:195 await this.runProviderRefreshPhase(provider, storedCredential, false, undefined, generation, signal)（在 !allowNetwork 早退 :198 之前——allowNetwork:false 的 refresh 也会真实调用钩子一次）；:163-171 runProviderRefreshPhase 内 :165 await provider.refreshModels({ credential, stored, publish, allowNetwork, force, signal })【行号锚基于 pi@1.0.0 实装实测】"
+      }
+    ],
+    "guard": {
+      "type": "probe",
+      "test": "extensions/universal/provider-live-sync/src/__tests__/pi-semantics-catalog-injection.test.ts"
+    },
+    "verifiedWith": "1.0.0"
   }
 ]

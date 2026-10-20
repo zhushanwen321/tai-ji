@@ -1,10 +1,11 @@
 /**
- * pi 语义 guard 探针 —— 登记表 docs/pi-semantics.json 的 PS-81 ~ PS-84 四条断言。
+ * pi 语义 guard 探针 —— 登记表 docs/pi-semantics.json 的 PS-81 ~ PS-84 + PS-86 断言。
  *
- * 这四条是 provider-catalog-sync 设计（目录投喂）最重的 pi 私有语义依赖面，方案成立全部
- * 系于它们（设计 §2.5 前提 1-4）。pi 升级时 `scripts/check-pi-semantics.mjs` 的四包版本
+ * PS-81 ~ PS-84 四条是 provider-catalog-sync 设计（目录投喂）最重的 pi 私有语义依赖面，
+ * 方案成立全部系于它们（设计 §2.5 前提 1-4）；PS-86 是 R7 规则的承重语义（refreshModels
+ * 钩子 falsy 返回=保留注入集）。pi 升级时 `scripts/check-pi-semantics.mjs` 的四包版本
  * 门禁会 fail 并列出待重验条目，本文件即重验入口——装配顺序 / 幂等语义 / 映射替换 /
- * 官方导出任一漂移都在此变红，不依赖人读 ADR 记忆。
+ * 官方导出 / 钩子 falsy 保留任一漂移都在此变红，不依赖人读 ADR 记忆。
  *
  * 断言分两层：
  * - **源码层**：读 pi 实装 dist 文件，断言关键语句的存在与**先后顺序**（装配链的顺序
@@ -377,5 +378,54 @@ describe('PS-84 —— 扩展进程内可经 pi-ai 官方导出拿到三态判�
     expect(lineOf(src, 'export function getBuiltinModelDataGeneratedAt() {')).toBeGreaterThan(0)
     // 时刻锚读的是编译期 manifest 的 generatedAt 字段（非运行时时钟）
     expect(lineOf(src, 'const generatedAt = Date.parse(modelDataManifest.generatedAt);')).toBeGreaterThan(0)
+  })
+})
+
+// ─────────────────────────────────────────────────────────────────────
+describe('PS-86 —— refreshModels 钩子 falsy 返回=保留注入集（R7 承重）', () => {
+  it('运行时层：钩子返回 undefined → refresh() 后注入集保留（发布分支被跳过）', async () => {
+    const { rt, baseline } = await runtimeWithFullBaseline(PROVIDER, tmpDir)
+
+    // R7 形态：钩子按实装语义返回 undefined（「本次不发布新列表」，瞬时读失败不清空）。
+    // hookCalled 自证钩子被真实调用——pi-ai ModelsStore.refresh 对 refreshable provider
+    // 无论 allowNetwork 都先跑一轮 allowNetwork:false 的 phase（:195 早退 :198 之前），
+    // 否则「注入集不变」可能是「钩子根本没被调用」的假绿。
+    let hookCalled = false
+    rt.registerProvider(PROVIDER, { refreshModels: async () => { hookCalled = true; return undefined } })
+    await rt.refresh({ allowNetwork: false })
+
+    expect(hookCalled).toBe(true)
+    expectVisibleIds(rt, PROVIDER, baseline.map((m) => m.id))
+  })
+
+  it('运行时层：对照——同一链路钩子返回有值列表时发布分支生效（可见集合替换）', async () => {
+    const { rt, baseline } = await runtimeWithFullBaseline(PROVIDER, tmpDir)
+
+    rt.registerProvider(PROVIDER, { refreshModels: async () => [{ ...baseline[0] }] })
+    await rt.refresh({ allowNetwork: false })
+
+    expectVisibleIds(rt, PROVIDER, [baseline[0].id])
+  })
+
+  it('源码层：类型声明不含 undefined + 合成包装的 falsy 发布分支', () => {
+    // 声明层锚：pi 声明不收 undefined——catalog-bridge 侧宽一档声明（RefreshModelsFn）
+    // + 显式断言挂 ProviderConfig 的依据（类型声明若改收 undefined，断言即多余可清理）
+    const types = readDist(PI_AGENT_DIST, 'core/extensions/types.d.ts')
+    expect(
+      lineOf(types, 'refreshModels?(context: RefreshModelsContext): Promise<ProviderModelConfig[]>;'),
+    ).toBeGreaterThan(0)
+
+    const src = PROVIDER_COMPOSER()
+    const callLine = lineOf(src, 'refreshed = await extension.refreshModels(context);')
+    expect(callLine).toBeGreaterThan(0)
+    // falsy 分支：if (refreshed) 才 applyExtension 发布——返回 undefined 即跳过（保留注入）
+    const branchLine = lineOfAfter(src, 'refreshed = await extension.refreshModels(context);', 'if (refreshed) {')
+    expect(branchLine, '发布分支 if (refreshed) 缺失').toBeGreaterThan(callLine)
+    const publishLine = lineOfAfter(
+      src,
+      'if (refreshed) {',
+      'applyExtension(providerId, applyModelsJson(providerId, getAllProviderModels(base), config), {',
+    )
+    expect(publishLine, '发布分支内的 applyExtension 缺失').toBeGreaterThan(branchLine)
   })
 })
