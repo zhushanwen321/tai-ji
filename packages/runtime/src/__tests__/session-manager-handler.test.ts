@@ -19,6 +19,8 @@ import { SessionManagerHandler } from '../transport/session-manager-handler.js'
 import type { SessionManagerHandlerOptions } from '../transport/session-manager-handler.js'
 import { deliverRespondTargets } from '../transport/session-manager-handler.js'
 import type { SessionDeliveryRegistry } from '../services/session/session-delivery-registry.js'
+import { ArchiveError } from '../services/archive/archive-service.js'
+import type { ArchiveService } from '../services/archive/archive-service.js'
 import { createClaimLedger } from '../services/session/notify-claims.js'
 import type { ClaimLedger, SettleOutcome } from '../services/session/notify-claims.js'
 import type { ISessionService, SessionCreateOptions } from '../interfaces.js'
@@ -1115,6 +1117,280 @@ describe('SessionManagerHandler', () => {
       } finally {
         info.mockRestore()
       }
+    })
+  })
+
+  // ─── session-manager-archive-delete U3：delete/archive 终局双 action ────────────
+  // 覆盖验收条款①-⑤：归档成功三步收尾（watch 收 'exited' + 双债全消）/ 归档失败债权零损伤 /
+  // delete 成功回包与死亡发声共存 / 越权·已归档·扫描态·统一文案四类归属判定 / ArchiveError
+  // code additive 透传。
+  describe('session-manager-archive-delete U3: delete/archive 终局双 action', () => {
+    const VALID_NID = 'sm-12345678-1234-4234-8234-123456789014'
+    const LIFETIME_NID = 'sm-12345678-1234-4234-8234-123456789015'
+    const TARGET_ERROR = 'target session not found or not managed by this agent'
+
+    /** mock ArchiveService：handler 只消费 archive() 一个方法 */
+    function makeMockArchiveService(archive: ReturnType<typeof vi.fn>): ArchiveService {
+      return { archive } as unknown as ArchiveService
+    }
+
+    /** 归档场景脚手架：claim + lifetime 双债权各挂 watch（验收①「双债全消」的观测面） */
+    function makeArchiveFixture(archive: ReturnType<typeof vi.fn>): SessionManagerHandlerOptions {
+      const opts = makeMockOptions({ archiveService: makeMockArchiveService(archive) })
+      opts.claims!.arm({ parentSid: 'sid-parent', notifyId: VALID_NID, kind: 'claim', sessionId: 's1' })
+      opts.claims!.markInjected('sid-parent', VALID_NID)
+      // lifetime 债权：create 恒 arm 的死亡通知形态（abortClaims 覆盖不到，唯收尾三步终结）
+      opts.claims!.arm({ parentSid: 'sid-parent', notifyId: LIFETIME_NID, kind: 'lifetime', sessionId: 's1' })
+      opts.claims!.openWatch('sid-parent', VALID_NID, 'w-claim')
+      opts.claims!.openWatch('sid-parent', LIFETIME_NID, 'w-lifetime')
+      return opts
+    }
+
+    /** 归属拒绝通用断言：统一文案 + 执行体不被触碰（service 与 archiveService 双观测点） */
+    async function expectTargetRejected(
+      action: 'delete' | 'archive',
+      serviceOverrides: Partial<ISessionService>,
+      executeSpies: { sessionDelete: ISessionService['delete']; archive: ArchiveService['archive'] },
+    ): Promise<void> {
+      const opts = makeMockOptions({
+        archiveService: makeMockArchiveService(vi.fn(executeSpies.archive)),
+        sessionService: makeMockSessionService({
+          delete: vi.fn(executeSpies.sessionDelete),
+          ...serviceOverrides,
+        }),
+      })
+      const handler = new SessionManagerHandler(opts)
+      await handler.handle('req-1', 'sid-parent', action, { sessionId: 's1' })
+      expect(respondAt(opts).error).toBe(TARGET_ERROR)
+      expect(executeSpies.sessionDelete).not.toHaveBeenCalled()
+      expect(executeSpies.archive).not.toHaveBeenCalled()
+    }
+
+    it('delete 成功：sessionService.delete 被调 + respond {sessionId, deleted:true}（验收③回包面）', async () => {
+      const sessionDelete = vi.fn().mockResolvedValue(undefined)
+      const opts = makeMockOptions({
+        sessionService: makeMockSessionService({ delete: sessionDelete }),
+      })
+      const handler = new SessionManagerHandler(opts)
+
+      await handler.handle('req-del', 'sid-parent', 'delete', { sessionId: 's1' })
+
+      expect(sessionDelete).toHaveBeenCalledWith('s1')
+      expect(opts.sendExtensionUiResponse).toHaveBeenCalledWith(
+        'sid-parent',
+        'req-del',
+        JSON.stringify({ sessionId: 's1', deleted: true }),
+        'select',
+      )
+    })
+
+    it('delete 成功：handler 零债权操作，删除链死亡发声照常收 deleted（验收③ watch 面）', async () => {
+      // handler 不手动收尾（职责 4：death latch 'delete' → 组合根 speakSessionDeath → watch
+      // 自动收 'deleted'）——mock delete 内复刻组合根 subscribeSessionDeathDisposition 同款
+      // 三步发声，断言挂起 watch 收到 'deleted' 词形且 handler 无重复收尾（无第二条 death respond）。
+      const sessionDelete = vi.fn().mockImplementation(async () => {
+        const claims = opts.claims!
+        const batch = claims.onSessionDeath('s1', 'delete')
+        deliverRespondTargets(claims, batch.targets, handler.watchRespond)
+        claims.clearSession('s1')
+      })
+      const opts = makeMockOptions({
+        sessionService: makeMockSessionService({ delete: sessionDelete }),
+      })
+      opts.claims!.arm({ parentSid: 'sid-parent', notifyId: VALID_NID, kind: 'claim', sessionId: 's1' })
+      opts.claims!.markInjected('sid-parent', VALID_NID)
+      opts.claims!.openWatch('sid-parent', VALID_NID, 'w-del')
+      const handler = new SessionManagerHandler(opts)
+
+      await handler.handle('req-del', 'sid-parent', 'delete', { sessionId: 's1' })
+
+      const mock = opts.sendExtensionUiResponse as ReturnType<typeof vi.fn>
+      // 第 1 条 = watch 收 'deleted'（death cause 词形映射），第 2 条 = 工具回包
+      expect(mock).toHaveBeenCalledTimes(2)
+      expect(mock.mock.calls[0]).toEqual([
+        'sid-parent',
+        'w-del',
+        JSON.stringify({ reason: 'deleted', sessionId: 's1', deathSeq: 1, fulfillsN: 1 }),
+        'select',
+      ])
+      expect(mock.mock.calls[1]).toEqual([
+        'sid-parent',
+        'req-del',
+        JSON.stringify({ sessionId: 's1', deleted: true }),
+        'select',
+      ])
+      expect(opts.claims!.getClaim('sid-parent', VALID_NID)).toBeUndefined()
+    })
+
+    it('archive 成功：双债全消 + 双 watch 收 exited + claims 清账 + 回包（验收①）', async () => {
+      const archive = vi.fn().mockImplementation(async () => {
+        // 时序不变量锚：收尾必须在 archive() resolve 之后——此刻双债仍在册
+        expect(opts.claims!.getClaim('sid-parent', VALID_NID)?.state).toBe('injected')
+        expect(opts.claims!.getClaim('sid-parent', LIFETIME_NID)?.kind).toBe('lifetime')
+        return { sessionId: 's1' }
+      })
+      const opts = makeArchiveFixture(archive)
+      const handler = new SessionManagerHandler(opts)
+
+      await handler.handle('req-arch', 'sid-parent', 'archive', { sessionId: 's1' })
+
+      expect(archive).toHaveBeenCalledWith('s1')
+      const mock = opts.sendExtensionUiResponse as ReturnType<typeof vi.fn>
+      // 三步收尾：双 watch 各收一条 'exited'（同 deathSeq 批，fulfillsN 只计 kind=claim）
+      expect(mock).toHaveBeenCalledTimes(3)
+      expect(mock.mock.calls[0]).toEqual([
+        'sid-parent',
+        'w-claim',
+        JSON.stringify({ reason: 'exited', sessionId: 's1', deathSeq: 1, fulfillsN: 1 }),
+        'select',
+      ])
+      expect(mock.mock.calls[1]).toEqual([
+        'sid-parent',
+        'w-lifetime',
+        JSON.stringify({ reason: 'exited', sessionId: 's1', deathSeq: 1, fulfillsN: 1 }),
+        'select',
+      ])
+      // 成功回包殿后
+      expect(mock.mock.calls[2]).toEqual([
+        'sid-parent',
+        'req-arch',
+        JSON.stringify({ sessionId: 's1', archived: true }),
+        'select',
+      ])
+      // claims 清账：claim + lifetime 双记录全消、undelivered 计数器清零（clearSession 第三步）
+      expect(opts.claims!.getClaim('sid-parent', VALID_NID)).toBeUndefined()
+      expect(opts.claims!.getClaim('sid-parent', LIFETIME_NID)).toBeUndefined()
+      expect(opts.claims!.count()).toBe(0)
+      expect(opts.claims!.undeliveredCount('s1')).toBe(0)
+    })
+
+    it('archive 失败（archive_generating）：error envelope 附 code + 债权零损伤 + send 后仍可 arm/兑现（验收②⑤）', async () => {
+      const archive = vi.fn().mockRejectedValue(new ArchiveError('archive_generating', '会话正在生成中，无法归档 (sessionId=s1)'))
+      const opts = makeMockOptions({ archiveService: makeMockArchiveService(archive) })
+      opts.claims!.arm({ parentSid: 'sid-parent', notifyId: VALID_NID, kind: 'claim', sessionId: 's1' })
+      opts.claims!.markInjected('sid-parent', VALID_NID)
+      const handler = new SessionManagerHandler(opts)
+
+      await handler.handle('req-arch', 'sid-parent', 'archive', { sessionId: 's1' })
+
+      // code additive 透传（验收⑤）：善后层恢复指引的第一跳
+      const response = respondAt(opts)
+      expect(response.error).toBe('会话正在生成中，无法归档 (sessionId=s1)')
+      expect(response.code).toBe('archive_generating')
+      // 债权零损伤（验收②前半）：在途 claim 原样在册
+      expect(opts.claims!.getClaim('sid-parent', VALID_NID)?.state).toBe('injected')
+      expect(opts.claims!.undeliveredCount('s1')).toBe(0)
+      // 债权零损伤（验收②后半）：失败后 send 照常 arm、内核回执后照常兑现
+      await handler.handle('req-send', 'sid-parent', 'send', { sessionId: 's1', prompt: 'retry', notifyId: LIFETIME_NID })
+      expect(respondAt(opts, 1)).toEqual({ queued: true, willNotify: true })
+      expect(opts.claims!.getClaim('sid-parent', LIFETIME_NID)?.state).toBe('armed')
+      opts.claims!.markInjected('sid-parent', LIFETIME_NID)
+      // 双 claim 各挂 watch（targets 只含挂 watch 的记录，notify-claims targetsOf）后 settle——
+      // 兑现面 = archive 失败留下的 VALID_NID + 失败后新 arm 的 LIFETIME_NID 全部 injected
+      // 可兑现，「send 后仍可 arm/兑现」的最强形态（验收②）
+      opts.claims!.openWatch('sid-parent', VALID_NID, 'w-after-fail-1')
+      opts.claims!.openWatch('sid-parent', LIFETIME_NID, 'w-after-fail-2')
+      const settleBatch = opts.claims!.settle('s1', 'done')
+      expect(settleBatch.targets.map((t) => t.notifyId)).toEqual([VALID_NID, LIFETIME_NID])
+    })
+
+    it('非 ArchiveError 的 archive 失败：error envelope 不附 code（additive 边界）', async () => {
+      const archive = vi.fn().mockRejectedValue(new Error('Session s1 not found (不在内存 Map 且磁盘无主文件，无归档对象)'))
+      const opts = makeMockOptions({ archiveService: makeMockArchiveService(archive) })
+      const handler = new SessionManagerHandler(opts)
+
+      await handler.handle('req-arch', 'sid-parent', 'archive', { sessionId: 's1' })
+
+      const response = respondAt(opts)
+      expect(response.error).toContain('not found')
+      expect(response.code).toBeUndefined()
+    })
+
+    it('archiveService 未注入：archive 报可操作错误，不静默（职责 1 缺省语义）', async () => {
+      const opts = makeMockOptions({ archiveService: undefined })
+      const handler = new SessionManagerHandler(opts)
+
+      await handler.handle('req-arch', 'sid-parent', 'archive', { sessionId: 's1' })
+
+      const response = respondAt(opts)
+      expect(response.error).toMatch(/archive service is not available/)
+    })
+
+    it('越权（内存态 user session）：delete/archive 统一文案 + 执行体不触碰（验收④）', async () => {
+      const userSummary = makeSessionSummary({ id: 's1', spawnSource: 'user', parentAgentSessionId: undefined })
+      const sessionDelete = vi.fn<(sid: string) => Promise<void>>()
+      const archive = vi.fn<(sid: string) => Promise<{ sessionId: string }>>()
+      const overrides = {
+        getSummary: vi.fn().mockReturnValue(userSummary),
+        // 磁盘回退腿同样查无（越权目标非本父 managed child，扫描不救）
+        listPersistedSessions: vi.fn().mockReturnValue([]),
+      }
+      await expectTargetRejected('delete', overrides, { sessionDelete, archive })
+      await expectTargetRejected('archive', overrides, { sessionDelete, archive })
+    })
+
+    it('已归档（内存与 sessions 树均无记录）：统一文案（验收④）', async () => {
+      const sessionDelete = vi.fn<(sid: string) => Promise<void>>()
+      const archive = vi.fn<(sid: string) => Promise<{ sessionId: string }>>()
+      const overrides = {
+        getSummary: vi.fn().mockReturnValue(undefined),
+        listPersistedSessions: vi.fn().mockReturnValue([]),
+      }
+      await expectTargetRejected('delete', overrides, { sessionDelete, archive })
+      await expectTargetRejected('archive', overrides, { sessionDelete, archive })
+    })
+
+    it('越权（磁盘扫描态但父不匹配）：统一文案（验收④——扩展校验条件与 isOwnedBy 同判）', async () => {
+      const otherChild = makeSessionSummary({ id: 's1', spawnSource: 'agent', parentAgentSessionId: 'another-agent' })
+      const sessionDelete = vi.fn<(sid: string) => Promise<void>>()
+      const archive = vi.fn<(sid: string) => Promise<{ sessionId: string }>>()
+      const overrides = {
+        getSummary: vi.fn().mockReturnValue(undefined),
+        listPersistedSessions: vi.fn().mockReturnValue([{ cwd: '/w', sessions: [otherChild] }]),
+      }
+      await expectTargetRejected('delete', overrides, { sessionDelete, archive })
+      await expectTargetRejected('archive', overrides, { sessionDelete, archive })
+    })
+
+    it('扫描态磁盘回退：内存无记录、磁盘为本父 managed child → 放行（验收④）', async () => {
+      const scannedChild = makeSessionSummary({ id: 's1', spawnSource: 'agent', parentAgentSessionId: 'sid-parent' })
+      const serviceOverrides = {
+        getSummary: vi.fn().mockReturnValue(undefined),
+        listPersistedSessions: vi.fn().mockReturnValue([{ cwd: '/w', sessions: [scannedChild] }]),
+      }
+      const archive = vi.fn().mockResolvedValue({ sessionId: 's1' })
+      const opts = makeMockOptions({
+        archiveService: makeMockArchiveService(archive),
+        sessionService: makeMockSessionService({ delete: vi.fn().mockResolvedValue(undefined), ...serviceOverrides }),
+      })
+      const handler = new SessionManagerHandler(opts)
+
+      await handler.handle('req-arch', 'sid-parent', 'archive', { sessionId: 's1' })
+      expect(archive).toHaveBeenCalledWith('s1')
+      expect(respondAt(opts)).toEqual({ sessionId: 's1', archived: true })
+
+      await handler.handle('req-del', 'sid-parent', 'delete', { sessionId: 's1' })
+      expect(opts.sessionService.delete).toHaveBeenCalledWith('s1')
+      expect(respondAt(opts, 1)).toEqual({ sessionId: 's1', deleted: true })
+    })
+
+    it('既有 action 不受扩展校验影响：send 对扫描态目标仍按 isOwnedBy 拒绝（行为保持）', async () => {
+      const delivery = makeMockDelivery()
+      const opts = makeMockOptions({
+        delivery,
+        sessionService: makeMockSessionService({
+          getSummary: vi.fn().mockReturnValue(undefined),
+          listPersistedSessions: vi.fn().mockReturnValue([
+            { cwd: '/w', sessions: [makeSessionSummary({ id: 's1' })] },
+          ]),
+        }),
+      })
+      const handler = new SessionManagerHandler(opts)
+
+      await handler.handle('req-send', 'sid-parent', 'send', { sessionId: 's1', prompt: 'x' })
+
+      expect(respondAt(opts).error).toBe('target session is not managed by this agent')
+      expect(delivery.getOrCreateDelivery).not.toHaveBeenCalled()
     })
   })
 

@@ -4,7 +4,8 @@
  * pi extension 通过 select 通道 + SESSION_MANAGER_MARKER 发送 session 管理请求，
  * runtime event-adapter 检测 marker 后路由到本 handler 的 handle() 方法。
  *
- * 7 个 action：create / send / history / status / list / abort / watch（notify-once D2/D6）。
+ * 9 个 action：create / send / history / status / list / abort / delete / archive /
+ * watch（notify-once D2/D6；delete/archive 终局双 action 见 session-manager-archive-delete U3）。
  * 响应通过 sendExtensionUiResponse 回写 pi（select value 通道）。
  *
  * notify-once 桥接（设计 U3）：本 handler 是债权状态机（ClaimLedger）的受理侧——
@@ -27,6 +28,10 @@ import type { SessionDeliveryRegistry } from '../services/session/session-delive
 // 通知债权状态机（u-claims）：本 handler 是其唯一受理侧消费方；组合根 index.ts 经
 // 本模块导出的映射/回执助手（toWatchRespondPayload 等）消费同一批素材。
 import type { ClaimLedger, RespondPayload, RespondTarget, SettleOutcome } from '../services/session/notify-claims.js'
+// ArchiveError 值导入（handle() catch 对归档域错误的 instanceof 特判，code 透传）；
+// ArchiveService 仅类型导入（可选注入，缺省 = 停用象限报可操作错误）。
+import { ArchiveError } from '../services/archive/archive-service.js'
+import type { ArchiveService } from '../services/archive/archive-service.js'
 import { toErrorMessage } from '../utils/errors.js'
 import { SESSION_MANAGER_ACTIONS } from '@zhushanwen/extension-protocol'
 import {
@@ -36,6 +41,8 @@ import {
   isSessionManagerStatusParams,
   isSessionManagerListParams,
   isSessionManagerAbortParams,
+  isSessionManagerDeleteParams,
+  isSessionManagerArchiveParams,
   isSessionManagerWatchParams,
   isSessionManagerNotifyId,
 } from '@zhushanwen/extension-protocol'
@@ -48,12 +55,16 @@ import type {
   SessionManagerStatusParams,
   SessionManagerListParams,
   SessionManagerAbortParams,
+  SessionManagerDeleteParams,
+  SessionManagerArchiveParams,
   SessionManagerCreateResult,
   SessionManagerSendResult,
   SessionManagerHistoryResult,
   SessionManagerStatusResult,
   SessionManagerListResult,
   SessionManagerAbortResult,
+  SessionManagerDeleteResult,
+  SessionManagerArchiveResult,
   SessionManagerErrorResult,
   SessionManagerWatchParams,
   SessionManagerWatchRespondPayload,
@@ -62,6 +73,18 @@ import type {
 /** send 失败时附带的恢复指引（target 不可达：先查状态再重试投递） */
 const SEND_UNREACHABLE_HINT =
   'target session unreachable; retry send_to_session after checking get_session_status'
+
+/**
+ * delete/archive 归属校验失败的统一文案（session-manager-archive-delete 设计决策 6）：
+ * 一句话涵盖越权 / 已归档 / 已删除三类不可达——不区分具体成因，防非属主借差异化
+ * 文案探测 sessionId 存在性（与 status 的 not_found 折叠同源语义）。区别于 send 等既有
+ * action 的 'target session is not managed by this agent'（行为保持不动）。
+ */
+const TARGET_NOT_OWNED_ERROR = 'target session not found or not managed by this agent'
+
+/** archive action 在归档服务未装配时的可操作错误（缺省注入 = 停用象限显式报错，不静默） */
+const ARCHIVE_SERVICE_MISSING_ERROR =
+  'archive service is not available in this runtime — archive_session requires the taiji desktop runtime with archive wiring'
 
 /**
  * 「send/create 未带 notifyId → 不 arm」once 日志（D6 兼容矩阵象限2 / 附录 C-3）：
@@ -185,6 +208,8 @@ type SessionManagerDispatchResult =
   | SessionManagerStatusResult
   | SessionManagerListResult
   | SessionManagerAbortResult
+  | SessionManagerDeleteResult
+  | SessionManagerArchiveResult
   | SessionManagerErrorResult
 
 /**
@@ -224,6 +249,13 @@ export interface SessionManagerHandlerOptions {
    * watch 走 fail-closed 'cancelled'（旧 runtime 兼容象限的静默降级形态），undeliveredResults 恒 0。
    */
   claims?: ClaimLedger
+  /**
+   * 归档服务（session-manager-archive-delete U3，组合根构造后经 server.setServices
+   * optional.archive → assembleSessionManagerHandler 注入）：archive action 的执行体。
+   * **可选 = 停用语义**：缺席时 archive action 报可操作错误（ARCHIVE_SERVICE_MISSING_ERROR），
+   * 不静默；delete 不消费本依赖（执行体 = sessionService.delete，必在）。
+   */
+  archiveService?: ArchiveService
 }
 
 /**
@@ -241,7 +273,7 @@ export class SessionManagerHandler {
    *
    * @param requestId       pi extension_ui_request id（回写 response 用；watch 分支 = watchId）
    * @param parentSessionId 发起方 session id（response 直发其 pi 进程；create 时注入为父 id）
-   * @param action          7 个 action 之一，或 marker 解析失败哨兵 '__malformed__'
+   * @param action          9 个 action 之一，或 marker 解析失败哨兵 '__malformed__'
    * @param params          action 对应的参数（已由 event-adapter 解析）
    */
   async handle(
@@ -268,6 +300,11 @@ export class SessionManagerHandler {
       // create 已成功但后续步骤失败时，handleCreate 在错误对象上携带 sessionId
       // → 附 sessionId + hint 恢复路径（设计文档 §5.2 原子性 catch 面）。
       const errorResult: SessionManagerErrorResult = { error: toErrorMessage(e) }
+      // ArchiveError 特判（session-manager-archive-delete 决策 5）：归档域结构化错误码
+      // additive 透传（如 archive_generating）——善后层恢复指引的第一跳；非归档域错误无 code。
+      if (e instanceof ArchiveError) {
+        errorResult.code = e.code
+      }
       const createdId = (e as { sessionId?: string }).sessionId
       if (createdId) {
         errorResult.sessionId = createdId
@@ -339,6 +376,14 @@ export class SessionManagerHandler {
         isParams: isSessionManagerAbortParams,
         run: (parentSessionId, params) => this.handleAbort(parentSessionId, params),
       },
+      delete: {
+        isParams: isSessionManagerDeleteParams,
+        run: (parentSessionId, params) => this.handleDelete(parentSessionId, params),
+      },
+      archive: {
+        isParams: isSessionManagerArchiveParams,
+        run: (parentSessionId, params) => this.handleArchive(parentSessionId, params),
+      },
       watch: {
         isParams: isSessionManagerWatchParams,
         run: (parentSessionId, params, requestId) => this.handleWatch(requestId, parentSessionId, params),
@@ -377,6 +422,23 @@ export class SessionManagerHandler {
   private isOwnedBy(parentSessionId: string, sessionId: string): boolean {
     const summary = this.opts.sessionService.getSummary(sessionId)
     return summary?.spawnSource === 'agent' && summary?.parentAgentSessionId === parentSessionId
+  }
+
+  /**
+   * 扩展归属校验（session-manager-archive-delete 决策 6，仅 delete/archive 消费）：
+   * 内存 `getSummary` 判定 ‖ `listPersistedSessions` 磁盘回退判定，条件与 isOwnedBy
+   * 完全相同（spawnSource='agent' 且 parentAgentSessionId = 发起方），仅数据源加磁盘
+   * 回退——覆盖父会话重启后子会话的扫描态（list 可见但内存 Map 无记录）。
+   * **不动现有 isOwnedBy**（send/history/status/abort 对扫描态的行为属既有语义）。
+   * 已归档/已删除目标两数据源均查无 → false（统一文案，涵盖三类不可达）。
+   */
+  private isOwnedByIncludingScanned(parentSessionId: string, sessionId: string): boolean {
+    if (this.isOwnedBy(parentSessionId, sessionId)) return true
+    const scanned = this.opts.sessionService
+      .listPersistedSessions()
+      .flatMap((g) => g.sessions)
+      .find((s) => s.id === sessionId)
+    return scanned?.spawnSource === 'agent' && scanned?.parentAgentSessionId === parentSessionId
   }
 
   /**
@@ -704,6 +766,57 @@ export class SessionManagerHandler {
     }
     await this.opts.sessionService.abort(sessionId)
     return { success: true }
+  }
+
+  /**
+   * delete 分支（session-manager-archive-delete 决策 5）：真删除权威 = sessionService.delete
+   * （death latch 'delete' → 组合根 speakSessionDeath 发声 → 挂起 watch 自动收 'deleted'；
+   * 整树废纸篓 + 侧栏消失均服务内建）——handler 不手动收尾债权（与 handleArchive 的差异：
+   * delete 的收尾由删除链内建的死亡处置汇聚点完成，重复收尾会与 'deleted' 词形冲突）。
+   * 归属校验用扩展形态（含磁盘回退）：父会话重启后子会话呈扫描态，仍可被其属主删除。
+   */
+  private async handleDelete(parentSessionId: string, params: SessionManagerDeleteParams): Promise<SessionManagerDeleteResult> {
+    const { sessionId } = params
+    if (!this.isOwnedByIncludingScanned(parentSessionId, sessionId)) {
+      throw new Error(TARGET_NOT_OWNED_ERROR)
+    }
+    await this.opts.sessionService.delete(sessionId)
+    return { sessionId, deleted: true }
+  }
+
+  /**
+   * archive 分支（session-manager-archive-delete 决策 2/5）：扩展归属校验 → 归档服务执行 →
+   * **成功后**三步收尾（与组合根 speakSessionDeath 序列逐行对齐——onSessionDeath('exit') 一次
+   * 终结全部种类债权（含 abortClaims 覆盖不到的 lifetime）→ deliverRespondTargets（挂起 watch
+   * 统一收 'exited'，会话退场的事实陈述）→ clearSession 清残留记录与 undelivered 计数器）。
+   *
+   * 时序不变量：收尾必须在 archive() resolve 之后——三门任一拒绝（archive_generating 等）
+   * 时债权零损伤（先收尾会把「等完成通知再重试」的在途债权不可逆抹除）。
+   * 幂等形态与组合根同款：空批（terminated.length === 0）不 respond；clearSession 无条件
+   * 执行（迟到记录查无即静默）；pendingExitDeaths latch 属组合根私有，handler 侧不涉及。
+   * claims 缺席 = 停用象限：无债权可收，跳过收尾直接回成功。
+   */
+  private async handleArchive(parentSessionId: string, params: SessionManagerArchiveParams): Promise<SessionManagerArchiveResult> {
+    const { sessionId } = params
+    if (!this.isOwnedByIncludingScanned(parentSessionId, sessionId)) {
+      throw new Error(TARGET_NOT_OWNED_ERROR)
+    }
+    const archiveService = this.opts.archiveService
+    if (!archiveService) {
+      throw new Error(ARCHIVE_SERVICE_MISSING_ERROR)
+    }
+    await archiveService.archive(sessionId)
+    const claims = this.opts.claims
+    if (claims) {
+      const batch = claims.onSessionDeath(sessionId, 'exit')
+      if (batch.terminated.length > 0) {
+        deliverRespondTargets(claims, batch.targets, this.watchRespond, {
+          sessionFilePath: this.resolveSessionFile(sessionId),
+        })
+      }
+      claims.clearSession(sessionId)
+    }
+    return { sessionId, archived: true }
   }
 
   /**
