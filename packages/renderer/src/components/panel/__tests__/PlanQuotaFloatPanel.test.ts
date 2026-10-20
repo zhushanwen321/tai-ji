@@ -3,7 +3,8 @@
  *
  * 覆盖：展开态渲染全部 quota.enabled provider 的三窗口用量（含无数据窗口「—」）、
  * 「当前」标记命中当前会话生效模型的 provider、用量分档色（≥90 红）、收起把手态
- * 与手动切换 emit、挂载即触发每 provider 查询、查询失败且无缓存的显式失败行。
+ * 与手动切换 emit、挂载即触发每 provider 查询、查询失败的可见反馈两态（无缓存 → 整行
+ * 失败提示；有旧缓存 → 旧三窗口保留 + 头部失败标记，C-proc-21）。
  *
  * Mock 策略（最小闭合面，quota 数据链走真实 store + useQuotaQuery）：
  * - mock `@taiji/core/transport/api/domains/quota`（getCached/fetchQuota 固定返回）；
@@ -176,6 +177,34 @@ describe('PlanQuotaFloatPanel', () => {
 
     const errors = wrapper.findAll('[data-testid="plan-quota-error"]')
     expect(errors).toHaveLength(2)
+  })
+
+  it('查询失败且有旧缓存：三窗口旧数据仍渲染 + 失败标记可见（error 与旧数据并存，C-proc-21）', async () => {
+    // 旧缓存来自 getCached（runtime 内存里的最后成功值），本次 fetch 失败（带 reason，A2-4 契约）：
+    // useQuotaQuery 先以 cached 填 store，再 setError 保留旧 data —— data≠null ∧ error≠null 态
+    quotaApiMock.getCached.mockImplementation(async (pid: string) => ({
+      data: QUOTA_DATA[pid] ?? null,
+      lastFetchAt: 1_700_000_000_000,
+    }))
+    quotaApiMock.fetchQuota.mockResolvedValue({ data: null, lastFetchAt: null, reason: 'network' })
+    const wrapper = mountFloat()
+    await flushPromises()
+
+    // 旧三窗口数据保留（不被失败整行替换）
+    const kimiPcts = wrapper
+      .findAll('[data-testid="plan-quota-item-kimi-coding"] [data-testid="plan-quota-pct"]')
+      .map((w) => w.text())
+    expect(kimiPcts).toEqual(['100%', '73%', '—'])
+    // 每个 provider 恰有一个可见失败标记（头部紧凑标记；整行失败提示不出现）
+    const errors = wrapper.findAll('[data-testid="plan-quota-error"]')
+    expect(errors).toHaveLength(2)
+    const kimiMark = wrapper.find('[data-testid="plan-quota-item-kimi-coding"] [data-testid="plan-quota-error"]')
+    expect(kimiMark.exists()).toBe(true)
+    // 失败原因经 title / aria-label 可达（复用 queryFailed 句式）
+    expect(kimiMark.attributes('title')).toContain('查询失败')
+    expect(kimiMark.attributes('aria-label')).toContain('查询失败')
+    // 整行失败提示属无缓存形态，此处不应出现
+    expect(wrapper.text()).not.toContain(i18n.global.t('panel.quotaFloat.fetchFailed'))
   })
 
   it('无满足条件 provider 时浮层整体不渲染', () => {

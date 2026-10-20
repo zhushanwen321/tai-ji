@@ -10,14 +10,27 @@
         class="shrink-0 text-[length:var(--text-xs)] text-success"
         data-testid="plan-quota-current-tag"
       >{{ t('panel.quotaFloat.current') }}</span>
+      <!-- 查询失败且有旧缓存：头部紧凑失败标记——error 与旧数据并存：旧三窗口保留 + 失败标记可见
+           （与 ContextCapacityCard「error 行与余量行并存」同口径，C-proc-21）；失败原因经 title /
+           aria-label 给出。无旧缓存的失败态由下方整行提示承担，两者互斥，共用 plan-quota-error testid
+           = 「任一失败态都有可见失败反馈」的单一判据 -->
+      <span
+        v-if="row !== null && error !== null"
+        class="flex shrink-0 self-center text-danger"
+        role="img"
+        :title="failText"
+        :aria-label="failText"
+        data-testid="plan-quota-error"
+      ><TriangleAlert class="size-3" aria-hidden="true" /></span>
       <span class="ml-auto shrink-0 font-mono text-[length:var(--text-xs)] text-neutral-dim">{{ providerId }}</span>
     </div>
-    <!-- 查询失败且无旧缓存：显式失败行（不静默；有旧 data 时仍展示旧数据，error 仅存 store） -->
+    <!-- 查询失败且无旧缓存：整行显式失败提示（不静默空值，C-proc-21） -->
     <p
       v-if="row === null && error !== null"
       class="mt-1 text-[length:var(--text-xs)] text-danger"
       data-testid="plan-quota-error"
     >{{ t('panel.quotaFloat.fetchFailed') }}</p>
+    <!-- 三窗口行：有数据（含失败态保留的旧数据）或从未查询（全「—」占位）时渲染 -->
     <div v-else class="mt-1 flex gap-2">
       <div
         v-for="(w, i) in windows"
@@ -62,6 +75,7 @@
  */
 import { computed, onMounted } from 'vue'
 import { useI18n } from 'vue-i18n'
+import { TriangleAlert } from '@lucide/vue'
 import type { QuotaWindow } from '@taiji/shared'
 import { useQuotaQuery } from '@/composables/features/model/useQuotaQuery'
 import { formatResetSec } from '@/composables/features/model/useQuotaDisplay'
@@ -82,8 +96,14 @@ onMounted(() => {
   void onHoverEnter()
 })
 
-/** row 供模板失败态判据（null = 无任何缓存数据）。 */
+/** row 供模板失败态判据（null = 无任何缓存数据 → 整行失败提示；非 null = 三窗口 + 头部失败标记）。 */
 const row = computed(() => data.value)
+
+/**
+ * 失败标记的 title / aria-label 文案。error 已是 quotaFailReasonText 本地化后的简短原因，
+ * 句式复用 ContextCapacityCard 的 queryFailed（「查询失败：{error}」），不新增 i18n 键。
+ */
+const failText = computed(() => t('panel.context.queryFailed', { error: error.value ?? '' }))
 
 const WINDOW_LABEL_KEYS = [
   'panel.context.window5h',
