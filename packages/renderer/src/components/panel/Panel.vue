@@ -19,8 +19,9 @@
     :style="panelStyle"
   >
     <!-- 对话流左侧套餐浮层（plan-quota-float）：全部 quota.enabled provider 的三窗口用量。
-         挂载域 = conversation/trace（dead/landing/empty 不挂）；收起态由 quotaFloatCollapsed
-         单点收敛（trace 激活 / drawer 打开 / 用户手动），内容区让位 gutter 见 panelStyle。 -->
+         挂载域 = conversation/trace 分支且 entries 非空（dead/landing/empty 不挂、无额度
+         监控 provider 也不挂）；收起态由 quotaFloatCollapsed 单点收敛（trace 激活 /
+         drawer 打开 / 用户手动），内容区让位 gutter 见 panelStyle。 -->
     <PlanQuotaFloatPanel
       v-if="quotaFloatVisible"
       :session-id="sessionId"
@@ -169,7 +170,12 @@ import MessageStream from './MessageStream.vue'
 import ModeDeclarationRow from './ModeDeclarationRow.vue'
 import Composer from './Composer.vue'
 import PlanQuotaFloatPanel from './PlanQuotaFloatPanel.vue'
+import {
+  QUOTA_FLOAT_GUTTER_COLLAPSED,
+  QUOTA_FLOAT_GUTTER_EXPANDED,
+} from './plan-quota-float'
 import { useSideDrawer } from '@/composables/features/drawer/useSideDrawer'
+import { useQuotaPlanList } from '@/composables/features/model/useQuotaPlanList'
 import { COMPOSER_BAND_CLASS } from './composer-band'
 import PlanModeBar from './plan/PlanModeBar.vue'
 import TraceView from './trace/TraceView.vue'
@@ -357,9 +363,15 @@ async function onDeleteGhostSession(): Promise<void> {
 const { isOpen: quotaDrawerOpen } = useSideDrawer()
 /** 用户手动收起（浮层把手/折叠钮上报；auto 来源解除后保持到再次点击展开） */
 const quotaFloatUserCollapsed = ref(false)
-/** 浮层挂载域 = conversation/trace 分支（dead/landing/empty 不挂，gutter 同步归零） */
+/** 浮层清单（gutter 判据联动源：entries 为空 → 浮层本体不渲染，gutter 同步归零，见下） */
+const { entries: quotaEntries } = useQuotaPlanList()
+/** 浮层挂载域 = conversation/trace 分支 **且清单非空**：清单为空时浮层本体（内部
+ *  v-if="entries.length > 0"）不渲染，gutter 若仍让位 = 对话流左侧恒空 300px（收起
+ *  64px）无内容——全新安装/未配置额度监控的常态，渲染与让位判据必须同源联动。 */
 const quotaFloatVisible = computed(
-  () => conversationSessionId.value !== null || traceSessionId.value !== null,
+  () =>
+    (conversationSessionId.value !== null || traceSessionId.value !== null)
+    && quotaEntries.value.length > 0,
 )
 /** 收起 = Trace 视图激活 或 drawer 打开 或 用户手动收起 */
 const quotaFloatCollapsed = computed(
@@ -371,18 +383,18 @@ const quotaFloatCollapsed = computed(
  * section 透明继承 MainPanel 的 bg-surface，--panel-bg=surface 供子组件浮层对齐。
  * header 已提升到 PanelContainer，本组件仅 body 区，无边框/圆角（融入统一外壳）。
  *
- * 套餐浮层让位 gutter（plan-quota-float）：浮层展开时消息列与 composer 同步左缩进 300px
- * （收起 64px / 不挂载 0）——section 级 padding 让两者整体右移，保持「composer 与消息流
- * 同宽同缘」契约（两者的 30px 内容列边距叠在其上）。宽度与 PlanQuotaFloatPanel 的
- * 276px/44px（+ left-3 双侧 12px 间距）成对，改动需两处同步。
+ * 套餐浮层让位 gutter（plan-quota-float）：浮层展开时消息列与 composer 同步左缩进
+ * 展开档 gutter（收起档 / 不挂载 0）——section 级 padding 让两者整体右移，保持
+ * 「composer 与消息流同宽同缘」契约（两者的 30px 内容列边距叠在其上）。三档数值与
+ * 浮层本体宽度同源派生（plan-quota-float.ts 尺寸契约 SSOT），改宽度只改常量模块。
  */
 const panelStyle = computed(() => ({
   '--panel-bg': 'var(--surface)',
   paddingLeft: !quotaFloatVisible.value
     ? '0px'
     : quotaFloatCollapsed.value
-      ? '64px'
-      : '300px',
+      ? `${QUOTA_FLOAT_GUTTER_COLLAPSED}px`
+      : `${QUOTA_FLOAT_GUTTER_EXPANDED}px`,
   transition: 'padding-left 260ms cubic-bezier(0.4, 0, 0.2, 1)',
 }))
 </script>
