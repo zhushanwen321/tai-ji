@@ -54,8 +54,8 @@
 /**
  * PlanQuotaItem —— 套餐浮层的单项（一个 quota.enabled provider 的三窗口用量）。
  *
- * 每实例独立 useQuotaQuery（per-provider 实例安全：pending 并发保护 + 10s throttle
- * 在 composable 内部）；挂载即触发一次快照查询——挂载域 = 浮层挂载（宿主 Panel 进
+ * 每实例独立 useQuotaQuery（per-provider 实例安全：pending 并发保护在 composable
+ * 内部）；挂载即触发一次快照查询——挂载域 = 浮层挂载（宿主 Panel 进
  * conversation/trace 分支且清单非空，含 drawer 已开/trace 激活的不可见形态）；
  * 收起是 v-show 切换不卸载本组件，收起→展开不重复查询。
  * tooltip 承载明细（used/limit/计量单位 + 重置倒计时），行内只留百分比保持紧凑。

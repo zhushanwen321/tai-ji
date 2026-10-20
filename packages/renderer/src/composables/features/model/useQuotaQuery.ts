@@ -57,7 +57,10 @@ export interface UseQuotaQueryResult {
   error: Ref<string | null>
   /** 是否正在查询中。 */
   isPending: Ref<boolean>
-  /** 触发 hover-enter 查询（受 10s throttle）。幂等：pending 期间重复调用无副作用。 */
+  /**
+   * 触发 hover-enter 查询。幂等：pending 期间重复调用无副作用。
+   * 节流不在本 composable：runtime QuotaService.fetch 对 10s 内重复 fetch 直接返回缓存。
+   */
   onHoverEnter: () => Promise<void>
 }
 
@@ -93,7 +96,8 @@ export function useQuotaQuery(providerIdRef: Ref<string | null>): UseQuotaQueryR
   })
 
   /**
-   * hover-enter 触发查询（受 10s throttle）。
+   * hover-enter 触发查询。本 composable 只做 pending 并发保护；10s 节流位于 runtime
+   * QuotaService.fetch（10s 内重复 fetch 直接返回缓存），不在此层实现。
    *
    * 流程：
    * 1. providerId 为空 → 跳过（未配置额度查询）
