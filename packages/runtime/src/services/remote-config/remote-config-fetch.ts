@@ -187,7 +187,13 @@ export async function refreshRemoteConfig<T>(
   if (!res) return { data: guardedCacheData(cached, guard), refreshed: false, reason: 'network' }
 
   if (res.status === HTTP_NOT_MODIFIED && cached) {
-    await persistCache(domain, { ...cached, checkedAt: Date.now() }).catch(() => {})
+    // 落盘失败不阻断本次返回（缓存数据已可用），下次触发点重刷；留痕与 200 路径同构
+    await persistCache(domain, { ...cached, checkedAt: Date.now() }).catch((e) => {
+      logger.warn('[remote-config] persist cache failed', {
+        domain,
+        error: e instanceof Error ? e.message : String(e),
+      })
+    })
     return { data: guardedCacheData(cached, guard), refreshed: false, reason: 'throttled' }
   }
   if (!res.ok) {

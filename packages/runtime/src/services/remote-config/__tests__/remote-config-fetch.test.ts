@@ -98,6 +98,30 @@ describe('refreshRemoteConfig', () => {
     expect(persisted.etag).toBe('"abc"')
   })
 
+  it('304 分支 checkedAt 顺延写盘失败 → warn 留痕（与 200 路径同构）且不阻断返回', async () => {
+    writeCache(VALID, '"abc"')
+    const mod = await loadFresh()
+    // loadFresh 已 resetModules，此处拿到的 logger 与被测模块同一实例
+    const { logger } = await import('../../../infra/logger.js')
+    // tmp 路径换成同名目录：persistCache 的 writeFile(tmp) 抛 EISDIR，命中写盘失败分支
+    mkdirSync(`${cachePath()}.tmp`, { recursive: true })
+    mockFetch(304)
+    const warnSpy = vi.spyOn(logger, 'warn').mockImplementation(() => {})
+    try {
+      const out = await mod.refreshRemoteConfig('builtin-providers', guard, { force: true })
+      expect(out.data).toEqual(VALID)
+      expect(out.refreshed).toBe(false)
+      expect(out.reason).toBe('throttled')
+      expect(warnSpy).toHaveBeenCalledTimes(1)
+      expect(warnSpy.mock.calls[0]?.[0]).toBe('[remote-config] persist cache failed')
+      const meta = warnSpy.mock.calls[0]?.[1] as { domain?: unknown; error?: unknown } | undefined
+      expect(meta?.domain).toBe('builtin-providers')
+      expect(String(meta?.error)).toContain('EISDIR')
+    } finally {
+      warnSpy.mockRestore()
+    }
+  })
+
   it('200 内容变化 → refreshed=true + 新数据落盘；内容不变 → refreshed=false', async () => {
     writeCache(VALID)
     const mod = await loadFresh()
