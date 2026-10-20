@@ -54,12 +54,12 @@ description: >-
 
 ```bash
 node scripts/quality-gates.mjs --side dev-merge   # 质量门聚合：typecheck 四处（含 mobile-renderer）+ 增量 coverage（含新增文件机器盲区判定，coverage-file-gate-exempt 可豁免）+ metrics
-node scripts/changeset-check.mjs                  # changeset 完整性：diff 触及 extensions/**/src/** 且包缺 .changeset/*.md → WARN 清单
+node scripts/changeset-check.mjs                  # changeset 双向检查：①diff 触及 extensions/**/src/** 且包缺 .changeset/*.md → WARN 清单；②.changeset/*.md 声明了 private/config.ignore 包 → FAIL（声明永不生效，残留/阻断 version）
 node "$(git rev-parse --show-toplevel)/.agents/skills/dev-merge/scripts/pi-extension-smoke.mjs" --json   # pi extension 启动冒烟：本 worktree 全部 extension 源码入口（extensions/{taiji,universal}/*/package.json 的 main）经 pi 真实加载一遍（--mode rpc + stdin EOF，零 LLM 调用），抓 main 声明指向缺失文件 / 入口加载期即崩——这类问题装进 pi 宿主才暴露，前置到合并边界
 ```
 
-- 退出码：quality-gates `0` = 全绿 / `1` = FAIL / `2` = 用法或环境错误；changeset-check `0` = pass/warn/skip（WARN 不阻断）/ `2` = 工具错误；pi-extension-smoke `0` = pass 或 skip（pi 未安装 / 无可加载入口，skip 不阻塞但必须随汇报披露）/ `1` = FAIL / `2` = 用法或环境错误。
-- **FAIL（exit 1）**：派 fixer 修复后重跑——quality-gates 与 pi-extension-smoke 的 FAIL 各走同款修复子循环：脚本累计执行各 ≤3 次、fixer 各最多派发 2 次（fixer 只修失败输出直接相关的问题——质量门失败修对应门项，冒烟失败修对应 extension 包的 main 声明或加载期问题；修完自行 commit（显式路径，禁 `git add -A`）、每轮修完重跑对应脚本验证）；预算用尽仍 FAIL 停下呈报人工处置，不进后续步骤。
+- 退出码：quality-gates `0` = 全绿 / `1` = FAIL / `2` = 用法或环境错误；changeset-check `0` = pass/warn/skip（WARN 不阻断）/ `1` = fail（声明了 private/ignore 包，进 FAIL 处置）/ `2` = 工具错误；pi-extension-smoke `0` = pass 或 skip（pi 未安装 / 无可加载入口，skip 不阻塞但必须随汇报披露）/ `1` = FAIL / `2` = 用法或环境错误。
+- **FAIL（exit 1）**：派 fixer 修复后重跑——quality-gates、pi-extension-smoke 与 changeset-check 的 FAIL 各走同款修复子循环：脚本累计执行各 ≤3 次、fixer 各最多派发 2 次（fixer 只修失败输出直接相关的问题——质量门失败修对应门项，冒烟失败修对应 extension 包的 main 声明或加载期问题，changeset-check fail 删该 changeset 文件或从 frontmatter 移除对应包行；修完自行 commit（显式路径，禁 `git add -A`）、每轮修完重跑对应脚本验证）；预算用尽仍 FAIL 停下呈报人工处置，不进后续步骤。
 - **exit 2**：工具/环境错误不进 fixer 循环，按脚本输出的缺失路径与恢复指引处置。
 - **changeset WARN**：主 agent 按 Gate-1a.5 同款分类逻辑处置（不弹窗问用户）——实质改动（包有对外语义变化）→ 起草 `.changeset/*.md` 且理由列明；非发布改动（纯注释/文档/无对外语义变化的内部整理）→ 跳过起草并列明理由。skip/pass → 无动作，汇报记一句。
 - **base 口径**：`--side dev-merge` = 分支增量（`git merge-base github/main HEAD`，脚本自解析），与第 1.7 步审查对象同口径；禁止传 `--base main`（那是 pr-cr-fix 侧的累积口径，两侧差异有意）。

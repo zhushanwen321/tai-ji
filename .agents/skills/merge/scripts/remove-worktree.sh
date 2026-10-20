@@ -164,7 +164,7 @@ fi
 
 # --- 远端分支卫生（已合并进 main 的陈年远端分支自动清理） ---
 # 根因：web 端合并 / 非 PR 直推的分支无人删除，多轮发布循环后永久滞留。每次发布必经
-# 本脚本 → 残留不过夜。判定 = 纯 git 祖先关系（已合并删除零损失）；失败语义 = 辅助
+# 本脚本 → 残留不过夜。判定 = 内容已全部进入 main（删除零损失）；失败语义 = 辅助
 # 功能，单条失败记 warning 不阻断主流程（分级即错误处理契约）。
 echo ""
 echo "=== 远端分支卫生检查 ==="
@@ -173,6 +173,27 @@ git -C .bare fetch github --prune --quiet 2>/dev/null || true
 # MAIN_BRANCH 段内自持（force / --skip-sync 组合下前置段落可能未定义，set -u 防线）
 MAIN_BRANCH=$(git -C .bare remote show github 2>/dev/null | grep 'HEAD branch' | awk '{print $NF}') || true
 MAIN_BRANCH="${MAIN_BRANCH:-main}"
+
+# 判定远端分支内容是否已全部进入 main（删除零损失），两条通道：
+#   ① 祖先关系：tip 本身是 main 的祖先（常规合并分支）。
+#   ② merge-back 形态：tip 是把 main 合进 dev 集成线的 merge commit（发布前同步产物），
+#      全部父提交均已是 main 的祖先，merge 自身不引入新内容。纯祖先判定对该形态恒为
+#      false（merge commit 不在 main 历史里），会误判成「未合并」而永久残留——dev-0.11.9
+#      实测即此形态：发布后无更新版本 dev 线，ACTIVE_DEV 跳过与祖先判定失败双重错过。
+_hygiene_branch_merged() {
+    local ref="$1" main="$2" parents p
+    git -C .bare merge-base --is-ancestor "$ref" "$main" 2>/dev/null && return 0
+    parents=$(git -C .bare rev-list --parents -n 1 "$ref" 2>/dev/null) || return 1
+    [[ -n "$parents" ]] || return 1
+    set -- $parents
+    shift || true
+    [[ $# -ge 2 ]] || return 1
+    for p in "$@"; do
+        git -C .bare merge-base --is-ancestor "$p" "$main" 2>/dev/null || return 1
+    done
+    return 0
+}
+
 # 现行 dev 集成线动态识别 = 版本号最大的 dev 分支（dev-0.11.x 出现时无需改本脚本）
 ACTIVE_DEV=$(git -C .bare for-each-ref --format='%(refname:short)' refs/remotes/github 2>/dev/null | grep -E 'github/dev-[0-9]+\.[0-9]+' | sort -V | tail -1) || ACTIVE_DEV=""
 HYGIENE_SKIP="^(github/main|github/HEAD|github)$"  # github 裸引用 = HEAD symref 实体，fetch 副产物，非分支
@@ -182,12 +203,13 @@ HYGIENE_DELETED=0
 HYGIENE_KEPT=0
 for _gb in $GH_BRANCHES; do
     _branch_name="${_gb#github/}"
-    if git -C .bare merge-base --is-ancestor "$_gb" "github/$MAIN_BRANCH" 2>/dev/null; then
-        if git -C .bare push github --delete "$_branch_name" >/dev/null 2>&1; then
+    if _hygiene_branch_merged "$_gb" "github/$MAIN_BRANCH"; then
+        if _del_out=$(git -C .bare push github --delete "$_branch_name" 2>&1); then
             echo "  ✓ 已删除远端已合并分支: $_branch_name"
             HYGIENE_DELETED=$((HYGIENE_DELETED + 1))
         else
-            echo "  Warning: 远端分支 $_branch_name 删除失败（不阻断，留待下次）"
+            echo "  Warning: 远端分支 $_branch_name 删除失败（不阻断，留待下次）。git 输出:"
+            echo "$_del_out" | sed 's/^/    /'
         fi
     else
         _ahead=$(git -C .bare rev-list --count "github/$MAIN_BRANCH..$_gb" 2>/dev/null || echo '?')
