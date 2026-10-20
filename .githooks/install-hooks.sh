@@ -691,6 +691,34 @@ if echo "$STAGED_FILES" | grep -qE "^packages/zcode-session-source/|^extensions/
 fi
 
 # ============================================================================
+# 2i. 模型可见性投喂单点调用点白名单检查（约束 C-ext-31）
+#     .githooks/check_register_allowlist.py：全仓 extensions/ 下
+#     registerProvider|registerNativeProvider|registerVirtualModel 调用点只许
+#     出现在两个白名单包——provider-live-sync（投喂通道本体，写入单点）与
+#     scheduler（ack 合成轮临时覆写 + backend 转发，语义不同不在禁列）。
+#     防未来新开常驻注入点绕过投喂单点、制造第二写入方：pi 进程注册表是模型
+#     可见性的事实源，消费方（--model 解析 / rpc set_model / rename /
+#     smart-context / permission / scheduler / subagent 校验 / provider 对账）
+#     零改动即自动受益，新开注入点等于绕过单点。零第三方依赖，实测 ~0.1s
+#     （326 个源文件全仓扫描，随仓库线性增长）。复用 SKIP_EXTENSION_LINT
+#     开关（与 2b-2e 扩展检查同族，不新增逃生口）。
+# ============================================================================
+
+if echo "$STAGED_FILES" | grep -qE "^extensions/.*\.ts$|^\.githooks/check_register_allowlist\.py$|^\.githooks/install-hooks\.sh$"; then
+    print_section "[模型可见性投喂单点调用点白名单检查]"
+
+    if [ "$SKIP_EXTENSION_LINT" != "1" ]; then
+        if ! python3 .githooks/check_register_allowlist.py; then
+            echo -e "${RED}[ERROR] 发现白名单外的注册表注入调用点——投喂单点 = provider-live-sync 包（C-ext-31），按上方 ✗ 明细修复后重试${NC}"
+            echo -e "${RED}[原则] 无论是否本次改动引入的问题，都必须当场直接修复解决，不允许跳过。${NC}"
+            exit 1
+        fi
+    else
+        echo -e "${YELLOW}[SKIP] 投喂单点调用点白名单检查已跳过${NC}"
+    fi
+fi
+
+# ============================================================================
 # 3. 自定义代码规范检查（原生 HTML 元素、Emoji、自定义 CSS）
 # ============================================================================
 

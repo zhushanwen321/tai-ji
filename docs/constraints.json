@@ -3306,6 +3306,31 @@
       ]
     },
     {
+      "id": "C-ext-31",
+      "summary": "模型可见性投喂单点 = provider-live-sync 包（extensions/universal/provider-live-sync/，投喂模块 src/catalog-bridge.ts）：taiji 侧目录缓存 → pi 进程注册表常驻条目的写入单点。新增模型数据来源（未来第三条缓存链、新目录源）时改该投喂模块的输入，禁止在其他扩展新开 registerProvider/registerVirtualModel 常驻注入——注入修的是注册表这一事实源，消费方（--model 解析 / rpc set_model / rename / smart-context / permission / scheduler / subagent 校验 / provider 对账）零改动自动受益，新开注入点等于绕过单点、制造第二写入方。scheduler 的 ack 合成轮（src/ack-turn.ts 临时注册合成 provider、one-shot 注销）是执行通道覆写、非可见性投喂，语义不同不在禁列。机器执行点 = check_register_allowlist.py 调用点白名单（包粒度：provider-live-sync + scheduler 两包，测试目录排除）",
+      "scope": [
+        "extensions/**"
+      ],
+      "authority": [
+        "extensions/extension-conventions.md",
+        "../AGENTS.md"
+      ],
+      "dimensions": [
+        "arch-boundary",
+        "extension-api"
+      ],
+      "enforcement": [
+        {
+          "type": "machine",
+          "hook": "check_register_allowlist.py"
+        },
+        {
+          "type": "review",
+          "agent": "review-arch-boundary"
+        }
+      ]
+    },
+    {
       "id": "C-state-20",
       "summary": "进程级全局槽键（Symbol.for + globalThis 单例）单一归属：subagent 体系三包（packages/subagent-core / packages/subagent-engine-sdk / extensions/universal/subagent-workflow）内 `Symbol.for(\"<字面量>\")` 只允许出现在两处声明文件——core `src/shared/global-slots.ts`（前缀 @zhushanwen/subagent-core.<槽名>，含壳侧托管槽）与 SDK `src/global-slots.ts`（前缀 @zhushanwen/subagent-engine-sdk.<槽名>，SDK 不得 import core 故保留自有前缀）；其余源码必须写 Symbol.for(<常量>)。键串跨两文件唯一。判据 scripts/check-global-slot-keys.mjs（含注释行豁免与 fixture 单测）。改键不破坏跨进程语义（槽为运行时单例，重启即重建），但 dev 热重载期间新旧代码各自成槽，需整进程重启收敛。",
       "scope": [
