@@ -2879,10 +2879,10 @@
     },
     {
       "id": "E2E-ARCHIVE-01",
-      "summary": "session 归档域 mock 轨行为用例（session-archive 设计 §8 V1-V4 交互行为子集）：归档两段确认 + 行消失 + 角标（V1）/ 归档列表与摘要免解压查看（V2）/ 恢复切回会话列表回场（V4）/ 彻底删除两段确认 + 空态（V8）/ 生成中归档钮禁用 renderer 门（V5①）——VITE_MOCK 内存 mockArchives 派生视图，零磁盘搬移",
+      "summary": "session 归档域 mock 轨行为用例（session-archive 设计 §8 V1/V2/V4/V5①/V8 交互行为子集）：归档两段确认 + 行消失 + 角标（V1）/ 归档列表与摘要免解压查看（V2）/ 恢复切回会话列表回场（V4）/ 彻底删除两段确认 + 空态（V8）/ 生成中归档钮禁用 renderer 门（V5①）——VITE_MOCK 内存 mockArchives 派生视图，零磁盘搬移",
       "scope": [
         "packages/renderer/src/components/archive/**",
-        "packages/renderer/src/components/sidebar/SessionItemActions.vue",
+        "packages/renderer/src/components/sidebar/session-item/SessionItemActions.vue",
         "packages/renderer/src/components/sidebar/SessionList.vue",
         "packages/renderer/src/components/sidebar/ArchiveListView.vue",
         "packages/renderer/src/components/sidebar/SessionItem.vue",
