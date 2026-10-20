@@ -23,7 +23,12 @@ const VALID_NOTIFY_ID = 'sm-123e4567-e89b-12d3-a456-426614174000'
 describe('watch action 入站集合', () => {
   it('SESSION_MANAGER_ACTIONS 含 watch（event-adapter 收窄范围——缺席即折叠 __malformed__）', () => {
     expect(SESSION_MANAGER_ACTIONS).toContain('watch')
-    expect(SESSION_MANAGER_ACTIONS).toHaveLength(7)
+    expect(SESSION_MANAGER_ACTIONS).toHaveLength(9)
+  })
+
+  it('SESSION_MANAGER_ACTIONS 含 delete/archive（archive-delete U2：终局操作双 action 入站集合）', () => {
+    expect(SESSION_MANAGER_ACTIONS).toContain('delete')
+    expect(SESSION_MANAGER_ACTIONS).toContain('archive')
   })
 })
 
@@ -246,5 +251,16 @@ describe('error envelope（watch 检查拒绝时 handler 错误闭环的回包�
     expect(isChannelErrorResult(payload)).toBe(false) // 无 error
     expect(isChannelErrorResult({})).toBe(false) // 空载荷
     expect(isChannelErrorResult(null)).toBe(false)
+  })
+
+  it('code additive 宽容检查（archive-delete U2，ArchiveError 码透传通道）：缺席放行 / present string 放行 / 非 string 拒绝', () => {
+    // 缺席放行（旧 runtime 兼容象限——旧 runtime 不产出 code）
+    expect(isChannelErrorResult({ error: 'archive failed' })).toBe(true)
+    // present string 放行（新 runtime 附 ArchiveError.code，如 archive_generating）
+    expect(isChannelErrorResult({ error: 'archive failed', code: 'archive_generating' })).toBe(true)
+    // present 非 string 拒绝（形状违规走 error envelope 同路拒绝闭环）
+    expect(isChannelErrorResult({ error: 'archive failed', code: 42 })).toBe(false)
+    expect(isChannelErrorResult({ error: 'archive failed', code: null })).toBe(false)
+    expect(isChannelErrorResult({ error: 'archive failed', code: { id: 'x' } })).toBe(false)
   })
 })

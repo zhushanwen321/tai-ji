@@ -41,19 +41,27 @@ export interface MarkerRpcOptions {
 
 /** 错误回包底层形状：select+marker 通道各协议（session-manager）
  * runtime 侧异常折叠的共用单源（不裸 reject，error 闭环走同一回包通道）。
- * SessionManagerErrorResult 是本形状的 alias（D8 单源化）。 */
+ * SessionManagerErrorResult 是本形状的 alias（D8 单源化）。
+ *
+ * `code`（session-manager-archive-delete U2，additive optional）：结构化错误码
+ * 透传通道（如 ArchiveError 的 `archive_generating`）——旧 runtime 不产出、旧
+ * extension 不消费，只加字段不破坏现有消费方。 */
 export interface ChannelErrorResult {
   error: string
   hint?: string
+  code?: string
 }
 
-/** 运行时形状检查：{error: string}（hint 可选，不校验其类型；排数组） */
+/** 运行时形状检查：{error: string}（hint 可选，不校验其类型；code additive 宽容
+ * ——缺席放行（旧 runtime 兼容象限）、present 须为 string；排数组） */
 export function isChannelErrorResult(v: unknown): v is ChannelErrorResult {
+  const rec = v as Record<string, unknown>
   return (
     typeof v === 'object' &&
     v !== null &&
     !Array.isArray(v) &&
-    typeof (v as Record<string, unknown>).error === 'string'
+    typeof rec.error === 'string' &&
+    (rec.code === undefined || typeof rec.code === 'string')
   )
 }
 
