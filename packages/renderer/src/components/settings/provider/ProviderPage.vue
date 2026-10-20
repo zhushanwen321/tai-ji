@@ -352,12 +352,19 @@ onMounted(async () => {
   // composables/features/settings/useProviderCatalogsStale.ts。
   await refreshCatalogs()
   // W1+W3c：页签可见期启用 models-store.json 变化感知 + 重拉 quota presets（fire-and-forget，
-  // 编排走 core refreshQuotaPresets 单一实现——失败 warn 沿用缓存，消费方回落基线）
-  transport.setProviderCatalogWatch(true).catch(() => {})
+  // 编排走 core refreshQuotaPresets 单一实现——失败 warn 沿用缓存，消费方回落基线）。
+  // watch 启用失败同样留痕：enable 失败 = 设置页开期间失去 models-store.json 变化感知
+  // （列表停在挂载时快照），属用户可见辅助能力降级，warn 可见而非裸吞。
+  transport.setProviderCatalogWatch(true).catch((e) => {
+    console.warn('[settings] setProviderCatalogWatch(true) failed:', e)
+  })
   void refreshQuotaPresets()
 })
 
-onUnmounted(() => transport.setProviderCatalogWatch(false).catch(() => {}))
+// disable 失败后果有界（重进页签即恢复），降为 debug 但不静默。
+onUnmounted(() => transport.setProviderCatalogWatch(false).catch((e) => {
+  console.debug('[settings] setProviderCatalogWatch(false) failed:', e)
+}))
 
 /** 选中内置模板 → 打开 QuickSetup（先刷新 OAuth presence + env 检测） */
 async function onTemplateSelect(tpl: BuiltinProviderTemplate): Promise<void> {
