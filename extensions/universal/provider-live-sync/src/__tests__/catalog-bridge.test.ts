@@ -516,6 +516,32 @@ describe('第三个监视条目（tick 挂载用的 mtime 观测器）', () => {
     expect(watcher.observe()).toBe(false)
   })
 
+  it('工厂期播种基线 + 窗口内 mtime 变更 → observe() 返回 true（运行中窗口 D5 的检出）', () => {
+    // 经 injectCatalogOverlay 取观测器——工厂期在 runPass 之前捕获的 mtime 即初始基线
+    // （生产接线；直接调 createOverlayCacheWatcher(path, initial) 测不到这层传递）。
+    writeTaijiCache({ [SYNTHETIC_PROVIDER]: entry([endpointModel('Model-A')], FRESH_AT) })
+    utimesSync(TAiji_CACHE_PATH(), MTIME_T0, MTIME_T0)
+    const pi = makePi()
+    const watcher = injectCatalogOverlay(asApi(pi))
+    expect(watcher).not.toBeNull()
+
+    // 工厂期注入与 tick 1 之间（~2s 窗）缓存被更新（taiji runtime 的 tmp+rename 原子替换写）
+    writeTaijiCache({
+      [SYNTHETIC_PROVIDER]: entry([endpointModel('Model-A'), endpointModel('Model-B')], FRESH_AT),
+    })
+    utimesSync(TAiji_CACHE_PATH(), MTIME_T1, MTIME_T1)
+    expect(watcher?.observe()).toBe(true)
+  })
+
+  it('工厂期播种基线 + 无变更 → observe() 返回 false（首拍不产生幻觉变化）', () => {
+    writeTaijiCache({ [SYNTHETIC_PROVIDER]: entry([endpointModel('Model-A')], FRESH_AT) })
+    utimesSync(TAiji_CACHE_PATH(), MTIME_T0, MTIME_T0)
+    const pi = makePi()
+    const watcher = injectCatalogOverlay(asApi(pi))
+
+    expect(watcher?.observe()).toBe(false)
+  })
+
   it('mtime 变化 → true（taiji runtime 原子替换写后的检出）', () => {
     const path = TAiji_CACHE_PATH()
     writeFileSync(path, '{}')
@@ -640,6 +666,27 @@ describe('tick 接线 —— 目录缓存 mtime 变化触发一次零网络本�
     utimesSync(TAiji_CACHE_PATH(), MTIME_T1, MTIME_T1)
 
     await tickOnce()
+    expect(refresh).toHaveBeenCalledTimes(1)
+    expect(refresh).toHaveBeenCalledWith({ allowNetwork: false })
+  })
+
+  it('运行中窗口不断裂：工厂期注入后、首个 tick 触发前改缓存 → 首个 tick 必须 refresh（firstBaseline 不放行 overlay 变化）', async () => {
+    writeTaijiCache({ [SYNTHETIC_PROVIDER]: entry([endpointModel('Model-A')], FRESH_AT) })
+    utimesSync(TAiji_CACHE_PATH(), MTIME_T0, MTIME_T0)
+
+    const { refresh, registerProvider } = startWithFakeCtx()
+    // 工厂期已注入（D1）——tick 只是触发方，不是注册方
+    expect(registerProvider).toHaveBeenCalledTimes(1)
+
+    // 「工厂期注入 → tick 1」约 2s 窗内的缓存变更（真机实证：spawn 后 ~200ms 变更时
+    // 30s 内新模型不出现）——首拍抑制的前提（pi spawn 时已按磁盘建快照）只对既有
+    // models.json/auth.json 成立，overlay 条目的变化必须放行，否则运行中窗口断裂。
+    writeTaijiCache({
+      [SYNTHETIC_PROVIDER]: entry([endpointModel('Model-A'), endpointModel('Model-B')], FRESH_AT),
+    })
+    utimesSync(TAiji_CACHE_PATH(), MTIME_T1, MTIME_T1)
+
+    await tickOnce() // 首个 tick：既有两条目双 absent 无变化，唯一信号 = overlay 变化
     expect(refresh).toHaveBeenCalledTimes(1)
     expect(refresh).toHaveBeenCalledWith({ allowNetwork: false })
   })

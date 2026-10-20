@@ -77,7 +77,9 @@ export interface Snapshot {
   baselines: Map<WatchedFile, FileBaseline>;
   /**
    * 是否已完成首个**可比**基线拍：两受监视文件各完成一次可比观察（absent 计入、
-   * unreadable 不计）。此后首拍只建基线、不触发 refresh（pi spawn 时已按磁盘建过快照）。
+   * unreadable 不计）。此后首拍只建基线、不触发 refresh（pi spawn 时已按磁盘建过快照
+   * ——该前提只对 models.json/auth.json 两条目成立；第三个监视条目 taiji 目录缓存的
+   * 基线工厂期已播种，其变化在首拍必须放行，见 tick 内 firstBaseline 抑制处注释）。
    * 置位与当拍 decision 无关——双 absent 首拍（catalog-only 常态）也构成完整基线。
    */
   initialized: boolean;
@@ -292,8 +294,12 @@ export default function providerLiveSync(pi: ExtensionAPI): void {
       const changed: string[] = decision.action === "refresh" ? [...decision.changedFiles] : [];
       if (overlayChanged !== null) changed.push(overlayChanged);
       if (changed.length === 0) return;
-      // 首个基线拍不刷新（进程启动时 pi 已按磁盘配置建过快照，重复刷新纯浪费）。
-      if (firstBaseline) return;
+      // 首个基线拍不刷新（进程启动时 pi 已按磁盘配置建过快照，重复刷新纯浪费）——该前提
+      // 只对既有 models.json/auth.json 两条目成立：pi spawn 时按磁盘建快照读的是它们。
+      // 第三个条目（taiji 目录缓存）不成立——pi 不读目录缓存，扩展工厂期注入才是初始态
+      // （基线工厂期播种），「工厂期注入 → tick 1」约 2s 窗内的缓存变更必须刷新，否则
+      // 运行中窗口（设计 D5）在该窗口断裂且此后 mtime 稳定即永不重检。
+      if (firstBaseline && overlayChanged === null) return;
 
       logger.debug(`config change detected (${changed.join(", ")}) → refreshing model snapshot`);
       const result = await currentCtx.modelRegistry.refresh({ allowNetwork: false });
@@ -318,7 +324,8 @@ export default function providerLiveSync(pi: ExtensionAPI): void {
     timer.unref();
   };
 
-  // 首拍只建基线（不 refresh）；此后每拍比较。（pi 无 extension 生命周期 shutdown 钩子，
-  // 进程退出时 unref 定时器自然消失。）
+  // 首拍对既有两条目只建基线（不 refresh）；此后每拍比较。第三个监视条目（taiji 目录
+  // 缓存）的基线工厂期已播种，其变化首拍即放行。（pi 无 extension 生命周期 shutdown
+  // 钩子，进程退出时 unref 定时器自然消失。）
   schedule();
 }

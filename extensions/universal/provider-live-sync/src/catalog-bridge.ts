@@ -19,7 +19,10 @@
  *   （带 mtime 短路：文件未变直接返回上次结果不重算），fresh 返回新并集、
  *   expired/never-seen 返回纯内置基线（R6 撤销）、运行期读失败返回 undefined
  *   （R7 保留当前注入）。触发方 = provider-live-sync 既有 tick 挂载的第三个
- *   监视条目（`createOverlayCacheWatcher`，绝对路径 + mtime 比较）。
+ *   监视条目（`createOverlayCacheWatcher`，绝对路径 + mtime 比较），其基线在
+ *   **工厂期播种**（`injectCatalogOverlay` 在 runPass 之前捕获 mtime 传入）——
+ *   「工厂期注入 → tick 1」约 2s 窗内的缓存变更必须可检出，否则运行中窗口在该
+ *   窗口断裂且此后 mtime 稳定即永不重检。
  *
  * 失败路径映射（设计 §3.1 R1-R7，全部 fail-safe 降级不抛错）：
  * - R1 无 `TAIJI_AGENT_DATA_DIR`（原生 pi 用户）→ 入口返回 null，零文件访问、零注册；
@@ -309,11 +312,18 @@ export type OverlayCacheWatcher = {
  * 为什么用 mtime 而非既有 models.json/auth.json 的内容字节比较：写入方是 taiji
  * runtime 的 tmp+rename 原子替换写（`provider-catalog-refresh.ts` 的 `writeFile`
  * + `rename`），mtime 可靠；且该文件含**全部** provider 的模型目录，逐拍字节比较
- * 是纯浪费。辖域仅限本条目——既有两条目的内容字节比较与「曾存在→缺失」抑制语义
+ * 是纯浪费。辖域仅限本条目——既有两条目的内容字节比较与「曾存在 → 缺失」抑制语义
  * 一字不变（设计 D5）。
+ *
+ * `initial` = 工厂期捕获的 mtime 观测（`injectCatalogOverlay` 在 runPass 之前观测后
+ * 传入）。第三个条目的基线**必须工厂期播种**：pi 不读目录缓存，扩展工厂期注入才是
+ * 初始态——若基线留到 tick 1 才建立，「工厂期注入 → tick 1」约 2s 窗内的缓存变更会
+ * 被首拍基线吞掉（与「无变更」无法区分），且此后 mtime 稳定即永不重检，运行中窗口
+ * （设计 D5）在该窗口断裂。缺省 undefined = 首拍建基线（恒判「变化」，由调用方的
+ * firstBaseline 抑制刷新）——仅无工厂期观测的形态（测试）使用。
  */
-export function createOverlayCacheWatcher(path: string): OverlayCacheWatcher {
-  let baseline: MtimeObservation | undefined;
+export function createOverlayCacheWatcher(path: string, initial?: MtimeObservation): OverlayCacheWatcher {
+  let baseline: MtimeObservation | undefined = initial;
   return {
     label: basename(path),
     observe(): boolean {
@@ -352,10 +362,19 @@ export function injectCatalogOverlay(pi: ExtensionAPI): OverlayCacheWatcher | nu
   const storePath = getPiStorePath();
   const state: BridgeState = { taijiPath, storePath, registered: new Set(), cache: null };
 
+  // 工厂期播种第三个监视条目的基线（读取前捕获 = 保守方向：最坏一次无害重复刷新，
+  // 不会漏检）。首拍抑制的前提（「进程启动时 pi 已按磁盘配置建过快照」）只对既有
+  // models.json/auth.json 两条目成立；第三个条目不成立——pi 不读目录缓存，扩展工厂期
+  // 注入才是初始态，基线必须工厂期播种，否则「工厂期注入 → tick 1」约 2s 窗内的缓存
+  // 变更会被 tick 首拍基线吞掉且此后 mtime 稳定即永不重检（运行中窗口 D5 断裂）。
+  const initialObservation = observeMtime(taijiPath);
+
   const outcome = runPass(state);
   if (outcome.status === "read-failed") {
-    // R2 的损坏/不可读分支：本次不注入；监视条目照挂，文件恢复后由 tick 触发重算
-    return createOverlayCacheWatcher(taijiPath);
+    // R2 的损坏/不可读分支：本次不注入；监视条目照挂，但无 provider 注册即无
+    // refreshModels 钩子——文件恢复后 tick 的刷新重建不了注入，恢复路径 = 下次会话
+    // 启动重读（设计 §3.1 R2）
+    return createOverlayCacheWatcher(taijiPath, initialObservation);
   }
 
   for (const [providerId, result] of outcome.results) {
@@ -395,5 +414,5 @@ export function injectCatalogOverlay(pi: ExtensionAPI): OverlayCacheWatcher | nu
       );
     }
   }
-  return createOverlayCacheWatcher(taijiPath);
+  return createOverlayCacheWatcher(taijiPath, initialObservation);
 }
