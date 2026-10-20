@@ -1,4 +1,6 @@
 #!/usr/bin/env node
+// fallow-ignore-file unused-file — 本文件由 .agents/skills/merge/scripts/pr-merge.sh 薄壳
+// 经 shell exec node 调起（用法见文件尾注），静态 import 分析不可见，非死代码
 /**
  * pr-merge.mjs — merge 流程阶段 2：PR CI 等待 + 合并 + sync 本地 main
  *

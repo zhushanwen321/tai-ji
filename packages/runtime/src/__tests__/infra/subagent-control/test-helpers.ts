@@ -7,6 +7,7 @@ import { mkdtemp, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
 import { StringDecoder } from 'node:string_decoder'
+import { expect } from 'vitest'
 import { SUBAGENT_CONTROL_PROTOCOL_VERSION, SUBAGENT_CONTROL_FRAME_KINDS } from '@zhushanwen/subagent-engine-sdk'
 import { SubagentControlServer, type ControlServerOptions } from '../../../infra/subagent-control/control-server.js'
 import { type DownStdin } from '../../../infra/subagent-control/down-queue.js'
@@ -44,6 +45,63 @@ export function makeServer(dataDir: string, overrides: ControlServerOptions = {}
     },
     ...overrides,
   })
+}
+
+// 模块级清理表：本目录多个测试文件曾各自复制同一份 setupServer + afterEach（克隆告警源）。
+// vitest 每测试文件独立模块图，表按文件天然隔离；消费方 afterEach 调 cleanupTestServers。
+const tmpDirs: string[] = []
+const servers: SubagentControlServer[] = []
+
+/**
+ * 测试 server 装配 + 登记清理表（dataDir 隔离；时间窗/上限按用例覆盖）。
+ * beforeInit = init 前的 dataDir 预处理钩子（权限形态用例：先 chmod 再 init）。
+ */
+export async function setupServer(
+  overrides: ControlServerOptions = {},
+  beforeInit?: (dataDir: string) => void,
+): Promise<{ server: SubagentControlServer; dataDir: string }> {
+  const dataDir = await makeTmpDir()
+  tmpDirs.push(dataDir)
+  beforeInit?.(dataDir)
+  const server = makeServer(dataDir, overrides)
+  servers.push(server)
+  await server.init()
+  return { server, dataDir }
+}
+
+/** 只建 dataDir 不建 server（sweep 等无服务用例）；同样登记 afterEach 清理。 */
+export async function makeRegisteredTmpDir(prefix?: string): Promise<string> {
+  const dataDir = await makeTmpDir(prefix)
+  tmpDirs.push(dataDir)
+  return dataDir
+}
+
+/** afterEach 清理：销毁全部 server + 删全部登记目录（幂等，反复调用安全）。 */
+export async function cleanupTestServers(): Promise<void> {
+  for (const server of servers.splice(0)) {
+    await server.destroy()
+  }
+  await Promise.all(tmpDirs.splice(0).map((d) => rmTmpDir(d)))
+}
+
+/** 标准前导：起 server + 连 agent + hello（hello 后即可 open 的用例同构入口）。 */
+export async function connectAgent(overrides: ControlServerOptions = {}): Promise<{ server: SubagentControlServer; agent: TestAgent; dataDir: string }> {
+  const { server, dataDir } = await setupServer(overrides)
+  const agent = new TestAgent(server.listeningSocketPath)
+  await agent.opened
+  agent.hello()
+  return { server, agent, dataDir }
+}
+
+/** 发退出帧并等 engine_closed，断言退出码（fixture 见 bye 即退；失败语义同 expectOpened）。 */
+export async function byeAndExpectClosed(agent: TestAgent, channelId: string, code: number): Promise<Record<string, unknown>> {
+  agent.sendFrame(channelId, 'bye')
+  const closed = await agent.waitForFrame(
+    (f) => f.kind === SUBAGENT_CONTROL_FRAME_KINDS.engineClosed && f.channelId === channelId,
+    'engine_closed',
+  )
+  expect(closed.code).toBe(code)
+  return closed
 }
 
 /** 永远背压的 fake stdin（write 恒 false、drain 永不触发）：背压用例注入，绕开平台内核缓冲差异。 */

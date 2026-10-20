@@ -49,11 +49,12 @@ type FetchInit = Parameters<FetchLike>[1];
  * 经代理发出时的 init：保留调用方全部选项，附上本次请求的代理分发器。
  * Omit 掉 Node 全局 RequestInit 自带的 dispatcher（undici-types 类型身份），避免与 npm
  * undici 的 Dispatcher 形成 `Dispatcher & Dispatcher` 冲突；运行时由本字段整体覆盖。
+ * 签名自包含（不引用文件内私有别名 FetchInit）——导出签名的被引用类型必须可命名。
  */
-export type ProxyFetchInit = Omit<NonNullable<FetchInit>, "dispatcher"> & { dispatcher: Dispatcher };
+export type ProxyFetchInit = Omit<NonNullable<Parameters<FetchLike>[1]>, "dispatcher"> & { dispatcher: Dispatcher };
 
 /** 代理 fetch 注入接缝：生产环境 = undici.fetch；单测用 fake 避免真实网络。 */
-export type ProxyFetch = (input: FetchInput, init: ProxyFetchInit) => Promise<Response>;
+export type ProxyFetch = (input: Parameters<FetchLike>[0], init: ProxyFetchInit) => Promise<Response>;
 
 /**
  * 跨模块环境身份标记（Symbol.for 进程级注册表，jiti reload 后新旧环境共享）：

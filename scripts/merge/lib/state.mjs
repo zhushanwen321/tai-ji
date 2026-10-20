@@ -12,7 +12,7 @@
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 
-export const MERGE_STATE_DIRNAME = '.merge-state'
+const MERGE_STATE_DIRNAME = '.merge-state'
 
 export function mergeStatePath(root) {
   return join(root, MERGE_STATE_DIRNAME, 'current.json')

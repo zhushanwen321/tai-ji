@@ -9,12 +9,13 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
+// mock 只覆盖本包模块图实际消费的导出（getLogger / setPiHandle；createLogger 无消费方，
+// 推测性 mock 会在 logger 包改表面时静默失配——缺导出是显式 undefined， loud fail）
 const { loggerMock } = vi.hoisted(() => ({
 	loggerMock: { debug: vi.fn(), warn: vi.fn(), error: vi.fn() },
 }));
 vi.mock("@zhushanwen/pi-extension-logger", () => ({
 	getLogger: () => loggerMock,
-	createLogger: () => loggerMock,
 	setPiHandle: vi.fn(),
 }));
 
@@ -55,6 +56,19 @@ function writeConfigFile(content: string): void {
 	writeFileSync(join(agentDir, "config", "network-proxy-ext-config.json"), content);
 }
 
+/**
+ * 标准前导：写配置文件 → 加载 extension（afterEach 的 resetModules 后每次 import
+ * 都是新模块图实例）→ 装配 fake pi 并执行工厂。config = 配置文件内容（默认 enabled）。
+ * 工厂在 helper 内执行：非法配置用例的「不抛」契约由 await 拒绝等价保证（抛即用例红）。
+ */
+async function loadExtension(content = JSON.stringify(ENABLED_CONFIG)): Promise<{ emit: (event: "turn_start" | "turn_end") => void }> {
+	writeConfigFile(content);
+	const { default: networkProxyExtension } = await import("../index.ts");
+	const { pi, emit } = createFakePi();
+	networkProxyExtension(pi);
+	return { emit };
+}
+
 beforeEach(() => {
 	agentDir = mkdtempSync(join(tmpdir(), "network-proxy-index-"));
 	vi.stubEnv("PI_CODING_AGENT_DIR", agentDir);
@@ -76,9 +90,7 @@ afterEach(() => {
 
 describe("networkProxyExtension 工厂加载序列", () => {
 	it("enabled 且校验过：包装 globalThis.fetch（未命中规则时委托 fake 原 fetch）", async () => {
-		writeConfigFile(JSON.stringify(ENABLED_CONFIG));
-		const { default: networkProxyExtension } = await import("../index.ts");
-		networkProxyExtension(createFakePi().pi);
+		await loadExtension();
 		expect(globalThis.fetch).not.toBe(fakeFetch);
 		const response = await globalThis.fetch("https://open.bigmodel.cn/api");
 		expect(await response.text()).toBe("fake-original");
@@ -87,26 +99,21 @@ describe("networkProxyExtension 工厂加载序列", () => {
 	});
 
 	it("enabled=false：不包装（globalThis.fetch 保持原实现），零 error", async () => {
-		writeConfigFile(JSON.stringify({ ...ENABLED_CONFIG, enabled: false }));
-		const { default: networkProxyExtension } = await import("../index.ts");
-		networkProxyExtension(createFakePi().pi);
+		await loadExtension(JSON.stringify({ ...ENABLED_CONFIG, enabled: false }));
 		expect(globalThis.fetch).toBe(fakeFetch);
 		expect(loggerMock.error).not.toHaveBeenCalled();
 	});
 
 	it("非法配置（坏 JSON）：不抛、不包装（全部直连），error 含恢复动作（配置文件路径）", async () => {
-		writeConfigFile("{ not valid json");
-		const { default: networkProxyExtension } = await import("../index.ts");
-		expect(() => networkProxyExtension(createFakePi().pi)).not.toThrow();
+		// 不抛契约由 loadExtension 的 await 保证（工厂抛错即本用例红）
+		await loadExtension("{ not valid json");
 		expect(globalThis.fetch).toBe(fakeFetch);
 		const messages = loggerMock.error.mock.calls.map((c) => String(c[0]));
 		expect(messages.some((m) => m.includes("network-proxy-ext-config.json"))).toBe(true);
 	});
 
 	it("非法字段（端口越界）：loadConfig 回落 defaults（enabled=false → 不包装）+ error 可归因", async () => {
-		writeConfigFile(JSON.stringify({ ...ENABLED_CONFIG, proxy: { ...ENABLED_CONFIG.proxy, port: 99999 } }));
-		const { default: networkProxyExtension } = await import("../index.ts");
-		expect(() => networkProxyExtension(createFakePi().pi)).not.toThrow();
+		await loadExtension(JSON.stringify({ ...ENABLED_CONFIG, proxy: { ...ENABLED_CONFIG.proxy, port: 99999 } }));
 		expect(globalThis.fetch).toBe(fakeFetch);
 		expect(loggerMock.error.mock.calls.length).toBeGreaterThan(0);
 	});
@@ -114,10 +121,7 @@ describe("networkProxyExtension 工厂加载序列", () => {
 
 describe("turn 粒度热生效", () => {
 	it("turn_start 重读配置：指纹变化换新包装，未变零动作", async () => {
-		writeConfigFile(JSON.stringify(ENABLED_CONFIG));
-		const { default: networkProxyExtension } = await import("../index.ts");
-		const { pi, emit } = createFakePi();
-		networkProxyExtension(pi);
+		const { emit } = await loadExtension();
 		const first = globalThis.fetch;
 
 		// 未变配置：同包装函数（不重建）
@@ -131,10 +135,7 @@ describe("turn 粒度热生效", () => {
 	});
 
 	it("pi 重装 globalThis.fetch（configureHttpDispatcher）后 turn_start 重新包装覆盖者", async () => {
-		writeConfigFile(JSON.stringify(ENABLED_CONFIG));
-		const { default: networkProxyExtension } = await import("../index.ts");
-		const { pi, emit } = createFakePi();
-		networkProxyExtension(pi);
+		const { emit } = await loadExtension();
 
 		let piReinstalledCalls = 0;
 		const piReinstalled: FetchLike = async () => {
@@ -151,12 +152,9 @@ describe("turn 粒度热生效", () => {
 	});
 
 	it("turn_end flush 计数增量到 stats JSONL（recordDispatch → turn_end → 落盘行）", async () => {
-		writeConfigFile(JSON.stringify(ENABLED_CONFIG));
-		const { default: networkProxyExtension } = await import("../index.ts");
+		const { emit } = await loadExtension();
 		// resetModules 后 index.ts 与此处 import 的 stats.ts 是同一模块图刷新的同一实例
 		const { recordDispatch, statsFilePath } = await import("../stats.ts");
-		const { pi, emit } = createFakePi();
-		networkProxyExtension(pi);
 
 		recordDispatch("api.anthropic.com", true);
 		recordDispatch("open.bigmodel.cn", false);
@@ -169,10 +167,7 @@ describe("turn 粒度热生效", () => {
 	});
 
 	it("enabled true→false：turn_start 后恢复原 fetch（禁用生效）", async () => {
-		writeConfigFile(JSON.stringify(ENABLED_CONFIG));
-		const { default: networkProxyExtension } = await import("../index.ts");
-		const { pi, emit } = createFakePi();
-		networkProxyExtension(pi);
+		const { emit } = await loadExtension();
 		expect(globalThis.fetch).not.toBe(fakeFetch);
 
 		writeConfigFile(JSON.stringify({ ...ENABLED_CONFIG, enabled: false }));

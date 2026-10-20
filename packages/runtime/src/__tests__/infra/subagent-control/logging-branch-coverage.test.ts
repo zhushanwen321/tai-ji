@@ -6,7 +6,7 @@
  * pid 复用不杀只删 / pid 文件删除失败；control-server 连接 error / 畸形帧丢弃 /
  * destroy 时 socket 文件删除失败 / pid 文件写失败 / pid 文件清理失败 / spawn ENOENT。
  */
-import { spawn } from 'node:child_process'
+import { spawn, type ChildProcess } from 'node:child_process'
 import { chmodSync, existsSync, mkdirSync, rmSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { describe, expect, it, afterEach, vi } from 'vitest'
@@ -22,31 +22,16 @@ import {
   getControlRunDir,
 } from '../../../infra/subagent-control/paths.js'
 import { sweepOrphanEnginePids, sweepStaleControlSockets } from '../../../infra/subagent-control/sweep.js'
-import type { ControlServerOptions, SubagentControlServer } from '../../../infra/subagent-control/control-server.js'
 import {
+  byeAndExpectClosed,
+  cleanupTestServers,
+  connectAgent,
   expectOpened,
-  makeServer,
-  makeTmpDir,
-  rmTmpDir,
-  waitFor,
-  TestAgent,
   launchSpec,
+  makeRegisteredTmpDir,
+  setupServer,
+  waitFor,
 } from './test-helpers.js'
-
-const tmpDirs: string[] = []
-const servers: SubagentControlServer[] = []
-
-async function setup(overrides: ControlServerOptions = {}): Promise<{
-  server: SubagentControlServer
-  dataDir: string
-}> {
-  const dataDir = await makeTmpDir()
-  tmpDirs.push(dataDir)
-  const server = makeServer(dataDir, overrides)
-  servers.push(server)
-  await server.init()
-  return { server, dataDir }
-}
 
 function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms))
@@ -65,12 +50,17 @@ function makeDownQueue(stdin: DownStdin | null): ChannelDownQueue {
   })
 }
 
+/** 起一个长睡子进程并收窄 pid（pid 复用用例的观测对象；调用方持 engine 负责 finally kill）。 */
+function spawnSleeperEngine(): { engine: ChildProcess; enginePid: number } {
+  const engine = spawn(process.execPath, ['-e', 'setInterval(() => {}, 1000)'], { stdio: 'ignore' })
+  const pid = engine.pid
+  if (pid === null || pid === undefined) throw new Error('spawn pid unavailable')
+  return { engine, enginePid: pid }
+}
+
 afterEach(async () => {
   vi.restoreAllMocks()
-  for (const server of servers.splice(0)) {
-    await server.destroy()
-  }
-  await Promise.all(tmpDirs.splice(0).map((d) => rmTmpDir(d)))
+  await cleanupTestServers()
 })
 
 describe('down-queue 降级分支', () => {
@@ -94,8 +84,7 @@ describe('down-queue 降级分支', () => {
 
 describe('sweep 降级分支', () => {
   it('stale socket 删除失败（socket 名被目录占位）：保留不阻塞、不抛错', async () => {
-    const dataDir = await makeTmpDir('ctl-sweepfail-')
-    tmpDirs.push(dataDir)
+    const dataDir = await makeRegisteredTmpDir('ctl-sweepfail-')
     const runDir = getControlRunDir(dataDir)
     mkdirSync(runDir, { recursive: true })
     const blockedPath = join(runDir, 'subagent-77777.sock')
@@ -106,8 +95,7 @@ describe('sweep 降级分支', () => {
   })
 
   it('pid 文件 instanceId 与 runtimePid 不一致 → 判活告警并保守跳过', async () => {
-    const dataDir = await makeTmpDir('ctl-mirror-id-')
-    tmpDirs.push(dataDir)
+    const dataDir = await makeRegisteredTmpDir('ctl-mirror-id-')
     const enginesDir = getControlEnginesDir(dataDir)
     mkdirSync(enginesDir, { recursive: true })
     const pidFile = join(enginesDir, 'sess-m-fake-m-ch-m.pid')
@@ -124,13 +112,10 @@ describe('sweep 降级分支', () => {
   })
 
   it('pid 复用（start 晚于登记）→ 不杀只删；目录只读时删除失败降级保留', { timeout: 20_000 }, async () => {
-    const dataDir = await makeTmpDir('ctl-reuse-')
-    tmpDirs.push(dataDir)
+    const dataDir = await makeRegisteredTmpDir('ctl-reuse-')
     const enginesDir = getControlEnginesDir(dataDir)
     mkdirSync(enginesDir, { recursive: true })
-    const engine = spawn(process.execPath, ['-e', 'setInterval(() => {}, 1000)'], { stdio: 'ignore' })
-    const enginePid = engine.pid
-    if (enginePid === null || enginePid === undefined) throw new Error('spawn pid unavailable')
+    const { engine, enginePid } = spawnSleeperEngine()
     const pidFile = join(enginesDir, 'sess-r-fake-r-ch-r.pid')
     writeFileSync(pidFile, JSON.stringify({
       pid: enginePid,
@@ -155,7 +140,7 @@ describe('sweep 降级分支', () => {
 
 describe('control-server 降级分支', () => {
   it('spawn ENOENT（resolveLaunch 注入不可执行 command）→ engine process error → engine_closed(127)', { timeout: 20_000 }, async () => {
-    const { server } = await setup({
+    const { agent } = await connectAgent({
       resolveLaunch: async () => ({
         command: '/nonexistent/pi-runner-for-test',
         args: ['--flag'],
@@ -163,9 +148,6 @@ describe('control-server 降级分支', () => {
         electronRunAsNode: false,
       }),
     })
-    const agent = new TestAgent(server.listeningSocketPath)
-    await agent.opened
-    agent.hello()
     // spawn error 路径没有 engine_opened/engine_open_failed 回执——open 永远等不到应答，
     // 只挂 catch 防 unhandled rejection，终态断言走 engine_closed 帧
     void agent.open(launchSpec(), 'open-spawn-err').catch(() => {})
@@ -179,10 +161,7 @@ describe('control-server 降级分支', () => {
   })
 
   it('hello 后畸形帧：丢弃并保持连接可用', { timeout: 20_000 }, async () => {
-    const { server } = await setup()
-    const agent = new TestAgent(server.listeningSocketPath)
-    await agent.opened
-    agent.hello()
+    const { agent } = await connectAgent()
     await agent.waitFor((f) => f.kind === SUBAGENT_CONTROL_FRAME_KINDS.helloOk, 'hello_ok')
     agent.sendRaw('not-json {{{') // 解析失败 → 丢弃、连接保持
 
@@ -192,7 +171,7 @@ describe('control-server 降级分支', () => {
   })
 
   it('destroy 时 socket 文件被目录占位：unlink 失败降级，关停不阻断', { timeout: 20_000 }, async () => {
-    const { server } = await setup()
+    const { server } = await setupServer()
     const socketPath = server.listeningSocketPath
     rmSync(socketPath)
     mkdirSync(socketPath) // 目录占位 → unlinkSync 必失败
@@ -204,14 +183,11 @@ describe('control-server 降级分支', () => {
   })
 
   it('引擎目录只读：pid 文件写失败降级，open 照常成功', { timeout: 20_000 }, async () => {
-    const { server, dataDir } = await setup()
+    const { agent, dataDir } = await connectAgent()
     const enginesDir = getControlEnginesDir(dataDir)
     mkdirSync(enginesDir, { recursive: true })
     chmodSync(enginesDir, 0o555)
     try {
-      const agent = new TestAgent(server.listeningSocketPath)
-      await agent.opened
-      agent.hello()
       const { channelId } = expectOpened(await agent.open(launchSpec({ args: ['--hang'] }), 'open-pidfail'))
       expect(channelId).toBeTruthy() // pid 文件写失败不阻塞（退出走清理）
     } finally {
@@ -220,21 +196,13 @@ describe('control-server 降级分支', () => {
   })
 
   it('引擎目录只读 + 引擎退出：pid 文件清理失败降级，closed 照常送达', { timeout: 20_000 }, async () => {
-    const { server, dataDir } = await setup()
-    const agent = new TestAgent(server.listeningSocketPath)
-    await agent.opened
-    agent.hello()
+    const { agent, dataDir } = await connectAgent()
     const { channelId, pid } = expectOpened(
       await agent.open(launchSpec({ args: ['--exit-on', 'bye', '--exit-code', '7'] }), 'open-cleanup'),
     )
     const enginesDir = getControlEnginesDir(dataDir)
     chmodSync(enginesDir, 0o555)
-    agent.sendFrame(channelId, 'bye')
-    const closed = await agent.waitForFrame(
-      (f) => f.kind === SUBAGENT_CONTROL_FRAME_KINDS.engineClosed && f.channelId === channelId,
-      'engine_closed',
-    )
-    expect(closed.code).toBe(7)
+    const closed = await byeAndExpectClosed(agent, channelId, 7)
     expect(closed.reason).toBe(SUBAGENT_CONTROL_CLOSED_REASONS.engineExit)
     chmodSync(enginesDir, 0o755) // 恢复写权限：降级残留的 pid 文件随 tmp 清理
     await waitFor(() => !isPidAlive(pid), 'engine reaped')
