@@ -18,6 +18,15 @@
     class="relative flex min-w-0 h-full flex-col overflow-hidden"
     :style="panelStyle"
   >
+    <!-- 对话流左侧套餐浮层（plan-quota-float）：全部 quota.enabled provider 的三窗口用量。
+         挂载域 = conversation/trace（dead/landing/empty 不挂）；收起态由 quotaFloatCollapsed
+         单点收敛（trace 激活 / drawer 打开 / 用户手动），内容区让位 gutter 见 panelStyle。 -->
+    <PlanQuotaFloatPanel
+      v-if="quotaFloatVisible"
+      :session-id="sessionId"
+      :collapsed="quotaFloatCollapsed"
+      @update:user-collapsed="quotaFloatUserCollapsed = $event"
+    />
     <!-- dead session 占位：进程已退出，不渲染对话流/composer，提供重开入口（W6：dead 优先级吞掉 form overlay） -->
     <div
       v-if="panelView.kind === 'dead'"
@@ -159,6 +168,8 @@ import { isFormQuestion, isScheduleDraft, type FormQuestion, type ScheduleDraft 
 import MessageStream from './MessageStream.vue'
 import ModeDeclarationRow from './ModeDeclarationRow.vue'
 import Composer from './Composer.vue'
+import PlanQuotaFloatPanel from './PlanQuotaFloatPanel.vue'
+import { useSideDrawer } from '@/composables/features/drawer/useSideDrawer'
 import { COMPOSER_BAND_CLASS } from './composer-band'
 import PlanModeBar from './plan/PlanModeBar.vue'
 import TraceView from './trace/TraceView.vue'
@@ -341,10 +352,37 @@ async function onDeleteGhostSession(): Promise<void> {
   }
 }
 
+// ── 套餐浮层（plan-quota-float）收起状态（宿主单点收敛三来源）──
+/** 文件 drawer 打开 → 浮层收起（per-session 分区状态，切会话自动跟随） */
+const { isOpen: quotaDrawerOpen } = useSideDrawer()
+/** 用户手动收起（浮层把手/折叠钮上报；auto 来源解除后保持到再次点击展开） */
+const quotaFloatUserCollapsed = ref(false)
+/** 浮层挂载域 = conversation/trace 分支（dead/landing/empty 不挂，gutter 同步归零） */
+const quotaFloatVisible = computed(
+  () => conversationSessionId.value !== null || traceSessionId.value !== null,
+)
+/** 收起 = Trace 视图激活 或 drawer 打开 或 用户手动收起 */
+const quotaFloatCollapsed = computed(
+  () => traceSessionId.value !== null || quotaDrawerOpen.value || quotaFloatUserCollapsed.value,
+)
+
 /**
  * Panel 底色 + --panel-bg CSS 变量（供子组件如 sticky turn-meta 消费，保证浮层底色与所在 panel 一致）。
  * section 透明继承 MainPanel 的 bg-surface，--panel-bg=surface 供子组件浮层对齐。
  * header 已提升到 PanelContainer，本组件仅 body 区，无边框/圆角（融入统一外壳）。
+ *
+ * 套餐浮层让位 gutter（plan-quota-float）：浮层展开时消息列与 composer 同步左缩进 300px
+ * （收起 64px / 不挂载 0）——section 级 padding 让两者整体右移，保持「composer 与消息流
+ * 同宽同缘」契约（两者的 30px 内容列边距叠在其上）。宽度与 PlanQuotaFloatPanel 的
+ * 276px/44px（+ left-3 双侧 12px 间距）成对，改动需两处同步。
  */
-const panelStyle = computed(() => ({ '--panel-bg': 'var(--surface)' }))
+const panelStyle = computed(() => ({
+  '--panel-bg': 'var(--surface)',
+  paddingLeft: !quotaFloatVisible.value
+    ? '0px'
+    : quotaFloatCollapsed.value
+      ? '64px'
+      : '300px',
+  transition: 'padding-left 260ms cubic-bezier(0.4, 0, 0.2, 1)',
+}))
 </script>
