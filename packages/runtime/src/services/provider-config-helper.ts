@@ -534,9 +534,23 @@ export function listBuiltinProviders(): BuiltinProviderTemplate[] {
   }
   // JSON import 的推断类型与 BuiltinProviderTemplate 有 optional 字段差异，浅校验后断言。
   // 尾部拼接 taiji 远程清单模板（remote-config 域 1；纯缓存读侧，拉取失败/损坏 = 空段，
-  // 不影响 pi catalog 快照段——两来源 id 命名空间不重叠）
+  // 不影响 pi catalog 快照段）。拼接判据 = 返回列表 id 唯一：远程条目复用 pi catalog id
+  // （或远程清单内部自重复）时跳过并逐条 warn——远程条目带 remoteSource 标记，重复 id 会让
+  // 该 catalog provider 被误标 remoteSource 参与热更新（模型被远程清单覆盖），且模板选择器
+  // 渲染出同 id 两张卡片（data-testid 撞名）。远程清单 id 与 catalog 撞名属配置错误，须可见。
   const remote = listRemoteProviderTemplates()
-  return remote.length > 0 ? [...(raw as unknown as BuiltinProviderTemplate[]), ...remote] : (raw as unknown as BuiltinProviderTemplate[])
+  if (remote.length === 0) return raw as unknown as BuiltinProviderTemplate[]
+  const seen = new Set((raw as unknown as BuiltinProviderTemplate[]).map((p) => p.id))
+  const appended: BuiltinProviderTemplate[] = []
+  for (const p of remote) {
+    if (seen.has(p.id)) {
+      console.warn(`[config-service] remote provider template id "${p.id}" collides with an already-listed builtin provider id, skipping the remote entry`)
+      continue
+    }
+    seen.add(p.id)
+    appended.push(p)
+  }
+  return [...(raw as unknown as BuiltinProviderTemplate[]), ...appended]
 }
 
 export function checkEnvVars(names: string[]): Record<string, boolean> {
