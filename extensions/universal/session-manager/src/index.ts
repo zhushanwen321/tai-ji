@@ -35,23 +35,23 @@ const CreateManagedSessionParams = Type.Object({
 });
 
 const SendToSessionParams = Type.Object({
-	sessionId: Type.String({ description: "Target session ID" }),
+	sessionId: Type.String({ description: "From list_my_sessions output. Unknown/stale ids error — re-list instead of retrying." }),
 	prompt: Type.String({ description: "Message to send to the session" }),
 });
 
 const ReadSessionHistoryParams = Type.Object({
-	sessionId: Type.String({ description: "Target session ID" }),
+	sessionId: Type.String({ description: "From list_my_sessions output. Unknown/stale ids error — re-list instead of retrying." }),
 	tailTurns: Type.Optional(Type.Number({ description: "Number of recent turns to return (default: all)" })),
 });
 
 const ListMySessionsParams = Type.Object({});
 
 const GetSessionStatusParams = Type.Object({
-	sessionId: Type.String({ description: "Target session ID" }),
+	sessionId: Type.String({ description: "From list_my_sessions output. Unknown/stale ids error — re-list instead of retrying." }),
 });
 
 const AbortSessionParams = Type.Object({
-	sessionId: Type.String({ description: "Target session ID to abort" }),
+	sessionId: Type.String({ description: "From list_my_sessions output. Unknown/stale ids error — re-list instead of retrying." }),
 });
 
 // 两终局操作的 sessionId 字段 description 走全族统一句式（填参层：id 唯一来源 + 错误恢复指引）
@@ -153,7 +153,7 @@ async function executeTool(
 		const text =
 			result.reason === "non-json"
 				? `Session manager ${action}: non-JSON response from runtime (protocol mismatch — redeploy same-version runtime + extension; see extension logs).`
-				: `Session manager ${action}: cancelled or channel error.`;
+				: `Session manager ${action}: cancelled or channel error — check the taiji runtime connection first; if it is up, retrying the call is safe. Exception: if a call fails with a duplicate-notifyId conflict, do not retry it as-is — issue a new call instead (a new call carries a fresh notifyId).`;
 		throw new Error(text);
 	}
 	const raw = result.value;
@@ -259,8 +259,16 @@ export default function sessionManagerExtension(pi: ExtensionAPI): void {
 	registerSessionTool(pi, {
 		name: "create_managed_session",
 		label: "Create Managed Session",
-		description:
-			"Create a new agent-managed session in a working directory. An optional initial prompt is delivered immediately (new sessions are always idle). Returns session ID, initial status, and willNotify: with a prompt, exactly one completion notification is delivered to this session when that run finishes (see pending_notifications, type 'session'); without a prompt, no completion notification. Terminal session death is notified once regardless. Requires the taiji desktop runtime (times out in standalone pi).",
+		description: `Create a new managed child session in a working directory, optionally with an initial prompt.
+
+Returns the new session's id and its initial status. With a prompt it is delivered immediately (new sessions are always idle) and exactly one completion notification is delivered to this session when that first run finishes (see pending_notifications, type 'session'); without a prompt, no completion notification. If the session dies later, its terminal death is notified once regardless — independent of completion notifications.
+
+Different from send_to_session (delivers messages to an already-created session): this tool creates the session and can send its first message atomically in one call.
+
+## Example
+{"cwd":"/absolute/path/to/project","label":"research","prompt":"Analyze the auth module"}
+
+The returned sessionId is the value all other session tools take — keep it; list_my_sessions recovers it later. Requires the taiji desktop runtime (in standalone pi this tool hangs forever — no runtime answers the channel).`,
 		parameters: CreateManagedSessionParams,
 		action: "create",
 		toParams: (p) => ({
@@ -299,8 +307,16 @@ export default function sessionManagerExtension(pi: ExtensionAPI): void {
 	registerSessionTool(pi, {
 		name: "send_to_session",
 		label: "Send to Session",
-		description:
-			"Send a prompt/message to an existing managed session. The message is queued asynchronously: if the target session is busy (generating/compacting/running bash) it is delivered at its next turn boundary and {queued: true} returns immediately. willNotify: exactly one completion notification is delivered to this session when the queued message is consumed and that run finishes (several queued messages merge into a single notification with a count). On synchronous failure the tool call errors (check get_session_status, then retry). Requires the taiji desktop runtime (times out in standalone pi).",
+		description: `Send a message to an existing managed session.
+
+The message is queued asynchronously: if the target session is busy (generating/compacting/running bash) it is delivered at its next turn boundary and {queued: true} returns immediately. willNotify: exactly one completion notification is delivered to this session when the queued message is consumed and that run finishes; several queued messages merge into a single notification with a count. On synchronous failure the tool call errors (check get_session_status, then retry).
+
+Different from create_managed_session (creates a session, optionally with a first message): this tool talks to a session that already exists.
+
+## Example
+{"sessionId":"<id from list_my_sessions>","prompt":"How did the analysis go?"}
+
+Ids come from list_my_sessions — never guess; on unknown-id error re-list, don't retry the same id. Requires the taiji desktop runtime (in standalone pi this tool hangs forever — no runtime answers the channel).`,
 		parameters: SendToSessionParams,
 		action: "send",
 		toParams: (p) => ({ sessionId: p.sessionId, prompt: p.prompt, notifyId: newNotifyId() }),
@@ -321,7 +337,16 @@ export default function sessionManagerExtension(pi: ExtensionAPI): void {
 	registerSessionTool(pi, {
 		name: "read_session_history",
 		label: "Read Session History",
-		description: "Read the conversation history of a managed session. Optionally limit to the last N turns. Requires the taiji desktop runtime (times out in standalone pi).",
+		description: `Read the conversation history of a managed session.
+
+Returns the session's messages. Pass tailTurns to limit the result to the most recent turns (default: all).
+
+Different from get_session_status (lightweight state and counters): this tool returns the actual conversation content.
+
+## Example
+{"sessionId":"<id from list_my_sessions>","tailTurns":20}
+
+Ids come from list_my_sessions — never guess; on unknown-id error re-list, don't retry the same id. Requires the taiji desktop runtime (in standalone pi this tool hangs forever — no runtime answers the channel).`,
 		parameters: ReadSessionHistoryParams,
 		action: "history",
 		toParams: (p) => ({ sessionId: p.sessionId, tailTurns: p.tailTurns }),
@@ -337,7 +362,14 @@ export default function sessionManagerExtension(pi: ExtensionAPI): void {
 	registerSessionTool(pi, {
 		name: "list_my_sessions",
 		label: "List My Sessions",
-		description: "List all sessions managed by the current agent. Returns session IDs, labels, and statuses. Requires the taiji desktop runtime (times out in standalone pi).",
+		description: `List all sessions managed by you, with id, label, cwd, and status.
+
+This listing is the single source of sessionId values for every other session tool. The response also carries undeliveredResults: the total count of completion notifications not yet delivered to you across your sessions.
+
+## Example
+{}
+
+Ids come from this listing — never guess; on unknown-id error re-list, don't retry the same id. Requires the taiji desktop runtime (in standalone pi this tool hangs forever — no runtime answers the channel).`,
 		parameters: ListMySessionsParams,
 		action: "list",
 		toParams: () => ({}),
@@ -364,7 +396,16 @@ export default function sessionManagerExtension(pi: ExtensionAPI): void {
 	registerSessionTool(pi, {
 		name: "get_session_status",
 		label: "Get Session Status",
-		description: "Get the current status of a managed session (active, idle, error, etc.) and its model info. Requires the taiji desktop runtime (times out in standalone pi).",
+		description: `Get the current status of a managed session without reading its history.
+
+Returns the session's status (active, idle, error, etc.), its model info, and undeliveredResults — the count of that session's finished runs whose completion notifications have not been delivered to you yet. An unknown or non-owned id does not error: it returns status 'not_found'.
+
+Different from read_session_history (conversation content): this tool is a lightweight state check.
+
+## Example
+{"sessionId":"<id from list_my_sessions>"}
+
+Ids come from list_my_sessions — never guess; on unknown-id error re-list, don't retry the same id. Requires the taiji desktop runtime (in standalone pi this tool hangs forever — no runtime answers the channel).`,
 		parameters: GetSessionStatusParams,
 		action: "status",
 		toParams: (p) => ({ sessionId: p.sessionId }),
@@ -380,7 +421,16 @@ export default function sessionManagerExtension(pi: ExtensionAPI): void {
 	registerSessionTool(pi, {
 		name: "abort_session",
 		label: "Abort Session",
-		description: "Abort a running managed session. The session stops processing; its final status will be 'stopped'. Requires the taiji desktop runtime (times out in standalone pi).",
+		description: `Stop a managed session's current run, keeping the session and its history.
+
+The session stops processing; its final status will be 'stopped'. Pending completion notifications for the aborted run are cancelled, not delivered.
+
+Different from archive_session (tidies a finished session away, reversible by the user) and delete_session (permanently removes it): abort only stops the current run — the session stays in the sidebar for later use.
+
+## Example
+{"sessionId":"<id from list_my_sessions>"}
+
+Ids come from list_my_sessions — never guess; on unknown-id error re-list, don't retry the same id. Requires the taiji desktop runtime (in standalone pi this tool hangs forever — no runtime answers the channel).`,
 		parameters: AbortSessionParams,
 		action: "abort",
 		toParams: (p) => ({ sessionId: p.sessionId }),
