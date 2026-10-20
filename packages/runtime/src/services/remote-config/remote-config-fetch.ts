@@ -81,6 +81,8 @@ function mtimeOf(path: string): number {
   }
 }
 
+// @data-owner #65（data-source-registry.md）：remote-config 落盘缓存的读侧内存快照（mtime
+// 失效检测），持久权威是磁盘 envelope 文件——persistCache 落盘后同步刷新本快照，非第二写方。
 const cacheSnapshots = new Map<string, { mtime: number; envelope: RemoteCacheEnvelope | null }>()
 
 /** 读域缓存（内存快照 + mtime 失效检测）。 */
