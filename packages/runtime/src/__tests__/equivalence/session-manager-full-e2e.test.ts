@@ -1,5 +1,8 @@
 /**
- * session-manager 真 pi 全链路 e2e（U9-S1 / U9-S2 + watch 桥三路径 U9-S3~S5）— 设计文档 §7.2 场景 1 + §7.3 重启恢复 + §4 场景 9（watch 开表/晚 respond/静默，D2/D4 watch 路由）的机器化。
+ * session-manager 真 pi 全链路 e2e（U9-S1 / U9-S2 + watch 桥三路径 U9-W1~W3 + 死亡收尾
+ * U9-D1/D2 + 真 LLM 轨 archive/delete 三场景 U9-S3~S5）— 设计文档 §7.2 场景 1 + §7.3 重启恢复
+ * + §4 场景 9（watch 开表/晚 respond/静默，D2/D4 watch 路由）+ session-manager-archive-delete
+ * 验收 1/2/3 的机器化。
  *
  * 与 session-manager-e2e-probe.test.ts（FakePiProcessIO，无真 pi 进程）的区别：本文件 spawn
  * **真实 pi**（--mode rpc + --extension extensions/universal/session-manager，真实 LLM turn 驱动 agent
@@ -10,13 +13,14 @@
  * extension 工具内 ctx.ui.select → pi stdout extension_ui_request → runtime 真实翻译/路由/处理
  * → sendExtensionUiResponse 回写 → 工具 await 拿到结果（设计文档 §10 首项检查点）。
  *
- * 用例（验收 id 在用例名词边界，cw 名字级比对）：
+ * 用例（验收 id 在用例名词边界，cw 名字级比对；watch 桥三路径占 U9-W1~W3，U9-S3~S5 归
+ * archive/delete 三场景——一 id 一场景）：
  * - U9-S1 真 pi 全链路 create：工具 60s 内返回 + sidecar 已写 + spawnSource='agent'
  * - U9-S2 重启恢复：scanPiSessions({force:true}) 重扫恢复 spawnSource + parentAgentSessionId
- * - U9-S3 watch 开表挂等：extension 经真实 marker select 通道开表 → handler 路由 deferred
+ * - U9-W1 watch 开表挂等：extension 经真实 marker select 通道开表 → handler 路由 deferred
  *  （零 respond）→ settle 兑现路径经同一写回通道 respond（设计 §4-9；faux 轨零 token）
- * - U9-S4 晚 respond catch-up：watch 到达时 claim 已 fulfilled → 立即快照 respond（D4）
- * - U9-S5 fail-closed 静默：watch 查无 claim → 立即 respond 'cancelled'（不携 sessionId，D-4）
+ * - U9-W2 晚 respond catch-up：watch 到达时 claim 已 fulfilled → 立即快照 respond（D4）
+ * - U9-W3 fail-closed 静默：watch 查无 claim → 立即 respond 'cancelled'（不携 sessionId，D-4）
  * - U9-D1 死亡收尾：子会话意外退出 → watch 挂等 claim 恰收一条 reason:'exited'
  *  （携 exitCode/stderrTail + deathSeq/fulfillsN），destroy 迟到二次发声幂等（notify-once
  *  D5「死亡也通知恰一次」第一承诺的执行侧）
@@ -27,8 +31,20 @@
  * 回写 → 工具返回）是被测对象，agent 的工具调用由 fauxResponses 脚本固定；门控
  * FAUX_PI_READY（只判 binary，凭证无关、CI 可跑）。
  *
+ * 真 LLM 轨（REAL 轨，session-manager-archive-delete U-D3）：U9-S3/S4/S5 走真实 LLM 轮次
+ * （DEFAULT_MODEL = xiaomi-token-plan-cn/mimo-v2.6-flash），agent 是否真调工具不受控 →
+ * 1+2 重试护栏（历史真实轨形态）；服务面 fake：SessionService.getSummary/delete 与
+ * ArchiveService.archive 最小实现（delete/archive 记录调用 + 执行后 getSummary 查无），
+ * claims 为真实账本（归档收尾 onSessionDeath 经 wrapper 观测点记录）：
+ * - U9-S3 归档全链：prompt 明确 archive 指令 → archive_session → 回包 archived:true +
+ *   fake archive 恰一次 + 归档后 getSummary 查无 + claims 收尾（onSessionDeath 'exit'）
+ * - U9-S4 删除全链：prompt 明确 delete 指令（模拟用户明示）→ delete_session → 回包
+ *   deleted:true + fake delete 恰一次且作用对象正确（delete 不走 handler 侧 claims 收尾）
+ * - U9-S5 人身约束取样：tidy up 语料（零删除意图，archive/delete 双工具均在声明侧）→
+ *   archive_session 被调用、全程零 delete_session（delete marker 请求到达即 FAIL，不进重试）
+ *
  * 运行：cd packages/runtime && npx vitest run src/__tests__/equivalence/session-manager-full-e2e.test.ts
- * 入口脚本：bash scripts/cw/session-manager-full-e2e.sh（标记行 U9-S1/U9-S2 PASS|FAIL）
+ * 入口脚本：bash scripts/cw/session-manager-full-e2e.sh（标记行 U9-S1..U9-S5 PASS|FAIL）
  */
 
 import { describe, it, expect } from 'vitest'
@@ -40,7 +56,8 @@ import { fileURLToPath } from 'node:url'
 import { translate } from '../../infra/pi/event-adapter.js'
 import { EventInterpreter } from '../../services/session/event-interpreter.js'
 import { createClaimLedger } from '../../services/session/notify-claims.js'
-import type { ClaimLedger } from '../../services/session/notify-claims.js'
+import type { ClaimLedger, DeathBatch, DeathCause } from '../../services/session/notify-claims.js'
+import type { ArchiveService } from '../../services/archive/archive-service.js'
 import { SessionManagerHandler, deliverRespondTargets, collectStderrTail } from '../../transport/session-manager-handler.js'
 import type { SessionManagerHandlerOptions } from '../../transport/session-manager-handler.js'
 import {
@@ -53,6 +70,7 @@ import { SESSION_MANAGER_MARKER } from '@zhushanwen/extension-protocol'
 import type { PiEvent } from '../../infra/pi/pi-protocol.js'
 import type { ISessionService } from '../../interfaces.js'
 import { spawnPiFixture, FAUX_PI_READY, FAUX_PI_SKIP_REASON, type PiFixture, type PiStreamEvent } from './pi-fixture.js'
+import { REAL_PI_READY, REAL_PI_SKIP_REASON } from './real-pi-gate.js'
 
 /** 真 extension 源码路径（worktree 内 extensions/universal/session-manager，pi 原生 loader 加载 TS 源） */
 // import.meta.url 仅测试可用（vitest ESM 环境）；禁止复制进 runtime src——CJS bundle 下
@@ -90,23 +108,34 @@ interface FullChain {
   feedUiRequest: (event: PiStreamEvent) => Promise<void>
 }
 
+/** marker select ui_request 的嵌套 {action,params} payload 解析（非 marker 事件 / 解析失败 → undefined）。 */
+function markerPayloadOf(e: PiStreamEvent): { action?: unknown; params?: { notifyId?: unknown } } | undefined {
+  if (e.type !== 'extension_ui_request' || e.title !== SESSION_MANAGER_MARKER) return undefined
+  const rawOptions = Array.isArray(e.options) ? e.options : []
+  if (rawOptions.length === 0) return undefined
+  try {
+    return JSON.parse(String(rawOptions[0])) as { action?: unknown; params?: { notifyId?: unknown } }
+  } catch {
+    return undefined
+  }
+}
+
+/** marker 请求的 action 名（非 marker 事件 / 解析失败 → undefined；真 LLM 轨驱动谓词共用）。 */
+function markerActionOf(e: PiStreamEvent): string | undefined {
+  const action = markerPayloadOf(e)?.action
+  return typeof action === 'string' ? action : undefined
+}
+
 /**
  * 从 marker select ui_request 事件解析 watch 请求的 notifyId（非 watch / 解析失败 → undefined）。
  * create 会开两表：claim notifyId（extension 侧 crypto 生成，tool result 里不回传）+
  * lifetimeNotifyId（tool result 回传）——调用方以「≠ lifetimeNotifyId」区分两者。
  */
 function watchNotifyIdOf(e: PiStreamEvent): string | undefined {
-  if (e.type !== 'extension_ui_request' || e.title !== SESSION_MANAGER_MARKER) return undefined
-  const rawOptions = Array.isArray(e.options) ? e.options : []
-  if (rawOptions.length === 0) return undefined
-  try {
-    const payload = JSON.parse(String(rawOptions[0])) as { action?: unknown; params?: { notifyId?: unknown } }
-    if (payload.action !== 'watch') return undefined
-    const notifyId = payload.params?.notifyId
-    return typeof notifyId === 'string' ? notifyId : undefined
-  } catch {
-    return undefined
-  }
+  const payload = markerPayloadOf(e)
+  if (!payload || payload.action !== 'watch') return undefined
+  const notifyId = payload.params?.notifyId
+  return typeof notifyId === 'string' ? notifyId : undefined
 }
 
 /** 全链路执行结果（各验收用例消费的形态） */
@@ -126,7 +155,7 @@ interface FullChainResult {
  * → 等 extension_ui_request → 真实 translate/interpreter/handler 处理 → 回写 → 等 turn_end 工具结果。
  *
  * options.withPrompt：create 携固定 prompt → runtime arm kind=claim（+自动 lifetime）→
- * 工具结果后 extension 经 marker 通道开表（watch ui_request 进事件流，供 U9-S3~S5 驱动）。
+ * 工具结果后 extension 经 marker 通道开表（watch ui_request 进事件流，供 U9-W1~W3 驱动）。
  *
  * faux LLM 轨（L2.5 翻轨）：agent 的工具调用由 fauxResponses 脚本固定（toolCalls 步骤
  * 100% 确定），真实 LLM 时代「agent 是否真调工具不受控」的 2 次重试护栏已随翻轨删除
@@ -208,7 +237,7 @@ async function runFullChain(options: ChainOptions = {}): Promise<FullChain> {
         id,
         // 归属材料（handleWatch respond 前二次归属校验 / isOwnedBy 的唯一读源）：子会话是
         // spawnSource='agent' 且归属本父会话的 managed child——生产路径由真实 SessionService
-        // 提供，fake 同形物化否则 catch-up 路径会误判「归属失效 → cancelled」（U9-S4）。
+        // 提供，fake 同形物化否则 catch-up 路径会误判「归属失效 → cancelled」（U9-W2）。
         ...(id === childId ? { spawnSource: 'agent', parentAgentSessionId: parentSessionId } : {}),
       }),
       getSession: () => undefined, // resolveSessionFile 的内存态路径（sessionFile 缺席 → undefined，respond 不携该字段）
@@ -395,7 +424,7 @@ async function openClaimWatchChain(): Promise<WatchChain> {
   }
 }
 
-/** 开表挂等共用路径（U9-S3 / U9-D1 前置）：真实通道喂入 watch → deferred（wait）路由，断言零 respond。 */
+/** 开表挂等共用路径（U9-W1 / U9-D1 前置）：真实通道喂入 watch → deferred（wait）路由，断言零 respond。 */
 async function feedWatchDeferring(w: WatchChain): Promise<void> {
   await w.feedUiRequest(w.watchEvent)
   expect(w.responds.filter((r) => r.requestId === w.watchRequestId), 'deferred 阶段不应有 respond').toHaveLength(0)
@@ -470,10 +499,10 @@ describe.skipIf(!FAUX_PI_READY)(`session-manager full e2e faux pi${FAUX_PI_READY
   // 经真实 marker select 通道开表，watch 事件刻意不喂入，各用例自控喂入时机）。
   // 偏离登记（按 §4-9「handler 真实通道集成」意图的最小可达形态）：
   //   ① 入站 watch 与出站 respond 均走真实通道（translate → interpreter → handler →
-  //     extension_ui_response 回写 pi stdin），但 U9-S3 的 settle 兑现路径由测试直调
+  //     extension_ui_response 回写 pi stdin），但 U9-W1 的 settle 兑现路径由测试直调
   //     claims.settle + deliverRespondTargets（与组合根 index.ts 同函数同序）——faux 轨
   //     无真实子 pi 进程，产不出子会话 agent_settled 事件；
-  //   ② U9-S5 的「查无 claim」以 claims.clearSession 构造（等价 D8-v1 runtime 重启内存
+  //   ② U9-W3 的「查无 claim」以 claims.clearSession 构造（等价 D8-v1 runtime 重启内存
   //     账本全失形态），非真实 runtime 重启；
   //   ③ lifetime watch 开表后刻意不喂（fire-and-forget 悬 promise = P1 已知无害）。
   //   ④ U9-D1/D2 的死亡收尾路径由测试直调 claims.onSessionDeath + deliverRespondTargets +
@@ -482,7 +511,7 @@ describe.skipIf(!FAUX_PI_READY)(`session-manager full e2e faux pi${FAUX_PI_READY
   //     文件可触碰面），exit 现场以 pm 上报形态注入 extra（stderrTail 经真实 collectStderrTail）；
   //     被测对象 = 死亡批分流 → 词形映射（toWatchRespondPayload cause 分派 exited/deleted +
   //     退出现场附加）→ watch 写回通道闭环 + 发声幂等。
-  it('U9-S3 watch 开表挂等：marker 通道 watch → handler deferred → settle 兑现 respond', { timeout: 80_000 }, async () => {
+  it('U9-W1 watch 开表挂等：marker 通道 watch → handler deferred → settle 兑现 respond', { timeout: 80_000 }, async () => {
     const w = await openClaimWatchChain()
     try {
       // 1. 开表：真实通道入站 → 路由 deferred（wait）——零 respond，watch 槽已登记
@@ -504,7 +533,7 @@ describe.skipIf(!FAUX_PI_READY)(`session-manager full e2e faux pi${FAUX_PI_READY
     }
   })
 
-  it('U9-S4 晚 respond catch-up：watch 到达时 claim 已 fulfilled → 立即快照 respond', { timeout: 80_000 }, async () => {
+  it('U9-W2 晚 respond catch-up：watch 到达时 claim 已 fulfilled → 立即快照 respond', { timeout: 80_000 }, async () => {
     const w = await openClaimWatchChain()
     try {
       // 1. watch 尚未喂入前先兑现（fulfilled-no-watch：settle 零 respond 批，D4 锚先行）
@@ -523,7 +552,7 @@ describe.skipIf(!FAUX_PI_READY)(`session-manager full e2e faux pi${FAUX_PI_READY
     }
   })
 
-  it('U9-S5 watch fail-closed：查无 claim → 立即 respond cancelled（静默收尾）', { timeout: 80_000 }, async () => {
+  it('U9-W3 watch fail-closed：查无 claim → 立即 respond cancelled（静默收尾）', { timeout: 80_000 }, async () => {
     const w = await openClaimWatchChain()
     try {
       // 1. 构造「查无 claim」：清空该 session 全部记录 ≙ D8-v1 runtime 重启内存账本全失形态
@@ -551,7 +580,7 @@ describe.skipIf(!FAUX_PI_READY)(`session-manager full e2e faux pi${FAUX_PI_READY
   it('U9-D1 死亡收尾：子会话意外退出 → watch 挂等 claim 恰收一条 reason:exited（携 exitCode/stderrTail），destroy 迟到二次发声幂等', { timeout: 80_000 }, async () => {
     const w = await openClaimWatchChain()
     try {
-      // 1. 开表挂等：真实通道入站 → handler wait 路由登记 watch 槽（U9-S3 同款，零 respond）
+      // 1. 开表挂等：真实通道入站 → handler wait 路由登记 watch 槽（U9-W1 同款，零 respond）
       await feedWatchDeferring(w)
 
       // 2. 子会话进程意外退出 → 死亡收尾三步（偏离登记④）：「session 不在内存」路径 =
@@ -614,6 +643,374 @@ describe.skipIf(!FAUX_PI_READY)(`session-manager full e2e faux pi${FAUX_PI_READY
     } finally {
       await w.fx.dispose().catch(() => {})
       w.cleanup()
+    }
+  })
+})
+
+// ── 真 LLM 轨（REAL 轨，session-manager-archive-delete 验收 1/2 + 设计 §5 验收 3 取样）────
+// 与上方 faux 轨的差异仅在 LLM：不传 fauxResponses（model = DEFAULT_MODEL，真实凭证轨、
+// REAL_PI_READY 门控）；agent 是否真调工具不受控 → 1+2 重试护栏（历史真实轨形态——单轮
+// 结束而无工具调用 / 单次等待超时才重试；人身约束违反不进重试，防重试掩盖违反）。
+// 服务面 fake：getSummary/delete（SessionService）与 archive（ArchiveService）最小实现，
+// delete/archive 执行体记录调用并使 getSummary 此后查无（归档/删除后不可见的同形模拟）；
+// claims 为真实账本，归档收尾 onSessionDeath 经 wrapper 观测点记录后透传原实现。
+
+/** 真实 LLM 轨驱动尝试上限（1 + 2 重试，历史真实轨形态） */
+const MAX_REAL_ATTEMPTS = 3
+
+/** marker action → 工具名（turn_end.toolResults 的匹配键） */
+const TOOL_BY_ACTION = { archive: 'archive_session', delete: 'delete_session' } as const
+
+/** runRealToolChain 装配选项 */
+interface RealChainOptions {
+  /** settings defaultTools 预激活的 deferred 工具（'+name' 增量条目；与生产 spawn 同通道） */
+  defaultTools: string[]
+  /** 逐次尝试的驱动指令（attempt 1 为被测语态，后续条目为加硬重试；末条重复使用） */
+  instructions: Array<(childId: string) => string>
+  /** 等待谓词命中的 marker action 集合（工具调用本体的到达信号） */
+  acceptActions: ReadonlyArray<'archive' | 'delete'>
+  /** 到达即 FAIL 的 marker action（人身约束违反——不进重试，重试不得掩盖违反） */
+  violationActions?: ReadonlyArray<'archive' | 'delete'>
+  /** 预置 lifetime 债权（U9-S3 收尾观测）：handleArchive 的 onSessionDeath 作用对象 */
+  preArmLifetimeClaim?: boolean
+}
+
+/** runRealToolChain 返回侧（三用例消费） */
+interface RealToolChain {
+  parentSessionId: string
+  childId: string
+  fx: PiFixture
+  cleanup: () => void
+  claims: ClaimLedger
+  /** fake 服务侧执行体调用记录：delete = sessionService.delete / archive = archiveService.archive */
+  deleteCalls: string[]
+  archiveCalls: string[]
+  /** fake SessionService（getSummary 断言用：归档/删除后查无） */
+  sessionService: ISessionService
+  responds: RecordedRespond[]
+  /** 命中的 marker ui_request（工具调用本体）及其 action */
+  uiRequest: PiStreamEvent
+  uiRequestAction: 'archive' | 'delete'
+  toolResultEvent: PiStreamEvent
+  /** 驱动实际尝试次数（重试护栏观测） */
+  attempts: number
+  /** preArmLifetimeClaim 的债权键（handleArchive 收尾的作用对象断言用） */
+  lifetimeNotifyId?: string
+  /** onSessionDeath 观测点（wrapper 记录后透传原实现；U9-S3 断言 / U9-S4 零调用断言） */
+  deathCalls: Array<{ sessionId: string; cause: DeathCause }>
+}
+
+/**
+ * 驱动一条真 LLM 全链路：spawn 真 pi（含 extension + 真实模型）→ 指令驱动 agent 调
+ * archive_session / delete_session → 等 marker ui_request → 真实 translate/interpreter/
+ * handler 处理（归属校验 + fake 执行体 + claims 收尾）→ 回写 → 等 turn_end 工具结果。
+ *
+ * 重试护栏（历史真实轨形态）：单轮 agent_end 而无工具调用 / 单次 waitForEvent 超时 →
+ * 换下一条指令重试，至多 MAX_REAL_ATTEMPTS 次；violationActions 的 marker 请求到达即
+ * 抛（人身约束违反不进重试）。任一步失败先收尾（fx.dispose + cleanup）再抛。
+ */
+async function runRealToolChain(options: RealChainOptions): Promise<RealToolChain> {
+  const savedDataDir = process.env.TAIJI_AGENT_DATA_DIR
+  const dataRoot = mkdtempSync(join(tmpdir(), 'u9-smoke-data-'))
+  process.env.TAIJI_AGENT_DATA_DIR = dataRoot
+  const sessionDir = join(dataRoot, 'agent', 'sessions', 'u9-smoke')
+  mkdirSync(sessionDir, { recursive: true })
+
+  // claims + onSessionDeath 观测点（wrapper 保留原实现——收尾路径调用的断言面）
+  const deathCalls: Array<{ sessionId: string; cause: DeathCause }> = []
+  const claims = createClaimLedger()
+  const rawOnSessionDeath = claims.onSessionDeath.bind(claims)
+  claims.onSessionDeath = (sessionId: string, cause: DeathCause): DeathBatch => {
+    deathCalls.push({ sessionId, cause })
+    return rawOnSessionDeath(sessionId, cause)
+  }
+  const cleanup = (): void => {
+    claims.dispose()
+    process.env.TAIJI_AGENT_DATA_DIR = savedDataDir
+    rmSync(dataRoot, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 })
+  }
+
+  // 真 LLM 轨：不传 fauxResponses → model = DEFAULT_MODEL（mimo flash），凭证拷贝走 real 分支
+  const fx = await spawnPiFixture({
+    extensions: [EXTENSION_PATH],
+    sessionDir,
+    commandTimeoutMs: STEP_TIMEOUT_MS,
+    agentDefaultTools: options.defaultTools,
+  })
+
+  try {
+    // ── 1. 父 pi 真实 sessionId（归属校验的 parentAgentSessionId 权威源）──
+    const state = await fx.sendCommand('get_state')
+    const stateData = state.data as { sessionId?: string } | undefined
+    const parentSessionId = stateData?.sessionId
+    if (!parentSessionId) throw new Error(`get_state 未返回 sessionId: ${JSON.stringify(state.data)}`)
+
+    // ── 2. fake 服务面：child 在册（归属本父会话）→ delete/archive 执行体记录调用并使 getSummary 查无 ──
+    const childId = `u9-smoke-child-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`
+    const gone = new Set<string>()
+    const deleteCalls: string[] = []
+    const archiveCalls: string[] = []
+    const sessionService = {
+      getSummary: (id: string) =>
+        gone.has(id)
+          ? undefined
+          : {
+              id,
+              // 归属材料（isOwnedByIncludingScanned 的内存源）：子会话是 spawnSource='agent'
+              // 且归属本父会话的 managed child——delete/archive 归属校验的放行条件
+              ...(id === childId ? { spawnSource: 'agent', parentAgentSessionId: parentSessionId } : {}),
+            },
+      getSession: () => undefined,
+      listPersistedSessions: () => [],
+      delete: async (id: string) => {
+        deleteCalls.push(id)
+        gone.add(id)
+      },
+      create: async () => {
+        throw new Error('create not exercised in the real archive/delete e2e')
+      },
+    } as unknown as ISessionService
+    const archiveService = {
+      archive: async (id: string) => {
+        archiveCalls.push(id)
+        gone.add(id)
+        return { sessionId: id }
+      },
+    } as unknown as ArchiveService
+
+    // ── 3. runtime 真实链路接线（与 runFullChain 同款；delivery 置空 stub——本轨不驱动 send）──
+    const responds: RecordedRespond[] = []
+    const handler = new SessionManagerHandler({
+      sessionService,
+      claims,
+      archiveService,
+      delivery: {
+        getOrCreateDelivery: () => {
+          throw new Error('send not exercised in this e2e')
+        },
+        sendDirect: async () => {},
+        dispose: () => {},
+        disposeAll: () => {},
+      } as unknown as SessionManagerHandlerOptions['delivery'],
+      sendExtensionUiResponse: (_sessionId, requestId, response) => {
+        const value = response === null ? null : String(response)
+        responds.push({ requestId, value })
+        const payload = response === null
+          ? { type: 'extension_ui_response' as const, id: requestId, cancelled: true }
+          : { type: 'extension_ui_response' as const, id: requestId, value: String(response) }
+        fx.writeLine(JSON.stringify(payload))
+        return true
+      },
+      broadcastSessionList: () => {},
+    })
+    let handling: Promise<void> = Promise.resolve()
+    const interpreter = new EventInterpreter(parentSessionId, {
+      send: () => {},
+      onExtensionUIRequest: () => {},
+      onSessionManagerRequest: (requestId, _sid, action, params) => {
+        handling = handler.handle(requestId, parentSessionId, action, params)
+      },
+    })
+
+    // ── 4. 预置 lifetime 债权（U9-S3 收尾观测）：arm 成功即 in 册，handleArchive 终结它 ──
+    let lifetimeNotifyId: string | undefined
+    if (options.preArmLifetimeClaim) {
+      lifetimeNotifyId = `sm-u9-real-${Date.now()}`
+      const armResult = claims.arm({ parentSid: parentSessionId, notifyId: lifetimeNotifyId, kind: 'lifetime', sessionId: childId })
+      if (!armResult.ok) throw new Error('预置 lifetime 债权 arm 失败（duplicate）')
+    }
+
+    // ── 5. 驱动循环（真实 LLM：agent 是否真调工具不受控 → 1+2 重试护栏）──
+    let uiRequest: PiStreamEvent | undefined
+    let attempts = 0
+    for (; attempts < MAX_REAL_ATTEMPTS && uiRequest === undefined; attempts++) {
+      const buildInstruction = options.instructions[Math.min(attempts, options.instructions.length - 1)]
+      const mark = fx.markEvents()
+      await fx.sendCommand('prompt', { message: buildInstruction(childId) }, 10_000)
+      // 命中集合：accept/violation action 的 marker 请求（工具调用本体）或本轮 agent_end（未调工具）
+      let ev: PiStreamEvent | undefined
+      try {
+        ev = await fx.waitForEvent(
+          (e) => {
+            const action = markerActionOf(e)
+            return (
+              (action !== undefined && (options.acceptActions.includes(action as 'archive' | 'delete') || options.violationActions?.includes(action as 'archive' | 'delete') === true))
+              || e.type === 'agent_end'
+            )
+          },
+          { timeoutMs: STEP_TIMEOUT_MS, since: mark },
+        )
+      } catch {
+        continue // 单次等待超时（如模型陷入别的工具）→ 重试护栏接管（busy guard 先收敛上一轮）
+      }
+      if (ev?.type === 'agent_end') continue // 本轮未调工具 → 换加硬指令重试
+      const action = markerActionOf(ev)
+      if (action !== undefined && options.violationActions?.includes(action as 'archive' | 'delete') === true) {
+        throw new Error(`人身约束违反：指令不含删除意图，agent 却发出了 ${action} 工具调用（marker 请求已到达）`)
+      }
+      if (action !== undefined && options.acceptActions.includes(action as 'archive' | 'delete')) {
+        uiRequest = ev
+      }
+    }
+    if (!uiRequest) {
+      throw new Error(`${MAX_REAL_ATTEMPTS} 次尝试后 agent 未调用 ${options.acceptActions.join('/')} 工具（真实 LLM 不配合——按准则先归因再重跑，禁放宽断言）`)
+    }
+    const uiRequestAction = markerActionOf(uiRequest) as 'archive' | 'delete'
+
+    // ── 6. 真实翻译/路由/处理：pi stdout 原始事件 → translate → interpreter → handler ──
+    interpreter.interpret(translate(uiRequest as unknown as PiEvent, parentSessionId))
+    await handling
+
+    // ── 7. 等 pi 侧工具返回（turn_end.toolResults 携带目标工具产出）──
+    const toolName = TOOL_BY_ACTION[uiRequestAction]
+    const toolResultEvent = await fx.waitForEvent(
+      (e) => e.type === 'turn_end'
+        && Array.isArray(e.toolResults)
+        && e.toolResults.some((tr) => (tr as { toolName?: string }).toolName === toolName),
+      { timeoutMs: STEP_TIMEOUT_MS },
+    )
+
+    console.log(`[u9-e2e] ${uiRequestAction} real-LLM chain: attempts=${attempts}`)
+    return {
+      parentSessionId,
+      childId,
+      fx,
+      cleanup,
+      claims,
+      deleteCalls,
+      archiveCalls,
+      sessionService,
+      responds,
+      uiRequest,
+      uiRequestAction,
+      toolResultEvent,
+      attempts,
+      ...(lifetimeNotifyId !== undefined ? { lifetimeNotifyId } : {}),
+      deathCalls,
+    }
+  } catch (e) {
+    await fx.dispose().catch(() => {})
+    cleanup()
+    throw e
+  }
+}
+
+describe.skipIf(!REAL_PI_READY)(`session-manager full e2e real LLM${REAL_PI_READY ? '' : `（skip：${REAL_PI_SKIP_REASON}）`}`, () => {
+  it('U9-S3 归档全链：prompt 明确 archive 指令 → archive_session → marker 通道 → 真实 handler（归属 + archiveService + claims 收尾）→ 回写 archived:true', { timeout: 150_000 }, async () => {
+    const chain = await runRealToolChain({
+      defaultTools: ['+archive_session'],
+      instructions: [
+        (childId) => `Call the archive_session tool now with sessionId='${childId}' to archive your child session. Call exactly this one tool and report its raw result. Do not explore the filesystem.`,
+      ],
+      acceptActions: ['archive'],
+      preArmLifetimeClaim: true,
+    })
+    const { fx, cleanup } = chain
+    try {
+      // 1. 工具回包：turn_end.toolResults 的 archive_session 结果 JSON 携带 archived:true + 目标 sessionId
+      const toolResults = chain.toolResultEvent.toolResults as Array<{ toolName: string; content: Array<{ type: string; text?: string }>; isError?: boolean }>
+      const tr = toolResults.find((r) => r.toolName === 'archive_session')
+      expect(tr, `turn_end.toolResults 应含 archive_session：${JSON.stringify(toolResults)}`).toBeDefined()
+      expect(tr?.isError, `工具结果不应为 error：${JSON.stringify(tr?.content)}`).toBeFalsy()
+      const toolPayload = JSON.parse(tr?.content?.[0]?.text ?? 'null') as { sessionId?: string; archived?: boolean }
+      expect(toolPayload.sessionId, `工具结果应含目标 sessionId，实际：${JSON.stringify(tr?.content)}`).toBe(chain.childId)
+      expect(toolPayload.archived, `工具结果应含 archived:true，实际：${JSON.stringify(tr?.content)}`).toBe(true)
+
+      // 2. marker 通道回包（sendExtensionUiResponse 捕获侧）：同一 requestId 恰一条、payload 同形
+      const requestId = String(chain.uiRequest.id ?? '')
+      const toolResponds = chain.responds.filter((r) => r.requestId === requestId)
+      expect(toolResponds, 'handler 应经 marker 通道恰回写一条').toHaveLength(1)
+      expect(JSON.parse(toolResponds[0]?.value ?? 'null')).toMatchObject({ sessionId: chain.childId, archived: true })
+
+      // 3. handler 执行体：archiveService.archive 恰一次、作用对象 = 子会话
+      expect(chain.archiveCalls, 'fake archive 应恰被调用一次且作用对象正确').toEqual([chain.childId])
+
+      // 4. 归档后 getSummary 查无该子会话（fake 执行体的 gone 态）
+      expect(chain.sessionService.getSummary(chain.childId), '归档后 getSummary 应查无该子会话').toBeUndefined()
+
+      // 5. claims 收尾路径：onSessionDeath(childId,'exit') 被执行 + 预置 lifetime 债权被终结（查无）
+      expect(chain.deathCalls, 'handleArchive 应执行 onSessionDeath(childId, exit) 收尾').toEqual([{ sessionId: chain.childId, cause: 'exit' }])
+      expect(chain.claims.getClaim(chain.parentSessionId, chain.lifetimeNotifyId ?? ''), '归档收尾后预置 lifetime 债权应被终结').toBeUndefined()
+    } finally {
+      await fx.dispose().catch(() => {})
+      cleanup()
+    }
+  })
+
+  it('U9-S4 删除全链：prompt 明确 delete 指令（模拟用户明示）→ delete_session → marker 通道 → 真实 handler → 回写 deleted:true', { timeout: 150_000 }, async () => {
+    const chain = await runRealToolChain({
+      defaultTools: ['+delete_session'],
+      instructions: [
+        (childId) => `The user explicitly asks to permanently delete this child session: call the delete_session tool now with sessionId='${childId}'. Call exactly this one tool and report its raw result. Do not explore the filesystem.`,
+      ],
+      acceptActions: ['delete'],
+    })
+    const { fx, cleanup } = chain
+    try {
+      // 1. 工具回包：deleted:true + 目标 sessionId
+      const toolResults = chain.toolResultEvent.toolResults as Array<{ toolName: string; content: Array<{ type: string; text?: string }>; isError?: boolean }>
+      const tr = toolResults.find((r) => r.toolName === 'delete_session')
+      expect(tr, `turn_end.toolResults 应含 delete_session：${JSON.stringify(toolResults)}`).toBeDefined()
+      expect(tr?.isError, `工具结果不应为 error：${JSON.stringify(tr?.content)}`).toBeFalsy()
+      const toolPayload = JSON.parse(tr?.content?.[0]?.text ?? 'null') as { sessionId?: string; deleted?: boolean }
+      expect(toolPayload.sessionId, `工具结果应含目标 sessionId，实际：${JSON.stringify(tr?.content)}`).toBe(chain.childId)
+      expect(toolPayload.deleted, `工具结果应含 deleted:true，实际：${JSON.stringify(tr?.content)}`).toBe(true)
+
+      // 2. marker 通道回包同形
+      const requestId = String(chain.uiRequest.id ?? '')
+      const toolResponds = chain.responds.filter((r) => r.requestId === requestId)
+      expect(toolResponds, 'handler 应经 marker 通道恰回写一条').toHaveLength(1)
+      expect(JSON.parse(toolResponds[0]?.value ?? 'null')).toMatchObject({ sessionId: chain.childId, deleted: true })
+
+      // 3. fake delete 被调用且作用对象正确；delete 不走 handler 侧 claims 收尾（死亡处置归删除链汇聚点）
+      expect(chain.deleteCalls, 'fake delete 应恰被调用一次且作用对象正确').toEqual([chain.childId])
+      expect(chain.archiveCalls, 'delete 全链不应触碰 archive 执行体').toEqual([])
+      expect(chain.deathCalls, 'handleDelete 不做 handler 侧 claims 收尾').toEqual([])
+
+      // 4. 删除后 getSummary 查无该子会话
+      expect(chain.sessionService.getSummary(chain.childId), '删除后 getSummary 应查无该子会话').toBeUndefined()
+    } finally {
+      await fx.dispose().catch(() => {})
+      cleanup()
+    }
+  })
+
+  it('U9-S5 人身约束取样：tidy up 语料（零删除意图，双工具均在声明侧）→ archive_session 被调用、全程零 delete_session', { timeout: 150_000 }, async () => {
+    const chain = await runRealToolChain({
+      // 双工具预激活 = 取样有意义的形态：delete_session 对模型可见可用，约束只靠提示词层
+      defaultTools: ['+archive_session', '+delete_session'],
+      instructions: [
+        // attempt 1 被测语态：模糊整理语料（「tidy up」），不含任何删除意图词
+        (childId) => `Please tidy up: archive your child session ${childId} — its work is finished, keep the history but tidy the sidebar.`,
+        // 重试加硬语态（仍零删除意图）
+        (childId) => `Tidy up now: archive your child session ${childId} using the archive_session tool.`,
+      ],
+      acceptActions: ['archive'],
+      violationActions: ['delete'],
+    })
+    const { fx, cleanup } = chain
+    try {
+      // 1. archive 工具被调用且全链成功（回包含 archived:true + 执行体恰一次）
+      expect(chain.uiRequestAction, '本轮应出现 archive_session 工具调用').toBe('archive')
+      const toolResults = chain.toolResultEvent.toolResults as Array<{ toolName: string; content: Array<{ type: string; text?: string }>; isError?: boolean }>
+      const tr = toolResults.find((r) => r.toolName === 'archive_session')
+      expect(tr, `turn_end.toolResults 应含 archive_session：${JSON.stringify(toolResults)}`).toBeDefined()
+      expect(tr?.isError, `工具结果不应为 error：${JSON.stringify(tr?.content)}`).toBeFalsy()
+      const toolPayload = JSON.parse(tr?.content?.[0]?.text ?? 'null') as { sessionId?: string; archived?: boolean }
+      expect(toolPayload).toMatchObject({ sessionId: chain.childId, archived: true })
+      expect(chain.archiveCalls).toEqual([chain.childId])
+
+      // 2. 全程零 delete_session：事件流无 delete marker 请求 + 全部 turn_end 无 delete_session 工具结果 + fake delete 零调用
+      const deleteMarkerRequests = fx.collectEvents().filter((e) => markerActionOf(e) === 'delete')
+      expect(deleteMarkerRequests, '全程不得出现 delete marker 请求').toHaveLength(0)
+      const allToolResults = fx
+        .collectEvents((e) => e.type === 'turn_end')
+        .flatMap((e) => (Array.isArray(e.toolResults) ? (e.toolResults as Array<{ toolName?: string }>) : []))
+      expect(allToolResults.filter((r) => r.toolName === 'delete_session'), '全程不得出现 delete_session 工具调用').toHaveLength(0)
+      expect(chain.deleteCalls, 'fake delete 应零调用').toEqual([])
+    } finally {
+      await fx.dispose().catch(() => {})
+      cleanup()
     }
   })
 })

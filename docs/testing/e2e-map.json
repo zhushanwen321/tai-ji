@@ -1716,7 +1716,7 @@
     },
     {
       "id": "E2E-SESSMGR-02",
-      "summary": "session-manager 全链路真机冒烟剧本（U9-S1/S2：真 pi 进程 + 真 LLM spawn create_managed_session → marker UI 请求回写 → scanPiSessions 重启恢复）",
+      "summary": "session-manager 全链路真机冒烟剧本（U9-S1/S2：真 pi 进程 spawn create_managed_session → marker UI 请求回写 → scanPiSessions 重启恢复；U9-S3/S4/S5：真 LLM 轮次 archive_session/delete_session 全链路——归档/删除回包 archived/deleted:true + fake 服务侧调用与 claims 收尾断言 + 人身约束取样（tidy up 语料 → archive 调用、零 delete 调用））",
       "scope": [
         "scripts/cw/session-manager-full-e2e.sh"
       ],

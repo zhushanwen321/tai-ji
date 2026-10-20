@@ -1,9 +1,10 @@
 #!/usr/bin/env bash
-# session-manager-full-e2e.sh — 真 pi 进程端到端冒烟探针（U9-S1 / U9-S2，设计文档 §7.2 场景 1 + §7.3 机器化）
+# session-manager-full-e2e.sh — 真 pi 进程端到端冒烟探针（U9-S1 / U9-S2 + 真 LLM 轨 U9-S3/S4/S5，
+# 设计文档 §7.2 场景 1 + §7.3 机器化 + session-manager-archive-delete 验收 1/2/3）
 #
 # 用法：bash scripts/cw/session-manager-full-e2e.sh
 #
-# 测试链路（一次 vitest 运行覆盖两个验收场景）：
+# 测试链路（一次 vitest 运行覆盖五个验收场景）：
 #   spawn 真 pi（--mode rpc + --extension extensions/universal/session-manager，model
 #   xiaomi-token-plan-cn/mimo-v2.6-flash，--session-dir 用 mktmp 目录、名字带 u9-smoke）
 #   → stdin JSONL prompt 写死指令驱动 agent 调 create_managed_session
@@ -12,13 +13,18 @@
 #     SessionService 最小 fake——create 落盘 JSONL header + 真实 persistAgentBinding sidecar）
 #   → extension_ui_response 回写 pi stdin → 工具 await 拿到结果（turn_end.toolResults）
 #   → U9-S2：scanPiSessions({force:true}) 重扫恢复 spawnSource/parentAgentSessionId
+#   → U9-S3/S4/S5：真 LLM 轮次驱动 archive_session/delete_session（服务面最小 fake：
+#     delete/archive 记录调用 + 使 getSummary 查无；claims 真实账本 + onSessionDeath 观测点）
 #
 # 输出（验收标记行，stdout）：
 #   U9-S1 PASS|FAIL   真 pi 全链路 create（工具返回 + sidecar 写入 + spawnSource='agent'）
 #   U9-S2 PASS|FAIL   重启恢复（scanPiSessions 恢复 spawnSource + parentAgentSessionId）
+#   U9-S3 PASS|FAIL   归档全链（archive_session 回包 archived:true + fake archive 调用 + claims 收尾）
+#   U9-S4 PASS|FAIL   删除全链（delete_session 回包 deleted:true + fake delete 调用且作用对象正确）
+#   U9-S5 PASS|FAIL   人身约束取样（tidy up 语料 → archive 调用、全程零 delete_session 调用）
 #
 # 护栏：
-#   - 每步 60s 上限在测试内（waitForEvent STEP_TIMEOUT_MS，agent 不调工具可重试 1 次）
+#   - 每步 60s 上限在测试内（waitForEvent STEP_TIMEOUT_MS；真 LLM 轨 agent 未调工具可重试 2 次）
 #   - 总脚本 180s watchdog（超时杀 vitest + 孤儿 pi）
 #   - trap 清理：pi 进程结束必须 kill，session-dir 命名带 u9-smoke 便于 pgrep 核查
 
@@ -88,6 +94,9 @@ while kill -0 "$VITEST_PID" 2>/dev/null; do
     kill -9 "$VITEST_PID" 2>/dev/null || true
     echo "U9-S1 FAIL"
     echo "U9-S2 FAIL"
+    echo "U9-S3 FAIL"
+    echo "U9-S4 FAIL"
+    echo "U9-S5 FAIL"
     exit 1
   fi
   sleep 2
@@ -105,7 +114,7 @@ const raw = fs.readFileSync(process.argv[1], "utf-8");
 const json = JSON.parse(raw);
 const all = (json.testResults || []).flatMap((t) => t.assertionResults || []);
 let exit = 0;
-for (const id of ["U9-S1", "U9-S2"]) {
+for (const id of ["U9-S1", "U9-S2", "U9-S3", "U9-S4", "U9-S5"]) {
   // 普通字符串 "\\b" → 值 \b → RegExp 词边界（防 U9-S1 误匹配 U9-S10 之类的子串）
   const re = new RegExp("\\b" + id + "\\b");
   const matches = all.filter((a) => re.test(a.fullName || ""));
