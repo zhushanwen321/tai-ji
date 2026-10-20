@@ -255,6 +255,31 @@ describe('resolveSessionRoots 第五根 archive（存在才纳入）', () => {
     expect(text).toContain('[archive]')
     expect(text).toContain('1 归档单元')
   })
+
+  it('同 realpath 去重：更高优先级根与归档目录同路径时 archive 根 dedupedInto，不重复成根', async () => {
+    // live 信号直接指向归档目录（basename 非 encodeCwd 形态 → 取自身，字面同路径
+    // realpath 必同）；优先级 live > archive，归档根不实扫簿记、标注归属——与普通根
+    // realpath 去重同构（§7B 要点 4）。回归锚：archive 分支漏 kept 检查时本用例红
+    //（out 出现两条同路径实扫根，且 byRealPath 被 archive 覆盖致 dedupedInto 失效）
+    await writeLedger(agentDir, 'a', archivedLedger())
+    const archiveDir = resolveArchiveDir(agentDir)
+
+    const roots = await resolveSessionRoots({ agentDir, liveSessionDir: archiveDir })
+    expect(roots.map((r) => r.kind)).toEqual(['live', 'default', 'legacy', 'subagent', 'archive'])
+    const archive = roots.find((r) => r.kind === 'archive')!
+    expect(archive.path).toBe(archiveDir)
+    expect(archive.dedupedInto).toBe('live')
+    // 被去重根不产生扫描统计，簿记收集未执行（与普通根去重同构）
+    expect(archive.fileCount).toBeUndefined()
+    expect(archive.scanMs).toBeUndefined()
+    expect(archive.archiveEntries).toBeUndefined()
+    // 同路径全列表只保留一个实扫根（= 更高优先级的 live），簿记不重复计数
+    const scannedAtSamePath = roots.filter(
+      (r) => r.path === archiveDir && r.dedupedInto === undefined,
+    )
+    expect(scannedAtSamePath).toHaveLength(1)
+    expect(scannedAtSamePath[0]!.kind).toBe('live')
+  })
 })
 
 // ============================================================

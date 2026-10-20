@@ -242,6 +242,15 @@ export async function resolveSessionRoots(
       // [session-archive D7] 存在才纳入：目录不存在 → 整根不进返回（备注「目录存在即
       // 纳入」的逆向——非 taiji/纯 pi 用户无 archive 目录，doctor 表与 F1 自检行零变化）
       if (!(await pathExists(candidate.path))) continue
+      const key = await safeRealpath(candidate.path)
+      const kept = byRealPath.get(key)
+      if (kept) {
+        // 同 realpath：不扫描，标注归属（与普通根 kept 检查同构——archive kind 优先级
+        // 最低，归档目录与更高优先级根同路径时只保留一根，doctor 表不重复计数；
+        // 漏此检查会既出重复根、又以本根覆盖 byRealPath 致后续根 dedupedInto 失效）
+        out.push({ ...candidate, exists: true, dedupedInto: kept.kind })
+        continue
+      }
       const t0 = performance.now()
       const archiveEntries = await scanArchiveLedgers(candidate.path)
       const scanMs = performance.now() - t0
@@ -254,7 +263,6 @@ export async function resolveSessionRoots(
         files: [],
         archiveEntries,
       }
-      const key = await safeRealpath(candidate.path)
       byRealPath.set(key, root)
       out.push(root)
       continue
