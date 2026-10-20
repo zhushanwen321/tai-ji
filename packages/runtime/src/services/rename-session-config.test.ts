@@ -497,11 +497,11 @@ describe('rename 跨包镜像同值锁定（跨包不 import 的手写镜像，�
     expect(RENAME_INSTRUCTION_MAX_LENGTH).toBe(2000)
   })
 
-  it('style 词表四值往返 = 协议 RenameStyle 值域（slug/sentence/emoji/custom，与 extension pure.ts RENAME_STYLES 同构）', () => {
+  it('style 词表五值往返 = 协议 RenameStyle 值域（slug/sentence/emoji/topic/custom，与 extension pure.ts RENAME_STYLES 同构）', () => {
     const tmpRoot = mkdtempSync(join(tmpdir(), 'rename-mirror-test-'))
     vi.stubEnv('TAIJI_AGENT_DATA_DIR', tmpRoot)
     try {
-      for (const style of ['slug', 'sentence', 'emoji', 'custom'] as const) {
+      for (const style of ['slug', 'sentence', 'emoji', 'topic', 'custom'] as const) {
         setRenamePrompt(style, '')
         expect(getRenamePrompt().style).toBe(style)
       }

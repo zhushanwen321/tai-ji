@@ -523,7 +523,7 @@ export type RenameMode = 'first-prompt' | 'first-stop' | 'agent-tool'
  * custom = 用户自定义自由文本（customInstruction 字段承载，空串回落内置 slug 默认）；
  * 其余枚举值 = extension 内置词表（随 extension 版本升级自动跟随）。
  */
-export type RenameStyle = 'slug' | 'sentence' | 'emoji' | 'custom'
+export type RenameStyle = 'slug' | 'sentence' | 'emoji' | 'topic' | 'custom'
 
 /**
  * config.renamePrompt 的 reply 形状（具名 interface：mutation-reply-contract 清单检查的

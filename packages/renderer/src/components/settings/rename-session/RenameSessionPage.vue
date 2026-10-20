@@ -320,6 +320,7 @@ const STYLE_OPTIONS: ReadonlyArray<{ value: RenameStyle; labelKey: string }> = [
   { value: 'slug', labelKey: 'settings.renameSession.styleSlug' },
   { value: 'sentence', labelKey: 'settings.renameSession.styleSentence' },
   { value: 'emoji', labelKey: 'settings.renameSession.styleEmoji' },
+  { value: 'topic', labelKey: 'settings.renameSession.styleTopic' },
   { value: 'custom', labelKey: 'settings.renameSession.styleCustom' },
 ]
 
