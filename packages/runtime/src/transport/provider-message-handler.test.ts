@@ -39,6 +39,10 @@ function mockContext(): SettingsHandlerContext {
     reply: vi.fn(),
     sendError: vi.fn(),
     broadcastProviderList: vi.fn(),
+    configService: {
+      refreshProviderCatalogs: vi.fn().mockResolvedValue({ refreshed: [], failed: [], corrupt: [] }),
+      refreshRemoteProviders: vi.fn().mockResolvedValue({ updatedProviders: [] }),
+    },
   } as unknown as SettingsHandlerContext
 }
 
@@ -63,6 +67,52 @@ describe('config.listQuotaPresets（W3c quota presets 下发）', () => {
     expect(listQuotaPresetsMock).toHaveBeenCalledTimes(1)
     expect(ctx.reply).toHaveBeenCalledTimes(1)
     expect(ctx.reply).toHaveBeenCalledWith(WS, 'msg-1', 'config.quotaPresets', { presets: PRESETS })
+  })
+})
+
+describe('config.refreshProviderCatalogs（远程目录刷新 + 顺带 remote-config 同步）', () => {
+  it('reply 成功 envelope + 广播一次，返回 true', async () => {
+    const ctx = mockContext()
+    const handler = new ProviderMessageHandler(ctx)
+    const handled = await handler.handle(msg('config.refreshProviderCatalogs'), WS)
+
+    expect(handled).toBe(true)
+    expect(ctx.reply).toHaveBeenCalledTimes(1)
+    expect(ctx.reply).toHaveBeenCalledWith(WS, 'msg-1', 'config.providerCatalogsRefreshed', {
+      refreshed: [], failed: [], corrupt: [],
+    })
+    expect(ctx.broadcastProviderList).toHaveBeenCalledTimes(1)
+  })
+
+  it('远程同步有 provider 合并写盘 → 再广播一次', async () => {
+    const ctx = mockContext()
+    ;(ctx.configService.refreshRemoteProviders as ReturnType<typeof vi.fn>).mockResolvedValue({ updatedProviders: ['p1'] })
+    const handler = new ProviderMessageHandler(ctx)
+    const handled = await handler.handle(msg('config.refreshProviderCatalogs'), WS)
+
+    expect(handled).toBe(true)
+    expect(ctx.broadcastProviderList).toHaveBeenCalledTimes(2)
+  })
+
+  it('远程同步失败 → 降级为 warn 留痕、不上抛（reply 已发成功 envelope，不得对同一 msg.id 补发 error）', async () => {
+    const ctx = mockContext()
+    ;(ctx.configService.refreshRemoteProviders as ReturnType<typeof vi.fn>).mockRejectedValue(new Error('sync boom'))
+    const handler = new ProviderMessageHandler(ctx)
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {})
+
+    // 关键断言：handle 不 reject —— 异常若冒泡到 server.ts handleMessage 的 catch，
+    // 会对同一 msg.id 补发 error envelope，形成「成功 reply + error」双回复。
+    const handled = await handler.handle(msg('config.refreshProviderCatalogs'), WS)
+
+    expect(handled).toBe(true)
+    expect(ctx.reply).toHaveBeenCalledTimes(1)
+    expect(ctx.reply).toHaveBeenCalledWith(WS, 'msg-1', 'config.providerCatalogsRefreshed', {
+      refreshed: [], failed: [], corrupt: [],
+    })
+    expect(ctx.sendError).not.toHaveBeenCalled()
+    expect(ctx.broadcastProviderList).toHaveBeenCalledTimes(1)
+    expect(warnSpy).toHaveBeenCalledWith('[remote-config] refresh remote providers failed:', 'sync boom')
+    warnSpy.mockRestore()
   })
 })
 
