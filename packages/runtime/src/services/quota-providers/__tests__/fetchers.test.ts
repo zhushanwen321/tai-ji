@@ -262,6 +262,11 @@ describe('mimoFetcher', () => {
     expect(await fetchOk(mimoFetcher, { code: '401' })).toEqual({ ok: false, reason: 'parse' })
   })
 
+  it('code 字段消失（决策字段缺失）→ parse（漂移可见，不引导查订阅）', async () => {
+    expect(await fetchOk(mimoFetcher, { message: 'no code field' })).toEqual({ ok: false, reason: 'parse' })
+    expect(await fetchOk(mimoFetcher, { code: null })).toEqual({ ok: false, reason: 'parse' })
+  })
+
   it('code 非 0（非过期码）→ no-subscription', async () => {
     expect(await fetchOk(mimoFetcher, { code: 1, message: 'no plan' })).toEqual({
       ok: false,
@@ -350,6 +355,39 @@ describe('mimoFetcher', () => {
         ],
       },
     })
+  })
+
+  it('detail resetSec 字段级漂移（currentPeriodEnd 非字符串 / data 非对象）→ resetSec=null，主数据保留', async () => {
+    // 字段级漂移与请求级失败（上方用例）同语义：仅 reset 信息缺失，pct/绝对量陪葬不发生
+    const monthBody = {
+      code: 0,
+      message: 'ok',
+      data: { monthUsage: { percent: 0.25, items: [{ used: 100, limit: 400 }] }, usage: { percent: 0.1, items: [] } },
+    }
+    const expected = {
+      ok: true,
+      data: {
+        label: 'MiMo Coding',
+        wins: [
+          { pct: null, resetSec: null },
+          { pct: null, resetSec: null },
+          { pct: 25, used: 100, limit: 400, unit: 'tokens', resetSec: null },
+        ],
+      },
+    }
+    setupFetch((input) => {
+      const url = String(input)
+      if (url.includes('/detail')) return jsonResponse({ code: 0, message: 'ok', data: { currentPeriodEnd: 12345 } })
+      return jsonResponse(monthBody)
+    })
+    expect(await mimoFetcher.fetchQuota('sid=1', 'cookie')).toEqual(expected)
+    // 路径容器形态漂移（detail data 非对象）同只降级 resetSec
+    setupFetch((input) => {
+      const url = String(input)
+      if (url.includes('/detail')) return jsonResponse({ code: 0, message: 'ok', data: 123 })
+      return jsonResponse(monthBody)
+    })
+    expect(await mimoFetcher.fetchQuota('sid=1', 'cookie')).toEqual(expected)
   })
 
   // ── RT-7#5：monthUsage.percent 缺失不产 pct=0 假未用 ──
@@ -495,6 +533,19 @@ describe('minimaxFetcher', () => {
     })
     expect(out.ok).toBe(true)
     if (out.ok) {
+      expect(out.data.wins[0]).toEqual({ pct: null, resetSec: null })
+      expect(out.data.wins[1]).toEqual({ pct: null, resetSec: null })
+    }
+  })
+
+  it('status 字段缺失（状态不可知）→ 该窗口 INFINITE_WIN，不放行求 pct', async () => {
+    const out = await fetchOk(minimaxFetcher, {
+      base_resp: { status_code: 0 },
+      model_remains: [{ ...generalModel, current_interval_status: undefined, current_weekly_status: undefined }],
+    })
+    expect(out.ok).toBe(true)
+    if (out.ok) {
+      // 缺失若被放行，5h 会产 pct=30、week 会产 pct=90 的假可用态
       expect(out.data.wins[0]).toEqual({ pct: null, resetSec: null })
       expect(out.data.wins[1]).toEqual({ pct: null, resetSec: null })
     }

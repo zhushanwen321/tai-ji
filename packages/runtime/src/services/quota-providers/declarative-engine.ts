@@ -7,9 +7,13 @@
  * 覆盖不住时按裁决回退「该 fetcher 留内置 TS」的混合形态，不为个案扩语言。
  *
  * 引擎内建纪律（配置无法关闭，RT-7#5「不可知纪律」的引擎化）：
- * - 字段缺失 → 该数据位 null（INFINITE_WIN 语义），绝不产假 0%/假 100%；
+ * - 字段缺失 → 该数据位 null（INFINITE_WIN 语义），绝不产假 0%/假 100%；bodyCode 决策
+ *   字段缺失按 bodyCode.missing 归口（缺省业务失败 else——minimax/zhipu 现行；'parse' =
+ *   漂移可见——mimo 现行 guard 要求 code 必在）；
  * - 字段存在但形态漂移（数值字段拿到不可归一值）→ 整查询归 parse（fail-visible，
- *   不静默降级——对齐各家现行 shape guard 的「漂移可见」语义）；
+ *   不静默降级——对齐各家现行 shape guard 的「漂移可见」语义）；唯一例外：独立降级源
+ *   （辅助请求）的 resetSec 字段漂移仅降级该数据位 null——请求级失败已由 allSettled
+ *   独立降级（fetchAuxiliaryRequests），字段级同语义，辅助端点故障不拖垮主数据（mimo）；
  * - redirect:'manual' + 3xx → unauthorized（会话过期 302 到登录流的判据，mimo 实测）；
  * - label 插值路径缺失 → 去掉插值段并 strip 尾部分隔符（zhipu `Z.ai-{{level}}` 缺
  *   level → `Z.ai`）。
@@ -42,7 +46,7 @@ export interface DeclarativeWindow { // oe-exempt:20261019:framework:taiji 远�
   fromRequest?: string
   /** 选取无命中升级语义（minimax find general 失败 → 整查询失败）。 */
   gate?: { path: string; missing: 'query-fail' | 'infinite-win' }
-  /** 字段值门控：取值 !== equals → 本窗 INFINITE_WIN（minimax status 门控）。 */
+  /** 字段值门控：取值 !== equals（含字段缺失 = 状态不可知）→ 本窗 INFINITE_WIN（minimax status 门控）。 */
   gateValue?: { path: string; equals: number }
   pct?: { path: string; via: PctVia }
   resetSec?: { path: string; mode: ResetSecMode; /** 覆写窗级 fromRequest（mimo resetSec 来自辅助请求）。 */ fromRequest?: string }
@@ -67,8 +71,11 @@ export interface DeclarativeFetcherConfig { // oe-exempt:20261019:framework:taij
   statusMap?: Record<string, QuotaFetchFailureReason>
   /** 在体业务码：body[path] === success 放行；map[值] 分派；其余 → else（缺省 no-subscription）。
    *  successRequires：成功响应必须存在的对象路径（缺失/非对象 → parse——mimo 现行 guard
-   *  「code=0 且 data 缺席」归 parse 的等价表达）。 */
-  bodyCode?: { path: string; success: number | boolean; map?: Record<string, QuotaFetchFailureReason>; else?: QuotaFetchFailureReason; successRequires?: string }
+   *  「code=0 且 data 缺席」归 parse 的等价表达）。
+   *  missing：决策字段本身缺失（undefined/null）的归口——'parse' = 形态漂移可见（mimo 现行
+   *  guard `typeof o.code !== 'number'` 即拒收，字段消失不能被 else 引导为「查订阅」）；
+   *  缺省 'else' = 业务失败（minimax/zhipu 现行「决策字段缺席 = 无订阅数据」语义）。 */
+  bodyCode?: { path: string; success: number | boolean; map?: Record<string, QuotaFetchFailureReason>; else?: QuotaFetchFailureReason; successRequires?: string; missing?: 'else' | 'parse' }
   /** 数据源存在性：列出的顶层路径全部缺失/为空数组 → no-subscription（kimi/opencode）。 */
   requires?: string[]
   windows: DeclarativeWindow[]
@@ -170,6 +177,7 @@ function isBodyCodeValid(b: unknown): boolean {
   if (typeof b['success'] !== 'number' && typeof b['success'] !== 'boolean') return false
   if (b['map'] !== undefined && !isRecord(b['map'])) return false
   if (b['else'] !== undefined && !isFailReason(b['else'])) return false
+  if (b['missing'] !== undefined && b['missing'] !== 'else' && b['missing'] !== 'parse') return false
   return b['successRequires'] === undefined || (typeof b['successRequires'] === 'string' && b['successRequires'] !== '')
 }
 
@@ -412,7 +420,9 @@ function evalWindowGate(
   }
   if (win.gateValue) {
     const v = strictNumeric(pickPath(source, win.gateValue.path), strict)
-    if (v !== undefined && v !== win.gateValue.equals) return { win: INFINITE_WIN }
+    // 决策字段缺失（undefined/null）= 状态不可知 → INFINITE_WIN（对齐 minimax 现行
+    // isActive「非 1 即无限」——undefined !== 1 同走该分支），不放行继续求 pct 产假可用态
+    if (v !== win.gateValue.equals) return { win: INFINITE_WIN }
   }
   return null
 }
@@ -462,10 +472,36 @@ function evalWindowPct(
   return { pct }
 }
 
+/** resetSec 求值（源可覆写：mimo resetSec 来自辅助 detail 请求）。
+ *  独立降级源（fromRequest 指向非主请求——该请求本就走 allSettled 请求级独立降级，见
+ *  fetchAuxiliaryRequests）的字段级漂移同语义只降级该数据位 null：仅 reset 信息缺失、
+ *  pct/usedLimit 主数据保留（对齐 mimo 现行 extractPeriodResetSec「非 string 仅 return
+ *  null」）；主请求源的字段级漂移照常上抛整查询归 parse（漂移可见不变）。 */
+function evalWindowResetSec(
+  win: DeclarativeWindow,
+  reqs: ResolvedRequests,
+  source: unknown,
+  failSafeSources: ReadonlySet<string>,
+): number | null {
+  if (!win.resetSec) return null
+  const overrideName = win.resetSec.fromRequest
+  const resetSrc = overrideName ? reqs.byName[overrideName] : source
+  if (overrideName === undefined || !failSafeSources.has(overrideName)) {
+    return evalResetSec(pickPath(resetSrc, win.resetSec.path), win.resetSec.mode)
+  }
+  try {
+    return evalResetSec(pickPath(resetSrc, win.resetSec.path), win.resetSec.mode)
+  } catch (e) {
+    if (e instanceof WireDriftError) return null
+    throw e
+  }
+}
+
 function evalWindow(
   win: DeclarativeWindow,
   reqs: ResolvedRequests,
   strict: boolean,
+  failSafeSources: ReadonlySet<string>,
 ): { win: QuotaWindow; queryFail?: true } {
   const source = win.fromRequest ? reqs.byName[win.fromRequest] : reqs.byName[reqs.primaryName]
 
@@ -476,9 +512,7 @@ function evalWindow(
   const { pct, infiniteWin } = evalWindowPct(win, source, strict, usedLimit)
   if (infiniteWin) return { win: INFINITE_WIN }
 
-  // resetSec 源：可覆写窗级源请求（mimo resetSec 来自辅助 detail 请求）
-  const resetSrc = win.resetSec?.fromRequest ? reqs.byName[win.resetSec.fromRequest] : source
-  const resetSec = win.resetSec ? evalResetSec(pickPath(resetSrc, win.resetSec.path), win.resetSec.mode) : null
+  const resetSec = evalWindowResetSec(win, reqs, source, failSafeSources)
 
   if (usedLimit && win.usedLimit?.output !== false) {
     return { win: { pct, used: usedLimit.used, limit: usedLimit.limit, unit: usedLimit.unit, resetSec } }
@@ -575,13 +609,16 @@ async function fetchAuxiliaryRequests(
 function evaluateBodyCode(config: DeclarativeFetcherConfig, primaryData: unknown): { ok: false; reason: QuotaFetchFailureReason } | null {
   const bodyCode = config.bodyCode
   if (!bodyCode) return null
-  const rawCode = pickPath(primaryData, bodyCode.path)
-  // 现状各家 guard 均要求 code 原生 number/boolean（字符串形态 = 漂移归 parse，
-  // 防 "401" 绕过类型检查命中 map）
-  if (rawCode !== undefined && rawCode !== null && typeof rawCode !== 'number' && typeof rawCode !== 'boolean') {
-    throw new WireDriftError(`non-numeric body code: ${JSON.stringify(rawCode)}`)
+  const code = pickPath(primaryData, bodyCode.path)
+  // 决策字段必须原生 number/boolean。缺失（undefined/null）按 missing 归口：'parse' =
+  // 漂移可见（mimo 现行 guard `typeof o.code !== 'number'` 拒收，字段消失引导「查订阅」
+  // 会误导排障）；缺省 'else' = 业务失败（minimax/zhipu 现行「决策字段缺席 = 无订阅」）。
+  // 存在但类型非法恒 parse（防 "401" 绕过类型检查命中 map）
+  if (code === undefined || code === null) {
+    if (bodyCode.missing === 'parse') throw new WireDriftError(`missing body code at '${bodyCode.path}'`)
+  } else if (typeof code !== 'number' && typeof code !== 'boolean') {
+    throw new WireDriftError(`non-numeric body code: ${JSON.stringify(code)}`)
   }
-  const code = rawCode
   if (code !== bodyCode.success) {
     const reason = (typeof code === 'string' || typeof code === 'number')
       ? bodyCode.map?.[String(code)]
@@ -606,8 +643,12 @@ function evaluateRequires(config: DeclarativeFetcherConfig, primaryData: unknown
 /** 窗口装配（未声明的 slot 恒 INFINITE_WIN）。 */
 function assembleWindows(config: DeclarativeFetcherConfig, reqs: ResolvedRequests, primaryData: unknown): QuotaFetchOutcome {
   const wins: Record<QuotaSlot, QuotaWindow> = { fiveHour: INFINITE_WIN, week: INFINITE_WIN, month: INFINITE_WIN }
+  // 独立降级源集合（除主请求外全部——与 fetchAuxiliaryRequests 的 allSettled fail-safe
+  // 集合同一口径），辅助源 resetSec 字段漂移按该集合降级
+  const primaryDef = config.requests.find(r => r.role !== 'auxiliary') ?? config.requests[0]
+  const failSafeSources = new Set(config.requests.filter(r => r !== primaryDef).map(r => r.name))
   for (const win of config.windows) {
-    const r = evalWindow(win, reqs, config.strictNumbers === true)
+    const r = evalWindow(win, reqs, config.strictNumbers === true, failSafeSources)
     if (r.queryFail) return { ok: false, reason: 'no-subscription' }
     wins[win.slot] = r.win
   }
