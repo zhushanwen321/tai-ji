@@ -1553,18 +1553,17 @@ export class RecordStore {
   // ── 内部 ──────────────────────────────────────────────────
 
   /**
-   * 三分支状态矩阵重建（终态 marker / 兜底；[perf] light 版）。
+   * 状态矩阵重建（终态收条 / 兜底；[perf] light 版）。
    *
-   * 优先级：
-   *   1. 终态 sidecar status=cancelled → closed（closedReason=cancelled）
-   *   2. 终态 sidecar status=finalized → closed（closedReason=内容 reason；空/旧格式 → disconnected）
-   *   （旧名 .finalized/.cancelled 由 readStateMarker 归一，判定分支不区分来源）
-   *   3. 兜底（其余一切，含 .alive 在持形态）→ running（v4 B-1 可续聊语义）
+   * 判定规则（收条自事件流折叠派生——scanFile 内 stateMarkerFromFold；
+   * `.state` sidecar 读已退场，写面族随事件流改造不再产出）：
+   *   1. 收条在场（record-settled，或末位 record-round-idle）→ idle +
+   *      stopReason=收条 reason（record-store-rebuild.stateMarkerFromFold）
+   *   2. 无收条 → 兜底 idle + interrupted-by-restart（v4 B-1 可续聊语义）
    *
-   * [U4a / D3b (a)] 原分支 3（.alive + pid 活 → running + externalInstance 投影）已
+   * [U4a / D3b (a)] 原探活分支（.alive + pid 活 → externalInstance 投影）已
    * 移除：探活缓存的读面角色由 (a′)(a″) 的 findForeignLiveInstance 现查探针替代，
-   * status 判定与 .alive 解耦（终态判定由收条分支承接——stateMarker 读侧自
-   * 事件流折叠/索引，`.state` sidecar 读已退场）。
+   * status 判定与 .alive 解耦（终态判定由收条分支承接）。
    *
    * [perf]：逐文件 scanFile（stat 戳校验 + 头部 identity 轻量重建）。命中缓存的
    * 文件零文件读取；变化的文件只重建自身，其余 N-1 个复用缓存。

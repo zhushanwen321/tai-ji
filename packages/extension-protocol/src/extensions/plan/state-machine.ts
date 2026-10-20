@@ -174,8 +174,9 @@ export type PlanTransitionResult =
  *
  * 垃圾输入的分层判定（原型链白名单口径已统一到基建 coerceState 的同族机制）：
  * 词表外 state 由机器词表集合拒绝（Set 查询不走原型链）；词表外 event 字符串由
- * 机器 (from, on) 行索引拒绝（Map 复合键查询不走原型链）；非字符串 event 在机器
- * 的事件名解析处会 crash，「不炸 turn」契约覆盖全输入域，故先挡形态。plan 表无
+ * 机器 (from, on) 行索引拒绝（Map 复合键查询不走原型链）；非字符串 event 由基建
+ * 归一 undefined 落入表外拒绝（§5.2 失败路径表第 3 行，不 crash），下方前置守卫
+ * 是域内显式等价拒绝（同结果先行返回，「不炸 turn」契约双保险）。plan 表无
  * to:null 消亡行（基建 null 语义 = 实体离开机器，plan 8 态全在机器内），state 为
  * null 的分支运行时不可达，收窄仅为类型完备。
  */
