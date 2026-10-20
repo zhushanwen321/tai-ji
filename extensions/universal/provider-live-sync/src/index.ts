@@ -273,7 +273,9 @@ async function refreshAndReport(modelRegistry: ExtensionContext["modelRegistry"]
   // 有效判据 = getError() 全文（本退化类 errors.size/aborted 恒为空/假，见模块头注释）。
   const error = modelRegistry.getError();
   if (error) {
-    logger.error(`model config rejected by the engine (models.json / auth.json): ${error}`);
+    // 不限定来源（models.json/auth.json/目录投喂注入集都可能被拒）：composition error 的
+    // 归因在各自产生侧（目录投喂侧见 catalog-bridge.ts 的 registerProvider/skipped 日志）。
+    logger.error(`model config rejected by the engine: ${error}`);
   } else if (result.errors.size > 0 || result.aborted) {
     logger.error(`refresh finished with errors (aborted=${String(result.aborted)}, providers=${result.errors.size})`);
   }
