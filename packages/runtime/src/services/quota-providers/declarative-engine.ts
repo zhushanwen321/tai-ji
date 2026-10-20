@@ -380,13 +380,17 @@ function evalResetSec(raw: unknown, mode: ResetSecMode): number | null {
   return RESET_EVALUATORS[mode](raw)
 }
 
-/** label 模板插值：`{{path}}` 替换；任一路径缺失 → strip 全部插值段 + strip 尾部 `- `。 */
+/** label 模板插值：`{{path}}` 替换；任一路径缺失 → strip 全部插值段 + strip 尾部 `- `。
+ *  插值源缺失（undefined/null）合法走 strip；**存在但非 string = 形态漂移** →
+ *  WireDriftError 整查询归 parse（对齐迁移前 zhipu guard `isOptionalField(d.level, 'string')`
+ *  ——`data.level` 为 number 时旧实现归 parse，引擎不得静默 stringify 出 `Z.ai-123`）。 */
 function evalLabel(template: string, data: unknown): string {
   if (!template.includes('{{')) return template
   const segs = template.match(/\{\{([^}]+)\}\}/g) ?? []
-  const allPresent = segs.every((s) => pickPath(data, s.slice(LABEL_DELIM_LEN, -LABEL_DELIM_LEN)) !== undefined)
-  if (allPresent) {
-    return template.replace(/\{\{([^}]+)\}\}/g, (_, p: string) => String(pickPath(data, p) ?? ''))
+  const paths = segs.map((s) => s.slice(LABEL_DELIM_LEN, -LABEL_DELIM_LEN))
+  const values = paths.map((p) => strictString(pickPath(data, p)))
+  if (values.every((v) => v !== undefined)) {
+    return template.replace(/\{\{([^}]+)\}\}/g, (_, p: string) => strictString(pickPath(data, p)) ?? '')
   }
   return template.replace(/\{\{[^}]+\}\}/g, '').replace(/[-\s]+$/, '')
 }
@@ -546,12 +550,14 @@ function reqsByName(primary: unknown, primaryName: string, name: string | undefi
   return undefined
 }
 
-/** 构造 credential header（引擎统一 redirect:'manual' + statusToReason 3xx 判据）。 */
+/** 构造 credential header（引擎统一 redirect:'manual' + statusToReason 3xx 判据）。
+ *  cookie 模式的 credential 必须已由调用方归一（runDeclarativeFetcher 的空判据判的是归一
+ *  后的值——见 normalizeCookieHeader 契约「归一后为空 → 调用方按 unauthorized 处理」）。 */
 function buildHeaders(config: DeclarativeFetcherConfig, credential: string, extra: Record<string, string>): Record<string, string> {
   const headers: Record<string, string> = { accept: 'application/json, text/plain, */*', ...extra }
   if (config.credential === 'bearer') headers['authorization'] = `Bearer ${credential}`
   else if (config.credential === 'raw') headers['authorization'] = credential
-  else headers['cookie'] = normalizeCookieHeader(credential)
+  else headers['cookie'] = credential
   return headers
 }
 
@@ -665,7 +671,12 @@ export async function runDeclarativeFetcher(
   fetcherConfig?: { workspaceUrl?: string },
   doFetch?: (url: string, init: RequestInit) => Promise<Response>,
 ): Promise<QuotaFetchOutcome> {
-  if (!credential) return { ok: false, reason: 'unauthorized' }
+  // cookie 模式的空判据必须判**归一后**的值：`';'` / `' ; '` 等无任何 k=v 对的粘贴伪影原文
+  // 非空，归一后为空串——按原文判空会带着空 cookie 头真发一次请求（types.ts
+  // normalizeCookieHeader 契约：归一后为空 → 调用方按 unauthorized；对齐迁移前 mimo fetcher
+  // 先归一再判空）。bearer/raw 模式无归一语义，维持原文判据与原文传递。
+  const resolvedCredential = config.credential === 'cookie' ? normalizeCookieHeader(credential) : credential
+  if (!resolvedCredential) return { ok: false, reason: 'unauthorized' }
 
   const extra = { ...(config.extraHeaders ?? {}) }
   const preconditionValue = resolvePreconditionHeader(config, fetcherConfig)
@@ -673,7 +684,7 @@ export async function runDeclarativeFetcher(
     if (!preconditionValue) return { ok: false, reason: config.precondition.failReason }
     extra[config.precondition.header] = preconditionValue
   }
-  const headers = buildHeaders(config, credential, extra)
+  const headers = buildHeaders(config, resolvedCredential, extra)
 
   const fetchImpl = doFetch ?? ((url: string, init: RequestInit) => fetch(url, init))
   const primaryDef = config.requests.find(r => r.role !== 'auxiliary') ?? config.requests[0]

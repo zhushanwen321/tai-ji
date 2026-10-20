@@ -236,6 +236,30 @@ describe('mimoFetcher', () => {
     expect(await mimoFetcher.fetchQuota('', 'cookie')).toEqual({ ok: false, reason: 'unauthorized' })
   })
 
+  // ── cookie 空判据判归一后的值（types.ts normalizeCookieHeader 契约）──
+  // `';'` / `' ; '` 等无任何 k=v 对的粘贴伪影原文非空、归一后为空串——判原文会带着空
+  // cookie 头真发一次请求（对齐迁移前 mimo fetcher 先归一再判空）
+
+  it('cookie 归一后为空（";" / " ; " / 纯空白）→ unauthorized 且不发请求', async () => {
+    const mock = setupFetch(() => jsonResponse({ code: 0, message: 'ok', data: {} }))
+    for (const raw of [';', ' ; ', '   ', '; ;']) {
+      expect(await mimoFetcher.fetchQuota(raw, 'cookie')).toEqual({ ok: false, reason: 'unauthorized' })
+    }
+    expect(mock).not.toHaveBeenCalled()
+  })
+
+  it('cookie 空白伪影归一后照常发送（header 拿归一值，非原文）', async () => {
+    const mock = setupFetch(() => jsonResponse({
+      code: 0,
+      message: 'ok',
+      data: { usage: { percent: 0.1, items: [] } },
+    }))
+    const out = await mimoFetcher.fetchQuota(' sid = 1 ; x = 2 ', 'cookie')
+    expect(out.ok).toBe(true)
+    const init = mock.mock.calls[0]?.[1] as RequestInit | undefined
+    expect((init?.headers as Record<string, string>)['cookie']).toBe('sid=1; x=2')
+  })
+
   it('401 → unauthorized，500 → network', async () => {
     setupFetch(() => jsonResponse({}, 401))
     expect(await mimoFetcher.fetchQuota('sid=1', 'cookie')).toEqual({ ok: false, reason: 'unauthorized' })
@@ -692,6 +716,27 @@ describe('zhipuFetcher', () => {
       expect(out.data.label).toBe('Z.ai')
       expect(out.data.wins[0]).toEqual({ pct: 5, resetSec: 4 * 3600 + 11 * 60 })
     }
+  })
+
+  // ── label 插值源形态漂移（迁移前 zhipu guard isOptionalField(d.level, 'string') 等价）──
+  // 插值字段存在但非 string 不得被静默 stringify 成 `Z.ai-123`——整查询归 parse（漂移可见）
+
+  it('data.level 类型漂移（number / boolean / 对象）→ parse，不产 Z.ai-123', async () => {
+    for (const level of [3, true, { name: 'Max' }]) {
+      expect(await fetchOk(zhipuFetcher, {
+        success: true,
+        data: { level, limits: [{ type: 'TOKENS_LIMIT', percentage: 42 }] },
+      })).toEqual({ ok: false, reason: 'parse' })
+    }
+  })
+
+  it('data.level 为 null → 按缺失走 label 兜底 Z.ai（不产尾部分隔符 Z.ai-）', async () => {
+    const out = await fetchOk(zhipuFetcher, {
+      success: true,
+      data: { level: null, limits: [{ type: 'TOKENS_LIMIT', percentage: 42 }] },
+    })
+    expect(out.ok).toBe(true)
+    if (out.ok) expect(out.data.label).toBe('Z.ai')
   })
 
   // ── RT-7#5：TOKENS_LIMIT 无 percentage / 无该条目 → 不产 pct=0 假未用 ──
