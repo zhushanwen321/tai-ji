@@ -530,6 +530,26 @@ Windows 等效：`tasklist /FI "PID eq <pid>"` 核对单进程；按命令行定
   2. **resume 场景查生效值**：journal 的 `run-resumed` 事件携带生效模型——三档回落：resume 显式参数（协议预留）> 持久化覆盖记录 > run 创建时模型。
   3. **查成员实际执行模型**：成员 pi session 文件的 `model_change` 条目序列（尾条目 = 当前实际使用模型，审计权威）。
 - **处置**：需要脚本显式模型赢时，对该目标再次切换即可（覆盖替换幂等——新覆盖值压旧值，不存在叠加）；确认从未切换过而模型仍不符预期，才按模型解析回归排查（三层解析：调用参数 > frontmatter > ctxModel）。
+### 41. 新建 worktree 基线落后 main：幽灵 remote-tracking ref（origin/* 残留镜像，2026-10-20 事故）
+
+**症状**：从 landing 页创建 worktree（base 选 `origin/main` 或默认），新分支起点落后本地 main 几百个提交；`git rev-parse --verify origin/main` 却能通过（ref 存在）。
+
+**判定**：`refs/remotes/origin/*` 的更新通道有且只有「名为 origin 的远端被 fetch」——`git remote` 清单里没有 origin（如 bare workspace 远端叫别的名字）时，这组 ref 是外部工具（git-cwt 兼容镜像等）抄写后冻结的死数据。两查：
+
+```bash
+git -C <repo> remote                          # 清单里没有 'origin' 即中招
+git -C <repo> for-each-ref refs/remotes/origin --format='%(refname) %(objectname:short)'
+```
+
+runtime 侧防护（2026-10-20 落地）：默认 base 不再硬编码 `origin/main`，按 `git remote` 实况动态推导（origin → checkout.defaultRemote → 单一远端 → 清单首个；无远端用本地 main，实现 `packages/runtime/src/services/worktree/default-base-resolver.ts`）；显式传 `<remote>/<branch>` 时若远端未配置且 ref 落在 `refs/remotes/` 下会拒绝采信（RT-8#8 warn 留痕 + fallback 推导默认）；打开仓库（workspace.record）后台 fetch 默认远端保新鲜。
+
+**恢复动作**（清理残留 refs，卫生性修复）：
+
+```bash
+git -C <barePath> for-each-ref --format='%(refname)' refs/remotes/origin | xargs -n1 git -C <barePath> update-ref -d
+```
+
+已受害的分支用 `git merge main` 补齐（快进或常规合并均可）。
 ### 33. LLM 网络代理分流失效：配了代理规则的服务商仍直连失败（pi 升级后高发）
 
 **症状**：settings「网络代理」页已启用并配置规则，但命中规则的服务商请求仍不走代理（或代理软件侧无新 CONNECT 隧道）；典型触发时点 = pi 版本升级后（分流依赖两个 pi/Node 未承诺前提：上游 SDK 默认 fetch 运行时读 `globalThis.fetch`；外部 undici 包 `setGlobalDispatcher` 写入的槽与 Node 内置 fetch 读取的槽一致——任一被升级打破即静默失效）。
