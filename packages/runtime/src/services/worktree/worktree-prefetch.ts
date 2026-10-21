@@ -1,7 +1,7 @@
 /**
  * 打开仓库时的默认远端 prefetch（自 worktree-service.ts 抽出，控 max-lines）。
  *
- * 事实驱动：refs/remotes/&lt;remote&gt;/* 的新鲜度只能由 fetch 保证——默认 base 推导与
+ * 事实驱动：refs/remotes/<remote>/* 的新鲜度只能由 fetch 保证——默认 base 推导与
  * 幽灵过滤都读它，打开仓库时刷一次让随后的 worktree 创建落在最新基线上。
  * 触发链：landing 选仓库 → workspace.record → fire-and-forget。
  *
