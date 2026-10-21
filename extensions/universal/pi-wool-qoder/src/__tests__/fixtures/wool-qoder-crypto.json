@@ -1,0 +1,45 @@
+{
+  "qoderEncode": {
+    "plainUtf8": "{\"hello\":\"wool\",\"n\":42}",
+    "expected": "KhBMnwVEw$ByBEJbu(f*GomYKnDS%ruY",
+    "roundtrip": "eyJoZWxsbyI6Indvb2wiLCJuIjo0Mn0="
+  },
+  "jsonSortedCompact": {
+    "input": {
+      "b": 2,
+      "a": "x",
+      "c": null,
+      "name": "qoder"
+    },
+    "expectedUtf8": "{\"a\":\"x\",\"b\":2,\"c\":\"\",\"name\":\"qoder\"}"
+  },
+  "infoAes": {
+    "tempKey": "0123456789abcdef",
+    "plainUtf8": "{\"aid\":\"fixture-uid-0001\",\"name\":\"fixture-user\",\"organization_id\":\"\",\"organization_name\":\"\",\"refresh_token\":\"drt-fixture-refresh-token\",\"security_oauth_token\":\"dt-fixture-access-token\",\"uid\":\"fixture-uid-0001\",\"user_type\":\"personal_professional_trial\",\"yx_uid\":\"\"}",
+    "expectedB64": "PTmvQO0MEZ2Zo4c6vGTtYxwz/sppQmKkjrj3gaoyZk7QwR9fsLHsO9io7rMgeZkbDF4JZY/AcOFHw68sAo7BkB48n3m7NlykR6DHTNovE0eUQ3yONS7mJRQTd2dmbTqj5yG6OxE49dIpnpIE/HhRuYu7mr/UiS6Z3tHw6MpPfE+coi8IRXwJLohGehWO0PNfACVEEZEhdQMtuJpeuJGb4bQf5IcwYMTLp6I+IYFayI78VIb/CIgasMFEL538DhP2pnJpAeiRzWQd+q4JNdDHWMqE7KoIUEJ/iXcGq6jRDCVxUX98Y9xsDqamPRVHy6wkUxXKV7LDQy1TzJIJAvP3TvDEC2bRGLSMMypeoAoCGHI="
+  },
+  "signature": {
+    "payloadB64": "eyJjb3N5VmVyc2lvbiI6IjEuMS43NSIsImlkZVZlcnNpb24iOiIiLCJpbmZvIjoiRklYRURfSU5GT19CNjQiLCJyZXF1ZXN0SWQiOiJmaXhlZC1yZXF1ZXN0LWlkIiwidmVyc2lvbiI6InYxIn0=",
+    "cosyKey": "FIXED_COSY_KEY_B64",
+    "date": "1700000000",
+    "body": "{\"stream\":true}",
+    "path": "/api/v2/service/pro/sse/agent_chat_generation",
+    "rawToMd5": "eyJjb3N5VmVyc2lvbiI6IjEuMS43NSIsImlkZVZlcnNpb24iOiIiLCJpbmZvIjoiRklYRURfSU5GT19CNjQiLCJyZXF1ZXN0SWQiOiJmaXhlZC1yZXF1ZXN0LWlkIiwidmVyc2lvbiI6InYxIn0=\nFIXED_COSY_KEY_B64\n1700000000\n{\"stream\":true}\n/api/v2/service/pro/sse/agent_chat_generation",
+    "expectedMd5": "c1e4c1c134be5cee712b753676d4e0c2"
+  },
+  "fingerprint": {
+    "uid": "fixture-uid-0001",
+    "machineId": "5a9a5a8d-8e65-4381-a611-e53254cac921",
+    "sessionId": "43c992a6-b020-4987-a696-035b76735b27",
+    "machineType": "910e9dc805fc491aa1",
+    "machineToken": "yJ02xzvOCn7PksS7f50mew4WLgbxWBU2LDoexkPyoX6"
+  },
+  "keychainExtract": {
+    "keychainPassword": "ZWtvIHRlc3QgcGFzc3dvcmQ=",
+    "pbkdf2KeyHex": "9486746711a2c13dc9f58245d1b77b97",
+    "magic": "v10",
+    "ivSpacesHex": "20202020202020202020202020202020",
+    "plainUtf8": "{\"schemaVersion\":1,\"token\":\"dt-fixture-access-token-000\",\"refreshToken\":\"drt-fixture-refresh-token-00\",\"expiresAt\":1763624866000,\"refreshTokenExpiresAt\":1795160866000,\"user\":{\"id\":\"fixture-user-id\",\"name\":\"fixture@example.com\",\"email\":\"\"}}",
+    "ciphertextHex": "7803c59179758e8030401f9948819b26273ce41a44050e2bee454f62c226936a6f0e91d14056be46d93dabd590a55620d9a277be9ebba3b9a9e4561960d2d783e02c1b0748b0c4ab38b09e7c7662c2407c0ec9de34ed82aa65d95544f4f99605fc834208aab4357bac214e33339c9c11d16d1145fde67b37b4142e2b14a9b10ec4903eac815b8555e17734a4ef0c83ab896f6e629dc954037185337c570563c9b63e8549c2818723d94e3fe8936091960b2bb69c509be243ed3e1c4a1d16f3298c3a9229e8aaad40919556845f413e95bfb8e77a04aeb1eb4c71d2a233a70b2388b2138e19b991f7a255e1b890e9b62d"
+  }
+}
