@@ -39,6 +39,21 @@ const BUN_VIRTUAL_PREFIX = "/$bunfs/root/";
 const PI_ENTRY_BASENAME_RE = /^(?:cli\.js|pi(?:\.exe|\.cmd)?)$/i;
 
 /**
+ * pi 二进制 basename 白名单（分支 2 资格判据）：npm bin 形态（`pi`/`pi.exe`/`pi.cmd`）
+ * + standalone 发行形态（`pi-<platform>-<arch>[.exe]`，命名 SSOT = runtime
+ * find-pi-executable.ts 的 binaryName 推导）。
+ *
+ * 为什么需要：分支 2 的原判据只有「execPath 非 node/bun」——它假设「非通用运行时
+ * ⇒ 本进程就是 pi standalone binary」。该假设在打包态 taiji 破裂：runtime 以宿主
+ * Electron 二进制作 node 执行器 spawn 引擎 CLI 进程（ELECTRON_RUN_AS_NODE=1），
+ * 引擎进程的 execPath 是 Electron 而非 pi 二进制——直接 spawn 它带 pi CLI 参数
+ * （--mode rpc 等）会被 node 选项解析器拒掉（"bad option: --mode"，exit 9）。
+ * 不命中本白名单时落分支 3（`pi` 走 PATH——runtime 引擎 env 已注入 pi 目录作
+ * PATH 前缀，engine-launch-env.ts 的 piDir 注入即为此存在）。
+ */
+const PI_BINARY_BASENAME_RE = /^(?:pi(?:\.exe|\.cmd)?|pi-[a-z0-9]+-[a-z0-9]+(?:\.exe)?)$/i;
+
+/**
  * 判断 execPath 的 basename 是否为通用运行时（node/bun）。
  * 通用运行时需要脚本路径才能启动 pi；非通用（pi standalone binary）可直接执行。
  */
@@ -52,15 +67,24 @@ function isPiEntryScript(scriptPath: string): boolean {
   return PI_ENTRY_BASENAME_RE.test(path.basename(scriptPath));
 }
 
+/** execPath basename 是否命中 pi 二进制命名（分支 2 资格判据，白名单见 {@link PI_BINARY_BASENAME_RE}）。 */
+function isPiBinaryExecPath(execPath: string): boolean {
+  return PI_BINARY_BASENAME_RE.test(path.basename(execPath));
+}
+
 /**
  * 组装 pi 子进程的 spawn 调用。
  *
  * 决策链（按优先级）：
  *   1. 本进程从 pi 入口启动（argv[1] basename ∈ pi 发行入口白名单 + 真实磁盘文件
  *      + 非 bun 虚拟路径）→ <execPath> <argv[1]> <userArgs>（复现启动方式）
- *   2. execPath 非通用运行时（pi standalone binary）→ <execPath> <userArgs>
+ *   2. execPath 自身即 pi 二进制（basename ∈ pi 二进制命名白名单）→ <execPath> <userArgs>
  *   3. 其余 → "pi" <userArgs>（依赖 PATH；taiji 宿主为引擎 env 注入 PATH 前缀，
  *      引擎 CLI 进程形态恒落此分支）
+ *
+ * 分支 2 的白名单判据是打包态 taiji 的修复锚点：引擎 CLI 进程由 runtime 以 Electron
+ * 二进制作 node 执行器 spawn 时 execPath 非 node/bun 亦非 pi 命名——原「非通用
+ * 运行时即 pi binary」假设会把它当 pi 直接 spawn，被 node 选项解析器拒掉 --mode。
  */
 // [perf] 决策链只依赖 process.argv[1] / process.execPath（进程内恒定），唯一磁盘
 // 探测（existsSync）结果按 argv[1] 值 memo——测试 mock 切换 argv[1] 自动失效重算。
@@ -96,8 +120,11 @@ export function getPiInvocation(userArgs: string[]): PiInvocation {
     return { command: process.execPath, args: [currentScript, ...userArgs] };
   }
 
-  // 分支 2：非通用运行时（pi 自带 binary）→ 直接执行
-  if (!isGenericRuntime(process.execPath)) {
+  // 分支 2：execPath 自身即 pi 二进制（npm bin / standalone 发行形态）→ 直接执行。
+  // 资格判据 = basename 命中 pi 二进制命名白名单（默认拒绝）：非 node/bun 且非 pi
+  // 命名的 execPath（打包态 taiji 的 Electron 执行器形态）不得直接 spawn——它按
+  // node 选项解析 argv，pi CLI flag（--mode rpc 等）会被拒（exit 9），落分支 3。
+  if (!isGenericRuntime(process.execPath) && isPiBinaryExecPath(process.execPath)) {
     return { command: process.execPath, args: userArgs };
   }
 
