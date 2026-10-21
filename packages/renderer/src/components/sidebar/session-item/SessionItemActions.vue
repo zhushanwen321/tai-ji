@@ -7,10 +7,10 @@
     都在主组件），经 v-model:confirming 双向。
 
     [session-archive D6/D12/D13，u-renderer-entry] 悬停第三钮 = 归档钮（原删除钮语义
-    迁移——删除链路整体移到归档列表的彻底删除）：PackageCheck 图标（D12 指定
-    PackageDown 在本仓 @lucide/vue 无此导出，取同族「包裹+勾」收纳语义图标）+
-    两段确认 accent 轻确认（归档非破坏性，区别于原 danger 红底）；生成中（D13
-    renderer 拦截层）禁用 + title 说明，runtime archive RPC 三门之首兜底。
+    迁移——删除链路整体移到归档列表的彻底删除）：Archive 归档箱图标（归档域四处同族：
+    侧栏入口钮 / 本钮 / 归档列表与主区空态；「标记完成」用对勾系 CircleCheck 区分
+    「做完了 vs 收起来」）+ 两段确认 accent 轻确认（归档非破坏性，区别于原 danger 红底）；
+    生成中（D13 renderer 拦截层）禁用 + title 说明，runtime archive RPC 三门之首兜底。
   -->
   <!-- 位置 = Display 右槽覆盖层（2026-10-11 用户裁决：absolute inset-0 覆盖「点 + 时间」
        定宽槽、justify-end 贴右；槽定宽 58px 由 Display 声明，名称在槽左缘截断构造性不受遮）。
@@ -93,7 +93,7 @@
       @pointerdown.stop
     >
       <Check v-if="confirming" class="size-[12px]" />
-      <PackageCheck v-else class="size-[12px]" />
+      <Archive v-else class="size-[12px]" />
     </Button>
   </div>
 </template>
@@ -101,7 +101,7 @@
 <script setup lang="ts">
 import { computed, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { Check, Pencil, PackageCheck, FolderKanban } from '@lucide/vue'
+import { Check, Pencil, Archive, FolderKanban } from '@lucide/vue'
 import { Button } from '@/components/ui/button'
 import { Popover, PopoverTrigger, PopoverContent } from '@/components/ui/popover'
 import { useAssignTargets } from './assign-targets'

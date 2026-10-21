@@ -15,7 +15,7 @@ export default {
   // background — wording does not claim completion)
   archiveSessionDone: 'Archived "{name}"',
   archiveSessionFailed: 'Archive failed: {msg}',
-  // Toolbar archive entry (D10: Package icon + count badge, hidden at 0)
+  // Toolbar archive entry (D10: Archive icon + count badge, hidden at 0)
   archiveEntry: {
     title: 'Archived sessions ({count})',
   },

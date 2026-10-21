@@ -51,7 +51,7 @@
           class="flex flex-col items-center justify-center gap-2 py-10 text-center"
           data-testid="archive-list-empty"
         >
-          <Package class="size-5 text-neutral-dim opacity-40" />
+          <Archive class="size-5 text-neutral-dim opacity-40" />
           <p class="text-[length:var(--text-2xs)] text-neutral-dim opacity-55">{{ t('archive.entry.empty') }}</p>
         </div>
 
@@ -143,7 +143,7 @@
 <script setup lang="ts">
 import { ref } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { ArrowLeft, RotateCcw, Trash2, Check, Package, AlertCircle } from '@lucide/vue'
+import { ArrowLeft, RotateCcw, Trash2, Check, Archive, AlertCircle } from '@lucide/vue'
 import type { ArchiveSummary } from '@taiji/shared'
 import { Button } from '@/components/ui/button'
 import { ScrollArea } from '@/components/ui/scroll-area'

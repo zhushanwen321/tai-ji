@@ -14,7 +14,7 @@ export default {
   // 归档发起 toast（session-archive §5.1 成功路径；压缩后台进行，文案不宣称已压缩）
   archiveSessionDone: '已归档「{name}」',
   archiveSessionFailed: '归档失败：{msg}',
-  // 工具组归档入口（D10：Package 图标 + count 角标，0 隐藏）
+  // 工具组归档入口（D10：Archive 图标 + count 角标，0 隐藏）
   archiveEntry: {
     title: '已归档会话（{count}）',
   },

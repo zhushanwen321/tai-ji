@@ -33,8 +33,10 @@
       <!-- 右侧工具组（用户裁决 2026-10-11）：新建项目「+」紧贴模式开关（组内 gap 2px，
            组整体 ml-auto 承接右贴）。新建项目入口 = 区头「+」→ 列表顶部草稿行（见列表容器首行），
            不再使用区头内联输入。
-           [session-archive D10] 归档入口插在「+」与模式开关之间：Package 图标 +
-           archiveCount 角标（count 0 隐藏，按钮仍可点——空归档列表有引导空态）。 -->
+           [session-archive D10] 归档入口插在「+」与模式开关之间：Archive 图标（归档域
+           统一用 Archive 归档箱——入口 / 悬停归档钮 / 两处空态同族；「标记完成」用对勾系
+           CircleCheck 区分「做完了 vs 收起来」）+ archiveCount 角标（count 0 隐藏，按钮仍可点
+           ——空归档列表有引导空态）。 -->
       <div class="ml-auto flex items-center gap-[2px]">
         <Button
           variant="ghost"
@@ -56,7 +58,7 @@
           :aria-label="t('sidebar.archiveEntry.title', { count: archiveCount })"
           @click="emit('openArchives')"
         >
-          <Package :stroke-width="1.8" />
+          <Archive :stroke-width="1.8" />
           <!-- 计数角标（D10：count 0 隐藏；>0 右上角 accent 圆形 mono 小字，99 封顶） -->
           <span
             v-if="archiveCount > 0"
@@ -343,7 +345,7 @@ import type { SessionGroup, SessionSummary } from '@taiji/shared'
 import type { DerivedStatus } from '@/types'
 import { computed, onBeforeUnmount, onMounted, provide, ref, watch, type Ref } from 'vue'
 import { useEventListener } from '@vueuse/core'
-import { Plus, Folder, List, Package } from '@lucide/vue'
+import { Plus, Folder, List, Archive } from '@lucide/vue'
 import { useI18n } from 'vue-i18n'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'

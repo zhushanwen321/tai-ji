@@ -22,7 +22,7 @@
       class="flex h-full flex-col items-center justify-center gap-2 py-10 text-center"
       data-testid="archive-main-empty"
     >
-      <Package class="size-8 text-neutral-dim opacity-40" />
+      <Archive class="size-8 text-neutral-dim opacity-40" />
       <p class="text-[length:var(--text-xs)] text-neutral-dim opacity-55">{{ t('archive.main.noSelection') }}</p>
     </div>
   </div>
@@ -31,7 +31,7 @@
 <script setup lang="ts">
 import { computed } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { Package } from '@lucide/vue'
+import { Archive } from '@lucide/vue'
 import ArchiveSummaryView from './ArchiveSummaryView.vue'
 import { useArchiveStore } from '@/stores/archive'
 import { useProjectStore } from '@/stores/project'

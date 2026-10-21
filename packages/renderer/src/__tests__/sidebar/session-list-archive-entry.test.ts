@@ -2,7 +2,7 @@
  * SessionList 工具组归档入口测试（session-archive 设计 D10，u-renderer-entry）。
  *
  * 覆盖验收条款「角标 0 隐藏」+ 入口交互：
- * - 归档入口钮存在（Package 图标，位于「+ 新建项目」与平铺/分组开关之间）且恒可点
+ * - 归档入口钮存在（Archive 图标，位于「+ 新建项目」与平铺/分组开关之间）且恒可点
  *   （count 0 也打开归档列表——空列表有引导空态）
  * - 角标：count 0 隐藏 / count 3 显示 3 / count 150 封顶 99+
  * - 点击 emit openArchives
@@ -50,7 +50,7 @@ describe('SessionList 归档入口（D10 工具组）', () => {
     const btn = wrapper.find('[data-testid="sidebar-archive-entry-btn"]')
     expect(btn.exists()).toBe(true)
     expect(btn.attributes('disabled')).toBeUndefined()
-    expect(btn.find('svg.lucide-package').exists()).toBe(true)
+    expect(btn.find('svg.lucide-archive').exists()).toBe(true)
 
     await btn.trigger('click')
     expect(wrapper.emitted('openArchives')).toHaveLength(1)

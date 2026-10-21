@@ -7,8 +7,7 @@
  * - 生成中禁用 + title（D13 renderer 拦截层）：DerivedStatus 六瞬态 → disabled +
  *   title「生成中不可归档」；点击不 emit
  * - 完成态可归档：title「归档」，两段确认链路可走通
- * - 图标语义（D12）：非确认态 PackageCheck（本仓 lucide 无 PackageDown 的同族替代）、
- *   确认态 Check
+ * - 图标语义（D12，2026-10-21 裁决改归档箱）：非确认态 Archive、确认态 Check
  *
  * 运行：cd packages/renderer && npx vitest run src/__tests__/sidebar/session-item-archive-button.test.ts
  */
@@ -54,7 +53,7 @@ describe('SessionItem 归档钮两段确认（D6 accent 轻确认）', () => {
     wrapper.unmount()
   })
 
-  it('确认态再击 → emit archive(sessionId) + 确认态复位（PackageCheck 图标回归）', async () => {
+  it('确认态再击 → emit archive(sessionId) + 确认态复位（Archive 图标回归）', async () => {
     const wrapper = mountItem('done')
     const btn = wrapper.find('[data-testid="session-archive-btn"]')
 
@@ -63,11 +62,11 @@ describe('SessionItem 归档钮两段确认（D6 accent 轻确认）', () => {
 
     expect(wrapper.emitted('archive')).toEqual([['s1']])
     expect(btn.classes()).not.toContain('bg-accent-soft')
-    expect(btn.find('svg.lucide-package-check').exists()).toBe(true)
+    expect(btn.find('svg.lucide-archive').exists()).toBe(true)
     wrapper.unmount()
   })
 
-  it('默认态：title「归档」+ PackageCheck 图标（D12：区别于归档列表入口的 Package）', () => {
+  it('默认态：title「归档」+ Archive 图标（与归档域入口/空态同族，区别于标记完成的 CircleCheck）', () => {
     const wrapper = mountItem('done')
     const btn = wrapper.find('[data-testid="session-archive-btn"]')
     expect(btn.attributes('title')).toBe('归档')
