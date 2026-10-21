@@ -226,6 +226,6 @@ CSP 能力一致性检查（`check_csp_compatibility.py`）[HISTORICAL]：2026-0
 | taste:allow-inline-import-type | `// taste:allow-inline-import-type` | `grep -rn "taste:allow-inline-import-type" packages` | `taste-lint/rules/no-inline-import-type.mjs` | 行内 import type 形态豁免（规则在册，当前全仓零使用） |
 | taste:allow-instance-level-session-state | `// taste:allow-instance-level-session-state` | `grep -rn "taste:allow-instance-level-session-state" packages` | `taste-lint/rules/no-instance-level-session-state.mjs` | 实例级 session 状态误报豁免（规则在册，合法形态以 ADR-0049 例外清单为准） |
 
-非项目自建的通用豁免形态（工具标准，不另行盘点）：`eslint-disable` / `eslint-disable-next-line` / `eslint-disable-line`（ESLint 消费，项目规则禁用其绕过检查——见「Lint / Hooks 原则」）；`@ts-expect-error`（tsc 消费）。脚本内的豁免登记表（非注释标记形态）：`scripts/check-doc-symbol-drift.mjs` 的 `PATH_REF_EXEMPT` / `COMMENT_DOC_REF_EXEMPT`（文档路径引用豁免，逐条附理由）；`.githooks/check_path_ref_drift.py` 的 `PATH_REF_EXEMPT`（被删除/移动路径的残留引用豁免，逐条附理由）。
+非项目自建的通用豁免形态（工具标准，不另行盘点）：`eslint-disable` / `eslint-disable-next-line` / `eslint-disable-line`（ESLint 消费，项目规则禁用其绕过检查——见「Lint / Hooks 原则」）；`@ts-expect-error`（tsc 消费）。脚本内的豁免登记表（非注释标记形态）：`scripts/check-doc-symbol-drift.mjs` 的 `PATH_REF_EXEMPT` / `COMMENT_DOC_REF_EXEMPT`（文档路径引用豁免，逐条附理由）；`.githooks/check_path_ref_drift.py` 的 `PATH_REF_EXEMPT`（被删除/移动路径的残留引用豁免，逐条附理由）；`.githooks/check-test-blind-wait.mjs` 的 `BLIND_WAIT_EXEMPT`（测试盲等形态检查的文件级豁免登记表——文件路径为 key、逐条附理由，仅限条件轮询间隔 / 被静态分析的 fixture 字符串等形态性误报，pre-commit 消费；规则正反例见 docs/TEST-STRATEGY.md「异步等待写法」节）。
 
 豁免标记的定期复核机制不做（2026-10-04 裁决：由用户人工处理）；oe-exempt 的 wip/test 类目自带过期日期，过期即由检查自动恢复拦截，不依赖复核。
