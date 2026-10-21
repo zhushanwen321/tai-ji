@@ -261,9 +261,9 @@ function countEngineShellProcesses(): { count: number; lines: string[] } {
 }
 
 /**
- * [S4 test 拆分] 在途证据段：journal 落盘 + ask-dispatched 帧 + 成员保活进程与引擎
- * 宿主薄壳的双正面对照（孤儿断言的前提是派发后确实有任务进程可回收）。失败路径
- * diag 与拆出前同构。
+ * [S4 test 拆分] 在途证据段：journal 落盘 + agent-started 帧（成员在途事实，
+ * RUN_EVENT_TYPES 词表内现行等价帧）+ 成员保活进程与引擎宿主薄壳的双正面对照
+ * （孤儿断言的前提是派发后确实有任务进程可回收）。失败路径 diag 与拆出前同构。
  */
 async function awaitS4InFlightEvidence(
   dataDir: string,
@@ -282,7 +282,7 @@ async function awaitS4InFlightEvidence(
   const journalFile = listFilesRecursive(agentDir, '.record.jsonl')[0]
   const runId = path.basename(journalFile).replace(/\.record\.jsonl$/, '')
   const dispatched = await waitUntil(
-    () => readJournalFrames(journalFile).some((f) => f['type'] === 'ask-dispatched'),
+    () => readJournalFrames(journalFile).some((f) => f['type'] === 'agent-started'),
     JOURNAL_TIMEOUT_MS,
   )
   if (!dispatched) {
@@ -291,7 +291,7 @@ async function awaitS4InFlightEvidence(
       piLogsTail: readPiLogs(dataDir).slice(-3000),
     })
   }
-  expect(dispatched, `journal 应出现 ask-dispatched 帧（成员在途——abort 才有「中途」语义）`).toBe(true)
+  expect(dispatched, `journal 应出现 agent-started 帧（成员在途——abort 才有「中途」语义）`).toBe(true)
 
   // 成员保活进程在跑（正面对照：孤儿断言的前提是派发后确实有任务进程可回收）
   const inFlight = await waitUntil(() => countMemberSleeperProcesses().count > baseline.count, JOURNAL_TIMEOUT_MS)
@@ -499,7 +499,7 @@ test('S4 (batch real): 派发后 abort → run-settled(cancelled) + 通知照达
     expect(dispatchDone, `派发 turn 未在 ${MAIN_TURN_TIMEOUT_MS}ms 内完成（真实 LLM 未调 subagents 工具？）`).toBe(true)
     sub.events.length = 0
 
-    // ── 在途证据（journal + ask-dispatched + 双进程正面对照；拆出 awaitS4InFlightEvidence）──
+    // ── 在途证据（journal + agent-started + 双进程正面对照；拆出 awaitS4InFlightEvidence）──
     const { journalFile, runId } = await awaitS4InFlightEvidence(dataDir, baseline, shellBaseline)
     await page.screenshot({ path: testInfo.outputPath('s4-in-flight.png'), fullPage: true })
 
@@ -553,7 +553,8 @@ test('S4 (batch real): 派发后 abort → run-settled(cancelled) + 通知照达
       'notifyDone ack 关闭应恰 1 条（at-least-once 幂等闭环——写入/关闭各恰一次，BATCH-06 口径）',
     ).toBe(1)
 
-    await assertS4SettledEntryAndOrphanFree(sessionFile, runId, baseline, readJournalFrames(journalFile))
+    const frames = readJournalFrames(journalFile)
+    await assertS4SettledEntryAndOrphanFree(sessionFile, runId, baseline, frames)
 
     // 断言 A4b：引擎宿主薄壳回落基线（per-window 收尾 dispose——abort 收尾杀薄壳，
     // 头注断言 ④ 的升级；同窗等待吸收成员任务收尾与薄壳退出的时序差）
