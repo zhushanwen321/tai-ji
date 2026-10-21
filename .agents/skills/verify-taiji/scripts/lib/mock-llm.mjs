@@ -313,15 +313,27 @@ export async function createMockLlm(opts = {}) {
     sockets.add(sock)
     sock.on('close', () => sockets.delete(sock))
   })
-  // 服务级错误（端口占用等）一律以 reject 交给调用方，不静默
-  const listenError = new Promise((_, reject) => {
-    server.once('error', reject)
-  })
 
-  await Promise.race([
-    new Promise((resolve) => server.listen(opts.port ?? 0, host, resolve)),
-    listenError,
-  ])
+  // 启动期错误（端口占用等）→ reject 给调用方；**listen 成功后必须摘掉**，
+  // 否则后续运行时错误会 reject 一个没人 await 的 promise（unhandled rejection）。
+  await new Promise((resolve, reject) => {
+    const onListenError = (err) => {
+      server.off('listening', onListening)
+      reject(err)
+    }
+    const onListening = () => {
+      server.off('error', onListenError)
+      resolve()
+    }
+    server.once('error', onListenError)
+    server.once('listening', onListening)
+    server.listen(opts.port ?? 0, host)
+  })
+  // listen 之后的 server 级错误：只记不抛（不带 listener 会变成 uncaught 杀死进程）
+  const runtimeErrors = []
+  server.on('error', (err) => {
+    runtimeErrors.push({ at: Date.now(), message: err instanceof Error ? err.message : String(err) })
+  })
 
   const address = server.address()
   const port = typeof address === 'object' && address !== null ? address.port : 0
@@ -334,6 +346,8 @@ export async function createMockLlm(opts = {}) {
     basePath,
     /** 每次请求的请求体记录（含 model / messages / stepIndex / status）。 */
     requests,
+    /** listen 之后的 server 级错误（诊断用；正常恒空）。 */
+    errors: runtimeErrors,
     /** 原始剧本（诊断用）。 */
     script,
     /** 各队列已消费步数（断言「子演员队列真的被消费」用）。 */

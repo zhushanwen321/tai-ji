@@ -259,7 +259,7 @@ const r = await p.call('session.setThinkingLevel', { sessionId: sid, level: 'hig
 
 - **通道**：A（子代理详情/浮层标题栏的模型标签 + 「用户覆盖中」badge）+ B（`subagent.setModel`
   三形态回执）+ C（record 事件文件 `record-model-override` / run journal `model-override`）
-- **前置**：`requires` = faux（主/子共用；**但孙进程 faux 不可达，见 `证不了`**）| custom-provider；
+- **前置**：`requires` = faux（主会话）/ **mock-http | live**（孙进程即执行域；孙进程 faux 不可达，见 `证不了`）；依赖 `session.create`
   依赖 `subagent.list` `subagent.model` `workflow.runs` `workflow.overlay`
 - **用于**：`p0-model-switch`（执行域子项）、`p0-subagent-dispatch`（覆盖后重派）、
   `p0-workflow-run`（run 级全切）
@@ -361,8 +361,10 @@ const agg = await p.call('subagent.setModel',
   （`GRANDCHILD_EXTENSION_PKG_SEGMENTS` = structured-output），e2e 专用放行门
   `resolveE2eFauxExtensionPath` 要求 `TAIJI_E2E=1`（dev 装配不设且设了会破坏 vite）。
   实测证据：`<dataDir>/logs/pi-task-stderr-<pid>.log` 出现 `Error: Model "faux/..." not found`。
-  → 执行域（subagent / workflow 成员）的真实轮次**不能用 faux 验收**；只能走真实引擎/模型，
-  或把该子项登记为 `verified-unreachable`。
+  → 执行域（subagent / workflow 成员）的真实轮次**不能用 faux 验收**；
+  **但可用 mock-http 通道**（`createInstance({ llm })`，孙进程经 `PI_CODING_AGENT_DIR` 读同一份 models.json，
+  实测 `mock-grandchild-reachable` / `mock-workflow-reachable`，见 `scripts/probes/mock-llm-grandchild.mjs`
+  与 `mock-llm-workflow.mjs`）；不愿用 mock-http 则走真实引擎/模型，或把该子项登记为 `verified-unreachable`。
   上述是对执行域而言；**主会话**的 faux 完全可用（argv 带 `--model`，可 model-keyed 选队）。
 - 真实引擎（zcode 等）的热切能力差异（`not-applicable` 分支需要非 pi 引擎）。
 
