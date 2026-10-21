@@ -28,6 +28,8 @@ import { promisify } from "node:util";
 
 import { describe, expect, it } from "vitest";
 
+import { THINKING_ORDER } from "../shared/model-ref.ts";
+
 const WORKFLOWS_DIR = join(__dirname, "..", "..", "workflows");
 const FANOUT_PATH = join(WORKFLOWS_DIR, "fan-out.js");
 const FANOUT_SOURCE = readFileSync(FANOUT_PATH, "utf8");
@@ -396,8 +398,14 @@ describe("fan-out.js 模块形态与参数侧契约", () => {
     expect(metaBlock).toContain('pattern: "^/"');
     expect(metaBlock).toContain("maxItems: 20");
     expect(metaBlock).toContain("required: [task]");
-    // thinkingLevel enum 与运行级 THINKING_ORDER 同源（字面量同源，见 meta 块注释）
-    expect(metaBlock).toContain('"off", "minimal", "low", "medium", "high", "xhigh", "max"');
+    // thinkingLevel enum 与运行级 THINKING_ORDER 动态对拍（fan-out.js 是 worker eval 模板
+    // 无法 import TS，字面量手动同步；THINKING_ORDER 增删档位时本断言变红提示同步）
+    const enumLine = metaBlock.match(/thinkingLevel: \{ type: string, enum: \[([^\]]+)\]/);
+    expect(enumLine).not.toBeNull();
+    const enumValues = (enumLine?.[1] ?? "")
+      .split(",")
+      .map((s) => s.trim().replace(/"/g, ""));
+    expect(enumValues).toEqual([...THINKING_ORDER]);
   });
 
   it("@pi-meta 无 agents 参数（随成员对象化退役）；模板级 aggregate 参数保留（验收④）", () => {

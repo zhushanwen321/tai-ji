@@ -34,7 +34,8 @@ notFor: 任务间有依赖顺序，或多视角分析同一目标
 # 会误报 "called but not in meta.phases" warning——parallel.js 等既有模板受此局限）
 phases: ["fan-out", "aggregate"]
 # thinkingLevel enum 与运行级白名单 THINKING_ORDER 同源（subagent-core src/shared/model-ref.ts；
-# worker 模板 eval 环境无法 import TS，此处字面量同源，由 model-ref.test.ts 的 SSOT 断言守护）
+# worker 模板 eval 环境无法 import TS，此处字面量须手动同步；fan-out-script.test.ts 解析本
+# meta 块的 enum 值集与 THINKING_ORDER 动态对拍，漂移即红）
 parameters:
   type: object
   properties:
