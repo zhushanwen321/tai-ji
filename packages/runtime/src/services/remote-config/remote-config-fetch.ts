@@ -19,8 +19,8 @@ import { logger } from '../../infra/logger.js'
 export const REMOTE_CONFIG_BASE_URL =
   'https://raw.githubusercontent.com/zhushanwen321/tai-ji/main/configs/remote'
 
-/** 新鲜度窗口（窗口内直接用缓存，不发网络请求；对齐 pi remote-catalog 的 4h 节奏）。 */
-const REFRESH_INTERVAL_MS = 4 * 60 * 60 * 1000
+/** 新鲜度窗口 4h = 14_400_000ms（窗口内直接用缓存，不发网络请求；对齐 pi remote-catalog 的 4h 节奏）。 */
+const REFRESH_INTERVAL_MS = 14_400_000
 const REQUEST_TIMEOUT_MS = 8000
 const CACHE_VERSION = 1
 /** JSON 落盘缩进（全仓 JSON_INDENT = 2 约定）。 */

@@ -143,6 +143,7 @@ export function createSettingsLifecycle() {
     try {
       store.setQuotaPresets(await getSettingsTransport().listQuotaPresets())
     } catch (e) {
+      // best-effort 拉取：失败沿用现有缓存（store 初始空时消费方回落编译期基线），不传播不打扰用户
       console.warn('[settings] listQuotaPresets 失败，沿用现有缓存/基线', e)
     }
   }

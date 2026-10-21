@@ -1850,6 +1850,7 @@ async function main(): Promise<void> {
   // taiji 远程配置两域（provider 清单域 + quota-fetchers 域，checkedAt 4h 节流在 fetch 层
   // 内建）。延迟避开启动网络竞争；有 provider 模型合并写盘时广播新列表（无变化/失败 =
   // 零动作，fail-safe 链内建在 fetch/sync 层）。unref：不阻塞进程退出。
+  const REMOTE_CONFIG_STARTUP_DELAY_MS = 30_000
   const remoteConfigStartupTimer = setTimeout(() => {
     void configService
       .refreshRemoteProviders()
@@ -1859,7 +1860,7 @@ async function main(): Promise<void> {
       .catch((e: unknown) => {
         console.warn('[remote-config] startup refresh failed:', e instanceof Error ? e.message : String(e))
       })
-  }, 30_000)
+  }, REMOTE_CONFIG_STARTUP_DELAY_MS)
   remoteConfigStartupTimer.unref?.()
 
   // ── u5（crash-forensics-and-watchdog D3）：reattach 编排 ─────────────────────
