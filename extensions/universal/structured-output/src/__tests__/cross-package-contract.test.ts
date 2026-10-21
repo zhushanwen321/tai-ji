@@ -210,6 +210,59 @@ describe("cross-package contract: SW subagent tool schema（真实 typebox 校�
 		expectDescription(messageParamProps, "interrupt");
 	});
 
+	it("subagents 批量：成员对象 required=[task] + agent pattern ^/ + THINKING_ORDER 枚举（批量终态）", async (ctx) => {
+		if (!mod) mod = await importSwSubagentSchema();
+		if (!mod) {
+			ctx.skip();
+			return;
+		}
+		const batch = asSchemaView(mod.SubagentsParams, "SubagentsParams");
+		// 顶层唯一必填是 tasks（成员对象数组）；旧 agents/aggregate 键已删除
+		expect(batch.required, "SubagentsParams.required = [tasks]").toEqual(["tasks"]);
+		expect(Object.keys(batch.properties)).not.toContain("agents");
+		expect(Object.keys(batch.properties)).not.toContain("aggregate");
+
+		// tasks 数组：minItems 1 + items 为成员对象
+		expect(batch.properties.tasks?.minItems, "tasks.minItems = 1").toBe(1);
+		const memberRaw: unknown = batch.properties.tasks?.items;
+		if (memberRaw === null || typeof memberRaw !== "object") throw new Error("tasks.items is not an object schema");
+		const member = memberRaw as SchemaView;
+		// 成员对象必填性（批量终态本体）：task 必填 + minLength 1（空白串由工具入口 trim 检查补足）
+		expect(member.required, "member.required = [task]").toEqual(["task"]);
+		const memberProps = member.properties;
+		expect(memberProps.task?.minLength, "task.minLength preserved").toBe(1);
+		expectDescription(memberProps, "task");
+
+		// 成员级与运行级 agent 同约束：绝对路径 pattern ^/
+		expect(memberProps.agent?.pattern, "member agent.pattern preserved").toBe("^/");
+		expect(batch.properties.agent?.pattern, "run-level agent.pattern preserved").toBe("^/");
+
+		// thinkingLevel 枚举与运行级同源（THINKING_ORDER SSOT）
+		const THINKING_ORDER_ENUM = ["off", "minimal", "low", "medium", "high", "xhigh", "max"];
+		expect(memberProps.thinkingLevel?.enum).toEqual(THINKING_ORDER_ENUM);
+		expect(batch.properties.thinkingLevel?.enum).toEqual(THINKING_ORDER_ENUM);
+	});
+
+	it("subagents 批量：真实 typebox Check 行为（成员对象合法 / 缺 task 拒 / 空 tasks 拒 / 字符串元素拒）", async (ctx) => {
+		if (!mod) mod = await importSwSubagentSchema();
+		if (!mod) {
+			ctx.skip();
+			return;
+		}
+		const batchCompiled = REAL_TYPEBOX_COMPILE.Compile(mod.SubagentsParams);
+		// 成员对象合法形态（含全部成员级覆盖字段）+ 运行级 agent 缺省执行者
+		expect(batchCompiled.Check({ tasks: [{ task: "t" }] })).toBe(true);
+		expect(batchCompiled.Check({ tasks: [{ task: "t", agent: "/abs/a.md", model: "p/m", thinkingLevel: "max" }] })).toBe(true);
+		expect(batchCompiled.Check({ tasks: [{ task: "t" }], agent: "/abs/default.md" })).toBe(true);
+		// 破坏性变更的拒单面：旧写法在 schema 层即拒（pi 参数校验第一道关卡）
+		expect(batchCompiled.Check({ tasks: [] })).toBe(false);
+		expect(batchCompiled.Check({ tasks: [{ agent: "/a.md" }] })).toBe(false);
+		expect(batchCompiled.Check({ tasks: ["legacy string element"] })).toBe(false);
+		expect(batchCompiled.Check({ tasks: [{ task: "t", agent: "relative/a.md" }] })).toBe(false);
+		expect(batchCompiled.Check({ tasks: [{ task: "" }] })).toBe(false);
+		expect(batchCompiled.Check({})).toBe(false);
+	});
+
 	it("真实 typebox 编译成功 + Check 行为正确（start 缺 slug 被拒 / manage 最小合法 / 非法 action 拒）", async (ctx) => {
 		if (!mod) mod = await importSwSubagentSchema();
 		if (!mod) {
@@ -346,5 +399,26 @@ describe("cross-package contract: pi-ai validateToolArguments 真实 SDK 冒烟�
 		}
 		expect(message).toMatch(/^Validation failed for tool "subagent_message"/);
 		expect(message).toContain("action");
+	});
+
+	it("subagents 批量成员对象：合法形态通过真实校验器，旧字符串元素写法被拒（pi 消费链端到端）", async (ctx) => {
+		const mod = await importSwSubagentSchema();
+		if (!mod) {
+			ctx.skip();
+			return;
+		}
+		const batchTool = swTool(mod, "subagents", mod.SubagentsParams);
+		expect(
+			validateToolArguments(batchTool, toolCall({ tasks: [{ task: "t", agent: "/abs/a.md" }] }, "subagents")),
+		).toEqual({ tasks: [{ task: "t", agent: "/abs/a.md" }] });
+
+		let message = "";
+		try {
+			validateToolArguments(batchTool, toolCall({ tasks: ["legacy string element"] }, "subagents"));
+			expect.unreachable("legacy string element must be rejected");
+		} catch (err) {
+			message = err instanceof Error ? err.message : String(err);
+		}
+		expect(message).toMatch(/^Validation failed for tool "subagents"/);
 	});
 });

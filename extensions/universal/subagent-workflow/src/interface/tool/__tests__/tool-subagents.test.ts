@@ -1,17 +1,25 @@
 // src/interface/tool/__tests__/tool-subagents.test.ts
 //
-// u2 契约测试：`subagents` 批量 tool（schema 平铺 D2 / handler 转译 D3 / 错误规格 D9 /
-// 集合收录 D1 / 渲染不构造 __gui__ D8）。
+// u2 契约测试：`subagents` 批量 tool（成员对象 schema / 旧字段迁移检查 / 模型入口
+// 校验 fail-closed / handler 转译 / 错误规格 / 集合收录 / 渲染不构造 __gui__）。
 //
 // 三视角（docs/TEST-STRATEGY.md §3）：
-// - 构建者（白盒）：注册点 schema 形态（顶层键集/类型/必填形态）+ 转译 spec 组装。
+// - 构建者（白盒）：注册点 schema 形态（顶层键集/类型/必填形态/常驻 exposure）+
+//   转译 spec 组装（运行级 agent 填入未指定成员；model/thinkingLevel 不复制进成员）。
 // - 使用者（黑盒）：模型看到的 tool description/guidelines 分工句；execute 的返回文案
-//   （一条通知 + 单次 status 恢复出口 + abort 指引）与错误文案（Correct 示例）。
+//   （一条通知 + 成员一次性 + 单次恢复查询出口 then stop again + abort 指引）与错误
+//   文案（迁移检查 Correct 示例 / 成员下标定位）。
 // - 观察者（真值源）：packages/shared/src/constants.ts 真模块（集合收录 SSOT）——
 //   动态 import 真文件，不用文本断言。
 //
 // mock 策略：lifecycle 深路径 stub（runWorkflow 为 vi.fn——不起真 Worker、真 worker
-// 线程只验证转译与 spec 组装）；registry/store 用最小 stub。框架：vitest（禁 node:test）。
+// 线程只验证转译与 spec 组装）；model-config-service 深路径 stub（getModelConfigService
+// 为 vi.fn——catalog 可用性与成员模型校验的入口行为本文件锁定）；registry/store 用
+// 最小 stub。框架：vitest（禁 node:test）。
+//
+// 成员对象的 required/pattern/enum 真实语义不在本文件断言（本包 vitest 把 typebox
+// alias 到 mock，丢 options）——由 structured-output 的 cross-package-contract.test.ts
+// 以真实 typebox 锁定。
 
 import { readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
@@ -25,7 +33,14 @@ vi.mock("@zhushanwen/subagent-core/orchestration/lifecycle.ts", () => ({
   abortRun: vi.fn(),
 }));
 
+/** 桩化 model service 单例访问器（catalog 可用性与 fail-closed 行为的注入点）。 */
+vi.mock("@zhushanwen/subagent-core/execution/assembly/model-config-service.ts", async (importOriginal) => ({
+  ...(await importOriginal<Record<string, unknown>>()),
+  getModelConfigService: vi.fn(),
+}));
+
 import { runWorkflow } from "@zhushanwen/subagent-core/orchestration/lifecycle.ts";
+import { getModelConfigService } from "@zhushanwen/subagent-core/execution/assembly/model-config-service.ts";
 import { MAX_TIMER_DELAY_MS, SLUG_MAX_LENGTH } from "@zhushanwen/subagent-core";
 import {
   FAN_OUT_SCRIPT_NAME,
@@ -57,6 +72,8 @@ interface SubagentsToolView {
   description: string;
   promptSnippet: string;
   promptGuidelines: string[];
+  /** pi SDK 的 exposure 缺省值 "direct"（常驻）——不写字段时 SDK 侧默认，本视图可缺省。 */
+  exposure?: string;
   parameters: { type?: string; properties: Record<string, CapturedProperty> };
   execute: (
     toolCallId: string,
@@ -159,11 +176,30 @@ async function loadSharedConstants(): Promise<SharedConstantsModule> {
 
 // ── 公共夹具 ──
 
-const TWO_TASKS = ["count .ts files under src", "count .md files under src"];
+/** 成员对象夹具（批量终态形状：tasks 元素 = {task, agent?, model?, thinkingLevel?}）。 */
+const TWO_TASKS = [
+  { task: "count .ts files under src" },
+  { task: "count .md files under src" },
+];
+
+/** 假模型目录源（assertModelInCatalog 用真实谓词判定；条目形状 = PiRegistryModelEntry）。 */
+function makeFakeModelRegistry(): { getAvailable: () => Array<{ provider: string; id: string }> } {
+  return {
+    getAvailable: () => [
+      { provider: "zai-coding-cn", id: "glm-5.3-flash" },
+      { provider: "opencode-go", id: "gpt-5.6" },
+    ],
+  };
+}
 
 beforeEach(() => {
   vi.mocked(runWorkflow).mockReset();
   vi.mocked(runWorkflow).mockResolvedValue("wf-1700000000000-abcd");
+  // 缺省 catalog 可用（带假 registry）；fail-closed 用例在用例内改写为 null。
+  vi.mocked(getModelConfigService).mockReset();
+  vi.mocked(getModelConfigService).mockReturnValue({
+    getModelRegistry: () => makeFakeModelRegistry(),
+  } as never);
 });
 
 afterEach(() => {
@@ -178,7 +214,7 @@ function lastSpec(): Record<string, unknown> {
 }
 
 // ══════════════════════════════════════════════════════════════
-describe("schema 契约：一跳扁平 + tasks 必填（D2）", () => {
+describe("schema 契约：一跳扁平 + 成员对象 tasks 必填 + 常驻", () => {
   it("注册名/label/description 存在，且以 batch 语义自述（one-shot 成员 + 一条通知）", () => {
     const tool = captureSubagentsTool({ isProcessing: false }, makeRegistry());
     expect(tool.name).toBe("subagents");
@@ -190,32 +226,43 @@ describe("schema 契约：一跳扁平 + tasks 必填（D2）", () => {
     expect(tool.description).toContain("`workflow_run` tool");
   });
 
-  it("参数全平铺：无 action 分发、无 args 嵌套、无嵌套 object 参数", () => {
+  it("参数全平铺：无 action 分发、无 args 嵌套；旧 agents/aggregate 键已删除", () => {
     const tool = captureSubagentsTool({ isProcessing: false }, makeRegistry());
     const keys = Object.keys(tool.parameters.properties);
     expect(keys.sort()).toEqual(
-      ["agents", "aggregate", "model", "slug", "tasks", "thinkingLevel", "time", "tokens"].sort(),
+      ["agent", "model", "slug", "tasks", "thinkingLevel", "time", "tokens"].sort(),
     );
     expect(keys).not.toContain("action");
     expect(keys).not.toContain("args");
+    expect(keys).not.toContain("agents");
+    expect(keys).not.toContain("aggregate");
     for (const key of keys) {
-      expect(["string", "number", "boolean", "array"]).toContain(tool.parameters.properties[key]?.type);
+      expect(["string", "number", "boolean", "array", "object"]).toContain(
+        tool.parameters.properties[key]?.type,
+      );
     }
   });
 
-  it("tasks 为必填形态（未经 Type.Optional 构造）且类型为数组", () => {
+  it("tasks 为必填形态（未经 Type.Optional 构造）且类型为数组；成员对象形状权威定义在 schema 叶子", () => {
     const tool = captureSubagentsTool({ isProcessing: false }, makeRegistry());
     expect(tool.parameters.properties.tasks?.type).toBe("array");
     // mock typebox 的 Optional 标记：tasks 不得带该标记（真 typebox 下即 required）
     expect(tool.parameters.properties.tasks?.optional).toBeUndefined();
-    // 源码级：tasks 未经 Type.Optional 包裹（防 mock 失真面丢失 required 语义）
-    expect(TOOL_SRC).toContain("tasks: Type.Array(");
-    expect(TOOL_SRC).not.toContain("Type.Optional(Type.Array(");
+    // 源码级：schema 权威定义移入 subagent-tool-schema.ts（跨包契约 import 点），
+    // tool 侧只 import 引用——防两处漂移。
+    expect(TOOL_SRC).toContain('from "./subagent-tool-schema.ts"');
+    expect(TOOL_SRC).toContain("SubagentsParams");
+    expect(TOOL_SRC).not.toContain("Type.Array(");
+  });
+
+  it("常驻（§3.3.4）：零 exposure: \"deferred\" 残留（SDK 默认 direct 即常驻声明）", () => {
+    const tool = captureSubagentsTool({ isProcessing: false }, makeRegistry());
+    expect(tool.exposure).not.toBe("deferred");
+    expect(TOOL_SRC).not.toContain('exposure: "deferred"');
   });
 
   it("slug 走 SLUG_MAX_LENGTH 上界（schema 第一道关卡 + 运行时第二道）", () => {
-    expect(TOOL_SRC).toContain("maxLength: SLUG_MAX_LENGTH");
-    expect(TOOL_SRC).toContain("SLUG_MAX_LENGTH");
+    expect(TOOL_SRC).toContain("assertSlugWithinLimit");
   });
 
   it("文件头与 interface/command/subagents.ts（/subagents 命令壳）互指防混淆", () => {
@@ -233,13 +280,18 @@ describe("schema 契约：一跳扁平 + tasks 必填（D2）", () => {
     expect(TOOL_SRC).not.toContain("isGuiCapable");
   });
 
-  it("promptGuidelines 含分工句/调用正例；跨工具纪律单源化零残留（D1）", () => {
+  it("promptGuidelines 含分工句/成员对象调用正例；旧 agents/aggregate 形状零残留", () => {
     const tool = captureSubagentsTool({ isProcessing: false }, makeRegistry());
     const guidelines = tool.promptGuidelines.join("\n");
     expect(guidelines).toContain("2+ independent tasks in one dispatch");
     expect(guidelines).toContain('{"tasks":[');
+    // 成员对象正例：元素是对象（{task...），不再是裸字符串元素
+    expect(guidelines).toContain('{"task":"<task 1>"');
     expect(guidelines).toContain("`workflow_run` tool");
     expect(guidelines).toContain("`workflow_control` tool");
+    // 旧字段形状零残留（迁移指引只在运行时错误里承载，声明面不再教旧形状）
+    expect(guidelines).not.toContain('"agents"');
+    expect(guidelines).not.toContain('"aggregate"');
     // tool-declaration-slimming D1 单源化终态：勿等待/预算/模型缺省继承三类跨工具
     // 通用纪律不在本工具 promptGuidelines 重复——收敛到 <available_subagents> 注入段
     // （subagent-list-injector.ts SUBAGENT_DISPATCH_SHARED_RULES）说一次。
@@ -255,17 +307,19 @@ describe("schema 契约：一跳扁平 + tasks 必填（D2）", () => {
 });
 
 // ══════════════════════════════════════════════════════════════
-describe("handler 组装：runWorkflow('fan-out') 确定性映射（D3）", () => {
-  it("全参数调用 → spec 逐字段映射（scriptSource/budget/slug/model/thinkingLevel/args）", async () => {
+describe("handler 组装：runWorkflow('fan-out') 确定性映射（成员对象 args）", () => {
+  it("全参数调用 → spec 逐字段映射（运行级 agent 填入未指定成员；model/thinkingLevel 不复制进成员）", async () => {
     const registry = makeRegistry();
     const result = await runSubagentsBatch(
       {
-        tasks: TWO_TASKS,
-        agents: "/abs/security.md,/abs/perf.md",
-        aggregate: true,
+        tasks: [
+          { task: "count .ts files under src", agent: "/abs/security.md", model: "opencode-go/gpt-5.6" },
+          { task: "count .md files under src", thinkingLevel: "max" },
+        ],
+        agent: "/abs/default.md",
         slug: "foo-tri-review",
         model: "zai-coding-cn/glm-5.3-flash",
-        thinkingLevel: "max",
+        thinkingLevel: "high",
         tokens: 100000,
         time: 600000,
       },
@@ -279,16 +333,20 @@ describe("handler 组装：runWorkflow('fan-out') 确定性映射（D3）", () =
     expect(spec.scriptName).toBe(FAN_OUT_SCRIPT_NAME);
     expect(spec.scriptPath).toBe("/builtin/workflows/fan-out.js");
     expect(spec.parameters).toEqual({ type: "object", properties: { tasks: { type: "array" } } });
+    // 运行级 agent 填入未指定 agent 的成员（成员 [0] 已显式指定保持，成员 [1] 填入缺省）；
+    // model/thinkingLevel 不复制进成员——留空给 $MODEL/$THINKING_LEVEL 继承。
     expect(spec.args).toEqual({
-      tasks: TWO_TASKS,
-      agents: "/abs/security.md,/abs/perf.md",
-      aggregate: true,
+      tasks: [
+        { task: "count .ts files under src", agent: "/abs/security.md", model: "opencode-go/gpt-5.6" },
+        { task: "count .md files under src", thinkingLevel: "max", agent: "/abs/default.md" },
+      ],
     });
     expect(spec.budgetTokens).toBe(100000);
     expect(spec.budgetTimeMs).toBe(600000);
     expect(spec.slug).toBe("foo-tri-review");
+    // 运行级 model/thinkingLevel 走 spec 顶层（workerData 通路），不进成员对象
     expect(spec.model).toBe("zai-coding-cn/glm-5.3-flash");
-    expect(spec.thinkingLevel).toBe("max");
+    expect(spec.thinkingLevel).toBe("high");
     // details：无 __gui__，携带 runId/stateFile（程序化消费方）
     expect(Object.keys(result.details)).not.toContain("__gui__");
     expect(result.details).toMatchObject({
@@ -301,7 +359,35 @@ describe("handler 组装：runWorkflow('fan-out') 确定性映射（D3）", () =
     });
   });
 
-  it("缺省参数不写入 args（不制造「都传/都缺」歧义形态）+ 预算缺省 undefined", async () => {
+  it("成员已指定 agent 时运行级 agent 不覆盖（成员级优先）；无运行级 agent 时成员原样透传", async () => {
+    await runSubagentsBatch(
+      {
+        tasks: [
+          { task: "a", agent: "/abs/explicit.md" },
+          { task: "b" },
+        ],
+        agent: "/abs/default.md",
+      },
+      makeDeps(makeRegistry()) as never,
+      undefined,
+    );
+    expect(lastSpec().args).toEqual({
+      tasks: [
+        { task: "a", agent: "/abs/explicit.md" },
+        { task: "b", agent: "/abs/default.md" },
+      ],
+    });
+
+    vi.mocked(runWorkflow).mockClear();
+    await runSubagentsBatch(
+      { tasks: [{ task: "a", agent: "/abs/explicit.md" }] },
+      makeDeps(makeRegistry()) as never,
+      undefined,
+    );
+    expect(lastSpec().args).toEqual({ tasks: [{ task: "a", agent: "/abs/explicit.md" }] });
+  });
+
+  it("缺省参数不写入 args（tasks 原样）+ 预算缺省 undefined", async () => {
     await runSubagentsBatch({ tasks: TWO_TASKS }, makeDeps(makeRegistry()) as never, undefined);
     const spec = lastSpec();
     expect(spec.args).toEqual({ tasks: TWO_TASKS });
@@ -311,19 +397,20 @@ describe("handler 组装：runWorkflow('fan-out') 确定性映射（D3）", () =
     expect(spec.thinkingLevel).toBeUndefined();
   });
 
-  it("返回文案：一条通知 + 单次 status 恢复出口 + abort 指引（设计 §3.1 全文）", async () => {
+  it("返回文案（§3.1.4 样例）：一条通知 + 成员一次性 + 单次恢复查询出口（then stop again）+ abort 指引", async () => {
     const result = await runSubagentsBatch(
       { tasks: TWO_TASKS, slug: "foo-tri-review" },
       makeDeps(makeRegistry()) as never,
       undefined,
     );
     const text = result.content[0].text;
-    expect(text).toContain("Started batch 'foo-tri-review' (wf-1700000000000-abcd) as workflow run 'fan-out' — 2 subagents dispatched in parallel (allSettled).");
-    expect(text).toContain("Results arrive as ONE notification when the run settles. Do NOT poll.");
-    expect(text).toContain('make a SINGLE status check: workflow_control {"action":"status"} with runId wf-1700000000000-abcd (recovery exit, not a poll loop).');
+    expect(text).toContain("Started batch 'foo-tri-review' (wf-1700000000000-abcd) — 2 members, allSettled.");
+    expect(text).toContain("Results arrive as ONE notification when the run settles. Members are one-shot; to continue a member's work, dispatch a new task.");
+    expect(text).toContain('make ONE query: workflow_control {"action":"status","runId":"wf-1700000000000-abcd"} (then stop again).');
     expect(text).toContain('To abort: workflow_control {"action":"abort","runId":"wf-1700000000000-abcd"}');
-    // status/abort 不复制：本 tool 无 action 参数（schema 已断言），文案只指路
-    // workflow_control 的 action 调用形态（D3 拆分新名）
+    // 无条件停下为默认（§3.3.5）：「做有用工作」的旧措辞零残留
+    expect(text).not.toContain("useful");
+    expect(text).not.toContain("well past the expected duration");
   });
 });
 
@@ -359,18 +446,130 @@ describe("slug 缺省生成 fan-out-<时间短码>（D8 状态侧辨识）", () 
 });
 
 // ══════════════════════════════════════════════════════════════
-describe("错误规格（D9）", () => {
-  it("tasks 缺失 → throw 带 Correct 示例（runWorkflow 未被调用）", async () => {
+describe("旧字段迁移检查（agents/aggregate 出现即 throw + Correct）", () => {
+  it("agents 出现 → throw 迁移指引（成员对象/运行级 agent 的 Correct 形状），不触达 runWorkflow", async () => {
+    const err = await runSubagentsBatch(
+      { tasks: TWO_TASKS, agents: "/abs/a.md,/abs/b.md" } as never,
+      makeDeps(makeRegistry()) as never,
+      undefined,
+    ).catch((e: unknown) => e as Error);
+    expect(err.message).toContain("no longer accepts 'agents'");
+    expect(err.message).toContain("Correct (per-member executor)");
+    expect(err.message).toContain('{"tasks":[{"task":"...","agent":"/abs/a.md"},{"task":"...","agent":"/abs/b.md"}]}');
+    expect(err.message).toContain('{"tasks":[{"task":"..."}],"agent":"/abs/a.md"}');
+    expect(vi.mocked(runWorkflow)).not.toHaveBeenCalled();
+  });
+
+  it("aggregate 出现 → 同一迁移检查 throw（自行归约指引），不触达 runWorkflow", async () => {
+    const err = await runSubagentsBatch(
+      { tasks: TWO_TASKS, aggregate: true } as never,
+      makeDeps(makeRegistry()) as never,
+      undefined,
+    ).catch((e: unknown) => e as Error);
+    expect(err.message).toContain("'aggregate' is removed");
+    expect(err.message).toContain("reduce the results into one conclusion yourself");
+    expect(vi.mocked(runWorkflow)).not.toHaveBeenCalled();
+  });
+
+  it("迁移检查最前：旧混合形态不被后续形状检查的通用错误遮蔽", async () => {
+    const err = await runSubagentsBatch(
+      { agents: "/abs/a.md" } as never,
+      makeDeps(makeRegistry()) as never,
+      undefined,
+    ).catch((e: unknown) => e as Error);
+    expect(err.message).toContain("no longer accepts 'agents'");
+  });
+});
+
+// ══════════════════════════════════════════════════════════════
+describe("模型入口校验（运行级一次 + 成员逐个带下标；catalog 不可用 fail-closed）", () => {
+  it("运行级 + 成员级显式模型均命中目录 → 放行（catalog 只查询一次入口）", async () => {
+    await runSubagentsBatch(
+      {
+        tasks: [
+          { task: "a", model: "opencode-go/gpt-5.6" },
+          { task: "b" },
+        ],
+        model: "zai-coding-cn/glm-5.3-flash",
+      },
+      makeDeps(makeRegistry()) as never,
+      undefined,
+    );
+    expect(vi.mocked(runWorkflow)).toHaveBeenCalledTimes(1);
+  });
+
+  it("成员模型查无 → throw 带成员下标（source = member[i] model）+ 可用清单", async () => {
+    const err = await runSubagentsBatch(
+      {
+        tasks: [
+          { task: "a", model: "zai-coding-cn/glm-5.3-flash" },
+          { task: "b", model: "ghost-provider/nope" },
+        ],
+      },
+      makeDeps(makeRegistry()) as never,
+      undefined,
+    ).catch((e: unknown) => e as Error);
+    expect(err.message).toContain("member[1] model");
+    expect(err.message).toContain("ghost-provider/nope");
+    expect(err.message).toContain("Available models:");
+    expect(vi.mocked(runWorkflow)).not.toHaveBeenCalled();
+  });
+
+  it("运行级模型查无 → throw（source = run-level model override）", async () => {
+    const err = await runSubagentsBatch(
+      { tasks: TWO_TASKS, model: "ghost-provider/nope" },
+      makeDeps(makeRegistry()) as never,
+      undefined,
+    ).catch((e: unknown) => e as Error);
+    expect(err.message).toContain("run-level model override");
+    expect(vi.mocked(runWorkflow)).not.toHaveBeenCalled();
+  });
+
+  it("catalog 不可用（model service null）→ fail-closed throw（不静默跳过，§3.1.2）", async () => {
+    vi.mocked(getModelConfigService).mockReturnValue(null);
+    const err = await runSubagentsBatch(
+      { tasks: [{ task: "a", model: "zai-coding-cn/glm-5.3-flash" }] },
+      makeDeps(makeRegistry()) as never,
+      undefined,
+    ).catch((e: unknown) => e as Error);
+    expect(err.message).toContain("Model catalog unavailable");
+    expect(err.message).toContain("fail-closed");
+    expect(err.message).toContain("Recovery:");
+    expect(vi.mocked(runWorkflow)).not.toHaveBeenCalled();
+  });
+
+  it("零显式 model → 不触达 catalog（catalog 缺席不拦纯继承调用）", async () => {
+    vi.mocked(getModelConfigService).mockReturnValue(null);
+    await runSubagentsBatch({ tasks: TWO_TASKS }, makeDeps(makeRegistry()) as never, undefined);
+    expect(vi.mocked(getModelConfigService)).not.toHaveBeenCalled();
+    expect(vi.mocked(runWorkflow)).toHaveBeenCalledTimes(1);
+  });
+});
+
+// ══════════════════════════════════════════════════════════════
+describe("错误规格（成员 task 空白带下标 + 既有入口 fail-fast）", () => {
+  it("tasks 缺失 → throw 带 Correct 示例（成员对象形状，runWorkflow 未被调用）", async () => {
     const err = await runSubagentsBatch({} as never, makeDeps(makeRegistry()) as never, undefined)
       .catch((e: unknown) => e as Error);
-    expect(err.message).toBe('subagents requires \'tasks\' parameter (non-empty string array). Correct: {"tasks":["...","..."]}');
+    expect(err.message).toBe('subagents requires \'tasks\' parameter (non-empty array of member objects). Correct: {"tasks":[{"task":"..."}]}');
     expect(vi.mocked(runWorkflow)).not.toHaveBeenCalled();
   });
 
   it("tasks 空数组 → 同一 Correct 文案", async () => {
     const err = await runSubagentsBatch({ tasks: [] }, makeDeps(makeRegistry()) as never, undefined)
       .catch((e: unknown) => e as Error);
-    expect(err.message).toContain("subagents requires 'tasks' parameter (non-empty string array)");
+    expect(err.message).toContain("subagents requires 'tasks' parameter (non-empty array of member objects)");
+    expect(vi.mocked(runWorkflow)).not.toHaveBeenCalled();
+  });
+
+  it("成员 task 纯空白 → throw 带成员下标（schema minLength 拦不住空白串的入口兜底）", async () => {
+    const err = await runSubagentsBatch(
+      { tasks: [{ task: "ok" }, { task: "   " }] },
+      makeDeps(makeRegistry()) as never,
+      undefined,
+    ).catch((e: unknown) => e as Error);
+    expect(err.message).toContain("member[1] 'task' must be a non-empty prompt");
+    expect(err.message).toContain('Correct: {"tasks":[{"task":"<complete self-contained prompt>"}]}');
     expect(vi.mocked(runWorkflow)).not.toHaveBeenCalled();
   });
 

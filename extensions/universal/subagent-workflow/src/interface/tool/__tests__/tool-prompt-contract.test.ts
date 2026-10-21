@@ -403,6 +403,55 @@ describe("subagent runtime handler — 错误文案含纠正正例", () => {
 });
 
 // ══════════════════════════════════════════════════════════════
+// subagents 批量声明契约（subagent-tool-interface-refactor §3.1.2 成员对象 / §3.1.4
+// 启动文案 / §3.3.4 常驻 / §3.3.5 无条件停下）——行为版断言在 tool-subagents.test.ts，
+// 本组锁源码文本锚（与 subagent_start 锚词做法同构：agent 决策时唯一可见的就是这些文案）。
+// 工具名保持 `subagents` 不变（改名属第二目标，附录 B）——零改名断言。
+// ══════════════════════════════════════════════════════════════
+
+describe("subagents 批量声明契约（成员对象 + 启动文案锚 + 常驻）", () => {
+  it("成员对象调用正例：tasks 元素是对象（task + 可选 agent/model/thinkingLevel）", () => {
+    expect(TOOL_SUBAGENTS_SRC).toContain('{"tasks":[{"task":"<task 1>","agent":"/abs/a.md"},{"task":"<task 2>"}]');
+    expect(TOOL_SUBAGENTS_SRC).toContain("member object");
+  });
+
+  it("旧 agents/aggregate 形状零残留：声明面无 JSON 键形态教唆（迁移指引只在运行时错误）", () => {
+    // JSON 键值对形态（"agents":）= 模型可照抄的旧正例教唆；迁移检查代码里的
+    // `"agents" in params` 与 anti-patterns 行的 'agents' 单引号反例说明不在禁令内
+    // （前者是检查本体，后者是有意保留的迁移提示）。
+    expect(TOOL_SUBAGENTS_SRC).not.toContain('"agents":');
+    expect(TOOL_SUBAGENTS_SRC).not.toContain('"aggregate":');
+    expect(TOOL_SUBAGENTS_SRC).not.toContain("Comma-separated");
+  });
+
+  it("启动文案锚词（§3.1.4）：一条通知 + 成员一次性 + make ONE query（then stop again）+ abort 指引", () => {
+    expect(TOOL_SUBAGENTS_SRC).toContain("Results arrive as ONE notification when the run settles. Members are one-shot;");
+    expect(TOOL_SUBAGENTS_SRC).toContain("make ONE query: workflow_control");
+    expect(TOOL_SUBAGENTS_SRC).toContain("(then stop again)");
+    expect(TOOL_SUBAGENTS_SRC).toContain('To abort: workflow_control {"action":"abort","runId":"${runId}"}');
+    // 无条件停下为默认（§3.3.5）：「做有用工作 / 超时才查」的旧措辞零残留
+    expect(TOOL_SUBAGENTS_SRC).not.toContain("useful non-overlapping work");
+    expect(TOOL_SUBAGENTS_SRC).not.toContain("well past the expected duration");
+    expect(TOOL_SUBAGENTS_SRC).not.toContain("Do NOT poll");
+  });
+
+  it("常驻 + 工具名不变（§3.3.4 / 附录 B 边界）", () => {
+    expect(TOOL_SUBAGENTS_SRC).not.toContain('exposure: "deferred"');
+    expect(TOOL_SUBAGENTS_SRC).toContain('name: "subagents"');
+    // 零改名断言：第二目标（subagent_batch）不在主干出现任何条件形态
+    expect(TOOL_SUBAGENTS_SRC).not.toContain("subagent_batch");
+  });
+
+  it("schema 叶子承载成员对象形状权威（跨包契约 import 点）", () => {
+    const schemaSrc = readFileSync(join(__dirname, "../subagent-tool-schema.ts"), "utf-8");
+    expect(schemaSrc).toContain("SubagentsParams");
+    expect(schemaSrc).toContain("SubagentsMember");
+    expect(schemaSrc).toContain("minItems: 1");
+    expect(schemaSrc).toContain("minLength: 1");
+  });
+});
+
+// ══════════════════════════════════════════════════════════════
 // workflow_run / workflow_control promptGuidelines（原 workflow-tool-prompt.test.ts）
 // ══════════════════════════════════════════════════════════════
 
