@@ -3,7 +3,7 @@
  * verify-doctor —— capabilities/ 与 scripts/ 的一致性守卫（零依赖，可进 pre-commit 之外的本地自检）。
  *
  * 检查项（每条独立、可定位到文件与行）：
- *  1. 契约 id 全覆盖：`API-CONTRACT.md §6` 的每个 id 必须在某个 `capabilities/*.md` 里作为
+ *  1. 契约 id 全覆盖：`capabilities/API-CONTRACT.md §6` 的每个 id 必须在某个 `capabilities/*.md` 里作为
  *     `# <id> ·` 或 `## <id> ·` 标题出现（文档存在性）。
  *  2. 文档无野 id：capabilities 文档里的 capability 标题必须都在契约 §6 里。
  *  3. 覆盖矩阵引用有效：`P0-P1-COVERAGE.md` 里出现的每个反引号 capability id 必须存在。
