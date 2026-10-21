@@ -1,12 +1,14 @@
 /**
- * provider-edit-discover（test / discover 探活 module）interface 级测试（[C4] 拆分后按
- * module 打点，原 use-provider-edit.test.ts 的 runDiscover 两组用例迁移至此）。
+ * provider-edit-discover（discover + per-model 测试编排 module）interface 级测试（[C4] 拆分后
+ * 按 module 打点，原 use-provider-edit.test.ts 的 runDiscover 两组用例迁移至此）。
  *
- * 覆盖：M3b 协议分流（test 只发 providerId + mode / discover 全参）/ test 结果消费
- * （results 分组与整体性失败互斥、旧 runtime 无 results 兜底）/ discover 合并与结果文案
- * / reject 收尾（testResult error + actionError，不静默吞）/ resetTransient。
+ * 覆盖：testModel 请求形状（mode=test + modelId，协议占位 baseUrl=""）/ 行结果消费
+ * （成败写 modelTestResults，顶层失败走 actionError 不覆盖行结果）/ discover 合并与结果文案
+ * / reject 收尾（testingModelIds 复位 + actionError，不静默吞）/ 重复点击防护 / resetTransient。
  *
  * 合并规则本体（去重 + D9①）归 provider-edit-models.test.ts；本文件只断言编排接线。
+ * 2026-10-21：provider 级「测试连接」入口随 per-model 行内入口下沉退役（用户拍板），
+ * 原 test 分支用例由 testModel 等价承载；provider 级分组测试 RPC 兼容路径在 runtime 侧。
  */
 import { describe, it, expect, vi, afterEach } from 'vitest'
 import { reactive, ref, effectScope } from 'vue'
@@ -81,7 +83,8 @@ function mountDiscover(options: {
   provideSettingsTransport(transport)
   tStub.mockClear()
   tStub.mockImplementation((key: string) => key)
-  const providerRef = ref<ProviderInfo | null>(options.provider ?? makeProvider())
+  // provider: null（新增态）是合法显式值，?? 会吞掉——判 undefined 才走默认
+  const providerRef = ref<ProviderInfo | null>(options.provider !== undefined ? options.provider : makeProvider())
   const draft = reactive<ProviderEditFormDraft>(options.draft ?? makeDraft())
   // 动作错误派生视图 stub（MF-1-7 写通道协议：report/clear 落到本地 ref 供断言）
   const actionError = ref('')
@@ -106,7 +109,7 @@ function mountDiscover(options: {
 /** discoverModels 桩：response 正常回包 / rejectWith 抛错（网络故障路径）。 */
 type DiscoverStub = { response: DiscoverModelsResponse } | { rejectWith: Error }
 
-/** test / discover 两分支共用用例骨架的参数：桩与装配覆写都可选。 */
+/** testModel / discover 共用用例骨架的参数：桩与装配覆写都可选。 */
 interface DiscoverCaseOptions {
   /** 省略 stub = 沿用 fake transport 默认回包 */
   stub?: DiscoverStub
@@ -114,8 +117,8 @@ interface DiscoverCaseOptions {
 }
 
 /**
- * test / discover 两分支共用用例骨架：mount → 打 discoverModels 桩 → 执行分支动作。
- * 分支差异（testConnection / autoDiscover）与桩差异（回包 / 抛错）经参数表达。
+ * testModel / discover 共用用例骨架：mount → 打 discoverModels 桩 → 执行分支动作。
+ * 分支差异（testModel 目标固定 m1 / autoDiscover）与桩差异（回包 / 抛错）经参数表达。
  */
 async function runDiscoverCase(
   mode: 'test' | 'discover',
@@ -133,69 +136,80 @@ async function runDiscoverCase(
     }
   }
   if (mode === 'test') {
-    await mounted.discover.testConnection()
+    await mounted.discover.testModel('m1')
   } else {
     await mounted.discover.autoDiscover()
   }
   return mounted
 }
 
-describe('runDiscover test 分支（探活）', () => {
-  it('成功 → testResult ok；discoverModels 调用参数带 mode=test 且只需 providerId（协议占位 baseUrl=""）', async () => {
-    const { discover, transport } = await runDiscoverCase('test', {
+describe('testModel（per-model 行内测试）', () => {
+  it('请求形状：mode=test + modelId + providerId（协议占位 baseUrl=""，代表模型选择不参与）', async () => {
+    const { transport } = await runDiscoverCase('test', {
       mount: { draft: makeDraft({ baseUrl: 'https://api.example.com', apiKey: 'sk-abc' }) },
     })
-    // M3b（设计 D4）：test 模式代表模型选择归 runtime——前端不发 baseUrl/apiKey/providerType
-    // （快照 artifact 不参战）；baseUrl 是协议形状必填键（shared/protocol.ts），传 '' 占位。
+    // 端点回落链归 runtime（与 provider 级测试同源）；baseUrl 是协议形状必填键（shared/protocol.ts），传 '' 占位
     expect(transport.discoverModels).toHaveBeenCalledWith({
       mode: 'test',
       baseUrl: '',
       providerId: 'p1',
+      modelId: 'm1',
     })
-    expect(discover.testResult.value).toBe('ok')
-    expect(discover.testing.value).toBe(false)
   })
 
-  it('M3b：成功返回 results → testResults 按协议分组消费（每协议 api/modelId/ok/error）', async () => {
-    // error 语法 = M3a runtime 实装（model-connection-tester.ts 头注「错误编码」）
-    const results: NonNullable<DiscoverModelsResponse['results']> = [
-      { api: 'anthropic-messages', modelId: 'minimax-m3', ok: true },
-      { api: 'openai-completions', modelId: 'qwen3.8-flash', ok: false, error: 'http_error|401|invalid api key' },
-    ]
+  it('行结果消费：results[0] 写 modelTestResults[modelId]（含 ok 行与 durationMs）', async () => {
+    const row = { api: 'anthropic-messages', modelId: 'm1', ok: true, durationMs: 812 }
     const { discover } = await runDiscoverCase('test', {
-      stub: { response: { success: true, models: [], results } },
+      stub: { response: { success: true, models: [], results: [row] } },
     })
-    expect(discover.testResults.value).toEqual(results)
-    // 行级失败不改变顶层 success（M3a 语义）——行内失败由行文案承载
-    expect(discover.testResult.value).toBe('ok')
-    expect(discover.testError.value).toBe('')
+    expect(discover.modelTestResults.value['m1']).toEqual(row)
+    expect(discover.testingModelIds.value).toEqual([])
   })
 
-  it('M3b：success=false 整体性失败 → results 空 + testError 携带原因（可展示状态，不抛全局）', async () => {
+  it('行级失败如实落行（http_error）：行内展示真实原因，顶层不抛', async () => {
+    const row = { api: 'openai-completions', modelId: 'm1', ok: false, error: 'http_error|400|MissingSessionID' }
+    const { discover, actionError } = await runDiscoverCase('test', {
+      stub: { response: { success: true, models: [], results: [row] } },
+    })
+    expect(discover.modelTestResults.value['m1']?.ok).toBe(false)
+    expect(discover.modelTestResults.value['m1']?.error).toBe('http_error|400|MissingSessionID')
+    expect(actionError.value).toBe('')
+  })
+
+  it('顶层 provider 级失败（success=false）→ actionError + 不写行结果（无行可报）', async () => {
     const { discover, actionError } = await runDiscoverCase('test', {
       stub: { response: { success: false, error: 'no_api_key', results: [] } },
     })
-    expect(discover.testResults.value).toEqual([])
-    expect(discover.testError.value).toBe('no_api_key')
-    expect(discover.testResult.value).toBe('error')
     expect(actionError.value).toBe('no_api_key')
+    expect(discover.modelTestResults.value['m1']).toBeUndefined()
   })
 
-  it('M3b：runtime 未回 results（旧 runtime）→ testResults 空数组（UI 走整体反馈兜底）', async () => {
-    const { discover } = await runDiscoverCase('test', {
-      stub: { response: { success: true, models: [] } },
-    })
-    expect(discover.testResults.value).toEqual([])
-    expect(discover.testResult.value).toBe('ok')
-  })
-
-  it('reject → testResult error + actionError 消息（网络故障不静默吞）', async () => {
+  it('reject → actionError + testingModelIds 复位（网络故障不静默吞、按钮不卡 spinner）', async () => {
     const { discover, actionError } = await runDiscoverCase('test', {
       stub: { rejectWith: new Error('net down') },
     })
-    expect(discover.testResult.value).toBe('error')
     expect(actionError.value).toBe('net down')
-    expect(discover.testing.value).toBe(false)
+    expect(discover.testingModelIds.value).toEqual([])
+  })
+
+  it('重复点击防护：同 modelId 测试进行中再次调用直接返回（不并发发包）', async () => {
+    const mounted = mountDiscover()
+    let release: (value: DiscoverModelsResponse) => void = () => {}
+    mounted.transport.discoverModels = vi.fn(async () => new Promise<DiscoverModelsResponse>((resolve) => { release = resolve }))
+    const first = mounted.discover.testModel('m1')
+    expect(mounted.discover.testingModelIds.value).toEqual(['m1'])
+    await mounted.discover.testModel('m1')
+    expect(mounted.transport.discoverModels).toHaveBeenCalledTimes(1)
+    release({ success: true, models: [], results: [{ api: 'anthropic-messages', modelId: 'm1', ok: true }] })
+    await first
+    expect(mounted.discover.testingModelIds.value).toEqual([])
+  })
+
+  it('canTest：新增态（providerRef=null）为 false——UI 据此禁用按钮并提示先保存；已保存 provider 为 true', () => {
+    const newMode = mountDiscover({ provider: null })
+    expect(newMode.discover.canTest.value).toBe(false)
+    const editMode = mountDiscover()
+    expect(editMode.discover.canTest.value).toBe(true)
   })
 })
 
@@ -284,15 +298,14 @@ describe('runDiscover discover 分支（自动发现 + 合并）', () => {
 })
 
 describe('瞬态重置（resetTransient）', () => {
-  it('provider 切换重置 test/discover 结果（不留上一个 provider 的结果）', async () => {
+  it('provider 切换重置 per-model 测试与 discover 结果（不留上一个 provider 的结果）', async () => {
     const { discover } = await runDiscoverCase('test', {
-      stub: { response: { success: true, models: [] } },
+      stub: { response: { success: true, models: [], results: [{ api: 'anthropic-messages', modelId: 'm1', ok: true }] } },
     })
-    expect(discover.testResult.value).toBe('ok')
+    expect(discover.modelTestResults.value['m1']?.ok).toBe(true)
     discover.resetTransient()
-    expect(discover.testResult.value).toBeNull()
-    expect(discover.testResults.value).toEqual([])
-    expect(discover.testError.value).toBe('')
+    expect(discover.modelTestResults.value).toEqual({})
+    expect(discover.testingModelIds.value).toEqual([])
     expect(discover.discoverResult.value).toBe('')
   })
 })

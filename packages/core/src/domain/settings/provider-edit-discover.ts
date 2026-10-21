@@ -1,16 +1,16 @@
 /**
- * provider-edit-discover —— Provider 编辑「test / discover 探活」module（[C4] 拆分自
- * use-provider-edit.ts）。runDiscover 是「置况 → 请求 → 分发结果 → 收尾」的线性骨架，
- * 分支细节在下游 helper（buildDiscoverRequest / applyTestResult / applyDiscoverResult）。
+ * provider-edit-discover —— Provider 编辑「discover + per-model 测试」编排 module（[C4] 拆分自
+ * use-provider-edit.ts）。
  *
- * - test（探活）：M3b 协议分流——只发 providerId + mode（代表模型选择归 runtime，前端零推导），
- *   结果消费 results（每协议一行）/ error（整体性失败）
- * - discover（自动发现）：带 baseUrl/apiKey/providerType 全参，结果合并入模型清单（去重 + D9①）
+ * - autoDiscover：带 baseUrl/apiKey/providerType 全参，结果合并入模型清单（去重 + D9①）
  *   apiKey 取「真实未保存草稿」投影（回显值 = 所存值不发，MF-1-1），由装配方注入 pendingApiKey
+ * - testModel（2026-10-21 per-model 行内入口）：只测指定模型——测试入口从凭据区「测试连接」
+ *   按钮下沉到每个模型行（用户拍板移除一键全测；provider 级分组测试 RPC 保留作协议兼容，
+ *   core/ui 不再消费）。结果写 modelTestResults[modelId]，行内展示成败 + 真实失败原因。
  *
  * 接口即测试入口（interface is the test surface）：行为矩阵见 provider-edit-discover.test.ts。
  */
-import { ref, type Ref } from 'vue'
+import { computed, ref, type Ref } from 'vue'
 import type { ConnectionTestResultRow, ProviderInfo } from '@taiji/shared'
 import { toErrorMessage } from '../../utils/error-message'
 import { getSettingsTransport } from './transport'
@@ -19,43 +19,38 @@ import type { Translate } from './provider-edit-types'
 import type { ProviderEditFormDraft } from './provider-edit-form'
 import type { ProviderEditModelsModule } from './provider-edit-models'
 
-/** discover 动作：test（探活，结果显示连接成败）/ discover（合并发现的模型） */
-export type DiscoverAction = 'test' | 'discover'
-
 /**
- * 测试连接按协议分组的单条结果（runtime `config.discoveredModels.results` 元素，设计 §3.5 D4）：
- * 每协议一条，代表模型 + 成败 + 失败时的真实原因（HTTP 状态码与响应截断）。
+ * 单模型行内测试的单条结果（runtime `config.discoveredModels.results` 元素）：
+ * 成败 + 失败时的真实原因（HTTP 状态码与响应截断）+ 往返耗时。
  * 形状 SSOT = shared ConnectionTestResultRow（S-9 收编，本名保留为域内语义别名）。
  */
 export type TestConnectionResult = ConnectionTestResultRow
 
 /**
- * test / discover 探活 module（[C4] 3 组子 interface 之一）。
+ * discover + per-model 测试 module（[C4] 3 组子 interface 之一）。
  */
 export interface ProviderEditDiscoverModule {
-  /** test 进行中 */
-  readonly testing: Ref<boolean>
   /** discover 进行中 */
   readonly discovering: Ref<boolean>
-  /** test 结果：ok=连接成功 / error=失败 / null=未测 */
-  readonly testResult: Ref<'ok' | 'error' | null>
-  /** test 模式按协议分组的连接结果（runtime results；空数组 = 无分组结果，如整体性失败） */
-  readonly testResults: Ref<TestConnectionResult[]>
-  /** test 模式整体性失败原因（success=false 的 error；有分组结果时留空） */
-  readonly testError: Ref<string>
   /** discover 结果文案（如「已发现 N 个模型，新增 M 个已合并」） */
   readonly discoverResult: Ref<string>
-  /** 测试连接（探活，复用 discoverModels，见 runDiscover 'test'） */
-  testConnection(): Promise<void>
-  /** 自动发现模型（探活 + 合并到清单，见 runDiscover 'discover'） */
+  /** 单模型测试进行中的 modelId 列表（行内按钮 spinner 态） */
+  readonly testingModelIds: Ref<string[]>
+  /** 单模型测试结果（key = modelId；每轮覆盖写该 key，跨轮保留其他模型结果） */
+  readonly modelTestResults: Ref<Record<string, TestConnectionResult>>
+  /** 测试可用性（providerRef 非空 = 已保存 provider）：新增态测试按钮据此禁用（见 testModel） */
+  readonly canTest: Ref<boolean>
+  /** 自动发现模型（探活 + 合并到清单，见 runDiscover） */
   autoDiscover(): Promise<void>
-  /** 瞬态态重置（provider 切换/打开时）：测试/发现结果 */
+  /** 单模型行内测试（只测该模型；顶层 provider 级失败走 reportActionError，行内不覆盖旧结果） */
+  testModel(modelId: string): Promise<void>
+  /** 瞬态态重置（provider 切换/打开时）：discover 结果 + per-model 测试状态 */
   resetTransient(): void
 }
 
 /** module 工厂输入 */
 export interface ProviderEditDiscoverInputs {
-  /** 当前编辑的 provider（null = 新增态；test/discover 的 providerId 来源） */
+  /** 当前编辑的 provider（null = 新增态；discover/testModel 的 providerId 来源） */
   providerRef: Ref<ProviderInfo | null>
   /** 表单草稿（discover 请求的 baseUrl/providerType 来源） */
   draft: ProviderEditFormDraft
@@ -71,7 +66,7 @@ export interface ProviderEditDiscoverInputs {
    * 标签由装配方（use-provider-edit）落——错误归属按 source 判定，不比对展示文案。
    */
   reportActionError: (message: string) => void
-  /** 动作错误清除（runDiscover 置况阶段清旧错误） */
+  /** 动作错误清除（动作发起时清旧错误） */
   clearActionError: () => void
   /** 模型清单 module（discover 合并目标） */
   models: ProviderEditModelsModule
@@ -82,37 +77,29 @@ export interface ProviderEditDiscoverInputs {
 export function createProviderEditDiscover(input: ProviderEditDiscoverInputs): ProviderEditDiscoverModule {
   const { providerRef, draft, pendingApiKey, reportActionError, clearActionError, models, t } = input
 
-  const testing = ref(false)
   const discovering = ref(false)
-  const testResult = ref<'ok' | 'error' | null>(null)
-  const testResults = ref<TestConnectionResult[]>([])
-  const testError = ref('')
   const discoverResult = ref('')
+  const testingModelIds = ref<string[]>([])
+  const modelTestResults = ref<Record<string, TestConnectionResult>>({})
+  /**
+   * 测试可用性：testModel 的 providerId 取自已保存 provider（runtime 凭据 resolver 按
+   * providerId 路由），新增态（providerRef = null）无 providerId 可测。UI 按此禁用按钮
+   * + tooltip 提示先保存；testModel 内的静默 return 仅作直调兜底，不承担用户反馈。
+   */
+  const canTest = computed(() => providerRef.value !== null)
 
   /**
-   * 请求构造（M3b/D4）：discover 显式带 mode（协议缺省即 discover，显式化防默认值将来变化）；
-   * test 只需 providerId + mode——代表模型选择归 runtime（前端零推导，对齐 view-ready 原则），
-   * baseUrl/apiKey/providerType 在 test 模式被 runtime 忽略故不发（baseUrl 是协议形状必填键，
-   * 传 '' 占位）。两模式各自构造（非展开合并）：键序 = 协议序，不用的键根本不出现。
+   * discover 请求构造：显式带 mode（协议缺省即 discover，显式化防默认值将来变化）；
+   * baseUrl 是协议形状必填键，discover 模式必填。
    */
-  function buildDiscoverRequest(action: DiscoverAction): DiscoverModelsRequest {
-    const providerId = providerRef.value?.id
-    if (action === 'test') return { mode: 'test', baseUrl: '', providerId }
+  function buildDiscoverRequest(): DiscoverModelsRequest {
     return {
       mode: 'discover',
       baseUrl: draft.baseUrl,
-      providerId,
+      providerId: providerRef.value?.id,
       providerType: draft.api,
       apiKey: pendingApiKey(),
     }
-  }
-
-  /** test 结果消费（M3b）：分组结果与整体性失败互斥——成功走 results（每协议一行），失败走 error */
-  function applyTestResult(res: DiscoverModelsResponse): void {
-    testResults.value = res.results ?? []
-    testError.value = res.success ? '' : res.error ?? ''
-    testResult.value = res.success ? 'ok' : 'error'
-    if (!res.success && res.error) reportActionError(res.error)
   }
 
   /**
@@ -128,61 +115,61 @@ export function createProviderEditDiscover(input: ProviderEditDiscoverInputs): P
     discoverResult.value = t('composable.discoveredModels', { count: total, merged: addedCount > 0 ? t('composable.newMerged', { count: addedCount }) : t('composable.allExisted') })
   }
 
-  /**
-   * 统一探活（transport.discoverModels）：test 取 success→testResult；discover 合并 models +
-   * discoverResult。本函数只留「置况 → 请求 → 分发结果 → 收尾」的线性骨架，分支细节在下游 helper。
-   */
-  async function runDiscover(action: DiscoverAction): Promise<void> {
-    const isTest = action === 'test'
-    if (isTest) {
-      testing.value = true
-      testResult.value = null
-    } else {
-      discovering.value = true
-      discoverResult.value = ''
-    }
+  async function autoDiscover(): Promise<void> {
+    discovering.value = true
+    discoverResult.value = ''
     clearActionError()
-
     try {
-      const res = await getSettingsTransport().discoverModels(buildDiscoverRequest(action))
-      if (isTest) {
-        applyTestResult(res)
-        return
-      }
-      applyDiscoverResult(res)
+      applyDiscoverResult(await getSettingsTransport().discoverModels(buildDiscoverRequest()))
     } catch (e) {
-      if (isTest) testResult.value = 'error'
       reportActionError(toErrorMessage(e))
     } finally {
-      if (isTest) testing.value = false
-      else discovering.value = false
+      discovering.value = false
     }
   }
 
-  async function testConnection(): Promise<void> {
-    await runDiscover('test')
-  }
-
-  async function autoDiscover(): Promise<void> {
-    await runDiscover('discover')
+  /**
+   * 单模型行内测试（per-model 入口）：runtime 侧凭据解析与 baseUrl 回落链与 provider 级
+   * 测试同源。顶层 success:false = provider 级硬停（no_api_key 等，无行可报）→ actionError；
+   * 行级失败（HTTP / 网络 / unsupported）如实写 modelTestResults，由行内结果条展示。
+   */
+  async function testModel(modelId: string): Promise<void> {
+    if (testingModelIds.value.includes(modelId)) return
+    const providerId = providerRef.value?.id
+    // 新增态无 providerId（UI 已按 canTest 禁用按钮，此 return 仅直调兜底）
+    if (!providerId) return
+    clearActionError()
+    testingModelIds.value = [...testingModelIds.value, modelId]
+    try {
+      // test 模式 baseUrl 协议必填占位（runtime 忽略，端点回落链归 runtime）
+      const res = await getSettingsTransport().discoverModels({ mode: 'test', baseUrl: '', providerId, modelId })
+      if (!res.success) {
+        reportActionError(res.error ?? t('composable.discoverFailed'))
+        return
+      }
+      const row = res.results?.[0]
+      if (row) modelTestResults.value = { ...modelTestResults.value, [modelId]: row }
+    } catch (e) {
+      reportActionError(toErrorMessage(e))
+    } finally {
+      testingModelIds.value = testingModelIds.value.filter(id => id !== modelId)
+    }
   }
 
   function resetTransient(): void {
-    testResult.value = null
-    testResults.value = []
-    testError.value = ''
     discoverResult.value = ''
+    testingModelIds.value = []
+    modelTestResults.value = {}
   }
 
   return {
-    testing,
     discovering,
-    testResult,
-    testResults,
-    testError,
     discoverResult,
-    testConnection,
+    testingModelIds,
+    modelTestResults,
+    canTest,
     autoDiscover,
+    testModel,
     resetTransient,
   }
 }

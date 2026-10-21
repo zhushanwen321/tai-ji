@@ -31,8 +31,8 @@ describe('U10: settings UI 文案经 i18n 渲染', () => {
     expect(i18n.global.t('settings.provider.add')).toBe('添加供应商')
     expect(i18n.global.t('settings.provider.modelsCount', { count: 5 })).toBe('5 模型')
     expect(i18n.global.t('settings.provider.deleteConfirmTitle', { name: 'OpenAI' })).toBe('删除 OpenAI？')
-    // providerEdit
-    expect(i18n.global.t('settings.providerEdit.testOk', { count: 3 })).toBe('连接成功，找到 3 个模型')
+    // providerEdit（2026-10-21 provider 级一键测试退役为 per-model 行内测试，断言现行 modelTestOk 具名插值键）
+    expect(i18n.global.t('settings.providerEdit.modelTestOk', { seconds: 2 })).toBe('连接成功 · 2s')
     // extension
     expect(i18n.global.t('settings.extension.recommendedTitle')).toBe('推荐扩展')
     expect(i18n.global.t('settings.extension.discoverResultTitle', 2, { named: { count: 2 } })).toBe('发现 2 个候选')
@@ -73,7 +73,7 @@ describe('U10: settings UI 文案经 i18n 渲染', () => {
     expect(i18n.global.t('settings.provider.add')).toBe('Add Provider')
     expect(i18n.global.t('settings.provider.modelsCount', { count: 5 })).toBe('5 models')
     expect(i18n.global.t('settings.provider.deleteConfirmTitle', { name: 'OpenAI' })).toBe('Delete OpenAI?')
-    expect(i18n.global.t('settings.providerEdit.testOk', { count: 3 })).toBe('Connection successful, found 3 models')
+    expect(i18n.global.t('settings.providerEdit.modelTestOk', { seconds: 2 })).toBe('Connected · 2s')
     expect(i18n.global.t('settings.extension.recommendedTitle')).toBe('Recommended')
     // 复数键（pipe 语法，t(key, count, { named })，对齐 sidebar.deleteFolderPartialFailed 先例）
     expect(i18n.global.t('settings.extension.discoverResultTitle', 2, { named: { count: 2 } })).toBe('Found 2 candidates')

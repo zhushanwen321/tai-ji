@@ -4,8 +4,8 @@
  * 从 ProviderEditBody 抽出：该组件受 eslint `max-lines`（500）与 `.githooks/vue_rules_checker.py`
  * 的 `<script setup>` ≤300 行约束，本块展示/派生逻辑内聚、无渲染依赖，按仓库既有先例
  * （ProviderTestDiscoverSection 纯展示块抽件）提取。M4 第二轮把「测试连接接线」一并并入：
- * ProviderTestDiscoverSection 的 M3b 4 个新增 props（providerKind/testResults/testError/
- * providerBaseUrl）在此派生后经 `testDiscoverProps` 整体 v-bind 下发，组件不再逐个解构 test 状态。
+ * ProviderTestDiscoverSection 的 discover 状态经 `testDiscoverProps` 整体 v-bind 下发
+ * （测试入口下沉到模型行后只剩 providerKind 派生位 + discover 状态透传，组件不再逐个解构）。
  *
  * 职责边界：runtime 聚合层已下发 provider 级派生值（ProviderInfo.api/baseUrl，前端零推导）；
  * 本模块只做**展示转译 + props 接线**——单值直接展示、undefined 按合并模型集归类为
@@ -14,7 +14,7 @@
  */
 import { computed, ref, watch, type ComputedRef, type Ref } from 'vue'
 import type { ProviderInfo } from '@taiji/shared'
-import type { ProviderEditSession, TestConnectionResult } from '@taiji/core/domain/settings'
+import type { ProviderEditSession } from '@taiji/core/domain/settings'
 
 /** i18n 翻译函数（vue-i18n global.t 消费侧的最小结构类型） */
 type Translate = (key: string, named?: Record<string, unknown>) => string
@@ -43,21 +43,13 @@ function distributionText(counts: Map<string, number>, t: Translate): string {
     .join(' / ')
 }
 
-/** ProviderTestDiscoverSection 的 props 快照（键名 = 子组件 props，v-bind 整体直传） */
+/** ProviderTestDiscoverSection 的 props 快照（键名 = 子组件 props，v-bind 整体直传）。
+ * 2026-10-21：「测试连接」入口退役（下沉到模型行 ModelTestButton），本快照只剩模型发现区。 */
 export interface ProviderTestDiscoverBindings {
-  testing: boolean
   discovering: boolean
-  testResult: 'ok' | 'error' | null
-  /** M3b：按协议分组的测试结果（runtime config.discoveredModels.results，原样透传） */
-  testResults: TestConnectionResult[]
-  /** M3b：整体性失败原因（success=false 的 error） */
-  testError: string
   discoverResult: string
-  modelCount: number
-  /** M3b：catalog 不渲染「模型发现」（pi 无 fetchModels） */
+  /** catalog 不渲染「模型发现」（pi 无 fetchModels） */
   providerKind: 'catalog' | 'custom'
-  /** M3b：失败指引展示的生效端点（见 effectiveBaseUrl 注释） */
-  providerBaseUrl: string
 }
 
 export interface CatalogDisplayState {
@@ -170,27 +162,13 @@ export function useCatalogDisplay(
   }
 
   /**
-   * 生效端点（testHintHttpError 的 {baseUrl} 展示值）：取 ProviderInfo.baseUrl——D5 两级值
-   * （用户网关 override 优先，否则模型集派生），即已持久化、runtime 测试连接时真正使用的端点。
-   * **不取 form.baseUrl**：catalog 的表单初值是 runtime 派生值回填（artifact，非用户网关），
-   * 且用户输入未保存时尚未生效；custom 的 provider 级 baseUrl 同样是定义权威。
-   */
-  const effectiveBaseUrl = computed<string>(() => provider.value?.baseUrl ?? '')
-
-  /**
-   * 测试连接区 props（M3b 接线）：test 状态原样透传，仅 kind 与端点在此派生。
-   * 组件侧 v-bind 直传，避免逐个解构 4 个新 props 撑破行数上限。
+   * 模型发现区 props：discover 状态原样透传，仅 kind 在此派生。
+   * 组件侧 v-bind 直传，避免逐个解构撑破行数上限。
    */
   const testDiscoverProps = computed<ProviderTestDiscoverBindings>(() => ({
-    testing: edit.discover.testing.value,
     discovering: edit.discover.discovering.value,
-    testResult: edit.discover.testResult.value,
-    testResults: edit.discover.testResults.value,
-    testError: edit.discover.testError.value,
     discoverResult: edit.discover.discoverResult.value,
-    modelCount: edit.models.localModels.value.length,
     providerKind: isCatalog.value ? 'catalog' : 'custom',
-    providerBaseUrl: effectiveBaseUrl.value,
   }))
 
   return { apiText, endpointDraft, endpointHint, onEndpointInput, syncBeforeSave, testDiscoverProps }

@@ -49,6 +49,21 @@ function onlySettled(entries: ReturnType<typeof planConnectionTests>) {
   return rows[0]
 }
 
+/** 装配 ModelService（configService 只需 listProviders / getProvider）。 */
+function makeService(configService: { listProviders: () => ProviderInfo[]; getProvider: (id: string) => { baseUrl?: string } | undefined }) {
+  const service = new ModelService({ discoverFromApi: vi.fn() } as never)
+  service.setServices({} as never, configService as never, {} as never)
+  return service
+}
+
+/** 凭据 miss 断言共用装配：带 openai-completions 模型 m1 的 custom-1（原始 provider 定义缺省）。 */
+function makeServiceWithM1() {
+  return makeService({
+    listProviders: () => [makeProvider('custom-1', [{ id: 'm1', api: 'openai-completions', baseUrl: 'https://api.example' }])],
+    getProvider: () => undefined,
+  })
+}
+
 describe('planConnectionTests：代表模型双过滤', () => {
   const tester = stubTester()
 
@@ -184,6 +199,7 @@ describe('ModelConnectionTester：3 协议最小请求（本地 stub server）',
 
   afterEach(async () => {
     captured = []
+    vi.unstubAllGlobals()
     if (server) {
       await new Promise<void>(resolve => { server!.close(() => resolve()) })
       server = undefined
@@ -193,7 +209,10 @@ describe('ModelConnectionTester：3 协议最小请求（本地 stub server）',
   it('anthropic-messages → POST {baseUrl}/v1/messages，x-api-key + anthropic-version + max_tokens:1', async () => {
     const baseUrl = await startStub()
     const result = await new ModelConnectionTester().test({ api: 'anthropic-messages', modelId: 'k3', baseUrl, apiKey: 'sk-a' })
-    expect(result).toEqual({ api: 'anthropic-messages', modelId: 'k3', ok: true })
+    expect(result.api).toBe('anthropic-messages')
+    expect(result.modelId).toBe('k3')
+    expect(result.ok).toBe(true)
+    expect(result.durationMs).toBeTypeOf('number')
     expect(captured).toHaveLength(1)
     expect(captured[0].url).toBe('/v1/messages')
     expect(captured[0].headers['x-api-key']).toBe('sk-a')
@@ -254,6 +273,64 @@ describe('ModelConnectionTester：3 协议最小请求（本地 stub server）',
     expect(result).toEqual({ api: 'google-generative-ai', modelId: 'm', ok: false, error: 'unsupported' })
   })
 
+  // ── x-opencode-session / x-opencode-client 注入（2026-10-21，与 pi 真实聊天请求同源）──
+  // 判定口径与 pi getSessionHeaders 同源（@earendil-works/pi-coding-agent@1.0.0
+  // provider-attribution.js:50-59）：provider id ∈ {opencode, opencode-go} 或 hostname
+  // 严格 = opencode.ai，双分支。fetch 经 vi.stubGlobal 拦截（不真发外网），断言
+  // init.headers 的注入行为。
+
+  /** fetch stub：捕获 (url, init) 后回 200 空体，不产生真实网络请求。 */
+  function stubFetch(): Array<{ url: string; headers: Record<string, string> }> {
+    const calls: Array<{ url: string; headers: Record<string, string> }> = []
+    vi.stubGlobal('fetch', vi.fn(async (_url: unknown, init?: { headers?: Record<string, string> }) => {
+      calls.push({ url: String(_url), headers: init?.headers ?? {} })
+      return new Response('{}', { status: 200 })
+    }))
+    return calls
+  }
+
+  it('opencode 端点（hostname=opencode.ai）→ 注入一次性 x-opencode-session（test- 前缀，两次调用值不同）+ x-opencode-client=pi', async () => {
+    const calls = stubFetch()
+    const tester = new ModelConnectionTester()
+    const req = { api: 'openai-completions' as const, modelId: 'deepseek-v4-flash', apiKey: 'k' }
+    await tester.test({ ...req, baseUrl: 'https://opencode.ai/zen/go/v1' })
+    await tester.test({ ...req, baseUrl: 'https://opencode.ai/zen/go/v1/' })
+    expect(calls).toHaveLength(2)
+    const first = calls[0]!.headers['x-opencode-session']
+    expect(first).toMatch(/^test-/)
+    expect(calls[1]!.headers['x-opencode-session']).toMatch(/^test-/)
+    expect(calls[1]!.headers['x-opencode-session']).not.toBe(first)
+    // client 头与 pi attribution 层同构（真实聊天同批注入，测试请求等价）
+    expect(calls[0]!.headers['x-opencode-client']).toBe('pi')
+    expect(calls[0]!.url).toBe('https://opencode.ai/zen/go/v1/chat/completions')
+  })
+
+  it('provider-id 命中分支（opencode / opencode-go + 自定义网关 baseUrl）→ 同样注入（与 pi 双分支判定一致）', async () => {
+    // 内置 opencode provider 配自定义网关/镜像的形态：真实聊天按 provider id 注入，
+    // 测试请求只判 baseUrl 会漏注入 → 测试 400 而聊天可用（脱节）
+    const calls = stubFetch()
+    const tester = new ModelConnectionTester()
+    const req = { api: 'openai-completions' as const, modelId: 'm1', apiKey: 'k', baseUrl: 'https://gw.internal.example.com/v1' }
+    await tester.test({ ...req, providerId: 'opencode' })
+    await tester.test({ ...req, providerId: 'opencode-go' })
+    expect(calls).toHaveLength(2)
+    expect(calls[0]!.headers['x-opencode-session']).toMatch(/^test-/)
+    expect(calls[0]!.headers['x-opencode-client']).toBe('pi')
+    expect(calls[1]!.headers['x-opencode-session']).toMatch(/^test-/)
+  })
+
+  it('非 opencode 端点 / 子域（api.opencode.ai）/ 非 opencode 系 providerId → 不注入', async () => {
+    const calls = stubFetch()
+    const tester = new ModelConnectionTester()
+    await tester.test({ api: 'openai-completions', modelId: 'm1', baseUrl: 'https://api.deepseek.com', apiKey: 'k', providerId: 'deepseek' })
+    await tester.test({ api: 'openai-completions', modelId: 'm2', baseUrl: 'https://api.opencode.ai/v1', apiKey: 'k' })
+    expect(calls).toHaveLength(2)
+    expect(calls[0]!.headers['x-opencode-session']).toBeUndefined()
+    expect(calls[0]!.headers['x-opencode-client']).toBeUndefined()
+    expect(calls[1]!.headers['x-opencode-session']).toBeUndefined()
+    vi.unstubAllGlobals()
+  })
+
   it('supports()：三协议 true、其他 false', () => {
     const tester = new ModelConnectionTester()
     expect(tester.supports('anthropic-messages')).toBe(true)
@@ -264,13 +341,6 @@ describe('ModelConnectionTester：3 协议最小请求（本地 stub server）',
 })
 
 describe('ModelService.testProviderConnections：provider 级错误分支与行序', () => {
-  /** 装配 ModelService（configService 只需 listProviders / getProvider）。 */
-  function makeService(configService: { listProviders: () => ProviderInfo[]; getProvider: (id: string) => { baseUrl?: string } | undefined }) {
-    const service = new ModelService({ discoverFromApi: vi.fn() } as never)
-    service.setServices({} as never, configService as never, {} as never)
-    return service
-  }
-
   it('providerId 不在聚合列表 → provider_not_found', async () => {
     const service = makeService({ listProviders: () => [], getProvider: () => undefined })
     const outcome = await service.testProviderConnections('nope', 'key', stubTester())
@@ -288,11 +358,7 @@ describe('ModelService.testProviderConnections：provider 级错误分支与行�
 
   it('凭据 resolver 全源 miss（apiKey undefined）→ no_api_key（不发任何请求）', async () => {
     const tester = stubTester()
-    const service = makeService({
-      listProviders: () => [makeProvider('custom-1', [{ id: 'm1', api: 'openai-completions', baseUrl: 'https://api.example' }])],
-      getProvider: () => undefined,
-    })
-    const outcome = await service.testProviderConnections('custom-1', undefined, tester)
+    const outcome = await makeServiceWithM1().testProviderConnections('custom-1', undefined, tester)
     expect(outcome).toEqual({ success: false, error: PROVIDER_CONNECTION_TEST_ERRORS.noApiKey })
     expect(tester.test).not.toHaveBeenCalled()
   })
@@ -335,6 +401,90 @@ describe('ModelService.testProviderConnections：provider 级错误分支与行�
       modelId: 'o1',
       baseUrl: 'https://provider.example',
       apiKey: 'sk-key',
+      providerId: 'opencode-go',
     })
+  })
+})
+
+describe('ModelService.testProviderModel：单模型测试（per-model 行内入口）', () => {
+  it('模型不在 provider.models → 行级 model_not_found（顶层仍 success:true，与已定论行同形）', async () => {
+    const service = makeService({
+      listProviders: () => [makeProvider('custom-1', [{ id: 'm1', api: 'openai-completions', baseUrl: 'https://api.example' }])],
+      getProvider: () => undefined,
+    })
+    const outcome = await service.testProviderModel('custom-1', 'ghost', 'key', stubTester())
+    expect(outcome.success).toBe(true)
+    if (outcome.success) {
+      expect(outcome.results).toEqual([{ api: '', modelId: 'ghost', ok: false, error: 'model_not_found' }])
+    }
+  })
+
+  it('凭据 miss → 顶层 no_api_key（与 provider 级测试同一硬停语义，不发请求）', async () => {
+    const tester = stubTester()
+    const outcome = await makeServiceWithM1().testProviderModel('custom-1', 'm1', undefined, tester)
+    expect(outcome).toEqual({ success: false, error: PROVIDER_CONNECTION_TEST_ERRORS.noApiKey })
+    expect(tester.test).not.toHaveBeenCalled()
+  })
+
+  it('协议缺省回落 provider 级；不支持协议 → unsupported 行；全缺端点 → no_base_url 行', async () => {
+    const service = makeService({
+      listProviders: () => [
+        makeProvider('custom-1', [
+          { id: 'm-noapi', baseUrl: 'https://api.example' },
+          { id: 'm-badapi', api: 'google-generative-ai', baseUrl: 'https://api.example' },
+          { id: 'm-nourl', api: 'openai-completions' },
+        ]),
+      ],
+      getProvider: () => ({ baseUrl: 'https://provider.example' }),
+    })
+    // m-noapi：模型级 api 缺省 → 回落 provider 级（本 provider 未声明 api）→ unsupported
+    const noApi = await service.testProviderModel('custom-1', 'm-noapi', 'key', stubTester())
+    if (noApi.success) expect(noApi.results[0]).toMatchObject({ modelId: 'm-noapi', ok: false, error: 'unsupported' })
+    // m-badapi：协议不在支持集 → unsupported
+    const badApi = await service.testProviderModel('custom-1', 'm-badapi', 'key', stubTester())
+    if (badApi.success) expect(badApi.results[0]).toMatchObject({ modelId: 'm-badapi', ok: false, error: 'unsupported' })
+    // m-nourl：custom 模型级缺省 → 回落 provider 级 https://provider.example（有值）→ 正常发包。
+    // 此处 provider 级有值，故改走「全缺」：用空 provider baseUrl 的独立 service。
+    const noUrlService = makeService({
+      listProviders: () => [makeProvider('custom-1', [{ id: 'm-nourl', api: 'openai-completions' }])],
+      getProvider: () => undefined,
+    })
+    const noUrl = await noUrlService.testProviderModel('custom-1', 'm-nourl', 'key', stubTester())
+    if (noUrl.success) expect(noUrl.results[0]).toMatchObject({ modelId: 'm-nourl', ok: false, error: 'no_base_url' })
+  })
+
+  it('正常路径：catalog 网关 override 优先于模型级 baseUrl（与 provider 级测试同一回落链），tester 收到凭据', async () => {
+    const tester = {
+      supports: (api: string) => api === 'anthropic-messages',
+      test: vi.fn().mockImplementation(async (req: { api: string; modelId: string }) => ({ api: req.api, modelId: req.modelId, ok: true, durationMs: 5 })),
+    }
+    const service = makeService({
+      // 'anthropic' 在快照内（isCatalogProvider=true），网关 override 必须赢过模型级 baseUrl
+      listProviders: () => [makeProvider('anthropic', [{ id: 'claude-fable-5', api: 'anthropic-messages', baseUrl: 'https://model.example' }])],
+      getProvider: () => ({ baseUrl: 'https://gw.corp.example' }),
+    })
+    const outcome = await service.testProviderModel('anthropic', 'claude-fable-5', 'sk-key', tester as never)
+    expect(outcome.success).toBe(true)
+    expect(tester.test).toHaveBeenCalledWith({
+      api: 'anthropic-messages',
+      modelId: 'claude-fable-5',
+      baseUrl: 'https://gw.corp.example',
+      apiKey: 'sk-key',
+      providerId: 'anthropic',
+    })
+  })
+
+  it('禁用态模型照样可测（per-model 显式指定即测，不做 enabled 过滤——测试不改配置）', async () => {
+    const tester = {
+      supports: (api: string) => api === 'openai-completions',
+      test: vi.fn().mockResolvedValue({ api: 'openai-completions', modelId: 'm-off', ok: true }),
+    }
+    const service = makeService({
+      listProviders: () => [makeProvider('custom-1', [{ id: 'm-off', api: 'openai-completions', baseUrl: 'https://api.example', enabled: false }])],
+      getProvider: () => undefined,
+    })
+    const outcome = await service.testProviderModel('custom-1', 'm-off', 'key', tester as never)
+    expect(outcome.success).toBe(true)
+    expect(tester.test).toHaveBeenCalledTimes(1)
   })
 })

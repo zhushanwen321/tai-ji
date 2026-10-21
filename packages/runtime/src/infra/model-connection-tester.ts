@@ -33,7 +33,19 @@
  *   `http_error|<status>|<响应体截断>`   非 2xx（如实带回状态码与真实响应原因）
  *   `network_error|<message>`           fetch 层失败（不可达 / 超时 / DNS）
  * 解析约定：按 `|` 切分，首段 = code、末段（含自身 `|`）= message；未知 code 走通用失败文案。
+ *
+ * x-opencode-session / x-opencode-client 注入（2026-10-21）：opencode go 网关强制要求
+ * 每请求携带 session 头（每会话稳定 id，路由优化 + prompt cache）。pi 真实聊天经 pi-ai
+ * `withOpenCodeSessionHeader` 包装自动注入；本测试器若不注入，测试请求对 opencode 端点必
+ * 400 MissingSessionID——「测试通过」与「聊天可用」脱节。判定口径与 pi 实装同源
+ * （@earendil-works/pi-coding-agent@1.0.0 `dist/core/provider-attribution.js:50-59`
+ * getSessionHeaders）：provider id ∈ {opencode, opencode-go} **或** baseUrl hostname 严格
+ * 等于 opencode.ai（子域不命中）——provider-id 分支覆盖内置 opencode provider 配了自定义
+ * 网关 baseUrl 的形态。attribution 层对命中端点同批注入 x-opencode-client: "pi"，测试
+ * 请求同构注入（taiji 的真实聊天即 pi 子进程发起，自称 pi 无失实）。session 值用一次性
+ * 随机 id（与真实会话不冲突，仅证明链路可达 + 网关受理）。
  */
+import { randomUUID } from 'node:crypto'
 import { toErrorMessage } from '../utils/errors.js'
 // 接口已端口化（D-21，对齐 IModelSource 先例）：声明 SSOT 在 services/ports，本文件是
 // infra 实现 + 既有 type-importer（model-service.ts 等）的兼容 re-export 面。
@@ -70,6 +82,24 @@ interface WireRequest {
   body: Record<string, unknown>
 }
 
+/** pi 内置 opencode 系 provider id（attribution 层 provider-id 命中分支的集合，见文件头锚点）。 */
+const OPENCODE_PROVIDER_IDS = new Set(['opencode', 'opencode-go'])
+
+/**
+ * opencode 网关识别：provider id 命中或 baseUrl hostname 严格等于 opencode.ai（子域不
+ * 命中），与 pi getSessionHeaders 双分支同源——provider-id 分支覆盖「内置 opencode
+ * provider + 自定义网关 baseUrl」形态（此时真实聊天注入而旧实现只判 baseUrl 不注入，
+ * 测试与聊天脱节）。
+ */
+function isOpenCodeGateway(providerId: string | undefined, baseUrl: string): boolean {
+  if (providerId !== undefined && OPENCODE_PROVIDER_IDS.has(providerId)) return true
+  try {
+    return new URL(baseUrl).hostname === 'opencode.ai'
+  } catch {
+    return false
+  }
+}
+
 /** 协议 → 最小真实请求（URL / 鉴权头 / body）。未知协议返回 undefined（调用方转 unsupported 行）。 */
 function buildWireRequest(request: ConnectionTestRequest): WireRequest | undefined {
   const base = request.baseUrl.replace(/\/+$/, '')
@@ -78,6 +108,12 @@ function buildWireRequest(request: ConnectionTestRequest): WireRequest | undefin
     // anthropic 用 x-api-key，openai 两协议用 Bearer（与 pi-ai 各 SDK 的默认鉴权同源）
     if (request.api === 'anthropic-messages') headers['x-api-key'] = request.apiKey
     else headers.authorization = `Bearer ${request.apiKey}`
+  }
+  if (isOpenCodeGateway(request.providerId, request.baseUrl)) {
+    // session 一次性 id：网关只要求头存在且非空，测试请求不归属任何真实会话；
+    // client 头与 pi attribution 层同构（taiji 真实聊天 = pi 子进程发起）
+    headers['x-opencode-session'] = `test-${randomUUID()}`
+    headers['x-opencode-client'] = 'pi'
   }
   const messages = [{ role: 'user', content: PING_PROMPT }]
   switch (request.api) {
@@ -118,6 +154,7 @@ export class ModelConnectionTester implements IModelConnectionTester {
     const row = { api: request.api, modelId: request.modelId }
     const wire = buildWireRequest(request)
     if (!wire) return { ...row, ok: false, error: 'unsupported' }
+    const startedAt = Date.now()
     try {
       const res = await fetch(wire.url, {
         method: 'POST',
@@ -127,12 +164,13 @@ export class ModelConnectionTester implements IModelConnectionTester {
       })
       // 读干响应体：1 token 级响应很小，读完让连接立即释放（不读会挂到 GC）
       const bodyText = await res.text().catch(() => '')
+      const durationMs = Date.now() - startedAt
       if (!res.ok) {
-        return { ...row, ok: false, error: `http_error|${res.status}|${toErrorSnippet(bodyText)}` }
+        return { ...row, ok: false, durationMs, error: `http_error|${res.status}|${toErrorSnippet(bodyText)}` }
       }
-      return { ...row, ok: true }
+      return { ...row, ok: true, durationMs }
     } catch (e) {
-      return { ...row, ok: false, error: `network_error|${toErrorSnippet(toErrorMessage(e))}` }
+      return { ...row, ok: false, durationMs: Date.now() - startedAt, error: `network_error|${toErrorSnippet(toErrorMessage(e))}` }
     }
   }
 }

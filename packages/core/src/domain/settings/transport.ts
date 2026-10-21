@@ -84,6 +84,8 @@ export interface DiscoverModelsRequest {
    * 'test' 只需 providerId（代表模型选择归 runtime，前端零推导，对齐 view-ready 原则）。
    */
   mode?: 'test' | 'discover'
+  /** test 模式的单模型测试目标（2026-10-21 per-model 行内入口）；省略 = provider 级分组测试。 */
+  modelId?: string
 }
 
 /** discoverModels 的响应载荷（config.discoveredModels reply 形状）。 */

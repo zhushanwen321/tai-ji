@@ -140,6 +140,37 @@ describe('TC4: catalog override——hasOverride + 字段优先取 override', ()
   })
 })
 
+describe('headers/authHeader 读侧回显——装配下发（幽灵数据修复）', () => {
+  // 事故背景：装配函数漏带这两个字段，models.json 已存的 headers 成「界面看不见、
+  // 保存「空=不动」语义又删不掉」的幽灵数据（空值 x-opencode-session 压制 pi 自动注入）
+  it('catalog override 带 headers/authHeader → ProviderInfo 原值下发', () => {
+    const svc = makeService({
+      models: { openai: { headers: { 'x-flag': 'v1' }, authHeader: true } },
+    })
+    const openai = byId(svc)['openai']
+    expect(openai.kind).toBe('catalog')
+    expect(openai.headers).toEqual({ 'x-flag': 'v1' })
+    expect(openai.authHeader).toBe(true)
+  })
+
+  it('custom config 带 headers/authHeader → ProviderInfo 原值下发', () => {
+    const svc = makeService({
+      models: { 'my-custom': { apiKey: 'sk-x', headers: { trace: 'on' }, authHeader: false, models: [] } },
+    })
+    const custom = byId(svc)['my-custom']
+    expect(custom.kind).toBe('custom')
+    expect(custom.headers).toEqual({ trace: 'on' })
+    expect(custom.authHeader).toBe(false)
+  })
+
+  it('未配置 → headers/authHeader 缺省 undefined', () => {
+    const svc = makeService({ models: { openai: {} } })
+    const openai = byId(svc)['openai']
+    expect(openai.headers).toBeUndefined()
+    expect(openai.authHeader).toBeUndefined()
+  })
+})
+
 // ── W2 重构特征锚定补充（listProviders 提取 helper 后的分支缺口）──
 
 describe('TC5 补充: catalog apiKeySet 双源判定——override.apiKey（models.json 手填 key 旧数据）', () => {
