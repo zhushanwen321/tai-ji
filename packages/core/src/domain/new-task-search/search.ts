@@ -210,7 +210,13 @@ export function useSearch(
       sub = ports.t('archive.summary.compressing')
     } else {
       const first = a.summary.turns[0]?.user ?? ''
-      sub = first.length > 0 ? (first.length > ARCHIVE_SUMMARY_PREVIEW_LIMIT ? `${first.slice(0, ARCHIVE_SUMMARY_PREVIEW_LIMIT)}…` : first) : ports.t('archive.summary.empty')
+      if (first.length === 0) {
+        sub = ports.t('archive.summary.empty')
+      } else if (first.length > ARCHIVE_SUMMARY_PREVIEW_LIMIT) {
+        sub = `${first.slice(0, ARCHIVE_SUMMARY_PREVIEW_LIMIT)}…`
+      } else {
+        sub = first
+      }
     }
     return { type: 'archive', title: a.name.length > 0 ? a.name : a.sessionId, sub, archive: a }
   }

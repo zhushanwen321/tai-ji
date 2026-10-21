@@ -64,7 +64,8 @@ export interface ArchiveLedgerEntry { // oe-exempt:20261020:framework:SDK 契约
 /** summary 字段的解析结果：turns 数组 / null / 非法（undefined）。 */
 function parseSummary(raw: unknown): ArchiveLedgerTurn[] | null | undefined {
   if (raw === null) return null
-  if (typeof raw !== 'object' || raw === null) return undefined
+  // raw 非 null 已由上一行保证（summary 合法形态恰为 turns 数组或显式 null），此处只需挡非对象。
+  if (typeof raw !== 'object') return undefined
   const turnsRaw = (raw as Record<string, unknown>).turns
   if (!Array.isArray(turnsRaw)) return undefined
   const turns: ArchiveLedgerTurn[] = []
