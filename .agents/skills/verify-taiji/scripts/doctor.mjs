@@ -17,12 +17,60 @@ import http from 'node:http'
 import path from 'node:path'
 
 const argv = process.argv.slice(2)
-const repo = argv.find((a) => !a.startsWith('--') && argv.indexOf(a) === 0)
-const dataDirIdx = argv.indexOf('--data-dir')
-const cliDataDir = dataDirIdx !== -1 ? argv[dataDirIdx + 1] : undefined
-const nameIdx = argv.indexOf('--name')
-const cliName = nameIdx !== -1 ? argv[nameIdx + 1] : undefined
+
+/** 所有带值 flag —— 位置参数解析必须跳过它们的值（审查 C M9：只认 argv[0] 会错位）。 */
+const VALUE_FLAGS = new Set(['data-dir', 'name'])
+
+function flagValue(name) {
+  const i = argv.indexOf(`--${name}`)
+  if (i === -1) return undefined
+  const v = argv[i + 1]
+  return v !== undefined && !v.startsWith('--') ? v : undefined
+}
+
+/**
+ * 第一个非 flag 位置参数 = repo。
+ * [HISTORICAL] 旧实现 `argv.indexOf(a) === 0` 只认 argv[0]：一旦写成
+ * `doctor <repo> --data-dir D --name N` 之外的顺序（或 --name 在前），
+ * `--data-dir` 的值会被误当 repo，进而报「--data-dir 必须落在 ~/.taiji-dev 之内: <repo>/--name」。
+ */
+function firstPositional() {
+  for (let i = 0; i < argv.length; i++) {
+    const a = argv[i]
+    if (a.startsWith('--')) {
+      if (VALUE_FLAGS.has(a.slice(2))) i++ // 跳过 flag 值
+      continue
+    }
+    return a
+  }
+  return undefined
+}
+
+const repo = firstPositional()
+const cliDataDir = flagValue('data-dir')
+const rawCliName = flagValue('name')
 const asJson = argv.includes('--json')
+
+/**
+ * 实例名解析（审查 C M9/M10 核心修复）。
+ *
+ * 优先级：`--name` 显式 > `<dataDir>/verify-instance.json` 记录的实例名 > worktree 默认名。
+ * [HISTORICAL] 旧实现忽略 `--data-dir` 里的实例元数据，于是「给了一个运行中实例的
+ * data-dir、但不给 --name」时，doctor 按 worktree 默认名派生端口 → 判「实例未启动」并打 GREEN
+ * （审查实测：真实实例 vite=1639/cdp=9382，doctor 报 1665/9304 未启动 + GREEN）。
+ * 数据目录本身就是实例的身份，端口必须从它派生。
+ */
+const cliName = (() => {
+  if (rawCliName) return rawCliName
+  if (!cliDataDir) return undefined
+  try {
+    const meta = JSON.parse(fs.readFileSync(path.join(cliDataDir, 'verify-instance.json'), 'utf8'))
+    if (typeof meta.instanceName === 'string' && meta.instanceName.length > 0) return meta.instanceName
+  } catch {
+    /* 无元数据（非本技能起的实例 / 首次）：回落 worktree 默认名 */
+  }
+  return undefined
+})()
 
 if (!repo || !fs.existsSync(path.join(repo, 'apps/electron/scripts/dev-instance.mjs'))) {
   console.error('用法: node doctor.mjs <repo> [--data-dir <dir>] [--name <实例名>] [--json]  （<repo> = worktree 根，需含 apps/electron/scripts/dev-instance.mjs）')
@@ -76,7 +124,44 @@ function cmdOf(pid) {
 const viteOwners = portOwners(vitePort)
 const cdpOwners = portOwners(cdpPort)
 const running = cdpOwners.length > 0
-if (viteOwners.length === 0 && cdpOwners.length === 0) {
+
+/**
+ * 交叉核对：dataDir 里的实例元数据 vs --print 派生端口（审查 C M9/M10 的第二道防线）。
+ *
+ * 即使实例名还原失败（人工起的实例没有 verify-instance.json），只要 dataDir 有
+ * `runtime.port` 或元数据里记了 vite/cdp，就能判断「这个 dataDir 对应的实例到底在不在」。
+ * 若元数据记录的端口与本次派生的不一致 → 以元数据为准（数据目录即身份），并提示。
+ */
+let metaPorts = null
+if (cliDataDir) {
+  try {
+    const meta = JSON.parse(fs.readFileSync(path.join(cliDataDir, 'verify-instance.json'), 'utf8'))
+    if (meta.vitePort > 0 || meta.cdpPort > 0) metaPorts = { vitePort: meta.vitePort, cdpPort: meta.cdpPort, instanceName: meta.instanceName }
+  } catch {
+    /* 无元数据 */
+  }
+}
+const dataDirHasRuntime = Boolean(cliDataDir) && fs.existsSync(path.join(cliDataDir, 'runtime.port'))
+
+if (metaPorts && (metaPorts.vitePort !== vitePort || metaPorts.cdpPort !== cdpPort)) {
+  const metaViteOwners = portOwners(metaPorts.vitePort)
+  const metaCdpOwners = portOwners(metaPorts.cdpPort)
+  const metaRunning = metaCdpOwners.length > 0
+  fail(
+    '端口归属',
+    `派生端口 vite:${vitePort}/cdp:${cdpPort} ≠ 元数据 vite:${metaPorts.vitePort}/cdp:${metaPorts.cdpPort}（实例名 ${metaPorts.instanceName ?? '?'}；元数据端口占用 vite=${metaViteOwners.length} cdp=${metaCdpOwners.length}）`,
+    '数据目录即实例身份：用 `--name <元数据里的实例名>` 重跑，或直接给 --data-dir 让 doctor 从 verify-instance.json 还原（本轮已尝试）。禁止在此状态下驱动。',
+  )
+  vitePort = metaPorts.vitePort
+  cdpPort = metaPorts.cdpPort
+} else if (viteOwners.length === 0 && cdpOwners.length === 0 && dataDirHasRuntime) {
+  // dataDir 有 runtime.port（说明这个实例起过）但派生端口无人占用 → 派生错位，不能判「未启动」绿灯
+  fail(
+    '端口归属',
+    `${dataDir} 有 runtime.port（实例曾启动）但派生端口 vite:${vitePort}/cdp:${cdpPort} 无人占用——端口派生与实例不符`,
+    '实例可能是用别的 --name 起的：找出它的 verify-instance.json（或 `ps aux | grep dev-instance` 看 --name），带上正确 --name 复跑。禁止在此状态下驱动。',
+  )
+} else if (viteOwners.length === 0 && cdpOwners.length === 0) {
   pass('端口归属', `vite:${vitePort} cdp:${cdpPort} 均未被占用（实例未启动）`)
 } else {
   const owners = [...new Set([...viteOwners, ...cdpOwners])]
@@ -135,7 +220,12 @@ if (!dataDir) {
   const hasPort = fs.existsSync(portFile)
   const hasToken = fs.existsSync(tokenFile)
   if (!hasPort && !running) {
-    pass('runtime 健康', '实例未启动，无 runtime.port 属预期')
+    // 但若 runtime.port 在盘（曾启动过），说明实例可能仍在跑而端口派生错位 —— 不能绿灯
+    if (fs.existsSync(path.join(dataDir, 'runtime.port'))) {
+      pass('runtime 健康', 'runtime.port 在盘但实例未确认运行（端口派生可能错位，见端口归属项）')
+    } else {
+      pass('runtime 健康', '实例未启动，无 runtime.port 属预期')
+    }
   } else if (!hasPort) {
     fail('runtime 健康', `${portFile} 不存在（实例进程在而 runtime 未就绪）`, 'runtime spawn 慢属常态，等 30s 复跑；持续缺失看 <dataDir>/logs/ 下 runtime 日志排查')
   } else {

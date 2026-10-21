@@ -330,6 +330,9 @@ export function createInstance(options = {}) {
     if (faux) {
       env.TAIJI_FAUX_SCRIPT = path.join(dir, 'agent', 'faux-responses.json')
       env.TAIJI_EXTENSION_PATHS = path.join(repo, 'e2e', 'fixtures', 'faux-provider-ext')
+      // [M13 修] faux.tps 必须落到 TAIJI_FAUX_TPS（旧实现静默丢弃 → 永远拿不到流式窗口，
+      // 所有「流式中途态」断言必然错过）。官方形态见 e2e/fixtures/launch-app-real.ts。
+      if (faux.tps !== undefined && Number(faux.tps) > 0) env.TAIJI_FAUX_TPS = String(faux.tps)
     }
     // llm 通道不需要任何 env：provider 定义全在 <dataDir>/agent/models.json 里，
     // 主 pi 与孙进程都按 PI_CODING_AGENT_DIR 读同一份。
@@ -712,6 +715,26 @@ export function createInstance(options = {}) {
       return uiInstance
     },
 
+    /**
+     * 释放本实例持有的客户端句柄（CDP browser + 协议 WS）。
+     *
+     * [M14 修] 旧实现只在 dispose() 里关这些句柄；`stop()` 单独调用（`--keep` 编排 /
+     * 只停不删目录的调用方）会留下 Playwright 连接吊住 node 进程（审查 C 实测：
+     * stop 后 8s 进程仍存活）。契约 §1.1「stop = 停实例」应当自洽地释放自己开的连接。
+     */
+    async releaseClients() {
+      try {
+        if (pageInstance?.__verifyBrowser) await pageInstance.__verifyBrowser.close().catch(() => {})
+      } catch {
+        /* CDP 断开失败不影响收尾 */
+      }
+      pageInstance = null
+      if (proto) {
+        await proto.close().catch(() => {})
+        proto = null
+      }
+    },
+
     /** 停止实例（SIGTERM 自己起的 PID + 等端口释放；超时给残留 PID 明细）。 */
     async stop(opts = {}) {
       if (state === 'stopped' || state === 'disposed') return
@@ -731,6 +754,7 @@ export function createInstance(options = {}) {
       }
       if (pid === null) {
         state = 'stopped'
+        await releaseClients()
         return
       }
       try {
@@ -762,6 +786,7 @@ export function createInstance(options = {}) {
           evidence: { residual, pid, logTail: api.logTail(60) },
         })
       }
+      await api.releaseClients()
       state = 'stopped'
     },
 
@@ -774,15 +799,7 @@ export function createInstance(options = {}) {
       } catch (e) {
         stopError = e
       }
-      try {
-        if (pageInstance?.__verifyBrowser) await pageInstance.__verifyBrowser.close().catch(() => {})
-      } catch {
-        /* CDP 断开失败不影响收尾 */
-      }
-      if (proto) {
-        await proto.close().catch(() => {})
-        proto = null
-      }
+      await api.releaseClients()
       // mock server 在 stop() 里已关闭（dispose 幂等）；此处不重复 close。
       if (!stopError && selfCreatedDataDir) {
         const dir = parsed?.dataDir ?? ''

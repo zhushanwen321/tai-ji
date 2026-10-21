@@ -42,6 +42,19 @@
   subagent 行（`subagent-block`：`子代理` + agent 名 · slug + `(model · thinking)`）→
   点击该行打开 drawer subagent tab；composer 托盘出现 `tray-builtin-button[data-kind="subagent"]`
   计数（三态：running>0 亮 / 仅有历史 dim / 全无隐藏）。
+#### 发起 subagent 的全部方式（共 4 条，别只记一种）
+
+| # | 方式 | 入口 | 适用 |
+|---|------|------|------|
+| 1 | **agent 工具调用**（主路径） | 对话里要求委派 → agent 调 `subagent_start` / `subagents` | 绝大多数验收场景 |
+| 2 | **托盘观察/取消** | composer 托盘 `tray-builtin-button[data-kind="subagent"]` → 面板 → 行内取消 | 只能观察与中止，**不能发起** |
+| 3 | **session-manager 的 8 工具** | `create_managed_session` 等（agent 调） | 建的是**独立托管会话**，不是 subagent record（见 `subagent.session-observation`） |
+| 4 | **续聊 / fork** | `subagent_message`（`action: message` / `fork-from`） | 对已有 record 续派，不是新发起 |
+
+> **没有**「快捷键直接派 subagent」的入口；也**没有** GUI 里的「新建子代理」按钮。
+> 发起权只在 agent（工具调用）——这是设计约束（subagent 的 task 由主 agent 编排）。
+> 验收「能不能发起」= 验工具可用且 record 落地，不是找按钮。
+
 - **协议（agent → 工具，不是 RPC）**：三个工具（`subagent-tool.ts` 注册）：
   | 工具 | 用途 | 关键参数 |
   |---|---|---|
@@ -449,10 +462,14 @@ JSON
 node .agents/skills/verify-taiji/scripts/seed-faux.mjs <repo> ~/.taiji-dev/verify-<runId> /tmp/managed.json
 
 PW="node ~/.agents/skills/browser-automation/scripts/pw.js http://localhost:<cdpPort>"
-$PW click "testid=tray-builtin-button"        # 托盘 built-in 聚合
-$PW click "testid=tray-panel-tab-session"     # 第 4 件
+# 第 4 件 = built-in 按钮的 data-kind="session"（固定序 bash → subagent → workflow → session → canvas）
+# [HISTORICAL] 不存在 `tray-panel-tab-session`：session 不参与 TrayNativePanel 的分桶 tab
+# （TRAY_BUCKETS 只有 bash/subagent/workflow 三键，session 走独立扁平列表 TraySessionPanel）
+$PW click 'css=[data-testid="tray-builtin-button"][data-kind="session"]'
 $PW wait "testid=tray-session-panel"
-$PW text "testid=tray-session-row"
+$PW text "testid=tray-session-row"            # 行根，带 data-child-session-id
+$PW text "testid=tray-session-meta"           # cwd 末段 · 状态 · 最后活跃
+$PW attr "testid=tray-session-row" "data-child-session-id"
 ```
 
 ## 断言（期望终态 / 失败信号）

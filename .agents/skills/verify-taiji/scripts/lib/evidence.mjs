@@ -47,11 +47,17 @@ export function createEvidence({ runDir, feature, meta = {} } = {}) {
       return assertions
     },
 
-    /** 追加一行 step 到 summary.jsonl（同时保留内存副本供 report）。 */
+    /**
+     * 追加一行 step 到 summary.jsonl（同时保留内存副本供 report）。
+     *
+     * [M4] `command` **恒输出**（契约 §5.7 与 dev-flow compile.md §5 都要求每步带 command）：
+     * 调用方不传时回落为 step 名（可执行语义 = 「这一步跑了什么」的最小事实），
+     * 不再静默缺字段（审查 C 实测 46/46 行缺失）。
+     */
     step({ step, command, exitCode = 0, stats, channel, ...rest } = {}) {
       const line = {
         step,
-        ...(command !== undefined ? { command } : {}),
+        command: command ?? step,
         exitCode,
         ...(stats !== undefined ? { stats } : {}),
         ...(channel !== undefined ? { channel } : {}),
@@ -167,12 +173,31 @@ export function createEvidence({ runDir, feature, meta = {} } = {}) {
     },
 
     /** 写 verdict.json（verdict ∈ pass|fail|degraded，禁写 status）。 */
-    verdict({ verdict, deviations = [], blockers = [], notProvable = [] } = {}) {
+    /**
+     * 写 verdict.json。
+     *
+     * [M5] `testEvidence`：dev-flow inspect 契约（compile.md §6 + 引擎 validateInspectResult）
+     * 要求 `test_evidence` 为 string 必填。字段名用 snake_case（`test_evidence`）以对齐引擎，
+     * 同时保留 camelCase 入参名便于调用。未传时自动生成「证据指针摘要」——保证 inspect 节点
+     * 可以直接复用本文件，不必自己补写。
+     */
+    verdict({ verdict, deviations = [], blockers = [], notProvable = [], testEvidence } = {}) {
       if (!['pass', 'fail', 'degraded'].includes(verdict)) {
         throw new Error(`verdict 取值必须是 pass|fail|degraded，收到 ${String(verdict)}`)
       }
+      const evidenceSummary =
+        testEvidence ??
+        [
+          `runDir=${dir}`,
+          `feature=${feature}`,
+          `assertions=${assertions.length}(failed=${assertionFailures})`,
+          `steps=${steps.length}`,
+          `summary=${path.join(dir, 'summary.jsonl')}`,
+          `report=${path.join(dir, 'report.md')}`,
+        ].join(' ; ')
       const payload = {
         verdict,
+        test_evidence: evidenceSummary,
         deviations,
         blockers,
         notProvable,

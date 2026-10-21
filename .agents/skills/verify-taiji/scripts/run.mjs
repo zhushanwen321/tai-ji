@@ -40,17 +40,37 @@ const asJson = hasFlag('json')
 const keep = hasFlag('keep')
 const strict = hasFlag('strict')
 
-/** 定位 scenario（第一个非 flag 的位置参数，且不是 flag 的值）。 */
+/** 所有带值 flag（漏登记 = 该 flag 的值会被当成 scenario 路径，见审查 C M16）。 */
+const VALUE_FLAGS = new Set([
+  'artifacts-dir',
+  'name',
+  'run-id',
+  'timeout-ms',
+  'repo',
+  'data-dir',
+  'scenario',
+])
+
+/**
+ * 定位 scenario。优先级（高→低）：
+ *   ① `--scenario <path>`（显式 flag）
+ *   ② 第一个非 flag 位置参数   ← 高于 env：包装壳 verify-run.sh 已把相对路径解析成绝对路径后
+ *      以位置参数传入，此时 env 里可能还是未解析的原值（旧实现 env 优先 → 反被覆盖，实测 exit 2）
+ *   ③ env `TAIJI_VERIFY_SCENARIO`（dev-flow 引擎零参数 spawn 形态）
+ */
 function resolveScenarioPath() {
-  const valueFlags = new Set(['artifacts-dir', 'name', 'run-id', 'timeout-ms'])
+  const explicit = flag('scenario')
+  if (explicit) return path.resolve(explicit)
   for (let i = 0; i < argv.length; i++) {
     const a = argv[i]
     if (a.startsWith('--')) {
-      if (valueFlags.has(a.slice(2))) i++ // 跳过 flag 值
+      if (VALUE_FLAGS.has(a.slice(2))) i++ // 跳过 flag 值
       continue
     }
     return path.resolve(a)
   }
+  const envScenario = process.env.TAIJI_VERIFY_SCENARIO
+  if (envScenario) return path.resolve(envScenario)
   return null
 }
 
@@ -59,7 +79,9 @@ if (!scenarioPath || !fs.existsSync(scenarioPath)) {
   const msg = {
     ok: false,
     reason: `scenario 不存在：${scenarioPath ?? '(未给)'}`,
-    hint: 'node scripts/run.mjs <scenario.mjs> [--artifacts-dir <dir>]',
+    hint:
+      'node scripts/run.mjs <scenario.mjs> [--artifacts-dir <dir>]  ' +
+      '| 或 env: TAIJI_VERIFY_SCENARIO=<scenario> TAIJI_VERIFY_ARTIFACTS=<dir> node scripts/run.mjs',
   }
   process.stdout.write(`${JSON.stringify(msg)}\n`)
   process.exit(2)
@@ -96,10 +118,47 @@ if (!meta.id) {
   process.exit(2)
 }
 
+/**
+ * runId / instanceName 严格校验（审查 C M7：未校验时 `--run-id 'z/../../tmp/verify-x'`
+ * 可让 dataDir 逃出 ~/.taiji-dev 并被 rm -rf 整树删除）。
+ * 只允许 [A-Za-z0-9._-]，禁止路径分隔符与 `..`。
+ */
+function assertSafeToken(value, label) {
+  if (!/^[A-Za-z0-9._-]+$/.test(value) || value === '.' || value === '..' || value.includes('..')) {
+    const msg = {
+      ok: false,
+      reason: `${label} 非法：${JSON.stringify(value)}`,
+      hint: '只允许 [A-Za-z0-9._-]，禁止路径分隔符与 ".."（防数据目录穿越）',
+    }
+    process.stdout.write(`${JSON.stringify(msg)}\n`)
+    process.exit(2)
+  }
+}
+
 const runId = flag('run-id', stamp())
-const runBase = flag('artifacts-dir')
-  ? path.resolve(flag('artifacts-dir'))
-  : path.join(os.homedir(), '.agents', 'skill-data', 'verify-taiji', worktree)
+assertSafeToken(runId, '--run-id')
+
+const runBase = (() => {
+  const explicit = flag('artifacts-dir') ?? process.env.TAIJI_VERIFY_ARTIFACTS
+  if (!explicit) return path.join(os.homedir(), '.agents', 'skill-data', 'verify-taiji', worktree)
+  const resolved = path.resolve(explicit)
+  // 防呆：证据根不允许是危险位置（runner 会往它写文件，不删；但 / 或家目录根会让产物散落）
+  const home = os.homedir()
+  if (resolved === '/' || resolved === home || resolved === home + path.sep) {
+    process.stdout.write(
+      `${JSON.stringify({
+        ok: false,
+        reason: `--artifacts-dir 不能是根目录或家目录根：${resolved}`,
+        hint: '给一个具体目录（如 ~/.agents/skill-data/verify-taiji/<worktree>/<runId> 或 /tmp/acc-xxx）',
+      })}\n`,
+    )
+    process.exit(2)
+  }
+  return resolved
+})()
+// 证据根：artifactsDir 语义（审查 C M6）= verdict.json 必须落在 artifactsDir 根，
+// 否则 dev-flow 的 inspectVerdictAnchorOk 读不到。runDir 仍按 <base>/<runId>/<scenarioId> 存细节，
+// 但 verdict.json / summary.jsonl 会同时写一份到 base 根（见文件尾）。
 const runDir = path.join(runBase, runId, String(meta.id))
 fs.mkdirSync(runDir, { recursive: true })
 
@@ -115,7 +174,31 @@ const log = (msg) => {
 }
 
 const instanceName = flag('name', `verify-${runId}`)
-const dataDir = path.join(os.homedir(), '.taiji-dev', `verify-${runId}`)
+assertSafeToken(instanceName, '--name')
+
+// dataDir 值域（审查 C M7）：显式 --data-dir 走仓库权威校验器；缺省 = ~/.taiji-dev/verify-<runId>。
+// 两条路都保证「最终路径在 ~/.taiji-dev 树内且 basename 以 verify- 开头」——
+// 后者是清理阶段的删除判据，必须由这里先保证。
+const devRoot = path.join(os.homedir(), '.taiji-dev')
+const dataDir = await (async () => {
+  const explicit = flag('data-dir') ?? process.env.TAIJI_VERIFY_DATA_DIR
+  if (!explicit) return path.join(devRoot, `verify-${runId}`)
+  const { resolveCustomDataDir } = await import(
+    pathToFileURL(path.join(repo, 'apps/electron/scripts/dev-instance-lib.mjs')).href
+  )
+  return resolveCustomDataDir(explicit)
+})()
+const dataDirBase = path.basename(dataDir)
+if (!dataDir.startsWith(`${devRoot}${path.sep}`) || !dataDirBase.startsWith('verify-')) {
+  process.stdout.write(
+    `${JSON.stringify({
+      ok: false,
+      reason: `dataDir 越界：${dataDir}`,
+      hint: `必须落在 ${devRoot} 树内且 basename 以 verify- 开头（清理阶段会整树删除）`,
+    })}\n`,
+  )
+  process.exit(2)
+}
 const faux = meta.faux ?? scenario.faux
 const llm = meta.llm ?? scenario.llm
 if (faux && llm) {
@@ -357,7 +440,19 @@ ev.report({
     ...(gotchas.length > 0 ? [`- Gotchas：${gotchas.join(' / ')}`] : []),
   ].join('\n'),
 })
-const verdictFile = ev.verdict({ verdict, deviations: [], blockers, notProvable })
+// test_evidence（审查 C M5）：dev-flow inspect 契约要求 string 必填，内容 = 证据指针摘要。
+// 由 runner 生成（inspect agent 直接复用，不必自己补）。
+const testEvidence = [
+  `runId=${runId}`,
+  `scenario=${meta.id}`,
+  `verdict=${verdict}`,
+  `assertions=${ev.assertions.length}(failed=${ev.assertions.filter((a) => !a.ok).length})`,
+  `runDir=${runDir}`,
+  `summary=${path.join(runDir, 'summary.jsonl')}`,
+  `report=${path.join(runDir, 'report.md')}`,
+].join(' ; ')
+
+const verdictFile = ev.verdict({ verdict, deviations: [], blockers, notProvable, testEvidence })
 
 // 9) 最终证据核对（report/verdict 已落盘）
 const finalFiles = fs.readdirSync(runDir)
@@ -373,6 +468,23 @@ if (finalMissing.length > 0) {
   )
 }
 
+// 10) artifactsDir 根镜像（审查 C M6）：dev-flow 引擎读 `<artifactsDir>/verdict.json` 与
+// `<artifactsDir>/summary.jsonl`（inspectVerdictAnchorOk）。runDir 保留完整细节，
+// 根上放一份「最近一次 run」的副本，使两种读法都成立。
+try {
+  for (const f of ['verdict.json', 'report.md', 'summary.jsonl', 'assertions.jsonl']) {
+    const src = path.join(runDir, f)
+    if (fs.existsSync(src)) fs.copyFileSync(src, path.join(runBase, f))
+  }
+  fs.writeFileSync(
+    path.join(runBase, 'latest-run.json'),
+    `${JSON.stringify({ runId, scenario: meta.id, runDir, verdict }, null, 2)}\n`,
+    'utf8',
+  )
+} catch (e) {
+  log(`artifactsRoot 镜像失败（不影响 runDir 产物）: ${e instanceof Error ? e.message : String(e)}`)
+}
+
 const result = {
   ok: verdict !== 'fail',
   scenario: meta.id,
@@ -384,7 +496,12 @@ const result = {
   assertions: { total: ev.assertions.length, failed: ev.assertions.filter((a) => !a.ok).length },
   blockers,
   notProvable,
-  evidence: { verdictFile, report: path.join(runDir, 'report.md'), summary: path.join(runDir, 'summary.jsonl') },
+  evidence: {
+    verdictFile,
+    report: path.join(runDir, 'report.md'),
+    summary: path.join(runDir, 'summary.jsonl'),
+    artifactsRoot: { dir: runBase, verdict: path.join(runBase, 'verdict.json'), summary: path.join(runBase, 'summary.jsonl') },
+  },
 }
 const exitCode = verdict === 'fail' ? 1 : verdict === 'degraded' && strict ? 2 : 0
 // 同步写 stdout：process.exit 前用 writeSync 防管道写被截断

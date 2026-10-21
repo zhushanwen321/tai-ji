@@ -209,6 +209,35 @@ function grepTree(root, pattern, { ignoreCase = false, maxMatches = 200, maxFile
   return { matches, filesScanned: files.length }
 }
 
+/**
+ * Message.content → 纯文本（string 或 Segment[]）。
+ * Segment 形态见 `packages/shared/src/message.ts`：text / slash / file / mention / session。
+ * 未知 segment 类型静默跳过（前向兼容，不吞整体文本）。
+ */
+function extractText(content) {
+  if (typeof content === 'string') return content
+  if (!Array.isArray(content)) return ''
+  return content
+    .map((seg) => {
+      if (!seg || typeof seg !== 'object') return ''
+      switch (seg.type) {
+        case 'text':
+          return seg.text ?? ''
+        case 'slash':
+          return `/${seg.name ?? ''}`
+        case 'file':
+          return seg.path ?? ''
+        case 'mention':
+          return `@${seg.name ?? ''}`
+        case 'session':
+          return `#${seg.sessionId ?? ''}`
+        default:
+          return ''
+      }
+    })
+    .join('')
+}
+
 function flattenSessions(groups = []) {
   return groups.flatMap((g) => (g.sessions ?? []).map((s) => ({ ...s, __groupCwd: g.cwd })))
 }
@@ -349,7 +378,10 @@ const CAPS = {
               id: m.id,
               role: m.role,
               piEntryId: m.piEntryId,
-              text: typeof m.content === 'string' ? m.content.slice(0, 500) : undefined,
+              // [M20 修] user 消息的 content 是 Segment[]（text/slash/file/mention/session），
+              // 旧实现只映射 string content → user.text 恒 undefined（审查实测），
+              // 使得「含用户消息文本」这类断言只能看 role，掩盖真实缺口。
+              text: extractText(m.content).slice(0, 500),
             })),
           },
           evidence: { replyType: 'session.history' },
@@ -389,37 +421,67 @@ const CAPS = {
     },
   },
 
+  /**
+   * chat.wait —— 等本轮 turn 结束（B 通道）。
+   *
+   * [M12 修] 旧实现「新开连接 subscribe 后立刻读 stateSnapshot 的 occupancy」会在
+   * 「send 已返回、pi 尚未 start」时读到 idle → 直接 `alreadyIdle:true` 返回，把
+   * 未开始的 turn 判成已结束（审查 C 实测 round2 `wait 0.3s alreadyIdle=True lens=0`）。
+   *
+   * 现行判据（不靠时间推测，只靠事件事实）：
+   *   - 默认 `requireEvents=true`：**必须**观察到本轮的 `message.complete` / `message.error`
+   *     / `message.stream_error` / `session.exited` 之一才算结束；connection 时的 idle
+   *     快照只作为「信息项」写进 observations，不作为结束依据。
+   *   - `--allow-idle`（显式 opt-in，仅用于「确认当前确实空闲」的场景）才沿用旧快路径，
+   *     并在输出里标 `decidedBy: 'idle-snapshot'`，让调用方知道证据强度不同。
+   *
+   * [M21 修] `ok` 反映 turn 是否**成功**（`message.complete` 且 `stopReason !== 'error'`）；
+   * 失败 turn 返回 ok:false + exitCode 1（旧实现恒 ok:true，codemode 会把 LLM 404 当成功）。
+   */
   'chat.wait': {
     async run(ctx) {
       const sid = requiredFlag('sid', 'chat.wait')
       const timeoutMs = Number(flag('timeout-ms', '180000'))
+      const allowIdle = hasFlag('allow-idle')
       return withProtocol(ctx, async (p) => {
         const startedAt = Date.now()
         const sub = await p.subscribe(sid)
-        // 状态快照里找 occupancy（last-value 语义，不依赖广播时序）
         const occ = sub.stateSnapshot
           .map((f) => (f?.type === 'session.occupancy' ? f.payload : null))
           .filter(Boolean)
           .find((x) => !x.sessionId || x.sessionId === sid)
         const busy = occ ? occ.turn !== 'idle' || occ.compacting || occ.bash : false
-        if (!busy) {
+        // 订阅建立后的事件游标：只认这之后到达的终态帧
+        const since = p.events.length
+
+        if (!busy && allowIdle) {
           return {
-            observations: { sessionId: sid, alreadyIdle: true, occupancy: occ ?? null, elapsedMs: Date.now() - startedAt },
-            evidence: { stateSnapshotFrames: sub.stateSnapshot.length },
+            observations: {
+              sessionId: sid,
+              alreadyIdle: true,
+              decidedBy: 'idle-snapshot',
+              occupancy: occ ?? null,
+              elapsedMs: Date.now() - startedAt,
+            },
+            evidence: { stateSnapshotFrames: sub.stateSnapshot.length, note: '--allow-idle 显式 opt-in' },
           }
         }
-        const end = await p.waitTurnEnd(sid, { timeoutMs })
+
+        const end = await p.waitTurnEnd(sid, { timeoutMs, since })
+        const failed = !end.ok
         return {
+          ok: !failed,
           observations: {
             sessionId: sid,
             alreadyIdle: false,
+            decidedBy: 'turn-event',
             type: end.type,
             ok: end.ok,
             stopReason: end.payload?.stopReason,
             error: end.payload?.message ?? end.payload?.content,
             elapsedMs: Date.now() - startedAt,
           },
-          evidence: { occupancy: occ ?? null },
+          evidence: { occupancy: occ ?? null, since },
         }
       })
     },
@@ -600,6 +662,17 @@ const CAPS = {
     },
   },
 
+  /**
+   * evidence.grep —— 契约 §6 的规范名。
+   * [M19 修] 契约 §6 明写「`shell.grep` 是 `evidence.grep` 的同名兼容别名（两者必须同时存在）]，
+   * 但实现只注册了 shell.grep → 按契约调 evidence.grep 会「未知 capability」。
+   */
+  'evidence.grep': {
+    async run(ctx) {
+      return CAPS['shell.grep'].run(ctx)
+    },
+  },
+
   'shell.grep': {
     async run(ctx) {
       const pattern = requiredFlag('pattern', 'shell.grep')
@@ -667,16 +740,21 @@ async function main() {
   try {
     const ctx = resolveContext()
     const result = await cap.run(ctx)
+    // [M21] capability 显式返回 `ok: false` = 动作本身判定失败（如 chat.wait 命中错误 turn）。
+    // 此时必须 exit 1 + ok:false，否则 codemode 编排会把 LLM 404 / 中断当成功。
+    // 注意与「exitCode 非 0 但不改变传输语义」的区别：doctor RED 属于观测结果（ok 仍 true、
+    // observations.exitCode 非 0）；capability 自己说失败才算失败。
+    const capOk = result.ok !== false
     const payload = {
-      ok: true,
+      ok: capOk,
       capability: CAPABILITY,
+      ...(capOk ? {} : { reason: result.reason ?? 'capability 判定失败（见 observations）' }),
       observations: result.observations ?? {},
       evidence: result.evidence ?? {},
       elapsedMs: Date.now() - startedAt,
     }
-    // exitCode 非 0（如 doctor RED）不改变 vp 自身的传输成功语义：ok 仍 true，观测里带 exitCode
     process.stdout.write(`${JSON.stringify(payload)}\n`)
-    process.exit(0)
+    process.exit(capOk ? 0 : 1)
   } catch (e) {
     const reason = e?.reason ?? (e instanceof Error ? e.message : String(e))
     const payload = {

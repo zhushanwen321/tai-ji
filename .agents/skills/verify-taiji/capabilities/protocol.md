@@ -159,7 +159,13 @@ node .agents/skills/verify-taiji/scripts/vp.mjs session.list --data-dir ~/.taiji
 
 - **广播可能早于订阅**：切/建 session 后要主动拉（`session.getCommands` / `session.history`），不能假设广播已到。
 - 多 session 并行验收时**每个事件都要按 sessionId 过滤**，否则断言会串（`waitFor` 的 predicate 必须带 sessionId）。
-- keepalive：静默连接 45s 会被 runtime 断开（`HEARTBEAT_TIMEOUT_MS`）→ `lib/protocol.mjs` 内置 `config.get`… 注释：现实现用 `ping` 保活；**任何自定义长连接必须自己保活并清理定时器**。
+- **没有服务端心跳超时**（`HEARTBEAT_TIMEOUT_MS` 已在 ADR-0122 防御机制清理中整段删除，
+  现行 `connection-manager.ts` 全文无 heartbeat / timer / isAlive）。早期文档写的「静默 45s
+  被断开」是已退役机制，**不要按它设计保活**。`lib/protocol.mjs` 现用 `ping` 做保活是保守做法
+  （无副作用、便于观测），不是必需品。
+- **任何自定义长连接必须自己清理定时器**（否则 node 进程不退出）——这条仍然成立。
+- `config.get` 是**已退役 RPC**（不在 `ClientMessageType`；仅 `e2e/fixtures/launch-app-real.ts`
+  有历史残留调用）。连通性探针用 `ping`。
 
 ---
 

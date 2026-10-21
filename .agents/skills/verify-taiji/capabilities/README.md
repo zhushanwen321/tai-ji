@@ -75,7 +75,7 @@ SKILL.md                 环境侧总流程（Launch / Doctor / Drive / Evidence
 
 ```bash
 node .agents/skills/verify-taiji/scripts/vp.mjs model.switch \
-  --data-dir ~/.taiji-dev/verify-<runId> --session <sid> --model faux/faux-1-reasoning --json
+  --data-dir ~/.taiji-dev/verify-<runId> --sid <sid> --provider faux --model-id faux-1-reasoning --json
 # → {"ok":true,"capability":"model.switch","observations":{...},"evidence":{...},"elapsedMs":420}
 # 失败 → exit 1 + {"ok":false,"capability":"...","reason":"...","hint":"...","evidence":{...}}
 ```
@@ -93,11 +93,16 @@ node .agents/skills/verify-taiji/scripts/run.mjs scenarios/p0-session-chat.mjs \
 
 | 产物 | 消费者 | 说明 |
 |------|--------|------|
-| `summary.jsonl` | dev-flow D3 inspect 节点 | 每步一行 `{step, command, exitCode, stats, channel, at}`；**核对以汇总为准，只对异常步骤读全文日志** |
+| `summary.jsonl` | dev-flow D3 inspect 节点 | 每步一行 `{step, command, exitCode, stats, channel, at}`（**六键恒在**）；**核对以汇总为准，只对异常步骤读全文日志** |
 | `assertions.jsonl` | 人工 / 审查 | 每条断言的 `channel / expected / actual / ok` |
 | `report.md` | 人工 | 期望 vs 实际 + 未覆盖项 + 坑 |
-| `verdict.json` | dev-flow D3 事实锚 | `{verdict: pass\|fail\|degraded, deviations, blockers, notProvable}`；**禁写 `status` 字段** |
+| `verdict.json` | dev-flow D3 事实锚 | `{verdict, test_evidence, deviations, blockers, notProvable}`；`verdict ∈ pass\|fail\|degraded`；**禁写 `status` 字段**；`test_evidence` 是引擎 `validateInspectResult` 的 string 必填项，runner 已自动生成（证据指针摘要） |
 | `*.png` / 附件 | 审查 | 截图与 DOM/日志/目录树附件 |
+
+**产物落位**：完整细节在 `<artifactsDir>/<runId>/<scenarioId>/`；同时把
+`verdict.json` / `summary.jsonl` / `report.md` / `assertions.jsonl` **镜像到 `artifactsDir` 根**，
+因为引擎的 `inspectVerdictAnchorOk` 读的是 `<artifactsDir>/verdict.json`。
+`<artifactsDir>/latest-run.json` 记录最近一次 run 的定位信息。
 
 退出码：`pass=0` / `degraded=0`（`--strict` 时 2）/ `fail=1`。
 
@@ -106,9 +111,9 @@ node .agents/skills/verify-taiji/scripts/run.mjs scenarios/p0-session-chat.mjs \
 | dev-flow 环节 | 接法 |
 |---------------|------|
 | T3 impl-plan「验收计划表」 | L3 行 → `scenarios/xxx.mjs`（**D0 前必须已实跑 exit 0**，见 `flow/compile.md` 剧本实装硬门槛）；L4 判断行 → promptFile 指向 `capabilities/*.md` 作为执行依据 |
-| D3 verify 节点 | `node scripts/run.mjs <scenario> --artifacts-dir <dir>`，产物按上表落位 |
-| D3 inspect 节点 | 只读 `summary.jsonl` + `verdict.json`；`verdict` 语义固定 `pass/fail/degraded` |
-| D3 熔断/并行 | `meta.parallelGroup`（同组互斥）+ `meta.estimateSec`（预算）+ 独立实例名（`--name`） |
+| D3 verify 节点 | **必须经包装壳**（引擎 `spawn(解释器,[script])` 零参数，直接写 scenario 会 exit 0 假绿）：`script` = `<repo>/.agents/skills/verify-taiji/scripts/verify-run.sh`，参数经 env：`TAIJI_VERIFY_SCENARIO` / `TAIJI_VERIFY_ARTIFACTS` / `TAIJI_VERIFY_NAME`。详见 [API-CONTRACT.md §8](API-CONTRACT.md) |
+| D3 inspect 节点 | 只读 `<artifactsDir>/summary.jsonl` + `verdict.json`（根镜像）；`verdict` 语义固定 `pass/fail/degraded`，`test_evidence` 已由 runner 填好 |
+| D3 熔断/并行 | `meta.parallelGroup`（同组互斥）+ `meta.estimateSec`（预算）+ **独立实例名 + 独立 runId**。⚠️ 并行有两条已实测的坑：① 同秒同 runId 会共享 dataDir（一绿一红）；② 仓内 staged 扩展目录会被 `bundle-extensions.mjs` 抢占写（串行必绿、并行常见 EEXIST）。**并行节点必须串行错开启动**（详见 [API-CONTRACT.md §7 L4/L5](API-CONTRACT.md)） |
 | D4 分流 | 一次性 → 留 skill-data；可复用且**能降为 L1/L2 零 token 机器轨** → 迁 `e2e/` 并登记 `docs/testing/e2e-map.json`；**本技能的 scenario 本身永不进 CI**（它跑真 dev 实例） |
 
 ## 6. 边界（防变成第六套验证体系）

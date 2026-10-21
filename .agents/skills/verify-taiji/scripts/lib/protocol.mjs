@@ -316,15 +316,26 @@ export async function createProtocol(options) {
    * 条件等待：轮询事件队列直到 predicate 命中（禁固定 sleep 后断言）。
    * @param {(evt:{type:string,payload:object,receivedAt:number})=>boolean} predicate
    */
+  /**
+   * 条件等待：轮询事件队列直到 predicate 命中。
+   *
+   * [契约 §1.2 落地] `opts.sessionId` 存在时**先按 sessionId 过滤再交给 predicate**
+   * （旧实现把过滤责任全推给调用方，契约声称的能力并未实现，审查 C 指出）。
+   * 帧上 `payload.sessionId` 缺省视为「全局帧」，对任何 session 都放行（与
+   * waitTurnEnd 的既有语义一致）。
+   */
   async function waitFor(predicate, opts = {}) {
     const timeoutMs = opts.timeoutMs ?? DEFAULT_WAIT_TIMEOUT_MS
+    const sid = opts.sessionId
     const startedAt = Date.now()
     let cursor = Math.max(0, Math.min(opts.since ?? 0, events.length))
     const deadline = startedAt + timeoutMs
+    const matchesSession = (evt) =>
+      sid === undefined || evt.payload?.sessionId === undefined || evt.payload?.sessionId === sid
     for (;;) {
       while (cursor < events.length) {
         const evt = events[cursor++]
-        if (predicate(evt)) return evt
+        if (matchesSession(evt) && predicate(evt)) return evt
       }
       if (Date.now() >= deadline) {
         throw new ProtocolError(`waitFor 超时（${timeoutMs}ms，已扫 ${events.length} 帧）`, {
@@ -371,10 +382,7 @@ export async function createProtocol(options) {
     const since = opts.since ?? events.length
     const timeoutMs = opts.timeoutMs ?? 180_000
     const endTypes = new Set(['message.complete', 'message.error', 'message.stream_error', 'session.exited'])
-    const evt = await waitFor(
-      (e) => endTypes.has(e.type) && (e.payload?.sessionId === undefined || e.payload.sessionId === sessionId),
-      { timeoutMs, since },
-    )
+    const evt = await waitFor((e) => endTypes.has(e.type), { timeoutMs, since, sessionId })
     return {
       type: evt.type,
       payload: evt.payload,

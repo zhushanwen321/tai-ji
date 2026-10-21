@@ -10,7 +10,7 @@ description: "驱动真实 taiji dev 实例做功能验收：启动、体检（d
 **三层结构**（从下往上读）：
 
 1. `SKILL.md`（本文件）= 环境侧总流程：Launch / Doctor / Drive / Evidence / Cleanup；
-2. `capabilities/` = **能力原语层**：68 个原子能力（一个动作 + 断言 + 证据 + 证不了 + 坑），按域拆文件，索引见 [capabilities/README.md](capabilities/README.md)；
+2. `capabilities/` = **能力原语层**：72 个原子能力（一个动作 + 断言 + 证据 + 证不了 + 坑），按域拆文件，索引见 [capabilities/README.md](capabilities/README.md)；
 3. `scenarios/` = **验收剧本层**：能力组合成可执行剧本，由 `scripts/run.mjs` 跑出 `summary.jsonl` / `verdict.json` / `report.md`，可直接被 dev-flow D3 消费。
 
 冷启动读序：本文件 §1-§6 → [capabilities/README.md](capabilities/README.md) → [capabilities/P0-P1-COVERAGE.md](capabilities/P0-P1-COVERAGE.md)（要验的功能在哪一行）→ 目标域的 `capabilities/<域>.md` → 目标 scenario。`features/` 保留人读的端到端故事（见 §8），漂移以 capability 为准。
@@ -202,7 +202,7 @@ node .agents/skills/verify-taiji/scripts/probes/mock-llm-workflow.mjs [--repo <r
 
 | 层 | 目录 | 用途 |
 |----|------|------|
-| **能力原语层** | [capabilities/](capabilities/README.md) | 68 个原子能力（进入口 / 驱动 / 断言 / 证据 / 证不了 / 坑），覆盖 env / session / chat / model / subagent / workflow / interaction / settings / plugin / extension / render / workspace / evidence 十三域 |
+| **能力原语层** | [capabilities/](capabilities/README.md) | 72 个原子能力（入口 / 驱动 / 断言 / 证据 / 证不了 / 坑）；其中 **19 个可用 `vp.mjs` 单步调用**，其余只能走 scenario 或手工驱动（见 [API-CONTRACT §7 L6](capabilities/API-CONTRACT.md)），覆盖 env / session / chat / model / subagent / workflow / interaction / settings / plugin / extension / render / workspace / evidence 十三域 |
 | **验收剧本层** | `scenarios/*.mjs` → [capabilities/README.md §4.3](capabilities/README.md) | 能力组合 = 可执行剧本，产 `summary.jsonl` / `verdict.json` / `report.md`，可直接被 dev-flow D3 的 verify/inspect 节点消费 |
 
 **覆盖对账** = [capabilities/P0-P1-COVERAGE.md](capabilities/P0-P1-COVERAGE.md)（P0 17 行 / P1 4 行逐行状态：`scenario` / `capability-only` / `reuse-e2e` / `unreachable`）。要回答「某功能能不能验、怎么验」，查这张表。

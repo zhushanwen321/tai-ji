@@ -89,6 +89,18 @@ const reply = await p.call('delivery.submit',
 ### Gotchas
 
 1. **contenteditable 必须 `pressSequentially`**：`fill` 不触发 input 逻辑（slash/skill/@/# 检测全失效）。
+
+   **composer 输入三态（P0「composer 输入三态」用例组，此前无 capability 承接）**：
+
+   | 态 | 触发 | 浮层锚点 | 断言要点 |
+   |----|------|---------|---------|
+   | slash | 输入 `/` 开头 | `CommandPopover`（portal 到 body） | 输入 `/` 后浮层出现；继续输入过滤；`cmd-popover-empty` 是「无匹配」不是失败 |
+   | mention | 输入 `@` 或「+菜单 → 引用」 | 同上（`composer.getMentionCandidates()` 供数） | 候选来自 RPC，**空候选是合法态**（无 agent/skill 时） |
+   | file | 输入 `#` 或「+菜单 → 文件」 | 同上（`composer.getFileCandidates()` 供数） | `cmd-file-empty` / `cmd-file-error` / `cmd-file-truncated` 是三态占位 |
+
+   **共同坑**：三个浮层都 portal 到 body（全局查，别限定在 composer 内）；都依赖 `pressSequentially`
+   逐字触发（`fill` 一次性赋值不会触发检测）；`Esc` 关闭走模态表面登记表的 Esc 栈序
+   （见 `ui.container`）。
    `packages/ui/src/features/composer/ComposerInput.vue`。
 2. **faux 队列逐轮出队**：每发一轮消耗一个 step；脚本耗尽后「发了但永远不回复」——
    看起来像挂死，实际是脚本用完了。多轮剧本要排足 step（含 abort/steer 的额外轮）。
@@ -202,14 +214,45 @@ expect css=.trace-tool 含工具名                        # tool 行（header �
 ### 驱动
 
 ```js
-await p.waitTurnEnd(sid, { timeoutMs: 120_000 })   // API-CONTRACT §1.2：complete/error 两态都算结束
+// 库用法（scenario 内，推荐）：先取 since 再 send，避免命中上一轮陈旧帧
+const since = p.events.length
+await p.send(sid, 'hello')
+const end = await p.waitTurnEnd(sid, { since, timeoutMs: 120_000 })
+if (!end.ok) throw new Error(`turn 失败：${end.type} ${end.payload?.stopReason}`)
 ```
+
+```bash
+# 单步 CLI（跨进程，连接已有实例）
+node .agents/skills/verify-taiji/scripts/vp.mjs chat.wait --data-dir <dir> --sid <sid> --json
+```
+
+> **[HISTORICAL] `vp chat.wait` 的两个坑（2026-10-22 审查实测修复）**：
+> ① 旧实现「新开连接 subscribe 后立刻读 occupancy 快照」，在「send 已返回、pi 尚未 start」时
+> 读到 `idle` → 直接 `alreadyIdle:true` 返回，把**未开始**的 turn 判成已结束（实测
+> `wait 0.3s alreadyIdle=True lens=0`）。现行默认**必须观察到终态帧**才算结束；
+> 只有显式 `--allow-idle` 才走旧快路径（并在输出标 `decidedBy: 'idle-snapshot'`）。
+> ② 旧实现恒返回 `ok:true`（即使 `message.complete.stopReason === 'error'`）→ codemode 会把
+> LLM 404 当成功。现行 `ok` 反映 turn 是否成功，失败时 exit 1。
+> → **跨进程编排优先用 `run.mjs` 的 scenario（进程内 `waitTurnEnd` 语义最强）**；
+> `vp chat.wait` 只适合人工单步核对。
 
 ### 断言（期望终态 / 失败信号）
 
 - 期望：**该轮最后一次** `message.complete`（同一 sid）满足 `willRetry === false`，且其后无新的
-  `message_start`；正常路径一轮一帧。`stopReason ∈ {'stop','endTurn'}`（正常）/ `'toolUse'`（工具段结束，
-  后面会继续，不能当终态）/ `'aborted'`（中止）/ `'error'`（失败）。
+  `message_start`；正常路径一轮一帧。
+
+  **⚠️ 词表必须分清（wire vs pi 内部，两套值域不同）**：
+
+  | 位置 | 值域 |
+  |------|------|
+  | **wire 帧** `message.complete.stopReason`（本原语断言的对象） | `end_turn`（正常）· `tool_use`（工具段结束，后面会继续，不能当终态）· `aborted`（中止）· `error`（失败）· `max_tokens` · `content_filter` |
+  | **faux 脚本 / pi 内部** `AssistantMessage.stopReason`（写 `fixtures/faux-responses/*.json` 时用） | `stop` · `toolUse` · `length` · `error` · `aborted` |
+
+  映射实现 = `packages/runtime/src/infra/pi/event-adapter.ts` 的 `STOP_REASON_MAP`
+  （`stop→end_turn` / `toolUse→tool_use` / `length→max_tokens`）。
+  **[HISTORICAL] 不要把 pi 侧词表套到 wire 帧上**：早期文档在断言段写 `stopReason === 'endTurn'`
+  或 `'toolUse'`，全仓无 `'endTurn'` 字面量（`grep -rn "'endTurn'" packages` 零命中）→ 断言恒假。
+  同理 `'toolUse'` 在 wire 上是 `'tool_use'`；写成驼峰会让「工具段未结束」的判定永远不命中。
 - **失败信号（具体形态）**：
   - 等到 `willRetry:true` 的 `message.complete`（中间失败帧）就当结束 → 下一轮断言全部错位。
   - 等到超时但帧一直在推进（`message.tool_call_*` 持续）→ **慢，不是死**（用 `waitFor` 的
@@ -238,8 +281,9 @@ await p.waitTurnEnd(sid, { timeoutMs: 120_000 })   // API-CONTRACT §1.2：compl
 2. **`since` 必须在 `send` 之前捕获**：faux 极快时 `message.complete` 可能在 `send` resolve 前入队；
    先 `const since = p.events.length` 再 `p.send(...)` 再 `p.waitTurnEnd(sid, { since })`
    （`scenarios/p0-session-chat.mjs` 就是这么写的）。
-3. **`stopReason='toolUse'` 不是回合终点**：工具调用后 pi 会续下一轮 assistant，UI 会出现新的
-   `message_start`；等「最后一个」终态要靠 `willRetry=false` + 无后续 `message_start`。
+3. **`stopReason='tool_use'` 不是回合终点**（注意是 wire 的 snake_case，不是 faux 脚本的 `toolUse`）：
+   工具调用后 pi 会续下一轮 assistant，UI 会出现新的 `message_start`；等「最后一个」终态要靠
+   `willRetry=false` + 无后续 `message_start`。
 4. **abort 也会发 `message.complete`（`stopReason:'aborted'`）**：只看 `message.complete` 会把中止
    误判为正常完成；断言正常完成要排 `stopReason`。
 5. **faux 耗时短**：`waitFor` 的 predicate 不要用「等 500ms 后仍 streaming」这类时间推断

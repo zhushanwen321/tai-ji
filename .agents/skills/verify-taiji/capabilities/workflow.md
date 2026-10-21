@@ -41,6 +41,30 @@
 
 ### 入口（用户 POV / 协议 / 副作用点）
 
+#### 先问：workflow 脚本从哪来？（不搞清这条，`workflow_run` 必报 `workflowNotFoundMessage`）
+
+`workflow_run.name` 必须是**已发现脚本的绝对路径或注册名**，来源是资源发现（7 源同名
+last-writer-wins，优先级低→高，SSOT = `packages/subagent-core/src/shared/resource-discovery.ts`）：
+
+| 序 | 源 | 路径 |
+|---|-----|------|
+| 1 | user pi agent | `~/.pi/agent/workflows/*.{js,mjs}` |
+| 2 | user .agents | `~/.agents/workflows/` |
+| 3 | npm global | 全局安装的 pi 包（`pi.workflows` manifest） |
+| 4 | npm dev | dev-link 包（`pi.workflows` manifest） |
+| 5 | ext-paths | `TAIJI_EXTENSION_PATHS` 指向的包（extension 内置 workflow） |
+| 6 | project .pi | `<cwd>/.pi/workflows/` |
+| 7 | project .pi/.tmp（**仅 workflow**） | `<cwd>/.pi/workflows/.tmp/` |
+| 8 | project .agents（**最高**） | `<cwd>/.agents/workflows/` |
+
+- **extension 内置 workflow**（如 `@zhushanwen/pi-subagent-workflow` 的 `fan-out`）经 `pi.workflows`
+  manifest 发现；`subagents` 工具的批量能力**固定**走内置 `fan-out` 模板（`FAN_OUT_SCRIPT_NAME`）。
+- **内置模板**（review-fix-loop 等）与**用户自写脚本**走同一发现链——没有第二套注册表。
+- 验收时**怎么知道有哪些脚本**：agent 侧看 `<available_workflows>`（就是上面 8 源合并后的清单）；
+  人工侧对照上表直接 `ls`。找不到 = 脚本没放进任何源目录（这是 `workflowNotFoundMessage` 的唯一成因）。
+- 本技能的测试脚本放 `fixtures/workflows/fanout-canary.workflow.js`，探针里用**绝对路径**传给
+  `workflow_run.name`（免依赖发现链）——这是验收时最稳的写法。
+
 - **用户 POV**：对话里让 agent 跑一个 workflow（如「跑 review-fix-loop」）→ assistant 回合出现
   `workflow-block`（`工作流` + 脚本名 · slug，下挂 `workflow-block-chips` 阶段 chips）→
   点击该块 → 全屏 overlay；托盘出现 `tray-workflow-row`（进度条 + N/M + 耗时 + abort）。

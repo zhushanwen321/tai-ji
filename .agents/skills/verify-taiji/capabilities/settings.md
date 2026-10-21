@@ -196,8 +196,11 @@ nav id 清单同文件 `MENU` 常量：`provider` / `skill` / `agent` / `extensi
 - 写盘：`<dataDir>/pi-presets.json`（出处：`packages/runtime/src/services/preset-service.ts`
   的 `presetsPath()` = `join(configStore.getConfigDir(), 'pi-presets.json')`；
   `getConfigDir()` = `<dataDir>`，见 `packages/runtime/src/infra/pi/pi-paths.ts`）。
-- 会话侧锁：session 创建时把 preset id 写 `.preset.json` sidecar，**建会话后不可换预设**
-  （chip 变只读 `preset-chip-locked`）。
+- 会话侧锁：session 创建时把 preset id 写 `.preset.json` sidecar，**建会话后不可换预设**。
+  **[HISTORICAL]** `preset-chip-locked` 不存在（全仓零命中）——`PresetChip.vue` 的全部 testid 是
+  `preset-chip` / `preset-chip-fallback` / `preset-chip-replace-badge` / `preset-chip-popover` /
+  `preset-chip-fallback-popover`。**锁定态的断言写法** = `preset-chip` 在场 + 点击后
+  `preset-chip-popover` 不出现（或 popover 内无预设选择项）；不要 grep 一个不存在的 testid。
 - 页面 testid（源码，`packages/renderer/src/components/settings/preset/PiPresetsPage.vue`）：
   `preset-prompt-section` / `preset-prompt-replace-switch` / `-input` / `-discard` / `-reset` /
   `-save` / `-append-switch` / `-append-input` / `-append-discard` / `-append-save` /

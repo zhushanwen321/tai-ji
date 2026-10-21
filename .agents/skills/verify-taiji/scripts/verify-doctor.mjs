@@ -24,6 +24,7 @@
  * 退出码：0 = 全过；1 = 有 FAIL。
  */
 import fs from 'node:fs'
+import os from 'node:os'
 import path from 'node:path'
 import { spawnSync } from 'node:child_process'
 import { fileURLToPath } from 'node:url'
@@ -283,6 +284,101 @@ if (!evText) {
     bad('verdict 不写 status 字段', 'evidence.mjs 出现 status 承载', 'dev-flow 契约要求 verdict ∈ pass|fail|degraded，禁写 status')
   } else {
     ok('verdict 不写 status 字段')
+  }
+}
+
+// ── 7b. 实跑产物校验（审查 C：旧守卫只查源码文本，46/46 行缺 command 也 PASS）──
+// 对存在的最新证据目录做「产物级」校验：字段真在、verdict 真合法、test_evidence 真非空。
+const skillDataRoot = path.join(os.homedir(), '.agents', 'skill-data', 'verify-taiji')
+// 允许用 env 指定额外证据根（手工跑 run.mjs --artifacts-dir /tmp/... 时）
+const extraArtifactRoots = (process.env.TAIJI_VERIFY_ARTIFACT_ROOTS ?? '')
+  .split(path.delimiter)
+  .map((x) => x.trim())
+  .filter(Boolean)
+// 取「最新写入」的证据目录（按 run 目录 mtime 排序，不按名字——名字是 runId 时间戳，
+// 但修复前后可能同一天内交错，mtime 才是真实新鲜度）。
+const latestArtifact = (() => {
+  const candidates = []
+  try {
+    for (const wt of fs.readdirSync(skillDataRoot)) {
+      const wtDir = path.join(skillDataRoot, wt)
+      if (!fs.statSync(wtDir).isDirectory()) continue
+      for (const d of fs.readdirSync(wtDir)) {
+        const dir = path.join(wtDir, d)
+        if (!fs.existsSync(path.join(dir, 'summary.jsonl'))) continue
+        candidates.push({ worktree: wt, runId: d, feature: d, dir, mtime: fs.statSync(dir).mtimeMs })
+      }
+    }
+  } catch {
+    /* 无 skill-data：跳过（首次使用正常） */
+  }
+  // 额外根：<root>/<runId>/<feature>/summary.jsonl（run.mjs 的目录形态）
+  for (const root of extraArtifactRoots) {
+    try {
+      for (const runId of fs.readdirSync(root)) {
+        const base = path.join(root, runId)
+        if (!fs.statSync(base).isDirectory()) continue
+        for (const feature of fs.readdirSync(base)) {
+          const dir = path.join(base, feature)
+          if (!fs.existsSync(path.join(dir, 'summary.jsonl'))) continue
+          candidates.push({ worktree: '(extra)', runId, feature, dir, mtime: fs.statSync(dir).mtimeMs })
+        }
+      }
+    } catch {
+      /* 该根不可读，跳过 */
+    }
+  }
+  if (candidates.length === 0) return null
+  candidates.sort((a, b) => b.mtime - a.mtime)
+  return candidates[0]
+})()
+
+if (!latestArtifact) {
+  ok('实跑产物校验', '无历史证据目录（首次使用正常，跑一次 run.mjs 后本项生效）')
+} else {
+  const { dir, runId, feature } = latestArtifact
+  const problems = []
+  // summary.jsonl：六键恒在
+  const summaryLines = fs
+    .readFileSync(path.join(dir, 'summary.jsonl'), 'utf8')
+    .split('\n')
+    .filter((l) => l.trim())
+    .map((l) => {
+      try {
+        return JSON.parse(l)
+      } catch {
+        return null
+      }
+    })
+    .filter(Boolean)
+  const REQUIRED_STEP_KEYS = ['step', 'command', 'exitCode', 'stats', 'channel', 'at']
+  const missingByKey = Object.fromEntries(REQUIRED_STEP_KEYS.map((k) => [k, 0]))
+  for (const line of summaryLines) {
+    for (const k of REQUIRED_STEP_KEYS) if (!(k in line)) missingByKey[k]++
+  }
+  for (const [k, n] of Object.entries(missingByKey)) {
+    if (n > 0) problems.push(`summary.jsonl 有 ${n}/${summaryLines.length} 行缺 ${k}`)
+  }
+  // verdict.json：test_evidence 必填非空 + verdict 合法 + 无 status
+  const vPath = path.join(dir, 'verdict.json')
+  if (!fs.existsSync(vPath)) {
+    problems.push('verdict.json 不存在')
+  } else {
+    try {
+      const v = JSON.parse(fs.readFileSync(vPath, 'utf8'))
+      if (!['pass', 'fail', 'degraded'].includes(v.verdict)) problems.push(`verdict 取值非法: ${v.verdict}`)
+      if (typeof v.test_evidence !== 'string' || v.test_evidence.trim() === '') {
+        problems.push('verdict.json 缺 test_evidence（引擎 validateInspectResult 必填 string）')
+      }
+      if ('status' in v) problems.push('verdict.json 出现 status 字段（契约禁用）')
+    } catch (e) {
+      problems.push(`verdict.json 不可解析: ${e instanceof Error ? e.message : String(e)}`)
+    }
+  }
+  if (problems.length === 0) {
+    ok('实跑产物校验', `${feature}@${runId}：${summaryLines.length} 行 summary 六键齐全 + verdict 合规`)
+  } else {
+    bad('实跑产物校验', `${feature}@${runId}：${problems.join('; ')}`, '这是产物级缺陷：改 evidence.mjs 的写入逻辑，不要只改本守卫')
   }
 }
 

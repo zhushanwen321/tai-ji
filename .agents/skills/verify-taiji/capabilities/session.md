@@ -93,8 +93,10 @@ await p.call('session.switch', { sessionId: session.id }, { replyType: 'session.
   - **假成功形态**：reply 成功但 `session.cwd` ≠ 请求 cwd → 是 cwd 降级（renderer 侧有 toast，
     协议侧只有 summary 能看出来），不是失败但必须记录为「降级」。
 - **A 成功**：`new-task-landing` 消失、panel 态 `composer-box` 在、`panel-session-label` 显示会话名。
-- **A 失败信号**：发送后仍停在 Landing（create 抛错 → toast，`new-task-landing` 不消失）；
-  `new-task-cancelled`（用户取消）会把已建 session 删掉（`remove` 清理）。
+- **A 失败信号**：发送后仍停在 Landing（create 抛错 → toast，`new-task-landing` 不消失）。
+  **[HISTORICAL]** 早期文档写的 `new-task-cancelled` 不是 testid / DOM 锚点 / 可断言信号
+  （全仓 `grep -rn "new-task-cancelled"` 零命中；`Landing.vue` 里 "cancelled" 只是内部流程分支名）。
+  「用户取消后已建 session 被清理」的验证要走 C 通道：对照 `<dataDir>/ext-sessions/` 树是否消失。
 - **C 成功**：`ext-sessions/<sid>/` 树出现；`.preset.json`（若给 presetId）/ `.project.json`
   （若给 projectId）在 `agent/sessions/...` 下；`agent/sessions/<encodeCwd>/<...>.jsonl`
   **可能还不存在**（pi 首次落盘条件 = 有 user 或 assistant 消息）。

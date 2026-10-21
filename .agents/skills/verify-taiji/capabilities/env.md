@@ -72,7 +72,7 @@
 
 ```bash
 node .agents/skills/verify-taiji/scripts/doctor.mjs <repo> [--data-dir <dir>] [--name <实例名>] [--json]
-node scripts/vp.mjs env.doctor --repo <repo> --data-dir <dir>
+node .agents/skills/verify-taiji/scripts/vp.mjs env.doctor --repo <repo> --data-dir <dir>
 ```
 
 ## 驱动
@@ -219,7 +219,7 @@ node scripts/vp.mjs env.doctor --repo <repo> --data-dir <dir>
 
 - 实例名：`name`（`TAIJI_DEV_INSTANCE_NAME` / `--name`）→ 端口段 hash 派生（Vite/C​DP/runtime offset 三者同源）。
 - 数据目录：`--data-dir ~/.taiji-dev/verify-<runId>`（树内严格子路径）。
-- 单步核对：`node scripts/vp.mjs env.ports --repo <repo> --name <实例名> --data-dir <dir>`。
+- 单步核对：`node .agents/skills/verify-taiji/scripts/vp.mjs env.ports --repo <repo> --name <实例名> --data-dir <dir>`。
 
 ## 驱动
 

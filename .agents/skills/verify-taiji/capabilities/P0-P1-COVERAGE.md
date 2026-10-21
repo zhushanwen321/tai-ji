@@ -18,9 +18,9 @@
 
 | # | 功能面 | capability id | 剧本 | 状态 | 备注 |
 |---|---|---|---|---|---|
-| 1 | 应用启动与进程编排 | `env.launch` `env.ready` `env.doctor` `env.cleanup` `env.isolation` `protocol.auth` | `p0-env-smoke` ✅实跑 | **`scenario`** | 三条就绪判据 + doctor 五项 + auth 往返 + 扩展装载 N + 数据隔离全在剧本内 |
-| 2 | 会话创建与首发 | `session.create` `session.list` `session.history` `chat.send` | `p0-session-chat` ✅实跑 | **`scenario`** | 走协议链。**缺口**：UI Landing 链（选目录/分支/首发提交）与 6 个 `session.create` 参数（`hidden`/`presetId`/`projectId`/`modelOverride`/`thinkingOverride`/`clientUuid`）无剧本 → 建议 `p0-session-create-ui` |
-| 3 | 对话发送与流式渲染 | `chat.send` `chat.stream` `chat.wait` | `p0-session-chat`（仅到 history 文本） | **`capability-only`** | UI 流式块序 / thinking / 工具块 / 变更集 未验 → 建议 `p0-chat-stream-ui`（faux `thinking-stream.json` + `TAJI_FAUX_TPS` 拉窗口） |
+| 1 | 应用启动与进程编排 | `env.launch` `env.ready` `env.doctor` `env.cleanup` `env.isolation` `protocol.auth` | `p0-env-smoke` ✅实跑 | **`scenario`（部分）** | **实测覆盖**：runtime 子进程拉起（pid + runtime.port）、WS 握手（ping→pong）、三条就绪判据、doctor 五项、扩展装载 N≥8、数据目录隔离。**未覆盖**：`FEATURE-PRIORITIES` 该行用例组里的「**Electron 窗口创建**」与「**单实例锁**」——本剧本不断言窗口存在，也不验证第二个实例被拒。→ 补 `p0-app-shell`（CDP 页面 URL 已能间接证窗口存在，但需显式断言 + 单实例锁需真起第二个实例验 `app.quit`） |
+| 2 | 会话创建与首发 | `session.create` `session.list` `session.history` `chat.send` | `p0-session-chat` ✅实跑 | **`scenario`（部分）** | **实测覆盖**（19 条断言）：协议 `session.create` → cwd 生效 → 模型解析 → subscribe → delivery 发送 → `message.complete` → history 文本 = 脚本 → 会话树落盘 → 双会话隔离 → `modelOverride` 生效 → pi 子进程日志。**未覆盖**：① 「**首发提交**」= UI Landing 链（选目录 chip / branch chip / 提交建 session），本剧本走的是协议不是 UI；② 「**模式选择（landing 第三 chip，模式 id 创建时锁定）**」；③ 其余 `session.create` 参数（`hidden`/`presetId`/`projectId`/`thinkingOverride`/`clientUuid` 幂等）。→ `p0-session-create-ui` + `p0-preset-lock` |
+| 3 | 对话发送与流式渲染 | `chat.send` `chat.stream` `chat.wait`（composer 输入三态挂在 `chat.send` 的 Gotcha 里） | `p0-session-chat`（仅到 history 文本） | **`capability-only`** | **已登记未验**：UI 流式块序 / thinking / 工具块 / 变更集 / **composer 输入三态（slash·mention·file 三个 portal 浮层）** → `p0-chat-stream-ui`（faux `thinking-stream.json` + `TAJI_FAUX_TPS` 拉窗口）。三态锚点表见 `chat.md` 的 `chat.send` Gotcha 1 |
 | 4 | pi RPC 适配 | `protocol.rpc` `protocol.events` `evidence.logs` | — | **`reuse-e2e`** | 机器资产 `TAIJI_SKIP_REAL_PI=1 pnpm --filter @taiji/runtime test:equivalence`（E2E-EQUIV-01~05）。本技能侧只补「帧按契约到达 + pi stdout tee 落盘」 |
 | 5 | session 持久化与恢复 | `session.persistence` `chat.reload-equiv` `session.history` | — | **`capability-only`** | live≡reload 等价性是最强证明，目前无剧本。跨进程等价由 E2E-EQUIV-01 覆盖；**本技能应补**「关会话重开 / 重启应用后 history 一致」两条 → `p0-session-persistence` |
 | 6 | per-session 隔离 | `session.isolation` `session.switch` `chat.stream` | `p0-session-chat`（history 层） | **`capability-only`** | 已验「两 session history 不串」；**未验**并发流式不串 + 切走切回不污染 + `message.*` 必带 sessionId → `p0-session-isolation-stream` |
@@ -49,10 +49,16 @@
 
 | 状态 | P0 | P1 | 合计 |
 |---|---|---|---|
-| `scenario`（已实跑） | 2 | 0 | 2 |
+| `scenario`（已实跑，**完整**覆盖该行全部用例组） | 0 | 0 | **0** |
+| `scenario`（已实跑，**部分**覆盖——见各行「未覆盖」） | 2 | 0 | 2 |
 | `capability-only` | 11 | 4 | 15 |
 | `reuse-e2e` | 4 | 1 | 5 |
 | `unreachable` | 0 | 0 | 0 |
+
+> **诚实口径（2026-10-22 审查后收紧）**：此前把两行标成 `scenario` 属「过度声称」——
+> `p0-env-smoke` 未验窗口创建与单实例锁，`p0-session-chat` 未验 UI 首发提交与模式选择。
+> 现行一律标 `scenario（部分）` 并逐条列出未覆盖项。**没有任何 P0/P1 行被完整覆盖**，
+> 这是本技能当前的真实水位。
 
 **说明**：P0/P1 无 `unreachable` 行——所有功能面都有至少一条可达路径。真正的 `unreachable` 在**子能力**层面（例：插件 sandbox 权限审批无夹具、`render.image` 无夹具、OS 原生对话框），逐条登记在各 capability 的「证不了 / Gotchas」。
 

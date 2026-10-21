@@ -60,7 +60,7 @@ const inst = createInstance({
 
 | 成员 | 签名 | 说明 |
 |------|------|------|
-| `launch()` | `async () => { pid, vitePort, cdpPort, runtimePort, dataDir, instanceName }` | 起 `dev-instance.mjs`（**必须 detached/background**，不得前台阻塞）。端口用 `dev-instance.mjs --print` 权威解析，不自行推导 |
+| `launch()` | `async () => { pid, vitePort, cdpPort, runtimePort, runtimePortRange, dataDir, instanceName, logFile }` | 起 `dev-instance.mjs`（**必须 detached/background**，不得前台阻塞）。端口用 `dev-instance.mjs --print` 权威解析，不自行推导。**⚠️ `runtimePort` 在 launch 返回时通常为 0**（`<dataDir>/runtime.port` 尚未写出）——要等 `waitReady()` 的 `runtimePort`，别信 launch 的这个字段 |
 | `waitReady(opts?)` | `async ({ timeoutMs=180_000 }) => ReadyReport` | 三条就绪判据（runtime.port / CDP 页面 URL 归属 / 扩展装载 N≥8）；返回三项明细与耗时。超时抛带 hint 的错 |
 | `doctor()` | `async () => { ok, checks: [{name,status,detail,action?}] }` | 委托 `scripts/doctor.mjs --json`（**不重复实现**） |
 | `page()` | `async () => Page` | CDP 连接，幂等；用 `chromium.connectOverCDP`，**核对页面 URL 属于本实例 vitePort**，否则抛「连错实例」 |
@@ -150,7 +150,7 @@ const p = await createProtocol({ dataDir, runtimePort })   // 自动读 <dataDir
 ## 2. `scripts/vp.mjs`（单步 CLI）
 
 ```bash
-node scripts/vp.mjs <capability> [--data-dir <dir>] [--repo <repo>] [flags...] [--json]
+node .agents/skills/verify-taiji/scripts/vp.mjs <capability> [--data-dir <dir>] [--repo <repo>] [flags...] [--json]
 ```
 
 约定：
@@ -171,7 +171,7 @@ extension.list    evidence.tree    evidence.logs      shell.grep
 ## 3. `scripts/run.mjs`（scenario runner）
 
 ```bash
-node scripts/run.mjs <scenario.mjs> --artifacts-dir <dir> [--json] [--keep] [--name <实例名>]
+node .agents/skills/verify-taiji/scripts/run.mjs <scenario.mjs> --artifacts-dir <dir> [--json] [--keep] [--name <实例名>]
 ```
 
 scenario 契约：
@@ -237,7 +237,43 @@ runner 职责（scenario 只写业务步骤）：
 6. **禁复制 e2e 资产**：复用 `e2e/fixtures/faux-provider-ext` 与 `packages/runtime/src/__tests__/fixtures/faux-llm-ext.ts`；
    不 import `@playwright/test` fixture（会 `_electron.launch` 抢焦点且走 mock 构建）。
 7. **禁机读文件污染**：`summary.jsonl` / `verdict.json` 字段名冻结，不要加私有字段（可加 `meta` 子对象）。
+   `summary.jsonl` 的六个键 **恒在**（`step/command/exitCode/stats/channel/at`；`command` 缺省回落为 step 名，
+   不允许缺失——dev-flow inspect 靠它回答「这一步跑了什么」）。
+   `verdict.json` 必含 `test_evidence`（string，引擎 `validateInspectResult` 必填）。
 8. **禁把产品语义搬进 lib**：lib 只做「驱动 / 断言 / 取证」。
+
+---
+
+## 7. 已知限制与副作用（诚实登记，2026-10-22 对抗式审查后补）
+
+| # | 限制 | 影响 | 规避 |
+|---|------|------|------|
+| L1 | **`vp --name`（不给 `--data-dir`）会触发装配器 `dev-instance --print` 的幂等种子**，创建 `~/.taiji-dev/instances/<name>/`（约 4MB） | 违反「vp 无副作用」的字面承诺 | 只查已有实例时**优先给 `--data-dir`**；用 `--name` 派生必然落盘。该目录是装配器行为，不是 vp 自建，`dispose` 也不删它 |
+| L2 | **mock-http 剧本游标是 per-model 单游标**（server 进程持有），不是 per-pi-进程 | 同一模型被两个 session 使用时，第二个 session 首轮会拿到第一个的后续 step | ① 用 model-keyed 给每个 session 分配不同模型；② 每组之前 `instance.mockLlm.reset()`；③ 每个 session 独立实例 |
+| L3 | **`session.list` 对未落盘的会话不可见** | 建 session 后立刻查列表可能 count=0（不是失败） | pi 首次落盘条件 = 有 user 或 assistant 消息；断言「会话已建」用 `session.created` reply 而非 list |
+| L4 | **并发 run 会争抢仓内 staged 扩展目录**（`scripts/bundle-extensions.mjs` → `apps/electron/resources/extensions/`） | 两个 run 同秒启动时其中一方可能 `EEXIST` 失败（串行必绿、并行必红） | dev-flow 并行节点**必须**用不同 `--name` 且串行启动（间隔 ≥1 个 ready 周期），或在引擎层加跨 run 互斥 |
+| L5 | **默认 runId 是秒级时间戳** | 同秒两个 run 会共享 dataDir（互踢真相被归因成「环境问题」） | 并发务必显式给 `--run-id` / `--name`（runner 已对 runId 做安全校验，但仍允许同名） |
+| L6 | **`vp` 只实现 19 个 capability**（契约登记 72 个） | 其余 53 个只有文档，没有单步 CLI | 走 scenario（`run.mjs`）或按文档手工驱动；后续按需扩 vp |
+| L7 | **`session.history` 的 `truncated` 语义** 以 runtime 为准 | 大历史下 messages 可能被截断 | 断言关键文本用 `--limit-turns` 收窄 + grep，不要假设全量 |
+
+## 8. dev-flow D3 调用形态（唯一正确写法）
+
+引擎只 `spawn(解释器, [script])`（零参数），因此 verify 节点的 `script` **必须**指向包装壳：
+
+```bash
+# verify 节点 script = <repo>/.agents/skills/verify-taiji/scripts/verify-run.sh
+# 参数全部经 env 传入：
+TAIJI_VERIFY_SCENARIO=scenarios/p0-env-smoke.mjs \
+TAIJI_VERIFY_ARTIFACTS=<artifactsDir>/<node-id> \
+TAIJI_VERIFY_NAME=verify-<node-id> \
+bash .agents/skills/verify-taiji/scripts/verify-run.sh
+```
+
+**不要**把 `script` 直接写成 `scenarios/*.mjs`：ESM 顶层 export 在 node 下是空操作，
+会 exit 0 且零断言（**静默假绿**，比失败更危险）。也不要直接写 `run.mjs`：零参数会 exit 2。
+
+产物锚：`<artifactsDir>/verdict.json` 与 `<artifactsDir>/summary.jsonl` **会在 artifactsDir 根**
+镜像一份（引擎的 `inspectVerdictAnchorOk` 读根），完整细节仍在 `<artifactsDir>/<runId>/<scenarioId>/`。
 
 ---
 

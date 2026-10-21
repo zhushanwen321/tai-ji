@@ -256,7 +256,15 @@ bridge 的 `plugin:statusBarUpdate` / `plugin:statusSetUpdate` / `extension:stat
 
 ## plugin.mountpoints · 挂载点注册与贡献可用性
 
-- **通道**：A（`contribution-item` / `contribution-unavailable`）/ B（`plugin.mountPoints.sync` 上报、`plugin.list` 的 contributions 可用性）/ C（`packages/core/src/bootstrap.ts` 注册清单、插件 manifest 的 `placement`）
+- **通道**：A（`contribution-item` / `contribution-unavailable`，**可用性真值在这里**）/ B（`plugin.mountPoints.sync` 上报帧）/ C（`packages/core/src/bootstrap.ts` 注册清单、插件 manifest 的 `placement`）
+
+  > **[HISTORICAL] 可用性不在 `plugin.list` reply 里**（早期文档这么写，是错的）：
+  > `PluginInfo`（`packages/shared/src/plugin.ts`）只有
+  > `pluginId/version/displayName/description/status/trustLevel/enabled`，**没有 `contributions`**。
+  > 可用性是 renderer 壳内现算的：`useExtensionHostBridge.ts` 的 `toContributionInfos(records, mountPoints)`
+  > → `available: mountPoints.has(c.placement)`，再经 `PluginSettingsDataSourceKey` 注入 UI。
+  > 且 `plugin.mountPoints.sync` 是 renderer → runtime **单向上报**（runtime 只存副本，从不回推）。
+  > → 断言可用性**必须走 A 通道**（或抓 `plugin.mountPoints.sync` 的实际上报帧）；`plugin.list` 只给插件清单。
 - **前置**：`requires: none`；依赖 `plugin.list`
 - **用于**：`p0-plugin-system`（矩阵口径）
 
@@ -265,8 +273,9 @@ bridge 的 `plugin:statusBarUpdate` / `plugin:statusSetUpdate` / `extension:stat
 - 用户 POV：插件页每条 contribution 显示「可用 / 不可用（原因）」。
 - 协议：
   - renderer → runtime：`plugin.mountPoints.sync` `{ mountPoints: string[] }`
-    （renderer 启动/重连时上报自己注册了哪些挂载点；非 OPEN 时静默丢弃、runtime 恒空）；
-  - `plugin.list` reply 的 contributions 带 `available` + `reason`。
+    （renderer 启动/重连时上报自己注册了哪些挂载点；非 OPEN 时静默丢弃、runtime 恒空）。
+    **这是唯一与挂载点相关的 wire 通道**。
+  - `plugin.list` reply **不含** contributions / available / reason（见上方 HISTORICAL 注）。
 - 桌面壳注册的挂载点（**只有三个**，出处 `packages/core/src/bootstrap.ts` 的
   `registerMountPoints()`）：
   ```
@@ -284,25 +293,27 @@ bridge 的 `plugin:statusBarUpdate` / `plugin:statusSetUpdate` / `extension:stat
 
 ### 驱动
 
-1. B 通道取真值：`plugin.list` → 逐 contribution 读 `available` 与 `reason`。
-2. A 通道对照：可用项 testid `contribution-item`，不可用项 `contribution-unavailable`
-   （且文本/`title` 含 `挂载点 X 未注册`）。
-3. 断言桌面壳只注册三个：在 renderer 侧执行
-   `getExtensionRegistries().mountPoints.list()`（或读 `plugin.mountPoints.sync` 的实际帧——
-   用 WS 抓帧更贴近协议），排序后应为 `['composer.toolbar','panel.header','sidebar.tab']`。
-4. 变更注入（可选）：注册一个额外挂载点（仅测试钩子可做）→ 再 `plugin.list`，
-   声明该 placement 的 contribution 应转为 available（不需要重启 runtime）。
+1. **A 通道取真值**（可用性只能从这里读）：设置 → `settings-nav-extension` →
+   `extension-contributions-entry` → 每条贡献项；可用 = `contribution-item`，
+   不可用 = `contribution-unavailable`（文本/`title` 含 `挂载点 X 未注册`）。
+2. **B 通道抓上报帧**：连 WS 后取 `plugin.mountPoints.sync` 的 payload（renderer 启动/
+   重连时上报），排序后应为 `['composer.toolbar','panel.header','sidebar.tab']`。
+   WS 抓帧不可行时退到 `plugin.list` 只验插件清单（**不要**指望它有 contributions）。
+3. **C 通道对账**：`packages/core/src/bootstrap.ts` 的 `registerMountPoints()` 与实际集合一致。
+4. 变更注入（可选）：**没有**「注册额外挂载点后 runtime 回推可用性」的通道——
+   可用性由 renderer 现算，所以注入点必须在 renderer（测试钩子注册 mountPoint 后触发重渲染）。
+   不要设计「再 `plugin.list` 看 available 翻转」的用例（永远不成立）。
 
 ### 断言（期望终态 / 失败信号）
 
 | # | 通道 | 断言 | 失败信号 |
 |---|------|------|----------|
 | 1 | B | 挂载点集合 = 上述三个 | 多出 `statusbar` = 退役代码复活；缺 `panel.header` = headerAction 全不可用 |
-| 2 | B | `contribution-unavailable` 的 reason 含 `挂载点 <name> 未注册` | reason 为空 = 诊断信息丢失 |
+| 2 | A | 不可用项的 reason 含 `挂载点 <name> 未注册` | reason 缺失 = 诊断信息丢失 |
 | 3 | A | 不可用贡献渲染为置灰项且可读原因 | 直接不渲染 = 用户无法知道为何没生效 |
 | 4 | C | `bootstrap.ts` 的 `registerMountPoints` 与实际集合一致 | 源码与实测劈叉 = 文档/实现漂移 |
 
-> 1/2 是 B，3 是 A，4 是 C（根因对照）。挂载点是**壳侧注册制**，runtime 只存副本，
+> 1 是 B，2/3 是 A，4 是 C（根因对照）。挂载点是**壳侧注册制**，runtime 只存副本，
 > 所以「B 通道一致」不等于「渲染真的有宿主组件」——第 3 条同时验呈现。
 
 ### 证据（A/B/C 各抓什么）

@@ -116,7 +116,7 @@ node .agents/skills/verify-taiji/scripts/doctor.mjs <repo> --data-dir <dataDir> 
 ```bash
 # feature 可禁：写 disabled-packages.json 的 npm:<name>（经 extension.toggle）
 # infrastructure 禁：应得 ExtensionInstallError code=infrastructure_cannot_disable
-node scripts/vp.mjs ... # 或直接 protocol.call('extension.toggle', { name: '@zhushanwen/pi-pending-notifications', enabled: false })
+node .agents/skills/verify-taiji/scripts/vp.mjs ... # 或直接 protocol.call('extension.toggle', { name: '@zhushanwen/pi-pending-notifications', enabled: false })
 ```
 
 - 断言：reply 为 error envelope 且 `code=infrastructure_cannot_disable`

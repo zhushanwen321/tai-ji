@@ -58,17 +58,21 @@ await instance.dispose()   // 同时关 mock server + 删自建数据目录
 
 1. **pi 发到 HTTP 的 `model` 是裸 id**（`mock-1`），不是 `provider/model`。`createMockLlm` 两种 key
    写法都兼容，但请求记录里的 `model` 字段永远是裸 id——断言要用裸 id。
-2. **每个 pi 进程各持一条队列游标**：model-keyed 让主进程与每个成员进程各吃自己的队。
-   但若不给 `workflow_run` / `subagent_start` 传 run 级或 task 级 `model`，成员会继承主 agent 模型，
-   与主队共享游标（表现 = 成员拿到主队的 step，断言会串味）。
+2. **游标是 per-model、由 mock server 进程持有**（**不是** per-pi-进程——早期这里写错了，
+   2026-10-22 实测纠正：多个 pi 打同一个 server 必然共享游标）。由此推两条纪律：
+   - 不给 `workflow_run` / `subagent_start` 传 run 级或 task 级 `model` 时，成员继承主 agent 模型 →
+     与主队**共享同一游标**（表现 = 成员拿到主队的 step，断言串味）；
+   - **同一模型被两个 session 顺序使用时，第二个 session 的首轮会拿到第一个的后续 step**。
+     多 session 互不污染的正确做法：① 每个 session 用不同模型（`session.create.modelOverride`）；
+     ② 每组之前 `instance.mockLlm.reset()`；③ 每个 session 独立实例（独立 server）。
 3. **完成通知会触发主 agent 再跑一轮**：主演员队列要备多步，否则命中「剧本耗尽 404」
    （不影响可达性结论，但会让 evidence 里出现 mock 404 噪音）。
 4. **workflow 成员必须调 `structured-output`**：workflow 模式下它是单参数合成工具
    （parameters 即权威 schema），不调用 = `schema_deterministic` 失败。
-5. **并发成员的队列必须「每一步都合法」**：model-keyed 队列的游标是 **per-pi-进程**的，
-   但同模型的多个成员进程共享同一队且并发推进——若剧本是「toolCall 步 + 收尾文本步」交替，
-   交错消费会让某个成员拿到收尾文本那一步 → `schema_deterministic` 失败（2026-10-21 实测：
-   1/2 成员失败）。修法 = 成员队列每步都是能独立收敛的终局调用（`workflow-fanout-mock.json` 即此形态）。
+5. **并发成员的队列必须「每一步都合法」**：同模型的多个成员进程**共享同一队**且并发推进
+   （游标 per-model，见坑 2）——若剧本是「toolCall 步 + 收尾文本步」交替，交错消费会让某个成员
+   拿到收尾文本那一步 → `schema_deterministic` 失败（2026-10-21 实测：1/2 成员失败）。
+   修法 = 成员队列每步都是能独立收敛的终局调用（`workflow-fanout-mock.json` 即此形态）。
 6. **auto-rename 必须关**（`agent/auto-rename-enabled` 删除）：标题生成会经 `llm-shared` 打 mock，
    消耗剧本 step；`ensureLlm` 已自动删除该标志。
 

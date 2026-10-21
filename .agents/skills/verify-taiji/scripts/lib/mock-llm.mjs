@@ -20,8 +20,16 @@
  *   step = { text?, thinking?, toolCalls?: [{ name, args }], stopReason? }
  *   - 数组 = 统一队列（每次请求按序消费一个 step）；
  *   - 对象 = model-keyed（按请求体 `model` 字段选队）——**这是区分主 agent（mock-1）与
- *     subagent 成员（mock-sub-a / mock-sub-b）的关键**：每个 pi 进程各自持有队列游标，
- *     model-keyed 让同一份剧本文件服务整棵进程树。
+ *     subagent 成员（mock-sub-a / mock-sub-b）的关键**：让同一份剧本文件服务整棵进程树。
+ *
+ *   ⚠️ **游标语义（审查 C M11 实测纠正）**：游标是 **per-model 单游标、由 mock server 进程持有**，
+ *   **不是 per-pi-进程**（早期注释写「每个 pi 进程各持一条游标」是错的：多个 pi 打同一个 server，
+ *   自然共享同一个游标）。
+ *   后果：**同一模型被两个 session 使用时，第二个 session 的第一轮会拿到第一个 session 的第二条 step**。
+ *   多 session 互不污染的正确做法（二选一）：
+ *     a) 用 `model-keyed` 给每个 session 分配不同模型（`session.create.modelOverride`）；
+ *     b) 每个 session 用独立实例（独立 mock server），`instance.mockLlm.reset()` 在每组之前归零。
+ *   faux 通道同理（脚本文件是共享的，队列在 pi 进程内 → faux 才是 per-进程）。
  *
  * 出队耗尽 / 未知模型 = HTTP 404 + 结构化 body（pi 侧报错可读，便于归因），**不**伪造回复。
  */
@@ -356,7 +364,12 @@ export async function createMockLlm(opts = {}) {
       for (const [k, v] of cursors) out[k] = v
       return out
     },
-    /** 游标归零（同一实例内复用剧本，例如跨 scenario 步骤）。 */
+    /**
+     * 游标归零（同一实例内复用剧本，例如跨 scenario 步骤）。
+     *
+     * 多 session 场景在「换受测会话」之前调用，避免 A 消费的 step 影响 B 的首轮
+     * （游标 per-model 共享，见文件头游标语义）。
+     */
     reset() {
       cursors.clear()
       requests.length = 0
