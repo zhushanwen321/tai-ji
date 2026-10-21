@@ -1038,6 +1038,28 @@ async function main(): Promise<void> {
           // initLogger monkey-patch 自动落盘。
           console.warn('[runtime] resumeDecision.observe failed (isolated):', e)
         }
+        try {
+          // wool（D6 ③ 报错时刷新）：错误帧文本喂羊毛错误分类——401/未授权 → 条目失效
+          // 徽标（失败路径表「对话 401 分类」判定源）；模型不存在 → 触发一次清单重新
+          // 拉取（选择器缓存自动收敛）。旁路观察同 resumeDecision：单路径异常不炸
+          // interpret 批次。woolManager 为闭包前向引用（createAdapter 仅在 session 建立
+          // 时执行，引用恒就绪——sessionService 同款模式）。
+          for (const ev of events) {
+            if (ev.kind !== 'message') continue
+            if (ev.message.type !== 'message.stream_error' && ev.message.type !== 'message.error') continue
+            // payload 经运行时 guard 收窄（ServerMessage payload 判别联合宽形态，见
+            // protocol.ts 2263-2266 两帧 payload 字段名 content / message）。
+            const payload: unknown = ev.message.payload
+            if (payload === null || typeof payload !== 'object') continue
+            const record = payload as Record<string, unknown>
+            const text = typeof record.content === 'string'
+              ? record.content
+              : typeof record.message === 'string' ? record.message : undefined
+            if (text !== undefined) woolManager.noteSessionError(text)
+          }
+        } catch (e) {
+          console.warn('[runtime] wool session-error observe failed (isolated):', e)
+        }
         interpreter.interpret(events)
         try {
           resumeDecision.settle(sessionId)
@@ -1500,6 +1522,9 @@ async function main(): Promise<void> {
   })
   modelService.setWoolProviderSource(woolManager)
   void woolManager.initialize()
+  // D5 到点提醒：每日签到定时器（产品功能定时白名单形态——autoCheckin 开 = 经管理通道
+  // 自动执行；关 = 拉账号状态 + 广播使「今日未签到」徽标新鲜点亮，即到点提醒呈现载体）。
+  woolManager.startDailyCheckinTimer()
 
   const tServicesReady = performance.now()
   // [subagent-model-switch U6] 模型切换网关生产适配器（§7.1.1 通道）：出站点 prompt +
@@ -1598,6 +1623,8 @@ async function main(): Promise<void> {
     // dispose 是收尾双保险；shutdown 后不再有回收拍）。线会话文件
     // **不删**（退出不删，D5 裁决⑧）；线进程由下方 server.stop → destroyAll 统一杀（同一 pm）。
     btwService.dispose()
+    // wool（D5）：停每日签到提醒定时器（unref 已不阻塞退出，显式 dispose 同款收尾双保险）。
+    woolManager.dispose()
     console.log(`\n[runtime] received ${signal}, shutting down...`)
     try {
       shutdownStep('flush-stores')

@@ -74,13 +74,14 @@ const FAILURE_I18N_KEYS: Record<WoolStepFailureCode, string> = {
   upstream_error: 'wool.errUpstreamError',
   authorize_unavailable: 'wool.errAuthorizeUnavailable',
   extract_unavailable: 'wool.errExtractUnavailable',
+  uninstall_failed: 'wool.errUninstallFailed',
   manage_unavailable: 'wool.errManageUnavailable',
   internal: 'wool.errInternal',
   cancelled: 'wool.errCancelled',
 }
 
 /** 参数化失败文案键集（{message} 占位的键才拼原始 message）。 */
-const PARAMETERIZED = new Set(['wool.errInstallFailed', 'wool.errUpstreamError', 'wool.errInternal', 'wool.errManageUnavailable'])
+const PARAMETERIZED = new Set(['wool.errInstallFailed', 'wool.errUpstreamError', 'wool.errInternal', 'wool.errManageUnavailable', 'wool.errUninstallFailed'])
 
 function failureText(failure: { code: WoolStepFailureCode; message: string }): string {
   const key = FAILURE_I18N_KEYS[failure.code]

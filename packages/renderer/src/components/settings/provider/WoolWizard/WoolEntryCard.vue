@@ -26,6 +26,16 @@
         class="inline-flex h-[18px] shrink-0 items-center rounded-full bg-danger-soft px-[7px] text-[length:var(--text-2xs)] font-semibold text-danger"
       >{{ t('wool.loginExpired') }}</span>
 
+      <!-- 可更新角标（D2 更新提示：installedVersion ≠ 清单 version；点击 = 用户显式触发更新，install 动作钉版本升级） -->
+      <Button
+        v-if="family.updateAvailable"
+        variant="ghost"
+        :data-testid="`wool-entry-update-${family.family}`"
+        class="h-[18px] shrink-0 rounded-full bg-accent-soft px-[7px] py-0 text-[length:var(--text-2xs)] font-semibold text-accent hover:bg-accent-soft hover:text-accent"
+        :title="t('wool.updateHint', { version: family.installedVersion ?? '' })"
+        @click="emit('update')"
+      >{{ t('wool.badgeUpdate') }}</Button>
+
       <!-- 模型数徽标（目录缓存计数 + 数据时点 title） -->
       <span
         v-if="modelCount > 0"
@@ -56,6 +66,18 @@
       >
         <RefreshCw :class="refreshing ? 'animate-spin' : ''" />
       </Button>
+
+      <!-- 卸载按钮（D3 卸载三步编排入口；确认弹窗在 ProviderPage 编排层） -->
+      <Button
+        variant="ghost"
+        class="h-[24px] w-[24px] shrink-0 rounded-md p-0 text-neutral-mid hover:bg-surface-hover hover:text-danger [&_svg]:size-[13px]"
+        :title="t('wool.uninstall')"
+        :data-testid="`wool-entry-uninstall-${family.family}`"
+        :disabled="uninstalling"
+        @click="emit('uninstall')"
+      >
+        <Trash2 />
+      </Button>
     </div>
 
     <!-- 额度条（quota 有值时；used/total 比例 + 文案） -->
@@ -78,12 +100,13 @@
 
 <script setup lang="ts">
 /**
- * 纯展示 + 动作上抛（刷新/签到由 ProviderPage 编排——wool.runAction 后快照经广播回推）。
- * 登录态失效判定（失败路径表）：account.loggedIn=false（status 动作回写）即失效呈现。
+ * 纯展示 + 动作上抛（刷新/签到/更新/卸载由 ProviderPage 编排——wool.runAction 后快照经广播回推）。
+ * 登录态失效判定（失败路径表）：account.loggedIn=false（status 动作回写或对话 401 分类，
+ * 任一命中）即失效呈现。
  */
 import { computed } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { RefreshCw } from '@lucide/vue'
+import { RefreshCw, Trash2 } from '@lucide/vue'
 import { Button } from '@taiji/ui'
 import type { WoolFamilyState } from '@taiji/shared'
 
@@ -91,11 +114,14 @@ const props = defineProps<{
   family: WoolFamilyState
   refreshing?: boolean
   checkinRunning?: boolean
+  uninstalling?: boolean
 }>()
 
 const emit = defineEmits<{
   refresh: []
   checkin: []
+  update: []
+  uninstall: []
 }>()
 
 const { t } = useI18n()

@@ -272,4 +272,23 @@ describe('WoolEntryCard（provider 列表羊毛条目）', () => {
     expect(wrapper.find('[data-testid="wool-entry-login-expired"]').text()).toBe('登录态失效')
     expect(wrapper.find('[data-testid="wool-entry-not-adopted"]').exists()).toBe(true)
   })
+
+  it('可更新角标（updateAvailable → 「可更新」呈现 + 点击上抛 update = D2 用户显式触发更新）；无标记时不渲染', async () => {
+    const wrapper = mountComp(WoolEntryCard, {
+      family: familyState({ installedVersion: '0.1.0', updateAvailable: true }),
+    })
+    expect(wrapper.find('[data-testid="wool-entry-update-qoder"]').text()).toBe('可更新')
+    await wrapper.find('[data-testid="wool-entry-update-qoder"]').trigger('click')
+    expect(wrapper.emitted('update')).toHaveLength(1)
+
+    // 版本一致（无 updateAvailable）→ 角标不渲染。
+    const noUpdate = mountComp(WoolEntryCard, { family: familyState({ installedVersion: '0.2.0' }) })
+    expect(noUpdate.find('[data-testid="wool-entry-update-qoder"]').exists()).toBe(false)
+  })
+
+  it('卸载按钮呈现 + 点击上抛 uninstall（D3 卸载入口；确认弹窗在 ProviderPage 编排层）', async () => {
+    const wrapper = mountComp(WoolEntryCard, { family: familyState() })
+    await wrapper.find('[data-testid="wool-entry-uninstall-qoder"]').trigger('click')
+    expect(wrapper.emitted('uninstall')).toHaveLength(1)
+  })
 })

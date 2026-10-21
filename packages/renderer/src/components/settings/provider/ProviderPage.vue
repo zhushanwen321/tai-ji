@@ -117,12 +117,27 @@
             :family="f"
             :refreshing="woolEntries.runningActions.value.has(f.family)"
             :checkin-running="woolEntries.runningActions.value.has(f.family)"
+            :uninstalling="woolEntries.uninstallingActions.value.has(f.family)"
             @refresh="woolEntries.refreshEntry(f.family)"
             @checkin="woolEntries.checkin(f.family)"
+            @update="woolEntries.updateEntry(f.family)"
+            @uninstall="woolUninstallTarget = f.family"
           />
         </div>
       </GroupCard>
     </section>
+
+    <!-- 羊毛卸载确认弹窗（D3 三步编排入口：清除凭据与模型目录 + 卸载扩展 + 移除羊毛域状态，破坏性动作须确认） -->
+    <ConfirmDialog
+      v-model:open="woolUninstallDialogOpen"
+      variant="danger"
+      :title="t('wool.uninstallConfirmTitle', { name: woolUninstallName })"
+      :description="t('wool.uninstallConfirmDesc')"
+      :confirm-text="t('wool.uninstallConfirmBtn')"
+      :cancel-text="t('wool.cancel')"
+      :loading="woolEntries.uninstallingActions.value.has(woolUninstallTarget ?? '')"
+      @confirm="confirmWoolUninstall"
+    />
 
     <!-- 羊毛接入向导（D6 ①/D7 两族模板） -->
     <WoolWizard v-model:open="woolEntries.wizardOpen.value" />
@@ -398,6 +413,14 @@ const deleteDialogOpen = computed({
     if (!open) deleteTarget.value = null
   },
 })
+
+// ── 羊毛卸载确认（状态与确认编排收在 useWoolEntries；解构别名保持模板引用名）──
+const {
+  uninstallTarget: woolUninstallTarget,
+  uninstallDialogOpen: woolUninstallDialogOpen,
+  uninstallName: woolUninstallName,
+  confirmUninstall: confirmWoolUninstall,
+} = woolEntries
 
 /** 动作错误（删除/启用失败时显示，非静默吞） */
 const actionError = ref('')

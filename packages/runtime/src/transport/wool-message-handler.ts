@@ -5,8 +5,8 @@
  * - wool.getState：拉羊毛域全量运行态快照（family 安装/接入/账号/目录缓存视图；
  *   reply = wool.state，与状态变化广播同名同形——拉为主，广播是失效提示）。
  * - wool.action：触发宿主编排动作（install/detect/status/checkin/refresh/
- *   setAutoCheckin/authorize；payload = WoolActionRequest 信封，动作语义与错误
- *   分级在 wool-manager，handler 只做入口校验 + 转发）。
+ *   setAutoCheckin/authorize/extract/uninstall；payload = WoolActionRequest 信封，
+ *   动作语义与错误分级在 wool-manager，handler 只做入口校验 + 转发）。
  *
  * 校验形态：payload 经 wool 域运行时守卫（isWoolFamilyId / WOOL_ACTION_TYPES）收窄，
  * 非法形态回 invalid_payload error envelope（请求级失败通道，不吞不猜）。

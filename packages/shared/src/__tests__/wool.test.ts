@@ -99,7 +99,7 @@ describe('isWoolDetectData / isWoolFamilyId', () => {
 })
 
 describe('动作词表（wool-manager dispatch 穷举前提）', () => {
-  it('七动作 + extract（透传通道）词表封闭', () => {
-    expect(WOOL_ACTION_TYPES).toEqual(['install', 'detect', 'status', 'checkin', 'refresh', 'setAutoCheckin', 'authorize', 'extract'])
+  it('七动作 + extract（透传通道）+ uninstall（D3 卸载三步编排）词表封闭', () => {
+    expect(WOOL_ACTION_TYPES).toEqual(['install', 'detect', 'status', 'checkin', 'refresh', 'setAutoCheckin', 'authorize', 'extract', 'uninstall'])
   })
 })

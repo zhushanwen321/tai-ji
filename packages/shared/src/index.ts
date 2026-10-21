@@ -508,6 +508,7 @@ export type {
   WoolRuntimeSnapshot,
   WoolStepFailureCode,
   WoolStepStatus,
+  WoolUninstallResult,
   WoolWizardTemplate,
 } from './wool'
 export {

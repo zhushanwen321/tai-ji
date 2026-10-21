@@ -35,6 +35,14 @@ export type UseWoolEntriesReturn = {
    * toast（不静默残留，D3 降级形态——hint 含扩展侧已清项分层说明与 pi 侧 /logout 指引）。
    */
   uninstall: (family: WoolFamilyState['family']) => Promise<void>
+  /** 卸载确认目标（null = 无弹窗；template 赋值触发弹窗）。 */
+  uninstallTarget: Ref<WoolFamilyState['family'] | null>
+  /** 卸载确认弹窗开关（关闭即清目标）。 */
+  uninstallDialogOpen: Ref<boolean>
+  /** 卸载确认弹窗名称（目标家族显示名，无目标为空串）。 */
+  uninstallName: ComputedRef<string>
+  /** 确认卸载（清目标 + 触发三步编排）。 */
+  confirmUninstall: () => void
 }
 
 export function useWoolEntries(): UseWoolEntriesReturn {
@@ -92,7 +100,26 @@ export function useWoolEntries(): UseWoolEntriesReturn {
     }
   }
 
-  return { wizardOpen, adoptedFamilies, runningActions, uninstallingActions, refreshEntry, checkin, updateEntry, uninstall }
+  /** 卸载确认目标与弹窗派生（D3 三步编排的破坏性动作拦截；ExtensionActions 卸载确认同款形态）。 */
+  const uninstallTarget = ref<WoolFamilyState['family'] | null>(null)
+  const uninstallDialogOpen = computed({
+    get: () => uninstallTarget.value !== null,
+    set: (open: boolean) => {
+      if (!open) uninstallTarget.value = null
+    },
+  })
+  const uninstallName = computed(() => {
+    const target = uninstallTarget.value
+    return target !== null ? (adoptedFamilies.value.find((f) => f.family === target)?.displayName ?? target) : ''
+  })
+  function confirmUninstall(): void {
+    const target = uninstallTarget.value
+    if (target === null) return
+    uninstallTarget.value = null
+    void uninstall(target)
+  }
+
+  return { wizardOpen, adoptedFamilies, runningActions, uninstallingActions, refreshEntry, checkin, updateEntry, uninstall, uninstallTarget, uninstallDialogOpen, uninstallName, confirmUninstall }
 }
 
 /** 动作参数形态别名（setAutoCheckin 的 { enabled }；其余动作无参）。 */

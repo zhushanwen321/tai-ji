@@ -139,6 +139,11 @@ export default [
       // 设计文档指定单文件）。职责内聚（同一同步链的生成侧全量实装），拆分 = 按 zcode
       // 读侧 / 纯映射 / 编排三段重组，属独立重构任务。短期 override 避免阻塞，长期应拆分。
       'packages/runtime/src/services/zcode-provider-sync.ts',
+      // 羊毛域唯一编排中心（wool-provider D2/D3/D5/D6：清单拉取 + 安装/卸载编排 +
+      // 管理专用会话生命周期 + 三缓存 + 每日签到提醒定时器 + 会话错误分类，动作全经
+      // runAction 单入口分派）。职责内聚（同一编排状态机的全部动作），拆分 = 按动作族
+      // 重组类内聚状态，属独立重构任务。短期 override 避免阻塞，长期应拆分。
+      'packages/runtime/src/services/wool-manager.ts',
     ],
     rules: {
       'max-lines': 'off',
