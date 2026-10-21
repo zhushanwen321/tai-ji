@@ -1,5 +1,7 @@
 # 对话发送与流式渲染
 
+> **补充（2026-10-21）**：逐能力的断言与失败信号见 `capabilities/chat.md`（`chat.send/stream/wait/abort/steer/revoke/reload-equiv`）。本文件是 UI 叙事版。
+
 用户发消息后看到完整回合：user 气泡 → assistant 流式回复（thinking 块 / 工具调用块 / 文本块）→ 变更集卡 → 收尾；流式中可 steer 追加、可停止中断。这是 taiji 的核心高频路径。
 
 ## Sub-features

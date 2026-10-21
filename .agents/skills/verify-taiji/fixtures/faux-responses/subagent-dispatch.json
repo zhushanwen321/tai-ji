@@ -1,0 +1,14 @@
+{
+  "_note": "依赖孙进程 faux 可达性（subagent pi 以 --no-extensions + 窄白名单启动，faux provider 不在白名单）——见 capabilities/env.md 与 fixtures/faux-responses/README.md「跑不通」节。",
+  "faux/faux-1": [
+    {
+      "text": "派一个子任务去核对：",
+      "toolCalls": [{ "name": "subagent_start", "args": { "task": "列出当前目录的顶层文件名", "slug": "faux-sub", "model": "faux/faux-1-b", "fork": false } }],
+      "stopReason": "toolUse"
+    },
+    { "text": "子任务已派发，等待完成通知（SUBAGENT-DISPATCHED）。", "stopReason": "stop" }
+  ],
+  "faux/faux-1-b": [
+    { "text": "子演员回复：顶层文件已列出（FAUX-SUB-DONE）。", "stopReason": "stop" }
+  ]
+}

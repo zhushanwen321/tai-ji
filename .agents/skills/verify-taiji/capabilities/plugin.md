@@ -47,7 +47,7 @@
 
 - **通道**：A（`plugin-settings-page` + `plugin-card`）/ B（`plugin.list` RPC → reply `config.plugins { plugins: PluginInfo[] }`）/ C（插件安装根目录 + `taijiPlugin` manifest）
 - **前置**：`requires: none`（不需要 LLM）；依赖 `env.ready`
-- **用于**：`p2-plugin-surface`（covers: `plugin.list`, `plugin.mountpoints`）
+- **用于**：`p0-plugin-system`（矩阵口径；covers: `plugin.list`, `plugin.mountpoints`）
 
 ### 入口（用户 POV / 协议 / 副作用点）
 
@@ -62,6 +62,9 @@
   页根 `plugin-settings-page`、卡片 `plugin-card`、`plugin-version`、`plugin-enabled`
   （文本「已启用/已禁用」）、`plugin-trust`（「受信任/沙箱」）、贡献项
   `contribution-item` / `contribution-unavailable`。
+  **weak-anchor 登记**：卡片内没有「启用开关」的独立 testid（状态只能读 `plugin-enabled`
+  文本）；插件行的启停动作锚点也不在源码里（开关控件由 `PluginSettingsPage` 内部渲染，
+  grep `data-testid` 零命中）——真机操作时用 role/开关语义定位，不要臆造 testid。
 
 ### 驱动
 
@@ -113,7 +116,7 @@
 
 - **通道**：A（`plugin-enabled` 文本切换）/ B（`plugin.toggle` / `plugin.approvePermissions` / `plugin.denyPermissions` / `plugin.revokePermissions`）/ C（插件状态持久化文件 + `<dataDir>/logs/runtime-*.log` 的 plugin 段）
 - **前置**：`requires: none`；依赖 `plugin.list`
-- **用于**：`p2-plugin-surface`
+- **用于**：`p0-plugin-system`（矩阵口径）
 
 ### 入口（用户 POV / 协议 / 副作用点）
 
@@ -179,7 +182,7 @@
 
 - **通道**：A（headerAction 按钮 / tray widget）/ B（`plugin.ui.snapshot`、`plugin:headerActionUpdate` 推送）/ C（runtime 日志 + 插件自身日志）
 - **前置**：`requires: none`；依赖 `plugin.list`
-- **用于**：`p2-plugin-surface`
+- **用于**：`p0-plugin-system`（矩阵口径）
 
 ### 入口（用户 POV / 协议 / 副作用点）
 
@@ -195,7 +198,7 @@ bridge 的 `plugin:statusBarUpdate` / `plugin:statusSetUpdate` / `extension:stat
 
 | 点位 | 机制 | 锚点 | 出处 |
 |------|------|------|------|
-| **顶栏按钮（headerAction）** | 插件声明 `contributes.headerActions[]`（`placement` 复用 `panel.header`）+ 运行时 `updateHeaderAction(id,{sessionId,badge,disabled,hidden,tooltip})` | `data-testid = header-action-<pluginId>-<actionId 末段>` | `packages/core/src/extension-host/contribution-registry.ts`（`PLACEMENT_BY_TYPE.headerAction`）；`packages/renderer/src/components/extension/HeaderActionsHost.vue` 的 `actionTestId()`；`packages/plugin-sdk/src/types.ts` 的 `updateHeaderAction` JSDoc |
+| **顶栏按钮（headerAction）** | 插件声明 `contributes.headerActions[]`（`placement` 复用 `panel.header`）+ 运行时 `updateHeaderAction(id,{sessionId,badge,disabled,hidden,tooltip})` | `data-testid = header-action-<pluginId>-<actionId 末段>`（**weak-anchor**：公式推导值，需实测核对一次） | `packages/core/src/extension-host/contribution-registry.ts`（`PLACEMENT_BY_TYPE.headerAction`）；`packages/renderer/src/components/extension/HeaderActionsHost.vue` 的 `actionTestId()`；`packages/plugin-sdk/src/types.ts` 的 `updateHeaderAction` JSDoc |
 | **tray 协议 widget** | pi extension `setWidgetDual` → 托盘 widget 区 | `tray-widget-button` / `tray-widget-panel` | `docs/testing/01-chat-panel-composer.md` §3.1「任务托盘」段 |
 | **modal / 简单对话框** | 插件 `ui.request` → `plugin:uiRequest` → CompanionBand | `companion-band` 家族 | `packages/ui/src/extension-host/CompanionBand.vue` |
 
@@ -255,7 +258,7 @@ bridge 的 `plugin:statusBarUpdate` / `plugin:statusSetUpdate` / `extension:stat
 
 - **通道**：A（`contribution-item` / `contribution-unavailable`）/ B（`plugin.mountPoints.sync` 上报、`plugin.list` 的 contributions 可用性）/ C（`packages/core/src/bootstrap.ts` 注册清单、插件 manifest 的 `placement`）
 - **前置**：`requires: none`；依赖 `plugin.list`
-- **用于**：`p2-plugin-surface`
+- **用于**：`p0-plugin-system`（矩阵口径）
 
 ### 入口（用户 POV / 协议 / 副作用点）
 
@@ -324,4 +327,6 @@ bridge 的 `plugin:statusBarUpdate` / `plugin:statusSetUpdate` / `extension:stat
 - `contribution-unavailable` 的 reason 文案是运行时拼接的中文串（`挂载点 X 未注册`），
   跨语言环境可能变；断言用「包含 `挂载点`」+ testid，不写全等。
 - 挂载点名字大小写敏感（`panel.header` 不是 `panelHeader`）。
+- `contribution-unavailable` 的 reason 是运行时中文拼接串（weak-anchor）：断言只做
+  「包含 `挂载点`」+ testid，不做全等；i18n 化之后要放宽。
 - 别把「pi extension 的 tools 不可用」归到这里——那是 `extension.load` 的范围。

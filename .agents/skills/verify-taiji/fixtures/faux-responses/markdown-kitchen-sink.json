@@ -1,0 +1,13 @@
+[
+  {
+    "toolCalls": [
+      { "name": "write", "args": { "path": ".faux-pic.svg", "content": "<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"160\" height=\"90\"><rect width=\"160\" height=\"90\" fill=\"#7fb89c\"/><text x=\"12\" y=\"50\" font-size=\"14\" fill=\"#18181b\">faux image</text></svg>\n" } },
+      { "name": "write", "args": { "path": ".faux-artifact.html", "content": "<!doctype html><html><body><h1>faux artifact</h1><p>HTML-PREVIEW-OK</p><script>document.title='faux'</script></body></html>\n" } }
+    ],
+    "stopReason": "toolUse"
+  },
+  {
+    "text": "# 渲染全家桶\n\n| 列A | 列B | 列C |\n| --- | --- | --- |\n| 甲乙 | 丙丁 | 戊己 |\n| long-cell-content | 短 | 值 |\n\n```ts\nconst answer: number = 42\nexport function faux(x: number): number { return x + answer }\n```\n\n行内公式 $E = mc^2$，块级公式：\n\n$$\n\\int_0^1 x^2 \\, dx = \\frac{1}{3}\n$$\n\n相对图片（基准 = session cwd）：\n\n![faux-pic](.faux-pic.svg)\n\n```html-preview\n.faux-artifact.html\n```\n\n链接：[外链](https://example.com) 与 [相对链接](docs/DESIGN.md)。\n\nMARKDOWN-KITCHEN-SINK-END。",
+    "stopReason": "stop"
+  }
+]

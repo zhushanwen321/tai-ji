@@ -1,0 +1,7 @@
+[
+  {
+    "thinking": "先确认观察点：thinking 块应逐字流式展开，文本块随后跟进；用 TAIJI_FAUX_TPS=8 可以拉长流式窗口，观察呼吸环、停止按钮与 turn-meta 的 elapsed 计时。",
+    "text": "thinking-stream 剧本的第二段正文用于观察流式中途态与终态差异。\n\n这一段故意写长一些，让流式渲染持续足够久：第一，验证 thinking 与 text 是两个独立的块（而不是被合并成一段）；第二，验证流式期间 DOM 是增量拼接的，终态才与重开 session 的历史一致；第三，验证长文本在窄 pane 下不会被横向撑爆（markdown 宿主宽度约束）。\n\n结尾标记：THINKING-STREAM-END。",
+    "stopReason": "stop"
+  }
+]

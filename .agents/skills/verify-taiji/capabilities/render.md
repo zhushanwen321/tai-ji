@@ -18,7 +18,7 @@ testid 权威：`docs/testing/01-chat-panel-composer.md` §3（对话流锚点�
 
 - **通道**：A（`block-text` 内的 `.md-render` DOM）/ B（`session.history` 原文）/ C（pi jsonl 的 assistant 消息）
 - **前置**：`requires: faux`（让 agent 吐 markdown）；依赖 `chat.send` / `chat.wait`
-- **用于**：`p1-render-markdown`（covers: `render.markdown`, `render.shiki`, `chat.stream`）
+- **用于**：`p0-markdown-render`（矩阵口径；covers: `render.markdown`, `render.shiki`, `chat.stream`）
 
 ### 入口（用户 POV / 协议 / 副作用点）
 
@@ -105,7 +105,7 @@ testid 权威：`docs/testing/01-chat-panel-composer.md` §3（对话流锚点�
 
 - **通道**：A（`.shiki` span + `--shiki-*` 计算样式）/ B（`session.history` 围栏语言标记）/ C（无独立落盘）
 - **前置**：`requires: faux`；依赖 `render.markdown`
-- **用于**：`p2-render-shiki`（covers: `render.shiki`, `render.markdown`）
+- **用于**：`p2-render-shiki`（矩阵伞形 `p0-markdown-render`；covers: `render.shiki`, `render.markdown`）
 
 ### 入口（用户 POV / 协议 / 副作用点）
 
@@ -182,7 +182,7 @@ testid 权威：`docs/testing/01-chat-panel-composer.md` §3（对话流锚点�
 
 - **通道**：A（`html-preview-inline` / `html-preview-frame` / `html-preview-degraded`）/ B（`localFile:servable` 预检 IPC 结果——不进 WS 协议）/ C（`<dataDir>/ext-sessions/<sid>/artifacts/` 产物文件）
 - **前置**：`requires: faux`（让 agent 写 HTML 并给出路径）+ 依赖 `render.markdown` / `chat.send`
-- **用于**：`p1-render-html-preview`（covers: `render.html-preview`, `render.markdown`, `evidence.tree`）
+- **用于**：`p1-render-html-preview`（矩阵伞形 `p0-markdown-render`；covers: `render.html-preview`, `render.markdown`, `evidence.tree`）
 
 ### 入口（用户 POV / 协议 / 副作用点）
 
@@ -258,7 +258,8 @@ testid 权威：`docs/testing/01-chat-panel-composer.md` §3（对话流锚点�
 - 围栏内容**只是路径**，不是 HTML 源码；` ```html-preview ` 后面写 HTML 会被当路径解析
   → 降级 `not_found`（常见误用）。
 - 产物目录 `<dataDir>/ext-sessions/<sid>/artifacts/` 在 `local-file` 全量白名单内；
-  但**读/预检通道**只放行「会话产物子树」（`computeLocalFileReadPrefixes`），
+  但**读/预检通道**只放行「会话产物子树」（`apps/electron/main/utils/local-file-prefixes.ts`
+的 `computeLocalFileReadPrefixes`），
   其它 `<dataDir>` 下的文件会被 `out_of_whitelist` 拒绝——这是刻意的收窄。
 - iframe 用 `allow-scripts` + **无** `allow-same-origin`：产物里的
   `localStorage`/`parent.document` 访问会抛错，这是 sandbox 语义，不是产物 bug。
@@ -272,7 +273,7 @@ testid 权威：`docs/testing/01-chat-panel-composer.md` §3（对话流锚点�
 
 - **通道**：A（`change-set-card` / `change-set-file` + 工具块）/ B（`message.tool_call_end` 的 `fileChanges`）/ C（`git status --porcelain`、`git diff --numstat`）
 - **前置**：`requires: faux`（让 agent 真的改文件）；依赖 `chat.send` / `chat.wait` / `render.markdown`
-- **用于**：`p1-render-changeset`（covers: `render.changeset`, `chat.send`）
+- **用于**：`p1-tool-call-render`（矩阵口径；covers: `render.changeset`, `chat.send`）
 
 ### 入口（用户 POV / 协议 / 副作用点）
 
@@ -351,7 +352,7 @@ testid 权威：`docs/testing/01-chat-panel-composer.md` §3（对话流锚点�
 
 - **通道**：A（`tool-image` / `tool-image-placeholder` / `tool-image-fallback`）/ B（`message.tool_call_end` 的 content 图片块）/ C（`<dataDir>/ext-sessions/<sid>/image-cache/`、`attachments/`）
 - **前置**：`requires: faux`（让 agent 返回图片块或用工具产出图片）；依赖 `chat.send` / `render.markdown`
-- **用于**：`p2-render-image`（covers: `render.image`, `chat.send`）
+- **用于**：`p2-render-image`（矩阵伞形 `p1-tool-call-render`；covers: `render.image`, `chat.send`）
 
 ### 入口（用户 POV / 协议 / 副作用点）
 
@@ -367,7 +368,8 @@ testid 权威：`docs/testing/01-chat-panel-composer.md` §3（对话流锚点�
     （推导 `packages/shared/src/paths.ts` 的 `getImageCacheDir`）；
   - 用户附件 = `.../attachments/`（`getAttachmentsDir`）；
   - URL 构造单点 = `packages/shared/src/local-file-url.ts`（`local-file:///` + encodeURIComponent）；
-    主进程白名单见 `apps/electron/main/gateway/local-file-handlers`。
+    主进程白名单见 `apps/electron/main/gateway/local-file-handlers.ts` 与
+`apps/electron/main/utils/local-file-prefixes.ts`。
 
 ### 驱动
 
@@ -402,7 +404,9 @@ testid 权威：`docs/testing/01-chat-panel-composer.md` §3（对话流锚点�
 - **当前无图片夹具**：仓内 faux 剧本库没有「工具返回图片」的现成脚本
   （`grep -rn "type: 'image'" packages/runtime/src/__tests__/fixtures/` 无命中）。
   → 本 capability 在 v1 记 `verified-unreachable`，前置缺失 = **需补一个返回图片块的
-  faux 剧本**（或一个 `read` 图片文件的工具调用）。
+  faux 剧本**。可行路径（未实测）：faux 让 agent 调 `read` 读一张仓内真实 PNG
+  （如 `docs/assets/logo/assets/qianwen/logo-square.png`）——`read` 对图片返回 attachment
+  块，正好落到 `ToolResultImages` 的三态渲染。补剧本时同批更新本文件与 README 索引。
 - **大图/超限截断**：`local-file` 有大小限制（按白名单 handler 实读），未验边界。
 - **图片 EXIF/方向**：浏览器行为，不做断言。
 - **用户粘贴图片（剪贴板）**：CDP 不能可靠设剪贴板图片 → 不可驱动。
@@ -417,3 +421,68 @@ testid 权威：`docs/testing/01-chat-panel-composer.md` §3（对话流锚点�
   （条件轮询，禁 sleep）。
 - 附件目录（`attachments/`）与图片缓存（`image-cache/`）语义不同：
   前者是用户输入，后者是工具结果缓存；删除会话时整树回收（ADR-0151）。
+
+---
+
+## render.tool-call · 工具调用过程展示（工具块 + 结果 + 变更集联动）
+
+- **通道**：A（工具块渲染态 / 强制展开 / 失败态）/ B（工具调用 entry 与 `tool_call` 索引）/ C（工具真实副作用：文件写入、git diff、后台任务登记）
+- **前置**：`requires: faux`（faux 可编排 toolCalls，零 token）；依赖 `chat.send` `chat.wait`
+- **用于**：覆盖矩阵 P1 行「工具调用过程展示」；被 `render.changeset` 复用
+
+## 入口（用户 POV / 协议 / 副作用点）
+
+- 用户 POV：assistant 回合里出现工具块（工具名 + 输入 + 输出），running 态强制展开、完成可折叠、失败态红标；工具改了文件则追加变更集卡。
+- 协议：`message.*` 事件流里的 tool 相关 entry；`session.history` 回读同样 entry（live ≡ reload）。
+- 副作用点：`<dataDir>/ext-sessions/<sid>/logs/pi-<date>.jsonl` 的 tool 调用记录；工具自身副作用（写文件 / 后台任务登记）。
+
+## 驱动
+
+```bash
+# faux 剧本：一回合内调 bash，再一回合收尾
+node .agents/skills/verify-taiji/scripts/seed-faux.mjs <repo> ~/.taiji-dev/verify-<runId> \
+  .agents/skills/verify-taiji/fixtures/faux-responses/tool-bash.json
+# 变更集用它（需要 cwd 是 git 仓库）
+# fixtures/faux-responses/tool-edit.json
+
+PW="node ~/.agents/skills/browser-automation/scripts/pw.js http://localhost:<cdpPort>"
+$PW wait "testid=chat-view"
+$PW text "css=[data-testid^='trace-tool']"     # 工具块容器（.trace-tool）
+$PW text "testid=bash-output"                   # bash 工具的输出块
+$PW text "testid=bash-status-tag"               # 运行/完成/失败状态标签
+```
+
+变更集：
+
+```bash
+$PW wait "testid=change-set-card"
+$PW text "testid=change-set-header"
+$PW text "testid=change-set-file"
+cd <repo> && git status --porcelain    # C 通道对照
+```
+
+## 断言（期望终态 / 失败信号）
+
+- 期望终态：工具块在场且**工具名可从 DOM 取到**；running 态展开；完成后可折叠但 header 恒在；失败态有显式标记；变更集卡列出真实改动文件且状态与 `git status` 一致。
+- 失败信号：
+  - 只见「黑盒回合」（无工具块）→ 工具调用过程展示挂掉（P1 契约：挂了只见黑盒）；
+  - 工具块 header 有但内容永久空白 → 输出通道断；
+  - 变更集卡的文与 `git status` 不一致 → 变更集派生源错（以 git 为真）。
+
+## 证据（A/B/C 各抓什么）
+
+- **A（主）**：工具块 / 输出 / 状态标签 / 变更集卡的截图与 DOM 文本。
+- **B**：`session.history` 里对应的 tool entry（证明 live 渲染不是前端造的）。
+- **C**：pi jsonl 的 tool 调用行 + `git status` + 工具真实产物（新建的文件）。
+
+## 证不了
+
+- 工具**执行结果正确性**（那是工具本身的契约，由 `base-tool-enhance` 等包的单测承担）；本原语只证「过程被正确呈现」。
+- 折叠态的动画质量（视觉轨归 e2e-visual）。
+
+## Gotchas
+
+- **工具块 header 是两个独立 span**（「工具」+ 工具名）→ 跨 span 的 `getByText` 不可靠；限定 `.trace-tool` 容器后取文本，或用 `bash-*` / `change-set-*` 家族 testid。
+- **变更集依赖 git 基线**：cwd 不是 git 仓库时不会出现变更集卡（预期行为，不是失败）。
+- **工具运行期间回合停在工具执行态**：不要把「没有文本流」误判为挂死（对照 `bash-status-tag` 是否在动）。
+- **同一工具多次调用**：`trace-tool` 是 class 不是 testid，容器选择器要靠 `[data-testid^=...]` 或 class 组合；块级序号不稳定，断言用「至少 N 个」而不是「第 N 个」。

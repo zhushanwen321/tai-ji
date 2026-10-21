@@ -1,0 +1,19 @@
+[
+  {
+    "toolCalls": [{ "name": "tool_search", "args": { "query": "canvas enter problem solving" } }],
+    "stopReason": "toolUse"
+  },
+  {
+    "toolCalls": [{
+      "name": "canvas_enter",
+      "args": {
+        "name": "faux-canvas",
+        "statement": "决定 faux 验收是否需要一个画布剧本",
+        "criterias": ["画布能在会话内创建并自动打开", "用户裁决能回推给 agent"],
+        "scope": ["不覆盖导出产物内容质量"]
+      }
+    }],
+    "stopReason": "toolUse"
+  },
+  { "text": "画布已创建（CANVAS-ENTER-DONE）；接下来应由用户在画布上裁决。", "stopReason": "stop" }
+]

@@ -70,7 +70,7 @@ const p = await createProtocol({ dataDir, runtimePort })   // 自动读 <dataDir
 
 | 成员 | 签名 | 说明 |
 |------|------|------|
-| `call(type, payload, opts?)` | `async (type, payload, { replyType?, id?, timeoutMs=60_000 }) => replyPayload` | 发 RPC 等匹配 reply；`replyType` 省略 = 与 type 同名（协议表 `ReplyPayloadMap`）。超时抛含 type 的错 |
+| `call(type, payload, opts?)` | `async (type, payload, { replyType?, id?, timeoutMs=60_000 }) => replyPayload` | 发 RPC 等匹配 reply。**`replyType` 省略时不能假设「与 type 同名」**——协议里大量异名对（如 `message.send`→`message.status`、`session.create`→`session.created`、`plugin.list`→`config.plugins`、`session.getCommands`→`session.commands`、`session.getContext`→`context.update`、`extension.list`→`config.extensions`）。`lib/protocol.mjs` 内置异名映射表（`REPLY_OF`），未登记的 type 才回落同名。**注意 `config.get` 不存在**（协议无此 RPC；连通性探针用 `ping`→`pong`，配置读取用 `config.sessions` 等具体 RPC）。超时抛含 type 的错 |
 | `subscribe(sessionId, opts?)` | `async (sid, { fromSeq? }) => { snapshot, stateSnapshot, lastSeq }` | `session.subscribe`；返回快照 |
 | `events` | `Array` | 收到的**广播帧**（无 id 的 message），带 `type/payload/receivedAt` |
 | `waitFor(predicate, opts?)` | `async ((evt)=>bool, { timeoutMs=30_000, since? }) => evt` | 轮询事件队列（**条件等待，禁固定 sleep**）。超时抛时附最近 20 帧类型摘要（区分「慢」与「死」） |
@@ -159,9 +159,14 @@ export const meta = {
   estimateSec: 90,
   provable: ['...'],
   notProvable: ['...'],
+  // 可选：faux 装配（runner 不读 global，只认这里；等价于 createInstance 的 faux 选项）
+  faux: { responses: [...], tps: 20, force: true },
 }
 export async function run(ctx) { /* ctx = { repo, instance, protocol, ui, ev, dataDir, log } */ }
 ```
+
+> `meta.faux` 是 v1 的既定扩展位（`scripts/run.mjs` 已实装：`meta.faux ?? scenario.faux`）；
+> 未声明则不启用 faux 装配。
 
 runner 职责（scenario 只写业务步骤）：
 1. 分配 runId + runDir + 独立实例名（默认识 `meta.id`）；2. `instance.launch/waitReady/doctor`；
@@ -244,3 +249,15 @@ runner 职责（scenario 只写业务步骤）：
 
 ### evidence（取证原语）
 `evidence.tree` · `evidence.logs` · `evidence.grep` · `evidence.screenshot`
+
+### CLI 别名说明（`scripts/vp.mjs` 侧）
+`vp.mjs` 的 `shell.grep` 是 `evidence.grep` 的**同名兼容别名**（早期草案值，两者必须同时存在）；
+新增 capability id 时不要再引入第二套命名。
+
+### 覆盖矩阵必备的衍生 id（v1.1 补登，2026-10-21）
+以下四个 id 在覆盖矩阵里被标为「需要但缺失」，现补入清单：
+
+`model.live-sync` · `ui.container` · `render.tool-call` · `subagent.session-observation`
+
+doc 归属：`model.live-sync` → [model.md](model.md)；`ui.container` → [workspace.md](workspace.md)；
+`render.tool-call` → [render.md](render.md)；`subagent.session-observation` → [subagent.md](subagent.md)。

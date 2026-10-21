@@ -1,0 +1,8 @@
+[
+  {
+    "text": "执行一次需要审批的命令：",
+    "toolCalls": [{ "name": "bash", "args": { "command": "echo permission-approval-ok" } }],
+    "stopReason": "toolUse"
+  },
+  { "text": "审批通过后命令已执行（输出应含 permission-approval-ok）；若在审批层点取消，应看到工具被 deny。", "stopReason": "stop" }
+]

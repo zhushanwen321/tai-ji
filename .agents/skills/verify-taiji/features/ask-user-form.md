@@ -1,5 +1,7 @@
 # 统一提问表单（FormOverlay）
 
+> **已知缺陷（2026-10-21）**：本文件 §Driving 的示例脚本第二题只给了 1 个 option，而 `pi-ask-user` 的 `QuestionSchema.options = { minItems: 2, maxItems: 4 }`——照抄会被扩展层校验拦住（拿到的不是表单）。可直接用 `fixtures/faux-responses/ask-user-two-questions.json`（每题 2 个 option，正确形态）。字段名是 `multiSelect`（不是 `multi`）。
+
 agent 遇到无法自行消解的歧义时，经 ask-user/scheduler/plan 共用的统一浮层向用户提问：多题 tab、每题选项（label + description）、自动附加 Other 自由输入。这是 agent↔用户交互闭环的唯一通道——挂了 agent 提问无人应答。
 
 ## Sub-features

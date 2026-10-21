@@ -19,7 +19,7 @@
 - **通道**：A（表单浮层 + 提交后对话流）/ B（`session.history` 末态、工具调用帧）/ C（pi jsonl 工具记录、会话树 logs）
 - **前置**：`requires: faux`（唯一触发入口是 agent 调工具）+ 依赖 `session.create` / `chat.send` / `chat.wait` / `extension.load`
   （`@zhushanwen/pi-ask-user` 属 `feature` tier，随 builtin 恒装载）
-- **用于**：`p0-askuser-form`（covers: `interaction.askuser`, `chat.send`, `chat.wait`）
+- **用于**：`p0-form-overlay`（矩阵口径；covers: `interaction.askuser`, `chat.send`, `chat.wait`）
 
 ### 入口（用户 POV / 协议 / 副作用点）
 
@@ -106,7 +106,7 @@
 - **通道**：A（审批浮层）/ B（`session.history` 工具结果、`plugin:permissionRequest` 广播）/ C（权限配置写回、pi jsonl、扩展日志）
 - **前置**：`requires: faux`（触发工具调用）+ 依赖 `chat.send` / `chat.wait` / `extension.load`；
   **权限模式必须不是 `yolo`**（默认就是 `yolo`，见下）
-- **用于**：`p0-permission-approval`（covers: `interaction.permission`, `chat.send`, `chat.wait`）
+- **用于**：`p1-permission-approval`（矩阵口径；covers: `interaction.permission`, `chat.send`, `chat.wait`）
 
 ### 入口（用户 POV / 协议 / 副作用点）
 
@@ -353,8 +353,9 @@ B 体系：无默认夹具，见「证不了」。
 
 ### 驱动
 
-1. 预置：**本轮 faux 剧本库不含 canvas 剧本**（deferred 激活链未实测，见报告「跑不通」清单）。
-   要用时按两步自写：step1 `tool_search` `{"query":"canvas enter problem solving"}`，
+1. 预置：faux 剧本 `fixtures/faux-responses/canvas-enter.json`（三步：`tool_search` → `canvas_enter`
+   → 收尾文本；**deferred 激活链未实测**，见 README「跑不通」节）。若不用该剧本，手写等价两步：
+   step1 `tool_search` `{"query":"canvas enter problem solving"}`，
    step2 `canvas_enter` `{"statement":"…","criterias":["…"],"scope":["…"]}`
    （参数 schema 出处：`extensions/taiji/canvas/src/tool-enter.ts` 的 `CanvasEnterParams`）。
 2. 后置断言入口（不经 GUI 也能验状态）：`protocol.call('canvas.list', { sessionId })`。

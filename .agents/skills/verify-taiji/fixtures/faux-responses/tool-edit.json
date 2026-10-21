@@ -1,0 +1,11 @@
+[
+  {
+    "text": "写入一个临时文件并做一次精确替换，用于触发变更集卡：",
+    "toolCalls": [
+      { "name": "write", "args": { "path": ".faux-changeset.txt", "content": "faux-v1\n" } },
+      { "name": "edit", "args": { "path": ".faux-changeset.txt", "edits": [{ "oldText": "faux-v1", "newText": "faux-v2" }] } }
+    ],
+    "stopReason": "toolUse"
+  },
+  { "text": "已完成 write + edit：`.faux-changeset.txt` 应出现在变更集卡里（未跟踪文件 = A）。", "stopReason": "stop" }
+]

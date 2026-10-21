@@ -1,5 +1,11 @@
 # 多会话管理
 
+> **已知漂移（2026-10-21，以 `capabilities/session.md` 为准）**：
+> ① 会话行根 = `.session-item[role=button]`（`aria-label` = label）；`session-detail-card` 是 hover 详情卡（Teleport 到 body 的 232px 浮层），点它不会切会话。
+> ② 归档是**两段确认**（首击进 accent 确认态、title 变「再次点击确认归档」，二击才执行）。
+> ③ 彻底删除的按钮 `archive-row-purge-btn` 在**归档列表行**悬停双钮里；`archive-summary-view` 只有 `archive-restore-button`，没有删除。
+> ④ `session.delete`（单会话真删）**没有用户 UI 入口**，A 通道只能证明「列表消失」；要验证删除必须走协议。
+
 侧栏会话列表的浏览、切换、归档与删除，以及行级右键菜单（停止 / 强制退出 / 标记完成 / 导出）。删除会话 = 整棵会话数据树移出（归档 → 彻底删除两级）。
 
 ## Sub-features

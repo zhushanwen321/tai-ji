@@ -26,8 +26,9 @@
   含 `name/displayName/version/enabled/source/layer/tier/mandatory`；
   出处：`packages/shared/src/protocol.ts` 的 `'extension.list'` + `packages/shared/src/extension.ts`
   的 `ExtensionInfo`）。
-- `extension.toggle`（`{ name, enabled }`）→ reply `config.extensions`；
-  `extension.uninstall` / `extension.upgrade` → reply 同名。
+- `extension.toggle`（`{ name, enabled }`）→ reply `config.extensions`（全量列表）；
+  `extension.uninstall` / `extension.upgrade` 的 reply 在协议表里标 `void`，前端靠
+  `config.extensions` 广播刷新列表（两者注释同源，以协议表为准）。
 - `session.getCommands`（`{ sessionId }`）→ reply `session.commands`
   （`commands[]` 含 `name/description/source/sourceInfo.path`；
   出处：`packages/shared/src/protocol.ts` 的 `CommandSourceInfo`）。
@@ -78,9 +79,13 @@ node .agents/skills/verify-taiji/scripts/doctor.mjs <repo> --data-dir <dataDir> 
 - 语义（**必须这样理解**）：
   - `N` = 去重后**目录数**（六源合并，first-write-wins）；
   - dev 实例典型值 = 21 builtin（源码布局 `extensions/<group>/<pkg>`） + 可选用户源
-    （`TAIJI_EXTENSION_PATHS`，faux 装配时会多一个 `e2e/fixtures/faux-provider-ext`）；
-  - `--no-extensions` 下 `M` 的来源数量取决于装配（dev 常见 2~3：bundled + user[+ settings]）；
-  - **N ≥ 8 只是「有东西被解析」的下限 smoke**，不是「21 个都在」的断言。
+    （`TAIJI_EXTENSION_PATHS`，faux 装配时会多一个 `e2e/fixtures/faux-provider-ext`）
+    + settings/npm/third-party 源里实际存在的东西（用户装过就 > 21）；
+  - `M` = `sources.length`，`bundled` / `third-party` / `settings` / `npm` **四源恒 push**
+    （即使扫出空 Map），`user`（`TAIJI_EXTENSION_PATHS`）与 `discovery`（discovery.json）
+    仅在非空时 push → **M ≥ 4**，dev 常见 5；
+  - **N ≥ 8 只是「有东西被解析」的下限 smoke**（阈值 8 硬编码在技能内 `scripts/doctor.mjs`，
+    无来源注释），不是「21 个都在」的断言。
 - 反向证据（C）：`cat <dataDir>/run/pi-spawn-markers.json` —— 该实例最近一次 pi spawn
   实际收到的 staged 专属 `--extension` 路径清单（原子覆盖写，JSON 字符串数组）。
   这是**比日志更硬的事实**：日志说「解析了 N 个」，清单说「真正传给了 pi 哪些」。
@@ -173,16 +178,21 @@ node scripts/vp.mjs ... # 或直接 protocol.call('extension.toggle', { name: '@
 - **`--no-extensions` 是硬事实**：`<dataDir>/agent/extensions/` 下的文件（`seed-faux.mjs`
   会把 `faux-llm-ext.ts` 拷到这里）**不会**被 pi 自动发现；faux 能工作是因为
   `TAIJI_EXTENSION_PATHS=<repo>/e2e/fixtures/faux-provider-ext` 走进了 `user` 源，
-  再由 runtime 拼成 `--extension`。`seed-faux.mjs` 里「pi 孙进程自动发现装载用」的注释
-  是**过时/错误**的（孙进程另有窄白名单，见 `capabilities/env.md` 与报告）。
+  再由 runtime 拼成 `--extension`。
+  孙进程侧只有 e2e harness 能用到那个拷贝：`resolveE2eFauxExtensionPath()` 要求
+  **`TAIJI_E2E=1`** 且文件在盘，才把它追加进孙进程的 `--extension` 白名单
+  （出处 `extensions/universal/subagent-workflow/src/host/pi-host.ts`）。
+  → `seed-faux.mjs` 里「pi 孙进程自动发现装载用」的注释**机制上不成立**（`--no-extensions`
+  下无自动发现），只在 e2e 轨经显式放行门生效；dev 验收的孙进程仍不可用（详见
+  `capabilities/env.md` 的实测证据）。
 - 扩展开关**不影响已存在的 session**（pi 进程已起）；验禁用必须新建 session 或重启实例。
 - dev 下 builtin 扩展的路径是**源码目录** `extensions/<group>/<pkg>`（resolver 的 dev 分支），
   打包后是 `Resources/extensions/@zhushanwen/<pkg>`。断言路径时两种形态都要认
   （`pi-spawn-markers.json` 的登记规则见 `spawn-markers.ts` 的「三根」注释）。
 - `resolved N` 的 N 会随装配变化（多一个 user 源就 +1）。**不要把它写成等值断言**，
   只做下限（≥8）。
-- doctor 的「N ≥ 8」历史上是从高频必装包的经验值来的；现在 21 个 builtin 里
-  8 个 infrastructure + 13 个 feature（见 `mandatory-extensions.json` 的 tier 字段）
-  ——**以文件为准**。
+- doctor 的「N ≥ 8」是**下限 smoke**（阈值硬编码在技能内 `scripts/doctor.mjs`，无注释说明依据），
+  不要反推「应该有 8 个」；builtin 清单现状 = 21 条（8 infrastructure + 13 feature，
+  以 `mandatory-extensions.json` 的 tier 字段为准）。
 - `TAIJI_AGENT_DEBUG=1` 才是 DEBUG 全量；默认只有 `TAIJI_AGENT_EXT_LOG=1` 的 INFO 档。
   找不到某扩展的 debug 行是正常的。

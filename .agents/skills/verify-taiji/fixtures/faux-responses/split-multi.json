@@ -1,0 +1,5 @@
+[
+  { "text": "第一轮：出队消息 1（SPLIT-1）。", "stopReason": "stop" },
+  { "text": "第二轮：出队消息 2（SPLIT-2），用于验证多轮各自消费一个 step。", "stopReason": "stop" },
+  { "text": "第三轮：出队消息 3（SPLIT-3），脚本到此耗尽，再发消息应命中 faux 耗尽错误。", "stopReason": "stop" }
+]

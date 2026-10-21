@@ -24,7 +24,7 @@ nav id 清单同文件 `MENU` 常量：`provider` / `skill` / `agent` / `extensi
 
 - **通道**：A（设置页 provider 列表）/ B（`config.getProviders` reply + `config.providerUpdated` 广播）/ C（`<dataDir>/agent/models.json`、`<dataDir>/agent/config/providers.json`、`<dataDir>/agent/auth.json`）
 - **前置**：`requires: none`（常规实例或 faux 实例都可；faux 实例列表里只有 `faux` 一个 provider）
-- **用于**：`p0-settings-provider`（covers: `settings.provider`, `env.ready`）；现有用户剧本
+- **用于**：`p0-settings-provider` / 矩阵伞形 `p0-settings`（covers: `settings.provider`, `env.ready`）；现有用户剧本
   `features/settings-provider.md`（本文件与它对齐，不重复其步骤）
 
 ### 入口（用户 POV / 协议 / 副作用点）
@@ -106,7 +106,7 @@ nav id 清单同文件 `MENU` 常量：`provider` / `skill` / `agent` / `extensi
 
 - **通道**：A（SystemPromptPage 两张卡）/ B（`config.getSystemPrompt` / `setSystemPrompt` + `config.systemPrompt` 广播）/ C（`<dataDir>/system-prompt.json`、pi session 的 `taiji:system-prompt` trace entry）
 - **前置**：`requires: faux`（要验「生效」必须让 agent 跑一轮）+ 依赖 `chat.send` / `chat.wait` / `extension.load`
-- **用于**：`p1-settings-system-prompt`（covers: `settings.system-prompt`, `chat.send`）
+- **用于**：`p1-settings-system-prompt`（矩阵伞形 `p0-settings`；covers: `settings.system-prompt`, `chat.send`）
 
 ### 入口（用户 POV / 协议 / 副作用点）
 
@@ -181,7 +181,7 @@ nav id 清单同文件 `MENU` 常量：`provider` / `skill` / `agent` / `extensi
 
 - **通道**：A（`PiPresetsPage` + landing `chip-preset` + 对话态 `preset-chip`）/ B（`preset.list` / `preset.getDefault` / `preset.setDefault` / `preset.create` / `preset.update` / `preset.delete` / `preset.export` / `preset.import`）/ C（`<dataDir>/pi-presets.json`、session 的 `.preset.json` sidecar）
 - **前置**：`requires: none`（纯配置面）；要验「预设影响会话」再叠 `requires: faux`
-- **用于**：`p2-settings-preset`（covers: `settings.preset`）；对话态可见性归
+- **用于**：`p2-settings-preset`（矩阵伞形 `p0-settings`；covers: `settings.preset`）；对话态可见性归
   `docs/testing/01-chat-panel-composer.md` §3.1「模式可见性」段
 
 ### 入口（用户 POV / 协议 / 副作用点）
@@ -257,7 +257,7 @@ nav id 清单同文件 `MENU` 常量：`provider` / `skill` / `agent` / `extensi
 
 - **通道**：A（MCP 分区 / 表单 / 列表行）/ B（`mcp.list` / `mcp.add` / `mcp.update` / `mcp.setEnabled` / `mcp.remove` / `mcp.test` / `mcp.testCancel`）/ C（`<dataDir>/agent/mcp.json`）
 - **前置**：`requires: none`（管理面）；要验「工具真的出现在 agent 侧」需新会话 + `extension.load`
-- **用于**：`p2-settings-mcp`（covers: `settings.mcp`）
+- **用于**：`p2-settings-mcp`（矩阵伞形 `p0-settings`；covers: `settings.mcp`）
 
 ### 入口（用户 POV / 协议 / 副作用点）
 
@@ -332,7 +332,7 @@ nav id 清单同文件 `MENU` 常量：`provider` / `skill` / `agent` / `extensi
 
 - **通道**：A（NetworkPage 三卡）/ B（`config.getNetworkProxy` / `setNetworkProxy` / `testNetworkProxy` / `getNetworkProxyStats` / `resetNetworkProxyStats`）/ C（`<dataDir>/agent/config/network-proxy-ext-config.json`、`<dataDir>/agent/network-proxy-stats.jsonl`）
 - **前置**：`requires: none`（配置面）；「代理真的生效」需真实出站请求（`live`）
-- **用于**：`p1-settings-network-proxy`（covers: `settings.network-proxy`）
+- **用于**：`p1-settings-network-proxy`（矩阵伞形 `p0-settings`；covers: `settings.network-proxy`）
 
 ### 入口（用户 POV / 协议 / 副作用点）
 
@@ -411,7 +411,7 @@ nav id 清单同文件 `MENU` 常量：`provider` / `skill` / `agent` / `extensi
 
 - **通道**：A（AppearancePage + `<html>` 属性）/ B（无 WS RPC——**这是纯前端 KV 存储**）/ C（CDP `localStorage['taiji:system-settings']`）
 - **前置**：`requires: none`；不依赖 runtime 存活（但设置页本身需要壳）
-- **用于**：`p2-settings-theme`（covers: `settings.theme`）
+- **用于**：`p2-settings-theme`（矩阵伞形 `p0-settings`；covers: `settings.theme`）
 
 ### 入口（用户 POV / 协议 / 副作用点）
 

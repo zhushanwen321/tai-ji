@@ -129,7 +129,8 @@ function documentedCapabilityIds() {
   for (const f of fs.readdirSync(dir)) {
     if (!f.endsWith('.md')) continue
     const text = fs.readFileSync(path.join(dir, f), 'utf8')
-    for (const m of text.matchAll(/^#\s+([a-z][a-z0-9-]*(?:\.[a-z0-9-]+)+)\s+·/gm)) ids.add(m[1])
+    // H1-H3 都接受：契约 §4 骨架是 H1，但同批并行交付的域文档用 H2（`## <id> · <名>`）
+    for (const m of text.matchAll(/^#{1,3}\s+([a-z][a-z0-9-]*(?:\.[a-z0-9-]+)+)\s+·/gm)) ids.add(m[1])
   }
   return ids
 }

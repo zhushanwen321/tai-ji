@@ -1,11 +1,19 @@
 ---
 name: verify-taiji
-description: "驱动真实 taiji dev 实例做功能验收：启动、体检（doctor）、CDP 驱动、证据三件套、清理收尾的全流程，外加按功能的验收剧本（features/）。触发词：真机验收、UI 验收、验收 taiji、verify taiji、驱动 dev 实例、faux LLM 验收、mock pi 置换。不用于写 e2e spec（那是 e2e/ 目录的机器资产）也不用于 VITE_MOCK 手工调试。"
+description: "驱动真实 taiji dev 实例做功能验收：启动、体检（doctor）、CDP 驱动、能力原语（capabilities/）、scenario 剧本执行（summary.jsonl/verdict.json）、证据三件套、清理收尾的全流程。触发词：真机验收、UI 验收、验收 taiji、verify taiji、驱动 dev 实例、faux LLM 验收、mock-http 验收、能力原语、scenario runner、mock pi 置换。不用于写 e2e spec（那是 e2e/ 目录的机器资产）也不用于 VITE_MOCK 手工调试。"
 ---
 
 # verify-taiji：taiji 真机验收技能
 
-本文件写给冷启动的验收 agent：把真实 dev 实例拉起来，按用户路径驱动一个功能，抓证据，收尾不留进程。本文件承载通用流程；`features/` 下每份文件是一个功能的验收剧本（入口、步骤、期望终态、坑）。验收前先读 `features/README.md` 的基线前置与证明标准，再读目标功能的剧本。
+本文件写给冷启动的验收 agent：把真实 dev 实例拉起来，按用户路径驱动一个功能，抓证据，收尾不留进程。
+
+**三层结构**（从下往上读）：
+
+1. `SKILL.md`（本文件）= 环境侧总流程：Launch / Doctor / Drive / Evidence / Cleanup；
+2. `capabilities/` = **能力原语层**：68 个原子能力（一个动作 + 断言 + 证据 + 证不了 + 坑），按域拆文件，索引见 [capabilities/README.md](capabilities/README.md)；
+3. `scenarios/` = **验收剧本层**：能力组合成可执行剧本，由 `scripts/run.mjs` 跑出 `summary.jsonl` / `verdict.json` / `report.md`，可直接被 dev-flow D3 消费。
+
+冷启动读序：本文件 §1-§6 → [capabilities/README.md](capabilities/README.md) → [capabilities/P0-P1-COVERAGE.md](capabilities/P0-P1-COVERAGE.md)（要验的功能在哪一行）→ 目标域的 `capabilities/<域>.md` → 目标 scenario。`features/` 保留人读的端到端故事（见 §8），漂移以 capability 为准。
 
 ## 0. 定位与边界
 
@@ -13,7 +21,7 @@ description: "驱动真实 taiji dev 实例做功能验收：启动、体检（d
 - 与既有验证体系的边界（不许越界，防止变成第六套验证体系）：
   - `e2e/` 的 playwright spec 与 `docs/testing/e2e-map.json` 是机器资产（CI/开发期按改动范围触发）；本技能不写 spec、不进 CI、不登记 e2e-map。
   - `docs/testing/` 分域手册是 testid 清单与已知坑的权威源；feature 剧本引用它们，不复制清单。
-- 驱动对话类功能（需要 LLM 回复）用 **faux LLM 装配**（默认，凭证无关零 token）；faux 覆盖不到的场景用 **mock pi 置换**（见 §1.3）。
+- 驱动对话类功能（需要 LLM 回复）的通道三选一：**faux**（主会话默认，凭证无关零 token）→ **mock-http**（本地 OpenAI 兼容 mock server；孙进程即 subagent/workflow 执行层**只有这条零 token 通道**）→ **live**（真模型智能或真鉴权）。详见 [capabilities/README.md §3](capabilities/README.md)。faux 覆盖不到的进程级行为用 **mock pi 置换**（见 §1.3）。
 
 ## 1. Launch
 
@@ -139,7 +147,7 @@ node .agents/skills/verify-taiji/scripts/doctor.mjs <repo> [--data-dir <dir>]
 
 ## 6. Helpers
 
-两个脚本都零依赖（node 内置模块），从任意 cwd 调用，`<repo>` 传 worktree 根绝对路径：
+四个脚本都零依赖（node 内置模块），从任意 cwd 调用，`<repo>` 传 worktree 根绝对路径：
 
 ```bash
 # 体检：五项判定 + 实际端口/数据目录（--json 给机器可读输出）
@@ -147,20 +155,42 @@ node .agents/skills/verify-taiji/scripts/doctor.mjs <repo> [--data-dir <dir>] [-
 
 # 预置 faux 数据目录并打印启动命令（responses.json 不传则写默认单轮演示脚本；--force 覆盖已存在的预置）
 node .agents/skills/verify-taiji/scripts/seed-faux.mjs <repo> <dataDir> [responses.json] [--force]
+
+# 能力原语单步 CLI（stateless / 单行 JSON / 可组合，供 codemode 编排）
+node .agents/skills/verify-taiji/scripts/vp.mjs <capability> --data-dir <dir> [flags] [--json]
+
+# scenario runner（组合原语 → summary.jsonl + verdict.json + report.md）
+node .agents/skills/verify-taiji/scripts/run.mjs scenarios/<id>.mjs --artifacts-dir <dir> [--json]
+
+# 探针：孙进程 LLM 可达性（faux 不可达 / mock-http 可达）
+node .agents/skills/verify-taiji/scripts/probes/faux-grandchild.mjs [--repo <repo>]
 ```
 
-## 7. Feature map
+## 7. 能力原语层与验收剧本
 
-`features/` 是本仓验收剧本的登记处：README 是索引 + 基线前置 + 证明标准，每个功能一个文件（四段式：Sub-features / 用户入口 / 驱动剧本 / Gotchas）。驱动某功能前先读对应文件；剧本里没覆盖的入口点验到了要回写剧本（这是 map 保持可信的唯一方式）。当前登记五个 P0 功能：
+本技能分两层，**驱动任何功能前先读对应的 capability，再读 scenario**：
 
-| 文件 | 功能 |
-|------|------|
-| [features/new-task.md](features/new-task.md) | 新建任务（Landing → 选目录 → 首发提交建 session） |
-| [features/session-management.md](features/session-management.md) | 多会话管理（列表 / 切换 / 归档 / 彻底删除 / 右键菜单） |
-| [features/chat-stream.md](features/chat-stream.md) | 对话发送与流式渲染（thinking / 工具 / 文本 / 变更集 / 中断） |
-| [features/settings-provider.md](features/settings-provider.md) | 设置页 provider 管理 |
-| [features/ask-user-form.md](features/ask-user-form.md) | 统一提问表单 FormOverlay（agent 向用户提问） |
+| 层 | 目录 | 用途 |
+|----|------|------|
+| **能力原语层** | [capabilities/](capabilities/README.md) | 68 个原子能力（进入口 / 驱动 / 断言 / 证据 / 证不了 / 坑），覆盖 env / session / chat / model / subagent / workflow / interaction / settings / plugin / extension / render / workspace / evidence 十三域 |
+| **验收剧本层** | `scenarios/*.mjs` → [capabilities/README.md §4.3](capabilities/README.md) | 能力组合 = 可执行剧本，产 `summary.jsonl` / `verdict.json` / `report.md`，可直接被 dev-flow D3 的 verify/inspect 节点消费 |
 
-## 8. 维护
+**覆盖对账** = [capabilities/P0-P1-COVERAGE.md](capabilities/P0-P1-COVERAGE.md)（P0 17 行 / P1 4 行逐行状态：`scenario` / `capability-only` / `reuse-e2e` / `unreachable`）。要回答「某功能能不能验、怎么验」，查这张表。
+
+LLM 通道三选一（决定能否零 token）：**faux**（主会话默认）/ **mock-http**（孙进程即 subagent·workflow 执行层）/ **live**（真模型智能或真鉴权）。判定依据与装配要点见 [capabilities/README.md §3](capabilities/README.md)。
+
+## 8. 人工剧本（features/）
+
+`features/` 保留用户视角的端到端故事（四段式：Sub-features / 用户入口 / 驱动剧本 / Gotchas），适合「要看某个界面怎么点」的场景；它是 capability 层的**人读摘要**，新增功能面以 capability 为准。当前五个 P0 剧本：
+
+| 文件 | 功能 | 与 capability 的关系 |
+|------|------|---------------------|
+| [features/new-task.md](features/new-task.md) | 新建任务（Landing → 选目录 → 首发提交建 session） | `session.create` 的 UI 入口；参数面（`presetId`/`modelOverride`/`clientUuid` 等）见 [session.md](capabilities/session.md) |
+| [features/session-management.md](features/session-management.md) | 多会话管理（列表 / 切换 / 归档 / 彻底删除 / 右键菜单） | **已知漂移**：会话行根是 `.session-item`（`session-detail-card` 是 hover 卡）；归档/彻底删除是两段确认，彻底删除在归档列表行 → 以 [session.md](capabilities/session.md) 为准 |
+| [features/chat-stream.md](features/chat-stream.md) | 对话发送与流式渲染（thinking / 工具 / 文本 / 变更集 / 中断） | 细节与失败信号见 [chat.md](capabilities/chat.md) |
+| [features/settings-provider.md](features/settings-provider.md) | 设置页 provider 管理 | 六面（provider / 系统提示词 / 预设 / MCP / 网络代理 / 主题）见 [settings.md](capabilities/settings.md) |
+| [features/ask-user-form.md](features/ask-user-form.md) | 统一提问表单 FormOverlay（agent 向用户提问） | **已知漂移**：示例脚本第二题只给 1 个 option，schema 要求 `minItems: 2`；正确形态见 `fixtures/faux-responses/ask-user-two-questions.json` |
+
+## 9. 维护
 
 功能变化后剧本会漂移。定期或大改动后用 `/maintain-verification-skill` 跑一轮维护（逐功能源码核对 + 实跑驱动 + 最多一个 PR 的修正）。

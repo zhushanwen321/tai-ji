@@ -1,0 +1,8 @@
+[
+  {
+    "text": "先跑一条无害命令确认工具链：",
+    "toolCalls": [{ "name": "bash", "args": { "command": "echo faux-bash-ok" } }],
+    "stopReason": "toolUse"
+  },
+  { "text": "bash 已返回（输出里应有 faux-bash-ok），本轮结束。", "stopReason": "stop" }
+]

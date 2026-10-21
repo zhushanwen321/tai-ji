@@ -1,0 +1,17 @@
+{
+  "_note": "依赖孙进程 faux 可达性 + 一个真实存在的 workflow 脚本绝对路径（workflow_run.name 取自 <available_workflows> 的 location）——见 capabilities/env.md 与 README「跑不通」节。",
+  "faux/faux-1": [
+    {
+      "text": "跑一个两路 fan-out 的 workflow：",
+      "toolCalls": [{ "name": "workflow_run", "args": { "name": "/absolute/path/to/fanout.workflow.js", "args": { "task": "faux fanout" } } }],
+      "stopReason": "toolUse"
+    },
+    { "text": "workflow 已派发，等待两路结果汇总（WORKFLOW-DISPATCHED）。", "stopReason": "stop" }
+  ],
+  "faux/faux-1-b": [
+    { "text": "fan-out 分支 A 完成（FAUX-FANOUT-A）。", "stopReason": "stop" }
+  ],
+  "faux/faux-1-c": [
+    { "text": "fan-out 分支 B 完成（FAUX-FANOUT-B）。", "stopReason": "stop" }
+  ]
+}

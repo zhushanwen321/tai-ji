@@ -18,7 +18,7 @@
 
 - **通道**：A（`file-view-root` 内行 DOM）/ B（`file.tree` / `file.tree.expand` / `file.search` / `git.status`）/ C（真实目录树、`git status --porcelain`、展开态持久化）
 - **前置**：`requires: none`（纯 UI + 文件系统）；依赖 `session.create`（需要活跃 session 才有 cwd）
-- **用于**：`p1-workspace-filetree`（covers: `workspace.filetree`, `workspace.drawer`, `session.history`）
+- **用于**：`p1-filetree`（矩阵口径；covers: `workspace.filetree`, `workspace.drawer`, `session.history`）
 
 ### 入口（用户 POV / 协议 / 副作用点）
 
@@ -36,7 +36,13 @@
   `file-tree-error-<path>` / `file-tree-empty-<path>` / `chevron-slot` / `file-view-no-session`，
   外加目录徽标 `file-tree-dir-badge-<path>`）。本文件不复刻该表。
 
-### e2e 已覆盖什么（**不要重复造**）
+### 驱动
+
+两步：① **先跑/读机器资产**（`e2e/file-tree.spec.ts`，覆盖渲染与交互逻辑）；
+② **再做真机增量**（真实 git 仓库 + 虚拟滚动行数 + git 角标 + 失败面）。
+两个子节按此顺序展开。
+
+#### e2e 已覆盖什么（**不要重复造**）
 
 `e2e/file-tree.spec.ts`（mock 轨 + `VITE_MOCK`，**10 个 test**；文档说 11 个，实测 10，
 见报告）覆盖：
@@ -55,7 +61,7 @@
 **e2e 用 mock 数据**（`MOCK_TREE`：src / README.md / package.json / untracked.log /
 node_modules(ignored)），所以它证明的是**渲染与交互逻辑**，不证明「真实文件系统 + 真 git」。
 
-### 真机验收补什么（本 capability 的增量）
+#### 真机验收补什么（本 capability 的增量）
 
 1. **真实 cwd 的树**：在**真实 git 仓库**（默认 `<repo>` 或 `e2e/fixtures/sample-project`）
    建 session → 断言 `file-tree-dir-<真实目录>` 存在，且行的 `path` 与
@@ -113,12 +119,17 @@ node_modules(ignored)），所以它证明的是**渲染与交互逻辑**，不�
 
 ---
 
-## workspace.drawer · 右侧抽屉（8 tab：git/doc/detail/subagent/workflow/bashTask/plan/btw）
+## workspace.drawer · 右侧抽屉（7 tab：git/doc/detail/subagent/bashTask/plan/btw/trace）
+
+> 事实更正（2026-10-21）：`workflow` tab 已于 2026-10-19 删除（`packages/core/src/domain/drawer/types.ts` 的
+> `RightDrawerTab` 实际域 = `'git' | 'doc' | 'detail' | 'subagent' | 'bashTask' | 'plan' | 'btw' | 'trace'`）。
+> workflow 唯一入口 = 全屏 overlay；overlay 不可用时**没有 drawer 回落载体**（回落 = toast + 重开重试）。
+> 本文档此前按 `docs/testing/02-panels-sidebar.md` §3 与 `FEATURE-PRIORITIES.md §2` 的旧口径写，属既有文档漂移。
 
 - **通道**：A（`drawer-panel` + `drawer-tab-<key>` + 各 tab 内容）/ B（`git.status` / `git.diff` / `plan` 状态 / subagent RPC）/ C（文件内容、git 状态、plan 产物）
-- **前置**：`requires: none`（git/detail）；plan/subagent/workflow/btw tab 需对应会话状态；
+- **前置**：`requires: none`（git/detail）；plan/subagent/trace/btw tab 需对应会话状态；
   依赖 `workspace.filetree`（detail 入口）
-- **用于**：`p2-workspace-drawer`（covers: `workspace.drawer`, `workspace.filetree`, `interaction.plan-review`）
+- **用于**：`p2-workspace-drawer`（矩阵伞形 `p0-display-containers`；covers: `workspace.drawer`, `workspace.filetree`, `interaction.plan-review`）
 
 ### 入口（用户 POV / 协议 / 副作用点）
 
@@ -127,8 +138,11 @@ node_modules(ignored)），所以它证明的是**渲染与交互逻辑**，不�
   - 文件树点文件 → 自动打开 **detail** tab；
   - 计划审批「评论计数」点击 → 打开 **plan** tab（`openDrawerTab('plan')`）；
   - 关闭按钮 `drawer-close`；宽度可拖 `drawer-resize-handle`（`PanelContainer.vue`）。
-- tab 集合（终态 8 员，出处 `docs/testing/02-panels-sidebar.md` §3 的 `drawer-tab-{key}` 行）：
-  `git` / `doc` / `detail` / `subagent` / `workflow` / `bashTask` / `plan` / `btw`。
+- tab 集合（终态 8 员，权威出处 = `packages/core/src/domain/drawer/types.ts` 的 `RightDrawerTab`；
+  ui 渲染 = `packages/ui/src/features/drawer/DrawerPanel.vue` 的 `drawer-tab-${tab.key}`；
+  renderer 内容注入 = `packages/renderer/src/components/workspace/PanelContainer.vue` 的 v-if 链）：
+  `git` / `doc` / `detail` / `subagent` / `bashTask` / `plan` / `btw` / `trace`。
+  **workflow tab 已删**（2026-10-19，见上方事实更正）；`trace` = 会话 trace 条目详情（`TraceInspector`）。
   **terminal 已迁底抽屉**（见 `workspace.terminal`），browser 已迁浮层。
 - testid 权威：`02-panels-sidebar.md` §3（`drawer-panel` / `drawer-close` /
   `drawer-tab-{key}` / `detail-pane` / `detail-view-toggle` / `detail-loading` /
@@ -170,7 +184,7 @@ node_modules(ignored)），所以它证明的是**渲染与交互逻辑**，不�
 
 ### 证不了
 
-- **`subagent` / `workflow` tab 的完整内容**：依赖 subagent/workflow run 状态；
+- **`subagent` / `trace` tab 的完整内容**：依赖 subagent record / trace 选中态；
   faux 下孙进程不可达（见 `capabilities/env.md` 与报告）→ 只验「tab 存在 + 空态」。
 - **`doc` tab（命令/skill 文档）**：`CommandDocPanel` **无 testid**（`02-panels-sidebar.md` §3
   注），只能文本锚点 → `weak-anchor`。
@@ -285,7 +299,12 @@ node_modules(ignored)），所以它证明的是**渲染与交互逻辑**，不�
     `term:<sid>:1`**）；
   - 关闭沿 / 会话销毁 / 世代变更三路径解订阅。
 
-### e2e 已覆盖什么（`e2e/terminal-multi-instance.spec.ts`，real 轨）
+### 驱动
+
+两步：① **先读 real 轨 e2e 的覆盖表**（下）避免重复；② **再做真机增量**（刷新世代恢复、
+双入口等价、收起 vs 关闭、多实例隔离）。
+
+#### e2e 已覆盖什么（`e2e/terminal-multi-instance.spec.ts`，real 轨）
 
 | 用例 | 覆盖点 |
 |------|--------|
@@ -300,7 +319,7 @@ node_modules(ignored)），所以它证明的是**渲染与交互逻辑**，不�
 **明确未覆盖（spec 头注声明）**：`T3` 刷新恢复 / `T5` 单实例无感 → **L4 真机走查**
 （本 capability 补）；`T6/T7/T11/T12` → L1 单测。
 
-### 真机验收补什么（本 capability 的增量）
+#### 真机验收补什么（本 capability 的增量）
 
 1. **刷新世代恢复（T3，e2e 未覆盖）**：实例跑 `echo $$` 记住 PID → 刷新窗口（`⌘R`）→
    断言实例条仍在、`terminal.list` 对账拉回、历史输出回放、**PID 未变**（PTY 未重启）。
@@ -387,7 +406,7 @@ node_modules(ignored)），所以它证明的是**渲染与交互逻辑**，不�
   **新增源 = 新增 source 模块 + 注册一行 + GUI 加一个选项卡**，编排层不动。
   当前源：`pi`（缺省）/ `zcode`。
 - 安全边界：`dbPath` 经 wire 只接受 `zcodeImportDbAllowlist(dataDir)` 集合，
-  集合外 → `import_db_path_forbidden`（见同文档 §「RPC 契约」）。
+  集合外 → error `import_db_path_forbidden`（见同文档 §「RPC 契约」）。
 
 ### 驱动
 
@@ -406,9 +425,9 @@ node_modules(ignored)），所以它证明的是**渲染与交互逻辑**，不�
 |---|------|------|----------|
 | 1 | A | 阶段一只有合法来源项；阶段二候选按 `import-group` 分组 | 阶段一空 = source 表未注册 |
 | 2 | B | `session.importCandidates` reply 的候选数与 `import-count` 一致 | 数不等 = 过滤/分页不一致 |
-| 3 | B | `session.import` reply 成功（或 `warning` 值为 `conversion_degraded`） | error envelope 的 `code` = 见下表错误码 |
+| 3 | B | `session.import` reply 成功（或 `warning` ∈ `conversion_degraded`/`conversion_unclassified`/`sidecar_failed`） | error envelope 的 `code`（`import_*` 家族） |
 | 4 | C | 目标 session 目录出现新 jsonl（`<dataDir>/agent/sessions/<encodeCwd>/`），内容 = 源会话消息 | 无文件 = 落盘失败（copy_failed） |
-| 5 | C | 重复导入同一条目 → `already_imported`（去重标记在源侧/sidecar） | 重复落成两份 = 去重失效 |
+| 5 | C | 重复导入同一条目 → error `import_already_imported`（去重标记在源侧/sidecar） | 重复落成两份 = 去重失效 |
 | 6 | A | `import-item-cwd-missing` 的条目不可导入（或要求选 cwd） | 导入成功但 cwd 不存在 = 会话打开即崩 |
 
 > 2/3 是 B，1/6 是 A，4/5 是 C。**重复导入与 cwd 缺失是最高价值的两条**（真机常见）。
@@ -440,5 +459,75 @@ node_modules(ignored)），所以它证明的是**渲染与交互逻辑**，不�
 - `import-search-input` 以 `/` 或 `~` 开头会切「路径模式」（`import-path-bar`），
   不是普通关键词——脚本里别用 `/` 开头的关键词。
 - 去重判据按源不同（pi 源看 marker 文件名 / 已导入集合），错误码
-  `already_imported` 是**成功语义的拒绝**，不是故障。
+  `import_already_imported` 属**拒绝**语义（不是故障），恢复指引见对话框内联文案。
 - 导入完成后的会话在侧栏出现，但**不会自动激活**（需点击）；别等自动切会话。
+
+---
+
+## ui.container · 展示容器体系（右抽屉 / 底抽屉 / 浮层壳 + 键盘栈序）
+
+- **通道**：A（各容器的开合 testid + 内容可见性）/ B（`OverlayControlState` 与 `session.traceEntries` 等载荷源）/ C（容器态不落盘——**这是本原语的最大限制**）
+- **前置**：`requires: none`；依赖 `env.ready`
+- **用于**：覆盖矩阵 P0 行「展示容器体系」；被 `workspace.drawer` / `workspace.terminal` / `workflow.overlay` 共用
+
+## 入口（用户 POV / 协议 / 副作用点）
+
+- 用户 POV：
+  - 右抽屉：顶栏 `drawer-toggle`（默认打开 git tab）→ 切 tab / 点 `drawer-close` 关闭；宽度可拖 `drawer-resize-handle`。
+  - 底抽屉：`` ⌃` `` 或顶栏终端按钮（`terminal-toggle-button`）→ 全宽，横跨右抽屉下方。
+  - 浮层壳：消息里点 localhost 链接（→ 浏览器浮层）、打开 workflow run（→ 可视化 overlay）、画布 / 调度器同壳。
+  - 键盘栈序：`Esc` 逐层让位（后开的先关）。
+- 协议：浮层状态在 `packages/core/src/domain/overlay/state.ts`（`overlayControl`，**纯渲染侧内存，无 RPC**）；右抽屉 tab 态在 `packages/core/src/domain/drawer`。
+- 副作用点：**无磁盘副作用**——容器态是会话期内存（这正是「证不了」的根源）。
+
+## 驱动
+
+```bash
+PW="node ~/.agents/skills/browser-automation/scripts/pw.js http://localhost:<cdpPort>"
+
+# 右抽屉
+$PW click "testid=drawer-toggle"
+$PW wait "testid=drawer-panel"
+$PW click "testid=drawer-tab-plan"
+$PW click "testid=drawer-close"
+$PW wait "testid=drawer-panel" hidden
+
+# 底抽屉（注意：⌃` 走主进程 before-input-event，CDP 键盘事件不一定能触发 → 优先点按钮）
+$PW click "testid=terminal-toggle-button"
+$PW wait "testid=bottom-drawer"
+
+# 浮层壳（workflow 场景）
+$PW click "testid=wfvz-overlay"   # 实际入口经托盘 tab → 行 → 详情
+```
+
+## 断言（期望终态 / 失败信号）
+
+- 期望终态：
+  - 右抽屉：`drawer-panel` 可见 + `drawer-tab-<key>` 的 active 态与内容面板同时在场；
+  - 底抽屉：`bottom-drawer` 高度从 0 变为 `displayPct%`（默认 35%），含 `TerminalView`；
+  - 浮层壳：`wfvz-overlay` / 浏览器浮层根可见，且**同一时刻只有一个内容**（单例换内容：开新内容不闪断）；
+  - Esc 层级序：后开的面先关，先开的面仍在。
+- 失败信号：
+  - 开 A 关 B / 两个浮层同时在场 → 单例换内容语义破坏；
+  - Esc 一次全关 → 层级序失效（编排器未按栈序让位）；
+  - 抽屉开着但内容面板空 → `v-if` 链与 `RightDrawerTab` 漂移（这是 2026-10-19 workflow tab 删除后的高风险区）。
+
+## 证据（A/B/C 各抓什么）
+
+- **A（主）**：每一步的截图 + 关键 testid 的可见性/DOM 断言输出（`drawer-panel` / `drawer-tab-*` / `bottom-drawer` / 浮层根）。
+- **B**：浮层内容的载荷源（如 workflow run 的 `session.getWorkflowRunEvents`）确实存在——证明「浮层不是空壳」。
+- **C**：**无法取证**（容器态不落盘）。这是本原语的诚实边界：容器的「关闭后重开是否恢复」只能靠 A 通道 + 会话内状态对照。
+
+## 证不了
+
+- 容器态**跨重启持久性**（内存态，重启必回默认）——若产品声称持久化，需另立 capability。
+- Esc 栈序的**内部排序依据**（z 值 / 注册顺序）：只能验可观察的关闭顺序，不能验实现机制。
+- 模态共存的几何判定（`shieldsView` / view 遮蔽）：那是 main 侧 display-gate 的事，属 `shell` 层，不在本原语。
+
+## Gotchas
+
+- **`⌃\`` 快捷键走主进程 `before-input-event`**：CDP 注入的键盘事件不一定触发 → 验证底抽屉优先点 `terminal-toggle-button`。
+- **`workflow` tab 已删（2026-10-19）**：`RightDrawerTab` 现行 = `git/doc/detail/subagent/bashTask/plan/btw/trace`；`docs/testing/02` 与 `FEATURE-PRIORITIES §2` 仍写「drawer WorkflowTab 回落载体」= **文档漂移**，overlay 不可用时回落是 toast。
+- **浮层是单例换内容**（`openOverlay` 开新内容时 `isOpen` 保持 true、只换 `current`）——断言「先关后开」会失败，正确断言是「内容变了、壳没闪」。
+- **模态表面登记表**（`modal-surface-registry/manifest.ts`）是 z 基线 + Esc 让位旗标的单一事实源：新增表面不登记会被 `z-surface-baseline.test.ts` 拦（那是单测轨，本技能只做真机侧佐证）。
+- 右抽屉的 `git` 数据由 `PanelContainer` provide；非 git 仓库时 `GitPanel` 自隐藏（走空态），不要断言「git tab 必有内容」。

@@ -1,0 +1,18 @@
+[
+  {
+    "toolCalls": [{
+      "name": "ask_user",
+      "args": { "questions": [
+        { "header": "DB", "question": "选哪个数据库？", "context": "需要 ACID 与 JSON 列。",
+          "options": [{ "label": "SQLite", "description": "零运维，嵌入式" }, { "label": "Postgres", "description": "成熟，强一致" }] },
+        { "header": "Region", "question": "部署在哪个区域？", "context": "决定延迟与合规边界。",
+          "options": [{ "label": "us-east-1", "description": "美东，延迟低" }, { "label": "eu-west-1", "description": "欧盟，合规友好" }] }
+      ] }
+    }],
+    "stopReason": "toolUse"
+  },
+  {
+    "text": "已收到你的两题选择，按此继续（ASKUSER-DONE）。",
+    "stopReason": "stop"
+  }
+]
