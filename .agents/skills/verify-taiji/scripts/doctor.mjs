@@ -20,16 +20,19 @@ const argv = process.argv.slice(2)
 const repo = argv.find((a) => !a.startsWith('--') && argv.indexOf(a) === 0)
 const dataDirIdx = argv.indexOf('--data-dir')
 const cliDataDir = dataDirIdx !== -1 ? argv[dataDirIdx + 1] : undefined
+const nameIdx = argv.indexOf('--name')
+const cliName = nameIdx !== -1 ? argv[nameIdx + 1] : undefined
 const asJson = argv.includes('--json')
 
 if (!repo || !fs.existsSync(path.join(repo, 'apps/electron/scripts/dev-instance.mjs'))) {
-  console.error('用法: node doctor.mjs <repo> [--data-dir <dir>] [--json]  （<repo> = worktree 根，需含 apps/electron/scripts/dev-instance.mjs）')
+  console.error('用法: node doctor.mjs <repo> [--data-dir <dir>] [--name <实例名>] [--json]  （<repo> = worktree 根，需含 apps/electron/scripts/dev-instance.mjs）')
   process.exit(2)
 }
 
 // ── 1. 装配参数（经权威源 dev-instance.mjs --print，避免重复实现派生逻辑）──
 const printArgs = ['apps/electron/scripts/dev-instance.mjs', '--print']
 if (cliDataDir) printArgs.push('--data-dir', cliDataDir)
+if (cliName) printArgs.push('--name', cliName)
 const printed = spawnSync('node', printArgs, { cwd: repo, encoding: 'utf8', timeout: 60_000 })
 
 const checks = []

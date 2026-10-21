@@ -36,7 +36,8 @@ node apps/electron/scripts/dev-instance.mjs --data-dir ~/.taiji-dev/verify-<run-
   2. CDP `http://localhost:<cdpPort>/json/list` 出现页面，且页面 URL 属于本实例的 `http://localhost:<vitePort>/`（连错实例看旧代码是已知坑，必须核对 URL）；
   3. `<dataDir>/logs/runtime-*.log` 出现 `resolved N extensions from M sources` 且 N ≥ 8（扩展装载完成；端口在位但扩展没装载完时建 session 会缺命令/工具）。
 - 端口、数据目录按 worktree 名 hash 派生，每次用 `node .agents/skills/verify-taiji/scripts/doctor.mjs <repo> [--data-dir <dir>]` 查实际值，不背数字。
-- **同 worktree 同时只能有一个实例**（Vite strictPort：第二个实例静默失败并加载旧代码）。多验收窗共用一个实例：主会话持有生命周期，各验收方只经 CDP 接入，不重启不杀；全部跑完由主会话按 PID 收尾。
+- **同实例名同时只能有一个实例**（Vite strictPort：第二个实例静默失败加载旧代码）。多验收窗共用一个实例：主会话持有生命周期，各验收方只经 CDP 接入，不重启不杀；全部跑完由主会话按 PID 收尾。
+- **端口被占但实例不属自己**（他人 dev 实例 / 打包版）：不要杀，用 `TAIJI_DEV_INSTANCE_NAME=<独立名>`（或 `--name`）给验收实例派生独立端口段，配合 `--data-dir` 指向自己的数据目录并行跑。
 - `--data-dir` 值域限定在 `~/.taiji-dev/` 树内且不得指向保留目录（`~/.taiji-dev` 本体与 `instances/`），越界即响亮退出。
 - 首启种子从只读模板 `~/.taiji-dev.template/` 白名单复制进实例目录（已存在的实例目录原样保留，不会覆盖预置内容）；模板本身调整后 `node apps/electron/scripts/dev-instance.mjs init-template --force` 重建，只读模板勿直改。
 - 单实例锁按数据目录 userData 区分：不同数据目录的实例天然共存；同 worktree 撞端口是唯一互斥条件（见上条）。
