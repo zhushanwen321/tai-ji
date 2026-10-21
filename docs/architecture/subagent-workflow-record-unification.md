@@ -82,7 +82,7 @@ workflow 域早于引擎协议化演进定型。协议化（D3 系列）把真�
 | agent() 失败 | record 标 failed 终态（现状语义不变）+ trace node 终态 | 脚本重跑该步 |
 | 宿主重启于 agent() 在途 | record 经 store 孤儿恢复终态化；WorkflowRun 经 journal 折叠重建 | run 视图重开显示各步终态 |
 | record 与 trace 摘要不一致 | **record 为真相**，trace node 是摘要缓存（详情视图读 store） | 无需动作 |
-| 排查 workflow 子代理 | `subagents action:'list' includeFinished:true` (add includeWorkflow:true to also see workflow-dispatched subagents)（或 run 视图详情按 parentRunId 下钻） | 指引文案随 runner 改造更新 |
+| 排查 workflow 子代理 | `subagent_manage action:'list'` 带 `includeFinished:true`（配 `includeWorkflow:true` 才可见 workflow 派发的子代理）（或 run 视图详情按 parentRunId 下钻） | 指引文案随 runner 改造更新 |
 
 ### 3.2 多方案对比
 
@@ -95,7 +95,7 @@ workflow 域早于引擎协议化演进定型。协议化（D3 系列）把真�
 ### 3.3 关键决策
 
 - **D1 `origin` 字段（建议新增）+ 派生视图层隐藏**：`ExecutionRecord` 增 `origin: "tool" | "workflow"`（缺省 `"tool"`）与 `parentRunId?: string`。**过滤在派生视图/查询层，不在 store 层**（治理侧 sweep/恢复/监督需全量）。**磁盘重建双载体（Gate B round-2 终态；v3「唯一载体 = 自描述 entry」口径据此扩正）**：① 主 session 自描述 record entry（runtime extractor/GUI 通道，W1 三环）；② 子文件 `.record-binding` sidecar（core `collectRecords`/list/TUI 的 light 重建通道——engine-CLI 化后子文件无身份 entry，binding 是身份侧真身，`writeBindingForRecord` 创建、`identityFromBinding` 重建）——两载体均透传 origin/parentRunId（检查式归一），binding 另携带终态快照 totalTokens/turns/endedAt（`updateRecordBinding` 于 `writeTerminalState`/`cancelBackground` 两终态写点 merge 落盘，缺失跳过不造新；sessions-index 可选字段不升 INDEX_VERSION）；**漏任一载体即该消费方过滤失效（Gate B S3 FAIL = 漏②的真机代价）**。消费方逐一点：
-  ① subagents tool `list`（`subagents.ts:234`）默认过滤，增 `includeWorkflow?: boolean` 参数（缺省 false）——runner 恢复指引（`:445/502`）文案更新为带 `includeFinished:true` + `includeWorkflow:true` 配对（与 message-guard 文案族同款）；
+  ① `subagent_manage` tool `list`（schema 权威 `interface/tool/subagent-tool-schema.ts`）默认过滤，增 `includeWorkflow?: boolean` 参数（缺省 false）——runner 恢复指引文案带 `includeFinished:true` + `includeWorkflow:true` 配对（与 message-guard 文案族同款）；
   ② renderer 消费方过滤（原 `useSidebarCounts` 的 badge/active bucket 计数 + 列表组装点；该域已于 2026-09-16 随侧栏任务视图退役，现承载 = composer 任务托盘的 `useTrayCounts`（计数）与托盘 subagent 面板（行集），过滤口径同）——三桶全滤（[阶段3-R1 裁决]：手动派发 subagent 域 = 手动派发 subagent，与计数同语义、与 TUI 对称；下游 filterSubagents/countSubagents/查看全部(N) 同源自洽）；
   ③ renderer `useBackgroundWork.hasBackgroundWork`（原 hasRunning，`:32`）过滤 origin=workflow（配合 D7 终态化后此条自然缓解，过滤保留为双保险）；
   ④ TUI `/subagents` 同 list（同参数）；
