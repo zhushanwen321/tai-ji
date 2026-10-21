@@ -1,5 +1,5 @@
 /**
- * BATCH S3 部分失败 + 反向断言（E2E-BATCH-03）—— 坏 agent 路径 partial / message 域边界拒绝 / agents 数量错配 fail-fast。
+ * BATCH S3 部分失败 + 反向断言（E2E-BATCH-03）—— 坏 agent 路径 partial / subagent_message 域边界拒绝 / 非法成员 agent 工具入口拒绝。
  *
  * 登记：E2E-BATCH-03（docs/testing/e2e-map.json，R2 按改动范围 on-diff，serial 空载串行，
  * L3 真实 LLM）。本 spec 是 2026-09-22 丢失剧本的重建产物（W1 介质归位触发义务）
@@ -7,8 +7,10 @@
  *
  * 断言语义来源（两段叠加，以 W1 新介质为准）：
  * - 场景编排 = 原始场景 S3（e2e-map E2E-BATCH-03 note）：坏 agent 路径 partial /
- *   message 拒绝（workflow-origin 域边界拒绝 + list inspect 指引 + 恢复句
- *   "To get these results, re-dispatch via the subagents tool."）/ agents 数量错配 fail-fast。
+ *   subagent_message 拒绝（workflow-origin 域边界拒绝 + list inspect 指引 + 恢复句
+ *   "To get these results, re-dispatch via the subagents tool."）/ 非法成员 agent 入口拒绝
+ *   （subagent-tool-interface-refactor §4.3：S3c 随 `agents` 参数删除退役，改测成员对象
+ *   非法 agent——非 `^/` 绝对路径——在 subagents 工具入口被拒）。
  * - 持久介质断言 = W1 设计 .tmp/tech-design/w1-run-record-journal-authority.md §4.2 场景 1
  *   （介质归位）+ D7 终态双维度语义：
  *   ① S3a partial：fan-out 脚本返回 status=partial（脚本层失败），但 run 自身正常完成——
@@ -16,8 +18,8 @@
  *      结论」与「run 自身怎么死的 = outcome:failed」在通知侧可区分）；
  *   ② v2 条目每实体两条（registered/settled）且 settled 数 === registered 数
  *      （每注册实体必有终态——W1 D4 恢复语义的静息面）；
- *   ③ S3c fail-fast：journal run-created 后紧跟 run-settled(failed) 且零 ask 帧
- *      （错配在模板入口拦截，不派发任何成员）。
+ *   ③ S3c 入口拒绝：非法成员 agent 在 subagents 工具入口被拒——零 run journal
+ *      （拒绝先于 run 创建，早于旧 `agents` 错配的模板入口 fail-fast 层级）、零成员派发。
  *
  * 可复用登记声明：本 spec 是 E2E-BATCH-03 的可复用真机资产（后续触碰批量失败行为时
  * 直接执行本文件，不再重建一次性剧本）。
@@ -27,7 +29,7 @@
  *   本机 provider 凭证（缺一 skip 不 fail）；CI/PR/merge 门禁不跑。
  *   前置：real renderer bundle（VITE_E2E=true pnpm run build:e2e，不带 VITE_MOCK）。
  * - 预算：S3a 600s（真实 LLM：一好一坏双成员）/ S3b 180s（单 turn 拒绝）/ S3c 300s
- *   （fail-fast 快速终局 + 通知落盘）。窗口不足属预算校准，禁止放宽断言换绿灯。
+ *   （工具入口拒绝快终局 + 调用证据落盘）。窗口不足属预算校准，禁止放宽断言换绿灯。
  * - 失败归因：writeDiag 落 testInfo.outputPath（batch-s3-*.json，不落 /tmp——诊断载荷
  *   可含 session entry 正文，/tmp 非其合法落盘位置，ADR-0063 I2）+ console 抓取 +
  *   全页截图 + <dataDir>/logs/。重试禁令：失败先归因，禁止不归因直接重试。
@@ -58,8 +60,12 @@ const SAMPLE_PROJECT = path.join(REPO_ROOT, 'e2e', 'fixtures', 'sample-project')
 
 const MAIN_MARKER = 'BATCH-S3-MAIN-5310'
 const BAD_AGENT_PATH = '/nonexistent/broken-agent-5313.md'
-/** fan-out.js 入口 fail-fast 的错配文案锚（D9 错误规格）。 */
-const MISMATCH_SNIPPET = 'agents must have 1 entry or exactly tasks.length'
+/** S3c 非法成员 agent（非 `^/` 绝对路径——相对路径在 subagents 工具入口被拒，
+ *  subagent-tool-interface-refactor §3.1.2 成员对象 agent pattern）。 */
+const INVALID_MEMBER_AGENT_PATH = 'relative-agent-5316.md'
+/** S3c 入口拒绝后的复核静默窗（主 turn complete 已意味着工具调用被拒且模型收到
+ *  错误；小窗只防 journal 落盘与 turn 结束的残余时序差）。 */
+const NO_RUN_SETTLE_MS = 3_000
 /** message 域边界拒绝文案锚（subagent-actions-core.ts，U4 §1.4 D7 域边界）。 */
 const REJECT_BOUNDARY_SNIPPET = 'workflow-origin record'
 const REJECT_REDIPATCH_SNIPPET = 're-dispatch via the subagents tool'
@@ -166,10 +172,12 @@ function listFilesRecursive(root: string, suffix: string, depth = 0, acc: string
 /**
  * 会话文件定位：waitUntil sessions 树下出现会话 JSONL 后返回路径。
  * pi 延迟写入语义（首条 assistant 消息 flush 前文件可能不存在）决定只能在
- * 首条消息发出后调用；journal 侧 *.events.jsonl 同以 .jsonl 结尾，排除防误取。
+ * 首条消息发出后调用；run journal（<runId>.record.jsonl，现行后缀——f92d931ba 起；
+ * .events.jsonl 为改名前 legacy）同以 .jsonl 结尾，排除防误取。
  */
 async function locateSessionFile(agentDir: string): Promise<string> {
-  const isSessionFile = (f: string): boolean => f.endsWith('.jsonl') && !f.endsWith('.events.jsonl')
+  const isSessionFile = (f: string): boolean =>
+    f.endsWith('.jsonl') && !f.endsWith('.events.jsonl') && !f.endsWith('.record.jsonl')
   const found = await waitUntil(
     () => listFilesRecursive(path.join(agentDir, 'sessions'), '.jsonl').some(isSessionFile),
     JSONL_FLUSH_TIMEOUT_MS,
@@ -355,14 +363,22 @@ test.describe.serial('BATCH-S3 partial / message boundary / agents mismatch', ()
   test('S3a (batch real): 坏 agent 路径 → partial 收尾（脚本层失败 ≠ run 死法）', async ({ }, testInfo) => {
     test.setTimeout(600_000)
     const s = shared!
+    // 成员对象形状（§3.1.2 终态）：好坏双 agent 改为各成员对象的 agent 字段
+    // （旧 `agents` 逗号串参数已随成员对象 schema 退役）。
     const tasks = [
-      'Reply with a one-line summary ending with the exact token BATCH-S3A-OK-5311. Do not write any files.',
-      'Reply with a one-line summary ending with the exact token BATCH-S3A-BAD-5312. Do not write any files.',
+      {
+        task: 'Reply with a one-line summary ending with the exact token BATCH-S3A-OK-5311. Do not write any files.',
+        agent: s.goodAgentPath,
+      },
+      {
+        task: 'Reply with a one-line summary ending with the exact token BATCH-S3A-BAD-5312. Do not write any files.',
+        agent: BAD_AGENT_PATH,
+      },
     ]
     const prompt =
       `Dispatch exactly 2 background subagent tasks in ONE call using the \`subagents\` tool. ` +
       `tasks = ${JSON.stringify(tasks)} ` +
-      `agents = "${s.goodAgentPath},${BAD_AGENT_PATH}" (one agent per task, same order — the second path is intentionally broken). ` +
+      `(each member object carries its own "agent" field, in dispatch order — the second path is intentionally broken; do not fix it). ` +
       `After the tool call returns, reply with only the word DISPATCHED. [${MAIN_MARKER}]`
 
     await sendAndWaitTurn(testInfo, prompt, 's3a-send', MAIN_TURN_TIMEOUT_MS)
@@ -370,9 +386,9 @@ test.describe.serial('BATCH-S3 partial / message boundary / agents mismatch', ()
     // 会话文件定位（首条消息已发，pi flush 后文件必在——本用例起供 S3b/S3c 共用）
     s.sessionFile = await locateSessionFile(path.join(s.dataDir, 'agent'))
 
-    // journal 出现 → runId
+    // journal 出现 → runId（journal 后缀 .record.jsonl，run-vocabulary RUN_EVENTS_SUFFIX）
     const agentDir = path.join(s.dataDir, 'agent')
-    const journalFound = await waitUntil(() => listFilesRecursive(agentDir, '.events.jsonl').length > 0, JOURNAL_TIMEOUT_MS)
+    const journalFound = await waitUntil(() => listFilesRecursive(agentDir, '.record.jsonl').length > 0, JOURNAL_TIMEOUT_MS)
     if (!journalFound) {
       writeDiag(testInfo, 'batch-s3a-journal-missing.json', {
         runtimeLogsTail: readRuntimeLogs(s.dataDir).slice(-3000),
@@ -380,8 +396,8 @@ test.describe.serial('BATCH-S3 partial / message boundary / agents mismatch', ()
       })
     }
     expect(journalFound, 'run journal 应落盘').toBe(true)
-    const journalFile = listFilesRecursive(agentDir, '.events.jsonl')[0]
-    const runId = path.basename(journalFile).replace(/\.events\.jsonl$/, '')
+    const journalFile = listFilesRecursive(agentDir, '.record.jsonl')[0]
+    const runId = path.basename(journalFile).replace(/\.record\.jsonl$/, '')
 
     // notifyDone 到达（坏成员也要等全批收尾——allSettled 语义）
     const notifyId = `wf-done:${runId}`
@@ -442,13 +458,14 @@ test.describe.serial('BATCH-S3 partial / message boundary / agents mismatch', ()
     // prompt 遵从 flake 对策（r4 绿 / r5 红 + sessionTail 空白 = LLM 未调工具直接
     // 文字回复——spec 头部「失败归因」点名的已知形态）：第一轮未命中拒绝文案时，
     // 强化指令重发一轮（归因明确后的单次重试）；仍失败落 diag 红。
+    // 工具名 `subagent_message`（D3 拆分新名——旧 `message` 工具已退役）。
     const basePrompt =
-      `Use the \`message\` tool to send the text "ping" to the subagent with id "${recordId}". ` +
+      `Use the \`subagent_message\` tool to send the text "ping" to the subagent with id "${recordId}". ` +
       `Then reply with the exact tool output verbatim. Do not use any other tool.`
     const retryPrompt =
-      `You did not call the \`message\` tool in your previous turn. Call it NOW with ` +
+      `You did not call the \`subagent_message\` tool in your previous turn. Call it NOW with ` +
       `to="${recordId}" and text="ping". This is a tool-calling test: you MUST invoke the ` +
-      `\`message\` tool before replying. Do not summarize, do not simulate the result.`
+      `\`subagent_message\` tool before replying. Do not summarize, do not simulate the result.`
     let rejectArrived = false
     for (let round = 1; round <= 2 && !rejectArrived; round += 1) {
       const offsetBefore = fs.statSync(s.sessionFile).size
@@ -462,7 +479,7 @@ test.describe.serial('BATCH-S3 partial / message boundary / agents mismatch', ()
         round === 1 ? JSONL_FLUSH_TIMEOUT_MS : JSONL_FLUSH_TIMEOUT_MS * 2,
       )
       if (!rejectArrived && round === 1) {
-        console.warn('[batch-s3b] 第一轮未见拒绝文案（LLM 未调 message 工具的遵从 flake），强化指令重发一轮')
+        console.warn('[batch-s3b] 第一轮未见拒绝文案（LLM 未调 subagent_message 工具的遵从 flake），强化指令重发一轮')
       }
     }
     if (!rejectArrived) {
@@ -471,95 +488,75 @@ test.describe.serial('BATCH-S3 partial / message boundary / agents mismatch', ()
         runtimeLogsTail: readRuntimeLogs(s.dataDir).slice(-3000),
       })
     }
-    expect(rejectArrived, `message 工具结果应含域边界拒绝文案 "${REJECT_BOUNDARY_SNIPPET}"（workflow-origin record 不进 message 通道）`).toBe(true)
+    expect(rejectArrived, `subagent_message 工具结果应含域边界拒绝文案 "${REJECT_BOUNDARY_SNIPPET}"（workflow-origin record 不进 message 通道）`).toBe(true)
     const sessionTextAll = fs.readFileSync(s.sessionFile, 'utf8')
     expect(sessionTextAll.includes(REJECT_REDIPATCH_SNIPPET), '拒绝文案应含恢复指引 "re-dispatch via the subagents tool"').toBe(true)
     await s.page.screenshot({ path: testInfo.outputPath('s3b-rejected.png'), fullPage: true })
     console.log('[batch-s3b] PASS：message 域边界拒绝')
   })
 
-  test('S3c (batch real): agents 数量错配 → 模板入口 fail-fast（零 ask 帧 + 通知照达）', async ({ }, testInfo) => {
+  test('S3c (batch real): 非法成员 agent（非 ^/ 绝对路径）→ subagents 工具入口拒绝（零 run + 零派发）', async ({ }, testInfo) => {
     test.setTimeout(300_000)
     const s = shared!
+    // 成员对象形状（§3.1.2 终态）：非法 agent 走成员对象 agent 字段——相对路径
+    // 不匹配 schema `^/` pattern，在 subagents 工具入口被拒（旧 S3c 的 `agents`
+    // 数量错配 fail-fast 随该参数退役；拒绝层级早于旧模板入口，run 不创建）。
     const tasks = [
-      'Reply with a one-line summary ending with the exact token BATCH-S3C-1-5314.',
-      'Reply with a one-line summary ending with the exact token BATCH-S3C-2-5315.',
+      { task: 'Reply with a one-line summary ending with the exact token BATCH-S3C-1-5314.' },
+      {
+        task: 'Reply with a one-line summary ending with the exact token BATCH-S3C-2-5315.',
+        agent: INVALID_MEMBER_AGENT_PATH,
+      },
     ]
     const prompt =
       `Dispatch exactly 2 background subagent tasks in ONE call using the \`subagents\` tool. ` +
       `tasks = ${JSON.stringify(tasks)} ` +
-      `agents = "/nonexistent/x1.md,/nonexistent/x2.md,/nonexistent/x3.md" ` +
-      `(3 agent entries for 2 tasks — this mismatch is INTENTIONAL, do not fix it). ` +
+      `(the second member's agent path is INTENTIONALLY invalid — it is not an absolute path; ` +
+      `do not fix it and do not retry with a different path — call the tool exactly as specified, once). ` +
       `After the tool call returns, reply with only the word DISPATCHED.`
 
-    const journalsBefore = listFilesRecursive(path.join(s.dataDir, 'agent'), '.events.jsonl').length
+    const agentDir = path.join(s.dataDir, 'agent')
+    const journalsBefore = listFilesRecursive(agentDir, '.record.jsonl').length
     await sendAndWaitTurn(testInfo, prompt, 's3c-send', MAIN_TURN_TIMEOUT_MS)
 
-    // 会话文件幂等重定位（同会话同文件；S3c 的 notify/v2 条目断言读它）
-    s.sessionFile = await locateSessionFile(path.join(s.dataDir, 'agent'))
+    // 会话文件幂等重定位（同会话同文件）
+    s.sessionFile = await locateSessionFile(agentDir)
 
-    const agentDir = path.join(s.dataDir, 'agent')
-    const newJournalFound = await waitUntil(
-      () => listFilesRecursive(agentDir, '.events.jsonl').length > journalsBefore,
-      JOURNAL_TIMEOUT_MS,
-    )
-    if (!newJournalFound) {
-      writeDiag(testInfo, 'batch-s3c-journal-missing.json', { runtimeLogsTail: readRuntimeLogs(s.dataDir).slice(-3000) })
-    }
-    expect(newJournalFound, '错配批的 run journal 应落盘（run-created 先于模板入口校验）').toBe(true)
-    const journals = listFilesRecursive(agentDir, '.events.jsonl')
-    const journalFile = journals[journals.length - 1]
-    const runId = path.basename(journalFile).replace(/\.events\.jsonl$/, '')
-
-    const notifyId = `wf-done:${runId}`
-    const notifyArrived = await waitUntil(() => fs.readFileSync(s.sessionFile, 'utf8').includes(notifyId), NOTIFY_TIMEOUT_MS)
-    if (!notifyArrived) {
-      writeDiag(testInfo, 'batch-s3c-notify-missing.json', {
-        journalEventTypes: readJournalFrames(journalFile).map((f) => f['type']),
-        piLogsTail: readPiLogs(s.dataDir).slice(-3000),
+    // 调用发起证据（prompt 遵从锚——结构不锚文案）：工具调用 args 随 assistant
+    // toolUse 落 session JSONL，其中含注入的非法路径字面；缺它则「零 run」可能
+    // 只是 LLM 没调工具的遵从 flake，断言无从归因。
+    const callIssued = fs.readFileSync(s.sessionFile, 'utf8').includes(INVALID_MEMBER_AGENT_PATH)
+    if (!callIssued) {
+      writeDiag(testInfo, 'batch-s3c-call-missing.json', {
+        sessionTail: fs.readFileSync(s.sessionFile, 'utf8').slice(-3000),
+        runtimeLogsTail: readRuntimeLogs(s.dataDir).slice(-3000),
       })
     }
-    expect(notifyArrived, `fail-fast 终局通知也应照达（${notifyId}）——通知链不因错配丢失`).toBe(true)
+    expect(callIssued, `session JSONL 应含非法 agent 路径字面 "${INVALID_MEMBER_AGENT_PATH}"（工具调用 args 落盘——LLM 确实按 prompt 发起了带非法成员的调用）`).toBe(true)
 
-    // journal：run-created + run-settled(failed)，零 ask 帧（错配在派发前拦截）
-    const frames = readJournalFrames(journalFile)
-    expect(frames[0]?.['type'], 'journal 首帧应为 run-created').toBe('run-created')
-    const askFrames = frames.filter((f) => String(f['type']).startsWith('ask-'))
-    expect(askFrames.length, '错配 fail-fast 的 journal 应零 ask 帧（不派发任何成员）').toBe(0)
-    const settledFrames = frames.filter((f) => f['type'] === 'run-settled')
-    expect(settledFrames.length, 'run-settled 应恰 1 帧').toBe(1)
-    expect(settledFrames[0]?.['outcome'], '数量错配的 run outcome 应为 failed（invalid_args → failed 映射）').toBe('failed')
-
-    // 错配文案证据（fail-fast 带纠正指引）：通知 content / 主 session JSONL /
-    // journal run-settled.reason 任一落点（r4 实测纠正指引全文落 journal reason，
-    // 通知 content 的 Script Result 段仅含 status 摘要——三落点并查）
-    const deliveries = extractCustomMessageEntries(s.sessionFile, 'workflow-result')
-    const lastDelivery = deliveries[deliveries.length - 1]
-    const notifyContent = String(lastDelivery?.['content'] ?? '')
-    const sessionText = fs.readFileSync(s.sessionFile, 'utf8')
-    const journalReason = String(settledFrames[0]?.['reason'] ?? '')
-    const mismatchEvidence =
-      notifyContent.includes(MISMATCH_SNIPPET) ||
-      sessionText.includes(MISMATCH_SNIPPET) ||
-      journalReason.includes(MISMATCH_SNIPPET)
-    if (!mismatchEvidence) {
-      writeDiag(testInfo, 'batch-s3c-mismatch-snippet-missing.json', {
-        notifyContentHead: notifyContent.slice(0, 2000),
-        journalSettled: settledFrames[0],
+    // 工具入口拒绝的结构证据：run journal 零新增（拒绝先于 run 创建——与旧
+    // `agents` 错配 fail-fast 的「journal run-created 先落再 settled(failed)」不同层级；
+    // 模型被拒后重试同批也仍零新增，断言不受影响）。主 turn complete 后补小静默窗
+    // 防 journal 落盘与 turn 结束的残余时序差。
+    await new Promise((resolve) => setTimeout(resolve, NO_RUN_SETTLE_MS))
+    const journalsAfter = listFilesRecursive(agentDir, '.record.jsonl')
+    if (journalsAfter.length !== journalsBefore) {
+      writeDiag(testInfo, 'batch-s3c-run-created.json', {
+        journalsBefore,
+        journalsAfter: journalsAfter.map((f) => path.basename(f)),
+        runtimeLogsTail: readRuntimeLogs(s.dataDir).slice(-3000),
       })
     }
-    expect(mismatchEvidence, `fail-fast 证据应含错配文案 "${MISMATCH_SNIPPET}"（纠正指引随通知/会话/journal reason 落盘）`).toBe(true)
+    expect(journalsAfter.length, `非法成员 agent 应在工具入口被拒——run journal 应零新增（${journalsBefore} → ${journalsAfter.length}；run 创建即拒绝层级后移，见 diag）`).toBe(journalsBefore)
 
-    // v2 条目照写（fail-fast run 也有注册 + 终态两条）
+    // v2 条目计数不变：入口拒绝不产生第二轮 run——workflow-record v2 条目仍只有
+    // S3a 一轮的 registered/settled 各 1（旧 S3c 断言「两轮批后恰 2」随退役删除）。
     const wfRegisteredAll = extractCustomEntries(s.sessionFile, 'workflow-record').filter((d) => d['v'] === 2 && d['kind'] === 'registered')
     const wfSettledAll = extractCustomEntries(s.sessionFile, 'workflow-record').filter((d) => d['v'] === 2 && d['kind'] === 'settled')
-    expect(wfRegisteredAll.length, '两轮批后 workflow-record registered 条目应恰 2（S3a + S3c）').toBe(2)
-    expect(wfSettledAll.length, '两轮批后 workflow-record settled 条目应恰 2（fail-fast 也写终态条目）').toBe(2)
-    const s3cSettled = wfSettledAll.find((d) => d['runId'] === runId)
-    expect(s3cSettled, 'S3c run 的 settled 条目应存在').toBeDefined()
-    expect(s3cSettled?.['outcome'], 'S3c settled 条目 outcome 应为 failed（与 journal 一致）').toBe('failed')
+    expect(wfRegisteredAll.length, '入口拒绝不产生新 run——workflow-record v2 registered 条目应仍为 S3a 的恰 1 条').toBe(1)
+    expect(wfSettledAll.length, '入口拒绝不产生新 run——workflow-record v2 settled 条目应仍为 S3a 的恰 1 条').toBe(1)
 
-    await s.page.screenshot({ path: testInfo.outputPath('s3c-failfast.png'), fullPage: true })
-    console.log(`[batch-s3c] PASS：runId=${runId} fail-fast 零 ask 帧收尾`)
+    await s.page.screenshot({ path: testInfo.outputPath('s3c-entry-rejected.png'), fullPage: true })
+    console.log('[batch-s3c] PASS：非法成员 agent 工具入口拒绝——零 run journal、零成员派发')
   })
 })

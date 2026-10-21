@@ -66,11 +66,17 @@ const T1_TOKEN = 'BATCH-S1-T1-5301'
 const T2_TOKEN = 'BATCH-S1-T2-5302'
 const MAIN_MARKER = 'BATCH-S1-MAIN-5300'
 
+/** 成员对象形状（subagent-tool-interface-refactor §3.1.2 终态）：tasks 元素只接受
+ *  {task, agent?, model?, thinkingLevel?} 对象——字符串元素已被 schema 拒绝。 */
 const TASKS = [
-  `Count the number of TypeScript (.ts) files under the src directory of this project. ` +
-    `Reply with a one-line summary that ends with the exact token ${T1_TOKEN}. Do not write any files.`,
-  `Read README.md in this project and summarize it in one sentence. ` +
-    `Reply with a one-line summary that ends with the exact token ${T2_TOKEN}. Do not write any files.`,
+  {
+    task: `Count the number of TypeScript (.ts) files under the src directory of this project. ` +
+      `Reply with a one-line summary that ends with the exact token ${T1_TOKEN}. Do not write any files.`,
+  },
+  {
+    task: `Read README.md in this project and summarize it in one sentence. ` +
+      `Reply with a one-line summary that ends with the exact token ${T2_TOKEN}. Do not write any files.`,
+  },
 ]
 
 const MAIN_PROMPT =

@@ -77,7 +77,7 @@ const DISPATCH_PROMPT =
 
 function abortPrompt(runId: string): string {
   return (
-    `Stop the workflow run with runId "${runId}" NOW. Use the \`workflow\` tool with ` +
+    `Stop the workflow run with runId "${runId}" NOW. Use the \`workflow_control\` tool with ` +
     `action "abort" and runId "${runId}" (reason: "e2e s4 abort test"). ` +
     `Do not use any other tool. After the tool returns, reply with only the word ABORTED.`
   )
@@ -271,7 +271,7 @@ async function awaitS4InFlightEvidence(
   shellBaseline: { count: number; lines: string[] },
 ): Promise<{ journalFile: string; runId: string }> {
   const agentDir = path.join(dataDir, 'agent')
-  const journalFound = await waitUntil(() => listFilesRecursive(agentDir, '.events.jsonl').length > 0, JOURNAL_TIMEOUT_MS)
+  const journalFound = await waitUntil(() => listFilesRecursive(agentDir, '.record.jsonl').length > 0, JOURNAL_TIMEOUT_MS)
   if (!journalFound) {
     writeDiag('batch-s4-journal-missing.json', {
       runtimeLogsTail: readRuntimeLogs(dataDir).slice(-3000),
@@ -279,8 +279,8 @@ async function awaitS4InFlightEvidence(
     })
   }
   expect(journalFound, 'run journal 应落盘').toBe(true)
-  const journalFile = listFilesRecursive(agentDir, '.events.jsonl')[0]
-  const runId = path.basename(journalFile).replace(/\.events\.jsonl$/, '')
+  const journalFile = listFilesRecursive(agentDir, '.record.jsonl')[0]
+  const runId = path.basename(journalFile).replace(/\.record\.jsonl$/, '')
   const dispatched = await waitUntil(
     () => readJournalFrames(journalFile).some((f) => f['type'] === 'ask-dispatched'),
     JOURNAL_TIMEOUT_MS,
@@ -475,6 +475,7 @@ test('S4 (batch real): 派发后 abort → run-settled(cancelled) + 通知照达
     listen = sub
 
     // 进程基线（成员保活进程与引擎宿主薄壳 spawn 前；正常环境两者均应为 0）
+    const agentDir = path.join(dataDir, 'agent')
     const baseline = countMemberSleeperProcesses()
     expect(baseline.count, '进程基线应可读（ps 失败 = -1 哨兵，环境异常 fail-fast）').toBeGreaterThanOrEqual(0)
     const shellBaseline = countEngineShellProcesses()

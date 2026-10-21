@@ -51,15 +51,23 @@ const MEMBER_SLEEP_SHORT_S = 20
 const taskText = (sleepS: number): string =>
   `First run \`sleep ${sleepS}\` using the bash tool, wait for it to finish, then reply with only the word MEMBER-DONE.`
 
+/** 成员对象形状（subagent-tool-interface-refactor §3.1.2 终态）：tasks 元素只接受
+ *  {task, agent?, model?, thinkingLevel?} 对象——字符串元素已被 schema 拒绝。 */
+const longTasks = [
+  { task: taskText(MEMBER_SLEEP_LONG_S) },
+  { task: taskText(MEMBER_SLEEP_LONG_S) },
+]
+const shortTasks = [{ task: taskText(MEMBER_SLEEP_SHORT_S) }]
+
 const DISPATCH_PROMPT_LONG =
   `Dispatch exactly 2 background subagent tasks in ONE call using the \`subagents\` tool ` +
   `(do NOT do the tasks yourself). Both tasks are identical long-running tasks: ` +
-  `"${taskText(MEMBER_SLEEP_LONG_S)}" ` +
+  `tasks = ${JSON.stringify(longTasks)} ` +
   `After the tool call returns, reply with only the word DISPATCHED. [BATCH-WL-LONG-7731]`
 
 const DISPATCH_PROMPT_SHORT =
   `Dispatch exactly 1 background subagent task in ONE call using the \`subagents\` tool ` +
-  `(do NOT do the task yourself). The task: "${taskText(MEMBER_SLEEP_SHORT_S)}" ` +
+  `(do NOT do the task yourself). The task: tasks = ${JSON.stringify(shortTasks)} ` +
   `After the tool call returns, reply with only the word DISPATCHED. [BATCH-WL-SHORT-7732]`
 
 // ── 预算 ────────────────────────────────────────────────────────────────
@@ -223,7 +231,7 @@ function readSettledFrames(journalFile: string): RunSettledView[] {
   return parseJsonlLines(journalFile).entries
     .filter((f) => f['type'] === 'run-settled')
     .map((f) => ({
-      runId: path.basename(journalFile).replace(/\.events\.jsonl$/, ''),
+      runId: path.basename(journalFile).replace(/\.record\.jsonl$/, ''),
       outcome: typeof f['outcome'] === 'string' ? f['outcome'] : undefined,
     }))
 }
@@ -241,9 +249,9 @@ async function awaitWLInFlightEvidence(
   baseShort: { count: number; lines: string[] },
   shellBaseline: { count: number; lines: string[] },
 ): Promise<string[]> {
-  // ── journal 恰 2 个 run（双 workflow 在途） ──
+  // ── journal 恰 2 个 run（双 workflow 在途；后缀 .record.jsonl——run-vocabulary RUN_EVENTS_SUFFIX） ──
   const agentDir = path.join(dataDir, 'agent')
-  const journalsFound = await waitUntil(() => listFilesRecursive(agentDir, '.events.jsonl').length >= 2, JOURNAL_TIMEOUT_MS)
+  const journalsFound = await waitUntil(() => listFilesRecursive(agentDir, '.record.jsonl').length >= 2, JOURNAL_TIMEOUT_MS)
   if (!journalsFound) {
     writeDiag('batch-wl-journals-missing.json', {
       runtimeLogsTail: readRuntimeLogs(dataDir).slice(-3000),
@@ -251,7 +259,7 @@ async function awaitWLInFlightEvidence(
     })
   }
   expect(journalsFound, '双 workflow run journal 应落盘').toBe(true)
-  const journalFiles = listFilesRecursive(agentDir, '.events.jsonl')
+  const journalFiles = listFilesRecursive(agentDir, '.record.jsonl')
 
   // ── 在途证据：long 两成员 + short 一成员 + 引擎宿主薄壳（每 run 一窗口） ──
   const inFlightLong = await waitUntil(

@@ -713,7 +713,7 @@
     },
     {
       "id": "E2E-BATCH-03",
-      "summary": "S3 部分失败 + 反向断言：坏 agent 路径 partial / message 拒绝 / agents 数量错配 fail-fast",
+      "summary": "S3 部分失败 + 反向断言：坏 agent 路径 partial / subagent_message 域边界拒绝 / 非法成员 agent（非 ^/ 绝对路径）工具入口拒绝",
       "scope": [
         "extensions/universal/subagent-workflow/src/**",
         "packages/subagent-core/workflows/fan-out.js",
@@ -739,7 +739,7 @@
       "run": "前置：VITE_E2E=true pnpm run build:e2e（real renderer bundle，不带 VITE_MOCK）。执行：TAIJI_PI_LIVE=1 pnpm test:e2e --project=electron e2e/batch-s3-partial-failfast.spec.ts（双凭证门 = env + 本机 provider 凭证，缺一 skip 不 fail；空载串行）。剧本化包装：bash .tmp/dev-flow/w1-run-record-journal-authority.acceptance/batch-rerun.sh（W1 D3 verify 载体，含 build 前置 + 三 spec 串行 + 产物落 batch/，.tmp 不入 git）",
       "owner": "extensions/universal/subagent-workflow",
       "authority": "docs/TEST-STRATEGY.md#e2e-资产归宿纪律三态-r1r2r3",
-      "note": "剧本重建完成（2026-09-26 W1 介质归位触发义务收敛）：S3 部分失败 + 反向断言三用例；mock 轨单测已随 u4/u5 记录在案（见下方既有 note），真机轨验端到端行为。 R2 态，触发条件同 E2E-BATCH-01。mock 轨单测已随 u4/u5 记录在案（partial 语义、message 批量成员拒绝文案 = workflow-origin 域边界拒绝 + list inspect 指引——core 侧恢复新句 \"To get these results, re-dispatch via the subagents tool.\"（已随修复组 1 落地，断言锁定于 subagent-actions-core.test.ts）；④冷复活绕过检查为双缺陷：①origin/parentRunId 透传缺失 ②冷查兜底全扫吃 origin 展示过滤（原 A3 通过系 list 预热索引的无关副作用），两修复均有红绿回归用例；agents 数量 fail-fast 均有壳层/模板单测检查）——真机轨验「模型能按恢复指引只重派失败条」的端到端行为（设计 S3）"
+      "note": "剧本重建完成（2026-09-26 W1 介质归位触发义务收敛）：S3 部分失败 + 反向断言三用例；mock 轨单测已随 u4/u5 记录在案（见下方既有 note），真机轨验端到端行为。 R2 态，触发条件同 E2E-BATCH-01。mock 轨单测已随 u4/u5 记录在案（partial 语义、subagent_message 批量成员拒绝文案 = workflow-origin 域边界拒绝 + list inspect 指引——core 侧恢复新句 \"To get these results, re-dispatch via the subagents tool.\"（已随修复组 1 落地，断言锁定于 subagent-actions-core.test.ts）；④冷复活绕过检查为双缺陷：①origin/parentRunId 透传缺失 ②冷查兜底全扫吃 origin 展示过滤（原 A3 通过系 list 预热索引的无关副作用），两修复均有红绿回归用例；非法成员 agent（非 ^/ 绝对路径）入口拒绝 = subagents 工具 schema 成员对象 pattern 校验）——真机轨验「模型能按恢复指引只重派失败条」的端到端行为（设计 S3）；S3c 真机形态（subagent-tool-interface-refactor §4.3）：非法成员 agent 在 subagents 工具入口被拒——零 run journal、零成员派发（调用发起以 session JSONL 中非法路径字面为证据，结构锚不锚拒绝文案）"
     },
     {
       "id": "E2E-BATCH-04",
