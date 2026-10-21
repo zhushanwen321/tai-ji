@@ -553,6 +553,14 @@ describe("workflow_run promptGuidelines 契约（U1/TC4 拆分重排）", () => 
     expect(SUBAGENT_LIST_INJECTOR_SRC).toContain("inherit the main agent's model");
   });
 
+  it("model/thinkingLevel 字段说明承载脚本同名参数双通道指引（§3.3.7 残留风险处置说明腿）", () => {
+    // 顶层 model/thinkingLevel 是 run 级覆盖、不进脚本；脚本把同名参数声明为可选时
+    // 工具不报错（脚本静默走自己的缺省值）——schema 字段说明是该歧义唯一的结构性
+    // 提示层（错误腿 = reservedKeyChannelError，只覆盖 required 缺参形态，行为版在
+    // tool-workflow.test.ts 保留键双通道条）。两处字段说明须保留同一锚句。
+    expect(TOOL_WORKFLOW_SRC).toContain("a script's own same-named parameter must be passed inside 'args'");
+  });
+
   it("workflow 注入段指路 workflow_run（D3 新名）", () => {
     expect(WORKFLOW_LIST_INJECTOR_SRC).toContain("run directly via the workflow_run tool");
   });

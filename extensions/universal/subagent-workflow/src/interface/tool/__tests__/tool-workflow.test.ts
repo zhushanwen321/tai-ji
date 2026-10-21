@@ -431,6 +431,33 @@ describe("status {runId} 单 run 视图（成员表 + failed N/M + 查无两种�
     expect(collect).toHaveBeenCalledWith(runId, LIST_LIMIT);
   });
 
+  it("service 在场但 record 查询抛错 → trace-only 成员行，降级不抛错（§3.1.3 跨进程读失败形态）", async () => {
+    const runId = "wf-1000-eeee0005";
+    const run = makeRunWithTrace(runId, [
+      traceNode(0, "completed"),
+      traceNode(1, "failed", { error: "Request timed out." }),
+    ]);
+    const collect = vi.fn(() => {
+      throw new Error("record store disk I/O failure");
+    });
+    setSubagentService({ queries: { collectRecordsByParentRunId: collect } } as never);
+    const tool = captureStatusTool(new Map([[runId, run]]), mkdtempSync(join(tmpdir(), "wf-status-readfail-")));
+    // 读失败不传播（§3.4 错误规格：record 查询不可用 | 降级（不抛错））——status
+    // 整体成功，成员行全部走 trace 兜底折行。
+    const r = await tool.execute("id", { action: "status", runId }, undefined, undefined, {});
+
+    const text = r.content[0]?.text ?? "";
+    expect(text.split("\n")[0]).toBe(`Run ${runId} [running] fan-out · 2 members · 30s · failed 1/2`);
+    expect(text).toContain("[0] completed");
+    expect(text).toContain("[1] failed");
+    expect(text).toContain("error: Request timed out.");
+    const details = r.details as Record<string, unknown>;
+    expect(details.mode).toBe("run");
+    expect(details.truncated).toBe(false);
+    expect(details.total).toBe(2);
+    expect(collect).toHaveBeenCalledWith(runId, LIST_LIMIT);
+  });
+
   it("超预算截断 → 失败行优先保留 + 省略行 + details truncated/total", async () => {
     const runId = "wf-1000-dddd0004";
     const nodes: ExecutionTraceNode[] = [];

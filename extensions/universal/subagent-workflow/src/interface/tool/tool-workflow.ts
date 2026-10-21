@@ -55,7 +55,7 @@ import { runSummary } from "@zhushanwen/subagent-core";
 import { ArgsValidationError } from "@zhushanwen/subagent-core";
 import { getSubagentService } from "@zhushanwen/subagent-core";
 import { MEMBER_VIEWS_MAX_CHARS, memberViewLine, runMemberViews, truncateRunMemberViews } from "@zhushanwen/subagent-core";
-import type { RunMemberView } from "@zhushanwen/subagent-core";
+import type { RunMemberRecordView, RunMemberView } from "@zhushanwen/subagent-core";
 import { ID_PREVIEW_LENGTH } from "../format/id-preview.ts";
 import type { RunStartDetails, WorkflowToolResult } from "./tool-result.ts";
 import {
@@ -115,14 +115,20 @@ const WorkflowRunParams = Type.Object({
   model: Type.Optional(Type.String({
     // 缺省继承主 agent 的纪律句已删（D1 单源化→注入段）；
     // run 级 override 作用域 / user override 优先级是本参数功能语义，保留。
+    // 尾句 = §3.3.7 残留风险处置的说明腿：脚本把同名参数声明为可选时工具不会报错
+    // （顶层键不进 args、脚本静默走自己的缺省值），schema 字段说明是该歧义唯一的
+    // 结构性提示层（错误腿 = reservedKeyChannelError 只覆盖 required 缺参形态）。
     description:
       "Run-level model override in 'provider/modelId' format — all agents spawned by this run inherit it (unless a per-call agent() opts.model is set). " +
-      "A user-issued runtime override (panel switch / /subagent-model) wins over this parameter and over any explicitly scripted model.",
+      "A user-issued runtime override (panel switch / /subagent-model) wins over this parameter and over any explicitly scripted model. " +
+      "This key is NOT passed to the script — a script's own same-named parameter must be passed inside 'args'.",
   })),
   thinkingLevel: Type.Optional(StringEnum(THINKING_ORDER, {
     // 枚举值由 schema 自身的 enum 承载（不重复列举）；「user override 不改显式 scripted
     // level」的优先级事实随 D1 单源化从 promptGuidelines Note 条迁入本字段说明。
-    description: "Run-level thinkingLevel override — all agents in the run inherit it. Omit for each agent's model's highest available level. A user-issued runtime override (panel switch / /subagent-model) does not change an explicitly scripted level (explicit levels outrank the override's inline level).",
+    // 尾句同 model：§3.3.7 残留风险处置的说明腿（脚本同名参数的通道指引）。
+    description: "Run-level thinkingLevel override — all agents in the run inherit it. Omit for each agent's model's highest available level. A user-issued runtime override (panel switch / /subagent-model) does not change an explicitly scripted level (explicit levels outrank the override's inline level). " +
+      "This key is NOT passed to the script — a script's own same-named parameter must be passed inside 'args'.",
   })),
 });
 
@@ -637,7 +643,8 @@ function actionStatus(params: WorkflowControlToolParams, deps: LauncherDeps): Wo
  * 单 run 视图（§3.1.3 成员表终态形状）：run 摘要行（带 failed N/M）+ 成员行
  * （stepIndex 序）+ 截断省略行。成员事实 = core runMemberViews（record 优先、
  * trace 兜底）；record 查询经 SubagentService 单例，缺席（standalone pi / session_start
- * 前）降级 trace-only，不抛错、不隐藏成员行。
+ * 前）或查询读失败（磁盘/manifest 异常）降级 trace-only，不抛错、不隐藏成员行
+ * （§3.4 错误规格：record 查询不可用 | 降级（不抛错））。
  */
 function statusSingleRun(runId: string, deps: LauncherDeps): WorkflowExecuteResult {
   const run = deps.runs.get(runId);
@@ -645,12 +652,22 @@ function statusSingleRun(runId: string, deps: LauncherDeps): WorkflowExecuteResu
     throw runNotFoundError(runId, deps);
   }
   const summary = toRunSummary(run, deps.store);
-  // service 缺席 → records undefined → 全部成员行走 trace 兜底折行（§3.1.3 trace 兜底；
-  // collectRecordsByParentRunId 的 limit 位与 TUI run 视图同源 LIST_LIMIT——同量级口径）。
+  // record 查询不可用降级（§3.1.3 trace 兜底把「跨进程读失败」与 service 缺席并列；
+  // §3.4 错误规格「record 查询不可用 | 降级（不抛错）」）：查询抛错（磁盘/manifest
+  // 异常）与缺席同样折为 records undefined → 全部成员行走 trace 兜底行，status 不整体
+  // 失败。collectRecordsByParentRunId 的 limit 位与 TUI run 视图同源 LIST_LIMIT——同量级口径。
+  let records: readonly RunMemberRecordView[] | undefined;
   const service = getSubagentService();
-  const records = service
-    ? service.queries.collectRecordsByParentRunId(runId, LIST_LIMIT)
-    : undefined;
+  if (service) {
+    try {
+      records = service.queries.collectRecordsByParentRunId(runId, LIST_LIMIT);
+    } catch (err) {
+      logger.warn(
+        `[tool-workflow] record query failed for run ${runId} — falling back to trace-only member rows`,
+        err,
+      );
+    }
+  }
   const members = runMemberViews(run, { records, now: Date.now() });
   const budget = truncateRunMemberViews(members, MEMBER_VIEWS_MAX_CHARS);
   // failed N/M 从截断前的全量成员行计数（M = 去重后成员表行数，设计 §3.1.3 唯一定义；
