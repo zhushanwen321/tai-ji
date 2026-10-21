@@ -5,12 +5,16 @@
   现在按钮形态不变（时钟 + badge），点击语义改为 toggle pin 快捷面板，overlay 直开移入面板底部操作条：
   160ms 悬停即出任务列表（含每任务 暂停/恢复 · 立即执行 · 删除 行内操作），无需点开 overlay。
 
-  数据面（零新增接线）：直接消费 scheduler-manager 插件经 views.update 持续推送的
-  SCHEDULER_MODAL_VIEW_ID 分区树（ViewHost 渲染，与 overlay 定时任务 tab 同一份数据同一
-  渲染原语——stats-line / list-tree / action-bar；action-bar 点击经壳层 provide 的
-  ACTION_EXECUTOR_KEY 走既有命令链 scheduler-manager.toggle/run/delete，带任务 id 参数）。
-  按钮 badge 可见 ⟹ 插件已推送过树（badge 与树同轮推、同源刷新），面板打开即有内容；
-  极端时序（树推送失败 badge 仍推）由 ViewHost placeholder 态兜底提示。
+  数据面（ADR-0097 拉为主，data-source-registry #73）：直接消费 scheduler-manager 插件
+  经 views.update 持续推送的 SCHEDULER_MODAL_VIEW_ID 分区树（ViewHost 渲染，与 overlay
+  定时任务 tab 同一份数据同一渲染原语——stats-line / list-tree / action-bar；action-bar
+  点击经壳层 provide 的 ACTION_EXECUTOR_KEY 走既有命令链
+  scheduler-manager.toggle/run/delete，带任务 id 参数）。数据到达双通道：WS connected
+  边沿 plugin.ui.snapshot 全量快照恢复（推送丢失/前端重载后的收敛）+ ViewHost 挂载
+  分区缺失自举补拉（source.refreshView，ViewHost.vue onMounted）；实时推送仍承担运行中
+  即时性。按钮可见 ⟹ 插件已推送过状态（isVisibleHeaderAction 缺省反转：未推送 = 不
+  渲染，无任务会话不出入口）；面板打开即有内容或经补拉秒到，placeholder 空态仅极端
+  断连窗口可见。
 
   交互状态机（对齐 ComposerTray 外壳 D8 范式的单面板简化版）：
   - hover 按钮 160ms → 开面板；指针离开按钮+面板整体 240ms → 收起

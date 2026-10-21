@@ -28,6 +28,7 @@ import type {
   Message, ModelInfo, ServerMessage, ServerMessageMap, ServerMessageUnion, SessionSummary, SessionGroup, ProviderInfo, BuiltinProviderTemplate,
   BashDispatchReceipt,
   SkillInfo, AgentInfo, PluginInfo, SetProviderData,
+  PluginUiSnapshotPayload,
   SkillDirConfig, FileNode, RecommendedExtension, SubagentRecord, WorkflowRunRecord,
   SystemPromptConfig,
   WorkflowRunEventsReply,
@@ -1878,6 +1879,12 @@ const pluginImpl = {
   },
   async denyPermissions(_pluginId: string): Promise<void> {
     await sleep(TIMING.ack)
+  },
+  // 插件 UI 快照拉取（ADR-0097 拉为主）：mock 无插件运行时，恒返空快照（渲染端按
+  // 「未推送」处理——headerAction 入口不渲染，与 mock 模式零插件的真实形态一致）
+  async getPluginUiSnapshot(_filter: { sessionId?: string; viewId?: string } = {}): Promise<PluginUiSnapshotPayload> {
+    await sleep(TIMING.ack)
+    return { headerActions: [], views: [] }
   },
 }
 

@@ -39,7 +39,10 @@ export const builtinContributions: BuiltinContribution[] = [
     // 声明本体字段名 headerActions 是声明驱动机制的机制名，与渲染位置无关，不随落点改名。
     // 声明 = 入口常驻的静态形状；可见性由插件运行时裁决——无任务时插件经
     // updateHeaderAction 推 hidden=true，HeaderActionsHost 列表构建层剔除该入口
-    // （不出按钮，与 disabled 灰置正交；hidden 缺省 false = 照常渲染）。
+    // （不出按钮，与 disabled 灰置正交）。缺省语义（2026-10-21 用户裁决反转）：
+    // 插件从未推送运行时状态 = 不可见（fail-safe——「未推送 = 显示」的旧缺省把未知态
+    // 乐观渲染成有入口，是无任务会话按钮常驻 + 空面板缺陷的根因之一）；数据到达由
+    // connected 边沿 plugin.ui.snapshot 快照拉取保证（data-source-registry #73）。
     // commands 是 overlay 树内 action-bar 写操作（toggle/run/delete）的命令通路：声明经
     // ensureCommandDeclarationsSync 注册进 CommandRegistry，树内按钮点击走
     // execute → WS plugin.executeCommand → Worker handler 闭环；缺声明则 ERR6

@@ -169,7 +169,8 @@ function makeHeaderActionSource(hidden = false): object {
         headerAction: { activation: 'scheduler-overlay', icon: 'clock', title: '定时任务' },
       },
     ],
-    getRuntimeState: () => (hidden ? { hidden: true } : undefined),
+    // 缺省反转后「可见」用例一律已推送形态（hidden=true 显式停用 / false 已推送在场）
+    getRuntimeState: () => ({ headerActionId: 'scheduler-manager.open', pluginId: 'scheduler-manager', updatedAt: 1, hidden }),
     resolveCommandAvailability: () => 'registered',
     executeCommand: () => true,
   }

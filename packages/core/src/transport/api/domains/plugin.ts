@@ -12,7 +12,7 @@
  *
  * 依赖方向：events（订阅）+ command（类型化请求/动作原语）。
  */
-import type { PluginInfo } from '@taiji/shared'
+import type { PluginInfo, PluginUiSnapshotPayload } from '@taiji/shared'
 import { RPC_BACKSTOP_TIMEOUT_MS } from '../pending'
 import { command } from '../request'
 import * as events from '../events'
@@ -21,6 +21,19 @@ export function onPlugins(handler: (plugins: PluginInfo[]) => void): () => void 
   return events.onGlobalType('config.plugins', (msg) => {
     handler(msg.payload.plugins)
   })
+}
+
+/**
+ * 拉取插件 UI 快照（headerAction 运行时状态 + 视图树，ADR-0097「拉为主、推补充」）。
+ *
+ * plugin:headerActionUpdate / plugin:viewUpdate 是 transient 推送（不入 ring、无重放），
+ * renderer 重载/重连后的丢失由本拉取收敛：无过滤参数 = 全部会话（connected 边沿全量
+ * 恢复）；sessionId/viewId 过滤 = 单分区（ViewHost 挂载发现分区缺失时自举补拉）。
+ */
+export function getPluginUiSnapshot(
+  filter: { sessionId?: string; viewId?: string } = {},
+): Promise<PluginUiSnapshotPayload> {
+  return command('plugin.ui.snapshot', filter, RPC_BACKSTOP_TIMEOUT_MS)
 }
 
 /** 批准插件申请的权限（可部分选择）。reply pong ack；列表刷新经 config.plugins 广播。 */

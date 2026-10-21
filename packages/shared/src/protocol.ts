@@ -254,6 +254,7 @@ export type ClientMessageType =
   | 'plugin.config.get' | 'plugin.config.set'
   | 'plugin.uiResponse'
   | 'plugin.mountPoints.sync'
+  | 'plugin.ui.snapshot'
   | 'file.read'
   | 'file.tree' | 'file.tree.expand' | 'file.search' | 'file.search.cwd'
   | 'git.diff'
@@ -580,6 +581,29 @@ export interface HeaderActionUpdatePayload {
   hidden?: boolean
 }
 
+/**
+ * 视图快照条目（'plugin:uiSnapshot'.views 元素）：与 'plugin:viewUpdate' 广播载荷同构
+ * （guiTree 用 unknown[] 保持 shared 依赖最小化，消费端 isGuiComponent 收窄）。
+ */
+export interface ViewSnapshotItem {
+  sessionId: string
+  viewId: string
+  pluginId: string
+  guiTree: unknown[]
+  updatedAt: number
+}
+
+/**
+ * 插件 UI 快照（'plugin:uiSnapshot'，plugin.ui.snapshot 的 reply）：runtime 持有的每
+ * (sessionId, id) 最新 headerAction 状态与视图树全集（或按过滤参数的子集）。快照条目
+ * 与实时推送帧同构——渲染端喂同一 store 写入口，快照回放与实时帧两路同函数。
+ */
+export interface PluginUiSnapshotPayload {
+  headerActions: HeaderActionUpdatePayload[]
+  views: ViewSnapshotItem[]
+}
+
+
 // ── ClientMessage discriminated union ───────────────────────────
 
 /** 每个 type 对应的 payload 类型映射 */
@@ -896,6 +920,9 @@ export interface ClientMessageMap {
   'plugin.config.set': { pluginId: string; key: string; value: unknown }
   'plugin.uiResponse': { requestId: string; result: unknown }
   'plugin.mountPoints.sync': { mountPoints: string[] }
+  // plugin.ui.snapshot：拉取插件 UI 快照（headerAction 状态 + 视图树）。无过滤 = 全部会话
+  //（connected 边沿全量恢复）；sessionId/viewId 过滤 = 单分区补拉（ViewHost 挂载缺失自举）。
+  'plugin.ui.snapshot': { sessionId?: string; viewId?: string }
   'file.read': { path: string; sessionId?: string }
   'file.tree': { sessionId: string }
   'file.tree.expand': { sessionId: string; path: string }
@@ -1368,6 +1395,10 @@ export type ServerMessageType =
   //（AP-1）。必带 sessionId——渲染端按 (sessionId, headerActionId) 写对应会话分区；
   // 经 broker 全局广播直发（同上不入 ring）。
   | 'plugin:headerActionUpdate'
+  // plugin:uiSnapshot：plugin.ui.snapshot 拉取 RPC 的 reply（renderer connected 边沿 /
+  // ViewHost 分区缺失补拉时拉取插件 UI 快照，ADR-0097「拉为主、推补充」——transient
+  // 推送帧的丢失收敛通道）。
+  | 'plugin:uiSnapshot'
   | 'extension:widget' | 'extension:widgetGui' | 'extension:notify'
   | 'extension:setEditorText'
   | 'extension:requestsInvalidated'
@@ -2240,6 +2271,9 @@ export interface ServerMessageMapBase {
   // plugin:headerActionUpdate：headerAction 可变字段下行帧（AP-1；必带 sessionId，
   // 渲染端按 (sessionId, headerActionId) 写会话分区）。payload 契约见 HeaderActionUpdatePayload。
   'plugin:headerActionUpdate': HeaderActionUpdatePayload
+  // plugin:uiSnapshot：plugin.ui.snapshot 的 reply（runtime PluginUiSnapshotStore 读出）。
+  // 条目与两类实时推送帧同构，渲染端喂 HeaderActionStore / ViewHostStore 同一写入口。
+  'plugin:uiSnapshot': PluginUiSnapshotPayload
   // plugin:uiRequest：plugin dialog 交互请求下行（runtime UiRequestQueue 广播回调生产，
   // payload 注入当前活跃 sessionId 后经 bus.publish 定向发布，无活跃 session 时回退全局广播）。
   // requestId 必带（前端 message-bus-bridge.parseUiRequest 缺失即丢弃整条）；method/title 等
@@ -3358,6 +3392,7 @@ export interface ReplyPayloadMap {
   'plugin.config.get': ServerMessageMap['plugin:config']
   'plugin.config.set': ServerMessageMap['plugin:config']
   'plugin.mountPoints.sync': ServerMessageMap['pong']
+  'plugin.ui.snapshot': ServerMessageMap['plugin:uiSnapshot']
   'workspace.listRecent': ServerMessageMap['workspace.recentList']
   'workspace.record': ServerMessageMap['workspace.recentList']
   'project.load': ServerMessageMap['project.loaded']

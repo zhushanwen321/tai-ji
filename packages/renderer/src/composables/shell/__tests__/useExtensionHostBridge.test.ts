@@ -30,6 +30,7 @@ import { dispatchCrossSession } from '@taiji/core/transport/api'
 import {
   getExtensionBus,
   initExtensionHostBridge,
+  applyUiSnapshot,
   hasVisibleHeaderActions,
   isVisibleHeaderAction,
   resolveHeaderActionAvailability,
@@ -278,6 +279,12 @@ describe('MF-1 挂载点上报时序（mountPoints.sync 连接就绪后发送）
     if (options?.register !== false) void simulateBootstrapRegistration()
   }
 
+  /** 按 type 过滤 send 调用（plugin.ui.snapshot 重放器与 mountPoints.sync 同为 connected
+   *  触发、共享同一 send spy——本组用例只断言 mountPoints.sync 帧的时序，按帧过滤计数）。 */
+  function syncCallsOf(type: string): unknown[][] {
+    return transportSendSpy.mock.calls.filter((c) => (c[0] as { type?: string } | undefined)?.type === type)
+  }
+
   it('TC11: 初始未连接不发送；首次建连进入 connected 后补发全量挂载点', async () => {
     initBridge()
 
@@ -288,7 +295,7 @@ describe('MF-1 挂载点上报时序（mountPoints.sync 连接就绪后发送）
     connect('mock://extension-host-test', { auth: 'skip' })
     await vi.advanceTimersByTimeAsync(200) // mock WS connecting→connected（200ms）
 
-    expect(transportSendSpy).toHaveBeenCalledTimes(1)
+    expect(syncCallsOf('plugin.mountPoints.sync')).toHaveLength(1)
     expect(transportSendSpy).toHaveBeenCalledWith({
       type: 'plugin.mountPoints.sync',
       payload: { mountPoints: ['sidebar.tab', 'panel.header', 'composer.toolbar'] },
@@ -300,19 +307,18 @@ describe('MF-1 挂载点上报时序（mountPoints.sync 连接就绪后发送）
 
     connect('mock://extension-host-test', { auth: 'skip' })
     await vi.advanceTimersByTimeAsync(200)
-    expect(transportSendSpy).toHaveBeenCalledTimes(1)
+    expect(syncCallsOf('plugin.mountPoints.sync')).toHaveLength(1)
 
     // runtime 重启：旧 WS 断开 → 重连 → 再次 connected → 补发（syncMountPoints overwrite 幂等）
     disconnect()
-    expect(transportSendSpy).toHaveBeenCalledTimes(1)
+    expect(syncCallsOf('plugin.mountPoints.sync')).toHaveLength(1)
     connect('mock://extension-host-test', { auth: 'skip' })
     await vi.advanceTimersByTimeAsync(200)
 
-    expect(transportSendSpy).toHaveBeenCalledTimes(2)
-    expect(transportSendSpy).toHaveBeenLastCalledWith({
-      type: 'plugin.mountPoints.sync',
-      payload: { mountPoints: ['sidebar.tab', 'panel.header', 'composer.toolbar'] },
-    })
+    expect(syncCallsOf('plugin.mountPoints.sync')).toHaveLength(2)
+    expect(syncCallsOf('plugin.mountPoints.sync').at(-1)).toEqual([
+      { type: 'plugin.mountPoints.sync', payload: { mountPoints: ['sidebar.tab', 'panel.header', 'composer.toolbar'] } },
+    ])
   })
 
   it('TC13 (R2-2): 重复 init 后重放器上报新实例快照（dispose-and-rebuild 防回归）', async () => {
@@ -320,29 +326,27 @@ describe('MF-1 挂载点上报时序（mountPoints.sync 连接就绪后发送）
     initBridge()
     connect('mock://extension-host-test', { auth: 'skip' })
     await vi.advanceTimersByTimeAsync(200)
-    expect(transportSendSpy).toHaveBeenCalledTimes(1)
+    expect(syncCallsOf('plugin.mountPoints.sync')).toHaveLength(1)
 
     // 重复 init：dispose-and-rebuild 使新 watcher 绑定新 registry 实例（setExtensionRegistries
     // 已换新）。register:false 使新实例快照为空表——若退回模块级布尔检查（watcher 永久闭包
     // 绑定第一次 init 的实例），此处上报的是实例 1 残留快照（5 个挂载点），空表断言即红。
     initBridge({ register: false })
     // 已 connected → 新 watcher immediate 同步补发（无需推进 timer）
-    expect(transportSendSpy).toHaveBeenCalledTimes(2)
-    expect(transportSendSpy).toHaveBeenLastCalledWith({
-      type: 'plugin.mountPoints.sync',
-      payload: { mountPoints: [] },
-    })
+    expect(syncCallsOf('plugin.mountPoints.sync')).toHaveLength(2)
+    expect(syncCallsOf('plugin.mountPoints.sync').at(-1)).toEqual([
+      { type: 'plugin.mountPoints.sync', payload: { mountPoints: [] } },
+    ])
 
     // 新实例补注册后重连 → 重放器对新实例照常工作（上报其全量快照）
     await simulateBootstrapRegistration()
     disconnect()
     connect('mock://extension-host-test', { auth: 'skip' })
     await vi.advanceTimersByTimeAsync(200)
-    expect(transportSendSpy).toHaveBeenCalledTimes(3)
-    expect(transportSendSpy).toHaveBeenLastCalledWith({
-      type: 'plugin.mountPoints.sync',
-      payload: { mountPoints: ['sidebar.tab', 'panel.header', 'composer.toolbar'] },
-    })
+    expect(syncCallsOf('plugin.mountPoints.sync')).toHaveLength(3)
+    expect(syncCallsOf('plugin.mountPoints.sync').at(-1)).toEqual([
+      { type: 'plugin.mountPoints.sync', payload: { mountPoints: ['sidebar.tab', 'panel.header', 'composer.toolbar'] } },
+    ])
   })
 })
 
@@ -391,6 +395,12 @@ describe('isVisibleHeaderAction（可见性谓词单点：渲染过滤与聚合�
     type: 'headerAction',
     headerAction: ha as ContributionRecord['headerAction'],
   })
+  /** 非空运行时状态条目（缺省反转后的「已推送」形态：插件声明了入口存在） */
+  const pushedEntry: HeaderActionEntry = {
+    headerActionId: 'c1',
+    pluginId: 'demo-plugin',
+    updatedAt: 1,
+  }
   const hiddenEntry: HeaderActionEntry = {
     headerActionId: 'c1',
     pluginId: 'demo-plugin',
@@ -398,37 +408,39 @@ describe('isVisibleHeaderAction（可见性谓词单点：渲染过滤与聚合�
     updatedAt: 1,
   }
 
-  it('① overlay 直开声明（无 commandId）可见——predicate 收窄后 headerAction 段非空（渲染侧直接取段）', () => {
+  it('① 插件从未推送（undefined）→ 不可见（缺省反转：未知态 fail-safe 不渲染）；推送后 overlay 直开声明可见', () => {
     const decl = declOf({ activation: 'scheduler-overlay', icon: 'clock', title: '定时任务' })
-    expect(isVisibleHeaderAction(decl, undefined)).toBe(true)
-    if (isVisibleHeaderAction(decl, undefined)) {
+    expect(isVisibleHeaderAction(decl, undefined)).toBe(false)
+    if (isVisibleHeaderAction(decl, pushedEntry)) {
       // type predicate 收窄断言：toHeaderActionButton 依赖它免二次 !ha 判定
       expect(decl.headerAction.activation).toBe('scheduler-overlay')
     }
+    expect(isVisibleHeaderAction(decl, pushedEntry)).toBe(true)
   })
 
-  it('② 命令链声明（有 commandId）可见；无 commandId 且无 activation 的声明不可见', () => {
-    expect(isVisibleHeaderAction(declOf({ commandId: 'demo.open', title: 'T' }), undefined)).toBe(true)
-    expect(isVisibleHeaderAction(declOf({ icon: 'puzzle', title: 'T' }), undefined)).toBe(false)
+  it('② 推送后命令链声明（有 commandId）可见；无 commandId 且无 activation 的声明不可见', () => {
+    expect(isVisibleHeaderAction(declOf({ commandId: 'demo.open', title: 'T' }), pushedEntry)).toBe(true)
+    expect(isVisibleHeaderAction(declOf({ icon: 'puzzle', title: 'T' }), pushedEntry)).toBe(false)
   })
 
-  it('③ 运行时 hidden=true → 不可见（插件「无任务不显示」契约）；hidden=false 与缺省帧可见', () => {
+  it('③ 运行时 hidden=true → 不可见（插件「无任务不显示」契约）；hidden=false 推送帧可见', () => {
     const decl = declOf({ activation: 'scheduler-overlay', icon: 'clock', title: '定时任务' })
     expect(isVisibleHeaderAction(decl, hiddenEntry)).toBe(false)
     expect(isVisibleHeaderAction(decl, { ...hiddenEntry, hidden: false })).toBe(true)
-    expect(isVisibleHeaderAction(decl, undefined)).toBe(true)
   })
 
   it('④ 声明缺省（headerAction 段为空）→ false——predicate 同时收窄掉缺省形状', () => {
-    expect(isVisibleHeaderAction(declOf(null), undefined)).toBe(false)
+    expect(isVisibleHeaderAction(declOf(null), pushedEntry)).toBe(false)
   })
 })
 
 describe('hasVisibleHeaderActions（聚合面板「有可见按钮才出段」+ 密度 absent 判据；可见性条件单点 isVisibleHeaderAction）', () => {
-  /** 最小 source stub（只带可见性判定消费的三个读侧；E13/E3 面不参与可见性） */
+  /** 最小 source stub（只带可见性判定消费的三个读侧；E13/E3 面不参与可见性）。
+   *  runtime: 'none' = 未推送（undefined）/ 'pushed' = 已推送非 hidden / 'hidden' = 已推送 hidden。
+   *  缺省反转后未推送不可见——「可见」用例一律用 pushed 形态。 */
   function sourceOf(
     declarations: Array<{ id: string; ha: Record<string, unknown> | null }>,
-    hiddenByDefault = false,
+    runtime: 'none' | 'pushed' | 'hidden' = 'pushed',
   ): HeaderActionsSource {
     return {
       getDeclarations: () =>
@@ -438,18 +450,26 @@ describe('hasVisibleHeaderActions（聚合面板「有可见按钮才出段」+ 
           type: 'headerAction',
           headerAction: d.ha,
         })),
-      getRuntimeState: (_sid, _id) => (hiddenByDefault ? { hidden: true } : undefined),
+      getRuntimeState: (_sid, _id) =>
+        runtime === 'none'
+          ? undefined
+          : { headerActionId: _id, pluginId: 'demo-plugin', updatedAt: 1, ...(runtime === 'hidden' ? { hidden: true } : {}) },
       resolveCommandAvailability: () => 'registered',
       executeCommand: () => true,
     } as unknown as HeaderActionsSource
   }
 
-  it('overlay 直开声明（无 commandId）可见——scheduler 定时任务钮形态', () => {
+  it('overlay 直开声明（无 commandId）已推送 → 可见——scheduler 定时任务钮形态', () => {
     const source = sourceOf([{ id: 'c1', ha: { activation: 'scheduler-overlay', icon: 'clock', title: '定时任务' } }])
     expect(hasVisibleHeaderActions(source, 's1')).toBe(true)
   })
 
-  it('命令链声明（有 commandId）可见；无 commandId 且无 activation 的声明不可见', () => {
+  it('插件从未推送 → 不可见（缺省反转的对账位：未知态不出段）', () => {
+    const source = sourceOf([{ id: 'c1', ha: { activation: 'scheduler-overlay', icon: 'clock', title: '定时任务' } }], 'none')
+    expect(hasVisibleHeaderActions(source, 's1')).toBe(false)
+  })
+
+  it('推送后命令链声明（有 commandId）可见；无 commandId 且无 activation 的声明不可见', () => {
     const withCmd = sourceOf([{ id: 'c1', ha: { commandId: 'demo.open', title: 'T' } }])
     expect(hasVisibleHeaderActions(withCmd, 's1')).toBe(true)
     const bare = sourceOf([{ id: 'c1', ha: { icon: 'puzzle', title: 'T' } }])
@@ -457,7 +477,7 @@ describe('hasVisibleHeaderActions（聚合面板「有可见按钮才出段」+ 
   })
 
   it('运行时 hidden=true → 不可见（插件「无任务不显示」契约的对账位）', () => {
-    const source = sourceOf([{ id: 'c1', ha: { activation: 'scheduler-overlay', icon: 'clock', title: '定时任务' } }], true)
+    const source = sourceOf([{ id: 'c1', ha: { activation: 'scheduler-overlay', icon: 'clock', title: '定时任务' } }], 'hidden')
     expect(hasVisibleHeaderActions(source, 's1')).toBe(false)
   })
 
@@ -528,5 +548,87 @@ describe('u4b E3 executeCommand 语义（HeaderActionsSource wiring，test-cover
     expect(source.executeCommand('demo.open')).toBe(true)
     expect(errors).toEqual([])
     off()
+  })
+})
+
+describe('插件 UI 快照拉取（ADR-0097 拉为主：connected 全量恢复 + ViewHost 分区缺失自举补拉）', () => {
+  beforeEach(() => {
+    vi.useFakeTimers()
+    transportSendSpy.mockClear()
+    providePlatform(createMockPlatform())
+  })
+
+  afterEach(() => {
+    disposeLastInit()
+    disconnect()
+    vi.useRealTimers()
+  })
+
+  function initBridge(): Array<{ key: unknown; value: unknown }> {
+    const provided: Array<{ key: unknown; value: unknown }> = []
+    const app = {
+      provide(key: unknown, value: unknown) {
+        provided.push({ key, value })
+        return app
+      },
+    }
+    initExtensionHostBridge(app as never)
+    return provided
+  }
+
+  it('applyUiSnapshot：快照条目按实时帧形状逐条 emit（headerAction 帧 + widget 帧带 sessionId）', () => {
+    const bus = new InternalEventBus()
+    const headerFrames: unknown[] = []
+    const widgetFrames: Array<{ sessionId?: string; viewId: string; guiTree: unknown[] }> = []
+    bus.on('plugin:headerActionUpdate', (e) => headerFrames.push(e.headerAction))
+    bus.on('extension-widget', (e) => widgetFrames.push({ sessionId: e.sessionId, viewId: e.widget.viewId, guiTree: e.widget.guiTree }))
+
+    applyUiSnapshot(bus, {
+      headerActions: [{ pluginId: 'scheduler-manager', headerActionId: 'scheduler-manager.open', sessionId: 's1', badge: '2' }],
+      views: [{ sessionId: 's1', viewId: 'scheduler.modal', pluginId: 'scheduler-manager', guiTree: [{ type: 'ansi-text', props: { lines: ['x'] } }], updatedAt: 1 }],
+    })
+
+    expect(headerFrames).toEqual([{ pluginId: 'scheduler-manager', headerActionId: 'scheduler-manager.open', sessionId: 's1', badge: '2' }])
+    expect(widgetFrames).toEqual([{ sessionId: 's1', viewId: 'scheduler.modal', guiTree: [{ type: 'ansi-text', props: { lines: ['x'] } }] }])
+  })
+
+  it('WS connected 边沿发出无过滤全量拉取（plugin.ui.snapshot）；未连接不发送', async () => {
+    initBridge()
+    expect(transportSendSpy).not.toHaveBeenCalled()
+
+    connect('mock://extension-host-test', { auth: 'skip' })
+    await vi.advanceTimersByTimeAsync(200)
+
+    const snapshotCalls = transportSendSpy.mock.calls.filter(
+      (c) => (c[0] as { type?: string } | undefined)?.type === 'plugin.ui.snapshot',
+    )
+    expect(snapshotCalls).toHaveLength(1)
+    // command() 附加幂等 id（createCommandId），断言只对 type + payload
+    const frame = snapshotCalls[0][0] as { type: string; payload: unknown }
+    expect(frame.type).toBe('plugin.ui.snapshot')
+    expect(frame.payload).toEqual({})
+  })
+
+  it('refreshView（VIEW_HOST_SOURCE_KEY provide）：按 (sessionId, viewId) 过滤补拉', async () => {
+    const provided = initBridge()
+    const viewSource = provided.find((p) => p.key === VIEW_HOST_SOURCE_KEY)?.value as
+      | { refreshView?: (sessionId: string, viewId: string) => void }
+      | undefined
+    expect(viewSource?.refreshView).toBeTypeOf('function')
+
+    connect('mock://extension-host-test', { auth: 'skip' })
+    await vi.advanceTimersByTimeAsync(200)
+    transportSendSpy.mockClear()
+
+    viewSource!.refreshView!('s1', 'scheduler.modal')
+    await Promise.resolve()
+
+    const snapshotCalls = transportSendSpy.mock.calls.filter(
+      (c) => (c[0] as { type?: string } | undefined)?.type === 'plugin.ui.snapshot',
+    )
+    expect(snapshotCalls).toHaveLength(1)
+    const frame = snapshotCalls[0][0] as { type: string; payload: unknown }
+    expect(frame.type).toBe('plugin.ui.snapshot')
+    expect(frame.payload).toEqual({ sessionId: 's1', viewId: 'scheduler.modal' })
   })
 })

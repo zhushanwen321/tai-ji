@@ -947,3 +947,11 @@ WorkflowTab 步骤列表的数据源绑定从「workflow-record 全量快照（6
 **为什么**：pi 注册表的 extension 层是映射替换而非合并，全部症状（rename 静默跳过 / set_model 报模型缺失 / 子代理校验抛错等 8 个同根因症状）的根子是「pi 可用集合不含 overlay-only 模型」。候选通道对比：改 models.json（物化机器数据进用户配置区，刷新/清理语义与用户手编冲突）、fork pi（违反不 fork 上游红线）、CLI spawn `--model` 近似回退（掩盖而非解决）、extension 注入（唯一不触碰用户配置与上游源码的通道）——注入且映射替换语义下，注入集即最终可见集，无「双源合并」的排序/去重歧义。staleness 基准 = pi-ai 官方导出的目录生成时刻（`@earendil-works/pi-ai/providers/all` 子路径导出），过期即整体回落内置基线，不投半新半旧。
 
 **边界**：投喂条目按 provider 挂靠——目录缓存 entries 只含用户已配置（有凭据）的 provider，provider 本身无投喂条目时（如从未配置凭据的 provider）其下模型整体不在合并视图，默认模型校验自然回退，属 provider 级配置约束而非投喂通道限制。投喂模型挂在已配置 provider 名下时可正常设为默认模型（默认模型校验基准 = models.json ⊕ 目录缓存合并视图，`provider-catalog.ts` `getMergedCatalogModels` 单点；2026-10-20 实证 spawn `--model` 直达）。models.json 手写条目被挤出属已裁决不立项的边界（映射替换语义的必然；删掉手写条目即恢复，2026-10-20 裁决，原登记文档已撤、git 可追溯）。
+
+### ADR-0155 插件 UI 状态拉为主 + headerAction 可见性缺省反转：未推送 = 不渲染（2026-10-21 用户裁决，scheduler-quickcard-pull-based）
+
+**决策**：插件 headerAction 状态与视图树在 runtime 增设快照存储（`PluginUiSnapshotStore`，写入点 = 两条 transient 推送链的校验出口），新增 `plugin.ui.snapshot` 拉取 RPC——renderer 在 WS connected 边沿全量恢复 + ViewHost 挂载分区缺失自举补拉，实时推送（transient，不入 ring）保留为失效提示。同时反转 `isVisibleHeaderAction` 缺省语义：插件从未推送运行时状态 = 不可见（旧缺省「未推送 = 显示」把未知态乐观渲染成有入口，是无任务会话定时任务按钮常驻 + 面板停「等待插件渲染…」空态的根因）。
+
+**为什么**：两帧是纯推送且结构性可丢（transient 不入 ring、renderer 重载即失、新建会话不触发插件激活回调），按钮缺省态又是「显示」，导致渲染端无法区分「有任务」与「什么都没收到」。修推送必达化属已否方案（ADR-0097：分布式消息税）；逐点打补丁（renderer 补定时器轮询）违反 ADR-0097 功能域禁补偿逻辑——拉取快照是唯一同时消除三条丢失路径的收敛通道（C-comm-08「立即消费的 session 级状态必须主动拉取 RPC」的本域落地）。数据域登记 = data-source-registry #73。
+
+**边界**：可见性反转是 headerAction 通用契约收紧——声明了 headerAction 但从未推送运行时状态的外部插件将不显示入口（有意行为变更，插件必须运行时声明存在才渲染；当前唯一 headerAction 插件 = scheduler-manager，无存量受影响方）。`hidden=true`（显式停用）与「无条目」（从未声明）语义分层保留。配套：scheduler-manager 补挂 `onDidCreateSession` 建镜像（session.create 不触发 didActivate，无镜像则收不到 entry 失效事件，新会话首轮创建任务后按钮漏显示）。

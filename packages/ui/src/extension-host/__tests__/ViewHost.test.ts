@@ -5,6 +5,7 @@
  *  - TC-6 渲染 GuiComponent 树：mock ViewHostSource 返回 ansi-text + stats-line 树，
  *    断言 GuiComponentRenderer 渲染出的 DOM 内容（AC9 view 渲染侧）
  *  - TC-7 空态占位：store 无 view 时渲染标题（title ?? viewId）+ 等待提示文案
+ *  - 自举补拉（ADR-0097 拉为主）：placeholder 态挂载且分区缺失 → 调 source.refreshView
  *
  * 运行：cd packages/ui && npx vitest run src/extension-host/
  */
@@ -12,6 +13,11 @@ import { describe, it, expect, vi } from 'vitest'
 import { mount } from '@vue/test-utils'
 import { reactive } from 'vue'
 import type { GuiComponent } from '@zhushanwen/extension-protocol'
+// 文件内 override 全局 setup 的 vue-i18n mock（键命中 → 字典文案）：空态断言走真实词条
+vi.mock('vue-i18n', async () => {
+  const { i18nMock } = await import('../../__tests__/helpers/i18n-mock')
+  return i18nMock({ 'common.loading': '加载中…' })
+})
 import ViewHost from '../ViewHost.vue'
 import { VIEW_HOST_SOURCE_KEY, type ViewHostSource, type ViewCacheEntry } from '../view-host-source'
 
@@ -36,6 +42,11 @@ function makeStore(entry?: ViewCacheEntry) {
     getViewIds: vi.fn(() => []),
   }
   return store
+}
+
+/** 命中 (SESSION, VIEW_ID) 的缓存条目（自举补拉「已有 view 不触发」用例） */
+function makeTreeEntry(): ViewCacheEntry {
+  return { viewId: VIEW_ID, pluginId: 'p1', guiTree: makeTree(), updatedAt: 1 }
 }
 
 function mountHost(store: ViewHostSource, title?: string, empty?: 'placeholder' | 'hidden') {
@@ -81,7 +92,7 @@ describe('ViewHost', () => {
     const empty = wrapper.find('[data-testid="view-host-empty"]')
     expect(empty.exists()).toBe(true)
     expect(empty.text()).toContain('我的视图')
-    expect(empty.text()).toContain('等待插件渲染')
+    expect(empty.text()).toContain('加载中')
     // 无 GuiComponent 渲染
     expect(wrapper.find('[data-testid="ansi-text"]').exists()).toBe(false)
   })
@@ -157,6 +168,28 @@ describe('ViewHost', () => {
     const empty = wrapper.find('[data-testid="view-host-empty"]')
     expect(empty.exists()).toBe(true)
     expect(empty.text()).toContain('我的视图')
-    expect(empty.text()).toContain('等待插件渲染')
+    expect(empty.text()).toContain('加载中')
+  })
+
+  it('自举补拉（ADR-0097）：placeholder 态挂载分区缺失 → 调 source.refreshView(sessionId, viewId)', () => {
+    const refreshView = vi.fn()
+    const store: ViewHostSource = { ...makeStore(undefined), refreshView }
+    mountHost(store, '我的视图')
+    expect(refreshView).toHaveBeenCalledTimes(1)
+    expect(refreshView).toHaveBeenCalledWith(SESSION, VIEW_ID)
+  })
+
+  it('自举补拉不触发：已有 view / empty=hidden / source 无 refreshView（可选方法）', () => {
+    const refreshView = vi.fn()
+    // 已有 view：不补拉
+    const withEntry: ViewHostSource = { ...makeStore(makeTreeEntry()), refreshView }
+    mountHost(withEntry)
+    // hidden 挂载点：分区无内容属常态，不补拉
+    const hiddenEmpty = mountHost({ ...makeStore(undefined), refreshView }, undefined, 'hidden')
+    expect(refreshView).not.toHaveBeenCalled()
+    expect(hiddenEmpty.find('[data-testid="view-host"]').exists()).toBe(false)
+    // source 无 refreshView（可选方法缺省）：静默跳过不崩
+    expect(() => mountHost(makeStore(undefined))).not.toThrow()
+    expect(refreshView).not.toHaveBeenCalled()
   })
 })

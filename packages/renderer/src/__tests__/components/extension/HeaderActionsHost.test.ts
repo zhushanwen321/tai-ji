@@ -12,7 +12,7 @@
  *   disabled=true 缺 tooltip → 「暂不可用」泛化文案（场景 12，与 unregistered 的
  *   「本会话未加载所需扩展」文案分叉），插件显式 tooltip 优先
  * - 运行时镜像 entry.hidden：true 入口整体不渲染（零 DOM，无任务不显示契约）/
- *   false 与未推送帧照常渲染
+ *   false 推送帧照常渲染；未推送帧（缺省反转 ADR-0155）不渲染
  * - E3 点击 → executeCommand(commandId)；命令缺失（返回 false）→ 本地置灰（禁静默 no-op）；
  *   宿主重判 registered（命令重注册回来）→ 置灰让位、按钮恢复可点（F5）
  * - activation 分派（声明驱动）：'scheduler-overlay' 点击 → openSchedulerTab（模块 mock），
@@ -64,7 +64,9 @@ const schedulerOverlayAction: ContributionRecord = {
 function makeSource(overrides: Partial<HeaderActionsSource> = {}): HeaderActionsSource {
   return {
     getDeclarations: () => [schedulerAction],
-    getRuntimeState: () => undefined,
+    // 缺省 = 已推送非 hidden 条目（缺省反转后「未推送 = 不可见」——渲染契约用例一律在
+    // 已推送形态下断言；「未推送不渲染」由专门用例承载）
+    getRuntimeState: (_sid, id) => ({ headerActionId: id, pluginId: 'scheduler-manager', updatedAt: 1 }),
     resolveCommandAvailability: () => 'registered',
     executeCommand: vi.fn(() => true),
     ...overrides,
@@ -236,9 +238,9 @@ describe('HeaderActionsHost', () => {
     const btn = wrapper.find('[data-testid=header-action-scheduler-manager-open]')
     expect(btn.attributes('disabled')).toBeUndefined()
     expect(btn.attributes('aria-label')).toBe('定时任务')
-    // 未推送运行时帧（getRuntimeState → undefined）：E13 registered 主路径可点
+    // 未推送运行时帧（getRuntimeState → undefined）：缺省反转后入口不渲染（不出按钮）
     const noEntry = mountHost(makeSource({ getRuntimeState: () => undefined }))
-    expect(noEntry.find('[data-testid=header-action-scheduler-manager-open]').attributes('disabled')).toBeUndefined()
+    expect(noEntry.find('[data-testid=header-action-scheduler-manager-open]').exists()).toBe(false)
   })
 
   it('运行时镜像 entry.hidden=true：入口整体不渲染（无任务不显示——不出按钮，非灰置）', () => {
@@ -255,7 +257,7 @@ describe('HeaderActionsHost', () => {
     expect(wrapper.find('button').exists()).toBe(false)
   })
 
-  it('运行时镜像 entry.hidden=false 与未推送帧（缺省）：按钮照常渲染', () => {
+  it('运行时镜像 entry.hidden=false 推送：按钮照常渲染；未推送帧（缺省反转）：不渲染', () => {
     const hiddenFalse: HeaderActionEntry = {
       headerActionId: 'scheduler-manager.open',
       pluginId: 'scheduler-manager',
@@ -264,9 +266,9 @@ describe('HeaderActionsHost', () => {
     }
     const explicitSource = mountHost(makeSource({ getRuntimeState: () => hiddenFalse }))
     expect(explicitSource.find('[data-testid=header-action-scheduler-manager-open]').exists()).toBe(true)
-    // 缺省（插件未推 hidden）：hidden 语义缺省 false，按钮显示
-    const defaultSource = mountHost(makeSource())
-    expect(defaultSource.find('[data-testid=header-action-scheduler-manager-open]').exists()).toBe(true)
+    // 未推送（插件从未声明存在）：fail-safe 不渲染（ADR-0155 缺省反转）
+    const neverPushed = mountHost(makeSource({ getRuntimeState: () => undefined }))
+    expect(neverPushed.find('[data-testid=header-action-scheduler-manager-open]').exists()).toBe(false)
   })
 
   it('点击 → executeCommand(commandId)（执行器收到命令 id）', async () => {

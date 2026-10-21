@@ -23,6 +23,9 @@ export type {
   SessionViewSnapshot,
   // plugin headerAction 帧载荷（plugin-header-action-modal-points AP-1）
   HeaderActionUpdatePayload,
+  // 插件 UI 快照（plugin.ui.snapshot 拉取 reply，ADR-0097 拉为主）——runtime store /
+  // renderer bridge 跨包具名消费
+  ViewSnapshotItem, PluginUiSnapshotPayload,
   WatchdogMemoryLevel, WatchdogMemoryPressurePayload,
   RollingRestartState, RollingRestartReason, RollingRestartInflightSummary,
   RollingRestartDeferredPayload, RollingRestartCountdownPayload, RollingRestartForcedPayload,
