@@ -163,7 +163,8 @@ describe("内置 workflow 脚本 scriptPath 锚定 fail-fast（u0-failfast）", 
     async (stem) => {
       const minArgs: Record<string, string> = {
         ...MIN_VALID_ARGS,
-        "fan-out": '{ tasks: ["probe"] }',
+        // fan-out tasks 为成员对象形态（对象-only 契约，u-fanout-template）
+        "fan-out": '{ tasks: [{ task: "probe" }] }',
       };
       plantHostileUtils(sandboxDir);
       const stderr = await runNodeExpectFailure(

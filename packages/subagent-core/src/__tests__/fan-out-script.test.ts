@@ -1,21 +1,26 @@
-// fan-out.js workflow 脚本行为契约直测（u1-fanout-template，设计 D4/D5/D9）。
+// fan-out.js workflow 脚本行为契约直测（u-fanout-template，设计 D4/D5/D9 + 成员对象化）。
 //
 // 测试方法（同 review-fix-loop-script.test.ts 先例）：fan-out.js 是 pi worker 模板
 // 脚本——顶层执行 + 顶层 return，不可作为 ES module import。用 node -e「AsyncFunction
 // 包装 + 真实子进程」跑整脚本副本：注入 fake agent / parallel / phase / log 与真实
-// require（_shared/agent-refs.cjs 经 workerData.scriptPath 锚定真实加载）。探针无
-// 文件系统副作用（fan-out 不落盘），读原路径即可。
+// require 沙箱（workerData.scriptPath 锚定契约，探针注入真实路径）。探针无文件系统
+// 副作用（fan-out 不落盘），读原路径即可。
 //
 // fake parallel 复刻 worker-script-builder.ts parallel() 的结果归一化语义
 // （fulfilled 对象透传 / fulfilled 非对象→failed / rejected→failed），使「成员死亡走
 // allSettled failed 分支」断言对齐真实 worker 行为，而非测试自造契约。
 //
 // 回归锚点（断言在违背契约的旧实现上会红）：
-//   - D9 agents 数量错配 fail-fast（对照 parallel 的静默 fallback 被有意排除）
+//   - tasks 对象-only 契约（成员对象元素；旧字符串形态/缺 task/空白 task 入口 fail-fast；
+//     validateRunArgs/ajv 类型校验是第一道，本脚本入口纵深兜底）
+//   - 成员级 agent/model/thinkingLevel 按成员传递，未指定字段不进 agent() 调用
+//     （留给 run 级 $MODEL / $THINKING_LEVEL 继承）
+//   - description 固定 fan-out-<i>（成员复用身份键，正则 ^fan-out-(\d+)$ 不变）
 //   - D4 taskIndex 按派发序赋值（$ARGS.tasks 为权威源，成员无从错报）
-//   - D4/G2 部分失败 partial 收尾；全员失败 throw（run failed）
+//   - D4/G2 部分失败 partial 收尾 + 只重派失败 taskIndex 提示；全员失败 throw（run failed）
 //   - D5 通知体积保序截断（truncated 标记 + taskIndex/status 恒完整）
 //   - D4 aggregate 可选归约（末尾一个 agent()；归约失败不炸 run）
+//   - @pi-meta parameters 对象-only（additionalProperties:false + task minLength + pattern ^/）
 import { execFile } from "node:child_process";
 import { readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
@@ -54,6 +59,8 @@ interface AgentCallRecord {
   description?: string;
   prompt?: string;
   agent?: string;
+  model?: string;
+  thinkingLevel?: string;
   schema?: { required?: string[]; properties?: Record<string, unknown> };
 }
 
@@ -153,88 +160,105 @@ async function runProbeExpectThrow(args: unknown, behavior: AgentBehavior): Prom
   return String(outcome.stderr ?? "");
 }
 
-const THREE_TASKS = ["count ts files", "count md files", "list exports"];
+const THREE_TASKS = [{ task: "count ts files" }, { task: "count md files" }, { task: "list exports" }];
 
-describe("fan-out.js 入口 fail-fast（D9 错误规格）", () => {
-  it("agents 数量错配（3 tasks 配 2 agents）→ throw 且错误带 D9 字面与 Correct 示例", async () => {
-    const stderr = await runProbeExpectThrow(
-      { tasks: THREE_TASKS, agents: "/a/first.md,/b/second.md" },
-      { aggregate: "none" },
-    );
-    // D9 字面：agents must have 1 entry or exactly tasks.length=3 entries, got 2
-    expect(stderr).toContain("agents must have 1 entry or exactly tasks.length=3 entries, got 2");
+describe("fan-out.js 入口 fail-fast（tasks 对象-only 契约）", () => {
+  it("tasks 元素为旧字符串形态 → throw（对象-only；validateRunArgs/ajv 类型校验第一道，脚本入口纵深兜底）", async () => {
+    const stderr = await runProbeExpectThrow({ tasks: ["t0", "t1"] }, { aggregate: "none" });
+    expect(stderr).toContain('must be objects with a non-blank "task" string');
     expect(stderr).toContain("Correct:");
-    // fail-fast 发生在派发前：零 agent 调用（对照 parallel 的静默 fallback 被有意排除）
+    // fail-fast 发生在派发前：零 agent 调用
   });
 
   it("tasks 缺失 → throw 带 Correct 示例（直跑 workflow run 无 handler 前置校验时的兜底）", async () => {
-    const stderr = await runProbeExpectThrow({ agents: "/a.md" }, { aggregate: "none" });
+    const stderr = await runProbeExpectThrow({}, { aggregate: "none" });
     expect(stderr).toContain("tasks is required");
     expect(stderr).toContain('Correct: {"tasks"');
   });
 
-  it("tasks 元素含非字符串 → throw（模板入口校验，args-validator 后的纵深）", async () => {
-    const stderr = await runProbeExpectThrow({ tasks: ["ok", 42] }, { aggregate: "none" });
-    expect(stderr).toContain("non-empty string array");
-    expect(stderr).toContain('Correct: {"tasks"');
+  it("tasks 空数组 → throw（minItems:1 的脚本入口纵深）", async () => {
+    const stderr = await runProbeExpectThrow({ tasks: [] }, { aggregate: "none" });
+    expect(stderr).toContain("tasks is required");
   });
 
-  it("tasks 元素为空白字符串 → throw", async () => {
-    const stderr = await runProbeExpectThrow({ tasks: ["ok", "   "] }, { aggregate: "none" });
-    expect(stderr).toContain("non-empty string array");
+  it("成员缺 task 字段 → throw（task 必填的脚本入口纵深）", async () => {
+    const stderr = await runProbeExpectThrow(
+      { tasks: [{ task: "ok" }, { agent: "/a/one.md" }] },
+      { aggregate: "none" },
+    );
+    expect(stderr).toContain('must be objects with a non-blank "task" string');
+  });
+
+  it("member.task 为空白字符串 → throw（schema minLength 不拦空白，入口 trim 检查保留）", async () => {
+    const stderr = await runProbeExpectThrow(
+      { tasks: [{ task: "ok" }, { task: "   " }] },
+      { aggregate: "none" },
+    );
+    expect(stderr).toContain('must be objects with a non-blank "task" string');
   });
 });
 
-describe("fan-out.js agents 分配（1 → 全部、N → 一一对应）", () => {
-  it("1 个 agent 应用于全部成员", async () => {
+describe("fan-out.js 成员级配置派发（成员对象 agent/model/thinkingLevel）", () => {
+  it("成员级 agent 逐成员生效（各成员可不同执行者）", async () => {
     const r = await runProbe(
-      { tasks: ["t0", "t1", "t2"], agents: "/x/one.md" },
+      { tasks: [{ task: "t0", agent: "/a/one.md" }, { task: "t1", agent: "/b/two.md" }, { task: "t2", agent: "/a/one.md" }] },
       { aggregate: "none" },
     );
     expect(r.outcome.status).toBe("ok");
-    expect(r.agentCalls).toHaveLength(3);
-    for (const call of r.agentCalls) {
-      expect(call.agent).toBe("/x/one.md");
-    }
+    expect(r.agentCalls.map((c) => c.agent)).toEqual(["/a/one.md", "/b/two.md", "/a/one.md"]);
   });
 
-  it("N 个 agents 与 tasks 一一对应（按派发序）", async () => {
-    const r = await runProbe(
-      { tasks: THREE_TASKS, agents: "/a/first.md,/b/second.md,/c/third.md" },
-      { aggregate: "none" },
-    );
-    expect(r.outcome.status).toBe("ok");
-    expect(r.agentCalls.map((c) => c.agent)).toEqual(["/a/first.md", "/b/second.md", "/c/third.md"]);
-  });
-
-  it("agents 缺省 → 成员不带 agent 字段（默认执行者）", async () => {
-    const r = await runProbe({ tasks: ["t0", "t1"] }, { aggregate: "none" });
+  it("成员未指定 agent → 不带 agent 字段（默认执行者；未指定字段不进 agent() 调用）", async () => {
+    const r = await runProbe({ tasks: [{ task: "t0" }, { task: "t1" }] }, { aggregate: "none" });
     expect(r.outcome.status).toBe("ok");
     for (const call of r.agentCalls) {
       expect(call.agent).toBeUndefined();
     }
   });
+
+  it("成员级 model/thinkingLevel 进 agent() 调用；未指定不带字段（留给 $MODEL/$THINKING_LEVEL 继承）", async () => {
+    const r = await runProbe(
+      {
+        tasks: [
+          { task: "t0", model: "prov/model-one", thinkingLevel: "high" },
+          { task: "t1" },
+        ],
+      },
+      { aggregate: "none" },
+    );
+    expect(r.agentCalls[0].model).toBe("prov/model-one");
+    expect(r.agentCalls[0].thinkingLevel).toBe("high");
+    expect(r.agentCalls[1].model).toBeUndefined();
+    expect(r.agentCalls[1].thinkingLevel).toBeUndefined();
+  });
+
+  it("description 恒为 fan-out-<i>（成员复用身份键，正则 ^fan-out-(\\d+)$ 派发序对齐）", async () => {
+    const r = await runProbe({ tasks: THREE_TASKS }, { aggregate: "none" });
+    expect(r.agentCalls.map((c) => c.description)).toEqual(["fan-out-0", "fan-out-1", "fan-out-2"]);
+    // 静态锚：派发块的 description 不承载显示语义，模板源码保持 "fan-out-" + i 字面拼接
+    expect(FANOUT_SOURCE).toContain('description: "fan-out-" + i,');
+  });
 });
 
 describe("fan-out.js taskIndex 派发序赋值（D4 权威源契约）", () => {
-  it("results[].taskIndex 严格等于 $ARGS.tasks 下标，task 文本以 $ARGS.tasks 为权威源", async () => {
+  it("results[].taskIndex 严格等于 $ARGS.tasks 下标，task 文本以 member.task 为权威源", async () => {
     const r = await runProbe(
-      { tasks: THREE_TASKS, agents: "/x/one.md" },
+      { tasks: THREE_TASKS.map((m) => ({ ...m, agent: "/x/one.md" })) },
       { aggregate: "none" },
     );
     expect(r.outcome.status).toBe("ok");
     expect(r.outcome.results).toHaveLength(3);
     r.outcome.results.forEach((entry, i) => {
       expect(entry.taskIndex).toBe(i);
-      expect(entry.task).toBe(THREE_TASKS[i]);
+      expect(entry.task).toBe(THREE_TASKS[i].task);
       expect(entry.status).toBe("ok");
     });
-    // prompt = task 原文（无转译包装），成员收到的就是 $ARGS.tasks 元素
-    expect(r.agentCalls.map((c) => c.prompt)).toEqual(THREE_TASKS);
+    // prompt = member.task 原文（无转译包装），成员收到的就是 $ARGS.tasks 元素的 task 字段
+    expect(r.agentCalls.map((c) => c.prompt)).toEqual(THREE_TASKS.map((m) => m.task));
   });
 
   it("成员输出 schema 不含 taskIndex（成员无从错报）——schema 只有 summary/fullReportPath", async () => {
-    const r = await runProbe({ tasks: ["t0", "t1"] }, { aggregate: "none" });
+    const r = await runProbe({ tasks: [{ task: "t0" }, { task: "t1" }] }, { aggregate: "none" });
     for (const call of r.agentCalls) {
       expect(call.schema?.required).toEqual(["summary"]);
       expect(Object.keys(call.schema?.properties ?? {}).sort()).toEqual(["fullReportPath", "summary"]);
@@ -242,16 +266,16 @@ describe("fan-out.js taskIndex 派发序赋值（D4 权威源契约）", () => {
     // 静态检查：agent() 派发块源码不得出现 taskIndex 字段声明
     const dispatchBlock = FANOUT_SOURCE.slice(
       FANOUT_SOURCE.indexOf("agent({"),
-      FANOUT_SOURCE.indexOf("...agentFor(i)"),
+      FANOUT_SOURCE.indexOf('...memberOverride(member, "thinkingLevel")'),
     );
     expect(dispatchBlock).not.toContain("taskIndex");
   });
 });
 
 describe("fan-out.js 失败语义（D4/G2：allSettled partial 收尾）", () => {
-  it("部分成员失败 → status=partial，失败条目带 error，其余成员 ok 不被阻断", async () => {
+  it("部分成员失败 → status=partial，失败条目带 error，其余成员 ok 不被阻断；收尾提示只重派失败 taskIndex", async () => {
     const r = await runProbe(
-      { tasks: THREE_TASKS, agents: "/x/one.md" },
+      { tasks: THREE_TASKS.map((m) => ({ ...m, agent: "/x/one.md" })) },
       { failIndexes: [1], aggregate: "none" },
     );
     expect(r.outcome.status).toBe("partial");
@@ -261,14 +285,17 @@ describe("fan-out.js 失败语义（D4/G2：allSettled partial 收尾）", () =>
     expect(r.outcome.results[2].status).toBe("ok");
     // 失败条目 task/taskIndex 仍按派发序权威赋值（只重派失败任务的归因基础）
     expect(r.outcome.results[1].taskIndex).toBe(1);
-    expect(r.outcome.results[1].task).toBe(THREE_TASKS[1]);
+    expect(r.outcome.results[1].task).toBe(THREE_TASKS[1].task);
     // 三个成员都被派发（失败不阻断派发集合）
     expect(r.agentCalls).toHaveLength(3);
+    // §3.3.5 partial 收尾文案：指向失败 taskIndex 的局部重派，不是全批重跑
+    expect(r.outcome.message).toContain("taskIndex");
+    expect(r.outcome.message).toContain("失败 1");
   });
 
   it("成员 resolve 非对象结果（引擎失败回退形态）→ failed 条目，不炸 run", async () => {
     const r = await runProbe(
-      { tasks: ["t0", "t1"] },
+      { tasks: [{ task: "t0" }, { task: "t1" }] },
       { failIndexes: [0], failMode: "resolve-string", aggregate: "none" },
     );
     expect(r.outcome.status).toBe("partial");
@@ -279,7 +306,7 @@ describe("fan-out.js 失败语义（D4/G2：allSettled partial 收尾）", () =>
 
   it("全员失败 → throw（run failed，非 error outcome 收尾）", async () => {
     const stderr = await runProbeExpectThrow(
-      { tasks: ["t0", "t1"], agents: "/x/one.md" },
+      { tasks: [{ task: "t0" }, { task: "t1" }] },
       { failIndexes: [0, 1], aggregate: "none" },
     );
     expect(stderr).toContain("all tasks failed");
@@ -290,7 +317,10 @@ describe("fan-out.js 失败语义（D4/G2：allSettled partial 收尾）", () =>
 describe("fan-out.js 通知体积保序截断（D5：truncated 标记）", () => {
   it("results 超预算 → truncated:true，按序截断（靠前完整、靠后让出 summary），taskIndex/status/路径恒完整", async () => {
     const behavior: AgentBehavior = { summaryOf: "x".repeat(3000), aggregate: "none" };
-    const r = await runProbe({ tasks: ["t0", "t1", "t2", "t3", "t4"], agents: "/x/one.md" }, behavior);
+    const r = await runProbe(
+      { tasks: [{ task: "t0" }, { task: "t1" }, { task: "t2" }, { task: "t3" }, { task: "t4" }] },
+      behavior,
+    );
     expect(r.outcome.status).toBe("ok");
     expect(r.outcome.truncated).toBe(true);
     expect(r.outcome.results).toHaveLength(5);
@@ -306,7 +336,7 @@ describe("fan-out.js 通知体积保序截断（D5：truncated 标记）", () =>
   });
 
   it("总量在预算内 → 无 truncated 标记（缺省即 false 语义）", async () => {
-    const r = await runProbe({ tasks: ["t0", "t1"], agents: "/x/one.md" }, { aggregate: "none" });
+    const r = await runProbe({ tasks: [{ task: "t0" }, { task: "t1" }] }, { aggregate: "none" });
     expect(r.outcome.truncated).toBeUndefined();
     expect(r.outcome.results[0].summary).toBe("summary-0");
   });
@@ -326,7 +356,7 @@ describe("fan-out.js aggregate 可选归约（D4）", () => {
   });
 
   it("aggregate 缺省 → 纯收集，不派聚合成员，outcome 无 aggregate 字段", async () => {
-    const r = await runProbe({ tasks: ["t0", "t1"] }, { aggregate: "none" });
+    const r = await runProbe({ tasks: [{ task: "t0" }, { task: "t1" }] }, { aggregate: "none" });
     expect(r.agentCalls).toHaveLength(2);
     expect(r.outcome.aggregate).toBeUndefined();
   });
@@ -355,5 +385,30 @@ describe("fan-out.js 模块形态与参数侧契约", () => {
   it("参数范围无 tasksJson（D4 不采用其余方案的理由：tasks 直接数组是唯一任务集入口）", () => {
     expect(FANOUT_SOURCE).not.toContain("tasksJson");
     expect(FANOUT_SOURCE).not.toContain("itemsJson");
+  });
+
+  it("@pi-meta tasks schema 对象-only：items additionalProperties:false + task minLength + agent pattern ^/ + maxItems（验收②）", () => {
+    const metaStart = FANOUT_SOURCE.indexOf("/* @pi-meta");
+    const metaEnd = FANOUT_SOURCE.indexOf("*/", metaStart);
+    const metaBlock = FANOUT_SOURCE.slice(metaStart, metaEnd);
+    expect(metaBlock).toContain("additionalProperties: false");
+    expect(metaBlock).toContain("minLength: 1");
+    expect(metaBlock).toContain('pattern: "^/"');
+    expect(metaBlock).toContain("maxItems: 20");
+    expect(metaBlock).toContain("required: [task]");
+    // thinkingLevel enum 与运行级 THINKING_ORDER 同源（字面量同源，见 meta 块注释）
+    expect(metaBlock).toContain('"off", "minimal", "low", "medium", "high", "xhigh", "max"');
+  });
+
+  it("@pi-meta 无 agents 参数（随成员对象化退役）；模板级 aggregate 参数保留（验收④）", () => {
+    const metaStart = FANOUT_SOURCE.indexOf("/* @pi-meta");
+    const metaEnd = FANOUT_SOURCE.indexOf("*/", metaStart);
+    const metaBlock = FANOUT_SOURCE.slice(metaStart, metaEnd);
+    expect(metaBlock).not.toMatch(/^\s*agents:/m);
+    expect(metaBlock).toContain("aggregate: { type: boolean, default: false }");
+    // parseAgentRefs / agents 数量 fail-fast 旧逻辑整体退役
+    expect(FANOUT_SOURCE).not.toContain("parseAgentRefs");
+    expect(FANOUT_SOURCE).not.toContain("agentRefs");
+    expect(FANOUT_SOURCE).not.toContain("agentFor");
   });
 });
