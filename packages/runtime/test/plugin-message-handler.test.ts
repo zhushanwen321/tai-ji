@@ -256,14 +256,14 @@ describe('PluginMessageHandler — 落空语义与 handles 清单', () => {
     expect(pluginService.getDiscoveredPlugins).not.toHaveBeenCalled()
   })
 
-  it('handles 清单含全部 12 个 plugin.* type', () => {
+  it('handles 清单含全部 13 个 plugin.* type', () => {
     const { handler } = makeHandler()
-    expect(handler.handles).toHaveLength(12)
+    expect(handler.handles).toHaveLength(13)
     expect(handler.handles).toEqual(expect.arrayContaining([
       'plugin.list', 'plugin.toggle', 'plugin.uninstall', 'plugin.approvePermissions', 'plugin.revokePermissions',
       'plugin.denyPermissions',
       'plugin.executeCommand', 'plugin.config.get', 'plugin.config.set', 'plugin.install', 'plugin.uiResponse',
-      'plugin.mountPoints.sync',
+      'plugin.mountPoints.sync', 'plugin.ui.snapshot',
     ]))
   })
 })

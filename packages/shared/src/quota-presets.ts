@@ -121,6 +121,17 @@ export const QUOTA_PRESETS: QuotaPreset[] = [
   },
 ]
 
+/** 非数组、非 null 的对象（wire 形状守卫共用）。 */
+function isPlainRecord(v: unknown): v is Record<string, unknown> {
+  return typeof v === 'object' && v !== null && !Array.isArray(v)
+}
+
+/** 可选字段校验：缺省放行（远程向后兼容），提供则必须是指定基元类型。 */
+function isOptionalField(record: Record<string, unknown>, key: string, type: 'string' | 'boolean'): boolean {
+  const value = record[key]
+  return value === undefined || typeof value === type
+}
+
 /**
  * QuotaPreset wire 形状守卫（remote-config presets 段元素校验用）。
  *
@@ -132,20 +143,19 @@ export const QUOTA_PRESETS: QuotaPreset[] = [
  * 不因单个未知值拒用整个 presets 表。
  */
 export function isQuotaPreset(v: unknown): v is QuotaPreset {
-  if (typeof v !== 'object' || v === null || Array.isArray(v)) return false
-  const p = v as Record<string, unknown>
-  if (typeof p['fetcher'] !== 'string' || p['fetcher'] === '') return false
-  if (typeof p['label'] !== 'string') return false
-  if (!Array.isArray(p['auth']) || !p['auth'].every((k) => typeof k === 'string')) return false
-  const match = p['match']
-  if (typeof match !== 'object' || match === null || Array.isArray(match)) return false
-  const m = match as Record<string, unknown>
-  if (m['baseUrlPattern'] !== undefined && typeof m['baseUrlPattern'] !== 'string') return false
-  if (m['namePattern'] !== undefined && typeof m['namePattern'] !== 'string') return false
-  if (p['helpUrl'] !== undefined && typeof p['helpUrl'] !== 'string') return false
-  if (p['helpText'] !== undefined && typeof p['helpText'] !== 'string') return false
-  if (p['requiresWorkspace'] !== undefined && typeof p['requiresWorkspace'] !== 'boolean') return false
-  return true
+  if (!isPlainRecord(v)) return false
+  if (typeof v['fetcher'] !== 'string' || v['fetcher'] === '') return false
+  if (typeof v['label'] !== 'string') return false
+  if (!Array.isArray(v['auth']) || !v['auth'].every((k) => typeof k === 'string')) return false
+  const match = v['match']
+  if (!isPlainRecord(match)) return false
+  return (
+    isOptionalField(match, 'baseUrlPattern', 'string') &&
+    isOptionalField(match, 'namePattern', 'string') &&
+    isOptionalField(v, 'helpUrl', 'string') &&
+    isOptionalField(v, 'helpText', 'string') &&
+    isOptionalField(v, 'requiresWorkspace', 'boolean')
+  )
 }
 
 /**

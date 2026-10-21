@@ -55,12 +55,12 @@ describe('matchQuotaPreset', () => {
   })
 
   it('baseUrl 匹配 opendesign（open-design.ai 域）', () => {
-    const result = matchQuotaPreset({ baseUrl: 'https://amr-link.open-design.ai/v1' })
+    const result = matchQuotaPreset({ baseUrl: 'https://amr-link.open-design.ai/v1' }, QUOTA_PRESETS)
     expect(result?.fetcher).toBe('opendesign')
   })
 
   it('name 匹配 opendesign（不区分大小写）', () => {
-    const result = matchQuotaPreset({ name: 'OpenDesign' })
+    const result = matchQuotaPreset({ name: 'OpenDesign' }, QUOTA_PRESETS)
     expect(result?.fetcher).toBe('opendesign')
   })
 
