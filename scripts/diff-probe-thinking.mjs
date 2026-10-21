@@ -52,6 +52,11 @@ const SHARED_SRC_URL_PREFIX = pathToFileURL(join(REPO_ROOT, 'packages', 'shared'
 // 转出后（thinking 档位词表 types），其内部同为 bundler resolution 风格无扩展名相对
 // import（'./core/types'）——shared 同型问题，hook 同款兜底。
 const EXTENSION_PROTOCOL_SRC_URL_PREFIX = pathToFileURL(join(REPO_ROOT, 'packages', 'extension-protocol', 'src') + '/').href
+// [merge dev-0.11.10 2026-10] state-machine/src 前缀：runtime（archive/canvas 生命周期机）
+// 与 extension-protocol（plan 状态机迁移）import '@zhushanwen/state-machine'
+// → workspace exports 解析到 src/index.ts，其内部同为 bundler resolution 风格无扩展名
+// 相对 import（'./define'）——shared 同型问题，hook 同款兜底。
+const STATE_MACHINE_SRC_URL_PREFIX = pathToFileURL(join(REPO_ROOT, 'packages', 'state-machine', 'src') + '/').href
 registerHooks({
   resolve(specifier, context, nextResolve) {
     if (
@@ -67,7 +72,8 @@ registerHooks({
     }
     if (
       ((context.parentURL ?? '').startsWith(SHARED_SRC_URL_PREFIX) ||
-        (context.parentURL ?? '').startsWith(EXTENSION_PROTOCOL_SRC_URL_PREFIX)) &&
+        (context.parentURL ?? '').startsWith(EXTENSION_PROTOCOL_SRC_URL_PREFIX) ||
+        (context.parentURL ?? '').startsWith(STATE_MACHINE_SRC_URL_PREFIX)) &&
       (specifier.startsWith('./') || specifier.startsWith('../')) &&
       !/\.(js|ts|json|mjs|cjs|node|css)$/.test(specifier)
     ) {
