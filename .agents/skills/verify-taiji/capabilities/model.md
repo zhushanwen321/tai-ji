@@ -5,8 +5,8 @@
 > 1. **模型目录** = `config.providers`（含 `models[].supportedLevels`）+ `model.list`（扁平聚合）；
 > 2. **会话生效值** = `model.switched` / `session.state_changed` / `session.thinkingLevelSet` 回执与广播；
 > 3. **执行域覆盖**（subagent / workflow run）= `subagent.setModel` + record/journal 记账 + badge。
-> 相关约定：[ADR-0065](../../../../dev-0.11.11/docs/adr/decisions.md)（mutation reply 生效值）、
-> [ADR-0129](../../../../dev-0.11.11/docs/adr/decisions.md)（subagent 执行模型切换）、
+> 相关约定：[ADR-0065](../../../../main/docs/adr/decisions.md)（mutation reply 生效值）、
+> [ADR-0129](../../../../main/docs/adr/decisions.md)（subagent 执行模型切换）、
 > C-pi-13（生效回执）。组件：`components/panel/{ModelSelectPopover,ThinkingLevelPopover,
 > ModelPickerPanel,ModelThinkingAggregate,SubagentTab}.vue`。
 
@@ -137,10 +137,12 @@ const r = await p.call('model.switch',
 
 - 期望：
   - reply `{provider, modelId}` = 生效值（与请求相同或 pi 静默替换后的同族值）；
-  - 收到 `session.state_changed`，`modelId` 与 reply 一致；
+  - 生效值二次核验：重订阅 `stateSnapshot` 的 `state_changed` 条目 `modelId` 与 reply 一致
+    （该帧不作为增量帧到达非 owner 订阅者，见 Gotcha 6；`p0-model-switch` 即此写法）；
   - A：composer 模型名变为该模型（1s 内，走快照防抖）；
   - C：`<sessionFile>` 追加 `model_change` entry（`{"type":"model_change", ... provider/modelId}`）；
-  - 发下一轮：`message.complete.responseModel` = 新模型（真正生效的最终证据）。
+  - 发下一轮：`message.complete.responseModel` = 新模型（真正生效的最终证据；**零 token 通道
+    不可用**——faux/mock 的回复与模型无绑定，live 才可断言）。
 - **失败信号（具体形态）**：
   - `error` `MODEL_NOT_FOUND`：目录里没有该 `provider/modelId`（大小写/拼写）；
   - `PROVIDER_CREDENTIAL_MISSING`：provider 没凭据（pi 报 not found 但凭据也缺时优先报这个）；
@@ -177,6 +179,16 @@ const r = await p.call('model.switch',
    `defaultModel`；`model.switch` 的持久化语义是「pi 会话内 `model_change`」。
 5. **`thinkingLevel` 可能被联动**：切模型时 pi 若新模型档位与当前不同会 emit
    `thinking_level_changed`；`state_changed` 里可能带新的 `thinkingLevel`（别惊讶）。
+6. **`session.state_changed` 不作为增量帧到达非 owner WS 订阅者**（2026-10-22 探针实测，
+   `p0-model-switch` 剧本 2 次复现）：switch 后该 client 只收到 `session.commands` /
+   `session.stats_update`，但 bus publish 已发生并写 state 快照（last-value）。生效值核验 =
+   **条件轮询重订阅读 `stateSnapshot` 的 `state_changed` 条目**（发布链有 300ms 防抖 +
+   重新拉取，回执后立即重订阅会拿到旧值）；`waitFor` 广播帧必超时。前端经同一快照通道
+   收敛（seq-gap 恢复），非产品缺陷。
+7. **modelId 有两种 wire 形态**：`session.create` reply / `state_changed` payload 是
+   `provider/id` 复合串（`faux/faux-1-reasoning`）；`model.switched` reply 是裸 id
+   （runtime 拆解复合串回填，`session-model-control.ts` U6）。断言时按字段分别取形态，
+   且 `faux-1` 是 `faux-1-reasoning` 的子串——用「含 faux-1-reasoning」不要用「含 faux-1」。
 
 ---
 

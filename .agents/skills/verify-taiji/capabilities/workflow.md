@@ -7,7 +7,7 @@
 > 载荷 `packages/shared/src/workflow.ts`；UI
 > `packages/renderer/src/components/panel/workflow-viz/**`（overlay / panel / dag / gantt）+
 > `components/panel/tray/TrayNativePanel.vue`。
-> testid 权威源 = [docs/testing/02-panels-sidebar.md §W](../../../../dev-0.11.11/docs/testing/02-panels-sidebar.md)
+> testid 权威源 = [docs/testing/02-panels-sidebar.md §W](../../../../main/docs/testing/02-panels-sidebar.md)
 > （注意该节有一处**已过时**的「drawer WorkflowTab 回落载体」说法，见 Gotchas 1）。
 > mock e2e 资产 = `e2e/workflow-viz-overlay.spec.ts` / `e2e/workflow-sidebar-sync.spec.ts` /
 > `e2e/workflow-disconnect-recovery.spec.ts`（e2e-map：E2E-MOCK-01 / E2E-SKILLRELOAD-04）。

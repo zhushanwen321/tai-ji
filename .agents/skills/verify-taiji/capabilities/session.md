@@ -1,10 +1,55 @@
 # session · 会话域能力原语（create / list / switch / history / delete / archive / restore / isolation / persistence）
 
 > 本文件按 [API-CONTRACT §4](API-CONTRACT.md) 骨架逐 capability 展开：H2 标题即 capability id。
-> testid 权威源 = [docs/testing/02-panels-sidebar.md](../../../../dev-0.11.11/docs/testing/02-panels-sidebar.md)
-> （侧栏/归档）与 [docs/testing/01-chat-panel-composer.md](../../../../dev-0.11.11/docs/testing/01-chat-panel-composer.md)
+> testid 权威源 = [docs/testing/02-panels-sidebar.md](../../../../main/docs/testing/02-panels-sidebar.md)
+> （侧栏/归档）与 [docs/testing/01-chat-panel-composer.md](../../../../main/docs/testing/01-chat-panel-composer.md)
 > （新建任务/Panel header）；本文件只写「驱动怎么点、断言什么、失败长什么样」，不复制清单。
 > 组件实装路径以 `<repo>/packages/renderer/src/components/{sidebar,archive,panel,new-task}/` 为准。
+
+## 最短可用路径（冷启动 agent 直接抄这一段）
+
+「起实例 → 建会话 → 发消息 → 看回复 → 收尾」的最小闭环，约 60 秒（faux 零 token）：
+
+```bash
+cd <repo>                                   # worktree 根（含 apps/electron/scripts/dev-instance.mjs）
+SK=".agents/skills/verify-taiji"            # 技能根（workspace 共享，不在各 worktree 里）
+dd=~/.taiji-dev/verify-$(date +%H%M%S)
+
+# 1) 预置 faux 数据目录（打印启动命令）
+node $SK/scripts/seed-faux.mjs . "$dd" $SK/fixtures/faux-responses/plain-text.json
+
+# 2) 起实例（后台；独立实例名避免与他人 dev 撞端口）
+TAIJI_DEV_BACKGROUND=1 \
+TAIJI_FAUX_SCRIPT="$dd/agent/faux-responses.json" \
+TAIJI_EXTENSION_PATHS="$PWD/e2e/fixtures/faux-provider-ext" \
+node apps/electron/scripts/dev-instance.mjs --data-dir "$dd" --name verify-$RANDOM &
+
+# 3) 体检（五项全绿才继续）
+node $SK/scripts/doctor.mjs . --data-dir "$dd"
+
+# 4) 建会话 + 发消息 + 等回复（三条单步命令，stateless 可拆可串）
+node $SK/scripts/vp.mjs session.create --repo . --data-dir "$dd" --cwd "$PWD" --json
+#   → observations.sessionId
+node $SK/scripts/vp.mjs chat.send --repo . --data-dir "$dd" --sid <sid> --text "hello" --json
+node $SK/scripts/vp.mjs chat.wait --repo . --data-dir "$dd" --sid <sid> --json
+
+# 5) 看回复 + 副作用
+node $SK/scripts/vp.mjs session.history --repo . --data-dir "$dd" --sid <sid> --json
+ls "$dd/ext-sessions/"
+
+# 6) 收尾（按 PID kill + 删自建数据目录）
+kill <dev-instance PID>; rm -rf "$dd"
+```
+
+**想一步到位**（含全部断言与证据）：用 scenario 而不是手敲——
+
+```bash
+node $SK/scripts/run.mjs $SK/scenarios/p0-session-chat.mjs \
+  --artifacts-dir /tmp/acc-demo --json
+```
+
+> 单步命令的完整参数面见各 capability 的「驱动」段；`vp` 只支持 20/72 个能力，
+> 其余用 scenario（差距表见 [README §4.2](README.md)）。
 
 ## 通用前置（本域全部 capability 共用）
 

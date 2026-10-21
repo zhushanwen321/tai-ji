@@ -202,7 +202,7 @@ node .agents/skills/verify-taiji/scripts/probes/mock-llm-workflow.mjs [--repo <r
 
 | 层 | 目录 | 用途 |
 |----|------|------|
-| **能力原语层** | [capabilities/](capabilities/README.md) | 72 个原子能力（入口 / 驱动 / 断言 / 证据 / 证不了 / 坑）；其中 **19 个可用 `vp.mjs` 单步调用**，其余只能走 scenario 或手工驱动（见 [API-CONTRACT §7 L6](capabilities/API-CONTRACT.md)），覆盖 env / session / chat / model / subagent / workflow / interaction / settings / plugin / extension / render / workspace / evidence 十三域 |
+| **能力原语层** | [capabilities/](capabilities/README.md) | 72 个原子能力（入口 / 驱动 / 断言 / 证据 / 证不了 / 坑），覆盖 env / session / chat / model / subagent / workflow / interaction / settings / plugin / extension / render / workspace / evidence 十三域；其中 **20 个可用 `vp.mjs` 单步调用**，其余走 scenario 或手工驱动（差距表见 [README §4.2](capabilities/README.md)、限制见 [API-CONTRACT §7 L6](capabilities/API-CONTRACT.md)） |
 | **验收剧本层** | `scenarios/*.mjs` → [capabilities/README.md §4.3](capabilities/README.md) | 能力组合 = 可执行剧本，产 `summary.jsonl` / `verdict.json` / `report.md`，可直接被 dev-flow D3 的 verify/inspect 节点消费 |
 
 **覆盖对账** = [capabilities/P0-P1-COVERAGE.md](capabilities/P0-P1-COVERAGE.md)（P0 17 行 / P1 4 行逐行状态：`scenario` / `capability-only` / `reuse-e2e` / `unreachable`）。要回答「某功能能不能验、怎么验」，查这张表。

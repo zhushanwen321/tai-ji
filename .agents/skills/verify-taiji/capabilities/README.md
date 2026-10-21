@@ -82,6 +82,19 @@ node .agents/skills/verify-taiji/scripts/vp.mjs model.switch \
 
 stateless、单步、机读，适合 codemode 里 `Promise.allSettled` 并行编排或条件分支。
 
+#### ⚠️ 哪些能力可以用 `vp` 单步调？（20/72，差距见下）
+
+契约登记 **72 个** capability id，`vp.mjs` 实现 **20 个**（19 + `evidence.grep` 别名）。
+**其余 56 个只能用 scenario 或按文档手工驱动**——拿 codemode 编排前先查下表，别撞墙。
+
+| 已可 `vp` 调（20） | 只能 scenario / 手工（56） |
+|---|---|
+| `env.doctor` `env.ports`<br>`session.create` `session.list` `session.switch` `session.history` `session.delete`<br>`chat.send` `chat.wait` `chat.abort`<br>`model.list` `model.switch`<br>`subagent.list` `workflow.list` `plugin.list` `extension.list`<br>`evidence.tree` `evidence.logs` `evidence.grep` `shell.grep` | **env** `launch` `ready` `cleanup` `isolation`<br>**protocol** `auth` `rpc` `subscribe` `events`（属 lib 层，scenario 内可用）<br>**session** `archive` `restore` `isolation` `persistence`<br>**chat** `stream` `steer` `revoke` `reload-equiv`<br>**model** `thinking` `subagent-switch` `live-sync`<br>**subagent** `dispatch` `stream` `cancel` `model` `session-observation`<br>**workflow** `dispatch` `runs` `overlay` `abort` `reconnect`<br>**interaction** `askuser` `permission` `plan-review` `canvas`<br>**settings** 六个全部<br>**plugin** `toggle` `statusbar` `mountpoints`<br>**extension** `load`<br>**render** 五个全部 + `tool-call`<br>**workspace** 五个全部<br>**ui** `container`<br>**evidence** `screenshot` |
+
+> 设计取舍：`vp` 只覆盖「跨进程、只读或少状态、能单步自证」的能力。带长事务（建实例、跑 turn、
+> 观察流）或强 UI 依赖（点击/断言可见性）的留在 scenario —— 那才是它们的正确形态。
+> 需要更多单步能力时按 `API-CONTRACT §2` 扩 `vp.mjs`，不要先把文档写成「都能 vp」。
+
 ### 4.3 组合成验收剧本（dev-flow 对接）
 
 ```bash

@@ -1,7 +1,7 @@
 # chat · 对话主链能力原语（send / stream / wait / abort / steer / revoke / reload-equiv）
 
 > 骨架遵循 [API-CONTRACT §4](API-CONTRACT.md)：H2 即 capability id。
-> testid 权威源 = [docs/testing/01-chat-panel-composer.md](../../../../dev-0.11.11/docs/testing/01-chat-panel-composer.md)
+> testid 权威源 = [docs/testing/01-chat-panel-composer.md](../../../../main/docs/testing/01-chat-panel-composer.md)
 > §3（对话流锚点）/ §4（send 全链时序）/ §5（流式帧表）；本文件只补「怎么驱动、断言什么、失败长什么样」。
 > 组件实装：`packages/renderer/src/components/panel/{Composer,MessageStream,QueueBubble}.vue` +
 > `packages/ui/src/features/chat/{Turn,Block,TextRow,ThinkingRow,ToolRow,UserBubble}.vue`。

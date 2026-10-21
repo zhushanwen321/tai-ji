@@ -126,7 +126,11 @@ if (!coverage) {
     if (cells.length < 4) continue
     const capCell = cells[3]
     if (!capCell || /^-+$/.test(capCell)) continue
-    for (const m of capCell.matchAll(/`([a-z][a-z-]*\.[a-z-]+)`/g)) referenced.push(m[1])
+    for (const m of capCell.matchAll(/`([a-z][a-z-]*\.[a-z-]+)`/g)) {
+      // 排除文件名（`pi-codemode-settings.ts` 这类也会匹配 id 形态）：带已知扩展名的一律不是 id
+      if (/\.(ts|js|mjs|md|json|sh|vue)$/.test(m[1])) continue
+      referenced.push(m[1])
+    }
   }
   const uniqReferenced = [...new Set(referenced)]
   const invalid = uniqReferenced.filter((id) => !contractIds.includes(id))

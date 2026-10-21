@@ -254,3 +254,10 @@ node .agents/skills/verify-taiji/scripts/vp.mjs env.doctor --repo <repo> --data-
 - `runtime 端口段` 是 10 个连续端口的段（offset 步进 10），实例名不同则整段不同；但端口占用仍要用 `lsof` 实测，不要只信派生值。
 - 打包版应用与 dev 实例可能并存（打包版占 3210 / CDP 9222 / Vite 1420）：**靠 CDP URL 归属区分，不靠端口号猜**。
 - 首启种子来自只读模板；模板调整后需重建模板，禁止直改模板或 prod 数据目录。
+- **auto-rename 自动标题必须「删 flag + 预置 initialized 标记」两件一起做**（`lib/instance.mjs`
+  的 `disarmAutoRename` 已实现）：只删 `auto-rename-enabled` 会被 runtime 首启后台链
+  `ensureAutoRenameDefault` 重建（initialized 标记不存在 → 默认开，2026-10-22 实测）。标题
+  生成经 llm-shared 走 faux/mock 的双注册 compat 通道，**按全局到达序消耗同一响应队列**——
+  主轮之间的插队消费会让后续 turn 命中「队列耗尽」error（faux：`No more faux responses
+  queued`，stopReason=error 且 message 为空）。多轮剧本（如 `p0-model-switch` 的切换后轮）
+  没有这层防御必炸。

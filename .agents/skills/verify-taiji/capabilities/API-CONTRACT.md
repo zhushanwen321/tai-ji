@@ -75,7 +75,7 @@ const inst = createInstance({
 
 ### 1.1b `createMockLlm({ port?, script, tps?, name? })`
 
-本地 OpenAI chat-completions 兼容 mock 服务（零第三方依赖）。语义移植自 `dev-0.11.11/scripts/verify-provider-live-sync.mjs`
+本地 OpenAI chat-completions 兼容 mock 服务（零第三方依赖）。语义移植自 `main/scripts/verify-provider-live-sync.mjs`
 的 createServer 段（**不 import** 那个仓库脚本，因为技能要能从任意 cwd 用）。
 
 | 成员 | 说明 |
@@ -159,14 +159,19 @@ node .agents/skills/verify-taiji/scripts/vp.mjs <capability> [--data-dir <dir>] 
 - `--repo` 省略 = `process.cwd()`；`--data-dir` 省略 = 从 `--name` 派生（否则报错，**不猜**）
 - 无副作用（除 capability 自身声明的动作）；不杀进程、不建/删数据目录
 
-v1 必须实现的 capability id（与 `capabilities/*.md` 的 id 一一对应）：
+v1 已实现的 capability id（**20 个 = 18 个主能力 + 2 个别名**；其余 52 个走 scenario/手工，
+差距表见 [README §4.2](README.md)）：
 
 ```
 env.doctor        env.ports        session.create     session.list      session.switch
-session.history   session.delete   chat.send          chat.wait          chat.abort
+session.history   session.delete   chat.send          chat.wait         chat.abort
 model.list        model.switch     subagent.list      workflow.list      plugin.list
-extension.list    evidence.tree    evidence.logs      shell.grep
+extension.list    evidence.tree    evidence.logs
+evidence.grep     shell.grep       ← 同一实现的两个名字（契约 §6 要求并存）
 ```
+
+**扩 vp 前先读**：只加「跨进程、只读或少状态、能单步自证」的能力。长事务（建实例 / 跑 turn /
+观察流）与强 UI 依赖（点击 / 可见性断言）的留在 scenario——那是它们的正确形态。
 
 ## 3. `scripts/run.mjs`（scenario runner）
 

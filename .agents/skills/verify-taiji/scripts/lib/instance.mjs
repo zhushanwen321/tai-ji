@@ -51,6 +51,23 @@ export class InstanceError extends Error {
   }
 }
 
+/**
+ * 关掉 rename-session 自动标题（验收确定性）。
+ *
+ * 只删 `auto-rename-enabled` 不够：runtime 首启后台串行链的 ensureAutoRenameDefault 见
+ * `auto-rename-initialized` 标记不存在会重建 enabled flag（默认开，2026-10-22 实测：
+ * 标题生成经 llm-shared 走 faux/mock 双注册 compat 通道，按全局到达序消耗同一响应队列，
+ * 主轮之间的插队消费让后续 turn 命中「队列耗尽」error）。必须同时预置 initialized
+ * 标记——ensureAutoRenameDefault 见标记存在即跳过，不再创建 enabled flag。
+ * 契约源：packages/runtime/src/services/rename-session-config.ts +
+ * extensions/universal/rename-session/src/pure.ts（flag 存在=开，不存在回落 config.enabled）。
+ */
+function disarmAutoRename(agentDir) {
+  fs.rmSync(path.join(agentDir, 'auto-rename-enabled'), { force: true })
+  const initialized = path.join(agentDir, 'auto-rename-initialized')
+  if (!fs.existsSync(initialized)) fs.writeFileSync(initialized, '', 'utf-8')
+}
+
 /** 极简条件轮询：predicate 返回真值即返回；超时返回 undefined（调用方给带 hint 的错）。 */
 async function pollUntil(predicate, { timeoutMs, intervalMs = POLL_INTERVAL_MS }) {
   const deadline = Date.now() + timeoutMs
@@ -443,7 +460,7 @@ export function createInstance(options = {}) {
     fs.writeFileSync(subagentsPath, `${JSON.stringify(subCfg, null, 2)}\n`)
 
     // 4) auto-rename 关掉（标题生成会经 llm-shared 打 mock，消耗剧本 step 并污染断言）
-    fs.rmSync(path.join(agentDir, 'auto-rename-enabled'), { force: true })
+    disarmAutoRename(agentDir)
     return llmTopology
   }
 
@@ -501,9 +518,7 @@ export function createInstance(options = {}) {
         const printed = printInstance({ repo, name: instanceName, dataDir: dir })
         parsed = printed
         if (faux) {
-          // faux 确定性：模板默认开启 auto-rename（agent/auto-rename-enabled），自动标题生成
-          // 会经 llm-shared 消耗 faux 响应队列的 step，导致主 turn 拿错脚本。验收实例显式关闭。
-          fs.rmSync(path.join(dir, 'agent', 'auto-rename-enabled'), { force: true })
+          disarmAutoRename(path.join(dir, 'agent'))
         }
       }
       fs.mkdirSync(dir, { recursive: true })
