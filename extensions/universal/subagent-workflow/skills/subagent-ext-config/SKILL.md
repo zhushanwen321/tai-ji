@@ -66,11 +66,11 @@ config.json 位于 pi agent 目录下的 `subagents/config.json`，随环境不�
 
 | 优先级 | 来源 |
 |------|------|
-| 1 | `subagents` 工具调用的 `engine` 参数（单次指定） |
+| 1 | `subagent_start` 调用的 `engine` 字段（单次指定；`subagents` 批量工具无此字段） |
 | 2 | agent `.md` frontmatter 的 `engine` 字段 |
 | 3 | config.json 的 `defaultEngine` |
 
-三层（调用参数 / agent frontmatter / 全局缺省）任一指定了引擎，运行期就按该引擎执行——**不可用即结构化失败，不换目标**：probe 失败一律报 `engine_probe_failed`（含逐项 check 摘要与恢复指引），id 未注册报 `engine_not_found`；要换引擎只能由调用方显式改传 `engine` 参数。三层全缺时落内置缺省 `pi`（免探）。
+三层（调用字段 / agent frontmatter / 全局缺省）任一指定了引擎，运行期就按该引擎执行——**不可用即结构化失败，不换目标**：probe 失败一律报 `engine_probe_failed`（含逐项 check 摘要与恢复指引），id 未注册报 `engine_not_found`；要换引擎只能由调用方显式指定——`subagent_start` 改传 `engine` 字段，`subagents` 批量派发改 agent frontmatter 或 config `defaultEngine`。三层全缺时落内置缺省 `pi`（免探）。
 
 ## 生效时机与 probe 缓存
 
@@ -82,7 +82,7 @@ config.json 位于 pi agent 目录下的 `subagents/config.json`，随环境不�
 改完配置后：
 
 1. **新建 session**（必须——当前 session 不重读配置）。
-2. 让主 agent 派一个 subagent（例：用 `subagents` 工具发个简单任务）。
+2. 让主 agent 派一个 subagent（例：用 `subagents` 工具发一个成员的简单批量 `{"tasks":[{"task":"<任务>"}]}`，或用 `subagent_start` 派单任务并直接传 `engine` 字段）。
 3. taiji composer **任务托盘**（task tray）的 Subagents 面板看该项最左的引擎 icon（pi / zcode）——这是统一验证面。
 4. journal 落点 `~/.taiji-dev/engines/<engineId>/` **仅适用非 pi 引擎**（zcode 分支建 journal）；pi 分支不建 journal，pi 任务以 icon 为验证面。
 
@@ -91,8 +91,8 @@ config.json 位于 pi agent 目录下的 `subagents/config.json`，随环境不�
 | 症状 | 原因与处置 |
 |------|------|
 | `engine_not_found` | engine id 未注册（含 `defaultEngine` 指向已卸载引擎）。检查拼写，合法值仅 `pi` / `zcode`；不回落其它引擎 |
-| `engine_probe_failed` | 引擎探针失败（CLI 缺失/版本不符）。引擎路由不换目标——修好引擎后重试，或由调用方显式改传 `engine` 参数 |
+| `engine_probe_failed` | 引擎探针失败（CLI 缺失/版本不符）。引擎路由不换目标——修好引擎后重试；换引擎由调用方显式指定（`subagent_start` 改传 `engine` 字段，批量派发改 agent frontmatter 或 `defaultEngine`） |
 | `engine_config_unreadable` | 全局 config.json 存在但读不出来（坏 JSON / 权限）——修复或删除该文件后重试（不按内置缺省 pi 执行） |
-| zcode 任务传 `conversation` / `fork` / `worktree` 被预检拒绝 | 这些是 pi 专属能力，zcode 不支持。改用 `engine: pi` 或不传该参数重试（预检在 record 创建前同步拒绝，可立即换引擎） |
+| zcode 任务传 `conversation` / `fork` / `worktree` 被预检拒绝 | 这些是 pi 专属能力，zcode 不支持。改用 `engine: pi`（`subagent_start` 字段；批量派发改 agent frontmatter 或 `defaultEngine`）或不传该参数重试（预检在 record 创建前同步拒绝，可立即换引擎） |
 | 改了 `defaultEngine` 没生效 | 两种可能：① 当前 session 不重读配置——新建 session；② 值非法被静默忽略回 pi——核对 JSON 值 |
 | probe 结果与 CLI 实际状态不符 | 探针进程存活期内缓存——CLI 刚装好/刚损坏，需新建 session 重置缓存 |
