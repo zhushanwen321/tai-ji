@@ -318,8 +318,12 @@ export class WoolManager {
           await this.checkinFamily(family)
         } else {
           // 提醒形态 = 账号状态新鲜化（not_logged_in 走 fetchAccountStatus 既有分支写
-          // loggedIn:false 失效态——徽标数据照常更新，catch warn 不放大）。
-          await this.fetchAccountStatus(family).catch(() => undefined)
+          // loggedIn:false 失效态——徽标数据照常更新；失败降级只 warn 不放大）。
+          await this.fetchAccountStatus(family).catch((e) => {
+            // 降级 ≠ 吞错：失败日志照记（与 checkin 分支 warn 同款口径），到点提醒
+            // 未点亮时可从 runtime 日志归因（状态拉取失败与成功可区分）。
+            console.warn(`[wool-manager] daily reminder status fetch failed (family=${family}): ${toErrorMessage(e)}`)
+          })
         }
       } catch (e) {
         // 辅助链降级：单家族到点失败只 warn（下一天再触发；用户手动入口不受影响）。
@@ -852,25 +856,31 @@ export class WoolManager {
 
   /**
    * uninstall：D3 卸载 = 视为放弃接入，清理编排三步。第一步 clear 经管理会话透传扩展侧
-   * 同名动作（清除 pi auth.json 凭据 + persist 模型目录）——**失败不阻断卸载**（清理指令
-   * 不可达 = 扩展损坏形态，按 D3 降级：卸载照常完成 + credentialsCleared=false 残留提示，
-   * 不静默残留）；第二步既有 extension-service 卸载链（失败 = 动作整体失败回执）；
-   * 第三步 settings 羊毛域清除 + 全部缓存清理（目录缓存持久化文件同步重写，条目从
-   * 选择器聚合源消失）。
+   * 同名动作，实际能力分层：扩展侧 clear 只清进程内凭据副本 + persist 模型目录（D3 ②，
+   * persistCleared 如实并入残留提示）；D3 ① 的 auth.json 凭据清除通道当前不存在（pi
+   * 扩展 API 无凭据删除、宿主无 Models.logout 通路），通道补齐前恒按 D3 降级条款返回
+   * credentialsCleared=false + 残留提示（指引 pi 侧 /logout，不静默残留）——**clear 失败
+   * 不阻断卸载**（清理指令不可达 = 扩展损坏形态，同样残留提示）；第二步既有
+   * extension-service 卸载链（失败 = 动作整体失败回执）；第三步 settings 羊毛域清除 +
+   * 全部缓存清理（目录缓存持久化文件同步重写，条目从选择器聚合源消失）。
    */
   private async uninstallFamily(family: WoolFamilyId): Promise<WoolUninstallResult> {
-    let credentialsCleared = false
+    // 分层报告素材：clear 往返成功时消费扩展侧如实回执（cleared=进程内副本已清，
+    // persistCleared=pi persist 目录已删），组装进残留提示的已清项说明。
+    let clearDelivered = false
+    let clearData: Record<string, unknown> | undefined
     try {
       await this.withManageSession(family, async (sid) => {
         const response = await this.runManageCommand(sid, family, 'clear')
         if (!response.ok) {
           throw new WoolActionError(mapManageErrorCode(response.code), `凭据清除失败：${response.message}`)
         }
+        clearData = isRecord(response.data) ? response.data : undefined
       })
-      credentialsCleared = true
+      clearDelivered = true
     } catch (e) {
       // D3 降级形态：清理指令不可达（扩展未装/未启用/加载失败/损坏）不阻断卸载主链——
-      // 残留事实经 credentialsCleared=false 显式上呈，由 renderer 呈现手动清除指引。
+      // 残留事实经 residualHint 显式上呈，由 renderer 呈现手动清除指引。
       console.warn(`[wool-manager] credential clear unreachable before uninstall (family=${family}): ${toErrorMessage(e)}`)
     }
     try {
@@ -878,7 +888,7 @@ export class WoolManager {
     } catch (e) {
       throw new WoolActionError(
         'uninstall_failed',
-        `扩展卸载失败：${toErrorMessage(e)}。请到扩展管理页重试卸载；凭据清除${credentialsCleared ? '已完成' : '未执行（残留提示见前）'}`,
+        `扩展卸载失败：${toErrorMessage(e)}。请到扩展管理页重试卸载；扩展侧 clear${clearDelivered ? '已执行（auth.json 凭据残留仍须手动清除）' : '未执行（残留提示见卸载完成回执）'}`,
       )
     }
     // settings 羊毛域清除该家族条目（adopted/autoCheckin/nickname 全清 = 放弃接入语义）。
@@ -892,10 +902,17 @@ export class WoolManager {
     this.detectCache.delete(family)
     this.catalogCache.delete(family)
     this.persistCatalogCacheFile()
-    if (credentialsCleared) return { credentialsCleared: true }
+    // D3 ①（auth.json 凭据清除）通道缺失期间恒走降级条款（不静默残留）；clear 已送达时
+    // 分层报告扩展侧实际清理项，不可达时全量残留提示。
+    const clearedParts: string[] = []
+    if (clearData?.cleared === true) clearedParts.push('进程内凭据副本')
+    if (clearData?.persistCleared === true) clearedParts.push('模型目录持久化缓存')
+    const localNote = clearDelivered
+      ? `扩展侧 clear 已执行（${clearedParts.length > 0 ? `${clearedParts.join('与')}已清理` : '本机无该家族进程内数据'}）`
+      : `凭据清除指令不可达，pi 凭据库（auth.json）与模型目录缓存可能残留 ${family} 家族数据`
     return {
       credentialsCleared: false,
-      residualHint: `扩展已卸载，但凭据清除指令不可达：pi 凭据库（auth.json）与模型目录缓存可能残留 ${family} 家族数据。请在 pi 侧执行登出，或到上游账号页吊销该应用授权后重跑接入。`,
+      residualHint: `扩展已卸载；${localNote}。pi 凭据库（auth.json）中的该家族凭据无法由宿主清除（凭据删除通道缺失，D3 降级形态）：请在 pi 会话执行 /logout wool-${family}，或到上游账号页吊销该应用授权。`,
     }
   }
 

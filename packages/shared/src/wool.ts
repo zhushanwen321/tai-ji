@@ -83,6 +83,7 @@ export type WoolStepFailureCode =
   | 'upstream_error'        // 上游调用失败 → 可重试
   | 'authorize_unavailable' // 授权动作通道未就绪（扩展管理协议无 authorize 动作）
   | 'extract_unavailable'   // 提取动作通道未就绪（扩展管理协议无 extract 动作）
+  | 'uninstall_failed'      // 卸载链失败（extension-service uninstallExtension 抛错；与 WoolActionErrorCode 同名码）
   | 'manage_unavailable'    // 管理会话编排失败（spawn/指令往返链路，可重试）
   | 'internal'              // 扩展内部异常 / taiji 侧编排异常
   | 'cancelled'             // 用户取消（非错误态）
@@ -142,6 +143,8 @@ export interface WoolFamilyState {  // oe-exempt:20261022:framework:家族接入
   installed: boolean
   /** 已安装版本（npm 目录 package.json 读取；未装 = undefined）。 */
   installedVersion?: string
+  /** 可更新标记（installedVersion ≠ 清单 version 派生，D2 更新角标数据源；清单未达或未装 = false）。 */
+  updateAvailable?: boolean
   /** 已完成接入（settings.json 羊毛域接入标记；向导完成时置位）。 */
   adopted: boolean
   /** 每日自动签到开关（默认关；开 = 黄色警示，D5）。 */
@@ -167,7 +170,8 @@ export interface WoolRuntimeSnapshot {  // oe-exempt:20261022:framework:runtime�
  * 宿主动作词表（taiji 向导/条目区经 wool.action 触发的编排动作）。
  * 与扩展管理动作词表（wool-shared WOOL_MANAGE_ACTIONS：status/detect/checkin/clear）
  * 是两层：本词表是 renderer → runtime 的编排动作；wool-manager 把其中
- * detect/status/checkin 翻译为管理会话内的同名扩展动作。
+ * detect/status/checkin/clear（uninstall 第一步）翻译为管理会话内的同名扩展动作。
+ * uninstall = D3 卸载三步编排（管理会话 clear → extension-service 卸载 → settings 羊毛域清除）。
  */
 export const WOOL_ACTION_TYPES = [
   'install',
@@ -178,6 +182,7 @@ export const WOOL_ACTION_TYPES = [
   'setAutoCheckin',
   'authorize',
   'extract',
+  'uninstall',
 ] as const
 export type WoolActionType = (typeof WOOL_ACTION_TYPES)[number]
 
@@ -195,6 +200,20 @@ export type WoolActionReply =
   | { ok: true; data?: unknown }
   | { ok: false; error: { code: WoolActionErrorCode; message: string } }
 
+/**
+ * uninstall 动作回执 data（D3 三步编排结果视图，按扩展侧 clear 实际能力分层）。
+ * credentialsCleared = pi auth.json 凭据是否已清除（D3 ①）——pi 扩展 API 无凭据删除
+ * 通道、宿主无 Models.logout 通路，清除通道补齐前恒 false；此时 residualHint 必带
+ * （D3 降级条款：不静默残留——扩展侧 clear 的分层结果〔进程内副本 / persist 目录〕
+ * 与手动清除指引并入 hint 文本），renderer 按 hint 呈现。
+ */
+export interface WoolUninstallResult {  // oe-exempt:20261022:framework:uninstall 动作回执视图（runtime 组装 / renderer 消费）
+  /** pi auth.json 凭据是否已清除（D3 ①；清除通道缺失期间恒 false，残留提示必带）。 */
+  credentialsCleared: boolean
+  /** 残留提示（credentialsCleared=false 时必带：扩展侧已清项分层说明 + 残留内容 + 手动清除指引）。 */
+  residualHint?: string
+}
+
 /** 动作错误码词表（renderer 按码分流恢复指引；与 WoolStepFailureCode 对应关系在 renderer 映射）。 */
 export type WoolActionErrorCode =
   | 'invalid_request'       // 参数非法 / 家族不在词表（renderer bug，重试无意义）
@@ -207,6 +226,7 @@ export type WoolActionErrorCode =
   | 'manage_unavailable'    // 管理会话编排失败（spawn/prompt/getEntries 链路错误）
   | 'authorize_unavailable' // 授权动作通道未就绪（扩展管理协议无 authorize 动作；与 WoolStepFailureCode 同名码）
   | 'extract_unavailable'   // 提取动作通道未就绪（扩展管理协议无 extract 动作；同上对称码）
+  | 'uninstall_failed'      // 卸载链失败（extension-service uninstallExtension 抛错；凭据清除失败不阻断卸载，走 credentialsCleared=false 残留提示形态）
 
 // ── 运行时守卫（读侧不信任外部格式；消费 WS 帧 / 清单 JSON 前收窄）──
 

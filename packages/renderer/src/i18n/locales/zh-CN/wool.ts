@@ -56,6 +56,16 @@ export default {
   notAdoptedHint: '未完成接入',
   catalogFetchedAt: '数据时点 {time}',
   refresh: '刷新',
+  // 更新角标（D2 更新提示经条目角标，用户显式触发更新）
+  badgeUpdate: '可更新',
+  updateHint: '当前 {version}，清单有新版本；点击更新（新会话生效）',
+  // 卸载（D3 三步编排：扩展侧 clear 进程内副本与模型目录 + 卸载扩展 + 移除接入状态；
+  // auth.json 凭据清除通道缺失 → 卸载后残留提示指引 pi 侧登出）
+  uninstall: '卸载',
+  uninstallConfirmTitle: '卸载 {name} 羊毛 provider？',
+  uninstallConfirmDesc: '将卸载扩展包、清理模型目录缓存与接入状态；pi 凭据库中的该家族凭据须在 pi 侧登出清除（卸载后有残留指引）。需要重新使用须重跑接入向导。',
+  uninstallConfirmBtn: '卸载',
+  uninstallResidualFallback: '扩展已卸载，但凭据清除未完成：pi 凭据库可能残留该家族数据，请手动清除。',
   // 失败路径表（WoolActionErrorCode / WoolStepFailureCode → 恢复指引）
   errManifestUnreachable: '无法获取版本清单，请检查网络后重试（清单不可达时不安装）',
   errManifestBadShape: '版本清单格式损坏，请稍后重试或检查发布通道',
@@ -66,6 +76,7 @@ export default {
   errUpstreamError: '上游调用失败：{message}',
   errAuthorizeUnavailable: '授权动作通道未就绪（扩展管理协议暂不支持），请等待羊毛扩展更新后重试',
   errExtractUnavailable: '凭据提取动作通道未就绪（扩展管理协议暂不支持），请等待羊毛扩展更新后重试',
+  errUninstallFailed: '扩展卸载失败：{message}',
   errInternal: '内部异常：{message}',
   errManageUnavailable: '管理通道不可用：{message}',
   errCancelled: '已取消',

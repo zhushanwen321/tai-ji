@@ -121,14 +121,15 @@ export default function piWoolQoder(pi: ExtensionAPI): void {
 			// Qoder 签到不在本包首版范围（hub 侧为可选任务模块运行时探测；设计 D5
 			// 签到交付物在 WorkBuddy 域）——显式报不支持，不静默假成功。
 			checkin: async () => ({ supported: false, reason: "Qoder check-in is not implemented in this extension version" }),
-			// 凭据权威在 pi auth.json（宿主经 Models.logout 清除）；这里只清进程内副本。
-			// pi persist 的模型目录删除由 scaffold clear 编排统一承担（D3 卸载编排②，
-			// 响应并入 persistCleared 字段）。
+			// 凭据权威在 pi auth.json；pi 扩展 API 无凭据删除通道（宿主同样无 Models.logout
+			// 通路）——这里只清进程内副本，auth.json 凭据由宿主卸载编排按 D3 降级条款呈现
+			// 残留提示（指引 pi 侧 /logout）。pi persist 的模型目录删除由 scaffold clear
+			// 编排统一承担（D3 卸载编排②，响应并入 persistCleared 字段）。
 			clear: async () => {
 				authStore.clear();
 				return {
 					cleared: true,
-					note: "in-process credential cache cleared; stored credentials live in pi auth.json — host invokes Models.logout",
+					note: "in-process credential cache cleared; stored credentials remain in pi auth.json — remove via pi /logout (host has no credential deletion channel)",
 				};
 			},
 		},

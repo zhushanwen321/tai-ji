@@ -216,10 +216,12 @@ export default defineWoolExtension({
 		detect: async () => ({ detected: detectTraeLoginState() }),
 		// 签到不属于 Trae 首版范围（设计 D5 自动签到是 WorkBuddy 域；Trae 无独立签到端点实装）。
 		checkin: async () => ({ supported: false }),
-		// 扩展无自治存储：凭据权威在 pi auth.json（宿主经 Models.logout 清除），
-		// 模型目录持久化在 pi models-store.json——两者均不归本 handler：persist 目录
-		// 由 scaffold clear 编排统一经 publish({persist:null}) 删除（D3 卸载编排②）。
-		clear: async () => ({ cleared: false, note: "credentials live in pi auth.json — host invokes Models.logout" }),
+		// 扩展无自治存储：凭据权威在 pi auth.json；pi 扩展 API 无凭据删除通道（宿主同样
+		// 无 Models.logout 通路）——本包无可清的进程内副本，auth.json 凭据由宿主卸载编排
+		// 按 D3 降级条款呈现残留提示（指引 pi 侧 /logout）。模型目录持久化在 pi
+		// models-store.json——persist 目录由 scaffold clear 编排统一经
+		// publish({persist:null}) 删除（D3 卸载编排②）。
+		clear: async () => ({ cleared: false, note: "credentials remain in pi auth.json — remove via pi /logout (host has no credential deletion channel)" }),
 	},
 });
 

@@ -122,8 +122,8 @@ export class QoderAuthStore {
 		return this.cachedSession.cosy;
 	}
 
-	/** 清除凭据与缓存（管理动作 clear：pi 侧 Models.logout 负责删 auth.json 条目，
-	 * 这里只清进程内副本——两者各管自己的权威存储）。 */
+	/** 清除凭据与缓存（管理动作 clear：本类只管进程内副本；pi auth.json 条目 pi 扩展
+	 * API 无删除通道——宿主卸载编排按 D3 降级条款呈现残留提示，各管自己的权威存储）。 */
 	clear(): void {
 		this.credential = undefined;
 		this.cachedSession = undefined;
