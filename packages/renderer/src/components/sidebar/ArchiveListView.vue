@@ -208,7 +208,7 @@ function projectNameOf(archive: ArchiveSummary): string {
   return projectStore.projects.find((p) => p.id === id)?.name ?? ''
 }
 
-/** 文件大小人类可读（B/KB/MB 一位小数——ArchiveSummaryView.formatSize 同款口径）。 */
+/** 文件大小人类可读（B/KB/MB 一位小数——ImportSessionDialog.formatSize 同款口径）。 */
 const BYTES_PER_KB = 1024
 const BYTES_PER_MB = BYTES_PER_KB * BYTES_PER_KB
 

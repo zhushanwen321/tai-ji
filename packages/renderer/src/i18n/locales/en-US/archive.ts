@@ -10,7 +10,6 @@ export default {
     tabAgentReference: 'Agent reference view',
     tablistLabel: 'Archive summary view',
     agentLabel: 'Assistant · Summary',
-    originalProject: 'Project: {name}',
     compressing: 'Compressing',
     generating: 'Generating summary',
     generatingHint: 'Refreshes automatically when background compression completes',

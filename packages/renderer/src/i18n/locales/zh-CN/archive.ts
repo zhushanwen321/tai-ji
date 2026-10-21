@@ -17,8 +17,6 @@ export default {
     tablistLabel: '归档摘要视图',
     // agent 文本块标签（对话流 Assistant 块范式，mono meta 行）
     agentLabel: 'Assistant · 摘要',
-    // banner 原项目段（projectName 由挂载方按 projectId 解析后传入）
-    originalProject: '原项目：{name}',
     // staging 态压缩信息占位（D10「压缩中」同词）
     compressing: '压缩中',
     // staging 全区占位（D11）
