@@ -320,10 +320,10 @@ taste/no-silent-catch 处理：纯 console.warn 仍报（要求传播/重抛）�
 
 羊毛 provider（[ADR-0152](adr/decisions.md)，三家族 pi provider 扩展 + 宿主编排）的真实验收轨：依赖三家真实凭据链路（Qoder 钥匙串提取 / Trae storage.json 容器解密 / WorkBuddy OAuth 授权）与本机登录态、真实上游对话（烧账号额度），不可凭证无关化——按 e2e 资产三态全部归 **R2（按改动范围触发）**，不进 CI、不进 PR/merge 门禁（与「等价性测试双轨」的 real-pi 分工同口径）。
 
-- **触发条件**：改动 `extensions/universal/pi-wool-*/`、`extensions/shared/wool-shared/`、`packages/shared/src/wool.ts`、`packages/runtime/src/services/wool-manager.ts`、model-service 聚合、`packages/renderer/src/components/settings/provider/WoolWizard/` 时，在 dev-flow 验收阶段跑受影响家族的对应场景子集
+- **触发条件**：改动 `extensions/universal/pi-wool-*/`、`extensions/shared/wool-shared/`、`packages/shared/src/wool.ts`、`packages/runtime/src/services/wool-manager.ts`、model-service 聚合、`packages/renderer/src/components/settings/provider/WoolWizard/`、`packages/renderer/src/composables/features/settings/useWool*.ts`（羊毛条目/向导状态编排：useWool / useWoolEntries / useWoolWizard）时，在 dev-flow 验收阶段跑受影响家族的对应场景子集
 - **执行纪律**：空载串行（真实 LLM 轮次延迟受 CPU 并发影响，项目 e2e 执行准则 SSOT = AGENTS.md「测试」节）；临时数据目录 dev 实例（`--data-dir` 隔离）；凭据探针产物不入库
-- **场景清单**（逐条步骤与通过标准见 wool-provider 设计文档 §4 场景表；本节只登记归宿）：S1 Qoder 全链路接入 / S2 WorkBuddy OAuth 接入 / S3 Trae 接入（真实凭据对话，L3 agent 判定）；S4 模型清单更新 / S5 扩展热更新 / S8 生命周期与邻居不变量 / S12 选择器整合双态（L3 脚本可判定，其中 S5 的 npm 发布链与 S2 的 OAuth 全链路依赖发布资产/用户交互，分段执行）；S6 令牌过期恢复 / S7 签到默认关 / S10 降级隔离 / S11 未装 IDE 家族（确定性断言 L3 + 交互判定 L3 混合）；S9 既有零回归 = 既有单测全量套件承接（L2，非真实凭据轨——model.list 聚合与扩展装载的回归由 ADR-0152 登记的 P0 关联义务覆盖）
-- **登记形态说明**：本轨无固定 spec 文件资产（场景为真机编排 + 断言脚本按次执行，不落 e2e/ 目录），故不进 `docs/testing/e2e-map.json` 机器登记；场景定义权威 = wool-provider 设计文档 §4，执行记录 = dev-flow runlog
+- **场景清单**（逐条步骤与通过标准见 wool-provider 设计文档 §4 场景表；本节只登记归宿，判定方式按「脚本可判定 / agent 判定 / 既有套件承接」描述——不使用 L1-L3 执行层标签，避免与上方四层框架撞名）：S1 Qoder 全链路接入 / S2 WorkBuddy OAuth 接入 / S3 Trae 接入（真实凭据对话，agent 判定）；S4 模型清单更新 / S5 扩展热更新 / S8 生命周期与邻居不变量 / S12 选择器整合双态（脚本可判定，其中 S5 的 npm 发布链与 S2 的 OAuth 全链路依赖发布资产/用户交互，分段执行）；S6 令牌过期恢复 / S7 签到默认关 / S10 降级隔离 / S11 未装 IDE 家族（确定性断言 + 交互判定混合）；S9 既有零回归 = 既有单测全量套件承接（非真实凭据轨——model.list 聚合与扩展装载的回归由 ADR-0152 登记的 P0 关联义务覆盖）
+- **登记形态说明**：本轨无固定 spec 文件资产（场景为真机编排 + 断言脚本按次执行，不落 e2e/ 目录），按新资产流转规则 1 的「本表」分支登记——触发条件落本节即为登记，不属 `docs/testing/e2e-map.json` 收录对象（其结构校验要求每条 rule 的 assets 非空且指向磁盘存在的 spec，见 `scripts/validate-e2e-map.mjs`）；场景定义权威 = wool-provider 设计文档 §4，执行记录 = dev-flow runlog
 
 ## 8. Extension Upgrade 回归基线 [from: extension-upgrade]
 

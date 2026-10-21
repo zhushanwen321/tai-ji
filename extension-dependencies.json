@@ -613,7 +613,7 @@
         {
           "package": "@zhushanwen/pi-wool-shared",
           "type": "package",
-          "reason": "代码层静态 import woolProviderId（src/index.ts top-level import，provider 注册名与家族词表同源），缺失时模块加载即抛 Cannot find module，是强依赖"
+          "reason": "代码层静态 import defineWoolExtension/woolLoggedOutStatus（src/index.ts top-level import，扩展脚手架组装与账号状态词表同源），缺失时模块加载即抛 Cannot find module，是强依赖"
         }
       ]
     },
@@ -624,7 +624,7 @@
         {
           "package": "@zhushanwen/pi-wool-shared",
           "type": "package",
-          "reason": "代码层静态 import woolProviderId（src/index.ts top-level import，provider 注册名与家族词表同源），缺失时模块加载即抛 Cannot find module，是强依赖"
+          "reason": "代码层静态 import defineWoolExtension（src/index.ts top-level import，pi 契约接线脚手架与 wool 类型词表同源），缺失时模块加载即抛 Cannot find module，是强依赖"
         }
       ]
     },
@@ -635,7 +635,7 @@
         {
           "package": "@zhushanwen/pi-wool-shared",
           "type": "package",
-          "reason": "代码层静态 import woolProviderId（src/index.ts top-level import，provider 注册名与家族词表同源），缺失时模块加载即抛 Cannot find module，是强依赖"
+          "reason": "代码层静态 import defineWoolExtension/readSnapshotFile（src/index.ts top-level import，pi 契约接线脚手架与模型目录快照读取同源），缺失时模块加载即抛 Cannot find module，是强依赖"
         }
       ]
     },

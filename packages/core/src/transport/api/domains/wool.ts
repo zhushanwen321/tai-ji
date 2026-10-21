@@ -3,7 +3,8 @@
  *
  * 形态分类：
  * - 请求-响应：getState（拉运行态快照；reply = wool.state，与状态广播同名同形）
- * - 动作-回执：action（install/detect/status/checkin/refresh/setAutoCheckin/authorize；
+ * - 动作-回执：action（install/detect/status/checkin/refresh/setAutoCheckin/authorize/
+ *   extract/uninstall；词表见 shared WOOL_ACTION_TYPES；
  *   reply 两态信封 WoolActionReply——结构化错误是设计内领域回执，不 reject）
  * - 订阅-推送：onWoolState（wool.state 广播；payload 无 sessionId → global 通道自动路由）
  *

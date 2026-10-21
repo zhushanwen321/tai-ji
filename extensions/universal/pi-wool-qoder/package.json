@@ -1,7 +1,7 @@
 {
   "name": "@zhushanwen/pi-wool-qoder",
   "version": "0.1.0",
-  "description": "Wool provider extension for Qoder (Alibaba) — cosy signature + RSA key exchange + AES payload family, macOS keychain credential extraction. Skeleton: protocol implementation lands in the u-qoder unit.",
+  "description": "Wool provider extension for Qoder (Alibaba) — cosy signature + RSA key exchange + AES payload family, macOS keychain credential extraction.",
   "type": "module",
   "main": "index.ts",
   "taiji": {

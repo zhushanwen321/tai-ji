@@ -221,7 +221,8 @@ export interface SettingsTransport {
   /** 拉羊毛域全量运行态快照（family 安装/接入/账号/目录缓存视图；纯内存读） */
   getWoolState(): Promise<WoolRuntimeSnapshot>
   /**
-   * 触发宿主编排动作（install/detect/status/checkin/refresh/setAutoCheckin/authorize）。
+   * 触发宿主编排动作（install/detect/status/checkin/refresh/setAutoCheckin/authorize/
+   * extract/uninstall；词表见 shared WOOL_ACTION_TYPES）。
    * 两态信封不 reject——ok=false 是设计内领域回执（error.code 分流恢复指引）。
    */
   runWoolAction(req: WoolActionRequest): Promise<WoolActionReply>
