@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { matchQuotaPreset, resolveQuotaPresets, QUOTA_PRESETS } from '../quota-presets'
+import { isQuotaPreset, matchQuotaPreset, resolveQuotaPresets, QUOTA_PRESETS } from '../quota-presets'
 
 describe('QUOTA_PRESETS', () => {
   it('有 6 个预设', () => {
@@ -162,5 +162,90 @@ describe('resolveQuotaPresets', () => {
   it('回落后匹配链仍可用：空态 + zhipu baseUrl 命中基线', () => {
     const preset = matchQuotaPreset({ baseUrl: 'https://bigmodel.cn/api' }, resolveQuotaPresets([]))
     expect(preset?.fetcher).toBe('zhipu')
+  })
+})
+
+// QuotaPreset wire 形状守卫（remote-config presets 段元素校验）：必填字段缺失或类型漂移
+// 即拒、可选字段提供即校验、未知字段放行（远程向后兼容）。
+describe('isQuotaPreset', () => {
+  // 最小合法形状：仅必填字段（fetcher/label/auth/match）
+  const minimal = {
+    fetcher: 'x',
+    label: 'X',
+    auth: ['api-key'],
+    match: { baseUrlPattern: 'example.com' },
+  }
+
+  it('最小合法形状（仅必填字段）→ true', () => {
+    expect(isQuotaPreset(minimal)).toBe(true)
+  })
+
+  it('全字段合法形状（含可选字段）→ true', () => {
+    expect(
+      isQuotaPreset({
+        ...minimal,
+        auth: ['api-key', 'oauth'],
+        match: { baseUrlPattern: 'example.com', namePattern: '\\bx\\b' },
+        helpUrl: 'https://example.com/help',
+        helpText: '获取凭证说明',
+        requiresWorkspace: true,
+      }),
+    ).toBe(true)
+  })
+
+  it('基线表每个预设都通过守卫（基线与守卫构造性一致）', () => {
+    for (const preset of QUOTA_PRESETS) {
+      expect(isQuotaPreset(preset)).toBe(true)
+    }
+  })
+
+  it('非对象（null / 数组 / 基元 / undefined）→ false', () => {
+    expect(isQuotaPreset(null)).toBe(false)
+    expect(isQuotaPreset(undefined)).toBe(false)
+    expect(isQuotaPreset(['x'])).toBe(false)
+    expect(isQuotaPreset('x')).toBe(false)
+    expect(isQuotaPreset(42)).toBe(false)
+  })
+
+  it('fetcher 缺失 / 非字符串 / 空串 → false', () => {
+    const { fetcher: _omit, ...noFetcher } = minimal
+    expect(isQuotaPreset(noFetcher)).toBe(false)
+    expect(isQuotaPreset({ ...minimal, fetcher: 42 })).toBe(false)
+    expect(isQuotaPreset({ ...minimal, fetcher: '' })).toBe(false)
+  })
+
+  it('label 缺失 / 非字符串 → false', () => {
+    const { label: _omit, ...noLabel } = minimal
+    expect(isQuotaPreset(noLabel)).toBe(false)
+    expect(isQuotaPreset({ ...minimal, label: 42 })).toBe(false)
+  })
+
+  it('auth 缺失 / 非数组 / 元素非字符串 → false', () => {
+    const { auth: _omit, ...noAuth } = minimal
+    expect(isQuotaPreset(noAuth)).toBe(false)
+    expect(isQuotaPreset({ ...minimal, auth: 'api-key' })).toBe(false)
+    expect(isQuotaPreset({ ...minimal, auth: ['api-key', 42] })).toBe(false)
+  })
+
+  it('match 缺失 / 非对象 / 数组 → false', () => {
+    const { match: _omit, ...noMatch } = minimal
+    expect(isQuotaPreset(noMatch)).toBe(false)
+    expect(isQuotaPreset({ ...minimal, match: 'example.com' })).toBe(false)
+    expect(isQuotaPreset({ ...minimal, match: ['example.com'] })).toBe(false)
+  })
+
+  it('match 可选字段提供即校验：非字符串 → false', () => {
+    expect(isQuotaPreset({ ...minimal, match: { baseUrlPattern: 42 } })).toBe(false)
+    expect(isQuotaPreset({ ...minimal, match: { namePattern: true } })).toBe(false)
+  })
+
+  it('可选字段提供即校验：helpUrl/helpText/requiresWorkspace 类型漂移 → false', () => {
+    expect(isQuotaPreset({ ...minimal, helpUrl: 42 })).toBe(false)
+    expect(isQuotaPreset({ ...minimal, helpText: 42 })).toBe(false)
+    expect(isQuotaPreset({ ...minimal, requiresWorkspace: 'yes' })).toBe(false)
+  })
+
+  it('未知字段放行（远程向后兼容：新形态不被旧版本整体拒用）', () => {
+    expect(isQuotaPreset({ ...minimal, futureField: { nested: true } })).toBe(true)
   })
 })
