@@ -36,10 +36,15 @@ import { createSessionDeliveryRegistry, createDiskDeliveryStoreForSession } from
 import { createResumeDecision } from './services/session/resume-decision.js'
 // u4 追加项（A5/V5）：reattach restore 包装——先建投递运行时再触发对账（reconcile 无运行时即 no-op）。
 import { createReattachRestore } from './services/session/reattach-delivery-trigger.js'
-// notify-once U3（组合根接线，实施计划偏差 D-1）：ClaimLedger 构造 + settle/死亡/清扫路径；
-// 词形映射与 respond 回执助手自 session-manager-handler 模块复用（映射单点）。
+// notify-once U3（组合根接线，实施计划偏差 D-1）：ClaimLedger 构造 + settle/死亡路径；
+// 词形映射、respond 回执与死亡收尾序列助手自 session-manager-handler 模块复用（各自单点）。
 import { createClaimLedger, type DeathCause } from './services/session/notify-claims.js'
-import { collectStderrTail, deliverRespondTargets } from './transport/session-manager-handler.js'
+import {
+  collectStderrTail,
+  deliverRespondTargets,
+  settleClaimsOnDeath,
+  type WatchRespondExtra,
+} from './transport/session-manager-handler.js'
 // notify-once D5：respawn 终态命运（熔断发声 / 恢复静默）——pi-respawn 模块级订阅。
 import { onRespawnFate } from './services/session/pi-respawn.js'
 import type { SessionManagerWatchRespondPayload } from '@zhushanwen/extension-protocol'
@@ -724,9 +729,14 @@ async function main(): Promise<void> {
   const agentSettledListeners = new Set<(sessionId: string) => void>()
 
   // ── notify-once（设计 U3 + 偏差 D-1：ClaimLedger 组合根接线）─────────────
-  // 职责面：respond 写回通道 / settle 兑现路径（agentSettledListeners）/ 终局死亡发声
-  //（delete·forceQuit·非 respawn 链 exit·熔断四汇聚点）/ 父死亡批量 orphan（触发器②）/
-  // TTL 清扫消费 / shutdown 非零 warn（D7b）。
+  // 职责范围：respond 写回通道 / settle 兑现路径（agentSettledListeners）/ 终局死亡发声
+  //（五汇聚点：delete·forceQuit·非 respawn 链 exit·熔断四点经本组合根 speakSessionDeath，
+  // 第五点 archive（session-manager 工具路径）由 SessionManagerHandler.handleArchive 发声——
+  // 五点共用 settleClaimsOnDeath 同一收尾实装）/ 父死亡批量 orphan（触发器②）/
+  // shutdown 非零 warn（D7b）。（TTL 清扫已随 ADR-0122 防御机制清查退役——claimLedger
+  // 消费点全集仅：组合根直调 settle/orphanByParent/markInjected/disarmDeliveryFailed/count/
+  // dispose 六方法 + 经 settleClaimsOnDeath 的 onSessionDeath/clearSession + 经
+  // deliverRespondTargets 的 onRespond，无定时回收路径。）
   // 订阅顺序硬约束：pm.onSessionExit 订阅须先于下方
   // `new SessionService` 的 exit 清理路径（按订阅序分发，本路径排前才能读到 session 内存态）。
   // 前向引用（sessionService/sessionStore）为 createAdapter 同款「声明在后、调用在运行期」模式。
@@ -764,25 +774,12 @@ async function main(): Promise<void> {
   const claimLedger = createClaimLedger()
 
   /**
-   * 终局死亡发声（D5 汇聚点共用）：onSessionDeath 同 deathSeq 批终结（即时删除）→
-   * 逐 target respond（携 sessionFilePath/exitCode/stderrTail）→ clearSession 立 latch
-   *（清残留记录 + seq/undelivered 计数器——迟到 exit 路径查无记录自然静默）。
-   * 幂等：重复调用空批空转（不占 deathSeq、无二次 respond）。
+   * 终局死亡发声（D5 汇聚点共用）：收尾序列整体委托 settleClaimsOnDeath（onSessionDeath 同
+   * deathSeq 批终结 → 逐 target respond（携 sessionFilePath/exitCode/stderrTail）→ clearSession
+   * 立 latch；幂等语义见该助手 JSDoc），再消费本组合根私有的 pendingExitDeaths 退出现场 stash。
    */
-  const speakSessionDeath = (
-    sessionId: string,
-    cause: DeathCause,
-    extra: { exitCode?: number | null; stderrTail?: string; sessionFilePath?: string } = {},
-  ): void => {
-    const batch = claimLedger.onSessionDeath(sessionId, cause)
-    if (batch.terminated.length > 0) {
-      deliverRespondTargets(claimLedger, batch.targets, respondWatch, {
-        sessionFilePath: extra.sessionFilePath ?? resolveSessionFile(sessionId),
-        ...(extra.exitCode !== undefined ? { exitCode: extra.exitCode } : {}),
-        ...(extra.stderrTail !== undefined ? { stderrTail: extra.stderrTail } : {}),
-      })
-    }
-    claimLedger.clearSession(sessionId)
+  const speakSessionDeath = (sessionId: string, cause: DeathCause, extra: WatchRespondExtra = {}): void => {
+    settleClaimsOnDeath(claimLedger, sessionId, cause, respondWatch, resolveSessionFile, extra)
     pendingExitDeaths.delete(sessionId)
   }
 
@@ -1565,7 +1562,7 @@ async function main(): Promise<void> {
     // 缺席时 server 构造退化实例并 warn（违反单例约束，仅测试装配遗漏场景）。
     delivery: sessionDelivery,
     // notify-once U3（偏差 D-1）：通知债权状态机透传 server → SessionManagerHandler
-    //（settle/死亡/清扫路径在上方组合根直接消费同一实例）。
+    //（settle/死亡路径在上方组合根直接消费同一实例）。
     claims: claimLedger,
     // 导入会话（import-session D5/U2 + 多源 §3.7）：session.importCandidates / session.import
     // 路由，payload.source（缺省 'pi'）在 ImportService 内按注册表分发。

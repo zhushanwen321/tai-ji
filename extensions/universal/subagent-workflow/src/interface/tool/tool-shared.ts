@@ -39,8 +39,10 @@ export interface RenderableToolResult {
 /**
  * 入口 abort 前置：已被取消则 throw。
  *
- * pi 只对 execute throw 置 isError:true（返回值里的 isError 被 agent-loop 丢弃，
- * agent-loop.js:453-483）——错误一律 throw。
+ * execute throw → pi agent-loop catch 置 isError:true（pi-agent-core dist/agent-loop.js
+ * executePreparedToolCall，1.0.0 实读 catch :581-588；1.0.0 起正常 return 的 isError
+ * 也被尊重——:579 isError: result.isError === true，0.84.4 才硬编码 false——本包失败
+ * 恒走 throw，行为不变）——错误一律 throw。
  */
 export function assertNotAborted(signal: AbortSignal | undefined): void {
   if (signal?.aborted) {
@@ -143,8 +145,10 @@ export function withGuiAttach<Details extends GuiAttachableDetails>(
 /**
  * catch 内重抛单点：`<prefix>: <msg>`（msg 经 toErrorMessage 规整）。
  *
- * pi 只对 execute throw 置 isError:true——返回值里的 isError 被 agent-loop 丢弃
- * （agent-loop.js:453-483），错误一律 throw，本函数是四个 catch 点共享的唯一包装
+ * execute throw → pi agent-loop catch 置 isError:true——pi-agent-core dist/agent-loop.js
+ * executePreparedToolCall，1.0.0 实读 catch :581-588；1.0.0 起正常 return 的 isError
+ * 也被尊重（:579 isError: result.isError === true，0.84.4 才硬编码 false——本包失败
+ * 恒走 throw，行为不变），错误一律 throw，本函数是四个 catch 点共享的唯一包装
  * 形态；前缀是 LLM 可见文案，调用方逐字保持既有形态。
  */
 export function throwPrefixed(prefix: string, err: unknown): never {

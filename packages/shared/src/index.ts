@@ -67,6 +67,9 @@ export type { SubagentSetModelKnownFailureReason } from './protocol'
 // hook 否决类分类码值常量（msg-pipeline-debloat D4-2 同族）：runtime 落码点 +
 // core useChat 判别点统一引用，跨包禁止手抄字面量。
 export { MESSAGE_BLOCKED_CODE } from './protocol'
+// worktree 默认基线哨兵 'auto'（C-comm-22）：renderer Settings 缺省值 + runtime
+// DefaultBaseResolver 判别点统一引用，跨包禁止手抄字面量。
+export { WORKTREE_AUTO_BASE_BRANCH } from './protocol'
 // 消息撤回（U5，设计 D7）：撤回草稿还原纯函数族（剥标记 / 整批两层切条）——
 // core useChat reply 消费侧跨包取用，同 allowlist 纪律。
 export { stripDeliveryMarkers, restoreRevokedDraft } from './revoke-restore'

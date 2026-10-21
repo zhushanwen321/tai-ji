@@ -955,13 +955,19 @@ export interface ClientMessageMap {
   /** worktree.list：列出 cwd 所在 workspace 的所有 worktree。 */
   'worktree.list': { cwd: string }
   /** worktree.create：在 bare repo + worktree 结构中创建隔离的工作目录。
-   *  branch 必填；baseBranch 默认 'current'（继承当前分支），可为任意分支名（runtime 验证存在性）。
+   *  branch 必填；baseBranch 省略时 runtime 取 config.defaultBaseBranch（其缺省为哨兵
+   *  WORKTREE_AUTO_BASE_BRANCH 'auto'），值域四形态见字段注释。
    *  locationMode 控制 worktree 创建位置：'workspace'（workspace 根，bare 模式默认）、
    *  'repo-dir'（.bare 同级 repo 子目录）、'dedicated-dir'（用户指定的专用目录）。
    *  workspaceHint 用于显式指定 workspace 根（检测 .bare 的起点 cwd），省略则用 process.cwd()。 */
   'worktree.create': {
     branch: string
-    /** 基础分支。'current' 为特殊值（继承当前分支），其余为具体分支名（runtime 验证存在性）。 */
+    /**
+     * 基础分支，四形态（与 runtime ports/worktree-service.ts WorktreeCreateParams.baseBranch 对齐）：
+     * 'current'（继承当前分支）/ WORKTREE_AUTO_BASE_BRANCH 'auto'（按仓库远端实况动态推导，
+     * 字段省略时的 config 缺省）/ '<remote>/<branch>'（先验证远端已配置，幽灵 ref 拒绝采信）/
+     * 任意本地分支名（runtime 验证存在性）。
+     */
     baseBranch?: string
     /** worktree 创建位置模式。省略时 bare 模式默认 'workspace'。 */
     locationMode?: 'workspace' | 'repo-dir' | 'dedicated-dir'
@@ -1221,6 +1227,17 @@ export type WorktreeErrorCode =
 export type WorktreeUnknownErrorCode = 'worktree_failed'
 /** envelope code 字段的完整联合（业务码 + 兜底） */
 export type WorktreeEnvelopeCode = WorktreeErrorCode | WorktreeUnknownErrorCode
+
+/**
+ * worktree 默认基线哨兵 'auto'（runtime ↔ renderer 契约 SSOT，C-comm-22：shared 是前后端
+ * 唯一类型源，禁某一端私自重定义或手抄字面量）。
+ *
+ * 出现点：renderer Settings 默认基分支字段的缺省值（经 config.setDefaultBaseBranch 写入
+ * config.json.defaultBaseBranch）；worktree.create.baseBranch 的值域成员（字段省略时 runtime
+ * 以 config 值补位，其缺省即本哨兵）。runtime 读到后不作为字面 ref，而是按仓库远端实况
+ * 动态推导基线（DefaultBaseResolver；实现侧以 AUTO_BASE_BRANCH 名 re-export 本常量）。
+ */
+export const WORKTREE_AUTO_BASE_BRANCH = 'auto'
 
 /**
  * session.compact RPC 失败的分类码（msg-pipeline-debloat D4-2，runtime ↔ renderer 契约 SSOT）。
@@ -2733,6 +2750,12 @@ export interface ServerMessageMapBase {
     barePath: string
     repoRoot: string
     defaultBranch: string
+    /**
+     * 推导默认 base ref（如 'github/main'）：按仓库远端实况动态推导（checkout.defaultRemote →
+     * origin → 单一远端 → 清单首个；无远端用本地 main）。repo 两态附带，
+     * 解析失败缺省——前端建 worktree 的默认基线直接用它，不自拼 origin/*。
+     */
+    defaultBaseRef?: string
   }
   /** worktree.created：worktree.create 的成功 reply（新 worktree 的 cwd 与分支名）。
    *  usedBaseRef：实际用作创建基线的 ref（RT-8#8）。请求的 baseBranch 校验失败时
@@ -2767,8 +2790,8 @@ export interface ServerMessageMapBase {
   'quota.configure:result': { ok: boolean; error?: string }
   'quota.refresh:result': QuotaFetchResultPayload
   'usage.getStats:result': UsageStatsResult
-  /** worktree.branches：worktree.listBranches 的 reply（本地/远程分支列表 + 默认分支名）。 */
-  'worktree.branches': { local: string[]; remote: string[]; defaultBranch: string }
+  /** worktree.branches：worktree.listBranches 的 reply（本地/远程分支列表 + 默认分支名 + 推导默认 base ref）。 */
+  'worktree.branches': { local: string[]; remote: string[]; defaultBranch: string; defaultBaseRef?: string }
   /** worktree.list:result：worktree.list 的 reply（worktree 条目列表）。 */
   'worktree.list:result': { items: Array<{ path: string; branch: string; HEAD: boolean; bare: boolean }> }
   /** config.worktreeRootDir：config.getWorktreeRootDir 的 reply。 */

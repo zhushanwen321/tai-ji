@@ -1,4 +1,4 @@
-// tool-registration.test.ts — U5-A1: 6 tools registered with correct name/description/parameters + SESSION_MANAGER_MARKER import
+// tool-registration.test.ts — U5-A1: 8 tools registered with correct name/description/parameters + SESSION_MANAGER_MARKER import
 
 import { describe, it, expect, vi } from "vitest";
 import { SESSION_MANAGER_MARKER } from "@zhushanwen/extension-protocol";
@@ -25,13 +25,15 @@ const EXPECTED_TOOL_NAMES = [
 	"list_my_sessions",
 	"get_session_status",
 	"abort_session",
+	"delete_session",
+	"archive_session",
 ] as const;
 
 describe("U5-A1 tool-registration", () => {
-	it("registers exactly 6 tools", () => {
+	it("registers exactly 8 tools", () => {
 		const { pi, registered } = createMockPi();
 		registerExtension(pi as never);
-		expect(registered).toHaveLength(6);
+		expect(registered).toHaveLength(8);
 	});
 
 	it.each(EXPECTED_TOOL_NAMES)('registers tool "%s"', (name) => {

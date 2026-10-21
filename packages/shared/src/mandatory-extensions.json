@@ -76,7 +76,7 @@
   },
   {
     "name": "@zhushanwen/pi-session-manager",
-    "description": "Agent-managed sessions: create/send/history/status/list/abort child sessions via select+marker channel to runtime handler",
+    "description": "Agent-managed sessions: create, message, monitor, abort, archive, delete child sessions via select+marker channel to runtime handler",
     "tier": "feature"
   },
   {

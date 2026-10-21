@@ -155,6 +155,7 @@ import { Input } from '@/components/ui/input'
 import { GroupCard } from '@taiji/ui/features/settings'
 import SettingRow from '../SettingRow.vue'
 import { getSettingsTransport } from '@taiji/core'
+import { WORKTREE_AUTO_BASE_BRANCH } from '@taiji/shared'
 import { createSettingFieldGroup } from '@/composables/features/settings/setting-field'
 
 // [C3] settings 域 transport 只经 SettingsTransport seam（禁直连门面 / 禁深 import transport 域）
@@ -227,7 +228,8 @@ const timeout = timeoutField.value
 const timeoutBusy = timeoutField.busy
 
 // ── Section 3：通用 ──
-const baseBranchField = group.field<string>('origin/main', {
+// 缺省值 = 跨端协议哨兵（@taiji/shared SSOT，runtime 读到后按远端实况动态推导），禁手抄字面量
+const baseBranchField = group.field<string>(WORKTREE_AUTO_BASE_BRANCH, {
   load: () => transport.getDefaultBaseBranch().then((res) => res.baseBranch),
   // RD-4#7：非空校验（runtime setDefaultBaseBranch 不校验空串，直到 git 操作才炸），inline error 形态
   validate: (next) => (next.trim() === '' ? 'settings.worktree.baseBranchEmpty' : null),

@@ -12,7 +12,7 @@ import { expect, vi, type Mock } from "vitest";
 
 import registerExtension from "../../index.ts";
 
-/** registerTool 捕获的注册工具形态（execute 以六工具用例的固定五参形态调用） */
+/** registerTool 捕获的注册工具形态（execute 以八工具用例的固定五参形态调用） */
 export interface RegisteredTool { // oe-exempt:20260930:test:测试 harness 契约——多测试文件的断言范围引用其字段类型
 	name: string;
 	execute: (...args: unknown[]) => Promise<unknown>;
@@ -94,7 +94,7 @@ export async function flushMicrotasks(): Promise<void> {
 	for (let i = 0; i < 12; i++) await Promise.resolve();
 }
 
-/** 工具文本结果形态（六工具 execute 成功路径的 content 派生视图） */
+/** 工具文本结果形态（八工具 execute 成功路径的 content 派生视图） */
 export interface ToolTextResult { // oe-exempt:20260930:test:runToolForText 返回契约——断言范围消费
 	content: Array<{ type: string; text: string }>;
 }
@@ -105,7 +105,7 @@ function findTool(h: Pick<ExtensionHarness, "registered">, name: string): Regist
 	return t;
 }
 
-/** 跑一次工具（callId/params 形态与六工具用例一致：双 undefined + harness ctx） */
+/** 跑一次工具（callId/params 形态与八工具用例一致：双 undefined + harness ctx） */
 export async function runToolCall(
 	h: Pick<ExtensionHarness, "registered" | "ctx">,
 	name: string,

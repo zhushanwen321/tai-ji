@@ -20,8 +20,10 @@
  * 本模块 re-export 供 index.ts 生产消费）。
  *
  * 错误规格 F1-F6：handler 抛 Error（message 含 👉 恢复指引），index.ts 的 execute 闭包
- * 原样传播给 pi——pi-agent-core 只对 execute throw 置 isError:true（返回值里的 isError
- * 字段被丢弃，agent-loop.js:453-483）。handler 可抛（纯逻辑可测）。
+ * 原样传播给 pi——execute throw → agent-loop catch 置 isError:true（pi-agent-core dist/
+ * agent-loop.js executePreparedToolCall，1.0.0 实读 catch :581-588；1.0.0 起正常 return 的
+ * isError 也被尊重——:579 isError: result.isError === true，0.84.4 才硬编码 false——本包
+ * 失败恒走 throw，行为不变）。handler 可抛（纯逻辑可测）。
  * 例外：F2 多匹配与 F1 find 零匹配「不视为错误」，返回消歧/提示结果而非抛错。
  */
 import { existsSync } from 'node:fs'

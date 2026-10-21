@@ -25,10 +25,9 @@ import { taijiTestConfig, guardProjectSetup } from '../../test-guard/factory.ts'
  * 性不存在（首批实测：thinking-level 294ms / live-reload 793ms / chaos 306ms）。
  * L2.5 首批（chaos / live-reload / thinking-level-effective-e2e）与二批（attach-lifecycle /
  * broadcast-getstate / completion-backflow / pi-protocol-contract / send-queue-e2e /
- * session-manager-full-e2e / tool-call-index / usage-queue-commands-invalidation /
- * pi-semantics-skill-expansion-golden / idle-pi-reclaim-integration）均已翻轨回 main 组
- * （后 idle-pi-reclaim-integration 2026-09-26、session-manager-full-e2e 2026-10-20 按
- * 数组内日期注释再登记进串行尾组——当前分组以 REAL_PI_TESTS 数组为准）。
+ * tool-call-index / usage-queue-commands-invalidation /
+ * pi-semantics-skill-expansion-golden）均已翻轨回 main 组（当前分组以 REAL_PI_TESTS
+ * 数组为准）。
  *
  * 防线（globalSetup env 固定 + fs-guard 切面）经 test-guard/factory 顶层注入；
  * projects 内 setupFiles **不**继承 root 级（vitest projects 语义，实测 setup 0ms 不执行），
@@ -38,16 +37,11 @@ import { taijiTestConfig, guardProjectSetup } from '../../test-guard/factory.ts'
 const REAL_PI_TESTS = [
   // L2.5 二批（2026-09-15）后：全部「真实 pi + 真实 LLM turn」equivalence 用例已翻轨
   // faux（见上方维护契约）。数组保留为注册位——新增真实 LLM 轨文件必须登记于此
-  // （检查 session-manager-e2e-fixture-unit.test.ts 双向 diff；scalar-state-invalidation
-  // 的真实轨 describe 已于 2026-09 测试舰队审查删除，纯 mock 文件的过期登记已清）。
-  // [HISTORICAL 2026-09-26 W1 Gate A] idle-pi-reclaim-integration（纯 faux 轨）自愿
-  // 登记：满并行下 pi 侧扩展冷编译与模型解析竞态（prompt 时 faux provider 未注册 →
-  // "No API key"），单跑 1.3s 恒绿、满并行 2/2 红——「faux 毫秒级轮次饿死结构性
-  // 不存在」前提对双 spawn + jiti 冷编译形态证伪。按池的调度语义（真进程隔离、
-  // main 组完整结束后顺序尾组）登记，非断言放宽。
-  'src/__tests__/services/idle-pi-reclaim-integration.test.ts',
-  // [2026-10-20 state-machine-infrastructure u-m1] session-manager-full-e2e（纯 faux
-  // 轨，双 spawn + 真 extension jiti 冷编译）同款自愿登记：满并行下 7/7 红（2026-10-20
+  // （检查 session-manager-e2e-fixture-unit.test.ts 双向 diff）。
+  // [2026-10-20 state-machine-infrastructure u-m1] session-manager-full-e2e（faux 轨
+  // 7 用例 + session-manager-archive-delete U9 加入的真 LLM 轨 3 用例——经
+  // REAL_PI_READY 门控，无凭证环境自动 skip；双 spawn + 真 extension jiti 冷编译）
+  // 同款自愿登记：满并行下 faux 7/7 红（2026-10-20
   // 两轮实证：runtime 全量 669 文件满载下该文件整体失败），单跑 12s 恒绿 7/7——
   // 按上例同判（双 spawn + jiti 冷编译形态的满并行竞态，非用例自身缺陷），登记
   // 串行尾组，非断言放宽。

@@ -71,7 +71,8 @@ import type { ImportService } from '../services/session/import-service.js'
 import type { GenStatsService } from '../services/session/gen-stats-service.js'
 // ArchiveService（session-archive 设计 D5，u-rpc-wiring）：归档域三 RPC + config.archives +
 // config.sessions 帧 archiveCount 的服务核心。type-only：实例由组合根构造（deps 注入 delete
-// 活跃分支原语），经 setServices optional.archive 注入 broker（角标）与 sessionHandler（RPC）。
+// 活跃分支原语），经 setServices optional.archive 注入三处消费点：broker（archiveCount 角标）、
+// sessionHandler ctx（三 RPC）、sessionManagerHandler（archive action 执行体，session-manager-archive-delete U3）。
 import type { ArchiveService } from '../services/archive/archive-service.js'
 import type { ITerminalService } from '../services/ports/terminal-service.js'
 import type { QuotaService } from '../services/quota-service.js'
@@ -207,7 +208,9 @@ export class RuntimeServer implements IMessageBroker {
   private importService?: ImportService
   /** 生成指标服务（composer-gen-stats u3）：可选，setServices 注入后经 sessionHandler ctx 触达。 */
   private genStatsService?: GenStatsService
-  /** 归档服务（session-archive u-rpc-wiring）：setServices 注入后经 broker（archiveCount）与 sessionHandler ctx（三 RPC）触达。 */
+  /** 归档服务（session-archive u-rpc-wiring）：setServices 注入后经三处消费点触达——broker
+   * （archiveCount 角标）、sessionHandler ctx（三 RPC）、sessionManagerHandler（archive action
+   * 执行体，session-manager-archive-delete U3）。 */
   private archiveService?: ArchiveService
   /**
    * MessageBus 单例（wave:runtime-wiring）：注入到 SessionMessageHandler ctx，
@@ -518,6 +521,9 @@ export class RuntimeServer implements IMessageBroker {
       this.workspaceMessageHandler = new WorkspaceMessageHandler({
         ...messaging,
         workspaceService: workspace,
+        // 打开仓库预热（workspace.record → prefetch 默认远端）：worktree 未注入时跳过，
+        // record 主流程不受影响（对齐 worktree/git handler 的可选注入防御形态）
+        worktreeService: worktree ?? null,
       })
     }
     if (project) {
@@ -582,7 +588,7 @@ export class RuntimeServer implements IMessageBroker {
 
   /** SessionManagerHandler：agent-managed session 请求处理（select 通道 + SESSION_MANAGER_MARKER）。 */
   private assembleSessionManagerHandler(optional: RuntimeServerOptionalServices): void {
-    const { delivery, workspace, claims } = optional
+    const { delivery, workspace, claims, archive } = optional
     // 不走 WS 路由表——由 EventInterpreter.onSessionManagerRequest fire-and-forget 调用。
     // sd-u5：delivery（send 排队投递 + create 直投）必注入——组合根装配 sessionId 单例注册表；
     // 缺省时现场构造无 settled 订阅的退化实例（内核自动退化为退避轮询，D8 兜底），仅兜测试装配遗漏。
@@ -617,6 +623,9 @@ export class RuntimeServer implements IMessageBroker {
       },
       // notify-once U3：债权状态机透传（缺席 = 停用象限，见 SessionManagerHandlerOptions.claims）
       claims,
+      // session-manager-archive-delete U3：归档服务透传（archive action 执行体；缺席 =
+      // 停用象限报可操作错误，见 SessionManagerHandlerOptions.archiveService）
+      archiveService: archive,
     })
   }
 

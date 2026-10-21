@@ -456,7 +456,7 @@
       "run": "TAIJI_SKIP_REAL_PI=1 pnpm --filter @taiji/runtime test:equivalence",
       "owner": "packages/runtime",
       "authority": "docs/TEST-STRATEGY.md#等价性测试双轨真实-llm-turn-基线开发阶段按改动范围跑",
-      "note": "收录清单记 13 文件为 TEST-STRATEGY 历史快照，磁盘实际为 18 个 .test.ts（2026-09-16 盘点），按目录现状全量收录；目录内增删文件由 scope glob 覆盖、不要求改本表。同目录真实 LLM 子集（skip 机制 SSOT = pi-fixture.ts REAL_PI_READY）属开发阶段按改动范围空载串行执行，无 CI/门禁触发范围，不在本表登记独立 rule。[2026-09-22 btw-question M4-b 评估结论更新] 设计 §4 登记对账段：btw 不新增 entry 类型，重载链复用 applyEntry 全量回放 → **btw 分区纳入等价性覆盖范围（live≡reload 构造性成立）**；btw 回放/驱逐语义的承接单测 = packages/renderer/src/__tests__/stores/btw-replay.test.ts（回放接线 + live≡reload 等价口径 describe）+ packages/core/src/domain/chat/__tests__/chat-lru-btw.test.ts（主驱逐不联动 btw 分区 + btw 驱逐同驱派生键）。scope 核对：btw 改动范围（services/session/**、core/domain/chat/**）已在本 rule scope 内，无需扩；本 rule 保持不跑真实 LLM 面（equivalence real-pi 池按改动范围开发期另行执行）。[2026-09-24 notify-once scope 扩展] completion-backflow / send-queue / session-manager-full 三资产（均属本 rule）的 watch/ClaimLedger 路径纳入触发范围：watch 路由与 respond 传导（transport/session-manager-handler.ts + transport/server.ts）、watch 协议范围（extension-protocol session-manager dir）、watch extension 侧（extensions/universal/session-manager/src/**——full-e2e 真加载该扩展源）、ClaimLedger envelope meta（packages/session-delivery/**，notifyId 穿 envelope）；ClaimLedger 本体 notify-claims.ts 落 services/session/** 已在原 scope 内。[2026-10-03 pi 1.0.0 升级补登记] scripts/prepare-pi-resources.sh 纳入 scope：pi binary 版本/下载源变化 = 真实 pi 子进程基线变化，等价性轨（faux 轨 + real-pi 按改动范围）为对应回归测试。"
+      "note": "收录清单记 13 文件为 TEST-STRATEGY 历史快照，磁盘实际为 18 个 .test.ts（2026-09-16 盘点），按目录现状全量收录；目录内增删文件由 scope glob 覆盖、不要求改本表。同目录真实 LLM 子集（skip 机制 SSOT = real-pi-gate.ts REAL_PI_READY——2026-09-27 自 pi-fixture.ts 拆出，凭证探测独立模块）属开发阶段按改动范围空载串行执行，无 CI/门禁触发范围，不在本表登记独立 rule。[2026-09-22 btw-question M4-b 评估结论更新] 设计 §4 登记对账段：btw 不新增 entry 类型，重载链复用 applyEntry 全量回放 → **btw 分区纳入等价性覆盖范围（live≡reload 构造性成立）**；btw 回放/驱逐语义的承接单测 = packages/renderer/src/__tests__/stores/btw-replay.test.ts（回放接线 + live≡reload 等价口径 describe）+ packages/core/src/domain/chat/__tests__/chat-lru-btw.test.ts（主驱逐不联动 btw 分区 + btw 驱逐同驱派生键）。scope 核对：btw 改动范围（services/session/**、core/domain/chat/**）已在本 rule scope 内，无需扩；本 rule 保持不跑真实 LLM 面（equivalence real-pi 池按改动范围开发期另行执行）。[2026-09-24 notify-once scope 扩展] completion-backflow / send-queue / session-manager-full 三资产（均属本 rule）的 watch/ClaimLedger 路径纳入触发范围：watch 路由与 respond 传导（transport/session-manager-handler.ts + transport/server.ts）、watch 协议范围（extension-protocol session-manager dir）、watch extension 侧（extensions/universal/session-manager/src/**——full-e2e 真加载该扩展源）、ClaimLedger envelope meta（packages/session-delivery/**，notifyId 穿 envelope）；ClaimLedger 本体 notify-claims.ts 落 services/session/** 已在原 scope 内。[2026-10-03 pi 1.0.0 升级补登记] scripts/prepare-pi-resources.sh 纳入 scope：pi binary 版本/下载源变化 = 真实 pi 子进程基线变化，等价性轨（faux 轨 + real-pi 按改动范围）为对应回归测试。"
     },
     {
       "id": "E2E-EQUIV-02",
@@ -1716,7 +1716,7 @@
     },
     {
       "id": "E2E-SESSMGR-02",
-      "summary": "session-manager 全链路真机冒烟剧本（U9-S1/S2：真 pi 进程 + 真 LLM spawn create_managed_session → marker UI 请求回写 → scanPiSessions 重启恢复）",
+      "summary": "session-manager 全链路真机冒烟剧本（U9-S1/S2：真 pi 进程 spawn create_managed_session → marker UI 请求回写 → scanPiSessions 重启恢复；U9-S3/S4/S5：真 LLM 轮次 archive_session/delete_session 全链路——归档/删除回包 archived/deleted:true + fake 服务侧调用与 claims 收尾断言 + 人身约束取样（tidy up 语料 → archive 调用、零 delete 调用））",
       "scope": [
         "scripts/cw/session-manager-full-e2e.sh"
       ],
@@ -3049,6 +3049,27 @@
       "owner": "extensions/universal/provider-live-sync",
       "authority": "docs/constraints.json",
       "note": "R2 态：真实运行形态 = pre-commit 2i 段按路径触发（extensions/**/*.{ts,mts,cts,js,mjs} / 本脚本 / install-hooks.sh 任一 staged，复用 SKIP_EXTENSION_LINT 开关）；判定唯一源 = 脚本内两包白名单常量，新增合法注入点须同 commit 改白名单并同步 C-ext-32 登记；零第三方依赖、全量扫描 ~0.1s"
+    },
+    {
+      "id": "E2E-EDGEFADE-01",
+      "summary": "EdgeFade 渐焦遮罩消费范围门禁：仅对话流及同族场景可用（唯一挂载点 MessageStream.vue，drawer subagent / 旁路提问 / workflow agent 流经其复用），列表 / 面板 / 文件树等一律禁止（2026-10-21 用户裁决）",
+      "scope": [
+        ".githooks/check_edge_fade_scope.mjs",
+        ".githooks/install-hooks.sh"
+      ],
+      "layer": "L1",
+      "assets": [
+        {
+          "kind": "script",
+          "ref": ".githooks/check_edge_fade_scope.mjs"
+        }
+      ],
+      "trigger": "on-diff",
+      "serial": false,
+      "run": "node .githooks/check_edge_fade_scope.mjs",
+      "owner": "packages/renderer",
+      "authority": ".githooks/check_edge_fade_scope.mjs",
+      "note": "R2 态：真实运行形态 = pre-commit 按路径触发（0.8 段，触发范围 = packages/**/*.{vue,ts} staged 文件，不设独立 SKIP 开关；接线 SSOT = .githooks/install-hooks.sh）。判定唯一源 = check_edge_fade_scope.mjs（白名单 ALLOWLIST 同文件，新增条目须附裁决理由；登记于 AGENTS.md 豁免标记盘点）。对 staged renderer 文件的强制拦截不经本对账（pre-commit 直接跑检查本体），本 rule run 面 = 脚本自身或 hook 模板变更时的全仓自含冒烟（git ls-files 扫描 + 两行正则，毫秒级）。无 vitest 测试资产——判定逻辑为两行正则匹配白名单差集，复杂度不配独立语义测试。2026-10-21 随消费范围收敛批落地（同批撤 SessionList/FileView/GitPanel/DetailPane/BackgroundTaskDetailPanel 五处接线）。"
     }
   ]
 }

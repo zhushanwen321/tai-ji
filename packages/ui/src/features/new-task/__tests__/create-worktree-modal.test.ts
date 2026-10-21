@@ -26,11 +26,11 @@ function makeDeps(overrides?: Partial<NewTaskDeps>): NewTaskDeps {
       gitInfo: ref({ branch: 'main' }),
     } as unknown as NewTaskDeps['flow'],
     recentWorkspaces: ref([]),
-    listBranches: vi.fn(async () => ({ local: [], remote: ['origin/main', 'origin/dev'], defaultBranch: 'main' })),
+    listBranches: vi.fn(async () => ({ local: [], remote: ['origin/main', 'origin/dev'], defaultBranch: 'main', defaultBaseRef: 'origin/main' })),
     createWorktree: vi.fn(async () => ({ cwd: '/Code/ws/feat-a', branch: 'feat-a' })),
     detectWorkspace: vi.fn(async () => ({
       mode: 'bare-workspace' as const, wsRoot: '/Code/ws', barePath: '/Code/ws/.bare',
-      repoRoot: '/Code/ws/main', defaultBranch: 'main',
+      repoRoot: '/Code/ws/main', defaultBranch: 'main', defaultBaseRef: 'origin/main',
     })),
     pickDirectory: vi.fn(async () => ({ canceled: true })),
     presets: ref([]),
@@ -129,6 +129,65 @@ describe('CreateWorktreeModal 仓库检测失败态（≠ not-repo）', () => {
     } finally {
       warnSpy.mockRestore()
     }
+  })
+})
+
+describe('CreateWorktreeModal 默认基线推导（defaultBaseRef，不自拼 origin/ 前缀）', () => {
+  it('onMounted：listBranches 失败 → warn 留痕，base 保留 detect 推导的 defaultBaseRef（不阻断表单）', async () => {
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    try {
+      const deps = makeDeps({
+        detectWorkspace: vi.fn(async () => ({
+          mode: 'bare-workspace' as const, wsRoot: '/Code/ws', barePath: '/Code/ws/.bare',
+          repoRoot: '/Code/ws/main', defaultBranch: 'main', defaultBaseRef: 'github/main',
+        })),
+        listBranches: vi.fn(async () => {
+          throw new Error('branches boom')
+        }),
+      })
+      const wrapper = await mountModal(deps)
+      // 用户可见：base trigger 显示 detect 推导值（分支加载失败不阻断，也不回落 origin/ 拼接）
+      expect(bySel('[data-testid="worktree-base-trigger"]').text()).toContain('github/main')
+      expect(warnSpy).toHaveBeenCalledWith(
+        expect.stringContaining('listBranches failed, keeping detect-derived base'),
+        expect.any(Error),
+      )
+      wrapper.unmount()
+    } finally {
+      warnSpy.mockRestore()
+    }
+  })
+
+  it('plain-repo 换仓库 → base 重推导为新仓库的 defaultBaseRef（detect 与 listBranches 两级实况推导）', async () => {
+    const deps = makeDeps({
+      detectWorkspace: vi.fn()
+        // 初始挂载：plain-repo（repo-change-btn 只在此态渲染）
+        .mockResolvedValueOnce({
+          mode: 'plain-repo' as const, wsRoot: '', barePath: '', repoRoot: '/Code/myrepo',
+          defaultBranch: 'main', defaultBaseRef: 'origin/main',
+        })
+        // 换仓库后的 detect：新仓库远端名非 origin，defaultBaseRef = github/main
+        .mockResolvedValueOnce({
+          mode: 'plain-repo' as const, wsRoot: '', barePath: '', repoRoot: '/Code/other',
+          defaultBranch: 'main', defaultBaseRef: 'github/main',
+        }),
+      pickDirectory: vi.fn(async () => ({ canceled: false, path: '/Code/other' })),
+      // listBranches 按调用次序区分：初始挂载（/Code/myrepo）与换仓库后（/Code/other）；
+      // 换仓库后返回与 detect 不同值，证明第二级赋值同样走 defaultBaseRef 分支
+      listBranches: vi.fn()
+        .mockResolvedValueOnce({ local: [], remote: ['origin/main'], defaultBranch: 'main', defaultBaseRef: 'origin/main' })
+        .mockResolvedValueOnce({ local: [], remote: ['github/main', 'github/dev'], defaultBranch: 'main', defaultBaseRef: 'github/dev' }),
+    })
+    const wrapper = await mountModal(deps)
+    expect(bySel('[data-testid="worktree-base-trigger"]').text()).toContain('origin/main')
+    await bySel('[data-testid="repo-change-btn"]').trigger('click')
+    await flushPromises()
+    // detect 以新选路径重检
+    expect(deps.detectWorkspace).toHaveBeenLastCalledWith('/Code/other')
+    // 用户可见：base 换到新仓库实况推导的基线（listBranches 级 defaultBaseRef 生效，
+    // 语义 = 无 origin/ 自拼——远端名 github 的仓库 base 不再落在幽灵 origin/* 上）
+    expect(bySel('[data-testid="worktree-base-trigger"]').text()).toContain('github/dev')
+    wrapper.unmount()
   })
 })
 

@@ -947,8 +947,8 @@ export default {
     timeoutHint: 'Timeout for worktree creation operation',
     timeoutPlaceholder: '60',
     defaultBaseBranch: 'Default Base Branch',
-    defaultBaseBranchHint: 'Default base branch when creating worktrees',
-    defaultBaseBranchPlaceholder: 'origin/main',
+    defaultBaseBranchHint: 'Default base when creating worktrees. auto = derive from repo remotes; or a concrete ref (e.g. github/main) / current',
+    defaultBaseBranchPlaceholder: 'auto',
     saved: 'Worktree settings saved',
     saveFailed: 'Save failed: {reason}',
     // RD-4#7: front-end range/non-empty validation (inline error, no RPC on miss)
