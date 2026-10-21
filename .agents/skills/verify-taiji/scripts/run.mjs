@@ -117,6 +117,10 @@ const log = (msg) => {
 const instanceName = flag('name', `verify-${runId}`)
 const dataDir = path.join(os.homedir(), '.taiji-dev', `verify-${runId}`)
 const faux = meta.faux ?? scenario.faux
+const llm = meta.llm ?? scenario.llm
+if (faux && llm) {
+  throw new Error(`${String(meta.id)}: meta/scenario 同时声明 faux 与 llm（两条零 token 通道互斥）`)
+}
 
 log(`runId=${runId} worktree=${worktree} instance=${instanceName} dataDir=${dataDir}`)
 log(`runDir=${runDir}`)
@@ -143,7 +147,7 @@ if (missingCovers.length > 0) {
   log(`warn: covers 缺文档 ${missingCovers.join(', ')}`)
 }
 
-const instance = createInstance({ repo, name: instanceName, dataDir, faux, background: true })
+const instance = createInstance({ repo, name: instanceName, dataDir, faux, llm, background: true })
 let proto = null
 let ui = null
 let thrown = null

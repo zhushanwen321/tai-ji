@@ -56,14 +56,22 @@ const log = (m) => process.stderr.write(`[probe] ${m}\n`)
 
 const MAIN_MODEL = 'mock-1'
 const SUB_MODEL = 'mock-sub-a'
-const CANARY_A = 'FANOUT_BRANCH_A_MOCK_CANARY'
-const CANARY_B = 'FANOUT_BRANCH_B_MOCK_CANARY'
+const CANARY_PREFIX = 'FANOUT_MEMBER_STEP_'
 
-/** 成员演员两轮：先调 structured-output 交结果，再收尾文本。 */
-const member = (summary) => [
-  { toolCalls: [{ name: 'structured-output', args: { summary } }], stopReason: 'toolUse' },
-  { text: `${summary}-done`, stopReason: 'stop' },
-]
+/**
+ * 成员演员队列：**每一步都必须是合法的终局 structured-output 调用**。
+ *
+ * 为什么不能「toolCall 步 + 收尾文本步」交替：model-keyed 队列是**每个 pi 进程各自的游标**，
+ * 但两个成员进程共享同一队（同 model）且并发推进——交错消费下某个成员会拿到「收尾文本」那一步，
+ * 命中 `schema_deterministic`（Agent finished without producing a structured output）失败。
+ * 全部步都是合法终局调用后，成员无论拿到哪一步都能正常收敛（2026-10-21 实测：交替步会
+ * 出现 1/2 成员失败，全合法步则全绿）。
+ */
+const memberStep = (i) => ({
+  toolCalls: [{ name: 'structured-output', args: { summary: `${CANARY_PREFIX}${i}_CANARY` } }],
+  stopReason: 'toolUse',
+})
+const memberQueue = Array.from({ length: 8 }, (_, i) => memberStep(i))
 
 const llm = {
   responses: {
@@ -86,7 +94,7 @@ const llm = {
       // 完成通知会触发主 agent 继续跑轮；备足脚本防「剧本耗尽 404」噪音（不影响结论）
       ...Array.from({ length: 6 }, (_, i) => ({ text: `parent-idle-${i}`, stopReason: 'stop' })),
     ],
-    [`mockllm/${SUB_MODEL}`]: [...member(CANARY_A), ...member(CANARY_B), ...member('SPARE_1'), ...member('SPARE_2')],
+    [`mockllm/${SUB_MODEL}`]: memberQueue,
   },
   mainModel: MAIN_MODEL,
   subModel: SUB_MODEL,
@@ -103,6 +111,7 @@ const facts = {
   runId: null,
   memberOutcomes: [],
   canaryInRecord: false,
+  canaryMarkers: [],
   childRequests: 0,
   childStepIndexes: [],
   mainRequests: 0,
@@ -179,7 +188,8 @@ try {
     }
   }
   ev.attach('workflow-records', recordText.slice(0, 200_000))
-  facts.canaryInRecord = recordText.includes(CANARY_A) && recordText.includes(CANARY_B)
+  const canaryMarkers = [...new Set([...recordText.matchAll(new RegExp(`${CANARY_PREFIX}(\\d+)_CANARY`, 'g'))].map((m) => m[0]))]
+  facts.canaryInRecord = canaryMarkers.length >= 2
   facts.memberOutcomes = recordText
     .split('\n')
     .map((l) => {
@@ -195,13 +205,14 @@ try {
     step: 'workflow.record',
     channel: 'C',
     exitCode: 0,
-    stats: { recordFiles: recFiles.length, memberOutcomes: JSON.stringify(facts.memberOutcomes), canary: facts.canaryInRecord },
+    stats: { recordFiles: recFiles.length, memberOutcomes: JSON.stringify(facts.memberOutcomes), canary: canaryMarkers.length },
   })
   ev.assert('③ 两个成员 outcome=done（canary 摘要落盘）', facts.memberOutcomes.length >= 2 && facts.memberOutcomes.every((m) => m.outcome === 'done'), {
     channel: 'C',
     expected: '2 × agent-settled outcome=done',
     actual: JSON.stringify(facts.memberOutcomes),
   })
+  facts.canaryMarkers = canaryMarkers
 
   const stderrFiles = (() => {
     const logsDir = path.join(dataDir, 'logs')
@@ -249,7 +260,7 @@ try {
   const memberOk = facts.memberOutcomes.length >= 2 && facts.memberOutcomes.every((m) => m.outcome === 'done')
   if (facts.childRequests >= 2 && memberOk && facts.canaryInRecord) {
     conclusion = 'mock-workflow-reachable'
-    reason = `${facts.childRequests} 条成员模型请求命中本机 mock；run status=${facts.runStatus}，两成员 outcome=done，canary 摘要落 record`
+    reason = `${facts.childRequests} 条成员模型请求命中本机 mock；run status=${facts.runStatus}，两成员 outcome=done，canary 摘要落 record（${canaryMarkers.join(', ')}）`
   } else if (facts.childRequests >= 1) {
     conclusion = 'inconclusive'
     reason = `成员打到 mock（${facts.childRequests} 条）但未全绿：run=${facts.runStatus} members=${JSON.stringify(facts.memberOutcomes)} canary=${facts.canaryInRecord}`
@@ -296,7 +307,7 @@ try {
       `- run：${facts.runId} status=${facts.runStatus}`,
       `- 成员 outcome：${JSON.stringify(facts.memberOutcomes)}`,
       `- mock 请求：main=${facts.mainRequests} × ${MAIN_MODEL} / child=${facts.childRequests} × ${SUB_MODEL}（steps=${facts.childStepIndexes.join(',')}）`,
-      `- canary 落盘：${facts.canaryInRecord}`,
+      `- canary 落盘：${facts.canaryInRecord}（命中 ${facts.canaryMarkers.join(', ') || '无'}）`,
     ].join('\n'),
   })
   ev.verdict({

@@ -50,11 +50,11 @@ await instance.dispose()   // 同时关 mock server + 删自建数据目录
 | 文件 | 验什么 | 演员（model-keyed） | 已知限制 |
 |------|--------|--------------------|----------|
 | `subagent-dispatch-mock.json` | 子代理派发执行层：主派发 → 成员吐 canary | `mockllm/mock-1`（派发 + 收尾 + 通知后若干轮）、`mockllm/mock-sub-a`（canary） | 成员剧本只有 1 步，二次派发需补步 |
-| `workflow-fanout-mock.json` | workflow fan-out 执行层：两成员各交 structured-output | `mockllm/mock-1`、`mockllm/mock-sub-a`（两路成员各 2 步 + 备用步） | `name` 必须替换成 `fixtures/workflows/fanout-canary.workflow.js` 的绝对路径；成员必须在终局调 `structured-output` |
+| `workflow-fanout-mock.json` | workflow fan-out 执行层：两成员各交 structured-output | `mockllm/mock-1`、`mockllm/mock-sub-a`（8 步**全部**是合法终局 structured-output） | `name` 必须替换成 `fixtures/workflows/fanout-canary.workflow.js` 的绝对路径；成员必须在终局调 `structured-output`；**不要**用「toolCall 步 + 收尾文本步」交替（见下文坑 4） |
 
 配套 workflow 脚本：`fixtures/workflows/fanout-canary.workflow.js`（最小 fan-out，成员用 schema 收 summary）。
 
-## 踩过的坑（都已在 lib 里处理，改剧本时注意）
+## 踩过的坑（1/3/6 已由 lib 处理，2/4/5 是剧本编写纪律）
 
 1. **pi 发到 HTTP 的 `model` 是裸 id**（`mock-1`），不是 `provider/model`。`createMockLlm` 两种 key
    写法都兼容，但请求记录里的 `model` 字段永远是裸 id——断言要用裸 id。
@@ -65,7 +65,11 @@ await instance.dispose()   // 同时关 mock server + 删自建数据目录
    （不影响可达性结论，但会让 evidence 里出现 mock 404 噪音）。
 4. **workflow 成员必须调 `structured-output`**：workflow 模式下它是单参数合成工具
    （parameters 即权威 schema），不调用 = `schema_deterministic` 失败。
-5. **auto-rename 必须关**（`agent/auto-rename-enabled` 删除）：标题生成会经 `llm-shared` 打 mock，
+5. **并发成员的队列必须「每一步都合法」**：model-keyed 队列的游标是 **per-pi-进程**的，
+   但同模型的多个成员进程共享同一队且并发推进——若剧本是「toolCall 步 + 收尾文本步」交替，
+   交错消费会让某个成员拿到收尾文本那一步 → `schema_deterministic` 失败（2026-10-21 实测：
+   1/2 成员失败）。修法 = 成员队列每步都是能独立收敛的终局调用（`workflow-fanout-mock.json` 即此形态）。
+6. **auto-rename 必须关**（`agent/auto-rename-enabled` 删除）：标题生成会经 `llm-shared` 打 mock，
    消耗剧本 step；`ensureLlm` 已自动删除该标志。
 
 ## 维护

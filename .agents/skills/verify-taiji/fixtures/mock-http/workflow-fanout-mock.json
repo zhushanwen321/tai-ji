@@ -1,5 +1,5 @@
 {
-  "_note": "mock-http 通道剧本（model-keyed）。主演员 mockllm/mock-1 派发 fanout-canary；成员演员 mockllm/mock-sub-a 每个成员两轮：第一轮调 structured-output（workflow 模式下它是单参数合成工具，parameters 即权威 schema），第二轮收尾文本。用法见 fixtures/mock-http/README.md。",
+  "_note": "mock-http 通道剧本（model-keyed）。主演员 mockllm/mock-1 派发 fanout-canary；成员演员 mockllm/mock-sub-a 的每一步都是合法的终局 structured-output 调用（workflow 模式下它是单参数合成工具，parameters 即权威 schema）。为什么每步都合法：两个成员进程共享同一 model-keyed 队列且并发推进，交错消费时任何一步都必须能独立收敛，否则会命中 schema_deterministic 失败（2026-10-21 实测）。用法见 fixtures/mock-http/README.md。",
   "mockllm/mock-1": [
     {
       "text": "跑一个两路 fan-out 的 workflow：",
@@ -22,17 +22,13 @@
     { "text": "parent-idle-3", "stopReason": "stop" }
   ],
   "mockllm/mock-sub-a": [
-    {
-      "toolCalls": [{ "name": "structured-output", "args": { "summary": "FANOUT-BRANCH-A-MOCKCANARY" } }],
-      "stopReason": "toolUse"
-    },
-    { "text": "branch-a-done", "stopReason": "stop" },
-    {
-      "toolCalls": [{ "name": "structured-output", "args": { "summary": "FANOUT-BRANCH-B-MOCKCANARY" } }],
-      "stopReason": "toolUse"
-    },
-    { "text": "branch-b-done", "stopReason": "stop" },
-    { "text": "spare-1", "stopReason": "stop" },
-    { "text": "spare-2", "stopReason": "stop" }
+    { "toolCalls": [{ "name": "structured-output", "args": { "summary": "FANOUT_MEMBER_STEP_0_CANARY" } }], "stopReason": "toolUse" },
+    { "toolCalls": [{ "name": "structured-output", "args": { "summary": "FANOUT_MEMBER_STEP_1_CANARY" } }], "stopReason": "toolUse" },
+    { "toolCalls": [{ "name": "structured-output", "args": { "summary": "FANOUT_MEMBER_STEP_2_CANARY" } }], "stopReason": "toolUse" },
+    { "toolCalls": [{ "name": "structured-output", "args": { "summary": "FANOUT_MEMBER_STEP_3_CANARY" } }], "stopReason": "toolUse" },
+    { "toolCalls": [{ "name": "structured-output", "args": { "summary": "FANOUT_MEMBER_STEP_4_CANARY" } }], "stopReason": "toolUse" },
+    { "toolCalls": [{ "name": "structured-output", "args": { "summary": "FANOUT_MEMBER_STEP_5_CANARY" } }], "stopReason": "toolUse" },
+    { "toolCalls": [{ "name": "structured-output", "args": { "summary": "FANOUT_MEMBER_STEP_6_CANARY" } }], "stopReason": "toolUse" },
+    { "toolCalls": [{ "name": "structured-output", "args": { "summary": "FANOUT_MEMBER_STEP_7_CANARY" } }], "stopReason": "toolUse" }
   ]
 }
