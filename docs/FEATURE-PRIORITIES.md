@@ -100,7 +100,7 @@ harness 必备能力（业务价值视角，2026-09-12 用户裁决）：
 | cache-probe | 前缀指纹采集、analyze.py 归因 | 缓存分析用户 |
 | goal | 目标管理 | goal 用户 |
 | scheduler | 定时调度 | 定时任务用户 |
-| session-manager | agent-managed session 8 工具 | 高级编排用户（**调度模式内置预设的工具范围承载**；模式面不可用仅该模式降级，8 工具本身仍属高级编排，判例 #8） |
+| session-manager | agent-managed session 8 工具 | 高级编排用户（**调度模式内置预设的工具范围承载**——8 工具全部列入该预设 allowlist，含 archive_session / delete_session，裁决见 ADR-0136 补记；调度模式不可用时仅该模式降级，8 工具本身仍属高级编排，判例 #8） |
 | rename-session | 会话重命名 | 全体但低频、有手动路径 |
 | system-prompt-trace | taiji:system-prompt 留痕 | 观测/调试 |
 | 用量统计页 | Settings → 用量 W1-W5 | 配额敏感用户 |

@@ -162,10 +162,14 @@ export const DEFAULT_PRESETS: PiLaunchPreset[] = [
     builtin: true,
     order: 3, // 唯一且为既有 0/1/2 之后的下一个整数（mergePresets 按 (order, id) 复合键排序）
     toolMode: 'allowlist',
+    // session-manager 八件套全部列入（含 archive_session / delete_session，裁决登记 ADR-0136 补记：
+    // allowlist 下 --tools 命名的 deferred 工具直接激活，「平时不可见」保护在该模式整体让位于
+    // 显式选择语义；delete 的发起者约束由 USER-INITIATED ONLY 标记词与 isOwnedBy 圈定承载）
     allowedTools: [
       'read', 'grep', 'find', 'ls',
       'create_managed_session', 'send_to_session', 'read_session_history',
       'list_my_sessions', 'get_session_status', 'abort_session',
+      'archive_session', 'delete_session',
       'ask_user', 'todo',
     ],
     extensionMode: 'denylist',

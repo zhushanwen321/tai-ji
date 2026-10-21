@@ -58,7 +58,7 @@ describe('DEFAULT_PRESETS', () => {
 
   // ── 内置「调度模式」（模式提示词面首次内置条目）──
 
-  it('SESSION_DISPATCH 预设存在且形状正确（order=3 / allowlist 12 项 / denylist subagent-workflow）', () => {
+  it('SESSION_DISPATCH 预设存在且形状正确（order=3 / allowlist 14 项含 session-manager 八件套 / denylist subagent-workflow）', () => {
     const dispatch = DEFAULT_PRESETS.find(p => p.id === 'builtin:session-dispatch')!
     expect(dispatch).toBeDefined()
     expect(dispatch.id).toBe(BUILTIN_PRESET_IDS.SESSION_DISPATCH)
@@ -68,11 +68,14 @@ describe('DEFAULT_PRESETS', () => {
     // order 必须是 3：mergePresets 按 (order, id) 复合键排序，同序会退化为 id 字符串比较
     expect(dispatch.order).toBe(3)
     expect(dispatch.toolMode).toBe('allowlist')
-    expect(dispatch.allowedTools).toHaveLength(12)
+    // session-manager 八件套全部列入（含 archive_session / delete_session，ADR-0136 补记裁决）——
+    // 白名单缺项 = 调度模式下该工具不可达（allowlist 下无 tool_search 检索通道）
+    expect(dispatch.allowedTools).toHaveLength(14)
     expect(dispatch.allowedTools).toEqual([
       'read', 'grep', 'find', 'ls',
       'create_managed_session', 'send_to_session', 'read_session_history',
       'list_my_sessions', 'get_session_status', 'abort_session',
+      'archive_session', 'delete_session',
       'ask_user', 'todo',
     ])
     expect(dispatch.extensionMode).toBe('denylist')
