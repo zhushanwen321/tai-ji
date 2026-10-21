@@ -239,6 +239,23 @@ pi 引擎单次工具调用的记录。是数据模型的最小单位（bash、r
 ### Model
 具体的模型实例（如 gpt-4o、claude-sonnet-4-20250514）。附属于唯一一个 Provider。不存在跨 Provider 共享的 Model。
 
+### 羊毛 provider
+把用户已登录 AI IDE 的内置模型额度接入为可选模型的 provider 形态（产品名沿用用户称呼，设置页首用即有释义文案）。_Avoid_：「白嫖 provider」「2api」。
+
+### provider 扩展
+经 pi custom provider 扩展机制（registerProvider/streamSimple/refreshModels/oauth）实装 provider 来源的 pi 扩展包。_Avoid_：「网关」「插件服务」「服务型插件」。
+
+### 羊毛扩展
+本设计交付的三个 provider 扩展包（@zhushanwen/pi-wool-*）的统称。
+
+### 家族
+一个 IDE 厂商的接入预设（现役三家：workbuddy / trae / qoder），承载为一个个羊毛扩展包。_Avoid_：「渠道」「源」。
+
+### 凭据来源
+家族接入时登录态的取得方式，两值：`ide-extract` / `oauth`。_Avoid_：「导入」「抓取」。
+
+**代码映射**: 三个家族扩展 `extensions/universal/pi-wool-{qoder,trae,workbuddy}/`（协议/凭据/模型目录全部在 pi 会话进程内实装）+ 共享库 `extensions/shared/wool-shared/`（脚手架/管理指令协议/账号状态）；taiji 宿主侧类型 `packages/shared/src/wool.ts`、编排服务 `packages/runtime/src/services/wool-manager.ts`、向导组件 `packages/renderer/src/components/settings/provider/WoolWizard/`；决策登记 [ADR-0152](adr/decisions.md)。
+
 ### Skill
 无状态的 prompt 模板。本质是一段提示词，注入到主 Agent 的上下文中使用。不产生独立进程、不拥有独立上下文。
 
