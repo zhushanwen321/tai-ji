@@ -1402,7 +1402,7 @@ export default {
     noProxyHint: 'Comma separated; matched requests connect directly, takes priority over rules below',
     ipv4Only: 'Direct connect, force IPv4 (ipv4Only)',
     ipv4OnlyHint:
-      'Comma-separated domains; matched requests skip the proxy and connect to the resolved IPv4 address (Host header and TLS server name stay on the original domain). Use it for providers that are reachable over IPv6 but stall during the TLS handshake and end up timing out. Lower priority than noProxy, higher than proxy rules',
+      'Comma-separated domains; matched requests skip the proxy and connect to the resolved IPv4 address (Host header and TLS server name stay on the original domain). Independent of the proxy toggle: it also applies while the toggle is off. Use it for providers that are reachable over IPv6 but stall during the TLS handshake and end up timing out. Lower priority than noProxy, higher than proxy rules',
     testConnection: 'Test connection',
     testing: 'Testing…',
     testElapsed: 'took {ms} ms',

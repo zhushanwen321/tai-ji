@@ -1401,7 +1401,7 @@ export default {
     noProxyHint: '逗号分隔；命中的请求保持直连，优先级高于下方规则',
     ipv4Only: '直连并强制 IPv4（ipv4Only）',
     ipv4OnlyHint:
-      '逗号分隔的域名；命中的请求不走代理，而是解析到 IPv4 后直连（保留原 Host 头与 TLS 域名校验）。适用于「IPv6 可达但握手抖动」导致请求超时的服务商；优先级低于 noProxy、高于代理规则',
+      '逗号分隔的域名；命中的请求不走代理，而是解析到 IPv4 后直连（保留原 Host 头与 TLS 域名校验）。不受网络代理开关影响，开关关闭时同样生效。适用于「IPv6 可达但握手抖动」导致请求超时的服务商；优先级低于 noProxy、高于代理规则',
     testConnection: '测试连接',
     testing: '测试中…',
     testElapsed: '耗时 {ms} ms',

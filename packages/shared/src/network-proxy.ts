@@ -49,6 +49,9 @@ export interface NetworkProxyConfig { // oe-exempt:20261019:framework:ext-config
    * 优先级：noProxy（排除代理）> ipv4Only（直连+锁 v4）> rules（经代理）。
    * 即命中 noProxy 时即便同时命中 ipv4Only 也不做地址族锁定（用户显式「别动这个域名」优先）；
    * 未命中 noProxy 而命中 ipv4Only 时不走代理（直连语义）。
+   *
+   * 独立于 enabled 代理开关：enabled=false 时本清单照常生效（IPv4 锁定是直连的地址族
+   * 修正，不是代理能力）；rules 分流另受 enabled 门控（开关关闭时规则不参与分流）。
    */
   ipv4Only: string[]
 }
