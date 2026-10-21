@@ -26,12 +26,13 @@ const DESIGN_RIGHT_TEXTS = [
   'bashTask（后台命令）',
   'plan（计划文档）',
   'btw（旁路线）',
+  'trace（条目详情）',
 ]
 const DESIGN_BOTTOM_TEXTS = ['terminal（终端）']
 const DESIGN_OVERLAY_TEXTS = ['browser（网页）', 'workflow（工作流图）']
 
-// ── 右抽屉 L1 显示序锚（[2026-10-19] workflow tab 删除后终态 7 条）──
-const RIGHT_EXPECTED_CONTENTS = ['git', 'doc', 'detail', 'subagent', 'bashTask', 'plan', 'btw']
+// ── 右抽屉 L1 显示序锚（终态 8 条：workflow 2026-10-19 删除 + trace 一级 tab 追加）──
+const RIGHT_EXPECTED_CONTENTS = ['git', 'doc', 'detail', 'subagent', 'bashTask', 'plan', 'btw', 'trace']
 
 function texts(entries: readonly ContainerRegistryEntry[]): string[] {
   return entries.map((entry) => entry.text)
@@ -41,8 +42,8 @@ function contents(entries: readonly ContainerRegistryEntry[]): string[] {
   return entries.map((entry) => entry.content)
 }
 
-describe('注册表条目文本与设计 §7.2 逐字一致（右 7 / 底 1 / 浮 2）', () => {
-  it('右抽屉 7 条目文本逐字一致', () => {
+describe('注册表条目文本与设计 §7.2 逐字一致（右 8 / 底 1 / 浮 2）', () => {
+  it('右抽屉 8 条目文本逐字一致', () => {
     expect(texts(RIGHT_DRAWER_REGISTRY)).toEqual(DESIGN_RIGHT_TEXTS)
   })
 
@@ -51,8 +52,8 @@ describe('注册表条目文本与设计 §7.2 逐字一致（右 7 / 底 1 / �
     expect(texts(OVERLAY_REGISTRY)).toEqual(DESIGN_OVERLAY_TEXTS)
   })
 
-  it('容器条目数 = 右 7 / 底 1 / 浮 2（用户可见 L1 图标数锚）', () => {
-    expect(RIGHT_DRAWER_REGISTRY).toHaveLength(7)
+  it('容器条目数 = 右 8 / 底 1 / 浮 2（用户可见 L1 图标数锚）', () => {
+    expect(RIGHT_DRAWER_REGISTRY).toHaveLength(8)
     expect(BOTTOM_DRAWER_REGISTRY).toHaveLength(1)
     expect(OVERLAY_REGISTRY).toHaveLength(2)
   })
@@ -64,8 +65,8 @@ describe('注册表条目文本与设计 §7.2 逐字一致（右 7 / 底 1 / �
   })
 })
 
-describe('右抽屉 L1 载入序列（u-w2-browser-mount：browser 走浮层，载入序列退役达终态 7/1/2）', () => {
-  it('DrawerPanel 数据源 = RIGHT_DRAWER_REGISTRY：7 条、终态显示序（用户可见 L1 图标锚）', () => {
+describe('右抽屉 L1 载入序列（u-w2-browser-mount：browser 走浮层，载入序列退役达终态 8/1/2）', () => {
+  it('DrawerPanel 数据源 = RIGHT_DRAWER_REGISTRY：8 条、终态显示序（用户可见 L1 图标锚）', () => {
     expect(contents(RIGHT_DRAWER_REGISTRY)).toEqual(RIGHT_EXPECTED_CONTENTS)
   })
 

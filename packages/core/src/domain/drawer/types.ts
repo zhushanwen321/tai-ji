@@ -12,14 +12,14 @@
  * 零 DOM 约束：core tsconfig 未配置 DOM lib，本文件为纯类型定义，不引入 DOM/浏览器 API 类型。
  */
 
-/** 右抽屉 tab 枚举（display-containers §7.1 终态 7 员）：git（变更集）/ doc（命令文档）/ detail（文件详情）/ subagent（子代理只读对话流）/ bashTask（后台命令详情）/ plan（计划文档）/ btw（旁路线）。
+/** 右抽屉 tab 枚举（display-containers §7.1 终态 8 员）：git（变更集）/ doc（命令文档）/ detail（文件详情）/ subagent（子代理只读对话流）/ bashTask（后台命令详情）/ plan（计划文档）/ btw（旁路线）/ trace（session-trace 条目详情）。
  * workflow 不入本枚举（[2026-10-19 用户裁决] drawer workflow tab 删除，workflow 唯一入口 =
  * 浮层，见 OVERLAY_REGISTRY）；terminal/browser 同不入（terminal 迁底抽屉、browser 走浮层，
  * §7.6）——本枚举是右抽屉 tab 的唯一类型，'terminal'/'browser'/'workflow' 赋给任何右抽屉
  * tab 位即编译错（注册表终态由类型层强制）。
  * 无打开参数（OpenDrawerOptions 零加员）；自动打开经 ADR-0053 per-session pendingOpen
  * 语义（renderer 接线，core 只持 tab 枚举成员）。 */
-export type RightDrawerTab = 'git' | 'doc' | 'detail' | 'subagent' | 'bashTask' | 'plan' | 'btw'
+export type RightDrawerTab = 'git' | 'doc' | 'detail' | 'subagent' | 'bashTask' | 'plan' | 'btw' | 'trace'
 
 /** drawer open 的可选参数：打开时指定要展示的 slash 命令名（Doc tab）/ 文件路径（Detail tab） */
 export interface OpenDrawerOptions { // oe-exempt:20261003:framework:类型契约先行——容器契约层声明，D1 下游单元即为消费方

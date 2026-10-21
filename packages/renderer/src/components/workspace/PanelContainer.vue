@@ -135,20 +135,15 @@
           :active-tab="drawerTab"
           :session-id="panelSessionId"
           @close="onDrawerClose"
-          @set-tab="onDrawerSetTab"
+          @set-tab="setDrawerTab"
         >
-          <!-- 桌面独占内容面板（C2 v-if chain；分支与 RIGHT_DRAWER_REGISTRY 终态 7 员一一对应）：
+          <!-- 桌面独占内容面板（C2 v-if chain；分支与 RIGHT_DRAWER_REGISTRY 终态 8 员一一对应）：
                Git tab → GitPanel（inject GIT_STATUS_KEY，非 git 仓库组件内自隐藏走空态）
                Doc tab → CommandDocPanel（selectedCommandName 由 core 瞬时参数指定）
                Detail tab → DetailPane（W3 多文件 tab：selectFile 同步注入 detail 分区，store 响应式自动加载）
                browser/terminal 已迁出本链（display-containers §7.6）——terminal 归底抽屉（本文件
                bottom-drawer 块 TerminalView 挂载点），browser tab 已删除、能力在浮层壳复活 -->
-          <!-- session-trace inspector（D5b 临时上下文页）：选中 trace 行时切入 default slot
-               最前（v-if chain 首项——优先于 activeTab 面板，点击即明确意图）；「← 返回」清
-               selectedKey 后回到 activeTab 内容（复原前 tab，RightDrawerTab 体系不变）。
-               未选中不注入（C2 v-if chain 语义保持，slot 空时走 DrawerPanel 空态 fallback）。 -->
-          <TraceInspector v-if="traceSelected" :session-id="panelSessionId ?? ''" />
-          <GitPanel v-else-if="drawerTab === 'git'" />
+          <GitPanel v-if="drawerTab === 'git'" />
           <CommandDocPanel v-else-if="drawerTab === 'doc'" :session-id="panelSessionId" />
           <DetailPane
             v-else-if="drawerTab === 'detail'"
@@ -175,6 +170,10 @@
                tab 激活即渲染，面板自渲染线列表空态；D7② 焦点绑定经 :session-id=panelSessionId
                透传当前焦点主会话，线列表按 mainSid 拉取） -->
           <BtwPanel v-else-if="drawerTab === 'btw'" :session-id="panelSessionId" />
+          <!-- trace tab（session-trace A44/D5b 终态）：选中 trace 条目的详情页。未选中
+               （selectedKey null，trace 视图分区）不注入 → DrawerPanel 空态 fallback
+               （与 bashTask 同款）；点其它一级 tab 切走不清选中，切回 trace tab 详情还在。 -->
+          <TraceInspector v-else-if="drawerTab === 'trace' && traceSelected" :session-id="panelSessionId ?? ''" />
           <!-- header-extra：AC-13 unread badge 壳侧挂载点（W4；chatStore 消息数感知，C3 壳层职责） -->
           <template #header-extra>
             <div
@@ -284,7 +283,7 @@ import { useFindInSurface } from '@/composables/features/find/useFindInSurface'
 import FindBar from '@/components/find/FindBar.vue'
 import { usePlanDrawerSync } from '@/composables/use-plan-drawer-sync'
 import { useChatStore } from '@/stores/chat'
-import { useSessionTrace, clearTraceSelection } from '@/composables/features/trace/useSessionTrace'
+import { useSessionTrace } from '@/composables/features/trace/useSessionTrace'
 import TraceInspector from '@/components/panel/trace/TraceInspector.vue'
 import PlanDocsPanel from '@/components/panel/plan/PlanDocsPanel.vue'
 import BtwPanel from '@/components/panel/BtwPanel.vue'
@@ -405,20 +404,11 @@ const bashTaskSelected = computed(() => selectedBashTaskId.value !== undefined)
 /** panel 的 session（git 状态数据源） */
 const panelSessionId = computed<string | null>(() => leaf.value?.sessionId ?? null)
 
-/** session-trace（A44）：选中 trace 行时 drawer default slot 最前注入 inspector 临时页（D5b）。 */
+/** session-trace（A44）：trace 一级 tab 内容注入条件——选中 trace 条目（trace 视图分区 selectedKey）时
+ *  注入 inspector 详情页，未选中走 DrawerPanel 空态 fallback。选中联动（切 tab + 开 drawer）
+ *  在 useSessionTrace 的写入口（selectTraceEntry/revealTraceEntry）。 */
 const { partition: tracePartition } = useSessionTrace()
 const traceSelected = computed(() => tracePartition.value.selectedKey !== null)
-
-/**
- * drawer set-tab 壳层包装（D5b 对称语义）：inspector 临时页期间用户点其它一级 tab =
- * 明确离开 inspector → 清 trace 选中（activeTab 链接管内容）。「单向 main→drawer」保持：
- * 这里只清 main 发起的选中态，drawer 不反向写 main 的过滤/视图状态。
- */
-function onDrawerSetTab(tab: Parameters<typeof setDrawerTab>[0]): void {
-  const sid = panelSessionId.value
-  if (sid && tracePartition.value.selectedKey !== null) clearTraceSelection(sid)
-  setDrawerTab(tab)
-}
 
 /**
  * 鼠标路径关闭/开关的焦点契约包装（§6.7「任一容器关闭后焦点回 composer」，display-containers

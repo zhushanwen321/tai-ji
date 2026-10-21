@@ -451,6 +451,10 @@ export default {
     bashTaskAlreadyExited: '任务已结束',
     bashTaskIdentityUnverifiable: '无法验证进程身份，已拒绝终止（宁不杀勿误杀）',
     bashTaskWriteFailed: '操作未生效（数据写入失败），请重试',
+    // trace tab（session-trace 一级 tab：选中 trace 条目的详情页；未选中走空态 fallback）
+    tabTrace: 'Trace',
+    noTraceEntry: '未选中条目',
+    traceHint: '切换到 Trace 视图后点击条目查看详情',
   },
   browserPane: {
     overlayTitle: '浏览器',

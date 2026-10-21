@@ -8,7 +8,7 @@
  * 壳路径（mount PanelContainer，test-strategy 集成章节要求）：
  * - PanelContainer 渲染跨端共享容器 DrawerPanel（@taiji/ui/features/drawer，W3），
  *   断言 drawer-panel + drawer-content DOM 存在（AC9/AC12 壳层载体）；drawer-tab-* 全量
- *   tab 按钮断言收拢在「注册表契约」用例（右抽屉终态 7 成员，其余用例只断言被测 tab）
+ *   tab 按钮断言收拢在「注册表契约」用例（右抽屉终态 8 成员，其余用例只断言被测 tab）
  * - drawerOpen=true：DrawerPanel 在 drawer-area wrapper 内挂载（feat-chat-flow-width 手写
  *   flex 布局，替换 reka-ui Splitter：无 drawer main 卡撑满、卡内内容列（对话流 + composer）
  *   限宽 2/3 居中（ui-signal-density D10 2026-10-06 修订 + 2026-10-14 用户修订 60%→2/3、
@@ -197,7 +197,7 @@ beforeEach(() => {
 enableAutoUnmount(afterEach)
 
 describe('drawer-tab 注册表契约（L1 全量收敛点，display-containers §7.2）', () => {
-  it('drawer 打开态渲染注册表派生视图的全部 L1 tab（7 条终态，terminal/browser 均不在）+ 注册表形状 右 7/底 1/浮 2', async () => {
+  it('drawer 打开态渲染注册表派生视图的全部 L1 tab（8 条终态，terminal/browser 均不在）+ 注册表形状 右 8/底 1/浮 2', async () => {
     const panel = usePanelStore()
     panel.loadSession(ROOT_PANEL_ID, 's-tab-registry')
     openDrawerTab('git')
@@ -210,14 +210,14 @@ describe('drawer-tab 注册表契约（L1 全量收敛点，display-containers �
     }
     // terminal 迁出 L1（用户可见：右抽屉不再有终端图标——入口改底抽屉 ⌃` / 顶栏终端开关按钮）；
     // browser 迁出 L1（用户可见：右抽屉不再有浏览器图标——能力在浮层复活，点 localhost 链接进入）
-    expect(L1_DRAWER_TABS).toHaveLength(7)
+    expect(L1_DRAWER_TABS).toHaveLength(8)
     expect(wrapper.find('[data-testid="drawer-tab-terminal"]').exists()).toBe(false)
     expect(wrapper.find('[data-testid="drawer-tab-browser"]').exists()).toBe(false)
     expect(wrapper.find('[data-testid="drawer-tab-workflow"]').exists()).toBe(false)
-    expect(wrapper.findAll('[data-testid^="drawer-tab-"]')).toHaveLength(7)
+    expect(wrapper.findAll('[data-testid^="drawer-tab-"]')).toHaveLength(8)
 
-    // 注册表形状机器锚（§8.2：右 7/底 1/浮 2——迁移源侧清空；[2026-10-19] workflow tab 删除）
-    expect(RIGHT_DRAWER_REGISTRY).toHaveLength(7)
+    // 注册表形状机器锚（§8.2：右 8/底 1/浮 2——迁移源侧清空；[2026-10-19] workflow tab 删除 + trace 一级 tab 追加）
+    expect(RIGHT_DRAWER_REGISTRY).toHaveLength(8)
     expect(BOTTOM_DRAWER_REGISTRY).toHaveLength(1)
     expect(OVERLAY_REGISTRY).toHaveLength(2)
     expect(CONTAINER_REGISTRY['bottom-drawer'][0]?.content).toBe('terminal')
@@ -711,7 +711,7 @@ describe('PanelContainer btw tab 接线（btw-question D7 M3-a）', () => {
     expect(wrapper.find('[data-testid="btw-panel"]').exists()).toBe(true)
     // 常驻注入语义：面板存在时空态 fallback 不渲染（与 plan 同款）
     expect(wrapper.find('[data-testid="drawer-widget-empty"]').exists()).toBe(false)
-    // btw tab 按钮随右抽屉终态 7 员常驻（DrawerPanel TabMeta；全量清单归注册表契约用例）
+    // btw tab 按钮随右抽屉终态 8 员常驻（DrawerPanel TabMeta；全量清单归注册表契约用例）
     expect(wrapper.find('[data-testid="drawer-tab-btw"]').exists()).toBe(true)
   }, 60_000)
 

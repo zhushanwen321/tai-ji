@@ -11,8 +11,8 @@
  *   checklist「WS handler 用 updateFor(capturedSid)」）；entry.id 去重追加（protocol 约定）。
  * - 视图状态：view（对话/Trace）、过滤（contextOnly/activeGroups/searchText）、selectedKey
  *   同分区存储（单 panel 下 pane 跟随 session，D5c per-pane 语义由分区承载）。
- * - drawer 联动（A44）：selectTraceEntry 写 selectedKey 且 drawer 未开时自动 openDrawerTab
- *   （单向 main→drawer；RightDrawerTab 体系不变，inspector 是临时页不占 tab 位——设计 D5b）。
+ * - drawer 联动（A44）：selectTraceEntry 写 selectedKey 并 openDrawerTab('trace') 切到
+ *   drawer 的 trace 一级 tab（inspector = trace tab 内容面板；单向 main→drawer）。
  *
  * 订阅生命周期：loadTrace 时 ensureIncrementSubscription（Set 去重防重复注册，规则 2）；
  * 不随 TraceView 卸载退订（切回对话视图增量继续收集，切回 Trace 不丢数据）；
@@ -24,7 +24,7 @@ import { computed, reactive, ref } from 'vue'
 import type { ComputedRef, Ref } from 'vue'
 import { useSessionScopedState } from '@/composables/useSessionScopedState'
 import { registerSessionCleanup } from '@taiji/core/foundation/use-session-scoped-state'
-import { openDrawerTab, getDrawerControlState } from '@taiji/core/domain/drawer'
+import { openDrawerTab } from '@taiji/core/domain/drawer'
 import type { ServerMessage, SessionTraceMalformedLine } from '@taiji/shared'
 import type {
   TraceKindGroup,
@@ -344,13 +344,12 @@ export async function fetchCurrentPrompt(sid: string): Promise<void> {
   }
 }
 
-/** 选中行（A44 drawer 联动）：写 selectedKey + drawer 未开时自动打开（保持当前 tab，D5b 临时页）。 */
+/** 选中行（A44 drawer 联动）：写 selectedKey + openDrawerTab('trace') 切到 trace 一级 tab（幂等；单向 main→drawer）。 */
 export function selectTraceEntry(sid: string, key: string): void {
   partitions.updateFor(sid, (s) => {
     s.selectedKey = key
   })
-  const drawer = getDrawerControlState()
-  if (!drawer.isOpen) openDrawerTab()
+  openDrawerTab('trace')
 }
 
 /** 清除选中（inspector「← 返回」）：复原 drawer 前 tab 内容（activeTab 未被改过，自动复原）。 */
@@ -379,8 +378,7 @@ export function revealTraceEntry(sid: string, key: string): void {
     s.selectedKey = key
     s.revealRequest = { key, nonce: (s.revealRequest?.nonce ?? 0) + 1 }
   })
-  const drawer = getDrawerControlState()
-  if (!drawer.isOpen) openDrawerTab()
+  openDrawerTab('trace')
 }
 
 /** 切换主区视图（SegmentedTab「对话 | Trace」，A42）。 */

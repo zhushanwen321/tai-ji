@@ -130,7 +130,7 @@
 import { Comment, computed, ref, useSlots, watch } from 'vue'
 import type { Component } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { BookOpen, Bot, FileText, GitBranch, Globe, MessagesSquare, SquareCheckBig, SquareTerminal, Terminal as TerminalIcon, Workflow, X } from '@lucide/vue'
+import { BookOpen, Bot, FileText, GitBranch, Globe, ListTree, MessagesSquare, SquareCheckBig, SquareTerminal, Terminal as TerminalIcon, Workflow, X } from '@lucide/vue'
 import { Button } from '@taiji/ui'
 import { RIGHT_DRAWER_REGISTRY } from '@taiji/core/domain/drawer'
 import type { RightDrawerTab } from '@taiji/core/domain/drawer'
@@ -189,6 +189,7 @@ const ICON_BY_ID: Record<string, Component> = {
   'square-check-big': SquareCheckBig,
   'messages-square': MessagesSquare,
   workflow: Workflow,
+  'list-tree': ListTree,
 }
 
 /** 注册表新增图标标识未入映射时的占位（file-text 同形中性图标；新条目评审/测试可见） */

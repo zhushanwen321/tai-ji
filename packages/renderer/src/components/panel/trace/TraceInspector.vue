@@ -1,9 +1,10 @@
 <template>
   <!--
-    展示组件 · trace-inspector（session-trace D5b：drawer 临时上下文页）。
-    选中 trace 行才切入（PanelContainer default slot v-if chain 最前），不占一级 tab 位
-    （RightDrawerTab 体系不变）；顶部「← 返回」清除选中 → 复原前 tab 内容（activeTab 未被
-    改过，单向 main→drawer）。两态：
+    展示组件 · trace-inspector（session-trace D5b：drawer trace 一级 tab 的详情面板）。
+    trace 是 RIGHT_DRAWER_REGISTRY 终态 8 员之一的正式一级 tab（无二级 tab，tab 内直接
+    展示详情）；选中 trace 行才注入内容（PanelContainer v-if chain 的 trace 分支），未选中
+    走 DrawerPanel 空态 fallback。头部「← 返回」：block 态回父聚合态；聚合态清除选中 →
+    trace tab 空态。两态：
     - 聚合态（selectedKey = entry key）：kind 分支详情（消息类文本/逐 block/工具输出/
       压缩 summary 全文/SYSTEM 留痕全文，其余原始 JSON 兜底，G1 不丢信息）。
     - block 态（selectedKey = `<entryKey>#block-N`）：assistant 子 block 全文
@@ -261,7 +262,7 @@ const blockParentRef = computed(() => {
   return `assistant ${id}${model ? ` · ${model}` : ''}`
 })
 
-/** 返回：block 态回父聚合态（保留 drawer），聚合态清除选中复原前 tab。 */
+/** 返回：block 态回父聚合态，聚合态清除选中（trace tab 回空态 fallback）。 */
 function onBack(): void {
   const key = partition.value.selectedKey
   const parsed = key ? parseTraceBlockKey(key) : null

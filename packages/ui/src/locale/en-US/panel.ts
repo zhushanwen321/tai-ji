@@ -464,6 +464,11 @@ export default {
     bashTaskAlreadyExited: 'Task already finished',
     bashTaskIdentityUnverifiable: 'Cannot verify process identity — termination refused (safety first)',
     bashTaskWriteFailed: 'Operation did not take effect (failed to write data); please retry',
+    // trace tab (session-trace top-level tab: detail page of the selected trace entry;
+    // empty-state fallback when nothing is selected)
+    tabTrace: 'Trace',
+    noTraceEntry: 'No entry selected',
+    traceHint: 'Switch to the Trace view and click an entry to inspect it',
   },
   browserPane: {
     overlayTitle: 'Browser',

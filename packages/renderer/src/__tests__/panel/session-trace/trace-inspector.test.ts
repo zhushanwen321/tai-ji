@@ -1,13 +1,13 @@
 /**
- * A44 drawer inspector 联动单测（trace-ui，设计 D5b/D5c）。
+ * A44 drawer inspector 联动单测（trace-ui，设计 D5b 终态：trace 一级 tab）。
  *
  * 覆盖：
- * - 选中切入临时页：selectTraceEntry 后 drawer default slot 最前注入 TraceInspector
- *   （优先于 activeTab 面板），详情按 kind 渲染（文本全文 / kv / 原始 JSON）
- * - 返回复原前 tab：「← 返回」清 selectedKey → inspector 卸载 → activeTab 内容复原
- * - 未开自动打开：drawer 关闭态点选 → openDrawerTab 自动打开（保持当前 tab）
- * - 单向 main→drawer + RightDrawerTab 体系不变（全量一级 tab 仍在，无新 tab 位；
- *   清单与 drawer-mode 注册表契约同源：helpers/drawer-tabs.ts）
+ * - trace 一级 tab：selectTraceEntry → openDrawerTab('trace') 自动打开并切 tab，
+ *   inspector = trace tab 内容面板（详情按 kind 渲染：文本全文 / kv / 原始 JSON）
+ * - 返回空态：「← 返回」清 selectedKey → inspector 卸载 → trace tab 空态 fallback
+ * - 未开自动打开：drawer 关闭态点选 → 自动打开 + activeTab 切 trace
+ * - 选中态保留：切其它一级 tab 不清 selectedKey，切回 trace tab 详情还在
+ *   （与 detail/bashTask 选中态同语义；清单与 drawer-mode 注册表契约同源：helpers/drawer-tabs.ts）
  *
  * 两层：组件级（mount TraceInspector 断言详情内容）+ 壳路径（mount PanelContainer，
  * stub 桌面面板，对齐 panel-container-drawer-mode.test.ts harness）。
@@ -97,7 +97,6 @@ import {
 } from '@/composables/features/trace/useSessionTrace'
 import { useToast } from '@/composables/useToast'
 import { clearToasts } from '../../helpers/toast-queue'
-import { L1_DRAWER_TABS } from '../../helpers/drawer-tabs'
 
 const SID = 'sid-inspector-1'
 
@@ -186,7 +185,7 @@ beforeEach(() => {
   usePanelStore().loadSession(ROOT_PANEL_ID, SID)
 })
 
-describe('A44 drawer inspector 联动（选中切入临时页 / 返回复原 / 未开自动打开 / RightDrawerTab 不变）', () => {
+describe('A44 drawer inspector 联动（trace 一级 tab：自动打开切 tab / 返回空态 / 选中态保留）', () => {
   it('组件级：选中 USER 行渲染详情（全文 / kv / 原始 JSON），返回清除选中', async () => {
     await readyPartition()
     selectTraceEntry(SID, 'u1')
@@ -225,40 +224,35 @@ describe('A44 drawer inspector 联动（选中切入临时页 / 返回复原 / �
     bash.unmount()
   })
 
-  it('壳路径：未开自动打开 + 选中切入临时页（取代 activeTab 内容）+ 一级 tab 体系不变', async () => {
+  it('壳路径：未开自动打开 + activeTab 切 trace（trace tab 高亮）+ inspector 接管内容', async () => {
     await readyPartition()
     const wrapper = await mountContainer()
     await nextTick()
     // drawer 关闭态：无 drawer
     expect(wrapper.find('[data-testid="drawer-panel"]').exists()).toBe(false)
 
-    // 选中（drawer 未开）→ 自动打开 + inspector 切入 default slot 最前
+    // 选中（drawer 未开）→ 自动打开 + activeTab 切 trace + inspector 显示（git 面板不渲染）
     selectTraceEntry(SID, 'u1')
     await nextTick()
     await nextTick()
     expect(wrapper.find('[data-testid="drawer-panel"]').exists()).toBe(true)
     expect(wrapper.find('[data-testid="trace-inspector"]').exists()).toBe(true)
-    // inspector 优先于 activeTab 面板（默认 git tab 内容被临时页取代）
     expect(wrapper.find('[data-testid="git-panel"]').exists()).toBe(false)
+    // trace 是正式一级 tab：按钮存在且高亮（选中态样式 bg-surface-hover）
+    const traceTab = wrapper.find('[data-testid="drawer-tab-trace"]')
+    expect(traceTab.exists()).toBe(true)
+    expect(traceTab.classes()).toContain('bg-surface-hover')
 
-    // RightDrawerTab 体系不变：全量 L1 tab 按钮仍在（清单与 drawer-mode 注册表契约用例
-    // 同源——helpers/drawer-tabs.ts，生产注册表运行时派生视图；inspector 不占 tab 位；
-    // terminal 已迁底抽屉不在 L1）
-    for (const tab of L1_DRAWER_TABS) {
-      expect(wrapper.find(`[data-testid="drawer-tab-${tab}"]`).exists(), `drawer-tab-${tab} 应存在`).toBe(true)
-    }
-    expect(wrapper.find('[data-testid="drawer-tab-terminal"]').exists()).toBe(false)
-
-    // 返回 → inspector 卸载 + 复原前 tab 内容（activeTab 未被改过，默认 git）
+    // 返回 → selectedKey 清除 → trace tab 空态 fallback（drawer-widget-empty）
     await wrapper.find('[data-testid="trace-inspector-back"]').trigger('click')
     await nextTick()
     await nextTick()
     expect(wrapper.find('[data-testid="trace-inspector"]').exists()).toBe(false)
-    expect(wrapper.find('[data-testid="git-panel"]').exists()).toBe(true)
+    expect(wrapper.find('[data-testid="drawer-widget-empty"]').exists()).toBe(true)
     wrapper.unmount()
   })
 
-  it('单向 main→drawer：inspector 期间点其它一级 tab = 显式离开（清选中，切 tab 内容），drawer 不反向写 main 状态', async () => {
+  it('trace tab 选中态保留：切其它一级 tab 不清选中，切回 trace 详情还在（main 状态不被 drawer 改写）', async () => {
     await readyPartition()
     const wrapper = await mountContainer()
     selectTraceEntry(SID, 'u1')
@@ -266,12 +260,17 @@ describe('A44 drawer inspector 联动（选中切入临时页 / 返回复原 / �
     await nextTick()
     expect(wrapper.find('[data-testid="trace-inspector"]').exists()).toBe(true)
 
-    // 用户点 git tab（明确意图离开临时页）→ 清 selectedKey + git 面板接管
+    // 用户点 git tab → git 面板接管；selectedKey 保留（与 detail/bashTask 选中态同语义）
     await wrapper.find('[data-testid="drawer-tab-git"]').trigger('click')
     await nextTick()
-    expect(useSessionTrace().partition.value.selectedKey).toBeNull()
+    expect(useSessionTrace().partition.value.selectedKey).toBe('u1')
     expect(wrapper.find('[data-testid="git-panel"]').exists()).toBe(true)
     expect(wrapper.find('[data-testid="trace-inspector"]').exists()).toBe(false)
+
+    // 切回 trace tab → inspector 复现（详情还在）
+    await wrapper.find('[data-testid="drawer-tab-trace"]').trigger('click')
+    await nextTick()
+    expect(wrapper.find('[data-testid="trace-inspector"]').exists()).toBe(true)
     // main 侧过滤/视图状态不被 drawer 操作改写
     expect(useSessionTrace().partition.value.view).toBe('chat')
     expect(useSessionTrace().partition.value.searchText).toBe('')
