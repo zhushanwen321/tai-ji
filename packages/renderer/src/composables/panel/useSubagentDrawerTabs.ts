@@ -8,7 +8,7 @@
  * 内容数据在 chatStore 按虚拟 id 分区——切 tab 不丢详情。
  */
 import { computed, watch, type ComputedRef, type Ref } from 'vue'
-import { clearSubagentSelection, openSubagent } from '@taiji/core/domain/drawer'
+import { clearSubagentSelection, closeDrawerIfTabsEmpty, openSubagent } from '@taiji/core/domain/drawer'
 import { useSubagentStore } from '@/stores/subagent'
 import { usePanelStore } from '@/stores/panel'
 
@@ -51,7 +51,7 @@ export function useSubagentDrawerTabs(deps: SubagentDrawerTabsDeps): {
     openSubagent({ virtualId: vid })
   }
 
-  /** tab 关闭；激活者关闭时 store 编排激活右邻/左邻，选中态同步（无剩余 = 停流回空态）。 */
+  /** tab 关闭；激活者关闭时 store 编排激活右邻/左邻，选中态同步（无剩余 = 停流 + 抽屉关空收敛）。 */
   function close(vid: string): void {
     const next = subagentStore.closeDrawerTab(focusedSid.value, vid)
     if (next === null) {
@@ -59,9 +59,11 @@ export function useSubagentDrawerTabs(deps: SubagentDrawerTabsDeps): {
       // tab 并拉流，且同值重选不触发 watch（无变化边沿）。
       clearSubagentSelection()
       deps.stopStream()
-      return
+    } else {
+      openSubagent({ virtualId: next })
     }
-    openSubagent({ virtualId: next })
+    // 关空收敛：最后一个二级 tab 关闭即关整个抽屉（规则单一落点见 core closeDrawerIfTabsEmpty）
+    closeDrawerIfTabsEmpty(next === null)
   }
 
   return { openTabs, activeTab, activate, close }

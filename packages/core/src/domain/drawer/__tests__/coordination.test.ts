@@ -21,6 +21,7 @@ import {
   bindWorkflowOverlayOpener,
   bindWorkflowRunLookup,
   closeDrawer,
+  closeDrawerIfTabsEmpty,
   clearSubagentSelection,
   lookupWorkflowRun,
   openDrawerTab,
@@ -128,6 +129,28 @@ describe('公开 API 薄封装（close/toggle/setTab）', () => {
     expect(isOpen.value).toBe(false)
 
     closeDrawer()
+    expect(isOpen.value).toBe(false)
+  })
+})
+
+describe('二级 tab 关空收敛（closeDrawerIfTabsEmpty，规则单一落点）', () => {
+  it('empty=true 关当前分区抽屉；empty=false 不动开合', () => {
+    focusSession('A')
+    const { isOpen } = useDrawerControl()
+
+    openDrawerTab('detail')
+    expect(isOpen.value).toBe(true)
+
+    // 关闭动作后仍有剩余 → 不关抽屉
+    closeDrawerIfTabsEmpty(false)
+    expect(isOpen.value).toBe(true)
+
+    // 关闭动作后无剩余 → 整个抽屉关闭（不回空态停留）
+    closeDrawerIfTabsEmpty(true)
+    expect(isOpen.value).toBe(false)
+
+    // 抽屉已关时空参数 no-op（幂等，不自动打开）
+    closeDrawerIfTabsEmpty(false)
     expect(isOpen.value).toBe(false)
   })
 })

@@ -8,7 +8,8 @@
  * - 多 tab：选中态入口依次开 tab（保留不互相替换），tab 条渲染、激活者高亮；
  * - tab 点击 = 切激活 + 同步 core 选中态（openSubagent 通道，sidebar 高亮/LRU 豁免
  *   谓词同源一致）；
- * - tab 关闭：激活者关闭激活右邻/左邻 + 选中态同步；全部关闭回空态。
+ * - tab 关闭：激活者关闭激活右邻/左邻 + 选中态同步；全部关闭 → 清选中态停流 + 抽屉关空
+ *   收敛（closeDrawerIfTabsEmpty，规则单一落点在 core）。
  *
  * 全 mock：drawer control / 三 store / MessageStream / useSubagentTabData /
  * ModelSelectPopover（trigger slot 直通）/ vue-i18n（t 返回 key——断言键即文案锚）。
@@ -42,6 +43,8 @@ vi.mock('@taiji/core/domain/drawer', async (importOriginal) => {
     clearSubagentSelection: vi.fn(() => {
       drawerState.selectedSubagentId.value = null
     }),
+    // 关空收敛桩：编排层 close() 无条件调用的抽屉关空通道（断言用例见「关空清选中态」）
+    closeDrawerIfTabsEmpty: vi.fn(),
   }
 })
 
@@ -126,6 +129,7 @@ vi.mock('vue-i18n', () => ({
 
 import SubagentTab from '../SubagentTab.vue'
 import { useSubagentStore } from '@/stores/subagent'
+import { closeDrawerIfTabsEmpty } from '@taiji/core/domain/drawer'
 
 /** store 通道关闭（不经编排层——验证空态渲染路径；测试内调用——需 active pinia）。 */
 function closeViaStore(sessionId: string, vid: string): void {
@@ -241,6 +245,8 @@ describe('SubagentTab 二级 tab 编排（subagent-detail-tabs）', () => {
     expect(drawerState.selectedSubagentId.value).toBeNull()
     expect(drawerTabsFixture.tabs).toHaveLength(0)
     expect(stopStream).toHaveBeenCalled()
+    // 关空收敛：最后一个二级 tab 关闭即关整个抽屉（规则单一落点 core closeDrawerIfTabsEmpty）
+    expect(closeDrawerIfTabsEmpty).toHaveBeenLastCalledWith(true)
     // 同值重选：null → vid 有变化边沿，watch 重开 tab（同值 set 不触发 watch 的缺陷不再可达）
     await select('subagent:main-1:sa-1')
     expect([...drawerTabsFixture.tabs]).toEqual(['subagent:main-1:sa-1'])

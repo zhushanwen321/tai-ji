@@ -43,6 +43,17 @@ export function closeDrawer(): void {
   drawerControl.close()
 }
 
+/**
+ * 二级 tab 关空收敛（drawer 域交互规则单一落点）：某一级 tab 下最后一个二级 tab 关闭时，
+ * 整个抽屉直接关闭（不回空态停留）。全部二级 tab 关闭编排（现有 detail 文件 tab /
+ * subagent 实例 tab，未来新增可关闭二级 tab 的内容域同样适用）的关空分支必须经本入口，
+ * 禁止各自直调 closeDrawer。empty 由调用方以内容域 store 关闭后的同步结果判定
+ * （core 不感知内容域数据），必须在关闭动作之后调用（判定基于关闭后的剩余计数）。
+ */
+export function closeDrawerIfTabsEmpty(empty: boolean): void {
+  if (empty) closeDrawer()
+}
+
 /** 切换开关；从关到开可指定 tab */
 export function toggleDrawer(tab?: RightDrawerTab): void {
   if (getDrawerControlState().isOpen) closeDrawer()
