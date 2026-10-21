@@ -149,11 +149,19 @@ function toIsoTimestamp(ms: number): string {
 }
 
 /**
- * [R1/R2] 权威 record 覆盖 trace 骨架行：状态/时间/错误/sessionId 取 record（运行状态
- * 权威），编排结构（phase/agent/id）与 ① 独有派生（model/lastProgressAt/token 拆分——
- * record 只有 totalTokens 总量，无法无损映射 input/output 二元组，保留 trace 值）维持
- * trace。sessionId = record.subagentId（trace.sessionId 语义即 record id，
+ * [R1/R2] 权威 record 覆盖 trace 骨架行：状态/时间/错误/sessionId/model 取 record（运行
+ * 状态权威——model 是成员创建期盖章的执行模型，record-created 帧 / settled 条目双落点；
+ * trace 侧不供源，见下），编排结构（phase/agent/id）与 ① 独有派生（lastProgressAt/
+ * token 拆分——record 只有 totalTokens 总量，无法无损映射 input/output 二元组，保留
+ * trace 值）维持 trace。sessionId = record.subagentId（trace.sessionId 语义即 record id，
  * getAgentCallHistory 按它查找——record-only 行与覆盖行都必带，否则步骤点击 no-op）。
+ *
+ * model 取 record 而非维持 trace 的原因：run 级模型显示链（renderer
+ * resolveSubagentModelDisplay 五级回退）以 call.model 为盖章值兜底，而 v2 投影的 trace
+ * 骨架行（projectAskStepToAgentCall）与 fold 骨架行（RunAskStepFold）均不承载 model，
+ * 「维持 trace」等价于恒 undefined——workflow 运行详情的模型触发器与下拉选中态全部
+ * 落空（pi 引擎成员的生效值通道仅在权威成员 running 时可达，成员陆续 done 后同样落到
+ * 本兜底）。record 无 model（存量 record 未指定）时保持 trace 原值，不劣化。
  */
 function overlayTraceCall(call: WorkflowAgentCall, record: SubagentRecord): WorkflowAgentCall {
   const mapped = mapStepStatusFromRecord(record)
@@ -162,6 +170,7 @@ function overlayTraceCall(call: WorkflowAgentCall, record: SubagentRecord): Work
     status: mapped.status,
     error: mapped.error,
     sessionId: record.subagentId,
+    ...(record.model !== undefined ? { model: record.model } : {}),
     startedAt: record.startedAt !== undefined ? toIsoTimestamp(record.startedAt) : call.startedAt,
     completedAt: record.endedAt !== undefined ? toIsoTimestamp(record.endedAt) : undefined,
     durationMs: record.elapsedSeconds !== undefined ? record.elapsedSeconds * MS_PER_SECOND : undefined,

@@ -88,6 +88,27 @@ export function resolveProviderIdFromGroups(
 }
 
 /**
+ * 选中 ref 的显示词汇归一（模型段大小写）。run 级展示链的盖章值源自引擎原生 ref
+ * （runtime 详情增强已按 manifest 逆表把 provider 段翻回 pi 词汇，模型段保留引擎
+ * 目录拼写——两世界拼写差，如 zcode 目录 `GLM-5.3-Flash` vs pi 行 id
+ * `glm-5.3-flash`），而选择器的行匹配是 providerId + id 精确等值。本函数按
+ * providerId 圈定行集、模型段大小写不敏感命中后回写 pi 行原生 id；未命中
+ * （provider 不在清单 / 模型段无匹配 / 裸 id 不分段）原样返回——不伪造匹配。
+ * 已是 pi 行原生拼写的输入（热切回执 / 覆盖意图 / composer 会话模型）恒等返回，
+ * 消费方统一套用无副作用。
+ */
+export function canonicalizeModelRef(ref: string, models: readonly ModelInfo[]): string {
+  const i = ref.lastIndexOf('/')
+  if (i <= 0) return ref
+  const providerId = ref.slice(0, i)
+  const modelId = ref.slice(i + 1)
+  const row = models.find(
+    (m) => m.providerId === providerId && m.id.toLowerCase() === modelId.toLowerCase(),
+  )
+  return row === undefined ? ref : `${providerId}/${row.id}`
+}
+
+/**
  * 数据范围 composable：settingsStore.models 常驻订阅读取（init 在 AppShell 根注册，
  * 不随组件卸载断开——旧实现组件内 onMounted 订阅会错过 sendInitialState 一次性推送，
  * 2026-07-01 竞态修复的现形态）。

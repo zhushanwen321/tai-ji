@@ -104,6 +104,8 @@ import {
 } from './workflow-viz-overlay'
 import { useWorkflowStore, deriveWorkflowRunElapsedMs } from '@/stores/workflow'
 import { resolveSubagentModelDisplay, useSubagentModel } from '@/composables/features/subagent/useSubagentModel'
+import { canonicalizeModelRef } from '@/components/panel/model-picker-data'
+import { getSettingsStore } from '@taiji/core'
 import type { ProviderId } from '@taiji/shared'
 
 const panelRef = ref<InstanceType<typeof WorkflowLivePanel> | null>(null)
@@ -249,13 +251,21 @@ const runModelDisplay = computed<{ label?: string; overridden: boolean } | undef
   // 成员回执态经 memberDisplayOf 按 (runId, memberRecordId) 键域读取（详情载荷 memberRecordId
   // 透出，单源锚）；session id（pi uuidv7）与 call.id（taskIndex）都不在该键域，仅作缺省兜底
   const memberRunId = authoritative.memberRecordId ?? authoritative.sessionId ?? String(authoritative.id)
-  return resolveSubagentModelDisplay({
+  const display = resolveSubagentModelDisplay({
     display: memberDisplayOf(wf.runId, memberRunId),
     stampedModel: authoritative.model,
     modelOverride: authoritative.modelOverride?.model,
     recentEffectiveModel: authoritative.recentEffectiveModel,
     recordStatus: authoritative.status,
   })
+  // 盖章值是引擎原生 ref 的模型段拼写（runtime 增强只反翻 provider 段），触发器文本与
+  // 下拉选中态同源，统一按清单行归一到 pi 行原生 id（canonicalize 对已是 pi 拼写的
+  // 分支恒等，见 model-picker-data 注释）
+  const label =
+    display.label !== undefined
+      ? canonicalizeModelRef(display.label, getSettingsStore().models.value)
+      : undefined
+  return { ...display, label }
 })
 
 /** 模型全切（壳上抛选择；已终局 run 的切换由 runtime fail-fast 报「run 已终局」，错误经 toast 承载）。 */

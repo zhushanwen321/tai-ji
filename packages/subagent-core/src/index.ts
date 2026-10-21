@@ -173,6 +173,9 @@ export {
 // 子入口（D9：每条子入口 bundle 多一份 host-services 副本）。
 // 模型引用串解析单点（runtime / 壳侧消费）：字符串只在入口解析一次，内部传结构体。
 export { isModelRef, parseModelSelector, type ParsedModelSelector } from "./shared/model-ref.ts";
+// 模型翻译表反向查表（runtime 显示侧消费——record 盖章 ref 翻回 pi 词汇；正向面
+// translateModelRef 经 EnginePort/RemoteEngine 承载，不经 barrel）。
+export { translateByTableReverse } from "./execution/engine/client/manifest-lookup.ts";
 export { parseEngineHandle } from "./execution/engine/common/session-view-types.ts";
 export { readSubagentHistoryMessages } from "./execution/engine/common/session-view-service.ts";
 // 引擎路由身份域裁决单点（runtime 读链同源消费——本地副本会让「有锚无 engine」的
