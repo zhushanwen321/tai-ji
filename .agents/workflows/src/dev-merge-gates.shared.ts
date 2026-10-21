@@ -1986,6 +1986,10 @@ async function main(): Promise<Record<string, unknown>> {
         const openAll = records.filter((r) => r.status === "open" && r.commitBlocked !== true);
         const groups = reconcileGroups(agg.groups, openAll);
         log(`[branch-review] 第 ${round} 轮修复分 ${groups.length} 组：${groups.map((g) => `${g.id}(${g.issueIds.length}条)`).join("、")}`);
+        // 修复执行与聚合裁决分框：聚合是判断段（合并去重/分组，分钟级），fixer+committer 是
+        // 执行段（改码+跑测试+提交，最长耗时段）——分属不同性质，GUI 观测时修复段的长时间
+        // 在途不再伪装成「聚合很慢」
+        phase("修复执行（分组修复 + 组级提交）");
         await runFixGroups(groups, round, agg.reportFile);
       }
     } catch (e) {
