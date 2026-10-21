@@ -6,7 +6,8 @@
  * 同样注入，不写盘读盘）。
  */
 import { describe, it, expect } from 'vitest'
-import { mkdtempSync, rmSync, realpathSync } from 'node:fs'
+import { existsSync, mkdtempSync, readFileSync, rmSync, realpathSync, writeFileSync } from 'node:fs'
+import { spawn, spawnSync } from 'node:child_process'
 import { tmpdir } from 'node:os'
 import { delimiter, dirname, join } from 'node:path'
 import {
@@ -19,6 +20,9 @@ import {
   hasExecutableLines,
   judgeNoLcov,
   runGates,
+  gateLockPath,
+  acquireGateLock,
+  captureProcessStartTime,
 } from '../quality-gates.mjs'
 
 /** 可编程 fake git：args.join 前缀匹配返回 stdout，未命中抛错（对齐 execFileSync 语义） */
@@ -40,6 +44,19 @@ function okRunPython() {
   return () => ({ status: 0, stdout: 'Gate ok', stderr: '' })
 }
 
+/** 组装带计数 stub 的 deps 跑 runGates（两个 exitCode 2 用例共用，消除重复块）；
+ *  返回 { exitCode, result, calls }——calls 用于断言「一门都没跑」。 */
+async function runGatesCounting(overrides = {}) {
+  const calls = { exec: 0, py: 0 }
+  const deps = makeDeps({
+    exec: () => { calls.exec += 1; return { status: 0, stdout: '', stderr: '' } },
+    runPython: () => { calls.py += 1; return { status: 0, stdout: '', stderr: '' } },
+    ...overrides,
+  })
+  const { exitCode, result } = await runGates(deps, { side: 'pr-cr-fix', base: null })
+  return { exitCode, result, calls }
+}
+
 /** 组装全绿 deps（可逐项覆盖）；readJson / readReviewJson 返回最小 coverage/metrics 产物形态。
  *  reviewDir=null = 新产物目录不可用，readReviewJson 与 readJson 同走旧 `.review/` 回退语义。 */
 function makeDeps(overrides = {}) {
@@ -59,6 +76,8 @@ function makeDeps(overrides = {}) {
     readHead: () => null,
     readJson: jsonStub,
     readReviewJson: jsonStub,
+    // worktree 级互斥锁：单测注入直通（真锁走 acquireGateLock 单测覆盖）
+    acquireGateLock: () => () => {},
     ...overrides,
   }
 }
@@ -184,19 +203,12 @@ describe('runGates 聚合编排（fake 子进程，不真跑重型命令）', ()
     expect(ext.detail).toContain('spawn npx ENOENT')
   })
   it('py 实体缺失 → exitCode 2，错误指明缺失路径与恢复通道，且不跑任何门', async () => {
-    let execCalls = 0
-    let pyCalls = 0
-    const deps = makeDeps({
-      exists: (rel) => !rel.includes('metrics-gate.py'),
-      exec: () => { execCalls += 1; return { status: 0, stdout: '', stderr: '' } },
-      runPython: () => { pyCalls += 1; return { status: 0, stdout: '', stderr: '' } },
-    })
-    const { exitCode, result } = await runGates(deps, { side: 'pr-cr-fix', base: null })
+    const { exitCode, result, calls } = await runGatesCounting({ exists: (rel) => !rel.includes('metrics-gate.py') })
     expect(exitCode).toBe(2)
     expect(result.error.missing[0]).toContain('.agents/skills/pr-cr-fix/scripts/metrics-gate.py')
     expect(result.error.message).toContain('refs/skills-snapshot')
-    expect(execCalls).toBe(0)
-    expect(pyCalls).toBe(0)
+    expect(calls.exec).toBe(0)
+    expect(calls.py).toBe(0)
   })
   it('coverage-gate.py 工具错误（exit 2）→ exitCode 2 带明细', async () => {
     const deps = makeDeps({ runPython: () => ({ status: 2, stdout: '', stderr: 'git 异常' }) })
@@ -213,6 +225,29 @@ describe('runGates 聚合编排（fake 子进程，不真跑重型命令）', ()
     })
     const { exitCode } = await runGates(deps, { side: 'pr-cr-fix', base: null })
     expect(exitCode).toBe(1)
+  })
+  it('互斥锁获取失败 → exitCode 2 环境错误（含恢复动作），且一门都不跑', async () => {
+    const { exitCode, result, calls } = await runGatesCounting({
+      acquireGateLock: () => {
+        throw new Error('等待 quality-gates 互斥锁超时（20 分钟）：/tmp/x.lock 被进程 123 持有且未释放')
+      },
+    })
+    expect(exitCode).toBe(2)
+    expect(result.error.message).toContain('互斥锁获取失败')
+    expect(result.error.recover).toContain('quality-gates')
+    expect(calls.exec).toBe(0)
+    expect(calls.py).toBe(0)
+  })
+  it('门禁 FAIL 路径跑完后互斥锁必释放（finally 语义，不泄漏给下一轮）', async () => {
+    let released = 0
+    const deps = makeDeps({
+      acquireGateLock: () => () => { released += 1 },
+      exec: (cmd, args, cwd) =>
+        cwd === 'packages/renderer' ? { status: 2, stdout: '', stderr: 'error TS2304: x' } : { status: 0, stdout: '', stderr: '' },
+    })
+    const { exitCode } = await runGates(deps, { side: 'pr-cr-fix', base: null })
+    expect(exitCode).toBe(1)
+    expect(released).toBe(1)
   })
 })
 
@@ -318,5 +353,103 @@ describe('buildGateEnv：门禁子进程 PATH 自举', () => {
   it('真实环境：运行中 node 的真实 bin 目录（symlink 解析后）必在自举后的 PATH 中', () => {
     const nodeRealBinDir = dirname(realpathSync(process.execPath))
     expect(buildGateEnv().PATH.split(delimiter)).toContain(nodeRealBinDir)
+  })
+})
+
+describe('gateLockPath：worktree 级互斥锁路径', () => {
+  it('同 root 确定性同路径；不同 root 不同桶；落 tmpdir 不污染工作区', () => {
+    const a = gateLockPath('/repo/a')
+    expect(gateLockPath('/repo/a')).toBe(a)
+    expect(gateLockPath('/repo/b')).not.toBe(a)
+    expect(dirname(a)).toBe(tmpdir())
+    expect(a.endsWith('.lock')).toBe(true)
+  })
+})
+
+describe('acquireGateLock：互斥获取 / 幂等释放 / 无主偷锁三通道 / 超时', () => {
+  /** 每个用例一个独立临时目录（锁文件落盘，跑完即清） */
+  function withLockDir(fn) {
+    const dir = mkdtempSync(join(tmpdir(), 'quality-gates-lock-'))
+    try {
+      fn(join(dir, 'g.lock'))
+    } finally {
+      rmSync(dir, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 })
+    }
+  }
+
+  /** 无主锁用例共用：写锁内容 → 短超时 acquire（无主偷锁接管）→ 断言本进程持锁 → release。 */
+  function stealAssertRelease(lockPath, content) {
+    writeFileSync(lockPath, content)
+    const release = acquireGateLock(lockPath, { timeoutMs: 1000, pollMs: 10 })
+    expect(JSON.parse(readFileSync(lockPath, 'utf-8')).pid).toBe(process.pid)
+    release()
+  }
+
+  it('空闲时获取成功（link 原子建锁：内容含本进程 pid + 启动时间、结构上不为空），release 幂等且删除锁文件、可再次获取', () => {
+    withLockDir((lockPath) => {
+      const release = acquireGateLock(lockPath)
+      expect(existsSync(lockPath)).toBe(true)
+      const info = JSON.parse(readFileSync(lockPath, 'utf-8'))
+      expect(info.pid).toBe(process.pid)
+      // 启动时间身份因子在 linux/darwin 必非空（平台不支持才为 null）
+      if (process.platform === 'linux' || process.platform === 'darwin') {
+        expect(typeof info.started).toBe('string')
+      }
+      release()
+      release() // 幂等：二次释放不抛、不动已删除的锁
+      expect(existsSync(lockPath)).toBe(false)
+      const release2 = acquireGateLock(lockPath)
+      release2()
+    })
+  })
+
+  it('持锁进程已退出（新格式 JSON / 旧格式纯 pid）→ 按 pid 存活判定确定性偷锁，不等时间窗', () => {
+    withLockDir((lockPath) => {
+      const dead = spawnSync(process.execPath, ['-e', ''], { stdio: 'ignore' })
+      stealAssertRelease(lockPath, JSON.stringify({ pid: dead.pid, started: 'linux:0' }))
+      // 旧格式（纯 pid 数字，过渡期兼容）→ started 缺失降级纯 pid 存活语义，死 pid 同样偷
+      stealAssertRelease(lockPath, String(dead.pid))
+    })
+  })
+
+  it('pid 复用（pid 存活但启动时间与锁内记录不符）→ 判非原持锁方偷锁', () => {
+    withLockDir((lockPath) => {
+      // 本进程 pid + 伪造启动时间 = 复用形态（pid 活、身份不符）
+      stealAssertRelease(lockPath, JSON.stringify({ pid: process.pid, started: 'linux:1740000000' }))
+    })
+  })
+
+  it('空锁文件（旧实现「建文件→写 pid」两步间崩溃残留）→ 立即判无主偷锁', () => {
+    withLockDir((lockPath) => {
+      stealAssertRelease(lockPath, '')
+    })
+  })
+
+  it('持锁方存活且身份成立（本进程 pid + 真实启动时间）→ 不偷，超时抛错，信息含锁路径与持锁 pid（可操作）', () => {
+    withLockDir((lockPath) => {
+      writeFileSync(lockPath, JSON.stringify({ pid: process.pid, started: captureProcessStartTime(process.pid) }))
+      let err = null
+      try {
+        acquireGateLock(lockPath, { timeoutMs: 60, pollMs: 10 })
+      } catch (e) {
+        err = e
+      }
+      expect(err).toBeInstanceOf(Error)
+      expect(err.message).toContain('互斥锁超时')
+      expect(err.message).toContain(lockPath)
+      expect(err.message).toContain(String(process.pid))
+    })
+  })
+
+  it('持锁方在等待期间释放 → 等待方获取成功（串行化语义，非偷锁路径）', () => {
+    withLockDir((lockPath) => {
+      writeFileSync(lockPath, String(process.pid)) // 活锁（本进程，旧格式内容）
+      // 子进程 80ms 后删锁：父进程阻塞在锁等待循环里，由子进程触发释放
+      const child = spawn(process.execPath, ['-e', `setTimeout(() => require('node:fs').unlinkSync(${JSON.stringify(lockPath)}), 80)`], { stdio: 'ignore' })
+      const release = acquireGateLock(lockPath, { timeoutMs: 5000, pollMs: 10 })
+      child.unref()
+      release()
+      expect(existsSync(lockPath)).toBe(false)
+    })
   })
 })
