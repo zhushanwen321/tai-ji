@@ -4,8 +4,8 @@
  * 装配：faux（真 Electron + 真 pi 子进程 + 假 LLM 演员，零 token）。
  * 路径：
  *   B 通道主体——model.list 目录 → 协议建 session（默认 faux/faux-1）→ 发一轮（切换前基线）→
- *   model.switch 到 faux-1-reasoning → model.switched 回执生效值 + session.state_changed 广播 →
- *   切换后再发一轮（message.complete.responseModel = 新模型，真正生效的最终证据）→
+ *   model.switch 到 faux-1-reasoning → model.switched 回执生效值 + state 快照 state_changed 收敛 →
+ *   切换后再发一轮（热切不破坏对话；faux 下 responseModel 不反映切换，见 notProvable）→
  *   session.setThinkingLevel('high') → session.thinkingLevelSet 回执 →
  *   失败信号：switch 到不存在模型必须收 error envelope（MODEL_NOT_FOUND）。
  *   C 通道——pi 会话 JSONL 追加 model_change 与 thinking_level_change entry（持久层唯一写方 = pi）。
@@ -29,7 +29,7 @@ export const meta = {
   ],
   requires: ['faux'],
   parallelGroup: 'model',
-  estimateSec: 160,
+  estimateSec: 90,
   // 统一数组队列（非 model-keyed）：faux 的 model-keyed 选队按进程 argv --model 一次定型
   // （faux-llm-ext.ts selfModelRef/loadScript），同进程热切模型不会重选队——切换前后必须
   // 同队顺序消费（step0 切换前、step1 切换后），否则新轮命中「faux 耗尽」error。
@@ -86,6 +86,22 @@ function grepSessionFile(sessionFile, needle) {
   return { hits, bytes: text.length }
 }
 
+/**
+ * 条件轮询重订阅 stateSnapshot，直到 state_changed 条目满足谓词（或超时返回最后值）。
+ * 为什么不等广播帧 / 不立即读快照：见文件尾 gotchas 的「state_changed 实测行为」条。
+ */
+async function pollStateSnapshotEntry(protocol, sid, predicate, { timeoutMs = 20_000, intervalMs = 500 } = {}) {
+  const deadline = Date.now() + timeoutMs
+  let entry = null
+  while (Date.now() < deadline) {
+    const sub = await protocol.call('session.subscribe', { sessionId: sid }, {})
+    entry = (sub.stateSnapshot ?? []).find((s) => s?.type === 'session.state_changed') ?? null
+    if (entry && predicate(entry)) return entry
+    await new Promise((r) => setTimeout(r, intervalMs))
+  }
+  return entry
+}
+
 export async function run(ctx) {
   const { protocol, ev, log, dataDir, repo, instance } = ctx
   const uncovered = []
@@ -94,8 +110,8 @@ export async function run(ctx) {
     'faux-1 只有 off 档：thinking 多档必须切到 faux-1-reasoning（supportedLevels = off/minimal/low/medium/high，faux-llm-ext.ts 四演员注释锁定）',
     'faux-1 是 faux-1-reasoning 的子串：断言生效模型用「含 faux-1-reasoning」，不要用「含 faux-1」（前轮匹配会双命中）',
     'model.switch / setThinkingLevel 都先 ensureActive（停止态 1–2s）；期间触发器单飞锁，并发两条 switch 会乱序回执',
-    'modelId 有两种 wire 形态：session.create / state_changed payload 是 provider/id 复合串（faux/faux-1-reasoning），model.switched 回执是裸 id（faux-1-reasoning）——runtime 拆解复合串回填（switchModel U6）',
-    'session.state_changed 不作为增量帧到达非 owner WS 订阅者（2026-10-22 探针实测：switch 后仅 commands/stats_update 到达），但 bus publish 已发生并写 state 快照；生效值核验 = 条件轮询重订阅读 stateSnapshot（发布链有 300ms 防抖 + 重新拉取，回执后立即重订阅会拿到旧值），不要 waitFor 广播帧（必超时）',
+    'modelId 有两种 wire 形态：session.create / state_changed payload 是 provider/id 复合串（faux/faux-1-reasoning），model.switched 回执是裸 id（faux-1-reasoning）——runtime 拆解复合串回填（model-message-handler.ts 的 parseModelSelector）',
+    'state_changed 实测行为（2026-10-22 两次复现）：switch 回执后等待窗口内本 WS 只收到 commands/stats_update，未收到 state_changed 增量帧；但发布已发生（重订阅 stateSnapshot 可读到新值）。注意这与 bus 层「对订阅者全集无差别投递」的源码推演相悖，机制未定位（登记为待查疑点）；无论机制如何，生效值核验一律用条件轮询重订阅读 stateSnapshot（发布链有 300ms 防抖 + 重新拉取，回执后立即读会拿旧值）——这是确定性收敛路径',
     'faux 的 model-keyed 选队按进程 argv --model 一次定型（selfModelRef/loadScript），同进程热切模型不重选队：验切换的剧本必须用统一数组队列，切换后轮才会被消费（model-keyed 下新轮命中「faux 耗尽」error）',
   ]
 
@@ -162,6 +178,13 @@ export async function run(ctx) {
       expected: '点击 [title="切换模型"] 后弹层含目标行',
       actual: String(e?.message ?? e).slice(0, 400),
     })
+    // 结构化失败现场（ui.mjs 的 visibleTestIds 摘要 / 页面 URL 等 evidence 字段）落盘供排障
+    ev.attach('model-picker-error', JSON.stringify({ message: e?.message, hint: e?.hint, evidence: e?.evidence }, null, 2).slice(0, 20_000))
+    try {
+      await ev.shot(await instance.page(), 'model-picker-fail')
+    } catch {
+      /* 页面不可用时放弃截图，失败现场以 attach 为准 */
+    }
     ev.step({ step: 'model.picker.A', channel: 'A', exitCode: 1, stats: {} })
   }
 
@@ -178,21 +201,11 @@ export async function run(ctx) {
   })
   ev.attach('model-switched', JSON.stringify(switched, null, 2).slice(0, 4_000))
 
-  // 生效值核验走「重订阅读 state 快照」（last-value 语义）。实测（2026-10-22 探针）：
-  // ① switch 后 state_changed 不作为增量帧到达非 owner WS 订阅者（仅 commands/stats_update 到达），
-  //   但 bus publish 已发生并写入 stateSnapshot；前端经同一快照通道收敛（seq-gap 恢复）。
-  // ② 发布链有防抖（W12：markDirty → 300ms 防抖 → 重新拉取 → 快照应用后发布），switch 回执
-  //   后立即重订阅会拿到旧值——必须条件轮询直到快照收敛。
-  let stateChangedEntry = null
-  {
-    const deadline = Date.now() + 20_000
-    while (Date.now() < deadline) {
-      const sub = await protocol.call('session.subscribe', { sessionId: sid }, {})
-      stateChangedEntry = (sub.stateSnapshot ?? []).find((s) => s?.type === 'session.state_changed') ?? null
-      if (stateChangedEntry?.payload?.modelId === 'faux/faux-1-reasoning') break
-      await new Promise((r) => setTimeout(r, 500))
-    }
-  }
+  // 生效值核验走「重订阅读 state 快照」（last-value 语义）。实测（2026-10-22 两次复现）：
+  // switch 回执后等待期间该 WS 只收到 commands/stats_update，未收到 state_changed 增量帧
+  // （与 bus 层「对订阅者全集无差别投递」的源码推演相悖，机制未定位——见 gotchas）；
+  // 发布已发生并写入 stateSnapshot，且发布链有 300ms 防抖 + 重新拉取，回执后立即读会拿旧值。
+  const stateChangedEntry = await pollStateSnapshotEntry(protocol, sid, (e) => e.payload?.modelId === 'faux/faux-1-reasoning')
   ev.assert('B: state 快照 state_changed 条目 modelId 收敛为 faux/faux-1-reasoning', stateChangedEntry?.payload?.modelId === 'faux/faux-1-reasoning', {
     channel: 'B',
     expected: 'state_changed.payload.modelId = faux/faux-1-reasoning（last-value 快照，防抖后收敛）',
@@ -253,16 +266,7 @@ export async function run(ctx) {
   ev.step({ step: 'model.thinking', channel: 'B', exitCode: 0, stats: { level: think.level } })
 
   // 快照收敛核验：state_changed 是 last-value 覆盖，等防抖后重订阅拿最新组合值
-  let thinkEntry = null
-  {
-    const deadline = Date.now() + 20_000
-    while (Date.now() < deadline) {
-      const sub = await protocol.call('session.subscribe', { sessionId: sid }, {})
-      thinkEntry = (sub.stateSnapshot ?? []).find((s) => s?.type === 'session.state_changed') ?? null
-      if (thinkEntry?.payload?.thinkingLevel === 'high') break
-      await new Promise((r) => setTimeout(r, 500))
-    }
-  }
+  const thinkEntry = await pollStateSnapshotEntry(protocol, sid, (e) => e.payload?.thinkingLevel === 'high')
   ev.assert('B: state 快照 state_changed 反映新档位（thinkingLevel=high 且 modelId 保持）', thinkEntry?.payload?.thinkingLevel === 'high' && thinkEntry?.payload?.modelId === 'faux/faux-1-reasoning', {
     channel: 'B',
     expected: '{modelId:"faux/faux-1-reasoning", thinkingLevel:"high"}',

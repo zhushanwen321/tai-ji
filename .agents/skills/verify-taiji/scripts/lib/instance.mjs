@@ -55,17 +55,28 @@ export class InstanceError extends Error {
  * 关掉 rename-session 自动标题（验收确定性）。
  *
  * 只删 `auto-rename-enabled` 不够：runtime 首启后台串行链的 ensureAutoRenameDefault 见
- * `auto-rename-initialized` 标记不存在会重建 enabled flag（默认开，2026-10-22 实测：
- * 标题生成经 llm-shared 走 faux/mock 双注册 compat 通道，按全局到达序消耗同一响应队列，
- * 主轮之间的插队消费让后续 turn 命中「队列耗尽」error）。必须同时预置 initialized
- * 标记——ensureAutoRenameDefault 见标记存在即跳过，不再创建 enabled flag。
+ * `auto-rename-initialized` 标记不存在会重建 enabled flag（默认开，2026-10-22 实测）。
+ * 标题生成对响应队列的插队消耗按通道分两种形态：
+ * - faux：llm-shared 走 pi-ai compat 的双注册（同进程两处注册共享同一 core 队列），
+ *   按全局到达序消耗——主轮之间的插队让后续 turn 命中「队列耗尽」error；
+ * - mock-http：models.json 真实 provider 直打本地 mock（无注册概念），消耗的是 mock
+ *   server 的 per-model 单游标——插队让主队游标错位。
+ * 两种形态都必须「删 flag + 预置 initialized 标记」一起做：ensureAutoRenameDefault 见
+ * 标记存在即跳过，不再创建 enabled flag。
  * 契约源：packages/runtime/src/services/rename-session-config.ts +
  * extensions/universal/rename-session/src/pure.ts（flag 存在=开，不存在回落 config.enabled）。
  */
 function disarmAutoRename(agentDir) {
-  fs.rmSync(path.join(agentDir, 'auto-rename-enabled'), { force: true })
-  const initialized = path.join(agentDir, 'auto-rename-initialized')
-  if (!fs.existsSync(initialized)) fs.writeFileSync(initialized, '', 'utf-8')
+  try {
+    fs.rmSync(path.join(agentDir, 'auto-rename-enabled'), { force: true })
+    const initialized = path.join(agentDir, 'auto-rename-initialized')
+    if (!fs.existsSync(initialized)) fs.writeFileSync(initialized, '', 'utf-8')
+  } catch (e) {
+    throw new InstanceError(`auto-rename 开关处置失败：${e instanceof Error ? e.message : String(e)}`, {
+      hint: 'agentDir 不可写（检查 dataDir 权限/磁盘）。auto-rename 未关会让标题生成消耗剧本步，失败形态是后续 turn 队列耗尽 error，极难归因',
+      evidence: { agentDir },
+    })
+  }
 }
 
 /** 极简条件轮询：predicate 返回真值即返回；超时返回 undefined（调用方给带 hint 的错）。 */
@@ -518,6 +529,7 @@ export function createInstance(options = {}) {
         const printed = printInstance({ repo, name: instanceName, dataDir: dir })
         parsed = printed
         if (faux) {
+          // 放在 --print 之后：无论模板种子写了什么开关状态，disarm 最后执行兜底
           disarmAutoRename(path.join(dir, 'agent'))
         }
       }

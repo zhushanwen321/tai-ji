@@ -109,7 +109,7 @@ export function createEvidence({ runDir, feature, meta = {} } = {}) {
       return file
     },
 
-    /** 人读报告：期望 vs 实际 + 未覆盖项 + 坑。 */
+    /** 人读报告：期望 vs 实际 + 运行中新增未决项 + 坑。 */
     report({ title, steps: reportSteps, uncovered = [], gotchas = [], summary } = {}) {
       const lines = []
       lines.push(`# ${title ?? feature ?? 'verify-taiji run'}`)
@@ -150,7 +150,8 @@ export function createEvidence({ runDir, feature, meta = {} } = {}) {
         }
       }
       lines.push('')
-      lines.push('## 未覆盖项')
+      // 「运行中新增未决项」：指 run 过程中新发现的不确定项，与覆盖矩阵的「未覆盖」（能力面未验清单）同词不同义，刻意区分
+      lines.push('## 运行中新增未决项')
       lines.push('')
       if (uncovered.length === 0) lines.push('（无）')
       else for (const u of uncovered) lines.push(`- ${u}`)

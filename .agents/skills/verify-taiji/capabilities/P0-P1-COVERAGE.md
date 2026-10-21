@@ -12,7 +12,7 @@
 > 1. faux LLM 演员在 subagent/workflow 的**孙进程不可达**（`--no-extensions` + 白名单无 faux provider + `TAIJI_E2E=1` 门）→ 证据 `capabilities/env.md` Gotchas + `scripts/probes/faux-grandchild.mjs`
 > 2. 孙进程**读同一个 `PI_CODING_AGENT_DIR`**（`packages/runtime/src/infra/subagent-control/engine-launch-env.ts`）→ **本地 mock-http provider 通道可覆盖孙进程**（先例 `scripts/verify-provider-live-sync.mjs`）
 > 3. 已实跑通过的 scenario：`p0-env-smoke`（15 断言）、`p0-session-chat`（28 断言）、
->    `p0-model-switch`（24 断言，2026-10-22）、`p0-subagent-workflow-dispatch`（23 断言，2026-10-22），均 verdict pass
+>    `p0-model-switch`（24 断言，2026-10-22）、`p0-subagent-workflow-dispatch`（24 断言，2026-10-22），均 verdict pass
 > 4. **mock-http 通道已实测打通孙进程**（2026-10-21）：subagent 派发 → 结论 `mock-grandchild-reachable`（探针 `scripts/probes/mock-llm-grandchild.mjs`，7 条断言全绿：record 终态 `idle` + canary 落盘 + mock 收到 `model=mock-sub-a` 请求）；workflow fan-out 两成员 → 结论 `mock-workflow-reachable`（探针 `scripts/probes/mock-llm-workflow.mjs`：run status=done，两成员 outcome=done，6 条成员模型请求）。**2026-10-22 两个探针已合成为正式剧本 `p0-subagent-workflow-dispatch`（双段单实例，主队游标顺序衔接），实跑 pass**
 
 ## 一、P0（17 行）
@@ -26,11 +26,11 @@
 | 5 | session 持久化与恢复 | `session.persistence` `chat.reload-equiv` `session.history` | — | **`capability-only`** | live≡reload 等价性是最强证明，目前无剧本。跨进程等价由 E2E-EQUIV-01 覆盖；**本技能应补**「关会话重开 / 重启应用后 history 一致」两条 → `p0-session-persistence` |
 | 6 | per-session 隔离 | `session.isolation` `session.switch` `chat.stream` | `p0-session-chat`（history 层） | **`capability-only`** | 已验「两 session history 不串」；**未验**并发流式不串 + 切走切回不污染 + `message.*` 必带 sessionId → `p0-session-isolation-stream` |
 | 7 | 多会话管理 | `session.list` `session.switch` `session.archive` `session.restore` `session.delete` | — | **`capability-only`** | `features/session-management.md` 有故事但**三处锚点错误**（已在该文件头标注）。归档/恢复/彻底删除是 P2 功能但触及 P0 删除链 → `p0-multi-session` 必须按 `capabilities/session.md` 重写 |
-| 8 | 模型与 thinking level | `model.list` `model.switch` `model.thinking` `model.subagent-switch` | `p0-model-switch` ✅实跑 | **`scenario`（部分）** | **实测覆盖**（24 断言，2026-10-22）：model.list 目录、`model.switch` 回执生效值、state 快照 `state_changed` 收敛（复合串 modelId）、热切不破坏对话、C 通道 `model_change` + `thinking_level_change` 双 entry、`session.setThinkingLevel(high)` 回执生效档、失败信号 `MODEL_NOT_FOUND` 不破坏会话、A 通道模型弹层目录可见性。**未覆盖**：composer 模型名随回执更新（需 UI 激活链路 → `p0-chat-stream-ui`）；执行域 `subagent.setModel`（执行层已由 `p0-subagent-workflow-dispatch` 的 mock-http 通道打通派发，热切面另立剧本）；`responseModel` 反映切换（零 token 通道无模型语义，live 才可断言） |
+| 8 | 模型与 thinking level | `model.list` `model.switch` `model.thinking` `model.subagent-switch` | `p0-model-switch` ✅实跑 | **`scenario`（部分）** | **实测覆盖**（24 断言，2026-10-22）：model.list 目录、`model.switch` 回执生效值、state 快照 `state_changed` 收敛（复合串 modelId）、session.create 默认模型、热切不破坏对话、切换不丢历史、C 通道 `model_change` + `thinking_level_change` 双 entry、`session.setThinkingLevel(high)` 回执生效档 + state 快照档位收敛、失败信号 `MODEL_NOT_FOUND` 不破坏会话、A 通道模型弹层目录可见性。**未覆盖**：composer 模型名随回执更新（需 UI 激活链路 → `p0-chat-stream-ui`）；执行域切换（`model.subagent-switch`：记账 + 热切 + run 级全切三要素）另立剧本；thinking 档位钳制分支（请求档不支持时的钳制回执，如对仅 off 档的 faux-1 设 high）；`responseModel` 反映切换（零 token 通道无模型语义，live 才可断言） |
 | 9 | 中断/取消 | `chat.abort` `subagent.cancel` `workflow.abort` | — | **`capability-only`** | 主会话中断（faux + 低 TPS）可验；执行域取消需 mock-http 通道 → `p0-interrupt-cancel` |
 | 10 | Markdown 渲染 | `render.markdown` `render.shiki` `render.html-preview` | — | **`reuse-e2e`** | `e2e/markdown-table-layout.spec.ts`（@p0-smoke）+ E2E-VISUAL-01 像素轨 + 渲染采样管道 `docs/testing/render-sampling.md`。本技能补 `render.markdown` 的 faux `markdown-kitchen-sink.json` 一轮即可 |
 | 11 | 扩展装载框架 | `extension.load` + `env.doctor` 第三判据 | `p0-env-smoke`（仅 N≥8） | **`capability-only`** | N = resolver 去重目录数，**不是装载成功数**。要验「某扩展真的可用」需行为证据（命令注册 / tool 可用 / 日志）→ `p0-extension-load` |
-| 12 | subagent/workflow 面板与派发 | `subagent.dispatch` `list` `stream` `cancel` `model` + `workflow.dispatch` `runs` `overlay` `abort` `reconnect` + `subagent.session-observation` | `p0-subagent-workflow-dispatch` ✅实跑 | **`scenario`（部分）** | **实测覆盖**（23 断言，2026-10-22，mock-http 双段单实例）：subagent 派发 record 终态 + 成员模型解析 + canary 落子代理产物；workflow fan-out run status=done + 两成员 outcome=done + canary 摘要落 record；铁证 = mock.requests 出现成员模型请求（孙进程真的打到 mock）；装配自检（models.json baseUrl / engineDefaults.pi）。**未覆盖**（结构层/UI 面）：overlay 可视化、托盘面板、`subagent.cancel` / `workflow.abort` / `workflow.reconnect`、`subagent.setModel` 热切 → 各自 capability 文档 + 后续剧本（机器资产：`e2e/workflow-viz-overlay.spec.ts` 等 mock 轨） |
+| 12 | subagent/workflow 面板与派发 | `subagent.dispatch` `list` `stream` `cancel` `model` + `workflow.dispatch` `runs` `overlay` `abort` `reconnect` + `subagent.session-observation` | `p0-subagent-workflow-dispatch` ✅实跑 | **`scenario`（部分）** | **实测覆盖**（24 断言，2026-10-22，mock-http 双段单实例；审查修复后复跑全绿）：subagent 派发 record 终态 + 成员模型解析 + canary 落子代理产物；workflow fan-out run status=done + 两成员 outcome=done + canary 摘要落 record；铁证 = mock.requests 出现成员模型有效请求（孙进程真的打到 mock）；装配自检（models.json baseUrl / engineDefaults.pi）。**未覆盖**（结构层/UI 面）：overlay 可视化、托盘面板、drawer 详情 tab（回落载体）、`subagent.stream`（内容帧 transient，断言手段受限，见已知空洞 #5）、通知链帧（本剧本的衔接断言只是通知轮发生的间接证据）、`subagent.cancel` / `workflow.abort` / `workflow.reconnect`、`subagent.setModel` 热切、`subagent.session-observation`（managed session 托盘观测面，与 subagent record 两族）→ 各自 capability 文档 + 后续剧本（机器资产：`e2e/workflow-viz-overlay.spec.ts` 等 mock 轨） |
 | 13 | 设置页 | `settings.provider` `system-prompt` `preset` `mcp` `network-proxy` `theme` | — | **`capability-only`** | 六面文档齐；仅 provider 一面有旧故事。建议拆两个剧本：`p0-settings-provider`（写侧 + provider-live-sync 联动）+ `p0-settings-others`（提示词/预设/主题/MCP/代理抽样） |
 | 14 | 插件系统 | `plugin.list` `toggle` `statusbar` `mountpoints` | — | **`reuse-e2e`** | `bash scripts/verify-plugin-contract.sh`（E2E-PLUGINCONTRACT-01）+ `bash scripts/verify-plugin-e2e.sh`（E2E-PLUGINCONTRACT-02）。⚠️ **这两个 rule 在 e2e-map 里标 L3，但实测并不打真 LLM**：contract 脚本写入的 provider 是 `baseUrl: http://127.0.0.1:9/v1` + `apiKey: dummy`（故意无响应的地址，只为过 pi 的模型校验），e2e 脚本明确「非 mock，真实加载路径」= 真插件装载而非真模型。→ 对验收技能**可用且零 token**；但**要跑在 main/目标 worktree 的仓库根**（脚本相对路径 `scripts/`）。注意 `plugin.statusbar` 已退役（ADR-0141），现役点位 = headerAction / tray widget / modal |
 | 15 | 统一提问表单 FormOverlay | `interaction.askuser` | — | **`capability-only`** | `features/ask-user-form.md` 有故事但**示例脚本违反 schema**（options 需 ≥2）；正确夹具 = `fixtures/faux-responses/ask-user-two-questions.json` → `p0-form-overlay` |
@@ -52,7 +52,7 @@
 |---|---|---|---|
 | `scenario`（已实跑，**完整**覆盖该行全部用例组） | 0 | 0 | **0** |
 | `scenario`（已实跑，**部分**覆盖——见各行「未覆盖」） | 4 | 0 | 4 |
-| `capability-only` | 9 | 4 | 13 |
+| `capability-only` | 9 | 3 | 12 |
 | `reuse-e2e` | 4 | 1 | 5 |
 | `unreachable` | 0 | 0 | 0 |
 
@@ -116,17 +116,17 @@
 3. **键盘栈序（Esc 路由）无 capability 锚点**：`ui.container` 已补 id，但缺可观测信号（需要产品侧暴露当前栈顶或提供日志）。
 4. **`workflow.reconnect` 的 WS 断连驱动未实测**：`context.setOffline` 是否稳定关闭 WS 未验证；当前复用 `e2e/workflow-disconnect-recovery.spec.ts`。
 5. **`subagent.stream` 内容帧是 transient**（不分配 seq）→ 无法用序号回放断言。
-6. **plan 的「执行方式选择」未单独登记**：`interaction.plan-review` 覆盖了审阅三键（修订/执行/搁置），
-   但「执行方式选择」（goal 桥派发 / plan-exec skill / goal 三条路）是另一个 UI 面（无 plan-exec
-   skill 时直通不弹表单）。需要时补 `interaction.plan-exec-choice`。
-7. **`tool_search` / `codemode` 对「工具是否在场」的影响未登记为独立 capability**：
-   低频工具默认 deferred，验收时若先断言在场会假失败。当前只在 `interaction.canvas` 的 Gotcha
-   里提了一句，覆盖面不够（`session_read` / `plan` / `schedule` 族 / `goal_control` /
-   `compact_context` / `rename_session` 都受影响）。
 6. **mock-http 通道的语义空洞（已实测，必须登记）**：mock 回复无模型语义——因此「成员/子代理的任务质量、
    工具选择、真实 token 成本、真实耗时」仍然不可断言；可断言面只到「进程真的跑到 LLM 并收敛」。
    另两个已踩到的坑（写在 `capabilities/env.md` Gotchas）：① 成员必须在终局调 `structured-output`
    （workflow 模式单参数合成工具，不做 = `schema_deterministic` 失败）；② 想让成员落「成员演员」队列
    需在 `workflow_run` 传 run 级 `model`（否则继承主 agent 模型、与主队共享游标）。
-7. **mock-http 的 abort / reconnect 未覆盖**：两个探针只走「正常完成」路径（workflow abort、session 断连收敛
-   仍需真 LLM 或拉长剧本的低 TPS 手段）。
+7. **mock-http 的 abort / reconnect 未覆盖**：两个探针与 `p0-subagent-workflow-dispatch` 只走「正常完成」路径
+   （workflow abort、session 断连收敛仍需真 LLM 或拉长剧本的低 TPS 手段）。
+8. **state_changed 增量帧实测与源码推演相悖（2026-10-22 新登记，机制待查）**：switch 后已订阅 WS
+   未收到 `session.state_changed` 增量帧但发布已发生（见 `capabilities/model.md` Gotcha 6）；
+   源码推演（bus 对订阅者全集无差别投递 + tap 帧序）与实测冲突，需定位真实投递链后回写。
+9. **plan 的「执行方式选择」与 `tool_search`/`codemode` 工具在场影响**：前者需补
+   `interaction.plan-exec-choice`（无 plan-exec skill 时直通不弹表单）；后者低频工具默认
+   deferred，验收先断言在场会假失败（`session_read` / `plan` / `schedule` 族 / `goal_control` /
+   `compact_context` / `rename_session` 受影响，当前只在 `interaction.canvas` Gotcha 提了一句）。

@@ -65,6 +65,9 @@ expect testid=model-picker-item-faux-1 visible
   搜索无结果显示「无匹配模型」（`noMatch`，与空池区分）。
 - **目录漂移信号**：`model.list` 有该模型但弹层没有 → 前端 `settingsStore.models` 未刷新
   （首推丢失 / 广播未消费）；反之弹层有而 `model.list` 无 → 缓存陈旧。
+- **weak-anchor 标注**：A 通道弹层断言（`model-picker-item-<id>` 可见）单独成立 = 弱锚
+  （单通道），必须与 B 通道 `model.list` reply 组合断言（`p0-model-switch` 即此组合：
+  B 证目录真值 + A 证 UI 可见）。
 
 ### 证据（A/B/C 各抓什么）
 
@@ -179,16 +182,23 @@ const r = await p.call('model.switch',
    `defaultModel`；`model.switch` 的持久化语义是「pi 会话内 `model_change`」。
 5. **`thinkingLevel` 可能被联动**：切模型时 pi 若新模型档位与当前不同会 emit
    `thinking_level_changed`；`state_changed` 里可能带新的 `thinkingLevel`（别惊讶）。
-6. **`session.state_changed` 不作为增量帧到达非 owner WS 订阅者**（2026-10-22 探针实测，
-   `p0-model-switch` 剧本 2 次复现）：switch 后该 client 只收到 `session.commands` /
-   `session.stats_update`，但 bus publish 已发生并写 state 快照（last-value）。生效值核验 =
-   **条件轮询重订阅读 `stateSnapshot` 的 `state_changed` 条目**（发布链有 300ms 防抖 +
-   重新拉取，回执后立即重订阅会拿到旧值）；`waitFor` 广播帧必超时。前端经同一快照通道
-   收敛（seq-gap 恢复），非产品缺陷。
+6. **state_changed 增量帧的实测行为与源码推演相悖（机制未定位，登记为待查疑点）**：
+   2026-10-22 两次实测（`p0-model-switch` 首跑 + 独立探针）：switch 回执后的等待窗口内，
+   已订阅该 session 的 WS 只收到 `session.commands` / `session.stats_update`，**未收到**
+   `session.state_changed` 增量帧；但发布已发生（重订阅 `stateSnapshot` 能读到新值）。
+   源码层 bus 对 state 订阅者全集无差别投递（`message-bus.ts` broadcastText），且
+   `stats_update` 是 state_changed 发布的同步后置产物（projection-bus-view 先 publish 后
+   tap），TCP 有序送达下「漏前一帧」按源码推演构造性不可能——实测与推演冲突，机制待查。
+   **无论机制如何，生效值核验一律用条件轮询重订阅读 `stateSnapshot`**（发布链有 300ms
+   防抖 + 重新拉取，回执后立即读会拿旧值）——这是确定性收敛路径，`p0-model-switch` 即此写法。
 7. **modelId 有两种 wire 形态**：`session.create` reply / `state_changed` payload 是
    `provider/id` 复合串（`faux/faux-1-reasoning`）；`model.switched` reply 是裸 id
-   （runtime 拆解复合串回填，`session-model-control.ts` U6）。断言时按字段分别取形态，
+   （`transport/model-message-handler.ts` 的 `parseModelSelector` 拆解复合串回填；
+   `session-model-control.ts` U6 注释）。断言时按字段分别取形态，
    且 `faux-1` 是 `faux-1-reasoning` 的子串——用「含 faux-1-reasoning」不要用「含 faux-1」。
+8. **faux 通道验「切换后一轮」必须用统一数组队列**：faux 的 model-keyed 选队按进程
+   argv `--model` 一次定型（`faux-llm-ext.ts` 的 `selfModelRef`/`loadScript`），同进程热切
+   模型不重选队——keyed 形态下切换后轮命中旧队（已耗尽）报「No more faux responses queued」。
 
 ---
 
@@ -213,7 +223,7 @@ const r = await p.call('model.switch',
   `setThinkingLevel` 与 `switchModel` 同一激活语义（先 `ensureActive` 再 set，
   `session-model-control.ts` 的 `activate` + 注释「U2/D7：与 switchModel 同一激活语义」）。
 - **副作用点**：`activate`（停止态/回收态先拉活）→ pi `set_thinking_level` → 读回 `get_state` 生效档
-  → `thinking_level_changed` → 广播 `session.thinkingLevelSet` + `session.state_changed`；
+  → `thinking_level_changed` → reply `session.thinkingLevelSet` + 广播 `session.state_changed`；
   持久化 = pi JSONL `thinking_level_change`；RPC 成功后 runtime 主动 `syncTraceEntries`。
 
 ### 驱动

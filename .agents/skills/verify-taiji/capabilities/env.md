@@ -256,8 +256,9 @@ node .agents/skills/verify-taiji/scripts/vp.mjs env.doctor --repo <repo> --data-
 - 首启种子来自只读模板；模板调整后需重建模板，禁止直改模板或 prod 数据目录。
 - **auto-rename 自动标题必须「删 flag + 预置 initialized 标记」两件一起做**（`lib/instance.mjs`
   的 `disarmAutoRename` 已实现）：只删 `auto-rename-enabled` 会被 runtime 首启后台链
-  `ensureAutoRenameDefault` 重建（initialized 标记不存在 → 默认开，2026-10-22 实测）。标题
-  生成经 llm-shared 走 faux/mock 的双注册 compat 通道，**按全局到达序消耗同一响应队列**——
-  主轮之间的插队消费会让后续 turn 命中「队列耗尽」error（faux：`No more faux responses
-  queued`，stopReason=error 且 message 为空）。多轮剧本（如 `p0-model-switch` 的切换后轮）
-  没有这层防御必炸。
+  `ensureAutoRenameDefault` 重建（initialized 标记不存在 → 默认开，2026-10-22 实测）。
+  标题生成对响应队列的插队消耗按通道分两种形态——**faux**：llm-shared 走 pi-ai compat
+  双注册（同进程共享同一 core 队列）按全局到达序消耗，主轮之间插队让后续 turn 命中
+  「队列耗尽」error（`No more faux responses queued`，stopReason=error 且 message 为空）；
+  **mock-http**：消耗 mock server 的 per-model 单游标，主队游标错位。多轮剧本（如
+  `p0-model-switch` 的切换后轮）没有这层防御必炸。

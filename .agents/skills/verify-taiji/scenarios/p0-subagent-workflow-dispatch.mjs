@@ -48,13 +48,13 @@ export const meta = {
   covers: [
     'env.launch', 'env.ready', 'env.isolation',
     'session.create', 'session.history', 'chat.send', 'chat.wait',
-    'subagent.dispatch', 'subagent.list', 'subagent.session-observation',
+    'subagent.dispatch', 'subagent.list',
     'workflow.dispatch', 'workflow.runs',
     'protocol.rpc', 'protocol.events',
   ],
   requires: ['mock-http'],
   parallelGroup: 'subagent',
-  estimateSec: 300,
+  estimateSec: 120,
   llm: {
     responses: {
       [`mockllm/${MAIN_MODEL}`]: [
@@ -110,7 +110,8 @@ export const meta = {
   ],
   notProvable: [
     'UI 面：workflow overlay / 托盘面板 / subagent 详情（A 通道，归后续 UI 剧本）',
-    'workflow abort / reconnect（探针未覆盖，见覆盖矩阵已知空洞 #4/#7）',
+    'workflow abort / reconnect（探针未覆盖，见覆盖矩阵已知空洞 #4/#9）',
+    'subagent.session-observation（agent-managed session 托盘观测面，与 subagent record 是两族——本剧本只验 record 族）',
     'mock 回复无真实模型语义：编排质量、工具选择、真实耗时与 token 成本',
     'subagent.setModel 执行域热切（独立 capability，需要活 record + 网关接线）',
   ],
@@ -175,7 +176,8 @@ export async function run(ctx) {
   const gotchas = [
     '孙进程 faux 不可达（--no-extensions + 白名单扩展集），mock-http 是执行域唯一零 token 通道（SSOT：capabilities/env.md Gotchas + probes/faux-grandchild.mjs）',
     '成员队列每一步都必须是合法终局 structured-output 调用：两成员并发共享同一 model-keyed 队列，交错消费下「文本步」会让某成员命中 schema_deterministic 失败（探针实测教训）',
-    'mock-http 游标是 per-model 单游标（server 进程持有）不是 per-pi-进程：本剧本主队跨两段顺序消费、成员队跨两段共用，靠「段 B 前等主队游标 ≥3」衔接（API-CONTRACT L2）',
+    'mock-http 游标是 per-model 单游标（mock server 进程持有，按请求到达序推进）不是 per-pi-进程：本剧本主队跨两段顺序消费、成员队跨两段共用，靠「段 B 前等主队游标 ≥3」衔接（API-CONTRACT L2）',
+    '成员 outcome=done 之后的收尾轮会命中「剧本耗尽」HTTP 404（预期形态）；铁证断言只计 200，404 单列 stats',
     'models.json 的 apiKey 必须是字面量（pi 把 $VAR 当 env 模板、!cmd 当命令）',
   ]
 
@@ -207,6 +209,11 @@ export async function run(ctx) {
   // ══ 段 A：subagent 派发 ══════════════════════════════════════
   const createdA = await protocol.call('session.create', { cwd: repo, label: 'p0-subagent' }, { timeoutMs: 120_000 })
   const sidA = createdA.session?.id
+  ev.assert('A: session.create A 返回 sessionId', Boolean(sidA), {
+    channel: 'B',
+    expected: 'session.id 非空',
+    actual: JSON.stringify(createdA.session ?? {}).slice(0, 300),
+  })
   await protocol.subscribe(sidA)
   log(`段 A session=${sidA} model=${createdA.session?.modelId}`)
   ev.step({ step: 'session.create.A', channel: 'B', exitCode: 0, stats: { sessionId: sidA, modelId: createdA.session?.modelId } })
@@ -269,8 +276,20 @@ export async function run(ctx) {
   ev.attach('subagents-disk', diskText.slice(0, 120_000))
 
   // ══ 段间衔接：等段 A 的完成通知轮把主队游标推到 step3 ══════════
+  // fail-fast：衔接失败继续跑段 B 会产出「B① 假 pass + 后续连环错步失败」的误导组合，
+  // 归因噪音大于增量证据（契约红线 5：失败要能定位到一步），此处直接终止并固化现场。
   const queue = await waitMainQueueConsumed(instance, 3, 90_000)
-  ev.assert('衔接：段 A 通知轮已消费主队前 3 步（防段 B 主轮错步）', queue.ok, {
+  if (!queue.ok) {
+    ev.attach('pending-snapshot', JSON.stringify(instance.mockLlm?.pending() ?? {}, null, 2))
+    ev.attach('mock-requests', JSON.stringify((instance.mockLlm?.requests ?? []).map((r) => ({ model: r.model, status: r.status, stepIndex: r.stepIndex })), null, 2))
+    ev.assert('衔接：段 A 通知轮已消费主队前 3 步（防段 B 主轮错步）', false, {
+      channel: 'C',
+      expected: 'mock-1 队列已消费 ≥3 步',
+      actual: `consumed=${queue.consumed}（pending 与请求记录见附件；主队游标未推进 = 完成通知轮未发生或未消费）`,
+    })
+    return { uncovered: ['衔接失败：段 B 未执行（防错步消费的误导性失败组合）'], gotchas }
+  }
+  ev.assert('衔接：段 A 通知轮已消费主队前 3 步', true, {
     channel: 'C',
     expected: 'mock-1 队列已消费 ≥3 步',
     actual: `consumed=${queue.consumed}`,
@@ -349,21 +368,26 @@ export async function run(ctx) {
   ev.attach('workflow-records', recordText.slice(0, 200_000))
 
   // ══ 铁证：mock 服务端收到的成员模型请求 ═══════════════════════
+  // 只计 HTTP 200：成员 done 后的收尾轮会命中「剧本耗尽」404（预期形态），混入计数会稀释
+  // 「孙进程真的跑到 LLM」的断言强度；404 单列 stats 供核对。
   const allRequests = instance.mockLlm?.requests ?? []
   const childRequests = allRequests.filter((r) => r.model === SUB_MODEL)
+  const childOk = childRequests.filter((r) => r.status === 200)
+  const child404 = childRequests.filter((r) => r.status !== 200)
   ev.step({
     step: 'mock.requests', channel: 'C', exitCode: 0,
     stats: {
       total: allRequests.length,
       main: allRequests.filter((r) => r.model === MAIN_MODEL).length,
-      child: childRequests.length,
+      childOk: childOk.length,
+      child404: child404.length,
       models: [...new Set(allRequests.map((r) => r.model))].join(','),
     },
   })
-  ev.assert('铁证：mock 收到 ≥3 条成员模型请求（段 A 1 + 段 B ≥2）', childRequests.length >= 3, {
+  ev.assert('铁证：mock 收到 ≥3 条成员模型的有效请求（200；段 A 1 + 段 B ≥2）', childOk.length >= 3, {
     channel: 'C',
-    expected: `≥3 × model=${SUB_MODEL}`,
-    actual: `${childRequests.length} 条（steps=${childRequests.map((r) => r.stepIndex).join(',')}）`,
+    expected: `≥3 × model=${SUB_MODEL} status=200`,
+    actual: `${childOk.length} 条 200（steps=${childOk.map((r) => r.stepIndex).join(',')}）+ ${child404.length} 条非 200（耗尽收尾轮，预期）`,
   })
   ev.attach(
     'mock-requests',
@@ -374,6 +398,6 @@ export async function run(ctx) {
     ).slice(0, 120_000),
   )
 
-  log(`done sidA=${sidA} sidB=${sidB} childRequests=${childRequests.length}`)
+  log(`done sidA=${sidA} sidB=${sidB} childOk=${childOk.length} child404=${child404.length}`)
   return { uncovered, gotchas }
 }
