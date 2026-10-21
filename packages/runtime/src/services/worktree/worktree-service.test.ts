@@ -1111,6 +1111,36 @@ describe('WorktreeService base 解析 fallback', () => {
       }),
     )
   })
+
+  it('请求 ref 校验失败且仓库无任何可用基线 → 直接 GIT_FAILED「无可用基线」，不打伪回退 warn、不跑 worktree add', async () => {
+    const deps = createDeps({
+      mode: 'bare-workspace',
+      existingPaths: new Set(['/project/.bare']),
+      gitOverrides: {
+        execResults: new Map([
+          ['rev-parse --verify origin/gone', { stdout: '', stderr: 'unknown revision', exitCode: 128 }],
+          // 无远端 + 本地无 main/master：推导不出任何可解析的默认基线
+          ['remote', { stdout: '', stderr: '', exitCode: 0 }],
+          ['rev-parse --verify refs/heads/main', { stdout: '', stderr: 'not found', exitCode: 128 }],
+        ]),
+      },
+    })
+    const service = new WorktreeService(deps)
+    vi.mocked(logger.warn).mockClear()
+
+    await expect(service.create({ branch: 'feat-x', baseBranch: 'origin/gone', workspaceHint: '/project' }))
+      .rejects.toMatchObject({
+        code: 'GIT_FAILED',
+        message: expect.stringContaining('无可用基线'),
+        detail: { branch: 'feat-x', requestedBaseBranch: 'origin/gone' },
+      })
+    // 此前形态：fallback ≡ 刚校验失败的 'main' 字面，仍打「改用推导默认」warn 再由 git worktree add
+    // 以 invalid reference 失败——现在推导不出即报校验失败，伪回退 warn 与注定失败的 add 都不发生
+    expect(logger.warn).not.toHaveBeenCalledWith(expect.stringContaining('base 解析 fallback'), expect.anything())
+    expect(deps.gitExecutor.exec).not.toHaveBeenCalledWith(
+      expect.anything(), 'worktree', expect.arrayContaining(['add']), expect.anything(),
+    )
+  })
 })
 
 // ── base 动态推导（auto 哨兵 + 幽灵 remote-tracking ref 防护，2026-10-20 事故修复）──
@@ -1143,6 +1173,31 @@ describe('WorktreeService base 动态推导', () => {
 
     const result = await service.create({ branch: 'feat-auto', workspaceHint: '/project' })
     expect(result.usedBaseRef).toBe('main')
+  })
+
+  it('无远端且本地无 main/master 的 auto → GIT_FAILED「无可用基线」（不把未验证的 main 交给 worktree add）', async () => {
+    const deps = createDeps({
+      mode: 'bare-workspace',
+      existingPaths: new Set(['/project/.bare']),
+      gitOverrides: {
+        execResults: new Map([
+          ['remote', { stdout: '', stderr: '', exitCode: 0 }],
+          ['rev-parse --verify refs/heads/main', { stdout: '', stderr: 'not found', exitCode: 128 }],
+        ]),
+      },
+    })
+    ;(deps.configService.getDefaultBaseBranch as ReturnType<typeof vi.fn>).mockReturnValue('auto')
+    const service = new WorktreeService(deps)
+
+    await expect(service.create({ branch: 'feat-auto', workspaceHint: '/project' }))
+      .rejects.toMatchObject({
+        code: 'GIT_FAILED',
+        message: expect.stringContaining('无可用基线'),
+        detail: { branch: 'feat-auto', requestedBaseBranch: 'auto' },
+      })
+    expect(deps.gitExecutor.exec).not.toHaveBeenCalledWith(
+      expect.anything(), 'worktree', expect.arrayContaining(['add']), expect.anything(),
+    )
   })
 
   it('幽灵 remote-tracking ref（远端未配置但 ref 残留）→ 拒绝采信 + warn + fallback 推导默认', async () => {

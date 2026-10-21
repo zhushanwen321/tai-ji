@@ -40,9 +40,10 @@ const DEFAULT_TIMEOUT = 300
 const TIMEOUT_MAX = 3600
 /**
  * 默认 base branch：'auto' 哨兵——create 时按仓库远端实况动态推导（checkout.defaultRemote →
- * origin → 单一远端 → 清单首个；无远端用本地 main，见 default-base-resolver）。
- * 不再硬编码 'origin/main'：bare workspace 远端可叫别的名字，且 refs/remotes/origin/*
- * 可能残留无更新通道的死数据（2026-10-20 事故：镜像冻结三天，新 worktree 落后 271 提交）。
+ * origin → 单一远端 → 清单首个；无远端退本地 main/master，恒经 rev-parse 验证，见
+ * default-base-resolver）。不再硬编码 'origin/main'：bare workspace 远端可叫别的名字，且
+ * refs/remotes/origin/* 可能残留无更新通道的死数据（2026-10-20 事故：镜像冻结三天，新
+ * worktree 落后 271 提交）。
  */
 const DEFAULT_BASE_BRANCH = AUTO_BASE_BRANCH
 

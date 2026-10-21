@@ -9,7 +9,8 @@
  * production 由 index.ts 传真实实现，测试传 mock。此模式让 WorktreeService 单测完全隔离 IO。
  *
  * 错误对象用 `Object.assign(new Error(msg), { code, detail })` 扁平模式（非 class）——
- * 测试用 toMatchObject 断言 code/detail，详见 port 注释。
+ * 测试用 toMatchObject 断言 code/detail，详见 port 注释；工厂 = worktree-error.ts 的
+ * worktreeError（与 base-ref-resolution.ts 共用）。
  *
  * 编排顺序与测试严格对齐：
  * 1. detect → 三态判定（bare-workspace / plain-repo / not-repo）
@@ -32,7 +33,6 @@ import {
   type GitRevParser,
   type WorkspaceDetectResult,
 } from './workspace-detector.js'
-import type { WorktreeErrorCode } from '@taiji/shared'
 import { INVALID_BRANCH_REGEX } from '@taiji/shared'
 import type { IShellRunner, ShellRunnerResult } from '../ports/shell-runner.js'
 import { ShellRunnerError } from '../ports/shell-runner.js'
@@ -42,6 +42,7 @@ import { logger } from '../../infra/logger.js'
 import { DefaultBaseResolver } from './default-base-resolver.js'
 import { resolveWorktreeBaseRef } from './base-ref-resolution.js'
 import { prefetchDefaultRemoteWorktree } from './worktree-prefetch.js'
+import { worktreeError } from './worktree-error.js'
 import type {
   IWorktreeService,
   WorktreeCreateParams,
@@ -95,7 +96,7 @@ export interface WorktreeServiceDeps {
   }
 }
 
-/** 主分支 fallback（origin/main ref 不存在时用本地 main）。 */
+/** 分支名缺省占位（'main'）：listBranches 的 defaultBranch / defaultBaseRef 在检测或推导失败时的 UI 缺省建议——创建路径不依赖它（base 解析对无可用基线显式报错）。 */
 const LOCAL_MAIN = 'main'
 
 /** 半成品判定：worktree 目录内 .git 入口（file，指向主仓 worktrees 元数据）。 */
@@ -134,14 +135,6 @@ const STDERR_LOG_TAIL_LENGTH = 2048
  * - `\/$`：以 / 结尾（git refname 禁止）
  * - `\.lock$`：.lock 后缀（git refname 保留）
  */
-
-/**
- * 构造 WorktreeService 扁平错误（code 类型编译时校验为 WorktreeErrorCode）。
- * 错误对象形状：`Error & { code: WorktreeErrorCode; detail?: unknown }`。
- */
-function worktreeError(code: WorktreeErrorCode, message: string, detail?: unknown): Error {
-  return Object.assign(new Error(message), detail !== undefined ? { code, detail } : { code })
-}
 
 /** 展开 ~ 前缀到 $HOME（路径字符串预处理，path.join 不展开 ~）。不处理 ~user/ 格式（仅支持当前用户的 ~）。 */
 function expandHome(p: string): string {
@@ -198,12 +191,13 @@ export class WorktreeService implements IWorktreeService {
       defaultBranch: result.defaultBranch,
     }
     // 推导默认 base（远端实况）：repo 两态附带，前端建 worktree 的默认基线直接可用；
-    // 解析失败（git 不可用/超时）safeResolve 内部降级返回 null——reply 缺省该字段，
-    // 三态结果本身不受影响
+    // 解析失败（git 不可用/超时）safeResolve 内部降级返回 null，defaultBaseRef 推导不出
+    // 可用基线（远端无默认分支且本地无 main/master）时为 null——两者都缺省该字段，
+    // 不给前端一个不存在的建议 ref；三态结果本身不受影响
     if (result.mode !== 'not-repo') {
       const repoDir = result.mode === 'bare-workspace' ? result.barePath : result.repoRoot
       const derived = await this.baseResolver.safeResolve(repoDir)
-      if (derived) reply.defaultBaseRef = derived.defaultBaseRef
+      if (derived?.defaultBaseRef) reply.defaultBaseRef = derived.defaultBaseRef
     }
     return reply
   }
@@ -321,7 +315,8 @@ export class WorktreeService implements IWorktreeService {
     const defaultBranch = detection.defaultBranch || LOCAL_MAIN
 
     // 远端实况：remote 列表过滤 + defaultBaseRef 一次取齐。safeResolve 在 git 不可用/
-    // 超时时降级返回 null——过滤退化为不过滤（保留旧行为）+ defaultBaseRef 本地 main 兜底
+    // 超时时降级返回 null，defaultBaseRef 推导不出可用基线时也为 null——两者都退本地
+    // 'main' 占位（UI 缺省建议文案；真实创建走 base 解析，对无可用基线会精确报错）
     const resolution = await this.baseResolver.safeResolve(repoDir)
     const remotes = resolution?.remotes ?? null
     const defaultBaseRef = resolution?.defaultBaseRef ?? LOCAL_MAIN

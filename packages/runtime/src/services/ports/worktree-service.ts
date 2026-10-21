@@ -27,8 +27,9 @@ export interface WorkspaceDetectResult {
   defaultBranch: string
   /**
    * 推导默认 base ref（如 'github/main'）：按仓库远端实况动态推导（checkout.defaultRemote →
-   * origin → 单一远端 → 清单首个；无远端用本地 main）。repo 两态附带；
-   * 解析失败或 not-repo 缺省。前端建 worktree 的默认基线直接用它，不再自拼 origin/*。
+   * origin → 单一远端 → 清单首个；无远端退本地 main/master），恒经 rev-parse 验证可解析。
+   * repo 两态附带；解析失败或推导不出可用基线（远端无默认分支且本地无 main/master）时
+   * 缺省。前端建 worktree 的默认基线直接用它，不再自拼 origin/*。
    */
   defaultBaseRef?: string
 }
@@ -81,7 +82,7 @@ export interface WorktreeBranchListResult {
   remote: string[]
   /** 默认分支名（如 'main'）。检测不到则为空串。 */
   defaultBranch: string
-  /** 推导默认 base ref（如 'github/main'，远端实况动态推导）；解析失败为本地 'main'。 */
+  /** 推导默认 base ref（如 'github/main'，远端实况推导，恒经 rev-parse 验证）；解析失败或推导不出可用基线时为本地 'main' 占位（UI 缺省建议；创建路径对无可用基线另作精确报错）。 */
   defaultBaseRef: string
 }
 
@@ -111,7 +112,8 @@ export interface WorktreeListResult {
  * - WORKTREE_EXISTS：目标 worktree 目录已存在。detail = { cwd, dirName }，
  *   前端可核对 dirName 是否与当前请求分支一致——区分「同分支已存在」与
  *   「另一分支名映射同目录碰撞」（feat/a 与 feat-a 映射同目录）。
- * - GIT_FAILED：git worktree add 失败（exitCode 非 0）
+ * - GIT_FAILED：git worktree add 失败（exitCode 非 0），或 base 解析不出任何可用基线
+ *   （远端无可识别默认分支且本地无 main/master，detail 带 requestedBaseBranch）
  * - SETUP_FAILED：setup-worktree.sh 失败（exitCode 非 0），detail 含 exitCode + stderr
  */
 export interface IWorktreeService {
