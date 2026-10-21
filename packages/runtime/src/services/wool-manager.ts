@@ -40,6 +40,7 @@ import {
   type WoolFamilyState,
   type WoolManifestFetchResult,
   type WoolRuntimeSnapshot,
+  type WoolUninstallResult,
 } from '@taiji/shared'
 import type { ISessionService } from '../interfaces.js'
 import { toErrorMessage } from '../utils/errors.js'
@@ -58,7 +59,7 @@ function woolManageCommandName(family: string): string {
   return `wool-${family}`
 }
 
-/** 资产清单缺省挂点（M5 实施期裁决，deviations 登记）：taiji GitHub release 最新版资产。 */
+/** 资产清单缺省挂点（M5 实施期裁决，deviations 登记 = 设计目录 wool-provider/deviations.md DEV-1）：taiji GitHub release 最新版资产。 */
 export const DEFAULT_WOOL_MANIFEST_URL =
   'https://github.com/zhushanwen321/tai-ji/releases/latest/download/wool-manifest.json'
 /** 清单拉取超时（控制范围单请求粒度，红线 19：秒级）。 */
@@ -81,6 +82,19 @@ const CATALOG_LOAD_POLL_INTERVAL_MS = 250
 const CATALOG_CACHE_FILENAME = 'wool-catalog.json'
 /** 目录缓存 JSON 缩进宽度（2 空格，人可读审计形态）。 */
 const CATALOG_CACHE_JSON_INDENT = 2
+/**
+ * 每日签到提醒时点（本地时 09:00，D5「到点提醒」的产品功能定时）。选型说明：设计未钉
+ * 具体时点，取「工作日上午开始」作缺省——签到额度按日刷新，上午 9 点覆盖「当天首次
+ * 打开工作台」主流形态；时点只影响提醒新鲜度，不改变签到可用性（用户全天可手动签到）。
+ */
+const DAILY_CHECKIN_REMINDER_HOUR = 9
+/**
+ * 会话错误 401/未授权分类（noteSessionError 消费）。词界 401 防相邻数字误命中（上游
+ * 错误码 4011 = 限流惩罚窗，非鉴权失败）；not_logged_in = wool-shared 管理错误码透传形态。
+ */
+const SESSION_AUTH_ERROR_RE = /\b401\b|unauthorized|not_logged_in/i
+/** 会话错误「模型不存在」分类（pi 实装文案 Model not found——缺凭据同文案，按 D6 ③ 裁决走清单重新拉取）。 */
+const SESSION_MODEL_MISSING_RE = /model not found|no such model|unknown model/i
 
 /** settings.json 羊毛域持久化形状（`wool` 键；scope 声明见 pi-settings-store SCOPE_FIELDS.wool）。 */
 export interface WoolSettingsDomain {  // oe-exempt:20261022:framework:依赖注入端口模式——settings 域端口，生产实装 pi-settings-store + 测试 stub 双实现（stub 在 tests 目录不进检查计数）
@@ -128,6 +142,8 @@ export interface WoolSessionPort {  // oe-exempt:20261022:framework:依赖注入
 export interface WoolExtensionPort {  // oe-exempt:20261022:framework:依赖注入端口模式——扩展安装端口，生产 extension-service + 测试 stub 双实现
   scanExtensions(): Promise<Array<{ name: string; version: string; enabled: boolean }>>
   installExtension(source: string): Promise<void>
+  /** 卸载（D3 卸载编排第三步：既有 extension-service uninstallExtension 链——目录删除 + settings 登记/npm uninstall 全既有）。 */
+  uninstallExtension(name: string): Promise<void>
 }
 
 /** settings.json 羊毛域读写 port（组合根以 pi-settings-store 闭包装配；services 层不 import infra）。 */
@@ -156,6 +172,11 @@ export interface WoolManagerDeps {  // oe-exempt:20261022:framework:依赖注入
   manageResponseWaitMs?: number
   /** 管理响应轮询间隔（测试压缩用；生产缺省 MANAGE_RESPONSE_POLL_INTERVAL_MS）。 */
   manageResponsePollIntervalMs?: number
+  /**
+   * 每日签到提醒定时器延迟（测试注入用；缺省 = 到下一个本地时 09:00 的实际毫秒数）。
+   * 注入 0 使定时器立即触发，单测可验证到点编排全链。
+   */
+  dailyCheckinDelayMs?: number
 }
 
 /** 管理响应 envelope 形状守卫（与 wool-shared isWoolManageResponse 同构镜像；本域只消费）。 */
@@ -216,6 +237,12 @@ export class WoolManager {
   private detectCache = new Map<WoolFamilyId, WoolDetectResultView>()
   /** 模型目录缓存（key = family；持久化 wool-catalog.json + 内存镜像）。 */
   private catalogCache = new Map<WoolFamilyId, WoolCatalogView>()
+  /** 每日签到提醒定时器句柄（D5 产品功能定时；unref 不阻止进程退出，dispose 清除）。 */
+  private dailyCheckinTimer: NodeJS.Timeout | undefined
+  /** dispose 已置位标记（定时器回调 fire 后的重排护栏——timer 已出队时 clearTimeout 追不上）。 */
+  private disposed = false
+  /** 报错触发目录刷新的在途护栏（key = family；并发错误帧只触发一次刷新编排）。 */
+  private readonly errorRefreshInFlight = new Set<WoolFamilyId>()
 
   constructor(deps: WoolManagerDeps) {
     this.deps = deps
@@ -224,9 +251,10 @@ export class WoolManager {
   }
 
   /**
-   * 启动恢复（组合根 fire-and-forget 调用）：读目录缓存文件 + 扫安装态。两类失败都
-   * 只 warn 降级（缓存缺失 = 设置页显示无缓存态，可手动刷新重建；安装态扫描失败 =
-   * installed 判 false，下次安装编排纠正）。
+   * 启动恢复（组合根 fire-and-forget 调用）：读目录缓存文件 + 扫安装态 + best-effort
+   * 拉一次资产清单（D2 更新角标数据源——重启后 manifestCache 为空则角标无从派生）。
+   * 各步失败都只 warn 降级（缓存缺失 = 设置页显示无缓存态；安装态扫描失败 =
+   * installed 判 false；清单不可达 = 角标不亮，动作期重拉），不阻塞启动。
    */
   async initialize(): Promise<void> {
     this.loadCatalogCacheFile()
@@ -236,6 +264,125 @@ export class WoolManager {
       // best-effort 降级：安装态扫描失败 = installed 判 false（下次安装编排纠正），不阻塞启动。
       console.warn(`[wool-manager] installed-cache scan failed: ${toErrorMessage(e)}`)
     }
+    const fetched = await this.fetchManifest()
+    if (!fetched.ok) {
+      // best-effort 降级：清单拉取失败不阻断启动（角标暂不派生；install 动作期会再拉并阻断）。
+      console.warn(`[wool-manager] startup manifest fetch failed (update badge degraded): ${fetched.error.message}`)
+    }
+  }
+
+  // ── 每日签到提醒（D5：定时器在 taiji 侧，产品功能定时白名单形态）────────
+
+  /**
+   * 启动每日签到提醒定时器（组合根 initialize 后调用一次）。到点编排：
+   * autoCheckin 开 = 经管理通道自动执行签到（D5「触发后经管理通道调扩展执行」）；
+   * autoCheckin 关（默认）= 拉一次账号状态并广播——「今日未签到」徽标以新鲜数据点亮，
+   * 即「到点提醒你手动签到」的呈现载体（签到徽标点击即手动签到）。错过的时点不补
+   * （进程未运行的时段无提醒，次日到点再来；当日手动签到入口全天可用）。
+   */
+  startDailyCheckinTimer(): void {
+    this.stopDailyCheckinTimer()
+    const delayMs = this.deps.dailyCheckinDelayMs ?? this.msUntilNextDailyCheckin()
+    this.dailyCheckinTimer = setTimeout(() => {
+      // fire 后重排护栏：dispose 在 clearTimeout 与本回调之间执行时，此处不再重排。
+      if (this.disposed) return
+      void this.runDailyCheckinTick()
+      // 链式排程次日（tick 失败不断链——下一时点照常触发）。
+      this.startDailyCheckinTimer()
+    }, delayMs)
+    this.dailyCheckinTimer.unref()
+  }
+
+  /** 到下一个提醒时点（本地时 09:00）的毫秒数；已过今日时点 = 明日同时。 */
+  private msUntilNextDailyCheckin(): number {
+    const now = new Date(this.now())
+    const next = new Date(
+      now.getFullYear(), now.getMonth(),
+      now.getDate() + (now.getHours() >= DAILY_CHECKIN_REMINDER_HOUR ? 1 : 0),
+      DAILY_CHECKIN_REMINDER_HOUR,
+    )
+    return Math.max(next.getTime() - now.getTime(), 1)
+  }
+
+  /**
+   * 到点编排（公开 = 单测直调入口；定时器到点触发同函数）。逐家族独立降级：单家族
+   * 编排失败（管理会话不可达/上游失败）只 warn，不阻断其余家族与整体广播。
+   */
+  async runDailyCheckinTick(): Promise<void> {
+    const settings = this.deps.settings.read()
+    for (const family of ['qoder', 'trae', 'workbuddy'] as const) {
+      const entry = settings.families?.[family]
+      if (entry?.adopted !== true) continue
+      try {
+        if (entry.autoCheckin === true) {
+          await this.checkinFamily(family)
+        } else {
+          // 提醒形态 = 账号状态新鲜化（not_logged_in 走 fetchAccountStatus 既有分支写
+          // loggedIn:false 失效态——徽标数据照常更新，catch warn 不放大）。
+          await this.fetchAccountStatus(family).catch(() => undefined)
+        }
+      } catch (e) {
+        // 辅助链降级：单家族到点失败只 warn（下一天再触发；用户手动入口不受影响）。
+        console.warn(`[wool-manager] daily checkin tick failed (family=${family}): ${toErrorMessage(e)}`)
+      }
+    }
+    this.broadcastState()
+  }
+
+  /** 停每日提醒定时器（dispose 路径；幂等）。 */
+  private stopDailyCheckinTimer(): void {
+    if (this.dailyCheckinTimer !== undefined) {
+      clearTimeout(this.dailyCheckinTimer)
+      this.dailyCheckinTimer = undefined
+    }
+  }
+
+  /** 生命周期收尾（组合根 shutdown 调用）：置 disposed 护栏 + 停定时器。无其他待回收资源（管理会话即起即收）。 */
+  dispose(): void {
+    this.disposed = true
+    this.stopDailyCheckinTimer()
+  }
+
+  // ── 会话错误分类（D6 ③ 报错时刷新 + 失败路径表对话 401 分类）────────────
+
+  /**
+   * 会话错误文本分类入口（组合根在 event-adapter interpret 旁路喂错误帧文本，
+   * resumeDecision.observe 同款隔离范式——wool-manager 只做分类与缓存编排）。
+   * 保守归属：文本含 `wool-<family>`（pi 错误文案携带 provider id 形态）才命中家族，
+   * 不带羊毛标识的错误不误触发。命中后二分：
+   * - 401/未授权类 → 账号缓存置失效 + 广播（失效徽标判定源之二，失败路径表「对话
+   *   401 分类」——与 status 拉取判定源「任一命中」）；
+   * - 模型不存在类 → 触发一次目录刷新（D6 ③「选不存在的模型报错→清单重新拉取收敛」；
+   *   在途护栏防并发编排堆积）。
+   */
+  noteSessionError(errorText: string): void {
+    if (typeof errorText !== 'string' || errorText.length === 0) return
+    for (const family of ['qoder', 'trae', 'workbuddy'] as const) {
+      if (!errorText.includes(woolProviderId(family))) continue
+      if (SESSION_AUTH_ERROR_RE.test(errorText)) {
+        const prev = this.accountCache.get(family)
+        this.accountCache.set(family, {
+          loggedIn: false,
+          fetchedAt: this.now(),
+          ...(prev?.nickname !== undefined ? { nickname: prev.nickname } : {}),
+        })
+        this.broadcastState()
+      } else if (SESSION_MODEL_MISSING_RE.test(errorText)) {
+        this.triggerErrorCatalogRefresh(family)
+      }
+      return
+    }
+  }
+
+  /** 报错触发的目录刷新（fire-and-forget；同家族在途不重复编排）。 */
+  private triggerErrorCatalogRefresh(family: WoolFamilyId): void {
+    if (this.errorRefreshInFlight.has(family)) return
+    this.errorRefreshInFlight.add(family)
+    void this.refreshCatalog(family)
+      .catch((e: unknown) => {
+        console.warn(`[wool-manager] error-triggered catalog refresh failed (family=${family}): ${toErrorMessage(e)}`)
+      })
+      .finally(() => this.errorRefreshInFlight.delete(family))
   }
 
   // ── 快照组装（纯内存读，设置页 wool.getState 零 IO 即时回）──────────────
@@ -246,6 +393,12 @@ export class WoolManager {
       const manifestEntry = this.manifestCache?.manifest.families[family]
       const settingsEntry = this.deps.settings.read().families?.[family]
       const installed = this.installedCache.get(family)
+      // D2 更新角标数据源：已装且清单已拉到、且清单版本 ≠ 已装版本 = 可更新（钉版本语义
+      // 下清单 version 即目标版本，字符串不等即版本差异；点击角标触发 install 即钉版本升级）。
+      const updateAvailable = installed?.installed === true &&
+        manifestEntry !== undefined &&
+        installed.version !== undefined &&
+        installed.version !== manifestEntry.version
       families.push({
         family,
         displayName: manifestEntry?.displayName ?? family,
@@ -256,6 +409,7 @@ export class WoolManager {
           '非官方接口：使用你自己的账号额度，存在账号风控与接口变动风险；凭据与协议实装仅在本机运行',
         installed: installed?.installed ?? false,
         ...(installed?.version !== undefined ? { installedVersion: installed.version } : {}),
+        ...(updateAvailable ? { updateAvailable: true } : {}),
         adopted: settingsEntry?.adopted ?? false,
         autoCheckin: settingsEntry?.autoCheckin ?? false,
         account: this.accountCache.get(family) ?? null,
@@ -311,6 +465,8 @@ export class WoolManager {
         return this.authorizeFamily(req.family)
       case 'extract':
         return this.extractFamily(req.family)
+      case 'uninstall':
+        return this.uninstallFamily(req.family)
       default: {
         // 词表外 action：WoolActionRequest 类型层已穷举，运行时到达 = 协议漂移，fail-fast。
         throw new WoolActionError('invalid_request', `未知动作 ${String((req as { action?: unknown }).action)}`)
@@ -579,8 +735,9 @@ export class WoolManager {
   /**
    * refresh：经管理会话读 pi registry 的羊毛模型清单（get_available_models 过滤
    * provider = wool-<family>）。pi registry 是唯一权威，本动作只做派生缓存刷新；
-   * 带网强刷（force refresh）无 RPC 通道（设计↔实装差异，deviations 登记）——目录
-   * 新鲜度由扩展侧 refreshModels 触发时机决定。
+   * 带网强刷（force refresh）无 RPC 通道（设计↔实装差异，deviations 登记 =
+   * 设计目录 wool-provider/deviations.md DEV-2）——目录新鲜度由扩展侧 refreshModels
+   * 触发时机决定。
    */
   private async refreshCatalog(family: WoolFamilyId): Promise<WoolCatalogView> {
     return this.withManageSession(family, async (sid) => {
@@ -689,6 +846,57 @@ export class WoolManager {
     const families = { ...(settings.families ?? {}) }
     families[family] = { ...(families[family] ?? {}), adopted: true }
     this.deps.settings.write({ ...settings, families })
+  }
+
+  // ── 卸载编排（D3 三步：clear 凭据与 persist → 包卸载 → 羊毛域清除）────────
+
+  /**
+   * uninstall：D3 卸载 = 视为放弃接入，清理编排三步。第一步 clear 经管理会话透传扩展侧
+   * 同名动作（清除 pi auth.json 凭据 + persist 模型目录）——**失败不阻断卸载**（清理指令
+   * 不可达 = 扩展损坏形态，按 D3 降级：卸载照常完成 + credentialsCleared=false 残留提示，
+   * 不静默残留）；第二步既有 extension-service 卸载链（失败 = 动作整体失败回执）；
+   * 第三步 settings 羊毛域清除 + 全部缓存清理（目录缓存持久化文件同步重写，条目从
+   * 选择器聚合源消失）。
+   */
+  private async uninstallFamily(family: WoolFamilyId): Promise<WoolUninstallResult> {
+    let credentialsCleared = false
+    try {
+      await this.withManageSession(family, async (sid) => {
+        const response = await this.runManageCommand(sid, family, 'clear')
+        if (!response.ok) {
+          throw new WoolActionError(mapManageErrorCode(response.code), `凭据清除失败：${response.message}`)
+        }
+      })
+      credentialsCleared = true
+    } catch (e) {
+      // D3 降级形态：清理指令不可达（扩展未装/未启用/加载失败/损坏）不阻断卸载主链——
+      // 残留事实经 credentialsCleared=false 显式上呈，由 renderer 呈现手动清除指引。
+      console.warn(`[wool-manager] credential clear unreachable before uninstall (family=${family}): ${toErrorMessage(e)}`)
+    }
+    try {
+      await this.deps.extensionService.uninstallExtension(`@zhushanwen/pi-wool-${family}`)
+    } catch (e) {
+      throw new WoolActionError(
+        'uninstall_failed',
+        `扩展卸载失败：${toErrorMessage(e)}。请到扩展管理页重试卸载；凭据清除${credentialsCleared ? '已完成' : '未执行（残留提示见前）'}`,
+      )
+    }
+    // settings 羊毛域清除该家族条目（adopted/autoCheckin/nickname 全清 = 放弃接入语义）。
+    const settings = this.deps.settings.read()
+    const families = { ...(settings.families ?? {}) }
+    delete families[family]
+    this.deps.settings.write({ ...settings, families })
+    // 缓存清理：安装态/账号/检测/目录四缓存 + 目录缓存文件重写（聚合源条目随之消失）。
+    this.installedCache.delete(family)
+    this.accountCache.delete(family)
+    this.detectCache.delete(family)
+    this.catalogCache.delete(family)
+    this.persistCatalogCacheFile()
+    if (credentialsCleared) return { credentialsCleared: true }
+    return {
+      credentialsCleared: false,
+      residualHint: `扩展已卸载，但凭据清除指令不可达：pi 凭据库（auth.json）与模型目录缓存可能残留 ${family} 家族数据。请在 pi 侧执行登出，或到上游账号页吊销该应用授权后重跑接入。`,
+    }
   }
 
   // ── 目录缓存持久化（QuotaCache 同形态：<dataDir>/wool-catalog.json 原子写）──

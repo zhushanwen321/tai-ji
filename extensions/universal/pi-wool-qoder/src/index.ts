@@ -122,6 +122,8 @@ export default function piWoolQoder(pi: ExtensionAPI): void {
 			// 签到交付物在 WorkBuddy 域）——显式报不支持，不静默假成功。
 			checkin: async () => ({ supported: false, reason: "Qoder check-in is not implemented in this extension version" }),
 			// 凭据权威在 pi auth.json（宿主经 Models.logout 清除）；这里只清进程内副本。
+			// pi persist 的模型目录删除由 scaffold clear 编排统一承担（D3 卸载编排②，
+			// 响应并入 persistCleared 字段）。
 			clear: async () => {
 				authStore.clear();
 				return {

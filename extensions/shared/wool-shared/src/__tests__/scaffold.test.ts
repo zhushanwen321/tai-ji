@@ -201,6 +201,88 @@ describe("defineWoolExtension 接线", () => {
 		});
 	});
 
+	describe("clear 编排（D3 卸载编排②：persist:null 通道）", () => {
+		type MockPi = ReturnType<typeof mockPi>;
+		async function runClearCommand(
+			mock: MockPi,
+		): Promise<{ family: string; response: { v: number; ok: boolean; data?: unknown } } | undefined> {
+			const manage = mock.commands.find((command) => command.name === "wool-qoder");
+			expect(manage).toBeDefined();
+			await manage!.options.handler(JSON.stringify({ v: 1, action: "clear" }));
+			const last = mock.entries.filter((entry) => entry.type === "wool-manage-response").at(-1);
+			return last?.data as { family: string; response: { v: number; ok: boolean; data?: unknown } } | undefined;
+		}
+
+		it("动态 provider：家族 clear 后 publish({persist:null}) 删 persist 目录 + 清进程内清单，响应并入 persistCleared:true", async () => {
+			const mock = mockPi();
+			let familyClearCalled = false;
+			defineWoolExtension(
+				echoDefinition({
+					fetchModels: async () => [],
+					manageHandlers: {
+						status: async () => ({}),
+						detect: async () => ({}),
+						checkin: async () => ({}),
+						clear: async () => {
+							familyClearCalled = true;
+							return { cleared: true, note: "family-side clear" };
+						},
+					},
+				}),
+			)(mock.pi);
+			const providers = (mock.pi as unknown as { providers: Map<string, ProviderConfig> }).providers;
+			// refreshModels 先跑一次：建立 publish 通道（模拟管理会话 spawn 时的离线恢复阶段）。
+			const context = refreshContext({ allowNetwork: false });
+			await providers.get("wool-qoder")?.refreshModels?.(context);
+
+			const entry = await runClearCommand(mock);
+			expect(familyClearCalled).toBe(true);
+			const publications = (context as RefreshModelsContext & { publications: ModelsPublication[] }).publications;
+			expect(publications.some((publication) => publication.persist === null)).toBe(true);
+			expect(entry?.response.ok).toBe(true);
+			expect(entry?.response.data).toMatchObject({ cleared: true, persistCleared: true });
+		});
+
+		it("静态清单 provider：无 refreshModels 通道，clear 回 persistCleared:false（如实报告无可清）", async () => {
+			const mock = mockPi();
+			defineWoolExtension(
+				echoDefinition({
+					manageHandlers: {
+						status: async () => ({}),
+						detect: async () => ({}),
+						checkin: async () => ({}),
+						clear: async () => ({ cleared: false }),
+					},
+				}),
+			)(mock.pi);
+			const entry = await runClearCommand(mock);
+			expect(entry?.response.ok).toBe(true);
+			expect(entry?.response.data).toMatchObject({ cleared: false, persistCleared: false });
+		});
+
+		it("refreshModels 从未跑过的动态 provider：clear 回 persistCleared:false，家族 clear 仍执行", async () => {
+			const mock = mockPi();
+			let familyClearCalled = false;
+			defineWoolExtension(
+				echoDefinition({
+					fetchModels: async () => [],
+					manageHandlers: {
+						status: async () => ({}),
+						detect: async () => ({}),
+						checkin: async () => ({}),
+						clear: async () => {
+							familyClearCalled = true;
+							return {};
+						},
+					},
+				}),
+			)(mock.pi);
+			const entry = await runClearCommand(mock);
+			expect(familyClearCalled).toBe(true);
+			expect(entry?.response.data).toMatchObject({ persistCleared: false });
+		});
+	});
+
 	describe("streamSimple", () => {
 		it("经骨架执行家族 stream：事件流纪律成立", async () => {
 			const { pi, providers, sessionStartHandlers } = mockPi();

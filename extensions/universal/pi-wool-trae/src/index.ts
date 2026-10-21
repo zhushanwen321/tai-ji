@@ -217,7 +217,8 @@ export default defineWoolExtension({
 		// 签到不属于 Trae 首版范围（设计 D5 自动签到是 WorkBuddy 域；Trae 无独立签到端点实装）。
 		checkin: async () => ({ supported: false }),
 		// 扩展无自治存储：凭据权威在 pi auth.json（宿主经 Models.logout 清除），
-		// 模型目录持久化在 pi models-store.json（宿主经 registry refresh/publish 清除）。
+		// 模型目录持久化在 pi models-store.json——两者均不归本 handler：persist 目录
+		// 由 scaffold clear 编排统一经 publish({persist:null}) 删除（D3 卸载编排②）。
 		clear: async () => ({ cleared: false, note: "credentials live in pi auth.json — host invokes Models.logout" }),
 	},
 });

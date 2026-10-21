@@ -145,6 +145,13 @@ export function defineWoolExtension(definition: WoolFamilyExtensionDefinition): 
 			loadSnapshot: snapshotLoaderFor(definition),
 		});
 
+		// D3 卸载编排② 的持久化目录删除通道：保存最近一次 refreshModels 的 publish
+		// 引用（clear 编排消费）。publish 是世代校验的（pi-ai models.js
+		// publishProviderModels：同 provider 新 refresh 开始后旧引用返回 false 不生效）；
+		// 管理专用会话即起即收、clear 后无新 refresh，通道稳定。静态清单 provider 无
+		// refreshModels → 通道恒缺位（本来从未写过 persist，无可清）。
+		let publishPersistClear: (() => Promise<boolean>) | undefined;
+
 		// streamSimple 执行期的凭据解析器：经 session_start 捕获 ctx.modelRegistry
 		//（ExtensionContext 上的公开 registry facade）。turn 执行时 session_start
 		// 必已跑过；未捕获即执行 streamSimple 属生命周期 bug，fail-fast 拒绝发请求。
@@ -179,6 +186,7 @@ export function defineWoolExtension(definition: WoolFamilyExtensionDefinition): 
 						// 返回类型 = pi legacy 契约的宽类型（ProviderModelConfig 联合）；
 						// 家族 fetchModels 产出的完整 chat 模型是其结构子集，直通赋值。
 						refreshModels: async (context: RefreshModelsContext): Promise<ProviderModelConfig[]> => {
+							publishPersistClear = () => context.publish({ persist: null });
 							// 阶段 1（allowNetwork=false）：恢复 persist 目录；persist 为空时回落包内快照。
 							store.restore(context.stored as ModelsStoreEntry | undefined);
 							if (!context.allowNetwork) {
@@ -230,7 +238,26 @@ export function defineWoolExtension(definition: WoolFamilyExtensionDefinition): 
 		});
 
 		if (definition.manageHandlers !== undefined) {
-			registerWoolManageCommand(pi, { family: definition.familyId, handlers: definition.manageHandlers });
+			const familyHandlers = definition.manageHandlers;
+			registerWoolManageCommand(pi, {
+				family: definition.familyId,
+				handlers: {
+					...familyHandlers,
+					// clear 编排 = 家族 clear（进程内凭据面）+ D3 卸载编排②：publish({persist:null})
+					// 删除 pi persist 的持久化模型目录 + 进程内清单清空。persistCleared 如实
+					// 报告删除结果（false = 无通道〔静态清单/refreshModels 未跑〕或世代过期未生效）。
+					clear: async (params) => {
+						const familyResult = await familyHandlers.clear(params);
+						const persistCleared = publishPersistClear !== undefined && (await publishPersistClear());
+						store.replace([], "empty");
+						const base =
+							typeof familyResult === "object" && familyResult !== null && !Array.isArray(familyResult)
+								? (familyResult as Record<string, unknown>)
+								: {};
+						return { ...base, persistCleared };
+					},
+				},
+			});
 		}
 	};
 }
