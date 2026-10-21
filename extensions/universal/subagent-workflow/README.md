@@ -11,7 +11,7 @@ Pi 的 subagent + workflow 合并包：任务委派 + 多 agent 编排（chain /
 | `subagent_message` | `message` / `fork-from`（2 个） | `message`：`subagentId` + `text` 必填；`fork-from`：`sourceSubagentId` 必填 |
 | `subagents` | —（单动作，批量派发，常驻） | `tasks` 必填（成员对象数组，每元素 `{task, agent?, model?, thinkingLevel?}` 为一次派发，全部并行、结果一条通知收尾），可选运行级 `agent` / `model` / `thinkingLevel`（成员缺省值）与 `slug`、`tokens`、`time`；run 级状态控制走 `workflow_control`。形状与示例见「批量派发（`subagents`）」节 |
 | `workflow_run` | —（单动作） | `name`（`.js` 绝对路径）+ 可选 `args` / 预算，见「Workflow 生命周期」节 |
-| `workflow_control` | `status` / `abort` / `resume`（3 个） | `abort` / `resume`：`runId` 必填，见「Workflow 生命周期」节 |
+| `workflow_control` | `status` / `abort` / `resume`（3 个） | `status`：可选 `runId`（带 = 单 run 成员表视图）；`abort` / `resume`：`runId` 必填，见「Workflow 生命周期」节 |
 | `workflow-script` | `generate` / `lint` / `save` / `delete` / `list`（5 个） | `generate`：`script` + `name`（可选 `description`）；`save`：`name`（可 `newName` 改名）；`lint` / `delete`：`name` |
 
 ### 批量派发（`subagents`）
@@ -96,6 +96,7 @@ pi --tools todo,goal_control,workflow_run,subagent_start,ask_user
 
 Workflow run 有两类结束形态：**终局**（`done`，outcome 区分 done / failed / cancelled / time_limited——成败已定）与**中断**（`interrupted` 暂停态——执行被打断但可续跑）。`workflow_run` 启动 run；`workflow_control` 共 3 个 action：`status` / `abort` / `resume`。run 的 `name` 仅接受 `.js` 绝对路径（通常是 `<available_workflows>` 条目的 `<location>`；任意声明 `@pi-meta kind:"workflow"` 的绝对 `.js` 路径均可），裸名 / 相对路径拒绝（`not_found`，拒单文案列全部可用条目及 location，按 location 重试即可）。
 
+- **status（状态查询）**：`{"action":"status"}` 列本 session 内存保留窗口内全部 run 摘要；带 `{"action":"status","runId":"<id>"}` 返回该 run 摘要 + 成员表（每个已出现成员一行：state / stepIndex / turns / lastError 等，按 stepIndex 排序；run 行带 `failed N/M` 失败计数，N = failed 成员数 / M = 成员表行数）。带 `runId` 查无此 run 时报错并区分两种情形：id 不存在（核对 id 重试）vs 已终局且超出内存保留窗口（最近 20 个已终局 run；从该 run 的完成通知恢复结果——省略 `runId` 列全部也查不到它）
 - **abort（主动取消）**：`{"action":"abort","runId":"<id>"}`（可选 `"error":"<reason>"`）→ `cancelled` 终局。要新结果就重新 run
 - **resume（断点续跑）**：`{"action":"resume","runId":"<id>"}`（可选 args 校验一致性与时间预算）——对 interrupted run 从断点恢复：已完成的调用回放缓存零 token、未完成的按三档恢复（会话完整 → 捞回结果；请求未完成 → 同会话续写；会话不在 → 整跑）；`/workflows resume <id>` 同能力
 - **session 切换/关闭时**，所有 running run 转 `interrupted` 暂停态（被打断不记失败）——回原 session 可 resume 续跑
